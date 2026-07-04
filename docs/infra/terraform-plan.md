@@ -199,8 +199,8 @@ Frontend bucket은 CloudFront Origin Access Control을 통해서만 접근하게
 
 Routing:
 
-- `/api/*` -> App Server target group
-- `/ws/*` -> Realtime Server target group
+- `/api/v1`, `/api/v1/*` -> App Server target group
+- `/ws`, `/ws/*` -> Realtime Server target group
 - `/socket.io/*` -> Realtime Server target group
 - `/sync/*` -> Realtime Server target group
 
