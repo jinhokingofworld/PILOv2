@@ -11,6 +11,11 @@ const service = await readSource("../src/app.service.ts");
 const appModule = await readSource("../src/app.module.ts");
 const authGuard = await readSource("../src/common/auth.guard.ts");
 const sessionService = await readSource("../src/common/session.service.ts");
+const calendarController = await readSource(
+  "../src/modules/calendar/calendar.controller.ts"
+);
+const calendarModule = await readSource("../src/modules/calendar/calendar.module.ts");
+const calendarService = await readSource("../src/modules/calendar/calendar.service.ts");
 const userController = await readSource("../src/modules/user/user.controller.ts");
 const workspaceController = await readSource(
   "../src/modules/workspace/workspace.controller.ts"
@@ -23,6 +28,20 @@ assert.match(service, /pilo-app-server/);
 assert.match(service, /status: "ok"/);
 assert.match(appModule, /UserModule/);
 assert.match(appModule, /WorkspaceModule/);
+assert.match(appModule, /CalendarModule/);
+assert.match(calendarModule, /WorkspaceModule/);
+assert.match(calendarController, /@Controller\("workspaces\/:workspaceId\/calendar\/events"\)/);
+assert.match(calendarController, /@UseGuards\(AuthGuard\)/);
+assert.match(calendarController, /@Get\(\)/);
+assert.match(calendarController, /@Get\(":eventId"\)/);
+assert.match(calendarController, /@Post\(\)/);
+assert.match(calendarController, /@Patch\(":eventId"\)/);
+assert.match(calendarController, /@Delete\(":eventId"\)/);
+assert.match(calendarService, /apiContract: "docs\/api\/calendar-api.md"/);
+assert.match(calendarService, /assertWorkspaceAccess/);
+assert.match(calendarService, /calendar_events/);
+assert.match(calendarService, /createdByUser/);
+assert.match(calendarService, /addOneHour/);
 assert.match(userController, /@Controller\("me"\)/);
 assert.match(userController, /@UseGuards\(AuthGuard\)/);
 assert.match(authGuard, /SessionService/);
