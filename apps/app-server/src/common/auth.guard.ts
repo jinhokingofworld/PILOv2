@@ -1,5 +1,6 @@
 import { CanActivate, ExecutionContext, Injectable } from "@nestjs/common";
 import { unauthorized } from "./api-error";
+import { SessionService } from "./session.service";
 
 export interface AuthenticatedRequest {
   headers: {
@@ -8,12 +9,11 @@ export interface AuthenticatedRequest {
   currentUserId?: string;
 }
 
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
 @Injectable()
 export class AuthGuard implements CanActivate {
-  canActivate(context: ExecutionContext): boolean {
+  constructor(private readonly sessionService: SessionService) {}
+
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
     const authorization = this.getAuthorizationHeader(request);
 
@@ -26,10 +26,7 @@ export class AuthGuard implements CanActivate {
       throw unauthorized("Invalid bearer token");
     }
 
-    const currentUserId = this.extractCurrentUserId(parts[1]);
-    if (!currentUserId) {
-      throw unauthorized("Invalid bearer token subject");
-    }
+    const currentUserId = await this.sessionService.validateSessionToken(parts[1]);
 
     request.currentUserId = currentUserId;
     return true;
@@ -42,9 +39,5 @@ export class AuthGuard implements CanActivate {
     }
 
     return authorization ?? null;
-  }
-
-  private extractCurrentUserId(token: string): string | null {
-    return UUID_PATTERN.test(token) ? token : null;
   }
 }
