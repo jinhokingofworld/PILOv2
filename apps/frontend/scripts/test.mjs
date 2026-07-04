@@ -11,6 +11,10 @@ const navigationFiles = await Promise.all(
     "../src/features/canvas/navigation.ts"
   ].map((path) => readFile(new URL(path, import.meta.url), "utf8"))
 );
+const githubApiClient = await readFile(
+  new URL("../src/features/github-integration/api/client.ts", import.meta.url),
+  "utf8"
+);
 const routePages = await Promise.all(
   [
     "../src/app/calendar/page.tsx",
@@ -41,6 +45,8 @@ assert.match(navigation, /Board/);
 assert.match(navigation, /PR review/);
 assert.match(navigation, /Voice meeting/);
 assert.match(navigation, /Canvas/);
+assert.match(githubApiClient, /\/api\/v1/);
+assert.match(githubApiClient, /NEXT_PUBLIC_PILO_APP_SERVER_URL/);
 assert.match(routes, /as default/);
 assert.doesNotMatch(routes, /MainShell/);
 assert.match(pages, /MainShell/);

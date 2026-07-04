@@ -1,5 +1,9 @@
 # GitHub Integration API
 
+External callback and webhook URLs MUST include the `/api/v1` base path. For example:
+`/api/v1/github/oauth/callback`, `/api/v1/github/installations/callback`, and
+`/api/v1/github/webhooks`.
+
 ## 범위
 
 GitHub Integration API는 Workspace 단위 GitHub 연결과 원본 데이터 조회를
