@@ -883,6 +883,7 @@ export function PiloTldrawCanvas({
     >
       <Tldraw
         hideUi
+        licenseKey={process.env.NEXT_PUBLIC_TLDRAW_LICENSE_KEY}
         shapeUtils={shapeUtils}
         components={tldrawComponents}
         onMount={mountEditor}
