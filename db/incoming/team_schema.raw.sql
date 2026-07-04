@@ -1,0 +1,2251 @@
+﻿-- Consolidated PostgreSQL schema
+-- Common tables are included for workspace ownership and cross-domain activity logs.
+
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+-- =========================================================
+-- Shared updated_at trigger function
+-- =========================================================
+
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- =========================================================
+-- ENUM TYPES
+-- =========================================================
+
+CREATE TYPE meeting_recording_status AS ENUM (
+  'RUNNING',
+  'COMPLETED',
+  'FAILED'
+);
+
+CREATE TYPE meeting_report_status AS ENUM (
+  'PROCESSING',
+  'COMPLETED',
+  'FAILED'
+);
+
+CREATE TYPE meeting_report_failed_step AS ENUM (
+  'RECORDING',
+  'STT',
+  'LLM'
+);
+
+CREATE TYPE github_account_type AS ENUM (
+  'User',
+  'Organization'
+);
+
+CREATE TYPE github_project_v2_owner_type AS ENUM (
+  'User',
+  'Organization'
+);
+
+CREATE TYPE github_project_v2_item_content_type AS ENUM (
+  'ISSUE',
+  'PULL_REQUEST',
+  'DRAFT_ISSUE',
+  'UNKNOWN'
+);
+
+CREATE TYPE github_issue_state AS ENUM (
+  'open',
+  'closed'
+);
+
+CREATE TYPE github_sync_status AS ENUM (
+  'running',
+  'success',
+  'failed'
+);
+
+CREATE TYPE github_sync_target AS ENUM (
+  'repositories',
+  'issues',
+  'project_v2',
+  'project_v2_fields',
+  'project_v2_items',
+  'full'
+);
+CREATE TYPE api_idempotency_status AS ENUM (
+  'processing',
+  'succeeded',
+  'failed',
+  'partial'
+);
+
+CREATE TYPE api_idempotency_partial_state AS ENUM (
+  'github_issue_created',
+  'project_item_created',
+  'status_update_pending'
+);
+
+CREATE TYPE activity_log_action AS ENUM (
+  'workspace_created',
+  'workspace_updated',
+  'workspace_archived',
+  'meeting_started',
+  'meeting_ended',
+  'meeting_participant_joined',
+  'meeting_participant_left',
+  'meeting_recording_started',
+  'meeting_recording_completed',
+  'meeting_recording_failed',
+  'meeting_report_completed',
+  'meeting_report_failed',
+  'pr_review_session_created',
+  'pr_review_session_updated',
+  'pr_review_session_submitted',
+  'file_review_decision_created',
+  'review_submission_created',
+  'review_submission_submitted',
+  'review_submission_failed',
+  'github_sync_started',
+  'github_sync_succeeded',
+  'github_sync_failed',
+  'github_repository_synced',
+  'github_issue_synced',
+  'github_project_v2_synced',
+  'canvas_created',
+  'canvas_updated',
+  'canvas_user_entered',
+  'canvas_user_left',
+  'canvas_shape_created',
+  'canvas_shape_updated',
+  'canvas_shape_deleted',
+  'board_created',
+  'board_updated',
+  'pilo_issue_created',
+  'pilo_issue_updated',
+  'pilo_issue_moved',
+  'pilo_issue_deleted',
+  'calendar_event_created',
+  'calendar_event_updated',
+  'calendar_event_deleted'
+);
+
+-- =========================================================
+-- USERS
+-- =========================================================
+
+CREATE TABLE users (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+  name VARCHAR(255),
+  email VARCHAR(320) UNIQUE,
+  avatar_url TEXT,
+
+  github_user_id BIGINT UNIQUE,
+  github_login VARCHAR(255) UNIQUE,
+  github_access_token_encrypted TEXT,
+  github_token_scope TEXT,
+  github_connected_at TIMESTAMPTZ,
+  github_revoked_at TIMESTAMPTZ,
+
+  google_user_id TEXT UNIQUE,
+  google_connected_at TIMESTAMPTZ,
+  google_revoked_at TIMESTAMPTZ,
+
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TRIGGER trg_users_updated_at
+BEFORE UPDATE ON users
+FOR EACH ROW
+EXECUTE FUNCTION update_updated_at_column();
+-- =========================================================
+-- WORKSPACES
+-- =========================================================
+
+CREATE TABLE workspaces (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+  name TEXT NOT NULL,
+
+  owner_user_id UUID
+    REFERENCES users(id) ON DELETE SET NULL,
+
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_workspaces_owner_user_id
+  ON workspaces(owner_user_id);
+
+CREATE TRIGGER trg_workspaces_updated_at
+BEFORE UPDATE ON workspaces
+FOR EACH ROW
+EXECUTE FUNCTION update_updated_at_column();
+
+-- =========================================================
+-- ACTIVITY LOGS
+-- =========================================================
+
+CREATE TABLE activity_logs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+  workspace_id UUID NOT NULL
+    REFERENCES workspaces(id) ON DELETE CASCADE,
+
+  actor_type TEXT NOT NULL,
+
+  actor_user_id UUID
+    REFERENCES users(id) ON DELETE SET NULL,
+
+  action activity_log_action NOT NULL,
+
+  target_type TEXT NOT NULL,
+  target_id TEXT NOT NULL,
+
+  parent_type TEXT,
+  parent_id TEXT,
+
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+
+  occurred_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_activity_logs_workspace_occurred_at
+  ON activity_logs(workspace_id, occurred_at DESC);
+
+CREATE INDEX idx_activity_logs_actor_user_id
+  ON activity_logs(actor_user_id);
+
+CREATE INDEX idx_activity_logs_action
+  ON activity_logs(action);
+
+CREATE INDEX idx_activity_logs_target
+  ON activity_logs(target_type, target_id);
+
+CREATE INDEX idx_activity_logs_parent
+  ON activity_logs(parent_type, parent_id);
+
+CREATE INDEX idx_activity_logs_metadata
+  ON activity_logs USING GIN(metadata);
+
+-- =========================================================
+-- GITHUB INTEGRATION
+-- =========================================================
+
+CREATE TABLE github_installations (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+  workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+
+  github_installation_id BIGINT NOT NULL UNIQUE,
+  account_login TEXT NOT NULL,
+  account_type github_account_type NOT NULL,
+
+  repository_selection TEXT,
+  permissions JSONB NOT NULL DEFAULT '{}'::jsonb,
+
+  installed_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+
+  installed_at TIMESTAMPTZ,
+  suspended_at TIMESTAMPTZ,
+  last_synced_at TIMESTAMPTZ,
+
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_github_installations_workspace_id
+  ON github_installations(workspace_id);
+
+CREATE INDEX idx_github_installations_installed_by_user_id
+  ON github_installations(installed_by_user_id);
+
+CREATE TRIGGER trg_github_installations_updated_at
+BEFORE UPDATE ON github_installations
+FOR EACH ROW
+EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TABLE github_repositories (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+  workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+
+  installation_id UUID
+    REFERENCES github_installations(id) ON DELETE SET NULL,
+
+  github_repository_id BIGINT UNIQUE,
+  github_node_id TEXT UNIQUE,
+
+  owner_login TEXT NOT NULL,
+  name TEXT NOT NULL,
+  full_name TEXT NOT NULL,
+
+  private BOOLEAN NOT NULL DEFAULT false,
+  archived BOOLEAN NOT NULL DEFAULT false,
+
+  default_branch TEXT,
+  html_url TEXT NOT NULL,
+
+  connected_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  connected_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  github_created_at TIMESTAMPTZ,
+  github_updated_at TIMESTAMPTZ,
+  pushed_at TIMESTAMPTZ,
+  last_synced_at TIMESTAMPTZ,
+
+  raw JSONB NOT NULL DEFAULT '{}'::jsonb,
+
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  UNIQUE (workspace_id, full_name),
+  UNIQUE (workspace_id, owner_login, name)
+);
+
+CREATE INDEX idx_github_repositories_workspace_id
+  ON github_repositories(workspace_id);
+
+CREATE INDEX idx_github_repositories_installation_id
+  ON github_repositories(installation_id);
+
+CREATE INDEX idx_github_repositories_connected_by_user_id
+  ON github_repositories(connected_by_user_id);
+
+CREATE INDEX idx_github_repositories_full_name
+  ON github_repositories(full_name);
+
+CREATE TRIGGER trg_github_repositories_updated_at
+BEFORE UPDATE ON github_repositories
+FOR EACH ROW
+EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TABLE github_issues (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+  workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+
+  repository_id UUID NOT NULL
+    REFERENCES github_repositories(id) ON DELETE CASCADE,
+
+  github_issue_id BIGINT NOT NULL UNIQUE,
+  github_node_id TEXT NOT NULL UNIQUE,
+
+  issue_number INTEGER NOT NULL,
+  title TEXT NOT NULL,
+  body TEXT,
+
+  state github_issue_state NOT NULL,
+  state_reason TEXT,
+
+  author_login TEXT,
+  author_avatar_url TEXT,
+
+  html_url TEXT NOT NULL,
+
+  labels JSONB NOT NULL DEFAULT '[]'::jsonb,
+  assignees JSONB NOT NULL DEFAULT '[]'::jsonb,
+  milestone JSONB,
+
+  github_created_at TIMESTAMPTZ,
+  github_updated_at TIMESTAMPTZ,
+  github_closed_at TIMESTAMPTZ,
+  last_synced_at TIMESTAMPTZ,
+
+  raw JSONB NOT NULL DEFAULT '{}'::jsonb,
+
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  UNIQUE (repository_id, issue_number)
+);
+
+CREATE INDEX idx_github_issues_workspace_id
+  ON github_issues(workspace_id);
+
+CREATE INDEX idx_github_issues_repository_id
+  ON github_issues(repository_id);
+
+CREATE INDEX idx_github_issues_state
+  ON github_issues(state);
+
+CREATE INDEX idx_github_issues_github_updated_at
+  ON github_issues(github_updated_at);
+
+CREATE TRIGGER trg_github_issues_updated_at
+BEFORE UPDATE ON github_issues
+FOR EACH ROW
+EXECUTE FUNCTION update_updated_at_column();
+
+-- Canonicalized from the original pull_requests table.
+CREATE TABLE github_pull_requests (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+  workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+
+  repository_id UUID NOT NULL
+    REFERENCES github_repositories(id) ON DELETE CASCADE,
+
+  github_pull_request_id BIGINT UNIQUE,
+  github_node_id TEXT UNIQUE,
+
+  pr_number INTEGER NOT NULL,
+  title TEXT NOT NULL,
+  body TEXT,
+
+  state github_issue_state NOT NULL DEFAULT 'open',
+  draft BOOLEAN NOT NULL DEFAULT false,
+  mergeable BOOLEAN,
+
+  author_login TEXT,
+  author_avatar_url TEXT,
+
+  head_branch TEXT,
+  base_branch TEXT,
+  head_sha TEXT,
+  base_sha TEXT,
+
+  changed_files_count INTEGER NOT NULL DEFAULT 0,
+  additions INTEGER NOT NULL DEFAULT 0,
+  deletions INTEGER NOT NULL DEFAULT 0,
+  commits_count INTEGER NOT NULL DEFAULT 0,
+  comments_count INTEGER NOT NULL DEFAULT 0,
+  review_comments_count INTEGER NOT NULL DEFAULT 0,
+
+  html_url TEXT NOT NULL,
+
+  github_created_at TIMESTAMPTZ,
+  github_updated_at TIMESTAMPTZ,
+  github_closed_at TIMESTAMPTZ,
+  merged_at TIMESTAMPTZ,
+  last_synced_at TIMESTAMPTZ,
+
+  raw JSONB NOT NULL DEFAULT '{}'::jsonb,
+
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  UNIQUE (repository_id, pr_number),
+
+  CONSTRAINT chk_github_pull_requests_counts_non_negative
+    CHECK (
+      changed_files_count >= 0
+      AND additions >= 0
+      AND deletions >= 0
+      AND commits_count >= 0
+      AND comments_count >= 0
+      AND review_comments_count >= 0
+    )
+);
+
+CREATE INDEX idx_github_pull_requests_workspace_id
+  ON github_pull_requests(workspace_id);
+
+CREATE INDEX idx_github_pull_requests_repository_id
+  ON github_pull_requests(repository_id);
+
+CREATE INDEX idx_github_pull_requests_state
+  ON github_pull_requests(state);
+
+CREATE INDEX idx_github_pull_requests_repository_state
+  ON github_pull_requests(repository_id, state);
+
+CREATE INDEX idx_github_pull_requests_github_updated_at
+  ON github_pull_requests(github_updated_at);
+
+CREATE TRIGGER trg_github_pull_requests_updated_at
+BEFORE UPDATE ON github_pull_requests
+FOR EACH ROW
+EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TABLE github_projects_v2 (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+  workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+
+  installation_id UUID NOT NULL
+    REFERENCES github_installations(id) ON DELETE CASCADE,
+
+  github_project_node_id TEXT NOT NULL UNIQUE,
+  github_project_full_database_id BIGINT,
+
+  owner_login TEXT NOT NULL,
+  owner_type github_project_v2_owner_type NOT NULL,
+
+  project_number INTEGER NOT NULL,
+  title TEXT NOT NULL,
+  short_description TEXT,
+  readme TEXT,
+
+  url TEXT NOT NULL,
+  resource_path TEXT,
+
+  public BOOLEAN NOT NULL DEFAULT false,
+  closed BOOLEAN NOT NULL DEFAULT false,
+  template BOOLEAN NOT NULL DEFAULT false,
+
+  github_created_at TIMESTAMPTZ,
+  github_updated_at TIMESTAMPTZ,
+  github_closed_at TIMESTAMPTZ,
+  last_synced_at TIMESTAMPTZ,
+
+  raw JSONB NOT NULL DEFAULT '{}'::jsonb,
+
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  UNIQUE (workspace_id, owner_login, project_number)
+);
+
+CREATE INDEX idx_github_projects_v2_workspace_id
+  ON github_projects_v2(workspace_id);
+
+CREATE INDEX idx_github_projects_v2_installation_id
+  ON github_projects_v2(installation_id);
+
+CREATE INDEX idx_github_projects_v2_owner_number
+  ON github_projects_v2(owner_login, project_number);
+
+CREATE TRIGGER trg_github_projects_v2_updated_at
+BEFORE UPDATE ON github_projects_v2
+FOR EACH ROW
+EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TABLE github_project_v2_repositories (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+  project_v2_id UUID NOT NULL
+    REFERENCES github_projects_v2(id) ON DELETE CASCADE,
+
+  repository_id UUID NOT NULL
+    REFERENCES github_repositories(id) ON DELETE CASCADE,
+
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  UNIQUE (project_v2_id, repository_id)
+);
+
+CREATE INDEX idx_project_v2_repositories_project_id
+  ON github_project_v2_repositories(project_v2_id);
+
+CREATE INDEX idx_project_v2_repositories_repository_id
+  ON github_project_v2_repositories(repository_id);
+
+CREATE TABLE github_project_v2_fields (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+  project_v2_id UUID NOT NULL
+    REFERENCES github_projects_v2(id) ON DELETE CASCADE,
+
+  github_field_node_id TEXT NOT NULL UNIQUE,
+  field_name TEXT NOT NULL,
+  data_type TEXT NOT NULL,
+  is_status_field BOOLEAN NOT NULL DEFAULT false,
+
+  github_created_at TIMESTAMPTZ,
+  github_updated_at TIMESTAMPTZ,
+
+  raw JSONB NOT NULL DEFAULT '{}'::jsonb,
+
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  UNIQUE (project_v2_id, field_name)
+);
+
+CREATE INDEX idx_project_v2_fields_project_id
+  ON github_project_v2_fields(project_v2_id);
+
+CREATE INDEX idx_project_v2_fields_status
+  ON github_project_v2_fields(project_v2_id, is_status_field);
+
+CREATE TRIGGER trg_github_project_v2_fields_updated_at
+BEFORE UPDATE ON github_project_v2_fields
+FOR EACH ROW
+EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TABLE github_project_v2_field_options (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+  field_id UUID NOT NULL
+    REFERENCES github_project_v2_fields(id) ON DELETE CASCADE,
+
+  github_option_id TEXT NOT NULL,
+  option_name TEXT NOT NULL,
+  normalized_name TEXT NOT NULL,
+
+  color TEXT,
+  description TEXT,
+  position INTEGER,
+
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  UNIQUE (field_id, github_option_id),
+  UNIQUE (field_id, normalized_name)
+);
+
+CREATE INDEX idx_project_v2_field_options_field_id
+  ON github_project_v2_field_options(field_id);
+
+CREATE INDEX idx_project_v2_field_options_normalized_name
+  ON github_project_v2_field_options(normalized_name);
+
+CREATE TRIGGER trg_github_project_v2_field_options_updated_at
+BEFORE UPDATE ON github_project_v2_field_options
+FOR EACH ROW
+EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TABLE github_project_v2_items (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+  workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+
+  project_v2_id UUID NOT NULL
+    REFERENCES github_projects_v2(id) ON DELETE CASCADE,
+
+  github_project_item_node_id TEXT NOT NULL UNIQUE,
+  github_project_item_full_database_id BIGINT,
+
+  content_type github_project_v2_item_content_type NOT NULL,
+
+  issue_id UUID
+    REFERENCES github_issues(id) ON DELETE CASCADE,
+
+  pull_request_id UUID
+    REFERENCES github_pull_requests(id) ON DELETE CASCADE,
+
+  is_archived BOOLEAN NOT NULL DEFAULT false,
+
+  status_field_id UUID
+    REFERENCES github_project_v2_fields(id) ON DELETE SET NULL,
+
+  status_option_id UUID
+    REFERENCES github_project_v2_field_options(id) ON DELETE SET NULL,
+
+  status_option_github_id TEXT,
+  status_name TEXT,
+  status_normalized_name TEXT,
+  position INTEGER,
+
+  github_created_at TIMESTAMPTZ,
+  github_updated_at TIMESTAMPTZ,
+  last_synced_at TIMESTAMPTZ,
+
+  raw JSONB NOT NULL DEFAULT '{}'::jsonb,
+
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  CONSTRAINT chk_project_v2_item_content_reference
+    CHECK (
+      (
+        content_type = 'ISSUE'
+        AND issue_id IS NOT NULL
+        AND pull_request_id IS NULL
+      )
+      OR (
+        content_type = 'PULL_REQUEST'
+        AND pull_request_id IS NOT NULL
+        AND issue_id IS NULL
+      )
+      OR (
+        content_type IN ('DRAFT_ISSUE', 'UNKNOWN')
+        AND issue_id IS NULL
+        AND pull_request_id IS NULL
+      )
+    ),
+
+  UNIQUE (project_v2_id, issue_id),
+  UNIQUE (project_v2_id, pull_request_id)
+);
+
+CREATE INDEX idx_project_v2_items_workspace_id
+  ON github_project_v2_items(workspace_id);
+
+CREATE INDEX idx_project_v2_items_project_id
+  ON github_project_v2_items(project_v2_id);
+
+CREATE INDEX idx_project_v2_items_issue_id
+  ON github_project_v2_items(issue_id);
+
+CREATE INDEX idx_project_v2_items_pull_request_id
+  ON github_project_v2_items(pull_request_id);
+
+CREATE INDEX idx_project_v2_items_status
+  ON github_project_v2_items(project_v2_id, status_normalized_name);
+
+CREATE INDEX idx_project_v2_items_archived
+  ON github_project_v2_items(project_v2_id, is_archived);
+
+CREATE TRIGGER trg_github_project_v2_items_updated_at
+BEFORE UPDATE ON github_project_v2_items
+FOR EACH ROW
+EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TABLE github_project_v2_item_field_values (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+  project_item_id UUID NOT NULL
+    REFERENCES github_project_v2_items(id) ON DELETE CASCADE,
+
+  field_id UUID
+    REFERENCES github_project_v2_fields(id) ON DELETE SET NULL,
+
+  github_field_value_node_id TEXT,
+  field_name TEXT NOT NULL,
+  field_data_type TEXT,
+
+  text_value TEXT,
+  number_value NUMERIC,
+  date_value DATE,
+  single_select_option_id TEXT,
+  single_select_name TEXT,
+  iteration_id TEXT,
+  iteration_title TEXT,
+
+  raw JSONB NOT NULL DEFAULT '{}'::jsonb,
+
+  github_created_at TIMESTAMPTZ,
+  github_updated_at TIMESTAMPTZ,
+
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  UNIQUE (project_item_id, field_name)
+);
+
+CREATE INDEX idx_project_item_field_values_item_id
+  ON github_project_v2_item_field_values(project_item_id);
+
+CREATE INDEX idx_project_item_field_values_field_name
+  ON github_project_v2_item_field_values(field_name);
+
+CREATE TRIGGER trg_github_project_v2_item_field_values_updated_at
+BEFORE UPDATE ON github_project_v2_item_field_values
+FOR EACH ROW
+EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TABLE github_sync_runs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+  workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+
+  installation_id UUID
+    REFERENCES github_installations(id) ON DELETE SET NULL,
+
+  repository_id UUID
+    REFERENCES github_repositories(id) ON DELETE SET NULL,
+
+  project_v2_id UUID
+    REFERENCES github_projects_v2(id) ON DELETE SET NULL,
+
+  target github_sync_target NOT NULL,
+  status github_sync_status NOT NULL DEFAULT 'running',
+
+  started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  finished_at TIMESTAMPTZ,
+
+  fetched_count INTEGER NOT NULL DEFAULT 0,
+  created_count INTEGER NOT NULL DEFAULT 0,
+  updated_count INTEGER NOT NULL DEFAULT 0,
+  skipped_count INTEGER NOT NULL DEFAULT 0,
+
+  error_message TEXT,
+  cursor JSONB NOT NULL DEFAULT '{}'::jsonb,
+
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  CONSTRAINT chk_github_sync_runs_counts_non_negative
+    CHECK (
+      fetched_count >= 0
+      AND created_count >= 0
+      AND updated_count >= 0
+      AND skipped_count >= 0
+    )
+);
+
+CREATE INDEX idx_github_sync_runs_workspace_id
+  ON github_sync_runs(workspace_id);
+
+CREATE INDEX idx_github_sync_runs_project_v2_id
+  ON github_sync_runs(project_v2_id);
+
+CREATE INDEX idx_github_sync_runs_status
+  ON github_sync_runs(status);
+
+CREATE TABLE github_webhook_deliveries (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+  delivery_id TEXT NOT NULL UNIQUE,
+  event_name TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'received',
+
+  received_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  processed_at TIMESTAMPTZ,
+  error_message TEXT,
+
+  CONSTRAINT github_webhook_deliveries_status_check
+    CHECK (status IN ('received', 'processed', 'failed', 'ignored'))
+);
+
+CREATE INDEX idx_github_webhook_deliveries_event_name
+  ON github_webhook_deliveries(event_name);
+
+CREATE INDEX idx_github_webhook_deliveries_status
+  ON github_webhook_deliveries(status);
+
+CREATE INDEX idx_github_webhook_deliveries_received_at
+  ON github_webhook_deliveries(received_at);
+
+-- =========================================================
+-- PR REVIEW
+-- =========================================================
+
+CREATE TABLE pr_review_sessions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+  pull_request_id UUID NOT NULL
+    REFERENCES github_pull_requests(id) ON DELETE CASCADE,
+
+  canvas_id UUID,
+
+  created_by_user_id UUID
+    REFERENCES users(id) ON DELETE SET NULL,
+
+  head_sha TEXT NOT NULL,
+
+  status VARCHAR(30) NOT NULL DEFAULT 'analyzing',
+
+  pr_purpose TEXT,
+  change_summary JSONB NOT NULL DEFAULT '[]'::jsonb,
+  recommended_review_order TEXT,
+  caution_points JSONB NOT NULL DEFAULT '[]'::jsonb,
+
+  reviewed_count INTEGER NOT NULL DEFAULT 0,
+  total_file_count INTEGER NOT NULL DEFAULT 0,
+
+  conflict_status VARCHAR(30) NOT NULL DEFAULT 'checking',
+  conflict_checked_at TIMESTAMPTZ,
+
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  CONSTRAINT pr_review_sessions_status_check
+    CHECK (status IN (
+      'analyzing',
+      'reviewing',
+      'ready_to_submit',
+      'submitted',
+      'failed',
+      'archived'
+    )),
+
+  CONSTRAINT pr_review_sessions_conflict_status_check
+    CHECK (conflict_status IN (
+      'checking',
+      'clean',
+      'conflicted',
+      'unknown'
+    )),
+
+  CONSTRAINT chk_pr_review_sessions_counts_non_negative
+    CHECK (
+      reviewed_count >= 0
+      AND total_file_count >= 0
+      AND reviewed_count <= total_file_count
+    )
+);
+
+CREATE INDEX idx_pr_review_sessions_pull_request_id
+  ON pr_review_sessions(pull_request_id);
+
+CREATE INDEX idx_pr_review_sessions_created_by_user_id
+  ON pr_review_sessions(created_by_user_id);
+
+CREATE INDEX idx_pr_review_sessions_canvas_id
+  ON pr_review_sessions(canvas_id);
+
+CREATE TRIGGER trg_pr_review_sessions_updated_at
+BEFORE UPDATE ON pr_review_sessions
+FOR EACH ROW
+EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TABLE review_flows (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+  session_id UUID NOT NULL
+    REFERENCES pr_review_sessions(id) ON DELETE CASCADE,
+
+  title VARCHAR(255) NOT NULL,
+  description TEXT,
+  sort_order INTEGER NOT NULL,
+
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  UNIQUE (session_id, sort_order),
+
+  CONSTRAINT chk_review_flows_sort_order_positive
+    CHECK (sort_order > 0)
+);
+
+CREATE INDEX idx_review_flows_session_id
+  ON review_flows(session_id);
+
+CREATE TRIGGER trg_review_flows_updated_at
+BEFORE UPDATE ON review_flows
+FOR EACH ROW
+EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TABLE review_files (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+  session_id UUID NOT NULL
+    REFERENCES pr_review_sessions(id) ON DELETE CASCADE,
+
+  file_path TEXT NOT NULL,
+  previous_file_path TEXT,
+  file_name VARCHAR(255) NOT NULL,
+
+  file_status VARCHAR(30) NOT NULL,
+
+  additions INTEGER NOT NULL DEFAULT 0,
+  deletions INTEGER NOT NULL DEFAULT 0,
+
+  is_binary BOOLEAN NOT NULL DEFAULT false,
+  is_large_diff BOOLEAN NOT NULL DEFAULT false,
+
+  github_file_url TEXT,
+  patch_text TEXT,
+  patch_size_bytes INTEGER,
+
+  file_role TEXT,
+  change_reason TEXT,
+  change_summary TEXT,
+  review_points JSONB NOT NULL DEFAULT '[]'::jsonb,
+
+  current_status VARCHAR(30) NOT NULL DEFAULT 'not_reviewed',
+  comment TEXT,
+
+  reviewed_by_user_id UUID
+    REFERENCES users(id) ON DELETE SET NULL,
+
+  reviewed_at TIMESTAMPTZ,
+
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  UNIQUE (session_id, file_path),
+
+  CONSTRAINT review_files_status_check
+    CHECK (current_status IN (
+      'not_reviewed',
+      'approved',
+      'discussion_needed',
+      'unknown'
+    )),
+
+  CONSTRAINT review_files_file_status_check
+    CHECK (file_status IN (
+      'added',
+      'modified',
+      'deleted',
+      'renamed'
+    )),
+
+  CONSTRAINT chk_review_files_counts_non_negative
+    CHECK (
+      additions >= 0
+      AND deletions >= 0
+      AND (patch_size_bytes IS NULL OR patch_size_bytes >= 0)
+    )
+);
+
+CREATE INDEX idx_review_files_session_id
+  ON review_files(session_id);
+
+CREATE INDEX idx_review_files_current_status
+  ON review_files(session_id, current_status);
+
+CREATE TRIGGER trg_review_files_updated_at
+BEFORE UPDATE ON review_files
+FOR EACH ROW
+EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TABLE review_flow_files (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+  flow_id UUID NOT NULL
+    REFERENCES review_flows(id) ON DELETE CASCADE,
+
+  review_file_id UUID NOT NULL
+    REFERENCES review_files(id) ON DELETE CASCADE,
+
+  canvas_shape_id TEXT,
+
+  workflow_order INTEGER NOT NULL,
+
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  UNIQUE (flow_id, review_file_id),
+  UNIQUE (flow_id, workflow_order),
+
+  CONSTRAINT chk_review_flow_files_workflow_order_positive
+    CHECK (workflow_order > 0)
+);
+
+CREATE INDEX idx_review_flow_files_flow_id
+  ON review_flow_files(flow_id);
+
+CREATE INDEX idx_review_flow_files_review_file_id
+  ON review_flow_files(review_file_id);
+
+CREATE INDEX idx_review_flow_files_canvas_shape_id
+  ON review_flow_files(canvas_shape_id);
+
+CREATE TRIGGER trg_review_flow_files_updated_at
+BEFORE UPDATE ON review_flow_files
+FOR EACH ROW
+EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TABLE file_review_decisions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+  review_file_id UUID NOT NULL
+    REFERENCES review_files(id) ON DELETE CASCADE,
+
+  reviewed_by_user_id UUID NOT NULL
+    REFERENCES users(id) ON DELETE RESTRICT,
+
+  status VARCHAR(30) NOT NULL,
+  comment TEXT,
+  reviewed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  CONSTRAINT file_review_decisions_status_check
+    CHECK (status IN (
+      'approved',
+      'discussion_needed',
+      'unknown'
+    ))
+);
+
+CREATE INDEX idx_file_review_decisions_review_file_id
+  ON file_review_decisions(review_file_id);
+
+CREATE INDEX idx_file_review_decisions_reviewed_by_user_id
+  ON file_review_decisions(reviewed_by_user_id);
+
+CREATE TABLE review_submissions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+  session_id UUID NOT NULL
+    REFERENCES pr_review_sessions(id) ON DELETE CASCADE,
+
+  submitted_by_user_id UUID NOT NULL
+    REFERENCES users(id) ON DELETE RESTRICT,
+
+  submitted_by_github_login VARCHAR(255) NOT NULL,
+
+  submit_type VARCHAR(30) NOT NULL,
+  review_body TEXT NOT NULL,
+  review_result_summary TEXT,
+  file_review_results JSONB NOT NULL DEFAULT '[]'::jsonb,
+
+  github_submit_status VARCHAR(30) NOT NULL DEFAULT 'not_submitted',
+  github_review_id VARCHAR(255),
+  github_review_url TEXT,
+  error_message TEXT,
+  submitted_at TIMESTAMPTZ,
+
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  CONSTRAINT review_submissions_type_check
+    CHECK (submit_type IN (
+      'COMMENT',
+      'APPROVE',
+      'REQUEST_CHANGES'
+    )),
+
+  CONSTRAINT review_submissions_status_check
+    CHECK (github_submit_status IN (
+      'not_submitted',
+      'submitting',
+      'submitted',
+      'failed'
+    ))
+);
+
+CREATE INDEX idx_review_submissions_session_id
+  ON review_submissions(session_id);
+
+CREATE INDEX idx_review_submissions_submitted_by_user_id
+  ON review_submissions(submitted_by_user_id);
+
+CREATE TRIGGER trg_review_submissions_updated_at
+BEFORE UPDATE ON review_submissions
+FOR EACH ROW
+EXECUTE FUNCTION update_updated_at_column();
+
+-- =========================================================
+-- MEETINGS
+-- =========================================================
+
+CREATE TABLE meetings (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+
+  room_key varchar(100) NOT NULL DEFAULT 'MAIN_MEETING_ROOM',
+  livekit_room_name varchar(255) NOT NULL,
+
+  created_by_id uuid NOT NULL,
+  ended_by_id uuid NULL,
+
+  started_at timestamptz NOT NULL DEFAULT now(),
+  ended_at timestamptz NULL,
+
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+
+  CONSTRAINT fk_meetings_created_by
+    FOREIGN KEY (created_by_id)
+    REFERENCES users(id)
+    ON DELETE RESTRICT,
+
+  CONSTRAINT fk_meetings_ended_by
+    FOREIGN KEY (ended_by_id)
+    REFERENCES users(id)
+    ON DELETE RESTRICT,
+
+  CONSTRAINT unique_meetings_livekit_room_name
+    UNIQUE (livekit_room_name),
+
+  CONSTRAINT chk_meetings_time_order
+    CHECK (ended_at IS NULL OR ended_at >= started_at)
+);
+
+-- 같은 room_key에서 진행 중인 회의는 하나만 존재 가능
+CREATE UNIQUE INDEX unique_active_meeting_per_room
+ON meetings (room_key)
+WHERE ended_at IS NULL;
+
+CREATE INDEX idx_meetings_room_key
+ON meetings (room_key);
+
+CREATE INDEX idx_meetings_started_at
+ON meetings (started_at);
+
+CREATE INDEX idx_meetings_ended_at
+ON meetings (ended_at);
+
+-- =========================================================
+-- 3. meeting_participants
+-- 회의 참석자 저장
+-- 같은 회의에서 같은 사용자는 하나의 row만 가진다.
+-- 재입장 시 기존 row의 joined_at, left_at을 갱신한다.
+-- =========================================================
+
+CREATE TABLE meeting_participants (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+
+  meeting_id uuid NOT NULL,
+  user_id uuid NOT NULL,
+
+  livekit_identity varchar(255) NOT NULL,
+
+  joined_at timestamptz NOT NULL DEFAULT now(),
+  left_at timestamptz NULL,
+
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+
+  CONSTRAINT fk_meeting_participants_meeting
+    FOREIGN KEY (meeting_id)
+    REFERENCES meetings(id)
+    ON DELETE CASCADE,
+
+  CONSTRAINT fk_meeting_participants_user
+    FOREIGN KEY (user_id)
+    REFERENCES users(id)
+    ON DELETE RESTRICT,
+
+  CONSTRAINT unique_meeting_participant
+    UNIQUE (meeting_id, user_id),
+
+  CONSTRAINT unique_meeting_livekit_identity
+    UNIQUE (meeting_id, livekit_identity),
+
+  CONSTRAINT chk_meeting_participants_time_order
+    CHECK (left_at IS NULL OR left_at >= joined_at)
+);
+
+CREATE INDEX idx_meeting_participants_meeting_id
+ON meeting_participants (meeting_id);
+
+CREATE INDEX idx_meeting_participants_user_id
+ON meeting_participants (user_id);
+
+-- 회의 나가기 후 남은 참여자 확인용
+CREATE INDEX idx_active_meeting_participants
+ON meeting_participants (meeting_id)
+WHERE left_at IS NULL;
+
+-- =========================================================
+-- 4. meeting_recordings
+-- LiveKit 녹음 정보 저장
+-- =========================================================
+
+CREATE TABLE meeting_recordings (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+
+  meeting_id uuid NOT NULL,
+
+  -- 녹음 시작 자체가 실패한 경우를 FAILED로 저장할 수 있도록 NULL 허용
+  livekit_egress_id varchar(255) NULL,
+
+  status meeting_recording_status NOT NULL DEFAULT 'RUNNING',
+
+  audio_file_url text NULL,
+  audio_file_key text NULL,
+
+  duration_sec integer NULL,
+  file_size_bytes bigint NULL,
+
+  started_at timestamptz NOT NULL DEFAULT now(),
+  ended_at timestamptz NULL,
+
+  error_message text NULL,
+
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+
+  CONSTRAINT fk_meeting_recordings_meeting
+    FOREIGN KEY (meeting_id)
+    REFERENCES meetings(id)
+    ON DELETE CASCADE,
+
+  CONSTRAINT unique_recording_per_meeting
+    UNIQUE (meeting_id),
+
+  -- meeting_reports에서 recording_id와 meeting_id가 같은 회의에 속하는지 FK로 검증하기 위한 제약
+  CONSTRAINT unique_recording_id_meeting_id
+    UNIQUE (id, meeting_id),
+
+  CONSTRAINT chk_recording_duration_non_negative
+    CHECK (duration_sec IS NULL OR duration_sec >= 0),
+
+  CONSTRAINT chk_recording_file_size_non_negative
+    CHECK (file_size_bytes IS NULL OR file_size_bytes >= 0),
+
+  CONSTRAINT chk_recordings_time_order
+    CHECK (ended_at IS NULL OR ended_at >= started_at),
+
+  CONSTRAINT chk_recordings_status_time
+    CHECK (
+      (status = 'RUNNING' AND ended_at IS NULL)
+      OR
+      (status IN ('COMPLETED', 'FAILED') AND ended_at IS NOT NULL)
+    ),
+
+  CONSTRAINT chk_recordings_completed_fields
+    CHECK (
+      status <> 'COMPLETED'
+      OR
+      (duration_sec IS NOT NULL AND audio_file_key IS NOT NULL)
+    ),
+
+  CONSTRAINT chk_recordings_failed_error
+    CHECK (
+      status <> 'FAILED'
+      OR
+      error_message IS NOT NULL
+    )
+);
+
+CREATE UNIQUE INDEX unique_livekit_egress_id
+ON meeting_recordings (livekit_egress_id)
+WHERE livekit_egress_id IS NOT NULL;
+
+CREATE INDEX idx_meeting_recordings_status
+ON meeting_recordings (status);
+
+CREATE INDEX idx_meeting_recordings_meeting_id
+ON meeting_recordings (meeting_id);
+
+-- =========================================================
+-- 5. meeting_reports
+-- STT / LLM 회의록 생성 결과 저장
+-- 60초 미만 회의는 MeetingReport를 생성하지 않는다.
+-- =========================================================
+
+CREATE TABLE meeting_reports (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+
+  meeting_id uuid NOT NULL,
+  recording_id uuid NOT NULL,
+
+  status meeting_report_status NOT NULL DEFAULT 'PROCESSING',
+
+  failed_step meeting_report_failed_step NULL,
+  error_message text NULL,
+
+  transcript_text text NULL,
+  summary text NULL,
+  discussion_points text NULL,
+  decisions text NULL,
+
+  action_item_candidates jsonb NOT NULL DEFAULT '[]'::jsonb,
+
+  retry_count integer NOT NULL DEFAULT 0,
+
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+
+  CONSTRAINT fk_meeting_reports_meeting
+    FOREIGN KEY (meeting_id)
+    REFERENCES meetings(id)
+    ON DELETE CASCADE,
+
+  CONSTRAINT fk_meeting_reports_recording
+    FOREIGN KEY (recording_id, meeting_id)
+    REFERENCES meeting_recordings(id, meeting_id)
+    ON DELETE CASCADE,
+
+  CONSTRAINT unique_report_per_meeting
+    UNIQUE (meeting_id),
+
+  CONSTRAINT unique_report_per_recording
+    UNIQUE (recording_id),
+
+  CONSTRAINT chk_meeting_reports_retry_count_non_negative
+    CHECK (retry_count >= 0),
+
+  CONSTRAINT chk_meeting_reports_action_items_array
+    CHECK (jsonb_typeof(action_item_candidates) = 'array'),
+
+  CONSTRAINT chk_meeting_reports_failed_state
+    CHECK (
+      (
+        status = 'FAILED'
+        AND failed_step IS NOT NULL
+        AND error_message IS NOT NULL
+      )
+      OR
+      (
+        status <> 'FAILED'
+        AND failed_step IS NULL
+        AND error_message IS NULL
+      )
+    )
+);
+
+CREATE INDEX idx_meeting_reports_status
+ON meeting_reports (status);
+
+CREATE INDEX idx_meeting_reports_meeting_id
+ON meeting_reports (meeting_id);
+
+CREATE INDEX idx_meeting_reports_recording_id
+ON meeting_reports (recording_id);
+
+CREATE INDEX idx_meeting_reports_created_at
+ON meeting_reports (created_at DESC);
+
+CREATE INDEX idx_meeting_reports_action_item_candidates
+ON meeting_reports
+USING GIN (action_item_candidates);
+
+-- =========================================================
+-- 6. 정책 검증 함수
+-- =========================================================
+
+CREATE OR REPLACE FUNCTION enforce_meeting_report_policy()
+RETURNS TRIGGER AS $$
+DECLARE
+  meeting_started_at timestamptz;
+  meeting_ended_at timestamptz;
+  recording_status meeting_recording_status;
+BEGIN
+  SELECT m.started_at, m.ended_at, r.status
+  INTO meeting_started_at, meeting_ended_at, recording_status
+  FROM meetings m
+  JOIN meeting_recordings r
+    ON r.meeting_id = m.id
+  WHERE m.id = NEW.meeting_id
+    AND r.id = NEW.recording_id;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'meeting_report must reference a recording from the same meeting';
+  END IF;
+
+  IF meeting_ended_at IS NULL THEN
+    RAISE EXCEPTION 'meeting_report cannot be created before the meeting ends';
+  END IF;
+
+  IF EXTRACT(EPOCH FROM (meeting_ended_at - meeting_started_at)) < 60 THEN
+    RAISE EXCEPTION 'meeting_report cannot be created for meetings shorter than 60 seconds';
+  END IF;
+
+  IF recording_status = 'RUNNING' THEN
+    RAISE EXCEPTION 'meeting_report cannot be created while recording is still running';
+  END IF;
+
+  IF recording_status = 'FAILED'
+     AND (NEW.status <> 'FAILED' OR NEW.failed_step <> 'RECORDING') THEN
+    RAISE EXCEPTION 'failed recording must create a FAILED report with failed_step RECORDING';
+  END IF;
+
+  IF recording_status = 'COMPLETED'
+     AND NEW.failed_step = 'RECORDING' THEN
+    RAISE EXCEPTION 'completed recording cannot create a report with failed_step RECORDING';
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_meeting_reports_policy
+BEFORE INSERT OR UPDATE OF meeting_id, recording_id, status, failed_step
+ON meeting_reports
+FOR EACH ROW
+EXECUTE FUNCTION enforce_meeting_report_policy();
+
+-- =========================================================
+-- 7. updated_at triggers
+-- =========================================================
+
+CREATE TRIGGER trg_meetings_updated_at
+BEFORE UPDATE ON meetings
+FOR EACH ROW
+EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER trg_meeting_participants_updated_at
+BEFORE UPDATE ON meeting_participants
+FOR EACH ROW
+EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER trg_meeting_recordings_updated_at
+BEFORE UPDATE ON meeting_recordings
+FOR EACH ROW
+EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER trg_meeting_reports_updated_at
+BEFORE UPDATE ON meeting_reports
+FOR EACH ROW
+EXECUTE FUNCTION update_updated_at_column();
+
+-- =========================================================
+-- 8. MVP 제외 사항
+-- =========================================================
+
+-- MVP에서는 녹음 동의 여부를 서버 DB에 저장하지 않는다.
+-- 프론트 localStorage에 recordingConsentAccepted = true 형태로 저장한다.
+-- 따라서 recording_consents, meeting_recording_consents 테이블은 만들지 않는다.
+
+-- =========================================================
+-- LOCAL BOARDS
+-- GitHub Project Kanban read-only cache.
+-- These local board tables are linked to the existing GitHub
+-- integration tables so synced GitHub issues can be rendered
+-- as PILO Kanban cards.
+-- =========================================================
+
+CREATE TABLE boards (
+  id BIGINT GENERATED BY DEFAULT AS IDENTITY,
+
+  workspace_id UUID NOT NULL
+    REFERENCES workspaces(id) ON DELETE CASCADE,
+
+  repository_id UUID
+    REFERENCES github_repositories(id) ON DELETE SET NULL,
+
+  project_v2_id UUID
+    REFERENCES github_projects_v2(id) ON DELETE SET NULL,
+
+  status_field_id UUID
+    REFERENCES github_project_v2_fields(id) ON DELETE SET NULL,
+
+  name VARCHAR(255) NOT NULL,
+
+  last_sync_status github_sync_status,
+  last_synced_at TIMESTAMPTZ,
+
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  CONSTRAINT pk_boards PRIMARY KEY (id),
+
+  CONSTRAINT uq_boards_project_repository
+    UNIQUE (project_v2_id, repository_id)
+);
+
+CREATE INDEX idx_boards_workspace_id
+  ON boards(workspace_id);
+
+CREATE INDEX idx_boards_repository_id
+  ON boards(repository_id);
+
+CREATE INDEX idx_boards_project_v2_id
+  ON boards(project_v2_id);
+
+CREATE INDEX idx_boards_status_field_id
+  ON boards(status_field_id);
+
+CREATE TRIGGER trg_boards_updated_at
+BEFORE UPDATE ON boards
+FOR EACH ROW
+EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TABLE board_columns (
+  id BIGINT GENERATED BY DEFAULT AS IDENTITY,
+  board_id BIGINT NOT NULL,
+
+  status_option_id UUID
+    REFERENCES github_project_v2_field_options(id) ON DELETE SET NULL,
+
+  status_option_github_id TEXT,
+  normalized_name TEXT,
+
+  name VARCHAR(255) NOT NULL,
+  position INTEGER NOT NULL DEFAULT 0,
+  color VARCHAR(30),
+
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  CONSTRAINT pk_board_columns PRIMARY KEY (id),
+
+  CONSTRAINT uq_board_columns_id_board_id
+    UNIQUE (id, board_id),
+
+  CONSTRAINT uq_board_columns_board_position
+    UNIQUE (board_id, position),
+
+  CONSTRAINT uq_board_columns_board_status_option
+    UNIQUE (board_id, status_option_id),
+
+  CONSTRAINT fk_board_columns_board
+    FOREIGN KEY (board_id)
+    REFERENCES boards(id)
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
+
+  CONSTRAINT chk_board_columns_position
+    CHECK (position >= 0)
+);
+
+CREATE INDEX idx_board_columns_board_id
+  ON board_columns(board_id);
+
+CREATE INDEX idx_board_columns_status_option_id
+  ON board_columns(status_option_id);
+
+CREATE INDEX idx_board_columns_board_normalized_name
+  ON board_columns(board_id, normalized_name);
+
+CREATE TRIGGER trg_board_columns_updated_at
+BEFORE UPDATE ON board_columns
+FOR EACH ROW
+EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TABLE pilo_issues (
+  id BIGINT GENERATED BY DEFAULT AS IDENTITY,
+
+  board_id BIGINT NOT NULL,
+  column_id BIGINT NOT NULL,
+
+  workspace_id UUID NOT NULL
+    REFERENCES workspaces(id) ON DELETE CASCADE,
+
+  repository_id UUID
+    REFERENCES github_repositories(id) ON DELETE CASCADE,
+
+  github_issue_id UUID
+    REFERENCES github_issues(id) ON DELETE CASCADE,
+
+  project_item_id UUID
+    REFERENCES github_project_v2_items(id) ON DELETE CASCADE,
+
+  github_issue_node_id TEXT,
+  github_project_item_node_id TEXT,
+
+  github_issue_number INTEGER,
+  issue_number VARCHAR(100) NOT NULL,
+
+  title VARCHAR(255) NOT NULL,
+  body TEXT,
+  html_url TEXT,
+
+  state github_issue_state,
+
+  labels JSONB NOT NULL DEFAULT '[]'::jsonb,
+  assignees JSONB NOT NULL DEFAULT '[]'::jsonb,
+  milestone JSONB,
+
+  position INTEGER NOT NULL DEFAULT 0,
+
+  github_updated_at TIMESTAMPTZ,
+  last_synced_at TIMESTAMPTZ,
+  raw JSONB NOT NULL DEFAULT '{}'::jsonb,
+
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  CONSTRAINT pk_pilo_issues PRIMARY KEY (id),
+
+  CONSTRAINT uq_pilo_issues_board_issue_number
+    UNIQUE (board_id, issue_number),
+
+  CONSTRAINT uq_pilo_issues_board_github_issue
+    UNIQUE (board_id, github_issue_id),
+
+  CONSTRAINT uq_pilo_issues_board_project_item
+    UNIQUE (board_id, project_item_id),
+
+  CONSTRAINT uq_pilo_issues_column_position
+    UNIQUE (column_id, position),
+
+  CONSTRAINT fk_pilo_issues_board
+    FOREIGN KEY (board_id)
+    REFERENCES boards(id)
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
+
+  CONSTRAINT fk_pilo_issues_column_same_board
+    FOREIGN KEY (column_id, board_id)
+    REFERENCES board_columns(id, board_id)
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
+
+  CONSTRAINT chk_pilo_issues_position
+    CHECK (position >= 0)
+);
+
+CREATE INDEX idx_pilo_issues_board_id
+  ON pilo_issues(board_id);
+
+CREATE INDEX idx_pilo_issues_column_id
+  ON pilo_issues(column_id);
+
+CREATE INDEX idx_pilo_issues_workspace_id
+  ON pilo_issues(workspace_id);
+
+CREATE INDEX idx_pilo_issues_repository_id
+  ON pilo_issues(repository_id);
+
+CREATE INDEX idx_pilo_issues_github_issue_id
+  ON pilo_issues(github_issue_id);
+
+CREATE INDEX idx_pilo_issues_project_item_id
+  ON pilo_issues(project_item_id);
+
+CREATE INDEX idx_pilo_issues_board_github_issue_number
+  ON pilo_issues(board_id, github_issue_number);
+
+CREATE TRIGGER trg_pilo_issues_updated_at
+BEFORE UPDATE ON pilo_issues
+FOR EACH ROW
+EXECUTE FUNCTION update_updated_at_column();
+
+-- =========================================================
+-- BOARD API IDEMPOTENCY
+-- Stores durable retry state for GitHub write endpoints.
+-- Issue deletion keeps the last full Issue response snapshot
+-- here because the local pilo_issues cache row can disappear
+-- after the Project item is removed or archived.
+-- =========================================================
+
+CREATE TABLE api_idempotency_keys (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+  workspace_id UUID NOT NULL
+    REFERENCES workspaces(id) ON DELETE CASCADE,
+
+  actor_user_id UUID NOT NULL
+    REFERENCES users(id) ON DELETE CASCADE,
+
+  idempotency_key TEXT NOT NULL,
+
+  http_method TEXT NOT NULL,
+  request_path TEXT NOT NULL,
+  request_body_hash TEXT NOT NULL,
+  operation TEXT NOT NULL,
+
+  status api_idempotency_status NOT NULL DEFAULT 'processing',
+  partial_state api_idempotency_partial_state,
+
+  board_id BIGINT
+    REFERENCES boards(id) ON DELETE SET NULL,
+
+  issue_id BIGINT
+    REFERENCES pilo_issues(id) ON DELETE SET NULL,
+
+  repository_id UUID
+    REFERENCES github_repositories(id) ON DELETE SET NULL,
+
+  project_v2_id UUID
+    REFERENCES github_projects_v2(id) ON DELETE SET NULL,
+
+  github_issue_id UUID
+    REFERENCES github_issues(id) ON DELETE SET NULL,
+
+  project_item_id UUID
+    REFERENCES github_project_v2_items(id) ON DELETE SET NULL,
+
+  github_issue_number INTEGER,
+  github_issue_node_id TEXT,
+  github_project_item_node_id TEXT,
+
+  sync_run_id UUID
+    REFERENCES github_sync_runs(id) ON DELETE SET NULL,
+
+  response_status_code INTEGER,
+  response_body JSONB,
+  issue_snapshot JSONB,
+
+  error_code TEXT,
+  error_message TEXT,
+
+  locked_until TIMESTAMPTZ,
+  completed_at TIMESTAMPTZ,
+  expires_at TIMESTAMPTZ NOT NULL DEFAULT (now() + INTERVAL '24 hours'),
+
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  CONSTRAINT uq_api_idempotency_keys_scope
+    UNIQUE (workspace_id, actor_user_id, idempotency_key),
+
+  CONSTRAINT chk_api_idempotency_keys_method
+    CHECK (http_method IN ('POST', 'PATCH', 'PUT', 'DELETE')),
+
+  CONSTRAINT chk_api_idempotency_keys_status_payload
+    CHECK (
+      (
+        status IN ('succeeded', 'failed')
+        AND response_status_code IS NOT NULL
+        AND response_body IS NOT NULL
+      )
+      OR (
+        status = 'processing'
+        AND response_status_code IS NULL
+      )
+      OR (
+        status = 'partial'
+        AND partial_state IS NOT NULL
+        AND response_status_code = 202
+        AND response_body IS NOT NULL
+      )
+    ),
+
+  CONSTRAINT chk_api_idempotency_keys_partial_state
+    CHECK (
+      (
+        status = 'partial'
+        AND partial_state IS NOT NULL
+      )
+      OR (
+        status <> 'partial'
+        AND partial_state IS NULL
+      )
+    ),
+
+  CONSTRAINT chk_api_idempotency_keys_response_status
+    CHECK (
+      response_status_code IS NULL
+      OR response_status_code BETWEEN 100 AND 599
+    ),
+
+  CONSTRAINT chk_api_idempotency_keys_expires_after_create
+    CHECK (expires_at > created_at)
+);
+
+CREATE INDEX idx_api_idempotency_keys_workspace_status
+  ON api_idempotency_keys(workspace_id, status, created_at);
+
+CREATE INDEX idx_api_idempotency_keys_expires_at
+  ON api_idempotency_keys(expires_at);
+
+CREATE INDEX idx_api_idempotency_keys_board_issue
+  ON api_idempotency_keys(board_id, issue_id);
+
+CREATE INDEX idx_api_idempotency_keys_github_issue_id
+  ON api_idempotency_keys(github_issue_id);
+
+CREATE INDEX idx_api_idempotency_keys_project_item_id
+  ON api_idempotency_keys(project_item_id);
+
+CREATE INDEX idx_api_idempotency_keys_sync_run_id
+  ON api_idempotency_keys(sync_run_id);
+
+CREATE TRIGGER trg_api_idempotency_keys_updated_at
+BEFORE UPDATE ON api_idempotency_keys
+FOR EACH ROW
+EXECUTE FUNCTION update_updated_at_column();
+
+-- =========================================================
+-- LOCAL BOARD HYDRATION FUNCTIONS
+-- Run after GitHub repositories, issues, project fields,
+-- field options, and project items are synced.
+-- =========================================================
+
+CREATE OR REPLACE FUNCTION refresh_pilo_issues_from_github(
+  p_board_id BIGINT
+)
+RETURNS VOID AS $$
+BEGIN
+  DELETE FROM pilo_issues pi
+  USING boards b
+  WHERE b.id = p_board_id
+    AND pi.board_id = b.id
+    AND NOT EXISTS (
+      SELECT 1
+      FROM github_project_v2_items gpi
+      WHERE gpi.project_v2_id = b.project_v2_id
+        AND gpi.workspace_id = b.workspace_id
+        AND gpi.id = pi.project_item_id
+        AND gpi.issue_id = pi.github_issue_id
+        AND gpi.content_type = 'ISSUE'
+        AND gpi.is_archived = false
+    );
+
+  WITH source_items AS (
+    SELECT
+      b.id AS board_id,
+      b.workspace_id,
+      b.repository_id,
+      gi.id AS github_issue_id,
+      gi.github_node_id AS github_issue_node_id,
+      gi.issue_number AS github_issue_number,
+      gi.title,
+      gi.body,
+      gi.html_url,
+      gi.state,
+      gi.labels,
+      gi.assignees,
+      gi.milestone,
+      gi.github_updated_at,
+      gi.raw,
+      gpi.id AS project_item_id,
+      gpi.github_project_item_node_id,
+      COALESCE(gpi.position, 0) AS item_position,
+      COALESCE(status_col.id, fallback_col.id) AS column_id
+    FROM boards b
+    JOIN github_project_v2_items gpi
+      ON gpi.project_v2_id = b.project_v2_id
+     AND gpi.workspace_id = b.workspace_id
+    JOIN github_issues gi
+      ON gi.id = gpi.issue_id
+     AND gi.workspace_id = b.workspace_id
+     AND gi.repository_id = b.repository_id
+    LEFT JOIN board_columns status_col
+      ON status_col.board_id = b.id
+     AND (
+        status_col.status_option_id = gpi.status_option_id
+        OR status_col.status_option_github_id = gpi.status_option_github_id
+        OR status_col.normalized_name = gpi.status_normalized_name
+     )
+    JOIN board_columns fallback_col
+      ON fallback_col.board_id = b.id
+     AND fallback_col.normalized_name = 'unmapped'
+    WHERE b.id = p_board_id
+      AND gpi.content_type = 'ISSUE'
+      AND gpi.is_archived = false
+  )
+  INSERT INTO pilo_issues (
+    board_id,
+    column_id,
+    workspace_id,
+    repository_id,
+    github_issue_id,
+    project_item_id,
+    github_issue_node_id,
+    github_project_item_node_id,
+    github_issue_number,
+    issue_number,
+    title,
+    body,
+    html_url,
+    state,
+    labels,
+    assignees,
+    milestone,
+    position,
+    github_updated_at,
+    last_synced_at,
+    raw
+  )
+  SELECT
+    board_id,
+    column_id,
+    workspace_id,
+    repository_id,
+    github_issue_id,
+    project_item_id,
+    github_issue_node_id,
+    github_project_item_node_id,
+    github_issue_number,
+    '#' || github_issue_number::text AS issue_number,
+    title,
+    body,
+    html_url,
+    state,
+    labels,
+    assignees,
+    milestone,
+    item_position,
+    github_updated_at,
+    now(),
+    raw
+  FROM source_items
+  ON CONFLICT (board_id, issue_number)
+  DO UPDATE SET
+    column_id = EXCLUDED.column_id,
+    workspace_id = EXCLUDED.workspace_id,
+    repository_id = EXCLUDED.repository_id,
+    github_issue_id = EXCLUDED.github_issue_id,
+    project_item_id = EXCLUDED.project_item_id,
+    github_issue_node_id = EXCLUDED.github_issue_node_id,
+    github_project_item_node_id = EXCLUDED.github_project_item_node_id,
+    github_issue_number = EXCLUDED.github_issue_number,
+    title = EXCLUDED.title,
+    body = EXCLUDED.body,
+    html_url = EXCLUDED.html_url,
+    state = EXCLUDED.state,
+    labels = EXCLUDED.labels,
+    assignees = EXCLUDED.assignees,
+    milestone = EXCLUDED.milestone,
+    position = EXCLUDED.position,
+    github_updated_at = EXCLUDED.github_updated_at,
+    last_synced_at = now(),
+    raw = EXCLUDED.raw,
+    updated_at = now();
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION hydrate_pilo_board_from_github(
+  p_project_v2_id UUID,
+  p_repository_id UUID
+)
+RETURNS BIGINT AS $$
+DECLARE
+  v_board_id BIGINT;
+BEGIN
+  INSERT INTO boards (
+    name,
+    workspace_id,
+    repository_id,
+    project_v2_id,
+    status_field_id,
+    last_sync_status,
+    last_synced_at
+  )
+  SELECT
+    gp.title,
+    gp.workspace_id,
+    gr.id AS repository_id,
+    gp.id AS project_v2_id,
+    sf.id AS status_field_id,
+    'success'::github_sync_status,
+    gp.last_synced_at
+  FROM github_projects_v2 gp
+  JOIN github_project_v2_repositories gpr
+    ON gpr.project_v2_id = gp.id
+  JOIN github_repositories gr
+    ON gr.id = gpr.repository_id
+  LEFT JOIN github_project_v2_fields sf
+    ON sf.project_v2_id = gp.id
+   AND sf.is_status_field = true
+  WHERE gp.id = p_project_v2_id
+    AND gr.id = p_repository_id
+    AND gp.workspace_id = gr.workspace_id
+  ON CONFLICT (project_v2_id, repository_id)
+  DO UPDATE SET
+    name = EXCLUDED.name,
+    workspace_id = EXCLUDED.workspace_id,
+    status_field_id = EXCLUDED.status_field_id,
+    last_sync_status = EXCLUDED.last_sync_status,
+    last_synced_at = EXCLUDED.last_synced_at,
+    updated_at = now()
+  RETURNING id INTO v_board_id;
+
+  INSERT INTO board_columns (
+    board_id,
+    name,
+    position,
+    color,
+    status_option_id,
+    status_option_github_id,
+    normalized_name
+  )
+  SELECT
+    b.id AS board_id,
+    o.option_name AS name,
+    COALESCE(o.position, 0) AS position,
+    o.color,
+    o.id AS status_option_id,
+    o.github_option_id AS status_option_github_id,
+    o.normalized_name
+  FROM boards b
+  JOIN github_project_v2_fields sf
+    ON sf.id = b.status_field_id
+  JOIN github_project_v2_field_options o
+    ON o.field_id = sf.id
+  WHERE b.id = v_board_id
+  ON CONFLICT (board_id, status_option_id)
+  DO UPDATE SET
+    name = EXCLUDED.name,
+    position = EXCLUDED.position,
+    color = EXCLUDED.color,
+    status_option_github_id = EXCLUDED.status_option_github_id,
+    normalized_name = EXCLUDED.normalized_name,
+    updated_at = now();
+
+  INSERT INTO board_columns (
+    board_id,
+    name,
+    position,
+    color,
+    normalized_name
+  )
+  SELECT
+    b.id,
+    'Unmapped',
+    COALESCE((
+      SELECT MAX(existing.position) + 1
+      FROM board_columns existing
+      WHERE existing.board_id = b.id
+    ), 0),
+    '#8a93a6',
+    'unmapped'
+  FROM boards b
+  WHERE b.id = v_board_id
+    AND NOT EXISTS (
+      SELECT 1
+      FROM board_columns bc
+      WHERE bc.board_id = b.id
+        AND bc.normalized_name = 'unmapped'
+    );
+
+  PERFORM refresh_pilo_issues_from_github(v_board_id);
+
+  RETURN v_board_id;
+END;
+$$ LANGUAGE plpgsql;
+
+-- =========================================================
+-- CALENDAR
+-- =========================================================
+
+CREATE TABLE calendar_events (
+  id BIGSERIAL PRIMARY KEY,
+
+  title VARCHAR(255) NOT NULL,
+  description TEXT,
+  color VARCHAR(20) NOT NULL DEFAULT '#3B82F6',
+
+  is_all_day BOOLEAN NOT NULL DEFAULT TRUE,
+
+  start_date DATE NOT NULL,
+  end_date DATE NOT NULL,
+  start_time TIME,
+  end_time TIME,
+
+  created_by UUID NOT NULL
+    REFERENCES users(id) ON DELETE RESTRICT,
+
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  CONSTRAINT calendar_events_date_order_check
+    CHECK (end_date >= start_date),
+
+  CONSTRAINT calendar_events_time_required_check
+    CHECK (
+      (is_all_day = TRUE AND start_time IS NULL AND end_time IS NULL)
+      OR
+      (is_all_day = FALSE AND start_time IS NOT NULL AND end_time IS NOT NULL)
+    ),
+
+  CONSTRAINT calendar_events_time_order_check
+    CHECK (
+      is_all_day = TRUE
+      OR end_date > start_date
+      OR (end_date = start_date AND end_time > start_time)
+    )
+);
+
+CREATE INDEX idx_calendar_events_created_by
+  ON calendar_events(created_by);
+
+CREATE INDEX idx_calendar_events_date_range
+  ON calendar_events(start_date, end_date);
+
+CREATE TRIGGER trg_calendar_events_updated_at
+BEFORE UPDATE ON calendar_events
+FOR EACH ROW
+EXECUTE FUNCTION update_updated_at_column();
+
+-- =========================================================
+-- CANVAS
+-- =========================================================
+
+CREATE TABLE canvas (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+  workspace_id UUID NOT NULL
+    REFERENCES workspaces(id) ON DELETE CASCADE,
+
+  title TEXT NOT NULL DEFAULT 'Untitled canvas',
+  board_type TEXT NOT NULL DEFAULT 'freeform',
+
+  zoom DOUBLE PRECISION NOT NULL DEFAULT 1,
+  viewport_x DOUBLE PRECISION NOT NULL DEFAULT 0,
+  viewport_y DOUBLE PRECISION NOT NULL DEFAULT 0,
+
+  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  CONSTRAINT canvas_board_type_check
+    CHECK (board_type IN ('freeform', 'review')),
+
+  CONSTRAINT canvas_zoom_positive_check
+    CHECK (zoom > 0)
+);
+
+CREATE INDEX idx_canvas_workspace_id
+  ON canvas(workspace_id);
+
+CREATE INDEX idx_canvas_created_by
+  ON canvas(created_by);
+
+CREATE TRIGGER trg_canvas_updated_at
+BEFORE UPDATE ON canvas
+FOR EACH ROW
+EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TABLE canvas_freeform_shapes (
+  id TEXT PRIMARY KEY,
+
+  canvas_id UUID NOT NULL
+    REFERENCES canvas(id) ON DELETE CASCADE,
+
+  shape_type TEXT NOT NULL,
+
+  title TEXT,
+  text_content TEXT,
+
+  x DOUBLE PRECISION NOT NULL DEFAULT 0,
+  y DOUBLE PRECISION NOT NULL DEFAULT 0,
+  width DOUBLE PRECISION,
+  height DOUBLE PRECISION,
+  rotation DOUBLE PRECISION NOT NULL DEFAULT 0,
+  z_index INTEGER NOT NULL DEFAULT 0,
+
+  raw_shape JSONB NOT NULL DEFAULT '{}'::jsonb,
+
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  deleted_at TIMESTAMPTZ,
+
+  CONSTRAINT canvas_shape_type_check
+    CHECK (
+      shape_type IN (
+        'sticky-note',
+        'text',
+        'frame',
+        'draw',
+        'highlight',
+        'geo',
+        'arrow',
+        'line',
+        'image',
+        'video',
+        'bookmark',
+        'embed',
+        'file_node',
+        'group'
+      )
+    ),
+
+  CONSTRAINT canvas_shape_size_check
+    CHECK (
+      (width IS NULL OR width >= 0)
+      AND (height IS NULL OR height >= 0)
+    )
+);
+
+CREATE INDEX idx_canvas_freeform_shapes_canvas_id
+  ON canvas_freeform_shapes(canvas_id);
+
+CREATE INDEX idx_canvas_freeform_shapes_deleted_at
+  ON canvas_freeform_shapes(deleted_at);
+
+CREATE TRIGGER trg_canvas_freeform_shapes_updated_at
+BEFORE UPDATE ON canvas_freeform_shapes
+FOR EACH ROW
+EXECUTE FUNCTION update_updated_at_column();
+ALTER TABLE pr_review_sessions
+ADD CONSTRAINT fk_pr_review_sessions_canvas
+FOREIGN KEY (canvas_id)
+REFERENCES canvas(id)
+ON DELETE SET NULL;
+
+ALTER TABLE review_flow_files
+ADD CONSTRAINT fk_review_flow_files_canvas_shape
+FOREIGN KEY (canvas_shape_id)
+REFERENCES canvas_freeform_shapes(id)
+ON DELETE SET NULL;
+
+CREATE TABLE canvas_user_states (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+  canvas_id UUID NOT NULL
+    REFERENCES canvas(id) ON DELETE CASCADE,
+
+  user_id UUID NOT NULL
+    REFERENCES users(id) ON DELETE CASCADE,
+
+  entered_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  left_at TIMESTAMPTZ,
+
+  UNIQUE (canvas_id, user_id)
+);
+
+CREATE INDEX idx_canvas_user_states_canvas_id
+  ON canvas_user_states(canvas_id);
+
+CREATE INDEX idx_canvas_user_states_user_id
+  ON canvas_user_states(user_id);
+
+-- =========================================================
+-- USER NOTIFICATION SETTINGS
+-- =========================================================
+
+CREATE TABLE user_notification_settings (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+  user_id UUID NOT NULL
+    REFERENCES users(id) ON DELETE CASCADE,
+
+  schedule_enabled BOOLEAN NOT NULL DEFAULT true,
+  issue_deadline_enabled BOOLEAN NOT NULL DEFAULT true,
+  pr_review_enabled BOOLEAN NOT NULL DEFAULT true,
+  voice_chat_enabled BOOLEAN NOT NULL DEFAULT true,
+
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  UNIQUE (user_id)
+);
+
+CREATE TRIGGER trg_user_notification_settings_updated_at
+BEFORE UPDATE ON user_notification_settings
+FOR EACH ROW
+EXECUTE FUNCTION update_updated_at_column();

@@ -4,7 +4,18 @@
 
 PILO 개발환경 인프라는 비용을 최소화하면서도 실제 MVP 구조를 검증할 수 있도록 설계한다. 모든 AWS 리소스는 Terraform으로 관리하며, 콘솔에서 수동 생성한 리소스는 예외로 두지 않는다.
 
-현재 저장소에는 `apps/`와 `infra/`가 존재한다. 이 문서는 dev 인프라의 아키텍처 기준이며, 실제 진행 상태는 `docs/infra/deploy-checklist.md`와 `infra/` 구현을 함께 확인한다.
+현재 저장소에는 `infra/`, `.github/`, 문서, 그리고 MVP 앱 scaffold가 존재한다.
+실제 진행 상태는 `docs/infra/deploy-checklist.md`와 로컬 파일 구조를 함께 확인한다.
+
+현재 dev 환경에서 확인된 주요 상태:
+
+- Terraform dev remote backend 연결 완료
+- Terraform plan 결과 `No changes`
+- ECS `app-server`, `realtime-server`, `ai-worker` 서비스 running
+- App Server와 Realtime Server ALB target health `healthy`
+- Frontend CloudFront endpoint 응답 확인
+- LiveKit self-host EC2 running
+- `livekit.dev.pilo.my`, `turn.dev.pilo.my` DNS 연결
 
 ## 2. 기본 원칙
 
@@ -18,7 +29,12 @@ PILO 개발환경 인프라는 비용을 최소화하면서도 실제 MVP 구조
 - API key, DB password, GitHub private key, LiveKit secret은 Terraform 파일에 하드코딩하지 않는다.
 - 비밀값은 AWS Secrets Manager 또는 SSM Parameter Store 참조로 관리한다.
 - ECS 로그는 CloudWatch Logs로 수집한다.
-- LiveKit은 MVP에서 self-hosting하지 않고 LiveKit Cloud를 사용한다.
+- 음성 회의는 MVP에서 LiveKit을 self-hosting한다.
+- MVP에서는 LiveKit Server, LiveKit Redis, LiveKit Egress를 같은 EC2 또는 같은 ECS 배포 단위에 둔다.
+- 회의 녹음은 영상 녹화가 아니라 audio-only Egress로 S3에 저장한다.
+- 운영 안정화 후 Egress만 별도 EC2 또는 ECS service로 분리한다.
+- `realtime-server`는 LiveKit을 대체하지 않는다. 앱 내부 이벤트 전달과 향후 실시간 확장을 위한 별도 서비스로 유지한다.
+- MVP에서 자유형 캔버스 CRDT, 커서 공유, 하트비트, 채팅, MeetingRoom 관리는 구현하지 않는다.
 
 ## 3. 서비스 구성
 
@@ -36,27 +52,35 @@ PILO 개발환경 인프라는 비용을 최소화하면서도 실제 MVP 구조
 - 실행: ECS Fargate
 - 역할:
   - Google/GitHub 소셜 로그인 및 세션 인증
-  - workspace/member/task 관리
-  - GitHub App 연동
-  - 파일 metadata 관리
-  - 알림 생성
+  - Workspace 경계와 접근 제어
+  - GitHub App installation, 사용자 GitHub OAuth 연결
+  - Repository, Issue, Pull Request, ProjectV2 동기화 API
+  - Kanban board hydrate와 ProjectV2 status 이동 API
+  - PR review session, file decision, submission API
+  - 자유형 캔버스와 캘린더 CRUD API
+  - LiveKit room token 발급과 audio-only Egress 시작/종료
   - AI job 생성
-  - LiveKit room token 발급
 - inbound:
   - ALB에서 오는 `/api/*` traffic만 허용
 - outbound:
-  - RDS, Redis, S3, SQS, Secrets Manager, GitHub, LiveKit Cloud 접근
+  - RDS, Redis, S3, SQS, Secrets Manager, GitHub, LiveKit Server 접근
 
 ### Realtime Server
 
 - 기술: WebSocket 서버
 - 실행: ECS Fargate
 - 역할:
-  - canvas sync
-  - chat
-  - presence
-  - meeting state
-  - realtime notification
+  - 앱 레벨 realtime notification
+  - sync run, AI analysis, meeting report processing 같은 진행 상태 전달
+  - 프론트엔드 reconnect와 health check 검증
+  - 향후 캔버스 협업, presence, 알림 확장 지점 유지
+- MVP에서 하지 않는 역할:
+  - LiveKit 음성 송수신
+  - 자유형 캔버스 CRDT/동시 편집
+  - 커서 공유와 하트비트
+  - 채팅
+  - MeetingRoom 관리
+  - GitHub, PR 리뷰, 회의, 일정 데이터의 source of truth
 - inbound:
   - ALB에서 오는 `/ws/*`, `/socket.io/*`, `/sync/*` traffic만 허용
 - outbound:
@@ -70,7 +94,6 @@ PILO 개발환경 인프라는 비용을 최소화하면서도 실제 MVP 구조
   - SQS message consume
   - OpenAI Responses API 호출
   - meeting report 생성
-  - task suggestion 생성
   - PR analysis 생성
   - review summary 생성
   - RDS/S3에 결과 저장
@@ -81,9 +104,33 @@ PILO 개발환경 인프라는 비용을 최소화하면서도 실제 MVP 구조
 
 ### Voice
 
-- MVP에서는 LiveKit Cloud를 사용한다.
+- MVP에서는 LiveKit을 self-hosting한다.
 - App Server가 LiveKit room token을 발급한다.
-- LiveKit self-hosting은 현재 범위에서 제외한다.
+- App Server가 회의 시작/종료 흐름에서 audio-only Egress를 제어한다.
+- Egress는 회의 전체 음성을 하나의 파일로 S3에 저장한다.
+- AI Worker는 S3에 저장된 오디오 파일을 받아 STT와 회의록 생성을 수행한다.
+- 발화자별 오디오 분리가 꼭 필요해지면 Track Egress로 확장한다.
+
+MVP 배치:
+
+```text
+LiveKit host
+├─ LiveKit Server
+├─ LiveKit Redis
+└─ LiveKit Egress
+   └─ audio_only recording -> S3 recordings/uploads bucket
+```
+
+운영 안정화 후:
+
+```text
+LiveKit Server host/service
+├─ LiveKit Server
+└─ LiveKit Redis
+
+LiveKit Egress host/service
+└─ LiveKit Egress -> S3 recordings/uploads bucket
+```
 
 ## 4. 네트워크 구조
 
@@ -118,7 +165,7 @@ VPC
 - Secrets Manager 또는 SSM Parameter Store 조회
 - OpenAI API 호출
 - GitHub API/Webhook 처리
-- LiveKit Cloud API 호출
+- LiveKit Server/Egress API 호출
 
 RDS와 Redis는 Private Subnet에 두고 security group으로 ECS task에서 오는 traffic만 허용한다.
 
@@ -234,10 +281,9 @@ dev.pilo.example.com/ws/*       -> ALB -> Realtime Server
 - Private Subnet에 배치한다.
 - single node dev 구성을 우선한다.
 - 용도:
-  - presence
-  - websocket pub/sub
+  - realtime notification pub/sub
   - short-lived cache
-  - agent job status cache if needed
+  - AI job status cache if needed
 - source of truth는 PostgreSQL이다.
 
 ### S3
@@ -248,6 +294,7 @@ dev.pilo.example.com/ws/*       -> ALB -> Realtime Server
 - uploads/reports/snapshots bucket
 
 uploads bucket은 public access block을 활성화하고, presigned URL 또는 backend proxy 방식으로 접근한다.
+회의 녹음 파일도 같은 private uploads bucket 또는 별도 recordings prefix에 저장한다.
 
 ## 8. 비동기 작업 구조
 
@@ -269,12 +316,29 @@ AI Worker -> SQS message consume -> OpenAI/GitHub/S3/RDS 처리
 AI Worker -> RDS result 저장 -> Realtime notification
 ```
 
+회의 녹음과 회의록 생성 흐름:
+
+```text
+User -> Next.js -> App Server -> LiveKit room/token 발급
+App Server -> LiveKit Egress audio_only 녹음 시작
+LiveKit Egress -> S3 recordings prefix에 오디오 저장
+App Server or S3 event -> SQS meeting transcription job 생성
+AI Worker -> S3 오디오 다운로드 -> STT -> 회의록 생성 -> RDS 저장
+```
+
 ## 9. CI/CD 개요
 
 GitHub Actions는 OIDC 기반으로 AWS IAM Role을 assume한다. 장기 AWS access key를 GitHub Secrets에 저장하지 않는다.
 
 필요 workflow:
 
+- App CI
+  - frontend, app-server, realtime-server, ai-worker format/lint/test/build
+- Docker CI
+  - app-server, realtime-server, ai-worker image build
+- Security CI
+  - gitleaks
+  - pip-audit
 - Terraform validation
   - `terraform fmt`
   - `terraform validate`
@@ -284,7 +348,19 @@ GitHub Actions는 OIDC 기반으로 AWS IAM Role을 assume한다. 장기 AWS acc
 - AI Worker image build/push/deploy
 - Frontend static build/upload/CloudFront invalidation
 
-현재 저장소에는 `.github/workflows/docker-image.yml`, `.github/workflows/docker-publish.yml`이 있으나, PILO의 AWS/ECR/ECS 배포 기준으로 재작성하는 것이 좋다.
+현재 저장소의 workflow:
+
+- `.github/workflows/app-ci.yml`
+- `.github/workflows/docker-ci.yml`
+- `.github/workflows/security-ci.yml`
+- `.github/workflows/terraform-validate.yml`
+- `.github/workflows/deploy-frontend.yml`
+- `.github/workflows/deploy-app-server.yml`
+- `.github/workflows/deploy-realtime-server.yml`
+- `.github/workflows/deploy-ai-worker.yml`
+
+배포 workflow는 required PR check로 사용하지 않는다. PR에서는 CI required checks를
+통과하고, `main` merge 이후 변경 경로에 맞는 배포 workflow가 실행된다.
 
 ## 10. Production 확장 고려
 

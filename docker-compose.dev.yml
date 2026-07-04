@@ -10,6 +10,7 @@ services:
       - "5432:5432"
     volumes:
       - pilo_postgres_data:/var/lib/postgresql/data
+      - ./db/migrations:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U pilo -d pilo"]
       interval: 5s

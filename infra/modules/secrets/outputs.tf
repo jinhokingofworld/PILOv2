@@ -4,21 +4,34 @@ output "secret_arns" {
 
 output "app_server_ecs_secrets" {
   value = {
-    for name in local.app_server_secrets :
+    for name in local.app_server_ecs_secret_names :
     name => aws_secretsmanager_secret.this["app-server/${name}"].arn
   }
 }
 
 output "realtime_server_ecs_secrets" {
   value = {
-    for name in local.realtime_server_secrets :
+    for name in local.realtime_server_ecs_secret_names :
     name => aws_secretsmanager_secret.this["realtime-server/${name}"].arn
   }
 }
 
 output "ai_worker_ecs_secrets" {
   value = {
-    for name in local.ai_worker_secrets :
+    for name in local.ai_worker_ecs_secret_names :
     name => aws_secretsmanager_secret.this["ai-worker/${name}"].arn
+  }
+}
+
+output "livekit_host_secret_arns" {
+  value = {
+    for name in [
+      "LIVEKIT_API_KEY",
+      "LIVEKIT_API_SECRET",
+      "LIVEKIT_URL",
+      "LIVEKIT_WS_URL",
+      "LIVEKIT_RECORDINGS_BUCKET",
+    ] :
+    name => aws_secretsmanager_secret.this["app-server/${name}"].arn
   }
 }

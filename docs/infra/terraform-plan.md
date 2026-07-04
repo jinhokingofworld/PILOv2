@@ -4,7 +4,9 @@
 
 PILO 개발환경 AWS 인프라를 Terraform module 구조로 설계한다. 이 문서는 초기 구현 순서와 모듈 경계를 정의한 계획 문서이며, 실제 진행 상태는 `docs/infra/deploy-checklist.md`를 우선 확인한다.
 
-실제 Terraform 파일은 사용자 승인 후 생성한다. 2026-06-27 기준으로 dev용 Terraform module 뼈대는 생성되었고, 아직 `terraform init`, `terraform plan`, `terraform apply`는 실행하지 않았다.
+현재 레포에는 dev용 Terraform module과 remote backend 설정이 존재한다. dev
+환경은 새 PILO 레포 기준으로 재검증되었으며, 현재 `terraform plan` 결과는
+`No changes`다.
 
 ## 2. 제안 폴더 구조
 
@@ -131,6 +133,7 @@ prod 확장 변수:
 - RDS와 Redis는 ECS service security group에서 오는 traffic만 허용
 - AI Worker inbound는 비워둔다
 - App/Realtime inbound는 ALB security group만 허용
+- Realtime Server는 앱 레벨 realtime channel이며 LiveKit 음성 서버가 아니다
 
 ### s3
 
@@ -200,6 +203,8 @@ Routing:
 - `/ws/*` -> Realtime Server target group
 - `/socket.io/*` -> Realtime Server target group
 - `/sync/*` -> Realtime Server target group
+
+Realtime routing은 MVP에서 lightweight notification/status delivery와 health check를 위한 경로다. LiveKit 음성 송수신은 별도 LiveKit Server/Egress 배포가 담당한다.
 
 ### ecs
 
@@ -303,7 +308,7 @@ dev 설정:
 
 - execution role: ECR pull, CloudWatch Logs write, secret read if needed
 - app task role: S3, SQS send, Secrets read, LiveKit/OpenAI secret read
-- realtime task role: 필요한 S3/Secrets read만 최소화
+- realtime task role: Redis pub/sub과 socket 인증에 필요한 Secrets read만 최소화
 - ai worker task role: SQS consume, S3 read/write, Secrets read
 - GitHub role: ECR push, ECS deploy, CloudFront invalidation, S3 sync, Terraform plan/apply에 필요한 권한
 
@@ -345,6 +350,14 @@ dev 설정:
 - realtime-server service
 - ai-worker service
 
+### Phase 5.5: LiveKit Voice Host
+
+- self-hosted LiveKit EC2
+- LiveKit security group
+- IAM instance profile
+- Elastic IP
+- LiveKit Server, Redis, Egress, Caddy Docker Compose host config
+
 ### Phase 6: Frontend Delivery
 
 - ACM
@@ -361,7 +374,8 @@ dev 설정:
 
 ## 5. 현재 저장소 기준 주의사항
 
-현재 저장소에는 실제 Next.js/NestJS/FastAPI 소스 디렉터리가 없다. 따라서 GitHub Actions workflow는 다음 경로를 가정하거나, 실제 소스 구조가 생긴 뒤 수정해야 한다.
+현재 저장소에는 실제 Next.js/NestJS/FastAPI scaffold가 있다. GitHub Actions와
+Dockerfile은 아래 경로를 기준으로 정렬되어 있다.
 
 제안 경로:
 
@@ -381,9 +395,23 @@ apps/realtime-server/Dockerfile
 apps/ai-worker/Dockerfile
 ```
 
-## 6. 다음 승인 전에는 하지 않을 작업
+`apps/realtime-server/`는 유지한다. 단, MVP 구현 범위는 앱 레벨 realtime notification/status delivery, reconnect 검증, health check로 제한한다. 자유형 캔버스 CRDT/동시 편집, 커서 공유, 하트비트, 채팅, MeetingRoom 관리는 MVP 제외 범위다.
 
-- `terraform apply`
-- AWS 리소스 생성
-- secret value 작성
-- 도메인 이름 확정
+## 6. 현재 검증 상태
+
+- Terraform CLI: `v1.15.7`
+- AWS provider: `hashicorp/aws v5.100.0`
+- Remote state bucket: `pilo-dev-683655334891-terraform-state`
+- Remote state key: `infra/dev/terraform.tfstate`
+- `terraform fmt -check -recursive`: 통과
+- `terraform validate`: 통과
+- `terraform plan -detailed-exitcode`: `No changes`
+- ECS services: `app-server`, `realtime-server`, `ai-worker` running
+- LiveKit host: EC2 `i-08e67f00d053bb4b9`, EIP `15.165.6.21`
+
+## 7. 앞으로 승인 전에는 하지 않을 작업
+
+- 새로운 `terraform apply`
+- AWS 리소스 생성, 변경, 삭제
+- secret value 작성 또는 변경
+- 비용 발생 리소스 중지 또는 삭제

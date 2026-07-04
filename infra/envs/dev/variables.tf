@@ -162,6 +162,24 @@ variable "redis_node_type" {
   default = "cache.t4g.micro"
 }
 
+variable "livekit_instance_type" {
+  description = "EC2 instance type for the self-hosted LiveKit MVP host."
+  type        = string
+  default     = "t3.small"
+}
+
+variable "livekit_root_volume_size" {
+  description = "Root EBS volume size in GiB for the self-hosted LiveKit MVP host."
+  type        = number
+  default     = 30
+}
+
+variable "livekit_allowed_cidr_blocks" {
+  description = "Public CIDR ranges allowed to reach LiveKit HTTP, HTTPS, TURN, and media ports."
+  type        = list(string)
+  default     = ["0.0.0.0/0"]
+}
+
 variable "github_owner" {
   description = "GitHub organization or user name for OIDC trust."
   type        = string

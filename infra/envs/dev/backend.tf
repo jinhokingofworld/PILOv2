@@ -1,6 +1,6 @@
 terraform {
   backend "s3" {
-    bucket       = "replace-me-dev-terraform-state"
+    bucket       = "pilo-dev-683655334891-terraform-state"
     key          = "infra/dev/terraform.tfstate"
     region       = "ap-northeast-2"
     encrypt      = true

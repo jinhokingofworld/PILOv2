@@ -1,0 +1,17 @@
+# Copy to egress.yaml on the LiveKit host and replace placeholder values.
+# Do not commit infra/livekit/egress.yaml because it contains API secrets.
+
+log_level: info
+api_key: pilo_dev_key
+api_secret: replace-me-with-a-strong-secret
+ws_url: ws://127.0.0.1:7880
+insecure: true
+
+redis:
+  address: 127.0.0.1:6379
+
+health_port: 7981
+
+s3:
+  region: ap-northeast-2
+  bucket: pilo-dev-683655334891-uploads

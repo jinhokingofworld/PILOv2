@@ -20,3 +20,9 @@ github_repo  = "PILO"
 app_server_desired_count      = 1
 realtime_server_desired_count = 1
 ai_worker_desired_count       = 1
+
+# Self-hosted LiveKit MVP host. Keep public CIDRs open for WebRTC unless a
+# stricter access policy is ready.
+livekit_instance_type        = "t3.small"
+livekit_root_volume_size     = 30
+livekit_allowed_cidr_blocks  = ["0.0.0.0/0"]

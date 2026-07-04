@@ -1,5 +1,5 @@
 locals {
-  app_server_secrets = [
+  app_server_ecs_secret_names = [
     "DATABASE_URL",
     "REDIS_URL",
     "JWT_SECRET",
@@ -13,13 +13,25 @@ locals {
     "OPENAI_API_KEY",
   ]
 
-  realtime_server_secrets = [
+  app_server_managed_secret_names = distinct(concat(local.app_server_ecs_secret_names, [
+    "GOOGLE_OAUTH_CLIENT_ID",
+    "GOOGLE_OAUTH_CLIENT_SECRET",
+    "GITHUB_LOGIN_CLIENT_ID",
+    "GITHUB_LOGIN_CLIENT_SECRET",
+    "GITHUB_USER_OAUTH_CLIENT_ID",
+    "GITHUB_USER_OAUTH_CLIENT_SECRET",
+    "GITHUB_TOKEN_ENCRYPTION_KEY",
+    "LIVEKIT_WS_URL",
+    "LIVEKIT_RECORDINGS_BUCKET",
+  ]))
+
+  realtime_server_ecs_secret_names = [
     "DATABASE_URL",
     "REDIS_URL",
     "JWT_SECRET",
   ]
 
-  ai_worker_secrets = [
+  ai_worker_ecs_secret_names = [
     "DATABASE_URL",
     "REDIS_URL",
     "OPENAI_API_KEY",
@@ -28,9 +40,9 @@ locals {
   ]
 
   all_secret_names = toset(concat(
-    [for name in local.app_server_secrets : "app-server/${name}"],
-    [for name in local.realtime_server_secrets : "realtime-server/${name}"],
-    [for name in local.ai_worker_secrets : "ai-worker/${name}"],
+    [for name in local.app_server_managed_secret_names : "app-server/${name}"],
+    [for name in local.realtime_server_ecs_secret_names : "realtime-server/${name}"],
+    [for name in local.ai_worker_ecs_secret_names : "ai-worker/${name}"],
   ))
 }
 

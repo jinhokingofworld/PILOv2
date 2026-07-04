@@ -2,10 +2,11 @@
 
 ## 1. 현재 단계
 
-현재 단계는 dev 인프라 생성과 Terraform remote state 전환을 마친 뒤,
-애플리케이션 배포 준비를 진행하는 단계다.
+현재 단계는 dev 인프라와 CI/CD bootstrap을 마치고, 기능 개발 PR을 받을 수
+있는지 최종 정리하는 단계다. 이 문서는 현재 레포와 실제 dev 환경에서 직접
+확인 가능한 상태를 기준으로 유지한다.
 
-완료된 작업:
+현재 레포에서 확인된 작업:
 
 - 현재 저장소 구조 확인
 - 기존 GitHub Actions workflow 확인
@@ -15,37 +16,49 @@
 - 배포 체크리스트 작성
 - `infra/` Terraform module 뼈대 생성
 - PILO 전용 GitHub Actions workflow 초안 생성
-- AWS CLI 설치 및 IAM 사용자 인증 확인
-- Terraform CLI 프로젝트 로컬 설치
-- `terraform init` 완료
-- `terraform validate` 완료
-- `terraform plan` 완료
-- `terraform apply` 완료
-- AWS dev 인프라 91개 리소스 생성 완료
-- Terraform remote state용 S3 bucket 생성 완료
-- Terraform lock용 DynamoDB table 생성 완료
-- `terraform init -migrate-state` 완료
-- S3 remote state 기준 `terraform plan` no changes 확인 완료
-- GitHub Actions repository variables 등록 완료
-- Secrets Manager DB/Redis/JWT/Session/Webhook secret value 입력 완료
-- 외부 연동 secret 입력용 PowerShell 스크립트 작성 완료
-- Secrets Manager 외부 연동 secret value 입력 완료
-- 기존 generic Docker workflow 정리 완료
-- `apps/` 애플리케이션 기본 구조 생성 완료
-- Next.js/NestJS/FastAPI 초기 배포 앱 작성 완료
-- Next.js/NestJS 로컬 빌드 검증 완료
-- npm production dependency audit 0 vulnerabilities 확인 완료
-- GitHub Actions 애플리케이션 배포 workflow 성공 확인 완료
-- ECR App/Realtime/AI Worker image push 완료
-- S3 frontend static asset upload 완료
-- ECS service desired count 증설 완료
-- ECS task running 상태 확인 완료
-- ALB target group health check 통과 확인 완료
-- Realtime external health endpoint 배포 확인 완료
+- `Project_Planning_Document.md` 기준 MVP 범위 확정
+- `realtime-server`를 MVP 인프라 서비스로 유지하기로 결정
+- LiveKit self-hosting, audio-only Egress, S3 녹음 저장 방향 확정
+- EC2 + Docker Compose 기반 LiveKit host config 템플릿 추가
+- Terraform LiveKit EC2, security group, IAM instance profile, EIP 리소스 추가
+- LiveKit EC2 apply 완료
+- `livekit.dev.pilo.my`, `turn.dev.pilo.my` DNS A record 연결
+- LiveKit Server, Redis, Egress, Caddy Docker Compose 배포
+- 외부 연동 secret 입력용 PowerShell 스크립트 작성
+- Secrets Manager `pilo-dev/*` secret value 입력
+- `apps/frontend`, `apps/app-server`, `apps/realtime-server`, `apps/ai-worker` scaffold 작성
+- 각 서비스 CI script와 Dockerfile 경로 정렬
+- GitHub Actions repository variables 등록
+- GitHub Actions workflow 활성화
+- `main` branch protection 설정
+- CodeRabbit repo config 제거
+
+검증된 외부 상태:
+
+- AWS account `683655334891`, region `ap-northeast-2`
+- Terraform CLI 설치 및 dev remote backend 연결
+- `terraform fmt -check -recursive`, `terraform validate`, `terraform plan`
+  통과
+- Terraform plan 결과: `No changes`
+- ECS `app-server`, `realtime-server`, `ai-worker` desired/running `1/1`
+- App Server, Realtime Server ALB target health `healthy`
+- Frontend CloudFront endpoint `200 OK`
+- LiveKit HTTPS endpoint `https://livekit.dev.pilo.my` `200 OK`
+- LiveKit DNS:
+  - `livekit.dev.pilo.my -> 15.165.6.21`
+  - `turn.dev.pilo.my -> 15.165.6.21`
+- Secrets Manager `pilo-dev/*` secret들이 `AWSCURRENT` version 보유
+- Supabase `PILO-Project` shared DB migration 001~004 적용
 
 아직 하지 않은 작업:
 
-- 실제 애플리케이션 기능 구현 및 DB migration 설계
+- 첫 기능 PR에서 GitHub Actions required checks 실제 통과 확인
+- GitHub App/OAuth, Kanban, PR 리뷰, 회의, 캔버스, 캘린더 기능 구현
+- 도메인별 RLS policy가 필요한 시점에 새 DB migration 추가
+- 실제 애플리케이션 기능 구현
+- App Server의 LiveKit room/token/Egress start-stop API 구현
+- AI Worker의 PR analysis와 meeting STT/report job 구현
+- 필요 시 frontend/API 커스텀 dev 도메인 연결
 
 ## 2. 사전 준비
 
@@ -53,8 +66,10 @@
 
 - AWS account id 확인
 - region은 `ap-northeast-2` 사용
-- Terraform state 저장용 S3 bucket 전략 결정
-- Terraform lock용 DynamoDB table 사용 여부 결정
+- Terraform state 저장용 S3 bucket은 기존 `pilo-dev-683655334891-terraform-state`를 사용
+- Terraform state key는 기존 `infra/dev/terraform.tfstate`를 사용
+- Terraform lock은 기존 state bucket의 S3 lockfile 방식을 사용한다
+- remote backend bucket/state object는 기존 PILO dev 리소스를 사용한다
 
 ### 도메인 준비
 
@@ -65,9 +80,18 @@
 
 ### GitHub 준비
 
-- GitHub repository owner/name 확인
-- GitHub Actions OIDC 사용 승인
-- 기존 `.github/workflows/docker-image.yml`, `.github/workflows/docker-publish.yml` 교체 여부 결정
+- GitHub repository owner/name은 `Developer-EJ/PILO`로 확인됨
+- GitHub Actions OIDC 사용
+- 배포 workflow:
+  - `.github/workflows/deploy-frontend.yml`
+  - `.github/workflows/deploy-app-server.yml`
+  - `.github/workflows/deploy-realtime-server.yml`
+  - `.github/workflows/deploy-ai-worker.yml`
+- PR 검증 workflow:
+  - `.github/workflows/app-ci.yml`
+  - `.github/workflows/docker-ci.yml`
+  - `.github/workflows/security-ci.yml`
+  - `.github/workflows/terraform-validate.yml`
 
 ### 애플리케이션 소스 구조 결정
 
@@ -80,11 +104,25 @@ apps/realtime-server/
 apps/ai-worker/
 ```
 
-각 서비스별 Dockerfile 경로를 확정해야 한다.
+`apps/realtime-server/`는 유지한다. 단, MVP 역할은 앱 레벨 realtime notification/status delivery와 health check로 제한하고, LiveKit 음성 회의나 자유형 캔버스 동시 편집을 담당하지 않는다.
+
+각 서비스별 Dockerfile 경로는 현재 workflow와 정렬되어 있다.
+
+### LiveKit host 준비
+
+MVP LiveKit은 EC2 한 대에서 Docker Compose로 LiveKit Server, LiveKit Redis,
+LiveKit Egress, Caddy를 함께 실행하는 방향으로 둔다. 설정 템플릿은
+`infra/livekit/`에 있으며 실제 secret이 들어가는 `.env`, `livekit.yaml`,
+`egress.yaml`, `Caddyfile`은 commit하지 않는다.
+
+현재 dev 환경에서는 Terraform으로 LiveKit EC2, security group, IAM instance
+profile, EIP를 생성했고, DNS record는 `livekit.dev.pilo.my`와
+`turn.dev.pilo.my`가 EC2 EIP를 가리킨다. 실제 secret이 들어가는 host-only
+파일은 git에 commit하지 않는다.
 
 ## 3. Terraform 작성 후 검증 순서
 
-사용자 승인 후 실제 Terraform 파일을 만든 뒤 다음 순서로 검증한다.
+Terraform 파일과 backend 값을 새 PILO 레포 기준으로 정리한 뒤 다음 순서로 검증한다.
 
 1. Terraform formatting
 
@@ -173,7 +211,11 @@ terraform apply
 
 - OpenAI API secret 조회 가능 여부 확인
 - GitHub webhook 수신 가능 여부 확인
-- LiveKit token 발급 가능 여부 확인
+- LiveKit Server 접속 가능 여부 확인
+- LiveKit room token 발급 가능 여부 확인
+- LiveKit Egress가 같은 Redis와 LiveKit Server에 연결되는지 확인
+- audio-only Egress 녹음 파일이 S3에 저장되는지 확인
+- 저장된 오디오 파일로 AI Worker STT job 생성이 가능한지 확인
 
 ## 6. GitHub Actions 검증
 

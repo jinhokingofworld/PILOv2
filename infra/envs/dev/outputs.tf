@@ -54,6 +54,22 @@ output "github_actions_role_arn" {
   value = module.iam.github_actions_role_arn
 }
 
+output "livekit_instance_id" {
+  value = module.livekit_host.instance_id
+}
+
+output "livekit_public_ip" {
+  value = module.livekit_host.public_ip
+}
+
+output "livekit_public_dns" {
+  value = module.livekit_host.public_dns
+}
+
+output "livekit_security_group_id" {
+  value = module.livekit_host.security_group_id
+}
+
 output "terraform_state_bucket_name" {
   value = module.terraform_state.state_bucket_name
 }

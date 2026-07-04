@@ -9,11 +9,13 @@ dist/
 .next/
 out/
 coverage/
+*.tsbuildinfo
 __pycache__/
 .pytest_cache/
 .ruff_cache/
 .venv/
 venv/
+.docker-tmp/
 
 # Terraform
 .tools/
@@ -28,6 +30,12 @@ override.tf
 override.tf.json
 *_override.tf
 *_override.tf.json
+
+# LiveKit host local config with secrets
+infra/livekit/.env
+infra/livekit/livekit.yaml
+infra/livekit/egress.yaml
+infra/livekit/Caddyfile
 
 # OS / editor
 .DS_Store

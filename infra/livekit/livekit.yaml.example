@@ -1,0 +1,22 @@
+# Copy to livekit.yaml on the LiveKit host and replace placeholder values.
+# Do not commit infra/livekit/livekit.yaml because it contains API secrets.
+
+port: 7880
+log_level: info
+
+rtc:
+  tcp_port: 7881
+  port_range_start: 50000
+  port_range_end: 60000
+  use_external_ip: true
+
+redis:
+  address: 127.0.0.1:6379
+
+keys:
+  pilo_dev_key: replace-me-with-a-strong-secret
+
+turn:
+  enabled: true
+  domain: turn.dev.pilo.my
+  udp_port: 3478

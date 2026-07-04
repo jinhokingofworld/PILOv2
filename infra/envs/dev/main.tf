@@ -50,6 +50,19 @@ module "s3" {
   name_prefix = local.name_prefix
 }
 
+module "livekit_host" {
+  source = "../../modules/livekit-host"
+
+  name_prefix           = local.name_prefix
+  vpc_id                = module.network.vpc_id
+  subnet_id             = module.network.public_subnet_ids[0]
+  recordings_bucket_arn = module.s3.uploads_bucket_arn
+  livekit_secret_arns   = values(module.secrets.livekit_host_secret_arns)
+  instance_type         = var.livekit_instance_type
+  root_volume_size      = var.livekit_root_volume_size
+  allowed_cidr_blocks   = var.livekit_allowed_cidr_blocks
+}
+
 module "route53_acm" {
   source = "../../modules/route53-acm"
 

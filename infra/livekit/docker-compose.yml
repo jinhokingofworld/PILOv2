@@ -1,0 +1,52 @@
+services:
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "/usr/local/etc/redis/redis.conf"]
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - ./redis.conf:/usr/local/etc/redis/redis.conf:ro
+      - redis_data:/data
+
+  livekit:
+    image: livekit/livekit-server:latest
+    command: ["--config", "/etc/livekit/livekit.yaml"]
+    depends_on:
+      - redis
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - ./livekit.yaml:/etc/livekit/livekit.yaml:ro
+
+  egress:
+    image: livekit/egress:latest
+    cap_add:
+      - SYS_ADMIN
+    depends_on:
+      - redis
+      - livekit
+    environment:
+      EGRESS_CONFIG_FILE: /etc/livekit/egress.yaml
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - ./egress.yaml:/etc/livekit/egress.yaml:ro
+
+  caddy:
+    image: caddy:2-alpine
+    depends_on:
+      - livekit
+    environment:
+      ACME_EMAIL: ${ACME_EMAIL:-admin@example.com}
+      LIVEKIT_DOMAIN: ${LIVEKIT_DOMAIN:-livekit.dev.pilo.my}
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  redis_data:
+  caddy_data:
+  caddy_config:
