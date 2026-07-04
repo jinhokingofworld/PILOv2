@@ -188,7 +188,8 @@ module "ecs" {
         SQS_AI_JOBS_QUEUE_URL         = module.sqs.ai_jobs_queue_url
         SQS_GITHUB_WEBHOOKS_QUEUE_URL = module.sqs.github_webhooks_queue_url
         FRONTEND_URL                  = local.frontend_domain == "" ? "" : "https://${local.frontend_domain}"
-        API_BASE_URL                  = local.api_domain == "" ? module.alb.alb_dns_name : "https://${local.api_domain}"
+        API_PUBLIC_ORIGIN             = local.api_domain == "" ? "http://${module.alb.alb_dns_name}" : "https://${local.api_domain}"
+        API_BASE_PATH                 = "/api/v1"
       }
       secrets = module.secrets.app_server_ecs_secrets
     }

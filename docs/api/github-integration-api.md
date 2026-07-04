@@ -4,6 +4,21 @@ External callback and webhook URLs MUST include the `/api/v1` base path. For exa
 `/api/v1/github/oauth/callback`, `/api/v1/github/installations/callback`, and
 `/api/v1/github/webhooks`.
 
+The endpoint table below follows the common API documentation rule and omits the
+`/api/v1` base path. External provider settings such as GitHub OAuth callback
+URLs and webhook URLs must use the full public path including `/api/v1`.
+
+## 외부 Provider 설정 URL
+
+GitHub OAuth App, GitHub App, webhook 설정 화면에는 아래처럼 public origin과
+`/api/v1` base path를 모두 포함한 URL을 등록한다.
+
+```text
+GitHub OAuth callback URL: {API_PUBLIC_ORIGIN}/api/v1/github/oauth/callback
+GitHub App callback URL:   {API_PUBLIC_ORIGIN}/api/v1/github/installations/callback
+GitHub webhook URL:        {API_PUBLIC_ORIGIN}/api/v1/github/webhooks
+```
+
 ## 범위
 
 GitHub Integration API는 Workspace 단위 GitHub 연결과 원본 데이터 조회를

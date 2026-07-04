@@ -198,7 +198,7 @@ GitHub 연동 모듈은 Workspace에 GitHub App installation을 연결하고, Gi
 
 기능:
 
-- 서버는 `/github/webhooks`로 GitHub webhook을 수신한다.
+- 서버는 `/api/v1/github/webhooks`로 GitHub webhook을 수신한다.
 - `X-Hub-Signature-256` HMAC-SHA256 검증을 통과한 요청만 처리한다.
 - 중복 delivery id는 별도 webhook delivery 저장 테이블을 기준으로 멱등 처리한다.
 - 즉시 처리하기 어려운 이벤트는 sync run 또는 background job으로 넘길 수 있다.
