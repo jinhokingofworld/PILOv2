@@ -49,6 +49,7 @@ jobs:
         working-directory: ${{ env.APP_PATH }}
         env:
           NEXT_PUBLIC_PILO_APP_SERVER_URL: ${{ vars.NEXT_PUBLIC_PILO_APP_SERVER_URL }}
+          NEXT_PUBLIC_TLDRAW_LICENSE_KEY: ${{ vars.NEXT_PUBLIC_TLDRAW_LICENSE_KEY }}
         run: npm run build
 
       - name: Upload to S3
