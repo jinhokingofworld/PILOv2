@@ -18,7 +18,7 @@ resource "aws_lb_target_group" "app" {
   vpc_id      = var.vpc_id
 
   health_check {
-    path                = "/api/health"
+    path                = "/api/v1/health"
     matcher             = "200-399"
     interval            = 30
     timeout             = 5
@@ -71,7 +71,7 @@ resource "aws_lb_listener_rule" "http_app" {
 
   condition {
     path_pattern {
-      values = ["/api/*"]
+      values = ["/api/v1", "/api/v1/*"]
     }
   }
 }
@@ -87,7 +87,7 @@ resource "aws_lb_listener_rule" "http_realtime" {
 
   condition {
     path_pattern {
-      values = ["/ws/*", "/socket.io/*", "/sync/*"]
+      values = ["/ws", "/ws/*", "/socket.io/*", "/sync/*"]
     }
   }
 }
@@ -125,7 +125,7 @@ resource "aws_lb_listener_rule" "https_app" {
 
   condition {
     path_pattern {
-      values = ["/api/*"]
+      values = ["/api/v1", "/api/v1/*"]
     }
   }
 }
@@ -143,7 +143,7 @@ resource "aws_lb_listener_rule" "https_realtime" {
 
   condition {
     path_pattern {
-      values = ["/ws/*", "/socket.io/*", "/sync/*"]
+      values = ["/ws", "/ws/*", "/socket.io/*", "/sync/*"]
     }
   }
 }

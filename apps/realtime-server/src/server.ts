@@ -29,6 +29,7 @@ server.on("upgrade", (request, socket, head) => {
   const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
   const acceptsRealtimePath =
     url.pathname === "/ws" ||
+    url.pathname.startsWith("/ws/") ||
     url.pathname.startsWith("/socket.io/") ||
     url.pathname.startsWith("/sync/");
 

@@ -12,7 +12,7 @@ async function bootstrap() {
     }
   );
 
-  app.setGlobalPrefix("api");
+  app.setGlobalPrefix("api/v1");
   app.enableCors({
     origin: process.env.CORS_ORIGIN ?? "*",
     credentials: false

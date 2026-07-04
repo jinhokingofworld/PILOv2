@@ -61,7 +61,7 @@ PILO 개발환경 인프라는 비용을 최소화하면서도 실제 MVP 구조
   - LiveKit room token 발급과 audio-only Egress 시작/종료
   - AI job 생성
 - inbound:
-  - ALB에서 오는 `/api/*` traffic만 허용
+  - ALB에서 오는 `/api/v1`, `/api/v1/*` traffic만 허용
 - outbound:
   - RDS, Redis, S3, SQS, Secrets Manager, GitHub, LiveKit Server 접근
 
@@ -82,7 +82,7 @@ PILO 개발환경 인프라는 비용을 최소화하면서도 실제 MVP 구조
   - MeetingRoom 관리
   - GitHub, PR 리뷰, 회의, 일정 데이터의 source of truth
 - inbound:
-  - ALB에서 오는 `/ws/*`, `/socket.io/*`, `/sync/*` traffic만 허용
+  - ALB에서 오는 `/ws`, `/ws/*`, `/socket.io/*`, `/sync/*` traffic만 허용
 - outbound:
   - Redis, RDS, S3 접근
 
@@ -250,8 +250,8 @@ Outbound:
 
 ```text
 dev.pilo.example.com/*          -> frontend CloudFront/S3
-api.dev.pilo.example.com/api/*  -> ALB -> App Server
-api.dev.pilo.example.com/ws/*   -> ALB -> Realtime Server
+api.dev.pilo.example.com/api/v1/* -> ALB -> App Server
+api.dev.pilo.example.com/ws/*     -> ALB -> Realtime Server
 api.dev.pilo.example.com/sync/* -> ALB -> Realtime Server
 ```
 
@@ -259,8 +259,8 @@ api.dev.pilo.example.com/sync/* -> ALB -> Realtime Server
 
 ```text
 dev.pilo.example.com            -> CloudFront
-dev.pilo.example.com/api/*      -> ALB -> App Server
-dev.pilo.example.com/ws/*       -> ALB -> Realtime Server
+dev.pilo.example.com/api/v1/* -> ALB -> App Server
+dev.pilo.example.com/ws/*     -> ALB -> Realtime Server
 ```
 
 첫 구현에서는 CloudFront frontend와 ALB backend를 분리한 `dev`/`api.dev` 도메인 구조가 더 이해하기 쉽다. CloudFront가 ALB origin까지 함께 들고 가는 구조는 이후 필요할 때 확장한다.
