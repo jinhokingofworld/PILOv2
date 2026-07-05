@@ -8,6 +8,7 @@ async function bootstrap() {
     AppModule,
     new FastifyAdapter(),
     {
+      rawBody: true,
       logger: ["error", "warn", "log"]
     }
   );

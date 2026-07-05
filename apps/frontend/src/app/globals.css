@@ -153,3 +153,45 @@ body {
     @apply font-sans;
   }
 }
+
+.login-backdrop-preview {
+  filter: blur(6px);
+  opacity: 0.74;
+  transform: scale(1.035);
+  transform-origin: center;
+  transition:
+    filter 1100ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 1100ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 1100ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.login-backdrop-preview[data-focused="true"] {
+  filter: blur(0);
+  opacity: 1;
+  transform: scale(1);
+}
+
+.login-floating-shape {
+  animation: login-float var(--login-float-duration, 8s) ease-in-out infinite;
+  transform: translate3d(0, 0, 0) rotate(var(--login-shape-rotate, 0deg));
+}
+
+@keyframes login-float {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) rotate(var(--login-shape-rotate, 0deg));
+  }
+
+  50% {
+    transform: translate3d(
+        var(--login-float-x, 12px),
+        var(--login-float-y, -12px),
+        0
+      )
+      rotate(
+        calc(
+          var(--login-shape-rotate, 0deg) + var(--login-shape-drift, 2deg)
+        )
+      );
+  }
+}

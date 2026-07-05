@@ -101,6 +101,10 @@ function getDefaultInsertUrl(tool: PiloInsertableTool) {
     : "https://www.youtube.com/watch?v=dQw4w9WgXcQ";
 }
 
+function getCanvasWorkspaceId() {
+  return process.env.NEXT_PUBLIC_PILO_WORKSPACE_ID ?? PILO_LOCAL_WORKSPACE_ID;
+}
+
 export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
   const imageFileInputRef = useRef<HTMLInputElement | null>(null);
   const videoFileInputRef = useRef<HTMLInputElement | null>(null);
@@ -121,7 +125,12 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
   const [openPopover, setOpenPopover] = useState<
     "memo" | "draw" | "draw-color" | "line" | "shape" | "insert" | null
   >(null);
-  const workspaceId = PILO_LOCAL_WORKSPACE_ID;
+  const canvasClientMode = resolveCanvasClientMode();
+  const canvasClient = useMemo(
+    () => createCanvasClient({ mode: canvasClientMode }),
+    [canvasClientMode],
+  );
+  const workspaceId = getCanvasWorkspaceId();
   const fallbackBoard = useMemo(
     () => createMockCanvasBoardDetail(workspaceId) as CanvasBoardDetail,
     [workspaceId],
@@ -133,18 +142,32 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
 
   useEffect(() => {
     let cancelled = false;
-    const canvasClient = createCanvasClient({ mode: "mock" });
 
     async function loadCanvasBoard() {
       setBoardState({
         board: null,
-        source: "mock",
+        source: canvasClientMode,
         status: "loading",
       });
 
       try {
         const boards = await canvasClient.listBoards(workspaceId);
-        const targetBoardId = boardId ?? boards[0]?.id ?? fallbackBoard.id;
+        let targetBoardId = boardId ?? boards[0]?.id;
+
+        if (!targetBoardId) {
+          const createdBoard = await canvasClient.createBoard(workspaceId, {
+            title: "PILO Canvas",
+          });
+
+          targetBoardId =
+            typeof createdBoard === "object" &&
+            createdBoard !== null &&
+            "id" in createdBoard &&
+            typeof createdBoard.id === "string"
+              ? createdBoard.id
+              : fallbackBoard.id;
+        }
+
         const detail = (await canvasClient.getBoardDetail(targetBoardId, {
           workspaceId,
         })) as CanvasBoardDetail;
@@ -153,7 +176,7 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
 
         setBoardState({
           board: detail,
-          source: resolveCanvasClientMode("mock"),
+          source: canvasClientMode,
           status: "ready",
         });
       } catch (error) {
@@ -161,7 +184,7 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
 
         setBoardState({
           board: fallbackBoard,
-          source: "mock",
+          source: canvasClientMode,
           status: "fallback",
         });
       }
@@ -172,7 +195,7 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
     return () => {
       cancelled = true;
     };
-  }, [boardId, fallbackBoard, workspaceId]);
+  }, [boardId, canvasClient, canvasClientMode, fallbackBoard, workspaceId]);
 
   const closePopover = useCallback(() => {
     setOpenPopover(null);
@@ -599,7 +622,12 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
           </section>
         </nav>
 
-        <PiloCanvasRuntime board={board} onReady={setCanvasActions} />
+        <PiloCanvasRuntime
+          board={board}
+          canvasClient={boardState.source === "api" ? canvasClient : null}
+          onReady={setCanvasActions}
+          storageMode={boardState.source === "api" ? "api" : "local"}
+        />
       </div>
     </section>
   );

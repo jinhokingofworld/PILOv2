@@ -29,9 +29,12 @@ type CanvasClientOptions = {
   mode?: string;
   baseUrl?: string;
   fetcher?: typeof fetch;
+  authToken?: string | null;
 };
 
-const DEFAULT_CANVAS_MODE = "mock";
+const API_BASE_PATH = "/api/v1";
+const DEFAULT_APP_SERVER_ORIGIN = "http://localhost:4000";
+const DEFAULT_CANVAS_MODE = "api";
 const defaultCanvasBoardId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1";
 const mockBoardListStorageScope = "mock-board-list";
 
@@ -40,7 +43,23 @@ function defaultCanvasMode() {
 }
 
 function defaultCanvasApiBaseUrl() {
-  return process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
+  return (
+    process.env.NEXT_PUBLIC_PILO_APP_SERVER_URL ??
+    process.env.NEXT_PUBLIC_API_BASE_URL ??
+    DEFAULT_APP_SERVER_ORIGIN
+  );
+}
+
+function defaultCanvasAuthToken() {
+  if (typeof window === "undefined") {
+    return process.env.NEXT_PUBLIC_PILO_ACCESS_TOKEN ?? null;
+  }
+
+  return (
+    window.localStorage.getItem("pilo:access-token") ??
+    process.env.NEXT_PUBLIC_PILO_ACCESS_TOKEN ??
+    null
+  );
 }
 
 export function resolveCanvasClientMode(
@@ -72,10 +91,12 @@ export function buildCanvasApiUrl(
   baseUrl = defaultCanvasApiBaseUrl(),
 ) {
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  const normalizedBaseUrl = baseUrl.replace(/\/+$/, "");
+  const apiBaseUrl = normalizedBaseUrl.endsWith(API_BASE_PATH)
+    ? normalizedBaseUrl
+    : `${normalizedBaseUrl}${API_BASE_PATH}`;
 
-  return baseUrl
-    ? `${baseUrl.replace(/\/$/, "")}${normalizedPath}`
-    : normalizedPath;
+  return `${apiBaseUrl}${normalizedPath}`;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -88,7 +109,7 @@ async function readCanvasJson(response: Response, path: string) {
   }
 
   try {
-    return (await response.json()) as unknown;
+    return unwrapCanvasApiData((await response.json()) as unknown);
   } catch (error) {
     throw new CanvasApiError("Canvas API returned invalid JSON", {
       status: response.status,
@@ -101,21 +122,26 @@ async function requestCanvasJson(
   path: string,
   init: RequestInit | undefined,
   {
+    authToken,
     baseUrl,
     fetcher,
   }: {
+    authToken: string | null;
     baseUrl: string;
     fetcher: typeof fetch;
   },
 ) {
+  const headers = {
+    Accept: "application/json",
+    ...(init?.body ? { "Content-Type": "application/json" } : {}),
+    ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+    ...(init?.headers ?? {}),
+  };
+
   const response = await fetcher(buildCanvasApiUrl(path, baseUrl), {
-    credentials: "include",
-    headers: {
-      Accept: "application/json",
-      ...(init?.body ? { "Content-Type": "application/json" } : {}),
-      ...(init?.headers ?? {}),
-    },
     ...init,
+    credentials: "same-origin",
+    headers,
   });
 
   if (!response.ok) {
@@ -141,6 +167,24 @@ function defaultCanvasViewSetting(): CanvasViewSetting {
     viewportX: 0,
     viewportY: 0,
   };
+}
+
+export function unwrapCanvasApiData(value: unknown) {
+  if (isRecord(value) && value.success === true && "data" in value) {
+    return value.data;
+  }
+
+  return value;
+}
+
+function normalizeCanvasShapes(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.map((shape) =>
+    isRecord(shape) && isRecord(shape.rawShape) ? shape.rawShape : shape,
+  );
 }
 
 export function createMockCanvasBoardDetail(
@@ -256,7 +300,7 @@ export function normalizeCanvasBoardDetail(
       typeof rawBoard.updatedAt === "string"
         ? rawBoard.updatedAt
         : fallback.updatedAt,
-    shapes: Array.isArray(rawBoard.shapes) ? rawBoard.shapes : fallback.shapes,
+    shapes: normalizeCanvasShapes(rawBoard.shapes),
     viewSetting: isRecord(rawViewSetting)
       ? {
           zoom:
@@ -278,10 +322,11 @@ export function normalizeCanvasBoardDetail(
 }
 
 export function createCanvasApiClient({
+  authToken = defaultCanvasAuthToken(),
   baseUrl = defaultCanvasApiBaseUrl(),
   fetcher = fetch,
 }: CanvasClientOptions = {}) {
-  const requestOptions = { baseUrl, fetcher };
+  const requestOptions = { authToken, baseUrl, fetcher };
 
   return {
     async listBoards(workspaceId: string) {

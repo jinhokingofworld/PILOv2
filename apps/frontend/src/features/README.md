@@ -7,6 +7,7 @@ types는 가능한 한 이 디렉터리의 도메인 폴더에 둔다.
 
 | Feature | Owner | API Contract |
 | --- | --- | --- |
+| `auth` | 동현 | `docs/api/auth-api.md` |
 | `github-integration` | 주형 | `docs/api/github-integration-api.md` |
 | `pr-review` | 은재 | `docs/api/pr-review-api.md` |
 | `board` | 주형 | `docs/api/board-api.md` |

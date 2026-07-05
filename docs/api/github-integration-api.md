@@ -44,6 +44,11 @@ PR 리뷰 세션, 파일별 리뷰 판단, Kanban board cache hydrate, GitHub is
 
 GitHub token은 복호화된 상태로 응답하거나 로그에 남기지 않는다.
 
+1인 MVP에서는 `auth-api.md`의 GitHub 로그인 callback도
+`users.github_access_token_encrypted`, `github_token_scope`,
+`github_connected_at`, `github_revoked_at`을 갱신할 수 있다. 따라서 GitHub로
+로그인한 사용자는 `/me/github`에서 연결 완료 상태로 보일 수 있다.
+
 GitHub App installation 연결을 시작하려면 현재 사용자의 GitHub OAuth 연결이
 선행되어야 한다. Installation callback 처리 시 서버는 저장된 사용자 OAuth
 token으로 GitHub의 user installations 목록을 조회해 callback의
@@ -57,6 +62,7 @@ token으로 GitHub의 user installations 목록을 조회해 callback의
 - PR 변경 파일과 patch text는 요청 시 GitHub에서 조회한다.
 - PR Review는 세션 생성 시 `review_files`에 파일 metadata를 저장할 수 있다. Diff 응답과 큰 diff 판단 기준은 PR Review API 문서를 따른다.
 - `github_sync_target` 값은 `repositories`, `issues`, `pull_requests`, `project_v2`, `project_v2_fields`, `project_v2_items`, `full`이다.
+- GitHub webhook receiver는 delivery 수신과 검증 결과를 `github_webhook_deliveries`에 기록한다. 실제 GitHub source table 동기화는 sync run 또는 별도 background worker가 담당한다.
 
 ## API 목록
 
@@ -102,6 +108,44 @@ token으로 GitHub의 user installations 목록을 조회해 callback의
 
 `repositoryId`, `projectV2Id`는 target에 따라 선택값이다. 서버는
 `github_sync_runs`에 status와 count를 기록한다.
+
+### GitHub webhook receiver
+
+GitHub App webhook 설정 URL은 `{API_PUBLIC_ORIGIN}/api/v1/github/webhooks`이다.
+
+요청은 GitHub가 보내는 raw body 기준으로 `X-Hub-Signature-256` HMAC-SHA256 signature를 검증한다. signature 검증에는 `GITHUB_WEBHOOK_SECRET`을 사용하며, webhook secret이나 provider 원문 오류는 응답 또는 로그에 노출하지 않는다.
+
+필수 header:
+
+| Header | 설명 |
+| --- | --- |
+| `X-GitHub-Delivery` | GitHub delivery id. `github_webhook_deliveries.delivery_id`에 저장하며 중복 판단 기준으로 사용한다. |
+| `X-GitHub-Event` | GitHub event name. `github_webhook_deliveries.event_name`에 저장한다. |
+| `X-Hub-Signature-256` | `sha256=` prefix를 포함한 GitHub webhook signature. |
+
+처리 규칙:
+
+- signature가 유효하지 않으면 delivery를 `failed`로 기록하고 `400 BAD_REQUEST`를 반환한다.
+- 이미 같은 `delivery_id` row가 있으면 신규 insert나 overwrite 없이 기존 row를 반환한다.
+- 지원하는 event는 `received`로 기록한다. `received`는 delivery가 검증되어 수신됐다는 의미이며, source table 동기화 완료를 의미하지 않는다.
+- 지원하지 않는 event는 오류 없이 `ignored`로 기록한다.
+- 현재 receiver는 sync run이나 background job을 직접 시작하지 않는다. webhook 기반 자동 동기화가 필요하면 별도 worker/queue 계약을 추가로 정의한다.
+
+응답 예시:
+
+```json
+{
+  "success": true,
+  "data": {
+    "deliveryId": "b32d8c10-5975-11ef-8e7e-000000000000",
+    "eventName": "ping",
+    "status": "received",
+    "receivedAt": "2026-07-05T09:00:00.000Z",
+    "processedAt": null,
+    "message": "GitHub webhook received"
+  }
+}
+```
 
 ### PR 변경 파일 응답
 

@@ -1,0 +1,130 @@
+name: Close Issues on Dev Merge
+
+on:
+  pull_request_target:
+    types: [closed]
+    branches: [dev]
+  workflow_dispatch:
+    inputs:
+      pull_request:
+        description: Pull request number to process
+        required: true
+        type: number
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+jobs:
+  close-issues:
+    name: close issues
+    runs-on: ubuntu-latest
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.pull_request.merged == true
+    steps:
+      - name: Close issues linked from dev PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const closingKeyword =
+              /\b(close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved)\s*:?\s+((?:[\w.-]+\/[\w.-]+)?#\d+)/gi;
+
+            const prNumber =
+              context.eventName === "workflow_dispatch"
+                ? Number(core.getInput("pull_request", { required: true }))
+                : context.payload.pull_request.number;
+
+            const { data: pr } = await github.rest.pulls.get({
+              owner,
+              repo,
+              pull_number: prNumber,
+            });
+
+            if (!pr.merged) {
+              core.info(`PR #${prNumber} is not merged. Nothing to close.`);
+              return;
+            }
+
+            if (pr.base.ref !== "dev") {
+              core.info(`PR #${prNumber} targets ${pr.base.ref}, not dev. Nothing to close.`);
+              return;
+            }
+
+            const commits = await github.paginate(github.rest.pulls.listCommits, {
+              owner,
+              repo,
+              pull_number: prNumber,
+              per_page: 100,
+            });
+
+            const searchableText = [
+              pr.title ?? "",
+              pr.body ?? "",
+              ...commits.map((commit) => commit.commit.message ?? ""),
+            ].join("\n");
+
+            const issueNumbers = new Set();
+            for (const match of searchableText.matchAll(closingKeyword)) {
+              const reference = match[2];
+              const referenceMatch = reference.match(/^(?:(?<owner>[\w.-]+)\/(?<repo>[\w.-]+))?#(?<number>\d+)$/);
+              if (!referenceMatch?.groups) {
+                continue;
+              }
+
+              const referencedOwner = referenceMatch.groups.owner;
+              const referencedRepo = referenceMatch.groups.repo;
+              if (
+                referencedOwner &&
+                referencedRepo &&
+                (referencedOwner.toLowerCase() !== owner.toLowerCase() ||
+                  referencedRepo.toLowerCase() !== repo.toLowerCase())
+              ) {
+                core.info(`Skipping cross-repository issue reference ${reference}.`);
+                continue;
+              }
+
+              issueNumbers.add(Number(referenceMatch.groups.number));
+            }
+
+            if (issueNumbers.size === 0) {
+              core.info(`No closing issue keywords found in PR #${prNumber}.`);
+              return;
+            }
+
+            for (const issue_number of issueNumbers) {
+              const { data: issue } = await github.rest.issues.get({
+                owner,
+                repo,
+                issue_number,
+              });
+
+              if (issue.pull_request) {
+                core.info(`#${issue_number} is a pull request. Skipping.`);
+                continue;
+              }
+
+              if (issue.state === "closed") {
+                core.info(`Issue #${issue_number} is already closed.`);
+                continue;
+              }
+
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number,
+                body: `PR #${prNumber} was merged into dev, so this issue is being closed.`,
+              });
+
+              await github.rest.issues.update({
+                owner,
+                repo,
+                issue_number,
+                state: "closed",
+                state_reason: "completed",
+              });
+
+              core.info(`Closed issue #${issue_number}.`);
+            }

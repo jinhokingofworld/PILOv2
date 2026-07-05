@@ -20,6 +20,10 @@ const typesIndex = await readFile(
   new URL("../../src/modules/github-integration/types/index.ts", import.meta.url),
   "utf8"
 );
+const dtoIndex = await readFile(
+  new URL("../../src/modules/github-integration/dto/index.ts", import.meta.url),
+  "utf8"
+);
 
 const githubIntegrationDirectory = new URL(
   "../../src/modules/github-integration/",
@@ -47,6 +51,22 @@ assert.match(controllerFile, /@Delete\("me\/github"\)/);
 assert.match(controllerFile, /@Post\("workspaces\/:workspaceId\/github\/installations\/start"\)/);
 assert.match(controllerFile, /@Get\("github\/installations\/callback"\)/);
 assert.match(controllerFile, /@Get\("workspaces\/:workspaceId\/github\/installations"\)/);
+assert.match(controllerFile, /@Get\("workspaces\/:workspaceId\/github\/repositories"\)/);
+assert.match(controllerFile, /@Get\("workspaces\/:workspaceId\/github\/repositories\/:repositoryId"\)/);
+assert.match(controllerFile, /@Get\("workspaces\/:workspaceId\/github\/projects-v2"\)/);
+assert.match(controllerFile, /@Get\("workspaces\/:workspaceId\/github\/projects-v2\/:projectV2Id"\)/);
+assert.match(controllerFile, /@Get\("workspaces\/:workspaceId\/github\/projects-v2\/:projectV2Id\/fields"\)/);
+assert.match(controllerFile, /@Get\("workspaces\/:workspaceId\/github\/projects-v2\/:projectV2Id\/status-options"\)/);
+assert.match(controllerFile, /@Get\("workspaces\/:workspaceId\/github\/projects-v2\/:projectV2Id\/kanban"\)/);
+assert.match(controllerFile, /@Get\("workspaces\/:workspaceId\/github\/projects-v2\/:projectV2Id\/items"\)/);
+assert.match(controllerFile, /@Get\("workspaces\/:workspaceId\/github\/issues\/:issueId"\)/);
+assert.match(controllerFile, /@Get\("workspaces\/:workspaceId\/github\/repositories\/:repositoryId\/pull-requests"\)/);
+assert.match(controllerFile, /@Get\("workspaces\/:workspaceId\/github\/pull-requests\/:pullRequestId"\)/);
+assert.match(controllerFile, /@Get\("workspaces\/:workspaceId\/github\/pull-requests\/:pullRequestId\/files"\)/);
+assert.match(controllerFile, /@Get\("workspaces\/:workspaceId\/github\/pull-requests\/:pullRequestId\/conflict-status"\)/);
+assert.match(controllerFile, /@Post\("workspaces\/:workspaceId\/github\/sync-runs"\)/);
+assert.match(controllerFile, /@Get\("workspaces\/:workspaceId\/github\/sync-runs"\)/);
+assert.match(controllerFile, /@Get\("workspaces\/:workspaceId\/github\/sync-runs\/:syncRunId"\)/);
 assert.match(controllerFile, /@UseGuards\(AuthGuard\)/);
 
 assert.match(serviceFile, /getModuleInfo\(\): GitHubIntegrationModuleInfo/);
@@ -59,8 +79,30 @@ assert.match(serviceFile, /disconnectGithubOAuth/);
 assert.match(serviceFile, /startGithubAppInstallation/);
 assert.match(serviceFile, /completeGithubAppInstallationCallback/);
 assert.match(serviceFile, /listGithubAppInstallations/);
+assert.match(serviceFile, /listGithubRepositories/);
+assert.match(serviceFile, /getGithubRepository/);
+assert.match(serviceFile, /listGithubProjectsV2/);
+assert.match(serviceFile, /getGithubProjectV2/);
+assert.match(serviceFile, /listGithubProjectV2Fields/);
+assert.match(serviceFile, /listGithubProjectV2StatusOptions/);
+assert.match(serviceFile, /getGithubProjectV2Kanban/);
+assert.match(serviceFile, /listGithubProjectV2Items/);
+assert.match(serviceFile, /getGithubIssue/);
+assert.match(serviceFile, /listGithubPullRequests/);
+assert.match(serviceFile, /getGithubPullRequest/);
+assert.match(serviceFile, /listGithubPullRequestFiles/);
+assert.match(serviceFile, /getGithubPullRequestConflictStatus/);
+assert.match(serviceFile, /startGithubSyncRun/);
+assert.match(serviceFile, /listGithubSyncRuns/);
+assert.match(serviceFile, /getGithubSyncRun/);
 
 assert.match(typesIndex, /export type GitHubIntegrationModuleInfo/);
+assert.match(typesIndex, /GithubPullRequestFilePayload/);
+assert.match(typesIndex, /GithubPullRequestConflictStatusPayload/);
+assert.match(typesIndex, /GithubSyncRunPayload/);
+assert.match(typesIndex, /GithubSyncRunDetailPayload/);
+assert.match(dtoIndex, /StartGithubSyncRunRequest/);
+assert.match(dtoIndex, /ListGithubSyncRunsQuery/);
 assert.deepEqual(directoryNames.sort(), ["dto", "queries", "types"]);
 
 const tscScript = fileURLToPath(
@@ -73,3 +115,8 @@ execFileSync(process.execPath, [tscScript, "-p", "tsconfig.build.json"], {
 
 await import("./oauth.test.mjs");
 await import("./installation.test.mjs");
+await import("./source-read.test.mjs");
+await import("./project-v2.test.mjs");
+await import("./pr-files.test.mjs");
+await import("./sync-runs.test.mjs");
+await import("./webhook.test.mjs");

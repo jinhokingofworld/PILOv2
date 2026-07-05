@@ -23,6 +23,10 @@ export interface GithubAppRuntimeConfig {
   now?: () => Date;
 }
 
+export interface GithubWebhookRuntimeConfig {
+  webhookSecret: string;
+}
+
 const DEFAULT_API_BASE_PATH = "/api/v1";
 const DEFAULT_STATE_TTL_SECONDS = 600;
 const GITHUB_APP_SLUG_PATTERN = /^[a-zA-Z0-9-]+$/;
@@ -92,6 +96,15 @@ export class GithubIntegrationConfigService {
       apiBasePath,
       stateSecret,
       stateTtlSeconds
+    };
+  }
+
+  getGithubWebhookConfig(): GithubWebhookRuntimeConfig {
+    return {
+      webhookSecret: this.requireConfig(
+        process.env.GITHUB_WEBHOOK_SECRET,
+        "GitHub App webhook is not configured"
+      )
     };
   }
 

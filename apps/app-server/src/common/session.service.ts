@@ -37,6 +37,22 @@ export class SessionService {
     return session.user_id;
   }
 
+  async revokeSessionToken(sessionToken: string): Promise<void> {
+    if (!sessionToken) {
+      throw unauthorized("Missing bearer token");
+    }
+
+    await this.database.execute(
+      `
+        UPDATE user_sessions
+        SET revoked_at = now()
+        WHERE token_hash = $1
+          AND revoked_at IS NULL
+      `,
+      [this.hashSessionToken(sessionToken)]
+    );
+  }
+
   hashSessionToken(sessionToken: string): string {
     return createHash("sha256").update(sessionToken, "utf8").digest("hex");
   }

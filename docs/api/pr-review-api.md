@@ -131,6 +131,81 @@ DELETE /api/v1/workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}
 - `review_submissions`는 session 삭제와 함께 삭제된다.
 - PR Review canvas는 자유형 `canvas` 테이블에 저장하지 않으므로 별도 canvas 삭제 작업은 없다.
 
+## PR 요약 패널 조회
+
+`summary` endpoint는 PR 리뷰 화면의 상단 헤더와 우측 요약 패널에 필요한 정보를
+반환한다. 상대 시간 문구는 서버가 만들지 않고 `githubCreatedAt`,
+`githubUpdatedAt`을 내려주며 프론트에서 표시한다.
+
+```json
+{
+  "success": true,
+  "data": {
+    "reviewSessionId": "review_session_uuid",
+    "pullRequestId": "pull_request_uuid",
+    "githubNumber": 24,
+    "title": "음성회의 및 리포트 페이지 목업 구현",
+    "authorName": "jinhokingofworld",
+    "authorAvatarUrl": "https://github.com/avatar.png",
+    "githubCreatedAt": "2026-07-04T12:00:00.000Z",
+    "githubUpdatedAt": "2026-07-05T00:00:00.000Z",
+    "headBranch": "feature/voice-report",
+    "baseBranch": "main",
+    "changedFilesCount": 5,
+    "additions": 128,
+    "deletions": 32,
+    "commitsCount": 3,
+    "githubUrl": "https://github.com/my-team/pilo/pull/24",
+    "headSha": "abc123",
+    "status": "reviewing",
+    "prPurpose": "음성 회의 페이지와 회의 종료 후 리포트 UI 흐름 추가",
+    "changeSummary": ["음성 회의 페이지 추가", "리포트 게시판 화면 추가"],
+    "recommendedReviewOrder": "공통 진입 구조를 먼저 확인한 뒤 각 페이지 UI를 확인",
+    "cautionPoints": ["사이드바 탭과 라우팅 경로 일치 여부 확인"],
+    "reviewedCount": 2,
+    "totalFileCount": 5,
+    "conflictStatus": "clean",
+    "conflictCheckedAt": "2026-07-05T00:00:00.000Z",
+    "readyToSubmit": false
+  }
+}
+```
+
+## 전체 리뷰 결과 조회
+
+`result` endpoint는 GitHub Review 제출 모달에서 파일별 판단 결과를 요약할 수 있는
+형태로 반환한다.
+
+```json
+{
+  "success": true,
+  "data": {
+    "reviewSessionId": "review_session_uuid",
+    "status": "reviewing",
+    "reviewResultSummary": "문제 없음 3개 / 논의·수정 필요 1개 / 판단 불가 1개 / 미리뷰 0개",
+    "counts": {
+      "approved": 3,
+      "discussionNeeded": 1,
+      "unknown": 1,
+      "notReviewed": 0,
+      "total": 5
+    },
+    "fileReviewResults": [
+      {
+        "reviewFileId": "review_file_uuid",
+        "fileName": "VoiceMeetingPage.tsx",
+        "filePath": "apps/frontend/VoiceMeetingPage.tsx",
+        "status": "approved",
+        "comment": "문제 없음",
+        "reviewedByUserId": "user_uuid",
+        "reviewedAt": "2026-07-05T00:00:00.000Z"
+      }
+    ],
+    "readyToSubmit": true
+  }
+}
+```
+
 ## Review Canvas View Model
 
 리뷰 canvas endpoint는 PR 리뷰 화면용 graph를 반환한다. 자유형 Canvas API와
@@ -138,18 +213,43 @@ DELETE /api/v1/workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}
 
 ```json
 {
+  "reviewSessionId": "review_session_uuid",
+  "headBranch": "feature/voice-report",
+  "baseBranch": "main",
+  "reviewedCount": 2,
+  "totalFileCount": 5,
+  "conflictStatus": "clean",
   "flows": [
     {
       "id": "flow_uuid",
+      "reviewSessionId": "review_session_uuid",
       "title": "Entry flow",
       "description": "Review entry points first",
       "sortOrder": 1,
+      "fileCount": 2,
       "files": [
         {
+          "id": "review_flow_file_uuid",
+          "reviewSessionId": "review_session_uuid",
+          "flowId": "flow_uuid",
           "reviewFileId": "review_file_uuid",
           "filePath": "apps/frontend/page.tsx",
+          "fileName": "page.tsx",
+          "fileStatus": "modified",
+          "fileRole": "프론트엔드",
           "workflowOrder": 1,
-          "currentStatus": "not_reviewed"
+          "currentStatus": "not_reviewed",
+          "fileNodeData": {
+            "reviewFileId": "review_file_uuid",
+            "reviewSessionId": "review_session_uuid",
+            "reviewFlowFileId": "review_flow_file_uuid",
+            "flowId": "flow_uuid",
+            "workflowOrder": 1,
+            "fileName": "page.tsx",
+            "filePath": "apps/frontend/page.tsx",
+            "roleSummary": "프론트엔드",
+            "reviewStatus": "not_reviewed"
+          }
         }
       ]
     }
@@ -158,7 +258,8 @@ DELETE /api/v1/workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}
     {
       "fromReviewFileId": "review_file_uuid_1",
       "toReviewFileId": "review_file_uuid_2",
-      "reason": "Shared state flow"
+      "flowId": "flow_uuid",
+      "reason": "리뷰 순서"
     }
   ]
 }
@@ -166,6 +267,102 @@ DELETE /api/v1/workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}
 
 PR Review schema에는 `canvas_id`, `canvas_shape_id`,
 `canvas_freeform_shapes` 관계가 없다.
+
+## Flow 목록 조회
+
+```json
+{
+  "success": true,
+  "data": {
+    "reviewSessionId": "review_session_uuid",
+    "flows": [
+      {
+        "id": "flow_uuid",
+        "reviewSessionId": "review_session_uuid",
+        "title": "공통 네비게이션",
+        "description": "사이드바와 라우팅 흐름",
+        "sortOrder": 1,
+        "fileCount": 3
+      }
+    ]
+  }
+}
+```
+
+## Flow 파일 노드 목록 조회
+
+```json
+{
+  "success": true,
+  "data": {
+    "reviewSessionId": "review_session_uuid",
+    "flowId": "flow_uuid",
+    "files": [
+      {
+        "id": "review_flow_file_uuid",
+        "reviewSessionId": "review_session_uuid",
+        "flowId": "flow_uuid",
+        "reviewFileId": "review_file_uuid",
+        "workflowOrder": 1,
+        "filePath": "apps/frontend/VoiceMeetingPage.tsx",
+        "fileName": "VoiceMeetingPage.tsx",
+        "fileStatus": "modified",
+        "fileRole": "프론트엔드",
+        "currentStatus": "not_reviewed",
+        "fileNodeData": {
+          "reviewFileId": "review_file_uuid",
+          "reviewSessionId": "review_session_uuid",
+          "reviewFlowFileId": "review_flow_file_uuid",
+          "flowId": "flow_uuid",
+          "workflowOrder": 1,
+          "fileName": "VoiceMeetingPage.tsx",
+          "filePath": "apps/frontend/VoiceMeetingPage.tsx",
+          "roleSummary": "프론트엔드",
+          "reviewStatus": "not_reviewed"
+        }
+      }
+    ]
+  }
+}
+```
+
+## Review File 상세 조회
+
+```json
+{
+  "success": true,
+  "data": {
+    "id": "review_file_uuid",
+    "sessionId": "review_session_uuid",
+    "filePath": "apps/frontend/VoiceMeetingPage.tsx",
+    "previousFilePath": null,
+    "fileName": "VoiceMeetingPage.tsx",
+    "fileStatus": "modified",
+    "additions": 84,
+    "deletions": 12,
+    "isBinary": false,
+    "isLargeDiff": false,
+    "githubFileUrl": "https://github.com/my-team/pilo/pull/24/files#diff-abc",
+    "fileRole": "프론트엔드",
+    "changeReason": "수정된 파일이다.",
+    "changeSummary": "84줄 추가, 12줄 삭제",
+    "reviewPoints": ["Workflow order 1번으로 확인한다."],
+    "currentStatus": "not_reviewed",
+    "comment": null,
+    "reviewedByUserId": null,
+    "reviewedAt": null,
+    "flowMemberships": [
+      {
+        "reviewFlowFileId": "review_flow_file_uuid",
+        "flowId": "flow_uuid",
+        "flowTitle": "공통 네비게이션",
+        "workflowOrder": 1
+      }
+    ],
+    "latestDecision": null
+  }
+}
+```
 
 ## Diff View Model
 
