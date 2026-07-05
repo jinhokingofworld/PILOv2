@@ -184,6 +184,7 @@ module "ecs" {
         APP_ENV                       = var.environment
         AWS_REGION                    = var.aws_region
         PORT                          = tostring(var.app_server_port)
+        DATABASE_SSL                  = "true"
         S3_UPLOADS_BUCKET             = module.s3.uploads_bucket_name
         SQS_AI_JOBS_QUEUE_URL         = module.sqs.ai_jobs_queue_url
         SQS_GITHUB_WEBHOOKS_QUEUE_URL = module.sqs.github_webhooks_queue_url
@@ -241,6 +242,8 @@ resource "aws_route53_record" "frontend" {
   name    = var.frontend_domain_name
   type    = "A"
 
+  allow_overwrite = true
+
   alias {
     name                   = module.cloudfront.distribution_domain_name
     zone_id                = module.cloudfront.distribution_hosted_zone_id
@@ -254,6 +257,8 @@ resource "aws_route53_record" "api" {
   zone_id = var.hosted_zone_id
   name    = var.api_domain_name
   type    = "A"
+
+  allow_overwrite = true
 
   alias {
     name                   = module.alb.alb_dns_name

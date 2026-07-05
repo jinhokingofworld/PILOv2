@@ -2,8 +2,8 @@
 
 ## 범위
 
-Calendar API는 Workspace 일정만 담당한다. MVP 캘린더는 GitHub issue, PR,
-회의, 회의록을 자동으로 캘린더에 섞지 않는다.
+Calendar API는 Workspace 일정 CRUD를 담당한다. MVP Calendar는 GitHub issue, PR,
+meeting, meeting report를 자동으로 Calendar에 넣지 않는다.
 
 ## 데이터 규칙
 
@@ -11,10 +11,13 @@ Calendar API는 Workspace 일정만 담당한다. MVP 캘린더는 GitHub issue,
 - `workspace_id`는 path의 `workspaceId`에서 온다.
 - `created_by`는 현재 로그인 사용자에서 온다.
 - Workspace 접근 권한이 있는 모든 사용자는 MVP에서 일정을 생성, 조회, 수정, 삭제할 수 있다.
+- `createdBy`, `workspaceId`는 request body로 받지 않는다.
 - `startDate`, `endDate`는 `YYYY-MM-DD` 형식이다.
-- `startTime`, `endTime`은 `HH:mm` 형식이며 `isAllDay = false`일 때만 필수다.
+- `startTime`, `endTime`은 `HH:mm` 형식이며 `isAllDay = false`일 때 사용한다.
+- `isAllDay = false`이고 `endTime`이 생략되면 서버는 `startTime + 1시간`으로 정규화한다.
+- `startTime + 1시간`이 다음 날짜로 넘어가면 서버는 `endDate`도 함께 다음 날짜로 정규화한다.
 - 기본 `color`는 `#3B82F6`이다.
-- 반복 일정, 알림, 외부 캘린더 연동은 제외한다.
+- 반복 일정, 알림, 외부 Calendar 연동은 제외한다.
 
 ## API 목록
 
@@ -53,10 +56,18 @@ AND end_date >= :start
   "startTime": "14:00",
   "endTime": "15:00",
   "createdBy": "user_uuid",
+  "createdByUser": {
+    "id": "user_uuid",
+    "name": "Sein",
+    "avatarUrl": "https://example.com/avatar.png"
+  },
   "createdAt": "2026-07-03T00:00:00.000Z",
   "updatedAt": "2026-07-03T00:00:00.000Z"
 }
 ```
+
+`createdByUser`는 Calendar UI 표시용 사용자 요약 정보다. Email, provider id, token,
+encrypted token은 포함하지 않는다.
 
 ## 일정 생성
 
@@ -73,16 +84,72 @@ AND end_date >= :start
 }
 ```
 
+`endTime`은 `isAllDay = false`일 때 생략할 수 있다. 생략하면 서버가 `startTime + 1시간`으로
+정규화한 값을 저장하고 응답한다.
+
+예:
+
+```json
+{
+  "title": "Team meeting",
+  "isAllDay": false,
+  "startDate": "2026-07-03",
+  "endDate": "2026-07-03",
+  "startTime": "14:00"
+}
+```
+
+정규화 후 저장/응답:
+
+```json
+{
+  "startDate": "2026-07-03",
+  "endDate": "2026-07-03",
+  "startTime": "14:00",
+  "endTime": "15:00"
+}
+```
+
 `createdBy`, `workspaceId`는 request body로 받지 않는다.
+
+## 일정 수정
+
+```http
+PATCH /api/v1/workspaces/{workspaceId}/calendar/events/{eventId}
+```
+
+Request body에는 변경할 필드만 보낸다. 시간 관련 값을 변경하고 `isAllDay = false`인 상태에서
+`endTime`이 생략되면 서버가 `startTime + 1시간`으로 정규화한다.
+
+## 일정 삭제
+
+```http
+DELETE /api/v1/workspaces/{workspaceId}/calendar/events/{eventId}
+```
+
+응답:
+
+```json
+{
+  "success": true,
+  "data": {
+    "id": 1
+  }
+}
+```
 
 ## Validation
 
 | 규칙 | 조건 |
 | --- | --- |
+| 제목 | 빈 문자열 불가 |
+| 제목 길이 | 최대 255자 |
+| 색상 | `#RRGGBB` 형식 |
 | 날짜 순서 | `endDate >= startDate` |
 | 종일 일정 시간 | `isAllDay = true`이면 `startTime = null`, `endTime = null` |
-| 시간 지정 일정 | `isAllDay = false`이면 `startTime`, `endTime` 필수 |
-| 시간 순서 | 같은 날짜의 시간 지정 일정은 `endTime > startTime` |
+| 시간 지정 일정 | `isAllDay = false`이면 `startTime` 필수, `endTime` 생략 가능 |
+| 시간 정규화 | `isAllDay = false`이고 `endTime` 생략 시 `startTime + 1시간` |
+| 시간 순서 | 같은 날짜의 시간 지정 일정은 정규화 후 `endTime > startTime` |
 
 ## MVP 제외
 
