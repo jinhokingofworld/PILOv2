@@ -44,6 +44,7 @@ const meetingController = await readSource(
 );
 const meetingModule = await readSource("../src/modules/meeting/meeting.module.ts");
 const meetingService = await readSource("../src/modules/meeting/meeting.service.ts");
+const initialSchema = await readSource("../../../db/migrations/001_initial_schema.sql");
 
 assert.match(main, /setGlobalPrefix\("api\/v1"\)/);
 assert.match(controller, /@Get\("health"\)/);
@@ -107,11 +108,15 @@ assert.match(googleOAuthClient, /openidconnect\.googleapis\.com\/v1\/userinfo/);
 assert.match(githubLoginOAuthClient, /api\.github\.com\/user\/emails/);
 assert.match(workspaceController, /@Controller\("workspaces"\)/);
 assert.match(workspaceController, /@Get\(\)/);
-assert.match(workspaceController, /@Post\(\)/);
 assert.match(workspaceController, /@Get\(":workspaceId"\)/);
 assert.match(workspaceService, /WHERE owner_user_id = \$1/);
 assert.match(workspaceService, /ORDER BY created_at ASC/);
 assert.match(workspaceService, /assertWorkspaceAccess/);
+assert.match(authService, /ensureWorkspaceForUser/);
+assert.match(authService, /INSERT INTO workspaces \(name, owner_user_id\)/);
+assert.match(authService, /ON CONFLICT \(owner_user_id\) WHERE owner_user_id IS NOT NULL/);
+assert.match(initialSchema, /unique_workspace_per_owner_user_id/);
+assert.match(initialSchema, /WHERE owner_user_id IS NOT NULL/);
 assert.match(canvasModule, /controllers: \[CanvasController\]/);
 assert.match(canvasModule, /providers: \[CanvasService\]/);
 assert.match(canvasController, /@Controller\("workspaces\/:workspaceId"\)/);

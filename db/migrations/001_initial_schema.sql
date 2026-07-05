@@ -169,8 +169,9 @@ CREATE TABLE workspaces (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_workspaces_owner_user_id
-  ON workspaces(owner_user_id);
+CREATE UNIQUE INDEX unique_workspace_per_owner_user_id
+  ON workspaces(owner_user_id)
+  WHERE owner_user_id IS NOT NULL;
 
 CREATE TRIGGER trg_workspaces_updated_at
 BEFORE UPDATE ON workspaces

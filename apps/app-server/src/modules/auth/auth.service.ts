@@ -32,6 +32,7 @@ interface LoginSessionPayload {
 const GOOGLE_LOGIN_SCOPE = "openid email profile";
 const GITHUB_LOGIN_SCOPE = "repo read:user user:email";
 const ACCESS_TOKEN_BYTE_LENGTH = 32;
+const WORKSPACE_NAME_BYTE_LENGTH = 4;
 const MAX_RETURN_URL_LENGTH = 2048;
 
 @Injectable()
@@ -86,6 +87,7 @@ export class AuthService {
       provider === "google"
         ? await this.completeGoogleLogin(code, config)
         : await this.completeGithubLogin(code, config);
+    await this.ensureWorkspaceForUser(userId);
     const session = await this.createSession(userId, config.sessionTtlSeconds);
 
     return this.buildCallbackRedirect({
@@ -368,6 +370,19 @@ export class AuthService {
       accessToken,
       expiresAt: this.toIsoString(session.expires_at)
     };
+  }
+
+  private async ensureWorkspaceForUser(userId: string): Promise<void> {
+    const workspaceName = `PILO-${randomBytes(WORKSPACE_NAME_BYTE_LENGTH).toString("hex")}`;
+    await this.database.execute(
+      `
+        INSERT INTO workspaces (name, owner_user_id)
+        VALUES ($1, $2)
+        ON CONFLICT (owner_user_id) WHERE owner_user_id IS NOT NULL
+        DO NOTHING
+      `,
+      [workspaceName, userId]
+    );
   }
 
   private buildCallbackRedirect(input: {
