@@ -26,6 +26,11 @@ const canvasController = await readSource(
   "../src/modules/canvas/canvas.controller.ts"
 );
 const canvasService = await readSource("../src/modules/canvas/canvas.service.ts");
+const meetingController = await readSource(
+  "../src/modules/meeting/meeting.controller.ts"
+);
+const meetingModule = await readSource("../src/modules/meeting/meeting.module.ts");
+const meetingService = await readSource("../src/modules/meeting/meeting.service.ts");
 
 assert.match(main, /setGlobalPrefix\("api\/v1"\)/);
 assert.match(controller, /@Get\("health"\)/);
@@ -35,6 +40,7 @@ assert.match(appModule, /UserModule/);
 assert.match(appModule, /WorkspaceModule/);
 assert.match(appModule, /CalendarModule/);
 assert.match(appModule, /CanvasModule/);
+assert.match(appModule, /MeetingModule/);
 assert.match(calendarModule, /WorkspaceModule/);
 assert.match(calendarController, /@Controller\("workspaces\/:workspaceId\/calendar\/events"\)/);
 assert.match(calendarController, /@UseGuards\(AuthGuard\)/);
@@ -80,5 +86,17 @@ assert.match(canvasService, /INSERT INTO canvas_freeform_shapes/);
 assert.match(canvasService, /UPDATE canvas_freeform_shapes s/);
 assert.match(canvasService, /SET deleted_at = now\(\)/);
 assert.match(canvasService, /deleted_at IS NULL/);
+assert.match(meetingModule, /DatabaseModule/);
+assert.match(meetingModule, /WorkspaceModule/);
+assert.match(meetingController, /@Controller\("workspaces\/:workspaceId"\)/);
+assert.match(meetingController, /@UseGuards\(AuthGuard\)/);
+assert.match(meetingController, /@Get\("meetings\/current"\)/);
+assert.match(meetingController, /@Post\("meetings"\)/);
+assert.match(meetingService, /MAIN_MEETING_ROOM/);
+assert.match(meetingService, /unique_active_meeting_per_room/);
+assert.match(meetingService, /INSERT INTO meetings/);
+assert.match(meetingService, /INSERT INTO meeting_participants/);
+assert.match(meetingService, /INSERT INTO meeting_recordings/);
 
 await import("./calendar/test.mjs");
+await import("./meeting/test.mjs");

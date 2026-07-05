@@ -11,7 +11,12 @@ import {
 import { apiResponse, ApiSuccessResponse } from "../../common/api-response";
 import { AuthGuard } from "../../common/auth.guard";
 import { CurrentUserId } from "../../common/current-user.decorator";
-import { MeetingService, PendingMeetingPayload } from "./meeting.service";
+import {
+  CurrentMeetingPayload,
+  MeetingService,
+  PendingMeetingPayload,
+  StartMeetingPayload
+} from "./meeting.service";
 
 @Controller("workspaces/:workspaceId")
 @UseGuards(AuthGuard)
@@ -22,7 +27,7 @@ export class MeetingController {
   async getCurrentMeeting(
     @CurrentUserId() currentUserId: string,
     @Param("workspaceId") workspaceId: string
-  ): Promise<ApiSuccessResponse<PendingMeetingPayload>> {
+  ): Promise<ApiSuccessResponse<CurrentMeetingPayload>> {
     const result = await this.meetingService.getCurrentMeeting(
       currentUserId,
       workspaceId
@@ -35,7 +40,7 @@ export class MeetingController {
     @CurrentUserId() currentUserId: string,
     @Param("workspaceId") workspaceId: string,
     @Body() body: unknown
-  ): Promise<ApiSuccessResponse<PendingMeetingPayload>> {
+  ): Promise<ApiSuccessResponse<StartMeetingPayload>> {
     const result = await this.meetingService.startMeeting(
       currentUserId,
       workspaceId,
