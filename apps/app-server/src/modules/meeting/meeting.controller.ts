@@ -12,11 +12,15 @@ import { apiResponse, ApiSuccessResponse } from "../../common/api-response";
 import { AuthGuard } from "../../common/auth.guard";
 import { CurrentUserId } from "../../common/current-user.decorator";
 import {
+  CurrentRecordingPayload,
   CurrentMeetingPayload,
   JoinMeetingPayload,
   LeaveMeetingPayload,
+  MeetingDetailPayload,
   MeetingService,
+  ParticipantListPayload,
   PendingMeetingPayload,
+  RecordingListPayload,
   StartMeetingPayload
 } from "./meeting.service";
 
@@ -70,7 +74,7 @@ export class MeetingController {
     @CurrentUserId() currentUserId: string,
     @Param("workspaceId") workspaceId: string,
     @Param("meetingId") meetingId: string
-  ): Promise<ApiSuccessResponse<PendingMeetingPayload>> {
+  ): Promise<ApiSuccessResponse<MeetingDetailPayload>> {
     const result = await this.meetingService.getMeeting(
       currentUserId,
       workspaceId,
@@ -128,7 +132,7 @@ export class MeetingController {
     @CurrentUserId() currentUserId: string,
     @Param("workspaceId") workspaceId: string,
     @Param("meetingId") meetingId: string
-  ): Promise<ApiSuccessResponse<PendingMeetingPayload>> {
+  ): Promise<ApiSuccessResponse<RecordingListPayload>> {
     const result = await this.meetingService.listRecordings(
       currentUserId,
       workspaceId,
@@ -142,7 +146,7 @@ export class MeetingController {
     @CurrentUserId() currentUserId: string,
     @Param("workspaceId") workspaceId: string,
     @Param("meetingId") meetingId: string
-  ): Promise<ApiSuccessResponse<PendingMeetingPayload>> {
+  ): Promise<ApiSuccessResponse<CurrentRecordingPayload>> {
     const result = await this.meetingService.getCurrentRecording(
       currentUserId,
       workspaceId,
@@ -156,7 +160,7 @@ export class MeetingController {
     @CurrentUserId() currentUserId: string,
     @Param("workspaceId") workspaceId: string,
     @Param("meetingId") meetingId: string
-  ): Promise<ApiSuccessResponse<PendingMeetingPayload>> {
+  ): Promise<ApiSuccessResponse<ParticipantListPayload>> {
     const result = await this.meetingService.listParticipants(
       currentUserId,
       workspaceId,

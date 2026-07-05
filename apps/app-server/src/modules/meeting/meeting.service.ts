@@ -7,6 +7,8 @@ import { WorkspaceService } from "../workspace/workspace.service";
 export type PendingMeetingPayload = never;
 
 type RecordingStatus = "RUNNING" | "COMPLETED" | "FAILED";
+type MeetingReportStatus = "PROCESSING" | "COMPLETED" | "FAILED";
+type MeetingReportFailedStep = "RECORDING" | "STT" | "LLM";
 
 interface MeetingRow extends QueryResultRow {
   id: string;
@@ -67,7 +69,41 @@ interface ParticipantRow extends QueryResultRow {
   user_avatar_url: string | null;
 }
 
+interface RecordingRow extends QueryResultRow {
+  id: string;
+  meeting_id: string;
+  status: RecordingStatus;
+  audio_file_url: string | null;
+  audio_file_key: string | null;
+  duration_sec: number | null;
+  file_size_bytes: number | string | null;
+  started_at: Date | string;
+  ended_at: Date | string | null;
+  error_message: string | null;
+}
+
+interface MeetingReportRow extends QueryResultRow {
+  id: string;
+  meeting_id: string;
+  recording_id: string;
+  status: MeetingReportStatus;
+  failed_step: MeetingReportFailedStep | null;
+  error_message: string | null;
+  summary: string | null;
+  discussion_points: string | null;
+  decisions: string | null;
+  action_item_candidates: unknown;
+  retry_count: number | string;
+  created_at: Date | string;
+  updated_at: Date | string;
+}
+
 interface ActiveParticipantCountRow extends QueryResultRow {
+  active_participant_count: number | string;
+}
+
+interface ParticipantCountRow extends QueryResultRow {
+  participant_count: number | string;
   active_participant_count: number | string;
 }
 
@@ -128,6 +164,22 @@ export interface RecordingPayload {
   errorMessage: string | null;
 }
 
+export interface MeetingReportSummaryPayload {
+  id: string;
+  meetingId: string;
+  recordingId: string;
+  status: MeetingReportStatus;
+  failedStep: MeetingReportFailedStep | null;
+  errorMessage: string | null;
+  summary: string | null;
+  discussionPoints: string | null;
+  decisions: string | null;
+  actionItemCandidates: unknown[];
+  retryCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface CurrentMeetingPayload {
   meeting: MeetingPayload | null;
   currentRecording: RecordingPayload | null;
@@ -153,6 +205,28 @@ export interface LeaveMeetingPayload {
   meetingEnded: boolean;
   meeting: MeetingPayload;
   currentRecording: RecordingPayload | null;
+}
+
+export interface MeetingDetailPayload {
+  meeting: MeetingPayload;
+  currentRecording: RecordingPayload | null;
+  recordings: RecordingPayload[];
+  reports: MeetingReportSummaryPayload[];
+  participantCount: number;
+  activeParticipantCount: number;
+  currentUserParticipant: ParticipantPayload | null;
+}
+
+export interface RecordingListPayload {
+  recordings: RecordingPayload[];
+}
+
+export interface CurrentRecordingPayload {
+  recording: RecordingPayload | null;
+}
+
+export interface ParticipantListPayload {
+  participants: ParticipantPayload[];
 }
 
 const MAIN_MEETING_ROOM = "MAIN_MEETING_ROOM";
@@ -329,10 +403,36 @@ export class MeetingService {
   async getMeeting(
     currentUserId: string,
     workspaceId: string,
-    _meetingId: string
-  ): Promise<PendingMeetingPayload> {
+    meetingId: string
+  ): Promise<MeetingDetailPayload> {
     await this.assertWorkspaceAccess(currentUserId, workspaceId);
-    return this.pendingEndpoint("GET /workspaces/{workspaceId}/meetings/{meetingId}");
+    const meeting = await this.findMeetingById(this.database, workspaceId, meetingId);
+
+    if (!meeting) {
+      throw notFound("Meeting not found");
+    }
+
+    const recordings = await this.listRecordingRows(meetingId);
+    const reports = await this.listMeetingReportRows(meetingId);
+    const participantCounts = await this.countParticipants(meetingId);
+    const currentUserParticipant = await this.findParticipant(
+      this.database,
+      meetingId,
+      currentUserId
+    );
+
+    return {
+      meeting: this.mapMeeting(meeting),
+      currentRecording: this.mapNullableCurrentRecording(meeting),
+      recordings: recordings.map((recording) => this.mapRecording(recording)),
+      reports: reports.map((report) => this.mapMeetingReportSummary(report)),
+      participantCount: participantCounts.participantCount,
+      activeParticipantCount: participantCounts.activeParticipantCount,
+      currentUserParticipant:
+        currentUserParticipant === null
+          ? null
+          : this.mapParticipant(currentUserParticipant)
+    };
   }
 
   async leaveMeeting(
@@ -410,34 +510,48 @@ export class MeetingService {
   async listRecordings(
     currentUserId: string,
     workspaceId: string,
-    _meetingId: string
-  ): Promise<PendingMeetingPayload> {
+    meetingId: string
+  ): Promise<RecordingListPayload> {
     await this.assertWorkspaceAccess(currentUserId, workspaceId);
-    return this.pendingEndpoint(
-      "GET /workspaces/{workspaceId}/meetings/{meetingId}/recordings"
-    );
+    await this.assertMeetingExists(workspaceId, meetingId);
+    const recordings = await this.listRecordingRows(meetingId);
+
+    return {
+      recordings: recordings.map((recording) => this.mapRecording(recording))
+    };
   }
 
   async getCurrentRecording(
     currentUserId: string,
     workspaceId: string,
-    _meetingId: string
-  ): Promise<PendingMeetingPayload> {
+    meetingId: string
+  ): Promise<CurrentRecordingPayload> {
     await this.assertWorkspaceAccess(currentUserId, workspaceId);
-    return this.pendingEndpoint(
-      "GET /workspaces/{workspaceId}/meetings/{meetingId}/recordings/current"
-    );
+    const meeting = await this.findMeetingById(this.database, workspaceId, meetingId);
+
+    if (!meeting) {
+      throw notFound("Meeting not found");
+    }
+
+    return {
+      recording: this.mapNullableCurrentRecording(meeting)
+    };
   }
 
   async listParticipants(
     currentUserId: string,
     workspaceId: string,
-    _meetingId: string
-  ): Promise<PendingMeetingPayload> {
+    meetingId: string
+  ): Promise<ParticipantListPayload> {
     await this.assertWorkspaceAccess(currentUserId, workspaceId);
-    return this.pendingEndpoint(
-      "GET /workspaces/{workspaceId}/meetings/{meetingId}/participants"
-    );
+    await this.assertMeetingExists(workspaceId, meetingId);
+    const participants = await this.listParticipantRows(meetingId);
+
+    return {
+      participants: participants.map((participant) =>
+        this.mapParticipant(participant)
+      )
+    };
   }
 
   async listReports(
@@ -487,6 +601,19 @@ export class MeetingService {
     workspaceId: string
   ): Promise<void> {
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+  }
+
+  private async assertMeetingExists(
+    workspaceId: string,
+    meetingId: string
+  ): Promise<MeetingRow> {
+    const meeting = await this.findMeetingById(this.database, workspaceId, meetingId);
+
+    if (!meeting) {
+      throw notFound("Meeting not found");
+    }
+
+    return meeting;
   }
 
   private async findCurrentMeeting(
@@ -617,6 +744,97 @@ export class MeetingService {
         ${options.lockMeeting === true ? "FOR UPDATE OF meetings" : ""}
       `,
       [workspaceId, meetingId]
+    );
+  }
+
+  private async listRecordingRows(meetingId: string): Promise<RecordingRow[]> {
+    return this.database.query<RecordingRow>(
+      `
+        SELECT
+          id,
+          meeting_id,
+          status,
+          audio_file_url,
+          audio_file_key,
+          duration_sec,
+          file_size_bytes,
+          started_at,
+          ended_at,
+          error_message
+        FROM meeting_recordings
+        WHERE meeting_id = $1
+        ORDER BY started_at DESC, id ASC
+      `,
+      [meetingId]
+    );
+  }
+
+  private async listMeetingReportRows(
+    meetingId: string
+  ): Promise<MeetingReportRow[]> {
+    return this.database.query<MeetingReportRow>(
+      `
+        SELECT
+          id,
+          meeting_id,
+          recording_id,
+          status,
+          failed_step,
+          error_message,
+          summary,
+          discussion_points,
+          decisions,
+          action_item_candidates,
+          retry_count,
+          created_at,
+          updated_at
+        FROM meeting_reports
+        WHERE meeting_id = $1
+        ORDER BY created_at DESC, id ASC
+      `,
+      [meetingId]
+    );
+  }
+
+  private async countParticipants(
+    meetingId: string
+  ): Promise<{ participantCount: number; activeParticipantCount: number }> {
+    const result = await this.database.queryOne<ParticipantCountRow>(
+      `
+        SELECT
+          COUNT(*)::int AS participant_count,
+          (COUNT(*) FILTER (WHERE left_at IS NULL))::int AS active_participant_count
+        FROM meeting_participants
+        WHERE meeting_id = $1
+      `,
+      [meetingId]
+    );
+
+    return {
+      participantCount: Number(result?.participant_count ?? 0),
+      activeParticipantCount: Number(result?.active_participant_count ?? 0)
+    };
+  }
+
+  private async listParticipantRows(meetingId: string): Promise<ParticipantRow[]> {
+    return this.database.query<ParticipantRow>(
+      `
+        SELECT
+          meeting_participants.id,
+          meeting_participants.meeting_id,
+          meeting_participants.user_id,
+          meeting_participants.livekit_identity,
+          meeting_participants.joined_at,
+          meeting_participants.left_at,
+          users.name AS user_name,
+          users.avatar_url AS user_avatar_url
+        FROM meeting_participants
+        JOIN users
+          ON users.id = meeting_participants.user_id
+        WHERE meeting_participants.meeting_id = $1
+        ORDER BY meeting_participants.joined_at ASC, meeting_participants.id ASC
+      `,
+      [meetingId]
     );
   }
 
@@ -825,20 +1043,35 @@ export class MeetingService {
       return null;
     }
 
-    return {
+    return this.mapRecording({
       id: row.recording_id,
-      meetingId: row.recording_meeting_id,
+      meeting_id: row.recording_meeting_id,
       status: row.recording_status,
-      audioFileUrl: row.recording_audio_file_url,
-      audioFileKey: row.recording_audio_file_key,
-      durationSec: row.recording_duration_sec,
+      audio_file_url: row.recording_audio_file_url,
+      audio_file_key: row.recording_audio_file_key,
+      duration_sec: row.recording_duration_sec,
+      file_size_bytes: row.recording_file_size_bytes,
+      started_at: row.recording_started_at,
+      ended_at: row.recording_ended_at,
+      error_message: row.recording_error_message
+    });
+  }
+
+  private mapRecording(recording: RecordingRow): RecordingPayload {
+    return {
+      id: recording.id,
+      meetingId: recording.meeting_id,
+      status: recording.status,
+      audioFileUrl: recording.audio_file_url,
+      audioFileKey: recording.audio_file_key,
+      durationSec: recording.duration_sec,
       fileSizeBytes:
-        row.recording_file_size_bytes === null
+        recording.file_size_bytes === null
           ? null
-          : Number(row.recording_file_size_bytes),
-      startedAt: this.toIsoString(row.recording_started_at),
-      endedAt: this.toNullableIsoString(row.recording_ended_at),
-      errorMessage: row.recording_error_message
+          : Number(recording.file_size_bytes),
+      startedAt: this.toIsoString(recording.started_at),
+      endedAt: this.toNullableIsoString(recording.ended_at),
+      errorMessage: recording.error_message
     };
   }
 
@@ -890,6 +1123,43 @@ export class MeetingService {
         avatarUrl: participant.user_avatar_url
       }
     };
+  }
+
+  private mapMeetingReportSummary(
+    report: MeetingReportRow
+  ): MeetingReportSummaryPayload {
+    return {
+      id: report.id,
+      meetingId: report.meeting_id,
+      recordingId: report.recording_id,
+      status: report.status,
+      failedStep: report.failed_step,
+      errorMessage: report.error_message,
+      summary: report.summary,
+      discussionPoints: report.discussion_points,
+      decisions: report.decisions,
+      actionItemCandidates: this.toJsonArray(report.action_item_candidates),
+      retryCount: Number(report.retry_count),
+      createdAt: this.toIsoString(report.created_at),
+      updatedAt: this.toIsoString(report.updated_at)
+    };
+  }
+
+  private toJsonArray(value: unknown): unknown[] {
+    if (Array.isArray(value)) {
+      return value;
+    }
+
+    if (typeof value === "string") {
+      try {
+        const parsed = JSON.parse(value) as unknown;
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    }
+
+    return [];
   }
 
   private isConstraintError(error: unknown, constraint: string): boolean {
