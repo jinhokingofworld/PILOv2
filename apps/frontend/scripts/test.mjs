@@ -102,7 +102,7 @@ assert.match(authSessionStorage, /pilo:access-token/);
 assert.match(authSessionStorage, /pilo:workspace-id/);
 assert.match(authSession, /AuthGate/);
 assert.match(authSession, /router\.replace\(`\/login\?returnUrl=/);
-assert.match(authSession, /Workspace was not initialized during login/);
+assert.match(authSession, /Default workspace was not initialized during login/);
 assert.doesNotMatch(authSession, /createWorkspace/);
 assert.doesNotMatch(authApiClient, /createWorkspace/);
 assert.match(loginPage, /Welcome back/);

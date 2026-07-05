@@ -170,7 +170,7 @@ export async function loadAuthSessionEntry(
   const workspaces = await listWorkspaces(accessToken);
 
   if (workspaces.length === 0) {
-    throw new Error("Workspace was not initialized during login");
+    throw new Error("Default workspace was not initialized during login");
   }
 
   const storedWorkspaceId = getSelectedWorkspaceId();

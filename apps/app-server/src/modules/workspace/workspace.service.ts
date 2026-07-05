@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { Injectable } from "@nestjs/common";
 import { QueryResultRow } from "pg";
 import { forbidden, notFound } from "../../common/api-error";
@@ -22,10 +23,24 @@ export interface WorkspacePayload {
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const DEFAULT_WORKSPACE_NAME_BYTE_LENGTH = 4;
 
 @Injectable()
 export class WorkspaceService {
   constructor(private readonly database: DatabaseService) {}
+
+  async ensureDefaultWorkspaceForUser(userId: string): Promise<void> {
+    const workspaceName = `PILO-${randomBytes(DEFAULT_WORKSPACE_NAME_BYTE_LENGTH).toString("hex")}`;
+    await this.database.execute(
+      `
+        INSERT INTO workspaces (name, owner_user_id)
+        VALUES ($1, $2)
+        ON CONFLICT (owner_user_id) WHERE owner_user_id IS NOT NULL
+        DO NOTHING
+      `,
+      [workspaceName, userId]
+    );
+  }
 
   async listWorkspaces(currentUserId: string): Promise<WorkspacePayload[]> {
     const workspaces = await this.database.query<WorkspaceRow>(
