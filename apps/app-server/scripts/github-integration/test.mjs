@@ -20,6 +20,10 @@ const typesIndex = await readFile(
   new URL("../../src/modules/github-integration/types/index.ts", import.meta.url),
   "utf8"
 );
+const dtoIndex = await readFile(
+  new URL("../../src/modules/github-integration/dto/index.ts", import.meta.url),
+  "utf8"
+);
 
 const githubIntegrationDirectory = new URL(
   "../../src/modules/github-integration/",
@@ -60,6 +64,9 @@ assert.match(controllerFile, /@Get\("workspaces\/:workspaceId\/github\/repositor
 assert.match(controllerFile, /@Get\("workspaces\/:workspaceId\/github\/pull-requests\/:pullRequestId"\)/);
 assert.match(controllerFile, /@Get\("workspaces\/:workspaceId\/github\/pull-requests\/:pullRequestId\/files"\)/);
 assert.match(controllerFile, /@Get\("workspaces\/:workspaceId\/github\/pull-requests\/:pullRequestId\/conflict-status"\)/);
+assert.match(controllerFile, /@Post\("workspaces\/:workspaceId\/github\/sync-runs"\)/);
+assert.match(controllerFile, /@Get\("workspaces\/:workspaceId\/github\/sync-runs"\)/);
+assert.match(controllerFile, /@Get\("workspaces\/:workspaceId\/github\/sync-runs\/:syncRunId"\)/);
 assert.match(controllerFile, /@UseGuards\(AuthGuard\)/);
 
 assert.match(serviceFile, /getModuleInfo\(\): GitHubIntegrationModuleInfo/);
@@ -85,10 +92,17 @@ assert.match(serviceFile, /listGithubPullRequests/);
 assert.match(serviceFile, /getGithubPullRequest/);
 assert.match(serviceFile, /listGithubPullRequestFiles/);
 assert.match(serviceFile, /getGithubPullRequestConflictStatus/);
+assert.match(serviceFile, /startGithubSyncRun/);
+assert.match(serviceFile, /listGithubSyncRuns/);
+assert.match(serviceFile, /getGithubSyncRun/);
 
 assert.match(typesIndex, /export type GitHubIntegrationModuleInfo/);
 assert.match(typesIndex, /GithubPullRequestFilePayload/);
 assert.match(typesIndex, /GithubPullRequestConflictStatusPayload/);
+assert.match(typesIndex, /GithubSyncRunPayload/);
+assert.match(typesIndex, /GithubSyncRunDetailPayload/);
+assert.match(dtoIndex, /StartGithubSyncRunRequest/);
+assert.match(dtoIndex, /ListGithubSyncRunsQuery/);
 assert.deepEqual(directoryNames.sort(), ["dto", "queries", "types"]);
 
 const tscScript = fileURLToPath(
@@ -104,3 +118,4 @@ await import("./installation.test.mjs");
 await import("./source-read.test.mjs");
 await import("./project-v2.test.mjs");
 await import("./pr-files.test.mjs");
+await import("./sync-runs.test.mjs");
