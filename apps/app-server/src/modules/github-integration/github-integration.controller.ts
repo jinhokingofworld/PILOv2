@@ -1,10 +1,27 @@
-import { Body, Controller, Delete, Get, Post, Query, UseGuards } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Post,
+  Query,
+  UseGuards
+} from "@nestjs/common";
 import { apiResponse, ApiSuccessResponse } from "../../common/api-response";
 import { AuthGuard } from "../../common/auth.guard";
 import { CurrentUserId } from "../../common/current-user.decorator";
-import type { GithubOAuthCallbackQuery, StartGithubOAuthRequest } from "./dto";
+import type {
+  GithubAppInstallationCallbackQuery,
+  GithubOAuthCallbackQuery,
+  StartGithubAppInstallationRequest,
+  StartGithubOAuthRequest
+} from "./dto";
 import { GithubIntegrationService } from "./github-integration.service";
 import type {
+  GithubAppInstallationCallbackPayload,
+  GithubAppInstallationPayload,
+  GithubAppInstallationStartPayload,
   GithubOAuthCallbackPayload,
   GithubOAuthDisconnectPayload,
   GithubOAuthStartPayload,
@@ -53,6 +70,43 @@ export class GithubIntegrationController {
   ): Promise<ApiSuccessResponse<GithubOAuthDisconnectPayload>> {
     const result = await this.githubIntegrationService.disconnectGithubOAuth(
       currentUserId
+    );
+    return apiResponse(result);
+  }
+
+  @Post("workspaces/:workspaceId/github/installations/start")
+  @UseGuards(AuthGuard)
+  async startGithubAppInstallation(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Body() body: StartGithubAppInstallationRequest | undefined
+  ): Promise<ApiSuccessResponse<GithubAppInstallationStartPayload>> {
+    const result = await this.githubIntegrationService.startGithubAppInstallation(
+      currentUserId,
+      workspaceId,
+      body
+    );
+    return apiResponse(result);
+  }
+
+  @Get("github/installations/callback")
+  async completeGithubAppInstallationCallback(
+    @Query() query: GithubAppInstallationCallbackQuery
+  ): Promise<ApiSuccessResponse<GithubAppInstallationCallbackPayload>> {
+    const result =
+      await this.githubIntegrationService.completeGithubAppInstallationCallback(query);
+    return apiResponse(result);
+  }
+
+  @Get("workspaces/:workspaceId/github/installations")
+  @UseGuards(AuthGuard)
+  async listGithubAppInstallations(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string
+  ): Promise<ApiSuccessResponse<GithubAppInstallationPayload[]>> {
+    const result = await this.githubIntegrationService.listGithubAppInstallations(
+      currentUserId,
+      workspaceId
     );
     return apiResponse(result);
   }

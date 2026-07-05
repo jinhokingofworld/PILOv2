@@ -13,5 +13,7 @@ API contract: `docs/api/github-integration-api.md`
 
 주의:
 
+- GitHub App 설치 완료 redirect 경로는 GitHub App 설정의 Setup URL에 등록한다.
+- GitHub App installation 연결은 현재 사용자의 GitHub OAuth 연결을 선행 조건으로 두고, callback의 `installation_id`가 해당 사용자에게 접근 가능한 installation인지 검증한 뒤 저장한다.
 - Repository/Issue/PR/ProjectV2 조회와 동기화는 GitHub App installation token을 사용한다.
 - GitHub Review 제출은 이 모듈이 아니라 PR Review 모듈에서 사용자 OAuth token으로 처리한다.
