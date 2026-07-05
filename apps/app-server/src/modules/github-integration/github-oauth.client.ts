@@ -24,6 +24,10 @@ export interface GithubUserInstallationAccessRequest {
   installationId: number;
 }
 
+export interface GithubUserInstallationLookupRequest {
+  accessToken: string;
+}
+
 interface GithubUserInstallationsApiPayload {
   total_count?: number;
   installations?: Array<{
@@ -98,31 +102,11 @@ export class GithubOAuthClient {
     let page = 1;
 
     while (true) {
-      const url = new URL("https://api.github.com/user/installations");
-      url.searchParams.set("per_page", String(perPage));
-      url.searchParams.set("page", String(page));
-
-      let response: Response;
-      try {
-        response = await fetch(url, {
-          headers: {
-            Accept: "application/vnd.github+json",
-            Authorization: `Bearer ${input.accessToken}`,
-            "X-GitHub-Api-Version": GITHUB_API_VERSION
-          }
-        });
-      } catch {
-        throw badRequest("GitHub OAuth installation lookup failed");
-      }
-
-      if (!response.ok) {
-        throw badRequest("GitHub OAuth installation lookup failed");
-      }
-
-      const payload = await this.readInstallationJson(response);
-      if (!this.isUserInstallationsPayload(payload)) {
-        throw badRequest("GitHub OAuth installation lookup failed");
-      }
+      const payload = await this.fetchUserInstallationsPage(
+        input.accessToken,
+        page,
+        perPage
+      );
 
       if (
         payload.installations.some(
@@ -139,6 +123,52 @@ export class GithubOAuthClient {
 
       page += 1;
     }
+  }
+
+  async assertUserInstallationLookupSupported(
+    input: GithubUserInstallationLookupRequest
+  ): Promise<void> {
+    await this.fetchUserInstallationsPage(input.accessToken, 1, 1);
+  }
+
+  private async fetchUserInstallationsPage(
+    accessToken: string,
+    page: number,
+    perPage: number
+  ): Promise<Required<GithubUserInstallationsApiPayload>> {
+    const url = new URL("https://api.github.com/user/installations");
+    url.searchParams.set("per_page", String(perPage));
+    url.searchParams.set("page", String(page));
+
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        headers: {
+          Accept: "application/vnd.github+json",
+          Authorization: `Bearer ${accessToken}`,
+          "X-GitHub-Api-Version": GITHUB_API_VERSION
+        }
+      });
+    } catch {
+      throw badRequest("GitHub OAuth installation lookup failed");
+    }
+
+    if (response.status === 401 || response.status === 403) {
+      throw badRequest(
+        "GitHub App user access token is required for installation lookup"
+      );
+    }
+
+    if (!response.ok) {
+      throw badRequest("GitHub OAuth installation lookup failed");
+    }
+
+    const payload = await this.readInstallationJson(response);
+    if (!this.isUserInstallationsPayload(payload)) {
+      throw badRequest("GitHub OAuth installation lookup failed");
+    }
+
+    return payload;
   }
 
   private isTokenPayload(value: unknown): value is {

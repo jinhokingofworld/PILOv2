@@ -50,8 +50,8 @@
 | `GOOGLE_OAUTH_CLIENT_SECRET` | Google 로그인 OAuth client secret |
 | `GITHUB_LOGIN_CLIENT_ID` | GitHub 로그인 OAuth client id |
 | `GITHUB_LOGIN_CLIENT_SECRET` | GitHub 로그인 OAuth client secret |
-| `GITHUB_USER_OAUTH_CLIENT_ID` | GitHub Review 제출용 사용자 OAuth client id |
-| `GITHUB_USER_OAUTH_CLIENT_SECRET` | GitHub Review 제출용 사용자 OAuth client secret |
+| `GITHUB_USER_OAUTH_CLIENT_ID` | GitHub App user authorization client id. Installation verification and user-scoped GitHub actions use this token. |
+| `GITHUB_USER_OAUTH_CLIENT_SECRET` | GitHub App user authorization client secret |
 | `GITHUB_APP_ID` | GitHub App id |
 | `GITHUB_APP_PRIVATE_KEY` | GitHub App private key |
 | `GITHUB_WEBHOOK_SECRET` | GitHub webhook 검증 secret |

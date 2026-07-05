@@ -7,6 +7,10 @@ PILO 로그인과 bearer session 발급 API를 정의한다.
 `users.github_access_token_encrypted`, `github_token_scope`,
 `github_connected_at`, `github_revoked_at`을 함께 갱신한다.
 
+이 로그인용 OAuth token은 GitHub App installation lookup에 사용할 수 있다고
+가정하지 않는다. GitHub Integration의 installation 검증은 GitHub App user
+access token으로 `/user/installations`를 조회할 수 있어야 한다.
+
 ## 공통 규칙
 
 - Base URL: `/api/v1`

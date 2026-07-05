@@ -59,9 +59,16 @@ export class GithubAppInstallationService {
     input: StartGithubAppInstallationRequest | undefined
   ): Promise<GithubAppInstallationStartPayload> {
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
-    await this.assertGithubOAuthConnected(currentUserId);
 
     const config = this.configService.getGithubAppConfig();
+    const oauthConfig = this.configService.getGithubOAuthConfig();
+    const accessToken = await this.getConnectedGithubOAuthAccessToken(
+      currentUserId,
+      oauthConfig
+    );
+    await this.githubOAuthClient.assertUserInstallationLookupSupported({
+      accessToken
+    });
     const returnUrl = this.validateReturnUrl(input?.returnUrl);
     const state = this.installationStateService.createState(
       {
@@ -229,13 +236,6 @@ export class GithubAppInstallationService {
       suspendedAt: this.toNullableIsoString(row.suspended_at),
       lastSyncedAt: this.toNullableIsoString(row.last_synced_at)
     };
-  }
-
-  private async assertGithubOAuthConnected(currentUserId: string): Promise<void> {
-    const row = await this.getGithubOAuthConnectionRow(currentUserId);
-    if (!this.isActiveGithubOAuthConnection(row)) {
-      throw badRequest("GitHub OAuth connection is required");
-    }
   }
 
   private async getConnectedGithubOAuthAccessToken(

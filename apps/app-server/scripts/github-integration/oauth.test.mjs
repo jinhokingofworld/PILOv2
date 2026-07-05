@@ -105,7 +105,7 @@ const connectedRow = {
   assert.equal(authorizeUrl.origin + authorizeUrl.pathname, "https://github.com/login/oauth/authorize");
   assert.equal(authorizeUrl.searchParams.get("client_id"), "client-id");
   assert.equal(authorizeUrl.searchParams.get("redirect_uri"), "https://api.pilo.test/api/v1/github/oauth/callback");
-  assert.equal(authorizeUrl.searchParams.get("scope"), "repo read:user");
+  assert.equal(authorizeUrl.searchParams.get("scope"), null);
   assert.equal(authorizeUrl.searchParams.get("state"), start.state);
 
   const parsedState = stateService.verifyState(start.state, baseConfig);
