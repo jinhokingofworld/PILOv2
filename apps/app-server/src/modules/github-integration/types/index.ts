@@ -85,6 +85,121 @@ export interface GithubRepositoryDetailPayload
   githubUpdatedAt: string | null;
 }
 
+export type GithubProjectV2OwnerType = "User" | "Organization";
+
+export type GithubProjectV2ItemContentType =
+  | "ISSUE"
+  | "PULL_REQUEST"
+  | "DRAFT_ISSUE"
+  | "UNKNOWN";
+
+export interface GithubProjectV2ListItemPayload {
+  id: string;
+  installationId: string;
+  githubProjectNodeId: string;
+  githubProjectFullDatabaseId: number | null;
+  ownerLogin: string;
+  ownerType: GithubProjectV2OwnerType;
+  projectNumber: number;
+  title: string;
+  shortDescription: string | null;
+  url: string;
+  public: boolean;
+  closed: boolean;
+  template: boolean;
+  lastSyncedAt: string | null;
+}
+
+export interface GithubProjectV2DetailPayload
+  extends GithubProjectV2ListItemPayload {
+  readme: string | null;
+  resourcePath: string | null;
+  githubCreatedAt: string | null;
+  githubUpdatedAt: string | null;
+  githubClosedAt: string | null;
+}
+
+export interface GithubProjectV2FieldPayload {
+  id: string;
+  projectV2Id: string;
+  githubFieldNodeId: string;
+  fieldName: string;
+  dataType: string;
+  isStatusField: boolean;
+  githubCreatedAt: string | null;
+  githubUpdatedAt: string | null;
+}
+
+export interface GithubProjectV2StatusOptionPayload {
+  id: string;
+  fieldId: string;
+  githubOptionId: string;
+  optionName: string;
+  normalizedName: string;
+  color: string | null;
+  description: string | null;
+  position: number | null;
+}
+
+export interface GithubProjectV2ItemPayload {
+  id: string;
+  projectV2Id: string;
+  githubProjectItemNodeId: string;
+  githubProjectItemFullDatabaseId: number | null;
+  contentType: GithubProjectV2ItemContentType;
+  issueId: string | null;
+  pullRequestId: string | null;
+  isArchived: boolean;
+  statusFieldId: string | null;
+  statusOptionId: string | null;
+  statusOptionGithubId: string | null;
+  statusName: string | null;
+  statusNormalizedName: string | null;
+  position: number | null;
+  contentNumber: number | null;
+  contentTitle: string | null;
+  contentState: string | null;
+  contentUrl: string | null;
+  labels: unknown[];
+  assignees: unknown[];
+  githubCreatedAt: string | null;
+  githubUpdatedAt: string | null;
+  lastSyncedAt: string | null;
+}
+
+export interface GithubProjectV2KanbanItemPayload {
+  id: string;
+  contentType: GithubProjectV2ItemContentType;
+  issueId: string | null;
+  pullRequestId: string | null;
+  title: string | null;
+  url: string | null;
+  assignees: unknown[];
+  labels: unknown[];
+}
+
+export interface GithubProjectV2KanbanColumnPayload {
+  id: string;
+  fieldId: string;
+  githubOptionId: string;
+  name: string;
+  key: string;
+  color: string | null;
+  description: string | null;
+  position: number | null;
+  items: GithubProjectV2KanbanItemPayload[];
+}
+
+export interface GithubProjectV2KanbanPayload {
+  project: {
+    id: string;
+    title: string;
+  };
+  statusField: GithubProjectV2FieldPayload | null;
+  columns: GithubProjectV2KanbanColumnPayload[];
+  unmappedItems: GithubProjectV2KanbanItemPayload[];
+}
+
 export interface GithubIssuePayload {
   id: string;
   repositoryId: string;

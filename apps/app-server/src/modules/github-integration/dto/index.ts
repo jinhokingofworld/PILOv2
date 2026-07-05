@@ -24,6 +24,14 @@ export interface ListGithubRepositoriesQuery {
   limit?: unknown;
 }
 
+export interface ListGithubProjectsV2Query {
+  ownerLogin?: unknown;
+  closed?: unknown;
+  q?: unknown;
+  page?: unknown;
+  limit?: unknown;
+}
+
 export interface ListGithubPullRequestsQuery {
   state?: unknown;
   query?: unknown;

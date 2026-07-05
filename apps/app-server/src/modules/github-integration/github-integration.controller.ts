@@ -15,6 +15,7 @@ import type {
   GithubAppInstallationCallbackQuery,
   GithubOAuthCallbackQuery,
   ListGithubPullRequestsQuery,
+  ListGithubProjectsV2Query,
   ListGithubRepositoriesQuery,
   StartGithubAppInstallationRequest,
   StartGithubOAuthRequest
@@ -31,6 +32,12 @@ import type {
   GithubOAuthStatusPayload,
   GithubPaginatedPayload,
   GithubPaginationMeta,
+  GithubProjectV2DetailPayload,
+  GithubProjectV2FieldPayload,
+  GithubProjectV2ItemPayload,
+  GithubProjectV2KanbanPayload,
+  GithubProjectV2ListItemPayload,
+  GithubProjectV2StatusOptionPayload,
   GithubPullRequestDetailPayload,
   GithubPullRequestListItemPayload,
   GithubRepositoryDetailPayload,
@@ -160,6 +167,97 @@ export class GithubIntegrationController {
       currentUserId,
       workspaceId,
       repositoryId
+    );
+    return apiResponse(result);
+  }
+
+  @Get("workspaces/:workspaceId/github/projects-v2")
+  @UseGuards(AuthGuard)
+  async listGithubProjectsV2(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Query() query: ListGithubProjectsV2Query
+  ): Promise<ApiSuccessResponseWithMeta<GithubProjectV2ListItemPayload[]>> {
+    const result = await this.githubIntegrationService.listGithubProjectsV2(
+      currentUserId,
+      workspaceId,
+      query
+    );
+    return apiPaginatedResponse(result);
+  }
+
+  @Get("workspaces/:workspaceId/github/projects-v2/:projectV2Id")
+  @UseGuards(AuthGuard)
+  async getGithubProjectV2(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("projectV2Id") projectV2Id: string
+  ): Promise<ApiSuccessResponse<GithubProjectV2DetailPayload>> {
+    const result = await this.githubIntegrationService.getGithubProjectV2(
+      currentUserId,
+      workspaceId,
+      projectV2Id
+    );
+    return apiResponse(result);
+  }
+
+  @Get("workspaces/:workspaceId/github/projects-v2/:projectV2Id/fields")
+  @UseGuards(AuthGuard)
+  async listGithubProjectV2Fields(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("projectV2Id") projectV2Id: string
+  ): Promise<ApiSuccessResponse<GithubProjectV2FieldPayload[]>> {
+    const result = await this.githubIntegrationService.listGithubProjectV2Fields(
+      currentUserId,
+      workspaceId,
+      projectV2Id
+    );
+    return apiResponse(result);
+  }
+
+  @Get("workspaces/:workspaceId/github/projects-v2/:projectV2Id/status-options")
+  @UseGuards(AuthGuard)
+  async listGithubProjectV2StatusOptions(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("projectV2Id") projectV2Id: string
+  ): Promise<ApiSuccessResponse<GithubProjectV2StatusOptionPayload[]>> {
+    const result =
+      await this.githubIntegrationService.listGithubProjectV2StatusOptions(
+        currentUserId,
+        workspaceId,
+        projectV2Id
+      );
+    return apiResponse(result);
+  }
+
+  @Get("workspaces/:workspaceId/github/projects-v2/:projectV2Id/kanban")
+  @UseGuards(AuthGuard)
+  async getGithubProjectV2Kanban(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("projectV2Id") projectV2Id: string
+  ): Promise<ApiSuccessResponse<GithubProjectV2KanbanPayload>> {
+    const result = await this.githubIntegrationService.getGithubProjectV2Kanban(
+      currentUserId,
+      workspaceId,
+      projectV2Id
+    );
+    return apiResponse(result);
+  }
+
+  @Get("workspaces/:workspaceId/github/projects-v2/:projectV2Id/items")
+  @UseGuards(AuthGuard)
+  async listGithubProjectV2Items(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("projectV2Id") projectV2Id: string
+  ): Promise<ApiSuccessResponse<GithubProjectV2ItemPayload[]>> {
+    const result = await this.githubIntegrationService.listGithubProjectV2Items(
+      currentUserId,
+      workspaceId,
+      projectV2Id
     );
     return apiResponse(result);
   }
