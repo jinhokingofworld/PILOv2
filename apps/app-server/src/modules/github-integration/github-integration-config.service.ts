@@ -12,8 +12,20 @@ export interface GithubOAuthRuntimeConfig {
   now?: () => Date;
 }
 
+export interface GithubAppRuntimeConfig {
+  appId: string;
+  appSlug: string;
+  privateKey: string;
+  apiPublicOrigin: string;
+  apiBasePath: string;
+  stateSecret: string;
+  stateTtlSeconds: number;
+  now?: () => Date;
+}
+
 const DEFAULT_API_BASE_PATH = "/api/v1";
 const DEFAULT_STATE_TTL_SECONDS = 600;
+const GITHUB_APP_SLUG_PATTERN = /^[a-zA-Z0-9-]+$/;
 
 @Injectable()
 export class GithubIntegrationConfigService {
@@ -42,9 +54,53 @@ export class GithubIntegrationConfigService {
     };
   }
 
-  private requireConfig(value: string | undefined): string {
+  getGithubAppConfig(): GithubAppRuntimeConfig {
+    const appId = this.requireConfig(
+      process.env.GITHUB_APP_ID,
+      "GitHub App is not configured"
+    );
+    const appSlug = this.normalizeGithubAppSlug(
+      this.requireConfig(process.env.GITHUB_APP_SLUG, "GitHub App is not configured")
+    );
+    const privateKey = this.normalizePrivateKey(
+      this.requireConfig(
+        process.env.GITHUB_APP_PRIVATE_KEY,
+        "GitHub App is not configured"
+      )
+    );
+    const apiPublicOrigin = this.requireConfig(
+      process.env.API_PUBLIC_ORIGIN,
+      "GitHub App is not configured"
+    );
+    const stateSecret = this.requireConfig(
+      process.env.SESSION_SECRET,
+      "GitHub App is not configured"
+    );
+    const apiBasePath = this.normalizeApiBasePath(
+      process.env.API_BASE_PATH ?? DEFAULT_API_BASE_PATH
+    );
+    const stateTtlSeconds = this.parsePositiveInteger(
+      process.env.OAUTH_STATE_TTL_SECONDS,
+      DEFAULT_STATE_TTL_SECONDS
+    );
+
+    return {
+      appId,
+      appSlug,
+      privateKey,
+      apiPublicOrigin: this.normalizeOrigin(apiPublicOrigin),
+      apiBasePath,
+      stateSecret,
+      stateTtlSeconds
+    };
+  }
+
+  private requireConfig(
+    value: string | undefined,
+    message = "GitHub OAuth is not configured"
+  ): string {
     if (!value?.trim()) {
-      throw badRequest("GitHub OAuth is not configured");
+      throw badRequest(message);
     }
 
     return value.trim();
@@ -66,6 +122,18 @@ export class GithubIntegrationConfigService {
   private normalizeApiBasePath(value: string): string {
     const path = value.trim() || DEFAULT_API_BASE_PATH;
     return path.startsWith("/") ? path.replace(/\/+$/, "") : `/${path}`;
+  }
+
+  private normalizeGithubAppSlug(value: string): string {
+    if (!GITHUB_APP_SLUG_PATTERN.test(value)) {
+      throw badRequest("GitHub App is not configured");
+    }
+
+    return value;
+  }
+
+  private normalizePrivateKey(value: string): string {
+    return value.replace(/\\n/g, "\n");
   }
 
   private parsePositiveInteger(value: string | undefined, fallback: number): number {
