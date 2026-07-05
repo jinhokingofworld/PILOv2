@@ -63,8 +63,17 @@ class FakeConfigService {
 }
 
 class FakeGithubAppClient {
-  constructor({ repositories = [], error = null } = {}) {
+  constructor({
+    repositories = [],
+    project = null,
+    fields = [],
+    items = [],
+    error = null
+  } = {}) {
     this.repositories = repositories;
+    this.project = project;
+    this.fields = fields;
+    this.items = items;
     this.error = error;
     this.calls = [];
   }
@@ -77,6 +86,33 @@ class FakeGithubAppClient {
 
     return this.repositories;
   }
+
+  async getProjectV2(input) {
+    this.calls.push({ method: "getProjectV2", input });
+    if (this.error) {
+      throw this.error;
+    }
+
+    return this.project;
+  }
+
+  async listProjectV2Fields(input) {
+    this.calls.push({ method: "listProjectV2Fields", input });
+    if (this.error) {
+      throw this.error;
+    }
+
+    return this.fields;
+  }
+
+  async listProjectV2Items(input) {
+    this.calls.push({ method: "listProjectV2Items", input });
+    if (this.error) {
+      throw this.error;
+    }
+
+    return this.items;
+  }
 }
 
 const currentUserId = "22222222-2222-4222-8222-222222222222";
@@ -87,6 +123,11 @@ const otherRepositoryId = "55555555-5555-4555-8555-555555555555";
 const projectV2Id = "66666666-6666-4666-8666-666666666666";
 const syncRunId = "77777777-7777-4777-8777-777777777777";
 const githubInstallationId = 987654;
+const projectNodeId = "PVT_kwDOExample";
+const statusFieldId = "88888888-8888-4888-8888-888888888888";
+const backlogOptionId = "99999999-9999-4999-8999-999999999999";
+const projectItemId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const issueId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 
 function createService(
   database = new FakeDatabase(),
@@ -117,6 +158,16 @@ function installationRow(overrides = {}) {
     id: installationId,
     workspace_id: workspaceId,
     github_installation_id: githubInstallationId,
+    ...overrides
+  };
+}
+
+function projectV2ContextRow(overrides = {}) {
+  return {
+    id: projectV2Id,
+    workspace_id: workspaceId,
+    installation_id: installationId,
+    github_project_node_id: projectNodeId,
     ...overrides
   };
 }
@@ -158,6 +209,89 @@ function repositoryApiItem(overrides = {}) {
     created_at: "2026-06-20T03:00:00.000Z",
     updated_at: "2026-07-01T14:30:00.000Z",
     pushed_at: "2026-07-01T14:30:00.000Z",
+    ...overrides
+  };
+}
+
+function projectV2ApiItem(overrides = {}) {
+  return {
+    id: projectNodeId,
+    databaseId: 42,
+    ownerLogin: "my-team",
+    ownerType: "Organization",
+    number: 1,
+    title: "PILO MVP",
+    shortDescription: "MVP board",
+    readme: "Project readme",
+    url: "https://github.com/orgs/my-team/projects/1",
+    resourcePath: "/orgs/my-team/projects/1",
+    public: false,
+    closed: false,
+    template: false,
+    createdAt: "2026-06-20T03:00:00.000Z",
+    updatedAt: "2026-07-01T14:30:00.000Z",
+    closedAt: null,
+    raw: { title: "PILO MVP" },
+    ...overrides
+  };
+}
+
+function projectV2FieldApiItem(overrides = {}) {
+  return {
+    id: "PVTSSF_lADOExample",
+    name: "Status",
+    dataType: "SINGLE_SELECT",
+    createdAt: "2026-06-20T03:00:00.000Z",
+    updatedAt: "2026-07-01T14:30:00.000Z",
+    options: [
+      {
+        id: "status-backlog",
+        name: "Backlog",
+        color: "GRAY",
+        description: "Ready for planning",
+        position: 1
+      }
+    ],
+    raw: { name: "Status" },
+    ...overrides
+  };
+}
+
+function projectV2ItemFieldValueApiItem(overrides = {}) {
+  return {
+    id: "PVTFV_lADOExample",
+    fieldNodeId: "PVTSSF_lADOExample",
+    fieldName: "Status",
+    fieldDataType: "SINGLE_SELECT",
+    textValue: null,
+    numberValue: null,
+    dateValue: null,
+    singleSelectOptionId: "status-backlog",
+    singleSelectName: "Backlog",
+    iterationId: null,
+    iterationTitle: null,
+    createdAt: "2026-07-01T10:00:00.000Z",
+    updatedAt: "2026-07-02T05:20:00.000Z",
+    raw: { name: "Backlog" },
+    ...overrides
+  };
+}
+
+function projectV2ItemApiItem(overrides = {}) {
+  return {
+    id: "PVTI_lADOExample",
+    databaseId: 9001,
+    contentType: "ISSUE",
+    contentNodeId: "I_kgDOExample",
+    isArchived: false,
+    statusFieldNodeId: "PVTSSF_lADOExample",
+    statusOptionId: "status-backlog",
+    statusName: "Backlog",
+    position: 10,
+    createdAt: "2026-07-01T10:00:00.000Z",
+    updatedAt: "2026-07-02T05:20:00.000Z",
+    fieldValues: [projectV2ItemFieldValueApiItem()],
+    raw: { content: { type: "Issue" } },
     ...overrides
   };
 }
@@ -378,6 +512,273 @@ function repositoryApiItem(overrides = {}) {
   });
   assert.equal(githubAppClient.calls.length, 1);
   assert.equal(githubAppClient.calls[0].input.installationId, githubInstallationId);
+}
+
+{
+  const githubAppClient = new FakeGithubAppClient({
+    project: projectV2ApiItem()
+  });
+  const database = new FakeDatabase({
+    queryOneRows: [
+      (text, values) => {
+        assert.match(text, /FROM github_installations/i);
+        assert.deepEqual(values, [workspaceId, installationId]);
+        return installationRow();
+      },
+      (text, values) => {
+        assert.match(text, /FROM github_projects_v2/i);
+        assert.match(text, /github_project_node_id/i);
+        assert.deepEqual(values, [workspaceId, projectV2Id]);
+        return projectV2ContextRow();
+      },
+      (text, values) => {
+        assert.match(text, /INSERT INTO github_sync_runs/i);
+        assert.deepEqual(values, [
+          workspaceId,
+          installationId,
+          null,
+          projectV2Id,
+          "project_v2"
+        ]);
+        return syncRunRow({
+          target: "project_v2",
+          status: "running",
+          repository_id: null,
+          finished_at: null,
+          fetched_count: 0,
+          created_count: 0,
+          updated_count: 0,
+          skipped_count: 0,
+          cursor: {}
+        });
+      },
+      (text, values) => {
+        assert.match(text, /UPDATE github_sync_runs/i);
+        assert.match(text, /status = 'success'/i);
+        assert.deepEqual(values, [syncRunId, 1, 0, 1, 0, {}]);
+        return syncRunRow({
+          target: "project_v2",
+          repository_id: null,
+          fetched_count: 1,
+          created_count: 0,
+          updated_count: 1,
+          skipped_count: 0,
+          cursor: {}
+        });
+      }
+    ]
+  });
+  const { service } = createService(database, githubAppClient);
+
+  const syncRun = await service.startGithubSyncRun(currentUserId, workspaceId, {
+    target: "project_v2",
+    installationId,
+    projectV2Id
+  });
+
+  assert.equal(syncRun.status, "success");
+  assert.equal(syncRun.fetchedCount, 1);
+  assert.equal(syncRun.updatedCount, 1);
+  assert.equal(githubAppClient.calls[0].method, "getProjectV2");
+  assert.equal(githubAppClient.calls[0].input.projectNodeId, projectNodeId);
+  const projectUpdate = database.queries.find(
+    (query) =>
+      query.method === "execute" &&
+      /UPDATE github_projects_v2/i.test(query.text)
+  );
+  assert.ok(projectUpdate);
+  assert.deepEqual(projectUpdate.values.slice(0, 6), [
+    projectV2Id,
+    installationId,
+    42,
+    "my-team",
+    "Organization",
+    1
+  ]);
+}
+
+{
+  const githubAppClient = new FakeGithubAppClient({
+    fields: [projectV2FieldApiItem()]
+  });
+  const database = new FakeDatabase({
+    queryOneRows: [
+      installationRow(),
+      projectV2ContextRow(),
+      syncRunRow({
+        target: "project_v2_fields",
+        status: "running",
+        repository_id: null,
+        finished_at: null,
+        fetched_count: 0,
+        created_count: 0,
+        updated_count: 0,
+        skipped_count: 0,
+        cursor: {}
+      }),
+      (text, values) => {
+        assert.match(text, /INSERT INTO github_project_v2_fields/i);
+        assert.deepEqual(values.slice(0, 5), [
+          projectV2Id,
+          "PVTSSF_lADOExample",
+          "Status",
+          "SINGLE_SELECT",
+          true
+        ]);
+        return { id: statusFieldId, created: true };
+      },
+      (text, values) => {
+        assert.match(text, /INSERT INTO github_project_v2_field_options/i);
+        assert.deepEqual(values, [
+          statusFieldId,
+          "status-backlog",
+          "Backlog",
+          "backlog",
+          "GRAY",
+          "Ready for planning",
+          1
+        ]);
+        return { id: backlogOptionId, created: false };
+      },
+      (text, values) => {
+        assert.match(text, /UPDATE github_sync_runs/i);
+        assert.deepEqual(values, [syncRunId, 1, 1, 0, 0, {}]);
+        return syncRunRow({
+          target: "project_v2_fields",
+          repository_id: null,
+          fetched_count: 1,
+          created_count: 1,
+          updated_count: 0,
+          skipped_count: 0,
+          cursor: {}
+        });
+      }
+    ]
+  });
+  const { service } = createService(database, githubAppClient);
+
+  const syncRun = await service.startGithubSyncRun(currentUserId, workspaceId, {
+    target: "project_v2_fields",
+    installationId,
+    projectV2Id
+  });
+
+  assert.equal(syncRun.status, "success");
+  assert.equal(syncRun.createdCount, 1);
+  assert.equal(githubAppClient.calls[0].method, "listProjectV2Fields");
+  assert.equal(githubAppClient.calls[0].input.projectNodeId, projectNodeId);
+}
+
+{
+  const githubAppClient = new FakeGithubAppClient({
+    items: [
+      projectV2ItemApiItem(),
+      projectV2ItemApiItem({
+        id: "PVTI_lADOSkipped",
+        contentNodeId: null,
+        fieldValues: []
+      })
+    ]
+  });
+  const database = new FakeDatabase({
+    queryOneRows: [
+      installationRow(),
+      projectV2ContextRow(),
+      syncRunRow({
+        target: "project_v2_items",
+        status: "running",
+        repository_id: null,
+        finished_at: null,
+        fetched_count: 0,
+        created_count: 0,
+        updated_count: 0,
+        skipped_count: 0,
+        cursor: {}
+      }),
+      (text, values) => {
+        assert.match(text, /FROM github_issues/i);
+        assert.deepEqual(values, [workspaceId, "I_kgDOExample"]);
+        return { id: issueId };
+      },
+      (text, values) => {
+        assert.match(text, /FROM github_project_v2_field_options/i);
+        assert.match(text, /JOIN github_project_v2_fields/i);
+        assert.deepEqual(values, [projectV2Id, "status-backlog"]);
+        return { id: backlogOptionId, field_id: statusFieldId, created: false };
+      },
+      (text, values) => {
+        assert.match(text, /INSERT INTO github_project_v2_items/i);
+        assert.deepEqual(values.slice(0, 14), [
+          workspaceId,
+          projectV2Id,
+          "PVTI_lADOExample",
+          9001,
+          "ISSUE",
+          issueId,
+          null,
+          false,
+          statusFieldId,
+          backlogOptionId,
+          "status-backlog",
+          "Backlog",
+          "backlog",
+          10
+        ]);
+        return { id: projectItemId, created: true };
+      },
+      (text, values) => {
+        assert.match(text, /FROM github_project_v2_fields/i);
+        assert.deepEqual(values, ["PVTSSF_lADOExample"]);
+        return { id: statusFieldId, created: false };
+      },
+      (text, values) => {
+        assert.match(text, /UPDATE github_sync_runs/i);
+        assert.deepEqual(values, [syncRunId, 2, 1, 0, 1, {}]);
+        return syncRunRow({
+          target: "project_v2_items",
+          repository_id: null,
+          fetched_count: 2,
+          created_count: 1,
+          updated_count: 0,
+          skipped_count: 1,
+          cursor: {}
+        });
+      }
+    ]
+  });
+  const { service } = createService(database, githubAppClient);
+
+  const syncRun = await service.startGithubSyncRun(currentUserId, workspaceId, {
+    target: "project_v2_items",
+    installationId,
+    projectV2Id
+  });
+
+  assert.equal(syncRun.status, "success");
+  assert.equal(syncRun.fetchedCount, 2);
+  assert.equal(syncRun.createdCount, 1);
+  assert.equal(syncRun.skippedCount, 1);
+  assert.equal(githubAppClient.calls[0].method, "listProjectV2Items");
+  assert.equal(githubAppClient.calls[0].input.projectNodeId, projectNodeId);
+  const fieldValueUpsert = database.queries.find(
+    (query) =>
+      query.method === "execute" &&
+      /INSERT INTO github_project_v2_item_field_values/i.test(query.text)
+  );
+  assert.ok(fieldValueUpsert);
+  assert.deepEqual(fieldValueUpsert.values.slice(0, 11), [
+    projectItemId,
+    statusFieldId,
+    "PVTFV_lADOExample",
+    "Status",
+    "SINGLE_SELECT",
+    null,
+    null,
+    null,
+    "status-backlog",
+    "Backlog",
+    null
+  ]);
 }
 
 {
