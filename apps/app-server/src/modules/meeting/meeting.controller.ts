@@ -91,13 +91,13 @@ export class MeetingController {
     return apiResponse(result);
   }
 
-  @Post("meetings/:meetingId/end")
-  async endMeeting(
+  @Post("meetings/:meetingId/recordings")
+  async startRecording(
     @CurrentUserId() currentUserId: string,
     @Param("workspaceId") workspaceId: string,
     @Param("meetingId") meetingId: string
   ): Promise<ApiSuccessResponse<PendingMeetingPayload>> {
-    const result = await this.meetingService.endMeeting(
+    const result = await this.meetingService.startRecording(
       currentUserId,
       workspaceId,
       meetingId
@@ -105,13 +105,43 @@ export class MeetingController {
     return apiResponse(result);
   }
 
-  @Get("meetings/:meetingId/recording")
-  async getRecording(
+  @Post("meetings/:meetingId/recordings/:recordingId/end")
+  async endRecordingAndCreateReport(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("meetingId") meetingId: string,
+    @Param("recordingId") recordingId: string
+  ): Promise<ApiSuccessResponse<PendingMeetingPayload>> {
+    const result = await this.meetingService.endRecordingAndCreateReport(
+      currentUserId,
+      workspaceId,
+      meetingId,
+      recordingId
+    );
+    return apiResponse(result);
+  }
+
+  @Get("meetings/:meetingId/recordings")
+  async listRecordings(
     @CurrentUserId() currentUserId: string,
     @Param("workspaceId") workspaceId: string,
     @Param("meetingId") meetingId: string
   ): Promise<ApiSuccessResponse<PendingMeetingPayload>> {
-    const result = await this.meetingService.getRecording(
+    const result = await this.meetingService.listRecordings(
+      currentUserId,
+      workspaceId,
+      meetingId
+    );
+    return apiResponse(result);
+  }
+
+  @Get("meetings/:meetingId/recordings/current")
+  async getCurrentRecording(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("meetingId") meetingId: string
+  ): Promise<ApiSuccessResponse<PendingMeetingPayload>> {
+    const result = await this.meetingService.getCurrentRecording(
       currentUserId,
       workspaceId,
       meetingId
@@ -161,13 +191,13 @@ export class MeetingController {
     return apiResponse(result);
   }
 
-  @Get("meetings/:meetingId/report")
-  async getMeetingReport(
+  @Get("meetings/:meetingId/reports")
+  async listMeetingReports(
     @CurrentUserId() currentUserId: string,
     @Param("workspaceId") workspaceId: string,
     @Param("meetingId") meetingId: string
   ): Promise<ApiSuccessResponse<PendingMeetingPayload>> {
-    const result = await this.meetingService.getMeetingReport(
+    const result = await this.meetingService.listMeetingReports(
       currentUserId,
       workspaceId,
       meetingId

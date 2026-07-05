@@ -108,6 +108,9 @@ assert.deepEqual(directoryNames.sort(), ["dto", "queries", "types"]);
 const tscScript = fileURLToPath(
   new URL("../../node_modules/typescript/bin/tsc", import.meta.url)
 );
+
+await import("./structure.test.mjs");
+
 execFileSync(process.execPath, [tscScript, "-p", "tsconfig.build.json"], {
   cwd: new URL("../..", import.meta.url),
   stdio: "inherit"

@@ -12,7 +12,6 @@ import {
 import { usePathname, useRouter } from "next/navigation";
 
 import {
-  createWorkspace,
   getCurrentUser,
   listWorkspaces,
   logoutSession,
@@ -168,10 +167,10 @@ export async function loadAuthSessionEntry(
   accessToken: string
 ): Promise<AuthSessionData> {
   const user = await getCurrentUser(accessToken);
-  let workspaces = await listWorkspaces(accessToken);
+  const workspaces = await listWorkspaces(accessToken);
 
   if (workspaces.length === 0) {
-    workspaces = [await createWorkspace(accessToken, "PILO")];
+    throw new Error("Workspace was not initialized during login");
   }
 
   const storedWorkspaceId = getSelectedWorkspaceId();

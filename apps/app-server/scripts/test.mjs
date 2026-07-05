@@ -44,6 +44,9 @@ const meetingController = await readSource(
 );
 const meetingModule = await readSource("../src/modules/meeting/meeting.module.ts");
 const meetingService = await readSource("../src/modules/meeting/meeting.service.ts");
+const workspaceMeetingConstraintMigration = await readSource(
+  "../../../db/migrations/006_update_workspace_and_meeting_recording_constraints.sql"
+);
 
 assert.match(main, /setGlobalPrefix\("api\/v1"\)/);
 assert.match(controller, /@Get\("health"\)/);
@@ -107,11 +110,15 @@ assert.match(googleOAuthClient, /openidconnect\.googleapis\.com\/v1\/userinfo/);
 assert.match(githubLoginOAuthClient, /api\.github\.com\/user\/emails/);
 assert.match(workspaceController, /@Controller\("workspaces"\)/);
 assert.match(workspaceController, /@Get\(\)/);
-assert.match(workspaceController, /@Post\(\)/);
 assert.match(workspaceController, /@Get\(":workspaceId"\)/);
 assert.match(workspaceService, /WHERE owner_user_id = \$1/);
 assert.match(workspaceService, /ORDER BY created_at ASC/);
 assert.match(workspaceService, /assertWorkspaceAccess/);
+assert.match(authService, /ensureWorkspaceForUser/);
+assert.match(authService, /INSERT INTO workspaces \(name, owner_user_id\)/);
+assert.match(authService, /ON CONFLICT \(owner_user_id\) WHERE owner_user_id IS NOT NULL/);
+assert.match(workspaceMeetingConstraintMigration, /unique_workspace_per_owner_user_id/);
+assert.match(workspaceMeetingConstraintMigration, /WHERE owner_user_id IS NOT NULL/);
 assert.match(canvasModule, /controllers: \[CanvasController\]/);
 assert.match(canvasModule, /providers: \[CanvasService\]/);
 assert.match(canvasController, /@Controller\("workspaces\/:workspaceId"\)/);
@@ -134,11 +141,13 @@ assert.match(meetingController, /@Controller\("workspaces\/:workspaceId"\)/);
 assert.match(meetingController, /@UseGuards\(AuthGuard\)/);
 assert.match(meetingController, /@Get\("meetings\/current"\)/);
 assert.match(meetingController, /@Post\("meetings"\)/);
+assert.match(meetingController, /@Post\("meetings\/:meetingId\/recordings"\)/);
+assert.match(meetingController, /@Post\("meetings\/:meetingId\/recordings\/:recordingId\/end"\)/);
+assert.match(meetingController, /@Get\("meetings\/:meetingId\/recordings"\)/);
 assert.match(meetingService, /MAIN_MEETING_ROOM/);
 assert.match(meetingService, /unique_active_meeting_per_room/);
 assert.match(meetingService, /INSERT INTO meetings/);
 assert.match(meetingService, /INSERT INTO meeting_participants/);
-assert.match(meetingService, /INSERT INTO meeting_recordings/);
 
 await import("./calendar/test.mjs");
 await import("./meeting/test.mjs");

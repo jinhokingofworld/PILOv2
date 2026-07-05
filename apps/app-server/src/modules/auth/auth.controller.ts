@@ -65,9 +65,11 @@ export class AuthController {
   ): Promise<void> {
     try {
       const redirectUrl = await this.authService.completeLoginCallback(provider, query);
-      void reply.redirect(redirectUrl);
+      void reply.status(302).redirect(redirectUrl);
     } catch {
-      void reply.redirect(this.authService.buildLoginRedirect(`${provider}_login_failed`));
+      void reply
+        .status(302)
+        .redirect(this.authService.buildLoginRedirect(`${provider}_login_failed`));
     }
   }
 }

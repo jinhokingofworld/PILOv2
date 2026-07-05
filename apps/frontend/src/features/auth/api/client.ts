@@ -116,16 +116,6 @@ export async function listWorkspaces(accessToken: string) {
   });
 }
 
-export async function createWorkspace(accessToken: string, name: string) {
-  return requestJson<Workspace>("/workspaces", {
-    accessToken,
-    method: "POST",
-    body: {
-      name
-    }
-  });
-}
-
 export async function logoutSession(accessToken: string) {
   return requestJson<{ loggedOut: true }>("/auth/logout", {
     accessToken,

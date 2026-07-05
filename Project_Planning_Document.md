@@ -38,7 +38,7 @@ MVP의 핵심 사용자 흐름은 다음과 같다.
 5. 리뷰어는 open PR을 선택해 AI 분석 기반 PR 리뷰 세션을 시작한다.
 6. 리뷰어는 파일별 diff를 확인하고 리뷰 판단과 메모를 남긴다.
 7. 리뷰어는 결과를 GitHub PR Review body로 제출한다.
-8. 사용자는 음성 회의를 진행하고, 회의 종료 후 STT/LLM 기반 회의록을 생성한다.
+8. 사용자는 음성 회의를 진행하고, 녹음 종료 후 STT/LLM 기반 회의록을 생성한다.
 9. 사용자는 자유형 캔버스에서 메모, 도형, 코드블럭 등을 저장한다.
 10. 사용자는 월간 캘린더에서 일정만 생성, 조회, 수정, 삭제한다.
 
@@ -726,7 +726,7 @@ GitHub 제출 정책:
 
 ### 7.1 목적
 
-회의 기능은 사용자가 고정 회의 페이지에서 음성 회의를 진행하고, 회의 종료 후 녹음 파일을 STT와 LLM으로 처리해 회의록을 생성하는 기능이다.
+회의 기능은 사용자가 고정 회의 페이지에서 음성 회의를 진행하고, 녹음 종료 후 녹음 파일을 STT와 LLM으로 처리해 회의록을 생성하는 기능이다.
 
 ### 7.2 용어
 
@@ -735,28 +735,32 @@ GitHub 제출 정책:
 | 회의 페이지 | 사용자가 회의에 접속할 수 있는 웹페이지 |
 | 회의실 MeetingRoom | MVP 제외. 여러 회의 공간을 관리하는 개념 |
 | 회의 Meeting | 실제 진행되는 회의 세션 |
+| Recording | 하나의 Meeting 안에서 사용자가 시작하고 종료하는 녹음 단위 |
 | MeetingReport | 회의 녹음에서 생성된 회의록 |
 
 MVP 기준:
 
-- 회의 페이지 자체가 하나의 회의실 역할을 한다.
+- 회의 페이지 자체는 고정 회의실의 진입점 역할을 한다.
 - `roomKey = "MAIN_MEETING_ROOM"`을 사용한다.
-- 같은 `roomKey`에서 `endedAt = null`인 Meeting은 하나만 존재해야 한다.
+- `roomKey`는 Workspace 안의 기본 회의실 키다.
+- `livekitRoomName`은 실제 LiveKit room name이며 Meeting 세션별로 고유해야 한다.
+- 같은 `workspaceId + roomKey`에서 `endedAt = null`인 Meeting은 하나만 존재해야 한다.
 
 ### 7.3 회의 페이지 진입
 
 기능:
 
 - 사용자가 회의 페이지에 접근한다.
+- 페이지 이동 자체는 DB 참여를 만들지 않는다.
 - 프론트는 현재 진행 중인 회의가 있는지 조회한다.
-- 진행 중 회의가 없으면 `회의 시작하기` 버튼을 보여준다.
-- 진행 중 회의가 있으면 `회의 참여하기` 버튼을 보여준다.
+- 화면에는 단일 `회의 참여하기` 버튼을 보여준다.
+- 사용자가 버튼을 누르면 진행 중 회의가 있을 때는 참여하고, 없을 때는 새 회의를 시작한다.
 
 중복 방지:
 
 ```sql
 CREATE UNIQUE INDEX unique_active_meeting_per_room
-ON meetings (room_key)
+ON meetings (workspace_id, room_key)
 WHERE ended_at IS NULL;
 ```
 
@@ -767,6 +771,7 @@ WHERE ended_at IS NULL;
 - 처음 회의 페이지를 이용하는 사용자는 녹음 동의 모달을 봐야 한다.
 - 안내 문구는 `회의록 생성을 위해 녹음됩니다`를 포함한다.
 - 동의하지 않으면 회의 참여를 막는다.
+- 프론트는 녹음 동의가 완료된 사용자에게만 회의 시작/참여 요청을 보낸다.
 - 동의 여부는 MVP에서 서버 DB에 저장하지 않는다.
 - 동의 여부는 `localStorage.recordingConsentAccepted = true`로 저장한다.
 
@@ -781,17 +786,17 @@ WHERE ended_at IS NULL;
 
 ### 7.6 회의 시작과 참여
 
-새 회의 시작:
+단일 회의 참여 버튼:
 
-1. 사용자가 `회의 시작하기`를 클릭한다.
-2. 서버는 진행 중인 Meeting이 있는지 확인한다.
-3. 없으면 Meeting을 생성한다.
-4. 현재 사용자를 `meeting_participants`에 등록한다.
-5. LiveKit Room 이름을 결정한다.
-6. 사용자별 LiveKit JWT token을 발급한다.
-7. LiveKit Egress 녹음을 시작한다.
-8. `meeting_recordings.status = RUNNING`으로 저장한다.
-9. 프론트는 LiveKit Room에 connect하고 Audio Track을 publish한다.
+1. 사용자가 `회의 참여하기`를 클릭한다.
+2. 서버는 `workspaceId + roomKey` 기준으로 진행 중인 Meeting이 있는지 확인한다.
+3. 진행 중 Meeting이 없으면 Meeting을 생성한다.
+4. 진행 중 Meeting이 있으면 기존 Meeting에 참여한다.
+5. 현재 사용자를 `meeting_participants`에 등록하거나 기존 row를 재입장 상태로 갱신한다.
+6. LiveKit Room 이름을 결정한다.
+7. 사용자별 LiveKit JWT token을 발급한다.
+8. 프론트는 LiveKit Room에 connect하고 Audio Track을 publish한다.
+9. 녹음은 자동 시작하지 않는다. 사용자가 `녹음 시작` 버튼을 누를 때 별도 API로 시작한다.
 
 진행 중 회의 참여:
 
@@ -807,6 +812,7 @@ LiveKit token 규칙:
 - LiveKit token은 DB에 저장하지 않는다.
 - DB에는 `meetingId`, `userId`, `livekitIdentity`, `livekitRoomName`을 저장한다.
 - token은 입장 시 서버가 새로 발급한다.
+- token 만료 시간은 발급 시점 기준 1시간이다.
 
 ### 7.7 회의 진행
 
@@ -823,7 +829,7 @@ DB에 저장하지 않는 실시간 상태:
 - 마이크 상태는 LiveKit track muted 상태로 표시한다.
 - 발화 상태는 LiveKit active speaker 이벤트로 표시한다.
 - 연결 상태는 LiveKit connection state로 표시한다.
-- 화면 상단에는 녹음 중 표시를 고정한다.
+- header 우측에는 녹음 상태를 표시한다.
 
 ### 7.8 녹음
 
@@ -837,14 +843,19 @@ type RecordingStatus = "RUNNING" | "COMPLETED" | "FAILED";
 
 규칙:
 
-- 회의 시작 시 녹음을 시작한다.
-- 회의 종료 시 녹음을 종료한다.
-- 녹음 종료는 한 번만 수행되어야 한다.
+- Meeting과 Recording은 1:N 관계다.
+- 사용자가 `녹음 시작` 버튼을 누르면 서버가 LiveKit Egress 녹음을 시작한다.
+- 회의 시작 또는 참여만으로는 녹음을 자동 시작하지 않는다.
+- 같은 Meeting 안에서 `RUNNING` 상태 Recording은 하나만 존재할 수 있다.
+- `녹음 시작`, `녹음 종료하고 회의록 생성`, STT 요청, LLM 요청은 같은 Recording에 대해 한 번만 수행되어야 한다.
+- 녹음 종료하고 회의록 생성 요청 또는 마지막 참여자 나가기 자동 종료 시 진행 중 녹음이 있으면 녹음을 종료한다.
+- 녹음 종료는 회의방 종료가 아니다.
+- 녹음 종료 후에도 `Meeting.endedAt = null`이면 기존 참여자와 새 사용자가 계속 참여할 수 있다.
 - 녹음 파일 URL 또는 object key를 저장한다.
 - 녹음 실패 시 실패 상태와 원인을 저장한다.
-- 회의 시간이 60초 미만이면 회의록을 생성하지 않는다.
+- `recording.durationSec`이 60 이하면 회의록을 생성하지 않는다. 단, 녹음 자체가 실패해 duration을 알 수 없는 경우에는 실패한 회의록을 남길 수 있다.
 
-### 7.9 회의 나가기와 종료
+### 7.9 회의 나가기와 녹음 종료
 
 회의 나가기:
 
@@ -852,18 +863,32 @@ type RecordingStatus = "RUNNING" | "COMPLETED" | "FAILED";
 - 서버는 현재 사용자의 `meeting_participants.leftAt`을 저장한다.
 - 남은 참여자가 있으면 회의는 계속 진행된다.
 - 마지막 참여자가 나가면 서버가 회의를 자동 종료한다.
+- 마지막 참여자가 나갈 때 진행 중 녹음이 있으면 서버가 녹음을 종료하고 회의록 생성을 트리거한다.
 
-회의 종료하고 회의록 생성:
+녹음 시작:
 
-- 전체 회의 세션을 종료한다.
 - 회의에 참여 중인 사용자라면 누구나 실행할 수 있다.
-- 회의에 참여하지 않은 사용자가 종료 요청을 보내면 `403 FORBIDDEN`을 반환한다.
-- 서버는 회의 종료, 녹음 종료, 회의록 생성 트리거가 중복 실행되지 않도록 처리한다.
+- 회의에 참여하지 않은 사용자가 요청을 보내면 `403 FORBIDDEN`을 반환한다.
+- 서버는 같은 Meeting에 진행 중 녹음이 있는지 lock으로 확인한다.
+- 진행 중 녹음이 있으면 기존 Recording을 반환하고 LiveKit Egress 시작 side effect를 다시 수행하지 않는다.
+- 진행 중 녹음이 없으면 LiveKit Egress를 시작하고 `meeting_recordings.status = RUNNING`으로 저장한다.
+- LiveKit Egress 시작에 실패하면 성공하지 않은 녹음을 `RUNNING`으로 남기지 않는다.
+
+녹음 종료하고 회의록 생성:
+
+- 녹음만 종료하고 회의방은 계속 유지한다.
+- 회의에 참여 중인 사용자라면 누구나 실행할 수 있다.
+- 회의에 참여하지 않은 사용자가 요청을 보내면 `403 FORBIDDEN`을 반환한다.
+- 이 요청은 `Meeting.endedAt`을 저장하지 않는다.
+- `Meeting.endedAt = null`이면 녹음 종료 후에도 기존 참여자와 새 사용자가 계속 참여할 수 있다.
+- 서버는 target Recording row를 lock으로 잡고 `RUNNING`인지 확인한다.
+- 이미 종료된 녹음이면 기존 Recording과 MeetingReport 결과를 반환한다.
+- 서버는 회의 나가기, 녹음 종료, 회의록 생성 트리거가 중복 실행되지 않도록 처리한다.
 
 중복 종료 방지:
 
 ```ts
-if (meeting.endedAt !== null) {
+if (recording.status !== "RUNNING") {
   return existingResult;
 }
 ```
@@ -878,11 +903,15 @@ const REPORT_MIN_DURATION_SECONDS = 60;
 
 규칙:
 
-- 회의 시간이 60초 미만이면 MeetingReport를 생성하지 않는다.
-- 60초 미만 회의는 회의록 목록에도 노출하지 않는다.
-- 회의 시간이 60초 이상이면 MeetingReport를 `PROCESSING` 상태로 생성한다.
-- 녹음 파일을 STT에 전달해 transcript를 만든다.
-- STT 결과를 LLM에 전달해 회의록을 생성한다.
+- `recording.durationSec`이 60 이하면 MeetingReport를 생성하지 않는다.
+- `recording.durationSec`이 60 이하인 녹음은 회의록 목록에도 노출하지 않는다.
+- `recording.durationSec`이 60을 초과하면 MeetingReport를 `PROCESSING` 상태로 생성한다.
+- App Server는 MeetingReport를 `PROCESSING`으로 생성하고 AI job을 enqueue한다.
+- MVP에서는 `PROCESSING`을 queued와 running을 모두 포함하는 상태로 사용한다.
+- AI Worker는 job을 consume해 녹음 파일을 OpenAI STT API에 전달하고 transcript를 만든다.
+- AI Worker는 transcript를 OpenAI LLM API에 전달해 회의록을 생성한다.
+- AI Worker는 생성된 보고서를 DB에 저장하고 MeetingReport를 `COMPLETED` 또는 `FAILED`로 갱신한다.
+- Frontend는 App Server API로 MeetingReport 상태를 조회한다. 화면과 API 조회의 source of truth는 DB의 MeetingReport다.
 
 회의록 상태:
 
@@ -1372,17 +1401,22 @@ MVP에서는 Workspace 접근 권한이 있는 모든 사용자가 모든 일정
 ### 12.4 회의와 회의록
 
 - 사용자는 회의 페이지에서 진행 중 회의 여부를 확인할 수 있다.
-- 진행 중 회의가 없으면 새 Meeting을 시작할 수 있다.
-- 진행 중 회의가 있으면 기존 Meeting에 참여할 수 있다.
-- 같은 `roomKey`에서 진행 중 Meeting은 하나만 존재한다.
+- 사용자는 단일 `회의 참여하기` 버튼으로 진행 중 회의에 참여하거나 새 Meeting을 시작할 수 있다.
+- 같은 `workspaceId + roomKey`에서 진행 중 Meeting은 하나만 존재한다.
 - 첫 이용자는 녹음 동의 모달을 봐야 하며, 동의하지 않으면 참여할 수 없다.
 - 마이크 권한 거부 시 회의 참여 불가 안내를 본다.
 - 사용자는 LiveKit Room에서 음성 회의를 할 수 있다.
-- 회의 중 녹음 중 표시가 보인다.
+- 회의 시작 또는 참여만으로 녹음이 자동 시작되지 않는다.
+- 참여자는 `녹음 시작` 버튼으로 녹음을 시작할 수 있다.
+- 같은 Meeting 안에서 진행 중 녹음은 하나만 존재한다.
+- 회의 중 녹음 상태가 보인다.
 - 마지막 참여자가 나가면 회의가 자동 종료된다.
-- 참여자는 회의 종료하고 회의록 생성을 요청할 수 있다.
-- 60초 미만 회의는 MeetingReport를 생성하지 않고 목록에도 표시하지 않는다.
-- 60초 이상 회의는 STT/LLM 처리를 통해 MeetingReport를 생성한다.
+- 참여자는 녹음 종료하고 회의록 생성을 요청할 수 있다.
+- 녹음 종료하고 회의록 생성은 회의방을 종료하지 않는다.
+- `Meeting.endedAt = null`이면 녹음 종료 후에도 기존 참여자와 새 사용자가 계속 참여할 수 있다.
+- 하나의 Meeting에는 여러 Recording과 MeetingReport가 연결될 수 있다.
+- `recording.durationSec`이 60 이하면 MeetingReport를 생성하지 않고 목록에도 표시하지 않는다.
+- `recording.durationSec`이 60을 초과하면 STT/LLM 처리를 통해 MeetingReport를 생성한다.
 - 실패한 MeetingReport는 실패 사유와 재시도 버튼을 제공한다.
 
 ### 12.5 자유형 캔버스
@@ -1423,19 +1457,19 @@ MVP에서는 Workspace 접근 권한이 있는 모든 사용자가 모든 일정
 | Unit | board position | column/issue position 충돌 처리 |
 | Unit | PR review status | 파일 상태, 진행률, 제출 가능 상태 |
 | Unit | calendar schedule rules | 종일/시간 지정/여러 날 일정 계산 |
-| Unit | meeting duplicate guard | active meeting, recording, report 중복 방지 |
+| Unit | meeting duplicate guard | active meeting, active recording, recording/report side effect 중복 방지 |
 | Integration | GitHub App callback | installation 저장 및 중복 callback 처리 |
 | Integration | sync run | GitHub API mock 기반 upsert |
 | Integration | board hydrate | ProjectV2 field/option/item에서 board 생성 |
 | Integration | kanban move | lane 이동, GitHub sync 성공/실패 처리 |
 | Integration | PR review | PR 조회, 분석 세션, 파일 결정, submission |
 | Integration | webhook | signature 검증 및 이벤트 반영 |
-| Integration | meeting report | 회의 종료, recording, STT, LLM, retry |
+| Integration | meeting report | 녹음 시작, 녹음 종료, recording, STT, LLM, retry |
 | Integration | canvas persistence | 도형 CRUD와 viewport 복원 |
 | E2E | 최초 연결 | GitHub App 설치, full sync, 보드 표시 |
 | E2E | 칸반 | 검색, 필터, 상세, lane 이동 |
 | E2E | PR 리뷰 | PR 선택, 리뷰 시작, diff 확인, GitHub 제출 |
-| E2E | 회의 | 회의 시작, 참여, 종료, 회의록 생성 |
+| E2E | 회의 | 회의 시작, 참여, 나가기, 녹음 시작, 녹음 종료, 회의록 생성 |
 | E2E | 캘린더 | 일정 생성, 월간 표시, 상세, 수정, 삭제 |
 
 ## 14. 구현 전 확정 사항 반영

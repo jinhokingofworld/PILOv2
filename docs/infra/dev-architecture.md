@@ -320,10 +320,11 @@ AI Worker -> RDS result 저장 -> Realtime notification
 
 ```text
 User -> Next.js -> App Server -> LiveKit room/token 발급
-App Server -> LiveKit Egress audio_only 녹음 시작
+User -> Next.js -> App Server -> LiveKit Egress audio_only 녹음 시작
 LiveKit Egress -> S3 recordings prefix에 오디오 저장
-App Server or S3 event -> SQS meeting transcription job 생성
-AI Worker -> S3 오디오 다운로드 -> STT -> 회의록 생성 -> RDS 저장
+User -> Next.js -> App Server -> 녹음 종료 + SQS meeting report job 생성
+AI Worker -> S3 오디오 다운로드 -> OpenAI STT -> OpenAI LLM 보고서 생성 -> RDS 저장
+Frontend -> App Server -> RDS MeetingReport 상태 조회
 ```
 
 ## 9. CI/CD 개요

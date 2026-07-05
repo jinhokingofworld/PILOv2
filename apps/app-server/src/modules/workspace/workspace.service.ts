@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { QueryResultRow } from "pg";
-import { badRequest, forbidden, notFound } from "../../common/api-error";
+import { forbidden, notFound } from "../../common/api-error";
 import { DatabaseService } from "../../database/database.service";
 
 interface WorkspaceRow extends QueryResultRow {
@@ -9,10 +9,6 @@ interface WorkspaceRow extends QueryResultRow {
   owner_user_id: string | null;
   created_at: Date | string;
   updated_at: Date | string;
-}
-
-export interface CreateWorkspaceRequest {
-  name?: unknown;
 }
 
 export interface WorkspacePayload {
@@ -26,7 +22,6 @@ export interface WorkspacePayload {
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const MAX_WORKSPACE_NAME_LENGTH = 100;
 
 @Injectable()
 export class WorkspaceService {
@@ -44,27 +39,6 @@ export class WorkspaceService {
     );
 
     return workspaces.map((workspace) => this.mapWorkspace(workspace, currentUserId));
-  }
-
-  async createWorkspace(
-    currentUserId: string,
-    input: CreateWorkspaceRequest
-  ): Promise<WorkspacePayload> {
-    const name = this.validateWorkspaceName(input.name);
-    const workspace = await this.database.queryOne<WorkspaceRow>(
-      `
-        INSERT INTO workspaces (name, owner_user_id)
-        VALUES ($1, $2)
-        RETURNING id, name, owner_user_id, created_at, updated_at
-      `,
-      [name, currentUserId]
-    );
-
-    if (!workspace) {
-      throw badRequest("Workspace could not be created");
-    }
-
-    return this.mapWorkspace(workspace, currentUserId);
   }
 
   async getWorkspace(
@@ -104,23 +78,6 @@ export class WorkspaceService {
       `,
       [workspaceId]
     );
-  }
-
-  private validateWorkspaceName(value: unknown): string {
-    if (typeof value !== "string") {
-      throw badRequest("Workspace name is required");
-    }
-
-    const name = value.trim();
-    if (!name) {
-      throw badRequest("Workspace name is required");
-    }
-
-    if (name.length > MAX_WORKSPACE_NAME_LENGTH) {
-      throw badRequest("Workspace name must be 100 characters or less");
-    }
-
-    return name;
   }
 
   private mapWorkspace(
