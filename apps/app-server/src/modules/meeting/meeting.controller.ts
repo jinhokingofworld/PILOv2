@@ -13,6 +13,8 @@ import { AuthGuard } from "../../common/auth.guard";
 import { CurrentUserId } from "../../common/current-user.decorator";
 import {
   CurrentMeetingPayload,
+  JoinMeetingPayload,
+  LeaveMeetingPayload,
   MeetingService,
   PendingMeetingPayload,
   StartMeetingPayload
@@ -54,7 +56,7 @@ export class MeetingController {
     @CurrentUserId() currentUserId: string,
     @Param("workspaceId") workspaceId: string,
     @Param("meetingId") meetingId: string
-  ): Promise<ApiSuccessResponse<PendingMeetingPayload>> {
+  ): Promise<ApiSuccessResponse<JoinMeetingPayload>> {
     const result = await this.meetingService.joinMeeting(
       currentUserId,
       workspaceId,
@@ -82,7 +84,7 @@ export class MeetingController {
     @CurrentUserId() currentUserId: string,
     @Param("workspaceId") workspaceId: string,
     @Param("meetingId") meetingId: string
-  ): Promise<ApiSuccessResponse<PendingMeetingPayload>> {
+  ): Promise<ApiSuccessResponse<LeaveMeetingPayload>> {
     const result = await this.meetingService.leaveMeeting(
       currentUserId,
       workspaceId,

@@ -12,6 +12,8 @@ const recordingId = "55555555-5555-5555-5555-555555555555";
 const startedAt = new Date("2026-07-05T00:00:00.000Z");
 const createdAt = new Date("2026-07-05T00:00:01.000Z");
 const updatedAt = new Date("2026-07-05T00:00:02.000Z");
+const leftAt = new Date("2026-07-05T00:10:00.000Z");
+const endedAt = new Date("2026-07-05T00:10:01.000Z");
 
 class FakeDatabase {
   constructor({ queryOneRows = [] } = {}) {
@@ -27,6 +29,10 @@ class FakeDatabase {
     }
 
     return next ?? null;
+  }
+
+  async transaction(callback) {
+    return callback(this);
   }
 }
 
@@ -102,10 +108,39 @@ function startMeetingRow(overrides = {}) {
   };
 }
 
+function participantRow(overrides = {}) {
+  return {
+    id: participantId,
+    meeting_id: meetingId,
+    user_id: currentUserId,
+    livekit_identity: `meeting-${meetingId}-user-${currentUserId}`,
+    joined_at: startedAt,
+    left_at: null,
+    user_name: "Jinho",
+    user_avatar_url: "https://example.com/avatar.png",
+    ...overrides
+  };
+}
+
+function activeParticipantCountRow(count) {
+  return {
+    active_participant_count: count
+  };
+}
+
 async function assertBadRequest(action, messagePattern) {
   await assert.rejects(action, (error) => {
     assert.equal(error.getStatus(), 400);
     assert.equal(error.getResponse().error.code, "BAD_REQUEST");
+    assert.match(error.getResponse().error.message, messagePattern);
+    return true;
+  });
+}
+
+async function assertNotFound(action, messagePattern) {
+  await assert.rejects(action, (error) => {
+    assert.equal(error.getStatus(), 404);
+    assert.equal(error.getResponse().error.code, "NOT_FOUND");
     assert.match(error.getResponse().error.message, messagePattern);
     return true;
   });
@@ -200,6 +235,156 @@ async function assertBadRequest(action, messagePattern) {
   await assertBadRequest(
     () => service.startMeeting(currentUserId, workspaceId, {}),
     /already in progress/
+  );
+}
+
+{
+  const { service, workspaceService } = createSubject(
+    new FakeDatabase({
+      queryOneRows: [
+        (text, values) => {
+          assert.match(text, /WHERE meetings\.workspace_id = \$1/);
+          assert.match(text, /AND meetings\.id = \$2/);
+          assert.match(text, /FOR UPDATE OF meetings/);
+          assert.deepEqual(values, [workspaceId, meetingId]);
+          return currentMeetingRow({
+            recording_id: null,
+            recording_meeting_id: null,
+            recording_status: null,
+            recording_started_at: null
+          });
+        },
+        (text, values) => {
+          assert.match(text, /ON CONFLICT \(meeting_id, user_id\)/);
+          assert.match(text, /left_at = NULL/);
+          assert.deepEqual(values, [meetingId, currentUserId]);
+          return participantRow();
+        }
+      ]
+    })
+  );
+
+  const joined = await service.joinMeeting(currentUserId, workspaceId, meetingId);
+
+  assert.deepEqual(workspaceService.calls, [{ userId: currentUserId, workspaceId }]);
+  assert.equal(joined.meeting.id, meetingId);
+  assert.equal(joined.participant.id, participantId);
+  assert.equal(joined.participant.isActive, true);
+  assert.equal(joined.livekit, null);
+  assert.equal(joined.currentRecording, null);
+}
+
+{
+  const { service } = createSubject(
+    new FakeDatabase({
+      queryOneRows: [
+        currentMeetingRow({
+          ended_at: endedAt
+        })
+      ]
+    })
+  );
+
+  await assertBadRequest(
+    () => service.joinMeeting(currentUserId, workspaceId, meetingId),
+    /already ended/
+  );
+}
+
+{
+  const { service } = createSubject(
+    new FakeDatabase({
+      queryOneRows: [null]
+    })
+  );
+
+  await assertNotFound(
+    () => service.joinMeeting(currentUserId, workspaceId, meetingId),
+    /Meeting not found/
+  );
+}
+
+{
+  const { service } = createSubject(
+    new FakeDatabase({
+      queryOneRows: [
+        currentMeetingRow(),
+        participantRow(),
+        participantRow({
+          left_at: leftAt
+        }),
+        activeParticipantCountRow(1)
+      ]
+    })
+  );
+
+  const left = await service.leaveMeeting(currentUserId, workspaceId, meetingId);
+
+  assert.equal(left.participant.id, participantId);
+  assert.equal(left.participant.isActive, false);
+  assert.equal(left.participant.leftAt, "2026-07-05T00:10:00.000Z");
+  assert.equal(left.meetingEnded, false);
+  assert.equal(left.meeting.endedAt, null);
+}
+
+{
+  const { database, service } = createSubject(
+    new FakeDatabase({
+      queryOneRows: [
+        currentMeetingRow(),
+        participantRow(),
+        participantRow({
+          left_at: leftAt
+        }),
+        activeParticipantCountRow(0),
+        currentMeetingRow({
+          ended_at: endedAt
+        })
+      ]
+    })
+  );
+
+  const left = await service.leaveMeeting(currentUserId, workspaceId, meetingId);
+
+  assert.equal(left.meetingEnded, true);
+  assert.equal(left.meeting.endedAt, "2026-07-05T00:10:01.000Z");
+  assert.match(database.queries.at(-1).text, /UPDATE meetings/);
+  assert.match(database.queries.at(-1).text, /AND ended_at IS NULL/);
+}
+
+{
+  const { database, service } = createSubject(
+    new FakeDatabase({
+      queryOneRows: [
+        currentMeetingRow(),
+        participantRow({
+          left_at: leftAt
+        }),
+        participantRow({
+          left_at: leftAt
+        }),
+        activeParticipantCountRow(0)
+      ]
+    })
+  );
+
+  const left = await service.leaveMeeting(currentUserId, workspaceId, meetingId);
+
+  assert.equal(left.meetingEnded, false);
+  assert.equal(left.participant.leftAt, "2026-07-05T00:10:00.000Z");
+  assert.equal(database.queries.length, 4);
+}
+
+{
+  const { service } = createSubject(
+    new FakeDatabase({
+      queryOneRows: [currentMeetingRow(), null]
+    })
+  );
+
+  await assertNotFound(
+    () => service.leaveMeeting(currentUserId, workspaceId, meetingId),
+    /Participant not found/
   );
 }
 
