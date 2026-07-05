@@ -34,6 +34,18 @@ const featureServices = [
   {
     fileName: "github-pull-request-remote.service.ts",
     className: "GithubPullRequestRemoteService"
+  },
+  {
+    fileName: "github-webhook.service.ts",
+    className: "GithubWebhookService"
+  },
+  {
+    fileName: "github-sync-run.service.ts",
+    className: "GithubSyncRunService"
+  },
+  {
+    fileName: "github-sync-executor.service.ts",
+    className: "GithubSyncExecutorService"
   }
 ];
 
@@ -42,7 +54,7 @@ for (const { fileName, className } of featureServices) {
 
   assert.ok(
     fileNames.includes(fileName),
-    `${fileName} must exist so #97 service responsibilities stay split by issue area.`
+    `${fileName} must exist so github-integration service responsibilities stay split by issue area.`
   );
   assert.match(moduleFile, new RegExp(`import \\{ ${className} \\} from "${importPath}";`));
   assert.match(moduleFile, new RegExp(`providers: \\[[\\s\\S]*${className}[\\s\\S]*\\]`));
@@ -148,6 +160,26 @@ const delegatedMethods = [
     methodName: "getGithubPullRequestConflictStatus",
     serviceName: "githubPullRequestRemoteService",
     args: "currentUserId, workspaceId, pullRequestId"
+  },
+  {
+    methodName: "receiveGithubWebhook",
+    serviceName: "githubWebhookService",
+    args: "input"
+  },
+  {
+    methodName: "startGithubSyncRun",
+    serviceName: "githubSyncRunService",
+    args: "currentUserId, workspaceId, input"
+  },
+  {
+    methodName: "listGithubSyncRuns",
+    serviceName: "githubSyncRunService",
+    args: "currentUserId, workspaceId, query"
+  },
+  {
+    methodName: "getGithubSyncRun",
+    serviceName: "githubSyncRunService",
+    args: "currentUserId, workspaceId, syncRunId"
   }
 ];
 

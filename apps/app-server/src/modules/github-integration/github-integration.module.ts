@@ -14,7 +14,10 @@ import { GithubOAuthStateService } from "./github-oauth-state.service";
 import { GithubProjectV2Service } from "./github-project-v2.service";
 import { GithubPullRequestRemoteService } from "./github-pull-request-remote.service";
 import { GithubSourceReadService } from "./github-source-read.service";
+import { GithubSyncExecutorService } from "./github-sync-executor.service";
+import { GithubSyncRunService } from "./github-sync-run.service";
 import { GithubTokenEncryptionService } from "./github-token-encryption.service";
+import { GithubWebhookService } from "./github-webhook.service";
 
 @Module({
   imports: [CommonModule, DatabaseModule, WorkspaceModule],
@@ -31,7 +34,10 @@ import { GithubTokenEncryptionService } from "./github-token-encryption.service"
       GithubProjectV2Service,
       GithubPullRequestRemoteService,
       GithubSourceReadService,
-      GithubTokenEncryptionService
+      GithubSyncExecutorService,
+      GithubSyncRunService,
+      GithubTokenEncryptionService,
+      GithubWebhookService
     ],
   exports: [GithubIntegrationService]
 })
