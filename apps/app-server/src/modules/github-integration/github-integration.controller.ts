@@ -14,11 +14,13 @@ import { CurrentUserId } from "../../common/current-user.decorator";
 import type {
   GithubAppInstallationCallbackQuery,
   GithubOAuthCallbackQuery,
+  ListGithubSyncRunsQuery,
   ListGithubPullRequestFilesQuery,
   ListGithubPullRequestsQuery,
   ListGithubProjectsV2Query,
   ListGithubRepositoriesQuery,
   StartGithubAppInstallationRequest,
+  StartGithubSyncRunRequest,
   StartGithubOAuthRequest
 } from "./dto";
 import { GithubIntegrationService } from "./github-integration.service";
@@ -44,7 +46,9 @@ import type {
   GithubPullRequestFilePayload,
   GithubPullRequestListItemPayload,
   GithubRepositoryDetailPayload,
-  GithubRepositoryListItemPayload
+  GithubRepositoryListItemPayload,
+  GithubSyncRunDetailPayload,
+  GithubSyncRunPayload
 } from "./types";
 
 interface ApiSuccessResponseWithMeta<T> extends ApiSuccessResponse<T> {
@@ -140,6 +144,51 @@ export class GithubIntegrationController {
     const result = await this.githubIntegrationService.listGithubAppInstallations(
       currentUserId,
       workspaceId
+    );
+    return apiResponse(result);
+  }
+
+  @Post("workspaces/:workspaceId/github/sync-runs")
+  @UseGuards(AuthGuard)
+  async startGithubSyncRun(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Body() body: StartGithubSyncRunRequest | undefined
+  ): Promise<ApiSuccessResponse<GithubSyncRunPayload>> {
+    const result = await this.githubIntegrationService.startGithubSyncRun(
+      currentUserId,
+      workspaceId,
+      body
+    );
+    return apiResponse(result);
+  }
+
+  @Get("workspaces/:workspaceId/github/sync-runs")
+  @UseGuards(AuthGuard)
+  async listGithubSyncRuns(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Query() query: ListGithubSyncRunsQuery
+  ): Promise<ApiSuccessResponseWithMeta<GithubSyncRunPayload[]>> {
+    const result = await this.githubIntegrationService.listGithubSyncRuns(
+      currentUserId,
+      workspaceId,
+      query
+    );
+    return apiPaginatedResponse(result);
+  }
+
+  @Get("workspaces/:workspaceId/github/sync-runs/:syncRunId")
+  @UseGuards(AuthGuard)
+  async getGithubSyncRun(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("syncRunId") syncRunId: string
+  ): Promise<ApiSuccessResponse<GithubSyncRunDetailPayload>> {
+    const result = await this.githubIntegrationService.getGithubSyncRun(
+      currentUserId,
+      workspaceId,
+      syncRunId
     );
     return apiResponse(result);
   }
