@@ -16,3 +16,17 @@ export interface GithubAppInstallationCallbackQuery {
   setup_action?: unknown;
   state?: unknown;
 }
+
+export interface ListGithubRepositoriesQuery {
+  q?: unknown;
+  includeArchived?: unknown;
+  page?: unknown;
+  limit?: unknown;
+}
+
+export interface ListGithubPullRequestsQuery {
+  state?: unknown;
+  query?: unknown;
+  page?: unknown;
+  limit?: unknown;
+}
