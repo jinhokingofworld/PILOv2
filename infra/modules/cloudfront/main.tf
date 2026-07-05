@@ -10,6 +10,42 @@ resource "aws_cloudfront_origin_access_control" "frontend" {
   signing_protocol                  = "sigv4"
 }
 
+resource "aws_cloudfront_function" "frontend_static_route_rewrite" {
+  name    = "${var.name_prefix}-frontend-static-route-rewrite"
+  runtime = "cloudfront-js-2.0"
+  comment = "Rewrite static export routes to route index files"
+  publish = true
+  code    = <<-EOT
+function handler(event) {
+  var request = event.request;
+  var uri = request.uri;
+
+  if (uri === "" || uri === "/") {
+    request.uri = "/index.html";
+    return request;
+  }
+
+  if (uri.indexOf("/_next/") === 0) {
+    return request;
+  }
+
+  var lastSlashIndex = uri.lastIndexOf("/");
+  var lastSegment = uri.substring(lastSlashIndex + 1);
+  if (lastSegment.indexOf(".") !== -1) {
+    return request;
+  }
+
+  if (uri.charAt(uri.length - 1) === "/") {
+    request.uri = uri + "index.html";
+  } else {
+    request.uri = uri + "/index.html";
+  }
+
+  return request;
+}
+EOT
+}
+
 resource "aws_cloudfront_distribution" "frontend" {
   enabled             = true
   is_ipv6_enabled     = true
@@ -37,6 +73,11 @@ resource "aws_cloudfront_distribution" "frontend" {
       cookies {
         forward = "none"
       }
+    }
+
+    function_association {
+      event_type   = "viewer-request"
+      function_arn = aws_cloudfront_function.frontend_static_route_rewrite.arn
     }
   }
 
