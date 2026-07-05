@@ -44,7 +44,9 @@ const meetingController = await readSource(
 );
 const meetingModule = await readSource("../src/modules/meeting/meeting.module.ts");
 const meetingService = await readSource("../src/modules/meeting/meeting.service.ts");
-const initialSchema = await readSource("../../../db/migrations/001_initial_schema.sql");
+const workspaceMeetingConstraintMigration = await readSource(
+  "../../../db/migrations/006_update_workspace_and_meeting_recording_constraints.sql"
+);
 
 assert.match(main, /setGlobalPrefix\("api\/v1"\)/);
 assert.match(controller, /@Get\("health"\)/);
@@ -115,8 +117,8 @@ assert.match(workspaceService, /assertWorkspaceAccess/);
 assert.match(authService, /ensureWorkspaceForUser/);
 assert.match(authService, /INSERT INTO workspaces \(name, owner_user_id\)/);
 assert.match(authService, /ON CONFLICT \(owner_user_id\) WHERE owner_user_id IS NOT NULL/);
-assert.match(initialSchema, /unique_workspace_per_owner_user_id/);
-assert.match(initialSchema, /WHERE owner_user_id IS NOT NULL/);
+assert.match(workspaceMeetingConstraintMigration, /unique_workspace_per_owner_user_id/);
+assert.match(workspaceMeetingConstraintMigration, /WHERE owner_user_id IS NOT NULL/);
 assert.match(canvasModule, /controllers: \[CanvasController\]/);
 assert.match(canvasModule, /providers: \[CanvasService\]/);
 assert.match(canvasController, /@Controller\("workspaces\/:workspaceId"\)/);
