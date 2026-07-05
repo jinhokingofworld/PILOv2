@@ -37,6 +37,7 @@ import {
   createMockCanvasBoardDetail,
   resolveCanvasClientMode,
 } from "@/features/canvas/api/canvas-client";
+import { useAuthSession } from "@/features/auth";
 import {
   PiloCanvasRuntime,
   type CanvasBoardDetail,
@@ -66,7 +67,7 @@ type ToolButtonProps = {
   onClick: () => void;
 };
 
-const PILO_LOCAL_WORKSPACE_ID = "pilo-local-workspace";
+const MOCK_CANVAS_WORKSPACE_ID = "pilo-local-workspace";
 
 const drawingColorOptions: {
   label: string;
@@ -101,11 +102,19 @@ function getDefaultInsertUrl(tool: PiloInsertableTool) {
     : "https://www.youtube.com/watch?v=dQw4w9WgXcQ";
 }
 
-function getCanvasWorkspaceId() {
-  return process.env.NEXT_PUBLIC_PILO_WORKSPACE_ID ?? PILO_LOCAL_WORKSPACE_ID;
+function resolveCanvasWorkspaceId(
+  canvasClientMode: CanvasBoardState["source"],
+  authWorkspaceId: string | undefined,
+) {
+  if (authWorkspaceId) {
+    return authWorkspaceId;
+  }
+
+  return canvasClientMode === "mock" ? MOCK_CANVAS_WORKSPACE_ID : "";
 }
 
 export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
+  const authSession = useAuthSession();
   const imageFileInputRef = useRef<HTMLInputElement | null>(null);
   const videoFileInputRef = useRef<HTMLInputElement | null>(null);
   const [boardState, setBoardState] = useState<CanvasBoardState>({
@@ -127,12 +136,22 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
   >(null);
   const canvasClientMode = resolveCanvasClientMode();
   const canvasClient = useMemo(
-    () => createCanvasClient({ mode: canvasClientMode }),
-    [canvasClientMode],
+    () =>
+      createCanvasClient({
+        authToken: authSession?.accessToken ?? null,
+        mode: canvasClientMode,
+      }),
+    [authSession?.accessToken, canvasClientMode],
   );
-  const workspaceId = getCanvasWorkspaceId();
+  const workspaceId = resolveCanvasWorkspaceId(
+    canvasClientMode,
+    authSession?.activeWorkspaceId,
+  );
   const fallbackBoard = useMemo(
-    () => createMockCanvasBoardDetail(workspaceId) as CanvasBoardDetail,
+    () =>
+      createMockCanvasBoardDetail(
+        workspaceId || MOCK_CANVAS_WORKSPACE_ID,
+      ) as CanvasBoardDetail,
     [workspaceId],
   );
   const board = boardState.board ?? fallbackBoard;
@@ -144,6 +163,15 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
     let cancelled = false;
 
     async function loadCanvasBoard() {
+      if (!workspaceId) {
+        setBoardState({
+          board: null,
+          source: canvasClientMode,
+          status: "loading",
+        });
+        return;
+      }
+
       setBoardState({
         board: null,
         source: canvasClientMode,

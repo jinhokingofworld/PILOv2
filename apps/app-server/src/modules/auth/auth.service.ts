@@ -5,6 +5,7 @@ import { badRequest } from "../../common/api-error";
 import { SessionService } from "../../common/session.service";
 import { DatabaseService } from "../../database/database.service";
 import { GithubTokenEncryptionService } from "../github-integration/github-token-encryption.service";
+import { WorkspaceService } from "../workspace/workspace.service";
 import { AuthConfigService } from "./auth-config.service";
 import { GithubLoginOAuthClient, GithubLoginUserProfile } from "./github-login-oauth.client";
 import { GoogleOAuthClient, GoogleUserProfile } from "./google-oauth.client";
@@ -32,7 +33,6 @@ interface LoginSessionPayload {
 const GOOGLE_LOGIN_SCOPE = "openid email profile";
 const GITHUB_LOGIN_SCOPE = "repo read:user user:email";
 const ACCESS_TOKEN_BYTE_LENGTH = 32;
-const WORKSPACE_NAME_BYTE_LENGTH = 4;
 const MAX_RETURN_URL_LENGTH = 2048;
 
 @Injectable()
@@ -44,7 +44,8 @@ export class AuthService {
     private readonly stateService: OAuthStateService,
     private readonly googleOAuthClient: GoogleOAuthClient,
     private readonly githubOAuthClient: GithubLoginOAuthClient,
-    private readonly githubTokenEncryptionService: GithubTokenEncryptionService
+    private readonly githubTokenEncryptionService: GithubTokenEncryptionService,
+    private readonly workspaceService: WorkspaceService
   ) {}
 
   startLogin(
@@ -87,7 +88,7 @@ export class AuthService {
       provider === "google"
         ? await this.completeGoogleLogin(code, config)
         : await this.completeGithubLogin(code, config);
-    await this.ensureWorkspaceForUser(userId);
+    await this.workspaceService.ensureDefaultWorkspaceForUser(userId);
     const session = await this.createSession(userId, config.sessionTtlSeconds);
 
     return this.buildCallbackRedirect({
@@ -370,19 +371,6 @@ export class AuthService {
       accessToken,
       expiresAt: this.toIsoString(session.expires_at)
     };
-  }
-
-  private async ensureWorkspaceForUser(userId: string): Promise<void> {
-    const workspaceName = `PILO-${randomBytes(WORKSPACE_NAME_BYTE_LENGTH).toString("hex")}`;
-    await this.database.execute(
-      `
-        INSERT INTO workspaces (name, owner_user_id)
-        VALUES ($1, $2)
-        ON CONFLICT (owner_user_id) WHERE owner_user_id IS NOT NULL
-        DO NOTHING
-      `,
-      [workspaceName, userId]
-    );
   }
 
   private buildCallbackRedirect(input: {

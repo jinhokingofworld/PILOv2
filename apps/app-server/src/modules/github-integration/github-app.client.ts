@@ -54,6 +54,11 @@ export interface GithubRepositoryPullRequestsRequest
   repo: string;
 }
 
+export interface GithubProjectV2LookupRequest
+  extends GithubAppInstallationTokenRequest {
+  projectNodeId: string;
+}
+
 export interface GithubInstallationRepositoryApiItem {
   id: number;
   node_id: string;
@@ -144,6 +149,77 @@ export interface GithubPullRequestApiDetails {
   mergeable: boolean | null;
 }
 
+export interface GithubProjectV2ApiItem {
+  id: string;
+  databaseId: number | null;
+  ownerLogin: string;
+  ownerType: "User" | "Organization";
+  number: number;
+  title: string;
+  shortDescription: string | null;
+  readme: string | null;
+  url: string;
+  resourcePath: string | null;
+  public: boolean;
+  closed: boolean;
+  template: boolean;
+  createdAt: string | null;
+  updatedAt: string | null;
+  closedAt: string | null;
+  raw: Record<string, unknown>;
+}
+
+export interface GithubProjectV2FieldOptionApiItem {
+  id: string;
+  name: string;
+  color: string | null;
+  description: string | null;
+  position: number;
+}
+
+export interface GithubProjectV2FieldApiItem {
+  id: string;
+  name: string;
+  dataType: string;
+  createdAt: string | null;
+  updatedAt: string | null;
+  options: GithubProjectV2FieldOptionApiItem[];
+  raw: Record<string, unknown>;
+}
+
+export interface GithubProjectV2ItemFieldValueApiItem {
+  id: string | null;
+  fieldNodeId: string | null;
+  fieldName: string;
+  fieldDataType: string | null;
+  textValue: string | null;
+  numberValue: number | null;
+  dateValue: string | null;
+  singleSelectOptionId: string | null;
+  singleSelectName: string | null;
+  iterationId: string | null;
+  iterationTitle: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+  raw: Record<string, unknown>;
+}
+
+export interface GithubProjectV2ItemApiItem {
+  id: string;
+  databaseId: number | null;
+  contentType: "ISSUE" | "PULL_REQUEST" | "DRAFT_ISSUE" | "UNKNOWN";
+  contentNodeId: string | null;
+  isArchived: boolean;
+  statusFieldNodeId: string | null;
+  statusOptionId: string | null;
+  statusName: string | null;
+  position: number | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+  fieldValues: GithubProjectV2ItemFieldValueApiItem[];
+  raw: Record<string, unknown>;
+}
+
 interface GithubInstallationApiPayload {
   id: number;
   account?: {
@@ -167,6 +243,246 @@ interface GithubInstallationRepositoriesApiPayload {
 
 const GITHUB_SYNC_PER_PAGE = 100;
 const GITHUB_SYNC_MAX_PAGES = 100;
+const GITHUB_PROJECT_V2_QUERY = `
+  query PiloProjectV2($projectId: ID!) {
+    node(id: $projectId) {
+      ... on ProjectV2 {
+        id
+        databaseId
+        owner {
+          __typename
+          ... on Organization {
+            login
+          }
+          ... on User {
+            login
+          }
+        }
+        number
+        title
+        shortDescription
+        readme
+        url
+        resourcePath
+        public
+        closed
+        template
+        createdAt
+        updatedAt
+        closedAt
+      }
+    }
+  }
+`;
+const GITHUB_PROJECT_V2_FIELDS_QUERY = `
+  query PiloProjectV2Fields($projectId: ID!, $cursor: String) {
+    node(id: $projectId) {
+      ... on ProjectV2 {
+        fields(first: 100, after: $cursor) {
+          nodes {
+            __typename
+            ... on ProjectV2Field {
+              id
+              name
+              dataType
+              createdAt
+              updatedAt
+            }
+            ... on ProjectV2IterationField {
+              id
+              name
+              dataType
+              createdAt
+              updatedAt
+            }
+            ... on ProjectV2SingleSelectField {
+              id
+              name
+              dataType
+              createdAt
+              updatedAt
+              options {
+                id
+                name
+                color
+                description
+              }
+            }
+          }
+          pageInfo {
+            hasNextPage
+            endCursor
+          }
+        }
+      }
+    }
+  }
+`;
+const GITHUB_PROJECT_V2_ITEMS_QUERY = `
+  query PiloProjectV2Items($projectId: ID!, $cursor: String) {
+    node(id: $projectId) {
+      ... on ProjectV2 {
+        items(first: 100, after: $cursor) {
+          nodes {
+            id
+            databaseId
+            type
+            isArchived
+            createdAt
+            updatedAt
+            content {
+              __typename
+              ... on Issue {
+                id
+                number
+                title
+                state
+                url
+              }
+              ... on PullRequest {
+                id
+                number
+                title
+                state
+                url
+              }
+              ... on DraftIssue {
+                title
+                body
+              }
+            }
+            fieldValues(first: 100) {
+              nodes {
+                __typename
+                ... on ProjectV2ItemFieldTextValue {
+                  id
+                  text
+                  createdAt
+                  updatedAt
+                  field {
+                    ... on ProjectV2Field {
+                      id
+                      name
+                      dataType
+                    }
+                    ... on ProjectV2SingleSelectField {
+                      id
+                      name
+                      dataType
+                    }
+                    ... on ProjectV2IterationField {
+                      id
+                      name
+                      dataType
+                    }
+                  }
+                }
+                ... on ProjectV2ItemFieldNumberValue {
+                  id
+                  number
+                  createdAt
+                  updatedAt
+                  field {
+                    ... on ProjectV2Field {
+                      id
+                      name
+                      dataType
+                    }
+                    ... on ProjectV2SingleSelectField {
+                      id
+                      name
+                      dataType
+                    }
+                    ... on ProjectV2IterationField {
+                      id
+                      name
+                      dataType
+                    }
+                  }
+                }
+                ... on ProjectV2ItemFieldDateValue {
+                  id
+                  date
+                  createdAt
+                  updatedAt
+                  field {
+                    ... on ProjectV2Field {
+                      id
+                      name
+                      dataType
+                    }
+                    ... on ProjectV2SingleSelectField {
+                      id
+                      name
+                      dataType
+                    }
+                    ... on ProjectV2IterationField {
+                      id
+                      name
+                      dataType
+                    }
+                  }
+                }
+                ... on ProjectV2ItemFieldSingleSelectValue {
+                  id
+                  name
+                  optionId
+                  createdAt
+                  updatedAt
+                  field {
+                    ... on ProjectV2Field {
+                      id
+                      name
+                      dataType
+                    }
+                    ... on ProjectV2SingleSelectField {
+                      id
+                      name
+                      dataType
+                    }
+                    ... on ProjectV2IterationField {
+                      id
+                      name
+                      dataType
+                    }
+                  }
+                }
+                ... on ProjectV2ItemFieldIterationValue {
+                  id
+                  title
+                  iterationId
+                  createdAt
+                  updatedAt
+                  field {
+                    ... on ProjectV2Field {
+                      id
+                      name
+                      dataType
+                    }
+                    ... on ProjectV2SingleSelectField {
+                      id
+                      name
+                      dataType
+                    }
+                    ... on ProjectV2IterationField {
+                      id
+                      name
+                      dataType
+                    }
+                  }
+                }
+              }
+            }
+          }
+          pageInfo {
+            hasNextPage
+            endCursor
+          }
+        }
+      }
+    }
+  }
+`;
 
 @Injectable()
 export class GithubAppClient {
@@ -350,6 +666,81 @@ export class GithubAppClient {
     return pullRequests;
   }
 
+  async getProjectV2(
+    input: GithubProjectV2LookupRequest
+  ): Promise<GithubProjectV2ApiItem> {
+    const installationToken = await this.createInstallationAccessToken(input);
+    const data = await this.fetchGraphqlWithToken(
+      installationToken.token,
+      GITHUB_PROJECT_V2_QUERY,
+      {
+        projectId: input.projectNodeId
+      },
+      "GitHub ProjectV2 sync failed"
+    );
+    const project = this.readProjectV2Node(data, "GitHub ProjectV2 sync failed");
+
+    return this.mapProjectV2(project);
+  }
+
+  async listProjectV2Fields(
+    input: GithubProjectV2LookupRequest
+  ): Promise<GithubProjectV2FieldApiItem[]> {
+    const installationToken = await this.createInstallationAccessToken(input);
+    const fields: GithubProjectV2FieldApiItem[] = [];
+    let cursor: string | null = null;
+
+    do {
+      const data = await this.fetchGraphqlWithToken(
+        installationToken.token,
+        GITHUB_PROJECT_V2_FIELDS_QUERY,
+        {
+          projectId: input.projectNodeId,
+          cursor
+        },
+        "GitHub ProjectV2 fields sync failed"
+      );
+      const connection = this.readProjectV2Connection(
+        data,
+        "fields",
+        "GitHub ProjectV2 fields sync failed"
+      );
+      fields.push(...connection.nodes.map((node) => this.mapProjectV2Field(node)));
+      cursor = connection.hasNextPage ? connection.endCursor : null;
+    } while (cursor);
+
+    return fields;
+  }
+
+  async listProjectV2Items(
+    input: GithubProjectV2LookupRequest
+  ): Promise<GithubProjectV2ItemApiItem[]> {
+    const installationToken = await this.createInstallationAccessToken(input);
+    const items: GithubProjectV2ItemApiItem[] = [];
+    let cursor: string | null = null;
+
+    do {
+      const data = await this.fetchGraphqlWithToken(
+        installationToken.token,
+        GITHUB_PROJECT_V2_ITEMS_QUERY,
+        {
+          projectId: input.projectNodeId,
+          cursor
+        },
+        "GitHub ProjectV2 items sync failed"
+      );
+      const connection = this.readProjectV2Connection(
+        data,
+        "items",
+        "GitHub ProjectV2 items sync failed"
+      );
+      items.push(...connection.nodes.map((node) => this.mapProjectV2Item(node)));
+      cursor = connection.hasNextPage ? connection.endCursor : null;
+    } while (cursor);
+
+    return items;
+  }
+
   async listPullRequestFiles(
     input: GithubPullRequestFileLookupRequest
   ): Promise<GithubPullRequestFileApiItem[]> {
@@ -425,6 +816,246 @@ export class GithubAppClient {
     return {
       mergeable
     };
+  }
+
+  private async fetchGraphqlWithToken(
+    token: string,
+    query: string,
+    variables: Record<string, unknown>,
+    errorMessage: string
+  ): Promise<unknown> {
+    let response: Response;
+    try {
+      response = await fetch("https://api.github.com/graphql", {
+        method: "POST",
+        headers: {
+          Accept: "application/vnd.github+json",
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+          "X-GitHub-Api-Version": GITHUB_API_VERSION
+        },
+        body: JSON.stringify({
+          query,
+          variables
+        })
+      });
+    } catch {
+      throw badRequest(errorMessage);
+    }
+
+    if (!response.ok) {
+      throw badRequest(errorMessage);
+    }
+
+    const payload = await this.readJson(response, errorMessage);
+    const record = this.toObject(payload);
+    if (Array.isArray(record.errors) && record.errors.length > 0) {
+      throw badRequest(errorMessage);
+    }
+
+    const data = record.data;
+    if (typeof data !== "object" || data === null || Array.isArray(data)) {
+      throw badRequest(errorMessage);
+    }
+
+    return data;
+  }
+
+  private readProjectV2Node(data: unknown, errorMessage: string): Record<string, unknown> {
+    const node = this.toObject(this.toObject(data).node);
+    if (node.__typename && node.__typename !== "ProjectV2") {
+      throw badRequest(errorMessage);
+    }
+
+    if (typeof node.id !== "string") {
+      throw badRequest(errorMessage);
+    }
+
+    return node;
+  }
+
+  private readProjectV2Connection(
+    data: unknown,
+    fieldName: "fields" | "items",
+    errorMessage: string
+  ): {
+    nodes: Record<string, unknown>[];
+    hasNextPage: boolean;
+    endCursor: string | null;
+  } {
+    const project = this.readProjectV2Node(data, errorMessage);
+    const connection = this.toObject(project[fieldName]);
+    const nodes = Array.isArray(connection.nodes)
+      ? connection.nodes.filter((node): node is Record<string, unknown> =>
+          this.isRecord(node)
+        )
+      : null;
+    const pageInfo = this.toObject(connection.pageInfo);
+
+    if (!nodes || typeof pageInfo.hasNextPage !== "boolean") {
+      throw badRequest(errorMessage);
+    }
+
+    return {
+      nodes,
+      hasNextPage: pageInfo.hasNextPage,
+      endCursor:
+        typeof pageInfo.endCursor === "string" && pageInfo.endCursor
+          ? pageInfo.endCursor
+          : null
+    };
+  }
+
+  private mapProjectV2(project: Record<string, unknown>): GithubProjectV2ApiItem {
+    const owner = this.toObject(project.owner);
+    const ownerLogin = this.readString(owner.login, "GitHub ProjectV2 sync failed");
+    const ownerType = owner.__typename === "User" ? "User" : "Organization";
+
+    return {
+      id: this.readString(project.id, "GitHub ProjectV2 sync failed"),
+      databaseId: this.toNullableNumber(project.databaseId),
+      ownerLogin,
+      ownerType,
+      number: this.readNumber(project.number, "GitHub ProjectV2 sync failed"),
+      title: this.readString(project.title, "GitHub ProjectV2 sync failed"),
+      shortDescription: this.toNullableString(project.shortDescription),
+      readme: this.toNullableString(project.readme),
+      url: this.readString(project.url, "GitHub ProjectV2 sync failed"),
+      resourcePath: this.toNullableString(project.resourcePath),
+      public: this.toBoolean(project.public),
+      closed: this.toBoolean(project.closed),
+      template: this.toBoolean(project.template),
+      createdAt: this.toNullableString(project.createdAt),
+      updatedAt: this.toNullableString(project.updatedAt),
+      closedAt: this.toNullableString(project.closedAt),
+      raw: project
+    };
+  }
+
+  private mapProjectV2Field(
+    field: Record<string, unknown>
+  ): GithubProjectV2FieldApiItem {
+    const options = Array.isArray(field.options)
+      ? field.options
+          .filter((option): option is Record<string, unknown> => this.isRecord(option))
+          .map((option, index) => this.mapProjectV2FieldOption(option, index))
+      : [];
+
+    return {
+      id: this.readString(field.id, "GitHub ProjectV2 fields sync failed"),
+      name: this.readString(field.name, "GitHub ProjectV2 fields sync failed"),
+      dataType: this.readString(
+        field.dataType,
+        "GitHub ProjectV2 fields sync failed"
+      ),
+      createdAt: this.toNullableString(field.createdAt),
+      updatedAt: this.toNullableString(field.updatedAt),
+      options,
+      raw: field
+    };
+  }
+
+  private mapProjectV2FieldOption(
+    option: Record<string, unknown>,
+    index: number
+  ): GithubProjectV2FieldOptionApiItem {
+    return {
+      id: this.readString(option.id, "GitHub ProjectV2 fields sync failed"),
+      name: this.readString(option.name, "GitHub ProjectV2 fields sync failed"),
+      color: this.toNullableString(option.color),
+      description: this.toNullableString(option.description),
+      position: index + 1
+    };
+  }
+
+  private mapProjectV2Item(
+    item: Record<string, unknown>
+  ): GithubProjectV2ItemApiItem {
+    const content = this.toObject(item.content);
+    const fieldValues = this.readProjectV2ItemFieldValues(item);
+    const status = this.findProjectV2StatusValue(fieldValues);
+
+    return {
+      id: this.readString(item.id, "GitHub ProjectV2 items sync failed"),
+      databaseId: this.toNullableNumber(item.databaseId),
+      contentType: this.mapProjectV2ItemContentType(content.__typename),
+      contentNodeId: this.toNullableString(content.id),
+      isArchived: this.toBoolean(item.isArchived),
+      statusFieldNodeId: status?.fieldNodeId ?? null,
+      statusOptionId: status?.singleSelectOptionId ?? null,
+      statusName: status?.singleSelectName ?? null,
+      position: null,
+      createdAt: this.toNullableString(item.createdAt),
+      updatedAt: this.toNullableString(item.updatedAt),
+      fieldValues,
+      raw: item
+    };
+  }
+
+  private readProjectV2ItemFieldValues(
+    item: Record<string, unknown>
+  ): GithubProjectV2ItemFieldValueApiItem[] {
+    const fieldValueConnection = this.toObject(item.fieldValues);
+    if (!Array.isArray(fieldValueConnection.nodes)) {
+      return [];
+    }
+
+    return fieldValueConnection.nodes
+      .filter((fieldValue): fieldValue is Record<string, unknown> =>
+        this.isRecord(fieldValue)
+      )
+      .map((fieldValue) => this.mapProjectV2ItemFieldValue(fieldValue));
+  }
+
+  private mapProjectV2ItemFieldValue(
+    fieldValue: Record<string, unknown>
+  ): GithubProjectV2ItemFieldValueApiItem {
+    const field = this.toObject(fieldValue.field);
+    const fieldName = this.toNullableString(field.name) ?? "Unknown";
+
+    return {
+      id: this.toNullableString(fieldValue.id),
+      fieldNodeId: this.toNullableString(field.id),
+      fieldName,
+      fieldDataType: this.toNullableString(field.dataType),
+      textValue: this.toNullableString(fieldValue.text),
+      numberValue: this.toNullableNumber(fieldValue.number),
+      dateValue: this.toNullableString(fieldValue.date),
+      singleSelectOptionId: this.toNullableString(fieldValue.optionId),
+      singleSelectName: this.toNullableString(fieldValue.name),
+      iterationId: this.toNullableString(fieldValue.iterationId),
+      iterationTitle: this.toNullableString(fieldValue.title),
+      createdAt: this.toNullableString(fieldValue.createdAt),
+      updatedAt: this.toNullableString(fieldValue.updatedAt),
+      raw: fieldValue
+    };
+  }
+
+  private findProjectV2StatusValue(
+    fieldValues: GithubProjectV2ItemFieldValueApiItem[]
+  ): GithubProjectV2ItemFieldValueApiItem | null {
+    return (
+      fieldValues.find(
+        (fieldValue) =>
+          fieldValue.singleSelectOptionId &&
+          fieldValue.fieldName.toLowerCase() === "status"
+      ) ?? null
+    );
+  }
+
+  private mapProjectV2ItemContentType(
+    value: unknown
+  ): GithubProjectV2ItemApiItem["contentType"] {
+    switch (value) {
+      case "Issue":
+        return "ISSUE";
+      case "PullRequest":
+        return "PULL_REQUEST";
+      case "DraftIssue":
+        return "DRAFT_ISSUE";
+      default:
+        return "UNKNOWN";
+    }
   }
 
   private async readJson(response: Response, errorMessage: string): Promise<unknown> {
@@ -706,6 +1337,38 @@ export class GithubAppClient {
       typeof (value as { pull_request?: unknown }).pull_request === "object" &&
       (value as { pull_request?: unknown }).pull_request !== null
     );
+  }
+
+  private isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+  }
+
+  private readString(value: unknown, errorMessage: string): string {
+    if (typeof value !== "string" || !value) {
+      throw badRequest(errorMessage);
+    }
+
+    return value;
+  }
+
+  private readNumber(value: unknown, errorMessage: string): number {
+    if (typeof value !== "number" || !Number.isSafeInteger(value)) {
+      throw badRequest(errorMessage);
+    }
+
+    return value;
+  }
+
+  private toNullableString(value: unknown): string | null {
+    return typeof value === "string" && value ? value : null;
+  }
+
+  private toNullableNumber(value: unknown): number | null {
+    return typeof value === "number" && Number.isSafeInteger(value) ? value : null;
+  }
+
+  private toBoolean(value: unknown): boolean {
+    return typeof value === "boolean" ? value : false;
   }
 
   private toObject(value: unknown): Record<string, unknown> {

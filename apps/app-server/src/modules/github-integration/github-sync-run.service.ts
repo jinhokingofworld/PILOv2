@@ -465,7 +465,8 @@ export class GithubSyncRunService {
         SELECT
           id,
           workspace_id,
-          installation_id
+          installation_id,
+          github_project_node_id
         FROM github_projects_v2
         WHERE workspace_id = $1
           AND id = $2

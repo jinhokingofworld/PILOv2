@@ -2,6 +2,7 @@ import { Module } from "@nestjs/common";
 import { CommonModule } from "../../common/common.module";
 import { DatabaseModule } from "../../database/database.module";
 import { GithubTokenEncryptionService } from "../github-integration/github-token-encryption.service";
+import { WorkspaceModule } from "../workspace/workspace.module";
 import { AuthConfigService } from "./auth-config.service";
 import { AuthController } from "./auth.controller";
 import { AuthService } from "./auth.service";
@@ -10,7 +11,7 @@ import { GoogleOAuthClient } from "./google-oauth.client";
 import { OAuthStateService } from "./oauth-state.service";
 
 @Module({
-  imports: [CommonModule, DatabaseModule],
+  imports: [CommonModule, DatabaseModule, WorkspaceModule],
   controllers: [AuthController],
   providers: [
     AuthService,

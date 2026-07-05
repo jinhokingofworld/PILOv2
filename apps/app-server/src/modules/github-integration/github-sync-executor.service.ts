@@ -6,6 +6,11 @@ import {
   GithubAppClient,
   type GithubInstallationRepositoryApiItem,
   type GithubIssueApiItem,
+  type GithubProjectV2ApiItem,
+  type GithubProjectV2FieldApiItem,
+  type GithubProjectV2FieldOptionApiItem,
+  type GithubProjectV2ItemApiItem,
+  type GithubProjectV2ItemFieldValueApiItem,
   type GithubPullRequestApiItem
 } from "./github-app.client";
 import type { GithubAppRuntimeConfig } from "./github-integration-config.service";
@@ -30,6 +35,7 @@ export interface GithubSyncProjectV2ContextRow extends QueryResultRow {
   id: string;
   workspace_id: string;
   installation_id: string;
+  github_project_node_id: string;
 }
 
 interface GithubSyncUpsertResultRow extends QueryResultRow {
@@ -39,6 +45,25 @@ interface GithubSyncUpsertResultRow extends QueryResultRow {
 
 interface CountRow extends QueryResultRow {
   total: string | number;
+}
+
+interface GithubProjectV2FieldSyncRow extends QueryResultRow {
+  id: string;
+  created: boolean;
+}
+
+interface GithubProjectV2FieldOptionSyncRow extends QueryResultRow {
+  id: string;
+  created: boolean;
+}
+
+interface GithubProjectV2ContentSyncRow extends QueryResultRow {
+  id: string;
+}
+
+interface GithubProjectV2ItemSyncRow extends QueryResultRow {
+  id: string;
+  created: boolean;
 }
 
 export interface GithubSyncRunSummary {
@@ -236,14 +261,14 @@ export class GithubSyncExecutorService {
     context: GithubSyncRunContext
   ): Promise<GithubSyncRunSummary> {
     const projectV2 = this.requireGithubSyncProjectV2(context);
-    await this.database.execute(
-      `
-        UPDATE github_projects_v2
-        SET last_synced_at = now()
-        WHERE id = $1
-      `,
-      [projectV2.id]
-    );
+    const project = await this.githubAppClient.getProjectV2({
+      installationId: this.toNumber(context.installation.github_installation_id),
+      appId: context.config.appId,
+      privateKey: context.config.privateKey,
+      projectNodeId: projectV2.github_project_node_id,
+      now: context.config.now
+    });
+    await this.upsertGithubProjectV2(context, project);
 
     return this.createGithubSyncSummary({
       fetchedCount: 1,
@@ -255,18 +280,33 @@ export class GithubSyncExecutorService {
     context: GithubSyncRunContext
   ): Promise<GithubSyncRunSummary> {
     const projectV2 = this.requireGithubSyncProjectV2(context);
-    const fieldCount = await this.countRows(
-      `
-        SELECT COUNT(*)::int AS total
-        FROM github_project_v2_fields
-        WHERE project_v2_id = $1
-      `,
-      [projectV2.id]
-    );
+    const fields = await this.githubAppClient.listProjectV2Fields({
+      installationId: this.toNumber(context.installation.github_installation_id),
+      appId: context.config.appId,
+      privateKey: context.config.privateKey,
+      projectNodeId: projectV2.github_project_node_id,
+      now: context.config.now
+    });
+    let createdCount = 0;
+    let updatedCount = 0;
+
+    for (const field of fields) {
+      const row = await this.upsertGithubProjectV2Field(projectV2.id, field);
+      if (row.created) {
+        createdCount += 1;
+      } else {
+        updatedCount += 1;
+      }
+
+      for (const option of field.options) {
+        await this.upsertGithubProjectV2FieldOption(row.id, option);
+      }
+    }
 
     return this.createGithubSyncSummary({
-      fetchedCount: fieldCount,
-      skippedCount: fieldCount
+      fetchedCount: fields.length,
+      createdCount,
+      updatedCount
     });
   }
 
@@ -274,27 +314,470 @@ export class GithubSyncExecutorService {
     context: GithubSyncRunContext
   ): Promise<GithubSyncRunSummary> {
     const projectV2 = this.requireGithubSyncProjectV2(context);
-    const itemCount = await this.countRows(
-      `
-        SELECT COUNT(*)::int AS total
-        FROM github_project_v2_items
-        WHERE project_v2_id = $1
-      `,
-      [projectV2.id]
-    );
-    await this.database.execute(
-      `
-        UPDATE github_project_v2_items
-        SET last_synced_at = now()
-        WHERE project_v2_id = $1
-      `,
-      [projectV2.id]
-    );
+    const items = await this.githubAppClient.listProjectV2Items({
+      installationId: this.toNumber(context.installation.github_installation_id),
+      appId: context.config.appId,
+      privateKey: context.config.privateKey,
+      projectNodeId: projectV2.github_project_node_id,
+      now: context.config.now
+    });
+    let createdCount = 0;
+    let updatedCount = 0;
+    let skippedCount = 0;
+
+    for (const item of items) {
+      const row = await this.upsertGithubProjectV2Item(context, item);
+      if (!row) {
+        skippedCount += 1;
+        continue;
+      }
+
+      if (row.created) {
+        createdCount += 1;
+      } else {
+        updatedCount += 1;
+      }
+
+      for (const fieldValue of item.fieldValues) {
+        await this.upsertGithubProjectV2ItemFieldValue(row.id, fieldValue);
+      }
+    }
 
     return this.createGithubSyncSummary({
-      fetchedCount: itemCount,
-      updatedCount: itemCount
+      fetchedCount: items.length,
+      createdCount,
+      updatedCount,
+      skippedCount
     });
+  }
+
+  private async upsertGithubProjectV2(
+    context: GithubSyncRunContext,
+    project: GithubProjectV2ApiItem
+  ): Promise<void> {
+    const projectV2 = this.requireGithubSyncProjectV2(context);
+    await this.database.execute(
+      `
+        UPDATE github_projects_v2
+        SET
+          installation_id = $2,
+          github_project_full_database_id = $3,
+          owner_login = $4,
+          owner_type = $5,
+          project_number = $6,
+          title = $7,
+          short_description = $8,
+          readme = $9,
+          url = $10,
+          resource_path = $11,
+          public = $12,
+          closed = $13,
+          template = $14,
+          github_created_at = $15,
+          github_updated_at = $16,
+          github_closed_at = $17,
+          last_synced_at = now(),
+          raw = $18::jsonb,
+          updated_at = now()
+        WHERE id = $1
+      `,
+      [
+        projectV2.id,
+        context.installation.id,
+        project.databaseId,
+        project.ownerLogin,
+        project.ownerType,
+        project.number,
+        project.title,
+        project.shortDescription,
+        project.readme,
+        project.url,
+        project.resourcePath,
+        project.public,
+        project.closed,
+        project.template,
+        project.createdAt,
+        project.updatedAt,
+        project.closedAt,
+        project.raw
+      ]
+    );
+  }
+
+  private async upsertGithubProjectV2Field(
+    projectV2Id: string,
+    field: GithubProjectV2FieldApiItem
+  ): Promise<GithubProjectV2FieldSyncRow> {
+    const row = await this.database.queryOne<GithubProjectV2FieldSyncRow>(
+      `
+        INSERT INTO github_project_v2_fields (
+          project_v2_id,
+          github_field_node_id,
+          field_name,
+          data_type,
+          is_status_field,
+          github_created_at,
+          github_updated_at,
+          raw
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+        ON CONFLICT (github_field_node_id)
+        DO UPDATE SET
+          project_v2_id = EXCLUDED.project_v2_id,
+          field_name = EXCLUDED.field_name,
+          data_type = EXCLUDED.data_type,
+          is_status_field = EXCLUDED.is_status_field,
+          github_created_at = EXCLUDED.github_created_at,
+          github_updated_at = EXCLUDED.github_updated_at,
+          raw = EXCLUDED.raw,
+          updated_at = now()
+        RETURNING id, (xmax = 0) AS created
+      `,
+      [
+        projectV2Id,
+        field.id,
+        field.name,
+        field.dataType,
+        field.name.trim().toLowerCase() === "status",
+        field.createdAt,
+        field.updatedAt,
+        field.raw
+      ]
+    );
+
+    if (!row) {
+      throw badRequest("GitHub ProjectV2 field could not be synced");
+    }
+
+    return row;
+  }
+
+  private async upsertGithubProjectV2FieldOption(
+    fieldId: string,
+    option: GithubProjectV2FieldOptionApiItem
+  ): Promise<GithubProjectV2FieldOptionSyncRow> {
+    const row = await this.database.queryOne<GithubProjectV2FieldOptionSyncRow>(
+      `
+        INSERT INTO github_project_v2_field_options (
+          field_id,
+          github_option_id,
+          option_name,
+          normalized_name,
+          color,
+          description,
+          position
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        ON CONFLICT (field_id, github_option_id)
+        DO UPDATE SET
+          option_name = EXCLUDED.option_name,
+          normalized_name = EXCLUDED.normalized_name,
+          color = EXCLUDED.color,
+          description = EXCLUDED.description,
+          position = EXCLUDED.position,
+          updated_at = now()
+        RETURNING id, (xmax = 0) AS created
+      `,
+      [
+        fieldId,
+        option.id,
+        option.name,
+        this.normalizeProjectV2OptionName(option.name),
+        option.color,
+        option.description,
+        option.position
+      ]
+    );
+
+    if (!row) {
+      throw badRequest("GitHub ProjectV2 field option could not be synced");
+    }
+
+    return row;
+  }
+
+  private async upsertGithubProjectV2Item(
+    context: GithubSyncRunContext,
+    item: GithubProjectV2ItemApiItem
+  ): Promise<GithubProjectV2ItemSyncRow | null> {
+    const projectV2 = this.requireGithubSyncProjectV2(context);
+    const contentIds = await this.resolveGithubProjectV2ItemContentIds(
+      context.workspaceId,
+      item
+    );
+    if (!contentIds) {
+      return null;
+    }
+
+    const status = item.statusOptionId
+      ? await this.findGithubProjectV2StatusOption(projectV2.id, item.statusOptionId)
+      : null;
+    const row = await this.database.queryOne<GithubProjectV2ItemSyncRow>(
+      `
+        INSERT INTO github_project_v2_items (
+          workspace_id,
+          project_v2_id,
+          github_project_item_node_id,
+          github_project_item_full_database_id,
+          content_type,
+          issue_id,
+          pull_request_id,
+          is_archived,
+          status_field_id,
+          status_option_id,
+          status_option_github_id,
+          status_name,
+          status_normalized_name,
+          position,
+          github_created_at,
+          github_updated_at,
+          last_synced_at,
+          raw
+        )
+        VALUES (
+          $1,
+          $2,
+          $3,
+          $4,
+          $5,
+          $6,
+          $7,
+          $8,
+          $9,
+          $10,
+          $11,
+          $12,
+          $13,
+          $14,
+          $15,
+          $16,
+          now(),
+          $17::jsonb
+        )
+        ON CONFLICT (github_project_item_node_id)
+        DO UPDATE SET
+          workspace_id = EXCLUDED.workspace_id,
+          project_v2_id = EXCLUDED.project_v2_id,
+          github_project_item_full_database_id =
+            EXCLUDED.github_project_item_full_database_id,
+          content_type = EXCLUDED.content_type,
+          issue_id = EXCLUDED.issue_id,
+          pull_request_id = EXCLUDED.pull_request_id,
+          is_archived = EXCLUDED.is_archived,
+          status_field_id = EXCLUDED.status_field_id,
+          status_option_id = EXCLUDED.status_option_id,
+          status_option_github_id = EXCLUDED.status_option_github_id,
+          status_name = EXCLUDED.status_name,
+          status_normalized_name = EXCLUDED.status_normalized_name,
+          position = EXCLUDED.position,
+          github_created_at = EXCLUDED.github_created_at,
+          github_updated_at = EXCLUDED.github_updated_at,
+          last_synced_at = now(),
+          raw = EXCLUDED.raw,
+          updated_at = now()
+        RETURNING id, (xmax = 0) AS created
+      `,
+      [
+        context.workspaceId,
+        projectV2.id,
+        item.id,
+        item.databaseId,
+        item.contentType,
+        contentIds.issueId,
+        contentIds.pullRequestId,
+        item.isArchived,
+        status?.field_id ?? null,
+        status?.id ?? null,
+        item.statusOptionId,
+        item.statusName,
+        item.statusName ? this.normalizeProjectV2OptionName(item.statusName) : null,
+        item.position,
+        item.createdAt,
+        item.updatedAt,
+        item.raw
+      ]
+    );
+
+    if (!row) {
+      throw badRequest("GitHub ProjectV2 item could not be synced");
+    }
+
+    return row;
+  }
+
+  private async upsertGithubProjectV2ItemFieldValue(
+    projectItemId: string,
+    fieldValue: GithubProjectV2ItemFieldValueApiItem
+  ): Promise<void> {
+    const fieldRow = fieldValue.fieldNodeId
+      ? await this.findGithubProjectV2FieldByNodeId(fieldValue.fieldNodeId)
+      : null;
+
+    await this.database.execute(
+      `
+        INSERT INTO github_project_v2_item_field_values (
+          project_item_id,
+          field_id,
+          github_field_value_node_id,
+          field_name,
+          field_data_type,
+          text_value,
+          number_value,
+          date_value,
+          single_select_option_id,
+          single_select_name,
+          iteration_id,
+          iteration_title,
+          raw,
+          github_created_at,
+          github_updated_at
+        )
+        VALUES (
+          $1,
+          $2,
+          $3,
+          $4,
+          $5,
+          $6,
+          $7,
+          $8,
+          $9,
+          $10,
+          $11,
+          $12,
+          $13::jsonb,
+          $14,
+          $15
+        )
+        ON CONFLICT (project_item_id, field_name)
+        DO UPDATE SET
+          field_id = EXCLUDED.field_id,
+          github_field_value_node_id = EXCLUDED.github_field_value_node_id,
+          field_data_type = EXCLUDED.field_data_type,
+          text_value = EXCLUDED.text_value,
+          number_value = EXCLUDED.number_value,
+          date_value = EXCLUDED.date_value,
+          single_select_option_id = EXCLUDED.single_select_option_id,
+          single_select_name = EXCLUDED.single_select_name,
+          iteration_id = EXCLUDED.iteration_id,
+          iteration_title = EXCLUDED.iteration_title,
+          raw = EXCLUDED.raw,
+          github_created_at = EXCLUDED.github_created_at,
+          github_updated_at = EXCLUDED.github_updated_at,
+          updated_at = now()
+      `,
+      [
+        projectItemId,
+        fieldRow?.id ?? null,
+        fieldValue.id,
+        fieldValue.fieldName,
+        fieldValue.fieldDataType,
+        fieldValue.textValue,
+        fieldValue.numberValue,
+        fieldValue.dateValue,
+        fieldValue.singleSelectOptionId,
+        fieldValue.singleSelectName,
+        fieldValue.iterationId,
+        fieldValue.iterationTitle,
+        fieldValue.raw,
+        fieldValue.createdAt,
+        fieldValue.updatedAt
+      ]
+    );
+  }
+
+  private async resolveGithubProjectV2ItemContentIds(
+    workspaceId: string,
+    item: GithubProjectV2ItemApiItem
+  ): Promise<{ issueId: string | null; pullRequestId: string | null } | null> {
+    if (item.contentType === "ISSUE") {
+      if (!item.contentNodeId) {
+        return null;
+      }
+
+      const row = await this.findGithubIssueByNodeId(workspaceId, item.contentNodeId);
+      return row ? { issueId: row.id, pullRequestId: null } : null;
+    }
+
+    if (item.contentType === "PULL_REQUEST") {
+      if (!item.contentNodeId) {
+        return null;
+      }
+
+      const row = await this.findGithubPullRequestByNodeId(
+        workspaceId,
+        item.contentNodeId
+      );
+      return row ? { issueId: null, pullRequestId: row.id } : null;
+    }
+
+    return {
+      issueId: null,
+      pullRequestId: null
+    };
+  }
+
+  private async findGithubIssueByNodeId(
+    workspaceId: string,
+    githubNodeId: string
+  ): Promise<GithubProjectV2ContentSyncRow | null> {
+    return this.database.queryOne<GithubProjectV2ContentSyncRow>(
+      `
+        SELECT id
+        FROM github_issues
+        WHERE workspace_id = $1
+          AND github_node_id = $2
+      `,
+      [workspaceId, githubNodeId]
+    );
+  }
+
+  private async findGithubPullRequestByNodeId(
+    workspaceId: string,
+    githubNodeId: string
+  ): Promise<GithubProjectV2ContentSyncRow | null> {
+    return this.database.queryOne<GithubProjectV2ContentSyncRow>(
+      `
+        SELECT id
+        FROM github_pull_requests
+        WHERE workspace_id = $1
+          AND github_node_id = $2
+      `,
+      [workspaceId, githubNodeId]
+    );
+  }
+
+  private async findGithubProjectV2StatusOption(
+    projectV2Id: string,
+    githubOptionId: string
+  ): Promise<(GithubProjectV2FieldOptionSyncRow & { field_id: string }) | null> {
+    return this.database.queryOne<
+      GithubProjectV2FieldOptionSyncRow & { field_id: string }
+    >(
+      `
+        SELECT o.id, o.field_id, false AS created
+        FROM github_project_v2_field_options o
+        JOIN github_project_v2_fields f
+          ON f.id = o.field_id
+        WHERE f.project_v2_id = $1
+          AND o.github_option_id = $2
+        LIMIT 1
+      `,
+      [projectV2Id, githubOptionId]
+    );
+  }
+
+  private async findGithubProjectV2FieldByNodeId(
+    githubFieldNodeId: string
+  ): Promise<GithubProjectV2FieldSyncRow | null> {
+    return this.database.queryOne<GithubProjectV2FieldSyncRow>(
+      `
+        SELECT id, false AS created
+        FROM github_project_v2_fields
+        WHERE github_field_node_id = $1
+      `,
+      [githubFieldNodeId]
+    );
   }
 
   private async upsertGithubRepository(
@@ -708,6 +1191,10 @@ export class GithubSyncExecutorService {
         ...right.cursor
       }
     };
+  }
+
+  private normalizeProjectV2OptionName(value: string): string {
+    return value.trim().toLowerCase().replace(/\s+/g, "-");
   }
 
   private async countRows(

@@ -103,7 +103,12 @@ function createService({
     oneRows: [connectedGithubOAuthRow]
   });
   const workspaceService = new FakeWorkspaceService();
-  const service = createService({ database, workspaceService });
+  const githubOAuthClient = {
+    async assertUserInstallationLookupSupported(input) {
+      assert.equal(input.accessToken, "plain-user-token");
+    }
+  };
+  const service = createService({ database, workspaceService, githubOAuthClient });
 
   assert.equal(typeof service.startGithubAppInstallation, "function");
 

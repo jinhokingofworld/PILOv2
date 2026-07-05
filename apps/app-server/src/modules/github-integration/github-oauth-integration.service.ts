@@ -24,8 +24,6 @@ interface GithubOAuthStatusRow extends QueryResultRow {
 
 @Injectable()
 export class GithubOAuthIntegrationService {
-  private readonly githubOAuthScope = "repo read:user";
-
   constructor(
     private readonly database: DatabaseService,
     private readonly githubOAuthClient: GithubOAuthClient,
@@ -74,7 +72,6 @@ export class GithubOAuthIntegrationService {
     const authorizeUrl = new URL("https://github.com/login/oauth/authorize");
     authorizeUrl.searchParams.set("client_id", config.clientId);
     authorizeUrl.searchParams.set("redirect_uri", this.getCallbackUrl(config));
-    authorizeUrl.searchParams.set("scope", this.githubOAuthScope);
     authorizeUrl.searchParams.set("state", state);
 
     return {
