@@ -1,5 +1,5 @@
 locals {
-  enable_https = var.create_https_listener && var.api_certificate_arn != ""
+  enable_https = var.create_https_listener
 }
 
 resource "aws_lb" "this" {

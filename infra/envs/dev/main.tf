@@ -241,6 +241,8 @@ resource "aws_route53_record" "frontend" {
   name    = var.frontend_domain_name
   type    = "A"
 
+  allow_overwrite = true
+
   alias {
     name                   = module.cloudfront.distribution_domain_name
     zone_id                = module.cloudfront.distribution_hosted_zone_id
@@ -254,6 +256,8 @@ resource "aws_route53_record" "api" {
   zone_id = var.hosted_zone_id
   name    = var.api_domain_name
   type    = "A"
+
+  allow_overwrite = true
 
   alias {
     name                   = module.alb.alb_dns_name
