@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
 } from "react";
@@ -11,6 +12,12 @@ import {
   readCanvasStorage,
   writeCanvasStorage,
 } from "../../utils/canvas-storage";
+import {
+  createCanvasShapeSyncQueue,
+  syncCanvasFreeformShapes,
+  type CanvasShapeSyncQueue,
+  type CanvasShapeApiClient,
+} from "../../utils/canvas-shape-sync";
 import {
   PiloTldrawCanvas,
   type PiloCanvasActions,
@@ -28,33 +35,19 @@ export type CanvasBoardDetail = {
   title: string;
   workspaceId: string;
   shapeCount: number;
+  shapes?: unknown[];
   viewSetting: CanvasViewSetting;
 };
 
 type PiloCanvasRuntimeProps = {
   board: CanvasBoardDetail;
+  canvasClient?: CanvasShapeApiClient | null;
   onReady: (actions: PiloCanvasActions | null) => void;
+  storageMode?: "api" | "local";
 };
 
 function clampZoom(value: number) {
   return Math.min(2, Math.max(0.5, Math.round(value * 100) / 100));
-}
-
-function isCanvasViewSetting(value: unknown): value is CanvasViewSetting {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return false;
-  }
-
-  const setting = value as Record<string, unknown>;
-
-  return (
-    typeof setting.zoom === "number" &&
-    Number.isFinite(setting.zoom) &&
-    typeof setting.viewportX === "number" &&
-    Number.isFinite(setting.viewportX) &&
-    typeof setting.viewportY === "number" &&
-    Number.isFinite(setting.viewportY)
-  );
 }
 
 function areViewSettingsEqual(
@@ -74,7 +67,9 @@ function buildFreeformShapesKey(shapes: PiloCanvasFreeformShape[]) {
 
 export function PiloCanvasRuntime({
   board,
+  canvasClient = null,
   onReady,
+  storageMode = "local",
 }: PiloCanvasRuntimeProps) {
   const [canvasActions, setCanvasActions] = useState<PiloCanvasActions | null>(
     null,
@@ -87,7 +82,7 @@ export function PiloCanvasRuntime({
     viewportX: 0,
     viewportY: 0,
   });
-  const [hasStoredViewSetting, setHasStoredViewSetting] = useState(false);
+  const shapeSyncQueueRef = useRef<CanvasShapeSyncQueue | null>(null);
   const [canvasHydrationVersion, setCanvasHydrationVersion] = useState(0);
 
   useEffect(() => {
@@ -96,23 +91,21 @@ export function PiloCanvasRuntime({
 
   useEffect(() => {
     let cancelled = false;
-    const storedViewSetting = readCanvasStorage("view-setting", board.id);
-    const storedFreeformShapes = normalizeCanvasFreeformShapes(
-      readCanvasStorage("freeform-shapes", board.id),
+    const boardFreeformShapes = normalizeCanvasFreeformShapes(
+      board.shapes,
     ) as PiloCanvasFreeformShape[];
+    const storedFreeformShapes =
+      storageMode === "local"
+        ? (normalizeCanvasFreeformShapes(
+            readCanvasStorage("freeform-shapes", board.id),
+          ) as PiloCanvasFreeformShape[])
+        : boardFreeformShapes;
 
     queueMicrotask(() => {
       if (cancelled) return;
 
       setFreeformShapes(storedFreeformShapes);
-
-      if (isCanvasViewSetting(storedViewSetting)) {
-        setViewSetting(storedViewSetting);
-        setHasStoredViewSetting(true);
-      } else {
-        setViewSetting(board.viewSetting);
-        setHasStoredViewSetting(false);
-      }
+      setViewSetting(board.viewSetting);
 
       setCanvasHydrationVersion((version) => version + 1);
     });
@@ -120,7 +113,36 @@ export function PiloCanvasRuntime({
     return () => {
       cancelled = true;
     };
-  }, [board.id, board.viewSetting]);
+  }, [board.id, board.shapes, board.viewSetting, storageMode]);
+
+  useEffect(() => {
+    if (storageMode !== "api" || !canvasClient) {
+      shapeSyncQueueRef.current?.cancel();
+      shapeSyncQueueRef.current = null;
+      return;
+    }
+
+    const shapeSyncQueue = createCanvasShapeSyncQueue({
+      boardId: board.id,
+      canvasClient,
+      onError(error: unknown) {
+        console.error("Canvas API shape sync failed", error);
+      },
+      workspaceId: board.workspaceId,
+    });
+
+    shapeSyncQueueRef.current = shapeSyncQueue;
+
+    return () => {
+      void shapeSyncQueue.flush().catch((error: unknown) => {
+        console.error("Canvas API shape sync failed", error);
+      });
+
+      if (shapeSyncQueueRef.current === shapeSyncQueue) {
+        shapeSyncQueueRef.current = null;
+      }
+    };
+  }, [board.id, board.workspaceId, canvasClient, storageMode]);
 
   const persistFreeformShapes = useCallback(
     (nextFreeformShapes: PiloCanvasFreeformShape[]) => {
@@ -132,12 +154,33 @@ export function PiloCanvasRuntime({
           return currentFreeformShapes;
         }
 
-        writeCanvasStorage("freeform-shapes", board.id, nextFreeformShapes);
+        if (storageMode === "api" && canvasClient) {
+          const shapeSyncQueue = shapeSyncQueueRef.current;
+          const syncInput = {
+            nextShapes: nextFreeformShapes,
+            previousShapes: currentFreeformShapes,
+          };
+
+          if (shapeSyncQueue) {
+            shapeSyncQueue.enqueue(syncInput);
+          } else {
+            void syncCanvasFreeformShapes({
+              boardId: board.id,
+              canvasClient,
+              ...syncInput,
+              workspaceId: board.workspaceId,
+            }).catch((error: unknown) => {
+              console.error("Canvas API shape sync failed", error);
+            });
+          }
+        } else {
+          writeCanvasStorage("freeform-shapes", board.id, nextFreeformShapes);
+        }
 
         return nextFreeformShapes;
       });
     },
-    [board.id],
+    [board.id, board.workspaceId, canvasClient, storageMode],
   );
 
   const persistViewSetting = useCallback(
@@ -153,10 +196,8 @@ export function PiloCanvasRuntime({
           ? currentViewSetting
           : normalizedViewSetting,
       );
-      setHasStoredViewSetting(true);
-      writeCanvasStorage("view-setting", board.id, normalizedViewSetting);
     },
-    [board.id],
+    [],
   );
 
   const markCanvasUiEvent = useCallback(
@@ -173,9 +214,7 @@ export function PiloCanvasRuntime({
         <PiloTldrawCanvas
           board={board}
           freeformShapes={freeformShapes}
-          hasStoredViewSetting={hasStoredViewSetting}
           hydrationVersion={canvasHydrationVersion}
-          viewSetting={viewSetting}
           onReady={setCanvasActions}
           onFreeformShapesChange={persistFreeformShapes}
           onViewChange={persistViewSetting}

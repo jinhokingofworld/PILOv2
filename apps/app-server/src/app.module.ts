@@ -2,6 +2,7 @@ import { Module } from "@nestjs/common";
 import { AppController } from "./app.controller";
 import { AppService } from "./app.service";
 import { CalendarModule } from "./modules/calendar/calendar.module";
+import { CanvasModule } from "./modules/canvas/canvas.module";
 import { GithubIntegrationModule } from "./modules/github-integration/github-integration.module";
 import { MeetingModule } from "./modules/meeting/meeting.module";
 import { DatabaseModule } from "./database/database.module";
@@ -15,7 +16,8 @@ import { WorkspaceModule } from "./modules/workspace/workspace.module";
     WorkspaceModule,
     GithubIntegrationModule,
     MeetingModule,
-    CalendarModule
+    CalendarModule,
+    CanvasModule
   ],
   controllers: [AppController],
   providers: [AppService]

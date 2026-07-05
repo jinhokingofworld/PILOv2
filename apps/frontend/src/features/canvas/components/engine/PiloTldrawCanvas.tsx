@@ -134,10 +134,8 @@ type PiloShapeWithMediaAssetMeta = TLShape & {
 
 type PiloTldrawCanvasProps = {
   board: CanvasBoardDetail;
-  hasStoredViewSetting: boolean;
   hydrationVersion: number;
   freeformShapes: PiloCanvasFreeformShape[];
-  viewSetting: CanvasViewSetting;
   onReady: (actions: PiloCanvasActions | null) => void;
   onFreeformShapesChange: (shapes: PiloCanvasFreeformShape[]) => void;
   onViewChange: (viewSetting: CanvasViewSetting) => void;
@@ -473,9 +471,7 @@ function restorePiloShapeAssets(editor: Editor, shapes: PiloCanvasFreeformShape[
 export function PiloTldrawCanvas({
   board,
   freeformShapes,
-  hasStoredViewSetting,
   hydrationVersion,
-  viewSetting,
   onReady,
   onFreeformShapesChange,
   onViewChange,
@@ -484,18 +480,15 @@ export function PiloTldrawCanvas({
   const placementRequestRef = useRef<PiloPlacementRequest | null>(null);
   const createdLocalCardsRef = useRef(0);
   const freeformShapesRef = useRef(freeformShapes);
-  const viewSettingRef = useRef(viewSetting);
   const seedKey = board.id;
 
   useEffect(() => {
     freeformShapesRef.current = freeformShapes;
-    viewSettingRef.current = viewSetting;
-  }, [freeformShapes, viewSetting]);
+  }, [freeformShapes]);
 
   useEffect(() => {
     const editor = editorRef.current;
     const nextFreeformShapes = freeformShapesRef.current;
-    const nextViewSetting = viewSettingRef.current;
 
     if (!editor) return;
 
@@ -513,16 +506,10 @@ export function PiloTldrawCanvas({
       editor.createShapes(sortFreeformShapesForCreate(nextFreeformShapes));
     }
 
-    if (hasStoredViewSetting) {
-      editor.setCamera({
-        x: nextViewSetting.viewportX,
-        y: nextViewSetting.viewportY,
-        z: nextViewSetting.zoom,
-      });
-    } else if (nextFreeformShapes.length) {
+    if (nextFreeformShapes.length) {
       editor.zoomToFit({ animation: { duration: 180 } });
     }
-  }, [hasStoredViewSetting, hydrationVersion, seedKey]);
+  }, [hydrationVersion, seedKey]);
 
   function mountEditor(editor: Editor) {
     editorRef.current = editor;
@@ -567,13 +554,7 @@ export function PiloTldrawCanvas({
       editor.createShapes(sortFreeformShapesForCreate(freeformShapes));
     }
 
-    if (hasStoredViewSetting) {
-      editor.setCamera({
-        x: viewSetting.viewportX,
-        y: viewSetting.viewportY,
-        z: viewSetting.zoom,
-      });
-    } else if (freeformShapes.length) {
+    if (freeformShapes.length) {
       editor.zoomToFit({ animation: { duration: 180 } });
     }
 
