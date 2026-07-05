@@ -43,3 +43,19 @@ export interface ListGithubPullRequestFilesQuery {
   page?: unknown;
   limit?: unknown;
 }
+
+export interface StartGithubSyncRunRequest {
+  target?: unknown;
+  installationId?: unknown;
+  repositoryId?: unknown;
+  projectV2Id?: unknown;
+}
+
+export interface ListGithubSyncRunsQuery {
+  target?: unknown;
+  status?: unknown;
+  repositoryId?: unknown;
+  projectV2Id?: unknown;
+  page?: unknown;
+  limit?: unknown;
+}

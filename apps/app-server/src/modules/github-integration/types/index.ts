@@ -285,3 +285,34 @@ export interface GithubPullRequestConflictStatusPayload {
   conflictCheckedAt: string;
   message: string;
 }
+
+export type GithubSyncTarget =
+  | "repositories"
+  | "issues"
+  | "pull_requests"
+  | "project_v2"
+  | "project_v2_fields"
+  | "project_v2_items"
+  | "full";
+
+export type GithubSyncStatus = "running" | "success" | "failed";
+
+export interface GithubSyncRunPayload {
+  id: string;
+  target: GithubSyncTarget;
+  status: GithubSyncStatus;
+  installationId: string | null;
+  repositoryId: string | null;
+  projectV2Id: string | null;
+  startedAt: string;
+  finishedAt: string | null;
+  fetchedCount: number;
+  createdCount: number;
+  updatedCount: number;
+  skippedCount: number;
+  errorMessage: string | null;
+}
+
+export interface GithubSyncRunDetailPayload extends GithubSyncRunPayload {
+  cursor: Record<string, unknown>;
+}
