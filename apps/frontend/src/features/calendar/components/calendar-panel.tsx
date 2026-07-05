@@ -64,8 +64,17 @@ type CalendarSheetMode =
       type: "create";
     }
   | {
+      type: "detail";
+      event: CalendarEvent;
+    }
+  | {
       type: "edit";
       event: CalendarEvent;
+    }
+  | {
+      type: "delete";
+      event: CalendarEvent;
+      returnTo: "detail" | "edit";
     };
 
 const ACCESS_TOKEN_STORAGE_KEY = "pilo_access_token";
@@ -155,6 +164,25 @@ function getEventDateLabel(event: CalendarEvent) {
   }
 
   return `${formatDateLabel(event.startDate)} - ${formatDateLabel(event.endDate)}`;
+}
+
+function formatDateTimeLabel(value: string) {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return [
+    `${date.getFullYear()}년 ${date.getMonth() + 1}월 ${date.getDate()}일`,
+    `${String(date.getHours()).padStart(2, "0")}:${String(
+      date.getMinutes()
+    ).padStart(2, "0")}`
+  ].join(" ");
+}
+
+function getEventCreatorLabel(event: CalendarEvent) {
+  return event.createdByUser?.name ?? event.createdBy;
 }
 
 function compareCalendarEvents(a: CalendarEvent, b: CalendarEvent) {
@@ -268,20 +296,29 @@ function CalendarEventSheet({
   formState,
   isSubmitting,
   mode,
+  onCancelDelete,
   onClose,
-  onDelete,
+  onConfirmDelete,
   onFormChange,
+  onOpenEdit,
+  onRequestDelete,
   onSubmit
 }: {
   formError: string | null;
   formState: CalendarFormState;
   isSubmitting: boolean;
   mode: CalendarSheetMode | null;
+  onCancelDelete: () => void;
   onClose: () => void;
-  onDelete: () => void;
+  onConfirmDelete: () => void;
   onFormChange: <Field extends keyof CalendarFormState>(
     field: Field,
     value: CalendarFormState[Field]
+  ) => void;
+  onOpenEdit: (event: CalendarEvent) => void;
+  onRequestDelete: (
+    event: CalendarEvent,
+    returnTo: Extract<CalendarSheetMode, { type: "delete" }>["returnTo"]
   ) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
@@ -291,159 +328,310 @@ function CalendarEventSheet({
     <Sheet open={Boolean(mode)} onOpenChange={(open) => !open && onClose()}>
       {mode ? (
         <SheetContent className="w-full sm:max-w-lg">
-          <form className="flex min-h-0 flex-1 flex-col" onSubmit={onSubmit}>
-            <SheetHeader>
-              <SheetTitle>
-                {isEditMode ? "일정 수정" : "새 일정"}
-              </SheetTitle>
-              <SheetDescription>
-                {formatDateLabel(formState.startDate)}
-              </SheetDescription>
-            </SheetHeader>
+          {mode.type === "detail" ? (
+            <div className="flex min-h-0 flex-1 flex-col">
+              <SheetHeader>
+                <SheetTitle>일정 상세</SheetTitle>
+                <SheetDescription>{getEventDateLabel(mode.event)}</SheetDescription>
+              </SheetHeader>
 
-            <div className="flex-1 space-y-4 overflow-y-auto px-4 pb-2">
-              <label className="grid gap-1.5 text-sm font-medium">
-                제목
-                <Input
-                  value={formState.title}
-                  maxLength={255}
-                  placeholder="일정 제목"
-                  onChange={(event) =>
-                    onFormChange("title", event.currentTarget.value)
-                  }
-                />
-              </label>
-
-              <label className="grid gap-1.5 text-sm font-medium">
-                설명
-                <textarea
-                  className="min-h-24 w-full resize-none rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-                  value={formState.description}
-                  placeholder="메모를 남겨둘 수 있습니다"
-                  onChange={(event) =>
-                    onFormChange("description", event.currentTarget.value)
-                  }
-                />
-              </label>
-
-              <label className="flex items-center justify-between gap-3 rounded-lg border bg-muted/20 px-3 py-2 text-sm font-medium">
-                <span>종일 일정</span>
-                <input
-                  type="checkbox"
-                  checked={formState.isAllDay}
-                  className="size-4"
-                  onChange={(event) =>
-                    onFormChange("isAllDay", event.currentTarget.checked)
-                  }
-                />
-              </label>
-
-              <div className="grid gap-3 sm:grid-cols-2">
-                <label className="grid gap-1.5 text-sm font-medium">
-                  시작일
-                  <Input
-                    type="date"
-                    value={formState.startDate}
-                    onChange={(event) =>
-                      onFormChange("startDate", event.currentTarget.value)
-                    }
+              <div className="flex-1 space-y-4 overflow-y-auto px-4 pb-2">
+                <div className="flex items-start gap-3 rounded-lg border bg-muted/20 p-3">
+                  <span
+                    className="mt-1 size-3 shrink-0 rounded-full"
+                    style={{ backgroundColor: mode.event.color }}
                   />
-                </label>
-                <label className="grid gap-1.5 text-sm font-medium">
-                  종료일
-                  <Input
-                    type="date"
-                    min={formState.startDate || undefined}
-                    value={formState.endDate}
-                    onChange={(event) =>
-                      onFormChange("endDate", event.currentTarget.value)
-                    }
-                  />
-                </label>
+                  <div className="min-w-0">
+                    <h3 className="break-words font-heading text-lg font-semibold">
+                      {mode.event.title}
+                    </h3>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      {getEventTimeLabel(mode.event)}
+                    </p>
+                  </div>
+                </div>
+
+                <dl className="grid gap-3 text-sm">
+                  <div className="grid gap-1">
+                    <dt className="font-medium text-muted-foreground">날짜</dt>
+                    <dd>{getEventDateLabel(mode.event)}</dd>
+                  </div>
+                  <div className="grid gap-1">
+                    <dt className="font-medium text-muted-foreground">시간</dt>
+                    <dd>{getEventTimeLabel(mode.event)}</dd>
+                  </div>
+                  <div className="grid gap-1">
+                    <dt className="font-medium text-muted-foreground">설명</dt>
+                    <dd className="whitespace-pre-wrap break-words">
+                      {mode.event.description || "등록된 설명이 없습니다."}
+                    </dd>
+                  </div>
+                  <div className="grid gap-1">
+                    <dt className="font-medium text-muted-foreground">
+                      등록자
+                    </dt>
+                    <dd>{getEventCreatorLabel(mode.event)}</dd>
+                  </div>
+                  <div className="grid gap-1">
+                    <dt className="font-medium text-muted-foreground">
+                      생성일
+                    </dt>
+                    <dd>{formatDateTimeLabel(mode.event.createdAt)}</dd>
+                  </div>
+                  <div className="grid gap-1">
+                    <dt className="font-medium text-muted-foreground">
+                      수정일
+                    </dt>
+                    <dd>{formatDateTimeLabel(mode.event.updatedAt)}</dd>
+                  </div>
+                </dl>
               </div>
 
-              {!formState.isAllDay ? (
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <label className="grid gap-1.5 text-sm font-medium">
-                    시작 시간
-                    <Input
-                      type="time"
-                      value={formState.startTime}
-                      onChange={(event) =>
-                        onFormChange("startTime", event.currentTarget.value)
-                      }
-                    />
-                  </label>
-                  <label className="grid gap-1.5 text-sm font-medium">
-                    종료 시간
-                    <Input
-                      type="time"
-                      value={formState.endTime}
-                      onChange={(event) =>
-                        onFormChange("endTime", event.currentTarget.value)
-                      }
-                    />
-                  </label>
-                </div>
-              ) : null}
-
-              <div className="grid gap-2">
-                <span className="text-sm font-medium">색상</span>
-                <div className="flex flex-wrap gap-2">
-                  {calendarColorOptions.map((color) => (
-                    <button
-                      key={color.value}
-                      type="button"
-                      aria-label={color.label}
-                      aria-pressed={formState.color === color.value}
-                      className={classNames(
-                        "size-7 rounded-full border border-border ring-offset-background transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                        formState.color === color.value &&
-                          "ring-2 ring-ring ring-offset-2"
-                      )}
-                      style={{ backgroundColor: color.value }}
-                      onClick={() => onFormChange("color", color.value)}
-                    />
-                  ))}
-                </div>
-              </div>
-
-              {formError ? (
-                <p className="rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                  {formError}
-                </p>
-              ) : null}
-            </div>
-
-            <SheetFooter className="border-t">
-              {isEditMode ? (
+              <SheetFooter className="border-t">
                 <Button
                   type="button"
                   variant="destructive"
                   disabled={isSubmitting}
-                  onClick={onDelete}
+                  onClick={() => onRequestDelete(mode.event, "detail")}
                 >
                   <Trash2 />
                   삭제
                 </Button>
-              ) : null}
-              <div className="flex gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="flex-1"
-                  disabled={isSubmitting}
-                  onClick={onClose}
-                >
-                  취소
-                </Button>
-                <Button type="submit" className="flex-1" disabled={isSubmitting}>
-                  {isSubmitting ? <Loader2 className="animate-spin" /> : null}
-                  {isEditMode ? "저장" : "등록"}
-                </Button>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="flex-1"
+                    disabled={isSubmitting}
+                    onClick={onClose}
+                  >
+                    닫기
+                  </Button>
+                  <Button
+                    type="button"
+                    className="flex-1"
+                    disabled={isSubmitting}
+                    onClick={() => onOpenEdit(mode.event)}
+                  >
+                    <Pencil />
+                    수정
+                  </Button>
+                </div>
+              </SheetFooter>
+            </div>
+          ) : mode.type === "delete" ? (
+            <div className="flex min-h-0 flex-1 flex-col">
+              <SheetHeader>
+                <SheetTitle>일정 삭제</SheetTitle>
+                <SheetDescription>
+                  삭제한 일정은 되돌릴 수 없습니다.
+                </SheetDescription>
+              </SheetHeader>
+
+              <div className="flex-1 space-y-4 overflow-y-auto px-4 pb-2">
+                <div className="rounded-lg border bg-muted/20 p-3">
+                  <p className="text-sm text-muted-foreground">
+                    다음 일정을 삭제할까요?
+                  </p>
+                  <p className="mt-2 break-words font-medium">
+                    {mode.event.title}
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {getEventDateLabel(mode.event)} ·{" "}
+                    {getEventTimeLabel(mode.event)}
+                  </p>
+                </div>
+
+                {formError ? (
+                  <p className="rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                    {formError}
+                  </p>
+                ) : null}
               </div>
-            </SheetFooter>
-          </form>
+
+              <SheetFooter className="border-t">
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="flex-1"
+                    disabled={isSubmitting}
+                    onClick={onCancelDelete}
+                  >
+                    취소
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    className="flex-1"
+                    disabled={isSubmitting}
+                    onClick={onConfirmDelete}
+                  >
+                    {isSubmitting ? <Loader2 className="animate-spin" /> : null}
+                    삭제
+                  </Button>
+                </div>
+              </SheetFooter>
+            </div>
+          ) : (
+            <form className="flex min-h-0 flex-1 flex-col" onSubmit={onSubmit}>
+              <SheetHeader>
+                <SheetTitle>
+                  {isEditMode ? "일정 수정" : "새 일정"}
+                </SheetTitle>
+                <SheetDescription>
+                  {formatDateLabel(formState.startDate)}
+                </SheetDescription>
+              </SheetHeader>
+
+              <div className="flex-1 space-y-4 overflow-y-auto px-4 pb-2">
+                <label className="grid gap-1.5 text-sm font-medium">
+                  제목
+                  <Input
+                    value={formState.title}
+                    maxLength={255}
+                    placeholder="일정 제목"
+                    onChange={(event) =>
+                      onFormChange("title", event.currentTarget.value)
+                    }
+                  />
+                </label>
+
+                <label className="grid gap-1.5 text-sm font-medium">
+                  설명
+                  <textarea
+                    className="min-h-24 w-full resize-none rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+                    value={formState.description}
+                    placeholder="메모를 남겨둘 수 있습니다"
+                    onChange={(event) =>
+                      onFormChange("description", event.currentTarget.value)
+                    }
+                  />
+                </label>
+
+                <label className="flex items-center justify-between gap-3 rounded-lg border bg-muted/20 px-3 py-2 text-sm font-medium">
+                  <span>종일 일정</span>
+                  <input
+                    type="checkbox"
+                    checked={formState.isAllDay}
+                    className="size-4"
+                    onChange={(event) =>
+                      onFormChange("isAllDay", event.currentTarget.checked)
+                    }
+                  />
+                </label>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="grid gap-1.5 text-sm font-medium">
+                    시작일
+                    <Input
+                      type="date"
+                      value={formState.startDate}
+                      onChange={(event) =>
+                        onFormChange("startDate", event.currentTarget.value)
+                      }
+                    />
+                  </label>
+                  <label className="grid gap-1.5 text-sm font-medium">
+                    종료일
+                    <Input
+                      type="date"
+                      min={formState.startDate || undefined}
+                      value={formState.endDate}
+                      onChange={(event) =>
+                        onFormChange("endDate", event.currentTarget.value)
+                      }
+                    />
+                  </label>
+                </div>
+
+                {!formState.isAllDay ? (
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <label className="grid gap-1.5 text-sm font-medium">
+                      시작 시간
+                      <Input
+                        type="time"
+                        value={formState.startTime}
+                        onChange={(event) =>
+                          onFormChange("startTime", event.currentTarget.value)
+                        }
+                      />
+                    </label>
+                    <label className="grid gap-1.5 text-sm font-medium">
+                      종료 시간
+                      <Input
+                        type="time"
+                        value={formState.endTime}
+                        onChange={(event) =>
+                          onFormChange("endTime", event.currentTarget.value)
+                        }
+                      />
+                    </label>
+                  </div>
+                ) : null}
+
+                <div className="grid gap-2">
+                  <span className="text-sm font-medium">색상</span>
+                  <div className="flex flex-wrap gap-2">
+                    {calendarColorOptions.map((color) => (
+                      <button
+                        key={color.value}
+                        type="button"
+                        aria-label={color.label}
+                        aria-pressed={formState.color === color.value}
+                        className={classNames(
+                          "size-7 rounded-full border border-border ring-offset-background transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                          formState.color === color.value &&
+                            "ring-2 ring-ring ring-offset-2"
+                        )}
+                        style={{ backgroundColor: color.value }}
+                        onClick={() => onFormChange("color", color.value)}
+                      />
+                    ))}
+                  </div>
+                </div>
+
+                {formError ? (
+                  <p className="rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                    {formError}
+                  </p>
+                ) : null}
+              </div>
+
+              <SheetFooter className="border-t">
+                {isEditMode ? (
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    disabled={isSubmitting}
+                    onClick={() => onRequestDelete(mode.event, "edit")}
+                  >
+                    <Trash2 />
+                    삭제
+                  </Button>
+                ) : null}
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="flex-1"
+                    disabled={isSubmitting}
+                    onClick={onClose}
+                  >
+                    취소
+                  </Button>
+                  <Button
+                    type="submit"
+                    className="flex-1"
+                    disabled={isSubmitting}
+                  >
+                    {isSubmitting ? <Loader2 className="animate-spin" /> : null}
+                    {isEditMode ? "저장" : "등록"}
+                  </Button>
+                </div>
+              </SheetFooter>
+            </form>
+          )}
         </SheetContent>
       ) : null}
     </Sheet>
@@ -531,11 +719,41 @@ export function CalendarPanel() {
     setSheetMode({ type: "create" });
   }, []);
 
+  const openDetailSheet = useCallback((event: CalendarEvent) => {
+    setFormError(null);
+    setSheetMode({ type: "detail", event });
+  }, []);
+
   const openEditSheet = useCallback((event: CalendarEvent) => {
     setFormState(createFormStateFromEvent(event));
     setFormError(null);
     setSheetMode({ type: "edit", event });
   }, []);
+
+  const requestDeleteSheet = useCallback(
+    (
+      event: CalendarEvent,
+      returnTo: Extract<CalendarSheetMode, { type: "delete" }>["returnTo"]
+    ) => {
+      setFormError(null);
+      setSheetMode({ type: "delete", event, returnTo });
+    },
+    []
+  );
+
+  const cancelDeleteSheet = useCallback(() => {
+    if (sheetMode?.type !== "delete") return;
+
+    setFormError(null);
+
+    if (sheetMode.returnTo === "edit") {
+      setFormState(createFormStateFromEvent(sheetMode.event));
+      setSheetMode({ type: "edit", event: sheetMode.event });
+      return;
+    }
+
+    setSheetMode({ type: "detail", event: sheetMode.event });
+  }, [sheetMode]);
 
   const closeSheet = useCallback(() => {
     if (!isSubmitting) {
@@ -571,7 +789,9 @@ export function CalendarPanel() {
 
   async function handleFormSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!sheetMode) return;
+    if (!sheetMode || (sheetMode.type !== "create" && sheetMode.type !== "edit")) {
+      return;
+    }
 
     if (!canUseCalendar) {
       setFormError("일정을 저장하려면 로그인이 필요합니다.");
@@ -607,18 +827,13 @@ export function CalendarPanel() {
     }
   }
 
-  async function handleDeleteEvent() {
-    if (sheetMode?.type !== "edit") return;
+  async function handleConfirmDeleteEvent() {
+    if (sheetMode?.type !== "delete") return;
 
     if (!canUseCalendar) {
       setFormError("일정을 삭제하려면 로그인이 필요합니다.");
       return;
     }
-
-    const shouldDelete = window.confirm(
-      `"${sheetMode.event.title}" 일정을 삭제할까요?`
-    );
-    if (!shouldDelete) return;
 
     setIsSubmitting(true);
     setFormError(null);
@@ -744,39 +959,48 @@ export function CalendarPanel() {
                     const isCurrentMonth = isDateInMonth(date, monthDate);
 
                     return (
-                      <button
+                      <div
                         key={date}
-                        type="button"
                         className={classNames(
-                          "min-h-32 border-b border-r p-2 text-left align-top transition last:border-r-0 hover:bg-muted/50 focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                          "relative min-h-32 border-b border-r p-2 text-left align-top transition last:border-r-0",
                           !isCurrentMonth &&
                             "bg-muted/20 text-muted-foreground",
                           isSelected &&
                             "bg-primary/10 ring-2 ring-inset ring-primary",
                           isToday && !isSelected && "bg-secondary/70"
                         )}
-                        onClick={() => setSelectedDate(date)}
                       >
+                        <button
+                          type="button"
+                          className="absolute inset-0 z-0 hover:bg-muted/50 focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          aria-label={`${formatDateLabel(date)} 선택`}
+                          onClick={() => setSelectedDate(date)}
+                        />
                         <span
                           className={classNames(
-                            "inline-flex size-6 items-center justify-center rounded-full text-xs font-medium",
+                            "pointer-events-none relative z-20 inline-flex size-6 items-center justify-center rounded-full text-xs font-medium",
                             isToday && "bg-primary text-primary-foreground"
                           )}
                         >
                           {formatCellDay(date)}
                         </span>
-                        <span className="mt-2 flex flex-col gap-1">
+                        <span className="relative z-20 mt-2 flex flex-col gap-1">
                           {visibleEvents.map((event) => (
-                            <span
+                            <button
                               key={`${date}-${event.id}`}
-                              className="flex min-w-0 items-center gap-1 rounded-md bg-background/85 px-1.5 py-1 text-xs text-foreground shadow-sm ring-1 ring-border"
+                              type="button"
+                              className="flex min-w-0 items-center gap-1 rounded-md bg-background/85 px-1.5 py-1 text-left text-xs text-foreground shadow-sm ring-1 ring-border transition hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                              onClick={() => {
+                                setSelectedDate(date);
+                                openDetailSheet(event);
+                              }}
                             >
                               <span
                                 className="size-1.5 shrink-0 rounded-full"
                                 style={{ backgroundColor: event.color }}
                               />
                               <span className="truncate">{event.title}</span>
-                            </span>
+                            </button>
                           ))}
                           {hiddenEventCount > 0 ? (
                             <span className="rounded-md px-1.5 py-0.5 text-xs font-medium text-muted-foreground">
@@ -784,7 +1008,7 @@ export function CalendarPanel() {
                             </span>
                           ) : null}
                         </span>
-                      </button>
+                      </div>
                     );
                   })}
                 </div>
@@ -820,36 +1044,45 @@ export function CalendarPanel() {
                 {selectedDateEvents.map((event) => (
                   <li
                     key={event.id}
-                    className="grid gap-3 rounded-lg border bg-background p-3 sm:grid-cols-[1fr_auto]"
+                    className="grid gap-2 rounded-lg border bg-background p-2 sm:grid-cols-[1fr_auto]"
                   >
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span
-                          className="size-2.5 shrink-0 rounded-full"
-                          style={{ backgroundColor: event.color }}
-                        />
-                        <p className="truncate text-sm font-medium">
-                          {event.title}
+                    <button
+                      type="button"
+                      className="min-w-0 rounded-md p-1 text-left transition hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      onClick={() => openDetailSheet(event)}
+                    >
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span
+                            className="size-2.5 shrink-0 rounded-full"
+                            style={{ backgroundColor: event.color }}
+                          />
+                          <p className="truncate text-sm font-medium">
+                            {event.title}
+                          </p>
+                        </div>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {getEventTimeLabel(event)} ·{" "}
+                          {getEventDateLabel(event)}
                         </p>
+                        {event.description ? (
+                          <p className="mt-2 line-clamp-2 text-sm text-muted-foreground">
+                            {event.description}
+                          </p>
+                        ) : null}
+                        {event.createdByUser ? (
+                          <p className="mt-2 text-xs text-muted-foreground">
+                            등록자:{" "}
+                            {event.createdByUser.name ?? event.createdBy}
+                          </p>
+                        ) : null}
                       </div>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {getEventTimeLabel(event)} · {getEventDateLabel(event)}
-                      </p>
-                      {event.description ? (
-                        <p className="mt-2 line-clamp-2 text-sm text-muted-foreground">
-                          {event.description}
-                        </p>
-                      ) : null}
-                      {event.createdByUser ? (
-                        <p className="mt-2 text-xs text-muted-foreground">
-                          등록자: {event.createdByUser.name ?? event.createdBy}
-                        </p>
-                      ) : null}
-                    </div>
+                    </button>
                     <Button
                       type="button"
                       variant="outline"
                       size="sm"
+                      className="self-start"
                       onClick={() => openEditSheet(event)}
                     >
                       <Pencil />
@@ -874,9 +1107,12 @@ export function CalendarPanel() {
         formState={formState}
         isSubmitting={isSubmitting}
         mode={sheetMode}
+        onCancelDelete={cancelDeleteSheet}
         onClose={closeSheet}
-        onDelete={handleDeleteEvent}
+        onConfirmDelete={handleConfirmDeleteEvent}
         onFormChange={updateFormField}
+        onOpenEdit={openEditSheet}
+        onRequestDelete={requestDeleteSheet}
         onSubmit={handleFormSubmit}
       />
     </div>
