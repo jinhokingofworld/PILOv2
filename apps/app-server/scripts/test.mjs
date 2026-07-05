@@ -134,11 +134,13 @@ assert.match(meetingController, /@Controller\("workspaces\/:workspaceId"\)/);
 assert.match(meetingController, /@UseGuards\(AuthGuard\)/);
 assert.match(meetingController, /@Get\("meetings\/current"\)/);
 assert.match(meetingController, /@Post\("meetings"\)/);
+assert.match(meetingController, /@Post\("meetings\/:meetingId\/recordings"\)/);
+assert.match(meetingController, /@Post\("meetings\/:meetingId\/recordings\/:recordingId\/end"\)/);
+assert.match(meetingController, /@Get\("meetings\/:meetingId\/recordings"\)/);
 assert.match(meetingService, /MAIN_MEETING_ROOM/);
 assert.match(meetingService, /unique_active_meeting_per_room/);
 assert.match(meetingService, /INSERT INTO meetings/);
 assert.match(meetingService, /INSERT INTO meeting_participants/);
-assert.match(meetingService, /INSERT INTO meeting_recordings/);
 
 await import("./calendar/test.mjs");
 await import("./meeting/test.mjs");

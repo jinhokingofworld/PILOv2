@@ -63,7 +63,16 @@ function currentMeetingRow(overrides = {}) {
     ended_at: null,
     created_at: createdAt,
     updated_at: updatedAt,
+    recording_id: recordingId,
+    recording_meeting_id: meetingId,
     recording_status: "RUNNING",
+    recording_audio_file_url: null,
+    recording_audio_file_key: null,
+    recording_duration_sec: null,
+    recording_file_size_bytes: null,
+    recording_started_at: startedAt,
+    recording_ended_at: null,
+    recording_error_message: null,
     active_participant_count: 1,
     ...overrides
   };
@@ -89,16 +98,6 @@ function startMeetingRow(overrides = {}) {
     participant_left_at: null,
     participant_user_name: "Jinho",
     participant_user_avatar_url: "https://example.com/avatar.png",
-    recording_id: recordingId,
-    recording_meeting_id: meetingId,
-    recording_status: "RUNNING",
-    recording_audio_file_url: null,
-    recording_audio_file_key: null,
-    recording_duration_sec: null,
-    recording_file_size_bytes: null,
-    recording_started_at: startedAt,
-    recording_ended_at: null,
-    recording_error_message: null,
     ...overrides
   };
 }
@@ -132,7 +131,7 @@ async function assertBadRequest(action, messagePattern) {
   assert.deepEqual(workspaceService.calls, [{ userId: currentUserId, workspaceId }]);
   assert.deepEqual(current, {
     meeting: null,
-    recordingStatus: null,
+    currentRecording: null,
     activeParticipantCount: 0
   });
 }
@@ -152,7 +151,8 @@ async function assertBadRequest(action, messagePattern) {
 
   assert.equal(current.meeting.id, meetingId);
   assert.equal(current.meeting.roomKey, "MAIN_MEETING_ROOM");
-  assert.equal(current.recordingStatus, "RUNNING");
+  assert.equal(current.currentRecording.id, recordingId);
+  assert.equal(current.currentRecording.status, "RUNNING");
   assert.equal(current.activeParticipantCount, 2);
   assert.equal(current.meeting.startedAt, "2026-07-05T00:00:00.000Z");
 }
@@ -165,8 +165,7 @@ async function assertBadRequest(action, messagePattern) {
         assert.match(text, /WITH generated AS/);
         assert.match(text, /INSERT INTO meetings/);
         assert.match(text, /INSERT INTO meeting_participants/);
-        assert.match(text, /INSERT INTO meeting_recordings/);
-        assert.match(text, /'RUNNING'::meeting_recording_status/);
+        assert.doesNotMatch(text, /INSERT INTO meeting_recordings/);
         assert.deepEqual(values, [
           workspaceId,
           "MAIN_MEETING_ROOM",
@@ -188,7 +187,7 @@ async function assertBadRequest(action, messagePattern) {
   assert.equal(started.participant.user.name, "Jinho");
   assert.equal(started.participant.isActive, true);
   assert.equal(started.livekit, null);
-  assert.equal(started.recording.status, "RUNNING");
+  assert.equal(started.currentRecording, null);
 }
 
 {

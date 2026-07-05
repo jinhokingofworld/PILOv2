@@ -22,7 +22,16 @@ interface MeetingRow extends QueryResultRow {
 }
 
 interface CurrentMeetingRow extends MeetingRow {
+  recording_id: string | null;
+  recording_meeting_id: string | null;
   recording_status: RecordingStatus | null;
+  recording_audio_file_url: string | null;
+  recording_audio_file_key: string | null;
+  recording_duration_sec: number | null;
+  recording_file_size_bytes: number | string | null;
+  recording_started_at: Date | string | null;
+  recording_ended_at: Date | string | null;
+  recording_error_message: string | null;
   active_participant_count: number | string;
 }
 
@@ -45,16 +54,6 @@ interface StartMeetingRow extends QueryResultRow {
   participant_left_at: Date | string | null;
   participant_user_name: string | null;
   participant_user_avatar_url: string | null;
-  recording_id: string;
-  recording_meeting_id: string;
-  recording_status: RecordingStatus;
-  recording_audio_file_url: string | null;
-  recording_audio_file_key: string | null;
-  recording_duration_sec: number | null;
-  recording_file_size_bytes: number | string | null;
-  recording_started_at: Date | string;
-  recording_ended_at: Date | string | null;
-  recording_error_message: string | null;
 }
 
 interface MeetingReportListQuery {
@@ -109,7 +108,7 @@ export interface RecordingPayload {
 
 export interface CurrentMeetingPayload {
   meeting: MeetingPayload | null;
-  recordingStatus: RecordingStatus | null;
+  currentRecording: RecordingPayload | null;
   activeParticipantCount: number;
 }
 
@@ -117,7 +116,7 @@ export interface StartMeetingPayload {
   meeting: MeetingPayload;
   participant: ParticipantPayload;
   livekit: null;
-  recording: RecordingPayload;
+  currentRecording: null;
 }
 
 const MAIN_MEETING_ROOM = "MAIN_MEETING_ROOM";
@@ -151,14 +150,14 @@ export class MeetingService {
     if (!currentMeeting) {
       return {
         meeting: null,
-        recordingStatus: null,
+        currentRecording: null,
         activeParticipantCount: 0
       };
     }
 
     return {
       meeting: this.mapMeeting(currentMeeting),
-      recordingStatus: currentMeeting.recording_status,
+      currentRecording: this.mapNullableCurrentRecording(currentMeeting),
       activeParticipantCount: Number(currentMeeting.active_participant_count)
     };
   }
@@ -212,12 +211,6 @@ export class MeetingService {
               'meeting-' || inserted_meeting.id::text || '-user-' || $3::text
             FROM inserted_meeting
             RETURNING *
-          ),
-          inserted_recording AS (
-            INSERT INTO meeting_recordings (meeting_id, status)
-            SELECT inserted_meeting.id, 'RUNNING'::meeting_recording_status
-            FROM inserted_meeting
-            RETURNING *
           )
           SELECT
             inserted_meeting.id AS meeting_id,
@@ -237,24 +230,12 @@ export class MeetingService {
             inserted_participant.joined_at AS participant_joined_at,
             inserted_participant.left_at AS participant_left_at,
             users.name AS participant_user_name,
-            users.avatar_url AS participant_user_avatar_url,
-            inserted_recording.id AS recording_id,
-            inserted_recording.meeting_id AS recording_meeting_id,
-            inserted_recording.status AS recording_status,
-            inserted_recording.audio_file_url AS recording_audio_file_url,
-            inserted_recording.audio_file_key AS recording_audio_file_key,
-            inserted_recording.duration_sec AS recording_duration_sec,
-            inserted_recording.file_size_bytes AS recording_file_size_bytes,
-            inserted_recording.started_at AS recording_started_at,
-            inserted_recording.ended_at AS recording_ended_at,
-            inserted_recording.error_message AS recording_error_message
+            users.avatar_url AS participant_user_avatar_url
           FROM inserted_meeting
           JOIN inserted_participant
             ON inserted_participant.meeting_id = inserted_meeting.id
           JOIN users
             ON users.id = inserted_participant.user_id
-          JOIN inserted_recording
-            ON inserted_recording.meeting_id = inserted_meeting.id
         `,
         [workspaceId, roomKey, currentUserId]
       );
@@ -304,25 +285,48 @@ export class MeetingService {
     );
   }
 
-  async endMeeting(
+  async startRecording(
     currentUserId: string,
     workspaceId: string,
     _meetingId: string
   ): Promise<PendingMeetingPayload> {
     await this.assertWorkspaceAccess(currentUserId, workspaceId);
     return this.pendingEndpoint(
-      "POST /workspaces/{workspaceId}/meetings/{meetingId}/end"
+      "POST /workspaces/{workspaceId}/meetings/{meetingId}/recordings"
     );
   }
 
-  async getRecording(
+  async endRecordingAndCreateReport(
+    currentUserId: string,
+    workspaceId: string,
+    _meetingId: string,
+    _recordingId: string
+  ): Promise<PendingMeetingPayload> {
+    await this.assertWorkspaceAccess(currentUserId, workspaceId);
+    return this.pendingEndpoint(
+      "POST /workspaces/{workspaceId}/meetings/{meetingId}/recordings/{recordingId}/end"
+    );
+  }
+
+  async listRecordings(
     currentUserId: string,
     workspaceId: string,
     _meetingId: string
   ): Promise<PendingMeetingPayload> {
     await this.assertWorkspaceAccess(currentUserId, workspaceId);
     return this.pendingEndpoint(
-      "GET /workspaces/{workspaceId}/meetings/{meetingId}/recording"
+      "GET /workspaces/{workspaceId}/meetings/{meetingId}/recordings"
+    );
+  }
+
+  async getCurrentRecording(
+    currentUserId: string,
+    workspaceId: string,
+    _meetingId: string
+  ): Promise<PendingMeetingPayload> {
+    await this.assertWorkspaceAccess(currentUserId, workspaceId);
+    return this.pendingEndpoint(
+      "GET /workspaces/{workspaceId}/meetings/{meetingId}/recordings/current"
     );
   }
 
@@ -357,14 +361,14 @@ export class MeetingService {
     );
   }
 
-  async getMeetingReport(
+  async listMeetingReports(
     currentUserId: string,
     workspaceId: string,
     _meetingId: string
   ): Promise<PendingMeetingPayload> {
     await this.assertWorkspaceAccess(currentUserId, workspaceId);
     return this.pendingEndpoint(
-      "GET /workspaces/{workspaceId}/meetings/{meetingId}/report"
+      "GET /workspaces/{workspaceId}/meetings/{meetingId}/reports"
     );
   }
 
@@ -403,11 +407,36 @@ export class MeetingService {
           meetings.ended_at,
           meetings.created_at,
           meetings.updated_at,
-          meeting_recordings.status AS recording_status,
+          current_recording.id AS recording_id,
+          current_recording.meeting_id AS recording_meeting_id,
+          current_recording.status AS recording_status,
+          current_recording.audio_file_url AS recording_audio_file_url,
+          current_recording.audio_file_key AS recording_audio_file_key,
+          current_recording.duration_sec AS recording_duration_sec,
+          current_recording.file_size_bytes AS recording_file_size_bytes,
+          current_recording.started_at AS recording_started_at,
+          current_recording.ended_at AS recording_ended_at,
+          current_recording.error_message AS recording_error_message,
           COALESCE(active_participants.count, 0)::int AS active_participant_count
         FROM meetings
-        LEFT JOIN meeting_recordings
-          ON meeting_recordings.meeting_id = meetings.id
+        LEFT JOIN LATERAL (
+          SELECT
+            meeting_recordings.id,
+            meeting_recordings.meeting_id,
+            meeting_recordings.status,
+            meeting_recordings.audio_file_url,
+            meeting_recordings.audio_file_key,
+            meeting_recordings.duration_sec,
+            meeting_recordings.file_size_bytes,
+            meeting_recordings.started_at,
+            meeting_recordings.ended_at,
+            meeting_recordings.error_message
+          FROM meeting_recordings
+          WHERE meeting_recordings.meeting_id = meetings.id
+            AND meeting_recordings.status = 'RUNNING'
+          ORDER BY meeting_recordings.started_at DESC, meeting_recordings.id ASC
+          LIMIT 1
+        ) AS current_recording ON true
         LEFT JOIN LATERAL (
           SELECT COUNT(*)::int AS count
           FROM meeting_participants
@@ -465,6 +494,32 @@ export class MeetingService {
     };
   }
 
+  private mapNullableCurrentRecording(row: CurrentMeetingRow): RecordingPayload | null {
+    if (row.recording_id === null || row.recording_meeting_id === null) {
+      return null;
+    }
+
+    if (row.recording_started_at === null || row.recording_status === null) {
+      return null;
+    }
+
+    return {
+      id: row.recording_id,
+      meetingId: row.recording_meeting_id,
+      status: row.recording_status,
+      audioFileUrl: row.recording_audio_file_url,
+      audioFileKey: row.recording_audio_file_key,
+      durationSec: row.recording_duration_sec,
+      fileSizeBytes:
+        row.recording_file_size_bytes === null
+          ? null
+          : Number(row.recording_file_size_bytes),
+      startedAt: this.toIsoString(row.recording_started_at),
+      endedAt: this.toNullableIsoString(row.recording_ended_at),
+      errorMessage: row.recording_error_message
+    };
+  }
+
   private mapStartMeeting(row: StartMeetingRow): StartMeetingPayload {
     return {
       meeting: {
@@ -494,21 +549,7 @@ export class MeetingService {
         }
       },
       livekit: null,
-      recording: {
-        id: row.recording_id,
-        meetingId: row.recording_meeting_id,
-        status: row.recording_status,
-        audioFileUrl: row.recording_audio_file_url,
-        audioFileKey: row.recording_audio_file_key,
-        durationSec: row.recording_duration_sec,
-        fileSizeBytes:
-          row.recording_file_size_bytes === null
-            ? null
-            : Number(row.recording_file_size_bytes),
-        startedAt: this.toIsoString(row.recording_started_at),
-        endedAt: this.toNullableIsoString(row.recording_ended_at),
-        errorMessage: row.recording_error_message
-      }
+      currentRecording: null
     };
   }
 
