@@ -385,8 +385,10 @@ export class CalendarService {
       draft.startTime === undefined
         ? this.toTimeString(existing.start_time)
         : this.readOptionalNullableTime(draft, "startTime");
-    const endTime =
-      draft.endTime === undefined
+    const shouldNormalizeEndTime = this.shouldNormalizePatchEndTime(draft);
+    const endTime = shouldNormalizeEndTime
+      ? null
+      : draft.endTime === undefined
         ? this.toTimeString(existing.end_time)
         : this.readOptionalNullableTime(draft, "endTime");
 
@@ -401,7 +403,7 @@ export class CalendarService {
         startTime,
         endTime
       },
-      this.shouldNormalizePatchEndTime(draft)
+      shouldNormalizeEndTime
     );
   }
 

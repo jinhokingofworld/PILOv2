@@ -42,6 +42,7 @@ assert.match(calendarService, /assertWorkspaceAccess/);
 assert.match(calendarService, /calendar_events/);
 assert.match(calendarService, /createdByUser/);
 assert.match(calendarService, /addOneHour/);
+assert.match(calendarService, /const endTime = shouldNormalizeEndTime\s*\?\s*null/);
 assert.match(userController, /@Controller\("me"\)/);
 assert.match(userController, /@UseGuards\(AuthGuard\)/);
 assert.match(authGuard, /SessionService/);
