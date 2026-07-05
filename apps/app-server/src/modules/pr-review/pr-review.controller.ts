@@ -5,6 +5,7 @@ import { CurrentUserId } from "../../common/current-user.decorator";
 import {
   DeletePrReviewSessionPayload,
   PrReviewCanvasPayload,
+  PrReviewFileDiffPayload,
   PrReviewFilePayload,
   PrReviewFlowFilesPayload,
   PrReviewFlowListPayload,
@@ -129,6 +130,20 @@ export class PrReviewController {
       reviewFileId
     );
     return apiResponse(file);
+  }
+
+  @Get("review-files/:reviewFileId/diff")
+  async getReviewFileDiff(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("reviewFileId") reviewFileId: string
+  ): Promise<ApiSuccessResponse<PrReviewFileDiffPayload>> {
+    const diff = await this.prReviewService.getReviewFileDiff(
+      currentUserId,
+      workspaceId,
+      reviewFileId
+    );
+    return apiResponse(diff);
   }
 
   @Patch("review-sessions/:reviewSessionId")

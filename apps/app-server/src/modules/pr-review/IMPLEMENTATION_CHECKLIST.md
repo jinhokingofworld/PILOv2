@@ -111,17 +111,17 @@
 
 ## 6. Diff View Model
 
-- [ ] `GET /workspaces/{workspaceId}/github/review-files/{reviewFileId}/diff`를 구현한다.
-- [ ] GitHub patch text를 side-by-side rows로 변환한다.
-- [ ] old/new line number를 포함한다.
-- [ ] `added`, `modified`, `deleted`, `renamed` file status를 처리한다.
-- [ ] binary file은 rows 없는 `mode: "binary"`로 처리한다.
-- [ ] large diff는 rows 없는 `mode: "large"`로 처리한다.
-- [ ] API 계약의 large diff 기준을 적용한다:
+- [x] `GET /workspaces/{workspaceId}/github/review-files/{reviewFileId}/diff`를 구현한다.
+- [x] GitHub patch text를 side-by-side rows로 변환한다.
+- [x] old/new line number를 포함한다.
+- [x] `added`, `modified`, `deleted`, `renamed` file status를 처리한다.
+- [x] binary file은 rows 없는 `mode: "binary"`로 처리한다.
+- [x] large diff는 rows 없는 `mode: "large"`로 처리한다.
+- [x] API 계약의 large diff 기준을 적용한다:
   `additions + deletions >= 1000`, `patchSizeBytes >= 200KB`, GitHub patch 누락.
-- [ ] preview가 생략될 때 frontend가 GitHub로 이동할 수 있도록 `githubFileUrl`을
+- [x] preview가 생략될 때 frontend가 GitHub로 이동할 수 있도록 `githubFileUrl`을
   반환한다.
-- [ ] inline comment 입력 UI/API는 구현하지 않는다.
+- [x] inline comment 입력 UI/API는 구현하지 않는다.
 
 ## 7. File Review Decision
 
@@ -215,7 +215,7 @@
 
 - [ ] session lifecycle에 대한 focused backend test를 추가한다.
 - [ ] session 삭제 cascade는 DB integration/fixture 환경이 준비되면 검증한다.
-- [ ] diff parsing에 대한 focused backend test를 추가한다.
+- [x] diff parsing에 대한 focused backend test를 추가한다.
 - [ ] file review decision update에 대한 focused backend test를 추가한다.
 - [ ] OAuth missing과 stale head submission guard에 대한 focused backend test를 추가한다.
 - [ ] submission success/failure persistence에 대한 focused backend test를 추가한다.

@@ -6,6 +6,10 @@ import {
   type DatabaseTransaction
 } from "../../database/database.service";
 import { WorkspaceService } from "../workspace/workspace.service";
+import {
+  parseUnifiedDiffPatch,
+  type PrReviewDiffRowPayload
+} from "./pr-review-diff-parser";
 import { PrReviewGithubDependencyService } from "./pr-review-github-dependency.service";
 import type {
   PrReviewConflictStatus,
@@ -99,6 +103,7 @@ interface ReviewFileResultRow extends QueryResultRow {
 interface ReviewFileDetailRow extends QueryResultRow {
   id: string;
   session_id: string;
+  pull_request_id: string;
   file_path: string;
   previous_file_path: string | null;
   file_name: string;
@@ -331,6 +336,19 @@ export interface PrReviewFilePayload {
   latestDecision: PrReviewLatestDecisionPayload | null;
 }
 
+export type PrReviewDiffMode = "side_by_side" | "binary" | "large";
+
+export interface PrReviewFileDiffPayload {
+  reviewFileId: string;
+  filePath: string;
+  mode: PrReviewDiffMode;
+  isBinary: boolean;
+  isLargeDiff: boolean;
+  githubFileUrl: string | null;
+  message?: string;
+  rows: PrReviewDiffRowPayload[];
+}
+
 export interface DeletePrReviewSessionPayload {
   deleted: true;
 }
@@ -346,6 +364,9 @@ const SESSION_STATUSES: readonly PrReviewSessionStatus[] = [
   "failed",
   "archived"
 ];
+
+const LARGE_DIFF_LINE_THRESHOLD = 1000;
+const LARGE_DIFF_PATCH_BYTES = 200 * 1024;
 
 @Injectable()
 export class PrReviewService {
@@ -587,6 +608,60 @@ export class PrReviewService {
     );
 
     return this.mapReviewFile(file, flowMemberships);
+  }
+
+  async getReviewFileDiff(
+    currentUserId: string,
+    workspaceId: string,
+    reviewFileId: string
+  ): Promise<PrReviewFileDiffPayload> {
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+
+    const file = await this.findReviewFile(workspaceId, reviewFileId);
+    if (!file) {
+      throw notFound("Review file not found");
+    }
+
+    if (file.is_binary) {
+      return this.buildDiffFallback(file, "binary");
+    }
+
+    const changedFiles = await this.githubDependency.getPullRequestChangedFiles(
+      currentUserId,
+      workspaceId,
+      file.pull_request_id
+    );
+    const changedFile = this.findChangedFileForReviewFile(file, changedFiles);
+    const githubFileUrl = changedFile?.githubFileUrl ?? file.github_file_url;
+    if (changedFile?.isBinary === true) {
+      return this.buildDiffFallback(file, "binary", githubFileUrl);
+    }
+
+    const patch = changedFile?.patch ?? null;
+    const patchSizeBytes = changedFile?.patchSizeBytes ?? 0;
+    const isLargeDiff =
+      file.is_large_diff ||
+      changedFile?.isLargeDiff === true ||
+      this.isLargeDiff({
+        additions: Number(file.additions),
+        deletions: Number(file.deletions),
+        patch,
+        patchSizeBytes
+      });
+
+    if (isLargeDiff) {
+      return this.buildDiffFallback(file, "large", githubFileUrl);
+    }
+
+    return {
+      reviewFileId: file.id,
+      filePath: file.file_path,
+      mode: "side_by_side",
+      isBinary: false,
+      isLargeDiff: false,
+      githubFileUrl,
+      rows: parseUnifiedDiffPatch(patch ?? "")
+    };
   }
 
   async updateReviewSession(
@@ -962,6 +1037,7 @@ export class PrReviewService {
         SELECT
           review_file.id,
           review_file.session_id,
+          review_session.pull_request_id,
           review_file.file_path,
           review_file.previous_file_path,
           review_file.file_name,
@@ -1232,6 +1308,66 @@ export class PrReviewService {
     }
 
     return reviewFile;
+  }
+
+  private findChangedFileForReviewFile(
+    file: ReviewFileDetailRow,
+    changedFiles: PrReviewGithubChangedFile[]
+  ): PrReviewGithubChangedFile | null {
+    return (
+      changedFiles.find((changedFile) => changedFile.filePath === file.file_path) ??
+      changedFiles.find(
+        (changedFile) =>
+          file.previous_file_path !== null &&
+          changedFile.previousFilePath === file.previous_file_path
+      ) ??
+      null
+    );
+  }
+
+  private isLargeDiff(input: {
+    additions: number;
+    deletions: number;
+    patch: string | null;
+    patchSizeBytes: number;
+  }): boolean {
+    if (input.additions + input.deletions >= LARGE_DIFF_LINE_THRESHOLD) {
+      return true;
+    }
+
+    if (input.patch === null) {
+      return true;
+    }
+
+    return input.patchSizeBytes >= LARGE_DIFF_PATCH_BYTES;
+  }
+
+  private buildDiffFallback(
+    file: ReviewFileDetailRow,
+    mode: Exclude<PrReviewDiffMode, "side_by_side">,
+    githubFileUrl = file.github_file_url
+  ): PrReviewFileDiffPayload {
+    return {
+      reviewFileId: file.id,
+      filePath: file.file_path,
+      mode,
+      isBinary: mode === "binary" || file.is_binary,
+      isLargeDiff: mode === "large" || file.is_large_diff,
+      githubFileUrl,
+      message: this.getDiffFallbackMessage(mode),
+      rows: []
+    };
+  }
+
+  private getDiffFallbackMessage(
+    mode: Exclude<PrReviewDiffMode, "side_by_side">
+  ): string {
+    switch (mode) {
+      case "binary":
+        return "Binary 파일은 PILO diff에서 미리보기하지 않습니다. GitHub에서 확인해주세요.";
+      case "large":
+        return "큰 diff 또는 patch가 누락된 파일은 PILO diff에서 미리보기하지 않습니다. GitHub에서 확인해주세요.";
+    }
   }
 
   private analyzePullRequest(
