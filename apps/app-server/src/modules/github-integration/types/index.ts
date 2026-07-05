@@ -28,3 +28,27 @@ export interface GithubOAuthCallbackPayload {
 export interface GithubOAuthDisconnectPayload {
   disconnected: true;
 }
+
+export interface GithubAppInstallationPayload {
+  id: string;
+  workspaceId: string;
+  githubInstallationId: number;
+  accountLogin: string;
+  accountType: "User" | "Organization";
+  repositorySelection: string | null;
+  permissions: Record<string, unknown>;
+  installedByUserId: string | null;
+  installedAt: string | null;
+  suspendedAt: string | null;
+  lastSyncedAt: string | null;
+}
+
+export interface GithubAppInstallationStartPayload {
+  installUrl: string;
+  state: string;
+}
+
+export interface GithubAppInstallationCallbackPayload
+  extends Omit<GithubAppInstallationPayload, "id"> {
+  installationId: string;
+}

@@ -1,5 +1,8 @@
 import { Module } from "@nestjs/common";
 import { DatabaseModule } from "../../database/database.module";
+import { WorkspaceModule } from "../workspace/workspace.module";
+import { GithubAppClient } from "./github-app.client";
+import { GithubAppInstallationStateService } from "./github-app-installation-state.service";
 import { GithubIntegrationConfigService } from "./github-integration-config.service";
 import { GithubIntegrationController } from "./github-integration.controller";
 import { GithubIntegrationService } from "./github-integration.service";
@@ -8,11 +11,13 @@ import { GithubOAuthStateService } from "./github-oauth-state.service";
 import { GithubTokenEncryptionService } from "./github-token-encryption.service";
 
 @Module({
-  imports: [DatabaseModule],
+  imports: [DatabaseModule, WorkspaceModule],
   controllers: [GithubIntegrationController],
   providers: [
     GithubIntegrationService,
     GithubIntegrationConfigService,
+    GithubAppClient,
+    GithubAppInstallationStateService,
     GithubOAuthClient,
     GithubOAuthStateService,
     GithubTokenEncryptionService

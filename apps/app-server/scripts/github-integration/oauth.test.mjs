@@ -48,6 +48,24 @@ const connectedRow = {
 };
 
 {
+  const encrypted = tokenEncryption.encryptToken("plain-access-token", baseConfig);
+
+  assert.match(encrypted, /^v1:/);
+  assert.equal(
+    tokenEncryption.decryptToken(encrypted, baseConfig),
+    "plain-access-token"
+  );
+}
+
+{
+  assert.throws(
+    () => tokenEncryption.decryptToken("not-a-valid-token", baseConfig),
+    (error) =>
+      error?.response?.error?.message === "GitHub OAuth connection is invalid"
+  );
+}
+
+{
   const database = new FakeDatabase([connectedRow]);
   const service = new GithubIntegrationService(
     database,
