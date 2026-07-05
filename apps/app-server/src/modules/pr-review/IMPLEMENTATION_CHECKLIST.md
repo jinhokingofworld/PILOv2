@@ -32,7 +32,7 @@
 
 - [x] 구현 시작 전 `AGENTS.md`, `docs/api/README.md`,
   `docs/api/pr-review-api.md`를 다시 확인한다.
-- [ ] #22 완료 후 PR 상세, 변경 파일, file patch, conflict 상태, 현재 사용자의
+- [x] #22 완료 후 PR 상세, 변경 파일, file patch, conflict 상태, 현재 사용자의
   GitHub OAuth 상태를 GitHub Integration에서 어떤 형태로 받을지 확인한다.
 - [x] API 계약 변경이 필요 없는지 확인한다. 필요하면 코드 변경과 함께
   `docs/api/pr-review-api.md`를 수정한다.
@@ -45,11 +45,12 @@
 
 - [x] PR Review adapter 경계를 추가하고 deterministic stub data를 둔다. 나중에 실제
   GitHub Integration API로 교체할 때 한 곳만 바꾸도록 만든다.
+- [x] #95에서 PR Review adapter를 실제 GitHub Integration API로 교체한다.
 - [ ] GitHub Integration을 통해 open PR 목록을 읽을 수 있게 한다.
-- [ ] GitHub Integration을 통해 현재 `headSha`를 포함한 PR 상세를 읽을 수 있게 한다.
-- [ ] GitHub Integration을 통해 file metadata와 GitHub patch text를 포함한 변경 파일을
+- [x] GitHub Integration을 통해 현재 `headSha`를 포함한 PR 상세를 읽을 수 있게 한다.
+- [x] GitHub Integration을 통해 file metadata와 GitHub patch text를 포함한 변경 파일을
   읽을 수 있게 한다.
-- [ ] GitHub Integration을 통해 conflict 상태를 읽을 수 있게 한다.
+- [x] GitHub Integration을 통해 conflict 상태를 읽을 수 있게 한다.
 - [ ] 제출 전에 현재 사용자의 GitHub OAuth 연결 상태를 확인할 수 있게 한다.
 - [ ] GitHub token, raw secret이 API 응답이나 로그에 노출되지 않게 한다.
 
