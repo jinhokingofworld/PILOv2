@@ -58,3 +58,5 @@ assert.match(workspaceController, /@Get\(":workspaceId"\)/);
 assert.match(workspaceService, /WHERE owner_user_id = \$1/);
 assert.match(workspaceService, /ORDER BY created_at ASC/);
 assert.match(workspaceService, /assertWorkspaceAccess/);
+
+await import("./calendar/test.mjs");
