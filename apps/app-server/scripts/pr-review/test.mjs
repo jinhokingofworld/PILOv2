@@ -65,12 +65,20 @@ assert.match(prReviewGithubDependencyService, /getCurrentUserGithubOAuthStatus/)
 assert.match(prReviewGithubDependencyService, /getPullRequestDetail/);
 assert.match(prReviewGithubDependencyService, /getPullRequestChangedFiles/);
 assert.match(prReviewGithubDependencyService, /getPullRequestConflictStatus/);
-assert.match(prReviewGithubDependencyService, /Deterministic PR Review stub/);
-assert.match(prReviewGithubDependencyService, /createStubChangedFile/);
-assert.match(
-  prReviewGithubDependencyService,
-  /checkedAt: "1970-01-01T00:00:00.000Z"/
-);
+assert.match(prReviewGithubDependencyService, /getGithubPullRequest/);
+assert.match(prReviewGithubDependencyService, /listGithubPullRequestFiles/);
+assert.match(prReviewGithubDependencyService, /getGithubPullRequestConflictStatus/);
+assert.match(prReviewGithubDependencyService, /mapPullRequestDetail/);
+assert.match(prReviewGithubDependencyService, /mapChangedFile/);
+assert.match(prReviewGithubDependencyService, /normalizeFileStatus/);
+assert.match(prReviewGithubDependencyService, /case "removed"/);
+assert.match(prReviewGithubDependencyService, /return "deleted"/);
+assert.match(prReviewGithubDependencyService, /conflict\.conflictCheckedAt/);
+assert.match(prReviewGithubDependencyService, /Buffer\.byteLength/);
+assert.match(prReviewGithubDependencyService, /GitHub pull request head SHA is not synced/);
+assert.doesNotMatch(prReviewGithubDependencyService, /Deterministic PR Review stub/);
+assert.doesNotMatch(prReviewGithubDependencyService, /createStubChangedFile/);
+assert.doesNotMatch(prReviewGithubDependencyService, /1970-01-01T00:00:00.000Z/);
 
 assert.match(prReviewService, /apiContract: "docs\/api\/pr-review-api.md"/);
 assert.match(prReviewService, /assertWorkspaceAccess/);
