@@ -14,6 +14,7 @@ import { CurrentUserId } from "../../common/current-user.decorator";
 import type {
   GithubAppInstallationCallbackQuery,
   GithubOAuthCallbackQuery,
+  ListGithubPullRequestFilesQuery,
   ListGithubPullRequestsQuery,
   ListGithubProjectsV2Query,
   ListGithubRepositoriesQuery,
@@ -38,7 +39,9 @@ import type {
   GithubProjectV2KanbanPayload,
   GithubProjectV2ListItemPayload,
   GithubProjectV2StatusOptionPayload,
+  GithubPullRequestConflictStatusPayload,
   GithubPullRequestDetailPayload,
+  GithubPullRequestFilePayload,
   GithubPullRequestListItemPayload,
   GithubRepositoryDetailPayload,
   GithubRepositoryListItemPayload
@@ -306,6 +309,39 @@ export class GithubIntegrationController {
       workspaceId,
       pullRequestId
     );
+    return apiResponse(result);
+  }
+
+  @Get("workspaces/:workspaceId/github/pull-requests/:pullRequestId/files")
+  @UseGuards(AuthGuard)
+  async listGithubPullRequestFiles(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("pullRequestId") pullRequestId: string,
+    @Query() query: ListGithubPullRequestFilesQuery
+  ): Promise<ApiSuccessResponseWithMeta<GithubPullRequestFilePayload[]>> {
+    const result = await this.githubIntegrationService.listGithubPullRequestFiles(
+      currentUserId,
+      workspaceId,
+      pullRequestId,
+      query
+    );
+    return apiPaginatedResponse(result);
+  }
+
+  @Get("workspaces/:workspaceId/github/pull-requests/:pullRequestId/conflict-status")
+  @UseGuards(AuthGuard)
+  async getGithubPullRequestConflictStatus(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("pullRequestId") pullRequestId: string
+  ): Promise<ApiSuccessResponse<GithubPullRequestConflictStatusPayload>> {
+    const result =
+      await this.githubIntegrationService.getGithubPullRequestConflictStatus(
+        currentUserId,
+        workspaceId,
+        pullRequestId
+      );
     return apiResponse(result);
   }
 }

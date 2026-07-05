@@ -38,3 +38,8 @@ export interface ListGithubPullRequestsQuery {
   page?: unknown;
   limit?: unknown;
 }
+
+export interface ListGithubPullRequestFilesQuery {
+  page?: unknown;
+  limit?: unknown;
+}

@@ -58,6 +58,8 @@ assert.match(controllerFile, /@Get\("workspaces\/:workspaceId\/github\/projects-
 assert.match(controllerFile, /@Get\("workspaces\/:workspaceId\/github\/issues\/:issueId"\)/);
 assert.match(controllerFile, /@Get\("workspaces\/:workspaceId\/github\/repositories\/:repositoryId\/pull-requests"\)/);
 assert.match(controllerFile, /@Get\("workspaces\/:workspaceId\/github\/pull-requests\/:pullRequestId"\)/);
+assert.match(controllerFile, /@Get\("workspaces\/:workspaceId\/github\/pull-requests\/:pullRequestId\/files"\)/);
+assert.match(controllerFile, /@Get\("workspaces\/:workspaceId\/github\/pull-requests\/:pullRequestId\/conflict-status"\)/);
 assert.match(controllerFile, /@UseGuards\(AuthGuard\)/);
 
 assert.match(serviceFile, /getModuleInfo\(\): GitHubIntegrationModuleInfo/);
@@ -81,8 +83,12 @@ assert.match(serviceFile, /listGithubProjectV2Items/);
 assert.match(serviceFile, /getGithubIssue/);
 assert.match(serviceFile, /listGithubPullRequests/);
 assert.match(serviceFile, /getGithubPullRequest/);
+assert.match(serviceFile, /listGithubPullRequestFiles/);
+assert.match(serviceFile, /getGithubPullRequestConflictStatus/);
 
 assert.match(typesIndex, /export type GitHubIntegrationModuleInfo/);
+assert.match(typesIndex, /GithubPullRequestFilePayload/);
+assert.match(typesIndex, /GithubPullRequestConflictStatusPayload/);
 assert.deepEqual(directoryNames.sort(), ["dto", "queries", "types"]);
 
 const tscScript = fileURLToPath(
@@ -97,3 +103,4 @@ await import("./oauth.test.mjs");
 await import("./installation.test.mjs");
 await import("./source-read.test.mjs");
 await import("./project-v2.test.mjs");
+await import("./pr-files.test.mjs");

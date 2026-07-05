@@ -256,3 +256,32 @@ export interface GithubPullRequestDetailPayload
   closedAtGithub: string | null;
   mergedAt: string | null;
 }
+
+export interface GithubPullRequestFilePayload {
+  filePath: string;
+  previousFilePath: string | null;
+  fileName: string;
+  fileStatus: string;
+  additions: number;
+  deletions: number;
+  changes: number;
+  isBinary: boolean;
+  isLargeDiff: boolean;
+  blobUrl: string | null;
+  rawUrl: string | null;
+  contentsUrl: string | null;
+  githubFileUrl: string;
+  patch: string | null;
+}
+
+export type GithubPullRequestConflictStatus =
+  | "checking"
+  | "clean"
+  | "conflicted"
+  | "unknown";
+
+export interface GithubPullRequestConflictStatusPayload {
+  conflictStatus: GithubPullRequestConflictStatus;
+  conflictCheckedAt: string;
+  message: string;
+}
