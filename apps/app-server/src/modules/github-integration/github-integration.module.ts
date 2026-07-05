@@ -1,4 +1,5 @@
 import { Module } from "@nestjs/common";
+import { CommonModule } from "../../common/common.module";
 import { DatabaseModule } from "../../database/database.module";
 import { WorkspaceModule } from "../workspace/workspace.module";
 import { GithubAppClient } from "./github-app.client";
@@ -11,7 +12,7 @@ import { GithubOAuthStateService } from "./github-oauth-state.service";
 import { GithubTokenEncryptionService } from "./github-token-encryption.service";
 
 @Module({
-  imports: [DatabaseModule, WorkspaceModule],
+  imports: [CommonModule, DatabaseModule, WorkspaceModule],
   controllers: [GithubIntegrationController],
   providers: [
     GithubIntegrationService,
