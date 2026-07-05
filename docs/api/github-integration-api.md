@@ -44,6 +44,11 @@ PR 리뷰 세션, 파일별 리뷰 판단, Kanban board cache hydrate, GitHub is
 
 GitHub token은 복호화된 상태로 응답하거나 로그에 남기지 않는다.
 
+1인 MVP에서는 `auth-api.md`의 GitHub 로그인 callback도
+`users.github_access_token_encrypted`, `github_token_scope`,
+`github_connected_at`, `github_revoked_at`을 갱신할 수 있다. 따라서 GitHub로
+로그인한 사용자는 `/me/github`에서 연결 완료 상태로 보일 수 있다.
+
 GitHub App installation 연결을 시작하려면 현재 사용자의 GitHub OAuth 연결이
 선행되어야 한다. Installation callback 처리 시 서버는 저장된 사용자 OAuth
 token으로 GitHub의 user installations 목록을 조회해 callback의

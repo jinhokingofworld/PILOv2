@@ -19,6 +19,34 @@ const canvasApiClient = await readFile(
   new URL("../src/features/canvas/api/canvas-client.ts", import.meta.url),
   "utf8"
 );
+const authApiClient = await readFile(
+  new URL("../src/features/auth/api/client.ts", import.meta.url),
+  "utf8"
+);
+const authSession = await readFile(
+  new URL("../src/features/auth/auth-session.tsx", import.meta.url),
+  "utf8"
+);
+const authSessionStorage = await readFile(
+  new URL("../src/features/auth/session-storage.ts", import.meta.url),
+  "utf8"
+);
+const loginPage = await readFile(
+  new URL("../src/features/auth/components/login-page.tsx", import.meta.url),
+  "utf8"
+);
+const loginCallbackPage = await readFile(
+  new URL("../src/features/auth/components/login-callback-page.tsx", import.meta.url),
+  "utf8"
+);
+const mainShell = await readFile(
+  new URL("../src/components/main-shell.tsx", import.meta.url),
+  "utf8"
+);
+const appSidebar = await readFile(
+  new URL("../src/components/app-sidebar.tsx", import.meta.url),
+  "utf8"
+);
 const canvasRuntime = await readFile(
   new URL(
     "../src/features/canvas/components/engine/PiloCanvasRuntime.tsx",
@@ -66,6 +94,25 @@ assert.match(navigation, /Voice meeting/);
 assert.match(navigation, /Canvas/);
 assert.match(githubApiClient, /\/api\/v1/);
 assert.match(githubApiClient, /NEXT_PUBLIC_PILO_APP_SERVER_URL/);
+assert.match(authApiClient, /\/auth\/\$\{provider\}\/start/);
+assert.match(authApiClient, /\/auth\/logout/);
+assert.match(authApiClient, /\/workspaces/);
+assert.match(authApiClient, /NEXT_PUBLIC_PILO_APP_SERVER_URL/);
+assert.match(authSessionStorage, /pilo:access-token/);
+assert.match(authSessionStorage, /pilo:workspace-id/);
+assert.match(authSession, /AuthGate/);
+assert.match(authSession, /router\.replace\(`\/login\?returnUrl=/);
+assert.match(authSession, /createWorkspace\(accessToken, "PILO"\)/);
+assert.match(loginPage, /Welcome back/);
+assert.match(loginPage, /Login with GitHub/);
+assert.match(loginPage, /Login with Google/);
+assert.doesNotMatch(loginPage, /Or continue with/);
+assert.doesNotMatch(loginPage, /Forgot your password/);
+assert.match(loginCallbackPage, /access_token/);
+assert.match(loginCallbackPage, /loadAuthSessionEntry/);
+assert.match(mainShell, /AuthGate/);
+assert.match(appSidebar, /useAuthSession/);
+assert.match(appSidebar, /logout/);
 assert.match(canvasApiClient, /const DEFAULT_CANVAS_MODE = "api"/);
 assert.match(canvasApiClient, /\/api\/v1/);
 assert.match(canvasApiClient, /NEXT_PUBLIC_PILO_APP_SERVER_URL/);

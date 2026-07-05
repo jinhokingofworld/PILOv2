@@ -49,6 +49,7 @@ import {
   SidebarSeparator,
   useSidebar
 } from "@/components/ui/sidebar";
+import { useAuthSession } from "@/features/auth";
 import type { FeatureNavigationItem } from "@/features/navigation-types";
 import { cn } from "@/lib/utils";
 
@@ -94,6 +95,7 @@ export function AppSidebar({
 }: AppSidebarProps) {
   const { isMobile, setOpenMobile } = useSidebar();
   const router = useRouter();
+  const authSession = useAuthSession();
   const [activeWorkspaceIndex, setActiveWorkspaceIndex] = useState(0);
   const [activeSubItemHref, setActiveSubItemHref] = useState<
     string | undefined
@@ -101,7 +103,31 @@ export function AppSidebar({
   const [openMenuIds, setOpenMenuIds] = useState<Record<string, boolean>>({
     [selectedItemId]: true
   });
-  const activeWorkspace = workspaces[activeWorkspaceIndex] ?? workspaces[0];
+  const workspaceOptions =
+    authSession?.workspaces.map((workspace) => ({
+      id: workspace.id,
+      name: workspace.name,
+      description: workspace.isOwner ? "개인 워크스페이스" : "워크스페이스",
+      icon: GalleryVerticalEnd
+    })) ?? workspaces.map((workspace) => ({ ...workspace, id: workspace.name }));
+  const activeWorkspace =
+    workspaceOptions.find(
+      (workspace) => workspace.id === authSession?.activeWorkspaceId
+    ) ??
+    workspaceOptions[activeWorkspaceIndex] ??
+    workspaceOptions[0] ?? {
+      id: "PILO",
+      name: "PILO",
+      description: "AI Project OS",
+      icon: GalleryVerticalEnd
+    };
+  const displayUser = authSession
+    ? {
+        name: authSession.user.name ?? "PILO 사용자",
+        email: authSession.user.email ?? "이메일 없음",
+        initials: getUserInitials(authSession.user.name, authSession.user.email)
+      }
+    : currentUser;
   const selectedItem = items.find((item) => item.id === selectedItemId);
 
   useEffect(() => {
@@ -135,6 +161,19 @@ export function AppSidebar({
     handleSelectItem(itemId, href);
   };
 
+  const handleSelectWorkspace = (workspaceId: string, index: number) => {
+    if (authSession) {
+      authSession.setActiveWorkspaceId(workspaceId);
+      return;
+    }
+
+    setActiveWorkspaceIndex(index);
+  };
+
+  const handleLogout = () => {
+    void authSession?.logout();
+  };
+
   return (
     <Sidebar collapsible="icon" variant="inset">
       <SidebarHeader>
@@ -163,11 +202,11 @@ export function AppSidebar({
               >
                 <DropdownMenuGroup>
                   <DropdownMenuLabel>워크스페이스</DropdownMenuLabel>
-                  {workspaces.map((workspace, index) => (
+                  {workspaceOptions.map((workspace, index) => (
                     <DropdownMenuItem
                       className="gap-2 p-2"
-                      key={workspace.name}
-                      onClick={() => setActiveWorkspaceIndex(index)}
+                      key={workspace.id}
+                      onClick={() => handleSelectWorkspace(workspace.id, index)}
                     >
                       <div className="flex size-6 items-center justify-center rounded-md border bg-background">
                         <workspace.icon className="size-3.5" />
@@ -284,14 +323,14 @@ export function AppSidebar({
             <DropdownMenu>
               <DropdownMenuTrigger render={<SidebarMenuButton size="lg" />}>
                 <Avatar size="sm">
-                  <AvatarFallback>{currentUser.initials}</AvatarFallback>
+                  <AvatarFallback>{displayUser.initials}</AvatarFallback>
                 </Avatar>
                 <div className="grid flex-1 text-left text-sm leading-tight">
                   <span className="truncate font-medium">
-                    {currentUser.name}
+                    {displayUser.name}
                   </span>
                   <span className="truncate text-xs text-muted-foreground">
-                    {currentUser.email}
+                    {displayUser.email}
                   </span>
                 </div>
                 <ChevronsUpDown className="ml-auto size-4" />
@@ -306,12 +345,12 @@ export function AppSidebar({
                   <DropdownMenuLabel className="p-0 font-normal">
                     <div className="flex items-center gap-2 px-1 py-1.5 text-left text-sm">
                       <Avatar>
-                        <AvatarFallback>{currentUser.initials}</AvatarFallback>
+                        <AvatarFallback>{displayUser.initials}</AvatarFallback>
                       </Avatar>
                       <div className="grid flex-1 leading-tight">
-                        <span className="font-medium">{currentUser.name}</span>
+                        <span className="font-medium">{displayUser.name}</span>
                         <span className="text-xs text-muted-foreground">
-                          {currentUser.email}
+                          {displayUser.email}
                         </span>
                       </div>
                     </div>
@@ -334,7 +373,7 @@ export function AppSidebar({
                 </DropdownMenuGroup>
                 <DropdownMenuSeparator />
                 <DropdownMenuGroup>
-                  <DropdownMenuItem className="gap-2">
+                  <DropdownMenuItem className="gap-2" onClick={handleLogout}>
                     <LogOut />
                     로그아웃
                   </DropdownMenuItem>
@@ -348,4 +387,16 @@ export function AppSidebar({
       <SidebarRail />
     </Sidebar>
   );
+}
+
+function getUserInitials(name: string | null, email: string | null) {
+  const source = name?.trim() || email?.trim() || "PILO";
+  const initials = source
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join("");
+
+  return initials || "P";
 }

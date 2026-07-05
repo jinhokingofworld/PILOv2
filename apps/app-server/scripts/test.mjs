@@ -11,6 +11,19 @@ const service = await readSource("../src/app.service.ts");
 const appModule = await readSource("../src/app.module.ts");
 const authGuard = await readSource("../src/common/auth.guard.ts");
 const sessionService = await readSource("../src/common/session.service.ts");
+const authModule = await readSource("../src/modules/auth/auth.module.ts");
+const authController = await readSource("../src/modules/auth/auth.controller.ts");
+const authService = await readSource("../src/modules/auth/auth.service.ts");
+const authConfigService = await readSource(
+  "../src/modules/auth/auth-config.service.ts"
+);
+const oauthStateService = await readSource("../src/modules/auth/oauth-state.service.ts");
+const googleOAuthClient = await readSource(
+  "../src/modules/auth/google-oauth.client.ts"
+);
+const githubLoginOAuthClient = await readSource(
+  "../src/modules/auth/github-login-oauth.client.ts"
+);
 const calendarController = await readSource(
   "../src/modules/calendar/calendar.controller.ts"
 );
@@ -36,6 +49,7 @@ assert.match(main, /setGlobalPrefix\("api\/v1"\)/);
 assert.match(controller, /@Get\("health"\)/);
 assert.match(service, /pilo-app-server/);
 assert.match(service, /status: "ok"/);
+assert.match(appModule, /AuthModule/);
 assert.match(appModule, /UserModule/);
 assert.match(appModule, /WorkspaceModule/);
 assert.match(appModule, /CalendarModule/);
@@ -63,6 +77,34 @@ assert.match(sessionService, /user_sessions/);
 assert.match(sessionService, /token_hash = \$1/);
 assert.match(sessionService, /revoked_at IS NULL/);
 assert.match(sessionService, /expires_at > now\(\)/);
+assert.match(sessionService, /revokeSessionToken/);
+assert.match(authModule, /controllers: \[AuthController\]/);
+assert.match(authModule, /GoogleOAuthClient/);
+assert.match(authModule, /GithubLoginOAuthClient/);
+assert.match(authController, /@Controller\("auth"\)/);
+assert.match(authController, /@Post\("google\/start"\)/);
+assert.match(authController, /@Get\("google\/callback"\)/);
+assert.match(authController, /@Post\("github\/start"\)/);
+assert.match(authController, /@Get\("github\/callback"\)/);
+assert.match(authController, /@Post\("logout"\)/);
+assert.match(authService, /user_sessions/);
+assert.match(authService, /token_hash/);
+assert.match(authService, /google_user_id/);
+assert.match(authService, /github_user_id/);
+assert.match(authService, /github_access_token_encrypted/);
+assert.match(authService, /github_token_scope/);
+assert.match(authService, /github_connected_at = now\(\)/);
+assert.match(authService, /github_revoked_at = NULL/);
+assert.match(authService, /GithubTokenEncryptionService/);
+assert.match(authService, /buildGithubAuthorizeUrl/);
+assert.match(authConfigService, /GOOGLE_OAUTH_CLIENT_ID/);
+assert.match(authConfigService, /GITHUB_LOGIN_CLIENT_ID/);
+assert.match(authConfigService, /GITHUB_TOKEN_ENCRYPTION_KEY/);
+assert.match(authConfigService, /FRONTEND_URL/);
+assert.match(oauthStateService, /createHmac\("sha256"/);
+assert.match(oauthStateService, /timingSafeEqual/);
+assert.match(googleOAuthClient, /openidconnect\.googleapis\.com\/v1\/userinfo/);
+assert.match(githubLoginOAuthClient, /api\.github\.com\/user\/emails/);
 assert.match(workspaceController, /@Controller\("workspaces"\)/);
 assert.match(workspaceController, /@Get\(\)/);
 assert.match(workspaceController, /@Post\(\)/);

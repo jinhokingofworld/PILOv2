@@ -4,6 +4,7 @@ import { AppService } from "./app.service";
 import { CalendarModule } from "./modules/calendar/calendar.module";
 import { CanvasModule } from "./modules/canvas/canvas.module";
 import { GithubIntegrationModule } from "./modules/github-integration/github-integration.module";
+import { AuthModule } from "./modules/auth/auth.module";
 import { MeetingModule } from "./modules/meeting/meeting.module";
 import { PrReviewModule } from "./modules/pr-review/pr-review.module";
 import { DatabaseModule } from "./database/database.module";
@@ -13,6 +14,7 @@ import { WorkspaceModule } from "./modules/workspace/workspace.module";
 @Module({
   imports: [
     DatabaseModule,
+    AuthModule,
     UserModule,
     WorkspaceModule,
     GithubIntegrationModule,
