@@ -185,17 +185,6 @@
   color: #a7afbd;
 }
 
-.canvas-history-section button.is-active {
-  background: transparent;
-  color: #2f343d;
-  box-shadow: none;
-}
-
-.canvas-history-section button:disabled {
-  cursor: not-allowed;
-  opacity: 0.62;
-}
-
 .canvas-tool-popover {
   position: absolute;
   right: calc(100% + 10px);
@@ -379,84 +368,40 @@
   padding: 0 2px;
 }
 
-.pilo-group-toolbar {
+.pilo-smart-guides {
   position: absolute;
-  z-index: 36;
-  display: flex;
-  pointer-events: auto;
-}
-
-.pilo-group-toolbar button {
-  position: relative;
-  display: grid;
-  width: 34px;
-  height: 34px;
-  place-items: center;
-  border: 1px solid rgba(148, 163, 184, 0.42);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.72);
-  color: #2f343d;
-  cursor: pointer;
-  font-family: inherit;
-  padding: 0;
-  backdrop-filter: blur(8px);
-  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.12);
-}
-
-.pilo-group-toolbar button[data-tooltip]::before,
-.pilo-group-toolbar button[data-tooltip]::after {
-  position: absolute;
-  left: 50%;
-  z-index: 70;
-  opacity: 0;
+  inset: 0;
+  z-index: 32;
+  contain: layout paint;
   pointer-events: none;
-  transition: opacity 80ms ease;
 }
 
-.pilo-group-toolbar button[data-tooltip]::before {
-  content: "";
-  top: calc(100% + 5px);
-  width: 0;
-  height: 0;
-  border-right: 6px solid transparent;
-  border-bottom: 7px solid #111827;
-  border-left: 6px solid transparent;
-  transform: translateX(-50%);
+.pilo-smart-guide {
+  position: absolute;
+  display: block;
+  box-shadow: 0 0 12px rgba(56, 88, 246, 0.24);
 }
 
-.pilo-group-toolbar button[data-tooltip]::after {
-  content: attr(data-tooltip);
-  top: calc(100% + 11px);
-  min-width: max-content;
-  border-radius: 8px;
-  background: #111827;
-  color: #ffffff;
-  font-size: 12px;
-  font-weight: 850;
-  letter-spacing: 0;
-  line-height: 1;
-  padding: 10px 12px;
-  transform: translateX(-50%);
-  white-space: nowrap;
-  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.22);
+.pilo-smart-guide.is-vertical {
+  background: repeating-linear-gradient(
+    to bottom,
+    #3858f6 0,
+    #3858f6 8px,
+    transparent 8px,
+    transparent 13px
+  );
+  transform: translateX(-0.5px);
 }
 
-.pilo-group-toolbar button[data-tooltip]:hover::before,
-.pilo-group-toolbar button[data-tooltip]:hover::after,
-.pilo-group-toolbar button[data-tooltip]:focus-visible::before,
-.pilo-group-toolbar button[data-tooltip]:focus-visible::after {
-  opacity: 1;
-  transition-delay: 500ms;
-}
-
-.pilo-group-toolbar button:hover {
-  background: rgba(255, 255, 255, 0.92);
-  color: #111827;
-}
-
-.pilo-group-toolbar button svg {
-  width: 18px;
-  height: 18px;
+.pilo-smart-guide.is-horizontal {
+  background: repeating-linear-gradient(
+    to right,
+    #3858f6 0,
+    #3858f6 8px,
+    transparent 8px,
+    transparent 13px
+  );
+  transform: translateY(-0.5px);
 }
 
 .pilo-frame-toolbar {
@@ -1139,7 +1084,6 @@
 }
 
 .canvas-zoom-controls button {
-  position: relative;
   display: grid;
   width: 32px;
   height: 32px;
@@ -1147,67 +1091,6 @@
   border-radius: 7px;
   font-size: 14px;
   font-weight: 900;
-}
-
-.canvas-zoom-controls button.is-active {
-  background: rgba(92, 108, 246, 0.16);
-  color: #3858f6;
-  box-shadow: inset 0 0 0 1px rgba(92, 108, 246, 0.18);
-}
-
-.canvas-zoom-controls button:disabled {
-  cursor: not-allowed;
-  opacity: 0.56;
-}
-
-.canvas-zoom-controls button svg {
-  width: 18px;
-  height: 18px;
-}
-
-.canvas-zoom-controls button[data-tooltip]::before,
-.canvas-zoom-controls button[data-tooltip]::after {
-  position: absolute;
-  bottom: calc(100% + 10px);
-  left: 50%;
-  z-index: 70;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 80ms ease;
-}
-
-.canvas-zoom-controls button[data-tooltip]::before {
-  content: "";
-  width: 0;
-  height: 0;
-  border-top: 7px solid #111827;
-  border-right: 6px solid transparent;
-  border-left: 6px solid transparent;
-  transform: translate(-50%, 6px);
-}
-
-.canvas-zoom-controls button[data-tooltip]::after {
-  content: attr(data-tooltip);
-  min-width: max-content;
-  border-radius: 8px;
-  background: #111827;
-  color: #ffffff;
-  font-size: 12px;
-  font-weight: 850;
-  letter-spacing: 0;
-  line-height: 1;
-  padding: 10px 12px;
-  transform: translateX(-50%);
-  white-space: nowrap;
-  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.22);
-}
-
-.canvas-zoom-controls button[data-tooltip]:hover::before,
-.canvas-zoom-controls button[data-tooltip]:hover::after,
-.canvas-zoom-controls button[data-tooltip]:focus-visible::before,
-.canvas-zoom-controls button[data-tooltip]:focus-visible::after {
-  opacity: 1;
-  transition-delay: 500ms;
 }
 
 .canvas-zoom-controls strong {

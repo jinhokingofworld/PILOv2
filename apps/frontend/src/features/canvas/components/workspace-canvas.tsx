@@ -11,7 +11,6 @@ import {
   Image,
   Maximize2,
   MousePointer2,
-  PanelsTopLeft,
   Pencil,
   Redo2,
   Slash,
@@ -45,7 +44,6 @@ import {
 } from "@/features/canvas/components/engine/runtime/PiloCanvasRuntime";
 import {
   type PiloCanvasActions,
-  type PiloCanvasHistoryState,
   type PiloCanvasTool,
   type PiloDrawingPreset,
   type PiloInsertableTool,
@@ -66,7 +64,6 @@ type ToolButtonProps = {
   label: string;
   active?: boolean;
   children: ReactNode;
-  disabled?: boolean;
   onClick: () => void;
 };
 
@@ -85,25 +82,13 @@ const drawingColorOptions: {
   { label: "보라", value: "violet", className: "is-violet" },
 ];
 
-const initialCanvasHistoryState: PiloCanvasHistoryState = {
-  canUndo: false,
-  canRedo: false,
-};
-
-function ToolButton({
-  label,
-  active,
-  children,
-  disabled,
-  onClick,
-}: ToolButtonProps) {
+function ToolButton({ label, active, children, onClick }: ToolButtonProps) {
   return (
     <button
       type="button"
       aria-label={label}
       data-tooltip={label}
       className={active ? "is-active" : undefined}
-      disabled={disabled}
       onClick={onClick}
     >
       {children}
@@ -140,8 +125,6 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
   const [canvasActions, setCanvasActions] = useState<PiloCanvasActions | null>(
     null,
   );
-  const [canvasHistoryState, setCanvasHistoryState] =
-    useState<PiloCanvasHistoryState>(initialCanvasHistoryState);
   const [activeCanvasTool, setActiveCanvasTool] =
     useState<PiloCanvasTool>("select");
   const [activeDrawingPreset, setActiveDrawingPreset] =
@@ -176,8 +159,6 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
     boardState.source === "api" &&
     boardState.status === "ready" &&
     boardState.board !== null;
-  const isCanvasToolActive = (tool: PiloCanvasTool) =>
-    openPopover === null && activeCanvasTool === tool;
   const activeDrawingColor =
     drawingColorOptions.find((color) => color.value === activeDrawingPreset) ??
     drawingColorOptions[4];
@@ -409,14 +390,14 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
           <section className="canvas-tool-section" aria-label="주요 도구">
             <ToolButton
               label="선택"
-              active={isCanvasToolActive("select")}
+              active={activeCanvasTool === "select"}
               onClick={() => selectCanvasTool("select")}
             >
               <MousePointer2 />
             </ToolButton>
             <ToolButton
               label="프레임"
-              active={isCanvasToolActive("frame")}
+              active={activeCanvasTool === "frame"}
               onClick={() => selectCanvasTool("frame")}
             >
               <Square />
@@ -430,14 +411,14 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
             </ToolButton>
             <ToolButton
               label="코드블럭"
-              active={isCanvasToolActive("code")}
+              active={activeCanvasTool === "code"}
               onClick={createCodeBlock}
             >
               <Code2 />
             </ToolButton>
             <ToolButton
               label="텍스트"
-              active={isCanvasToolActive("text")}
+              active={activeCanvasTool === "text"}
               onClick={() => selectCanvasTool("text")}
             >
               <Type />
@@ -467,7 +448,7 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
               <Triangle />
             </ToolButton>
             <ToolButton
-              label="더보기"
+              label="삽입"
               active={openPopover === "insert"}
               onClick={() => togglePopover("insert")}
             >
@@ -591,7 +572,7 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
           {openPopover === "insert" ? (
             <section
               className="canvas-tool-popover canvas-draw-popover"
-              aria-label="더보기 도구"
+              aria-label="삽입 도구"
             >
               <ToolButton label="이미지" onClick={() => openMediaFilePicker("image")}>
                 <Image />
@@ -609,7 +590,7 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
                 label="임베드"
                 onClick={() => createInsertableShape("embed")}
               >
-                <PanelsTopLeft />
+                <Code2 />
               </ToolButton>
               <ToolButton label="그룹" onClick={groupSelectedShapes}>
                 <Group />
@@ -664,20 +645,10 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
           ) : null}
 
           <section className="canvas-history-section" aria-label="작업 기록">
-            <ToolButton
-              label="실행 취소"
-              active={canvasHistoryState.canUndo}
-              disabled={!canvasHistoryState.canUndo}
-              onClick={() => canvasActions?.undo()}
-            >
+            <ToolButton label="실행 취소" onClick={() => canvasActions?.undo()}>
               <Undo2 />
             </ToolButton>
-            <ToolButton
-              label="다시 실행"
-              active={canvasHistoryState.canRedo}
-              disabled={!canvasHistoryState.canRedo}
-              onClick={() => canvasActions?.redo()}
-            >
+            <ToolButton label="다시 실행" onClick={() => canvasActions?.redo()}>
               <Redo2 />
             </ToolButton>
           </section>
@@ -686,7 +657,6 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
         <PiloCanvasRuntime
           board={board}
           canvasClient={shouldUseCanvasApi ? canvasClient : null}
-          onHistoryStateChange={setCanvasHistoryState}
           onReady={setCanvasActions}
           storageMode={shouldUseCanvasApi ? "api" : "local"}
         />

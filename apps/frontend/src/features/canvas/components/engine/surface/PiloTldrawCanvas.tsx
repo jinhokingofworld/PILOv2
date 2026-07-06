@@ -13,13 +13,14 @@ import {
   GeoShapeGeoStyle,
   type Editor,
   type TLShapeId,
-  useEditor,
 } from "tldraw";
-import { useValue } from "@tldraw/state-react";
 import { TldrawSurface } from "@/shared/tldraw";
 import { PiloCanvasBackground } from "./PiloCanvasBackground";
 import { SelectedShapeStackingManager } from "../interactions/PiloCanvasStackingManager";
-import { SelectedGroupToolbar } from "../interactions/PiloCanvasGroupToolbar";
+import {
+  applyPiloSmartSnap,
+  SmartGuidesOverlay,
+} from "../interactions/PiloCanvasSmartGuides";
 import {
   isPiloCodeBlockShape,
   isPiloFrameShape,
@@ -106,7 +107,6 @@ export type PiloCanvasActions = {
   selectDrawingPreset: (preset: PiloDrawingPreset) => void;
   createInsertableShape: (tool: PiloInsertableTool, url: string) => void;
   groupSelection: () => void;
-  setSmartGuidesEnabled: (enabled: boolean) => void;
   createStickyNote: (color?: PiloStickyNoteColor) => void;
   createStickyStack: (color?: PiloStickyNoteColor) => void;
   createCodeBlock: () => void;
@@ -116,15 +116,6 @@ export type PiloCanvasActions = {
   zoomOut: () => void;
   undo: () => void;
   redo: () => void;
-};
-
-export type PiloCanvasHistoryState = {
-  canUndo: boolean;
-  canRedo: boolean;
-};
-
-export type PiloCanvasSnapState = {
-  isSmartGuideEnabled: boolean;
 };
 
 type PiloTldrawCanvasProps = {
@@ -138,15 +129,13 @@ type PiloTldrawCanvasProps = {
   onViewChange: (viewSetting: PiloCanvasViewSetting) => void;
   onViewportBoundsChange: (bounds: PiloCanvasViewportBounds) => void;
   onShapeDetailRequest: (request: PiloCanvasShapeDetailRequest) => void;
-  onHistoryStateChange: (state: PiloCanvasHistoryState) => void;
-  onSnapStateChange: (state: PiloCanvasSnapState) => void;
 };
 
 const tldrawComponents = {
   Background: PiloCanvasBackground,
 };
 
-function createFreeformShapeRecords(
+function hydrateFreeformShapes(
   editor: Editor,
   shapes: PiloCanvasFreeformShape[],
 ) {
@@ -154,15 +143,6 @@ function createFreeformShapeRecords(
 
   restorePiloShapeAssets(editor, shapes);
   editor.createShapes(sortFreeformShapesForCreate(shapes));
-}
-
-function hydrateFreeformShapes(
-  editor: Editor,
-  shapes: PiloCanvasFreeformShape[],
-) {
-  editor.run(() => createFreeformShapeRecords(editor, shapes), {
-    history: "ignore",
-  });
 }
 
 function applyViewSetting(editor: Editor, viewSetting: PiloCanvasViewSetting) {
@@ -185,20 +165,15 @@ function resetFreeformShapes(
   editor: Editor,
   shapes: PiloCanvasFreeformShape[],
 ) {
-  editor.run(
-    () => {
-      const existingFreeformShapeIds = editor
-        .getCurrentPageShapes()
-        .map((shape) => shape.id as TLShapeId);
+  const existingFreeformShapeIds = editor
+    .getCurrentPageShapes()
+    .map((shape) => shape.id as TLShapeId);
 
-      if (existingFreeformShapeIds.length) {
-        editor.deleteShapes(existingFreeformShapeIds);
-      }
+  if (existingFreeformShapeIds.length) {
+    editor.deleteShapes(existingFreeformShapeIds);
+  }
 
-      createFreeformShapeRecords(editor, shapes);
-    },
-    { history: "ignore" },
-  );
+  hydrateFreeformShapes(editor, shapes);
 }
 
 function registerCanvasEditorSideEffects(editor: Editor) {
@@ -236,7 +211,7 @@ function registerCanvasEditorSideEffects(editor: Editor) {
       }
     }
 
-    return nextShape;
+    return applyPiloSmartSnap(editor, prev, nextShape);
   });
 }
 
@@ -251,8 +226,6 @@ export function PiloTldrawCanvas({
   onViewChange,
   onViewportBoundsChange,
   onShapeDetailRequest,
-  onHistoryStateChange,
-  onSnapStateChange,
 }: PiloTldrawCanvasProps) {
   const editorRef = useRef<Editor | null>(null);
   const placementRequestRef = useRef<PiloPlacementRequest | null>(null);
@@ -383,9 +356,6 @@ export function PiloTldrawCanvas({
         if (selectedShapeIds.length < 2) return;
 
         editor.groupShapes(selectedShapeIds);
-      },
-      setSmartGuidesEnabled(enabled) {
-        editor.user.updateUserPreferences({ isSnapMode: enabled });
       },
       clearSelection() {
         placementRequestRef.current = null;
@@ -574,60 +544,9 @@ export function PiloTldrawCanvas({
         onViewChange={onViewChange}
         onViewportBoundsChange={onViewportBoundsChange}
       />
-      <CanvasHistoryStateReporter
-        onHistoryStateChange={onHistoryStateChange}
-      />
-      <CanvasSnapStateReporter onSnapStateChange={onSnapStateChange} />
+      <SmartGuidesOverlay />
       <SelectedShapeStackingManager />
-      <SelectedGroupToolbar />
       <FrameSelectionToolbar />
     </TldrawSurface>
   );
-}
-
-function CanvasHistoryStateReporter({
-  onHistoryStateChange,
-}: {
-  onHistoryStateChange: (state: PiloCanvasHistoryState) => void;
-}) {
-  const editor = useEditor();
-  const canUndo = useValue("pilo-can-undo", () => editor.getCanUndo(), [
-    editor,
-  ]);
-  const canRedo = useValue("pilo-can-redo", () => editor.getCanRedo(), [
-    editor,
-  ]);
-
-  useEffect(() => {
-    onHistoryStateChange({ canUndo, canRedo });
-  }, [canRedo, canUndo, onHistoryStateChange]);
-
-  useEffect(() => {
-    return () => onHistoryStateChange({ canUndo: false, canRedo: false });
-  }, [onHistoryStateChange]);
-
-  return null;
-}
-
-function CanvasSnapStateReporter({
-  onSnapStateChange,
-}: {
-  onSnapStateChange: (state: PiloCanvasSnapState) => void;
-}) {
-  const editor = useEditor();
-  const isSmartGuideEnabled = useValue(
-    "pilo-smart-guide-enabled",
-    () => editor.user.getIsSnapMode(),
-    [editor],
-  );
-
-  useEffect(() => {
-    onSnapStateChange({ isSmartGuideEnabled });
-  }, [isSmartGuideEnabled, onSnapStateChange]);
-
-  useEffect(() => {
-    return () => onSnapStateChange({ isSmartGuideEnabled: false });
-  }, [onSnapStateChange]);
-
-  return null;
 }

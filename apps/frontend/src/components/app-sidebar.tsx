@@ -266,7 +266,7 @@ export function AppSidebar({
                         render={
                           <SidebarMenuButton
                             aria-current={isActive ? "page" : undefined}
-                            className="transition-colors group-data-[collapsible=icon]:justify-center data-[active=true]:shadow-sm"
+                            className="transition-colors data-[active=true]:shadow-sm"
                             isActive={isActive}
                             size="lg"
                             tooltip={item.title}
@@ -274,7 +274,7 @@ export function AppSidebar({
                         }
                       >
                         <item.icon />
-                        <div className="grid flex-1 text-left leading-tight group-data-[collapsible=icon]:hidden">
+                        <div className="grid flex-1 text-left leading-tight">
                           <span className="truncate">{item.title}</span>
                           <span className="truncate text-xs text-muted-foreground">
                             {item.description}
@@ -282,7 +282,7 @@ export function AppSidebar({
                         </div>
                         <ChevronRight
                           className={cn(
-                            "ml-auto size-4 transition-transform group-data-[collapsible=icon]:hidden",
+                            "ml-auto size-4 transition-transform",
                             isOpen && "rotate-90"
                           )}
                         />

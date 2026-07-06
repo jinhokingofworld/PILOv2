@@ -60,10 +60,14 @@ function defaultCanvasApiBaseUrl() {
 
 function defaultCanvasAuthToken() {
   if (typeof window === "undefined") {
-    return null;
+    return process.env.NEXT_PUBLIC_PILO_ACCESS_TOKEN ?? null;
   }
 
-  return window.localStorage.getItem("pilo:access-token");
+  return (
+    window.localStorage.getItem("pilo:access-token") ??
+    process.env.NEXT_PUBLIC_PILO_ACCESS_TOKEN ??
+    null
+  );
 }
 
 export function resolveCanvasClientMode(
