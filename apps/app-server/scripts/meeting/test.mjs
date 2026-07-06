@@ -133,12 +133,17 @@ class FakeLiveKitEgressService {
 }
 
 class FakeMeetingReportJobService {
-  constructor() {
+  constructor({ shouldFail = false } = {}) {
+    this.shouldFail = shouldFail;
     this.calls = [];
   }
 
   async enqueueMeetingReportJob(payload) {
     this.calls.push(payload);
+
+    if (this.shouldFail) {
+      throw new Error("Meeting report job could not be enqueued");
+    }
   }
 }
 
@@ -943,6 +948,91 @@ async function assertError(action, messagePattern) {
       retryCount: 0
     }
   ]);
+}
+
+{
+  const expectedAudioFileKey = `recordings/meetings/workspaces/${workspaceId}/meetings/${meetingId}/recordings/${recordingId}.mp3`;
+  const database = new FakeDatabase({
+    queryOneRows: [
+      currentMeetingRow(),
+      participantRow(),
+      recordingRow(),
+      (text, values) => {
+        assert.match(text, /UPDATE meeting_recordings/);
+        assert.match(text, /status = 'COMPLETED'/);
+        assert.deepEqual(values, [
+          recordingId,
+          expectedAudioFileKey,
+          180,
+          8192
+        ]);
+        return recordingRow({
+          status: "COMPLETED",
+          audio_file_key: expectedAudioFileKey,
+          duration_sec: 180,
+          file_size_bytes: "8192",
+          ended_at: endedAt
+        });
+      },
+      (text, values) => {
+        assert.match(text, /FROM meeting_reports/);
+        assert.match(text, /recording_id = \$2/);
+        assert.deepEqual(values, [meetingId, recordingId]);
+        return null;
+      },
+      (text, values) => {
+        assert.match(text, /INSERT INTO meeting_reports/);
+        assert.match(text, /'PROCESSING'/);
+        assert.deepEqual(values, [meetingId, recordingId]);
+        return meetingReportRow({
+          status: "PROCESSING"
+        });
+      },
+      (text, values) => {
+        assert.match(text, /UPDATE meeting_reports/);
+        assert.match(text, /status = 'FAILED'/);
+        assert.match(text, /error_message = 'Meeting report job could not be enqueued'/);
+        assert.deepEqual(values, [reportId]);
+        return { id: reportId };
+      }
+    ]
+  });
+  const { service, meetingReportJobService } = createSubject(
+    database,
+    new FakeLiveKitTokenService(),
+    new FakeLiveKitEgressService(),
+    new FakeMeetingReportJobService({ shouldFail: true })
+  );
+
+  await assertError(
+    () =>
+      service.endRecordingAndCreateReport(
+        currentUserId,
+        workspaceId,
+        meetingId,
+        recordingId
+      ),
+    /Meeting report job could not be enqueued/
+  );
+
+  assert.equal(database.transactionCommitted, true);
+  assert.deepEqual(meetingReportJobService.calls, [
+    {
+      jobType: "meeting_report",
+      reportId,
+      meetingId,
+      recordingId,
+      audioFileKey: expectedAudioFileKey,
+      retryCount: 0
+    }
+  ]);
+  assert.equal(
+    database.queries.some(
+      ({ text }) =>
+        text.includes("UPDATE meeting_reports") && text.includes("status = 'FAILED'")
+    ),
+    true
+  );
 }
 
 {
