@@ -120,6 +120,7 @@ export type PiloCanvasActions = {
 
 type PiloTldrawCanvasProps = {
   board: CanvasBoardDetail;
+  cameraRestoreVersion: number;
   hydrationVersion: number;
   initialViewSetting: PiloCanvasViewSetting;
   freeformShapes: PiloCanvasFreeformShape[];
@@ -163,7 +164,6 @@ function applyViewSetting(editor: Editor, viewSetting: PiloCanvasViewSetting) {
 function resetFreeformShapes(
   editor: Editor,
   shapes: PiloCanvasFreeformShape[],
-  viewSetting: PiloCanvasViewSetting,
 ) {
   const existingFreeformShapeIds = editor
     .getCurrentPageShapes()
@@ -174,7 +174,6 @@ function resetFreeformShapes(
   }
 
   hydrateFreeformShapes(editor, shapes);
-  applyViewSetting(editor, viewSetting);
 }
 
 function registerCanvasEditorSideEffects(editor: Editor) {
@@ -218,6 +217,7 @@ function registerCanvasEditorSideEffects(editor: Editor) {
 
 export function PiloTldrawCanvas({
   board,
+  cameraRestoreVersion,
   freeformShapes,
   hydrationVersion,
   initialViewSetting,
@@ -247,12 +247,16 @@ export function PiloTldrawCanvas({
 
     if (!editor) return;
 
-    resetFreeformShapes(
-      editor,
-      freeformShapesRef.current,
-      initialViewSettingRef.current,
-    );
+    resetFreeformShapes(editor, freeformShapesRef.current);
   }, [hydrationVersion, seedKey]);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+
+    if (!editor) return;
+
+    applyViewSetting(editor, initialViewSettingRef.current);
+  }, [cameraRestoreVersion, seedKey]);
 
   function mountEditor(editor: Editor) {
     editorRef.current = editor;

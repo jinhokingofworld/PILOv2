@@ -67,6 +67,12 @@ const liveKitEgressService = {
   }
 };
 
+const meetingReportJobService = {
+  async enqueueMeetingReportJob() {
+    throw new Error("meeting DB smoke does not enqueue MeetingReport jobs");
+  }
+};
+
 const suffix = randomUUID();
 const currentUserId = randomUUID();
 const workspaceId = randomUUID();
@@ -80,7 +86,8 @@ try {
     database,
     workspaceService,
     liveKitTokenService,
-    liveKitEgressService
+    liveKitEgressService,
+    meetingReportJobService
   );
 
   await database.execute(

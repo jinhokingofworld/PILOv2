@@ -155,6 +155,10 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
     [workspaceId],
   );
   const board = boardState.board ?? fallbackBoard;
+  const shouldUseCanvasApi =
+    boardState.source === "api" &&
+    boardState.status === "ready" &&
+    boardState.board !== null;
   const activeDrawingColor =
     drawingColorOptions.find((color) => color.value === activeDrawingPreset) ??
     drawingColorOptions[4];
@@ -652,9 +656,9 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
 
         <PiloCanvasRuntime
           board={board}
-          canvasClient={boardState.source === "api" ? canvasClient : null}
+          canvasClient={shouldUseCanvasApi ? canvasClient : null}
           onReady={setCanvasActions}
-          storageMode={boardState.source === "api" ? "api" : "local"}
+          storageMode={shouldUseCanvasApi ? "api" : "local"}
         />
       </div>
     </section>

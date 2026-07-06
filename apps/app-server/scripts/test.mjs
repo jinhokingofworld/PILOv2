@@ -44,6 +44,9 @@ const meetingController = await readSource(
 );
 const meetingModule = await readSource("../src/modules/meeting/meeting.module.ts");
 const meetingService = await readSource("../src/modules/meeting/meeting.service.ts");
+const meetingReportJobService = await readSource(
+  "../src/modules/meeting/meeting-report-job.service.ts"
+);
 const liveKitEgressService = await readSource(
   "../src/modules/meeting/livekit-egress.service.ts"
 );
@@ -176,6 +179,7 @@ assert.match(meetingModule, /DatabaseModule/);
 assert.match(meetingModule, /WorkspaceModule/);
 assert.match(meetingModule, /LiveKitEgressService/);
 assert.match(meetingModule, /LiveKitTokenService/);
+assert.match(meetingModule, /MeetingReportJobService/);
 assert.match(meetingController, /@Controller\("workspaces\/:workspaceId"\)/);
 assert.match(meetingController, /@UseGuards\(AuthGuard\)/);
 assert.match(meetingController, /@Get\("meetings\/current"\)/);
@@ -192,9 +196,22 @@ assert.match(meetingService, /startRoomAudioOnlyEgress/);
 assert.match(meetingService, /stopEgress/);
 assert.match(meetingService, /INSERT INTO meeting_reports/);
 assert.match(meetingService, /PROCESSING/);
+assert.match(meetingService, /MeetingReportJobService/);
+assert.match(meetingService, /enqueueMeetingReportJob/);
+assert.match(meetingService, /jobType: "meeting_report"/);
 assert.match(meetingService, /LIVEKIT_EGRESS_S3_PREFIX/);
 assert.match(meetingService, /audio_file_url = NULL/);
 assert.doesNotMatch(meetingService, /livekit:\s*null/);
+assert.match(meetingReportJobService, /jobType: "meeting_report"/);
+assert.match(meetingReportJobService, /@aws-sdk\/client-sqs/);
+assert.match(meetingReportJobService, /SQSClient/);
+assert.match(meetingReportJobService, /SendMessageCommand/);
+assert.match(meetingReportJobService, /SQS_AI_JOBS_QUEUE_URL/);
+assert.match(meetingReportJobService, /SQS_ENDPOINT/);
+assert.match(meetingReportJobService, /Meeting report job queue is not configured/);
+assert.match(meetingReportJobService, /Meeting report job could not be enqueued/);
+assert.doesNotMatch(meetingReportJobService, /AWS_ACCESS_KEY_ID/);
+assert.doesNotMatch(meetingReportJobService, /AWS_SECRET_ACCESS_KEY/);
 assert.match(liveKitEgressService, /EgressClient/);
 assert.match(liveKitEgressService, /startRoomCompositeEgress/);
 assert.match(liveKitEgressService, /listEgress/);
@@ -229,6 +246,7 @@ assert.match(devTerraformMain, /LIVEKIT_EGRESS_S3_PREFIX\s*=\s*"recordings\/meet
 await import("./meeting/livekit-egress.test.mjs");
 await import("./auth/test.mjs");
 await import("./meeting/livekit-token.test.mjs");
+await import("./meeting/meeting-report-job.test.mjs");
 await import("./calendar/test.mjs");
 await import("./meeting/test.mjs");
 await import("./github-integration/test.mjs");

@@ -140,35 +140,39 @@
 
 ## 8. GitHub Review 제출
 
-- [ ] `POST /workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}/submissions`를
+- [x] `POST /workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}/submissions`를
   구현한다.
 - [x] #124 내부 dependency에서 `submitType`은 `COMMENT`, `APPROVE`,
   `REQUEST_CHANGES`만 허용한다.
 - [x] #124 내부 dependency에서 `reviewBody`가 비어 있지 않은지 검증한다.
 - [x] #124 내부 dependency에서 현재 사용자의 GitHub OAuth 연결 상태를 확인한다.
-- [ ] 현재 PR의 `headSha`를 다시 조회하고 session의 `headSha`와 다르면 제출을 막는다.
+- [x] 현재 PR의 `headSha`를 다시 조회하고 session의 `headSha`와 다르면 제출을 막는다.
 - [x] #124 내부 dependency에서 현재 사용자의 OAuth token으로 GitHub Review를 제출한다.
 - [x] #124 내부 dependency에서 review body만 보낸다. line comment는 보내지 않는다.
-- [ ] 모든 제출 시도를 `review_submissions`에 저장한다.
-- [ ] submitted/failed status와 sanitize된 error message를 저장한다.
-- [ ] 제출 성공 후 session status를 `submitted`로 바꾼다.
-- [ ] `GET /workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}/submissions`를
+- [x] GitHub OAuth 미연결, stale head SHA, 분석/파일 생성이 끝나지 않은 session은 pre-submit
+  guard 실패로 보고 `review_submissions` row를 만들지 않는다.
+- [x] `not_reviewed` file이 남아 있어도 GitHub Review 제출을 허용한다.
+- [x] 실제 GitHub 제출 단계에 진입한 성공/실패 시도를 `review_submissions`에 저장한다.
+- [x] GitHub App `Pull requests: write` permission 부족 403을 권한 부족 에러로 구분한다.
+- [x] submitted/failed status와 sanitize된 error message를 저장한다.
+- [x] 제출 성공 후 session status를 `submitted`로 바꾼다.
+- [x] `GET /workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}/submissions`를
   구현한다.
-- [ ] `GET /workspaces/{workspaceId}/github/review-submissions/{submissionId}`를 구현한다.
+- [x] `GET /workspaces/{workspaceId}/github/review-submissions/{submissionId}`를 구현한다.
 
 ## 9. Frontend PR 선택
 
-- [ ] placeholder PR Review panel을 실제 PR 선택 화면으로 교체한다.
-- [ ] open PR만 불러온다.
-- [ ] PR 번호 또는 제목 검색을 추가한다.
-- [ ] 검색 input에 300ms debounce를 적용한다.
-- [ ] 10개 단위 pagination과 previous/next button을 추가한다.
-- [ ] loading, empty, error, retry, GitHub-not-connected 상태를 추가한다.
-- [ ] title, author, branch info, changed files, additions/deletions, commits,
+- [x] placeholder PR Review panel을 실제 PR 선택 화면으로 교체한다.
+- [x] open PR만 불러온다.
+- [x] PR 번호 또는 제목 검색을 추가한다.
+- [x] 검색 input에 300ms debounce를 적용한다.
+- [x] 10개 단위 pagination과 previous/next button을 추가한다.
+- [x] loading, empty, error, retry, GitHub-not-connected 상태를 추가한다.
+- [x] title, author, branch info, changed files, additions/deletions, commits,
   description, file list를 보여주는 PR detail modal을 추가한다.
-- [ ] review start button을 추가한다.
-- [ ] session 생성 중에는 review start를 비활성화한다.
-- [ ] analysis loading/failure 상태를 보여준다.
+- [x] review start button을 추가한다.
+- [x] session 생성 중에는 review start를 비활성화한다.
+- [x] analysis loading/failure 상태를 session 생성 loading/failure로 보여준다.
 
 ## 10. Frontend Review Canvas
 
@@ -192,7 +196,8 @@
 - [ ] PR purpose, change summary, recommended order, caution points, selected flow
   description을 보여준다.
 - [ ] reviewed count와 total file count로 review progress를 보여준다.
-- [ ] 모든 file에 status가 선택된 경우에만 Review 제출을 활성화한다.
+- [ ] 모든 file에 status가 선택되지 않아도 Review 제출을 활성화한다.
+- [ ] GitHub OAuth 미연결 상태에서는 제출 모달에서 GitHub 연결 CTA를 보여준다.
 - [ ] conflict status는 정보성으로만 보여준다.
 - [ ] Merge button은 MVP 안내 문구와 함께 disabled 상태로 보여준다.
 - [ ] node position은 frontend-only로 유지한다.
@@ -230,8 +235,10 @@
 - [x] diff parsing에 대한 focused backend test를 추가한다.
 - [ ] file review decision update에 대한 focused backend test를 추가한다.
 - [x] OAuth missing에 대한 focused backend test를 추가한다.
-- [ ] stale head submission guard에 대한 focused backend test를 추가한다.
-- [ ] submission success/failure persistence에 대한 focused backend test를 추가한다.
+- [x] stale head submission guard에 대한 focused backend test를 추가한다.
+- [x] submission success/failure persistence에 대한 focused backend test를 추가한다.
+- [x] permission denied submission failure에 대한 focused backend test를 추가한다.
+- [x] not-reviewed file이 남아 있어도 submission이 가능한 focused backend test를 추가한다.
 - [ ] navigation과 PR Review screen state에 대한 frontend test를 추가한다.
 - [x] backend 변경 후 `apps/app-server`에서 `npm run lint`, `npm run test`,
   `npm run build`를 실행한다.

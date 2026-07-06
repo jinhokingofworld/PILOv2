@@ -1,27 +1,27 @@
 export type BoardSyncStatus = "running" | "success" | "failed";
 export type BoardIssueState = "open" | "closed";
 
-export interface BoardRepositoryPayload {
+export type BoardRepositoryPayload = {
   id: string;
   fullName: string;
   htmlUrl: string;
-}
+};
 
-export interface BoardProjectPayload {
+export type BoardProjectPayload = {
   id: string;
   githubProjectNodeId: string;
   projectNumber: number;
   title: string;
   url: string;
-}
+};
 
-export interface BoardStatusFieldPayload {
+export type BoardStatusFieldPayload = {
   id: string;
   githubFieldNodeId: string;
   name: string;
-}
+};
 
-export interface BoardPayload {
+export type BoardPayload = {
   id: string;
   workspaceId: string;
   name: string;
@@ -32,30 +32,30 @@ export interface BoardPayload {
   lastSyncedAt: string | null;
   createdAt: string;
   updatedAt: string;
-}
+};
 
-export interface BoardPaginatedPayload<T> {
+export type BoardPaginatedPayload<T> = {
   data: T[];
   meta: {
     page: number;
     limit: number;
     total: number;
   };
-}
+};
 
-export interface BoardSummaryPayload {
+export type BoardSummaryPayload = {
   columnsCount: number;
   totalCards: number;
   openCards: number;
   closedCards: number;
-}
+};
 
-export interface BoardSyncPayload {
+export type BoardSyncPayload = {
   status: BoardSyncStatus | null;
   lastSyncedAt: string | null;
-}
+};
 
-export interface BoardDetailPayload {
+export type BoardDetailPayload = {
   id: string;
   workspaceId: string;
   name: string;
@@ -66,9 +66,9 @@ export interface BoardDetailPayload {
   sync: BoardSyncPayload;
   createdAt: string;
   updatedAt: string;
-}
+};
 
-export interface BoardColumnPayload {
+export type BoardColumnPayload = {
   id: string;
   boardId: string;
   statusOptionId: string | null;
@@ -78,9 +78,9 @@ export interface BoardColumnPayload {
   position: number;
   color: string | null;
   issueCount: number;
-}
+};
 
-export interface BoardIssueCardPayload {
+export type BoardIssueCardPayload = {
   id: string;
   boardId: string;
   columnId: string;
@@ -101,9 +101,9 @@ export interface BoardIssueCardPayload {
   lastSyncedAt: string | null;
   createdAt: string;
   updatedAt: string;
-}
+};
 
-export interface BoardProjectFieldPayload {
+export type BoardProjectFieldPayload = {
   fieldName: string;
   fieldDataType: string | null;
   textValue?: string;
@@ -113,15 +113,15 @@ export interface BoardProjectFieldPayload {
   singleSelectName?: string;
   iterationId?: string;
   iterationTitle?: string;
-}
+};
 
-export interface BoardIssueDetailPayload extends BoardIssueCardPayload {
+export type BoardIssueDetailPayload = BoardIssueCardPayload & {
   body: string | null;
   milestone: Record<string, unknown> | null;
   projectFields: BoardProjectFieldPayload[];
-}
+};
 
-export interface BoardRelatedPullRequestPayload {
+export type BoardRelatedPullRequestPayload = {
   id: string;
   repositoryId: string;
   githubPullRequestId: number | null;
@@ -147,41 +147,58 @@ export interface BoardRelatedPullRequestPayload {
   reviewCommentsCount: number;
   githubUrl: string;
   lastSyncedAt: string | null;
-}
+};
 
-export interface BoardFilterColumnOptionPayload {
+export type BoardFilterColumnOptionPayload = {
   id: string;
   name: string;
   normalizedName: string | null;
   count: number;
-}
+};
 
-export interface BoardFilterStateOptionPayload {
+export type BoardFilterStateOptionPayload = {
   value: BoardIssueState;
   label: "Open" | "Closed";
   count: number;
-}
+};
 
-export interface BoardFilterAssigneeOptionPayload {
+export type BoardFilterAssigneeOptionPayload = {
   login: string;
   avatarUrl: string | null;
   count: number;
-}
+};
 
-export interface BoardFilterLabelOptionPayload {
+export type BoardFilterLabelOptionPayload = {
   name: string;
   color: string | null;
   count: number;
-}
+};
 
-export interface BoardFilterOptionsPayload {
+export type BoardFilterOptionsPayload = {
   columns: BoardFilterColumnOptionPayload[];
   states: BoardFilterStateOptionPayload[];
   assignees: BoardFilterAssigneeOptionPayload[];
   labels: BoardFilterLabelOptionPayload[];
-}
+};
 
-export interface CreateBoardResult {
-  board: BoardPayload;
-  statusCode: 200 | 201;
-}
+export type CreateBoardInput = {
+  repositoryId: string;
+  projectV2Id: string;
+};
+
+export type ListBoardsQuery = {
+  repositoryId?: string;
+  projectV2Id?: string;
+  page?: number;
+  limit?: number;
+};
+
+export type ListBoardIssuesQuery = {
+  columnId?: string;
+  state?: BoardIssueState;
+  search?: string;
+  label?: string;
+  assignee?: string;
+  page?: number;
+  limit?: number;
+};

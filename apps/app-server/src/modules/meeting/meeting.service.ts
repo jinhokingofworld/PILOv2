@@ -14,6 +14,10 @@ import {
   LiveKitJoinPayload,
   LiveKitTokenService
 } from "./livekit-token.service";
+import {
+  MeetingReportJobPayload,
+  MeetingReportJobService
+} from "./meeting-report-job.service";
 
 export type PendingMeetingPayload = never;
 
@@ -111,6 +115,10 @@ interface MeetingReportRow extends QueryResultRow {
   updated_at: Date | string;
 }
 
+interface MeetingReportDetailRow extends MeetingReportRow {
+  transcript_text: string | null;
+}
+
 interface ActiveParticipantCountRow extends QueryResultRow {
   active_participant_count: number | string;
 }
@@ -132,8 +140,23 @@ interface QueryOneExecutor {
 }
 
 interface MeetingReportListQuery {
-  status?: string;
-  limit?: string;
+  status?: unknown;
+  limit?: unknown;
+}
+
+interface MeetingReportInsertResult {
+  report: MeetingReportRow;
+  inserted: boolean;
+}
+
+interface MeetingReportPreparation {
+  report: MeetingReportRow | null;
+  job: MeetingReportJobPayload | null;
+}
+
+interface EndRecordingTransactionResult {
+  payload: EndRecordingPayload;
+  job: MeetingReportJobPayload | null;
 }
 
 interface StartMeetingDraft {
@@ -197,6 +220,10 @@ export interface MeetingReportSummaryPayload {
   updatedAt: string;
 }
 
+export interface MeetingReportDetailPayload extends MeetingReportSummaryPayload {
+  transcriptText: string | null;
+}
+
 export interface CurrentMeetingPayload {
   meeting: MeetingPayload | null;
   currentRecording: RecordingPayload | null;
@@ -257,11 +284,26 @@ export interface ParticipantListPayload {
   participants: ParticipantPayload[];
 }
 
+export interface MeetingReportListPayload {
+  reports: MeetingReportSummaryPayload[];
+}
+
+export interface MeetingReportDetailResponsePayload {
+  report: MeetingReportDetailPayload;
+}
+
 const MAIN_MEETING_ROOM = "MAIN_MEETING_ROOM";
 const UNIQUE_VIOLATION_CODE = "23505";
 const ACTIVE_MEETING_UNIQUE_INDEX = "unique_active_meeting_per_room";
 const SAFE_EGRESS_START_ERROR = "LiveKit Egress start failed";
 const SAFE_EGRESS_STOP_ERROR = "LiveKit Egress stop failed";
+const DEFAULT_MEETING_REPORT_LIMIT = 20;
+const MAX_MEETING_REPORT_LIMIT = 100;
+const MEETING_REPORT_STATUSES: readonly MeetingReportStatus[] = [
+  "PROCESSING",
+  "COMPLETED",
+  "FAILED"
+];
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -271,7 +313,8 @@ export class MeetingService {
     private readonly database: DatabaseService,
     private readonly workspaceService: WorkspaceService,
     private readonly liveKitTokenService: LiveKitTokenService,
-    private readonly liveKitEgressService: LiveKitEgressService
+    private readonly liveKitEgressService: LiveKitEgressService,
+    private readonly meetingReportJobService: MeetingReportJobService
   ) {}
 
   getModuleInfo() {
@@ -649,45 +692,61 @@ export class MeetingService {
     recordingId: string
   ): Promise<EndRecordingPayload> {
     await this.assertWorkspaceAccess(currentUserId, workspaceId);
-    return this.database.transaction(async (transaction) => {
-      const meeting = await this.findMeetingById(transaction, workspaceId, meetingId, {
-        lockMeeting: true
-      });
+    const result = await this.database.transaction<EndRecordingTransactionResult>(
+      async (transaction) => {
+        const meeting = await this.findMeetingById(
+          transaction,
+          workspaceId,
+          meetingId,
+          {
+            lockMeeting: true
+          }
+        );
 
-      if (!meeting) {
-        throw notFound("Meeting not found");
-      }
-
-      await this.assertActiveParticipant(transaction, meetingId, currentUserId);
-
-      const recording = await this.findRecordingById(
-        transaction,
-        meetingId,
-        recordingId,
-        {
-          lockRecording: true
+        if (!meeting) {
+          throw notFound("Meeting not found");
         }
-      );
 
-      if (!recording) {
-        throw notFound("Recording not found");
+        await this.assertActiveParticipant(transaction, meetingId, currentUserId);
+
+        const recording = await this.findRecordingById(
+          transaction,
+          meetingId,
+          recordingId,
+          {
+            lockRecording: true
+          }
+        );
+
+        if (!recording) {
+          throw notFound("Recording not found");
+        }
+
+        const stoppedRecording =
+          recording.status === "RUNNING"
+            ? await this.stopRunningRecording(transaction, meeting, recording)
+            : recording;
+        const reportPreparation = await this.prepareReportForStoppedRecording(
+          transaction,
+          stoppedRecording
+        );
+
+        return {
+          payload: {
+            meeting: this.mapMeeting(meeting),
+            recording: this.mapRecording(stoppedRecording),
+            report:
+              reportPreparation.report === null
+                ? null
+                : this.mapMeetingReportSummary(reportPreparation.report)
+          },
+          job: reportPreparation.job
+        };
       }
+    );
 
-      const stoppedRecording =
-        recording.status === "RUNNING"
-          ? await this.stopRunningRecording(transaction, meeting, recording)
-          : recording;
-      const report = await this.ensureReportForStoppedRecording(
-        transaction,
-        stoppedRecording
-      );
-
-      return {
-        meeting: this.mapMeeting(meeting),
-        recording: this.mapRecording(stoppedRecording),
-        report: report === null ? null : this.mapMeetingReportSummary(report)
-      };
-    });
+    await this.enqueueMeetingReportJob(result.job);
+    return result.payload;
   }
 
   async listRecordings(
@@ -740,32 +799,51 @@ export class MeetingService {
   async listReports(
     currentUserId: string,
     workspaceId: string,
-    _query: MeetingReportListQuery
-  ): Promise<PendingMeetingPayload> {
+    query: MeetingReportListQuery
+  ): Promise<MeetingReportListPayload> {
     await this.assertWorkspaceAccess(currentUserId, workspaceId);
-    return this.pendingEndpoint("GET /workspaces/{workspaceId}/meeting-reports");
+    const status = this.normalizeMeetingReportStatus(query.status);
+    const limit = this.normalizeMeetingReportLimit(query.limit);
+    const reports = await this.listWorkspaceMeetingReportRows(
+      workspaceId,
+      status,
+      limit
+    );
+
+    return {
+      reports: reports.map((report) => this.mapMeetingReportSummary(report))
+    };
   }
 
   async getReport(
     currentUserId: string,
     workspaceId: string,
-    _reportId: string
-  ): Promise<PendingMeetingPayload> {
+    reportId: string
+  ): Promise<MeetingReportDetailResponsePayload> {
     await this.assertWorkspaceAccess(currentUserId, workspaceId);
-    return this.pendingEndpoint(
-      "GET /workspaces/{workspaceId}/meeting-reports/{reportId}"
-    );
+    const report = await this.findMeetingReportDetailById(workspaceId, reportId);
+
+    if (report === null) {
+      throw notFound("Meeting report not found");
+    }
+
+    return {
+      report: this.mapMeetingReportDetail(report)
+    };
   }
 
   async listMeetingReports(
     currentUserId: string,
     workspaceId: string,
-    _meetingId: string
-  ): Promise<PendingMeetingPayload> {
+    meetingId: string
+  ): Promise<MeetingReportListPayload> {
     await this.assertWorkspaceAccess(currentUserId, workspaceId);
-    return this.pendingEndpoint(
-      "GET /workspaces/{workspaceId}/meetings/{meetingId}/reports"
-    );
+    await this.assertMeetingExists(workspaceId, meetingId);
+    const reports = await this.listMeetingReportRows(meetingId);
+
+    return {
+      reports: reports.map((report) => this.mapMeetingReportSummary(report))
+    };
   }
 
   async requestReportRegeneration(
@@ -1212,16 +1290,22 @@ export class MeetingService {
     return updatedRecording;
   }
 
-  private async ensureReportForStoppedRecording(
+  private async prepareReportForStoppedRecording(
     executor: QueryOneExecutor,
     recording: RecordingRow
-  ): Promise<MeetingReportRow | null> {
+  ): Promise<MeetingReportPreparation> {
     if (recording.status !== "COMPLETED") {
-      return null;
+      return {
+        report: null,
+        job: null
+      };
     }
 
     if (recording.duration_sec === null || Number(recording.duration_sec) <= 60) {
-      return null;
+      return {
+        report: null,
+        job: null
+      };
     }
 
     const existingReport = await this.findMeetingReportByRecordingId(
@@ -1230,10 +1314,20 @@ export class MeetingService {
       recording.id
     );
     if (existingReport !== null) {
-      return existingReport;
+      return {
+        report: existingReport,
+        job: null
+      };
     }
 
-    return this.insertProcessingMeetingReport(executor, recording);
+    const result = await this.insertProcessingMeetingReport(executor, recording);
+    return {
+      report: result.report,
+      job:
+        result.inserted && recording.audio_file_key !== null
+          ? this.buildMeetingReportJobPayload(result.report, recording)
+          : null
+    };
   }
 
   private async findMeetingReportByRecordingId(
@@ -1269,7 +1363,7 @@ export class MeetingService {
   private async insertProcessingMeetingReport(
     executor: QueryOneExecutor,
     recording: RecordingRow
-  ): Promise<MeetingReportRow> {
+  ): Promise<MeetingReportInsertResult> {
     const insertedReport = await executor.queryOne<MeetingReportRow>(
       `
         INSERT INTO meeting_reports (
@@ -1298,7 +1392,10 @@ export class MeetingService {
     );
 
     if (insertedReport !== null) {
-      return insertedReport;
+      return {
+        report: insertedReport,
+        inserted: true
+      };
     }
 
     const existingReport = await this.findMeetingReportByRecordingId(
@@ -1310,7 +1407,38 @@ export class MeetingService {
       throw badRequest("Meeting report could not be created");
     }
 
-    return existingReport;
+    return {
+      report: existingReport,
+      inserted: false
+    };
+  }
+
+  private buildMeetingReportJobPayload(
+    report: MeetingReportRow,
+    recording: RecordingRow
+  ): MeetingReportJobPayload {
+    if (recording.audio_file_key === null) {
+      throw badRequest("Meeting report job could not be created");
+    }
+
+    return {
+      jobType: "meeting_report",
+      reportId: report.id,
+      meetingId: report.meeting_id,
+      recordingId: report.recording_id,
+      audioFileKey: recording.audio_file_key,
+      retryCount: Number(report.retry_count)
+    };
+  }
+
+  private async enqueueMeetingReportJob(
+    job: MeetingReportJobPayload | null
+  ): Promise<void> {
+    if (job === null) {
+      return;
+    }
+
+    await this.meetingReportJobService.enqueueMeetingReportJob(job);
   }
 
   private async updateRecordingFailed(
@@ -1375,6 +1503,82 @@ export class MeetingService {
         ORDER BY created_at DESC, id ASC
       `,
       [meetingId]
+    );
+  }
+
+  private async listWorkspaceMeetingReportRows(
+    workspaceId: string,
+    status: MeetingReportStatus | null,
+    limit: number
+  ): Promise<MeetingReportRow[]> {
+    const values: unknown[] = [workspaceId];
+    const statusCondition =
+      status === null
+        ? ""
+        : `AND meeting_reports.status = $${values.push(status)}`;
+    const limitParameter = `$${values.push(limit)}`;
+
+    return this.database.query<MeetingReportRow>(
+      `
+        SELECT
+          meeting_reports.id,
+          meeting_reports.meeting_id,
+          meeting_reports.recording_id,
+          meeting_reports.status,
+          meeting_reports.failed_step,
+          meeting_reports.error_message,
+          meeting_reports.summary,
+          meeting_reports.discussion_points,
+          meeting_reports.decisions,
+          meeting_reports.action_item_candidates,
+          meeting_reports.retry_count,
+          meeting_reports.created_at,
+          meeting_reports.updated_at
+        FROM meeting_reports
+        JOIN meetings
+          ON meetings.id = meeting_reports.meeting_id
+        WHERE meetings.workspace_id = $1
+          ${statusCondition}
+        ORDER BY meeting_reports.created_at DESC, meeting_reports.id ASC
+        LIMIT ${limitParameter}
+      `,
+      values
+    );
+  }
+
+  private async findMeetingReportDetailById(
+    workspaceId: string,
+    reportId: string
+  ): Promise<MeetingReportDetailRow | null> {
+    if (!UUID_PATTERN.test(reportId)) {
+      return null;
+    }
+
+    return this.database.queryOne<MeetingReportDetailRow>(
+      `
+        SELECT
+          meeting_reports.id,
+          meeting_reports.meeting_id,
+          meeting_reports.recording_id,
+          meeting_reports.status,
+          meeting_reports.failed_step,
+          meeting_reports.error_message,
+          meeting_reports.transcript_text,
+          meeting_reports.summary,
+          meeting_reports.discussion_points,
+          meeting_reports.decisions,
+          meeting_reports.action_item_candidates,
+          meeting_reports.retry_count,
+          meeting_reports.created_at,
+          meeting_reports.updated_at
+        FROM meeting_reports
+        JOIN meetings
+          ON meetings.id = meeting_reports.meeting_id
+        WHERE meetings.workspace_id = $1
+          AND meeting_reports.id = $2
+        LIMIT 1
+      `,
+      [workspaceId, reportId]
     );
   }
 
@@ -1839,6 +2043,60 @@ export class MeetingService {
       createdAt: this.toIsoString(report.created_at),
       updatedAt: this.toIsoString(report.updated_at)
     };
+  }
+
+  private mapMeetingReportDetail(
+    report: MeetingReportDetailRow
+  ): MeetingReportDetailPayload {
+    return {
+      ...this.mapMeetingReportSummary(report),
+      transcriptText: report.transcript_text
+    };
+  }
+
+  private normalizeMeetingReportStatus(
+    status: unknown
+  ): MeetingReportStatus | null {
+    if (status === undefined) {
+      return null;
+    }
+
+    if (typeof status !== "string") {
+      throw badRequest("Invalid meeting report status");
+    }
+
+    if (MEETING_REPORT_STATUSES.includes(status as MeetingReportStatus)) {
+      return status as MeetingReportStatus;
+    }
+
+    throw badRequest("Invalid meeting report status");
+  }
+
+  private normalizeMeetingReportLimit(limit: unknown): number {
+    if (limit === undefined || limit === null || limit === "") {
+      return DEFAULT_MEETING_REPORT_LIMIT;
+    }
+
+    if (Array.isArray(limit)) {
+      return DEFAULT_MEETING_REPORT_LIMIT;
+    }
+
+    const rawLimit = typeof limit === "number" ? String(limit) : limit;
+    if (typeof rawLimit !== "string") {
+      return DEFAULT_MEETING_REPORT_LIMIT;
+    }
+
+    const parsed = Number(rawLimit.trim());
+    if (!Number.isFinite(parsed)) {
+      return DEFAULT_MEETING_REPORT_LIMIT;
+    }
+
+    const integerLimit = Math.trunc(parsed);
+    if (integerLimit < DEFAULT_MEETING_REPORT_LIMIT) {
+      return DEFAULT_MEETING_REPORT_LIMIT;
+    }
+
+    return Math.min(integerLimit, MAX_MEETING_REPORT_LIMIT);
   }
 
   private toJsonArray(value: unknown): unknown[] {

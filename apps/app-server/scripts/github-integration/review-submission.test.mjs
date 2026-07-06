@@ -326,3 +326,36 @@ function createService({ database, githubOAuthClient, workspaceService } = {}) {
     globalThis.fetch = originalFetch;
   }
 }
+
+{
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({
+    ok: false,
+    status: 403,
+    async json() {
+      return {
+        message: "provider permission details should not leak"
+      };
+    }
+  });
+
+  try {
+    await assert.rejects(
+      () =>
+        new GithubOAuthClient().submitPullRequestReview({
+          accessToken: "oauth-access-value",
+          owner: "my-team",
+          repo: "pilo",
+          pullNumber: 24,
+          event: "COMMENT",
+          body: "LGTM"
+        }),
+      (error) =>
+        error?.response?.error?.message ===
+          "GitHub App Pull requests write permission is required" &&
+        error?.getStatus?.() === 403
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}

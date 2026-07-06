@@ -18,6 +18,8 @@ import {
   JoinMeetingPayload,
   LeaveMeetingPayload,
   MeetingDetailPayload,
+  MeetingReportDetailResponsePayload,
+  MeetingReportListPayload,
   MeetingService,
   ParticipantListPayload,
   PendingMeetingPayload,
@@ -175,9 +177,9 @@ export class MeetingController {
   async listReports(
     @CurrentUserId() currentUserId: string,
     @Param("workspaceId") workspaceId: string,
-    @Query("status") status: string | undefined,
-    @Query("limit") limit: string | undefined
-  ): Promise<ApiSuccessResponse<PendingMeetingPayload>> {
+    @Query("status") status: unknown,
+    @Query("limit") limit: unknown
+  ): Promise<ApiSuccessResponse<MeetingReportListPayload>> {
     const result = await this.meetingService.listReports(currentUserId, workspaceId, {
       status,
       limit
@@ -190,7 +192,7 @@ export class MeetingController {
     @CurrentUserId() currentUserId: string,
     @Param("workspaceId") workspaceId: string,
     @Param("reportId") reportId: string
-  ): Promise<ApiSuccessResponse<PendingMeetingPayload>> {
+  ): Promise<ApiSuccessResponse<MeetingReportDetailResponsePayload>> {
     const result = await this.meetingService.getReport(
       currentUserId,
       workspaceId,
@@ -204,7 +206,7 @@ export class MeetingController {
     @CurrentUserId() currentUserId: string,
     @Param("workspaceId") workspaceId: string,
     @Param("meetingId") meetingId: string
-  ): Promise<ApiSuccessResponse<PendingMeetingPayload>> {
+  ): Promise<ApiSuccessResponse<MeetingReportListPayload>> {
     const result = await this.meetingService.listMeetingReports(
       currentUserId,
       workspaceId,

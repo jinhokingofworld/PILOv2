@@ -446,6 +446,9 @@ Query:
 | `status` | No | `PROCESSING`, `COMPLETED`, `FAILED` |
 | `limit` | No | 반환 개수. 기본값 20, 최대 100 |
 
+`status`가 허용값이 아니면 `400 BAD_REQUEST`를 반환한다. `limit`이 숫자가
+아니거나 20 미만이면 20으로, 100 초과면 100으로 보정한다.
+
 기본 정렬은 `createdAt DESC`다. `recording.durationSec`이 60 이하인 녹음은
 MeetingReport가 없으므로 목록에 나오지 않는다. 실패한 MeetingReport도 목록에 나온다.
 

@@ -177,6 +177,9 @@ DELETE /api/v1/workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}
 
 `result` endpoint는 GitHub Review 제출 모달에서 파일별 판단 결과를 요약할 수 있는
 형태로 반환한다.
+`readyToSubmit`은 모든 파일에 판단이 들어갔는지 보여주는 진행률 신호이며,
+GitHub Review 제출 가능 여부를 막는 hard guard가 아니다. `not_reviewed` 파일이
+남아 있어도 Review 제출은 가능하고, 해당 개수는 summary와 counts에 그대로 포함된다.
 
 ```json
 {
@@ -477,10 +480,79 @@ Decision history response:
 - GitHub OAuth token 복호화와 GitHub Review body 제출은 GitHub Integration의
   서버 내부 dependency를 통해 수행하며, PR Review API 응답에는 token 값을 노출하지 않는다.
 - 현재 PR head SHA를 다시 조회해 session `headSha`와 비교한다.
+- GitHub OAuth 미연결, stale head SHA, 분석/파일 생성이 끝나지 않은 session은 제출 전 guard
+  실패로 보고 `review_submissions` row를 만들지 않는다.
+- `not_reviewed` file이 남아 있어도 GitHub Review 제출은 가능하다.
+- 실제 GitHub 제출 단계에 진입한 뒤의 성공/실패 시도만 `review_submissions`에 저장한다.
+- GitHub Review 제출에는 GitHub App `Pull requests: write` permission이 필요하다.
+- GitHub Review 제출 403 응답은 generic failure가 아니라 권한 부족 에러로 구분해
+  sanitize된 message만 저장/응답한다.
 - GitHub Review body만 제출한다.
 - Line comment payload는 보내지 않는다.
-- 제출 시도는 `review_submissions`에 저장한다.
+- 실제 GitHub 제출 시도는 `review_submissions`에 저장한다.
 - 화면 이탈로 session이 삭제되면 해당 local submission history도 함께 삭제된다.
+
+제출 성공 응답:
+
+```json
+{
+  "success": true,
+  "data": {
+    "id": "review_submission_uuid",
+    "sessionId": "review_session_uuid",
+    "submitType": "REQUEST_CHANGES",
+    "reviewBody": "## PILO PR Review\n\nSummary...",
+    "reviewResultSummary": "문제 없음 1개 / 논의·수정 필요 1개 / 판단 불가 0개 / 미리뷰 0개",
+    "fileReviewResults": [
+      {
+        "fileName": "VoiceMeetingPage.tsx",
+        "filePath": "apps/frontend/VoiceMeetingPage.tsx",
+        "status": "discussion_needed",
+        "comment": "Need to confirm empty state behavior."
+      }
+    ],
+    "githubSubmitStatus": "submitted",
+    "githubReviewId": "123456789",
+    "githubReviewUrl": "https://github.com/my-team/pilo/pull/24#pullrequestreview-123456789",
+    "submittedByUserId": "user_uuid",
+    "submittedByGithubLogin": "octocat",
+    "errorMessage": null,
+    "submittedAt": "2026-07-06T12:00:00.000Z",
+    "createdAt": "2026-07-06T11:59:58.000Z",
+    "updatedAt": "2026-07-06T12:00:00.000Z"
+  }
+}
+```
+
+Session submission history response:
+
+```json
+{
+  "success": true,
+  "data": {
+    "reviewSessionId": "review_session_uuid",
+    "submissions": [
+      {
+        "id": "review_submission_uuid",
+        "sessionId": "review_session_uuid",
+        "submitType": "REQUEST_CHANGES",
+        "githubSubmitStatus": "failed",
+        "githubReviewId": null,
+        "githubReviewUrl": null,
+        "submittedByUserId": "user_uuid",
+        "submittedByGithubLogin": "octocat",
+        "errorMessage": "GitHub App Pull requests write permission is required",
+        "submittedAt": null,
+        "createdAt": "2026-07-06T11:59:58.000Z",
+        "updatedAt": "2026-07-06T11:59:59.000Z"
+      }
+    ]
+  }
+}
+```
+
+`GET /workspaces/{workspaceId}/github/review-submissions/{submissionId}`는 제출 성공 응답과
+같은 detail payload를 반환한다.
 
 ## MVP 제외
 
