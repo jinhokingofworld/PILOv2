@@ -6,6 +6,7 @@
     "build": "tsc -p tsconfig.build.json",
     "format:check": "node scripts/check-format.mjs",
     "lint": "tsc --noEmit",
+    "pretest": "npm run build",
     "start": "node dist/main.js",
     "test": "node scripts/test.mjs"
   },
