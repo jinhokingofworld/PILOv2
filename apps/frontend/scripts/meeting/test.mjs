@@ -16,6 +16,28 @@ const meetingHook = await readFile(
   ),
   "utf8"
 );
+const liveKitHook = await readFile(
+  new URL(
+    "../../src/features/meeting/hooks/use-livekit-meeting-room.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
+const meetingPanel = await readFile(
+  new URL(
+    "../../src/features/meeting/components/meeting-panel.tsx",
+    import.meta.url
+  ),
+  "utf8"
+);
+const meetingNavigation = await readFile(
+  new URL("../../src/features/meeting/navigation.ts", import.meta.url),
+  "utf8"
+);
+const packageJson = await readFile(
+  new URL("../../package.json", import.meta.url),
+  "utf8"
+);
 
 assert.match(meetingTypes, /export type Meeting =/);
 assert.match(meetingTypes, /export type MeetingParticipant =/);
@@ -84,3 +106,35 @@ assert.match(meetingHook, /regenerateMeetingReport/);
 assert.match(meetingHook, /Meeting action requires an authenticated workspace/);
 assert.doesNotMatch(meetingHook, /livekit-client/);
 assert.doesNotMatch(meetingHook, /@livekit\/components-react/);
+
+assert.match(packageJson, /"livekit-client":/);
+assert.match(liveKitHook, /useLiveKitMeetingRoom/);
+assert.match(liveKitHook, /new Room\(/);
+assert.match(liveKitHook, /RoomEvent\.TrackSubscribed/);
+assert.match(liveKitHook, /RoomEvent\.TrackUnsubscribed/);
+assert.match(liveKitHook, /setMicrophoneEnabled\(true\)/);
+assert.match(liveKitHook, /remoteAudioContainerRef/);
+assert.match(liveKitHook, /track\.attach\(\)/);
+assert.doesNotMatch(liveKitHook, /@livekit\/components-react/);
+
+assert.match(meetingNavigation, /title: "음성회의"/);
+assert.match(meetingNavigation, /회의 참여, 녹음, 회의록 확인과 재생성/);
+assert.match(meetingNavigation, /\/meeting#room/);
+assert.match(meetingNavigation, /\/meeting#report/);
+assert.doesNotMatch(meetingNavigation, /\/meeting#recording/);
+
+assert.match(meetingPanel, /"use client"/);
+assert.match(meetingPanel, /useAuthSession/);
+assert.match(meetingPanel, /useMeetingWorkspaceData/);
+assert.match(meetingPanel, /useLiveKitMeetingRoom/);
+assert.match(meetingPanel, /recordingConsentAccepted/);
+assert.match(meetingPanel, /RECORDING_CONSENT_STORAGE_KEY/);
+assert.match(meetingPanel, /localStorage\.setItem/);
+assert.match(meetingPanel, /getUserMedia/);
+assert.match(meetingPanel, /회의 참여/);
+assert.match(meetingPanel, /회의 나가기/);
+assert.match(meetingPanel, /녹음 시작/);
+assert.match(meetingPanel, /녹음 종료/);
+assert.match(meetingPanel, /현재 참여 인원/);
+assert.match(meetingPanel, /remoteAudioContainerRef/);
+assert.doesNotMatch(meetingPanel, /AvatarImage/);
