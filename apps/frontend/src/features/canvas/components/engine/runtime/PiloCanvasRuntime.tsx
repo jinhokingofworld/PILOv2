@@ -193,6 +193,7 @@ export function PiloCanvasRuntime({
   const shapeDetailCacheRef = useRef(new Map<string, PiloCanvasFreeformShape>());
   const pendingShapeDetailRef = useRef<string | null>(null);
   const [canvasHydrationVersion, setCanvasHydrationVersion] = useState(0);
+  const [cameraRestoreVersion, setCameraRestoreVersion] = useState(0);
 
   useEffect(() => {
     onReady(canvasActions);
@@ -228,6 +229,7 @@ export function PiloCanvasRuntime({
       setViewSetting(storedViewSetting);
 
       setCanvasHydrationVersion((version) => version + 1);
+      setCameraRestoreVersion((version) => version + 1);
     });
 
     return () => {
@@ -540,6 +542,7 @@ export function PiloCanvasRuntime({
       <section className="canvas-content" aria-label="캔버스 보드">
         <PiloTldrawCanvas
           board={board}
+          cameraRestoreVersion={cameraRestoreVersion}
           freeformShapes={freeformShapes}
           hydrationVersion={canvasHydrationVersion}
           initialViewSetting={viewSetting}
