@@ -5,6 +5,7 @@ import { CurrentUserId } from "../../common/current-user.decorator";
 import {
   DeletePrReviewSessionPayload,
   PrReviewCanvasPayload,
+  PrReviewFileDecisionListPayload,
   PrReviewFileDiffPayload,
   PrReviewFilePayload,
   PrReviewFlowFilesPayload,
@@ -130,6 +131,36 @@ export class PrReviewController {
       reviewFileId
     );
     return apiResponse(file);
+  }
+
+  @Patch("review-files/:reviewFileId/review")
+  async updateReviewFileDecision(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("reviewFileId") reviewFileId: string,
+    @Body() body: unknown
+  ): Promise<ApiSuccessResponse<PrReviewFilePayload>> {
+    const file = await this.prReviewService.updateReviewFileDecision(
+      currentUserId,
+      workspaceId,
+      reviewFileId,
+      body
+    );
+    return apiResponse(file);
+  }
+
+  @Get("review-files/:reviewFileId/decisions")
+  async listReviewFileDecisions(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("reviewFileId") reviewFileId: string
+  ): Promise<ApiSuccessResponse<PrReviewFileDecisionListPayload>> {
+    const decisions = await this.prReviewService.listReviewFileDecisions(
+      currentUserId,
+      workspaceId,
+      reviewFileId
+    );
+    return apiResponse(decisions);
   }
 
   @Get("review-files/:reviewFileId/diff")
