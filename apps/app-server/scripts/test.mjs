@@ -44,6 +44,9 @@ const meetingController = await readSource(
 );
 const meetingModule = await readSource("../src/modules/meeting/meeting.module.ts");
 const meetingService = await readSource("../src/modules/meeting/meeting.service.ts");
+const meetingReportJobService = await readSource(
+  "../src/modules/meeting/meeting-report-job.service.ts"
+);
 const liveKitEgressService = await readSource(
   "../src/modules/meeting/livekit-egress.service.ts"
 );
@@ -176,6 +179,7 @@ assert.match(meetingModule, /DatabaseModule/);
 assert.match(meetingModule, /WorkspaceModule/);
 assert.match(meetingModule, /LiveKitEgressService/);
 assert.match(meetingModule, /LiveKitTokenService/);
+assert.match(meetingModule, /MeetingReportJobService/);
 assert.match(meetingController, /@Controller\("workspaces\/:workspaceId"\)/);
 assert.match(meetingController, /@UseGuards\(AuthGuard\)/);
 assert.match(meetingController, /@Get\("meetings\/current"\)/);
@@ -192,9 +196,15 @@ assert.match(meetingService, /startRoomAudioOnlyEgress/);
 assert.match(meetingService, /stopEgress/);
 assert.match(meetingService, /INSERT INTO meeting_reports/);
 assert.match(meetingService, /PROCESSING/);
+assert.match(meetingService, /MeetingReportJobService/);
+assert.match(meetingService, /enqueueMeetingReportJob/);
+assert.match(meetingService, /jobType: "meeting_report"/);
 assert.match(meetingService, /LIVEKIT_EGRESS_S3_PREFIX/);
 assert.match(meetingService, /audio_file_url = NULL/);
 assert.doesNotMatch(meetingService, /livekit:\s*null/);
+assert.match(meetingReportJobService, /jobType: "meeting_report"/);
+assert.match(meetingReportJobService, /Actual SQS publish is intentionally split into issue #173/);
+assert.doesNotMatch(meetingReportJobService, /SQSClient|SendMessageCommand|@aws-sdk/);
 assert.match(liveKitEgressService, /EgressClient/);
 assert.match(liveKitEgressService, /startRoomCompositeEgress/);
 assert.match(liveKitEgressService, /listEgress/);

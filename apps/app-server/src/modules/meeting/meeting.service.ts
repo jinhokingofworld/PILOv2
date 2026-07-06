@@ -14,6 +14,10 @@ import {
   LiveKitJoinPayload,
   LiveKitTokenService
 } from "./livekit-token.service";
+import {
+  MeetingReportJobPayload,
+  MeetingReportJobService
+} from "./meeting-report-job.service";
 
 export type PendingMeetingPayload = never;
 
@@ -134,6 +138,21 @@ interface QueryOneExecutor {
 interface MeetingReportListQuery {
   status?: string;
   limit?: string;
+}
+
+interface MeetingReportInsertResult {
+  report: MeetingReportRow;
+  inserted: boolean;
+}
+
+interface MeetingReportPreparation {
+  report: MeetingReportRow | null;
+  job: MeetingReportJobPayload | null;
+}
+
+interface EndRecordingTransactionResult {
+  payload: EndRecordingPayload;
+  job: MeetingReportJobPayload | null;
 }
 
 interface StartMeetingDraft {
@@ -271,7 +290,8 @@ export class MeetingService {
     private readonly database: DatabaseService,
     private readonly workspaceService: WorkspaceService,
     private readonly liveKitTokenService: LiveKitTokenService,
-    private readonly liveKitEgressService: LiveKitEgressService
+    private readonly liveKitEgressService: LiveKitEgressService,
+    private readonly meetingReportJobService: MeetingReportJobService
   ) {}
 
   getModuleInfo() {
@@ -649,45 +669,61 @@ export class MeetingService {
     recordingId: string
   ): Promise<EndRecordingPayload> {
     await this.assertWorkspaceAccess(currentUserId, workspaceId);
-    return this.database.transaction(async (transaction) => {
-      const meeting = await this.findMeetingById(transaction, workspaceId, meetingId, {
-        lockMeeting: true
-      });
+    const result = await this.database.transaction<EndRecordingTransactionResult>(
+      async (transaction) => {
+        const meeting = await this.findMeetingById(
+          transaction,
+          workspaceId,
+          meetingId,
+          {
+            lockMeeting: true
+          }
+        );
 
-      if (!meeting) {
-        throw notFound("Meeting not found");
-      }
-
-      await this.assertActiveParticipant(transaction, meetingId, currentUserId);
-
-      const recording = await this.findRecordingById(
-        transaction,
-        meetingId,
-        recordingId,
-        {
-          lockRecording: true
+        if (!meeting) {
+          throw notFound("Meeting not found");
         }
-      );
 
-      if (!recording) {
-        throw notFound("Recording not found");
+        await this.assertActiveParticipant(transaction, meetingId, currentUserId);
+
+        const recording = await this.findRecordingById(
+          transaction,
+          meetingId,
+          recordingId,
+          {
+            lockRecording: true
+          }
+        );
+
+        if (!recording) {
+          throw notFound("Recording not found");
+        }
+
+        const stoppedRecording =
+          recording.status === "RUNNING"
+            ? await this.stopRunningRecording(transaction, meeting, recording)
+            : recording;
+        const reportPreparation = await this.prepareReportForStoppedRecording(
+          transaction,
+          stoppedRecording
+        );
+
+        return {
+          payload: {
+            meeting: this.mapMeeting(meeting),
+            recording: this.mapRecording(stoppedRecording),
+            report:
+              reportPreparation.report === null
+                ? null
+                : this.mapMeetingReportSummary(reportPreparation.report)
+          },
+          job: reportPreparation.job
+        };
       }
+    );
 
-      const stoppedRecording =
-        recording.status === "RUNNING"
-          ? await this.stopRunningRecording(transaction, meeting, recording)
-          : recording;
-      const report = await this.ensureReportForStoppedRecording(
-        transaction,
-        stoppedRecording
-      );
-
-      return {
-        meeting: this.mapMeeting(meeting),
-        recording: this.mapRecording(stoppedRecording),
-        report: report === null ? null : this.mapMeetingReportSummary(report)
-      };
-    });
+    await this.enqueueMeetingReportJob(result.job);
+    return result.payload;
   }
 
   async listRecordings(
@@ -1212,16 +1248,22 @@ export class MeetingService {
     return updatedRecording;
   }
 
-  private async ensureReportForStoppedRecording(
+  private async prepareReportForStoppedRecording(
     executor: QueryOneExecutor,
     recording: RecordingRow
-  ): Promise<MeetingReportRow | null> {
+  ): Promise<MeetingReportPreparation> {
     if (recording.status !== "COMPLETED") {
-      return null;
+      return {
+        report: null,
+        job: null
+      };
     }
 
     if (recording.duration_sec === null || Number(recording.duration_sec) <= 60) {
-      return null;
+      return {
+        report: null,
+        job: null
+      };
     }
 
     const existingReport = await this.findMeetingReportByRecordingId(
@@ -1230,10 +1272,20 @@ export class MeetingService {
       recording.id
     );
     if (existingReport !== null) {
-      return existingReport;
+      return {
+        report: existingReport,
+        job: null
+      };
     }
 
-    return this.insertProcessingMeetingReport(executor, recording);
+    const result = await this.insertProcessingMeetingReport(executor, recording);
+    return {
+      report: result.report,
+      job:
+        result.inserted && recording.audio_file_key !== null
+          ? this.buildMeetingReportJobPayload(result.report, recording)
+          : null
+    };
   }
 
   private async findMeetingReportByRecordingId(
@@ -1269,7 +1321,7 @@ export class MeetingService {
   private async insertProcessingMeetingReport(
     executor: QueryOneExecutor,
     recording: RecordingRow
-  ): Promise<MeetingReportRow> {
+  ): Promise<MeetingReportInsertResult> {
     const insertedReport = await executor.queryOne<MeetingReportRow>(
       `
         INSERT INTO meeting_reports (
@@ -1298,7 +1350,10 @@ export class MeetingService {
     );
 
     if (insertedReport !== null) {
-      return insertedReport;
+      return {
+        report: insertedReport,
+        inserted: true
+      };
     }
 
     const existingReport = await this.findMeetingReportByRecordingId(
@@ -1310,7 +1365,38 @@ export class MeetingService {
       throw badRequest("Meeting report could not be created");
     }
 
-    return existingReport;
+    return {
+      report: existingReport,
+      inserted: false
+    };
+  }
+
+  private buildMeetingReportJobPayload(
+    report: MeetingReportRow,
+    recording: RecordingRow
+  ): MeetingReportJobPayload {
+    if (recording.audio_file_key === null) {
+      throw badRequest("Meeting report job could not be created");
+    }
+
+    return {
+      jobType: "meeting_report",
+      reportId: report.id,
+      meetingId: report.meeting_id,
+      recordingId: report.recording_id,
+      audioFileKey: recording.audio_file_key,
+      retryCount: Number(report.retry_count)
+    };
+  }
+
+  private async enqueueMeetingReportJob(
+    job: MeetingReportJobPayload | null
+  ): Promise<void> {
+    if (job === null) {
+      return;
+    }
+
+    await this.meetingReportJobService.enqueueMeetingReportJob(job);
   }
 
   private async updateRecordingFailed(

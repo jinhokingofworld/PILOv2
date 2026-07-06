@@ -5,12 +5,18 @@ import { WorkspaceModule } from "../workspace/workspace.module";
 import { LiveKitEgressService } from "./livekit-egress.service";
 import { LiveKitTokenService } from "./livekit-token.service";
 import { MeetingController } from "./meeting.controller";
+import { MeetingReportJobService } from "./meeting-report-job.service";
 import { MeetingService } from "./meeting.service";
 
 @Module({
   imports: [CommonModule, DatabaseModule, WorkspaceModule],
   controllers: [MeetingController],
-  providers: [MeetingService, LiveKitEgressService, LiveKitTokenService],
+  providers: [
+    MeetingService,
+    LiveKitEgressService,
+    LiveKitTokenService,
+    MeetingReportJobService
+  ],
   exports: [MeetingService]
 })
 export class MeetingModule {}
