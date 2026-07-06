@@ -162,17 +162,17 @@
 
 ## 9. Frontend PR 선택
 
-- [ ] placeholder PR Review panel을 실제 PR 선택 화면으로 교체한다.
-- [ ] open PR만 불러온다.
-- [ ] PR 번호 또는 제목 검색을 추가한다.
-- [ ] 검색 input에 300ms debounce를 적용한다.
-- [ ] 10개 단위 pagination과 previous/next button을 추가한다.
-- [ ] loading, empty, error, retry, GitHub-not-connected 상태를 추가한다.
-- [ ] title, author, branch info, changed files, additions/deletions, commits,
+- [x] placeholder PR Review panel을 실제 PR 선택 화면으로 교체한다.
+- [x] open PR만 불러온다.
+- [x] PR 번호 또는 제목 검색을 추가한다.
+- [x] 검색 input에 300ms debounce를 적용한다.
+- [x] 10개 단위 pagination과 previous/next button을 추가한다.
+- [x] loading, empty, error, retry, GitHub-not-connected 상태를 추가한다.
+- [x] title, author, branch info, changed files, additions/deletions, commits,
   description, file list를 보여주는 PR detail modal을 추가한다.
-- [ ] review start button을 추가한다.
-- [ ] session 생성 중에는 review start를 비활성화한다.
-- [ ] analysis loading/failure 상태를 보여준다.
+- [x] review start button을 추가한다.
+- [x] session 생성 중에는 review start를 비활성화한다.
+- [x] analysis loading/failure 상태를 session 생성 loading/failure로 보여준다.
 
 ## 10. Frontend Review Canvas
 
