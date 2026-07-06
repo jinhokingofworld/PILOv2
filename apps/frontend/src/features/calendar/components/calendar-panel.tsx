@@ -1,14 +1,14 @@
 "use client";
 
 import {
-  CalendarClock,
   CalendarPlus,
   ChevronLeft,
   ChevronRight,
   Loader2,
   Pencil,
   RefreshCw,
-  Trash2
+  Trash2,
+  X
 } from "lucide-react";
 import {
   useCallback,
@@ -18,14 +18,6 @@ import {
 } from "react";
 
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardAction,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle
-} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
   Sheet,
@@ -35,14 +27,12 @@ import {
   SheetHeader,
   SheetTitle
 } from "@/components/ui/sheet";
-import { Skeleton } from "@/components/ui/skeleton";
 import { useAuthSession } from "@/features/auth";
 import { createCalendarApiClient } from "@/features/calendar/api/client";
 import {
   formatCalendarDate,
   useCalendarMonthEvents
 } from "@/features/calendar/hooks/use-calendar-month-events";
-import { calendarNavigation } from "@/features/calendar/navigation";
 import type {
   CalendarEvent,
   CreateCalendarEventInput
@@ -77,6 +67,11 @@ type CalendarSheetMode =
       returnTo: "detail" | "edit";
     };
 
+type CalendarEventsDialogState = {
+  date: string;
+  events: CalendarEvent[];
+} | null;
+
 const DEFAULT_EVENT_COLOR = "#3B82F6";
 const calendarGridCellCount = 42;
 const calendarWeekdayLabels = ["일", "월", "화", "수", "목", "금", "토"];
@@ -94,7 +89,11 @@ function startOfCalendarMonth(date: Date) {
 }
 
 function addCalendarDays(date: Date, dayOffset: number) {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate() + dayOffset);
+  return new Date(
+    date.getFullYear(),
+    date.getMonth(),
+    date.getDate() + dayOffset
+  );
 }
 
 function shiftMonth(date: Date, monthOffset: number) {
@@ -179,9 +178,16 @@ function compareCalendarEvents(a: CalendarEvent, b: CalendarEvent) {
     return a.isAllDay ? -1 : 1;
   }
 
-  const timeCompare = (a.startTime ?? "").localeCompare(b.startTime ?? "");
-  if (timeCompare !== 0) {
-    return timeCompare;
+  if (!a.isAllDay && !b.isAllDay) {
+    const timeCompare = (a.startTime ?? "").localeCompare(b.startTime ?? "");
+    if (timeCompare !== 0) {
+      return timeCompare;
+    }
+  }
+
+  const createdAtCompare = a.createdAt.localeCompare(b.createdAt);
+  if (createdAtCompare !== 0) {
+    return createdAtCompare;
   }
 
   return a.title.localeCompare(b.title);
@@ -195,6 +201,76 @@ function getEventsForCalendarDate(events: CalendarEvent[], date: string) {
 
 function classNames(...values: Array<string | false | null | undefined>) {
   return values.filter(Boolean).join(" ");
+}
+
+function hexToRgb(hexColor: string) {
+  const match = /^#?([\da-f]{2})([\da-f]{2})([\da-f]{2})$/i.exec(hexColor);
+  if (!match) {
+    return null;
+  }
+
+  return {
+    red: Number.parseInt(match[1], 16),
+    green: Number.parseInt(match[2], 16),
+    blue: Number.parseInt(match[3], 16)
+  };
+}
+
+function readableTextColor(backgroundColor: string) {
+  const rgb = hexToRgb(backgroundColor);
+  if (!rgb) {
+    return "#FFFFFF";
+  }
+
+  const luminance =
+    (0.299 * rgb.red + 0.587 * rgb.green + 0.114 * rgb.blue) / 255;
+
+  return luminance > 0.68 ? "#111827" : "#FFFFFF";
+}
+
+function getAllDayEventChipStyle(event: CalendarEvent) {
+  return {
+    backgroundColor: event.color,
+    borderColor: event.color,
+    color: readableTextColor(event.color)
+  };
+}
+
+function CalendarEventChip({
+  className,
+  event
+}: {
+  className?: string;
+  event: CalendarEvent;
+}) {
+  if (event.isAllDay) {
+    return (
+      <span
+        className={classNames(
+          "flex min-w-0 items-center rounded-md border px-1.5 py-1 text-xs font-medium shadow-sm",
+          className
+        )}
+        style={getAllDayEventChipStyle(event)}
+      >
+        <span className="truncate">{event.title}</span>
+      </span>
+    );
+  }
+
+  return (
+    <span
+      className={classNames(
+        "flex min-w-0 items-center gap-1.5 rounded-md border border-transparent bg-transparent px-1 py-0.5 text-xs font-medium text-foreground",
+        className
+      )}
+    >
+      <span
+        className="size-1.5 shrink-0 rounded-full"
+        style={{ backgroundColor: event.color }}
+      />
+      <span className="truncate">{event.title}</span>
+    </span>
+  );
 }
 
 function createDefaultFormState(date: string): CalendarFormState {
@@ -627,6 +703,82 @@ function CalendarEventSheet({
   );
 }
 
+function CalendarEventsDialog({
+  dialog,
+  onClose,
+  onOpenEvent
+}: {
+  dialog: CalendarEventsDialogState;
+  onClose: () => void;
+  onOpenEvent: (event: CalendarEvent) => void;
+}) {
+  if (!dialog) {
+    return null;
+  }
+
+  return (
+    <div
+      aria-labelledby="calendar-events-dialog-title"
+      aria-modal="true"
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/35 p-3 sm:items-center sm:p-6"
+      role="dialog"
+    >
+      <button
+        type="button"
+        className="absolute inset-0 cursor-default"
+        aria-label="일정 목록 닫기"
+        onClick={onClose}
+      />
+      <div className="relative flex max-h-[min(560px,calc(100vh-2rem))] w-full max-w-md flex-col rounded-lg border bg-background shadow-xl">
+        <div className="flex items-start justify-between gap-3 border-b p-4">
+          <div className="min-w-0">
+            <h2
+              id="calendar-events-dialog-title"
+              className="font-heading text-lg font-semibold"
+            >
+              일정 목록
+            </h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {formatDateLabel(dialog.date)} · {dialog.events.length}개 일정
+            </p>
+          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            aria-label="닫기"
+            onClick={onClose}
+          >
+            <X />
+          </Button>
+        </div>
+
+        <ul className="grid gap-2 overflow-y-auto p-4">
+          {dialog.events.map((event) => (
+            <li key={event.id}>
+              <button
+                type="button"
+                className="grid w-full gap-2 rounded-lg border bg-background p-3 text-left transition hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                onClick={() => onOpenEvent(event)}
+              >
+                <CalendarEventChip className="text-sm" event={event} />
+                <span className="text-xs text-muted-foreground">
+                  {getEventTimeLabel(event)} · {getEventDateLabel(event)}
+                </span>
+                {event.description ? (
+                  <span className="line-clamp-2 text-sm text-muted-foreground">
+                    {event.description}
+                  </span>
+                ) : null}
+              </button>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
 export function CalendarPanel() {
   const authSession = useAuthSession();
   const [monthDate, setMonthDate] = useState(() =>
@@ -636,6 +788,8 @@ export function CalendarPanel() {
     formatCalendarDate(new Date())
   );
   const [sheetMode, setSheetMode] = useState<CalendarSheetMode | null>(null);
+  const [eventsDialog, setEventsDialog] =
+    useState<CalendarEventsDialogState>(null);
   const [formState, setFormState] = useState(() =>
     createDefaultFormState(formatCalendarDate(new Date()))
   );
@@ -665,15 +819,9 @@ export function CalendarPanel() {
       ),
     [calendarEvents.events, gridDates]
   );
-  const selectedDateEvents = useMemo(
-    () => getEventsForCalendarDate(calendarEvents.events, selectedDate),
-    [calendarEvents.events, selectedDate]
-  );
   const needsSignIn = !normalizedAccessToken;
   const isLoading = calendarEvents.status === "loading";
   const canUseCalendar = Boolean(workspaceId.trim() && normalizedAccessToken);
-  const selectedDateLabel =
-    selectedDate === today ? "오늘 일정" : "선택 날짜 일정";
 
   const goToMonth = useCallback((nextMonthDate: Date) => {
     const nextMonthStart = startOfCalendarMonth(nextMonthDate);
@@ -694,11 +842,13 @@ export function CalendarPanel() {
   }, []);
 
   const openDetailSheet = useCallback((event: CalendarEvent) => {
+    setEventsDialog(null);
     setFormError(null);
     setSheetMode({ type: "detail", event });
   }, []);
 
   const openEditSheet = useCallback((event: CalendarEvent) => {
+    setEventsDialog(null);
     setFormState(createFormStateFromEvent(event));
     setFormError(null);
     setSheetMode({ type: "edit", event });
@@ -735,6 +885,11 @@ export function CalendarPanel() {
       setFormError(null);
     }
   }, [isSubmitting]);
+
+  const openEventsDialog = useCallback((date: string, events: CalendarEvent[]) => {
+    setSelectedDate(date);
+    setEventsDialog({ date, events });
+  }, []);
 
   const updateFormField = useCallback(
     <Field extends keyof CalendarFormState>(
@@ -824,18 +979,11 @@ export function CalendarPanel() {
   }
 
   return (
-    <div className="flex flex-col gap-4">
-      <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-        <Card id="month">
-          <CardHeader className="border-b">
-            <CardTitle className="flex items-center gap-2">
-              <CalendarClock className="size-4 text-muted-foreground" />
-              {calendarNavigation.title}
-            </CardTitle>
-            <CardDescription>
-              {calendarEvents.range.start} - {calendarEvents.range.end}
-            </CardDescription>
-            <CardAction className="flex items-center gap-1">
+    <div className="flex min-h-[calc(100vh-6.5rem)] flex-col gap-4">
+      <section id="month" className="flex min-h-0 flex-1 flex-col gap-4">
+        <div className="grid gap-3 lg:grid-cols-[1fr_auto_1fr] lg:items-center">
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1">
               <Button
                 type="button"
                 variant="outline"
@@ -849,6 +997,7 @@ export function CalendarPanel() {
                 type="button"
                 variant="outline"
                 size="sm"
+                aria-label="오늘이 포함된 달로 이동"
                 onClick={goToToday}
               >
                 오늘
@@ -862,219 +1011,143 @@ export function CalendarPanel() {
               >
                 <ChevronRight />
               </Button>
-            </CardAction>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h2 className="font-heading text-2xl font-semibold leading-tight">
-                  {monthLabel}
-                </h2>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {calendarEvents.events.length}개 일정
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  disabled={!canUseCalendar || isLoading}
-                  onClick={() => void calendarEvents.reload()}
-                >
-                  {isLoading ? (
-                    <Loader2 className="animate-spin" />
-                  ) : (
-                    <RefreshCw />
-                  )}
-                  새로고침
-                </Button>
-                <Button
-                  id="new"
-                  type="button"
-                  size="sm"
-                  disabled={!canUseCalendar}
-                  onClick={() => openCreateSheet(selectedDate)}
-                >
-                  <CalendarPlus />
-                  일정 추가
-                </Button>
-              </div>
             </div>
+            <span className="text-sm text-muted-foreground">
+              {calendarEvents.events.length}개 일정
+            </span>
+          </div>
 
-            {needsSignIn ? (
-              <p className="rounded-lg border border-dashed px-3 py-2 text-sm text-muted-foreground">
-                일정을 보려면 로그인이 필요합니다.
-              </p>
-            ) : null}
-            {calendarEvents.error ? (
-              <p className="rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                일정을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.
-              </p>
-            ) : null}
+          <h1
+            className="justify-self-start rounded-md px-2 py-1 text-left font-heading text-2xl font-semibold leading-tight outline-none transition hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring lg:justify-self-center"
+            onDoubleClick={goToToday}
+          >
+            {monthLabel}
+          </h1>
 
-            <div className="overflow-x-auto">
-              <div className="min-w-[760px] rounded-lg border">
-                <div className="grid grid-cols-7 border-b bg-muted/40 text-xs font-medium text-muted-foreground">
-                  {calendarWeekdayLabels.map((weekday) => (
-                    <div key={weekday} className="px-2 py-2 text-center">
-                      {weekday}
-                    </div>
-                  ))}
-                </div>
-                <div className="grid grid-cols-7">
-                  {gridDates.map((date) => {
-                    const dateEvents = eventsByDate.get(date) ?? [];
-                    const visibleEvents = dateEvents.slice(0, 3);
-                    const hiddenEventCount =
-                      dateEvents.length - visibleEvents.length;
-                    const isSelected = date === selectedDate;
-                    const isToday = date === today;
-                    const isCurrentMonth = isDateInMonth(date, monthDate);
+          <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={!canUseCalendar || isLoading}
+              onClick={() => void calendarEvents.reload()}
+            >
+              {isLoading ? (
+                <Loader2 className="animate-spin" />
+              ) : (
+                <RefreshCw />
+              )}
+              새로고침
+            </Button>
+            <Button
+              id="new"
+              type="button"
+              size="sm"
+              disabled={!canUseCalendar}
+              onClick={() => openCreateSheet(selectedDate)}
+            >
+              <CalendarPlus />
+              일정 추가
+            </Button>
+          </div>
+        </div>
 
-                    return (
-                      <div
-                        key={date}
-                        className={classNames(
-                          "relative min-h-32 border-b border-r p-2 text-left align-top transition last:border-r-0",
-                          !isCurrentMonth &&
-                            "bg-muted/20 text-muted-foreground",
-                          isSelected &&
-                            "bg-primary/10 ring-2 ring-inset ring-primary",
-                          isToday && !isSelected && "bg-secondary/70"
-                        )}
-                      >
-                        <button
-                          type="button"
-                          className="absolute inset-0 z-0 hover:bg-muted/50 focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                          aria-label={`${formatDateLabel(date)} 선택`}
-                          onClick={() => setSelectedDate(date)}
-                        />
-                        <span
-                          className={classNames(
-                            "pointer-events-none relative z-20 inline-flex size-6 items-center justify-center rounded-full text-xs font-medium",
-                            isToday && "bg-primary text-primary-foreground"
-                          )}
-                        >
-                          {formatCellDay(date)}
-                        </span>
-                        <span className="relative z-20 mt-2 flex flex-col gap-1">
-                          {visibleEvents.map((event) => (
-                            <button
-                              key={`${date}-${event.id}`}
-                              type="button"
-                              className="flex min-w-0 items-center gap-1 rounded-md bg-background/85 px-1.5 py-1 text-left text-xs text-foreground shadow-sm ring-1 ring-border transition hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                              onClick={() => {
-                                setSelectedDate(date);
-                                openDetailSheet(event);
-                              }}
-                            >
-                              <span
-                                className="size-1.5 shrink-0 rounded-full"
-                                style={{ backgroundColor: event.color }}
-                              />
-                              <span className="truncate">{event.title}</span>
-                            </button>
-                          ))}
-                          {hiddenEventCount > 0 ? (
-                            <span className="rounded-md px-1.5 py-0.5 text-xs font-medium text-muted-foreground">
-                              +{hiddenEventCount}
-                            </span>
-                          ) : null}
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+        {needsSignIn ? (
+          <p className="rounded-lg border border-dashed px-3 py-2 text-sm text-muted-foreground">
+            일정을 보려면 로그인이 필요합니다.
+          </p>
+        ) : null}
+        {calendarEvents.error ? (
+          <p className="rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            일정을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.
+          </p>
+        ) : null}
 
-        <Card id="today" className="xl:sticky xl:top-4 xl:self-start">
-          <CardHeader>
-            <CardTitle>{selectedDateLabel}</CardTitle>
-            <CardDescription>{formatDateLabel(selectedDate)}</CardDescription>
-            <CardAction>
-              <Button
-                type="button"
-                size="sm"
-                disabled={!canUseCalendar}
-                onClick={() => openCreateSheet(selectedDate)}
+        <div className="min-h-0 flex-1 overflow-x-auto">
+          <div className="grid min-w-[760px] grid-cols-7 gap-1.5">
+            {calendarWeekdayLabels.map((weekday) => (
+              <div
+                key={weekday}
+                className="px-2 py-1 text-center text-xs font-semibold text-muted-foreground"
               >
-                <CalendarPlus />
-                추가
-              </Button>
-            </CardAction>
-          </CardHeader>
-          <CardContent>
-            {isLoading && selectedDateEvents.length === 0 ? (
-              <div className="grid gap-2">
-                <Skeleton className="h-14" />
-                <Skeleton className="h-14" />
+                {weekday}
               </div>
-            ) : selectedDateEvents.length > 0 ? (
-              <ul className="grid gap-2" aria-label="선택 날짜 일정 목록">
-                {selectedDateEvents.map((event) => (
-                  <li
-                    key={event.id}
-                    className="grid gap-2 rounded-lg border bg-background p-2 sm:grid-cols-[1fr_auto]"
-                  >
-                    <button
-                      type="button"
-                      className="min-w-0 rounded-md p-1 text-left transition hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      onClick={() => openDetailSheet(event)}
+            ))}
+
+            {gridDates.map((date) => {
+              const dateEvents = eventsByDate.get(date) ?? [];
+              const visibleEvents = dateEvents.slice(0, 3);
+              const hiddenEventCount = dateEvents.length - visibleEvents.length;
+              const isSelected = date === selectedDate;
+              const isToday = date === today;
+              const isCurrentMonth = isDateInMonth(date, monthDate);
+
+              return (
+                <div
+                  key={date}
+                  className={classNames(
+                    "relative min-h-28 rounded-lg border bg-background p-2 text-left align-top transition sm:min-h-32",
+                    !isCurrentMonth && "bg-muted/20 text-muted-foreground",
+                    isSelected && "border-primary ring-2 ring-primary/80",
+                    isToday && !isSelected && "border-primary/40 bg-primary/5"
+                  )}
+                >
+                  <button
+                    type="button"
+                    className="absolute inset-0 z-0 rounded-lg hover:bg-muted/40 focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    aria-label={`${formatDateLabel(date)} 선택`}
+                    onClick={() => setSelectedDate(date)}
+                  />
+                  <div className="relative z-20 flex items-center justify-between">
+                    <span
+                      className={classNames(
+                        "pointer-events-none inline-flex size-6 items-center justify-center rounded-full text-xs font-semibold",
+                        isToday && "bg-primary text-primary-foreground"
+                      )}
                     >
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span
-                            className="size-2.5 shrink-0 rounded-full"
-                            style={{ backgroundColor: event.color }}
-                          />
-                          <p className="truncate text-sm font-medium">
-                            {event.title}
-                          </p>
-                        </div>
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          {getEventTimeLabel(event)} ·{" "}
-                          {getEventDateLabel(event)}
-                        </p>
-                        {event.description ? (
-                          <p className="mt-2 line-clamp-2 text-sm text-muted-foreground">
-                            {event.description}
-                          </p>
-                        ) : null}
-                        {event.createdByUser ? (
-                          <p className="mt-2 text-xs text-muted-foreground">
-                            등록자:{" "}
-                            {event.createdByUser.name ?? event.createdBy}
-                          </p>
-                        ) : null}
-                      </div>
-                    </button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="self-start"
-                      onClick={() => openEditSheet(event)}
-                    >
-                      <Pencil />
-                      수정
-                    </Button>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
-                {canUseCalendar
-                  ? "선택한 날짜에 등록된 일정이 없습니다."
-                  : "로그인 후 일정을 확인할 수 있습니다."}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+                      {formatCellDay(date)}
+                    </span>
+                  </div>
+                  <div className="relative z-20 mt-2 flex flex-col gap-1">
+                    {visibleEvents.map((event) => (
+                      <button
+                        key={`${date}-${event.id}`}
+                        type="button"
+                        className={classNames(
+                          "block min-w-0 rounded-md text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                          event.isAllDay ? "hover:brightness-95" : "hover:bg-muted/40",
+                          !isCurrentMonth && "opacity-65"
+                        )}
+                        onClick={() => {
+                          setSelectedDate(date);
+                          openDetailSheet(event);
+                        }}
+                      >
+                        <CalendarEventChip event={event} />
+                      </button>
+                    ))}
+                    {hiddenEventCount > 0 ? (
+                      <button
+                        type="button"
+                        className="rounded-md px-1.5 py-0.5 text-left text-xs font-semibold text-muted-foreground transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        onClick={() => openEventsDialog(date, dateEvents)}
+                      >
+                        +{hiddenEventCount}
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       </section>
+
+      <CalendarEventsDialog
+        dialog={eventsDialog}
+        onClose={() => setEventsDialog(null)}
+        onOpenEvent={openDetailSheet}
+      />
 
       <CalendarEventSheet
         formError={formError}
