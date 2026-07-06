@@ -745,17 +745,7 @@ export class MeetingService {
       }
     );
 
-    try {
-      await this.enqueueMeetingReportJob(result.job);
-    } catch (error) {
-      try {
-        await this.markMeetingReportJobEnqueueFailed(result.job);
-      } catch {
-        // Preserve the safe queue error instead of leaking a secondary DB failure.
-      }
-      throw error;
-    }
-
+    await this.enqueueMeetingReportJob(result.job);
     return result.payload;
   }
 
@@ -1449,29 +1439,6 @@ export class MeetingService {
     }
 
     await this.meetingReportJobService.enqueueMeetingReportJob(job);
-  }
-
-  private async markMeetingReportJobEnqueueFailed(
-    job: MeetingReportJobPayload | null
-  ): Promise<void> {
-    if (job === null) {
-      return;
-    }
-
-    await this.database.queryOne(
-      `
-        UPDATE meeting_reports
-        SET
-          status = 'FAILED',
-          failed_step = NULL,
-          error_message = 'Meeting report job could not be enqueued',
-          updated_at = now()
-        WHERE id = $1
-          AND status = 'PROCESSING'
-        RETURNING id
-      `,
-      [job.reportId]
-    );
   }
 
   private async updateRecordingFailed(
