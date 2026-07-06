@@ -146,6 +146,10 @@ export interface GithubPullRequestFileApiItem {
 }
 
 export interface GithubPullRequestApiDetails {
+  changed_files: number;
+  additions: number;
+  deletions: number;
+  commits: number;
   mergeable: boolean | null;
 }
 
@@ -808,12 +812,26 @@ export class GithubAppClient {
       throw badRequest("GitHub pull request lookup failed");
     }
 
-    const mergeable = (payload as { mergeable?: unknown }).mergeable;
+    const pullRequest = payload as GithubPullRequestApiDetails;
+    if (
+      typeof pullRequest.changed_files !== "number" ||
+      typeof pullRequest.additions !== "number" ||
+      typeof pullRequest.deletions !== "number" ||
+      typeof pullRequest.commits !== "number"
+    ) {
+      throw badRequest("GitHub pull request lookup failed");
+    }
+
+    const mergeable = pullRequest.mergeable;
     if (mergeable !== true && mergeable !== false && mergeable !== null) {
       throw badRequest("GitHub pull request lookup failed");
     }
 
     return {
+      changed_files: pullRequest.changed_files,
+      additions: pullRequest.additions,
+      deletions: pullRequest.deletions,
+      commits: pullRequest.commits,
       mergeable
     };
   }

@@ -235,10 +235,26 @@ export class GithubSyncExecutorService {
       fetchedCount += pullRequests.length;
 
       for (const pullRequest of pullRequests) {
+        const pullRequestDetails = await this.githubAppClient.getPullRequest({
+          installationId: this.toNumber(context.installation.github_installation_id),
+          appId: context.config.appId,
+          privateKey: context.config.privateKey,
+          owner: repository.owner_login,
+          repo: repository.name,
+          pullNumber: pullRequest.number,
+          now: context.config.now
+        });
         const row = await this.upsertGithubPullRequest(
           context.workspaceId,
           repository.id,
-          pullRequest
+          {
+            ...pullRequest,
+            changed_files: pullRequestDetails.changed_files,
+            additions: pullRequestDetails.additions,
+            deletions: pullRequestDetails.deletions,
+            commits: pullRequestDetails.commits,
+            mergeable: pullRequestDetails.mergeable
+          }
         );
         if (row.created) {
           createdCount += 1;
