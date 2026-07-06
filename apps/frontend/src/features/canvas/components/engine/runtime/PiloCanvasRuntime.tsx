@@ -1,5 +1,6 @@
 "use client";
 
+import { Magnet } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -21,6 +22,8 @@ import {
 import {
   PiloTldrawCanvas,
   type PiloCanvasActions,
+  type PiloCanvasHistoryState,
+  type PiloCanvasSnapState,
 } from "../surface/PiloTldrawCanvas";
 import type {
   PiloCanvasFreeformShape,
@@ -46,6 +49,8 @@ export type CanvasBoardDetail = {
 type PiloCanvasRuntimeProps = {
   board: CanvasBoardDetail;
   canvasClient?: CanvasViewSettingApiClient | null;
+  onHistoryStateChange?: (state: PiloCanvasHistoryState) => void;
+  onSnapStateChange?: (state: PiloCanvasSnapState) => void;
   onReady: (actions: PiloCanvasActions | null) => void;
   storageMode?: "api" | "local";
 };
@@ -79,6 +84,10 @@ const DEFAULT_VIEW_SETTING_SYNC_DEBOUNCE_MS = 360;
 const DEFAULT_VIEWPORT_SHAPE_LOAD_DEBOUNCE_MS = 280;
 const DEFAULT_VIEWPORT_SHAPE_LOAD_MARGIN = 320;
 const CANVAS_SHAPE_DETAIL_MIN_ZOOM = 0.75;
+const noopCanvasHistoryStateChange = () => {};
+const initialCanvasSnapState: PiloCanvasSnapState = {
+  isSmartGuideEnabled: false,
+};
 
 function clampZoom(value: number) {
   return Math.min(8, Math.max(0.12, Math.round(value * 100) / 100));
@@ -165,6 +174,8 @@ function normalizeViewSetting(
 export function PiloCanvasRuntime({
   board,
   canvasClient = null,
+  onHistoryStateChange,
+  onSnapStateChange,
   onReady,
   storageMode = "local",
 }: PiloCanvasRuntimeProps) {
@@ -180,6 +191,8 @@ export function PiloCanvasRuntime({
     viewportX: 0,
     viewportY: 0,
   });
+  const [canvasSnapState, setCanvasSnapState] =
+    useState<PiloCanvasSnapState>(initialCanvasSnapState);
   const shapeSyncQueueRef = useRef<CanvasShapeSyncQueue | null>(null);
   const pendingViewSettingRef = useRef<CanvasViewSetting | null>(null);
   const viewSettingRef = useRef<CanvasViewSetting>(viewSetting);
@@ -537,6 +550,26 @@ export function PiloCanvasRuntime({
     [canvasActions],
   );
 
+  const handleSnapStateChange = useCallback(
+    (state: PiloCanvasSnapState) => {
+      setCanvasSnapState(state);
+      onSnapStateChange?.(state);
+    },
+    [onSnapStateChange],
+  );
+
+  const toggleSmartGuides = useCallback(() => {
+    if (!canvasActions) return;
+
+    const nextState = {
+      isSmartGuideEnabled: !canvasSnapState.isSmartGuideEnabled,
+    };
+
+    setCanvasSnapState(nextState);
+    onSnapStateChange?.(nextState);
+    canvasActions.setSmartGuidesEnabled(nextState.isSmartGuideEnabled);
+  }, [canvasActions, canvasSnapState.isSmartGuideEnabled, onSnapStateChange]);
+
   return (
     <>
       <section className="canvas-content" aria-label="캔버스 보드">
@@ -551,6 +584,10 @@ export function PiloCanvasRuntime({
           onViewChange={persistViewSetting}
           onViewportBoundsChange={loadViewportShapes}
           onShapeDetailRequest={loadShapeDetail}
+          onHistoryStateChange={
+            onHistoryStateChange ?? noopCanvasHistoryStateChange
+          }
+          onSnapStateChange={handleSnapStateChange}
         />
       </section>
 
@@ -562,10 +599,15 @@ export function PiloCanvasRuntime({
       >
         <button
           type="button"
-          aria-label="화면 맞춤"
-          onClick={() => canvasActions?.fit()}
+          aria-label="스마트가이드"
+          className={
+            canvasSnapState.isSmartGuideEnabled ? "is-active" : undefined
+          }
+          data-tooltip="스마트가이드"
+          disabled={!canvasActions}
+          onClick={toggleSmartGuides}
         >
-          맞춤
+          <Magnet />
         </button>
         <button
           type="button"

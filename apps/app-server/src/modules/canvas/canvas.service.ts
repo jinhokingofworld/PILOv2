@@ -412,6 +412,21 @@ export class CanvasService {
           $12::jsonb,
           NULL
         )
+        ON CONFLICT (id) DO UPDATE
+        SET
+          shape_type = EXCLUDED.shape_type,
+          title = EXCLUDED.title,
+          text_content = EXCLUDED.text_content,
+          x = EXCLUDED.x,
+          y = EXCLUDED.y,
+          width = EXCLUDED.width,
+          height = EXCLUDED.height,
+          rotation = EXCLUDED.rotation,
+          z_index = EXCLUDED.z_index,
+          raw_shape = EXCLUDED.raw_shape,
+          deleted_at = NULL
+        WHERE canvas_freeform_shapes.canvas_id = EXCLUDED.canvas_id
+          AND canvas_freeform_shapes.deleted_at IS NOT NULL
         RETURNING
           id,
           canvas_id,
@@ -509,6 +524,21 @@ export class CanvasService {
                 $12::jsonb,
                 NULL
               )
+              ON CONFLICT (id) DO UPDATE
+              SET
+                shape_type = EXCLUDED.shape_type,
+                title = EXCLUDED.title,
+                text_content = EXCLUDED.text_content,
+                x = EXCLUDED.x,
+                y = EXCLUDED.y,
+                width = EXCLUDED.width,
+                height = EXCLUDED.height,
+                rotation = EXCLUDED.rotation,
+                z_index = EXCLUDED.z_index,
+                raw_shape = EXCLUDED.raw_shape,
+                deleted_at = NULL
+              WHERE canvas_freeform_shapes.canvas_id = EXCLUDED.canvas_id
+                AND canvas_freeform_shapes.deleted_at IS NOT NULL
               RETURNING
                 id,
                 canvas_id,
