@@ -10,7 +10,10 @@ import type {
   PrReviewPullRequestFile,
   PrReviewRepository,
   PrReviewSession,
+  PrReviewSessionResult,
+  PrReviewSubmission,
   PrReviewSummary,
+  SubmitPrReviewSessionInput,
   UpdatePrReviewFileDecisionInput
 } from "@/features/pr-review/types";
 
@@ -392,6 +395,32 @@ export function createPrReviewApiClient({
       return requestPrReviewData<PrReviewCanvas>(
         `${reviewSessionGithubPath(workspaceId, reviewSessionId)}/canvas`,
         undefined,
+        requestOptions
+      );
+    },
+
+    async getReviewSessionResult(
+      workspaceId: string,
+      reviewSessionId: string
+    ) {
+      return requestPrReviewData<PrReviewSessionResult>(
+        `${reviewSessionGithubPath(workspaceId, reviewSessionId)}/result`,
+        undefined,
+        requestOptions
+      );
+    },
+
+    async submitReviewSession(
+      workspaceId: string,
+      reviewSessionId: string,
+      input: SubmitPrReviewSessionInput
+    ) {
+      return requestPrReviewData<PrReviewSubmission>(
+        `${reviewSessionGithubPath(workspaceId, reviewSessionId)}/submissions`,
+        {
+          body: JSON.stringify(input),
+          method: "POST"
+        },
         requestOptions
       );
     },
