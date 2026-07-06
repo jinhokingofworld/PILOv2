@@ -23,6 +23,13 @@ const liveKitHook = await readFile(
   ),
   "utf8"
 );
+const meetingReportSection = await readFile(
+  new URL(
+    "../../src/features/meeting/components/meeting-report-section.tsx",
+    import.meta.url
+  ),
+  "utf8"
+);
 const meetingPanel = await readFile(
   new URL(
     "../../src/features/meeting/components/meeting-panel.tsx",
@@ -95,6 +102,7 @@ assert.match(meetingHook, /"use client"/);
 assert.match(meetingHook, /useMeetingWorkspaceData/);
 assert.match(meetingHook, /createMeetingApiClient/);
 assert.match(meetingHook, /MeetingWorkspaceDataStatus/);
+assert.match(meetingHook, /reportsEnabled/);
 assert.match(meetingHook, /reloadCurrentMeeting/);
 assert.match(meetingHook, /reloadReports/);
 assert.match(meetingHook, /startMeeting/);
@@ -139,4 +147,31 @@ assert.match(meetingPanel, /녹음 시작/);
 assert.match(meetingPanel, /녹음 종료/);
 assert.match(meetingPanel, /현재 참여 인원/);
 assert.match(meetingPanel, /remoteAudioContainerRef/);
+assert.match(meetingPanel, /MeetingReportSection/);
+assert.match(meetingPanel, /getMeetingSectionFromHash/);
+assert.match(meetingPanel, /activeSection/);
+assert.match(meetingPanel, /hashchange/);
+assert.match(meetingPanel, /reportsEnabled: activeSection === "report"/);
+assert.match(meetingPanel, /reportStatusFilter/);
+assert.match(meetingPanel, /limit: 100/);
+assert.match(meetingPanel, /60초 이하 녹음은 회의록이 생성되지 않습니다/);
 assert.doesNotMatch(meetingPanel, /AvatarImage/);
+
+assert.match(meetingReportSection, /MeetingReportSection/);
+assert.match(meetingReportSection, /MeetingReportStatusFilter/);
+assert.match(meetingReportSection, /REPORT_POLL_INTERVAL_MS = 10000/);
+assert.match(meetingReportSection, /formatReportTitle/);
+assert.match(meetingReportSection, /createdAt/);
+assert.match(meetingReportSection, /회의록 검색/);
+assert.match(meetingReportSection, /PROCESSING/);
+assert.match(meetingReportSection, /COMPLETED/);
+assert.match(meetingReportSection, /FAILED/);
+assert.match(meetingReportSection, /Sheet/);
+assert.match(meetingReportSection, /getMeetingReport/);
+assert.match(meetingReportSection, /regenerateMeetingReport/);
+assert.match(meetingReportSection, /window\.confirm/);
+assert.match(meetingReportSection, /actionItemCandidates/);
+assert.match(meetingReportSection, /60초 이하 녹음은 회의록이 생성되지 않습니다/);
+assert.doesNotMatch(meetingReportSection, /@\/components\/ui\/badge/);
+assert.doesNotMatch(meetingReportSection, /@\/components\/ui\/tabs/);
+assert.doesNotMatch(meetingReportSection, /@\/components\/ui\/dialog/);
