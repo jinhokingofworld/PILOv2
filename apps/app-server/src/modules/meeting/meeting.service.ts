@@ -225,7 +225,7 @@ export interface StartRecordingPayload {
 export interface EndRecordingPayload {
   meeting: MeetingPayload;
   recording: RecordingPayload;
-  report: null;
+  report: MeetingReportSummaryPayload | null;
 }
 
 export interface LeaveMeetingPayload {
@@ -539,7 +539,8 @@ export class MeetingService {
     meetingId: string
   ): Promise<StartRecordingPayload> {
     await this.assertWorkspaceAccess(currentUserId, workspaceId);
-    return this.database.transaction(async (transaction) => {
+
+    const prepared = await this.database.transaction(async (transaction) => {
       const meeting = await this.findMeetingById(transaction, workspaceId, meetingId, {
         lockMeeting: true
       });
@@ -563,6 +564,7 @@ export class MeetingService {
       );
       if (runningRecording) {
         return {
+          shouldStartEgress: false as const,
           meeting: this.mapMeeting(meeting),
           recording: this.mapRecording(runningRecording)
         };
@@ -575,39 +577,69 @@ export class MeetingService {
         recordingId
       );
 
-      let livekitEgressId: string;
-      try {
-        const egress = await this.liveKitEgressService.startRoomAudioOnlyEgress({
-          livekitRoomName: meeting.livekit_room_name,
-          audioFileKey
-        });
-        livekitEgressId = egress.livekitEgressId;
-      } catch {
-        const recording = await this.insertFailedRecording(transaction, {
-          recordingId,
-          meetingId,
-          audioFileKey,
-          errorMessage: SAFE_EGRESS_START_ERROR
-        });
-
-        return {
-          meeting: this.mapMeeting(meeting),
-          recording: this.mapRecording(recording)
-        };
-      }
-
       const recording = await this.insertRunningRecording(transaction, {
         recordingId,
         meetingId,
-        livekitEgressId,
+        livekitEgressId: null,
         audioFileKey
       });
 
       return {
-        meeting: this.mapMeeting(meeting),
-        recording: this.mapRecording(recording)
+        shouldStartEgress: true as const,
+        meeting,
+        recording,
+        audioFileKey,
+        livekitRoomName: meeting.livekit_room_name
       };
     });
+
+    if (!prepared.shouldStartEgress) {
+      return {
+        meeting: prepared.meeting,
+        recording: prepared.recording
+      };
+    }
+
+    let livekitEgressId: string;
+    try {
+      const egress = await this.liveKitEgressService.startRoomAudioOnlyEgress({
+        livekitRoomName: prepared.livekitRoomName,
+        audioFileKey: prepared.audioFileKey
+      });
+      livekitEgressId = egress.livekitEgressId;
+    } catch {
+      const recording = await this.database.transaction((transaction) =>
+        this.updateRecordingFailed(
+          transaction,
+          prepared.recording,
+          SAFE_EGRESS_START_ERROR
+        )
+      );
+
+      return {
+        meeting: this.mapMeeting(prepared.meeting),
+        recording: this.mapRecording(recording)
+      };
+    }
+
+    try {
+      const recording = await this.database.transaction((transaction) =>
+        this.updateRecordingLiveKitEgressId(
+          transaction,
+          prepared.recording,
+          livekitEgressId
+        )
+      );
+
+      return {
+        meeting: this.mapMeeting(prepared.meeting),
+        recording: this.mapRecording(recording)
+      };
+    } catch (error) {
+      await this.stopStartedEgressAfterPersistenceFailure(livekitEgressId);
+      await this.markRecordingFailedAfterPersistenceFailure(prepared.recording);
+      throw error;
+    }
   }
 
   async endRecordingAndCreateReport(
@@ -645,11 +677,15 @@ export class MeetingService {
         recording.status === "RUNNING"
           ? await this.stopRunningRecording(transaction, meeting, recording)
           : recording;
+      const report = await this.ensureReportForStoppedRecording(
+        transaction,
+        stoppedRecording
+      );
 
       return {
         meeting: this.mapMeeting(meeting),
         recording: this.mapRecording(stoppedRecording),
-        report: null
+        report: report === null ? null : this.mapMeetingReportSummary(report)
       };
     });
   }
@@ -1002,7 +1038,7 @@ export class MeetingService {
     input: {
       recordingId: string;
       meetingId: string;
-      livekitEgressId: string;
+      livekitEgressId: string | null;
       audioFileKey: string;
     }
   ): Promise<RecordingRow> {
@@ -1043,6 +1079,43 @@ export class MeetingService {
     }
 
     return recording;
+  }
+
+  private async updateRecordingLiveKitEgressId(
+    executor: QueryOneExecutor,
+    recording: RecordingRow,
+    livekitEgressId: string
+  ): Promise<RecordingRow> {
+    const updatedRecording = await executor.queryOne<RecordingRow>(
+      `
+        UPDATE meeting_recordings
+        SET
+          livekit_egress_id = $2,
+          updated_at = now()
+        WHERE id = $1
+          AND status = 'RUNNING'
+          AND livekit_egress_id IS NULL
+        RETURNING
+          id,
+          meeting_id,
+          livekit_egress_id,
+          status,
+          audio_file_url,
+          audio_file_key,
+          duration_sec,
+          file_size_bytes,
+          started_at,
+          ended_at,
+          error_message
+      `,
+      [recording.id, livekitEgressId]
+    );
+
+    if (!updatedRecording) {
+      throw badRequest("Recording Egress id could not be saved");
+    }
+
+    return updatedRecording;
   }
 
   private async insertFailedRecording(
@@ -1137,6 +1210,107 @@ export class MeetingService {
     }
 
     return updatedRecording;
+  }
+
+  private async ensureReportForStoppedRecording(
+    executor: QueryOneExecutor,
+    recording: RecordingRow
+  ): Promise<MeetingReportRow | null> {
+    if (recording.status !== "COMPLETED") {
+      return null;
+    }
+
+    if (recording.duration_sec === null || Number(recording.duration_sec) <= 60) {
+      return null;
+    }
+
+    const existingReport = await this.findMeetingReportByRecordingId(
+      executor,
+      recording.meeting_id,
+      recording.id
+    );
+    if (existingReport !== null) {
+      return existingReport;
+    }
+
+    return this.insertProcessingMeetingReport(executor, recording);
+  }
+
+  private async findMeetingReportByRecordingId(
+    executor: QueryOneExecutor,
+    meetingId: string,
+    recordingId: string
+  ): Promise<MeetingReportRow | null> {
+    return executor.queryOne<MeetingReportRow>(
+      `
+        SELECT
+          id,
+          meeting_id,
+          recording_id,
+          status,
+          failed_step,
+          error_message,
+          summary,
+          discussion_points,
+          decisions,
+          action_item_candidates,
+          retry_count,
+          created_at,
+          updated_at
+        FROM meeting_reports
+        WHERE meeting_id = $1
+          AND recording_id = $2
+        LIMIT 1
+      `,
+      [meetingId, recordingId]
+    );
+  }
+
+  private async insertProcessingMeetingReport(
+    executor: QueryOneExecutor,
+    recording: RecordingRow
+  ): Promise<MeetingReportRow> {
+    const insertedReport = await executor.queryOne<MeetingReportRow>(
+      `
+        INSERT INTO meeting_reports (
+          meeting_id,
+          recording_id,
+          status
+        )
+        VALUES ($1, $2, 'PROCESSING')
+        ON CONFLICT (recording_id) DO NOTHING
+        RETURNING
+          id,
+          meeting_id,
+          recording_id,
+          status,
+          failed_step,
+          error_message,
+          summary,
+          discussion_points,
+          decisions,
+          action_item_candidates,
+          retry_count,
+          created_at,
+          updated_at
+      `,
+      [recording.meeting_id, recording.id]
+    );
+
+    if (insertedReport !== null) {
+      return insertedReport;
+    }
+
+    const existingReport = await this.findMeetingReportByRecordingId(
+      executor,
+      recording.meeting_id,
+      recording.id
+    );
+    if (existingReport === null) {
+      throw badRequest("Meeting report could not be created");
+    }
+
+    return existingReport;
   }
 
   private async updateRecordingFailed(
@@ -1454,6 +1628,32 @@ export class MeetingService {
         recording,
         SAFE_EGRESS_STOP_ERROR
       );
+    }
+  }
+
+  private async stopStartedEgressAfterPersistenceFailure(
+    livekitEgressId: string
+  ): Promise<void> {
+    try {
+      await this.liveKitEgressService.stopEgress(livekitEgressId);
+    } catch {
+      // Best effort cleanup: the original persistence error remains the API result.
+    }
+  }
+
+  private async markRecordingFailedAfterPersistenceFailure(
+    recording: RecordingRow
+  ): Promise<void> {
+    try {
+      await this.database.transaction((transaction) =>
+        this.updateRecordingFailed(
+          transaction,
+          recording,
+          SAFE_EGRESS_START_ERROR
+        )
+      );
+    } catch {
+      // Best effort cleanup: the original persistence error remains the API result.
     }
   }
 

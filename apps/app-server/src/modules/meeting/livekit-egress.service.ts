@@ -35,8 +35,11 @@ interface LiveKitEgressConfig {
 
 type LiveKitEgressClient = Pick<
   EgressClient,
-  "startRoomCompositeEgress" | "stopEgress"
+  "listEgress" | "startRoomCompositeEgress" | "stopEgress"
 >;
+
+const EGRESS_STOP_POLL_ATTEMPTS = 5;
+const EGRESS_STOP_POLL_DELAY_MS = 500;
 
 @Injectable()
 export class LiveKitEgressService {
@@ -82,11 +85,24 @@ export class LiveKitEgressService {
   async stopEgress(livekitEgressId: string): Promise<StopLiveKitEgressResult> {
     const config = this.getConfig();
     const client = this.createEgressClient(config);
+    const egressId = this.requireNonEmpty(livekitEgressId);
 
     try {
-      return this.mapStoppedEgress(
-        await client.stopEgress(this.requireNonEmpty(livekitEgressId))
-      );
+      const stopped = this.mapTerminalEgress(await client.stopEgress(egressId));
+      if (stopped !== null) {
+        return stopped;
+      }
+
+      for (let attempt = 0; attempt < EGRESS_STOP_POLL_ATTEMPTS; attempt += 1) {
+        await this.delay(EGRESS_STOP_POLL_DELAY_MS);
+        const [egress] = await client.listEgress({ egressId });
+        const terminal = egress === undefined ? null : this.mapTerminalEgress(egress);
+        if (terminal !== null) {
+          return terminal;
+        }
+      }
+
+      return this.failedResult("LiveKit Egress did not reach a terminal state");
     } catch {
       throw new Error("LiveKit Egress could not be stopped");
     }
@@ -96,7 +112,22 @@ export class LiveKitEgressService {
     return new EgressClient(config.livekitApiUrl, config.apiKey, config.apiSecret);
   }
 
-  private mapStoppedEgress(egress: EgressInfo): StopLiveKitEgressResult {
+  private mapTerminalEgress(egress: EgressInfo): StopLiveKitEgressResult | null {
+    if (egress.status === EgressStatus.EGRESS_COMPLETE) {
+      const file = egress.fileResults[0] ?? null;
+      if (file === null) {
+        return this.failedResult("LiveKit Egress completed without a file");
+      }
+
+      return {
+        status: "COMPLETED",
+        audioFileKey: this.blankToNull(file.filename),
+        durationSec: this.durationToSeconds(file.duration),
+        fileSizeBytes: this.bigintToNumber(file.size),
+        errorMessage: null
+      };
+    }
+
     if (egress.status === EgressStatus.EGRESS_FAILED) {
       return this.failedResult();
     }
@@ -109,25 +140,16 @@ export class LiveKitEgressService {
       return this.failedResult();
     }
 
-    const file = egress.fileResults[0] ?? null;
-
-    return {
-      status: "COMPLETED",
-      audioFileKey: this.blankToNull(file?.filename ?? null),
-      durationSec:
-        file === null ? null : this.durationToSeconds(file.duration),
-      fileSizeBytes: file === null ? null : this.bigintToNumber(file.size),
-      errorMessage: null
-    };
+    return null;
   }
 
-  private failedResult(): StopLiveKitEgressResult {
+  private failedResult(errorMessage = "LiveKit Egress failed"): StopLiveKitEgressResult {
     return {
       status: "FAILED",
       audioFileKey: null,
       durationSec: null,
       fileSizeBytes: null,
-      errorMessage: "LiveKit Egress failed"
+      errorMessage
     };
   }
 
@@ -193,11 +215,7 @@ export class LiveKitEgressService {
       return null;
     }
 
-    if (duration > 1_000_000_000n) {
-      return Math.round(Number(duration) / 1_000_000_000);
-    }
-
-    return Number(duration);
+    return Math.max(1, Math.ceil(Number(duration) / 1_000_000_000));
   }
 
   private bigintToNumber(value: bigint): number | null {
@@ -206,5 +224,9 @@ export class LiveKitEgressService {
     }
 
     return Number(value);
+  }
+
+  protected async delay(milliseconds: number): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, milliseconds));
   }
 }

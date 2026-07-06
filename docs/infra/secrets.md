@@ -172,7 +172,7 @@ UI Preview는 local 개발 편의 기능이며 실제 bearer session이나 Works
 | `LIVEKIT_REDIS_ADDRESS` | LiveKit Server와 Egress가 공유할 Redis address |
 | `LIVEKIT_WS_URL` | Egress가 접속할 LiveKit websocket URL |
 | `AWS_REGION` | Egress S3 upload region |
-| `LIVEKIT_RECORDINGS_BUCKET` | audio-only 녹음 파일 저장 bucket |
+| `LIVEKIT_EGRESS_S3_BUCKET` | LiveKit host에서 Egress가 audio-only 녹음 파일을 저장할 bucket. App Server의 `LIVEKIT_RECORDINGS_BUCKET` 값이 deploy script에서 이 변수로 매핑된다. |
 | `LIVEKIT_EGRESS_S3_PREFIX` | 예: `recordings/` |
 
 ## 5. GitHub Actions Secrets와 Variables

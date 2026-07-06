@@ -20,6 +20,7 @@ const originalEnv = {
 
 class FakeEgressClient {
   constructor() {
+    this.listCalls = [];
     this.startCalls = [];
     this.stopCalls = [];
     this.startResponse = {
@@ -35,6 +36,7 @@ class FakeEgressClient {
         }
       ]
     };
+    this.listResponses = [];
   }
 
   async startRoomCompositeEgress(roomName, output, options) {
@@ -45,6 +47,11 @@ class FakeEgressClient {
   async stopEgress(egressId) {
     this.stopCalls.push({ egressId });
     return this.stopResponse;
+  }
+
+  async listEgress(options) {
+    this.listCalls.push(options);
+    return this.listResponses.shift() ?? [this.stopResponse];
   }
 }
 
@@ -59,6 +66,8 @@ class TestLiveKitEgressService extends LiveKitEgressService {
     this.configs.push(config);
     return this.client;
   }
+
+  async delay() {}
 }
 
 try {
@@ -108,6 +117,59 @@ try {
     assert.equal(result.durationSec, 120);
     assert.equal(result.fileSizeBytes, 4096);
     assert.equal(result.errorMessage, null);
+  }
+
+  {
+    const client = new FakeEgressClient();
+    client.stopResponse = {
+      status: EgressStatus.EGRESS_ENDING,
+      fileResults: []
+    };
+    client.listResponses = [
+      [
+        {
+          status: EgressStatus.EGRESS_COMPLETE,
+          fileResults: [
+            {
+              filename: "recordings/rec.mp3",
+              duration: 1_000_000_000n,
+              size: 1024n
+            }
+          ]
+        }
+      ]
+    ];
+    const service = new TestLiveKitEgressService(client);
+    const result = await service.stopEgress("egress-1");
+
+    assert.equal(client.listCalls[0].egressId, "egress-1");
+    assert.equal(result.status, "COMPLETED");
+    assert.equal(result.audioFileKey, "recordings/rec.mp3");
+    assert.equal(result.durationSec, 1);
+    assert.equal(result.fileSizeBytes, 1024);
+  }
+
+  {
+    const client = new FakeEgressClient();
+    client.stopResponse = {
+      status: EgressStatus.EGRESS_ACTIVE,
+      fileResults: []
+    };
+    client.listResponses = [
+      [{ status: EgressStatus.EGRESS_ACTIVE, fileResults: [] }],
+      [{ status: EgressStatus.EGRESS_ACTIVE, fileResults: [] }],
+      [{ status: EgressStatus.EGRESS_ACTIVE, fileResults: [] }],
+      [{ status: EgressStatus.EGRESS_ACTIVE, fileResults: [] }],
+      [{ status: EgressStatus.EGRESS_ACTIVE, fileResults: [] }]
+    ];
+    const service = new TestLiveKitEgressService(client);
+    const result = await service.stopEgress("egress-1");
+
+    assert.equal(result.status, "FAILED");
+    assert.equal(
+      result.errorMessage,
+      "LiveKit Egress did not reach a terminal state"
+    );
   }
 
   {
