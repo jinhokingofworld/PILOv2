@@ -102,6 +102,28 @@ function readApiErrorMessage(payload: unknown) {
     };
   }
 
+  if (isRecord(payload)) {
+    if (typeof payload.message === "string") {
+      return {
+        code: typeof payload.error === "string" ? payload.error : undefined,
+        message: payload.message
+      };
+    }
+
+    if (Array.isArray(payload.message)) {
+      const message = payload.message
+        .filter((item): item is string => typeof item === "string")
+        .join(", ");
+
+      if (message) {
+        return {
+          code: typeof payload.error === "string" ? payload.error : undefined,
+          message
+        };
+      }
+    }
+  }
+
   return null;
 }
 
