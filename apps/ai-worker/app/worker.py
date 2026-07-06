@@ -1,6 +1,8 @@
 import os
 from dataclasses import dataclass
 
+from app.meeting_report_runtime import run_worker
+
 
 @dataclass(frozen=True)
 class WorkerSettings:
@@ -24,3 +26,11 @@ def supported_jobs() -> list[str]:
         "meeting_transcription",
         "meeting_report",
     ]
+
+
+def main() -> None:
+    run_worker()
+
+
+if __name__ == "__main__":
+    main()
