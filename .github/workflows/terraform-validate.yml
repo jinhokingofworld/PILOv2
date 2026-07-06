@@ -18,7 +18,7 @@ env:
   TF_WORKING_DIR: infra/envs/dev
 
 jobs:
-  validate:
+  terraform:
     if: ${{ github.event_name == 'pull_request' }}
     runs-on: ubuntu-latest
 
