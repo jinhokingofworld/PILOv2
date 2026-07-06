@@ -437,6 +437,29 @@ Binary 또는 large diff 응답:
 서버는 `review_files.current_status/comment`를 갱신하고
 `file_review_decisions` row를 추가한다.
 
+PATCH response는 Review File 상세 조회와 같은 payload를 반환한다.
+
+Decision history response:
+
+```json
+{
+  "success": true,
+  "data": {
+    "reviewFileId": "review_file_1",
+    "decisions": [
+      {
+        "id": "decision_1",
+        "reviewFileId": "review_file_1",
+        "status": "discussion_needed",
+        "comment": "Need to confirm empty state behavior.",
+        "reviewedByUserId": "user_1",
+        "reviewedAt": "2026-01-01T00:00:00.000Z"
+      }
+    ]
+  }
+}
+```
+
 ## GitHub Review 제출
 
 ```json
