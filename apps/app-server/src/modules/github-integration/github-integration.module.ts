@@ -5,6 +5,7 @@ import { WorkspaceModule } from "../workspace/workspace.module";
 import { GithubAppClient } from "./github-app.client";
 import { GithubAppInstallationService } from "./github-app-installation.service";
 import { GithubAppInstallationStateService } from "./github-app-installation-state.service";
+import { GithubCallbackStateService } from "./github-callback-state.service";
 import { GithubIntegrationConfigService } from "./github-integration-config.service";
 import { GithubIntegrationController } from "./github-integration.controller";
 import { GithubIntegrationService } from "./github-integration.service";
@@ -29,6 +30,7 @@ import { GithubWebhookService } from "./github-webhook.service";
     GithubAppClient,
     GithubAppInstallationService,
     GithubAppInstallationStateService,
+    GithubCallbackStateService,
     GithubOAuthClient,
     GithubOAuthIntegrationService,
     GithubOAuthStateService,
