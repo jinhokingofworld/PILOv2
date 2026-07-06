@@ -18,6 +18,8 @@ locals {
     "LIVEKIT_API_KEY",
     "LIVEKIT_API_SECRET",
     "LIVEKIT_URL",
+    "LIVEKIT_WS_URL",
+    "LIVEKIT_RECORDINGS_BUCKET",
     "OPENAI_API_KEY",
   ]
 
@@ -29,8 +31,6 @@ locals {
     "GITHUB_USER_OAUTH_CLIENT_ID",
     "GITHUB_USER_OAUTH_CLIENT_SECRET",
     "GITHUB_TOKEN_ENCRYPTION_KEY",
-    "LIVEKIT_WS_URL",
-    "LIVEKIT_RECORDINGS_BUCKET",
   ]))
 
   realtime_server_ecs_secret_names = [

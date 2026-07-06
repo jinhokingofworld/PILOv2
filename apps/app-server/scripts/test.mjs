@@ -53,6 +53,10 @@ const liveKitTokenService = await readSource(
 const workspaceMeetingConstraintMigration = await readSource(
   "../../../db/migrations/006_update_workspace_and_meeting_recording_constraints.sql"
 );
+const devTerraformMain = await readSource("../../../infra/envs/dev/main.tf");
+const terraformSecretsModule = await readSource(
+  "../../../infra/modules/secrets/main.tf"
+);
 
 assert.match(main, /setGlobalPrefix\("api\/v1"\)/);
 assert.match(main, /enableCors/);
@@ -211,6 +215,16 @@ assert.match(liveKitTokenService, /canSubscribe:\s*true/);
 assert.match(liveKitTokenService, /LIVEKIT_API_KEY/);
 assert.match(liveKitTokenService, /LIVEKIT_API_SECRET/);
 assert.match(liveKitTokenService, /LIVEKIT_URL/);
+assert.match(
+  terraformSecretsModule,
+  /app_server_ecs_secret_names = \[[^\]]*"LIVEKIT_WS_URL"/
+);
+assert.match(
+  terraformSecretsModule,
+  /app_server_ecs_secret_names = \[[^\]]*"LIVEKIT_RECORDINGS_BUCKET"/
+);
+assert.match(devTerraformMain, /LIVEKIT_RECORDING_MODE\s*=\s*"room_audio_only"/);
+assert.match(devTerraformMain, /LIVEKIT_EGRESS_S3_PREFIX\s*=\s*"recordings\/meetings"/);
 
 await import("./meeting/livekit-egress.test.mjs");
 await import("./auth/test.mjs");

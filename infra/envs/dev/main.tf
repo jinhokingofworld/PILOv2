@@ -191,6 +191,8 @@ module "ecs" {
         FRONTEND_URL                  = local.frontend_domain == "" ? "" : "https://${local.frontend_domain}"
         API_PUBLIC_ORIGIN             = local.api_domain == "" ? "http://${module.alb.alb_dns_name}" : "https://${local.api_domain}"
         API_BASE_PATH                 = "/api/v1"
+        LIVEKIT_RECORDING_MODE        = "room_audio_only"
+        LIVEKIT_EGRESS_S3_PREFIX      = "recordings/meetings"
       }
       secrets = module.secrets.app_server_ecs_secrets
     }
