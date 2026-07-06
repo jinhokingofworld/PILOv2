@@ -103,6 +103,84 @@ export interface BoardIssueCardPayload {
   updatedAt: string;
 }
 
+export interface BoardProjectFieldPayload {
+  fieldName: string;
+  fieldDataType: string | null;
+  textValue?: string;
+  numberValue?: number;
+  dateValue?: string;
+  singleSelectOptionId?: string;
+  singleSelectName?: string;
+  iterationId?: string;
+  iterationTitle?: string;
+}
+
+export interface BoardIssueDetailPayload extends BoardIssueCardPayload {
+  body: string | null;
+  milestone: Record<string, unknown> | null;
+  projectFields: BoardProjectFieldPayload[];
+}
+
+export interface BoardRelatedPullRequestPayload {
+  id: string;
+  repositoryId: string;
+  githubPullRequestId: number | null;
+  githubNodeId: string | null;
+  githubNumber: number;
+  title: string;
+  authorName: string | null;
+  authorAvatarUrl: string | null;
+  state: BoardIssueState;
+  draft: boolean;
+  mergeable: boolean | null;
+  createdAtGithub: string | null;
+  updatedAtGithub: string | null;
+  headBranch: string | null;
+  baseBranch: string | null;
+  headSha: string | null;
+  baseSha: string | null;
+  changedFilesCount: number;
+  additions: number;
+  deletions: number;
+  commitsCount: number;
+  commentsCount: number;
+  reviewCommentsCount: number;
+  githubUrl: string;
+  lastSyncedAt: string | null;
+}
+
+export interface BoardFilterColumnOptionPayload {
+  id: string;
+  name: string;
+  normalizedName: string | null;
+  count: number;
+}
+
+export interface BoardFilterStateOptionPayload {
+  value: BoardIssueState;
+  label: "Open" | "Closed";
+  count: number;
+}
+
+export interface BoardFilterAssigneeOptionPayload {
+  login: string;
+  avatarUrl: string | null;
+  count: number;
+}
+
+export interface BoardFilterLabelOptionPayload {
+  name: string;
+  color: string | null;
+  count: number;
+}
+
+export interface BoardFilterOptionsPayload {
+  columns: BoardFilterColumnOptionPayload[];
+  states: BoardFilterStateOptionPayload[];
+  assignees: BoardFilterAssigneeOptionPayload[];
+  labels: BoardFilterLabelOptionPayload[];
+}
+
 export interface CreateBoardResult {
   board: BoardPayload;
   statusCode: 200 | 201;

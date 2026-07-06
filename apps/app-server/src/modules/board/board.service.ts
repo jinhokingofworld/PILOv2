@@ -1,13 +1,17 @@
 import { Injectable } from "@nestjs/common";
 import { BoardHydrationService } from "./board-hydration.service";
+import { BoardIssueReadService } from "./board-issue-read.service";
 import { BoardReadService } from "./board-read.service";
 import type { ListBoardIssuesQuery, ListBoardsQuery } from "./dto";
 import type {
   BoardColumnPayload,
   BoardDetailPayload,
+  BoardFilterOptionsPayload,
   BoardIssueCardPayload,
+  BoardIssueDetailPayload,
   BoardPaginatedPayload,
   BoardPayload,
+  BoardRelatedPullRequestPayload,
   CreateBoardResult
 } from "./types";
 
@@ -20,7 +24,8 @@ export interface BoardModuleInfo {
 export class BoardService {
   constructor(
     private readonly boardHydrationService: BoardHydrationService,
-    private readonly boardReadService: BoardReadService
+    private readonly boardReadService: BoardReadService,
+    private readonly boardIssueReadService: BoardIssueReadService
   ) {}
 
   getModuleInfo(): BoardModuleInfo {
@@ -77,6 +82,46 @@ export class BoardService {
       workspaceId,
       boardId,
       query
+    );
+  }
+
+  async getBoardIssue(
+    currentUserId: string,
+    workspaceId: string,
+    boardId: string,
+    issueId: string
+  ): Promise<BoardIssueDetailPayload> {
+    return this.boardIssueReadService.getBoardIssue(
+      currentUserId,
+      workspaceId,
+      boardId,
+      issueId
+    );
+  }
+
+  async listBoardIssuePullRequests(
+    currentUserId: string,
+    workspaceId: string,
+    boardId: string,
+    issueId: string
+  ): Promise<BoardRelatedPullRequestPayload[]> {
+    return this.boardIssueReadService.listBoardIssuePullRequests(
+      currentUserId,
+      workspaceId,
+      boardId,
+      issueId
+    );
+  }
+
+  async getBoardFilterOptions(
+    currentUserId: string,
+    workspaceId: string,
+    boardId: string
+  ): Promise<BoardFilterOptionsPayload> {
+    return this.boardIssueReadService.getBoardFilterOptions(
+      currentUserId,
+      workspaceId,
+      boardId
     );
   }
 }

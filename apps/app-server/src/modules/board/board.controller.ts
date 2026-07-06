@@ -17,9 +17,12 @@ import type { ListBoardIssuesQuery, ListBoardsQuery } from "./dto";
 import type {
   BoardColumnPayload,
   BoardDetailPayload,
+  BoardFilterOptionsPayload,
   BoardIssueCardPayload,
+  BoardIssueDetailPayload,
   BoardPaginatedPayload,
-  BoardPayload
+  BoardPayload,
+  BoardRelatedPullRequestPayload
 } from "./types";
 
 @Controller("workspaces/:workspaceId/boards")
@@ -103,5 +106,54 @@ export class BoardController {
     );
 
     return apiResponse(issues);
+  }
+
+  @Get(":boardId/issues/:issueId")
+  async getBoardIssue(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("boardId") boardId: string,
+    @Param("issueId") issueId: string
+  ): Promise<ApiSuccessResponse<BoardIssueDetailPayload>> {
+    const issue = await this.boardService.getBoardIssue(
+      currentUserId,
+      workspaceId,
+      boardId,
+      issueId
+    );
+
+    return apiResponse(issue);
+  }
+
+  @Get(":boardId/issues/:issueId/pull-requests")
+  async listBoardIssuePullRequests(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("boardId") boardId: string,
+    @Param("issueId") issueId: string
+  ): Promise<ApiSuccessResponse<BoardRelatedPullRequestPayload[]>> {
+    const pullRequests = await this.boardService.listBoardIssuePullRequests(
+      currentUserId,
+      workspaceId,
+      boardId,
+      issueId
+    );
+
+    return apiResponse(pullRequests);
+  }
+
+  @Get(":boardId/filter-options")
+  async getBoardFilterOptions(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("boardId") boardId: string
+  ): Promise<ApiSuccessResponse<BoardFilterOptionsPayload>> {
+    const options = await this.boardService.getBoardFilterOptions(
+      currentUserId,
+      workspaceId,
+      boardId
+    );
+
+    return apiResponse(options);
   }
 }

@@ -28,6 +28,9 @@ const serviceFile = await readSource("../../src/modules/board/board.service.ts")
 const readServiceFile = await readSource(
   "../../src/modules/board/board-read.service.ts"
 );
+const issueReadServiceFile = await readSource(
+  "../../src/modules/board/board-issue-read.service.ts"
+);
 const readQueriesFile = await readSource(
   "../../src/modules/board/queries/board-read.queries.ts"
 );
@@ -49,6 +52,7 @@ assert.match(moduleFile, /imports: \[[\s\S]*WorkspaceModule[\s\S]*\]/);
 assert.match(moduleFile, /controllers: \[BoardController\]/);
 assert.match(moduleFile, /providers: \[[\s\S]*BoardService[\s\S]*\]/);
 assert.match(moduleFile, /providers: \[[\s\S]*BoardHydrationService[\s\S]*\]/);
+assert.match(moduleFile, /providers: \[[\s\S]*BoardIssueReadService[\s\S]*\]/);
 assert.match(moduleFile, /providers: \[[\s\S]*BoardReadService[\s\S]*\]/);
 assert.match(moduleFile, /providers: \[[\s\S]*BoardReadQueries[\s\S]*\]/);
 assert.match(moduleFile, /exports: \[BoardService\]/);
@@ -61,6 +65,9 @@ assert.match(controllerFile, /@Get\(\)/);
 assert.match(controllerFile, /@Get\(":boardId"\)/);
 assert.match(controllerFile, /@Get\(":boardId\/columns"\)/);
 assert.match(controllerFile, /@Get\(":boardId\/issues"\)/);
+assert.match(controllerFile, /@Get\(":boardId\/issues\/:issueId"\)/);
+assert.match(controllerFile, /@Get\(":boardId\/issues\/:issueId\/pull-requests"\)/);
+assert.match(controllerFile, /@Get\(":boardId\/filter-options"\)/);
 assert.match(controllerFile, /@CurrentUserId\(\) currentUserId: string/);
 assert.match(controllerFile, /@Param\("workspaceId"\) workspaceId: string/);
 assert.match(controllerFile, /@Body\(\) body: unknown/);
@@ -74,6 +81,9 @@ assert.match(serviceFile, /listBoards/);
 assert.match(serviceFile, /getBoard/);
 assert.match(serviceFile, /listBoardColumns/);
 assert.match(serviceFile, /listBoardIssues/);
+assert.match(serviceFile, /getBoardIssue/);
+assert.match(serviceFile, /listBoardIssuePullRequests/);
+assert.match(serviceFile, /getBoardFilterOptions/);
 
 assert.match(readServiceFile, /class BoardReadService/);
 assert.match(readServiceFile, /assertWorkspaceAccess/);
@@ -81,6 +91,12 @@ assert.match(readServiceFile, /BoardReadQueries/);
 assert.doesNotMatch(readServiceFile, /FROM boards b/);
 assert.doesNotMatch(readServiceFile, /FROM board_columns bc/);
 assert.doesNotMatch(readServiceFile, /FROM pilo_issues/);
+
+assert.match(issueReadServiceFile, /class BoardIssueReadService/);
+assert.match(issueReadServiceFile, /findBoardIssueDetail/);
+assert.match(issueReadServiceFile, /listRelatedPullRequests/);
+assert.match(issueReadServiceFile, /getBoardFilterOptions/);
+assert.doesNotMatch(issueReadServiceFile, /FROM pilo_issues/);
 
 assert.match(readQueriesFile, /class BoardReadQueries/);
 assert.match(readQueriesFile, /FROM boards b/);
@@ -107,3 +123,4 @@ execFileSync(process.execPath, [tscScript, "-p", "tsconfig.build.json"], {
 await import("./create-hydrate.test.mjs");
 await import("./read.test.mjs");
 await import("./issues.test.mjs");
+await import("./issue-detail.test.mjs");
