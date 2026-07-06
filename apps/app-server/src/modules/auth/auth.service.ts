@@ -4,7 +4,6 @@ import { QueryResultRow } from "pg";
 import { badRequest } from "../../common/api-error";
 import { SessionService } from "../../common/session.service";
 import { DatabaseService } from "../../database/database.service";
-import { GithubTokenEncryptionService } from "../github-integration/github-token-encryption.service";
 import { WorkspaceService } from "../workspace/workspace.service";
 import { AuthConfigService } from "./auth-config.service";
 import { GithubLoginOAuthClient, GithubLoginUserProfile } from "./github-login-oauth.client";
@@ -31,7 +30,7 @@ interface LoginSessionPayload {
 }
 
 const GOOGLE_LOGIN_SCOPE = "openid email profile";
-const GITHUB_LOGIN_SCOPE = "repo read:user user:email";
+const GITHUB_LOGIN_SCOPE = "read:user user:email";
 const ACCESS_TOKEN_BYTE_LENGTH = 32;
 const MAX_RETURN_URL_LENGTH = 2048;
 
@@ -44,7 +43,6 @@ export class AuthService {
     private readonly stateService: OAuthStateService,
     private readonly googleOAuthClient: GoogleOAuthClient,
     private readonly githubOAuthClient: GithubLoginOAuthClient,
-    private readonly githubTokenEncryptionService: GithubTokenEncryptionService,
     private readonly workspaceService: WorkspaceService
   ) {}
 
@@ -176,18 +174,8 @@ export class AuthService {
       redirectUri: this.configService.getCallbackUrl("github", config)
     });
     const profile = await this.githubOAuthClient.getUserProfile(token.accessToken);
-    const encryptedToken = this.githubTokenEncryptionService.encryptToken(
-      token.accessToken,
-      {
-        ...config,
-        tokenEncryptionKey: this.configService.getGithubTokenEncryptionKey()
-      }
-    );
 
-    return this.upsertGithubUser(profile, {
-      encryptedToken,
-      scope: token.scope
-    });
+    return this.upsertGithubUser(profile);
   }
 
   private async upsertGoogleUser(profile: GoogleUserProfile): Promise<string> {
@@ -254,13 +242,7 @@ export class AuthService {
     }
   }
 
-  private async upsertGithubUser(
-    profile: GithubLoginUserProfile,
-    token: {
-      encryptedToken: string;
-      scope: string | null;
-    }
-  ): Promise<string> {
+  private async upsertGithubUser(profile: GithubLoginUserProfile): Promise<string> {
     try {
       const existingUser = await this.database.queryOne<UserIdRow>(
         `
@@ -283,11 +265,7 @@ export class AuthService {
               github_login = $3,
               name = COALESCE($4, $3, name),
               email = COALESCE(email, $5),
-              avatar_url = COALESCE($6, avatar_url),
-              github_access_token_encrypted = $7,
-              github_token_scope = $8,
-              github_connected_at = now(),
-              github_revoked_at = NULL
+              avatar_url = COALESCE($6, avatar_url)
             WHERE id = $1
             RETURNING id
           `,
@@ -297,9 +275,7 @@ export class AuthService {
             profile.login,
             profile.name,
             profile.email,
-            profile.avatarUrl,
-            token.encryptedToken,
-            token.scope
+            profile.avatarUrl
           ]
         );
 
@@ -317,13 +293,9 @@ export class AuthService {
             email,
             avatar_url,
             github_user_id,
-            github_login,
-            github_access_token_encrypted,
-            github_token_scope,
-            github_connected_at,
-            github_revoked_at
+            github_login
           )
-          VALUES ($1, $2, $3, $4, $5, $6, $7, now(), NULL)
+          VALUES ($1, $2, $3, $4, $5)
           RETURNING id
         `,
         [
@@ -331,9 +303,7 @@ export class AuthService {
           profile.email,
           profile.avatarUrl,
           profile.id,
-          profile.login,
-          token.encryptedToken,
-          token.scope
+          profile.login
         ]
       );
 

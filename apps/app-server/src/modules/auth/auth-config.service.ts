@@ -54,13 +54,6 @@ export class AuthConfigService {
     return this.normalizeOrigin(process.env.FRONTEND_URL ?? DEFAULT_FRONTEND_URL);
   }
 
-  getGithubTokenEncryptionKey(): string {
-    return this.requireConfig(
-      process.env.GITHUB_TOKEN_ENCRYPTION_KEY,
-      "GitHub token encryption is not configured"
-    );
-  }
-
   getCallbackUrl(provider: LoginProvider, config: AuthProviderRuntimeConfig): string {
     return `${config.apiPublicOrigin}${config.apiBasePath}/auth/${provider}/callback`;
   }

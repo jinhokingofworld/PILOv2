@@ -35,7 +35,7 @@ comment, PR merge/close, ProjectV2 write는 이 문서의 범위가 아니다.
 - Diff 응답은 GitHub Integration을 통해 PR 변경 파일과 patch 정보를 조회해 만든다.
 - PR 리뷰 canvas는 `review_flows`, `review_files`, `review_flow_files`에서 생성하는 view model이다. 자유형 `canvas` 테이블에 저장하지 않는다.
 - `review_flow_files`는 같은 review session에 속한 `review_flows`와 `review_files`만 연결한다.
-- GitHub Review 제출은 현재 사용자의 OAuth token으로 수행하며 review body만 제출한다.
+- GitHub Review 제출은 GitHub Integration에서 연결한 현재 사용자의 GitHub App user OAuth token으로 수행하며 review body만 제출한다.
 - 현재 GitHub PR head SHA가 session의 `headSha`와 다르면 제출을 막는다.
 
 ## 상태값
@@ -448,7 +448,7 @@ Binary 또는 large diff 응답:
 
 서버 규칙:
 
-- 사용자의 GitHub OAuth 연결 여부를 확인한다.
+- 사용자의 GitHub App user OAuth 연결 여부를 확인한다.
 - 현재 PR head SHA를 다시 조회해 session `headSha`와 비교한다.
 - GitHub Review body만 제출한다.
 - Line comment payload는 보내지 않는다.
