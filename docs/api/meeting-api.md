@@ -502,9 +502,11 @@ POST /api/v1/workspaces/{workspaceId}/meeting-reports/{reportId}/regeneration-jo
 
 Request body 없음.
 
-`FAILED` 상태의 MeetingReport만 재생성을 요청할 수 있다. 요청이 성공하면
-MeetingReport는 다시 `PROCESSING` 상태가 되고 `retryCount`가 증가한다.
-MVP 응답에는 별도 `jobId`를 포함하지 않는다.
+`FAILED` 상태의 MeetingReport만 재생성을 요청할 수 있다. 단, 연결된 Recording이
+`COMPLETED` 상태이고 `audioFileKey`가 있어 AI Worker가 다시 처리할 수 있는 경우만
+허용한다. 요청이 성공하면 MeetingReport는 다시 `PROCESSING` 상태가 되고
+`retryCount`가 증가한다. 기존 실패 정보와 이전 산출물은 초기화한다. MVP 응답에는
+별도 `jobId`를 포함하지 않고, 긴 `transcriptText`도 포함하지 않는다.
 
 Response `data`:
 
@@ -517,6 +519,7 @@ Response `data`:
 | HTTP | Code | 상황 |
 | --- | --- | --- |
 | `400` | `BAD_REQUEST` | `PROCESSING` 또는 `COMPLETED` 상태의 MeetingReport 재생성 요청 |
+| `400` | `BAD_REQUEST` | Recording이 완료되지 않았거나 `audioFileKey`가 없어 재생성할 수 없음 |
 | `401` | `UNAUTHORIZED` | 인증 없음 |
 | `403` | `FORBIDDEN` | Workspace 접근 불가 |
 | `404` | `NOT_FOUND` | 회의록을 찾을 수 없음 |

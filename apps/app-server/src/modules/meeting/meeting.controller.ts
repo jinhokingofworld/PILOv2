@@ -20,9 +20,9 @@ import {
   MeetingDetailPayload,
   MeetingReportDetailResponsePayload,
   MeetingReportListPayload,
+  MeetingReportRegenerationPayload,
   MeetingService,
   ParticipantListPayload,
-  PendingMeetingPayload,
   RecordingListPayload,
   StartRecordingPayload,
   StartMeetingPayload
@@ -220,7 +220,7 @@ export class MeetingController {
     @CurrentUserId() currentUserId: string,
     @Param("workspaceId") workspaceId: string,
     @Param("reportId") reportId: string
-  ): Promise<ApiSuccessResponse<PendingMeetingPayload>> {
+  ): Promise<ApiSuccessResponse<MeetingReportRegenerationPayload>> {
     const result = await this.meetingService.requestReportRegeneration(
       currentUserId,
       workspaceId,

@@ -19,8 +19,6 @@ import {
   MeetingReportJobService
 } from "./meeting-report-job.service";
 
-export type PendingMeetingPayload = never;
-
 type RecordingStatus = "RUNNING" | "COMPLETED" | "FAILED";
 type MeetingReportStatus = "PROCESSING" | "COMPLETED" | "FAILED";
 type MeetingReportFailedStep = "RECORDING" | "STT" | "LLM";
@@ -119,6 +117,11 @@ interface MeetingReportDetailRow extends MeetingReportRow {
   transcript_text: string | null;
 }
 
+interface MeetingReportRegenerationRow extends MeetingReportDetailRow {
+  recording_status: RecordingStatus;
+  recording_audio_file_key: string | null;
+}
+
 interface ActiveParticipantCountRow extends QueryResultRow {
   active_participant_count: number | string;
 }
@@ -157,6 +160,12 @@ interface MeetingReportPreparation {
 interface EndRecordingTransactionResult {
   payload: EndRecordingPayload;
   job: MeetingReportJobPayload | null;
+}
+
+interface MeetingReportRegenerationTransactionResult {
+  payload: MeetingReportRegenerationPayload;
+  job: MeetingReportJobPayload;
+  previousReport: MeetingReportRegenerationRow;
 }
 
 interface StartMeetingDraft {
@@ -290,6 +299,10 @@ export interface MeetingReportListPayload {
 
 export interface MeetingReportDetailResponsePayload {
   report: MeetingReportDetailPayload;
+}
+
+export interface MeetingReportRegenerationPayload {
+  report: MeetingReportSummaryPayload;
 }
 
 const MAIN_MEETING_ROOM = "MAIN_MEETING_ROOM";
@@ -849,12 +862,234 @@ export class MeetingService {
   async requestReportRegeneration(
     currentUserId: string,
     workspaceId: string,
-    _reportId: string
-  ): Promise<PendingMeetingPayload> {
+    reportId: string
+  ): Promise<MeetingReportRegenerationPayload> {
     await this.assertWorkspaceAccess(currentUserId, workspaceId);
-    return this.pendingEndpoint(
-      "POST /workspaces/{workspaceId}/meeting-reports/{reportId}/regeneration-jobs"
+
+    const result =
+      await this.database.transaction<MeetingReportRegenerationTransactionResult>(
+        async (transaction) => {
+          const report = await this.findMeetingReportForRegeneration(
+            transaction,
+            workspaceId,
+            reportId
+          );
+
+          if (report === null) {
+            throw notFound("Meeting report not found");
+          }
+
+          const audioFileKey = this.assertReportCanBeRegenerated(report);
+          const updatedReport = await this.updateMeetingReportForRegeneration(
+            transaction,
+            report.id
+          );
+
+          return {
+            payload: {
+              report: this.mapMeetingReportSummary(updatedReport)
+            },
+            job: this.buildMeetingReportJobPayloadFromAudioFileKey(
+              updatedReport,
+              audioFileKey
+            ),
+            previousReport: report
+          };
+        }
+      );
+
+    try {
+      await this.meetingReportJobService.enqueueMeetingReportJob(result.job);
+    } catch (error) {
+      await this.restoreMeetingReportAfterRegenerationEnqueueFailure(
+        result.previousReport
+      );
+      throw error;
+    }
+
+    return result.payload;
+  }
+
+  private assertReportCanBeRegenerated(
+    report: MeetingReportRegenerationRow
+  ): string {
+    if (report.status === "PROCESSING") {
+      throw badRequest("Meeting report is already processing");
+    }
+
+    if (report.status === "COMPLETED") {
+      throw badRequest("Completed meeting report cannot be regenerated");
+    }
+
+    if (report.status !== "FAILED") {
+      throw badRequest("Meeting report cannot be regenerated");
+    }
+
+    if (
+      report.recording_status !== "COMPLETED" ||
+      report.recording_audio_file_key === null ||
+      !report.recording_audio_file_key.trim()
+    ) {
+      throw badRequest("Meeting report audio file is unavailable");
+    }
+
+    return report.recording_audio_file_key.trim();
+  }
+
+  private async findMeetingReportForRegeneration(
+    executor: QueryOneExecutor,
+    workspaceId: string,
+    reportId: string
+  ): Promise<MeetingReportRegenerationRow | null> {
+    if (!UUID_PATTERN.test(reportId)) {
+      return null;
+    }
+
+    return executor.queryOne<MeetingReportRegenerationRow>(
+      `
+        SELECT
+          meeting_reports.id,
+          meeting_reports.meeting_id,
+          meeting_reports.recording_id,
+          meeting_reports.status,
+          meeting_reports.failed_step,
+          meeting_reports.error_message,
+          meeting_reports.transcript_text,
+          meeting_reports.summary,
+          meeting_reports.discussion_points,
+          meeting_reports.decisions,
+          meeting_reports.action_item_candidates,
+          meeting_reports.retry_count,
+          meeting_reports.created_at,
+          meeting_reports.updated_at,
+          meeting_recordings.status AS recording_status,
+          meeting_recordings.audio_file_key AS recording_audio_file_key
+        FROM meeting_reports
+        JOIN meetings
+          ON meetings.id = meeting_reports.meeting_id
+        JOIN meeting_recordings
+          ON meeting_recordings.id = meeting_reports.recording_id
+          AND meeting_recordings.meeting_id = meeting_reports.meeting_id
+        WHERE meetings.workspace_id = $1
+          AND meeting_reports.id = $2
+        FOR UPDATE OF meeting_reports
+      `,
+      [workspaceId, reportId]
     );
+  }
+
+  private async updateMeetingReportForRegeneration(
+    executor: QueryOneExecutor,
+    reportId: string
+  ): Promise<MeetingReportRow> {
+    const updatedReport = await executor.queryOne<MeetingReportRow>(
+      `
+        UPDATE meeting_reports
+        SET
+          status = 'PROCESSING',
+          failed_step = NULL,
+          error_message = NULL,
+          transcript_text = NULL,
+          summary = NULL,
+          discussion_points = NULL,
+          decisions = NULL,
+          action_item_candidates = '[]'::jsonb,
+          retry_count = retry_count + 1,
+          updated_at = now()
+        WHERE id = $1
+          AND status = 'FAILED'
+        RETURNING
+          id,
+          meeting_id,
+          recording_id,
+          status,
+          failed_step,
+          error_message,
+          summary,
+          discussion_points,
+          decisions,
+          action_item_candidates,
+          retry_count,
+          created_at,
+          updated_at
+      `,
+      [reportId]
+    );
+
+    if (updatedReport === null) {
+      throw badRequest("Meeting report could not be regenerated");
+    }
+
+    return updatedReport;
+  }
+
+  private async restoreMeetingReportAfterRegenerationEnqueueFailure(
+    report: MeetingReportRegenerationRow
+  ): Promise<void> {
+    await this.database.transaction(async (transaction) => {
+      const restoredReport = await transaction.queryOne<MeetingReportRow>(
+        `
+          UPDATE meeting_reports
+          SET
+            status = $2::meeting_report_status,
+            failed_step = $3::meeting_report_failed_step,
+            error_message = $4,
+            transcript_text = $5,
+            summary = $6,
+            discussion_points = $7,
+            decisions = $8,
+            action_item_candidates = $9::jsonb,
+            retry_count = $10,
+            updated_at = now()
+          WHERE id = $1
+            AND status = 'PROCESSING'
+          RETURNING
+            id,
+            meeting_id,
+            recording_id,
+            status,
+            failed_step,
+            error_message,
+            summary,
+            discussion_points,
+            decisions,
+            action_item_candidates,
+            retry_count,
+            created_at,
+            updated_at
+        `,
+        [
+          report.id,
+          report.status,
+          report.failed_step,
+          report.error_message,
+          report.transcript_text,
+          report.summary,
+          report.discussion_points,
+          report.decisions,
+          JSON.stringify(report.action_item_candidates ?? []),
+          Number(report.retry_count)
+        ]
+      );
+
+      if (restoredReport === null) {
+        throw badRequest("Meeting report regeneration could not be restored");
+      }
+    });
+  }
+
+  private buildMeetingReportJobPayloadFromAudioFileKey(
+    report: MeetingReportRow,
+    audioFileKey: string
+  ): MeetingReportJobPayload {
+    return {
+      jobType: "meeting_report",
+      reportId: report.id,
+      meetingId: report.meeting_id,
+      recordingId: report.recording_id,
+      audioFileKey,
+      retryCount: Number(report.retry_count)
+    };
   }
 
   private async assertWorkspaceAccess(
@@ -1421,14 +1656,10 @@ export class MeetingService {
       throw badRequest("Meeting report job could not be created");
     }
 
-    return {
-      jobType: "meeting_report",
-      reportId: report.id,
-      meetingId: report.meeting_id,
-      recordingId: report.recording_id,
-      audioFileKey: recording.audio_file_key,
-      retryCount: Number(report.retry_count)
-    };
+    return this.buildMeetingReportJobPayloadFromAudioFileKey(
+      report,
+      recording.audio_file_key
+    );
   }
 
   private async enqueueMeetingReportJob(
@@ -2130,9 +2361,5 @@ export class MeetingService {
 
   private toNullableIsoString(value: Date | string | null): string | null {
     return value === null ? null : this.toIsoString(value);
-  }
-
-  private pendingEndpoint(endpoint: string): PendingMeetingPayload {
-    throw badRequest(`${endpoint} is not implemented yet`);
   }
 }
