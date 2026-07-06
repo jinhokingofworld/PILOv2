@@ -44,6 +44,9 @@ const meetingController = await readSource(
 );
 const meetingModule = await readSource("../src/modules/meeting/meeting.module.ts");
 const meetingService = await readSource("../src/modules/meeting/meeting.service.ts");
+const liveKitTokenService = await readSource(
+  "../src/modules/meeting/livekit-token.service.ts"
+);
 const workspaceMeetingConstraintMigration = await readSource(
   "../../../db/migrations/006_update_workspace_and_meeting_recording_constraints.sql"
 );
@@ -145,6 +148,7 @@ assert.match(canvasService, /SET deleted_at = now\(\)/);
 assert.match(canvasService, /deleted_at IS NULL/);
 assert.match(meetingModule, /DatabaseModule/);
 assert.match(meetingModule, /WorkspaceModule/);
+assert.match(meetingModule, /LiveKitTokenService/);
 assert.match(meetingController, /@Controller\("workspaces\/:workspaceId"\)/);
 assert.match(meetingController, /@UseGuards\(AuthGuard\)/);
 assert.match(meetingController, /@Get\("meetings\/current"\)/);
@@ -156,7 +160,17 @@ assert.match(meetingService, /MAIN_MEETING_ROOM/);
 assert.match(meetingService, /unique_active_meeting_per_room/);
 assert.match(meetingService, /INSERT INTO meetings/);
 assert.match(meetingService, /INSERT INTO meeting_participants/);
+assert.match(meetingService, /createJoinToken/);
+assert.doesNotMatch(meetingService, /livekit:\s*null/);
+assert.match(liveKitTokenService, /livekit-server-sdk/);
+assert.match(liveKitTokenService, /TrackSource\.MICROPHONE/);
+assert.match(liveKitTokenService, /canPublishData:\s*false/);
+assert.match(liveKitTokenService, /canSubscribe:\s*true/);
+assert.match(liveKitTokenService, /LIVEKIT_API_KEY/);
+assert.match(liveKitTokenService, /LIVEKIT_API_SECRET/);
+assert.match(liveKitTokenService, /LIVEKIT_URL/);
 
+await import("./meeting/livekit-token.test.mjs");
 await import("./calendar/test.mjs");
 await import("./meeting/test.mjs");
 await import("./github-integration/test.mjs");

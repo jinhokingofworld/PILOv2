@@ -3,6 +3,10 @@ import { QueryResultRow } from "pg";
 import { badRequest, notFound } from "../../common/api-error";
 import { DatabaseService } from "../../database/database.service";
 import { WorkspaceService } from "../workspace/workspace.service";
+import {
+  LiveKitJoinPayload,
+  LiveKitTokenService
+} from "./livekit-token.service";
 
 export type PendingMeetingPayload = never;
 
@@ -189,14 +193,14 @@ export interface CurrentMeetingPayload {
 export interface StartMeetingPayload {
   meeting: MeetingPayload;
   participant: ParticipantPayload;
-  livekit: null;
+  livekit: LiveKitJoinPayload;
   currentRecording: null;
 }
 
 export interface JoinMeetingPayload {
   meeting: MeetingPayload;
   participant: ParticipantPayload;
-  livekit: null;
+  livekit: LiveKitJoinPayload;
   currentRecording: RecordingPayload | null;
 }
 
@@ -239,7 +243,8 @@ const UUID_PATTERN =
 export class MeetingService {
   constructor(
     private readonly database: DatabaseService,
-    private readonly workspaceService: WorkspaceService
+    private readonly workspaceService: WorkspaceService,
+    private readonly liveKitTokenService: LiveKitTokenService
   ) {}
 
   getModuleInfo() {
@@ -287,70 +292,83 @@ export class MeetingService {
       throw badRequest("A meeting is already in progress");
     }
 
-    let startedMeeting: StartMeetingRow | null;
     try {
-      startedMeeting = await this.database.queryOne<StartMeetingRow>(
-        `
-          WITH generated AS (
-            SELECT gen_random_uuid() AS meeting_id
-          ),
-          inserted_meeting AS (
-            INSERT INTO meetings (
-              id,
-              workspace_id,
-              room_key,
-              livekit_room_name,
-              created_by_id
+      return await this.database.transaction(async (transaction) => {
+        const startedMeeting = await transaction.queryOne<StartMeetingRow>(
+          `
+            WITH generated AS (
+              SELECT gen_random_uuid() AS meeting_id
+            ),
+            inserted_meeting AS (
+              INSERT INTO meetings (
+                id,
+                workspace_id,
+                room_key,
+                livekit_room_name,
+                created_by_id
+              )
+              SELECT
+                generated.meeting_id,
+                $1,
+                $2,
+                'meeting-' || generated.meeting_id::text,
+                $3
+              FROM generated
+              RETURNING *
+            ),
+            inserted_participant AS (
+              INSERT INTO meeting_participants (
+                meeting_id,
+                user_id,
+                livekit_identity
+              )
+              SELECT
+                inserted_meeting.id,
+                $3,
+                'meeting-' || inserted_meeting.id::text || '-user-' || $3::text
+              FROM inserted_meeting
+              RETURNING *
             )
             SELECT
-              generated.meeting_id,
-              $1,
-              $2,
-              'meeting-' || generated.meeting_id::text,
-              $3
-            FROM generated
-            RETURNING *
-          ),
-          inserted_participant AS (
-            INSERT INTO meeting_participants (
-              meeting_id,
-              user_id,
-              livekit_identity
-            )
-            SELECT
-              inserted_meeting.id,
-              $3,
-              'meeting-' || inserted_meeting.id::text || '-user-' || $3::text
+              inserted_meeting.id AS meeting_id,
+              inserted_meeting.workspace_id AS meeting_workspace_id,
+              inserted_meeting.room_key AS meeting_room_key,
+              inserted_meeting.livekit_room_name AS meeting_livekit_room_name,
+              inserted_meeting.created_by_id AS meeting_created_by_id,
+              inserted_meeting.ended_by_id AS meeting_ended_by_id,
+              inserted_meeting.started_at AS meeting_started_at,
+              inserted_meeting.ended_at AS meeting_ended_at,
+              inserted_meeting.created_at AS meeting_created_at,
+              inserted_meeting.updated_at AS meeting_updated_at,
+              inserted_participant.id AS participant_id,
+              inserted_participant.meeting_id AS participant_meeting_id,
+              inserted_participant.user_id AS participant_user_id,
+              inserted_participant.livekit_identity AS participant_livekit_identity,
+              inserted_participant.joined_at AS participant_joined_at,
+              inserted_participant.left_at AS participant_left_at,
+              users.name AS participant_user_name,
+              users.avatar_url AS participant_user_avatar_url
             FROM inserted_meeting
-            RETURNING *
-          )
-          SELECT
-            inserted_meeting.id AS meeting_id,
-            inserted_meeting.workspace_id AS meeting_workspace_id,
-            inserted_meeting.room_key AS meeting_room_key,
-            inserted_meeting.livekit_room_name AS meeting_livekit_room_name,
-            inserted_meeting.created_by_id AS meeting_created_by_id,
-            inserted_meeting.ended_by_id AS meeting_ended_by_id,
-            inserted_meeting.started_at AS meeting_started_at,
-            inserted_meeting.ended_at AS meeting_ended_at,
-            inserted_meeting.created_at AS meeting_created_at,
-            inserted_meeting.updated_at AS meeting_updated_at,
-            inserted_participant.id AS participant_id,
-            inserted_participant.meeting_id AS participant_meeting_id,
-            inserted_participant.user_id AS participant_user_id,
-            inserted_participant.livekit_identity AS participant_livekit_identity,
-            inserted_participant.joined_at AS participant_joined_at,
-            inserted_participant.left_at AS participant_left_at,
-            users.name AS participant_user_name,
-            users.avatar_url AS participant_user_avatar_url
-          FROM inserted_meeting
-          JOIN inserted_participant
-            ON inserted_participant.meeting_id = inserted_meeting.id
-          JOIN users
-            ON users.id = inserted_participant.user_id
-        `,
-        [workspaceId, roomKey, currentUserId]
-      );
+            JOIN inserted_participant
+              ON inserted_participant.meeting_id = inserted_meeting.id
+            JOIN users
+              ON users.id = inserted_participant.user_id
+          `,
+          [workspaceId, roomKey, currentUserId]
+        );
+
+        if (!startedMeeting) {
+          throw badRequest("Meeting could not be started");
+        }
+
+        const livekit = await this.liveKitTokenService.createJoinToken({
+          livekitRoomName: startedMeeting.meeting_livekit_room_name,
+          livekitIdentity: startedMeeting.participant_livekit_identity,
+          participantName: startedMeeting.participant_user_name
+        });
+
+        return this.mapStartMeeting(startedMeeting, livekit);
+      });
     } catch (error) {
       if (this.isConstraintError(error, ACTIVE_MEETING_UNIQUE_INDEX)) {
         throw badRequest("A meeting is already in progress");
@@ -358,12 +376,6 @@ export class MeetingService {
 
       throw error;
     }
-
-    if (!startedMeeting) {
-      throw badRequest("Meeting could not be started");
-    }
-
-    return this.mapStartMeeting(startedMeeting);
   }
 
   async joinMeeting(
@@ -390,11 +402,16 @@ export class MeetingService {
         meetingId,
         currentUserId
       );
+      const livekit = await this.liveKitTokenService.createJoinToken({
+        livekitRoomName: meeting.livekit_room_name,
+        livekitIdentity: participant.livekit_identity,
+        participantName: participant.user_name
+      });
 
       return {
         meeting: this.mapMeeting(meeting),
         participant: this.mapParticipant(participant),
-        livekit: null,
+        livekit,
         currentRecording: this.mapNullableCurrentRecording(meeting)
       };
     });
@@ -1075,7 +1092,10 @@ export class MeetingService {
     };
   }
 
-  private mapStartMeeting(row: StartMeetingRow): StartMeetingPayload {
+  private mapStartMeeting(
+    row: StartMeetingRow,
+    livekit: LiveKitJoinPayload
+  ): StartMeetingPayload {
     return {
       meeting: {
         id: row.meeting_id,
@@ -1103,7 +1123,7 @@ export class MeetingService {
           avatarUrl: row.participant_user_avatar_url
         }
       },
-      livekit: null,
+      livekit,
       currentRecording: null
     };
   }

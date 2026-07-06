@@ -24,6 +24,8 @@ class FakeDatabase {
     this.queryOneRows = [...queryOneRows];
     this.queryRows = [...queryRows];
     this.queries = [];
+    this.transactionCommitted = false;
+    this.transactionRolledBack = false;
   }
 
   async query(text, values = []) {
@@ -47,7 +49,14 @@ class FakeDatabase {
   }
 
   async transaction(callback) {
-    return callback(this);
+    try {
+      const result = await callback(this);
+      this.transactionCommitted = true;
+      return result;
+    } catch (error) {
+      this.transactionRolledBack = true;
+      throw error;
+    }
   }
 }
 
@@ -62,13 +71,44 @@ class FakeWorkspaceService {
   }
 }
 
-function createSubject(database = new FakeDatabase()) {
+class FakeLiveKitTokenService {
+  constructor({ shouldFail = false } = {}) {
+    this.shouldFail = shouldFail;
+    this.calls = [];
+  }
+
+  async createJoinToken(input) {
+    this.calls.push(input);
+
+    if (this.shouldFail) {
+      throw new Error("LiveKit token could not be issued");
+    }
+
+    return {
+      livekitRoomName: input.livekitRoomName,
+      livekitIdentity: input.livekitIdentity,
+      livekitToken: `token-for-${input.livekitIdentity}`,
+      livekitUrl: "wss://livekit.example.test",
+      expiresAt: "2026-07-05T01:00:00.000Z"
+    };
+  }
+}
+
+function createSubject(
+  database = new FakeDatabase(),
+  liveKitTokenService = new FakeLiveKitTokenService()
+) {
   const workspaceService = new FakeWorkspaceService();
-  const service = new MeetingService(database, workspaceService);
+  const service = new MeetingService(
+    database,
+    workspaceService,
+    liveKitTokenService
+  );
   return {
     database,
     service,
-    workspaceService
+    workspaceService,
+    liveKitTokenService
   };
 }
 
@@ -203,6 +243,13 @@ async function assertNotFound(action, messagePattern) {
   });
 }
 
+async function assertError(action, messagePattern) {
+  await assert.rejects(action, (error) => {
+    assert.match(error.message, messagePattern);
+    return true;
+  });
+}
+
 {
   const { service, workspaceService } = createSubject(
     new FakeDatabase({
@@ -267,7 +314,7 @@ async function assertNotFound(action, messagePattern) {
       }
     ]
   });
-  const { service } = createSubject(database);
+  const { service, liveKitTokenService } = createSubject(database);
 
   const started = await service.startMeeting(currentUserId, workspaceId, {
     roomKey: "MAIN_MEETING_ROOM"
@@ -278,8 +325,22 @@ async function assertNotFound(action, messagePattern) {
   assert.equal(started.participant.user.id, currentUserId);
   assert.equal(started.participant.user.name, "Jinho");
   assert.equal(started.participant.isActive, true);
-  assert.equal(started.livekit, null);
+  assert.deepEqual(liveKitTokenService.calls, [
+    {
+      livekitRoomName: `meeting-${meetingId}`,
+      livekitIdentity: `meeting-${meetingId}-user-${currentUserId}`,
+      participantName: "Jinho"
+    }
+  ]);
+  assert.deepEqual(started.livekit, {
+    livekitRoomName: `meeting-${meetingId}`,
+    livekitIdentity: `meeting-${meetingId}-user-${currentUserId}`,
+    livekitToken: `token-for-meeting-${meetingId}-user-${currentUserId}`,
+    livekitUrl: "wss://livekit.example.test",
+    expiresAt: "2026-07-05T01:00:00.000Z"
+  });
   assert.equal(started.currentRecording, null);
+  assert.equal(database.transactionCommitted, true);
 }
 
 {
@@ -296,7 +357,30 @@ async function assertNotFound(action, messagePattern) {
 }
 
 {
-  const { service, workspaceService } = createSubject(
+  const database = new FakeDatabase({
+    queryOneRows: [null, startMeetingRow()]
+  });
+  const { service, liveKitTokenService } = createSubject(
+    database,
+    new FakeLiveKitTokenService({ shouldFail: true })
+  );
+
+  await assertError(
+    () => service.startMeeting(currentUserId, workspaceId, {}),
+    /LiveKit token could not be issued/
+  );
+  assert.equal(database.transactionRolledBack, true);
+  assert.equal(liveKitTokenService.calls.length, 1);
+  assert.equal(
+    database.queries.some(({ values }) =>
+      values.some((value) => typeof value === "string" && value.includes("token"))
+    ),
+    false
+  );
+}
+
+{
+  const { service, workspaceService, liveKitTokenService } = createSubject(
     new FakeDatabase({
       queryOneRows: [
         (text, values) => {
@@ -327,12 +411,25 @@ async function assertNotFound(action, messagePattern) {
   assert.equal(joined.meeting.id, meetingId);
   assert.equal(joined.participant.id, participantId);
   assert.equal(joined.participant.isActive, true);
-  assert.equal(joined.livekit, null);
+  assert.deepEqual(liveKitTokenService.calls, [
+    {
+      livekitRoomName: `meeting-${meetingId}`,
+      livekitIdentity: `meeting-${meetingId}-user-${currentUserId}`,
+      participantName: "Jinho"
+    }
+  ]);
+  assert.deepEqual(joined.livekit, {
+    livekitRoomName: `meeting-${meetingId}`,
+    livekitIdentity: `meeting-${meetingId}-user-${currentUserId}`,
+    livekitToken: `token-for-meeting-${meetingId}-user-${currentUserId}`,
+    livekitUrl: "wss://livekit.example.test",
+    expiresAt: "2026-07-05T01:00:00.000Z"
+  });
   assert.equal(joined.currentRecording, null);
 }
 
 {
-  const { service } = createSubject(
+  const { service, liveKitTokenService } = createSubject(
     new FakeDatabase({
       queryOneRows: [
         currentMeetingRow({
@@ -346,6 +443,28 @@ async function assertNotFound(action, messagePattern) {
     () => service.joinMeeting(currentUserId, workspaceId, meetingId),
     /already ended/
   );
+  assert.deepEqual(liveKitTokenService.calls, []);
+}
+
+{
+  const database = new FakeDatabase();
+  const liveKitTokenService = new FakeLiveKitTokenService();
+  const service = new MeetingService(
+    database,
+    {
+      async assertWorkspaceAccess() {
+        throw new Error("workspace denied");
+      }
+    },
+    liveKitTokenService
+  );
+
+  await assertError(
+    () => service.startMeeting(currentUserId, workspaceId, {}),
+    /workspace denied/
+  );
+  assert.deepEqual(liveKitTokenService.calls, []);
+  assert.equal(database.queries.length, 0);
 }
 
 {
