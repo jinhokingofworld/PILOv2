@@ -16,7 +16,9 @@ async function bootstrap() {
   app.setGlobalPrefix("api/v1");
   app.enableCors({
     origin: process.env.CORS_ORIGIN ?? "*",
-    credentials: false
+    credentials: false,
+    methods: ["GET", "HEAD", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Authorization", "Content-Type", "Accept"]
   });
 
   const port = Number.parseInt(process.env.PORT ?? "3000", 10);
