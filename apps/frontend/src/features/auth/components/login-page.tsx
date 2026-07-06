@@ -2,7 +2,13 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { GalleryVerticalEnd, GitBranch, Loader2, UserRound } from "lucide-react";
+import {
+  GalleryVerticalEnd,
+  GitBranch,
+  Loader2,
+  MonitorPlay,
+  UserRound
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -16,21 +22,25 @@ import {
   loadAuthSessionEntry,
   type AuthSessionData
 } from "@/features/auth/auth-session";
-import {
-  startProviderLogin,
-  type LoginProvider
-} from "@/features/auth/api/client";
+import { startProviderLogin, type LoginProvider } from "@/features/auth/api/client";
 import { LoginFloatingShapes } from "@/features/auth/components/login-floating-shapes";
 import { LoginScene } from "@/features/auth/components/login-scene";
 import {
+  isDevPreviewEnabled,
+  PILO_DEV_PREVIEW_ACCESS_TOKEN,
   getStoredAuthSession,
+  saveDevPreviewAuthSession,
   saveSelectedWorkspaceId
 } from "@/features/auth/session-storage";
 
+type PendingLoginProvider = LoginProvider | "preview";
+
 type LoginStatus = {
-  pendingProvider: LoginProvider | null;
+  pendingProvider: PendingLoginProvider | null;
   errorMessage: string | null;
 };
+
+const DEV_PREVIEW_QUERY_PARAM = "devPreview";
 
 export function LoginPage() {
   const router = useRouter();
@@ -38,9 +48,18 @@ export function LoginPage() {
     pendingProvider: null,
     errorMessage: null
   });
+  const [showDevPreview, setShowDevPreview] = useState(false);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
+
+    setShowDevPreview(isDevPreviewEnabled());
+
+    if (params.get(DEV_PREVIEW_QUERY_PARAM) === "1") {
+      void handleDevPreviewLogin();
+      return;
+    }
+
     const error = params.get("error");
 
     if (error) {
@@ -82,6 +101,35 @@ export function LoginPage() {
       });
     }
   };
+
+  async function handleDevPreviewLogin() {
+    setStatus({
+      pendingProvider: "preview",
+      errorMessage: null
+    });
+
+    if (!isDevPreviewEnabled()) {
+      setStatus({
+        pendingProvider: null,
+        errorMessage: "UI Preview는 local 개발 환경에서만 사용할 수 있습니다."
+      });
+      return;
+    }
+
+    try {
+      saveDevPreviewAuthSession();
+      const session = await loadAuthSessionEntry(PILO_DEV_PREVIEW_ACCESS_TOKEN);
+      routeToEntry(router, session, readReturnUrl());
+    } catch (error) {
+      setStatus({
+        pendingProvider: null,
+        errorMessage:
+          error instanceof Error
+            ? error.message
+            : "UI Preview를 시작하지 못했습니다."
+      });
+    }
+  }
 
   return (
     <LoginScene decorations={<LoginFloatingShapes />}>
@@ -131,6 +179,22 @@ export function LoginPage() {
                   )}
                   Login with Google
                 </Button>
+                {showDevPreview ? (
+                  <Button
+                    className="h-14 w-full text-base"
+                    disabled={status.pendingProvider !== null}
+                    onClick={() => void handleDevPreviewLogin()}
+                    type="button"
+                    variant="ghost"
+                  >
+                    {status.pendingProvider === "preview" ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : (
+                      <MonitorPlay className="size-4" />
+                    )}
+                    UI Preview
+                  </Button>
+                ) : null}
               </div>
             </form>
 

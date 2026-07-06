@@ -20,6 +20,9 @@ import {
 } from "@/features/auth/api/client";
 import {
   clearStoredAuthSession,
+  isDevPreviewAccessToken,
+  isDevPreviewEnabled,
+  PILO_DEV_PREVIEW_WORKSPACE_ID,
   getSelectedWorkspaceId,
   getStoredAuthSession,
   saveSelectedWorkspaceId
@@ -50,6 +53,26 @@ type AuthGateState =
     };
 
 const AuthSessionContext = createContext<AuthSessionContextValue | null>(null);
+const DEV_PREVIEW_USER_ID = "00000000-0000-4000-8000-000000000137";
+const DEV_PREVIEW_TIMESTAMP = "2026-07-06T00:00:00.000Z";
+
+const devPreviewUser: UserProfile = {
+  id: DEV_PREVIEW_USER_ID,
+  name: "PILO UI Preview",
+  email: "preview@pilo.local",
+  avatarUrl: null,
+  createdAt: DEV_PREVIEW_TIMESTAMP,
+  updatedAt: DEV_PREVIEW_TIMESTAMP
+};
+
+const devPreviewWorkspace: Workspace = {
+  id: PILO_DEV_PREVIEW_WORKSPACE_ID,
+  name: "PILO UI Preview",
+  ownerUserId: DEV_PREVIEW_USER_ID,
+  isOwner: true,
+  createdAt: DEV_PREVIEW_TIMESTAMP,
+  updatedAt: DEV_PREVIEW_TIMESTAMP
+};
 
 export function AuthGate({ children }: { children: ReactNode }) {
   const router = useRouter();
@@ -166,6 +189,21 @@ export function useAuthSession() {
 export async function loadAuthSessionEntry(
   accessToken: string
 ): Promise<AuthSessionData> {
+  if (isDevPreviewAccessToken(accessToken)) {
+    if (!isDevPreviewEnabled()) {
+      throw new Error("Dev preview is disabled");
+    }
+
+    saveSelectedWorkspaceId(devPreviewWorkspace.id);
+
+    return {
+      accessToken,
+      user: devPreviewUser,
+      workspaces: [devPreviewWorkspace],
+      activeWorkspaceId: devPreviewWorkspace.id
+    };
+  }
+
   const user = await getCurrentUser(accessToken);
   const workspaces = await listWorkspaces(accessToken);
 
