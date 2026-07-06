@@ -46,6 +46,27 @@ function createTransactionDatabase(targetClient) {
   return database;
 }
 
+const liveKitTokenService = {
+  async createJoinToken(input) {
+    return {
+      livekitRoomName: input.livekitRoomName,
+      livekitIdentity: input.livekitIdentity,
+      livekitToken: `smoke-token-${input.livekitIdentity}`,
+      livekitUrl: "wss://livekit.example.test",
+      expiresAt: "2026-07-05T01:00:00.000Z"
+    };
+  }
+};
+
+const liveKitEgressService = {
+  async startRoomAudioOnlyEgress() {
+    throw new Error("meeting DB smoke does not start LiveKit Egress");
+  },
+  async stopEgress() {
+    throw new Error("meeting DB smoke does not stop LiveKit Egress");
+  }
+};
+
 const suffix = randomUUID();
 const currentUserId = randomUUID();
 const workspaceId = randomUUID();
@@ -55,7 +76,12 @@ try {
 
   const database = createTransactionDatabase(client);
   const workspaceService = new WorkspaceService(database);
-  const meetingService = new MeetingService(database, workspaceService);
+  const meetingService = new MeetingService(
+    database,
+    workspaceService,
+    liveKitTokenService,
+    liveKitEgressService
+  );
 
   await database.execute(
     `
@@ -92,7 +118,8 @@ try {
   assert.equal(started.meeting.workspaceId, workspaceId);
   assert.equal(started.participant.userId, currentUserId);
   assert.equal(started.participant.isActive, true);
-  assert.equal(started.livekit, null);
+  assert.equal(started.livekit.livekitRoomName, started.meeting.livekitRoomName);
+  assert.equal(started.livekit.livekitIdentity, started.participant.livekitIdentity);
   assert.equal(started.currentRecording, null);
 
   const rejoined = await meetingService.joinMeeting(
@@ -103,7 +130,7 @@ try {
   assert.equal(rejoined.meeting.id, started.meeting.id);
   assert.equal(rejoined.participant.id, started.participant.id);
   assert.equal(rejoined.participant.isActive, true);
-  assert.equal(rejoined.livekit, null);
+  assert.equal(rejoined.livekit.livekitRoomName, started.meeting.livekitRoomName);
 
   const left = await meetingService.leaveMeeting(
     currentUserId,

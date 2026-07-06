@@ -59,6 +59,7 @@ $githubUserOAuthClientId = Read-Host "GITHUB_USER_OAUTH_CLIENT_ID"
 $githubUserOAuthClientSecret = Read-OptionalSecureText "GITHUB_USER_OAUTH_CLIENT_SECRET"
 $openAiApiKey = Read-OptionalSecureText "OPENAI_API_KEY"
 $githubAppId = Read-Host "GITHUB_APP_ID"
+$githubAppSlug = Read-Host "GITHUB_APP_SLUG"
 $githubPrivateKeyPath = Read-Host "GITHUB_APP_PRIVATE_KEY file path"
 $githubWebhookSecret = Read-OptionalSecureText "GITHUB_WEBHOOK_SECRET"
 $githubTokenEncryptionKey = Read-OptionalSecureText "GITHUB_TOKEN_ENCRYPTION_KEY"
@@ -98,6 +99,7 @@ Put-SecretIfPresent "pilo-dev/ai-worker/OPENAI_API_KEY" $openAiApiKey
 
 Put-SecretIfPresent "pilo-dev/app-server/GITHUB_APP_ID" $githubAppId
 Put-SecretIfPresent "pilo-dev/ai-worker/GITHUB_APP_ID" $githubAppId
+Put-SecretIfPresent "pilo-dev/app-server/GITHUB_APP_SLUG" $githubAppSlug
 Put-SecretIfPresent "pilo-dev/app-server/GITHUB_APP_PRIVATE_KEY" $githubPrivateKey
 Put-SecretIfPresent "pilo-dev/ai-worker/GITHUB_APP_PRIVATE_KEY" $githubPrivateKey
 Put-SecretIfPresent "pilo-dev/app-server/GITHUB_WEBHOOK_SECRET" $githubWebhookSecret

@@ -7,7 +7,7 @@ import {
   bringPiloTextShapesToFront,
   getPiloTextShapeIds,
   isPiloSnapShape,
-} from "./PiloCanvasShapeGuards";
+} from "../shapes/PiloCanvasShapeGuards";
 
 export function SelectedShapeStackingManager() {
   const editor = useEditor();

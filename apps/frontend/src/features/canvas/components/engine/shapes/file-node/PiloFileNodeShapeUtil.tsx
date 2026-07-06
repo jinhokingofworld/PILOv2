@@ -14,5 +14,5 @@ export type PiloFileNodeShapeProps = {
 };
 
 // Reserved for the follow-up file_node implementation.
-// When the shape is ready, add its ShapeUtil to PiloTldrawCanvas.shapeUtils
+// When the shape is ready, add its ShapeUtil to pilo-canvas-shape-utils
 // and add PILO_FILE_NODE_SHAPE_TYPE to canvas-storage persistableShapeTypes.

@@ -11,18 +11,18 @@ import {
   normalizeCanvasFreeformShapes,
   readCanvasStorage,
   writeCanvasStorage,
-} from "../../utils/canvas-storage";
+} from "../../../utils/canvas-storage";
 import {
   createCanvasShapeSyncQueue,
   syncCanvasFreeformShapes,
   type CanvasShapeSyncQueue,
   type CanvasShapeApiClient,
-} from "../../utils/canvas-shape-sync";
+} from "../../../utils/canvas-shape-sync";
 import {
   PiloTldrawCanvas,
   type PiloCanvasActions,
-  type PiloCanvasFreeformShape,
-} from "./PiloTldrawCanvas";
+} from "../surface/PiloTldrawCanvas";
+import type { PiloCanvasFreeformShape } from "../types";
 
 export type CanvasViewSetting = {
   zoom: number;

@@ -44,6 +44,12 @@ const meetingController = await readSource(
 );
 const meetingModule = await readSource("../src/modules/meeting/meeting.module.ts");
 const meetingService = await readSource("../src/modules/meeting/meeting.service.ts");
+const liveKitEgressService = await readSource(
+  "../src/modules/meeting/livekit-egress.service.ts"
+);
+const liveKitTokenService = await readSource(
+  "../src/modules/meeting/livekit-token.service.ts"
+);
 const workspaceMeetingConstraintMigration = await readSource(
   "../../../db/migrations/006_update_workspace_and_meeting_recording_constraints.sql"
 );
@@ -99,18 +105,18 @@ assert.match(authService, /user_sessions/);
 assert.match(authService, /token_hash/);
 assert.match(authService, /google_user_id/);
 assert.match(authService, /github_user_id/);
-assert.match(authService, /github_access_token_encrypted/);
-assert.match(authService, /github_token_scope/);
-assert.match(authService, /github_connected_at = now\(\)/);
-assert.match(authService, /github_revoked_at = NULL/);
-assert.match(authService, /GithubTokenEncryptionService/);
+assert.doesNotMatch(authService, /github_access_token_encrypted/);
+assert.doesNotMatch(authService, /github_token_scope/);
+assert.doesNotMatch(authService, /github_connected_at = now\(\)/);
+assert.doesNotMatch(authService, /github_revoked_at = NULL/);
+assert.doesNotMatch(authService, /GithubTokenEncryptionService/);
 assert.match(authService, /buildGithubAuthorizeUrl/);
 assert.match(authService, /WorkspaceService/);
 assert.match(authService, /ensureDefaultWorkspaceForUser/);
 assert.doesNotMatch(authService, /INSERT INTO workspaces \(name, owner_user_id\)/);
 assert.match(authConfigService, /GOOGLE_OAUTH_CLIENT_ID/);
 assert.match(authConfigService, /GITHUB_LOGIN_CLIENT_ID/);
-assert.match(authConfigService, /GITHUB_TOKEN_ENCRYPTION_KEY/);
+assert.doesNotMatch(authConfigService, /GITHUB_TOKEN_ENCRYPTION_KEY/);
 assert.match(authConfigService, /FRONTEND_URL/);
 assert.match(oauthStateService, /createHmac\("sha256"/);
 assert.match(oauthStateService, /timingSafeEqual/);
@@ -145,6 +151,8 @@ assert.match(canvasService, /SET deleted_at = now\(\)/);
 assert.match(canvasService, /deleted_at IS NULL/);
 assert.match(meetingModule, /DatabaseModule/);
 assert.match(meetingModule, /WorkspaceModule/);
+assert.match(meetingModule, /LiveKitEgressService/);
+assert.match(meetingModule, /LiveKitTokenService/);
 assert.match(meetingController, /@Controller\("workspaces\/:workspaceId"\)/);
 assert.match(meetingController, /@UseGuards\(AuthGuard\)/);
 assert.match(meetingController, /@Get\("meetings\/current"\)/);
@@ -156,7 +164,38 @@ assert.match(meetingService, /MAIN_MEETING_ROOM/);
 assert.match(meetingService, /unique_active_meeting_per_room/);
 assert.match(meetingService, /INSERT INTO meetings/);
 assert.match(meetingService, /INSERT INTO meeting_participants/);
+assert.match(meetingService, /createJoinToken/);
+assert.match(meetingService, /startRoomAudioOnlyEgress/);
+assert.match(meetingService, /stopEgress/);
+assert.match(meetingService, /INSERT INTO meeting_reports/);
+assert.match(meetingService, /PROCESSING/);
+assert.match(meetingService, /LIVEKIT_EGRESS_S3_PREFIX/);
+assert.match(meetingService, /audio_file_url = NULL/);
+assert.doesNotMatch(meetingService, /livekit:\s*null/);
+assert.match(liveKitEgressService, /EgressClient/);
+assert.match(liveKitEgressService, /startRoomCompositeEgress/);
+assert.match(liveKitEgressService, /listEgress/);
+assert.match(liveKitEgressService, /audioOnly:\s*true/);
+assert.match(liveKitEgressService, /EGRESS_COMPLETE/);
+assert.match(liveKitEgressService, /EncodedFileType\.MP3/);
+assert.match(liveKitEgressService, /S3Upload/);
+assert.match(liveKitEgressService, /LIVEKIT_RECORDING_MODE/);
+assert.match(liveKitEgressService, /LIVEKIT_RECORDINGS_BUCKET/);
+assert.match(liveKitEgressService, /LIVEKIT_WS_URL/);
+assert.match(liveKitEgressService, /LIVEKIT_URL/);
+assert.doesNotMatch(liveKitEgressService, /AWS_ACCESS_KEY_ID/);
+assert.doesNotMatch(liveKitEgressService, /AWS_SECRET_ACCESS_KEY/);
+assert.match(liveKitTokenService, /livekit-server-sdk/);
+assert.match(liveKitTokenService, /TrackSource\.MICROPHONE/);
+assert.match(liveKitTokenService, /canPublishData:\s*false/);
+assert.match(liveKitTokenService, /canSubscribe:\s*true/);
+assert.match(liveKitTokenService, /LIVEKIT_API_KEY/);
+assert.match(liveKitTokenService, /LIVEKIT_API_SECRET/);
+assert.match(liveKitTokenService, /LIVEKIT_URL/);
 
+await import("./meeting/livekit-egress.test.mjs");
+await import("./auth/test.mjs");
+await import("./meeting/livekit-token.test.mjs");
 await import("./calendar/test.mjs");
 await import("./meeting/test.mjs");
 await import("./github-integration/test.mjs");

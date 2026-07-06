@@ -24,6 +24,8 @@ class FakeDatabase {
     this.queryOneRows = [...queryOneRows];
     this.queryRows = [...queryRows];
     this.queries = [];
+    this.transactionCommitted = false;
+    this.transactionRolledBack = false;
   }
 
   async query(text, values = []) {
@@ -47,7 +49,14 @@ class FakeDatabase {
   }
 
   async transaction(callback) {
-    return callback(this);
+    try {
+      const result = await callback(this);
+      this.transactionCommitted = true;
+      return result;
+    } catch (error) {
+      this.transactionRolledBack = true;
+      throw error;
+    }
   }
 }
 
@@ -62,13 +71,85 @@ class FakeWorkspaceService {
   }
 }
 
-function createSubject(database = new FakeDatabase()) {
+class FakeLiveKitTokenService {
+  constructor({ shouldFail = false } = {}) {
+    this.shouldFail = shouldFail;
+    this.calls = [];
+  }
+
+  async createJoinToken(input) {
+    this.calls.push(input);
+
+    if (this.shouldFail) {
+      throw new Error("LiveKit token could not be issued");
+    }
+
+    return {
+      livekitRoomName: input.livekitRoomName,
+      livekitIdentity: input.livekitIdentity,
+      livekitToken: `token-for-${input.livekitIdentity}`,
+      livekitUrl: "wss://livekit.example.test",
+      expiresAt: "2026-07-05T01:00:00.000Z"
+    };
+  }
+}
+
+class FakeLiveKitEgressService {
+  constructor({ startShouldFail = false, stopShouldFail = false } = {}) {
+    this.startShouldFail = startShouldFail;
+    this.stopShouldFail = stopShouldFail;
+    this.startCalls = [];
+    this.stopCalls = [];
+    this.stopResult = {
+      status: "COMPLETED",
+      audioFileKey: `recordings/meetings/workspaces/${workspaceId}/meetings/${meetingId}/recordings/${recordingId}.mp3`,
+      durationSec: 180,
+      fileSizeBytes: 8192,
+      errorMessage: null
+    };
+  }
+
+  async startRoomAudioOnlyEgress(input) {
+    this.startCalls.push(input);
+
+    if (this.startShouldFail) {
+      throw new Error("LiveKit Egress could not be started");
+    }
+
+    return {
+      livekitEgressId: "egress-1"
+    };
+  }
+
+  async stopEgress(livekitEgressId) {
+    this.stopCalls.push({ livekitEgressId });
+
+    if (this.stopShouldFail) {
+      throw new Error("LiveKit Egress could not be stopped");
+    }
+
+    return this.stopResult;
+  }
+}
+
+function createSubject(
+  database = new FakeDatabase(),
+  liveKitTokenService = new FakeLiveKitTokenService(),
+  liveKitEgressService = new FakeLiveKitEgressService()
+) {
   const workspaceService = new FakeWorkspaceService();
-  const service = new MeetingService(database, workspaceService);
+  const service = new MeetingService(
+    database,
+    workspaceService,
+    liveKitTokenService,
+    liveKitEgressService
+  );
   return {
     database,
     service,
-    workspaceService
+    workspaceService,
+    liveKitTokenService,
+    liveKitEgressService
   };
 }
 
@@ -86,6 +167,7 @@ function currentMeetingRow(overrides = {}) {
     updated_at: updatedAt,
     recording_id: recordingId,
     recording_meeting_id: meetingId,
+    recording_livekit_egress_id: "egress-1",
     recording_status: "RUNNING",
     recording_audio_file_url: null,
     recording_audio_file_key: null,
@@ -141,6 +223,7 @@ function recordingRow(overrides = {}) {
   return {
     id: recordingId,
     meeting_id: meetingId,
+    livekit_egress_id: "egress-1",
     status: "RUNNING",
     audio_file_url: null,
     audio_file_key: null,
@@ -199,6 +282,13 @@ async function assertNotFound(action, messagePattern) {
     assert.equal(error.getStatus(), 404);
     assert.equal(error.getResponse().error.code, "NOT_FOUND");
     assert.match(error.getResponse().error.message, messagePattern);
+    return true;
+  });
+}
+
+async function assertError(action, messagePattern) {
+  await assert.rejects(action, (error) => {
+    assert.match(error.message, messagePattern);
     return true;
   });
 }
@@ -267,7 +357,7 @@ async function assertNotFound(action, messagePattern) {
       }
     ]
   });
-  const { service } = createSubject(database);
+  const { service, liveKitTokenService } = createSubject(database);
 
   const started = await service.startMeeting(currentUserId, workspaceId, {
     roomKey: "MAIN_MEETING_ROOM"
@@ -278,8 +368,22 @@ async function assertNotFound(action, messagePattern) {
   assert.equal(started.participant.user.id, currentUserId);
   assert.equal(started.participant.user.name, "Jinho");
   assert.equal(started.participant.isActive, true);
-  assert.equal(started.livekit, null);
+  assert.deepEqual(liveKitTokenService.calls, [
+    {
+      livekitRoomName: `meeting-${meetingId}`,
+      livekitIdentity: `meeting-${meetingId}-user-${currentUserId}`,
+      participantName: "Jinho"
+    }
+  ]);
+  assert.deepEqual(started.livekit, {
+    livekitRoomName: `meeting-${meetingId}`,
+    livekitIdentity: `meeting-${meetingId}-user-${currentUserId}`,
+    livekitToken: `token-for-meeting-${meetingId}-user-${currentUserId}`,
+    livekitUrl: "wss://livekit.example.test",
+    expiresAt: "2026-07-05T01:00:00.000Z"
+  });
   assert.equal(started.currentRecording, null);
+  assert.equal(database.transactionCommitted, true);
 }
 
 {
@@ -296,7 +400,30 @@ async function assertNotFound(action, messagePattern) {
 }
 
 {
-  const { service, workspaceService } = createSubject(
+  const database = new FakeDatabase({
+    queryOneRows: [null, startMeetingRow()]
+  });
+  const { service, liveKitTokenService } = createSubject(
+    database,
+    new FakeLiveKitTokenService({ shouldFail: true })
+  );
+
+  await assertError(
+    () => service.startMeeting(currentUserId, workspaceId, {}),
+    /LiveKit token could not be issued/
+  );
+  assert.equal(database.transactionRolledBack, true);
+  assert.equal(liveKitTokenService.calls.length, 1);
+  assert.equal(
+    database.queries.some(({ values }) =>
+      values.some((value) => typeof value === "string" && value.includes("token"))
+    ),
+    false
+  );
+}
+
+{
+  const { service, workspaceService, liveKitTokenService } = createSubject(
     new FakeDatabase({
       queryOneRows: [
         (text, values) => {
@@ -327,12 +454,25 @@ async function assertNotFound(action, messagePattern) {
   assert.equal(joined.meeting.id, meetingId);
   assert.equal(joined.participant.id, participantId);
   assert.equal(joined.participant.isActive, true);
-  assert.equal(joined.livekit, null);
+  assert.deepEqual(liveKitTokenService.calls, [
+    {
+      livekitRoomName: `meeting-${meetingId}`,
+      livekitIdentity: `meeting-${meetingId}-user-${currentUserId}`,
+      participantName: "Jinho"
+    }
+  ]);
+  assert.deepEqual(joined.livekit, {
+    livekitRoomName: `meeting-${meetingId}`,
+    livekitIdentity: `meeting-${meetingId}-user-${currentUserId}`,
+    livekitToken: `token-for-meeting-${meetingId}-user-${currentUserId}`,
+    livekitUrl: "wss://livekit.example.test",
+    expiresAt: "2026-07-05T01:00:00.000Z"
+  });
   assert.equal(joined.currentRecording, null);
 }
 
 {
-  const { service } = createSubject(
+  const { service, liveKitTokenService } = createSubject(
     new FakeDatabase({
       queryOneRows: [
         currentMeetingRow({
@@ -346,6 +486,29 @@ async function assertNotFound(action, messagePattern) {
     () => service.joinMeeting(currentUserId, workspaceId, meetingId),
     /already ended/
   );
+  assert.deepEqual(liveKitTokenService.calls, []);
+}
+
+{
+  const database = new FakeDatabase();
+  const liveKitTokenService = new FakeLiveKitTokenService();
+  const service = new MeetingService(
+    database,
+    {
+      async assertWorkspaceAccess() {
+        throw new Error("workspace denied");
+      }
+    },
+    liveKitTokenService,
+    new FakeLiveKitEgressService()
+  );
+
+  await assertError(
+    () => service.startMeeting(currentUserId, workspaceId, {}),
+    /workspace denied/
+  );
+  assert.deepEqual(liveKitTokenService.calls, []);
+  assert.equal(database.queries.length, 0);
 }
 
 {
@@ -385,7 +548,7 @@ async function assertNotFound(action, messagePattern) {
 }
 
 {
-  const { database, service } = createSubject(
+  const { database, service, liveKitEgressService } = createSubject(
     new FakeDatabase({
       queryOneRows: [
         currentMeetingRow(),
@@ -394,6 +557,23 @@ async function assertNotFound(action, messagePattern) {
           left_at: leftAt
         }),
         activeParticipantCountRow(0),
+        (text, values) => {
+          assert.match(text, /UPDATE meeting_recordings/);
+          assert.match(text, /status = 'COMPLETED'/);
+          assert.deepEqual(values, [
+            recordingId,
+            `recordings/meetings/workspaces/${workspaceId}/meetings/${meetingId}/recordings/${recordingId}.mp3`,
+            180,
+            8192
+          ]);
+          return recordingRow({
+            status: "COMPLETED",
+            audio_file_key: values[1],
+            duration_sec: values[2],
+            file_size_bytes: values[3],
+            ended_at: endedAt
+          });
+        },
         currentMeetingRow({
           ended_at: endedAt
         })
@@ -405,6 +585,12 @@ async function assertNotFound(action, messagePattern) {
 
   assert.equal(left.meetingEnded, true);
   assert.equal(left.meeting.endedAt, "2026-07-05T00:10:01.000Z");
+  assert.equal(left.currentRecording, null);
+  assert.deepEqual(liveKitEgressService.stopCalls, [
+    {
+      livekitEgressId: "egress-1"
+    }
+  ]);
   assert.match(database.queries.at(-1).text, /UPDATE meetings/);
   assert.match(database.queries.at(-1).text, /AND ended_at IS NULL/);
 }
@@ -443,6 +629,349 @@ async function assertNotFound(action, messagePattern) {
     () => service.leaveMeeting(currentUserId, workspaceId, meetingId),
     /Participant not found/
   );
+}
+
+{
+  const expectedAudioFileKey = `recordings/meetings/workspaces/${workspaceId}/meetings/${meetingId}/recordings/${recordingId}.mp3`;
+  const database = new FakeDatabase({
+    queryOneRows: [
+      currentMeetingRow({
+        recording_id: null,
+        recording_meeting_id: null,
+        recording_livekit_egress_id: null,
+        recording_status: null,
+        recording_started_at: null
+      }),
+      participantRow(),
+      null,
+      { id: recordingId },
+      (text, values) => {
+        assert.match(text, /INSERT INTO meeting_recordings/);
+        assert.match(text, /status,\s*audio_file_url,\s*audio_file_key/s);
+        assert.deepEqual(values, [
+          recordingId,
+          meetingId,
+          null,
+          expectedAudioFileKey
+        ]);
+        return recordingRow({
+          livekit_egress_id: null,
+          audio_file_key: expectedAudioFileKey
+        });
+      },
+      (text, values) => {
+        assert.match(text, /UPDATE meeting_recordings/);
+        assert.match(text, /livekit_egress_id = \$2/);
+        assert.deepEqual(values, [recordingId, "egress-1"]);
+        return recordingRow({
+          audio_file_key: expectedAudioFileKey
+        });
+      }
+    ]
+  });
+  const { service, liveKitEgressService } = createSubject(database);
+
+  const result = await service.startRecording(
+    currentUserId,
+    workspaceId,
+    meetingId
+  );
+
+  assert.equal(result.meeting.id, meetingId);
+  assert.equal(result.recording.id, recordingId);
+  assert.equal(result.recording.status, "RUNNING");
+  assert.equal(result.recording.audioFileKey, expectedAudioFileKey);
+  assert.equal(result.recording.audioFileUrl, null);
+  assert.deepEqual(liveKitEgressService.startCalls, [
+    {
+      livekitRoomName: `meeting-${meetingId}`,
+      audioFileKey: expectedAudioFileKey
+    }
+  ]);
+}
+
+{
+  const expectedAudioFileKey = `recordings/meetings/workspaces/${workspaceId}/meetings/${meetingId}/recordings/${recordingId}.mp3`;
+  const database = new FakeDatabase({
+    queryOneRows: [
+      currentMeetingRow({
+        recording_id: null,
+        recording_meeting_id: null,
+        recording_livekit_egress_id: null,
+        recording_status: null,
+        recording_started_at: null
+      }),
+      participantRow(),
+      null,
+      { id: recordingId },
+      recordingRow({
+        livekit_egress_id: null,
+        audio_file_key: expectedAudioFileKey
+      }),
+      () => {
+        throw new Error("persist egress id failed");
+      },
+      (text, values) => {
+        assert.match(text, /UPDATE meeting_recordings/);
+        assert.match(text, /status = 'FAILED'/);
+        assert.deepEqual(values, [recordingId, "LiveKit Egress start failed"]);
+        return recordingRow({
+          livekit_egress_id: null,
+          status: "FAILED",
+          audio_file_key: expectedAudioFileKey,
+          ended_at: endedAt,
+          error_message: "LiveKit Egress start failed"
+        });
+      }
+    ]
+  });
+  const { service, liveKitEgressService } = createSubject(database);
+
+  await assert.rejects(
+    () => service.startRecording(currentUserId, workspaceId, meetingId),
+    /persist egress id failed/
+  );
+  assert.equal(liveKitEgressService.startCalls.length, 1);
+  assert.deepEqual(liveKitEgressService.stopCalls, [
+    {
+      livekitEgressId: "egress-1"
+    }
+  ]);
+}
+
+{
+  const { service, liveKitEgressService } = createSubject(
+    new FakeDatabase({
+      queryOneRows: [currentMeetingRow(), participantRow(), recordingRow()]
+    })
+  );
+
+  const result = await service.startRecording(
+    currentUserId,
+    workspaceId,
+    meetingId
+  );
+
+  assert.equal(result.recording.id, recordingId);
+  assert.equal(result.recording.status, "RUNNING");
+  assert.deepEqual(liveKitEgressService.startCalls, []);
+}
+
+{
+  const expectedAudioFileKey = `recordings/meetings/workspaces/${workspaceId}/meetings/${meetingId}/recordings/${recordingId}.mp3`;
+  const { service, liveKitEgressService } = createSubject(
+    new FakeDatabase({
+      queryOneRows: [
+        currentMeetingRow({
+          recording_id: null,
+          recording_meeting_id: null,
+          recording_livekit_egress_id: null,
+          recording_status: null,
+          recording_started_at: null
+        }),
+        participantRow(),
+        null,
+        { id: recordingId },
+        (text, values) => {
+          assert.match(text, /INSERT INTO meeting_recordings/);
+          assert.match(text, /'RUNNING'/);
+          assert.deepEqual(values, [
+            recordingId,
+            meetingId,
+            null,
+            expectedAudioFileKey
+          ]);
+          return recordingRow({
+            livekit_egress_id: null,
+            audio_file_key: expectedAudioFileKey
+          });
+        },
+        (text, values) => {
+          assert.match(text, /UPDATE meeting_recordings/);
+          assert.match(text, /status = 'FAILED'/);
+          assert.deepEqual(values, [recordingId, "LiveKit Egress start failed"]);
+          return recordingRow({
+            livekit_egress_id: null,
+            status: "FAILED",
+            audio_file_key: expectedAudioFileKey,
+            ended_at: endedAt,
+            error_message: "LiveKit Egress start failed"
+          });
+        }
+      ]
+    }),
+    new FakeLiveKitTokenService(),
+    new FakeLiveKitEgressService({ startShouldFail: true })
+  );
+
+  const result = await service.startRecording(
+    currentUserId,
+    workspaceId,
+    meetingId
+  );
+
+  assert.equal(result.recording.status, "FAILED");
+  assert.equal(result.recording.errorMessage, "LiveKit Egress start failed");
+  assert.equal(liveKitEgressService.startCalls.length, 1);
+}
+
+{
+  const { service, liveKitEgressService } = createSubject(
+    new FakeDatabase({
+      queryOneRows: [
+        currentMeetingRow({
+          recording_id: null,
+          recording_meeting_id: null,
+          recording_livekit_egress_id: null,
+          recording_status: null,
+          recording_started_at: null
+        }),
+        participantRow({
+          left_at: leftAt
+        })
+      ]
+    })
+  );
+
+  await assert.rejects(
+    () => service.startRecording(currentUserId, workspaceId, meetingId),
+    (error) => {
+      assert.equal(error.getStatus(), 403);
+      assert.equal(error.getResponse().error.code, "FORBIDDEN");
+      return true;
+    }
+  );
+  assert.deepEqual(liveKitEgressService.startCalls, []);
+}
+
+{
+  const expectedAudioFileKey = `recordings/meetings/workspaces/${workspaceId}/meetings/${meetingId}/recordings/${recordingId}.mp3`;
+  const { service, liveKitEgressService } = createSubject(
+    new FakeDatabase({
+      queryOneRows: [
+        currentMeetingRow(),
+        participantRow(),
+        recordingRow(),
+        (text, values) => {
+          assert.match(text, /UPDATE meeting_recordings/);
+          assert.match(text, /status = 'COMPLETED'/);
+          assert.match(text, /audio_file_url = NULL/);
+          assert.deepEqual(values, [
+            recordingId,
+            expectedAudioFileKey,
+            180,
+            8192
+          ]);
+          return recordingRow({
+            status: "COMPLETED",
+            audio_file_key: expectedAudioFileKey,
+            duration_sec: 180,
+            file_size_bytes: "8192",
+            ended_at: endedAt
+          });
+        },
+        (text, values) => {
+          assert.match(text, /FROM meeting_reports/);
+          assert.match(text, /recording_id = \$2/);
+          assert.deepEqual(values, [meetingId, recordingId]);
+          return null;
+        },
+        (text, values) => {
+          assert.match(text, /INSERT INTO meeting_reports/);
+          assert.match(text, /'PROCESSING'/);
+          assert.deepEqual(values, [meetingId, recordingId]);
+          return meetingReportRow({
+            status: "PROCESSING"
+          });
+        }
+      ]
+    })
+  );
+
+  const result = await service.endRecordingAndCreateReport(
+    currentUserId,
+    workspaceId,
+    meetingId,
+    recordingId
+  );
+
+  assert.equal(result.recording.status, "COMPLETED");
+  assert.equal(result.recording.audioFileKey, expectedAudioFileKey);
+  assert.equal(result.recording.audioFileUrl, null);
+  assert.equal(result.recording.durationSec, 180);
+  assert.equal(result.recording.fileSizeBytes, 8192);
+  assert.equal(result.report.id, reportId);
+  assert.equal(result.report.status, "PROCESSING");
+  assert.deepEqual(liveKitEgressService.stopCalls, [
+    {
+      livekitEgressId: "egress-1"
+    }
+  ]);
+}
+
+{
+  const { service, liveKitEgressService } = createSubject(
+    new FakeDatabase({
+      queryOneRows: [
+        currentMeetingRow(),
+        participantRow(),
+        recordingRow({
+          status: "COMPLETED",
+          duration_sec: 120,
+          ended_at: endedAt
+        }),
+        meetingReportRow({
+          status: "PROCESSING"
+        })
+      ]
+    })
+  );
+
+  const result = await service.endRecordingAndCreateReport(
+    currentUserId,
+    workspaceId,
+    meetingId,
+    recordingId
+  );
+
+  assert.equal(result.recording.status, "COMPLETED");
+  assert.equal(result.report.id, reportId);
+  assert.deepEqual(liveKitEgressService.stopCalls, []);
+}
+
+{
+  const { service, liveKitEgressService } = createSubject(
+    new FakeDatabase({
+      queryOneRows: [
+        currentMeetingRow(),
+        participantRow(),
+        recordingRow(),
+        (text, values) => {
+          assert.match(text, /UPDATE meeting_recordings/);
+          assert.match(text, /status = 'FAILED'/);
+          assert.deepEqual(values, [recordingId, "LiveKit Egress stop failed"]);
+          return recordingRow({
+            status: "FAILED",
+            ended_at: endedAt,
+            error_message: "LiveKit Egress stop failed"
+          });
+        }
+      ]
+    }),
+    new FakeLiveKitTokenService(),
+    new FakeLiveKitEgressService({ stopShouldFail: true })
+  );
+
+  const result = await service.endRecordingAndCreateReport(
+    currentUserId,
+    workspaceId,
+    meetingId,
+    recordingId
+  );
+
+  assert.equal(result.recording.status, "FAILED");
+  assert.equal(result.recording.errorMessage, "LiveKit Egress stop failed");
+  assert.equal(liveKitEgressService.stopCalls.length, 1);
 }
 
 {

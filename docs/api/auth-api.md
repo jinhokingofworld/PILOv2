@@ -2,14 +2,13 @@
 
 PILO 로그인과 bearer session 발급 API를 정의한다.
 
-이 문서의 GitHub OAuth는 PILO 로그인용이며, 1인 MVP에서는 GitHub Review 제출용
-사용자 OAuth 연결도 함께 완료한다. 따라서 GitHub 로그인 callback은
-`users.github_access_token_encrypted`, `github_token_scope`,
-`github_connected_at`, `github_revoked_at`을 함께 갱신한다.
+이 문서의 GitHub OAuth는 PILO 로그인용이다. GitHub 로그인 callback은 사용자
+식별과 session 발급에 필요한 profile만 저장하고, GitHub App 연동용 OAuth
+token 컬럼은 갱신하지 않는다.
 
-이 로그인용 OAuth token은 GitHub App installation lookup에 사용할 수 있다고
-가정하지 않는다. GitHub Integration의 installation 검증은 GitHub App user
-access token으로 `/user/installations`를 조회할 수 있어야 한다.
+GitHub App installation lookup, GitHub 원본 조회, GitHub Review 제출에 필요한
+사용자 GitHub OAuth 연결은 GitHub Integration API의 `/me/github/oauth/start`
+흐름에서 완료한다.
 
 ## 공통 규칙
 
@@ -32,7 +31,6 @@ access token으로 `/user/installations`를 조회할 수 있어야 한다.
 | `GOOGLE_OAUTH_CLIENT_SECRET` | Google 로그인 OAuth client secret |
 | `GITHUB_LOGIN_CLIENT_ID` | GitHub 로그인 OAuth client id |
 | `GITHUB_LOGIN_CLIENT_SECRET` | GitHub 로그인 OAuth client secret |
-| `GITHUB_TOKEN_ENCRYPTION_KEY` | GitHub login access token 암호화 키 |
 | `SESSION_SECRET` | OAuth state 서명 secret |
 | `AUTH_SESSION_TTL_SECONDS` | bearer session 만료 시간. 기본값 30일 |
 | `OAUTH_STATE_TTL_SECONDS` | OAuth state 만료 시간. 기본값 10분 |
@@ -147,15 +145,16 @@ WorkspaceService를 통해 MVP 기본 Workspace를 보장한 뒤 `user_sessions`
 
 ### 성공 처리
 
-서버는 GitHub profile 기준으로 `users` row를 생성하거나 갱신하고,
-GitHub access token을 암호화 저장한다. 이후 WorkspaceService를 통해 MVP 기본
-Workspace를 보장한 뒤 `user_sessions` row를 생성하고 frontend로 redirect한다.
+서버는 GitHub profile 기준으로 `users` row를 생성하거나 갱신한다. GitHub
+login OAuth access token은 profile 조회에만 사용하고 DB에 저장하지 않는다.
+이후 WorkspaceService를 통해 MVP 기본 Workspace를 보장한 뒤 `user_sessions`
+row를 생성하고 frontend로 redirect한다.
 
-GitHub login OAuth scope는 `repo read:user user:email`을 요청한다.
-`github_access_token_encrypted`에는 암호화된 access token을 저장하고,
-`github_token_scope`에는 provider가 반환한 scope를 저장한다.
-`github_connected_at`은 현재 시각으로 기록하고 `github_revoked_at`은 `NULL`로
-갱신한다.
+GitHub login OAuth scope는 `read:user user:email`을 요청한다.
+`users.github_user_id`, `github_login`, 이름, 이메일, avatar만 로그인 profile
+동기화 대상으로 사용한다. `github_access_token_encrypted`, `github_token_scope`,
+`github_connected_at`, `github_revoked_at`은 GitHub Integration API의 GitHub
+App user OAuth 연결 상태로만 갱신한다.
 
 ```text
 {FRONTEND_URL}/login/callback#access_token=<pilo_access_token>&expires_at=<iso>&return_to=/calendar

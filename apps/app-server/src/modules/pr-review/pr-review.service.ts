@@ -128,6 +128,22 @@ interface ReviewFileDetailRow extends QueryResultRow {
   latest_decision_reviewed_at: Date | string | null;
 }
 
+type PrReviewDecisionStatus = Exclude<PrReviewFileReviewStatus, "not_reviewed">;
+
+interface ReviewFileDecisionTargetRow extends QueryResultRow {
+  id: string;
+  session_id: string;
+}
+
+interface ReviewFileDecisionRow extends QueryResultRow {
+  id: string;
+  review_file_id: string;
+  status: PrReviewDecisionStatus;
+  comment: string | null;
+  reviewed_by_user_id: string;
+  reviewed_at: Date | string;
+}
+
 interface ReviewFileFlowMembershipRow extends QueryResultRow {
   review_flow_file_id: string;
   flow_id: string;
@@ -137,6 +153,16 @@ interface ReviewFileFlowMembershipRow extends QueryResultRow {
 
 interface PrReviewSessionUpdateDraft {
   status?: unknown;
+}
+
+interface PrReviewFileDecisionDraft {
+  status?: unknown;
+  comment?: unknown;
+}
+
+interface ReviewProgressRow extends QueryResultRow {
+  reviewed_count: number | string;
+  total_file_count: number | string;
 }
 
 interface PrReviewAnalysis {
@@ -312,6 +338,20 @@ export interface PrReviewLatestDecisionPayload {
   reviewedAt: string | null;
 }
 
+export interface PrReviewFileDecisionPayload {
+  id: string;
+  reviewFileId: string;
+  status: PrReviewDecisionStatus;
+  comment: string | null;
+  reviewedByUserId: string;
+  reviewedAt: string;
+}
+
+export interface PrReviewFileDecisionListPayload {
+  reviewFileId: string;
+  decisions: PrReviewFileDecisionPayload[];
+}
+
 export interface PrReviewFilePayload {
   id: string;
   sessionId: string;
@@ -363,6 +403,12 @@ const SESSION_STATUSES: readonly PrReviewSessionStatus[] = [
   "submitted",
   "failed",
   "archived"
+];
+
+const REVIEW_DECISION_STATUSES: readonly PrReviewDecisionStatus[] = [
+  "approved",
+  "discussion_needed",
+  "unknown"
 ];
 
 const LARGE_DIFF_LINE_THRESHOLD = 1000;
@@ -608,6 +654,80 @@ export class PrReviewService {
     );
 
     return this.mapReviewFile(file, flowMemberships);
+  }
+
+  async updateReviewFileDecision(
+    currentUserId: string,
+    workspaceId: string,
+    reviewFileId: string,
+    body: unknown
+  ): Promise<PrReviewFilePayload> {
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+
+    const reviewFileUuid = this.requireUuid(reviewFileId, "reviewFileId");
+    const input = this.normalizeReviewDecision(body);
+    const updatedFile = await this.database.transaction(async (transaction) => {
+      const file = await this.updateReviewFileDecisionState(transaction, {
+        workspaceId,
+        reviewFileId: reviewFileUuid,
+        currentUserId,
+        status: input.status,
+        comment: input.comment
+      });
+
+      if (!file) {
+        return null;
+      }
+
+      await this.insertReviewFileDecision(transaction, {
+        reviewFileId: file.id,
+        currentUserId,
+        status: input.status,
+        comment: input.comment
+      });
+      await this.syncReviewSessionReviewProgress(transaction, file.session_id);
+
+      return file;
+    });
+
+    if (!updatedFile) {
+      throw notFound("Review file not found");
+    }
+
+    const [file, flowMemberships] = await Promise.all([
+      this.findReviewFile(workspaceId, updatedFile.id),
+      this.listReviewFileFlowMemberships(workspaceId, updatedFile.id)
+    ]);
+
+    if (!file) {
+      throw notFound("Review file not found");
+    }
+
+    return this.mapReviewFile(file, flowMemberships);
+  }
+
+  async listReviewFileDecisions(
+    currentUserId: string,
+    workspaceId: string,
+    reviewFileId: string
+  ): Promise<PrReviewFileDecisionListPayload> {
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+
+    const reviewFileUuid = this.requireUuid(reviewFileId, "reviewFileId");
+    const file = await this.findReviewFile(workspaceId, reviewFileUuid);
+    if (!file) {
+      throw notFound("Review file not found");
+    }
+
+    const decisions = await this.listReviewFileDecisionRows(
+      workspaceId,
+      reviewFileUuid
+    );
+
+    return {
+      reviewFileId: file.id,
+      decisions: decisions.map((decision) => this.mapDecision(decision))
+    };
   }
 
   async getReviewFileDiff(
@@ -1114,6 +1234,143 @@ export class PrReviewService {
     );
   }
 
+  private async listReviewFileDecisionRows(
+    workspaceId: string,
+    reviewFileId: string
+  ): Promise<ReviewFileDecisionRow[]> {
+    return this.database.query<ReviewFileDecisionRow>(
+      `
+        SELECT
+          decision.id,
+          decision.review_file_id,
+          decision.status,
+          decision.comment,
+          decision.reviewed_by_user_id,
+          decision.reviewed_at
+        FROM file_review_decisions AS decision
+        JOIN review_files AS review_file
+          ON review_file.id = decision.review_file_id
+        JOIN pr_review_sessions AS review_session
+          ON review_session.id = review_file.session_id
+        JOIN github_pull_requests AS pull_request
+          ON pull_request.id = review_session.pull_request_id
+        WHERE pull_request.workspace_id = $1
+          AND review_file.id = $2
+        ORDER BY decision.reviewed_at DESC, decision.id DESC
+      `,
+      [workspaceId, this.requireUuid(reviewFileId, "reviewFileId")]
+    );
+  }
+
+  private async updateReviewFileDecisionState(
+    transaction: DatabaseTransaction,
+    input: {
+      workspaceId: string;
+      reviewFileId: string;
+      currentUserId: string;
+      status: PrReviewDecisionStatus;
+      comment: string | null;
+    }
+  ): Promise<ReviewFileDecisionTargetRow | null> {
+    return transaction.queryOne<ReviewFileDecisionTargetRow>(
+      `
+        UPDATE review_files AS review_file
+        SET current_status = $3,
+            comment = $4,
+            reviewed_by_user_id = $5,
+            reviewed_at = now()
+        FROM pr_review_sessions AS review_session
+        JOIN github_pull_requests AS pull_request
+          ON pull_request.id = review_session.pull_request_id
+        WHERE review_file.session_id = review_session.id
+          AND pull_request.workspace_id = $1
+          AND review_file.id = $2
+        RETURNING review_file.id, review_file.session_id
+      `,
+      [
+        input.workspaceId,
+        input.reviewFileId,
+        input.status,
+        input.comment,
+        input.currentUserId
+      ]
+    );
+  }
+
+  private async insertReviewFileDecision(
+    transaction: DatabaseTransaction,
+    input: {
+      reviewFileId: string;
+      currentUserId: string;
+      status: PrReviewDecisionStatus;
+      comment: string | null;
+    }
+  ): Promise<void> {
+    const decision = await transaction.queryOne<{ id: string }>(
+      `
+        INSERT INTO file_review_decisions (
+          review_file_id,
+          reviewed_by_user_id,
+          status,
+          comment
+        )
+        VALUES ($1, $2, $3, $4)
+        RETURNING id
+      `,
+      [input.reviewFileId, input.currentUserId, input.status, input.comment]
+    );
+
+    if (!decision) {
+      throw badRequest("Review decision could not be saved");
+    }
+  }
+
+  private async syncReviewSessionReviewProgress(
+    transaction: DatabaseTransaction,
+    reviewSessionId: string
+  ): Promise<void> {
+    const progress = await transaction.queryOne<ReviewProgressRow>(
+      `
+        SELECT
+          COUNT(*) FILTER (WHERE current_status <> 'not_reviewed') AS reviewed_count,
+          COUNT(*) AS total_file_count
+        FROM review_files
+        WHERE session_id = $1
+      `,
+      [reviewSessionId]
+    );
+
+    if (!progress) {
+      throw badRequest("Review session progress could not be calculated");
+    }
+
+    const reviewedCount = Number(progress.reviewed_count);
+    const totalFileCount = Number(progress.total_file_count);
+    const updated = await transaction.queryOne<{ id: string }>(
+      `
+        UPDATE pr_review_sessions AS review_session
+        SET reviewed_count = $2,
+            total_file_count = $3,
+            status = CASE
+              WHEN review_session.status IN ('submitted', 'archived')
+                THEN review_session.status
+              WHEN $2 = $3
+                THEN 'ready_to_submit'
+              WHEN review_session.status = 'ready_to_submit'
+                THEN 'reviewing'
+              ELSE review_session.status
+            END
+        WHERE review_session.id = $1
+        RETURNING review_session.id
+      `,
+      [reviewSessionId, reviewedCount, totalFileCount]
+    );
+
+    if (!updated) {
+      throw badRequest("Review session progress could not be updated");
+    }
+  }
+
   private async insertReviewSession(
     transaction: DatabaseTransaction,
     input: {
@@ -1468,8 +1725,45 @@ export class PrReviewService {
     };
   }
 
+  private normalizeReviewDecision(body: unknown): {
+    status: PrReviewDecisionStatus;
+    comment: string | null;
+  } {
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      throw badRequest("Request body must be an object");
+    }
+
+    const draft = body as PrReviewFileDecisionDraft;
+    if (
+      typeof draft.status !== "string" ||
+      !this.isReviewDecisionStatus(draft.status)
+    ) {
+      throw badRequest("status must be approved, discussion_needed, or unknown");
+    }
+
+    if (draft.comment === undefined || draft.comment === null) {
+      return {
+        status: draft.status,
+        comment: null
+      };
+    }
+
+    if (typeof draft.comment !== "string") {
+      throw badRequest("comment must be a string or null");
+    }
+
+    return {
+      status: draft.status,
+      comment: draft.comment
+    };
+  }
+
   private isSessionStatus(value: string): value is PrReviewSessionStatus {
     return SESSION_STATUSES.includes(value as PrReviewSessionStatus);
+  }
+
+  private isReviewDecisionStatus(value: string): value is PrReviewDecisionStatus {
+    return REVIEW_DECISION_STATUSES.includes(value as PrReviewDecisionStatus);
   }
 
   private requireUuid(value: string, field: string): string {
@@ -1612,6 +1906,19 @@ export class PrReviewService {
             reviewedAt: this.toNullableIsoString(file.latest_decision_reviewed_at)
           }
         : null
+    };
+  }
+
+  private mapDecision(
+    decision: ReviewFileDecisionRow
+  ): PrReviewFileDecisionPayload {
+    return {
+      id: decision.id,
+      reviewFileId: decision.review_file_id,
+      status: decision.status,
+      comment: decision.comment,
+      reviewedByUserId: decision.reviewed_by_user_id,
+      reviewedAt: this.toIsoString(decision.reviewed_at)
     };
   }
 

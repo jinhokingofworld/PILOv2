@@ -6,8 +6,8 @@ import type {
   TLShapeId,
   TLShapePartial,
 } from "tldraw";
-import type { PiloCodeBlockShape } from "./PiloCodeBlockShapeUtil";
-import type { PiloStickyNoteShape } from "./PiloStickyNoteShapeUtil";
+import type { PiloCodeBlockShape } from "./code-block/PiloCodeBlockShapeUtil";
+import type { PiloStickyNoteShape } from "./sticky-note/PiloStickyNoteShapeUtil";
 
 export type PiloFrameShape = Extract<TLShape, { type: "frame" }>;
 export type PiloFramePartial = TLShapePartial<PiloFrameShape> & {

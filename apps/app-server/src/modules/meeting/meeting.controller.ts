@@ -14,6 +14,7 @@ import { CurrentUserId } from "../../common/current-user.decorator";
 import {
   CurrentRecordingPayload,
   CurrentMeetingPayload,
+  EndRecordingPayload,
   JoinMeetingPayload,
   LeaveMeetingPayload,
   MeetingDetailPayload,
@@ -21,6 +22,7 @@ import {
   ParticipantListPayload,
   PendingMeetingPayload,
   RecordingListPayload,
+  StartRecordingPayload,
   StartMeetingPayload
 } from "./meeting.service";
 
@@ -102,7 +104,7 @@ export class MeetingController {
     @CurrentUserId() currentUserId: string,
     @Param("workspaceId") workspaceId: string,
     @Param("meetingId") meetingId: string
-  ): Promise<ApiSuccessResponse<PendingMeetingPayload>> {
+  ): Promise<ApiSuccessResponse<StartRecordingPayload>> {
     const result = await this.meetingService.startRecording(
       currentUserId,
       workspaceId,
@@ -117,7 +119,7 @@ export class MeetingController {
     @Param("workspaceId") workspaceId: string,
     @Param("meetingId") meetingId: string,
     @Param("recordingId") recordingId: string
-  ): Promise<ApiSuccessResponse<PendingMeetingPayload>> {
+  ): Promise<ApiSuccessResponse<EndRecordingPayload>> {
     const result = await this.meetingService.endRecordingAndCreateReport(
       currentUserId,
       workspaceId,

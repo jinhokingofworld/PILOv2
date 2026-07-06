@@ -8,7 +8,7 @@ User API는 PILO API 호출의 현재 로그인 사용자 정보를 제공한다
 - 도메인 API가 사용할 `currentUserId` 기준 제공
 
 로그인 OAuth 시작/콜백, session 발급/갱신, GitHub Review 제출용 사용자 GitHub
-OAuth 연결은 이 문서의 범위가 아니다. 사용자 GitHub OAuth 연결 상태는
+App user OAuth 연결은 이 문서의 범위가 아니다. 사용자 GitHub App user OAuth 연결 상태는
 GitHub Integration API의 `/me/github`를 사용한다.
 
 ## 데이터 규칙
@@ -68,7 +68,7 @@ GET /api/v1/me
 | Meeting | `meeting_participants.user_id`, `ended_by_id` |
 | Calendar | `calendar_events.created_by` |
 | Canvas | `canvas_user_states.user_id` |
-| GitHub Integration | `users.github_access_token_encrypted` |
+| GitHub Integration | `users.github_access_token_encrypted` GitHub App user OAuth 연결 상태 |
 
 ## MVP 제외
 

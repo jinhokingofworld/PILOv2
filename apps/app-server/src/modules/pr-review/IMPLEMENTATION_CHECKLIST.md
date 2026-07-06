@@ -125,15 +125,15 @@
 
 ## 7. File Review Decision
 
-- [ ] `PATCH /workspaces/{workspaceId}/github/review-files/{reviewFileId}/review`를 구현한다.
-- [ ] `approved`, `discussion_needed`, `unknown`만 허용한다.
-- [ ] `review_files.current_status`를 갱신한다.
-- [ ] `review_files.comment`를 갱신한다.
-- [ ] status가 선택되면 `reviewed_by_user_id`, `reviewed_at`을 설정한다.
-- [ ] `file_review_decisions` history row를 추가한다.
-- [ ] `reviewed_count`를 다시 계산한다.
-- [ ] 모든 file에 review status가 있으면 session status를 `ready_to_submit`으로 바꾼다.
-- [ ] `GET /workspaces/{workspaceId}/github/review-files/{reviewFileId}/decisions`를
+- [x] `PATCH /workspaces/{workspaceId}/github/review-files/{reviewFileId}/review`를 구현한다.
+- [x] `approved`, `discussion_needed`, `unknown`만 허용한다.
+- [x] `review_files.current_status`를 갱신한다.
+- [x] `review_files.comment`를 갱신한다.
+- [x] status가 선택되면 `reviewed_by_user_id`, `reviewed_at`을 설정한다.
+- [x] `file_review_decisions` history row를 추가한다.
+- [x] `reviewed_count`를 다시 계산한다.
+- [x] 모든 file에 review status가 있으면 session status를 `ready_to_submit`으로 바꾼다.
+- [x] `GET /workspaces/{workspaceId}/github/review-files/{reviewFileId}/decisions`를
   구현한다.
 
 ## 8. GitHub Review 제출

@@ -41,17 +41,17 @@ import { useAuthSession } from "@/features/auth";
 import {
   PiloCanvasRuntime,
   type CanvasBoardDetail,
-} from "@/features/canvas/components/engine/PiloCanvasRuntime";
+} from "@/features/canvas/components/engine/runtime/PiloCanvasRuntime";
 import {
   type PiloCanvasActions,
   type PiloCanvasTool,
   type PiloDrawingPreset,
   type PiloInsertableTool,
-} from "@/features/canvas/components/engine/PiloTldrawCanvas";
+} from "@/features/canvas/components/engine/surface/PiloTldrawCanvas";
 import {
   piloStickyNoteColors,
   type PiloStickyNoteColor,
-} from "@/features/canvas/components/engine/PiloStickyNoteShapeUtil";
+} from "@/features/canvas/components/engine/shapes/sticky-note/PiloStickyNoteShapeUtil";
 import { cn } from "@/lib/utils";
 
 type CanvasBoardState = {
