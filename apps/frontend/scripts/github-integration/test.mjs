@@ -92,7 +92,7 @@ assert.match(githubApiClient, /listGithubPullRequests/);
 assert.match(githubApiClient, /startGithubSyncRun/);
 assert.match(githubApiClient, /listGithubSyncRuns/);
 assert.match(githubApiClient, /Authorization/);
-assert.match(githubApiClient, /credentials: "same-origin"/);
+assert.match(githubApiClient, /credentials: "include"/);
 assert.match(githubApiClient, /success === true/);
 assert.doesNotMatch(githubApiClient, /pilo_access_token/);
 assert.match(githubPanel, /useAuthSession/);

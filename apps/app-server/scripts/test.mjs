@@ -63,7 +63,8 @@ const terraformSecretsModule = await readSource(
 
 assert.match(main, /setGlobalPrefix\("api\/v1"\)/);
 assert.match(main, /enableCors/);
-assert.match(main, /credentials: false/);
+assert.match(main, /credentials: true/);
+assert.match(main, /FRONTEND_URL/);
 assert.match(main, /methods: \["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"\]/);
 assert.match(main, /allowedHeaders: \["Authorization", "Content-Type", "Accept"\]/);
 assert.match(controller, /@Get\("health"\)/);

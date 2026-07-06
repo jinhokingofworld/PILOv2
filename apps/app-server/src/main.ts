@@ -4,6 +4,8 @@ import { FastifyAdapter, NestFastifyApplication } from "@nestjs/platform-fastify
 import { AppModule } from "./app.module";
 
 async function bootstrap() {
+  const corsOrigin =
+    process.env.CORS_ORIGIN ?? process.env.FRONTEND_URL ?? "http://localhost:3000";
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
     new FastifyAdapter(),
@@ -15,8 +17,8 @@ async function bootstrap() {
 
   app.setGlobalPrefix("api/v1");
   app.enableCors({
-    origin: process.env.CORS_ORIGIN ?? "*",
-    credentials: false,
+    origin: corsOrigin,
+    credentials: true,
     methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Authorization", "Content-Type", "Accept"]
   });
