@@ -39,6 +39,17 @@ interface CanvasShapeDeleteRow extends QueryResultRow {
   deleted_at: Date | string | null;
 }
 
+interface CanvasUserStateRow extends QueryResultRow {
+  canvas_id: string;
+  user_id: string;
+  entered_at: Date | string;
+  left_at: Date | string | null;
+}
+
+interface CanvasShapeCleanupRow extends QueryResultRow {
+  deleted_count: number | string;
+}
+
 export interface CreateCanvasRequest {
   title?: unknown;
 }
@@ -58,6 +69,24 @@ export interface CreateCanvasShapeRequest {
 }
 
 export type UpdateCanvasShapeRequest = Partial<CreateCanvasShapeRequest>;
+
+export interface UpdateCanvasViewSettingRequest {
+  zoom?: unknown;
+  viewportX?: unknown;
+  viewportY?: unknown;
+}
+
+export interface ListCanvasShapesQuery {
+  x?: unknown;
+  y?: unknown;
+  width?: unknown;
+  height?: unknown;
+  margin?: unknown;
+}
+
+export interface SyncCanvasShapesBatchRequest {
+  operations?: unknown;
+}
 
 export interface CanvasViewSettingPayload {
   zoom: number;
@@ -83,6 +112,8 @@ export interface CanvasShapePayload {
   deletedAt: string | null;
 }
 
+export type CanvasShapeSummaryPayload = CanvasShapePayload;
+
 export interface CanvasBoardPayload {
   id: string;
   workspaceId: string;
@@ -107,6 +138,23 @@ export interface CanvasShapeDeletePayload {
   deletedAt: string;
 }
 
+export interface CanvasShapeBatchPayload {
+  created: number;
+  updated: number;
+  deleted: number;
+}
+
+export interface CanvasUserStatePayload {
+  canvasId: string;
+  userId: string;
+  enteredAt: string;
+  leftAt: string | null;
+}
+
+export interface CanvasLeavePayload extends CanvasUserStatePayload {
+  permanentlyDeletedShapeCount: number;
+}
+
 interface ShapeWriteValues {
   shapeType?: string;
   title?: string | null;
@@ -120,9 +168,34 @@ interface ShapeWriteValues {
   rawShape?: Record<string, unknown>;
 }
 
+interface ViewportBoundsValues {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  margin: number;
+}
+
+type CanvasShapeBatchOperationValues =
+  | {
+      type: "create";
+      shapeId: string;
+      payload: CreateCanvasShapeRequest;
+    }
+  | {
+      type: "update";
+      shapeId: string;
+      payload: UpdateCanvasShapeRequest;
+    }
+  | {
+      type: "delete";
+      shapeId: string;
+    };
+
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_CANVAS_TITLE_LENGTH = 120;
+const MAX_CANVAS_SHAPE_BATCH_OPERATIONS = 100;
 const ALLOWED_SHAPE_TYPES = new Set([
   "sticky-note",
   "text",
@@ -227,12 +300,11 @@ export class CanvasService {
       throw notFound("Canvas not found");
     }
 
-    const shapes = await this.listActiveShapes(canvas.id);
-    const payload = this.mapCanvas(canvas, shapes.length);
+    const payload = this.mapCanvas(canvas);
 
     return {
       ...payload,
-      shapes,
+      shapes: [],
       viewSetting: {
         zoom: payload.zoom,
         viewportX: payload.viewportX,
@@ -240,6 +312,57 @@ export class CanvasService {
       },
       userState: null
     };
+  }
+
+  async listShapesInViewport(
+    currentUserId: string,
+    workspaceId: string,
+    canvasId: string,
+    input: ListCanvasShapesQuery
+  ): Promise<CanvasShapeSummaryPayload[]> {
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+
+    const canvas = await this.findCanvas(workspaceId, canvasId);
+    if (!canvas) {
+      throw notFound("Canvas not found");
+    }
+
+    const bounds = this.validateViewportBounds(input);
+    const minX = bounds.x - bounds.margin;
+    const minY = bounds.y - bounds.margin;
+    const maxX = bounds.x + bounds.width + bounds.margin;
+    const maxY = bounds.y + bounds.height + bounds.margin;
+    const shapes = await this.database.query<CanvasShapeRow>(
+      `
+        SELECT
+          id,
+          canvas_id,
+          shape_type,
+          title,
+          text_content,
+          x,
+          y,
+          width,
+          height,
+          rotation,
+          z_index,
+          raw_shape,
+          created_at,
+          updated_at,
+          deleted_at
+        FROM canvas_freeform_shapes
+        WHERE canvas_id = $1
+          AND deleted_at IS NULL
+          AND x <= $3
+          AND (x + COALESCE(width, 0)) >= $2
+          AND y <= $5
+          AND (y + COALESCE(height, 0)) >= $4
+        ORDER BY z_index ASC, updated_at ASC, id ASC
+      `,
+      [canvas.id, minX, maxX, minY, maxY]
+    );
+
+    return shapes.map((shape) => this.mapShape(shape));
   }
 
   async createShape(
@@ -327,6 +450,380 @@ export class CanvasService {
     }
 
     return this.mapShape(shape);
+  }
+
+  async syncShapesBatch(
+    currentUserId: string,
+    workspaceId: string,
+    canvasId: string,
+    input: SyncCanvasShapesBatchRequest
+  ): Promise<CanvasShapeBatchPayload> {
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+
+    const canvas = await this.findCanvas(workspaceId, canvasId);
+    if (!canvas) {
+      throw notFound("Canvas not found");
+    }
+
+    const operations = this.validateShapeBatchOperations(input);
+
+    return this.database.transaction(async (transaction) => {
+      const result: CanvasShapeBatchPayload = {
+        created: 0,
+        updated: 0,
+        deleted: 0
+      };
+
+      for (const operation of operations) {
+        if (operation.type === "create") {
+          const values = this.validateShapeCreate(operation.payload);
+          const shape = await transaction.queryOne<CanvasShapeRow>(
+            `
+              INSERT INTO canvas_freeform_shapes (
+                id,
+                canvas_id,
+                shape_type,
+                title,
+                text_content,
+                x,
+                y,
+                width,
+                height,
+                rotation,
+                z_index,
+                raw_shape,
+                deleted_at
+              )
+              VALUES (
+                $1,
+                $2,
+                $3,
+                $4,
+                $5,
+                $6,
+                $7,
+                $8,
+                $9,
+                $10,
+                $11,
+                $12::jsonb,
+                NULL
+              )
+              RETURNING
+                id,
+                canvas_id,
+                shape_type,
+                title,
+                text_content,
+                x,
+                y,
+                width,
+                height,
+                rotation,
+                z_index,
+                raw_shape,
+                created_at,
+                updated_at,
+                deleted_at
+            `,
+            [
+              operation.shapeId,
+              canvas.id,
+              values.shapeType,
+              values.title ?? null,
+              values.textContent ?? null,
+              values.x ?? 0,
+              values.y ?? 0,
+              values.width ?? null,
+              values.height ?? null,
+              values.rotation ?? 0,
+              values.zIndex ?? 0,
+              JSON.stringify(values.rawShape ?? {})
+            ]
+          );
+
+          if (!shape) {
+            throw badRequest("Canvas shape could not be created");
+          }
+
+          result.created += 1;
+          continue;
+        }
+
+        if (operation.type === "update") {
+          const values = this.validateShapeUpdate(operation.payload);
+          const updates: string[] = [];
+          const queryValues: unknown[] = [operation.shapeId, canvas.id];
+
+          this.addUpdate(updates, queryValues, "shape_type", values.shapeType);
+          this.addUpdate(updates, queryValues, "title", values.title);
+          this.addUpdate(updates, queryValues, "text_content", values.textContent);
+          this.addUpdate(updates, queryValues, "x", values.x);
+          this.addUpdate(updates, queryValues, "y", values.y);
+          this.addUpdate(updates, queryValues, "width", values.width);
+          this.addUpdate(updates, queryValues, "height", values.height);
+          this.addUpdate(updates, queryValues, "rotation", values.rotation);
+          this.addUpdate(updates, queryValues, "z_index", values.zIndex);
+          this.addUpdate(
+            updates,
+            queryValues,
+            "raw_shape",
+            values.rawShape === undefined
+              ? undefined
+              : JSON.stringify(values.rawShape),
+            values.rawShape === undefined ? "" : "::jsonb"
+          );
+
+          const shape = await transaction.queryOne<CanvasShapeRow>(
+            `
+              UPDATE canvas_freeform_shapes s
+              SET ${updates.join(", ")}
+              WHERE s.id = $1
+                AND s.canvas_id = $2
+                AND s.deleted_at IS NULL
+              RETURNING
+                s.id,
+                s.canvas_id,
+                s.shape_type,
+                s.title,
+                s.text_content,
+                s.x,
+                s.y,
+                s.width,
+                s.height,
+                s.rotation,
+                s.z_index,
+                s.raw_shape,
+                s.created_at,
+                s.updated_at,
+                s.deleted_at
+            `,
+            queryValues
+          );
+
+          if (!shape) {
+            throw notFound("Canvas shape not found");
+          }
+
+          result.updated += 1;
+          continue;
+        }
+
+        const shape = await transaction.queryOne<CanvasShapeDeleteRow>(
+          `
+            UPDATE canvas_freeform_shapes s
+            SET deleted_at = now()
+            WHERE s.id = $1
+              AND s.canvas_id = $2
+              AND s.deleted_at IS NULL
+            RETURNING s.id, s.deleted_at
+          `,
+          [operation.shapeId, canvas.id]
+        );
+
+        if (!shape || !shape.deleted_at) {
+          throw notFound("Canvas shape not found");
+        }
+
+        result.deleted += 1;
+      }
+
+      return result;
+    });
+  }
+
+  async getShapeDetail(
+    currentUserId: string,
+    workspaceId: string,
+    shapeId: string
+  ): Promise<CanvasShapePayload> {
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+
+    const id = this.validateShapeId(shapeId);
+    const shape = await this.database.queryOne<CanvasShapeRow>(
+      `
+        SELECT
+          s.id,
+          s.canvas_id,
+          s.shape_type,
+          s.title,
+          s.text_content,
+          s.x,
+          s.y,
+          s.width,
+          s.height,
+          s.rotation,
+          s.z_index,
+          s.raw_shape,
+          s.created_at,
+          s.updated_at,
+          s.deleted_at
+        FROM canvas_freeform_shapes s
+        INNER JOIN canvas c ON c.id = s.canvas_id
+        WHERE s.id = $1
+          AND c.workspace_id = $2
+          AND c.board_type = 'freeform'
+          AND s.deleted_at IS NULL
+      `,
+      [id, workspaceId]
+    );
+
+    if (!shape) {
+      throw notFound("Canvas shape not found");
+    }
+
+    return this.mapShape(shape);
+  }
+
+  async enterCanvas(
+    currentUserId: string,
+    workspaceId: string,
+    canvasId: string
+  ): Promise<CanvasUserStatePayload> {
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+
+    const canvas = await this.findCanvas(workspaceId, canvasId);
+    if (!canvas) {
+      throw notFound("Canvas not found");
+    }
+
+    const userState = await this.database.queryOne<CanvasUserStateRow>(
+      `
+        INSERT INTO canvas_user_states (
+          canvas_id,
+          user_id,
+          entered_at,
+          left_at
+        )
+        VALUES ($1, $2, now(), NULL)
+        ON CONFLICT (canvas_id, user_id)
+        DO UPDATE SET
+          entered_at = now(),
+          left_at = NULL
+        RETURNING
+          canvas_id,
+          user_id,
+          entered_at,
+          left_at
+      `,
+      [canvas.id, currentUserId]
+    );
+
+    if (!userState) {
+      throw badRequest("Canvas user state could not be recorded");
+    }
+
+    return this.mapCanvasUserState(userState);
+  }
+
+  async leaveCanvas(
+    currentUserId: string,
+    workspaceId: string,
+    canvasId: string
+  ): Promise<CanvasLeavePayload> {
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+
+    const canvas = await this.findCanvas(workspaceId, canvasId);
+    if (!canvas) {
+      throw notFound("Canvas not found");
+    }
+
+    return this.database.transaction(async (transaction) => {
+      const userState = await transaction.queryOne<CanvasUserStateRow>(
+        `
+          INSERT INTO canvas_user_states (
+            canvas_id,
+            user_id,
+            entered_at,
+            left_at
+          )
+          VALUES ($1, $2, now(), now())
+          ON CONFLICT (canvas_id, user_id)
+          DO UPDATE SET
+            left_at = now()
+          RETURNING
+            canvas_id,
+            user_id,
+            entered_at,
+            left_at
+        `,
+        [canvas.id, currentUserId]
+      );
+
+      if (!userState) {
+        throw badRequest("Canvas user state could not be recorded");
+      }
+
+      const cleanup = await transaction.queryOne<CanvasShapeCleanupRow>(
+        `
+          WITH deleted_shapes AS (
+            DELETE FROM canvas_freeform_shapes
+            WHERE canvas_id = $1
+              AND deleted_at IS NOT NULL
+            RETURNING id
+          )
+          SELECT COUNT(*)::int AS deleted_count
+          FROM deleted_shapes
+        `,
+        [canvas.id]
+      );
+
+      return {
+        ...this.mapCanvasUserState(userState),
+        permanentlyDeletedShapeCount: Number(cleanup?.deleted_count ?? 0)
+      };
+    });
+  }
+
+  async updateViewSetting(
+    currentUserId: string,
+    workspaceId: string,
+    canvasId: string,
+    input: UpdateCanvasViewSettingRequest
+  ): Promise<CanvasViewSettingPayload> {
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+
+    const canvas = await this.findCanvas(workspaceId, canvasId);
+    if (!canvas) {
+      throw notFound("Canvas not found");
+    }
+
+    const values = this.validateViewSetting(input);
+    const updatedCanvas = await this.database.queryOne<CanvasRow>(
+      `
+        UPDATE canvas
+        SET
+          zoom = $3,
+          viewport_x = $4,
+          viewport_y = $5
+        WHERE id = $1
+          AND workspace_id = $2
+          AND board_type = 'freeform'
+        RETURNING
+          id,
+          workspace_id,
+          title,
+          board_type,
+          zoom,
+          viewport_x,
+          viewport_y,
+          updated_at,
+          0::int AS shape_count
+      `,
+      [canvas.id, workspaceId, values.zoom, values.viewportX, values.viewportY]
+    );
+
+    if (!updatedCanvas) {
+      throw notFound("Canvas not found");
+    }
+
+    const payload = this.mapCanvas(updatedCanvas);
+
+    return {
+      zoom: payload.zoom,
+      viewportX: payload.viewportX,
+      viewportY: payload.viewportY
+    };
   }
 
   async updateShape(
@@ -441,19 +938,23 @@ export class CanvasService {
     return this.database.queryOne<CanvasRow>(
       `
         SELECT
-          id,
-          workspace_id,
-          title,
-          board_type,
-          zoom,
-          viewport_x,
-          viewport_y,
-          updated_at,
-          0::int AS shape_count
-        FROM canvas
-        WHERE id = $1
-          AND workspace_id = $2
-          AND board_type = 'freeform'
+          c.id,
+          c.workspace_id,
+          c.title,
+          c.board_type,
+          c.zoom,
+          c.viewport_x,
+          c.viewport_y,
+          c.updated_at,
+          COUNT(s.id)::int AS shape_count
+        FROM canvas c
+        LEFT JOIN canvas_freeform_shapes s
+          ON s.canvas_id = c.id
+         AND s.deleted_at IS NULL
+        WHERE c.id = $1
+          AND c.workspace_id = $2
+          AND c.board_type = 'freeform'
+        GROUP BY c.id
       `,
       [canvasId, workspaceId]
     );
@@ -591,6 +1092,125 @@ export class CanvasService {
     return values;
   }
 
+  private validateShapeBatchOperations(
+    input: SyncCanvasShapesBatchRequest
+  ): CanvasShapeBatchOperationValues[] {
+    if (!this.isRecord(input)) {
+      throw badRequest("Canvas shape batch body is required");
+    }
+
+    if (!Array.isArray(input.operations)) {
+      throw badRequest("Canvas shape batch operations must be an array");
+    }
+
+    if (input.operations.length > MAX_CANVAS_SHAPE_BATCH_OPERATIONS) {
+      throw badRequest(
+        `Canvas shape batch operations must be ${MAX_CANVAS_SHAPE_BATCH_OPERATIONS} or fewer`
+      );
+    }
+
+    return input.operations.map((operation, index) => {
+      if (!this.isRecord(operation)) {
+        throw badRequest(`Canvas shape batch operation ${index} is invalid`);
+      }
+
+      const type = operation.type;
+      if (type !== "create" && type !== "update" && type !== "delete") {
+        throw badRequest(`Canvas shape batch operation ${index} type is invalid`);
+      }
+
+      const shapeId = this.validateShapeId(operation.shapeId);
+
+      if (type === "delete") {
+        return {
+          type,
+          shapeId
+        };
+      }
+
+      if (!this.isRecord(operation.payload)) {
+        throw badRequest(
+          `Canvas shape batch operation ${index} payload is required`
+        );
+      }
+
+      if (type === "create") {
+        if (this.hasOwn(operation.payload, "id")) {
+          const payloadShapeId = this.validateShapeId(operation.payload.id);
+          if (payloadShapeId !== shapeId) {
+            throw badRequest(
+              `Canvas shape batch operation ${index} shapeId must match payload id`
+            );
+          }
+        }
+
+        return {
+          type,
+          shapeId,
+          payload: {
+            ...operation.payload,
+            id: shapeId
+          }
+        };
+      }
+
+      return {
+        type,
+        shapeId,
+        payload: operation.payload
+      };
+    });
+  }
+
+  private validateViewSetting(
+    input: UpdateCanvasViewSettingRequest
+  ): CanvasViewSettingPayload {
+    if (!this.isRecord(input)) {
+      throw badRequest("Canvas view setting body is required");
+    }
+
+    const zoom = this.validateNumber(input.zoom, "Canvas zoom");
+    if (zoom <= 0) {
+      throw badRequest("Canvas zoom must be greater than 0");
+    }
+
+    return {
+      zoom,
+      viewportX: this.validateNumber(input.viewportX, "Canvas viewportX"),
+      viewportY: this.validateNumber(input.viewportY, "Canvas viewportY")
+    };
+  }
+
+  private validateViewportBounds(input: ListCanvasShapesQuery): ViewportBoundsValues {
+    if (!this.isRecord(input)) {
+      throw badRequest("Canvas viewport bounds query is required");
+    }
+
+    const width = this.validateQueryNumber(input.width, "Canvas viewport width");
+    const height = this.validateQueryNumber(input.height, "Canvas viewport height");
+    const margin = this.validateQueryNumber(input.margin, "Canvas viewport margin", 0);
+
+    if (width <= 0) {
+      throw badRequest("Canvas viewport width must be greater than 0");
+    }
+
+    if (height <= 0) {
+      throw badRequest("Canvas viewport height must be greater than 0");
+    }
+
+    if (margin < 0) {
+      throw badRequest("Canvas viewport margin must be greater than or equal to 0");
+    }
+
+    return {
+      x: this.validateQueryNumber(input.x, "Canvas viewport x"),
+      y: this.validateQueryNumber(input.y, "Canvas viewport y"),
+      width,
+      height,
+      margin
+    };
+  }
+
   private validateShapeType(value: unknown): string {
     if (typeof value !== "string" || !ALLOWED_SHAPE_TYPES.has(value)) {
       throw badRequest("Canvas shapeType is invalid");
@@ -629,6 +1249,33 @@ export class CanvasService {
     }
 
     return value;
+  }
+
+  private validateQueryNumber(
+    value: unknown,
+    fieldName: string,
+    fallback?: number
+  ): number {
+    if (value === undefined || value === null || value === "") {
+      if (fallback !== undefined) {
+        return fallback;
+      }
+
+      throw badRequest(`${fieldName} is required`);
+    }
+
+    const numberValue =
+      typeof value === "number"
+        ? value
+        : typeof value === "string" && value.trim()
+          ? Number(value)
+          : NaN;
+
+    if (!Number.isFinite(numberValue)) {
+      throw badRequest(`${fieldName} must be a finite number`);
+    }
+
+    return numberValue;
   }
 
   private validateNullableNonNegativeNumber(
@@ -725,6 +1372,18 @@ export class CanvasService {
       updatedAt: this.toIsoString(shape.updated_at),
       deletedAt:
         shape.deleted_at === null ? null : this.toIsoString(shape.deleted_at)
+    };
+  }
+
+  private mapCanvasUserState(
+    userState: CanvasUserStateRow
+  ): CanvasUserStatePayload {
+    return {
+      canvasId: userState.canvas_id,
+      userId: userState.user_id,
+      enteredAt: this.toIsoString(userState.entered_at),
+      leftAt:
+        userState.left_at === null ? null : this.toIsoString(userState.left_at)
     };
   }
 

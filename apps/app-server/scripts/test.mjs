@@ -53,11 +53,15 @@ const liveKitTokenService = await readSource(
 const workspaceMeetingConstraintMigration = await readSource(
   "../../../db/migrations/006_update_workspace_and_meeting_recording_constraints.sql"
 );
+const devTerraformMain = await readSource("../../../infra/envs/dev/main.tf");
+const terraformSecretsModule = await readSource(
+  "../../../infra/modules/secrets/main.tf"
+);
 
 assert.match(main, /setGlobalPrefix\("api\/v1"\)/);
 assert.match(main, /enableCors/);
 assert.match(main, /credentials: false/);
-assert.match(main, /methods: \["GET", "HEAD", "POST", "PATCH", "DELETE", "OPTIONS"\]/);
+assert.match(main, /methods: \["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"\]/);
 assert.match(main, /allowedHeaders: \["Authorization", "Content-Type", "Accept"\]/);
 assert.match(controller, /@Get\("health"\)/);
 assert.match(service, /pilo-app-server/);
@@ -139,14 +143,33 @@ assert.match(canvasController, /@Controller\("workspaces\/:workspaceId"\)/);
 assert.match(canvasController, /@Get\("canvases"\)/);
 assert.match(canvasController, /@Post\("canvases"\)/);
 assert.match(canvasController, /@Get\("canvases\/:canvasId"\)/);
+assert.match(canvasController, /@Get\("canvases\/:canvasId\/shapes"\)/);
 assert.match(canvasController, /@Post\("canvases\/:canvasId\/shapes"\)/);
+assert.match(canvasController, /@Post\("canvases\/:canvasId\/shapes\/batch"\)/);
+assert.match(canvasController, /@Get\("canvas-shapes\/:shapeId"\)/);
+assert.match(canvasController, /@Post\("canvases\/:canvasId\/enter"\)/);
+assert.match(canvasController, /@Patch\("canvases\/:canvasId\/leave"\)/);
+assert.match(canvasController, /@Put\("canvases\/:canvasId\/view-settings"\)/);
 assert.match(canvasController, /@Patch\("canvas-shapes\/:shapeId"\)/);
 assert.match(canvasController, /@Delete\("canvas-shapes\/:shapeId"\)/);
 assert.match(canvasService, /assertWorkspaceAccess/);
 assert.match(canvasService, /FROM canvas c/);
 assert.match(canvasService, /INSERT INTO canvas \(workspace_id, title, board_type, created_by\)/);
+assert.match(canvasService, /UPDATE canvas/);
+assert.match(canvasService, /viewport_x =/);
 assert.match(canvasService, /INSERT INTO canvas_freeform_shapes/);
 assert.match(canvasService, /UPDATE canvas_freeform_shapes s/);
+assert.match(canvasService, /listShapesInViewport/);
+assert.match(canvasService, /validateViewportBounds/);
+assert.match(canvasService, /getShapeDetail/);
+assert.match(canvasService, /syncShapesBatch/);
+assert.match(canvasService, /validateShapeBatchOperations/);
+assert.match(canvasService, /MAX_CANVAS_SHAPE_BATCH_OPERATIONS = 100/);
+assert.match(canvasService, /enterCanvas/);
+assert.match(canvasService, /leaveCanvas/);
+assert.match(canvasService, /canvas_user_states/);
+assert.match(canvasService, /DELETE FROM canvas_freeform_shapes/);
+assert.match(canvasService, /permanentlyDeletedShapeCount/);
 assert.match(canvasService, /SET deleted_at = now\(\)/);
 assert.match(canvasService, /deleted_at IS NULL/);
 assert.match(meetingModule, /DatabaseModule/);
@@ -192,6 +215,16 @@ assert.match(liveKitTokenService, /canSubscribe:\s*true/);
 assert.match(liveKitTokenService, /LIVEKIT_API_KEY/);
 assert.match(liveKitTokenService, /LIVEKIT_API_SECRET/);
 assert.match(liveKitTokenService, /LIVEKIT_URL/);
+assert.match(
+  terraformSecretsModule,
+  /app_server_ecs_secret_names = \[[^\]]*"LIVEKIT_WS_URL"/
+);
+assert.match(
+  terraformSecretsModule,
+  /app_server_ecs_secret_names = \[[^\]]*"LIVEKIT_RECORDINGS_BUCKET"/
+);
+assert.match(devTerraformMain, /LIVEKIT_RECORDING_MODE\s*=\s*"room_audio_only"/);
+assert.match(devTerraformMain, /LIVEKIT_EGRESS_S3_PREFIX\s*=\s*"recordings\/meetings"/);
 
 await import("./meeting/livekit-egress.test.mjs");
 await import("./auth/test.mjs");

@@ -13,10 +13,11 @@ import { apiResponse, ApiSuccessResponse } from "../../common/api-response";
 import { AuthGuard } from "../../common/auth.guard";
 import { CurrentUserId } from "../../common/current-user.decorator";
 import { BoardService } from "./board.service";
-import type { ListBoardsQuery } from "./dto";
+import type { ListBoardIssuesQuery, ListBoardsQuery } from "./dto";
 import type {
   BoardColumnPayload,
   BoardDetailPayload,
+  BoardIssueCardPayload,
   BoardPaginatedPayload,
   BoardPayload
 } from "./types";
@@ -85,5 +86,22 @@ export class BoardController {
     );
 
     return apiResponse(columns);
+  }
+
+  @Get(":boardId/issues")
+  async listBoardIssues(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("boardId") boardId: string,
+    @Query() query: ListBoardIssuesQuery
+  ): Promise<ApiSuccessResponse<BoardPaginatedPayload<BoardIssueCardPayload>>> {
+    const issues = await this.boardService.listBoardIssues(
+      currentUserId,
+      workspaceId,
+      boardId,
+      query
+    );
+
+    return apiResponse(issues);
   }
 }

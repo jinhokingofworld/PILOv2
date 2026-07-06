@@ -8,6 +8,14 @@ type CanvasViewSetting = {
   viewportY: number;
 };
 
+type CanvasViewportShapeQuery = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  margin?: number;
+};
+
 type CanvasBoardDetail = {
   id: string;
   workspaceId: string;
@@ -177,14 +185,28 @@ export function unwrapCanvasApiData(value: unknown) {
   return value;
 }
 
+function normalizeCanvasShape(value: unknown) {
+  return isRecord(value) && isRecord(value.rawShape) ? value.rawShape : value;
+}
+
 function normalizeCanvasShapes(value: unknown) {
   if (!Array.isArray(value)) {
     return [];
   }
 
-  return value.map((shape) =>
-    isRecord(shape) && isRecord(shape.rawShape) ? shape.rawShape : shape,
-  );
+  return value.map(normalizeCanvasShape);
+}
+
+function buildViewportShapeQuery(query: CanvasViewportShapeQuery) {
+  const searchParams = new URLSearchParams({
+    x: String(query.x),
+    y: String(query.y),
+    width: String(query.width),
+    height: String(query.height),
+    margin: String(query.margin ?? 0),
+  });
+
+  return searchParams.toString();
 }
 
 export function createMockCanvasBoardDetail(
@@ -351,6 +373,53 @@ export function createCanvasApiClient({
       return normalizeCanvasBoardDetail(board, { workspaceId });
     },
 
+    async listShapesInViewport(
+      boardId: string,
+      query: CanvasViewportShapeQuery,
+      { workspaceId }: { workspaceId: string },
+    ) {
+      const search = buildViewportShapeQuery(query);
+      const path = `/workspaces/${encodeURIComponent(workspaceId)}/canvases/${encodeURIComponent(boardId)}/shapes?${search}`;
+      const shapes = await requestCanvasJson(path, undefined, requestOptions);
+
+      return normalizeCanvasShapes(shapes);
+    },
+
+    async getShapeDetail(shapeId: string, { workspaceId }: { workspaceId: string }) {
+      const path = `/workspaces/${encodeURIComponent(workspaceId)}/canvas-shapes/${encodeURIComponent(shapeId)}`;
+      const shape = await requestCanvasJson(path, undefined, requestOptions);
+
+      return normalizeCanvasShape(shape);
+    },
+
+    async enterCanvas(boardId: string, { workspaceId }: { workspaceId: string }) {
+      return requestCanvasJson(
+        `/workspaces/${encodeURIComponent(workspaceId)}/canvases/${encodeURIComponent(boardId)}/enter`,
+        { method: "POST" },
+        requestOptions,
+      );
+    },
+
+    async leaveCanvas(boardId: string, { workspaceId }: { workspaceId: string }) {
+      return requestCanvasJson(
+        `/workspaces/${encodeURIComponent(workspaceId)}/canvases/${encodeURIComponent(boardId)}/leave`,
+        { method: "PATCH" },
+        requestOptions,
+      );
+    },
+
+    async syncShapesBatch(
+      boardId: string,
+      body: unknown,
+      { workspaceId }: { workspaceId: string },
+    ) {
+      return requestCanvasJson(
+        `/workspaces/${encodeURIComponent(workspaceId)}/canvases/${encodeURIComponent(boardId)}/shapes/batch`,
+        withJsonBody(body, { method: "POST" }),
+        requestOptions,
+      );
+    },
+
     async createShape(
       boardId: string,
       body: unknown,
@@ -443,6 +512,81 @@ export function createMockCanvasClient() {
       return {
         ...createMockBlankBoard(defaultBoard.workspaceId, "Untitled canvas"),
         id: boardId,
+      };
+    },
+
+    async listShapesInViewport(
+      boardId: string,
+      _query: CanvasViewportShapeQuery,
+      { workspaceId }: { workspaceId?: string } = {},
+    ) {
+      const defaultBoard = createMockCanvasBoardDetail(workspaceId);
+      const storedBoard = readMockBoards(defaultBoard.workspaceId).find(
+        (board) => board.id === boardId,
+      );
+      const board =
+        !boardId || boardId === defaultBoard.id
+          ? defaultBoard
+          : storedBoard ?? {
+              ...createMockBlankBoard(defaultBoard.workspaceId, "Untitled canvas"),
+              id: boardId,
+            };
+
+      return normalizeCanvasShapes(board.shapes);
+    },
+
+    async getShapeDetail(shapeId: string, { workspaceId }: { workspaceId?: string } = {}) {
+      const defaultBoard = createMockCanvasBoardDetail(workspaceId);
+      const boards = [
+        defaultBoard,
+        ...readMockBoards(defaultBoard.workspaceId),
+      ];
+      const shape = boards
+        .flatMap((board) => normalizeCanvasShapes(board.shapes))
+        .find((rawShape) => isRecord(rawShape) && rawShape.id === shapeId);
+
+      return shape ?? null;
+    },
+
+    async enterCanvas(boardId: string, { workspaceId }: { workspaceId?: string } = {}) {
+      const now = new Date().toISOString();
+
+      return {
+        canvasId: boardId,
+        userId: "mock-user",
+        enteredAt: now,
+        leftAt: null,
+        workspaceId,
+      };
+    },
+
+    async leaveCanvas(boardId: string, { workspaceId }: { workspaceId?: string } = {}) {
+      const now = new Date().toISOString();
+
+      return {
+        canvasId: boardId,
+        userId: "mock-user",
+        enteredAt: now,
+        leftAt: now,
+        permanentlyDeletedShapeCount: 0,
+        workspaceId,
+      };
+    },
+
+    async syncShapesBatch(_boardId: string, body: unknown) {
+      const operations =
+        isRecord(body) && Array.isArray(body.operations) ? body.operations : [];
+
+      return {
+        created: operations.filter(
+          (operation) => isRecord(operation) && operation.type === "create",
+        ).length,
+        updated: operations.filter(
+          (operation) => isRecord(operation) && operation.type === "update",
+        ).length,
+        deleted: operations.filter(
+          (operation) => isRecord(operation) && operation.type === "delete",
+        ).length,
       };
     },
 

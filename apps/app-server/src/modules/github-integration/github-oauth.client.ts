@@ -28,11 +28,35 @@ export interface GithubUserInstallationLookupRequest {
   accessToken: string;
 }
 
+export type GithubPullRequestReviewEvent =
+  | "COMMENT"
+  | "APPROVE"
+  | "REQUEST_CHANGES";
+
+export interface GithubPullRequestReviewSubmissionRequest {
+  accessToken: string;
+  owner: string;
+  repo: string;
+  pullNumber: number;
+  event: GithubPullRequestReviewEvent;
+  body: string;
+}
+
+export interface GithubPullRequestReviewSubmissionResponse {
+  githubReviewId: string | null;
+  githubReviewUrl: string | null;
+}
+
 interface GithubUserInstallationsApiPayload {
   total_count?: number;
   installations?: Array<{
     id?: number;
   }>;
+}
+
+interface GithubPullRequestReviewApiPayload {
+  id?: unknown;
+  html_url?: unknown;
 }
 
 @Injectable()
@@ -131,6 +155,60 @@ export class GithubOAuthClient {
     await this.fetchUserInstallationsPage(input.accessToken, 1, 1);
   }
 
+  async submitPullRequestReview(
+    input: GithubPullRequestReviewSubmissionRequest
+  ): Promise<GithubPullRequestReviewSubmissionResponse> {
+    const url = new URL(
+      `https://api.github.com/repos/${encodeURIComponent(input.owner)}/${encodeURIComponent(input.repo)}/pulls/${input.pullNumber}/reviews`
+    );
+
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: "POST",
+        headers: {
+          Accept: "application/vnd.github+json",
+          Authorization: `Bearer ${input.accessToken}`,
+          "Content-Type": "application/json",
+          "X-GitHub-Api-Version": GITHUB_API_VERSION
+        },
+        body: JSON.stringify({
+          event: input.event,
+          body: input.body
+        })
+      });
+    } catch {
+      throw badRequest("GitHub Review submission failed");
+    }
+
+    if (response.status === 401) {
+      throw badRequest("GitHub OAuth connection is invalid");
+    }
+
+    if (!response.ok) {
+      throw badRequest("GitHub Review submission failed");
+    }
+
+    const payload = await this.readJson(
+      response,
+      "GitHub Review submission failed"
+    );
+    if (!this.isPullRequestReviewPayload(payload)) {
+      throw badRequest("GitHub Review submission failed");
+    }
+
+    return {
+      githubReviewId:
+        typeof payload.id === "number" || typeof payload.id === "string"
+          ? String(payload.id)
+          : null,
+      githubReviewUrl:
+        typeof payload.html_url === "string" && payload.html_url.length > 0
+          ? payload.html_url
+          : null
+    };
+  }
+
   private async fetchUserInstallationsPage(
     accessToken: string,
     page: number,
@@ -197,11 +275,21 @@ export class GithubOAuthClient {
   }
 
   private async readInstallationJson(response: Response): Promise<unknown> {
+    return this.readJson(response, "GitHub OAuth installation lookup failed");
+  }
+
+  private async readJson(response: Response, message: string): Promise<unknown> {
     try {
       return (await response.json()) as unknown;
     } catch {
-      throw badRequest("GitHub OAuth installation lookup failed");
+      throw badRequest(message);
     }
+  }
+
+  private isPullRequestReviewPayload(
+    value: unknown
+  ): value is GithubPullRequestReviewApiPayload {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
   }
 
   private isUserInstallationsPayload(

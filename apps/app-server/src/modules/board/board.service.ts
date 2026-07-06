@@ -1,10 +1,11 @@
 import { Injectable } from "@nestjs/common";
 import { BoardHydrationService } from "./board-hydration.service";
 import { BoardReadService } from "./board-read.service";
-import type { ListBoardsQuery } from "./dto";
+import type { ListBoardIssuesQuery, ListBoardsQuery } from "./dto";
 import type {
   BoardColumnPayload,
   BoardDetailPayload,
+  BoardIssueCardPayload,
   BoardPaginatedPayload,
   BoardPayload,
   CreateBoardResult
@@ -62,6 +63,20 @@ export class BoardService {
       currentUserId,
       workspaceId,
       boardId
+    );
+  }
+
+  async listBoardIssues(
+    currentUserId: string,
+    workspaceId: string,
+    boardId: string,
+    query: ListBoardIssuesQuery
+  ): Promise<BoardPaginatedPayload<BoardIssueCardPayload>> {
+    return this.boardReadService.listBoardIssues(
+      currentUserId,
+      workspaceId,
+      boardId,
+      query
     );
   }
 }

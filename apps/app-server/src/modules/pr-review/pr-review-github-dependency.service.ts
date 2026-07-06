@@ -10,7 +10,9 @@ import type {
   PrReviewGithubConflictStatusPayload,
   PrReviewGithubDependency,
   PrReviewGithubOAuthStatus,
-  PrReviewGithubPullRequestDetail
+  PrReviewGithubPullRequestDetail,
+  PrReviewGithubReviewSubmitType,
+  PrReviewGithubReviewSubmissionPayload
 } from "./types";
 
 @Injectable()
@@ -84,6 +86,23 @@ export class PrReviewGithubDependencyService implements PrReviewGithubDependency
       conflictStatus: conflict.conflictStatus,
       checkedAt: conflict.conflictCheckedAt
     };
+  }
+
+  async submitPullRequestReview(
+    currentUserId: string,
+    workspaceId: string,
+    pullRequestId: string,
+    input: {
+      submitType: PrReviewGithubReviewSubmitType;
+      reviewBody: string;
+    }
+  ): Promise<PrReviewGithubReviewSubmissionPayload> {
+    return this.githubIntegrationService.submitGithubPullRequestReview(
+      currentUserId,
+      workspaceId,
+      pullRequestId,
+      input
+    );
   }
 
   private mapPullRequestDetail(

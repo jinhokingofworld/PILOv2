@@ -2,7 +2,7 @@ import { Injectable } from "@nestjs/common";
 import { QueryResultRow } from "pg";
 import { badRequest } from "../../../common/api-error";
 import { DatabaseService } from "../../../database/database.service";
-import type { BoardSyncStatus } from "../types";
+import type { BoardIssueState, BoardSyncStatus } from "../types";
 
 export interface BoardRow extends QueryResultRow {
   id: string | number;
@@ -44,6 +44,29 @@ export interface BoardColumnRow extends QueryResultRow {
   issue_count: string | number;
 }
 
+export interface BoardIssueRow extends QueryResultRow {
+  id: string | number;
+  board_id: string | number;
+  column_id: string | number;
+  repository_id: string | null;
+  github_issue_id: string | null;
+  project_item_id: string | null;
+  github_issue_node_id: string | null;
+  github_project_item_node_id: string | null;
+  github_issue_number: string | number | null;
+  issue_number: string;
+  title: string;
+  html_url: string | null;
+  state: BoardIssueState | null;
+  labels: unknown;
+  assignees: unknown;
+  position: string | number;
+  github_updated_at: Date | string | null;
+  last_synced_at: Date | string | null;
+  created_at: Date | string;
+  updated_at: Date | string;
+}
+
 interface CountRow extends QueryResultRow {
   total: string | number;
 }
@@ -52,6 +75,15 @@ interface BoardFilterInput {
   workspaceId: string;
   repositoryId: string | null;
   projectV2Id: string | null;
+}
+
+interface BoardIssueFilterInput {
+  boardId: string;
+  columnId: string | null;
+  state: BoardIssueState | null;
+  search: string | null;
+  label: string | null;
+  assignee: string | null;
 }
 
 @Injectable()
@@ -166,6 +198,62 @@ export class BoardReadQueries {
     );
   }
 
+  async countBoardIssues(input: BoardIssueFilterInput): Promise<number> {
+    const { whereSql, values } = this.buildIssueFilters(input);
+    const row = await this.database.queryOne<CountRow>(
+      `
+        SELECT COUNT(*)::int AS total
+        FROM pilo_issues pi
+        WHERE ${whereSql}
+      `,
+      values
+    );
+
+    return row ? this.toInteger(row.total, "Invalid row count") : 0;
+  }
+
+  async listBoardIssues(
+    input: BoardIssueFilterInput,
+    limit: number,
+    offset: number
+  ): Promise<BoardIssueRow[]> {
+    const { whereSql, values } = this.buildIssueFilters(input);
+
+    return this.database.query<BoardIssueRow>(
+      `
+        SELECT
+          pi.id::text AS id,
+          pi.board_id::text AS board_id,
+          pi.column_id::text AS column_id,
+          pi.repository_id,
+          pi.github_issue_id,
+          pi.project_item_id,
+          pi.github_issue_node_id,
+          pi.github_project_item_node_id,
+          pi.github_issue_number,
+          pi.issue_number,
+          pi.title,
+          pi.html_url,
+          pi.state,
+          pi.labels,
+          pi.assignees,
+          pi.position,
+          pi.github_updated_at,
+          pi.last_synced_at,
+          pi.created_at,
+          pi.updated_at
+        FROM pilo_issues pi
+        JOIN board_columns bc
+          ON bc.id = pi.column_id
+         AND bc.board_id = pi.board_id
+        WHERE ${whereSql}
+        ORDER BY bc.position ASC, pi.position ASC, pi.id ASC
+        LIMIT $${values.length + 1} OFFSET $${values.length + 2}
+      `,
+      [...values, limit, offset]
+    );
+  }
+
   private buildBoardFilters(input: BoardFilterInput): {
     whereSql: string;
     values: unknown[];
@@ -181,6 +269,58 @@ export class BoardReadQueries {
     if (input.projectV2Id) {
       values.push(input.projectV2Id);
       filters.push(`b.project_v2_id = $${values.length}`);
+    }
+
+    return {
+      whereSql: filters.join(" AND "),
+      values
+    };
+  }
+
+  private buildIssueFilters(input: BoardIssueFilterInput): {
+    whereSql: string;
+    values: unknown[];
+  } {
+    const values: unknown[] = [input.boardId];
+    const filters = ["pi.board_id = $1::bigint"];
+
+    if (input.columnId) {
+      values.push(input.columnId);
+      filters.push(`pi.column_id = $${values.length}::bigint`);
+    }
+
+    if (input.state) {
+      values.push(input.state);
+      filters.push(`pi.state = $${values.length}`);
+    }
+
+    if (input.search) {
+      values.push(`%${input.search}%`);
+      filters.push(
+        `(pi.title ILIKE $${values.length} OR COALESCE(pi.body, '') ILIKE $${values.length})`
+      );
+    }
+
+    if (input.label) {
+      values.push(input.label);
+      filters.push(`
+        EXISTS (
+          SELECT 1
+          FROM jsonb_array_elements(pi.labels) AS label
+          WHERE label->>'name' = $${values.length}
+        )
+      `);
+    }
+
+    if (input.assignee) {
+      values.push(input.assignee);
+      filters.push(`
+        EXISTS (
+          SELECT 1
+          FROM jsonb_array_elements(pi.assignees) AS assignee
+          WHERE assignee->>'login' = $${values.length}
+        )
+      `);
     }
 
     return {

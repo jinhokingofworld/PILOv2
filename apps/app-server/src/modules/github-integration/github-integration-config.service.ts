@@ -6,6 +6,7 @@ export interface GithubOAuthRuntimeConfig {
   clientSecret: string;
   apiPublicOrigin: string;
   apiBasePath: string;
+  frontendUrl: string;
   tokenEncryptionKey: string;
   stateSecret: string;
   stateTtlSeconds: number;
@@ -18,6 +19,7 @@ export interface GithubAppRuntimeConfig {
   privateKey: string;
   apiPublicOrigin: string;
   apiBasePath: string;
+  frontendUrl: string;
   stateSecret: string;
   stateTtlSeconds: number;
   now?: () => Date;
@@ -28,6 +30,7 @@ export interface GithubWebhookRuntimeConfig {
 }
 
 const DEFAULT_API_BASE_PATH = "/api/v1";
+const DEFAULT_FRONTEND_URL = "http://localhost:3000";
 const DEFAULT_STATE_TTL_SECONDS = 600;
 const GITHUB_APP_SLUG_PATTERN = /^[a-zA-Z0-9-]+$/;
 
@@ -37,6 +40,9 @@ export class GithubIntegrationConfigService {
     const clientId = this.requireConfig(process.env.GITHUB_USER_OAUTH_CLIENT_ID);
     const clientSecret = this.requireConfig(process.env.GITHUB_USER_OAUTH_CLIENT_SECRET);
     const apiPublicOrigin = this.requireConfig(process.env.API_PUBLIC_ORIGIN);
+    const frontendUrl = this.normalizeOrigin(
+      process.env.FRONTEND_URL?.trim() || DEFAULT_FRONTEND_URL
+    );
     const tokenEncryptionKey = this.requireConfig(process.env.GITHUB_TOKEN_ENCRYPTION_KEY);
     const stateSecret = this.requireConfig(process.env.SESSION_SECRET);
     const apiBasePath = this.normalizeApiBasePath(
@@ -52,6 +58,7 @@ export class GithubIntegrationConfigService {
       clientSecret,
       apiPublicOrigin: this.normalizeOrigin(apiPublicOrigin),
       apiBasePath,
+      frontendUrl,
       tokenEncryptionKey,
       stateSecret,
       stateTtlSeconds
@@ -76,6 +83,9 @@ export class GithubIntegrationConfigService {
       process.env.API_PUBLIC_ORIGIN,
       "GitHub App is not configured"
     );
+    const frontendUrl = this.normalizeOrigin(
+      process.env.FRONTEND_URL?.trim() || DEFAULT_FRONTEND_URL
+    );
     const stateSecret = this.requireConfig(
       process.env.SESSION_SECRET,
       "GitHub App is not configured"
@@ -94,6 +104,7 @@ export class GithubIntegrationConfigService {
       privateKey,
       apiPublicOrigin: this.normalizeOrigin(apiPublicOrigin),
       apiBasePath,
+      frontendUrl,
       stateSecret,
       stateTtlSeconds
     };

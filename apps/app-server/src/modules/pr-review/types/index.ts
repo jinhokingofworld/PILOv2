@@ -75,6 +75,18 @@ export interface PrReviewGithubConflictStatusPayload {
   checkedAt: string | null;
 }
 
+export type PrReviewGithubReviewSubmitType =
+  | "COMMENT"
+  | "APPROVE"
+  | "REQUEST_CHANGES";
+
+export interface PrReviewGithubReviewSubmissionPayload {
+  submittedByGithubLogin: string;
+  githubReviewId: string | null;
+  githubReviewUrl: string | null;
+  submittedAt: string;
+}
+
 export interface PrReviewGithubDependency {
   getCurrentUserGithubOAuthStatus(
     currentUserId: string
@@ -97,4 +109,14 @@ export interface PrReviewGithubDependency {
     workspaceId: string,
     pullRequestId: string
   ): Promise<PrReviewGithubConflictStatusPayload>;
+
+  submitPullRequestReview(
+    currentUserId: string,
+    workspaceId: string,
+    pullRequestId: string,
+    input: {
+      submitType: PrReviewGithubReviewSubmitType;
+      reviewBody: string;
+    }
+  ): Promise<PrReviewGithubReviewSubmissionPayload>;
 }

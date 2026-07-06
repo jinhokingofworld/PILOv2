@@ -23,6 +23,7 @@ export interface GithubOAuthCallbackPayload {
   githubLogin: string;
   tokenScope: string | null;
   githubConnectedAt: string;
+  returnUrl: string | null;
 }
 
 export interface GithubOAuthDisconnectPayload {
@@ -51,6 +52,7 @@ export interface GithubAppInstallationStartPayload {
 export interface GithubAppInstallationCallbackPayload
   extends Omit<GithubAppInstallationPayload, "id"> {
   installationId: string;
+  returnUrl: string | null;
 }
 
 export type GithubWebhookDeliveryStatus = "received" | "ignored";
@@ -295,6 +297,23 @@ export interface GithubPullRequestConflictStatusPayload {
   conflictStatus: GithubPullRequestConflictStatus;
   conflictCheckedAt: string;
   message: string;
+}
+
+export type GithubPullRequestReviewSubmitType =
+  | "COMMENT"
+  | "APPROVE"
+  | "REQUEST_CHANGES";
+
+export interface SubmitGithubPullRequestReviewInput {
+  submitType: GithubPullRequestReviewSubmitType;
+  reviewBody: string;
+}
+
+export interface GithubPullRequestReviewSubmissionPayload {
+  submittedByGithubLogin: string;
+  githubReviewId: string | null;
+  githubReviewUrl: string | null;
+  submittedAt: string;
 }
 
 export type GithubSyncTarget =

@@ -10,6 +10,7 @@ import { GithubOAuthIntegrationService } from "./github-oauth-integration.servic
 import { GithubOAuthStateService } from "./github-oauth-state.service";
 import { GithubProjectV2Service } from "./github-project-v2.service";
 import { GithubPullRequestRemoteService } from "./github-pull-request-remote.service";
+import { GithubReviewSubmissionService } from "./github-review-submission.service";
 import { GithubSourceReadService } from "./github-source-read.service";
 import { GithubSyncExecutorService } from "./github-sync-executor.service";
 import { GithubSyncRunService } from "./github-sync-run.service";
@@ -49,9 +50,11 @@ import type {
   GithubPullRequestDetailPayload,
   GithubPullRequestFilePayload,
   GithubPullRequestListItemPayload,
+  GithubPullRequestReviewSubmissionPayload,
   GithubWebhookDeliveryPayload,
   GithubRepositoryDetailPayload,
   GithubRepositoryListItemPayload,
+  SubmitGithubPullRequestReviewInput,
   GithubSyncRunDetailPayload,
   GithubSyncRunPayload
 } from "./types";
@@ -63,6 +66,7 @@ export class GithubIntegrationService {
   private readonly githubSourceReadService: GithubSourceReadService;
   private readonly githubProjectV2Service: GithubProjectV2Service;
   private readonly githubPullRequestRemoteService: GithubPullRequestRemoteService;
+  private readonly githubReviewSubmissionService: GithubReviewSubmissionService;
   private readonly githubWebhookService: GithubWebhookService;
   private readonly githubSyncRunService: GithubSyncRunService;
 
@@ -90,7 +94,9 @@ export class GithubIntegrationService {
     @Optional()
     githubSyncExecutorService?: GithubSyncExecutorService,
     @Optional()
-    githubSyncRunService?: GithubSyncRunService
+    githubSyncRunService?: GithubSyncRunService,
+    @Optional()
+    githubReviewSubmissionService?: GithubReviewSubmissionService
   ) {
     this.githubOAuthIntegrationService =
       githubOAuthIntegrationService ??
@@ -123,6 +129,15 @@ export class GithubIntegrationService {
       new GithubPullRequestRemoteService(
         database,
         githubAppClient,
+        configService,
+        workspaceService
+      );
+    this.githubReviewSubmissionService =
+      githubReviewSubmissionService ??
+      new GithubReviewSubmissionService(
+        database,
+        githubOAuthClient,
+        tokenEncryptionService,
         configService,
         workspaceService
       );
@@ -364,6 +379,20 @@ export class GithubIntegrationService {
       currentUserId,
       workspaceId,
       pullRequestId
+    );
+  }
+
+  async submitGithubPullRequestReview(
+    currentUserId: string,
+    workspaceId: string,
+    pullRequestId: string,
+    input: SubmitGithubPullRequestReviewInput
+  ): Promise<GithubPullRequestReviewSubmissionPayload> {
+    return this.githubReviewSubmissionService.submitGithubPullRequestReview(
+      currentUserId,
+      workspaceId,
+      pullRequestId,
+      input
     );
   }
 

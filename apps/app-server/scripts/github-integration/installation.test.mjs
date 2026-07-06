@@ -57,6 +57,7 @@ const baseConfig = {
   privateKey: "test-private-key",
   apiPublicOrigin: "https://api.pilo.test",
   apiBasePath: "/api/v1",
+  frontendUrl: "https://pilo.test",
   tokenEncryptionKey: "test-token-encryption-key",
   stateSecret: "test-state-secret",
   stateTtlSeconds: 600,
@@ -140,6 +141,26 @@ function createService({
 }
 
 {
+  const database = new FakeDatabase({
+    oneRows: [connectedGithubOAuthRow]
+  });
+  const githubOAuthClient = {
+    async assertUserInstallationLookupSupported(input) {
+      assert.equal(input.accessToken, "plain-user-token");
+    }
+  };
+  const service = createService({ database, githubOAuthClient });
+
+  await assert.rejects(
+    () =>
+      service.startGithubAppInstallation(currentUserId, workspaceId, {
+        returnUrl: "https://evil.test/workspaces/11111111-1111-4111-8111-111111111111/github"
+      }),
+    (error) => error?.response?.error?.message === "Invalid returnUrl"
+  );
+}
+
+{
   const service = createService({
     database: new FakeDatabase({
       oneRows: [
@@ -195,7 +216,7 @@ function createService({
     {
       userId: currentUserId,
       workspaceId,
-      returnUrl: null
+      returnUrl: "https://pilo.test/workspaces/11111111-1111-4111-8111-111111111111/github"
     },
     baseConfig
   );
@@ -275,7 +296,8 @@ function createService({
     installedByUserId: currentUserId,
     installedAt: "2026-07-04T12:30:00.000Z",
     suspendedAt: "2026-07-04T12:45:00.000Z",
-    lastSyncedAt: null
+    lastSyncedAt: null,
+    returnUrl: "https://pilo.test/workspaces/11111111-1111-4111-8111-111111111111/github"
   });
 
   const upsert = database.queries.at(-1);

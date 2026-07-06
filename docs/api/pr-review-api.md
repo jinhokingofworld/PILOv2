@@ -101,6 +101,8 @@ comment, PR merge/close, ProjectV2 write는 이 문서의 범위가 아니다.
 - GitHub Integration API로 PR 상세, 변경 파일, conflict 상태를 조회한다.
 - 생성 시점의 `headSha`를 저장한다.
 - 파일 metadata는 `review_files`에 저장한다.
+- App Server는 PR 상세와 변경 파일 정보를 입력으로 AI 분석을 생성한다.
+- `OPENAI_API_KEY`가 있으면 OpenAI Responses API structured output을 사용하고, key 누락/API 실패/응답 검증 실패 시 deterministic fallback 결과를 저장한다.
 - Diff 생성에 필요한 patch 정보는 GitHub Integration API의 PR 변경 파일 응답을 기준으로 사용한다.
 - 같은 PR을 다시 리뷰하더라도 새 Review Session을 생성한다.
 - 중복 클릭 방지는 프론트 버튼 disabled와 서버의 진행 중 생성 요청 방어 로직으로 처리한다.
@@ -472,6 +474,8 @@ Decision history response:
 서버 규칙:
 
 - 사용자의 GitHub App user OAuth 연결 여부를 확인한다.
+- GitHub OAuth token 복호화와 GitHub Review body 제출은 GitHub Integration의
+  서버 내부 dependency를 통해 수행하며, PR Review API 응답에는 token 값을 노출하지 않는다.
 - 현재 PR head SHA를 다시 조회해 session `headSha`와 비교한다.
 - GitHub Review body만 제출한다.
 - Line comment payload는 보내지 않는다.

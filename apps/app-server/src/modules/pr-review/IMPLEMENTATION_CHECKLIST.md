@@ -51,8 +51,8 @@
 - [x] GitHub Integration을 통해 file metadata와 GitHub patch text를 포함한 변경 파일을
   읽을 수 있게 한다.
 - [x] GitHub Integration을 통해 conflict 상태를 읽을 수 있게 한다.
-- [ ] 제출 전에 현재 사용자의 GitHub OAuth 연결 상태를 확인할 수 있게 한다.
-- [ ] GitHub token, raw secret이 API 응답이나 로그에 노출되지 않게 한다.
+- [x] 제출 전에 현재 사용자의 GitHub OAuth 연결 상태를 확인할 수 있게 한다.
+- [x] GitHub token, raw secret이 API 응답이나 로그에 노출되지 않게 한다.
 
 ## 2. Backend Module Skeleton
 
@@ -92,8 +92,10 @@
 - [x] file 단위 `fileRole`, `changeReason`, `changeSummary`, `reviewPoints`를 저장한다.
 - [x] flow order와 file workflow order를 저장한다.
 - [x] MVP에서는 flow/node/edge 편집을 제외한다.
-- [ ] 후속 이슈에서 `ai-worker`를 연결하기 전에 `pr_analysis` request/response 계약과
-  실패 처리를 정의한다. #47에서는 deterministic app-server analyzer까지만 유지한다.
+- [x] App Server에서 `OPENAI_API_KEY`가 있으면 OpenAI Responses API로 PR 분석을 생성한다.
+- [x] `pr_analysis` request/response schema를 정의하고 structured output으로 검증한다.
+- [x] OpenAI API key 누락, API 실패, 응답 schema 불일치 시 deterministic fallback을 사용한다.
+- [ ] `ai-worker` 비동기 job 연결은 App Server AI 분석 MVP 이후 별도 이슈에서 처리한다.
 
 ## 5. Review Read APIs
 
@@ -140,12 +142,13 @@
 
 - [ ] `POST /workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}/submissions`를
   구현한다.
-- [ ] `submitType`은 `COMMENT`, `APPROVE`, `REQUEST_CHANGES`만 허용한다.
-- [ ] `reviewBody`가 비어 있지 않은지 검증한다.
-- [ ] 현재 사용자의 GitHub OAuth 연결 상태를 확인한다.
+- [x] #124 내부 dependency에서 `submitType`은 `COMMENT`, `APPROVE`,
+  `REQUEST_CHANGES`만 허용한다.
+- [x] #124 내부 dependency에서 `reviewBody`가 비어 있지 않은지 검증한다.
+- [x] #124 내부 dependency에서 현재 사용자의 GitHub OAuth 연결 상태를 확인한다.
 - [ ] 현재 PR의 `headSha`를 다시 조회하고 session의 `headSha`와 다르면 제출을 막는다.
-- [ ] 현재 사용자의 OAuth token으로 GitHub Review를 제출한다.
-- [ ] review body만 보낸다. line comment는 보내지 않는다.
+- [x] #124 내부 dependency에서 현재 사용자의 OAuth token으로 GitHub Review를 제출한다.
+- [x] #124 내부 dependency에서 review body만 보낸다. line comment는 보내지 않는다.
 - [ ] 모든 제출 시도를 `review_submissions`에 저장한다.
 - [ ] submitted/failed status와 sanitize된 error message를 저장한다.
 - [ ] 제출 성공 후 session status를 `submitted`로 바꾼다.
@@ -171,12 +174,21 @@
 
 - [ ] `WORKFLOW_CANVAS_STRATEGY.md`를 따른다. MVP에서는 Canvas API/DB persistence 없이
   tldraw surface를 사용하고, Post-MVP에서 Canvas persistence를 별도 확장한다.
+- [ ] Canvas 담당자의 `src/shared/tldraw/TldrawSurface` 분리 PR을 선행 의존성으로
+  둔다.
+- [ ] `TldrawSurface`가 `src/shared/` 등 frontend 공통 위치로 이동하면 사이렌 변경으로
+  다룬다.
+- [ ] review canvas 파일은 `apps/frontend/src/features/pr-review/components/review-canvas/`
+  아래에 둔다.
 - [ ] PR Review canvas endpoint 응답으로 flow, file node, edge view를 렌더링한다.
 - [ ] workflow 데이터를 future Canvas persistence와 호환되도록 deterministic tldraw
   shapes와 stable review metadata로 변환한다.
-- [ ] `PiloCanvasRuntime`을 import하지 않고 얇은 `PiloTldrawSurface`를 사용하거나
-  분리한다.
-- [ ] `review_file_node`는 PR Review 소유 custom shape util로 둔다.
+- [ ] `WorkspaceCanvas`, `PiloCanvasRuntime`, `PiloTldrawCanvas`, `PiloFileNodeShapeUtil`,
+  freeform 저장 queue를 PR Review에 붙이지 않는다.
+- [ ] `src/shared/tldraw/TldrawSurface`에 `shapeUtils`, `components`, tool 제한,
+  camera/selection callback을 주입한다.
+- [ ] `review_file_node`는 PR Review 소유 custom shape util로 두고, shape props는
+  `fileNodeData`를 기준으로 설계한다.
 - [ ] PR purpose, change summary, recommended order, caution points, selected flow
   description을 보여준다.
 - [ ] reviewed count와 total file count로 review progress를 보여준다.
@@ -217,7 +229,8 @@
 - [ ] session 삭제 cascade는 DB integration/fixture 환경이 준비되면 검증한다.
 - [x] diff parsing에 대한 focused backend test를 추가한다.
 - [ ] file review decision update에 대한 focused backend test를 추가한다.
-- [ ] OAuth missing과 stale head submission guard에 대한 focused backend test를 추가한다.
+- [x] OAuth missing에 대한 focused backend test를 추가한다.
+- [ ] stale head submission guard에 대한 focused backend test를 추가한다.
 - [ ] submission success/failure persistence에 대한 focused backend test를 추가한다.
 - [ ] navigation과 PR Review screen state에 대한 frontend test를 추가한다.
 - [x] backend 변경 후 `apps/app-server`에서 `npm run lint`, `npm run test`,

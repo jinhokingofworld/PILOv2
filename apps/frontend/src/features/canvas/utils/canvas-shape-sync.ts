@@ -23,6 +23,11 @@ export type CanvasShapePayload = {
 };
 
 export type CanvasShapeApiClient = {
+  syncShapesBatch?: (
+    boardId: string,
+    body: { operations: CanvasShapeSyncOperation[] },
+    options: { workspaceId: string },
+  ) => Promise<unknown>;
   createShape: (
     boardId: string,
     body: CanvasShapePayload,
@@ -73,7 +78,7 @@ type CanvasShapeSyncQueueOptions = {
   workspaceId: string;
 };
 
-const DEFAULT_CANVAS_SHAPE_SYNC_QUEUE_DEBOUNCE_MS = 360;
+const DEFAULT_CANVAS_SHAPE_SYNC_QUEUE_DEBOUNCE_MS = 500;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -258,6 +263,42 @@ function runCanvasShapeSyncOperation({
   });
 }
 
+async function runCanvasShapeSyncOperations({
+  boardId,
+  canvasClient,
+  operations,
+  workspaceId,
+}: {
+  boardId: string;
+  canvasClient: CanvasShapeApiClient;
+  operations: CanvasShapeSyncOperation[];
+  workspaceId: string;
+}) {
+  if (canvasClient.syncShapesBatch) {
+    await canvasClient.syncShapesBatch(
+      boardId,
+      {
+        operations,
+      },
+      {
+        workspaceId,
+      },
+    );
+    return;
+  }
+
+  await Promise.all(
+    operations.map((operation) =>
+      runCanvasShapeSyncOperation({
+        boardId,
+        canvasClient,
+        operation,
+        workspaceId,
+      }),
+    ),
+  );
+}
+
 export function createCanvasShapeSyncQueue({
   boardId,
   canvasClient,
@@ -283,16 +324,12 @@ export function createCanvasShapeSyncQueue({
 
     if (!operations.length) return;
 
-    await Promise.all(
-      operations.map((operation) =>
-        runCanvasShapeSyncOperation({
-          boardId,
-          canvasClient,
-          operation,
-          workspaceId,
-        }),
-      ),
-    );
+    await runCanvasShapeSyncOperations({
+      boardId,
+      canvasClient,
+      operations,
+      workspaceId,
+    });
 
     if (pendingOperations.size) {
       await flushPendingOperations();
@@ -369,14 +406,10 @@ export async function syncCanvasFreeformShapes({
 }) {
   const operations = buildCanvasShapeSyncOperations(previousShapes, nextShapes);
 
-  await Promise.all(
-    operations.map((operation) =>
-      runCanvasShapeSyncOperation({
-        boardId,
-        canvasClient,
-        operation,
-        workspaceId,
-      }),
-    ),
-  );
+  await runCanvasShapeSyncOperations({
+    boardId,
+    canvasClient,
+    operations,
+    workspaceId,
+  });
 }

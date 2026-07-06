@@ -16,6 +16,9 @@ const prReviewGithubDependencyService = await readSource(
 const prReviewDiffParser = await readSource(
   "../../src/modules/pr-review/pr-review-diff-parser.ts"
 );
+const prReviewAnalysisService = await readSource(
+  "../../src/modules/pr-review/pr-review-analysis.service.ts"
+);
 const prReviewModule = await readSource(
   "../../src/modules/pr-review/pr-review.module.ts"
 );
@@ -33,6 +36,7 @@ assert.match(prReviewModule, /GithubIntegrationModule/);
 assert.match(prReviewModule, /PrReviewController/);
 assert.match(prReviewModule, /PrReviewService/);
 assert.match(prReviewModule, /PrReviewGithubDependencyService/);
+assert.match(prReviewModule, /PrReviewAnalysisService/);
 
 assert.match(prReviewController, /@Controller\("workspaces\/:workspaceId\/github"\)/);
 assert.match(prReviewController, /@UseGuards\(AuthGuard\)/);
@@ -74,9 +78,11 @@ assert.match(prReviewGithubDependencyService, /getCurrentUserGithubOAuthStatus/)
 assert.match(prReviewGithubDependencyService, /getPullRequestDetail/);
 assert.match(prReviewGithubDependencyService, /getPullRequestChangedFiles/);
 assert.match(prReviewGithubDependencyService, /getPullRequestConflictStatus/);
+assert.match(prReviewGithubDependencyService, /submitPullRequestReview/);
 assert.match(prReviewGithubDependencyService, /getGithubPullRequest/);
 assert.match(prReviewGithubDependencyService, /listGithubPullRequestFiles/);
 assert.match(prReviewGithubDependencyService, /getGithubPullRequestConflictStatus/);
+assert.match(prReviewGithubDependencyService, /submitGithubPullRequestReview/);
 assert.match(prReviewGithubDependencyService, /mapPullRequestDetail/);
 assert.match(prReviewGithubDependencyService, /mapChangedFile/);
 assert.match(prReviewGithubDependencyService, /normalizeFileStatus/);
@@ -99,7 +105,8 @@ assert.match(prReviewService, /review_flow_files/);
 assert.match(prReviewService, /inFlightSessionCreations/);
 assert.match(prReviewService, /transaction/);
 assert.match(prReviewService, /Pull request not found in workspace/);
-assert.match(prReviewService, /PR 변경 파일 리뷰/);
+assert.match(prReviewService, /analysisService\.analyzePullRequest/);
+assert.match(prReviewAnalysisService, /PR 변경 파일 리뷰/);
 assert.match(prReviewService, /getReviewSessionSummary/);
 assert.match(prReviewService, /getReviewSessionResult/);
 assert.match(prReviewService, /getReviewSessionCanvas/);
@@ -138,6 +145,20 @@ assert.match(prReviewService, /mode === "binary"/);
 assert.match(prReviewService, /mode === "large"/);
 assert.doesNotMatch(prReviewService, /canvas_freeform_shapes/);
 assert.doesNotMatch(prReviewService, /canvas_shape_id/);
+assert.match(prReviewAnalysisService, /PrReviewAnalysisService/);
+assert.match(prReviewAnalysisService, /OPENAI_API_KEY/);
+assert.match(prReviewAnalysisService, /OPENAI_PR_REVIEW_MODEL/);
+assert.match(prReviewAnalysisService, /OPENAI_PR_REVIEW_TIMEOUT_MS/);
+assert.match(prReviewAnalysisService, /https:\/\/api\.openai\.com\/v1\/responses/);
+assert.match(prReviewAnalysisService, /json_schema/);
+assert.match(prReviewAnalysisService, /strict: true/);
+assert.match(prReviewAnalysisService, /output_text/);
+assert.match(prReviewAnalysisService, /buildPromptInput/);
+assert.match(prReviewAnalysisService, /patchSnippet/);
+assert.match(prReviewAnalysisService, /normalizeAnalysisResult/);
+assert.match(prReviewAnalysisService, /buildDeterministicAnalysis/);
+assert.match(prReviewAnalysisService, /fallback used/);
+assert.match(prReviewAnalysisService, /filePath/);
 assert.match(prReviewDiffParser, /parseUnifiedDiffPatch/);
 assert.match(prReviewDiffParser, /HUNK_HEADER_PATTERN/);
 assert.match(prReviewDiffParser, /oldLineNumber/);
@@ -146,6 +167,8 @@ assert.match(prReviewDiffParser, /type: "unchanged"/);
 assert.match(prReviewDiffParser, /type: "deleted"/);
 assert.match(prReviewDiffParser, /type: "added"/);
 assert.match(prReviewTypes, /PrReviewFileReviewStatus/);
+assert.match(prReviewTypes, /PrReviewGithubReviewSubmitType/);
+assert.match(prReviewTypes, /PrReviewGithubReviewSubmissionPayload/);
 assert.match(prReviewApi, /PR 요약 패널 조회/);
 assert.match(prReviewApi, /전체 리뷰 결과 조회/);
 assert.match(prReviewApi, /Flow 파일 노드 목록 조회/);

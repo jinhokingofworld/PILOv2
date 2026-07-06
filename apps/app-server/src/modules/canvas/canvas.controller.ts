@@ -6,6 +6,8 @@ import {
   Param,
   Patch,
   Post,
+  Put,
+  Query,
   UseGuards
 } from "@nestjs/common";
 import { apiResponse, ApiSuccessResponse } from "../../common/api-response";
@@ -14,11 +16,19 @@ import { CurrentUserId } from "../../common/current-user.decorator";
 import {
   CanvasBoardDetailPayload,
   CanvasBoardPayload,
+  CanvasLeavePayload,
+  CanvasShapeBatchPayload,
   CanvasShapeDeletePayload,
   CanvasShapePayload,
+  CanvasShapeSummaryPayload,
+  CanvasUserStatePayload,
+  CanvasViewSettingPayload,
   CanvasService,
   CreateCanvasRequest,
   CreateCanvasShapeRequest,
+  ListCanvasShapesQuery,
+  SyncCanvasShapesBatchRequest,
+  UpdateCanvasViewSettingRequest,
   UpdateCanvasShapeRequest
 } from "./canvas.service";
 
@@ -70,6 +80,23 @@ export class CanvasController {
     return apiResponse(canvas);
   }
 
+  @Get("canvases/:canvasId/shapes")
+  async listShapesInViewport(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("canvasId") canvasId: string,
+    @Query() query: ListCanvasShapesQuery
+  ): Promise<ApiSuccessResponse<CanvasShapeSummaryPayload[]>> {
+    const shapes = await this.canvasService.listShapesInViewport(
+      currentUserId,
+      workspaceId,
+      canvasId,
+      query
+    );
+
+    return apiResponse(shapes);
+  }
+
   @Post("canvases/:canvasId/shapes")
   async createShape(
     @CurrentUserId() currentUserId: string,
@@ -85,6 +112,68 @@ export class CanvasController {
     );
 
     return apiResponse(shape);
+  }
+
+  @Post("canvases/:canvasId/shapes/batch")
+  async syncShapesBatch(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("canvasId") canvasId: string,
+    @Body() body: SyncCanvasShapesBatchRequest
+  ): Promise<ApiSuccessResponse<CanvasShapeBatchPayload>> {
+    const result = await this.canvasService.syncShapesBatch(
+      currentUserId,
+      workspaceId,
+      canvasId,
+      body
+    );
+
+    return apiResponse(result);
+  }
+
+  @Get("canvas-shapes/:shapeId")
+  async getShapeDetail(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("shapeId") shapeId: string
+  ): Promise<ApiSuccessResponse<CanvasShapePayload>> {
+    const shape = await this.canvasService.getShapeDetail(
+      currentUserId,
+      workspaceId,
+      shapeId
+    );
+
+    return apiResponse(shape);
+  }
+
+  @Post("canvases/:canvasId/enter")
+  async enterCanvas(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("canvasId") canvasId: string
+  ): Promise<ApiSuccessResponse<CanvasUserStatePayload>> {
+    const userState = await this.canvasService.enterCanvas(
+      currentUserId,
+      workspaceId,
+      canvasId
+    );
+
+    return apiResponse(userState);
+  }
+
+  @Patch("canvases/:canvasId/leave")
+  async leaveCanvas(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("canvasId") canvasId: string
+  ): Promise<ApiSuccessResponse<CanvasLeavePayload>> {
+    const userState = await this.canvasService.leaveCanvas(
+      currentUserId,
+      workspaceId,
+      canvasId
+    );
+
+    return apiResponse(userState);
   }
 
   @Patch("canvas-shapes/:shapeId")
@@ -117,5 +206,22 @@ export class CanvasController {
     );
 
     return apiResponse(result);
+  }
+
+  @Put("canvases/:canvasId/view-settings")
+  async updateViewSetting(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("canvasId") canvasId: string,
+    @Body() body: UpdateCanvasViewSettingRequest
+  ): Promise<ApiSuccessResponse<CanvasViewSettingPayload>> {
+    const viewSetting = await this.canvasService.updateViewSetting(
+      currentUserId,
+      workspaceId,
+      canvasId,
+      body
+    );
+
+    return apiResponse(viewSetting);
   }
 }

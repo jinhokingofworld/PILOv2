@@ -35,7 +35,9 @@ import {
 import { restorePiloShapeAssets } from "../assets/pilo-canvas-assets";
 import { CanvasStateReporter } from "./pilo-canvas-state-reporter";
 import type {
+  PiloCanvasShapeDetailRequest,
   PiloCanvasFreeformShape,
+  PiloCanvasViewportBounds,
   PiloCanvasViewSetting,
 } from "../types";
 import {
@@ -119,10 +121,13 @@ export type PiloCanvasActions = {
 type PiloTldrawCanvasProps = {
   board: CanvasBoardDetail;
   hydrationVersion: number;
+  initialViewSetting: PiloCanvasViewSetting;
   freeformShapes: PiloCanvasFreeformShape[];
   onReady: (actions: PiloCanvasActions | null) => void;
   onFreeformShapesChange: (shapes: PiloCanvasFreeformShape[]) => void;
   onViewChange: (viewSetting: PiloCanvasViewSetting) => void;
+  onViewportBoundsChange: (bounds: PiloCanvasViewportBounds) => void;
+  onShapeDetailRequest: (request: PiloCanvasShapeDetailRequest) => void;
 };
 
 const tldrawComponents = {
@@ -139,9 +144,26 @@ function hydrateFreeformShapes(
   editor.createShapes(sortFreeformShapesForCreate(shapes));
 }
 
+function applyViewSetting(editor: Editor, viewSetting: PiloCanvasViewSetting) {
+  if (
+    !Number.isFinite(viewSetting.zoom) ||
+    !Number.isFinite(viewSetting.viewportX) ||
+    !Number.isFinite(viewSetting.viewportY)
+  ) {
+    return;
+  }
+
+  editor.setCamera({
+    x: viewSetting.viewportX,
+    y: viewSetting.viewportY,
+    z: viewSetting.zoom,
+  });
+}
+
 function resetFreeformShapes(
   editor: Editor,
   shapes: PiloCanvasFreeformShape[],
+  viewSetting: PiloCanvasViewSetting,
 ) {
   const existingFreeformShapeIds = editor
     .getCurrentPageShapes()
@@ -152,10 +174,7 @@ function resetFreeformShapes(
   }
 
   hydrateFreeformShapes(editor, shapes);
-
-  if (shapes.length) {
-    editor.zoomToFit({ animation: { duration: 180 } });
-  }
+  applyViewSetting(editor, viewSetting);
 }
 
 function registerCanvasEditorSideEffects(editor: Editor) {
@@ -201,14 +220,18 @@ export function PiloTldrawCanvas({
   board,
   freeformShapes,
   hydrationVersion,
+  initialViewSetting,
   onReady,
   onFreeformShapesChange,
   onViewChange,
+  onViewportBoundsChange,
+  onShapeDetailRequest,
 }: PiloTldrawCanvasProps) {
   const editorRef = useRef<Editor | null>(null);
   const placementRequestRef = useRef<PiloPlacementRequest | null>(null);
   const createdLocalCardsRef = useRef(0);
   const freeformShapesRef = useRef(freeformShapes);
+  const initialViewSettingRef = useRef(initialViewSetting);
   const seedKey = board.id;
 
   useEffect(() => {
@@ -216,21 +239,26 @@ export function PiloTldrawCanvas({
   }, [freeformShapes]);
 
   useEffect(() => {
+    initialViewSettingRef.current = initialViewSetting;
+  }, [initialViewSetting]);
+
+  useEffect(() => {
     const editor = editorRef.current;
 
     if (!editor) return;
 
-    resetFreeformShapes(editor, freeformShapesRef.current);
+    resetFreeformShapes(
+      editor,
+      freeformShapesRef.current,
+      initialViewSettingRef.current,
+    );
   }, [hydrationVersion, seedKey]);
 
   function mountEditor(editor: Editor) {
     editorRef.current = editor;
     registerCanvasEditorSideEffects(editor);
     hydrateFreeformShapes(editor, freeformShapes);
-
-    if (freeformShapes.length) {
-      editor.zoomToFit({ animation: { duration: 180 } });
-    }
+    applyViewSetting(editor, initialViewSetting);
 
     onReady({
       markUiEventAsHandled(event) {
@@ -417,6 +445,13 @@ export function PiloTldrawCanvas({
     return result.placed;
   }
 
+  function requestShapeDetail(editor: Editor, shapeId: TLShapeId) {
+    onShapeDetailRequest({
+      shapeId: String(shapeId),
+      zoom: editor.getCamera().z,
+    });
+  }
+
   function handleCanvasPointerDownCapture(event: PointerEvent<HTMLDivElement>) {
     const editor = editorRef.current;
 
@@ -455,10 +490,14 @@ export function PiloTldrawCanvas({
         editor.select(directShape.id);
       }
 
+      requestShapeDetail(editor, directShape.id);
       return;
     }
 
-    if (directShape && !isPiloFrameShape(directShape)) return;
+    if (directShape && !isPiloFrameShape(directShape)) {
+      requestShapeDetail(editor, directShape.id as TLShapeId);
+      return;
+    }
 
     const frameShape = isPiloFrameShape(directShape)
       ? directShape
@@ -474,11 +513,13 @@ export function PiloTldrawCanvas({
       !frameShape.isLocked &&
       editor.getSelectedShapeIds().includes(frameShape.id)
     ) {
+      requestShapeDetail(editor, frameShape.id);
       return;
     }
 
     editor.setCurrentTool("select");
     editor.select(frameShape.id);
+    requestShapeDetail(editor, frameShape.id);
     event.preventDefault();
     event.stopPropagation();
   }
@@ -497,6 +538,7 @@ export function PiloTldrawCanvas({
       <CanvasStateReporter
         onFreeformShapesChange={onFreeformShapesChange}
         onViewChange={onViewChange}
+        onViewportBoundsChange={onViewportBoundsChange}
       />
       <SmartGuidesOverlay />
       <SelectedShapeStackingManager />

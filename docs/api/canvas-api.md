@@ -5,7 +5,7 @@
 Canvas API는 사용자가 직접 편집하는 자유형 캔버스를 담당한다.
 
 - Workspace canvas 목록, 생성, 상세 조회
-- 자유 도형 생성, 수정, 삭제
+- 자유 도형 viewport 조회, 상세 조회, 생성, 수정, 삭제
 - 화면 위치 저장
 - 캔버스 입장/퇴장 user state
 
@@ -17,7 +17,7 @@ editing은 이 문서의 범위가 아니다.
 - `canvas` 테이블은 canvas metadata와 viewport 값을 저장한다.
 - `canvas_freeform_shapes` 테이블은 사용자가 만든 shape data를 저장한다.
 - Shape id는 client-generated text id다.
-- 삭제는 `deleted_at`을 사용하는 soft delete다.
+- Shape 삭제 API는 `deleted_at`을 사용하는 soft delete다. Canvas 퇴장 API는 해당 canvas의 soft-deleted shape를 영구 삭제할 수 있다.
 - 이 API의 `board_type`은 `freeform`이다. `review`는 PR 리뷰 화면 의미로 예약되어 있으며 여기서 관리하지 않는다.
 - MVP에는 CRDT, cursor 공유, heartbeat, 동시 편집 conflict resolution이 없다.
 
@@ -27,8 +27,11 @@ editing은 이 문서의 범위가 아니다.
 | --- | --- | --- |
 | `GET` | `/workspaces/{workspaceId}/canvases` | Workspace canvas 목록 조회 |
 | `POST` | `/workspaces/{workspaceId}/canvases` | Canvas 생성 |
-| `GET` | `/workspaces/{workspaceId}/canvases/{canvasId}` | Canvas 상세와 활성 shape 조회 |
+| `GET` | `/workspaces/{workspaceId}/canvases/{canvasId}` | Canvas metadata와 저장된 viewport 조회 |
+| `GET` | `/workspaces/{workspaceId}/canvases/{canvasId}/shapes` | Viewport bounds 기준 shape summary 조회 |
 | `POST` | `/workspaces/{workspaceId}/canvases/{canvasId}/shapes` | Shape 생성 |
+| `POST` | `/workspaces/{workspaceId}/canvases/{canvasId}/shapes/batch` | Shape 변경 batch 저장 |
+| `GET` | `/workspaces/{workspaceId}/canvas-shapes/{shapeId}` | Shape 상세 조회 |
 | `PATCH` | `/workspaces/{workspaceId}/canvas-shapes/{shapeId}` | Shape 수정 |
 | `DELETE` | `/workspaces/{workspaceId}/canvas-shapes/{shapeId}` | Shape soft delete |
 | `PUT` | `/workspaces/{workspaceId}/canvases/{canvasId}/view-settings` | Viewport 저장 |
@@ -73,6 +76,154 @@ bookmark, embed, pilo-sticky-note, pilo-code-block, file_node, group
 `file_node`는 여기서는 일반 자유형 shape type이다. PR Review graph는
 `canvas_freeform_shapes`에 저장하지 않는다.
 
+## Canvas 상세 조회
+
+Canvas 상세 조회는 canvas metadata와 저장된 viewport를 반환한다. 대용량 canvas에서
+초기 진입 시 전체 shape를 우선 로드하지 않도록, 클라이언트는 `viewSetting` 기준
+viewport bounds를 계산한 뒤 shape summary 조회 API를 호출한다.
+
+```json
+{
+  "id": "canvas id",
+  "workspaceId": "workspace id",
+  "title": "Untitled canvas",
+  "boardType": "freeform",
+  "zoom": 1,
+  "viewportX": 0,
+  "viewportY": 0,
+  "shapeCount": 42,
+  "updatedAt": "2026-07-03T00:00:00.000Z",
+  "viewSetting": {
+    "zoom": 1,
+    "viewportX": 0,
+    "viewportY": 0
+  },
+  "shapes": [],
+  "userState": null
+}
+```
+
+## Viewport Shape Summary 조회
+
+```text
+GET /workspaces/{workspaceId}/canvases/{canvasId}/shapes?x=-120&y=80&width=1440&height=900&margin=320
+```
+
+Query:
+
+- `x`: viewport page bounds left
+- `y`: viewport page bounds top
+- `width`: viewport page bounds width
+- `height`: viewport page bounds height
+- `margin`: viewport 주변 추가 로드 여백. 생략하면 `0`
+
+서버는 `x - margin`, `y - margin`, `x + width + margin`,
+`y + height + margin`과 겹치는 활성 shape summary를 반환한다.
+
+```json
+[
+  {
+    "id": "shape_client_id",
+    "canvasId": "canvas id",
+    "shapeType": "pilo-sticky-note",
+    "title": "Decision",
+    "textContent": "Ship MVP with all-deny RLS",
+    "x": 120,
+    "y": 80,
+    "width": 240,
+    "height": 120,
+    "rotation": 0,
+    "zIndex": 10,
+    "rawShape": {},
+    "createdAt": "2026-07-03T00:00:00.000Z",
+    "updatedAt": "2026-07-03T00:00:00.000Z",
+    "deletedAt": null
+  }
+]
+```
+
+## Shape 상세 조회
+
+```text
+GET /workspaces/{workspaceId}/canvas-shapes/{shapeId}
+```
+
+클라이언트는 shape 클릭 시 zoom 기준 이상일 때만 상세 조회를 호출한다. zoom 기준
+이하에서 클릭한 경우에는 선택/강조만 처리하고 상세 조회를 보내지 않는다. zoom 기준
+이하로 내려갔다가 다시 확대되어도 자동 조회하지 않으며, 사용자가 shape를 다시
+클릭해야 한다.
+
+응답은 `Shape Payload`와 같은 full shape data다. 이미 클라이언트 cache에 full
+detail이 있으면 cache를 우선 사용할 수 있다.
+
+## Shape Batch 저장
+
+```text
+POST /workspaces/{workspaceId}/canvases/{canvasId}/shapes/batch
+```
+
+이 API는 짧은 시간에 여러 shape 변경이 생겼을 때 API 호출 수를 줄이는 최적화
+endpoint다. 단일 shape 생성/수정/삭제 API는 fallback, 테스트, 디버깅, 단일 작업만
+지원하는 클라이언트를 위해 유지한다.
+
+요청:
+
+```json
+{
+  "operations": [
+    {
+      "type": "create",
+      "shapeId": "shape_1",
+      "payload": {
+        "id": "shape_1",
+        "shapeType": "pilo-sticky-note",
+        "title": "Decision",
+        "textContent": "Ship MVP with all-deny RLS",
+        "x": 120,
+        "y": 80,
+        "width": 240,
+        "height": 120,
+        "rotation": 0,
+        "zIndex": 10,
+        "rawShape": {}
+      }
+    },
+    {
+      "type": "update",
+      "shapeId": "shape_2",
+      "payload": {
+        "x": 360,
+        "y": 160,
+        "rawShape": {}
+      }
+    },
+    {
+      "type": "delete",
+      "shapeId": "shape_3"
+    }
+  ]
+}
+```
+
+응답:
+
+```json
+{
+  "created": 1,
+  "updated": 1,
+  "deleted": 1
+}
+```
+
+정책:
+
+- `operations`는 최대 `100`개까지 허용한다.
+- 서버는 같은 transaction 안에서 순서대로 처리하며, batch 전체 성공 또는 전체 실패로 동작한다.
+- `create` payload의 `id`가 있으면 `shapeId`와 같아야 한다.
+- 프론트는 500ms 동안 shape 변경 operation을 queue에 모은 뒤 shapeId 기준으로 merge한다.
+- 프론트에 batch method가 없으면 기존 단일 API로 fallback할 수 있다.
+- batch endpoint 호출이 실패한 경우에는 단일 API로 재시도하지 않는다.
+
 ## View Settings
 
 ```json
@@ -80,6 +231,39 @@ bookmark, embed, pilo-sticky-note, pilo-code-block, file_node, group
   "zoom": 1,
   "viewportX": 0,
   "viewportY": 0
+}
+```
+
+## Canvas 입장/퇴장
+
+```text
+POST /workspaces/{workspaceId}/canvases/{canvasId}/enter
+PATCH /workspaces/{workspaceId}/canvases/{canvasId}/leave
+```
+
+`enter`는 현재 사용자의 `canvas_user_states` row를 upsert한다. 재입장 시
+`entered_at`을 현재 시각으로 갱신하고 `left_at`을 `null`로 되돌린다.
+
+```json
+{
+  "canvasId": "canvas id",
+  "userId": "user id",
+  "enteredAt": "2026-07-03T00:00:00.000Z",
+  "leftAt": null
+}
+```
+
+`leave`는 현재 사용자의 `left_at`을 기록한 뒤, 같은 canvas에서
+`deleted_at IS NOT NULL`인 shape를 영구 삭제한다. 이 cleanup은 사용자별 삭제자
+기준이 아니라 canvas 기준이다.
+
+```json
+{
+  "canvasId": "canvas id",
+  "userId": "user id",
+  "enteredAt": "2026-07-03T00:00:00.000Z",
+  "leftAt": "2026-07-03T00:05:00.000Z",
+  "permanentlyDeletedShapeCount": 3
 }
 ```
 

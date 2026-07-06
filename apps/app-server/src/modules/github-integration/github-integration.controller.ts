@@ -8,8 +8,10 @@ import {
   Post,
   Query,
   RawBody,
+  Res,
   UseGuards
 } from "@nestjs/common";
+import type { FastifyReply } from "fastify";
 import { apiResponse, ApiSuccessResponse } from "../../common/api-response";
 import { AuthGuard } from "../../common/auth.guard";
 import { CurrentUserId } from "../../common/current-user.decorator";
@@ -69,6 +71,15 @@ function apiPaginatedResponse<T>(
   };
 }
 
+function redirectToReturnUrl(reply: FastifyReply, returnUrl: string | null): boolean {
+  if (!returnUrl) {
+    return false;
+  }
+
+  reply.redirect(returnUrl, 302);
+  return true;
+}
+
 @Controller()
 export class GithubIntegrationController {
   constructor(private readonly githubIntegrationService: GithubIntegrationService) {}
@@ -96,11 +107,16 @@ export class GithubIntegrationController {
 
   @Get("github/oauth/callback")
   async completeGithubOAuthCallback(
-    @Query() query: GithubOAuthCallbackQuery
-  ): Promise<ApiSuccessResponse<GithubOAuthCallbackPayload>> {
+    @Query() query: GithubOAuthCallbackQuery,
+    @Res({ passthrough: true }) reply: FastifyReply
+  ): Promise<ApiSuccessResponse<GithubOAuthCallbackPayload> | undefined> {
     const result = await this.githubIntegrationService.completeGithubOAuthCallback(
       query
     );
+    if (redirectToReturnUrl(reply, result.returnUrl)) {
+      return undefined;
+    }
+
     return apiResponse(result);
   }
 
@@ -132,10 +148,15 @@ export class GithubIntegrationController {
 
   @Get("github/installations/callback")
   async completeGithubAppInstallationCallback(
-    @Query() query: GithubAppInstallationCallbackQuery
-  ): Promise<ApiSuccessResponse<GithubAppInstallationCallbackPayload>> {
+    @Query() query: GithubAppInstallationCallbackQuery,
+    @Res({ passthrough: true }) reply: FastifyReply
+  ): Promise<ApiSuccessResponse<GithubAppInstallationCallbackPayload> | undefined> {
     const result =
       await this.githubIntegrationService.completeGithubAppInstallationCallback(query);
+    if (redirectToReturnUrl(reply, result.returnUrl)) {
+      return undefined;
+    }
+
     return apiResponse(result);
   }
 

@@ -7,3 +7,16 @@ export type PiloCanvasViewSetting = {
   viewportX: number;
   viewportY: number;
 };
+
+export type PiloCanvasViewportBounds = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  zoom: number;
+};
+
+export type PiloCanvasShapeDetailRequest = {
+  shapeId: string;
+  zoom: number;
+};
