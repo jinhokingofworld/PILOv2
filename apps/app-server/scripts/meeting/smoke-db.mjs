@@ -58,6 +58,15 @@ const liveKitTokenService = {
   }
 };
 
+const liveKitEgressService = {
+  async startRoomAudioOnlyEgress() {
+    throw new Error("meeting DB smoke does not start LiveKit Egress");
+  },
+  async stopEgress() {
+    throw new Error("meeting DB smoke does not stop LiveKit Egress");
+  }
+};
+
 const suffix = randomUUID();
 const currentUserId = randomUUID();
 const workspaceId = randomUUID();
@@ -70,7 +79,8 @@ try {
   const meetingService = new MeetingService(
     database,
     workspaceService,
-    liveKitTokenService
+    liveKitTokenService,
+    liveKitEgressService
   );
 
   await database.execute(

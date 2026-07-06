@@ -1,8 +1,15 @@
 import { Injectable } from "@nestjs/common";
 import { QueryResultRow } from "pg";
-import { badRequest, notFound } from "../../common/api-error";
-import { DatabaseService } from "../../database/database.service";
+import { badRequest, forbidden, notFound } from "../../common/api-error";
+import {
+  DatabaseService,
+  DatabaseTransaction
+} from "../../database/database.service";
 import { WorkspaceService } from "../workspace/workspace.service";
+import {
+  LiveKitEgressService,
+  StopLiveKitEgressResult
+} from "./livekit-egress.service";
 import {
   LiveKitJoinPayload,
   LiveKitTokenService
@@ -30,6 +37,7 @@ interface MeetingRow extends QueryResultRow {
 interface CurrentMeetingRow extends MeetingRow {
   recording_id: string | null;
   recording_meeting_id: string | null;
+  recording_livekit_egress_id: string | null;
   recording_status: RecordingStatus | null;
   recording_audio_file_url: string | null;
   recording_audio_file_key: string | null;
@@ -76,6 +84,7 @@ interface ParticipantRow extends QueryResultRow {
 interface RecordingRow extends QueryResultRow {
   id: string;
   meeting_id: string;
+  livekit_egress_id: string | null;
   status: RecordingStatus;
   audio_file_url: string | null;
   audio_file_key: string | null;
@@ -104,6 +113,10 @@ interface MeetingReportRow extends QueryResultRow {
 
 interface ActiveParticipantCountRow extends QueryResultRow {
   active_participant_count: number | string;
+}
+
+interface GeneratedIdRow extends QueryResultRow {
+  id: string;
 }
 
 interface ParticipantCountRow extends QueryResultRow {
@@ -204,6 +217,17 @@ export interface JoinMeetingPayload {
   currentRecording: RecordingPayload | null;
 }
 
+export interface StartRecordingPayload {
+  meeting: MeetingPayload;
+  recording: RecordingPayload;
+}
+
+export interface EndRecordingPayload {
+  meeting: MeetingPayload;
+  recording: RecordingPayload;
+  report: null;
+}
+
 export interface LeaveMeetingPayload {
   participant: ParticipantPayload;
   meetingEnded: boolean;
@@ -236,6 +260,8 @@ export interface ParticipantListPayload {
 const MAIN_MEETING_ROOM = "MAIN_MEETING_ROOM";
 const UNIQUE_VIOLATION_CODE = "23505";
 const ACTIVE_MEETING_UNIQUE_INDEX = "unique_active_meeting_per_room";
+const SAFE_EGRESS_START_ERROR = "LiveKit Egress start failed";
+const SAFE_EGRESS_STOP_ERROR = "LiveKit Egress stop failed";
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -244,7 +270,8 @@ export class MeetingService {
   constructor(
     private readonly database: DatabaseService,
     private readonly workspaceService: WorkspaceService,
-    private readonly liveKitTokenService: LiveKitTokenService
+    private readonly liveKitTokenService: LiveKitTokenService,
+    private readonly liveKitEgressService: LiveKitEgressService
   ) {}
 
   getModuleInfo() {
@@ -488,6 +515,10 @@ export class MeetingService {
       );
       const shouldEndMeeting =
         wasActive && activeParticipantCount === 0 && meeting.ended_at === null;
+      const endedRecording =
+        shouldEndMeeting && meeting.recording_id !== null
+          ? await this.stopRunningRecording(transaction, meeting)
+          : null;
       const endedMeeting = shouldEndMeeting
         ? await this.endMeetingIfStillActive(transaction, workspaceId, meetingId)
         : null;
@@ -496,7 +527,8 @@ export class MeetingService {
         participant: this.mapParticipant(participant),
         meetingEnded: endedMeeting !== null,
         meeting: this.mapMeeting(endedMeeting ?? meeting),
-        currentRecording: this.mapNullableCurrentRecording(meeting)
+        currentRecording:
+          endedRecording === null ? this.mapNullableCurrentRecording(meeting) : null
       };
     });
   }
@@ -504,24 +536,122 @@ export class MeetingService {
   async startRecording(
     currentUserId: string,
     workspaceId: string,
-    _meetingId: string
-  ): Promise<PendingMeetingPayload> {
+    meetingId: string
+  ): Promise<StartRecordingPayload> {
     await this.assertWorkspaceAccess(currentUserId, workspaceId);
-    return this.pendingEndpoint(
-      "POST /workspaces/{workspaceId}/meetings/{meetingId}/recordings"
-    );
+    return this.database.transaction(async (transaction) => {
+      const meeting = await this.findMeetingById(transaction, workspaceId, meetingId, {
+        lockMeeting: true
+      });
+
+      if (!meeting) {
+        throw notFound("Meeting not found");
+      }
+
+      if (meeting.ended_at !== null) {
+        throw badRequest("Meeting has already ended");
+      }
+
+      await this.assertActiveParticipant(transaction, meetingId, currentUserId);
+
+      const runningRecording = await this.findRunningRecording(
+        transaction,
+        meetingId,
+        {
+          lockRecording: true
+        }
+      );
+      if (runningRecording) {
+        return {
+          meeting: this.mapMeeting(meeting),
+          recording: this.mapRecording(runningRecording)
+        };
+      }
+
+      const recordingId = await this.generateId(transaction);
+      const audioFileKey = this.buildAudioFileKey(
+        workspaceId,
+        meetingId,
+        recordingId
+      );
+
+      let livekitEgressId: string;
+      try {
+        const egress = await this.liveKitEgressService.startRoomAudioOnlyEgress({
+          livekitRoomName: meeting.livekit_room_name,
+          audioFileKey
+        });
+        livekitEgressId = egress.livekitEgressId;
+      } catch {
+        const recording = await this.insertFailedRecording(transaction, {
+          recordingId,
+          meetingId,
+          audioFileKey,
+          errorMessage: SAFE_EGRESS_START_ERROR
+        });
+
+        return {
+          meeting: this.mapMeeting(meeting),
+          recording: this.mapRecording(recording)
+        };
+      }
+
+      const recording = await this.insertRunningRecording(transaction, {
+        recordingId,
+        meetingId,
+        livekitEgressId,
+        audioFileKey
+      });
+
+      return {
+        meeting: this.mapMeeting(meeting),
+        recording: this.mapRecording(recording)
+      };
+    });
   }
 
   async endRecordingAndCreateReport(
     currentUserId: string,
     workspaceId: string,
-    _meetingId: string,
-    _recordingId: string
-  ): Promise<PendingMeetingPayload> {
+    meetingId: string,
+    recordingId: string
+  ): Promise<EndRecordingPayload> {
     await this.assertWorkspaceAccess(currentUserId, workspaceId);
-    return this.pendingEndpoint(
-      "POST /workspaces/{workspaceId}/meetings/{meetingId}/recordings/{recordingId}/end"
-    );
+    return this.database.transaction(async (transaction) => {
+      const meeting = await this.findMeetingById(transaction, workspaceId, meetingId, {
+        lockMeeting: true
+      });
+
+      if (!meeting) {
+        throw notFound("Meeting not found");
+      }
+
+      await this.assertActiveParticipant(transaction, meetingId, currentUserId);
+
+      const recording = await this.findRecordingById(
+        transaction,
+        meetingId,
+        recordingId,
+        {
+          lockRecording: true
+        }
+      );
+
+      if (!recording) {
+        throw notFound("Recording not found");
+      }
+
+      const stoppedRecording =
+        recording.status === "RUNNING"
+          ? await this.stopRunningRecording(transaction, meeting, recording)
+          : recording;
+
+      return {
+        meeting: this.mapMeeting(meeting),
+        recording: this.mapRecording(stoppedRecording),
+        report: null
+      };
+    });
   }
 
   async listRecordings(
@@ -652,6 +782,7 @@ export class MeetingService {
           meetings.updated_at,
           current_recording.id AS recording_id,
           current_recording.meeting_id AS recording_meeting_id,
+          current_recording.livekit_egress_id AS recording_livekit_egress_id,
           current_recording.status AS recording_status,
           current_recording.audio_file_url AS recording_audio_file_url,
           current_recording.audio_file_key AS recording_audio_file_key,
@@ -666,6 +797,7 @@ export class MeetingService {
           SELECT
             meeting_recordings.id,
             meeting_recordings.meeting_id,
+            meeting_recordings.livekit_egress_id,
             meeting_recordings.status,
             meeting_recordings.audio_file_url,
             meeting_recordings.audio_file_key,
@@ -721,6 +853,7 @@ export class MeetingService {
           meetings.updated_at,
           current_recording.id AS recording_id,
           current_recording.meeting_id AS recording_meeting_id,
+          current_recording.livekit_egress_id AS recording_livekit_egress_id,
           current_recording.status AS recording_status,
           current_recording.audio_file_url AS recording_audio_file_url,
           current_recording.audio_file_key AS recording_audio_file_key,
@@ -735,6 +868,7 @@ export class MeetingService {
           SELECT
             meeting_recordings.id,
             meeting_recordings.meeting_id,
+            meeting_recordings.livekit_egress_id,
             meeting_recordings.status,
             meeting_recordings.audio_file_url,
             meeting_recordings.audio_file_key,
@@ -770,6 +904,7 @@ export class MeetingService {
         SELECT
           id,
           meeting_id,
+          livekit_egress_id,
           status,
           audio_file_url,
           audio_file_key,
@@ -784,6 +919,262 @@ export class MeetingService {
       `,
       [meetingId]
     );
+  }
+
+  private async findRunningRecording(
+    executor: QueryOneExecutor,
+    meetingId: string,
+    options: { lockRecording?: boolean } = {}
+  ): Promise<RecordingRow | null> {
+    return executor.queryOne<RecordingRow>(
+      `
+        SELECT
+          id,
+          meeting_id,
+          livekit_egress_id,
+          status,
+          audio_file_url,
+          audio_file_key,
+          duration_sec,
+          file_size_bytes,
+          started_at,
+          ended_at,
+          error_message
+        FROM meeting_recordings
+        WHERE meeting_id = $1
+          AND status = 'RUNNING'
+        ORDER BY started_at DESC, id ASC
+        LIMIT 1
+        ${options.lockRecording === true ? "FOR UPDATE" : ""}
+      `,
+      [meetingId]
+    );
+  }
+
+  private async findRecordingById(
+    executor: QueryOneExecutor,
+    meetingId: string,
+    recordingId: string,
+    options: { lockRecording?: boolean } = {}
+  ): Promise<RecordingRow | null> {
+    if (!UUID_PATTERN.test(recordingId)) {
+      return null;
+    }
+
+    return executor.queryOne<RecordingRow>(
+      `
+        SELECT
+          id,
+          meeting_id,
+          livekit_egress_id,
+          status,
+          audio_file_url,
+          audio_file_key,
+          duration_sec,
+          file_size_bytes,
+          started_at,
+          ended_at,
+          error_message
+        FROM meeting_recordings
+        WHERE meeting_id = $1
+          AND id = $2
+        LIMIT 1
+        ${options.lockRecording === true ? "FOR UPDATE" : ""}
+      `,
+      [meetingId, recordingId]
+    );
+  }
+
+  private async generateId(executor: QueryOneExecutor): Promise<string> {
+    const generated = await executor.queryOne<GeneratedIdRow>(
+      "SELECT gen_random_uuid()::text AS id"
+    );
+
+    if (!generated) {
+      throw badRequest("Identifier could not be generated");
+    }
+
+    return generated.id;
+  }
+
+  private async insertRunningRecording(
+    executor: QueryOneExecutor,
+    input: {
+      recordingId: string;
+      meetingId: string;
+      livekitEgressId: string;
+      audioFileKey: string;
+    }
+  ): Promise<RecordingRow> {
+    const recording = await executor.queryOne<RecordingRow>(
+      `
+        INSERT INTO meeting_recordings (
+          id,
+          meeting_id,
+          livekit_egress_id,
+          status,
+          audio_file_url,
+          audio_file_key
+        )
+        VALUES ($1, $2, $3, 'RUNNING', NULL, $4)
+        RETURNING
+          id,
+          meeting_id,
+          livekit_egress_id,
+          status,
+          audio_file_url,
+          audio_file_key,
+          duration_sec,
+          file_size_bytes,
+          started_at,
+          ended_at,
+          error_message
+      `,
+      [
+        input.recordingId,
+        input.meetingId,
+        input.livekitEgressId,
+        input.audioFileKey
+      ]
+    );
+
+    if (!recording) {
+      throw badRequest("Recording could not be started");
+    }
+
+    return recording;
+  }
+
+  private async insertFailedRecording(
+    executor: QueryOneExecutor,
+    input: {
+      recordingId: string;
+      meetingId: string;
+      audioFileKey: string;
+      errorMessage: string;
+    }
+  ): Promise<RecordingRow> {
+    const recording = await executor.queryOne<RecordingRow>(
+      `
+        INSERT INTO meeting_recordings (
+          id,
+          meeting_id,
+          status,
+          audio_file_url,
+          audio_file_key,
+          ended_at,
+          error_message
+        )
+        VALUES ($1, $2, 'FAILED', NULL, $3, now(), $4)
+        RETURNING
+          id,
+          meeting_id,
+          livekit_egress_id,
+          status,
+          audio_file_url,
+          audio_file_key,
+          duration_sec,
+          file_size_bytes,
+          started_at,
+          ended_at,
+          error_message
+      `,
+      [input.recordingId, input.meetingId, input.audioFileKey, input.errorMessage]
+    );
+
+    if (!recording) {
+      throw badRequest("Recording failure could not be saved");
+    }
+
+    return recording;
+  }
+
+  private async updateRecordingCompleted(
+    executor: QueryOneExecutor,
+    recording: RecordingRow,
+    result: StopLiveKitEgressResult
+  ): Promise<RecordingRow> {
+    const updatedRecording = await executor.queryOne<RecordingRow>(
+      `
+        UPDATE meeting_recordings
+        SET
+          status = 'COMPLETED',
+          audio_file_url = NULL,
+          audio_file_key = COALESCE($2, audio_file_key),
+          duration_sec = COALESCE(
+            $3,
+            GREATEST(1, EXTRACT(EPOCH FROM (now() - started_at))::int)
+          ),
+          file_size_bytes = $4,
+          ended_at = now(),
+          error_message = NULL,
+          updated_at = now()
+        WHERE id = $1
+          AND status = 'RUNNING'
+        RETURNING
+          id,
+          meeting_id,
+          livekit_egress_id,
+          status,
+          audio_file_url,
+          audio_file_key,
+          duration_sec,
+          file_size_bytes,
+          started_at,
+          ended_at,
+          error_message
+      `,
+      [
+        recording.id,
+        result.audioFileKey ?? recording.audio_file_key,
+        result.durationSec,
+        result.fileSizeBytes
+      ]
+    );
+
+    if (!updatedRecording) {
+      throw badRequest("Recording could not be completed");
+    }
+
+    return updatedRecording;
+  }
+
+  private async updateRecordingFailed(
+    executor: QueryOneExecutor,
+    recording: RecordingRow,
+    errorMessage: string
+  ): Promise<RecordingRow> {
+    const updatedRecording = await executor.queryOne<RecordingRow>(
+      `
+        UPDATE meeting_recordings
+        SET
+          status = 'FAILED',
+          ended_at = now(),
+          error_message = $2,
+          updated_at = now()
+        WHERE id = $1
+          AND status = 'RUNNING'
+        RETURNING
+          id,
+          meeting_id,
+          livekit_egress_id,
+          status,
+          audio_file_url,
+          audio_file_key,
+          duration_sec,
+          file_size_bytes,
+          started_at,
+          ended_at,
+          error_message
+      `,
+      [recording.id, errorMessage]
+    );
+
+    if (!updatedRecording) {
+      throw badRequest("Recording could not be failed");
+    }
+
+    return updatedRecording;
   }
 
   private async listMeetingReportRows(
@@ -931,6 +1322,22 @@ export class MeetingService {
     );
   }
 
+  private async assertActiveParticipant(
+    executor: QueryOneExecutor,
+    meetingId: string,
+    currentUserId: string
+  ): Promise<void> {
+    const participant = await this.findParticipant(
+      executor,
+      meetingId,
+      currentUserId
+    );
+
+    if (!participant || participant.left_at !== null) {
+      throw forbidden("Current user is not an active meeting participant");
+    }
+  }
+
   private async markParticipantLeft(
     executor: QueryOneExecutor,
     meetingId: string,
@@ -1010,6 +1417,65 @@ export class MeetingService {
     );
   }
 
+  private async stopRunningRecording(
+    executor: DatabaseTransaction,
+    meeting: CurrentMeetingRow,
+    recording = this.toCurrentRecordingRow(meeting)
+  ): Promise<RecordingRow> {
+    if (recording === null) {
+      throw badRequest("No running recording found");
+    }
+
+    if (recording.livekit_egress_id === null) {
+      return this.updateRecordingFailed(
+        executor,
+        recording,
+        SAFE_EGRESS_STOP_ERROR
+      );
+    }
+
+    try {
+      const result = await this.liveKitEgressService.stopEgress(
+        recording.livekit_egress_id
+      );
+
+      if (result.status === "FAILED") {
+        return this.updateRecordingFailed(
+          executor,
+          recording,
+          result.errorMessage ?? SAFE_EGRESS_STOP_ERROR
+        );
+      }
+
+      return this.updateRecordingCompleted(executor, recording, result);
+    } catch {
+      return this.updateRecordingFailed(
+        executor,
+        recording,
+        SAFE_EGRESS_STOP_ERROR
+      );
+    }
+  }
+
+  private buildAudioFileKey(
+    workspaceId: string,
+    meetingId: string,
+    recordingId: string
+  ): string {
+    const prefix = (process.env.LIVEKIT_EGRESS_S3_PREFIX ?? "recordings/meetings")
+      .trim()
+      .replace(/^\/+|\/+$/g, "");
+
+    return [
+      prefix,
+      `workspaces/${workspaceId}`,
+      `meetings/${meetingId}`,
+      `recordings/${recordingId}.mp3`
+    ]
+      .filter(Boolean)
+      .join("/");
+  }
+
   private normalizeStartMeetingBody(body: unknown): { roomKey: string } {
     if (body === undefined || body === null) {
       return { roomKey: MAIN_MEETING_ROOM };
@@ -1052,6 +1518,15 @@ export class MeetingService {
   }
 
   private mapNullableCurrentRecording(row: CurrentMeetingRow): RecordingPayload | null {
+    const recording = this.toCurrentRecordingRow(row);
+    if (recording === null) {
+      return null;
+    }
+
+    return this.mapRecording(recording);
+  }
+
+  private toCurrentRecordingRow(row: CurrentMeetingRow): RecordingRow | null {
     if (row.recording_id === null || row.recording_meeting_id === null) {
       return null;
     }
@@ -1060,9 +1535,10 @@ export class MeetingService {
       return null;
     }
 
-    return this.mapRecording({
+    return {
       id: row.recording_id,
       meeting_id: row.recording_meeting_id,
+      livekit_egress_id: row.recording_livekit_egress_id,
       status: row.recording_status,
       audio_file_url: row.recording_audio_file_url,
       audio_file_key: row.recording_audio_file_key,
@@ -1071,7 +1547,7 @@ export class MeetingService {
       started_at: row.recording_started_at,
       ended_at: row.recording_ended_at,
       error_message: row.recording_error_message
-    });
+    };
   }
 
   private mapRecording(recording: RecordingRow): RecordingPayload {

@@ -44,6 +44,9 @@ const meetingController = await readSource(
 );
 const meetingModule = await readSource("../src/modules/meeting/meeting.module.ts");
 const meetingService = await readSource("../src/modules/meeting/meeting.service.ts");
+const liveKitEgressService = await readSource(
+  "../src/modules/meeting/livekit-egress.service.ts"
+);
 const liveKitTokenService = await readSource(
   "../src/modules/meeting/livekit-token.service.ts"
 );
@@ -148,6 +151,7 @@ assert.match(canvasService, /SET deleted_at = now\(\)/);
 assert.match(canvasService, /deleted_at IS NULL/);
 assert.match(meetingModule, /DatabaseModule/);
 assert.match(meetingModule, /WorkspaceModule/);
+assert.match(meetingModule, /LiveKitEgressService/);
 assert.match(meetingModule, /LiveKitTokenService/);
 assert.match(meetingController, /@Controller\("workspaces\/:workspaceId"\)/);
 assert.match(meetingController, /@UseGuards\(AuthGuard\)/);
@@ -161,7 +165,22 @@ assert.match(meetingService, /unique_active_meeting_per_room/);
 assert.match(meetingService, /INSERT INTO meetings/);
 assert.match(meetingService, /INSERT INTO meeting_participants/);
 assert.match(meetingService, /createJoinToken/);
+assert.match(meetingService, /startRoomAudioOnlyEgress/);
+assert.match(meetingService, /stopEgress/);
+assert.match(meetingService, /LIVEKIT_EGRESS_S3_PREFIX/);
+assert.match(meetingService, /audio_file_url = NULL/);
 assert.doesNotMatch(meetingService, /livekit:\s*null/);
+assert.match(liveKitEgressService, /EgressClient/);
+assert.match(liveKitEgressService, /startRoomCompositeEgress/);
+assert.match(liveKitEgressService, /audioOnly:\s*true/);
+assert.match(liveKitEgressService, /EncodedFileType\.MP3/);
+assert.match(liveKitEgressService, /S3Upload/);
+assert.match(liveKitEgressService, /LIVEKIT_RECORDING_MODE/);
+assert.match(liveKitEgressService, /LIVEKIT_RECORDINGS_BUCKET/);
+assert.match(liveKitEgressService, /LIVEKIT_WS_URL/);
+assert.match(liveKitEgressService, /LIVEKIT_URL/);
+assert.doesNotMatch(liveKitEgressService, /AWS_ACCESS_KEY_ID/);
+assert.doesNotMatch(liveKitEgressService, /AWS_SECRET_ACCESS_KEY/);
 assert.match(liveKitTokenService, /livekit-server-sdk/);
 assert.match(liveKitTokenService, /TrackSource\.MICROPHONE/);
 assert.match(liveKitTokenService, /canPublishData:\s*false/);
@@ -170,6 +189,7 @@ assert.match(liveKitTokenService, /LIVEKIT_API_KEY/);
 assert.match(liveKitTokenService, /LIVEKIT_API_SECRET/);
 assert.match(liveKitTokenService, /LIVEKIT_URL/);
 
+await import("./meeting/livekit-egress.test.mjs");
 await import("./meeting/livekit-token.test.mjs");
 await import("./calendar/test.mjs");
 await import("./meeting/test.mjs");
