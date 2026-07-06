@@ -1,0 +1,304 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useState } from "react";
+
+import { createBoardApiClient } from "@/features/board/api/client";
+import type {
+  BoardColumnPayload,
+  BoardDetailPayload,
+  BoardFilterOptionsPayload,
+  BoardIssueCardPayload,
+  BoardPaginatedPayload,
+  BoardPayload,
+  CreateBoardInput,
+  ListBoardIssuesQuery
+} from "@/features/board/types";
+import { createGithubIntegrationApiClient } from "@/features/github-integration/api/client";
+import type {
+  GithubProjectV2,
+  GithubRepository
+} from "@/features/github-integration/types";
+
+type BoardWorkspaceStatus = "idle" | "loading" | "success" | "error";
+
+type BoardWorkspaceCatalog = {
+  repositories: GithubRepository[];
+  projects: GithubProjectV2[];
+  boards: BoardPayload[];
+  boardsMeta: BoardPaginatedPayload<BoardPayload>["meta"] | null;
+};
+
+type BoardWorkspaceBoardState = {
+  board: BoardDetailPayload | null;
+  columns: BoardColumnPayload[];
+  issues: BoardIssueCardPayload[];
+  issuesMeta: BoardPaginatedPayload<BoardIssueCardPayload>["meta"] | null;
+  filterOptions: BoardFilterOptionsPayload | null;
+};
+
+type UseBoardWorkspaceDataOptions = {
+  accessToken?: string | null;
+  boardId?: string;
+  enabled?: boolean;
+  issueQuery?: ListBoardIssuesQuery;
+  workspaceId: string;
+};
+
+const emptyCatalog: BoardWorkspaceCatalog = {
+  repositories: [],
+  projects: [],
+  boards: [],
+  boardsMeta: null
+};
+
+const emptyBoardState: BoardWorkspaceBoardState = {
+  board: null,
+  columns: [],
+  issues: [],
+  issuesMeta: null,
+  filterOptions: null
+};
+
+function errorFromUnknown(error: unknown) {
+  return error instanceof Error
+    ? error
+    : new Error("Board data could not be loaded");
+}
+
+export function useBoardWorkspaceData({
+  accessToken = null,
+  boardId = "",
+  enabled = true,
+  issueQuery = {},
+  workspaceId
+}: UseBoardWorkspaceDataOptions) {
+  const normalizedAccessToken = accessToken?.trim() || null;
+  const normalizedWorkspaceId = workspaceId.trim();
+  const normalizedBoardId = boardId.trim();
+  const canLoad = Boolean(enabled && normalizedWorkspaceId && normalizedAccessToken);
+  const issueQueryKey = JSON.stringify(issueQuery);
+  const [catalog, setCatalog] = useState<BoardWorkspaceCatalog>(emptyCatalog);
+  const [boardState, setBoardState] =
+    useState<BoardWorkspaceBoardState>(emptyBoardState);
+  const [catalogStatus, setCatalogStatus] =
+    useState<BoardWorkspaceStatus>("idle");
+  const [boardStatus, setBoardStatus] = useState<BoardWorkspaceStatus>("idle");
+  const [catalogError, setCatalogError] = useState<Error | null>(null);
+  const [boardError, setBoardError] = useState<Error | null>(null);
+  const boardClient = useMemo(
+    () => createBoardApiClient({ accessToken: normalizedAccessToken }),
+    [normalizedAccessToken]
+  );
+  const githubClient = useMemo(
+    () =>
+      createGithubIntegrationApiClient({
+        accessToken: normalizedAccessToken
+      }),
+    [normalizedAccessToken]
+  );
+
+  const loadWorkspaceData = useCallback(async () => {
+    if (!canLoad) {
+      return emptyCatalog;
+    }
+
+    const [repositories, projects, boards] = await Promise.all([
+      githubClient.listGithubRepositories(normalizedWorkspaceId, {
+        includeArchived: false,
+        limit: 100
+      }),
+      githubClient.listGithubProjectsV2(normalizedWorkspaceId, {
+        closed: false,
+        limit: 100
+      }),
+      boardClient.listBoards(normalizedWorkspaceId, {
+        limit: 50
+      })
+    ]);
+
+    return {
+      repositories: repositories.data,
+      projects: projects.data,
+      boards: boards.data,
+      boardsMeta: boards.meta
+    };
+  }, [boardClient, canLoad, githubClient, normalizedWorkspaceId]);
+
+  const loadBoardData = useCallback(async () => {
+    if (!canLoad || !normalizedBoardId) {
+      return emptyBoardState;
+    }
+
+    const parsedIssueQuery = JSON.parse(issueQueryKey) as ListBoardIssuesQuery;
+    const [board, columns, issues, filterOptions] = await Promise.all([
+      boardClient.getBoard(normalizedWorkspaceId, normalizedBoardId),
+      boardClient.listBoardColumns(normalizedWorkspaceId, normalizedBoardId),
+      boardClient.listBoardIssues(normalizedWorkspaceId, normalizedBoardId, {
+        ...parsedIssueQuery,
+        limit: parsedIssueQuery.limit ?? 200
+      }),
+      boardClient.getBoardFilterOptions(normalizedWorkspaceId, normalizedBoardId)
+    ]);
+
+    return {
+      board,
+      columns,
+      issues: issues.data,
+      issuesMeta: issues.meta,
+      filterOptions
+    };
+  }, [
+    boardClient,
+    canLoad,
+    issueQueryKey,
+    normalizedBoardId,
+    normalizedWorkspaceId
+  ]);
+
+  const reloadWorkspace = useCallback(async () => {
+    if (!canLoad) {
+      setCatalog(emptyCatalog);
+      setCatalogStatus("idle");
+      setCatalogError(null);
+      return emptyCatalog;
+    }
+
+    setCatalogStatus("loading");
+    setCatalogError(null);
+
+    try {
+      const nextCatalog = await loadWorkspaceData();
+      setCatalog(nextCatalog);
+      setCatalogStatus("success");
+      return nextCatalog;
+    } catch (error) {
+      const nextError = errorFromUnknown(error);
+      setCatalog(emptyCatalog);
+      setCatalogError(nextError);
+      setCatalogStatus("error");
+      return emptyCatalog;
+    }
+  }, [canLoad, loadWorkspaceData]);
+
+  const reloadBoard = useCallback(async () => {
+    if (!canLoad || !normalizedBoardId) {
+      setBoardState(emptyBoardState);
+      setBoardStatus("idle");
+      setBoardError(null);
+      return emptyBoardState;
+    }
+
+    setBoardStatus("loading");
+    setBoardError(null);
+
+    try {
+      const nextBoardState = await loadBoardData();
+      setBoardState(nextBoardState);
+      setBoardStatus("success");
+      return nextBoardState;
+    } catch (error) {
+      const nextError = errorFromUnknown(error);
+      setBoardState(emptyBoardState);
+      setBoardError(nextError);
+      setBoardStatus("error");
+      return emptyBoardState;
+    }
+  }, [canLoad, loadBoardData, normalizedBoardId]);
+
+  const hydrateBoard = useCallback(
+    async (input: CreateBoardInput) => {
+      if (!canLoad) {
+        throw new Error("Board hydration requires an authenticated workspace");
+      }
+
+      const board = await boardClient.createBoard(normalizedWorkspaceId, input);
+      await reloadWorkspace();
+      return board;
+    },
+    [boardClient, canLoad, normalizedWorkspaceId, reloadWorkspace]
+  );
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadCatalog() {
+      if (!canLoad) {
+        setCatalog(emptyCatalog);
+        setCatalogStatus("idle");
+        setCatalogError(null);
+        return;
+      }
+
+      setCatalogStatus("loading");
+      setCatalogError(null);
+
+      try {
+        const nextCatalog = await loadWorkspaceData();
+        if (!active) return;
+
+        setCatalog(nextCatalog);
+        setCatalogStatus("success");
+      } catch (error) {
+        if (!active) return;
+
+        setCatalog(emptyCatalog);
+        setCatalogError(errorFromUnknown(error));
+        setCatalogStatus("error");
+      }
+    }
+
+    void loadCatalog();
+
+    return () => {
+      active = false;
+    };
+  }, [canLoad, loadWorkspaceData]);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadSelectedBoard() {
+      if (!canLoad || !normalizedBoardId) {
+        setBoardState(emptyBoardState);
+        setBoardStatus("idle");
+        setBoardError(null);
+        return;
+      }
+
+      setBoardStatus("loading");
+      setBoardError(null);
+
+      try {
+        const nextBoardState = await loadBoardData();
+        if (!active) return;
+
+        setBoardState(nextBoardState);
+        setBoardStatus("success");
+      } catch (error) {
+        if (!active) return;
+
+        setBoardState(emptyBoardState);
+        setBoardError(errorFromUnknown(error));
+        setBoardStatus("error");
+      }
+    }
+
+    void loadSelectedBoard();
+
+    return () => {
+      active = false;
+    };
+  }, [canLoad, loadBoardData, normalizedBoardId]);
+
+  return {
+    ...catalog,
+    ...boardState,
+    boardError,
+    boardStatus,
+    catalogError,
+    catalogStatus,
+    hydrateBoard,
+    reloadBoard,
+    reloadWorkspace
+  };
+}
