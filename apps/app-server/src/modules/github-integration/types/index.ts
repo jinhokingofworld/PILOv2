@@ -23,6 +23,7 @@ export interface GithubOAuthCallbackPayload {
   githubLogin: string;
   tokenScope: string | null;
   githubConnectedAt: string;
+  returnUrl: string | null;
 }
 
 export interface GithubOAuthDisconnectPayload {
@@ -51,6 +52,7 @@ export interface GithubAppInstallationStartPayload {
 export interface GithubAppInstallationCallbackPayload
   extends Omit<GithubAppInstallationPayload, "id"> {
   installationId: string;
+  returnUrl: string | null;
 }
 
 export type GithubWebhookDeliveryStatus = "received" | "ignored";

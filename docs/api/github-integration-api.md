@@ -192,3 +192,14 @@ GitHub App webhook 설정 URL은 `{API_PUBLIC_ORIGIN}/api/v1/github/webhooks`이
 - GitHub ProjectV2 field/option write
 - PR merge/close
 - GitHub inline review comment
+
+## Callback redirect rule
+
+- `POST /me/github/oauth/start` and
+  `POST /workspaces/{workspaceId}/github/installations/start` store the optional
+  `returnUrl` in signed state.
+- `returnUrl` must use the configured frontend origin (`FRONTEND_URL`) or a
+  frontend-relative path.
+- On callback success, app-server redirects to `returnUrl` with `302`.
+- If `returnUrl` is omitted, the callback returns the JSON payload for
+  diagnostic/API-client use.

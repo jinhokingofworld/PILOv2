@@ -6,6 +6,7 @@ import { GithubOAuthCallbackQuery, StartGithubOAuthRequest } from "./dto";
 import { GithubIntegrationConfigService } from "./github-integration-config.service";
 import { GithubOAuthClient } from "./github-oauth.client";
 import { GithubOAuthStateService } from "./github-oauth-state.service";
+import { validateGithubCallbackReturnUrl } from "./github-return-url";
 import { GithubTokenEncryptionService } from "./github-token-encryption.service";
 import type {
   GithubOAuthCallbackPayload,
@@ -61,7 +62,10 @@ export class GithubOAuthIntegrationService {
     input: StartGithubOAuthRequest | undefined
   ): GithubOAuthStartPayload {
     const config = this.configService.getGithubOAuthConfig();
-    const returnUrl = this.validateReturnUrl(input?.returnUrl);
+    const returnUrl = validateGithubCallbackReturnUrl(
+      input?.returnUrl,
+      config.frontendUrl
+    );
     const state = this.stateService.createState(
       {
         userId: currentUserId,
@@ -147,7 +151,8 @@ export class GithubOAuthIntegrationService {
       githubUserId: this.toNullableNumber(row.github_user_id) ?? githubUser.id,
       githubLogin: row.github_login ?? githubUser.login,
       tokenScope: row.github_token_scope,
-      githubConnectedAt
+      githubConnectedAt,
+      returnUrl: statePayload.returnUrl
     };
   }
 
@@ -196,27 +201,6 @@ export class GithubOAuthIntegrationService {
     apiBasePath: string;
   }): string {
     return `${config.apiPublicOrigin}${config.apiBasePath}/github/oauth/callback`;
-  }
-
-  private validateReturnUrl(value: unknown): string | null {
-    if (value === undefined || value === null || value === "") {
-      return null;
-    }
-
-    if (typeof value !== "string" || value.length > 2048) {
-      throw badRequest("Invalid returnUrl");
-    }
-
-    try {
-      const url = new URL(value);
-      if (url.protocol !== "http:" && url.protocol !== "https:") {
-        throw new Error("Unsupported returnUrl protocol");
-      }
-
-      return url.toString();
-    } catch {
-      throw badRequest("Invalid returnUrl");
-    }
   }
 
   private validateRequiredString(value: unknown, message: string): string {

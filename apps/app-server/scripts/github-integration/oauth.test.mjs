@@ -25,6 +25,7 @@ const baseConfig = {
   clientSecret: "client-secret",
   apiPublicOrigin: "https://api.pilo.test",
   apiBasePath: "/api/v1",
+  frontendUrl: "https://pilo.test",
   tokenEncryptionKey: "test-token-encryption-key",
   stateSecret: "test-state-secret",
   stateTtlSeconds: 600,
@@ -115,6 +116,14 @@ const connectedRow = {
   const startWithoutBody = service.startGithubOAuth("user-1", undefined);
   const stateWithoutBody = stateService.verifyState(startWithoutBody.state, baseConfig);
   assert.equal(stateWithoutBody.returnUrl, null);
+
+  assert.throws(
+    () =>
+      service.startGithubOAuth("user-1", {
+        returnUrl: "https://evil.test/settings/integrations/github"
+      }),
+    (error) => error?.response?.error?.message === "Invalid returnUrl"
+  );
 }
 
 {
@@ -151,7 +160,7 @@ const connectedRow = {
   const state = stateService.createState(
     {
       userId: "user-1",
-      returnUrl: null
+      returnUrl: "https://pilo.test/settings/integrations/github"
     },
     baseConfig
   );
@@ -166,7 +175,8 @@ const connectedRow = {
     githubUserId: 12345678,
     githubLogin: "juhyeong",
     tokenScope: "repo,read:user",
-    githubConnectedAt: "2026-07-04T12:00:00.000Z"
+    githubConnectedAt: "2026-07-04T12:00:00.000Z",
+    returnUrl: "https://pilo.test/settings/integrations/github"
   });
 
   const update = database.queries.at(-1);

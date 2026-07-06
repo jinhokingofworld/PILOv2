@@ -14,6 +14,7 @@ import {
   type GithubOAuthRuntimeConfig
 } from "./github-integration-config.service";
 import { GithubOAuthClient } from "./github-oauth.client";
+import { validateGithubCallbackReturnUrl } from "./github-return-url";
 import { GithubTokenEncryptionService } from "./github-token-encryption.service";
 import type {
   GithubAppInstallationCallbackPayload,
@@ -69,7 +70,10 @@ export class GithubAppInstallationService {
     await this.githubOAuthClient.assertUserInstallationLookupSupported({
       accessToken
     });
-    const returnUrl = this.validateReturnUrl(input?.returnUrl);
+    const returnUrl = validateGithubCallbackReturnUrl(
+      input?.returnUrl,
+      config.frontendUrl
+    );
     const state = this.installationStateService.createState(
       {
         userId: currentUserId,
@@ -186,7 +190,8 @@ export class GithubAppInstallationService {
     const { id, ...payload } = this.mapGithubInstallation(row);
     return {
       ...payload,
-      installationId: id
+      installationId: id,
+      returnUrl: statePayload.returnUrl
     };
   }
 
@@ -283,27 +288,6 @@ export class GithubAppInstallationService {
         row.github_connected_at &&
         !row.github_revoked_at
     );
-  }
-
-  private validateReturnUrl(value: unknown): string | null {
-    if (value === undefined || value === null || value === "") {
-      return null;
-    }
-
-    if (typeof value !== "string" || value.length > 2048) {
-      throw badRequest("Invalid returnUrl");
-    }
-
-    try {
-      const url = new URL(value);
-      if (url.protocol !== "http:" && url.protocol !== "https:") {
-        throw new Error("Unsupported returnUrl protocol");
-      }
-
-      return url.toString();
-    } catch {
-      throw badRequest("Invalid returnUrl");
-    }
   }
 
   private validateRequiredString(value: unknown, message: string): string {
