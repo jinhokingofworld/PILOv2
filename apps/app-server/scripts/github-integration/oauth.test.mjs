@@ -8,14 +8,29 @@ const { GithubOAuthStateService } = require("../../dist/modules/github-integrati
 const { GithubTokenEncryptionService } = require("../../dist/modules/github-integration/github-token-encryption.service.js");
 
 class FakeDatabase {
-  constructor(rows = []) {
+  constructor(rows = [], handlers = {}) {
     this.rows = [...rows];
+    this.handlers = handlers;
     this.queries = [];
   }
 
   async queryOne(text, values = []) {
     this.queries.push({ text, values });
+    if (this.handlers.queryOne) {
+      const handled = await this.handlers.queryOne(text, values);
+      if (handled !== undefined) {
+        return handled;
+      }
+    }
     return this.rows.shift() ?? null;
+  }
+
+  async execute(text, values = []) {
+    this.queries.push({ text, values });
+    if (this.handlers.execute) {
+      return this.handlers.execute(text, values);
+    }
+    return undefined;
   }
 }
 
@@ -90,15 +105,16 @@ const connectedRow = {
 }
 
 {
+  const database = new FakeDatabase();
   const service = new GithubIntegrationService(
-    new FakeDatabase(),
+    database,
     {},
     stateService,
     tokenEncryption,
     configService
   );
 
-  const start = service.startGithubOAuth("user-1", {
+  const start = await service.startGithubOAuth("user-1", {
     returnUrl: "https://pilo.test/settings/integrations/github"
   });
   const authorizeUrl = new URL(start.authorizeUrl);
@@ -108,16 +124,23 @@ const connectedRow = {
   assert.equal(authorizeUrl.searchParams.get("redirect_uri"), "https://api.pilo.test/api/v1/github/oauth/callback");
   assert.equal(authorizeUrl.searchParams.get("scope"), null);
   assert.equal(authorizeUrl.searchParams.get("state"), start.state);
+  assert.match(start.stateCookie, /pilo_github_oauth_state=/);
+  assert.match(start.stateCookie, /HttpOnly/);
+  assert.match(start.stateCookie, /SameSite=Lax/);
+  assert.match(
+    database.queries[0].text,
+    /INSERT INTO github_callback_states/i
+  );
 
   const parsedState = stateService.verifyState(start.state, baseConfig);
   assert.equal(parsedState.userId, "user-1");
   assert.equal(parsedState.returnUrl, "https://pilo.test/settings/integrations/github");
 
-  const startWithoutBody = service.startGithubOAuth("user-1", undefined);
+  const startWithoutBody = await service.startGithubOAuth("user-1", undefined);
   const stateWithoutBody = stateService.verifyState(startWithoutBody.state, baseConfig);
   assert.equal(stateWithoutBody.returnUrl, null);
 
-  assert.throws(
+  await assert.rejects(
     () =>
       service.startGithubOAuth("user-1", {
         returnUrl: "https://evil.test/settings/integrations/github"
@@ -127,12 +150,35 @@ const connectedRow = {
 }
 
 {
-  const database = new FakeDatabase([
+  const state = stateService.createState(
     {
-      ...connectedRow,
-      github_connected_at: fixedNow
+      userId: "user-1",
+      returnUrl: "https://pilo.test/settings/integrations/github"
+    },
+    baseConfig
+  );
+  const statePayload = stateService.verifyState(state, baseConfig);
+  const database = new FakeDatabase([], {
+    queryOne(text) {
+      if (/UPDATE github_callback_states/i.test(text)) {
+        return {
+          user_id: "user-1",
+          workspace_id: null,
+          return_url: "https://pilo.test/settings/integrations/github",
+          expires_at: new Date(statePayload.expiresAt)
+        };
+      }
+
+      if (/UPDATE users/i.test(text)) {
+        return {
+          ...connectedRow,
+          github_connected_at: fixedNow
+        };
+      }
+
+      return undefined;
     }
-  ]);
+  });
   const githubClient = {
     async exchangeCodeForAccessToken(input) {
       assert.equal(input.code, "oauth-code");
@@ -157,18 +203,11 @@ const connectedRow = {
     tokenEncryption,
     configService
   );
-  const state = stateService.createState(
-    {
-      userId: "user-1",
-      returnUrl: "https://pilo.test/settings/integrations/github"
-    },
-    baseConfig
-  );
 
   const callback = await service.completeGithubOAuthCallback({
     code: "oauth-code",
     state
-  });
+  }, "pilo_github_oauth_state=oauth-binding-token");
 
   assert.deepEqual(callback, {
     connected: true,
@@ -186,6 +225,121 @@ const connectedRow = {
   assert.equal(update.values[2], "juhyeong");
   assert.notEqual(update.values[3], "plain-access-token");
   assert.match(update.values[3], /^v1:/);
+}
+
+{
+  const state = stateService.createState(
+    {
+      userId: "user-1",
+      returnUrl: null
+    },
+    baseConfig
+  );
+  let stateConsumeCount = 0;
+  const database = new FakeDatabase([], {
+    queryOne(text) {
+      if (/UPDATE github_callback_states/i.test(text)) {
+        stateConsumeCount += 1;
+        if (stateConsumeCount > 1) {
+          return null;
+        }
+
+        return {
+          user_id: "user-1",
+          workspace_id: null,
+          return_url: null,
+          expires_at: fixedNow
+        };
+      }
+
+      if (/UPDATE users/i.test(text)) {
+        return {
+          ...connectedRow,
+          github_connected_at: fixedNow
+        };
+      }
+
+      return undefined;
+    }
+  });
+  const githubClient = {
+    async exchangeCodeForAccessToken(input) {
+      assert.match(input.code, /^oauth-code-/);
+      return {
+        accessToken: "plain-access-token",
+        scope: "repo,read:user"
+      };
+    },
+    async getAuthenticatedUser() {
+      return {
+        id: 12345678,
+        login: "juhyeong"
+      };
+    }
+  };
+  const service = new GithubIntegrationService(
+    database,
+    githubClient,
+    stateService,
+    tokenEncryption,
+    configService
+  );
+
+  await service.completeGithubOAuthCallback(
+    {
+      code: "oauth-code-1",
+      state
+    },
+    "pilo_github_oauth_state=oauth-binding-token"
+  );
+
+  await assert.rejects(
+    () =>
+      service.completeGithubOAuthCallback(
+        {
+          code: "oauth-code-2",
+          state
+        },
+        "pilo_github_oauth_state=oauth-binding-token"
+      ),
+    (error) => error?.response?.error?.message === "Invalid OAuth state"
+  );
+}
+
+{
+  const state = stateService.createState(
+    {
+      userId: "user-1",
+      returnUrl: null
+    },
+    baseConfig
+  );
+  let tokenExchangeCalled = false;
+  const service = new GithubIntegrationService(
+    new FakeDatabase(),
+    {
+      async exchangeCodeForAccessToken() {
+        tokenExchangeCalled = true;
+        throw new Error("token exchange should not run without a state cookie");
+      }
+    },
+    stateService,
+    tokenEncryption,
+    configService
+  );
+
+  await assert.rejects(
+    () =>
+      service.completeGithubOAuthCallback(
+        {
+          code: "oauth-code",
+          state
+        },
+        null
+      ),
+    (error) => error?.response?.error?.message === "Invalid OAuth state"
+  );
+  assert.equal(tokenExchangeCalled, false);
 }
 
 {

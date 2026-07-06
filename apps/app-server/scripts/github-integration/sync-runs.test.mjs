@@ -65,12 +65,20 @@ class FakeConfigService {
 class FakeGithubAppClient {
   constructor({
     repositories = [],
+    projects = [],
+    issues = [],
+    pullRequests = [],
+    pullRequestDetails = [],
     project = null,
     fields = [],
     items = [],
     error = null
   } = {}) {
     this.repositories = repositories;
+    this.projects = projects;
+    this.issues = issues;
+    this.pullRequests = pullRequests;
+    this.pullRequestDetails = [...pullRequestDetails];
     this.project = project;
     this.fields = fields;
     this.items = items;
@@ -85,6 +93,50 @@ class FakeGithubAppClient {
     }
 
     return this.repositories;
+  }
+
+  async listProjectV2s(input) {
+    this.calls.push({ method: "listProjectV2s", input });
+    if (this.error) {
+      throw this.error;
+    }
+
+    return this.projects;
+  }
+
+  async listRepositoryIssues(input) {
+    this.calls.push({ method: "listRepositoryIssues", input });
+    if (this.error) {
+      throw this.error;
+    }
+
+    return this.issues;
+  }
+
+  async listRepositoryPullRequests(input) {
+    this.calls.push({ method: "listRepositoryPullRequests", input });
+    if (this.error) {
+      throw this.error;
+    }
+
+    return this.pullRequests;
+  }
+
+  async getPullRequest(input) {
+    this.calls.push({ method: "getPullRequest", input });
+    if (this.error) {
+      throw this.error;
+    }
+
+    return (
+      this.pullRequestDetails.shift() ?? {
+        changed_files: 0,
+        additions: 0,
+        deletions: 0,
+        commits: 0,
+        mergeable: null
+      }
+    );
   }
 
   async getProjectV2(input) {
@@ -158,6 +210,20 @@ function installationRow(overrides = {}) {
     id: installationId,
     workspace_id: workspaceId,
     github_installation_id: githubInstallationId,
+    account_login: "my-team",
+    account_type: "Organization",
+    ...overrides
+  };
+}
+
+function repositoryContextRow(overrides = {}) {
+  return {
+    id: repositoryId,
+    workspace_id: workspaceId,
+    installation_id: installationId,
+    owner_login: "my-team",
+    name: "pilo",
+    full_name: "my-team/pilo",
     ...overrides
   };
 }
@@ -213,6 +279,43 @@ function repositoryApiItem(overrides = {}) {
   };
 }
 
+function pullRequestApiItem(overrides = {}) {
+  return {
+    id: 2001,
+    node_id: "PR_kwDOExample",
+    number: 24,
+    title: "Implement PR review selector",
+    body: "PR body",
+    user: {
+      login: "developer-ej",
+      avatar_url: "https://avatars.githubusercontent.com/u/1"
+    },
+    head: {
+      ref: "feature/pr-review",
+      sha: "head-sha"
+    },
+    base: {
+      ref: "main",
+      sha: "base-sha"
+    },
+    changed_files: 0,
+    additions: 0,
+    deletions: 0,
+    commits: 0,
+    comments: 2,
+    review_comments: 1,
+    html_url: "https://github.com/my-team/pilo/pull/24",
+    created_at: "2026-07-01T10:00:00.000Z",
+    updated_at: "2026-07-02T05:20:00.000Z",
+    closed_at: null,
+    merged_at: null,
+    draft: false,
+    mergeable: null,
+    state: "open",
+    ...overrides
+  };
+}
+
 function projectV2ApiItem(overrides = {}) {
   return {
     id: projectNodeId,
@@ -232,6 +335,14 @@ function projectV2ApiItem(overrides = {}) {
     updatedAt: "2026-07-01T14:30:00.000Z",
     closedAt: null,
     raw: { title: "PILO MVP" },
+    ...overrides
+  };
+}
+
+function discoveredProjectV2ApiItem(overrides = {}) {
+  return {
+    ...projectV2ApiItem(),
+    repositoryNodeIds: ["R_kgDOExample"],
     ...overrides
   };
 }
@@ -512,6 +623,236 @@ function projectV2ItemApiItem(overrides = {}) {
   });
   assert.equal(githubAppClient.calls.length, 1);
   assert.equal(githubAppClient.calls[0].input.installationId, githubInstallationId);
+}
+
+{
+  const githubAppClient = new FakeGithubAppClient({
+    pullRequests: [pullRequestApiItem()],
+    pullRequestDetails: [
+      {
+        changed_files: 5,
+        additions: 128,
+        deletions: 32,
+        commits: 3,
+        mergeable: true
+      }
+    ]
+  });
+  const database = new FakeDatabase({
+    queryOneRows: [
+      (text, values) => {
+        assert.match(text, /FROM github_installations/i);
+        assert.deepEqual(values, [workspaceId, installationId]);
+        return installationRow();
+      },
+      (text, values) => {
+        assert.match(text, /FROM github_repositories/i);
+        assert.deepEqual(values, [workspaceId, repositoryId]);
+        return repositoryContextRow();
+      },
+      (text, values) => {
+        assert.match(text, /INSERT INTO github_sync_runs/i);
+        assert.deepEqual(values, [
+          workspaceId,
+          installationId,
+          repositoryId,
+          null,
+          "pull_requests"
+        ]);
+        return syncRunRow({
+          target: "pull_requests",
+          status: "running",
+          repository_id: repositoryId,
+          project_v2_id: null,
+          finished_at: null,
+          fetched_count: 0,
+          created_count: 0,
+          updated_count: 0,
+          skipped_count: 0,
+          cursor: {}
+        });
+      },
+      (text, values) => {
+        assert.match(text, /INSERT INTO github_pull_requests/i);
+        assert.equal(values[0], workspaceId);
+        assert.equal(values[1], repositoryId);
+        assert.equal(values[2], 2001);
+        assert.equal(values[11], 5);
+        assert.equal(values[12], 128);
+        assert.equal(values[13], 32);
+        assert.equal(values[14], 3);
+        assert.equal(values[15], 2);
+        assert.equal(values[16], 1);
+        assert.equal(values[22].changed_files, 5);
+        assert.equal(values[22].additions, 128);
+        assert.equal(values[22].deletions, 32);
+        assert.equal(values[22].commits, 3);
+        assert.equal(values[22].mergeable, true);
+        return { id: "pull-request-id", created: true };
+      },
+      (text, values) => {
+        assert.match(text, /UPDATE github_sync_runs/i);
+        assert.match(text, /status = 'success'/i);
+        assert.deepEqual(values, [syncRunId, 1, 1, 0, 0, {}]);
+        return syncRunRow({
+          target: "pull_requests",
+          repository_id: repositoryId,
+          project_v2_id: null,
+          fetched_count: 1,
+          created_count: 1,
+          updated_count: 0,
+          skipped_count: 0,
+          cursor: {}
+        });
+      }
+    ]
+  });
+  const { service } = createService(database, githubAppClient);
+
+  const syncRun = await service.startGithubSyncRun(currentUserId, workspaceId, {
+    target: "pull_requests",
+    installationId,
+    repositoryId
+  });
+
+  assert.equal(syncRun.status, "success");
+  assert.equal(syncRun.fetchedCount, 1);
+  assert.equal(syncRun.createdCount, 1);
+  assert.equal(githubAppClient.calls[0].method, "listRepositoryPullRequests");
+  assert.equal(githubAppClient.calls[0].input.owner, "my-team");
+  assert.equal(githubAppClient.calls[0].input.repo, "pilo");
+  assert.equal(githubAppClient.calls[1].method, "getPullRequest");
+  assert.equal(githubAppClient.calls[1].input.pullNumber, 24);
+}
+
+{
+  const githubAppClient = new FakeGithubAppClient({
+    repositories: [repositoryApiItem()],
+    projects: [discoveredProjectV2ApiItem()]
+  });
+  const database = new FakeDatabase({
+    queryOneRows: [
+      (text, values) => {
+        assert.match(text, /FROM github_installations/i);
+        assert.match(text, /account_login/i);
+        assert.match(text, /account_type/i);
+        assert.deepEqual(values, [workspaceId, installationId]);
+        return installationRow();
+      },
+      (text, values) => {
+        assert.match(text, /INSERT INTO github_sync_runs/i);
+        assert.deepEqual(values, [
+          workspaceId,
+          installationId,
+          null,
+          null,
+          "full"
+        ]);
+        return syncRunRow({
+          target: "full",
+          status: "running",
+          repository_id: null,
+          project_v2_id: null,
+          finished_at: null,
+          fetched_count: 0,
+          created_count: 0,
+          updated_count: 0,
+          skipped_count: 0,
+          cursor: {}
+        });
+      },
+      (text, values) => {
+        assert.match(text, /INSERT INTO github_repositories/i);
+        assert.equal(values[0], workspaceId);
+        assert.equal(values[1], installationId);
+        assert.equal(values[3], 1001);
+        return { id: repositoryId, created: true };
+      },
+      (text, values) => {
+        assert.match(text, /INSERT INTO github_projects_v2/i);
+        assert.match(text, /ON CONFLICT \(github_project_node_id\)/i);
+        assert.deepEqual(values.slice(0, 7), [
+          workspaceId,
+          installationId,
+          projectNodeId,
+          42,
+          "my-team",
+          "Organization",
+          1
+        ]);
+        return { id: projectV2Id, created: true };
+      },
+      (text, values) => {
+        assert.match(text, /UPDATE github_sync_runs/i);
+        assert.match(text, /status = 'success'/i);
+        assert.deepEqual(values, [syncRunId, 2, 2, 0, 0, {}]);
+        return syncRunRow({
+          target: "full",
+          repository_id: null,
+          project_v2_id: null,
+          fetched_count: 2,
+          created_count: 2,
+          updated_count: 0,
+          skipped_count: 0,
+          cursor: {}
+        });
+      }
+    ],
+    queryRows: [
+      (text, values) => {
+        assert.match(text, /FROM github_repositories/i);
+        assert.deepEqual(values, [workspaceId, installationId]);
+        return [repositoryContextRow()];
+      },
+      (text, values) => {
+        assert.match(text, /FROM github_repositories/i);
+        assert.deepEqual(values, [workspaceId, installationId]);
+        return [repositoryContextRow()];
+      }
+    ]
+  });
+  const { service } = createService(database, githubAppClient);
+
+  const syncRun = await service.startGithubSyncRun(currentUserId, workspaceId, {
+    target: "full",
+    installationId
+  });
+
+  assert.equal(syncRun.status, "success");
+  assert.equal(syncRun.fetchedCount, 2);
+  assert.deepEqual(
+    githubAppClient.calls.map((call) => call.method),
+    [
+      "listInstallationRepositories",
+      "listProjectV2s",
+      "listRepositoryIssues",
+      "listRepositoryPullRequests"
+    ]
+  );
+  assert.equal(githubAppClient.calls[1].input.accountLogin, "my-team");
+  assert.equal(githubAppClient.calls[1].input.accountType, "Organization");
+  const projectRepositoryDelete = database.queries.find(
+    (query) =>
+      query.method === "execute" &&
+      /DELETE FROM github_project_v2_repositories/i.test(query.text)
+  );
+  assert.ok(projectRepositoryDelete);
+  assert.deepEqual(projectRepositoryDelete.values, [
+    projectV2Id,
+    workspaceId,
+    ["R_kgDOExample"]
+  ]);
+  const projectRepositoryInsert = database.queries.find(
+    (query) =>
+      query.method === "execute" &&
+      /INSERT INTO github_project_v2_repositories/i.test(query.text)
+  );
+  assert.ok(projectRepositoryInsert);
+  assert.deepEqual(projectRepositoryInsert.values, [
+    projectV2Id,
+    workspaceId,
+    ["R_kgDOExample"]
+  ]);
 }
 
 {

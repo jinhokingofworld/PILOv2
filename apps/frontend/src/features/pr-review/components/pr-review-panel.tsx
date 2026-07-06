@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import {
   AlertCircle,
   ArrowLeft,
-  CheckCircle2,
   ChevronLeft,
   ChevronRight,
   ExternalLink,
@@ -37,6 +36,7 @@ import {
   createPrReviewApiClient,
   PrReviewApiError
 } from "@/features/pr-review/api/client";
+import { PrReviewCanvasShell } from "@/features/pr-review/components/review-canvas/PrReviewCanvasShell";
 import type {
   PrReviewPaginationMeta,
   PrReviewPullRequest,
@@ -162,8 +162,11 @@ export function PrReviewPanel() {
   >([]);
   const [descriptionExpanded, setDescriptionExpanded] = useState(false);
   const [isStartingReview, setIsStartingReview] = useState(false);
-  const [createdSession, setCreatedSession] =
+  const [activeReviewSession, setActiveReviewSession] =
     useState<PrReviewSession | null>(null);
+  const [activeReviewPullRequest, setActiveReviewPullRequest] = useState<
+    PrReviewPullRequest | PrReviewPullRequestDetail | null
+  >(null);
 
   const repositoryConnected = repositoryStatus === "ready" && repository !== null;
   const isRepositoryLoading =
@@ -220,7 +223,8 @@ export function PrReviewPanel() {
     setRepositoryStatus("loading");
     setRepositoryError(null);
     setSessionError(null);
-    setCreatedSession(null);
+    setActiveReviewSession(null);
+    setActiveReviewPullRequest(null);
 
     try {
       const repositoriesPage = await apiClient.listRepositories(workspaceId, {
@@ -313,6 +317,7 @@ export function PrReviewPanel() {
 
   async function startReviewSession() {
     const pullRequestId = activeDetail?.id;
+    const reviewPullRequest = activeDetail;
     if (!pullRequestId) {
       return;
     }
@@ -325,8 +330,15 @@ export function PrReviewPanel() {
         workspaceId,
         pullRequestId
       );
-      setCreatedSession(session);
-      closePullRequestDetail();
+      setActiveReviewSession(session);
+      setActiveReviewPullRequest(reviewPullRequest);
+      setSelectedPullRequest(null);
+      setPullRequestDetail(null);
+      setPullRequestFiles([]);
+      setDetailError(null);
+      setSessionError(null);
+      setDetailStatus("idle");
+      setDescriptionExpanded(false);
     } catch (error) {
       setSessionError(getErrorMessage(error));
     } finally {
@@ -339,31 +351,29 @@ export function PrReviewPanel() {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-5">
+    <>
+      {activeReviewSession ? (
+        <PrReviewCanvasShell
+          apiClient={apiClient}
+          onBackToSelection={() => setActiveReviewSession(null)}
+          onGoToGithub={goToGithubPage}
+          onReviewSessionCreated={(session) => {
+            setActiveReviewSession(session);
+            setActiveReviewPullRequest(null);
+          }}
+          pullRequest={activeReviewPullRequest}
+          session={activeReviewSession}
+          workspaceId={workspaceId}
+        />
+      ) : null}
+
+      <div className="mx-auto flex w-full max-w-5xl flex-col gap-5">
       <section className="flex flex-col items-center gap-2 text-center">
         <p className="text-sm font-medium text-primary">PR Review</p>
         <h1 className="text-3xl font-semibold tracking-normal text-foreground">
           리뷰할 PR을 선택하세요
         </h1>
       </section>
-
-      {createdSession ? (
-        <Card className="border-emerald-200 bg-emerald-50 text-emerald-950">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <CheckCircle2 className="size-4 text-emerald-600" />
-              Review session이 생성되었습니다
-            </CardTitle>
-            <CardDescription className="text-emerald-800">
-              AI 분석 결과와 리뷰 캔버스 화면으로 이어질 준비가 끝났습니다.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="grid gap-2 text-sm sm:grid-cols-2">
-            <span>Session ID: {createdSession.id}</span>
-            <span>Status: {createdSession.status}</span>
-          </CardContent>
-        </Card>
-      ) : null}
 
       {isRepositoryLoading ? (
         <RepositoryLoadingState />
@@ -479,7 +489,8 @@ export function PrReviewPanel() {
           shouldClampDescription={shouldClampDescription}
         />
       ) : null}
-    </div>
+      </div>
+    </>
   );
 }
 

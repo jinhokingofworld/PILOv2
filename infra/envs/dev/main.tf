@@ -228,8 +228,11 @@ module "ecs" {
         APP_ENV                       = var.environment
         AWS_REGION                    = var.aws_region
         S3_UPLOADS_BUCKET             = module.s3.uploads_bucket_name
+        S3_RECORDINGS_BUCKET          = module.s3.uploads_bucket_name
         SQS_AI_JOBS_QUEUE_URL         = module.sqs.ai_jobs_queue_url
         SQS_GITHUB_WEBHOOKS_QUEUE_URL = module.sqs.github_webhooks_queue_url
+        OPENAI_STT_MODEL              = "gpt-4o-mini-transcribe"
+        OPENAI_MEETING_REPORT_MODEL   = "gpt-5.1-mini"
         AI_WORKER_CONCURRENCY         = "1"
       }
       secrets = module.secrets.ai_worker_ecs_secrets

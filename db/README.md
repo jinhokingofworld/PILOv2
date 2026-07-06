@@ -23,3 +23,4 @@ The database schema source of truth is the migration history in `db/migrations/`
 - `migrations/004_harden_functions_and_index_foreign_keys.sql` pins public function search paths and adds indexes for foreign keys.
 - `migrations/005_create_user_sessions.sql` adds server-side hashed session token storage.
 - `migrations/006_update_workspace_and_meeting_recording_constraints.sql` updates workspace owner uniqueness and meeting recording/report constraints.
+- `migrations/007_create_github_callback_states.sql` adds one-time server-side callback state storage for GitHub OAuth and GitHub App installation redirects.

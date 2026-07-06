@@ -93,7 +93,7 @@ fallback으로만 사용한다.
 | --- | --- |
 | `DATABASE_URL` | PostgreSQL 접속 문자열 |
 | `REDIS_URL` | 필요한 경우 Redis 접속 문자열 |
-| `OPENAI_API_KEY` | OpenAI Responses API 호출 |
+| `OPENAI_API_KEY` | OpenAI API 호출 |
 | `GITHUB_APP_ID` | PR 분석에 GitHub App 인증이 필요한 경우 |
 | `GITHUB_APP_PRIVATE_KEY` | GitHub App private key |
 | `S3_UPLOADS_BUCKET` | 결과/스냅샷 저장 bucket |
@@ -163,6 +163,8 @@ UI Preview는 local 개발 편의 기능이며 실제 bearer session이나 Works
 | `S3_UPLOADS_BUCKET` | uploads bucket name |
 | `AI_WORKER_CONCURRENCY` | worker 동시 처리 수 |
 | `S3_RECORDINGS_BUCKET` | STT 입력 오디오 파일 bucket |
+| `OPENAI_STT_MODEL` | STT 모델. local 기본값: `gpt-4o-mini-transcribe` |
+| `OPENAI_MEETING_REPORT_MODEL` | 회의록 생성 모델. local 기본값: `gpt-5.1-mini` |
 
 ### LiveKit Server / Egress
 

@@ -121,6 +121,7 @@ execFileSync(process.execPath, [tscScript, "-p", "tsconfig.build.json"], {
 
 await import("./oauth.test.mjs");
 await import("./installation.test.mjs");
+await import("./github-app-client.test.mjs");
 await import("./callback-redirect.test.mjs");
 await import("./source-read.test.mjs");
 await import("./project-v2.test.mjs");

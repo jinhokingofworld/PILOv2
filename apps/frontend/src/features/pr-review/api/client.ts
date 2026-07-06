@@ -1,12 +1,20 @@
 import type {
   ListPrReviewPullRequestsQuery,
   ListPrReviewRepositoriesQuery,
+  PrReviewCanvas,
+  PrReviewFile,
+  PrReviewFileDiff,
   PrReviewPaginatedPayload,
   PrReviewPullRequest,
   PrReviewPullRequestDetail,
   PrReviewPullRequestFile,
   PrReviewRepository,
-  PrReviewSession
+  PrReviewSession,
+  PrReviewSessionResult,
+  PrReviewSubmission,
+  PrReviewSummary,
+  SubmitPrReviewSessionInput,
+  UpdatePrReviewFileDecisionInput
 } from "@/features/pr-review/types";
 
 const API_BASE_PATH = "/api/v1";
@@ -290,6 +298,20 @@ function pullRequestGithubPath(workspaceId: string, pullRequestId: string) {
   );
 }
 
+function reviewSessionGithubPath(workspaceId: string, reviewSessionId: string) {
+  return workspaceGithubPath(
+    workspaceId,
+    `/review-sessions/${encodeURIComponent(reviewSessionId)}`
+  );
+}
+
+function reviewFileGithubPath(workspaceId: string, reviewFileId: string) {
+  return workspaceGithubPath(
+    workspaceId,
+    `/review-files/${encodeURIComponent(reviewFileId)}`
+  );
+}
+
 export function createPrReviewApiClient({
   accessToken = null,
   baseUrl = defaultPrReviewApiBaseUrl(),
@@ -351,6 +373,85 @@ export function createPrReviewApiClient({
       return requestPrReviewData<PrReviewSession>(
         `${pullRequestGithubPath(workspaceId, pullRequestId)}/review-sessions`,
         { method: "POST" },
+        requestOptions
+      );
+    },
+
+    async getReviewSessionSummary(
+      workspaceId: string,
+      reviewSessionId: string
+    ) {
+      return requestPrReviewData<PrReviewSummary>(
+        `${reviewSessionGithubPath(workspaceId, reviewSessionId)}/summary`,
+        undefined,
+        requestOptions
+      );
+    },
+
+    async getReviewSessionCanvas(
+      workspaceId: string,
+      reviewSessionId: string
+    ) {
+      return requestPrReviewData<PrReviewCanvas>(
+        `${reviewSessionGithubPath(workspaceId, reviewSessionId)}/canvas`,
+        undefined,
+        requestOptions
+      );
+    },
+
+    async getReviewSessionResult(
+      workspaceId: string,
+      reviewSessionId: string
+    ) {
+      return requestPrReviewData<PrReviewSessionResult>(
+        `${reviewSessionGithubPath(workspaceId, reviewSessionId)}/result`,
+        undefined,
+        requestOptions
+      );
+    },
+
+    async submitReviewSession(
+      workspaceId: string,
+      reviewSessionId: string,
+      input: SubmitPrReviewSessionInput
+    ) {
+      return requestPrReviewData<PrReviewSubmission>(
+        `${reviewSessionGithubPath(workspaceId, reviewSessionId)}/submissions`,
+        {
+          body: JSON.stringify(input),
+          method: "POST"
+        },
+        requestOptions
+      );
+    },
+
+    async getReviewFile(workspaceId: string, reviewFileId: string) {
+      return requestPrReviewData<PrReviewFile>(
+        reviewFileGithubPath(workspaceId, reviewFileId),
+        undefined,
+        requestOptions
+      );
+    },
+
+    async getReviewFileDiff(workspaceId: string, reviewFileId: string) {
+      return requestPrReviewData<PrReviewFileDiff>(
+        `${reviewFileGithubPath(workspaceId, reviewFileId)}/diff`,
+        undefined,
+        requestOptions
+      );
+    },
+
+    async updateReviewFileDecision(
+      workspaceId: string,
+      reviewFileId: string,
+      input: UpdatePrReviewFileDecisionInput
+    ) {
+      return requestPrReviewData<PrReviewFile>(
+        `${reviewFileGithubPath(workspaceId, reviewFileId)}/review`,
+        {
+          body: JSON.stringify(input),
+          method: "PATCH"
+        },
         requestOptions
       );
     }

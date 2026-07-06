@@ -79,6 +79,13 @@ token으로 GitHub의 user installations 목록을 조회해 callback의
 - PR 변경 파일과 patch text는 요청 시 GitHub에서 조회한다.
 - PR Review는 세션 생성 시 `review_files`에 파일 metadata를 저장할 수 있다. Diff 응답과 큰 diff 판단 기준은 PR Review API 문서를 따른다.
 - `github_sync_target` 값은 `repositories`, `issues`, `pull_requests`, `project_v2`, `project_v2_fields`, `project_v2_items`, `full`이다.
+- `full` sync는 허용 저장소를 먼저 갱신한 뒤 GitHub GraphQL의
+  `organization.projectsV2` 또는 `user.projectsV2`로 installation 계정에서 접근 가능한
+  Projects v2를 발견한다. 발견한 ProjectV2는 `github_projects_v2`에 upsert하고,
+  GitHub repository node id와 동기화된 저장소를 매칭해 `github_project_v2_repositories`
+  관계를 갱신한다.
+- ProjectV2 자동 발견은 GitHub App installation에 Projects read 권한이 있어야 한다.
+  권한이 없으면 GitHub GraphQL provider 오류로 sync run이 실패한다.
 - GitHub webhook receiver는 delivery 수신과 검증 결과를 `github_webhook_deliveries`에 기록한다. 실제 GitHub source table 동기화는 sync run 또는 별도 background worker가 담당한다.
 
 ## API 목록
@@ -206,8 +213,23 @@ GitHub App webhook 설정 URL은 `{API_PUBLIC_ORIGIN}/api/v1/github/webhooks`이
 - `POST /me/github/oauth/start` and
   `POST /workspaces/{workspaceId}/github/installations/start` store the optional
   `returnUrl` in signed state.
+- Both start endpoints also create a server-side callback state row and set an
+  HttpOnly `SameSite=Lax` binding cookie scoped to `{API_BASE_PATH}/github`.
+- Browser clients must call the start endpoints with credentials included, and
+  app-server CORS must use a concrete frontend origin with credentials enabled
+  so the binding cookie can be stored.
 - `returnUrl` must use the configured frontend origin (`FRONTEND_URL`) or a
   frontend-relative path.
+- `GET /github/oauth/callback` requires a valid signed OAuth state, the matching
+  browser binding cookie, and an unexpired unconsumed server-side state row.
+  The server consumes the state row before exchanging the GitHub OAuth code.
+- `GET /github/installations/callback` requires a valid signed GitHub App
+  installation state, the matching browser binding cookie, and an unexpired
+  unconsumed server-side state row. The server consumes the state row before
+  checking the user's installation access or looking up the installation.
+- Missing cookies, expired rows, already-consumed rows, or nonce/binding
+  mismatches are rejected as invalid callback state. Callback state is one-time
+  use and MUST NOT be accepted on replay.
 - On callback success, app-server redirects to `returnUrl` with `302`.
 - If `returnUrl` is omitted, the callback returns the JSON payload for
   diagnostic/API-client use.

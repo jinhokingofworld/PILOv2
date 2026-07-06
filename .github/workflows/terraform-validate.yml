@@ -3,12 +3,15 @@ name: Terraform Validate
 on:
   pull_request:
     types: [opened, synchronize, reopened, edited]
+  push:
+    branches: ["main"]
+    paths:
+      - "infra/**"
+      - ".github/workflows/terraform-validate.yml"
   workflow_dispatch:
 
 permissions:
   contents: read
-  id-token: write
-  pull-requests: read
 
 env:
   AWS_REGION: ap-northeast-2
@@ -16,14 +19,39 @@ env:
 
 jobs:
   terraform:
+    if: ${{ github.event_name == 'pull_request' }}
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform fmt
+        run: terraform fmt -check -recursive
+
+      - name: Terraform init
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform init -backend=false
+
+      - name: Terraform validate
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform validate
+
+  plan:
+    if: ${{ vars.AWS_GITHUB_ACTIONS_ROLE_ARN != '' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')) }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Configure AWS credentials
-        if: ${{ vars.AWS_GITHUB_ACTIONS_ROLE_ARN != '' }}
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.AWS_GITHUB_ACTIONS_ROLE_ARN }}
@@ -44,6 +72,5 @@ jobs:
         run: terraform validate
 
       - name: Terraform plan
-        if: ${{ vars.AWS_GITHUB_ACTIONS_ROLE_ARN != '' }}
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: terraform plan -input=false

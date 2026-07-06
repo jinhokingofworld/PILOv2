@@ -72,6 +72,8 @@ export type PrReviewPullRequestFile = {
   patch: string | null;
 };
 
+export type PrReviewFileStatus = PrReviewPullRequestFile["fileStatus"];
+
 export type PrReviewSessionStatus =
   | "analyzing"
   | "reviewing"
@@ -85,6 +87,25 @@ export type PrReviewConflictStatus =
   | "clean"
   | "conflicted"
   | "unknown";
+
+export type PrReviewFileReviewStatus =
+  | "not_reviewed"
+  | "approved"
+  | "discussion_needed"
+  | "unknown";
+
+export type PrReviewFileDecisionStatus = Exclude<
+  PrReviewFileReviewStatus,
+  "not_reviewed"
+>;
+
+export type PrReviewSubmitType = "COMMENT" | "APPROVE" | "REQUEST_CHANGES";
+
+export type PrReviewGithubSubmitStatus =
+  | "not_submitted"
+  | "submitting"
+  | "submitted"
+  | "failed";
 
 export type PrReviewSession = {
   id: string;
@@ -101,6 +122,219 @@ export type PrReviewSession = {
   createdByUserId: string | null;
   createdAt: string;
   updatedAt: string;
+};
+
+export type PrReviewSummary = {
+  reviewSessionId: string;
+  pullRequestId: string;
+  githubNumber: number;
+  title: string;
+  authorName: string | null;
+  authorAvatarUrl: string | null;
+  githubCreatedAt: string | null;
+  githubUpdatedAt: string | null;
+  headBranch: string | null;
+  baseBranch: string | null;
+  changedFilesCount: number;
+  additions: number;
+  deletions: number;
+  commitsCount: number;
+  githubUrl: string;
+  headSha: string;
+  status: PrReviewSessionStatus;
+  prPurpose: string | null;
+  changeSummary: string[];
+  recommendedReviewOrder: string | null;
+  cautionPoints: string[];
+  reviewedCount: number;
+  totalFileCount: number;
+  conflictStatus: PrReviewConflictStatus;
+  conflictCheckedAt: string | null;
+  readyToSubmit: boolean;
+};
+
+export type PrReviewFlow = {
+  id: string;
+  reviewSessionId: string;
+  title: string;
+  description: string | null;
+  sortOrder: number;
+  fileCount: number;
+};
+
+export type PrReviewFileNodeData = {
+  reviewFileId: string;
+  reviewSessionId: string;
+  reviewFlowFileId: string;
+  flowId: string;
+  workflowOrder: number;
+  fileName: string;
+  filePath: string;
+  roleSummary: string | null;
+  reviewStatus: PrReviewFileReviewStatus;
+};
+
+export type PrReviewFlowFile = {
+  id: string;
+  reviewSessionId: string;
+  flowId: string;
+  reviewFileId: string;
+  workflowOrder: number;
+  filePath: string;
+  fileName: string;
+  fileStatus: PrReviewFileStatus;
+  fileRole: string | null;
+  currentStatus: PrReviewFileReviewStatus;
+  fileNodeData: PrReviewFileNodeData;
+};
+
+export type PrReviewCanvasFlow = PrReviewFlow & {
+  files: PrReviewFlowFile[];
+};
+
+export type PrReviewCanvasEdge = {
+  fromReviewFileId: string;
+  toReviewFileId: string;
+  flowId: string;
+  reason: string;
+};
+
+export type PrReviewCanvas = {
+  reviewSessionId: string;
+  headBranch: string | null;
+  baseBranch: string | null;
+  reviewedCount: number;
+  totalFileCount: number;
+  conflictStatus: PrReviewConflictStatus;
+  flows: PrReviewCanvasFlow[];
+  edges: PrReviewCanvasEdge[];
+};
+
+export type PrReviewFileFlowMembership = {
+  reviewFlowFileId: string;
+  flowId: string;
+  flowTitle: string;
+  workflowOrder: number;
+};
+
+export type PrReviewLatestDecision = {
+  id: string;
+  status: PrReviewFileDecisionStatus;
+  comment: string | null;
+  reviewedByUserId: string | null;
+  reviewedAt: string | null;
+};
+
+export type PrReviewFile = {
+  id: string;
+  sessionId: string;
+  filePath: string;
+  previousFilePath: string | null;
+  fileName: string;
+  fileStatus: PrReviewFileStatus;
+  additions: number;
+  deletions: number;
+  isBinary: boolean;
+  isLargeDiff: boolean;
+  githubFileUrl: string | null;
+  fileRole: string | null;
+  changeReason: string | null;
+  changeSummary: string | null;
+  reviewPoints: string[];
+  currentStatus: PrReviewFileReviewStatus;
+  comment: string | null;
+  reviewedByUserId: string | null;
+  reviewedAt: string | null;
+  flowMemberships: PrReviewFileFlowMembership[];
+  latestDecision: PrReviewLatestDecision | null;
+};
+
+export type PrReviewDiffMode = "side_by_side" | "binary" | "large";
+
+export type PrReviewDiffRowType = "unchanged" | "added" | "deleted";
+
+export type PrReviewDiffRow = {
+  type: PrReviewDiffRowType;
+  oldLineNumber: number | null;
+  newLineNumber: number | null;
+  oldText: string | null;
+  newText: string | null;
+};
+
+export type PrReviewFileDiff = {
+  reviewFileId: string;
+  filePath: string;
+  mode: PrReviewDiffMode;
+  isBinary: boolean;
+  isLargeDiff: boolean;
+  githubFileUrl: string | null;
+  message?: string;
+  rows: PrReviewDiffRow[];
+};
+
+export type UpdatePrReviewFileDecisionInput = {
+  status: PrReviewFileDecisionStatus;
+  comment: string | null;
+};
+
+export type PrReviewStatusCounts = {
+  approved: number;
+  discussionNeeded: number;
+  unknown: number;
+  notReviewed: number;
+  total: number;
+};
+
+export type PrReviewSessionResultFile = {
+  reviewFileId: string;
+  fileName: string;
+  filePath: string;
+  status: PrReviewFileReviewStatus;
+  comment: string | null;
+  reviewedByUserId: string | null;
+  reviewedAt: string | null;
+};
+
+export type PrReviewSessionResult = {
+  reviewSessionId: string;
+  status: PrReviewSessionStatus;
+  reviewResultSummary: string;
+  counts: PrReviewStatusCounts;
+  fileReviewResults: PrReviewSessionResultFile[];
+  readyToSubmit: boolean;
+};
+
+export type PrReviewSubmissionFileResult = {
+  fileName: string;
+  filePath: string;
+  status: PrReviewFileReviewStatus;
+  comment: string | null;
+};
+
+export type PrReviewSubmissionListItem = {
+  id: string;
+  sessionId: string;
+  submitType: PrReviewSubmitType;
+  githubSubmitStatus: PrReviewGithubSubmitStatus;
+  githubReviewId: string | null;
+  githubReviewUrl: string | null;
+  submittedByUserId: string | null;
+  submittedByGithubLogin: string | null;
+  errorMessage: string | null;
+  submittedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type PrReviewSubmission = PrReviewSubmissionListItem & {
+  reviewBody: string;
+  reviewResultSummary: string | null;
+  fileReviewResults: PrReviewSubmissionFileResult[];
+};
+
+export type SubmitPrReviewSessionInput = {
+  submitType: PrReviewSubmitType;
+  reviewBody: string;
 };
 
 export type ListPrReviewRepositoriesQuery = {

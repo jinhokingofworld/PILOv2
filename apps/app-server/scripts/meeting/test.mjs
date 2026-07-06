@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
 const { MeetingService } = require("../../dist/modules/meeting/meeting.service.js");
+const { badRequest } = require("../../dist/common/api-error.js");
 
 const currentUserId = "11111111-1111-1111-1111-111111111111";
 const workspaceId = "22222222-2222-2222-2222-222222222222";
@@ -133,12 +134,17 @@ class FakeLiveKitEgressService {
 }
 
 class FakeMeetingReportJobService {
-  constructor() {
+  constructor({ shouldFail = false } = {}) {
+    this.shouldFail = shouldFail;
     this.calls = [];
   }
 
   async enqueueMeetingReportJob(payload) {
     this.calls.push(payload);
+
+    if (this.shouldFail) {
+      throw badRequest("Meeting report job could not be enqueued");
+    }
   }
 }
 
@@ -264,6 +270,25 @@ function meetingReportRow(overrides = {}) {
     retry_count: 0,
     created_at: createdAt,
     updated_at: updatedAt,
+    ...overrides
+  };
+}
+
+function meetingReportRegenerationRow(overrides = {}) {
+  return {
+    ...meetingReportRow({
+      status: "FAILED",
+      failed_step: "STT",
+      error_message: "STT failed safely",
+      summary: "이전 요약",
+      discussion_points: "이전 논의사항",
+      decisions: "이전 결정사항",
+      action_item_candidates: [{ title: "이전 후속 작업" }],
+      retry_count: 1
+    }),
+    transcript_text: "이전 전문",
+    recording_status: "COMPLETED",
+    recording_audio_file_key: `recordings/meetings/workspaces/${workspaceId}/meetings/${meetingId}/recordings/${recordingId}.mp3`,
     ...overrides
   };
 }
@@ -544,10 +569,10 @@ async function assertError(action, messagePattern) {
       queryOneRows: [
         currentMeetingRow(),
         participantRow(),
+        activeParticipantCountRow(2),
         participantRow({
           left_at: leftAt
-        }),
-        activeParticipantCountRow(1)
+        })
       ]
     })
   );
@@ -564,14 +589,167 @@ async function assertError(action, messagePattern) {
 {
   const { database, service, liveKitEgressService, meetingReportJobService } =
     createSubject(
+      new FakeDatabase({
+        queryOneRows: [
+          currentMeetingRow(),
+          participantRow(),
+          activeParticipantCountRow(1),
+          (text, values) => {
+            assert.match(text, /FROM meeting_recordings/);
+            assert.match(text, /status = 'RUNNING'/);
+            assert.match(text, /FOR UPDATE/);
+            assert.deepEqual(values, [meetingId]);
+            return recordingRow();
+          },
+          (text, values) => {
+            assert.match(text, /UPDATE meeting_recordings/);
+            assert.match(text, /status = 'COMPLETED'/);
+            assert.deepEqual(values, [
+              recordingId,
+              `recordings/meetings/workspaces/${workspaceId}/meetings/${meetingId}/recordings/${recordingId}.mp3`,
+              180,
+              8192
+            ]);
+            return recordingRow({
+              status: "COMPLETED",
+              audio_file_key: values[1],
+              duration_sec: values[2],
+              file_size_bytes: values[3],
+              ended_at: endedAt
+            });
+          },
+          (text, values) => {
+            assert.match(text, /FROM meeting_reports/);
+            assert.match(text, /recording_id = \$2/);
+            assert.deepEqual(values, [meetingId, recordingId]);
+            return null;
+          },
+          (text, values) => {
+            assert.match(text, /INSERT INTO meeting_reports/);
+            assert.match(text, /'PROCESSING'/);
+            assert.deepEqual(values, [meetingId, recordingId]);
+            return meetingReportRow({
+              status: "PROCESSING",
+              summary: null,
+              discussion_points: null,
+              decisions: null,
+              action_item_candidates: [],
+              retry_count: 0
+            });
+          },
+          participantRow({
+            left_at: leftAt
+          }),
+          currentMeetingRow({
+            ended_at: endedAt
+          })
+        ]
+      })
+    );
+
+  const left = await service.leaveMeeting(currentUserId, workspaceId, meetingId);
+
+  assert.equal(left.meetingEnded, true);
+  assert.equal(left.meeting.endedAt, "2026-07-05T00:10:01.000Z");
+  assert.equal(left.currentRecording, null);
+  assert.deepEqual(liveKitEgressService.stopCalls, [
+    {
+      livekitEgressId: "egress-1"
+    }
+  ]);
+  assert.equal(
+    database.queries.some(({ text }) => text.includes("meeting_reports")),
+    true
+  );
+  assert.deepEqual(meetingReportJobService.calls, [
+    {
+      jobType: "meeting_report",
+      reportId,
+      meetingId,
+      recordingId,
+      audioFileKey: `recordings/meetings/workspaces/${workspaceId}/meetings/${meetingId}/recordings/${recordingId}.mp3`,
+      retryCount: 0
+    }
+  ]);
+  assert.match(database.queries.at(-1).text, /UPDATE meetings/);
+  assert.match(database.queries.at(-1).text, /AND ended_at IS NULL/);
+}
+
+{
+  const { database, service } = createSubject(
     new FakeDatabase({
       queryOneRows: [
         currentMeetingRow(),
-        participantRow(),
         participantRow({
           left_at: leftAt
         }),
         activeParticipantCountRow(0),
+        participantRow({
+          left_at: leftAt
+        })
+      ]
+    })
+  );
+
+  const left = await service.leaveMeeting(currentUserId, workspaceId, meetingId);
+
+  assert.equal(left.meetingEnded, false);
+  assert.equal(left.participant.leftAt, "2026-07-05T00:10:00.000Z");
+  assert.equal(database.queries.length, 4);
+}
+
+{
+  const { database, service, liveKitEgressService, meetingReportJobService } =
+    createSubject(
+      new FakeDatabase({
+        queryOneRows: [
+          currentMeetingRow(),
+          participantRow(),
+          activeParticipantCountRow(1),
+          recordingRow(),
+          (text, values) => {
+            assert.match(text, /UPDATE meeting_recordings/);
+            assert.match(text, /status = 'FAILED'/);
+            assert.deepEqual(values, [recordingId, "LiveKit Egress stop failed"]);
+            return recordingRow({
+              status: "FAILED",
+              ended_at: endedAt,
+              error_message: "LiveKit Egress stop failed"
+            });
+          }
+        ]
+      }),
+      new FakeLiveKitTokenService(),
+      new FakeLiveKitEgressService({ stopShouldFail: true }),
+      new FakeMeetingReportJobService()
+    );
+
+  await assertBadRequest(
+    () => service.leaveMeeting(currentUserId, workspaceId, meetingId),
+    /Running recording could not be completed before leaving/
+  );
+
+  assert.equal(database.transactionRolledBack, true);
+  assert.equal(
+    database.queries.some(({ text }) => text.includes("UPDATE meeting_participants")),
+    false
+  );
+  assert.deepEqual(liveKitEgressService.stopCalls, [
+    {
+      livekitEgressId: "egress-1"
+    }
+  ]);
+  assert.deepEqual(meetingReportJobService.calls, []);
+}
+
+{
+  const { database, service, meetingReportJobService } = createSubject(
+    new FakeDatabase({
+      queryOneRows: [
+        currentMeetingRow(),
+        participantRow(),
+        activeParticipantCountRow(1),
+        recordingRow(),
         (text, values) => {
           assert.match(text, /UPDATE meeting_recordings/);
           assert.match(text, /status = 'COMPLETED'/);
@@ -589,53 +767,81 @@ async function assertError(action, messagePattern) {
             ended_at: endedAt
           });
         },
+        null,
+        meetingReportRow({
+          status: "PROCESSING",
+          summary: null,
+          discussion_points: null,
+          decisions: null,
+          action_item_candidates: [],
+          retry_count: 0
+        }),
+        participantRow({
+          left_at: leftAt
+        }),
         currentMeetingRow({
           ended_at: endedAt
-        })
+        }),
+        (text, values) => {
+          assert.match(text, /UPDATE meeting_reports/);
+          assert.match(text, /status = 'FAILED'/);
+          assert.match(text, /failed_step = 'STT'/);
+          assert.match(text, /Meeting report job could not be enqueued/);
+          assert.deepEqual(values, [reportId]);
+          return { id: reportId };
+        },
+        (text, values) => {
+          assert.match(text, /UPDATE meeting_participants/);
+          assert.match(text, /left_at = NULL/);
+          assert.deepEqual(values, [meetingId, currentUserId]);
+          return { id: participantId };
+        },
+        (text, values) => {
+          assert.match(text, /UPDATE meetings/);
+          assert.match(text, /ended_at = NULL/);
+          assert.deepEqual(values, [workspaceId, meetingId]);
+          return { id: meetingId };
+        }
       ]
-    })
-    );
+    }),
+    new FakeLiveKitTokenService(),
+    new FakeLiveKitEgressService(),
+    new FakeMeetingReportJobService({ shouldFail: true })
+  );
 
-  const left = await service.leaveMeeting(currentUserId, workspaceId, meetingId);
+  await assertBadRequest(
+    () => service.leaveMeeting(currentUserId, workspaceId, meetingId),
+    /Meeting report job could not be enqueued/
+  );
 
-  assert.equal(left.meetingEnded, true);
-  assert.equal(left.meeting.endedAt, "2026-07-05T00:10:01.000Z");
-  assert.equal(left.currentRecording, null);
-  assert.deepEqual(liveKitEgressService.stopCalls, [
+  assert.deepEqual(meetingReportJobService.calls, [
     {
-      livekitEgressId: "egress-1"
+      jobType: "meeting_report",
+      reportId,
+      meetingId,
+      recordingId,
+      audioFileKey: `recordings/meetings/workspaces/${workspaceId}/meetings/${meetingId}/recordings/${recordingId}.mp3`,
+      retryCount: 0
     }
   ]);
   assert.equal(
-    database.queries.some(({ text }) => text.includes("meeting_reports")),
-    false
+    database.queries.some(
+      ({ text }) => text.includes("status = 'FAILED'") && text.includes("failed_step")
+    ),
+    true
   );
-  assert.deepEqual(meetingReportJobService.calls, []);
-  assert.match(database.queries.at(-1).text, /UPDATE meetings/);
-  assert.match(database.queries.at(-1).text, /AND ended_at IS NULL/);
-}
-
-{
-  const { database, service } = createSubject(
-    new FakeDatabase({
-      queryOneRows: [
-        currentMeetingRow(),
-        participantRow({
-          left_at: leftAt
-        }),
-        participantRow({
-          left_at: leftAt
-        }),
-        activeParticipantCountRow(0)
-      ]
-    })
+  assert.equal(
+    database.queries.some(
+      ({ text }) => text.includes("UPDATE meeting_participants") && text.includes("left_at = NULL")
+    ),
+    true
   );
-
-  const left = await service.leaveMeeting(currentUserId, workspaceId, meetingId);
-
-  assert.equal(left.meetingEnded, false);
-  assert.equal(left.participant.leftAt, "2026-07-05T00:10:00.000Z");
-  assert.equal(database.queries.length, 4);
+  assert.equal(
+    database.queries.some(
+      ({ text }) => text.includes("UPDATE meetings") && text.includes("ended_at = NULL")
+    ),
+    true
+  );
 }
 
 {
@@ -1489,12 +1695,221 @@ async function assertError(action, messagePattern) {
 }
 
 {
-  const { service } = createSubject();
+  const meetingReportJobService = new FakeMeetingReportJobService();
+  const { database, service } = createSubject(
+    new FakeDatabase({
+      queryOneRows: [
+        (text, values) => {
+          assert.match(text, /FROM meeting_reports/);
+          assert.match(text, /JOIN meetings/);
+          assert.match(text, /JOIN meeting_recordings/);
+          assert.match(text, /meetings\.workspace_id = \$1/);
+          assert.match(text, /meeting_reports\.id = \$2/);
+          assert.match(text, /FOR UPDATE OF meeting_reports/);
+          assert.deepEqual(values, [workspaceId, reportId]);
+          return meetingReportRegenerationRow();
+        },
+        (text, values) => {
+          assert.match(text, /UPDATE meeting_reports/);
+          assert.match(text, /status = 'PROCESSING'/);
+          assert.match(text, /failed_step = NULL/);
+          assert.match(text, /error_message = NULL/);
+          assert.match(text, /transcript_text = NULL/);
+          assert.match(text, /action_item_candidates = '\[\]'::jsonb/);
+          assert.match(text, /retry_count = retry_count \+ 1/);
+          assert.deepEqual(values, [reportId]);
+          return meetingReportRow({
+            status: "PROCESSING",
+            failed_step: null,
+            error_message: null,
+            summary: null,
+            discussion_points: null,
+            decisions: null,
+            action_item_candidates: [],
+            retry_count: "2"
+          });
+        }
+      ]
+    }),
+    new FakeLiveKitTokenService(),
+    new FakeLiveKitEgressService(),
+    meetingReportJobService
+  );
+
+  const result = await service.requestReportRegeneration(
+    currentUserId,
+    workspaceId,
+    reportId
+  );
+
+  assert.equal(database.transactionCommitted, true);
+  assert.equal(result.report.status, "PROCESSING");
+  assert.equal(result.report.retryCount, 2);
+  assert.equal(result.report.failedStep, null);
+  assert.equal(result.report.summary, null);
+  assert.equal("transcriptText" in result.report, false);
+  assert.deepEqual(meetingReportJobService.calls, [
+    {
+      jobType: "meeting_report",
+      reportId,
+      meetingId,
+      recordingId,
+      audioFileKey: `recordings/meetings/workspaces/${workspaceId}/meetings/${meetingId}/recordings/${recordingId}.mp3`,
+      retryCount: 2
+    }
+  ]);
+}
+
+{
+  const meetingReportJobService = new FakeMeetingReportJobService();
+  const { service } = createSubject(
+    new FakeDatabase({
+      queryOneRows: [
+        meetingReportRegenerationRow({
+          status: "PROCESSING",
+          failed_step: null,
+          error_message: null
+        })
+      ]
+    }),
+    new FakeLiveKitTokenService(),
+    new FakeLiveKitEgressService(),
+    meetingReportJobService
+  );
 
   await assertBadRequest(
     () => service.requestReportRegeneration(currentUserId, workspaceId, reportId),
-    /not implemented yet/
+    /already processing/
   );
+
+  assert.deepEqual(meetingReportJobService.calls, []);
+}
+
+{
+  const meetingReportJobService = new FakeMeetingReportJobService();
+  const { service } = createSubject(
+    new FakeDatabase({
+      queryOneRows: [
+        meetingReportRegenerationRow({
+          status: "COMPLETED",
+          failed_step: null,
+          error_message: null
+        })
+      ]
+    }),
+    new FakeLiveKitTokenService(),
+    new FakeLiveKitEgressService(),
+    meetingReportJobService
+  );
+
+  await assertBadRequest(
+    () => service.requestReportRegeneration(currentUserId, workspaceId, reportId),
+    /Completed meeting report/
+  );
+
+  assert.deepEqual(meetingReportJobService.calls, []);
+}
+
+{
+  const meetingReportJobService = new FakeMeetingReportJobService();
+  const { service } = createSubject(
+    new FakeDatabase({
+      queryOneRows: [
+        meetingReportRegenerationRow({
+          recording_status: "FAILED",
+          recording_audio_file_key: null,
+          failed_step: "RECORDING"
+        })
+      ]
+    }),
+    new FakeLiveKitTokenService(),
+    new FakeLiveKitEgressService(),
+    meetingReportJobService
+  );
+
+  await assertBadRequest(
+    () => service.requestReportRegeneration(currentUserId, workspaceId, reportId),
+    /audio file is unavailable/
+  );
+
+  assert.deepEqual(meetingReportJobService.calls, []);
+}
+
+{
+  const meetingReportJobService = new FakeMeetingReportJobService();
+  const { service } = createSubject(
+    new FakeDatabase({
+      queryOneRows: [null]
+    }),
+    new FakeLiveKitTokenService(),
+    new FakeLiveKitEgressService(),
+    meetingReportJobService
+  );
+
+  await assertNotFound(
+    () => service.requestReportRegeneration(currentUserId, workspaceId, reportId),
+    /Meeting report not found/
+  );
+
+  assert.deepEqual(meetingReportJobService.calls, []);
+}
+
+{
+  const previousReport = meetingReportRegenerationRow({
+    retry_count: "3"
+  });
+  const meetingReportJobService = new FakeMeetingReportJobService({
+    shouldFail: true
+  });
+  const { database, service } = createSubject(
+    new FakeDatabase({
+      queryOneRows: [
+        previousReport,
+        meetingReportRow({
+          status: "PROCESSING",
+          failed_step: null,
+          error_message: null,
+          summary: null,
+          discussion_points: null,
+          decisions: null,
+          action_item_candidates: [],
+          retry_count: "4"
+        }),
+        (text, values) => {
+          assert.match(text, /UPDATE meeting_reports/);
+          assert.match(text, /status = \$2::meeting_report_status/);
+          assert.match(text, /failed_step = \$3::meeting_report_failed_step/);
+          assert.match(text, /action_item_candidates = \$9::jsonb/);
+          assert.match(text, /retry_count = \$10/);
+          assert.match(text, /AND status = 'PROCESSING'/);
+          assert.deepEqual(values, [
+            reportId,
+            "FAILED",
+            "STT",
+            "STT failed safely",
+            "이전 전문",
+            "이전 요약",
+            "이전 논의사항",
+            "이전 결정사항",
+            JSON.stringify([{ title: "이전 후속 작업" }]),
+            3
+          ]);
+          return meetingReportRow(previousReport);
+        }
+      ]
+    }),
+    new FakeLiveKitTokenService(),
+    new FakeLiveKitEgressService(),
+    meetingReportJobService
+  );
+
+  await assertBadRequest(
+    () => service.requestReportRegeneration(currentUserId, workspaceId, reportId),
+    /Meeting report job could not be enqueued/
+  );
+
+  assert.equal(database.queryOneRows.length, 0);
+  assert.equal(meetingReportJobService.calls.length, 1);
 }
 
 {

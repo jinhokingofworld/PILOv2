@@ -426,7 +426,9 @@ export class GithubSyncRunService {
         SELECT
           id,
           workspace_id,
-          github_installation_id
+          github_installation_id,
+          account_login,
+          account_type
         FROM github_installations
         WHERE workspace_id = $1
           AND id = $2

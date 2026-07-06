@@ -19,8 +19,6 @@ import {
   MeetingReportJobService
 } from "./meeting-report-job.service";
 
-export type PendingMeetingPayload = never;
-
 type RecordingStatus = "RUNNING" | "COMPLETED" | "FAILED";
 type MeetingReportStatus = "PROCESSING" | "COMPLETED" | "FAILED";
 type MeetingReportFailedStep = "RECORDING" | "STT" | "LLM";
@@ -119,6 +117,11 @@ interface MeetingReportDetailRow extends MeetingReportRow {
   transcript_text: string | null;
 }
 
+interface MeetingReportRegenerationRow extends MeetingReportDetailRow {
+  recording_status: RecordingStatus;
+  recording_audio_file_key: string | null;
+}
+
 interface ActiveParticipantCountRow extends QueryResultRow {
   active_participant_count: number | string;
 }
@@ -157,6 +160,17 @@ interface MeetingReportPreparation {
 interface EndRecordingTransactionResult {
   payload: EndRecordingPayload;
   job: MeetingReportJobPayload | null;
+}
+
+interface LeaveMeetingTransactionResult {
+  payload: LeaveMeetingPayload;
+  job: MeetingReportJobPayload | null;
+}
+
+interface MeetingReportRegenerationTransactionResult {
+  payload: MeetingReportRegenerationPayload;
+  job: MeetingReportJobPayload;
+  previousReport: MeetingReportRegenerationRow;
 }
 
 interface StartMeetingDraft {
@@ -290,6 +304,10 @@ export interface MeetingReportListPayload {
 
 export interface MeetingReportDetailResponsePayload {
   report: MeetingReportDetailPayload;
+}
+
+export interface MeetingReportRegenerationPayload {
+  report: MeetingReportSummaryPayload;
 }
 
 const MAIN_MEETING_ROOM = "MAIN_MEETING_ROOM";
@@ -528,52 +546,97 @@ export class MeetingService {
     meetingId: string
   ): Promise<LeaveMeetingPayload> {
     await this.assertWorkspaceAccess(currentUserId, workspaceId);
-    return this.database.transaction(async (transaction) => {
-      const meeting = await this.findMeetingById(transaction, workspaceId, meetingId, {
-        lockMeeting: true
-      });
+    const result = await this.database.transaction<LeaveMeetingTransactionResult>(
+      async (transaction) => {
+        const meeting = await this.findMeetingById(
+          transaction,
+          workspaceId,
+          meetingId,
+          {
+            lockMeeting: true
+          }
+        );
 
-      if (!meeting) {
-        throw notFound("Meeting not found");
-      }
+        if (!meeting) {
+          throw notFound("Meeting not found");
+        }
 
-      const existingParticipant = await this.findParticipant(
-        transaction,
-        meetingId,
-        currentUserId
-      );
-      if (!existingParticipant) {
-        throw notFound("Participant not found");
-      }
+        const existingParticipant = await this.findParticipant(
+          transaction,
+          meetingId,
+          currentUserId
+        );
+        if (!existingParticipant) {
+          throw notFound("Participant not found");
+        }
 
-      const wasActive = existingParticipant.left_at === null;
-      const participant = await this.markParticipantLeft(
-        transaction,
-        meetingId,
-        currentUserId
-      );
-      const activeParticipantCount = await this.countActiveParticipants(
-        transaction,
-        meetingId
-      );
-      const shouldEndMeeting =
-        wasActive && activeParticipantCount === 0 && meeting.ended_at === null;
-      const endedRecording =
-        shouldEndMeeting && meeting.recording_id !== null
-          ? await this.stopRunningRecording(transaction, meeting)
+        const activeParticipantCount = await this.countActiveParticipants(
+          transaction,
+          meetingId
+        );
+        const wasActive = existingParticipant.left_at === null;
+        const shouldEndMeeting =
+          wasActive && activeParticipantCount === 1 && meeting.ended_at === null;
+
+        const runningRecording =
+          shouldEndMeeting && meeting.recording_id !== null
+            ? await this.findRunningRecording(transaction, meetingId, {
+                lockRecording: true
+              })
+            : null;
+        const stoppedRecording =
+          runningRecording === null
+            ? null
+            : await this.stopRunningRecording(transaction, meeting, runningRecording);
+
+        if (stoppedRecording !== null && stoppedRecording.status !== "COMPLETED") {
+          throw badRequest("Running recording could not be completed before leaving");
+        }
+
+        const reportPreparation =
+          stoppedRecording === null
+            ? { report: null, job: null }
+            : await this.prepareReportForStoppedRecording(transaction, stoppedRecording);
+        const participant = await this.markParticipantLeft(
+          transaction,
+          meetingId,
+          currentUserId
+        );
+        const endedMeeting = shouldEndMeeting
+          ? await this.endMeetingIfStillActive(transaction, workspaceId, meetingId)
           : null;
-      const endedMeeting = shouldEndMeeting
-        ? await this.endMeetingIfStillActive(transaction, workspaceId, meetingId)
-        : null;
 
-      return {
-        participant: this.mapParticipant(participant),
-        meetingEnded: endedMeeting !== null,
-        meeting: this.mapMeeting(endedMeeting ?? meeting),
-        currentRecording:
-          endedRecording === null ? this.mapNullableCurrentRecording(meeting) : null
-      };
-    });
+        return {
+          payload: {
+            participant: this.mapParticipant(participant),
+            meetingEnded: endedMeeting !== null,
+            meeting: this.mapMeeting(endedMeeting ?? meeting),
+            currentRecording:
+              stoppedRecording === null
+                ? this.mapNullableCurrentRecording(meeting)
+                : null
+          },
+          job: reportPreparation.job
+        };
+      }
+    );
+
+    try {
+      await this.enqueueMeetingReportJob(result.job);
+    } catch (error) {
+      if (result.job !== null) {
+        await this.restoreLeaveMeetingAfterReportEnqueueFailure({
+          workspaceId,
+          meetingId,
+          currentUserId,
+          reportId: result.job.reportId
+        });
+      }
+
+      throw error;
+    }
+
+    return result.payload;
   }
 
   async startRecording(
@@ -849,12 +912,234 @@ export class MeetingService {
   async requestReportRegeneration(
     currentUserId: string,
     workspaceId: string,
-    _reportId: string
-  ): Promise<PendingMeetingPayload> {
+    reportId: string
+  ): Promise<MeetingReportRegenerationPayload> {
     await this.assertWorkspaceAccess(currentUserId, workspaceId);
-    return this.pendingEndpoint(
-      "POST /workspaces/{workspaceId}/meeting-reports/{reportId}/regeneration-jobs"
+
+    const result =
+      await this.database.transaction<MeetingReportRegenerationTransactionResult>(
+        async (transaction) => {
+          const report = await this.findMeetingReportForRegeneration(
+            transaction,
+            workspaceId,
+            reportId
+          );
+
+          if (report === null) {
+            throw notFound("Meeting report not found");
+          }
+
+          const audioFileKey = this.assertReportCanBeRegenerated(report);
+          const updatedReport = await this.updateMeetingReportForRegeneration(
+            transaction,
+            report.id
+          );
+
+          return {
+            payload: {
+              report: this.mapMeetingReportSummary(updatedReport)
+            },
+            job: this.buildMeetingReportJobPayloadFromAudioFileKey(
+              updatedReport,
+              audioFileKey
+            ),
+            previousReport: report
+          };
+        }
+      );
+
+    try {
+      await this.meetingReportJobService.enqueueMeetingReportJob(result.job);
+    } catch (error) {
+      await this.restoreMeetingReportAfterRegenerationEnqueueFailure(
+        result.previousReport
+      );
+      throw error;
+    }
+
+    return result.payload;
+  }
+
+  private assertReportCanBeRegenerated(
+    report: MeetingReportRegenerationRow
+  ): string {
+    if (report.status === "PROCESSING") {
+      throw badRequest("Meeting report is already processing");
+    }
+
+    if (report.status === "COMPLETED") {
+      throw badRequest("Completed meeting report cannot be regenerated");
+    }
+
+    if (report.status !== "FAILED") {
+      throw badRequest("Meeting report cannot be regenerated");
+    }
+
+    if (
+      report.recording_status !== "COMPLETED" ||
+      report.recording_audio_file_key === null ||
+      !report.recording_audio_file_key.trim()
+    ) {
+      throw badRequest("Meeting report audio file is unavailable");
+    }
+
+    return report.recording_audio_file_key.trim();
+  }
+
+  private async findMeetingReportForRegeneration(
+    executor: QueryOneExecutor,
+    workspaceId: string,
+    reportId: string
+  ): Promise<MeetingReportRegenerationRow | null> {
+    if (!UUID_PATTERN.test(reportId)) {
+      return null;
+    }
+
+    return executor.queryOne<MeetingReportRegenerationRow>(
+      `
+        SELECT
+          meeting_reports.id,
+          meeting_reports.meeting_id,
+          meeting_reports.recording_id,
+          meeting_reports.status,
+          meeting_reports.failed_step,
+          meeting_reports.error_message,
+          meeting_reports.transcript_text,
+          meeting_reports.summary,
+          meeting_reports.discussion_points,
+          meeting_reports.decisions,
+          meeting_reports.action_item_candidates,
+          meeting_reports.retry_count,
+          meeting_reports.created_at,
+          meeting_reports.updated_at,
+          meeting_recordings.status AS recording_status,
+          meeting_recordings.audio_file_key AS recording_audio_file_key
+        FROM meeting_reports
+        JOIN meetings
+          ON meetings.id = meeting_reports.meeting_id
+        JOIN meeting_recordings
+          ON meeting_recordings.id = meeting_reports.recording_id
+          AND meeting_recordings.meeting_id = meeting_reports.meeting_id
+        WHERE meetings.workspace_id = $1
+          AND meeting_reports.id = $2
+        FOR UPDATE OF meeting_reports
+      `,
+      [workspaceId, reportId]
     );
+  }
+
+  private async updateMeetingReportForRegeneration(
+    executor: QueryOneExecutor,
+    reportId: string
+  ): Promise<MeetingReportRow> {
+    const updatedReport = await executor.queryOne<MeetingReportRow>(
+      `
+        UPDATE meeting_reports
+        SET
+          status = 'PROCESSING',
+          failed_step = NULL,
+          error_message = NULL,
+          transcript_text = NULL,
+          summary = NULL,
+          discussion_points = NULL,
+          decisions = NULL,
+          action_item_candidates = '[]'::jsonb,
+          retry_count = retry_count + 1,
+          updated_at = now()
+        WHERE id = $1
+          AND status = 'FAILED'
+        RETURNING
+          id,
+          meeting_id,
+          recording_id,
+          status,
+          failed_step,
+          error_message,
+          summary,
+          discussion_points,
+          decisions,
+          action_item_candidates,
+          retry_count,
+          created_at,
+          updated_at
+      `,
+      [reportId]
+    );
+
+    if (updatedReport === null) {
+      throw badRequest("Meeting report could not be regenerated");
+    }
+
+    return updatedReport;
+  }
+
+  private async restoreMeetingReportAfterRegenerationEnqueueFailure(
+    report: MeetingReportRegenerationRow
+  ): Promise<void> {
+    await this.database.transaction(async (transaction) => {
+      const restoredReport = await transaction.queryOne<MeetingReportRow>(
+        `
+          UPDATE meeting_reports
+          SET
+            status = $2::meeting_report_status,
+            failed_step = $3::meeting_report_failed_step,
+            error_message = $4,
+            transcript_text = $5,
+            summary = $6,
+            discussion_points = $7,
+            decisions = $8,
+            action_item_candidates = $9::jsonb,
+            retry_count = $10,
+            updated_at = now()
+          WHERE id = $1
+            AND status = 'PROCESSING'
+          RETURNING
+            id,
+            meeting_id,
+            recording_id,
+            status,
+            failed_step,
+            error_message,
+            summary,
+            discussion_points,
+            decisions,
+            action_item_candidates,
+            retry_count,
+            created_at,
+            updated_at
+        `,
+        [
+          report.id,
+          report.status,
+          report.failed_step,
+          report.error_message,
+          report.transcript_text,
+          report.summary,
+          report.discussion_points,
+          report.decisions,
+          JSON.stringify(report.action_item_candidates ?? []),
+          Number(report.retry_count)
+        ]
+      );
+
+      if (restoredReport === null) {
+        throw badRequest("Meeting report regeneration could not be restored");
+      }
+    });
+  }
+
+  private buildMeetingReportJobPayloadFromAudioFileKey(
+    report: MeetingReportRow,
+    audioFileKey: string
+  ): MeetingReportJobPayload {
+    return {
+      jobType: "meeting_report",
+      reportId: report.id,
+      meetingId: report.meeting_id,
+      recordingId: report.recording_id,
+      audioFileKey,
+      retryCount: Number(report.retry_count)
+    };
   }
 
   private async assertWorkspaceAccess(
@@ -1421,14 +1706,10 @@ export class MeetingService {
       throw badRequest("Meeting report job could not be created");
     }
 
-    return {
-      jobType: "meeting_report",
-      reportId: report.id,
-      meetingId: report.meeting_id,
-      recordingId: report.recording_id,
-      audioFileKey: recording.audio_file_key,
-      retryCount: Number(report.retry_count)
-    };
+    return this.buildMeetingReportJobPayloadFromAudioFileKey(
+      report,
+      recording.audio_file_key
+    );
   }
 
   private async enqueueMeetingReportJob(
@@ -1439,6 +1720,63 @@ export class MeetingService {
     }
 
     await this.meetingReportJobService.enqueueMeetingReportJob(job);
+  }
+
+  private async restoreLeaveMeetingAfterReportEnqueueFailure(input: {
+    workspaceId: string;
+    meetingId: string;
+    currentUserId: string;
+    reportId: string;
+  }): Promise<void> {
+    await this.database.transaction(async (transaction) => {
+      await transaction.queryOne(
+        `
+          UPDATE meeting_reports
+          SET
+            status = 'FAILED',
+            failed_step = 'STT',
+            error_message = 'Meeting report job could not be enqueued',
+            transcript_text = NULL,
+            summary = NULL,
+            discussion_points = NULL,
+            decisions = NULL,
+            action_item_candidates = '[]'::jsonb,
+            updated_at = now()
+          WHERE id = $1
+            AND status = 'PROCESSING'
+          RETURNING id
+        `,
+        [input.reportId]
+      );
+
+      await transaction.queryOne(
+        `
+          UPDATE meeting_participants
+          SET
+            left_at = NULL,
+            updated_at = now()
+          WHERE meeting_id = $1
+            AND user_id = $2
+            AND left_at IS NOT NULL
+          RETURNING id
+        `,
+        [input.meetingId, input.currentUserId]
+      );
+
+      await transaction.queryOne(
+        `
+          UPDATE meetings
+          SET
+            ended_at = NULL,
+            updated_at = now()
+          WHERE workspace_id = $1
+            AND id = $2
+            AND ended_at IS NOT NULL
+          RETURNING id
+        `,
+        [input.workspaceId, input.meetingId]
+      );
+    });
   }
 
   private async updateRecordingFailed(
@@ -2130,9 +2468,5 @@ export class MeetingService {
 
   private toNullableIsoString(value: Date | string | null): string | null {
     return value === null ? null : this.toIsoString(value);
-  }
-
-  private pendingEndpoint(endpoint: string): PendingMeetingPayload {
-    throw badRequest(`${endpoint} is not implemented yet`);
   }
 }

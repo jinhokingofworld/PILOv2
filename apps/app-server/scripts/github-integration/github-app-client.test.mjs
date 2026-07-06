@@ -1,0 +1,174 @@
+import assert from "node:assert/strict";
+import { generateKeyPairSync } from "node:crypto";
+import { createRequire } from "node:module";
+
+const require = createRequire(import.meta.url);
+
+const { GithubAppClient } = require("../../dist/modules/github-integration/github-app.client.js");
+
+const fixedNow = new Date("2026-07-04T12:00:00.000Z");
+
+function createPrivateKeyPem() {
+  const { privateKey } = generateKeyPairSync("rsa", {
+    modulusLength: 2048
+  });
+
+  return privateKey.export({
+    type: "pkcs8",
+    format: "pem"
+  });
+}
+
+function projectNode(overrides = {}) {
+  return {
+    id: "PVT_kwDOExample",
+    databaseId: 42,
+    owner: {
+      __typename: "Organization",
+      login: "my-team"
+    },
+    number: 1,
+    title: "PILO MVP",
+    shortDescription: "MVP project board",
+    readme: "Project readme",
+    url: "https://github.com/orgs/my-team/projects/1",
+    resourcePath: "/orgs/my-team/projects/1",
+    public: false,
+    closed: false,
+    template: false,
+    createdAt: "2026-06-20T03:00:00.000Z",
+    updatedAt: "2026-07-01T14:30:00.000Z",
+    closedAt: null,
+    repositories: {
+      nodes: [{ id: "R_kgDOExample" }],
+      pageInfo: {
+        hasNextPage: true,
+        endCursor: "repo-cursor-1"
+      }
+    },
+    ...overrides
+  };
+}
+
+{
+  const originalFetch = globalThis.fetch;
+  const privateKeyPem = createPrivateKeyPem();
+  const requests = [];
+
+  globalThis.fetch = async (url, options = {}) => {
+    const requestUrl = url.toString();
+    const body = options.body ? JSON.parse(options.body) : null;
+    requests.push({
+      url: requestUrl,
+      method: options.method ?? "GET",
+      headers: options.headers ?? {},
+      body
+    });
+
+    if (requestUrl.endsWith("/app/installations/12345678/access_tokens")) {
+      return {
+        ok: true,
+        async json() {
+          return {
+            token: "installation-token",
+            expires_at: "2026-07-04T13:00:00.000Z"
+          };
+        }
+      };
+    }
+
+    assert.equal(requestUrl, "https://api.github.com/graphql");
+    assert.equal(options.headers?.Authorization, "Bearer installation-token");
+
+    if (body.variables.projectId === "PVT_kwDOExample") {
+      return {
+        ok: true,
+        async json() {
+          return {
+            data: {
+              node: {
+                __typename: "ProjectV2",
+                id: "PVT_kwDOExample",
+                repositories: {
+                  nodes: [{ id: "R_kgDOSecond" }, { id: "R_kgDOExample" }],
+                  pageInfo: {
+                    hasNextPage: false,
+                    endCursor: null
+                  }
+                }
+              }
+            }
+          };
+        }
+      };
+    }
+
+    return {
+      ok: true,
+      async json() {
+        return {
+          data: {
+            organization: {
+              projectsV2: {
+                nodes: [projectNode()],
+                pageInfo: {
+                  hasNextPage: false,
+                  endCursor: null
+                }
+              }
+            }
+          }
+        };
+      }
+    };
+  };
+
+  try {
+    const projects = await new GithubAppClient().listProjectV2s({
+      installationId: 12345678,
+      appId: "12345",
+      privateKey: privateKeyPem,
+      accountLogin: "my-team",
+      accountType: "Organization",
+      now: () => fixedNow
+    });
+
+    assert.equal(requests.length, 3);
+    assert.equal(requests[0].method, "POST");
+    assert.match(requests[0].headers.Authorization, /^Bearer [^.]+\.[^.]+\.[^.]+$/);
+    assert.match(requests[1].body.query, /organization\(login: \$login\)/);
+    assert.deepEqual(requests[1].body.variables, {
+      login: "my-team",
+      cursor: null
+    });
+    assert.match(requests[2].body.query, /node\(id: \$projectId\)/);
+    assert.deepEqual(requests[2].body.variables, {
+      projectId: "PVT_kwDOExample",
+      cursor: "repo-cursor-1"
+    });
+    assert.deepEqual(projects, [
+      {
+        id: "PVT_kwDOExample",
+        databaseId: 42,
+        ownerLogin: "my-team",
+        ownerType: "Organization",
+        number: 1,
+        title: "PILO MVP",
+        shortDescription: "MVP project board",
+        readme: "Project readme",
+        url: "https://github.com/orgs/my-team/projects/1",
+        resourcePath: "/orgs/my-team/projects/1",
+        public: false,
+        closed: false,
+        template: false,
+        createdAt: "2026-06-20T03:00:00.000Z",
+        updatedAt: "2026-07-01T14:30:00.000Z",
+        closedAt: null,
+        raw: projectNode(),
+        repositoryNodeIds: ["R_kgDOExample", "R_kgDOSecond"]
+      }
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}

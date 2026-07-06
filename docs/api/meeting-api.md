@@ -297,8 +297,15 @@ DELETE /api/v1/workspaces/{workspaceId}/meetings/{meetingId}/participants/me
 
 Request body 없음.
 
-현재 사용자만 회의에서 나간다. 마지막 active participant가 나가면 회의가 자동
-종료될 수 있다. 이미 나간 상태에서 다시 호출해도 같은 결과를 반환한다.
+현재 사용자만 회의에서 나간다. `RUNNING` Recording이 있어도 모든 active
+participant는 나갈 수 있다. 단, 마지막 active participant가 나가는 시점에
+`RUNNING` Recording이 있으면 서버는 먼저 녹음을 정상 종료하고 MeetingReport 생성
+trigger를 수행한 뒤 participant를 나가게 하고 회의를 자동 종료한다. 녹음 종료가
+정상 완료되지 않으면 나가기 요청은 실패하고 participant는 active 상태로 남는다.
+MeetingReport job enqueue가 실패하면 요청은 실패하고 participant와 meeting 종료
+상태는 보정되며, 생성된 MeetingReport는 `FAILED` 상태로 남아 재생성 요청 대상이
+된다.
+이미 나간 상태에서 다시 호출해도 같은 결과를 반환한다.
 
 Response `data`:
 
@@ -307,9 +314,9 @@ Response `data`:
 | `participant` | Participant | 현재 사용자 참여 정보 |
 | `meetingEnded` | boolean | 마지막 참여자 나가기라서 회의 세션이 자동 종료됐는지 여부 |
 | `meeting` | Meeting | 회의 정보 |
-| `currentRecording` | Recording \| null | 진행 중 녹음. 자동 종료로 녹음도 종료됐으면 `null` |
+| `currentRecording` | Recording \| null | 진행 중 녹음. 마지막 참여자 나가기 중 녹음이 정상 종료됐으면 `null` |
 
-주요 오류: `401`, `403`, `404`
+주요 오류: `400`, `401`, `403`, `404`
 
 ### 녹음 시작
 
@@ -502,9 +509,11 @@ POST /api/v1/workspaces/{workspaceId}/meeting-reports/{reportId}/regeneration-jo
 
 Request body 없음.
 
-`FAILED` 상태의 MeetingReport만 재생성을 요청할 수 있다. 요청이 성공하면
-MeetingReport는 다시 `PROCESSING` 상태가 되고 `retryCount`가 증가한다.
-MVP 응답에는 별도 `jobId`를 포함하지 않는다.
+`FAILED` 상태의 MeetingReport만 재생성을 요청할 수 있다. 단, 연결된 Recording이
+`COMPLETED` 상태이고 `audioFileKey`가 있어 AI Worker가 다시 처리할 수 있는 경우만
+허용한다. 요청이 성공하면 MeetingReport는 다시 `PROCESSING` 상태가 되고
+`retryCount`가 증가한다. 기존 실패 정보와 이전 산출물은 초기화한다. MVP 응답에는
+별도 `jobId`를 포함하지 않고, 긴 `transcriptText`도 포함하지 않는다.
 
 Response `data`:
 
@@ -517,6 +526,7 @@ Response `data`:
 | HTTP | Code | 상황 |
 | --- | --- | --- |
 | `400` | `BAD_REQUEST` | `PROCESSING` 또는 `COMPLETED` 상태의 MeetingReport 재생성 요청 |
+| `400` | `BAD_REQUEST` | Recording이 완료되지 않았거나 `audioFileKey`가 없어 재생성할 수 없음 |
 | `401` | `UNAUTHORIZED` | 인증 없음 |
 | `403` | `FORBIDDEN` | Workspace 접근 불가 |
 | `404` | `NOT_FOUND` | 회의록을 찾을 수 없음 |

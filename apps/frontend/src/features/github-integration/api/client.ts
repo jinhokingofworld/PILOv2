@@ -236,7 +236,7 @@ async function requestGithubIntegrationPayload<T>(
   }
 
   const response = await fetcher(buildGithubIntegrationApiUrl(path, baseUrl), {
-    credentials: "same-origin",
+    credentials: "include",
     ...init,
     headers
   });

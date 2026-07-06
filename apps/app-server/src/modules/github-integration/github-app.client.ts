@@ -59,6 +59,12 @@ export interface GithubProjectV2LookupRequest
   projectNodeId: string;
 }
 
+export interface GithubProjectV2DiscoveryRequest
+  extends GithubAppInstallationTokenRequest {
+  accountLogin: string;
+  accountType: "User" | "Organization";
+}
+
 export interface GithubInstallationRepositoryApiItem {
   id: number;
   node_id: string;
@@ -146,6 +152,10 @@ export interface GithubPullRequestFileApiItem {
 }
 
 export interface GithubPullRequestApiDetails {
+  changed_files: number;
+  additions: number;
+  deletions: number;
+  commits: number;
   mergeable: boolean | null;
 }
 
@@ -167,6 +177,10 @@ export interface GithubProjectV2ApiItem {
   updatedAt: string | null;
   closedAt: string | null;
   raw: Record<string, unknown>;
+}
+
+export interface GithubProjectV2DiscoveryApiItem extends GithubProjectV2ApiItem {
+  repositoryNodeIds: string[];
 }
 
 export interface GithubProjectV2FieldOptionApiItem {
@@ -243,6 +257,92 @@ interface GithubInstallationRepositoriesApiPayload {
 
 const GITHUB_SYNC_PER_PAGE = 100;
 const GITHUB_SYNC_MAX_PAGES = 100;
+const GITHUB_PROJECT_V2_DISCOVERY_FRAGMENT = `
+  fragment PiloProjectV2DiscoveryFields on ProjectV2 {
+    id
+    databaseId
+    owner {
+      __typename
+      ... on Organization {
+        login
+      }
+      ... on User {
+        login
+      }
+    }
+    number
+    title
+    shortDescription
+    readme
+    url
+    resourcePath
+    public
+    closed
+    template
+    createdAt
+    updatedAt
+    closedAt
+    repositories(first: 100) {
+      nodes {
+        id
+      }
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+    }
+  }
+`;
+const GITHUB_ORGANIZATION_PROJECT_V2S_QUERY = `
+  query PiloOrganizationProjectV2s($login: String!, $cursor: String) {
+    organization(login: $login) {
+      projectsV2(first: 100, after: $cursor) {
+        nodes {
+          ...PiloProjectV2DiscoveryFields
+        }
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
+      }
+    }
+  }
+  ${GITHUB_PROJECT_V2_DISCOVERY_FRAGMENT}
+`;
+const GITHUB_USER_PROJECT_V2S_QUERY = `
+  query PiloUserProjectV2s($login: String!, $cursor: String) {
+    user(login: $login) {
+      projectsV2(first: 100, after: $cursor) {
+        nodes {
+          ...PiloProjectV2DiscoveryFields
+        }
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
+      }
+    }
+  }
+  ${GITHUB_PROJECT_V2_DISCOVERY_FRAGMENT}
+`;
+const GITHUB_PROJECT_V2_REPOSITORIES_QUERY = `
+  query PiloProjectV2Repositories($projectId: ID!, $cursor: String) {
+    node(id: $projectId) {
+      ... on ProjectV2 {
+        id
+        repositories(first: 100, after: $cursor) {
+          nodes {
+            id
+          }
+          pageInfo {
+            hasNextPage
+            endCursor
+          }
+        }
+      }
+    }
+  }
+`;
 const GITHUB_PROJECT_V2_QUERY = `
   query PiloProjectV2($projectId: ID!) {
     node(id: $projectId) {
@@ -666,6 +766,60 @@ export class GithubAppClient {
     return pullRequests;
   }
 
+  async listProjectV2s(
+    input: GithubProjectV2DiscoveryRequest
+  ): Promise<GithubProjectV2DiscoveryApiItem[]> {
+    const installationToken = await this.createInstallationAccessToken(input);
+    const projects: GithubProjectV2DiscoveryApiItem[] = [];
+    let cursor: string | null = null;
+    const query =
+      input.accountType === "Organization"
+        ? GITHUB_ORGANIZATION_PROJECT_V2S_QUERY
+        : GITHUB_USER_PROJECT_V2S_QUERY;
+
+    do {
+      const data = await this.fetchGraphqlWithToken(
+        installationToken.token,
+        query,
+        {
+          login: input.accountLogin,
+          cursor
+        },
+        "GitHub ProjectV2 discovery failed"
+      );
+      const connection = this.readProjectV2OwnerConnection(
+        data,
+        input.accountType,
+        "GitHub ProjectV2 discovery failed"
+      );
+
+      for (const projectNode of connection.nodes) {
+        const firstRepositoryPage = this.readProjectV2RepositoryPage(
+          projectNode,
+          "GitHub ProjectV2 discovery failed"
+        );
+        const repositoryNodeIds = [
+          ...firstRepositoryPage.nodeIds,
+          ...(await this.listRemainingProjectV2RepositoryNodeIds(
+            installationToken.token,
+            this.readString(projectNode.id, "GitHub ProjectV2 discovery failed"),
+            firstRepositoryPage.endCursor,
+            firstRepositoryPage.hasNextPage
+          ))
+        ];
+
+        projects.push({
+          ...this.mapProjectV2(projectNode),
+          repositoryNodeIds: this.uniqueStrings(repositoryNodeIds)
+        });
+      }
+
+      cursor = connection.hasNextPage ? connection.endCursor : null;
+    } while (cursor);
+
+    return projects;
+  }
+
   async getProjectV2(
     input: GithubProjectV2LookupRequest
   ): Promise<GithubProjectV2ApiItem> {
@@ -808,12 +962,26 @@ export class GithubAppClient {
       throw badRequest("GitHub pull request lookup failed");
     }
 
-    const mergeable = (payload as { mergeable?: unknown }).mergeable;
+    const pullRequest = payload as GithubPullRequestApiDetails;
+    if (
+      typeof pullRequest.changed_files !== "number" ||
+      typeof pullRequest.additions !== "number" ||
+      typeof pullRequest.deletions !== "number" ||
+      typeof pullRequest.commits !== "number"
+    ) {
+      throw badRequest("GitHub pull request lookup failed");
+    }
+
+    const mergeable = pullRequest.mergeable;
     if (mergeable !== true && mergeable !== false && mergeable !== null) {
       throw badRequest("GitHub pull request lookup failed");
     }
 
     return {
+      changed_files: pullRequest.changed_files,
+      additions: pullRequest.additions,
+      deletions: pullRequest.deletions,
+      commits: pullRequest.commits,
       mergeable
     };
   }
@@ -861,6 +1029,69 @@ export class GithubAppClient {
     return data;
   }
 
+  private async listRemainingProjectV2RepositoryNodeIds(
+    token: string,
+    projectNodeId: string,
+    cursor: string | null,
+    hasNextPage: boolean
+  ): Promise<string[]> {
+    const repositoryNodeIds: string[] = [];
+    let nextCursor = hasNextPage ? cursor : null;
+
+    while (nextCursor) {
+      const data = await this.fetchGraphqlWithToken(
+        token,
+        GITHUB_PROJECT_V2_REPOSITORIES_QUERY,
+        {
+          projectId: projectNodeId,
+          cursor: nextCursor
+        },
+        "GitHub ProjectV2 discovery failed"
+      );
+      const page = this.readProjectV2RepositoryConnection(
+        data,
+        "GitHub ProjectV2 discovery failed"
+      );
+      repositoryNodeIds.push(...page.nodeIds);
+      nextCursor = page.hasNextPage ? page.endCursor : null;
+    }
+
+    return repositoryNodeIds;
+  }
+
+  private readProjectV2OwnerConnection(
+    data: unknown,
+    accountType: "User" | "Organization",
+    errorMessage: string
+  ): {
+    nodes: Record<string, unknown>[];
+    hasNextPage: boolean;
+    endCursor: string | null;
+  } {
+    const ownerField = accountType === "Organization" ? "organization" : "user";
+    const owner = this.toObject(this.toObject(data)[ownerField]);
+    const connection = this.toObject(owner.projectsV2);
+    const nodes = Array.isArray(connection.nodes)
+      ? connection.nodes.filter((node): node is Record<string, unknown> =>
+          this.isRecord(node)
+        )
+      : null;
+    const pageInfo = this.toObject(connection.pageInfo);
+
+    if (!nodes || typeof pageInfo.hasNextPage !== "boolean") {
+      throw badRequest(errorMessage);
+    }
+
+    return {
+      nodes,
+      hasNextPage: pageInfo.hasNextPage,
+      endCursor:
+        typeof pageInfo.endCursor === "string" && pageInfo.endCursor
+          ? pageInfo.endCursor
+          : null
+    };
+  }
+
   private readProjectV2Node(data: unknown, errorMessage: string): Record<string, unknown> {
     const node = this.toObject(this.toObject(data).node);
     if (node.__typename && node.__typename !== "ProjectV2") {
@@ -872,6 +1103,52 @@ export class GithubAppClient {
     }
 
     return node;
+  }
+
+  private readProjectV2RepositoryConnection(
+    data: unknown,
+    errorMessage: string
+  ): {
+    nodeIds: string[];
+    hasNextPage: boolean;
+    endCursor: string | null;
+  } {
+    return this.readProjectV2RepositoryPage(
+      this.readProjectV2Node(data, errorMessage),
+      errorMessage
+    );
+  }
+
+  private readProjectV2RepositoryPage(
+    project: Record<string, unknown>,
+    errorMessage: string
+  ): {
+    nodeIds: string[];
+    hasNextPage: boolean;
+    endCursor: string | null;
+  } {
+    const connection = this.toObject(project.repositories);
+    const nodes = Array.isArray(connection.nodes)
+      ? connection.nodes.filter((node): node is Record<string, unknown> =>
+          this.isRecord(node)
+        )
+      : null;
+    const pageInfo = this.toObject(connection.pageInfo);
+
+    if (!nodes || typeof pageInfo.hasNextPage !== "boolean") {
+      throw badRequest(errorMessage);
+    }
+
+    return {
+      nodeIds: nodes
+        .map((node) => this.toNullableString(node.id))
+        .filter((id): id is string => Boolean(id)),
+      hasNextPage: pageInfo.hasNextPage,
+      endCursor:
+        typeof pageInfo.endCursor === "string" && pageInfo.endCursor
+          ? pageInfo.endCursor
+          : null
+    };
   }
 
   private readProjectV2Connection(
@@ -1369,6 +1646,10 @@ export class GithubAppClient {
 
   private toBoolean(value: unknown): boolean {
     return typeof value === "boolean" ? value : false;
+  }
+
+  private uniqueStrings(values: string[]): string[] {
+    return [...new Set(values)];
   }
 
   private toObject(value: unknown): Record<string, unknown> {

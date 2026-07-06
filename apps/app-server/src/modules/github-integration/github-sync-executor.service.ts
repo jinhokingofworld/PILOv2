@@ -6,6 +6,7 @@ import {
   GithubAppClient,
   type GithubInstallationRepositoryApiItem,
   type GithubIssueApiItem,
+  type GithubProjectV2DiscoveryApiItem,
   type GithubProjectV2ApiItem,
   type GithubProjectV2FieldApiItem,
   type GithubProjectV2FieldOptionApiItem,
@@ -20,6 +21,8 @@ export interface GithubSyncInstallationRow extends QueryResultRow {
   id: string;
   workspace_id: string;
   github_installation_id: string | number;
+  account_login: string;
+  account_type: "User" | "Organization";
 }
 
 export interface GithubSyncRepositoryContextRow extends QueryResultRow {
@@ -119,6 +122,10 @@ export class GithubSyncExecutorService {
     summary = this.mergeGithubSyncSummaries(
       summary,
       await this.syncGithubRepositories(context)
+    );
+    summary = this.mergeGithubSyncSummaries(
+      summary,
+      await this.syncGithubProjectV2Discovery(context)
     );
     summary = this.mergeGithubSyncSummaries(
       summary,
@@ -235,10 +242,26 @@ export class GithubSyncExecutorService {
       fetchedCount += pullRequests.length;
 
       for (const pullRequest of pullRequests) {
+        const pullRequestDetails = await this.githubAppClient.getPullRequest({
+          installationId: this.toNumber(context.installation.github_installation_id),
+          appId: context.config.appId,
+          privateKey: context.config.privateKey,
+          owner: repository.owner_login,
+          repo: repository.name,
+          pullNumber: pullRequest.number,
+          now: context.config.now
+        });
         const row = await this.upsertGithubPullRequest(
           context.workspaceId,
           repository.id,
-          pullRequest
+          {
+            ...pullRequest,
+            changed_files: pullRequestDetails.changed_files,
+            additions: pullRequestDetails.additions,
+            deletions: pullRequestDetails.deletions,
+            commits: pullRequestDetails.commits,
+            mergeable: pullRequestDetails.mergeable
+          }
         );
         if (row.created) {
           createdCount += 1;
@@ -252,6 +275,42 @@ export class GithubSyncExecutorService {
 
     return this.createGithubSyncSummary({
       fetchedCount,
+      createdCount,
+      updatedCount
+    });
+  }
+
+  private async syncGithubProjectV2Discovery(
+    context: GithubSyncRunContext
+  ): Promise<GithubSyncRunSummary> {
+    const projects = await this.githubAppClient.listProjectV2s({
+      installationId: this.toNumber(context.installation.github_installation_id),
+      appId: context.config.appId,
+      privateKey: context.config.privateKey,
+      accountLogin: context.installation.account_login,
+      accountType: context.installation.account_type,
+      now: context.config.now
+    });
+
+    let createdCount = 0;
+    let updatedCount = 0;
+    for (const project of projects) {
+      const row = await this.upsertDiscoveredGithubProjectV2(context, project);
+      if (row.created) {
+        createdCount += 1;
+      } else {
+        updatedCount += 1;
+      }
+
+      await this.replaceGithubProjectV2RepositoryLinks(
+        context.workspaceId,
+        row.id,
+        project.repositoryNodeIds
+      );
+    }
+
+    return this.createGithubSyncSummary({
+      fetchedCount: projects.length,
       createdCount,
       updatedCount
     });
@@ -349,6 +408,153 @@ export class GithubSyncExecutorService {
       updatedCount,
       skippedCount
     });
+  }
+
+  private async upsertDiscoveredGithubProjectV2(
+    context: GithubSyncRunContext,
+    project: GithubProjectV2DiscoveryApiItem
+  ): Promise<GithubSyncUpsertResultRow> {
+    const row = await this.database.queryOne<GithubSyncUpsertResultRow>(
+      `
+        INSERT INTO github_projects_v2 (
+          workspace_id,
+          installation_id,
+          github_project_node_id,
+          github_project_full_database_id,
+          owner_login,
+          owner_type,
+          project_number,
+          title,
+          short_description,
+          readme,
+          url,
+          resource_path,
+          public,
+          closed,
+          template,
+          github_created_at,
+          github_updated_at,
+          github_closed_at,
+          last_synced_at,
+          raw
+        )
+        VALUES (
+          $1,
+          $2,
+          $3,
+          $4,
+          $5,
+          $6,
+          $7,
+          $8,
+          $9,
+          $10,
+          $11,
+          $12,
+          $13,
+          $14,
+          $15,
+          $16,
+          $17,
+          $18,
+          now(),
+          $19::jsonb
+        )
+        ON CONFLICT (github_project_node_id)
+        DO UPDATE SET
+          workspace_id = EXCLUDED.workspace_id,
+          installation_id = EXCLUDED.installation_id,
+          github_project_full_database_id =
+            EXCLUDED.github_project_full_database_id,
+          owner_login = EXCLUDED.owner_login,
+          owner_type = EXCLUDED.owner_type,
+          project_number = EXCLUDED.project_number,
+          title = EXCLUDED.title,
+          short_description = EXCLUDED.short_description,
+          readme = EXCLUDED.readme,
+          url = EXCLUDED.url,
+          resource_path = EXCLUDED.resource_path,
+          public = EXCLUDED.public,
+          closed = EXCLUDED.closed,
+          template = EXCLUDED.template,
+          github_created_at = EXCLUDED.github_created_at,
+          github_updated_at = EXCLUDED.github_updated_at,
+          github_closed_at = EXCLUDED.github_closed_at,
+          last_synced_at = now(),
+          raw = EXCLUDED.raw,
+          updated_at = now()
+        RETURNING id, (xmax = 0) AS created
+      `,
+      [
+        context.workspaceId,
+        context.installation.id,
+        project.id,
+        project.databaseId,
+        project.ownerLogin,
+        project.ownerType,
+        project.number,
+        project.title,
+        project.shortDescription,
+        project.readme,
+        project.url,
+        project.resourcePath,
+        project.public,
+        project.closed,
+        project.template,
+        project.createdAt,
+        project.updatedAt,
+        project.closedAt,
+        project.raw
+      ]
+    );
+
+    if (!row) {
+      throw badRequest("GitHub ProjectV2 could not be synced");
+    }
+
+    return row;
+  }
+
+  private async replaceGithubProjectV2RepositoryLinks(
+    workspaceId: string,
+    projectV2Id: string,
+    repositoryNodeIds: string[]
+  ): Promise<void> {
+    const uniqueRepositoryNodeIds = [...new Set(repositoryNodeIds)];
+    await this.database.execute(
+      `
+        DELETE FROM github_project_v2_repositories links
+        WHERE links.project_v2_id = $1
+          AND NOT EXISTS (
+            SELECT 1
+            FROM github_repositories repositories
+            WHERE repositories.id = links.repository_id
+              AND repositories.workspace_id = $2
+              AND repositories.github_node_id = ANY($3::text[])
+          )
+      `,
+      [projectV2Id, workspaceId, uniqueRepositoryNodeIds]
+    );
+
+    if (uniqueRepositoryNodeIds.length === 0) {
+      return;
+    }
+
+    await this.database.execute(
+      `
+        INSERT INTO github_project_v2_repositories (
+          project_v2_id,
+          repository_id
+        )
+        SELECT $1, repositories.id
+        FROM github_repositories repositories
+        WHERE repositories.workspace_id = $2
+          AND repositories.github_node_id = ANY($3::text[])
+        ON CONFLICT (project_v2_id, repository_id)
+        DO NOTHING
+      `,
+      [projectV2Id, workspaceId, uniqueRepositoryNodeIds]
+    );
   }
 
   private async upsertGithubProjectV2(
