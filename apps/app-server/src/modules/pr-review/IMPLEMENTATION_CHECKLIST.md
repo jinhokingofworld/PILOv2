@@ -185,6 +185,14 @@
 - [ ] review canvas 파일은 `apps/frontend/src/features/pr-review/components/review-canvas/`
   아래에 둔다.
 - [ ] PR Review canvas endpoint 응답으로 flow, file node, edge view를 렌더링한다.
+- [ ] Review Canvas는 단순 좌->우 1열 순서도가 아니라, 함께 봐야 하는 파일 관계를
+  보여주는 관계 지도 형태로 렌더링한다.
+- [ ] `review_flows`는 lane 또는 cluster 단위로 표현하고, 같은 flow에 속하거나
+  함께 봐야 하는 파일은 가까이 배치한다.
+- [ ] `workflowOrder`는 보조 순서 정보로 사용하며, node badge/order number와
+  edge로 순서를 함께 표현한다.
+- [ ] `edges.reason`이 있으면 연결선 label, hover, 선택 상태 패널 중 하나로
+  노출한다.
 - [ ] workflow 데이터를 future Canvas persistence와 호환되도록 deterministic tldraw
   shapes와 stable review metadata로 변환한다.
 - [ ] `WorkspaceCanvas`, `PiloCanvasRuntime`, `PiloTldrawCanvas`, `PiloFileNodeShapeUtil`,

@@ -51,6 +51,26 @@ MVP 동작:
 - MVP에서는 flow, node, edge 구조 편집을 허용하지 않는다.
 - review workflow 생성, 조회, 삭제를 위해 Canvas API에 의존하지 않는다.
 
+## Layout 원칙
+
+PR Review workflow canvas는 단순한 좌->우 1열 순서도가 아니라, 리뷰 중 함께 봐야
+하는 파일 관계를 보여주는 관계 지도여야 한다.
+
+MVP layout 원칙:
+
+- `review_flows`는 lane 또는 cluster 단위로 표현한다.
+- `workflowOrder`는 리뷰 순서를 나타내는 보조 정보로 사용하고, 전체 화면을
+  1열 step list로만 만들지 않는다.
+- 같은 flow에 속하거나 함께 봐야 하는 파일은 가까이 배치한다.
+- `edges`는 파일 간 관계를 표현하며, `reason`이 있으면 연결선 label, hover,
+  선택 상태 패널 중 하나로 노출한다.
+- 순서가 중요한 관계는 edge와 node badge/order number를 함께 사용해 표현한다.
+- 한 파일이 여러 flow와 관련되면 MVP에서는 관련 flow badge를 우선 사용하고,
+  필요한 경우 flow별 중복 node fallback을 허용한다.
+- node 위치는 deterministic frontend layout으로 계산하며 저장하지 않는다.
+- 사용자가 node/edge를 drag해서 review order나 graph 구조를 수정하는 동작은
+  MVP 범위에서 제외한다.
+
 ## Canvas Surface 경계
 
 현재 Canvas feature 컴포넌트는 아직 순수 공용 엔진이 아니다.
