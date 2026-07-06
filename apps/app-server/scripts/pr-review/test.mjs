@@ -152,6 +152,7 @@ assert.match(prReviewService, /Review session head SHA is stale/);
 assert.match(prReviewService, /GitHub OAuth connection is required/);
 assert.match(prReviewService, /current_status = \$3/);
 assert.match(prReviewService, /reviewed_by_user_id = \$5/);
+assert.match(prReviewService, /review_file\.session_id IN/);
 assert.match(prReviewService, /status must be approved, discussion_needed, or unknown/);
 assert.match(prReviewService, /readyToSubmit/);
 assert.match(prReviewService, /ready_to_submit/);

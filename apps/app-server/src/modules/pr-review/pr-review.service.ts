@@ -1681,12 +1681,14 @@ export class PrReviewService {
             comment = $4,
             reviewed_by_user_id = $5,
             reviewed_at = now()
-        FROM pr_review_sessions AS review_session
-        JOIN github_pull_requests AS pull_request
-          ON pull_request.id = review_session.pull_request_id
-        WHERE review_file.session_id = review_session.id
-          AND pull_request.workspace_id = $1
-          AND review_file.id = $2
+        WHERE review_file.id = $2
+          AND review_file.session_id IN (
+            SELECT review_session.id
+            FROM pr_review_sessions AS review_session
+            JOIN github_pull_requests AS pull_request
+              ON pull_request.id = review_session.pull_request_id
+            WHERE pull_request.workspace_id = $1
+          )
         RETURNING review_file.id, review_file.session_id
       `,
       [

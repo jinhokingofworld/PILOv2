@@ -281,11 +281,11 @@ export function PrReviewSubmitReviewModal({
   return (
     <div
       aria-modal="true"
-      className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/45 px-4 py-6 backdrop-blur-[3px]"
+      className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/35 px-4 py-6 backdrop-blur-[2px]"
       role="dialog"
     >
-      <div className="flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-lg border border-slate-700 bg-slate-950 text-slate-100 shadow-2xl">
-        <header className="flex min-h-16 items-center gap-3 border-b border-slate-800 px-5">
+      <div className="flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-lg border border-slate-200 bg-white text-slate-950 shadow-2xl">
+        <header className="flex min-h-16 items-center gap-3 border-b border-slate-200 px-5">
           <div className="min-w-0 flex-1">
             <h2 className="text-lg font-semibold">Finish your review</h2>
           </div>
@@ -351,7 +351,7 @@ export function PrReviewSubmitReviewModal({
               </div>
 
               {result.counts.notReviewed > 0 ? (
-                <div className="mt-3 rounded-lg border border-amber-300/35 bg-amber-300/10 px-3 py-2 text-sm leading-6 text-amber-100">
+                <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm leading-6 text-amber-800">
                   아직 판단하지 않은 파일 {formatNumber(result.counts.notReviewed)}
                   개가 남아 있습니다.
                 </div>
@@ -359,7 +359,7 @@ export function PrReviewSubmitReviewModal({
 
               <textarea
                 aria-label="Review body"
-                className="mt-4 min-h-72 w-full resize-y rounded-lg border border-slate-700 bg-slate-900 px-4 py-3 text-sm leading-6 text-slate-100 outline-none transition-colors placeholder:text-slate-500 focus:border-blue-400 focus:ring-3 focus:ring-blue-500/20"
+                className="mt-4 min-h-72 w-full resize-y rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm leading-6 text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:border-blue-400 focus:ring-3 focus:ring-blue-100"
                 disabled={submitStatus === "submitting" || Boolean(submission)}
                 onChange={(event) => {
                   setReviewBody(event.target.value);
@@ -381,8 +381,8 @@ export function PrReviewSubmitReviewModal({
                       className={cn(
                         "rounded-lg border px-3 py-3 text-left transition-colors",
                         selected
-                          ? "border-blue-400 bg-blue-500/15 text-white"
-                          : "border-slate-700 bg-slate-900 text-slate-300 hover:bg-slate-800"
+                          ? "border-blue-500 bg-blue-50 text-blue-950"
+                          : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
                       )}
                       disabled={submitStatus === "submitting" || Boolean(submission)}
                       key={option.submitType}
@@ -393,7 +393,12 @@ export function PrReviewSubmitReviewModal({
                         <Icon className="size-4" />
                         {option.label}
                       </span>
-                      <span className="mt-1 block text-xs leading-5 text-slate-400">
+                      <span
+                        className={cn(
+                          "mt-1 block text-xs leading-5",
+                          selected ? "text-blue-700" : "text-slate-500"
+                        )}
+                      >
                         {option.description}
                       </span>
                     </button>
@@ -402,7 +407,7 @@ export function PrReviewSubmitReviewModal({
               </div>
             </div>
 
-            <footer className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-slate-800 px-5 py-4">
+            <footer className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-slate-200 bg-white px-5 py-4">
               <Button onClick={onClose} type="button" variant="secondary">
                 Cancel
               </Button>
@@ -429,8 +434,8 @@ export function PrReviewSubmitReviewModal({
 function ModalLoadingState() {
   return (
     <div className="flex min-h-96 items-center justify-center">
-      <div className="flex items-center gap-3 rounded-lg border border-slate-700 bg-slate-900 px-4 py-3 text-sm text-slate-300">
-        <Loader2 className="size-4 animate-spin text-blue-400" />
+      <div className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 shadow-sm">
+        <Loader2 className="size-4 animate-spin text-blue-600" />
         Review 결과 불러오는 중
       </div>
     </div>
@@ -456,12 +461,12 @@ function ModalErrorState({
 }) {
   return (
     <div className="flex min-h-96 items-center justify-center p-6">
-      <div className="max-w-md rounded-lg border border-rose-300/30 bg-rose-300/10 px-5 py-4 text-center">
-        <AlertCircle className="mx-auto size-8 text-rose-300" />
+      <div className="max-w-md rounded-lg border border-rose-200 bg-white px-5 py-4 text-center shadow-sm">
+        <AlertCircle className="mx-auto size-8 text-rose-600" />
         <h3 className="mt-3 text-base font-semibold">
           Review 정보를 불러오지 못했습니다.
         </h3>
-        <p className="mt-2 text-sm leading-6 text-slate-300">
+        <p className="mt-2 text-sm leading-6 text-slate-500">
           {message ?? "잠시 후 다시 시도해 주세요."}
         </p>
         <div className="mt-4 flex flex-wrap justify-center gap-2">
@@ -491,7 +496,7 @@ function ModalErrorState({
           )}
         </div>
         {createErrorMessage ? (
-          <p className="mt-3 text-sm text-rose-200">{createErrorMessage}</p>
+          <p className="mt-3 text-sm text-rose-600">{createErrorMessage}</p>
         ) : null}
       </div>
     </div>
@@ -508,11 +513,11 @@ function StaleSessionNotice({
   onCreateNewReview: () => void;
 }) {
   return (
-    <div className="mb-4 rounded-lg border border-amber-300/35 bg-amber-300/10 px-4 py-3">
+    <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <p className="font-semibold text-amber-100">PR이 수정되었습니다.</p>
-          <p className="mt-1 text-sm leading-6 text-amber-100/80">
+          <p className="font-semibold text-amber-950">PR이 수정되었습니다.</p>
+          <p className="mt-1 text-sm leading-6 text-amber-800">
             현재 session은 이전 head SHA 기준입니다.
           </p>
         </div>
@@ -530,7 +535,7 @@ function StaleSessionNotice({
         </Button>
       </div>
       {createErrorMessage ? (
-        <p className="mt-3 text-sm text-rose-200">{createErrorMessage}</p>
+        <p className="mt-3 text-sm text-rose-600">{createErrorMessage}</p>
       ) : null}
     </div>
   );
@@ -552,9 +557,9 @@ function SubmissionError({
   onGoToGithub: () => void;
 }) {
   return (
-    <div className="mb-4 rounded-lg border border-rose-300/30 bg-rose-300/10 px-4 py-3">
-      <p className="font-semibold text-rose-100">Review 제출 실패</p>
-      <p className="mt-1 text-sm leading-6 text-rose-100/80">{message}</p>
+    <div className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3">
+      <p className="font-semibold text-rose-950">Review 제출 실패</p>
+      <p className="mt-1 text-sm leading-6 text-rose-800">{message}</p>
       {guardKind === "oauth_required" || guardKind === "stale" ? (
         <div className="mt-3">
           {guardKind === "oauth_required" ? (
@@ -579,7 +584,7 @@ function SubmissionError({
         </div>
       ) : null}
       {createErrorMessage ? (
-        <p className="mt-3 text-sm text-rose-200">{createErrorMessage}</p>
+        <p className="mt-3 text-sm text-rose-600">{createErrorMessage}</p>
       ) : null}
     </div>
   );
@@ -591,20 +596,20 @@ function SubmissionSuccess({
   submission: PrReviewSubmission;
 }) {
   return (
-    <div className="mb-4 rounded-lg border border-emerald-300/35 bg-emerald-300/10 px-4 py-3">
+    <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <p className="flex items-center gap-2 font-semibold text-emerald-100">
+          <p className="flex items-center gap-2 font-semibold text-emerald-950">
             <CheckCircle2 className="size-4" />
             Review 제출 완료
           </p>
-          <p className="mt-1 text-sm leading-6 text-emerald-100/80">
+          <p className="mt-1 text-sm leading-6 text-emerald-800">
             {submission.reviewResultSummary ?? "GitHub Review가 제출되었습니다."}
           </p>
         </div>
         {submission.githubReviewUrl ? (
           <a
-            className="inline-flex items-center gap-1 text-sm font-medium text-blue-200 hover:underline"
+            className="inline-flex items-center gap-1 text-sm font-medium text-blue-600 hover:underline"
             href={submission.githubReviewUrl}
             rel="noreferrer"
             target="_blank"
@@ -614,8 +619,8 @@ function SubmissionSuccess({
           </a>
         ) : null}
       </div>
-      <Separator className="my-3 bg-emerald-300/20" />
-      <p className="text-xs text-emerald-100/70">
+      <Separator className="my-3 bg-emerald-200" />
+      <p className="text-xs text-emerald-700">
         {submission.submittedByGithubLogin
           ? `submitted by ${submission.submittedByGithubLogin}`
           : submission.githubSubmitStatus}
