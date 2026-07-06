@@ -1,6 +1,11 @@
 "use client";
 
-import { useState, type PointerEvent as ReactPointerEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useState,
+  type PointerEvent as ReactPointerEvent
+} from "react";
 import {
   AlertCircle,
   ArrowLeft,
@@ -8,24 +13,36 @@ import {
   GitBranch,
   GitMerge,
   GitPullRequest,
+  Loader2,
+  RefreshCcw,
   Send
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
+import type { createPrReviewApiClient } from "@/features/pr-review/api/client";
+import { PrReviewCanvasSurface } from "@/features/pr-review/components/review-canvas/PrReviewCanvasSurface";
 import type {
+  PrReviewCanvas,
   PrReviewConflictStatus,
   PrReviewPullRequest,
   PrReviewPullRequestDetail,
-  PrReviewSession
+  PrReviewSession,
+  PrReviewSummary
 } from "@/features/pr-review/types";
 
+type PrReviewApiClient = ReturnType<typeof createPrReviewApiClient>;
+
 type PrReviewCanvasShellProps = {
+  apiClient: PrReviewApiClient;
   onBackToSelection: () => void;
   pullRequest: PrReviewPullRequest | PrReviewPullRequestDetail | null;
   session: PrReviewSession;
+  workspaceId: string;
 };
+
+type CanvasLoadStatus = "idle" | "loading" | "ready" | "error";
 
 const DETAIL_PANEL_MIN_WIDTH = 360;
 const DETAIL_PANEL_MAX_WIDTH = 620;
@@ -33,6 +50,14 @@ const DETAIL_PANEL_DEFAULT_WIDTH = 440;
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
+}
+
+function getErrorMessage(error: unknown) {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return "리뷰 캔버스를 불러오지 못했습니다.";
 }
 
 function formatNumber(value: number) {
@@ -77,15 +102,68 @@ function getConflictClassName(status: PrReviewConflictStatus) {
 }
 
 export function PrReviewCanvasShell({
+  apiClient,
   onBackToSelection,
   pullRequest,
-  session
+  session,
+  workspaceId
 }: PrReviewCanvasShellProps) {
   const [detailPanelWidth, setDetailPanelWidth] = useState(
     DETAIL_PANEL_DEFAULT_WIDTH
   );
-  const progressLabel = `${formatNumber(session.reviewedCount)} / ${formatNumber(
-    session.totalFileCount
+  const [loadStatus, setLoadStatus] = useState<CanvasLoadStatus>("idle");
+  const [summary, setSummary] = useState<PrReviewSummary | null>(null);
+  const [canvas, setCanvas] = useState<PrReviewCanvas | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [, setSelectedReviewFileId] = useState<string | null>(null);
+
+  const loadCanvasData = useCallback(async () => {
+    if (!workspaceId) {
+      setLoadStatus("error");
+      setLoadError("워크스페이스 정보를 확인할 수 없습니다.");
+      setSummary(null);
+      setCanvas(null);
+      return;
+    }
+
+    setLoadStatus("loading");
+    setLoadError(null);
+
+    try {
+      const [nextSummary, nextCanvas] = await Promise.all([
+        apiClient.getReviewSessionSummary(workspaceId, session.id),
+        apiClient.getReviewSessionCanvas(workspaceId, session.id)
+      ]);
+
+      setSummary(nextSummary);
+      setCanvas(nextCanvas);
+      setLoadStatus("ready");
+    } catch (error) {
+      setSummary(null);
+      setCanvas(null);
+      setLoadStatus("error");
+      setLoadError(getErrorMessage(error));
+    }
+  }, [apiClient, session.id, workspaceId]);
+
+  useEffect(() => {
+    void loadCanvasData();
+  }, [loadCanvasData]);
+
+  const headBranch =
+    canvas?.headBranch ??
+    summary?.headBranch ??
+    pullRequest?.headBranch ??
+    session.headSha.slice(0, 7);
+  const baseBranch = canvas?.baseBranch ?? summary?.baseBranch ?? pullRequest?.baseBranch ?? "-";
+  const reviewedCount =
+    canvas?.reviewedCount ?? summary?.reviewedCount ?? session.reviewedCount;
+  const totalFileCount =
+    canvas?.totalFileCount ?? summary?.totalFileCount ?? session.totalFileCount;
+  const conflictStatus =
+    canvas?.conflictStatus ?? summary?.conflictStatus ?? session.conflictStatus;
+  const progressLabel = `${formatNumber(reviewedCount)} / ${formatNumber(
+    totalFileCount
   )}`;
 
   function startPanelResize(event: ReactPointerEvent<HTMLButtonElement>) {
@@ -121,33 +199,29 @@ export function PrReviewCanvasShell({
         </Button>
         <div className="flex h-10 min-w-0 items-center gap-2 rounded-lg border border-slate-200 px-3 text-sm font-medium">
           <GitBranch className="size-4 shrink-0 text-slate-500" />
-          <span className="max-w-44 truncate">
-            {pullRequest?.headBranch ?? session.headSha.slice(0, 7)}
-          </span>
+          <span className="max-w-44 truncate">{headBranch}</span>
           <span className="text-slate-400">→</span>
-          <span className="max-w-32 truncate">
-            {pullRequest?.baseBranch ?? "-"}
-          </span>
+          <span className="max-w-32 truncate">{baseBranch}</span>
         </div>
         <div className="hidden h-10 items-center gap-2 rounded-lg border border-slate-200 px-3 text-sm md:flex">
           <GitPullRequest className="size-4 text-blue-600" />
-          <span>리뷰 진행률:</span>
+          <span>리뷰 진행률</span>
           <strong>{progressLabel}</strong>
         </div>
         <div className="ml-auto flex items-center gap-2">
           <span
             className={cn(
               "inline-flex h-10 items-center rounded-full border px-3 text-sm font-medium",
-              getConflictClassName(session.conflictStatus)
+              getConflictClassName(conflictStatus)
             )}
           >
-            {getConflictLabel(session.conflictStatus)}
+            {getConflictLabel(conflictStatus)}
           </span>
-          <Button disabled title="#194에서 제출 modal을 연결합니다." type="button">
+          <Button disabled type="button">
             <Send className="size-4" />
             Review 제출
           </Button>
-          <Button disabled title="MVP 이후 지원 예정" type="button" variant="outline">
+          <Button disabled type="button" variant="outline">
             <GitMerge className="size-4" />
             Merge
           </Button>
@@ -156,25 +230,22 @@ export function PrReviewCanvasShell({
 
       <main className="flex min-h-0 flex-1">
         <section className="relative min-w-0 flex-1 overflow-hidden">
-          <div
-            className="absolute inset-0 bg-slate-50"
-            style={{
-              backgroundImage:
-                "linear-gradient(rgba(15, 23, 42, 0.055) 1px, transparent 1px), linear-gradient(90deg, rgba(15, 23, 42, 0.055) 1px, transparent 1px)",
-              backgroundSize: "32px 32px"
-            }}
-          />
-          <div className="relative flex h-full items-center justify-center p-8">
-            <div className="max-w-md rounded-lg border border-slate-200 bg-white/95 px-5 py-4 text-center shadow-sm">
-              <div className="mx-auto mb-3 flex size-10 items-center justify-center rounded-full bg-blue-50 text-blue-600">
-                <GitPullRequest className="size-5" />
-              </div>
-              <h1 className="text-base font-semibold">Review Canvas</h1>
-              <p className="mt-2 text-sm leading-6 text-slate-500">
-                리뷰 흐름을 준비하고 있습니다.
-              </p>
-            </div>
-          </div>
+          {loadStatus === "loading" || loadStatus === "idle" ? (
+            <CanvasLoadingState />
+          ) : loadStatus === "error" ? (
+            <CanvasErrorState
+              message={loadError}
+              onRetry={() => void loadCanvasData()}
+            />
+          ) : canvas && canvas.flows.length > 0 ? (
+            <PrReviewCanvasSurface
+              canvas={canvas}
+              className="h-full w-full"
+              onFileSelect={setSelectedReviewFileId}
+            />
+          ) : (
+            <CanvasEmptyState />
+          )}
         </section>
 
         <button
@@ -190,20 +261,106 @@ export function PrReviewCanvasShell({
           className="hidden min-h-0 shrink-0 overflow-y-auto border-l border-slate-200 bg-white md:block"
           style={{ width: detailPanelWidth }}
         >
-          <ReviewDetailPanel pullRequest={pullRequest} session={session} />
+          <ReviewDetailPanel
+            pullRequest={pullRequest}
+            session={session}
+            summary={summary}
+          />
         </aside>
       </main>
     </div>
   );
 }
 
+function CanvasLoadingState() {
+  return (
+    <div className="flex h-full items-center justify-center bg-slate-50">
+      <div className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 shadow-sm">
+        <Loader2 className="size-4 animate-spin text-blue-600" />
+        Workflow graph 불러오는 중
+      </div>
+    </div>
+  );
+}
+
+function CanvasErrorState({
+  message,
+  onRetry
+}: {
+  message: string | null;
+  onRetry: () => void;
+}) {
+  return (
+    <div className="flex h-full items-center justify-center bg-slate-50 p-8">
+      <div className="max-w-md rounded-lg border border-rose-200 bg-white px-5 py-4 text-center shadow-sm">
+        <div className="mx-auto mb-3 flex size-10 items-center justify-center rounded-full bg-rose-50 text-rose-600">
+          <AlertCircle className="size-5" />
+        </div>
+        <h1 className="text-base font-semibold">리뷰 캔버스를 불러오지 못했습니다</h1>
+        <p className="mt-2 text-sm leading-6 text-slate-500">
+          {message ?? "잠시 후 다시 시도해 주세요."}
+        </p>
+        <Button className="mt-4" onClick={onRetry} type="button" variant="outline">
+          <RefreshCcw className="size-4" />
+          다시 시도
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function CanvasEmptyState() {
+  return (
+    <div className="flex h-full items-center justify-center bg-slate-50 p-8">
+      <div className="max-w-md rounded-lg border border-slate-200 bg-white px-5 py-4 text-center shadow-sm">
+        <div className="mx-auto mb-3 flex size-10 items-center justify-center rounded-full bg-blue-50 text-blue-600">
+          <GitPullRequest className="size-5" />
+        </div>
+        <h1 className="text-base font-semibold">표시할 workflow가 없습니다</h1>
+        <p className="mt-2 text-sm leading-6 text-slate-500">
+          분석 결과에 flow와 file node가 생성되면 이 영역에 표시됩니다.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function ReviewDetailPanel({
   pullRequest,
-  session
+  session,
+  summary
 }: {
   pullRequest: PrReviewPullRequest | PrReviewPullRequestDetail | null;
   session: PrReviewSession;
+  summary: PrReviewSummary | null;
 }) {
+  const displayTitle = summary
+    ? `#${summary.githubNumber} ${summary.title}`
+    : pullRequest
+      ? `#${pullRequest.githubNumber} ${pullRequest.title}`
+      : "PR 정보";
+  const headBranch =
+    summary?.headBranch ?? pullRequest?.headBranch ?? session.headSha.slice(0, 7);
+  const baseBranch = summary?.baseBranch ?? pullRequest?.baseBranch ?? "-";
+  const changedFilesCount =
+    summary?.changedFilesCount ??
+    pullRequest?.changedFilesCount ??
+    session.totalFileCount;
+  const additions = summary?.additions ?? pullRequest?.additions ?? null;
+  const deletions = summary?.deletions ?? pullRequest?.deletions ?? null;
+  const commitsCount = summary?.commitsCount ?? pullRequest?.commitsCount ?? null;
+  const githubUrl = summary?.githubUrl ?? pullRequest?.githubUrl ?? null;
+  const prPurpose = summary?.prPurpose ?? session.prPurpose;
+  const changeSummary = summary?.changeSummary ?? session.changeSummary;
+  const recommendedReviewOrder =
+    summary?.recommendedReviewOrder ?? session.recommendedReviewOrder;
+  const cautionPoints = summary?.cautionPoints ?? session.cautionPoints;
+  const reviewedCount = summary?.reviewedCount ?? session.reviewedCount;
+  const totalFileCount = summary?.totalFileCount ?? session.totalFileCount;
+  const conflictStatus = summary?.conflictStatus ?? session.conflictStatus;
+  const createdAt = summary?.githubCreatedAt ?? session.createdAt;
+  const status = summary?.status ?? session.status;
+
   return (
     <div className="space-y-6 p-5">
       <section className="rounded-lg border border-amber-200 bg-amber-50 p-4">
@@ -215,25 +372,21 @@ function ReviewDetailPanel({
 
       <section>
         <p className="text-xs font-semibold uppercase text-slate-500">PR</p>
-        <h2 className="mt-2 text-xl font-semibold leading-7">
-          {pullRequest ? `#${pullRequest.githubNumber} ${pullRequest.title}` : "PR 정보"}
-        </h2>
+        <h2 className="mt-2 text-xl font-semibold leading-7">{displayTitle}</h2>
         <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-slate-600">
           <span className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-2 py-1">
             <GitBranch className="size-3.5" />
-            {pullRequest?.headBranch ?? session.headSha.slice(0, 7)} →{" "}
-            {pullRequest?.baseBranch ?? "-"}
+            {headBranch} → {baseBranch}
           </span>
-          <span>{formatNumber(pullRequest?.changedFilesCount ?? session.totalFileCount)} files</span>
-          {pullRequest ? (
-            <>
-              <span className="text-emerald-600">
-                +{formatNumber(pullRequest.additions)}
-              </span>
-              <span className="text-rose-500">
-                -{formatNumber(pullRequest.deletions)}
-              </span>
-            </>
+          <span>{formatNumber(changedFilesCount)} files</span>
+          {additions !== null ? (
+            <span className="text-emerald-600">+{formatNumber(additions)}</span>
+          ) : null}
+          {deletions !== null ? (
+            <span className="text-rose-500">-{formatNumber(deletions)}</span>
+          ) : null}
+          {commitsCount !== null ? (
+            <span>{formatNumber(commitsCount)} commits</span>
           ) : null}
         </div>
       </section>
@@ -241,15 +394,15 @@ function ReviewDetailPanel({
       <section>
         <p className="text-xs font-semibold uppercase text-slate-500">PR 의도</p>
         <p className="mt-2 text-sm leading-6 text-slate-700">
-          {session.prPurpose ?? "PR 의도 분석 결과가 아직 없습니다."}
+          {prPurpose ?? "PR 의도 분석 결과가 아직 없습니다."}
         </p>
       </section>
 
       <section>
         <p className="text-xs font-semibold uppercase text-slate-500">AI 분석</p>
-        {session.changeSummary.length ? (
+        {changeSummary.length ? (
           <ul className="mt-3 space-y-2 text-sm leading-6 text-slate-700">
-            {session.changeSummary.map((item, index) => (
+            {changeSummary.map((item, index) => (
               <li className="flex gap-2" key={`${item}-${index}`}>
                 <span className="mt-2 size-1.5 shrink-0 rounded-full bg-blue-500" />
                 <span>{item}</span>
@@ -268,18 +421,17 @@ function ReviewDetailPanel({
           리뷰 순서
         </p>
         <p className="mt-2 text-sm leading-6 text-slate-700">
-          {session.recommendedReviewOrder ??
-            "추천 리뷰 순서 분석 결과가 아직 없습니다."}
+          {recommendedReviewOrder ?? "추천 리뷰 순서 분석 결과가 아직 없습니다."}
         </p>
       </section>
 
-      {session.cautionPoints.length ? (
+      {cautionPoints.length ? (
         <section>
           <p className="text-xs font-semibold uppercase text-slate-500">
-            주의할 점
+            주의사항
           </p>
           <ul className="mt-3 space-y-2 text-sm leading-6 text-slate-700">
-            {session.cautionPoints.map((item, index) => (
+            {cautionPoints.map((item, index) => (
               <li className="flex gap-2" key={`${item}-${index}`}>
                 <AlertCircle className="mt-0.5 size-4 shrink-0 text-amber-600" />
                 <span>{item}</span>
@@ -292,16 +444,16 @@ function ReviewDetailPanel({
       <Separator />
 
       <section className="grid grid-cols-2 gap-2">
-        <Metric label="리뷰 진행률" value={`${session.reviewedCount}/${session.totalFileCount}`} />
-        <Metric label="상태" value={session.status} />
-        <Metric label="Conflict" value={getConflictLabel(session.conflictStatus)} />
-        <Metric label="생성일" value={formatDateTime(session.createdAt)} />
+        <Metric label="리뷰 진행률" value={`${reviewedCount}/${totalFileCount}`} />
+        <Metric label="상태" value={status} />
+        <Metric label="Conflict" value={getConflictLabel(conflictStatus)} />
+        <Metric label="생성일" value={formatDateTime(createdAt)} />
       </section>
 
-      {pullRequest?.githubUrl ? (
+      {githubUrl ? (
         <a
           className="inline-flex items-center gap-2 text-sm font-medium text-blue-600 hover:underline"
-          href={pullRequest.githubUrl}
+          href={githubUrl}
           rel="noreferrer"
           target="_blank"
         >

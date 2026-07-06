@@ -72,6 +72,8 @@ export type PrReviewPullRequestFile = {
   patch: string | null;
 };
 
+export type PrReviewFileStatus = PrReviewPullRequestFile["fileStatus"];
+
 export type PrReviewSessionStatus =
   | "analyzing"
   | "reviewing"
@@ -84,6 +86,12 @@ export type PrReviewConflictStatus =
   | "checking"
   | "clean"
   | "conflicted"
+  | "unknown";
+
+export type PrReviewFileReviewStatus =
+  | "not_reviewed"
+  | "approved"
+  | "discussion_needed"
   | "unknown";
 
 export type PrReviewSession = {
@@ -101,6 +109,92 @@ export type PrReviewSession = {
   createdByUserId: string | null;
   createdAt: string;
   updatedAt: string;
+};
+
+export type PrReviewSummary = {
+  reviewSessionId: string;
+  pullRequestId: string;
+  githubNumber: number;
+  title: string;
+  authorName: string | null;
+  authorAvatarUrl: string | null;
+  githubCreatedAt: string | null;
+  githubUpdatedAt: string | null;
+  headBranch: string | null;
+  baseBranch: string | null;
+  changedFilesCount: number;
+  additions: number;
+  deletions: number;
+  commitsCount: number;
+  githubUrl: string;
+  headSha: string;
+  status: PrReviewSessionStatus;
+  prPurpose: string | null;
+  changeSummary: string[];
+  recommendedReviewOrder: string | null;
+  cautionPoints: string[];
+  reviewedCount: number;
+  totalFileCount: number;
+  conflictStatus: PrReviewConflictStatus;
+  conflictCheckedAt: string | null;
+  readyToSubmit: boolean;
+};
+
+export type PrReviewFlow = {
+  id: string;
+  reviewSessionId: string;
+  title: string;
+  description: string | null;
+  sortOrder: number;
+  fileCount: number;
+};
+
+export type PrReviewFileNodeData = {
+  reviewFileId: string;
+  reviewSessionId: string;
+  reviewFlowFileId: string;
+  flowId: string;
+  workflowOrder: number;
+  fileName: string;
+  filePath: string;
+  roleSummary: string | null;
+  reviewStatus: PrReviewFileReviewStatus;
+};
+
+export type PrReviewFlowFile = {
+  id: string;
+  reviewSessionId: string;
+  flowId: string;
+  reviewFileId: string;
+  workflowOrder: number;
+  filePath: string;
+  fileName: string;
+  fileStatus: PrReviewFileStatus;
+  fileRole: string | null;
+  currentStatus: PrReviewFileReviewStatus;
+  fileNodeData: PrReviewFileNodeData;
+};
+
+export type PrReviewCanvasFlow = PrReviewFlow & {
+  files: PrReviewFlowFile[];
+};
+
+export type PrReviewCanvasEdge = {
+  fromReviewFileId: string;
+  toReviewFileId: string;
+  flowId: string;
+  reason: string;
+};
+
+export type PrReviewCanvas = {
+  reviewSessionId: string;
+  headBranch: string | null;
+  baseBranch: string | null;
+  reviewedCount: number;
+  totalFileCount: number;
+  conflictStatus: PrReviewConflictStatus;
+  flows: PrReviewCanvasFlow[];
+  edges: PrReviewCanvasEdge[];
 };
 
 export type ListPrReviewRepositoriesQuery = {
