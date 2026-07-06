@@ -171,12 +171,21 @@
 
 - [ ] `WORKFLOW_CANVAS_STRATEGY.md`를 따른다. MVP에서는 Canvas API/DB persistence 없이
   tldraw surface를 사용하고, Post-MVP에서 Canvas persistence를 별도 확장한다.
+- [ ] Canvas 담당자의 `src/shared/tldraw/TldrawSurface` 분리 PR을 선행 의존성으로
+  둔다.
+- [ ] `TldrawSurface`가 `src/shared/` 등 frontend 공통 위치로 이동하면 사이렌 변경으로
+  다룬다.
+- [ ] review canvas 파일은 `apps/frontend/src/features/pr-review/components/review-canvas/`
+  아래에 둔다.
 - [ ] PR Review canvas endpoint 응답으로 flow, file node, edge view를 렌더링한다.
 - [ ] workflow 데이터를 future Canvas persistence와 호환되도록 deterministic tldraw
   shapes와 stable review metadata로 변환한다.
-- [ ] `PiloCanvasRuntime`을 import하지 않고 얇은 `PiloTldrawSurface`를 사용하거나
-  분리한다.
-- [ ] `review_file_node`는 PR Review 소유 custom shape util로 둔다.
+- [ ] `WorkspaceCanvas`, `PiloCanvasRuntime`, `PiloTldrawCanvas`, `PiloFileNodeShapeUtil`,
+  freeform 저장 queue를 PR Review에 붙이지 않는다.
+- [ ] `src/shared/tldraw/TldrawSurface`에 `shapeUtils`, `components`, tool 제한,
+  camera/selection callback을 주입한다.
+- [ ] `review_file_node`는 PR Review 소유 custom shape util로 두고, shape props는
+  `fileNodeData`를 기준으로 설계한다.
 - [ ] PR purpose, change summary, recommended order, caution points, selected flow
   description을 보여준다.
 - [ ] reviewed count와 total file count로 review progress를 보여준다.
