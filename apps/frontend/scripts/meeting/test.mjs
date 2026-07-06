@@ -133,6 +133,8 @@ assert.match(meetingPanel, /localStorage\.setItem/);
 assert.match(meetingPanel, /getUserMedia/);
 assert.match(meetingPanel, /회의 참여/);
 assert.match(meetingPanel, /회의 나가기/);
+assert.match(meetingPanel, /shouldLeaveMeeting = isCurrentUserActive/);
+assert.match(meetingPanel, /if \(shouldLeaveMeeting\)/);
 assert.match(meetingPanel, /녹음 시작/);
 assert.match(meetingPanel, /녹음 종료/);
 assert.match(meetingPanel, /현재 참여 인원/);

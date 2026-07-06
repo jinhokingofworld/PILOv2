@@ -302,9 +302,7 @@ export function MeetingPanel() {
     (participant) => participant.userId === currentUserId
   );
   const isCurrentUserActive = Boolean(currentUserActiveParticipant);
-  const isBrowserJoined =
-    isCurrentUserActive &&
-    (liveKitRoom.status === "connected" || liveKitRoom.status === "reconnecting");
+  const shouldLeaveMeeting = isCurrentUserActive;
   const isActionPending = actionStatus !== "idle";
   const isInitialLoading = currentStatus === "loading" && meeting === null;
   const hasRunningRecording = currentRecording?.status === "RUNNING";
@@ -521,8 +519,8 @@ export function MeetingPanel() {
     }
   }
 
-  const joinButtonLabel = isBrowserJoined ? "회의 나가기" : "회의 참여";
-  const joinButtonIcon = isBrowserJoined ? PhoneOff : Phone;
+  const joinButtonLabel = shouldLeaveMeeting ? "회의 나가기" : "회의 참여";
+  const joinButtonIcon = shouldLeaveMeeting ? PhoneOff : Phone;
   const JoinButtonIcon = isActionPending ? Loader2 : joinButtonIcon;
   const RecordingButtonIcon = hasRunningRecording ? Square : Radio;
   const connectionTone =
@@ -708,11 +706,14 @@ export function MeetingPanel() {
               <div className="grid w-full max-w-2xl gap-3">
                 <Button
                   className="h-14 text-base"
-                  disabled={isActionPending || liveKitRoom.isConnecting}
+                  disabled={
+                    isActionPending ||
+                    (!shouldLeaveMeeting && liveKitRoom.isConnecting)
+                  }
                   size="lg"
-                  variant={isBrowserJoined ? "outline" : "default"}
+                  variant={shouldLeaveMeeting ? "outline" : "default"}
                   onClick={() => {
-                    if (isBrowserJoined) {
+                    if (shouldLeaveMeeting) {
                       void handleLeaveMeeting();
                     } else {
                       handleEntryAction();
