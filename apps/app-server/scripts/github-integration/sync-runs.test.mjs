@@ -316,6 +316,51 @@ function pullRequestApiItem(overrides = {}) {
   };
 }
 
+function issueApiItem(overrides = {}) {
+  return {
+    id: 3001,
+    node_id: "I_kgDOExample",
+    number: 12,
+    title: "Sync ProjectV2 labels",
+    body: "Issue body",
+    state: "open",
+    state_reason: null,
+    user: {
+      login: "developer-ej",
+      avatar_url: "https://avatars.githubusercontent.com/u/1"
+    },
+    html_url: "https://github.com/my-team/pilo/issues/12",
+    labels: [
+      {
+        id: 4001,
+        node_id: "LA_kwDOExample",
+        name: "bug",
+        color: "d73a4a",
+        description: "Something is not working"
+      }
+    ],
+    assignees: [
+      {
+        login: "developer-ej",
+        id: 5001,
+        node_id: "U_kwDOExample",
+        avatar_url: "https://avatars.githubusercontent.com/u/1"
+      }
+    ],
+    milestone: {
+      id: 6001,
+      node_id: "M_kwDOExample",
+      number: 1,
+      title: "MVP",
+      state: "open"
+    },
+    created_at: "2026-07-01T10:00:00.000Z",
+    updated_at: "2026-07-02T05:20:00.000Z",
+    closed_at: null,
+    ...overrides
+  };
+}
+
 function projectV2ApiItem(overrides = {}) {
   return {
     id: projectNodeId,
@@ -573,6 +618,7 @@ function projectV2ItemApiItem(overrides = {}) {
         assert.equal(values[1], installationId);
         assert.equal(values[2], currentUserId);
         assert.equal(values[3], 1001);
+        assert.equal(values[15], JSON.stringify(repositoryApiItem()));
         return { id: repositoryId, created: true };
       },
       (text, values) => {
@@ -583,7 +629,7 @@ function projectV2ItemApiItem(overrides = {}) {
       (text, values) => {
         assert.match(text, /UPDATE github_sync_runs/i);
         assert.match(text, /status = 'success'/i);
-        assert.deepEqual(values, [syncRunId, 2, 1, 1, 0, {}]);
+        assert.deepEqual(values, [syncRunId, 2, 1, 1, 0, "{}"]);
         return syncRunRow({
           target: "repositories",
           repository_id: null,
@@ -623,6 +669,89 @@ function projectV2ItemApiItem(overrides = {}) {
   });
   assert.equal(githubAppClient.calls.length, 1);
   assert.equal(githubAppClient.calls[0].input.installationId, githubInstallationId);
+}
+
+{
+  const issue = issueApiItem();
+  const githubAppClient = new FakeGithubAppClient({
+    issues: [issue]
+  });
+  const database = new FakeDatabase({
+    queryOneRows: [
+      (text, values) => {
+        assert.match(text, /FROM github_installations/i);
+        assert.deepEqual(values, [workspaceId, installationId]);
+        return installationRow();
+      },
+      (text, values) => {
+        assert.match(text, /FROM github_repositories/i);
+        assert.deepEqual(values, [workspaceId, repositoryId]);
+        return repositoryContextRow();
+      },
+      (text, values) => {
+        assert.match(text, /INSERT INTO github_sync_runs/i);
+        assert.deepEqual(values, [
+          workspaceId,
+          installationId,
+          repositoryId,
+          null,
+          "issues"
+        ]);
+        return syncRunRow({
+          target: "issues",
+          status: "running",
+          repository_id: repositoryId,
+          project_v2_id: null,
+          finished_at: null,
+          fetched_count: 0,
+          created_count: 0,
+          updated_count: 0,
+          skipped_count: 0,
+          cursor: {}
+        });
+      },
+      (text, values) => {
+        assert.match(text, /INSERT INTO github_issues/i);
+        assert.equal(values[0], workspaceId);
+        assert.equal(values[1], repositoryId);
+        assert.equal(values[2], 3001);
+        assert.equal(values[12], JSON.stringify(issue.labels));
+        assert.equal(values[13], JSON.stringify(issue.assignees));
+        assert.equal(values[14], JSON.stringify(issue.milestone));
+        assert.deepEqual(JSON.parse(values[18]), issue);
+        return { id: issueId, created: true };
+      },
+      (text, values) => {
+        assert.match(text, /UPDATE github_sync_runs/i);
+        assert.match(text, /status = 'success'/i);
+        assert.deepEqual(values, [syncRunId, 1, 1, 0, 0, "{}"]);
+        return syncRunRow({
+          target: "issues",
+          repository_id: repositoryId,
+          project_v2_id: null,
+          fetched_count: 1,
+          created_count: 1,
+          updated_count: 0,
+          skipped_count: 0,
+          cursor: {}
+        });
+      }
+    ]
+  });
+  const { service } = createService(database, githubAppClient);
+
+  const syncRun = await service.startGithubSyncRun(currentUserId, workspaceId, {
+    target: "issues",
+    installationId,
+    repositoryId
+  });
+
+  assert.equal(syncRun.status, "success");
+  assert.equal(syncRun.fetchedCount, 1);
+  assert.equal(syncRun.createdCount, 1);
+  assert.equal(githubAppClient.calls[0].method, "listRepositoryIssues");
+  assert.equal(githubAppClient.calls[0].input.owner, "my-team");
+  assert.equal(githubAppClient.calls[0].input.repo, "pilo");
 }
 
 {
@@ -683,17 +812,18 @@ function projectV2ItemApiItem(overrides = {}) {
         assert.equal(values[14], 3);
         assert.equal(values[15], 2);
         assert.equal(values[16], 1);
-        assert.equal(values[22].changed_files, 5);
-        assert.equal(values[22].additions, 128);
-        assert.equal(values[22].deletions, 32);
-        assert.equal(values[22].commits, 3);
-        assert.equal(values[22].mergeable, true);
+        const rawPullRequest = JSON.parse(values[22]);
+        assert.equal(rawPullRequest.changed_files, 5);
+        assert.equal(rawPullRequest.additions, 128);
+        assert.equal(rawPullRequest.deletions, 32);
+        assert.equal(rawPullRequest.commits, 3);
+        assert.equal(rawPullRequest.mergeable, true);
         return { id: "pull-request-id", created: true };
       },
       (text, values) => {
         assert.match(text, /UPDATE github_sync_runs/i);
         assert.match(text, /status = 'success'/i);
-        assert.deepEqual(values, [syncRunId, 1, 1, 0, 0, {}]);
+        assert.deepEqual(values, [syncRunId, 1, 1, 0, 0, "{}"]);
         return syncRunRow({
           target: "pull_requests",
           repository_id: repositoryId,
@@ -780,12 +910,13 @@ function projectV2ItemApiItem(overrides = {}) {
           "Organization",
           1
         ]);
+        assert.equal(values[18], JSON.stringify(discoveredProjectV2ApiItem().raw));
         return { id: projectV2Id, created: true };
       },
       (text, values) => {
         assert.match(text, /UPDATE github_sync_runs/i);
         assert.match(text, /status = 'success'/i);
-        assert.deepEqual(values, [syncRunId, 2, 2, 0, 0, {}]);
+        assert.deepEqual(values, [syncRunId, 2, 2, 0, 0, "{}"]);
         return syncRunRow({
           target: "full",
           repository_id: null,
@@ -896,7 +1027,7 @@ function projectV2ItemApiItem(overrides = {}) {
       (text, values) => {
         assert.match(text, /UPDATE github_sync_runs/i);
         assert.match(text, /status = 'success'/i);
-        assert.deepEqual(values, [syncRunId, 1, 0, 1, 0, {}]);
+        assert.deepEqual(values, [syncRunId, 1, 0, 1, 0, "{}"]);
         return syncRunRow({
           target: "project_v2",
           repository_id: null,
@@ -936,6 +1067,7 @@ function projectV2ItemApiItem(overrides = {}) {
     "Organization",
     1
   ]);
+  assert.equal(projectUpdate.values[17], JSON.stringify(projectV2ApiItem().raw));
 }
 
 {
@@ -966,6 +1098,7 @@ function projectV2ItemApiItem(overrides = {}) {
           "SINGLE_SELECT",
           true
         ]);
+        assert.equal(values[7], JSON.stringify(projectV2FieldApiItem().raw));
         return { id: statusFieldId, created: true };
       },
       (text, values) => {
@@ -983,7 +1116,7 @@ function projectV2ItemApiItem(overrides = {}) {
       },
       (text, values) => {
         assert.match(text, /UPDATE github_sync_runs/i);
-        assert.deepEqual(values, [syncRunId, 1, 1, 0, 0, {}]);
+        assert.deepEqual(values, [syncRunId, 1, 1, 0, 0, "{}"]);
         return syncRunRow({
           target: "project_v2_fields",
           repository_id: null,
@@ -1065,6 +1198,7 @@ function projectV2ItemApiItem(overrides = {}) {
           "backlog",
           10
         ]);
+        assert.equal(values[16], JSON.stringify(projectV2ItemApiItem().raw));
         return { id: projectItemId, created: true };
       },
       (text, values) => {
@@ -1074,7 +1208,7 @@ function projectV2ItemApiItem(overrides = {}) {
       },
       (text, values) => {
         assert.match(text, /UPDATE github_sync_runs/i);
-        assert.deepEqual(values, [syncRunId, 2, 1, 0, 1, {}]);
+        assert.deepEqual(values, [syncRunId, 2, 1, 0, 1, "{}"]);
         return syncRunRow({
           target: "project_v2_items",
           repository_id: null,
@@ -1120,6 +1254,10 @@ function projectV2ItemApiItem(overrides = {}) {
     "Backlog",
     null
   ]);
+  assert.equal(
+    fieldValueUpsert.values[12],
+    JSON.stringify(projectV2ItemFieldValueApiItem().raw)
+  );
 }
 
 {

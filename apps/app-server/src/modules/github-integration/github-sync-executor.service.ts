@@ -15,6 +15,7 @@ import {
   type GithubPullRequestApiItem
 } from "./github-app.client";
 import type { GithubAppRuntimeConfig } from "./github-integration-config.service";
+import { serializeGithubJsonb } from "./github-jsonb";
 import type { GithubSyncTarget } from "./types";
 
 export interface GithubSyncInstallationRow extends QueryResultRow {
@@ -504,7 +505,7 @@ export class GithubSyncExecutorService {
         project.createdAt,
         project.updatedAt,
         project.closedAt,
-        project.raw
+        serializeGithubJsonb(project.raw)
       ]
     );
 
@@ -605,7 +606,7 @@ export class GithubSyncExecutorService {
         project.createdAt,
         project.updatedAt,
         project.closedAt,
-        project.raw
+        serializeGithubJsonb(project.raw)
       ]
     );
   }
@@ -647,7 +648,7 @@ export class GithubSyncExecutorService {
         field.name.trim().toLowerCase() === "status",
         field.createdAt,
         field.updatedAt,
-        field.raw
+        serializeGithubJsonb(field.raw)
       ]
     );
 
@@ -800,7 +801,7 @@ export class GithubSyncExecutorService {
         item.position,
         item.createdAt,
         item.updatedAt,
-        item.raw
+        serializeGithubJsonb(item.raw)
       ]
     );
 
@@ -885,7 +886,7 @@ export class GithubSyncExecutorService {
         fieldValue.singleSelectName,
         fieldValue.iterationId,
         fieldValue.iterationTitle,
-        fieldValue.raw,
+        serializeGithubJsonb(fieldValue.raw),
         fieldValue.createdAt,
         fieldValue.updatedAt
       ]
@@ -1067,7 +1068,7 @@ export class GithubSyncExecutorService {
         repository.created_at ?? null,
         repository.updated_at ?? null,
         repository.pushed_at ?? null,
-        repository
+        serializeGithubJsonb(repository)
       ]
     );
 
@@ -1166,13 +1167,13 @@ export class GithubSyncExecutorService {
         issue.user?.login ?? null,
         issue.user?.avatar_url ?? null,
         issue.html_url,
-        issue.labels ?? [],
-        issue.assignees ?? [],
-        issue.milestone ?? null,
+        serializeGithubJsonb(issue.labels ?? []),
+        serializeGithubJsonb(issue.assignees ?? []),
+        serializeGithubJsonb(issue.milestone ?? null),
         issue.created_at ?? null,
         issue.updated_at ?? null,
         issue.closed_at ?? null,
-        issue
+        serializeGithubJsonb(issue)
       ]
     );
 
@@ -1293,7 +1294,7 @@ export class GithubSyncExecutorService {
         pullRequest.updated_at ?? null,
         pullRequest.closed_at ?? null,
         pullRequest.merged_at ?? null,
-        pullRequest
+        serializeGithubJsonb(pullRequest)
       ]
     );
 

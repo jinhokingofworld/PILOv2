@@ -5,6 +5,7 @@ import { DatabaseService } from "../../database/database.service";
 import { WorkspaceService } from "../workspace/workspace.service";
 import { ListGithubSyncRunsQuery, StartGithubSyncRunRequest } from "./dto";
 import { GithubIntegrationConfigService } from "./github-integration-config.service";
+import { serializeGithubJsonb } from "./github-jsonb";
 import {
   GithubSyncExecutorService,
   type GithubSyncInstallationRow,
@@ -345,7 +346,7 @@ export class GithubSyncRunService {
         summary.createdCount,
         summary.updatedCount,
         summary.skippedCount,
-        summary.cursor
+        serializeGithubJsonb(summary.cursor)
       ]
     );
 
