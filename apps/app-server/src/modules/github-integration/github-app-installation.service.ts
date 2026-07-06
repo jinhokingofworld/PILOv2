@@ -9,6 +9,7 @@ import {
 } from "./dto";
 import { GithubAppClient } from "./github-app.client";
 import { GithubAppInstallationStateService } from "./github-app-installation-state.service";
+import { GithubCallbackStateService } from "./github-callback-state.service";
 import {
   GithubIntegrationConfigService,
   type GithubOAuthRuntimeConfig
@@ -42,6 +43,10 @@ interface GithubOAuthConnectionRow extends QueryResultRow {
   github_revoked_at: Date | string | null;
 }
 
+type GithubAppInstallationStartResult = GithubAppInstallationStartPayload & {
+  stateCookie: string;
+};
+
 @Injectable()
 export class GithubAppInstallationService {
   constructor(
@@ -51,6 +56,7 @@ export class GithubAppInstallationService {
     private readonly configService: GithubIntegrationConfigService,
     private readonly workspaceService: WorkspaceService,
     private readonly installationStateService: GithubAppInstallationStateService,
+    private readonly callbackStateService: GithubCallbackStateService,
     private readonly githubAppClient: GithubAppClient
   ) {}
 
@@ -58,7 +64,7 @@ export class GithubAppInstallationService {
     currentUserId: string,
     workspaceId: string,
     input: StartGithubAppInstallationRequest | undefined
-  ): Promise<GithubAppInstallationStartPayload> {
+  ): Promise<GithubAppInstallationStartResult> {
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
 
     const config = this.configService.getGithubAppConfig();
@@ -82,6 +88,18 @@ export class GithubAppInstallationService {
       },
       config
     );
+    const statePayload = this.installationStateService.verifyState(state, config);
+    const bindingToken = this.callbackStateService.createBindingToken();
+    await this.callbackStateService.storeState({
+      flow: "app_installation",
+      stateNonce: statePayload.nonce,
+      userId: currentUserId,
+      workspaceId,
+      returnUrl,
+      bindingTokenHash: this.callbackStateService.hashBindingToken(bindingToken),
+      expiresAt: new Date(statePayload.expiresAt)
+    });
+
     const installUrl = new URL(
       `https://github.com/apps/${config.appSlug}/installations/new`
     );
@@ -89,12 +107,18 @@ export class GithubAppInstallationService {
 
     return {
       installUrl: installUrl.toString(),
-      state
+      state,
+      stateCookie: this.callbackStateService.buildSetCookieHeader(
+        "app_installation",
+        bindingToken,
+        config
+      )
     };
   }
 
   async completeGithubAppInstallationCallback(
-    query: GithubAppInstallationCallbackQuery
+    query: GithubAppInstallationCallbackQuery,
+    cookieHeader?: string | null
   ): Promise<GithubAppInstallationCallbackPayload> {
     const config = this.configService.getGithubAppConfig();
     const githubInstallationId = this.parseGithubInstallationId(
@@ -109,9 +133,18 @@ export class GithubAppInstallationService {
       "GitHub App installation state is required"
     );
     const statePayload = this.installationStateService.verifyState(state, config);
+    const storedState = await this.callbackStateService.consumeState({
+      flow: "app_installation",
+      stateNonce: statePayload.nonce,
+      cookieHeader
+    });
+    if (!storedState.workspaceId) {
+      throw badRequest("Invalid GitHub App installation state");
+    }
+
     const oauthConfig = this.configService.getGithubOAuthConfig();
     const accessToken = await this.getConnectedGithubOAuthAccessToken(
-      statePayload.userId,
+      storedState.userId,
       oauthConfig
     );
     const hasInstallationAccess =
@@ -171,13 +204,13 @@ export class GithubAppInstallationService {
           last_synced_at
       `,
       [
-        statePayload.workspaceId,
+        storedState.workspaceId,
         installation.githubInstallationId,
         installation.accountLogin,
         installation.accountType,
         installation.repositorySelection,
         installation.permissions,
-        statePayload.userId,
+        storedState.userId,
         installation.installedAt,
         installation.suspendedAt
       ]
@@ -191,7 +224,7 @@ export class GithubAppInstallationService {
     return {
       ...payload,
       installationId: id,
-      returnUrl: statePayload.returnUrl
+      returnUrl: storedState.returnUrl
     };
   }
 
