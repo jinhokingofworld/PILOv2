@@ -92,8 +92,10 @@
 - [x] file 단위 `fileRole`, `changeReason`, `changeSummary`, `reviewPoints`를 저장한다.
 - [x] flow order와 file workflow order를 저장한다.
 - [x] MVP에서는 flow/node/edge 편집을 제외한다.
-- [ ] 후속 이슈에서 `ai-worker`를 연결하기 전에 `pr_analysis` request/response 계약과
-  실패 처리를 정의한다. #47에서는 deterministic app-server analyzer까지만 유지한다.
+- [x] App Server에서 `OPENAI_API_KEY`가 있으면 OpenAI Responses API로 PR 분석을 생성한다.
+- [x] `pr_analysis` request/response schema를 정의하고 structured output으로 검증한다.
+- [x] OpenAI API key 누락, API 실패, 응답 schema 불일치 시 deterministic fallback을 사용한다.
+- [ ] `ai-worker` 비동기 job 연결은 App Server AI 분석 MVP 이후 별도 이슈에서 처리한다.
 
 ## 5. Review Read APIs
 
