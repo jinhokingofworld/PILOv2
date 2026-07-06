@@ -7,7 +7,11 @@ const { GithubIntegrationController } = require("../../dist/modules/github-integ
 
 function createReply() {
   return {
+    headers: [],
     redirects: [],
+    header(name, value) {
+      this.headers.push({ name, value });
+    },
     redirect(url, statusCode) {
       this.redirects.push({ url, statusCode });
     }
@@ -16,8 +20,9 @@ function createReply() {
 
 {
   const controller = new GithubIntegrationController({
-    async completeGithubOAuthCallback(query) {
+    async completeGithubOAuthCallback(query, cookieHeader) {
       assert.deepEqual(query, { code: "oauth-code", state: "oauth-state" });
+      assert.equal(cookieHeader, "pilo_github_oauth_state=binding-token");
       return {
         connected: true,
         githubUserId: 12345678,
@@ -32,6 +37,7 @@ function createReply() {
 
   const result = await controller.completeGithubOAuthCallback(
     { code: "oauth-code", state: "oauth-state" },
+    "pilo_github_oauth_state=binding-token",
     reply
   );
 
@@ -46,7 +52,8 @@ function createReply() {
 
 {
   const controller = new GithubIntegrationController({
-    async completeGithubOAuthCallback() {
+    async completeGithubOAuthCallback(_query, cookieHeader) {
+      assert.equal(cookieHeader, undefined);
       return {
         connected: true,
         githubUserId: 12345678,
@@ -59,7 +66,7 @@ function createReply() {
   });
   const reply = createReply();
 
-  const result = await controller.completeGithubOAuthCallback({}, reply);
+  const result = await controller.completeGithubOAuthCallback({}, undefined, reply);
 
   assert.deepEqual(result, {
     success: true,
@@ -77,12 +84,16 @@ function createReply() {
 
 {
   const controller = new GithubIntegrationController({
-    async completeGithubAppInstallationCallback(query) {
+    async completeGithubAppInstallationCallback(query, cookieHeader) {
       assert.deepEqual(query, {
         installation_id: "12345678",
         setup_action: "install",
         state: "installation-state"
       });
+      assert.equal(
+        cookieHeader,
+        "pilo_github_app_installation_state=binding-token"
+      );
       return {
         workspaceId: "11111111-1111-4111-8111-111111111111",
         installationId: "33333333-3333-4333-8333-333333333333",
@@ -109,6 +120,7 @@ function createReply() {
       setup_action: "install",
       state: "installation-state"
     },
+    "pilo_github_app_installation_state=binding-token",
     reply
   );
 

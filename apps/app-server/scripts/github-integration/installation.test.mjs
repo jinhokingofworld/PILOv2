@@ -11,20 +11,35 @@ const { GithubOAuthClient } = require("../../dist/modules/github-integration/git
 const { GithubTokenEncryptionService } = require("../../dist/modules/github-integration/github-token-encryption.service.js");
 
 class FakeDatabase {
-  constructor({ oneRows = [], rows = [] } = {}) {
+  constructor({ oneRows = [], rows = [], handlers = {} } = {}) {
     this.oneRows = [...oneRows];
     this.rows = [...rows];
+    this.handlers = handlers;
     this.queries = [];
   }
 
   async queryOne(text, values = []) {
     this.queries.push({ method: "queryOne", text, values });
+    if (this.handlers.queryOne) {
+      const handled = await this.handlers.queryOne(text, values);
+      if (handled !== undefined) {
+        return handled;
+      }
+    }
     return this.oneRows.shift() ?? null;
   }
 
   async query(text, values = []) {
     this.queries.push({ method: "query", text, values });
     return this.rows.shift() ?? [];
+  }
+
+  async execute(text, values = []) {
+    this.queries.push({ method: "execute", text, values });
+    if (this.handlers.execute) {
+      return this.handlers.execute(text, values);
+    }
+    return undefined;
   }
 }
 
@@ -127,6 +142,13 @@ function createService({
     "https://github.com/apps/pilo-github-app/installations/new"
   );
   assert.equal(installUrl.searchParams.get("state"), start.state);
+  assert.match(start.stateCookie, /pilo_github_app_installation_state=/);
+  assert.match(start.stateCookie, /HttpOnly/);
+  assert.match(start.stateCookie, /SameSite=Lax/);
+  assert.match(
+    database.queries.at(-1).text,
+    /INSERT INTO github_callback_states/i
+  );
 
   const statePayload = new GithubAppInstallationStateService().verifyState(
     start.state,
@@ -220,29 +242,49 @@ function createService({
     },
     baseConfig
   );
+  const statePayload = stateService.verifyState(state, baseConfig);
   const installedAt = new Date("2026-07-04T12:30:00.000Z");
   const suspendedAt = new Date("2026-07-04T12:45:00.000Z");
   const database = new FakeDatabase({
-    oneRows: [
-      connectedGithubOAuthRow,
-      {
-        id: "33333333-3333-4333-8333-333333333333",
-        workspace_id: workspaceId,
-        github_installation_id: "12345678",
-        account_login: "my-team",
-        account_type: "Organization",
-        repository_selection: "selected",
-        permissions: {
-          metadata: "read",
-          contents: "read",
-          issues: "read"
-        },
-        installed_by_user_id: currentUserId,
-        installed_at: installedAt,
-        suspended_at: suspendedAt,
-        last_synced_at: null
+    handlers: {
+      queryOne(text) {
+        if (/UPDATE github_callback_states/i.test(text)) {
+          return {
+            user_id: currentUserId,
+            workspace_id: workspaceId,
+            return_url:
+              "https://pilo.test/workspaces/11111111-1111-4111-8111-111111111111/github",
+            expires_at: new Date(statePayload.expiresAt)
+          };
+        }
+
+        if (/SELECT[\s\S]*github_access_token_encrypted[\s\S]*FROM users/i.test(text)) {
+          return connectedGithubOAuthRow;
+        }
+
+        if (/INSERT INTO github_installations/i.test(text)) {
+          return {
+            id: "33333333-3333-4333-8333-333333333333",
+            workspace_id: workspaceId,
+            github_installation_id: "12345678",
+            account_login: "my-team",
+            account_type: "Organization",
+            repository_selection: "selected",
+            permissions: {
+              metadata: "read",
+              contents: "read",
+              issues: "read"
+            },
+            installed_by_user_id: currentUserId,
+            installed_at: installedAt,
+            suspended_at: suspendedAt,
+            last_synced_at: null
+          };
+        }
+
+        return undefined;
       }
-    ]
+    }
   });
   const githubOAuthClient = {
     async hasUserInstallationAccess(input) {
@@ -279,7 +321,7 @@ function createService({
     installation_id: "12345678",
     setup_action: "install",
     state
-  });
+  }, "pilo_github_app_installation_state=installation-binding-token");
 
   assert.deepEqual(callback, {
     workspaceId,
@@ -331,8 +373,165 @@ function createService({
     },
     baseConfig
   );
+  let stateConsumeCount = 0;
   const database = new FakeDatabase({
-    oneRows: [connectedGithubOAuthRow]
+    handlers: {
+      queryOne(text) {
+        if (/UPDATE github_callback_states/i.test(text)) {
+          stateConsumeCount += 1;
+          if (stateConsumeCount > 1) {
+            return null;
+          }
+
+          return {
+            user_id: currentUserId,
+            workspace_id: workspaceId,
+            return_url: null,
+            expires_at: fixedNow
+          };
+        }
+
+        if (/SELECT[\s\S]*github_access_token_encrypted[\s\S]*FROM users/i.test(text)) {
+          return connectedGithubOAuthRow;
+        }
+
+        if (/INSERT INTO github_installations/i.test(text)) {
+          return {
+            id: "33333333-3333-4333-8333-333333333333",
+            workspace_id: workspaceId,
+            github_installation_id: "12345678",
+            account_login: "my-team",
+            account_type: "Organization",
+            repository_selection: "selected",
+            permissions: {
+              metadata: "read"
+            },
+            installed_by_user_id: currentUserId,
+            installed_at: null,
+            suspended_at: null,
+            last_synced_at: null
+          };
+        }
+
+        return undefined;
+      }
+    }
+  });
+  const service = createService({
+    database,
+    githubOAuthClient: {
+      async hasUserInstallationAccess() {
+        return true;
+      }
+    },
+    githubAppClient: {
+      async getInstallation() {
+        return {
+          githubInstallationId: 12345678,
+          accountLogin: "my-team",
+          accountType: "Organization",
+          repositorySelection: "selected",
+          permissions: {
+            metadata: "read"
+          },
+          installedAt: null,
+          suspendedAt: null
+        };
+      }
+    }
+  });
+
+  await service.completeGithubAppInstallationCallback(
+    {
+      installation_id: "12345678",
+      setup_action: "install",
+      state
+    },
+    "pilo_github_app_installation_state=installation-binding-token"
+  );
+
+  await assert.rejects(
+    () =>
+      service.completeGithubAppInstallationCallback(
+        {
+          installation_id: "12345678",
+          setup_action: "install",
+          state
+        },
+        "pilo_github_app_installation_state=installation-binding-token"
+      ),
+    (error) =>
+      error?.response?.error?.message === "Invalid GitHub App installation state"
+  );
+}
+
+{
+  const stateService = new GithubAppInstallationStateService();
+  const state = stateService.createState(
+    {
+      userId: currentUserId,
+      workspaceId,
+      returnUrl: null
+    },
+    baseConfig
+  );
+  let installationAccessChecked = false;
+  const service = createService({
+    database: new FakeDatabase(),
+    githubOAuthClient: {
+      async hasUserInstallationAccess() {
+        installationAccessChecked = true;
+        throw new Error("installation lookup should not run without a state cookie");
+      }
+    }
+  });
+
+  await assert.rejects(
+    () =>
+      service.completeGithubAppInstallationCallback(
+        {
+          installation_id: "12345678",
+          setup_action: "install",
+          state
+        },
+        null
+      ),
+    (error) =>
+      error?.response?.error?.message === "Invalid GitHub App installation state"
+  );
+  assert.equal(installationAccessChecked, false);
+}
+
+{
+  const stateService = new GithubAppInstallationStateService();
+  const state = stateService.createState(
+    {
+      userId: currentUserId,
+      workspaceId,
+      returnUrl: null
+    },
+    baseConfig
+  );
+  const statePayload = stateService.verifyState(state, baseConfig);
+  const database = new FakeDatabase({
+    handlers: {
+      queryOne(text) {
+        if (/UPDATE github_callback_states/i.test(text)) {
+          return {
+            user_id: currentUserId,
+            workspace_id: workspaceId,
+            return_url: null,
+            expires_at: new Date(statePayload.expiresAt)
+          };
+        }
+
+        if (/SELECT[\s\S]*github_access_token_encrypted[\s\S]*FROM users/i.test(text)) {
+          return connectedGithubOAuthRow;
+        }
+
+        return undefined;
+      }
+    }
   });
   let appLookupCalled = false;
   const service = createService({
@@ -358,7 +557,7 @@ function createService({
         installation_id: "12345678",
         setup_action: "install",
         state
-      }),
+      }, "pilo_github_app_installation_state=installation-binding-token"),
     (error) =>
       error?.response?.error?.message ===
       "GitHub App installation is not accessible to the connected GitHub user"

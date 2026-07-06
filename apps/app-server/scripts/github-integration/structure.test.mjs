@@ -24,6 +24,10 @@ const featureServices = [
     className: "GithubAppInstallationService"
   },
   {
+    fileName: "github-callback-state.service.ts",
+    className: "GithubCallbackStateService"
+  },
+  {
     fileName: "github-source-read.service.ts",
     className: "GithubSourceReadService"
   },
@@ -74,7 +78,7 @@ const delegatedMethods = [
   {
     methodName: "completeGithubOAuthCallback",
     serviceName: "githubOAuthIntegrationService",
-    args: "query"
+    args: "query, cookieHeader"
   },
   {
     methodName: "disconnectGithubOAuth",
@@ -89,7 +93,7 @@ const delegatedMethods = [
   {
     methodName: "completeGithubAppInstallationCallback",
     serviceName: "githubAppInstallationService",
-    args: "query"
+    args: "query, cookieHeader"
   },
   {
     methodName: "listGithubAppInstallations",
