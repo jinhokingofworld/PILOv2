@@ -356,6 +356,11 @@ export function PrReviewPanel() {
         <PrReviewCanvasShell
           apiClient={apiClient}
           onBackToSelection={() => setActiveReviewSession(null)}
+          onGoToGithub={goToGithubPage}
+          onReviewSessionCreated={(session) => {
+            setActiveReviewSession(session);
+            setActiveReviewPullRequest(null);
+          }}
           pullRequest={activeReviewPullRequest}
           session={activeReviewSession}
           workspaceId={workspaceId}
