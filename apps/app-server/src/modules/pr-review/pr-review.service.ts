@@ -10,6 +10,11 @@ import {
   parseUnifiedDiffPatch,
   type PrReviewDiffRowPayload
 } from "./pr-review-diff-parser";
+import {
+  PrReviewAnalysisService,
+  type PrReviewAnalysisResult,
+  type ReviewFileMetadata
+} from "./pr-review-analysis.service";
 import { PrReviewGithubDependencyService } from "./pr-review-github-dependency.service";
 import type {
   PrReviewConflictStatus,
@@ -163,22 +168,6 @@ interface PrReviewFileDecisionDraft {
 interface ReviewProgressRow extends QueryResultRow {
   reviewed_count: number | string;
   total_file_count: number | string;
-}
-
-interface PrReviewAnalysis {
-  prPurpose: string;
-  changeSummary: string[];
-  recommendedReviewOrder: string;
-  cautionPoints: string[];
-  flowTitle: string;
-  flowDescription: string;
-}
-
-interface ReviewFileMetadata {
-  fileRole: string;
-  changeReason: string;
-  changeSummary: string;
-  reviewPoints: string[];
 }
 
 export interface PrReviewSessionPayload {
@@ -421,7 +410,8 @@ export class PrReviewService {
   constructor(
     private readonly database: DatabaseService,
     private readonly workspaceService: WorkspaceService,
-    private readonly githubDependency: PrReviewGithubDependencyService
+    private readonly githubDependency: PrReviewGithubDependencyService,
+    private readonly analysisService: PrReviewAnalysisService
   ) {}
 
   getModuleInfo(): PrReviewModuleInfo {
@@ -468,7 +458,7 @@ export class PrReviewService {
           pullRequestId
         )
       ]);
-      const analysis = this.analyzePullRequest(detail, files);
+      const analysis = await this.analysisService.analyzePullRequest(detail, files);
 
       return this.database.transaction(async (transaction) => {
         const session = await this.insertReviewSession(transaction, {
@@ -1380,7 +1370,7 @@ export class PrReviewService {
       files: PrReviewGithubChangedFile[];
       conflictStatus: PrReviewConflictStatus;
       conflictCheckedAt: string | null;
-      analysis: PrReviewAnalysis;
+      analysis: PrReviewAnalysisResult;
     }
   ): Promise<PrReviewSessionRow> {
     const session = await transaction.queryOne<PrReviewSessionRow>(
@@ -1455,7 +1445,7 @@ export class PrReviewService {
     transaction: DatabaseTransaction,
     sessionId: string,
     files: PrReviewGithubChangedFile[],
-    analysis: PrReviewAnalysis
+    analysis: PrReviewAnalysisResult
   ): Promise<void> {
     const flow = await transaction.queryOne<ReviewFlowRow>(
       `
@@ -1476,7 +1466,7 @@ export class PrReviewService {
     }
 
     for (const [index, file] of files.entries()) {
-      const metadata = this.buildFileMetadata(file, index);
+      const metadata = analysis.files[index];
       const reviewFile = await this.insertReviewFile(
         transaction,
         sessionId,
@@ -1624,89 +1614,6 @@ export class PrReviewService {
         return "Binary 파일은 PILO diff에서 미리보기하지 않습니다. GitHub에서 확인해주세요.";
       case "large":
         return "큰 diff 또는 patch가 누락된 파일은 PILO diff에서 미리보기하지 않습니다. GitHub에서 확인해주세요.";
-    }
-  }
-
-  private analyzePullRequest(
-    detail: PrReviewGithubPullRequestDetail,
-    files: PrReviewGithubChangedFile[]
-  ): PrReviewAnalysis {
-    const totalAdditions = files.reduce((sum, file) => sum + file.additions, 0);
-    const totalDeletions = files.reduce((sum, file) => sum + file.deletions, 0);
-    const binaryCount = files.filter((file) => file.isBinary).length;
-    const largeDiffCount = files.filter((file) => file.isLargeDiff).length;
-    const cautionPoints = [
-      ...(binaryCount > 0 ? [`Binary file ${binaryCount}개는 GitHub에서 확인한다.`] : []),
-      ...(largeDiffCount > 0
-        ? [`Large diff file ${largeDiffCount}개는 요약과 GitHub 원문을 함께 확인한다.`]
-        : []),
-      "제출 전 PR head SHA가 변경되지 않았는지 확인한다."
-    ];
-
-    return {
-      prPurpose: `#${detail.prNumber} ${detail.title}`,
-      changeSummary: [
-        `${files.length}개 파일 변경`,
-        `추가 ${totalAdditions}줄, 삭제 ${totalDeletions}줄`,
-        `base ${detail.baseBranch ?? "unknown"} -> head ${detail.headBranch ?? "unknown"}`
-      ],
-      recommendedReviewOrder:
-        files.length > 0
-          ? "표시된 workflow order 순서대로 변경 범위가 큰 파일부터 확인한다."
-          : "변경 파일이 없어 리뷰할 파일이 없다.",
-      cautionPoints,
-      flowTitle: "PR 변경 파일 리뷰",
-      flowDescription:
-        "PR Review MVP에서 생성한 기본 workflow다. 파일 metadata와 변경 규모를 기준으로 순서를 제공한다."
-    };
-  }
-
-  private buildFileMetadata(
-    file: PrReviewGithubChangedFile,
-    index: number
-  ): ReviewFileMetadata {
-    return {
-      fileRole: this.describeFileRole(file.filePath),
-      changeReason: `${this.describeFileStatus(file.fileStatus)} 파일이다.`,
-      changeSummary: `${file.additions}줄 추가, ${file.deletions}줄 삭제`,
-      reviewPoints: [
-        `Workflow order ${index + 1}번으로 확인한다.`,
-        "변경 의도와 주변 호출부 영향이 일치하는지 확인한다.",
-        "리뷰 판단을 approved, discussion_needed, unknown 중 하나로 남긴다."
-      ]
-    };
-  }
-
-  private describeFileRole(filePath: string): string {
-    if (filePath.endsWith(".md")) {
-      return "문서";
-    }
-
-    if (filePath.includes("/test") || filePath.includes(".test.")) {
-      return "테스트";
-    }
-
-    if (filePath.includes("/src/app") || filePath.includes("/src/features")) {
-      return "프론트엔드";
-    }
-
-    if (filePath.includes("/src/modules") || filePath.includes("app-server")) {
-      return "백엔드";
-    }
-
-    return "일반 변경 파일";
-  }
-
-  private describeFileStatus(status: PrReviewFileStatus): string {
-    switch (status) {
-      case "added":
-        return "추가된";
-      case "deleted":
-        return "삭제된";
-      case "renamed":
-        return "이름이 변경된";
-      case "modified":
-        return "수정된";
     }
   }
 
