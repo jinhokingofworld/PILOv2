@@ -2,7 +2,7 @@
 
 import { useEditor, type Editor, type TLShape } from "tldraw";
 import { useValue } from "@tldraw/state-react";
-import { isPiloSnapShape, type PiloSnapShape } from "./PiloCanvasShapeGuards";
+import { isPiloSnapShape, type PiloSnapShape } from "../shapes/PiloCanvasShapeGuards";
 
 const PILO_SMART_GUIDE_SCREEN_THRESHOLD = 7;
 const PILO_SMART_GUIDE_PADDING = 56;

@@ -49,7 +49,7 @@ const appSidebar = await readFile(
 );
 const canvasRuntime = await readFile(
   new URL(
-    "../src/features/canvas/components/engine/PiloCanvasRuntime.tsx",
+    "../src/features/canvas/components/engine/runtime/PiloCanvasRuntime.tsx",
     import.meta.url
   ),
   "utf8"
@@ -60,6 +60,70 @@ const canvasWorkspace = await readFile(
 );
 const canvasShapeSync = await readFile(
   new URL("../src/features/canvas/utils/canvas-shape-sync.ts", import.meta.url),
+  "utf8"
+);
+const tldrawSurface = await readFile(
+  new URL("../src/shared/tldraw/TldrawSurface.tsx", import.meta.url),
+  "utf8"
+);
+const piloTldrawCanvas = await readFile(
+  new URL(
+    "../src/features/canvas/components/engine/surface/PiloTldrawCanvas.tsx",
+    import.meta.url
+  ),
+  "utf8"
+);
+const piloCanvasStateReporter = await readFile(
+  new URL(
+    "../src/features/canvas/components/engine/surface/pilo-canvas-state-reporter.tsx",
+    import.meta.url
+  ),
+  "utf8"
+);
+const piloCanvasTypes = await readFile(
+  new URL("../src/features/canvas/components/engine/types.ts", import.meta.url),
+  "utf8"
+);
+const piloCanvasAssets = await readFile(
+  new URL(
+    "../src/features/canvas/components/engine/assets/pilo-canvas-assets.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
+const piloCanvasShapeFactory = await readFile(
+  new URL(
+    "../src/features/canvas/components/engine/shapes/pilo-canvas-shape-factory.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
+const piloCanvasShapeUtils = await readFile(
+  new URL(
+    "../src/features/canvas/components/engine/shapes/pilo-canvas-shape-utils.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
+const piloFrameShapeUtil = await readFile(
+  new URL(
+    "../src/features/canvas/components/engine/shapes/frame/PiloFrameShapeUtil.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
+const piloFrameSelectionToolbar = await readFile(
+  new URL(
+    "../src/features/canvas/components/engine/shapes/frame/PiloFrameSelectionToolbar.tsx",
+    import.meta.url
+  ),
+  "utf8"
+);
+const piloCanvasPlacement = await readFile(
+  new URL(
+    "../src/features/canvas/components/engine/interactions/pilo-canvas-placement.ts",
+    import.meta.url
+  ),
   "utf8"
 );
 const routePages = await Promise.all(
@@ -160,6 +224,36 @@ assert.match(canvasShapeSync, /shapeType: typeof shape.type === "string" \? shap
 assert.match(canvasShapeSync, /x: readFiniteNumber\(shape.x, 0\)/);
 assert.match(canvasShapeSync, /y: readFiniteNumber\(shape.y, 0\)/);
 assert.match(canvasShapeSync, /rawShape: cloneRawShape\(shape\)/);
+assert.match(tldrawSurface, /export function TldrawSurface/);
+assert.match(tldrawSurface, /shapeUtils=\{shapeUtils\}/);
+assert.match(tldrawSurface, /onMount=\{onMount\}/);
+assert.doesNotMatch(tldrawSurface, /createCanvasShapeSyncQueue/);
+assert.doesNotMatch(tldrawSurface, /writeCanvasStorage/);
+assert.match(piloTldrawCanvas, /TldrawSurface/);
+assert.match(piloTldrawCanvas, /piloCanvasShapeUtils/);
+assert.match(piloTldrawCanvas, /CanvasStateReporter/);
+assert.match(piloTldrawCanvas, /placePiloCanvasShapeAt/);
+assert.doesNotMatch(piloTldrawCanvas, /createCanvasShapeSyncQueue/);
+assert.doesNotMatch(piloTldrawCanvas, /writeCanvasStorage\(/);
+assert.match(piloCanvasStateReporter, /onFreeformShapesChange/);
+assert.match(piloCanvasStateReporter, /onViewChange/);
+assert.match(piloCanvasTypes, /export type PiloCanvasFreeformShape/);
+assert.match(piloCanvasTypes, /export type PiloCanvasViewSetting/);
+assert.doesNotMatch(piloCanvasAssets, /surface\/pilo-canvas-state-reporter/);
+assert.match(piloCanvasShapeFactory, /createStickyNoteShape/);
+assert.match(piloCanvasShapeFactory, /createCodeBlockShape/);
+assert.match(piloCanvasShapeFactory, /createInsertableShape/);
+assert.doesNotMatch(
+  piloCanvasShapeFactory,
+  /surface\/pilo-canvas-state-reporter/
+);
+assert.match(piloCanvasShapeUtils, /frame\/PiloFrameShapeUtil/);
+assert.doesNotMatch(piloCanvasShapeUtils, /frame\/PiloFrameSelectionToolbar/);
+assert.match(piloFrameShapeUtil, /FrameShapeUtil\.configure/);
+assert.match(piloFrameShapeUtil, /resolveNextFrameName/);
+assert.doesNotMatch(piloFrameSelectionToolbar, /FrameShapeUtil\.configure/);
+assert.match(piloCanvasPlacement, /PiloPlacementRequest/);
+assert.match(piloCanvasPlacement, /placePiloCanvasShapeAt/);
 assert.match(routes, /as default/);
 assert.doesNotMatch(routes, /MainShell/);
 assert.match(pages, /MainShell/);
