@@ -299,6 +299,23 @@ export interface GithubPullRequestConflictStatusPayload {
   message: string;
 }
 
+export type GithubPullRequestReviewSubmitType =
+  | "COMMENT"
+  | "APPROVE"
+  | "REQUEST_CHANGES";
+
+export interface SubmitGithubPullRequestReviewInput {
+  submitType: GithubPullRequestReviewSubmitType;
+  reviewBody: string;
+}
+
+export interface GithubPullRequestReviewSubmissionPayload {
+  submittedByGithubLogin: string;
+  githubReviewId: string | null;
+  githubReviewUrl: string | null;
+  submittedAt: string;
+}
+
 export type GithubSyncTarget =
   | "repositories"
   | "issues"

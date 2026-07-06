@@ -474,6 +474,8 @@ Decision history response:
 서버 규칙:
 
 - 사용자의 GitHub App user OAuth 연결 여부를 확인한다.
+- GitHub OAuth token 복호화와 GitHub Review body 제출은 GitHub Integration의
+  서버 내부 dependency를 통해 수행하며, PR Review API 응답에는 token 값을 노출하지 않는다.
 - 현재 PR head SHA를 다시 조회해 session `headSha`와 비교한다.
 - GitHub Review body만 제출한다.
 - Line comment payload는 보내지 않는다.

@@ -13,6 +13,7 @@ import { GithubOAuthIntegrationService } from "./github-oauth-integration.servic
 import { GithubOAuthStateService } from "./github-oauth-state.service";
 import { GithubProjectV2Service } from "./github-project-v2.service";
 import { GithubPullRequestRemoteService } from "./github-pull-request-remote.service";
+import { GithubReviewSubmissionService } from "./github-review-submission.service";
 import { GithubSourceReadService } from "./github-source-read.service";
 import { GithubSyncExecutorService } from "./github-sync-executor.service";
 import { GithubSyncRunService } from "./github-sync-run.service";
@@ -24,21 +25,22 @@ import { GithubWebhookService } from "./github-webhook.service";
   controllers: [GithubIntegrationController],
   providers: [
     GithubIntegrationService,
-      GithubIntegrationConfigService,
-      GithubAppClient,
-      GithubAppInstallationService,
-      GithubAppInstallationStateService,
-      GithubOAuthClient,
-      GithubOAuthIntegrationService,
-      GithubOAuthStateService,
-      GithubProjectV2Service,
-      GithubPullRequestRemoteService,
-      GithubSourceReadService,
-      GithubSyncExecutorService,
-      GithubSyncRunService,
-      GithubTokenEncryptionService,
-      GithubWebhookService
-    ],
+    GithubIntegrationConfigService,
+    GithubAppClient,
+    GithubAppInstallationService,
+    GithubAppInstallationStateService,
+    GithubOAuthClient,
+    GithubOAuthIntegrationService,
+    GithubOAuthStateService,
+    GithubProjectV2Service,
+    GithubPullRequestRemoteService,
+    GithubReviewSubmissionService,
+    GithubSourceReadService,
+    GithubSyncExecutorService,
+    GithubSyncRunService,
+    GithubTokenEncryptionService,
+    GithubWebhookService
+  ],
   exports: [GithubIntegrationService]
 })
 export class GithubIntegrationModule {}

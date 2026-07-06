@@ -44,6 +44,12 @@ PR 리뷰 세션, 파일별 리뷰 판단, Kanban board cache hydrate, GitHub is
 
 GitHub token은 복호화된 상태로 응답하거나 로그에 남기지 않는다.
 
+GitHub Review 제출은 GitHub Integration 공개 API endpoint가 아니다. PR Review API가
+제출 workflow와 local submission history를 소유하고, GitHub Integration은 PR Review가
+호출하는 서버 내부 dependency로 현재 사용자의 OAuth token 복호화 경계와 body-only
+GitHub Review 제출 adapter만 제공한다. 이 adapter는 `event`, `body`만 GitHub로 보내며
+inline `comments` payload는 보내지 않는다.
+
 GitHub App installation 검증은 GitHub의 `/user/installations` endpoint를
 호출한다. 저장된 사용자 token은 GitHub App client id/secret으로 발급받은
 GitHub App user access token이어야 하며, `repo`/`read:user` scope가 있는

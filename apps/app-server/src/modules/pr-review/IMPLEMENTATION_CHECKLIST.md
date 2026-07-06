@@ -51,8 +51,8 @@
 - [x] GitHub Integration을 통해 file metadata와 GitHub patch text를 포함한 변경 파일을
   읽을 수 있게 한다.
 - [x] GitHub Integration을 통해 conflict 상태를 읽을 수 있게 한다.
-- [ ] 제출 전에 현재 사용자의 GitHub OAuth 연결 상태를 확인할 수 있게 한다.
-- [ ] GitHub token, raw secret이 API 응답이나 로그에 노출되지 않게 한다.
+- [x] 제출 전에 현재 사용자의 GitHub OAuth 연결 상태를 확인할 수 있게 한다.
+- [x] GitHub token, raw secret이 API 응답이나 로그에 노출되지 않게 한다.
 
 ## 2. Backend Module Skeleton
 
@@ -142,12 +142,13 @@
 
 - [ ] `POST /workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}/submissions`를
   구현한다.
-- [ ] `submitType`은 `COMMENT`, `APPROVE`, `REQUEST_CHANGES`만 허용한다.
-- [ ] `reviewBody`가 비어 있지 않은지 검증한다.
-- [ ] 현재 사용자의 GitHub OAuth 연결 상태를 확인한다.
+- [x] #124 내부 dependency에서 `submitType`은 `COMMENT`, `APPROVE`,
+  `REQUEST_CHANGES`만 허용한다.
+- [x] #124 내부 dependency에서 `reviewBody`가 비어 있지 않은지 검증한다.
+- [x] #124 내부 dependency에서 현재 사용자의 GitHub OAuth 연결 상태를 확인한다.
 - [ ] 현재 PR의 `headSha`를 다시 조회하고 session의 `headSha`와 다르면 제출을 막는다.
-- [ ] 현재 사용자의 OAuth token으로 GitHub Review를 제출한다.
-- [ ] review body만 보낸다. line comment는 보내지 않는다.
+- [x] #124 내부 dependency에서 현재 사용자의 OAuth token으로 GitHub Review를 제출한다.
+- [x] #124 내부 dependency에서 review body만 보낸다. line comment는 보내지 않는다.
 - [ ] 모든 제출 시도를 `review_submissions`에 저장한다.
 - [ ] submitted/failed status와 sanitize된 error message를 저장한다.
 - [ ] 제출 성공 후 session status를 `submitted`로 바꾼다.
@@ -228,7 +229,8 @@
 - [ ] session 삭제 cascade는 DB integration/fixture 환경이 준비되면 검증한다.
 - [x] diff parsing에 대한 focused backend test를 추가한다.
 - [ ] file review decision update에 대한 focused backend test를 추가한다.
-- [ ] OAuth missing과 stale head submission guard에 대한 focused backend test를 추가한다.
+- [x] OAuth missing에 대한 focused backend test를 추가한다.
+- [ ] stale head submission guard에 대한 focused backend test를 추가한다.
 - [ ] submission success/failure persistence에 대한 focused backend test를 추가한다.
 - [ ] navigation과 PR Review screen state에 대한 frontend test를 추가한다.
 - [x] backend 변경 후 `apps/app-server`에서 `npm run lint`, `npm run test`,
