@@ -297,8 +297,15 @@ DELETE /api/v1/workspaces/{workspaceId}/meetings/{meetingId}/participants/me
 
 Request body 없음.
 
-현재 사용자만 회의에서 나간다. 마지막 active participant가 나가면 회의가 자동
-종료될 수 있다. 이미 나간 상태에서 다시 호출해도 같은 결과를 반환한다.
+현재 사용자만 회의에서 나간다. `RUNNING` Recording이 있어도 모든 active
+participant는 나갈 수 있다. 단, 마지막 active participant가 나가는 시점에
+`RUNNING` Recording이 있으면 서버는 먼저 녹음을 정상 종료하고 MeetingReport 생성
+trigger를 수행한 뒤 participant를 나가게 하고 회의를 자동 종료한다. 녹음 종료가
+정상 완료되지 않으면 나가기 요청은 실패하고 participant는 active 상태로 남는다.
+MeetingReport job enqueue가 실패하면 요청은 실패하고 participant와 meeting 종료
+상태는 보정되며, 생성된 MeetingReport는 `FAILED` 상태로 남아 재생성 요청 대상이
+된다.
+이미 나간 상태에서 다시 호출해도 같은 결과를 반환한다.
 
 Response `data`:
 
@@ -307,9 +314,9 @@ Response `data`:
 | `participant` | Participant | 현재 사용자 참여 정보 |
 | `meetingEnded` | boolean | 마지막 참여자 나가기라서 회의 세션이 자동 종료됐는지 여부 |
 | `meeting` | Meeting | 회의 정보 |
-| `currentRecording` | Recording \| null | 진행 중 녹음. 자동 종료로 녹음도 종료됐으면 `null` |
+| `currentRecording` | Recording \| null | 진행 중 녹음. 마지막 참여자 나가기 중 녹음이 정상 종료됐으면 `null` |
 
-주요 오류: `401`, `403`, `404`
+주요 오류: `400`, `401`, `403`, `404`
 
 ### 녹음 시작
 
