@@ -15,7 +15,13 @@ import {
   Users,
   X
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore
+} from "react";
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -28,12 +34,17 @@ import {
 } from "@/components/ui/tooltip";
 import { useAuthSession } from "@/features/auth";
 import { MeetingApiError } from "@/features/meeting/api/client";
+import {
+  MeetingReportSection,
+  type MeetingReportStatusFilter
+} from "@/features/meeting/components/meeting-report-section";
 import { useLiveKitMeetingRoom } from "@/features/meeting/hooks/use-livekit-meeting-room";
 import type { LiveKitMeetingRoomStatus } from "@/features/meeting/hooks/use-livekit-meeting-room";
 import { useMeetingWorkspaceData } from "@/features/meeting/hooks/use-meeting-workspace-data";
 import { meetingNavigation } from "@/features/meeting/navigation";
 import type {
   MeetingParticipant,
+  MeetingReportListQuery,
   RecordingStatus
 } from "@/features/meeting/types";
 import { cn } from "@/lib/utils";
@@ -45,6 +56,7 @@ type ActionStatus =
   | "leaving"
   | "starting-recording"
   | "ending-recording";
+type MeetingSection = "room" | "report";
 
 const MEETING_STATUS_POLL_INTERVAL_MS = 5000;
 const RECORDING_CONSENT_STORAGE_KEY = "recordingConsentAccepted";
@@ -57,6 +69,59 @@ const LEAVE_FAILED_MESSAGE =
 
 function getInitial(name: string | null | undefined) {
   return (name?.trim().slice(0, 1) || "?").toUpperCase();
+}
+
+function getMeetingSectionFromHash(hash: string): MeetingSection {
+  return hash === "#report" ? "report" : "room";
+}
+
+function getMeetingSectionSnapshot(): MeetingSection {
+  if (typeof window === "undefined") {
+    return "room";
+  }
+
+  return getMeetingSectionFromHash(window.location.hash);
+}
+
+function getMeetingSectionServerSnapshot(): MeetingSection {
+  return "room";
+}
+
+function subscribeToMeetingSection(onStoreChange: () => void) {
+  const frameIds: number[] = [];
+  const timeoutIds: number[] = [];
+
+  function scheduleSectionSync(delayMs = 50) {
+    const timeoutId = window.setTimeout(() => {
+      const frameId = window.requestAnimationFrame(onStoreChange);
+      frameIds.push(frameId);
+    }, delayMs);
+
+    timeoutIds.push(timeoutId);
+  }
+
+  function syncSectionAfterNavigationClick() {
+    scheduleSectionSync(50);
+    scheduleSectionSync(150);
+    scheduleSectionSync(300);
+  }
+
+  function syncSectionAfterNavigationChange() {
+    scheduleSectionSync();
+  }
+
+  scheduleSectionSync();
+  window.addEventListener("click", syncSectionAfterNavigationClick, true);
+  window.addEventListener("hashchange", syncSectionAfterNavigationChange);
+  window.addEventListener("popstate", syncSectionAfterNavigationChange);
+
+  return () => {
+    timeoutIds.forEach((timeoutId) => window.clearTimeout(timeoutId));
+    frameIds.forEach((frameId) => window.cancelAnimationFrame(frameId));
+    window.removeEventListener("click", syncSectionAfterNavigationClick, true);
+    window.removeEventListener("hashchange", syncSectionAfterNavigationChange);
+    window.removeEventListener("popstate", syncSectionAfterNavigationChange);
+  };
 }
 
 function getParticipantName(participant: MeetingParticipant) {
@@ -259,10 +324,25 @@ export function MeetingPanel() {
   const workspaceId = authSession?.activeWorkspaceId ?? "";
   const accessToken = authSession?.accessToken.trim() ?? "";
   const currentUserId = authSession?.user.id ?? "";
+  const activeSection = useSyncExternalStore(
+    subscribeToMeetingSection,
+    getMeetingSectionSnapshot,
+    getMeetingSectionServerSnapshot
+  );
+  const [reportStatusFilter, setReportStatusFilter] =
+    useState<MeetingReportStatusFilter>("ALL");
+  const reportsQuery = useMemo<MeetingReportListQuery>(
+    () => ({
+      limit: 100,
+      ...(reportStatusFilter === "ALL" ? {} : { status: reportStatusFilter })
+    }),
+    [reportStatusFilter]
+  );
   const meetingData = useMeetingWorkspaceData({
     accessToken,
     enabled: Boolean(workspaceId && accessToken),
-    reportsQuery: { limit: 20 },
+    reportsEnabled: activeSection === "report",
+    reportsQuery,
     workspaceId
   });
   const liveKitRoom = useLiveKitMeetingRoom();
@@ -507,9 +587,13 @@ export function MeetingPanel() {
     setToastMessage(null);
 
     try {
-      await endRecording(meeting.id, currentRecording.id);
+      const result = await endRecording(meeting.id, currentRecording.id);
       await Promise.all([reloadCurrentMeeting(), reloadParticipants(meeting.id)]);
-      setToastMessage("녹음을 종료하고 회의록 생성을 요청했습니다.");
+      setToastMessage(
+        result.report
+          ? "녹음을 종료하고 회의록 생성을 요청했습니다."
+          : "60초 이하 녹음은 회의록이 생성되지 않습니다."
+      );
     } catch (error) {
       const message = getErrorMessage(error);
       setActionError(message);
@@ -581,207 +665,210 @@ export function MeetingPanel() {
           />
         </div>
 
-        <section
-          id="room"
-          className="flex min-h-[calc(100vh-8rem)] flex-col rounded-xl border bg-card"
-        >
-          {isInitialLoading ? (
-            <MeetingPanelSkeleton />
-          ) : (
-            <div className="flex flex-1 flex-col items-center justify-center gap-6 px-4 py-10">
-              <div className="w-full max-w-2xl text-center">
-                <h2 className="text-2xl font-semibold">현재 참여 인원</h2>
-                <p className="mt-2 text-sm text-muted-foreground">
-                  {displayedActiveCount}명 참여 중
-                  {meeting ? ` · 시작 ${formatDateTime(meeting.startedAt)}` : ""}
-                </p>
-              </div>
+        {activeSection === "room" ? (
+          <section
+            id="room"
+            className="flex min-h-[calc(100vh-8rem)] flex-col rounded-xl border bg-card"
+          >
+            {isInitialLoading ? (
+              <MeetingPanelSkeleton />
+            ) : (
+              <div className="flex flex-1 flex-col items-center justify-center gap-6 px-4 py-10">
+                <div className="w-full max-w-2xl text-center">
+                  <h2 className="text-2xl font-semibold">현재 참여 인원</h2>
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    {displayedActiveCount}명 참여 중
+                    {meeting
+                      ? ` · 시작 ${formatDateTime(meeting.startedAt)}`
+                      : ""}
+                  </p>
+                </div>
 
-              <div className="w-full max-w-2xl space-y-3">
-                {participantStatus === "loading" && participants.length === 0 ? (
-                  <>
-                    <Skeleton className="h-16 rounded-lg" />
-                    <Skeleton className="h-16 rounded-lg" />
-                    <Skeleton className="h-16 rounded-lg" />
-                  </>
-                ) : activeParticipants.length > 0 ? (
-                  activeParticipants.map((participant) => {
-                    const isCurrentUser = participant.userId === currentUserId;
-                    const isSpeaking = liveKitRoom.activeSpeakerIdentities.has(
-                      participant.livekitIdentity
-                    );
-                    const hasKnownMicState =
-                      isCurrentUser && liveKitRoom.status === "connected";
-                    const isMicEnabled =
-                      hasKnownMicState && liveKitRoom.isMicrophoneEnabled;
+                <div className="w-full max-w-2xl space-y-3">
+                  {participantStatus === "loading" &&
+                  participants.length === 0 ? (
+                    <>
+                      <Skeleton className="h-16 rounded-lg" />
+                      <Skeleton className="h-16 rounded-lg" />
+                      <Skeleton className="h-16 rounded-lg" />
+                    </>
+                  ) : activeParticipants.length > 0 ? (
+                    activeParticipants.map((participant) => {
+                      const isCurrentUser = participant.userId === currentUserId;
+                      const isSpeaking = liveKitRoom.activeSpeakerIdentities.has(
+                        participant.livekitIdentity
+                      );
+                      const hasKnownMicState =
+                        isCurrentUser && liveKitRoom.status === "connected";
+                      const isMicEnabled =
+                        hasKnownMicState && liveKitRoom.isMicrophoneEnabled;
 
-                    return (
-                      <div
-                        key={participant.id}
-                        className={cn(
-                          "flex min-h-16 items-center gap-4 rounded-lg border bg-background px-4 py-3",
-                          isSpeaking && "border-emerald-300 bg-emerald-50/60"
-                        )}
-                      >
-                        <Avatar>
-                          <AvatarFallback>
-                            {isSpeaking ? (
-                              <CircleUserRound className="size-4 text-emerald-700" />
-                            ) : (
-                              getInitial(participant.user.name)
-                            )}
-                          </AvatarFallback>
-                        </Avatar>
-                        <div className="min-w-0 flex-1">
-                          <div className="flex min-w-0 flex-wrap items-center gap-2">
-                            <p className="truncate text-lg font-semibold">
-                              {getParticipantName(participant)}
-                            </p>
-                            {isCurrentUser && (
-                              <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
-                                내 계정
-                              </span>
-                            )}
-                            {isSpeaking && (
-                              <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">
-                                말하는 중
-                              </span>
-                            )}
+                      return (
+                        <div
+                          key={participant.id}
+                          className={cn(
+                            "flex min-h-16 items-center gap-4 rounded-lg border bg-background px-4 py-3",
+                            isSpeaking && "border-emerald-300 bg-emerald-50/60"
+                          )}
+                        >
+                          <Avatar>
+                            <AvatarFallback>
+                              {isSpeaking ? (
+                                <CircleUserRound className="size-4 text-emerald-700" />
+                              ) : (
+                                getInitial(participant.user.name)
+                              )}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex min-w-0 flex-wrap items-center gap-2">
+                              <p className="truncate text-lg font-semibold">
+                                {getParticipantName(participant)}
+                              </p>
+                              {isCurrentUser && (
+                                <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
+                                  내 계정
+                                </span>
+                              )}
+                              {isSpeaking && (
+                                <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">
+                                  말하는 중
+                                </span>
+                              )}
+                            </div>
                           </div>
+                          <Tooltip>
+                            <TooltipTrigger
+                              aria-label={
+                                isMicEnabled ? "마이크 켜짐" : "마이크 상태 대기"
+                              }
+                              className={cn(
+                                "flex size-9 items-center justify-center rounded-full border",
+                                isMicEnabled
+                                  ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                  : "border-border bg-card text-muted-foreground"
+                              )}
+                            >
+                              {isMicEnabled ? (
+                                <Mic className="size-4" />
+                              ) : (
+                                <MicOff className="size-4" />
+                              )}
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              {isCurrentUser
+                                ? isMicEnabled
+                                  ? "마이크 켜짐"
+                                  : "마이크 상태 대기"
+                                : "원격 마이크 상태는 LiveKit 이벤트 기준으로 표시됩니다."}
+                            </TooltipContent>
+                          </Tooltip>
                         </div>
-                        <Tooltip>
-                          <TooltipTrigger
-                            aria-label={
-                              isMicEnabled ? "마이크 켜짐" : "마이크 상태 대기"
-                            }
-                            className={cn(
-                              "flex size-9 items-center justify-center rounded-full border",
-                              isMicEnabled
-                                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                                : "border-border bg-card text-muted-foreground"
-                            )}
-                          >
-                            {isMicEnabled ? (
-                              <Mic className="size-4" />
-                            ) : (
-                              <MicOff className="size-4" />
-                            )}
-                          </TooltipTrigger>
-                          <TooltipContent>
-                            {isCurrentUser
-                              ? isMicEnabled
-                                ? "마이크 켜짐"
-                                : "마이크 상태 대기"
-                              : "원격 마이크 상태는 LiveKit 이벤트 기준으로 표시됩니다."}
-                          </TooltipContent>
-                        </Tooltip>
-                      </div>
-                    );
-                  })
-                ) : (
-                  <div className="flex min-h-64 flex-col items-center justify-center rounded-lg border border-dashed bg-background p-6 text-center">
-                    <Users className="size-8 text-muted-foreground" />
-                    <p className="mt-3 text-sm font-medium">
-                      현재 참여자가 없습니다.
-                    </p>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      회의 참여 버튼으로 음성 회의에 들어갈 수 있습니다.
-                    </p>
+                      );
+                    })
+                  ) : (
+                    <div className="flex min-h-64 flex-col items-center justify-center rounded-lg border border-dashed bg-background p-6 text-center">
+                      <Users className="size-8 text-muted-foreground" />
+                      <p className="mt-3 text-sm font-medium">
+                        현재 참여자가 없습니다.
+                      </p>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        회의 참여 버튼으로 음성 회의에 들어갈 수 있습니다.
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                {(actionError ||
+                  participantError ||
+                  currentError ||
+                  liveKitRoom.errorMessage) && (
+                  <div className="w-full max-w-2xl rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+                    {actionError ??
+                      participantError ??
+                      currentError?.message ??
+                      liveKitRoom.errorMessage}
                   </div>
                 )}
-              </div>
 
-              {(actionError ||
-                participantError ||
-                currentError ||
-                liveKitRoom.errorMessage) && (
-                <div className="w-full max-w-2xl rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
-                  {actionError ??
-                    participantError ??
-                    currentError?.message ??
-                    liveKitRoom.errorMessage}
-                </div>
-              )}
-
-              <div className="grid w-full max-w-2xl gap-3">
-                <Button
-                  className="h-14 text-base"
-                  disabled={
-                    isActionPending ||
-                    (!shouldLeaveMeeting && liveKitRoom.isConnecting)
-                  }
-                  size="lg"
-                  variant={shouldLeaveMeeting ? "outline" : "default"}
-                  onClick={() => {
-                    if (shouldLeaveMeeting) {
-                      void handleLeaveMeeting();
-                    } else {
-                      handleEntryAction();
+                <div className="grid w-full max-w-2xl gap-3">
+                  <Button
+                    className="h-14 text-base"
+                    disabled={
+                      isActionPending ||
+                      (!shouldLeaveMeeting && liveKitRoom.isConnecting)
                     }
+                    size="lg"
+                    variant={shouldLeaveMeeting ? "outline" : "default"}
+                    onClick={() => {
+                      if (shouldLeaveMeeting) {
+                        void handleLeaveMeeting();
+                      } else {
+                        handleEntryAction();
+                      }
+                    }}
+                  >
+                    <JoinButtonIcon
+                      className={cn(
+                        isActionPending && "animate-spin",
+                        !isActionPending && "size-4"
+                      )}
+                    />
+                    {joinButtonLabel}
+                  </Button>
+
+                  <Button
+                    className="h-14 text-base"
+                    disabled={
+                      !meeting ||
+                      !isCurrentUserActive ||
+                      isActionPending ||
+                      liveKitRoom.isConnecting
+                    }
+                    size="lg"
+                    variant={hasRunningRecording ? "destructive" : "secondary"}
+                    onClick={() => void handleRecordingAction()}
+                  >
+                    {actionStatus === "starting-recording" ||
+                    actionStatus === "ending-recording" ? (
+                      <Loader2 className="animate-spin" />
+                    ) : (
+                      <RecordingButtonIcon />
+                    )}
+                    {hasRunningRecording ? "녹음 종료" : "녹음 시작"}
+                  </Button>
+                </div>
+
+                <Button
+                  aria-label="회의 상태 새로고침"
+                  disabled={isActionPending}
+                  size="icon"
+                  variant="ghost"
+                  onClick={() => {
+                    void reloadCurrentMeeting();
+                    void reloadParticipants(meeting?.id);
                   }}
                 >
-                  <JoinButtonIcon
-                    className={cn(
-                      isActionPending && "animate-spin",
-                      !isActionPending && "size-4"
-                    )}
-                  />
-                  {joinButtonLabel}
-                </Button>
-
-                <Button
-                  className="h-14 text-base"
-                  disabled={
-                    !meeting ||
-                    !isCurrentUserActive ||
-                    isActionPending ||
-                    liveKitRoom.isConnecting
-                  }
-                  size="lg"
-                  variant={hasRunningRecording ? "destructive" : "secondary"}
-                  onClick={() => void handleRecordingAction()}
-                >
-                  {actionStatus === "starting-recording" ||
-                  actionStatus === "ending-recording" ? (
-                    <Loader2 className="animate-spin" />
-                  ) : (
-                    <RecordingButtonIcon />
-                  )}
-                  {hasRunningRecording ? "녹음 종료" : "녹음 시작"}
+                  <RefreshCw />
                 </Button>
               </div>
+            )}
 
-              <Button
-                aria-label="회의 상태 새로고침"
-                disabled={isActionPending}
-                size="icon"
-                variant="ghost"
-                onClick={() => {
-                  void reloadCurrentMeeting();
-                  void reloadParticipants(meeting?.id);
-                }}
-              >
-                <RefreshCw />
-              </Button>
-            </div>
-          )}
-
-          <div
-            ref={liveKitRoom.remoteAudioContainerRef}
-            aria-hidden="true"
-            className="hidden"
+          </section>
+        ) : (
+          <MeetingReportSection
+            meetingData={meetingData}
+            statusFilter={reportStatusFilter}
+            onStatusFilterChange={setReportStatusFilter}
+            onToastMessage={setToastMessage}
           />
-        </section>
+        )}
 
-        <section
-          id="report"
-          className="rounded-xl border border-dashed bg-background p-5"
-        >
-          <h2 className="text-base font-semibold">회의록</h2>
-          <p className="mt-2 text-sm text-muted-foreground">
-            회의록 목록, 상세, 재생성 UI는 #80에서 연결합니다.
-          </p>
-        </section>
+        <div
+          ref={liveKitRoom.remoteAudioContainerRef}
+          aria-hidden="true"
+          className="hidden"
+        />
       </div>
     </TooltipProvider>
   );

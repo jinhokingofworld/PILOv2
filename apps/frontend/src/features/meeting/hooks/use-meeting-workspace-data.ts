@@ -27,6 +27,7 @@ type MeetingWorkspaceReportsState = {
 type UseMeetingWorkspaceDataOptions = {
   accessToken?: string | null;
   enabled?: boolean;
+  reportsEnabled?: boolean;
   reportsQuery?: MeetingReportListQuery;
   workspaceId: string;
 };
@@ -50,6 +51,7 @@ function errorFromUnknown(error: unknown) {
 export function useMeetingWorkspaceData({
   accessToken = null,
   enabled = true,
+  reportsEnabled = true,
   reportsQuery = {},
   workspaceId
 }: UseMeetingWorkspaceDataOptions) {
@@ -89,13 +91,19 @@ export function useMeetingWorkspaceData({
   }, [canLoad, meetingClient, normalizedWorkspaceId]);
 
   const loadReports = useCallback(async () => {
-    if (!canLoad) {
+    if (!canLoad || !reportsEnabled) {
       return emptyReportsState;
     }
 
     const query = JSON.parse(reportsQueryKey) as MeetingReportListQuery;
     return meetingClient.listMeetingReports(normalizedWorkspaceId, query);
-  }, [canLoad, meetingClient, normalizedWorkspaceId, reportsQueryKey]);
+  }, [
+    canLoad,
+    meetingClient,
+    normalizedWorkspaceId,
+    reportsEnabled,
+    reportsQueryKey
+  ]);
 
   const reloadCurrentMeeting = useCallback(async () => {
     if (!canLoad) {
@@ -123,7 +131,7 @@ export function useMeetingWorkspaceData({
   }, [canLoad, loadCurrentMeeting]);
 
   const reloadReports = useCallback(async () => {
-    if (!canLoad) {
+    if (!canLoad || !reportsEnabled) {
       setReportsState(emptyReportsState);
       setReportsStatus("idle");
       setReportsError(null);
@@ -145,7 +153,7 @@ export function useMeetingWorkspaceData({
       setReportsStatus("error");
       return emptyReportsState;
     }
-  }, [canLoad, loadReports]);
+  }, [canLoad, loadReports, reportsEnabled]);
 
   const startMeeting = useCallback(
     async (input: StartMeetingInput = {}) => {
@@ -307,7 +315,7 @@ export function useMeetingWorkspaceData({
     let active = true;
 
     async function load() {
-      if (!canLoad) {
+      if (!canLoad || !reportsEnabled) {
         setReportsState(emptyReportsState);
         setReportsStatus("idle");
         setReportsError(null);
@@ -337,7 +345,7 @@ export function useMeetingWorkspaceData({
     return () => {
       active = false;
     };
-  }, [canLoad, loadReports]);
+  }, [canLoad, loadReports, reportsEnabled]);
 
   return {
     activeParticipantCount: currentState.activeParticipantCount,
