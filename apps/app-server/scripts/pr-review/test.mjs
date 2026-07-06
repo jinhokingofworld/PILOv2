@@ -13,6 +13,9 @@ const prReviewController = await readSource(
 const prReviewGithubDependencyService = await readSource(
   "../../src/modules/pr-review/pr-review-github-dependency.service.ts"
 );
+const prReviewDiffParser = await readSource(
+  "../../src/modules/pr-review/pr-review-diff-parser.ts"
+);
 const prReviewModule = await readSource(
   "../../src/modules/pr-review/pr-review.module.ts"
 );
@@ -56,6 +59,7 @@ assert.match(
 );
 assert.match(prReviewController, /@Get\("review-flows\/:flowId\/files"\)/);
 assert.match(prReviewController, /@Get\("review-files\/:reviewFileId"\)/);
+assert.match(prReviewController, /@Get\("review-files\/:reviewFileId\/diff"\)/);
 assert.match(prReviewController, /@Patch\("review-sessions\/:reviewSessionId"\)/);
 assert.match(prReviewController, /@Delete\("review-sessions\/:reviewSessionId"\)/);
 assert.match(prReviewController, /apiResponse/);
@@ -97,6 +101,10 @@ assert.match(prReviewService, /getReviewSessionCanvas/);
 assert.match(prReviewService, /listReviewFlows/);
 assert.match(prReviewService, /listReviewFlowFiles/);
 assert.match(prReviewService, /getReviewFile/);
+assert.match(prReviewService, /getReviewFileDiff/);
+assert.match(prReviewService, /parseUnifiedDiffPatch/);
+assert.match(prReviewService, /LARGE_DIFF_LINE_THRESHOLD = 1000/);
+assert.match(prReviewService, /LARGE_DIFF_PATCH_BYTES = 200 \* 1024/);
 assert.match(prReviewService, /findReviewSessionSummary/);
 assert.match(prReviewService, /listReviewFlowsForSession/);
 assert.match(prReviewService, /listReviewFlowFilesForSession/);
@@ -107,13 +115,24 @@ assert.match(prReviewService, /file_review_decisions/);
 assert.match(prReviewService, /readyToSubmit/);
 assert.match(prReviewService, /fileNodeData/);
 assert.match(prReviewService, /리뷰 순서/);
+assert.match(prReviewService, /mode: "side_by_side"/);
+assert.match(prReviewService, /mode === "binary"/);
+assert.match(prReviewService, /mode === "large"/);
 assert.doesNotMatch(prReviewService, /canvas_freeform_shapes/);
 assert.doesNotMatch(prReviewService, /canvas_shape_id/);
+assert.match(prReviewDiffParser, /parseUnifiedDiffPatch/);
+assert.match(prReviewDiffParser, /HUNK_HEADER_PATTERN/);
+assert.match(prReviewDiffParser, /oldLineNumber/);
+assert.match(prReviewDiffParser, /newLineNumber/);
+assert.match(prReviewDiffParser, /type: "unchanged"/);
+assert.match(prReviewDiffParser, /type: "deleted"/);
+assert.match(prReviewDiffParser, /type: "added"/);
 assert.match(prReviewTypes, /PrReviewFileReviewStatus/);
 assert.match(prReviewApi, /PR 요약 패널 조회/);
 assert.match(prReviewApi, /전체 리뷰 결과 조회/);
 assert.match(prReviewApi, /Flow 파일 노드 목록 조회/);
 assert.match(prReviewApi, /Review File 상세 조회/);
+assert.match(prReviewApi, /Diff View Model/);
 assert.match(prReviewApi, /githubCreatedAt/);
 assert.match(prReviewApi, /fileNodeData/);
 
@@ -122,3 +141,5 @@ assert.match(databaseService, /async transaction/);
 assert.match(databaseService, /BEGIN/);
 assert.match(databaseService, /COMMIT/);
 assert.match(databaseService, /ROLLBACK/);
+
+await import("./diff-parser.test.mjs");

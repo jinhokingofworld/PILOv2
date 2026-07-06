@@ -49,6 +49,10 @@ const workspaceMeetingConstraintMigration = await readSource(
 );
 
 assert.match(main, /setGlobalPrefix\("api\/v1"\)/);
+assert.match(main, /enableCors/);
+assert.match(main, /credentials: false/);
+assert.match(main, /methods: \["GET", "HEAD", "POST", "PATCH", "DELETE", "OPTIONS"\]/);
+assert.match(main, /allowedHeaders: \["Authorization", "Content-Type", "Accept"\]/);
 assert.match(controller, /@Get\("health"\)/);
 assert.match(service, /pilo-app-server/);
 assert.match(service, /status: "ok"/);
@@ -157,3 +161,4 @@ await import("./calendar/test.mjs");
 await import("./meeting/test.mjs");
 await import("./github-integration/test.mjs");
 await import("./pr-review/test.mjs");
+await import("./board/test.mjs");

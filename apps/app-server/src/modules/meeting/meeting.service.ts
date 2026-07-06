@@ -1,12 +1,14 @@
 import { Injectable } from "@nestjs/common";
 import { QueryResultRow } from "pg";
-import { badRequest } from "../../common/api-error";
+import { badRequest, notFound } from "../../common/api-error";
 import { DatabaseService } from "../../database/database.service";
 import { WorkspaceService } from "../workspace/workspace.service";
 
 export type PendingMeetingPayload = never;
 
 type RecordingStatus = "RUNNING" | "COMPLETED" | "FAILED";
+type MeetingReportStatus = "PROCESSING" | "COMPLETED" | "FAILED";
+type MeetingReportFailedStep = "RECORDING" | "STT" | "LLM";
 
 interface MeetingRow extends QueryResultRow {
   id: string;
@@ -54,6 +56,62 @@ interface StartMeetingRow extends QueryResultRow {
   participant_left_at: Date | string | null;
   participant_user_name: string | null;
   participant_user_avatar_url: string | null;
+}
+
+interface ParticipantRow extends QueryResultRow {
+  id: string;
+  meeting_id: string;
+  user_id: string;
+  livekit_identity: string;
+  joined_at: Date | string;
+  left_at: Date | string | null;
+  user_name: string | null;
+  user_avatar_url: string | null;
+}
+
+interface RecordingRow extends QueryResultRow {
+  id: string;
+  meeting_id: string;
+  status: RecordingStatus;
+  audio_file_url: string | null;
+  audio_file_key: string | null;
+  duration_sec: number | null;
+  file_size_bytes: number | string | null;
+  started_at: Date | string;
+  ended_at: Date | string | null;
+  error_message: string | null;
+}
+
+interface MeetingReportRow extends QueryResultRow {
+  id: string;
+  meeting_id: string;
+  recording_id: string;
+  status: MeetingReportStatus;
+  failed_step: MeetingReportFailedStep | null;
+  error_message: string | null;
+  summary: string | null;
+  discussion_points: string | null;
+  decisions: string | null;
+  action_item_candidates: unknown;
+  retry_count: number | string;
+  created_at: Date | string;
+  updated_at: Date | string;
+}
+
+interface ActiveParticipantCountRow extends QueryResultRow {
+  active_participant_count: number | string;
+}
+
+interface ParticipantCountRow extends QueryResultRow {
+  participant_count: number | string;
+  active_participant_count: number | string;
+}
+
+interface QueryOneExecutor {
+  queryOne<T extends QueryResultRow = QueryResultRow>(
+    text: string,
+    values?: readonly unknown[]
+  ): Promise<T | null>;
 }
 
 interface MeetingReportListQuery {
@@ -106,6 +164,22 @@ export interface RecordingPayload {
   errorMessage: string | null;
 }
 
+export interface MeetingReportSummaryPayload {
+  id: string;
+  meetingId: string;
+  recordingId: string;
+  status: MeetingReportStatus;
+  failedStep: MeetingReportFailedStep | null;
+  errorMessage: string | null;
+  summary: string | null;
+  discussionPoints: string | null;
+  decisions: string | null;
+  actionItemCandidates: unknown[];
+  retryCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface CurrentMeetingPayload {
   meeting: MeetingPayload | null;
   currentRecording: RecordingPayload | null;
@@ -119,9 +193,47 @@ export interface StartMeetingPayload {
   currentRecording: null;
 }
 
+export interface JoinMeetingPayload {
+  meeting: MeetingPayload;
+  participant: ParticipantPayload;
+  livekit: null;
+  currentRecording: RecordingPayload | null;
+}
+
+export interface LeaveMeetingPayload {
+  participant: ParticipantPayload;
+  meetingEnded: boolean;
+  meeting: MeetingPayload;
+  currentRecording: RecordingPayload | null;
+}
+
+export interface MeetingDetailPayload {
+  meeting: MeetingPayload;
+  currentRecording: RecordingPayload | null;
+  recordings: RecordingPayload[];
+  reports: MeetingReportSummaryPayload[];
+  participantCount: number;
+  activeParticipantCount: number;
+  currentUserParticipant: ParticipantPayload | null;
+}
+
+export interface RecordingListPayload {
+  recordings: RecordingPayload[];
+}
+
+export interface CurrentRecordingPayload {
+  recording: RecordingPayload | null;
+}
+
+export interface ParticipantListPayload {
+  participants: ParticipantPayload[];
+}
+
 const MAIN_MEETING_ROOM = "MAIN_MEETING_ROOM";
 const UNIQUE_VIOLATION_CODE = "23505";
 const ACTIVE_MEETING_UNIQUE_INDEX = "unique_active_meeting_per_room";
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 @Injectable()
 export class MeetingService {
@@ -257,32 +369,119 @@ export class MeetingService {
   async joinMeeting(
     currentUserId: string,
     workspaceId: string,
-    _meetingId: string
-  ): Promise<PendingMeetingPayload> {
+    meetingId: string
+  ): Promise<JoinMeetingPayload> {
     await this.assertWorkspaceAccess(currentUserId, workspaceId);
-    return this.pendingEndpoint(
-      "POST /workspaces/{workspaceId}/meetings/{meetingId}/participants/me"
-    );
+    return this.database.transaction(async (transaction) => {
+      const meeting = await this.findMeetingById(transaction, workspaceId, meetingId, {
+        lockMeeting: true
+      });
+
+      if (!meeting) {
+        throw notFound("Meeting not found");
+      }
+
+      if (meeting.ended_at !== null) {
+        throw badRequest("Meeting has already ended");
+      }
+
+      const participant = await this.upsertParticipant(
+        transaction,
+        meetingId,
+        currentUserId
+      );
+
+      return {
+        meeting: this.mapMeeting(meeting),
+        participant: this.mapParticipant(participant),
+        livekit: null,
+        currentRecording: this.mapNullableCurrentRecording(meeting)
+      };
+    });
   }
 
   async getMeeting(
     currentUserId: string,
     workspaceId: string,
-    _meetingId: string
-  ): Promise<PendingMeetingPayload> {
+    meetingId: string
+  ): Promise<MeetingDetailPayload> {
     await this.assertWorkspaceAccess(currentUserId, workspaceId);
-    return this.pendingEndpoint("GET /workspaces/{workspaceId}/meetings/{meetingId}");
+    const meeting = await this.findMeetingById(this.database, workspaceId, meetingId);
+
+    if (!meeting) {
+      throw notFound("Meeting not found");
+    }
+
+    const recordings = await this.listRecordingRows(meetingId);
+    const reports = await this.listMeetingReportRows(meetingId);
+    const participantCounts = await this.countParticipants(meetingId);
+    const currentUserParticipant = await this.findParticipant(
+      this.database,
+      meetingId,
+      currentUserId
+    );
+
+    return {
+      meeting: this.mapMeeting(meeting),
+      currentRecording: this.mapNullableCurrentRecording(meeting),
+      recordings: recordings.map((recording) => this.mapRecording(recording)),
+      reports: reports.map((report) => this.mapMeetingReportSummary(report)),
+      participantCount: participantCounts.participantCount,
+      activeParticipantCount: participantCounts.activeParticipantCount,
+      currentUserParticipant:
+        currentUserParticipant === null
+          ? null
+          : this.mapParticipant(currentUserParticipant)
+    };
   }
 
   async leaveMeeting(
     currentUserId: string,
     workspaceId: string,
-    _meetingId: string
-  ): Promise<PendingMeetingPayload> {
+    meetingId: string
+  ): Promise<LeaveMeetingPayload> {
     await this.assertWorkspaceAccess(currentUserId, workspaceId);
-    return this.pendingEndpoint(
-      "DELETE /workspaces/{workspaceId}/meetings/{meetingId}/participants/me"
-    );
+    return this.database.transaction(async (transaction) => {
+      const meeting = await this.findMeetingById(transaction, workspaceId, meetingId, {
+        lockMeeting: true
+      });
+
+      if (!meeting) {
+        throw notFound("Meeting not found");
+      }
+
+      const existingParticipant = await this.findParticipant(
+        transaction,
+        meetingId,
+        currentUserId
+      );
+      if (!existingParticipant) {
+        throw notFound("Participant not found");
+      }
+
+      const wasActive = existingParticipant.left_at === null;
+      const participant = await this.markParticipantLeft(
+        transaction,
+        meetingId,
+        currentUserId
+      );
+      const activeParticipantCount = await this.countActiveParticipants(
+        transaction,
+        meetingId
+      );
+      const shouldEndMeeting =
+        wasActive && activeParticipantCount === 0 && meeting.ended_at === null;
+      const endedMeeting = shouldEndMeeting
+        ? await this.endMeetingIfStillActive(transaction, workspaceId, meetingId)
+        : null;
+
+      return {
+        participant: this.mapParticipant(participant),
+        meetingEnded: endedMeeting !== null,
+        meeting: this.mapMeeting(endedMeeting ?? meeting),
+        currentRecording: this.mapNullableCurrentRecording(meeting)
+      };
+    });
   }
 
   async startRecording(
@@ -311,34 +510,48 @@ export class MeetingService {
   async listRecordings(
     currentUserId: string,
     workspaceId: string,
-    _meetingId: string
-  ): Promise<PendingMeetingPayload> {
+    meetingId: string
+  ): Promise<RecordingListPayload> {
     await this.assertWorkspaceAccess(currentUserId, workspaceId);
-    return this.pendingEndpoint(
-      "GET /workspaces/{workspaceId}/meetings/{meetingId}/recordings"
-    );
+    await this.assertMeetingExists(workspaceId, meetingId);
+    const recordings = await this.listRecordingRows(meetingId);
+
+    return {
+      recordings: recordings.map((recording) => this.mapRecording(recording))
+    };
   }
 
   async getCurrentRecording(
     currentUserId: string,
     workspaceId: string,
-    _meetingId: string
-  ): Promise<PendingMeetingPayload> {
+    meetingId: string
+  ): Promise<CurrentRecordingPayload> {
     await this.assertWorkspaceAccess(currentUserId, workspaceId);
-    return this.pendingEndpoint(
-      "GET /workspaces/{workspaceId}/meetings/{meetingId}/recordings/current"
-    );
+    const meeting = await this.findMeetingById(this.database, workspaceId, meetingId);
+
+    if (!meeting) {
+      throw notFound("Meeting not found");
+    }
+
+    return {
+      recording: this.mapNullableCurrentRecording(meeting)
+    };
   }
 
   async listParticipants(
     currentUserId: string,
     workspaceId: string,
-    _meetingId: string
-  ): Promise<PendingMeetingPayload> {
+    meetingId: string
+  ): Promise<ParticipantListPayload> {
     await this.assertWorkspaceAccess(currentUserId, workspaceId);
-    return this.pendingEndpoint(
-      "GET /workspaces/{workspaceId}/meetings/{meetingId}/participants"
-    );
+    await this.assertMeetingExists(workspaceId, meetingId);
+    const participants = await this.listParticipantRows(meetingId);
+
+    return {
+      participants: participants.map((participant) =>
+        this.mapParticipant(participant)
+      )
+    };
   }
 
   async listReports(
@@ -388,6 +601,19 @@ export class MeetingService {
     workspaceId: string
   ): Promise<void> {
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+  }
+
+  private async assertMeetingExists(
+    workspaceId: string,
+    meetingId: string
+  ): Promise<MeetingRow> {
+    const meeting = await this.findMeetingById(this.database, workspaceId, meetingId);
+
+    if (!meeting) {
+      throw notFound("Meeting not found");
+    }
+
+    return meeting;
   }
 
   private async findCurrentMeeting(
@@ -453,6 +679,320 @@ export class MeetingService {
     );
   }
 
+  private async findMeetingById(
+    executor: QueryOneExecutor,
+    workspaceId: string,
+    meetingId: string,
+    options: { lockMeeting?: boolean } = {}
+  ): Promise<CurrentMeetingRow | null> {
+    if (!UUID_PATTERN.test(meetingId)) {
+      return null;
+    }
+
+    return executor.queryOne<CurrentMeetingRow>(
+      `
+        SELECT
+          meetings.id,
+          meetings.workspace_id,
+          meetings.room_key,
+          meetings.livekit_room_name,
+          meetings.created_by_id,
+          meetings.ended_by_id,
+          meetings.started_at,
+          meetings.ended_at,
+          meetings.created_at,
+          meetings.updated_at,
+          current_recording.id AS recording_id,
+          current_recording.meeting_id AS recording_meeting_id,
+          current_recording.status AS recording_status,
+          current_recording.audio_file_url AS recording_audio_file_url,
+          current_recording.audio_file_key AS recording_audio_file_key,
+          current_recording.duration_sec AS recording_duration_sec,
+          current_recording.file_size_bytes AS recording_file_size_bytes,
+          current_recording.started_at AS recording_started_at,
+          current_recording.ended_at AS recording_ended_at,
+          current_recording.error_message AS recording_error_message,
+          COALESCE(active_participants.count, 0)::int AS active_participant_count
+        FROM meetings
+        LEFT JOIN LATERAL (
+          SELECT
+            meeting_recordings.id,
+            meeting_recordings.meeting_id,
+            meeting_recordings.status,
+            meeting_recordings.audio_file_url,
+            meeting_recordings.audio_file_key,
+            meeting_recordings.duration_sec,
+            meeting_recordings.file_size_bytes,
+            meeting_recordings.started_at,
+            meeting_recordings.ended_at,
+            meeting_recordings.error_message
+          FROM meeting_recordings
+          WHERE meeting_recordings.meeting_id = meetings.id
+            AND meeting_recordings.status = 'RUNNING'
+          ORDER BY meeting_recordings.started_at DESC, meeting_recordings.id ASC
+          LIMIT 1
+        ) AS current_recording ON true
+        LEFT JOIN LATERAL (
+          SELECT COUNT(*)::int AS count
+          FROM meeting_participants
+          WHERE meeting_participants.meeting_id = meetings.id
+            AND meeting_participants.left_at IS NULL
+        ) AS active_participants ON true
+        WHERE meetings.workspace_id = $1
+          AND meetings.id = $2
+        LIMIT 1
+        ${options.lockMeeting === true ? "FOR UPDATE OF meetings" : ""}
+      `,
+      [workspaceId, meetingId]
+    );
+  }
+
+  private async listRecordingRows(meetingId: string): Promise<RecordingRow[]> {
+    return this.database.query<RecordingRow>(
+      `
+        SELECT
+          id,
+          meeting_id,
+          status,
+          audio_file_url,
+          audio_file_key,
+          duration_sec,
+          file_size_bytes,
+          started_at,
+          ended_at,
+          error_message
+        FROM meeting_recordings
+        WHERE meeting_id = $1
+        ORDER BY started_at DESC, id ASC
+      `,
+      [meetingId]
+    );
+  }
+
+  private async listMeetingReportRows(
+    meetingId: string
+  ): Promise<MeetingReportRow[]> {
+    return this.database.query<MeetingReportRow>(
+      `
+        SELECT
+          id,
+          meeting_id,
+          recording_id,
+          status,
+          failed_step,
+          error_message,
+          summary,
+          discussion_points,
+          decisions,
+          action_item_candidates,
+          retry_count,
+          created_at,
+          updated_at
+        FROM meeting_reports
+        WHERE meeting_id = $1
+        ORDER BY created_at DESC, id ASC
+      `,
+      [meetingId]
+    );
+  }
+
+  private async countParticipants(
+    meetingId: string
+  ): Promise<{ participantCount: number; activeParticipantCount: number }> {
+    const result = await this.database.queryOne<ParticipantCountRow>(
+      `
+        SELECT
+          COUNT(*)::int AS participant_count,
+          (COUNT(*) FILTER (WHERE left_at IS NULL))::int AS active_participant_count
+        FROM meeting_participants
+        WHERE meeting_id = $1
+      `,
+      [meetingId]
+    );
+
+    return {
+      participantCount: Number(result?.participant_count ?? 0),
+      activeParticipantCount: Number(result?.active_participant_count ?? 0)
+    };
+  }
+
+  private async listParticipantRows(meetingId: string): Promise<ParticipantRow[]> {
+    return this.database.query<ParticipantRow>(
+      `
+        SELECT
+          meeting_participants.id,
+          meeting_participants.meeting_id,
+          meeting_participants.user_id,
+          meeting_participants.livekit_identity,
+          meeting_participants.joined_at,
+          meeting_participants.left_at,
+          users.name AS user_name,
+          users.avatar_url AS user_avatar_url
+        FROM meeting_participants
+        JOIN users
+          ON users.id = meeting_participants.user_id
+        WHERE meeting_participants.meeting_id = $1
+        ORDER BY meeting_participants.joined_at ASC, meeting_participants.id ASC
+      `,
+      [meetingId]
+    );
+  }
+
+  private async upsertParticipant(
+    executor: QueryOneExecutor,
+    meetingId: string,
+    currentUserId: string
+  ): Promise<ParticipantRow> {
+    const participant = await executor.queryOne<ParticipantRow>(
+      `
+        WITH upserted_participant AS (
+          INSERT INTO meeting_participants (
+            meeting_id,
+            user_id,
+            livekit_identity
+          )
+          VALUES (
+            $1,
+            $2,
+            'meeting-' || $1::text || '-user-' || $2::text
+          )
+          ON CONFLICT (meeting_id, user_id)
+          DO UPDATE SET
+            joined_at = now(),
+            left_at = NULL,
+            livekit_identity = EXCLUDED.livekit_identity,
+            updated_at = now()
+          RETURNING *
+        )
+        SELECT
+          upserted_participant.id,
+          upserted_participant.meeting_id,
+          upserted_participant.user_id,
+          upserted_participant.livekit_identity,
+          upserted_participant.joined_at,
+          upserted_participant.left_at,
+          users.name AS user_name,
+          users.avatar_url AS user_avatar_url
+        FROM upserted_participant
+        JOIN users
+          ON users.id = upserted_participant.user_id
+      `,
+      [meetingId, currentUserId]
+    );
+
+    if (!participant) {
+      throw badRequest("Meeting participant could not be saved");
+    }
+
+    return participant;
+  }
+
+  private async findParticipant(
+    executor: QueryOneExecutor,
+    meetingId: string,
+    currentUserId: string
+  ): Promise<ParticipantRow | null> {
+    return executor.queryOne<ParticipantRow>(
+      `
+        SELECT
+          meeting_participants.id,
+          meeting_participants.meeting_id,
+          meeting_participants.user_id,
+          meeting_participants.livekit_identity,
+          meeting_participants.joined_at,
+          meeting_participants.left_at,
+          users.name AS user_name,
+          users.avatar_url AS user_avatar_url
+        FROM meeting_participants
+        JOIN users
+          ON users.id = meeting_participants.user_id
+        WHERE meeting_participants.meeting_id = $1
+          AND meeting_participants.user_id = $2
+        LIMIT 1
+      `,
+      [meetingId, currentUserId]
+    );
+  }
+
+  private async markParticipantLeft(
+    executor: QueryOneExecutor,
+    meetingId: string,
+    currentUserId: string
+  ): Promise<ParticipantRow> {
+    const participant = await executor.queryOne<ParticipantRow>(
+      `
+        WITH updated_participant AS (
+          UPDATE meeting_participants
+          SET
+            left_at = COALESCE(left_at, now()),
+            updated_at = CASE
+              WHEN left_at IS NULL THEN now()
+              ELSE updated_at
+            END
+          WHERE meeting_id = $1
+            AND user_id = $2
+          RETURNING *
+        )
+        SELECT
+          updated_participant.id,
+          updated_participant.meeting_id,
+          updated_participant.user_id,
+          updated_participant.livekit_identity,
+          updated_participant.joined_at,
+          updated_participant.left_at,
+          users.name AS user_name,
+          users.avatar_url AS user_avatar_url
+        FROM updated_participant
+        JOIN users
+          ON users.id = updated_participant.user_id
+      `,
+      [meetingId, currentUserId]
+    );
+
+    if (!participant) {
+      throw notFound("Participant not found");
+    }
+
+    return participant;
+  }
+
+  private async countActiveParticipants(
+    executor: QueryOneExecutor,
+    meetingId: string
+  ): Promise<number> {
+    const result = await executor.queryOne<ActiveParticipantCountRow>(
+      `
+        SELECT COUNT(*)::int AS active_participant_count
+        FROM meeting_participants
+        WHERE meeting_id = $1
+          AND left_at IS NULL
+      `,
+      [meetingId]
+    );
+
+    return Number(result?.active_participant_count ?? 0);
+  }
+
+  private async endMeetingIfStillActive(
+    executor: QueryOneExecutor,
+    workspaceId: string,
+    meetingId: string
+  ): Promise<MeetingRow | null> {
+    return executor.queryOne<MeetingRow>(
+      `
+        UPDATE meetings
+        SET
+          ended_at = now(),
+          updated_at = now()
+        WHERE workspace_id = $1
+          AND id = $2
+          AND ended_at IS NULL
+        RETURNING *
+      `,
+      [workspaceId, meetingId]
+    );
+  }
+
   private normalizeStartMeetingBody(body: unknown): { roomKey: string } {
     if (body === undefined || body === null) {
       return { roomKey: MAIN_MEETING_ROOM };
@@ -503,20 +1043,35 @@ export class MeetingService {
       return null;
     }
 
-    return {
+    return this.mapRecording({
       id: row.recording_id,
-      meetingId: row.recording_meeting_id,
+      meeting_id: row.recording_meeting_id,
       status: row.recording_status,
-      audioFileUrl: row.recording_audio_file_url,
-      audioFileKey: row.recording_audio_file_key,
-      durationSec: row.recording_duration_sec,
+      audio_file_url: row.recording_audio_file_url,
+      audio_file_key: row.recording_audio_file_key,
+      duration_sec: row.recording_duration_sec,
+      file_size_bytes: row.recording_file_size_bytes,
+      started_at: row.recording_started_at,
+      ended_at: row.recording_ended_at,
+      error_message: row.recording_error_message
+    });
+  }
+
+  private mapRecording(recording: RecordingRow): RecordingPayload {
+    return {
+      id: recording.id,
+      meetingId: recording.meeting_id,
+      status: recording.status,
+      audioFileUrl: recording.audio_file_url,
+      audioFileKey: recording.audio_file_key,
+      durationSec: recording.duration_sec,
       fileSizeBytes:
-        row.recording_file_size_bytes === null
+        recording.file_size_bytes === null
           ? null
-          : Number(row.recording_file_size_bytes),
-      startedAt: this.toIsoString(row.recording_started_at),
-      endedAt: this.toNullableIsoString(row.recording_ended_at),
-      errorMessage: row.recording_error_message
+          : Number(recording.file_size_bytes),
+      startedAt: this.toIsoString(recording.started_at),
+      endedAt: this.toNullableIsoString(recording.ended_at),
+      errorMessage: recording.error_message
     };
   }
 
@@ -551,6 +1106,60 @@ export class MeetingService {
       livekit: null,
       currentRecording: null
     };
+  }
+
+  private mapParticipant(participant: ParticipantRow): ParticipantPayload {
+    return {
+      id: participant.id,
+      meetingId: participant.meeting_id,
+      userId: participant.user_id,
+      livekitIdentity: participant.livekit_identity,
+      joinedAt: this.toIsoString(participant.joined_at),
+      leftAt: this.toNullableIsoString(participant.left_at),
+      isActive: participant.left_at === null,
+      user: {
+        id: participant.user_id,
+        name: participant.user_name,
+        avatarUrl: participant.user_avatar_url
+      }
+    };
+  }
+
+  private mapMeetingReportSummary(
+    report: MeetingReportRow
+  ): MeetingReportSummaryPayload {
+    return {
+      id: report.id,
+      meetingId: report.meeting_id,
+      recordingId: report.recording_id,
+      status: report.status,
+      failedStep: report.failed_step,
+      errorMessage: report.error_message,
+      summary: report.summary,
+      discussionPoints: report.discussion_points,
+      decisions: report.decisions,
+      actionItemCandidates: this.toJsonArray(report.action_item_candidates),
+      retryCount: Number(report.retry_count),
+      createdAt: this.toIsoString(report.created_at),
+      updatedAt: this.toIsoString(report.updated_at)
+    };
+  }
+
+  private toJsonArray(value: unknown): unknown[] {
+    if (Array.isArray(value)) {
+      return value;
+    }
+
+    if (typeof value === "string") {
+      try {
+        const parsed = JSON.parse(value) as unknown;
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    }
+
+    return [];
   }
 
   private isConstraintError(error: unknown, constraint: string): boolean {

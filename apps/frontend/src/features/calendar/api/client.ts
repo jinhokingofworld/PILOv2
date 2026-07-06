@@ -180,7 +180,7 @@ async function requestCalendarData<T>(
   }
 
   const response = await fetcher(buildCalendarApiUrl(path, baseUrl), {
-    credentials: "include",
+    credentials: "same-origin",
     ...init,
     headers
   });
