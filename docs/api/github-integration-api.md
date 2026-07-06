@@ -39,7 +39,7 @@ PR 리뷰 세션, 파일별 리뷰 판단, Kanban board cache hydrate, GitHub is
 | 용도 | 인증 주체 | 저장 위치 |
 | --- | --- | --- |
 | Repository/Issue/PR/ProjectV2 조회와 동기화 | GitHub App installation token | `github_installations` |
-| GitHub Review 제출 | 현재 사용자의 GitHub OAuth token | `users.github_access_token_encrypted` |
+| GitHub Review 제출 | 현재 사용자의 GitHub App user OAuth token | `users.github_access_token_encrypted` |
 | PILO API 호출 | PILO access token | application auth/session layer |
 
 GitHub token은 복호화된 상태로 응답하거나 로그에 남기지 않는다.
@@ -49,12 +49,14 @@ GitHub App installation 검증은 GitHub의 `/user/installations` endpoint를
 GitHub App user access token이어야 하며, `repo`/`read:user` scope가 있는
 classic GitHub OAuth App token만으로는 이 조회를 통과할 수 없다.
 
-1인 MVP에서는 `auth-api.md`의 GitHub 로그인 callback도
-`users.github_access_token_encrypted`, `github_token_scope`,
-`github_connected_at`, `github_revoked_at`을 갱신할 수 있다. 따라서 GitHub로
-로그인한 사용자는 `/me/github`에서 연결 완료 상태로 보일 수 있다. 단,
-installation 시작 시에는 저장된 token으로 `/user/installations` 조회가 되는지
-추가 검증한다.
+`auth-api.md`의 GitHub 로그인 callback은 GitHub App user OAuth token을 저장하지
+않는다. 따라서 GitHub로 로그인한 사용자도 `/me/github/oauth/start` 연결을
+완료하기 전까지 `/me/github`에서는 GitHub App user OAuth 미연결 상태로 보인다.
+
+기존 dev 데이터처럼 GitHub 로그인 OAuth token이 `users.github_access_token_encrypted`에
+저장된 row는 GitHub App installation lookup을 통과하지 못할 수 있다. 이 경우
+`DELETE /me/github`로 기존 GitHub Integration 연결 상태를 해제한 뒤
+`POST /me/github/oauth/start`로 다시 연결한다.
 
 GitHub App installation 연결을 시작하려면 현재 사용자의 GitHub OAuth 연결이
 선행되어야 한다. Installation callback 처리 시 서버는 저장된 사용자 OAuth
@@ -75,10 +77,10 @@ token으로 GitHub의 user installations 목록을 조회해 callback의
 
 | Method | Endpoint | 설명 |
 | --- | --- | --- |
-| `GET` | `/me/github` | 현재 사용자의 GitHub OAuth 연결 상태 조회 |
+| `GET` | `/me/github` | 현재 사용자의 GitHub App user OAuth 연결 상태 조회 |
 | `POST` | `/me/github/oauth/start` | GitHub App user authorization URL 생성 |
 | `GET` | `/github/oauth/callback` | GitHub OAuth callback |
-| `DELETE` | `/me/github` | 현재 사용자의 GitHub OAuth 연결 해제 |
+| `DELETE` | `/me/github` | 현재 사용자의 GitHub App user OAuth 연결 해제 |
 | `POST` | `/workspaces/{workspaceId}/github/installations/start` | GitHub App user access token 검증 후 GitHub App 설치 URL 생성 |
 | `GET` | `/github/installations/callback` | GitHub App Setup URL redirect 처리 |
 | `GET` | `/workspaces/{workspaceId}/github/installations` | Workspace installation 목록 조회 |
