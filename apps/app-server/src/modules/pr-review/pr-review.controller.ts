@@ -12,6 +12,8 @@ import {
   PrReviewFlowListPayload,
   PrReviewResultPayload,
   PrReviewService,
+  PrReviewSubmissionListPayload,
+  PrReviewSubmissionPayload,
   PrReviewSummaryPayload,
   PrReviewSessionPayload
 } from "./pr-review.service";
@@ -175,6 +177,50 @@ export class PrReviewController {
       reviewFileId
     );
     return apiResponse(diff);
+  }
+
+  @Post("review-sessions/:reviewSessionId/submissions")
+  async submitReviewSession(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("reviewSessionId") reviewSessionId: string,
+    @Body() body: unknown
+  ): Promise<ApiSuccessResponse<PrReviewSubmissionPayload>> {
+    const submission = await this.prReviewService.submitReviewSession(
+      currentUserId,
+      workspaceId,
+      reviewSessionId,
+      body
+    );
+    return apiResponse(submission);
+  }
+
+  @Get("review-sessions/:reviewSessionId/submissions")
+  async listReviewSubmissions(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("reviewSessionId") reviewSessionId: string
+  ): Promise<ApiSuccessResponse<PrReviewSubmissionListPayload>> {
+    const submissions = await this.prReviewService.listReviewSubmissions(
+      currentUserId,
+      workspaceId,
+      reviewSessionId
+    );
+    return apiResponse(submissions);
+  }
+
+  @Get("review-submissions/:submissionId")
+  async getReviewSubmission(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("submissionId") submissionId: string
+  ): Promise<ApiSuccessResponse<PrReviewSubmissionPayload>> {
+    const submission = await this.prReviewService.getReviewSubmission(
+      currentUserId,
+      workspaceId,
+      submissionId
+    );
+    return apiResponse(submission);
   }
 
   @Patch("review-sessions/:reviewSessionId")

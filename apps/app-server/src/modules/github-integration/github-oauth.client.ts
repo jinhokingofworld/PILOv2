@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import { badRequest } from "../../common/api-error";
+import { badRequest, forbidden } from "../../common/api-error";
 import { GITHUB_API_VERSION } from "./github-api.constants";
 
 export interface GithubOAuthTokenRequest {
@@ -183,6 +183,10 @@ export class GithubOAuthClient {
 
     if (response.status === 401) {
       throw badRequest("GitHub OAuth connection is invalid");
+    }
+
+    if (response.status === 403) {
+      throw forbidden("GitHub App Pull requests write permission is required");
     }
 
     if (!response.ok) {

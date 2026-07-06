@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { QueryResultRow } from "pg";
-import { badRequest, notFound } from "../../common/api-error";
+import { ApiError, badRequest, notFound } from "../../common/api-error";
 import {
   DatabaseService,
   type DatabaseTransaction
@@ -22,6 +22,8 @@ import type {
   PrReviewFileStatus,
   PrReviewGithubChangedFile,
   PrReviewGithubPullRequestDetail,
+  PrReviewGithubReviewSubmissionPayload,
+  PrReviewGithubReviewSubmitType,
   PrReviewModuleInfo,
   PrReviewSessionStatus
 } from "./types";
@@ -134,6 +136,11 @@ interface ReviewFileDetailRow extends QueryResultRow {
 }
 
 type PrReviewDecisionStatus = Exclude<PrReviewFileReviewStatus, "not_reviewed">;
+type PrReviewSubmissionStatus =
+  | "not_submitted"
+  | "submitting"
+  | "submitted"
+  | "failed";
 
 interface ReviewFileDecisionTargetRow extends QueryResultRow {
   id: string;
@@ -147,6 +154,24 @@ interface ReviewFileDecisionRow extends QueryResultRow {
   comment: string | null;
   reviewed_by_user_id: string;
   reviewed_at: Date | string;
+}
+
+interface ReviewSubmissionRow extends QueryResultRow {
+  id: string;
+  session_id: string;
+  submitted_by_user_id: string;
+  submitted_by_github_login: string;
+  submit_type: PrReviewGithubReviewSubmitType;
+  review_body: string;
+  review_result_summary: string | null;
+  file_review_results: unknown;
+  github_submit_status: PrReviewSubmissionStatus;
+  github_review_id: string | null;
+  github_review_url: string | null;
+  error_message: string | null;
+  submitted_at: Date | string | null;
+  created_at: Date | string;
+  updated_at: Date | string;
 }
 
 interface ReviewFileFlowMembershipRow extends QueryResultRow {
@@ -163,6 +188,11 @@ interface PrReviewSessionUpdateDraft {
 interface PrReviewFileDecisionDraft {
   status?: unknown;
   comment?: unknown;
+}
+
+interface PrReviewSubmissionDraft {
+  submitType?: unknown;
+  reviewBody?: unknown;
 }
 
 interface ReviewProgressRow extends QueryResultRow {
@@ -378,6 +408,39 @@ export interface PrReviewFileDiffPayload {
   rows: PrReviewDiffRowPayload[];
 }
 
+export interface PrReviewSubmissionFileResultPayload {
+  fileName: string;
+  filePath: string;
+  status: PrReviewFileReviewStatus;
+  comment: string | null;
+}
+
+export interface PrReviewSubmissionListItemPayload {
+  id: string;
+  sessionId: string;
+  submitType: PrReviewGithubReviewSubmitType;
+  githubSubmitStatus: PrReviewSubmissionStatus;
+  githubReviewId: string | null;
+  githubReviewUrl: string | null;
+  submittedByUserId: string;
+  submittedByGithubLogin: string;
+  errorMessage: string | null;
+  submittedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PrReviewSubmissionPayload extends PrReviewSubmissionListItemPayload {
+  reviewBody: string;
+  reviewResultSummary: string | null;
+  fileReviewResults: PrReviewSubmissionFileResultPayload[];
+}
+
+export interface PrReviewSubmissionListPayload {
+  reviewSessionId: string;
+  submissions: PrReviewSubmissionListItemPayload[];
+}
+
 export interface DeletePrReviewSessionPayload {
   deleted: true;
 }
@@ -398,6 +461,11 @@ const REVIEW_DECISION_STATUSES: readonly PrReviewDecisionStatus[] = [
   "approved",
   "discussion_needed",
   "unknown"
+];
+const REVIEW_SUBMIT_TYPES: readonly PrReviewGithubReviewSubmitType[] = [
+  "COMMENT",
+  "APPROVE",
+  "REQUEST_CHANGES"
 ];
 
 const LARGE_DIFF_LINE_THRESHOLD = 1000;
@@ -772,6 +840,131 @@ export class PrReviewService {
       githubFileUrl,
       rows: parseUnifiedDiffPatch(patch ?? "")
     };
+  }
+
+  async submitReviewSession(
+    currentUserId: string,
+    workspaceId: string,
+    reviewSessionId: string,
+    body: unknown
+  ): Promise<PrReviewSubmissionPayload> {
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+
+    const session = await this.findReviewSession(workspaceId, reviewSessionId);
+    if (!session) {
+      throw notFound("Review session not found");
+    }
+
+    const input = this.normalizeReviewSubmission(body);
+    const files = await this.listReviewFilesForSession(workspaceId, session.id);
+    const counts = this.countReviewStatuses(files);
+    this.assertReviewSessionSubmittable(session, counts);
+
+    const githubOAuth = await this.githubDependency.getCurrentUserGithubOAuthStatus(
+      currentUserId
+    );
+    if (!githubOAuth.connected || !githubOAuth.githubLogin) {
+      throw badRequest("GitHub OAuth connection is required");
+    }
+
+    const currentPullRequest = await this.githubDependency.getPullRequestDetail(
+      currentUserId,
+      workspaceId,
+      session.pull_request_id
+    );
+    if (currentPullRequest.headSha !== session.head_sha) {
+      throw badRequest("Review session head SHA is stale");
+    }
+
+    const fileReviewResults = files.map((file) =>
+      this.mapSubmissionFileResult(file)
+    );
+    const reviewResultSummary = this.buildReviewResultSummary(counts);
+    const attempt = await this.insertReviewSubmissionAttempt({
+      sessionId: session.id,
+      currentUserId,
+      submittedByGithubLogin: githubOAuth.githubLogin,
+      submitType: input.submitType,
+      reviewBody: input.reviewBody,
+      reviewResultSummary,
+      fileReviewResults
+    });
+
+    let submission: PrReviewGithubReviewSubmissionPayload;
+    try {
+      submission = await this.githubDependency.submitPullRequestReview(
+        currentUserId,
+        workspaceId,
+        session.pull_request_id,
+        {
+          submitType: input.submitType,
+          reviewBody: input.reviewBody
+        }
+      );
+    } catch (error) {
+      const errorMessage = this.getSafeSubmissionErrorMessage(error);
+      await this.updateReviewSubmissionFailure(attempt.id, errorMessage);
+
+      if (error instanceof ApiError) {
+        throw error;
+      }
+
+      throw badRequest(errorMessage);
+    }
+
+    const savedSubmission = await this.database.transaction(
+      async (transaction) => {
+        const updatedSubmission = await this.updateReviewSubmissionSuccess(
+          transaction,
+          {
+            submissionId: attempt.id,
+            githubReviewId: submission.githubReviewId,
+            githubReviewUrl: submission.githubReviewUrl,
+            submittedAt: submission.submittedAt
+          }
+        );
+        await this.markReviewSessionSubmitted(transaction, session.id);
+        return updatedSubmission;
+      }
+    );
+
+    return this.mapSubmission(savedSubmission);
+  }
+
+  async listReviewSubmissions(
+    currentUserId: string,
+    workspaceId: string,
+    reviewSessionId: string
+  ): Promise<PrReviewSubmissionListPayload> {
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+
+    const session = await this.findReviewSession(workspaceId, reviewSessionId);
+    if (!session) {
+      throw notFound("Review session not found");
+    }
+
+    const submissions = await this.listReviewSubmissionRows(workspaceId, session.id);
+    return {
+      reviewSessionId: session.id,
+      submissions: submissions.map((submission) =>
+        this.mapSubmissionListItem(submission)
+      )
+    };
+  }
+
+  async getReviewSubmission(
+    currentUserId: string,
+    workspaceId: string,
+    submissionId: string
+  ): Promise<PrReviewSubmissionPayload> {
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+
+    const submission = await this.findReviewSubmission(workspaceId, submissionId);
+    if (!submission) {
+      throw notFound("Review submission not found");
+    }
+
+    return this.mapSubmission(submission);
   }
 
   async updateReviewSession(
@@ -1252,6 +1445,225 @@ export class PrReviewService {
     );
   }
 
+  private async listReviewSubmissionRows(
+    workspaceId: string,
+    reviewSessionId: string
+  ): Promise<ReviewSubmissionRow[]> {
+    return this.database.query<ReviewSubmissionRow>(
+      `
+        SELECT
+          submission.id,
+          submission.session_id,
+          submission.submitted_by_user_id,
+          submission.submitted_by_github_login,
+          submission.submit_type,
+          submission.review_body,
+          submission.review_result_summary,
+          submission.file_review_results,
+          submission.github_submit_status,
+          submission.github_review_id,
+          submission.github_review_url,
+          submission.error_message,
+          submission.submitted_at,
+          submission.created_at,
+          submission.updated_at
+        FROM review_submissions AS submission
+        JOIN pr_review_sessions AS review_session
+          ON review_session.id = submission.session_id
+        JOIN github_pull_requests AS pull_request
+          ON pull_request.id = review_session.pull_request_id
+        WHERE pull_request.workspace_id = $1
+          AND review_session.id = $2
+        ORDER BY submission.created_at DESC, submission.id DESC
+      `,
+      [workspaceId, this.requireUuid(reviewSessionId, "reviewSessionId")]
+    );
+  }
+
+  private async findReviewSubmission(
+    workspaceId: string,
+    submissionId: string
+  ): Promise<ReviewSubmissionRow | null> {
+    if (!UUID_PATTERN.test(submissionId)) {
+      return null;
+    }
+
+    return this.database.queryOne<ReviewSubmissionRow>(
+      `
+        SELECT
+          submission.id,
+          submission.session_id,
+          submission.submitted_by_user_id,
+          submission.submitted_by_github_login,
+          submission.submit_type,
+          submission.review_body,
+          submission.review_result_summary,
+          submission.file_review_results,
+          submission.github_submit_status,
+          submission.github_review_id,
+          submission.github_review_url,
+          submission.error_message,
+          submission.submitted_at,
+          submission.created_at,
+          submission.updated_at
+        FROM review_submissions AS submission
+        JOIN pr_review_sessions AS review_session
+          ON review_session.id = submission.session_id
+        JOIN github_pull_requests AS pull_request
+          ON pull_request.id = review_session.pull_request_id
+        WHERE pull_request.workspace_id = $1
+          AND submission.id = $2
+      `,
+      [workspaceId, submissionId]
+    );
+  }
+
+  private async insertReviewSubmissionAttempt(input: {
+    sessionId: string;
+    currentUserId: string;
+    submittedByGithubLogin: string;
+    submitType: PrReviewGithubReviewSubmitType;
+    reviewBody: string;
+    reviewResultSummary: string;
+    fileReviewResults: PrReviewSubmissionFileResultPayload[];
+  }): Promise<ReviewSubmissionRow> {
+    const submission = await this.database.queryOne<ReviewSubmissionRow>(
+      `
+        INSERT INTO review_submissions (
+          session_id,
+          submitted_by_user_id,
+          submitted_by_github_login,
+          submit_type,
+          review_body,
+          review_result_summary,
+          file_review_results,
+          github_submit_status
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, 'submitting')
+        RETURNING
+          id,
+          session_id,
+          submitted_by_user_id,
+          submitted_by_github_login,
+          submit_type,
+          review_body,
+          review_result_summary,
+          file_review_results,
+          github_submit_status,
+          github_review_id,
+          github_review_url,
+          error_message,
+          submitted_at,
+          created_at,
+          updated_at
+      `,
+      [
+        input.sessionId,
+        input.currentUserId,
+        input.submittedByGithubLogin,
+        input.submitType,
+        input.reviewBody,
+        input.reviewResultSummary,
+        JSON.stringify(input.fileReviewResults)
+      ]
+    );
+
+    if (!submission) {
+      throw badRequest("Review submission could not be saved");
+    }
+
+    return submission;
+  }
+
+  private async updateReviewSubmissionSuccess(
+    transaction: DatabaseTransaction,
+    input: {
+      submissionId: string;
+      githubReviewId: string | null;
+      githubReviewUrl: string | null;
+      submittedAt: string;
+    }
+  ): Promise<ReviewSubmissionRow> {
+    const submission = await transaction.queryOne<ReviewSubmissionRow>(
+      `
+        UPDATE review_submissions
+        SET github_submit_status = 'submitted',
+            github_review_id = $2,
+            github_review_url = $3,
+            error_message = NULL,
+            submitted_at = $4
+        WHERE id = $1
+        RETURNING
+          id,
+          session_id,
+          submitted_by_user_id,
+          submitted_by_github_login,
+          submit_type,
+          review_body,
+          review_result_summary,
+          file_review_results,
+          github_submit_status,
+          github_review_id,
+          github_review_url,
+          error_message,
+          submitted_at,
+          created_at,
+          updated_at
+      `,
+      [
+        input.submissionId,
+        input.githubReviewId,
+        input.githubReviewUrl,
+        input.submittedAt
+      ]
+    );
+
+    if (!submission) {
+      throw badRequest("Review submission could not be updated");
+    }
+
+    return submission;
+  }
+
+  private async updateReviewSubmissionFailure(
+    submissionId: string,
+    errorMessage: string
+  ): Promise<void> {
+    const submission = await this.database.queryOne<{ id: string }>(
+      `
+        UPDATE review_submissions
+        SET github_submit_status = 'failed',
+            error_message = $2
+        WHERE id = $1
+        RETURNING id
+      `,
+      [submissionId, errorMessage]
+    );
+
+    if (!submission) {
+      throw badRequest("Review submission could not be updated");
+    }
+  }
+
+  private async markReviewSessionSubmitted(
+    transaction: DatabaseTransaction,
+    reviewSessionId: string
+  ): Promise<void> {
+    const session = await transaction.queryOne<{ id: string }>(
+      `
+        UPDATE pr_review_sessions
+        SET status = 'submitted'
+        WHERE id = $1
+        RETURNING id
+      `,
+      [reviewSessionId]
+    );
+
+    if (!session) {
+      throw badRequest("Review session could not be marked as submitted");
+    }
+  }
+
   private async updateReviewFileDecisionState(
     transaction: DatabaseTransaction,
     input: {
@@ -1665,12 +2077,67 @@ export class PrReviewService {
     };
   }
 
+  private normalizeReviewSubmission(body: unknown): {
+    submitType: PrReviewGithubReviewSubmitType;
+    reviewBody: string;
+  } {
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      throw badRequest("Request body must be an object");
+    }
+
+    const draft = body as PrReviewSubmissionDraft;
+    if (
+      typeof draft.submitType !== "string" ||
+      !this.isReviewSubmitType(draft.submitType)
+    ) {
+      throw badRequest("submitType must be COMMENT, APPROVE, or REQUEST_CHANGES");
+    }
+
+    if (typeof draft.reviewBody !== "string" || !draft.reviewBody.trim()) {
+      throw badRequest("reviewBody must not be empty");
+    }
+
+    return {
+      submitType: draft.submitType,
+      reviewBody: draft.reviewBody.trim()
+    };
+  }
+
+  private assertReviewSessionSubmittable(
+    session: PrReviewSessionRow,
+    counts: PrReviewStatusCountsPayload
+  ): void {
+    if (session.status === "submitted") {
+      throw badRequest("Review session has already been submitted");
+    }
+
+    if (session.status === "archived") {
+      throw badRequest("Review session is archived");
+    }
+
+    if (counts.total === 0) {
+      throw badRequest("Review session is not ready to submit");
+    }
+
+    if (session.status !== "reviewing" && session.status !== "ready_to_submit") {
+      throw badRequest("Review session is not ready to submit");
+    }
+  }
+
   private isSessionStatus(value: string): value is PrReviewSessionStatus {
     return SESSION_STATUSES.includes(value as PrReviewSessionStatus);
   }
 
   private isReviewDecisionStatus(value: string): value is PrReviewDecisionStatus {
     return REVIEW_DECISION_STATUSES.includes(value as PrReviewDecisionStatus);
+  }
+
+  private isReviewFileStatus(value: string): value is PrReviewFileReviewStatus {
+    return value === "not_reviewed" || this.isReviewDecisionStatus(value);
+  }
+
+  private isReviewSubmitType(value: string): value is PrReviewGithubReviewSubmitType {
+    return REVIEW_SUBMIT_TYPES.includes(value as PrReviewGithubReviewSubmitType);
   }
 
   private requireUuid(value: string, field: string): string {
@@ -1829,6 +2296,47 @@ export class PrReviewService {
     };
   }
 
+  private mapSubmissionListItem(
+    submission: ReviewSubmissionRow
+  ): PrReviewSubmissionListItemPayload {
+    return {
+      id: submission.id,
+      sessionId: submission.session_id,
+      submitType: submission.submit_type,
+      githubSubmitStatus: submission.github_submit_status,
+      githubReviewId: submission.github_review_id,
+      githubReviewUrl: submission.github_review_url,
+      submittedByUserId: submission.submitted_by_user_id,
+      submittedByGithubLogin: submission.submitted_by_github_login,
+      errorMessage: submission.error_message,
+      submittedAt: this.toNullableIsoString(submission.submitted_at),
+      createdAt: this.toIsoString(submission.created_at),
+      updatedAt: this.toIsoString(submission.updated_at)
+    };
+  }
+
+  private mapSubmission(submission: ReviewSubmissionRow): PrReviewSubmissionPayload {
+    return {
+      ...this.mapSubmissionListItem(submission),
+      reviewBody: submission.review_body,
+      reviewResultSummary: submission.review_result_summary,
+      fileReviewResults: this.toSubmissionFileResults(
+        submission.file_review_results
+      )
+    };
+  }
+
+  private mapSubmissionFileResult(
+    file: ReviewFileResultRow
+  ): PrReviewSubmissionFileResultPayload {
+    return {
+      fileName: file.file_name,
+      filePath: file.file_path,
+      status: file.current_status,
+      comment: file.comment
+    };
+  }
+
   private countReviewStatuses(
     files: ReviewFileResultRow[]
   ): PrReviewStatusCountsPayload {
@@ -1896,6 +2404,59 @@ export class PrReviewService {
     }
 
     return edges;
+  }
+
+  private getSafeSubmissionErrorMessage(error: unknown): string {
+    if (error instanceof ApiError) {
+      const response = error.getResponse();
+      if (typeof response === "object" && response !== null && "error" in response) {
+        const errorPayload = response.error;
+        if (
+          typeof errorPayload === "object" &&
+          errorPayload !== null &&
+          "message" in errorPayload &&
+          typeof errorPayload.message === "string" &&
+          errorPayload.message.length > 0
+        ) {
+          return errorPayload.message;
+        }
+      }
+    }
+
+    return "GitHub Review submission failed";
+  }
+
+  private toSubmissionFileResults(
+    value: unknown
+  ): PrReviewSubmissionFileResultPayload[] {
+    if (!Array.isArray(value)) {
+      return [];
+    }
+
+    return value.flatMap((item) => {
+      if (typeof item !== "object" || item === null) {
+        return [];
+      }
+
+      const result = item as Partial<PrReviewSubmissionFileResultPayload>;
+      if (
+        typeof result.fileName !== "string" ||
+        typeof result.filePath !== "string" ||
+        typeof result.status !== "string" ||
+        !this.isReviewFileStatus(result.status)
+      ) {
+        return [];
+      }
+
+      return [
+        {
+          fileName: result.fileName,
+          filePath: result.filePath,
+          status: result.status,
+          comment: typeof result.comment === "string" ? result.comment : null
+        }
+      ];
+    });
   }
 
   private toStringArray(value: unknown): string[] {

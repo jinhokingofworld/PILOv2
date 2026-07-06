@@ -49,6 +49,8 @@ GitHub Review 제출은 GitHub Integration 공개 API endpoint가 아니다. PR 
 호출하는 서버 내부 dependency로 현재 사용자의 OAuth token 복호화 경계와 body-only
 GitHub Review 제출 adapter만 제공한다. 이 adapter는 `event`, `body`만 GitHub로 보내며
 inline `comments` payload는 보내지 않는다.
+GitHub Review 제출에는 GitHub App `Pull requests: write` permission이 필요하며,
+GitHub 403 응답은 provider raw error 대신 safe permission error로 매핑한다.
 
 GitHub App installation 검증은 GitHub의 `/user/installations` endpoint를
 호출한다. 저장된 사용자 token은 GitHub App client id/secret으로 발급받은

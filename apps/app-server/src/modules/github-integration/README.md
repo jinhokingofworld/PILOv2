@@ -11,6 +11,8 @@ API contract: `docs/api/github-integration-api.md`
   body-only GitHub Review 제출 adapter를 소유한다.
 - adapter는 raw GitHub token, 복호화된 token 값, provider secret 정보를 API 응답이나
   로그로 노출하지 않는다.
+- GitHub Review 제출에는 GitHub App `Pull requests: write` permission이 필요하며,
+  GitHub 403 응답은 safe permission error로 매핑한다.
 
 범위:
 
@@ -27,3 +29,5 @@ API contract: `docs/api/github-integration-api.md`
 - Repository/Issue/PR/ProjectV2 조회와 동기화는 GitHub App installation token을 사용한다.
 - GitHub Review 제출 공개 API는 PR Review가 소유하고, 이 모듈은 PR Review가 호출하는
   서버 내부 OAuth token/decrypt 및 body-only 제출 adapter를 제공한다.
+- GitHub App `Pull requests: write` permission이 없으면 Review 제출은 권한 부족 에러로
+  실패한다.

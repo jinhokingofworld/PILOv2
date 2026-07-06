@@ -69,6 +69,15 @@ assert.match(
   /@Get\("review-files\/:reviewFileId\/decisions"\)/
 );
 assert.match(prReviewController, /@Get\("review-files\/:reviewFileId\/diff"\)/);
+assert.match(
+  prReviewController,
+  /@Post\("review-sessions\/:reviewSessionId\/submissions"\)/
+);
+assert.match(
+  prReviewController,
+  /@Get\("review-sessions\/:reviewSessionId\/submissions"\)/
+);
+assert.match(prReviewController, /@Get\("review-submissions\/:submissionId"\)/);
 assert.match(prReviewController, /@Patch\("review-sessions\/:reviewSessionId"\)/);
 assert.match(prReviewController, /@Delete\("review-sessions\/:reviewSessionId"\)/);
 assert.match(prReviewController, /apiResponse/);
@@ -116,6 +125,9 @@ assert.match(prReviewService, /getReviewFile/);
 assert.match(prReviewService, /updateReviewFileDecision/);
 assert.match(prReviewService, /listReviewFileDecisions/);
 assert.match(prReviewService, /getReviewFileDiff/);
+assert.match(prReviewService, /submitReviewSession/);
+assert.match(prReviewService, /listReviewSubmissions/);
+assert.match(prReviewService, /getReviewSubmission/);
 assert.match(prReviewService, /parseUnifiedDiffPatch/);
 assert.match(prReviewService, /LARGE_DIFF_LINE_THRESHOLD = 1000/);
 assert.match(prReviewService, /LARGE_DIFF_PATCH_BYTES = 200 \* 1024/);
@@ -131,8 +143,13 @@ assert.match(prReviewService, /syncReviewSessionReviewProgress/);
 assert.match(prReviewService, /github_created_at/);
 assert.match(prReviewService, /changed_files_count/);
 assert.match(prReviewService, /file_review_decisions/);
+assert.match(prReviewService, /review_submissions/);
 assert.match(prReviewService, /reviewed_count/);
 assert.match(prReviewService, /total_file_count/);
+assert.match(prReviewService, /github_submit_status = 'submitted'/);
+assert.match(prReviewService, /github_submit_status = 'failed'/);
+assert.match(prReviewService, /Review session head SHA is stale/);
+assert.match(prReviewService, /GitHub OAuth connection is required/);
 assert.match(prReviewService, /current_status = \$3/);
 assert.match(prReviewService, /reviewed_by_user_id = \$5/);
 assert.match(prReviewService, /status must be approved, discussion_needed, or unknown/);
@@ -169,6 +186,7 @@ assert.match(prReviewDiffParser, /type: "added"/);
 assert.match(prReviewTypes, /PrReviewFileReviewStatus/);
 assert.match(prReviewTypes, /PrReviewGithubReviewSubmitType/);
 assert.match(prReviewTypes, /PrReviewGithubReviewSubmissionPayload/);
+assert.match(prReviewApi, /Pull requests: write/);
 assert.match(prReviewApi, /PR 요약 패널 조회/);
 assert.match(prReviewApi, /전체 리뷰 결과 조회/);
 assert.match(prReviewApi, /Flow 파일 노드 목록 조회/);
@@ -187,3 +205,4 @@ assert.match(databaseService, /COMMIT/);
 assert.match(databaseService, /ROLLBACK/);
 
 await import("./diff-parser.test.mjs");
+await import("./submission.test.mjs");
