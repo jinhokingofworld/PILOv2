@@ -18,10 +18,12 @@ function toFreeformSnapshot(shape: TLShape): PiloCanvasFreeformShape {
 }
 
 export function CanvasStateReporter({
+  onFreeformShapesDraftChange,
   onFreeformShapesChange,
   onViewChange,
   onViewportBoundsChange,
 }: {
+  onFreeformShapesDraftChange: (shapes: PiloCanvasFreeformShape[]) => void;
   onFreeformShapesChange: (shapes: PiloCanvasFreeformShape[]) => void;
   onViewChange: (viewSetting: PiloCanvasViewSetting) => void;
   onViewportBoundsChange: (bounds: PiloCanvasViewportBounds) => void;
@@ -86,13 +88,17 @@ export function CanvasStateReporter({
     }
 
     function scheduleFreeformSync() {
+      const nextFreeformShapes = readFreeformShapes();
+
+      onFreeformShapesDraftChange(nextFreeformShapes);
+
       if (freeformSyncTimerRef.current) {
         clearTimeout(freeformSyncTimerRef.current);
       }
 
       freeformSyncTimerRef.current = setTimeout(() => {
         freeformSyncTimerRef.current = null;
-        onFreeformShapesChange(readFreeformShapes());
+        onFreeformShapesChange(nextFreeformShapes);
       }, 220);
     }
 
@@ -107,7 +113,7 @@ export function CanvasStateReporter({
       }
       removeListener();
     };
-  }, [editor, onFreeformShapesChange]);
+  }, [editor, onFreeformShapesChange, onFreeformShapesDraftChange]);
 
   return null;
 }

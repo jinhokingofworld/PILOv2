@@ -68,6 +68,7 @@ export type CanvasShapeSyncQueue = {
   }) => void;
   flush: () => Promise<void>;
   size: () => number;
+  whenIdle: () => Promise<void>;
 };
 
 type CanvasShapeSyncQueueOptions = {
@@ -307,6 +308,10 @@ export function createCanvasShapeSyncQueue({
   workspaceId,
 }: CanvasShapeSyncQueueOptions): CanvasShapeSyncQueue {
   const pendingOperations = new Map<string, CanvasShapeSyncOperation>();
+  const idleWaiters: Array<{
+    reject: (error: unknown) => void;
+    resolve: () => void;
+  }> = [];
   let flushPromise: Promise<void> | null = null;
   let flushTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -315,6 +320,24 @@ export function createCanvasShapeSyncQueue({
 
     clearTimeout(flushTimer);
     flushTimer = null;
+  }
+
+  function isIdle() {
+    return pendingOperations.size === 0 && !flushTimer && !flushPromise;
+  }
+
+  function resolveIdleWaiters() {
+    if (!isIdle()) return;
+
+    const waiters = idleWaiters.splice(0);
+
+    waiters.forEach((waiter) => waiter.resolve());
+  }
+
+  function rejectIdleWaiters(error: unknown) {
+    const waiters = idleWaiters.splice(0);
+
+    waiters.forEach((waiter) => waiter.reject(error));
   }
 
   async function flushPendingOperations(): Promise<void> {
@@ -344,12 +367,15 @@ export function createCanvasShapeSyncQueue({
         .catch((error: unknown) => {
           if (pendingOperations.size) {
             scheduleFlush();
+          } else {
+            rejectIdleWaiters(error);
           }
 
           throw error;
         })
         .finally(() => {
           flushPromise = null;
+          resolveIdleWaiters();
         });
     }
 
@@ -369,6 +395,7 @@ export function createCanvasShapeSyncQueue({
     cancel() {
       clearFlushTimer();
       pendingOperations.clear();
+      resolveIdleWaiters();
     },
     enqueue({ previousShapes, nextShapes }) {
       const operations = buildCanvasShapeSyncOperations(
@@ -387,6 +414,13 @@ export function createCanvasShapeSyncQueue({
     flush,
     size() {
       return pendingOperations.size;
+    },
+    whenIdle() {
+      if (isIdle()) return Promise.resolve();
+
+      return new Promise<void>((resolve, reject) => {
+        idleWaiters.push({ reject, resolve });
+      });
     },
   };
 }

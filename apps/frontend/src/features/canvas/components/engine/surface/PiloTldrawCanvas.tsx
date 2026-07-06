@@ -134,6 +134,7 @@ type PiloTldrawCanvasProps = {
   initialViewSetting: PiloCanvasViewSetting;
   freeformShapes: PiloCanvasFreeformShape[];
   onReady: (actions: PiloCanvasActions | null) => void;
+  onFreeformShapesDraftChange: (shapes: PiloCanvasFreeformShape[]) => void;
   onFreeformShapesChange: (shapes: PiloCanvasFreeformShape[]) => void;
   onViewChange: (viewSetting: PiloCanvasViewSetting) => void;
   onViewportBoundsChange: (bounds: PiloCanvasViewportBounds) => void;
@@ -247,6 +248,7 @@ export function PiloTldrawCanvas({
   hydrationVersion,
   initialViewSetting,
   onReady,
+  onFreeformShapesDraftChange,
   onFreeformShapesChange,
   onViewChange,
   onViewportBoundsChange,
@@ -570,6 +572,7 @@ export function PiloTldrawCanvas({
       onWheelCapture={handleCanvasWheel}
     >
       <CanvasStateReporter
+        onFreeformShapesDraftChange={onFreeformShapesDraftChange}
         onFreeformShapesChange={onFreeformShapesChange}
         onViewChange={onViewChange}
         onViewportBoundsChange={onViewportBoundsChange}
