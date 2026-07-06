@@ -9,3 +9,13 @@ export interface ListBoardsQuery {
   page?: unknown;
   limit?: unknown;
 }
+
+export interface ListBoardIssuesQuery {
+  columnId?: unknown;
+  state?: unknown;
+  search?: unknown;
+  label?: unknown;
+  assignee?: unknown;
+  page?: unknown;
+  limit?: unknown;
+}

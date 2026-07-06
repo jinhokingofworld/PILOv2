@@ -1,16 +1,19 @@
 import { Injectable } from "@nestjs/common";
 import { badRequest, notFound } from "../../common/api-error";
 import { WorkspaceService } from "../workspace/workspace.service";
-import type { ListBoardsQuery } from "./dto";
+import type { ListBoardIssuesQuery, ListBoardsQuery } from "./dto";
 import { BoardReadQueries } from "./queries/board-read.queries";
 import type {
   BoardColumnRow,
   BoardDetailRow,
+  BoardIssueRow,
   BoardRow
 } from "./queries/board-read.queries";
 import type {
   BoardColumnPayload,
   BoardDetailPayload,
+  BoardIssueCardPayload,
+  BoardIssueState,
   BoardPaginatedPayload,
   BoardPayload
 } from "./types";
@@ -19,6 +22,19 @@ interface NormalizedPagination {
   page: number;
   limit: number;
   offset: number;
+}
+
+interface PaginationInput {
+  page?: unknown;
+  limit?: unknown;
+}
+
+interface NormalizedIssueFilters {
+  columnId: string | null;
+  state: BoardIssueState | null;
+  search: string | null;
+  label: string | null;
+  assignee: string | null;
 }
 
 const MAX_PAGE_LIMIT = 100;
@@ -92,6 +108,39 @@ export class BoardReadService {
     return rows.map((row) => this.mapBoardColumn(row));
   }
 
+  async listBoardIssues(
+    currentUserId: string,
+    workspaceId: string,
+    boardId: string,
+    query: ListBoardIssuesQuery
+  ): Promise<BoardPaginatedPayload<BoardIssueCardPayload>> {
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+
+    const normalizedBoardId = this.readBoardId(boardId);
+    const filters = this.normalizeIssueFilters(query);
+    const pagination = this.normalizePagination(query, 20);
+    await this.assertBoardExists(workspaceId, normalizedBoardId);
+    const queryInput = {
+      boardId: normalizedBoardId,
+      ...filters
+    };
+    const count = await this.boardReadQueries.countBoardIssues(queryInput);
+    const rows = await this.boardReadQueries.listBoardIssues(
+      queryInput,
+      pagination.limit,
+      pagination.offset
+    );
+
+    return {
+      data: rows.map((row) => this.mapBoardIssue(row)),
+      meta: {
+        page: pagination.page,
+        limit: pagination.limit,
+        total: count
+      }
+    };
+  }
+
   private async assertBoardExists(
     workspaceId: string,
     boardId: string
@@ -104,7 +153,7 @@ export class BoardReadService {
   }
 
   private normalizePagination(
-    input: ListBoardsQuery,
+    input: PaginationInput,
     defaultLimit: number
   ): NormalizedPagination {
     const page = this.readPositiveInteger(input.page, "page", 1);
@@ -121,8 +170,31 @@ export class BoardReadService {
     };
   }
 
+  private normalizeIssueFilters(
+    query: ListBoardIssuesQuery
+  ): NormalizedIssueFilters {
+    return {
+      columnId: this.readOptionalPositiveInteger(query.columnId, "columnId"),
+      state: this.readOptionalIssueState(query.state),
+      search: this.readOptionalString(query.search, "search"),
+      label: this.readOptionalString(query.label, "label"),
+      assignee: this.readOptionalString(query.assignee, "assignee")
+    };
+  }
+
   private readBoardId(value: string): string {
     return String(this.readPositiveInteger(value, "boardId", 0));
+  }
+
+  private readOptionalPositiveInteger(
+    value: unknown,
+    field: string
+  ): string | null {
+    if (value === undefined || value === null || value === "") {
+      return null;
+    }
+
+    return String(this.readPositiveInteger(value, field, 0));
   }
 
   private readPositiveInteger(
@@ -149,6 +221,23 @@ export class BoardReadService {
     }
 
     return parsed;
+  }
+
+  private readOptionalIssueState(value: unknown): BoardIssueState | null {
+    if (value === undefined || value === null || value === "") {
+      return null;
+    }
+
+    if (Array.isArray(value) || typeof value !== "string") {
+      throw badRequest("state must be open or closed");
+    }
+
+    const state = value.trim();
+    if (state === "open" || state === "closed") {
+      return state;
+    }
+
+    throw badRequest("state must be open or closed");
   }
 
   private readOptionalString(value: unknown, field: string): string | null {
@@ -241,6 +330,34 @@ export class BoardReadService {
     };
   }
 
+  private mapBoardIssue(row: BoardIssueRow): BoardIssueCardPayload {
+    return {
+      id: String(row.id),
+      boardId: String(row.board_id),
+      columnId: String(row.column_id),
+      repositoryId: row.repository_id,
+      githubIssueId: row.github_issue_id,
+      projectItemId: row.project_item_id,
+      githubIssueNodeId: row.github_issue_node_id,
+      githubProjectItemNodeId: row.github_project_item_node_id,
+      githubIssueNumber: this.toNullableInteger(
+        row.github_issue_number,
+        "Invalid GitHub issue number"
+      ),
+      issueNumber: row.issue_number,
+      title: row.title,
+      htmlUrl: row.html_url,
+      state: row.state,
+      labels: this.toArray(row.labels),
+      assignees: this.toArray(row.assignees),
+      position: this.toInteger(row.position, "Invalid board issue position"),
+      githubUpdatedAt: this.toNullableIsoString(row.github_updated_at),
+      lastSyncedAt: this.toNullableIsoString(row.last_synced_at),
+      createdAt: this.toIsoString(row.created_at),
+      updatedAt: this.toIsoString(row.updated_at)
+    };
+  }
+
   private toInteger(value: string | number, message: string): number {
     const parsed = typeof value === "number" ? value : Number.parseInt(value, 10);
     if (!Number.isSafeInteger(parsed)) {
@@ -248,6 +365,21 @@ export class BoardReadService {
     }
 
     return parsed;
+  }
+
+  private toNullableInteger(
+    value: string | number | null,
+    message: string
+  ): number | null {
+    if (value === null) {
+      return null;
+    }
+
+    return this.toInteger(value, message);
+  }
+
+  private toArray(value: unknown): unknown[] {
+    return Array.isArray(value) ? value : [];
   }
 
   private toNullableIsoString(value: Date | string | null): string | null {

@@ -60,6 +60,7 @@ assert.match(controllerFile, /@Post\(\)/);
 assert.match(controllerFile, /@Get\(\)/);
 assert.match(controllerFile, /@Get\(":boardId"\)/);
 assert.match(controllerFile, /@Get\(":boardId\/columns"\)/);
+assert.match(controllerFile, /@Get\(":boardId\/issues"\)/);
 assert.match(controllerFile, /@CurrentUserId\(\) currentUserId: string/);
 assert.match(controllerFile, /@Param\("workspaceId"\) workspaceId: string/);
 assert.match(controllerFile, /@Body\(\) body: unknown/);
@@ -72,6 +73,7 @@ assert.match(serviceFile, /createBoard/);
 assert.match(serviceFile, /listBoards/);
 assert.match(serviceFile, /getBoard/);
 assert.match(serviceFile, /listBoardColumns/);
+assert.match(serviceFile, /listBoardIssues/);
 
 assert.match(readServiceFile, /class BoardReadService/);
 assert.match(readServiceFile, /assertWorkspaceAccess/);
@@ -104,3 +106,4 @@ execFileSync(process.execPath, [tscScript, "-p", "tsconfig.build.json"], {
 
 await import("./create-hydrate.test.mjs");
 await import("./read.test.mjs");
+await import("./issues.test.mjs");
