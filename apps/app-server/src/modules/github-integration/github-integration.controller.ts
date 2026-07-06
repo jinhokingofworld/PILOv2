@@ -97,21 +97,26 @@ export class GithubIntegrationController {
 
   @Post("me/github/oauth/start")
   @UseGuards(AuthGuard)
-  startGithubOAuth(
+  async startGithubOAuth(
     @CurrentUserId() currentUserId: string,
-    @Body() body: StartGithubOAuthRequest | undefined
-  ): ApiSuccessResponse<GithubOAuthStartPayload> {
-    const start = this.githubIntegrationService.startGithubOAuth(currentUserId, body);
+    @Body() body: StartGithubOAuthRequest | undefined,
+    @Res({ passthrough: true }) reply: FastifyReply
+  ): Promise<ApiSuccessResponse<GithubOAuthStartPayload>> {
+    const { stateCookie, ...start } =
+      await this.githubIntegrationService.startGithubOAuth(currentUserId, body);
+    reply.header("set-cookie", stateCookie);
     return apiResponse(start);
   }
 
   @Get("github/oauth/callback")
   async completeGithubOAuthCallback(
     @Query() query: GithubOAuthCallbackQuery,
+    @Headers("cookie") cookieHeader: string | undefined,
     @Res({ passthrough: true }) reply: FastifyReply
   ): Promise<ApiSuccessResponse<GithubOAuthCallbackPayload> | undefined> {
     const result = await this.githubIntegrationService.completeGithubOAuthCallback(
-      query
+      query,
+      cookieHeader
     );
     if (redirectToReturnUrl(reply, result.returnUrl)) {
       return undefined;
@@ -136,23 +141,30 @@ export class GithubIntegrationController {
   async startGithubAppInstallation(
     @CurrentUserId() currentUserId: string,
     @Param("workspaceId") workspaceId: string,
-    @Body() body: StartGithubAppInstallationRequest | undefined
+    @Body() body: StartGithubAppInstallationRequest | undefined,
+    @Res({ passthrough: true }) reply: FastifyReply
   ): Promise<ApiSuccessResponse<GithubAppInstallationStartPayload>> {
-    const result = await this.githubIntegrationService.startGithubAppInstallation(
-      currentUserId,
-      workspaceId,
-      body
-    );
+    const { stateCookie, ...result } =
+      await this.githubIntegrationService.startGithubAppInstallation(
+        currentUserId,
+        workspaceId,
+        body
+      );
+    reply.header("set-cookie", stateCookie);
     return apiResponse(result);
   }
 
   @Get("github/installations/callback")
   async completeGithubAppInstallationCallback(
     @Query() query: GithubAppInstallationCallbackQuery,
+    @Headers("cookie") cookieHeader: string | undefined,
     @Res({ passthrough: true }) reply: FastifyReply
   ): Promise<ApiSuccessResponse<GithubAppInstallationCallbackPayload> | undefined> {
     const result =
-      await this.githubIntegrationService.completeGithubAppInstallationCallback(query);
+      await this.githubIntegrationService.completeGithubAppInstallationCallback(
+        query,
+        cookieHeader
+      );
     if (redirectToReturnUrl(reply, result.returnUrl)) {
       return undefined;
     }

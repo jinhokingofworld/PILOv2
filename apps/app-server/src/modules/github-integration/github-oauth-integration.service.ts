@@ -3,6 +3,7 @@ import { QueryResultRow } from "pg";
 import { badRequest, unauthorized } from "../../common/api-error";
 import { DatabaseService } from "../../database/database.service";
 import { GithubOAuthCallbackQuery, StartGithubOAuthRequest } from "./dto";
+import { GithubCallbackStateService } from "./github-callback-state.service";
 import { GithubIntegrationConfigService } from "./github-integration-config.service";
 import { GithubOAuthClient } from "./github-oauth.client";
 import { GithubOAuthStateService } from "./github-oauth-state.service";
@@ -23,12 +24,17 @@ interface GithubOAuthStatusRow extends QueryResultRow {
   github_revoked_at: Date | string | null;
 }
 
+type GithubOAuthStartResult = GithubOAuthStartPayload & {
+  stateCookie: string;
+};
+
 @Injectable()
 export class GithubOAuthIntegrationService {
   constructor(
     private readonly database: DatabaseService,
     private readonly githubOAuthClient: GithubOAuthClient,
     private readonly stateService: GithubOAuthStateService,
+    private readonly callbackStateService: GithubCallbackStateService,
     private readonly tokenEncryptionService: GithubTokenEncryptionService,
     private readonly configService: GithubIntegrationConfigService
   ) {}
@@ -57,10 +63,10 @@ export class GithubOAuthIntegrationService {
     return this.mapGithubOAuthStatus(row);
   }
 
-  startGithubOAuth(
+  async startGithubOAuth(
     currentUserId: string,
     input: StartGithubOAuthRequest | undefined
-  ): GithubOAuthStartPayload {
+  ): Promise<GithubOAuthStartResult> {
     const config = this.configService.getGithubOAuthConfig();
     const returnUrl = validateGithubCallbackReturnUrl(
       input?.returnUrl,
@@ -73,6 +79,18 @@ export class GithubOAuthIntegrationService {
       },
       config
     );
+    const statePayload = this.stateService.verifyState(state, config);
+    const bindingToken = this.callbackStateService.createBindingToken();
+    await this.callbackStateService.storeState({
+      flow: "oauth",
+      stateNonce: statePayload.nonce,
+      userId: currentUserId,
+      workspaceId: null,
+      returnUrl,
+      bindingTokenHash: this.callbackStateService.hashBindingToken(bindingToken),
+      expiresAt: new Date(statePayload.expiresAt)
+    });
+
     const authorizeUrl = new URL("https://github.com/login/oauth/authorize");
     authorizeUrl.searchParams.set("client_id", config.clientId);
     authorizeUrl.searchParams.set("redirect_uri", this.getCallbackUrl(config));
@@ -80,12 +98,18 @@ export class GithubOAuthIntegrationService {
 
     return {
       authorizeUrl: authorizeUrl.toString(),
-      state
+      state,
+      stateCookie: this.callbackStateService.buildSetCookieHeader(
+        "oauth",
+        bindingToken,
+        config
+      )
     };
   }
 
   async completeGithubOAuthCallback(
-    query: GithubOAuthCallbackQuery
+    query: GithubOAuthCallbackQuery,
+    cookieHeader?: string | null
   ): Promise<GithubOAuthCallbackPayload> {
     const config = this.configService.getGithubOAuthConfig();
     const code = this.validateRequiredString(
@@ -97,6 +121,11 @@ export class GithubOAuthIntegrationService {
       "GitHub OAuth state is required"
     );
     const statePayload = this.stateService.verifyState(state, config);
+    const storedState = await this.callbackStateService.consumeState({
+      flow: "oauth",
+      stateNonce: statePayload.nonce,
+      cookieHeader
+    });
     const token = await this.githubOAuthClient.exchangeCodeForAccessToken({
       code,
       clientId: config.clientId,
@@ -129,7 +158,7 @@ export class GithubOAuthIntegrationService {
           github_revoked_at
       `,
       [
-        statePayload.userId,
+        storedState.userId,
         githubUser.id,
         githubUser.login,
         encryptedToken,
@@ -152,7 +181,7 @@ export class GithubOAuthIntegrationService {
       githubLogin: row.github_login ?? githubUser.login,
       tokenScope: row.github_token_scope,
       githubConnectedAt,
-      returnUrl: statePayload.returnUrl
+      returnUrl: storedState.returnUrl
     };
   }
 
