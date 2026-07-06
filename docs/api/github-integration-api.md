@@ -213,8 +213,23 @@ GitHub App webhook 설정 URL은 `{API_PUBLIC_ORIGIN}/api/v1/github/webhooks`이
 - `POST /me/github/oauth/start` and
   `POST /workspaces/{workspaceId}/github/installations/start` store the optional
   `returnUrl` in signed state.
+- Both start endpoints also create a server-side callback state row and set an
+  HttpOnly `SameSite=Lax` binding cookie scoped to `{API_BASE_PATH}/github`.
+- Browser clients must call the start endpoints with credentials included, and
+  app-server CORS must use a concrete frontend origin with credentials enabled
+  so the binding cookie can be stored.
 - `returnUrl` must use the configured frontend origin (`FRONTEND_URL`) or a
   frontend-relative path.
+- `GET /github/oauth/callback` requires a valid signed OAuth state, the matching
+  browser binding cookie, and an unexpired unconsumed server-side state row.
+  The server consumes the state row before exchanging the GitHub OAuth code.
+- `GET /github/installations/callback` requires a valid signed GitHub App
+  installation state, the matching browser binding cookie, and an unexpired
+  unconsumed server-side state row. The server consumes the state row before
+  checking the user's installation access or looking up the installation.
+- Missing cookies, expired rows, already-consumed rows, or nonce/binding
+  mismatches are rejected as invalid callback state. Callback state is one-time
+  use and MUST NOT be accepted on replay.
 - On callback success, app-server redirects to `returnUrl` with `302`.
 - If `returnUrl` is omitted, the callback returns the JSON payload for
   diagnostic/API-client use.
