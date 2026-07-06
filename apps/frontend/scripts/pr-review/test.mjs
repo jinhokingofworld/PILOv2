@@ -24,6 +24,13 @@ const prReviewPanel = await readFile(
   ),
   "utf8"
 );
+const prReviewCanvasShell = await readFile(
+  new URL(
+    "../../src/features/pr-review/components/review-canvas/PrReviewCanvasShell.tsx",
+    import.meta.url
+  ),
+  "utf8"
+);
 
 assert.match(prReviewTypes, /export type PrReviewRepository/);
 assert.match(prReviewTypes, /export type PrReviewPullRequest/);
@@ -54,8 +61,17 @@ assert.match(prReviewPanel, /router\.push\("\/github"\)/);
 assert.match(prReviewPanel, /PR 번호 또는 제목 검색/);
 assert.match(prReviewPanel, /리뷰할 PR을 선택하세요/);
 assert.match(prReviewPanel, /리뷰 시작/);
-assert.match(prReviewPanel, /Review session이 생성되었습니다/);
+assert.match(prReviewPanel, /PrReviewCanvasShell/);
+assert.match(prReviewPanel, /activeReviewSession/);
 assert.match(prReviewPanel, /role="dialog"/);
 assert.match(prReviewPanel, /Skeleton/);
 assert.match(prReviewPanel, /isStartingReview/);
 assert.doesNotMatch(prReviewPanel, /features\/github-integration/);
+assert.match(prReviewCanvasShell, /PR 선택으로 돌아가기/);
+assert.match(prReviewCanvasShell, /Review 제출/);
+assert.match(prReviewCanvasShell, /Merge/);
+assert.match(prReviewCanvasShell, /DETAIL_PANEL_DEFAULT_WIDTH/);
+assert.match(prReviewCanvasShell, /onPointerDown/);
+assert.match(prReviewCanvasShell, /session\.reviewedCount/);
+assert.match(prReviewCanvasShell, /session\.conflictStatus/);
+assert.doesNotMatch(prReviewCanvasShell, /features\/canvas/);
