@@ -4,6 +4,7 @@ import { DatabaseModule } from "../../database/database.module";
 import { WorkspaceModule } from "../workspace/workspace.module";
 import { BoardController } from "./board.controller";
 import { BoardHydrationService } from "./board-hydration.service";
+import { BoardIssueReadService } from "./board-issue-read.service";
 import { BoardReadService } from "./board-read.service";
 import { BoardService } from "./board.service";
 import { BoardReadQueries } from "./queries/board-read.queries";
@@ -14,6 +15,7 @@ import { BoardReadQueries } from "./queries/board-read.queries";
   providers: [
     BoardService,
     BoardHydrationService,
+    BoardIssueReadService,
     BoardReadService,
     BoardReadQueries
   ],
