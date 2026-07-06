@@ -150,6 +150,7 @@ assert.match(meetingPanel, /remoteAudioContainerRef/);
 assert.match(meetingPanel, /MeetingReportSection/);
 assert.match(meetingPanel, /getMeetingSectionFromHash/);
 assert.match(meetingPanel, /activeSection/);
+assert.match(meetingPanel, /useState<MeetingSection>\("room"\)/);
 assert.match(meetingPanel, /hashchange/);
 assert.match(meetingPanel, /reportsEnabled: activeSection === "report"/);
 assert.match(meetingPanel, /reportStatusFilter/);

@@ -269,11 +269,8 @@ export function MeetingPanel() {
   const workspaceId = authSession?.activeWorkspaceId ?? "";
   const accessToken = authSession?.accessToken.trim() ?? "";
   const currentUserId = authSession?.user.id ?? "";
-  const [activeSection, setActiveSection] = useState<MeetingSection>(() =>
-    typeof window === "undefined"
-      ? "room"
-      : getMeetingSectionFromHash(window.location.hash)
-  );
+  const [activeSection, setActiveSection] =
+    useState<MeetingSection>("room");
   const [reportStatusFilter, setReportStatusFilter] =
     useState<MeetingReportStatusFilter>("ALL");
   const reportsQuery = useMemo<MeetingReportListQuery>(
