@@ -76,6 +76,14 @@ export interface UpdateCanvasViewSettingRequest {
   viewportY?: unknown;
 }
 
+export interface ListCanvasShapesQuery {
+  x?: unknown;
+  y?: unknown;
+  width?: unknown;
+  height?: unknown;
+  margin?: unknown;
+}
+
 export interface SyncCanvasShapesBatchRequest {
   operations?: unknown;
 }
@@ -103,6 +111,8 @@ export interface CanvasShapePayload {
   updatedAt: string;
   deletedAt: string | null;
 }
+
+export type CanvasShapeSummaryPayload = CanvasShapePayload;
 
 export interface CanvasBoardPayload {
   id: string;
@@ -156,6 +166,14 @@ interface ShapeWriteValues {
   rotation?: number;
   zIndex?: number;
   rawShape?: Record<string, unknown>;
+}
+
+interface ViewportBoundsValues {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  margin: number;
 }
 
 type CanvasShapeBatchOperationValues =
@@ -282,12 +300,11 @@ export class CanvasService {
       throw notFound("Canvas not found");
     }
 
-    const shapes = await this.listActiveShapes(canvas.id);
-    const payload = this.mapCanvas(canvas, shapes.length);
+    const payload = this.mapCanvas(canvas);
 
     return {
       ...payload,
-      shapes,
+      shapes: [],
       viewSetting: {
         zoom: payload.zoom,
         viewportX: payload.viewportX,
@@ -295,6 +312,57 @@ export class CanvasService {
       },
       userState: null
     };
+  }
+
+  async listShapesInViewport(
+    currentUserId: string,
+    workspaceId: string,
+    canvasId: string,
+    input: ListCanvasShapesQuery
+  ): Promise<CanvasShapeSummaryPayload[]> {
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+
+    const canvas = await this.findCanvas(workspaceId, canvasId);
+    if (!canvas) {
+      throw notFound("Canvas not found");
+    }
+
+    const bounds = this.validateViewportBounds(input);
+    const minX = bounds.x - bounds.margin;
+    const minY = bounds.y - bounds.margin;
+    const maxX = bounds.x + bounds.width + bounds.margin;
+    const maxY = bounds.y + bounds.height + bounds.margin;
+    const shapes = await this.database.query<CanvasShapeRow>(
+      `
+        SELECT
+          id,
+          canvas_id,
+          shape_type,
+          title,
+          text_content,
+          x,
+          y,
+          width,
+          height,
+          rotation,
+          z_index,
+          raw_shape,
+          created_at,
+          updated_at,
+          deleted_at
+        FROM canvas_freeform_shapes
+        WHERE canvas_id = $1
+          AND deleted_at IS NULL
+          AND x <= $3
+          AND (x + COALESCE(width, 0)) >= $2
+          AND y <= $5
+          AND (y + COALESCE(height, 0)) >= $4
+        ORDER BY z_index ASC, updated_at ASC, id ASC
+      `,
+      [canvas.id, minX, maxX, minY, maxY]
+    );
+
+    return shapes.map((shape) => this.mapShape(shape));
   }
 
   async createShape(
@@ -564,6 +632,49 @@ export class CanvasService {
     });
   }
 
+  async getShapeDetail(
+    currentUserId: string,
+    workspaceId: string,
+    shapeId: string
+  ): Promise<CanvasShapePayload> {
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+
+    const id = this.validateShapeId(shapeId);
+    const shape = await this.database.queryOne<CanvasShapeRow>(
+      `
+        SELECT
+          s.id,
+          s.canvas_id,
+          s.shape_type,
+          s.title,
+          s.text_content,
+          s.x,
+          s.y,
+          s.width,
+          s.height,
+          s.rotation,
+          s.z_index,
+          s.raw_shape,
+          s.created_at,
+          s.updated_at,
+          s.deleted_at
+        FROM canvas_freeform_shapes s
+        INNER JOIN canvas c ON c.id = s.canvas_id
+        WHERE s.id = $1
+          AND c.workspace_id = $2
+          AND c.board_type = 'freeform'
+          AND s.deleted_at IS NULL
+      `,
+      [id, workspaceId]
+    );
+
+    if (!shape) {
+      throw notFound("Canvas shape not found");
+    }
+
+    return this.mapShape(shape);
+  }
+
   async enterCanvas(
     currentUserId: string,
     workspaceId: string,
@@ -827,19 +938,23 @@ export class CanvasService {
     return this.database.queryOne<CanvasRow>(
       `
         SELECT
-          id,
-          workspace_id,
-          title,
-          board_type,
-          zoom,
-          viewport_x,
-          viewport_y,
-          updated_at,
-          0::int AS shape_count
-        FROM canvas
-        WHERE id = $1
-          AND workspace_id = $2
-          AND board_type = 'freeform'
+          c.id,
+          c.workspace_id,
+          c.title,
+          c.board_type,
+          c.zoom,
+          c.viewport_x,
+          c.viewport_y,
+          c.updated_at,
+          COUNT(s.id)::int AS shape_count
+        FROM canvas c
+        LEFT JOIN canvas_freeform_shapes s
+          ON s.canvas_id = c.id
+         AND s.deleted_at IS NULL
+        WHERE c.id = $1
+          AND c.workspace_id = $2
+          AND c.board_type = 'freeform'
+        GROUP BY c.id
       `,
       [canvasId, workspaceId]
     );
@@ -1066,6 +1181,36 @@ export class CanvasService {
     };
   }
 
+  private validateViewportBounds(input: ListCanvasShapesQuery): ViewportBoundsValues {
+    if (!this.isRecord(input)) {
+      throw badRequest("Canvas viewport bounds query is required");
+    }
+
+    const width = this.validateQueryNumber(input.width, "Canvas viewport width");
+    const height = this.validateQueryNumber(input.height, "Canvas viewport height");
+    const margin = this.validateQueryNumber(input.margin, "Canvas viewport margin", 0);
+
+    if (width <= 0) {
+      throw badRequest("Canvas viewport width must be greater than 0");
+    }
+
+    if (height <= 0) {
+      throw badRequest("Canvas viewport height must be greater than 0");
+    }
+
+    if (margin < 0) {
+      throw badRequest("Canvas viewport margin must be greater than or equal to 0");
+    }
+
+    return {
+      x: this.validateQueryNumber(input.x, "Canvas viewport x"),
+      y: this.validateQueryNumber(input.y, "Canvas viewport y"),
+      width,
+      height,
+      margin
+    };
+  }
+
   private validateShapeType(value: unknown): string {
     if (typeof value !== "string" || !ALLOWED_SHAPE_TYPES.has(value)) {
       throw badRequest("Canvas shapeType is invalid");
@@ -1104,6 +1249,33 @@ export class CanvasService {
     }
 
     return value;
+  }
+
+  private validateQueryNumber(
+    value: unknown,
+    fieldName: string,
+    fallback?: number
+  ): number {
+    if (value === undefined || value === null || value === "") {
+      if (fallback !== undefined) {
+        return fallback;
+      }
+
+      throw badRequest(`${fieldName} is required`);
+    }
+
+    const numberValue =
+      typeof value === "number"
+        ? value
+        : typeof value === "string" && value.trim()
+          ? Number(value)
+          : NaN;
+
+    if (!Number.isFinite(numberValue)) {
+      throw badRequest(`${fieldName} must be a finite number`);
+    }
+
+    return numberValue;
   }
 
   private validateNullableNonNegativeNumber(

@@ -5,6 +5,7 @@ import { useEditor, type TLShape } from "tldraw";
 import { useValue } from "@tldraw/state-react";
 import type {
   PiloCanvasFreeformShape,
+  PiloCanvasViewportBounds,
   PiloCanvasViewSetting,
 } from "../types";
 
@@ -19,9 +20,11 @@ function toFreeformSnapshot(shape: TLShape): PiloCanvasFreeformShape {
 export function CanvasStateReporter({
   onFreeformShapesChange,
   onViewChange,
+  onViewportBoundsChange,
 }: {
   onFreeformShapesChange: (shapes: PiloCanvasFreeformShape[]) => void;
   onViewChange: (viewSetting: PiloCanvasViewSetting) => void;
+  onViewportBoundsChange: (bounds: PiloCanvasViewportBounds) => void;
 }) {
   const editor = useEditor();
   const viewSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -46,6 +49,25 @@ export function CanvasStateReporter({
     viewSyncTimerRef.current = setTimeout(() => {
       viewSyncTimerRef.current = null;
       onViewChange(nextViewSetting);
+
+      const bounds = editor.getViewportPageBounds();
+
+      if (
+        Number.isFinite(bounds.x) &&
+        Number.isFinite(bounds.y) &&
+        Number.isFinite(bounds.w) &&
+        Number.isFinite(bounds.h) &&
+        bounds.w > 0 &&
+        bounds.h > 0
+      ) {
+        onViewportBoundsChange({
+          x: bounds.x,
+          y: bounds.y,
+          width: bounds.w,
+          height: bounds.h,
+          zoom: camera.z,
+        });
+      }
     }, 140);
 
     return () => {
@@ -53,7 +75,7 @@ export function CanvasStateReporter({
         clearTimeout(viewSyncTimerRef.current);
       }
     };
-  }, [camera.x, camera.y, camera.z, onViewChange]);
+  }, [camera.x, camera.y, camera.z, editor, onViewChange, onViewportBoundsChange]);
 
   useEffect(() => {
     function readFreeformShapes() {

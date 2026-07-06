@@ -5,7 +5,7 @@
 Canvas API는 사용자가 직접 편집하는 자유형 캔버스를 담당한다.
 
 - Workspace canvas 목록, 생성, 상세 조회
-- 자유 도형 생성, 수정, 삭제
+- 자유 도형 viewport 조회, 상세 조회, 생성, 수정, 삭제
 - 화면 위치 저장
 - 캔버스 입장/퇴장 user state
 
@@ -27,9 +27,11 @@ editing은 이 문서의 범위가 아니다.
 | --- | --- | --- |
 | `GET` | `/workspaces/{workspaceId}/canvases` | Workspace canvas 목록 조회 |
 | `POST` | `/workspaces/{workspaceId}/canvases` | Canvas 생성 |
-| `GET` | `/workspaces/{workspaceId}/canvases/{canvasId}` | Canvas 상세와 활성 shape 조회 |
+| `GET` | `/workspaces/{workspaceId}/canvases/{canvasId}` | Canvas metadata와 저장된 viewport 조회 |
+| `GET` | `/workspaces/{workspaceId}/canvases/{canvasId}/shapes` | Viewport bounds 기준 shape summary 조회 |
 | `POST` | `/workspaces/{workspaceId}/canvases/{canvasId}/shapes` | Shape 생성 |
 | `POST` | `/workspaces/{workspaceId}/canvases/{canvasId}/shapes/batch` | Shape 변경 batch 저장 |
+| `GET` | `/workspaces/{workspaceId}/canvas-shapes/{shapeId}` | Shape 상세 조회 |
 | `PATCH` | `/workspaces/{workspaceId}/canvas-shapes/{shapeId}` | Shape 수정 |
 | `DELETE` | `/workspaces/{workspaceId}/canvas-shapes/{shapeId}` | Shape soft delete |
 | `PUT` | `/workspaces/{workspaceId}/canvases/{canvasId}/view-settings` | Viewport 저장 |
@@ -73,6 +75,86 @@ bookmark, embed, pilo-sticky-note, pilo-code-block, file_node, group
 
 `file_node`는 여기서는 일반 자유형 shape type이다. PR Review graph는
 `canvas_freeform_shapes`에 저장하지 않는다.
+
+## Canvas 상세 조회
+
+Canvas 상세 조회는 canvas metadata와 저장된 viewport를 반환한다. 대용량 canvas에서
+초기 진입 시 전체 shape를 우선 로드하지 않도록, 클라이언트는 `viewSetting` 기준
+viewport bounds를 계산한 뒤 shape summary 조회 API를 호출한다.
+
+```json
+{
+  "id": "canvas id",
+  "workspaceId": "workspace id",
+  "title": "Untitled canvas",
+  "boardType": "freeform",
+  "zoom": 1,
+  "viewportX": 0,
+  "viewportY": 0,
+  "shapeCount": 42,
+  "updatedAt": "2026-07-03T00:00:00.000Z",
+  "viewSetting": {
+    "zoom": 1,
+    "viewportX": 0,
+    "viewportY": 0
+  },
+  "shapes": [],
+  "userState": null
+}
+```
+
+## Viewport Shape Summary 조회
+
+```text
+GET /workspaces/{workspaceId}/canvases/{canvasId}/shapes?x=-120&y=80&width=1440&height=900&margin=320
+```
+
+Query:
+
+- `x`: viewport page bounds left
+- `y`: viewport page bounds top
+- `width`: viewport page bounds width
+- `height`: viewport page bounds height
+- `margin`: viewport 주변 추가 로드 여백. 생략하면 `0`
+
+서버는 `x - margin`, `y - margin`, `x + width + margin`,
+`y + height + margin`과 겹치는 활성 shape summary를 반환한다.
+
+```json
+[
+  {
+    "id": "shape_client_id",
+    "canvasId": "canvas id",
+    "shapeType": "pilo-sticky-note",
+    "title": "Decision",
+    "textContent": "Ship MVP with all-deny RLS",
+    "x": 120,
+    "y": 80,
+    "width": 240,
+    "height": 120,
+    "rotation": 0,
+    "zIndex": 10,
+    "rawShape": {},
+    "createdAt": "2026-07-03T00:00:00.000Z",
+    "updatedAt": "2026-07-03T00:00:00.000Z",
+    "deletedAt": null
+  }
+]
+```
+
+## Shape 상세 조회
+
+```text
+GET /workspaces/{workspaceId}/canvas-shapes/{shapeId}
+```
+
+클라이언트는 shape 클릭 시 zoom 기준 이상일 때만 상세 조회를 호출한다. zoom 기준
+이하에서 클릭한 경우에는 선택/강조만 처리하고 상세 조회를 보내지 않는다. zoom 기준
+이하로 내려갔다가 다시 확대되어도 자동 조회하지 않으며, 사용자가 shape를 다시
+클릭해야 한다.
+
+응답은 `Shape Payload`와 같은 full shape data다. 이미 클라이언트 cache에 full
+detail이 있으면 cache를 우선 사용할 수 있다.
 
 ## Shape Batch 저장
 

@@ -7,6 +7,7 @@ import {
   Patch,
   Post,
   Put,
+  Query,
   UseGuards
 } from "@nestjs/common";
 import { apiResponse, ApiSuccessResponse } from "../../common/api-response";
@@ -19,11 +20,13 @@ import {
   CanvasShapeBatchPayload,
   CanvasShapeDeletePayload,
   CanvasShapePayload,
+  CanvasShapeSummaryPayload,
+  CanvasUserStatePayload,
   CanvasViewSettingPayload,
   CanvasService,
-  CanvasUserStatePayload,
   CreateCanvasRequest,
   CreateCanvasShapeRequest,
+  ListCanvasShapesQuery,
   SyncCanvasShapesBatchRequest,
   UpdateCanvasViewSettingRequest,
   UpdateCanvasShapeRequest
@@ -77,6 +80,23 @@ export class CanvasController {
     return apiResponse(canvas);
   }
 
+  @Get("canvases/:canvasId/shapes")
+  async listShapesInViewport(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("canvasId") canvasId: string,
+    @Query() query: ListCanvasShapesQuery
+  ): Promise<ApiSuccessResponse<CanvasShapeSummaryPayload[]>> {
+    const shapes = await this.canvasService.listShapesInViewport(
+      currentUserId,
+      workspaceId,
+      canvasId,
+      query
+    );
+
+    return apiResponse(shapes);
+  }
+
   @Post("canvases/:canvasId/shapes")
   async createShape(
     @CurrentUserId() currentUserId: string,
@@ -109,6 +129,21 @@ export class CanvasController {
     );
 
     return apiResponse(result);
+  }
+
+  @Get("canvas-shapes/:shapeId")
+  async getShapeDetail(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("shapeId") shapeId: string
+  ): Promise<ApiSuccessResponse<CanvasShapePayload>> {
+    const shape = await this.canvasService.getShapeDetail(
+      currentUserId,
+      workspaceId,
+      shapeId
+    );
+
+    return apiResponse(shape);
   }
 
   @Post("canvases/:canvasId/enter")
