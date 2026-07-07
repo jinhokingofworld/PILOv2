@@ -1,4 +1,10 @@
 export type LoginProvider = "google" | "github";
+export type WorkspaceRole = "owner" | "member";
+export type WorkspaceInvitationStatus =
+  | "pending"
+  | "accepted"
+  | "revoked"
+  | "expired";
 
 export type UserProfile = {
   id: string;
@@ -13,9 +19,63 @@ export type Workspace = {
   id: string;
   name: string;
   ownerUserId: string | null;
+  role: WorkspaceRole;
   isOwner: boolean;
   createdAt: string;
   updatedAt: string;
+};
+
+export type WorkspaceMember = {
+  id: string;
+  workspaceId: string;
+  userId: string;
+  role: WorkspaceRole;
+  invitedByUserId: string | null;
+  joinedAt: string;
+  createdAt: string;
+  updatedAt: string;
+  user: {
+    id: string;
+    name: string | null;
+    email: string | null;
+    avatarUrl: string | null;
+  };
+};
+
+export type WorkspaceInvitation = {
+  id: string;
+  workspaceId: string;
+  email: string;
+  role: WorkspaceRole;
+  status: WorkspaceInvitationStatus;
+  invitedByUserId: string;
+  acceptedByUserId: string | null;
+  revokedByUserId: string | null;
+  expiresAt: string;
+  acceptedAt: string | null;
+  revokedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CreateWorkspaceInvitationPayload = {
+  invitation: WorkspaceInvitation;
+  invitationToken: string;
+  acceptUrl: string;
+};
+
+export type WorkspaceInvitationTokenPayload = {
+  workspaceId: string;
+  workspaceName: string;
+  email: string;
+  role: WorkspaceRole;
+  status: WorkspaceInvitationStatus;
+  expiresAt: string;
+};
+
+export type AcceptWorkspaceInvitationPayload = {
+  workspace: Workspace;
+  membership: WorkspaceMember;
 };
 
 type ApiSuccessResponse<T> = {
@@ -114,6 +174,105 @@ export async function listWorkspaces(accessToken: string) {
   return requestJson<Workspace[]>("/workspaces", {
     accessToken
   });
+}
+
+export async function listWorkspaceMembers(
+  accessToken: string,
+  workspaceId: string
+) {
+  return requestJson<WorkspaceMember[]>(
+    `/workspaces/${encodeURIComponent(workspaceId)}/members`,
+    {
+      accessToken
+    }
+  );
+}
+
+export async function removeWorkspaceMember(
+  accessToken: string,
+  workspaceId: string,
+  userId: string
+) {
+  return requestJson<{ removed: true }>(
+    `/workspaces/${encodeURIComponent(workspaceId)}/members/${encodeURIComponent(
+      userId
+    )}`,
+    {
+      accessToken,
+      method: "DELETE"
+    }
+  );
+}
+
+export async function listWorkspaceInvitations(
+  accessToken: string,
+  workspaceId: string
+) {
+  return requestJson<WorkspaceInvitation[]>(
+    `/workspaces/${encodeURIComponent(workspaceId)}/invitations`,
+    {
+      accessToken
+    }
+  );
+}
+
+export async function createWorkspaceInvitation(
+  accessToken: string,
+  workspaceId: string,
+  email: string
+) {
+  return requestJson<CreateWorkspaceInvitationPayload>(
+    `/workspaces/${encodeURIComponent(workspaceId)}/invitations`,
+    {
+      accessToken,
+      method: "POST",
+      body: {
+        email,
+        role: "member"
+      }
+    }
+  );
+}
+
+export async function revokeWorkspaceInvitation(
+  accessToken: string,
+  workspaceId: string,
+  invitationId: string
+) {
+  return requestJson<WorkspaceInvitation>(
+    `/workspaces/${encodeURIComponent(
+      workspaceId
+    )}/invitations/${encodeURIComponent(invitationId)}/revoke`,
+    {
+      accessToken,
+      method: "POST"
+    }
+  );
+}
+
+export async function getWorkspaceInvitation(
+  accessToken: string,
+  invitationToken: string
+) {
+  return requestJson<WorkspaceInvitationTokenPayload>(
+    `/workspace-invitations/${encodeURIComponent(invitationToken)}`,
+    {
+      accessToken
+    }
+  );
+}
+
+export async function acceptWorkspaceInvitation(
+  accessToken: string,
+  invitationToken: string
+) {
+  return requestJson<AcceptWorkspaceInvitationPayload>(
+    `/workspace-invitations/${encodeURIComponent(invitationToken)}/accept`,
+    {
+      accessToken,
+      method: "POST"
+    }
+  );
 }
 
 export async function logoutSession(accessToken: string) {

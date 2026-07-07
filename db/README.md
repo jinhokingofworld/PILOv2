@@ -24,3 +24,4 @@ The database schema source of truth is the migration history in `db/migrations/`
 - `migrations/005_create_user_sessions.sql` adds server-side hashed session token storage.
 - `migrations/006_update_workspace_and_meeting_recording_constraints.sql` updates workspace owner uniqueness and meeting recording/report constraints.
 - `migrations/007_create_github_callback_states.sql` adds one-time server-side callback state storage for GitHub OAuth and GitHub App installation redirects.
+- `migrations/008_create_workspace_memberships_and_invitations.sql` adds owner/member workspace membership, invitation storage, and owner backfill.
