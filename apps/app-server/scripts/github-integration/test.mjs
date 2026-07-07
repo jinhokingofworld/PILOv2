@@ -41,7 +41,9 @@ assert.match(moduleFile, /providers: \[[\s\S]*GithubIntegrationService[\s\S]*\]/
 assert.match(moduleFile, /providers: \[[\s\S]*GithubAppClient[\s\S]*\]/);
 assert.match(moduleFile, /providers: \[[\s\S]*GithubAppInstallationStateService[\s\S]*\]/);
 assert.match(moduleFile, /providers: \[[\s\S]*GithubReviewSubmissionService[\s\S]*\]/);
-assert.match(moduleFile, /exports: \[GithubIntegrationService\]/);
+assert.match(moduleFile, /providers: \[[\s\S]*GithubProjectV2WriteService[\s\S]*\]/);
+assert.match(moduleFile, /exports: \[[\s\S]*GithubIntegrationService[\s\S]*\]/);
+assert.match(moduleFile, /exports: \[[\s\S]*GithubProjectV2WriteService[\s\S]*\]/);
 
 assert.match(controllerFile, /@Controller\(\)/);
 assert.match(controllerFile, /constructor\(private readonly githubIntegrationService/);

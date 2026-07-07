@@ -185,3 +185,8 @@ export interface CreateBoardResult {
   board: BoardPayload;
   statusCode: 200 | 201;
 }
+
+export interface UpdateBoardIssueStatusPayload {
+  issue: BoardIssueCardPayload;
+  previousColumnId: string;
+}
