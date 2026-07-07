@@ -172,3 +172,165 @@ function projectNode(overrides = {}) {
     globalThis.fetch = originalFetch;
   }
 }
+
+{
+  const originalFetch = globalThis.fetch;
+  const privateKeyPem = createPrivateKeyPem();
+  const requests = [];
+  const userProject = projectNode({
+    owner: {
+      __typename: "User",
+      login: "Developer-EJ"
+    },
+    title: "PILO_Project",
+    url: "https://github.com/users/Developer-EJ/projects/34",
+    resourcePath: "/users/Developer-EJ/projects/34",
+    repositories: {
+      nodes: [{ id: "R_kgDOExample" }],
+      pageInfo: {
+        hasNextPage: false,
+        endCursor: null
+      }
+    }
+  });
+
+  globalThis.fetch = async (url, options = {}) => {
+    const requestUrl = url.toString();
+    assert.doesNotMatch(requestUrl, /access_tokens/);
+    const body = options.body ? JSON.parse(options.body) : null;
+    requests.push({
+      url: requestUrl,
+      method: options.method ?? "GET",
+      headers: options.headers ?? {},
+      body
+    });
+
+    assert.equal(requestUrl, "https://api.github.com/graphql");
+    assert.equal(options.headers?.Authorization, "Bearer user-oauth-token");
+
+    if (body.query.includes("user(login: $login)")) {
+      return {
+        ok: true,
+        async json() {
+          return {
+            data: {
+              user: {
+                projectsV2: {
+                  nodes: [userProject],
+                  pageInfo: {
+                    hasNextPage: false,
+                    endCursor: null
+                  }
+                }
+              }
+            }
+          };
+        }
+      };
+    }
+
+    if (body.query.includes("query PiloProjectV2(")) {
+      return {
+        ok: true,
+        async json() {
+          return {
+            data: {
+              node: userProject
+            }
+          };
+        }
+      };
+    }
+
+    if (body.query.includes("query PiloProjectV2Fields(")) {
+      return {
+        ok: true,
+        async json() {
+          return {
+            data: {
+              node: {
+                __typename: "ProjectV2",
+                id: "PVT_kwDOExample",
+                fields: {
+                  nodes: [],
+                  pageInfo: {
+                    hasNextPage: false,
+                    endCursor: null
+                  }
+                }
+              }
+            }
+          };
+        }
+      };
+    }
+
+    if (body.query.includes("query PiloProjectV2Items(")) {
+      return {
+        ok: true,
+        async json() {
+          return {
+            data: {
+              node: {
+                __typename: "ProjectV2",
+                id: "PVT_kwDOExample",
+                items: {
+                  nodes: [],
+                  pageInfo: {
+                    hasNextPage: false,
+                    endCursor: null
+                  }
+                }
+              }
+            }
+          };
+        }
+      };
+    }
+
+    throw new Error("Unexpected GraphQL query");
+  };
+
+  try {
+    const client = new GithubAppClient();
+    const baseInput = {
+      installationId: 12345678,
+      appId: "12345",
+      privateKey: privateKeyPem,
+      userAccessToken: "user-oauth-token",
+      now: () => fixedNow
+    };
+
+    const projects = await client.listProjectV2s({
+      ...baseInput,
+      accountLogin: "Developer-EJ",
+      accountType: "User"
+    });
+    const project = await client.getProjectV2({
+      ...baseInput,
+      projectNodeId: "PVT_kwDOExample"
+    });
+    const fields = await client.listProjectV2Fields({
+      ...baseInput,
+      projectNodeId: "PVT_kwDOExample"
+    });
+    const items = await client.listProjectV2Items({
+      ...baseInput,
+      projectNodeId: "PVT_kwDOExample"
+    });
+
+    assert.equal(requests.length, 4);
+    assert.equal(projects[0].ownerType, "User");
+    assert.equal(projects[0].title, "PILO_Project");
+    assert.equal(project.ownerLogin, "Developer-EJ");
+    assert.deepEqual(fields, []);
+    assert.deepEqual(items, []);
+    assert.ok(
+      requests.every(
+        (request) => request.headers.Authorization === "Bearer user-oauth-token"
+      )
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}

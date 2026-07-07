@@ -60,6 +60,20 @@ class FakeConfigService {
       now: () => new Date("2026-07-05T10:00:00.000Z")
     };
   }
+
+  getGithubOAuthConfig() {
+    return {
+      tokenEncryptionKey: "test-token-encryption-key",
+      now: () => new Date("2026-07-05T10:00:00.000Z")
+    };
+  }
+}
+
+class FakeTokenEncryptionService {
+  decryptToken(encryptedToken) {
+    assert.equal(encryptedToken, "encrypted-user-oauth-token");
+    return "decrypted-user-oauth-token";
+  }
 }
 
 class FakeGithubAppClient {
@@ -190,7 +204,7 @@ function createService(
     database,
     {},
     {},
-    {},
+    new FakeTokenEncryptionService(),
     new FakeConfigService(),
     workspaceService,
     {},
@@ -212,6 +226,16 @@ function installationRow(overrides = {}) {
     github_installation_id: githubInstallationId,
     account_login: "my-team",
     account_type: "Organization",
+    ...overrides
+  };
+}
+
+function githubOAuthConnectionRow(overrides = {}) {
+  return {
+    github_login: "Developer-EJ",
+    github_access_token_encrypted: "encrypted-user-oauth-token",
+    github_connected_at: "2026-07-05T09:00:00.000Z",
+    github_revoked_at: null,
     ...overrides
   };
 }
@@ -984,6 +1008,222 @@ function projectV2ItemApiItem(overrides = {}) {
     workspaceId,
     ["R_kgDOExample"]
   ]);
+}
+
+{
+  const githubAppClient = new FakeGithubAppClient({
+    projects: [
+      discoveredProjectV2ApiItem({
+        ownerLogin: "Developer-EJ",
+        ownerType: "User",
+        title: "PILO_Project",
+        url: "https://github.com/users/Developer-EJ/projects/34",
+        resourcePath: "/users/Developer-EJ/projects/34",
+        raw: { title: "PILO_Project" }
+      })
+    ]
+  });
+  const database = new FakeDatabase({
+    queryOneRows: [
+      installationRow({
+        account_login: "Developer-EJ",
+        account_type: "User"
+      }),
+      syncRunRow({
+        target: "full",
+        status: "running",
+        repository_id: null,
+        project_v2_id: null,
+        finished_at: null,
+        fetched_count: 0,
+        created_count: 0,
+        updated_count: 0,
+        skipped_count: 0,
+        cursor: {}
+      }),
+      (text, values) => {
+        assert.match(text, /github_access_token_encrypted/i);
+        assert.match(text, /FROM users/i);
+        assert.deepEqual(values, [currentUserId]);
+        return githubOAuthConnectionRow();
+      },
+      (text, values) => {
+        assert.match(text, /INSERT INTO github_projects_v2/i);
+        assert.deepEqual(values.slice(0, 7), [
+          workspaceId,
+          installationId,
+          projectNodeId,
+          42,
+          "Developer-EJ",
+          "User",
+          1
+        ]);
+        return { id: projectV2Id, created: true };
+      },
+      (text, values) => {
+        assert.match(text, /UPDATE github_sync_runs/i);
+        assert.match(text, /status = 'success'/i);
+        assert.deepEqual(values, [syncRunId, 1, 1, 0, 0, "{}"]);
+        return syncRunRow({
+          target: "full",
+          repository_id: null,
+          project_v2_id: null,
+          fetched_count: 1,
+          created_count: 1,
+          updated_count: 0,
+          skipped_count: 0,
+          cursor: {}
+        });
+      }
+    ],
+    queryRows: [() => [], () => []]
+  });
+  const { service } = createService(database, githubAppClient);
+
+  const syncRun = await service.startGithubSyncRun(currentUserId, workspaceId, {
+    target: "full",
+    installationId
+  });
+
+  assert.equal(syncRun.status, "success");
+  assert.equal(syncRun.createdCount, 1);
+  assert.deepEqual(
+    githubAppClient.calls.map((call) => call.method),
+    ["listInstallationRepositories", "listProjectV2s"]
+  );
+  assert.equal(githubAppClient.calls[0].input.userAccessToken, undefined);
+  assert.equal(
+    githubAppClient.calls[1].input.userAccessToken,
+    "decrypted-user-oauth-token"
+  );
+  assert.doesNotMatch(
+    JSON.stringify(database.queries),
+    /decrypted-user-oauth-token/
+  );
+}
+
+{
+  const githubAppClient = new FakeGithubAppClient();
+  const database = new FakeDatabase({
+    queryOneRows: [
+      installationRow({
+        account_login: "Developer-EJ",
+        account_type: "User"
+      }),
+      syncRunRow({
+        target: "full",
+        status: "running",
+        repository_id: null,
+        project_v2_id: null,
+        finished_at: null,
+        fetched_count: 0,
+        created_count: 0,
+        updated_count: 0,
+        skipped_count: 0,
+        cursor: {}
+      }),
+      githubOAuthConnectionRow({
+        github_login: null,
+        github_access_token_encrypted: null,
+        github_connected_at: null
+      }),
+      (text, values) => {
+        assert.match(text, /UPDATE github_sync_runs/i);
+        assert.match(text, /status = 'failed'/i);
+        assert.deepEqual(values, [
+          syncRunId,
+          "GitHub user OAuth token is required for personal ProjectV2 sync"
+        ]);
+        return syncRunRow({
+          target: "full",
+          status: "failed",
+          repository_id: null,
+          project_v2_id: null,
+          fetched_count: 0,
+          created_count: 0,
+          updated_count: 0,
+          skipped_count: 0,
+          error_message:
+            "GitHub user OAuth token is required for personal ProjectV2 sync",
+          cursor: {}
+        });
+      }
+    ]
+  });
+  const { service } = createService(database, githubAppClient);
+
+  const syncRun = await service.startGithubSyncRun(currentUserId, workspaceId, {
+    target: "full",
+    installationId
+  });
+
+  assert.equal(syncRun.status, "failed");
+  assert.equal(
+    syncRun.errorMessage,
+    "GitHub user OAuth token is required for personal ProjectV2 sync"
+  );
+  assert.deepEqual(githubAppClient.calls, []);
+}
+
+{
+  const githubAppClient = new FakeGithubAppClient();
+  const database = new FakeDatabase({
+    queryOneRows: [
+      installationRow({
+        account_login: "Developer-EJ",
+        account_type: "User"
+      }),
+      projectV2ContextRow(),
+      syncRunRow({
+        target: "project_v2_fields",
+        status: "running",
+        repository_id: null,
+        finished_at: null,
+        fetched_count: 0,
+        created_count: 0,
+        updated_count: 0,
+        skipped_count: 0,
+        cursor: {}
+      }),
+      githubOAuthConnectionRow({
+        github_login: "other-user"
+      }),
+      (text, values) => {
+        assert.match(text, /UPDATE github_sync_runs/i);
+        assert.match(text, /status = 'failed'/i);
+        assert.deepEqual(values, [
+          syncRunId,
+          "GitHub user OAuth token cannot access this personal ProjectV2 owner"
+        ]);
+        return syncRunRow({
+          target: "project_v2_fields",
+          status: "failed",
+          repository_id: null,
+          fetched_count: 0,
+          created_count: 0,
+          updated_count: 0,
+          skipped_count: 0,
+          error_message:
+            "GitHub user OAuth token cannot access this personal ProjectV2 owner",
+          cursor: {}
+        });
+      }
+    ]
+  });
+  const { service } = createService(database, githubAppClient);
+
+  const syncRun = await service.startGithubSyncRun(currentUserId, workspaceId, {
+    target: "project_v2_fields",
+    installationId,
+    projectV2Id
+  });
+
+  assert.equal(syncRun.status, "failed");
+  assert.equal(
+    syncRun.errorMessage,
+    "GitHub user OAuth token cannot access this personal ProjectV2 owner"
+  );
+  assert.deepEqual(githubAppClient.calls, []);
 }
 
 {
