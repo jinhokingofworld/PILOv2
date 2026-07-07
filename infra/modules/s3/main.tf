@@ -44,6 +44,20 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "uploads" {
   }
 }
 
+resource "aws_s3_bucket_cors_configuration" "uploads" {
+  count = length(var.uploads_cors_allowed_origins) > 0 ? 1 : 0
+
+  bucket = aws_s3_bucket.uploads.id
+
+  cors_rule {
+    allowed_headers = ["Content-Type", "x-amz-*"]
+    allowed_methods = ["GET", "HEAD", "PUT"]
+    allowed_origins = var.uploads_cors_allowed_origins
+    expose_headers  = ["ETag"]
+    max_age_seconds = 3000
+  }
+}
+
 resource "aws_s3_bucket_lifecycle_configuration" "uploads" {
   bucket = aws_s3_bucket.uploads.id
 

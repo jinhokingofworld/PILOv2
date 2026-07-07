@@ -48,6 +48,10 @@ module "s3" {
   source = "../../modules/s3"
 
   name_prefix = local.name_prefix
+  uploads_cors_allowed_origins = compact([
+    "http://localhost:3000",
+    local.frontend_domain == "" ? "" : "https://${local.frontend_domain}",
+  ])
 }
 
 module "livekit_host" {
