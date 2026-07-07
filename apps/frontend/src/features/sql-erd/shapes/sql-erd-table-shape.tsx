@@ -5,6 +5,7 @@ import {
   Rectangle2d,
   ShapeUtil,
   T,
+  useEditor,
   type TLBaseShape,
   type TLShape
 } from "tldraw";
@@ -13,6 +14,8 @@ import type { ErdColumn, ErdTable } from "@/features/sql-erd/types";
 import { getTableDisplayName } from "@/features/sql-erd/utils/model";
 
 export const SQLTOERD_TABLE_SHAPE_TYPE = "sqltoerd_table";
+export const SQLTOERD_COLUMN_SELECT_EVENT = "sqltoerd:column-select";
+export const SQLTOERD_TABLE_SELECT_EVENT = "sqltoerd:table-select";
 
 const TABLE_MIN_WIDTH = 260;
 const TABLE_HEADER_HEIGHT = 54;
@@ -69,6 +72,31 @@ type ColumnBadge = {
   label: "PK" | "FK" | "UQ" | "NN";
   className: string;
 };
+
+type SqlErdColumnSelectEventDetail = {
+  columnId: string;
+  tableId: string;
+};
+
+type SqlErdTableSelectEventDetail = {
+  tableId: string;
+};
+
+export function selectSqlErdColumn(detail: SqlErdColumnSelectEventDetail) {
+  window.dispatchEvent(
+    new CustomEvent(SQLTOERD_COLUMN_SELECT_EVENT, {
+      detail
+    })
+  );
+}
+
+export function selectSqlErdTable(detail: SqlErdTableSelectEventDetail) {
+  window.dispatchEvent(
+    new CustomEvent(SQLTOERD_TABLE_SELECT_EVENT, {
+      detail
+    })
+  );
+}
 
 export function getSqlErdTableShapeSize(table: ErdTable, fallbackWidth?: number) {
   const badgeColumnWidth = getSqlErdTableBadgeColumnWidth(table.columns);
@@ -190,9 +218,22 @@ function getColumnBadges(column: SqlErdTableColumnShapeProps): ColumnBadge[] {
 }
 
 function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
+  const editor = useEditor();
   const displayName = shape.props.schemaName
     ? `${shape.props.schemaName}.${shape.props.tableName}`
     : shape.props.tableName;
+
+  function handleTableClick() {
+    selectSqlErdTable({ tableId: shape.props.tableId });
+  }
+
+  function handleColumnClick(columnId: string) {
+    editor.select(shape.id);
+    selectSqlErdColumn({
+      columnId,
+      tableId: shape.props.tableId
+    });
+  }
 
   return (
     <HTMLContainer
@@ -201,6 +242,7 @@ function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
     >
       <article
         className="overflow-hidden rounded-md border border-slate-200 bg-white shadow-[0_12px_28px_rgba(15,23,42,0.12)]"
+        onClick={handleTableClick}
         style={{
           height: shape.props.h,
           minWidth: shape.props.w,
@@ -220,12 +262,28 @@ function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
             return (
               <div
                 className="grid h-[42px] items-center px-6 font-mono text-[20px] leading-none"
+                data-sqltoerd-column-id={column.id}
                 key={column.id}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  handleColumnClick(column.id);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key !== "Enter" && event.key !== " ") {
+                    return;
+                  }
+
+                  event.preventDefault();
+                  event.stopPropagation();
+                  handleColumnClick(column.id);
+                }}
+                role="button"
                 style={{
                   backgroundColor: columnIndex % 2 === 0 ? "#ffffff" : "#f8fafc",
                   columnGap: ROW_COLUMN_GAP,
                   gridTemplateColumns: `${shape.props.badgeColumnWidth}px max-content max-content`
                 }}
+                tabIndex={0}
               >
                 <div className="flex min-w-0 items-center gap-1">
                   {badges.map((badge) => (

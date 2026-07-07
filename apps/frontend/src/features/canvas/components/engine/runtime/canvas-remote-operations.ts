@@ -68,6 +68,10 @@ function preserveArrowBindingMeta(
   };
 }
 
+function isShapeParentId(parentId: unknown): parentId is string {
+  return typeof parentId === "string" && parentId.startsWith("shape:");
+}
+
 function getShapeBounds(shape: PiloCanvasFreeformShape) {
   const props: Record<string, unknown> = isRecord(shape.props)
     ? shape.props
@@ -153,8 +157,9 @@ export function applyCanvasRemoteOperation({
 
   shapeDetailCache.set(shapeId, nextShape);
 
-  if (parentId) {
-    const parentShape = currentShapeMap.get(parentId);
+  if (isShapeParentId(parentId)) {
+    const parentShape =
+      currentShapeMap.get(parentId) ?? shapeDetailCache.get(parentId);
 
     if (!parentShape || isPiloFrameCollapsed(parentShape)) {
       return {

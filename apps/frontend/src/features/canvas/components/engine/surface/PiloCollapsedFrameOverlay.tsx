@@ -15,10 +15,14 @@ import {
 type CollapsedFrameOverlayItem = {
   childShapeCount: number;
   frame: PiloFrameShape;
+  height: number;
   id: string;
+  isSelected: boolean;
   left: number;
   title: string;
   top: number;
+  width: number;
+  zoom: number;
 };
 
 function normalizeFrameTitle(value: string) {
@@ -27,7 +31,10 @@ function normalizeFrameTitle(value: string) {
   return title || "Frame";
 }
 
-function readCollapsedFrameOverlayItems(editor: Editor) {
+function readCollapsedFrameOverlayItems(
+  editor: Editor,
+  selectedShapeIds: Set<string>,
+) {
   return editor
     .getCurrentPageShapes()
     .flatMap((shape): CollapsedFrameOverlayItem[] => {
@@ -40,18 +47,23 @@ function readCollapsedFrameOverlayItems(editor: Editor) {
       if (!bounds) return [];
 
       const viewportPoint = editor.pageToViewport({
-        x: bounds.x + 8,
-        y: bounds.y + 8,
+        x: bounds.x,
+        y: bounds.y,
       });
+      const camera = editor.getCamera();
 
       return [
         {
           childShapeCount: getPiloChildShapeCount(shape),
           frame: shape,
+          height: bounds.h,
           id: String(shape.id),
+          isSelected: selectedShapeIds.has(String(shape.id)),
           left: viewportPoint.x,
           title: normalizeFrameTitle(shape.props.name),
           top: viewportPoint.y,
+          width: bounds.w,
+          zoom: camera.z,
         },
       ];
     });
@@ -71,10 +83,19 @@ export function PiloCollapsedFrameOverlay({
     () => editor.getCamera(),
     [editor],
   );
+  const selectedShapeIdToken = useValue(
+    "pilo-collapsed-frame-overlay-selection",
+    () => editor.getSelectedShapeIds().map(String).join("|"),
+    [editor],
+  );
   const [documentVersion, setDocumentVersion] = useState(0);
   const collapsedFrames = useMemo(
-    () => readCollapsedFrameOverlayItems(editor),
-    [camera.x, camera.y, camera.z, documentVersion, editor],
+    () =>
+      readCollapsedFrameOverlayItems(
+        editor,
+        new Set(selectedShapeIdToken ? selectedShapeIdToken.split("|") : []),
+      ),
+    [camera.x, camera.y, camera.z, documentVersion, editor, selectedShapeIdToken],
   );
 
   useEffect(() => {
@@ -109,24 +130,30 @@ export function PiloCollapsedFrameOverlay({
   return (
     <div className="pilo-collapsed-frame-layer" aria-hidden="false">
       {collapsedFrames.map((item) => (
-        <button
+        <div
           key={item.id}
-          type="button"
-          className="pilo-collapsed-frame-card"
+          className={`pilo-collapsed-frame-card${item.isSelected ? " is-selected" : ""}`}
           style={{
+            height: item.height,
             left: item.left,
             top: item.top,
+            transform: `scale(${item.zoom})`,
+            width: item.width,
           }}
-          aria-label={`${item.title} expand`}
           title={`${item.title} - ${item.childShapeCount} shapes`}
-          onPointerDown={(event) => handleExpandPointerDown(event, item.frame)}
-          onPointerUp={handlePointerEvent}
         >
-          <span className="pilo-collapsed-frame-plus" aria-hidden="true">
+          <button
+            type="button"
+            className="pilo-collapsed-frame-expand"
+            aria-label={`${item.title} expand`}
+            onPointerDown={(event) => handleExpandPointerDown(event, item.frame)}
+          >
             +
-          </span>
-          <small aria-hidden="true">{item.childShapeCount}</small>
-        </button>
+          </button>
+          <strong>{item.title}</strong>
+          <span>{item.childShapeCount} shapes</span>
+          <small>Collapsed frame</small>
+        </div>
       ))}
     </div>
   );

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import {
   Database,
@@ -13,15 +13,38 @@ import {
 
 import { SqlErdCanvas } from "@/features/sql-erd/components/sql-erd-canvas";
 import { commerceSqltoerdFixture } from "@/features/sql-erd/fixtures/commerce";
-import { getSqltoerdModelCounts } from "@/features/sql-erd/utils/model";
+import type { SqlErdSelection } from "@/features/sql-erd/types";
+import {
+  createSqlErdInspectorViewModel,
+  formatSqlErdRelationEndpoint,
+  type RelationSummary,
+  type SqlErdInspectorViewModel
+} from "@/features/sql-erd/utils/inspector";
+import {
+  createSqltoerdModelIndex,
+  getSqltoerdModelCounts,
+  getTableDisplayName
+} from "@/features/sql-erd/utils/model";
 import { cn } from "@/lib/utils";
 
 const sampleSql = commerceSqltoerdFixture.sourceText;
-const fixtureCounts = getSqltoerdModelCounts(commerceSqltoerdFixture.modelJson);
+const fixtureModelJson = commerceSqltoerdFixture.modelJson;
+const fixtureLayoutJson = commerceSqltoerdFixture.layoutJson;
+const fixtureCounts = getSqltoerdModelCounts(fixtureModelJson);
 
 export function SqlErdPanel() {
   const [isSourceOpen, setIsSourceOpen] = useState(false);
   const [isInspectorOpen, setIsInspectorOpen] = useState(false);
+  const [selectedSqlErdObject, setSelectedSqlErdObject] =
+    useState<SqlErdSelection>({ type: "none" });
+  const modelIndex = useMemo(
+    () => createSqltoerdModelIndex(fixtureModelJson),
+    []
+  );
+  const inspectorViewModel = useMemo(
+    () => createSqlErdInspectorViewModel(selectedSqlErdObject, modelIndex),
+    [modelIndex, selectedSqlErdObject]
+  );
 
   useEffect(() => {
     setIsSourceOpen(window.matchMedia("(min-width: 1024px)").matches);
@@ -34,10 +57,14 @@ export function SqlErdPanel() {
         isOpen={isSourceOpen}
         onToggle={() => setIsSourceOpen((current) => !current)}
       />
-      <CanvasShell />
+      <CanvasShell
+        onSelectionChange={setSelectedSqlErdObject}
+        selectedSqlErdObject={selectedSqlErdObject}
+      />
       <InspectorPanel
         isOpen={isInspectorOpen}
         onToggle={() => setIsInspectorOpen((current) => !current)}
+        viewModel={inspectorViewModel}
       />
     </section>
   );
@@ -136,7 +163,15 @@ function SelectorLabel({ label, value }: SelectorLabelProps) {
   );
 }
 
-function CanvasShell() {
+type CanvasShellProps = {
+  onSelectionChange: (selection: SqlErdSelection) => void;
+  selectedSqlErdObject: SqlErdSelection;
+};
+
+function CanvasShell({
+  onSelectionChange,
+  selectedSqlErdObject
+}: CanvasShellProps) {
   return (
     <div className="relative flex min-w-0 flex-1 flex-col">
       <div
@@ -161,13 +196,23 @@ function CanvasShell() {
       </div>
 
       <div className="relative min-h-0 flex-1 overflow-hidden">
-        <SqlErdCanvas className="absolute inset-0" />
+        <SqlErdCanvas
+          className="absolute inset-0"
+          layoutJson={fixtureLayoutJson}
+          modelJson={fixtureModelJson}
+          onSelectionChange={onSelectionChange}
+          selectedSqlErdObject={selectedSqlErdObject}
+        />
       </div>
     </div>
   );
 }
 
-function InspectorPanel({ isOpen, onToggle }: PanelToggleProps) {
+type InspectorPanelProps = PanelToggleProps & {
+  viewModel: SqlErdInspectorViewModel;
+};
+
+function InspectorPanel({ isOpen, onToggle, viewModel }: InspectorPanelProps) {
   if (!isOpen) {
     return (
       <CollapsedPanelButton
@@ -189,7 +234,7 @@ function InspectorPanel({ isOpen, onToggle }: PanelToggleProps) {
         <div className="min-w-0">
           <p className="text-sm font-semibold">Inspector</p>
           <p className="truncate text-xs text-muted-foreground">
-            No selection
+            {getInspectorSubtitle(viewModel)}
           </p>
         </div>
         <button
@@ -203,29 +248,18 @@ function InspectorPanel({ isOpen, onToggle }: PanelToggleProps) {
       </div>
 
       <div className="flex flex-1 flex-col gap-4 overflow-auto p-4">
-        <div className="rounded-md border border-dashed p-4">
-          <p className="text-sm font-medium">Selection</p>
-          <p className="mt-1 text-xs leading-5 text-muted-foreground">
-            No table, column, or relation selected
-          </p>
-        </div>
-
-        <div className="space-y-2">
-          <InspectorRow label="Tool" value="select" />
-          <InspectorRow label="Shapes" value="0 selected" />
-          <InspectorRow label="Viewport" value="x 0, y 0, 100%" />
-        </div>
+        <InspectorContent viewModel={viewModel} />
 
         <div className="mt-auto grid gap-2">
           <button
-            className="inline-flex h-9 items-center justify-center rounded-md border bg-background px-3 text-sm font-medium text-muted-foreground"
+            className="inline-flex h-9 cursor-not-allowed items-center justify-center rounded-md border bg-background px-3 text-sm font-medium text-muted-foreground opacity-70"
             disabled
             type="button"
           >
             Add column
           </button>
           <button
-            className="inline-flex h-9 items-center justify-center rounded-md border bg-background px-3 text-sm font-medium text-muted-foreground"
+            className="inline-flex h-9 cursor-not-allowed items-center justify-center rounded-md border bg-background px-3 text-sm font-medium text-muted-foreground opacity-70"
             disabled
             type="button"
           >
@@ -237,6 +271,180 @@ function InspectorPanel({ isOpen, onToggle }: PanelToggleProps) {
   );
 }
 
+function getInspectorSubtitle(viewModel: SqlErdInspectorViewModel) {
+  if (viewModel.type === "table") {
+    return `${viewModel.title} table`;
+  }
+
+  if (viewModel.type === "column") {
+    return `${getTableDisplayName(viewModel.table)}.${viewModel.column.name}`;
+  }
+
+  if (viewModel.type === "relation") {
+    return "foreign key relation";
+  }
+
+  return "No selection";
+}
+
+function InspectorContent({
+  viewModel
+}: {
+  viewModel: SqlErdInspectorViewModel;
+}) {
+  if (viewModel.type === "table") {
+    return <TableInspector viewModel={viewModel} />;
+  }
+
+  if (viewModel.type === "column") {
+    return <ColumnInspector viewModel={viewModel} />;
+  }
+
+  if (viewModel.type === "relation") {
+    return <RelationInspector viewModel={viewModel} />;
+  }
+
+  return (
+    <div className="rounded-md border border-dashed p-4">
+      <p className="text-sm font-medium">Selection</p>
+      <p className="mt-1 text-xs leading-5 text-muted-foreground">
+        No table, column, or relation selected
+      </p>
+    </div>
+  );
+}
+
+function TableInspector({
+  viewModel
+}: {
+  viewModel: Extract<SqlErdInspectorViewModel, { type: "table" }>;
+}) {
+  return (
+    <>
+      <InspectorSectionTitle>Table details</InspectorSectionTitle>
+      <div className="space-y-2">
+        <InspectorRow label="Table name" value={viewModel.title} />
+        <InspectorRow label="Columns" value={`${viewModel.columnCount}`} />
+        <InspectorRow label="Relations" value={`${viewModel.relations.length}`} />
+      </div>
+      <RelationList relations={viewModel.relations} />
+    </>
+  );
+}
+
+function ColumnInspector({
+  viewModel
+}: {
+  viewModel: Extract<SqlErdInspectorViewModel, { type: "column" }>;
+}) {
+  const { column, table } = viewModel;
+
+  return (
+    <>
+      <InspectorSectionTitle>Column details</InspectorSectionTitle>
+      <div className="space-y-2">
+        <InspectorRow label="Table" value={getTableDisplayName(table)} />
+        <InspectorRow label="Column name" value={column.name} />
+        <InspectorRow label="Column type" value={column.dataType} />
+        <InspectorRow label="Nullable" value={column.nullable ? "Yes" : "No"} />
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {column.primaryKey ? <ConstraintPill label="PK" /> : null}
+        {column.foreignKey ? <ConstraintPill label="FK" /> : null}
+        {column.unique ? <ConstraintPill label="UQ" /> : null}
+        {!column.nullable ? <ConstraintPill label="NN" /> : null}
+      </div>
+      <RelationList relations={viewModel.relations} />
+    </>
+  );
+}
+
+function RelationInspector({
+  viewModel
+}: {
+  viewModel: Extract<SqlErdInspectorViewModel, { type: "relation" }>;
+}) {
+  const { endpoints, relation } = viewModel;
+
+  return (
+    <>
+      <InspectorSectionTitle>Relation details</InspectorSectionTitle>
+      <div className="space-y-2">
+        <InspectorRow label="Kind" value="foreign key" />
+        <InspectorRow label="Constraint" value={relation.constraintName ?? "-"} />
+        <InspectorRow
+          label="From"
+          value={
+            endpoints
+              ? formatSqlErdRelationEndpoint(
+                  endpoints.from.table,
+                  endpoints.from.columns
+                )
+              : relation.fromTableId
+          }
+        />
+        <InspectorRow
+          label="To"
+          value={
+            endpoints
+              ? formatSqlErdRelationEndpoint(
+                  endpoints.to.table,
+                  endpoints.to.columns
+                )
+              : relation.toTableId
+          }
+        />
+      </div>
+    </>
+  );
+}
+
+function RelationList({ relations }: { relations: RelationSummary[] }) {
+  if (!relations.length) {
+    return (
+      <div>
+        <InspectorSectionTitle>Relations</InspectorSectionTitle>
+        <p className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">
+          No connected relations
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <InspectorSectionTitle>Relations</InspectorSectionTitle>
+      <div className="space-y-2">
+        {relations.map((relation) => (
+          <div
+            className="rounded-md border bg-background p-3 text-xs leading-5"
+            key={relation.id}
+          >
+            <p className="font-medium text-foreground">{relation.fromLabel}</p>
+            <p className="text-muted-foreground">-&gt; {relation.toLabel}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ConstraintPill({ label }: { label: string }) {
+  return (
+    <span className="inline-flex h-7 items-center rounded-md border bg-muted/40 px-2 text-xs font-semibold text-muted-foreground">
+      {label}
+    </span>
+  );
+}
+
+function InspectorSectionTitle({ children }: { children: ReactNode }) {
+  return (
+    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+      {children}
+    </p>
+  );
+}
+
 type InspectorRowProps = {
   label: string;
   value: string;
@@ -244,9 +452,9 @@ type InspectorRowProps = {
 
 function InspectorRow({ label, value }: InspectorRowProps) {
   return (
-    <div className="flex items-center justify-between gap-3 border-b py-2 text-sm">
-      <span className="text-muted-foreground">{label}</span>
-      <span className="font-medium">{value}</span>
+    <div className="flex items-start justify-between gap-3 border-b py-2 text-sm">
+      <span className="shrink-0 text-muted-foreground">{label}</span>
+      <span className="break-all text-right font-medium">{value}</span>
     </div>
   );
 }

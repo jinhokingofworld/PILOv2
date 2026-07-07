@@ -620,6 +620,7 @@
     0 1px 2px rgba(15, 23, 42, 0.08),
     0 12px 28px rgba(15, 23, 42, 0.14);
   transform: translateX(-50%);
+  transform-origin: top center;
   pointer-events: auto;
 }
 
@@ -707,20 +708,18 @@
 
 .pilo-collapsed-frame-card {
   position: absolute;
-  display: grid;
-  width: 56px;
-  height: 56px;
-  place-items: center;
-  border: 1px solid rgba(37, 99, 235, 0.26);
-  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  border: 2px solid rgba(37, 99, 235, 0.42);
+  border-radius: 8px;
   background:
-    linear-gradient(145deg, rgba(255, 255, 255, 0.98), rgba(231, 241, 255, 0.94)),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(239, 246, 255, 0.95)),
     #ffffff;
   box-shadow:
     0 1px 2px rgba(15, 23, 42, 0.1),
-    0 12px 28px rgba(37, 99, 235, 0.22);
+    0 12px 28px rgba(37, 99, 235, 0.16);
   color: #172033;
-  cursor: pointer;
   font-family:
     Pretendard,
     Inter,
@@ -730,9 +729,9 @@
     "Segoe UI",
     sans-serif;
   letter-spacing: 0;
-  padding: 0;
-  pointer-events: auto;
-  transform: translateZ(0);
+  padding: 12px;
+  pointer-events: none;
+  transform-origin: 0 0;
 }
 
 .pilo-collapsed-frame-card:hover {
@@ -743,40 +742,72 @@
   box-shadow:
     0 2px 4px rgba(15, 23, 42, 0.12),
     0 16px 38px rgba(37, 99, 235, 0.28);
-  transform: translateY(-1px);
 }
 
-.pilo-collapsed-frame-plus {
+.pilo-collapsed-frame-expand {
   position: absolute;
-  top: 9px;
-  left: 50%;
+  top: 8px;
+  right: 8px;
   display: grid;
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   place-items: center;
-  border-radius: 999px;
+  border: 0;
+  border-radius: 6px;
   background: #2563eb;
   color: #ffffff;
+  cursor: pointer;
   font-size: 18px;
   font-weight: 900;
   line-height: 1;
-  transform: translateX(-50%);
+  opacity: 0;
+  padding: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.pilo-collapsed-frame-card.is-selected .pilo-collapsed-frame-expand {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.pilo-collapsed-frame-expand:hover {
+  background: #1d4ed8;
+}
+
+.pilo-collapsed-frame-card strong {
+  overflow: hidden;
+  max-width: calc(100% - 34px);
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 900;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pilo-collapsed-frame-card span {
+  width: fit-content;
+  border: 1px solid rgba(37, 99, 235, 0.16);
+  border-radius: 999px;
+  background: rgba(37, 99, 235, 0.08);
+  color: #1d4ed8;
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1;
+  margin-top: 8px;
+  padding: 5px 7px;
 }
 
 .pilo-collapsed-frame-card small {
-  position: absolute;
-  right: 8px;
-  bottom: 7px;
-  min-width: 18px;
-  height: 18px;
-  border: 1px solid rgba(37, 99, 235, 0.24);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.92);
-  color: #1d4ed8;
+  overflow: hidden;
+  margin-top: 8px;
+  color: #64748b;
   font-size: 10px;
-  font-weight: 900;
-  line-height: 16px;
-  text-align: center;
+  font-weight: 800;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .pilo-frame-toolbar-ratio {
