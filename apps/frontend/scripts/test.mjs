@@ -261,6 +261,13 @@ const piloCanvasPlacement = await readFile(
   ),
   "utf8"
 );
+const piloCanvasFileImport = await readFile(
+  new URL(
+    "../src/features/canvas/components/engine/interactions/pilo-canvas-file-import.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
 const piloCanvasGroupToolbar = await readFile(
   new URL(
     "../src/features/canvas/components/engine/interactions/PiloCanvasGroupToolbar.tsx",
@@ -646,7 +653,8 @@ assert.doesNotMatch(piloCanvasShapeUtils, /frame\/PiloFrameSelectionToolbar/);
 assert.match(piloFrameShapeUtil, /FrameShapeUtil\.configure/);
 assert.match(piloFrameShapeUtil, /resolveNextFrameName/);
 assert.doesNotMatch(piloFrameSelectionToolbar, /FrameShapeUtil\.configure/);
-assert.match(piloCodeBlockShapeUtil, /BaseFrameLikeShapeUtil/);
+assert.match(piloCodeBlockShapeUtil, /BaseBoxShapeUtil/);
+assert.doesNotMatch(piloCodeBlockShapeUtil, /BaseFrameLikeShapeUtil/);
 assert.doesNotMatch(piloCodeBlockShapeUtil, /@codemirror/);
 assert.doesNotMatch(piloCodeBlockShapeUtil, /navigator\.clipboard/);
 assert.match(piloCodeBlockComponent, /PiloCodeMirrorEditor/);
@@ -654,6 +662,40 @@ assert.match(piloCodeMirrorEditor, /@codemirror\/view/);
 assert.match(piloCodeBlockShapeTypes, /export type PiloCodeBlockShape/);
 assert.match(piloCanvasPlacement, /PiloPlacementRequest/);
 assert.match(piloCanvasPlacement, /placePiloCanvasShapeAt/);
+assert.match(piloCanvasFileImport, /PILO_CODE_IMPORT_MAX_FILES = 30/);
+assert.match(piloCanvasFileImport, /PILO_CODE_IMPORT_MAX_SINGLE_FILE_BYTES = 200 \* 1024/);
+assert.match(piloCanvasFileImport, /PILO_CODE_IMPORT_MAX_TOTAL_BYTES = 2 \* 1024 \* 1024/);
+assert.match(piloCanvasFileImport, /PILO_CODE_IMPORT_MAX_FOLDER_DEPTH = 4/);
+assert.match(piloCanvasFileImport, /webkitGetAsEntry/);
+assert.match(piloCanvasFileImport, /collectDirectoryFiles/);
+assert.match(piloCanvasFileImport, /createImportedCodeFolderNode/);
+assert.match(piloCanvasFileImport, /folder\.folders\.push\(childFolder\)/);
+assert.match(piloCanvasFileImport, /queuedFile\.folder\.files\.push\(codeFile\)/);
+assert.match(piloCanvasFileImport, /pruneImportedCodeFolder/);
+assert.match(piloCanvasFileImport, /ignoredFolderNames/);
+assert.match(piloCanvasFileImport, /importCodeFilesFromDataTransfer/);
+assert.match(piloCanvasFileImport, /inferLanguageFromShebang/);
+assert.match(piloCanvasFileImport, /isProbablyBinary/);
+assert.match(piloCanvasFileImport, /바이너리 파일은 제외했습니다/);
+assert.match(piloCanvasFileImport, /제외 폴더입니다/);
+assert.match(piloTldrawCanvas, /CanvasFileDropImporter/);
+assert.match(piloCanvasShapeFactory, /createImportedCodeFolderShapes/);
+assert.match(piloCanvasShapeFactory, /createImportedCodeFolderLayout/);
+assert.match(piloCanvasShapeFactory, /createFrameTree/);
+assert.match(piloCanvasShapeFactory, /frame\.parentId = parentId/);
+assert.match(piloCanvasShapeFactory, /frames: PiloFramePartial\[\]/);
+assert.match(piloCanvasShapeFactory, /getShapeDepth/);
+assert.match(piloTldrawCanvas, /createImportedCodeBlockShape/);
+assert.match(piloTldrawCanvas, /createImportedCodeFolderShapes/);
+assert.match(piloTldrawCanvas, /getImportedFolderCodeBlockCount/);
+assert.match(piloTldrawCanvas, /topLevelFrames/);
+assert.match(piloTldrawCanvas, /folderShapes\.push\(\.\.\.createdFolder\.shapes\)/);
+assert.match(piloTldrawCanvas, /getImportedCodeBlockCount/);
+assert.match(piloTldrawCanvas, /closest\("\.pilo-tldraw-canvas"\)/);
+assert.match(piloTldrawCanvas, /stopImmediatePropagation/);
+assert.match(piloTldrawCanvas, /getCodeFileDropSignature/);
+assert.match(piloTldrawCanvas, /pilo-code-file-drop-overlay/);
+assert.match(piloTldrawCanvas, /pilo-code-file-import-toast/);
 assert.match(piloCanvasGroupToolbar, /shape\.type === "group"/);
 assert.match(piloCanvasGroupToolbar, /editor\.ungroupShapes/);
 assert.match(piloCanvasGroupToolbar, /LockOpen/);
