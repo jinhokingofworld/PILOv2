@@ -46,8 +46,8 @@ type NodePlacement = {
 
 const NODE_WIDTH = 268;
 const NODE_HEIGHT = 96;
-const FLOW_LABEL_WIDTH = 420;
-const FLOW_LABEL_HEIGHT = 80;
+const FLOW_LABEL_WIDTH = 640;
+const FLOW_LABEL_HEIGHT = 128;
 const CANVAS_PADDING_X = 72;
 const CANVAS_PADDING_Y = 56;
 const COLUMN_GAP = 72;

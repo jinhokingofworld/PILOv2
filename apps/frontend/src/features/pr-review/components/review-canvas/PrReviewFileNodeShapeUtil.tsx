@@ -193,15 +193,15 @@ function PrReviewFlowEdge({ shape }: { shape: PrReviewFlowEdgeShape }) {
 function PrReviewFlowLabel({ shape }: { shape: PrReviewFlowLabelShape }) {
   return (
     <HTMLContainer style={{ width: shape.props.w, height: shape.props.h }}>
-      <div className="flex h-full flex-col justify-center">
+      <div className="flex h-full min-w-0 flex-col justify-center overflow-hidden">
         <p className="text-xs font-semibold uppercase text-blue-600">
           Flow {shape.props.sortOrder}
         </p>
-        <h2 className="mt-1 truncate text-lg font-semibold text-slate-950">
+        <h2 className="mt-1 line-clamp-2 break-words text-lg font-semibold leading-6 text-slate-950">
           {shape.props.title}
         </h2>
         {shape.props.description ? (
-          <p className="mt-1 line-clamp-2 text-sm leading-5 text-slate-600">
+          <p className="mt-2 line-clamp-2 break-words text-sm leading-5 text-slate-600">
             {shape.props.description}
           </p>
         ) : null}
@@ -381,8 +381,8 @@ export class PrReviewFlowLabelShapeUtil extends ShapeUtil<PrReviewFlowLabelShape
 
   override getDefaultProps(): PrReviewFlowLabelShape["props"] {
     return {
-      w: 360,
-      h: 72,
+      w: 640,
+      h: 128,
       flowId: "",
       title: "",
       description: null,
