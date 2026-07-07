@@ -98,6 +98,8 @@ type CanvasShapeSyncQueueOptions = {
 const DEFAULT_CANVAS_SHAPE_SYNC_QUEUE_DEBOUNCE_MS = 500;
 const DEFAULT_CANVAS_SHAPE_SYNC_RETRY_ATTEMPTS = 3;
 const DEFAULT_CANVAS_SHAPE_SYNC_RETRY_DELAY_MS = 320;
+const DEFAULT_CANVAS_SHAPE_SYNC_BATCH_SIZE = 100;
+const NON_RETRYABLE_CANVAS_API_STATUSES = new Set([400, 401, 403, 404]);
 
 class CanvasShapeSyncFailure extends Error {
   readonly cause: unknown;
@@ -113,6 +115,29 @@ class CanvasShapeSyncFailure extends Error {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readCanvasApiErrorStatus(error: unknown) {
+  return isRecord(error) && typeof error.status === "number"
+    ? error.status
+    : null;
+}
+
+function isNonRetryableCanvasApiError(error: unknown) {
+  const status = readCanvasApiErrorStatus(error);
+
+  return status !== null && NON_RETRYABLE_CANVAS_API_STATUSES.has(status);
+}
+
+function isNonRetryableCanvasShapeSyncError(error: unknown) {
+  if (isNonRetryableCanvasApiError(error)) {
+    return true;
+  }
+
+  return (
+    error instanceof CanvasShapeSyncFailure &&
+    isNonRetryableCanvasApiError(error.cause)
+  );
 }
 
 function readFiniteNumber(value: unknown, fallback: number) {
@@ -363,6 +388,9 @@ function runWithRetry(task: () => Promise<unknown>) {
     factor: 2,
     minTimeout: DEFAULT_CANVAS_SHAPE_SYNC_RETRY_DELAY_MS,
     retries: DEFAULT_CANVAS_SHAPE_SYNC_RETRY_ATTEMPTS,
+    shouldRetry({ error }) {
+      return !isNonRetryableCanvasApiError(error);
+    },
   });
 }
 
@@ -384,21 +412,33 @@ async function runCanvasShapeSyncOperations({
   const syncShapesBatch = canvasClient.syncShapesBatch;
 
   if (syncShapesBatch) {
-    try {
-      await runWithRetry(async () => {
-        await syncShapesBatch(
-          boardId,
-          {
-            operations,
-          },
-          {
-            workspaceId,
-          },
-        );
-      });
-    } catch (error) {
-      throw new CanvasShapeSyncFailure(error, operations);
+    for (
+      let index = 0;
+      index < operations.length;
+      index += DEFAULT_CANVAS_SHAPE_SYNC_BATCH_SIZE
+    ) {
+      const batchOperations = operations.slice(
+        index,
+        index + DEFAULT_CANVAS_SHAPE_SYNC_BATCH_SIZE,
+      );
+
+      try {
+        await runWithRetry(async () => {
+          await syncShapesBatch(
+            boardId,
+            {
+              operations: batchOperations,
+            },
+            {
+              workspaceId,
+            },
+          );
+        });
+      } catch (error) {
+        throw new CanvasShapeSyncFailure(error, operations.slice(index));
+      }
     }
+
     return;
   }
 
@@ -484,6 +524,11 @@ export function createCanvasShapeSyncQueue({
       });
       onSynced?.(operations);
     } catch (error) {
+      if (isNonRetryableCanvasShapeSyncError(error)) {
+        pendingOperations.clear();
+        throw error;
+      }
+
       const queuedDuringFlush = Array.from(pendingOperations.values());
       const failedOperations =
         error instanceof CanvasShapeSyncFailure
