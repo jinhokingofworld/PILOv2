@@ -7,7 +7,7 @@ import {
 export const commerceSqltoerdFixture: SqltoerdSessionFixture = {
   title: "Commerce ERD",
   sourceFormat: "sql",
-  dialect: "postgresql",
+  dialect: "auto",
   sourceText: `CREATE TABLE users (
   id BIGINT PRIMARY KEY,
   email VARCHAR(255) NOT NULL UNIQUE,

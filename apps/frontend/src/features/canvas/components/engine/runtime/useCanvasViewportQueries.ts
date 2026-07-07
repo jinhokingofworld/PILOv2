@@ -119,10 +119,11 @@ export function useCanvasViewportQueries({
         workspaceId: board.workspaceId,
       });
 
+      queryClient.removeQueries({ exact: true, queryKey });
       void queryClient
         .fetchQuery({
           queryKey,
-          staleTime: CANVAS_VIEWPORT_SHAPE_STALE_TIME_MS,
+          staleTime: 0,
           queryFn: ({ signal }) =>
             listShapesInViewport(
               board.id,
