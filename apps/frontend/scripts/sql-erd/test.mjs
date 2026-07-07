@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import ts from "typescript";
 
@@ -10,9 +10,12 @@ async function readSqlErdFile(path) {
 }
 
 async function compileSqlErdRuntimeModules() {
-  const outputDir = await mkdtemp(join(tmpdir(), "pilo-sqltoerd-runtime-"));
+  const outputDir = await mkdtemp(
+    fileURLToPath(new URL("../../.pilo-sqltoerd-runtime-", import.meta.url))
+  );
   const modelOutputPath = join(outputDir, "model.mjs");
   const inspectorOutputPath = join(outputDir, "inspector.mjs");
+  const ddlParserOutputPath = join(outputDir, "ddl-parser.mjs");
 
   try {
     await compileTypeScriptModule(
@@ -24,13 +27,24 @@ async function compileSqlErdRuntimeModules() {
       inspectorOutputPath,
       [[/from "\.\/model"/g, 'from "./model.mjs"']]
     );
+    await compileTypeScriptModule(
+      "../../src/features/sql-erd/utils/ddl-parser.ts",
+      ddlParserOutputPath,
+      [[/from "@\/features\/sql-erd\/types"/g, 'from "./types-stub.mjs"']]
+    );
 
-    const [modelRuntime, inspectorRuntime] = await Promise.all([
+    await writeFile(
+      join(outputDir, "types-stub.mjs"),
+      "export const SQLTOERD_MODEL_JSON_VERSION = 1;\n"
+    );
+
+    const [modelRuntime, inspectorRuntime, ddlParserRuntime] = await Promise.all([
       import(pathToFileHref(modelOutputPath)),
-      import(pathToFileHref(inspectorOutputPath))
+      import(pathToFileHref(inspectorOutputPath)),
+      import(pathToFileHref(ddlParserOutputPath))
     ]);
 
-    return { inspectorRuntime, modelRuntime };
+    return { ddlParserRuntime, inspectorRuntime, modelRuntime };
   } finally {
     await rm(outputDir, { force: true, recursive: true });
   }
@@ -158,7 +172,9 @@ const [
   panel,
   canvasSurface,
   tableShape,
-  relationShape
+  relationShape,
+  ddlParserUtils,
+  packageJson
 ] =
   await Promise.all([
     readSqlErdFile("../../../../docs/api/sqltoerd-api.md"),
@@ -170,10 +186,13 @@ const [
     readSqlErdFile("../../src/features/sql-erd/components/sql-erd-panel.tsx"),
     readSqlErdFile("../../src/features/sql-erd/components/sql-erd-canvas.tsx"),
     readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-table-shape.tsx"),
-    readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-relation-shape.tsx")
+    readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-relation-shape.tsx"),
+    readSqlErdFile("../../src/features/sql-erd/utils/ddl-parser.ts"),
+    readSqlErdFile("../../package.json")
   ]);
 
-const { inspectorRuntime, modelRuntime } = await compileSqlErdRuntimeModules();
+const { ddlParserRuntime, inspectorRuntime, modelRuntime } =
+  await compileSqlErdRuntimeModules();
 const runtimeModel = createRuntimeTestModel();
 const runtimeModelIndex = modelRuntime.createSqltoerdModelIndex(runtimeModel);
 const runtimeOrdersToUsersRelation =
@@ -243,6 +262,140 @@ assert.equal(
   ).length,
   1
 );
+
+const postgresParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
+  dialect: "postgresql",
+  sourceText: `CREATE TABLE users (
+  id BIGSERIAL PRIMARY KEY,
+  email VARCHAR(255) NOT NULL UNIQUE,
+  full_name TEXT,
+  created_at TIMESTAMP NOT NULL
+);
+
+CREATE TABLE orders (
+  id BIGINT NOT NULL,
+  user_id BIGINT NOT NULL,
+  status VARCHAR(32) NOT NULL,
+  total_cents INTEGER NOT NULL,
+  PRIMARY KEY (id),
+  CONSTRAINT fk_orders_user FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+CREATE TABLE reviews (
+  id BIGINT PRIMARY KEY,
+  user_id BIGINT REFERENCES users(id),
+  rating SMALLINT NOT NULL,
+  body TEXT
+);`
+});
+
+assert.equal(postgresParseResult.ok, true);
+assert.equal(postgresParseResult.modelJson.version, 1);
+assert.deepEqual(
+  postgresParseResult.modelJson.schema.tables.map((table) => table.id),
+  ["table.users", "table.orders", "table.reviews"]
+);
+
+const postgresUsers = postgresParseResult.modelJson.schema.tables[0];
+const postgresOrders = postgresParseResult.modelJson.schema.tables[1];
+const postgresReviews = postgresParseResult.modelJson.schema.tables[2];
+
+assert.equal(postgresUsers.columns[0].id, "column.users.id");
+assert.equal(postgresUsers.columns[0].dataType, "BIGSERIAL");
+assert.equal(postgresUsers.columns[0].primaryKey, true);
+assert.equal(postgresUsers.columns[0].nullable, false);
+assert.equal(postgresUsers.columns[1].dataType, "VARCHAR(255)");
+assert.equal(postgresUsers.columns[1].unique, true);
+assert.equal(postgresUsers.columns[1].nullable, false);
+assert.equal(postgresUsers.columns[2].nullable, true);
+assert.deepEqual(postgresOrders.constraints, [
+  {
+    id: "constraint.orders.pk",
+    kind: "primary_key",
+    columnIds: ["column.orders.id"],
+    name: null
+  }
+]);
+assert.equal(postgresOrders.columns[1].foreignKey, true);
+assert.equal(postgresReviews.columns[1].foreignKey, true);
+assert.deepEqual(
+  postgresParseResult.modelJson.schema.relations.map((relation) => relation.id),
+  [
+    "relation.orders.user_id.users.id",
+    "relation.reviews.user_id.users.id"
+  ]
+);
+assert.equal(
+  postgresParseResult.modelJson.schema.relations[0].constraintName,
+  "fk_orders_user"
+);
+
+const mysqlParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
+  dialect: "mysql",
+  sourceText: `CREATE TABLE users (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  email VARCHAR(255) NOT NULL UNIQUE,
+  created_at DATETIME NOT NULL
+);
+
+CREATE TABLE orders (
+  id BIGINT PRIMARY KEY,
+  user_id BIGINT NOT NULL,
+  status VARCHAR(32) NOT NULL,
+  UNIQUE KEY uq_orders_status (status),
+  CONSTRAINT fk_orders_user FOREIGN KEY (user_id) REFERENCES users(id)
+);`
+});
+
+assert.equal(mysqlParseResult.ok, true);
+assert.deepEqual(
+  mysqlParseResult.modelJson.schema.tables.map((table) => table.id),
+  ["table.users", "table.orders"]
+);
+assert.equal(mysqlParseResult.modelJson.schema.tables[0].columns[0].dataType, "BIGINT");
+assert.equal(mysqlParseResult.modelJson.schema.tables[0].columns[0].primaryKey, true);
+assert.equal(mysqlParseResult.modelJson.schema.tables[0].columns[1].unique, true);
+assert.equal(mysqlParseResult.modelJson.schema.tables[1].columns[2].unique, true);
+assert.deepEqual(mysqlParseResult.modelJson.schema.tables[1].constraints[1], {
+  id: "constraint.orders.status.unique",
+  kind: "unique",
+  columnIds: ["column.orders.status"],
+  name: "uq_orders_status"
+});
+assert.deepEqual(mysqlParseResult.modelJson.schema.relations, [
+  {
+    id: "relation.orders.user_id.users.id",
+    kind: "foreign_key",
+    fromTableId: "table.orders",
+    fromColumnIds: ["column.orders.user_id"],
+    toTableId: "table.users",
+    toColumnIds: ["column.users.id"],
+    constraintName: "fk_orders_user"
+  }
+]);
+
+const autoDialectParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
+  dialect: "auto",
+  sourceText: `CREATE TABLE users (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  email VARCHAR(255) NOT NULL UNIQUE
+);`
+});
+
+assert.equal(autoDialectParseResult.ok, true);
+assert.equal(autoDialectParseResult.modelJson.schema.tables[0].id, "table.users");
+assert.equal(
+  autoDialectParseResult.modelJson.schema.tables[0].columns[0].dataType,
+  "BIGINT"
+);
+
+const invalidParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
+  dialect: "postgresql",
+  sourceText: "SELECT * FROM users"
+});
+
+assert.equal(invalidParseResult.ok, false);
+assert.match(invalidParseResult.error.message, /CREATE TABLE/);
 
 for (const typeName of [
   "SqltoerdModelJsonV1",
@@ -385,3 +538,15 @@ assert.doesNotMatch(relationShape, /useValue/);
 assert.doesNotMatch(relationShape, /canCull\(\)/);
 assert.match(relationShape, /hideSelectionBoundsBg/);
 assert.match(relationShape, /hideSelectionBoundsFg/);
+
+assert.match(packageJson, /"node-sql-parser"/);
+assert.match(ddlParserUtils, /parseSqlDdlToErdModel/);
+assert.match(ddlParserUtils, /node-sql-parser/);
+assert.match(ddlParserUtils, /SQLTOERD_MODEL_JSON_VERSION/);
+assert.match(ddlParserUtils, /NO_CREATE_TABLE/);
+assert.match(ddlParserUtils, /resolveParserDatabases/);
+assert.match(ddlParserUtils, /createTableState/);
+assert.match(ddlParserUtils, /createRelationFromReference/);
+assert.match(ddlParserUtils, /primary_key/);
+assert.match(ddlParserUtils, /foreign_key/);
+assert.match(ddlParserUtils, /unique/);
