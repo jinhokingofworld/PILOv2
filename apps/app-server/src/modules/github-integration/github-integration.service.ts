@@ -9,6 +9,7 @@ import { GithubIntegrationConfigService } from "./github-integration-config.serv
 import { GithubOAuthClient } from "./github-oauth.client";
 import { GithubOAuthIntegrationService } from "./github-oauth-integration.service";
 import { GithubOAuthStateService } from "./github-oauth-state.service";
+import { GithubProjectV2SyncTokenService } from "./github-project-v2-sync-token.service";
 import { GithubProjectV2Service } from "./github-project-v2.service";
 import { GithubPullRequestRemoteService } from "./github-pull-request-remote.service";
 import { GithubReviewSubmissionService } from "./github-review-submission.service";
@@ -99,7 +100,9 @@ export class GithubIntegrationService {
     @Optional()
     githubReviewSubmissionService?: GithubReviewSubmissionService,
     @Optional()
-    githubCallbackStateService?: GithubCallbackStateService
+    githubCallbackStateService?: GithubCallbackStateService,
+    @Optional()
+    githubProjectV2SyncTokenService?: GithubProjectV2SyncTokenService
   ) {
     const callbackStateService =
       githubCallbackStateService ?? new GithubCallbackStateService(database);
@@ -116,13 +119,21 @@ export class GithubIntegrationService {
     const syncExecutorService =
       githubSyncExecutorService ??
       new GithubSyncExecutorService(database, githubAppClient);
+    const projectV2SyncTokenService =
+      githubProjectV2SyncTokenService ??
+      new GithubProjectV2SyncTokenService(
+        database,
+        tokenEncryptionService,
+        configService
+      );
     const syncRunService =
       githubSyncRunService ??
       new GithubSyncRunService(
         database,
         configService,
         workspaceService,
-        syncExecutorService
+        syncExecutorService,
+        projectV2SyncTokenService
       );
     this.githubAppInstallationService =
       githubAppInstallationService ??

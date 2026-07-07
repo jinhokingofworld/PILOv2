@@ -84,6 +84,7 @@ export interface GithubSyncRunContext {
   installation: GithubSyncInstallationRow;
   repository: GithubSyncRepositoryContextRow | null;
   projectV2: GithubSyncProjectV2ContextRow | null;
+  githubUserAccessToken: string | null;
   config: GithubAppRuntimeConfig;
 }
 
@@ -290,6 +291,7 @@ export class GithubSyncExecutorService {
       privateKey: context.config.privateKey,
       accountLogin: context.installation.account_login,
       accountType: context.installation.account_type,
+      userAccessToken: this.getProjectV2UserAccessToken(context),
       now: context.config.now
     });
 
@@ -326,6 +328,7 @@ export class GithubSyncExecutorService {
       appId: context.config.appId,
       privateKey: context.config.privateKey,
       projectNodeId: projectV2.github_project_node_id,
+      userAccessToken: this.getProjectV2UserAccessToken(context),
       now: context.config.now
     });
     await this.upsertGithubProjectV2(context, project);
@@ -345,6 +348,7 @@ export class GithubSyncExecutorService {
       appId: context.config.appId,
       privateKey: context.config.privateKey,
       projectNodeId: projectV2.github_project_node_id,
+      userAccessToken: this.getProjectV2UserAccessToken(context),
       now: context.config.now
     });
     let createdCount = 0;
@@ -379,6 +383,7 @@ export class GithubSyncExecutorService {
       appId: context.config.appId,
       privateKey: context.config.privateKey,
       projectNodeId: projectV2.github_project_node_id,
+      userAccessToken: this.getProjectV2UserAccessToken(context),
       now: context.config.now
     });
     let createdCount = 0;
@@ -1370,6 +1375,14 @@ export class GithubSyncExecutorService {
     }
 
     return context.projectV2;
+  }
+
+  private getProjectV2UserAccessToken(
+    context: GithubSyncRunContext
+  ): string | undefined {
+    return context.installation.account_type === "User"
+      ? context.githubUserAccessToken ?? undefined
+      : undefined;
   }
 
   private createGithubSyncSummary(
