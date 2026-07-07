@@ -32,8 +32,10 @@ const { SqlErdService } = require(
 
 const currentUserId = "11111111-1111-4111-8111-111111111111";
 const workspaceId = "22222222-2222-4222-8222-222222222222";
+const sessionId = "33333333-3333-4333-8333-333333333333";
 const createdAt = new Date("2026-07-07T08:00:00.000Z");
 const updatedAt = new Date("2026-07-07T08:05:00.000Z");
+const deletedAt = new Date("2026-07-07T08:10:00.000Z");
 
 assert.match(appModule, /SqlErdModule/);
 assert.match(sqlErdModule, /controllers: \[SqlErdSessionController\]/);
@@ -54,6 +56,9 @@ assert.match(sqlErdService, /assertWorkspaceAccess/);
 assert.match(sqlErdService, /DatabaseService/);
 assert.match(sqlErdService, /FROM sql_erd_sessions/);
 assert.match(sqlErdService, /INSERT INTO sql_erd_sessions/);
+assert.match(sqlErdService, /UPDATE sql_erd_sessions/);
+assert.match(sqlErdService, /revision = revision \+ 1/);
+assert.match(sqlErdService, /deleted_at = now\(\)/);
 assert.match(sqlErdService, /table_count/);
 assert.match(sqlErdService, /relation_count/);
 assert.match(sqlErdService, /created_by/);
@@ -61,9 +66,12 @@ assert.match(sqlErdService, /updated_by/);
 assert.match(sqlErdService, /UNIQUE_VIOLATION_CODE/);
 assert.match(sqlErdValidation, /validateSqlErdSessionId/);
 assert.match(sqlErdValidation, /validateCreateSqlErdSessionRequest/);
+assert.match(sqlErdValidation, /validateUpdateSqlErdSessionRequest/);
+assert.match(sqlErdValidation, /validateDeleteSqlErdSessionQuery/);
 assert.match(sqlErdValidation, /readVersionedJsonObject/);
 assert.match(sqlErdValidation, /\$\{field\}\.version must be 1/);
 assert.match(sqlErdMapper, /mapSqlErdSession/);
+assert.match(sqlErdMapper, /mapDeletedSqlErdSession/);
 
 class FakeDatabase {
   constructor({ queryOneRows = [] } = {}) {
@@ -124,7 +132,7 @@ function layoutJson(overrides = {}) {
 
 function sessionRow(overrides = {}) {
   return {
-    id: "33333333-3333-4333-8333-333333333333",
+    id: sessionId,
     workspace_id: workspaceId,
     title: "Commerce ERD",
     source_format: "sql",
@@ -283,6 +291,270 @@ async function assertApiError(action, status, code, messagePattern, forbiddenPat
 }
 
 {
+  const updatedSourceText = "CREATE TABLE users (id BIGINT PRIMARY KEY, email TEXT);";
+  const updatedModelJson = {
+    version: 1,
+    schema: {
+      tables: [
+        { id: "table_users" },
+        { id: "table_orders" },
+        { id: "table_products" }
+      ],
+      relations: [{ id: "relation_orders_users" }, { id: "relation_products" }]
+    }
+  };
+  const updatedLayoutJson = {
+    version: 1,
+    tableLayouts: [{ tableId: "table_users", x: 10, y: 20 }]
+  };
+  const updatedSettingsJson = { panel: { leftCollapsed: false } };
+  const database = new FakeDatabase({
+    queryOneRows: [
+      sessionRow({ revision: 3 }),
+      (text, values) => {
+        assert.match(text, /UPDATE sql_erd_sessions/);
+        assert.match(text, /AND revision = \$13/);
+        assert.deepEqual(values, [
+          workspaceId,
+          sessionId,
+          "Commerce ERD v2",
+          "sql",
+          "mysql",
+          updatedSourceText,
+          JSON.stringify(updatedModelJson),
+          JSON.stringify(updatedLayoutJson),
+          JSON.stringify(updatedSettingsJson),
+          3,
+          2,
+          currentUserId,
+          3
+        ]);
+        return sessionRow({
+          title: "Commerce ERD v2",
+          dialect: "mysql",
+          source_text: updatedSourceText,
+          model_json: updatedModelJson,
+          layout_json: updatedLayoutJson,
+          settings_json: updatedSettingsJson,
+          table_count: 3,
+          relation_count: 2,
+          revision: 4,
+          updated_by: currentUserId
+        });
+      }
+    ]
+  });
+  const { service } = createSubject(database);
+
+  const session = await service.updateSession(currentUserId, workspaceId, sessionId, {
+    baseRevision: 3,
+    title: "Commerce ERD v2",
+    sourceFormat: "sql",
+    dialect: "mysql",
+    sourceText: updatedSourceText,
+    modelJson: updatedModelJson,
+    layoutJson: updatedLayoutJson,
+    settingsJson: updatedSettingsJson
+  });
+
+  assert.equal(session.title, "Commerce ERD v2");
+  assert.equal(session.dialect, "mysql");
+  assert.equal(session.tableCount, 3);
+  assert.equal(session.relationCount, 2);
+  assert.equal(session.revision, 4);
+  assert.equal(session.updatedBy, currentUserId);
+}
+
+{
+  const existingRow = sessionRow({
+    title: "Old ERD",
+    source_text: "CREATE TABLE old_table (id BIGINT PRIMARY KEY);",
+    revision: 2,
+    table_count: 2,
+    relation_count: 1
+  });
+  const database = new FakeDatabase({
+    queryOneRows: [
+      existingRow,
+      (text, values) => {
+        assert.match(text, /UPDATE sql_erd_sessions/);
+        assert.deepEqual(values, [
+          workspaceId,
+          sessionId,
+          "Renamed ERD",
+          existingRow.source_format,
+          existingRow.dialect,
+          existingRow.source_text,
+          JSON.stringify(existingRow.model_json),
+          JSON.stringify(existingRow.layout_json),
+          JSON.stringify(existingRow.settings_json),
+          2,
+          1,
+          currentUserId,
+          2
+        ]);
+        return sessionRow({
+          ...existingRow,
+          title: "Renamed ERD",
+          revision: 3,
+          updated_by: currentUserId
+        });
+      }
+    ]
+  });
+  const { service } = createSubject(database);
+
+  const session = await service.updateSession(currentUserId, workspaceId, sessionId, {
+    baseRevision: 2,
+    title: "Renamed ERD"
+  });
+
+  assert.equal(session.title, "Renamed ERD");
+  assert.equal(session.sourceText, existingRow.source_text);
+  assert.equal(session.tableCount, 2);
+  assert.equal(session.relationCount, 1);
+  assert.equal(session.revision, 3);
+}
+
+{
+  const database = new FakeDatabase({ queryOneRows: [sessionRow({ revision: 5 })] });
+  const { service } = createSubject(database);
+
+  await assertApiError(
+    () =>
+      service.updateSession(currentUserId, workspaceId, sessionId, {
+        baseRevision: 4,
+        title: "Stale ERD"
+      }),
+    409,
+    "CONFLICT",
+    /revision conflict/
+  );
+}
+
+{
+  const { service } = createSubject();
+
+  await assertApiError(
+    () =>
+      service.updateSession(currentUserId, workspaceId, sessionId, {
+        baseRevision: 1
+      }),
+    400,
+    "BAD_REQUEST",
+    /At least one update field is required/
+  );
+}
+
+{
+  const database = new FakeDatabase({ queryOneRows: [null] });
+  const { service } = createSubject(database);
+
+  await assertApiError(
+    () =>
+      service.updateSession(currentUserId, workspaceId, sessionId, {
+        baseRevision: 1,
+        title: "Missing ERD"
+      }),
+    404,
+    "NOT_FOUND",
+    /session not found/
+  );
+}
+
+{
+  const database = new FakeDatabase({
+    queryOneRows: [sessionRow({ revision: 3 }), null, sessionRow({ revision: 4 })]
+  });
+  const { service } = createSubject(database);
+
+  await assertApiError(
+    () =>
+      service.updateSession(currentUserId, workspaceId, sessionId, {
+        baseRevision: 3,
+        title: "Race ERD"
+      }),
+    409,
+    "CONFLICT",
+    /revision conflict/
+  );
+}
+
+{
+  const database = new FakeDatabase({
+    queryOneRows: [
+      (text, values) => {
+        assert.match(text, /UPDATE sql_erd_sessions/);
+        assert.match(text, /deleted_at = now\(\)/);
+        assert.match(text, /AND revision = \$3/);
+        assert.deepEqual(values, [workspaceId, sessionId, 4, currentUserId]);
+        return sessionRow({
+          deleted_at: deletedAt,
+          revision: 5,
+          updated_by: currentUserId
+        });
+      }
+    ]
+  });
+  const { service } = createSubject(database);
+
+  const result = await service.deleteSession(currentUserId, workspaceId, sessionId, {
+    baseRevision: "4"
+  });
+
+  assert.deepEqual(result, {
+    id: sessionId,
+    deletedAt: deletedAt.toISOString(),
+    revision: 5
+  });
+}
+
+{
+  const database = new FakeDatabase({
+    queryOneRows: [null, sessionRow({ revision: 6 })]
+  });
+  const { service } = createSubject(database);
+
+  await assertApiError(
+    () =>
+      service.deleteSession(currentUserId, workspaceId, sessionId, {
+        baseRevision: "5"
+      }),
+    409,
+    "CONFLICT",
+    /revision conflict/
+  );
+}
+
+{
+  const database = new FakeDatabase({
+    queryOneRows: [null, null]
+  });
+  const { service } = createSubject(database);
+
+  await assertApiError(
+    () =>
+      service.deleteSession(currentUserId, workspaceId, sessionId, {
+        baseRevision: "1"
+      }),
+    404,
+    "NOT_FOUND",
+    /session not found/
+  );
+}
+
+{
+  const { service } = createSubject();
+
+  await assertApiError(
+    () => service.deleteSession(currentUserId, workspaceId, sessionId, {}),
+    400,
+    "BAD_REQUEST",
+    /baseRevision is required/
+  );
+}
+
+{
   const sensitiveSql = "CREATE TABLE secret_users (password TEXT);";
   const { service } = createSubject();
 
@@ -328,6 +600,19 @@ async function assertApiError(action, status, code, messagePattern, forbiddenPat
     400,
     "BAD_REQUEST",
     /layoutJson\.version must be 1/,
+    /secret_users|password/
+  );
+
+  await assertApiError(
+    () =>
+      service.updateSession(currentUserId, workspaceId, sessionId, {
+        baseRevision: 1,
+        sourceText: sensitiveSql,
+        modelJson: modelJson({ version: 2 })
+      }),
+    400,
+    "BAD_REQUEST",
+    /modelJson\.version must be 1/,
     /secret_users|password/
   );
 }

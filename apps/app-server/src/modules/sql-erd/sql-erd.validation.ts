@@ -1,10 +1,14 @@
 import { badRequest, payloadTooLarge } from "../../common/api-error";
 import {
   CreateSqlErdSessionRequest,
+  DeleteSqlErdSessionQuery,
   NormalizedCreateSqlErdSessionInput,
+  NormalizedDeleteSqlErdSessionInput,
+  NormalizedUpdateSqlErdSessionInput,
   SqlErdDialect,
   SqlErdJsonObject,
-  SqlErdSourceFormat
+  SqlErdSourceFormat,
+  UpdateSqlErdSessionRequest
 } from "./sql-erd.types";
 
 const UUID_PATTERN =
@@ -48,6 +52,42 @@ export function validateCreateSqlErdSessionRequest(
   };
 }
 
+export function validateUpdateSqlErdSessionRequest(
+  body: UpdateSqlErdSessionRequest
+): NormalizedUpdateSqlErdSessionInput {
+  const draft = readBody(body);
+  const modelJson = readOptionalVersionedJsonObject(draft.modelJson, "modelJson");
+  const counts = modelJson ? readModelCounts(modelJson) : undefined;
+  const input: NormalizedUpdateSqlErdSessionInput = {
+    baseRevision: readBaseRevision(draft.baseRevision),
+    title: readOptionalTitle(draft.title),
+    sourceFormat: readOptionalSourceFormat(draft.sourceFormat),
+    dialect: readOptionalDialect(draft.dialect),
+    sourceText: readOptionalSourceText(draft.sourceText),
+    modelJson,
+    layoutJson: readOptionalVersionedJsonObject(draft.layoutJson, "layoutJson"),
+    settingsJson: readOptionalSettingsJson(draft.settingsJson),
+    tableCount: counts?.tableCount,
+    relationCount: counts?.relationCount
+  };
+
+  if (!hasUpdateField(input)) {
+    throw badRequest("At least one update field is required");
+  }
+
+  return input;
+}
+
+export function validateDeleteSqlErdSessionQuery(
+  query: DeleteSqlErdSessionQuery
+): NormalizedDeleteSqlErdSessionInput {
+  const draft = readBody(query);
+
+  return {
+    baseRevision: readBaseRevision(draft.baseRevision)
+  };
+}
+
 function readBody(body: unknown): Record<string, unknown> {
   if (!isPlainJsonObject(body)) {
     throw badRequest("Request body must be an object");
@@ -77,6 +117,14 @@ function readTitle(value: unknown): string {
   return title;
 }
 
+function readOptionalTitle(value: unknown): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  return readTitle(value);
+}
+
 function readSourceFormat(value: unknown): SqlErdSourceFormat {
   if (value === undefined) {
     return DEFAULT_SOURCE_FORMAT;
@@ -89,6 +137,14 @@ function readSourceFormat(value: unknown): SqlErdSourceFormat {
   return value as SqlErdSourceFormat;
 }
 
+function readOptionalSourceFormat(value: unknown): SqlErdSourceFormat | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  return readSourceFormat(value);
+}
+
 function readDialect(value: unknown): SqlErdDialect {
   if (value === undefined) {
     return DEFAULT_DIALECT;
@@ -99,6 +155,14 @@ function readDialect(value: unknown): SqlErdDialect {
   }
 
   return value as SqlErdDialect;
+}
+
+function readOptionalDialect(value: unknown): SqlErdDialect | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  return readDialect(value);
 }
 
 function readSourceText(value: unknown): string {
@@ -117,6 +181,14 @@ function readSourceText(value: unknown): string {
   return value;
 }
 
+function readOptionalSourceText(value: unknown): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  return readSourceText(value);
+}
+
 function readVersionedJsonObject(
   value: unknown,
   field: "modelJson" | "layoutJson"
@@ -132,6 +204,17 @@ function readVersionedJsonObject(
   return value;
 }
 
+function readOptionalVersionedJsonObject(
+  value: unknown,
+  field: "modelJson" | "layoutJson"
+): SqlErdJsonObject | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  return readVersionedJsonObject(value, field);
+}
+
 function readOptionalJsonObject(
   value: unknown,
   field: "settingsJson"
@@ -145,6 +228,45 @@ function readOptionalJsonObject(
   }
 
   return value;
+}
+
+function readOptionalSettingsJson(value: unknown): SqlErdJsonObject | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  return readOptionalJsonObject(value, "settingsJson");
+}
+
+function readBaseRevision(value: unknown): number {
+  if (typeof value === "number") {
+    if (Number.isSafeInteger(value) && value > 0) {
+      return value;
+    }
+
+    throw badRequest("baseRevision must be a positive integer");
+  }
+
+  if (typeof value === "string" && /^[1-9]\d*$/.test(value)) {
+    const parsed = Number(value);
+    if (Number.isSafeInteger(parsed)) {
+      return parsed;
+    }
+  }
+
+  throw badRequest("baseRevision is required");
+}
+
+function hasUpdateField(input: NormalizedUpdateSqlErdSessionInput): boolean {
+  return (
+    input.title !== undefined ||
+    input.sourceFormat !== undefined ||
+    input.dialect !== undefined ||
+    input.sourceText !== undefined ||
+    input.modelJson !== undefined ||
+    input.layoutJson !== undefined ||
+    input.settingsJson !== undefined
+  );
 }
 
 function readModelCounts(modelJson: SqlErdJsonObject): {

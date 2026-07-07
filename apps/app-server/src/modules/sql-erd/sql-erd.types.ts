@@ -18,6 +18,23 @@ export interface NormalizedCreateSqlErdSessionInput {
   relationCount: number;
 }
 
+export interface NormalizedUpdateSqlErdSessionInput {
+  baseRevision: number;
+  title?: string;
+  sourceFormat?: SqlErdSourceFormat;
+  dialect?: SqlErdDialect;
+  sourceText?: string;
+  modelJson?: SqlErdJsonObject;
+  layoutJson?: SqlErdJsonObject;
+  settingsJson?: SqlErdJsonObject;
+  tableCount?: number;
+  relationCount?: number;
+}
+
+export interface NormalizedDeleteSqlErdSessionInput {
+  baseRevision: number;
+}
+
 export interface SqlErdSessionRow extends QueryResultRow {
   id: string;
   workspace_id: string;

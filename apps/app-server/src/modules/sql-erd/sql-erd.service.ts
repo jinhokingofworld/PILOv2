@@ -1,17 +1,23 @@
 import { Injectable } from "@nestjs/common";
-import { badRequest, conflict } from "../../common/api-error";
+import { badRequest, conflict, notFound } from "../../common/api-error";
 import { DatabaseService } from "../../database/database.service";
 import { WorkspaceService } from "../workspace/workspace.service";
-import { mapSqlErdSession } from "./sql-erd.mapper";
+import { mapDeletedSqlErdSession, mapSqlErdSession } from "./sql-erd.mapper";
 import {
   CreateSqlErdSessionRequest,
   DeleteSqlErdSessionQuery,
+  NormalizedUpdateSqlErdSessionInput,
   SqlErdDeletedSessionPayload,
   SqlErdSessionPayload,
   SqlErdSessionRow,
   UpdateSqlErdSessionRequest
 } from "./sql-erd.types";
-import { validateCreateSqlErdSessionRequest } from "./sql-erd.validation";
+import {
+  validateCreateSqlErdSessionRequest,
+  validateDeleteSqlErdSessionQuery,
+  validateSqlErdSessionId,
+  validateUpdateSqlErdSessionRequest
+} from "./sql-erd.validation";
 
 const SQL_ERD_SESSION_SELECT = `
   SELECT
@@ -161,10 +167,31 @@ export class SqlErdService {
     body: UpdateSqlErdSessionRequest
   ): Promise<SqlErdSessionPayload> {
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
-    void sessionId;
-    void body;
 
-    return this.throwNotImplemented("update");
+    const validSessionId = validateSqlErdSessionId(sessionId);
+    const input = validateUpdateSqlErdSessionRequest(body);
+    const currentSession = await this.findActiveSessionById(
+      workspaceId,
+      validSessionId
+    );
+    if (!currentSession) {
+      throw notFound("sqltoerd session not found");
+    }
+
+    this.assertRevision(currentSession, input.baseRevision);
+
+    const session = await this.updateActiveSession(
+      workspaceId,
+      validSessionId,
+      currentUserId,
+      currentSession,
+      input
+    );
+    if (!session) {
+      return await this.throwMissingOrConflict(workspaceId, validSessionId);
+    }
+
+    return mapSqlErdSession(session);
   }
 
   async deleteSession(
@@ -174,14 +201,55 @@ export class SqlErdService {
     query: DeleteSqlErdSessionQuery
   ): Promise<SqlErdDeletedSessionPayload> {
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
-    void sessionId;
-    void query;
 
-    return this.throwNotImplemented("delete");
-  }
+    const validSessionId = validateSqlErdSessionId(sessionId);
+    const input = validateDeleteSqlErdSessionQuery(query);
+    const session = await this.database.queryOne<SqlErdSessionRow>(
+      `
+        UPDATE sql_erd_sessions
+        SET
+          deleted_at = now(),
+          revision = revision + 1,
+          updated_by = $4
+        WHERE workspace_id = $1
+          AND id = $2
+          AND deleted_at IS NULL
+          AND revision = $3
+        RETURNING
+          id,
+          workspace_id,
+          title,
+          source_format,
+          dialect,
+          source_text,
+          model_json,
+          layout_json,
+          settings_json,
+          table_count,
+          relation_count,
+          revision,
+          created_by,
+          updated_by,
+          created_at,
+          updated_at,
+          deleted_at
+      `,
+      [workspaceId, validSessionId, input.baseRevision, currentUserId]
+    );
 
-  private throwNotImplemented(action: string): never {
-    throw badRequest(`sqltoerd session ${action} is not implemented`);
+    if (!session) {
+      return await this.throwMissingOrConflict(workspaceId, validSessionId);
+    }
+
+    if (!session.deleted_at) {
+      return await this.throwMissingOrConflict(workspaceId, validSessionId);
+    }
+
+    return mapDeletedSqlErdSession(
+      session.id,
+      session.deleted_at,
+      session.revision
+    );
   }
 
   private findActiveSession(workspaceId: string): Promise<SqlErdSessionRow | null> {
@@ -193,6 +261,112 @@ export class SqlErdService {
       `,
       [workspaceId]
     );
+  }
+
+  private findActiveSessionById(
+    workspaceId: string,
+    sessionId: string
+  ): Promise<SqlErdSessionRow | null> {
+    return this.database.queryOne<SqlErdSessionRow>(
+      `
+        ${SQL_ERD_SESSION_SELECT}
+        WHERE workspace_id = $1
+          AND id = $2
+          AND deleted_at IS NULL
+      `,
+      [workspaceId, sessionId]
+    );
+  }
+
+  private updateActiveSession(
+    workspaceId: string,
+    sessionId: string,
+    currentUserId: string,
+    currentSession: SqlErdSessionRow,
+    input: NormalizedUpdateSqlErdSessionInput
+  ): Promise<SqlErdSessionRow | null> {
+    const modelJson = input.modelJson ?? currentSession.model_json;
+    const layoutJson = input.layoutJson ?? currentSession.layout_json;
+    const settingsJson = input.settingsJson ?? currentSession.settings_json;
+    const tableCount = input.tableCount ?? Number(currentSession.table_count);
+    const relationCount =
+      input.relationCount ?? Number(currentSession.relation_count);
+
+    return this.database.queryOne<SqlErdSessionRow>(
+      `
+        UPDATE sql_erd_sessions
+        SET
+          title = $3,
+          source_format = $4,
+          dialect = $5,
+          source_text = $6,
+          model_json = $7::jsonb,
+          layout_json = $8::jsonb,
+          settings_json = $9::jsonb,
+          table_count = $10,
+          relation_count = $11,
+          revision = revision + 1,
+          updated_by = $12
+        WHERE workspace_id = $1
+          AND id = $2
+          AND deleted_at IS NULL
+          AND revision = $13
+        RETURNING
+          id,
+          workspace_id,
+          title,
+          source_format,
+          dialect,
+          source_text,
+          model_json,
+          layout_json,
+          settings_json,
+          table_count,
+          relation_count,
+          revision,
+          created_by,
+          updated_by,
+          created_at,
+          updated_at,
+          deleted_at
+      `,
+      [
+        workspaceId,
+        sessionId,
+        input.title ?? currentSession.title,
+        input.sourceFormat ?? currentSession.source_format,
+        input.dialect ?? currentSession.dialect,
+        input.sourceText ?? currentSession.source_text,
+        JSON.stringify(modelJson),
+        JSON.stringify(layoutJson),
+        JSON.stringify(settingsJson),
+        tableCount,
+        relationCount,
+        currentUserId,
+        input.baseRevision
+      ]
+    );
+  }
+
+  private assertRevision(
+    session: SqlErdSessionRow,
+    baseRevision: number
+  ): void {
+    if (Number(session.revision) !== baseRevision) {
+      throw conflict("sqltoerd session revision conflict");
+    }
+  }
+
+  private async throwMissingOrConflict(
+    workspaceId: string,
+    sessionId: string
+  ): Promise<never> {
+    const currentSession = await this.findActiveSessionById(workspaceId, sessionId);
+    if (currentSession) {
+      throw conflict("sqltoerd session revision conflict");
+    }
+
+    throw notFound("sqltoerd session not found");
   }
 
   private isUniqueViolation(error: unknown): boolean {
