@@ -21,12 +21,16 @@ import {
 } from "@/features/sql-erd/shapes/sql-erd-relation-shape";
 import {
   getSqlErdTableShapeSize,
+  SQLTOERD_COLUMN_SELECT_EVENT,
+  SQLTOERD_TABLE_SELECT_EVENT,
   SQLTOERD_TABLE_SHAPE_TYPE,
   SqlErdTableShapeUtil,
   toSqlErdTableShapeColumns,
+  isSqlErdTableShape,
   type SqlErdTableShape
 } from "@/features/sql-erd/shapes/sql-erd-table-shape";
 import type {
+  SqlErdSelection,
   SqltoerdLayoutJsonV1,
   SqltoerdModelJsonV1
 } from "@/features/sql-erd/types";
@@ -36,6 +40,10 @@ import { TldrawSurface } from "@/shared/tldraw/TldrawSurface";
 
 type SqlErdCanvasProps = {
   className?: string;
+  layoutJson?: SqltoerdLayoutJsonV1;
+  modelJson?: SqltoerdModelJsonV1;
+  onSelectionChange?: (selection: SqlErdSelection) => void;
+  selectedSqlErdObject?: SqlErdSelection;
 };
 
 const sqlErdShapeUtils = [SqlErdRelationShapeUtil, SqlErdTableShapeUtil];
@@ -312,6 +320,65 @@ export function syncSqlErdRelationShapes(editor: Editor) {
   return updates.length;
 }
 
+function areSqlErdSelectionsEqual(
+  left: SqlErdSelection,
+  right: SqlErdSelection
+) {
+  if (left.type !== right.type) {
+    return false;
+  }
+
+  if (left.type === "table" && right.type === "table") {
+    return left.tableId === right.tableId;
+  }
+
+  if (left.type === "column" && right.type === "column") {
+    return left.tableId === right.tableId && left.columnId === right.columnId;
+  }
+
+  if (left.type === "relation" && right.type === "relation") {
+    return left.relationId === right.relationId;
+  }
+
+  return true;
+}
+
+function getSqlErdSelectionFromEditor(
+  editor: Editor,
+  currentSelection: SqlErdSelection
+): SqlErdSelection {
+  const selectedShapes = editor.getSelectedShapes();
+
+  if (selectedShapes.length !== 1) {
+    return { type: "none" };
+  }
+
+  const [selectedShape] = selectedShapes;
+
+  if (isSqlErdRelationShape(selectedShape)) {
+    return {
+      type: "relation",
+      relationId: selectedShape.props.relationId
+    };
+  }
+
+  if (isSqlErdTableShape(selectedShape)) {
+    if (
+      currentSelection.type === "column" &&
+      currentSelection.tableId === selectedShape.props.tableId
+    ) {
+      return currentSelection;
+    }
+
+    return {
+      type: "table",
+      tableId: selectedShape.props.tableId
+    };
+  }
+
+  return { type: "none" };
+}
+
 function resetSqlErdCanvas(
   editor: Editor,
   shapes: TLShapePartial[]
@@ -370,20 +437,106 @@ function SqlErdRelationLayoutSync() {
   return null;
 }
 
+type SqlErdSelectionSyncProps = {
+  onSelectionChange: (selection: SqlErdSelection) => void;
+  selectedSqlErdObject: SqlErdSelection;
+};
+
+function SqlErdSelectionSync({
+  onSelectionChange,
+  selectedSqlErdObject
+}: SqlErdSelectionSyncProps) {
+  const editor = useEditor();
+  const selectedSqlErdObjectRef = useRef(selectedSqlErdObject);
+
+  useEffect(() => {
+    selectedSqlErdObjectRef.current = selectedSqlErdObject;
+  }, [selectedSqlErdObject]);
+
+  useEffect(() => {
+    function setSelection(nextSelection: SqlErdSelection) {
+      if (areSqlErdSelectionsEqual(selectedSqlErdObjectRef.current, nextSelection)) {
+        return;
+      }
+
+      selectedSqlErdObjectRef.current = nextSelection;
+      onSelectionChange(nextSelection);
+    }
+
+    function syncSelectionFromEditor() {
+      setSelection(
+        getSqlErdSelectionFromEditor(editor, selectedSqlErdObjectRef.current)
+      );
+    }
+
+    function handleColumnSelect(event: Event) {
+      const customEvent = event as CustomEvent<{
+        columnId?: unknown;
+        tableId?: unknown;
+      }>;
+      const { columnId, tableId } = customEvent.detail ?? {};
+
+      if (typeof columnId !== "string" || typeof tableId !== "string") {
+        return;
+      }
+
+      setSelection({
+        type: "column",
+        columnId,
+        tableId
+      });
+    }
+
+    function handleTableSelect(event: Event) {
+      const customEvent = event as CustomEvent<{ tableId?: unknown }>;
+      const { tableId } = customEvent.detail ?? {};
+
+      if (typeof tableId !== "string") {
+        return;
+      }
+
+      setSelection({
+        type: "table",
+        tableId
+      });
+    }
+
+    syncSelectionFromEditor();
+
+    const removeStoreListener = editor.store.listen(syncSelectionFromEditor, {
+      scope: "all",
+      source: "all"
+    });
+
+    window.addEventListener(SQLTOERD_COLUMN_SELECT_EVENT, handleColumnSelect);
+    window.addEventListener(SQLTOERD_TABLE_SELECT_EVENT, handleTableSelect);
+
+    return () => {
+      removeStoreListener();
+      window.removeEventListener(SQLTOERD_COLUMN_SELECT_EVENT, handleColumnSelect);
+      window.removeEventListener(SQLTOERD_TABLE_SELECT_EVENT, handleTableSelect);
+    };
+  }, [editor, onSelectionChange]);
+
+  return null;
+}
+
 function SqlErdCanvasBackground() {
   return (
     <div className="absolute inset-0 bg-slate-50 bg-[radial-gradient(circle_at_1px_1px,rgba(15,23,42,0.12)_1px,transparent_0)] [background-size:24px_24px]" />
   );
 }
 
-export function SqlErdCanvas({ className }: SqlErdCanvasProps) {
+export function SqlErdCanvas({
+  className,
+  layoutJson = commerceSqltoerdFixture.layoutJson,
+  modelJson = commerceSqltoerdFixture.modelJson,
+  onSelectionChange,
+  selectedSqlErdObject = { type: "none" }
+}: SqlErdCanvasProps) {
   const shapes = useMemo(
-    () =>
-      createSqltoerdCanvasShapes(
-        commerceSqltoerdFixture.modelJson,
-        commerceSqltoerdFixture.layoutJson
-      ),
-    []
+    () => createSqltoerdCanvasShapes(modelJson, layoutJson),
+    [layoutJson, modelJson]
   );
   const handleMount = useCallback(
     (editor: Editor) => {
@@ -402,6 +555,12 @@ export function SqlErdCanvas({ className }: SqlErdCanvasProps) {
       shapeUtils={sqlErdShapeUtils}
     >
       <SqlErdRelationLayoutSync />
+      {onSelectionChange ? (
+        <SqlErdSelectionSync
+          onSelectionChange={onSelectionChange}
+          selectedSqlErdObject={selectedSqlErdObject}
+        />
+      ) : null}
     </TldrawSurface>
   );
 }

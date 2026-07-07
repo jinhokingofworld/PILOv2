@@ -243,13 +243,14 @@ function SqlErdRelationLine({ shape }: { shape: SqlErdRelationShape }) {
       style={{
         height: shape.props.h,
         overflow: "visible",
-        pointerEvents: "none",
+        pointerEvents: "auto",
         width: shape.props.w
       }}
     >
       <path
         d={getRelationPathData(shape.props.points)}
         fill="none"
+        pointerEvents="stroke"
         stroke="rgba(37, 99, 235, 0.58)"
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -257,6 +258,7 @@ function SqlErdRelationLine({ shape }: { shape: SqlErdRelationShape }) {
       />
       <polygon
         fill="rgba(37, 99, 235, 0.7)"
+        pointerEvents="auto"
         points={getPointListData(shape.props.arrowPoints)}
       />
     </SVGContainer>

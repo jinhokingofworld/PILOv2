@@ -5,6 +5,12 @@ export type SqltoerdSourceFormat = "sql";
 
 export type SqltoerdDialect = "auto" | "postgresql" | "mysql";
 
+export type SqlErdSelection =
+  | { type: "none" }
+  | { type: "table"; tableId: string }
+  | { type: "column"; tableId: string; columnId: string }
+  | { type: "relation"; relationId: string };
+
 export type SqltoerdModelJsonV1 = {
   version: typeof SQLTOERD_MODEL_JSON_VERSION;
   schema: {
