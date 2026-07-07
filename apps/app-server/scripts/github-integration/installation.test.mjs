@@ -46,6 +46,7 @@ class FakeDatabase {
 class FakeWorkspaceService {
   constructor() {
     this.accessChecks = [];
+    this.ownerChecks = [];
   }
 
   async assertWorkspaceAccess(currentUserId, workspaceId) {
@@ -54,6 +55,19 @@ class FakeWorkspaceService {
       id: workspaceId,
       name: "Engineering",
       ownerUserId: currentUserId,
+      isOwner: true,
+      createdAt: "2026-07-04T12:00:00.000Z",
+      updatedAt: "2026-07-04T12:00:00.000Z"
+    };
+  }
+
+  async assertWorkspaceOwnerAccess(currentUserId, workspaceId) {
+    this.ownerChecks.push({ currentUserId, workspaceId });
+    return {
+      id: workspaceId,
+      name: "Engineering",
+      ownerUserId: currentUserId,
+      role: "owner",
       isOwner: true,
       createdAt: "2026-07-04T12:00:00.000Z",
       updatedAt: "2026-07-04T12:00:00.000Z"
@@ -764,6 +778,223 @@ function createService({
   ]);
   assert.match(database.queries[0].text, /FROM github_installations/i);
   assert.doesNotMatch(database.queries[0].text, /token|private_key|secret/i);
+}
+
+{
+  const installationId = "33333333-3333-4333-8333-333333333333";
+  const database = new FakeDatabase({
+    handlers: {
+      queryOne(text, values) {
+        if (/DELETE FROM github_installations/i.test(text)) {
+          assert.match(text, /workspace_id = \$1/i);
+          assert.match(text, /id = \$2/i);
+          assert.deepEqual(values, [workspaceId, installationId]);
+          return { id: installationId };
+        }
+
+        if (/FROM github_installations/i.test(text)) {
+          assert.match(text, /workspace_id = \$1/i);
+          assert.match(text, /id = \$2/i);
+          assert.deepEqual(values, [workspaceId, installationId]);
+          return {
+            id: installationId,
+            workspace_id: workspaceId,
+            github_installation_id: "12345678",
+            account_login: "my-team",
+            account_type: "Organization",
+            repository_selection: "selected",
+            permissions: {
+              metadata: "read"
+            },
+            installed_by_user_id: currentUserId,
+            installed_at: "2026-07-04T12:30:00.000Z",
+            suspended_at: null,
+            last_synced_at: "2026-07-04T12:40:00.000Z"
+          };
+        }
+
+        return undefined;
+      }
+    }
+  });
+  const workspaceService = new FakeWorkspaceService();
+  const githubAppClient = {
+    calls: [],
+    async deleteInstallation(input) {
+      this.calls.push(input);
+      return {
+        deleted: true,
+        alreadyDeleted: false
+      };
+    }
+  };
+  const service = createService({ database, workspaceService, githubAppClient });
+
+  assert.equal(typeof service.deleteGithubAppInstallation, "function");
+
+  const result = await service.deleteGithubAppInstallation(
+    currentUserId,
+    workspaceId,
+    installationId
+  );
+
+  assert.deepEqual(workspaceService.ownerChecks, [{ currentUserId, workspaceId }]);
+  assert.deepEqual(githubAppClient.calls, [
+    {
+      installationId: 12345678,
+      appId: "12345",
+      privateKey: "test-private-key",
+      now: baseConfig.now
+    }
+  ]);
+  assert.deepEqual(result, {
+    deleted: true,
+    alreadyDeleted: false,
+    installationId,
+    githubInstallationId: 12345678,
+    accountLogin: "my-team"
+  });
+  assert.match(database.queries.at(-1).text, /DELETE FROM github_installations/i);
+  for (const query of database.queries) {
+    assert.doesNotMatch(query.text, /token|private_key|secret/i);
+  }
+}
+
+{
+  const installationId = "33333333-3333-4333-8333-333333333333";
+  let localDeleteCalled = false;
+  const database = new FakeDatabase({
+    handlers: {
+      queryOne(text) {
+        if (/DELETE FROM github_installations/i.test(text)) {
+          localDeleteCalled = true;
+          return { id: installationId };
+        }
+
+        if (/FROM github_installations/i.test(text)) {
+          return {
+            id: installationId,
+            workspace_id: workspaceId,
+            github_installation_id: "12345678",
+            account_login: "my-team",
+            account_type: "Organization",
+            repository_selection: "selected",
+            permissions: {},
+            installed_by_user_id: currentUserId,
+            installed_at: null,
+            suspended_at: null,
+            last_synced_at: null
+          };
+        }
+
+        return undefined;
+      }
+    }
+  });
+  const service = createService({
+    database,
+    githubAppClient: {
+      async deleteInstallation() {
+        return {
+          deleted: true,
+          alreadyDeleted: true
+        };
+      }
+    }
+  });
+
+  const result = await service.deleteGithubAppInstallation(
+    currentUserId,
+    workspaceId,
+    installationId
+  );
+
+  assert.equal(localDeleteCalled, true);
+  assert.equal(result.alreadyDeleted, true);
+}
+
+{
+  const installationId = "33333333-3333-4333-8333-333333333333";
+  const service = createService({
+    database: new FakeDatabase({
+      handlers: {
+        queryOne(text) {
+          if (/FROM github_installations/i.test(text)) {
+            return null;
+          }
+
+          throw new Error("unexpected query");
+        }
+      }
+    })
+  });
+
+  await assert.rejects(
+    () =>
+      service.deleteGithubAppInstallation(
+        currentUserId,
+        workspaceId,
+        installationId
+      ),
+    (error) => {
+      assert.equal(error.getStatus(), 404);
+      assert.equal(
+        error.getResponse().error.message,
+        "GitHub App installation not found"
+      );
+      return true;
+    }
+  );
+}
+
+{
+  const installationId = "33333333-3333-4333-8333-333333333333";
+  let localDeleteCalled = false;
+  const service = createService({
+    database: new FakeDatabase({
+      handlers: {
+        queryOne(text) {
+          if (/FROM github_installations/i.test(text)) {
+            return {
+              id: installationId,
+              workspace_id: workspaceId,
+              github_installation_id: "12345678",
+              account_login: "my-team",
+              account_type: "Organization",
+              repository_selection: "selected",
+              permissions: {},
+              installed_by_user_id: currentUserId,
+              installed_at: null,
+              suspended_at: null,
+              last_synced_at: null
+            };
+          }
+
+          if (/DELETE FROM github_installations/i.test(text)) {
+            localDeleteCalled = true;
+          }
+
+          return undefined;
+        }
+      }
+    }),
+    githubAppClient: {
+      async deleteInstallation() {
+        throw new Error("provider failure");
+      }
+    }
+  });
+
+  await assert.rejects(
+    () =>
+      service.deleteGithubAppInstallation(
+        currentUserId,
+        workspaceId,
+        installationId
+      ),
+    /provider failure/
+  );
+  assert.equal(localDeleteCalled, false);
 }
 
 {

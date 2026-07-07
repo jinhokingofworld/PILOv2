@@ -4,6 +4,7 @@ import {
   GitBranch,
   Loader2,
   ShieldCheck,
+  Trash2,
   Unplug
 } from "lucide-react";
 
@@ -35,10 +36,15 @@ type StepsProps = {
   selectedProject: GithubProjectV2 | undefined;
   isLoading: boolean;
   isDisconnecting: boolean;
+  isDeletingInstallation: boolean;
+  isInstallationDeleteRequested: boolean;
   redirectAction: "oauth" | "installation" | null;
   onStartOAuth: () => void;
   onDisconnectOAuth: () => void;
   onStartInstallation: () => void;
+  onRequestDeleteInstallation: () => void;
+  onCancelDeleteInstallation: () => void;
+  onConfirmDeleteInstallation: () => void;
 };
 
 export function GithubConnectSteps({
@@ -51,10 +57,15 @@ export function GithubConnectSteps({
   selectedProject,
   isLoading,
   isDisconnecting,
+  isDeletingInstallation,
+  isInstallationDeleteRequested,
   redirectAction,
   onStartOAuth,
   onDisconnectOAuth,
-  onStartInstallation
+  onStartInstallation,
+  onRequestDeleteInstallation,
+  onCancelDeleteInstallation,
+  onConfirmDeleteInstallation
 }: StepsProps) {
   const hasInstallation = Boolean(selectedInstallation);
 
@@ -187,7 +198,7 @@ export function GithubConnectSteps({
               설치 후 백엔드가 저장소, Pull Request, Projects v2 데이터를
               동기화합니다.
             </p>
-            <div className="mt-4">
+            <div className="mt-4 flex flex-wrap gap-2">
               <Button
                 className="h-10 rounded-[8px] bg-[#3157d5] px-4 text-white hover:bg-[#2447bd]"
                 disabled={
@@ -206,7 +217,61 @@ export function GithubConnectSteps({
                 )}
                 GitHub에서 설치 시작
               </Button>
+              {hasInstallation ? (
+                <Button
+                  className="h-10 rounded-[8px]"
+                  disabled={isDeletingInstallation || isLoading}
+                  onClick={onRequestDeleteInstallation}
+                  type="button"
+                  variant="destructive"
+                >
+                  {isDeletingInstallation ? (
+                    <Loader2 className="animate-spin" data-icon="inline-start" />
+                  ) : (
+                    <Trash2 data-icon="inline-start" />
+                  )}
+                  GitHub에서 App 설치 해제
+                </Button>
+              ) : null}
             </div>
+            {isInstallationDeleteRequested && selectedInstallation ? (
+              <div className="mt-4 rounded-[8px] border border-[#ffc9c9] bg-[#fff7f7] p-3">
+                <p className="text-[13px] font-semibold text-[#b42318]">
+                  설치 해제 확인
+                </p>
+                <p className="mt-1 text-[13px] leading-5 text-[#7a2e2e]">
+                  @{selectedInstallation.accountLogin} GitHub App 설치를 GitHub에서
+                  해제합니다. 다시 사용하려면 GitHub App을 다시 설치해야 합니다.
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Button
+                    className="h-8 rounded-[8px]"
+                    disabled={isDeletingInstallation}
+                    onClick={onConfirmDeleteInstallation}
+                    size="sm"
+                    type="button"
+                    variant="destructive"
+                  >
+                    {isDeletingInstallation ? (
+                      <Loader2 className="animate-spin" data-icon="inline-start" />
+                    ) : (
+                      <Trash2 data-icon="inline-start" />
+                    )}
+                    설치 해제
+                  </Button>
+                  <Button
+                    className="h-8 rounded-[8px]"
+                    disabled={isDeletingInstallation}
+                    onClick={onCancelDeleteInstallation}
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                  >
+                    취소
+                  </Button>
+                </div>
+              </div>
+            ) : null}
             <dl className="mt-4 rounded-[8px] border border-[#e5e9f2] bg-white px-4">
               <GithubConnectFieldRow
                 label="돌아온 뒤"

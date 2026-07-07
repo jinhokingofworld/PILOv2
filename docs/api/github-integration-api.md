@@ -93,6 +93,14 @@ token으로 GitHub의 user installations 목록을 조회해 callback의
   sync run이 실패한다. 현재 GitHub OAuth 사용자가 personal Project owner와 다르면
   `GitHub user OAuth token cannot access this personal ProjectV2 owner`로 실패한다.
 - GitHub webhook receiver는 delivery 수신과 검증 결과를 `github_webhook_deliveries`에 기록한다. 실제 GitHub source table 동기화는 sync run 또는 별도 background worker가 담당한다.
+- GitHub App installation 삭제는 GitHub 원격 `DELETE /app/installations/{installation_id}`를
+  App JWT로 호출한 뒤 local `github_installations` row를 삭제한다. GitHub가 `404`를
+  반환하면 이미 원격에서 삭제된 상태로 보고 local cleanup을 진행한다.
+- GitHub App installation 삭제 시 `github_projects_v2` 계열 cache는 FK cascade로
+  삭제된다. `github_repositories`, `github_issues`, `github_pull_requests`, PR review
+  기록은 과거 cache로 남기며, repository 목록 API는 현재 active installation에 연결된
+  repository만 반환한다. 재설치 후 full sync가 같은 `github_repository_id`를 다시
+  발견하면 기존 repository cache의 `installation_id`가 새 installation으로 갱신된다.
 
 ## API 목록
 
@@ -105,6 +113,7 @@ token으로 GitHub의 user installations 목록을 조회해 callback의
 | `POST` | `/workspaces/{workspaceId}/github/installations/start` | GitHub App user access token 검증 후 GitHub App 설치 URL 생성 |
 | `GET` | `/github/installations/callback` | GitHub App Setup URL redirect 처리 |
 | `GET` | `/workspaces/{workspaceId}/github/installations` | Workspace installation 목록 조회 |
+| `DELETE` | `/workspaces/{workspaceId}/github/installations/{installationId}` | GitHub 원격 App installation 삭제 후 local 연결 정리 |
 | `GET` | `/workspaces/{workspaceId}/github/repositories` | 동기화된 repository 목록 조회 |
 | `GET` | `/workspaces/{workspaceId}/github/repositories/{repositoryId}` | Repository 상세 조회 |
 | `GET` | `/workspaces/{workspaceId}/github/projects-v2` | 동기화된 ProjectV2 목록 조회 |
@@ -173,6 +182,46 @@ GitHub App webhook 설정 URL은 `{API_PUBLIC_ORIGIN}/api/v1/github/webhooks`이
     "receivedAt": "2026-07-05T09:00:00.000Z",
     "processedAt": null,
     "message": "GitHub webhook received"
+  }
+}
+```
+
+### GitHub App installation 삭제
+
+```text
+DELETE /api/v1/workspaces/{workspaceId}/github/installations/{installationId}
+```
+
+권한:
+
+- PILO bearer token이 필요하다.
+- 현재 사용자는 해당 Workspace의 `owner`여야 한다. `member`는 GitHub installation
+  관리 작업을 수행할 수 없다.
+
+처리 규칙:
+
+- 서버는 `github_installations.id`와 `workspace_id`로 대상 installation을 조회한다.
+- 서버는 GitHub App JWT로 GitHub REST API
+  `DELETE /app/installations/{githubInstallationId}`를 호출한다.
+- GitHub가 `202`를 반환하면 local `github_installations` row를 삭제한다.
+- GitHub가 `404`를 반환하면 이미 원격에서 삭제된 상태로 보고 local
+  `github_installations` row를 삭제한다.
+- GitHub가 `401`, `403`, `5xx` 등 실패 응답을 반환하거나 네트워크 오류가 발생하면
+  provider raw error를 노출하지 않고 safe error를 반환하며 local row는 유지한다.
+- API 응답이나 로그에 GitHub App private key, JWT, installation token, 사용자 OAuth
+  token을 노출하지 않는다.
+
+응답 예시:
+
+```json
+{
+  "success": true,
+  "data": {
+    "deleted": true,
+    "alreadyDeleted": false,
+    "installationId": "installation_uuid",
+    "githubInstallationId": 12345678,
+    "accountLogin": "my-team"
   }
 }
 ```

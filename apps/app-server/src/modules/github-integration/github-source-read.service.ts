@@ -348,7 +348,7 @@ export class GithubSourceReadService {
     includeArchived: boolean
   ): { whereSql: string; values: unknown[] } {
     const values: unknown[] = [workspaceId];
-    const filters = ["workspace_id = $1"];
+    const filters = ["workspace_id = $1", "installation_id IS NOT NULL"];
 
     if (!includeArchived) {
       filters.push("archived = false");
