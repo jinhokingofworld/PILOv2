@@ -13,7 +13,8 @@ const [
   navigation,
   panel,
   canvasSurface,
-  tableShape
+  tableShape,
+  relationShape
 ] =
   await Promise.all([
     readSqlErdFile("../../../../docs/api/sqltoerd-api.md"),
@@ -23,7 +24,8 @@ const [
     readSqlErdFile("../../src/features/sql-erd/navigation.ts"),
     readSqlErdFile("../../src/features/sql-erd/components/sql-erd-panel.tsx"),
     readSqlErdFile("../../src/features/sql-erd/components/sql-erd-canvas.tsx"),
-    readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-table-shape.tsx")
+    readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-table-shape.tsx"),
+    readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-relation-shape.tsx")
   ]);
 
 for (const typeName of [
@@ -90,7 +92,11 @@ assert.doesNotMatch(panel, /PreviewTableCard/);
 assert.match(canvasSurface, /TldrawSurface/);
 assert.match(canvasSurface, /commerceSqltoerdFixture/);
 assert.match(canvasSurface, /createSqltoerdTableShapes/);
+assert.match(canvasSurface, /createSqltoerdRelationShapes/);
+assert.match(canvasSurface, /createSqltoerdCanvasShapes/);
 assert.match(canvasSurface, /SQLTOERD_TABLE_SHAPE_TYPE/);
+assert.match(canvasSurface, /SQLTOERD_RELATION_SHAPE_TYPE/);
+assert.match(canvasSurface, /SqlErdRelationShapeUtil/);
 assert.match(canvasSurface, /getSqlErdTableShapeId/);
 assert.match(canvasSurface, /hashSqlErdShapeSourceId/);
 assert.match(canvasSurface, /zoomToFit/);
@@ -110,3 +116,17 @@ assert.doesNotMatch(tableShape, /const BADGE_COLUMN_WIDTH = 72/);
 assert.doesNotMatch(tableShape, /gridTemplateColumns: `\$\{BADGE_COLUMN_WIDTH\}px max-content max-content`/);
 assert.doesNotMatch(tableShape, /truncate/);
 assert.doesNotMatch(tableShape, /text-overflow/);
+
+assert.match(relationShape, /SQLTOERD_RELATION_SHAPE_TYPE/);
+assert.match(relationShape, /class SqlErdRelationShapeUtil extends ShapeUtil/);
+assert.match(relationShape, /SVGContainer/);
+assert.match(relationShape, /getSqlErdRelationTableEdgeAnchors/);
+assert.match(relationShape, /fromTableId/);
+assert.match(relationShape, /toTableId/);
+assert.match(relationShape, /fromColumnIds/);
+assert.match(relationShape, /toColumnIds/);
+assert.match(relationShape, /fromTableShapeId/);
+assert.match(relationShape, /toTableShapeId/);
+assert.match(relationShape, /useValue/);
+assert.match(relationShape, /hideSelectionBoundsBg/);
+assert.match(relationShape, /hideSelectionBoundsFg/);

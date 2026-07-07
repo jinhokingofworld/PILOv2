@@ -1,6 +1,13 @@
 "use client";
 
-import { HTMLContainer, Rectangle2d, ShapeUtil, T, type TLBaseShape } from "tldraw";
+import {
+  HTMLContainer,
+  Rectangle2d,
+  ShapeUtil,
+  T,
+  type TLBaseShape,
+  type TLShape
+} from "tldraw";
 
 import type { ErdColumn, ErdTable } from "@/features/sql-erd/types";
 import { getTableDisplayName } from "@/features/sql-erd/utils/model";
@@ -44,6 +51,12 @@ export type SqlErdTableShape = TLBaseShape<
   typeof SQLTOERD_TABLE_SHAPE_TYPE,
   SqlErdTableShapeProps
 >;
+
+export function isSqlErdTableShape(
+  shape: TLShape | null | undefined
+): shape is SqlErdTableShape {
+  return shape?.type === SQLTOERD_TABLE_SHAPE_TYPE;
+}
 
 declare module "@tldraw/tlschema" {
   interface TLGlobalShapePropsMap {

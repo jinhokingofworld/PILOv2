@@ -10,6 +10,11 @@ import {
 
 import { commerceSqltoerdFixture } from "@/features/sql-erd/fixtures/commerce";
 import {
+  SQLTOERD_RELATION_SHAPE_TYPE,
+  SqlErdRelationShapeUtil,
+  type SqlErdRelationShape
+} from "@/features/sql-erd/shapes/sql-erd-relation-shape";
+import {
   getSqlErdTableShapeSize,
   SQLTOERD_TABLE_SHAPE_TYPE,
   SqlErdTableShapeUtil,
@@ -28,7 +33,7 @@ type SqlErdCanvasProps = {
   className?: string;
 };
 
-const sqlErdShapeUtils = [SqlErdTableShapeUtil];
+const sqlErdShapeUtils = [SqlErdRelationShapeUtil, SqlErdTableShapeUtil];
 
 const sqlErdTldrawComponents = {
   Background: SqlErdCanvasBackground
@@ -54,6 +59,12 @@ export function hashSqlErdShapeSourceId(value: string) {
 export function getSqlErdTableShapeId(tableId: string) {
   return createShapeId(
     `sqltoerd-table-${shapeIdSuffix(tableId)}-${hashSqlErdShapeSourceId(tableId)}`
+  );
+}
+
+export function getSqlErdRelationShapeId(relationId: string) {
+  return createShapeId(
+    `sqltoerd-relation-${shapeIdSuffix(relationId)}-${hashSqlErdShapeSourceId(relationId)}`
   );
 }
 
@@ -88,9 +99,42 @@ export function createSqltoerdTableShapes(
   });
 }
 
+export function createSqltoerdRelationShapes(
+  modelJson: SqltoerdModelJsonV1
+): TLShapePartial<SqlErdRelationShape>[] {
+  return modelJson.schema.relations.map((relation) => ({
+    id: getSqlErdRelationShapeId(relation.id),
+    type: SQLTOERD_RELATION_SHAPE_TYPE,
+    x: 0,
+    y: 0,
+    props: {
+      w: 1,
+      h: 1,
+      relationId: relation.id,
+      fromTableId: relation.fromTableId,
+      fromColumnIds: relation.fromColumnIds,
+      toTableId: relation.toTableId,
+      toColumnIds: relation.toColumnIds,
+      constraintName: relation.constraintName,
+      fromTableShapeId: getSqlErdTableShapeId(relation.fromTableId),
+      toTableShapeId: getSqlErdTableShapeId(relation.toTableId)
+    }
+  }));
+}
+
+export function createSqltoerdCanvasShapes(
+  modelJson: SqltoerdModelJsonV1,
+  layoutJson: SqltoerdLayoutJsonV1
+) {
+  return [
+    ...createSqltoerdRelationShapes(modelJson),
+    ...createSqltoerdTableShapes(modelJson, layoutJson)
+  ];
+}
+
 function resetSqlErdCanvas(
   editor: Editor,
-  shapes: TLShapePartial<SqlErdTableShape>[]
+  shapes: TLShapePartial[]
 ) {
   const existingShapeIds = editor
     .getCurrentPageShapes()
@@ -106,6 +150,11 @@ function resetSqlErdCanvas(
   }
 
   editor.createShapes(shapes);
+  editor.sendToBack(
+    shapes
+      .filter((shape) => shape.type === SQLTOERD_RELATION_SHAPE_TYPE)
+      .map((shape) => shape.id as TLShapeId)
+  );
   window.requestAnimationFrame(() => {
     editor.zoomToFit({ animation: { duration: 160 } });
   });
@@ -120,7 +169,7 @@ function SqlErdCanvasBackground() {
 export function SqlErdCanvas({ className }: SqlErdCanvasProps) {
   const shapes = useMemo(
     () =>
-      createSqltoerdTableShapes(
+      createSqltoerdCanvasShapes(
         commerceSqltoerdFixture.modelJson,
         commerceSqltoerdFixture.layoutJson
       ),
