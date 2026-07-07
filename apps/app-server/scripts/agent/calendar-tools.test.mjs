@@ -1,0 +1,307 @@
+import assert from "node:assert/strict";
+import { createRequire } from "node:module";
+
+const require = createRequire(import.meta.url);
+const { AgentToolRegistryService } = require(
+  "../../dist/modules/agent/agent-tool-registry.service.js"
+);
+const { CalendarAgentToolsService } = require(
+  "../../dist/modules/agent/tools/calendar-agent-tools.service.js"
+);
+
+const USER_ID = "11111111-1111-1111-1111-111111111111";
+const WORKSPACE_ID = "22222222-2222-2222-2222-222222222222";
+const RUN_ID = "33333333-3333-3333-3333-333333333333";
+
+function createEvent(overrides = {}) {
+  return {
+    id: 1,
+    title: "주간 회의",
+    description: null,
+    color: "#3B82F6",
+    isAllDay: false,
+    startDate: "2026-07-08",
+    endDate: "2026-07-08",
+    startTime: "15:00",
+    endTime: "16:00",
+    createdBy: USER_ID,
+    createdByUser: {
+      id: USER_ID,
+      name: "Jin",
+      avatarUrl: null
+    },
+    createdAt: "2026-07-08T00:00:00.000Z",
+    updatedAt: "2026-07-08T00:00:00.000Z",
+    ...overrides
+  };
+}
+
+class FakeCalendarService {
+  constructor() {
+    this.calls = [];
+    this.events = [createEvent()];
+  }
+
+  async listEvents(currentUserId, workspaceId, query) {
+    this.calls.push({
+      method: "listEvents",
+      currentUserId,
+      workspaceId,
+      query
+    });
+    return this.events;
+  }
+
+  async createEvent(currentUserId, workspaceId, body) {
+    this.calls.push({
+      method: "createEvent",
+      currentUserId,
+      workspaceId,
+      body
+    });
+    return createEvent(body);
+  }
+
+  async updateEvent(currentUserId, workspaceId, eventId, body) {
+    this.calls.push({
+      method: "updateEvent",
+      currentUserId,
+      workspaceId,
+      eventId,
+      body
+    });
+    return createEvent({ id: Number(eventId), ...body });
+  }
+}
+
+function createRegistry() {
+  const calendarService = new FakeCalendarService();
+  const calendarTools = new CalendarAgentToolsService(calendarService);
+  const registry = new AgentToolRegistryService(calendarTools);
+
+  return {
+    calendarService,
+    registry
+  };
+}
+
+const context = {
+  currentUserId: USER_ID,
+  workspaceId: WORKSPACE_ID,
+  runId: RUN_ID
+};
+
+function errorCode(error) {
+  return error.getResponse().error.code;
+}
+
+{
+  const { registry } = createRegistry();
+  const names = registry.listDefinitions().map((definition) => definition.name);
+
+  assert.deepEqual(names, [
+    "list_calendar_events",
+    "create_calendar_event",
+    "update_calendar_event"
+  ]);
+}
+
+{
+  const { calendarService, registry } = createRegistry();
+  const tool = registry.getDefinition("list_calendar_events");
+  const input = tool.validateInput({
+    start: "2026-07-08",
+    end: "2026-07-15"
+  });
+  const result = await tool.execute(context, input);
+
+  assert.equal(result.outputSummary.count, 1);
+  assert.equal(result.resourceRefs[0].domain, "calendar");
+  assert.equal(result.resourceRefs[0].resourceId, "1");
+  assert.deepEqual(calendarService.calls[0], {
+    method: "listEvents",
+    currentUserId: USER_ID,
+    workspaceId: WORKSPACE_ID,
+    query: {
+      start: "2026-07-08",
+      end: "2026-07-15"
+    }
+  });
+}
+
+{
+  const { calendarService, registry } = createRegistry();
+  const tool = registry.getDefinition("create_calendar_event");
+  const input = tool.validateInput({
+    title: "  주간 회의  ",
+    isAllDay: false,
+    startDate: "2026-07-08",
+    endDate: "2026-07-08",
+    startTime: "15:00"
+  });
+  const plan = tool.buildConfirmation(input);
+  const result = await tool.execute(context, input);
+
+  assert.equal(plan.toolName, "create_calendar_event");
+  assert.equal(plan.before, null);
+  assert.equal(plan.after.title, "주간 회의");
+  assert.equal(plan.after.color, "#3B82F6");
+  assert.equal(plan.call.service, "CalendarService.createEvent");
+  assert.equal(result.status, "created");
+  assert.deepEqual(calendarService.calls[0].body, {
+    title: "주간 회의",
+    description: null,
+    color: "#3B82F6",
+    isAllDay: false,
+    startDate: "2026-07-08",
+    endDate: "2026-07-08",
+    startTime: "15:00",
+    endTime: null
+  });
+}
+
+{
+  const { calendarService, registry } = createRegistry();
+  const tool = registry.getDefinition("create_calendar_event");
+  const input = tool.validateInput({
+    title: "주간 회의",
+    startDate: "2026-07-08",
+    endDate: "2026-07-08",
+    startTime: "15:00"
+  });
+  await tool.execute(context, input);
+
+  assert.equal(input.isAllDay, false);
+  assert.deepEqual(calendarService.calls[0].body, {
+    title: "주간 회의",
+    description: null,
+    color: "#3B82F6",
+    isAllDay: false,
+    startDate: "2026-07-08",
+    endDate: "2026-07-08",
+    startTime: "15:00",
+    endTime: null
+  });
+}
+
+{
+  const { calendarService, registry } = createRegistry();
+  const tool = registry.getDefinition("update_calendar_event");
+  const input = tool.validateInput({
+    eventId: "1",
+    before: {
+      id: 1,
+      title: "주간 회의",
+      startDate: "2026-07-08",
+      startTime: "15:00"
+    },
+    changes: {
+      startTime: "16:00",
+      endTime: "17:00"
+    }
+  });
+  const plan = tool.buildConfirmation(input);
+  const result = await tool.execute(context, input);
+
+  assert.equal(plan.toolName, "update_calendar_event");
+  assert.equal(plan.target.resourceId, "1");
+  assert.equal(plan.before.title, "주간 회의");
+  assert.deepEqual(plan.after, {
+    startTime: "16:00",
+    endTime: "17:00"
+  });
+  assert.equal(result.status, "updated");
+  assert.deepEqual(calendarService.calls[0].body, {
+    startTime: "16:00",
+    endTime: "17:00"
+  });
+}
+
+{
+  const { registry } = createRegistry();
+  const tool = registry.getDefinition("create_calendar_event");
+
+  assert.throws(
+    () =>
+      tool.validateInput({
+        title: "주간 회의",
+        workspaceId: WORKSPACE_ID,
+        startDate: "2026-07-08",
+        endDate: "2026-07-08"
+      }),
+    (error) => {
+      assert.equal(error.getStatus(), 400);
+      assert.equal(errorCode(error), "BAD_REQUEST");
+      assert.match(error.getResponse().error.message, /workspaceId/);
+      return true;
+    }
+  );
+}
+
+{
+  const { registry } = createRegistry();
+  const tool = registry.getDefinition("create_calendar_event");
+
+  assert.throws(
+    () =>
+      tool.validateInput({
+        title: "주간 회의",
+        isAllDay: false,
+        startDate: "2026-07-08",
+        endDate: "2026-07-08"
+      }),
+    (error) => {
+      assert.equal(error.getStatus(), 400);
+      assert.equal(errorCode(error), "BAD_REQUEST");
+      assert.match(error.getResponse().error.message, /startTime/);
+      return true;
+    }
+  );
+}
+
+{
+  const { registry } = createRegistry();
+  const tool = registry.getDefinition("create_calendar_event");
+
+  assert.throws(
+    () =>
+      tool.validateInput({
+        title: "주간 회의",
+        isAllDay: true,
+        startDate: "2026-07-08",
+        endDate: "2026-07-08",
+        startTime: "15:00"
+      }),
+    (error) => {
+      assert.equal(error.getStatus(), 400);
+      assert.equal(errorCode(error), "BAD_REQUEST");
+      assert.match(error.getResponse().error.message, /all-day events/);
+      return true;
+    }
+  );
+}
+
+{
+  const { registry } = createRegistry();
+  const tool = registry.getDefinition("update_calendar_event");
+
+  assert.throws(
+    () =>
+      tool.validateInput({
+        eventId: "1",
+        before: {
+          id: 1,
+          title: "주간 회의"
+        },
+        changes: {
+          unsupported: "value"
+        }
+      }),
+    (error) => {
+      assert.equal(error.getStatus(), 400);
+      assert.equal(errorCode(error), "BAD_REQUEST");
+      assert.match(error.getResponse().error.message, /unsupported/);
+      return true;
+    }
+  );
+}

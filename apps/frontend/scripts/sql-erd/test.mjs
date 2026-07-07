@@ -359,6 +359,106 @@ const emptySqlErdApiClient = apiClientRuntime.createSqlErdApiClient({
 
 assert.equal(await emptySqlErdApiClient.getActiveSession("workspace-1"), null);
 
+const createSqlErdSessionRequests = [];
+const createSqlErdSessionClient = apiClientRuntime.createSqlErdApiClient({
+  accessToken: "token-1",
+  baseUrl: "https://api.example.test",
+  fetcher: async (url, init) => {
+    createSqlErdSessionRequests.push({ init, url });
+
+    return new Response(
+      JSON.stringify({
+        success: true,
+        data: createRuntimeTestSession({ revision: 1 })
+      }),
+      {
+        headers: { "Content-Type": "application/json" },
+        status: 201
+      }
+    );
+  }
+});
+const createSessionPayload = {
+  title: "Generated ERD",
+  sourceFormat: "sql",
+  dialect: "postgresql",
+  sourceText: "CREATE TABLE users (id BIGINT PRIMARY KEY);",
+  modelJson: createRuntimeTestModel(),
+  layoutJson: {
+    version: 1,
+    tableLayouts: [{ tableId: "table.users", x: 80, y: 80, width: 240 }]
+  },
+  settingsJson: {}
+};
+const createdSqlErdSession = await createSqlErdSessionClient.createSession(
+  "workspace 1",
+  createSessionPayload
+);
+
+assert.equal(createdSqlErdSession.revision, 1);
+assert.equal(createSqlErdSessionRequests.length, 1);
+assert.equal(
+  createSqlErdSessionRequests[0].url,
+  "https://api.example.test/api/v1/workspaces/workspace%201/sql-erd-session"
+);
+assert.equal(createSqlErdSessionRequests[0].init.method, "POST");
+assert.equal(
+  createSqlErdSessionRequests[0].init.headers["Content-Type"],
+  "application/json"
+);
+assert.deepEqual(
+  JSON.parse(createSqlErdSessionRequests[0].init.body),
+  createSessionPayload
+);
+
+const updateSqlErdSessionRequests = [];
+const updateSqlErdSessionClient = apiClientRuntime.createSqlErdApiClient({
+  fetcher: async (url, init) => {
+    updateSqlErdSessionRequests.push({ init, url });
+
+    return new Response(
+      JSON.stringify({
+        success: true,
+        data: createRuntimeTestSession({ revision: 4 })
+      }),
+      {
+        headers: { "Content-Type": "application/json" },
+        status: 200
+      }
+    );
+  }
+});
+const updateSessionPayload = {
+  baseRevision: 3,
+  title: "Generated ERD",
+  sourceFormat: "sql",
+  dialect: "mysql",
+  sourceText: "CREATE TABLE users (id BIGINT PRIMARY KEY);",
+  modelJson: createRuntimeTestModel(),
+  layoutJson: {
+    version: 1,
+    tableLayouts: [{ tableId: "table.users", x: 120, y: 160, width: 260 }]
+  },
+  settingsJson: {}
+};
+const updatedSqlErdSession = await updateSqlErdSessionClient.updateSession(
+  "workspace 1",
+  "session 1",
+  updateSessionPayload
+);
+
+assert.equal(updatedSqlErdSession.revision, 4);
+assert.equal(updateSqlErdSessionRequests.length, 1);
+assert.equal(
+  updateSqlErdSessionRequests[0].url,
+  "http://localhost:4000/api/v1/workspaces/workspace%201/sql-erd-session/session%201"
+);
+assert.equal(updateSqlErdSessionRequests[0].init.method, "PATCH");
+assert.deepEqual(
+  JSON.parse(updateSqlErdSessionRequests[0].init.body),
+  updateSessionPayload
+);
+
 const failingSqlErdApiClient = apiClientRuntime.createSqlErdApiClient({
   fetcher: async () =>
     new Response(
@@ -531,6 +631,26 @@ assert.equal(
   "BIGINT UNSIGNED"
 );
 
+const generatedLayout = modelRuntime.createSqltoerdLayoutForModel(
+  mysqlParseResult.modelJson,
+  {
+    version: 1,
+    tableLayouts: [{ tableId: "table.users", x: 44, y: 55, width: 288 }]
+  }
+);
+
+assert.deepEqual(generatedLayout.tableLayouts[0], {
+  tableId: "table.users",
+  x: 44,
+  y: 55,
+  width: 288
+});
+assert.deepEqual(generatedLayout.tableLayouts[1], {
+  tableId: "table.orders",
+  x: 440,
+  y: 80
+});
+
 const autoDialectParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
   dialect: "auto",
   sourceText: `CREATE TABLE users (
@@ -612,6 +732,7 @@ assert.match(modelUtils, /findErdColumn/);
 assert.match(modelUtils, /getTableLayout/);
 assert.match(modelUtils, /getRelationEndpoints/);
 assert.match(modelUtils, /getTableDisplayName/);
+assert.match(modelUtils, /createSqltoerdLayoutForModel/);
 assert.match(modelUtils, /relationsByTableId/);
 assert.match(modelUtils, /columnsByTableId/);
 assert.match(modelUtils, /relation\.fromTableId === relation\.toTableId/);
@@ -624,6 +745,16 @@ assert.match(panel, /SqlErdCanvas/);
 assert.match(panel, /useAuthSession/);
 assert.match(panel, /createSqlErdApiClient/);
 assert.match(panel, /getActiveSession/);
+assert.match(panel, /parseSqlDdlToErdModel/);
+assert.match(panel, /handleGenerate/);
+assert.match(panel, /createSession/);
+assert.match(panel, /updateSession/);
+assert.match(panel, /baseRevision: sqlErdViewSession\.revision/);
+assert.match(panel, /createSqltoerdLayoutForModel/);
+assert.match(panel, /onSourceTextChange/);
+assert.match(panel, /isSourceTextReadOnly/);
+assert.match(panel, /readOnly=\{isSourceTextReadOnly\}/);
+assert.match(panel, /setSqlErdViewSession\(\(currentSession\) =>/);
 assert.match(panel, /sessionLoadState/);
 assert.match(panel, /setSqlErdViewSession/);
 assert.match(panel, /selectedSqlErdObject/);
@@ -724,6 +855,9 @@ assert.match(ddlParserUtils, /unique/);
 
 assert.match(apiClient, /createSqlErdApiClient/);
 assert.match(apiClient, /getActiveSession/);
+assert.match(apiClient, /createSession/);
+assert.match(apiClient, /updateSession/);
 assert.match(apiClient, /\/workspaces\/\$\{encodeURIComponent\(workspaceId\)\}\/sql-erd-session/);
+assert.match(apiClient, /\/workspaces\/\$\{encodeURIComponent\(workspaceId\)\}\/sql-erd-session\/\$\{encodeURIComponent\(sessionId\)\}/);
 assert.match(apiClient, /Authorization: `Bearer \$\{accessToken\}`/);
 assert.match(apiClient, /credentials: "same-origin"/);

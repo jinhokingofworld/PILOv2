@@ -38,6 +38,35 @@ export function getSqltoerdModelCounts(
   };
 }
 
+export function createSqltoerdLayoutForModel(
+  modelJson: SqltoerdModelJsonV1,
+  previousLayoutJson?: SqltoerdLayoutJsonV1
+): SqltoerdLayoutJsonV1 {
+  const previousLayoutsByTableId = new Map(
+    previousLayoutJson?.tableLayouts.map((tableLayout) => [
+      tableLayout.tableId,
+      tableLayout
+    ]) ?? []
+  );
+
+  return {
+    version: 1 as SqltoerdLayoutJsonV1["version"],
+    tableLayouts: modelJson.schema.tables.map((table, index) => {
+      const previousLayout = previousLayoutsByTableId.get(table.id);
+
+      if (previousLayout) {
+        return previousLayout;
+      }
+
+      return {
+        tableId: table.id,
+        x: 80 + (index % 3) * 360,
+        y: 80 + Math.floor(index / 3) * 280
+      };
+    })
+  };
+}
+
 export function createSqltoerdModelIndex(
   modelJson: SqltoerdModelJsonV1
 ): SqltoerdModelIndex {

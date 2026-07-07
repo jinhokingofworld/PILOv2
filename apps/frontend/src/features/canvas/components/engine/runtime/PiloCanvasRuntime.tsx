@@ -113,6 +113,7 @@ function PiloCanvasRuntimeInner({
   const pendingShapeDetailRef = useRef<string | null>(null);
   const shapeDetailRequestSeqRef = useRef(0);
   const pendingLocalShapeVersionsRef = useRef(new Map<string, number>());
+  const pendingRemoteFrameChildrenRequestRef = useRef(new Set<string>());
   const deferredRemoteOperationsRef = useRef(
     new Map<number, CanvasShapeOperationPayload>(),
   );
@@ -148,6 +149,7 @@ function PiloCanvasRuntimeInner({
         .sort((a, b) => a.opSeq - b.opSeq);
       let nextFreeformShapes = freeformShapesRef.current;
       let hasVisibleShapeChange = false;
+      const expandedFrameIds = new Set<string>();
 
       sortedOperations.forEach((operation) => {
         deferredRemoteOperationsRef.current.delete(operation.opSeq);
@@ -186,6 +188,12 @@ function PiloCanvasRuntimeInner({
           operation.shapeId,
           operation.resultRevision,
         );
+        result.expandedFrameIds.forEach((frameId) => {
+          expandedFrameIds.add(frameId);
+        });
+        result.unloadedShapeIds.forEach((shapeId) => {
+          unloadedShapeIdsRef.current.add(shapeId);
+        });
 
         if (!result.changed) {
           return;
@@ -193,6 +201,10 @@ function PiloCanvasRuntimeInner({
 
         nextFreeformShapes = result.nextShapes;
         hasVisibleShapeChange = true;
+      });
+
+      expandedFrameIds.forEach((frameId) => {
+        pendingRemoteFrameChildrenRequestRef.current.add(frameId);
       });
 
       if (!hasVisibleShapeChange) {
@@ -307,6 +319,22 @@ function PiloCanvasRuntimeInner({
     viewportShapeLoadRequestSeqRef,
     viewportShapeLoadTimerRef,
   });
+
+  useEffect(() => {
+    if (
+      storageMode !== "api" ||
+      !pendingRemoteFrameChildrenRequestRef.current.size
+    ) {
+      return;
+    }
+
+    const frameIds = Array.from(pendingRemoteFrameChildrenRequestRef.current);
+    pendingRemoteFrameChildrenRequestRef.current.clear();
+
+    frameIds.forEach((frameId) => {
+      loadFrameChildren(frameId);
+    });
+  }, [canvasHydrationVersion, loadFrameChildren, storageMode]);
 
   const handleFrameChildShapesUnload = useCallback(
     (shapes: PiloCanvasFreeformShape[]) => {
