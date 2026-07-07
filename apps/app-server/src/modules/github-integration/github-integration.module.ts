@@ -12,6 +12,7 @@ import { GithubIntegrationService } from "./github-integration.service";
 import { GithubOAuthClient } from "./github-oauth.client";
 import { GithubOAuthIntegrationService } from "./github-oauth-integration.service";
 import { GithubOAuthStateService } from "./github-oauth-state.service";
+import { GithubProjectV2SyncTokenService } from "./github-project-v2-sync-token.service";
 import { GithubProjectV2Service } from "./github-project-v2.service";
 import { GithubPullRequestRemoteService } from "./github-pull-request-remote.service";
 import { GithubReviewSubmissionService } from "./github-review-submission.service";
@@ -34,6 +35,7 @@ import { GithubWebhookService } from "./github-webhook.service";
     GithubOAuthClient,
     GithubOAuthIntegrationService,
     GithubOAuthStateService,
+    GithubProjectV2SyncTokenService,
     GithubProjectV2Service,
     GithubPullRequestRemoteService,
     GithubReviewSubmissionService,
