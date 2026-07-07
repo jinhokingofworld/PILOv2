@@ -5,6 +5,7 @@ import { githubIntegrationNavigation } from "@/features/github-integration/navig
 import { meetingNavigation } from "@/features/meeting/navigation";
 import { prReviewNavigation } from "@/features/pr-review/navigation";
 import { boardNavigation } from "@/features/board/navigation";
+import { sqlErdNavigation } from "@/features/sql-erd/navigation";
 import type { FeatureNavigationItem } from "@/features/navigation-types";
 
 export const featureNavigationItems: FeatureNavigationItem[] = [
@@ -12,6 +13,7 @@ export const featureNavigationItems: FeatureNavigationItem[] = [
   driveNavigation,
   githubIntegrationNavigation,
   boardNavigation,
+  sqlErdNavigation,
   prReviewNavigation,
   meetingNavigation,
   canvasNavigation
