@@ -94,6 +94,7 @@ assert.match(prReviewApiClient, /createPrReviewApiClient/);
 assert.match(prReviewApiClient, /\/api\/v1/);
 assert.match(prReviewApiClient, /NEXT_PUBLIC_PILO_APP_SERVER_URL/);
 assert.match(prReviewApiClient, /Authorization/);
+assert.match(prReviewApiClient, /cache: "no-store"/);
 assert.match(prReviewApiClient, /credentials: "same-origin"/);
 assert.match(prReviewApiClient, /listRepositories/);
 assert.match(prReviewApiClient, /listOpenPullRequests/);
@@ -143,6 +144,8 @@ assert.match(prReviewCanvasShell, /onReviewSessionCreated/);
 assert.match(prReviewCanvasShell, /onDecisionSaved/);
 assert.match(prReviewCanvasShell, /loadCanvasData\(\{ quiet: true \}\)/);
 assert.match(prReviewCanvasShell, /updateReviewedCount/);
+assert.match(prReviewCanvasShell, /findReviewFileStatus/);
+assert.match(prReviewCanvasShell, /setSummary/);
 assert.match(prReviewCanvasShell, /updatedFile\.riskLevel/);
 assert.match(
   prReviewCanvasShell,
@@ -176,6 +179,7 @@ assert.match(prReviewFileDiffDrawer, /getReviewFileDiff/);
 assert.match(prReviewFileDiffDrawer, /updateReviewFileDecision/);
 assert.match(prReviewFileDiffDrawer, /riskLevelLabels/);
 assert.match(prReviewFileDiffDrawer, /getSaveButtonLabel/);
+assert.match(prReviewFileDiffDrawer, /const savedFile: PrReviewFile/);
 assert.match(prReviewFileDiffDrawer, /approved/);
 assert.match(prReviewFileDiffDrawer, /discussion_needed/);
 assert.match(prReviewFileDiffDrawer, /unknown/);

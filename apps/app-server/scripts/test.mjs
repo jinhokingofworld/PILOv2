@@ -74,7 +74,7 @@ const canvasShapeHashMigration = await readSource(
   "../../../db/migrations/009_canvas_shape_hash_revision_viewport_index.sql"
 );
 const canvasShapeOperationMigration = await readSource(
-  "../../../db/migrations/012_canvas_shape_operations.sql"
+  "../../../db/migrations/013_canvas_shape_operations.sql"
 );
 const devTerraformMain = await readSource("../../../infra/envs/dev/main.tf");
 const terraformSecretsModule = await readSource(
@@ -348,3 +348,4 @@ await import("./meeting/test.mjs");
 await import("./github-integration/test.mjs");
 await import("./pr-review/test.mjs");
 await import("./board/test.mjs");
+await import("./sqltoerd/test.mjs");

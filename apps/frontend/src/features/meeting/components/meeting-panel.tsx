@@ -68,6 +68,10 @@ const LIVEKIT_CONNECTION_ERROR_MESSAGE =
   "음성 회의 연결에 실패했습니다. 마이크 권한과 네트워크 상태를 확인해주세요.";
 const LEAVE_FAILED_MESSAGE =
   "회의 나가기에 실패했습니다. 문제가 반복되면 녹음을 종료한 뒤 다시 시도해주세요.";
+const ACTIVE_MEETING_IN_PROGRESS_ERROR_CODE =
+  "MEETING_ALREADY_IN_PROGRESS";
+const CURRENT_MEETING_RELOAD_FAILED_MESSAGE =
+  "진행 중인 회의를 다시 찾지 못했습니다. 새로고침 후 다시 시도해주세요.";
 
 function getInitial(name: string | null | undefined) {
   return (name?.trim().slice(0, 1) || "?").toUpperCase();
@@ -139,13 +143,22 @@ function getErrorMessage(error: unknown) {
     if (
       error.message === MIC_PERMISSION_ERROR_MESSAGE ||
       error.message === LIVEKIT_CONNECTION_ERROR_MESSAGE ||
-      error.message === LEAVE_FAILED_MESSAGE
+      error.message === LEAVE_FAILED_MESSAGE ||
+      error.message === CURRENT_MEETING_RELOAD_FAILED_MESSAGE
     ) {
       return error.message;
     }
   }
 
   return "회의 상태를 처리하지 못했습니다. 잠시 후 다시 시도해주세요.";
+}
+
+function isActiveMeetingInProgressError(error: unknown) {
+  return (
+    error instanceof MeetingApiError &&
+    error.status === 400 &&
+    error.code === ACTIVE_MEETING_IN_PROGRESS_ERROR_CODE
+  );
 }
 
 async function requestMicrophonePermission() {
@@ -408,7 +421,7 @@ export function MeetingPanel() {
   }, [toastMessage]);
 
   async function runEntryAction(action: EntryAction) {
-    const targetMeetingId = meeting?.id;
+    const targetMeetingId = meeting?.id ?? null;
 
     setActionStatus("joining");
     setActionError(null);
@@ -421,10 +434,26 @@ export function MeetingPanel() {
       await requestMicrophonePermission();
 
       failedStage = "api";
+      const joinCurrentMeeting = async (meetingId: string | null) => {
+        const currentMeetingId =
+          meetingId ?? (await reloadCurrentMeeting()).meeting?.id ?? null;
+
+        if (!currentMeetingId) {
+          throw new Error(CURRENT_MEETING_RELOAD_FAILED_MESSAGE);
+        }
+
+        return joinMeeting(currentMeetingId);
+      };
       const result =
         action === "start"
-          ? await startMeeting()
-          : await joinMeeting(targetMeetingId ?? "");
+          ? await startMeeting().catch((error: unknown) => {
+              if (!isActiveMeetingInProgressError(error)) {
+                throw error;
+              }
+
+              return joinCurrentMeeting(null);
+            })
+          : await joinCurrentMeeting(targetMeetingId);
       createdOrJoinedMeetingId = result.meeting.id;
 
       failedStage = "livekit";
@@ -561,6 +590,10 @@ export function MeetingPanel() {
   const joinButtonIcon = shouldLeaveMeeting ? PhoneOff : Phone;
   const JoinButtonIcon = isActionPending ? Loader2 : joinButtonIcon;
   const RecordingButtonIcon = hasRunningRecording ? Square : Radio;
+  const isEntryButtonDisabled =
+    isActionPending ||
+    (!shouldLeaveMeeting &&
+      (liveKitRoom.isConnecting || currentStatus === "loading"));
 
   if (!accessToken || !workspaceId) {
     return (
@@ -719,10 +752,7 @@ export function MeetingPanel() {
                 <div className="grid w-full max-w-2xl gap-3">
                   <Button
                     className="h-14 text-base"
-                    disabled={
-                      isActionPending ||
-                      (!shouldLeaveMeeting && liveKitRoom.isConnecting)
-                    }
+                    disabled={isEntryButtonDisabled}
                     size="lg"
                     variant={shouldLeaveMeeting ? "outline" : "default"}
                     onClick={() => {

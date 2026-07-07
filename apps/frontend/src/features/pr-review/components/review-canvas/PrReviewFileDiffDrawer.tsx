@@ -219,20 +219,26 @@ export function PrReviewFileDiffDrawer({
     setSaveErrorMessage(null);
 
     try {
+      const nextComment = comment.trim() || null;
       const updatedFile = await apiClient.updateReviewFileDecision(
         workspaceId,
         reviewFileId,
         {
-          comment: comment.trim() || null,
+          comment: nextComment,
           status: decisionStatus
         }
       );
+      const savedFile: PrReviewFile = {
+        ...updatedFile,
+        comment: nextComment,
+        currentStatus: decisionStatus
+      };
 
-      setFile(updatedFile);
-      setDecisionStatus(getInitialDecisionStatus(updatedFile));
-      setComment(updatedFile.comment ?? "");
+      setFile(savedFile);
+      setDecisionStatus(getInitialDecisionStatus(savedFile));
+      setComment(savedFile.comment ?? "");
       setSaveStatus("saved");
-      onDecisionSaved(updatedFile);
+      onDecisionSaved(savedFile);
     } catch (error) {
       setSaveStatus("error");
       setSaveErrorMessage(getErrorMessage(error));

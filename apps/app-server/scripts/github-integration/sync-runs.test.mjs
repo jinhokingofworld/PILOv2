@@ -190,8 +190,6 @@ const projectV2Id = "66666666-6666-4666-8666-666666666666";
 const syncRunId = "77777777-7777-4777-8777-777777777777";
 const githubInstallationId = 987654;
 const projectNodeId = "PVT_kwDOExample";
-const personalProjectV2ScopeErrorMessage =
-  "GitHub OAuth connection must be reconnected with read:project scope for personal ProjectV2 sync";
 const statusFieldId = "88888888-8888-4888-8888-888888888888";
 const backlogOptionId = "99999999-9999-4999-8999-999999999999";
 const projectItemId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -236,7 +234,7 @@ function githubOAuthConnectionRow(overrides = {}) {
   return {
     github_login: "Developer-EJ",
     github_access_token_encrypted: "encrypted-user-oauth-token",
-    github_token_scope: "repo,read:user,read:project",
+    github_token_scope: "",
     github_connected_at: "2026-07-05T09:00:00.000Z",
     github_revoked_at: null,
     ...overrides
@@ -1049,7 +1047,6 @@ function projectV2ItemApiItem(overrides = {}) {
       }),
       (text, values) => {
         assert.match(text, /github_access_token_encrypted/i);
-        assert.match(text, /github_token_scope/i);
         assert.match(text, /FROM users/i);
         assert.deepEqual(values, [currentUserId]);
         return githubOAuthConnectionRow();
@@ -1193,31 +1190,31 @@ function projectV2ItemApiItem(overrides = {}) {
         cursor: {}
       }),
       (text, values) => {
-        assert.match(text, /github_token_scope/i);
+        assert.match(text, /github_access_token_encrypted/i);
         assert.match(text, /FROM users/i);
         assert.deepEqual(values, [currentUserId]);
         return githubOAuthConnectionRow({
-          github_token_scope: "repo,read:user"
+          github_token_scope: null
         });
       },
       (text, values) => {
         assert.match(text, /UPDATE github_sync_runs/i);
-        assert.match(text, /status = 'failed'/i);
-        assert.deepEqual(values, [syncRunId, personalProjectV2ScopeErrorMessage]);
+        assert.match(text, /status = 'success'/i);
+        assert.deepEqual(values, [syncRunId, 0, 0, 0, 0, "{}"]);
         return syncRunRow({
           target: "full",
-          status: "failed",
+          status: "success",
           repository_id: null,
           project_v2_id: null,
           fetched_count: 0,
           created_count: 0,
           updated_count: 0,
           skipped_count: 0,
-          error_message: personalProjectV2ScopeErrorMessage,
           cursor: {}
         });
       }
-    ]
+    ],
+    queryRows: [() => [], () => []]
   });
   const { service } = createService(database, githubAppClient);
 
@@ -1226,9 +1223,16 @@ function projectV2ItemApiItem(overrides = {}) {
     installationId
   });
 
-  assert.equal(syncRun.status, "failed");
-  assert.equal(syncRun.errorMessage, personalProjectV2ScopeErrorMessage);
-  assert.deepEqual(githubAppClient.calls, []);
+  assert.equal(syncRun.status, "success");
+  assert.equal(syncRun.fetchedCount, 0);
+  assert.deepEqual(
+    githubAppClient.calls.map((call) => call.method),
+    ["listInstallationRepositories", "listProjectV2s"]
+  );
+  assert.equal(
+    githubAppClient.calls[1].input.userAccessToken,
+    "decrypted-user-oauth-token"
+  );
 }
 
 {

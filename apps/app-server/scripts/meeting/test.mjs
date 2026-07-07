@@ -315,6 +315,18 @@ async function assertBadRequest(action, messagePattern) {
   });
 }
 
+async function assertMeetingAlreadyInProgress(action) {
+  await assert.rejects(action, (error) => {
+    assert.equal(error.getStatus(), 400);
+    assert.equal(
+      error.getResponse().error.code,
+      "MEETING_ALREADY_IN_PROGRESS"
+    );
+    assert.match(error.getResponse().error.message, /already in progress/);
+    return true;
+  });
+}
+
 async function assertNotFound(action, messagePattern) {
   await assert.rejects(action, (error) => {
     assert.equal(error.getStatus(), 404);
@@ -431,9 +443,8 @@ async function assertError(action, messagePattern) {
     })
   );
 
-  await assertBadRequest(
-    () => service.startMeeting(currentUserId, workspaceId, {}),
-    /already in progress/
+  await assertMeetingAlreadyInProgress(() =>
+    service.startMeeting(currentUserId, workspaceId, {})
   );
 }
 
@@ -506,6 +517,66 @@ async function assertError(action, messagePattern) {
     livekitUrl: "wss://livekit.example.test",
     expiresAt: "2026-07-05T01:00:00.000Z"
   });
+  assert.equal(joined.currentRecording, null);
+}
+
+{
+  const { service, workspaceService, liveKitTokenService } = createSubject(
+    new FakeDatabase({
+      queryOneRows: [
+        (text, values) => {
+          assert.match(text, /WHERE meetings\.workspace_id = \$1/);
+          assert.match(text, /AND meetings\.id = \$2/);
+          assert.match(text, /FOR UPDATE OF meetings/);
+          assert.deepEqual(values, [workspaceId, meetingId]);
+          return currentMeetingRow({
+            created_by_id: currentUserId,
+            recording_id: null,
+            recording_meeting_id: null,
+            recording_status: null,
+            recording_started_at: null
+          });
+        },
+        (text, values) => {
+          assert.match(text, /ON CONFLICT \(meeting_id, user_id\)/);
+          assert.match(text, /left_at = NULL/);
+          assert.deepEqual(values, [meetingId, otherUserId]);
+          return participantRow({
+            id: otherParticipantId,
+            user_id: otherUserId,
+            livekit_identity: `meeting-${meetingId}-user-${otherUserId}`,
+            user_name: "Teammate",
+            user_avatar_url: null
+          });
+        }
+      ]
+    })
+  );
+
+  const joined = await service.joinMeeting(otherUserId, workspaceId, meetingId);
+
+  assert.deepEqual(workspaceService.calls, [{ userId: otherUserId, workspaceId }]);
+  assert.equal(joined.meeting.id, meetingId);
+  assert.equal(joined.meeting.createdById, currentUserId);
+  assert.equal(joined.meeting.livekitRoomName, `meeting-${meetingId}`);
+  assert.equal(joined.participant.id, otherParticipantId);
+  assert.equal(joined.participant.user.id, otherUserId);
+  assert.equal(joined.participant.isActive, true);
+  assert.deepEqual(liveKitTokenService.calls, [
+    {
+      livekitRoomName: `meeting-${meetingId}`,
+      livekitIdentity: `meeting-${meetingId}-user-${otherUserId}`,
+      participantName: "Teammate"
+    }
+  ]);
+  assert.deepEqual(joined.livekit, {
+    livekitRoomName: `meeting-${meetingId}`,
+    livekitIdentity: `meeting-${meetingId}-user-${otherUserId}`,
+    livekitToken: `token-for-meeting-${meetingId}-user-${otherUserId}`,
+    livekitUrl: "wss://livekit.example.test",
+    expiresAt: "2026-07-05T01:00:00.000Z"
+  });
+  assert.notEqual(joined.livekit.livekitIdentity, `meeting-${meetingId}-user-${currentUserId}`);
   assert.equal(joined.currentRecording, null);
 }
 
@@ -2060,8 +2131,7 @@ async function assertError(action, messagePattern) {
     })
   );
 
-  await assertBadRequest(
-    () => service.startMeeting(currentUserId, workspaceId, {}),
-    /already in progress/
+  await assertMeetingAlreadyInProgress(() =>
+    service.startMeeting(currentUserId, workspaceId, {})
   );
 }
