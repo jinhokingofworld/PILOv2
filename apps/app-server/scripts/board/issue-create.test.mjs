@@ -310,11 +310,27 @@ function createdIssueRow(overrides = {}) {
       )
     )
   );
+  const projectItemCacheUpsert = db.queries.find((query) =>
+    /INSERT INTO github_project_v2_items[\s\S]*github_project_item_node_id/i.test(
+      query.text
+    )
+  );
+  assert.ok(projectItemCacheUpsert);
+  assert.match(projectItemCacheUpsert.text, /\$3::text/);
+  assert.match(projectItemCacheUpsert.text, /\$7::text/);
+  assert.match(projectItemCacheUpsert.text, /\$8::text/);
   assert.ok(
     db.queries.some((query) =>
       /INSERT INTO github_project_v2_item_field_values/i.test(query.text)
     )
   );
+  const fieldValueUpsert = db.queries.find((query) =>
+    /INSERT INTO github_project_v2_item_field_values/i.test(query.text)
+  );
+  assert.ok(fieldValueUpsert);
+  assert.match(fieldValueUpsert.text, /\$3::text/);
+  assert.match(fieldValueUpsert.text, /\$4::text/);
+  assert.match(fieldValueUpsert.text, /\$5::text/);
   assert.ok(db.queries.some((query) => /INSERT INTO pilo_issues/i.test(query.text)));
   assert.equal(result.issue.id, piloIssueId);
   assert.equal(result.issue.columnId, columnId);

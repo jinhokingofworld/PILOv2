@@ -202,17 +202,17 @@ export class BoardIssueStatusQueries {
         VALUES (
           $1::uuid,
           $2::uuid,
-          $3,
+          $3::text,
           'SINGLE_SELECT',
-          $4,
-          $5,
+          $4::text,
+          $5::text,
           jsonb_build_object(
             'fieldName',
-            $3,
+            $3::text,
             'singleSelectOptionId',
-            $4,
+            $4::text,
             'singleSelectName',
-            $5
+            $5::text
           ),
           now()
         )
