@@ -4,6 +4,7 @@ import { AppService } from "./app.service";
 import { BoardModule } from "./modules/board/board.module";
 import { CalendarModule } from "./modules/calendar/calendar.module";
 import { CanvasModule } from "./modules/canvas/canvas.module";
+import { DriveModule } from "./modules/drive/drive.module";
 import { GithubIntegrationModule } from "./modules/github-integration/github-integration.module";
 import { AuthModule } from "./modules/auth/auth.module";
 import { MeetingModule } from "./modules/meeting/meeting.module";
@@ -25,6 +26,7 @@ import { WorkspaceModule } from "./modules/workspace/workspace.module";
     MeetingModule,
     CalendarModule,
     CanvasModule,
+    DriveModule,
     SqlErdModule
   ],
   controllers: [AppController],
