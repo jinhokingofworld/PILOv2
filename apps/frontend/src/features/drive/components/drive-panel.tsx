@@ -3,22 +3,48 @@
 import {
   AlertCircle,
   ChevronRight,
+  Download,
   FileText,
   Folder,
   FolderPlus,
   Home,
   Loader2,
-  RefreshCw
+  MoreHorizontal,
+  Pencil,
+  RefreshCw,
+  Trash2,
+  Upload,
+  X
 } from "lucide-react";
 import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
+  type ChangeEvent,
   type FormEvent
 } from "react";
 
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogMedia,
+  AlertDialogTitle
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -31,11 +57,33 @@ import {
 } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuthSession } from "@/features/auth";
-import { createDriveApiClient } from "@/features/drive/api/client";
+import {
+  createDriveApiClient,
+  uploadDriveFileToPresignedUrl
+} from "@/features/drive/api/client";
 import type { DriveItem, DriveListPayload } from "@/features/drive/types";
 import { cn } from "@/lib/utils";
 
 type DriveStatus = "idle" | "loading" | "success" | "error";
+
+type DriveUploadState =
+  | {
+      status: "idle";
+    }
+  | {
+      status: "uploading";
+      fileName: string;
+      progressPercent: number | null;
+    }
+  | {
+      status: "success";
+      fileName: string;
+    }
+  | {
+      status: "error";
+      fileName: string;
+      message: string;
+    };
 
 const emptyDriveData: DriveListPayload = {
   parent: null,
@@ -44,6 +92,8 @@ const emptyDriveData: DriveListPayload = {
 };
 
 const DRIVE_NAME_MAX_LENGTH = 255;
+const MAX_DRIVE_FILE_SIZE_BYTES = 104857600;
+const FALLBACK_MIME_TYPE = "application/octet-stream";
 
 function errorMessageFromUnknown(error: unknown) {
   return error instanceof Error
@@ -55,19 +105,19 @@ function validateDriveItemName(value: string) {
   const name = value.trim();
 
   if (!name) {
-    return { error: "폴더 이름을 입력해주세요.", name };
+    return { error: "이름을 입력해주세요.", name };
   }
 
   if (name.length > DRIVE_NAME_MAX_LENGTH) {
-    return { error: "폴더 이름은 255자 이하로 입력해주세요.", name };
+    return { error: "이름은 255자 이하로 입력해주세요.", name };
   }
 
   if (name === "." || name === "..") {
-    return { error: "사용할 수 없는 폴더 이름입니다.", name };
+    return { error: "사용할 수 없는 이름입니다.", name };
   }
 
   if (/[\\/]/.test(name)) {
-    return { error: "폴더 이름에는 / 또는 \\를 사용할 수 없습니다.", name };
+    return { error: "이름에는 / 또는 \\를 사용할 수 없습니다.", name };
   }
 
   return { error: null, name };
@@ -119,11 +169,21 @@ function getItemTypeLabel(item: DriveItem) {
 }
 
 function getItemActorLabel(item: DriveItem) {
-  return (
-    item.updatedByUser?.name ??
-    item.createdByUser?.name ??
-    "알 수 없음"
-  );
+  return item.updatedByUser?.name ?? item.createdByUser?.name ?? "알 수 없음";
+}
+
+function getFileMimeType(file: File) {
+  return file.type.trim() || FALLBACK_MIME_TYPE;
+}
+
+function triggerBrowserDownload(downloadUrl: string, fileName: string) {
+  const anchor = document.createElement("a");
+  anchor.href = downloadUrl;
+  anchor.download = fileName;
+  anchor.rel = "noopener";
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
 }
 
 function DriveBreadcrumbs({
@@ -171,19 +231,57 @@ function DriveBreadcrumbs({
   );
 }
 
+function DriveItemName({ item }: { item: DriveItem }) {
+  const isFolder = item.itemType === "folder";
+
+  return (
+    <>
+      <span
+        className={cn(
+          "flex size-9 shrink-0 items-center justify-center rounded-lg border",
+          isFolder
+            ? "border-amber-200 bg-amber-50 text-amber-700"
+            : "border-sky-200 bg-sky-50 text-sky-700"
+        )}
+      >
+        {isFolder ? (
+          <Folder className="size-4" />
+        ) : (
+          <FileText className="size-4" />
+        )}
+      </span>
+      <span className="min-w-0">
+        <span className="block truncate font-medium">{item.name}</span>
+        <span className="mt-0.5 block truncate text-xs text-muted-foreground md:hidden">
+          {getItemTypeLabel(item)} · {formatFileSize(item.sizeBytes)}
+        </span>
+      </span>
+    </>
+  );
+}
+
 function DriveItemRow({
+  activeActionItemId,
   item,
-  onOpenFolder
+  onDownload,
+  onOpenDelete,
+  onOpenFolder,
+  onOpenRename
 }: {
+  activeActionItemId: string | null;
   item: DriveItem;
+  onDownload: (item: DriveItem) => void;
+  onOpenDelete: (item: DriveItem) => void;
   onOpenFolder: (item: DriveItem) => void;
+  onOpenRename: (item: DriveItem) => void;
 }) {
   const isFolder = item.itemType === "folder";
+  const isBusy = activeActionItemId === item.id;
 
   return (
     <li
       className={cn(
-        "grid gap-3 border-b px-3 py-3 last:border-b-0 md:grid-cols-[minmax(0,1.8fr)_minmax(7rem,0.7fr)_minmax(8rem,0.8fr)_minmax(9rem,0.8fr)] md:items-center",
+        "grid gap-3 border-b px-3 py-3 last:border-b-0 md:grid-cols-[minmax(0,1.8fr)_minmax(7rem,0.7fr)_minmax(8rem,0.8fr)_minmax(9rem,0.8fr)_3rem] md:items-center",
         isFolder && "transition hover:bg-muted/40"
       )}
     >
@@ -213,32 +311,62 @@ function DriveItemRow({
           {getItemActorLabel(item)}
         </span>
       </span>
+      <div className="flex items-center justify-start md:justify-end">
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                aria-label={`${item.name} 작업`}
+                disabled={isBusy}
+              />
+            }
+          >
+            {isBusy ? (
+              <Loader2 className="animate-spin" />
+            ) : (
+              <MoreHorizontal />
+            )}
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-40">
+            <DropdownMenuGroup>
+              {!isFolder ? (
+                <DropdownMenuItem
+                  className="gap-2"
+                  disabled={isBusy}
+                  onClick={() => onDownload(item)}
+                >
+                  <Download />
+                  다운로드
+                </DropdownMenuItem>
+              ) : null}
+              <DropdownMenuItem
+                className="gap-2"
+                disabled={isBusy}
+                onClick={() => onOpenRename(item)}
+              >
+                <Pencil />
+                이름 변경
+              </DropdownMenuItem>
+            </DropdownMenuGroup>
+            <DropdownMenuSeparator />
+            <DropdownMenuGroup>
+              <DropdownMenuItem
+                className="gap-2"
+                disabled={isBusy}
+                variant="destructive"
+                onClick={() => onOpenDelete(item)}
+              >
+                <Trash2 />
+                삭제
+              </DropdownMenuItem>
+            </DropdownMenuGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
     </li>
-  );
-}
-
-function DriveItemName({ item }: { item: DriveItem }) {
-  const isFolder = item.itemType === "folder";
-
-  return (
-    <>
-        <span
-          className={cn(
-            "flex size-9 shrink-0 items-center justify-center rounded-lg border",
-            isFolder
-              ? "border-amber-200 bg-amber-50 text-amber-700"
-              : "border-sky-200 bg-sky-50 text-sky-700"
-          )}
-        >
-          {isFolder ? <Folder className="size-4" /> : <FileText className="size-4" />}
-        </span>
-        <span className="min-w-0">
-          <span className="block truncate font-medium">{item.name}</span>
-          <span className="mt-0.5 block truncate text-xs text-muted-foreground md:hidden">
-            {getItemTypeLabel(item)} · {formatFileSize(item.sizeBytes)}
-          </span>
-        </span>
-    </>
   );
 }
 
@@ -248,7 +376,7 @@ function DriveListSkeleton() {
       {Array.from({ length: 5 }, (_, index) => (
         <div
           key={index}
-          className="grid gap-3 border-b px-3 py-3 last:border-b-0 md:grid-cols-[minmax(0,1.8fr)_minmax(7rem,0.7fr)_minmax(8rem,0.8fr)_minmax(9rem,0.8fr)]"
+          className="grid gap-3 border-b px-3 py-3 last:border-b-0 md:grid-cols-[minmax(0,1.8fr)_minmax(7rem,0.7fr)_minmax(8rem,0.8fr)_minmax(9rem,0.8fr)_3rem]"
         >
           <div className="flex items-center gap-3">
             <Skeleton className="size-9" />
@@ -260,8 +388,80 @@ function DriveListSkeleton() {
           <Skeleton className="hidden h-4 w-20 md:block" />
           <Skeleton className="hidden h-4 w-16 md:block" />
           <Skeleton className="h-4 w-28" />
+          <Skeleton className="size-7" />
         </div>
       ))}
+    </div>
+  );
+}
+
+function DriveUploadNotice({
+  onDismiss,
+  uploadState
+}: {
+  onDismiss: () => void;
+  uploadState: DriveUploadState;
+}) {
+  if (uploadState.status === "idle") {
+    return null;
+  }
+
+  const isUploading = uploadState.status === "uploading";
+  const isError = uploadState.status === "error";
+  const progressPercent =
+    uploadState.status === "uploading" ? uploadState.progressPercent : null;
+
+  return (
+    <div
+      className={cn(
+        "rounded-lg border px-3 py-2 text-sm",
+        isError
+          ? "border-destructive/20 bg-destructive/10 text-destructive"
+          : "bg-muted/30"
+      )}
+      role={isError ? "alert" : "status"}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="font-medium">
+            {isUploading
+              ? "업로드 중"
+              : isError
+                ? "업로드 실패"
+                : "업로드 완료"}
+          </p>
+          <p
+            className={cn(
+              "mt-0.5 truncate",
+              isError ? "text-destructive" : "text-muted-foreground"
+            )}
+          >
+            {uploadState.fileName}
+            {isError ? ` · ${uploadState.message}` : null}
+          </p>
+        </div>
+        {!isUploading ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            aria-label="업로드 알림 닫기"
+            onClick={onDismiss}
+          >
+            <X className="size-4" />
+          </Button>
+        ) : (
+          <Loader2 className="mt-1 size-4 shrink-0 animate-spin text-muted-foreground" />
+        )}
+      </div>
+      {isUploading ? (
+        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
+          <div
+            className="h-full rounded-full bg-primary transition-all"
+            style={{ width: `${progressPercent ?? 8}%` }}
+          />
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -344,8 +544,144 @@ function CreateFolderSheet({
   );
 }
 
+function RenameItemSheet({
+  error,
+  isSubmitting,
+  item,
+  name,
+  onNameChange,
+  onOpenChange,
+  onSubmit
+}: {
+  error: string | null;
+  isSubmitting: boolean;
+  item: DriveItem | null;
+  name: string;
+  onNameChange: (name: string) => void;
+  onOpenChange: (open: boolean) => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  return (
+    <Sheet open={Boolean(item)} onOpenChange={onOpenChange}>
+      <SheetContent className="w-full sm:max-w-sm">
+        <form className="flex min-h-0 flex-1 flex-col" onSubmit={onSubmit}>
+          <SheetHeader>
+            <SheetTitle>이름 변경</SheetTitle>
+            <SheetDescription>
+              {item?.itemType === "folder" ? "폴더" : "파일"}
+            </SheetDescription>
+          </SheetHeader>
+
+          <div className="flex-1 px-4">
+            <label className="grid gap-1.5 text-sm font-medium">
+              이름
+              <Input
+                value={name}
+                maxLength={DRIVE_NAME_MAX_LENGTH}
+                placeholder="새 이름"
+                disabled={isSubmitting}
+                onChange={(event) => onNameChange(event.currentTarget.value)}
+              />
+            </label>
+
+            {error ? (
+              <p className="mt-3 rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                {error}
+              </p>
+            ) : null}
+          </div>
+
+          <SheetFooter className="border-t">
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                className="flex-1"
+                disabled={isSubmitting}
+                onClick={() => onOpenChange(false)}
+              >
+                취소
+              </Button>
+              <Button
+                type="submit"
+                className="flex-1"
+                disabled={isSubmitting}
+              >
+                {isSubmitting ? (
+                  <Loader2 className="animate-spin" />
+                ) : (
+                  <Pencil />
+                )}
+                저장
+              </Button>
+            </div>
+          </SheetFooter>
+        </form>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+function DeleteItemDialog({
+  error,
+  isDeleting,
+  item,
+  onConfirm,
+  onOpenChange
+}: {
+  error: string | null;
+  isDeleting: boolean;
+  item: DriveItem | null;
+  onConfirm: () => void;
+  onOpenChange: (open: boolean) => void;
+}) {
+  return (
+    <AlertDialog open={Boolean(item)} onOpenChange={onOpenChange}>
+      <AlertDialogContent size="default">
+        <AlertDialogHeader>
+          <AlertDialogMedia className="bg-destructive/10 text-destructive">
+            <Trash2 className="size-5" />
+          </AlertDialogMedia>
+          <AlertDialogTitle>
+            {item?.itemType === "folder" ? "폴더 삭제" : "파일 삭제"}
+          </AlertDialogTitle>
+          <AlertDialogDescription>
+            {item?.itemType === "folder"
+              ? "폴더와 하위 항목이 모두 삭제됩니다."
+              : "삭제한 파일은 목록에서 사라집니다."}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+
+        <div className="rounded-md border bg-muted/30 p-3">
+          <p className="break-words text-sm font-medium">{item?.name}</p>
+        </div>
+
+        {error ? (
+          <p className="rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            {error}
+          </p>
+        ) : null}
+
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={isDeleting}>취소</AlertDialogCancel>
+          <Button
+            type="button"
+            variant="destructive"
+            disabled={isDeleting}
+            onClick={onConfirm}
+          >
+            {isDeleting ? <Loader2 className="animate-spin" /> : <Trash2 />}
+            삭제
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
 export function DrivePanel() {
   const authSession = useAuthSession();
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const workspaceId = authSession?.activeWorkspaceId ?? "";
   const workspaceName = authSession?.activeWorkspace.name ?? "Workspace";
   const normalizedAccessToken = authSession?.accessToken.trim() ?? "";
@@ -354,10 +690,24 @@ export function DrivePanel() {
   const [driveData, setDriveData] = useState<DriveListPayload>(emptyDriveData);
   const [status, setStatus] = useState<DriveStatus>("idle");
   const [error, setError] = useState<Error | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [activeActionItemId, setActiveActionItemId] = useState<string | null>(
+    null
+  );
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [folderName, setFolderName] = useState("");
   const [folderError, setFolderError] = useState<string | null>(null);
   const [isCreatingFolder, setIsCreatingFolder] = useState(false);
+  const [uploadState, setUploadState] = useState<DriveUploadState>({
+    status: "idle"
+  });
+  const [renameItem, setRenameItem] = useState<DriveItem | null>(null);
+  const [renameName, setRenameName] = useState("");
+  const [renameError, setRenameError] = useState<string | null>(null);
+  const [isRenaming, setIsRenaming] = useState(false);
+  const [deleteItem, setDeleteItem] = useState<DriveItem | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   const driveClient = useMemo(
     () => createDriveApiClient({ accessToken: normalizedAccessToken }),
     [normalizedAccessToken]
@@ -373,6 +723,7 @@ export function DrivePanel() {
   const currentFolderName = driveData.parent
     ? driveData.parent.name
     : `${workspaceName} 루트`;
+  const isUploading = uploadState.status === "uploading";
 
   const fetchDriveData = useCallback(async () => {
     if (!canUseDrive) {
@@ -503,6 +854,216 @@ export function DrivePanel() {
     }
   }
 
+  function openFilePicker() {
+    setActionError(null);
+    fileInputRef.current?.click();
+  }
+
+  async function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0] ?? null;
+    event.currentTarget.value = "";
+
+    if (!file) {
+      return;
+    }
+
+    if (!canUseDrive) {
+      setUploadState({
+        status: "error",
+        fileName: file.name,
+        message: "파일을 업로드하려면 로그인이 필요합니다."
+      });
+      return;
+    }
+
+    const nameResult = validateDriveItemName(file.name);
+    if (nameResult.error) {
+      setUploadState({
+        status: "error",
+        fileName: file.name,
+        message: nameResult.error
+      });
+      return;
+    }
+
+    if (file.size > MAX_DRIVE_FILE_SIZE_BYTES) {
+      setUploadState({
+        status: "error",
+        fileName: file.name,
+        message: "파일은 100 MiB 이하만 업로드할 수 있습니다."
+      });
+      return;
+    }
+
+    setActionError(null);
+    setUploadState({
+      status: "uploading",
+      fileName: file.name,
+      progressPercent: null
+    });
+
+    try {
+      const result = await driveClient.createUploadUrl(workspaceId, {
+        parentId: currentParentId,
+        name: nameResult.name,
+        sizeBytes: file.size,
+        mimeType: getFileMimeType(file)
+      });
+
+      await uploadDriveFileToPresignedUrl({
+        file,
+        headers: result.upload.headers,
+        uploadUrl: result.upload.uploadUrl,
+        onProgress: (progress) => {
+          setUploadState({
+            status: "uploading",
+            fileName: file.name,
+            progressPercent: progress.percent
+          });
+        }
+      });
+
+      await driveClient.completeUpload(workspaceId, result.file.id, {
+        uploadId: result.upload.id
+      });
+
+      setUploadState({
+        status: "success",
+        fileName: file.name
+      });
+      await reloadDrive();
+    } catch (uploadError) {
+      setUploadState({
+        status: "error",
+        fileName: file.name,
+        message: errorMessageFromUnknown(uploadError)
+      });
+      void reloadDrive();
+    }
+  }
+
+  async function handleDownloadItem(item: DriveItem) {
+    if (item.itemType !== "file") {
+      return;
+    }
+
+    if (!canUseDrive) {
+      setActionError("파일을 다운로드하려면 로그인이 필요합니다.");
+      return;
+    }
+
+    setActiveActionItemId(item.id);
+    setActionError(null);
+
+    try {
+      const result = await driveClient.createDownloadUrl(workspaceId, item.id);
+      triggerBrowserDownload(result.downloadUrl, item.name);
+    } catch (downloadError) {
+      setActionError(errorMessageFromUnknown(downloadError));
+    } finally {
+      setActiveActionItemId(null);
+    }
+  }
+
+  function openRenameSheet(item: DriveItem) {
+    setRenameItem(item);
+    setRenameName(item.name);
+    setRenameError(null);
+    setActionError(null);
+  }
+
+  function handleRenameOpenChange(open: boolean) {
+    if (isRenaming) {
+      return;
+    }
+
+    if (!open) {
+      setRenameItem(null);
+      setRenameName("");
+      setRenameError(null);
+    }
+  }
+
+  async function handleRenameSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!renameItem) {
+      return;
+    }
+
+    if (!canUseDrive) {
+      setRenameError("이름을 변경하려면 로그인이 필요합니다.");
+      return;
+    }
+
+    const result = validateDriveItemName(renameName);
+    if (result.error) {
+      setRenameError(result.error);
+      return;
+    }
+
+    setIsRenaming(true);
+    setActiveActionItemId(renameItem.id);
+    setRenameError(null);
+
+    try {
+      await driveClient.updateItem(workspaceId, renameItem.id, {
+        name: result.name
+      });
+      setRenameItem(null);
+      setRenameName("");
+      await reloadDrive();
+    } catch (renameErrorValue) {
+      setRenameError(errorMessageFromUnknown(renameErrorValue));
+    } finally {
+      setIsRenaming(false);
+      setActiveActionItemId(null);
+    }
+  }
+
+  function openDeleteDialog(item: DriveItem) {
+    setDeleteItem(item);
+    setDeleteError(null);
+    setActionError(null);
+  }
+
+  function handleDeleteOpenChange(open: boolean) {
+    if (isDeleting) {
+      return;
+    }
+
+    if (!open) {
+      setDeleteItem(null);
+      setDeleteError(null);
+    }
+  }
+
+  async function handleConfirmDelete() {
+    if (!deleteItem) {
+      return;
+    }
+
+    if (!canUseDrive) {
+      setDeleteError("삭제하려면 로그인이 필요합니다.");
+      return;
+    }
+
+    setIsDeleting(true);
+    setActiveActionItemId(deleteItem.id);
+    setDeleteError(null);
+
+    try {
+      await driveClient.deleteItem(workspaceId, deleteItem.id);
+      setDeleteItem(null);
+      await reloadDrive();
+    } catch (deleteErrorValue) {
+      setDeleteError(errorMessageFromUnknown(deleteErrorValue));
+    } finally {
+      setIsDeleting(false);
+      setActiveActionItemId(null);
+    }
+  }
+
   const isLoading = status === "loading";
   const isEmpty = status === "success" && driveData.items.length === 0;
 
@@ -520,6 +1081,12 @@ export function DrivePanel() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+            <input
+              ref={fileInputRef}
+              type="file"
+              className="sr-only"
+              onChange={(event) => void handleFileChange(event)}
+            />
             <Button
               type="button"
               variant="outline"
@@ -536,6 +1103,20 @@ export function DrivePanel() {
             </Button>
             <Button
               type="button"
+              variant="outline"
+              size="sm"
+              disabled={!canUseDrive || isUploading}
+              onClick={openFilePicker}
+            >
+              {isUploading ? (
+                <Loader2 className="animate-spin" />
+              ) : (
+                <Upload />
+              )}
+              업로드
+            </Button>
+            <Button
+              type="button"
               size="sm"
               disabled={!canUseDrive}
               onClick={openCreateFolderSheet}
@@ -545,6 +1126,20 @@ export function DrivePanel() {
             </Button>
           </div>
         </div>
+
+        <DriveUploadNotice
+          uploadState={uploadState}
+          onDismiss={() => setUploadState({ status: "idle" })}
+        />
+
+        {actionError ? (
+          <p
+            className="rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+            role="alert"
+          >
+            {actionError}
+          </p>
+        ) : null}
 
         <div className="rounded-lg border bg-background">
           <div className="flex min-h-12 items-center px-3">
@@ -595,31 +1190,50 @@ export function DrivePanel() {
                   이 위치에는 아직 파일이나 폴더가 없습니다.
                 </p>
               </div>
-              <Button
-                type="button"
-                size="sm"
-                disabled={!canUseDrive}
-                onClick={openCreateFolderSheet}
-              >
-                <FolderPlus />
-                새 폴더
-              </Button>
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={!canUseDrive || isUploading}
+                  onClick={openFilePicker}
+                >
+                  <Upload />
+                  업로드
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={!canUseDrive}
+                  onClick={openCreateFolderSheet}
+                >
+                  <FolderPlus />
+                  새 폴더
+                </Button>
+              </div>
             </div>
           ) : (
             <div className="min-h-0 overflow-x-auto">
-              <div className="min-w-[720px]">
-                <div className="grid border-b bg-muted/30 px-3 py-2 text-xs font-semibold text-muted-foreground md:grid-cols-[minmax(0,1.8fr)_minmax(7rem,0.7fr)_minmax(8rem,0.8fr)_minmax(9rem,0.8fr)]">
+              <div className="min-w-[780px]">
+                <div className="grid border-b bg-muted/30 px-3 py-2 text-xs font-semibold text-muted-foreground md:grid-cols-[minmax(0,1.8fr)_minmax(7rem,0.7fr)_minmax(8rem,0.8fr)_minmax(9rem,0.8fr)_3rem]">
                   <span>이름</span>
                   <span>유형</span>
                   <span>크기</span>
                   <span>수정일</span>
+                  <span className="text-right">작업</span>
                 </div>
                 <ul>
                   {driveData.items.map((item) => (
                     <DriveItemRow
                       key={item.id}
+                      activeActionItemId={activeActionItemId}
                       item={item}
+                      onDownload={(targetItem) =>
+                        void handleDownloadItem(targetItem)
+                      }
+                      onOpenDelete={openDeleteDialog}
                       onOpenFolder={(folder) => setCurrentParentId(folder.id)}
+                      onOpenRename={openRenameSheet}
                     />
                   ))}
                 </ul>
@@ -638,6 +1252,24 @@ export function DrivePanel() {
         onNameChange={setFolderName}
         onOpenChange={handleCreateOpenChange}
         onSubmit={handleCreateFolder}
+      />
+
+      <RenameItemSheet
+        error={renameError}
+        isSubmitting={isRenaming}
+        item={renameItem}
+        name={renameName}
+        onNameChange={setRenameName}
+        onOpenChange={handleRenameOpenChange}
+        onSubmit={handleRenameSubmit}
+      />
+
+      <DeleteItemDialog
+        error={deleteError}
+        isDeleting={isDeleting}
+        item={deleteItem}
+        onConfirm={() => void handleConfirmDelete()}
+        onOpenChange={handleDeleteOpenChange}
       />
     </div>
   );

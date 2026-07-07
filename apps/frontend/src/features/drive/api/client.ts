@@ -1,8 +1,14 @@
 import type {
   CreateDriveFolderInput,
+  CreateDriveUploadUrlInput,
+  CreateDriveUploadUrlPayload,
+  CompleteDriveUploadInput,
+  DeleteDriveItemPayload,
+  DriveDownloadUrlPayload,
   DriveItem,
   DriveListPayload,
-  ListDriveItemsQuery
+  ListDriveItemsQuery,
+  UpdateDriveItemInput
 } from "@/features/drive/types";
 
 const API_BASE_PATH = "/api/v1";
@@ -219,6 +225,87 @@ function driveFoldersPath(workspaceId: string) {
   return `/workspaces/${encodeURIComponent(workspaceId)}/drive/folders` as const;
 }
 
+function driveUploadUrlPath(workspaceId: string) {
+  return `/workspaces/${encodeURIComponent(
+    workspaceId
+  )}/drive/files/upload-url` as const;
+}
+
+function driveFilePath(workspaceId: string, fileId: string) {
+  return `/workspaces/${encodeURIComponent(
+    workspaceId
+  )}/drive/files/${encodeURIComponent(fileId)}` as const;
+}
+
+function driveItemPath(workspaceId: string, itemId: string) {
+  return `/workspaces/${encodeURIComponent(
+    workspaceId
+  )}/drive/items/${encodeURIComponent(itemId)}` as const;
+}
+
+export type UploadDriveFileProgress = {
+  loadedBytes: number;
+  totalBytes: number;
+  percent: number;
+};
+
+export function uploadDriveFileToPresignedUrl({
+  file,
+  headers,
+  onProgress,
+  uploadUrl
+}: {
+  file: File;
+  headers: Record<string, string>;
+  onProgress?: (progress: UploadDriveFileProgress) => void;
+  uploadUrl: string;
+}) {
+  return new Promise<void>((resolve, reject) => {
+    const request = new XMLHttpRequest();
+
+    request.open("PUT", uploadUrl);
+
+    for (const [key, value] of Object.entries(headers)) {
+      request.setRequestHeader(key, value);
+    }
+
+    request.upload.onprogress = (event) => {
+      if (!event.lengthComputable || event.total <= 0) {
+        return;
+      }
+
+      onProgress?.({
+        loadedBytes: event.loaded,
+        totalBytes: event.total,
+        percent: Math.min(100, Math.round((event.loaded / event.total) * 100))
+      });
+    };
+
+    request.onload = () => {
+      if (request.status >= 200 && request.status < 300) {
+        resolve();
+        return;
+      }
+
+      reject(
+        new DriveApiError("파일 업로드에 실패했습니다.", {
+          status: request.status
+        })
+      );
+    };
+
+    request.onerror = () => {
+      reject(new DriveApiError("파일 업로드 요청을 완료하지 못했습니다."));
+    };
+
+    request.onabort = () => {
+      reject(new DriveApiError("파일 업로드가 취소되었습니다."));
+    };
+
+    request.send(file);
+  });
+}
+
 export function createDriveApiClient({
   accessToken = null,
   baseUrl = defaultDriveApiBaseUrl(),
@@ -243,6 +330,57 @@ export function createDriveApiClient({
       return requestDriveData<DriveItem>(
         driveFoldersPath(workspaceId),
         withJsonBody(body, { method: "POST" }),
+        requestOptions
+      );
+    },
+
+    async createUploadUrl(
+      workspaceId: string,
+      body: CreateDriveUploadUrlInput
+    ) {
+      return requestDriveData<CreateDriveUploadUrlPayload>(
+        driveUploadUrlPath(workspaceId),
+        withJsonBody(body, { method: "POST" }),
+        requestOptions
+      );
+    },
+
+    async completeUpload(
+      workspaceId: string,
+      fileId: string,
+      body: CompleteDriveUploadInput
+    ) {
+      return requestDriveData<DriveItem>(
+        `${driveFilePath(workspaceId, fileId)}/complete`,
+        withJsonBody(body, { method: "POST" }),
+        requestOptions
+      );
+    },
+
+    async createDownloadUrl(workspaceId: string, fileId: string) {
+      return requestDriveData<DriveDownloadUrlPayload>(
+        `${driveFilePath(workspaceId, fileId)}/download-url`,
+        undefined,
+        requestOptions
+      );
+    },
+
+    async updateItem(
+      workspaceId: string,
+      itemId: string,
+      body: UpdateDriveItemInput
+    ) {
+      return requestDriveData<DriveItem>(
+        driveItemPath(workspaceId, itemId),
+        withJsonBody(body, { method: "PATCH" }),
+        requestOptions
+      );
+    },
+
+    async deleteItem(workspaceId: string, itemId: string) {
+      return requestDriveData<DeleteDriveItemPayload>(
+        driveItemPath(workspaceId, itemId),
+        { method: "DELETE" },
         requestOptions
       );
     }

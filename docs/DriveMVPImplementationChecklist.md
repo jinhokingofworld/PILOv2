@@ -1,225 +1,176 @@
 # 파일 MVP 구현 체크리스트
 
 작성일: 2026-07-07
+최신화: 2026-07-07
 
-이 문서는 Workspace 공유 파일 기능을 구현할 때 따라갈 작업 순서를 정리한다.
+이 문서는 Workspace 공유 파일 기능의 현재 구현 상태와 남은 작업 순서를 정리한다.
 구현 기준 계약은 `docs/api/drive-api.md`, DB schema 기준은
 `db/migrations/014_create_drive_items_and_uploads.sql`을 따른다.
 
-## 1. 작업 준비와 영향 범위 확인
+## 0. 현재 진행 상황
 
-- [ ] 현재 브랜치가 `origin/dev` 기준 작업 브랜치인지 확인한다.
-- [ ] `docs/api/drive-api.md`의 MVP 범위와 제외 범위를 다시 확인한다.
-- [ ] `db/migrations/014_create_drive_items_and_uploads.sql` 번호가 최신 `dev`와 충돌하지 않는지 확인한다.
-- [ ] DB schema 변경이므로 DB Schema owner 확인 대상임을 PR 본문에 명시한다.
-- [ ] Drive 1차 owner가 은재임을 작업 범위에 명시한다.
-- [ ] S3는 기존 uploads bucket을 사용하고, 파일 object key는 `drive/` prefix로 분리한다.
-- [ ] App Server 공통 영역 변경이 필요한 항목을 정리한다.
-- [ ] Frontend 공통 영역 변경이 필요한 항목을 정리한다.
-- [ ] `docs/AgentPostMVP.md`를 같은 PR에 포함할지 최종 확인한다.
+| Issue | 범위 | 상태 | 관련 PR | 메모 |
+| --- | --- | --- | --- | --- |
+| #298 | 계약/DB/Infra 준비 | 완료 | #295 | API 문서, migration, 구현 체크리스트 준비 |
+| #299 | Backend 구현 | 완료 | #305, #307 | Drive API와 S3 presigned URL 흐름 구현 |
+| #300 | Frontend 구현 | GitHub상 완료 | #310 | 기본 화면은 완료. 업로드/다운로드/이름 변경/삭제 UI는 다음 구현 작업으로 남음 |
+| #315 | Frontend action 구현 | 진행 예정 | - | 업로드, 다운로드, 이름 변경, 삭제 UI 구현 |
+| #301 | 통합 QA/배포 정리 | 진행 전 | - | 전체 흐름 구현 후 dev 환경에서 검증 |
 
-## 2. 인프라와 환경 변수 준비
+주의: #300은 #310 merge 후 GitHub issue 상태가 `CLOSED`이지만, 기능 범위 기준으로는
+파일 업로드, 다운로드, 이름 변경, 삭제 UI가 아직 남아 있다. 이 남은 Frontend action
+작업은 #315에서 추적한다.
 
-- [ ] app-server가 `S3_UPLOADS_BUCKET`을 읽을 수 있는지 확인한다.
-- [ ] dev 환경에서 uploads bucket 이름이 app-server 환경 변수로 주입되는지 확인한다.
-- [ ] S3 object key prefix를 `drive/workspaces/{workspaceId}/items/{fileId}/{safeFileName}`로 고정한다.
-- [ ] uploads bucket CORS에 브라우저 presigned upload/download 흐름이 가능한지 확인한다.
-- [ ] CORS 허용 method에 `PUT`, `GET`, `HEAD`가 포함되는지 확인한다.
-- [ ] CORS 허용 header에 `Content-Type`, `x-amz-*`가 포함되는지 확인한다.
-- [ ] CORS expose header에 `ETag`가 필요한지 확인한다.
-- [ ] app-server IAM 권한에 `s3:PutObject`, `s3:GetObject`, `s3:HeadObject`가 충분한지 확인한다.
-- [ ] Drive용 별도 bucket을 만들지 않고 uploads bucket의 `drive/` prefix를 사용하는 것으로 문서화한다.
+## 1. 완료된 기반 작업
 
-## 3. App Server 의존성과 공통 영역 반영
+### 1.1 계약과 DB
 
-- [ ] `apps/app-server/package.json`에 S3 client 의존성을 추가한다.
-- [ ] presigned URL 발급용 의존성을 추가한다.
-- [ ] 의존성 설치 후 `package-lock.json` 변경을 확인한다.
-- [ ] `src/app.module.ts`에 `DriveModule`을 등록한다.
-- [ ] `src/modules/README.md`에 `drive` 모듈을 추가할지 확인한다.
-- [ ] 공통 영역 변경 사유, 영향 범위, 검증 방법을 PR 본문에 적을 수 있게 정리한다.
+- [x] Drive API 계약 문서를 작성했다.
+- [x] `docs/api/README.md`에 Drive API 문서를 등록했다.
+- [x] `drive_items`, `drive_uploads` migration을 `014`번으로 추가했다.
+- [x] `drive_items`가 폴더와 파일 metadata를 모두 표현한다.
+- [x] `drive_uploads`가 presigned upload URL 한 번의 업로드 시도를 추적한다.
+- [x] 같은 Workspace와 parent 안에서 활성 item 이름 중복을 막는다.
+- [x] `object_key` unique index와 pending upload 정리용 index를 추가했다.
+- [x] RLS baseline all-deny를 활성화했다.
 
-## 4. DB Migration 적용 기준 확인
+### 1.2 Backend
 
-- [ ] `drive_items` 테이블이 폴더와 파일 metadata를 모두 표현하는지 확인한다.
-- [ ] `drive_uploads` 테이블이 presigned upload 한 번의 시도를 추적하는지 확인한다.
-- [ ] `drive_items.parent_id`가 같은 Workspace 안의 item만 참조하도록 FK가 잡혔는지 확인한다.
-- [ ] 폴더 row는 `object_key`, `mime_type`, `size_bytes`, `upload_status`가 모두 `NULL`인지 확인한다.
-- [ ] 파일 row는 `object_key`, `mime_type`, `size_bytes`, `upload_status`가 모두 필요한지 확인한다.
-- [ ] 같은 parent 안에서 활성 item 이름 중복을 막는 unique index를 확인한다.
-- [ ] `deleted_at IS NULL` 조건이 중복 이름 제약에 들어가 있는지 확인한다.
-- [ ] `object_key` unique index를 확인한다.
-- [ ] `pending` upload 정리용 index가 있는지 확인한다.
-- [ ] RLS가 baseline all-deny로 활성화되는지 확인한다.
-- [ ] 가능하면 로컬 Postgres에 migration을 적용해 문법을 검증한다.
+- [x] `DriveModule`, `DriveController`, `DriveService`를 추가했다.
+- [x] `DriveStorageService`에서 S3 presigned upload/download URL을 발급한다.
+- [x] `@aws-sdk/client-s3`, `@aws-sdk/s3-request-presigner` 의존성을 추가했다.
+- [x] `AuthGuard`와 Workspace 접근 권한 검증을 Drive endpoint에 적용했다.
+- [x] 파일/폴더 이름, UUID, parent folder, size, MIME type 검증을 구현했다.
+- [x] 목록 조회와 폴더 생성 API를 구현했다.
+- [x] 업로드 URL 발급과 upload complete API를 구현했다.
+- [x] 다운로드 URL 발급 API를 구현했다.
+- [x] 이름 변경과 soft delete API를 구현했다.
+- [x] 폴더 삭제 시 하위 item까지 recursive soft delete한다.
+- [x] S3 raw error를 API 응답에 그대로 노출하지 않도록 처리했다.
+- [x] app-server drive 테스트 스크립트를 추가했다.
 
-## 5. Drive Backend 모듈 골격 작성
+### 1.3 Frontend 기본 화면
 
-- [ ] `apps/app-server/src/modules/drive/drive.module.ts`를 만든다.
-- [ ] `drive.controller.ts`를 만든다.
-- [ ] `drive.service.ts`를 만든다.
-- [ ] `drive-storage.service.ts` 또는 동등한 S3 adapter를 만든다.
-- [ ] `dto/`, `types/`, `queries/` 폴더를 필요한 만큼 만든다.
-- [ ] `WorkspaceModule`, `DatabaseModule`, `CommonModule` import를 맞춘다.
-- [ ] 모든 endpoint에 `AuthGuard`를 적용한다.
-- [ ] 모든 service method 시작에서 `WorkspaceService.assertWorkspaceAccess`를 호출한다.
-- [ ] request body의 `workspaceId`, `userId`, `objectKey`를 받지 않도록 한다.
+- [x] `apps/frontend/src/features/drive/` 도메인 폴더를 추가했다.
+- [x] Drive 타입과 API client를 추가했다.
+- [x] 목록 조회 API 함수를 구현했다.
+- [x] 폴더 생성 API 함수를 구현했다.
+- [x] `/files` route bridge를 `apps/frontend/src/app/(workspace)/files/page.tsx`에 추가했다.
+- [x] `drive/navigation.ts`를 만들고 `파일` 메뉴를 등록했다.
+- [x] 현재 Workspace id와 access token을 기존 auth/session 흐름에서 가져온다.
+- [x] root와 폴더 내부 이동을 구현했다.
+- [x] breadcrumbs를 표시한다.
+- [x] 폴더와 파일 목록을 구분해서 표시한다.
+- [x] 빈 상태, 로딩 상태, 에러 상태와 재시도 버튼을 구현했다.
+- [x] 새 폴더 생성 UI를 shadcn/ui `Sheet`, `Button`, `Input` 기반으로 구현했다.
+- [x] #310 CI에서 frontend build, lint, test 통과를 확인했다.
 
-## 6. Backend 공통 검증 로직 구현
+## 2. 다음 구현 PR: Frontend action 완성
 
-- [ ] UUID 형식 검증 helper를 둔다.
-- [ ] 파일/폴더 이름 trim 검증을 구현한다.
-- [ ] 빈 이름, 255자 초과 이름을 거부한다.
-- [ ] `.`, `..` 이름을 거부한다.
-- [ ] `/`, `\`가 포함된 이름을 거부한다.
-- [ ] `parentId`가 있으면 같은 Workspace의 활성 folder인지 검증한다.
-- [ ] 같은 parent의 활성 item 이름 중복을 사전에 검사한다.
-- [ ] DB unique violation도 `BAD_REQUEST`로 안전하게 변환한다.
-- [ ] `sizeBytes`가 `0` 이상 `100 MiB` 이하인지 검증한다.
-- [ ] `mimeType`이 빈 문자열이 아니고 255자 이하인지 검증한다.
-- [ ] S3 provider raw error를 응답에 그대로 노출하지 않는다.
+다음 작업은 최신 `dev`에서 새 브랜치를 파고 시작한다. 권장 브랜치:
+`feat/315-drive-frontend-actions`.
 
-## 7. 목록 조회와 폴더 생성 구현
+### 2.1 시작 전 확인
 
-- [ ] `GET /workspaces/{workspaceId}/drive/items`를 구현한다.
-- [ ] root 조회는 `parentId IS NULL`로 처리한다.
-- [ ] 특정 폴더 조회는 `parentId` 기준으로 처리한다.
-- [ ] 활성 폴더와 `ready` 파일만 목록에 반환한다.
-- [ ] `pending`, `failed`, soft-deleted item은 목록에서 제외한다.
-- [ ] 정렬은 폴더 먼저, 파일 나중으로 처리한다.
-- [ ] 각 그룹 안에서 `updatedAt DESC`, `name ASC`로 정렬한다.
-- [ ] 현재 parent payload와 breadcrumbs를 응답에 포함한다.
-- [ ] `POST /workspaces/{workspaceId}/drive/folders`를 구현한다.
-- [ ] 폴더 생성 시 `created_by_user_id`를 현재 사용자로 저장한다.
-- [ ] 폴더 생성 응답을 `Drive Item Payload`에 맞춘다.
+- [x] 최신 `dev`를 pull한다.
+- [x] 남은 Frontend action 작업의 추적 issue를 #315로 확정한다.
+- [x] `docs/api/drive-api.md`에서 upload/download/rename/delete 계약을 다시 확인한다.
+- [x] `apps/frontend/FRONTEND_COMMON_AREAS.md`를 확인한다.
+- [x] route bridge는 `apps/frontend/src/app/(workspace)/files/page.tsx` 위치를 유지한다.
+- [x] 이번 PR에는 API 계약/DB schema 변경을 넣지 않는다.
 
-## 8. 업로드 URL 발급 구현
+### 2.2 API client와 타입 확장
 
-- [ ] `POST /workspaces/{workspaceId}/drive/files/upload-url`를 구현한다.
-- [ ] 요청의 `parentId`, `name`, `sizeBytes`, `mimeType`을 검증한다.
-- [ ] 서버에서 file id를 생성하거나 DB insert 결과 id를 사용한다.
-- [ ] object key를 `drive/workspaces/{workspaceId}/items/{fileId}/{safeFileName}` 형식으로 만든다.
-- [ ] 파일명을 object key에 넣기 전에 S3 key로 안전한 문자열로 정규화한다.
-- [ ] `drive_items`에 `item_type = 'file'`, `upload_status = 'pending'` row를 만든다.
-- [ ] `drive_uploads`에 `status = 'pending'`, `expires_at = now() + 10분` row를 만든다.
-- [ ] S3 presigned `PUT` URL을 발급한다.
-- [ ] 응답에 `file`, `upload.method`, `upload.uploadUrl`, `upload.headers`, `upload.expiresAt`을 포함한다.
-- [ ] S3 bucket name과 object key는 응답에 노출하지 않는다.
+- [x] `DriveUpload` 타입을 추가한다.
+- [x] upload URL 발급 API 함수를 추가한다.
+- [x] S3 presigned `PUT` 업로드 함수를 추가한다.
+- [x] upload complete API 함수를 추가한다.
+- [x] download URL 발급 API 함수를 추가한다.
+- [x] 이름 변경 API 함수를 추가한다.
+- [x] 삭제 API 함수를 추가한다.
+- [x] API error parsing은 기존 Drive client 패턴을 유지한다.
 
-## 9. 업로드 완료 처리 구현
+### 2.3 업로드 UI
 
-- [ ] `POST /workspaces/{workspaceId}/drive/files/{fileId}/complete`를 구현한다.
-- [ ] `fileId`가 같은 Workspace의 활성 `pending` file인지 확인한다.
-- [ ] `uploadId`가 해당 file의 `pending` upload인지 확인한다.
-- [ ] upload가 만료되었으면 `drive_uploads.status = 'expired'`로 전환한다.
-- [ ] 만료된 upload의 file item은 `failed` 및 soft delete 처리할지 구현 정책을 확정한다.
-- [ ] S3 `HeadObject`로 object 존재 여부를 확인한다.
-- [ ] S3 object size가 expected size와 일치하는지 확인한다.
-- [ ] size가 `100 MiB`를 초과하면 실패 처리한다.
-- [ ] 검증 성공 시 transaction으로 `drive_uploads.status = 'completed'`를 저장한다.
-- [ ] 같은 transaction에서 `drive_items.upload_status = 'ready'`로 전환한다.
-- [ ] 완료 응답을 `Drive Item Payload`에 맞춘다.
+- [x] 파일 선택 input을 추가한다.
+- [x] 현재 폴더 `parentId` 기준으로 업로드 URL을 요청한다.
+- [x] 서버가 내려준 `upload.headers`를 S3 `PUT` 요청에 그대로 사용한다.
+- [x] S3 `PUT` 성공 후 upload complete API를 호출한다.
+- [x] 업로드 성공 후 현재 폴더 목록을 새로고침한다.
+- [x] 업로드 진행 중 상태를 표시한다.
+- [x] 업로드 실패 상태와 재시도 가능 흐름을 표시한다.
+- [x] 100 MiB 초과 파일은 UI에서 사전 차단하거나 서버 에러를 사용자에게 보여준다.
 
-## 10. 다운로드 URL 발급 구현
+### 2.4 다운로드 UI
 
-- [ ] `GET /workspaces/{workspaceId}/drive/files/{fileId}/download-url`를 구현한다.
-- [ ] `fileId`가 같은 Workspace의 활성 `ready` file인지 확인한다.
-- [ ] folder, pending file, failed file에 대해서는 다운로드 URL을 발급하지 않는다.
-- [ ] S3 presigned `GET` URL을 발급한다.
-- [ ] URL 만료 시간은 기본 `10분`으로 둔다.
-- [ ] 원본 파일명을 `Content-Disposition` filename에 반영한다.
-- [ ] 응답에 `file`, `downloadUrl`, `expiresAt`을 포함한다.
-- [ ] S3 bucket name과 object key는 응답에 노출하지 않는다.
+- [x] 파일 row에 다운로드 버튼을 추가한다.
+- [x] folder row에는 다운로드 액션을 노출하지 않는다.
+- [x] download URL 발급 후 브라우저 다운로드를 시작한다.
+- [x] 다운로드 URL 발급 실패 상태를 사용자에게 표시한다.
 
-## 11. 이름 변경과 삭제 구현
+### 2.5 이름 변경 UI
 
-- [ ] `PATCH /workspaces/{workspaceId}/drive/items/{itemId}`를 구현한다.
-- [ ] Workspace `owner` 또는 `member`면 이름 변경을 허용한다.
-- [ ] `itemId`가 같은 Workspace의 활성 item인지 확인한다.
-- [ ] 새 이름 검증과 sibling 중복 검사를 수행한다.
-- [ ] 이름 변경 시 S3 object key는 변경하지 않는다.
-- [ ] `updated_by_user_id`를 현재 사용자로 저장한다.
-- [ ] `DELETE /workspaces/{workspaceId}/drive/items/{itemId}`를 구현한다.
-- [ ] Workspace `owner` 또는 `member`면 삭제를 허용한다.
-- [ ] file 삭제는 해당 item의 `deleted_at`을 기록한다.
-- [ ] folder 삭제는 recursive CTE로 하위 item까지 soft delete한다.
-- [ ] 삭제 시 S3 object는 즉시 삭제하지 않는다.
-- [ ] 응답에 `id`, `deleted`, `deletedItemCount`를 포함한다.
+- [x] 파일/폴더 row에 이름 변경 액션을 추가한다.
+- [x] 기존 이름을 기본값으로 보여준다.
+- [x] 빈 이름, 255자 초과, `.`, `..`, `/`, `\` 포함 이름을 UI에서 검증한다.
+- [x] 이름 변경 성공 후 현재 목록을 새로고침한다.
+- [x] sibling 이름 중복 서버 에러를 사용자에게 표시한다.
 
-## 12. Backend 테스트와 검증
+### 2.6 삭제 UI
 
-- [ ] drive 도메인 전용 테스트 스크립트를 추가한다.
-- [ ] 폴더 생성 성공 테스트를 작성한다.
-- [ ] 같은 폴더 이름 중복 실패 테스트를 작성한다.
-- [ ] root와 하위 폴더 목록 조회 테스트를 작성한다.
-- [ ] upload URL 발급 성공 테스트를 작성한다.
-- [ ] 100 MiB 초과 업로드 요청 실패 테스트를 작성한다.
-- [ ] upload complete 성공 테스트를 작성한다.
-- [ ] S3 object 미존재 complete 실패 테스트를 작성한다.
-- [ ] 다운로드 URL 발급 성공 테스트를 작성한다.
-- [ ] 이름 변경 성공과 중복 실패 테스트를 작성한다.
-- [ ] 파일 삭제와 폴더 recursive 삭제 테스트를 작성한다.
-- [ ] Workspace 접근 권한 없는 요청이 실패하는지 확인한다.
-- [ ] `npm run build`, `npm run lint`, `npm test` 또는 repo 기준 검증 명령을 실행한다.
+- [x] 파일/폴더 row에 삭제 액션을 추가한다.
+- [x] 삭제 확인 UI를 추가한다.
+- [x] 파일 삭제 성공 후 목록에서 사라지는지 확인한다.
+- [x] 폴더 삭제 성공 후 하위 item까지 사라지는지 확인한다.
+- [x] 삭제 실패 상태를 사용자에게 표시한다.
 
-## 13. Frontend API client와 타입 구현
+### 2.7 Frontend 검증
 
-- [ ] `apps/frontend/src/features/drive/types/` 또는 `types.ts`를 만든다.
-- [ ] `DriveItem`, `DriveUpload`, `DriveListResponse` 타입을 정의한다.
-- [ ] `apps/frontend/src/features/drive/api/client.ts`를 만든다.
-- [ ] 목록 조회 API 함수를 구현한다.
-- [ ] 폴더 생성 API 함수를 구현한다.
-- [ ] upload URL 발급 API 함수를 구현한다.
-- [ ] S3 `PUT` 업로드 함수를 구현한다.
-- [ ] upload complete API 함수를 구현한다.
-- [ ] download URL 발급 API 함수를 구현한다.
-- [ ] 이름 변경 API 함수를 구현한다.
-- [ ] 삭제 API 함수를 구현한다.
-- [ ] API error parsing은 기존 feature client 패턴을 따른다.
+- [x] `npm run format:check`를 실행한다.
+- [x] `npm run lint`를 실행한다.
+- [x] `npm run test`를 실행한다.
+- [x] `npm run build`를 실행한다.
+- [ ] 모바일 폭에서 목록, 버튼, 파일명이 겹치지 않는지 확인한다.
+- [ ] 가능하면 dev app-server와 연결해 업로드/다운로드 흐름을 수동 확인한다.
 
-## 14. Frontend 화면과 상태 구현
+## 3. 최종 QA와 배포 확인
 
-- [ ] `apps/frontend/src/features/drive/page.tsx`를 만든다.
-- [ ] `apps/frontend/src/app/files/page.tsx` route bridge를 만든다.
-- [ ] `drive/navigation.ts`를 만들고 `파일` 메뉴를 정의한다.
-- [ ] `src/features/navigation.ts`에 Drive navigation을 등록한다.
-- [ ] 현재 Workspace id와 access token을 auth session에서 가져온다.
-- [ ] root와 폴더 내부를 이동할 수 있게 한다.
-- [ ] breadcrumbs를 표시한다.
-- [ ] 폴더와 파일 목록을 구분해서 표시한다.
-- [ ] 빈 상태를 표시한다.
-- [ ] 로딩 상태를 표시한다.
-- [ ] 에러 상태와 재시도 버튼을 표시한다.
-- [ ] 새 폴더 생성 UI를 만든다.
-- [ ] 파일 선택 및 업로드 UI를 만든다.
-- [ ] 업로드 진행 중 상태를 표시한다.
-- [ ] 업로드 실패 상태를 표시한다.
-- [ ] 다운로드 버튼을 만든다.
-- [ ] 이름 변경 UI를 만든다.
-- [ ] 삭제 확인 UI를 만든다.
-- [ ] 모바일 폭에서도 목록과 버튼 텍스트가 겹치지 않게 확인한다.
+이 단계는 #301에서 진행한다. Frontend action PR이 dev에 들어간 뒤 수행한다.
 
-## 15. Frontend 검증
+### 3.1 Infra/S3 확인
 
-- [ ] 로그인하지 않은 상태에서 파일 화면 접근 시 기존 auth UX와 맞게 동작하는지 확인한다.
-- [ ] Workspace member가 root 목록을 볼 수 있는지 확인한다.
-- [ ] 폴더 생성 후 목록에 반영되는지 확인한다.
+- [ ] dev app-server에 `S3_UPLOADS_BUCKET`이 주입되어 있는지 확인한다.
+- [ ] AWS region/endpoint 설정이 app-server 실행 환경과 맞는지 확인한다.
+- [ ] uploads bucket CORS에 `PUT`, `GET`, `HEAD`가 허용되어 있는지 확인한다.
+- [ ] CORS 허용 header에 `Content-Type`, `x-amz-*`가 포함되어 있는지 확인한다.
+- [ ] 필요하면 CORS expose header에 `ETag`를 포함한다.
+- [ ] app-server IAM 권한에 `s3:PutObject`, `s3:GetObject`, `s3:HeadObject`가 있는지 확인한다.
+
+### 3.2 DB와 Backend 확인
+
+- [ ] dev DB에 `014_create_drive_items_and_uploads.sql` migration이 적용되어 있는지 확인한다.
+- [ ] Workspace `owner`와 `member` 모두 Drive API를 사용할 수 있는지 확인한다.
+- [ ] 권한 없는 Workspace 요청이 실패하는지 확인한다.
+- [ ] 만료된 pending upload 처리 결과를 확인한다.
+
+### 3.3 End-to-end 수동 QA
+
+- [ ] Workspace member로 `파일` 화면에 접근한다.
+- [ ] root 목록 조회를 확인한다.
+- [ ] 폴더 생성과 폴더 내부 이동을 확인한다.
 - [ ] 파일 업로드 후 `ready` 상태로 목록에 나타나는지 확인한다.
-- [ ] 다운로드 버튼이 presigned URL로 파일을 받을 수 있는지 확인한다.
-- [ ] 이름 변경 후 목록과 상세 표시가 갱신되는지 확인한다.
+- [ ] 다운로드 URL로 파일을 받을 수 있는지 확인한다.
+- [ ] 파일/폴더 이름 변경 후 목록이 갱신되는지 확인한다.
 - [ ] 파일 삭제 후 목록에서 사라지는지 확인한다.
 - [ ] 폴더 삭제 후 하위 item도 목록에서 사라지는지 확인한다.
-- [ ] 100 MiB 초과 파일 업로드가 UI에서 차단되거나 서버 에러를 보여주는지 확인한다.
-- [ ] `npm run build`, `npm run lint`, `npm test` 또는 repo 기준 검증 명령을 실행한다.
+- [ ] 100 MiB 초과 파일 처리 결과를 확인한다.
 
-## 16. 문서와 PR 정리
+## 4. PR 정리 기준
 
 - [ ] 구현 중 API 계약이 바뀌면 `docs/api/drive-api.md`를 함께 수정한다.
 - [ ] DB schema가 바뀌면 migration과 `db/README.md`를 함께 수정한다.
-- [ ] app-server 공통 영역 변경 사유와 영향 범위를 PR 본문에 적는다.
-- [ ] frontend 공통 영역 변경 사유와 영향 범위를 PR 본문에 적는다.
-- [ ] Infra/S3 CORS 변경이 있으면 배포 영향에 적는다.
-- [ ] PR 제목에 DB, app-server 공통 영역, frontend 공통 영역 영향이 있으면 사이렌 표시를 검토한다.
+- [ ] frontend 공통 영역 변경이 있으면 PR 제목에 사이렌 표시를 검토한다.
+- [ ] `apps/frontend/FRONTEND_COMMON_AREAS.md` 기준 영향 범위와 검증 방법을 PR 본문에 적는다.
+- [ ] Infra/S3 CORS/IAM/env 확인이 남아 있으면 PR 본문에 미수행 사유를 적는다.
 - [ ] 테스트 결과와 미수행 사유를 PR 본문에 적는다.
-- [ ] Drive owner와 DB Schema owner 확인이 필요한 점을 PR 본문에 적는다.
 - [ ] 구현 범위에서 제외한 항목을 PR 본문에 명시한다.
