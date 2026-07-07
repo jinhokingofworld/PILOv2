@@ -1,5 +1,6 @@
 "use client";
 
+import type { PointerEvent } from "react";
 import {
   HTMLContainer,
   Rectangle2d,
@@ -236,9 +237,17 @@ function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
     });
   }
 
+  function handleColumnPointerDown(
+    event: PointerEvent<HTMLDivElement>,
+    columnId: string
+  ) {
+    event.stopPropagation();
+    handleColumnClick(columnId);
+  }
+
   return (
     <HTMLContainer
-      className="overflow-visible"
+      className="pointer-events-auto overflow-visible"
       style={{ width: shape.props.w, height: shape.props.h }}
     >
       <article
@@ -280,6 +289,7 @@ function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
                   event.stopPropagation();
                   handleColumnClick(column.id);
                 }}
+                onPointerDown={(event) => handleColumnPointerDown(event, column.id)}
                 role="button"
                 style={{
                   backgroundColor: isSelected

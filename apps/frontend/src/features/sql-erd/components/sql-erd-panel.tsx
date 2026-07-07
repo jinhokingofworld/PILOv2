@@ -604,13 +604,13 @@ function InspectorPanel({ isOpen, onToggle, viewModel }: InspectorPanelProps) {
 
   return (
     <aside
-      className="flex w-[min(360px,36vw)] min-w-80 max-w-[360px] shrink-0 flex-col border-l bg-background"
+      className="flex w-[min(400px,40vw)] min-w-96 max-w-[400px] shrink-0 flex-col border-l bg-background"
       id="inspector"
     >
-      <div className="flex min-h-16 items-center justify-between gap-3 border-b px-5">
+      <div className="flex min-h-20 items-center justify-between gap-3 border-b px-6">
         <div className="min-w-0">
-          <p className="text-lg font-semibold">상세 정보</p>
-          <p className="truncate text-sm text-muted-foreground">
+          <p className="text-xl font-semibold">상세 정보</p>
+          <p className="truncate text-base text-muted-foreground">
             {getInspectorSubtitle(viewModel)}
           </p>
         </div>
@@ -624,19 +624,19 @@ function InspectorPanel({ isOpen, onToggle, viewModel }: InspectorPanelProps) {
         </button>
       </div>
 
-      <div className="flex flex-1 flex-col gap-5 overflow-auto p-5">
+      <div className="flex flex-1 flex-col gap-6 overflow-auto p-6">
         <InspectorContent viewModel={viewModel} />
 
         <div className="mt-auto grid gap-2">
           <button
-            className="inline-flex h-10 cursor-not-allowed items-center justify-center rounded-md border bg-background px-3 text-base font-medium text-muted-foreground opacity-70"
+            className="inline-flex h-11 cursor-not-allowed items-center justify-center rounded-md border bg-background px-3 text-lg font-medium text-muted-foreground opacity-70"
             disabled
             type="button"
           >
             Add column
           </button>
           <button
-            className="inline-flex h-10 cursor-not-allowed items-center justify-center rounded-md border bg-background px-3 text-base font-medium text-muted-foreground opacity-70"
+            className="inline-flex h-11 cursor-not-allowed items-center justify-center rounded-md border bg-background px-3 text-lg font-medium text-muted-foreground opacity-70"
             disabled
             type="button"
           >
@@ -683,8 +683,8 @@ function InspectorContent({
 
   return (
     <div className="rounded-md border border-dashed p-4">
-      <p className="text-base font-medium">선택 정보</p>
-      <p className="mt-1 text-sm leading-6 text-muted-foreground">
+      <p className="text-lg font-medium">선택 정보</p>
+      <p className="mt-1 text-base leading-7 text-muted-foreground">
         선택한 테이블, 컬럼, 관계가 없습니다
       </p>
     </div>
@@ -781,7 +781,7 @@ function RelationList({ relations }: { relations: RelationSummary[] }) {
     return (
       <div>
         <InspectorSectionTitle>연결 관계</InspectorSectionTitle>
-        <p className="rounded-md border border-dashed p-3 text-sm leading-6 text-muted-foreground">
+        <p className="rounded-md border border-dashed p-4 text-base leading-7 text-muted-foreground">
           연결된 관계가 없습니다
         </p>
       </div>
@@ -794,7 +794,7 @@ function RelationList({ relations }: { relations: RelationSummary[] }) {
       <div className="space-y-2">
         {relations.map((relation) => (
           <div
-            className="rounded-md border bg-background p-3 text-sm leading-6"
+            className="rounded-md border bg-background p-4 text-base leading-7"
             key={relation.id}
           >
             <p className="font-medium text-foreground">{relation.fromLabel}</p>
@@ -808,7 +808,7 @@ function RelationList({ relations }: { relations: RelationSummary[] }) {
 
 function ConstraintPill({ label }: { label: string }) {
   return (
-    <span className="inline-flex h-8 items-center rounded-md border bg-muted/40 px-2.5 text-sm font-semibold text-muted-foreground">
+    <span className="inline-flex h-9 items-center rounded-md border bg-muted/40 px-3 text-base font-semibold text-muted-foreground">
       {label}
     </span>
   );
@@ -816,7 +816,7 @@ function ConstraintPill({ label }: { label: string }) {
 
 function InspectorSectionTitle({ children }: { children: ReactNode }) {
   return (
-    <p className="text-sm font-semibold text-muted-foreground">
+    <p className="text-base font-semibold text-muted-foreground">
       {children}
     </p>
   );
@@ -829,7 +829,7 @@ type InspectorRowProps = {
 
 function InspectorRow({ label, value }: InspectorRowProps) {
   return (
-    <div className="flex items-start justify-between gap-4 border-b py-2.5 text-base">
+    <div className="flex items-start justify-between gap-4 border-b py-3 text-lg">
       <span className="shrink-0 text-muted-foreground">{label}</span>
       <span className="break-all text-right font-medium">{value}</span>
     </div>

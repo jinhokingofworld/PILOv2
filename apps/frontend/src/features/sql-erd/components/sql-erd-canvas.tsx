@@ -127,7 +127,11 @@ export function createSqltoerdRelationShapes(
     const layout =
       getSqlErdRelationShapeLayoutFromTablePartials(
         fromTableShape,
-        toTableShape
+        toTableShape,
+        {
+          fromColumnIds: relation.fromColumnIds,
+          toColumnIds: relation.toColumnIds
+        }
       ) ?? getFallbackSqlErdRelationShapeLayout();
 
     return {
@@ -182,7 +186,11 @@ function getFallbackSqlErdRelationShapeLayout(): SqlErdRelationShapeLayout {
 
 function getSqlErdRelationShapeLayoutFromTablePartials(
   fromTableShape: TLShapePartial<SqlErdTableShape> | undefined,
-  toTableShape: TLShapePartial<SqlErdTableShape> | undefined
+  toTableShape: TLShapePartial<SqlErdTableShape> | undefined,
+  columnIds: {
+    fromColumnIds: string[];
+    toColumnIds: string[];
+  }
 ) {
   if (!fromTableShape?.props || !toTableShape?.props) {
     return null;
@@ -192,33 +200,40 @@ function getSqlErdRelationShapeLayoutFromTablePartials(
   const fromY = fromTableShape.y ?? 0;
   const fromW = fromTableShape.props.w;
   const fromH = fromTableShape.props.h;
+  const fromColumns = fromTableShape.props.columns ?? [];
   const toX = toTableShape.x ?? 0;
   const toY = toTableShape.y ?? 0;
   const toW = toTableShape.props.w;
   const toH = toTableShape.props.h;
+  const toColumns = toTableShape.props.columns ?? [];
 
   if (
     typeof fromW !== "number" ||
     typeof fromH !== "number" ||
     typeof toW !== "number" ||
-    typeof toH !== "number"
+    typeof toH !== "number" ||
+    !Array.isArray(fromColumns) ||
+    !Array.isArray(toColumns)
   ) {
     return null;
   }
 
   return getSqlErdRelationShapeLayout(
     {
+      columns: fromColumns.map((column) => ({ id: column.id })),
       x: fromX,
       y: fromY,
       w: fromW,
       h: fromH
     },
     {
+      columns: toColumns.map((column) => ({ id: column.id })),
       x: toX,
       y: toY,
       w: toW,
       h: toH
-    }
+    },
+    columnIds
   );
 }
 
@@ -267,7 +282,10 @@ function getSqlErdRelationShapeLayoutFromEditor(
     return null;
   }
 
-  return getSqlErdRelationShapeLayout(fromTable, toTable);
+  return getSqlErdRelationShapeLayout(fromTable, toTable, {
+    fromColumnIds: shape.props.fromColumnIds,
+    toColumnIds: shape.props.toColumnIds
+  });
 }
 
 function getSqlErdRelationShapeUpdates(
