@@ -8,6 +8,8 @@ import type {
   BoardPayload,
   BoardRelatedPullRequestPayload,
   CreateBoardInput,
+  CreateBoardIssueInput,
+  CreateBoardIssuePayload,
   ListBoardIssuesQuery,
   ListBoardsQuery,
   UpdateBoardIssueInput,
@@ -308,6 +310,18 @@ export function createBoardApiClient({
       return requestBoardData<BoardPaginatedPayload<BoardIssueCardPayload>>(
         withQueryParams(`${boardPath(workspaceId, boardId)}/issues`, query),
         undefined,
+        requestOptions
+      );
+    },
+
+    async createBoardIssue(
+      workspaceId: string,
+      boardId: string,
+      body: CreateBoardIssueInput
+    ) {
+      return requestBoardData<CreateBoardIssuePayload>(
+        `${boardPath(workspaceId, boardId)}/issues`,
+        withJsonBody(body, { method: "POST" }),
         requestOptions
       );
     },

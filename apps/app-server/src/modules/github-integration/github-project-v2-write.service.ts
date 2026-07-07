@@ -24,6 +24,16 @@ export interface UpdateGithubProjectV2ItemStatusInput {
   singleSelectOptionId: string | null;
 }
 
+export interface AddGithubProjectV2ItemInput {
+  currentUserId: string;
+  projectNodeId: string;
+  contentNodeId: string;
+}
+
+export interface AddGithubProjectV2ItemResult {
+  itemNodeId: string;
+}
+
 @Injectable()
 export class GithubProjectV2WriteService {
   constructor(
@@ -46,6 +56,20 @@ export class GithubProjectV2WriteService {
       itemNodeId: input.itemNodeId,
       fieldNodeId: input.fieldNodeId,
       singleSelectOptionId: input.singleSelectOptionId
+    });
+  }
+
+  async addProjectV2ItemByContentId(
+    input: AddGithubProjectV2ItemInput
+  ): Promise<AddGithubProjectV2ItemResult> {
+    const oauthConfig = this.configService.getGithubOAuthConfig();
+    const connection = await this.getGithubOAuthConnectionRow(input.currentUserId);
+    const accessToken = this.getConnectedGithubOAuthAccess(connection, oauthConfig);
+
+    return this.githubAppClient.addProjectV2ItemByContentId({
+      contentNodeId: input.contentNodeId,
+      projectNodeId: input.projectNodeId,
+      userAccessToken: accessToken
     });
   }
 

@@ -186,6 +186,16 @@ export type CreateBoardInput = {
   projectV2Id: string;
 };
 
+export type CreateBoardIssueInput = {
+  title: string;
+  body?: string;
+  columnId: string;
+};
+
+export type CreateBoardIssuePayload = {
+  issue: BoardIssueCardPayload;
+};
+
 export type UpdateBoardIssueStatusInput = {
   columnId: string;
   previousColumnId?: string;
