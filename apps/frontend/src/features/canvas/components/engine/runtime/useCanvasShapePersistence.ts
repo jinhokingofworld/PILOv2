@@ -55,14 +55,6 @@ export function useCanvasShapePersistence({
   storageMode,
   unloadedShapeIdsRef,
 }: UseCanvasShapePersistenceOptions) {
-  function filterUnloadedShapes(shapes: PiloCanvasFreeformShape[]) {
-    return shapes.filter((shape) => {
-      const shapeId = getFreeformShapeId(shape);
-
-      return !shapeId || !unloadedShapeIdsRef.current.has(shapeId);
-    });
-  }
-
   function buildPersistableLocalShapes(shapes: PiloCanvasFreeformShape[]) {
     const shapeMap = buildFreeformShapeMap(shapes);
 
@@ -81,8 +73,8 @@ export function useCanvasShapePersistence({
     currentShapes: PiloCanvasFreeformShape[],
     nextShapes: PiloCanvasFreeformShape[],
   ) {
-    const currentSyncShapes = filterUnloadedShapes(currentShapes);
-    const nextSyncShapes = filterUnloadedShapes(nextShapes);
+    const currentSyncShapes = buildPersistableLocalShapes(currentShapes);
+    const nextSyncShapes = buildPersistableLocalShapes(nextShapes);
     const changedShapeIds = getChangedFreeformShapeIds(
       currentSyncShapes,
       nextSyncShapes,
@@ -194,8 +186,8 @@ export function useCanvasShapePersistence({
           );
           const shapeSyncQueue = shapeSyncQueueRef.current;
           const syncInput = {
-            nextShapes: filterUnloadedShapes(nextFreeformShapes),
-            previousShapes: filterUnloadedShapes(currentFreeformShapes),
+            nextShapes: buildPersistableLocalShapes(nextFreeformShapes),
+            previousShapes: buildPersistableLocalShapes(currentFreeformShapes),
           };
 
           if (shapeSyncQueue) {

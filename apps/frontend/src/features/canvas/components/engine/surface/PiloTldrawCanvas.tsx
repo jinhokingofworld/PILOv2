@@ -183,6 +183,10 @@ const tldrawComponents = {
 };
 
 const PILO_COLLAPSED_FRAME_SIZE = 144;
+const PILO_FRAME_EXPANDED_FALLBACK_SIZE = {
+  h: 180,
+  w: 320,
+};
 
 function collectSerializedArrowBindings(shapes: PiloCanvasFreeformShape[]) {
   return shapes.flatMap(readSerializedArrowBindings);
@@ -708,7 +712,10 @@ export function PiloTldrawCanvas({
               h: expandedSize.h,
               w: expandedSize.w,
             }
-          : undefined;
+          : {
+              h: Math.max(frameShape.props.h, PILO_FRAME_EXPANDED_FALLBACK_SIZE.h),
+              w: Math.max(frameShape.props.w, PILO_FRAME_EXPANDED_FALLBACK_SIZE.w),
+            };
 
       if (nextCollapsed && descendantSnapshots.length) {
         onFrameChildShapesUnload(descendantSnapshots);
@@ -745,11 +752,12 @@ export function PiloTldrawCanvas({
         { history: "ignore" },
       );
 
-      onFreeformShapesDraftChange(
-        editor
-          .getCurrentPageShapes()
-          .map((shape) => withSerializedArrowBindings(editor, shape)),
-      );
+      const nextFreeformShapes = editor
+        .getCurrentPageShapes()
+        .map((shape) => withSerializedArrowBindings(editor, shape));
+
+      onFreeformShapesDraftChange(nextFreeformShapes);
+      onFreeformShapesChange(nextFreeformShapes);
 
       if (!nextCollapsed) {
         if (frameChildrenRequestTimerRef.current) {
@@ -765,6 +773,7 @@ export function PiloTldrawCanvas({
     [
       onFrameChildShapesUnload,
       onFrameChildrenRequest,
+      onFreeformShapesChange,
       onFreeformShapesDraftChange,
     ],
   );
