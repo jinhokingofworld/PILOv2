@@ -7,7 +7,6 @@ import {
   useState,
   type MutableRefObject,
   type PointerEvent,
-  type WheelEvent,
 } from "react";
 import {
   DefaultColorStyle,
@@ -402,6 +401,7 @@ export function PiloTldrawCanvas({
   const piloDefaultArrowKindHydrationGuardRef = useRef(false);
   const createdLocalCardsRef = useRef(0);
   const freeformShapesRef = useRef(freeformShapes);
+  const canvasWheelCleanupRef = useRef<(() => void) | null>(null);
   const frameChildrenRequestTimerRef =
     useRef<ReturnType<typeof setTimeout> | null>(null);
   const initialViewSettingRef = useRef(initialViewSetting);
@@ -448,6 +448,19 @@ export function PiloTldrawCanvas({
 
   function mountEditor(editor: Editor) {
     editorRef.current = editor;
+    canvasWheelCleanupRef.current?.();
+
+    const canvasContainer = editor.getContainer();
+    canvasContainer.addEventListener("wheel", handleCanvasWheel, {
+      capture: true,
+      passive: false,
+    });
+    canvasWheelCleanupRef.current = () => {
+      canvasContainer.removeEventListener("wheel", handleCanvasWheel, {
+        capture: true,
+      });
+    };
+
     registerCanvasEditorSideEffects(
       editor,
       piloDefaultArrowKindHydrationGuardRef,
@@ -583,10 +596,14 @@ export function PiloTldrawCanvas({
   }
 
   useEffect(() => {
-    return () => onReady(null);
+    return () => {
+      canvasWheelCleanupRef.current?.();
+      canvasWheelCleanupRef.current = null;
+      onReady(null);
+    };
   }, [onReady]);
 
-  function handleCanvasWheel(event: WheelEvent<HTMLDivElement>) {
+  function handleCanvasWheel(event: globalThis.WheelEvent) {
     const editor = editorRef.current;
 
     if (!editor) return;
@@ -830,7 +847,6 @@ export function PiloTldrawCanvas({
       components={tldrawComponents}
       onMount={mountEditor}
       onPointerDownCapture={handleCanvasPointerDownCapture}
-      onWheelCapture={handleCanvasWheel}
     >
       <CanvasStateReporter
         onFreeformShapesDraftChange={onFreeformShapesDraftChange}
