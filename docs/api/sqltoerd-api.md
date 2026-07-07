@@ -95,6 +95,121 @@ mysql
 서버는 dialect 자동 감지를 수행하지 않는다. client가 감지한 값 또는 사용자가 선택한
 값을 저장한다.
 
+## Model JSON / Layout JSON Contract
+
+`modelJson`과 `layoutJson`은 sqltoerd session API의 request/response payload이자
+DB 저장 검증 기준이다. app-server는 SQL을 parsing하지 않고, client가 생성한
+`modelJson`과 `layoutJson`의 schema와 제한값만 검증한다.
+
+### modelJson v1
+
+```ts
+type SqltoerdModelJsonV1 = {
+  version: 1;
+  schema: {
+    tables: ErdTable[];
+    relations: ErdRelation[];
+  };
+};
+
+type ErdTable = {
+  id: string;
+  name: string;
+  schemaName: string | null;
+  columns: ErdColumn[];
+  constraints: ErdConstraint[];
+  comment: string | null;
+};
+
+type ErdColumn = {
+  id: string;
+  name: string;
+  dataType: string;
+  nullable: boolean;
+  primaryKey: boolean;
+  foreignKey: boolean;
+  unique: boolean;
+  defaultValue: string | null;
+  comment: string | null;
+};
+
+type ErdRelation = {
+  id: string;
+  kind: "foreign_key";
+  fromTableId: string;
+  fromColumnIds: string[];
+  toTableId: string;
+  toColumnIds: string[];
+  constraintName: string | null;
+};
+
+type ErdConstraint = {
+  id: string;
+  kind: "primary_key" | "unique";
+  columnIds: string[];
+  name: string | null;
+};
+```
+
+### layoutJson v1
+
+```ts
+type SqltoerdLayoutJsonV1 = {
+  version: 1;
+  tableLayouts: {
+    tableId: string;
+    x: number;
+    y: number;
+    width?: number;
+  }[];
+  viewport?: {
+    x: number;
+    y: number;
+    zoom: number;
+  };
+};
+```
+
+### Canonical Rules
+
+- FK의 canonical source는 `modelJson.schema.relations`다.
+- PK와 unique의 canonical source는 각 table의 `constraints`다.
+- `ErdColumn.primaryKey`, `ErdColumn.foreignKey`, `ErdColumn.unique`는 UI 표시와
+  빠른 조회를 위한 column-level summary 값이다.
+- column-level summary 값은 parser/model 생성 시 canonical data에서 파생한다.
+- summary 값과 canonical data가 충돌하면 canonical data를 우선한다.
+- `nullable`은 column 속성으로 표현하며, `not_null`은 `constraints`에 별도로
+  저장하지 않는다.
+
+### Validation Rules
+
+- `modelJson.version`과 `layoutJson.version`은 `1`만 허용한다.
+- `schema.tables`와 `schema.relations`는 배열이어야 한다.
+- table `id`는 `modelJson.schema.tables` 안에서 중복될 수 없다.
+- 같은 table 안에서 column `id`는 중복될 수 없다.
+- relation `id`는 `modelJson.schema.relations` 안에서 중복될 수 없다.
+- relation의 `fromTableId`와 `toTableId`는 존재하는 table `id`를 참조해야 한다.
+- relation의 `fromColumnIds`는 `fromTableId` table에 존재하는 column `id`만 참조해야 한다.
+- relation의 `toColumnIds`는 `toTableId` table에 존재하는 column `id`만 참조해야 한다.
+- `fromColumnIds`와 `toColumnIds`의 길이는 같아야 한다.
+- composite FK는 `fromColumnIds[index] -> toColumnIds[index]` 순서로 매핑한다.
+- constraint의 `columnIds`는 같은 table에 존재하는 column `id`만 참조해야 한다.
+- `layoutJson.tableLayouts[].tableId`는 존재하는 table `id`를 참조해야 한다.
+- `layoutJson.tableLayouts[].x`, `y`, `width`, `viewport.x`, `viewport.y`,
+  `viewport.zoom`은 finite number여야 한다.
+- `viewport.zoom`은 0보다 커야 한다.
+- `id`, `name`, `schemaName`, `dataType`, `constraintName`, `comment`는 HTML로
+  주입하지 않고 text로 렌더링해야 한다.
+- table, column, relation id는 parser가 안정적으로 생성해야 한다. 같은 SQL source에서
+  같은 entity는 가능한 한 같은 id를 가져야 한다.
+
+### Count Rules
+
+- `tableCount`는 `modelJson.schema.tables.length`에서 계산한다.
+- `relationCount`는 `modelJson.schema.relations.length`에서 계산한다.
+- client가 보낸 `tableCount`, `relationCount`는 사용하지 않는다.
+- `layoutJson.tableLayouts.length`는 table 개수를 초과할 수 없다.
+
 ## Session Payload
 
 ```json
