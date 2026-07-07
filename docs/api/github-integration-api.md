@@ -102,6 +102,12 @@ token으로 GitHub의 user installations 목록을 조회해 callback의
   실패한다. 현재 GitHub OAuth 사용자가 personal Project owner와 다르면
   `GitHub user OAuth token cannot access this personal ProjectV2 owner`로 실패한다.
   GraphQL 권한 오류는 provider raw error 대신 safe message로 sync run에 기록한다.
+  classic OAuth scope 오류는
+  `GitHub OAuth connection must be reconnected with read:project scope`,
+  personal ProjectV2에 installation token만 사용된 경우는
+  `GitHub App installation token cannot access personal ProjectV2`,
+  organization ProjectV2에 installation token 권한이 부족한 경우는
+  `GitHub App installation token cannot access organization ProjectV2`로 구분한다.
 - GitHub webhook receiver는 delivery 수신과 검증 결과를 `github_webhook_deliveries`에 기록한다. 실제 GitHub source table 동기화는 sync run 또는 별도 background worker가 담당한다.
 - GitHub App installation 삭제는 GitHub 원격 `DELETE /app/installations/{installation_id}`를
   App JWT로 호출한 뒤 local `github_installations` row를 삭제한다. GitHub가 `404`를

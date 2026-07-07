@@ -223,7 +223,7 @@ function projectNode(overrides = {}) {
         }),
       (error) =>
         error?.response?.error?.message ===
-        "GitHub ProjectV2 access requires GitHub App Projects permission and user access to the ProjectV2 owner"
+        "GitHub App installation token cannot access organization ProjectV2"
     );
     assert.equal(graphqlRequestCount, 1);
   } finally {
@@ -336,6 +336,37 @@ function projectNode(overrides = {}) {
         error?.response?.error?.message ===
         "GitHub App installation uninstall failed"
     );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
+{
+  const originalFetch = globalThis.fetch;
+  const privateKeyPem = createPrivateKeyPem();
+  let fetchCalled = false;
+
+  globalThis.fetch = async () => {
+    fetchCalled = true;
+    throw new Error("installation token fallback should not be attempted");
+  };
+
+  try {
+    await assert.rejects(
+      () =>
+        new GithubAppClient().listProjectV2s({
+          installationId: 12345678,
+          appId: "12345",
+          privateKey: privateKeyPem,
+          accountLogin: "Developer-EJ",
+          accountType: "User",
+          now: () => fixedNow
+        }),
+      (error) =>
+        error?.response?.error?.message ===
+        "GitHub App installation token cannot access personal ProjectV2"
+    );
+    assert.equal(fetchCalled, false);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -497,6 +528,99 @@ function projectNode(overrides = {}) {
       requests.every(
         (request) => request.headers.Authorization === "Bearer user-oauth-token"
       )
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
+{
+  const originalFetch = globalThis.fetch;
+  const privateKeyPem = createPrivateKeyPem();
+  let graphqlRequestCount = 0;
+
+  globalThis.fetch = async (url, options = {}) => {
+    const requestUrl = url.toString();
+    assert.doesNotMatch(requestUrl, /access_tokens/);
+    assert.equal(requestUrl, "https://api.github.com/graphql");
+    assert.equal(options.headers?.Authorization, "Bearer user-oauth-token");
+    graphqlRequestCount += 1;
+
+    return {
+      ok: true,
+      async json() {
+        return {
+          errors: [
+            {
+              message: "Resource not accessible by integration"
+            }
+          ]
+        };
+      }
+    };
+  };
+
+  try {
+    await assert.rejects(
+      () =>
+        new GithubAppClient().listProjectV2s({
+          installationId: 12345678,
+          appId: "12345",
+          privateKey: privateKeyPem,
+          accountLogin: "Developer-EJ",
+          accountType: "User",
+          userAccessToken: "user-oauth-token",
+          now: () => fixedNow
+        }),
+      (error) =>
+        error?.response?.error?.message ===
+        "GitHub user OAuth token cannot access this personal ProjectV2 owner"
+    );
+    assert.equal(graphqlRequestCount, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
+{
+  const originalFetch = globalThis.fetch;
+  const privateKeyPem = createPrivateKeyPem();
+
+  globalThis.fetch = async (url, options = {}) => {
+    const requestUrl = url.toString();
+    assert.equal(requestUrl, "https://api.github.com/graphql");
+    assert.equal(options.headers?.Authorization, "Bearer user-oauth-token");
+
+    return {
+      ok: true,
+      async json() {
+        return {
+          errors: [
+            {
+              message:
+                "Your token has not been granted the required scopes: ['read:project']"
+            }
+          ]
+        };
+      }
+    };
+  };
+
+  try {
+    await assert.rejects(
+      () =>
+        new GithubAppClient().listProjectV2s({
+          installationId: 12345678,
+          appId: "12345",
+          privateKey: privateKeyPem,
+          accountLogin: "Developer-EJ",
+          accountType: "User",
+          userAccessToken: "user-oauth-token",
+          now: () => fixedNow
+        }),
+      (error) =>
+        error?.response?.error?.message ===
+        "GitHub OAuth connection must be reconnected with read:project scope"
     );
   } finally {
     globalThis.fetch = originalFetch;

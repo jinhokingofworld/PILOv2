@@ -61,6 +61,7 @@ export interface GithubRepositoryPullRequestsRequest
 
 export interface GithubProjectV2UserAccessTokenRequest {
   userAccessToken?: string | null;
+  accountType?: "User" | "Organization";
 }
 
 export interface GithubProjectV2LookupRequest
@@ -274,10 +275,31 @@ interface GithubInstallationRepositoriesApiPayload {
   repositories?: unknown;
 }
 
+type GithubProjectV2GraphqlTokenSource = "user" | "installation";
+
+interface GithubProjectV2GraphqlAuth {
+  token: string;
+  source: GithubProjectV2GraphqlTokenSource;
+  accountType?: "User" | "Organization";
+}
+
+interface GithubProjectV2GraphqlErrorContext {
+  tokenSource: GithubProjectV2GraphqlTokenSource;
+  accountType?: "User" | "Organization";
+}
+
 const GITHUB_SYNC_PER_PAGE = 100;
 const GITHUB_SYNC_MAX_PAGES = 100;
-const GITHUB_PROJECT_V2_ACCESS_ERROR_MESSAGE =
-  "GitHub ProjectV2 access requires GitHub App Projects permission and user access to the ProjectV2 owner";
+const GITHUB_PROJECT_V2_OAUTH_SCOPE_ERROR_MESSAGE =
+  "GitHub OAuth connection must be reconnected with read:project scope";
+const GITHUB_PROJECT_V2_PERSONAL_USER_ACCESS_ERROR_MESSAGE =
+  "GitHub user OAuth token cannot access this personal ProjectV2 owner";
+const GITHUB_PROJECT_V2_PERSONAL_INSTALLATION_ACCESS_ERROR_MESSAGE =
+  "GitHub App installation token cannot access personal ProjectV2";
+const GITHUB_PROJECT_V2_ORGANIZATION_INSTALLATION_ACCESS_ERROR_MESSAGE =
+  "GitHub App installation token cannot access organization ProjectV2";
+const GITHUB_PROJECT_V2_USER_ACCESS_ERROR_MESSAGE =
+  "GitHub user OAuth token cannot access this ProjectV2";
 const GITHUB_PROJECT_V2_DISCOVERY_FRAGMENT = `
   fragment PiloProjectV2DiscoveryFields on ProjectV2 {
     id
@@ -868,7 +890,7 @@ export class GithubAppClient {
   async listProjectV2s(
     input: GithubProjectV2DiscoveryRequest
   ): Promise<GithubProjectV2DiscoveryApiItem[]> {
-    const graphqlToken = await this.getProjectV2GraphqlToken(input);
+    const graphqlAuth = await this.getProjectV2GraphqlAuth(input);
     const projects: GithubProjectV2DiscoveryApiItem[] = [];
     let cursor: string | null = null;
     const query =
@@ -878,13 +900,17 @@ export class GithubAppClient {
 
     do {
       const data = await this.fetchGraphqlWithToken(
-        graphqlToken,
+        graphqlAuth.token,
         query,
         {
           login: input.accountLogin,
           cursor
         },
-        "GitHub ProjectV2 discovery failed"
+        "GitHub ProjectV2 discovery failed",
+        {
+          tokenSource: graphqlAuth.source,
+          accountType: graphqlAuth.accountType
+        }
       );
       const connection = this.readProjectV2OwnerConnection(
         data,
@@ -900,7 +926,7 @@ export class GithubAppClient {
         const repositoryNodeIds = [
           ...firstRepositoryPage.nodeIds,
           ...(await this.listRemainingProjectV2RepositoryNodeIds(
-            graphqlToken,
+            graphqlAuth,
             this.readString(projectNode.id, "GitHub ProjectV2 discovery failed"),
             firstRepositoryPage.endCursor,
             firstRepositoryPage.hasNextPage
@@ -922,14 +948,18 @@ export class GithubAppClient {
   async getProjectV2(
     input: GithubProjectV2LookupRequest
   ): Promise<GithubProjectV2ApiItem> {
-    const graphqlToken = await this.getProjectV2GraphqlToken(input);
+    const graphqlAuth = await this.getProjectV2GraphqlAuth(input);
     const data = await this.fetchGraphqlWithToken(
-      graphqlToken,
+      graphqlAuth.token,
       GITHUB_PROJECT_V2_QUERY,
       {
         projectId: input.projectNodeId
       },
-      "GitHub ProjectV2 sync failed"
+      "GitHub ProjectV2 sync failed",
+      {
+        tokenSource: graphqlAuth.source,
+        accountType: graphqlAuth.accountType
+      }
     );
     const project = this.readProjectV2Node(data, "GitHub ProjectV2 sync failed");
 
@@ -939,19 +969,23 @@ export class GithubAppClient {
   async listProjectV2Fields(
     input: GithubProjectV2LookupRequest
   ): Promise<GithubProjectV2FieldApiItem[]> {
-    const graphqlToken = await this.getProjectV2GraphqlToken(input);
+    const graphqlAuth = await this.getProjectV2GraphqlAuth(input);
     const fields: GithubProjectV2FieldApiItem[] = [];
     let cursor: string | null = null;
 
     do {
       const data = await this.fetchGraphqlWithToken(
-        graphqlToken,
+        graphqlAuth.token,
         GITHUB_PROJECT_V2_FIELDS_QUERY,
         {
           projectId: input.projectNodeId,
           cursor
         },
-        "GitHub ProjectV2 fields sync failed"
+        "GitHub ProjectV2 fields sync failed",
+        {
+          tokenSource: graphqlAuth.source,
+          accountType: graphqlAuth.accountType
+        }
       );
       const connection = this.readProjectV2Connection(
         data,
@@ -968,19 +1002,23 @@ export class GithubAppClient {
   async listProjectV2Items(
     input: GithubProjectV2LookupRequest
   ): Promise<GithubProjectV2ItemApiItem[]> {
-    const graphqlToken = await this.getProjectV2GraphqlToken(input);
+    const graphqlAuth = await this.getProjectV2GraphqlAuth(input);
     const items: GithubProjectV2ItemApiItem[] = [];
     let cursor: string | null = null;
 
     do {
       const data = await this.fetchGraphqlWithToken(
-        graphqlToken,
+        graphqlAuth.token,
         GITHUB_PROJECT_V2_ITEMS_QUERY,
         {
           projectId: input.projectNodeId,
           cursor
         },
-        "GitHub ProjectV2 items sync failed"
+        "GitHub ProjectV2 items sync failed",
+        {
+          tokenSource: graphqlAuth.source,
+          accountType: graphqlAuth.accountType
+        }
       );
       const connection = this.readProjectV2Connection(
         data,
@@ -1022,7 +1060,10 @@ export class GithubAppClient {
       input.userAccessToken,
       mutation,
       variables,
-      errorMessage
+      errorMessage,
+      {
+        tokenSource: "user"
+      }
     );
 
     this.readProjectV2ItemMutation(data, mutationName, errorMessage);
@@ -1119,22 +1160,35 @@ export class GithubAppClient {
     };
   }
 
-  private async getProjectV2GraphqlToken(
+  private async getProjectV2GraphqlAuth(
     input: GithubProjectV2LookupRequest | GithubProjectV2DiscoveryRequest
-  ): Promise<string> {
+  ): Promise<GithubProjectV2GraphqlAuth> {
     if (input.userAccessToken) {
-      return input.userAccessToken;
+      return {
+        token: input.userAccessToken,
+        source: "user",
+        accountType: input.accountType
+      };
+    }
+
+    if (input.accountType === "User") {
+      throw badRequest(GITHUB_PROJECT_V2_PERSONAL_INSTALLATION_ACCESS_ERROR_MESSAGE);
     }
 
     const installationToken = await this.createInstallationAccessToken(input);
-    return installationToken.token;
+    return {
+      token: installationToken.token,
+      source: "installation",
+      accountType: input.accountType
+    };
   }
 
   private async fetchGraphqlWithToken(
     token: string,
     query: string,
     variables: Record<string, unknown>,
-    errorMessage: string
+    errorMessage: string,
+    context?: GithubProjectV2GraphqlErrorContext
   ): Promise<unknown> {
     let response: Response;
     try {
@@ -1156,13 +1210,17 @@ export class GithubAppClient {
     }
 
     if (!response.ok) {
-      throw badRequest(errorMessage);
+      throw badRequest(
+        this.mapGraphqlHttpErrorMessage(response.status, errorMessage, context)
+      );
     }
 
     const payload = await this.readJson(response, errorMessage);
     const record = this.toObject(payload);
     if (Array.isArray(record.errors) && record.errors.length > 0) {
-      throw badRequest(this.mapGraphqlErrorMessage(record.errors, errorMessage));
+      throw badRequest(
+        this.mapGraphqlErrorMessage(record.errors, errorMessage, context)
+      );
     }
 
     const data = record.data;
@@ -1174,7 +1232,7 @@ export class GithubAppClient {
   }
 
   private async listRemainingProjectV2RepositoryNodeIds(
-    token: string,
+    graphqlAuth: GithubProjectV2GraphqlAuth,
     projectNodeId: string,
     cursor: string | null,
     hasNextPage: boolean
@@ -1184,13 +1242,17 @@ export class GithubAppClient {
 
     while (nextCursor) {
       const data = await this.fetchGraphqlWithToken(
-        token,
+        graphqlAuth.token,
         GITHUB_PROJECT_V2_REPOSITORIES_QUERY,
         {
           projectId: projectNodeId,
           cursor: nextCursor
         },
-        "GitHub ProjectV2 discovery failed"
+        "GitHub ProjectV2 discovery failed",
+        {
+          tokenSource: graphqlAuth.source,
+          accountType: graphqlAuth.accountType
+        }
       );
       const page = this.readProjectV2RepositoryConnection(
         data,
@@ -1218,16 +1280,58 @@ export class GithubAppClient {
 
   private mapGraphqlErrorMessage(
     errors: unknown[],
-    fallbackMessage: string
+    fallbackMessage: string,
+    context?: GithubProjectV2GraphqlErrorContext
   ): string {
     if (
       fallbackMessage.includes("ProjectV2") &&
       errors.some((error) => this.isProjectV2AccessError(error))
     ) {
-      return GITHUB_PROJECT_V2_ACCESS_ERROR_MESSAGE;
+      return this.getProjectV2AccessErrorMessage(errors, context);
     }
 
     return fallbackMessage;
+  }
+
+  private mapGraphqlHttpErrorMessage(
+    status: number,
+    fallbackMessage: string,
+    context?: GithubProjectV2GraphqlErrorContext
+  ): string {
+    if (
+      fallbackMessage.includes("ProjectV2") &&
+      (status === 401 || status === 403 || status === 404)
+    ) {
+      return this.getProjectV2AccessErrorMessage([], context);
+    }
+
+    return fallbackMessage;
+  }
+
+  private getProjectV2AccessErrorMessage(
+    errors: unknown[],
+    context?: GithubProjectV2GraphqlErrorContext
+  ): string {
+    if (
+      context?.tokenSource === "user" &&
+      errors.some((error) => this.isProjectV2ScopeError(error))
+    ) {
+      return GITHUB_PROJECT_V2_OAUTH_SCOPE_ERROR_MESSAGE;
+    }
+
+    if (context?.tokenSource === "user" && context.accountType === "User") {
+      return GITHUB_PROJECT_V2_PERSONAL_USER_ACCESS_ERROR_MESSAGE;
+    }
+
+    if (context?.tokenSource === "user") {
+      return GITHUB_PROJECT_V2_USER_ACCESS_ERROR_MESSAGE;
+    }
+
+    if (context?.accountType === "User") {
+      return GITHUB_PROJECT_V2_PERSONAL_INSTALLATION_ACCESS_ERROR_MESSAGE;
+    }
+
+    return GITHUB_PROJECT_V2_ORGANIZATION_INSTALLATION_ACCESS_ERROR_MESSAGE;
   }
 
   private isProjectV2AccessError(error: unknown): boolean {
@@ -1241,11 +1345,25 @@ export class GithubAppClient {
     }
 
     return (
-      message.includes("read:project") ||
+      this.isProjectV2ScopeError(error) ||
       message.includes("resource not accessible") ||
       message.includes("permission") ||
-      message.includes("scope")
+      message.includes("could not resolve to a user") ||
+      message.includes("could not resolve to an organization")
     );
+  }
+
+  private isProjectV2ScopeError(error: unknown): boolean {
+    if (!this.isRecord(error)) {
+      return false;
+    }
+
+    const message = this.toNullableString(error.message)?.toLowerCase();
+    if (!message) {
+      return false;
+    }
+
+    return message.includes("read:project") || message.includes("scope");
   }
 
   private readProjectV2OwnerConnection(
