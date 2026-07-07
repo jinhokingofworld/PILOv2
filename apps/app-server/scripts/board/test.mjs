@@ -67,6 +67,9 @@ const hydrationServiceFile = await readSource(
 const dtoIndexFile = await readSource("../../src/modules/board/dto/index.ts");
 const typesIndexFile = await readSource("../../src/modules/board/types/index.ts");
 const readmeFile = await readSource("../../src/modules/board/README.md");
+const projectItemFieldValueUniquenessMigration = await readSource(
+  "../../../../db/migrations/020_backfill_project_item_field_value_uniqueness.sql"
+);
 
 assert.match(appModule, /import \{ BoardModule \}/);
 assert.match(appModule, /imports: \[[\s\S]*BoardModule[\s\S]*\]/);
@@ -187,6 +190,17 @@ assert.match(createQueriesFile, /INSERT INTO github_issues/);
 assert.match(createQueriesFile, /INSERT INTO github_project_v2_items/);
 assert.match(createQueriesFile, /INSERT INTO github_project_v2_item_field_values/);
 assert.match(createQueriesFile, /INSERT INTO pilo_issues/);
+assert.match(
+  projectItemFieldValueUniquenessMigration,
+  /github_project_v2_item_field_values/
+);
+assert.match(projectItemFieldValueUniquenessMigration, /project_item_id/);
+assert.match(projectItemFieldValueUniquenessMigration, /field_name/);
+assert.match(projectItemFieldValueUniquenessMigration, /CREATE UNIQUE INDEX/);
+assert.match(
+  projectItemFieldValueUniquenessMigration,
+  /uq_github_project_v2_item_field_values_item_field_name/
+);
 
 assert.match(githubIssueWriteServiceFile, /class GithubIssueWriteService/);
 assert.match(githubIssueWriteServiceFile, /github_access_token_encrypted/);

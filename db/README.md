@@ -36,3 +36,4 @@ The database schema source of truth is the migration history in `db/migrations/`
 - `migrations/017_create_agent_runs.sql` adds Workspace Agent run, step, confirmation, and diagnostic log storage.
 - `migrations/018_fix_project_item_sync_positions.sql` backfills duplicate GitHub Project item positions and enforces per-field uniqueness.
 - `migrations/019_normalize_canvas_page_parent_shapes.sql` restores accidentally persisted tldraw page parents to top-level Canvas shapes.
+- `migrations/020_backfill_project_item_field_value_uniqueness.sql` removes duplicate ProjectV2 item field-value cache rows and ensures `(project_item_id, field_name)` uniqueness for Board write upserts.
