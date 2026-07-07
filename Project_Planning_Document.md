@@ -14,6 +14,7 @@
 - 회의/녹음/회의록 기능 명세서
 - PILO 캔버스 기능 명세서
 - 캘린더 일정 기능 명세
+- sqltoerd MVP Session 기능 명세서
 
 통합 원칙은 다음과 같다.
 
@@ -24,10 +25,11 @@
 5. 캘린더는 MVP에서 `일정`만 다룬다. 이슈, PR, 회의록을 자동으로 일정에 섞지 않는다.
 6. 회의 기능은 MVP에서 고정 회의 페이지 1개를 기준으로 한다. 별도의 MeetingRoom 관리 기능은 제외한다.
 7. 사용자가 GitHub에 실제로 쓰기 동작을 수행하는 기능은 명확히 제한한다.
+8. sqltoerd는 자유형 캔버스의 하위 도구가 아니라 Workspace 안의 독립 기능이다.
 
 ## 1. 제품 개요
 
-PILO MVP는 개발팀이 한 Workspace 안에서 GitHub 프로젝트 운영, PR 리뷰, 회의, 캔버스 기록, 일정 관리를 수행하는 협업 서비스다.
+PILO MVP는 개발팀이 한 Workspace 안에서 GitHub 프로젝트 운영, PR 리뷰, 회의, 캔버스 기록, 일정 관리, SQL DDL 기반 ERD 확인을 수행하는 협업 서비스다.
 
 MVP의 핵심 사용자 흐름은 다음과 같다.
 
@@ -41,6 +43,7 @@ MVP의 핵심 사용자 흐름은 다음과 같다.
 8. 사용자는 음성 회의를 진행하고, 녹음 종료 후 STT/LLM 기반 회의록을 생성한다.
 9. 사용자는 자유형 캔버스에서 메모, 도형, 코드블럭 등을 저장한다.
 10. 사용자는 월간 캘린더에서 일정만 생성, 조회, 수정, 삭제한다.
+11. 사용자는 sqltoerd에서 PostgreSQL/MySQL DDL을 입력하고 ERD table card와 FK relation line을 확인한다.
 
 ## 2. 사용자와 권한
 
@@ -49,7 +52,7 @@ MVP의 핵심 사용자 흐름은 다음과 같다.
 | 사용자 | 설명 | 주요 권한 |
 | --- | --- | --- |
 | Workspace Owner/Admin | Workspace 설정과 GitHub 연결을 관리하는 사용자 | GitHub App 설치, installation 해제, full sync 실행, 보드 hydrate |
-| Workspace Member | Workspace에 참여한 일반 사용자 | 보드 조회, 이슈 상세 조회, PR 조회, 회의 참여, 캔버스 사용, 일정 관리 |
+| Workspace Member | Workspace에 참여한 일반 사용자 | 보드 조회, 이슈 상세 조회, PR 조회, 회의 참여, 캔버스 사용, 일정 관리, sqltoerd session 사용 |
 | PR Reviewer | PR 리뷰를 수행하는 사용자 | PR 리뷰 세션 생성, 파일별 리뷰 결정, GitHub Review 제출 |
 | Read-only 사용자 | GitHub 또는 Workspace 권한이 읽기 전용인 사용자 | 조회 가능, 쓰기 기능 비활성화 |
 | GitHub App | GitHub installation 권한으로 데이터를 가져오는 시스템 주체 | Repository, Issue, PR, ProjectV2 동기화 |
@@ -82,6 +85,7 @@ Workspace 역할/멤버십 모델은 다음 스프린트에서 확정한다. 이
 | 회의 | 고정 회의 페이지, LiveKit 음성 회의, 녹음, STT, LLM 회의록, 실패 재시도 |
 | 자유형 캔버스 | Workspace 캔버스, 자유 도형 CRUD, 화면 위치 저장, 입장/퇴장 기록 |
 | 캘린더 | 월간 일정 조회, 일정 생성/수정/삭제, 상세 모달, 우측 일자 패널 |
+| sqltoerd | PostgreSQL/MySQL DDL 입력, ERD model 생성, tldraw table card 렌더링, FK relation line 표시, Inspector 조회, Workspace session 저장/복원 |
 | 운영 상태 | sync run 상태, 저장 실패, 제출 실패, 권한 부족, rate limit, webhook 실패 표시 |
 
 ### 3.2 제외 범위
@@ -100,6 +104,7 @@ Workspace 역할/멤버십 모델은 다음 스프린트에서 확정한다. 이
 | MeetingRoom 관리 | 방 목록, 방 생성, 여러 회의실 관리는 제외한다. |
 | 비정상 회의 disconnect 보정 | 브라우저 강제 종료, 네트워크 단절 보정은 추후 LiveKit webhook으로 확장한다. |
 | 캘린더 반복 일정/알림/외부 캘린더 연동 | MVP 캘린더는 내부 일정 CRUD만 제공한다. |
+| sqltoerd 고급 편집/공유/내보내기 | Local-only 저장, JSON import/export, PNG/SVG export, theme 전환, inline edit, Add column, model-to-SQL 재생성, BigQuery CTE, Prisma/DBML/Mermaid/PlantUML/SQLAlchemy/Sequelize, Sticky note, Group box, Manual arrow, URL 공유, 실시간 협업은 제외한다. |
 | 대량 편집/멀티레포 보드/고급 리포트 | MVP 이후 확장으로 둔다. |
 
 ## 4. GitHub 연동
@@ -1267,7 +1272,84 @@ MVP에서 캘린더에 표시하는 항목은 `일정`만이다.
 - 사용자가 확인하면 일정을 삭제한다.
 - 사용자가 취소하면 삭제하지 않고 상세 모달로 돌아간다.
 
-## 10. 데이터 소유권과 모듈 경계
+## 10. sqltoerd
+
+### 10.1 목적
+
+sqltoerd는 사용자가 Workspace 안에서 PostgreSQL/MySQL DDL을 입력하면 table card와
+FK relation line으로 구성된 ERD를 확인하고, 마지막 상태를 Workspace session으로
+저장/복원하는 기능이다.
+
+MVP는 읽기 중심 ERD 확인과 Workspace 저장 안정화를 목표로 한다.
+
+### 10.2 기본 화면
+
+sqltoerd 화면은 PILO 기본 app shell 안에서 동작한다.
+
+```text
+PILO Sidebar | Left Source Panel | Center ERD Canvas | Right Inspector Panel
+```
+
+기능:
+
+| 영역 | 상세 |
+| --- | --- |
+| PILO Sidebar | 기존 Workspace navigation을 유지한다. |
+| Left Source Panel | SQL editor, dialect selector, Generate 버튼, parse/save 상태를 표시한다. |
+| Center ERD Canvas | tldraw surface 위에 table card와 FK relation line을 표시한다. |
+| Right Inspector Panel | 선택한 table, column, relation의 상세 정보를 읽기 전용으로 표시한다. |
+
+### 10.3 입력과 파싱
+
+- MVP source format은 `sql`만 지원한다.
+- MVP dialect는 `auto`, `postgresql`, `mysql`을 지원한다.
+- 사용자는 Source Panel에 SQL DDL을 입력한다.
+- Generate 실행 시 client가 SQL DDL을 parsing하고 ERD semantic model을 만든다.
+- app-server는 SQL을 실행하거나 parsing하지 않는다.
+- parsing 실패 시 Source Panel에 error 상태를 표시하고 기존 session을 덮어쓰지 않는다.
+
+### 10.4 ERD 표시
+
+MVP에서 표시하는 ERD object:
+
+- table card
+- column row
+- PK/FK/unique/not-null 표시
+- FK relation line
+
+상호작용:
+
+- 사용자는 table card를 drag할 수 있다.
+- 사용자는 canvas를 zoom/pan할 수 있다.
+- 사용자는 table, column, relation을 선택할 수 있다.
+- 선택한 항목의 상세 정보는 Inspector에 표시한다.
+
+MVP Inspector는 읽기 전용이다. table/column inline edit과 Add column은 제외한다.
+
+### 10.5 Workspace session 저장
+
+MVP에서는 active Workspace당 활성 sqltoerd session 1개만 지원한다.
+
+저장 대상:
+
+- source text
+- source format
+- SQL dialect
+- ERD semantic model
+- table layout
+- table count
+- relation count
+- revision
+
+저장 규칙:
+
+- 첫 Generate 성공 시 Workspace session을 생성한다.
+- Generate 성공, table 위치 변경 등 저장 대상이 바뀌면 자동 저장한다.
+- 자동 저장은 revision 기반 conflict 감지를 사용한다.
+- 새로고침하면 저장된 Workspace session을 복원한다.
+- SQL 원문은 plain text로만 저장하고 실행하지 않는다.
+
+## 11. 데이터 소유권과 모듈 경계
 
 | 모듈 | 소유 데이터 | 다른 모듈과의 관계 |
 | --- | --- | --- |
@@ -1279,16 +1361,17 @@ MVP에서 캘린더에 표시하는 항목은 `일정`만이다.
 | 회의 | meetings, participants, recordings, meeting_reports | 사용자 정보만 참조 |
 | 자유형 캔버스 | canvas, canvas_freeform_shapes, canvas_user_states | 다른 도메인 데이터를 직접 변경하지 않음 |
 | 캘린더 | schedules/events | 등록자 사용자 정보만 참조 |
+| sqltoerd | sql_erd_sessions, source text, ERD model, layout, revision | Workspace 접근 경계를 사용하며 자유형 Canvas shape 저장소를 직접 사용하지 않음 |
 
-## 11. 통합 결정 사항
+## 12. 통합 결정 사항
 
-### 11.1 칸반 AI와 PR 리뷰 AI
+### 12.1 칸반 AI와 PR 리뷰 AI
 
 - 칸반보드의 AI agent 추천, 자동 작업 생성, 자동 리뷰는 MVP에서 제외한다.
 - PR 리뷰의 AI 분석은 MVP에 포함한다.
 - 따라서 `AI 제외`는 칸반 자동화에만 적용하고, PR 리뷰 분석에는 적용하지 않는다.
 
-### 11.2 파일별 리뷰 상태
+### 12.2 파일별 리뷰 상태
 
 원문에 `change_requested` 상태가 등장하지만, PR 리뷰 화면 명세는 파일별 상태를 3개로 제한한다.
 
@@ -1301,7 +1384,7 @@ MVP에서 캘린더에 표시하는 항목은 `일정`만이다.
 
 `REQUEST_CHANGES`는 파일별 상태가 아니라 GitHub Review 제출 타입으로만 사용한다.
 
-### 11.3 GitHub Issue 수정
+### 12.3 GitHub Issue 수정
 
 Kanban 문서에는 상세 form 수정 흐름이 포함되어 있으나, GitHub 연동 문서는 GitHub issue 생성/수정 API를 MVP 제외로 둔다.
 
@@ -1311,7 +1394,7 @@ Kanban 문서에는 상세 form 수정 흐름이 포함되어 있으나, GitHub 
 - 보드 lane/status 이동은 지원한다.
 - 이슈 제목, 본문, assignee, label, milestone, due date 직접 수정은 MVP 제외다.
 
-### 11.4 PR 리뷰 세션 삭제 정책
+### 12.4 PR 리뷰 세션 삭제 정책
 
 PR 리뷰 기능은 MVP에서 리뷰 화면 단위 임시 세션을 사용한다.
 
@@ -1323,40 +1406,52 @@ PR 리뷰 기능은 MVP에서 리뷰 화면 단위 임시 세션을 사용한다
 - `review_submissions`는 화면 안에서 제출 결과와 실패 원인을 확인하기 위한 세션 내부 이력이다.
 - GitHub에 이미 제출된 Review 자체는 GitHub에 남지만, MVP에서는 해당 제출 이력을 PILO DB에 장기 보존하지 않는다.
 
-### 11.5 자유형 캔버스와 PR 리뷰 캔버스
+### 12.5 자유형 캔버스와 PR 리뷰 캔버스
 
 - 자유형 캔버스는 사용자가 직접 편집하는 도형 보드다.
 - PR 리뷰 캔버스는 AI가 생성한 Flow/Node/Edge를 보여주는 리뷰 화면이다.
 - 자유형 캔버스는 PR 리뷰를 실행하지 않는다.
 - PR 리뷰 캔버스의 파일 Node는 리뷰 도메인 데이터이며, 자유형 캔버스 도형 저장 정책과 분리한다.
 
-### 11.6 캘린더 셀 표시 개수
+### 12.6 캘린더 셀 표시 개수
 
 통합 MVP에서는 날짜 셀당 일정 제목을 최대 3개 표시한다.
 
 초과 일정은 `+N`으로 표시하고, 클릭 시 우측 날짜 패널에서 전체 목록을 보여준다.
 
-### 11.7 PR 필드와 변경 파일 조회
+### 12.7 PR 필드와 변경 파일 조회
 
 통합 MVP에서는 PR 부가 필드를 별도 컬럼으로 추가하지 않고 `github_pull_requests.raw` JSONB에서 파생한다.
 
 PR 변경 파일은 GitHub Integration의 별도 원본 캐시 테이블에 저장하지 않고 매번 GitHub API에서 조회한다. 단, 리뷰 세션 생성 시 변경 파일 metadata는 `review_files`에 저장한다. MVP 사용 중 실제 속도를 측정한 뒤, 필요하면 GitHub 원본 PR file cache 테이블을 별도 개선 항목으로 도입한다.
 
-### 11.8 Webhook Delivery 저장
+### 12.8 Webhook Delivery 저장
 
 Webhook delivery id는 activity log metadata가 아니라 별도 테이블에 저장한다.
 
 이 테이블은 중복 webhook 수신 방지와 재처리 이력 확인에 사용한다.
 
-### 11.9 캘린더 수정 권한
+### 12.9 캘린더 수정 권한
 
 MVP에서는 Workspace 접근 권한이 있는 모든 사용자가 모든 일정을 생성, 수정, 삭제할 수 있다.
 
 작성자 제한, 관리자 승인, 일정별 권한은 MVP 이후 확장으로 둔다.
 
-## 12. MVP 수용 기준
+### 12.10 sqltoerd 저장 경계
 
-### 12.1 GitHub 연결
+sqltoerd는 tldraw surface를 사용하지만 자유형 Canvas의 저장 API나
+`canvas_freeform_shapes`를 재사용하지 않는다.
+
+통합 MVP 결정:
+
+- sqltoerd 저장소는 `sql_erd_sessions`다.
+- MVP에서는 active Workspace당 활성 sqltoerd session 1개만 지원한다.
+- SQL 원문은 plain text로만 저장하고 실행하지 않는다.
+- app-server는 SQL parsing과 auto layout을 수행하지 않는다.
+
+## 13. MVP 수용 기준
+
+### 13.1 GitHub 연결
 
 - 사용자는 Workspace에 GitHub App을 설치할 수 있다.
 - signed state 검증 실패 시 installation이 저장되지 않는다.
@@ -1364,7 +1459,7 @@ MVP에서는 Workspace 접근 권한이 있는 모든 사용자가 모든 일정
 - sync run은 `running`, `success`, `failed` 상태와 count를 기록한다.
 - GitHub OAuth token은 암호화 저장되며 응답과 로그에 노출되지 않는다.
 
-### 12.2 Kanban
+### 13.2 Kanban
 
 - 사용자는 연결된 GitHub Project를 칸반보드로 볼 수 있다.
 - 카드에는 이슈 번호와 제목만 기본 노출된다.
@@ -1377,7 +1472,7 @@ MVP에서는 Workspace 접근 권한이 있는 모든 사용자가 모든 일정
 - read-only 사용자는 수정 기능이 비활성화된다.
 - 모바일에서 보드와 상세 패널을 사용할 수 있다.
 
-### 12.3 PR 리뷰
+### 13.3 PR 리뷰
 
 - GitHub Repository가 연결되어 있으면 open PR 목록만 표시된다.
 - PR 목록은 10개 단위로 페이지 이동할 수 있다.
@@ -1398,7 +1493,7 @@ MVP에서는 Workspace 접근 권한이 있는 모든 사용자가 모든 일정
 - Merge 버튼은 보이지만 실제 merge는 수행하지 않는다.
 - conflict 상태는 `확인 중`, `충돌 없음`, `충돌 있음`, `충돌 확인 실패` 중 하나로 표시된다.
 
-### 12.4 회의와 회의록
+### 13.4 회의와 회의록
 
 - 사용자는 회의 페이지에서 진행 중 회의 여부를 확인할 수 있다.
 - 사용자는 단일 `회의 참여하기` 버튼으로 진행 중 회의에 참여하거나 새 Meeting을 시작할 수 있다.
@@ -1419,7 +1514,7 @@ MVP에서는 Workspace 접근 권한이 있는 모든 사용자가 모든 일정
 - `recording.durationSec`이 60을 초과하면 STT/LLM 처리를 통해 MeetingReport를 생성한다.
 - 실패한 MeetingReport는 실패 사유와 재시도 버튼을 제공한다.
 
-### 12.5 자유형 캔버스
+### 13.5 자유형 캔버스
 
 - 사용자가 Workspace 캔버스를 열 수 있다.
 - 사용자가 자유 도형을 생성할 수 있다.
@@ -1432,7 +1527,7 @@ MVP에서는 Workspace 접근 권한이 있는 모든 사용자가 모든 일정
 - 캔버스를 나갈 때 퇴장 API가 호출된다.
 - MVP에서는 하트비트가 없어도 된다.
 
-### 12.6 캘린더
+### 13.6 캘린더
 
 - 로그인 직후 메인페이지에서 현재 월 달력을 볼 수 있다.
 - 사용자는 이전 달/다음 달로 이동할 수 있다.
@@ -1447,7 +1542,24 @@ MVP에서는 Workspace 접근 권한이 있는 모든 사용자가 모든 일정
 - 종일 일정과 시간 지정 일정 입력 규칙이 올바르게 적용된다.
 - 여러 날 일정은 시작일과 종료일을 포함한 모든 날짜에 표시된다.
 
-## 13. 테스트 계획
+### 13.7 sqltoerd
+
+- 사용자는 PostgreSQL 또는 MySQL DDL을 Source Panel에 입력할 수 있다.
+- Generate 성공 시 table card가 생성된다.
+- PK/FK/unique/not-null 정보가 table card에 표시된다.
+- FK relation line이 표시된다.
+- 사용자는 table card를 drag할 수 있다.
+- 사용자는 canvas를 zoom/pan할 수 있다.
+- 사용자는 table, column, relation을 선택할 수 있다.
+- Inspector는 선택한 항목의 정보를 읽기 전용으로 표시한다.
+- 첫 Generate 성공 후 Workspace session이 생성된다.
+- Generate 성공과 table drag 이후 session이 자동 저장된다.
+- 새로고침하면 저장된 Workspace session이 복원된다.
+- revision conflict가 발생하면 자동 저장을 멈추고 conflict 상태를 표시한다.
+- parsing 실패 시 사용자에게 error 상태를 표시한다.
+- SQL은 실행되지 않는다.
+
+## 14. 테스트 계획
 
 | 레이어 | 테스트 대상 | 주요 검증 |
 | --- | --- | --- |
@@ -1458,6 +1570,8 @@ MVP에서는 Workspace 접근 권한이 있는 모든 사용자가 모든 일정
 | Unit | PR review status | 파일 상태, 진행률, 제출 가능 상태 |
 | Unit | calendar schedule rules | 종일/시간 지정/여러 날 일정 계산 |
 | Unit | meeting duplicate guard | active meeting, active recording, recording/report side effect 중복 방지 |
+| Unit | sqltoerd parser/model | PostgreSQL/MySQL DDL, PK/FK/unique/not-null, ERD model 생성 |
+| Unit | sqltoerd validation | source/model/layout 제한값, revision conflict |
 | Integration | GitHub App callback | installation 저장 및 중복 callback 처리 |
 | Integration | sync run | GitHub API mock 기반 upsert |
 | Integration | board hydrate | ProjectV2 field/option/item에서 board 생성 |
@@ -1466,13 +1580,15 @@ MVP에서는 Workspace 접근 권한이 있는 모든 사용자가 모든 일정
 | Integration | webhook | signature 검증 및 이벤트 반영 |
 | Integration | meeting report | 녹음 시작, 녹음 종료, recording, STT, LLM, retry |
 | Integration | canvas persistence | 도형 CRUD와 viewport 복원 |
+| Integration | sqltoerd session | session 생성, 조회, autosave, soft delete, Workspace 접근 검증 |
 | E2E | 최초 연결 | GitHub App 설치, full sync, 보드 표시 |
 | E2E | 칸반 | 검색, 필터, 상세, lane 이동 |
 | E2E | PR 리뷰 | PR 선택, 리뷰 시작, diff 확인, GitHub 제출 |
 | E2E | 회의 | 회의 시작, 참여, 나가기, 녹음 시작, 녹음 종료, 회의록 생성 |
 | E2E | 캘린더 | 일정 생성, 월간 표시, 상세, 수정, 삭제 |
+| E2E | sqltoerd | SQL 입력, ERD 생성, table 선택, 저장/복원 |
 
-## 14. 구현 전 확정 사항 반영
+## 15. 구현 전 확정 사항 반영
 
 팀 확인 결과, 기존 미정 항목은 다음과 같이 정리한다.
 
@@ -1484,6 +1600,7 @@ MVP에서는 Workspace 접근 권한이 있는 모든 사용자가 모든 일정
 | PR 변경 파일 캐시 | GitHub Integration 원본 캐시는 두지 않고 매번 GitHub API에서 가져온다. 리뷰 세션의 파일 metadata는 `review_files`에 저장한다. 실제 속도를 확인한 뒤 필요 시 원본 캐시 테이블을 재검토한다. |
 | 캘린더 권한 | Workspace 접근 권한이 있는 모든 사용자가 모든 일정을 생성, 수정, 삭제할 수 있다. |
 | 자유형 캔버스 이미지/비디오 저장 | MVP에서는 작은 이미지/비디오 파일만 지원한다. 큰 파일 저장과 별도 파일 저장소 연동은 제외한다. |
+| sqltoerd MVP 범위 | PostgreSQL/MySQL DDL 기반 ERD 생성, table card, FK relation line, Inspector, Workspace session 저장/복원까지만 포함한다. |
 
 남은 이월 항목:
 
