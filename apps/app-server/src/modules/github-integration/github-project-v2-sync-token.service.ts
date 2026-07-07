@@ -13,9 +13,12 @@ interface GithubProjectV2SyncInstallation {
 interface GithubOAuthConnectionRow extends QueryResultRow {
   github_login: string | null;
   github_access_token_encrypted: string | null;
+  github_token_scope: string | null;
   github_connected_at: Date | string | null;
   github_revoked_at: Date | string | null;
 }
+
+const GITHUB_PROJECT_V2_OAUTH_SCOPES = new Set(["read:project", "project"]);
 
 @Injectable()
 export class GithubProjectV2SyncTokenService {
@@ -50,6 +53,12 @@ export class GithubProjectV2SyncTokenService {
       );
     }
 
+    if (!this.hasProjectV2Scope(row.github_token_scope)) {
+      throw badRequest(
+        "GitHub OAuth connection must be reconnected with read:project scope for personal ProjectV2 sync"
+      );
+    }
+
     return this.tokenEncryptionService.decryptToken(
       row.github_access_token_encrypted,
       this.configService.getGithubOAuthConfig()
@@ -64,6 +73,7 @@ export class GithubProjectV2SyncTokenService {
         SELECT
           github_login,
           github_access_token_encrypted,
+          github_token_scope,
           github_connected_at,
           github_revoked_at
         FROM users
@@ -91,5 +101,15 @@ export class GithubProjectV2SyncTokenService {
         row.github_connected_at &&
         !row.github_revoked_at
     );
+  }
+
+  private hasProjectV2Scope(scope: string | null): boolean {
+    if (!scope) {
+      return false;
+    }
+
+    return scope
+      .split(/[,\s]+/)
+      .some((item) => GITHUB_PROJECT_V2_OAUTH_SCOPES.has(item.trim()));
   }
 }

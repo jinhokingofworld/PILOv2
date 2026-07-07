@@ -58,7 +58,7 @@ const configService = {
 const connectedRow = {
   github_user_id: "12345678",
   github_login: "juhyeong",
-  github_token_scope: "repo,read:user",
+  github_token_scope: "repo,read:user,read:project",
   github_connected_at: fixedNow,
   github_revoked_at: null
 };
@@ -97,7 +97,7 @@ const connectedRow = {
     connected: true,
     githubUserId: 12345678,
     githubLogin: "juhyeong",
-    tokenScope: "repo,read:user",
+    tokenScope: "repo,read:user,read:project",
     githubConnectedAt: "2026-07-04T12:00:00.000Z",
     githubRevokedAt: null
   });
@@ -122,7 +122,7 @@ const connectedRow = {
   assert.equal(authorizeUrl.origin + authorizeUrl.pathname, "https://github.com/login/oauth/authorize");
   assert.equal(authorizeUrl.searchParams.get("client_id"), "client-id");
   assert.equal(authorizeUrl.searchParams.get("redirect_uri"), "https://api.pilo.test/api/v1/github/oauth/callback");
-  assert.equal(authorizeUrl.searchParams.get("scope"), null);
+  assert.equal(authorizeUrl.searchParams.get("scope"), "read:user repo read:project");
   assert.equal(authorizeUrl.searchParams.get("state"), start.state);
   assert.match(start.stateCookie, /pilo_github_oauth_state=/);
   assert.match(start.stateCookie, /HttpOnly/);
@@ -185,7 +185,7 @@ const connectedRow = {
       assert.equal(input.redirectUri, "https://api.pilo.test/api/v1/github/oauth/callback");
       return {
         accessToken: "plain-access-token",
-        scope: "repo,read:user"
+        scope: "repo,read:user,read:project"
       };
     },
     async getAuthenticatedUser(accessToken) {
@@ -213,7 +213,7 @@ const connectedRow = {
     connected: true,
     githubUserId: 12345678,
     githubLogin: "juhyeong",
-    tokenScope: "repo,read:user",
+    tokenScope: "repo,read:user,read:project",
     githubConnectedAt: "2026-07-04T12:00:00.000Z",
     returnUrl: "https://pilo.test/settings/integrations/github"
   });
@@ -267,7 +267,7 @@ const connectedRow = {
       assert.match(input.code, /^oauth-code-/);
       return {
         accessToken: "plain-access-token",
-        scope: "repo,read:user"
+        scope: "repo,read:user,read:project"
       };
     },
     async getAuthenticatedUser() {

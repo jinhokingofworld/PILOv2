@@ -174,6 +174,64 @@ function projectNode(overrides = {}) {
 }
 
 {
+  const originalFetch = globalThis.fetch;
+  const privateKeyPem = createPrivateKeyPem();
+  let graphqlRequestCount = 0;
+
+  globalThis.fetch = async (url, options = {}) => {
+    const requestUrl = url.toString();
+
+    if (requestUrl.endsWith("/app/installations/12345678/access_tokens")) {
+      return {
+        ok: true,
+        async json() {
+          return {
+            token: "installation-token",
+            expires_at: "2026-07-04T13:00:00.000Z"
+          };
+        }
+      };
+    }
+
+    assert.equal(requestUrl, "https://api.github.com/graphql");
+    assert.equal(options.headers?.Authorization, "Bearer installation-token");
+    graphqlRequestCount += 1;
+    return {
+      ok: true,
+      async json() {
+        return {
+          errors: [
+            {
+              message: "Resource not accessible by integration"
+            }
+          ]
+        };
+      }
+    };
+  };
+
+  try {
+    await assert.rejects(
+      () =>
+        new GithubAppClient().listProjectV2s({
+          installationId: 12345678,
+          appId: "12345",
+          privateKey: privateKeyPem,
+          accountLogin: "my-team",
+          accountType: "Organization",
+          now: () => fixedNow
+        }),
+      (error) =>
+        error?.response?.error?.message ===
+        "GitHub ProjectV2 access requires read:project OAuth scope or GitHub App Projects read permission"
+    );
+    assert.equal(graphqlRequestCount, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
+{
   const { privateKey } = generateKeyPairSync("rsa", {
     modulusLength: 2048
   });
