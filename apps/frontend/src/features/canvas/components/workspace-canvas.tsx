@@ -173,11 +173,17 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
       ) as CanvasBoardDetail,
     [workspaceId],
   );
-  const board = boardState.board ?? fallbackBoard;
+  const activeBoard =
+    boardState.board &&
+    boardState.board.workspaceId === workspaceId &&
+    (!boardId || boardState.board.id === boardId)
+      ? boardState.board
+      : null;
+  const board = activeBoard ?? fallbackBoard;
   const shouldUseCanvasApi =
     boardState.source === "api" &&
     boardState.status === "ready" &&
-    boardState.board !== null;
+    activeBoard !== null;
   const canvasRealtimeConfig = useMemo<CanvasRealtimeConfig>(
     () => ({
       enabled: Boolean(
@@ -715,6 +721,7 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
         </nav>
 
         <PiloCanvasRuntime
+          key={`${board.workspaceId}:${board.id}:${shouldUseCanvasApi ? "api" : "local"}`}
           board={board}
           canvasClient={shouldUseCanvasApi ? canvasClient : null}
           onHistoryStateChange={setCanvasHistoryState}
