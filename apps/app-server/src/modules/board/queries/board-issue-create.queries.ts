@@ -262,27 +262,27 @@ export class BoardIssueCreateQueries {
           raw
         )
         VALUES (
-          $1,
+          $1::uuid,
           $2::uuid,
-          $3,
+          $3::text,
           'ISSUE',
           $4::uuid,
           false,
           $5::uuid,
           $6::uuid,
-          $7,
-          $8,
-          $9,
+          $7::text,
+          $8::text,
+          $9::text,
           now(),
           jsonb_build_object(
             'id',
-            $3,
+            $3::text,
             'contentType',
             'ISSUE',
             'statusOptionId',
-            $7,
+            $7::text,
             'statusName',
-            $8
+            $8::text
           )
         )
         ON CONFLICT (project_v2_id, github_project_item_node_id)
@@ -340,17 +340,17 @@ export class BoardIssueCreateQueries {
         VALUES (
           $1::uuid,
           $2::uuid,
-          $3,
+          $3::text,
           'SINGLE_SELECT',
-          $4,
-          $5,
+          $4::text,
+          $5::text,
           jsonb_build_object(
             'fieldName',
-            $3,
+            $3::text,
             'singleSelectOptionId',
-            $4,
+            $4::text,
             'singleSelectName',
-            $5
+            $5::text
           ),
           now()
         )

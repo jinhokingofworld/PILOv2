@@ -206,6 +206,13 @@ function issueRow(overrides = {}) {
       /INSERT INTO github_project_v2_item_field_values/i.test(query.text)
     )
   );
+  const fieldValueUpsert = db.queries.find((query) =>
+    /INSERT INTO github_project_v2_item_field_values/i.test(query.text)
+  );
+  assert.ok(fieldValueUpsert);
+  assert.match(fieldValueUpsert.text, /\$3::text/);
+  assert.match(fieldValueUpsert.text, /\$4::text/);
+  assert.match(fieldValueUpsert.text, /\$5::text/);
   assert.ok(
     db.queries.some((query) =>
       /UPDATE pilo_issues[\s\S]*column_id/i.test(query.text)
