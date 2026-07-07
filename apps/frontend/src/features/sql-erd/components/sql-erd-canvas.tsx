@@ -40,18 +40,38 @@ function shapeIdSuffix(value: string) {
   return suffix || "item";
 }
 
+export function hashSqlErdShapeSourceId(value: string) {
+  let hash = 0x811c9dc5;
+
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+
+  return (hash >>> 0).toString(36);
+}
+
+export function getSqlErdTableShapeId(tableId: string) {
+  return createShapeId(
+    `sqltoerd-table-${shapeIdSuffix(tableId)}-${hashSqlErdShapeSourceId(tableId)}`
+  );
+}
+
 export function createSqltoerdTableShapes(
   modelJson: SqltoerdModelJsonV1,
   layoutJson: SqltoerdLayoutJsonV1
 ): TLShapePartial<SqlErdTableShape>[] {
   return modelJson.schema.tables.map((table, index) => {
     const tableLayout = getTableLayout(layoutJson, table.id);
-    const { w, h } = getSqlErdTableShapeSize(table, tableLayout?.width);
+    const { w, h, badgeColumnWidth } = getSqlErdTableShapeSize(
+      table,
+      tableLayout?.width
+    );
     const fallbackColumn = index % 3;
     const fallbackRow = Math.floor(index / 3);
 
     return {
-      id: createShapeId(`sqltoerd-table-${shapeIdSuffix(table.id)}`),
+      id: getSqlErdTableShapeId(table.id),
       type: SQLTOERD_TABLE_SHAPE_TYPE,
       x: tableLayout?.x ?? 80 + fallbackColumn * 360,
       y: tableLayout?.y ?? 80 + fallbackRow * 300,
@@ -61,6 +81,7 @@ export function createSqltoerdTableShapes(
         tableId: table.id,
         tableName: table.name,
         schemaName: table.schemaName,
+        badgeColumnWidth,
         columns: toSqlErdTableShapeColumns(table.columns)
       }
     };

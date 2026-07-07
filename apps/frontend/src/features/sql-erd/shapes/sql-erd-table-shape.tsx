@@ -11,7 +11,9 @@ const TABLE_MIN_WIDTH = 260;
 const TABLE_HEADER_HEIGHT = 54;
 const TABLE_ROW_HEIGHT = 42;
 const TABLE_BORDER_WIDTH = 1;
-const BADGE_COLUMN_WIDTH = 72;
+const BADGE_MIN_COLUMN_WIDTH = 72;
+const BADGE_WIDTH = 30;
+const BADGE_GAP = 4;
 const ROW_SIDE_PADDING = 24;
 const ROW_COLUMN_GAP = 28;
 const TABLE_NAME_CHAR_WIDTH = 13;
@@ -34,6 +36,7 @@ export type SqlErdTableShapeProps = {
   tableId: string;
   tableName: string;
   schemaName: string | null;
+  badgeColumnWidth: number;
   columns: SqlErdTableColumnShapeProps[];
 };
 
@@ -54,12 +57,13 @@ type ColumnBadge = {
 };
 
 export function getSqlErdTableShapeSize(table: ErdTable, fallbackWidth?: number) {
+  const badgeColumnWidth = getSqlErdTableBadgeColumnWidth(table.columns);
   const titleWidth =
     getTableDisplayName(table).length * TABLE_NAME_CHAR_WIDTH + ROW_SIDE_PADDING * 2;
   const rowContentWidth = Math.max(
     ...table.columns.map(
       (column) =>
-        BADGE_COLUMN_WIDTH +
+        badgeColumnWidth +
         column.name.length * COLUMN_NAME_CHAR_WIDTH +
         ROW_COLUMN_GAP +
         column.dataType.length * COLUMN_TYPE_CHAR_WIDTH
@@ -79,7 +83,7 @@ export function getSqlErdTableShapeSize(table: ErdTable, fallbackWidth?: number)
     table.columns.length * TABLE_ROW_HEIGHT +
     TABLE_BORDER_WIDTH * 2;
 
-  return { w: width, h: height };
+  return { w: width, h: height, badgeColumnWidth };
 }
 
 export function toSqlErdTableShapeColumns(
@@ -94,6 +98,46 @@ export function toSqlErdTableShapeColumns(
     unique: column.unique,
     nullable: column.nullable
   }));
+}
+
+function getColumnBadgeCount(column: SqlErdTableColumnShapeProps) {
+  let count = 0;
+
+  if (column.primaryKey) {
+    count += 1;
+  }
+
+  if (column.foreignKey) {
+    count += 1;
+  }
+
+  if (column.unique) {
+    count += 1;
+  }
+
+  if (!column.nullable && !column.primaryKey) {
+    count += 1;
+  }
+
+  return count;
+}
+
+export function getSqlErdTableBadgeColumnWidth(
+  columns: SqlErdTableColumnShapeProps[]
+) {
+  const maxBadgeCount = Math.max(
+    ...columns.map((column) => getColumnBadgeCount(column)),
+    0
+  );
+
+  if (maxBadgeCount === 0) {
+    return BADGE_MIN_COLUMN_WIDTH;
+  }
+
+  return Math.max(
+    BADGE_MIN_COLUMN_WIDTH,
+    maxBadgeCount * BADGE_WIDTH + Math.max(0, maxBadgeCount - 1) * BADGE_GAP
+  );
 }
 
 function getColumnBadges(column: SqlErdTableColumnShapeProps): ColumnBadge[] {
@@ -165,7 +209,7 @@ function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
                 style={{
                   backgroundColor: columnIndex % 2 === 0 ? "#ffffff" : "#f8fafc",
                   columnGap: ROW_COLUMN_GAP,
-                  gridTemplateColumns: `${BADGE_COLUMN_WIDTH}px max-content max-content`
+                  gridTemplateColumns: `${shape.props.badgeColumnWidth}px max-content max-content`
                 }}
               >
                 <div className="flex min-w-0 items-center gap-1">
@@ -202,6 +246,7 @@ export class SqlErdTableShapeUtil extends ShapeUtil<SqlErdTableShape> {
     tableId: T.string,
     tableName: T.string,
     schemaName: T.nullable(T.string),
+    badgeColumnWidth: T.number,
     columns: T.arrayOf(
       T.object({
         id: T.string,
@@ -230,6 +275,7 @@ export class SqlErdTableShapeUtil extends ShapeUtil<SqlErdTableShape> {
       tableId: "",
       tableName: "",
       schemaName: null,
+      badgeColumnWidth: BADGE_MIN_COLUMN_WIDTH,
       columns: []
     };
   }
