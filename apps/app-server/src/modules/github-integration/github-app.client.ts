@@ -319,17 +319,17 @@ interface GithubProjectV2GraphqlErrorContext {
 const GITHUB_SYNC_PER_PAGE = 100;
 const GITHUB_SYNC_MAX_PAGES = 100;
 const GITHUB_PROJECT_V2_OAUTH_SCOPE_ERROR_MESSAGE =
-  "GitHub OAuth connection must be reconnected with read:project scope";
+  "GitHub ProjectV2 OAuth connection must be reconnected with project scope";
 const GITHUB_PROJECT_V2_OWNER_RESOLUTION_ERROR_MESSAGE =
   "GitHub ProjectV2 owner could not be resolved";
 const GITHUB_PROJECT_V2_PERSONAL_USER_PERMISSION_ERROR_MESSAGE =
-  "GitHub user OAuth token lacks permission to read personal ProjectV2";
+  "GitHub ProjectV2 OAuth token lacks permission to read personal ProjectV2";
 const GITHUB_PROJECT_V2_PERSONAL_INSTALLATION_ACCESS_ERROR_MESSAGE =
   "GitHub App installation token cannot access personal ProjectV2";
 const GITHUB_PROJECT_V2_ORGANIZATION_INSTALLATION_ACCESS_ERROR_MESSAGE =
   "GitHub App installation token cannot access organization ProjectV2";
 const GITHUB_PROJECT_V2_USER_ACCESS_ERROR_MESSAGE =
-  "GitHub user OAuth token cannot access this ProjectV2";
+  "GitHub ProjectV2 OAuth token cannot access this ProjectV2";
 const GITHUB_PROJECT_V2_DISCOVERY_FRAGMENT = `
   fragment PiloProjectV2DiscoveryFields on ProjectV2 {
     id

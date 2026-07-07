@@ -65,6 +65,49 @@ export class GithubIntegrationConfigService {
     };
   }
 
+  getGithubProjectOAuthConfig(): GithubOAuthRuntimeConfig {
+    const message = "GitHub ProjectV2 OAuth is not configured";
+    const clientId = this.requireConfig(
+      process.env.GITHUB_PROJECT_OAUTH_CLIENT_ID,
+      message
+    );
+    const clientSecret = this.requireConfig(
+      process.env.GITHUB_PROJECT_OAUTH_CLIENT_SECRET,
+      message
+    );
+    const apiPublicOrigin = this.requireConfig(
+      process.env.API_PUBLIC_ORIGIN,
+      message
+    );
+    const frontendUrl = this.normalizeOrigin(
+      process.env.FRONTEND_URL?.trim() || DEFAULT_FRONTEND_URL,
+      message
+    );
+    const tokenEncryptionKey = this.requireConfig(
+      process.env.GITHUB_TOKEN_ENCRYPTION_KEY,
+      message
+    );
+    const stateSecret = this.requireConfig(process.env.SESSION_SECRET, message);
+    const apiBasePath = this.normalizeApiBasePath(
+      process.env.API_BASE_PATH ?? DEFAULT_API_BASE_PATH
+    );
+    const stateTtlSeconds = this.parsePositiveInteger(
+      process.env.OAUTH_STATE_TTL_SECONDS,
+      DEFAULT_STATE_TTL_SECONDS
+    );
+
+    return {
+      clientId,
+      clientSecret,
+      apiPublicOrigin: this.normalizeOrigin(apiPublicOrigin, message),
+      apiBasePath,
+      frontendUrl,
+      tokenEncryptionKey,
+      stateSecret,
+      stateTtlSeconds
+    };
+  }
+
   getGithubAppConfig(): GithubAppRuntimeConfig {
     const appId = this.requireConfig(
       process.env.GITHUB_APP_ID,
@@ -130,7 +173,10 @@ export class GithubIntegrationConfigService {
     return value.trim();
   }
 
-  private normalizeOrigin(value: string): string {
+  private normalizeOrigin(
+    value: string,
+    message = "GitHub OAuth is not configured"
+  ): string {
     try {
       const url = new URL(value);
       if (url.protocol !== "http:" && url.protocol !== "https:") {
@@ -139,7 +185,7 @@ export class GithubIntegrationConfigService {
 
       return url.origin;
     } catch {
-      throw badRequest("GitHub OAuth is not configured");
+      throw badRequest(message);
     }
   }
 
