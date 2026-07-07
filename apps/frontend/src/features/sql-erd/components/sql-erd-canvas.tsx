@@ -106,6 +106,7 @@ export function createSqltoerdTableShapes(
         tableName: table.name,
         schemaName: table.schemaName,
         badgeColumnWidth,
+        selectedColumnId: null,
         columns: toSqlErdTableShapeColumns(table.columns)
       }
     };
@@ -536,6 +537,71 @@ function SqlErdSelectionSync({
   return null;
 }
 
+function getSelectedColumnIdForTable(
+  selection: SqlErdSelection,
+  tableId: string
+) {
+  return selection.type === "column" && selection.tableId === tableId
+    ? selection.columnId
+    : null;
+}
+
+function syncSqlErdSelectedColumnShapes(
+  editor: Editor,
+  selectedSqlErdObject: SqlErdSelection
+) {
+  const updates: TLShapePartial<SqlErdTableShape>[] = [];
+
+  for (const shape of editor.getCurrentPageShapes()) {
+    if (!isSqlErdTableShape(shape)) {
+      continue;
+    }
+
+    const selectedColumnId = getSelectedColumnIdForTable(
+      selectedSqlErdObject,
+      shape.props.tableId
+    );
+
+    if (shape.props.selectedColumnId === selectedColumnId) {
+      continue;
+    }
+
+    updates.push({
+      id: shape.id,
+      type: SQLTOERD_TABLE_SHAPE_TYPE,
+      props: {
+        ...shape.props,
+        selectedColumnId
+      }
+    });
+  }
+
+  if (!updates.length) {
+    return;
+  }
+
+  editor.run(
+    () => {
+      editor.updateShapes(updates);
+    },
+    { history: "ignore" }
+  );
+}
+
+function SqlErdSelectedColumnSync({
+  selectedSqlErdObject
+}: {
+  selectedSqlErdObject: SqlErdSelection;
+}) {
+  const editor = useEditor();
+
+  useEffect(() => {
+    syncSqlErdSelectedColumnShapes(editor, selectedSqlErdObject);
+  }, [editor, selectedSqlErdObject]);
+
+  return null;
+}
+
 function SqlErdCanvasBackground() {
   return (
     <div className="absolute inset-0 bg-slate-50 bg-[radial-gradient(circle_at_1px_1px,rgba(15,23,42,0.12)_1px,transparent_0)] [background-size:24px_24px]" />
@@ -570,6 +636,7 @@ export function SqlErdCanvas({
     >
       <SqlErdCanvasShapeSync shapes={shapes} />
       <SqlErdRelationLayoutSync />
+      <SqlErdSelectedColumnSync selectedSqlErdObject={selectedSqlErdObject} />
       {onSelectionChange ? (
         <SqlErdSelectionSync
           onSelectionChange={onSelectionChange}

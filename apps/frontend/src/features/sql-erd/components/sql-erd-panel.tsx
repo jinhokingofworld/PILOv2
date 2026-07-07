@@ -593,9 +593,9 @@ function InspectorPanel({ isOpen, onToggle, viewModel }: InspectorPanelProps) {
   if (!isOpen) {
     return (
       <CollapsedPanelButton
-        ariaLabel="Open inspector panel"
+        ariaLabel="상세 정보 패널 열기"
         icon={<PanelRightOpen className="size-4" />}
-        label="Inspector"
+        label="상세"
         onClick={onToggle}
         side="right"
       />
@@ -604,18 +604,18 @@ function InspectorPanel({ isOpen, onToggle, viewModel }: InspectorPanelProps) {
 
   return (
     <aside
-      className="flex w-[min(320px,34vw)] min-w-72 max-w-[320px] shrink-0 flex-col border-l bg-background"
+      className="flex w-[min(360px,36vw)] min-w-80 max-w-[360px] shrink-0 flex-col border-l bg-background"
       id="inspector"
     >
-      <div className="flex min-h-14 items-center justify-between gap-3 border-b px-4">
+      <div className="flex min-h-16 items-center justify-between gap-3 border-b px-5">
         <div className="min-w-0">
-          <p className="text-sm font-semibold">Inspector</p>
-          <p className="truncate text-xs text-muted-foreground">
+          <p className="text-lg font-semibold">상세 정보</p>
+          <p className="truncate text-sm text-muted-foreground">
             {getInspectorSubtitle(viewModel)}
           </p>
         </div>
         <button
-          aria-label="Close inspector panel"
+          aria-label="상세 정보 패널 닫기"
           className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           onClick={onToggle}
           type="button"
@@ -624,19 +624,19 @@ function InspectorPanel({ isOpen, onToggle, viewModel }: InspectorPanelProps) {
         </button>
       </div>
 
-      <div className="flex flex-1 flex-col gap-4 overflow-auto p-4">
+      <div className="flex flex-1 flex-col gap-5 overflow-auto p-5">
         <InspectorContent viewModel={viewModel} />
 
         <div className="mt-auto grid gap-2">
           <button
-            className="inline-flex h-9 cursor-not-allowed items-center justify-center rounded-md border bg-background px-3 text-sm font-medium text-muted-foreground opacity-70"
+            className="inline-flex h-10 cursor-not-allowed items-center justify-center rounded-md border bg-background px-3 text-base font-medium text-muted-foreground opacity-70"
             disabled
             type="button"
           >
             Add column
           </button>
           <button
-            className="inline-flex h-9 cursor-not-allowed items-center justify-center rounded-md border bg-background px-3 text-sm font-medium text-muted-foreground opacity-70"
+            className="inline-flex h-10 cursor-not-allowed items-center justify-center rounded-md border bg-background px-3 text-base font-medium text-muted-foreground opacity-70"
             disabled
             type="button"
           >
@@ -650,7 +650,7 @@ function InspectorPanel({ isOpen, onToggle, viewModel }: InspectorPanelProps) {
 
 function getInspectorSubtitle(viewModel: SqlErdInspectorViewModel) {
   if (viewModel.type === "table") {
-    return `${viewModel.title} table`;
+    return `${viewModel.title} 테이블`;
   }
 
   if (viewModel.type === "column") {
@@ -658,10 +658,10 @@ function getInspectorSubtitle(viewModel: SqlErdInspectorViewModel) {
   }
 
   if (viewModel.type === "relation") {
-    return "foreign key relation";
+    return "외래 키 관계";
   }
 
-  return "No selection";
+  return "선택 없음";
 }
 
 function InspectorContent({
@@ -683,9 +683,9 @@ function InspectorContent({
 
   return (
     <div className="rounded-md border border-dashed p-4">
-      <p className="text-sm font-medium">Selection</p>
-      <p className="mt-1 text-xs leading-5 text-muted-foreground">
-        No table, column, or relation selected
+      <p className="text-base font-medium">선택 정보</p>
+      <p className="mt-1 text-sm leading-6 text-muted-foreground">
+        선택한 테이블, 컬럼, 관계가 없습니다
       </p>
     </div>
   );
@@ -698,11 +698,11 @@ function TableInspector({
 }) {
   return (
     <>
-      <InspectorSectionTitle>Table details</InspectorSectionTitle>
+      <InspectorSectionTitle>테이블 정보</InspectorSectionTitle>
       <div className="space-y-2">
-        <InspectorRow label="Table name" value={viewModel.title} />
-        <InspectorRow label="Columns" value={`${viewModel.columnCount}`} />
-        <InspectorRow label="Relations" value={`${viewModel.relations.length}`} />
+        <InspectorRow label="테이블명" value={viewModel.title} />
+        <InspectorRow label="컬럼" value={`${viewModel.columnCount}`} />
+        <InspectorRow label="관계" value={`${viewModel.relations.length}`} />
       </div>
       <RelationList relations={viewModel.relations} />
     </>
@@ -718,12 +718,12 @@ function ColumnInspector({
 
   return (
     <>
-      <InspectorSectionTitle>Column details</InspectorSectionTitle>
+      <InspectorSectionTitle>컬럼 정보</InspectorSectionTitle>
       <div className="space-y-2">
-        <InspectorRow label="Table" value={getTableDisplayName(table)} />
-        <InspectorRow label="Column name" value={column.name} />
-        <InspectorRow label="Column type" value={column.dataType} />
-        <InspectorRow label="Nullable" value={column.nullable ? "Yes" : "No"} />
+        <InspectorRow label="테이블" value={getTableDisplayName(table)} />
+        <InspectorRow label="컬럼명" value={column.name} />
+        <InspectorRow label="컬럼 타입" value={column.dataType} />
+        <InspectorRow label="NULL 허용" value={column.nullable ? "예" : "아니오"} />
       </div>
       <div className="flex flex-wrap gap-2">
         {column.primaryKey ? <ConstraintPill label="PK" /> : null}
@@ -745,10 +745,10 @@ function RelationInspector({
 
   return (
     <>
-      <InspectorSectionTitle>Relation details</InspectorSectionTitle>
+      <InspectorSectionTitle>관계 정보</InspectorSectionTitle>
       <div className="space-y-2">
-        <InspectorRow label="Kind" value="foreign key" />
-        <InspectorRow label="Constraint" value={relation.constraintName ?? "-"} />
+        <InspectorRow label="종류" value="foreign key" />
+        <InspectorRow label="제약 조건" value={relation.constraintName ?? "-"} />
         <InspectorRow
           label="From"
           value={
@@ -780,9 +780,9 @@ function RelationList({ relations }: { relations: RelationSummary[] }) {
   if (!relations.length) {
     return (
       <div>
-        <InspectorSectionTitle>Relations</InspectorSectionTitle>
-        <p className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">
-          No connected relations
+        <InspectorSectionTitle>연결 관계</InspectorSectionTitle>
+        <p className="rounded-md border border-dashed p-3 text-sm leading-6 text-muted-foreground">
+          연결된 관계가 없습니다
         </p>
       </div>
     );
@@ -790,11 +790,11 @@ function RelationList({ relations }: { relations: RelationSummary[] }) {
 
   return (
     <div>
-      <InspectorSectionTitle>Relations</InspectorSectionTitle>
+      <InspectorSectionTitle>연결 관계</InspectorSectionTitle>
       <div className="space-y-2">
         {relations.map((relation) => (
           <div
-            className="rounded-md border bg-background p-3 text-xs leading-5"
+            className="rounded-md border bg-background p-3 text-sm leading-6"
             key={relation.id}
           >
             <p className="font-medium text-foreground">{relation.fromLabel}</p>
@@ -808,7 +808,7 @@ function RelationList({ relations }: { relations: RelationSummary[] }) {
 
 function ConstraintPill({ label }: { label: string }) {
   return (
-    <span className="inline-flex h-7 items-center rounded-md border bg-muted/40 px-2 text-xs font-semibold text-muted-foreground">
+    <span className="inline-flex h-8 items-center rounded-md border bg-muted/40 px-2.5 text-sm font-semibold text-muted-foreground">
       {label}
     </span>
   );
@@ -816,7 +816,7 @@ function ConstraintPill({ label }: { label: string }) {
 
 function InspectorSectionTitle({ children }: { children: ReactNode }) {
   return (
-    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+    <p className="text-sm font-semibold text-muted-foreground">
       {children}
     </p>
   );
@@ -829,7 +829,7 @@ type InspectorRowProps = {
 
 function InspectorRow({ label, value }: InspectorRowProps) {
   return (
-    <div className="flex items-start justify-between gap-3 border-b py-2 text-sm">
+    <div className="flex items-start justify-between gap-4 border-b py-2.5 text-base">
       <span className="shrink-0 text-muted-foreground">{label}</span>
       <span className="break-all text-right font-medium">{value}</span>
     </div>

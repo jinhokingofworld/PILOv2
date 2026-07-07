@@ -145,17 +145,25 @@ export function getSqlErdRelationRoutePoints(
   ];
 }
 
-function getRelationPathData(points: SqlErdRelationRoutePoint[]) {
-  const [firstPoint, ...restPoints] = points;
+function getRelationCurvePathData(points: SqlErdRelationRoutePoint[]) {
+  const startPoint = points[0];
+  const endPoint = points.at(-1);
 
-  if (!firstPoint) {
+  if (!startPoint || !endPoint) {
     return "";
   }
 
-  return [
-    `M ${firstPoint.x} ${firstPoint.y}`,
-    ...restPoints.map((point) => `L ${point.x} ${point.y}`)
-  ].join(" ");
+  const dx = endPoint.x - startPoint.x;
+  const dy = endPoint.y - startPoint.y;
+  const isMostlyHorizontal = Math.abs(dx) >= Math.abs(dy);
+  const controlPointOne = isMostlyHorizontal
+    ? { x: startPoint.x + dx * 0.5, y: startPoint.y }
+    : { x: startPoint.x, y: startPoint.y + dy * 0.5 };
+  const controlPointTwo = isMostlyHorizontal
+    ? { x: endPoint.x - dx * 0.5, y: endPoint.y }
+    : { x: endPoint.x, y: endPoint.y - dy * 0.5 };
+
+  return `M ${startPoint.x} ${startPoint.y} C ${controlPointOne.x} ${controlPointOne.y}, ${controlPointTwo.x} ${controlPointTwo.y}, ${endPoint.x} ${endPoint.y}`;
 }
 
 function getPointListData(points: SqlErdRelationRoutePoint[]) {
@@ -248,7 +256,7 @@ function SqlErdRelationLine({ shape }: { shape: SqlErdRelationShape }) {
       }}
     >
       <path
-        d={getRelationPathData(shape.props.points)}
+        d={getRelationCurvePathData(shape.props.points)}
         fill="none"
         pointerEvents="stroke"
         stroke="rgba(37, 99, 235, 0.58)"
@@ -340,6 +348,6 @@ export class SqlErdRelationShapeUtil extends ShapeUtil<SqlErdRelationShape> {
   }
 
   override getIndicatorPath(shape: SqlErdRelationShape) {
-    return new Path2D(getRelationPathData(shape.props.points));
+    return new Path2D(getRelationCurvePathData(shape.props.points));
   }
 }
