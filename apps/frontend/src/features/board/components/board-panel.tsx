@@ -12,6 +12,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { BoardHydrationForm } from "@/features/board/components/board-hydration-form";
+import { BoardIssueCreateForm } from "@/features/board/components/board-issue-create-form";
 import { BoardIssueSheet } from "@/features/board/components/board-issue-sheet";
 import { BoardKanban } from "@/features/board/components/board-kanban";
 import { useBoardWorkspaceData } from "@/features/board/hooks/use-board-workspace-data";
@@ -61,8 +62,10 @@ export function BoardPanel() {
   const [assignee, setAssignee] = useState("");
   const [label, setLabel] = useState("");
   const [hydrateError, setHydrateError] = useState<string | null>(null);
+  const [issueCreateError, setIssueCreateError] = useState<string | null>(null);
   const [statusMoveError, setStatusMoveError] = useState<string | null>(null);
   const [isHydrating, setIsHydrating] = useState(false);
+  const [isCreatingIssue, setIsCreatingIssue] = useState(false);
   const [movingIssueId, setMovingIssueId] = useState<string | null>(null);
   const issueQuery = useMemo(
     () => ({
@@ -163,6 +166,26 @@ export function BoardPanel() {
 
   function handleOpenIssue(issue: BoardIssueCardPayload) {
     setSelectedIssueId(issue.id);
+  }
+
+  async function handleCreateIssue(input: {
+    body?: string;
+    columnId: string;
+    title: string;
+  }) {
+    setIsCreatingIssue(true);
+    setIssueCreateError(null);
+
+    try {
+      const issue = await boardData.createBoardIssue(input);
+      setSelectedIssueId(issue.id);
+    } catch (error) {
+      setIssueCreateError(
+        error instanceof Error ? error.message : "Board issue를 생성하지 못했습니다."
+      );
+    } finally {
+      setIsCreatingIssue(false);
+    }
   }
 
   async function handleMoveIssueStatus(input: {
@@ -293,6 +316,16 @@ export function BoardPanel() {
           onHydrate={() => void handleHydrateBoard()}
           onSelectProjectV2={setSelectedProjectV2Id}
           onSelectRepository={setSelectedRepositoryId}
+        />
+      </div>
+
+      <div className="board-issue-create-dock border-b border-slate-200 bg-white/70 px-7 py-4">
+        <BoardIssueCreateForm
+          columns={boardData.columns}
+          disabled={!canUseBoard || !selectedBoardId || isBoardLoading}
+          error={issueCreateError}
+          isCreating={isCreatingIssue}
+          onCreateIssue={(input) => handleCreateIssue(input)}
         />
       </div>
 

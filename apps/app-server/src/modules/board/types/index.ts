@@ -194,3 +194,7 @@ export interface UpdateBoardIssueStatusPayload {
 export interface UpdateBoardIssuePayload {
   issue: BoardIssueDetailPayload;
 }
+
+export interface CreateBoardIssuePayload {
+  issue: BoardIssueCardPayload;
+}

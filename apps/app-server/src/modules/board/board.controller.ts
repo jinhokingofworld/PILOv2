@@ -25,6 +25,7 @@ import type {
   BoardPayload,
   UpdateBoardIssueStatusPayload,
   UpdateBoardIssuePayload,
+  CreateBoardIssuePayload,
   BoardRelatedPullRequestPayload
 } from "./types";
 
@@ -109,6 +110,25 @@ export class BoardController {
     );
 
     return apiResponse(issues);
+  }
+
+  @Post(":boardId/issues")
+  async createBoardIssue(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("boardId") boardId: string,
+    @Body() body: unknown,
+    @Res({ passthrough: true }) reply: FastifyReply
+  ): Promise<ApiSuccessResponse<CreateBoardIssuePayload>> {
+    const result = await this.boardService.createBoardIssue(
+      currentUserId,
+      workspaceId,
+      boardId,
+      body
+    );
+
+    reply.status(201);
+    return apiResponse(result);
   }
 
   @Get(":boardId/issues/:issueId")

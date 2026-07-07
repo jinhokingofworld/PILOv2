@@ -30,3 +30,9 @@ export interface UpdateBoardIssueRequest {
   body?: unknown;
   state?: unknown;
 }
+
+export interface CreateBoardIssueRequest {
+  title?: unknown;
+  body?: unknown;
+  columnId?: unknown;
+}

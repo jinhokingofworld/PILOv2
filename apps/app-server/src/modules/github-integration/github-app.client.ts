@@ -74,10 +74,28 @@ export interface GithubRepositoryIssueUpdateRequest
   state?: "open" | "closed";
 }
 
+export interface GithubRepositoryIssueCreateRequest
+  extends GithubProjectV2UserAccessTokenRequest {
+  owner: string;
+  repo: string;
+  title: string;
+  body?: string;
+}
+
 export interface GithubProjectV2LookupRequest
   extends GithubAppInstallationTokenRequest,
     GithubProjectV2UserAccessTokenRequest {
   projectNodeId: string;
+}
+
+export interface GithubProjectV2ItemAddRequest
+  extends GithubProjectV2UserAccessTokenRequest {
+  projectNodeId: string;
+  contentNodeId: string;
+}
+
+export interface GithubProjectV2ItemAddResult {
+  itemNodeId: string;
 }
 
 export interface GithubProjectV2ItemStatusUpdateRequest
@@ -636,6 +654,20 @@ const GITHUB_PROJECT_V2_ITEMS_QUERY = `
     }
   }
 `;
+const GITHUB_PROJECT_V2_ADD_ITEM_BY_ID_MUTATION = `
+  mutation PiloAddProjectV2ItemById($projectId: ID!, $contentId: ID!) {
+    addProjectV2ItemById(
+      input: {
+        projectId: $projectId
+        contentId: $contentId
+      }
+    ) {
+      item {
+        id
+      }
+    }
+  }
+`;
 const GITHUB_PROJECT_V2_UPDATE_ITEM_STATUS_MUTATION = `
   mutation PiloUpdateProjectV2ItemStatus(
     $projectId: ID!
@@ -914,6 +946,51 @@ export class GithubAppClient {
     return payload;
   }
 
+  async createRepositoryIssue(
+    input: GithubRepositoryIssueCreateRequest
+  ): Promise<GithubIssueApiItem> {
+    if (!input.userAccessToken) {
+      throw badRequest("GitHub OAuth connection is required");
+    }
+
+    const body: Record<string, unknown> = {
+      title: input.title
+    };
+    if (input.body !== undefined) {
+      body.body = input.body;
+    }
+
+    let response: Response;
+    try {
+      response = await fetch(
+        `https://api.github.com/repos/${encodeURIComponent(input.owner)}/${encodeURIComponent(input.repo)}/issues`,
+        {
+          method: "POST",
+          headers: {
+            Accept: "application/vnd.github+json",
+            Authorization: `Bearer ${input.userAccessToken}`,
+            "Content-Type": "application/json",
+            "X-GitHub-Api-Version": GITHUB_API_VERSION
+          },
+          body: JSON.stringify(body)
+        }
+      );
+    } catch {
+      throw badRequest("GitHub issue create failed");
+    }
+
+    if (!response.ok) {
+      throw badRequest("GitHub issue create failed");
+    }
+
+    const payload = await this.readJson(response, "GitHub issue create failed");
+    if (!this.isIssuePayload(payload) || this.isPullRequestIssue(payload)) {
+      throw badRequest("GitHub issue create failed");
+    }
+
+    return payload;
+  }
+
   async listRepositoryPullRequests(
     input: GithubRepositoryPullRequestsRequest
   ): Promise<GithubPullRequestApiItem[]> {
@@ -1128,6 +1205,30 @@ export class GithubAppClient {
     this.readProjectV2ItemMutation(data, mutationName, errorMessage);
   }
 
+  async addProjectV2ItemByContentId(
+    input: GithubProjectV2ItemAddRequest
+  ): Promise<GithubProjectV2ItemAddResult> {
+    if (!input.userAccessToken) {
+      throw badRequest("GitHub OAuth connection is required");
+    }
+
+    const errorMessage = "GitHub ProjectV2 item add failed";
+    const data = await this.fetchGraphqlWithToken(
+      input.userAccessToken,
+      GITHUB_PROJECT_V2_ADD_ITEM_BY_ID_MUTATION,
+      {
+        contentId: input.contentNodeId,
+        projectId: input.projectNodeId
+      },
+      errorMessage,
+      {
+        tokenSource: "user"
+      }
+    );
+
+    return this.readProjectV2ItemAddMutation(data, errorMessage);
+  }
+
   async listPullRequestFiles(
     input: GithubPullRequestFileLookupRequest
   ): Promise<GithubPullRequestFileApiItem[]> {
@@ -1335,6 +1436,21 @@ export class GithubAppClient {
     if (typeof projectV2Item.id !== "string" || !projectV2Item.id) {
       throw badRequest(errorMessage);
     }
+  }
+
+  private readProjectV2ItemAddMutation(
+    data: unknown,
+    errorMessage: string
+  ): GithubProjectV2ItemAddResult {
+    const payload = this.toObject(this.toObject(data).addProjectV2ItemById);
+    const item = this.toObject(payload.item);
+    const itemNodeId = this.toNullableString(item.id);
+
+    if (!itemNodeId) {
+      throw badRequest(errorMessage);
+    }
+
+    return { itemNodeId };
   }
 
   private mapGraphqlErrorMessage(

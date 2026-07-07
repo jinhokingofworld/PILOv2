@@ -37,6 +37,9 @@ const issueStatusServiceFile = await readSource(
 const issueUpdateServiceFile = await readSource(
   "../../src/modules/board/board-issue-update.service.ts"
 );
+const issueCreateServiceFile = await readSource(
+  "../../src/modules/board/board-issue-create.service.ts"
+);
 const readQueriesFile = await readSource(
   "../../src/modules/board/queries/board-read.queries.ts"
 );
@@ -46,8 +49,17 @@ const statusQueriesFile = await readSource(
 const updateQueriesFile = await readSource(
   "../../src/modules/board/queries/board-issue-update.queries.ts"
 );
+const createQueriesFile = await readSource(
+  "../../src/modules/board/queries/board-issue-create.queries.ts"
+);
 const githubIssueWriteServiceFile = await readSource(
   "../../src/modules/github-integration/github-issue-write.service.ts"
+);
+const githubProjectV2WriteServiceFile = await readSource(
+  "../../src/modules/github-integration/github-project-v2-write.service.ts"
+);
+const githubAppClientFile = await readSource(
+  "../../src/modules/github-integration/github-app.client.ts"
 );
 const hydrationServiceFile = await readSource(
   "../../src/modules/board/board-hydration.service.ts"
@@ -71,10 +83,12 @@ assert.match(moduleFile, /providers: \[[\s\S]*BoardHydrationService[\s\S]*\]/);
 assert.match(moduleFile, /providers: \[[\s\S]*BoardIssueReadService[\s\S]*\]/);
 assert.match(moduleFile, /providers: \[[\s\S]*BoardIssueStatusService[\s\S]*\]/);
 assert.match(moduleFile, /providers: \[[\s\S]*BoardIssueUpdateService[\s\S]*\]/);
+assert.match(moduleFile, /providers: \[[\s\S]*BoardIssueCreateService[\s\S]*\]/);
 assert.match(moduleFile, /providers: \[[\s\S]*BoardReadService[\s\S]*\]/);
 assert.match(moduleFile, /providers: \[[\s\S]*BoardReadQueries[\s\S]*\]/);
 assert.match(moduleFile, /providers: \[[\s\S]*BoardIssueStatusQueries[\s\S]*\]/);
 assert.match(moduleFile, /providers: \[[\s\S]*BoardIssueUpdateQueries[\s\S]*\]/);
+assert.match(moduleFile, /providers: \[[\s\S]*BoardIssueCreateQueries[\s\S]*\]/);
 assert.match(moduleFile, /exports: \[BoardService\]/);
 
 assert.match(controllerFile, /@Controller\("workspaces\/:workspaceId\/boards"\)/);
@@ -85,6 +99,7 @@ assert.match(controllerFile, /@Get\(\)/);
 assert.match(controllerFile, /@Get\(":boardId"\)/);
 assert.match(controllerFile, /@Get\(":boardId\/columns"\)/);
 assert.match(controllerFile, /@Get\(":boardId\/issues"\)/);
+assert.match(controllerFile, /@Post\(":boardId\/issues"\)/);
 assert.match(controllerFile, /@Get\(":boardId\/issues\/:issueId"\)/);
 assert.match(controllerFile, /@Get\(":boardId\/issues\/:issueId\/pull-requests"\)/);
 assert.match(controllerFile, /@Get\(":boardId\/filter-options"\)/);
@@ -108,6 +123,7 @@ assert.match(serviceFile, /listBoardIssuePullRequests/);
 assert.match(serviceFile, /getBoardFilterOptions/);
 assert.match(serviceFile, /updateBoardIssueStatus/);
 assert.match(serviceFile, /updateBoardIssue/);
+assert.match(serviceFile, /createBoardIssue/);
 
 assert.match(readServiceFile, /class BoardReadService/);
 assert.match(readServiceFile, /assertWorkspaceAccess/);
@@ -134,6 +150,13 @@ assert.match(issueUpdateServiceFile, /updateIssue/);
 assert.match(issueUpdateServiceFile, /title\/body\/state/);
 assert.doesNotMatch(issueUpdateServiceFile, /FROM pilo_issues/);
 
+assert.match(issueCreateServiceFile, /class BoardIssueCreateService/);
+assert.match(issueCreateServiceFile, /assertWorkspaceAccess/);
+assert.match(issueCreateServiceFile, /createIssue/);
+assert.match(issueCreateServiceFile, /addProjectV2ItemByContentId/);
+assert.match(issueCreateServiceFile, /updateProjectV2ItemStatus/);
+assert.doesNotMatch(issueCreateServiceFile, /FROM pilo_issues/);
+
 assert.match(readQueriesFile, /class BoardReadQueries/);
 assert.match(readQueriesFile, /FROM boards b/);
 assert.match(readQueriesFile, /FROM board_columns bc/);
@@ -152,9 +175,23 @@ assert.match(updateQueriesFile, /JOIN github_repositories gr/);
 assert.match(updateQueriesFile, /UPDATE github_issues/);
 assert.match(updateQueriesFile, /UPDATE pilo_issues/);
 
+assert.match(createQueriesFile, /class BoardIssueCreateQueries/);
+assert.match(createQueriesFile, /FROM boards b/);
+assert.match(createQueriesFile, /JOIN board_columns target_col/);
+assert.match(createQueriesFile, /INSERT INTO github_issues/);
+assert.match(createQueriesFile, /INSERT INTO github_project_v2_items/);
+assert.match(createQueriesFile, /INSERT INTO github_project_v2_item_field_values/);
+assert.match(createQueriesFile, /INSERT INTO pilo_issues/);
+
 assert.match(githubIssueWriteServiceFile, /class GithubIssueWriteService/);
 assert.match(githubIssueWriteServiceFile, /github_access_token_encrypted/);
 assert.match(githubIssueWriteServiceFile, /updateRepositoryIssue/);
+assert.match(githubIssueWriteServiceFile, /createRepositoryIssue/);
+assert.match(githubProjectV2WriteServiceFile, /class GithubProjectV2WriteService/);
+assert.match(githubProjectV2WriteServiceFile, /addProjectV2ItemByContentId/);
+assert.match(githubAppClientFile, /createRepositoryIssue/);
+assert.match(githubAppClientFile, /addProjectV2ItemByContentId/);
+assert.match(githubAppClientFile, /addProjectV2ItemById/);
 
 assert.match(hydrationServiceFile, /class BoardHydrationService/);
 assert.match(hydrationServiceFile, /assertWorkspaceAccess/);
@@ -180,5 +217,6 @@ await import("./issues.test.mjs");
 await import("./issue-detail.test.mjs");
 await import("./status-update.test.mjs");
 await import("./issue-update.test.mjs");
+await import("./issue-create.test.mjs");
 await import("./contract.test.mjs");
 await import("./github-sync-workspace-isolation.test.mjs");

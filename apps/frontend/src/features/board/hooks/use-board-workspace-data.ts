@@ -11,6 +11,7 @@ import type {
   BoardPaginatedPayload,
   BoardPayload,
   CreateBoardInput,
+  CreateBoardIssueInput,
   ListBoardIssuesQuery,
   UpdateBoardIssueStatusInput
 } from "@/features/board/types";
@@ -281,6 +282,59 @@ export function useBoardWorkspaceData({
     ]
   );
 
+  const createBoardIssue = useCallback(
+    async (input: CreateBoardIssueInput): Promise<BoardIssueCardPayload> => {
+      if (!canLoad || !normalizedBoardId) {
+        throw new Error("Board issue creation requires an authenticated board");
+      }
+
+      setBoardError(null);
+
+      try {
+        const result = await boardClient.createBoardIssue(
+          normalizedWorkspaceId,
+          normalizedBoardId,
+          input
+        );
+
+        setBoardState((current) => {
+          const hasIssue = current.issues.some(
+            (issue) => issue.id === result.issue.id
+          );
+          const nextIssues = hasIssue
+            ? current.issues.map((issue) =>
+                issue.id === result.issue.id ? result.issue : issue
+              )
+            : [...current.issues, result.issue];
+
+          return {
+            ...current,
+            columns: current.columns.map((column) =>
+              column.id === result.issue.columnId && !hasIssue
+                ? { ...column, issueCount: column.issueCount + 1 }
+                : column
+            ),
+            issues: nextIssues,
+            issuesMeta: current.issuesMeta
+              ? {
+                  ...current.issuesMeta,
+                  total: hasIssue
+                    ? current.issuesMeta.total
+                    : current.issuesMeta.total + 1
+                }
+              : current.issuesMeta
+          };
+        });
+
+        return result.issue;
+      } catch (error) {
+        setBoardError(errorFromUnknown(error));
+        throw error;
+      }
+    },
+    [boardClient, canLoad, normalizedBoardId, normalizedWorkspaceId]
+  );
+
   useEffect(() => {
     let active = true;
 
@@ -360,6 +414,7 @@ export function useBoardWorkspaceData({
     boardStatus,
     catalogError,
     catalogStatus,
+    createBoardIssue,
     hydrateBoard,
     moveIssueStatus,
     reloadBoard,

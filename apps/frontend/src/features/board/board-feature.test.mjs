@@ -12,7 +12,8 @@ const [
   boardPanel,
   boardHydrationForm,
   boardKanban,
-  boardIssueSheet
+  boardIssueSheet,
+  boardIssueCreateForm
 ] = await Promise.all([
   readFeatureFile("./types/index.ts"),
   readFeatureFile("./api/client.ts"),
@@ -20,7 +21,8 @@ const [
   readFeatureFile("./components/board-panel.tsx"),
   readFeatureFile("./components/board-hydration-form.tsx"),
   readFeatureFile("./components/board-kanban.tsx"),
-  readFeatureFile("./components/board-issue-sheet.tsx")
+  readFeatureFile("./components/board-issue-sheet.tsx"),
+  readFeatureFile("./components/board-issue-create-form.tsx")
 ]);
 
 assert.match(boardTypes, /export type BoardPayload/);
@@ -29,6 +31,8 @@ assert.match(boardTypes, /export type BoardIssueCardPayload/);
 assert.match(boardTypes, /export type BoardIssueDetailPayload/);
 assert.match(boardTypes, /export type BoardFilterOptionsPayload/);
 assert.match(boardTypes, /export type CreateBoardInput/);
+assert.match(boardTypes, /export type CreateBoardIssueInput/);
+assert.match(boardTypes, /export type CreateBoardIssuePayload/);
 assert.match(boardTypes, /export type UpdateBoardIssueStatusInput/);
 assert.match(boardTypes, /export type UpdateBoardIssueInput/);
 assert.match(boardTypes, /export type UpdateBoardIssuePayload/);
@@ -45,6 +49,7 @@ assert.match(boardApiClient, /createBoard/);
 assert.match(boardApiClient, /getBoard/);
 assert.match(boardApiClient, /listBoardColumns/);
 assert.match(boardApiClient, /listBoardIssues/);
+assert.match(boardApiClient, /createBoardIssue/);
 assert.match(boardApiClient, /getBoardIssue/);
 assert.match(boardApiClient, /updateBoardIssueStatus/);
 assert.match(boardApiClient, /updateBoardIssue/);
@@ -65,6 +70,7 @@ assert.match(boardDataHook, /getBoardFilterOptions/);
 assert.match(boardDataHook, /Promise\.all/);
 assert.match(boardDataHook, /reloadBoard/);
 assert.match(boardDataHook, /hydrateBoard/);
+assert.match(boardDataHook, /createBoardIssue/);
 assert.match(boardDataHook, /moveIssueStatus/);
 assert.match(boardDataHook, /previousColumnId/);
 assert.match(boardDataHook, /setBoardState/);
@@ -73,11 +79,14 @@ assert.match(boardPanel, /useAuthSession/);
 assert.match(boardPanel, /activeWorkspaceId/);
 assert.match(boardPanel, /useBoardWorkspaceData/);
 assert.match(boardPanel, /BoardHydrationForm/);
+assert.match(boardPanel, /BoardIssueCreateForm/);
 assert.match(boardPanel, /BoardKanban/);
 assert.match(boardPanel, /BoardIssueSheet/);
 assert.match(boardPanel, /onIssueUpdated/);
+assert.match(boardPanel, /createBoardIssue/);
 assert.match(boardPanel, /moveIssueStatus/);
 assert.match(boardPanel, /statusMoveError/);
+assert.match(boardPanel, /issueCreateError/);
 assert.match(boardPanel, /selectedRepositoryId/);
 assert.match(boardPanel, /selectedProjectV2Id/);
 assert.match(boardPanel, /query/);
@@ -98,6 +107,15 @@ assert.match(boardHydrationForm, /저장소/);
 assert.match(boardHydrationForm, /ProjectV2/);
 assert.match(boardHydrationForm, /board-hydrate-form/);
 assert.doesNotMatch(boardHydrationForm, /Card/);
+
+assert.match(boardIssueCreateForm, /BoardIssueCreateForm/);
+assert.match(boardIssueCreateForm, /columns/);
+assert.match(boardIssueCreateForm, /onCreateIssue/);
+assert.match(boardIssueCreateForm, /title/);
+assert.match(boardIssueCreateForm, /body/);
+assert.match(boardIssueCreateForm, /columnId/);
+assert.match(boardIssueCreateForm, /새 이슈/);
+assert.doesNotMatch(boardIssueCreateForm, /Card/);
 
 assert.match(boardKanban, /columns/);
 assert.match(boardKanban, /issuesByColumnId/);
