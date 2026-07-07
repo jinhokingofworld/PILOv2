@@ -101,6 +101,12 @@ token으로 GitHub의 user installations 목록을 조회해 callback의
   ProjectV2는 현재 사용자의 ProjectV2 OAuth token을 사용한다. 발견한
   ProjectV2는 `github_projects_v2`에 upsert하고, GitHub repository node id와
   동기화된 저장소를 매칭해 `github_project_v2_repositories` 관계를 갱신한다.
+- `full` sync 요청에 `repositoryId`가 있으면, 선택된 ProjectV2가 없는 경우에도
+  발견한 ProjectV2 중 해당 repository에 연결된 ProjectV2만 fields/items
+  동기화 대상으로 삼는다. `projectV2Id`가 있으면 그 ProjectV2를 우선한다.
+- ProjectV2 fields/items 동기화가 끝나면 서버는 같은 workspace의 기존 Board
+  cache 중 해당 ProjectV2와 repository 조합으로 이미 생성된 board만 다시
+  hydrate한다. 이 동작은 새 board를 자동 생성하지 않는다.
 - organization ProjectV2 자동 발견은 GitHub App installation에 Projects read 권한이
   있어야 한다. 권한이 없으면 GitHub GraphQL provider 오류로 sync run이 실패한다.
 - personal ProjectV2 discovery and sync require an active ProjectV2 OAuth
@@ -180,6 +186,26 @@ token으로 GitHub의 user installations 목록을 조회해 callback의
 
 `repositoryId`, `projectV2Id`는 target에 따라 선택값이다. 서버는
 `github_sync_runs`에 status와 count를 기록한다.
+
+### ProjectV2 목록/상세 응답
+
+`GET /workspaces/{workspaceId}/github/projects-v2`와
+`GET /workspaces/{workspaceId}/github/projects-v2/{projectV2Id}`의 ProjectV2
+payload는 board 구성을 위해 연결된 repository id 목록을 포함한다.
+
+```json
+{
+  "id": "project_v2_uuid",
+  "installationId": "installation_uuid",
+  "githubProjectNodeId": "PVT_kwDOExample",
+  "ownerLogin": "my-team",
+  "ownerType": "Organization",
+  "projectNumber": 10,
+  "title": "PILO MVP",
+  "repositoryIds": ["repository_uuid"],
+  "lastSyncedAt": "2026-07-07T12:00:00.000Z"
+}
+```
 
 ### GitHub webhook receiver
 

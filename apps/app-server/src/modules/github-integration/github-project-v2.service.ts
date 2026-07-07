@@ -37,6 +37,7 @@ interface GithubProjectV2Row extends QueryResultRow {
   github_updated_at: Date | string | null;
   github_closed_at: Date | string | null;
   last_synced_at: Date | string | null;
+  repository_ids: unknown;
   raw: unknown;
 }
 
@@ -424,27 +425,38 @@ export class GithubProjectV2Service {
   private githubProjectV2SelectSql(): string {
     return `
       SELECT
-        id,
-        installation_id,
-        github_project_node_id,
-        github_project_full_database_id,
-        owner_login,
-        owner_type,
-        project_number,
-        title,
-        short_description,
-        readme,
-        url,
-        resource_path,
-        public,
-        closed,
-        template,
-        github_created_at,
-        github_updated_at,
-        github_closed_at,
-        last_synced_at,
-        raw
-      FROM github_projects_v2
+        gp.id,
+        gp.installation_id,
+        gp.github_project_node_id,
+        gp.github_project_full_database_id,
+        gp.owner_login,
+        gp.owner_type,
+        gp.project_number,
+        gp.title,
+        gp.short_description,
+        gp.readme,
+        gp.url,
+        gp.resource_path,
+        gp.public,
+        gp.closed,
+        gp.template,
+        gp.github_created_at,
+        gp.github_updated_at,
+        gp.github_closed_at,
+        gp.last_synced_at,
+        (
+          SELECT COALESCE(
+            ARRAY_AGG(gpr.repository_id::text ORDER BY gr.full_name ASC, gr.id ASC),
+            ARRAY[]::text[]
+          )
+          FROM github_project_v2_repositories gpr
+          JOIN github_repositories gr
+            ON gr.id = gpr.repository_id
+           AND gr.workspace_id = gp.workspace_id
+          WHERE gpr.project_v2_id = gp.id
+        ) AS repository_ids,
+        gp.raw
+      FROM github_projects_v2 gp
     `;
   }
 
@@ -638,6 +650,7 @@ export class GithubProjectV2Service {
       public: row.public,
       closed: row.closed,
       template: row.template,
+      repositoryIds: this.toStringArray(row.repository_ids),
       lastSyncedAt: this.toNullableIsoString(row.last_synced_at)
     };
   }
@@ -869,5 +882,22 @@ export class GithubProjectV2Service {
     }
 
     return Array.isArray(value) ? value : [];
+  }
+
+  private toStringArray(value: unknown): string[] {
+    if (typeof value === "string") {
+      try {
+        const parsed = JSON.parse(value) as unknown;
+        return this.toStringArray(parsed);
+      } catch {
+        return value ? [value] : [];
+      }
+    }
+
+    if (!Array.isArray(value)) {
+      return [];
+    }
+
+    return value.filter((item): item is string => typeof item === "string");
   }
 }

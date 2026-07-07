@@ -89,6 +89,7 @@ export type GithubProjectV2 = {
   public: boolean;
   closed: boolean;
   template: boolean;
+  repositoryIds: string[];
   lastSyncedAt: string | null;
 };
 

@@ -60,6 +60,7 @@ const emptyBoardState: BoardWorkspaceBoardState = {
   issuesMeta: null,
   filterOptions: null
 };
+const BOARD_ISSUES_PAGE_LIMIT = 100;
 
 function errorFromUnknown(error: unknown) {
   return error instanceof Error
@@ -137,7 +138,7 @@ export function useBoardWorkspaceData({
       boardClient.listBoardColumns(normalizedWorkspaceId, normalizedBoardId),
       boardClient.listBoardIssues(normalizedWorkspaceId, normalizedBoardId, {
         ...parsedIssueQuery,
-        limit: parsedIssueQuery.limit ?? 200
+        limit: parsedIssueQuery.limit ?? BOARD_ISSUES_PAGE_LIMIT
       }),
       boardClient.getBoardFilterOptions(normalizedWorkspaceId, normalizedBoardId)
     ]);

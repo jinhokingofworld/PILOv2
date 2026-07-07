@@ -468,6 +468,7 @@ export class GithubSyncRunService {
           id,
           workspace_id,
           installation_id,
+          github_node_id,
           owner_login,
           name,
           full_name

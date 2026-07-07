@@ -30,6 +30,7 @@ export interface GithubSyncRepositoryContextRow extends QueryResultRow {
   id: string;
   workspace_id: string;
   installation_id: string | null;
+  github_node_id: string | null;
   owner_login: string;
   name: string;
   full_name: string;
@@ -88,6 +89,25 @@ export interface GithubSyncRunContext {
   config: GithubAppRuntimeConfig;
 }
 
+interface GithubProjectV2DiscoveryContext
+  extends GithubSyncProjectV2ContextRow {
+  repositoryNodeIds: string[];
+}
+
+interface GithubProjectV2DiscoverySyncResult {
+  summary: GithubSyncRunSummary;
+  projectV2s: GithubProjectV2DiscoveryContext[];
+}
+
+interface ExistingBoardHydrationRow extends QueryResultRow {
+  project_v2_id: string;
+  repository_id: string;
+}
+
+interface HydratedBoardRow extends QueryResultRow {
+  board_id: string | number | null;
+}
+
 @Injectable()
 export class GithubSyncExecutorService {
   constructor(
@@ -109,9 +129,9 @@ export class GithubSyncExecutorService {
       case "project_v2":
         return this.syncGithubProjectV2(context);
       case "project_v2_fields":
-        return this.syncGithubProjectV2Fields(context);
+        return this.syncGithubProjectV2FieldsAndHydrate(context);
       case "project_v2_items":
-        return this.syncGithubProjectV2Items(context);
+        return this.syncGithubProjectV2ItemsAndHydrate(context);
       case "full":
         return this.syncGithubFull(context);
     }
@@ -125,10 +145,8 @@ export class GithubSyncExecutorService {
       summary,
       await this.syncGithubRepositories(context)
     );
-    summary = this.mergeGithubSyncSummaries(
-      summary,
-      await this.syncGithubProjectV2Discovery(context)
-    );
+    const discovery = await this.syncGithubProjectV2Discovery(context);
+    summary = this.mergeGithubSyncSummaries(summary, discovery.summary);
     summary = this.mergeGithubSyncSummaries(
       summary,
       await this.syncGithubIssues(context)
@@ -138,19 +156,27 @@ export class GithubSyncExecutorService {
       await this.syncGithubPullRequests(context)
     );
 
-    if (context.projectV2) {
+    const projectV2Contexts = this.getGithubProjectV2ContextsForFullSync(
+      context,
+      discovery.projectV2s
+    );
+    for (const projectV2 of projectV2Contexts) {
+      const projectContext = this.withGithubSyncProjectV2(context, projectV2);
+      if (context.projectV2) {
+        summary = this.mergeGithubSyncSummaries(
+          summary,
+          await this.syncGithubProjectV2(projectContext)
+        );
+      }
       summary = this.mergeGithubSyncSummaries(
         summary,
-        await this.syncGithubProjectV2(context)
+        await this.syncGithubProjectV2Fields(projectContext)
       );
       summary = this.mergeGithubSyncSummaries(
         summary,
-        await this.syncGithubProjectV2Fields(context)
+        await this.syncGithubProjectV2Items(projectContext)
       );
-      summary = this.mergeGithubSyncSummaries(
-        summary,
-        await this.syncGithubProjectV2Items(context)
-      );
+      await this.hydrateExistingBoardsForGithubProjectV2(projectContext);
     }
 
     return summary;
@@ -284,7 +310,7 @@ export class GithubSyncExecutorService {
 
   private async syncGithubProjectV2Discovery(
     context: GithubSyncRunContext
-  ): Promise<GithubSyncRunSummary> {
+  ): Promise<GithubProjectV2DiscoverySyncResult> {
     const projects = await this.githubAppClient.listProjectV2s({
       installationId: this.toNumber(context.installation.github_installation_id),
       appId: context.config.appId,
@@ -297,6 +323,7 @@ export class GithubSyncExecutorService {
 
     let createdCount = 0;
     let updatedCount = 0;
+    const projectV2s: GithubProjectV2DiscoveryContext[] = [];
     for (const project of projects) {
       const row = await this.upsertDiscoveredGithubProjectV2(context, project);
       if (row.created) {
@@ -310,13 +337,24 @@ export class GithubSyncExecutorService {
         row.id,
         project.repositoryNodeIds
       );
+
+      projectV2s.push({
+        id: row.id,
+        workspace_id: context.workspaceId,
+        installation_id: context.installation.id,
+        github_project_node_id: project.id,
+        repositoryNodeIds: project.repositoryNodeIds
+      });
     }
 
-    return this.createGithubSyncSummary({
-      fetchedCount: projects.length,
-      createdCount,
-      updatedCount
-    });
+    return {
+      summary: this.createGithubSyncSummary({
+        fetchedCount: projects.length,
+        createdCount,
+        updatedCount
+      }),
+      projectV2s
+    };
   }
 
   private async syncGithubProjectV2(
@@ -421,6 +459,22 @@ export class GithubSyncExecutorService {
       updatedCount,
       skippedCount
     });
+  }
+
+  private async syncGithubProjectV2FieldsAndHydrate(
+    context: GithubSyncRunContext
+  ): Promise<GithubSyncRunSummary> {
+    const summary = await this.syncGithubProjectV2Fields(context);
+    await this.hydrateExistingBoardsForGithubProjectV2(context);
+    return summary;
+  }
+
+  private async syncGithubProjectV2ItemsAndHydrate(
+    context: GithubSyncRunContext
+  ): Promise<GithubSyncRunSummary> {
+    const summary = await this.syncGithubProjectV2Items(context);
+    await this.hydrateExistingBoardsForGithubProjectV2(context);
+    return summary;
   }
 
   private async upsertDiscoveredGithubProjectV2(
@@ -1361,6 +1415,7 @@ export class GithubSyncExecutorService {
           id,
           workspace_id,
           installation_id,
+          github_node_id,
           owner_login,
           name,
           full_name
@@ -1381,6 +1436,70 @@ export class GithubSyncExecutorService {
     }
 
     return context.projectV2;
+  }
+
+  private getGithubProjectV2ContextsForFullSync(
+    context: GithubSyncRunContext,
+    discoveredProjectV2s: GithubProjectV2DiscoveryContext[]
+  ): GithubSyncProjectV2ContextRow[] {
+    if (context.projectV2) {
+      return [context.projectV2];
+    }
+
+    if (!context.repository) {
+      return discoveredProjectV2s;
+    }
+
+    const repositoryNodeId = context.repository.github_node_id;
+    if (!repositoryNodeId) {
+      return [];
+    }
+
+    return discoveredProjectV2s.filter((projectV2) =>
+      projectV2.repositoryNodeIds.includes(repositoryNodeId)
+    );
+  }
+
+  private withGithubSyncProjectV2(
+    context: GithubSyncRunContext,
+    projectV2: GithubSyncProjectV2ContextRow
+  ): GithubSyncRunContext {
+    return {
+      ...context,
+      projectV2
+    };
+  }
+
+  private async hydrateExistingBoardsForGithubProjectV2(
+    context: GithubSyncRunContext
+  ): Promise<void> {
+    const projectV2 = this.requireGithubSyncProjectV2(context);
+    const values: unknown[] = [context.workspaceId, projectV2.id];
+    const repositoryFilter = context.repository
+      ? `AND b.repository_id = $${values.push(context.repository.id)}`
+      : "";
+    const boards = await this.database.query<ExistingBoardHydrationRow>(
+      `
+        SELECT
+          b.project_v2_id,
+          b.repository_id
+        FROM boards b
+        WHERE b.workspace_id = $1
+          AND b.project_v2_id = $2
+          ${repositoryFilter}
+        ORDER BY b.repository_id ASC, b.id ASC
+      `,
+      values
+    );
+
+    for (const board of boards) {
+      await this.database.queryOne<HydratedBoardRow>(
+        `
+          SELECT hydrate_pilo_board_from_github($1::uuid, $2::uuid)::text AS board_id
+        `,
+        [board.project_v2_id, board.repository_id]
+      );
+    }
   }
 
   private getProjectV2UserAccessToken(
