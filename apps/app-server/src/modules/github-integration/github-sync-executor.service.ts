@@ -329,6 +329,7 @@ export class GithubSyncExecutorService {
       privateKey: context.config.privateKey,
       projectNodeId: projectV2.github_project_node_id,
       userAccessToken: this.getProjectV2UserAccessToken(context),
+      accountType: context.installation.account_type,
       now: context.config.now
     });
     await this.upsertGithubProjectV2(context, project);
@@ -349,6 +350,7 @@ export class GithubSyncExecutorService {
       privateKey: context.config.privateKey,
       projectNodeId: projectV2.github_project_node_id,
       userAccessToken: this.getProjectV2UserAccessToken(context),
+      accountType: context.installation.account_type,
       now: context.config.now
     });
     let createdCount = 0;
@@ -384,6 +386,7 @@ export class GithubSyncExecutorService {
       privateKey: context.config.privateKey,
       projectNodeId: projectV2.github_project_node_id,
       userAccessToken: this.getProjectV2UserAccessToken(context),
+      accountType: context.installation.account_type,
       now: context.config.now
     });
     let createdCount = 0;
