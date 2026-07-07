@@ -22,6 +22,7 @@ import {
   getGithubConnectSyncStatusLabel,
   getGithubConnectSyncTargetLabel
 } from "@/features/github-integration/utils/github-connect-format";
+import { selectProjectV2IdForRepository } from "@/features/github-integration/utils/github-project-selection";
 import { useAuthSession } from "@/features/auth/auth-session";
 
 type PanelStatus = "idle" | "loading" | "ready" | "error";
@@ -225,11 +226,11 @@ export function GithubPanel() {
         )?.id ??
         repositories.data[0]?.id ??
         "";
-      const nextProjectV2Id =
-        projects.data.find((project) => project.id === preferredProjectV2Id)
-          ?.id ??
-        projects.data[0]?.id ??
-        "";
+      const nextProjectV2Id = selectProjectV2IdForRepository({
+        projects: projects.data,
+        preferredProjectV2Id,
+        repositoryId: nextRepositoryId
+      });
       const nextInstallationId =
         installations.find(
           (installation) => installation.id === selectedInstallationId
@@ -412,7 +413,13 @@ export function GithubPanel() {
   }
 
   async function handleSelectRepository(repositoryId: string) {
+    const nextProjectV2Id = selectProjectV2IdForRepository({
+      projects: snapshot.projects,
+      preferredProjectV2Id: selectedProjectV2Id,
+      repositoryId
+    });
     setSelectedRepositoryId(repositoryId);
+    setSelectedProjectV2Id(nextProjectV2Id);
     await loadGithubPullRequests(repositoryId);
   }
 
@@ -462,11 +469,17 @@ export function GithubPanel() {
       target: syncTarget
     };
 
-    if (repositoryScopedSyncTargets.has(syncTarget) && selectedRepositoryId) {
+    if (
+      (syncTarget === "full" || repositoryScopedSyncTargets.has(syncTarget)) &&
+      selectedRepositoryId
+    ) {
       body.repositoryId = selectedRepositoryId;
     }
 
-    if (projectScopedSyncTargets.has(syncTarget)) {
+    if (
+      (syncTarget === "full" || projectScopedSyncTargets.has(syncTarget)) &&
+      selectedProjectV2Id
+    ) {
       body.projectV2Id = selectedProjectV2Id;
     }
 
