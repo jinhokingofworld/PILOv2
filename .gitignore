@@ -10,6 +10,7 @@ dist/
 out/
 coverage/
 *.tsbuildinfo
+.pilo-sqltoerd-runtime-*/
 __pycache__/
 .pytest_cache/
 .ruff_cache/

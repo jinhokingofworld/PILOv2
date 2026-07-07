@@ -419,12 +419,20 @@ function formatColumnDataType(definition: SqlParserAstNode | null) {
 
   const dataType = readString(definition.dataType)?.toUpperCase() ?? "UNKNOWN";
   const length = readPrimitive(definition.length);
+  const scale = readPrimitive(definition.scale);
+  const suffix = readStringArray(definition.suffix)
+    .map((suffixPart) => suffixPart.toUpperCase())
+    .join(" ");
+  let formattedDataType = dataType;
 
   if (length !== null) {
-    return `${dataType}(${String(length)})`;
+    formattedDataType =
+      scale !== null
+        ? `${dataType}(${String(length)},${String(scale)})`
+        : `${dataType}(${String(length)})`;
   }
 
-  return dataType;
+  return suffix ? `${formattedDataType} ${suffix}` : formattedDataType;
 }
 
 function readColumnNames(value: unknown) {
@@ -573,6 +581,12 @@ function readPrimitive(value: unknown) {
   }
 
   return null;
+}
+
+function readStringArray(value: unknown) {
+  return Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === "string")
+    : [];
 }
 
 function isRecord(value: unknown): value is SqlParserAstNode {

@@ -308,6 +308,7 @@ assert.equal(postgresUsers.columns[1].dataType, "VARCHAR(255)");
 assert.equal(postgresUsers.columns[1].unique, true);
 assert.equal(postgresUsers.columns[1].nullable, false);
 assert.equal(postgresUsers.columns[2].nullable, true);
+assert.equal(postgresOrders.columns[3].dataType, "INTEGER");
 assert.deepEqual(postgresOrders.constraints, [
   {
     id: "constraint.orders.pk",
@@ -328,6 +329,29 @@ assert.deepEqual(
 assert.equal(
   postgresParseResult.modelJson.schema.relations[0].constraintName,
   "fk_orders_user"
+);
+
+const postgresTypeParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
+  dialect: "postgresql",
+  sourceText: `CREATE TABLE metrics (
+  amount NUMERIC(12,4) NOT NULL,
+  ratio DECIMAL(10,2),
+  placed_at TIMESTAMP WITH TIME ZONE NOT NULL
+);`
+});
+
+assert.equal(postgresTypeParseResult.ok, true);
+assert.equal(
+  postgresTypeParseResult.modelJson.schema.tables[0].columns[0].dataType,
+  "NUMERIC(12,4)"
+);
+assert.equal(
+  postgresTypeParseResult.modelJson.schema.tables[0].columns[1].dataType,
+  "DECIMAL(10,2)"
+);
+assert.equal(
+  postgresTypeParseResult.modelJson.schema.tables[0].columns[2].dataType,
+  "TIMESTAMP WITH TIME ZONE"
 );
 
 const mysqlParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
@@ -373,6 +397,24 @@ assert.deepEqual(mysqlParseResult.modelJson.schema.relations, [
     constraintName: "fk_orders_user"
   }
 ]);
+
+const mysqlTypeParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
+  dialect: "mysql",
+  sourceText: `CREATE TABLE metrics (
+  amount DECIMAL(10,2) NOT NULL,
+  id BIGINT UNSIGNED NOT NULL
+);`
+});
+
+assert.equal(mysqlTypeParseResult.ok, true);
+assert.equal(
+  mysqlTypeParseResult.modelJson.schema.tables[0].columns[0].dataType,
+  "DECIMAL(10,2)"
+);
+assert.equal(
+  mysqlTypeParseResult.modelJson.schema.tables[0].columns[1].dataType,
+  "BIGINT UNSIGNED"
+);
 
 const autoDialectParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
   dialect: "auto",
