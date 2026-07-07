@@ -61,7 +61,9 @@ export function BoardPanel() {
   const [assignee, setAssignee] = useState("");
   const [label, setLabel] = useState("");
   const [hydrateError, setHydrateError] = useState<string | null>(null);
+  const [statusMoveError, setStatusMoveError] = useState<string | null>(null);
   const [isHydrating, setIsHydrating] = useState(false);
+  const [movingIssueId, setMovingIssueId] = useState<string | null>(null);
   const issueQuery = useMemo(
     () => ({
       assignee: assignee || undefined,
@@ -161,6 +163,34 @@ export function BoardPanel() {
 
   function handleOpenIssue(issue: BoardIssueCardPayload) {
     setSelectedIssueId(issue.id);
+  }
+
+  async function handleMoveIssueStatus(input: {
+    issueId: string;
+    columnId: string;
+    previousColumnId: string;
+  }) {
+    if (input.columnId === input.previousColumnId) {
+      return;
+    }
+
+    setMovingIssueId(input.issueId);
+    setStatusMoveError(null);
+
+    try {
+      await boardData.moveIssueStatus(input.issueId, {
+        columnId: input.columnId,
+        previousColumnId: input.previousColumnId
+      });
+    } catch (error) {
+      setStatusMoveError(
+        error instanceof Error
+          ? error.message
+          : "Board issue status를 변경하지 못했습니다."
+      );
+    } finally {
+      setMovingIssueId(null);
+    }
   }
 
   return (
@@ -344,13 +374,21 @@ export function BoardPanel() {
         </p>
       ) : null}
 
+      {statusMoveError ? (
+        <p className="mx-7 mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-600">
+          {statusMoveError}
+        </p>
+      ) : null}
+
       <BoardKanban
         board={boardData.board}
         boardStatus={boardData.boardStatus}
         columns={boardData.columns}
         issues={boardData.issues}
+        movingIssueId={movingIssueId}
         selectedIssueId={selectedIssueId}
         onOpenIssue={handleOpenIssue}
+        onMoveIssue={(input) => void handleMoveIssueStatus(input)}
       />
 
       <section id="issues" className="sr-only" aria-label="이슈 상세" />

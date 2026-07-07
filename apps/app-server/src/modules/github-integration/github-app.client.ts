@@ -69,6 +69,14 @@ export interface GithubProjectV2LookupRequest
   projectNodeId: string;
 }
 
+export interface GithubProjectV2ItemStatusUpdateRequest
+  extends GithubProjectV2UserAccessTokenRequest {
+  projectNodeId: string;
+  itemNodeId: string;
+  fieldNodeId: string;
+  singleSelectOptionId: string | null;
+}
+
 export interface GithubProjectV2DiscoveryRequest
   extends GithubAppInstallationTokenRequest,
     GithubProjectV2UserAccessTokenRequest {
@@ -596,6 +604,46 @@ const GITHUB_PROJECT_V2_ITEMS_QUERY = `
     }
   }
 `;
+const GITHUB_PROJECT_V2_UPDATE_ITEM_STATUS_MUTATION = `
+  mutation PiloUpdateProjectV2ItemStatus(
+    $projectId: ID!
+    $itemId: ID!
+    $fieldId: ID!
+    $singleSelectOptionId: String!
+  ) {
+    updateProjectV2ItemFieldValue(
+      input: {
+        projectId: $projectId
+        itemId: $itemId
+        fieldId: $fieldId
+        value: { singleSelectOptionId: $singleSelectOptionId }
+      }
+    ) {
+      projectV2Item {
+        id
+      }
+    }
+  }
+`;
+const GITHUB_PROJECT_V2_CLEAR_ITEM_STATUS_MUTATION = `
+  mutation PiloClearProjectV2ItemStatus(
+    $projectId: ID!
+    $itemId: ID!
+    $fieldId: ID!
+  ) {
+    clearProjectV2ItemFieldValue(
+      input: {
+        projectId: $projectId
+        itemId: $itemId
+        fieldId: $fieldId
+      }
+    ) {
+      projectV2Item {
+        id
+      }
+    }
+  }
+`;
 
 @Injectable()
 export class GithubAppClient {
@@ -946,6 +994,40 @@ export class GithubAppClient {
     return items;
   }
 
+  async updateProjectV2ItemStatus(
+    input: GithubProjectV2ItemStatusUpdateRequest
+  ): Promise<void> {
+    if (!input.userAccessToken) {
+      throw badRequest("GitHub OAuth connection is required");
+    }
+
+    const errorMessage = "GitHub ProjectV2 status update failed";
+    const mutation = input.singleSelectOptionId
+      ? GITHUB_PROJECT_V2_UPDATE_ITEM_STATUS_MUTATION
+      : GITHUB_PROJECT_V2_CLEAR_ITEM_STATUS_MUTATION;
+    const mutationName = input.singleSelectOptionId
+      ? "updateProjectV2ItemFieldValue"
+      : "clearProjectV2ItemFieldValue";
+    const variables: Record<string, unknown> = {
+      projectId: input.projectNodeId,
+      itemId: input.itemNodeId,
+      fieldId: input.fieldNodeId
+    };
+
+    if (input.singleSelectOptionId) {
+      variables.singleSelectOptionId = input.singleSelectOptionId;
+    }
+
+    const data = await this.fetchGraphqlWithToken(
+      input.userAccessToken,
+      mutation,
+      variables,
+      errorMessage
+    );
+
+    this.readProjectV2ItemMutation(data, mutationName, errorMessage);
+  }
+
   async listPullRequestFiles(
     input: GithubPullRequestFileLookupRequest
   ): Promise<GithubPullRequestFileApiItem[]> {
@@ -1119,6 +1201,19 @@ export class GithubAppClient {
     }
 
     return repositoryNodeIds;
+  }
+
+  private readProjectV2ItemMutation(
+    data: unknown,
+    mutationName: string,
+    errorMessage: string
+  ): void {
+    const payload = this.toObject(this.toObject(data)[mutationName]);
+    const projectV2Item = this.toObject(payload.projectV2Item);
+
+    if (typeof projectV2Item.id !== "string" || !projectV2Item.id) {
+      throw badRequest(errorMessage);
+    }
   }
 
   private mapGraphqlErrorMessage(
