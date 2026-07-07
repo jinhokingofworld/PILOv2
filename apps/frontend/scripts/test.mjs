@@ -192,6 +192,34 @@ const piloFrameSelectionToolbar = await readFile(
   ),
   "utf8"
 );
+const piloCodeBlockShapeUtil = await readFile(
+  new URL(
+    "../src/features/canvas/components/engine/shapes/code-block/PiloCodeBlockShapeUtil.tsx",
+    import.meta.url
+  ),
+  "utf8"
+);
+const piloCodeBlockComponent = await readFile(
+  new URL(
+    "../src/features/canvas/components/engine/shapes/code-block/PiloCodeBlockComponent.tsx",
+    import.meta.url
+  ),
+  "utf8"
+);
+const piloCodeMirrorEditor = await readFile(
+  new URL(
+    "../src/features/canvas/components/engine/shapes/code-block/PiloCodeMirrorEditor.tsx",
+    import.meta.url
+  ),
+  "utf8"
+);
+const piloCodeBlockShapeTypes = await readFile(
+  new URL(
+    "../src/features/canvas/components/engine/shapes/code-block/PiloCodeBlockShapeTypes.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
 const piloCanvasPlacement = await readFile(
   new URL(
     "../src/features/canvas/components/engine/interactions/pilo-canvas-placement.ts",
@@ -470,6 +498,12 @@ assert.doesNotMatch(piloCanvasShapeUtils, /frame\/PiloFrameSelectionToolbar/);
 assert.match(piloFrameShapeUtil, /FrameShapeUtil\.configure/);
 assert.match(piloFrameShapeUtil, /resolveNextFrameName/);
 assert.doesNotMatch(piloFrameSelectionToolbar, /FrameShapeUtil\.configure/);
+assert.match(piloCodeBlockShapeUtil, /BaseFrameLikeShapeUtil/);
+assert.doesNotMatch(piloCodeBlockShapeUtil, /@codemirror/);
+assert.doesNotMatch(piloCodeBlockShapeUtil, /navigator\.clipboard/);
+assert.match(piloCodeBlockComponent, /PiloCodeMirrorEditor/);
+assert.match(piloCodeMirrorEditor, /@codemirror\/view/);
+assert.match(piloCodeBlockShapeTypes, /export type PiloCodeBlockShape/);
 assert.match(piloCanvasPlacement, /PiloPlacementRequest/);
 assert.match(piloCanvasPlacement, /placePiloCanvasShapeAt/);
 assert.match(piloCanvasGroupToolbar, /shape\.type === "group"/);

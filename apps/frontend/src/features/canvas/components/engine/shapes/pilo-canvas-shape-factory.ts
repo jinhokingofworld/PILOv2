@@ -10,7 +10,10 @@ import type {
   PiloStickyNoteColor,
   PiloStickyNoteShape,
 } from "./sticky-note/PiloStickyNoteShapeUtil";
-import type { PiloCodeBlockShape } from "./code-block/PiloCodeBlockShapeUtil";
+import {
+  DEFAULT_PILO_CODE_BLOCK_PROPS,
+  type PiloCodeBlockShape,
+} from "./code-block/PiloCodeBlockShapeTypes";
 import {
   createPiloAssetId,
   type PiloMediaAsset,
@@ -62,12 +65,9 @@ export function createCodeBlockShape(
     x: position.x - width / 2,
     y: position.y - height / 2,
     props: {
+      ...DEFAULT_PILO_CODE_BLOCK_PROPS,
       w: width,
       h: height,
-      fileName: "canvas-node.tsx",
-      language: "tsx",
-      code: "export function CanvasNode() {\n  return <div>PILO</div>;\n}",
-      scrollY: 0,
     },
   };
 }

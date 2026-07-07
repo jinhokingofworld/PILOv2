@@ -32,6 +32,11 @@ WorkspaceCanvas -> PiloCanvasRuntime -> PiloTldrawCanvas -> TldrawSurface
 - `interactions/`: placement, smart guide, selection stacking
 - `assets/`: image/video asset 생성과 복원
 
+`shapes/code-block/`은 code block shape의 tldraw 연결과 editor UI 책임을 파일 단위로
+분리한다. `PiloCodeBlockShapeUtil`은 shape props schema, geometry, resize,
+component 연결만 담당하고, CodeMirror 설정과 code editor UI는 code-block 하위
+컴포넌트/타입 파일에서 담당한다.
+
 `runtime/`은 `PiloCanvasRuntime`을 조립자로 두고 책임별 파일을 평평하게 나눈다.
 
 - `useCanvasRuntimeHydration`: board 변경 시 초기 shape와 view setting 복원
