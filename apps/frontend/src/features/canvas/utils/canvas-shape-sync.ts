@@ -1,3 +1,7 @@
+import diff from "microdiff";
+import PQueue from "p-queue";
+import pRetry from "p-retry";
+
 export type CanvasFreeformShapeSnapshot = {
   id?: unknown;
   type?: unknown;
@@ -20,6 +24,8 @@ export type CanvasShapePayload = {
   rotation: number;
   zIndex: number;
   rawShape: Record<string, unknown>;
+  contentHash?: string;
+  revision?: number;
 };
 
 export type CanvasShapeApiClient = {
@@ -76,10 +82,25 @@ type CanvasShapeSyncQueueOptions = {
   canvasClient: CanvasShapeApiClient;
   debounceMs?: number;
   onError?: (error: unknown) => void;
+  onSynced?: (operations: CanvasShapeSyncOperation[]) => void;
   workspaceId: string;
 };
 
 const DEFAULT_CANVAS_SHAPE_SYNC_QUEUE_DEBOUNCE_MS = 500;
+const DEFAULT_CANVAS_SHAPE_SYNC_RETRY_ATTEMPTS = 3;
+const DEFAULT_CANVAS_SHAPE_SYNC_RETRY_DELAY_MS = 320;
+
+class CanvasShapeSyncFailure extends Error {
+  readonly cause: unknown;
+  readonly failedOperations: CanvasShapeSyncOperation[];
+
+  constructor(error: unknown, failedOperations: CanvasShapeSyncOperation[]) {
+    super("Canvas shape sync failed");
+    this.name = "CanvasShapeSyncFailure";
+    this.cause = error;
+    this.failedOperations = failedOperations;
+  }
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -99,8 +120,35 @@ function cloneRawShape(shape: CanvasFreeformShapeSnapshot) {
   return JSON.parse(JSON.stringify(shape)) as Record<string, unknown>;
 }
 
-function shapeSnapshotKey(shape: CanvasFreeformShapeSnapshot) {
-  return JSON.stringify(shape);
+export function hasCanvasFreeformShapeChanged(
+  previousShape: CanvasFreeformShapeSnapshot,
+  nextShape: CanvasFreeformShapeSnapshot,
+) {
+  return diff(previousShape, nextShape).length > 0;
+}
+
+export function areCanvasFreeformShapesEqual(
+  previousShapes: CanvasFreeformShapeSnapshot[],
+  nextShapes: CanvasFreeformShapeSnapshot[],
+) {
+  if (previousShapes.length !== nextShapes.length) {
+    return false;
+  }
+
+  for (let index = 0; index < previousShapes.length; index += 1) {
+    const previousShape = previousShapes[index];
+    const nextShape = nextShapes[index];
+
+    if (previousShape?.id !== nextShape?.id) {
+      return false;
+    }
+
+    if (hasCanvasFreeformShapeChanged(previousShape, nextShape)) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 function toShapeMap(shapes: CanvasFreeformShapeSnapshot[]) {
@@ -167,7 +215,7 @@ export function buildCanvasShapeSyncOperations(
       return;
     }
 
-    if (shapeSnapshotKey(previousShape) !== shapeSnapshotKey(shape)) {
+    if (hasCanvasFreeformShapeChanged(previousShape, shape)) {
       operations.push({
         type: "update",
         shapeId: shape.id,
@@ -264,6 +312,14 @@ function runCanvasShapeSyncOperation({
   });
 }
 
+function runWithRetry(task: () => Promise<unknown>) {
+  return pRetry(task, {
+    factor: 2,
+    minTimeout: DEFAULT_CANVAS_SHAPE_SYNC_RETRY_DELAY_MS,
+    retries: DEFAULT_CANVAS_SHAPE_SYNC_RETRY_ATTEMPTS,
+  });
+}
+
 async function runCanvasShapeSyncOperations({
   boardId,
   canvasClient,
@@ -275,29 +331,47 @@ async function runCanvasShapeSyncOperations({
   operations: CanvasShapeSyncOperation[];
   workspaceId: string;
 }) {
-  if (canvasClient.syncShapesBatch) {
-    await canvasClient.syncShapesBatch(
-      boardId,
-      {
-        operations,
-      },
-      {
-        workspaceId,
-      },
-    );
+  if (!operations.length) {
     return;
   }
 
-  await Promise.all(
-    operations.map((operation) =>
-      runCanvasShapeSyncOperation({
-        boardId,
-        canvasClient,
-        operation,
-        workspaceId,
-      }),
-    ),
-  );
+  const syncShapesBatch = canvasClient.syncShapesBatch;
+
+  if (syncShapesBatch) {
+    try {
+      await runWithRetry(async () => {
+        await syncShapesBatch(
+          boardId,
+          {
+            operations,
+          },
+          {
+            workspaceId,
+          },
+        );
+      });
+    } catch (error) {
+      throw new CanvasShapeSyncFailure(error, operations);
+    }
+    return;
+  }
+
+  for (let index = 0; index < operations.length; index += 1) {
+    const operation = operations[index];
+
+    try {
+      await runWithRetry(async () => {
+        await runCanvasShapeSyncOperation({
+          boardId,
+          canvasClient,
+          operation,
+          workspaceId,
+        });
+      });
+    } catch (error) {
+      throw new CanvasShapeSyncFailure(error, operations.slice(index));
+    }
+  }
 }
 
 export function createCanvasShapeSyncQueue({
@@ -305,9 +379,11 @@ export function createCanvasShapeSyncQueue({
   canvasClient,
   debounceMs = DEFAULT_CANVAS_SHAPE_SYNC_QUEUE_DEBOUNCE_MS,
   onError,
+  onSynced,
   workspaceId,
 }: CanvasShapeSyncQueueOptions): CanvasShapeSyncQueue {
   const pendingOperations = new Map<string, CanvasShapeSyncOperation>();
+  const requestQueue = new PQueue({ concurrency: 1 });
   const idleWaiters: Array<{
     reject: (error: unknown) => void;
     resolve: () => void;
@@ -323,7 +399,13 @@ export function createCanvasShapeSyncQueue({
   }
 
   function isIdle() {
-    return pendingOperations.size === 0 && !flushTimer && !flushPromise;
+    return (
+      pendingOperations.size === 0 &&
+      !flushTimer &&
+      !flushPromise &&
+      requestQueue.size === 0 &&
+      requestQueue.pending === 0
+    );
   }
 
   function resolveIdleWaiters() {
@@ -347,12 +429,31 @@ export function createCanvasShapeSyncQueue({
 
     if (!operations.length) return;
 
-    await runCanvasShapeSyncOperations({
-      boardId,
-      canvasClient,
-      operations,
-      workspaceId,
-    });
+    try {
+      await runCanvasShapeSyncOperations({
+        boardId,
+        canvasClient,
+        operations,
+        workspaceId,
+      });
+      onSynced?.(operations);
+    } catch (error) {
+      const queuedDuringFlush = Array.from(pendingOperations.values());
+      const failedOperations =
+        error instanceof CanvasShapeSyncFailure
+          ? error.failedOperations
+          : operations;
+
+      pendingOperations.clear();
+      failedOperations.forEach((operation) => {
+        mergeQueuedCanvasShapeSyncOperation(pendingOperations, operation);
+      });
+      queuedDuringFlush.forEach((operation) => {
+        mergeQueuedCanvasShapeSyncOperation(pendingOperations, operation);
+      });
+
+      throw error;
+    }
 
     if (pendingOperations.size) {
       await flushPendingOperations();
@@ -363,7 +464,8 @@ export function createCanvasShapeSyncQueue({
     clearFlushTimer();
 
     if (!flushPromise) {
-      flushPromise = flushPendingOperations()
+      flushPromise = requestQueue
+        .add(() => flushPendingOperations())
         .catch((error: unknown) => {
           if (pendingOperations.size) {
             scheduleFlush();
@@ -394,6 +496,7 @@ export function createCanvasShapeSyncQueue({
   return {
     cancel() {
       clearFlushTimer();
+      requestQueue.clear();
       pendingOperations.clear();
       resolveIdleWaiters();
     },
@@ -413,7 +516,7 @@ export function createCanvasShapeSyncQueue({
     },
     flush,
     size() {
-      return pendingOperations.size;
+      return pendingOperations.size + requestQueue.size + requestQueue.pending;
     },
     whenIdle() {
       if (isIdle()) return Promise.resolve();

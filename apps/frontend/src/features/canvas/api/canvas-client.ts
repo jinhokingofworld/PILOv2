@@ -16,6 +16,11 @@ type CanvasViewportShapeQuery = {
   margin?: number;
 };
 
+type CanvasWorkspaceRequestOptions = {
+  signal?: AbortSignal;
+  workspaceId: string;
+};
+
 type CanvasBoardDetail = {
   id: string;
   workspaceId: string;
@@ -372,18 +377,21 @@ export function createCanvasApiClient({
     async listShapesInViewport(
       boardId: string,
       query: CanvasViewportShapeQuery,
-      { workspaceId }: { workspaceId: string },
+      { signal, workspaceId }: CanvasWorkspaceRequestOptions,
     ) {
       const search = buildViewportShapeQuery(query);
       const path = `/workspaces/${encodeURIComponent(workspaceId)}/canvases/${encodeURIComponent(boardId)}/shapes?${search}`;
-      const shapes = await requestCanvasJson(path, undefined, requestOptions);
+      const shapes = await requestCanvasJson(path, { signal }, requestOptions);
 
       return normalizeCanvasShapes(shapes);
     },
 
-    async getShapeDetail(shapeId: string, { workspaceId }: { workspaceId: string }) {
+    async getShapeDetail(
+      shapeId: string,
+      { signal, workspaceId }: CanvasWorkspaceRequestOptions,
+    ) {
       const path = `/workspaces/${encodeURIComponent(workspaceId)}/canvas-shapes/${encodeURIComponent(shapeId)}`;
-      const shape = await requestCanvasJson(path, undefined, requestOptions);
+      const shape = await requestCanvasJson(path, { signal }, requestOptions);
 
       return normalizeCanvasShape(shape);
     },
@@ -514,7 +522,7 @@ export function createMockCanvasClient() {
     async listShapesInViewport(
       boardId: string,
       _query: CanvasViewportShapeQuery,
-      { workspaceId }: { workspaceId?: string } = {},
+      { workspaceId }: Partial<CanvasWorkspaceRequestOptions> = {},
     ) {
       const defaultBoard = createMockCanvasBoardDetail(workspaceId);
       const storedBoard = readMockBoards(defaultBoard.workspaceId).find(
@@ -531,7 +539,10 @@ export function createMockCanvasClient() {
       return normalizeCanvasShapes(board.shapes);
     },
 
-    async getShapeDetail(shapeId: string, { workspaceId }: { workspaceId?: string } = {}) {
+    async getShapeDetail(
+      shapeId: string,
+      { workspaceId }: Partial<CanvasWorkspaceRequestOptions> = {},
+    ) {
       const defaultBoard = createMockCanvasBoardDetail(workspaceId);
       const boards = [
         defaultBoard,
@@ -572,6 +583,38 @@ export function createMockCanvasClient() {
     async syncShapesBatch(_boardId: string, body: unknown) {
       const operations =
         isRecord(body) && Array.isArray(body.operations) ? body.operations : [];
+      const changedShapes = operations.flatMap((operation) => {
+        if (
+          !isRecord(operation) ||
+          (operation.type !== "create" && operation.type !== "update") ||
+          !isRecord(operation.payload)
+        ) {
+          return [];
+        }
+
+        return [
+          {
+            ...operation.payload,
+            contentHash: `mock-${String(operation.shapeId)}-content`,
+            revision: 1,
+          },
+        ];
+      });
+      const deletedShapes = operations.flatMap((operation) => {
+        if (!isRecord(operation) || operation.type !== "delete") {
+          return [];
+        }
+
+        return [
+          {
+            id: operation.shapeId,
+            deleted: true,
+            deletedAt: new Date().toISOString(),
+            contentHash: `mock-${String(operation.shapeId)}-content`,
+            revision: 1,
+          },
+        ];
+      });
 
       return {
         created: operations.filter(
@@ -583,6 +626,8 @@ export function createMockCanvasClient() {
         deleted: operations.filter(
           (operation) => isRecord(operation) && operation.type === "delete",
         ).length,
+        shapes: changedShapes,
+        deletedShapes,
       };
     },
 
@@ -602,6 +647,8 @@ export function createMockCanvasClient() {
         rotation: body.rotation ?? 0,
         zIndex: body.zIndex ?? 1,
         rawShape: body.rawShape ?? {},
+        contentHash: `mock-${String(body.id ?? "created")}-content`,
+        revision: 1,
         createdAt: now,
         updatedAt: now,
         deletedAt: null,
@@ -612,6 +659,8 @@ export function createMockCanvasClient() {
       return {
         id: shapeId,
         ...body,
+        contentHash: `mock-${shapeId}-content`,
+        revision: 1,
       };
     },
 
@@ -619,6 +668,9 @@ export function createMockCanvasClient() {
       return {
         id: shapeId,
         deleted: true,
+        deletedAt: new Date().toISOString(),
+        contentHash: `mock-${shapeId}-content`,
+        revision: 1,
       };
     },
 

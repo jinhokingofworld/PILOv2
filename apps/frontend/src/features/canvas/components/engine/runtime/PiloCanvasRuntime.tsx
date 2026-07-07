@@ -1,5 +1,10 @@
 "use client";
 
+import {
+  QueryClient,
+  QueryClientProvider,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { Magnet } from "lucide-react";
 import {
   useCallback,
@@ -14,6 +19,8 @@ import {
   writeCanvasStorage,
 } from "../../../utils/canvas-storage";
 import {
+  areCanvasFreeformShapesEqual,
+  hasCanvasFreeformShapeChanged,
   createCanvasShapeSyncQueue,
   syncCanvasFreeformShapes,
   type CanvasShapeSyncQueue,
@@ -64,11 +71,11 @@ type CanvasViewSettingApiClient = CanvasShapeApiClient & {
   listShapesInViewport?: (
     boardId: string,
     query: PiloCanvasViewportBounds & { margin: number },
-    options: { workspaceId: string },
+    options: { signal?: AbortSignal; workspaceId: string },
   ) => Promise<unknown>;
   getShapeDetail?: (
     shapeId: string,
-    options: { workspaceId: string },
+    options: { signal?: AbortSignal; workspaceId: string },
   ) => Promise<unknown>;
   enterCanvas?: (
     boardId: string,
@@ -84,6 +91,8 @@ const DEFAULT_VIEW_SETTING_SYNC_DEBOUNCE_MS = 360;
 const DEFAULT_VIEWPORT_SHAPE_LOAD_DEBOUNCE_MS = 280;
 const DEFAULT_VIEWPORT_SHAPE_LOAD_MARGIN = 320;
 const CANVAS_SHAPE_DETAIL_MIN_ZOOM = 0.75;
+const CANVAS_VIEWPORT_SHAPE_STALE_TIME_MS = 5_000;
+const CANVAS_SHAPE_DETAIL_STALE_TIME_MS = 30_000;
 const noopCanvasHistoryStateChange = () => {};
 const initialCanvasSnapState: PiloCanvasSnapState = {
   isSmartGuideEnabled: false,
@@ -102,14 +111,6 @@ function areViewSettingsEqual(
     current.viewportX === next.viewportX &&
     current.viewportY === next.viewportY
   );
-}
-
-function buildFreeformShapesKey(shapes: PiloCanvasFreeformShape[]) {
-  return JSON.stringify(shapes);
-}
-
-function buildFreeformShapeKey(shape: PiloCanvasFreeformShape) {
-  return JSON.stringify(shape);
 }
 
 function getFreeformShapeId(shape: PiloCanvasFreeformShape) {
@@ -143,7 +144,7 @@ function getChangedFreeformShapeIds(
 
     if (
       !currentShape ||
-      buildFreeformShapeKey(currentShape) !== buildFreeformShapeKey(nextShape)
+      hasCanvasFreeformShapeChanged(currentShape, nextShape)
     ) {
       changedShapeIds.add(shapeId);
     }
@@ -218,6 +219,63 @@ function normalizeViewSetting(
 }
 
 export function PiloCanvasRuntime({
+  ...props
+}: PiloCanvasRuntimeProps) {
+  const [queryClient] = useState(
+    () =>
+      new QueryClient({
+        defaultOptions: {
+          queries: {
+            refetchOnWindowFocus: false,
+            retry: 1,
+          },
+        },
+      }),
+  );
+
+  return (
+    <QueryClientProvider client={queryClient}>
+      <PiloCanvasRuntimeInner {...props} />
+    </QueryClientProvider>
+  );
+}
+
+function buildViewportShapeQueryKey({
+  boardId,
+  bounds,
+  workspaceId,
+}: {
+  boardId: string;
+  bounds: PiloCanvasViewportBounds;
+  workspaceId: string;
+}) {
+  const round = (value: number) => Math.round(value * 100) / 100;
+
+  return [
+    "canvas",
+    workspaceId,
+    boardId,
+    "viewport-shapes",
+    round(bounds.x),
+    round(bounds.y),
+    round(bounds.width),
+    round(bounds.height),
+    round(bounds.zoom),
+    DEFAULT_VIEWPORT_SHAPE_LOAD_MARGIN,
+  ] as const;
+}
+
+function buildShapeDetailQueryKey({
+  shapeId,
+  workspaceId,
+}: {
+  shapeId: string;
+  workspaceId: string;
+}) {
+  return ["canvas", workspaceId, "shape-detail", shapeId] as const;
+}
+
+function PiloCanvasRuntimeInner({
   board,
   canvasClient = null,
   onHistoryStateChange,
@@ -225,6 +283,7 @@ export function PiloCanvasRuntime({
   onReady,
   storageMode = "local",
 }: PiloCanvasRuntimeProps) {
+  const queryClient = useQueryClient();
   const [canvasActions, setCanvasActions] = useState<PiloCanvasActions | null>(
     null,
   );
@@ -248,9 +307,11 @@ export function PiloCanvasRuntime({
   const viewportShapeLoadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
+  const viewportShapeLoadRequestSeqRef = useRef(0);
   const latestViewportBoundsRef = useRef<PiloCanvasViewportBounds | null>(null);
   const shapeDetailCacheRef = useRef(new Map<string, PiloCanvasFreeformShape>());
   const pendingShapeDetailRef = useRef<string | null>(null);
+  const shapeDetailRequestSeqRef = useRef(0);
   const pendingLocalShapeVersionsRef = useRef(new Map<string, number>());
   const localShapeVersionRef = useRef(0);
   const [canvasHydrationVersion, setCanvasHydrationVersion] = useState(0);
@@ -284,6 +345,8 @@ export function PiloCanvasRuntime({
 
       shapeDetailCacheRef.current.clear();
       pendingShapeDetailRef.current = null;
+      shapeDetailRequestSeqRef.current += 1;
+      viewportShapeLoadRequestSeqRef.current += 1;
       pendingLocalShapeVersionsRef.current.clear();
       freeformShapesRef.current = storedFreeformShapes;
       setFreeformShapes(storedFreeformShapes);
@@ -315,6 +378,20 @@ export function PiloCanvasRuntime({
       canvasClient,
       onError(error: unknown) {
         console.error("Canvas API shape sync failed", error);
+      },
+      onSynced(operations) {
+        void queryClient.invalidateQueries({
+          queryKey: ["canvas", board.workspaceId, board.id, "viewport-shapes"],
+        });
+
+        operations.forEach((operation) => {
+          void queryClient.invalidateQueries({
+            queryKey: buildShapeDetailQueryKey({
+              shapeId: operation.shapeId,
+              workspaceId: board.workspaceId,
+            }),
+          });
+        });
       },
       workspaceId: board.workspaceId,
     });
@@ -379,7 +456,7 @@ export function PiloCanvasRuntime({
         shapeSyncQueueRef.current = null;
       }
     };
-  }, [board.id, board.workspaceId, canvasClient, storageMode]);
+  }, [board.id, board.workspaceId, canvasClient, queryClient, storageMode]);
 
   function markPendingLocalShapeChanges(
     currentShapes: PiloCanvasFreeformShape[],
@@ -420,8 +497,10 @@ export function PiloCanvasRuntime({
   const captureDraftFreeformShapes = useCallback(
     (nextFreeformShapes: PiloCanvasFreeformShape[]) => {
       if (
-        buildFreeformShapesKey(freeformShapesRef.current) ===
-        buildFreeformShapesKey(nextFreeformShapes)
+        areCanvasFreeformShapesEqual(
+          freeformShapesRef.current,
+          nextFreeformShapes,
+        )
       ) {
         return;
       }
@@ -454,8 +533,7 @@ export function PiloCanvasRuntime({
       );
 
       if (
-        buildFreeformShapesKey(freeformShapesRef.current) ===
-        buildFreeformShapesKey(mergedShapes)
+        areCanvasFreeformShapesEqual(freeformShapesRef.current, mergedShapes)
       ) {
         return;
       }
@@ -471,8 +549,7 @@ export function PiloCanvasRuntime({
     (nextFreeformShapes: PiloCanvasFreeformShape[]) => {
       setFreeformShapes((currentFreeformShapes) => {
         if (
-          buildFreeformShapesKey(currentFreeformShapes) ===
-          buildFreeformShapesKey(nextFreeformShapes)
+          areCanvasFreeformShapesEqual(currentFreeformShapes, nextFreeformShapes)
         ) {
           return currentFreeformShapes;
         }
@@ -602,33 +679,78 @@ export function PiloCanvasRuntime({
 
         if (!latestBounds) return;
 
-        void listShapesInViewport(
-          board.id,
-          {
-            ...latestBounds,
-            margin: DEFAULT_VIEWPORT_SHAPE_LOAD_MARGIN,
-          },
-          {
-            workspaceId: board.workspaceId,
-          },
-        )
+        const requestSeq = viewportShapeLoadRequestSeqRef.current + 1;
+        viewportShapeLoadRequestSeqRef.current = requestSeq;
+        const queryKey = buildViewportShapeQueryKey({
+          boardId: board.id,
+          bounds: latestBounds,
+          workspaceId: board.workspaceId,
+        });
+
+        void queryClient
+          .cancelQueries({
+            exact: false,
+            queryKey: [
+              "canvas",
+              board.workspaceId,
+              board.id,
+              "viewport-shapes",
+            ],
+          })
+          .then(() =>
+            queryClient.fetchQuery({
+              queryKey,
+              staleTime: CANVAS_VIEWPORT_SHAPE_STALE_TIME_MS,
+              queryFn: ({ signal }) =>
+                listShapesInViewport(
+                  board.id,
+                  {
+                    ...latestBounds,
+                    margin: DEFAULT_VIEWPORT_SHAPE_LOAD_MARGIN,
+                  },
+                  {
+                    signal,
+                    workspaceId: board.workspaceId,
+                  },
+                ),
+            }),
+          )
           .then((shapes) => {
+            if (
+              viewportShapeLoadRequestSeqRef.current !== requestSeq ||
+              latestViewportBoundsRef.current !== latestBounds
+            ) {
+              return;
+            }
+
             mergeLoadedFreeformShapes(
               normalizeCanvasFreeformShapes(shapes) as PiloCanvasFreeformShape[],
             );
           })
           .catch((error: unknown) => {
+            if (error instanceof Error && error.name === "AbortError") {
+              return;
+            }
+
             console.error("Canvas API viewport shape load failed", error);
           });
       }, DEFAULT_VIEWPORT_SHAPE_LOAD_DEBOUNCE_MS);
     },
-    [board.id, board.workspaceId, canvasClient, mergeLoadedFreeformShapes, storageMode],
+    [
+      board.id,
+      board.workspaceId,
+      canvasClient,
+      mergeLoadedFreeformShapes,
+      queryClient,
+      storageMode,
+    ],
   );
 
   const loadShapeDetail = useCallback(
     ({ shapeId, zoom }: PiloCanvasShapeDetailRequest) => {
       if (zoom < CANVAS_SHAPE_DETAIL_MIN_ZOOM) {
         pendingShapeDetailRef.current = null;
+        shapeDetailRequestSeqRef.current += 1;
         return;
       }
 
@@ -648,14 +770,38 @@ export function PiloCanvasRuntime({
       }
 
       const getShapeDetail = canvasClient.getShapeDetail;
+      const requestSeq = shapeDetailRequestSeqRef.current + 1;
+      const queryKey = buildShapeDetailQueryKey({
+        shapeId,
+        workspaceId: board.workspaceId,
+      });
 
+      shapeDetailRequestSeqRef.current = requestSeq;
       pendingShapeDetailRef.current = shapeId;
 
-      void getShapeDetail(shapeId, {
-        workspaceId: board.workspaceId,
-      })
+      void queryClient
+        .cancelQueries({
+          exact: false,
+          queryKey: ["canvas", board.workspaceId, "shape-detail"],
+        })
+        .then(() =>
+          queryClient.fetchQuery({
+            queryKey,
+            staleTime: CANVAS_SHAPE_DETAIL_STALE_TIME_MS,
+            queryFn: ({ signal }) =>
+              getShapeDetail(shapeId, {
+                signal,
+                workspaceId: board.workspaceId,
+              }),
+          }),
+        )
         .then((shape) => {
-          if (pendingShapeDetailRef.current !== shapeId) return;
+          if (
+            pendingShapeDetailRef.current !== shapeId ||
+            shapeDetailRequestSeqRef.current !== requestSeq
+          ) {
+            return;
+          }
 
           const [detailShape] = normalizeCanvasFreeformShapes([
             shape,
@@ -667,10 +813,20 @@ export function PiloCanvasRuntime({
           mergeLoadedFreeformShapes([detailShape]);
         })
         .catch((error: unknown) => {
+          if (error instanceof Error && error.name === "AbortError") {
+            return;
+          }
+
           console.error("Canvas API shape detail load failed", error);
         });
     },
-    [board.workspaceId, canvasClient, mergeLoadedFreeformShapes, storageMode],
+    [
+      board.workspaceId,
+      canvasClient,
+      mergeLoadedFreeformShapes,
+      queryClient,
+      storageMode,
+    ],
   );
 
   const markCanvasUiEvent = useCallback(

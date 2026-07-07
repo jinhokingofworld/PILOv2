@@ -59,6 +59,9 @@ const workspaceMeetingConstraintMigration = await readSource(
 const workspaceMembershipMigration = await readSource(
   "../../../db/migrations/008_create_workspace_memberships_and_invitations.sql"
 );
+const canvasShapeHashMigration = await readSource(
+  "../../../db/migrations/009_canvas_shape_hash_revision_viewport_index.sql"
+);
 const devTerraformMain = await readSource("../../../infra/envs/dev/main.tf");
 const terraformSecretsModule = await readSource(
   "../../../infra/modules/secrets/main.tf"
@@ -185,6 +188,11 @@ assert.match(canvasService, /UPDATE canvas/);
 assert.match(canvasService, /viewport_x =/);
 assert.match(canvasService, /INSERT INTO canvas_freeform_shapes/);
 assert.match(canvasService, /UPDATE canvas_freeform_shapes s/);
+assert.match(canvasService, /content_hash/);
+assert.match(canvasService, /contentHash/);
+assert.match(canvasService, /revision = s\.revision \+ 1/);
+assert.match(canvasService, /max_x >= \$2/);
+assert.match(canvasService, /max_y >= \$4/);
 assert.match(canvasService, /listShapesInViewport/);
 assert.match(canvasService, /validateViewportBounds/);
 assert.match(canvasService, /getShapeDetail/);
@@ -196,11 +204,16 @@ assert.match(canvasService, /leaveCanvas/);
 assert.match(canvasService, /canvas_user_states/);
 assert.match(canvasService, /DELETE FROM canvas_freeform_shapes/);
 assert.match(canvasService, /permanentlyDeletedShapeCount/);
-assert.match(canvasService, /SET deleted_at = now\(\)/);
+assert.match(canvasService, /deleted_at = now\(\)/);
 assert.match(canvasService, /deleted_at IS NULL/);
 assert.match(canvasService, /ON CONFLICT \(id\) DO UPDATE/);
 assert.match(canvasService, /deleted_at = NULL/);
 assert.match(canvasService, /canvas_freeform_shapes\.deleted_at IS NOT NULL/);
+assert.match(canvasShapeHashMigration, /ADD COLUMN content_hash TEXT NOT NULL DEFAULT ''/);
+assert.match(canvasShapeHashMigration, /ADD COLUMN revision BIGINT NOT NULL DEFAULT 1/);
+assert.match(canvasShapeHashMigration, /ADD COLUMN max_x DOUBLE PRECISION/);
+assert.match(canvasShapeHashMigration, /idx_canvas_freeform_shapes_viewport_active/);
+assert.match(canvasShapeHashMigration, /idx_canvas_freeform_shapes_order_active/);
 assert.match(meetingModule, /DatabaseModule/);
 assert.match(meetingModule, /WorkspaceModule/);
 assert.match(meetingModule, /LiveKitEgressService/);

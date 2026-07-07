@@ -9,8 +9,10 @@ API contract: `docs/api/canvas-api.md`
 - 자유형 Workspace canvas
 - shape 생성, 이동, 수정, 삭제
 - viewport 상태
+- shape `contentHash`, `revision`, viewport bounds 기반 조회
 
 주의:
 
 - PR Review canvas는 자유형 canvas 테이블에 저장하지 않는다.
 - PR Review 화면용 graph는 PR Review 모듈의 view model이다.
+- `contentHash`는 서버가 canonical shape content 기준으로 계산한다.
