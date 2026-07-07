@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import {
   Database,
@@ -27,10 +27,12 @@ import {
   type SqlErdInspectorViewModel
 } from "@/features/sql-erd/utils/inspector";
 import {
+  createSqltoerdLayoutForModel,
   createSqltoerdModelIndex,
   getSqltoerdModelCounts,
   getTableDisplayName
 } from "@/features/sql-erd/utils/model";
+import { parseSqlDdlToErdModel } from "@/features/sql-erd/utils/ddl-parser";
 import { cn } from "@/lib/utils";
 
 type SqlErdViewSession = Pick<
@@ -50,7 +52,7 @@ type SqlErdViewSession = Pick<
 type SqlErdSessionLoadState = {
   label: string;
   message: string;
-  tone: "neutral" | "success";
+  tone: "error" | "neutral" | "success";
 };
 
 const sampleSqlErdViewSession = createSampleSqlErdViewSession(
@@ -89,6 +91,22 @@ function createWorkspaceSqlErdViewSession(
   };
 }
 
+function getSqlErdGenerateErrorMessage(errorCode: string) {
+  if (errorCode === "EMPTY_SOURCE") {
+    return "Enter one or more CREATE TABLE statements";
+  }
+
+  if (errorCode === "UNSUPPORTED_DIALECT") {
+    return "Selected SQL dialect is not supported by the MVP parser";
+  }
+
+  if (errorCode === "NO_CREATE_TABLE") {
+    return "SQLtoERD MVP expects CREATE TABLE statements";
+  }
+
+  return "SQL DDL could not be parsed";
+}
+
 export function SqlErdPanel() {
   const authSession = useAuthSession();
   const [isSourceOpen, setIsSourceOpen] = useState(false);
@@ -104,6 +122,7 @@ export function SqlErdPanel() {
     });
   const [selectedSqlErdObject, setSelectedSqlErdObject] =
     useState<SqlErdSelection>({ type: "none" });
+  const [isGenerating, setIsGenerating] = useState(false);
   const modelIndex = useMemo(
     () => createSqltoerdModelIndex(sqlErdViewSession.modelJson),
     [sqlErdViewSession.modelJson]
@@ -116,6 +135,104 @@ export function SqlErdPanel() {
     () => createSqlErdInspectorViewModel(selectedSqlErdObject, modelIndex),
     [modelIndex, selectedSqlErdObject]
   );
+  const handleSourceTextChange = useCallback((sourceText: string) => {
+    setSqlErdViewSession((currentSession) => ({
+      ...currentSession,
+      sourceText
+    }));
+  }, []);
+  const handleGenerate = useCallback(async () => {
+    if (isGenerating) {
+      return;
+    }
+
+    if (!authSession) {
+      setSessionLoadState({
+        label: "Sign in",
+        message: "Sign in to save a Workspace session",
+        tone: "error"
+      });
+      return;
+    }
+
+    setIsGenerating(true);
+    setSessionLoadState({
+      label: "Parsing",
+      message: "Parsing SQL DDL",
+      tone: "neutral"
+    });
+
+    const parseResult = parseSqlDdlToErdModel({
+      dialect: sqlErdViewSession.dialect,
+      sourceText: sqlErdViewSession.sourceText
+    });
+
+    if (!parseResult.ok) {
+      setSessionLoadState({
+        label: "Parse error",
+        message: getSqlErdGenerateErrorMessage(parseResult.error.code),
+        tone: "error"
+      });
+      setIsGenerating(false);
+      return;
+    }
+
+    const nextLayoutJson = createSqltoerdLayoutForModel(
+      parseResult.modelJson,
+      sqlErdViewSession.layoutJson
+    );
+    const sqlErdApiClient = createSqlErdApiClient({
+      accessToken: authSession.accessToken
+    });
+    const writePayload = {
+      title: sqlErdViewSession.title,
+      sourceFormat: sqlErdViewSession.sourceFormat,
+      dialect: sqlErdViewSession.dialect,
+      sourceText: sqlErdViewSession.sourceText,
+      modelJson: parseResult.modelJson,
+      layoutJson: nextLayoutJson,
+      settingsJson: sqlErdViewSession.settingsJson
+    };
+
+    setSessionLoadState({
+      label: "Saving",
+      message: "Saving Workspace session",
+      tone: "neutral"
+    });
+
+    try {
+      const savedSession =
+        sqlErdViewSession.id && sqlErdViewSession.revision !== null
+          ? await sqlErdApiClient.updateSession(
+              authSession.activeWorkspaceId,
+              sqlErdViewSession.id,
+              {
+                baseRevision: sqlErdViewSession.revision,
+                ...writePayload
+              }
+            )
+          : await sqlErdApiClient.createSession(
+              authSession.activeWorkspaceId,
+              writePayload
+            );
+
+      setSqlErdViewSession(createWorkspaceSqlErdViewSession(savedSession));
+      setSessionLoadState({
+        label: "Workspace",
+        message: `Workspace session revision ${savedSession.revision}`,
+        tone: "success"
+      });
+      setSelectedSqlErdObject({ type: "none" });
+    } catch {
+      setSessionLoadState({
+        label: "Save error",
+        message: "Workspace session could not be saved",
+        tone: "error"
+      });
+    } finally {
+      setIsGenerating(false);
+    }
+  }, [authSession, isGenerating, sqlErdViewSession]);
 
   useEffect(() => {
     setIsSourceOpen(window.matchMedia("(min-width: 1024px)").matches);
@@ -198,9 +315,19 @@ export function SqlErdPanel() {
     <section className="flex min-h-[calc(100vh-8.5rem)] overflow-hidden rounded-lg border bg-background shadow-sm">
       <SourcePanel
         counts={sessionCounts}
+        dialect={sqlErdViewSession.dialect}
         isOpen={isSourceOpen}
+        isGenerateDisabled={
+          isGenerating || !authSession || sessionLoadState.label === "Loading"
+        }
+        isGenerating={isGenerating}
+        onGenerate={handleGenerate}
+        onSourceTextChange={handleSourceTextChange}
         onToggle={() => setIsSourceOpen((current) => !current)}
         sessionLoadState={sessionLoadState}
+        isSourceTextReadOnly={
+          isGenerating || sessionLoadState.label === "Loading"
+        }
         sourceText={sqlErdViewSession.sourceText}
       />
       <CanvasShell
@@ -227,13 +354,25 @@ type PanelToggleProps = {
 
 type SourcePanelProps = PanelToggleProps & {
   counts: ReturnType<typeof getSqltoerdModelCounts>;
+  dialect: SqlErdViewSession["dialect"];
+  isGenerateDisabled: boolean;
+  isGenerating: boolean;
+  isSourceTextReadOnly: boolean;
+  onGenerate: () => void;
+  onSourceTextChange: (sourceText: string) => void;
   sessionLoadState: SqlErdSessionLoadState;
   sourceText: string;
 };
 
 function SourcePanel({
   counts,
+  dialect,
   isOpen,
+  isGenerateDisabled,
+  isGenerating,
+  isSourceTextReadOnly,
+  onGenerate,
+  onSourceTextChange,
   onToggle,
   sessionLoadState,
   sourceText
@@ -282,7 +421,7 @@ function SourcePanel({
 
       <div className="grid grid-cols-2 gap-2 border-b p-3">
         <SelectorLabel label="Format" value="SQL" />
-        <SelectorLabel label="Dialect" value="Auto" />
+        <SelectorLabel label="Dialect" value={formatSqlErdDialectLabel(dialect)} />
       </div>
 
       <div className="flex flex-1 flex-col overflow-hidden">
@@ -291,24 +430,46 @@ function SourcePanel({
             Source text
           </span>
           <button
-            className="inline-flex h-8 cursor-not-allowed items-center gap-1.5 rounded-md bg-primary/70 px-3 text-xs font-medium text-primary-foreground opacity-60"
-            disabled
+            className={cn(
+              "inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-xs font-medium transition-colors",
+              isGenerateDisabled
+                ? "cursor-not-allowed bg-primary/70 text-primary-foreground opacity-60"
+                : "bg-primary text-primary-foreground hover:bg-primary/90"
+            )}
+            disabled={isGenerateDisabled}
+            onClick={onGenerate}
             type="button"
           >
             <Play className="size-3.5" />
-            Generate
+            {isGenerating ? "Generating" : "Generate"}
           </button>
         </div>
         <textarea
           aria-label="SQL source"
-          className="min-h-0 flex-1 resize-none overflow-auto border-0 bg-[#0d1117] p-4 font-mono text-[13px] leading-6 text-slate-100 outline-none placeholder:text-slate-500"
-          defaultValue={sourceText}
-          key={sourceText}
+          className={cn(
+            "min-h-0 flex-1 resize-none overflow-auto border-0 bg-[#0d1117] p-4 font-mono text-[13px] leading-6 text-slate-100 outline-none placeholder:text-slate-500",
+            isSourceTextReadOnly && "cursor-progress opacity-80"
+          )}
+          onChange={(event) => onSourceTextChange(event.target.value)}
+          readOnly={isSourceTextReadOnly}
+          value={sourceText}
           spellCheck={false}
         />
       </div>
     </aside>
   );
+}
+
+function formatSqlErdDialectLabel(dialect: SqlErdViewSession["dialect"]) {
+  if (dialect === "postgresql") {
+    return "PostgreSQL";
+  }
+
+  if (dialect === "mysql") {
+    return "MySQL";
+  }
+
+  return "Auto";
 }
 
 type SelectorLabelProps = {
@@ -670,7 +831,7 @@ function CollapsedPanelButton({
 
 type StatusPillProps = {
   label: string;
-  tone: "neutral" | "success";
+  tone: SqlErdSessionLoadState["tone"];
 };
 
 function StatusPill({ label, tone }: StatusPillProps) {
@@ -678,9 +839,10 @@ function StatusPill({ label, tone }: StatusPillProps) {
     <span
       className={cn(
         "inline-flex h-6 items-center rounded-full border px-2 text-[11px] font-medium",
-        tone === "success"
-          ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-          : "border-border bg-background text-muted-foreground"
+        tone === "success" &&
+          "border-emerald-200 bg-emerald-50 text-emerald-700",
+        tone === "error" && "border-red-200 bg-red-50 text-red-700",
+        tone === "neutral" && "border-border bg-background text-muted-foreground"
       )}
     >
       {label}

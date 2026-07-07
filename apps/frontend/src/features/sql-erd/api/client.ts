@@ -1,4 +1,11 @@
-import type { SqltoerdSessionPayload } from "@/features/sql-erd/types";
+import type {
+  SqltoerdDialect,
+  SqltoerdLayoutJsonV1,
+  SqltoerdModelJsonV1,
+  SqltoerdSessionPayload,
+  SqltoerdSettingsJson,
+  SqltoerdSourceFormat
+} from "@/features/sql-erd/types";
 
 const API_BASE_PATH = "/api/v1";
 const DEFAULT_APP_SERVER_ORIGIN = "http://localhost:4000";
@@ -12,6 +19,20 @@ type SqlErdApiClientOptions = {
 type SqlErdApiSuccessResponse<T> = {
   success: true;
   data: T;
+};
+
+export type CreateSqlErdSessionRequest = {
+  title: string;
+  sourceFormat: SqltoerdSourceFormat;
+  dialect: SqltoerdDialect;
+  sourceText: string;
+  modelJson: SqltoerdModelJsonV1;
+  layoutJson: SqltoerdLayoutJsonV1;
+  settingsJson: SqltoerdSettingsJson;
+};
+
+export type UpdateSqlErdSessionRequest = Partial<CreateSqlErdSessionRequest> & {
+  baseRevision: number;
 };
 
 function trimTrailingSlash(value: string) {
@@ -194,6 +215,35 @@ export function createSqlErdApiClient({
       return requestSqlErdApiPayload<SqltoerdSessionPayload | null>(
         `/workspaces/${encodeURIComponent(workspaceId)}/sql-erd-session`,
         { method: "GET" },
+        requestOptions
+      );
+    },
+
+    async createSession(
+      workspaceId: string,
+      payload: CreateSqlErdSessionRequest
+    ) {
+      return requestSqlErdApiPayload<SqltoerdSessionPayload>(
+        `/workspaces/${encodeURIComponent(workspaceId)}/sql-erd-session`,
+        {
+          body: JSON.stringify(payload),
+          method: "POST"
+        },
+        requestOptions
+      );
+    },
+
+    async updateSession(
+      workspaceId: string,
+      sessionId: string,
+      payload: UpdateSqlErdSessionRequest
+    ) {
+      return requestSqlErdApiPayload<SqltoerdSessionPayload>(
+        `/workspaces/${encodeURIComponent(workspaceId)}/sql-erd-session/${encodeURIComponent(sessionId)}`,
+        {
+          body: JSON.stringify(payload),
+          method: "PATCH"
+        },
         requestOptions
       );
     }
