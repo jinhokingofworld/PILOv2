@@ -238,6 +238,7 @@ async function requestPrReviewPayload<T>(
   }
 
   const response = await fetcher(buildPrReviewApiUrl(path, baseUrl), {
+    cache: "no-store",
     credentials: "same-origin",
     ...init,
     headers

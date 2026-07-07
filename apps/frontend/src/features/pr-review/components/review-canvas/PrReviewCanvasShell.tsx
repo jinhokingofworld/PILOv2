@@ -125,6 +125,23 @@ function updateReviewedCount(
   return currentCount + (isReviewed ? 1 : -1);
 }
 
+function findReviewFileStatus(
+  canvas: PrReviewCanvas | null,
+  reviewFileId: string
+): PrReviewFileReviewStatus | null {
+  for (const flow of canvas?.flows ?? []) {
+    const file = flow.files.find(
+      (flowFile) => flowFile.reviewFileId === reviewFileId
+    );
+
+    if (file) {
+      return file.currentStatus;
+    }
+  }
+
+  return null;
+}
+
 export function PrReviewCanvasShell({
   apiClient,
   onBackToSelection,
@@ -191,6 +208,8 @@ export function PrReviewCanvasShell({
 
   const handleDecisionSaved = useCallback(
     (updatedFile: PrReviewFile) => {
+      const previousReviewStatus = findReviewFileStatus(canvas, updatedFile.id);
+
       setCanvas((currentCanvas) => {
         if (!currentCanvas) {
           return currentCanvas;
@@ -238,9 +257,27 @@ export function PrReviewCanvasShell({
         };
       });
 
+      setSummary((currentSummary) => {
+        if (!currentSummary || previousReviewStatus === null) {
+          return currentSummary;
+        }
+
+        const reviewedCount = updateReviewedCount(
+          currentSummary.reviewedCount,
+          previousReviewStatus,
+          updatedFile.currentStatus
+        );
+
+        return {
+          ...currentSummary,
+          readyToSubmit: reviewedCount === currentSummary.totalFileCount,
+          reviewedCount
+        };
+      });
+
       void loadCanvasData({ quiet: true });
     },
-    [loadCanvasData]
+    [canvas, loadCanvasData]
   );
 
   const headBranch =
