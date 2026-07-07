@@ -325,6 +325,9 @@ export function SqlErdPanel() {
         onSourceTextChange={handleSourceTextChange}
         onToggle={() => setIsSourceOpen((current) => !current)}
         sessionLoadState={sessionLoadState}
+        isSourceTextReadOnly={
+          isGenerating || sessionLoadState.label === "Loading"
+        }
         sourceText={sqlErdViewSession.sourceText}
       />
       <CanvasShell
@@ -354,6 +357,7 @@ type SourcePanelProps = PanelToggleProps & {
   dialect: SqlErdViewSession["dialect"];
   isGenerateDisabled: boolean;
   isGenerating: boolean;
+  isSourceTextReadOnly: boolean;
   onGenerate: () => void;
   onSourceTextChange: (sourceText: string) => void;
   sessionLoadState: SqlErdSessionLoadState;
@@ -366,6 +370,7 @@ function SourcePanel({
   isOpen,
   isGenerateDisabled,
   isGenerating,
+  isSourceTextReadOnly,
   onGenerate,
   onSourceTextChange,
   onToggle,
@@ -441,8 +446,12 @@ function SourcePanel({
         </div>
         <textarea
           aria-label="SQL source"
-          className="min-h-0 flex-1 resize-none overflow-auto border-0 bg-[#0d1117] p-4 font-mono text-[13px] leading-6 text-slate-100 outline-none placeholder:text-slate-500"
+          className={cn(
+            "min-h-0 flex-1 resize-none overflow-auto border-0 bg-[#0d1117] p-4 font-mono text-[13px] leading-6 text-slate-100 outline-none placeholder:text-slate-500",
+            isSourceTextReadOnly && "cursor-progress opacity-80"
+          )}
           onChange={(event) => onSourceTextChange(event.target.value)}
+          readOnly={isSourceTextReadOnly}
           value={sourceText}
           spellCheck={false}
         />

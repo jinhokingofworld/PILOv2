@@ -752,6 +752,8 @@ assert.match(panel, /updateSession/);
 assert.match(panel, /baseRevision: sqlErdViewSession\.revision/);
 assert.match(panel, /createSqltoerdLayoutForModel/);
 assert.match(panel, /onSourceTextChange/);
+assert.match(panel, /isSourceTextReadOnly/);
+assert.match(panel, /readOnly=\{isSourceTextReadOnly\}/);
 assert.match(panel, /setSqlErdViewSession\(\(currentSession\) =>/);
 assert.match(panel, /sessionLoadState/);
 assert.match(panel, /setSqlErdViewSession/);
