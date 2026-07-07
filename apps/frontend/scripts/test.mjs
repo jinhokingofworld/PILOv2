@@ -59,6 +59,10 @@ const mainShell = await readFile(
   new URL("../src/components/main-shell.tsx", import.meta.url),
   "utf8"
 );
+const workspaceLayout = await readFile(
+  new URL("../src/app/(workspace)/layout.tsx", import.meta.url),
+  "utf8"
+);
 const appSidebar = await readFile(
   new URL("../src/components/app-sidebar.tsx", import.meta.url),
   "utf8"
@@ -243,12 +247,12 @@ const piloCanvasGroupToolbar = await readFile(
 );
 const routePages = await Promise.all(
   [
-    "../src/app/calendar/page.tsx",
-    "../src/app/github/page.tsx",
-    "../src/app/board/page.tsx",
-    "../src/app/pr-review/page.tsx",
-    "../src/app/meeting/page.tsx",
-    "../src/app/canvas/page.tsx"
+    "../src/app/(workspace)/calendar/page.tsx",
+    "../src/app/(workspace)/github/page.tsx",
+    "../src/app/(workspace)/board/page.tsx",
+    "../src/app/(workspace)/pr-review/page.tsx",
+    "../src/app/(workspace)/meeting/page.tsx",
+    "../src/app/(workspace)/canvas/page.tsx"
   ].map((path) => readFile(new URL(path, import.meta.url), "utf8"))
 );
 const featurePages = await Promise.all(
@@ -292,6 +296,7 @@ assert.match(authSession, /PILO UI Preview/);
 assert.match(authSession, /activeWorkspace/);
 assert.match(authSession, /refreshSession/);
 assert.match(authSession, /role: "owner"/);
+assert.match(authSession, /currentState\.status === "ready"/);
 assert.match(authApiClient, /role: WorkspaceRole/);
 assert.match(authApiClient, /CurrentUserWorkspaceInvitation/);
 assert.match(authApiClient, /listCurrentUserWorkspaceInvitations/);
@@ -312,14 +317,24 @@ assert.doesNotMatch(loginPage, /Or continue with/);
 assert.doesNotMatch(loginPage, /Forgot your password/);
 assert.match(loginCallbackPage, /access_token/);
 assert.match(loginCallbackPage, /loadAuthSessionEntry/);
-assert.match(mainShell, /AuthGate/);
+assert.match(workspaceLayout, /AuthGate/);
+assert.match(workspaceLayout, /MeetingRuntimeProvider/);
+assert.doesNotMatch(mainShell, /AuthGate/);
 assert.match(mainShell, /HeaderMeetingStatus/);
 assert.match(mainShell, /sticky top-0/);
 assert.match(mainShell, /<span className="truncate">\{activeFeature\.title\}<\/span>/);
 assert.match(mainShell, /peer-data-\[variant=inset\]:!m-0/);
 assert.match(mainShell, /peer-data-\[state=collapsed\]:!ml-0/);
 assert.match(appSidebar, /useAuthSession/);
+assert.match(appSidebar, /useMeetingRuntime/);
+assert.match(appSidebar, /leaveActiveMeeting/);
 assert.match(appSidebar, /logout/);
+assert.match(appSidebar, /ACTIVE_MEETING_LEAVE_FAILED_MESSAGE/);
+assert.match(appSidebar, /sessionActionStatus/);
+assert.match(
+  appSidebar,
+  /await meetingRuntime\.leaveActiveMeeting\(\);[\s\S]*await acceptCurrentUserWorkspaceInvitation\(/
+);
 assert.match(appSidebar, /activeWorkspaceDetail/);
 assert.match(appSidebar, /canManageWorkspace/);
 assert.match(appSidebar, /pendingInvitationCount/);

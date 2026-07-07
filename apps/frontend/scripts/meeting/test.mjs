@@ -23,6 +23,13 @@ const liveKitHook = await readFile(
   ),
   "utf8"
 );
+const meetingRuntimeProvider = await readFile(
+  new URL(
+    "../../src/features/meeting/runtime/meeting-runtime-provider.tsx",
+    import.meta.url
+  ),
+  "utf8"
+);
 const headerMeetingStatusStore = await readFile(
   new URL(
     "../../src/features/meeting/stores/header-meeting-status-store.ts",
@@ -139,6 +146,17 @@ assert.match(liveKitHook, /remoteAudioContainerRef/);
 assert.match(liveKitHook, /track\.attach\(\)/);
 assert.doesNotMatch(liveKitHook, /@livekit\/components-react/);
 
+assert.match(meetingRuntimeProvider, /MeetingRuntimeProvider/);
+assert.match(meetingRuntimeProvider, /useMeetingRuntime/);
+assert.match(meetingRuntimeProvider, /useLiveKitMeetingRoom/);
+assert.match(meetingRuntimeProvider, /createMeetingApiClient/);
+assert.match(meetingRuntimeProvider, /connectToMeeting/);
+assert.match(meetingRuntimeProvider, /disconnectFromMeeting/);
+assert.match(meetingRuntimeProvider, /leaveActiveMeeting/);
+assert.match(meetingRuntimeProvider, /activeSessionRef/);
+assert.match(meetingRuntimeProvider, /setHeaderMeetingConnectionStatus\(liveKitRoomStatus\)/);
+assert.match(meetingRuntimeProvider, /setHeaderMeetingRecordingStatus\(null\)/);
+
 assert.match(meetingNavigation, /title: "음성회의"/);
 assert.match(meetingNavigation, /회의 참여, 녹음, 회의록 확인과 재생성/);
 assert.match(meetingNavigation, /\/meeting\/#room/);
@@ -148,11 +166,14 @@ assert.doesNotMatch(meetingNavigation, /\/meeting#recording/);
 assert.match(meetingPanel, /"use client"/);
 assert.match(meetingPanel, /useAuthSession/);
 assert.match(meetingPanel, /useMeetingWorkspaceData/);
-assert.match(meetingPanel, /useLiveKitMeetingRoom/);
-assert.match(meetingPanel, /setHeaderMeetingConnectionStatus/);
+assert.match(meetingPanel, /useMeetingRuntime/);
+assert.match(meetingPanel, /connectToMeeting/);
+assert.match(meetingPanel, /disconnectFromMeeting/);
 assert.match(meetingPanel, /setHeaderMeetingRecordingStatus/);
-assert.match(meetingPanel, /setHeaderMeetingConnectionStatus\(liveKitRoom\.status\)/);
 assert.match(meetingPanel, /setHeaderMeetingRecordingStatus\(currentRecording\?\.status \?\? null\)/);
+assert.match(meetingPanel, /currentStatus === "success"/);
+assert.doesNotMatch(meetingPanel, /useLiveKitMeetingRoom/);
+assert.doesNotMatch(meetingPanel, /setHeaderMeetingConnectionStatus/);
 assert.match(meetingPanel, /ACTIVE_MEETING_IN_PROGRESS_ERROR_CODE/);
 assert.match(meetingPanel, /MEETING_ALREADY_IN_PROGRESS/);
 assert.match(meetingPanel, /CURRENT_MEETING_RELOAD_FAILED_MESSAGE/);

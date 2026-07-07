@@ -9,6 +9,7 @@ import {
   ChevronsUpDown,
   ChevronRight,
   GalleryVerticalEnd,
+  Loader2,
   LogOut,
   Send,
   Sparkles,
@@ -75,6 +76,7 @@ import {
   type WorkspaceInvitation,
   type WorkspaceMember
 } from "@/features/auth/api/client";
+import { useMeetingRuntime } from "@/features/meeting/runtime/meeting-runtime-provider";
 import type { FeatureNavigationItem } from "@/features/navigation-types";
 import { cn } from "@/lib/utils";
 
@@ -113,6 +115,8 @@ const currentUser = {
   initials: "DH",
   avatarUrl: null
 };
+const ACTIVE_MEETING_LEAVE_FAILED_MESSAGE =
+  "진행 중인 회의에서 나가지 못했습니다. 회의 상태를 확인한 뒤 다시 시도해주세요.";
 
 export function AppSidebar({
   items,
@@ -122,6 +126,7 @@ export function AppSidebar({
   const { isMobile, setOpenMobile } = useSidebar();
   const router = useRouter();
   const authSession = useAuthSession();
+  const meetingRuntime = useMeetingRuntime();
   const [activeWorkspaceIndex, setActiveWorkspaceIndex] = useState(0);
   const [activeSubItemHref, setActiveSubItemHref] = useState<
     string | undefined
@@ -155,9 +160,16 @@ export function AppSidebar({
     string | null
   >(null);
   const [isInviteSubmitting, setIsInviteSubmitting] = useState(false);
+  const [sessionActionError, setSessionActionError] = useState<string | null>(
+    null
+  );
+  const [sessionActionStatus, setSessionActionStatus] = useState<
+    "idle" | "logging-out" | "switching-workspace"
+  >("idle");
   const activeWorkspaceDetail = authSession?.activeWorkspace;
   const canManageWorkspace = activeWorkspaceDetail?.role === "owner";
   const pendingInvitationCount = currentUserInvitations.length;
+  const isSessionActionPending = sessionActionStatus !== "idle";
   const workspaceOptions =
     authSession?.workspaces.map((workspace) => ({
       id: workspace.id,
@@ -313,8 +325,29 @@ export function AppSidebar({
   };
 
   const handleSelectWorkspace = (workspaceId: string, index: number) => {
+    if (isSessionActionPending) {
+      return;
+    }
+
     if (authSession) {
-      authSession.setActiveWorkspaceId(workspaceId);
+      if (authSession.activeWorkspaceId === workspaceId) {
+        return;
+      }
+
+      setSessionActionError(null);
+      setSessionActionStatus("switching-workspace");
+
+      void meetingRuntime
+        .leaveActiveMeeting()
+        .then(() => {
+          authSession.setActiveWorkspaceId(workspaceId);
+        })
+        .catch(() => {
+          setSessionActionError(ACTIVE_MEETING_LEAVE_FAILED_MESSAGE);
+        })
+        .finally(() => {
+          setSessionActionStatus("idle");
+        });
       return;
     }
 
@@ -443,19 +476,30 @@ export function AppSidebar({
   const handleAcceptCurrentUserInvitation = (
     invitation: CurrentUserWorkspaceInvitation
   ) => {
-    if (!authSession || acceptingInvitationId) {
+    if (!authSession || acceptingInvitationId || isSessionActionPending) {
       return;
     }
 
     setInvitationNotice(null);
     setInvitationNoticeError(null);
+    setSessionActionError(null);
     setAcceptingInvitationId(invitation.id);
+    setSessionActionStatus("switching-workspace");
 
-    void acceptCurrentUserWorkspaceInvitation(
-      authSession.accessToken,
-      invitation.id
-    )
-      .then(async (result) => {
+    void (async () => {
+      try {
+        try {
+          await meetingRuntime.leaveActiveMeeting();
+        } catch {
+          setInvitationNoticeError(ACTIVE_MEETING_LEAVE_FAILED_MESSAGE);
+          return;
+        }
+
+        const result = await acceptCurrentUserWorkspaceInvitation(
+          authSession.accessToken,
+          invitation.id
+        );
+
         setCurrentUserInvitations((currentInvitations) =>
           currentInvitations.filter(
             (currentInvitation) => currentInvitation.id !== invitation.id
@@ -464,19 +508,36 @@ export function AppSidebar({
         setInvitationNotice(`${result.workspace.name} 워크스페이스에 참여했습니다`);
         await authSession.refreshSession(result.workspace.id);
         router.push("/calendar");
-      })
-      .catch((error: unknown) => {
+      } catch (error) {
         setInvitationNoticeError(
-          error instanceof Error ? error.message : "초대 수락에 실패했습니다"
+          error instanceof Error
+            ? error.message
+            : "초대 수락에 실패했습니다"
         );
-      })
-      .finally(() => {
+      } finally {
+        setSessionActionStatus("idle");
         setAcceptingInvitationId(null);
-      });
+      }
+    })();
   };
 
   const handleLogout = () => {
-    void authSession?.logout();
+    if (!authSession || isSessionActionPending) {
+      return;
+    }
+
+    setSessionActionError(null);
+    setSessionActionStatus("logging-out");
+
+    void meetingRuntime
+      .leaveActiveMeeting()
+      .then(() => authSession.logout())
+      .catch(() => {
+        setSessionActionError(ACTIVE_MEETING_LEAVE_FAILED_MESSAGE);
+      })
+      .finally(() => {
+        setSessionActionStatus("idle");
+      });
   };
 
   return (
@@ -511,6 +572,7 @@ export function AppSidebar({
                   {workspaceOptions.map((workspace, index) => (
                     <DropdownMenuItem
                       className="gap-2 p-2"
+                      disabled={isSessionActionPending}
                       key={workspace.id}
                       onClick={() => handleSelectWorkspace(workspace.id, index)}
                     >
@@ -747,6 +809,11 @@ export function AppSidebar({
       </SidebarContent>
 
       <SidebarFooter>
+        {sessionActionError ? (
+          <p className="px-2 text-xs leading-5 text-destructive group-data-[collapsible=icon]:hidden">
+            {sessionActionError}
+          </p>
+        ) : null}
         <SidebarMenu>
           <SidebarMenuItem>
             <DropdownMenu>
@@ -820,9 +887,19 @@ export function AppSidebar({
                 </DropdownMenuGroup>
                 <DropdownMenuSeparator />
                 <DropdownMenuGroup>
-                  <DropdownMenuItem className="gap-2" onClick={handleLogout}>
-                    <LogOut />
-                    로그아웃
+                  <DropdownMenuItem
+                    className="gap-2"
+                    disabled={isSessionActionPending}
+                    onClick={handleLogout}
+                  >
+                    {sessionActionStatus === "logging-out" ? (
+                      <Loader2 className="animate-spin" />
+                    ) : (
+                      <LogOut />
+                    )}
+                    {sessionActionStatus === "logging-out"
+                      ? "로그아웃 중"
+                      : "로그아웃"}
                   </DropdownMenuItem>
                 </DropdownMenuGroup>
               </DropdownMenuContent>
