@@ -335,11 +335,7 @@ export async function createRealtimeSocketServer({
         presencePayload,
       );
 
-      socket.to(roomName).emit(canvasServerEvents.presenceUpdate, {
-        canvasId: presencePayload.canvasId,
-        presence,
-        workspaceId: presencePayload.workspaceId,
-      });
+      socket.to(roomName).emit(canvasServerEvents.presenceUpdate, presence);
     });
 
     socket.on("disconnect", () => {

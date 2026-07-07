@@ -397,6 +397,9 @@ async function assertError(action, messagePattern) {
         assert.match(text, /WITH generated AS/);
         assert.match(text, /INSERT INTO meetings/);
         assert.match(text, /INSERT INTO meeting_participants/);
+        assert.match(text, /\$1::uuid/);
+        assert.match(text, /\$3::uuid/);
+        assert.match(text, /\(\$3::uuid\)::text/);
         assert.doesNotMatch(text, /INSERT INTO meeting_recordings/);
         assert.deepEqual(values, [
           workspaceId,
@@ -489,6 +492,10 @@ async function assertError(action, messagePattern) {
         },
         (text, values) => {
           assert.match(text, /ON CONFLICT \(meeting_id, user_id\)/);
+          assert.match(text, /\$1::uuid/);
+          assert.match(text, /\$2::uuid/);
+          assert.match(text, /\(\$1::uuid\)::text/);
+          assert.match(text, /\(\$2::uuid\)::text/);
           assert.match(text, /left_at = NULL/);
           assert.deepEqual(values, [meetingId, currentUserId]);
           return participantRow();
@@ -539,6 +546,10 @@ async function assertError(action, messagePattern) {
         },
         (text, values) => {
           assert.match(text, /ON CONFLICT \(meeting_id, user_id\)/);
+          assert.match(text, /\$1::uuid/);
+          assert.match(text, /\$2::uuid/);
+          assert.match(text, /\(\$1::uuid\)::text/);
+          assert.match(text, /\(\$2::uuid\)::text/);
           assert.match(text, /left_at = NULL/);
           assert.deepEqual(values, [meetingId, otherUserId]);
           return participantRow({

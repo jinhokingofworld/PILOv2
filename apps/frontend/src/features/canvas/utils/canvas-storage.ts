@@ -30,6 +30,65 @@ const persistableShapeTypes = new Set([
   // registered and the local/mock restore path can render it safely.
 ]);
 
+function createEmptyRichText() {
+  return {
+    content: [
+      {
+        type: "paragraph",
+      },
+    ],
+    type: "doc",
+  };
+}
+
+function isRichText(value: unknown) {
+  return (
+    isRecord(value) &&
+    typeof value.type === "string" &&
+    Array.isArray(value.content)
+  );
+}
+
+function normalizePoint(value: unknown, fallback: { x: number; y: number }) {
+  return isRecord(value) &&
+    isFiniteNumber(value.x) &&
+    isFiniteNumber(value.y)
+    ? { x: value.x, y: value.y }
+    : fallback;
+}
+
+function normalizeShapeProps(shape: Record<string, unknown>) {
+  const props = isRecord(shape.props) ? { ...shape.props } : {};
+
+  if (
+    shape.type === "text" ||
+    shape.type === "geo" ||
+    shape.type === "arrow"
+  ) {
+    props.richText = isRichText(props.richText)
+      ? props.richText
+      : createEmptyRichText();
+  }
+
+  if (shape.type === "arrow") {
+    props.start = normalizePoint(props.start, { x: 0, y: 0 });
+    props.end = normalizePoint(props.end, { x: 2, y: 0 });
+  }
+
+  if (
+    (shape.type === "draw" || shape.type === "highlight") &&
+    !Array.isArray(props.segments)
+  ) {
+    delete props.segments;
+  }
+
+  if (shape.type === "line" && !isRecord(props.points)) {
+    delete props.points;
+  }
+
+  return props;
+}
+
 export function readCanvasStorage(
   scope: string,
   boardId: string,
@@ -62,14 +121,24 @@ export function writeCanvasStorage(
 export function normalizeCanvasFreeformShapes(value: unknown) {
   if (!Array.isArray(value)) return [];
 
-  return value.filter(
-    (shape) =>
-      isRecord(shape) &&
-      typeof shape.id === "string" &&
-      typeof shape.type === "string" &&
-      persistableShapeTypes.has(shape.type) &&
-      isFiniteNumber(shape.x) &&
-      isFiniteNumber(shape.y) &&
-      isRecord(shape.props),
-  );
+  return value.flatMap((shape) => {
+    if (
+      !isRecord(shape) ||
+      typeof shape.id !== "string" ||
+      typeof shape.type !== "string" ||
+      !persistableShapeTypes.has(shape.type) ||
+      !isFiniteNumber(shape.x) ||
+      !isFiniteNumber(shape.y) ||
+      !isRecord(shape.props)
+    ) {
+      return [];
+    }
+
+    return [
+      {
+        ...shape,
+        props: normalizeShapeProps(shape),
+      },
+    ];
+  });
 }

@@ -1,9 +1,7 @@
 "use client";
 
 import {
-  BaseFrameLikeShapeUtil,
-  Group2d,
-  Rectangle2d,
+  BaseBoxShapeUtil,
   T,
   type TLResizeInfo,
 } from "tldraw";
@@ -15,7 +13,7 @@ import {
 
 export type { PiloCodeBlockShape } from "./PiloCodeBlockShapeTypes";
 
-export class PiloCodeBlockShapeUtil extends BaseFrameLikeShapeUtil<PiloCodeBlockShape> {
+export class PiloCodeBlockShapeUtil extends BaseBoxShapeUtil<PiloCodeBlockShape> {
   static override type = "pilo-code-block" as const;
 
   static override props = {
@@ -45,18 +43,6 @@ export class PiloCodeBlockShapeUtil extends BaseFrameLikeShapeUtil<PiloCodeBlock
 
   override getDefaultProps(): PiloCodeBlockShape["props"] {
     return { ...DEFAULT_PILO_CODE_BLOCK_PROPS };
-  }
-
-  override getGeometry(shape: PiloCodeBlockShape) {
-    return new Group2d({
-      children: [
-        new Rectangle2d({
-          width: shape.props.w,
-          height: shape.props.h,
-          isFilled: true,
-        }),
-      ],
-    });
   }
 
   override onResize(

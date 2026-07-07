@@ -23,12 +23,15 @@ export type CanvasPresenceViewport = {
 };
 
 export type CanvasPresenceState = {
+  canvasId: string;
   cursor: CanvasPresencePoint | null;
+  displayName?: string;
   selectedShapeIds: string[];
   sentAt?: string;
   updatedAt: string;
-  user: CanvasPresenceUser;
+  userId: string;
   viewport?: CanvasPresenceViewport;
+  workspaceId: string;
 };
 
 export type CanvasJoinPayload = CanvasRoomRef & {

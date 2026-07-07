@@ -13,13 +13,13 @@
 | --- | --- | --- | --- | --- |
 | #298 | 계약/DB/Infra 준비 | 완료 | #295 | API 문서, migration, 구현 체크리스트 준비 |
 | #299 | Backend 구현 | 완료 | #305, #307 | Drive API와 S3 presigned URL 흐름 구현 |
-| #300 | Frontend 구현 | GitHub상 완료 | #310 | 기본 화면은 완료. 업로드/다운로드/이름 변경/삭제 UI는 다음 구현 작업으로 남음 |
-| #315 | Frontend action 구현 | 진행 예정 | - | 업로드, 다운로드, 이름 변경, 삭제 UI 구현 |
-| #301 | 통합 QA/배포 정리 | 진행 전 | - | 전체 흐름 구현 후 dev 환경에서 검증 |
+| #300 | Frontend 기본 화면 | 완료 | #310 | 파일 화면 route, 목록 조회, 폴더 생성 UI 구현 |
+| #315 | Frontend action 구현 | 완료 | #316 | 업로드, 다운로드, 이름 변경, 삭제 UI 구현 |
+| #301 | 통합 QA/배포 정리 | 진행 중 | - | dev 환경 검증과 Infra/S3/DB 확인 정리 |
 
-주의: #300은 #310 merge 후 GitHub issue 상태가 `CLOSED`이지만, 기능 범위 기준으로는
-파일 업로드, 다운로드, 이름 변경, 삭제 UI가 아직 남아 있다. 이 남은 Frontend action
-작업은 #315에서 추적한다.
+주의: #301은 실제 dev 환경의 S3 bucket, DB, 배포된 app-server 상태까지 확인해야
+완료할 수 있다. repo에서 확인 가능한 Terraform, migration, local build/test 결과와
+실제 dev 환경 수동 QA 결과를 구분해서 기록한다.
 
 ## 1. 완료된 기반 작업
 
@@ -65,10 +65,10 @@
 - [x] 새 폴더 생성 UI를 shadcn/ui `Sheet`, `Button`, `Input` 기반으로 구현했다.
 - [x] #310 CI에서 frontend build, lint, test 통과를 확인했다.
 
-## 2. 다음 구현 PR: Frontend action 완성
+## 2. 완료된 구현 PR: Frontend action 완성
 
-다음 작업은 최신 `dev`에서 새 브랜치를 파고 시작한다. 권장 브랜치:
-`feat/315-drive-frontend-actions`.
+작업 브랜치: `feat/315-drive-frontend-actions`.
+관련 PR: #316.
 
 ### 2.1 시작 전 확인
 
@@ -135,19 +135,22 @@
 
 ## 3. 최종 QA와 배포 확인
 
-이 단계는 #301에서 진행한다. Frontend action PR이 dev에 들어간 뒤 수행한다.
+이 단계는 #301에서 진행한다. 작업 브랜치: `chore/301-drive-qa`.
 
 ### 3.1 Infra/S3 확인
 
-- [ ] dev app-server에 `S3_UPLOADS_BUCKET`이 주입되어 있는지 확인한다.
-- [ ] AWS region/endpoint 설정이 app-server 실행 환경과 맞는지 확인한다.
-- [ ] uploads bucket CORS에 `PUT`, `GET`, `HEAD`가 허용되어 있는지 확인한다.
-- [ ] CORS 허용 header에 `Content-Type`, `x-amz-*`가 포함되어 있는지 확인한다.
-- [ ] 필요하면 CORS expose header에 `ETag`를 포함한다.
-- [ ] app-server IAM 권한에 `s3:PutObject`, `s3:GetObject`, `s3:HeadObject`가 있는지 확인한다.
+- [x] dev Terraform에서 app-server에 `S3_UPLOADS_BUCKET`이 주입되어 있는지 확인한다.
+- [x] dev Terraform에서 app-server에 `AWS_REGION`이 주입되어 있는지 확인한다.
+- [x] uploads bucket CORS에 `PUT`, `GET`, `HEAD`를 허용하도록 Terraform을 보완한다.
+- [x] CORS 허용 header에 `Content-Type`, `x-amz-*`를 포함하도록 Terraform을 보완한다.
+- [x] CORS expose header에 `ETag`를 포함하도록 Terraform을 보완한다.
+- [x] app-server task role에 `s3:PutObject`, `s3:GetObject` 권한이 있는지 확인한다.
+- [ ] dev Terraform plan/apply 결과를 확인한다.
+- [ ] 배포된 dev uploads bucket CORS가 Terraform 의도와 일치하는지 확인한다.
 
 ### 3.2 DB와 Backend 확인
 
+- [x] repo 기준 `014_create_drive_items_and_uploads.sql` migration과 `db/README.md` 등록을 확인한다.
 - [ ] dev DB에 `014_create_drive_items_and_uploads.sql` migration이 적용되어 있는지 확인한다.
 - [ ] Workspace `owner`와 `member` 모두 Drive API를 사용할 수 있는지 확인한다.
 - [ ] 권한 없는 Workspace 요청이 실패하는지 확인한다.
@@ -164,6 +167,19 @@
 - [ ] 파일 삭제 후 목록에서 사라지는지 확인한다.
 - [ ] 폴더 삭제 후 하위 item도 목록에서 사라지는지 확인한다.
 - [ ] 100 MiB 초과 파일 처리 결과를 확인한다.
+
+### 3.4 자동 검증 결과
+
+- [x] frontend `npm run format:check` 통과.
+- [x] frontend `npm run lint` 통과.
+- [x] frontend `npm run test` 통과.
+- [x] frontend `npm run build` 통과.
+- [x] app-server `npm run format:check` 통과.
+- [x] app-server `npm run lint` 통과.
+- [x] app-server `npm run test` 통과. 이 명령의 `pretest`로 app-server build도 함께 확인했다.
+- [x] `git diff --check` 통과.
+- [ ] Terraform fmt/validate/plan 확인. 현재 로컬 환경에서는 `terraform` CLI가 PATH에 없어 미수행했다.
+- [ ] GitHub PR CI 결과 확인.
 
 ## 4. PR 정리 기준
 

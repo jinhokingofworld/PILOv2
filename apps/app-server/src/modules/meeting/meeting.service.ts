@@ -405,10 +405,10 @@ export class MeetingService {
               )
               SELECT
                 generated.meeting_id,
-                $1,
+                $1::uuid,
                 $2,
                 'meeting-' || generated.meeting_id::text,
-                $3
+                $3::uuid
               FROM generated
               RETURNING *
             ),
@@ -420,8 +420,8 @@ export class MeetingService {
               )
               SELECT
                 inserted_meeting.id,
-                $3,
-                'meeting-' || inserted_meeting.id::text || '-user-' || $3::text
+                $3::uuid,
+                'meeting-' || inserted_meeting.id::text || '-user-' || ($3::uuid)::text
               FROM inserted_meeting
               RETURNING *
             )
@@ -1992,9 +1992,9 @@ export class MeetingService {
             livekit_identity
           )
           VALUES (
-            $1,
-            $2,
-            'meeting-' || $1::text || '-user-' || $2::text
+            $1::uuid,
+            $2::uuid,
+            'meeting-' || ($1::uuid)::text || '-user-' || ($2::uuid)::text
           )
           ON CONFLICT (meeting_id, user_id)
           DO UPDATE SET
