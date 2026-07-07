@@ -277,7 +277,7 @@ interface GithubInstallationRepositoriesApiPayload {
 const GITHUB_SYNC_PER_PAGE = 100;
 const GITHUB_SYNC_MAX_PAGES = 100;
 const GITHUB_PROJECT_V2_ACCESS_ERROR_MESSAGE =
-  "GitHub ProjectV2 access requires read:project OAuth scope or GitHub App Projects read permission";
+  "GitHub ProjectV2 access requires GitHub App Projects permission and user access to the ProjectV2 owner";
 const GITHUB_PROJECT_V2_DISCOVERY_FRAGMENT = `
   fragment PiloProjectV2DiscoveryFields on ProjectV2 {
     id

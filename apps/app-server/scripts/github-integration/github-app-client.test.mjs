@@ -223,7 +223,7 @@ function projectNode(overrides = {}) {
         }),
       (error) =>
         error?.response?.error?.message ===
-        "GitHub ProjectV2 access requires read:project OAuth scope or GitHub App Projects read permission"
+        "GitHub ProjectV2 access requires GitHub App Projects permission and user access to the ProjectV2 owner"
     );
     assert.equal(graphqlRequestCount, 1);
   } finally {
