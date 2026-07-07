@@ -34,3 +34,5 @@ The database schema source of truth is the migration history in `db/migrations/`
 - `migrations/015_add_github_project_oauth.sql` adds GitHub ProjectV2 OAuth token storage and callback state flow support.
 - `migrations/016_canvas_shape_parent_relation.sql` adds Canvas shape parent relation storage and indexing for frame-scoped lazy loading.
 - `migrations/017_create_agent_runs.sql` adds Workspace Agent run, step, confirmation, and diagnostic log storage.
+- `migrations/018_fix_project_item_sync_positions.sql` backfills duplicate GitHub Project item positions and enforces per-field uniqueness.
+- `migrations/019_normalize_canvas_page_parent_shapes.sql` restores accidentally persisted tldraw page parents to top-level Canvas shapes.

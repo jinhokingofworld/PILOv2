@@ -129,6 +129,12 @@ function cloneRawShape(shape: CanvasFreeformShapeSnapshot) {
   return JSON.parse(JSON.stringify(shape)) as Record<string, unknown>;
 }
 
+function resolveParentShapeId(parentId: unknown) {
+  return typeof parentId === "string" && parentId.startsWith("shape:")
+    ? parentId
+    : null;
+}
+
 function createCanvasClientOperationId() {
   if (
     typeof crypto !== "undefined" &&
@@ -199,7 +205,7 @@ export function toCanvasShapePayload(
 
   return {
     id: typeof shape.id === "string" ? shape.id : "",
-    parentShapeId: typeof shape.parentId === "string" ? shape.parentId : null,
+    parentShapeId: resolveParentShapeId(shape.parentId),
     shapeType: typeof shape.type === "string" ? shape.type : "",
     title,
     textContent,
