@@ -75,8 +75,16 @@ assert.match(sqlErdValidation, /validateDeleteSqlErdSessionQuery/);
 assert.match(sqlErdValidation, /MAX_MODEL_JSON_BYTES = 1024 \* 1024/);
 assert.match(sqlErdValidation, /MAX_LAYOUT_JSON_BYTES = 1024 \* 1024/);
 assert.match(sqlErdValidation, /MAX_SETTINGS_JSON_BYTES = 64 \* 1024/);
+assert.match(sqlErdValidation, /MAX_COLUMN_COUNT = 1000/);
+assert.match(sqlErdValidation, /MAX_COLUMNS_PER_TABLE = 200/);
+assert.match(sqlErdValidation, /MAX_IDENTIFIER_LENGTH = 256/);
+assert.match(sqlErdValidation, /MAX_COLUMN_TYPE_LENGTH = 512/);
+assert.match(sqlErdValidation, /MAX_JSON_DEPTH = 20/);
+assert.match(sqlErdValidation, /FORBIDDEN_JSON_KEYS/);
 assert.match(sqlErdValidation, /readVersionedJsonObject/);
 assert.match(sqlErdValidation, /assertJsonByteLength/);
+assert.match(sqlErdValidation, /validateSqlErdLayoutJson/);
+assert.match(sqlErdValidation, /readModelMetadata/);
 assert.match(sqlErdValidation, /\$\{field\}\.version must be 1/);
 assert.match(sqlErdMapper, /mapSqlErdSession/);
 assert.match(sqlErdMapper, /mapDeletedSqlErdSession/);
@@ -119,12 +127,107 @@ function createSubject(database = new FakeDatabase()) {
   };
 }
 
+function column(id, name, dataType, overrides = {}) {
+  return {
+    id,
+    name,
+    dataType,
+    nullable: true,
+    primaryKey: false,
+    foreignKey: false,
+    unique: false,
+    defaultValue: null,
+    comment: null,
+    ...overrides
+  };
+}
+
+function table(id, name, columns, constraints = [], overrides = {}) {
+  return {
+    id,
+    name,
+    schemaName: null,
+    columns,
+    constraints,
+    comment: null,
+    ...overrides
+  };
+}
+
+function constraint(id, kind, columnIds, overrides = {}) {
+  return {
+    id,
+    kind,
+    columnIds,
+    name: null,
+    ...overrides
+  };
+}
+
+function relation(id, fromTableId, fromColumnIds, toTableId, toColumnIds, overrides = {}) {
+  return {
+    id,
+    kind: "foreign_key",
+    fromTableId,
+    fromColumnIds,
+    toTableId,
+    toColumnIds,
+    constraintName: null,
+    ...overrides
+  };
+}
+
 function modelJson(overrides = {}) {
   return {
     version: 1,
     schema: {
-      tables: [{ id: "table_users" }, { id: "table_orders" }],
-      relations: [{ id: "relation_orders_users" }]
+      tables: [
+        table(
+          "table_users",
+          "users",
+          [
+            column("column_users_id", "id", "BIGINT", {
+              nullable: false,
+              primaryKey: true
+            }),
+            column("column_users_email", "email", "VARCHAR(255)", {
+              nullable: false,
+              unique: true
+            })
+          ],
+          [
+            constraint("constraint_users_pk", "primary_key", ["column_users_id"]),
+            constraint("constraint_users_email_unique", "unique", [
+              "column_users_email"
+            ])
+          ]
+        ),
+        table(
+          "table_orders",
+          "orders",
+          [
+            column("column_orders_id", "id", "BIGINT", {
+              nullable: false,
+              primaryKey: true
+            }),
+            column("column_orders_user_id", "user_id", "BIGINT", {
+              nullable: false,
+              foreignKey: true
+            })
+          ],
+          [constraint("constraint_orders_pk", "primary_key", ["column_orders_id"])]
+        )
+      ],
+      relations: [
+        relation(
+          "relation_orders_users",
+          "table_orders",
+          ["column_orders_user_id"],
+          "table_users",
+          ["column_users_id"],
+          { constraintName: "fk_orders_user" }
+        )
+      ]
     },
     ...overrides
   };
@@ -140,6 +243,24 @@ function layoutJson(overrides = {}) {
 
 function oversizedText(size) {
   return "x".repeat(size);
+}
+
+function deepObject(depth) {
+  let value = { leaf: true };
+  for (let index = 0; index < depth; index += 1) {
+    value = { child: value };
+  }
+
+  return value;
+}
+
+function ownForbiddenKeyObject(key) {
+  const value = {};
+  Object.defineProperty(value, key, {
+    value: "blocked",
+    enumerable: true
+  });
+  return value;
 }
 
 function sessionRow(overrides = {}) {
@@ -381,18 +502,475 @@ async function assertApiError(action, status, code, messagePattern, forbiddenPat
 }
 
 {
+  const sensitiveSql = "CREATE TABLE secret_users (password TEXT);";
+  const { service } = createSubject();
+
+  await assertApiError(
+    () =>
+      service.createSession(currentUserId, workspaceId, {
+        sourceFormat: "sql",
+        dialect: "postgresql",
+        sourceText: sensitiveSql,
+        modelJson: modelJson(),
+        layoutJson: layoutJson(),
+        unexpected: true
+      }),
+    400,
+    "BAD_REQUEST",
+    /unknown field/,
+    /secret_users|password/
+  );
+
+  await assertApiError(
+    () =>
+      service.updateSession(currentUserId, workspaceId, sessionId, {
+        baseRevision: 1,
+        sourceText: sensitiveSql,
+        title: "Commerce ERD",
+        unexpected: true
+      }),
+    400,
+    "BAD_REQUEST",
+    /unknown field/,
+    /secret_users|password/
+  );
+
+  await assertApiError(
+    () =>
+      service.createSession(currentUserId, workspaceId, {
+        sourceFormat: "sql",
+        dialect: "postgresql",
+        sourceText: sensitiveSql,
+        modelJson: modelJson(),
+        layoutJson: layoutJson(),
+        settingsJson: ownForbiddenKeyObject("constructor")
+      }),
+    400,
+    "BAD_REQUEST",
+    /forbidden key/,
+    /secret_users|password/
+  );
+
+  await assertApiError(
+    () =>
+      service.createSession(currentUserId, workspaceId, {
+        sourceFormat: "sql",
+        dialect: "postgresql",
+        sourceText: sensitiveSql,
+        modelJson: modelJson(),
+        layoutJson: layoutJson(),
+        settingsJson: deepObject(21)
+      }),
+    400,
+    "BAD_REQUEST",
+    /depth limit exceeded/,
+    /secret_users|password/
+  );
+}
+
+{
+  const { service } = createSubject();
+  const baseModel = modelJson();
+
+  await assertApiError(
+    () =>
+      service.createSession(currentUserId, workspaceId, {
+        sourceFormat: "sql",
+        modelJson: modelJson({
+          schema: {
+            ...baseModel.schema,
+            tables: [
+              table("table_users", "users", [
+                column("column_users_id", "id", "BIGINT")
+              ]),
+              table("table_users", "users_copy", [
+                column("column_users_copy_id", "id", "BIGINT")
+              ])
+            ]
+          }
+        }),
+        layoutJson: layoutJson()
+      }),
+    400,
+    "BAD_REQUEST",
+    /duplicate table id/
+  );
+
+  await assertApiError(
+    () =>
+      service.createSession(currentUserId, workspaceId, {
+        sourceFormat: "sql",
+        modelJson: modelJson({
+          schema: {
+            tables: [
+              table("table_bad", "bad", [
+                column("column_dup", "first", "BIGINT"),
+                column("column_dup", "second", "BIGINT")
+              ])
+            ],
+            relations: []
+          }
+        }),
+        layoutJson: layoutJson()
+      }),
+    400,
+    "BAD_REQUEST",
+    /duplicate column id/
+  );
+
+  await assertApiError(
+    () =>
+      service.createSession(currentUserId, workspaceId, {
+        sourceFormat: "sql",
+        modelJson: modelJson({
+          schema: {
+            tables: [
+              table(
+                "table_bad",
+                "bad",
+                [column("column_bad_id", "id", "BIGINT")],
+                [
+                  constraint("constraint_bad", "primary_key", [
+                    "column_missing"
+                  ])
+                ]
+              )
+            ],
+            relations: []
+          }
+        }),
+        layoutJson: layoutJson()
+      }),
+    400,
+    "BAD_REQUEST",
+    /constraint column reference is invalid/
+  );
+}
+
+{
+  const { service } = createSubject();
+
+  await assertApiError(
+    () =>
+      service.createSession(currentUserId, workspaceId, {
+        sourceFormat: "sql",
+        modelJson: modelJson({ extra: true }),
+        layoutJson: layoutJson()
+      }),
+    400,
+    "BAD_REQUEST",
+    /modelJson has unknown field/
+  );
+
+  await assertApiError(
+    () =>
+      service.createSession(currentUserId, workspaceId, {
+        sourceFormat: "sql",
+        modelJson: modelJson({
+          schema: {
+            ...modelJson().schema,
+            relations: [
+              relation(
+                "relation_missing_table",
+                "table_missing",
+                ["column_orders_user_id"],
+                "table_users",
+                ["column_users_id"]
+              )
+            ]
+          }
+        }),
+        layoutJson: layoutJson()
+      }),
+    400,
+    "BAD_REQUEST",
+    /relation table reference is invalid/
+  );
+
+  await assertApiError(
+    () =>
+      service.createSession(currentUserId, workspaceId, {
+        sourceFormat: "sql",
+        modelJson: modelJson({
+          schema: {
+            ...modelJson().schema,
+            relations: [
+              relation(
+                "relation_mismatch",
+                "table_orders",
+                ["column_orders_user_id"],
+                "table_users",
+                ["column_users_id", "column_users_email"]
+              )
+            ]
+          }
+        }),
+        layoutJson: layoutJson()
+      }),
+    400,
+    "BAD_REQUEST",
+    /relation column reference length mismatch/
+  );
+
+  await assertApiError(
+    () =>
+      service.createSession(currentUserId, workspaceId, {
+        sourceFormat: "sql",
+        modelJson: modelJson({
+          schema: {
+            ...modelJson().schema,
+            relations: [
+              relation(
+                "relation_missing_column",
+                "table_orders",
+                ["column_missing"],
+                "table_users",
+                ["column_users_id"]
+              )
+            ]
+          }
+        }),
+        layoutJson: layoutJson()
+      }),
+    400,
+    "BAD_REQUEST",
+    /relation fromColumnIds reference is invalid/
+  );
+
+  await assertApiError(
+    () =>
+      service.createSession(currentUserId, workspaceId, {
+        sourceFormat: "sql",
+        modelJson: modelJson({
+          schema: {
+            ...modelJson().schema,
+            relations: [
+              relation(
+                "relation_duplicate",
+                "table_orders",
+                ["column_orders_user_id"],
+                "table_users",
+                ["column_users_id"]
+              ),
+              relation(
+                "relation_duplicate",
+                "table_orders",
+                ["column_orders_user_id"],
+                "table_users",
+                ["column_users_id"]
+              )
+            ]
+          }
+        }),
+        layoutJson: layoutJson()
+      }),
+    400,
+    "BAD_REQUEST",
+    /duplicate relation id/
+  );
+
+  await assertApiError(
+    () =>
+      service.createSession(currentUserId, workspaceId, {
+        sourceFormat: "sql",
+        modelJson: modelJson({
+          schema: {
+            ...modelJson().schema,
+            relations: [
+              relation(
+                "relation_missing_to_column",
+                "table_orders",
+                ["column_orders_user_id"],
+                "table_users",
+                ["column_missing"]
+              )
+            ]
+          }
+        }),
+        layoutJson: layoutJson()
+      }),
+    400,
+    "BAD_REQUEST",
+    /relation toColumnIds reference is invalid/
+  );
+}
+
+{
+  const { service } = createSubject();
+  const tooManyColumns = Array.from({ length: 201 }, (_, index) =>
+    column(`column_too_many_${index}`, `column_${index}`, "BIGINT")
+  );
+
+  await assertApiError(
+    () =>
+      service.createSession(currentUserId, workspaceId, {
+        sourceFormat: "sql",
+        modelJson: modelJson({
+          schema: {
+            tables: [table("table_wide", "wide", tooManyColumns)],
+            relations: []
+          }
+        }),
+        layoutJson: layoutJson()
+      }),
+    400,
+    "BAD_REQUEST",
+    /table column count limit exceeded/
+  );
+
+  await assertApiError(
+    () =>
+      service.createSession(currentUserId, workspaceId, {
+        sourceFormat: "sql",
+        modelJson: modelJson({
+          schema: {
+            tables: [
+              table("table_bad", oversizedText(257), [
+                column("column_bad_id", "id", "BIGINT")
+              ])
+            ],
+            relations: []
+          }
+        }),
+        layoutJson: layoutJson()
+      }),
+    400,
+    "BAD_REQUEST",
+    /length limit exceeded/
+  );
+
+  await assertApiError(
+    () =>
+      service.createSession(currentUserId, workspaceId, {
+        sourceFormat: "sql",
+        modelJson: modelJson({
+          schema: {
+            tables: [
+              table("table_bad", "bad", [
+                column("column_bad_id", "id", oversizedText(513))
+              ])
+            ],
+            relations: []
+          }
+        }),
+        layoutJson: layoutJson()
+      }),
+    400,
+    "BAD_REQUEST",
+    /length limit exceeded/
+  );
+}
+
+{
+  const { service } = createSubject();
+
+  await assertApiError(
+    () =>
+      service.createSession(currentUserId, workspaceId, {
+        sourceFormat: "sql",
+        modelJson: modelJson(),
+        layoutJson: layoutJson({ extra: true })
+      }),
+    400,
+    "BAD_REQUEST",
+    /layoutJson has unknown field/
+  );
+
+  await assertApiError(
+    () =>
+      service.createSession(currentUserId, workspaceId, {
+        sourceFormat: "sql",
+        modelJson: modelJson(),
+        layoutJson: layoutJson({
+          tableLayouts: [{ tableId: "table_missing", x: 0, y: 0 }]
+        })
+      }),
+    400,
+    "BAD_REQUEST",
+    /layoutJson.tableLayouts tableId reference is invalid/
+  );
+
+  await assertApiError(
+    () =>
+      service.createSession(currentUserId, workspaceId, {
+        sourceFormat: "sql",
+        modelJson: modelJson(),
+        layoutJson: layoutJson({
+          tableLayouts: [
+            { tableId: "table_users", x: 0, y: 0 },
+            { tableId: "table_users", x: 10, y: 10 }
+          ]
+        })
+      }),
+    400,
+    "BAD_REQUEST",
+    /duplicate layout tableId/
+  );
+
+  await assertApiError(
+    () =>
+      service.createSession(currentUserId, workspaceId, {
+        sourceFormat: "sql",
+        modelJson: modelJson(),
+        layoutJson: layoutJson({
+          tableLayouts: [{ tableId: "table_users", x: Number.NaN, y: 0 }]
+        })
+      }),
+    400,
+    "BAD_REQUEST",
+    /must be a finite number/
+  );
+
+  await assertApiError(
+    () =>
+      service.createSession(currentUserId, workspaceId, {
+        sourceFormat: "sql",
+        modelJson: modelJson(),
+        layoutJson: layoutJson({
+          viewport: { x: 0, y: 0, zoom: 0 }
+        })
+      }),
+    400,
+    "BAD_REQUEST",
+    /zoom must be greater than 0/
+  );
+}
+
+{
   const updatedSourceText = "CREATE TABLE users (id BIGINT PRIMARY KEY, email TEXT);";
-  const updatedModelJson = {
-    version: 1,
+  const updatedModelJson = modelJson({
     schema: {
       tables: [
-        { id: "table_users" },
-        { id: "table_orders" },
-        { id: "table_products" }
+        ...modelJson().schema.tables,
+        table(
+          "table_products",
+          "products",
+          [
+            column("column_products_id", "id", "BIGINT", {
+              nullable: false,
+              primaryKey: true
+            })
+          ],
+          [
+            constraint("constraint_products_pk", "primary_key", [
+              "column_products_id"
+            ])
+          ]
+        )
       ],
-      relations: [{ id: "relation_orders_users" }, { id: "relation_products" }]
+      relations: [
+        ...modelJson().schema.relations,
+        relation(
+          "relation_products_users",
+          "table_products",
+          ["column_products_id"],
+          "table_users",
+          ["column_users_id"],
+          { constraintName: "fk_products_user" }
+        )
+      ]
     }
-  };
+  });
   const updatedLayoutJson = {
     version: 1,
     tableLayouts: [{ tableId: "table_users", x: 10, y: 20 }]

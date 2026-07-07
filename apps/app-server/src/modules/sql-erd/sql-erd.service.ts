@@ -20,6 +20,7 @@ import {
 import {
   validateCreateSqlErdSessionRequest,
   validateDeleteSqlErdSessionQuery,
+  validateSqlErdLayoutJson,
   validateSqlErdSessionId,
   validateUpdateSqlErdSessionRequest
 } from "./sql-erd.validation";
@@ -194,6 +195,12 @@ export class SqlErdService {
     }
 
     this.assertRevision(currentSession, input.baseRevision);
+    if (input.modelJson || input.layoutJson) {
+      validateSqlErdLayoutJson(
+        input.layoutJson ?? currentSession.layout_json,
+        input.modelJson ?? currentSession.model_json
+      );
+    }
 
     let session: SqlErdSessionRow | null;
     try {
