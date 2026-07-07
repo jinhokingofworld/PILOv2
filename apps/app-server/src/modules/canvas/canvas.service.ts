@@ -1,243 +1,49 @@
 import { Injectable } from "@nestjs/common";
-import { createHash } from "node:crypto";
-import { QueryResultRow } from "pg";
 import { badRequest, notFound } from "../../common/api-error";
 import { DatabaseService } from "../../database/database.service";
 import { WorkspaceService } from "../workspace/workspace.service";
-
-interface CanvasRow extends QueryResultRow {
-  id: string;
-  workspace_id: string;
-  title: string;
-  board_type: string;
-  zoom: number | string;
-  viewport_x: number | string;
-  viewport_y: number | string;
-  shape_count?: number | string;
-  updated_at: Date | string;
-}
-
-interface CanvasShapeRow extends QueryResultRow {
-  id: string;
-  canvas_id: string;
-  shape_type: string;
-  title: string | null;
-  text_content: string | null;
-  x: number | string;
-  y: number | string;
-  width: number | string | null;
-  height: number | string | null;
-  rotation: number | string;
-  z_index: number | string;
-  raw_shape: Record<string, unknown>;
-  content_hash: string;
-  revision: number | string;
-  created_at: Date | string;
-  updated_at: Date | string;
-  deleted_at: Date | string | null;
-}
-
-interface CanvasShapeDeleteRow extends QueryResultRow {
-  id: string;
-  content_hash: string;
-  revision: number | string;
-  deleted_at: Date | string | null;
-}
-
-interface CanvasUserStateRow extends QueryResultRow {
-  canvas_id: string;
-  user_id: string;
-  entered_at: Date | string;
-  left_at: Date | string | null;
-}
-
-interface CanvasShapeCleanupRow extends QueryResultRow {
-  deleted_count: number | string;
-}
-
-export interface CreateCanvasRequest {
-  title?: unknown;
-}
-
-export interface CreateCanvasShapeRequest {
-  id?: unknown;
-  shapeType?: unknown;
-  title?: unknown;
-  textContent?: unknown;
-  x?: unknown;
-  y?: unknown;
-  width?: unknown;
-  height?: unknown;
-  rotation?: unknown;
-  zIndex?: unknown;
-  rawShape?: unknown;
-}
-
-export type UpdateCanvasShapeRequest = Partial<CreateCanvasShapeRequest>;
-
-export interface UpdateCanvasViewSettingRequest {
-  zoom?: unknown;
-  viewportX?: unknown;
-  viewportY?: unknown;
-}
-
-export interface ListCanvasShapesQuery {
-  x?: unknown;
-  y?: unknown;
-  width?: unknown;
-  height?: unknown;
-  margin?: unknown;
-}
-
-export interface SyncCanvasShapesBatchRequest {
-  operations?: unknown;
-}
-
-export interface CanvasViewSettingPayload {
-  zoom: number;
-  viewportX: number;
-  viewportY: number;
-}
-
-export interface CanvasShapePayload {
-  id: string;
-  canvasId: string;
-  shapeType: string;
-  title: string | null;
-  textContent: string | null;
-  x: number;
-  y: number;
-  width: number | null;
-  height: number | null;
-  rotation: number;
-  zIndex: number;
-  rawShape: Record<string, unknown>;
-  contentHash: string;
-  revision: number;
-  createdAt: string;
-  updatedAt: string;
-  deletedAt: string | null;
-}
-
-export type CanvasShapeSummaryPayload = CanvasShapePayload;
-
-export interface CanvasBoardPayload {
-  id: string;
-  workspaceId: string;
-  title: string;
-  boardType: string;
-  zoom: number;
-  viewportX: number;
-  viewportY: number;
-  shapeCount: number;
-  updatedAt: string;
-}
-
-export interface CanvasBoardDetailPayload extends CanvasBoardPayload {
-  shapes: CanvasShapePayload[];
-  viewSetting: CanvasViewSettingPayload;
-  userState: null;
-}
-
-export interface CanvasShapeDeletePayload {
-  id: string;
-  deleted: true;
-  deletedAt: string;
-  contentHash: string;
-  revision: number;
-}
-
-export interface CanvasShapeBatchPayload {
-  created: number;
-  updated: number;
-  deleted: number;
-  shapes: CanvasShapePayload[];
-  deletedShapes: CanvasShapeDeletePayload[];
-}
-
-export interface CanvasUserStatePayload {
-  canvasId: string;
-  userId: string;
-  enteredAt: string;
-  leftAt: string | null;
-}
-
-export interface CanvasLeavePayload extends CanvasUserStatePayload {
-  permanentlyDeletedShapeCount: number;
-}
-
-interface ShapeWriteValues {
-  shapeType?: string;
-  title?: string | null;
-  textContent?: string | null;
-  x?: number;
-  y?: number;
-  width?: number | null;
-  height?: number | null;
-  rotation?: number;
-  zIndex?: number;
-  rawShape?: Record<string, unknown>;
-}
-
-interface CompleteShapeWriteValues {
-  shapeType: string;
-  title: string | null;
-  textContent: string | null;
-  x: number;
-  y: number;
-  width: number | null;
-  height: number | null;
-  rotation: number;
-  zIndex: number;
-  rawShape: Record<string, unknown>;
-}
-
-interface ViewportBoundsValues {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  margin: number;
-}
-
-type CanvasShapeBatchOperationValues =
-  | {
-      type: "create";
-      shapeId: string;
-      payload: CreateCanvasShapeRequest;
-    }
-  | {
-      type: "update";
-      shapeId: string;
-      payload: UpdateCanvasShapeRequest;
-    }
-  | {
-      type: "delete";
-      shapeId: string;
-    };
+import { computeShapeContentHash } from "./canvas-shape-hash";
+import {
+  mapCanvas,
+  mapCanvasUserState,
+  mapDeletedShape,
+  mapShape,
+  mergeShapeWriteValues
+} from "./canvas-shape.mapper";
+import {
+  validateCanvasTitle,
+  validateShapeBatchOperations,
+  validateShapeCreate,
+  validateShapeId,
+  validateShapeUpdate,
+  validateViewSetting,
+  validateViewportBounds
+} from "./canvas-shape.validation";
+import {
+  CanvasBoardDetailPayload,
+  CanvasBoardPayload,
+  CanvasLeavePayload,
+  CanvasRow,
+  CanvasShapeBatchPayload,
+  CanvasShapeCleanupRow,
+  CanvasShapeDeletePayload,
+  CanvasShapeDeleteRow,
+  CanvasShapePayload,
+  CanvasShapeRow,
+  CanvasShapeSummaryPayload,
+  CanvasUserStatePayload,
+  CanvasUserStateRow,
+  CanvasViewSettingPayload,
+  CreateCanvasRequest,
+  CreateCanvasShapeRequest,
+  ListCanvasShapesQuery,
+  SyncCanvasShapesBatchRequest,
+  UpdateCanvasShapeRequest,
+  UpdateCanvasViewSettingRequest
+} from "./canvas.types";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const MAX_CANVAS_TITLE_LENGTH = 120;
-const MAX_CANVAS_SHAPE_BATCH_OPERATIONS = 100;
-const ALLOWED_SHAPE_TYPES = new Set([
-  "sticky-note",
-  "text",
-  "frame",
-  "draw",
-  "highlight",
-  "geo",
-  "arrow",
-  "line",
-  "image",
-  "video",
-  "bookmark",
-  "embed",
-  "pilo-sticky-note",
-  "pilo-code-block",
-  "file_node",
-  "group"
-]);
 
 @Injectable()
 export class CanvasService {
@@ -276,7 +82,7 @@ export class CanvasService {
       [workspaceId]
     );
 
-    return canvases.map((canvas) => this.mapCanvas(canvas));
+    return canvases.map((canvas) => mapCanvas(canvas));
   }
 
   async createCanvas(
@@ -286,7 +92,7 @@ export class CanvasService {
   ): Promise<CanvasBoardPayload> {
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
 
-    const title = this.validateCanvasTitle(input.title);
+    const title = validateCanvasTitle(input.title);
     const canvas = await this.database.queryOne<CanvasRow>(
       `
         INSERT INTO canvas (workspace_id, title, board_type, created_by)
@@ -309,7 +115,7 @@ export class CanvasService {
       throw badRequest("Canvas could not be created");
     }
 
-    return this.mapCanvas(canvas);
+    return mapCanvas(canvas);
   }
 
   async getCanvas(
@@ -324,7 +130,7 @@ export class CanvasService {
       throw notFound("Canvas not found");
     }
 
-    const payload = this.mapCanvas(canvas);
+    const payload = mapCanvas(canvas);
 
     return {
       ...payload,
@@ -351,7 +157,7 @@ export class CanvasService {
       throw notFound("Canvas not found");
     }
 
-    const bounds = this.validateViewportBounds(input);
+    const bounds = validateViewportBounds(input);
     const minX = bounds.x - bounds.margin;
     const minY = bounds.y - bounds.margin;
     const maxX = bounds.x + bounds.width + bounds.margin;
@@ -388,7 +194,7 @@ export class CanvasService {
       [canvas.id, minX, maxX, minY, maxY]
     );
 
-    return shapes.map((shape) => this.mapShape(shape));
+    return shapes.map((shape) => mapShape(shape));
   }
 
   async createShape(
@@ -404,9 +210,9 @@ export class CanvasService {
       throw notFound("Canvas not found");
     }
 
-    const id = this.validateShapeId(input.id);
-    const values = this.validateShapeCreate(input);
-    const contentHash = this.computeShapeContentHash(values);
+    const id = validateShapeId(input.id);
+    const values = validateShapeCreate(input);
+    const contentHash = computeShapeContentHash(values);
     const shape = await this.database.queryOne<CanvasShapeRow>(
       `
         INSERT INTO canvas_freeform_shapes (
@@ -498,7 +304,7 @@ export class CanvasService {
       throw badRequest("Canvas shape could not be created");
     }
 
-    return this.mapShape(shape);
+    return mapShape(shape);
   }
 
   async syncShapesBatch(
@@ -514,7 +320,7 @@ export class CanvasService {
       throw notFound("Canvas not found");
     }
 
-    const operations = this.validateShapeBatchOperations(input);
+    const operations = validateShapeBatchOperations(input);
 
     return this.database.transaction(async (transaction) => {
       const result: CanvasShapeBatchPayload = {
@@ -527,8 +333,8 @@ export class CanvasService {
 
       for (const operation of operations) {
         if (operation.type === "create") {
-          const values = this.validateShapeCreate(operation.payload);
-          const contentHash = this.computeShapeContentHash(values);
+          const values = validateShapeCreate(operation.payload);
+          const contentHash = computeShapeContentHash(values);
           const shape = await transaction.queryOne<CanvasShapeRow>(
             `
               INSERT INTO canvas_freeform_shapes (
@@ -621,12 +427,12 @@ export class CanvasService {
           }
 
           result.created += 1;
-          result.shapes.push(this.mapShape(shape));
+          result.shapes.push(mapShape(shape));
           continue;
         }
 
         if (operation.type === "update") {
-          const values = this.validateShapeUpdate(operation.payload);
+          const values = validateShapeUpdate(operation.payload);
           const currentShape = await transaction.queryOne<CanvasShapeRow>(
             `
               SELECT
@@ -660,8 +466,8 @@ export class CanvasService {
             throw notFound("Canvas shape not found");
           }
 
-          const mergedValues = this.mergeShapeWriteValues(currentShape, values);
-          const contentHash = this.computeShapeContentHash(mergedValues);
+          const mergedValues = mergeShapeWriteValues(currentShape, values);
+          const contentHash = computeShapeContentHash(mergedValues);
           const shape = await transaction.queryOne<CanvasShapeRow>(
             `
               UPDATE canvas_freeform_shapes s
@@ -722,7 +528,7 @@ export class CanvasService {
           }
 
           result.updated += 1;
-          result.shapes.push(this.mapShape(shape));
+          result.shapes.push(mapShape(shape));
           continue;
         }
 
@@ -745,7 +551,7 @@ export class CanvasService {
         }
 
         result.deleted += 1;
-        result.deletedShapes.push(this.mapDeletedShape(shape));
+        result.deletedShapes.push(mapDeletedShape(shape));
       }
 
       return result;
@@ -759,7 +565,7 @@ export class CanvasService {
   ): Promise<CanvasShapePayload> {
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
 
-    const id = this.validateShapeId(shapeId);
+    const id = validateShapeId(shapeId);
     const shape = await this.database.queryOne<CanvasShapeRow>(
       `
         SELECT
@@ -794,7 +600,7 @@ export class CanvasService {
       throw notFound("Canvas shape not found");
     }
 
-    return this.mapShape(shape);
+    return mapShape(shape);
   }
 
   async enterCanvas(
@@ -835,7 +641,7 @@ export class CanvasService {
       throw badRequest("Canvas user state could not be recorded");
     }
 
-    return this.mapCanvasUserState(userState);
+    return mapCanvasUserState(userState);
   }
 
   async leaveCanvas(
@@ -891,7 +697,7 @@ export class CanvasService {
       );
 
       return {
-        ...this.mapCanvasUserState(userState),
+        ...mapCanvasUserState(userState),
         permanentlyDeletedShapeCount: Number(cleanup?.deleted_count ?? 0)
       };
     });
@@ -910,7 +716,7 @@ export class CanvasService {
       throw notFound("Canvas not found");
     }
 
-    const values = this.validateViewSetting(input);
+    const values = validateViewSetting(input);
     const updatedCanvas = await this.database.queryOne<CanvasRow>(
       `
         UPDATE canvas
@@ -939,7 +745,7 @@ export class CanvasService {
       throw notFound("Canvas not found");
     }
 
-    const payload = this.mapCanvas(updatedCanvas);
+    const payload = mapCanvas(updatedCanvas);
 
     return {
       zoom: payload.zoom,
@@ -956,8 +762,8 @@ export class CanvasService {
   ): Promise<CanvasShapePayload> {
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
 
-    const id = this.validateShapeId(shapeId);
-    const values = this.validateShapeUpdate(input);
+    const id = validateShapeId(shapeId);
+    const values = validateShapeUpdate(input);
 
     const shape = await this.database.transaction(async (transaction) => {
       const currentShape = await transaction.queryOne<CanvasShapeRow>(
@@ -995,8 +801,8 @@ export class CanvasService {
         throw notFound("Canvas shape not found");
       }
 
-      const mergedValues = this.mergeShapeWriteValues(currentShape, values);
-      const contentHash = this.computeShapeContentHash(mergedValues);
+      const mergedValues = mergeShapeWriteValues(currentShape, values);
+      const contentHash = computeShapeContentHash(mergedValues);
 
       return transaction.queryOne<CanvasShapeRow>(
         `
@@ -1061,7 +867,7 @@ export class CanvasService {
       throw notFound("Canvas shape not found");
     }
 
-    return this.mapShape(shape);
+    return mapShape(shape);
   }
 
   async deleteShape(
@@ -1071,7 +877,7 @@ export class CanvasService {
   ): Promise<CanvasShapeDeletePayload> {
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
 
-    const id = this.validateShapeId(shapeId);
+    const id = validateShapeId(shapeId);
     const shape = await this.database.queryOne<CanvasShapeDeleteRow>(
       `
         UPDATE canvas_freeform_shapes s
@@ -1093,7 +899,7 @@ export class CanvasService {
       throw notFound("Canvas shape not found");
     }
 
-    return this.mapDeletedShape(shape);
+    return mapDeletedShape(shape);
   }
 
   private async findCanvas(
@@ -1129,483 +935,4 @@ export class CanvasService {
     );
   }
 
-  private validateCanvasTitle(value: unknown): string {
-    const title = typeof value === "string" ? value.trim() : "";
-
-    if (title.length > MAX_CANVAS_TITLE_LENGTH) {
-      throw badRequest("Canvas title must be 120 characters or less");
-    }
-
-    return title || "Untitled canvas";
-  }
-
-  private validateShapeId(value: unknown): string {
-    if (typeof value !== "string" || !value.trim()) {
-      throw badRequest("Canvas shape id is required");
-    }
-
-    return value.trim();
-  }
-
-  private validateShapeCreate(input: CreateCanvasShapeRequest): Required<ShapeWriteValues> {
-    return {
-      shapeType: this.validateShapeType(input.shapeType),
-      title: this.validateNullableString(input.title, "Shape title"),
-      textContent: this.validateNullableString(
-        input.textContent,
-        "Shape textContent"
-      ),
-      x: this.validateNumber(input.x, "Shape x", 0),
-      y: this.validateNumber(input.y, "Shape y", 0),
-      width: this.validateNullableNonNegativeNumber(input.width, "Shape width"),
-      height: this.validateNullableNonNegativeNumber(
-        input.height,
-        "Shape height"
-      ),
-      rotation: this.validateNumber(input.rotation, "Shape rotation", 0),
-      zIndex: this.validateInteger(input.zIndex, "Shape zIndex", 0),
-      rawShape: this.validateRawShape(input.rawShape)
-    };
-  }
-
-  private validateShapeUpdate(input: UpdateCanvasShapeRequest): ShapeWriteValues {
-    if (!this.isRecord(input)) {
-      throw badRequest("Canvas shape update body is required");
-    }
-
-    const values: ShapeWriteValues = {};
-
-    if (this.hasOwn(input, "shapeType")) {
-      values.shapeType = this.validateShapeType(input.shapeType);
-    }
-
-    if (this.hasOwn(input, "title")) {
-      values.title = this.validateNullableString(input.title, "Shape title");
-    }
-
-    if (this.hasOwn(input, "textContent")) {
-      values.textContent = this.validateNullableString(
-        input.textContent,
-        "Shape textContent"
-      );
-    }
-
-    if (this.hasOwn(input, "x")) {
-      values.x = this.validateNumber(input.x, "Shape x");
-    }
-
-    if (this.hasOwn(input, "y")) {
-      values.y = this.validateNumber(input.y, "Shape y");
-    }
-
-    if (this.hasOwn(input, "width")) {
-      values.width = this.validateNullableNonNegativeNumber(
-        input.width,
-        "Shape width"
-      );
-    }
-
-    if (this.hasOwn(input, "height")) {
-      values.height = this.validateNullableNonNegativeNumber(
-        input.height,
-        "Shape height"
-      );
-    }
-
-    if (this.hasOwn(input, "rotation")) {
-      values.rotation = this.validateNumber(input.rotation, "Shape rotation");
-    }
-
-    if (this.hasOwn(input, "zIndex")) {
-      values.zIndex = this.validateInteger(input.zIndex, "Shape zIndex");
-    }
-
-    if (this.hasOwn(input, "rawShape")) {
-      values.rawShape = this.validateRawShape(input.rawShape);
-    }
-
-    if (Object.keys(values).length === 0) {
-      throw badRequest("Canvas shape update body is required");
-    }
-
-    return values;
-  }
-
-  private validateShapeBatchOperations(
-    input: SyncCanvasShapesBatchRequest
-  ): CanvasShapeBatchOperationValues[] {
-    if (!this.isRecord(input)) {
-      throw badRequest("Canvas shape batch body is required");
-    }
-
-    if (!Array.isArray(input.operations)) {
-      throw badRequest("Canvas shape batch operations must be an array");
-    }
-
-    if (input.operations.length > MAX_CANVAS_SHAPE_BATCH_OPERATIONS) {
-      throw badRequest(
-        `Canvas shape batch operations must be ${MAX_CANVAS_SHAPE_BATCH_OPERATIONS} or fewer`
-      );
-    }
-
-    return input.operations.map((operation, index) => {
-      if (!this.isRecord(operation)) {
-        throw badRequest(`Canvas shape batch operation ${index} is invalid`);
-      }
-
-      const type = operation.type;
-      if (type !== "create" && type !== "update" && type !== "delete") {
-        throw badRequest(`Canvas shape batch operation ${index} type is invalid`);
-      }
-
-      const shapeId = this.validateShapeId(operation.shapeId);
-
-      if (type === "delete") {
-        return {
-          type,
-          shapeId
-        };
-      }
-
-      if (!this.isRecord(operation.payload)) {
-        throw badRequest(
-          `Canvas shape batch operation ${index} payload is required`
-        );
-      }
-
-      if (type === "create") {
-        if (this.hasOwn(operation.payload, "id")) {
-          const payloadShapeId = this.validateShapeId(operation.payload.id);
-          if (payloadShapeId !== shapeId) {
-            throw badRequest(
-              `Canvas shape batch operation ${index} shapeId must match payload id`
-            );
-          }
-        }
-
-        return {
-          type,
-          shapeId,
-          payload: {
-            ...operation.payload,
-            id: shapeId
-          }
-        };
-      }
-
-      return {
-        type,
-        shapeId,
-        payload: operation.payload
-      };
-    });
-  }
-
-  private validateViewSetting(
-    input: UpdateCanvasViewSettingRequest
-  ): CanvasViewSettingPayload {
-    if (!this.isRecord(input)) {
-      throw badRequest("Canvas view setting body is required");
-    }
-
-    const zoom = this.validateNumber(input.zoom, "Canvas zoom");
-    if (zoom <= 0) {
-      throw badRequest("Canvas zoom must be greater than 0");
-    }
-
-    return {
-      zoom,
-      viewportX: this.validateNumber(input.viewportX, "Canvas viewportX"),
-      viewportY: this.validateNumber(input.viewportY, "Canvas viewportY")
-    };
-  }
-
-  private validateViewportBounds(input: ListCanvasShapesQuery): ViewportBoundsValues {
-    if (!this.isRecord(input)) {
-      throw badRequest("Canvas viewport bounds query is required");
-    }
-
-    const width = this.validateQueryNumber(input.width, "Canvas viewport width");
-    const height = this.validateQueryNumber(input.height, "Canvas viewport height");
-    const margin = this.validateQueryNumber(input.margin, "Canvas viewport margin", 0);
-
-    if (width <= 0) {
-      throw badRequest("Canvas viewport width must be greater than 0");
-    }
-
-    if (height <= 0) {
-      throw badRequest("Canvas viewport height must be greater than 0");
-    }
-
-    if (margin < 0) {
-      throw badRequest("Canvas viewport margin must be greater than or equal to 0");
-    }
-
-    return {
-      x: this.validateQueryNumber(input.x, "Canvas viewport x"),
-      y: this.validateQueryNumber(input.y, "Canvas viewport y"),
-      width,
-      height,
-      margin
-    };
-  }
-
-  private validateShapeType(value: unknown): string {
-    if (typeof value !== "string" || !ALLOWED_SHAPE_TYPES.has(value)) {
-      throw badRequest("Canvas shapeType is invalid");
-    }
-
-    return value;
-  }
-
-  private validateNullableString(value: unknown, fieldName: string): string | null {
-    if (value === undefined || value === null) {
-      return null;
-    }
-
-    if (typeof value !== "string") {
-      throw badRequest(`${fieldName} must be a string`);
-    }
-
-    return value;
-  }
-
-  private validateNumber(
-    value: unknown,
-    fieldName: string,
-    fallback?: number
-  ): number {
-    if (value === undefined || value === null) {
-      if (fallback !== undefined) {
-        return fallback;
-      }
-
-      throw badRequest(`${fieldName} is required`);
-    }
-
-    if (typeof value !== "number" || !Number.isFinite(value)) {
-      throw badRequest(`${fieldName} must be a finite number`);
-    }
-
-    return value;
-  }
-
-  private validateQueryNumber(
-    value: unknown,
-    fieldName: string,
-    fallback?: number
-  ): number {
-    if (value === undefined || value === null || value === "") {
-      if (fallback !== undefined) {
-        return fallback;
-      }
-
-      throw badRequest(`${fieldName} is required`);
-    }
-
-    const numberValue =
-      typeof value === "number"
-        ? value
-        : typeof value === "string" && value.trim()
-          ? Number(value)
-          : NaN;
-
-    if (!Number.isFinite(numberValue)) {
-      throw badRequest(`${fieldName} must be a finite number`);
-    }
-
-    return numberValue;
-  }
-
-  private validateNullableNonNegativeNumber(
-    value: unknown,
-    fieldName: string
-  ): number | null {
-    if (value === undefined || value === null) {
-      return null;
-    }
-
-    const numberValue = this.validateNumber(value, fieldName);
-    if (numberValue < 0) {
-      throw badRequest(`${fieldName} must be greater than or equal to 0`);
-    }
-
-    return numberValue;
-  }
-
-  private validateInteger(
-    value: unknown,
-    fieldName: string,
-    fallback?: number
-  ): number {
-    const numberValue = this.validateNumber(value, fieldName, fallback);
-
-    if (!Number.isInteger(numberValue)) {
-      throw badRequest(`${fieldName} must be an integer`);
-    }
-
-    return numberValue;
-  }
-
-  private validateRawShape(value: unknown): Record<string, unknown> {
-    if (value === undefined || value === null) {
-      return {};
-    }
-
-    if (!this.isRecord(value)) {
-      throw badRequest("Shape rawShape must be an object");
-    }
-
-    return value;
-  }
-
-  private mergeShapeWriteValues(
-    currentShape: CanvasShapeRow,
-    values: ShapeWriteValues
-  ): CompleteShapeWriteValues {
-    return {
-      shapeType: values.shapeType ?? currentShape.shape_type,
-      title: values.title === undefined ? currentShape.title : values.title,
-      textContent:
-        values.textContent === undefined
-          ? currentShape.text_content
-          : values.textContent,
-      x: values.x ?? this.toNumber(currentShape.x),
-      y: values.y ?? this.toNumber(currentShape.y),
-      width:
-        values.width === undefined
-          ? currentShape.width === null
-            ? null
-            : this.toNumber(currentShape.width)
-          : values.width,
-      height:
-        values.height === undefined
-          ? currentShape.height === null
-            ? null
-            : this.toNumber(currentShape.height)
-          : values.height,
-      rotation: values.rotation ?? this.toNumber(currentShape.rotation),
-      zIndex: values.zIndex ?? Number(currentShape.z_index),
-      rawShape: values.rawShape ?? (currentShape.raw_shape ?? {})
-    };
-  }
-
-  private computeShapeContentHash(values: CompleteShapeWriteValues): string {
-    return createHash("sha256")
-      .update(this.stableStringify(values))
-      .digest("hex");
-  }
-
-  private stableStringify(value: unknown): string {
-    return JSON.stringify(this.canonicalizeJsonValue(value));
-  }
-
-  private canonicalizeJsonValue(value: unknown): unknown {
-    if (Array.isArray(value)) {
-      return value.map((item) =>
-        item === undefined ? null : this.canonicalizeJsonValue(item)
-      );
-    }
-
-    if (this.isRecord(value)) {
-      return Object.keys(value)
-        .sort()
-        .reduce<Record<string, unknown>>((result, key) => {
-          const item = value[key];
-
-          if (item === undefined) {
-            return result;
-          }
-
-          result[key] = this.canonicalizeJsonValue(item);
-          return result;
-        }, {});
-    }
-
-    return value;
-  }
-
-  private mapCanvas(canvas: CanvasRow, shapeCount?: number): CanvasBoardPayload {
-    const zoom = this.toNumber(canvas.zoom);
-    const viewportX = this.toNumber(canvas.viewport_x);
-    const viewportY = this.toNumber(canvas.viewport_y);
-
-    return {
-      id: canvas.id,
-      workspaceId: canvas.workspace_id,
-      title: canvas.title,
-      boardType: canvas.board_type,
-      zoom,
-      viewportX,
-      viewportY,
-      shapeCount:
-        shapeCount ?? (canvas.shape_count === undefined ? 0 : Number(canvas.shape_count)),
-      updatedAt: this.toIsoString(canvas.updated_at)
-    };
-  }
-
-  private mapShape(shape: CanvasShapeRow): CanvasShapePayload {
-    return {
-      id: shape.id,
-      canvasId: shape.canvas_id,
-      shapeType: shape.shape_type,
-      title: shape.title,
-      textContent: shape.text_content,
-      x: this.toNumber(shape.x),
-      y: this.toNumber(shape.y),
-      width: shape.width === null ? null : this.toNumber(shape.width),
-      height: shape.height === null ? null : this.toNumber(shape.height),
-      rotation: this.toNumber(shape.rotation),
-      zIndex: Number(shape.z_index),
-      rawShape: shape.raw_shape ?? {},
-      contentHash: shape.content_hash,
-      revision: Number(shape.revision),
-      createdAt: this.toIsoString(shape.created_at),
-      updatedAt: this.toIsoString(shape.updated_at),
-      deletedAt:
-        shape.deleted_at === null ? null : this.toIsoString(shape.deleted_at)
-    };
-  }
-
-  private mapDeletedShape(shape: CanvasShapeDeleteRow): CanvasShapeDeletePayload {
-    if (shape.deleted_at === null) {
-      throw badRequest("Canvas shape delete timestamp missing");
-    }
-
-    return {
-      id: shape.id,
-      deleted: true,
-      deletedAt: this.toIsoString(shape.deleted_at),
-      contentHash: shape.content_hash,
-      revision: Number(shape.revision)
-    };
-  }
-
-  private mapCanvasUserState(
-    userState: CanvasUserStateRow
-  ): CanvasUserStatePayload {
-    return {
-      canvasId: userState.canvas_id,
-      userId: userState.user_id,
-      enteredAt: this.toIsoString(userState.entered_at),
-      leftAt:
-        userState.left_at === null ? null : this.toIsoString(userState.left_at)
-    };
-  }
-
-  private toNumber(value: number | string): number {
-    return typeof value === "number" ? value : Number(value);
-  }
-
-  private toIsoString(value: Date | string): string {
-    return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
-  }
-
-  private isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
-  }
-
-  private hasOwn(value: Record<string, unknown>, key: string): boolean {
-    return Object.prototype.hasOwnProperty.call(value, key);
-  }
 }

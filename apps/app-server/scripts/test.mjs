@@ -39,6 +39,16 @@ const canvasController = await readSource(
   "../src/modules/canvas/canvas.controller.ts"
 );
 const canvasService = await readSource("../src/modules/canvas/canvas.service.ts");
+const canvasTypes = await readSource("../src/modules/canvas/canvas.types.ts");
+const canvasShapeValidation = await readSource(
+  "../src/modules/canvas/canvas-shape.validation.ts"
+);
+const canvasShapeMapper = await readSource(
+  "../src/modules/canvas/canvas-shape.mapper.ts"
+);
+const canvasShapeHash = await readSource(
+  "../src/modules/canvas/canvas-shape-hash.ts"
+);
 const meetingController = await readSource(
   "../src/modules/meeting/meeting.controller.ts"
 );
@@ -189,7 +199,6 @@ assert.match(canvasService, /viewport_x =/);
 assert.match(canvasService, /INSERT INTO canvas_freeform_shapes/);
 assert.match(canvasService, /UPDATE canvas_freeform_shapes s/);
 assert.match(canvasService, /content_hash/);
-assert.match(canvasService, /contentHash/);
 assert.match(canvasService, /revision = s\.revision \+ 1/);
 assert.match(canvasService, /max_x >= \$2/);
 assert.match(canvasService, /max_y >= \$4/);
@@ -197,8 +206,6 @@ assert.match(canvasService, /listShapesInViewport/);
 assert.match(canvasService, /validateViewportBounds/);
 assert.match(canvasService, /getShapeDetail/);
 assert.match(canvasService, /syncShapesBatch/);
-assert.match(canvasService, /validateShapeBatchOperations/);
-assert.match(canvasService, /MAX_CANVAS_SHAPE_BATCH_OPERATIONS = 100/);
 assert.match(canvasService, /enterCanvas/);
 assert.match(canvasService, /leaveCanvas/);
 assert.match(canvasService, /canvas_user_states/);
@@ -209,6 +216,21 @@ assert.match(canvasService, /deleted_at IS NULL/);
 assert.match(canvasService, /ON CONFLICT \(id\) DO UPDATE/);
 assert.match(canvasService, /deleted_at = NULL/);
 assert.match(canvasService, /canvas_freeform_shapes\.deleted_at IS NOT NULL/);
+assert.match(canvasTypes, /export interface CanvasShapePayload/);
+assert.match(canvasTypes, /contentHash: string/);
+assert.match(canvasTypes, /revision: number/);
+assert.match(canvasTypes, /export interface CanvasShapeRow/);
+assert.match(canvasShapeValidation, /validateShapeBatchOperations/);
+assert.match(canvasShapeValidation, /MAX_CANVAS_SHAPE_BATCH_OPERATIONS = 100/);
+assert.match(canvasShapeValidation, /Canvas shapeType is invalid/);
+assert.match(canvasShapeValidation, /Canvas viewport bounds query is required/);
+assert.match(canvasShapeMapper, /export function mapShape/);
+assert.match(canvasShapeMapper, /contentHash: shape\.content_hash/);
+assert.match(canvasShapeMapper, /revision: Number\(shape\.revision\)/);
+assert.match(canvasShapeMapper, /export function mapDeletedShape/);
+assert.match(canvasShapeHash, /export function computeShapeContentHash/);
+assert.match(canvasShapeHash, /createHash\("sha256"\)/);
+assert.match(canvasShapeHash, /\.sort\(\)/);
 assert.match(canvasShapeHashMigration, /ADD COLUMN content_hash TEXT NOT NULL DEFAULT ''/);
 assert.match(canvasShapeHashMigration, /ADD COLUMN revision BIGINT NOT NULL DEFAULT 1/);
 assert.match(canvasShapeHashMigration, /ADD COLUMN max_x DOUBLE PRECISION/);
