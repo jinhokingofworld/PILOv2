@@ -68,8 +68,8 @@ const LIVEKIT_CONNECTION_ERROR_MESSAGE =
   "음성 회의 연결에 실패했습니다. 마이크 권한과 네트워크 상태를 확인해주세요.";
 const LEAVE_FAILED_MESSAGE =
   "회의 나가기에 실패했습니다. 문제가 반복되면 녹음을 종료한 뒤 다시 시도해주세요.";
-const ACTIVE_MEETING_IN_PROGRESS_MESSAGE =
-  "A meeting is already in progress";
+const ACTIVE_MEETING_IN_PROGRESS_ERROR_CODE =
+  "MEETING_ALREADY_IN_PROGRESS";
 const CURRENT_MEETING_RELOAD_FAILED_MESSAGE =
   "진행 중인 회의를 다시 찾지 못했습니다. 새로고침 후 다시 시도해주세요.";
 
@@ -157,8 +157,7 @@ function isActiveMeetingInProgressError(error: unknown) {
   return (
     error instanceof MeetingApiError &&
     error.status === 400 &&
-    error.code === "BAD_REQUEST" &&
-    error.message === ACTIVE_MEETING_IN_PROGRESS_MESSAGE
+    error.code === ACTIVE_MEETING_IN_PROGRESS_ERROR_CODE
   );
 }
 

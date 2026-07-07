@@ -2,6 +2,7 @@ import { HttpException, HttpStatus } from "@nestjs/common";
 
 export type ApiErrorCode =
   | "BAD_REQUEST"
+  | "MEETING_ALREADY_IN_PROGRESS"
   | "UNAUTHORIZED"
   | "FORBIDDEN"
   | "NOT_FOUND"

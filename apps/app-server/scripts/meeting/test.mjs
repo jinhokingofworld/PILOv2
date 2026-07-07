@@ -315,6 +315,18 @@ async function assertBadRequest(action, messagePattern) {
   });
 }
 
+async function assertMeetingAlreadyInProgress(action) {
+  await assert.rejects(action, (error) => {
+    assert.equal(error.getStatus(), 400);
+    assert.equal(
+      error.getResponse().error.code,
+      "MEETING_ALREADY_IN_PROGRESS"
+    );
+    assert.match(error.getResponse().error.message, /already in progress/);
+    return true;
+  });
+}
+
 async function assertNotFound(action, messagePattern) {
   await assert.rejects(action, (error) => {
     assert.equal(error.getStatus(), 404);
@@ -431,9 +443,8 @@ async function assertError(action, messagePattern) {
     })
   );
 
-  await assertBadRequest(
-    () => service.startMeeting(currentUserId, workspaceId, {}),
-    /already in progress/
+  await assertMeetingAlreadyInProgress(() =>
+    service.startMeeting(currentUserId, workspaceId, {})
   );
 }
 
@@ -2120,8 +2131,7 @@ async function assertError(action, messagePattern) {
     })
   );
 
-  await assertBadRequest(
-    () => service.startMeeting(currentUserId, workspaceId, {}),
-    /already in progress/
+  await assertMeetingAlreadyInProgress(() =>
+    service.startMeeting(currentUserId, workspaceId, {})
   );
 }
