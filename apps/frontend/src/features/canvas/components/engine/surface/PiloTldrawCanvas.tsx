@@ -679,7 +679,10 @@ export function PiloTldrawCanvas({
       if (!editor) return;
 
       const currentFrame = editor.getShape(frame.id);
-      const frameShape = isPiloFrameShape(currentFrame) ? currentFrame : frame;
+
+      if (!isPiloFrameShape(currentFrame)) return;
+
+      const frameShape = currentFrame;
       const descendantShapes = nextCollapsed
         ? collectFrameDescendantShapes(editor, frameShape.id)
         : [];

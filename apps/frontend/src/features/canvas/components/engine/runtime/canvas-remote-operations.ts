@@ -15,7 +15,9 @@ const PILO_ARROW_BINDINGS_META_KEY = "piloArrowBindingsV1";
 
 type CanvasRemoteOperationApplyResult = {
   changed: boolean;
+  expandedFrameIds: string[];
   nextShapes: PiloCanvasFreeformShape[];
+  unloadedShapeIds: string[];
 };
 
 function cloneShape(shape: PiloCanvasFreeformShape) {
@@ -107,6 +109,36 @@ function intersectsViewport(
   );
 }
 
+function collectDescendantShapeIds(
+  shapes: PiloCanvasFreeformShape[],
+  frameId: string,
+) {
+  const descendantIds = new Set<string>();
+  let didAddShape = true;
+
+  while (didAddShape) {
+    didAddShape = false;
+
+    shapes.forEach((shape) => {
+      const shapeId = getFreeformShapeId(shape);
+      const parentId = typeof shape.parentId === "string" ? shape.parentId : null;
+
+      if (!shapeId || shapeId === frameId || descendantIds.has(shapeId)) {
+        return;
+      }
+
+      if (parentId !== frameId && !descendantIds.has(parentId ?? "")) {
+        return;
+      }
+
+      descendantIds.add(shapeId);
+      didAddShape = true;
+    });
+  }
+
+  return descendantIds;
+}
+
 export function applyCanvasRemoteOperation({
   currentShapes,
   operation,
@@ -123,7 +155,9 @@ export function applyCanvasRemoteOperation({
   if (!shapeId) {
     return {
       changed: false,
+      expandedFrameIds: [],
       nextShapes: currentShapes,
+      unloadedShapeIds: [],
     };
   }
 
@@ -136,7 +170,9 @@ export function applyCanvasRemoteOperation({
 
     return {
       changed: nextShapes.length !== currentShapes.length,
+      expandedFrameIds: [],
       nextShapes,
+      unloadedShapeIds: [],
     };
   }
 
@@ -145,7 +181,9 @@ export function applyCanvasRemoteOperation({
   if (!incomingShape) {
     return {
       changed: false,
+      expandedFrameIds: [],
       nextShapes: currentShapes,
+      unloadedShapeIds: [],
     };
   }
 
@@ -154,6 +192,10 @@ export function applyCanvasRemoteOperation({
   const nextShape = preserveArrowBindingMeta(currentShape, cloneShape(incomingShape));
   const parentId =
     typeof nextShape.parentId === "string" ? nextShape.parentId : null;
+  const wasCollapsedFrame = currentShape
+    ? isPiloFrameCollapsed(currentShape)
+    : false;
+  const isCollapsedFrame = isPiloFrameCollapsed(nextShape);
 
   shapeDetailCache.set(shapeId, nextShape);
 
@@ -164,7 +206,9 @@ export function applyCanvasRemoteOperation({
     if (!parentShape || isPiloFrameCollapsed(parentShape)) {
       return {
         changed: false,
+        expandedFrameIds: [],
         nextShapes: currentShapes,
+        unloadedShapeIds: [],
       };
     }
   }
@@ -172,18 +216,47 @@ export function applyCanvasRemoteOperation({
   if (!currentShape && !intersectsViewport(nextShape, viewportBounds)) {
     return {
       changed: false,
+      expandedFrameIds: [],
       nextShapes: currentShapes,
+      unloadedShapeIds: [],
     };
   }
 
-  const nextShapes = currentShape
+  let nextShapes = currentShape
     ? currentShapes.map((shape) =>
         getFreeformShapeId(shape) === shapeId ? nextShape : shape,
       )
     : [...currentShapes, nextShape];
+  const expandedFrameIds =
+    nextShape.type === "frame" && wasCollapsedFrame && !isCollapsedFrame
+      ? [shapeId]
+      : [];
+  let unloadedShapeIds: string[] = [];
+
+  if (isCollapsedFrame) {
+    const descendantIds = collectDescendantShapeIds(currentShapes, shapeId);
+
+    if (descendantIds.size) {
+      unloadedShapeIds = Array.from(descendantIds);
+      currentShapes.forEach((shape) => {
+        const descendantShapeId = getFreeformShapeId(shape);
+
+        if (descendantShapeId && descendantIds.has(descendantShapeId)) {
+          shapeDetailCache.set(descendantShapeId, cloneShape(shape));
+        }
+      });
+      nextShapes = nextShapes.filter((shape) => {
+        const nextShapeId = getFreeformShapeId(shape);
+
+        return !nextShapeId || !descendantIds.has(nextShapeId);
+      });
+    }
+  }
 
   return {
     changed: true,
+    expandedFrameIds,
     nextShapes,
+    unloadedShapeIds,
   };
 }
