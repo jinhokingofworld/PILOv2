@@ -433,6 +433,20 @@ async function assertApiError(action, status, code, messagePattern, forbiddenPat
 }
 
 {
+  const { service } = createSubject();
+
+  await assertApiError(
+    () =>
+      service.updateSession(currentUserId, workspaceId, sessionId, {
+        baseRevision: 1
+      }),
+    400,
+    "BAD_REQUEST",
+    /At least one update field is required/
+  );
+}
+
+{
   const database = new FakeDatabase({ queryOneRows: [null] });
   const { service } = createSubject(database);
 

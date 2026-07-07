@@ -58,8 +58,7 @@ export function validateUpdateSqlErdSessionRequest(
   const draft = readBody(body);
   const modelJson = readOptionalVersionedJsonObject(draft.modelJson, "modelJson");
   const counts = modelJson ? readModelCounts(modelJson) : undefined;
-
-  return {
+  const input: NormalizedUpdateSqlErdSessionInput = {
     baseRevision: readBaseRevision(draft.baseRevision),
     title: readOptionalTitle(draft.title),
     sourceFormat: readOptionalSourceFormat(draft.sourceFormat),
@@ -71,6 +70,12 @@ export function validateUpdateSqlErdSessionRequest(
     tableCount: counts?.tableCount,
     relationCount: counts?.relationCount
   };
+
+  if (!hasUpdateField(input)) {
+    throw badRequest("At least one update field is required");
+  }
+
+  return input;
 }
 
 export function validateDeleteSqlErdSessionQuery(
@@ -250,6 +255,18 @@ function readBaseRevision(value: unknown): number {
   }
 
   throw badRequest("baseRevision is required");
+}
+
+function hasUpdateField(input: NormalizedUpdateSqlErdSessionInput): boolean {
+  return (
+    input.title !== undefined ||
+    input.sourceFormat !== undefined ||
+    input.dialect !== undefined ||
+    input.sourceText !== undefined ||
+    input.modelJson !== undefined ||
+    input.layoutJson !== undefined ||
+    input.settingsJson !== undefined
+  );
 }
 
 function readModelCounts(modelJson: SqlErdJsonObject): {
