@@ -1,8 +1,151 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import ts from "typescript";
 
 async function readSqlErdFile(path) {
   return readFile(new URL(path, import.meta.url), "utf8");
+}
+
+async function compileSqlErdRuntimeModules() {
+  const outputDir = await mkdtemp(join(tmpdir(), "pilo-sqltoerd-runtime-"));
+  const modelOutputPath = join(outputDir, "model.mjs");
+  const inspectorOutputPath = join(outputDir, "inspector.mjs");
+
+  try {
+    await compileTypeScriptModule(
+      "../../src/features/sql-erd/utils/model.ts",
+      modelOutputPath
+    );
+    await compileTypeScriptModule(
+      "../../src/features/sql-erd/utils/inspector.ts",
+      inspectorOutputPath,
+      [[/from "\.\/model"/g, 'from "./model.mjs"']]
+    );
+
+    const [modelRuntime, inspectorRuntime] = await Promise.all([
+      import(pathToFileHref(modelOutputPath)),
+      import(pathToFileHref(inspectorOutputPath))
+    ]);
+
+    return { inspectorRuntime, modelRuntime };
+  } finally {
+    await rm(outputDir, { force: true, recursive: true });
+  }
+}
+
+async function compileTypeScriptModule(sourcePath, outputPath, replacements = []) {
+  const sourceText = await readSqlErdFile(sourcePath);
+  let { outputText } = ts.transpileModule(sourceText, {
+    compilerOptions: {
+      jsx: ts.JsxEmit.ReactJSX,
+      module: ts.ModuleKind.ES2022,
+      target: ts.ScriptTarget.ES2022
+    },
+    fileName: sourcePath
+  });
+
+  for (const [pattern, replacement] of replacements) {
+    outputText = outputText.replace(pattern, replacement);
+  }
+
+  await writeFile(outputPath, outputText);
+}
+
+function pathToFileHref(path) {
+  return new URL(`file:///${path.replaceAll("\\", "/")}`).href;
+}
+
+function createRuntimeTestColumn(id, name, options = {}) {
+  return {
+    id,
+    name,
+    dataType: options.dataType ?? "BIGINT",
+    nullable: options.nullable ?? true,
+    primaryKey: options.primaryKey ?? false,
+    foreignKey: options.foreignKey ?? false,
+    unique: options.unique ?? false,
+    defaultValue: null,
+    comment: null
+  };
+}
+
+function createRuntimeTestModel() {
+  const usersTable = {
+    id: "table.users",
+    name: "users",
+    schemaName: null,
+    columns: [
+      createRuntimeTestColumn("id", "id", {
+        nullable: false,
+        primaryKey: true
+      }),
+      createRuntimeTestColumn("manager_id", "manager_id", {
+        foreignKey: true
+      })
+    ],
+    constraints: [
+      {
+        id: "constraint.users.pk",
+        kind: "primary_key",
+        columnIds: ["id"],
+        name: null
+      }
+    ],
+    comment: null
+  };
+  const ordersTable = {
+    id: "table.orders",
+    name: "orders",
+    schemaName: null,
+    columns: [
+      createRuntimeTestColumn("id", "id", {
+        nullable: false,
+        primaryKey: true
+      }),
+      createRuntimeTestColumn("user_id", "user_id", {
+        foreignKey: true
+      })
+    ],
+    constraints: [
+      {
+        id: "constraint.orders.pk",
+        kind: "primary_key",
+        columnIds: ["id"],
+        name: null
+      }
+    ],
+    comment: null
+  };
+
+  return {
+    version: 1,
+    schema: {
+      tables: [usersTable, ordersTable],
+      relations: [
+        {
+          id: "relation.orders.user_id.users.id",
+          kind: "foreign_key",
+          fromTableId: "table.orders",
+          fromColumnIds: ["user_id"],
+          toTableId: "table.users",
+          toColumnIds: ["id"],
+          constraintName: null
+        },
+        {
+          id: "relation.users.manager_id.users.id",
+          kind: "foreign_key",
+          fromTableId: "table.users",
+          fromColumnIds: ["manager_id"],
+          toTableId: "table.users",
+          toColumnIds: ["id"],
+          constraintName: null
+        }
+      ]
+    }
+  };
 }
 
 const [
@@ -10,6 +153,7 @@ const [
   types,
   commerceFixture,
   modelUtils,
+  inspectorUtils,
   navigation,
   panel,
   canvasSurface,
@@ -21,12 +165,84 @@ const [
     readSqlErdFile("../../src/features/sql-erd/types/index.ts"),
     readSqlErdFile("../../src/features/sql-erd/fixtures/commerce.ts"),
     readSqlErdFile("../../src/features/sql-erd/utils/model.ts"),
+    readSqlErdFile("../../src/features/sql-erd/utils/inspector.ts"),
     readSqlErdFile("../../src/features/sql-erd/navigation.ts"),
     readSqlErdFile("../../src/features/sql-erd/components/sql-erd-panel.tsx"),
     readSqlErdFile("../../src/features/sql-erd/components/sql-erd-canvas.tsx"),
     readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-table-shape.tsx"),
     readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-relation-shape.tsx")
   ]);
+
+const { inspectorRuntime, modelRuntime } = await compileSqlErdRuntimeModules();
+const runtimeModel = createRuntimeTestModel();
+const runtimeModelIndex = modelRuntime.createSqltoerdModelIndex(runtimeModel);
+const runtimeOrdersToUsersRelation =
+  runtimeModel.schema.relations.find(
+    (relation) => relation.id === "relation.orders.user_id.users.id"
+  ) ?? null;
+const runtimeUsersSelfRelation =
+  runtimeModel.schema.relations.find(
+    (relation) => relation.id === "relation.users.manager_id.users.id"
+  ) ?? null;
+
+assert.ok(runtimeOrdersToUsersRelation);
+assert.ok(runtimeUsersSelfRelation);
+
+const runtimeRelationEndpoints = modelRuntime.getRelationEndpoints(
+  runtimeOrdersToUsersRelation,
+  runtimeModelIndex
+);
+
+assert.equal(runtimeRelationEndpoints.from.table.id, "table.orders");
+assert.deepEqual(
+  runtimeRelationEndpoints.from.columns.map((column) => column.name),
+  ["user_id"]
+);
+assert.equal(runtimeRelationEndpoints.to.table.id, "table.users");
+assert.deepEqual(
+  runtimeRelationEndpoints.to.columns.map((column) => column.name),
+  ["id"]
+);
+assert.equal(
+  runtimeModelIndex.relationsByTableId
+    .get("table.users")
+    .filter((relation) => relation.id === runtimeUsersSelfRelation.id).length,
+  1
+);
+
+const ordersIdColumnView = inspectorRuntime.createSqlErdInspectorViewModel(
+  { type: "column", tableId: "table.orders", columnId: "id" },
+  runtimeModelIndex
+);
+const usersIdColumnView = inspectorRuntime.createSqlErdInspectorViewModel(
+  { type: "column", tableId: "table.users", columnId: "id" },
+  runtimeModelIndex
+);
+const usersTableView = inspectorRuntime.createSqlErdInspectorViewModel(
+  { type: "table", tableId: "table.users" },
+  runtimeModelIndex
+);
+
+assert.equal(ordersIdColumnView.type, "column");
+assert.deepEqual(
+  ordersIdColumnView.relations.map((relation) => relation.id),
+  []
+);
+assert.equal(usersIdColumnView.type, "column");
+assert.deepEqual(
+  usersIdColumnView.relations.map((relation) => relation.id),
+  [
+    "relation.orders.user_id.users.id",
+    "relation.users.manager_id.users.id"
+  ]
+);
+assert.equal(usersTableView.type, "table");
+assert.equal(
+  usersTableView.relations.filter(
+    (relation) => relation.id === runtimeUsersSelfRelation.id
+  ).length,
+  1
+);
 
 for (const typeName of [
   "SqltoerdModelJsonV1",
@@ -98,10 +314,13 @@ assert.match(panel, /createSqlErdInspectorViewModel/);
 assert.match(panel, /Column details/);
 assert.match(panel, /Table details/);
 assert.match(panel, /Relation details/);
-assert.match(panel, /isColumnConnectedToRelation/);
-assert.match(panel, /relation\.fromTableId === tableId/);
-assert.match(panel, /relation\.toTableId === tableId/);
+assert.match(panel, /features\/sql-erd\/utils\/inspector/);
 assert.doesNotMatch(panel, /PreviewTableCard/);
+
+assert.match(inspectorUtils, /createSqlErdInspectorViewModel/);
+assert.match(inspectorUtils, /isColumnConnectedToRelation/);
+assert.match(inspectorUtils, /relation\.fromTableId === tableId/);
+assert.match(inspectorUtils, /relation\.toTableId === tableId/);
 
 assert.match(canvasSurface, /TldrawSurface/);
 assert.match(canvasSurface, /commerceSqltoerdFixture/);
