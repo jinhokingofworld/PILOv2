@@ -54,6 +54,7 @@ export class BoardIssueCreateService {
 
     this.assertGithubCreateTarget(target);
 
+    await this.githubProjectV2WriteService.assertProjectV2WriteAccess(currentUserId);
     const githubIssue = await this.createGithubIssue(currentUserId, target, input);
     const projectItem = await this.addProjectItem(currentUserId, target, githubIssue.node_id);
     await this.updateProjectItemStatus(currentUserId, target, projectItem.itemNodeId);

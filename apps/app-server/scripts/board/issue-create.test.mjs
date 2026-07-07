@@ -110,8 +110,13 @@ class FakeGithubProjectV2WriteService {
   constructor({ addFail = false, statusFail = false } = {}) {
     this.addFail = addFail;
     this.statusFail = statusFail;
+    this.accessChecks = [];
     this.addCalls = [];
     this.statusCalls = [];
+  }
+
+  async assertProjectV2WriteAccess(currentUserId) {
+    this.accessChecks.push(currentUserId);
   }
 
   async addProjectV2ItemByContentId(input) {
@@ -270,6 +275,7 @@ function createdIssueRow(overrides = {}) {
   );
 
   assert.deepEqual(workspaceService.calls, [{ userId: currentUserId, workspaceId }]);
+  assert.deepEqual(githubProjectV2WriteService.accessChecks, [currentUserId]);
   assert.deepEqual(githubIssueWriteService.calls, [
     {
       body: "Issue body",
