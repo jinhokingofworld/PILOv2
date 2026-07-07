@@ -5,13 +5,25 @@ async function readSqlErdFile(path) {
   return readFile(new URL(path, import.meta.url), "utf8");
 }
 
-const [apiSpec, types, commerceFixture, modelUtils, navigation] =
+const [
+  apiSpec,
+  types,
+  commerceFixture,
+  modelUtils,
+  navigation,
+  panel,
+  canvasSurface,
+  tableShape
+] =
   await Promise.all([
     readSqlErdFile("../../../../docs/api/sqltoerd-api.md"),
     readSqlErdFile("../../src/features/sql-erd/types/index.ts"),
     readSqlErdFile("../../src/features/sql-erd/fixtures/commerce.ts"),
     readSqlErdFile("../../src/features/sql-erd/utils/model.ts"),
-    readSqlErdFile("../../src/features/sql-erd/navigation.ts")
+    readSqlErdFile("../../src/features/sql-erd/navigation.ts"),
+    readSqlErdFile("../../src/features/sql-erd/components/sql-erd-panel.tsx"),
+    readSqlErdFile("../../src/features/sql-erd/components/sql-erd-canvas.tsx"),
+    readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-table-shape.tsx")
   ]);
 
 for (const typeName of [
@@ -71,3 +83,23 @@ assert.doesNotMatch(modelUtils, /columnsById: Map<string, SqltoerdColumnRef>/);
 
 assert.match(navigation, /SQLtoERD/);
 assert.match(navigation, /href: "\/sql-erd"/);
+
+assert.match(panel, /SqlErdCanvas/);
+assert.doesNotMatch(panel, /PreviewTableCard/);
+
+assert.match(canvasSurface, /TldrawSurface/);
+assert.match(canvasSurface, /commerceSqltoerdFixture/);
+assert.match(canvasSurface, /createSqltoerdTableShapes/);
+assert.match(canvasSurface, /SQLTOERD_TABLE_SHAPE_TYPE/);
+assert.match(canvasSurface, /zoomToFit/);
+
+assert.match(tableShape, /SQLTOERD_TABLE_SHAPE_TYPE/);
+assert.match(tableShape, /class SqlErdTableShapeUtil extends ShapeUtil/);
+assert.match(tableShape, /HTMLContainer/);
+assert.match(tableShape, /primaryKey/);
+assert.match(tableShape, /foreignKey/);
+assert.match(tableShape, /unique/);
+assert.match(tableShape, /nullable/);
+assert.match(tableShape, /minWidth/);
+assert.doesNotMatch(tableShape, /truncate/);
+assert.doesNotMatch(tableShape, /text-overflow/);
