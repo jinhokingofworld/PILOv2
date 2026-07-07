@@ -78,6 +78,26 @@ export type SqltoerdViewport = {
 
 export type SqltoerdSettingsJson = Record<string, unknown>;
 
+export type SqltoerdSessionPayload = {
+  id: string;
+  workspaceId: string;
+  title: string;
+  sourceFormat: SqltoerdSourceFormat;
+  dialect: SqltoerdDialect;
+  sourceText: string;
+  modelJson: SqltoerdModelJsonV1;
+  layoutJson: SqltoerdLayoutJsonV1;
+  settingsJson: SqltoerdSettingsJson;
+  tableCount: number;
+  relationCount: number;
+  revision: number;
+  createdBy: string | null;
+  updatedBy: string | null;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt: string | null;
+};
+
 export type SqltoerdSessionFixture = {
   title: string;
   sourceFormat: SqltoerdSourceFormat;
