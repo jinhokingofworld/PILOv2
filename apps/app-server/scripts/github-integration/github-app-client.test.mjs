@@ -232,6 +232,143 @@ function projectNode(overrides = {}) {
 }
 
 {
+  const originalFetch = globalThis.fetch;
+  const requests = [];
+
+  globalThis.fetch = async (url, options = {}) => {
+    assert.equal(url.toString(), "https://api.github.com/graphql");
+    assert.equal(options.headers?.Authorization, "Bearer user-oauth-token");
+    const body = JSON.parse(options.body);
+    requests.push(body);
+
+    if (body.query.includes("query PiloProjectV2Items(")) {
+      assert.deepEqual(body.variables, {
+        projectId: "PVT_kwDOExample",
+        cursor: null
+      });
+
+      return {
+        ok: true,
+        async json() {
+          return {
+            data: {
+              node: {
+                __typename: "ProjectV2",
+                items: {
+                  nodes: [
+                    {
+                      id: "PVTI_lADOExample",
+                      databaseId: 9001,
+                      type: "ISSUE",
+                      isArchived: false,
+                      createdAt: "2026-07-05T09:00:00.000Z",
+                      updatedAt: "2026-07-05T09:00:00.000Z",
+                      content: {
+                        __typename: "Issue",
+                        id: "I_kwDOExample",
+                        number: 24,
+                        title: "Sync item",
+                        state: "OPEN",
+                        url: "https://github.com/org/repo/issues/24"
+                      },
+                      fieldValues: {
+                        nodes: [
+                          {
+                            __typename: "ProjectV2ItemFieldTextValue",
+                            id: "PVTFV_text",
+                            text: "first page",
+                            createdAt: "2026-07-05T09:00:00.000Z",
+                            updatedAt: "2026-07-05T09:00:00.000Z",
+                            field: {
+                              id: "PVTF_text",
+                              name: "Notes",
+                              dataType: "TEXT"
+                            }
+                          }
+                        ],
+                        pageInfo: {
+                          hasNextPage: true,
+                          endCursor: "field-value-cursor-1"
+                        }
+                      }
+                    }
+                  ],
+                  pageInfo: {
+                    hasNextPage: false,
+                    endCursor: null
+                  }
+                }
+              }
+            }
+          };
+        }
+      };
+    }
+
+    if (body.query.includes("query PiloProjectV2ItemFieldValues(")) {
+      assert.deepEqual(body.variables, {
+        itemId: "PVTI_lADOExample",
+        cursor: "field-value-cursor-1"
+      });
+
+      return {
+        ok: true,
+        async json() {
+          return {
+            data: {
+              node: {
+                __typename: "ProjectV2Item",
+                fieldValues: {
+                  nodes: [
+                    {
+                      __typename: "ProjectV2ItemFieldSingleSelectValue",
+                      id: "PVTFV_status",
+                      name: "In Progress",
+                      optionId: "status-in-progress",
+                      createdAt: "2026-07-05T09:00:00.000Z",
+                      updatedAt: "2026-07-05T09:00:00.000Z",
+                      field: {
+                        id: "PVTSSF_status",
+                        name: "Status",
+                        dataType: "SINGLE_SELECT"
+                      }
+                    }
+                  ],
+                  pageInfo: {
+                    hasNextPage: false,
+                    endCursor: null
+                  }
+                }
+              }
+            }
+          };
+        }
+      };
+    }
+
+    throw new Error("Unexpected GraphQL query");
+  };
+
+  try {
+    const items = await new GithubAppClient().listProjectV2Items({
+      installationId: 12345678,
+      appId: "12345",
+      privateKey: "unused",
+      projectNodeId: "PVT_kwDOExample",
+      userAccessToken: "user-oauth-token",
+      now: () => fixedNow
+    });
+
+    assert.equal(requests.length, 2);
+    assert.equal(items[0].statusOptionId, "status-in-progress");
+    assert.equal(items[0].statusName, "In Progress");
+    assert.equal(items[0].fieldValues.length, 2);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
+{
   const { privateKey } = generateKeyPairSync("rsa", {
     modulusLength: 2048
   });

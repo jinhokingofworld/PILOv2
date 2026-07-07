@@ -155,6 +155,11 @@ assert.match(issueCreateServiceFile, /assertWorkspaceAccess/);
 assert.match(issueCreateServiceFile, /createIssue/);
 assert.match(issueCreateServiceFile, /addProjectV2ItemByContentId/);
 assert.match(issueCreateServiceFile, /updateProjectV2ItemStatus/);
+assert.match(issueCreateServiceFile, /assertProjectV2WriteAccess/);
+assert.match(
+  issueCreateServiceFile,
+  /assertProjectV2WriteAccess\(currentUserId\)[\s\S]*const githubIssue = await this\.createGithubIssue/
+);
 assert.doesNotMatch(issueCreateServiceFile, /FROM pilo_issues/);
 
 assert.match(readQueriesFile, /class BoardReadQueries/);

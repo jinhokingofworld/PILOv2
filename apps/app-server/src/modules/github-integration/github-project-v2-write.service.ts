@@ -49,6 +49,12 @@ export class GithubProjectV2WriteService {
     private readonly configService: GithubIntegrationConfigService
   ) {}
 
+  async assertProjectV2WriteAccess(currentUserId: string): Promise<void> {
+    const oauthConfig = this.configService.getGithubProjectOAuthConfig();
+    const connection = await this.getGithubProjectOAuthConnectionRow(currentUserId);
+    this.getConnectedGithubProjectOAuthAccess(connection, oauthConfig);
+  }
+
   async updateProjectV2ItemStatus(
     input: UpdateGithubProjectV2ItemStatusInput
   ): Promise<void> {

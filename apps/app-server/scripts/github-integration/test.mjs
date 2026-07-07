@@ -24,6 +24,10 @@ const dtoIndex = await readFile(
   new URL("../../src/modules/github-integration/dto/index.ts", import.meta.url),
   "utf8"
 );
+const envExample = await readFile(
+  new URL("../../../../.env.example", import.meta.url),
+  "utf8"
+);
 
 const githubIntegrationDirectory = new URL(
   "../../src/modules/github-integration/",
@@ -123,6 +127,9 @@ assert.match(typesIndex, /GithubSyncRunPayload/);
 assert.match(typesIndex, /GithubSyncRunDetailPayload/);
 assert.match(dtoIndex, /StartGithubSyncRunRequest/);
 assert.match(dtoIndex, /ListGithubSyncRunsQuery/);
+assert.match(envExample, /^API_PUBLIC_ORIGIN=/m);
+assert.match(envExample, /^GITHUB_PROJECT_OAUTH_CLIENT_ID=/m);
+assert.match(envExample, /^GITHUB_PROJECT_OAUTH_CLIENT_SECRET=/m);
 assert.deepEqual(directoryNames.sort(), ["dto", "queries", "types"]);
 
 const tscScript = fileURLToPath(

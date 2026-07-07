@@ -118,3 +118,18 @@ function createService(database, githubAppClient = new FakeGithubAppClient()) {
   );
   assert.deepEqual(githubAppClient.statusUpdates, []);
 }
+
+{
+  const database = new FakeDatabase([
+    (text, values) => {
+      assert.match(text, /github_project_access_token_encrypted/i);
+      assert.deepEqual(values, ["user-1"]);
+      return projectOAuthRow;
+    }
+  ]);
+  const { githubAppClient, service } = createService(database);
+
+  await service.assertProjectV2WriteAccess("user-1");
+
+  assert.deepEqual(githubAppClient.statusUpdates, []);
+}

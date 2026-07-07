@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 import { AppController } from "./app.controller";
 import { AppService } from "./app.service";
+import { AgentModule } from "./modules/agent/agent.module";
 import { BoardModule } from "./modules/board/board.module";
 import { CalendarModule } from "./modules/calendar/calendar.module";
 import { CanvasModule } from "./modules/canvas/canvas.module";
@@ -20,6 +21,7 @@ import { WorkspaceModule } from "./modules/workspace/workspace.module";
     AuthModule,
     UserModule,
     WorkspaceModule,
+    AgentModule,
     GithubIntegrationModule,
     PrReviewModule,
     BoardModule,

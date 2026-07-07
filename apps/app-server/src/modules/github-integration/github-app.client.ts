@@ -491,6 +491,126 @@ const GITHUB_PROJECT_V2_FIELDS_QUERY = `
     }
   }
 `;
+const GITHUB_PROJECT_V2_ITEM_FIELD_VALUE_SELECTION = `
+  __typename
+  ... on ProjectV2ItemFieldTextValue {
+    id
+    text
+    createdAt
+    updatedAt
+    field {
+      ... on ProjectV2Field {
+        id
+        name
+        dataType
+      }
+      ... on ProjectV2SingleSelectField {
+        id
+        name
+        dataType
+      }
+      ... on ProjectV2IterationField {
+        id
+        name
+        dataType
+      }
+    }
+  }
+  ... on ProjectV2ItemFieldNumberValue {
+    id
+    number
+    createdAt
+    updatedAt
+    field {
+      ... on ProjectV2Field {
+        id
+        name
+        dataType
+      }
+      ... on ProjectV2SingleSelectField {
+        id
+        name
+        dataType
+      }
+      ... on ProjectV2IterationField {
+        id
+        name
+        dataType
+      }
+    }
+  }
+  ... on ProjectV2ItemFieldDateValue {
+    id
+    date
+    createdAt
+    updatedAt
+    field {
+      ... on ProjectV2Field {
+        id
+        name
+        dataType
+      }
+      ... on ProjectV2SingleSelectField {
+        id
+        name
+        dataType
+      }
+      ... on ProjectV2IterationField {
+        id
+        name
+        dataType
+      }
+    }
+  }
+  ... on ProjectV2ItemFieldSingleSelectValue {
+    id
+    name
+    optionId
+    createdAt
+    updatedAt
+    field {
+      ... on ProjectV2Field {
+        id
+        name
+        dataType
+      }
+      ... on ProjectV2SingleSelectField {
+        id
+        name
+        dataType
+      }
+      ... on ProjectV2IterationField {
+        id
+        name
+        dataType
+      }
+    }
+  }
+  ... on ProjectV2ItemFieldIterationValue {
+    id
+    title
+    iterationId
+    createdAt
+    updatedAt
+    field {
+      ... on ProjectV2Field {
+        id
+        name
+        dataType
+      }
+      ... on ProjectV2SingleSelectField {
+        id
+        name
+        dataType
+      }
+      ... on ProjectV2IterationField {
+        id
+        name
+        dataType
+      }
+    }
+  }
+`;
 const GITHUB_PROJECT_V2_ITEMS_QUERY = `
   query PiloProjectV2Items($projectId: ID!, $cursor: String) {
     node(id: $projectId) {
@@ -526,126 +646,31 @@ const GITHUB_PROJECT_V2_ITEMS_QUERY = `
             }
             fieldValues(first: 100) {
               nodes {
-                __typename
-                ... on ProjectV2ItemFieldTextValue {
-                  id
-                  text
-                  createdAt
-                  updatedAt
-                  field {
-                    ... on ProjectV2Field {
-                      id
-                      name
-                      dataType
-                    }
-                    ... on ProjectV2SingleSelectField {
-                      id
-                      name
-                      dataType
-                    }
-                    ... on ProjectV2IterationField {
-                      id
-                      name
-                      dataType
-                    }
-                  }
-                }
-                ... on ProjectV2ItemFieldNumberValue {
-                  id
-                  number
-                  createdAt
-                  updatedAt
-                  field {
-                    ... on ProjectV2Field {
-                      id
-                      name
-                      dataType
-                    }
-                    ... on ProjectV2SingleSelectField {
-                      id
-                      name
-                      dataType
-                    }
-                    ... on ProjectV2IterationField {
-                      id
-                      name
-                      dataType
-                    }
-                  }
-                }
-                ... on ProjectV2ItemFieldDateValue {
-                  id
-                  date
-                  createdAt
-                  updatedAt
-                  field {
-                    ... on ProjectV2Field {
-                      id
-                      name
-                      dataType
-                    }
-                    ... on ProjectV2SingleSelectField {
-                      id
-                      name
-                      dataType
-                    }
-                    ... on ProjectV2IterationField {
-                      id
-                      name
-                      dataType
-                    }
-                  }
-                }
-                ... on ProjectV2ItemFieldSingleSelectValue {
-                  id
-                  name
-                  optionId
-                  createdAt
-                  updatedAt
-                  field {
-                    ... on ProjectV2Field {
-                      id
-                      name
-                      dataType
-                    }
-                    ... on ProjectV2SingleSelectField {
-                      id
-                      name
-                      dataType
-                    }
-                    ... on ProjectV2IterationField {
-                      id
-                      name
-                      dataType
-                    }
-                  }
-                }
-                ... on ProjectV2ItemFieldIterationValue {
-                  id
-                  title
-                  iterationId
-                  createdAt
-                  updatedAt
-                  field {
-                    ... on ProjectV2Field {
-                      id
-                      name
-                      dataType
-                    }
-                    ... on ProjectV2SingleSelectField {
-                      id
-                      name
-                      dataType
-                    }
-                    ... on ProjectV2IterationField {
-                      id
-                      name
-                      dataType
-                    }
-                  }
-                }
+                ${GITHUB_PROJECT_V2_ITEM_FIELD_VALUE_SELECTION}
+              }
+              pageInfo {
+                hasNextPage
+                endCursor
               }
             }
+          }
+          pageInfo {
+            hasNextPage
+            endCursor
+          }
+        }
+      }
+    }
+  }
+`;
+const GITHUB_PROJECT_V2_ITEM_FIELD_VALUES_QUERY = `
+  query PiloProjectV2ItemFieldValues($itemId: ID!, $cursor: String) {
+    node(id: $itemId) {
+      ... on ProjectV2Item {
+        id
+        fieldValues(first: 100, after: $cursor) {
+          nodes {
+            ${GITHUB_PROJECT_V2_ITEM_FIELD_VALUE_SELECTION}
           }
           pageInfo {
             hasNextPage
@@ -1163,7 +1188,28 @@ export class GithubAppClient {
         "items",
         "GitHub ProjectV2 items sync failed"
       );
-      items.push(...connection.nodes.map((node) => this.mapProjectV2Item(node)));
+
+      for (const node of connection.nodes) {
+        const itemId = this.readString(node.id, "GitHub ProjectV2 items sync failed");
+        const fieldValuePage = this.readProjectV2ItemFieldValuePage(
+          node,
+          "GitHub ProjectV2 items sync failed"
+        );
+        const remainingFieldValues =
+          await this.listRemainingProjectV2ItemFieldValues(
+            graphqlAuth,
+            itemId,
+            fieldValuePage.endCursor,
+            fieldValuePage.hasNextPage
+          );
+        items.push(
+          this.mapProjectV2Item(node, [
+            ...fieldValuePage.nodes,
+            ...remainingFieldValues
+          ])
+        );
+      }
+
       cursor = connection.hasNextPage ? connection.endCursor : null;
     } while (cursor);
 
@@ -1425,6 +1471,44 @@ export class GithubAppClient {
     }
 
     return repositoryNodeIds;
+  }
+
+  private async listRemainingProjectV2ItemFieldValues(
+    graphqlAuth: GithubProjectV2GraphqlAuth,
+    itemNodeId: string,
+    cursor: string | null,
+    hasNextPage: boolean
+  ): Promise<GithubProjectV2ItemFieldValueApiItem[]> {
+    const fieldValues: GithubProjectV2ItemFieldValueApiItem[] = [];
+    let nextCursor = hasNextPage ? cursor : null;
+
+    while (nextCursor) {
+      const data = await this.fetchGraphqlWithToken(
+        graphqlAuth.token,
+        GITHUB_PROJECT_V2_ITEM_FIELD_VALUES_QUERY,
+        {
+          itemId: itemNodeId,
+          cursor: nextCursor
+        },
+        "GitHub ProjectV2 items sync failed",
+        {
+          tokenSource: graphqlAuth.source,
+          accountType: graphqlAuth.accountType
+        }
+      );
+      const item = this.readProjectV2ItemNode(
+        data,
+        "GitHub ProjectV2 items sync failed"
+      );
+      const page = this.readProjectV2ItemFieldValuePage(
+        item,
+        "GitHub ProjectV2 items sync failed"
+      );
+      fieldValues.push(...page.nodes);
+      nextCursor = page.hasNextPage ? page.endCursor : null;
+    }
+
+    return fieldValues;
   }
 
   private readProjectV2ItemMutation(
@@ -1699,6 +1783,18 @@ export class GithubAppClient {
     return node;
   }
 
+  private readProjectV2ItemNode(
+    data: unknown,
+    errorMessage: string
+  ): Record<string, unknown> {
+    const node = this.toObject(this.toObject(data).node);
+    if (node.__typename && node.__typename !== "ProjectV2Item") {
+      throw badRequest(errorMessage);
+    }
+
+    return node;
+  }
+
   private mapProjectV2(project: Record<string, unknown>): GithubProjectV2ApiItem {
     const owner = this.toObject(project.owner);
     const ownerLogin = this.readString(owner.login, "GitHub ProjectV2 sync failed");
@@ -1762,10 +1858,11 @@ export class GithubAppClient {
   }
 
   private mapProjectV2Item(
-    item: Record<string, unknown>
+    item: Record<string, unknown>,
+    fieldValuesOverride?: GithubProjectV2ItemFieldValueApiItem[]
   ): GithubProjectV2ItemApiItem {
     const content = this.toObject(item.content);
-    const fieldValues = this.readProjectV2ItemFieldValues(item);
+    const fieldValues = fieldValuesOverride ?? this.readProjectV2ItemFieldValues(item);
     const status = this.findProjectV2StatusValue(fieldValues);
 
     return {
@@ -1788,16 +1885,42 @@ export class GithubAppClient {
   private readProjectV2ItemFieldValues(
     item: Record<string, unknown>
   ): GithubProjectV2ItemFieldValueApiItem[] {
+    return this.readProjectV2ItemFieldValuePage(
+      item,
+      "GitHub ProjectV2 items sync failed"
+    ).nodes;
+  }
+
+  private readProjectV2ItemFieldValuePage(
+    item: Record<string, unknown>,
+    _errorMessage: string
+  ): {
+    nodes: GithubProjectV2ItemFieldValueApiItem[];
+    hasNextPage: boolean;
+    endCursor: string | null;
+  } {
     const fieldValueConnection = this.toObject(item.fieldValues);
     if (!Array.isArray(fieldValueConnection.nodes)) {
-      return [];
+      return {
+        nodes: [],
+        hasNextPage: false,
+        endCursor: null
+      };
     }
+    const pageInfo = this.toObject(fieldValueConnection.pageInfo);
 
-    return fieldValueConnection.nodes
-      .filter((fieldValue): fieldValue is Record<string, unknown> =>
-        this.isRecord(fieldValue)
-      )
-      .map((fieldValue) => this.mapProjectV2ItemFieldValue(fieldValue));
+    return {
+      nodes: fieldValueConnection.nodes
+        .filter((fieldValue): fieldValue is Record<string, unknown> =>
+          this.isRecord(fieldValue)
+        )
+        .map((fieldValue) => this.mapProjectV2ItemFieldValue(fieldValue)),
+      hasNextPage: pageInfo.hasNextPage === true,
+      endCursor:
+        typeof pageInfo.endCursor === "string" && pageInfo.endCursor
+          ? pageInfo.endCursor
+          : null
+    };
   }
 
   private mapProjectV2ItemFieldValue(
