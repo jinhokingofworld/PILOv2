@@ -19,6 +19,27 @@ export type CanvasWorkspaceRequestOptions = {
   workspaceId: string;
 };
 
+export type CanvasShapeOperationPayload = {
+  id: string;
+  workspaceId: string;
+  canvasId: string;
+  shapeId: string;
+  operationType: "create" | "update" | "delete";
+  opSeq: number;
+  actorUserId: string;
+  clientOperationId: string;
+  baseRevision: number | null;
+  resultRevision: number;
+  contentHash: string;
+  payload: Record<string, unknown>;
+  createdAt: string;
+};
+
+export type CanvasOperationsCatchupPayload = {
+  latestOpSeq: number;
+  operations: CanvasShapeOperationPayload[];
+};
+
 export type CanvasBoardDetail = {
   id: string;
   workspaceId: string;

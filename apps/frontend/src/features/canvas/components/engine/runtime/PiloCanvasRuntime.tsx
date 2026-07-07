@@ -6,6 +6,8 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { CanvasRealtimeConfig } from "@/features/canvas/realtime/canvas-realtime-types";
+import { useCanvasPresence } from "@/features/canvas/realtime/useCanvasPresence";
 import type { CanvasShapeSyncQueue } from "../../../utils/canvas-shape-sync";
 import {
   PiloTldrawCanvas,
@@ -38,6 +40,7 @@ type PiloCanvasRuntimeProps = {
   onHistoryStateChange?: (state: PiloCanvasHistoryState) => void;
   onSnapStateChange?: (state: PiloCanvasSnapState) => void;
   onReady: (actions: PiloCanvasActions | null) => void;
+  realtime?: CanvasRealtimeConfig | null;
   storageMode?: CanvasRuntimeStorageMode;
 };
 
@@ -74,6 +77,7 @@ function PiloCanvasRuntimeInner({
   onHistoryStateChange,
   onSnapStateChange,
   onReady,
+  realtime = null,
   storageMode = "local",
 }: PiloCanvasRuntimeProps) {
   const queryClient = useQueryClient();
@@ -109,6 +113,25 @@ function PiloCanvasRuntimeInner({
   const localShapeVersionRef = useRef(0);
   const [canvasHydrationVersion, setCanvasHydrationVersion] = useState(0);
   const [cameraRestoreVersion, setCameraRestoreVersion] = useState(0);
+  const catchUpCanvasOperations = useCallback(
+    async (afterSeq: number, signal?: AbortSignal) => {
+      if (storageMode !== "api" || !canvasClient?.listOperationsAfterSeq) {
+        return {
+          latestOpSeq: afterSeq,
+          operations: [],
+        };
+      }
+
+      return canvasClient.listOperationsAfterSeq(board.id, afterSeq, {
+        signal,
+        workspaceId: board.workspaceId,
+      });
+    },
+    [board.id, board.workspaceId, canvasClient, storageMode],
+  );
+  const canvasPresence = useCanvasPresence(realtime, {
+    catchUpOperations: catchUpCanvasOperations,
+  });
 
   useEffect(() => {
     onReady(canvasActions);
@@ -227,6 +250,7 @@ function PiloCanvasRuntimeInner({
           onHistoryStateChange={
             onHistoryStateChange ?? noopCanvasHistoryStateChange
           }
+          presence={canvasPresence}
           onSnapStateChange={handleSnapStateChange}
         />
       </section>

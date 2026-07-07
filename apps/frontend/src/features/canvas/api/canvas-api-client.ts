@@ -5,6 +5,7 @@ import type {
 } from "./canvas-types";
 import {
   normalizeCanvasBoardDetail,
+  normalizeCanvasOperationsCatchup,
   normalizeCanvasShape,
   normalizeCanvasShapes,
   unwrapCanvasApiData,
@@ -170,6 +171,20 @@ export function createCanvasApiClient({
       const shapes = await requestCanvasJson(path, { signal }, requestOptions);
 
       return normalizeCanvasShapes(shapes);
+    },
+
+    async listOperationsAfterSeq(
+      boardId: string,
+      afterSeq: number,
+      { signal, workspaceId }: CanvasWorkspaceRequestOptions,
+    ) {
+      const search = new URLSearchParams({
+        afterSeq: String(Math.max(0, Math.trunc(afterSeq))),
+      });
+      const path = `/workspaces/${encodeURIComponent(workspaceId)}/canvases/${encodeURIComponent(boardId)}/operations?${search.toString()}`;
+      const operations = await requestCanvasJson(path, { signal }, requestOptions);
+
+      return normalizeCanvasOperationsCatchup(operations);
     },
 
     async getShapeDetail(

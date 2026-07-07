@@ -6,6 +6,8 @@ import {
   CanvasShapeDeleteRow,
   CanvasShapePayload,
   CanvasShapeRow,
+  CanvasShapeOperationPayload,
+  CanvasShapeOperationRow,
   CanvasUserStatePayload,
   CanvasUserStateRow,
   CompleteShapeWriteValues,
@@ -70,6 +72,27 @@ export function mapDeletedShape(
     deletedAt: toIsoString(shape.deleted_at),
     contentHash: shape.content_hash,
     revision: Number(shape.revision)
+  };
+}
+
+export function mapShapeOperation(
+  operation: CanvasShapeOperationRow
+): CanvasShapeOperationPayload {
+  return {
+    id: operation.id,
+    workspaceId: operation.workspace_id,
+    canvasId: operation.canvas_id,
+    shapeId: operation.shape_id,
+    operationType: operation.operation_type,
+    opSeq: Number(operation.op_seq),
+    actorUserId: operation.actor_user_id,
+    clientOperationId: operation.client_operation_id,
+    baseRevision:
+      operation.base_revision === null ? null : Number(operation.base_revision),
+    resultRevision: Number(operation.result_revision),
+    contentHash: operation.content_hash,
+    payload: operation.payload ?? {},
+    createdAt: toIsoString(operation.created_at)
   };
 }
 

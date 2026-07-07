@@ -50,6 +50,26 @@ export interface CanvasShapeCleanupRow extends QueryResultRow {
   deleted_count: number | string;
 }
 
+export interface CanvasLatestOperationSeqRow extends QueryResultRow {
+  latest_op_seq: number | string;
+}
+
+export interface CanvasShapeOperationRow extends QueryResultRow {
+  id: string;
+  workspace_id: string;
+  canvas_id: string;
+  shape_id: string;
+  actor_user_id: string;
+  operation_type: "create" | "update" | "delete";
+  op_seq: number | string;
+  client_operation_id: string;
+  base_revision: number | string | null;
+  result_revision: number | string;
+  content_hash: string;
+  payload: Record<string, unknown>;
+  created_at: Date | string;
+}
+
 export interface CreateCanvasRequest {
   title?: unknown;
 }
@@ -82,6 +102,10 @@ export interface ListCanvasShapesQuery {
   width?: unknown;
   height?: unknown;
   margin?: unknown;
+}
+
+export interface ListCanvasOperationsQuery {
+  afterSeq?: unknown;
 }
 
 export interface SyncCanvasShapesBatchRequest {
@@ -159,6 +183,27 @@ export interface CanvasUserStatePayload {
 
 export interface CanvasLeavePayload extends CanvasUserStatePayload {
   permanentlyDeletedShapeCount: number;
+}
+
+export interface CanvasShapeOperationPayload {
+  id: string;
+  workspaceId: string;
+  canvasId: string;
+  shapeId: string;
+  operationType: "create" | "update" | "delete";
+  opSeq: number;
+  actorUserId: string;
+  clientOperationId: string;
+  baseRevision: number | null;
+  resultRevision: number;
+  contentHash: string;
+  payload: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface CanvasOperationsCatchupPayload {
+  latestOpSeq: number;
+  operations: CanvasShapeOperationPayload[];
 }
 
 export interface ShapeWriteValues {

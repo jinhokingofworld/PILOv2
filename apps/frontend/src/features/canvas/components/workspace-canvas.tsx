@@ -39,10 +39,12 @@ import {
   resolveCanvasClientMode,
 } from "@/features/canvas/api/canvas-client";
 import { useAuthSession } from "@/features/auth";
+import { isDevPreviewAccessToken } from "@/features/auth/session-storage";
 import {
   PiloCanvasRuntime,
   type CanvasBoardDetail,
 } from "@/features/canvas/components/engine/runtime/PiloCanvasRuntime";
+import type { CanvasRealtimeConfig } from "@/features/canvas/realtime/canvas-realtime-types";
 import {
   type PiloCanvasActions,
   type PiloCanvasHistoryState,
@@ -176,6 +178,35 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
     boardState.source === "api" &&
     boardState.status === "ready" &&
     boardState.board !== null;
+  const canvasRealtimeConfig = useMemo<CanvasRealtimeConfig>(
+    () => ({
+      enabled: Boolean(
+        shouldUseCanvasApi &&
+          authSession?.accessToken &&
+          !isDevPreviewAccessToken(authSession.accessToken) &&
+          authSession.user.id &&
+          workspaceId &&
+          board.id,
+      ),
+      workspaceId,
+      canvasId: board.id,
+      authToken: authSession?.accessToken ?? null,
+      currentUser: authSession
+        ? {
+            userId: authSession.user.id,
+            displayName:
+              authSession.user.name ?? authSession.user.email ?? "PILO",
+            avatarUrl: authSession.user.avatarUrl,
+          }
+        : null,
+    }),
+    [
+      authSession,
+      board.id,
+      shouldUseCanvasApi,
+      workspaceId,
+    ],
+  );
   const isCanvasToolActive = (tool: PiloCanvasTool) =>
     openPopover === null && activeCanvasTool === tool;
   const activeDrawingColor =
@@ -688,6 +719,7 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
           canvasClient={shouldUseCanvasApi ? canvasClient : null}
           onHistoryStateChange={setCanvasHistoryState}
           onReady={setCanvasActions}
+          realtime={canvasRealtimeConfig}
           storageMode={shouldUseCanvasApi ? "api" : "local"}
         />
       </div>

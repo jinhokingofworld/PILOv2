@@ -2,6 +2,7 @@
 
 import {
   useEffect,
+  useCallback,
   useRef,
   type MutableRefObject,
   type PointerEvent,
@@ -18,6 +19,12 @@ import {
 } from "tldraw";
 import { useValue } from "@tldraw/state-react";
 import { TldrawSurface } from "@/shared/tldraw";
+import type { CanvasPresenceController } from "@/features/canvas/realtime/useCanvasPresence";
+import { RemoteCursorOverlay } from "@/features/canvas/realtime/RemoteCursorOverlay";
+import type {
+  CanvasPresencePoint,
+  CanvasPresenceViewport,
+} from "@/features/canvas/realtime/canvas-realtime-types";
 import { PiloCanvasBackground } from "./PiloCanvasBackground";
 import { SelectedShapeStackingManager } from "../interactions/PiloCanvasStackingManager";
 import { SelectedGroupToolbar } from "../interactions/PiloCanvasGroupToolbar";
@@ -146,6 +153,7 @@ type PiloTldrawCanvasProps = {
   onViewportBoundsChange: (bounds: PiloCanvasViewportBounds) => void;
   onShapeDetailRequest: (request: PiloCanvasShapeDetailRequest) => void;
   onHistoryStateChange: (state: PiloCanvasHistoryState) => void;
+  presence?: CanvasPresenceController;
   onSnapStateChange: (state: PiloCanvasSnapState) => void;
 };
 
@@ -335,6 +343,7 @@ export function PiloTldrawCanvas({
   onViewportBoundsChange,
   onShapeDetailRequest,
   onHistoryStateChange,
+  presence,
   onSnapStateChange,
 }: PiloTldrawCanvasProps) {
   const editorRef = useRef<Editor | null>(null);
@@ -676,12 +685,185 @@ export function PiloTldrawCanvas({
       <CanvasHistoryStateReporter
         onHistoryStateChange={onHistoryStateChange}
       />
+      {presence?.enabled ? <CanvasPresenceReporter presence={presence} /> : null}
+      {presence ? (
+        <RemoteCursorOverlay
+          currentUserId={presence.currentUserId}
+          presence={presence.remotePresence}
+        />
+      ) : null}
       <CanvasSnapStateReporter onSnapStateChange={onSnapStateChange} />
       <SelectedShapeStackingManager />
       <SelectedGroupToolbar />
       <FrameSelectionToolbar />
     </TldrawSurface>
   );
+}
+
+function hasSameSelectedShapeIds(
+  previousShapeIds: string[],
+  nextShapeIds: string[],
+) {
+  if (previousShapeIds.length !== nextShapeIds.length) {
+    return false;
+  }
+
+  return previousShapeIds.every(
+    (shapeId, index) => shapeId === nextShapeIds[index],
+  );
+}
+
+function hasCursorMovedEnough(
+  previousCursor: CanvasPresencePoint | null,
+  nextCursor: CanvasPresencePoint,
+) {
+  if (!previousCursor) {
+    return true;
+  }
+
+  return (
+    Math.hypot(
+      nextCursor.x - previousCursor.x,
+      nextCursor.y - previousCursor.y,
+    ) >= 1.5
+  );
+}
+
+function getCanvasPresenceViewport(editor: Editor): CanvasPresenceViewport {
+  const viewportBounds = editor.getViewportPageBounds();
+
+  return {
+    height: viewportBounds.h,
+    width: viewportBounds.w,
+    x: viewportBounds.x,
+    y: viewportBounds.y,
+    zoom: editor.getCamera().z,
+  };
+}
+
+function CanvasPresenceReporter({
+  presence,
+}: {
+  presence: CanvasPresenceController;
+}) {
+  const editor = useEditor();
+  const sendPresenceUpdate = presence.sendPresenceUpdate;
+  const selectedShapeIds = useValue(
+    "pilo-presence-selected-shape-ids",
+    () => editor.getSelectedShapeIds().map(String),
+    [editor],
+  );
+  const selectedShapeIdsRef = useRef<string[]>(selectedShapeIds);
+  const lastSentAtRef = useRef(0);
+  const lastSentPayloadRef = useRef<{
+    cursor: CanvasPresencePoint | null;
+    selectedShapeIds: string[];
+  }>({
+    cursor: null,
+    selectedShapeIds: [],
+  });
+  const pendingCursorRef = useRef<CanvasPresencePoint | null>(null);
+  const pendingTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    selectedShapeIdsRef.current = selectedShapeIds;
+  }, [selectedShapeIds]);
+
+  const flushPresence = useCallback(
+    (cursor: CanvasPresencePoint) => {
+      const nextSelectedShapeIds = selectedShapeIdsRef.current;
+      const lastPayload = lastSentPayloadRef.current;
+
+      if (
+        !hasCursorMovedEnough(lastPayload.cursor, cursor) &&
+        hasSameSelectedShapeIds(
+          lastPayload.selectedShapeIds,
+          nextSelectedShapeIds,
+        )
+      ) {
+        return;
+      }
+
+      sendPresenceUpdate(
+        cursor,
+        nextSelectedShapeIds,
+        getCanvasPresenceViewport(editor),
+      );
+      lastSentAtRef.current = Date.now();
+      lastSentPayloadRef.current = {
+        cursor,
+        selectedShapeIds: nextSelectedShapeIds,
+      };
+    },
+    [editor, sendPresenceUpdate],
+  );
+
+  const schedulePresence = useCallback(
+    (cursor: CanvasPresencePoint) => {
+      pendingCursorRef.current = cursor;
+
+      const elapsedMs = Date.now() - lastSentAtRef.current;
+      if (elapsedMs >= 80) {
+        if (pendingTimerRef.current) {
+          window.clearTimeout(pendingTimerRef.current);
+          pendingTimerRef.current = null;
+        }
+
+        flushPresence(cursor);
+        return;
+      }
+
+      if (pendingTimerRef.current) {
+        return;
+      }
+
+      pendingTimerRef.current = window.setTimeout(() => {
+        pendingTimerRef.current = null;
+        const pendingCursor = pendingCursorRef.current;
+
+        if (pendingCursor) {
+          flushPresence(pendingCursor);
+        }
+      }, 80 - elapsedMs);
+    },
+    [flushPresence],
+  );
+
+  useEffect(() => {
+    if (!presence.enabled) {
+      return undefined;
+    }
+
+    const container = editor.getContainer();
+
+    function handlePointerMove(event: globalThis.PointerEvent) {
+      if (event.isPrimary === false) {
+        return;
+      }
+
+      const pagePoint = editor.screenToPage({
+        x: event.clientX,
+        y: event.clientY,
+      });
+
+      schedulePresence({ x: pagePoint.x, y: pagePoint.y });
+    }
+
+    container.addEventListener("pointermove", handlePointerMove, {
+      passive: true,
+    });
+
+    return () => {
+      container.removeEventListener("pointermove", handlePointerMove);
+      if (pendingTimerRef.current) {
+        window.clearTimeout(pendingTimerRef.current);
+        pendingTimerRef.current = null;
+      }
+      pendingCursorRef.current = null;
+    };
+  }, [editor, presence.enabled, schedulePresence]);
+
+  return null;
 }
 
 function CanvasHistoryStateReporter({

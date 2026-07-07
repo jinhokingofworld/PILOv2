@@ -20,12 +20,14 @@ import {
   CanvasLeavePayload,
   CanvasShapeBatchPayload,
   CanvasShapeDeletePayload,
+  CanvasOperationsCatchupPayload,
   CanvasShapePayload,
   CanvasShapeSummaryPayload,
   CanvasUserStatePayload,
   CanvasViewSettingPayload,
   CreateCanvasRequest,
   CreateCanvasShapeRequest,
+  ListCanvasOperationsQuery,
   ListCanvasShapesQuery,
   SyncCanvasShapesBatchRequest,
   UpdateCanvasViewSettingRequest,
@@ -95,6 +97,23 @@ export class CanvasController {
     );
 
     return apiResponse(shapes);
+  }
+
+  @Get("canvases/:canvasId/operations")
+  async listOperationsAfterSeq(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("canvasId") canvasId: string,
+    @Query() query: ListCanvasOperationsQuery
+  ): Promise<ApiSuccessResponse<CanvasOperationsCatchupPayload>> {
+    const operations = await this.canvasService.listOperationsAfterSeq(
+      currentUserId,
+      workspaceId,
+      canvasId,
+      query
+    );
+
+    return apiResponse(operations);
   }
 
   @Post("canvases/:canvasId/shapes")

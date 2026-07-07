@@ -31,6 +31,7 @@ WorkspaceCanvas -> PiloCanvasRuntime -> PiloTldrawCanvas -> TldrawSurface
 - `shapes/`: shape 등록, shape factory, shape type guard, shape별 ShapeUtil/UI
 - `interactions/`: placement, smart guide, selection stacking
 - `assets/`: image/video asset 생성과 복원
+- `realtime/`: Socket.IO 연결, Canvas room presence hook, remote cursor overlay
 
 `shapes/code-block/`은 code block shape의 tldraw 연결과 editor UI 책임을 파일 단위로
 분리한다. `PiloCodeBlockShapeUtil`은 shape props schema, geometry, resize,
@@ -81,3 +82,11 @@ Canvas의 아래 흐름은 Canvas 도메인 전용이다.
 - shape 변경 감지는 전체 snapshot `JSON.stringify` 비교 대신 shape id별 `microdiff`를 사용한다.
 - viewport/detail 조회는 `@tanstack/react-query` query key, cancellation, cache invalidation과 local dirty shape 상태를 확인한 뒤 반영한다.
 - `contentHash`와 `revision`은 Canvas API 응답 기준 metadata이며, shared `TldrawSurface`가 아니라 Canvas runtime/API 경계에서 다룬다.
+
+## Realtime Presence
+
+- Canvas presence는 `src/features/canvas/realtime/`에서 Socket.IO client, hook, overlay를 분리해 조립한다.
+- `PiloCanvasRuntime`은 socket state를 만들고, `PiloTldrawCanvas`는 `TldrawSurface` child에서 `useEditor()` 기반 cursor 좌표를 report한다.
+- cursor 좌표와 selection presence는 DB에 저장하지 않는다.
+- local UI Preview의 fake session은 realtime-server DB session 검증을 통과하지 않으므로 presence를 켜지 않는다.
+- `src/shared/tldraw/TldrawSurface`는 presence를 소유하지 않는다. PR Review 같은 다른 tldraw 화면은 필요하면 realtime 모듈을 자기 화면 흐름에 맞게 조립한다.

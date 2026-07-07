@@ -14,6 +14,8 @@ export type {
   CanvasBoardSummary,
   CanvasClientMode,
   CanvasClientOptions,
+  CanvasOperationsCatchupPayload,
+  CanvasShapeOperationPayload,
   CanvasViewSetting,
   CanvasViewportShapeQuery,
   CanvasWorkspaceRequestOptions,

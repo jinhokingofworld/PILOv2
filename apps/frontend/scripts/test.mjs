@@ -164,6 +164,22 @@ const piloCanvasTypes = await readFile(
   new URL("../src/features/canvas/components/engine/types.ts", import.meta.url),
   "utf8"
 );
+const canvasRealtimeTypes = await readFile(
+  new URL("../src/features/canvas/realtime/canvas-realtime-types.ts", import.meta.url),
+  "utf8"
+);
+const canvasRealtimeClient = await readFile(
+  new URL("../src/features/canvas/realtime/canvas-realtime-client.ts", import.meta.url),
+  "utf8"
+);
+const canvasPresenceHook = await readFile(
+  new URL("../src/features/canvas/realtime/useCanvasPresence.ts", import.meta.url),
+  "utf8"
+);
+const canvasRemoteCursorOverlay = await readFile(
+  new URL("../src/features/canvas/realtime/RemoteCursorOverlay.tsx", import.meta.url),
+  "utf8"
+);
 const piloCanvasAssets = await readFile(
   new URL(
     "../src/features/canvas/components/engine/assets/pilo-canvas-assets.ts",
@@ -363,7 +379,13 @@ assert.match(canvasApiClient, /\/workspaces\/\$\{encodeURIComponent\(workspaceId
 assert.match(canvasApiClient, /\/shapes`/);
 assert.match(canvasApiClient, /listShapesInViewport/);
 assert.match(canvasApiClient, /getShapeDetail/);
+assert.match(canvasApiClient, /listOperationsAfterSeq/);
+assert.match(canvasApiClient, /\/operations\?\$\{search\.toString\(\)\}/);
 assert.match(canvasTypes, /signal\?: AbortSignal/);
+assert.match(canvasTypes, /CanvasOperationsCatchupPayload/);
+assert.match(canvasTypes, /CanvasShapeOperationPayload/);
+assert.match(canvasNormalizers, /normalizeCanvasOperationsCatchup/);
+assert.match(canvasNormalizers, /normalizeCanvasOperation/);
 assert.match(canvasApiClient, /enterCanvas/);
 assert.match(canvasApiClient, /leaveCanvas/);
 assert.match(canvasApiClient, /syncShapesBatch/);
@@ -379,6 +401,7 @@ assert.match(canvasMockClient, /writeCanvasStorage/);
 assert.match(canvasMockClient, /createMockCanvasClient/);
 assert.match(canvasMockClient, /mock-board-list/);
 assert.match(canvasMockClient, /mock-user/);
+assert.match(canvasMockClient, /listOperationsAfterSeq/);
 assert.doesNotMatch(canvasMockClient, /Authorization: `Bearer/);
 assert.doesNotMatch(canvasMockClient, /NEXT_PUBLIC_PILO_APP_SERVER_URL/);
 assert.doesNotMatch(canvasMockClient, /requestCanvasJson/);
@@ -439,6 +462,9 @@ assert.doesNotMatch(canvasWorkspace, /getCanvasWorkspaceId/);
 assert.match(canvasWorkspace, /const shouldUseCanvasApi =/);
 assert.match(canvasWorkspace, /boardState.status === "ready"/);
 assert.match(canvasWorkspace, /boardState.board !== null/);
+assert.match(canvasWorkspace, /canvasRealtimeConfig/);
+assert.match(canvasWorkspace, /isDevPreviewAccessToken/);
+assert.match(canvasWorkspace, /realtime=\{canvasRealtimeConfig\}/);
 assert.match(canvasWorkspace, /canvasHistoryState\.canUndo/);
 assert.match(canvasWorkspace, /canvasHistoryState\.canRedo/);
 assert.match(canvasWorkspace, /onHistoryStateChange=\{setCanvasHistoryState\}/);
@@ -448,6 +474,39 @@ assert.doesNotMatch(canvasWorkspace, /label="삽입"/);
 assert.doesNotMatch(canvasWorkspace, /label="스마트가이드"/);
 assert.match(canvasWorkspace, /canvasClient=\{shouldUseCanvasApi \? canvasClient : null\}/);
 assert.match(canvasWorkspace, /storageMode=\{shouldUseCanvasApi \? "api" : "local"\}/);
+assert.match(canvasRuntime, /useCanvasPresence/);
+assert.match(canvasRuntime, /catchUpCanvasOperations/);
+assert.match(canvasRuntime, /listOperationsAfterSeq/);
+assert.match(canvasRuntime, /realtime\?: CanvasRealtimeConfig \| null/);
+assert.match(canvasRuntime, /presence=\{canvasPresence\}/);
+assert.match(piloTldrawCanvas, /CanvasPresenceReporter/);
+assert.match(piloTldrawCanvas, /RemoteCursorOverlay/);
+assert.match(piloTldrawCanvas, /editor\.getContainer\(\)/);
+assert.match(piloTldrawCanvas, /editor\.screenToPage/);
+assert.match(canvasRealtimeTypes, /CanvasRealtimeConfig/);
+assert.match(canvasRealtimeTypes, /CanvasRemotePresenceState/);
+assert.match(canvasRealtimeTypes, /CanvasPresenceViewport/);
+assert.match(canvasRealtimeTypes, /"canvas:operation"/);
+assert.match(canvasRealtimeTypes, /"canvas:sync:required"/);
+assert.match(canvasRealtimeTypes, /"canvas:presence:update"/);
+assert.match(canvasRealtimeClient, /NEXT_PUBLIC_PILO_REALTIME_SERVER_URL/);
+assert.match(canvasRealtimeClient, /http:\/\/localhost:3001/);
+assert.match(canvasRealtimeClient, /transports: \["websocket"\]/);
+assert.match(canvasPresenceHook, /canvas:join/);
+assert.match(canvasPresenceHook, /canvas:leave/);
+assert.match(canvasPresenceHook, /lastSeenOpSeqRef/);
+assert.match(canvasPresenceHook, /runCatchUp/);
+assert.match(canvasPresenceHook, /canvas:operation/);
+assert.match(canvasPresenceHook, /canvas:sync:required/);
+assert.match(canvasPresenceHook, /operation\.opSeq === lastSeenOpSeq \+ 1/);
+assert.match(canvasPresenceHook, /STALE_PRESENCE_TIMEOUT_MS = 15_000/);
+assert.match(canvasPresenceHook, /sentAt: new Date\(\)\.toISOString\(\)/);
+assert.match(canvasPresenceHook, /userId !== currentUserId/);
+assert.match(canvasRemoteCursorOverlay, /pageToScreen/);
+assert.match(canvasRemoteCursorOverlay, /getBoundingClientRect/);
+assert.match(canvasRemoteCursorOverlay, /getShapePageBounds/);
+assert.match(canvasRemoteCursorOverlay, /canvas-remote-selection-outline/);
+assert.match(canvasRemoteCursorOverlay, /getStableCursorColor/);
 assert.match(canvasShapeSync, /buildCanvasShapeSyncOperations/);
 assert.match(canvasShapeSync, /createCanvasShapeSyncQueue/);
 assert.match(canvasShapeSync, /DEFAULT_CANVAS_SHAPE_SYNC_QUEUE_DEBOUNCE_MS = 500/);
@@ -478,9 +537,12 @@ assert.match(packageJson, /"@tanstack\/react-query"/);
 assert.match(packageJson, /"p-queue"/);
 assert.match(packageJson, /"p-retry"/);
 assert.match(packageJson, /"microdiff"/);
+assert.match(packageJson, /"socket\.io-client"/);
 assert.match(tldrawSurface, /export function TldrawSurface/);
 assert.match(tldrawSurface, /shapeUtils=\{shapeUtils\}/);
 assert.match(tldrawSurface, /onMount=\{onMount\}/);
+assert.doesNotMatch(tldrawSurface, /useCanvasPresence/);
+assert.doesNotMatch(tldrawSurface, /RemoteCursorOverlay/);
 assert.doesNotMatch(tldrawSurface, /createCanvasShapeSyncQueue/);
 assert.doesNotMatch(tldrawSurface, /writeCanvasStorage/);
 assert.match(piloTldrawCanvas, /TldrawSurface/);
