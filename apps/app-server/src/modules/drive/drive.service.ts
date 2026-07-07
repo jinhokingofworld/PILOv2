@@ -1,19 +1,32 @@
+import { randomUUID } from "node:crypto";
 import { Injectable } from "@nestjs/common";
 import { badRequest, notFound } from "../../common/api-error";
-import { DatabaseService } from "../../database/database.service";
+import {
+  DatabaseService,
+  DatabaseTransaction
+} from "../../database/database.service";
 import { WorkspaceService } from "../workspace/workspace.service";
 import { mapDriveItem } from "./drive.mapper";
+import { DriveStorageService } from "./drive-storage.service";
 import {
+  CompleteDriveUploadRequest,
   CreateDriveFolderRequest,
+  CreateDriveUploadUrlRequest,
   DriveDeleteCountRow,
   DriveDeletePayload,
+  DriveDownloadUrlPayload,
   DriveItemPayload,
   DriveItemRow,
   DriveListPayload,
+  DriveUploadRow,
+  DriveUploadUrlPayload,
   UpdateDriveItemRequest
 } from "./drive.types";
 import {
+  DRIVE_FILE_SIZE_LIMIT_BYTES,
+  validateCompleteDriveUploadRequest,
   validateCreateDriveFolderRequest,
+  validateCreateDriveUploadUrlRequest,
   validateDriveItemId,
   validateListDriveItemsQuery,
   validateUpdateDriveItemRequest
@@ -46,12 +59,14 @@ const DRIVE_ITEM_SELECT = `
     ON updated_by_user.id = drive_items.updated_by_user_id
 `;
 const UNIQUE_VIOLATION_CODE = "23505";
+const DRIVE_UPLOAD_EXPIRES_SECONDS = 10 * 60;
 
 @Injectable()
 export class DriveService {
   constructor(
     private readonly database: DatabaseService,
-    private readonly workspaceService: WorkspaceService
+    private readonly workspaceService: WorkspaceService,
+    private readonly driveStorageService: DriveStorageService
   ) {}
 
   getModuleInfo() {
@@ -129,6 +144,235 @@ export class DriveService {
 
       throw error;
     }
+  }
+
+  async createUploadUrl(
+    currentUserId: string,
+    workspaceId: string,
+    body: CreateDriveUploadUrlRequest
+  ): Promise<DriveUploadUrlPayload> {
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+
+    const input = validateCreateDriveUploadUrlRequest(body);
+    if (input.parentId !== null) {
+      await this.findActiveFolder(workspaceId, input.parentId, "Drive folder not found");
+    }
+
+    const fileId = randomUUID();
+    const uploadId = randomUUID();
+    const objectKey = this.buildObjectKey(workspaceId, fileId, input.name);
+    const uploadUrl = await this.driveStorageService.createUploadUrl({
+      objectKey,
+      mimeType: input.mimeType,
+      expiresInSeconds: DRIVE_UPLOAD_EXPIRES_SECONDS
+    });
+
+    try {
+      const result = await this.database.transaction(async (transaction) => {
+        const file = await transaction.queryOne<DriveItemRow>(
+          `
+            WITH inserted AS (
+              INSERT INTO drive_items (
+                id,
+                workspace_id,
+                parent_id,
+                item_type,
+                name,
+                object_key,
+                mime_type,
+                size_bytes,
+                upload_status,
+                created_by_user_id
+              )
+              VALUES ($1, $2, $3, 'file', $4, $5, $6, $7, 'pending', $8)
+              RETURNING *
+            )
+            ${this.selectInsertedDriveItem("inserted")}
+          `,
+          [
+            fileId,
+            workspaceId,
+            input.parentId,
+            input.name,
+            objectKey,
+            input.mimeType,
+            input.sizeBytes,
+            currentUserId
+          ]
+        );
+
+        if (!file) {
+          throw badRequest("Drive file could not be created");
+        }
+
+        const upload = await transaction.queryOne<DriveUploadRow>(
+          `
+            INSERT INTO drive_uploads (
+              id,
+              workspace_id,
+              drive_item_id,
+              object_key,
+              status,
+              expected_size_bytes,
+              expected_mime_type,
+              expires_at,
+              created_by_user_id
+            )
+            VALUES (
+              $1,
+              $2,
+              $3,
+              $4,
+              'pending',
+              $5,
+              $6,
+              now() + ($7::int * interval '1 second'),
+              $8
+            )
+            RETURNING
+              id,
+              workspace_id,
+              drive_item_id,
+              object_key,
+              status,
+              expected_size_bytes,
+              expected_mime_type,
+              expires_at,
+              completed_at,
+              created_by_user_id,
+              created_at,
+              updated_at
+          `,
+          [
+            uploadId,
+            workspaceId,
+            fileId,
+            objectKey,
+            input.sizeBytes,
+            input.mimeType,
+            DRIVE_UPLOAD_EXPIRES_SECONDS,
+            currentUserId
+          ]
+        );
+
+        if (!upload) {
+          throw badRequest("Drive upload could not be created");
+        }
+
+        return { file, upload };
+      });
+
+      return {
+        file: mapDriveItem(result.file),
+        upload: {
+          id: result.upload.id,
+          fileId: result.upload.drive_item_id,
+          status: result.upload.status,
+          method: "PUT",
+          uploadUrl,
+          headers: {
+            "Content-Type": result.upload.expected_mime_type
+          },
+          expiresAt: this.toIsoString(result.upload.expires_at)
+        }
+      };
+    } catch (error) {
+      if (this.isUniqueViolation(error)) {
+        throw badRequest("Drive item name already exists in this folder");
+      }
+
+      throw error;
+    }
+  }
+
+  async completeUpload(
+    currentUserId: string,
+    workspaceId: string,
+    fileId: string,
+    body: CompleteDriveUploadRequest
+  ): Promise<DriveItemPayload> {
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+
+    const validFileId = validateDriveItemId(fileId);
+    const input = validateCompleteDriveUploadRequest(body);
+    const file = await this.findActivePendingFile(workspaceId, validFileId);
+    if (!file) {
+      throw notFound("Drive file upload not found");
+    }
+
+    const upload = await this.findPendingUpload(
+      workspaceId,
+      validFileId,
+      input.uploadId
+    );
+    if (!upload) {
+      throw notFound("Drive upload not found");
+    }
+
+    if (this.isExpired(upload.expires_at)) {
+      await this.expireUpload(workspaceId, validFileId, input.uploadId, currentUserId);
+      throw badRequest("Drive upload has expired");
+    }
+
+    const objectSizeBytes = await this.driveStorageService.getObjectSizeBytes(
+      upload.object_key
+    );
+    if (objectSizeBytes === null) {
+      throw badRequest("Drive uploaded object was not found");
+    }
+
+    const expectedSizeBytes = Number(upload.expected_size_bytes);
+    if (
+      objectSizeBytes !== expectedSizeBytes ||
+      objectSizeBytes > DRIVE_FILE_SIZE_LIMIT_BYTES
+    ) {
+      throw badRequest("Drive uploaded object size is invalid");
+    }
+
+    const completed = await this.database.transaction((transaction) =>
+      this.markUploadCompleted(
+        transaction,
+        workspaceId,
+        validFileId,
+        input.uploadId,
+        currentUserId
+      )
+    );
+
+    if (!completed) {
+      throw notFound("Drive upload not found");
+    }
+
+    return mapDriveItem(completed);
+  }
+
+  async createDownloadUrl(
+    currentUserId: string,
+    workspaceId: string,
+    fileId: string
+  ): Promise<DriveDownloadUrlPayload> {
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+
+    const validFileId = validateDriveItemId(fileId);
+    const file = await this.findActiveReadyFile(workspaceId, validFileId);
+    if (!file || !file.object_key || !file.mime_type) {
+      throw notFound("Drive file not found");
+    }
+
+    const downloadUrl = await this.driveStorageService.createDownloadUrl({
+      objectKey: file.object_key,
+      fileName: file.name,
+      mimeType: file.mime_type,
+      expiresInSeconds: DRIVE_UPLOAD_EXPIRES_SECONDS
+    });
+
+    return {
+      file: mapDriveItem(file),
+      downloadUrl,
+      expiresAt: this.toIsoString(
+        new Date(Date.now() + DRIVE_UPLOAD_EXPIRES_SECONDS * 1000)
+      )
+    };
   }
 
   async updateItem(
@@ -356,6 +600,148 @@ export class DriveService {
     );
   }
 
+  private findActivePendingFile(
+    workspaceId: string,
+    fileId: string
+  ): Promise<DriveItemRow | null> {
+    return this.database.queryOne<DriveItemRow>(
+      `
+        ${DRIVE_ITEM_SELECT}
+        WHERE drive_items.workspace_id = $1
+          AND drive_items.id = $2
+          AND drive_items.item_type = 'file'
+          AND drive_items.upload_status = 'pending'
+          AND drive_items.deleted_at IS NULL
+      `,
+      [workspaceId, fileId]
+    );
+  }
+
+  private findActiveReadyFile(
+    workspaceId: string,
+    fileId: string
+  ): Promise<DriveItemRow | null> {
+    return this.database.queryOne<DriveItemRow>(
+      `
+        ${DRIVE_ITEM_SELECT}
+        WHERE drive_items.workspace_id = $1
+          AND drive_items.id = $2
+          AND drive_items.item_type = 'file'
+          AND drive_items.upload_status = 'ready'
+          AND drive_items.deleted_at IS NULL
+      `,
+      [workspaceId, fileId]
+    );
+  }
+
+  private findPendingUpload(
+    workspaceId: string,
+    fileId: string,
+    uploadId: string
+  ): Promise<DriveUploadRow | null> {
+    return this.database.queryOne<DriveUploadRow>(
+      `
+        SELECT
+          id,
+          workspace_id,
+          drive_item_id,
+          object_key,
+          status,
+          expected_size_bytes,
+          expected_mime_type,
+          expires_at,
+          completed_at,
+          created_by_user_id,
+          created_at,
+          updated_at
+        FROM drive_uploads
+        WHERE workspace_id = $1
+          AND drive_item_id = $2
+          AND id = $3
+          AND status = 'pending'
+      `,
+      [workspaceId, fileId, uploadId]
+    );
+  }
+
+  private async expireUpload(
+    workspaceId: string,
+    fileId: string,
+    uploadId: string,
+    currentUserId: string
+  ): Promise<void> {
+    await this.database.transaction(async (transaction) => {
+      await transaction.execute(
+        `
+          UPDATE drive_uploads
+          SET status = 'expired'
+          WHERE workspace_id = $1
+            AND drive_item_id = $2
+            AND id = $3
+            AND status = 'pending'
+        `,
+        [workspaceId, fileId, uploadId]
+      );
+
+      await transaction.execute(
+        `
+          UPDATE drive_items
+          SET
+            upload_status = 'failed',
+            deleted_at = now(),
+            updated_by_user_id = $3
+          WHERE workspace_id = $1
+            AND id = $2
+            AND item_type = 'file'
+            AND upload_status = 'pending'
+            AND deleted_at IS NULL
+        `,
+        [workspaceId, fileId, currentUserId]
+      );
+    });
+  }
+
+  private async markUploadCompleted(
+    transaction: DatabaseTransaction,
+    workspaceId: string,
+    fileId: string,
+    uploadId: string,
+    currentUserId: string
+  ): Promise<DriveItemRow | null> {
+    await transaction.execute(
+      `
+        UPDATE drive_uploads
+        SET
+          status = 'completed',
+          completed_at = now()
+        WHERE workspace_id = $1
+          AND drive_item_id = $2
+          AND id = $3
+          AND status = 'pending'
+      `,
+      [workspaceId, fileId, uploadId]
+    );
+
+    return transaction.queryOne<DriveItemRow>(
+      `
+        WITH updated AS (
+          UPDATE drive_items
+          SET
+            upload_status = 'ready',
+            updated_by_user_id = $3
+          WHERE workspace_id = $1
+            AND id = $2
+            AND item_type = 'file'
+            AND upload_status = 'pending'
+            AND deleted_at IS NULL
+          RETURNING *
+        )
+        ${this.selectInsertedDriveItem("updated")}
+      `,
+      [workspaceId, fileId, currentUserId]
+    );
+  }
+
   private selectInsertedDriveItem(alias: "inserted" | "updated"): string {
     return `
       SELECT
@@ -392,5 +778,32 @@ export class DriveService {
       "code" in error &&
       error.code === UNIQUE_VIOLATION_CODE
     );
+  }
+
+  private buildObjectKey(
+    workspaceId: string,
+    fileId: string,
+    fileName: string
+  ): string {
+    return `drive/workspaces/${workspaceId}/items/${fileId}/${this.toSafeFileName(
+      fileName
+    )}`;
+  }
+
+  private toSafeFileName(fileName: string): string {
+    const safeFileName = fileName
+      .normalize("NFC")
+      .replace(/[\u0000-\u001f\u007f]/g, "_")
+      .replace(/\s+/g, "_");
+
+    return safeFileName || "file";
+  }
+
+  private isExpired(expiresAt: Date | string): boolean {
+    return new Date(expiresAt).getTime() <= Date.now();
+  }
+
+  private toIsoString(value: Date | string): string {
+    return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
   }
 }

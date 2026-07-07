@@ -2,6 +2,11 @@ import { QueryResultRow } from "pg";
 
 export type DriveItemType = "folder" | "file";
 export type DriveUploadStatus = "pending" | "ready" | "failed" | null;
+export type DriveUploadAttemptStatus =
+  | "pending"
+  | "completed"
+  | "failed"
+  | "expired";
 
 export interface DriveUserPayload {
   id: string;
@@ -37,6 +42,29 @@ export interface DriveDeletePayload {
   deletedItemCount: number;
 }
 
+export interface DriveUploadPayload {
+  id: string;
+  fileId: string;
+  status: DriveUploadAttemptStatus;
+  method: "PUT";
+  uploadUrl: string;
+  headers: {
+    "Content-Type": string;
+  };
+  expiresAt: string;
+}
+
+export interface DriveUploadUrlPayload {
+  file: DriveItemPayload;
+  upload: DriveUploadPayload;
+}
+
+export interface DriveDownloadUrlPayload {
+  file: DriveItemPayload;
+  downloadUrl: string;
+  expiresAt: string;
+}
+
 export interface DriveItemRow extends QueryResultRow {
   id: string;
   workspace_id: string;
@@ -62,8 +90,25 @@ export interface DriveDeleteCountRow extends QueryResultRow {
   deleted_item_count: string | number;
 }
 
+export interface DriveUploadRow extends QueryResultRow {
+  id: string;
+  workspace_id: string;
+  drive_item_id: string;
+  object_key: string;
+  status: DriveUploadAttemptStatus;
+  expected_size_bytes: string | number;
+  expected_mime_type: string;
+  expires_at: Date | string;
+  completed_at: Date | string | null;
+  created_by_user_id: string;
+  created_at: Date | string;
+  updated_at: Date | string;
+}
+
 export type CreateDriveFolderRequest = Record<string, unknown>;
 export type UpdateDriveItemRequest = Record<string, unknown>;
+export type CreateDriveUploadUrlRequest = Record<string, unknown>;
+export type CompleteDriveUploadRequest = Record<string, unknown>;
 
 export interface NormalizedDriveParentInput {
   parentId: string | null;
@@ -76,4 +121,15 @@ export interface NormalizedCreateDriveFolderInput
 
 export interface NormalizedUpdateDriveItemInput {
   name: string;
+}
+
+export interface NormalizedCreateDriveUploadUrlInput
+  extends NormalizedDriveParentInput {
+  name: string;
+  sizeBytes: number;
+  mimeType: string;
+}
+
+export interface NormalizedCompleteDriveUploadInput {
+  uploadId: string;
 }

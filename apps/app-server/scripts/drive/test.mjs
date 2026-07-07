@@ -14,6 +14,9 @@ const driveController = await readSource(
 const driveServiceSource = await readSource(
   "../../src/modules/drive/drive.service.ts"
 );
+const driveStorageService = await readSource(
+  "../../src/modules/drive/drive-storage.service.ts"
+);
 const driveValidation = await readSource(
   "../../src/modules/drive/drive.validation.ts"
 );
@@ -26,17 +29,22 @@ const currentUserId = "11111111-1111-4111-8111-111111111111";
 const workspaceId = "22222222-2222-4222-8222-222222222222";
 const folderId = "33333333-3333-4333-8333-333333333333";
 const fileId = "44444444-4444-4444-8444-444444444444";
+const uploadId = "66666666-6666-4666-8666-666666666666";
 const createdAt = new Date("2026-07-07T08:00:00.000Z");
 const updatedAt = new Date("2026-07-07T08:05:00.000Z");
+const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
 assert.match(appModule, /DriveModule/);
 assert.match(driveModule, /controllers: \[DriveController\]/);
-assert.match(driveModule, /providers: \[DriveService\]/);
+assert.match(driveModule, /providers: \[DriveService, DriveStorageService\]/);
 assert.match(driveModule, /WorkspaceModule/);
 assert.match(driveController, /@Controller\("workspaces\/:workspaceId\/drive"\)/);
 assert.match(driveController, /@UseGuards\(AuthGuard\)/);
 assert.match(driveController, /@Get\("items"\)/);
 assert.match(driveController, /@Post\("folders"\)/);
+assert.match(driveController, /@Post\("files\/upload-url"\)/);
+assert.match(driveController, /@Post\("files\/:fileId\/complete"\)/);
+assert.match(driveController, /@Get\("files\/:fileId\/download-url"\)/);
 assert.match(driveController, /@Patch\("items\/:itemId"\)/);
 assert.match(driveController, /@Delete\("items\/:itemId"\)/);
 assert.match(driveServiceSource, /domain: "drive"/);
@@ -44,15 +52,30 @@ assert.match(driveServiceSource, /apiContract: "docs\/api\/drive-api.md"/);
 assert.match(driveServiceSource, /assertWorkspaceAccess/);
 assert.match(driveServiceSource, /FROM drive_items/);
 assert.match(driveServiceSource, /INSERT INTO drive_items/);
+assert.match(driveServiceSource, /INSERT INTO drive_uploads/);
+assert.match(driveServiceSource, /createUploadUrl/);
+assert.match(driveServiceSource, /completeUpload/);
+assert.match(driveServiceSource, /createDownloadUrl/);
+assert.match(driveServiceSource, /drive\/workspaces\/\$\{workspaceId\}\/items/);
 assert.match(driveServiceSource, /WITH RECURSIVE target_tree/);
 assert.match(driveServiceSource, /deleted_at = now\(\)/);
+assert.match(driveStorageService, /S3Client/);
+assert.match(driveStorageService, /PutObjectCommand/);
+assert.match(driveStorageService, /GetObjectCommand/);
+assert.match(driveStorageService, /HeadObjectCommand/);
+assert.match(driveStorageService, /getSignedUrl/);
+assert.match(driveStorageService, /S3_UPLOADS_BUCKET/);
+assert.match(driveStorageService, /AWS_REGION/);
+assert.match(driveStorageService, /BAD_GATEWAY/);
 assert.match(driveValidation, /validateCreateDriveFolderRequest/);
+assert.match(driveValidation, /validateCreateDriveUploadUrlRequest/);
+assert.match(driveValidation, /validateCompleteDriveUploadRequest/);
 assert.match(driveValidation, /validateUpdateDriveItemRequest/);
 assert.match(driveValidation, /validateListDriveItemsQuery/);
 assert.match(driveValidation, /path separators/);
 assert.match(driveMapper, /mapDriveItem/);
-assert.doesNotMatch(packageJson, /@aws-sdk\/client-s3/);
-assert.doesNotMatch(packageJson, /@aws-sdk\/s3-request-presigner/);
+assert.match(packageJson, /@aws-sdk\/client-s3/);
+assert.match(packageJson, /@aws-sdk\/s3-request-presigner/);
 
 class FakeDatabase {
   constructor({ queryRows = [], queryOneRows = [] } = {}) {
@@ -60,6 +83,8 @@ class FakeDatabase {
     this.queryOneRows = [...queryOneRows];
     this.queries = [];
     this.queryOneCalls = [];
+    this.executeCalls = [];
+    this.transactions = 0;
   }
 
   async query(text, values = []) {
@@ -81,6 +106,16 @@ class FakeDatabase {
 
     return next ?? null;
   }
+
+  async execute(text, values = []) {
+    this.executeCalls.push({ text, values });
+    return { rows: [] };
+  }
+
+  async transaction(callback) {
+    this.transactions += 1;
+    return callback(this);
+  }
 }
 
 class FakeWorkspaceService {
@@ -94,12 +129,40 @@ class FakeWorkspaceService {
   }
 }
 
-function createSubject(database = new FakeDatabase()) {
+class FakeDriveStorageService {
+  constructor({ objectSizeBytes = 1024 } = {}) {
+    this.objectSizeBytes = objectSizeBytes;
+    this.uploadUrlCalls = [];
+    this.downloadUrlCalls = [];
+    this.headCalls = [];
+  }
+
+  async createUploadUrl(input) {
+    this.uploadUrlCalls.push(input);
+    return "https://s3.example/upload";
+  }
+
+  async createDownloadUrl(input) {
+    this.downloadUrlCalls.push(input);
+    return "https://s3.example/download";
+  }
+
+  async getObjectSizeBytes(objectKey) {
+    this.headCalls.push(objectKey);
+    return this.objectSizeBytes;
+  }
+}
+
+function createSubject(
+  database = new FakeDatabase(),
+  driveStorageService = new FakeDriveStorageService()
+) {
   const workspaceService = new FakeWorkspaceService();
-  const service = new DriveService(database, workspaceService);
+  const service = new DriveService(database, workspaceService, driveStorageService);
   return {
     database,
     service,
+    driveStorageService,
     workspaceService
   };
 }
@@ -124,6 +187,24 @@ function itemRow(overrides = {}) {
     created_by_user_avatar_url: null,
     updated_by_user_name: null,
     updated_by_user_avatar_url: null,
+    ...overrides
+  };
+}
+
+function uploadRow(overrides = {}) {
+  return {
+    id: uploadId,
+    workspace_id: workspaceId,
+    drive_item_id: fileId,
+    object_key: "drive/workspaces/workspace/items/file/PILO.pdf",
+    status: "pending",
+    expected_size_bytes: "1024",
+    expected_mime_type: "application/pdf",
+    expires_at: expiresAt,
+    completed_at: null,
+    created_by_user_id: currentUserId,
+    created_at: createdAt,
+    updated_at: updatedAt,
     ...overrides
   };
 }
@@ -213,6 +294,59 @@ async function assertApiError(action, status, code, messagePattern) {
 }
 
 {
+  const pendingFile = itemRow({
+    id: fileId,
+    item_type: "file",
+    name: "PILO.pdf",
+    object_key: "drive/workspaces/workspace/items/file/PILO.pdf",
+    mime_type: "application/pdf",
+    size_bytes: "1024",
+    upload_status: "pending"
+  });
+  const upload = uploadRow();
+  const database = new FakeDatabase({
+    queryOneRows: [
+      (text, values) => {
+        assert.match(text, /INSERT INTO drive_items/);
+        assert.match(text, /upload_status/);
+        assert.equal(values[1], workspaceId);
+        assert.equal(values[2], null);
+        assert.equal(values[3], "PILO.pdf");
+        assert.match(values[4], /^drive\/workspaces\//);
+        assert.equal(values[5], "application/pdf");
+        assert.equal(values[6], 1024);
+        assert.equal(values[7], currentUserId);
+        return pendingFile;
+      },
+      (text, values) => {
+        assert.match(text, /INSERT INTO drive_uploads/);
+        assert.equal(values[1], workspaceId);
+        assert.equal(values[4], 1024);
+        assert.equal(values[5], "application/pdf");
+        return upload;
+      }
+    ]
+  });
+  const storage = new FakeDriveStorageService();
+  const { service, driveStorageService } = createSubject(database, storage);
+
+  const result = await service.createUploadUrl(currentUserId, workspaceId, {
+    parentId: null,
+    name: " PILO.pdf ",
+    sizeBytes: 1024,
+    mimeType: " application/pdf "
+  });
+
+  assert.equal(result.file.id, fileId);
+  assert.equal(result.file.uploadStatus, "pending");
+  assert.equal(result.upload.id, uploadId);
+  assert.equal(result.upload.method, "PUT");
+  assert.equal(result.upload.uploadUrl, "https://s3.example/upload");
+  assert.equal(result.upload.headers["Content-Type"], "application/pdf");
+  assert.equal(driveStorageService.uploadUrlCalls.length, 1);
+}
+
+{
   const database = new FakeDatabase({
     queryOneRows: [
       () => {
@@ -228,6 +362,121 @@ async function assertApiError(action, status, code, messagePattern) {
     "BAD_REQUEST",
     /already exists/
   );
+}
+
+{
+  const pendingFile = itemRow({
+    id: fileId,
+    item_type: "file",
+    name: "PILO.pdf",
+    object_key: "drive/workspaces/workspace/items/file/PILO.pdf",
+    mime_type: "application/pdf",
+    size_bytes: "1024",
+    upload_status: "pending"
+  });
+  const completedFile = itemRow({
+    ...pendingFile,
+    upload_status: "ready",
+    updated_by_user_id: currentUserId,
+    updated_by_user_name: "PILO User"
+  });
+  const database = new FakeDatabase({
+    queryOneRows: [
+      pendingFile,
+      uploadRow(),
+      (text, values) => {
+        assert.match(text, /UPDATE drive_items/);
+        assert.match(text, /upload_status = 'ready'/);
+        assert.deepEqual(values, [workspaceId, fileId, currentUserId]);
+        return completedFile;
+      }
+    ]
+  });
+  const storage = new FakeDriveStorageService({ objectSizeBytes: 1024 });
+  const { service, driveStorageService } = createSubject(database, storage);
+
+  const file = await service.completeUpload(currentUserId, workspaceId, fileId, {
+    uploadId
+  });
+
+  assert.equal(file.uploadStatus, "ready");
+  assert.equal(driveStorageService.headCalls[0], uploadRow().object_key);
+  assert.equal(database.executeCalls.length, 1);
+  assert.match(database.executeCalls[0].text, /status = 'completed'/);
+}
+
+{
+  const pendingFile = itemRow({
+    id: fileId,
+    item_type: "file",
+    name: "PILO.pdf",
+    object_key: "drive/workspaces/workspace/items/file/PILO.pdf",
+    mime_type: "application/pdf",
+    size_bytes: "1024",
+    upload_status: "pending"
+  });
+  const database = new FakeDatabase({
+    queryOneRows: [pendingFile, uploadRow()]
+  });
+  const storage = new FakeDriveStorageService({ objectSizeBytes: null });
+  const { service } = createSubject(database, storage);
+
+  await assertApiError(
+    () => service.completeUpload(currentUserId, workspaceId, fileId, { uploadId }),
+    400,
+    "BAD_REQUEST",
+    /object was not found/
+  );
+}
+
+{
+  const pendingFile = itemRow({
+    id: fileId,
+    item_type: "file",
+    name: "PILO.pdf",
+    object_key: "drive/workspaces/workspace/items/file/PILO.pdf",
+    mime_type: "application/pdf",
+    size_bytes: "1024",
+    upload_status: "pending"
+  });
+  const database = new FakeDatabase({
+    queryOneRows: [
+      pendingFile,
+      uploadRow({ expires_at: new Date("2020-01-01T00:00:00.000Z") })
+    ]
+  });
+  const { service } = createSubject(database);
+
+  await assertApiError(
+    () => service.completeUpload(currentUserId, workspaceId, fileId, { uploadId }),
+    400,
+    "BAD_REQUEST",
+    /expired/
+  );
+  assert.equal(database.executeCalls.length, 2);
+  assert.match(database.executeCalls[0].text, /status = 'expired'/);
+  assert.match(database.executeCalls[1].text, /upload_status = 'failed'/);
+}
+
+{
+  const readyFile = itemRow({
+    id: fileId,
+    item_type: "file",
+    name: "PILO.pdf",
+    object_key: "drive/workspaces/workspace/items/file/PILO.pdf",
+    mime_type: "application/pdf",
+    size_bytes: "1024",
+    upload_status: "ready"
+  });
+  const database = new FakeDatabase({ queryOneRows: [readyFile] });
+  const storage = new FakeDriveStorageService();
+  const { service, driveStorageService } = createSubject(database, storage);
+
+  const result = await service.createDownloadUrl(currentUserId, workspaceId, fileId);
+
+  assert.equal(result.file.id, fileId);
+  assert.equal(result.downloadUrl, "https://s3.example/download");
+  assert.equal(driveStorageService.downloadUrlCalls[0].fileName, "PILO.pdf");
 }
 
 {
