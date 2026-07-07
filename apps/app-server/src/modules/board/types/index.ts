@@ -190,3 +190,7 @@ export interface UpdateBoardIssueStatusPayload {
   issue: BoardIssueCardPayload;
   previousColumnId: string;
 }
+
+export interface UpdateBoardIssuePayload {
+  issue: BoardIssueDetailPayload;
+}

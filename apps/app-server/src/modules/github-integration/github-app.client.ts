@@ -64,6 +64,16 @@ export interface GithubProjectV2UserAccessTokenRequest {
   accountType?: "User" | "Organization";
 }
 
+export interface GithubRepositoryIssueUpdateRequest
+  extends GithubProjectV2UserAccessTokenRequest {
+  owner: string;
+  repo: string;
+  issueNumber: number;
+  title?: string;
+  body?: string;
+  state?: "open" | "closed";
+}
+
 export interface GithubProjectV2LookupRequest
   extends GithubAppInstallationTokenRequest,
     GithubProjectV2UserAccessTokenRequest {
@@ -853,6 +863,55 @@ export class GithubAppClient {
     }
 
     return issues;
+  }
+
+  async updateRepositoryIssue(
+    input: GithubRepositoryIssueUpdateRequest
+  ): Promise<GithubIssueApiItem> {
+    if (!input.userAccessToken) {
+      throw badRequest("GitHub OAuth connection is required");
+    }
+
+    const body: Record<string, unknown> = {};
+    if (input.title !== undefined) {
+      body.title = input.title;
+    }
+    if (input.body !== undefined) {
+      body.body = input.body;
+    }
+    if (input.state !== undefined) {
+      body.state = input.state;
+    }
+
+    let response: Response;
+    try {
+      response = await fetch(
+        `https://api.github.com/repos/${encodeURIComponent(input.owner)}/${encodeURIComponent(input.repo)}/issues/${input.issueNumber}`,
+        {
+          method: "PATCH",
+          headers: {
+            Accept: "application/vnd.github+json",
+            Authorization: `Bearer ${input.userAccessToken}`,
+            "Content-Type": "application/json",
+            "X-GitHub-Api-Version": GITHUB_API_VERSION
+          },
+          body: JSON.stringify(body)
+        }
+      );
+    } catch {
+      throw badRequest("GitHub issue update failed");
+    }
+
+    if (!response.ok) {
+      throw badRequest("GitHub issue update failed");
+    }
+
+    const payload = await this.readJson(response, "GitHub issue update failed");
+    if (!this.isIssuePayload(payload) || this.isPullRequestIssue(payload)) {
+      throw badRequest("GitHub issue update failed");
+    }
+
+    return payload;
   }
 
   async listRepositoryPullRequests(

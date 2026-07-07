@@ -1,9 +1,10 @@
 "use client";
 
-import { ExternalLink, GitPullRequest, Loader2 } from "lucide-react";
+import { ExternalLink, GitPullRequest, Loader2, Pencil, Save, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Sheet,
   SheetContent,
@@ -14,6 +15,7 @@ import {
 import { createBoardApiClient } from "@/features/board/api/client";
 import type {
   BoardIssueDetailPayload,
+  BoardIssueState,
   BoardRelatedPullRequestPayload
 } from "@/features/board/types";
 import {
@@ -31,6 +33,7 @@ type BoardIssueSheetProps = {
   boardId: string;
   issueId: string | null;
   onClose: () => void;
+  onIssueUpdated?: (issue: BoardIssueDetailPayload) => void;
   workspaceId: string;
 };
 
@@ -61,6 +64,7 @@ export function BoardIssueSheet({
   boardId,
   issueId,
   onClose,
+  onIssueUpdated,
   workspaceId
 }: BoardIssueSheetProps) {
   const [issue, setIssue] = useState<BoardIssueDetailPayload | null>(null);
@@ -71,11 +75,23 @@ export function BoardIssueSheet({
     "idle"
   );
   const [error, setError] = useState<string | null>(null);
+  const [isEditing, setIsEditing] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [draftTitle, setDraftTitle] = useState("");
+  const [draftBody, setDraftBody] = useState("");
+  const [draftState, setDraftState] = useState<BoardIssueState>("open");
   const boardClient = useMemo(
     () => createBoardApiClient({ accessToken }),
     [accessToken]
   );
   const open = Boolean(issueId);
+
+  function resetDraft(nextIssue: BoardIssueDetailPayload) {
+    setDraftTitle(nextIssue.title);
+    setDraftBody(nextIssue.body ?? "");
+    setDraftState(nextIssue.state ?? "open");
+  }
 
   useEffect(() => {
     let active = true;
@@ -86,11 +102,14 @@ export function BoardIssueSheet({
         setPullRequests([]);
         setStatus("idle");
         setError(null);
+        setIsEditing(false);
+        setSaveError(null);
         return;
       }
 
       setStatus("loading");
       setError(null);
+      setSaveError(null);
 
       try {
         const [detail, relatedPullRequests] = await Promise.all([
@@ -101,7 +120,9 @@ export function BoardIssueSheet({
         if (!active) return;
 
         setIssue(detail);
+        resetDraft(detail);
         setPullRequests(relatedPullRequests);
+        setIsEditing(false);
         setStatus("success");
       } catch (loadError) {
         if (!active) return;
@@ -109,6 +130,7 @@ export function BoardIssueSheet({
         setIssue(null);
         setPullRequests([]);
         setStatus("error");
+        setIsEditing(false);
         setError(
           loadError instanceof Error
             ? loadError.message
@@ -123,6 +145,45 @@ export function BoardIssueSheet({
       active = false;
     };
   }, [accessToken, boardClient, boardId, issueId, open, workspaceId]);
+
+  async function handleSaveIssue() {
+    if (!issue || !issueId) return;
+
+    const title = draftTitle.trim();
+    if (!title) {
+      setSaveError("제목을 입력해주세요.");
+      return;
+    }
+
+    setIsSaving(true);
+    setSaveError(null);
+
+    try {
+      const result = await boardClient.updateBoardIssue(
+        workspaceId,
+        boardId,
+        issueId,
+        {
+          body: draftBody,
+          state: draftState,
+          title
+        }
+      );
+
+      setIssue(result.issue);
+      resetDraft(result.issue);
+      setIsEditing(false);
+      onIssueUpdated?.(result.issue);
+    } catch (saveFailure) {
+      setSaveError(
+        saveFailure instanceof Error
+          ? saveFailure.message
+          : "이슈를 저장하지 못했습니다."
+      );
+    } finally {
+      setIsSaving(false);
+    }
+  }
 
   return (
     <Sheet open={open} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
@@ -155,25 +216,109 @@ export function BoardIssueSheet({
                       {formatBoardIssueNumber(issue)} -{" "}
                       {formatBoardIssueState(issue.state)}
                     </p>
-                    <h2 className="mt-1 break-words font-heading text-xl font-semibold">
-                      {issue.title}
-                    </h2>
+                    {isEditing ? (
+                      <div className="mt-2 grid gap-2">
+                        <label className="grid gap-1 text-sm font-medium">
+                          제목
+                          <Input
+                            value={draftTitle}
+                            disabled={isSaving}
+                            onChange={(event) =>
+                              setDraftTitle(event.currentTarget.value)
+                            }
+                          />
+                        </label>
+                        <label className="grid gap-1 text-sm font-medium">
+                          상태
+                          <select
+                            className="h-9 rounded-md border bg-background px-3 text-sm"
+                            value={draftState}
+                            disabled={isSaving}
+                            onChange={(event) =>
+                              setDraftState(
+                                event.currentTarget.value as BoardIssueState
+                              )
+                            }
+                          >
+                            <option value="open">Open</option>
+                            <option value="closed">Closed</option>
+                          </select>
+                        </label>
+                      </div>
+                    ) : (
+                      <h2 className="mt-1 break-words font-heading text-xl font-semibold">
+                        {issue.title}
+                      </h2>
+                    )}
                   </div>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    disabled={!issue.htmlUrl}
-                    onClick={() =>
-                      issue.htmlUrl
-                        ? window.open(issue.htmlUrl, "_blank", "noopener")
-                        : undefined
-                    }
-                  >
-                    <ExternalLink />
-                    GitHub
-                  </Button>
+                  <div className="flex shrink-0 flex-wrap justify-end gap-2">
+                    {isEditing ? (
+                      <>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          disabled={isSaving}
+                          onClick={() => {
+                            resetDraft(issue);
+                            setIsEditing(false);
+                            setSaveError(null);
+                          }}
+                        >
+                          <X />
+                          취소
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          disabled={isSaving}
+                          onClick={() => void handleSaveIssue()}
+                        >
+                          {isSaving ? (
+                            <Loader2 className="animate-spin" />
+                          ) : (
+                            <Save />
+                          )}
+                          저장
+                        </Button>
+                      </>
+                    ) : (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          resetDraft(issue);
+                          setSaveError(null);
+                          setIsEditing(true);
+                        }}
+                      >
+                        <Pencil />
+                        수정
+                      </Button>
+                    )}
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={!issue.htmlUrl}
+                      onClick={() =>
+                        issue.htmlUrl
+                          ? window.open(issue.htmlUrl, "_blank", "noopener")
+                          : undefined
+                      }
+                    >
+                      <ExternalLink />
+                      GitHub
+                    </Button>
+                  </div>
                 </div>
+
+                {saveError ? (
+                  <p className="rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                    {saveError}
+                  </p>
+                ) : null}
 
                 <div className="flex flex-wrap gap-2">
                   {issue.labels.map((label) => {
@@ -220,9 +365,18 @@ export function BoardIssueSheet({
 
               <section className="grid gap-2">
                 <h3 className="font-heading text-base font-semibold">본문</h3>
-                <div className="max-h-72 overflow-y-auto whitespace-pre-wrap break-words rounded-lg border bg-background p-3 text-sm leading-6">
-                  {issue.body || "등록된 본문이 없습니다."}
-                </div>
+                {isEditing ? (
+                  <textarea
+                    className="min-h-48 resize-y rounded-md border bg-background p-3 text-sm leading-6 outline-none transition focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                    value={draftBody}
+                    disabled={isSaving}
+                    onChange={(event) => setDraftBody(event.currentTarget.value)}
+                  />
+                ) : (
+                  <div className="max-h-72 overflow-y-auto whitespace-pre-wrap break-words rounded-lg border bg-background p-3 text-sm leading-6">
+                    {issue.body || "등록된 본문이 없습니다."}
+                  </div>
+                )}
               </section>
 
               {issue.projectFields.length ? (

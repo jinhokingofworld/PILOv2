@@ -10,6 +10,8 @@ import type {
   CreateBoardInput,
   ListBoardIssuesQuery,
   ListBoardsQuery,
+  UpdateBoardIssueInput,
+  UpdateBoardIssuePayload,
   UpdateBoardIssueStatusInput,
   UpdateBoardIssueStatusPayload
 } from "@/features/board/types";
@@ -330,6 +332,19 @@ export function createBoardApiClient({
     ) {
       return requestBoardData<UpdateBoardIssueStatusPayload>(
         `${boardIssuePath(workspaceId, boardId, issueId)}/status`,
+        withJsonBody(body, { method: "PATCH" }),
+        requestOptions
+      );
+    },
+
+    async updateBoardIssue(
+      workspaceId: string,
+      boardId: string,
+      issueId: string,
+      body: UpdateBoardIssueInput
+    ) {
+      return requestBoardData<UpdateBoardIssuePayload>(
+        boardIssuePath(workspaceId, boardId, issueId),
         withJsonBody(body, { method: "PATCH" }),
         requestOptions
       );

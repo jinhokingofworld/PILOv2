@@ -24,3 +24,9 @@ export interface UpdateBoardIssueStatusRequest {
   columnId?: unknown;
   previousColumnId?: unknown;
 }
+
+export interface UpdateBoardIssueRequest {
+  title?: unknown;
+  body?: unknown;
+  state?: unknown;
+}

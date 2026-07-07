@@ -7,9 +7,11 @@ import { BoardController } from "./board.controller";
 import { BoardHydrationService } from "./board-hydration.service";
 import { BoardIssueReadService } from "./board-issue-read.service";
 import { BoardIssueStatusService } from "./board-issue-status.service";
+import { BoardIssueUpdateService } from "./board-issue-update.service";
 import { BoardReadService } from "./board-read.service";
 import { BoardService } from "./board.service";
 import { BoardIssueStatusQueries } from "./queries/board-issue-status.queries";
+import { BoardIssueUpdateQueries } from "./queries/board-issue-update.queries";
 import { BoardReadQueries } from "./queries/board-read.queries";
 
 @Module({
@@ -20,8 +22,10 @@ import { BoardReadQueries } from "./queries/board-read.queries";
     BoardHydrationService,
     BoardIssueReadService,
     BoardIssueStatusService,
+    BoardIssueUpdateService,
     BoardReadService,
     BoardIssueStatusQueries,
+    BoardIssueUpdateQueries,
     BoardReadQueries
   ],
   exports: [BoardService]

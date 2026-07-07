@@ -196,6 +196,16 @@ export type UpdateBoardIssueStatusPayload = {
   previousColumnId: string;
 };
 
+export type UpdateBoardIssueInput = {
+  title?: string;
+  body?: string;
+  state?: BoardIssueState;
+};
+
+export type UpdateBoardIssuePayload = {
+  issue: BoardIssueDetailPayload;
+};
+
 export type ListBoardsQuery = {
   repositoryId?: string;
   projectV2Id?: string;
