@@ -18,6 +18,9 @@ const DEFAULT_SOURCE_FORMAT: SqlErdSourceFormat = "sql";
 const DEFAULT_DIALECT: SqlErdDialect = "auto";
 const MAX_TITLE_LENGTH = 120;
 const MAX_SOURCE_TEXT_BYTES = 1024 * 1024;
+const MAX_MODEL_JSON_BYTES = 1024 * 1024;
+const MAX_LAYOUT_JSON_BYTES = 1024 * 1024;
+const MAX_SETTINGS_JSON_BYTES = 64 * 1024;
 const MAX_TABLE_COUNT = 100;
 const MAX_RELATION_COUNT = 300;
 const SOURCE_FORMATS = new Set<SqlErdSourceFormat>(["sql"]);
@@ -201,6 +204,12 @@ function readVersionedJsonObject(
     throw badRequest(`${field}.version must be 1`);
   }
 
+  assertJsonByteLength(
+    value,
+    field,
+    field === "modelJson" ? MAX_MODEL_JSON_BYTES : MAX_LAYOUT_JSON_BYTES
+  );
+
   return value;
 }
 
@@ -226,6 +235,8 @@ function readOptionalJsonObject(
   if (!isPlainJsonObject(value)) {
     throw badRequest(`${field} must be an object`);
   }
+
+  assertJsonByteLength(value, field, MAX_SETTINGS_JSON_BYTES);
 
   return value;
 }
@@ -267,6 +278,28 @@ function hasUpdateField(input: NormalizedUpdateSqlErdSessionInput): boolean {
     input.layoutJson !== undefined ||
     input.settingsJson !== undefined
   );
+}
+
+function assertJsonByteLength(
+  value: SqlErdJsonObject,
+  field: "modelJson" | "layoutJson" | "settingsJson",
+  maxBytes: number
+): void {
+  const serialized = stringifyJsonObject(value, field);
+  if (Buffer.byteLength(serialized, "utf8") > maxBytes) {
+    throw payloadTooLarge(`${field} is too large`);
+  }
+}
+
+function stringifyJsonObject(
+  value: SqlErdJsonObject,
+  field: "modelJson" | "layoutJson" | "settingsJson"
+): string {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    throw badRequest(`${field} must be JSON serializable`);
+  }
 }
 
 function readModelCounts(modelJson: SqlErdJsonObject): {

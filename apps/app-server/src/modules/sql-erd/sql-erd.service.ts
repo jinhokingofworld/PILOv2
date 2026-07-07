@@ -1,5 +1,10 @@
 import { Injectable } from "@nestjs/common";
-import { badRequest, conflict, notFound } from "../../common/api-error";
+import {
+  badRequest,
+  conflict,
+  notFound,
+  payloadTooLarge
+} from "../../common/api-error";
 import { DatabaseService } from "../../database/database.service";
 import { WorkspaceService } from "../workspace/workspace.service";
 import { mapDeletedSqlErdSession, mapSqlErdSession } from "./sql-erd.mapper";
@@ -41,6 +46,12 @@ const SQL_ERD_SESSION_SELECT = `
   FROM sql_erd_sessions
 `;
 const UNIQUE_VIOLATION_CODE = "23505";
+const CHECK_VIOLATION_CODE = "23514";
+const JSON_SIZE_CONSTRAINTS = new Set([
+  "sql_erd_sessions_model_json_size_check",
+  "sql_erd_sessions_layout_json_size_check",
+  "sql_erd_sessions_settings_json_size_check"
+]);
 
 @Injectable()
 export class SqlErdService {
@@ -156,6 +167,10 @@ export class SqlErdService {
         throw conflict("sqltoerd active session already exists");
       }
 
+      if (this.isJsonSizeConstraintViolation(error)) {
+        throw payloadTooLarge("sqltoerd JSON payload is too large");
+      }
+
       throw error;
     }
   }
@@ -180,13 +195,23 @@ export class SqlErdService {
 
     this.assertRevision(currentSession, input.baseRevision);
 
-    const session = await this.updateActiveSession(
-      workspaceId,
-      validSessionId,
-      currentUserId,
-      currentSession,
-      input
-    );
+    let session: SqlErdSessionRow | null;
+    try {
+      session = await this.updateActiveSession(
+        workspaceId,
+        validSessionId,
+        currentUserId,
+        currentSession,
+        input
+      );
+    } catch (error) {
+      if (this.isJsonSizeConstraintViolation(error)) {
+        throw payloadTooLarge("sqltoerd JSON payload is too large");
+      }
+
+      throw error;
+    }
+
     if (!session) {
       return await this.throwMissingOrConflict(workspaceId, validSessionId);
     }
@@ -375,6 +400,18 @@ export class SqlErdService {
       error !== null &&
       "code" in error &&
       error.code === UNIQUE_VIOLATION_CODE
+    );
+  }
+
+  private isJsonSizeConstraintViolation(error: unknown): boolean {
+    return (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === CHECK_VIOLATION_CODE &&
+      "constraint" in error &&
+      typeof error.constraint === "string" &&
+      JSON_SIZE_CONSTRAINTS.has(error.constraint)
     );
   }
 }
