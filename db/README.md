@@ -26,4 +26,4 @@ The database schema source of truth is the migration history in `db/migrations/`
 - `migrations/007_create_github_callback_states.sql` adds one-time server-side callback state storage for GitHub OAuth and GitHub App installation redirects.
 - `migrations/008_create_workspace_memberships_and_invitations.sql` adds owner/member workspace membership, invitation storage, and owner backfill.
 - `migrations/009_canvas_shape_hash_revision_viewport_index.sql` adds Canvas shape content hashes, revisions, generated bounds, and active viewport/order indexes.
-- `migrations/010_create_sql_erd_sessions.sql` adds Workspace sqltoerd session storage with one active session per Workspace.
+- `migrations/012_create_sql_erd_sessions.sql` adds Workspace sqltoerd session storage with one active session per Workspace.
