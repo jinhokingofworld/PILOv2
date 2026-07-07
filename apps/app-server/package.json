@@ -8,7 +8,7 @@
     "lint": "tsc --noEmit",
     "pretest": "npm run build",
     "start": "node dist/main.js",
-    "test": "node scripts/test.mjs && node scripts/agent/planner.test.mjs && node scripts/agent/confirmation.test.mjs && node scripts/agent/logging.test.mjs"
+    "test": "node scripts/test.mjs && node scripts/agent/planner.test.mjs && node scripts/agent/confirmation.test.mjs && node scripts/agent/logging.test.mjs && node scripts/agent/calendar-tools.test.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1080.0",
