@@ -127,6 +127,18 @@ export interface WorkspaceInvitationTokenPayload {
   expiresAt: string;
 }
 
+export interface CurrentUserWorkspaceInvitationPayload {
+  id: string;
+  workspaceId: string;
+  workspaceName: string;
+  email: string;
+  role: WorkspaceRole;
+  status: WorkspaceInvitationStatus;
+  invitedByUserId: string;
+  expiresAt: string;
+  createdAt: string;
+}
+
 export interface AcceptWorkspaceInvitationPayload {
   workspace: WorkspacePayload;
   membership: WorkspaceMemberPayload;
@@ -598,6 +610,104 @@ export class WorkspaceService {
     };
   }
 
+  async listCurrentUserInvitations(
+    currentUserId: string
+  ): Promise<CurrentUserWorkspaceInvitationPayload[]> {
+    const user = await this.database.queryOne<UserEmailRow>(
+      `
+        SELECT id, email
+        FROM users
+        WHERE id = $1
+      `,
+      [currentUserId]
+    );
+
+    const userEmail = user?.email?.trim().toLowerCase();
+    if (!userEmail) {
+      return [];
+    }
+
+    await this.expirePendingInvitationsForUserEmail(userEmail);
+
+    const invitations = await this.database.query<WorkspaceInvitationDetailRow>(
+      `
+        SELECT
+          wi.id,
+          wi.workspace_id,
+          wi.email,
+          wi.role,
+          wi.token_hash,
+          wi.status,
+          wi.invited_by_user_id,
+          wi.accepted_by_user_id,
+          wi.revoked_by_user_id,
+          wi.expires_at,
+          wi.accepted_at,
+          wi.revoked_at,
+          wi.created_at,
+          wi.updated_at,
+          w.name AS workspace_name
+        FROM workspace_invitations wi
+        JOIN workspaces w
+          ON w.id = wi.workspace_id
+        LEFT JOIN workspace_members wm
+          ON wm.workspace_id = wi.workspace_id
+         AND wm.user_id = $2
+        WHERE lower(wi.email) = $1
+          AND wi.status = 'pending'
+          AND wm.id IS NULL
+        ORDER BY wi.created_at DESC
+      `,
+      [userEmail, currentUserId]
+    );
+
+    return invitations.map((invitation) =>
+      this.mapCurrentUserInvitation(invitation)
+    );
+  }
+
+  async acceptCurrentUserInvitation(
+    currentUserId: string,
+    invitationId: string
+  ): Promise<AcceptWorkspaceInvitationPayload> {
+    this.validateInvitationId(invitationId);
+
+    return this.database.transaction(async (transaction) => {
+      const invitation = await transaction.queryOne<WorkspaceInvitationDetailRow>(
+        `
+          SELECT
+            wi.id,
+            wi.workspace_id,
+            wi.email,
+            wi.role,
+            wi.token_hash,
+            wi.status,
+            wi.invited_by_user_id,
+            wi.accepted_by_user_id,
+            wi.revoked_by_user_id,
+            wi.expires_at,
+            wi.accepted_at,
+            wi.revoked_at,
+            wi.created_at,
+            wi.updated_at,
+            w.name AS workspace_name
+          FROM workspace_invitations wi
+          JOIN workspaces w
+            ON w.id = wi.workspace_id
+          WHERE wi.id = $1
+          FOR UPDATE OF wi
+        `,
+        [invitationId]
+      );
+
+      if (!invitation) {
+        throw notFound("Workspace invitation not found");
+      }
+
+      return this.acceptPendingInvitation(transaction, currentUserId, invitation);
+    });
+  }
+
   async acceptInvitation(
     currentUserId: string,
     invitationToken: string
@@ -636,125 +746,142 @@ export class WorkspaceService {
         throw notFound("Workspace invitation not found");
       }
 
-      if (this.shouldExpireInvitation(invitation)) {
-        await transaction.execute(
-          `
-            UPDATE workspace_invitations
-            SET status = 'expired'
-            WHERE id = $1
-              AND status = 'pending'
-          `,
-          [invitation.id]
-        );
-        throw badRequest("Workspace invitation has expired");
-      }
+      return this.acceptPendingInvitation(transaction, currentUserId, invitation);
+    });
+  }
 
-      if (invitation.status !== "pending") {
-        throw badRequest("Workspace invitation is not pending");
-      }
-
-      const user = await transaction.queryOne<UserEmailRow>(
-        `
-          SELECT id, email
-          FROM users
-          WHERE id = $1
-        `,
-        [currentUserId]
-      );
-
-      const userEmail = user?.email?.trim().toLowerCase();
-      if (!userEmail || userEmail !== invitation.email) {
-        throw forbidden("Workspace invitation email does not match current user");
-      }
-
-      const existingMembership = await transaction.queryOne<WorkspaceIdRow>(
-        `
-          SELECT id
-          FROM workspace_members
-          WHERE workspace_id = $1
-            AND user_id = $2
-        `,
-        [invitation.workspace_id, currentUserId]
-      );
-
-      if (existingMembership) {
-        throw badRequest("User is already a workspace member");
-      }
-
-      const membership = await transaction.queryOne<WorkspaceMemberRow>(
-        `
-          INSERT INTO workspace_members (
-            workspace_id,
-            user_id,
-            role,
-            invited_by_user_id,
-            joined_at
-          )
-          VALUES ($1, $2, 'member', $3, now())
-          RETURNING
-            id,
-            workspace_id,
-            user_id,
-            role,
-            invited_by_user_id,
-            joined_at,
-            created_at,
-            updated_at,
-            NULL::text AS user_name,
-            $4::text AS user_email,
-            NULL::text AS user_avatar_url
-        `,
-        [
-          invitation.workspace_id,
-          currentUserId,
-          invitation.invited_by_user_id,
-          userEmail
-        ]
-      );
-
-      if (!membership) {
-        throw new Error("Workspace membership could not be created");
-      }
-
+  private async acceptPendingInvitation(
+    transaction: {
+      queryOne<T extends QueryResultRow = QueryResultRow>(
+        text: string,
+        values?: readonly unknown[]
+      ): Promise<T | null>;
+      execute<T extends QueryResultRow = QueryResultRow>(
+        text: string,
+        values?: readonly unknown[]
+      ): Promise<unknown>;
+    },
+    currentUserId: string,
+    invitation: WorkspaceInvitationDetailRow
+  ): Promise<AcceptWorkspaceInvitationPayload> {
+    if (this.shouldExpireInvitation(invitation)) {
       await transaction.execute(
         `
           UPDATE workspace_invitations
-          SET
-            status = 'accepted',
-            accepted_by_user_id = $2,
-            accepted_at = now()
+          SET status = 'expired'
           WHERE id = $1
+            AND status = 'pending'
         `,
-        [invitation.id, currentUserId]
+        [invitation.id]
       );
+      throw badRequest("Workspace invitation has expired");
+    }
 
-      const workspace = await transaction.queryOne<WorkspaceRow>(
-        `
-          SELECT
-            w.id,
-            w.name,
-            w.owner_user_id,
-            wm.role,
-            w.created_at,
-            w.updated_at
-          FROM workspaces w
-          JOIN workspace_members wm
-            ON wm.workspace_id = w.id
-           AND wm.user_id = $2
-          WHERE w.id = $1
-        `,
-        [invitation.workspace_id, currentUserId]
-      );
+    if (invitation.status !== "pending") {
+      throw badRequest("Workspace invitation is not pending");
+    }
 
-      if (!workspace) {
-        throw new Error("Accepted workspace could not be loaded");
-      }
+    const user = await transaction.queryOne<UserEmailRow>(
+      `
+        SELECT id, email
+        FROM users
+        WHERE id = $1
+      `,
+      [currentUserId]
+    );
 
-      return {
-        workspace: this.mapWorkspace(workspace, currentUserId),
-        membership: this.mapMember(membership)
-      };
-    });
+    const userEmail = user?.email?.trim().toLowerCase();
+    if (!userEmail || userEmail !== invitation.email) {
+      throw forbidden("Workspace invitation email does not match current user");
+    }
+
+    const existingMembership = await transaction.queryOne<WorkspaceIdRow>(
+      `
+        SELECT id
+        FROM workspace_members
+        WHERE workspace_id = $1
+          AND user_id = $2
+      `,
+      [invitation.workspace_id, currentUserId]
+    );
+
+    if (existingMembership) {
+      throw badRequest("User is already a workspace member");
+    }
+
+    const membership = await transaction.queryOne<WorkspaceMemberRow>(
+      `
+        INSERT INTO workspace_members (
+          workspace_id,
+          user_id,
+          role,
+          invited_by_user_id,
+          joined_at
+        )
+        VALUES ($1, $2, 'member', $3, now())
+        RETURNING
+          id,
+          workspace_id,
+          user_id,
+          role,
+          invited_by_user_id,
+          joined_at,
+          created_at,
+          updated_at,
+          NULL::text AS user_name,
+          $4::text AS user_email,
+          NULL::text AS user_avatar_url
+      `,
+      [
+        invitation.workspace_id,
+        currentUserId,
+        invitation.invited_by_user_id,
+        userEmail
+      ]
+    );
+
+    if (!membership) {
+      throw new Error("Workspace membership could not be created");
+    }
+
+    await transaction.execute(
+      `
+        UPDATE workspace_invitations
+        SET
+          status = 'accepted',
+          accepted_by_user_id = $2,
+          accepted_at = now()
+        WHERE id = $1
+      `,
+      [invitation.id, currentUserId]
+    );
+
+    const workspace = await transaction.queryOne<WorkspaceRow>(
+      `
+        SELECT
+          w.id,
+          w.name,
+          w.owner_user_id,
+          wm.role,
+          w.created_at,
+          w.updated_at
+        FROM workspaces w
+        JOIN workspace_members wm
+          ON wm.workspace_id = w.id
+         AND wm.user_id = $2
+        WHERE w.id = $1
+      `,
+      [invitation.workspace_id, currentUserId]
+    );
+
+    if (!workspace) {
+      throw new Error("Accepted workspace could not be loaded");
+    }
+
+    return {
+      workspace: this.mapWorkspace(workspace, currentUserId),
+      membership: this.mapMember(membership)
+    };
   }
 
   private async findWorkspaceForUser(
@@ -845,6 +972,19 @@ export class WorkspaceService {
           AND expires_at <= now()
       `,
       [workspaceId, email]
+    );
+  }
+
+  private async expirePendingInvitationsForUserEmail(email: string): Promise<void> {
+    await this.database.execute(
+      `
+        UPDATE workspace_invitations
+        SET status = 'expired'
+        WHERE lower(email) = $1
+          AND status = 'pending'
+          AND expires_at <= now()
+      `,
+      [email]
     );
   }
 
@@ -947,6 +1087,22 @@ export class WorkspaceService {
       revokedAt: this.toNullableIsoString(invitation.revoked_at),
       createdAt: this.toIsoString(invitation.created_at),
       updatedAt: this.toIsoString(invitation.updated_at)
+    };
+  }
+
+  private mapCurrentUserInvitation(
+    invitation: WorkspaceInvitationDetailRow
+  ): CurrentUserWorkspaceInvitationPayload {
+    return {
+      id: invitation.id,
+      workspaceId: invitation.workspace_id,
+      workspaceName: invitation.workspace_name,
+      email: invitation.email,
+      role: invitation.role,
+      status: invitation.status,
+      invitedByUserId: invitation.invited_by_user_id,
+      expiresAt: this.toIsoString(invitation.expires_at),
+      createdAt: this.toIsoString(invitation.created_at)
     };
   }
 

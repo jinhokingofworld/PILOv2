@@ -18,6 +18,17 @@ import {
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogMedia,
+  AlertDialogTitle
+} from "@/components/ui/alert-dialog";
+import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger
@@ -53,9 +64,12 @@ import {
 } from "@/components/ui/sidebar";
 import { useAuthSession } from "@/features/auth";
 import {
+  acceptCurrentUserWorkspaceInvitation,
   createWorkspaceInvitation,
+  listCurrentUserWorkspaceInvitations,
   listWorkspaceInvitations,
   revokeWorkspaceInvitation,
+  type CurrentUserWorkspaceInvitation,
   type WorkspaceInvitation
 } from "@/features/auth/api/client";
 import type { FeatureNavigationItem } from "@/features/navigation-types";
@@ -119,9 +133,21 @@ export function AppSidebar({
   const [pendingInvitations, setPendingInvitations] = useState<
     WorkspaceInvitation[]
   >([]);
+  const [currentUserInvitations, setCurrentUserInvitations] = useState<
+    CurrentUserWorkspaceInvitation[]
+  >([]);
+  const [isInvitationModalOpen, setIsInvitationModalOpen] = useState(false);
+  const [invitationNotice, setInvitationNotice] = useState<string | null>(null);
+  const [invitationNoticeError, setInvitationNoticeError] = useState<
+    string | null
+  >(null);
+  const [acceptingInvitationId, setAcceptingInvitationId] = useState<
+    string | null
+  >(null);
   const [isInviteSubmitting, setIsInviteSubmitting] = useState(false);
   const activeWorkspaceDetail = authSession?.activeWorkspace;
   const canManageWorkspace = activeWorkspaceDetail?.role === "owner";
+  const pendingInvitationCount = currentUserInvitations.length;
   const workspaceOptions =
     authSession?.workspaces.map((workspace) => ({
       id: workspace.id,
@@ -196,6 +222,39 @@ export function AppSidebar({
       cancelled = true;
     };
   }, [activeWorkspaceDetail?.id, authSession, canManageWorkspace]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!authSession) {
+      setCurrentUserInvitations([]);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const accessToken = authSession.accessToken;
+
+    async function loadCurrentUserInvitations() {
+      try {
+        const invitations = await listCurrentUserWorkspaceInvitations(accessToken);
+
+        if (!cancelled) {
+          setCurrentUserInvitations(invitations);
+        }
+      } catch {
+        if (!cancelled) {
+          setCurrentUserInvitations([]);
+        }
+      }
+    }
+
+    void loadCurrentUserInvitations();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authSession?.accessToken]);
 
   const handleSelectItem = (
     itemId: string,
@@ -300,11 +359,53 @@ export function AppSidebar({
       });
   };
 
+  const handleOpenInvitations = () => {
+    setInvitationNotice(null);
+    setInvitationNoticeError(null);
+    setIsInvitationModalOpen(true);
+  };
+
+  const handleAcceptCurrentUserInvitation = (
+    invitation: CurrentUserWorkspaceInvitation
+  ) => {
+    if (!authSession || acceptingInvitationId) {
+      return;
+    }
+
+    setInvitationNotice(null);
+    setInvitationNoticeError(null);
+    setAcceptingInvitationId(invitation.id);
+
+    void acceptCurrentUserWorkspaceInvitation(
+      authSession.accessToken,
+      invitation.id
+    )
+      .then(async (result) => {
+        setCurrentUserInvitations((currentInvitations) =>
+          currentInvitations.filter(
+            (currentInvitation) => currentInvitation.id !== invitation.id
+          )
+        );
+        setInvitationNotice(`${result.workspace.name} 워크스페이스에 참여했습니다`);
+        await authSession.refreshSession(result.workspace.id);
+        router.push("/calendar");
+      })
+      .catch((error: unknown) => {
+        setInvitationNoticeError(
+          error instanceof Error ? error.message : "초대 수락에 실패했습니다"
+        );
+      })
+      .finally(() => {
+        setAcceptingInvitationId(null);
+      });
+  };
+
   const handleLogout = () => {
     void authSession?.logout();
   };
 
   return (
+    <>
     <Sidebar collapsible="icon" variant="inset">
       <SidebarHeader>
         <SidebarMenu>
@@ -570,9 +671,19 @@ export function AppSidebar({
                     <BadgeCheck />
                     계정
                   </DropdownMenuItem>
-                  <DropdownMenuItem className="gap-2">
+                  <DropdownMenuItem
+                    className="gap-2"
+                    onClick={handleOpenInvitations}
+                  >
                     <Bell />
-                    알림
+                    <span className="flex flex-1 items-center justify-between gap-3">
+                      <span>알림</span>
+                      {pendingInvitationCount > 0 ? (
+                        <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-primary px-1.5 text-[11px] font-semibold text-primary-foreground">
+                          {pendingInvitationCount}
+                        </span>
+                      ) : null}
+                    </span>
                   </DropdownMenuItem>
                   <DropdownMenuItem className="gap-2">
                     <UserRound />
@@ -594,6 +705,71 @@ export function AppSidebar({
 
       <SidebarRail />
     </Sidebar>
+    <AlertDialog
+      onOpenChange={setIsInvitationModalOpen}
+      open={isInvitationModalOpen}
+    >
+      <AlertDialogContent className="max-w-md" size="default">
+        <AlertDialogHeader>
+          <AlertDialogMedia>
+            <Bell className="size-5" />
+          </AlertDialogMedia>
+          <AlertDialogTitle>초대 알림</AlertDialogTitle>
+          <AlertDialogDescription>
+            받은 workspace 초대를 확인하세요
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+
+        <div className="space-y-2">
+          {currentUserInvitations.length > 0 ? (
+            currentUserInvitations.map((invitation) => (
+              <div
+                className="rounded-md border bg-muted/30 p-3"
+                key={invitation.id}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium">
+                      {invitation.workspaceName}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {invitation.role} 초대
+                    </p>
+                  </div>
+                  <AlertDialogAction
+                    className="h-8 px-3 text-xs"
+                    disabled={acceptingInvitationId !== null}
+                    onClick={() => handleAcceptCurrentUserInvitation(invitation)}
+                    type="button"
+                  >
+                    {acceptingInvitationId === invitation.id ? "수락 중" : "수락"}
+                  </AlertDialogAction>
+                </div>
+                <p className="mt-2 text-[11px] text-muted-foreground">
+                  만료: {formatInvitationDate(invitation.expiresAt)}
+                </p>
+              </div>
+            ))
+          ) : (
+            <div className="rounded-md border border-dashed p-4 text-center text-sm text-muted-foreground">
+              받은 초대가 없습니다
+            </div>
+          )}
+        </div>
+
+        {invitationNotice ? (
+          <p className="text-sm text-muted-foreground">{invitationNotice}</p>
+        ) : null}
+        {invitationNoticeError ? (
+          <p className="text-sm text-destructive">{invitationNoticeError}</p>
+        ) : null}
+
+        <AlertDialogFooter>
+          <AlertDialogCancel>닫기</AlertDialogCancel>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+    </>
   );
 }
 
@@ -607,4 +783,11 @@ function getUserInitials(name: string | null, email: string | null) {
     .join("");
 
   return initials || "P";
+}
+
+function formatInvitationDate(value: string) {
+  return new Intl.DateTimeFormat("ko-KR", {
+    dateStyle: "medium",
+    timeStyle: "short"
+  }).format(new Date(value));
 }

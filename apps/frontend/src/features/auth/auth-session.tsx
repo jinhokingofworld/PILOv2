@@ -38,6 +38,7 @@ export type AuthSessionData = {
 
 type AuthSessionContextValue = AuthSessionData & {
   logout: () => Promise<void>;
+  refreshSession: (preferredWorkspaceId?: string) => Promise<void>;
   setActiveWorkspaceId: (workspaceId: string) => void;
 };
 
@@ -162,6 +163,26 @@ export function AuthGate({ children }: { children: ReactNode }) {
     router.replace("/login");
   }, [router, state.session?.accessToken]);
 
+  const refreshSession = useCallback(
+    async (preferredWorkspaceId?: string) => {
+      if (state.status !== "ready") {
+        return;
+      }
+
+      if (preferredWorkspaceId) {
+        saveSelectedWorkspaceId(preferredWorkspaceId);
+      }
+
+      const session = await loadAuthSessionEntry(state.session.accessToken);
+      setState({
+        status: "ready",
+        message: "세션 확인 완료",
+        session
+      });
+    },
+    [state]
+  );
+
   const contextValue = useMemo<AuthSessionContextValue | null>(() => {
     if (state.status !== "ready") {
       return null;
@@ -170,9 +191,10 @@ export function AuthGate({ children }: { children: ReactNode }) {
     return {
       ...state.session,
       logout,
+      refreshSession,
       setActiveWorkspaceId
     };
-  }, [logout, setActiveWorkspaceId, state]);
+  }, [logout, refreshSession, setActiveWorkspaceId, state]);
 
   if (state.status !== "ready" || !contextValue) {
     return (

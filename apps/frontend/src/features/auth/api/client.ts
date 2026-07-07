@@ -73,6 +73,18 @@ export type WorkspaceInvitationTokenPayload = {
   expiresAt: string;
 };
 
+export type CurrentUserWorkspaceInvitation = {
+  id: string;
+  workspaceId: string;
+  workspaceName: string;
+  email: string;
+  role: WorkspaceRole;
+  status: WorkspaceInvitationStatus;
+  invitedByUserId: string;
+  expiresAt: string;
+  createdAt: string;
+};
+
 export type AcceptWorkspaceInvitationPayload = {
   workspace: Workspace;
   membership: WorkspaceMember;
@@ -243,6 +255,28 @@ export async function revokeWorkspaceInvitation(
     `/workspaces/${encodeURIComponent(
       workspaceId
     )}/invitations/${encodeURIComponent(invitationId)}/revoke`,
+    {
+      accessToken,
+      method: "POST"
+    }
+  );
+}
+
+export async function listCurrentUserWorkspaceInvitations(accessToken: string) {
+  return requestJson<CurrentUserWorkspaceInvitation[]>(
+    "/me/workspace-invitations",
+    {
+      accessToken
+    }
+  );
+}
+
+export async function acceptCurrentUserWorkspaceInvitation(
+  accessToken: string,
+  invitationId: string
+) {
+  return requestJson<AcceptWorkspaceInvitationPayload>(
+    `/me/workspace-invitations/${encodeURIComponent(invitationId)}/accept`,
     {
       accessToken,
       method: "POST"

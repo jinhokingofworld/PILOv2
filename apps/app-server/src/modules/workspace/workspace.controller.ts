@@ -14,6 +14,7 @@ import {
   AcceptWorkspaceInvitationPayload,
   CreateWorkspaceInvitationPayload,
   CreateWorkspaceInvitationRequest,
+  CurrentUserWorkspaceInvitationPayload,
   RemoveWorkspaceMemberPayload,
   WorkspaceInvitationPayload,
   WorkspaceInvitationTokenPayload,
@@ -111,6 +112,33 @@ export class WorkspaceController {
       workspaceId
     );
     return apiResponse(workspace);
+  }
+}
+
+@Controller("me/workspace-invitations")
+@UseGuards(AuthGuard)
+export class CurrentUserWorkspaceInvitationController {
+  constructor(private readonly workspaceService: WorkspaceService) {}
+
+  @Get()
+  async listCurrentUserInvitations(
+    @CurrentUserId() currentUserId: string
+  ): Promise<ApiSuccessResponse<CurrentUserWorkspaceInvitationPayload[]>> {
+    const invitations =
+      await this.workspaceService.listCurrentUserInvitations(currentUserId);
+    return apiResponse(invitations);
+  }
+
+  @Post(":invitationId/accept")
+  async acceptCurrentUserInvitation(
+    @CurrentUserId() currentUserId: string,
+    @Param("invitationId") invitationId: string
+  ): Promise<ApiSuccessResponse<AcceptWorkspaceInvitationPayload>> {
+    const result = await this.workspaceService.acceptCurrentUserInvitation(
+      currentUserId,
+      invitationId
+    );
+    return apiResponse(result);
   }
 }
 
