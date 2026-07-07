@@ -86,6 +86,10 @@ CREATE TABLE public.agent_runs (
     CHECK (expires_at > created_at)
 );
 
+ALTER TABLE public.agent_runs
+  ADD CONSTRAINT agent_runs_id_workspace_unique
+  UNIQUE (id, workspace_id);
+
 CREATE UNIQUE INDEX ux_agent_runs_client_request
   ON public.agent_runs(workspace_id, requested_by_user_id, client_request_id)
   WHERE client_request_id IS NOT NULL
@@ -327,8 +331,7 @@ CREATE TABLE public.agent_logs (
   workspace_id UUID NOT NULL
     REFERENCES public.workspaces(id) ON DELETE CASCADE,
 
-  run_id UUID NOT NULL
-    REFERENCES public.agent_runs(id) ON DELETE CASCADE,
+  run_id UUID NOT NULL,
 
   step_id UUID
     REFERENCES public.agent_steps(id) ON DELETE SET NULL,
@@ -379,6 +382,12 @@ CREATE TABLE public.agent_logs (
   CONSTRAINT agent_logs_resource_refs_size_check
     CHECK (octet_length(resource_refs::text) <= 32768)
 );
+
+ALTER TABLE public.agent_logs
+  ADD CONSTRAINT agent_logs_run_same_workspace_fk
+  FOREIGN KEY (run_id, workspace_id)
+  REFERENCES public.agent_runs(id, workspace_id)
+  ON DELETE CASCADE;
 
 CREATE INDEX idx_agent_logs_workspace_created_at
   ON public.agent_logs(workspace_id, created_at DESC);
