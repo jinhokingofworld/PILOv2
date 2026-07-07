@@ -99,6 +99,8 @@ Workspace 생성, 삭제, 이름 수정, owner transfer, admin/viewer/read-only 
 | `GET` | `/workspaces/{workspaceId}/invitations` | owner | Workspace 초대 목록 조회 |
 | `POST` | `/workspaces/{workspaceId}/invitations` | owner | member 초대 생성 |
 | `POST` | `/workspaces/{workspaceId}/invitations/{invitationId}/revoke` | owner | pending 초대 취소 |
+| `GET` | `/me/workspace-invitations` | bearer session | 현재 user email로 받은 pending 초대 목록 조회 |
+| `POST` | `/me/workspace-invitations/{invitationId}/accept` | bearer session | 현재 user가 받은 초대를 token 없이 수락 |
 | `GET` | `/workspace-invitations/{invitationToken}` | bearer session | 초대 token 조회 |
 | `POST` | `/workspace-invitations/{invitationToken}/accept` | bearer session | 초대 수락 |
 
@@ -358,6 +360,58 @@ POST /api/v1/workspaces/{workspaceId}/invitations/{invitationId}/revoke
 - 현재 사용자가 해당 Workspace의 owner가 아니면 `403 FORBIDDEN`을 반환한다.
 - pending 초대만 취소할 수 있다.
 - 이미 accepted, revoked, expired 상태인 초대는 `400 BAD_REQUEST`를 반환한다.
+
+## 내 pending 초대 목록 조회
+
+```http
+GET /api/v1/me/workspace-invitations
+```
+
+응답:
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "invitation_uuid",
+      "workspaceId": "workspace_uuid",
+      "workspaceName": "PILO-a1b2c3d4",
+      "email": "member@example.com",
+      "role": "member",
+      "status": "pending",
+      "invitedByUserId": "owner_user_uuid",
+      "expiresAt": "2026-07-14T00:00:00.000Z",
+      "createdAt": "2026-07-07T00:00:00.000Z"
+    }
+  ]
+}
+```
+
+서버 규칙:
+
+- bearer session이 없으면 `401 UNAUTHORIZED`를 반환한다.
+- 현재 user의 `users.email`과 초대 email이 일치하는 pending 초대만 반환한다.
+- 이미 현재 user가 해당 Workspace member이면 목록에서 제외한다.
+- 만료 시간이 지난 pending 초대는 `expired`로 전환하고 목록에서 제외한다.
+- 응답에는 token 원문과 `token_hash`를 포함하지 않는다.
+
+## 내 pending 초대 수락
+
+```http
+POST /api/v1/me/workspace-invitations/{invitationId}/accept
+```
+
+응답 payload는 token 기반 `POST /workspace-invitations/{invitationToken}/accept`와 같다.
+
+서버 규칙:
+
+- bearer session이 없으면 `401 UNAUTHORIZED`를 반환한다.
+- invitation id와 일치하는 초대가 없으면 `404 NOT_FOUND`를 반환한다.
+- pending 초대만 수락할 수 있다.
+- 현재 user의 email이 초대 email과 일치하지 않으면 `403 FORBIDDEN`을 반환한다.
+- 이미 같은 Workspace member이면 `400 BAD_REQUEST`를 반환한다.
+- 수락은 transaction으로 처리한다.
 
 ## 초대 token 조회
 

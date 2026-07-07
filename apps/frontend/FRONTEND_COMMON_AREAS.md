@@ -62,6 +62,7 @@ src/features/<domain>/
 | `meeting` | `docs/api/meeting-api.md` |
 | `canvas` | `docs/api/canvas-api.md` |
 | `board` | `docs/api/board-api.md` |
+| `sql-erd` | `docs/api/sqltoerd-api.md` |
 
 ## Shared API Layer
 

@@ -124,3 +124,4 @@ await import("./create-hydrate.test.mjs");
 await import("./read.test.mjs");
 await import("./issues.test.mjs");
 await import("./issue-detail.test.mjs");
+await import("./contract.test.mjs");

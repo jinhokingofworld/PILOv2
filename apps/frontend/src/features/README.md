@@ -14,6 +14,7 @@ types는 가능한 한 이 디렉터리의 도메인 폴더에 둔다.
 | `meeting` | 진호 | `docs/api/meeting-api.md` |
 | `calendar` | 세인 | `docs/api/calendar-api.md` |
 | `canvas` | 동현 | `docs/api/canvas-api.md` |
+| `sql-erd` | 세인 | `docs/api/sqltoerd-api.md` |
 
 권장 구조:
 

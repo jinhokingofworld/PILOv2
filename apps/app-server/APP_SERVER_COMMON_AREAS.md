@@ -43,6 +43,7 @@ src/modules/<domain>/
 | `meeting` | `docs/api/meeting-api.md` |
 | `canvas` | `docs/api/canvas-api.md` |
 | `board` | `docs/api/board-api.md` |
+| `sql-erd` | `docs/api/sqltoerd-api.md` |
 
 도메인 전용 테스트 스크립트는 `scripts/<domain>/` 아래에 둔다.
 
