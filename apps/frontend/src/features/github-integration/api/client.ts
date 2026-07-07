@@ -1,5 +1,6 @@
 import type {
   GithubAppInstallation,
+  GithubAppInstallationDelete,
   GithubAppInstallationStart,
   GithubOAuthDisconnect,
   GithubOAuthStart,
@@ -377,6 +378,14 @@ export function createGithubIntegrationApiClient({
       return requestGithubIntegrationData<GithubAppInstallation[]>(
         workspaceGithubPath(workspaceId, "/installations"),
         undefined,
+        requestOptions
+      );
+    },
+
+    async deleteGithubAppInstallation(workspaceId: string, installationId: string) {
+      return requestGithubIntegrationData<GithubAppInstallationDelete>(
+        workspaceGithubPath(workspaceId, `/installations/${encodeURIComponent(installationId)}`),
+        { method: "DELETE" },
         requestOptions
       );
     },

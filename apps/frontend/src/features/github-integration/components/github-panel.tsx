@@ -87,6 +87,9 @@ export function GithubPanel() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [redirectAction, setRedirectAction] = useState<RedirectAction>(null);
   const [isDisconnecting, setIsDisconnecting] = useState(false);
+  const [isDeletingInstallation, setIsDeletingInstallation] = useState(false);
+  const [isInstallationDeleteRequested, setIsInstallationDeleteRequested] =
+    useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [snapshot, setSnapshot] =
     useState<GithubIntegrationSnapshot>(emptySnapshot);
@@ -159,6 +162,7 @@ export function GithubPanel() {
       setSelectedRepositoryId("");
       setSelectedInstallationId("");
       setSelectedProjectV2Id("");
+      setIsInstallationDeleteRequested(false);
       return;
     }
 
@@ -214,6 +218,7 @@ export function GithubPanel() {
       setSelectedRepositoryId(nextRepositoryId);
       setSelectedProjectV2Id(nextProjectV2Id);
       setSelectedInstallationId(nextInstallationId);
+      setIsInstallationDeleteRequested(false);
       setPanelStatus("ready");
 
       if (nextRepositoryId) {
@@ -296,6 +301,51 @@ export function GithubPanel() {
     }
   }
 
+  function handleRequestDeleteGithubAppInstallation() {
+    if (!selectedInstallationId) {
+      setActionError("삭제할 GitHub App 설치를 먼저 선택해야 합니다.");
+      return;
+    }
+
+    setActionError(null);
+    setActionMessage(null);
+    setIsInstallationDeleteRequested(true);
+  }
+
+  function handleCancelDeleteGithubAppInstallation() {
+    setIsInstallationDeleteRequested(false);
+  }
+
+  async function handleConfirmDeleteGithubAppInstallation() {
+    if (!workspaceId || !selectedInstallationId) {
+      setActionError("삭제할 GitHub App 설치를 확인할 수 없습니다.");
+      return;
+    }
+
+    setIsDeletingInstallation(true);
+    setActionError(null);
+    setActionMessage(null);
+
+    try {
+      const result = await apiClient.deleteGithubAppInstallation(
+        workspaceId,
+        selectedInstallationId
+      );
+      setIsInstallationDeleteRequested(false);
+      setActionMessage(
+        result.alreadyDeleted
+          ? "GitHub App 설치가 이미 해제되어 local 연결 정보를 정리했습니다."
+          : "GitHub에서 App 설치를 해제하고 local 연결 정보를 정리했습니다."
+      );
+      setSelectedInstallationId("");
+      await loadGithubIntegrationSnapshot();
+    } catch (error) {
+      setActionError(getErrorMessage(error));
+    } finally {
+      setIsDeletingInstallation(false);
+    }
+  }
+
   async function handleSelectRepository(repositoryId: string) {
     setSelectedRepositoryId(repositoryId);
     await loadGithubPullRequests(repositoryId);
@@ -362,11 +412,17 @@ export function GithubPanel() {
       errorMessage={errorMessage}
       filteredRepositories={filteredRepositories}
       isDisconnecting={isDisconnecting}
+      isDeletingInstallation={isDeletingInstallation}
+      isInstallationDeleteRequested={isInstallationDeleteRequested}
       isLoading={isLoading}
       isPullRequestsLoading={isPullRequestsLoading}
       isSyncing={isSyncing}
       oauth={snapshot.oauth}
       onDisconnectOAuth={() => void handleDisconnectGithubOAuth()}
+      onCancelDeleteInstallation={handleCancelDeleteGithubAppInstallation}
+      onConfirmDeleteInstallation={() =>
+        void handleConfirmDeleteGithubAppInstallation()
+      }
       onRefresh={() =>
         void loadGithubIntegrationSnapshot(
           selectedRepositoryId,
@@ -376,6 +432,7 @@ export function GithubPanel() {
       onRepositoryQueryChange={setRepositoryQuery}
       onSelectProjectV2={setSelectedProjectV2Id}
       onSelectRepository={(repositoryId) => void handleSelectRepository(repositoryId)}
+      onRequestDeleteInstallation={handleRequestDeleteGithubAppInstallation}
       onStartInstallation={() => void handleStartGithubAppInstallation()}
       onStartOAuth={() => void handleStartGithubOAuth()}
       onStartSync={() => void handleStartGithubSyncRun()}
