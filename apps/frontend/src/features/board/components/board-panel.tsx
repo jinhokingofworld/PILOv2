@@ -193,6 +193,10 @@ export function BoardPanel() {
     }
   }
 
+  function handleIssueUpdated() {
+    void boardData.reloadBoard();
+  }
+
   return (
     <div
       data-board-main
@@ -399,6 +403,7 @@ export function BoardPanel() {
         issueId={selectedIssueId}
         workspaceId={workspaceId}
         onClose={() => setSelectedIssueId(null)}
+        onIssueUpdated={handleIssueUpdated}
       />
     </div>
   );
