@@ -5,6 +5,7 @@ const require = createRequire(import.meta.url);
 const { AgentConfirmationService } = require(
   "../../dist/modules/agent/agent-confirmation.service.js"
 );
+const { badRequest } = require("../../dist/common/api-error.js");
 
 const USER_ID = "11111111-1111-1111-1111-111111111111";
 const WORKSPACE_ID = "22222222-2222-2222-2222-222222222222";
@@ -43,6 +44,37 @@ function createPlan(toolName = "create_calendar_event") {
         endDate: "2026-07-08",
         startTime: "15:00",
         endTime: null
+      }
+    }
+  };
+}
+
+function createUpdatePlan() {
+  return {
+    toolName: "update_calendar_event",
+    summary: "주간 회의 일정을 수정합니다.",
+    target: {
+      domain: "calendar",
+      resourceType: "event",
+      resourceId: "77",
+      label: "주간 회의"
+    },
+    before: {
+      title: "주간 회의",
+      startDate: "2026-07-08",
+      startTime: "15:00"
+    },
+    after: {
+      title: "변경된 회의",
+      startTime: "16:00"
+    },
+    call: {
+      method: "PATCH",
+      path: "/api/v1/workspaces/{workspaceId}/calendar/events/77",
+      eventId: "77",
+      body: {
+        title: "변경된 회의",
+        startTime: "16:00"
       }
     }
   };
@@ -496,6 +528,43 @@ function errorMessage(error) {
 }
 
 {
+  const updatePlan = createUpdatePlan();
+  const state = {
+    runs: [createRun()],
+    confirmations: [
+      createConfirmation({
+        tool_name: "update_calendar_event",
+        summary: updatePlan.summary,
+        plan_json: updatePlan
+      })
+    ]
+  };
+  const { service, toolRegistryService } = createService(state);
+  const result = await service.approveConfirmation(
+    USER_ID,
+    WORKSPACE_ID,
+    RUN_ID,
+    CONFIRMATION_ID,
+    undefined
+  );
+
+  assert.equal(result.run.status, "completed");
+  assert.equal(result.run.confirmation.status, "approved");
+  assert.deepEqual(toolRegistryService.calls[1].input, {
+    eventId: "77",
+    before: {
+      title: "주간 회의",
+      startDate: "2026-07-08",
+      startTime: "15:00"
+    },
+    changes: {
+      title: "변경된 회의",
+      startTime: "16:00"
+    }
+  });
+}
+
+{
   const state = {
     runs: [createRun()],
     confirmations: [createConfirmation()]
@@ -546,7 +615,29 @@ function errorMessage(error) {
   assert.equal(loggingService.calls[1].input.errorCode, "CALENDAR_TOOL_FAILED");
   assert.equal(
     loggingService.calls[2].input.errorMessage,
-    "Calendar execution failed"
+    "Calendar 작업 실행 중 오류가 발생했습니다."
+  );
+}
+
+{
+  const state = {
+    runs: [createRun()],
+    confirmations: [createConfirmation()],
+    executionError: badRequest("title is required")
+  };
+  const { service, loggingService } = createService(state);
+  const result = await service.approveConfirmation(
+    USER_ID,
+    WORKSPACE_ID,
+    RUN_ID,
+    CONFIRMATION_ID,
+    undefined
+  );
+
+  assert.equal(result.run.status, "failed");
+  assert.equal(
+    loggingService.calls[2].input.errorMessage,
+    "title is required"
   );
 }
 

@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { HttpException, Injectable } from "@nestjs/common";
 import { QueryResultRow } from "pg";
 import { badRequest, notFound } from "../../common/api-error";
 import {
@@ -646,11 +646,39 @@ export class AgentConfirmationService {
   }
 
   private toSafeErrorMessage(error: unknown): string {
-    if (error instanceof Error && error.message.trim()) {
-      return error.message;
+    if (error instanceof HttpException) {
+      const message = this.readHttpExceptionMessage(error);
+      if (message) {
+        return message;
+      }
     }
 
     return "Calendar 작업 실행 중 오류가 발생했습니다.";
+  }
+
+  private readHttpExceptionMessage(error: HttpException): string | null {
+    const response = error.getResponse();
+
+    if (typeof response === "object" && response !== null) {
+      const maybeError = "error" in response ? response.error : null;
+      if (this.isPlainObject(maybeError)) {
+        const message = maybeError.message;
+        if (typeof message === "string" && message.trim()) {
+          return message;
+        }
+      }
+
+      const maybeMessage = "message" in response ? response.message : null;
+      if (typeof maybeMessage === "string" && maybeMessage.trim()) {
+        return maybeMessage;
+      }
+    }
+
+    if (typeof response === "string" && response.trim()) {
+      return response;
+    }
+
+    return null;
   }
 
   private toIso(value: Date | string): string {
