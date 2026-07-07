@@ -207,10 +207,11 @@ module "ecs" {
       task_role_arn      = module.iam.realtime_server_task_role_arn
       target_group_arn   = module.alb.realtime_target_group_arn
       environment = {
-        APP_ENV     = var.environment
-        AWS_REGION  = var.aws_region
-        PORT        = tostring(var.realtime_server_port)
-        CORS_ORIGIN = local.frontend_domain == "" ? "*" : "https://${local.frontend_domain}"
+        APP_ENV               = var.environment
+        AWS_REGION            = var.aws_region
+        PORT                  = tostring(var.realtime_server_port)
+        DATABASE_SSL          = "true"
+        SOCKET_IO_CORS_ORIGIN = local.frontend_domain == "" ? "*" : "https://${local.frontend_domain}"
       }
       secrets = module.secrets.realtime_server_ecs_secrets
     }

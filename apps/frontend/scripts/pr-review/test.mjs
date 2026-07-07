@@ -14,7 +14,7 @@ const prReviewPage = await readFile(
   "utf8"
 );
 const prReviewRoutePage = await readFile(
-  new URL("../../src/app/pr-review/page.tsx", import.meta.url),
+  new URL("../../src/app/(workspace)/pr-review/page.tsx", import.meta.url),
   "utf8"
 );
 const prReviewApiClient = await readFile(

@@ -169,9 +169,19 @@ export function validateShapeBatchOperations(
     }
 
     const shapeId = validateShapeId(operation.shapeId);
+    const clientOperationId = validateOptionalClientOperationId(
+      operation.clientOperationId,
+      `Canvas shape batch operation ${index} clientOperationId`
+    );
+    const baseRevision = validateOptionalBaseRevision(
+      operation.baseRevision,
+      `Canvas shape batch operation ${index} baseRevision`
+    );
 
     if (type === "delete") {
       return {
+        baseRevision,
+        clientOperationId,
         type,
         shapeId
       };
@@ -194,6 +204,8 @@ export function validateShapeBatchOperations(
       }
 
       return {
+        baseRevision,
+        clientOperationId,
         type,
         shapeId,
         payload: {
@@ -204,6 +216,8 @@ export function validateShapeBatchOperations(
     }
 
     return {
+      baseRevision,
+      clientOperationId,
       type,
       shapeId,
       payload: operation.payload
@@ -282,6 +296,38 @@ export function validateCanvasOperationsAfterSeq(
   }
 
   return afterSeq;
+}
+
+export function validateOptionalClientOperationId(
+  value: unknown,
+  fieldName = "Canvas shape clientOperationId"
+): string | null {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+
+  if (typeof value !== "string" || !value.trim()) {
+    throw badRequest(`${fieldName} must be a non-empty string`);
+  }
+
+  return value.trim();
+}
+
+export function validateOptionalBaseRevision(
+  value: unknown,
+  fieldName = "Canvas shape baseRevision"
+): number | null {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+
+  const revision = validateInteger(value, fieldName);
+
+  if (revision <= 0) {
+    throw badRequest(`${fieldName} must be greater than 0`);
+  }
+
+  return revision;
 }
 
 function validateShapeType(value: unknown): string {

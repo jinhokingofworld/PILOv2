@@ -46,7 +46,7 @@ export class GithubProjectV2SyncTokenService {
 
     if (row.github_login !== input.installation.account_login) {
       throw badRequest(
-        "GitHub user OAuth token cannot access this personal ProjectV2 owner"
+        "GitHub OAuth account does not match this personal ProjectV2 owner"
       );
     }
 

@@ -5,6 +5,7 @@ on:
     branches: ["main"]
     paths:
       - "apps/frontend/**"
+      - ".github/workflows/deploy-frontend.yml"
   workflow_dispatch:
 
 permissions:
@@ -40,15 +41,19 @@ jobs:
         working-directory: ${{ env.APP_PATH }}
         run: npm ci
 
-      - name: Check frontend API origin
+      - name: Check frontend public origins
         env:
           NEXT_PUBLIC_PILO_APP_SERVER_URL: ${{ vars.NEXT_PUBLIC_PILO_APP_SERVER_URL }}
-        run: test -n "$NEXT_PUBLIC_PILO_APP_SERVER_URL"
+          NEXT_PUBLIC_PILO_REALTIME_SERVER_URL: ${{ vars.NEXT_PUBLIC_PILO_REALTIME_SERVER_URL }}
+        run: |
+          test -n "$NEXT_PUBLIC_PILO_APP_SERVER_URL"
+          test -n "$NEXT_PUBLIC_PILO_REALTIME_SERVER_URL"
 
       - name: Build static frontend
         working-directory: ${{ env.APP_PATH }}
         env:
           NEXT_PUBLIC_PILO_APP_SERVER_URL: ${{ vars.NEXT_PUBLIC_PILO_APP_SERVER_URL }}
+          NEXT_PUBLIC_PILO_REALTIME_SERVER_URL: ${{ vars.NEXT_PUBLIC_PILO_REALTIME_SERVER_URL }}
           NEXT_PUBLIC_TLDRAW_LICENSE_KEY: ${{ vars.NEXT_PUBLIC_TLDRAW_LICENSE_KEY }}
         run: npm run build
 

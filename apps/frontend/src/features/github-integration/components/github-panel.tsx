@@ -447,6 +447,7 @@ export function GithubPanel() {
       repositoriesTotal={snapshot.repositoriesTotal}
       repositoryQuery={repositoryQuery}
       selectedInstallation={selectedInstallation}
+      installations={snapshot.installations}
       selectedInstallationId={selectedInstallationId}
       selectedProject={selectedProject}
       selectedProjectV2Id={selectedProjectV2Id}

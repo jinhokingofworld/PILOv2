@@ -1,9 +1,13 @@
+import { randomUUID } from "node:crypto";
 import { Injectable } from "@nestjs/common";
+import type { DatabaseTransaction } from "../../database/database.service";
 import { badRequest, notFound } from "../../common/api-error";
 import { DatabaseService } from "../../database/database.service";
 import { WorkspaceService } from "../workspace/workspace.service";
+import { CanvasOperationPublisherService } from "./canvas-operation-publisher.service";
 import { computeShapeContentHash } from "./canvas-shape-hash";
 import {
+  attachShapeOperationMeta,
   mapCanvas,
   mapCanvasUserState,
   mapDeletedShape,
@@ -19,6 +23,8 @@ import {
   validateShapeUpdate,
   validateViewSetting,
   validateCanvasOperationsAfterSeq,
+  validateOptionalBaseRevision,
+  validateOptionalClientOperationId,
   validateViewportBounds
 } from "./canvas-shape.validation";
 import {
@@ -32,7 +38,9 @@ import {
   CanvasShapeCleanupRow,
   CanvasShapeDeletePayload,
   CanvasShapeDeleteRow,
+  CanvasShapeOperationPayload,
   CanvasShapeOperationRow,
+  CanvasShapeOperationType,
   CanvasShapePayload,
   CanvasShapeRow,
   CanvasShapeSummaryPayload,
@@ -51,10 +59,37 @@ import {
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+type CanvasShapeOperationWriteInput = {
+  actorUserId: string;
+  baseRevision: number | null;
+  canvasId: string;
+  clientOperationId: string | null;
+  operationType: CanvasShapeOperationType;
+  shapeId: string;
+  workspaceId: string;
+};
+
+type CanvasShapeOperationWritePayload =
+  | {
+      operationPayload: Record<string, unknown>;
+      payload: CanvasShapePayload;
+    }
+  | {
+      operationPayload: Record<string, unknown>;
+      payload: CanvasShapeDeletePayload;
+    };
+
+type CanvasShapeOperationWriteResult<TPayload> = {
+  isNewOperation: boolean;
+  operation: CanvasShapeOperationPayload;
+  payload: TPayload;
+};
+
 @Injectable()
 export class CanvasService {
   constructor(
     private readonly database: DatabaseService,
+    private readonly operationPublisher: CanvasOperationPublisherService,
     private readonly workspaceService: WorkspaceService
   ) {}
 
@@ -274,128 +309,23 @@ export class CanvasService {
 
     const id = validateShapeId(input.id);
     const values = validateShapeCreate(input);
-    const contentHash = computeShapeContentHash(values);
-    const shape = await this.database.queryOne<CanvasShapeRow>(
-      `
-        INSERT INTO canvas_freeform_shapes (
-          id,
-          canvas_id,
-          shape_type,
-          title,
-          text_content,
-          x,
-          y,
-          width,
-          height,
-          rotation,
-          z_index,
-          raw_shape,
-          content_hash,
-          deleted_at
-        )
-        VALUES (
-          $1,
-          $2,
-          $3,
-          $4,
-          $5,
-          $6,
-          $7,
-          $8,
-          $9,
-          $10,
-          $11,
-          $12::jsonb,
-          $13,
-          NULL
-        )
-        ON CONFLICT (id) DO UPDATE
-        SET
-          shape_type = EXCLUDED.shape_type,
-          title = EXCLUDED.title,
-          text_content = EXCLUDED.text_content,
-          x = EXCLUDED.x,
-          y = EXCLUDED.y,
-          width = EXCLUDED.width,
-          height = EXCLUDED.height,
-          rotation = EXCLUDED.rotation,
-          z_index = EXCLUDED.z_index,
-          raw_shape = EXCLUDED.raw_shape,
-          content_hash = EXCLUDED.content_hash,
-          revision = canvas_freeform_shapes.revision + 1,
-          deleted_at = NULL
-        WHERE canvas_freeform_shapes.canvas_id = EXCLUDED.canvas_id
-          AND canvas_freeform_shapes.deleted_at IS NOT NULL
-        RETURNING
-          id,
-          canvas_id,
-          shape_type,
-          title,
-          text_content,
-          x,
-          y,
-          width,
-          height,
-          rotation,
-          z_index,
-          raw_shape,
-          content_hash,
-          revision,
-          created_at,
-          updated_at,
-          deleted_at
-      `,
-      [
-        id,
-        canvas.id,
-        values.shapeType,
-        values.title ?? null,
-        values.textContent ?? null,
-        values.x ?? 0,
-        values.y ?? 0,
-        values.width ?? null,
-        values.height ?? null,
-        values.rotation ?? 0,
-        values.zIndex ?? 0,
-        JSON.stringify(values.rawShape ?? {}),
-        contentHash
-      ]
+    const clientOperationId = validateOptionalClientOperationId(
+      input.clientOperationId
     );
-
-    if (!shape) {
-      throw badRequest("Canvas shape could not be created");
-    }
-
-    return mapShape(shape);
-  }
-
-  async syncShapesBatch(
-    currentUserId: string,
-    workspaceId: string,
-    canvasId: string,
-    input: SyncCanvasShapesBatchRequest
-  ): Promise<CanvasShapeBatchPayload> {
-    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
-
-    const canvas = await this.findCanvas(workspaceId, canvasId);
-    if (!canvas) {
-      throw notFound("Canvas not found");
-    }
-
-    const operations = validateShapeBatchOperations(input);
-
-    return this.database.transaction(async (transaction) => {
-      const result: CanvasShapeBatchPayload = {
-        created: 0,
-        updated: 0,
-        deleted: 0,
-        shapes: [],
-        deletedShapes: []
-      };
-
-      for (const operation of operations) {
-        if (operation.type === "create") {
-          const values = validateShapeCreate(operation.payload);
+    const baseRevision = validateOptionalBaseRevision(input.baseRevision);
+    const result = await this.database.transaction(async (transaction) =>
+      this.writeShapeOperation<CanvasShapePayload>(
+        transaction,
+        {
+          actorUserId: currentUserId,
+          baseRevision,
+          canvasId: canvas.id,
+          clientOperationId,
+          operationType: "create",
+          shapeId: id,
+          workspaceId
+        },
+        async () => {
           const contentHash = computeShapeContentHash(values);
           const shape = await transaction.queryOne<CanvasShapeRow>(
             `
@@ -468,7 +398,7 @@ export class CanvasService {
                 deleted_at
             `,
             [
-              operation.shapeId,
+              id,
               canvas.id,
               values.shapeType,
               values.title ?? null,
@@ -488,136 +418,350 @@ export class CanvasService {
             throw badRequest("Canvas shape could not be created");
           }
 
+          const payload = mapShape(shape);
+
+          return {
+            operationPayload: { shape: payload },
+            payload
+          };
+        }
+      )
+    );
+
+    if (result.isNewOperation) {
+      await this.publishShapeOperations([result.operation]);
+    }
+
+    return result.payload;
+  }
+
+  async syncShapesBatch(
+    currentUserId: string,
+    workspaceId: string,
+    canvasId: string,
+    input: SyncCanvasShapesBatchRequest
+  ): Promise<CanvasShapeBatchPayload> {
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+
+    const canvas = await this.findCanvas(workspaceId, canvasId);
+    if (!canvas) {
+      throw notFound("Canvas not found");
+    }
+
+    const operations = validateShapeBatchOperations(input);
+
+    const batchResult = await this.database.transaction(async (transaction) => {
+      const result: CanvasShapeBatchPayload = {
+        created: 0,
+        updated: 0,
+        deleted: 0,
+        shapes: [],
+        deletedShapes: []
+      };
+      const operationsToPublish: CanvasShapeOperationPayload[] = [];
+
+      for (const operation of operations) {
+        if (operation.type === "create") {
+          const values = validateShapeCreate(operation.payload);
+          const writeResult = await this.writeShapeOperation<CanvasShapePayload>(
+            transaction,
+            {
+              actorUserId: currentUserId,
+              baseRevision: operation.baseRevision,
+              canvasId: canvas.id,
+              clientOperationId: operation.clientOperationId,
+              operationType: "create",
+              shapeId: operation.shapeId,
+              workspaceId
+            },
+            async () => {
+              const contentHash = computeShapeContentHash(values);
+              const shape = await transaction.queryOne<CanvasShapeRow>(
+                `
+                  INSERT INTO canvas_freeform_shapes (
+                    id,
+                    canvas_id,
+                    shape_type,
+                    title,
+                    text_content,
+                    x,
+                    y,
+                    width,
+                    height,
+                    rotation,
+                    z_index,
+                    raw_shape,
+                    content_hash,
+                    deleted_at
+                  )
+                  VALUES (
+                    $1,
+                    $2,
+                    $3,
+                    $4,
+                    $5,
+                    $6,
+                    $7,
+                    $8,
+                    $9,
+                    $10,
+                    $11,
+                    $12::jsonb,
+                    $13,
+                    NULL
+                  )
+                  ON CONFLICT (id) DO UPDATE
+                  SET
+                    shape_type = EXCLUDED.shape_type,
+                    title = EXCLUDED.title,
+                    text_content = EXCLUDED.text_content,
+                    x = EXCLUDED.x,
+                    y = EXCLUDED.y,
+                    width = EXCLUDED.width,
+                    height = EXCLUDED.height,
+                    rotation = EXCLUDED.rotation,
+                    z_index = EXCLUDED.z_index,
+                    raw_shape = EXCLUDED.raw_shape,
+                    content_hash = EXCLUDED.content_hash,
+                    revision = canvas_freeform_shapes.revision + 1,
+                    deleted_at = NULL
+                  WHERE canvas_freeform_shapes.canvas_id = EXCLUDED.canvas_id
+                    AND canvas_freeform_shapes.deleted_at IS NOT NULL
+                  RETURNING
+                    id,
+                    canvas_id,
+                    shape_type,
+                    title,
+                    text_content,
+                    x,
+                    y,
+                    width,
+                    height,
+                    rotation,
+                    z_index,
+                    raw_shape,
+                    content_hash,
+                    revision,
+                    created_at,
+                    updated_at,
+                    deleted_at
+                `,
+                [
+                  operation.shapeId,
+                  canvas.id,
+                  values.shapeType,
+                  values.title ?? null,
+                  values.textContent ?? null,
+                  values.x ?? 0,
+                  values.y ?? 0,
+                  values.width ?? null,
+                  values.height ?? null,
+                  values.rotation ?? 0,
+                  values.zIndex ?? 0,
+                  JSON.stringify(values.rawShape ?? {}),
+                  contentHash
+                ]
+              );
+
+              if (!shape) {
+                throw badRequest("Canvas shape could not be created");
+              }
+
+              const payload = mapShape(shape);
+
+              return {
+                operationPayload: { shape: payload },
+                payload
+              };
+            }
+          );
+
           result.created += 1;
-          result.shapes.push(mapShape(shape));
+          result.shapes.push(writeResult.payload);
+          if (writeResult.isNewOperation) {
+            operationsToPublish.push(writeResult.operation);
+          }
           continue;
         }
 
         if (operation.type === "update") {
           const values = validateShapeUpdate(operation.payload);
-          const currentShape = await transaction.queryOne<CanvasShapeRow>(
-            `
-              SELECT
-                id,
-                canvas_id,
-                shape_type,
-                title,
-                text_content,
-                x,
-                y,
-                width,
-                height,
-                rotation,
-                z_index,
-                raw_shape,
-                content_hash,
-                revision,
-                created_at,
-                updated_at,
-                deleted_at
-              FROM canvas_freeform_shapes
-              WHERE id = $1
-                AND canvas_id = $2
-                AND deleted_at IS NULL
-              FOR UPDATE
-            `,
-            [operation.shapeId, canvas.id]
+          const writeResult = await this.writeShapeOperation<CanvasShapePayload>(
+            transaction,
+            {
+              actorUserId: currentUserId,
+              baseRevision: operation.baseRevision,
+              canvasId: canvas.id,
+              clientOperationId: operation.clientOperationId,
+              operationType: "update",
+              shapeId: operation.shapeId,
+              workspaceId
+            },
+            async () => {
+              const currentShape = await transaction.queryOne<CanvasShapeRow>(
+                `
+                  SELECT
+                    id,
+                    canvas_id,
+                    shape_type,
+                    title,
+                    text_content,
+                    x,
+                    y,
+                    width,
+                    height,
+                    rotation,
+                    z_index,
+                    raw_shape,
+                    content_hash,
+                    revision,
+                    created_at,
+                    updated_at,
+                    deleted_at
+                  FROM canvas_freeform_shapes
+                  WHERE id = $1
+                    AND canvas_id = $2
+                    AND deleted_at IS NULL
+                  FOR UPDATE
+                `,
+                [operation.shapeId, canvas.id]
+              );
+
+              if (!currentShape) {
+                throw notFound("Canvas shape not found");
+              }
+
+              const mergedValues = mergeShapeWriteValues(currentShape, values);
+              const contentHash = computeShapeContentHash(mergedValues);
+              const shape = await transaction.queryOne<CanvasShapeRow>(
+                `
+                  UPDATE canvas_freeform_shapes s
+                  SET
+                    shape_type = $3,
+                    title = $4,
+                    text_content = $5,
+                    x = $6,
+                    y = $7,
+                    width = $8,
+                    height = $9,
+                    rotation = $10,
+                    z_index = $11,
+                    raw_shape = $12::jsonb,
+                    content_hash = $13,
+                    revision = s.revision + 1
+                  WHERE s.id = $1
+                    AND s.canvas_id = $2
+                    AND s.deleted_at IS NULL
+                  RETURNING
+                    s.id,
+                    s.canvas_id,
+                    s.shape_type,
+                    s.title,
+                    s.text_content,
+                    s.x,
+                    s.y,
+                    s.width,
+                    s.height,
+                    s.rotation,
+                    s.z_index,
+                    s.raw_shape,
+                    s.content_hash,
+                    s.revision,
+                    s.created_at,
+                    s.updated_at,
+                    s.deleted_at
+                `,
+                [
+                  operation.shapeId,
+                  canvas.id,
+                  mergedValues.shapeType,
+                  mergedValues.title,
+                  mergedValues.textContent,
+                  mergedValues.x,
+                  mergedValues.y,
+                  mergedValues.width,
+                  mergedValues.height,
+                  mergedValues.rotation,
+                  mergedValues.zIndex,
+                  JSON.stringify(mergedValues.rawShape),
+                  contentHash
+                ]
+              );
+
+              if (!shape) {
+                throw notFound("Canvas shape not found");
+              }
+
+              const payload = mapShape(shape);
+
+              return {
+                operationPayload: { shape: payload },
+                payload
+              };
+            }
           );
-
-          if (!currentShape) {
-            throw notFound("Canvas shape not found");
-          }
-
-          const mergedValues = mergeShapeWriteValues(currentShape, values);
-          const contentHash = computeShapeContentHash(mergedValues);
-          const shape = await transaction.queryOne<CanvasShapeRow>(
-            `
-              UPDATE canvas_freeform_shapes s
-              SET
-                shape_type = $3,
-                title = $4,
-                text_content = $5,
-                x = $6,
-                y = $7,
-                width = $8,
-                height = $9,
-                rotation = $10,
-                z_index = $11,
-                raw_shape = $12::jsonb,
-                content_hash = $13,
-                revision = s.revision + 1
-              WHERE s.id = $1
-                AND s.canvas_id = $2
-                AND s.deleted_at IS NULL
-              RETURNING
-                s.id,
-                s.canvas_id,
-                s.shape_type,
-                s.title,
-                s.text_content,
-                s.x,
-                s.y,
-                s.width,
-                s.height,
-                s.rotation,
-                s.z_index,
-                s.raw_shape,
-                s.content_hash,
-                s.revision,
-                s.created_at,
-                s.updated_at,
-                s.deleted_at
-            `,
-            [
-              operation.shapeId,
-              canvas.id,
-              mergedValues.shapeType,
-              mergedValues.title,
-              mergedValues.textContent,
-              mergedValues.x,
-              mergedValues.y,
-              mergedValues.width,
-              mergedValues.height,
-              mergedValues.rotation,
-              mergedValues.zIndex,
-              JSON.stringify(mergedValues.rawShape),
-              contentHash
-            ]
-          );
-
-          if (!shape) {
-            throw notFound("Canvas shape not found");
-          }
 
           result.updated += 1;
-          result.shapes.push(mapShape(shape));
+          result.shapes.push(writeResult.payload);
+          if (writeResult.isNewOperation) {
+            operationsToPublish.push(writeResult.operation);
+          }
           continue;
         }
 
-        const shape = await transaction.queryOne<CanvasShapeDeleteRow>(
-          `
-            UPDATE canvas_freeform_shapes s
-            SET
-              deleted_at = now(),
-              revision = s.revision + 1
-            WHERE s.id = $1
-              AND s.canvas_id = $2
-              AND s.deleted_at IS NULL
-            RETURNING s.id, s.content_hash, s.revision, s.deleted_at
-          `,
-          [operation.shapeId, canvas.id]
-        );
+        const writeResult =
+          await this.writeShapeOperation<CanvasShapeDeletePayload>(
+            transaction,
+            {
+              actorUserId: currentUserId,
+              baseRevision: operation.baseRevision,
+              canvasId: canvas.id,
+              clientOperationId: operation.clientOperationId,
+              operationType: "delete",
+              shapeId: operation.shapeId,
+              workspaceId
+            },
+            async () => {
+              const shape = await transaction.queryOne<CanvasShapeDeleteRow>(
+                `
+                  UPDATE canvas_freeform_shapes s
+                  SET
+                    deleted_at = now(),
+                    revision = s.revision + 1
+                  WHERE s.id = $1
+                    AND s.canvas_id = $2
+                    AND s.deleted_at IS NULL
+                  RETURNING s.id, s.content_hash, s.revision, s.deleted_at
+                `,
+                [operation.shapeId, canvas.id]
+              );
 
-        if (!shape || !shape.deleted_at) {
-          throw notFound("Canvas shape not found");
-        }
+              if (!shape || !shape.deleted_at) {
+                throw notFound("Canvas shape not found");
+              }
+
+              const payload = mapDeletedShape(shape);
+
+              return {
+                operationPayload: { deletedShape: payload },
+                payload
+              };
+            }
+          );
 
         result.deleted += 1;
-        result.deletedShapes.push(mapDeletedShape(shape));
+        result.deletedShapes.push(writeResult.payload);
+        if (writeResult.isNewOperation) {
+          operationsToPublish.push(writeResult.operation);
+        }
       }
 
-      return result;
+      return { operationsToPublish, payload: result };
     });
+
+    await this.publishShapeOperations(batchResult.operationsToPublish);
+
+    return batchResult.payload;
   }
 
   async getShapeDetail(
@@ -826,110 +970,167 @@ export class CanvasService {
 
     const id = validateShapeId(shapeId);
     const values = validateShapeUpdate(input);
+    const clientOperationId = validateOptionalClientOperationId(
+      input.clientOperationId
+    );
+    const baseRevision = validateOptionalBaseRevision(input.baseRevision);
+    const targetShape = await this.database.queryOne<CanvasShapeRow>(
+      `
+        SELECT
+          s.id,
+          s.canvas_id,
+          s.shape_type,
+          s.title,
+          s.text_content,
+          s.x,
+          s.y,
+          s.width,
+          s.height,
+          s.rotation,
+          s.z_index,
+          s.raw_shape,
+          s.content_hash,
+          s.revision,
+          s.created_at,
+          s.updated_at,
+          s.deleted_at
+        FROM canvas_freeform_shapes s
+        INNER JOIN canvas c ON c.id = s.canvas_id
+        WHERE s.id = $1
+          AND c.workspace_id = $2
+          AND c.board_type = 'freeform'
+          AND s.deleted_at IS NULL
+      `,
+      [id, workspaceId]
+    );
 
-    const shape = await this.database.transaction(async (transaction) => {
-      const currentShape = await transaction.queryOne<CanvasShapeRow>(
-        `
-          SELECT
-            s.id,
-            s.canvas_id,
-            s.shape_type,
-            s.title,
-            s.text_content,
-            s.x,
-            s.y,
-            s.width,
-            s.height,
-            s.rotation,
-            s.z_index,
-            s.raw_shape,
-            s.content_hash,
-            s.revision,
-            s.created_at,
-            s.updated_at,
-            s.deleted_at
-          FROM canvas_freeform_shapes s
-          INNER JOIN canvas c ON c.id = s.canvas_id
-          WHERE s.id = $1
-            AND c.workspace_id = $2
-            AND c.board_type = 'freeform'
-            AND s.deleted_at IS NULL
-          FOR UPDATE OF s
-        `,
-        [id, workspaceId]
-      );
-
-      if (!currentShape) {
-        throw notFound("Canvas shape not found");
-      }
-
-      const mergedValues = mergeShapeWriteValues(currentShape, values);
-      const contentHash = computeShapeContentHash(mergedValues);
-
-      return transaction.queryOne<CanvasShapeRow>(
-        `
-          UPDATE canvas_freeform_shapes s
-          SET
-            shape_type = $3,
-            title = $4,
-            text_content = $5,
-            x = $6,
-            y = $7,
-            width = $8,
-            height = $9,
-            rotation = $10,
-            z_index = $11,
-            raw_shape = $12::jsonb,
-            content_hash = $13,
-            revision = s.revision + 1
-          FROM canvas c
-          WHERE s.canvas_id = c.id
-            AND s.id = $1
-            AND c.workspace_id = $2
-            AND c.board_type = 'freeform'
-            AND s.deleted_at IS NULL
-          RETURNING
-            s.id,
-            s.canvas_id,
-            s.shape_type,
-            s.title,
-            s.text_content,
-            s.x,
-            s.y,
-            s.width,
-            s.height,
-            s.rotation,
-            s.z_index,
-            s.raw_shape,
-            s.content_hash,
-            s.revision,
-            s.created_at,
-            s.updated_at,
-            s.deleted_at
-        `,
-        [
-          id,
-          workspaceId,
-          mergedValues.shapeType,
-          mergedValues.title,
-          mergedValues.textContent,
-          mergedValues.x,
-          mergedValues.y,
-          mergedValues.width,
-          mergedValues.height,
-          mergedValues.rotation,
-          mergedValues.zIndex,
-          JSON.stringify(mergedValues.rawShape),
-          contentHash
-        ]
-      );
-    });
-
-    if (!shape) {
+    if (!targetShape) {
       throw notFound("Canvas shape not found");
     }
 
-    return mapShape(shape);
+    const result = await this.database.transaction(async (transaction) =>
+      this.writeShapeOperation<CanvasShapePayload>(
+        transaction,
+        {
+          actorUserId: currentUserId,
+          baseRevision,
+          canvasId: targetShape.canvas_id,
+          clientOperationId,
+          operationType: "update",
+          shapeId: id,
+          workspaceId
+        },
+        async () => {
+          const currentShape = await transaction.queryOne<CanvasShapeRow>(
+            `
+              SELECT
+                id,
+                canvas_id,
+                shape_type,
+                title,
+                text_content,
+                x,
+                y,
+                width,
+                height,
+                rotation,
+                z_index,
+                raw_shape,
+                content_hash,
+                revision,
+                created_at,
+                updated_at,
+                deleted_at
+              FROM canvas_freeform_shapes
+              WHERE id = $1
+                AND canvas_id = $2
+                AND deleted_at IS NULL
+              FOR UPDATE
+            `,
+            [id, targetShape.canvas_id]
+          );
+
+          if (!currentShape) {
+            throw notFound("Canvas shape not found");
+          }
+
+          const mergedValues = mergeShapeWriteValues(currentShape, values);
+          const contentHash = computeShapeContentHash(mergedValues);
+
+          const shape = await transaction.queryOne<CanvasShapeRow>(
+            `
+              UPDATE canvas_freeform_shapes s
+              SET
+                shape_type = $3,
+                title = $4,
+                text_content = $5,
+                x = $6,
+                y = $7,
+                width = $8,
+                height = $9,
+                rotation = $10,
+                z_index = $11,
+                raw_shape = $12::jsonb,
+                content_hash = $13,
+                revision = s.revision + 1
+              WHERE s.id = $1
+                AND s.canvas_id = $2
+                AND s.deleted_at IS NULL
+              RETURNING
+                s.id,
+                s.canvas_id,
+                s.shape_type,
+                s.title,
+                s.text_content,
+                s.x,
+                s.y,
+                s.width,
+                s.height,
+                s.rotation,
+                s.z_index,
+                s.raw_shape,
+                s.content_hash,
+                s.revision,
+                s.created_at,
+                s.updated_at,
+                s.deleted_at
+            `,
+            [
+              id,
+              targetShape.canvas_id,
+              mergedValues.shapeType,
+              mergedValues.title,
+              mergedValues.textContent,
+              mergedValues.x,
+              mergedValues.y,
+              mergedValues.width,
+              mergedValues.height,
+              mergedValues.rotation,
+              mergedValues.zIndex,
+              JSON.stringify(mergedValues.rawShape),
+              contentHash
+            ]
+          );
+
+          if (!shape) {
+            throw notFound("Canvas shape not found");
+          }
+
+          const payload = mapShape(shape);
+
+          return {
+            operationPayload: { shape: payload },
+            payload
+          };
+        }
+      )
+    );
+
+    if (result.isNewOperation) {
+      await this.publishShapeOperations([result.operation]);
+    }
+
+    return result.payload;
   }
 
   async deleteShape(
@@ -940,28 +1141,286 @@ export class CanvasService {
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
 
     const id = validateShapeId(shapeId);
-    const shape = await this.database.queryOne<CanvasShapeDeleteRow>(
+    const targetShape = await this.database.queryOne<CanvasShapeRow>(
       `
-        UPDATE canvas_freeform_shapes s
-        SET
-          deleted_at = now(),
-          revision = s.revision + 1
-        FROM canvas c
-        WHERE s.canvas_id = c.id
-          AND s.id = $1
+        SELECT
+          s.id,
+          s.canvas_id,
+          s.shape_type,
+          s.title,
+          s.text_content,
+          s.x,
+          s.y,
+          s.width,
+          s.height,
+          s.rotation,
+          s.z_index,
+          s.raw_shape,
+          s.content_hash,
+          s.revision,
+          s.created_at,
+          s.updated_at,
+          s.deleted_at
+        FROM canvas_freeform_shapes s
+        INNER JOIN canvas c ON c.id = s.canvas_id
+        WHERE s.id = $1
           AND c.workspace_id = $2
           AND c.board_type = 'freeform'
           AND s.deleted_at IS NULL
-        RETURNING s.id, s.content_hash, s.revision, s.deleted_at
       `,
       [id, workspaceId]
     );
 
-    if (!shape || !shape.deleted_at) {
+    if (!targetShape) {
       throw notFound("Canvas shape not found");
     }
 
-    return mapDeletedShape(shape);
+    const result = await this.database.transaction(async (transaction) =>
+      this.writeShapeOperation<CanvasShapeDeletePayload>(
+        transaction,
+        {
+          actorUserId: currentUserId,
+          baseRevision: null,
+          canvasId: targetShape.canvas_id,
+          clientOperationId: null,
+          operationType: "delete",
+          shapeId: id,
+          workspaceId
+        },
+        async () => {
+          const shape = await transaction.queryOne<CanvasShapeDeleteRow>(
+            `
+              UPDATE canvas_freeform_shapes s
+              SET
+                deleted_at = now(),
+                revision = s.revision + 1
+              WHERE s.id = $1
+                AND s.canvas_id = $2
+                AND s.deleted_at IS NULL
+              RETURNING s.id, s.content_hash, s.revision, s.deleted_at
+            `,
+            [id, targetShape.canvas_id]
+          );
+
+          if (!shape || !shape.deleted_at) {
+            throw notFound("Canvas shape not found");
+          }
+
+          const payload = mapDeletedShape(shape);
+
+          return {
+            operationPayload: { deletedShape: payload },
+            payload
+          };
+        }
+      )
+    );
+
+    if (result.isNewOperation) {
+      await this.publishShapeOperations([result.operation]);
+    }
+
+    return result.payload;
+  }
+
+  private async writeShapeOperation<TPayload extends CanvasShapeDeletePayload | CanvasShapePayload>(
+    transaction: DatabaseTransaction,
+    input: CanvasShapeOperationWriteInput,
+    writePayload: () => Promise<CanvasShapeOperationWritePayload>
+  ): Promise<CanvasShapeOperationWriteResult<TPayload>> {
+    const clientOperationId = input.clientOperationId ?? randomUUID();
+    const lockedCanvas = await transaction.queryOne<CanvasLatestOperationSeqRow>(
+      `
+        SELECT latest_op_seq
+        FROM canvas
+        WHERE id = $1
+          AND workspace_id = $2
+          AND board_type = 'freeform'
+        FOR UPDATE
+      `,
+      [input.canvasId, input.workspaceId]
+    );
+
+    if (!lockedCanvas) {
+      throw notFound("Canvas not found");
+    }
+
+    const existingOperation = await this.findShapeOperationByClientId(
+      transaction,
+      input.canvasId,
+      input.actorUserId,
+      clientOperationId
+    );
+
+    if (existingOperation) {
+      const operation = mapShapeOperation(existingOperation);
+
+      if (
+        operation.operationType !== input.operationType ||
+        operation.shapeId !== input.shapeId
+      ) {
+        throw badRequest("Canvas clientOperationId was already used");
+      }
+
+      return {
+        isNewOperation: false,
+        operation,
+        payload: this.readPayloadFromOperation<TPayload>(operation)
+      };
+    }
+
+    const writeResult = await writePayload();
+    const resultRevision = writeResult.payload.revision;
+    const contentHash = writeResult.payload.contentHash;
+    const nextOpSeq = Number(lockedCanvas.latest_op_seq) + 1;
+
+    await transaction.execute(
+      `
+        UPDATE canvas
+        SET latest_op_seq = $3
+        WHERE id = $1
+          AND workspace_id = $2
+          AND board_type = 'freeform'
+      `,
+      [input.canvasId, input.workspaceId, nextOpSeq]
+    );
+
+    const operationRow = await transaction.queryOne<CanvasShapeOperationRow>(
+      `
+        INSERT INTO canvas_shape_operations (
+          workspace_id,
+          canvas_id,
+          shape_id,
+          actor_user_id,
+          operation_type,
+          op_seq,
+          client_operation_id,
+          base_revision,
+          result_revision,
+          content_hash,
+          payload
+        )
+        VALUES (
+          $1,
+          $2,
+          $3,
+          $4,
+          $5,
+          $6,
+          $7,
+          $8,
+          $9,
+          $10,
+          $11::jsonb
+        )
+        RETURNING
+          id,
+          workspace_id,
+          canvas_id,
+          shape_id,
+          actor_user_id,
+          operation_type,
+          op_seq,
+          client_operation_id,
+          base_revision,
+          result_revision,
+          content_hash,
+          payload,
+          created_at
+      `,
+      [
+        input.workspaceId,
+        input.canvasId,
+        input.shapeId,
+        input.actorUserId,
+        input.operationType,
+        nextOpSeq,
+        clientOperationId,
+        input.baseRevision,
+        resultRevision,
+        contentHash,
+        JSON.stringify(writeResult.operationPayload)
+      ]
+    );
+
+    if (!operationRow) {
+      throw badRequest("Canvas shape operation could not be recorded");
+    }
+
+    const operation = mapShapeOperation(operationRow);
+
+    return {
+      isNewOperation: true,
+      operation,
+      payload: attachShapeOperationMeta(
+        writeResult.payload,
+        operation
+      ) as TPayload
+    };
+  }
+
+  private async findShapeOperationByClientId(
+    transaction: DatabaseTransaction,
+    canvasId: string,
+    actorUserId: string,
+    clientOperationId: string
+  ): Promise<CanvasShapeOperationRow | null> {
+    return transaction.queryOne<CanvasShapeOperationRow>(
+      `
+        SELECT
+          id,
+          workspace_id,
+          canvas_id,
+          shape_id,
+          actor_user_id,
+          operation_type,
+          op_seq,
+          client_operation_id,
+          base_revision,
+          result_revision,
+          content_hash,
+          payload,
+          created_at
+        FROM canvas_shape_operations
+        WHERE canvas_id = $1
+          AND actor_user_id = $2
+          AND client_operation_id = $3
+      `,
+      [canvasId, actorUserId, clientOperationId]
+    );
+  }
+
+  private readPayloadFromOperation<
+    TPayload extends CanvasShapeDeletePayload | CanvasShapePayload
+  >(operation: CanvasShapeOperationPayload): TPayload {
+    const payloadKey =
+      operation.operationType === "delete" ? "deletedShape" : "shape";
+    const payload = operation.payload[payloadKey];
+
+    if (!this.isRecord(payload)) {
+      throw badRequest("Canvas shape operation payload is invalid");
+    }
+
+    return attachShapeOperationMeta(
+      payload as TPayload,
+      operation
+    ) as TPayload;
+  }
+
+  private async publishShapeOperations(
+    operations: CanvasShapeOperationPayload[]
+  ): Promise<void> {
+    for (const operation of operations) {
+      try {
+        await this.operationPublisher.publishOperation(operation);
+      } catch (error) {
+        console.error("Canvas shape operation publish failed", error);
+      }
+    }
+  }
+
+  private isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
   }
 
   private async findCanvas(

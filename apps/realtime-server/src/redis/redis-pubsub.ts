@@ -27,6 +27,10 @@ export function createNoopRedisPubSub(): RedisPubSubClient {
 export type SocketIoRedisAdapterHandle = {
   adapter: ReturnType<typeof createAdapter>;
   close: () => Promise<void>;
+  subscribe: (
+    channel: string,
+    handler: (payload: unknown) => void,
+  ) => Promise<() => Promise<void>>;
 };
 
 export async function createSocketIoRedisAdapter(
@@ -53,6 +57,19 @@ export async function createSocketIoRedisAdapter(
     ),
     async close() {
       await Promise.allSettled([pubClient.quit(), subClient.quit()]);
+    },
+    async subscribe(channel, handler) {
+      await subClient.subscribe(channel, (message) => {
+        try {
+          handler(JSON.parse(message) as unknown);
+        } catch (error) {
+          console.error("Redis subscription payload parse failed", error);
+        }
+      });
+
+      return async () => {
+        await subClient.unsubscribe(channel);
+      };
     },
   };
 }

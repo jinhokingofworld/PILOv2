@@ -61,9 +61,14 @@ assert.match(socketServer, /room_not_joined/);
 assert.match(socketServer, /isCanvasPresenceViewport/);
 assert.match(socketServer, /isIsoDateString/);
 assert.match(socketServer, /createSocketIoRedisAdapter/);
+assert.match(socketServer, /CANVAS_OPERATION_REDIS_CHANNEL = "canvas:operations"/);
+assert.match(socketServer, /isCanvasShapeOperationPayload/);
+assert.match(socketServer, /canvasServerEvents\.operation/);
+assert.match(socketServer, /redisAdapter\.subscribe/);
 
 assert.match(canvasPresence, /clearRoomPresence/);
 assert.match(canvasPresence, /clearSocket/);
 assert.match(canvasPresence, /payload\.sentAt/);
 assert.match(canvasPresence, /payload\.viewport/);
 assert.match(redisPubSub, /createAdapter/);
+assert.match(redisPubSub, /subscribe\(channel/);

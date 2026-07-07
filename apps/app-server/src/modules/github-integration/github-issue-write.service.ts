@@ -29,6 +29,14 @@ export interface UpdateGithubIssueInput {
   state?: "open" | "closed";
 }
 
+export interface CreateGithubIssueInput {
+  currentUserId: string;
+  owner: string;
+  repo: string;
+  title: string;
+  body?: string;
+}
+
 @Injectable()
 export class GithubIssueWriteService {
   constructor(
@@ -49,6 +57,20 @@ export class GithubIssueWriteService {
       owner: input.owner,
       repo: input.repo,
       state: input.state,
+      title: input.title,
+      userAccessToken: accessToken
+    });
+  }
+
+  async createIssue(input: CreateGithubIssueInput): Promise<GithubIssueApiItem> {
+    const oauthConfig = this.configService.getGithubOAuthConfig();
+    const connection = await this.getGithubOAuthConnectionRow(input.currentUserId);
+    const accessToken = this.getConnectedGithubOAuthAccess(connection, oauthConfig);
+
+    return this.githubAppClient.createRepositoryIssue({
+      body: input.body,
+      owner: input.owner,
+      repo: input.repo,
       title: input.title,
       userAccessToken: accessToken
     });

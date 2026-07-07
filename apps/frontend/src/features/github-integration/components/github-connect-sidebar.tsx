@@ -3,6 +3,7 @@ import { GitPullRequest, Loader2, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import type {
+  GithubAppInstallation,
   GithubPullRequest,
   GithubRepository,
   GithubSyncRun,
@@ -38,6 +39,7 @@ const syncTargetOptions: Array<{
 
 type SidebarProps = {
   isLoading: boolean;
+  installations: GithubAppInstallation[];
   selectedInstallationId: string;
   selectedRepository: GithubRepository | undefined;
   pullRequests: GithubPullRequest[];
@@ -53,6 +55,7 @@ type SidebarProps = {
 
 export function GithubConnectSidebar({
   isLoading,
+  installations,
   selectedInstallationId,
   selectedRepository,
   pullRequests,
@@ -120,11 +123,16 @@ export function GithubConnectSidebar({
           </GithubConnectEmptyState>
         ) : (
           <div className="job-list space-y-3">
-            {syncRuns.map((syncRun) => (
-              <div
-                className="rounded-[8px] border border-[#e5e9f2] bg-[#fbfcfe] p-3"
-                key={syncRun.id}
-              >
+            {syncRuns.map((syncRun) => {
+              const installation = syncRun.installationId
+                ? installations.find((item) => item.id === syncRun.installationId)
+                : null;
+
+              return (
+                <div
+                  className="rounded-[8px] border border-[#e5e9f2] bg-[#fbfcfe] p-3"
+                  key={syncRun.id}
+                >
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <p className="text-[13px] font-semibold text-[#101828]">
@@ -133,6 +141,11 @@ export function GithubConnectSidebar({
                     <p className="mt-1 text-[12px] text-[#7a8497]">
                       {formatGithubConnectDateTime(syncRun.startedAt)}
                     </p>
+                    {installation ? (
+                      <p className="mt-1 text-[12px] font-medium text-[#4b5565]">
+                        Installation @{installation.accountLogin}
+                      </p>
+                    ) : null}
                   </div>
                   <GithubConnectPill
                     tone={
@@ -160,8 +173,9 @@ export function GithubConnectSidebar({
                     {syncRun.errorMessage}
                   </p>
                 ) : null}
-              </div>
-            ))}
+                </div>
+              );
+            })}
           </div>
         )}
       </GithubConnectPanel>

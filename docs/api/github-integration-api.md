@@ -100,10 +100,14 @@ token으로 GitHub의 user installations 목록을 조회해 callback의
   빈 문자열이어도 GraphQL 조회가 성공하면 동기화를 진행한다. OAuth token이 없으면
   `GitHub user OAuth token is required for personal ProjectV2 sync`로 sync run이
   실패한다. 현재 GitHub OAuth 사용자가 personal Project owner와 다르면
-  `GitHub user OAuth token cannot access this personal ProjectV2 owner`로 실패한다.
+  `GitHub OAuth account does not match this personal ProjectV2 owner`로 실패한다.
   GraphQL 권한 오류는 provider raw error 대신 safe message로 sync run에 기록한다.
   classic OAuth scope 오류는
   `GitHub OAuth connection must be reconnected with read:project scope`,
+  현재 GitHub App user OAuth token 또는 GitHub App 권한으로 personal ProjectV2를 읽을 수 없는 경우는
+  `GitHub user OAuth token lacks permission to read personal ProjectV2`,
+  GitHub가 owner login 자체를 확인하지 못하는 경우는
+  `GitHub ProjectV2 owner could not be resolved`,
   personal ProjectV2에 installation token만 사용된 경우는
   `GitHub App installation token cannot access personal ProjectV2`,
   organization ProjectV2에 installation token 권한이 부족한 경우는

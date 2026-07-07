@@ -59,6 +59,10 @@ const mainShell = await readFile(
   new URL("../src/components/main-shell.tsx", import.meta.url),
   "utf8"
 );
+const workspaceLayout = await readFile(
+  new URL("../src/app/(workspace)/layout.tsx", import.meta.url),
+  "utf8"
+);
 const appSidebar = await readFile(
   new URL("../src/components/app-sidebar.tsx", import.meta.url),
   "utf8"
@@ -80,6 +84,13 @@ const canvasRuntimeTypes = await readFile(
 const canvasRuntimeUtils = await readFile(
   new URL(
     "../src/features/canvas/components/engine/runtime/canvas-runtime-utils.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
+const canvasRemoteOperations = await readFile(
+  new URL(
+    "../src/features/canvas/components/engine/runtime/canvas-remote-operations.ts",
     import.meta.url
   ),
   "utf8"
@@ -259,12 +270,12 @@ const piloCanvasGroupToolbar = await readFile(
 );
 const routePages = await Promise.all(
   [
-    "../src/app/calendar/page.tsx",
-    "../src/app/github/page.tsx",
-    "../src/app/board/page.tsx",
-    "../src/app/pr-review/page.tsx",
-    "../src/app/meeting/page.tsx",
-    "../src/app/canvas/page.tsx"
+    "../src/app/(workspace)/calendar/page.tsx",
+    "../src/app/(workspace)/github/page.tsx",
+    "../src/app/(workspace)/board/page.tsx",
+    "../src/app/(workspace)/pr-review/page.tsx",
+    "../src/app/(workspace)/meeting/page.tsx",
+    "../src/app/(workspace)/canvas/page.tsx"
   ].map((path) => readFile(new URL(path, import.meta.url), "utf8"))
 );
 const featurePages = await Promise.all(
@@ -308,6 +319,7 @@ assert.match(authSession, /PILO UI Preview/);
 assert.match(authSession, /activeWorkspace/);
 assert.match(authSession, /refreshSession/);
 assert.match(authSession, /role: "owner"/);
+assert.match(authSession, /currentState\.status === "ready"/);
 assert.match(authApiClient, /role: WorkspaceRole/);
 assert.match(authApiClient, /CurrentUserWorkspaceInvitation/);
 assert.match(authApiClient, /listCurrentUserWorkspaceInvitations/);
@@ -328,14 +340,24 @@ assert.doesNotMatch(loginPage, /Or continue with/);
 assert.doesNotMatch(loginPage, /Forgot your password/);
 assert.match(loginCallbackPage, /access_token/);
 assert.match(loginCallbackPage, /loadAuthSessionEntry/);
-assert.match(mainShell, /AuthGate/);
+assert.match(workspaceLayout, /AuthGate/);
+assert.match(workspaceLayout, /MeetingRuntimeProvider/);
+assert.doesNotMatch(mainShell, /AuthGate/);
 assert.match(mainShell, /HeaderMeetingStatus/);
 assert.match(mainShell, /sticky top-0/);
 assert.match(mainShell, /<span className="truncate">\{activeFeature\.title\}<\/span>/);
 assert.match(mainShell, /peer-data-\[variant=inset\]:!m-0/);
 assert.match(mainShell, /peer-data-\[state=collapsed\]:!ml-0/);
 assert.match(appSidebar, /useAuthSession/);
+assert.match(appSidebar, /useMeetingRuntime/);
+assert.match(appSidebar, /leaveActiveMeeting/);
 assert.match(appSidebar, /logout/);
+assert.match(appSidebar, /ACTIVE_MEETING_LEAVE_FAILED_MESSAGE/);
+assert.match(appSidebar, /sessionActionStatus/);
+assert.match(
+  appSidebar,
+  /await meetingRuntime\.leaveActiveMeeting\(\);[\s\S]*await acceptCurrentUserWorkspaceInvitation\(/
+);
 assert.match(appSidebar, /activeWorkspaceDetail/);
 assert.match(appSidebar, /canManageWorkspace/);
 assert.match(appSidebar, /pendingInvitationCount/);
@@ -476,9 +498,20 @@ assert.match(canvasWorkspace, /canvasClient=\{shouldUseCanvasApi \? canvasClient
 assert.match(canvasWorkspace, /storageMode=\{shouldUseCanvasApi \? "api" : "local"\}/);
 assert.match(canvasRuntime, /useCanvasPresence/);
 assert.match(canvasRuntime, /catchUpCanvasOperations/);
+assert.match(canvasRuntime, /applyRemoteCanvasOperations/);
+assert.match(canvasRuntime, /deferredRemoteOperationsRef/);
+assert.match(canvasRuntime, /remoteShapeRevisionRef/);
+assert.match(canvasRuntime, /pendingLocalShapeVersionsRef\.current\.has/);
+assert.match(canvasRuntime, /actorUserId === currentRealtimeUserId/);
 assert.match(canvasRuntime, /listOperationsAfterSeq/);
 assert.match(canvasRuntime, /realtime\?: CanvasRealtimeConfig \| null/);
 assert.match(canvasRuntime, /presence=\{canvasPresence\}/);
+assert.match(canvasRemoteOperations, /applyCanvasRemoteOperation/);
+assert.match(canvasRemoteOperations, /PILO_ARROW_BINDINGS_META_KEY/);
+assert.match(canvasRemoteOperations, /preserveArrowBindingMeta/);
+assert.match(canvasRemoteOperations, /shapeDetailCache\.set/);
+assert.match(canvasRemoteOperations, /shapeDetailCache\.delete/);
+assert.match(canvasRemoteOperations, /intersectsViewport/);
 assert.match(piloTldrawCanvas, /CanvasPresenceReporter/);
 assert.match(piloTldrawCanvas, /RemoteCursorOverlay/);
 assert.match(piloTldrawCanvas, /editor\.getContainer\(\)/);
@@ -496,6 +529,10 @@ assert.match(canvasPresenceHook, /canvas:join/);
 assert.match(canvasPresenceHook, /canvas:leave/);
 assert.match(canvasPresenceHook, /lastSeenOpSeqRef/);
 assert.match(canvasPresenceHook, /runCatchUp/);
+assert.match(canvasPresenceHook, /applyOperations/);
+assert.match(canvasPresenceHook, /applyContiguousOperations/);
+assert.match(canvasPresenceHook, /liveOperationBufferRef/);
+assert.match(canvasPresenceHook, /flushBufferedOperations/);
 assert.match(canvasPresenceHook, /canvas:operation/);
 assert.match(canvasPresenceHook, /canvas:sync:required/);
 assert.match(canvasPresenceHook, /operation\.opSeq === lastSeenOpSeq \+ 1/);
@@ -509,6 +546,8 @@ assert.match(canvasRemoteCursorOverlay, /canvas-remote-selection-outline/);
 assert.match(canvasRemoteCursorOverlay, /getStableCursorColor/);
 assert.match(canvasShapeSync, /buildCanvasShapeSyncOperations/);
 assert.match(canvasShapeSync, /createCanvasShapeSyncQueue/);
+assert.match(canvasShapeSync, /createCanvasClientOperationId/);
+assert.match(canvasShapeSync, /clientOperationId/);
 assert.match(canvasShapeSync, /DEFAULT_CANVAS_SHAPE_SYNC_QUEUE_DEBOUNCE_MS = 500/);
 assert.match(canvasShapeSync, /DEFAULT_CANVAS_SHAPE_SYNC_RETRY_ATTEMPTS = 3/);
 assert.match(canvasShapeSync, /CanvasShapeSyncFailure/);
@@ -525,8 +564,9 @@ assert.match(canvasShapeSync, /queuedDuringFlush/);
 assert.match(canvasShapeSync, /whenIdle: \(\) => Promise<void>/);
 assert.match(canvasShapeSync, /resolveIdleWaiters/);
 assert.match(canvasShapeSync, /syncShapesBatch/);
-assert.match(canvasShapeSync, /createShape\(boardId, operation.payload/);
-assert.match(canvasShapeSync, /updateShape\(operation.shapeId, operation.payload/);
+assert.match(canvasShapeSync, /createShape\(\s*boardId,/);
+assert.match(canvasShapeSync, /updateShape\(\s*operation\.shapeId,/);
+assert.match(canvasShapeSync, /clientOperationId: operation\.clientOperationId/);
 assert.match(canvasShapeSync, /deleteShape\(operation.shapeId/);
 assert.match(canvasShapeSync, /id: typeof shape.id === "string" \? shape.id : ""/);
 assert.match(canvasShapeSync, /shapeType: typeof shape.type === "string" \? shape.type : ""/);

@@ -96,6 +96,18 @@ export function mapShapeOperation(
   };
 }
 
+export function attachShapeOperationMeta<
+  T extends CanvasShapeDeletePayload | CanvasShapePayload
+>(payload: T, operation: CanvasShapeOperationPayload): T {
+  return {
+    ...payload,
+    actorUserId: operation.actorUserId,
+    clientOperationId: operation.clientOperationId,
+    operationType: operation.operationType,
+    opSeq: operation.opSeq
+  };
+}
+
 export function mapCanvasUserState(
   userState: CanvasUserStateRow
 ): CanvasUserStatePayload {

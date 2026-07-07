@@ -54,13 +54,15 @@ export interface CanvasLatestOperationSeqRow extends QueryResultRow {
   latest_op_seq: number | string;
 }
 
+export type CanvasShapeOperationType = "create" | "update" | "delete";
+
 export interface CanvasShapeOperationRow extends QueryResultRow {
   id: string;
   workspace_id: string;
   canvas_id: string;
   shape_id: string;
   actor_user_id: string;
-  operation_type: "create" | "update" | "delete";
+  operation_type: CanvasShapeOperationType;
   op_seq: number | string;
   client_operation_id: string;
   base_revision: number | string | null;
@@ -86,6 +88,8 @@ export interface CreateCanvasShapeRequest {
   rotation?: unknown;
   zIndex?: unknown;
   rawShape?: unknown;
+  clientOperationId?: unknown;
+  baseRevision?: unknown;
 }
 
 export type UpdateCanvasShapeRequest = Partial<CreateCanvasShapeRequest>;
@@ -136,6 +140,10 @@ export interface CanvasShapePayload {
   createdAt: string;
   updatedAt: string;
   deletedAt: string | null;
+  operationType?: CanvasShapeOperationType;
+  opSeq?: number;
+  actorUserId?: string;
+  clientOperationId?: string;
 }
 
 export type CanvasShapeSummaryPayload = CanvasShapePayload;
@@ -164,6 +172,10 @@ export interface CanvasShapeDeletePayload {
   deletedAt: string;
   contentHash: string;
   revision: number;
+  operationType?: "delete";
+  opSeq?: number;
+  actorUserId?: string;
+  clientOperationId?: string;
 }
 
 export interface CanvasShapeBatchPayload {
@@ -190,7 +202,7 @@ export interface CanvasShapeOperationPayload {
   workspaceId: string;
   canvasId: string;
   shapeId: string;
-  operationType: "create" | "update" | "delete";
+  operationType: CanvasShapeOperationType;
   opSeq: number;
   actorUserId: string;
   clientOperationId: string;
@@ -244,14 +256,20 @@ export type CanvasShapeBatchOperationValues =
   | {
       type: "create";
       shapeId: string;
+      clientOperationId: string | null;
+      baseRevision: number | null;
       payload: CreateCanvasShapeRequest;
     }
   | {
       type: "update";
       shapeId: string;
+      clientOperationId: string | null;
+      baseRevision: number | null;
       payload: UpdateCanvasShapeRequest;
     }
   | {
       type: "delete";
       shapeId: string;
+      clientOperationId: string | null;
+      baseRevision: number | null;
     };

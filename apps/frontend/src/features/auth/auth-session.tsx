@@ -90,11 +90,15 @@ export function AuthGate({ children }: { children: ReactNode }) {
     let cancelled = false;
 
     async function loadSession() {
-      setState({
-        status: "checking",
-        session: null,
-        message: "세션 확인 중"
-      });
+      setState((currentState) =>
+        currentState.status === "ready"
+          ? currentState
+          : {
+              status: "checking",
+              session: null,
+              message: "세션 확인 중"
+            }
+      );
 
       const storedSession = getStoredAuthSession();
       if (!storedSession) {

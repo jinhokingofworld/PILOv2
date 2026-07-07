@@ -1263,7 +1263,7 @@ function projectV2ItemApiItem(overrides = {}) {
         assert.match(text, /status = 'failed'/i);
         assert.deepEqual(values, [
           syncRunId,
-          "GitHub user OAuth token cannot access this personal ProjectV2 owner"
+          "GitHub OAuth account does not match this personal ProjectV2 owner"
         ]);
         return syncRunRow({
           target: "project_v2_fields",
@@ -1274,7 +1274,7 @@ function projectV2ItemApiItem(overrides = {}) {
           updated_count: 0,
           skipped_count: 0,
           error_message:
-            "GitHub user OAuth token cannot access this personal ProjectV2 owner",
+            "GitHub OAuth account does not match this personal ProjectV2 owner",
           cursor: {}
         });
       }
@@ -1291,7 +1291,7 @@ function projectV2ItemApiItem(overrides = {}) {
   assert.equal(syncRun.status, "failed");
   assert.equal(
     syncRun.errorMessage,
-    "GitHub user OAuth token cannot access this personal ProjectV2 owner"
+    "GitHub OAuth account does not match this personal ProjectV2 owner"
   );
   assert.deepEqual(githubAppClient.calls, []);
 }

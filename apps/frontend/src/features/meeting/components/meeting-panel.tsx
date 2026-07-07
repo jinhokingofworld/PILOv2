@@ -38,13 +38,10 @@ import {
   MeetingReportSection,
   type MeetingReportStatusFilter
 } from "@/features/meeting/components/meeting-report-section";
-import { useLiveKitMeetingRoom } from "@/features/meeting/hooks/use-livekit-meeting-room";
 import { useMeetingWorkspaceData } from "@/features/meeting/hooks/use-meeting-workspace-data";
 import { meetingNavigation } from "@/features/meeting/navigation";
-import {
-  setHeaderMeetingConnectionStatus,
-  setHeaderMeetingRecordingStatus
-} from "@/features/meeting/stores/header-meeting-status-store";
+import { useMeetingRuntime } from "@/features/meeting/runtime/meeting-runtime-provider";
+import { setHeaderMeetingRecordingStatus } from "@/features/meeting/stores/header-meeting-status-store";
 import type {
   MeetingParticipant,
   MeetingReportListQuery
@@ -297,7 +294,11 @@ export function MeetingPanel() {
     reportsQuery,
     workspaceId
   });
-  const liveKitRoom = useLiveKitMeetingRoom();
+  const {
+    connectToMeeting,
+    disconnectFromMeeting,
+    liveKitRoom
+  } = useMeetingRuntime();
   const {
     activeParticipantCount,
     canLoad,
@@ -341,19 +342,8 @@ export function MeetingPanel() {
   const displayedActiveCount = activeParticipants.length || activeParticipantCount;
 
   useEffect(() => {
-    setHeaderMeetingConnectionStatus(liveKitRoom.status);
-  }, [liveKitRoom.status]);
-
-  useEffect(() => {
     setHeaderMeetingRecordingStatus(currentRecording?.status ?? null);
   }, [currentRecording?.status]);
-
-  useEffect(() => {
-    return () => {
-      setHeaderMeetingConnectionStatus("idle");
-      setHeaderMeetingRecordingStatus(null);
-    };
-  }, []);
 
   const reloadParticipants = useCallback(
     async (targetMeetingId = meeting?.id) => {
@@ -406,10 +396,14 @@ export function MeetingPanel() {
   }, [canLoad, meeting?.id, reloadCurrentMeeting, reloadParticipants]);
 
   useEffect(() => {
-    if (!meeting && liveKitRoom.status !== "idle") {
-      void liveKitRoom.disconnect();
+    if (
+      currentStatus === "success" &&
+      !meeting &&
+      liveKitRoom.status !== "idle"
+    ) {
+      void disconnectFromMeeting();
     }
-  }, [liveKitRoom.disconnect, liveKitRoom.status, meeting]);
+  }, [currentStatus, disconnectFromMeeting, liveKitRoom.status, meeting]);
 
   useEffect(() => {
     if (!toastMessage) {
@@ -457,7 +451,10 @@ export function MeetingPanel() {
       createdOrJoinedMeetingId = result.meeting.id;
 
       failedStage = "livekit";
-      await liveKitRoom.connect(result.livekit);
+      await connectToMeeting({
+        livekit: result.livekit,
+        meeting: result.meeting
+      });
 
       await Promise.all([
         reloadCurrentMeeting(),
@@ -466,7 +463,7 @@ export function MeetingPanel() {
     } catch (error) {
       if (createdOrJoinedMeetingId) {
         await leaveMeeting(createdOrJoinedMeetingId).catch(() => undefined);
-        await liveKitRoom.disconnect();
+        await disconnectFromMeeting();
         await reloadCurrentMeeting();
         await reloadParticipants(createdOrJoinedMeetingId);
       }
@@ -514,7 +511,7 @@ export function MeetingPanel() {
 
     try {
       const result = await leaveMeeting(meeting.id);
-      await liveKitRoom.disconnect();
+      await disconnectFromMeeting();
       await reloadCurrentMeeting();
       await reloadParticipants(result.meetingEnded ? undefined : meeting.id);
       setToastMessage(

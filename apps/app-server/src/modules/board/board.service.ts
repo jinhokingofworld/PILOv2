@@ -9,6 +9,10 @@ import {
   BoardIssueUpdateService,
   type UpdateBoardIssueResult
 } from "./board-issue-update.service";
+import {
+  BoardIssueCreateService,
+  type CreateBoardIssueResult
+} from "./board-issue-create.service";
 import { BoardReadService } from "./board-read.service";
 import type { ListBoardIssuesQuery, ListBoardsQuery } from "./dto";
 import type {
@@ -35,7 +39,8 @@ export class BoardService {
     private readonly boardReadService: BoardReadService,
     private readonly boardIssueReadService: BoardIssueReadService,
     private readonly boardIssueStatusService: BoardIssueStatusService,
-    private readonly boardIssueUpdateService: BoardIssueUpdateService
+    private readonly boardIssueUpdateService: BoardIssueUpdateService,
+    private readonly boardIssueCreateService: BoardIssueCreateService
   ) {}
 
   getModuleInfo(): BoardModuleInfo {
@@ -137,6 +142,20 @@ export class BoardService {
       workspaceId,
       boardId,
       issueId,
+      body
+    );
+  }
+
+  async createBoardIssue(
+    currentUserId: string,
+    workspaceId: string,
+    boardId: string,
+    body: unknown
+  ): Promise<CreateBoardIssueResult> {
+    return this.boardIssueCreateService.createBoardIssue(
+      currentUserId,
+      workspaceId,
+      boardId,
       body
     );
   }
