@@ -1,6 +1,7 @@
 import { HttpException, HttpStatus } from "@nestjs/common";
 
 type AgentApiErrorCode =
+  | "CLIENT_REQUEST_ID_CONFLICT"
   | "CONFIRMATION_EXPIRED"
   | "CONFIRMATION_NOT_PENDING";
 
@@ -29,6 +30,14 @@ export function confirmationNotPending(message: string): HttpException {
   return agentApiError(
     HttpStatus.CONFLICT,
     "CONFIRMATION_NOT_PENDING",
+    message
+  );
+}
+
+export function clientRequestIdConflict(message: string): HttpException {
+  return agentApiError(
+    HttpStatus.CONFLICT,
+    "CLIENT_REQUEST_ID_CONFLICT",
     message
   );
 }
