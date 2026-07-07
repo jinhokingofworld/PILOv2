@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import type {
   GithubAppInstallation,
   GithubOAuthStatus,
+  GithubProjectOAuthStatus,
   GithubProjectV2,
   GithubPullRequest,
   GithubRepository,
@@ -24,6 +25,7 @@ export type GithubConnectLayoutProps = {
   actionError: string | null;
   actionMessage: string | null;
   oauth: GithubOAuthStatus | null;
+  projectOAuth: GithubProjectOAuthStatus | null;
   selectedInstallationId: string;
   selectedInstallation: GithubAppInstallation | undefined;
   installations: GithubAppInstallation[];
@@ -43,16 +45,19 @@ export type GithubConnectLayoutProps = {
   isLoading: boolean;
   isPullRequestsLoading: boolean;
   isDisconnecting: boolean;
+  isDisconnectingProjectOAuth: boolean;
   isDeletingInstallation: boolean;
   isInstallationDeleteRequested: boolean;
   isSyncing: boolean;
-  redirectAction: "oauth" | "installation" | null;
+  redirectAction: "oauth" | "installation" | "project_oauth" | null;
   syncRuns: GithubSyncRun[];
   syncRunsTotal: number;
   syncTarget: GithubSyncTarget;
   onRefresh: () => void;
   onStartOAuth: () => void;
   onDisconnectOAuth: () => void;
+  onStartGithubProjectOAuth: () => void;
+  onDisconnectGithubProjectOAuth: () => void;
   onStartInstallation: () => void;
   onRequestDeleteInstallation: () => void;
   onCancelDeleteInstallation: () => void;
@@ -70,6 +75,7 @@ export function GithubConnectLayout({
   actionError,
   actionMessage,
   oauth,
+  projectOAuth,
   selectedInstallationId,
   selectedInstallation,
   installations,
@@ -89,6 +95,7 @@ export function GithubConnectLayout({
   isLoading,
   isPullRequestsLoading,
   isDisconnecting,
+  isDisconnectingProjectOAuth,
   isDeletingInstallation,
   isInstallationDeleteRequested,
   isSyncing,
@@ -99,6 +106,8 @@ export function GithubConnectLayout({
   onRefresh,
   onStartOAuth,
   onDisconnectOAuth,
+  onStartGithubProjectOAuth,
+  onDisconnectGithubProjectOAuth,
   onStartInstallation,
   onRequestDeleteInstallation,
   onCancelDeleteInstallation,
@@ -174,15 +183,19 @@ export function GithubConnectLayout({
             <GithubConnectSteps
               connected={connected}
               isDisconnecting={isDisconnecting}
+              isDisconnectingProjectOAuth={isDisconnectingProjectOAuth}
               isDeletingInstallation={isDeletingInstallation}
               isInstallationDeleteRequested={isInstallationDeleteRequested}
               isLoading={isLoading}
               oauth={oauth}
+              projectOAuth={projectOAuth}
               onCancelDeleteInstallation={onCancelDeleteInstallation}
               onConfirmDeleteInstallation={onConfirmDeleteInstallation}
               onDisconnectOAuth={onDisconnectOAuth}
+              onDisconnectGithubProjectOAuth={onDisconnectGithubProjectOAuth}
               onRequestDeleteInstallation={onRequestDeleteInstallation}
               onStartInstallation={onStartInstallation}
+              onStartGithubProjectOAuth={onStartGithubProjectOAuth}
               onStartOAuth={onStartOAuth}
               projectsTotal={projectsTotal}
               redirectAction={redirectAction}

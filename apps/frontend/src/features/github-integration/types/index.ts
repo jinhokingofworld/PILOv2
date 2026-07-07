@@ -16,6 +16,12 @@ export type GithubOAuthDisconnect = {
   disconnected: true;
 };
 
+export type GithubProjectOAuthStatus = GithubOAuthStatus;
+
+export type GithubProjectOAuthStart = GithubOAuthStart;
+
+export type GithubProjectOAuthDisconnect = GithubOAuthDisconnect;
+
 export type GithubAppInstallation = {
   id: string;
   workspaceId: string;
