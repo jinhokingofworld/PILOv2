@@ -200,6 +200,10 @@ export class SqlErdRelationShapeUtil extends ShapeUtil<SqlErdRelationShape> {
     return false;
   }
 
+  override canCull() {
+    return false;
+  }
+
   override canResize() {
     return false;
   }

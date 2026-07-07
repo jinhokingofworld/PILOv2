@@ -23,6 +23,7 @@ const BADGE_WIDTH = 30;
 const BADGE_GAP = 4;
 const ROW_SIDE_PADDING = 24;
 const ROW_COLUMN_GAP = 28;
+const ROW_CONTENT_SAFETY_PADDING = 16;
 const TABLE_NAME_CHAR_WIDTH = 13;
 const COLUMN_NAME_CHAR_WIDTH = 10.5;
 const COLUMN_TYPE_CHAR_WIDTH = 9.5;
@@ -77,9 +78,10 @@ export function getSqlErdTableShapeSize(table: ErdTable, fallbackWidth?: number)
     ...table.columns.map(
       (column) =>
         badgeColumnWidth +
+        ROW_COLUMN_GAP * 2 +
         column.name.length * COLUMN_NAME_CHAR_WIDTH +
-        ROW_COLUMN_GAP +
-        column.dataType.length * COLUMN_TYPE_CHAR_WIDTH
+        column.dataType.length * COLUMN_TYPE_CHAR_WIDTH +
+        ROW_CONTENT_SAFETY_PADDING
     ),
     0
   );
