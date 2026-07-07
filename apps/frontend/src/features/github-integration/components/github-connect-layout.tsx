@@ -42,6 +42,8 @@ export type GithubConnectLayoutProps = {
   isLoading: boolean;
   isPullRequestsLoading: boolean;
   isDisconnecting: boolean;
+  isDeletingInstallation: boolean;
+  isInstallationDeleteRequested: boolean;
   isSyncing: boolean;
   redirectAction: "oauth" | "installation" | null;
   syncRuns: GithubSyncRun[];
@@ -51,6 +53,9 @@ export type GithubConnectLayoutProps = {
   onStartOAuth: () => void;
   onDisconnectOAuth: () => void;
   onStartInstallation: () => void;
+  onRequestDeleteInstallation: () => void;
+  onCancelDeleteInstallation: () => void;
+  onConfirmDeleteInstallation: () => void;
   onRepositoryQueryChange: (value: string) => void;
   onSelectRepository: (id: string) => void;
   onSelectProjectV2: (id: string) => void;
@@ -82,6 +87,8 @@ export function GithubConnectLayout({
   isLoading,
   isPullRequestsLoading,
   isDisconnecting,
+  isDeletingInstallation,
+  isInstallationDeleteRequested,
   isSyncing,
   redirectAction,
   syncRuns,
@@ -91,6 +98,9 @@ export function GithubConnectLayout({
   onStartOAuth,
   onDisconnectOAuth,
   onStartInstallation,
+  onRequestDeleteInstallation,
+  onCancelDeleteInstallation,
+  onConfirmDeleteInstallation,
   onRepositoryQueryChange,
   onSelectRepository,
   onSelectProjectV2,
@@ -162,9 +172,14 @@ export function GithubConnectLayout({
             <GithubConnectSteps
               connected={connected}
               isDisconnecting={isDisconnecting}
+              isDeletingInstallation={isDeletingInstallation}
+              isInstallationDeleteRequested={isInstallationDeleteRequested}
               isLoading={isLoading}
               oauth={oauth}
+              onCancelDeleteInstallation={onCancelDeleteInstallation}
+              onConfirmDeleteInstallation={onConfirmDeleteInstallation}
               onDisconnectOAuth={onDisconnectOAuth}
+              onRequestDeleteInstallation={onRequestDeleteInstallation}
               onStartInstallation={onStartInstallation}
               onStartOAuth={onStartOAuth}
               projectsTotal={projectsTotal}

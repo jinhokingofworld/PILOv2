@@ -174,6 +174,116 @@ function projectNode(overrides = {}) {
 }
 
 {
+  const { privateKey } = generateKeyPairSync("rsa", {
+    modulusLength: 2048
+  });
+  const privateKeyPem = privateKey.export({
+    type: "pkcs8",
+    format: "pem"
+  });
+  const originalFetch = globalThis.fetch;
+  let requestUrl = "";
+  let requestOptions = {};
+  globalThis.fetch = async (url, options = {}) => {
+    requestUrl = url.toString();
+    requestOptions = options;
+    return {
+      ok: true,
+      status: 202,
+      async json() {
+        throw new Error("GitHub delete installation should not require JSON");
+      }
+    };
+  };
+
+  try {
+    const result = await new GithubAppClient().deleteInstallation({
+      installationId: 12345678,
+      appId: "12345",
+      privateKey: privateKeyPem,
+      now: () => fixedNow
+    });
+
+    assert.equal(
+      requestUrl,
+      "https://api.github.com/app/installations/12345678"
+    );
+    assert.equal(requestOptions.method, "DELETE");
+    assert.match(requestOptions.headers.Authorization, /^Bearer [^.]+\.[^.]+\.[^.]+$/);
+    assert.equal(requestOptions.headers["X-GitHub-Api-Version"], "2026-03-10");
+    assert.deepEqual(result, {
+      deleted: true,
+      alreadyDeleted: false
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
+{
+  const { privateKey } = generateKeyPairSync("rsa", {
+    modulusLength: 2048
+  });
+  const privateKeyPem = privateKey.export({
+    type: "pkcs8",
+    format: "pem"
+  });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({
+    ok: false,
+    status: 404
+  });
+
+  try {
+    const result = await new GithubAppClient().deleteInstallation({
+      installationId: 12345678,
+      appId: "12345",
+      privateKey: privateKeyPem,
+      now: () => fixedNow
+    });
+
+    assert.deepEqual(result, {
+      deleted: true,
+      alreadyDeleted: true
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
+{
+  const { privateKey } = generateKeyPairSync("rsa", {
+    modulusLength: 2048
+  });
+  const privateKeyPem = privateKey.export({
+    type: "pkcs8",
+    format: "pem"
+  });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({
+    ok: false,
+    status: 403
+  });
+
+  try {
+    await assert.rejects(
+      () =>
+        new GithubAppClient().deleteInstallation({
+          installationId: 12345678,
+          appId: "12345",
+          privateKey: privateKeyPem,
+          now: () => fixedNow
+        }),
+      (error) =>
+        error?.response?.error?.message ===
+        "GitHub App installation uninstall failed"
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
+{
   const originalFetch = globalThis.fetch;
   const privateKeyPem = createPrivateKeyPem();
   const requests = [];

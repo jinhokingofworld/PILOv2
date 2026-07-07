@@ -34,6 +34,7 @@ import type {
 import type {
   GitHubIntegrationModuleInfo,
   GithubAppInstallationCallbackPayload,
+  GithubAppInstallationDeletePayload,
   GithubAppInstallationPayload,
   GithubAppInstallationStartPayload,
   GithubIssuePayload,
@@ -245,6 +246,18 @@ export class GithubIntegrationService {
     return this.githubAppInstallationService.listGithubAppInstallations(
       currentUserId,
       workspaceId
+    );
+  }
+
+  async deleteGithubAppInstallation(
+    currentUserId: string,
+    workspaceId: string,
+    installationId: string
+  ): Promise<GithubAppInstallationDeletePayload> {
+    return this.githubAppInstallationService.deleteGithubAppInstallation(
+      currentUserId,
+      workspaceId,
+      installationId
     );
   }
 

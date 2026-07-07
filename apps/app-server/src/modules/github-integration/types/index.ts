@@ -44,6 +44,14 @@ export interface GithubAppInstallationPayload {
   lastSyncedAt: string | null;
 }
 
+export interface GithubAppInstallationDeletePayload {
+  deleted: true;
+  alreadyDeleted: boolean;
+  installationId: string;
+  githubInstallationId: number;
+  accountLogin: string;
+}
+
 export interface GithubAppInstallationStartPayload {
   installUrl: string;
   state: string;

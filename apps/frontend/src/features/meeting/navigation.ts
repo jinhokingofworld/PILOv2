@@ -11,7 +11,7 @@ export const meetingNavigation: FeatureNavigationItem = {
   href: "/meeting",
   icon: Mic2,
   items: [
-    { title: "회의 입장", href: "/meeting#room" },
-    { title: "회의록", href: "/meeting#report" }
+    { title: "회의 입장", href: "/meeting/#room" },
+    { title: "회의록", href: "/meeting/#report" }
   ]
 };

@@ -30,6 +30,14 @@ export type GithubAppInstallation = {
   lastSyncedAt: string | null;
 };
 
+export type GithubAppInstallationDelete = {
+  deleted: true;
+  alreadyDeleted: boolean;
+  installationId: string;
+  githubInstallationId: number;
+  accountLogin: string;
+};
+
 export type GithubAppInstallationStart = {
   installUrl: string;
   state: string;

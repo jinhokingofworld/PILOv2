@@ -32,6 +32,30 @@ WorkspaceCanvas -> PiloCanvasRuntime -> PiloTldrawCanvas -> TldrawSurface
 - `interactions/`: placement, smart guide, selection stacking
 - `assets/`: image/video asset 생성과 복원
 
+`shapes/code-block/`은 code block shape의 tldraw 연결과 editor UI 책임을 파일 단위로
+분리한다. `PiloCodeBlockShapeUtil`은 shape props schema, geometry, resize,
+component 연결만 담당하고, CodeMirror 설정과 code editor UI는 code-block 하위
+컴포넌트/타입 파일에서 담당한다.
+
+`runtime/`은 `PiloCanvasRuntime`을 조립자로 두고 책임별 파일을 평평하게 나눈다.
+
+- `useCanvasRuntimeHydration`: board 변경 시 초기 shape와 view setting 복원
+- `useCanvasShapePersistence`: freeform shape 변경 감지, local/API 저장, dirty shape 방어
+- `useCanvasViewportQueries`: viewport shape summary 조회와 shape detail lazy loading
+- `useCanvasViewSettingPersistence`: zoom, viewportX, viewportY 저장
+- `useCanvasApiLifecycle`: Canvas enter/leave, unmount 시 queue flush와 pending view setting sync
+- `CanvasZoomControls`: smart guide와 zoom controls UI
+- `canvas-runtime-utils`: runtime hook들이 공유하는 순수 계산 helper와 query key
+- `canvas-runtime-types`: runtime 내부 client/storage mode 타입
+
+`api/` 하위 폴더는 Canvas API client 경계를 책임별로 나눈다.
+
+- `canvas-client.ts`: 외부 import 경로를 유지하는 얇은 entrypoint와 mode 선택
+- `canvas-api-client.ts`: bearer token, baseUrl, 실제 Canvas API request/response 처리
+- `canvas-mock-client.ts`: local/mock mode의 board, shape, view-setting 흐름
+- `canvas-normalizers.ts`: API/mock 응답을 Canvas runtime 입력 형태로 정규화
+- `canvas-types.ts`: API client와 mock client가 공유하는 타입
+
 `TldrawSurface`는 Canvas API/DB 저장 흐름을 소유하지 않는다. PR Review 같은 다른
 도메인은 필요한 경우 이 surface만 가져가고, 자기 도메인 payload와 source of
 truth를 유지해야 한다.

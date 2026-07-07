@@ -127,8 +127,8 @@ assert.doesNotMatch(liveKitHook, /@livekit\/components-react/);
 
 assert.match(meetingNavigation, /title: "음성회의"/);
 assert.match(meetingNavigation, /회의 참여, 녹음, 회의록 확인과 재생성/);
-assert.match(meetingNavigation, /\/meeting#room/);
-assert.match(meetingNavigation, /\/meeting#report/);
+assert.match(meetingNavigation, /\/meeting\/#room/);
+assert.match(meetingNavigation, /\/meeting\/#report/);
 assert.doesNotMatch(meetingNavigation, /\/meeting#recording/);
 
 assert.match(meetingPanel, /"use client"/);

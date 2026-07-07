@@ -175,6 +175,7 @@ function assertNoSecretLookup(database) {
         assert.match(text, /COUNT\(\*\)/i);
         assert.match(text, /FROM github_repositories/i);
         assert.match(text, /workspace_id = \$1/i);
+        assert.match(text, /installation_id IS NOT NULL/i);
         assert.match(text, /archived = false/i);
         assert.match(text, /ILIKE/i);
         assert.deepEqual(values, [workspaceId, "%pilo%"]);
@@ -184,6 +185,7 @@ function assertNoSecretLookup(database) {
     queryRows: [
       (text, values) => {
         assert.match(text, /FROM github_repositories/i);
+        assert.match(text, /installation_id IS NOT NULL/i);
         assert.match(text, /ORDER BY full_name ASC/i);
         assert.deepEqual(values, [workspaceId, "%pilo%", 20, 0]);
         return [repositoryRow()];

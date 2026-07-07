@@ -1,6 +1,6 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { QueryResultRow } from "pg";
-import { badRequest, unauthorized } from "../../common/api-error";
+import { badRequest, notFound, unauthorized } from "../../common/api-error";
 import { DatabaseService } from "../../database/database.service";
 import { WorkspaceService } from "../workspace/workspace.service";
 import {
@@ -20,6 +20,7 @@ import { validateGithubCallbackReturnUrl } from "./github-return-url";
 import { GithubTokenEncryptionService } from "./github-token-encryption.service";
 import type {
   GithubAppInstallationCallbackPayload,
+  GithubAppInstallationDeletePayload,
   GithubAppInstallationPayload,
   GithubAppInstallationStartPayload
 } from "./types";
@@ -283,6 +284,73 @@ export class GithubAppInstallationService {
     );
 
     return rows.map((row) => this.mapGithubInstallation(row));
+  }
+
+  async deleteGithubAppInstallation(
+    currentUserId: string,
+    workspaceId: string,
+    installationId: string
+  ): Promise<GithubAppInstallationDeletePayload> {
+    await this.workspaceService.assertWorkspaceOwnerAccess(
+      currentUserId,
+      workspaceId
+    );
+
+    const row = await this.database.queryOne<GithubInstallationRow>(
+      `
+        SELECT
+          id,
+          workspace_id,
+          github_installation_id,
+          account_login,
+          account_type,
+          repository_selection,
+          permissions,
+          installed_by_user_id,
+          installed_at,
+          suspended_at,
+          last_synced_at
+        FROM github_installations
+        WHERE workspace_id = $1
+          AND id = $2
+      `,
+      [workspaceId, installationId]
+    );
+
+    if (!row) {
+      throw notFound("GitHub App installation not found");
+    }
+
+    const config = this.configService.getGithubAppConfig();
+    const githubInstallationId = this.toNumber(row.github_installation_id);
+    const deleteResult = await this.githubAppClient.deleteInstallation({
+      installationId: githubInstallationId,
+      appId: config.appId,
+      privateKey: config.privateKey,
+      now: config.now
+    });
+
+    const deleted = await this.database.queryOne<QueryResultRow>(
+      `
+        DELETE FROM github_installations
+        WHERE workspace_id = $1
+          AND id = $2
+        RETURNING id
+      `,
+      [workspaceId, installationId]
+    );
+
+    if (!deleted) {
+      throw notFound("GitHub App installation not found");
+    }
+
+    return {
+      deleted: true,
+      alreadyDeleted: deleteResult.alreadyDeleted,
+      installationId: row.id,
+      githubInstallationId,
+      accountLogin: row.account_login
+    };
   }
 
   private mapGithubInstallation(

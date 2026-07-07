@@ -162,9 +162,10 @@ UI Preview는 local 개발 편의 기능이며 실제 bearer session이나 Works
 | `SQS_GITHUB_WEBHOOKS_QUEUE_URL` | GitHub webhook queue URL if consumed |
 | `S3_UPLOADS_BUCKET` | uploads bucket name |
 | `AI_WORKER_CONCURRENCY` | worker 동시 처리 수 |
+| `DATABASE_SSL` | Set to `true` when `DATABASE_URL` points to Supabase/Postgres that requires SSL. |
 | `S3_RECORDINGS_BUCKET` | STT 입력 오디오 파일 bucket |
 | `OPENAI_STT_MODEL` | STT 모델. local 기본값: `gpt-4o-mini-transcribe` |
-| `OPENAI_MEETING_REPORT_MODEL` | 회의록 생성 모델. local 기본값: `gpt-5.1-mini` |
+| `OPENAI_MEETING_REPORT_MODEL` | 회의록 생성 모델. local 기본값: `gpt-5.4-mini` |
 
 ### LiveKit Server / Egress
 

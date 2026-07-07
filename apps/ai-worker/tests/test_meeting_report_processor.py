@@ -1,4 +1,5 @@
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -14,7 +15,11 @@ from app.meeting_report_processor import (
     parse_meeting_report_job,
     serialize_action_items,
 )
-from app.meeting_report_runtime import S3RecordingStorage
+from app.meeting_report_runtime import (
+    OpenAiMeetingReportClient,
+    RuntimeSettings,
+    S3RecordingStorage,
+)
 
 REPORT_ID = "77777777-7777-7777-7777-777777777777"
 MEETING_ID = "33333333-3333-3333-3333-333333333333"
@@ -281,6 +286,53 @@ def test_lock_contention_message_is_left_for_sqs_retry() -> None:
     assert result.delete_message is False
     assert result.reason == "duplicate_in_progress"
     assert repository.release_calls == []
+
+
+def test_runtime_settings_default_meeting_report_model(monkeypatch) -> None:
+    monkeypatch.setenv("SQS_AI_JOBS_QUEUE_URL", "https://sqs.example.com/jobs")
+    monkeypatch.setenv("S3_RECORDINGS_BUCKET", "recordings")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.delenv("OPENAI_MEETING_REPORT_MODEL", raising=False)
+
+    settings = RuntimeSettings.from_env()
+
+    assert settings.openai_meeting_report_model == "gpt-5.4-mini"
+
+
+def test_runtime_settings_reads_database_ssl(monkeypatch) -> None:
+    monkeypatch.setenv("SQS_AI_JOBS_QUEUE_URL", "https://sqs.example.com/jobs")
+    monkeypatch.setenv("S3_RECORDINGS_BUCKET", "recordings")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("DATABASE_SSL", "true")
+
+    settings = RuntimeSettings.from_env()
+
+    assert settings.database_ssl is True
+
+
+def test_openai_transcribe_uses_json_response_format(tmp_path) -> None:
+    audio_path = tmp_path / "recording.m4a"
+    audio_path.write_bytes(b"audio")
+    transcriptions = FakeOpenAiTranscriptions()
+    ai_client = OpenAiMeetingReportClient.__new__(OpenAiMeetingReportClient)
+    ai_client.client = SimpleNamespace(audio=SimpleNamespace(transcriptions=transcriptions))
+    ai_client.stt_model = "gpt-4o-mini-transcribe"
+    ai_client.meeting_report_model = "gpt-5.4-mini"
+
+    transcript = ai_client.transcribe(str(audio_path))
+
+    assert transcript == "회의 내용을 정리합니다."
+    assert transcriptions.kwargs["model"] == "gpt-4o-mini-transcribe"
+    assert transcriptions.kwargs["response_format"] == "json"
+
+
+class FakeOpenAiTranscriptions:
+    def __init__(self) -> None:
+        self.kwargs = None
+
+    def create(self, **kwargs):
+        self.kwargs = kwargs
+        return SimpleNamespace(text="회의 내용을 정리합니다.")
 
 
 class FakeS3Client:
