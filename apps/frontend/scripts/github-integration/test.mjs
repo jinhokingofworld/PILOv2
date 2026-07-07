@@ -36,13 +36,6 @@ const githubConnectPrimitives = await readFile(
   ),
   "utf8"
 );
-const githubConnectSummary = await readFile(
-  new URL(
-    "../../src/features/github-integration/components/github-connect-summary.tsx",
-    import.meta.url
-  ),
-  "utf8"
-);
 const githubConnectSteps = await readFile(
   new URL(
     "../../src/features/github-integration/components/github-connect-steps.tsx",
@@ -92,7 +85,7 @@ assert.match(githubApiClient, /listGithubPullRequests/);
 assert.match(githubApiClient, /startGithubSyncRun/);
 assert.match(githubApiClient, /listGithubSyncRuns/);
 assert.match(githubApiClient, /Authorization/);
-assert.match(githubApiClient, /credentials: "same-origin"/);
+assert.match(githubApiClient, /credentials: "include"/);
 assert.match(githubApiClient, /success === true/);
 assert.doesNotMatch(githubApiClient, /pilo_access_token/);
 assert.match(githubPanel, /useAuthSession/);
@@ -109,14 +102,13 @@ assert.match(githubPanel, /GithubConnectLayout/);
 assert.doesNotMatch(githubPanel, /function StatusPill/);
 assert.doesNotMatch(githubPanel, /function LoadingRows/);
 assert.match(githubConnectLayout, /GithubConnectLayout/);
-assert.match(githubConnectLayout, /summary-strip/);
+assert.doesNotMatch(githubConnectLayout, /GithubConnectSummary/);
+assert.doesNotMatch(githubConnectLayout, /summary-strip/);
 assert.match(githubConnectLayout, /main-grid/);
 assert.match(githubConnectLayout, /PILO GitHub Connect/);
 assert.match(githubConnectPrimitives, /GithubConnectPanel/);
 assert.match(githubConnectPrimitives, /GithubConnectPill/);
 assert.match(githubConnectPrimitives, /GithubConnectEmptyState/);
-assert.match(githubConnectSummary, /GithubConnectSummary/);
-assert.match(githubConnectSummary, /js-metric-install/);
 assert.match(githubConnectSteps, /GithubConnectSteps/);
 assert.match(githubConnectSteps, /step-card/);
 assert.match(githubConnectSteps, /GitHub App 설치/);
@@ -125,7 +117,8 @@ assert.match(githubConnectTables, /repo-table/);
 assert.match(githubConnectTables, /project-table/);
 assert.match(githubConnectSidebar, /GithubConnectSidebar/);
 assert.match(githubConnectSidebar, /job-list/);
-assert.match(githubConnectSidebar, /health-list/);
+assert.doesNotMatch(githubConnectSidebar, /health-list/);
+assert.doesNotMatch(githubConnectSidebar, /HealthRow/);
 assert.match(githubConnectFormat, /formatGithubConnectDateTime/);
 assert.match(githubConnectFormat, /getGithubConnectSyncStatusLabel/);
 assert.doesNotMatch(githubPanel, /window\.confirm/);

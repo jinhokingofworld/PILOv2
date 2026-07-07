@@ -5,12 +5,14 @@ import { WorkspaceModule } from "../workspace/workspace.module";
 import { GithubAppClient } from "./github-app.client";
 import { GithubAppInstallationService } from "./github-app-installation.service";
 import { GithubAppInstallationStateService } from "./github-app-installation-state.service";
+import { GithubCallbackStateService } from "./github-callback-state.service";
 import { GithubIntegrationConfigService } from "./github-integration-config.service";
 import { GithubIntegrationController } from "./github-integration.controller";
 import { GithubIntegrationService } from "./github-integration.service";
 import { GithubOAuthClient } from "./github-oauth.client";
 import { GithubOAuthIntegrationService } from "./github-oauth-integration.service";
 import { GithubOAuthStateService } from "./github-oauth-state.service";
+import { GithubProjectV2SyncTokenService } from "./github-project-v2-sync-token.service";
 import { GithubProjectV2Service } from "./github-project-v2.service";
 import { GithubPullRequestRemoteService } from "./github-pull-request-remote.service";
 import { GithubReviewSubmissionService } from "./github-review-submission.service";
@@ -29,9 +31,11 @@ import { GithubWebhookService } from "./github-webhook.service";
     GithubAppClient,
     GithubAppInstallationService,
     GithubAppInstallationStateService,
+    GithubCallbackStateService,
     GithubOAuthClient,
     GithubOAuthIntegrationService,
     GithubOAuthStateService,
+    GithubProjectV2SyncTokenService,
     GithubProjectV2Service,
     GithubPullRequestRemoteService,
     GithubReviewSubmissionService,

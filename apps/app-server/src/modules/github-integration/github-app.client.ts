@@ -54,13 +54,19 @@ export interface GithubRepositoryPullRequestsRequest
   repo: string;
 }
 
+export interface GithubProjectV2UserAccessTokenRequest {
+  userAccessToken?: string | null;
+}
+
 export interface GithubProjectV2LookupRequest
-  extends GithubAppInstallationTokenRequest {
+  extends GithubAppInstallationTokenRequest,
+    GithubProjectV2UserAccessTokenRequest {
   projectNodeId: string;
 }
 
 export interface GithubProjectV2DiscoveryRequest
-  extends GithubAppInstallationTokenRequest {
+  extends GithubAppInstallationTokenRequest,
+    GithubProjectV2UserAccessTokenRequest {
   accountLogin: string;
   accountType: "User" | "Organization";
 }
@@ -769,7 +775,7 @@ export class GithubAppClient {
   async listProjectV2s(
     input: GithubProjectV2DiscoveryRequest
   ): Promise<GithubProjectV2DiscoveryApiItem[]> {
-    const installationToken = await this.createInstallationAccessToken(input);
+    const graphqlToken = await this.getProjectV2GraphqlToken(input);
     const projects: GithubProjectV2DiscoveryApiItem[] = [];
     let cursor: string | null = null;
     const query =
@@ -779,7 +785,7 @@ export class GithubAppClient {
 
     do {
       const data = await this.fetchGraphqlWithToken(
-        installationToken.token,
+        graphqlToken,
         query,
         {
           login: input.accountLogin,
@@ -801,7 +807,7 @@ export class GithubAppClient {
         const repositoryNodeIds = [
           ...firstRepositoryPage.nodeIds,
           ...(await this.listRemainingProjectV2RepositoryNodeIds(
-            installationToken.token,
+            graphqlToken,
             this.readString(projectNode.id, "GitHub ProjectV2 discovery failed"),
             firstRepositoryPage.endCursor,
             firstRepositoryPage.hasNextPage
@@ -823,9 +829,9 @@ export class GithubAppClient {
   async getProjectV2(
     input: GithubProjectV2LookupRequest
   ): Promise<GithubProjectV2ApiItem> {
-    const installationToken = await this.createInstallationAccessToken(input);
+    const graphqlToken = await this.getProjectV2GraphqlToken(input);
     const data = await this.fetchGraphqlWithToken(
-      installationToken.token,
+      graphqlToken,
       GITHUB_PROJECT_V2_QUERY,
       {
         projectId: input.projectNodeId
@@ -840,13 +846,13 @@ export class GithubAppClient {
   async listProjectV2Fields(
     input: GithubProjectV2LookupRequest
   ): Promise<GithubProjectV2FieldApiItem[]> {
-    const installationToken = await this.createInstallationAccessToken(input);
+    const graphqlToken = await this.getProjectV2GraphqlToken(input);
     const fields: GithubProjectV2FieldApiItem[] = [];
     let cursor: string | null = null;
 
     do {
       const data = await this.fetchGraphqlWithToken(
-        installationToken.token,
+        graphqlToken,
         GITHUB_PROJECT_V2_FIELDS_QUERY,
         {
           projectId: input.projectNodeId,
@@ -869,13 +875,13 @@ export class GithubAppClient {
   async listProjectV2Items(
     input: GithubProjectV2LookupRequest
   ): Promise<GithubProjectV2ItemApiItem[]> {
-    const installationToken = await this.createInstallationAccessToken(input);
+    const graphqlToken = await this.getProjectV2GraphqlToken(input);
     const items: GithubProjectV2ItemApiItem[] = [];
     let cursor: string | null = null;
 
     do {
       const data = await this.fetchGraphqlWithToken(
-        installationToken.token,
+        graphqlToken,
         GITHUB_PROJECT_V2_ITEMS_QUERY,
         {
           projectId: input.projectNodeId,
@@ -984,6 +990,17 @@ export class GithubAppClient {
       commits: pullRequest.commits,
       mergeable
     };
+  }
+
+  private async getProjectV2GraphqlToken(
+    input: GithubProjectV2LookupRequest | GithubProjectV2DiscoveryRequest
+  ): Promise<string> {
+    if (input.userAccessToken) {
+      return input.userAccessToken;
+    }
+
+    const installationToken = await this.createInstallationAccessToken(input);
+    return installationToken.token;
   }
 
   private async fetchGraphqlWithToken(

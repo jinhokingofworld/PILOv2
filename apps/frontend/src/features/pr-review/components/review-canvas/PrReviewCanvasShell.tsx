@@ -24,6 +24,7 @@ import { cn } from "@/lib/utils";
 import type { createPrReviewApiClient } from "@/features/pr-review/api/client";
 import { PrReviewCanvasSurface } from "@/features/pr-review/components/review-canvas/PrReviewCanvasSurface";
 import { PrReviewFileDiffDrawer } from "@/features/pr-review/components/review-canvas/PrReviewFileDiffDrawer";
+import { PrReviewSubmitReviewModal } from "@/features/pr-review/components/review-canvas/PrReviewSubmitReviewModal";
 import type {
   PrReviewCanvas,
   PrReviewConflictStatus,
@@ -38,6 +39,8 @@ type PrReviewApiClient = ReturnType<typeof createPrReviewApiClient>;
 type PrReviewCanvasShellProps = {
   apiClient: PrReviewApiClient;
   onBackToSelection: () => void;
+  onGoToGithub: () => void;
+  onReviewSessionCreated: (session: PrReviewSession) => void;
   pullRequest: PrReviewPullRequest | PrReviewPullRequestDetail | null;
   session: PrReviewSession;
   workspaceId: string;
@@ -108,6 +111,8 @@ function getConflictClassName(status: PrReviewConflictStatus) {
 export function PrReviewCanvasShell({
   apiClient,
   onBackToSelection,
+  onGoToGithub,
+  onReviewSessionCreated,
   pullRequest,
   session,
   workspaceId
@@ -122,6 +127,7 @@ export function PrReviewCanvasShell({
   const [selectedReviewFileId, setSelectedReviewFileId] = useState<
     string | null
   >(null);
+  const [isSubmitReviewModalOpen, setIsSubmitReviewModalOpen] = useState(false);
 
   const loadCanvasData = useCallback(async (options: LoadCanvasDataOptions = {}) => {
     const quiet = options.quiet ?? false;
@@ -178,9 +184,22 @@ export function PrReviewCanvasShell({
     canvas?.totalFileCount ?? summary?.totalFileCount ?? session.totalFileCount;
   const conflictStatus =
     canvas?.conflictStatus ?? summary?.conflictStatus ?? session.conflictStatus;
+  const reviewSubmitted = (summary?.status ?? session.status) === "submitted";
   const progressLabel = `${formatNumber(reviewedCount)} / ${formatNumber(
     totalFileCount
   )}`;
+
+  async function createNewReviewSession() {
+    const pullRequestId = summary?.pullRequestId ?? session.pullRequestId;
+    const nextSession = await apiClient.createReviewSession(
+      workspaceId,
+      pullRequestId
+    );
+
+    setIsSubmitReviewModalOpen(false);
+    setSelectedReviewFileId(null);
+    onReviewSessionCreated(nextSession);
+  }
 
   function startPanelResize(event: ReactPointerEvent<HTMLButtonElement>) {
     event.preventDefault();
@@ -233,9 +252,13 @@ export function PrReviewCanvasShell({
           >
             {getConflictLabel(conflictStatus)}
           </span>
-          <Button disabled type="button">
+          <Button
+            disabled={loadStatus !== "ready" || reviewSubmitted}
+            onClick={() => setIsSubmitReviewModalOpen(true)}
+            type="button"
+          >
             <Send className="size-4" />
-            Review 제출
+            {reviewSubmitted ? "제출 완료" : "Review 제출"}
           </Button>
           <Button disabled type="button" variant="outline">
             <GitMerge className="size-4" />
@@ -296,6 +319,21 @@ export function PrReviewCanvasShell({
           />
         </aside>
       </main>
+
+      {isSubmitReviewModalOpen ? (
+        <PrReviewSubmitReviewModal
+          apiClient={apiClient}
+          onClose={() => setIsSubmitReviewModalOpen(false)}
+          onCreateNewReview={createNewReviewSession}
+          onGoToGithub={onGoToGithub}
+          onSubmitted={() => {
+            void loadCanvasData({ quiet: true });
+          }}
+          pullRequest={pullRequest}
+          session={session}
+          workspaceId={workspaceId}
+        />
+      ) : null}
     </div>
   );
 }

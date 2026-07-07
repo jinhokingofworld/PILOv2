@@ -10,7 +10,10 @@ import type {
   PrReviewPullRequestFile,
   PrReviewRepository,
   PrReviewSession,
+  PrReviewSessionResult,
+  PrReviewSubmission,
   PrReviewSummary,
+  SubmitPrReviewSessionInput,
   UpdatePrReviewFileDecisionInput
 } from "@/features/pr-review/types";
 
@@ -97,6 +100,28 @@ function readApiErrorMessage(payload: unknown) {
           : undefined,
       message: payload.error.message
     };
+  }
+
+  if (isRecord(payload)) {
+    if (typeof payload.message === "string") {
+      return {
+        code: typeof payload.error === "string" ? payload.error : undefined,
+        message: payload.message
+      };
+    }
+
+    if (Array.isArray(payload.message)) {
+      const message = payload.message
+        .filter((item): item is string => typeof item === "string")
+        .join(", ");
+
+      if (message) {
+        return {
+          code: typeof payload.error === "string" ? payload.error : undefined,
+          message
+        };
+      }
+    }
   }
 
   return null;
@@ -392,6 +417,32 @@ export function createPrReviewApiClient({
       return requestPrReviewData<PrReviewCanvas>(
         `${reviewSessionGithubPath(workspaceId, reviewSessionId)}/canvas`,
         undefined,
+        requestOptions
+      );
+    },
+
+    async getReviewSessionResult(
+      workspaceId: string,
+      reviewSessionId: string
+    ) {
+      return requestPrReviewData<PrReviewSessionResult>(
+        `${reviewSessionGithubPath(workspaceId, reviewSessionId)}/result`,
+        undefined,
+        requestOptions
+      );
+    },
+
+    async submitReviewSession(
+      workspaceId: string,
+      reviewSessionId: string,
+      input: SubmitPrReviewSessionInput
+    ) {
+      return requestPrReviewData<PrReviewSubmission>(
+        `${reviewSessionGithubPath(workspaceId, reviewSessionId)}/submissions`,
+        {
+          body: JSON.stringify(input),
+          method: "POST"
+        },
         requestOptions
       );
     },

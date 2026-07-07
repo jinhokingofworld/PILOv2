@@ -15,6 +15,7 @@ import {
   type GithubPullRequestApiItem
 } from "./github-app.client";
 import type { GithubAppRuntimeConfig } from "./github-integration-config.service";
+import { serializeGithubJsonb } from "./github-jsonb";
 import type { GithubSyncTarget } from "./types";
 
 export interface GithubSyncInstallationRow extends QueryResultRow {
@@ -83,6 +84,7 @@ export interface GithubSyncRunContext {
   installation: GithubSyncInstallationRow;
   repository: GithubSyncRepositoryContextRow | null;
   projectV2: GithubSyncProjectV2ContextRow | null;
+  githubUserAccessToken: string | null;
   config: GithubAppRuntimeConfig;
 }
 
@@ -289,6 +291,7 @@ export class GithubSyncExecutorService {
       privateKey: context.config.privateKey,
       accountLogin: context.installation.account_login,
       accountType: context.installation.account_type,
+      userAccessToken: this.getProjectV2UserAccessToken(context),
       now: context.config.now
     });
 
@@ -325,6 +328,7 @@ export class GithubSyncExecutorService {
       appId: context.config.appId,
       privateKey: context.config.privateKey,
       projectNodeId: projectV2.github_project_node_id,
+      userAccessToken: this.getProjectV2UserAccessToken(context),
       now: context.config.now
     });
     await this.upsertGithubProjectV2(context, project);
@@ -344,6 +348,7 @@ export class GithubSyncExecutorService {
       appId: context.config.appId,
       privateKey: context.config.privateKey,
       projectNodeId: projectV2.github_project_node_id,
+      userAccessToken: this.getProjectV2UserAccessToken(context),
       now: context.config.now
     });
     let createdCount = 0;
@@ -378,6 +383,7 @@ export class GithubSyncExecutorService {
       appId: context.config.appId,
       privateKey: context.config.privateKey,
       projectNodeId: projectV2.github_project_node_id,
+      userAccessToken: this.getProjectV2UserAccessToken(context),
       now: context.config.now
     });
     let createdCount = 0;
@@ -504,7 +510,7 @@ export class GithubSyncExecutorService {
         project.createdAt,
         project.updatedAt,
         project.closedAt,
-        project.raw
+        serializeGithubJsonb(project.raw)
       ]
     );
 
@@ -605,7 +611,7 @@ export class GithubSyncExecutorService {
         project.createdAt,
         project.updatedAt,
         project.closedAt,
-        project.raw
+        serializeGithubJsonb(project.raw)
       ]
     );
   }
@@ -647,7 +653,7 @@ export class GithubSyncExecutorService {
         field.name.trim().toLowerCase() === "status",
         field.createdAt,
         field.updatedAt,
-        field.raw
+        serializeGithubJsonb(field.raw)
       ]
     );
 
@@ -800,7 +806,7 @@ export class GithubSyncExecutorService {
         item.position,
         item.createdAt,
         item.updatedAt,
-        item.raw
+        serializeGithubJsonb(item.raw)
       ]
     );
 
@@ -885,7 +891,7 @@ export class GithubSyncExecutorService {
         fieldValue.singleSelectName,
         fieldValue.iterationId,
         fieldValue.iterationTitle,
-        fieldValue.raw,
+        serializeGithubJsonb(fieldValue.raw),
         fieldValue.createdAt,
         fieldValue.updatedAt
       ]
@@ -1067,7 +1073,7 @@ export class GithubSyncExecutorService {
         repository.created_at ?? null,
         repository.updated_at ?? null,
         repository.pushed_at ?? null,
-        repository
+        serializeGithubJsonb(repository)
       ]
     );
 
@@ -1166,13 +1172,13 @@ export class GithubSyncExecutorService {
         issue.user?.login ?? null,
         issue.user?.avatar_url ?? null,
         issue.html_url,
-        issue.labels ?? [],
-        issue.assignees ?? [],
-        issue.milestone ?? null,
+        serializeGithubJsonb(issue.labels ?? []),
+        serializeGithubJsonb(issue.assignees ?? []),
+        serializeGithubJsonb(issue.milestone ?? null),
         issue.created_at ?? null,
         issue.updated_at ?? null,
         issue.closed_at ?? null,
-        issue
+        serializeGithubJsonb(issue)
       ]
     );
 
@@ -1293,7 +1299,7 @@ export class GithubSyncExecutorService {
         pullRequest.updated_at ?? null,
         pullRequest.closed_at ?? null,
         pullRequest.merged_at ?? null,
-        pullRequest
+        serializeGithubJsonb(pullRequest)
       ]
     );
 
@@ -1369,6 +1375,14 @@ export class GithubSyncExecutorService {
     }
 
     return context.projectV2;
+  }
+
+  private getProjectV2UserAccessToken(
+    context: GithubSyncRunContext
+  ): string | undefined {
+    return context.installation.account_type === "User"
+      ? context.githubUserAccessToken ?? undefined
+      : undefined;
   }
 
   private createGithubSyncSummary(

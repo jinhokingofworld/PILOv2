@@ -162,6 +162,11 @@ interface EndRecordingTransactionResult {
   job: MeetingReportJobPayload | null;
 }
 
+interface LeaveMeetingTransactionResult {
+  payload: LeaveMeetingPayload;
+  job: MeetingReportJobPayload | null;
+}
+
 interface MeetingReportRegenerationTransactionResult {
   payload: MeetingReportRegenerationPayload;
   job: MeetingReportJobPayload;
@@ -541,52 +546,97 @@ export class MeetingService {
     meetingId: string
   ): Promise<LeaveMeetingPayload> {
     await this.assertWorkspaceAccess(currentUserId, workspaceId);
-    return this.database.transaction(async (transaction) => {
-      const meeting = await this.findMeetingById(transaction, workspaceId, meetingId, {
-        lockMeeting: true
-      });
+    const result = await this.database.transaction<LeaveMeetingTransactionResult>(
+      async (transaction) => {
+        const meeting = await this.findMeetingById(
+          transaction,
+          workspaceId,
+          meetingId,
+          {
+            lockMeeting: true
+          }
+        );
 
-      if (!meeting) {
-        throw notFound("Meeting not found");
-      }
+        if (!meeting) {
+          throw notFound("Meeting not found");
+        }
 
-      const existingParticipant = await this.findParticipant(
-        transaction,
-        meetingId,
-        currentUserId
-      );
-      if (!existingParticipant) {
-        throw notFound("Participant not found");
-      }
+        const existingParticipant = await this.findParticipant(
+          transaction,
+          meetingId,
+          currentUserId
+        );
+        if (!existingParticipant) {
+          throw notFound("Participant not found");
+        }
 
-      const wasActive = existingParticipant.left_at === null;
-      const participant = await this.markParticipantLeft(
-        transaction,
-        meetingId,
-        currentUserId
-      );
-      const activeParticipantCount = await this.countActiveParticipants(
-        transaction,
-        meetingId
-      );
-      const shouldEndMeeting =
-        wasActive && activeParticipantCount === 0 && meeting.ended_at === null;
-      const endedRecording =
-        shouldEndMeeting && meeting.recording_id !== null
-          ? await this.stopRunningRecording(transaction, meeting)
+        const activeParticipantCount = await this.countActiveParticipants(
+          transaction,
+          meetingId
+        );
+        const wasActive = existingParticipant.left_at === null;
+        const shouldEndMeeting =
+          wasActive && activeParticipantCount === 1 && meeting.ended_at === null;
+
+        const runningRecording =
+          shouldEndMeeting && meeting.recording_id !== null
+            ? await this.findRunningRecording(transaction, meetingId, {
+                lockRecording: true
+              })
+            : null;
+        const stoppedRecording =
+          runningRecording === null
+            ? null
+            : await this.stopRunningRecording(transaction, meeting, runningRecording);
+
+        if (stoppedRecording !== null && stoppedRecording.status !== "COMPLETED") {
+          throw badRequest("Running recording could not be completed before leaving");
+        }
+
+        const reportPreparation =
+          stoppedRecording === null
+            ? { report: null, job: null }
+            : await this.prepareReportForStoppedRecording(transaction, stoppedRecording);
+        const participant = await this.markParticipantLeft(
+          transaction,
+          meetingId,
+          currentUserId
+        );
+        const endedMeeting = shouldEndMeeting
+          ? await this.endMeetingIfStillActive(transaction, workspaceId, meetingId)
           : null;
-      const endedMeeting = shouldEndMeeting
-        ? await this.endMeetingIfStillActive(transaction, workspaceId, meetingId)
-        : null;
 
-      return {
-        participant: this.mapParticipant(participant),
-        meetingEnded: endedMeeting !== null,
-        meeting: this.mapMeeting(endedMeeting ?? meeting),
-        currentRecording:
-          endedRecording === null ? this.mapNullableCurrentRecording(meeting) : null
-      };
-    });
+        return {
+          payload: {
+            participant: this.mapParticipant(participant),
+            meetingEnded: endedMeeting !== null,
+            meeting: this.mapMeeting(endedMeeting ?? meeting),
+            currentRecording:
+              stoppedRecording === null
+                ? this.mapNullableCurrentRecording(meeting)
+                : null
+          },
+          job: reportPreparation.job
+        };
+      }
+    );
+
+    try {
+      await this.enqueueMeetingReportJob(result.job);
+    } catch (error) {
+      if (result.job !== null) {
+        await this.restoreLeaveMeetingAfterReportEnqueueFailure({
+          workspaceId,
+          meetingId,
+          currentUserId,
+          reportId: result.job.reportId
+        });
+      }
+
+      throw error;
+    }
+
+    return result.payload;
   }
 
   async startRecording(
@@ -1670,6 +1720,63 @@ export class MeetingService {
     }
 
     await this.meetingReportJobService.enqueueMeetingReportJob(job);
+  }
+
+  private async restoreLeaveMeetingAfterReportEnqueueFailure(input: {
+    workspaceId: string;
+    meetingId: string;
+    currentUserId: string;
+    reportId: string;
+  }): Promise<void> {
+    await this.database.transaction(async (transaction) => {
+      await transaction.queryOne(
+        `
+          UPDATE meeting_reports
+          SET
+            status = 'FAILED',
+            failed_step = 'STT',
+            error_message = 'Meeting report job could not be enqueued',
+            transcript_text = NULL,
+            summary = NULL,
+            discussion_points = NULL,
+            decisions = NULL,
+            action_item_candidates = '[]'::jsonb,
+            updated_at = now()
+          WHERE id = $1
+            AND status = 'PROCESSING'
+          RETURNING id
+        `,
+        [input.reportId]
+      );
+
+      await transaction.queryOne(
+        `
+          UPDATE meeting_participants
+          SET
+            left_at = NULL,
+            updated_at = now()
+          WHERE meeting_id = $1
+            AND user_id = $2
+            AND left_at IS NOT NULL
+          RETURNING id
+        `,
+        [input.meetingId, input.currentUserId]
+      );
+
+      await transaction.queryOne(
+        `
+          UPDATE meetings
+          SET
+            ended_at = NULL,
+            updated_at = now()
+          WHERE workspace_id = $1
+            AND id = $2
+            AND ended_at IS NOT NULL
+          RETURNING id
+        `,
+        [input.workspaceId, input.meetingId]
+      );
+    });
   }
 
   private async updateRecordingFailed(

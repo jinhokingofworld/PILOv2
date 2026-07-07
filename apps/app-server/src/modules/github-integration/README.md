@@ -26,7 +26,8 @@ API contract: `docs/api/github-integration-api.md`
 - GitHub App 설치 완료 redirect 경로는 GitHub App 설정의 Setup URL에 등록한다.
 - GitHub App installation 연결은 현재 사용자의 GitHub App user access token을 선행 조건으로 두고, callback의 `installation_id`가 해당 사용자에게 접근 가능한 installation인지 검증한 뒤 저장한다.
 - `/user/installations` 조회가 가능한 GitHub App user access token이 필요하다. classic OAuth App token만 저장된 상태면 installation 시작 단계에서 거절한다.
-- Repository/Issue/PR/ProjectV2 조회와 동기화는 GitHub App installation token을 사용한다.
+- Repository/Issue/PR와 organization ProjectV2 조회와 동기화는 GitHub App installation token을 사용한다.
+- personal ProjectV2 조회와 동기화는 현재 사용자의 GitHub App user OAuth token을 사용한다.
 - GitHub Review 제출 공개 API는 PR Review가 소유하고, 이 모듈은 PR Review가 호출하는
   서버 내부 OAuth token/decrypt 및 body-only 제출 adapter를 제공한다.
 - GitHub App `Pull requests: write` permission이 없으면 Review 제출은 권한 부족 에러로

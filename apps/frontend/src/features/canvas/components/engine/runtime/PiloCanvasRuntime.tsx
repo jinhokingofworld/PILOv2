@@ -1,5 +1,6 @@
 "use client";
 
+import { Magnet } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -21,6 +22,8 @@ import {
 import {
   PiloTldrawCanvas,
   type PiloCanvasActions,
+  type PiloCanvasHistoryState,
+  type PiloCanvasSnapState,
 } from "../surface/PiloTldrawCanvas";
 import type {
   PiloCanvasFreeformShape,
@@ -46,6 +49,8 @@ export type CanvasBoardDetail = {
 type PiloCanvasRuntimeProps = {
   board: CanvasBoardDetail;
   canvasClient?: CanvasViewSettingApiClient | null;
+  onHistoryStateChange?: (state: PiloCanvasHistoryState) => void;
+  onSnapStateChange?: (state: PiloCanvasSnapState) => void;
   onReady: (actions: PiloCanvasActions | null) => void;
   storageMode?: "api" | "local";
 };
@@ -79,6 +84,10 @@ const DEFAULT_VIEW_SETTING_SYNC_DEBOUNCE_MS = 360;
 const DEFAULT_VIEWPORT_SHAPE_LOAD_DEBOUNCE_MS = 280;
 const DEFAULT_VIEWPORT_SHAPE_LOAD_MARGIN = 320;
 const CANVAS_SHAPE_DETAIL_MIN_ZOOM = 0.75;
+const noopCanvasHistoryStateChange = () => {};
+const initialCanvasSnapState: PiloCanvasSnapState = {
+  isSmartGuideEnabled: false,
+};
 
 function clampZoom(value: number) {
   return Math.min(8, Math.max(0.12, Math.round(value * 100) / 100));
@@ -99,8 +108,54 @@ function buildFreeformShapesKey(shapes: PiloCanvasFreeformShape[]) {
   return JSON.stringify(shapes);
 }
 
+function buildFreeformShapeKey(shape: PiloCanvasFreeformShape) {
+  return JSON.stringify(shape);
+}
+
 function getFreeformShapeId(shape: PiloCanvasFreeformShape) {
   return typeof shape.id === "string" ? shape.id : null;
+}
+
+function buildFreeformShapeMap(shapes: PiloCanvasFreeformShape[]) {
+  const shapeMap = new Map<string, PiloCanvasFreeformShape>();
+
+  shapes.forEach((shape) => {
+    const shapeId = getFreeformShapeId(shape);
+
+    if (!shapeId) return;
+
+    shapeMap.set(shapeId, shape);
+  });
+
+  return shapeMap;
+}
+
+function getChangedFreeformShapeIds(
+  currentShapes: PiloCanvasFreeformShape[],
+  nextShapes: PiloCanvasFreeformShape[],
+) {
+  const currentShapeMap = buildFreeformShapeMap(currentShapes);
+  const nextShapeMap = buildFreeformShapeMap(nextShapes);
+  const changedShapeIds = new Set<string>();
+
+  nextShapeMap.forEach((nextShape, shapeId) => {
+    const currentShape = currentShapeMap.get(shapeId);
+
+    if (
+      !currentShape ||
+      buildFreeformShapeKey(currentShape) !== buildFreeformShapeKey(nextShape)
+    ) {
+      changedShapeIds.add(shapeId);
+    }
+  });
+
+  currentShapeMap.forEach((_currentShape, shapeId) => {
+    if (!nextShapeMap.has(shapeId)) {
+      changedShapeIds.add(shapeId);
+    }
+  });
+
+  return changedShapeIds;
 }
 
 function mergeFreeformShapesById(
@@ -165,6 +220,8 @@ function normalizeViewSetting(
 export function PiloCanvasRuntime({
   board,
   canvasClient = null,
+  onHistoryStateChange,
+  onSnapStateChange,
   onReady,
   storageMode = "local",
 }: PiloCanvasRuntimeProps) {
@@ -180,6 +237,8 @@ export function PiloCanvasRuntime({
     viewportX: 0,
     viewportY: 0,
   });
+  const [canvasSnapState, setCanvasSnapState] =
+    useState<PiloCanvasSnapState>(initialCanvasSnapState);
   const shapeSyncQueueRef = useRef<CanvasShapeSyncQueue | null>(null);
   const pendingViewSettingRef = useRef<CanvasViewSetting | null>(null);
   const viewSettingRef = useRef<CanvasViewSetting>(viewSetting);
@@ -192,6 +251,8 @@ export function PiloCanvasRuntime({
   const latestViewportBoundsRef = useRef<PiloCanvasViewportBounds | null>(null);
   const shapeDetailCacheRef = useRef(new Map<string, PiloCanvasFreeformShape>());
   const pendingShapeDetailRef = useRef<string | null>(null);
+  const pendingLocalShapeVersionsRef = useRef(new Map<string, number>());
+  const localShapeVersionRef = useRef(0);
   const [canvasHydrationVersion, setCanvasHydrationVersion] = useState(0);
   const [cameraRestoreVersion, setCameraRestoreVersion] = useState(0);
 
@@ -223,6 +284,7 @@ export function PiloCanvasRuntime({
 
       shapeDetailCacheRef.current.clear();
       pendingShapeDetailRef.current = null;
+      pendingLocalShapeVersionsRef.current.clear();
       freeformShapesRef.current = storedFreeformShapes;
       setFreeformShapes(storedFreeformShapes);
       viewSettingRef.current = storedViewSetting;
@@ -319,13 +381,76 @@ export function PiloCanvasRuntime({
     };
   }, [board.id, board.workspaceId, canvasClient, storageMode]);
 
+  function markPendingLocalShapeChanges(
+    currentShapes: PiloCanvasFreeformShape[],
+    nextShapes: PiloCanvasFreeformShape[],
+  ) {
+    const changedShapeIds = getChangedFreeformShapeIds(currentShapes, nextShapes);
+    const nextShapeMap = buildFreeformShapeMap(nextShapes);
+    const pendingVersions = new Map<string, number>();
+
+    changedShapeIds.forEach((shapeId) => {
+      const nextShape = nextShapeMap.get(shapeId);
+      const version = localShapeVersionRef.current + 1;
+
+      localShapeVersionRef.current = version;
+      pendingLocalShapeVersionsRef.current.set(shapeId, version);
+      pendingVersions.set(shapeId, version);
+
+      if (nextShape) {
+        shapeDetailCacheRef.current.set(shapeId, nextShape);
+      } else {
+        shapeDetailCacheRef.current.delete(shapeId);
+      }
+    });
+
+    return pendingVersions;
+  }
+
+  function clearPendingLocalShapeChanges(
+    pendingVersions: Map<string, number>,
+  ) {
+    pendingVersions.forEach((version, shapeId) => {
+      if (pendingLocalShapeVersionsRef.current.get(shapeId) === version) {
+        pendingLocalShapeVersionsRef.current.delete(shapeId);
+      }
+    });
+  }
+
+  const captureDraftFreeformShapes = useCallback(
+    (nextFreeformShapes: PiloCanvasFreeformShape[]) => {
+      if (
+        buildFreeformShapesKey(freeformShapesRef.current) ===
+        buildFreeformShapesKey(nextFreeformShapes)
+      ) {
+        return;
+      }
+
+      if (storageMode === "api" && canvasClient) {
+        markPendingLocalShapeChanges(
+          freeformShapesRef.current,
+          nextFreeformShapes,
+        );
+      }
+
+      freeformShapesRef.current = nextFreeformShapes;
+    },
+    [canvasClient, storageMode],
+  );
+
   const mergeLoadedFreeformShapes = useCallback(
     (loadedShapes: PiloCanvasFreeformShape[]) => {
-      if (!loadedShapes.length) return;
+      const nextLoadedShapes = loadedShapes.filter((shape) => {
+        const shapeId = getFreeformShapeId(shape);
+
+        return !shapeId || !pendingLocalShapeVersionsRef.current.has(shapeId);
+      });
+
+      if (!nextLoadedShapes.length) return;
 
       const mergedShapes = mergeFreeformShapesById(
         freeformShapesRef.current,
-        loadedShapes,
+        nextLoadedShapes,
       );
 
       if (
@@ -355,6 +480,10 @@ export function PiloCanvasRuntime({
         freeformShapesRef.current = nextFreeformShapes;
 
         if (storageMode === "api" && canvasClient) {
+          const pendingLocalShapeVersions = markPendingLocalShapeChanges(
+            currentFreeformShapes,
+            nextFreeformShapes,
+          );
           const shapeSyncQueue = shapeSyncQueueRef.current;
           const syncInput = {
             nextShapes: nextFreeformShapes,
@@ -363,15 +492,30 @@ export function PiloCanvasRuntime({
 
           if (shapeSyncQueue) {
             shapeSyncQueue.enqueue(syncInput);
+
+            if (pendingLocalShapeVersions.size) {
+              void shapeSyncQueue
+                .whenIdle()
+                .then(() =>
+                  clearPendingLocalShapeChanges(pendingLocalShapeVersions),
+                )
+                .catch((error: unknown) => {
+                  console.error("Canvas API shape sync failed", error);
+                });
+            }
           } else {
             void syncCanvasFreeformShapes({
               boardId: board.id,
               canvasClient,
               ...syncInput,
               workspaceId: board.workspaceId,
-            }).catch((error: unknown) => {
-              console.error("Canvas API shape sync failed", error);
-            });
+            })
+              .then(() =>
+                clearPendingLocalShapeChanges(pendingLocalShapeVersions),
+              )
+              .catch((error: unknown) => {
+                console.error("Canvas API shape sync failed", error);
+              });
           }
         } else {
           writeCanvasStorage("freeform-shapes", board.id, nextFreeformShapes);
@@ -537,6 +681,26 @@ export function PiloCanvasRuntime({
     [canvasActions],
   );
 
+  const handleSnapStateChange = useCallback(
+    (state: PiloCanvasSnapState) => {
+      setCanvasSnapState(state);
+      onSnapStateChange?.(state);
+    },
+    [onSnapStateChange],
+  );
+
+  const toggleSmartGuides = useCallback(() => {
+    if (!canvasActions) return;
+
+    const nextState = {
+      isSmartGuideEnabled: !canvasSnapState.isSmartGuideEnabled,
+    };
+
+    setCanvasSnapState(nextState);
+    onSnapStateChange?.(nextState);
+    canvasActions.setSmartGuidesEnabled(nextState.isSmartGuideEnabled);
+  }, [canvasActions, canvasSnapState.isSmartGuideEnabled, onSnapStateChange]);
+
   return (
     <>
       <section className="canvas-content" aria-label="캔버스 보드">
@@ -547,10 +711,15 @@ export function PiloCanvasRuntime({
           hydrationVersion={canvasHydrationVersion}
           initialViewSetting={viewSetting}
           onReady={setCanvasActions}
+          onFreeformShapesDraftChange={captureDraftFreeformShapes}
           onFreeformShapesChange={persistFreeformShapes}
           onViewChange={persistViewSetting}
           onViewportBoundsChange={loadViewportShapes}
           onShapeDetailRequest={loadShapeDetail}
+          onHistoryStateChange={
+            onHistoryStateChange ?? noopCanvasHistoryStateChange
+          }
+          onSnapStateChange={handleSnapStateChange}
         />
       </section>
 
@@ -562,10 +731,15 @@ export function PiloCanvasRuntime({
       >
         <button
           type="button"
-          aria-label="화면 맞춤"
-          onClick={() => canvasActions?.fit()}
+          aria-label="스마트가이드"
+          className={
+            canvasSnapState.isSmartGuideEnabled ? "is-active" : undefined
+          }
+          data-tooltip="스마트가이드"
+          disabled={!canvasActions}
+          onClick={toggleSmartGuides}
         >
-          맞춤
+          <Magnet />
         </button>
         <button
           type="button"

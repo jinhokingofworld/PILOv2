@@ -31,7 +31,7 @@ export function MainShell({ activeFeatureId, children }: MainShellProps) {
           selectedItemId={activeFeature.id}
         />
 
-        <SidebarInset>
+        <SidebarInset className="md:peer-data-[variant=inset]:!m-0 md:peer-data-[variant=inset]:!rounded-none md:peer-data-[variant=inset]:!shadow-none md:peer-data-[variant=inset]:peer-data-[state=collapsed]:!ml-0">
           <header className="flex h-14 shrink-0 items-center gap-2 bg-background px-4">
             <SidebarTrigger />
             <div className="h-5 w-px bg-border" />

@@ -99,6 +99,14 @@ export type PrReviewFileDecisionStatus = Exclude<
   "not_reviewed"
 >;
 
+export type PrReviewSubmitType = "COMMENT" | "APPROVE" | "REQUEST_CHANGES";
+
+export type PrReviewGithubSubmitStatus =
+  | "not_submitted"
+  | "submitting"
+  | "submitted"
+  | "failed";
+
 export type PrReviewSession = {
   id: string;
   pullRequestId: string;
@@ -267,6 +275,66 @@ export type PrReviewFileDiff = {
 export type UpdatePrReviewFileDecisionInput = {
   status: PrReviewFileDecisionStatus;
   comment: string | null;
+};
+
+export type PrReviewStatusCounts = {
+  approved: number;
+  discussionNeeded: number;
+  unknown: number;
+  notReviewed: number;
+  total: number;
+};
+
+export type PrReviewSessionResultFile = {
+  reviewFileId: string;
+  fileName: string;
+  filePath: string;
+  status: PrReviewFileReviewStatus;
+  comment: string | null;
+  reviewedByUserId: string | null;
+  reviewedAt: string | null;
+};
+
+export type PrReviewSessionResult = {
+  reviewSessionId: string;
+  status: PrReviewSessionStatus;
+  reviewResultSummary: string;
+  counts: PrReviewStatusCounts;
+  fileReviewResults: PrReviewSessionResultFile[];
+  readyToSubmit: boolean;
+};
+
+export type PrReviewSubmissionFileResult = {
+  fileName: string;
+  filePath: string;
+  status: PrReviewFileReviewStatus;
+  comment: string | null;
+};
+
+export type PrReviewSubmissionListItem = {
+  id: string;
+  sessionId: string;
+  submitType: PrReviewSubmitType;
+  githubSubmitStatus: PrReviewGithubSubmitStatus;
+  githubReviewId: string | null;
+  githubReviewUrl: string | null;
+  submittedByUserId: string | null;
+  submittedByGithubLogin: string | null;
+  errorMessage: string | null;
+  submittedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type PrReviewSubmission = PrReviewSubmissionListItem & {
+  reviewBody: string;
+  reviewResultSummary: string | null;
+  fileReviewResults: PrReviewSubmissionFileResult[];
+};
+
+export type SubmitPrReviewSessionInput = {
+  submitType: PrReviewSubmitType;
+  reviewBody: string;
 };
 
 export type ListPrReviewRepositoriesQuery = {

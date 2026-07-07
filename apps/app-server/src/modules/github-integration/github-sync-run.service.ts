@@ -5,6 +5,8 @@ import { DatabaseService } from "../../database/database.service";
 import { WorkspaceService } from "../workspace/workspace.service";
 import { ListGithubSyncRunsQuery, StartGithubSyncRunRequest } from "./dto";
 import { GithubIntegrationConfigService } from "./github-integration-config.service";
+import { serializeGithubJsonb } from "./github-jsonb";
+import { GithubProjectV2SyncTokenService } from "./github-project-v2-sync-token.service";
 import {
   GithubSyncExecutorService,
   type GithubSyncInstallationRow,
@@ -75,7 +77,8 @@ export class GithubSyncRunService {
     private readonly database: DatabaseService,
     private readonly configService: GithubIntegrationConfigService,
     private readonly workspaceService: WorkspaceService,
-    private readonly syncExecutorService: GithubSyncExecutorService
+    private readonly syncExecutorService: GithubSyncExecutorService,
+    private readonly projectV2SyncTokenService: GithubProjectV2SyncTokenService
   ) {}
 
   async startGithubSyncRun(
@@ -136,12 +139,21 @@ export class GithubSyncRunService {
 
     try {
       const config = this.configService.getGithubAppConfig();
+      const githubUserAccessToken =
+        await this.projectV2SyncTokenService.resolvePersonalProjectV2UserAccessToken(
+          {
+            currentUserId,
+            installation,
+            requiresProjectV2Access: this.requiresProjectV2Access(target)
+          }
+        );
       const summary = await this.syncExecutorService.runGithubSyncTarget(target, {
         currentUserId,
         workspaceId,
         installation,
         repository,
         projectV2,
+        githubUserAccessToken,
         config
       });
       const completed = await this.completeGithubSyncRunSuccess(syncRun.id, summary);
@@ -345,7 +357,7 @@ export class GithubSyncRunService {
         summary.createdCount,
         summary.updatedCount,
         summary.skippedCount,
-        summary.cursor
+        serializeGithubJsonb(summary.cursor)
       ]
     );
 
@@ -399,11 +411,7 @@ export class GithubSyncRunService {
     const fallback = "GitHub sync failed";
     let message: string | null = null;
 
-    if (error instanceof Error && error.message) {
-      message = error.message;
-    }
-
-    if (!message && typeof error === "object" && error !== null) {
+    if (typeof error === "object" && error !== null) {
       const response = (error as { getResponse?: () => unknown }).getResponse?.();
       const responseMessage =
         typeof response === "object" && response !== null
@@ -412,6 +420,10 @@ export class GithubSyncRunService {
       if (typeof responseMessage === "string" && responseMessage.trim()) {
         message = responseMessage;
       }
+    }
+
+    if (!message && error instanceof Error && error.message) {
+      message = error.message;
     }
 
     return (message ?? fallback).slice(0, 1000);
@@ -434,6 +446,15 @@ export class GithubSyncRunService {
           AND id = $2
       `,
       [workspaceId, installationId]
+    );
+  }
+
+  private requiresProjectV2Access(target: GithubSyncTarget): boolean {
+    return (
+      target === "full" ||
+      target === "project_v2" ||
+      target === "project_v2_fields" ||
+      target === "project_v2_items"
     );
   }
 

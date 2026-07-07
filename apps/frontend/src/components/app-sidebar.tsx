@@ -16,7 +16,7 @@ import {
   UserRound
 } from "lucide-react";
 
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   Collapsible,
   CollapsibleContent,
@@ -93,7 +93,8 @@ const workspaces = [
 const currentUser = {
   name: "동현",
   email: "donghyun@pilo.local",
-  initials: "DH"
+  initials: "DH",
+  avatarUrl: null
 };
 
 export function AppSidebar({
@@ -146,7 +147,8 @@ export function AppSidebar({
     ? {
         name: authSession.user.name ?? "PILO 사용자",
         email: authSession.user.email ?? "이메일 없음",
-        initials: getUserInitials(authSession.user.name, authSession.user.email)
+        initials: getUserInitials(authSession.user.name, authSession.user.email),
+        avatarUrl: authSession.user.avatarUrl
       }
     : currentUser;
   const selectedItem = items.find((item) => item.id === selectedItemId);
@@ -467,7 +469,7 @@ export function AppSidebar({
                         render={
                           <SidebarMenuButton
                             aria-current={isActive ? "page" : undefined}
-                            className="transition-colors data-[active=true]:shadow-sm"
+                            className="transition-colors group-data-[collapsible=icon]:justify-center data-[active=true]:shadow-sm"
                             isActive={isActive}
                             size="lg"
                             tooltip={item.title}
@@ -475,15 +477,12 @@ export function AppSidebar({
                         }
                       >
                         <item.icon />
-                        <div className="grid flex-1 text-left leading-tight">
+                        <div className="grid flex-1 text-left leading-tight group-data-[collapsible=icon]:hidden">
                           <span className="truncate">{item.title}</span>
-                          <span className="truncate text-xs text-muted-foreground">
-                            {item.description}
-                          </span>
                         </div>
                         <ChevronRight
                           className={cn(
-                            "ml-auto size-4 transition-transform",
+                            "ml-auto size-4 transition-transform group-data-[collapsible=icon]:hidden",
                             isOpen && "rotate-90"
                           )}
                         />
@@ -524,6 +523,10 @@ export function AppSidebar({
             <DropdownMenu>
               <DropdownMenuTrigger render={<SidebarMenuButton size="lg" />}>
                 <Avatar size="sm">
+                  <AvatarImage
+                    alt={displayUser.name}
+                    src={displayUser.avatarUrl || undefined}
+                  />
                   <AvatarFallback>{displayUser.initials}</AvatarFallback>
                 </Avatar>
                 <div className="grid flex-1 text-left text-sm leading-tight">
@@ -546,6 +549,10 @@ export function AppSidebar({
                   <DropdownMenuLabel className="p-0 font-normal">
                     <div className="flex items-center gap-2 px-1 py-1.5 text-left text-sm">
                       <Avatar>
+                        <AvatarImage
+                          alt={displayUser.name}
+                          src={displayUser.avatarUrl || undefined}
+                        />
                         <AvatarFallback>{displayUser.initials}</AvatarFallback>
                       </Avatar>
                       <div className="grid flex-1 leading-tight">

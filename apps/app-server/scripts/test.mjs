@@ -66,7 +66,8 @@ const terraformSecretsModule = await readSource(
 
 assert.match(main, /setGlobalPrefix\("api\/v1"\)/);
 assert.match(main, /enableCors/);
-assert.match(main, /credentials: false/);
+assert.match(main, /credentials: true/);
+assert.match(main, /FRONTEND_URL/);
 assert.match(main, /methods: \["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"\]/);
 assert.match(main, /allowedHeaders: \["Authorization", "Content-Type", "Accept"\]/);
 assert.match(controller, /@Get\("health"\)/);
@@ -197,6 +198,9 @@ assert.match(canvasService, /DELETE FROM canvas_freeform_shapes/);
 assert.match(canvasService, /permanentlyDeletedShapeCount/);
 assert.match(canvasService, /SET deleted_at = now\(\)/);
 assert.match(canvasService, /deleted_at IS NULL/);
+assert.match(canvasService, /ON CONFLICT \(id\) DO UPDATE/);
+assert.match(canvasService, /deleted_at = NULL/);
+assert.match(canvasService, /canvas_freeform_shapes\.deleted_at IS NOT NULL/);
 assert.match(meetingModule, /DatabaseModule/);
 assert.match(meetingModule, /WorkspaceModule/);
 assert.match(meetingModule, /LiveKitEgressService/);
