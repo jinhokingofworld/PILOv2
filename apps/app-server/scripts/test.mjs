@@ -56,6 +56,9 @@ const liveKitTokenService = await readSource(
 const workspaceMeetingConstraintMigration = await readSource(
   "../../../db/migrations/006_update_workspace_and_meeting_recording_constraints.sql"
 );
+const workspaceMembershipMigration = await readSource(
+  "../../../db/migrations/007_create_workspace_memberships_and_invitations.sql"
+);
 const devTerraformMain = await readSource("../../../infra/envs/dev/main.tf");
 const terraformSecretsModule = await readSource(
   "../../../infra/modules/secrets/main.tf"
@@ -132,14 +135,33 @@ assert.match(githubLoginOAuthClient, /api\.github\.com\/user\/emails/);
 assert.match(workspaceController, /@Controller\("workspaces"\)/);
 assert.match(workspaceController, /@Get\(\)/);
 assert.match(workspaceController, /@Get\(":workspaceId"\)/);
-assert.match(workspaceService, /WHERE owner_user_id = \$1/);
-assert.match(workspaceService, /ORDER BY created_at ASC/);
+assert.match(workspaceController, /@Get\(":workspaceId\/members"\)/);
+assert.match(workspaceController, /@Delete\(":workspaceId\/members\/:userId"\)/);
+assert.match(workspaceController, /@Get\(":workspaceId\/invitations"\)/);
+assert.match(workspaceController, /@Post\(":workspaceId\/invitations"\)/);
+assert.match(workspaceController, /@Controller\("workspace-invitations"\)/);
+assert.match(workspaceController, /@Post\(":invitationToken\/accept"\)/);
+assert.match(workspaceService, /FROM workspace_members wm/);
+assert.match(workspaceService, /JOIN workspaces w/);
+assert.match(workspaceService, /WHERE wm\.user_id = \$1/);
+assert.match(workspaceService, /ORDER BY wm\.joined_at ASC, w\.created_at ASC/);
 assert.match(workspaceService, /assertWorkspaceAccess/);
+assert.match(workspaceService, /assertWorkspaceOwnerAccess/);
 assert.match(workspaceService, /ensureDefaultWorkspaceForUser/);
 assert.match(workspaceService, /INSERT INTO workspaces \(name, owner_user_id\)/);
 assert.match(workspaceService, /ON CONFLICT \(owner_user_id\) WHERE owner_user_id IS NOT NULL/);
+assert.match(workspaceService, /INSERT INTO workspace_members/);
+assert.match(workspaceService, /workspace_invitations/);
+assert.match(workspaceService, /hashInvitationToken/);
+assert.match(workspaceService, /accepted_by_user_id/);
 assert.match(workspaceMeetingConstraintMigration, /unique_workspace_per_owner_user_id/);
 assert.match(workspaceMeetingConstraintMigration, /WHERE owner_user_id IS NOT NULL/);
+assert.match(workspaceMembershipMigration, /CREATE TABLE public\.workspace_members/);
+assert.match(workspaceMembershipMigration, /CREATE TABLE public\.workspace_invitations/);
+assert.match(workspaceMembershipMigration, /UNIQUE \(workspace_id, user_id\)/);
+assert.match(workspaceMembershipMigration, /unique_pending_workspace_invitation_email/);
+assert.match(workspaceMembershipMigration, /ENABLE ROW LEVEL SECURITY/);
+assert.match(workspaceMembershipMigration, /ON CONFLICT \(workspace_id, user_id\) DO NOTHING/);
 assert.match(canvasModule, /controllers: \[CanvasController\]/);
 assert.match(canvasModule, /providers: \[CanvasService\]/);
 assert.match(canvasController, /@Controller\("workspaces\/:workspaceId"\)/);

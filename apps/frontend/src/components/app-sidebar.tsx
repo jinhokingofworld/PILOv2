@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { MouseEvent } from "react";
+import type { FormEvent, MouseEvent } from "react";
 import { useRouter } from "next/navigation";
 import {
   BadgeCheck,
@@ -10,8 +10,9 @@ import {
   ChevronRight,
   GalleryVerticalEnd,
   LogOut,
-  Plus,
+  Send,
   Sparkles,
+  X,
   UserRound
 } from "lucide-react";
 
@@ -31,6 +32,7 @@ import {
   DropdownMenuShortcut,
   DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
 import {
   Sidebar,
   SidebarContent,
@@ -50,6 +52,12 @@ import {
   useSidebar
 } from "@/components/ui/sidebar";
 import { useAuthSession } from "@/features/auth";
+import {
+  createWorkspaceInvitation,
+  listWorkspaceInvitations,
+  revokeWorkspaceInvitation,
+  type WorkspaceInvitation
+} from "@/features/auth/api/client";
 import type { FeatureNavigationItem } from "@/features/navigation-types";
 import { cn } from "@/lib/utils";
 
@@ -103,11 +111,24 @@ export function AppSidebar({
   const [openMenuIds, setOpenMenuIds] = useState<Record<string, boolean>>({
     [selectedItemId]: true
   });
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteStatus, setInviteStatus] = useState<string | null>(null);
+  const [inviteError, setInviteError] = useState<string | null>(null);
+  const [inviteUrl, setInviteUrl] = useState<string | null>(null);
+  const [pendingInvitations, setPendingInvitations] = useState<
+    WorkspaceInvitation[]
+  >([]);
+  const [isInviteSubmitting, setIsInviteSubmitting] = useState(false);
+  const activeWorkspaceDetail = authSession?.activeWorkspace;
+  const canManageWorkspace = activeWorkspaceDetail?.role === "owner";
   const workspaceOptions =
     authSession?.workspaces.map((workspace) => ({
       id: workspace.id,
       name: workspace.name,
-      description: workspace.isOwner ? "개인 워크스페이스" : "워크스페이스",
+      description:
+        workspace.role === "owner" || workspace.isOwner
+          ? "Owner 워크스페이스"
+          : "Member 워크스페이스",
       icon: GalleryVerticalEnd
     })) ?? workspaces.map((workspace) => ({ ...workspace, id: workspace.name }));
   const activeWorkspace =
@@ -137,6 +158,42 @@ export function AppSidebar({
     }));
     setActiveSubItemHref(selectedItem?.href);
   }, [selectedItem?.href, selectedItemId]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!authSession || !activeWorkspaceDetail || !canManageWorkspace) {
+      setPendingInvitations([]);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const accessToken = authSession.accessToken;
+    const workspaceId = activeWorkspaceDetail.id;
+
+    async function loadInvitations() {
+      try {
+        const invitations = await listWorkspaceInvitations(accessToken, workspaceId);
+
+        if (!cancelled) {
+          setPendingInvitations(
+            invitations.filter((invitation) => invitation.status === "pending")
+          );
+        }
+      } catch {
+        if (!cancelled) {
+          setPendingInvitations([]);
+        }
+      }
+    }
+
+    void loadInvitations();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeWorkspaceDetail?.id, authSession, canManageWorkspace]);
 
   const handleSelectItem = (
     itemId: string,
@@ -168,6 +225,77 @@ export function AppSidebar({
     }
 
     setActiveWorkspaceIndex(index);
+  };
+
+  const handleSubmitInvitation = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (
+      !authSession ||
+      !activeWorkspaceDetail ||
+      !canManageWorkspace ||
+      isInviteSubmitting
+    ) {
+      return;
+    }
+
+    setInviteError(null);
+    setInviteStatus(null);
+    setInviteUrl(null);
+    setIsInviteSubmitting(true);
+
+    void createWorkspaceInvitation(
+      authSession.accessToken,
+      activeWorkspaceDetail.id,
+      inviteEmail
+    )
+      .then((result) => {
+        setInviteEmail("");
+        setInviteStatus(`${result.invitation.email} 초대 생성됨`);
+        setInviteUrl(result.acceptUrl);
+        setPendingInvitations((currentInvitations) => [
+          result.invitation,
+          ...currentInvitations.filter(
+            (invitation) => invitation.id !== result.invitation.id
+          )
+        ]);
+      })
+      .catch((error: unknown) => {
+        setInviteError(
+          error instanceof Error ? error.message : "초대 생성에 실패했습니다"
+        );
+      })
+      .finally(() => {
+        setIsInviteSubmitting(false);
+      });
+  };
+
+  const handleRevokeInvitation = (invitationId: string) => {
+    if (!authSession || !activeWorkspaceDetail || !canManageWorkspace) {
+      return;
+    }
+
+    setInviteError(null);
+
+    void revokeWorkspaceInvitation(
+      authSession.accessToken,
+      activeWorkspaceDetail.id,
+      invitationId
+    )
+      .then((invitation) => {
+        setPendingInvitations((currentInvitations) =>
+          currentInvitations.filter(
+            (currentInvitation) => currentInvitation.id !== invitation.id
+          )
+        );
+        setInviteStatus(`${invitation.email} 초대 취소됨`);
+      })
+      .catch((error: unknown) => {
+        setInviteError(
+          error instanceof Error ? error.message : "초대 취소에 실패했습니다"
+        );
+      });
   };
 
   const handleLogout = () => {
@@ -223,15 +351,88 @@ export function AppSidebar({
                     </DropdownMenuItem>
                   ))}
                 </DropdownMenuGroup>
-                <DropdownMenuSeparator />
-                <DropdownMenuGroup>
-                  <DropdownMenuItem className="gap-2 p-2">
-                    <div className="flex size-6 items-center justify-center rounded-md border bg-background">
-                      <Plus className="size-3.5" />
-                    </div>
-                    <span className="font-medium">워크스페이스 추가</span>
-                  </DropdownMenuItem>
-                </DropdownMenuGroup>
+                {canManageWorkspace ? (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuGroup>
+                      <DropdownMenuLabel>멤버 관리</DropdownMenuLabel>
+                      <div
+                        className="space-y-2 px-2 pb-2"
+                        onClick={(event) => event.stopPropagation()}
+                        onKeyDown={(event) => event.stopPropagation()}
+                      >
+                        <form
+                          className="flex items-center gap-2"
+                          onSubmit={handleSubmitInvitation}
+                        >
+                          <Input
+                            aria-label="초대 이메일"
+                            className="h-8"
+                            onChange={(event) =>
+                              setInviteEmail(event.target.value)
+                            }
+                            placeholder="member@example.com"
+                            type="email"
+                            value={inviteEmail}
+                          />
+                          <button
+                            aria-label="멤버 초대"
+                            className="inline-flex h-8 shrink-0 items-center gap-1 rounded-md bg-primary px-2 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+                            disabled={isInviteSubmitting || inviteEmail.trim() === ""}
+                            type="submit"
+                          >
+                            <Send className="size-3.5" />
+                            초대
+                          </button>
+                        </form>
+                        {inviteError ? (
+                          <p className="text-xs text-destructive">
+                            {inviteError}
+                          </p>
+                        ) : null}
+                        {inviteStatus ? (
+                          <p className="text-xs text-muted-foreground">
+                            {inviteStatus}
+                          </p>
+                        ) : null}
+                        {inviteUrl ? (
+                          <p className="line-clamp-2 break-all text-[11px] text-muted-foreground">
+                            {inviteUrl}
+                          </p>
+                        ) : null}
+                        {pendingInvitations.length > 0 ? (
+                          <div className="space-y-1">
+                            {pendingInvitations.slice(0, 3).map((invitation) => (
+                              <div
+                                className="flex items-center gap-2 rounded-md border bg-background px-2 py-1.5"
+                                key={invitation.id}
+                              >
+                                <div className="min-w-0 flex-1">
+                                  <p className="truncate text-xs font-medium">
+                                    {invitation.email}
+                                  </p>
+                                  <p className="text-[11px] text-muted-foreground">
+                                    pending
+                                  </p>
+                                </div>
+                                <button
+                                  aria-label="초대 취소"
+                                  className="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                                  onClick={() =>
+                                    handleRevokeInvitation(invitation.id)
+                                  }
+                                  type="button"
+                                >
+                                  <X className="size-3.5" />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+                    </DropdownMenuGroup>
+                  </>
+                ) : null}
               </DropdownMenuContent>
             </DropdownMenu>
           </SidebarMenuItem>

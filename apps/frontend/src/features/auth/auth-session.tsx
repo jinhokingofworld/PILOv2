@@ -33,6 +33,7 @@ export type AuthSessionData = {
   user: UserProfile;
   workspaces: Workspace[];
   activeWorkspaceId: string;
+  activeWorkspace: Workspace;
 };
 
 type AuthSessionContextValue = AuthSessionData & {
@@ -69,6 +70,7 @@ const devPreviewWorkspace: Workspace = {
   id: PILO_DEV_PREVIEW_WORKSPACE_ID,
   name: "PILO UI Preview",
   ownerUserId: DEV_PREVIEW_USER_ID,
+  role: "owner",
   isOwner: true,
   createdAt: DEV_PREVIEW_TIMESTAMP,
   updatedAt: DEV_PREVIEW_TIMESTAMP
@@ -131,13 +133,18 @@ export function AuthGate({ children }: { children: ReactNode }) {
         return;
       }
 
-      saveSelectedWorkspaceId(workspaceId);
+      const activeWorkspace =
+        state.session.workspaces.find((workspace) => workspace.id === workspaceId) ??
+        state.session.activeWorkspace;
+
+      saveSelectedWorkspaceId(activeWorkspace.id);
       setState({
         status: "ready",
         message: state.message,
         session: {
           ...state.session,
-          activeWorkspaceId: workspaceId
+          activeWorkspaceId: activeWorkspace.id,
+          activeWorkspace
         }
       });
     },
@@ -200,7 +207,8 @@ export async function loadAuthSessionEntry(
       accessToken,
       user: devPreviewUser,
       workspaces: [devPreviewWorkspace],
-      activeWorkspaceId: devPreviewWorkspace.id
+      activeWorkspaceId: devPreviewWorkspace.id,
+      activeWorkspace: devPreviewWorkspace
     };
   }
 
@@ -222,6 +230,7 @@ export async function loadAuthSessionEntry(
     accessToken,
     user,
     workspaces,
-    activeWorkspaceId: activeWorkspace.id
+    activeWorkspaceId: activeWorkspace.id,
+    activeWorkspace
   };
 }
