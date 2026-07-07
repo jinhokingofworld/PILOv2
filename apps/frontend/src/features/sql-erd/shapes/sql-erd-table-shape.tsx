@@ -48,6 +48,7 @@ export type SqlErdTableShapeProps = {
   tableName: string;
   schemaName: string | null;
   badgeColumnWidth: number;
+  selectedColumnId: string | null;
   columns: SqlErdTableColumnShapeProps[];
 };
 
@@ -258,10 +259,12 @@ function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
         <div className="divide-y divide-slate-100">
           {shape.props.columns.map((column, columnIndex) => {
             const badges = getColumnBadges(column);
+            const isSelected = shape.props.selectedColumnId === column.id;
 
             return (
               <div
-                className="grid h-[42px] items-center px-6 font-mono text-[20px] leading-none"
+                aria-pressed={isSelected}
+                className="grid h-[42px] cursor-pointer items-center px-6 font-mono text-[20px] leading-none outline-none transition-colors focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-inset"
                 data-sqltoerd-column-id={column.id}
                 key={column.id}
                 onClick={(event) => {
@@ -279,9 +282,16 @@ function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
                 }}
                 role="button"
                 style={{
-                  backgroundColor: columnIndex % 2 === 0 ? "#ffffff" : "#f8fafc",
+                  backgroundColor: isSelected
+                    ? "#eff6ff"
+                    : columnIndex % 2 === 0
+                      ? "#ffffff"
+                      : "#f8fafc",
+                  boxShadow: isSelected
+                    ? "inset 3px 0 0 rgba(37, 99, 235, 0.85)"
+                    : undefined,
                   columnGap: ROW_COLUMN_GAP,
-                  gridTemplateColumns: `${shape.props.badgeColumnWidth}px max-content max-content`
+                  gridTemplateColumns: `${shape.props.badgeColumnWidth}px max-content minmax(max-content, 1fr)`
                 }}
                 tabIndex={0}
               >
@@ -298,7 +308,7 @@ function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
                 <span className="whitespace-nowrap text-slate-700">
                   {column.name}
                 </span>
-                <span className="whitespace-nowrap text-right text-slate-400">
+                <span className="justify-self-end whitespace-nowrap text-right text-slate-400">
                   {column.dataType.toLowerCase()}
                 </span>
               </div>
@@ -320,6 +330,7 @@ export class SqlErdTableShapeUtil extends ShapeUtil<SqlErdTableShape> {
     tableName: T.string,
     schemaName: T.nullable(T.string),
     badgeColumnWidth: T.number,
+    selectedColumnId: T.nullable(T.string),
     columns: T.arrayOf(
       T.object({
         id: T.string,
@@ -349,6 +360,7 @@ export class SqlErdTableShapeUtil extends ShapeUtil<SqlErdTableShape> {
       tableName: "",
       schemaName: null,
       badgeColumnWidth: BADGE_MIN_COLUMN_WIDTH,
+      selectedColumnId: null,
       columns: []
     };
   }

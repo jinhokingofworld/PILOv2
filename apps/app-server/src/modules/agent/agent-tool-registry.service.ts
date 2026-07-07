@@ -1,13 +1,23 @@
 import { Injectable } from "@nestjs/common";
 import { CalendarAgentToolsService } from "./tools/calendar-agent-tools.service";
+import { MeetingAgentToolsService } from "./tools/meeting-agent-tools.service";
 import type { AgentToolDefinition } from "./types/agent-tool.types";
 
 @Injectable()
 export class AgentToolRegistryService {
   private readonly definitions = new Map<string, AgentToolDefinition<unknown>>();
 
-  constructor(calendarAgentToolsService: CalendarAgentToolsService) {
-    this.registerMany(calendarAgentToolsService.listDefinitions());
+  constructor(
+    calendarAgentToolsService?: CalendarAgentToolsService,
+    meetingAgentToolsService?: MeetingAgentToolsService
+  ) {
+    if (calendarAgentToolsService) {
+      this.registerMany(calendarAgentToolsService.listDefinitions());
+    }
+
+    if (meetingAgentToolsService) {
+      this.registerMany(meetingAgentToolsService.listDefinitions());
+    }
   }
 
   listDefinitions(): AgentToolDefinition<unknown>[] {

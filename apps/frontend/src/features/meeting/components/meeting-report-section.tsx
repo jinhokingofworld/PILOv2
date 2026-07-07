@@ -11,20 +11,14 @@ import {
   RefreshCw,
   RotateCcw,
   Search,
+  X,
   XCircle
 } from "lucide-react";
+import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetFooter,
-  SheetHeader,
-  SheetTitle
-} from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { MeetingWorkspaceData } from "@/features/meeting/hooks/use-meeting-workspace-data";
 import type {
@@ -267,7 +261,7 @@ function ReportTextBlock({
   );
 }
 
-function MeetingReportDetailSheet({
+function MeetingReportDetailModal({
   detailError,
   detailStatus,
   onClose,
@@ -289,180 +283,202 @@ function MeetingReportDetailSheet({
   );
 
   return (
-    <Sheet open={open} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
-      <SheetContent className="w-full sm:max-w-3xl">
-        <SheetHeader>
-          <SheetTitle>회의록 상세</SheetTitle>
-          <SheetDescription>
-            {report ? formatReportDateTime(report.createdAt) : "불러오는 중"}
-          </SheetDescription>
-        </SheetHeader>
+    <DialogPrimitive.Root
+      open={open}
+      onOpenChange={(nextOpen) => !nextOpen && onClose()}
+    >
+      <DialogPrimitive.Portal>
+        <DialogPrimitive.Backdrop className="fixed inset-0 z-50 bg-black/20 backdrop-blur-xs transition-opacity duration-150 data-ending-style:opacity-0 data-starting-style:opacity-0" />
+        <DialogPrimitive.Popup className="fixed top-1/2 left-1/2 z-50 flex max-h-[min(760px,calc(100vh-2rem))] w-[calc(100vw-2rem)] max-w-4xl -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl border bg-popover text-popover-foreground shadow-2xl shadow-slate-950/20 outline-none transition duration-150 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0">
+          <div className="border-b p-5 pr-14">
+            <DialogPrimitive.Title className="font-heading text-lg font-semibold">
+              회의록 상세
+            </DialogPrimitive.Title>
+            <DialogPrimitive.Description className="mt-1 text-sm text-muted-foreground">
+              {report ? formatReportDateTime(report.createdAt) : "불러오는 중"}
+            </DialogPrimitive.Description>
+          </div>
 
-        <div className="flex-1 overflow-y-auto px-4 pb-4">
-          {detailStatus === "loading" && !report ? (
-            <div className="grid gap-4">
-              <Skeleton className="h-28 rounded-lg" />
-              <Skeleton className="h-32 rounded-lg" />
-              <Skeleton className="h-32 rounded-lg" />
-              <Skeleton className="h-40 rounded-lg" />
-            </div>
-          ) : detailStatus === "error" ? (
-            <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
-              {detailError ?? "회의록 상세를 불러오지 못했습니다."}
-            </div>
-          ) : report ? (
-            <div className="grid gap-5">
-              <section className="grid gap-4 rounded-lg border bg-muted/20 p-4">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-xs font-semibold text-muted-foreground">
-                      회의 날짜
-                    </p>
-                    <h2 className="mt-1 break-words font-heading text-xl font-semibold">
-                      {formatReportTitle(report)}
-                    </h2>
-                  </div>
-                  <ReportStatusPill status={report.status} />
-                </div>
-
-                <dl className="grid gap-3 text-sm sm:grid-cols-2">
-                  <div>
-                    <dt className="font-medium text-muted-foreground">
-                      실패 단계
-                    </dt>
-                    <dd className="mt-1">
-                      {getReportFailedStepLabel(report.failedStep)}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt className="font-medium text-muted-foreground">
-                      재생성 횟수
-                    </dt>
-                    <dd className="mt-1">{report.retryCount}회</dd>
-                  </div>
-                  <div>
-                    <dt className="font-medium text-muted-foreground">
-                      생성일
-                    </dt>
-                    <dd className="mt-1">
-                      {formatReportDateTime(report.createdAt)}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt className="font-medium text-muted-foreground">
-                      수정일
-                    </dt>
-                    <dd className="mt-1">
-                      {formatReportDateTime(report.updatedAt)}
-                    </dd>
-                  </div>
-                </dl>
-
-                {report.errorMessage ? (
-                  <div className="rounded-lg border border-destructive/30 bg-background p-3 text-sm text-destructive">
-                    {report.errorMessage}
-                  </div>
-                ) : null}
-              </section>
-
-              <ReportTextBlock
-                emptyLabel={
-                  report.status === "PROCESSING"
-                    ? "회의록을 생성하는 중입니다."
-                    : "등록된 요약이 없습니다."
-                }
-                title="요약"
-                value={report.summary}
+          <DialogPrimitive.Close
+            render={
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                className="absolute top-4 right-4"
+                aria-label="회의록 상세 닫기"
               />
+            }
+          >
+            <X className="size-4" />
+          </DialogPrimitive.Close>
 
-              <ReportTextBlock
-                emptyLabel={
-                  report.status === "PROCESSING"
-                    ? "논의사항을 정리하는 중입니다."
-                    : "등록된 논의사항이 없습니다."
-                }
-                title="논의사항"
-                value={report.discussionPoints}
-              />
+          <div className="flex-1 overflow-y-auto px-5 py-5">
+            {detailStatus === "loading" && !report ? (
+              <div className="grid gap-4">
+                <Skeleton className="h-28 rounded-lg" />
+                <Skeleton className="h-32 rounded-lg" />
+                <Skeleton className="h-32 rounded-lg" />
+                <Skeleton className="h-40 rounded-lg" />
+              </div>
+            ) : detailStatus === "error" ? (
+              <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
+                {detailError ?? "회의록 상세를 불러오지 못했습니다."}
+              </div>
+            ) : report ? (
+              <div className="grid gap-5">
+                <section className="grid gap-4 rounded-lg border bg-muted/20 p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold text-muted-foreground">
+                        회의 날짜
+                      </p>
+                      <h2 className="mt-1 break-words font-heading text-xl font-semibold">
+                        {formatReportTitle(report)}
+                      </h2>
+                    </div>
+                    <ReportStatusPill status={report.status} />
+                  </div>
 
-              <ReportTextBlock
-                emptyLabel={
-                  report.status === "PROCESSING"
-                    ? "결정사항을 정리하는 중입니다."
-                    : "등록된 결정사항이 없습니다."
-                }
-                title="결정사항"
-                value={report.decisions}
-              />
+                  <dl className="grid gap-3 text-sm sm:grid-cols-2">
+                    <div>
+                      <dt className="font-medium text-muted-foreground">
+                        실패 단계
+                      </dt>
+                      <dd className="mt-1">
+                        {getReportFailedStepLabel(report.failedStep)}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="font-medium text-muted-foreground">
+                        재생성 횟수
+                      </dt>
+                      <dd className="mt-1">{report.retryCount}회</dd>
+                    </div>
+                    <div>
+                      <dt className="font-medium text-muted-foreground">
+                        생성일
+                      </dt>
+                      <dd className="mt-1">
+                        {formatReportDateTime(report.createdAt)}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="font-medium text-muted-foreground">
+                        수정일
+                      </dt>
+                      <dd className="mt-1">
+                        {formatReportDateTime(report.updatedAt)}
+                      </dd>
+                    </div>
+                  </dl>
 
-              <section className="grid gap-2">
-                <h3 className="font-heading text-base font-semibold">
-                  후속 작업 후보
-                </h3>
-                {actionItems.length ? (
-                  <ul className="grid gap-2">
-                    {actionItems.map((item, index) => (
-                      <li
-                        key={`${item.title}-${index}`}
-                        className="rounded-lg border bg-background p-3 text-sm"
-                      >
-                        <div className="flex flex-wrap items-start justify-between gap-2">
-                          <p className="min-w-0 flex-1 font-medium">
-                            {item.title}
-                          </p>
-                          {item.priority ? (
-                            <span className="rounded-full border bg-muted/40 px-2 py-0.5 text-xs font-medium text-muted-foreground">
-                              {getActionPriorityLabel(item.priority)}
-                            </span>
+                  {report.errorMessage ? (
+                    <div className="rounded-lg border border-destructive/30 bg-background p-3 text-sm text-destructive">
+                      {report.errorMessage}
+                    </div>
+                  ) : null}
+                </section>
+
+                <ReportTextBlock
+                  emptyLabel={
+                    report.status === "PROCESSING"
+                      ? "회의록을 생성하는 중입니다."
+                      : "등록된 요약이 없습니다."
+                  }
+                  title="요약"
+                  value={report.summary}
+                />
+
+                <ReportTextBlock
+                  emptyLabel={
+                    report.status === "PROCESSING"
+                      ? "논의사항을 정리하는 중입니다."
+                      : "등록된 논의사항이 없습니다."
+                  }
+                  title="논의사항"
+                  value={report.discussionPoints}
+                />
+
+                <ReportTextBlock
+                  emptyLabel={
+                    report.status === "PROCESSING"
+                      ? "결정사항을 정리하는 중입니다."
+                      : "등록된 결정사항이 없습니다."
+                  }
+                  title="결정사항"
+                  value={report.decisions}
+                />
+
+                <section className="grid gap-2">
+                  <h3 className="font-heading text-base font-semibold">
+                    후속 작업 후보
+                  </h3>
+                  {actionItems.length ? (
+                    <ul className="grid gap-2">
+                      {actionItems.map((item, index) => (
+                        <li
+                          key={`${item.title}-${index}`}
+                          className="rounded-lg border bg-background p-3 text-sm"
+                        >
+                          <div className="flex flex-wrap items-start justify-between gap-2">
+                            <p className="min-w-0 flex-1 font-medium">
+                              {item.title}
+                            </p>
+                            {item.priority ? (
+                              <span className="rounded-full border bg-muted/40 px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                                {getActionPriorityLabel(item.priority)}
+                              </span>
+                            ) : null}
+                          </div>
+                          {item.description ? (
+                            <p className="mt-2 whitespace-pre-wrap break-words text-muted-foreground">
+                              {item.description}
+                            </p>
                           ) : null}
-                        </div>
-                        {item.description ? (
-                          <p className="mt-2 whitespace-pre-wrap break-words text-muted-foreground">
-                            {item.description}
-                          </p>
-                        ) : null}
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
-                    등록된 후속 작업 후보가 없습니다.
-                  </p>
-                )}
-              </section>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+                      등록된 후속 작업 후보가 없습니다.
+                    </p>
+                  )}
+                </section>
 
-              <ReportTextBlock
-                emptyLabel={
-                  report.status === "PROCESSING"
-                    ? "음성 텍스트를 정리하는 중입니다."
-                    : "등록된 transcript가 없습니다."
-                }
-                title="Transcript"
-                value={report.transcriptText}
-              />
+                <ReportTextBlock
+                  emptyLabel={
+                    report.status === "PROCESSING"
+                      ? "음성 텍스트를 정리하는 중입니다."
+                      : "등록된 transcript가 없습니다."
+                  }
+                  title="Transcript"
+                  value={report.transcriptText}
+                />
+              </div>
+            ) : null}
+          </div>
+
+          {report?.status === "FAILED" ? (
+            <div className="mt-auto flex flex-col gap-2 border-t p-4 sm:flex-row sm:justify-end">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={regenerating}
+                onClick={() => onRegenerate(report)}
+              >
+                {regenerating ? (
+                  <Loader2 className="animate-spin" />
+                ) : (
+                  <RotateCcw />
+                )}
+                재생성 요청
+              </Button>
             </div>
           ) : null}
-        </div>
-
-        {report?.status === "FAILED" ? (
-          <SheetFooter className="border-t">
-            <Button
-              type="button"
-              variant="outline"
-              disabled={regenerating}
-              onClick={() => onRegenerate(report)}
-            >
-              {regenerating ? (
-                <Loader2 className="animate-spin" />
-              ) : (
-                <RotateCcw />
-              )}
-              재생성 요청
-            </Button>
-          </SheetFooter>
-        ) : null}
-      </SheetContent>
-    </Sheet>
+        </DialogPrimitive.Popup>
+      </DialogPrimitive.Portal>
+    </DialogPrimitive.Root>
   );
 }
 
@@ -803,7 +819,7 @@ export function MeetingReportSection({
         )}
       </div>
 
-      <MeetingReportDetailSheet
+      <MeetingReportDetailModal
         detailError={detailError}
         detailStatus={detailStatus}
         open={Boolean(selectedReportId)}
