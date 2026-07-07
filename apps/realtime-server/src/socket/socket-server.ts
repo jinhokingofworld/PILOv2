@@ -15,6 +15,7 @@ import type {
   CanvasPresencePoint,
   CanvasPresenceUpdatePayload,
   CanvasRoomRef,
+  CanvasShapeOperationPayload,
 } from "../canvas/canvas-types";
 import { createRealtimeDatabase } from "../database/database";
 import { createSocketIoRedisAdapter } from "../redis/redis-pubsub";
@@ -38,6 +39,8 @@ type AuthedSocket = Socket & {
     };
   };
 };
+
+const CANVAS_OPERATION_REDIS_CHANNEL = "canvas:operations";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -96,6 +99,36 @@ function isCanvasPresenceViewport(
 
 function isIsoDateString(value: unknown): value is string {
   return typeof value === "string" && Number.isFinite(Date.parse(value));
+}
+
+function isCanvasShapeOperationPayload(
+  value: unknown,
+): value is CanvasShapeOperationPayload {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.workspaceId === "string" &&
+    typeof value.canvasId === "string" &&
+    typeof value.shapeId === "string" &&
+    typeof value.actorUserId === "string" &&
+    typeof value.clientOperationId === "string" &&
+    typeof value.contentHash === "string" &&
+    isIsoDateString(value.createdAt) &&
+    (value.operationType === "create" ||
+      value.operationType === "update" ||
+      value.operationType === "delete") &&
+    typeof value.opSeq === "number" &&
+    Number.isInteger(value.opSeq) &&
+    value.opSeq > 0 &&
+    (value.baseRevision === null ||
+      (typeof value.baseRevision === "number" &&
+        Number.isInteger(value.baseRevision) &&
+        value.baseRevision > 0)) &&
+    typeof value.resultRevision === "number" &&
+    Number.isInteger(value.resultRevision) &&
+    value.resultRevision > 0 &&
+    isRecord(value.payload)
+  );
 }
 
 function readJoinPayload(payload: unknown): CanvasJoinPayload | null {
@@ -184,6 +217,19 @@ export async function createRealtimeSocketServer({
     accessService,
     presenceService,
   });
+  const unsubscribeCanvasOperations = redisAdapter
+    ? await redisAdapter.subscribe(CANVAS_OPERATION_REDIS_CHANNEL, (payload) => {
+        if (!isCanvasShapeOperationPayload(payload)) {
+          console.error("Canvas operation Redis payload is invalid", payload);
+          return;
+        }
+
+        io.to(createCanvasRoomName(payload)).emit(
+          canvasServerEvents.operation,
+          payload,
+        );
+      })
+    : null;
 
   io.use((socket, next) => {
     const authContext = createSocketAuthContext(
@@ -309,6 +355,7 @@ export async function createRealtimeSocketServer({
 
   return {
     async close() {
+      await unsubscribeCanvasOperations?.();
       await io.close();
       await redisAdapter?.close();
       await database.close();

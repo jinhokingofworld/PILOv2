@@ -6,6 +6,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { CanvasShapeOperationPayload } from "@/features/canvas/api/canvas-types";
 import type { CanvasRealtimeConfig } from "@/features/canvas/realtime/canvas-realtime-types";
 import { useCanvasPresence } from "@/features/canvas/realtime/useCanvasPresence";
 import type { CanvasShapeSyncQueue } from "../../../utils/canvas-shape-sync";
@@ -20,6 +21,7 @@ import type {
   PiloCanvasViewportBounds,
 } from "../types";
 import { CanvasZoomControls } from "./CanvasZoomControls";
+import { applyCanvasRemoteOperation } from "./canvas-remote-operations";
 import type {
   CanvasBoardDetail,
   CanvasRuntimeStorageMode,
@@ -110,9 +112,14 @@ function PiloCanvasRuntimeInner({
   const pendingShapeDetailRef = useRef<string | null>(null);
   const shapeDetailRequestSeqRef = useRef(0);
   const pendingLocalShapeVersionsRef = useRef(new Map<string, number>());
+  const deferredRemoteOperationsRef = useRef(
+    new Map<number, CanvasShapeOperationPayload>(),
+  );
+  const remoteShapeRevisionRef = useRef(new Map<string, number>());
   const localShapeVersionRef = useRef(0);
   const [canvasHydrationVersion, setCanvasHydrationVersion] = useState(0);
   const [cameraRestoreVersion, setCameraRestoreVersion] = useState(0);
+  const currentRealtimeUserId = realtime?.currentUser?.userId ?? null;
   const catchUpCanvasOperations = useCallback(
     async (afterSeq: number, signal?: AbortSignal) => {
       if (storageMode !== "api" || !canvasClient?.listOperationsAfterSeq) {
@@ -129,9 +136,92 @@ function PiloCanvasRuntimeInner({
     },
     [board.id, board.workspaceId, canvasClient, storageMode],
   );
+  const applyRemoteCanvasOperations = useCallback(
+    (operations: CanvasShapeOperationPayload[]) => {
+      if (storageMode !== "api" || !operations.length) {
+        return;
+      }
+
+      const sortedOperations = operations
+        .slice()
+        .sort((a, b) => a.opSeq - b.opSeq);
+      let nextFreeformShapes = freeformShapesRef.current;
+      let hasVisibleShapeChange = false;
+
+      sortedOperations.forEach((operation) => {
+        deferredRemoteOperationsRef.current.delete(operation.opSeq);
+
+        if (operation.actorUserId === currentRealtimeUserId) {
+          remoteShapeRevisionRef.current.set(
+            operation.shapeId,
+            Math.max(
+              remoteShapeRevisionRef.current.get(operation.shapeId) ?? 0,
+              operation.resultRevision,
+            ),
+          );
+          return;
+        }
+
+        if (pendingLocalShapeVersionsRef.current.has(operation.shapeId)) {
+          deferredRemoteOperationsRef.current.set(operation.opSeq, operation);
+          return;
+        }
+
+        const appliedRevision =
+          remoteShapeRevisionRef.current.get(operation.shapeId) ?? 0;
+
+        if (operation.resultRevision <= appliedRevision) {
+          return;
+        }
+
+        const result = applyCanvasRemoteOperation({
+          currentShapes: nextFreeformShapes,
+          operation,
+          shapeDetailCache: shapeDetailCacheRef.current,
+          viewportBounds: latestViewportBoundsRef.current,
+        });
+
+        remoteShapeRevisionRef.current.set(
+          operation.shapeId,
+          operation.resultRevision,
+        );
+
+        if (!result.changed) {
+          return;
+        }
+
+        nextFreeformShapes = result.nextShapes;
+        hasVisibleShapeChange = true;
+      });
+
+      if (!hasVisibleShapeChange) {
+        return;
+      }
+
+      freeformShapesRef.current = nextFreeformShapes;
+      setFreeformShapes(nextFreeformShapes);
+      setCanvasHydrationVersion((version) => version + 1);
+    },
+    [currentRealtimeUserId, storageMode],
+  );
+  const flushDeferredRemoteOperations = useCallback(() => {
+    if (!deferredRemoteOperationsRef.current.size) {
+      return;
+    }
+
+    applyRemoteCanvasOperations(
+      Array.from(deferredRemoteOperationsRef.current.values()),
+    );
+  }, [applyRemoteCanvasOperations]);
   const canvasPresence = useCanvasPresence(realtime, {
+    applyOperations: applyRemoteCanvasOperations,
     catchUpOperations: catchUpCanvasOperations,
   });
+
+  useEffect(() => {
+    deferredRemoteOperationsRef.current.clear();
+    remoteShapeRevisionRef.current.clear();
+  }, [board.id]);
 
   useEffect(() => {
     onReady(canvasActions);
@@ -179,6 +269,7 @@ function PiloCanvasRuntimeInner({
     canvasClient,
     freeformShapesRef,
     localShapeVersionRef,
+    onLocalShapeSyncIdle: flushDeferredRemoteOperations,
     pendingLocalShapeVersionsRef,
     setCanvasHydrationVersion,
     setFreeformShapes,

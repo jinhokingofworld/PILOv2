@@ -27,6 +27,7 @@ type UseCanvasShapePersistenceOptions = {
   canvasClient: CanvasViewSettingApiClient | null;
   freeformShapesRef: RuntimeRef<PiloCanvasFreeformShape[]>;
   localShapeVersionRef: RuntimeRef<number>;
+  onLocalShapeSyncIdle?: () => void;
   pendingLocalShapeVersionsRef: RuntimeRef<Map<string, number>>;
   setCanvasHydrationVersion: (updater: (version: number) => number) => void;
   setFreeformShapes: (
@@ -44,6 +45,7 @@ export function useCanvasShapePersistence({
   canvasClient,
   freeformShapesRef,
   localShapeVersionRef,
+  onLocalShapeSyncIdle,
   pendingLocalShapeVersionsRef,
   setCanvasHydrationVersion,
   setFreeformShapes,
@@ -85,6 +87,8 @@ export function useCanvasShapePersistence({
         pendingLocalShapeVersionsRef.current.delete(shapeId);
       }
     });
+
+    onLocalShapeSyncIdle?.();
   }
 
   const captureDraftFreeformShapes = useCallback(
@@ -135,7 +139,12 @@ export function useCanvasShapePersistence({
       setFreeformShapes(mergedShapes);
       setCanvasHydrationVersion((version) => version + 1);
     },
-    [freeformShapesRef, pendingLocalShapeVersionsRef, setCanvasHydrationVersion, setFreeformShapes],
+    [
+      freeformShapesRef,
+      pendingLocalShapeVersionsRef,
+      setCanvasHydrationVersion,
+      setFreeformShapes,
+    ],
   );
 
   const persistFreeformShapes = useCallback(
@@ -199,6 +208,7 @@ export function useCanvasShapePersistence({
       board.workspaceId,
       canvasClient,
       freeformShapesRef,
+      onLocalShapeSyncIdle,
       setFreeformShapes,
       shapeSyncQueueRef,
       storageMode,

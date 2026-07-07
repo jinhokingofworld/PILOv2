@@ -84,6 +84,13 @@ const canvasRuntimeUtils = await readFile(
   ),
   "utf8"
 );
+const canvasRemoteOperations = await readFile(
+  new URL(
+    "../src/features/canvas/components/engine/runtime/canvas-remote-operations.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
 const canvasRuntimeHydration = await readFile(
   new URL(
     "../src/features/canvas/components/engine/runtime/useCanvasRuntimeHydration.ts",
@@ -476,9 +483,20 @@ assert.match(canvasWorkspace, /canvasClient=\{shouldUseCanvasApi \? canvasClient
 assert.match(canvasWorkspace, /storageMode=\{shouldUseCanvasApi \? "api" : "local"\}/);
 assert.match(canvasRuntime, /useCanvasPresence/);
 assert.match(canvasRuntime, /catchUpCanvasOperations/);
+assert.match(canvasRuntime, /applyRemoteCanvasOperations/);
+assert.match(canvasRuntime, /deferredRemoteOperationsRef/);
+assert.match(canvasRuntime, /remoteShapeRevisionRef/);
+assert.match(canvasRuntime, /pendingLocalShapeVersionsRef\.current\.has/);
+assert.match(canvasRuntime, /actorUserId === currentRealtimeUserId/);
 assert.match(canvasRuntime, /listOperationsAfterSeq/);
 assert.match(canvasRuntime, /realtime\?: CanvasRealtimeConfig \| null/);
 assert.match(canvasRuntime, /presence=\{canvasPresence\}/);
+assert.match(canvasRemoteOperations, /applyCanvasRemoteOperation/);
+assert.match(canvasRemoteOperations, /PILO_ARROW_BINDINGS_META_KEY/);
+assert.match(canvasRemoteOperations, /preserveArrowBindingMeta/);
+assert.match(canvasRemoteOperations, /shapeDetailCache\.set/);
+assert.match(canvasRemoteOperations, /shapeDetailCache\.delete/);
+assert.match(canvasRemoteOperations, /intersectsViewport/);
 assert.match(piloTldrawCanvas, /CanvasPresenceReporter/);
 assert.match(piloTldrawCanvas, /RemoteCursorOverlay/);
 assert.match(piloTldrawCanvas, /editor\.getContainer\(\)/);
@@ -496,6 +514,10 @@ assert.match(canvasPresenceHook, /canvas:join/);
 assert.match(canvasPresenceHook, /canvas:leave/);
 assert.match(canvasPresenceHook, /lastSeenOpSeqRef/);
 assert.match(canvasPresenceHook, /runCatchUp/);
+assert.match(canvasPresenceHook, /applyOperations/);
+assert.match(canvasPresenceHook, /applyContiguousOperations/);
+assert.match(canvasPresenceHook, /liveOperationBufferRef/);
+assert.match(canvasPresenceHook, /flushBufferedOperations/);
 assert.match(canvasPresenceHook, /canvas:operation/);
 assert.match(canvasPresenceHook, /canvas:sync:required/);
 assert.match(canvasPresenceHook, /operation\.opSeq === lastSeenOpSeq \+ 1/);
@@ -509,6 +531,8 @@ assert.match(canvasRemoteCursorOverlay, /canvas-remote-selection-outline/);
 assert.match(canvasRemoteCursorOverlay, /getStableCursorColor/);
 assert.match(canvasShapeSync, /buildCanvasShapeSyncOperations/);
 assert.match(canvasShapeSync, /createCanvasShapeSyncQueue/);
+assert.match(canvasShapeSync, /createCanvasClientOperationId/);
+assert.match(canvasShapeSync, /clientOperationId/);
 assert.match(canvasShapeSync, /DEFAULT_CANVAS_SHAPE_SYNC_QUEUE_DEBOUNCE_MS = 500/);
 assert.match(canvasShapeSync, /DEFAULT_CANVAS_SHAPE_SYNC_RETRY_ATTEMPTS = 3/);
 assert.match(canvasShapeSync, /CanvasShapeSyncFailure/);
@@ -525,8 +549,9 @@ assert.match(canvasShapeSync, /queuedDuringFlush/);
 assert.match(canvasShapeSync, /whenIdle: \(\) => Promise<void>/);
 assert.match(canvasShapeSync, /resolveIdleWaiters/);
 assert.match(canvasShapeSync, /syncShapesBatch/);
-assert.match(canvasShapeSync, /createShape\(boardId, operation.payload/);
-assert.match(canvasShapeSync, /updateShape\(operation.shapeId, operation.payload/);
+assert.match(canvasShapeSync, /createShape\(\s*boardId,/);
+assert.match(canvasShapeSync, /updateShape\(\s*operation\.shapeId,/);
+assert.match(canvasShapeSync, /clientOperationId: operation\.clientOperationId/);
 assert.match(canvasShapeSync, /deleteShape\(operation.shapeId/);
 assert.match(canvasShapeSync, /id: typeof shape.id === "string" \? shape.id : ""/);
 assert.match(canvasShapeSync, /shapeType: typeof shape.type === "string" \? shape.type : ""/);

@@ -44,6 +44,7 @@ export type CanvasPresenceController = {
 };
 
 export type CanvasPresenceOptions = {
+  applyOperations?: (operations: CanvasShapeOperationPayload[]) => void;
   catchUpOperations?: (
     afterSeq: number,
     signal?: AbortSignal,
@@ -112,15 +113,49 @@ export function useCanvasPresence(
   const joinedRef = useRef(false);
   const roomRef = useRef({ workspaceId: "", canvasId: "" });
   const lastSeenOpSeqRef = useRef(0);
+  const applyOperationsRef = useRef(options.applyOperations);
   const catchUpOperationsRef = useRef(options.catchUpOperations);
   const activeCatchUpAbortRef = useRef<AbortController | null>(null);
+  const liveOperationBufferRef = useRef<CanvasShapeOperationPayload[]>([]);
+  const runCatchUpRef = useRef<(afterSeq: number) => void>(() => {});
   const currentUserId = config?.currentUser?.userId ?? null;
   const usableConfig = isUsableRealtimeConfig(config) ? config : null;
   const enabled = Boolean(usableConfig && getCanvasRealtimeServerUrl());
 
   useEffect(() => {
+    applyOperationsRef.current = options.applyOperations;
     catchUpOperationsRef.current = options.catchUpOperations;
-  }, [options.catchUpOperations]);
+  }, [options.applyOperations, options.catchUpOperations]);
+
+  const applyContiguousOperations = useCallback(
+    (operations: CanvasShapeOperationPayload[], afterSeq: number) => {
+      const contiguousOperations: CanvasShapeOperationPayload[] = [];
+      let nextLastSeenOpSeq = Math.max(0, Math.trunc(afterSeq));
+
+      operations
+        .slice()
+        .sort((a, b) => a.opSeq - b.opSeq)
+        .forEach((operation) => {
+          if (operation.opSeq <= nextLastSeenOpSeq) {
+            return;
+          }
+
+          if (operation.opSeq !== nextLastSeenOpSeq + 1) {
+            return;
+          }
+
+          contiguousOperations.push(operation);
+          nextLastSeenOpSeq = operation.opSeq;
+        });
+
+      if (contiguousOperations.length) {
+        applyOperationsRef.current?.(contiguousOperations);
+      }
+
+      return nextLastSeenOpSeq;
+    },
+    [],
+  );
 
   const setLastSeenOpSeq = useCallback((nextOpSeq: number) => {
     const normalizedOpSeq = Math.max(0, Math.trunc(nextOpSeq));
@@ -134,77 +169,103 @@ export function useCanvasPresence(
     }));
   }, []);
 
-  const runCatchUp = useCallback((afterSeq: number) => {
-    const catchUpOperations = catchUpOperationsRef.current;
-    const normalizedAfterSeq = Math.max(0, Math.trunc(afterSeq));
+  const flushBufferedOperations = useCallback(() => {
+    const bufferedOperations = liveOperationBufferRef.current;
 
-    if (!catchUpOperations) {
+    if (!bufferedOperations.length) {
       return;
     }
 
-    activeCatchUpAbortRef.current?.abort();
+    const nextLastSeenOpSeq = applyContiguousOperations(
+      bufferedOperations,
+      lastSeenOpSeqRef.current,
+    );
 
-    const abortController = new AbortController();
-    activeCatchUpAbortRef.current = abortController;
-    setOperationSync((currentState) => ({
-      ...currentState,
-      pendingAfterSeq: normalizedAfterSeq,
-      status: "catching_up",
-      lastError: null,
-    }));
+    liveOperationBufferRef.current = bufferedOperations.filter(
+      (operation) => operation.opSeq > nextLastSeenOpSeq,
+    );
 
-    void catchUpOperations(normalizedAfterSeq, abortController.signal)
-      .then((result) => {
-        if (abortController.signal.aborted) {
-          return;
-        }
+    if (nextLastSeenOpSeq > lastSeenOpSeqRef.current) {
+      setLastSeenOpSeq(nextLastSeenOpSeq);
+    }
 
-        const nextLastSeenOpSeq = result.operations.reduce(
-          (contiguousSeq, operation) => {
-            if (operation.opSeq <= contiguousSeq) {
-              return contiguousSeq;
-            }
+    if (liveOperationBufferRef.current.length) {
+      runCatchUpRef.current(lastSeenOpSeqRef.current);
+    }
+  }, [applyContiguousOperations, setLastSeenOpSeq]);
 
-            return operation.opSeq === contiguousSeq + 1
-              ? operation.opSeq
-              : contiguousSeq;
-          },
-          normalizedAfterSeq,
-        );
+  const runCatchUp = useCallback(
+    (afterSeq: number) => {
+      const catchUpOperations = catchUpOperationsRef.current;
+      const normalizedAfterSeq = Math.max(0, Math.trunc(afterSeq));
 
-        lastSeenOpSeqRef.current = nextLastSeenOpSeq;
-        setOperationSync({
-          lastSeenOpSeq: nextLastSeenOpSeq,
-          latestOpSeq: Math.max(result.latestOpSeq, nextLastSeenOpSeq),
-          pendingAfterSeq: null,
-          status: "caught_up",
-          lastError: null,
+      if (!catchUpOperations) {
+        return;
+      }
+
+      activeCatchUpAbortRef.current?.abort();
+
+      const abortController = new AbortController();
+      activeCatchUpAbortRef.current = abortController;
+      setOperationSync((currentState) => ({
+        ...currentState,
+        pendingAfterSeq: normalizedAfterSeq,
+        status: "catching_up",
+        lastError: null,
+      }));
+
+      void catchUpOperations(normalizedAfterSeq, abortController.signal)
+        .then((result) => {
+          if (abortController.signal.aborted) {
+            return;
+          }
+
+          const nextLastSeenOpSeq = applyContiguousOperations(
+            result.operations,
+            normalizedAfterSeq,
+          );
+
+          lastSeenOpSeqRef.current = nextLastSeenOpSeq;
+          setOperationSync({
+            lastSeenOpSeq: nextLastSeenOpSeq,
+            latestOpSeq: Math.max(result.latestOpSeq, nextLastSeenOpSeq),
+            pendingAfterSeq: null,
+            status: "caught_up",
+            lastError: null,
+          });
+
+          flushBufferedOperations();
+        })
+        .catch((error: unknown) => {
+          if (abortController.signal.aborted) {
+            return;
+          }
+
+          const message =
+            error instanceof Error
+              ? error.message
+              : "Canvas operation catch-up failed.";
+
+          console.warn("Canvas operation catch-up failed.", error);
+          setOperationSync((currentState) => ({
+            ...currentState,
+            pendingAfterSeq: null,
+            status: "failed",
+            lastError: message,
+          }));
+        })
+        .finally(() => {
+          if (activeCatchUpAbortRef.current === abortController) {
+            activeCatchUpAbortRef.current = null;
+          }
         });
-      })
-      .catch((error: unknown) => {
-        if (abortController.signal.aborted) {
-          return;
-        }
+    },
+    [applyContiguousOperations, flushBufferedOperations],
+  );
 
-        const message =
-          error instanceof Error
-            ? error.message
-            : "Canvas operation catch-up failed.";
-
-        console.warn("Canvas operation catch-up failed.", error);
-        setOperationSync((currentState) => ({
-          ...currentState,
-          pendingAfterSeq: null,
-          status: "failed",
-          lastError: message,
-        }));
-      })
-      .finally(() => {
-        if (activeCatchUpAbortRef.current === abortController) {
-          activeCatchUpAbortRef.current = null;
-        }
-      });
-  }, []);
+  useEffect(() => {
+    runCatchUpRef.current = runCatchUp;
+  }, [runCatchUp]);
 
   const reconcileOperationSeq = useCallback(
     (operation: CanvasShapeOperationPayload) => {
@@ -214,14 +275,33 @@ export function useCanvasPresence(
         return;
       }
 
-      if (operation.opSeq === lastSeenOpSeq + 1) {
-        setLastSeenOpSeq(operation.opSeq);
+      setOperationSync((currentState) => ({
+        ...currentState,
+        latestOpSeq: Math.max(currentState.latestOpSeq, operation.opSeq),
+      }));
+
+      if (activeCatchUpAbortRef.current) {
+        liveOperationBufferRef.current = [
+          ...liveOperationBufferRef.current,
+          operation,
+        ];
         return;
       }
 
+      if (operation.opSeq === lastSeenOpSeq + 1) {
+        applyOperationsRef.current?.([operation]);
+        setLastSeenOpSeq(operation.opSeq);
+        flushBufferedOperations();
+        return;
+      }
+
+      liveOperationBufferRef.current = [
+        ...liveOperationBufferRef.current,
+        operation,
+      ];
       runCatchUp(lastSeenOpSeq);
     },
-    [runCatchUp, setLastSeenOpSeq],
+    [flushBufferedOperations, runCatchUp, setLastSeenOpSeq],
   );
 
   const reconcileJoinState = useCallback(
@@ -273,6 +353,7 @@ export function useCanvasPresence(
       lastSeenOpSeqRef.current = 0;
       activeCatchUpAbortRef.current?.abort();
       activeCatchUpAbortRef.current = null;
+      liveOperationBufferRef.current = [];
       setRemotePresence([]);
       setOperationSync(initialOperationSyncState);
       return;
@@ -303,6 +384,7 @@ export function useCanvasPresence(
       lastSeenOpSeqRef.current = 0;
       activeCatchUpAbortRef.current?.abort();
       activeCatchUpAbortRef.current = null;
+      liveOperationBufferRef.current = [];
       setOperationSync(initialOperationSyncState);
     }
 
@@ -398,6 +480,7 @@ export function useCanvasPresence(
       realtimeSocket.disconnect();
       activeCatchUpAbortRef.current?.abort();
       activeCatchUpAbortRef.current = null;
+      liveOperationBufferRef.current = [];
       if (socketRef.current === realtimeSocket) {
         socketRef.current = null;
       }

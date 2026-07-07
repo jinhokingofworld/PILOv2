@@ -28,6 +28,10 @@ export type CanvasShapePayload = {
   revision?: number;
 };
 
+type CanvasShapeMutationPayload = CanvasShapePayload & {
+  clientOperationId?: string;
+};
+
 export type CanvasShapeApiClient = {
   syncShapesBatch?: (
     boardId: string,
@@ -36,12 +40,12 @@ export type CanvasShapeApiClient = {
   ) => Promise<unknown>;
   createShape: (
     boardId: string,
-    body: CanvasShapePayload,
+    body: CanvasShapeMutationPayload,
     options: { workspaceId: string },
   ) => Promise<unknown>;
   updateShape: (
     shapeId: string,
-    body: CanvasShapePayload,
+    body: CanvasShapeMutationPayload,
     options: { workspaceId: string },
   ) => Promise<unknown>;
   deleteShape: (
@@ -52,16 +56,19 @@ export type CanvasShapeApiClient = {
 
 export type CanvasShapeSyncOperation =
   | {
+      clientOperationId: string;
       type: "create";
       shapeId: string;
       payload: CanvasShapePayload;
     }
   | {
+      clientOperationId: string;
       type: "update";
       shapeId: string;
       payload: CanvasShapePayload;
     }
   | {
+      clientOperationId: string;
       type: "delete";
       shapeId: string;
     };
@@ -118,6 +125,17 @@ function readNullableSize(value: unknown) {
 
 function cloneRawShape(shape: CanvasFreeformShapeSnapshot) {
   return JSON.parse(JSON.stringify(shape)) as Record<string, unknown>;
+}
+
+function createCanvasClientOperationId() {
+  if (
+    typeof crypto !== "undefined" &&
+    typeof crypto.randomUUID === "function"
+  ) {
+    return crypto.randomUUID();
+  }
+
+  return `op_${Date.now()}_${Math.random().toString(36).slice(2)}`;
 }
 
 export function hasCanvasFreeformShapeChanged(
@@ -208,6 +226,7 @@ export function buildCanvasShapeSyncOperations(
 
     if (!previousShape) {
       operations.push({
+        clientOperationId: createCanvasClientOperationId(),
         type: "create",
         shapeId: shape.id,
         payload,
@@ -217,6 +236,7 @@ export function buildCanvasShapeSyncOperations(
 
     if (hasCanvasFreeformShapeChanged(previousShape, shape)) {
       operations.push({
+        clientOperationId: createCanvasClientOperationId(),
         type: "update",
         shapeId: shape.id,
         payload,
@@ -229,6 +249,7 @@ export function buildCanvasShapeSyncOperations(
     if (nextShapeMap.has(shape.id)) return;
 
     operations.push({
+      clientOperationId: createCanvasClientOperationId(),
       type: "delete",
       shapeId: shape.id,
     });
@@ -254,6 +275,7 @@ function mergeQueuedCanvasShapeSyncOperation(
       pendingOperation.type === "create"
         ? operation
         : {
+            clientOperationId: operation.clientOperationId,
             type: "update",
             shapeId: operation.shapeId,
             payload: operation.payload,
@@ -267,6 +289,7 @@ function mergeQueuedCanvasShapeSyncOperation(
       operation.shapeId,
       pendingOperation.type === "create"
         ? {
+            clientOperationId: pendingOperation.clientOperationId,
             type: "create",
             shapeId: operation.shapeId,
             payload: operation.payload,
@@ -296,15 +319,29 @@ function runCanvasShapeSyncOperation({
   workspaceId: string;
 }) {
   if (operation.type === "create") {
-    return canvasClient.createShape(boardId, operation.payload, {
-      workspaceId,
-    });
+    return canvasClient.createShape(
+      boardId,
+      {
+        ...operation.payload,
+        clientOperationId: operation.clientOperationId,
+      },
+      {
+        workspaceId,
+      },
+    );
   }
 
   if (operation.type === "update") {
-    return canvasClient.updateShape(operation.shapeId, operation.payload, {
-      workspaceId,
-    });
+    return canvasClient.updateShape(
+      operation.shapeId,
+      {
+        ...operation.payload,
+        clientOperationId: operation.clientOperationId,
+      },
+      {
+        workspaceId,
+      },
+    );
   }
 
   return canvasClient.deleteShape(operation.shapeId, {

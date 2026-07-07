@@ -51,3 +51,17 @@ export type CanvasPresenceUpdatePayload = CanvasRoomRef & {
 export type CanvasPresenceLeavePayload = CanvasRoomRef & {
   userId: string;
 };
+
+export type CanvasShapeOperationPayload = CanvasRoomRef & {
+  actorUserId: string;
+  baseRevision: number | null;
+  clientOperationId: string;
+  contentHash: string;
+  createdAt: string;
+  id: string;
+  operationType: "create" | "update" | "delete";
+  opSeq: number;
+  payload: Record<string, unknown>;
+  resultRevision: number;
+  shapeId: string;
+};
