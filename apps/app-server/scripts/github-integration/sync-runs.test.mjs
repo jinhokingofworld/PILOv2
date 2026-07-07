@@ -1007,11 +1007,15 @@ function projectV2ItemApiItem(overrides = {}) {
       "listInstallationRepositories",
       "listProjectV2s",
       "listRepositoryIssues",
-      "listRepositoryPullRequests"
+      "listRepositoryPullRequests",
+      "listProjectV2Fields",
+      "listProjectV2Items"
     ]
   );
   assert.equal(githubAppClient.calls[1].input.accountLogin, "my-team");
   assert.equal(githubAppClient.calls[1].input.accountType, "Organization");
+  assert.equal(githubAppClient.calls[4].input.projectNodeId, projectNodeId);
+  assert.equal(githubAppClient.calls[5].input.projectNodeId, projectNodeId);
   const projectRepositoryDelete = database.queries.find(
     (query) =>
       query.method === "execute" &&
@@ -1115,11 +1119,24 @@ function projectV2ItemApiItem(overrides = {}) {
   assert.equal(syncRun.createdCount, 1);
   assert.deepEqual(
     githubAppClient.calls.map((call) => call.method),
-    ["listInstallationRepositories", "listProjectV2s"]
+    [
+      "listInstallationRepositories",
+      "listProjectV2s",
+      "listProjectV2Fields",
+      "listProjectV2Items"
+    ]
   );
   assert.equal(githubAppClient.calls[0].input.userAccessToken, undefined);
   assert.equal(
     githubAppClient.calls[1].input.userAccessToken,
+    "decrypted-project-oauth-token"
+  );
+  assert.equal(
+    githubAppClient.calls[2].input.userAccessToken,
+    "decrypted-project-oauth-token"
+  );
+  assert.equal(
+    githubAppClient.calls[3].input.userAccessToken,
     "decrypted-project-oauth-token"
   );
   assert.doesNotMatch(

@@ -220,3 +220,5 @@ await import("./issue-update.test.mjs");
 await import("./issue-create.test.mjs");
 await import("./contract.test.mjs");
 await import("./github-sync-workspace-isolation.test.mjs");
+await import("./full-sync-project-items.test.mjs");
+await import("./project-v2-repository-links.test.mjs");

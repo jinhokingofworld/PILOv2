@@ -222,6 +222,7 @@ function assertNoSecretLookup(database) {
         public: false,
         closed: false,
         template: false,
+        repositoryIds: [],
         lastSyncedAt: "2026-07-02T05:20:00.000Z"
       }
     ],
@@ -268,6 +269,7 @@ function assertNoSecretLookup(database) {
     public: false,
     closed: false,
     template: false,
+    repositoryIds: [],
     githubCreatedAt: "2026-06-20T03:00:00.000Z",
     githubUpdatedAt: "2026-07-01T14:30:00.000Z",
     githubClosedAt: null,

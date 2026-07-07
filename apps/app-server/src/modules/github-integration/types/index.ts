@@ -136,6 +136,7 @@ export interface GithubProjectV2ListItemPayload {
   public: boolean;
   closed: boolean;
   template: boolean;
+  repositoryIds: string[];
   lastSyncedAt: string | null;
 }
 
