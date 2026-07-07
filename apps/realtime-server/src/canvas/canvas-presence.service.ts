@@ -89,13 +89,16 @@ export function createCanvasPresenceService(): CanvasPresenceService {
     },
     updatePresence(socketId, user, payload) {
       const state: StoredPresence = {
+        canvasId: payload.canvasId,
         cursor: payload.cursor,
+        ...(user.displayName ? { displayName: user.displayName } : {}),
         selectedShapeIds: payload.selectedShapeIds,
         ...(payload.sentAt ? { sentAt: payload.sentAt } : {}),
         socketId,
         updatedAt: new Date().toISOString(),
-        user,
+        userId: user.userId,
         ...(payload.viewport ? { viewport: payload.viewport } : {}),
+        workspaceId: payload.workspaceId,
       };
 
       getRoomPresence(payload).set(user.userId, state);

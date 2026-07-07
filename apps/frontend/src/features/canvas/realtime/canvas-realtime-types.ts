@@ -32,7 +32,7 @@ export type CanvasPresenceViewport = {
 export type CanvasRemotePresenceState = CanvasRealtimeUser & {
   workspaceId: string;
   canvasId: string;
-  cursor: CanvasPresencePoint;
+  cursor: CanvasPresencePoint | null;
   selectedShapeIds: string[];
   sentAt?: string;
   updatedAt: string;

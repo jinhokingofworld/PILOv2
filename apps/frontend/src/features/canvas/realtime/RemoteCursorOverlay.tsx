@@ -95,7 +95,14 @@ export function RemoteCursorOverlay({
   );
 
   const visiblePresence = useMemo(
-    () => presence.filter((entry) => entry.userId !== currentUserId),
+    () =>
+      presence.filter(
+        (entry) =>
+          entry.userId &&
+          entry.userId !== currentUserId &&
+          (entry.cursor === null ||
+            (Number.isFinite(entry.cursor.x) && Number.isFinite(entry.cursor.y))),
+      ),
     [currentUserId, presence],
   );
 
@@ -130,6 +137,10 @@ export function RemoteCursorOverlay({
         );
       })}
       {visiblePresence.map((entry) => {
+        if (!entry.cursor) {
+          return null;
+        }
+
         const screenPoint = editor.pageToScreen(entry.cursor);
         const x = overlayRect ? screenPoint.x - overlayRect.left : screenPoint.x;
         const y = overlayRect ? screenPoint.y - overlayRect.top : screenPoint.y;

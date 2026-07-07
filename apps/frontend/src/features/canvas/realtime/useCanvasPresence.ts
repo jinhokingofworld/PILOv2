@@ -79,6 +79,116 @@ function parsePresenceTimestamp(updatedAt: string) {
   return Number.isFinite(time) ? time : 0;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isPresencePoint(value: unknown): value is CanvasPresencePoint {
+  return (
+    isRecord(value) &&
+    typeof value.x === "number" &&
+    typeof value.y === "number" &&
+    Number.isFinite(value.x) &&
+    Number.isFinite(value.y)
+  );
+}
+
+function isPresenceViewport(value: unknown): value is CanvasPresenceViewport {
+  return (
+    isRecord(value) &&
+    typeof value.height === "number" &&
+    typeof value.width === "number" &&
+    typeof value.x === "number" &&
+    typeof value.y === "number" &&
+    typeof value.zoom === "number" &&
+    Number.isFinite(value.height) &&
+    Number.isFinite(value.width) &&
+    Number.isFinite(value.x) &&
+    Number.isFinite(value.y) &&
+    Number.isFinite(value.zoom)
+  );
+}
+
+function normalizeRemotePresence(
+  payload: unknown,
+): CanvasRemotePresenceState | null {
+  const source =
+    isRecord(payload) && isRecord(payload.presence)
+      ? payload.presence
+      : payload;
+
+  if (!isRecord(source)) {
+    return null;
+  }
+
+  const nestedUser = isRecord(source.user) ? source.user : null;
+  const userId =
+    typeof source.userId === "string"
+      ? source.userId
+      : typeof nestedUser?.userId === "string"
+        ? nestedUser.userId
+        : "";
+  const workspaceId =
+    typeof source.workspaceId === "string"
+      ? source.workspaceId
+      : isRecord(payload) && typeof payload.workspaceId === "string"
+        ? payload.workspaceId
+        : "";
+  const canvasId =
+    typeof source.canvasId === "string"
+      ? source.canvasId
+      : isRecord(payload) && typeof payload.canvasId === "string"
+        ? payload.canvasId
+        : "";
+  const selectedShapeIds = Array.isArray(source.selectedShapeIds)
+    ? source.selectedShapeIds.filter((shapeId) => typeof shapeId === "string")
+    : [];
+  const cursor = source.cursor === null ? null : source.cursor;
+  const updatedAt =
+    typeof source.updatedAt === "string"
+      ? source.updatedAt
+      : new Date().toISOString();
+
+  if (!userId || !workspaceId || !canvasId) {
+    return null;
+  }
+
+  if (cursor !== null && !isPresencePoint(cursor)) {
+    return null;
+  }
+
+  return {
+    canvasId,
+    cursor,
+    displayName:
+      typeof source.displayName === "string"
+        ? source.displayName
+        : typeof nestedUser?.displayName === "string"
+          ? nestedUser.displayName
+          : "PILO",
+    selectedShapeIds,
+    ...(typeof source.sentAt === "string" ? { sentAt: source.sentAt } : {}),
+    updatedAt,
+    userId,
+    ...(isPresenceViewport(source.viewport) ? { viewport: source.viewport } : {}),
+    workspaceId,
+  };
+}
+
+function normalizeRemotePresenceList(
+  payloads: unknown,
+): CanvasRemotePresenceState[] {
+  if (!Array.isArray(payloads)) {
+    return [];
+  }
+
+  return payloads.flatMap((payload) => {
+    const normalizedPresence = normalizeRemotePresence(payload);
+
+    return normalizedPresence ? [normalizedPresence] : [];
+  });
+}
+
 function filterOwnPresence(
   presence: CanvasRemotePresenceState[],
   currentUserId: string,
@@ -418,7 +528,12 @@ export function useCanvasPresence(
 
       joinedRef.current = true;
       reconcileJoinState(payload);
-      setRemotePresence(filterOwnPresence(payload.presence, currentUserId));
+      setRemotePresence(
+        filterOwnPresence(
+          normalizeRemotePresenceList(payload.presence),
+          currentUserId,
+        ),
+      );
     });
     realtimeSocket.on("canvas:operation", (payload) => {
       if (
@@ -441,16 +556,22 @@ export function useCanvasPresence(
       reconcileSyncRequired(payload);
     });
     realtimeSocket.on("canvas:presence:update", (payload) => {
+      const presence = normalizeRemotePresence(payload);
+
+      if (!presence) {
+        return;
+      }
+
       if (
-        payload.workspaceId !== room.workspaceId ||
-        payload.canvasId !== room.canvasId ||
-        payload.userId === currentUserId
+        presence.workspaceId !== room.workspaceId ||
+        presence.canvasId !== room.canvasId ||
+        presence.userId === currentUserId
       ) {
         return;
       }
 
       setRemotePresence((currentPresence) =>
-        upsertPresence(currentPresence, payload),
+        upsertPresence(currentPresence, presence),
       );
     });
     realtimeSocket.on("canvas:presence:leave", (payload) => {
