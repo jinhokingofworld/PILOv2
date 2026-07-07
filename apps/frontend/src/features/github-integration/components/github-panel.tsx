@@ -10,6 +10,7 @@ import { GithubConnectLayout } from "@/features/github-integration/components/gi
 import type {
   GithubAppInstallation,
   GithubOAuthStatus,
+  GithubProjectOAuthStatus,
   GithubProjectV2,
   GithubPullRequest,
   GithubRepository,
@@ -24,10 +25,11 @@ import {
 import { useAuthSession } from "@/features/auth/auth-session";
 
 type PanelStatus = "idle" | "loading" | "ready" | "error";
-type RedirectAction = "oauth" | "installation" | null;
+type RedirectAction = "oauth" | "installation" | "project_oauth" | null;
 
 type GithubIntegrationSnapshot = {
   oauth: GithubOAuthStatus | null;
+  projectOAuth: GithubProjectOAuthStatus | null;
   installations: GithubAppInstallation[];
   repositories: GithubRepository[];
   repositoriesTotal: number;
@@ -39,6 +41,7 @@ type GithubIntegrationSnapshot = {
 
 const emptySnapshot: GithubIntegrationSnapshot = {
   oauth: null,
+  projectOAuth: null,
   installations: [],
   projects: [],
   projectsTotal: 0,
@@ -58,6 +61,25 @@ const repositoryScopedSyncTargets = new Set<GithubSyncTarget>([
   "issues",
   "pull_requests"
 ]);
+
+const PERSONAL_PROJECT_OAUTH_REQUIRED_MESSAGE =
+  "GitHub ProjectV2 OAuth connection is required for personal ProjectV2 sync";
+const PERSONAL_PROJECT_OAUTH_ACCOUNT_MISMATCH_MESSAGE =
+  "GitHub ProjectV2 OAuth account does not match this personal ProjectV2 owner";
+const PERSONAL_PROJECT_OAUTH_SCOPE_MESSAGE =
+  "GitHub ProjectV2 OAuth connection must be reconnected with project scope";
+
+function requiresProjectOAuth(target: GithubSyncTarget) {
+  return target === "full" || projectScopedSyncTargets.has(target);
+}
+
+function hasProjectScope(scope: string | null | undefined) {
+  if (!scope) {
+    return false;
+  }
+
+  return scope.split(/[,\s]+/).includes("project");
+}
 
 function getErrorMessage(error: unknown) {
   if (error instanceof GithubIntegrationApiError) {
@@ -87,6 +109,8 @@ export function GithubPanel() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [redirectAction, setRedirectAction] = useState<RedirectAction>(null);
   const [isDisconnecting, setIsDisconnecting] = useState(false);
+  const [isDisconnectingProjectOAuth, setIsDisconnectingProjectOAuth] =
+    useState(false);
   const [isDeletingInstallation, setIsDeletingInstallation] = useState(false);
   const [isInstallationDeleteRequested, setIsInstallationDeleteRequested] =
     useState(false);
@@ -171,9 +195,17 @@ export function GithubPanel() {
     setActionError(null);
 
     try {
-      const [oauth, installations, repositories, projects, syncRuns] =
+      const [
+        oauth,
+        projectOAuth,
+        installations,
+        repositories,
+        projects,
+        syncRuns
+      ] =
         await Promise.all([
           apiClient.getGithubOAuthStatus(),
+          apiClient.getGithubProjectOAuthStatus(),
           apiClient.listGithubAppInstallations(workspaceId),
           apiClient.listGithubRepositories(workspaceId, {
             includeArchived: true,
@@ -207,6 +239,7 @@ export function GithubPanel() {
 
       setSnapshot({
         oauth,
+        projectOAuth,
         installations,
         projects: projects.data,
         projectsTotal: projects.meta.total,
@@ -272,6 +305,38 @@ export function GithubPanel() {
       setActionError(getErrorMessage(error));
     } finally {
       setIsDisconnecting(false);
+    }
+  }
+
+  async function handleStartGithubProjectOAuth() {
+    setRedirectAction("project_oauth");
+    setActionError(null);
+    setActionMessage(null);
+
+    try {
+      const result = await apiClient.startGithubProjectOAuth({
+        returnUrl: window.location.href
+      });
+      window.location.assign(result.authorizeUrl);
+    } catch (error) {
+      setRedirectAction(null);
+      setActionError(getErrorMessage(error));
+    }
+  }
+
+  async function handleDisconnectGithubProjectOAuth() {
+    setIsDisconnectingProjectOAuth(true);
+    setActionError(null);
+    setActionMessage(null);
+
+    try {
+      await apiClient.disconnectGithubProjectOAuth();
+      setActionMessage("GitHub ProjectV2 OAuth connection disconnected.");
+      await loadGithubIntegrationSnapshot();
+    } catch (error) {
+      setActionError(getErrorMessage(error));
+    } finally {
+      setIsDisconnectingProjectOAuth(false);
     }
   }
 
@@ -367,6 +432,31 @@ export function GithubPanel() {
       return;
     }
 
+    if (
+      selectedInstallation?.accountType === "User" &&
+      requiresProjectOAuth(syncTarget)
+    ) {
+      const projectOAuth = snapshot.projectOAuth;
+      if (!projectOAuth?.connected) {
+        setActionError(PERSONAL_PROJECT_OAUTH_REQUIRED_MESSAGE);
+        return;
+      }
+
+      if (
+        !projectOAuth.githubLogin ||
+        projectOAuth.githubLogin.toLowerCase() !==
+          selectedInstallation.accountLogin.toLowerCase()
+      ) {
+        setActionError(PERSONAL_PROJECT_OAUTH_ACCOUNT_MISMATCH_MESSAGE);
+        return;
+      }
+
+      if (!hasProjectScope(projectOAuth.tokenScope)) {
+        setActionError(PERSONAL_PROJECT_OAUTH_SCOPE_MESSAGE);
+        return;
+      }
+    }
+
     const body: StartGithubSyncRunInput = {
       installationId: selectedInstallationId,
       target: syncTarget
@@ -412,13 +502,18 @@ export function GithubPanel() {
       errorMessage={errorMessage}
       filteredRepositories={filteredRepositories}
       isDisconnecting={isDisconnecting}
+      isDisconnectingProjectOAuth={isDisconnectingProjectOAuth}
       isDeletingInstallation={isDeletingInstallation}
       isInstallationDeleteRequested={isInstallationDeleteRequested}
       isLoading={isLoading}
       isPullRequestsLoading={isPullRequestsLoading}
       isSyncing={isSyncing}
       oauth={snapshot.oauth}
+      projectOAuth={snapshot.projectOAuth}
       onDisconnectOAuth={() => void handleDisconnectGithubOAuth()}
+      onDisconnectGithubProjectOAuth={() =>
+        void handleDisconnectGithubProjectOAuth()
+      }
       onCancelDeleteInstallation={handleCancelDeleteGithubAppInstallation}
       onConfirmDeleteInstallation={() =>
         void handleConfirmDeleteGithubAppInstallation()
@@ -435,6 +530,7 @@ export function GithubPanel() {
       onRequestDeleteInstallation={handleRequestDeleteGithubAppInstallation}
       onStartInstallation={() => void handleStartGithubAppInstallation()}
       onStartOAuth={() => void handleStartGithubOAuth()}
+      onStartGithubProjectOAuth={() => void handleStartGithubProjectOAuth()}
       onStartSync={() => void handleStartGithubSyncRun()}
       onSyncTargetChange={setSyncTarget}
       panelStatus={panelStatus}

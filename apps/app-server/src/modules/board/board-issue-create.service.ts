@@ -328,6 +328,7 @@ export class BoardIssueCreateService {
     return (
       typeof apiError?.message === "string" &&
       (apiError.message.includes("GitHub OAuth connection") ||
+        apiError.message.includes("GitHub ProjectV2 OAuth") ||
         apiError.message.includes("Current user not found"))
     );
   }

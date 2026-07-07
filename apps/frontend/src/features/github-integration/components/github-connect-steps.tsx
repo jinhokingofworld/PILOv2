@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import type {
   GithubAppInstallation,
   GithubOAuthStatus,
+  GithubProjectOAuthStatus,
   GithubProjectV2,
   GithubRepository
 } from "@/features/github-integration/types";
@@ -29,6 +30,7 @@ import {
 type StepsProps = {
   connected: boolean;
   oauth: GithubOAuthStatus | null;
+  projectOAuth: GithubProjectOAuthStatus | null;
   selectedInstallation: GithubAppInstallation | undefined;
   repositoriesTotal: number;
   projectsTotal: number;
@@ -36,11 +38,14 @@ type StepsProps = {
   selectedProject: GithubProjectV2 | undefined;
   isLoading: boolean;
   isDisconnecting: boolean;
+  isDisconnectingProjectOAuth: boolean;
   isDeletingInstallation: boolean;
   isInstallationDeleteRequested: boolean;
-  redirectAction: "oauth" | "installation" | null;
+  redirectAction: "oauth" | "installation" | "project_oauth" | null;
   onStartOAuth: () => void;
   onDisconnectOAuth: () => void;
+  onStartGithubProjectOAuth: () => void;
+  onDisconnectGithubProjectOAuth: () => void;
   onStartInstallation: () => void;
   onRequestDeleteInstallation: () => void;
   onCancelDeleteInstallation: () => void;
@@ -50,6 +55,7 @@ type StepsProps = {
 export function GithubConnectSteps({
   connected,
   oauth,
+  projectOAuth,
   selectedInstallation,
   repositoriesTotal,
   projectsTotal,
@@ -57,17 +63,21 @@ export function GithubConnectSteps({
   selectedProject,
   isLoading,
   isDisconnecting,
+  isDisconnectingProjectOAuth,
   isDeletingInstallation,
   isInstallationDeleteRequested,
   redirectAction,
   onStartOAuth,
   onDisconnectOAuth,
+  onStartGithubProjectOAuth,
+  onDisconnectGithubProjectOAuth,
   onStartInstallation,
   onRequestDeleteInstallation,
   onCancelDeleteInstallation,
   onConfirmDeleteInstallation
 }: StepsProps) {
   const hasInstallation = Boolean(selectedInstallation);
+  const projectOAuthConnected = projectOAuth?.connected === true;
 
   return (
     <div className="space-y-[15px]">
@@ -76,7 +86,7 @@ export function GithubConnectSteps({
         title="연결 진행"
         subtitle="OAuth 연결과 GitHub App 설치가 끝나면 저장소와 Project 데이터를 확인할 수 있습니다."
       >
-        <div className="stepper grid gap-3 md:grid-cols-2">
+        <div className="stepper grid gap-3 md:grid-cols-3">
           <StepCard
             active={!hasInstallation}
             complete={hasInstallation}
@@ -99,6 +109,103 @@ export function GithubConnectSteps({
             eyebrow="02"
             title="연결 데이터 확인"
           />
+          <StepCard
+            active={hasInstallation && !projectOAuthConnected}
+            complete={projectOAuthConnected}
+            description={
+              projectOAuthConnected
+                ? `@${projectOAuth?.githubLogin ?? "unknown"} ProjectV2 OAuth ready`
+                : "Personal ProjectV2 sync requires a separate project-scoped OAuth token."
+            }
+            eyebrow="03"
+            title="GitHub ProjectV2 OAuth"
+          />
+        </div>
+      </GithubConnectPanel>
+
+      <GithubConnectPanel
+        action={
+          projectOAuthConnected ? (
+            <Button
+              className="h-9 rounded-[8px]"
+              disabled={isDisconnectingProjectOAuth || isLoading}
+              onClick={onDisconnectGithubProjectOAuth}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              {isDisconnectingProjectOAuth ? (
+                <Loader2 className="animate-spin" data-icon="inline-start" />
+              ) : (
+                <Unplug data-icon="inline-start" />
+              )}
+              Disconnect
+            </Button>
+          ) : null
+        }
+        icon={<ShieldCheck className="size-4" />}
+        title="GitHub ProjectV2 OAuth"
+        subtitle="Personal ProjectV2 discovery and status writes use a separate OAuth App token with project scope."
+      >
+        <div className="rounded-[8px] border border-[#d9dee8] bg-[#fbfcfe] p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-[13px] font-semibold uppercase tracking-[0.06em] text-[#7a8497]">
+                ProjectV2 OAuth
+              </p>
+              <h3 className="mt-1 text-[18px] font-semibold text-[#101828]">
+                Personal ProjectV2 access
+              </h3>
+            </div>
+            <GithubConnectPill tone={projectOAuthConnected ? "success" : "warning"}>
+              {projectOAuthConnected ? "Connected" : "Required for personal projects"}
+            </GithubConnectPill>
+          </div>
+          <p className="mt-3 text-[13px] leading-5 text-[#687184]">
+            GitHub App user OAuth tokens can be scope-less. Connect this OAuth App
+            when syncing a personal ProjectV2 owner.
+          </p>
+          <div className="mt-4">
+            <Button
+              className="h-10 rounded-[8px] bg-[#111827] px-4 text-white hover:bg-[#2b3343]"
+              disabled={
+                projectOAuthConnected ||
+                redirectAction === "project_oauth" ||
+                isLoading
+              }
+              onClick={onStartGithubProjectOAuth}
+              type="button"
+            >
+              {redirectAction === "project_oauth" ? (
+                <Loader2 className="animate-spin" data-icon="inline-start" />
+              ) : (
+                <GitBranch data-icon="inline-start" />
+              )}
+              Connect ProjectV2 OAuth
+            </Button>
+          </div>
+          <dl className="mt-4 rounded-[8px] border border-[#e5e9f2] bg-white px-4">
+            <GithubConnectFieldRow
+              label="Connected account"
+              value={
+                projectOAuthConnected
+                  ? `@${projectOAuth?.githubLogin ?? "unknown"}`
+                  : "-"
+              }
+            />
+            <GithubConnectFieldRow
+              label="Start API"
+              value={<code>/me/github/project-oauth/start</code>}
+            />
+            <GithubConnectFieldRow
+              label="Callback API"
+              value={<code>/github/project-oauth/callback</code>}
+            />
+            <GithubConnectFieldRow
+              label="Scope"
+              value={projectOAuth?.tokenScope ?? "project"}
+            />
+          </dl>
         </div>
       </GithubConnectPanel>
 

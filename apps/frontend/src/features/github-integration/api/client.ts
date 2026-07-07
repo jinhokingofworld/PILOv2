@@ -7,6 +7,9 @@ import type {
   GithubOAuthStatus,
   GithubPaginatedPayload,
   GithubPaginationMeta,
+  GithubProjectOAuthDisconnect,
+  GithubProjectOAuthStart,
+  GithubProjectOAuthStatus,
   GithubProjectV2,
   GithubPullRequest,
   GithubRepository,
@@ -358,6 +361,30 @@ export function createGithubIntegrationApiClient({
     async disconnectGithubOAuth() {
       return requestGithubIntegrationData<GithubOAuthDisconnect>(
         "/me/github",
+        { method: "DELETE" },
+        requestOptions
+      );
+    },
+
+    async getGithubProjectOAuthStatus() {
+      return requestGithubIntegrationData<GithubProjectOAuthStatus>(
+        "/me/github/project-oauth",
+        undefined,
+        requestOptions
+      );
+    },
+
+    async startGithubProjectOAuth(body: StartGithubOAuthInput = {}) {
+      return requestGithubIntegrationData<GithubProjectOAuthStart>(
+        "/me/github/project-oauth/start",
+        withJsonBody(body, { method: "POST" }),
+        requestOptions
+      );
+    },
+
+    async disconnectGithubProjectOAuth() {
+      return requestGithubIntegrationData<GithubProjectOAuthDisconnect>(
+        "/me/github/project-oauth",
         { method: "DELETE" },
         requestOptions
       );

@@ -67,12 +67,23 @@ class FakeConfigService {
       now: () => new Date("2026-07-05T10:00:00.000Z")
     };
   }
+
+  getGithubProjectOAuthConfig() {
+    return {
+      tokenEncryptionKey: "test-token-encryption-key",
+      now: () => new Date("2026-07-05T10:00:00.000Z")
+    };
+  }
 }
 
 class FakeTokenEncryptionService {
   decryptToken(encryptedToken) {
-    assert.equal(encryptedToken, "encrypted-user-oauth-token");
-    return "decrypted-user-oauth-token";
+    if (encryptedToken === "encrypted-user-oauth-token") {
+      return "decrypted-user-oauth-token";
+    }
+
+    assert.equal(encryptedToken, "encrypted-project-oauth-token");
+    return "decrypted-project-oauth-token";
   }
 }
 
@@ -237,6 +248,17 @@ function githubOAuthConnectionRow(overrides = {}) {
     github_token_scope: "",
     github_connected_at: "2026-07-05T09:00:00.000Z",
     github_revoked_at: null,
+    ...overrides
+  };
+}
+
+function githubProjectOAuthConnectionRow(overrides = {}) {
+  return {
+    github_project_login: "Developer-EJ",
+    github_project_access_token_encrypted: "encrypted-project-oauth-token",
+    github_project_token_scope: "read:user,user:email,project",
+    github_project_connected_at: "2026-07-05T09:00:00.000Z",
+    github_project_revoked_at: null,
     ...overrides
   };
 }
@@ -1046,10 +1068,10 @@ function projectV2ItemApiItem(overrides = {}) {
         cursor: {}
       }),
       (text, values) => {
-        assert.match(text, /github_access_token_encrypted/i);
+        assert.match(text, /github_project_access_token_encrypted/i);
         assert.match(text, /FROM users/i);
         assert.deepEqual(values, [currentUserId]);
-        return githubOAuthConnectionRow();
+        return githubProjectOAuthConnectionRow();
       },
       (text, values) => {
         assert.match(text, /INSERT INTO github_projects_v2/i);
@@ -1098,11 +1120,11 @@ function projectV2ItemApiItem(overrides = {}) {
   assert.equal(githubAppClient.calls[0].input.userAccessToken, undefined);
   assert.equal(
     githubAppClient.calls[1].input.userAccessToken,
-    "decrypted-user-oauth-token"
+    "decrypted-project-oauth-token"
   );
   assert.doesNotMatch(
     JSON.stringify(database.queries),
-    /decrypted-user-oauth-token/
+    /decrypted-project-oauth-token/
   );
 }
 
@@ -1126,17 +1148,17 @@ function projectV2ItemApiItem(overrides = {}) {
         skipped_count: 0,
         cursor: {}
       }),
-      githubOAuthConnectionRow({
-        github_login: null,
-        github_access_token_encrypted: null,
-        github_connected_at: null
+      githubProjectOAuthConnectionRow({
+        github_project_login: null,
+        github_project_access_token_encrypted: null,
+        github_project_connected_at: null
       }),
       (text, values) => {
         assert.match(text, /UPDATE github_sync_runs/i);
         assert.match(text, /status = 'failed'/i);
         assert.deepEqual(values, [
           syncRunId,
-          "GitHub user OAuth token is required for personal ProjectV2 sync"
+          "GitHub ProjectV2 OAuth connection is required for personal ProjectV2 sync"
         ]);
         return syncRunRow({
           target: "full",
@@ -1148,7 +1170,7 @@ function projectV2ItemApiItem(overrides = {}) {
           updated_count: 0,
           skipped_count: 0,
           error_message:
-            "GitHub user OAuth token is required for personal ProjectV2 sync",
+            "GitHub ProjectV2 OAuth connection is required for personal ProjectV2 sync",
           cursor: {}
         });
       }
@@ -1164,7 +1186,7 @@ function projectV2ItemApiItem(overrides = {}) {
   assert.equal(syncRun.status, "failed");
   assert.equal(
     syncRun.errorMessage,
-    "GitHub user OAuth token is required for personal ProjectV2 sync"
+    "GitHub ProjectV2 OAuth connection is required for personal ProjectV2 sync"
   );
   assert.deepEqual(githubAppClient.calls, []);
 }
@@ -1190,26 +1212,31 @@ function projectV2ItemApiItem(overrides = {}) {
         cursor: {}
       }),
       (text, values) => {
-        assert.match(text, /github_access_token_encrypted/i);
+        assert.match(text, /github_project_access_token_encrypted/i);
         assert.match(text, /FROM users/i);
         assert.deepEqual(values, [currentUserId]);
-        return githubOAuthConnectionRow({
-          github_token_scope: null
+        return githubProjectOAuthConnectionRow({
+          github_project_token_scope: null
         });
       },
       (text, values) => {
         assert.match(text, /UPDATE github_sync_runs/i);
-        assert.match(text, /status = 'success'/i);
-        assert.deepEqual(values, [syncRunId, 0, 0, 0, 0, "{}"]);
+        assert.match(text, /status = 'failed'/i);
+        assert.deepEqual(values, [
+          syncRunId,
+          "GitHub ProjectV2 OAuth connection must be reconnected with project scope"
+        ]);
         return syncRunRow({
           target: "full",
-          status: "success",
+          status: "failed",
           repository_id: null,
           project_v2_id: null,
           fetched_count: 0,
           created_count: 0,
           updated_count: 0,
           skipped_count: 0,
+          error_message:
+            "GitHub ProjectV2 OAuth connection must be reconnected with project scope",
           cursor: {}
         });
       }
@@ -1223,16 +1250,12 @@ function projectV2ItemApiItem(overrides = {}) {
     installationId
   });
 
-  assert.equal(syncRun.status, "success");
-  assert.equal(syncRun.fetchedCount, 0);
-  assert.deepEqual(
-    githubAppClient.calls.map((call) => call.method),
-    ["listInstallationRepositories", "listProjectV2s"]
-  );
+  assert.equal(syncRun.status, "failed");
   assert.equal(
-    githubAppClient.calls[1].input.userAccessToken,
-    "decrypted-user-oauth-token"
+    syncRun.errorMessage,
+    "GitHub ProjectV2 OAuth connection must be reconnected with project scope"
   );
+  assert.deepEqual(githubAppClient.calls, []);
 }
 
 {
@@ -1255,15 +1278,15 @@ function projectV2ItemApiItem(overrides = {}) {
         skipped_count: 0,
         cursor: {}
       }),
-      githubOAuthConnectionRow({
-        github_login: "other-user"
+      githubProjectOAuthConnectionRow({
+        github_project_login: "other-user"
       }),
       (text, values) => {
         assert.match(text, /UPDATE github_sync_runs/i);
         assert.match(text, /status = 'failed'/i);
         assert.deepEqual(values, [
           syncRunId,
-          "GitHub OAuth account does not match this personal ProjectV2 owner"
+          "GitHub ProjectV2 OAuth account does not match this personal ProjectV2 owner"
         ]);
         return syncRunRow({
           target: "project_v2_fields",
@@ -1274,7 +1297,7 @@ function projectV2ItemApiItem(overrides = {}) {
           updated_count: 0,
           skipped_count: 0,
           error_message:
-            "GitHub OAuth account does not match this personal ProjectV2 owner",
+            "GitHub ProjectV2 OAuth account does not match this personal ProjectV2 owner",
           cursor: {}
         });
       }
@@ -1291,7 +1314,7 @@ function projectV2ItemApiItem(overrides = {}) {
   assert.equal(syncRun.status, "failed");
   assert.equal(
     syncRun.errorMessage,
-    "GitHub OAuth account does not match this personal ProjectV2 owner"
+    "GitHub ProjectV2 OAuth account does not match this personal ProjectV2 owner"
   );
   assert.deepEqual(githubAppClient.calls, []);
 }

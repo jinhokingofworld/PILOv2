@@ -9,11 +9,12 @@ import {
 } from "./github-integration-config.service";
 import { GithubTokenEncryptionService } from "./github-token-encryption.service";
 
-interface GithubOAuthConnectionRow extends QueryResultRow {
-  github_login: string | null;
-  github_access_token_encrypted: string | null;
-  github_connected_at: Date | string | null;
-  github_revoked_at: Date | string | null;
+interface GithubProjectOAuthConnectionRow extends QueryResultRow {
+  github_project_login: string | null;
+  github_project_access_token_encrypted: string | null;
+  github_project_token_scope: string | null;
+  github_project_connected_at: Date | string | null;
+  github_project_revoked_at: Date | string | null;
 }
 
 export interface UpdateGithubProjectV2ItemStatusInput {
@@ -34,6 +35,11 @@ export interface AddGithubProjectV2ItemResult {
   itemNodeId: string;
 }
 
+const GITHUB_PROJECT_OAUTH_REQUIRED_MESSAGE =
+  "GitHub ProjectV2 OAuth connection is required for ProjectV2 write";
+const GITHUB_PROJECT_OAUTH_SCOPE_ERROR_MESSAGE =
+  "GitHub ProjectV2 OAuth connection must be reconnected with project scope";
+
 @Injectable()
 export class GithubProjectV2WriteService {
   constructor(
@@ -46,9 +52,14 @@ export class GithubProjectV2WriteService {
   async updateProjectV2ItemStatus(
     input: UpdateGithubProjectV2ItemStatusInput
   ): Promise<void> {
-    const oauthConfig = this.configService.getGithubOAuthConfig();
-    const connection = await this.getGithubOAuthConnectionRow(input.currentUserId);
-    const accessToken = this.getConnectedGithubOAuthAccess(connection, oauthConfig);
+    const oauthConfig = this.configService.getGithubProjectOAuthConfig();
+    const connection = await this.getGithubProjectOAuthConnectionRow(
+      input.currentUserId
+    );
+    const accessToken = this.getConnectedGithubProjectOAuthAccess(
+      connection,
+      oauthConfig
+    );
 
     await this.githubAppClient.updateProjectV2ItemStatus({
       userAccessToken: accessToken,
@@ -62,9 +73,14 @@ export class GithubProjectV2WriteService {
   async addProjectV2ItemByContentId(
     input: AddGithubProjectV2ItemInput
   ): Promise<AddGithubProjectV2ItemResult> {
-    const oauthConfig = this.configService.getGithubOAuthConfig();
-    const connection = await this.getGithubOAuthConnectionRow(input.currentUserId);
-    const accessToken = this.getConnectedGithubOAuthAccess(connection, oauthConfig);
+    const oauthConfig = this.configService.getGithubProjectOAuthConfig();
+    const connection = await this.getGithubProjectOAuthConnectionRow(
+      input.currentUserId
+    );
+    const accessToken = this.getConnectedGithubProjectOAuthAccess(
+      connection,
+      oauthConfig
+    );
 
     return this.githubAppClient.addProjectV2ItemByContentId({
       contentNodeId: input.contentNodeId,
@@ -73,16 +89,17 @@ export class GithubProjectV2WriteService {
     });
   }
 
-  private async getGithubOAuthConnectionRow(
+  private async getGithubProjectOAuthConnectionRow(
     currentUserId: string
-  ): Promise<GithubOAuthConnectionRow> {
-    const row = await this.database.queryOne<GithubOAuthConnectionRow>(
+  ): Promise<GithubProjectOAuthConnectionRow> {
+    const row = await this.database.queryOne<GithubProjectOAuthConnectionRow>(
       `
         SELECT
-          github_login,
-          github_access_token_encrypted,
-          github_connected_at,
-          github_revoked_at
+          github_project_login,
+          github_project_access_token_encrypted,
+          github_project_token_scope,
+          github_project_connected_at,
+          github_project_revoked_at
         FROM users
         WHERE id = $1
       `,
@@ -96,30 +113,42 @@ export class GithubProjectV2WriteService {
     return row;
   }
 
-  private getConnectedGithubOAuthAccess(
-    row: GithubOAuthConnectionRow,
+  private getConnectedGithubProjectOAuthAccess(
+    row: GithubProjectOAuthConnectionRow,
     config: GithubOAuthRuntimeConfig
   ): string {
-    if (!this.isActiveGithubOAuthConnection(row)) {
-      throw badRequest("GitHub OAuth connection is required");
+    if (!this.isActiveGithubProjectOAuthConnection(row)) {
+      throw badRequest(GITHUB_PROJECT_OAUTH_REQUIRED_MESSAGE);
+    }
+
+    if (!this.hasProjectScope(row.github_project_token_scope)) {
+      throw badRequest(GITHUB_PROJECT_OAUTH_SCOPE_ERROR_MESSAGE);
     }
 
     return this.tokenEncryptionService.decryptToken(
-      row.github_access_token_encrypted,
+      row.github_project_access_token_encrypted,
       config
     );
   }
 
-  private isActiveGithubOAuthConnection(
-    row: GithubOAuthConnectionRow
-  ): row is GithubOAuthConnectionRow & {
-    github_access_token_encrypted: string;
+  private isActiveGithubProjectOAuthConnection(
+    row: GithubProjectOAuthConnectionRow
+  ): row is GithubProjectOAuthConnectionRow & {
+    github_project_access_token_encrypted: string;
   } {
     return Boolean(
-      row.github_login &&
-        row.github_access_token_encrypted &&
-        row.github_connected_at &&
-        !row.github_revoked_at
+      row.github_project_login &&
+        row.github_project_access_token_encrypted &&
+        row.github_project_connected_at &&
+        !row.github_project_revoked_at
     );
+  }
+
+  private hasProjectScope(scope: string | null): boolean {
+    if (!scope) {
+      return false;
+    }
+
+    return scope.split(/[,\s]+/).includes("project");
   }
 }

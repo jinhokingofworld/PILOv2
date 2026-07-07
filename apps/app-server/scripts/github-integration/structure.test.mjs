@@ -20,6 +20,10 @@ const featureServices = [
     className: "GithubOAuthIntegrationService"
   },
   {
+    fileName: "github-project-oauth-integration.service.ts",
+    className: "GithubProjectOAuthIntegrationService"
+  },
+  {
     fileName: "github-app-installation.service.ts",
     className: "GithubAppInstallationService"
   },
@@ -83,6 +87,26 @@ const delegatedMethods = [
   {
     methodName: "disconnectGithubOAuth",
     serviceName: "githubOAuthIntegrationService",
+    args: "currentUserId"
+  },
+  {
+    methodName: "getGithubProjectOAuthStatus",
+    serviceName: "githubProjectOAuthIntegrationService",
+    args: "currentUserId"
+  },
+  {
+    methodName: "startGithubProjectOAuth",
+    serviceName: "githubProjectOAuthIntegrationService",
+    args: "currentUserId, input"
+  },
+  {
+    methodName: "completeGithubProjectOAuthCallback",
+    serviceName: "githubProjectOAuthIntegrationService",
+    args: "query, cookieHeader"
+  },
+  {
+    methodName: "disconnectGithubProjectOAuth",
+    serviceName: "githubProjectOAuthIntegrationService",
     args: "currentUserId"
   },
   {

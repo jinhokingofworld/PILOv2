@@ -4,7 +4,10 @@ import { QueryResultRow } from "pg";
 import { badRequest } from "../../common/api-error";
 import { DatabaseService } from "../../database/database.service";
 
-export type GithubCallbackStateFlow = "oauth" | "app_installation";
+export type GithubCallbackStateFlow =
+  | "oauth"
+  | "app_installation"
+  | "project_oauth";
 
 export interface GithubCallbackStateRuntimeConfig {
   apiPublicOrigin: string;
@@ -44,7 +47,8 @@ interface GithubCallbackStateRow extends QueryResultRow {
 
 const COOKIE_NAMES: Record<GithubCallbackStateFlow, string> = {
   oauth: "pilo_github_oauth_state",
-  app_installation: "pilo_github_app_installation_state"
+  app_installation: "pilo_github_app_installation_state",
+  project_oauth: "pilo_github_project_oauth_state"
 };
 
 @Injectable()
@@ -179,9 +183,15 @@ export class GithubCallbackStateService {
   }
 
   private getInvalidStateMessage(flow: GithubCallbackStateFlow): string {
-    return flow === "oauth"
-      ? "Invalid OAuth state"
-      : "Invalid GitHub App installation state";
+    if (flow === "oauth") {
+      return "Invalid OAuth state";
+    }
+
+    if (flow === "project_oauth") {
+      return "Invalid ProjectV2 OAuth state";
+    }
+
+    return "Invalid GitHub App installation state";
   }
 
   private getCookiePath(config: GithubCallbackStateRuntimeConfig): string {

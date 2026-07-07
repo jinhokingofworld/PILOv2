@@ -46,12 +46,20 @@ const baseConfig = {
   stateTtlSeconds: 600,
   now: () => fixedNow
 };
+const projectOAuthConfig = {
+  ...baseConfig,
+  clientId: "project-client-id",
+  clientSecret: "project-client-secret"
+};
 
 const stateService = new GithubOAuthStateService();
 const tokenEncryption = new GithubTokenEncryptionService();
 const configService = {
   getGithubOAuthConfig() {
     return baseConfig;
+  },
+  getGithubProjectOAuthConfig() {
+    return projectOAuthConfig;
   }
 };
 
@@ -61,6 +69,13 @@ const connectedRow = {
   github_token_scope: "",
   github_connected_at: fixedNow,
   github_revoked_at: null
+};
+const projectOAuthConnectedRow = {
+  github_project_user_id: "12345678",
+  github_project_login: "juhyeong",
+  github_project_token_scope: "read:user,user:email,project",
+  github_project_connected_at: fixedNow,
+  github_project_revoked_at: null
 };
 
 {
@@ -147,6 +162,239 @@ const connectedRow = {
       }),
     (error) => error?.response?.error?.message === "Invalid returnUrl"
   );
+}
+
+{
+  const database = new FakeDatabase([projectOAuthConnectedRow]);
+  const service = new GithubIntegrationService(
+    database,
+    {},
+    stateService,
+    tokenEncryption,
+    configService
+  );
+
+  const status = await service.getGithubProjectOAuthStatus("user-1");
+
+  assert.deepEqual(status, {
+    connected: true,
+    githubUserId: 12345678,
+    githubLogin: "juhyeong",
+    tokenScope: "read:user,user:email,project",
+    githubConnectedAt: "2026-07-04T12:00:00.000Z",
+    githubRevokedAt: null
+  });
+  assert.doesNotMatch(
+    database.queries[0].text,
+    /github_project_access_token_encrypted/i
+  );
+}
+
+{
+  const database = new FakeDatabase();
+  const service = new GithubIntegrationService(
+    database,
+    {},
+    stateService,
+    tokenEncryption,
+    configService
+  );
+
+  const start = await service.startGithubProjectOAuth("user-1", {
+    returnUrl: "https://pilo.test/settings/integrations/github"
+  });
+  const authorizeUrl = new URL(start.authorizeUrl);
+
+  assert.equal(
+    authorizeUrl.origin + authorizeUrl.pathname,
+    "https://github.com/login/oauth/authorize"
+  );
+  assert.equal(authorizeUrl.searchParams.get("client_id"), "project-client-id");
+  assert.equal(
+    authorizeUrl.searchParams.get("redirect_uri"),
+    "https://api.pilo.test/api/v1/github/project-oauth/callback"
+  );
+  assert.equal(
+    authorizeUrl.searchParams.get("scope"),
+    "read:user user:email project"
+  );
+  assert.equal(authorizeUrl.searchParams.get("state"), start.state);
+  assert.match(start.stateCookie, /pilo_github_project_oauth_state=/);
+  assert.match(start.stateCookie, /HttpOnly/);
+  assert.match(start.stateCookie, /SameSite=Lax/);
+  assert.match(database.queries[0].text, /flow,\s*state_nonce/i);
+}
+
+{
+  const state = stateService.createState(
+    {
+      userId: "user-1",
+      returnUrl: "https://pilo.test/settings/integrations/github"
+    },
+    projectOAuthConfig
+  );
+  const statePayload = stateService.verifyState(state, projectOAuthConfig);
+  const database = new FakeDatabase([], {
+    queryOne(text) {
+      if (/UPDATE github_callback_states/i.test(text)) {
+        return {
+          user_id: "user-1",
+          workspace_id: null,
+          return_url: "https://pilo.test/settings/integrations/github",
+          expires_at: new Date(statePayload.expiresAt)
+        };
+      }
+
+      if (/SELECT[\s\S]*github_login[\s\S]*FROM users/i.test(text)) {
+        return {
+          github_login: "juhyeong",
+          github_connected_at: fixedNow,
+          github_revoked_at: null
+        };
+      }
+
+      if (/UPDATE users/i.test(text)) {
+        return {
+          ...projectOAuthConnectedRow,
+          github_project_connected_at: fixedNow
+        };
+      }
+
+      return undefined;
+    }
+  });
+  const githubClient = {
+    async exchangeCodeForAccessToken(input) {
+      assert.equal(input.code, "project-oauth-code");
+      assert.equal(
+        input.redirectUri,
+        "https://api.pilo.test/api/v1/github/project-oauth/callback"
+      );
+      return {
+        accessToken: "plain-project-access-token",
+        scope: "read:user,user:email,project"
+      };
+    },
+    async getAuthenticatedUser(accessToken) {
+      assert.equal(accessToken, "plain-project-access-token");
+      return {
+        id: 12345678,
+        login: "juhyeong"
+      };
+    }
+  };
+  const service = new GithubIntegrationService(
+    database,
+    githubClient,
+    stateService,
+    tokenEncryption,
+    configService
+  );
+
+  const callback = await service.completeGithubProjectOAuthCallback(
+    {
+      code: "project-oauth-code",
+      state
+    },
+    "pilo_github_project_oauth_state=project-binding-token"
+  );
+
+  assert.deepEqual(callback, {
+    connected: true,
+    githubUserId: 12345678,
+    githubLogin: "juhyeong",
+    tokenScope: "read:user,user:email,project",
+    githubConnectedAt: "2026-07-04T12:00:00.000Z",
+    returnUrl: "https://pilo.test/settings/integrations/github"
+  });
+
+  const update = database.queries.at(-1);
+  assert.match(update.text, /github_project_access_token_encrypted = \$4/i);
+  assert.equal(update.values[0], "user-1");
+  assert.equal(update.values[1], 12345678);
+  assert.equal(update.values[2], "juhyeong");
+  assert.notEqual(update.values[3], "plain-project-access-token");
+  assert.match(update.values[3], /^v1:/);
+}
+
+{
+  const state = stateService.createState(
+    {
+      userId: "user-1",
+      returnUrl: null
+    },
+    projectOAuthConfig
+  );
+  const statePayload = stateService.verifyState(state, projectOAuthConfig);
+  const database = new FakeDatabase([], {
+    queryOne(text) {
+      if (/UPDATE github_callback_states/i.test(text)) {
+        return {
+          user_id: "user-1",
+          workspace_id: null,
+          return_url: null,
+          expires_at: new Date(statePayload.expiresAt)
+        };
+      }
+
+      return undefined;
+    }
+  });
+  const service = new GithubIntegrationService(
+    database,
+    {
+      async exchangeCodeForAccessToken() {
+        return {
+          accessToken: "plain-project-access-token",
+          scope: "read:user,user:email"
+        };
+      },
+      async getAuthenticatedUser() {
+        return {
+          id: 12345678,
+          login: "juhyeong"
+        };
+      }
+    },
+    stateService,
+    tokenEncryption,
+    configService
+  );
+
+  await assert.rejects(
+    () =>
+      service.completeGithubProjectOAuthCallback(
+        {
+          code: "project-oauth-code",
+          state
+        },
+        "pilo_github_project_oauth_state=project-binding-token"
+      ),
+    (error) =>
+      error?.response?.error?.message ===
+      "GitHub ProjectV2 OAuth connection must be reconnected with project scope"
+  );
+}
+
+{
+  const database = new FakeDatabase([{ id: "user-1" }]);
+  const service = new GithubIntegrationService(
+    database,
+    {},
+    stateService,
+    tokenEncryption,
+    configService
+  );
+
+  const result = await service.disconnectGithubProjectOAuth("user-1");
+
+  assert.deepEqual(result, { disconnected: true });
+  assert.match(
+    database.queries[0].text,
+    /github_project_access_token_encrypted = NULL/i
+  );
+  assert.match(database.queries[0].text, /github_project_revoked_at = now\(\)/i);
+  assert.deepEqual(database.queries[0].values, ["user-1"]);
 }
 
 {

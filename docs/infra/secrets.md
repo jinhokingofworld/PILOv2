@@ -52,10 +52,12 @@
 | `GITHUB_LOGIN_CLIENT_SECRET` | GitHub 로그인 OAuth client secret |
 | `GITHUB_USER_OAUTH_CLIENT_ID` | GitHub App user authorization client id. Installation verification and user-scoped GitHub actions use this token. |
 | `GITHUB_USER_OAUTH_CLIENT_SECRET` | GitHub App user authorization client secret |
+| `GITHUB_PROJECT_OAUTH_CLIENT_ID` | Regular GitHub OAuth App client id for personal ProjectV2 access. Must request `read:user user:email project`. |
+| `GITHUB_PROJECT_OAUTH_CLIENT_SECRET` | Regular GitHub OAuth App client secret for personal ProjectV2 access. |
 | `GITHUB_APP_ID` | GitHub App id |
 | `GITHUB_APP_PRIVATE_KEY` | GitHub App private key |
 | `GITHUB_WEBHOOK_SECRET` | GitHub webhook 검증 secret |
-| `GITHUB_TOKEN_ENCRYPTION_KEY` | `users.github_access_token_encrypted` 암복호화 키 |
+| `GITHUB_TOKEN_ENCRYPTION_KEY` | `users.github_access_token_encrypted` and `users.github_project_access_token_encrypted` 암복호화 키 |
 | `LIVEKIT_API_KEY` | self-hosted LiveKit API key |
 | `LIVEKIT_API_SECRET` | self-hosted LiveKit API secret |
 | `LIVEKIT_URL` | frontend/client가 접속할 LiveKit URL |

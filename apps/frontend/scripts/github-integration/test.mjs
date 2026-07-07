@@ -66,6 +66,7 @@ const githubConnectFormat = await readFile(
 );
 
 assert.match(githubTypes, /export type GithubOAuthStatus/);
+assert.match(githubTypes, /export type GithubProjectOAuthStatus/);
 assert.match(githubTypes, /export type GithubAppInstallation/);
 assert.match(githubTypes, /export type GithubAppInstallationDelete/);
 assert.match(githubTypes, /export type GithubRepository/);
@@ -78,6 +79,10 @@ assert.match(githubApiClient, /GithubIntegrationApiError/);
 assert.match(githubApiClient, /getGithubOAuthStatus/);
 assert.match(githubApiClient, /startGithubOAuth/);
 assert.match(githubApiClient, /disconnectGithubOAuth/);
+assert.match(githubApiClient, /getGithubProjectOAuthStatus/);
+assert.match(githubApiClient, /startGithubProjectOAuth/);
+assert.match(githubApiClient, /disconnectGithubProjectOAuth/);
+assert.match(githubApiClient, /\/me\/github\/project-oauth/);
 assert.match(githubApiClient, /deleteGithubAppInstallation/);
 assert.match(
   githubApiClient,
@@ -101,6 +106,13 @@ assert.match(githubPanel, /createGithubIntegrationApiClient/);
 assert.match(githubPanel, /loadGithubIntegrationSnapshot/);
 assert.match(githubPanel, /handleStartGithubOAuth/);
 assert.match(githubPanel, /handleDisconnectGithubOAuth/);
+assert.match(githubPanel, /handleStartGithubProjectOAuth/);
+assert.match(githubPanel, /handleDisconnectGithubProjectOAuth/);
+assert.match(githubPanel, /requiresProjectOAuth/);
+assert.match(
+  githubPanel,
+  /GitHub ProjectV2 OAuth connection is required for personal ProjectV2 sync/
+);
 assert.match(githubPanel, /handleRequestDeleteGithubAppInstallation/);
 assert.match(githubPanel, /handleConfirmDeleteGithubAppInstallation/);
 assert.match(githubPanel, /deleteGithubAppInstallation/);
@@ -112,6 +124,7 @@ assert.match(githubPanel, /GithubConnectLayout/);
 assert.doesNotMatch(githubPanel, /function StatusPill/);
 assert.doesNotMatch(githubPanel, /function LoadingRows/);
 assert.match(githubConnectLayout, /GithubConnectLayout/);
+assert.match(githubConnectLayout, /projectOAuth/);
 assert.match(githubConnectLayout, /onRequestDeleteInstallation/);
 assert.match(githubConnectLayout, /onCancelDeleteInstallation/);
 assert.match(githubConnectLayout, /onConfirmDeleteInstallation/);
@@ -123,6 +136,9 @@ assert.match(githubConnectPrimitives, /GithubConnectPanel/);
 assert.match(githubConnectPrimitives, /GithubConnectPill/);
 assert.match(githubConnectPrimitives, /GithubConnectEmptyState/);
 assert.match(githubConnectSteps, /GithubConnectSteps/);
+assert.match(githubConnectSteps, /GitHub ProjectV2 OAuth/);
+assert.match(githubConnectSteps, /onStartGithubProjectOAuth/);
+assert.match(githubConnectSteps, /onDisconnectGithubProjectOAuth/);
 assert.match(githubConnectSteps, /step-card/);
 assert.match(githubConnectSteps, /GitHub App 설치/);
 assert.match(githubConnectSteps, /GitHub에서 App 설치 해제/);

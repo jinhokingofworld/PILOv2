@@ -1,8 +1,8 @@
 # GitHub Integration API
 
 External callback, setup, and webhook URLs MUST include the `/api/v1` base path. For example:
-`/api/v1/github/oauth/callback`, `/api/v1/github/installations/callback`, and
-`/api/v1/github/webhooks`.
+`/api/v1/github/oauth/callback`, `/api/v1/github/project-oauth/callback`,
+`/api/v1/github/installations/callback`, and `/api/v1/github/webhooks`.
 
 The endpoint table below follows the common API documentation rule and omits the
 `/api/v1` base path. External provider settings such as GitHub OAuth callback
@@ -16,6 +16,7 @@ GitHub OAuth App, GitHub App, webhook 설정 화면에는 아래처럼 public or
 
 ```text
 GitHub OAuth callback URL: {API_PUBLIC_ORIGIN}/api/v1/github/oauth/callback
+GitHub ProjectV2 OAuth callback URL: {API_PUBLIC_ORIGIN}/api/v1/github/project-oauth/callback
 GitHub App Setup URL:      {API_PUBLIC_ORIGIN}/api/v1/github/installations/callback
 GitHub webhook URL:        {API_PUBLIC_ORIGIN}/api/v1/github/webhooks
 ```
@@ -39,11 +40,19 @@ PR 리뷰 세션, 파일별 리뷰 판단, Kanban board cache hydrate, GitHub is
 | 용도 | 인증 주체 | 저장 위치 |
 | --- | --- | --- |
 | Repository/Issue/PR와 organization ProjectV2 조회와 동기화 | GitHub App installation token | `github_installations` |
-| personal ProjectV2 조회와 동기화 | 현재 사용자의 GitHub App user OAuth token | `users.github_access_token_encrypted` |
+| personal ProjectV2 read/write and sync | regular GitHub OAuth App token with `project` scope | `users.github_project_access_token_encrypted` |
 | GitHub Review 제출 | 현재 사용자의 GitHub App user OAuth token | `users.github_access_token_encrypted` |
 | PILO API 호출 | PILO access token | application auth/session layer |
 
 GitHub token은 복호화된 상태로 응답하거나 로그에 남기지 않는다.
+
+ProjectV2 OAuth is intentionally separate from `/me/github/oauth/start`.
+`/me/github/oauth/start` remains the GitHub App user authorization flow used for
+installation lookup and PR review submission. Personal ProjectV2 discovery and
+ProjectV2 item status writes use `/me/github/project-oauth/start`, which
+requests `read:user user:email project` and stores the encrypted token in
+`users.github_project_access_token_encrypted`. The callback rejects tokens whose
+scope does not include `project`.
 
 GitHub Review 제출은 GitHub Integration 공개 API endpoint가 아니다. PR Review API가
 제출 workflow와 local submission history를 소유하고, GitHub Integration은 PR Review가
@@ -89,29 +98,28 @@ token으로 GitHub의 user installations 목록을 조회해 callback의
 - `full` sync는 허용 저장소를 먼저 갱신한 뒤 GitHub GraphQL의
   `organization.projectsV2` 또는 `user.projectsV2`로 Projects v2를 발견한다.
   organization ProjectV2는 GitHub App installation token을 사용하고, personal
-  ProjectV2는 현재 사용자의 GitHub App user OAuth token을 사용한다. 발견한
+  ProjectV2는 현재 사용자의 ProjectV2 OAuth token을 사용한다. 발견한
   ProjectV2는 `github_projects_v2`에 upsert하고, GitHub repository node id와
   동기화된 저장소를 매칭해 `github_project_v2_repositories` 관계를 갱신한다.
 - organization ProjectV2 자동 발견은 GitHub App installation에 Projects read 권한이
   있어야 한다. 권한이 없으면 GitHub GraphQL provider 오류로 sync run이 실패한다.
-- personal ProjectV2 자동 발견은 현재 사용자의 active GitHub App user OAuth
-  연결이 필요하다. GitHub App user access token은 traditional OAuth scope로
-  ProjectV2 접근 가능성을 판단하지 않으며, `users.github_token_scope`가 `NULL` 또는
-  빈 문자열이어도 GraphQL 조회가 성공하면 동기화를 진행한다. OAuth token이 없으면
-  `GitHub user OAuth token is required for personal ProjectV2 sync`로 sync run이
-  실패한다. 현재 GitHub OAuth 사용자가 personal Project owner와 다르면
-  `GitHub OAuth account does not match this personal ProjectV2 owner`로 실패한다.
-  GraphQL 권한 오류는 provider raw error 대신 safe message로 sync run에 기록한다.
-  classic OAuth scope 오류는
-  `GitHub OAuth connection must be reconnected with read:project scope`,
-  현재 GitHub App user OAuth token 또는 GitHub App 권한으로 personal ProjectV2를 읽을 수 없는 경우는
-  `GitHub user OAuth token lacks permission to read personal ProjectV2`,
-  GitHub가 owner login 자체를 확인하지 못하는 경우는
-  `GitHub ProjectV2 owner could not be resolved`,
-  personal ProjectV2에 installation token만 사용된 경우는
-  `GitHub App installation token cannot access personal ProjectV2`,
-  organization ProjectV2에 installation token 권한이 부족한 경우는
-  `GitHub App installation token cannot access organization ProjectV2`로 구분한다.
+- personal ProjectV2 discovery and sync require an active ProjectV2 OAuth
+  connection from `/me/github/project-oauth/start`. The ProjectV2 OAuth account
+  must match the personal ProjectV2 owner and `users.github_project_token_scope`
+  must include `project`. Missing connection fails the sync run with
+  `GitHub ProjectV2 OAuth connection is required for personal ProjectV2 sync`.
+  Owner mismatch fails with
+  `GitHub ProjectV2 OAuth account does not match this personal ProjectV2 owner`.
+  Missing scope fails with
+  `GitHub ProjectV2 OAuth connection must be reconnected with project scope`.
+  GraphQL permission failure with a ProjectV2 OAuth token is reported as
+  `GitHub ProjectV2 OAuth token lacks permission to read personal ProjectV2`.
+  GitHub owner resolution failure remains
+  `GitHub ProjectV2 owner could not be resolved`; using an installation token for
+  personal ProjectV2 remains
+  `GitHub App installation token cannot access personal ProjectV2`; organization
+  ProjectV2 installation-token permission failure remains
+  `GitHub App installation token cannot access organization ProjectV2`.
 - GitHub webhook receiver는 delivery 수신과 검증 결과를 `github_webhook_deliveries`에 기록한다. 실제 GitHub source table 동기화는 sync run 또는 별도 background worker가 담당한다.
 - GitHub App installation 삭제는 GitHub 원격 `DELETE /app/installations/{installation_id}`를
   App JWT로 호출한 뒤 local `github_installations` row를 삭제한다. GitHub가 `404`를
@@ -131,6 +139,10 @@ token으로 GitHub의 user installations 목록을 조회해 callback의
 | `POST` | `/me/github/oauth/start` | GitHub App user authorization URL 생성 |
 | `GET` | `/github/oauth/callback` | GitHub OAuth callback |
 | `DELETE` | `/me/github` | 현재 사용자의 GitHub App user OAuth 연결 해제 |
+| `GET` | `/me/github/project-oauth` | ProjectV2 OAuth connection status |
+| `POST` | `/me/github/project-oauth/start` | ProjectV2 OAuth authorization URL with `project` scope |
+| `GET` | `/github/project-oauth/callback` | ProjectV2 OAuth callback |
+| `DELETE` | `/me/github/project-oauth` | Disconnect ProjectV2 OAuth token |
 | `POST` | `/workspaces/{workspaceId}/github/installations/start` | GitHub App user access token 검증 후 GitHub App 설치 URL 생성 |
 | `GET` | `/github/installations/callback` | GitHub App Setup URL redirect 처리 |
 | `GET` | `/workspaces/{workspaceId}/github/installations` | Workspace installation 목록 조회 |
@@ -286,14 +298,18 @@ DELETE /api/v1/workspaces/{workspaceId}/github/installations/{installationId}
 
 ## Callback redirect rule
 
-- `POST /me/github/oauth/start` and
+- `POST /me/github/oauth/start`, `POST /me/github/project-oauth/start`, and
   `POST /workspaces/{workspaceId}/github/installations/start` store the optional
   `returnUrl` in signed state.
 - `POST /me/github/oauth/start` creates a GitHub App user authorization URL.
   GitHub App user access tokens do not use traditional OAuth scopes, so
   `users.github_token_scope` is stored for diagnostics/display only and is not a
   mandatory ProjectV2 access precondition.
-- Both start endpoints also create a server-side callback state row and set an
+- `POST /me/github/project-oauth/start` creates a regular GitHub OAuth App
+  authorization URL with `read:user user:email project`. Its callback stores
+  `users.github_project_access_token_encrypted` and requires the returned scope
+  to include `project`.
+- All start endpoints also create a server-side callback state row and set an
   HttpOnly `SameSite=Lax` binding cookie scoped to `{API_BASE_PATH}/github`.
 - Browser clients must call the start endpoints with credentials included, and
   app-server CORS must use a concrete frontend origin with credentials enabled
@@ -303,6 +319,10 @@ DELETE /api/v1/workspaces/{workspaceId}/github/installations/{installationId}
 - `GET /github/oauth/callback` requires a valid signed OAuth state, the matching
   browser binding cookie, and an unexpired unconsumed server-side state row.
   The server consumes the state row before exchanging the GitHub OAuth code.
+- `GET /github/project-oauth/callback` requires a valid signed ProjectV2 OAuth
+  state, the matching browser binding cookie, and an unexpired unconsumed
+  server-side state row. The server consumes the state row before exchanging the
+  GitHub OAuth code and rejects returned tokens without `project` scope.
 - `GET /github/installations/callback` requires a valid signed GitHub App
   installation state, the matching browser binding cookie, and an unexpired
   unconsumed server-side state row. The server consumes the state row before

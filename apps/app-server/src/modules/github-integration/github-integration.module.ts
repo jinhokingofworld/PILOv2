@@ -13,6 +13,7 @@ import { GithubIssueWriteService } from "./github-issue-write.service";
 import { GithubOAuthClient } from "./github-oauth.client";
 import { GithubOAuthIntegrationService } from "./github-oauth-integration.service";
 import { GithubOAuthStateService } from "./github-oauth-state.service";
+import { GithubProjectOAuthIntegrationService } from "./github-project-oauth-integration.service";
 import { GithubProjectV2SyncTokenService } from "./github-project-v2-sync-token.service";
 import { GithubProjectV2Service } from "./github-project-v2.service";
 import { GithubProjectV2WriteService } from "./github-project-v2-write.service";
@@ -38,6 +39,7 @@ import { GithubWebhookService } from "./github-webhook.service";
     GithubOAuthClient,
     GithubOAuthIntegrationService,
     GithubOAuthStateService,
+    GithubProjectOAuthIntegrationService,
     GithubProjectV2SyncTokenService,
     GithubProjectV2Service,
     GithubProjectV2WriteService,
