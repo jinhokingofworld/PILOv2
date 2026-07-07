@@ -1,6 +1,7 @@
 import { readCanvasStorage, writeCanvasStorage } from "../utils/canvas-storage";
 import type {
   CanvasBoardDetail,
+  CanvasOperationsCatchupPayload,
   CanvasViewportShapeQuery,
   CanvasWorkspaceRequestOptions,
 } from "./canvas-types";
@@ -135,6 +136,16 @@ export function createMockCanvasClient() {
         .find((rawShape) => isRecord(rawShape) && rawShape.id === shapeId);
 
       return shape ?? null;
+    },
+
+    async listOperationsAfterSeq(
+      _boardId: string,
+      afterSeq = 0,
+    ): Promise<CanvasOperationsCatchupPayload> {
+      return {
+        latestOpSeq: Math.max(0, Math.trunc(afterSeq)),
+        operations: [],
+      };
     },
 
     async enterCanvas(boardId: string, { workspaceId }: { workspaceId?: string } = {}) {

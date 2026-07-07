@@ -1,6 +1,8 @@
 import type {
   CanvasBoardDetail,
   CanvasBoardSummary,
+  CanvasOperationsCatchupPayload,
+  CanvasShapeOperationPayload,
   CanvasViewSetting,
 } from "./canvas-types";
 
@@ -36,6 +38,84 @@ export function normalizeCanvasShapes(value: unknown) {
   }
 
   return value.map(normalizeCanvasShape);
+}
+
+function normalizeNumber(value: unknown, fallback = 0) {
+  const numberValue =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number(value)
+        : fallback;
+
+  return Number.isFinite(numberValue) ? numberValue : fallback;
+}
+
+function normalizeString(value: unknown, fallback = "") {
+  return typeof value === "string" ? value : fallback;
+}
+
+function normalizeOptionalNumber(value: unknown) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  return normalizeNumber(value);
+}
+
+export function normalizeCanvasOperation(
+  value: unknown,
+): CanvasShapeOperationPayload | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const operationType =
+    value.operationType === "create" ||
+    value.operationType === "update" ||
+    value.operationType === "delete"
+      ? value.operationType
+      : "update";
+
+  return {
+    id: normalizeString(value.id),
+    workspaceId: normalizeString(value.workspaceId),
+    canvasId: normalizeString(value.canvasId),
+    shapeId: normalizeString(value.shapeId),
+    operationType,
+    opSeq: normalizeNumber(value.opSeq),
+    actorUserId: normalizeString(value.actorUserId),
+    clientOperationId: normalizeString(value.clientOperationId),
+    baseRevision: normalizeOptionalNumber(value.baseRevision),
+    resultRevision: normalizeNumber(value.resultRevision),
+    contentHash: normalizeString(value.contentHash),
+    payload: isRecord(value.payload) ? value.payload : {},
+    createdAt: normalizeString(value.createdAt),
+  };
+}
+
+export function normalizeCanvasOperationsCatchup(
+  value: unknown,
+): CanvasOperationsCatchupPayload {
+  if (!isRecord(value)) {
+    return {
+      latestOpSeq: 0,
+      operations: [],
+    };
+  }
+
+  const operations = Array.isArray(value.operations)
+    ? value.operations.flatMap((operation) => {
+        const normalizedOperation = normalizeCanvasOperation(operation);
+
+        return normalizedOperation === null ? [] : [normalizedOperation];
+      })
+    : [];
+
+  return {
+    latestOpSeq: normalizeNumber(value.latestOpSeq),
+    operations,
+  };
 }
 
 export function createMockCanvasBoardDetail(

@@ -1,5 +1,9 @@
 import type { CanvasShapeApiClient } from "../../../utils/canvas-shape-sync";
-import type { CanvasBoardDetail, CanvasViewSetting } from "../../../api/canvas-types";
+import type {
+  CanvasBoardDetail,
+  CanvasOperationsCatchupPayload,
+  CanvasViewSetting,
+} from "../../../api/canvas-types";
 import type { PiloCanvasViewportBounds } from "../types";
 
 export type { CanvasBoardDetail, CanvasViewSetting };
@@ -21,6 +25,11 @@ export type CanvasViewSettingApiClient = CanvasShapeApiClient & {
     shapeId: string,
     options: { signal?: AbortSignal; workspaceId: string },
   ) => Promise<unknown>;
+  listOperationsAfterSeq?: (
+    boardId: string,
+    afterSeq: number,
+    options: { signal?: AbortSignal; workspaceId: string },
+  ) => Promise<CanvasOperationsCatchupPayload>;
   enterCanvas?: (
     boardId: string,
     options: { workspaceId: string },

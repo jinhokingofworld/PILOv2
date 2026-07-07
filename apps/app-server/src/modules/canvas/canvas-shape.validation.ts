@@ -4,6 +4,7 @@ import {
   CompleteShapeWriteValues,
   CreateCanvasShapeRequest,
   CreateCanvasRequest,
+  ListCanvasOperationsQuery,
   ListCanvasShapesQuery,
   ShapeWriteValues,
   SyncCanvasShapesBatchRequest,
@@ -259,6 +260,28 @@ export function validateViewportBounds(
     height,
     margin
   };
+}
+
+export function validateCanvasOperationsAfterSeq(
+  input: ListCanvasOperationsQuery
+): number {
+  if (!isRecord(input)) {
+    return 0;
+  }
+
+  const afterSeq = validateQueryNumber(
+    input.afterSeq,
+    "Canvas operations afterSeq",
+    0
+  );
+
+  if (!Number.isInteger(afterSeq) || afterSeq < 0) {
+    throw badRequest(
+      "Canvas operations afterSeq must be a non-negative integer"
+    );
+  }
+
+  return afterSeq;
 }
 
 function validateShapeType(value: unknown): string {

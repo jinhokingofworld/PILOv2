@@ -7,6 +7,7 @@ import {
   mapCanvas,
   mapCanvasUserState,
   mapDeletedShape,
+  mapShapeOperation,
   mapShape,
   mergeShapeWriteValues
 } from "./canvas-shape.mapper";
@@ -17,17 +18,21 @@ import {
   validateShapeId,
   validateShapeUpdate,
   validateViewSetting,
+  validateCanvasOperationsAfterSeq,
   validateViewportBounds
 } from "./canvas-shape.validation";
 import {
   CanvasBoardDetailPayload,
   CanvasBoardPayload,
+  CanvasLatestOperationSeqRow,
   CanvasLeavePayload,
+  CanvasOperationsCatchupPayload,
   CanvasRow,
   CanvasShapeBatchPayload,
   CanvasShapeCleanupRow,
   CanvasShapeDeletePayload,
   CanvasShapeDeleteRow,
+  CanvasShapeOperationRow,
   CanvasShapePayload,
   CanvasShapeRow,
   CanvasShapeSummaryPayload,
@@ -36,6 +41,7 @@ import {
   CanvasViewSettingPayload,
   CreateCanvasRequest,
   CreateCanvasShapeRequest,
+  ListCanvasOperationsQuery,
   ListCanvasShapesQuery,
   SyncCanvasShapesBatchRequest,
   UpdateCanvasShapeRequest,
@@ -195,6 +201,62 @@ export class CanvasService {
     );
 
     return shapes.map((shape) => mapShape(shape));
+  }
+
+  async listOperationsAfterSeq(
+    currentUserId: string,
+    workspaceId: string,
+    canvasId: string,
+    input: ListCanvasOperationsQuery
+  ): Promise<CanvasOperationsCatchupPayload> {
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+
+    const canvas = await this.findCanvas(workspaceId, canvasId);
+    if (!canvas) {
+      throw notFound("Canvas not found");
+    }
+
+    const afterSeq = validateCanvasOperationsAfterSeq(input);
+    const latestSeqRow = await this.database.queryOne<CanvasLatestOperationSeqRow>(
+      `
+        SELECT latest_op_seq
+        FROM canvas
+        WHERE id = $1
+          AND workspace_id = $2
+          AND board_type = 'freeform'
+      `,
+      [canvas.id, workspaceId]
+    );
+    const operations = await this.database.query<CanvasShapeOperationRow>(
+      `
+        SELECT
+          id,
+          workspace_id,
+          canvas_id,
+          shape_id,
+          actor_user_id,
+          operation_type,
+          op_seq,
+          client_operation_id,
+          base_revision,
+          result_revision,
+          content_hash,
+          payload,
+          created_at
+        FROM canvas_shape_operations
+        WHERE workspace_id = $1
+          AND canvas_id = $2
+          AND op_seq > $3
+        ORDER BY op_seq ASC, created_at ASC, id ASC
+        LIMIT 500
+      `,
+      [workspaceId, canvas.id, afterSeq]
+    );
+
+    return {
+      latestOpSeq: Number(latestSeqRow?.latest_op_seq ?? 0),
+      operations: operations.map((operation) => mapShapeOperation(operation))
+    };
   }
 
   async createShape(
