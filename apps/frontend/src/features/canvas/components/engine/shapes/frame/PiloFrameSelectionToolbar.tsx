@@ -37,6 +37,8 @@ const frameRatioPresets = [
   { key: "browser", label: "브라우저", width: 520, height: 325 },
 ];
 
+const FRAME_TOOLBAR_BASE_WIDTH = 264;
+
 function buildFrameSizePartial(
   shape: PiloFrameShape,
   preset: (typeof frameRatioPresets)[number],
@@ -90,11 +92,17 @@ export function FrameSelectionToolbar({
       if (!bounds) return null;
 
       const viewportBounds = editor.getViewportScreenBounds();
+      const camera = editor.getCamera();
       const topCenter = editor.pageToViewport({
         x: bounds.x + bounds.w / 2,
         y: bounds.y + bounds.h,
       });
-      const toolbarHalfWidth = 132;
+      const frameViewportWidth = bounds.w * camera.z;
+      const toolbarScale = Math.min(
+        1,
+        Math.max(0.01, frameViewportWidth / FRAME_TOOLBAR_BASE_WIDTH),
+      );
+      const toolbarHalfWidth = (FRAME_TOOLBAR_BASE_WIDTH * toolbarScale) / 2;
       const clampedLeft = Math.min(
         Math.max(topCenter.x, toolbarHalfWidth + 12),
         Math.max(
@@ -106,7 +114,8 @@ export function FrameSelectionToolbar({
       return {
         frame: selectedFrame,
         left: clampedLeft,
-        top: topCenter.y + 12,
+        scale: toolbarScale,
+        top: topCenter.y + 12 * toolbarScale,
       };
     },
     [editor],
@@ -168,6 +177,7 @@ export function FrameSelectionToolbar({
       style={{
         left: toolbarState.left,
         top: toolbarState.top,
+        transform: `translateX(-50%) scale(${toolbarState.scale})`,
       }}
       onPointerDownCapture={handleToolbarPointerEvent}
       onPointerUpCapture={handleToolbarPointerEvent}

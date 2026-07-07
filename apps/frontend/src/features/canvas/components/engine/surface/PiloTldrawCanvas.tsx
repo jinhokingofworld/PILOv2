@@ -183,7 +183,7 @@ const tldrawComponents = {
   Background: PiloCanvasBackground,
 };
 
-const PILO_COLLAPSED_FRAME_SIZE = 72;
+const PILO_COLLAPSED_FRAME_SIZE = 144;
 
 function collectSerializedArrowBindings(shapes: PiloCanvasFreeformShape[]) {
   return shapes.flatMap(readSerializedArrowBindings);
