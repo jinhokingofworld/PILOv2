@@ -9,6 +9,7 @@ import { GithubIntegrationConfigService } from "./github-integration-config.serv
 import { GithubOAuthClient } from "./github-oauth.client";
 import { GithubOAuthIntegrationService } from "./github-oauth-integration.service";
 import { GithubOAuthStateService } from "./github-oauth-state.service";
+import { GithubProjectOAuthIntegrationService } from "./github-project-oauth-integration.service";
 import { GithubProjectV2SyncTokenService } from "./github-project-v2-sync-token.service";
 import { GithubProjectV2Service } from "./github-project-v2.service";
 import { GithubPullRequestRemoteService } from "./github-pull-request-remote.service";
@@ -43,6 +44,10 @@ import type {
   GithubOAuthStartPayload,
   GithubOAuthStatusPayload,
   GithubPaginatedPayload,
+  GithubProjectOAuthCallbackPayload,
+  GithubProjectOAuthDisconnectPayload,
+  GithubProjectOAuthStartPayload,
+  GithubProjectOAuthStatusPayload,
   GithubProjectV2DetailPayload,
   GithubProjectV2FieldPayload,
   GithubProjectV2ItemPayload,
@@ -65,6 +70,7 @@ import type {
 @Injectable()
 export class GithubIntegrationService {
   private readonly githubOAuthIntegrationService: GithubOAuthIntegrationService;
+  private readonly githubProjectOAuthIntegrationService: GithubProjectOAuthIntegrationService;
   private readonly githubAppInstallationService: GithubAppInstallationService;
   private readonly githubSourceReadService: GithubSourceReadService;
   private readonly githubProjectV2Service: GithubProjectV2Service;
@@ -103,13 +109,25 @@ export class GithubIntegrationService {
     @Optional()
     githubCallbackStateService?: GithubCallbackStateService,
     @Optional()
-    githubProjectV2SyncTokenService?: GithubProjectV2SyncTokenService
+    githubProjectV2SyncTokenService?: GithubProjectV2SyncTokenService,
+    @Optional()
+    githubProjectOAuthIntegrationService?: GithubProjectOAuthIntegrationService
   ) {
     const callbackStateService =
       githubCallbackStateService ?? new GithubCallbackStateService(database);
     this.githubOAuthIntegrationService =
       githubOAuthIntegrationService ??
       new GithubOAuthIntegrationService(
+        database,
+        githubOAuthClient,
+        stateService,
+        callbackStateService,
+        tokenEncryptionService,
+        configService
+      );
+    this.githubProjectOAuthIntegrationService =
+      githubProjectOAuthIntegrationService ??
+      new GithubProjectOAuthIntegrationService(
         database,
         githubOAuthClient,
         stateService,
@@ -215,6 +233,42 @@ export class GithubIntegrationService {
     currentUserId: string
   ): Promise<GithubOAuthDisconnectPayload> {
     return this.githubOAuthIntegrationService.disconnectGithubOAuth(currentUserId);
+  }
+
+  async getGithubProjectOAuthStatus(
+    currentUserId: string
+  ): Promise<GithubProjectOAuthStatusPayload> {
+    return this.githubProjectOAuthIntegrationService.getGithubProjectOAuthStatus(
+      currentUserId
+    );
+  }
+
+  async startGithubProjectOAuth(
+    currentUserId: string,
+    input: StartGithubOAuthRequest | undefined
+  ): Promise<GithubProjectOAuthStartPayload & { stateCookie: string }> {
+    return this.githubProjectOAuthIntegrationService.startGithubProjectOAuth(
+      currentUserId,
+      input
+    );
+  }
+
+  async completeGithubProjectOAuthCallback(
+    query: GithubOAuthCallbackQuery,
+    cookieHeader?: string | null
+  ): Promise<GithubProjectOAuthCallbackPayload> {
+    return this.githubProjectOAuthIntegrationService.completeGithubProjectOAuthCallback(
+      query,
+      cookieHeader
+    );
+  }
+
+  async disconnectGithubProjectOAuth(
+    currentUserId: string
+  ): Promise<GithubProjectOAuthDisconnectPayload> {
+    return this.githubProjectOAuthIntegrationService.disconnectGithubProjectOAuth(
+      currentUserId
+    );
   }
 
   async startGithubAppInstallation(

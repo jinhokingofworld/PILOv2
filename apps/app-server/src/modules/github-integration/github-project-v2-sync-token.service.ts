@@ -10,12 +10,20 @@ interface GithubProjectV2SyncInstallation {
   account_type: "User" | "Organization";
 }
 
-interface GithubOAuthConnectionRow extends QueryResultRow {
-  github_login: string | null;
-  github_access_token_encrypted: string | null;
-  github_connected_at: Date | string | null;
-  github_revoked_at: Date | string | null;
+interface GithubProjectOAuthConnectionRow extends QueryResultRow {
+  github_project_login: string | null;
+  github_project_access_token_encrypted: string | null;
+  github_project_token_scope: string | null;
+  github_project_connected_at: Date | string | null;
+  github_project_revoked_at: Date | string | null;
 }
+
+const GITHUB_PROJECT_OAUTH_REQUIRED_MESSAGE =
+  "GitHub ProjectV2 OAuth connection is required for personal ProjectV2 sync";
+const GITHUB_PROJECT_OAUTH_SCOPE_ERROR_MESSAGE =
+  "GitHub ProjectV2 OAuth connection must be reconnected with project scope";
+const GITHUB_PROJECT_OAUTH_OWNER_MISMATCH_MESSAGE =
+  "GitHub ProjectV2 OAuth account does not match this personal ProjectV2 owner";
 
 @Injectable()
 export class GithubProjectV2SyncTokenService {
@@ -37,35 +45,39 @@ export class GithubProjectV2SyncTokenService {
       return null;
     }
 
-    const row = await this.getGithubOAuthConnectionRow(input.currentUserId);
-    if (!this.isActiveGithubOAuthConnection(row)) {
-      throw badRequest(
-        "GitHub user OAuth token is required for personal ProjectV2 sync"
-      );
+    const row = await this.getGithubProjectOAuthConnectionRow(input.currentUserId);
+    if (!this.isActiveGithubProjectOAuthConnection(row)) {
+      throw badRequest(GITHUB_PROJECT_OAUTH_REQUIRED_MESSAGE);
     }
 
-    if (row.github_login !== input.installation.account_login) {
-      throw badRequest(
-        "GitHub OAuth account does not match this personal ProjectV2 owner"
-      );
+    if (
+      row.github_project_login.toLowerCase() !==
+      input.installation.account_login.toLowerCase()
+    ) {
+      throw badRequest(GITHUB_PROJECT_OAUTH_OWNER_MISMATCH_MESSAGE);
+    }
+
+    if (!this.hasProjectScope(row.github_project_token_scope)) {
+      throw badRequest(GITHUB_PROJECT_OAUTH_SCOPE_ERROR_MESSAGE);
     }
 
     return this.tokenEncryptionService.decryptToken(
-      row.github_access_token_encrypted,
-      this.configService.getGithubOAuthConfig()
+      row.github_project_access_token_encrypted,
+      this.configService.getGithubProjectOAuthConfig()
     );
   }
 
-  private async getGithubOAuthConnectionRow(
+  private async getGithubProjectOAuthConnectionRow(
     currentUserId: string
-  ): Promise<GithubOAuthConnectionRow> {
-    const row = await this.database.queryOne<GithubOAuthConnectionRow>(
+  ): Promise<GithubProjectOAuthConnectionRow> {
+    const row = await this.database.queryOne<GithubProjectOAuthConnectionRow>(
       `
         SELECT
-          github_login,
-          github_access_token_encrypted,
-          github_connected_at,
-          github_revoked_at
+          github_project_login,
+          github_project_access_token_encrypted,
+          github_project_token_scope,
+          github_project_connected_at,
+          github_project_revoked_at
         FROM users
         WHERE id = $1
       `,
@@ -79,17 +91,25 @@ export class GithubProjectV2SyncTokenService {
     return row;
   }
 
-  private isActiveGithubOAuthConnection(
-    row: GithubOAuthConnectionRow
-  ): row is GithubOAuthConnectionRow & {
-    github_access_token_encrypted: string;
-    github_login: string;
+  private isActiveGithubProjectOAuthConnection(
+    row: GithubProjectOAuthConnectionRow
+  ): row is GithubProjectOAuthConnectionRow & {
+    github_project_access_token_encrypted: string;
+    github_project_login: string;
   } {
     return Boolean(
-      row.github_login &&
-        row.github_access_token_encrypted &&
-        row.github_connected_at &&
-        !row.github_revoked_at
+      row.github_project_login &&
+        row.github_project_access_token_encrypted &&
+        row.github_project_connected_at &&
+        !row.github_project_revoked_at
     );
+  }
+
+  private hasProjectScope(scope: string | null): boolean {
+    if (!scope) {
+      return false;
+    }
+
+    return scope.split(/[,\s]+/).includes("project");
   }
 }

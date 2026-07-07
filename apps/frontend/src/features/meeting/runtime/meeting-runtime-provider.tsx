@@ -158,6 +158,12 @@ export function MeetingRuntimeProvider({ children }: { children: ReactNode }) {
   return (
     <MeetingRuntimeContext.Provider value={contextValue}>
       {children}
+      <div
+        ref={liveKitRoom.remoteAudioContainerRef}
+        aria-hidden="true"
+        className="hidden"
+        data-livekit-audio-sink="true"
+      />
     </MeetingRuntimeContext.Provider>
   );
 }

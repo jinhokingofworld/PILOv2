@@ -41,6 +41,10 @@ import type {
   GithubOAuthStatusPayload,
   GithubPaginatedPayload,
   GithubPaginationMeta,
+  GithubProjectOAuthCallbackPayload,
+  GithubProjectOAuthDisconnectPayload,
+  GithubProjectOAuthStartPayload,
+  GithubProjectOAuthStatusPayload,
   GithubProjectV2DetailPayload,
   GithubProjectV2FieldPayload,
   GithubProjectV2ItemPayload,
@@ -134,6 +138,64 @@ export class GithubIntegrationController {
     const result = await this.githubIntegrationService.disconnectGithubOAuth(
       currentUserId
     );
+    return apiResponse(result);
+  }
+
+  @Get("me/github/project-oauth")
+  @UseGuards(AuthGuard)
+  async getGithubProjectOAuthStatus(
+    @CurrentUserId() currentUserId: string
+  ): Promise<ApiSuccessResponse<GithubProjectOAuthStatusPayload>> {
+    const status =
+      await this.githubIntegrationService.getGithubProjectOAuthStatus(
+        currentUserId
+      );
+    return apiResponse(status);
+  }
+
+  @Post("me/github/project-oauth/start")
+  @UseGuards(AuthGuard)
+  async startGithubProjectOAuth(
+    @CurrentUserId() currentUserId: string,
+    @Body() body: StartGithubOAuthRequest | undefined,
+    @Res({ passthrough: true }) reply: FastifyReply
+  ): Promise<ApiSuccessResponse<GithubProjectOAuthStartPayload>> {
+    const { stateCookie, ...start } =
+      await this.githubIntegrationService.startGithubProjectOAuth(
+        currentUserId,
+        body
+      );
+    reply.header("set-cookie", stateCookie);
+    return apiResponse(start);
+  }
+
+  @Get("github/project-oauth/callback")
+  async completeGithubProjectOAuthCallback(
+    @Query() query: GithubOAuthCallbackQuery,
+    @Headers("cookie") cookieHeader: string | undefined,
+    @Res({ passthrough: true }) reply: FastifyReply
+  ): Promise<ApiSuccessResponse<GithubProjectOAuthCallbackPayload> | undefined> {
+    const result =
+      await this.githubIntegrationService.completeGithubProjectOAuthCallback(
+        query,
+        cookieHeader
+      );
+    if (redirectToReturnUrl(reply, result.returnUrl)) {
+      return undefined;
+    }
+
+    return apiResponse(result);
+  }
+
+  @Delete("me/github/project-oauth")
+  @UseGuards(AuthGuard)
+  async disconnectGithubProjectOAuth(
+    @CurrentUserId() currentUserId: string
+  ): Promise<ApiSuccessResponse<GithubProjectOAuthDisconnectPayload>> {
+    const result =
+      await this.githubIntegrationService.disconnectGithubProjectOAuth(
+        currentUserId
+      );
     return apiResponse(result);
   }
 

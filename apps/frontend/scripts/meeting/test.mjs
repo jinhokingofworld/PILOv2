@@ -156,11 +156,14 @@ assert.match(meetingRuntimeProvider, /leaveActiveMeeting/);
 assert.match(meetingRuntimeProvider, /activeSessionRef/);
 assert.match(meetingRuntimeProvider, /setHeaderMeetingConnectionStatus\(liveKitRoomStatus\)/);
 assert.match(meetingRuntimeProvider, /setHeaderMeetingRecordingStatus\(null\)/);
+assert.match(meetingRuntimeProvider, /remoteAudioContainerRef/);
+assert.match(meetingRuntimeProvider, /data-livekit-audio-sink="true"/);
 
 assert.match(meetingNavigation, /title: "음성회의"/);
 assert.match(meetingNavigation, /회의 참여, 녹음, 회의록 확인과 재생성/);
-assert.match(meetingNavigation, /\/meeting\/#room/);
-assert.match(meetingNavigation, /\/meeting\/#report/);
+assert.match(meetingNavigation, /\/meeting#room/);
+assert.match(meetingNavigation, /\/meeting#report/);
+assert.doesNotMatch(meetingNavigation, /\/meeting\/#/);
 assert.doesNotMatch(meetingNavigation, /\/meeting#recording/);
 
 assert.match(meetingPanel, /"use client"/);
@@ -192,7 +195,7 @@ assert.match(meetingPanel, /if \(shouldLeaveMeeting\)/);
 assert.match(meetingPanel, /녹음 시작/);
 assert.match(meetingPanel, /녹음 종료/);
 assert.match(meetingPanel, /현재 참여 인원/);
-assert.match(meetingPanel, /remoteAudioContainerRef/);
+assert.doesNotMatch(meetingPanel, /remoteAudioContainerRef/);
 assert.match(meetingPanel, /MeetingReportSection/);
 assert.match(meetingPanel, /getMeetingSectionFromHash/);
 assert.match(meetingPanel, /activeSection/);

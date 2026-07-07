@@ -30,6 +30,14 @@ export interface GithubOAuthDisconnectPayload {
   disconnected: true;
 }
 
+export type GithubProjectOAuthStatusPayload = GithubOAuthStatusPayload;
+
+export type GithubProjectOAuthStartPayload = GithubOAuthStartPayload;
+
+export type GithubProjectOAuthCallbackPayload = GithubOAuthCallbackPayload;
+
+export type GithubProjectOAuthDisconnectPayload = GithubOAuthDisconnectPayload;
+
 export interface GithubAppInstallationPayload {
   id: string;
   workspaceId: string;

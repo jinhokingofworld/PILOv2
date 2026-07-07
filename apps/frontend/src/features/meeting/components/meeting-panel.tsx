@@ -816,11 +816,6 @@ export function MeetingPanel() {
           />
         )}
 
-        <div
-          ref={liveKitRoom.remoteAudioContainerRef}
-          aria-hidden="true"
-          className="hidden"
-        />
       </div>
     </TooltipProvider>
   );

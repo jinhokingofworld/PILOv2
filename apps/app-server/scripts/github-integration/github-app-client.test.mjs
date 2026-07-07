@@ -574,7 +574,7 @@ function projectNode(overrides = {}) {
         }),
       (error) =>
         error?.response?.error?.message ===
-        "GitHub user OAuth token lacks permission to read personal ProjectV2"
+        "GitHub ProjectV2 OAuth token lacks permission to read personal ProjectV2"
     );
     assert.equal(graphqlRequestCount, 1);
   } finally {
@@ -664,7 +664,7 @@ function projectNode(overrides = {}) {
         }),
       (error) =>
         error?.response?.error?.message ===
-        "GitHub OAuth connection must be reconnected with read:project scope"
+        "GitHub ProjectV2 OAuth connection must be reconnected with project scope"
     );
   } finally {
     globalThis.fetch = originalFetch;
