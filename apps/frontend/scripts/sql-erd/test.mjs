@@ -66,6 +66,8 @@ assert.match(modelUtils, /getTableLayout/);
 assert.match(modelUtils, /getRelationEndpoints/);
 assert.match(modelUtils, /getTableDisplayName/);
 assert.match(modelUtils, /relationsByTableId/);
+assert.match(modelUtils, /columnsByTableId/);
+assert.doesNotMatch(modelUtils, /columnsById: Map<string, SqltoerdColumnRef>/);
 
 assert.match(navigation, /SQLtoERD/);
 assert.match(navigation, /href: "\/sql-erd"/);

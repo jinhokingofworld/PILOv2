@@ -8,11 +8,6 @@ import type {
   SqltoerdTableLayout
 } from "@/features/sql-erd/types";
 
-export type SqltoerdColumnRef = {
-  table: ErdTable;
-  column: ErdColumn;
-};
-
 export type SqltoerdRelationEndpoint = {
   table: ErdTable;
   columns: ErdColumn[];
@@ -25,7 +20,7 @@ export type SqltoerdRelationEndpoints = {
 
 export type SqltoerdModelIndex = {
   tablesById: Map<string, ErdTable>;
-  columnsById: Map<string, SqltoerdColumnRef>;
+  columnsByTableId: Map<string, Map<string, ErdColumn>>;
   relationsById: Map<string, ErdRelation>;
   relationsByTableId: Map<string, ErdRelation[]>;
 };
@@ -47,17 +42,14 @@ export function createSqltoerdModelIndex(
   modelJson: SqltoerdModelJsonV1
 ): SqltoerdModelIndex {
   const tablesById = new Map<string, ErdTable>();
-  const columnsById = new Map<string, SqltoerdColumnRef>();
+  const columnsByTableId = new Map<string, Map<string, ErdColumn>>();
   const relationsById = new Map<string, ErdRelation>();
   const relationsByTableId = new Map<string, ErdRelation[]>();
 
   for (const table of modelJson.schema.tables) {
     tablesById.set(table.id, table);
+    columnsByTableId.set(table.id, createColumnsById(table));
     relationsByTableId.set(table.id, []);
-
-    for (const column of table.columns) {
-      columnsById.set(column.id, { table, column });
-    }
   }
 
   for (const relation of modelJson.schema.relations) {
@@ -68,7 +60,7 @@ export function createSqltoerdModelIndex(
 
   return {
     tablesById,
-    columnsById,
+    columnsByTableId,
     relationsById,
     relationsByTableId
   };
@@ -112,25 +104,31 @@ export function getRelationEndpoints(
 
   const fromColumns: ErdColumn[] = [];
   const toColumns: ErdColumn[] = [];
+  const fromColumnsById = modelIndex.columnsByTableId.get(fromTable.id);
+  const toColumnsById = modelIndex.columnsByTableId.get(toTable.id);
+
+  if (!fromColumnsById || !toColumnsById) {
+    return null;
+  }
 
   for (const columnId of relation.fromColumnIds) {
-    const columnRef = modelIndex.columnsById.get(columnId);
+    const column = fromColumnsById.get(columnId);
 
-    if (!columnRef || columnRef.table.id !== fromTable.id) {
+    if (!column) {
       return null;
     }
 
-    fromColumns.push(columnRef.column);
+    fromColumns.push(column);
   }
 
   for (const columnId of relation.toColumnIds) {
-    const columnRef = modelIndex.columnsById.get(columnId);
+    const column = toColumnsById.get(columnId);
 
-    if (!columnRef || columnRef.table.id !== toTable.id) {
+    if (!column) {
       return null;
     }
 
-    toColumns.push(columnRef.column);
+    toColumns.push(column);
   }
 
   return {
@@ -143,6 +141,16 @@ export function getRelationEndpoints(
       columns: toColumns
     }
   };
+}
+
+function createColumnsById(table: ErdTable) {
+  const columnsById = new Map<string, ErdColumn>();
+
+  for (const column of table.columns) {
+    columnsById.set(column.id, column);
+  }
+
+  return columnsById;
 }
 
 function appendRelation(
