@@ -10,6 +10,7 @@ import {
   SidebarTrigger
 } from "@/components/ui/sidebar";
 import { AuthGate } from "@/features/auth";
+import { HeaderMeetingStatus } from "@/features/meeting/components/header-meeting-status";
 import {
   featureNavigationItems,
   getFeatureNavigationItem
@@ -32,13 +33,16 @@ export function MainShell({ activeFeatureId, children }: MainShellProps) {
         />
 
         <SidebarInset className="md:peer-data-[variant=inset]:!m-0 md:peer-data-[variant=inset]:!rounded-none md:peer-data-[variant=inset]:!shadow-none md:peer-data-[variant=inset]:peer-data-[state=collapsed]:!ml-0">
-          <header className="flex h-14 shrink-0 items-center gap-2 bg-background px-4">
-            <SidebarTrigger />
-            <div className="h-5 w-px bg-border" />
-            <div className="flex items-center gap-2 text-sm font-medium">
-              <LayoutDashboard className="size-4 text-muted-foreground" />
-              {activeFeature.title}
+          <header className="sticky top-0 z-30 flex min-h-14 shrink-0 items-center gap-2 bg-background px-4">
+            <div className="flex min-w-0 flex-1 items-center gap-2">
+              <SidebarTrigger className="shrink-0" />
+              <div className="h-5 w-px shrink-0 bg-border" />
+              <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
+                <LayoutDashboard className="size-4 shrink-0 text-muted-foreground" />
+                <span className="truncate">{activeFeature.title}</span>
+              </div>
             </div>
+            <HeaderMeetingStatus />
           </header>
 
           <main className="flex flex-1 flex-col gap-6 p-6">{children}</main>
