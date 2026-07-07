@@ -66,10 +66,14 @@ function PiloStickyNoteComponent({ shape }: { shape: PiloStickyNoteShape }) {
   const color = stickyColorMap[shape.props.color] ?? stickyColorMap.butter;
 
   function updateText(text: string) {
+    const currentShape = editor.getShape(shape.id);
+
+    if (!currentShape || currentShape.type !== shape.type) return;
+
     editor.updateShapes([
       {
-        id: shape.id,
-        type: shape.type,
+        id: currentShape.id,
+        type: currentShape.type,
         props: { text },
       },
     ]);
@@ -97,7 +101,9 @@ function PiloStickyNoteComponent({ shape }: { shape: PiloStickyNoteShape }) {
       }
       onDoubleClick={(event) => {
         event.stopPropagation();
-        editor.setEditingShape(shape.id);
+        if (editor.getShape(shape.id)?.type === shape.type) {
+          editor.setEditingShape(shape.id);
+        }
       }}
     >
       <article className="pilo-sticky-note">

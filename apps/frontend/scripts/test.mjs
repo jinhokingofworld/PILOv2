@@ -265,6 +265,13 @@ const piloCodeBlockShapeTypes = await readFile(
   ),
   "utf8"
 );
+const piloStickyNoteShapeUtil = await readFile(
+  new URL(
+    "../src/features/canvas/components/engine/shapes/sticky-note/PiloStickyNoteShapeUtil.tsx",
+    import.meta.url
+  ),
+  "utf8"
+);
 const piloCanvasPlacement = await readFile(
   new URL(
     "../src/features/canvas/components/engine/interactions/pilo-canvas-placement.ts",
@@ -716,6 +723,8 @@ assert.match(piloFrameSelectionToolbar, /frameViewportWidth/);
 assert.match(piloFrameSelectionToolbar, /scale: toolbarScale/);
 assert.match(piloFrameSelectionToolbar, /topCenter\.y \+ 12 \* toolbarScale/);
 assert.match(piloFrameSelectionToolbar, /translateX\(-50%\) scale/);
+assert.match(piloFrameSelectionToolbar, /editor\.getShape\(selectedFrame\.id\)/);
+assert.match(piloFrameSelectionToolbar, /if \(!isPiloFrameShape\(currentFrame\)\) return/);
 assert.match(piloCollapsedFrameOverlay, /pilo-collapsed-frame-card/);
 assert.match(piloCollapsedFrameOverlay, /pilo-collapsed-frame-expand/);
 assert.match(piloCollapsedFrameOverlay, /is-selected/);
@@ -731,6 +740,11 @@ assert.doesNotMatch(piloCodeBlockShapeUtil, /navigator\.clipboard/);
 assert.match(piloCodeBlockComponent, /PiloCodeMirrorEditor/);
 assert.match(piloCodeBlockComponent, /PILO_CODE_BLOCK_COLLAPSED_META_KEY/);
 assert.match(piloCodeBlockComponent, /pilo-code-preview/);
+assert.match(piloCodeBlockComponent, /isPiloCodeBlockShape/);
+assert.match(piloCodeBlockComponent, /editor\.getShape\(shape\.id\)/);
+assert.match(piloCodeBlockComponent, /if \(!isPiloCodeBlockShape\(currentShape\)\) return/);
+assert.match(piloStickyNoteShapeUtil, /editor\.getShape\(shape\.id\)/);
+assert.match(piloStickyNoteShapeUtil, /currentShape\.type !== shape\.type/);
 assert.match(piloCodeMirrorEditor, /@codemirror\/view/);
 assert.match(piloCodeBlockShapeTypes, /export type PiloCodeBlockShape/);
 assert.match(piloCodeBlockShapeTypes, /isCollapsed\?: boolean/);

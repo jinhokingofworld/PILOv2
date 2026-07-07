@@ -22,6 +22,7 @@ import {
   getPiloCodeBlockExpandedSize,
   isPiloCodeBlockCollapsed,
 } from "../../../../utils/canvas-collapse";
+import { isPiloCodeBlockShape } from "../PiloCanvasShapeGuards";
 
 const PILO_COLLAPSED_CODE_BLOCK_SIZE = {
   h: 72,
@@ -48,21 +49,29 @@ export function PiloCodeBlockComponent({
   );
 
   function updateProps(props: Partial<PiloCodeBlockShapeProps>) {
+    const currentShape = editor.getShape(shape.id);
+
+    if (!isPiloCodeBlockShape(currentShape)) return;
+
     editor.updateShapes([
       {
-        id: shape.id,
-        type: shape.type,
+        id: currentShape.id,
+        type: currentShape.type,
         props,
       },
     ]);
   }
 
   function toggleCollapsed(event: PointerEvent<HTMLButtonElement>) {
-    const nextCollapsed = !isCollapsed;
-    const expandedSize = getPiloCodeBlockExpandedSize(shape);
+    const currentShape = editor.getShape(shape.id);
+
+    if (!isPiloCodeBlockShape(currentShape)) return;
+
+    const nextCollapsed = !isPiloCodeBlockCollapsed(currentShape);
+    const expandedSize = getPiloCodeBlockExpandedSize(currentShape);
     const currentSize = {
-      h: shape.props.h,
-      w: shape.props.w,
+      h: currentShape.props.h,
+      w: currentShape.props.w,
     };
     const nextSize = nextCollapsed
       ? PILO_COLLAPSED_CODE_BLOCK_SIZE
@@ -72,14 +81,14 @@ export function PiloCodeBlockComponent({
     event.stopPropagation();
     editor.updateShapes([
       {
-        id: shape.id,
-        type: shape.type,
+        id: currentShape.id,
+        type: currentShape.type,
         props: {
           isCollapsed: nextCollapsed,
           ...(nextSize ?? {}),
         },
         meta: {
-          ...(shape.meta ?? {}),
+          ...(currentShape.meta ?? {}),
           [PILO_CODE_BLOCK_COLLAPSED_META_KEY]: nextCollapsed,
           ...(nextCollapsed
             ? {
@@ -97,16 +106,24 @@ export function PiloCodeBlockComponent({
 
   function updateScrollY(scrollY: number, anchor: CodeScrollAnchor) {
     scrollAnchorRef.current = anchor;
+    const currentShape = editor.getShape(shape.id);
+
+    if (!isPiloCodeBlockShape(currentShape)) return;
+
     const nextScrollY = Math.max(0, scrollY);
 
-    if (Math.abs(nextScrollY - (shape.props.scrollY ?? 0)) < 0.5) return;
+    if (Math.abs(nextScrollY - (currentShape.props.scrollY ?? 0)) < 0.5) return;
 
     editor.run(
       () => {
+        const shapeToUpdate = editor.getShape(currentShape.id);
+
+        if (!isPiloCodeBlockShape(shapeToUpdate)) return;
+
         editor.updateShapes([
           {
-            id: shape.id,
-            type: shape.type,
+            id: shapeToUpdate.id,
+            type: shapeToUpdate.type,
             props: {
               scrollY: nextScrollY,
             },
@@ -150,7 +167,9 @@ export function PiloCodeBlockComponent({
       }}
       onDoubleClick={(event) => {
         event.stopPropagation();
-        editor.setEditingShape(shape.id);
+        if (isPiloCodeBlockShape(editor.getShape(shape.id))) {
+          editor.setEditingShape(shape.id);
+        }
       }}
     >
       <article className="pilo-code-block">

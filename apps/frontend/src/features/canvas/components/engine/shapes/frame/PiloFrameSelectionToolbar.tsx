@@ -66,6 +66,10 @@ function updateFrame(
   shape: PiloFrameShape,
   partial: PiloFramePartial,
 ) {
+  const currentShape = editor.getShape(shape.id);
+
+  if (!isPiloFrameShape(currentShape)) return;
+
   editor.updateShapes([partial]);
   editor.select(shape.id);
 }
@@ -134,18 +138,26 @@ export function FrameSelectionToolbar({
   }
 
   function applyFramePreset(preset: (typeof frameRatioPresets)[number]) {
+    const currentFrame = editor.getShape(selectedFrame.id);
+
+    if (!isPiloFrameShape(currentFrame)) return;
+
     updateFrame(
       editor,
-      selectedFrame,
-      buildFrameSizePartial(selectedFrame, preset),
+      currentFrame,
+      buildFrameSizePartial(currentFrame, preset),
     );
     setOpenMenu(null);
   }
 
   function applyFrameColor(color: PiloFrameShape["props"]["color"]) {
-    updateFrame(editor, selectedFrame, {
-      id: selectedFrame.id,
-      type: selectedFrame.type,
+    const currentFrame = editor.getShape(selectedFrame.id);
+
+    if (!isPiloFrameShape(currentFrame)) return;
+
+    updateFrame(editor, currentFrame, {
+      id: currentFrame.id,
+      type: currentFrame.type,
       props: {
         color,
       },
@@ -154,16 +166,24 @@ export function FrameSelectionToolbar({
   }
 
   function toggleFrameLock() {
+    const currentFrame = editor.getShape(selectedFrame.id);
+
+    if (!isPiloFrameShape(currentFrame)) return;
+
     setOpenMenu(null);
-    editor.toggleLock([selectedFrame.id]);
-    editor.select(selectedFrame.id);
+    editor.toggleLock([currentFrame.id]);
+    editor.select(currentFrame.id);
   }
 
   function toggleFrameCollapsed() {
+    const currentFrame = editor.getShape(selectedFrame.id);
+
+    if (!isPiloFrameShape(currentFrame)) return;
+
     const nextCollapsed = !isCollapsed;
 
     setOpenMenu(null);
-    onFrameCollapsedChange?.(selectedFrame, nextCollapsed);
+    onFrameCollapsedChange?.(currentFrame, nextCollapsed);
   }
 
   function handleToolbarPointerEvent(event: ReactPointerEvent<HTMLElement>) {

@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { HttpException, Injectable } from "@nestjs/common";
 import { QueryResultRow } from "pg";
 import { badRequest, notFound } from "../../common/api-error";
 import {
@@ -10,6 +10,12 @@ import {
   confirmationExpired,
   confirmationNotPending
 } from "./agent-api-error";
+import {
+  AgentLoggingService,
+  AgentRunPayload,
+  AgentStepPayload
+} from "./agent-logging.service";
+import { AgentToolRegistryService } from "./agent-tool-registry.service";
 import type {
   AgentConfirmationPlan,
   AgentJsonObject,
@@ -98,7 +104,9 @@ const CONFIRMATION_TTL_MS = 15 * 60 * 1000;
 export class AgentConfirmationService {
   constructor(
     private readonly database: DatabaseService,
-    private readonly workspaceService: WorkspaceService
+    private readonly workspaceService: WorkspaceService,
+    private readonly agentLoggingService: AgentLoggingService,
+    private readonly agentToolRegistryService: AgentToolRegistryService
   ) {}
 
   async createConfirmation(
@@ -217,6 +225,7 @@ export class AgentConfirmationService {
       }
 
       this.assertExecutablePlan(confirmation.plan_json, confirmation.tool_name);
+      const toolInput = this.validateApprovedPlan(confirmation.plan_json);
 
       const approved = await transaction.queryOne<AgentConfirmationRow>(
         `
@@ -242,7 +251,9 @@ export class AgentConfirmationService {
 
       return {
         expired: false,
-        payload: this.mapActionPayload(run, approved)
+        payload: this.mapActionPayload(run, approved),
+        confirmation: approved,
+        toolInput
       } as const;
     });
 
@@ -250,7 +261,13 @@ export class AgentConfirmationService {
       throw confirmationExpired("Confirmation expired");
     }
 
-    return result.payload;
+    return this.executeApprovedPlan(
+      currentUserId,
+      workspaceId,
+      runId,
+      result.confirmation,
+      result.toolInput
+    );
   }
 
   async rejectConfirmation(
@@ -437,6 +454,138 @@ export class AgentConfirmationService {
     }
   }
 
+  private validateApprovedPlan(plan: AgentConfirmationPlan): unknown {
+    const definition = this.agentToolRegistryService.getDefinition(plan.toolName);
+    if (!definition) {
+      throw badRequest(`Agent tool is not executable: ${plan.toolName}`);
+    }
+
+    const toolInput = this.buildToolInputFromPlan(plan);
+    return definition.validateInput(toolInput);
+  }
+
+  private async executeApprovedPlan(
+    currentUserId: string,
+    workspaceId: string,
+    runId: string,
+    confirmation: AgentConfirmationRow,
+    toolInput: unknown
+  ): Promise<AgentConfirmationActionPayload> {
+    const definition = this.agentToolRegistryService.getDefinition(
+      confirmation.tool_name
+    );
+    if (!definition) {
+      throw badRequest(`Agent tool is not executable: ${confirmation.tool_name}`);
+    }
+
+    let step: AgentStepPayload | null = null;
+
+    try {
+      step = await this.agentLoggingService.startNextStep(
+        currentUserId,
+        workspaceId,
+        {
+          runId,
+          type: "tool",
+          toolName: confirmation.tool_name,
+          riskLevel: confirmation.risk_level,
+          inputSummary: this.buildStepInputSummary(confirmation.plan_json)
+        }
+      );
+
+      const result = await definition.execute(
+        {
+          currentUserId,
+          workspaceId,
+          runId
+        },
+        toolInput
+      );
+
+      await this.agentLoggingService.completeStep(currentUserId, workspaceId, {
+        runId,
+        stepId: step.id,
+        outputSummary: result.outputSummary,
+        resourceRefs: result.resourceRefs
+      });
+
+      const run = await this.agentLoggingService.completeRun(
+        currentUserId,
+        workspaceId,
+        {
+          runId,
+          riskLevel: confirmation.risk_level,
+          finalAnswer: "승인된 Calendar 작업을 완료했습니다.",
+          message: "승인된 작업을 완료했습니다."
+        }
+      );
+
+      return this.mapActionPayloadFromRun(run, confirmation);
+    } catch (error) {
+      const message = this.toSafeErrorMessage(error);
+
+      if (step) {
+        await this.agentLoggingService.failStep(currentUserId, workspaceId, {
+          runId,
+          stepId: step.id,
+          errorCode: "CALENDAR_TOOL_FAILED",
+          errorMessage: message
+        });
+      }
+
+      const run = await this.agentLoggingService.failRun(
+        currentUserId,
+        workspaceId,
+        {
+          runId,
+          errorCode: "CALENDAR_TOOL_FAILED",
+          errorMessage: message,
+          message: "승인된 Calendar 작업을 실행하지 못했습니다."
+        }
+      );
+
+      return this.mapActionPayloadFromRun(run, confirmation);
+    }
+  }
+
+  private buildToolInputFromPlan(plan: AgentConfirmationPlan): unknown {
+    if (plan.toolName === "create_calendar_event") {
+      return plan.after;
+    }
+
+    if (plan.toolName === "update_calendar_event") {
+      return {
+        eventId: this.readCalendarEventId(plan),
+        before: plan.before ?? {},
+        changes: plan.after
+      };
+    }
+
+    throw badRequest(`Agent tool is not executable: ${plan.toolName}`);
+  }
+
+  private buildStepInputSummary(plan: AgentConfirmationPlan): AgentJsonObject {
+    return {
+      toolName: plan.toolName,
+      target: plan.target,
+      after: plan.after
+    };
+  }
+
+  private readCalendarEventId(plan: AgentConfirmationPlan): string {
+    const targetId = plan.target.resourceId;
+    if (typeof targetId === "string") {
+      return targetId;
+    }
+
+    const callEventId = plan.call.eventId;
+    if (typeof callEventId === "string") {
+      return callEventId;
+    }
+
+    throw badRequest("Calendar event id is required for update plan");
+  }
+
   private isExpired(value: Date | string): boolean {
     return new Date(value).getTime() <= Date.now();
   }
@@ -475,6 +624,61 @@ export class AgentConfirmationService {
       createdAt: this.toIso(confirmation.created_at),
       updatedAt: this.toIso(confirmation.updated_at)
     };
+  }
+
+  private mapActionPayloadFromRun(
+    run: Pick<AgentRunPayload, "id" | "status" | "message">,
+    confirmation: AgentConfirmationRow
+  ): AgentConfirmationActionPayload {
+    return {
+      run: {
+        id: run.id,
+        status: run.status,
+        message: run.message,
+        confirmation: {
+          id: confirmation.id,
+          status: confirmation.status,
+          approvedAt: this.toIsoOrNull(confirmation.approved_at),
+          rejectedAt: this.toIsoOrNull(confirmation.rejected_at)
+        }
+      }
+    };
+  }
+
+  private toSafeErrorMessage(error: unknown): string {
+    if (error instanceof HttpException) {
+      const message = this.readHttpExceptionMessage(error);
+      if (message) {
+        return message;
+      }
+    }
+
+    return "Calendar 작업 실행 중 오류가 발생했습니다.";
+  }
+
+  private readHttpExceptionMessage(error: HttpException): string | null {
+    const response = error.getResponse();
+
+    if (typeof response === "object" && response !== null) {
+      const maybeError = "error" in response ? response.error : null;
+      if (this.isPlainObject(maybeError)) {
+        const message = maybeError.message;
+        if (typeof message === "string" && message.trim()) {
+          return message;
+        }
+      }
+
+      const maybeMessage = "message" in response ? response.message : null;
+      if (typeof maybeMessage === "string" && maybeMessage.trim()) {
+        return maybeMessage;
+      }
+    }
+
+    if (typeof response === "string" && response.trim()) {
+      return response;
+    }
+
+    return null;
   }
 
   private toIso(value: Date | string): string {
