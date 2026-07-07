@@ -1,6 +1,11 @@
-import { Injectable } from "@nestjs/common";
+import { HttpStatus, Injectable } from "@nestjs/common";
 import { QueryResultRow } from "pg";
-import { badRequest, forbidden, notFound } from "../../common/api-error";
+import {
+  ApiError,
+  badRequest,
+  forbidden,
+  notFound
+} from "../../common/api-error";
 import {
   DatabaseService,
   DatabaseTransaction
@@ -313,6 +318,9 @@ export interface MeetingReportRegenerationPayload {
 const MAIN_MEETING_ROOM = "MAIN_MEETING_ROOM";
 const UNIQUE_VIOLATION_CODE = "23505";
 const ACTIVE_MEETING_UNIQUE_INDEX = "unique_active_meeting_per_room";
+const MEETING_ALREADY_IN_PROGRESS_ERROR_CODE =
+  "MEETING_ALREADY_IN_PROGRESS";
+const MEETING_ALREADY_IN_PROGRESS_MESSAGE = "A meeting is already in progress";
 const SAFE_EGRESS_START_ERROR = "LiveKit Egress start failed";
 const SAFE_EGRESS_STOP_ERROR = "LiveKit Egress stop failed";
 const DEFAULT_MEETING_REPORT_LIMIT = 20;
@@ -377,7 +385,7 @@ export class MeetingService {
 
     const existingMeeting = await this.findCurrentMeeting(workspaceId, roomKey);
     if (existingMeeting) {
-      throw badRequest("A meeting is already in progress");
+      throw this.meetingAlreadyInProgress();
     }
 
     try {
@@ -459,7 +467,7 @@ export class MeetingService {
       });
     } catch (error) {
       if (this.isConstraintError(error, ACTIVE_MEETING_UNIQUE_INDEX)) {
-        throw badRequest("A meeting is already in progress");
+        throw this.meetingAlreadyInProgress();
       }
 
       throw error;
@@ -1147,6 +1155,14 @@ export class MeetingService {
     workspaceId: string
   ): Promise<void> {
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+  }
+
+  private meetingAlreadyInProgress() {
+    return new ApiError(
+      HttpStatus.BAD_REQUEST,
+      MEETING_ALREADY_IN_PROGRESS_ERROR_CODE,
+      MEETING_ALREADY_IN_PROGRESS_MESSAGE
+    );
   }
 
   private async assertMeetingExists(
