@@ -17,6 +17,7 @@ import { SqlErdCanvas } from "@/features/sql-erd/components/sql-erd-canvas";
 import { commerceSqltoerdFixture } from "@/features/sql-erd/fixtures/commerce";
 import type {
   SqlErdSelection,
+  SqltoerdDialect,
   SqltoerdSessionPayload,
   SqltoerdSessionFixture
 } from "@/features/sql-erd/types";
@@ -139,6 +140,12 @@ export function SqlErdPanel() {
     setSqlErdViewSession((currentSession) => ({
       ...currentSession,
       sourceText
+    }));
+  }, []);
+  const handleDialectChange = useCallback((dialect: SqltoerdDialect) => {
+    setSqlErdViewSession((currentSession) => ({
+      ...currentSession,
+      dialect
     }));
   }, []);
   const handleGenerate = useCallback(async () => {
@@ -317,10 +324,14 @@ export function SqlErdPanel() {
         counts={sessionCounts}
         dialect={sqlErdViewSession.dialect}
         isOpen={isSourceOpen}
+        isDialectSelectDisabled={
+          isGenerating || sessionLoadState.label === "Loading"
+        }
         isGenerateDisabled={
           isGenerating || !authSession || sessionLoadState.label === "Loading"
         }
         isGenerating={isGenerating}
+        onDialectChange={handleDialectChange}
         onGenerate={handleGenerate}
         onSourceTextChange={handleSourceTextChange}
         onToggle={() => setIsSourceOpen((current) => !current)}
@@ -355,9 +366,11 @@ type PanelToggleProps = {
 type SourcePanelProps = PanelToggleProps & {
   counts: ReturnType<typeof getSqltoerdModelCounts>;
   dialect: SqlErdViewSession["dialect"];
+  isDialectSelectDisabled: boolean;
   isGenerateDisabled: boolean;
   isGenerating: boolean;
   isSourceTextReadOnly: boolean;
+  onDialectChange: (dialect: SqltoerdDialect) => void;
   onGenerate: () => void;
   onSourceTextChange: (sourceText: string) => void;
   sessionLoadState: SqlErdSessionLoadState;
@@ -368,9 +381,11 @@ function SourcePanel({
   counts,
   dialect,
   isOpen,
+  isDialectSelectDisabled,
   isGenerateDisabled,
   isGenerating,
   isSourceTextReadOnly,
+  onDialectChange,
   onGenerate,
   onSourceTextChange,
   onToggle,
@@ -421,7 +436,11 @@ function SourcePanel({
 
       <div className="grid grid-cols-2 gap-2 border-b p-3">
         <SelectorLabel label="Format" value="SQL" />
-        <SelectorLabel label="Dialect" value={formatSqlErdDialectLabel(dialect)} />
+        <DialectSelect
+          disabled={isDialectSelectDisabled}
+          onChange={onDialectChange}
+          value={dialect}
+        />
       </div>
 
       <div className="flex flex-1 flex-col overflow-hidden">
@@ -460,16 +479,37 @@ function SourcePanel({
   );
 }
 
-function formatSqlErdDialectLabel(dialect: SqlErdViewSession["dialect"]) {
-  if (dialect === "postgresql") {
-    return "PostgreSQL";
-  }
+function isSqltoerdDialect(value: string): value is SqltoerdDialect {
+  return value === "auto" || value === "postgresql" || value === "mysql";
+}
 
-  if (dialect === "mysql") {
-    return "MySQL";
-  }
+type DialectSelectProps = {
+  disabled: boolean;
+  onChange: (dialect: SqltoerdDialect) => void;
+  value: SqltoerdDialect;
+};
 
-  return "Auto";
+function DialectSelect({ disabled, onChange, value }: DialectSelectProps) {
+  return (
+    <label className="flex h-10 items-center justify-between gap-3 rounded-md border bg-background px-3 text-left">
+      <span className="text-xs text-muted-foreground">Dialect</span>
+      <select
+        aria-label="SQL dialect"
+        className="min-w-0 flex-1 bg-transparent text-right text-sm font-medium outline-none disabled:cursor-not-allowed disabled:text-muted-foreground"
+        disabled={disabled}
+        onChange={(event) => {
+          if (isSqltoerdDialect(event.target.value)) {
+            onChange(event.target.value);
+          }
+        }}
+        value={value}
+      >
+        <option value="auto">Auto</option>
+        <option value="postgresql">PostgreSQL</option>
+        <option value="mysql">MySQL</option>
+      </select>
+    </label>
+  );
 }
 
 type SelectorLabelProps = {
