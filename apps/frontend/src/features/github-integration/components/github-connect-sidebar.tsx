@@ -1,9 +1,8 @@
-import { GitPullRequest, Loader2, Play, RefreshCcw } from "lucide-react";
+import { GitPullRequest, Loader2, Play } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import type {
-  GithubAppInstallation,
   GithubPullRequest,
   GithubRepository,
   GithubSyncRun,
@@ -38,13 +37,8 @@ const syncTargetOptions: Array<{
 ];
 
 type SidebarProps = {
-  connected: boolean;
   isLoading: boolean;
-  installations: GithubAppInstallation[];
   selectedInstallationId: string;
-  selectedInstallation: GithubAppInstallation | undefined;
-  repositoriesTotal: number;
-  projectsTotal: number;
   selectedRepository: GithubRepository | undefined;
   pullRequests: GithubPullRequest[];
   pullRequestsTotal: number;
@@ -53,20 +47,13 @@ type SidebarProps = {
   syncRunsTotal: number;
   syncTarget: GithubSyncTarget;
   isSyncing: boolean;
-  onSelectInstallation: (id: string) => void;
   onSyncTargetChange: (target: GithubSyncTarget) => void;
   onStartSync: () => void;
-  onRefresh: () => void;
 };
 
 export function GithubConnectSidebar({
-  connected,
   isLoading,
-  installations,
   selectedInstallationId,
-  selectedInstallation,
-  repositoriesTotal,
-  projectsTotal,
   selectedRepository,
   pullRequests,
   pullRequestsTotal,
@@ -75,84 +62,11 @@ export function GithubConnectSidebar({
   syncRunsTotal,
   syncTarget,
   isSyncing,
-  onSelectInstallation,
   onSyncTargetChange,
-  onStartSync,
-  onRefresh
+  onStartSync
 }: SidebarProps) {
   return (
     <aside className="space-y-[15px]">
-      <GithubConnectPanel
-        action={
-          <Button
-            className="h-8 rounded-[8px]"
-            disabled={isLoading}
-            onClick={onRefresh}
-            size="sm"
-            type="button"
-            variant="outline"
-          >
-            <RefreshCcw data-icon="inline-start" />
-            새로고침
-          </Button>
-        }
-        title="현재 상태"
-        subtitle="연결 준비부터 데이터 동기화까지 필요한 상태를 압축해서 보여줍니다."
-      >
-        <div className="health-list space-y-3">
-          <HealthRow
-            detail={
-              connected
-                ? "OAuth 토큰으로 API 요청 가능"
-                : "GitHub OAuth 연결 필요"
-            }
-            label="GitHub App"
-            tone={connected ? "success" : "warning"}
-            value={connected ? "Ready" : "Wait"}
-          />
-          <HealthRow
-            detail={`${formatGithubConnectNumber(repositoriesTotal)}개 저장소`}
-            label="허용 저장소"
-            tone={repositoriesTotal > 0 ? "success" : "warning"}
-            value={repositoriesTotal > 0 ? "Synced" : "Empty"}
-          />
-          <HealthRow
-            detail={`${formatGithubConnectNumber(projectsTotal)}개 Project`}
-            label="Projects v2"
-            tone={projectsTotal > 0 ? "success" : "warning"}
-            value={projectsTotal > 0 ? "Synced" : "Empty"}
-          />
-        </div>
-
-        <div className="mt-4 rounded-[8px] border border-[#e5e9f2] bg-[#fbfcfe] p-3">
-          <label className="block text-[12px] font-semibold uppercase tracking-[0.06em] text-[#7a8497]">
-            Installation
-          </label>
-          <select
-            className="mt-2 h-10 w-full rounded-[8px] border border-[#d9dee8] bg-white px-3 text-[13px] text-[#293142] outline-none transition-colors focus:border-[#3157d5]"
-            disabled={installations.length === 0 || isLoading}
-            onChange={(event) => onSelectInstallation(event.target.value)}
-            value={selectedInstallationId}
-          >
-            {installations.length === 0 ? (
-              <option value="">설치 없음</option>
-            ) : null}
-            {installations.map((installation) => (
-              <option key={installation.id} value={installation.id}>
-                {installation.accountLogin} · #{installation.githubInstallationId}
-              </option>
-            ))}
-          </select>
-          <p className="mt-2 text-[12px] leading-5 text-[#7a8497]">
-            {selectedInstallation
-              ? `${selectedInstallation.accountType} · ${
-                  selectedInstallation.repositorySelection ?? "선택 범위 없음"
-                }`
-              : "OAuth 연결 후 GitHub App을 설치하세요."}
-          </p>
-        </div>
-      </GithubConnectPanel>
-
       <GithubConnectPanel
         icon={<Play className="size-4" />}
         title="동기화 실행"
@@ -300,28 +214,6 @@ export function GithubConnectSidebar({
         )}
       </GithubConnectPanel>
     </aside>
-  );
-}
-
-function HealthRow({
-  label,
-  value,
-  detail,
-  tone
-}: {
-  label: string;
-  value: string;
-  detail: string;
-  tone: "success" | "warning" | "danger";
-}) {
-  return (
-    <div className="flex items-start justify-between gap-3 rounded-[8px] border border-[#e5e9f2] bg-[#fbfcfe] p-3">
-      <div>
-        <p className="text-[13px] font-semibold text-[#101828]">{label}</p>
-        <p className="mt-1 text-[12px] leading-5 text-[#7a8497]">{detail}</p>
-      </div>
-      <GithubConnectPill tone={tone}>{value}</GithubConnectPill>
-    </div>
   );
 }
 

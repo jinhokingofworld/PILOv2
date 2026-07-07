@@ -15,7 +15,6 @@ import type {
 import { GithubConnectSidebar } from "./github-connect-sidebar";
 import { GithubConnectSourceTables } from "./github-connect-tables";
 import { GithubConnectSteps } from "./github-connect-steps";
-import { GithubConnectSummary } from "./github-connect-summary";
 
 export type GithubConnectStage = "idle" | "loading" | "ready" | "error";
 
@@ -25,7 +24,6 @@ export type GithubConnectLayoutProps = {
   actionError: string | null;
   actionMessage: string | null;
   oauth: GithubOAuthStatus | null;
-  installations: GithubAppInstallation[];
   selectedInstallationId: string;
   selectedInstallation: GithubAppInstallation | undefined;
   connected: boolean;
@@ -53,7 +51,6 @@ export type GithubConnectLayoutProps = {
   onStartOAuth: () => void;
   onDisconnectOAuth: () => void;
   onStartInstallation: () => void;
-  onSelectInstallation: (id: string) => void;
   onRepositoryQueryChange: (value: string) => void;
   onSelectRepository: (id: string) => void;
   onSelectProjectV2: (id: string) => void;
@@ -67,7 +64,6 @@ export function GithubConnectLayout({
   actionError,
   actionMessage,
   oauth,
-  installations,
   selectedInstallationId,
   selectedInstallation,
   connected,
@@ -95,7 +91,6 @@ export function GithubConnectLayout({
   onStartOAuth,
   onDisconnectOAuth,
   onStartInstallation,
-  onSelectInstallation,
   onRepositoryQueryChange,
   onSelectRepository,
   onSelectProjectV2,
@@ -131,17 +126,6 @@ export function GithubConnectLayout({
             새로고침
           </Button>
         </header>
-
-        <div className="summary-strip-shell">
-          <GithubConnectSummary
-            connected={connected}
-            connectedAt={oauth?.githubConnectedAt}
-            githubLogin={oauth?.githubLogin}
-            installationsTotal={installations.length}
-            projectsTotal={projectsTotal}
-            repositoriesTotal={repositoriesTotal}
-          />
-        </div>
 
         {panelStatus === "error" ? (
           <StatusNotice
@@ -208,20 +192,13 @@ export function GithubConnectLayout({
           </div>
 
           <GithubConnectSidebar
-            connected={connected}
-            installations={installations}
             isLoading={isLoading}
             isPullRequestsLoading={isPullRequestsLoading}
             isSyncing={isSyncing}
-            onRefresh={onRefresh}
-            onSelectInstallation={onSelectInstallation}
             onStartSync={onStartSync}
             onSyncTargetChange={onSyncTargetChange}
-            projectsTotal={projectsTotal}
             pullRequests={pullRequests}
             pullRequestsTotal={pullRequestsTotal}
-            repositoriesTotal={repositoriesTotal}
-            selectedInstallation={selectedInstallation}
             selectedInstallationId={selectedInstallationId}
             selectedRepository={selectedRepository}
             syncRuns={syncRuns}

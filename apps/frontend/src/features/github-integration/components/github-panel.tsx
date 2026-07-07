@@ -361,7 +361,6 @@ export function GithubPanel() {
       connected={connected}
       errorMessage={errorMessage}
       filteredRepositories={filteredRepositories}
-      installations={snapshot.installations}
       isDisconnecting={isDisconnecting}
       isLoading={isLoading}
       isPullRequestsLoading={isPullRequestsLoading}
@@ -375,7 +374,6 @@ export function GithubPanel() {
         )
       }
       onRepositoryQueryChange={setRepositoryQuery}
-      onSelectInstallation={setSelectedInstallationId}
       onSelectProjectV2={setSelectedProjectV2Id}
       onSelectRepository={(repositoryId) => void handleSelectRepository(repositoryId)}
       onStartInstallation={() => void handleStartGithubAppInstallation()}
