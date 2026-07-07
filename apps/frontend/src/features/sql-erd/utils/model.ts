@@ -55,6 +55,11 @@ export function createSqltoerdModelIndex(
   for (const relation of modelJson.schema.relations) {
     relationsById.set(relation.id, relation);
     appendRelation(relationsByTableId, relation.fromTableId, relation);
+
+    if (relation.fromTableId === relation.toTableId) {
+      continue;
+    }
+
     appendRelation(relationsByTableId, relation.toTableId, relation);
   }
 
