@@ -320,8 +320,10 @@ const GITHUB_SYNC_PER_PAGE = 100;
 const GITHUB_SYNC_MAX_PAGES = 100;
 const GITHUB_PROJECT_V2_OAUTH_SCOPE_ERROR_MESSAGE =
   "GitHub OAuth connection must be reconnected with read:project scope";
-const GITHUB_PROJECT_V2_PERSONAL_USER_ACCESS_ERROR_MESSAGE =
-  "GitHub user OAuth token cannot access this personal ProjectV2 owner";
+const GITHUB_PROJECT_V2_OWNER_RESOLUTION_ERROR_MESSAGE =
+  "GitHub ProjectV2 owner could not be resolved";
+const GITHUB_PROJECT_V2_PERSONAL_USER_PERMISSION_ERROR_MESSAGE =
+  "GitHub user OAuth token lacks permission to read personal ProjectV2";
 const GITHUB_PROJECT_V2_PERSONAL_INSTALLATION_ACCESS_ERROR_MESSAGE =
   "GitHub App installation token cannot access personal ProjectV2";
 const GITHUB_PROJECT_V2_ORGANIZATION_INSTALLATION_ACCESS_ERROR_MESSAGE =
@@ -1494,8 +1496,12 @@ export class GithubAppClient {
       return GITHUB_PROJECT_V2_OAUTH_SCOPE_ERROR_MESSAGE;
     }
 
+    if (errors.some((error) => this.isProjectV2OwnerResolutionError(error))) {
+      return GITHUB_PROJECT_V2_OWNER_RESOLUTION_ERROR_MESSAGE;
+    }
+
     if (context?.tokenSource === "user" && context.accountType === "User") {
-      return GITHUB_PROJECT_V2_PERSONAL_USER_ACCESS_ERROR_MESSAGE;
+      return GITHUB_PROJECT_V2_PERSONAL_USER_PERMISSION_ERROR_MESSAGE;
     }
 
     if (context?.tokenSource === "user") {
@@ -1539,6 +1545,22 @@ export class GithubAppClient {
     }
 
     return message.includes("read:project") || message.includes("scope");
+  }
+
+  private isProjectV2OwnerResolutionError(error: unknown): boolean {
+    if (!this.isRecord(error)) {
+      return false;
+    }
+
+    const message = this.toNullableString(error.message)?.toLowerCase();
+    if (!message) {
+      return false;
+    }
+
+    return (
+      message.includes("could not resolve to a user") ||
+      message.includes("could not resolve to an organization")
+    );
   }
 
   private readProjectV2OwnerConnection(

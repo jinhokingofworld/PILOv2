@@ -26,6 +26,7 @@ export type GithubConnectLayoutProps = {
   oauth: GithubOAuthStatus | null;
   selectedInstallationId: string;
   selectedInstallation: GithubAppInstallation | undefined;
+  installations: GithubAppInstallation[];
   connected: boolean;
   repositories: GithubRepository[];
   repositoriesTotal: number;
@@ -71,6 +72,7 @@ export function GithubConnectLayout({
   oauth,
   selectedInstallationId,
   selectedInstallation,
+  installations,
   connected,
   repositories,
   repositoriesTotal,
@@ -214,6 +216,7 @@ export function GithubConnectLayout({
             onSyncTargetChange={onSyncTargetChange}
             pullRequests={pullRequests}
             pullRequestsTotal={pullRequestsTotal}
+            installations={installations}
             selectedInstallationId={selectedInstallationId}
             selectedRepository={selectedRepository}
             syncRuns={syncRuns}

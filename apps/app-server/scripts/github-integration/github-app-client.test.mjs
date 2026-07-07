@@ -574,9 +574,53 @@ function projectNode(overrides = {}) {
         }),
       (error) =>
         error?.response?.error?.message ===
-        "GitHub user OAuth token cannot access this personal ProjectV2 owner"
+        "GitHub user OAuth token lacks permission to read personal ProjectV2"
     );
     assert.equal(graphqlRequestCount, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
+{
+  const originalFetch = globalThis.fetch;
+  const privateKeyPem = createPrivateKeyPem();
+
+  globalThis.fetch = async (url, options = {}) => {
+    const requestUrl = url.toString();
+    assert.equal(requestUrl, "https://api.github.com/graphql");
+    assert.equal(options.headers?.Authorization, "Bearer user-oauth-token");
+
+    return {
+      ok: true,
+      async json() {
+        return {
+          errors: [
+            {
+              message: "Could not resolve to a User with the login of 'missing-user'."
+            }
+          ]
+        };
+      }
+    };
+  };
+
+  try {
+    await assert.rejects(
+      () =>
+        new GithubAppClient().listProjectV2s({
+          installationId: 12345678,
+          appId: "12345",
+          privateKey: privateKeyPem,
+          accountLogin: "missing-user",
+          accountType: "User",
+          userAccessToken: "user-oauth-token",
+          now: () => fixedNow
+        }),
+      (error) =>
+        error?.response?.error?.message ===
+        "GitHub ProjectV2 owner could not be resolved"
+    );
   } finally {
     globalThis.fetch = originalFetch;
   }
