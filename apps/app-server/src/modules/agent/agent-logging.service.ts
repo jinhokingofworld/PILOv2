@@ -59,6 +59,14 @@ export interface StartAgentStepInput {
   inputSummary?: AgentJsonObject;
 }
 
+export interface StartNextAgentStepInput {
+  runId: string;
+  type: AgentStepType;
+  toolName?: string | null;
+  riskLevel?: AgentRiskLevel | null;
+  inputSummary?: AgentJsonObject;
+}
+
 export interface CompleteAgentStepInput {
   runId: string;
   stepId: string;
@@ -323,53 +331,45 @@ export class AgentLoggingService {
         runId: input.runId
       });
 
-      const step = await transaction.queryOne<AgentStepRow>(
-        `
-          INSERT INTO agent_steps (
-            run_id,
-            step_order,
-            step_type,
-            status,
-            tool_name,
-            risk_level,
-            input_json,
-            started_at
-          )
-          VALUES ($1, $2, $3, 'running', $4, $5, $6, now())
-          RETURNING *
-        `,
-        [
-          input.runId,
-          input.order,
-          input.type,
-          input.toolName ?? null,
-          input.riskLevel ?? null,
-          inputSummary
-        ]
-      );
+      return this.insertRunningStep(transaction, workspaceId, {
+        ...input,
+        inputSummary
+      });
+    });
+  }
 
-      if (!step) {
-        throw new Error("Agent step could not be created");
-      }
+  async startNextStep(
+    currentUserId: string,
+    workspaceId: string,
+    input: StartNextAgentStepInput
+  ): Promise<AgentStepPayload> {
+    const inputSummary = this.assertSafeObject(
+      input.inputSummary ?? {},
+      INPUT_JSON_MAX_BYTES,
+      "step input"
+    );
 
-      await this.insertLog(transaction, {
+    return this.database.transaction(async (transaction) => {
+      await this.findOwnedRunForUpdate(transaction, {
+        currentUserId,
         workspaceId,
-        runId: input.runId,
-        stepId: step.id,
-        actorType: "app_server",
-        actorUserId: null,
-        level: "info",
-        eventType: "step_started",
-        message: "Agent step started",
-        metadata: {
-          stepOrder: input.order,
-          stepType: input.type,
-          toolName: input.toolName ?? null
-        },
-        resourceRefs: []
+        runId: input.runId
       });
 
-      return this.mapStep(step);
+      const nextOrder = await transaction.queryOne<{ next_order: number | string }>(
+        `
+          SELECT COALESCE(MAX(step_order), 0) + 1 AS next_order
+          FROM agent_steps
+          WHERE run_id = $1
+        `,
+        [input.runId]
+      );
+
+      return this.insertRunningStep(transaction, workspaceId, {
+        ...input,
+        order: Number(nextOrder?.next_order ?? 1),
+        inputSummary
+      });
     });
   }
 
@@ -681,6 +681,60 @@ export class AgentLoggingService {
       `,
       [workspaceId, currentUserId, clientRequestId]
     );
+  }
+
+  private async insertRunningStep(
+    transaction: DatabaseTransaction,
+    workspaceId: string,
+    input: StartAgentStepInput & { inputSummary: AgentJsonObject }
+  ): Promise<AgentStepPayload> {
+    const step = await transaction.queryOne<AgentStepRow>(
+      `
+        INSERT INTO agent_steps (
+          run_id,
+          step_order,
+          step_type,
+          status,
+          tool_name,
+          risk_level,
+          input_json,
+          started_at
+        )
+        VALUES ($1, $2, $3, 'running', $4, $5, $6, now())
+        RETURNING *
+      `,
+      [
+        input.runId,
+        input.order,
+        input.type,
+        input.toolName ?? null,
+        input.riskLevel ?? null,
+        input.inputSummary
+      ]
+    );
+
+    if (!step) {
+      throw new Error("Agent step could not be created");
+    }
+
+    await this.insertLog(transaction, {
+      workspaceId,
+      runId: input.runId,
+      stepId: step.id,
+      actorType: "app_server",
+      actorUserId: null,
+      level: "info",
+      eventType: "step_started",
+      message: "Agent step started",
+      metadata: {
+        stepOrder: input.order,
+        stepType: input.type,
+        toolName: input.toolName ?? null
+      },
+      resourceRefs: []
+    });
+
+    return this.mapStep(step);
   }
 
   private async findOwnedRunForUpdate(
