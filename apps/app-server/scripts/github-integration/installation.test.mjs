@@ -394,7 +394,10 @@ function createService({
 
   const upsert = database.queries.at(-1);
   assert.match(upsert.text, /INSERT INTO github_installations/i);
-  assert.match(upsert.text, /ON CONFLICT \(github_installation_id\)/i);
+  assert.match(
+    upsert.text,
+    /ON CONFLICT \(workspace_id, github_installation_id\)/i
+  );
   assert.doesNotMatch(upsert.text, /token|private_key|secret/i);
   assert.deepEqual(upsert.values, [
     workspaceId,

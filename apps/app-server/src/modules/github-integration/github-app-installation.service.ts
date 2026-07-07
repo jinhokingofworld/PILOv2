@@ -184,9 +184,8 @@ export class GithubAppInstallationService {
           suspended_at
         )
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-        ON CONFLICT (github_installation_id)
+        ON CONFLICT (workspace_id, github_installation_id)
         DO UPDATE SET
-          workspace_id = EXCLUDED.workspace_id,
           account_login = EXCLUDED.account_login,
           account_type = EXCLUDED.account_type,
           repository_selection = EXCLUDED.repository_selection,

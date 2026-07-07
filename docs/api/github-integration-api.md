@@ -80,6 +80,10 @@ token으로 GitHub의 user installations 목록을 조회해 callback의
 - PR 변경 파일과 patch text는 요청 시 GitHub에서 조회한다.
 - PR Review는 세션 생성 시 `review_files`에 파일 metadata를 저장할 수 있다. Diff 응답과 큰 diff 판단 기준은 PR Review API 문서를 따른다.
 - `github_sync_target` 값은 `repositories`, `issues`, `pull_requests`, `project_v2`, `project_v2_fields`, `project_v2_items`, `full`이다.
+- GitHub 원본 cache identity는 Workspace 범위다. 같은 GitHub
+  installation/repository/issue/PR/ProjectV2/field/item이 여러 Workspace에
+  동기화될 수 있으며, sync upsert는 현재 Workspace 또는 현재 ProjectV2 안에서만
+  충돌 처리하고 다른 Workspace의 row를 재할당하지 않는다.
 - `full` sync는 허용 저장소를 먼저 갱신한 뒤 GitHub GraphQL의
   `organization.projectsV2` 또는 `user.projectsV2`로 Projects v2를 발견한다.
   organization ProjectV2는 GitHub App installation token을 사용하고, personal
@@ -99,8 +103,9 @@ token으로 GitHub의 user installations 목록을 조회해 callback의
 - GitHub App installation 삭제 시 `github_projects_v2` 계열 cache는 FK cascade로
   삭제된다. `github_repositories`, `github_issues`, `github_pull_requests`, PR review
   기록은 과거 cache로 남기며, repository 목록 API는 현재 active installation에 연결된
-  repository만 반환한다. 재설치 후 full sync가 같은 `github_repository_id`를 다시
-  발견하면 기존 repository cache의 `installation_id`가 새 installation으로 갱신된다.
+  repository만 반환한다. 같은 Workspace에서 재설치 후 full sync가 같은
+  `github_repository_id`를 다시 발견하면 해당 Workspace 안의 기존 repository cache
+  `installation_id`가 새 installation으로 갱신된다.
 
 ## API 목록
 

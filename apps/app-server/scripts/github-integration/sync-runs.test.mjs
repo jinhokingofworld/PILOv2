@@ -924,7 +924,10 @@ function projectV2ItemApiItem(overrides = {}) {
       },
       (text, values) => {
         assert.match(text, /INSERT INTO github_projects_v2/i);
-        assert.match(text, /ON CONFLICT \(github_project_node_id\)/i);
+        assert.match(
+          text,
+          /ON CONFLICT \(workspace_id, github_project_node_id\)/i
+        );
         assert.deepEqual(values.slice(0, 7), [
           workspaceId,
           installationId,
@@ -1443,7 +1446,7 @@ function projectV2ItemApiItem(overrides = {}) {
       },
       (text, values) => {
         assert.match(text, /FROM github_project_v2_fields/i);
-        assert.deepEqual(values, ["PVTSSF_lADOExample"]);
+        assert.deepEqual(values, [projectV2Id, "PVTSSF_lADOExample"]);
         return { id: statusFieldId, created: false };
       },
       (text, values) => {
