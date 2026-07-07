@@ -175,7 +175,7 @@ export function GithubConnectSteps({
               />
               <GithubConnectFieldRow
                 label="요청 권한"
-                value={oauth?.tokenScope || "read:user, repo, project"}
+                value={oauth?.tokenScope ?? "연결 후 GitHub 응답 scope를 표시합니다"}
               />
             </dl>
           </div>

@@ -28,6 +28,8 @@ import { PrReviewSubmitReviewModal } from "@/features/pr-review/components/revie
 import type {
   PrReviewCanvas,
   PrReviewConflictStatus,
+  PrReviewFile,
+  PrReviewFileReviewStatus,
   PrReviewPullRequest,
   PrReviewPullRequestDetail,
   PrReviewSession,
@@ -108,6 +110,21 @@ function getConflictClassName(status: PrReviewConflictStatus) {
   }
 }
 
+function updateReviewedCount(
+  currentCount: number,
+  previousStatus: PrReviewFileReviewStatus,
+  nextStatus: PrReviewFileReviewStatus
+) {
+  const wasReviewed = previousStatus !== "not_reviewed";
+  const isReviewed = nextStatus !== "not_reviewed";
+
+  if (wasReviewed === isReviewed) {
+    return currentCount;
+  }
+
+  return currentCount + (isReviewed ? 1 : -1);
+}
+
 export function PrReviewCanvasShell({
   apiClient,
   onBackToSelection,
@@ -171,6 +188,60 @@ export function PrReviewCanvasShell({
   useEffect(() => {
     void loadCanvasData();
   }, [loadCanvasData]);
+
+  const handleDecisionSaved = useCallback(
+    (updatedFile: PrReviewFile) => {
+      setCanvas((currentCanvas) => {
+        if (!currentCanvas) {
+          return currentCanvas;
+        }
+
+        let previousStatus: PrReviewFileReviewStatus | null = null;
+        const flows = currentCanvas.flows.map((flow) => ({
+          ...flow,
+          files: flow.files.map((flowFile) => {
+            if (flowFile.reviewFileId !== updatedFile.id) {
+              return flowFile;
+            }
+
+            if (previousStatus === null) {
+              previousStatus = flowFile.currentStatus;
+            }
+
+            return {
+              ...flowFile,
+              currentStatus: updatedFile.currentStatus,
+              fileRole: updatedFile.fileRole,
+              riskLevel: updatedFile.riskLevel,
+              fileNodeData: {
+                ...flowFile.fileNodeData,
+                reviewStatus: updatedFile.currentStatus,
+                roleSummary: updatedFile.fileRole,
+                riskLevel: updatedFile.riskLevel
+              }
+            };
+          })
+        }));
+
+        if (previousStatus === null) {
+          return currentCanvas;
+        }
+
+        return {
+          ...currentCanvas,
+          reviewedCount: updateReviewedCount(
+            currentCanvas.reviewedCount,
+            previousStatus,
+            updatedFile.currentStatus
+          ),
+          flows
+        };
+      });
+
+      void loadCanvasData({ quiet: true });
+    },
+    [loadCanvasData]
+  );
 
   const headBranch =
     canvas?.headBranch ??
@@ -290,9 +361,7 @@ export function PrReviewCanvasShell({
             <PrReviewFileDiffDrawer
               apiClient={apiClient}
               onClose={() => setSelectedReviewFileId(null)}
-              onDecisionSaved={() => {
-                void loadCanvasData({ quiet: true });
-              }}
+              onDecisionSaved={handleDecisionSaved}
               reviewFileId={selectedReviewFileId}
               workspaceId={workspaceId}
             />

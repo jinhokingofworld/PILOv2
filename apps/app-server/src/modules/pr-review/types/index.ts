@@ -25,6 +25,8 @@ export type PrReviewFileReviewStatus =
   | "discussion_needed"
   | "unknown";
 
+export type PrReviewFileRiskLevel = "high" | "medium" | "low" | "unknown";
+
 export interface PrReviewGithubOAuthStatus {
   connected: boolean;
   githubUserId: number | null;

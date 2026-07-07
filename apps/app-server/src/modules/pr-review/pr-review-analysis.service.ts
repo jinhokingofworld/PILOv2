@@ -1,7 +1,8 @@
 import { Injectable, Logger } from "@nestjs/common";
 import type {
   PrReviewGithubChangedFile,
-  PrReviewGithubPullRequestDetail
+  PrReviewGithubPullRequestDetail,
+  PrReviewFileRiskLevel
 } from "./types";
 
 const DEFAULT_OPENAI_MODEL = "gpt-5.1-mini";
@@ -14,6 +15,7 @@ const MAX_TOTAL_PATCH_CHARS = 32000;
 export interface ReviewFileMetadata {
   filePath: string;
   fileRole: string;
+  riskLevel: PrReviewFileRiskLevel;
   changeReason: string;
   changeSummary: string;
   reviewPoints: string[];
@@ -70,6 +72,7 @@ const PR_REVIEW_ANALYSIS_SCHEMA = {
         required: [
           "filePath",
           "fileRole",
+          "riskLevel",
           "changeReason",
           "changeSummary",
           "reviewPoints"
@@ -77,6 +80,10 @@ const PR_REVIEW_ANALYSIS_SCHEMA = {
         properties: {
           filePath: { type: "string" },
           fileRole: { type: "string" },
+          riskLevel: {
+            type: "string",
+            enum: ["high", "medium", "low", "unknown"]
+          },
           changeReason: { type: "string" },
           changeSummary: { type: "string" },
           reviewPoints: {
@@ -188,6 +195,15 @@ export class PrReviewAnalysisService {
     return {
       task:
         "Analyze this pull request for an MVP PR review workflow. Keep every file in the response and match each file by filePath.",
+      riskLevelGuidance: {
+        high:
+          "Security, auth, payment, data/schema/migration, deletion, or broad runtime impact.",
+        medium:
+          "Main app/server logic, important feature behavior, or sizeable but reviewable changes.",
+        low: "Docs, tests, styling, or isolated low-impact changes.",
+        unknown:
+          "Binary files, unavailable patch context, or insufficient information to judge."
+      },
       pullRequest: {
         number: detail.prNumber,
         title: detail.title,
@@ -301,6 +317,7 @@ export class PrReviewAnalysisService {
     return {
       filePath,
       fileRole: this.cleanString(value.fileRole, fallback.fileRole),
+      riskLevel: this.cleanRiskLevel(value.riskLevel, fallback.riskLevel),
       changeReason: this.cleanString(value.changeReason, fallback.changeReason),
       changeSummary: this.cleanString(value.changeSummary, fallback.changeSummary),
       reviewPoints: this.cleanStringArray(
@@ -349,6 +366,7 @@ export class PrReviewAnalysisService {
       files: files.map((file, index) => ({
         filePath: file.filePath,
         fileRole: this.describeFileRole(file.filePath),
+        riskLevel: this.inferFileRiskLevel(file),
         changeReason: `${this.describeFileStatus(file.fileStatus)} 파일이다.`,
         changeSummary: `${file.additions}줄 추가, ${file.deletions}줄 삭제`,
         reviewPoints: [
@@ -378,6 +396,45 @@ export class PrReviewAnalysisService {
     }
 
     return "일반 변경 파일";
+  }
+
+  private inferFileRiskLevel(
+    file: PrReviewGithubChangedFile
+  ): PrReviewFileRiskLevel {
+    const filePath = file.filePath.toLowerCase().replace(/\\/g, "/");
+    const changedLineCount = file.additions + file.deletions;
+
+    if (file.isBinary || file.isLargeDiff || file.patch === null) {
+      return "unknown";
+    }
+
+    if (
+      file.fileStatus === "deleted" ||
+      changedLineCount >= 1000 ||
+      filePath.includes("/db/migrations/") ||
+      filePath.includes("/migrations/") ||
+      filePath.endsWith("schema.sql") ||
+      filePath.endsWith("package-lock.json") ||
+      filePath.endsWith("pnpm-lock.yaml") ||
+      filePath.endsWith("yarn.lock") ||
+      /\b(auth|oauth|security|permission|billing|payment|checkout|token|secret)\b/.test(
+        filePath
+      )
+    ) {
+      return "high";
+    }
+
+    if (
+      changedLineCount >= 250 ||
+      filePath.includes("/src/modules/") ||
+      filePath.includes("/src/app/") ||
+      filePath.includes("/src/features/") ||
+      filePath.includes("app-server")
+    ) {
+      return "medium";
+    }
+
+    return "low";
   }
 
   private describeFileStatus(
@@ -455,6 +512,18 @@ export class PrReviewAnalysisService {
       .slice(0, maxItems);
 
     return items.length > 0 ? items : fallback;
+  }
+
+  private cleanRiskLevel(
+    value: unknown,
+    fallback: PrReviewFileRiskLevel
+  ): PrReviewFileRiskLevel {
+    return value === "high" ||
+      value === "medium" ||
+      value === "low" ||
+      value === "unknown"
+      ? value
+      : fallback;
   }
 
   private truncateText(value: string | null, maxChars: number): string | null {

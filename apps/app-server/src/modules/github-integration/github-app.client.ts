@@ -268,6 +268,8 @@ interface GithubInstallationRepositoriesApiPayload {
 
 const GITHUB_SYNC_PER_PAGE = 100;
 const GITHUB_SYNC_MAX_PAGES = 100;
+const GITHUB_PROJECT_V2_ACCESS_ERROR_MESSAGE =
+  "GitHub ProjectV2 access requires read:project OAuth scope or GitHub App Projects read permission";
 const GITHUB_PROJECT_V2_DISCOVERY_FRAGMENT = `
   fragment PiloProjectV2DiscoveryFields on ProjectV2 {
     id
@@ -1078,7 +1080,7 @@ export class GithubAppClient {
     const payload = await this.readJson(response, errorMessage);
     const record = this.toObject(payload);
     if (Array.isArray(record.errors) && record.errors.length > 0) {
-      throw badRequest(errorMessage);
+      throw badRequest(this.mapGraphqlErrorMessage(record.errors, errorMessage));
     }
 
     const data = record.data;
@@ -1117,6 +1119,38 @@ export class GithubAppClient {
     }
 
     return repositoryNodeIds;
+  }
+
+  private mapGraphqlErrorMessage(
+    errors: unknown[],
+    fallbackMessage: string
+  ): string {
+    if (
+      fallbackMessage.includes("ProjectV2") &&
+      errors.some((error) => this.isProjectV2AccessError(error))
+    ) {
+      return GITHUB_PROJECT_V2_ACCESS_ERROR_MESSAGE;
+    }
+
+    return fallbackMessage;
+  }
+
+  private isProjectV2AccessError(error: unknown): boolean {
+    if (!this.isRecord(error)) {
+      return false;
+    }
+
+    const message = this.toNullableString(error.message)?.toLowerCase();
+    if (!message) {
+      return false;
+    }
+
+    return (
+      message.includes("read:project") ||
+      message.includes("resource not accessible") ||
+      message.includes("permission") ||
+      message.includes("scope")
+    );
   }
 
   private readProjectV2OwnerConnection(

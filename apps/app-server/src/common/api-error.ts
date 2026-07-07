@@ -4,7 +4,9 @@ export type ApiErrorCode =
   | "BAD_REQUEST"
   | "UNAUTHORIZED"
   | "FORBIDDEN"
-  | "NOT_FOUND";
+  | "NOT_FOUND"
+  | "CONFLICT"
+  | "PAYLOAD_TOO_LARGE";
 
 export interface ApiErrorResponse {
   success: false;
@@ -43,4 +45,16 @@ export function forbidden(message: string): ApiError {
 
 export function notFound(message: string): ApiError {
   return new ApiError(HttpStatus.NOT_FOUND, "NOT_FOUND", message);
+}
+
+export function conflict(message: string): ApiError {
+  return new ApiError(HttpStatus.CONFLICT, "CONFLICT", message);
+}
+
+export function payloadTooLarge(message: string): ApiError {
+  return new ApiError(
+    HttpStatus.PAYLOAD_TOO_LARGE,
+    "PAYLOAD_TOO_LARGE",
+    message
+  );
 }

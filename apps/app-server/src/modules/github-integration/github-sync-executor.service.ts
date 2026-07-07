@@ -404,7 +404,11 @@ export class GithubSyncExecutorService {
       }
 
       for (const fieldValue of item.fieldValues) {
-        await this.upsertGithubProjectV2ItemFieldValue(row.id, fieldValue);
+        await this.upsertGithubProjectV2ItemFieldValue(
+          projectV2.id,
+          row.id,
+          fieldValue
+        );
       }
     }
 
@@ -466,9 +470,8 @@ export class GithubSyncExecutorService {
           now(),
           $19::jsonb
         )
-        ON CONFLICT (github_project_node_id)
+        ON CONFLICT (workspace_id, github_project_node_id)
         DO UPDATE SET
-          workspace_id = EXCLUDED.workspace_id,
           installation_id = EXCLUDED.installation_id,
           github_project_full_database_id =
             EXCLUDED.github_project_full_database_id,
@@ -633,9 +636,8 @@ export class GithubSyncExecutorService {
           raw
         )
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
-        ON CONFLICT (github_field_node_id)
+        ON CONFLICT (project_v2_id, github_field_node_id)
         DO UPDATE SET
-          project_v2_id = EXCLUDED.project_v2_id,
           field_name = EXCLUDED.field_name,
           data_type = EXCLUDED.data_type,
           is_status_field = EXCLUDED.is_status_field,
@@ -766,10 +768,8 @@ export class GithubSyncExecutorService {
           now(),
           $17::jsonb
         )
-        ON CONFLICT (github_project_item_node_id)
+        ON CONFLICT (project_v2_id, github_project_item_node_id)
         DO UPDATE SET
-          workspace_id = EXCLUDED.workspace_id,
-          project_v2_id = EXCLUDED.project_v2_id,
           github_project_item_full_database_id =
             EXCLUDED.github_project_item_full_database_id,
           content_type = EXCLUDED.content_type,
@@ -818,11 +818,15 @@ export class GithubSyncExecutorService {
   }
 
   private async upsertGithubProjectV2ItemFieldValue(
+    projectV2Id: string,
     projectItemId: string,
     fieldValue: GithubProjectV2ItemFieldValueApiItem
   ): Promise<void> {
     const fieldRow = fieldValue.fieldNodeId
-      ? await this.findGithubProjectV2FieldByNodeId(fieldValue.fieldNodeId)
+      ? await this.findGithubProjectV2FieldByNodeId(
+          projectV2Id,
+          fieldValue.fieldNodeId
+        )
       : null;
 
     await this.database.execute(
@@ -980,15 +984,17 @@ export class GithubSyncExecutorService {
   }
 
   private async findGithubProjectV2FieldByNodeId(
+    projectV2Id: string,
     githubFieldNodeId: string
   ): Promise<GithubProjectV2FieldSyncRow | null> {
     return this.database.queryOne<GithubProjectV2FieldSyncRow>(
       `
         SELECT id, false AS created
         FROM github_project_v2_fields
-        WHERE github_field_node_id = $1
+        WHERE project_v2_id = $1
+          AND github_field_node_id = $2
       `,
-      [githubFieldNodeId]
+      [projectV2Id, githubFieldNodeId]
     );
   }
 
@@ -1036,9 +1042,8 @@ export class GithubSyncExecutorService {
           now(),
           $16::jsonb
         )
-        ON CONFLICT (github_repository_id)
+        ON CONFLICT (workspace_id, github_repository_id)
         DO UPDATE SET
-          workspace_id = EXCLUDED.workspace_id,
           installation_id = EXCLUDED.installation_id,
           connected_by_user_id = EXCLUDED.connected_by_user_id,
           github_node_id = EXCLUDED.github_node_id,
@@ -1135,9 +1140,8 @@ export class GithubSyncExecutorService {
           now(),
           $19::jsonb
         )
-        ON CONFLICT (github_issue_id)
+        ON CONFLICT (workspace_id, github_issue_id)
         DO UPDATE SET
-          workspace_id = EXCLUDED.workspace_id,
           repository_id = EXCLUDED.repository_id,
           github_node_id = EXCLUDED.github_node_id,
           issue_number = EXCLUDED.issue_number,
@@ -1248,9 +1252,8 @@ export class GithubSyncExecutorService {
           now(),
           $23::jsonb
         )
-        ON CONFLICT (github_pull_request_id)
+        ON CONFLICT (workspace_id, github_pull_request_id)
         DO UPDATE SET
-          workspace_id = EXCLUDED.workspace_id,
           repository_id = EXCLUDED.repository_id,
           github_node_id = EXCLUDED.github_node_id,
           pr_number = EXCLUDED.pr_number,

@@ -9,6 +9,7 @@ const controller = await readSource("../src/app.controller.ts");
 const main = await readSource("../src/main.ts");
 const service = await readSource("../src/app.service.ts");
 const appModule = await readSource("../src/app.module.ts");
+const apiError = await readSource("../src/common/api-error.ts");
 const authGuard = await readSource("../src/common/auth.guard.ts");
 const sessionService = await readSource("../src/common/session.service.ts");
 const authModule = await readSource("../src/modules/auth/auth.module.ts");
@@ -92,6 +93,15 @@ assert.match(appModule, /WorkspaceModule/);
 assert.match(appModule, /CalendarModule/);
 assert.match(appModule, /CanvasModule/);
 assert.match(appModule, /MeetingModule/);
+assert.match(apiError, /"CONFLICT"/);
+assert.match(apiError, /"PAYLOAD_TOO_LARGE"/);
+assert.match(apiError, /export function conflict\(message: string\): ApiError/);
+assert.match(apiError, /HttpStatus\.CONFLICT/);
+assert.match(
+  apiError,
+  /export function payloadTooLarge\(message: string\): ApiError/
+);
+assert.match(apiError, /HttpStatus\.PAYLOAD_TOO_LARGE/);
 assert.match(calendarModule, /WorkspaceModule/);
 assert.match(calendarController, /@Controller\("workspaces\/:workspaceId\/calendar\/events"\)/);
 assert.match(calendarController, /@UseGuards\(AuthGuard\)/);

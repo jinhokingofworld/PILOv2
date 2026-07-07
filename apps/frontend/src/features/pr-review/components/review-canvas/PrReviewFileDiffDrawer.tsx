@@ -24,7 +24,8 @@ import type {
   PrReviewFile,
   PrReviewFileDecisionStatus,
   PrReviewFileDiff,
-  PrReviewFileFlowMembership
+  PrReviewFileFlowMembership,
+  PrReviewFileRiskLevel
 } from "@/features/pr-review/types";
 
 type PrReviewApiClient = ReturnType<typeof createPrReviewApiClient>;
@@ -118,6 +119,32 @@ function getFileStatusClassName(status: PrReviewFile["fileStatus"]) {
       return "bg-violet-50 text-violet-700";
     case "modified":
       return "bg-slate-100 text-slate-700";
+  }
+}
+
+const riskLevelLabels: Record<PrReviewFileRiskLevel, string> = {
+  high: "위험도 높음",
+  medium: "위험도 중간",
+  low: "위험도 낮음",
+  unknown: "위험도 미확인"
+};
+
+const riskLevelClassNames: Record<PrReviewFileRiskLevel, string> = {
+  high: "bg-rose-50 text-rose-700",
+  medium: "bg-amber-50 text-amber-700",
+  low: "bg-emerald-50 text-emerald-700",
+  unknown: "bg-slate-100 text-slate-600"
+};
+
+function getSaveButtonLabel(status: SaveStatus) {
+  switch (status) {
+    case "saving":
+      return "저장 중";
+    case "saved":
+      return "저장됨";
+    case "error":
+    case "idle":
+      return "판단 저장";
   }
 }
 
@@ -334,6 +361,14 @@ function FileDiffHeader({ file }: { file: PrReviewFile }) {
         <span className="font-medium text-rose-500">
           -{formatNumber(file.deletions)}
         </span>
+        <span
+          className={cn(
+            "rounded-md px-2 py-1 text-xs font-semibold",
+            riskLevelClassNames[file.riskLevel]
+          )}
+        >
+          {riskLevelLabels[file.riskLevel]}
+        </span>
         {file.previousFilePath ? (
           <span className="min-w-0 truncate text-slate-500">
             from {file.previousFilePath}
@@ -389,6 +424,14 @@ function ReviewNodePanel({
           <div className="mt-3 flex flex-wrap gap-2">
             <span className="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700">
               {file.fileRole ?? "역할 미분류"}
+            </span>
+            <span
+              className={cn(
+                "rounded-full px-2.5 py-1 text-xs font-semibold",
+                riskLevelClassNames[file.riskLevel]
+              )}
+            >
+              {riskLevelLabels[file.riskLevel]}
             </span>
             <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">
               {file.currentStatus === "not_reviewed"
@@ -490,7 +533,7 @@ function ReviewNodePanel({
             ) : (
               <Save className="size-4" />
             )}
-            판단 저장
+            {getSaveButtonLabel(saveStatus)}
           </Button>
         </div>
 

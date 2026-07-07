@@ -1,20 +1,24 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { useEditor, type TLShape } from "tldraw";
+import { useEditor, type Editor, type TLShape } from "tldraw";
 import { useValue } from "@tldraw/state-react";
 import type {
   PiloCanvasFreeformShape,
   PiloCanvasViewportBounds,
   PiloCanvasViewSetting,
 } from "../types";
+import { withSerializedArrowBindings } from "./pilo-canvas-arrow-bindings";
 
 function isPersistableFreeformShape(_shape: TLShape) {
   return true;
 }
 
-function toFreeformSnapshot(shape: TLShape): PiloCanvasFreeformShape {
-  return JSON.parse(JSON.stringify(shape)) as PiloCanvasFreeformShape;
+function toFreeformSnapshot(
+  editor: Editor,
+  shape: TLShape,
+): PiloCanvasFreeformShape {
+  return withSerializedArrowBindings(editor, shape);
 }
 
 export function CanvasStateReporter({
@@ -84,7 +88,7 @@ export function CanvasStateReporter({
       return editor
         .getCurrentPageShapes()
         .filter(isPersistableFreeformShape)
-        .map(toFreeformSnapshot);
+        .map((shape) => toFreeformSnapshot(editor, shape));
     }
 
     function scheduleFreeformSync() {

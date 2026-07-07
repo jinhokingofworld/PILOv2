@@ -3,6 +3,7 @@
 import {
   useEffect,
   useRef,
+  type MutableRefObject,
   type PointerEvent,
   type WheelEvent,
 } from "react";
@@ -33,6 +34,11 @@ import {
 } from "../shapes/frame/PiloFrameShapeUtil";
 import { restorePiloShapeAssets } from "../assets/pilo-canvas-assets";
 import { CanvasStateReporter } from "./pilo-canvas-state-reporter";
+import {
+  readSerializedArrowBindings,
+  restoreSerializedArrowBindings,
+  type PiloArrowBindingSnapshot,
+} from "./pilo-canvas-arrow-bindings";
 import type {
   PiloCanvasShapeDetailRequest,
   PiloCanvasFreeformShape,
@@ -147,23 +153,73 @@ const tldrawComponents = {
   Background: PiloCanvasBackground,
 };
 
+function collectSerializedArrowBindings(shapes: PiloCanvasFreeformShape[]) {
+  return shapes.flatMap(readSerializedArrowBindings);
+}
+
+function uniquePendingArrowBindings(bindings: PiloArrowBindingSnapshot[]) {
+  const bindingMap = new Map<string, PiloArrowBindingSnapshot>();
+
+  bindings.forEach((binding) => {
+    bindingMap.set(
+      [
+        binding.id ?? "",
+        binding.fromId,
+        binding.toId,
+        binding.props.terminal,
+      ].join("|"),
+      binding,
+    );
+  });
+
+  return Array.from(bindingMap.values());
+}
+
 function createFreeformShapeRecords(
   editor: Editor,
   shapes: PiloCanvasFreeformShape[],
+  pendingArrowBindingsRef: MutableRefObject<PiloArrowBindingSnapshot[]>,
+  piloDefaultArrowKindHydrationGuardRef: MutableRefObject<boolean>,
 ) {
   if (!shapes.length) return;
 
   restorePiloShapeAssets(editor, shapes);
-  editor.createShapes(sortFreeformShapesForCreate(shapes));
+  piloDefaultArrowKindHydrationGuardRef.current = true;
+  try {
+    editor.createShapes(sortFreeformShapesForCreate(shapes));
+  } finally {
+    piloDefaultArrowKindHydrationGuardRef.current = false;
+  }
+
+  const bindingsToRestore = uniquePendingArrowBindings([
+    ...pendingArrowBindingsRef.current,
+    ...collectSerializedArrowBindings(shapes),
+  ]);
+
+  if (!bindingsToRestore.length) return;
+
+  const result = restoreSerializedArrowBindings(editor, bindingsToRestore);
+  pendingArrowBindingsRef.current = uniquePendingArrowBindings(result.pending);
 }
 
 function hydrateFreeformShapes(
   editor: Editor,
   shapes: PiloCanvasFreeformShape[],
+  pendingArrowBindingsRef: MutableRefObject<PiloArrowBindingSnapshot[]>,
+  piloDefaultArrowKindHydrationGuardRef: MutableRefObject<boolean>,
 ) {
-  editor.run(() => createFreeformShapeRecords(editor, shapes), {
-    history: "ignore",
-  });
+  editor.run(
+    () =>
+      createFreeformShapeRecords(
+        editor,
+        shapes,
+        pendingArrowBindingsRef,
+        piloDefaultArrowKindHydrationGuardRef,
+      ),
+    {
+      history: "ignore",
+    },
+  );
 }
 
 function applyViewSetting(editor: Editor, viewSetting: PiloCanvasViewSetting) {
@@ -185,9 +241,12 @@ function applyViewSetting(editor: Editor, viewSetting: PiloCanvasViewSetting) {
 function resetFreeformShapes(
   editor: Editor,
   shapes: PiloCanvasFreeformShape[],
+  pendingArrowBindingsRef: MutableRefObject<PiloArrowBindingSnapshot[]>,
+  piloDefaultArrowKindHydrationGuardRef: MutableRefObject<boolean>,
 ) {
   editor.run(
     () => {
+      pendingArrowBindingsRef.current = [];
       const existingFreeformShapeIds = editor
         .getCurrentPageShapes()
         .map((shape) => shape.id as TLShapeId);
@@ -196,14 +255,36 @@ function resetFreeformShapes(
         editor.deleteShapes(existingFreeformShapeIds);
       }
 
-      createFreeformShapeRecords(editor, shapes);
+      createFreeformShapeRecords(
+        editor,
+        shapes,
+        pendingArrowBindingsRef,
+        piloDefaultArrowKindHydrationGuardRef,
+      );
     },
     { history: "ignore" },
   );
 }
 
-function registerCanvasEditorSideEffects(editor: Editor) {
+function registerCanvasEditorSideEffects(
+  editor: Editor,
+  piloDefaultArrowKindHydrationGuardRef: MutableRefObject<boolean>,
+) {
   editor.sideEffects.registerBeforeCreateHandler("shape", (shape) => {
+    if (
+      shape.type === "arrow" &&
+      !piloDefaultArrowKindHydrationGuardRef.current &&
+      shape.props.kind !== "elbow"
+    ) {
+      return {
+        ...shape,
+        props: {
+          ...shape.props,
+          kind: "elbow",
+        },
+      };
+    }
+
     if (!isPiloFrameShape(shape) || shape.props.name.trim()) return shape;
 
     return {
@@ -258,6 +339,8 @@ export function PiloTldrawCanvas({
 }: PiloTldrawCanvasProps) {
   const editorRef = useRef<Editor | null>(null);
   const placementRequestRef = useRef<PiloPlacementRequest | null>(null);
+  const pendingArrowBindingsRef = useRef<PiloArrowBindingSnapshot[]>([]);
+  const piloDefaultArrowKindHydrationGuardRef = useRef(false);
   const createdLocalCardsRef = useRef(0);
   const freeformShapesRef = useRef(freeformShapes);
   const initialViewSettingRef = useRef(initialViewSetting);
@@ -276,7 +359,12 @@ export function PiloTldrawCanvas({
 
     if (!editor) return;
 
-    resetFreeformShapes(editor, freeformShapesRef.current);
+    resetFreeformShapes(
+      editor,
+      freeformShapesRef.current,
+      pendingArrowBindingsRef,
+      piloDefaultArrowKindHydrationGuardRef,
+    );
   }, [hydrationVersion, seedKey]);
 
   useEffect(() => {
@@ -289,8 +377,16 @@ export function PiloTldrawCanvas({
 
   function mountEditor(editor: Editor) {
     editorRef.current = editor;
-    registerCanvasEditorSideEffects(editor);
-    hydrateFreeformShapes(editor, freeformShapes);
+    registerCanvasEditorSideEffects(
+      editor,
+      piloDefaultArrowKindHydrationGuardRef,
+    );
+    hydrateFreeformShapes(
+      editor,
+      freeformShapes,
+      pendingArrowBindingsRef,
+      piloDefaultArrowKindHydrationGuardRef,
+    );
     applyViewSetting(editor, initialViewSetting);
 
     onReady({
