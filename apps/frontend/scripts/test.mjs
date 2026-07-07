@@ -70,6 +70,62 @@ const canvasRuntime = await readFile(
   ),
   "utf8"
 );
+const canvasRuntimeTypes = await readFile(
+  new URL(
+    "../src/features/canvas/components/engine/runtime/canvas-runtime-types.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
+const canvasRuntimeUtils = await readFile(
+  new URL(
+    "../src/features/canvas/components/engine/runtime/canvas-runtime-utils.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
+const canvasRuntimeHydration = await readFile(
+  new URL(
+    "../src/features/canvas/components/engine/runtime/useCanvasRuntimeHydration.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
+const canvasApiLifecycle = await readFile(
+  new URL(
+    "../src/features/canvas/components/engine/runtime/useCanvasApiLifecycle.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
+const canvasShapePersistence = await readFile(
+  new URL(
+    "../src/features/canvas/components/engine/runtime/useCanvasShapePersistence.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
+const canvasViewSettingPersistence = await readFile(
+  new URL(
+    "../src/features/canvas/components/engine/runtime/useCanvasViewSettingPersistence.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
+const canvasViewportQueries = await readFile(
+  new URL(
+    "../src/features/canvas/components/engine/runtime/useCanvasViewportQueries.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
+const canvasZoomControls = await readFile(
+  new URL(
+    "../src/features/canvas/components/engine/runtime/CanvasZoomControls.tsx",
+    import.meta.url
+  ),
+  "utf8"
+);
 const canvasWorkspace = await readFile(
   new URL("../src/features/canvas/components/workspace-canvas.tsx", import.meta.url),
   "utf8"
@@ -272,41 +328,50 @@ assert.match(canvasNormalizers, /createMockCanvasBoardDetail/);
 assert.match(canvasNormalizers, /normalizeCanvasBoardDetail/);
 assert.match(canvasNormalizers, /unwrapCanvasApiData/);
 assert.match(canvasNormalizers, /normalizeCanvasShapes/);
-assert.match(canvasRuntime, /syncCanvasFreeformShapes/);
-assert.match(canvasRuntime, /createCanvasShapeSyncQueue/);
-assert.match(canvasRuntime, /shapeSyncQueue\.enqueue/);
 assert.match(canvasRuntime, /@tanstack\/react-query/);
 assert.match(canvasRuntime, /QueryClientProvider/);
-assert.match(canvasRuntime, /queryClient\s*\.\s*fetchQuery/);
-assert.match(canvasRuntime, /queryClient\s*\.\s*cancelQueries/);
-assert.match(canvasRuntime, /queryClient\s*\.\s*invalidateQueries/);
 assert.match(canvasRuntime, /viewportShapeLoadRequestSeqRef/);
 assert.match(canvasRuntime, /shapeDetailRequestSeqRef/);
-assert.match(canvasRuntime, /areCanvasFreeformShapesEqual/);
-assert.match(canvasRuntime, /hasCanvasFreeformShapeChanged/);
 assert.match(canvasRuntime, /pendingLocalShapeVersionsRef/);
-assert.match(canvasRuntime, /getChangedFreeformShapeIds/);
+assert.match(canvasRuntime, /useCanvasRuntimeHydration/);
+assert.match(canvasRuntime, /useCanvasApiLifecycle/);
+assert.match(canvasRuntime, /useCanvasShapePersistence/);
+assert.match(canvasRuntime, /useCanvasViewSettingPersistence/);
+assert.match(canvasRuntime, /useCanvasViewportQueries/);
+assert.match(canvasRuntime, /<CanvasZoomControls/);
+assert.match(canvasRuntimeTypes, /CanvasViewSettingApiClient/);
+assert.match(canvasRuntimeUtils, /hasCanvasFreeformShapeChanged/);
+assert.match(canvasRuntimeUtils, /getChangedFreeformShapeIds/);
+assert.match(canvasRuntimeHydration, /readCanvasStorage\("freeform-shapes"/);
+assert.match(canvasRuntimeHydration, /readCanvasStorage\("view-setting"/);
+assert.match(canvasApiLifecycle, /createCanvasShapeSyncQueue/);
+assert.match(canvasApiLifecycle, /queryClient\s*\.\s*invalidateQueries/);
+assert.match(canvasApiLifecycle, /enterCanvas/);
+assert.match(canvasApiLifecycle, /leaveCanvas/);
+assert.match(canvasApiLifecycle, /shapeSyncQueue\.flush/);
+assert.match(canvasShapePersistence, /syncCanvasFreeformShapes/);
+assert.match(canvasShapePersistence, /shapeSyncQueue\.enqueue/);
+assert.match(canvasShapePersistence, /areCanvasFreeformShapesEqual/);
 assert.match(canvasRuntime, /captureDraftFreeformShapes/);
-assert.match(canvasRuntime, /shapeDetailCacheRef\.current\.set\(shapeId, nextShape\)/);
-assert.match(canvasRuntime, /pendingLocalShapeVersionsRef\.current\.has\(shapeId\)/);
-assert.match(canvasRuntime, /shapeSyncQueue\s*\.\s*whenIdle\(\)/);
-assert.match(canvasRuntime, /listShapesInViewport/);
-assert.match(canvasRuntime, /getShapeDetail/);
-assert.match(canvasRuntime, /enterCanvas/);
-assert.match(canvasRuntime, /leaveCanvas/);
-assert.match(canvasRuntime, /shapeSyncQueue\.flush/);
+assert.match(canvasShapePersistence, /shapeDetailCacheRef\.current\.set\(shapeId, nextShape\)/);
+assert.match(canvasShapePersistence, /pendingLocalShapeVersionsRef\.current\.has\(shapeId\)/);
+assert.match(canvasShapePersistence, /shapeSyncQueue\s*\.\s*whenIdle\(\)/);
+assert.match(canvasViewportQueries, /queryClient\s*\.\s*fetchQuery/);
+assert.match(canvasViewportQueries, /queryClient\s*\.\s*cancelQueries/);
+assert.match(canvasViewportQueries, /listShapesInViewport/);
+assert.match(canvasViewportQueries, /getShapeDetail/);
+assert.match(canvasViewportQueries, /CANVAS_SHAPE_DETAIL_MIN_ZOOM/);
+assert.match(canvasRuntimeUtils, /DEFAULT_VIEWPORT_SHAPE_LOAD_MARGIN/);
+assert.match(canvasViewSettingPersistence, /storageMode === "api"/);
+assert.match(canvasViewSettingPersistence, /updateViewSetting/);
+assert.match(canvasShapePersistence, /writeCanvasStorage\("freeform-shapes"/);
+assert.match(canvasViewSettingPersistence, /writeCanvasStorage\("view-setting"/);
 assert.match(canvasRuntime, /onSnapStateChange/);
 assert.match(canvasRuntime, /canvasSnapState\.isSmartGuideEnabled/);
-assert.match(canvasRuntime, /aria-label="스마트가이드"/);
 assert.match(canvasRuntime, /setSmartGuidesEnabled/);
-assert.match(canvasRuntime, /<Magnet/);
-assert.match(canvasRuntime, /aria-label="스마트가이드"[\s\S]*aria-label="축소"[\s\S]*<strong>/);
-assert.match(canvasRuntime, /CANVAS_SHAPE_DETAIL_MIN_ZOOM/);
-assert.match(canvasRuntime, /DEFAULT_VIEWPORT_SHAPE_LOAD_MARGIN/);
-assert.match(canvasRuntime, /storageMode === "api"/);
-assert.match(canvasRuntime, /writeCanvasStorage\("freeform-shapes"/);
-assert.match(canvasRuntime, /updateViewSetting/);
-assert.match(canvasRuntime, /writeCanvasStorage\("view-setting"/);
+assert.match(canvasZoomControls, /aria-label="스마트가이드"/);
+assert.match(canvasZoomControls, /<Magnet/);
+assert.match(canvasZoomControls, /aria-label="스마트가이드"[\s\S]*aria-label="축소"[\s\S]*<strong>/);
 assert.match(canvasWorkspace, /useAuthSession/);
 assert.match(canvasWorkspace, /authSession\?\.activeWorkspaceId/);
 assert.match(canvasWorkspace, /authToken: authSession\?\.accessToken/);

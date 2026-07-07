@@ -32,6 +32,17 @@ WorkspaceCanvas -> PiloCanvasRuntime -> PiloTldrawCanvas -> TldrawSurface
 - `interactions/`: placement, smart guide, selection stacking
 - `assets/`: image/video asset 생성과 복원
 
+`runtime/`은 `PiloCanvasRuntime`을 조립자로 두고 책임별 파일을 평평하게 나눈다.
+
+- `useCanvasRuntimeHydration`: board 변경 시 초기 shape와 view setting 복원
+- `useCanvasShapePersistence`: freeform shape 변경 감지, local/API 저장, dirty shape 방어
+- `useCanvasViewportQueries`: viewport shape summary 조회와 shape detail lazy loading
+- `useCanvasViewSettingPersistence`: zoom, viewportX, viewportY 저장
+- `useCanvasApiLifecycle`: Canvas enter/leave, unmount 시 queue flush와 pending view setting sync
+- `CanvasZoomControls`: smart guide와 zoom controls UI
+- `canvas-runtime-utils`: runtime hook들이 공유하는 순수 계산 helper와 query key
+- `canvas-runtime-types`: runtime 내부 client/storage mode 타입
+
 `api/` 하위 폴더는 Canvas API client 경계를 책임별로 나눈다.
 
 - `canvas-client.ts`: 외부 import 경로를 유지하는 얇은 entrypoint와 mode 선택
