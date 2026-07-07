@@ -13,6 +13,7 @@ import {
 import { apiResponse, ApiSuccessResponse } from "../../common/api-response";
 import { AuthGuard } from "../../common/auth.guard";
 import { CurrentUserId } from "../../common/current-user.decorator";
+import { CanvasService } from "./canvas.service";
 import {
   CanvasBoardDetailPayload,
   CanvasBoardPayload,
@@ -23,14 +24,13 @@ import {
   CanvasShapeSummaryPayload,
   CanvasUserStatePayload,
   CanvasViewSettingPayload,
-  CanvasService,
   CreateCanvasRequest,
   CreateCanvasShapeRequest,
   ListCanvasShapesQuery,
   SyncCanvasShapesBatchRequest,
   UpdateCanvasViewSettingRequest,
   UpdateCanvasShapeRequest
-} from "./canvas.service";
+} from "./canvas.types";
 
 @Controller("workspaces/:workspaceId")
 @UseGuards(AuthGuard)
