@@ -15,8 +15,10 @@ import { CurrentUserId } from "../../common/current-user.decorator";
 import { DriveService } from "./drive.service";
 import {
   DriveDeletePayload,
+  DriveDownloadUrlPayload,
   DriveItemPayload,
-  DriveListPayload
+  DriveListPayload,
+  DriveUploadUrlPayload
 } from "./drive.types";
 
 @Controller("workspaces/:workspaceId/drive")
@@ -52,6 +54,53 @@ export class DriveController {
     );
 
     return apiResponse(folder);
+  }
+
+  @Post("files/upload-url")
+  async createUploadUrl(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Body() body: Record<string, unknown>
+  ): Promise<ApiSuccessResponse<DriveUploadUrlPayload>> {
+    const result = await this.driveService.createUploadUrl(
+      currentUserId,
+      workspaceId,
+      body
+    );
+
+    return apiResponse(result);
+  }
+
+  @Post("files/:fileId/complete")
+  async completeUpload(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("fileId") fileId: string,
+    @Body() body: Record<string, unknown>
+  ): Promise<ApiSuccessResponse<DriveItemPayload>> {
+    const file = await this.driveService.completeUpload(
+      currentUserId,
+      workspaceId,
+      fileId,
+      body
+    );
+
+    return apiResponse(file);
+  }
+
+  @Get("files/:fileId/download-url")
+  async createDownloadUrl(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("fileId") fileId: string
+  ): Promise<ApiSuccessResponse<DriveDownloadUrlPayload>> {
+    const result = await this.driveService.createDownloadUrl(
+      currentUserId,
+      workspaceId,
+      fileId
+    );
+
+    return apiResponse(result);
   }
 
   @Patch("items/:itemId")

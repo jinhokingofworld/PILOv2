@@ -1,7 +1,11 @@
 import { badRequest } from "../../common/api-error";
 import {
+  CompleteDriveUploadRequest,
   CreateDriveFolderRequest,
+  CreateDriveUploadUrlRequest,
   NormalizedCreateDriveFolderInput,
+  NormalizedCreateDriveUploadUrlInput,
+  NormalizedCompleteDriveUploadInput,
   NormalizedDriveParentInput,
   NormalizedUpdateDriveItemInput,
   UpdateDriveItemRequest
@@ -10,6 +14,8 @@ import {
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_DRIVE_ITEM_NAME_LENGTH = 255;
+const MAX_DRIVE_MIME_TYPE_LENGTH = 255;
+export const DRIVE_FILE_SIZE_LIMIT_BYTES = 100 * 1024 * 1024;
 
 export function validateDriveItemId(value: unknown): string {
   if (typeof value !== "string" || !UUID_PATTERN.test(value)) {
@@ -35,6 +41,29 @@ export function validateCreateDriveFolderRequest(
   return {
     parentId: readOptionalParentId(draft.parentId),
     name: readDriveItemName(draft.name)
+  };
+}
+
+export function validateCreateDriveUploadUrlRequest(
+  body: CreateDriveUploadUrlRequest
+): NormalizedCreateDriveUploadUrlInput {
+  const draft = readBody(body);
+
+  return {
+    parentId: readOptionalParentId(draft.parentId),
+    name: readDriveItemName(draft.name),
+    sizeBytes: readSizeBytes(draft.sizeBytes),
+    mimeType: readMimeType(draft.mimeType)
+  };
+}
+
+export function validateCompleteDriveUploadRequest(
+  body: CompleteDriveUploadRequest
+): NormalizedCompleteDriveUploadInput {
+  const draft = readBody(body);
+
+  return {
+    uploadId: validateDriveItemId(draft.uploadId)
   };
 }
 
@@ -91,4 +120,34 @@ function readDriveItemName(value: unknown): string {
   }
 
   return name;
+}
+
+function readSizeBytes(value: unknown): number {
+  if (
+    typeof value !== "number" ||
+    !Number.isSafeInteger(value) ||
+    value < 0 ||
+    value > DRIVE_FILE_SIZE_LIMIT_BYTES
+  ) {
+    throw badRequest("Drive file sizeBytes is invalid");
+  }
+
+  return value;
+}
+
+function readMimeType(value: unknown): string {
+  if (typeof value !== "string") {
+    throw badRequest("Drive file mimeType is required");
+  }
+
+  const mimeType = value.trim();
+  if (!mimeType) {
+    throw badRequest("Drive file mimeType is required");
+  }
+
+  if (mimeType.length > MAX_DRIVE_MIME_TYPE_LENGTH) {
+    throw badRequest("Drive file mimeType must be 255 characters or less");
+  }
+
+  return mimeType;
 }
