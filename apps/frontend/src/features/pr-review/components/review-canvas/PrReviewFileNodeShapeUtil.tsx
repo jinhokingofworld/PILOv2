@@ -14,6 +14,7 @@ import {
 
 import { cn } from "@/lib/utils";
 import type {
+  PrReviewFileRiskLevel,
   PrReviewFileReviewStatus,
   PrReviewFileStatus
 } from "@/features/pr-review/types";
@@ -21,6 +22,7 @@ import type {
 export const PR_REVIEW_FILE_NODE_SHAPE_TYPE = "pr_review_file_node";
 export const PR_REVIEW_FLOW_EDGE_SHAPE_TYPE = "pr_review_flow_edge";
 export const PR_REVIEW_FLOW_LABEL_SHAPE_TYPE = "pr_review_flow_label";
+export const PR_REVIEW_FLOW_MILESTONE_SHAPE_TYPE = "pr_review_flow_milestone";
 
 export type PrReviewFileNodeShapeProps = {
   w: number;
@@ -34,6 +36,7 @@ export type PrReviewFileNodeShapeProps = {
   filePath: string;
   fileStatus: PrReviewFileStatus;
   roleSummary: string | null;
+  riskLevel: PrReviewFileRiskLevel;
   reviewStatus: PrReviewFileReviewStatus;
 };
 
@@ -60,6 +63,15 @@ export type PrReviewFlowLabelShapeProps = {
   fileCount: number;
 };
 
+export type PrReviewFlowMilestoneShapeProps = {
+  w: number;
+  h: number;
+  flowId: string;
+  kind: "start" | "end";
+  label: string;
+  description: string | null;
+};
+
 export type PrReviewFileNodeShape = TLBaseShape<
   typeof PR_REVIEW_FILE_NODE_SHAPE_TYPE,
   PrReviewFileNodeShapeProps
@@ -75,11 +87,17 @@ export type PrReviewFlowLabelShape = TLBaseShape<
   PrReviewFlowLabelShapeProps
 >;
 
+export type PrReviewFlowMilestoneShape = TLBaseShape<
+  typeof PR_REVIEW_FLOW_MILESTONE_SHAPE_TYPE,
+  PrReviewFlowMilestoneShapeProps
+>;
+
 declare module "@tldraw/tlschema" {
   interface TLGlobalShapePropsMap {
     [PR_REVIEW_FILE_NODE_SHAPE_TYPE]: PrReviewFileNodeShapeProps;
     [PR_REVIEW_FLOW_EDGE_SHAPE_TYPE]: PrReviewFlowEdgeShapeProps;
     [PR_REVIEW_FLOW_LABEL_SHAPE_TYPE]: PrReviewFlowLabelShapeProps;
+    [PR_REVIEW_FLOW_MILESTONE_SHAPE_TYPE]: PrReviewFlowMilestoneShapeProps;
   }
 }
 
@@ -104,8 +122,33 @@ const reviewStatusClasses: Record<PrReviewFileReviewStatus, string> = {
   unknown: "border-violet-200 bg-violet-50 text-violet-700"
 };
 
+const riskLevelLabels: Record<PrReviewFileRiskLevel, string> = {
+  high: "위험 높음",
+  medium: "위험 중간",
+  low: "위험 낮음",
+  unknown: "위험 미확인"
+};
+
+const riskNodeClasses: Record<PrReviewFileRiskLevel, string> = {
+  high: "border-rose-300 bg-rose-50/95 shadow-rose-100",
+  medium: "border-amber-300 bg-amber-50/95 shadow-amber-100",
+  low: "border-emerald-300 bg-emerald-50/95 shadow-emerald-100",
+  unknown: "border-slate-200 bg-white shadow-slate-100"
+};
+
+const riskBadgeClasses: Record<PrReviewFileRiskLevel, string> = {
+  high: "border-rose-200 bg-white text-rose-700",
+  medium: "border-amber-200 bg-white text-amber-700",
+  low: "border-emerald-200 bg-white text-emerald-700",
+  unknown: "border-slate-200 bg-white text-slate-600"
+};
+
 function getEdgePathData(shape: PrReviewFlowEdgeShape) {
   const { startX, startY, endX, endY } = shape.props;
+  if (startX === endX || startY === endY) {
+    return `M ${startX} ${startY} L ${endX} ${endY}`;
+  }
+
   const midX = startX + (endX - startX) / 2;
 
   return `M ${startX} ${startY} L ${midX} ${startY} L ${midX} ${endY} L ${endX} ${endY}`;
@@ -125,12 +168,8 @@ function PrReviewFileNode({ shape }: { shape: PrReviewFileNodeShape }) {
     >
       <article
         className={cn(
-          "flex h-full w-full flex-col justify-between rounded-lg border-2 bg-white px-4 py-3 shadow-sm",
-          shape.props.reviewStatus === "discussion_needed"
-            ? "border-amber-300"
-            : shape.props.reviewStatus === "approved"
-              ? "border-emerald-300"
-              : "border-blue-200"
+          "flex h-full w-full flex-col justify-between rounded-md border-2 px-4 py-3 shadow-sm",
+          riskNodeClasses[shape.props.riskLevel]
         )}
       >
         <div className="flex min-w-0 items-start gap-3">
@@ -149,6 +188,14 @@ function PrReviewFileNode({ shape }: { shape: PrReviewFileNodeShape }) {
         <div className="flex min-w-0 items-center justify-between gap-2 text-xs">
           <span className="truncate font-medium text-slate-600">
             {shape.props.roleSummary || fileStatusLabels[shape.props.fileStatus]}
+          </span>
+          <span
+            className={cn(
+              "shrink-0 rounded-full border px-2 py-0.5 font-semibold",
+              riskBadgeClasses[shape.props.riskLevel]
+            )}
+          >
+            {riskLevelLabels[shape.props.riskLevel]}
           </span>
           <span
             className={cn(
@@ -180,12 +227,12 @@ function PrReviewFlowEdge({ shape }: { shape: PrReviewFlowEdgeShape }) {
       <path
         d={path}
         fill="none"
-        stroke="rgba(71, 85, 105, 0.78)"
+        stroke="rgba(37, 99, 235, 0.68)"
         strokeLinecap="round"
         strokeLinejoin="round"
-        strokeWidth="2.25"
+        strokeWidth="3"
       />
-      <polygon fill="rgba(71, 85, 105, 0.78)" points={arrowPoints} />
+      <polygon fill="rgba(37, 99, 235, 0.72)" points={arrowPoints} />
     </SVGContainer>
   );
 }
@@ -210,6 +257,35 @@ function PrReviewFlowLabel({ shape }: { shape: PrReviewFlowLabelShape }) {
   );
 }
 
+function PrReviewFlowMilestone({
+  shape
+}: {
+  shape: PrReviewFlowMilestoneShape;
+}) {
+  return (
+    <HTMLContainer
+      className="overflow-visible"
+      style={{ width: shape.props.w, height: shape.props.h }}
+    >
+      <div
+        className={cn(
+          "flex h-full w-full flex-col items-center justify-center rounded-full border-2 px-5 text-center shadow-sm",
+          shape.props.kind === "start"
+            ? "border-blue-300 bg-blue-50 text-blue-950"
+            : "border-slate-300 bg-white text-slate-950"
+        )}
+      >
+        <p className="text-sm font-semibold leading-5">{shape.props.label}</p>
+        {shape.props.description ? (
+          <p className="mt-0.5 text-xs leading-4 text-slate-500">
+            {shape.props.description}
+          </p>
+        ) : null}
+      </div>
+    </HTMLContainer>
+  );
+}
+
 export class PrReviewFileNodeShapeUtil extends ShapeUtil<PrReviewFileNodeShape> {
   static override type = PR_REVIEW_FILE_NODE_SHAPE_TYPE;
 
@@ -225,6 +301,7 @@ export class PrReviewFileNodeShapeUtil extends ShapeUtil<PrReviewFileNodeShape> 
     filePath: T.string,
     fileStatus: T.literalEnum("added", "modified", "deleted", "renamed"),
     roleSummary: T.nullable(T.string),
+    riskLevel: T.literalEnum("high", "medium", "low", "unknown"),
     reviewStatus: T.literalEnum(
       "not_reviewed",
       "approved",
@@ -254,6 +331,7 @@ export class PrReviewFileNodeShapeUtil extends ShapeUtil<PrReviewFileNodeShape> 
       filePath: "",
       fileStatus: "modified",
       roleSummary: null,
+      riskLevel: "unknown",
       reviewStatus: "not_reviewed"
     };
   }
@@ -327,6 +405,12 @@ export class PrReviewFlowEdgeShapeUtil extends ShapeUtil<PrReviewFlowEdgeShape> 
 
   override getGeometry(shape: PrReviewFlowEdgeShape) {
     const { startX, startY, endX, endY } = shape.props;
+    if (startX === endX || startY === endY) {
+      return new Polyline2d({
+        points: [new Vec(startX, startY), new Vec(endX, endY)]
+      });
+    }
+
     const midX = startX + (endX - startX) / 2;
 
     return new Polyline2d({
@@ -345,6 +429,57 @@ export class PrReviewFlowEdgeShapeUtil extends ShapeUtil<PrReviewFlowEdgeShape> 
 
   override getIndicatorPath(shape: PrReviewFlowEdgeShape) {
     const path = new Path2D(getEdgePathData(shape));
+
+    return path;
+  }
+}
+
+export class PrReviewFlowMilestoneShapeUtil extends ShapeUtil<PrReviewFlowMilestoneShape> {
+  static override type = PR_REVIEW_FLOW_MILESTONE_SHAPE_TYPE;
+
+  static override props = {
+    w: T.number,
+    h: T.number,
+    flowId: T.string,
+    kind: T.literalEnum("start", "end"),
+    label: T.string,
+    description: T.nullable(T.string)
+  };
+
+  override canBind() {
+    return false;
+  }
+
+  override canResize() {
+    return false;
+  }
+
+  override getDefaultProps(): PrReviewFlowMilestoneShape["props"] {
+    return {
+      w: 176,
+      h: 72,
+      flowId: "",
+      kind: "start",
+      label: "",
+      description: null
+    };
+  }
+
+  override getGeometry(shape: PrReviewFlowMilestoneShape) {
+    return new Rectangle2d({
+      width: shape.props.w,
+      height: shape.props.h,
+      isFilled: true
+    });
+  }
+
+  override component(shape: PrReviewFlowMilestoneShape) {
+    return <PrReviewFlowMilestone shape={shape} />;
+  }
+
+  override getIndicatorPath(shape: PrReviewFlowMilestoneShape) {
+    const path = new Path2D();
+    path.roundRect(0, 0, shape.props.w, shape.props.h, shape.props.h / 2);
 
     return path;
   }

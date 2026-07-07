@@ -18,6 +18,7 @@ import {
 import { PrReviewGithubDependencyService } from "./pr-review-github-dependency.service";
 import type {
   PrReviewConflictStatus,
+  PrReviewFileRiskLevel,
   PrReviewFileReviewStatus,
   PrReviewFileStatus,
   PrReviewGithubChangedFile,
@@ -89,6 +90,7 @@ interface ReviewFlowFileRow extends QueryResultRow {
   file_name: string;
   file_status: PrReviewFileStatus;
   file_role: string | null;
+  risk_level: PrReviewFileRiskLevel;
   current_status: PrReviewFileReviewStatus;
 }
 
@@ -121,6 +123,7 @@ interface ReviewFileDetailRow extends QueryResultRow {
   is_large_diff: boolean;
   github_file_url: string | null;
   file_role: string | null;
+  risk_level: PrReviewFileRiskLevel;
   change_reason: string | null;
   change_summary: string | null;
   review_points: unknown;
@@ -297,6 +300,7 @@ export interface PrReviewFileNodeDataPayload {
   fileName: string;
   filePath: string;
   roleSummary: string | null;
+  riskLevel: PrReviewFileRiskLevel;
   reviewStatus: PrReviewFileReviewStatus;
 }
 
@@ -310,6 +314,7 @@ export interface PrReviewFlowFilePayload {
   fileName: string;
   fileStatus: PrReviewFileStatus;
   fileRole: string | null;
+  riskLevel: PrReviewFileRiskLevel;
   currentStatus: PrReviewFileReviewStatus;
   fileNodeData: PrReviewFileNodeDataPayload;
 }
@@ -384,6 +389,7 @@ export interface PrReviewFilePayload {
   isLargeDiff: boolean;
   githubFileUrl: string | null;
   fileRole: string | null;
+  riskLevel: PrReviewFileRiskLevel;
   changeReason: string | null;
   changeSummary: string | null;
   reviewPoints: string[];
@@ -1271,6 +1277,7 @@ export class PrReviewService {
           review_file.file_name,
           review_file.file_status,
           review_file.file_role,
+          review_file.risk_level,
           review_file.current_status
         FROM review_flow_files AS flow_file
         JOIN review_flows AS flow
@@ -1307,6 +1314,7 @@ export class PrReviewService {
           review_file.file_name,
           review_file.file_status,
           review_file.file_role,
+          review_file.risk_level,
           review_file.current_status
         FROM review_flow_files AS flow_file
         JOIN review_flows AS flow
@@ -1351,6 +1359,7 @@ export class PrReviewService {
           review_file.is_large_diff,
           review_file.github_file_url,
           review_file.file_role,
+          review_file.risk_level,
           review_file.change_reason,
           review_file.change_summary,
           review_file.review_points,
@@ -1924,6 +1933,7 @@ export class PrReviewService {
           is_large_diff,
           github_file_url,
           file_role,
+          risk_level,
           change_reason,
           change_summary,
           review_points
@@ -1942,7 +1952,8 @@ export class PrReviewService {
           $11,
           $12,
           $13,
-          $14::jsonb
+          $14,
+          $15::jsonb
         )
         RETURNING id
       `,
@@ -1958,6 +1969,7 @@ export class PrReviewService {
         file.isLargeDiff,
         file.githubFileUrl,
         metadata.fileRole,
+        metadata.riskLevel,
         metadata.changeReason,
         metadata.changeSummary,
         JSON.stringify(metadata.reviewPoints)
@@ -2138,6 +2150,15 @@ export class PrReviewService {
     return value === "not_reviewed" || this.isReviewDecisionStatus(value);
   }
 
+  private normalizeRiskLevel(value: unknown): PrReviewFileRiskLevel {
+    return value === "high" ||
+      value === "medium" ||
+      value === "low" ||
+      value === "unknown"
+      ? value
+      : "unknown";
+  }
+
   private isReviewSubmitType(value: string): value is PrReviewGithubReviewSubmitType {
     return REVIEW_SUBMIT_TYPES.includes(value as PrReviewGithubReviewSubmitType);
   }
@@ -2217,6 +2238,7 @@ export class PrReviewService {
 
   private mapFlowFile(file: ReviewFlowFileRow): PrReviewFlowFilePayload {
     const workflowOrder = Number(file.workflow_order);
+    const riskLevel = this.normalizeRiskLevel(file.risk_level);
 
     return {
       id: file.id,
@@ -2228,6 +2250,7 @@ export class PrReviewService {
       fileName: file.file_name,
       fileStatus: file.file_status,
       fileRole: file.file_role,
+      riskLevel,
       currentStatus: file.current_status,
       fileNodeData: {
         reviewFileId: file.review_file_id,
@@ -2238,6 +2261,7 @@ export class PrReviewService {
         fileName: file.file_name,
         filePath: file.file_path,
         roleSummary: file.file_role,
+        riskLevel,
         reviewStatus: file.current_status
       }
     };
@@ -2260,6 +2284,7 @@ export class PrReviewService {
       isLargeDiff: file.is_large_diff,
       githubFileUrl: file.github_file_url,
       fileRole: file.file_role,
+      riskLevel: this.normalizeRiskLevel(file.risk_level),
       changeReason: file.change_reason,
       changeSummary: file.change_summary,
       reviewPoints: this.toStringArray(file.review_points),

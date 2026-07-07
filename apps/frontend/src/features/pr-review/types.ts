@@ -94,6 +94,8 @@ export type PrReviewFileReviewStatus =
   | "discussion_needed"
   | "unknown";
 
+export type PrReviewFileRiskLevel = "high" | "medium" | "low" | "unknown";
+
 export type PrReviewFileDecisionStatus = Exclude<
   PrReviewFileReviewStatus,
   "not_reviewed"
@@ -171,6 +173,7 @@ export type PrReviewFileNodeData = {
   fileName: string;
   filePath: string;
   roleSummary: string | null;
+  riskLevel: PrReviewFileRiskLevel;
   reviewStatus: PrReviewFileReviewStatus;
 };
 
@@ -184,6 +187,7 @@ export type PrReviewFlowFile = {
   fileName: string;
   fileStatus: PrReviewFileStatus;
   fileRole: string | null;
+  riskLevel: PrReviewFileRiskLevel;
   currentStatus: PrReviewFileReviewStatus;
   fileNodeData: PrReviewFileNodeData;
 };
@@ -238,6 +242,7 @@ export type PrReviewFile = {
   isLargeDiff: boolean;
   githubFileUrl: string | null;
   fileRole: string | null;
+  riskLevel: PrReviewFileRiskLevel;
   changeReason: string | null;
   changeSummary: string | null;
   reviewPoints: string[];

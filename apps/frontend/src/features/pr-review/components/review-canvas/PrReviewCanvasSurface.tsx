@@ -21,10 +21,12 @@ import {
   PR_REVIEW_FILE_NODE_SHAPE_TYPE,
   PR_REVIEW_FLOW_EDGE_SHAPE_TYPE,
   PR_REVIEW_FLOW_LABEL_SHAPE_TYPE,
+  PR_REVIEW_FLOW_MILESTONE_SHAPE_TYPE,
   isPrReviewFileNodeShape,
   type PrReviewFileNodeShape,
   type PrReviewFlowEdgeShape,
-  type PrReviewFlowLabelShape
+  type PrReviewFlowLabelShape,
+  type PrReviewFlowMilestoneShape
 } from "@/features/pr-review/components/review-canvas/PrReviewFileNodeShapeUtil";
 import { prReviewShapeUtils } from "@/features/pr-review/components/review-canvas/pr-review-shape-utils";
 
@@ -44,17 +46,37 @@ type NodePlacement = {
   h: number;
 };
 
-const NODE_WIDTH = 268;
-const NODE_HEIGHT = 96;
-const FLOW_LABEL_WIDTH = 640;
-const FLOW_LABEL_HEIGHT = 128;
+type ReviewStage = "entry" | "logic" | "data" | "verification" | "support";
+
+type ReviewLayer = {
+  id: string;
+  stage: ReviewStage;
+  files: PrReviewFlowFile[];
+};
+
+type Connector = {
+  id: string;
+  flowId: string;
+  fromId: string;
+  toId: string;
+  reason: string;
+};
+
+const START_NODE_ID = "__start";
+const END_NODE_ID = "__end";
+const NODE_WIDTH = 292;
+const NODE_HEIGHT = 104;
+const MILESTONE_WIDTH = 176;
+const MILESTONE_HEIGHT = 72;
+const FLOW_LABEL_MIN_WIDTH = 720;
+const FLOW_LABEL_HEIGHT = 112;
 const CANVAS_PADDING_X = 72;
 const CANVAS_PADDING_Y = 56;
-const COLUMN_GAP = 72;
-const ROW_GAP = 104;
-const FLOW_HEADER_GAP = 40;
-const FLOW_GAP = 120;
-const MAX_COLUMNS = 3;
+const COLUMN_GAP = 132;
+const NODE_ROW_GAP = 54;
+const FLOW_HEADER_GAP = 56;
+const FLOW_GAP = 148;
+const MAX_FILES_PER_LAYER = 3;
 
 const prReviewTldrawComponents = {
   Background: PrReviewCanvasBackground
@@ -63,7 +85,8 @@ const prReviewTldrawComponents = {
 const prReviewShapeTypes = new Set<string>([
   PR_REVIEW_FILE_NODE_SHAPE_TYPE,
   PR_REVIEW_FLOW_EDGE_SHAPE_TYPE,
-  PR_REVIEW_FLOW_LABEL_SHAPE_TYPE
+  PR_REVIEW_FLOW_LABEL_SHAPE_TYPE,
+  PR_REVIEW_FLOW_MILESTONE_SHAPE_TYPE
 ]);
 
 function shapeIdSuffix(value: string) {
@@ -87,27 +110,109 @@ function sortFlowFiles(files: PrReviewCanvasFlow["files"]) {
   );
 }
 
-function getColumnCount(fileCount: number) {
-  if (fileCount <= 1) {
-    return 1;
+function inferReviewStage(file: PrReviewFlowFile): ReviewStage {
+  const filePath = file.filePath.toLowerCase().replace(/\\/g, "/");
+  const role = (file.fileRole ?? file.fileNodeData.roleSummary ?? "").toLowerCase();
+  const reviewText = `${filePath} ${role}`;
+
+  if (
+    filePath.includes("/test") ||
+    filePath.includes("/__tests__/") ||
+    filePath.includes(".test.") ||
+    filePath.includes(".spec.")
+  ) {
+    return "verification";
   }
 
-  if (fileCount <= 4) {
-    return 2;
+  if (
+    filePath.endsWith(".md") ||
+    filePath.includes("/docs/") ||
+    filePath.endsWith("package-lock.json") ||
+    filePath.endsWith("pnpm-lock.yaml") ||
+    filePath.endsWith("yarn.lock") ||
+    filePath.endsWith(".config.js") ||
+    filePath.endsWith(".config.ts") ||
+    filePath.includes("/scripts/")
+  ) {
+    return "support";
   }
 
-  return MAX_COLUMNS;
+  if (
+    filePath.includes("/db/") ||
+    filePath.includes("/migrations/") ||
+    filePath.includes("/dto") ||
+    filePath.includes("/api/") ||
+    filePath.includes("/queries/") ||
+    filePath.includes("/repositories/") ||
+    filePath.includes("/types/") ||
+    reviewText.includes("dto") ||
+    reviewText.includes("api") ||
+    reviewText.includes("데이터")
+  ) {
+    return "data";
+  }
+
+  if (
+    filePath.includes("/page.") ||
+    filePath.includes("/components/") ||
+    filePath.includes("/app/") ||
+    filePath.endsWith(".css") ||
+    reviewText.includes("화면") ||
+    reviewText.includes("ui") ||
+    reviewText.includes("프론트")
+  ) {
+    return "entry";
+  }
+
+  return "logic";
 }
 
-function getFlowHeight(fileCount: number, columnCount: number) {
-  const rowCount = Math.max(1, Math.ceil(fileCount / columnCount));
+function buildReviewLayers(files: PrReviewFlowFile[]): ReviewLayer[] {
+  const layers: ReviewLayer[] = [];
 
+  for (const file of files) {
+    const stage = inferReviewStage(file);
+    const lastLayer = layers[layers.length - 1];
+
+    if (lastLayer?.stage === stage && lastLayer.files.length < MAX_FILES_PER_LAYER) {
+      lastLayer.files.push(file);
+      continue;
+    }
+
+    layers.push({
+      id: `${stage}-${layers.length + 1}`,
+      stage,
+      files: [file]
+    });
+  }
+
+  return layers;
+}
+
+function getLayerHeight(fileCount: number) {
   return (
-    FLOW_LABEL_HEIGHT +
-    FLOW_HEADER_GAP +
-    rowCount * NODE_HEIGHT +
-    Math.max(0, rowCount - 1) * ROW_GAP
+    fileCount * NODE_HEIGHT +
+    Math.max(0, fileCount - 1) * NODE_ROW_GAP
   );
+}
+
+function getFlowContentHeight(layers: ReviewLayer[]) {
+  return Math.max(
+    MILESTONE_HEIGHT,
+    ...layers.map((layer) => getLayerHeight(layer.files.length))
+  );
+}
+
+function getFlowContentWidth(layers: ReviewLayer[]) {
+  const layerCount = layers.length;
+  const fileLayerWidth =
+    layerCount > 0 ? layerCount * NODE_WIDTH + layerCount * COLUMN_GAP : 0;
+
+  return MILESTONE_WIDTH + COLUMN_GAP + fileLayerWidth + MILESTONE_WIDTH;
+}
+
+function getPlacementKey(flowId: string, nodeId: string) {
+  return `${flowId}:${nodeId}`;
 }
 
 function createFileNodeShape(
@@ -137,6 +242,7 @@ function createFileNodeShape(
       filePath: fileNodeData.filePath,
       fileStatus: file.fileStatus,
       roleSummary: fileNodeData.roleSummary,
+      riskLevel: fileNodeData.riskLevel,
       reviewStatus: fileNodeData.reviewStatus
     }
   };
@@ -144,7 +250,8 @@ function createFileNodeShape(
 
 function createFlowLabelShape(
   flow: PrReviewCanvasFlow,
-  y: number
+  y: number,
+  width: number
 ): TLShapePartial<PrReviewFlowLabelShape> {
   return {
     id: createShapeId(`pr-review-flow-${shapeIdSuffix(flow.id)}`),
@@ -152,13 +259,38 @@ function createFlowLabelShape(
     x: CANVAS_PADDING_X,
     y,
     props: {
-      w: FLOW_LABEL_WIDTH,
+      w: width,
       h: FLOW_LABEL_HEIGHT,
       flowId: flow.id,
       title: flow.title,
       description: flow.description,
       sortOrder: flow.sortOrder,
       fileCount: flow.fileCount
+    }
+  };
+}
+
+function createMilestoneShape(
+  flow: PrReviewCanvasFlow,
+  placement: NodePlacement,
+  kind: "start" | "end"
+): TLShapePartial<PrReviewFlowMilestoneShape> {
+  return {
+    id: createShapeId(
+      `pr-review-${kind}-${shapeIdSuffix(flow.id)}-${shapeIdSuffix(
+        placement.reviewFileId
+      )}`
+    ),
+    type: PR_REVIEW_FLOW_MILESTONE_SHAPE_TYPE,
+    x: placement.x,
+    y: placement.y,
+    props: {
+      w: placement.w,
+      h: placement.h,
+      flowId: flow.id,
+      kind,
+      label: kind === "start" ? "PR 시작" : "Review 제출",
+      description: kind === "start" ? "리뷰 흐름 진입" : "최종 판단"
     }
   };
 }
@@ -188,14 +320,14 @@ function getAnchors(from: NodePlacement, to: NodePlacement) {
   };
 }
 
-function createEdgeShape(
-  edge: PrReviewCanvas["edges"][number],
-  placementByFlowAndFile: Map<string, NodePlacement>
+function createConnectorShape(
+  connector: Connector,
+  placementByKey: Map<string, NodePlacement>
 ): TLShapePartial<PrReviewFlowEdgeShape> | null {
-  const from = placementByFlowAndFile.get(
-    `${edge.flowId}:${edge.fromReviewFileId}`
+  const from = placementByKey.get(
+    getPlacementKey(connector.flowId, connector.fromId)
   );
-  const to = placementByFlowAndFile.get(`${edge.flowId}:${edge.toReviewFileId}`);
+  const to = placementByKey.get(getPlacementKey(connector.flowId, connector.toId));
 
   if (!from || !to) {
     return null;
@@ -209,9 +341,9 @@ function createEdgeShape(
 
   return {
     id: createShapeId(
-      `pr-review-edge-${shapeIdSuffix(edge.flowId)}-${shapeIdSuffix(
-        edge.fromReviewFileId
-      )}-${shapeIdSuffix(edge.toReviewFileId)}`
+      `pr-review-edge-${shapeIdSuffix(connector.flowId)}-${shapeIdSuffix(
+        connector.id
+      )}`
     ),
     type: PR_REVIEW_FLOW_EDGE_SHAPE_TYPE,
     x,
@@ -223,52 +355,151 @@ function createEdgeShape(
       startY: anchors.startY - y,
       endX: anchors.endX - x,
       endY: anchors.endY - y,
-      fromReviewFileId: edge.fromReviewFileId,
-      toReviewFileId: edge.toReviewFileId,
-      flowId: edge.flowId,
-      reason: edge.reason
+      fromReviewFileId: connector.fromId,
+      toReviewFileId: connector.toId,
+      flowId: connector.flowId,
+      reason: connector.reason
     }
   };
 }
 
+function buildFlowConnectors(
+  flow: PrReviewCanvasFlow,
+  files: PrReviewFlowFile[],
+  canvasEdges: PrReviewCanvas["edges"]
+): Connector[] {
+  if (files.length === 0) {
+    return [
+      {
+        id: "start-end",
+        flowId: flow.id,
+        fromId: START_NODE_ID,
+        toId: END_NODE_ID,
+        reason: "리뷰 흐름"
+      }
+    ];
+  }
+
+  const connectors: Connector[] = [
+    {
+      id: `start-${files[0].reviewFileId}`,
+      flowId: flow.id,
+      fromId: START_NODE_ID,
+      toId: files[0].reviewFileId,
+      reason: "리뷰 시작"
+    }
+  ];
+  const semanticEdges = canvasEdges.filter((edge) => edge.flowId === flow.id);
+
+  if (semanticEdges.length > 0) {
+    connectors.push(
+      ...semanticEdges.map((edge) => ({
+        id: `${edge.fromReviewFileId}-${edge.toReviewFileId}`,
+        flowId: flow.id,
+        fromId: edge.fromReviewFileId,
+        toId: edge.toReviewFileId,
+        reason: edge.reason
+      }))
+    );
+  } else {
+    for (let index = 0; index < files.length - 1; index += 1) {
+      connectors.push({
+        id: `${files[index].reviewFileId}-${files[index + 1].reviewFileId}`,
+        flowId: flow.id,
+        fromId: files[index].reviewFileId,
+        toId: files[index + 1].reviewFileId,
+        reason: "리뷰 순서"
+      });
+    }
+  }
+
+  connectors.push({
+    id: `${files[files.length - 1].reviewFileId}-end`,
+    flowId: flow.id,
+    fromId: files[files.length - 1].reviewFileId,
+    toId: END_NODE_ID,
+    reason: "최종 판단"
+  });
+
+  return connectors;
+}
+
 function buildPrReviewCanvasShapes(canvas: PrReviewCanvas): TLShapePartial[] {
   const shapes: TLShapePartial[] = [];
-  const placementByFlowAndFile = new Map<string, NodePlacement>();
+  const placementByKey = new Map<string, NodePlacement>();
+  const connectors: Connector[] = [];
   let nextFlowY = CANVAS_PADDING_Y;
 
   for (const flow of sortFlows(canvas.flows)) {
     const files = sortFlowFiles(flow.files);
-    const columnCount = getColumnCount(files.length);
-    const flowHeight = getFlowHeight(files.length, columnCount);
+    const layers = buildReviewLayers(files);
+    const contentHeight = getFlowContentHeight(layers);
+    const contentWidth = getFlowContentWidth(layers);
+    const flowWidth = Math.max(FLOW_LABEL_MIN_WIDTH, contentWidth);
+    const contentTop = nextFlowY + FLOW_LABEL_HEIGHT + FLOW_HEADER_GAP;
+    const contentCenterY = contentTop + contentHeight / 2;
 
-    shapes.push(createFlowLabelShape(flow, nextFlowY));
+    shapes.push(createFlowLabelShape(flow, nextFlowY, flowWidth));
 
-    files.forEach((file, index) => {
-      const row = Math.floor(index / columnCount);
-      const column = index % columnCount;
-      const rowOffset = row % 2 === 1 ? 32 : 0;
-      const placement: NodePlacement = {
-        flowId: flow.id,
-        reviewFileId: file.reviewFileId,
-        x: CANVAS_PADDING_X + rowOffset + column * (NODE_WIDTH + COLUMN_GAP),
-        y:
-          nextFlowY +
-          FLOW_LABEL_HEIGHT +
-          FLOW_HEADER_GAP +
-          row * (NODE_HEIGHT + ROW_GAP),
-        w: NODE_WIDTH,
-        h: NODE_HEIGHT
-      };
+    const startPlacement: NodePlacement = {
+      flowId: flow.id,
+      reviewFileId: START_NODE_ID,
+      x: CANVAS_PADDING_X,
+      y: contentCenterY - MILESTONE_HEIGHT / 2,
+      w: MILESTONE_WIDTH,
+      h: MILESTONE_HEIGHT
+    };
+    const firstLayerX = startPlacement.x + MILESTONE_WIDTH + COLUMN_GAP;
 
-      placementByFlowAndFile.set(`${flow.id}:${file.reviewFileId}`, placement);
-      shapes.push(createFileNodeShape(file, placement));
+    placementByKey.set(getPlacementKey(flow.id, START_NODE_ID), startPlacement);
+    shapes.push(createMilestoneShape(flow, startPlacement, "start"));
+
+    layers.forEach((layer, layerIndex) => {
+      const layerHeight = getLayerHeight(layer.files.length);
+      const layerTop = contentTop + (contentHeight - layerHeight) / 2;
+      const layerX = firstLayerX + layerIndex * (NODE_WIDTH + COLUMN_GAP);
+
+      layer.files.forEach((file, fileIndex) => {
+        const placement: NodePlacement = {
+          flowId: flow.id,
+          reviewFileId: file.reviewFileId,
+          x: layerX,
+          y: layerTop + fileIndex * (NODE_HEIGHT + NODE_ROW_GAP),
+          w: NODE_WIDTH,
+          h: NODE_HEIGHT
+        };
+
+        placementByKey.set(
+          getPlacementKey(flow.id, file.reviewFileId),
+          placement
+        );
+        shapes.push(createFileNodeShape(file, placement));
+      });
     });
 
-    nextFlowY += flowHeight + FLOW_GAP;
+    const endX =
+      layers.length > 0
+        ? firstLayerX + layers.length * (NODE_WIDTH + COLUMN_GAP)
+        : firstLayerX;
+    const endPlacement: NodePlacement = {
+      flowId: flow.id,
+      reviewFileId: END_NODE_ID,
+      x: endX,
+      y: contentCenterY - MILESTONE_HEIGHT / 2,
+      w: MILESTONE_WIDTH,
+      h: MILESTONE_HEIGHT
+    };
+
+    placementByKey.set(getPlacementKey(flow.id, END_NODE_ID), endPlacement);
+    shapes.push(createMilestoneShape(flow, endPlacement, "end"));
+    connectors.push(...buildFlowConnectors(flow, files, canvas.edges));
+
+    nextFlowY +=
+      FLOW_LABEL_HEIGHT + FLOW_HEADER_GAP + contentHeight + FLOW_GAP;
   }
 
-  const edgeShapes = canvas.edges
-    .map((edge) => createEdgeShape(edge, placementByFlowAndFile))
+  const edgeShapes = connectors
+    .map((connector) => createConnectorShape(connector, placementByKey))
     .filter((shape): shape is TLShapePartial<PrReviewFlowEdgeShape> =>
       Boolean(shape)
     );

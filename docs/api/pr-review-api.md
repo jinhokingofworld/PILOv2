@@ -44,6 +44,7 @@ comment, PR merge/close, ProjectV2 write는 이 문서의 범위가 아니다.
 | --- | --- |
 | `prReviewSession.status` | `analyzing`, `reviewing`, `ready_to_submit`, `submitted`, `failed`, `archived` |
 | `reviewFile.currentStatus` | `not_reviewed`, `approved`, `discussion_needed`, `unknown` |
+| `reviewFile.riskLevel` | `high`, `medium`, `low`, `unknown` |
 | `fileReviewDecision.status` | `approved`, `discussion_needed`, `unknown` |
 | `reviewSubmission.submitType` | `COMMENT`, `APPROVE`, `REQUEST_CHANGES` |
 | `reviewSubmission.githubSubmitStatus` | `not_submitted`, `submitting`, `submitted`, `failed` |
@@ -242,6 +243,7 @@ GitHub Review 제출 가능 여부를 막는 hard guard가 아니다. `not_revie
           "fileName": "page.tsx",
           "fileStatus": "modified",
           "fileRole": "프론트엔드",
+          "riskLevel": "medium",
           "workflowOrder": 1,
           "currentStatus": "not_reviewed",
           "fileNodeData": {
@@ -253,6 +255,7 @@ GitHub Review 제출 가능 여부를 막는 hard guard가 아니다. `not_revie
             "fileName": "page.tsx",
             "filePath": "apps/frontend/page.tsx",
             "roleSummary": "프론트엔드",
+            "riskLevel": "medium",
             "reviewStatus": "not_reviewed"
           }
         }
@@ -313,6 +316,7 @@ PR Review schema에는 `canvas_id`, `canvas_shape_id`,
         "fileName": "VoiceMeetingPage.tsx",
         "fileStatus": "modified",
         "fileRole": "프론트엔드",
+        "riskLevel": "medium",
         "currentStatus": "not_reviewed",
         "fileNodeData": {
           "reviewFileId": "review_file_uuid",
@@ -323,6 +327,7 @@ PR Review schema에는 `canvas_id`, `canvas_shape_id`,
           "fileName": "VoiceMeetingPage.tsx",
           "filePath": "apps/frontend/VoiceMeetingPage.tsx",
           "roleSummary": "프론트엔드",
+          "riskLevel": "medium",
           "reviewStatus": "not_reviewed"
         }
       }
@@ -349,6 +354,7 @@ PR Review schema에는 `canvas_id`, `canvas_shape_id`,
     "isLargeDiff": false,
     "githubFileUrl": "https://github.com/my-team/pilo/pull/24/files#diff-abc",
     "fileRole": "프론트엔드",
+    "riskLevel": "medium",
     "changeReason": "수정된 파일이다.",
     "changeSummary": "84줄 추가, 12줄 삭제",
     "reviewPoints": ["Workflow order 1번으로 확인한다."],
