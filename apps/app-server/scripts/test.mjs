@@ -80,7 +80,7 @@ const canvasShapeOperationMigration = await readSource(
   "../../../db/migrations/013_canvas_shape_operations.sql"
 );
 const canvasShapeParentMigration = await readSource(
-  "../../../db/migrations/015_canvas_shape_parent_relation.sql"
+  "../../../db/migrations/016_canvas_shape_parent_relation.sql"
 );
 const devTerraformMain = await readSource("../../../infra/envs/dev/main.tf");
 const terraformSecretsModule = await readSource(
