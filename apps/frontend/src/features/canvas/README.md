@@ -32,6 +32,14 @@ WorkspaceCanvas -> PiloCanvasRuntime -> PiloTldrawCanvas -> TldrawSurface
 - `interactions/`: placement, smart guide, selection stacking
 - `assets/`: image/video asset 생성과 복원
 
+`api/` 하위 폴더는 Canvas API client 경계를 책임별로 나눈다.
+
+- `canvas-client.ts`: 외부 import 경로를 유지하는 얇은 entrypoint와 mode 선택
+- `canvas-api-client.ts`: bearer token, baseUrl, 실제 Canvas API request/response 처리
+- `canvas-mock-client.ts`: local/mock mode의 board, shape, view-setting 흐름
+- `canvas-normalizers.ts`: API/mock 응답을 Canvas runtime 입력 형태로 정규화
+- `canvas-types.ts`: API client와 mock client가 공유하는 타입
+
 `TldrawSurface`는 Canvas API/DB 저장 흐름을 소유하지 않는다. PR Review 같은 다른
 도메인은 필요한 경우 이 surface만 가져가고, 자기 도메인 payload와 source of
 truth를 유지해야 한다.

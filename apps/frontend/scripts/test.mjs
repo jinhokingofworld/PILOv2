@@ -15,8 +15,24 @@ const githubApiClient = await readFile(
   new URL("../src/features/github-integration/api/client.ts", import.meta.url),
   "utf8"
 );
-const canvasApiClient = await readFile(
+const canvasClientFacade = await readFile(
   new URL("../src/features/canvas/api/canvas-client.ts", import.meta.url),
+  "utf8"
+);
+const canvasApiClient = await readFile(
+  new URL("../src/features/canvas/api/canvas-api-client.ts", import.meta.url),
+  "utf8"
+);
+const canvasMockClient = await readFile(
+  new URL("../src/features/canvas/api/canvas-mock-client.ts", import.meta.url),
+  "utf8"
+);
+const canvasNormalizers = await readFile(
+  new URL("../src/features/canvas/api/canvas-normalizers.ts", import.meta.url),
+  "utf8"
+);
+const canvasTypes = await readFile(
+  new URL("../src/features/canvas/api/canvas-types.ts", import.meta.url),
   "utf8"
 );
 const authApiClient = await readFile(
@@ -217,7 +233,12 @@ assert.match(appSidebar, /src=\{displayUser\.avatarUrl \|\| undefined\}/);
 assert.match(appSidebar, /group-data-\[collapsible=icon\]:justify-center/);
 assert.match(appSidebar, /group-data-\[collapsible=icon\]:hidden/);
 assert.doesNotMatch(appSidebar, /\{item\.description\}/);
-assert.match(canvasApiClient, /const DEFAULT_CANVAS_MODE = "api"/);
+assert.match(canvasClientFacade, /const DEFAULT_CANVAS_MODE = "api"/);
+assert.match(canvasClientFacade, /createCanvasApiClient\(options\)/);
+assert.match(canvasClientFacade, /createMockCanvasClient\(\)/);
+assert.match(canvasClientFacade, /resolveCanvasClientMode/);
+assert.doesNotMatch(canvasClientFacade, /readCanvasStorage/);
+assert.doesNotMatch(canvasClientFacade, /requestCanvasJson/);
 assert.match(canvasApiClient, /\/api\/v1/);
 assert.match(canvasApiClient, /NEXT_PUBLIC_PILO_APP_SERVER_URL/);
 assert.doesNotMatch(canvasApiClient, new RegExp(deprecatedCanvasTokenEnv));
@@ -228,7 +249,7 @@ assert.match(canvasApiClient, /\/workspaces\/\$\{encodeURIComponent\(workspaceId
 assert.match(canvasApiClient, /\/shapes`/);
 assert.match(canvasApiClient, /listShapesInViewport/);
 assert.match(canvasApiClient, /getShapeDetail/);
-assert.match(canvasApiClient, /signal\?: AbortSignal/);
+assert.match(canvasTypes, /signal\?: AbortSignal/);
 assert.match(canvasApiClient, /enterCanvas/);
 assert.match(canvasApiClient, /leaveCanvas/);
 assert.match(canvasApiClient, /syncShapesBatch/);
@@ -239,6 +260,18 @@ assert.match(canvasApiClient, /URLSearchParams/);
 assert.match(canvasApiClient, /method: "POST"/);
 assert.match(canvasApiClient, /method: "PATCH"/);
 assert.match(canvasApiClient, /method: "DELETE"/);
+assert.match(canvasMockClient, /readCanvasStorage/);
+assert.match(canvasMockClient, /writeCanvasStorage/);
+assert.match(canvasMockClient, /createMockCanvasClient/);
+assert.match(canvasMockClient, /mock-board-list/);
+assert.match(canvasMockClient, /mock-user/);
+assert.doesNotMatch(canvasMockClient, /Authorization: `Bearer/);
+assert.doesNotMatch(canvasMockClient, /NEXT_PUBLIC_PILO_APP_SERVER_URL/);
+assert.doesNotMatch(canvasMockClient, /requestCanvasJson/);
+assert.match(canvasNormalizers, /createMockCanvasBoardDetail/);
+assert.match(canvasNormalizers, /normalizeCanvasBoardDetail/);
+assert.match(canvasNormalizers, /unwrapCanvasApiData/);
+assert.match(canvasNormalizers, /normalizeCanvasShapes/);
 assert.match(canvasRuntime, /syncCanvasFreeformShapes/);
 assert.match(canvasRuntime, /createCanvasShapeSyncQueue/);
 assert.match(canvasRuntime, /shapeSyncQueue\.enqueue/);
