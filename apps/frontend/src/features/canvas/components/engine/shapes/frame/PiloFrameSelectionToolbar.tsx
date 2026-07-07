@@ -8,6 +8,10 @@ import {
   type PiloFramePartial,
   type PiloFrameShape,
 } from "../PiloCanvasShapeGuards";
+import {
+  getPiloChildShapeCount,
+  isPiloFrameCollapsed,
+} from "../../../../utils/canvas-collapse";
 import { normalizeBlankFrameName } from "./PiloFrameShapeUtil";
 
 const frameColorOptions: {
@@ -64,7 +68,14 @@ function updateFrame(
   editor.select(shape.id);
 }
 
-export function FrameSelectionToolbar() {
+export function FrameSelectionToolbar({
+  onFrameCollapsedChange,
+}: {
+  onFrameCollapsedChange?: (
+    frame: PiloFrameShape,
+    nextCollapsed: boolean,
+  ) => void;
+}) {
   const editor = useEditor();
   const [openMenu, setOpenMenu] = useState<"ratio" | "color" | null>(null);
   const toolbarState = useValue(
@@ -104,6 +115,10 @@ export function FrameSelectionToolbar() {
   if (!toolbarState) return null;
 
   const selectedFrame = toolbarState.frame;
+  const isCollapsed = isPiloFrameCollapsed(selectedFrame);
+  const childShapeCount = getPiloChildShapeCount(selectedFrame);
+
+  if (isCollapsed) return null;
 
   function toggleMenu(menu: "ratio" | "color") {
     setOpenMenu((currentMenu) => (currentMenu === menu ? null : menu));
@@ -133,6 +148,13 @@ export function FrameSelectionToolbar() {
     setOpenMenu(null);
     editor.toggleLock([selectedFrame.id]);
     editor.select(selectedFrame.id);
+  }
+
+  function toggleFrameCollapsed() {
+    const nextCollapsed = !isCollapsed;
+
+    setOpenMenu(null);
+    onFrameCollapsedChange?.(selectedFrame, nextCollapsed);
   }
 
   function handleToolbarPointerEvent(event: ReactPointerEvent<HTMLElement>) {
@@ -176,6 +198,18 @@ export function FrameSelectionToolbar() {
       >
         <FrameToolbarIcon type={selectedFrame.isLocked ? "unlock" : "lock"} />
       </button>
+      <button
+        type="button"
+        aria-label={isCollapsed ? "프레임 펼치기" : "프레임 접기"}
+        data-tooltip={
+          isCollapsed
+            ? `펼치기${childShapeCount ? ` · 내부 ${childShapeCount}개` : ""}`
+            : `접기${childShapeCount ? ` · 내부 ${childShapeCount}개` : ""}`
+        }
+        onClick={toggleFrameCollapsed}
+      >
+        <FrameToolbarIcon type={isCollapsed ? "expand" : "collapse"} />
+      </button>
       {openMenu === "ratio" ? (
         <div className="pilo-frame-dropdown pilo-frame-ratio-menu">
           {frameRatioPresets.map((preset) => (
@@ -217,7 +251,11 @@ export function FrameSelectionToolbar() {
   );
 }
 
-function FrameToolbarIcon({ type }: { type: "lock" | "unlock" }) {
+function FrameToolbarIcon({
+  type,
+}: {
+  type: "collapse" | "expand" | "lock" | "unlock";
+}) {
   const commonProps = {
     "aria-hidden": true,
     viewBox: "0 0 24 24",
@@ -233,6 +271,25 @@ function FrameToolbarIcon({ type }: { type: "lock" | "unlock" }) {
       <svg {...commonProps}>
         <rect x="5.5" y="10" width="13" height="10" rx="2.4" />
         <path d="M8.5 10V7.2a3.5 3.5 0 0 1 6.4-2" />
+      </svg>
+    );
+  }
+
+  if (type === "collapse") {
+    return (
+      <svg {...commonProps}>
+        <rect x="5" y="6" width="14" height="12" rx="2.5" />
+        <path d="M8.5 12h7" />
+      </svg>
+    );
+  }
+
+  if (type === "expand") {
+    return (
+      <svg {...commonProps}>
+        <rect x="5" y="6" width="14" height="12" rx="2.5" />
+        <path d="M8.5 12h7" />
+        <path d="M12 8.5v7" />
       </svg>
     );
   }

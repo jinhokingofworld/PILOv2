@@ -145,6 +145,10 @@ const canvasShapeSync = await readFile(
   new URL("../src/features/canvas/utils/canvas-shape-sync.ts", import.meta.url),
   "utf8"
 );
+const canvasCollapse = await readFile(
+  new URL("../src/features/canvas/utils/canvas-collapse.ts", import.meta.url),
+  "utf8"
+);
 const packageJson = await readFile(new URL("../package.json", import.meta.url), "utf8");
 const tldrawSurface = await readFile(
   new URL("../src/shared/tldraw/TldrawSurface.tsx", import.meta.url),
@@ -222,6 +226,13 @@ const piloFrameShapeUtil = await readFile(
 const piloFrameSelectionToolbar = await readFile(
   new URL(
     "../src/features/canvas/components/engine/shapes/frame/PiloFrameSelectionToolbar.tsx",
+    import.meta.url
+  ),
+  "utf8"
+);
+const piloCollapsedFrameOverlay = await readFile(
+  new URL(
+    "../src/features/canvas/components/engine/surface/PiloCollapsedFrameOverlay.tsx",
     import.meta.url
   ),
   "utf8"
@@ -422,6 +433,7 @@ assert.match(canvasApiClient, /\/enter`/);
 assert.match(canvasApiClient, /\/leave`/);
 assert.match(canvasApiClient, /\/shapes\/batch`/);
 assert.match(canvasApiClient, /URLSearchParams/);
+assert.match(canvasApiClient, /parentShapeId/);
 assert.match(canvasApiClient, /method: "POST"/);
 assert.match(canvasApiClient, /method: "PATCH"/);
 assert.match(canvasApiClient, /method: "DELETE"/);
@@ -438,6 +450,8 @@ assert.match(canvasNormalizers, /createMockCanvasBoardDetail/);
 assert.match(canvasNormalizers, /normalizeCanvasBoardDetail/);
 assert.match(canvasNormalizers, /unwrapCanvasApiData/);
 assert.match(canvasNormalizers, /normalizeCanvasShapes/);
+assert.match(canvasNormalizers, /PILO_CHILD_SHAPE_COUNT_META_KEY/);
+assert.match(canvasNormalizers, /value\.parentShapeId/);
 assert.match(canvasRuntime, /@tanstack\/react-query/);
 assert.match(canvasRuntime, /QueryClientProvider/);
 assert.match(canvasRuntime, /viewportShapeLoadRequestSeqRef/);
@@ -448,9 +462,11 @@ assert.match(canvasRuntime, /useCanvasApiLifecycle/);
 assert.match(canvasRuntime, /useCanvasShapePersistence/);
 assert.match(canvasRuntime, /useCanvasViewSettingPersistence/);
 assert.match(canvasRuntime, /useCanvasViewportQueries/);
+assert.match(canvasRuntime, /loadFrameChildren/);
 assert.match(canvasRuntime, /<CanvasZoomControls/);
 assert.match(canvasRuntimeTypes, /CanvasViewSettingApiClient/);
 assert.match(canvasRuntimeUtils, /hasCanvasFreeformShapeChanged/);
+assert.match(canvasRuntimeUtils, /buildFrameChildrenQueryKey/);
 assert.match(canvasRuntimeUtils, /getChangedFreeformShapeIds/);
 assert.match(canvasRuntimeHydration, /readCanvasStorage\("freeform-shapes"/);
 assert.match(canvasRuntimeHydration, /readCanvasStorage\("view-setting"/);
@@ -464,17 +480,23 @@ assert.match(canvasShapePersistence, /shapeSyncQueue\.enqueue/);
 assert.match(canvasShapePersistence, /areCanvasFreeformShapesEqual/);
 assert.match(canvasRuntime, /captureDraftFreeformShapes/);
 assert.match(canvasShapePersistence, /shapeDetailCacheRef\.current\.set\(shapeId, nextShape\)/);
+assert.match(canvasShapePersistence, /unloadedShapeIdsRef/);
+assert.match(canvasShapePersistence, /filterUnloadedShapes/);
+assert.match(canvasShapePersistence, /buildPersistableLocalShapes/);
 assert.match(canvasShapePersistence, /pendingLocalShapeVersionsRef\.current\.has\(shapeId\)/);
 assert.match(canvasShapePersistence, /shapeSyncQueue\s*\.\s*whenIdle\(\)/);
 assert.match(canvasViewportQueries, /queryClient\s*\.\s*fetchQuery/);
 assert.match(canvasViewportQueries, /queryClient\s*\.\s*cancelQueries/);
 assert.match(canvasViewportQueries, /listShapesInViewport/);
+assert.match(canvasViewportQueries, /parentShapeId: frameId/);
+assert.match(canvasViewportQueries, /isPiloFrameCollapsed/);
+assert.match(canvasViewportQueries, /mergeFrameChildren/);
 assert.match(canvasViewportQueries, /getShapeDetail/);
 assert.match(canvasViewportQueries, /CANVAS_SHAPE_DETAIL_MIN_ZOOM/);
 assert.match(canvasRuntimeUtils, /DEFAULT_VIEWPORT_SHAPE_LOAD_MARGIN/);
 assert.match(canvasViewSettingPersistence, /storageMode === "api"/);
 assert.match(canvasViewSettingPersistence, /updateViewSetting/);
-assert.match(canvasShapePersistence, /writeCanvasStorage\("freeform-shapes"/);
+assert.match(canvasShapePersistence, /writeCanvasStorage\([\s\S]*"freeform-shapes"/);
 assert.match(canvasViewSettingPersistence, /writeCanvasStorage\("view-setting"/);
 assert.match(canvasRuntime, /onSnapStateChange/);
 assert.match(canvasRuntime, /canvasSnapState\.isSmartGuideEnabled/);
@@ -519,6 +541,8 @@ assert.match(canvasRemoteOperations, /preserveArrowBindingMeta/);
 assert.match(canvasRemoteOperations, /shapeDetailCache\.set/);
 assert.match(canvasRemoteOperations, /shapeDetailCache\.delete/);
 assert.match(canvasRemoteOperations, /intersectsViewport/);
+assert.match(canvasRemoteOperations, /isPiloFrameCollapsed/);
+assert.match(canvasRemoteOperations, /parentId/);
 assert.match(piloTldrawCanvas, /CanvasPresenceReporter/);
 assert.match(piloTldrawCanvas, /RemoteCursorOverlay/);
 assert.match(piloTldrawCanvas, /editor\.getContainer\(\)/);
@@ -579,6 +603,7 @@ assert.match(canvasShapeSync, /updateShape\(\s*operation\.shapeId,/);
 assert.match(canvasShapeSync, /clientOperationId: operation\.clientOperationId/);
 assert.match(canvasShapeSync, /deleteShape\(operation.shapeId/);
 assert.match(canvasShapeSync, /id: typeof shape.id === "string" \? shape.id : ""/);
+assert.match(canvasShapeSync, /parentShapeId: typeof shape\.parentId === "string"/);
 assert.match(canvasShapeSync, /shapeType: typeof shape.type === "string" \? shape.type : ""/);
 assert.match(canvasShapeSync, /x: readFiniteNumber\(shape.x, 0\)/);
 assert.match(canvasShapeSync, /y: readFiniteNumber\(shape.y, 0\)/);
@@ -624,6 +649,10 @@ assert.match(piloTldrawCanvas, /shape\.props\.kind !== "elbow"/);
 assert.match(piloTldrawCanvas, /kind: "elbow"/);
 assert.match(piloTldrawCanvas, /editor\.createShapes\(sortFreeformShapesForCreate\(shapes\)\)/);
 assert.match(piloTldrawCanvas, /onShapeDetailRequest/);
+assert.match(piloTldrawCanvas, /onFrameChildrenRequest/);
+assert.match(piloTldrawCanvas, /onFrameChildShapesUnload/);
+assert.match(piloTldrawCanvas, /collectFrameDescendantShapes/);
+assert.match(piloTldrawCanvas, /PiloCollapsedFrameOverlay/);
 assert.match(piloTldrawCanvas, /onViewportBoundsChange/);
 assert.match(piloTldrawCanvas, /placePiloCanvasShapeAt/);
 assert.doesNotMatch(piloTldrawCanvas, /createCanvasShapeSyncQueue/);
@@ -658,14 +687,28 @@ assert.match(piloCanvasShapeUtils, /frame\/PiloFrameShapeUtil/);
 assert.doesNotMatch(piloCanvasShapeUtils, /frame\/PiloFrameSelectionToolbar/);
 assert.match(piloFrameShapeUtil, /FrameShapeUtil\.configure/);
 assert.match(piloFrameShapeUtil, /resolveNextFrameName/);
+assert.match(piloFrameShapeUtil, /isPiloFrameCollapsed/);
 assert.doesNotMatch(piloFrameSelectionToolbar, /FrameShapeUtil\.configure/);
+assert.match(piloFrameSelectionToolbar, /onFrameCollapsedChange/);
+assert.match(piloCollapsedFrameOverlay, /pilo-collapsed-frame-card/);
+assert.match(piloCollapsedFrameOverlay, /handleExpandPointerDown/);
+assert.match(piloCollapsedFrameOverlay, /onFrameCollapsedChange\(frame, false\)/);
+assert.match(piloCollapsedFrameOverlay, /getPiloChildShapeCount/);
 assert.match(piloCodeBlockShapeUtil, /BaseBoxShapeUtil/);
+assert.match(piloCodeBlockShapeUtil, /isCollapsed: T\.boolean\.optional/);
 assert.doesNotMatch(piloCodeBlockShapeUtil, /BaseFrameLikeShapeUtil/);
 assert.doesNotMatch(piloCodeBlockShapeUtil, /@codemirror/);
 assert.doesNotMatch(piloCodeBlockShapeUtil, /navigator\.clipboard/);
 assert.match(piloCodeBlockComponent, /PiloCodeMirrorEditor/);
+assert.match(piloCodeBlockComponent, /PILO_CODE_BLOCK_COLLAPSED_META_KEY/);
+assert.match(piloCodeBlockComponent, /pilo-code-preview/);
 assert.match(piloCodeMirrorEditor, /@codemirror\/view/);
 assert.match(piloCodeBlockShapeTypes, /export type PiloCodeBlockShape/);
+assert.match(piloCodeBlockShapeTypes, /isCollapsed\?: boolean/);
+assert.match(canvasCollapse, /piloFrameCollapsed/);
+assert.match(canvasCollapse, /piloCodeBlockCollapsed/);
+assert.match(canvasCollapse, /piloChildShapeCount/);
+assert.match(canvasCollapse, /piloCodeBlockExpandedSize/);
 assert.match(piloCanvasPlacement, /PiloPlacementRequest/);
 assert.match(piloCanvasPlacement, /placePiloCanvasShapeAt/);
 assert.match(piloCanvasFileImport, /PILO_CODE_IMPORT_MAX_FILES = 30/);

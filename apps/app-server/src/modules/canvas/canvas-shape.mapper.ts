@@ -40,6 +40,7 @@ export function mapShape(shape: CanvasShapeRow): CanvasShapePayload {
   return {
     id: shape.id,
     canvasId: shape.canvas_id,
+    parentShapeId: shape.parent_shape_id,
     shapeType: shape.shape_type,
     title: shape.title,
     textContent: shape.text_content,
@@ -49,6 +50,8 @@ export function mapShape(shape: CanvasShapeRow): CanvasShapePayload {
     height: shape.height === null ? null : toNumber(shape.height),
     rotation: toNumber(shape.rotation),
     zIndex: Number(shape.z_index),
+    childShapeCount:
+      shape.child_shape_count === undefined ? 0 : Number(shape.child_shape_count),
     rawShape: shape.raw_shape ?? {},
     contentHash: shape.content_hash,
     revision: Number(shape.revision),
@@ -125,6 +128,7 @@ export function mergeShapeWriteValues(
   values: ShapeWriteValues
 ): CompleteShapeWriteValues {
   return {
+    parentShapeId: values.parentShapeId ?? currentShape.parent_shape_id,
     shapeType: values.shapeType ?? currentShape.shape_type,
     title: values.title === undefined ? currentShape.title : values.title,
     textContent:

@@ -4,6 +4,7 @@ import pRetry from "p-retry";
 
 export type CanvasFreeformShapeSnapshot = {
   id?: unknown;
+  parentId?: unknown;
   type?: unknown;
   x?: unknown;
   y?: unknown;
@@ -14,6 +15,7 @@ export type CanvasFreeformShapeSnapshot = {
 
 export type CanvasShapePayload = {
   id: string;
+  parentShapeId: string | null;
   shapeType: string;
   title: string | null;
   textContent: string | null;
@@ -197,6 +199,7 @@ export function toCanvasShapePayload(
 
   return {
     id: typeof shape.id === "string" ? shape.id : "",
+    parentShapeId: typeof shape.parentId === "string" ? shape.parentId : null,
     shapeType: typeof shape.type === "string" ? shape.type : "",
     title,
     textContent,

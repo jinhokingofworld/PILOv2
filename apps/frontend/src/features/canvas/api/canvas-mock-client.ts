@@ -104,7 +104,7 @@ export function createMockCanvasClient() {
 
     async listShapesInViewport(
       boardId: string,
-      _query: CanvasViewportShapeQuery,
+      query: CanvasViewportShapeQuery,
       { workspaceId }: Partial<CanvasWorkspaceRequestOptions> = {},
     ) {
       const defaultBoard = createMockCanvasBoardDetail(workspaceId);
@@ -119,7 +119,15 @@ export function createMockCanvasClient() {
               id: boardId,
             };
 
-      return normalizeCanvasShapes(board.shapes);
+      const shapes = normalizeCanvasShapes(board.shapes);
+
+      if (typeof query.parentShapeId === "string" && query.parentShapeId) {
+        return shapes.filter(
+          (shape) => isRecord(shape) && shape.parentId === query.parentShapeId,
+        );
+      }
+
+      return shapes.filter((shape) => !isRecord(shape) || !shape.parentId);
     },
 
     async getShapeDetail(
@@ -230,6 +238,7 @@ export function createMockCanvasClient() {
       return {
         id: body.id ?? "mock-canvas-shape-created",
         canvasId: boardId,
+        parentShapeId: body.parentShapeId ?? null,
         shapeType: body.shapeType,
         title: body.title ?? null,
         textContent: body.textContent ?? null,
@@ -239,6 +248,7 @@ export function createMockCanvasClient() {
         height: body.height ?? null,
         rotation: body.rotation ?? 0,
         zIndex: body.zIndex ?? 1,
+        childShapeCount: 0,
         rawShape: body.rawShape ?? {},
         contentHash: `mock-${String(body.id ?? "created")}-content`,
         revision: 1,

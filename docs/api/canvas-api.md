@@ -212,8 +212,8 @@ Query:
   있으면 `x`, `y`, `width`, `height`, `margin`은 생략할 수 있다.
 
 서버는 `x - margin`, `y - margin`, `x + width + margin`,
-`y + height + margin`과 겹치는 활성 shape summary를 반환한다. 기본 viewport
-조회에서는 접힌 Frame 자체는 반환하되, 접힌 Frame의 내부 shape는 반환하지 않는다.
+`y + height + margin`과 겹치는 활성 최상위 shape summary를 반환한다. 기본 viewport
+조회에서는 Frame 자체와 최상위 shape만 반환하고, Frame 내부 shape는 반환하지 않는다.
 
 Frame을 펼칠 때는 아래처럼 `parentShapeId`로 해당 Frame의 직접 내부 shape를
 lazy load한다.
@@ -476,9 +476,9 @@ loading을 위해 `canvas_id, parent_shape_id` active index를 가진다.
 
 서버의 viewport summary 조회는
 `x <= viewportRight`, `max_x >= viewportLeft`, `y <= viewportBottom`,
-`max_y >= viewportTop`, `deleted_at IS NULL` 조건을 사용한다. 기본 viewport 조회는
-접힌 Frame 내부 shape를 제외한다. `parentShapeId` 조회는 `parent_shape_id`가 요청한
-shape id와 같은 활성 shape를 반환한다.
+`max_y >= viewportTop`, `deleted_at IS NULL`, `parent_shape_id IS NULL` 조건을
+사용한다. `parentShapeId` 조회는 `parent_shape_id`가 요청한 shape id와 같은 활성
+shape를 반환한다.
 
 `canvas_shape_operations`는 reconnect/catch-up을 위해 `canvas_id, op_seq` 순서
 조회 index와 `canvas_id, actor_user_id, client_operation_id` unique 제약을 가진다.

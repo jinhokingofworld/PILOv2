@@ -5,12 +5,14 @@ import type {
   CanvasShapeOperationPayload,
   CanvasViewSetting,
 } from "./canvas-types";
+import {
+  PILO_CHILD_SHAPE_COUNT_META_KEY,
+  isRecord as isCanvasRecord,
+} from "../utils/canvas-collapse";
 
 const defaultCanvasBoardId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1";
 
-export function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
+export const isRecord = isCanvasRecord;
 
 export function defaultCanvasViewSetting(): CanvasViewSetting {
   return {
@@ -29,7 +31,25 @@ export function unwrapCanvasApiData(value: unknown) {
 }
 
 export function normalizeCanvasShape(value: unknown) {
-  return isRecord(value) && isRecord(value.rawShape) ? value.rawShape : value;
+  if (!isRecord(value) || !isRecord(value.rawShape)) {
+    return value;
+  }
+
+  const rawShape = { ...value.rawShape };
+  const meta = isRecord(rawShape.meta) ? { ...rawShape.meta } : {};
+  const childShapeCount = normalizeNumber(value.childShapeCount, 0);
+
+  if (typeof value.parentShapeId === "string" && value.parentShapeId) {
+    rawShape.parentId = value.parentShapeId;
+  }
+
+  if (childShapeCount > 0) {
+    meta[PILO_CHILD_SHAPE_COUNT_META_KEY] = childShapeCount;
+  }
+
+  rawShape.meta = meta;
+
+  return rawShape;
 }
 
 export function normalizeCanvasShapes(value: unknown) {

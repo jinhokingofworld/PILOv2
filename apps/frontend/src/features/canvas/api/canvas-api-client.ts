@@ -120,13 +120,31 @@ function withJsonBody(body: unknown, init: RequestInit = {}) {
 }
 
 function buildViewportShapeQuery(query: CanvasViewportShapeQuery) {
-  const searchParams = new URLSearchParams({
-    x: String(query.x),
-    y: String(query.y),
-    width: String(query.width),
-    height: String(query.height),
-    margin: String(query.margin ?? 0),
-  });
+  const searchParams = new URLSearchParams();
+
+  if (typeof query.parentShapeId === "string" && query.parentShapeId) {
+    searchParams.set("parentShapeId", query.parentShapeId);
+  }
+
+  if (typeof query.x === "number") {
+    searchParams.set("x", String(query.x));
+  }
+
+  if (typeof query.y === "number") {
+    searchParams.set("y", String(query.y));
+  }
+
+  if (typeof query.width === "number") {
+    searchParams.set("width", String(query.width));
+  }
+
+  if (typeof query.height === "number") {
+    searchParams.set("height", String(query.height));
+  }
+
+  if (typeof query.margin === "number") {
+    searchParams.set("margin", String(query.margin));
+  }
 
   return searchParams.toString();
 }

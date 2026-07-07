@@ -163,3 +163,15 @@ export function buildShapeDetailQueryKey({
 }) {
   return ["canvas", workspaceId, "shape-detail", shapeId] as const;
 }
+
+export function buildFrameChildrenQueryKey({
+  boardId,
+  frameId,
+  workspaceId,
+}: {
+  boardId: string;
+  frameId: string;
+  workspaceId: string;
+}) {
+  return ["canvas", workspaceId, boardId, "frame-children", frameId] as const;
+}
