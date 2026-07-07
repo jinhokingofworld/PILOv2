@@ -13,6 +13,11 @@ export interface GithubAppInstallationLookupRequest {
 export interface GithubAppInstallationTokenRequest
   extends GithubAppInstallationLookupRequest {}
 
+export interface GithubAppInstallationDeleteResult {
+  deleted: true;
+  alreadyDeleted: boolean;
+}
+
 export interface GithubAppInstallationDetails {
   githubInstallationId: number;
   accountLogin: string;
@@ -632,6 +637,44 @@ export class GithubAppClient {
       permissions: this.toObject(payload.permissions),
       installedAt: payload.created_at ?? null,
       suspendedAt: payload.suspended_at ?? null
+    };
+  }
+
+  async deleteInstallation(
+    input: GithubAppInstallationLookupRequest
+  ): Promise<GithubAppInstallationDeleteResult> {
+    const appJwt = this.createAppJwt(input);
+    let response: Response;
+    try {
+      response = await fetch(
+        `https://api.github.com/app/installations/${input.installationId}`,
+        {
+          method: "DELETE",
+          headers: {
+            Accept: "application/vnd.github+json",
+            Authorization: `Bearer ${appJwt}`,
+            "X-GitHub-Api-Version": GITHUB_API_VERSION
+          }
+        }
+      );
+    } catch {
+      throw badRequest("GitHub App installation uninstall failed");
+    }
+
+    if (response.status === 404) {
+      return {
+        deleted: true,
+        alreadyDeleted: true
+      };
+    }
+
+    if (!response.ok) {
+      throw badRequest("GitHub App installation uninstall failed");
+    }
+
+    return {
+      deleted: true,
+      alreadyDeleted: false
     };
   }
 

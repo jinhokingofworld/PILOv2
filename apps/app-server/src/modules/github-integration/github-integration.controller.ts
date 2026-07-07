@@ -31,6 +31,7 @@ import type {
 import { GithubIntegrationService } from "./github-integration.service";
 import type {
   GithubAppInstallationCallbackPayload,
+  GithubAppInstallationDeletePayload,
   GithubAppInstallationPayload,
   GithubAppInstallationStartPayload,
   GithubIssuePayload,
@@ -201,6 +202,21 @@ export class GithubIntegrationController {
     const result = await this.githubIntegrationService.listGithubAppInstallations(
       currentUserId,
       workspaceId
+    );
+    return apiResponse(result);
+  }
+
+  @Delete("workspaces/:workspaceId/github/installations/:installationId")
+  @UseGuards(AuthGuard)
+  async deleteGithubAppInstallation(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("installationId") installationId: string
+  ): Promise<ApiSuccessResponse<GithubAppInstallationDeletePayload>> {
+    const result = await this.githubIntegrationService.deleteGithubAppInstallation(
+      currentUserId,
+      workspaceId,
+      installationId
     );
     return apiResponse(result);
   }
