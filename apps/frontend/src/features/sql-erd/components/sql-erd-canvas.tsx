@@ -1,18 +1,23 @@
 "use client";
 
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import {
   createShapeId,
   type Editor,
   type TLShapeId,
-  type TLShapePartial
+  type TLShapePartial,
+  useEditor
 } from "tldraw";
 
 import { commerceSqltoerdFixture } from "@/features/sql-erd/fixtures/commerce";
 import {
+  getSqlErdRelationShapeLayout,
+  getSqlErdTableBoundsFromShape,
+  isSqlErdRelationShape,
   SQLTOERD_RELATION_SHAPE_TYPE,
   SqlErdRelationShapeUtil,
-  type SqlErdRelationShape
+  type SqlErdRelationShape,
+  type SqlErdRelationShapeLayout
 } from "@/features/sql-erd/shapes/sql-erd-relation-shape";
 import {
   getSqlErdTableShapeSize,
@@ -100,36 +105,211 @@ export function createSqltoerdTableShapes(
 }
 
 export function createSqltoerdRelationShapes(
-  modelJson: SqltoerdModelJsonV1
+  modelJson: SqltoerdModelJsonV1,
+  tableShapes: TLShapePartial<SqlErdTableShape>[]
 ): TLShapePartial<SqlErdRelationShape>[] {
-  return modelJson.schema.relations.map((relation) => ({
-    id: getSqlErdRelationShapeId(relation.id),
-    type: SQLTOERD_RELATION_SHAPE_TYPE,
-    x: 0,
-    y: 0,
-    props: {
-      w: 1,
-      h: 1,
-      relationId: relation.id,
-      fromTableId: relation.fromTableId,
-      fromColumnIds: relation.fromColumnIds,
-      toTableId: relation.toTableId,
-      toColumnIds: relation.toColumnIds,
-      constraintName: relation.constraintName,
-      fromTableShapeId: getSqlErdTableShapeId(relation.fromTableId),
-      toTableShapeId: getSqlErdTableShapeId(relation.toTableId)
-    }
-  }));
+  const tableShapeById = new Map(
+    tableShapes.map((shape) => [shape.props?.tableId, shape])
+  );
+
+  return modelJson.schema.relations.map((relation) => {
+    const fromTableShape = tableShapeById.get(relation.fromTableId);
+    const toTableShape = tableShapeById.get(relation.toTableId);
+    const layout =
+      getSqlErdRelationShapeLayoutFromTablePartials(
+        fromTableShape,
+        toTableShape
+      ) ?? getFallbackSqlErdRelationShapeLayout();
+
+    return {
+      id: getSqlErdRelationShapeId(relation.id),
+      type: SQLTOERD_RELATION_SHAPE_TYPE,
+      x: layout.x,
+      y: layout.y,
+      props: {
+        w: layout.w,
+        h: layout.h,
+        relationId: relation.id,
+        fromTableId: relation.fromTableId,
+        fromColumnIds: relation.fromColumnIds,
+        toTableId: relation.toTableId,
+        toColumnIds: relation.toColumnIds,
+        constraintName: relation.constraintName,
+        fromTableShapeId: getSqlErdTableShapeId(relation.fromTableId),
+        toTableShapeId: getSqlErdTableShapeId(relation.toTableId),
+        points: layout.points,
+        arrowPoints: layout.arrowPoints
+      }
+    };
+  });
 }
 
 export function createSqltoerdCanvasShapes(
   modelJson: SqltoerdModelJsonV1,
   layoutJson: SqltoerdLayoutJsonV1
 ) {
+  const tableShapes = createSqltoerdTableShapes(modelJson, layoutJson);
+  const relationShapes = createSqltoerdRelationShapes(modelJson, tableShapes);
+
   return [
-    ...createSqltoerdRelationShapes(modelJson),
-    ...createSqltoerdTableShapes(modelJson, layoutJson)
+    ...relationShapes,
+    ...tableShapes
   ];
+}
+
+function getFallbackSqlErdRelationShapeLayout(): SqlErdRelationShapeLayout {
+  return {
+    x: 0,
+    y: 0,
+    w: 1,
+    h: 1,
+    points: [
+      { x: 0, y: 0 },
+      { x: 1, y: 1 }
+    ],
+    arrowPoints: []
+  };
+}
+
+function getSqlErdRelationShapeLayoutFromTablePartials(
+  fromTableShape: TLShapePartial<SqlErdTableShape> | undefined,
+  toTableShape: TLShapePartial<SqlErdTableShape> | undefined
+) {
+  if (!fromTableShape?.props || !toTableShape?.props) {
+    return null;
+  }
+
+  const fromX = fromTableShape.x ?? 0;
+  const fromY = fromTableShape.y ?? 0;
+  const fromW = fromTableShape.props.w;
+  const fromH = fromTableShape.props.h;
+  const toX = toTableShape.x ?? 0;
+  const toY = toTableShape.y ?? 0;
+  const toW = toTableShape.props.w;
+  const toH = toTableShape.props.h;
+
+  if (
+    typeof fromW !== "number" ||
+    typeof fromH !== "number" ||
+    typeof toW !== "number" ||
+    typeof toH !== "number"
+  ) {
+    return null;
+  }
+
+  return getSqlErdRelationShapeLayout(
+    {
+      x: fromX,
+      y: fromY,
+      w: fromW,
+      h: fromH
+    },
+    {
+      x: toX,
+      y: toY,
+      w: toW,
+      h: toH
+    }
+  );
+}
+
+function areSqlErdRelationPointsEqual(
+  leftPoints: SqlErdRelationShapeLayout["points"],
+  rightPoints: SqlErdRelationShapeLayout["points"]
+) {
+  if (leftPoints.length !== rightPoints.length) {
+    return false;
+  }
+
+  return leftPoints.every((leftPoint, index) => {
+    const rightPoint = rightPoints[index];
+
+    return (
+      Math.abs(leftPoint.x - rightPoint.x) < 0.01 &&
+      Math.abs(leftPoint.y - rightPoint.y) < 0.01
+    );
+  });
+}
+
+function isSqlErdRelationLayoutEqual(
+  shape: SqlErdRelationShape,
+  layout: SqlErdRelationShapeLayout
+) {
+  return (
+    Math.abs(shape.x - layout.x) < 0.01 &&
+    Math.abs(shape.y - layout.y) < 0.01 &&
+    Math.abs(shape.props.w - layout.w) < 0.01 &&
+    Math.abs(shape.props.h - layout.h) < 0.01 &&
+    areSqlErdRelationPointsEqual(shape.props.points, layout.points) &&
+    areSqlErdRelationPointsEqual(shape.props.arrowPoints, layout.arrowPoints)
+  );
+}
+
+function getSqlErdRelationShapeLayoutFromEditor(
+  editor: Editor,
+  shape: SqlErdRelationShape
+) {
+  const fromTableShape = editor.getShape(shape.props.fromTableShapeId as TLShapeId);
+  const toTableShape = editor.getShape(shape.props.toTableShapeId as TLShapeId);
+  const fromTable = getSqlErdTableBoundsFromShape(fromTableShape);
+  const toTable = getSqlErdTableBoundsFromShape(toTableShape);
+
+  if (!fromTable || !toTable) {
+    return null;
+  }
+
+  return getSqlErdRelationShapeLayout(fromTable, toTable);
+}
+
+function getSqlErdRelationShapeUpdates(
+  editor: Editor
+): TLShapePartial<SqlErdRelationShape>[] {
+  const updates: TLShapePartial<SqlErdRelationShape>[] = [];
+
+  for (const shape of editor.getCurrentPageShapes()) {
+    if (!isSqlErdRelationShape(shape)) {
+      continue;
+    }
+
+    const layout = getSqlErdRelationShapeLayoutFromEditor(editor, shape);
+
+    if (!layout || isSqlErdRelationLayoutEqual(shape, layout)) {
+      continue;
+    }
+
+    updates.push({
+      id: shape.id,
+      type: SQLTOERD_RELATION_SHAPE_TYPE,
+      x: layout.x,
+      y: layout.y,
+      props: {
+        ...shape.props,
+        w: layout.w,
+        h: layout.h,
+        points: layout.points,
+        arrowPoints: layout.arrowPoints
+      }
+    });
+  }
+
+  return updates;
+}
+
+export function syncSqlErdRelationShapes(editor: Editor) {
+  const updates = getSqlErdRelationShapeUpdates(editor);
+
+  if (!updates.length) {
+    return 0;
+  }
+
+  editor.run(
+    () => {
+      editor.updateShapes(updates);
+    },
+    { history: "ignore" }
+  );
+
+  return updates.length;
 }
 
 function resetSqlErdCanvas(
@@ -158,6 +338,36 @@ function resetSqlErdCanvas(
   window.requestAnimationFrame(() => {
     editor.zoomToFit({ animation: { duration: 160 } });
   });
+}
+
+function SqlErdRelationLayoutSync() {
+  const editor = useEditor();
+  const isSyncingRef = useRef(false);
+
+  useEffect(() => {
+    function syncRelationShapes() {
+      if (isSyncingRef.current) {
+        return;
+      }
+
+      isSyncingRef.current = true;
+
+      try {
+        syncSqlErdRelationShapes(editor);
+      } finally {
+        isSyncingRef.current = false;
+      }
+    }
+
+    syncRelationShapes();
+
+    return editor.store.listen(syncRelationShapes, {
+      scope: "document",
+      source: "all"
+    });
+  }, [editor]);
+
+  return null;
 }
 
 function SqlErdCanvasBackground() {
@@ -190,6 +400,8 @@ export function SqlErdCanvas({ className }: SqlErdCanvasProps) {
       hideUi
       onMount={handleMount}
       shapeUtils={sqlErdShapeUtils}
-    />
+    >
+      <SqlErdRelationLayoutSync />
+    </TldrawSurface>
   );
 }
