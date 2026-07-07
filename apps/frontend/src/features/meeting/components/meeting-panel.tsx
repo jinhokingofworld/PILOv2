@@ -39,13 +39,15 @@ import {
   type MeetingReportStatusFilter
 } from "@/features/meeting/components/meeting-report-section";
 import { useLiveKitMeetingRoom } from "@/features/meeting/hooks/use-livekit-meeting-room";
-import type { LiveKitMeetingRoomStatus } from "@/features/meeting/hooks/use-livekit-meeting-room";
 import { useMeetingWorkspaceData } from "@/features/meeting/hooks/use-meeting-workspace-data";
 import { meetingNavigation } from "@/features/meeting/navigation";
+import {
+  setHeaderMeetingConnectionStatus,
+  setHeaderMeetingRecordingStatus
+} from "@/features/meeting/stores/header-meeting-status-store";
 import type {
   MeetingParticipant,
-  MeetingReportListQuery,
-  RecordingStatus
+  MeetingReportListQuery
 } from "@/features/meeting/types";
 import { cn } from "@/lib/utils";
 
@@ -171,69 +173,6 @@ function formatDateTime(value: string | null | undefined) {
     dateStyle: "medium",
     timeStyle: "short"
   }).format(new Date(value));
-}
-
-function getRecordingStatusLabel(status: RecordingStatus | null | undefined) {
-  switch (status) {
-    case "RUNNING":
-      return "녹음중";
-    case "COMPLETED":
-      return "녹음 완료";
-    case "FAILED":
-      return "녹음 실패";
-    default:
-      return "녹음 대기";
-  }
-}
-
-function getConnectionStatusLabel(
-  status: LiveKitMeetingRoomStatus
-) {
-  switch (status) {
-    case "connected":
-      return "음성 연결중";
-    case "connecting":
-      return "연결중";
-    case "reconnecting":
-      return "재연결중";
-    case "disconnected":
-      return "연결 끊김";
-    case "error":
-      return "연결 실패";
-    case "idle":
-      return "음성 미연결";
-  }
-}
-
-function StatusIndicator({
-  label,
-  tone
-}: {
-  label: string;
-  tone: "default" | "success" | "warning" | "danger";
-}) {
-  return (
-    <span
-      className={cn(
-        "inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-xs font-medium",
-        tone === "default" && "border-border bg-background text-muted-foreground",
-        tone === "success" && "border-emerald-200 bg-emerald-50 text-emerald-700",
-        tone === "warning" && "border-amber-200 bg-amber-50 text-amber-700",
-        tone === "danger" && "border-destructive/30 bg-destructive/10 text-destructive"
-      )}
-    >
-      <span
-        className={cn(
-          "size-1.5 rounded-full",
-          tone === "default" && "bg-muted-foreground",
-          tone === "success" && "bg-emerald-500",
-          tone === "warning" && "bg-amber-500",
-          tone === "danger" && "bg-destructive"
-        )}
-      />
-      {label}
-    </span>
-  );
 }
 
 function MeetingPanelSkeleton() {
@@ -387,6 +326,21 @@ export function MeetingPanel() {
   const isInitialLoading = currentStatus === "loading" && meeting === null;
   const hasRunningRecording = currentRecording?.status === "RUNNING";
   const displayedActiveCount = activeParticipants.length || activeParticipantCount;
+
+  useEffect(() => {
+    setHeaderMeetingConnectionStatus(liveKitRoom.status);
+  }, [liveKitRoom.status]);
+
+  useEffect(() => {
+    setHeaderMeetingRecordingStatus(currentRecording?.status ?? null);
+  }, [currentRecording?.status]);
+
+  useEffect(() => {
+    return () => {
+      setHeaderMeetingConnectionStatus("idle");
+      setHeaderMeetingRecordingStatus(null);
+    };
+  }, []);
 
   const reloadParticipants = useCallback(
     async (targetMeetingId = meeting?.id) => {
@@ -607,21 +561,6 @@ export function MeetingPanel() {
   const joinButtonIcon = shouldLeaveMeeting ? PhoneOff : Phone;
   const JoinButtonIcon = isActionPending ? Loader2 : joinButtonIcon;
   const RecordingButtonIcon = hasRunningRecording ? Square : Radio;
-  const connectionTone =
-    liveKitRoom.status === "connected"
-      ? "success"
-      : liveKitRoom.status === "error" || liveKitRoom.status === "disconnected"
-        ? "danger"
-        : liveKitRoom.status === "connecting" ||
-            liveKitRoom.status === "reconnecting"
-          ? "warning"
-          : "default";
-  const recordingTone =
-    currentRecording?.status === "RUNNING"
-      ? "danger"
-      : currentRecording?.status === "FAILED"
-        ? "warning"
-        : "default";
 
   if (!accessToken || !workspaceId) {
     return (
@@ -650,20 +589,6 @@ export function MeetingPanel() {
             onClose={() => setPendingConsentAction(null)}
           />
         )}
-
-        <div
-          aria-label="회의 상태"
-          className="pointer-events-none fixed top-3 right-4 z-40 flex max-w-[calc(100vw-6rem)] flex-wrap justify-end gap-2"
-        >
-          <StatusIndicator
-            label={getConnectionStatusLabel(liveKitRoom.status)}
-            tone={connectionTone}
-          />
-          <StatusIndicator
-            label={getRecordingStatusLabel(currentRecording?.status)}
-            tone={recordingTone}
-          />
-        </div>
 
         {activeSection === "room" ? (
           <section

@@ -1,6 +1,10 @@
 import { Injectable } from "@nestjs/common";
 import { BoardHydrationService } from "./board-hydration.service";
 import { BoardIssueReadService } from "./board-issue-read.service";
+import {
+  BoardIssueStatusService,
+  type UpdateBoardIssueStatusResult
+} from "./board-issue-status.service";
 import { BoardReadService } from "./board-read.service";
 import type { ListBoardIssuesQuery, ListBoardsQuery } from "./dto";
 import type {
@@ -25,7 +29,8 @@ export class BoardService {
   constructor(
     private readonly boardHydrationService: BoardHydrationService,
     private readonly boardReadService: BoardReadService,
-    private readonly boardIssueReadService: BoardIssueReadService
+    private readonly boardIssueReadService: BoardIssueReadService,
+    private readonly boardIssueStatusService: BoardIssueStatusService
   ) {}
 
   getModuleInfo(): BoardModuleInfo {
@@ -96,6 +101,22 @@ export class BoardService {
       workspaceId,
       boardId,
       issueId
+    );
+  }
+
+  async updateBoardIssueStatus(
+    currentUserId: string,
+    workspaceId: string,
+    boardId: string,
+    issueId: string,
+    body: unknown
+  ): Promise<UpdateBoardIssueStatusResult> {
+    return this.boardIssueStatusService.updateBoardIssueStatus(
+      currentUserId,
+      workspaceId,
+      boardId,
+      issueId,
+      body
     );
   }
 

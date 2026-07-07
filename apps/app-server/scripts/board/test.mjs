@@ -31,8 +31,14 @@ const readServiceFile = await readSource(
 const issueReadServiceFile = await readSource(
   "../../src/modules/board/board-issue-read.service.ts"
 );
+const issueStatusServiceFile = await readSource(
+  "../../src/modules/board/board-issue-status.service.ts"
+);
 const readQueriesFile = await readSource(
   "../../src/modules/board/queries/board-read.queries.ts"
+);
+const statusQueriesFile = await readSource(
+  "../../src/modules/board/queries/board-issue-status.queries.ts"
 );
 const hydrationServiceFile = await readSource(
   "../../src/modules/board/board-hydration.service.ts"
@@ -49,12 +55,15 @@ assert.match(rootTest, /import\("\.\/board\/test\.mjs"\)/);
 assert.match(moduleFile, /imports: \[[\s\S]*CommonModule[\s\S]*\]/);
 assert.match(moduleFile, /imports: \[[\s\S]*DatabaseModule[\s\S]*\]/);
 assert.match(moduleFile, /imports: \[[\s\S]*WorkspaceModule[\s\S]*\]/);
+assert.match(moduleFile, /imports: \[[\s\S]*GithubIntegrationModule[\s\S]*\]/);
 assert.match(moduleFile, /controllers: \[BoardController\]/);
 assert.match(moduleFile, /providers: \[[\s\S]*BoardService[\s\S]*\]/);
 assert.match(moduleFile, /providers: \[[\s\S]*BoardHydrationService[\s\S]*\]/);
 assert.match(moduleFile, /providers: \[[\s\S]*BoardIssueReadService[\s\S]*\]/);
+assert.match(moduleFile, /providers: \[[\s\S]*BoardIssueStatusService[\s\S]*\]/);
 assert.match(moduleFile, /providers: \[[\s\S]*BoardReadService[\s\S]*\]/);
 assert.match(moduleFile, /providers: \[[\s\S]*BoardReadQueries[\s\S]*\]/);
+assert.match(moduleFile, /providers: \[[\s\S]*BoardIssueStatusQueries[\s\S]*\]/);
 assert.match(moduleFile, /exports: \[BoardService\]/);
 
 assert.match(controllerFile, /@Controller\("workspaces\/:workspaceId\/boards"\)/);
@@ -68,6 +77,7 @@ assert.match(controllerFile, /@Get\(":boardId\/issues"\)/);
 assert.match(controllerFile, /@Get\(":boardId\/issues\/:issueId"\)/);
 assert.match(controllerFile, /@Get\(":boardId\/issues\/:issueId\/pull-requests"\)/);
 assert.match(controllerFile, /@Get\(":boardId\/filter-options"\)/);
+assert.match(controllerFile, /@Patch\(":boardId\/issues\/:issueId\/status"\)/);
 assert.match(controllerFile, /@CurrentUserId\(\) currentUserId: string/);
 assert.match(controllerFile, /@Param\("workspaceId"\) workspaceId: string/);
 assert.match(controllerFile, /@Body\(\) body: unknown/);
@@ -84,6 +94,7 @@ assert.match(serviceFile, /listBoardIssues/);
 assert.match(serviceFile, /getBoardIssue/);
 assert.match(serviceFile, /listBoardIssuePullRequests/);
 assert.match(serviceFile, /getBoardFilterOptions/);
+assert.match(serviceFile, /updateBoardIssueStatus/);
 
 assert.match(readServiceFile, /class BoardReadService/);
 assert.match(readServiceFile, /assertWorkspaceAccess/);
@@ -98,11 +109,23 @@ assert.match(issueReadServiceFile, /listRelatedPullRequests/);
 assert.match(issueReadServiceFile, /getBoardFilterOptions/);
 assert.doesNotMatch(issueReadServiceFile, /FROM pilo_issues/);
 
+assert.match(issueStatusServiceFile, /class BoardIssueStatusService/);
+assert.match(issueStatusServiceFile, /assertWorkspaceAccess/);
+assert.match(issueStatusServiceFile, /updateProjectV2ItemStatus/);
+assert.match(issueStatusServiceFile, /previousColumnId/);
+assert.doesNotMatch(issueStatusServiceFile, /FROM pilo_issues/);
+
 assert.match(readQueriesFile, /class BoardReadQueries/);
 assert.match(readQueriesFile, /FROM boards b/);
 assert.match(readQueriesFile, /FROM board_columns bc/);
 assert.match(readQueriesFile, /ORDER BY bc\.position ASC/);
 assert.match(readQueriesFile, /FROM pilo_issues/);
+
+assert.match(statusQueriesFile, /class BoardIssueStatusQueries/);
+assert.match(statusQueriesFile, /FROM pilo_issues pi/);
+assert.match(statusQueriesFile, /JOIN board_columns target_col/);
+assert.match(statusQueriesFile, /UPDATE github_project_v2_items/);
+assert.match(statusQueriesFile, /UPDATE pilo_issues/);
 
 assert.match(hydrationServiceFile, /class BoardHydrationService/);
 assert.match(hydrationServiceFile, /assertWorkspaceAccess/);
@@ -124,5 +147,6 @@ await import("./create-hydrate.test.mjs");
 await import("./read.test.mjs");
 await import("./issues.test.mjs");
 await import("./issue-detail.test.mjs");
+await import("./status-update.test.mjs");
 await import("./contract.test.mjs");
 await import("./github-sync-workspace-isolation.test.mjs");

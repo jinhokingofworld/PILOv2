@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Param,
+  Patch,
   Post,
   Query,
   Res,
@@ -22,6 +23,7 @@ import type {
   BoardIssueDetailPayload,
   BoardPaginatedPayload,
   BoardPayload,
+  UpdateBoardIssueStatusPayload,
   BoardRelatedPullRequestPayload
 } from "./types";
 
@@ -123,6 +125,25 @@ export class BoardController {
     );
 
     return apiResponse(issue);
+  }
+
+  @Patch(":boardId/issues/:issueId/status")
+  async updateBoardIssueStatus(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("boardId") boardId: string,
+    @Param("issueId") issueId: string,
+    @Body() body: unknown
+  ): Promise<ApiSuccessResponse<UpdateBoardIssueStatusPayload>> {
+    const result = await this.boardService.updateBoardIssueStatus(
+      currentUserId,
+      workspaceId,
+      boardId,
+      issueId,
+      body
+    );
+
+    return apiResponse(result);
   }
 
   @Get(":boardId/issues/:issueId/pull-requests")

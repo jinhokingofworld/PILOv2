@@ -28,8 +28,6 @@ type GithubOAuthStartResult = GithubOAuthStartPayload & {
   stateCookie: string;
 };
 
-const GITHUB_OAUTH_SCOPES = ["read:user", "repo", "read:project"] as const;
-
 @Injectable()
 export class GithubOAuthIntegrationService {
   constructor(
@@ -96,7 +94,6 @@ export class GithubOAuthIntegrationService {
     const authorizeUrl = new URL("https://github.com/login/oauth/authorize");
     authorizeUrl.searchParams.set("client_id", config.clientId);
     authorizeUrl.searchParams.set("redirect_uri", this.getCallbackUrl(config));
-    authorizeUrl.searchParams.set("scope", GITHUB_OAUTH_SCOPES.join(" "));
     authorizeUrl.searchParams.set("state", state);
 
     return {

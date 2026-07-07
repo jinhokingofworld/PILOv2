@@ -9,7 +9,9 @@ import type {
   BoardRelatedPullRequestPayload,
   CreateBoardInput,
   ListBoardIssuesQuery,
-  ListBoardsQuery
+  ListBoardsQuery,
+  UpdateBoardIssueStatusInput,
+  UpdateBoardIssueStatusPayload
 } from "@/features/board/types";
 
 const API_BASE_PATH = "/api/v1";
@@ -316,6 +318,19 @@ export function createBoardApiClient({
       return requestBoardData<BoardIssueDetailPayload>(
         boardIssuePath(workspaceId, boardId, issueId),
         undefined,
+        requestOptions
+      );
+    },
+
+    async updateBoardIssueStatus(
+      workspaceId: string,
+      boardId: string,
+      issueId: string,
+      body: UpdateBoardIssueStatusInput
+    ) {
+      return requestBoardData<UpdateBoardIssueStatusPayload>(
+        `${boardIssuePath(workspaceId, boardId, issueId)}/status`,
+        withJsonBody(body, { method: "PATCH" }),
         requestOptions
       );
     },

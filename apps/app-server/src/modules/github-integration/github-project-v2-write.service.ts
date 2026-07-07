@@ -2,13 +2,12 @@ import { Injectable } from "@nestjs/common";
 import { QueryResultRow } from "pg";
 import { badRequest, unauthorized } from "../../common/api-error";
 import { DatabaseService } from "../../database/database.service";
-import { GithubIntegrationConfigService } from "./github-integration-config.service";
+import { GithubAppClient } from "./github-app.client";
+import {
+  GithubIntegrationConfigService,
+  type GithubOAuthRuntimeConfig
+} from "./github-integration-config.service";
 import { GithubTokenEncryptionService } from "./github-token-encryption.service";
-
-interface GithubProjectV2SyncInstallation {
-  account_login: string;
-  account_type: "User" | "Organization";
-}
 
 interface GithubOAuthConnectionRow extends QueryResultRow {
   github_login: string | null;
@@ -17,43 +16,37 @@ interface GithubOAuthConnectionRow extends QueryResultRow {
   github_revoked_at: Date | string | null;
 }
 
+export interface UpdateGithubProjectV2ItemStatusInput {
+  currentUserId: string;
+  projectNodeId: string;
+  itemNodeId: string;
+  fieldNodeId: string;
+  singleSelectOptionId: string | null;
+}
+
 @Injectable()
-export class GithubProjectV2SyncTokenService {
+export class GithubProjectV2WriteService {
   constructor(
     private readonly database: DatabaseService,
+    private readonly githubAppClient: GithubAppClient,
     private readonly tokenEncryptionService: GithubTokenEncryptionService,
     private readonly configService: GithubIntegrationConfigService
   ) {}
 
-  async resolvePersonalProjectV2UserAccessToken(input: {
-    currentUserId: string;
-    installation: GithubProjectV2SyncInstallation;
-    requiresProjectV2Access: boolean;
-  }): Promise<string | null> {
-    if (
-      !input.requiresProjectV2Access ||
-      input.installation.account_type !== "User"
-    ) {
-      return null;
-    }
+  async updateProjectV2ItemStatus(
+    input: UpdateGithubProjectV2ItemStatusInput
+  ): Promise<void> {
+    const oauthConfig = this.configService.getGithubOAuthConfig();
+    const connection = await this.getGithubOAuthConnectionRow(input.currentUserId);
+    const accessToken = this.getConnectedGithubOAuthAccess(connection, oauthConfig);
 
-    const row = await this.getGithubOAuthConnectionRow(input.currentUserId);
-    if (!this.isActiveGithubOAuthConnection(row)) {
-      throw badRequest(
-        "GitHub user OAuth token is required for personal ProjectV2 sync"
-      );
-    }
-
-    if (row.github_login !== input.installation.account_login) {
-      throw badRequest(
-        "GitHub user OAuth token cannot access this personal ProjectV2 owner"
-      );
-    }
-
-    return this.tokenEncryptionService.decryptToken(
-      row.github_access_token_encrypted,
-      this.configService.getGithubOAuthConfig()
-    );
+    await this.githubAppClient.updateProjectV2ItemStatus({
+      userAccessToken: accessToken,
+      projectNodeId: input.projectNodeId,
+      itemNodeId: input.itemNodeId,
+      fieldNodeId: input.fieldNodeId,
+      singleSelectOptionId: input.singleSelectOptionId
+    });
   }
 
   private async getGithubOAuthConnectionRow(
@@ -79,11 +72,24 @@ export class GithubProjectV2SyncTokenService {
     return row;
   }
 
+  private getConnectedGithubOAuthAccess(
+    row: GithubOAuthConnectionRow,
+    config: GithubOAuthRuntimeConfig
+  ): string {
+    if (!this.isActiveGithubOAuthConnection(row)) {
+      throw badRequest("GitHub OAuth connection is required");
+    }
+
+    return this.tokenEncryptionService.decryptToken(
+      row.github_access_token_encrypted,
+      config
+    );
+  }
+
   private isActiveGithubOAuthConnection(
     row: GithubOAuthConnectionRow
   ): row is GithubOAuthConnectionRow & {
     github_access_token_encrypted: string;
-    github_login: string;
   } {
     return Boolean(
       row.github_login &&

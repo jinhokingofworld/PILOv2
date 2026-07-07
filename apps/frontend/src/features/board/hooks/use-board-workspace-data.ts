@@ -11,7 +11,8 @@ import type {
   BoardPaginatedPayload,
   BoardPayload,
   CreateBoardInput,
-  ListBoardIssuesQuery
+  ListBoardIssuesQuery,
+  UpdateBoardIssueStatusInput
 } from "@/features/board/types";
 import { createGithubIntegrationApiClient } from "@/features/github-integration/api/client";
 import type {
@@ -218,6 +219,68 @@ export function useBoardWorkspaceData({
     [boardClient, canLoad, normalizedWorkspaceId, reloadWorkspace]
   );
 
+  const moveIssueStatus = useCallback(
+    async (
+      issueId: string,
+      input: UpdateBoardIssueStatusInput
+    ): Promise<BoardIssueCardPayload> => {
+      if (!canLoad || !normalizedBoardId) {
+        throw new Error("Board status update requires an authenticated board");
+      }
+
+      const previousBoardState = boardState;
+      const currentIssue = previousBoardState.issues.find(
+        (issue) => issue.id === issueId
+      );
+
+      if (!currentIssue) {
+        throw new Error("Board issue could not be found");
+      }
+
+      setBoardError(null);
+      setBoardState((current) => ({
+        ...current,
+        issues: current.issues.map((issue) =>
+          issue.id === issueId ? { ...issue, columnId: input.columnId } : issue
+        )
+      }));
+
+      try {
+        const result = await boardClient.updateBoardIssueStatus(
+          normalizedWorkspaceId,
+          normalizedBoardId,
+          issueId,
+          {
+            columnId: input.columnId,
+            previousColumnId: input.previousColumnId ?? currentIssue.columnId
+          }
+        );
+
+        setBoardState((current) => ({
+          ...current,
+          issues: current.issues.map((issue) =>
+            issue.id === issueId ? result.issue : issue
+          )
+        }));
+
+        return result.issue;
+      } catch (error) {
+        setBoardState(previousBoardState);
+        setBoardError(errorFromUnknown(error));
+        void reloadBoard();
+        throw error;
+      }
+    },
+    [
+      boardClient,
+      boardState,
+      canLoad,
+      normalizedBoardId,
+      normalizedWorkspaceId,
+      reloadBoard
+    ]
+  );
+
   useEffect(() => {
     let active = true;
 
@@ -298,6 +361,7 @@ export function useBoardWorkspaceData({
     catalogError,
     catalogStatus,
     hydrateBoard,
+    moveIssueStatus,
     reloadBoard,
     reloadWorkspace
   };

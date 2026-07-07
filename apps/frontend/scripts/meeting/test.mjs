@@ -23,9 +23,23 @@ const liveKitHook = await readFile(
   ),
   "utf8"
 );
+const headerMeetingStatusStore = await readFile(
+  new URL(
+    "../../src/features/meeting/stores/header-meeting-status-store.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
 const meetingReportSection = await readFile(
   new URL(
     "../../src/features/meeting/components/meeting-report-section.tsx",
+    import.meta.url
+  ),
+  "utf8"
+);
+const headerMeetingStatus = await readFile(
+  new URL(
+    "../../src/features/meeting/components/header-meeting-status.tsx",
     import.meta.url
   ),
   "utf8"
@@ -135,6 +149,10 @@ assert.match(meetingPanel, /"use client"/);
 assert.match(meetingPanel, /useAuthSession/);
 assert.match(meetingPanel, /useMeetingWorkspaceData/);
 assert.match(meetingPanel, /useLiveKitMeetingRoom/);
+assert.match(meetingPanel, /setHeaderMeetingConnectionStatus/);
+assert.match(meetingPanel, /setHeaderMeetingRecordingStatus/);
+assert.match(meetingPanel, /setHeaderMeetingConnectionStatus\(liveKitRoom\.status\)/);
+assert.match(meetingPanel, /setHeaderMeetingRecordingStatus\(currentRecording\?\.status \?\? null\)/);
 assert.match(meetingPanel, /recordingConsentAccepted/);
 assert.match(meetingPanel, /RECORDING_CONSENT_STORAGE_KEY/);
 assert.match(meetingPanel, /localStorage\.setItem/);
@@ -161,6 +179,33 @@ assert.match(meetingPanel, /reportStatusFilter/);
 assert.match(meetingPanel, /limit: 100/);
 assert.match(meetingPanel, /60초 이하 녹음은 회의록이 생성되지 않습니다/);
 assert.doesNotMatch(meetingPanel, /AvatarImage/);
+assert.doesNotMatch(meetingPanel, /aria-label="회의 상태"/);
+assert.doesNotMatch(meetingPanel, /fixed top-3 right-4/);
+
+assert.match(headerMeetingStatus, /HeaderMeetingStatus/);
+assert.match(headerMeetingStatus, /useAuthSession/);
+assert.match(headerMeetingStatus, /useMeetingWorkspaceData/);
+assert.match(headerMeetingStatus, /useSyncExternalStore/);
+assert.match(headerMeetingStatus, /usePathname/);
+assert.match(headerMeetingStatus, /isMeetingRoute/);
+assert.match(headerMeetingStatus, /reportsEnabled: false/);
+assert.match(headerMeetingStatus, /enabled: Boolean\(workspaceId && accessToken && !isMeetingRoute\)/);
+assert.match(headerMeetingStatus, /HEADER_MEETING_STATUS_POLL_INTERVAL_MS = 5000/);
+assert.match(headerMeetingStatus, /reloadCurrentMeeting/);
+assert.match(headerMeetingStatus, /음성 미연결/);
+assert.match(headerMeetingStatus, /녹음 대기/);
+assert.match(headerMeetingStatus, /flex-nowrap/);
+assert.doesNotMatch(headerMeetingStatus, /useLiveKitMeetingRoom/);
+assert.doesNotMatch(
+  headerMeetingStatus,
+  /const connectionStatus: .* = "idle"/
+);
+
+assert.match(headerMeetingStatusStore, /HeaderMeetingStatusSnapshot/);
+assert.match(headerMeetingStatusStore, /subscribeHeaderMeetingStatus/);
+assert.match(headerMeetingStatusStore, /setHeaderMeetingConnectionStatus/);
+assert.match(headerMeetingStatusStore, /setHeaderMeetingRecordingStatus/);
+assert.match(headerMeetingStatusStore, /connectionStatus: "idle"/);
 
 assert.match(meetingReportSection, /MeetingReportSection/);
 assert.match(meetingReportSection, /MeetingReportStatusFilter/);

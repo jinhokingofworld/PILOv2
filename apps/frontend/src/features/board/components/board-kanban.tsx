@@ -3,10 +3,9 @@
 import {
   Clock3,
   ExternalLink,
-  GitPullRequestArrow,
-  LockKeyhole
+  GitPullRequestArrow
 } from "lucide-react";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import type {
@@ -29,8 +28,19 @@ type BoardKanbanProps = {
   boardStatus: "idle" | "loading" | "success" | "error";
   columns: BoardColumnPayload[];
   issues: BoardIssueCardPayload[];
+  movingIssueId?: string | null;
   onOpenIssue: (issue: BoardIssueCardPayload) => void;
+  onMoveIssue: (input: {
+    issueId: string;
+    columnId: string;
+    previousColumnId: string;
+  }) => void;
   selectedIssueId?: string | null;
+};
+
+type DraggedIssue = {
+  issueId: string;
+  previousColumnId: string;
 };
 
 function columnToneClassName(index: number) {
@@ -64,11 +74,17 @@ function readAssigneeInitials(login: string) {
 
 function BoardIssueCard({
   issue,
+  moving,
   onOpenIssue,
+  onDragEnd,
+  onDragStart,
   selected
 }: {
   issue: BoardIssueCardPayload;
+  moving: boolean;
   onOpenIssue: (issue: BoardIssueCardPayload) => void;
+  onDragEnd: () => void;
+  onDragStart: (issue: BoardIssueCardPayload) => void;
   selected: boolean;
 }) {
   const visibleLabels = issue.labels
@@ -88,11 +104,26 @@ function BoardIssueCard({
   return (
     <button
       type="button"
+      draggable={!moving}
       className={cn(
-        "issue-card flex min-h-24 w-full flex-col items-stretch gap-3 rounded-[14px] border border-slate-200 bg-white p-4 text-left text-slate-950 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300",
-        selected && "border-violet-400 ring-2 ring-violet-200"
+        "issue-card flex min-h-24 w-full cursor-grab flex-col items-stretch gap-3 rounded-[14px] border border-slate-200 bg-white p-4 text-left text-slate-950 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300 active:cursor-grabbing",
+        selected && "border-violet-400 ring-2 ring-violet-200",
+        moving && "pointer-events-none opacity-60"
       )}
+      aria-busy={moving}
       onClick={() => onOpenIssue(issue)}
+      onDragEnd={onDragEnd}
+      onDragStart={(event) => {
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData(
+          "application/x-pilo-board-issue",
+          JSON.stringify({
+            issueId: issue.id,
+            previousColumnId: issue.columnId
+          } satisfies DraggedIssue)
+        );
+        onDragStart(issue);
+      }}
     >
       <span className="card-top flex items-center justify-between gap-3">
         <span className="issue-key font-mono text-[11.5px] font-bold text-slate-500">
@@ -159,9 +190,13 @@ export function BoardKanban({
   boardStatus,
   columns,
   issues,
+  movingIssueId = null,
   onOpenIssue,
+  onMoveIssue,
   selectedIssueId = null
 }: BoardKanbanProps) {
+  const [draggedIssue, setDraggedIssue] = useState<DraggedIssue | null>(null);
+  const [dragOverColumnId, setDragOverColumnId] = useState<string | null>(null);
   const issuesByColumnId = useMemo(() => {
     const nextIssuesByColumnId = new Map<string, BoardIssueCardPayload[]>();
 
@@ -177,6 +212,48 @@ export function BoardKanban({
 
     return nextIssuesByColumnId;
   }, [columns, issues]);
+
+  function readDraggedIssue(event: React.DragEvent): DraggedIssue | null {
+    if (draggedIssue) {
+      return draggedIssue;
+    }
+
+    const payload = event.dataTransfer.getData("application/x-pilo-board-issue");
+    if (!payload) {
+      return null;
+    }
+
+    try {
+      const parsed = JSON.parse(payload) as Partial<DraggedIssue>;
+      if (parsed.issueId && parsed.previousColumnId) {
+        return {
+          issueId: parsed.issueId,
+          previousColumnId: parsed.previousColumnId
+        };
+      }
+    } catch {
+      return null;
+    }
+
+    return null;
+  }
+
+  function handleDrop(event: React.DragEvent, columnId: string) {
+    event.preventDefault();
+    const droppedIssue = readDraggedIssue(event);
+    setDraggedIssue(null);
+    setDragOverColumnId(null);
+
+    if (!droppedIssue || droppedIssue.previousColumnId === columnId) {
+      return;
+    }
+
+    onMoveIssue({
+      issueId: droppedIssue.issueId,
+      columnId,
+      previousColumnId: droppedIssue.previousColumnId
+    });
+  }
 
   if (boardStatus === "loading") {
     return (
@@ -230,14 +307,7 @@ export function BoardKanban({
 
   return (
     <section id="kanban" className="kanban-scroll overflow-x-auto p-6" aria-label="보드 칸반">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white/70 px-3 py-2 text-sm">
-        <div className="flex min-w-0 items-center gap-2">
-          <LockKeyhole className="size-4 text-slate-500" />
-          <span className="font-bold">읽기 전용</span>
-          <span className="text-slate-500">
-            GitHub ProjectV2 상태 변경과 드래그 저장은 MVP 범위에서 제외됩니다.
-          </span>
-        </div>
+      <div className="mb-3 flex justify-end">
         <Button
           type="button"
           variant="outline"
@@ -263,7 +333,26 @@ export function BoardKanban({
             <article
               id={column.normalizedName ?? column.id}
               key={column.id}
-              className="lane flex min-h-[calc(100vh-252px)] flex-col rounded-2xl border border-slate-200 bg-white/50"
+              className={cn(
+                "lane flex min-h-[calc(100vh-252px)] flex-col rounded-2xl border border-slate-200 bg-white/50 transition",
+                dragOverColumnId === column.id &&
+                  "border-violet-300 bg-violet-50/60 ring-2 ring-violet-100"
+              )}
+              onDragLeave={(event) => {
+                const nextTarget = event.relatedTarget;
+                if (
+                  !(nextTarget instanceof Node) ||
+                  !event.currentTarget.contains(nextTarget)
+                ) {
+                  setDragOverColumnId(null);
+                }
+              }}
+              onDragOver={(event) => {
+                event.preventDefault();
+                event.dataTransfer.dropEffect = "move";
+                setDragOverColumnId(column.id);
+              }}
+              onDrop={(event) => handleDrop(event, column.id)}
               role="listitem"
             >
               <header className="lane-header flex min-h-[54px] items-center justify-between gap-2 border-b border-slate-200 px-3 py-3">
@@ -294,8 +383,19 @@ export function BoardKanban({
                     <BoardIssueCard
                       key={issue.id}
                       issue={issue}
+                      moving={movingIssueId === issue.id}
                       selected={selectedIssueId === issue.id}
                       onOpenIssue={onOpenIssue}
+                      onDragEnd={() => {
+                        setDraggedIssue(null);
+                        setDragOverColumnId(null);
+                      }}
+                      onDragStart={(dragIssue) => {
+                        setDraggedIssue({
+                          issueId: dragIssue.id,
+                          previousColumnId: dragIssue.columnId
+                        });
+                      }}
                     />
                   ))
                 ) : (
