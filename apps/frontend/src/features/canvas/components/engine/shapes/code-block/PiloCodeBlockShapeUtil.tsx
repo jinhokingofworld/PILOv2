@@ -34,6 +34,7 @@ export class PiloCodeBlockShapeUtil extends BaseBoxShapeUtil<PiloCodeBlockShape>
       "c",
     ),
     code: T.string,
+    isCollapsed: T.boolean.optional(),
     scrollY: T.number.optional(),
   };
 

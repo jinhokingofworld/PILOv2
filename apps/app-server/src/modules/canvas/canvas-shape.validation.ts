@@ -57,6 +57,7 @@ export function validateShapeCreate(
   input: CreateCanvasShapeRequest
 ): CompleteShapeWriteValues {
   return {
+    parentShapeId: validateOptionalParentShapeId(input.parentShapeId),
     shapeType: validateShapeType(input.shapeType),
     title: validateNullableString(input.title, "Shape title"),
     textContent: validateNullableString(
@@ -87,6 +88,10 @@ export function validateShapeUpdate(
 
   if (hasOwn(input, "shapeType")) {
     values.shapeType = validateShapeType(input.shapeType);
+  }
+
+  if (hasOwn(input, "parentShapeId")) {
+    values.parentShapeId = validateOptionalParentShapeId(input.parentShapeId);
   }
 
   if (hasOwn(input, "title")) {
@@ -251,6 +256,12 @@ export function validateViewportBounds(
     throw badRequest("Canvas viewport bounds query is required");
   }
 
+  const parentShapeId = validateOptionalParentShapeId(input.parentShapeId);
+
+  if (parentShapeId !== null) {
+    return { parentShapeId };
+  }
+
   const width = validateQueryNumber(input.width, "Canvas viewport width");
   const height = validateQueryNumber(input.height, "Canvas viewport height");
   const margin = validateQueryNumber(input.margin, "Canvas viewport margin", 0);
@@ -268,6 +279,7 @@ export function validateViewportBounds(
   }
 
   return {
+    parentShapeId,
     x: validateQueryNumber(input.x, "Canvas viewport x"),
     y: validateQueryNumber(input.y, "Canvas viewport y"),
     width,
@@ -311,6 +323,14 @@ export function validateOptionalClientOperationId(
   }
 
   return value.trim();
+}
+
+export function validateOptionalParentShapeId(value: unknown): string | null {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+
+  return validateShapeId(value);
 }
 
 export function validateOptionalBaseRevision(

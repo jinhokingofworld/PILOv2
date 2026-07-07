@@ -15,6 +15,7 @@ import {
   DefaultSizeStyle,
   GeoShapeGeoStyle,
   type Editor,
+  type TLShape,
   type TLShapeId,
   useEditor,
 } from "tldraw";
@@ -27,6 +28,7 @@ import type {
   CanvasPresenceViewport,
 } from "@/features/canvas/realtime/canvas-realtime-types";
 import { PiloCanvasBackground } from "./PiloCanvasBackground";
+import { PiloCollapsedFrameOverlay } from "./PiloCollapsedFrameOverlay";
 import { SelectedShapeStackingManager } from "../interactions/PiloCanvasStackingManager";
 import { SelectedGroupToolbar } from "../interactions/PiloCanvasGroupToolbar";
 import {
@@ -45,6 +47,7 @@ import { CanvasStateReporter } from "./pilo-canvas-state-reporter";
 import {
   readSerializedArrowBindings,
   restoreSerializedArrowBindings,
+  withSerializedArrowBindings,
   type PiloArrowBindingSnapshot,
 } from "./pilo-canvas-arrow-bindings";
 import type {
@@ -72,6 +75,13 @@ import {
   type PiloCodeFileImportResult,
 } from "../interactions/pilo-canvas-file-import";
 import type { PiloStickyNoteColor } from "../shapes/sticky-note/PiloStickyNoteShapeUtil";
+import {
+  PILO_CHILD_SHAPE_COUNT_META_KEY,
+  PILO_FRAME_EXPANDED_SIZE_META_KEY,
+  PILO_FRAME_COLLAPSED_META_KEY,
+  getPiloFrameExpandedSize,
+  getPiloChildShapeCount,
+} from "../../../utils/canvas-collapse";
 
 export type { PiloCanvasFreeformShape } from "../types";
 export type { PiloInsertableTool } from "../shapes/pilo-canvas-shape-factory";
@@ -160,6 +170,8 @@ type PiloTldrawCanvasProps = {
   onFreeformShapesDraftChange: (shapes: PiloCanvasFreeformShape[]) => void;
   onFreeformShapesChange: (shapes: PiloCanvasFreeformShape[]) => void;
   onViewChange: (viewSetting: PiloCanvasViewSetting) => void;
+  onFrameChildShapesUnload: (shapes: PiloCanvasFreeformShape[]) => void;
+  onFrameChildrenRequest: (frameId: string) => void;
   onViewportBoundsChange: (bounds: PiloCanvasViewportBounds) => void;
   onShapeDetailRequest: (request: PiloCanvasShapeDetailRequest) => void;
   onHistoryStateChange: (state: PiloCanvasHistoryState) => void;
@@ -170,6 +182,8 @@ type PiloTldrawCanvasProps = {
 const tldrawComponents = {
   Background: PiloCanvasBackground,
 };
+
+const PILO_COLLAPSED_FRAME_SIZE = 72;
 
 function collectSerializedArrowBindings(shapes: PiloCanvasFreeformShape[]) {
   return shapes.flatMap(readSerializedArrowBindings);
@@ -284,6 +298,30 @@ function resetFreeformShapes(
   );
 }
 
+function collectFrameDescendantShapes(editor: Editor, frameId: TLShapeId) {
+  const shapes = editor.getCurrentPageShapes();
+  const descendantIds = new Set<TLShapeId>();
+  let didAddShape = true;
+
+  while (didAddShape) {
+    didAddShape = false;
+
+    shapes.forEach((shape) => {
+      if (shape.id === frameId || descendantIds.has(shape.id)) return;
+
+      const parentId = shape.parentId as TLShapeId | undefined;
+      if (parentId !== frameId && !descendantIds.has(parentId as TLShapeId)) {
+        return;
+      }
+
+      descendantIds.add(shape.id);
+      didAddShape = true;
+    });
+  }
+
+  return shapes.filter((shape) => descendantIds.has(shape.id));
+}
+
 function registerCanvasEditorSideEffects(
   editor: Editor,
   piloDefaultArrowKindHydrationGuardRef: MutableRefObject<boolean>,
@@ -350,6 +388,8 @@ export function PiloTldrawCanvas({
   onFreeformShapesDraftChange,
   onFreeformShapesChange,
   onViewChange,
+  onFrameChildShapesUnload,
+  onFrameChildrenRequest,
   onViewportBoundsChange,
   onShapeDetailRequest,
   onHistoryStateChange,
@@ -362,6 +402,8 @@ export function PiloTldrawCanvas({
   const piloDefaultArrowKindHydrationGuardRef = useRef(false);
   const createdLocalCardsRef = useRef(0);
   const freeformShapesRef = useRef(freeformShapes);
+  const frameChildrenRequestTimerRef =
+    useRef<ReturnType<typeof setTimeout> | null>(null);
   const initialViewSettingRef = useRef(initialViewSetting);
   const seedKey = board.id;
 
@@ -372,6 +414,16 @@ export function PiloTldrawCanvas({
   useEffect(() => {
     initialViewSettingRef.current = initialViewSetting;
   }, [initialViewSetting]);
+
+  useEffect(
+    () => () => {
+      if (frameChildrenRequestTimerRef.current) {
+        clearTimeout(frameChildrenRequestTimerRef.current);
+        frameChildrenRequestTimerRef.current = null;
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     const editor = editorRef.current;
@@ -603,6 +655,100 @@ export function PiloTldrawCanvas({
     });
   }
 
+  const handleFrameCollapsedChange = useCallback(
+    (frame: Extract<TLShape, { type: "frame" }>, nextCollapsed: boolean) => {
+      const editor = editorRef.current;
+
+      if (!editor) return;
+
+      const currentFrame = editor.getShape(frame.id);
+      const frameShape = isPiloFrameShape(currentFrame) ? currentFrame : frame;
+      const descendantShapes = nextCollapsed
+        ? collectFrameDescendantShapes(editor, frameShape.id)
+        : [];
+      const descendantSnapshots = descendantShapes.map((shape) =>
+        withSerializedArrowBindings(editor, shape),
+      );
+      const childShapeCount = Math.max(
+        getPiloChildShapeCount(frameShape),
+        descendantSnapshots.length,
+      );
+      const expandedSize = getPiloFrameExpandedSize(frameShape);
+      const currentFrameSize = {
+        h: frameShape.props.h,
+        w: frameShape.props.w,
+      };
+      const nextFrameProps = nextCollapsed
+        ? {
+            h: PILO_COLLAPSED_FRAME_SIZE,
+            w: PILO_COLLAPSED_FRAME_SIZE,
+          }
+        : expandedSize
+          ? {
+              h: expandedSize.h,
+              w: expandedSize.w,
+            }
+          : undefined;
+
+      if (nextCollapsed && descendantSnapshots.length) {
+        onFrameChildShapesUnload(descendantSnapshots);
+      }
+
+      editor.run(
+        () => {
+          if (nextCollapsed && descendantShapes.length) {
+            editor.deleteShapes(
+              descendantShapes.map((shape) => shape.id as TLShapeId),
+            );
+          }
+
+          editor.updateShapes([
+            {
+              id: frameShape.id,
+              type: frameShape.type,
+              ...(nextFrameProps ? { props: nextFrameProps } : {}),
+              meta: {
+                ...(frameShape.meta ?? {}),
+                [PILO_FRAME_COLLAPSED_META_KEY]: nextCollapsed,
+                [PILO_CHILD_SHAPE_COUNT_META_KEY]: childShapeCount,
+                ...(nextCollapsed
+                  ? {
+                      [PILO_FRAME_EXPANDED_SIZE_META_KEY]: currentFrameSize,
+                    }
+                  : {}),
+              },
+            },
+          ]);
+
+          editor.select(frameShape.id);
+        },
+        { history: "ignore" },
+      );
+
+      onFreeformShapesDraftChange(
+        editor
+          .getCurrentPageShapes()
+          .map((shape) => withSerializedArrowBindings(editor, shape)),
+      );
+
+      if (!nextCollapsed) {
+        if (frameChildrenRequestTimerRef.current) {
+          clearTimeout(frameChildrenRequestTimerRef.current);
+        }
+
+        frameChildrenRequestTimerRef.current = setTimeout(() => {
+          frameChildrenRequestTimerRef.current = null;
+          onFrameChildrenRequest(String(frameShape.id));
+        }, 0);
+      }
+    },
+    [
+      onFrameChildShapesUnload,
+      onFrameChildrenRequest,
+      onFreeformShapesDraftChange,
+    ],
+  );
+
   function handleCanvasPointerDownCapture(event: PointerEvent<HTMLDivElement>) {
     const editor = editorRef.current;
 
@@ -706,7 +852,12 @@ export function PiloTldrawCanvas({
       <CanvasSnapStateReporter onSnapStateChange={onSnapStateChange} />
       <SelectedShapeStackingManager />
       <SelectedGroupToolbar />
-      <FrameSelectionToolbar />
+      <PiloCollapsedFrameOverlay
+        onFrameCollapsedChange={handleFrameCollapsedChange}
+      />
+      <FrameSelectionToolbar
+        onFrameCollapsedChange={handleFrameCollapsedChange}
+      />
     </TldrawSurface>
   );
 }

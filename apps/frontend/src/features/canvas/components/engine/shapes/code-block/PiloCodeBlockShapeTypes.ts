@@ -22,6 +22,7 @@ export type PiloCodeBlockShapeProps = {
   fileName: string;
   language: PiloCodeLanguage;
   code: string;
+  isCollapsed?: boolean;
   scrollY?: number;
 };
 
@@ -36,6 +37,7 @@ export const DEFAULT_PILO_CODE_BLOCK_PROPS: PiloCodeBlockShape["props"] = {
   fileName: "canvas-node.tsx",
   language: "tsx",
   code: "export function CanvasNode() {\n  return <div>PILO</div>;\n}",
+  isCollapsed: false,
   scrollY: 0,
 };
 

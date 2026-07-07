@@ -109,6 +109,7 @@ function PiloCanvasRuntimeInner({
   const viewportShapeLoadRequestSeqRef = useRef(0);
   const latestViewportBoundsRef = useRef<PiloCanvasViewportBounds | null>(null);
   const shapeDetailCacheRef = useRef(new Map<string, PiloCanvasFreeformShape>());
+  const unloadedShapeIdsRef = useRef(new Set<string>());
   const pendingShapeDetailRef = useRef<string | null>(null);
   const shapeDetailRequestSeqRef = useRef(0);
   const pendingLocalShapeVersionsRef = useRef(new Map<string, number>());
@@ -221,6 +222,7 @@ function PiloCanvasRuntimeInner({
   useEffect(() => {
     deferredRemoteOperationsRef.current.clear();
     remoteShapeRevisionRef.current.clear();
+    unloadedShapeIdsRef.current.clear();
   }, [board.id]);
 
   useEffect(() => {
@@ -276,6 +278,7 @@ function PiloCanvasRuntimeInner({
     shapeDetailCacheRef,
     shapeSyncQueueRef,
     storageMode,
+    unloadedShapeIdsRef,
   });
 
   const persistViewSetting = useCanvasViewSettingPersistence({
@@ -289,7 +292,8 @@ function PiloCanvasRuntimeInner({
     viewSettingSyncTimerRef,
   });
 
-  const { loadShapeDetail, loadViewportShapes } = useCanvasViewportQueries({
+  const { loadFrameChildren, loadShapeDetail, loadViewportShapes } =
+    useCanvasViewportQueries({
     board,
     canvasClient,
     latestViewportBoundsRef,
@@ -299,9 +303,23 @@ function PiloCanvasRuntimeInner({
     shapeDetailCacheRef,
     shapeDetailRequestSeqRef,
     storageMode,
+    unloadedShapeIdsRef,
     viewportShapeLoadRequestSeqRef,
     viewportShapeLoadTimerRef,
   });
+
+  const handleFrameChildShapesUnload = useCallback(
+    (shapes: PiloCanvasFreeformShape[]) => {
+      shapes.forEach((shape) => {
+        if (typeof shape.id !== "string") return;
+
+        unloadedShapeIdsRef.current.add(shape.id);
+        shapeDetailCacheRef.current.set(shape.id, shape);
+        pendingLocalShapeVersionsRef.current.delete(shape.id);
+      });
+    },
+    [],
+  );
 
   const handleSnapStateChange = useCallback(
     (state: PiloCanvasSnapState) => {
@@ -336,7 +354,9 @@ function PiloCanvasRuntimeInner({
           onFreeformShapesDraftChange={captureDraftFreeformShapes}
           onFreeformShapesChange={persistFreeformShapes}
           onViewChange={persistViewSetting}
+          onFrameChildShapesUnload={handleFrameChildShapesUnload}
           onViewportBoundsChange={loadViewportShapes}
+          onFrameChildrenRequest={loadFrameChildren}
           onShapeDetailRequest={loadShapeDetail}
           onHistoryStateChange={
             onHistoryStateChange ?? noopCanvasHistoryStateChange

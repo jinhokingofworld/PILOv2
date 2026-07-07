@@ -79,6 +79,9 @@ const canvasShapeHashMigration = await readSource(
 const canvasShapeOperationMigration = await readSource(
   "../../../db/migrations/013_canvas_shape_operations.sql"
 );
+const canvasShapeParentMigration = await readSource(
+  "../../../db/migrations/016_canvas_shape_parent_relation.sql"
+);
 const devTerraformMain = await readSource("../../../infra/envs/dev/main.tf");
 const terraformSecretsModule = await readSource(
   "../../../infra/modules/secrets/main.tf"
@@ -222,6 +225,11 @@ assert.match(canvasService, /UPDATE canvas/);
 assert.match(canvasService, /viewport_x =/);
 assert.match(canvasService, /INSERT INTO canvas_freeform_shapes/);
 assert.match(canvasService, /UPDATE canvas_freeform_shapes s/);
+assert.match(canvasService, /parent_shape_id/);
+assert.match(canvasService, /child_counts\.child_shape_count/);
+assert.match(canvasService, /s\.parent_shape_id IS NULL/);
+assert.match(canvasService, /s\.parent_shape_id = \$2/);
+assert.match(canvasService, /parent_shape_id = \$3/);
 assert.match(canvasService, /content_hash/);
 assert.match(canvasService, /revision = s\.revision \+ 1/);
 assert.match(canvasService, /max_x >= \$2/);
@@ -250,6 +258,8 @@ assert.match(canvasService, /ON CONFLICT \(id\) DO UPDATE/);
 assert.match(canvasService, /deleted_at = NULL/);
 assert.match(canvasService, /canvas_freeform_shapes\.deleted_at IS NOT NULL/);
 assert.match(canvasTypes, /export interface CanvasShapePayload/);
+assert.match(canvasTypes, /parentShapeId: string \| null/);
+assert.match(canvasTypes, /childShapeCount: number/);
 assert.match(canvasTypes, /export interface CanvasOperationsCatchupPayload/);
 assert.match(canvasTypes, /export interface CanvasShapeOperationPayload/);
 assert.match(canvasTypes, /export interface CanvasShapeOperationRow/);
@@ -259,6 +269,8 @@ assert.match(canvasTypes, /export interface CanvasShapeRow/);
 assert.match(canvasShapeValidation, /validateShapeBatchOperations/);
 assert.match(canvasShapeValidation, /validateCanvasOperationsAfterSeq/);
 assert.match(canvasShapeValidation, /validateOptionalClientOperationId/);
+assert.match(canvasShapeValidation, /validateOptionalParentShapeId/);
+assert.match(canvasShapeValidation, /parentShapeId/);
 assert.match(canvasShapeValidation, /validateOptionalBaseRevision/);
 assert.match(canvasShapeValidation, /MAX_CANVAS_SHAPE_BATCH_OPERATIONS = 100/);
 assert.match(canvasShapeValidation, /Canvas shapeType is invalid/);
@@ -267,6 +279,8 @@ assert.match(canvasShapeMapper, /export function mapShape/);
 assert.match(canvasShapeMapper, /export function mapShapeOperation/);
 assert.match(canvasShapeMapper, /attachShapeOperationMeta/);
 assert.match(canvasShapeMapper, /contentHash: shape\.content_hash/);
+assert.match(canvasShapeMapper, /parentShapeId: shape\.parent_shape_id/);
+assert.match(canvasShapeMapper, /childShapeCount/);
 assert.match(canvasShapeMapper, /revision: Number\(shape\.revision\)/);
 assert.match(canvasShapeMapper, /export function mapDeletedShape/);
 assert.match(canvasShapeHash, /export function computeShapeContentHash/);
@@ -285,6 +299,9 @@ assert.match(canvasShapeOperationMigration, /latest_op_seq/);
 assert.match(canvasShapeOperationMigration, /CREATE TABLE public\.canvas_shape_operations/);
 assert.match(canvasShapeOperationMigration, /UNIQUE \(canvas_id, op_seq\)/);
 assert.match(canvasShapeOperationMigration, /UNIQUE \(canvas_id, actor_user_id, client_operation_id\)/);
+assert.match(canvasShapeParentMigration, /ADD COLUMN parent_shape_id TEXT/);
+assert.match(canvasShapeParentMigration, /idx_canvas_freeform_shapes_parent_active/);
+assert.match(canvasShapeParentMigration, /canvas_id, parent_shape_id/);
 assert.match(meetingModule, /DatabaseModule/);
 assert.match(meetingModule, /WorkspaceModule/);
 assert.match(meetingModule, /LiveKitEgressService/);

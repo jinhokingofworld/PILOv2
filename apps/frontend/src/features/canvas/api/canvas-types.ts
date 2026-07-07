@@ -7,11 +7,12 @@ export type CanvasViewSetting = {
 };
 
 export type CanvasViewportShapeQuery = {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
   margin?: number;
+  parentShapeId?: string;
 };
 
 export type CanvasWorkspaceRequestOptions = {

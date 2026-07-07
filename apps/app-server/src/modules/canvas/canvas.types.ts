@@ -15,6 +15,7 @@ export interface CanvasRow extends QueryResultRow {
 export interface CanvasShapeRow extends QueryResultRow {
   id: string;
   canvas_id: string;
+  parent_shape_id: string | null;
   shape_type: string;
   title: string | null;
   text_content: string | null;
@@ -27,6 +28,7 @@ export interface CanvasShapeRow extends QueryResultRow {
   raw_shape: Record<string, unknown>;
   content_hash: string;
   revision: number | string;
+  child_shape_count?: number | string;
   created_at: Date | string;
   updated_at: Date | string;
   deleted_at: Date | string | null;
@@ -78,6 +80,7 @@ export interface CreateCanvasRequest {
 
 export interface CreateCanvasShapeRequest {
   id?: unknown;
+  parentShapeId?: unknown;
   shapeType?: unknown;
   title?: unknown;
   textContent?: unknown;
@@ -106,6 +109,7 @@ export interface ListCanvasShapesQuery {
   width?: unknown;
   height?: unknown;
   margin?: unknown;
+  parentShapeId?: unknown;
 }
 
 export interface ListCanvasOperationsQuery {
@@ -125,6 +129,7 @@ export interface CanvasViewSettingPayload {
 export interface CanvasShapePayload {
   id: string;
   canvasId: string;
+  parentShapeId: string | null;
   shapeType: string;
   title: string | null;
   textContent: string | null;
@@ -134,6 +139,7 @@ export interface CanvasShapePayload {
   height: number | null;
   rotation: number;
   zIndex: number;
+  childShapeCount: number;
   rawShape: Record<string, unknown>;
   contentHash: string;
   revision: number;
@@ -219,6 +225,7 @@ export interface CanvasOperationsCatchupPayload {
 }
 
 export interface ShapeWriteValues {
+  parentShapeId?: string | null;
   shapeType?: string;
   title?: string | null;
   textContent?: string | null;
@@ -232,6 +239,7 @@ export interface ShapeWriteValues {
 }
 
 export interface CompleteShapeWriteValues {
+  parentShapeId: string | null;
   shapeType: string;
   title: string | null;
   textContent: string | null;
@@ -245,11 +253,12 @@ export interface CompleteShapeWriteValues {
 }
 
 export interface ViewportBoundsValues {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  margin: number;
+  parentShapeId: string | null;
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  margin?: number;
 }
 
 export type CanvasShapeBatchOperationValues =

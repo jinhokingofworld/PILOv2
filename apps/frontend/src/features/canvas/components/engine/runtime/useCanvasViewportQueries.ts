@@ -1,6 +1,7 @@
 import type { QueryClient } from "@tanstack/react-query";
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 import { normalizeCanvasFreeformShapes } from "../../../utils/canvas-storage";
+import { isPiloFrameCollapsed } from "../../../utils/canvas-collapse";
 import type {
   PiloCanvasFreeformShape,
   PiloCanvasShapeDetailRequest,
@@ -13,6 +14,7 @@ import type {
 } from "./canvas-runtime-types";
 import {
   buildShapeDetailQueryKey,
+  buildFrameChildrenQueryKey,
   buildViewportShapeQueryKey,
   CANVAS_SHAPE_DETAIL_MIN_ZOOM,
   CANVAS_SHAPE_DETAIL_STALE_TIME_MS,
@@ -35,9 +37,20 @@ type UseCanvasViewportQueriesOptions = {
   shapeDetailCacheRef: RuntimeRef<Map<string, PiloCanvasFreeformShape>>;
   shapeDetailRequestSeqRef: RuntimeRef<number>;
   storageMode: CanvasRuntimeStorageMode;
+  unloadedShapeIdsRef: RuntimeRef<Set<string>>;
   viewportShapeLoadRequestSeqRef: RuntimeRef<number>;
   viewportShapeLoadTimerRef: RuntimeRef<ReturnType<typeof setTimeout> | null>;
 };
+
+function shouldLoadExpandedFrameChildren(
+  shape: PiloCanvasFreeformShape,
+): shape is PiloCanvasFreeformShape & { id: string; type: "frame" } {
+  return (
+    shape.type === "frame" &&
+    typeof shape.id === "string" &&
+    !isPiloFrameCollapsed(shape)
+  );
+}
 
 export function useCanvasViewportQueries({
   board,
@@ -49,9 +62,109 @@ export function useCanvasViewportQueries({
   shapeDetailCacheRef,
   shapeDetailRequestSeqRef,
   storageMode,
+  unloadedShapeIdsRef,
   viewportShapeLoadRequestSeqRef,
   viewportShapeLoadTimerRef,
 }: UseCanvasViewportQueriesOptions) {
+  const loadingFrameChildrenRef = useRef(new Set<string>());
+  const loadFrameChildren = useCallback(
+    (frameId: string, visitedFrameIds = new Set<string>()) => {
+      if (
+        visitedFrameIds.has(frameId) ||
+        loadingFrameChildrenRef.current.has(frameId)
+      ) {
+        return;
+      }
+
+      const nextVisitedFrameIds = new Set(visitedFrameIds);
+      nextVisitedFrameIds.add(frameId);
+      loadingFrameChildrenRef.current.add(frameId);
+
+      function mergeFrameChildren(loadedShapes: PiloCanvasFreeformShape[]) {
+        if (!loadedShapes.length) return;
+
+        loadedShapes.forEach((shape) => {
+          if (typeof shape.id === "string") {
+            unloadedShapeIdsRef.current.delete(shape.id);
+            shapeDetailCacheRef.current.set(shape.id, shape);
+          }
+        });
+        mergeLoadedFreeformShapes(loadedShapes);
+        loadedShapes.forEach((shape) => {
+          if (shouldLoadExpandedFrameChildren(shape)) {
+            loadFrameChildren(shape.id, nextVisitedFrameIds);
+          }
+        });
+      }
+
+      const cachedShapes = Array.from(shapeDetailCacheRef.current.values()).filter(
+        (shape) => shape.parentId === frameId,
+      );
+
+      mergeFrameChildren(cachedShapes);
+
+      if (
+        storageMode !== "api" ||
+        !canvasClient ||
+        !canvasClient.listShapesInViewport
+      ) {
+        loadingFrameChildrenRef.current.delete(frameId);
+        return;
+      }
+
+      const listShapesInViewport = canvasClient.listShapesInViewport;
+      const queryKey = buildFrameChildrenQueryKey({
+        boardId: board.id,
+        frameId,
+        workspaceId: board.workspaceId,
+      });
+
+      void queryClient
+        .fetchQuery({
+          queryKey,
+          staleTime: CANVAS_VIEWPORT_SHAPE_STALE_TIME_MS,
+          queryFn: ({ signal }) =>
+            listShapesInViewport(
+              board.id,
+              {
+                parentShapeId: frameId,
+              },
+              {
+                signal,
+                workspaceId: board.workspaceId,
+              },
+            ),
+        })
+        .then((shapes) => {
+          const loadedShapes = normalizeCanvasFreeformShapes(
+            shapes,
+          ) as PiloCanvasFreeformShape[];
+
+          mergeFrameChildren(loadedShapes);
+        })
+        .catch((error: unknown) => {
+          if (error instanceof Error && error.name === "AbortError") {
+            return;
+          }
+
+            console.error("Canvas API frame children load failed", error);
+        })
+        .finally(() => {
+          loadingFrameChildrenRef.current.delete(frameId);
+        });
+    },
+    [
+      board.id,
+      board.workspaceId,
+      canvasClient,
+      mergeLoadedFreeformShapes,
+      queryClient,
+      shapeDetailCacheRef,
+      storageMode,
+      unloadedShapeIdsRef,
+    ],
+  );
+
   const loadViewportShapes = useCallback(
     (bounds: PiloCanvasViewportBounds) => {
       latestViewportBoundsRef.current = bounds;
@@ -121,9 +234,16 @@ export function useCanvasViewportQueries({
               return;
             }
 
-            mergeLoadedFreeformShapes(
-              normalizeCanvasFreeformShapes(shapes) as PiloCanvasFreeformShape[],
-            );
+            const loadedShapes = normalizeCanvasFreeformShapes(
+              shapes,
+            ) as PiloCanvasFreeformShape[];
+
+            mergeLoadedFreeformShapes(loadedShapes);
+            loadedShapes.forEach((shape) => {
+              if (shouldLoadExpandedFrameChildren(shape)) {
+                loadFrameChildren(shape.id);
+              }
+            });
           })
           .catch((error: unknown) => {
             if (error instanceof Error && error.name === "AbortError") {
@@ -139,6 +259,7 @@ export function useCanvasViewportQueries({
       board.workspaceId,
       canvasClient,
       latestViewportBoundsRef,
+      loadFrameChildren,
       mergeLoadedFreeformShapes,
       queryClient,
       storageMode,
@@ -234,6 +355,7 @@ export function useCanvasViewportQueries({
   );
 
   return {
+    loadFrameChildren,
     loadShapeDetail,
     loadViewportShapes,
   };

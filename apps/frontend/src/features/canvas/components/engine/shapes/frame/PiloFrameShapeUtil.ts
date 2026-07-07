@@ -6,6 +6,7 @@ import {
   isPiloFrameShape,
   type PiloFrameShape,
 } from "../PiloCanvasShapeGuards";
+import { isPiloFrameCollapsed } from "../../../../utils/canvas-collapse";
 
 const PILO_EMPTY_FRAME_NAME = "\u200B";
 
@@ -45,6 +46,16 @@ const piloFrameDisplayColors: Partial<
 export const PiloFrameShapeUtil = FrameShapeUtil.configure({
   showColors: true,
   getCustomDisplayValues(_editor, shape) {
+    if (isPiloFrameCollapsed(shape)) {
+      return {
+        showColorsFillColor: "transparent",
+        showColorsStrokeColor: "transparent",
+        showColorsHeadingFillColor: "transparent",
+        showColorsHeadingStrokeColor: "transparent",
+        showColorsHeadingTextColor: "transparent",
+      };
+    }
+
     const colors =
       piloFrameDisplayColors[shape.props.color] ?? piloFrameDisplayColors.black;
 

@@ -199,38 +199,90 @@ export class CanvasService {
     }
 
     const bounds = validateViewportBounds(input);
-    const minX = bounds.x - bounds.margin;
-    const minY = bounds.y - bounds.margin;
-    const maxX = bounds.x + bounds.width + bounds.margin;
-    const maxY = bounds.y + bounds.height + bounds.margin;
+    if (bounds.parentShapeId !== null) {
+      const shapes = await this.database.query<CanvasShapeRow>(
+        `
+          SELECT
+            s.id,
+            s.canvas_id,
+            s.parent_shape_id,
+            s.shape_type,
+            s.title,
+            s.text_content,
+            s.x,
+            s.y,
+            s.width,
+            s.height,
+            s.rotation,
+            s.z_index,
+            s.raw_shape,
+            s.content_hash,
+            s.revision,
+            child_counts.child_shape_count,
+            s.created_at,
+            s.updated_at,
+            s.deleted_at
+          FROM canvas_freeform_shapes s
+          LEFT JOIN LATERAL (
+            SELECT COUNT(*)::int AS child_shape_count
+            FROM canvas_freeform_shapes child
+            WHERE child.canvas_id = s.canvas_id
+              AND child.parent_shape_id = s.id
+              AND child.deleted_at IS NULL
+          ) child_counts ON TRUE
+          WHERE s.canvas_id = $1
+            AND s.deleted_at IS NULL
+            AND s.parent_shape_id = $2
+          ORDER BY s.z_index ASC, s.updated_at ASC, s.id ASC
+        `,
+        [canvas.id, bounds.parentShapeId]
+      );
+
+      return shapes.map((shape) => mapShape(shape));
+    }
+
+    const minX = (bounds.x ?? 0) - (bounds.margin ?? 0);
+    const minY = (bounds.y ?? 0) - (bounds.margin ?? 0);
+    const maxX = (bounds.x ?? 0) + (bounds.width ?? 0) + (bounds.margin ?? 0);
+    const maxY = (bounds.y ?? 0) + (bounds.height ?? 0) + (bounds.margin ?? 0);
     const shapes = await this.database.query<CanvasShapeRow>(
       `
         SELECT
-          id,
-          canvas_id,
-          shape_type,
-          title,
-          text_content,
-          x,
-          y,
-          width,
-          height,
-          rotation,
-          z_index,
-          raw_shape,
-          content_hash,
-          revision,
-          created_at,
-          updated_at,
-          deleted_at
-        FROM canvas_freeform_shapes
-        WHERE canvas_id = $1
-          AND deleted_at IS NULL
-          AND x <= $3
-          AND max_x >= $2
-          AND y <= $5
-          AND max_y >= $4
-        ORDER BY z_index ASC, updated_at ASC, id ASC
+          s.id,
+          s.canvas_id,
+          s.parent_shape_id,
+          s.shape_type,
+          s.title,
+          s.text_content,
+          s.x,
+          s.y,
+          s.width,
+          s.height,
+          s.rotation,
+          s.z_index,
+          s.raw_shape,
+          s.content_hash,
+          s.revision,
+          child_counts.child_shape_count,
+          s.created_at,
+          s.updated_at,
+          s.deleted_at
+        FROM canvas_freeform_shapes s
+        LEFT JOIN LATERAL (
+          SELECT COUNT(*)::int AS child_shape_count
+          FROM canvas_freeform_shapes child
+          WHERE child.canvas_id = s.canvas_id
+            AND child.parent_shape_id = s.id
+            AND child.deleted_at IS NULL
+        ) child_counts ON TRUE
+        WHERE s.canvas_id = $1
+          AND s.deleted_at IS NULL
+          AND s.parent_shape_id IS NULL
+          AND s.x <= $3
+          AND s.max_x >= $2
+          AND s.y <= $5
+          AND s.max_y >= $4
+        ORDER BY s.z_index ASC, s.updated_at ASC, s.id ASC
       `,
       [canvas.id, minX, maxX, minY, maxY]
     );
@@ -332,6 +384,7 @@ export class CanvasService {
               INSERT INTO canvas_freeform_shapes (
                 id,
                 canvas_id,
+                parent_shape_id,
                 shape_type,
                 title,
                 text_content,
@@ -357,12 +410,14 @@ export class CanvasService {
                 $9,
                 $10,
                 $11,
-                $12::jsonb,
-                $13,
+                $12,
+                $13::jsonb,
+                $14,
                 NULL
               )
               ON CONFLICT (id) DO UPDATE
               SET
+                parent_shape_id = EXCLUDED.parent_shape_id,
                 shape_type = EXCLUDED.shape_type,
                 title = EXCLUDED.title,
                 text_content = EXCLUDED.text_content,
@@ -381,6 +436,7 @@ export class CanvasService {
               RETURNING
                 id,
                 canvas_id,
+                parent_shape_id,
                 shape_type,
                 title,
                 text_content,
@@ -393,6 +449,7 @@ export class CanvasService {
                 raw_shape,
                 content_hash,
                 revision,
+                0::int AS child_shape_count,
                 created_at,
                 updated_at,
                 deleted_at
@@ -400,6 +457,7 @@ export class CanvasService {
             [
               id,
               canvas.id,
+              values.parentShapeId,
               values.shapeType,
               values.title ?? null,
               values.textContent ?? null,
@@ -481,6 +539,7 @@ export class CanvasService {
                   INSERT INTO canvas_freeform_shapes (
                     id,
                     canvas_id,
+                    parent_shape_id,
                     shape_type,
                     title,
                     text_content,
@@ -506,12 +565,14 @@ export class CanvasService {
                     $9,
                     $10,
                     $11,
-                    $12::jsonb,
-                    $13,
+                    $12,
+                    $13::jsonb,
+                    $14,
                     NULL
                   )
                   ON CONFLICT (id) DO UPDATE
                   SET
+                    parent_shape_id = EXCLUDED.parent_shape_id,
                     shape_type = EXCLUDED.shape_type,
                     title = EXCLUDED.title,
                     text_content = EXCLUDED.text_content,
@@ -530,6 +591,7 @@ export class CanvasService {
                   RETURNING
                     id,
                     canvas_id,
+                    parent_shape_id,
                     shape_type,
                     title,
                     text_content,
@@ -542,6 +604,7 @@ export class CanvasService {
                     raw_shape,
                     content_hash,
                     revision,
+                    0::int AS child_shape_count,
                     created_at,
                     updated_at,
                     deleted_at
@@ -549,6 +612,7 @@ export class CanvasService {
                 [
                   operation.shapeId,
                   canvas.id,
+                  values.parentShapeId,
                   values.shapeType,
                   values.title ?? null,
                   values.textContent ?? null,
@@ -603,6 +667,7 @@ export class CanvasService {
                   SELECT
                     id,
                     canvas_id,
+                    parent_shape_id,
                     shape_type,
                     title,
                     text_content,
@@ -637,17 +702,18 @@ export class CanvasService {
                 `
                   UPDATE canvas_freeform_shapes s
                   SET
-                    shape_type = $3,
-                    title = $4,
-                    text_content = $5,
-                    x = $6,
-                    y = $7,
-                    width = $8,
-                    height = $9,
-                    rotation = $10,
-                    z_index = $11,
-                    raw_shape = $12::jsonb,
-                    content_hash = $13,
+                    parent_shape_id = $3,
+                    shape_type = $4,
+                    title = $5,
+                    text_content = $6,
+                    x = $7,
+                    y = $8,
+                    width = $9,
+                    height = $10,
+                    rotation = $11,
+                    z_index = $12,
+                    raw_shape = $13::jsonb,
+                    content_hash = $14,
                     revision = s.revision + 1
                   WHERE s.id = $1
                     AND s.canvas_id = $2
@@ -655,6 +721,7 @@ export class CanvasService {
                   RETURNING
                     s.id,
                     s.canvas_id,
+                    s.parent_shape_id,
                     s.shape_type,
                     s.title,
                     s.text_content,
@@ -667,6 +734,7 @@ export class CanvasService {
                     s.raw_shape,
                     s.content_hash,
                     s.revision,
+                    0::int AS child_shape_count,
                     s.created_at,
                     s.updated_at,
                     s.deleted_at
@@ -674,6 +742,7 @@ export class CanvasService {
                 [
                   operation.shapeId,
                   canvas.id,
+                  mergedValues.parentShapeId,
                   mergedValues.shapeType,
                   mergedValues.title,
                   mergedValues.textContent,
@@ -777,6 +846,7 @@ export class CanvasService {
         SELECT
           s.id,
           s.canvas_id,
+          s.parent_shape_id,
           s.shape_type,
           s.title,
           s.text_content,
@@ -789,11 +859,19 @@ export class CanvasService {
           s.raw_shape,
           s.content_hash,
           s.revision,
+          child_counts.child_shape_count,
           s.created_at,
           s.updated_at,
           s.deleted_at
         FROM canvas_freeform_shapes s
         INNER JOIN canvas c ON c.id = s.canvas_id
+        LEFT JOIN LATERAL (
+          SELECT COUNT(*)::int AS child_shape_count
+          FROM canvas_freeform_shapes child
+          WHERE child.canvas_id = s.canvas_id
+            AND child.parent_shape_id = s.id
+            AND child.deleted_at IS NULL
+        ) child_counts ON TRUE
         WHERE s.id = $1
           AND c.workspace_id = $2
           AND c.board_type = 'freeform'
@@ -979,6 +1057,7 @@ export class CanvasService {
         SELECT
           s.id,
           s.canvas_id,
+          s.parent_shape_id,
           s.shape_type,
           s.title,
           s.text_content,
@@ -1026,6 +1105,7 @@ export class CanvasService {
               SELECT
                 id,
                 canvas_id,
+                parent_shape_id,
                 shape_type,
                 title,
                 text_content,
@@ -1061,17 +1141,18 @@ export class CanvasService {
             `
               UPDATE canvas_freeform_shapes s
               SET
-                shape_type = $3,
-                title = $4,
-                text_content = $5,
-                x = $6,
-                y = $7,
-                width = $8,
-                height = $9,
-                rotation = $10,
-                z_index = $11,
-                raw_shape = $12::jsonb,
-                content_hash = $13,
+                parent_shape_id = $3,
+                shape_type = $4,
+                title = $5,
+                text_content = $6,
+                x = $7,
+                y = $8,
+                width = $9,
+                height = $10,
+                rotation = $11,
+                z_index = $12,
+                raw_shape = $13::jsonb,
+                content_hash = $14,
                 revision = s.revision + 1
               WHERE s.id = $1
                 AND s.canvas_id = $2
@@ -1079,6 +1160,7 @@ export class CanvasService {
               RETURNING
                 s.id,
                 s.canvas_id,
+                s.parent_shape_id,
                 s.shape_type,
                 s.title,
                 s.text_content,
@@ -1091,6 +1173,7 @@ export class CanvasService {
                 s.raw_shape,
                 s.content_hash,
                 s.revision,
+                0::int AS child_shape_count,
                 s.created_at,
                 s.updated_at,
                 s.deleted_at
@@ -1098,6 +1181,7 @@ export class CanvasService {
             [
               id,
               targetShape.canvas_id,
+              mergedValues.parentShapeId,
               mergedValues.shapeType,
               mergedValues.title,
               mergedValues.textContent,
@@ -1146,6 +1230,7 @@ export class CanvasService {
         SELECT
           s.id,
           s.canvas_id,
+          s.parent_shape_id,
           s.shape_type,
           s.title,
           s.text_content,

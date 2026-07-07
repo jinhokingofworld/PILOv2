@@ -14,6 +14,19 @@ import {
   PiloCodeMirrorEditor,
   type CodeScrollAnchor,
 } from "./PiloCodeMirrorEditor";
+import {
+  PILO_CODE_BLOCK_COLLAPSED_META_KEY,
+  PILO_CODE_BLOCK_EXPANDED_SIZE_META_KEY,
+  getCodeLineCount,
+  getCodePreview,
+  getPiloCodeBlockExpandedSize,
+  isPiloCodeBlockCollapsed,
+} from "../../../../utils/canvas-collapse";
+
+const PILO_COLLAPSED_CODE_BLOCK_SIZE = {
+  h: 72,
+  w: 180,
+};
 
 export function PiloCodeBlockComponent({
   shape,
@@ -25,6 +38,9 @@ export function PiloCodeBlockComponent({
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">(
     "idle",
   );
+  const isCollapsed = isPiloCodeBlockCollapsed(shape);
+  const lineCount = getCodeLineCount(shape.props.code);
+  const preview = getCodePreview(shape.props.code);
   const isEditing = useValue(
     "pilo-code-block-editing",
     () => editor.getEditingShapeId() === shape.id,
@@ -39,6 +55,44 @@ export function PiloCodeBlockComponent({
         props,
       },
     ]);
+  }
+
+  function toggleCollapsed(event: PointerEvent<HTMLButtonElement>) {
+    const nextCollapsed = !isCollapsed;
+    const expandedSize = getPiloCodeBlockExpandedSize(shape);
+    const currentSize = {
+      h: shape.props.h,
+      w: shape.props.w,
+    };
+    const nextSize = nextCollapsed
+      ? PILO_COLLAPSED_CODE_BLOCK_SIZE
+      : expandedSize ?? undefined;
+
+    editor.markEventAsHandled(event);
+    event.stopPropagation();
+    editor.updateShapes([
+      {
+        id: shape.id,
+        type: shape.type,
+        props: {
+          isCollapsed: nextCollapsed,
+          ...(nextSize ?? {}),
+        },
+        meta: {
+          ...(shape.meta ?? {}),
+          [PILO_CODE_BLOCK_COLLAPSED_META_KEY]: nextCollapsed,
+          ...(nextCollapsed
+            ? {
+                [PILO_CODE_BLOCK_EXPANDED_SIZE_META_KEY]: currentSize,
+              }
+            : {}),
+        },
+      },
+    ]);
+
+    if (nextCollapsed && isEditing) {
+      editor.setEditingShape(null);
+    }
   }
 
   function updateScrollY(scrollY: number, anchor: CodeScrollAnchor) {
@@ -89,7 +143,7 @@ export function PiloCodeBlockComponent({
 
   return (
     <HTMLContainer
-      className={`pilo-code-block-shape${isEditing ? " is-editing" : ""}`}
+      className={`pilo-code-block-shape${isEditing ? " is-editing" : ""}${isCollapsed ? " is-collapsed" : ""}`}
       style={{
         width: shape.props.w,
         height: shape.props.h,
@@ -137,6 +191,15 @@ export function PiloCodeBlockComponent({
               <small>{shape.props.language}</small>
               <button
                 type="button"
+                className="pilo-code-collapse-button"
+                aria-label={isCollapsed ? "코드 블록 펼치기" : "코드 블록 접기"}
+                onClick={toggleCollapsed}
+                onPointerDown={handleEditorPointerDown}
+              >
+                {isCollapsed ? "펼치기" : "접기"}
+              </button>
+              <button
+                type="button"
                 className="pilo-code-copy-button"
                 aria-label="코드 복사"
                 onClick={(event) => {
@@ -167,6 +230,14 @@ export function PiloCodeBlockComponent({
               onPointerDown={handleEditorPointerDown}
               onScrollYChange={updateScrollY}
             />
+          </div>
+        ) : isCollapsed ? (
+          <div className="pilo-code-preview">
+            <div>
+              <span>{shape.props.language}</span>
+              <span>{lineCount} lines</span>
+            </div>
+            <pre>{preview || " "}</pre>
           </div>
         ) : (
           <div className="pilo-code-editor">

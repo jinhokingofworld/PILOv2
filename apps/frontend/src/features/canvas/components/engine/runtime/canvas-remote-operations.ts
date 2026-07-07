@@ -4,6 +4,7 @@ import {
   normalizeCanvasShape,
 } from "@/features/canvas/api/canvas-normalizers";
 import { normalizeCanvasFreeformShapes } from "../../../utils/canvas-storage";
+import { isPiloFrameCollapsed } from "../../../utils/canvas-collapse";
 import type { PiloCanvasFreeformShape, PiloCanvasViewportBounds } from "../types";
 import {
   buildFreeformShapeMap,
@@ -147,8 +148,21 @@ export function applyCanvasRemoteOperation({
   const currentShapeMap = buildFreeformShapeMap(currentShapes);
   const currentShape = currentShapeMap.get(shapeId);
   const nextShape = preserveArrowBindingMeta(currentShape, cloneShape(incomingShape));
+  const parentId =
+    typeof nextShape.parentId === "string" ? nextShape.parentId : null;
 
   shapeDetailCache.set(shapeId, nextShape);
+
+  if (parentId) {
+    const parentShape = currentShapeMap.get(parentId);
+
+    if (!parentShape || isPiloFrameCollapsed(parentShape)) {
+      return {
+        changed: false,
+        nextShapes: currentShapes,
+      };
+    }
+  }
 
   if (!currentShape && !intersectsViewport(nextShape, viewportBounds)) {
     return {

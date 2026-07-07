@@ -38,6 +38,7 @@ type UseCanvasShapePersistenceOptions = {
   shapeDetailCacheRef: RuntimeRef<Map<string, PiloCanvasFreeformShape>>;
   shapeSyncQueueRef: RuntimeRef<CanvasShapeSyncQueue | null>;
   storageMode: CanvasRuntimeStorageMode;
+  unloadedShapeIdsRef: RuntimeRef<Set<string>>;
 };
 
 export function useCanvasShapePersistence({
@@ -52,13 +53,41 @@ export function useCanvasShapePersistence({
   shapeDetailCacheRef,
   shapeSyncQueueRef,
   storageMode,
+  unloadedShapeIdsRef,
 }: UseCanvasShapePersistenceOptions) {
+  function filterUnloadedShapes(shapes: PiloCanvasFreeformShape[]) {
+    return shapes.filter((shape) => {
+      const shapeId = getFreeformShapeId(shape);
+
+      return !shapeId || !unloadedShapeIdsRef.current.has(shapeId);
+    });
+  }
+
+  function buildPersistableLocalShapes(shapes: PiloCanvasFreeformShape[]) {
+    const shapeMap = buildFreeformShapeMap(shapes);
+
+    unloadedShapeIdsRef.current.forEach((shapeId) => {
+      const unloadedShape = shapeDetailCacheRef.current.get(shapeId);
+
+      if (unloadedShape) {
+        shapeMap.set(shapeId, unloadedShape);
+      }
+    });
+
+    return Array.from(shapeMap.values());
+  }
+
   function markPendingLocalShapeChanges(
     currentShapes: PiloCanvasFreeformShape[],
     nextShapes: PiloCanvasFreeformShape[],
   ) {
-    const changedShapeIds = getChangedFreeformShapeIds(currentShapes, nextShapes);
-    const nextShapeMap = buildFreeformShapeMap(nextShapes);
+    const currentSyncShapes = filterUnloadedShapes(currentShapes);
+    const nextSyncShapes = filterUnloadedShapes(nextShapes);
+    const changedShapeIds = getChangedFreeformShapeIds(
+      currentSyncShapes,
+      nextSyncShapes,
+    );
+    const nextShapeMap = buildFreeformShapeMap(nextSyncShapes);
     const pendingVersions = new Map<string, number>();
 
     changedShapeIds.forEach((shapeId) => {
@@ -165,8 +194,8 @@ export function useCanvasShapePersistence({
           );
           const shapeSyncQueue = shapeSyncQueueRef.current;
           const syncInput = {
-            nextShapes: nextFreeformShapes,
-            previousShapes: currentFreeformShapes,
+            nextShapes: filterUnloadedShapes(nextFreeformShapes),
+            previousShapes: filterUnloadedShapes(currentFreeformShapes),
           };
 
           if (shapeSyncQueue) {
@@ -197,7 +226,11 @@ export function useCanvasShapePersistence({
               });
           }
         } else {
-          writeCanvasStorage("freeform-shapes", board.id, nextFreeformShapes);
+          writeCanvasStorage(
+            "freeform-shapes",
+            board.id,
+            buildPersistableLocalShapes(nextFreeformShapes),
+          );
         }
 
         return nextFreeformShapes;
@@ -212,6 +245,7 @@ export function useCanvasShapePersistence({
       setFreeformShapes,
       shapeSyncQueueRef,
       storageMode,
+      unloadedShapeIdsRef,
     ],
   );
 
