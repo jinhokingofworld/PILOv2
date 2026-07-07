@@ -1,7 +1,23 @@
-import { badRequest } from "../../common/api-error";
+import { badRequest, payloadTooLarge } from "../../common/api-error";
+import {
+  CreateSqlErdSessionRequest,
+  NormalizedCreateSqlErdSessionInput,
+  SqlErdDialect,
+  SqlErdJsonObject,
+  SqlErdSourceFormat
+} from "./sql-erd.types";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const DEFAULT_TITLE = "Untitled ERD";
+const DEFAULT_SOURCE_FORMAT: SqlErdSourceFormat = "sql";
+const DEFAULT_DIALECT: SqlErdDialect = "auto";
+const MAX_TITLE_LENGTH = 120;
+const MAX_SOURCE_TEXT_BYTES = 1024 * 1024;
+const MAX_TABLE_COUNT = 100;
+const MAX_RELATION_COUNT = 300;
+const SOURCE_FORMATS = new Set<SqlErdSourceFormat>(["sql"]);
+const DIALECTS = new Set<SqlErdDialect>(["auto", "postgresql", "mysql"]);
 
 export function validateSqlErdSessionId(value: unknown): string {
   if (typeof value !== "string" || !UUID_PATTERN.test(value)) {
@@ -9,4 +25,161 @@ export function validateSqlErdSessionId(value: unknown): string {
   }
 
   return value;
+}
+
+export function validateCreateSqlErdSessionRequest(
+  body: CreateSqlErdSessionRequest
+): NormalizedCreateSqlErdSessionInput {
+  const draft = readBody(body);
+  const modelJson = readVersionedJsonObject(draft.modelJson, "modelJson");
+  const layoutJson = readVersionedJsonObject(draft.layoutJson, "layoutJson");
+  const counts = readModelCounts(modelJson);
+
+  return {
+    title: readTitle(draft.title),
+    sourceFormat: readSourceFormat(draft.sourceFormat),
+    dialect: readDialect(draft.dialect),
+    sourceText: readSourceText(draft.sourceText),
+    modelJson,
+    layoutJson,
+    settingsJson: readOptionalJsonObject(draft.settingsJson, "settingsJson"),
+    tableCount: counts.tableCount,
+    relationCount: counts.relationCount
+  };
+}
+
+function readBody(body: unknown): Record<string, unknown> {
+  if (!isPlainJsonObject(body)) {
+    throw badRequest("Request body must be an object");
+  }
+
+  return body;
+}
+
+function readTitle(value: unknown): string {
+  if (value === undefined) {
+    return DEFAULT_TITLE;
+  }
+
+  if (typeof value !== "string") {
+    throw badRequest("title must be a string");
+  }
+
+  const title = value.trim();
+  if (!title) {
+    throw badRequest("title is required");
+  }
+
+  if (title.length > MAX_TITLE_LENGTH) {
+    throw badRequest("title must be 120 characters or less");
+  }
+
+  return title;
+}
+
+function readSourceFormat(value: unknown): SqlErdSourceFormat {
+  if (value === undefined) {
+    return DEFAULT_SOURCE_FORMAT;
+  }
+
+  if (typeof value !== "string" || !SOURCE_FORMATS.has(value as SqlErdSourceFormat)) {
+    throw badRequest("sourceFormat is invalid");
+  }
+
+  return value as SqlErdSourceFormat;
+}
+
+function readDialect(value: unknown): SqlErdDialect {
+  if (value === undefined) {
+    return DEFAULT_DIALECT;
+  }
+
+  if (typeof value !== "string" || !DIALECTS.has(value as SqlErdDialect)) {
+    throw badRequest("dialect is invalid");
+  }
+
+  return value as SqlErdDialect;
+}
+
+function readSourceText(value: unknown): string {
+  if (value === undefined) {
+    return "";
+  }
+
+  if (typeof value !== "string") {
+    throw badRequest("sourceText must be a string");
+  }
+
+  if (Buffer.byteLength(value, "utf8") > MAX_SOURCE_TEXT_BYTES) {
+    throw payloadTooLarge("sourceText is too large");
+  }
+
+  return value;
+}
+
+function readVersionedJsonObject(
+  value: unknown,
+  field: "modelJson" | "layoutJson"
+): SqlErdJsonObject {
+  if (!isPlainJsonObject(value)) {
+    throw badRequest(`${field} must be an object`);
+  }
+
+  if (value.version !== 1) {
+    throw badRequest(`${field}.version must be 1`);
+  }
+
+  return value;
+}
+
+function readOptionalJsonObject(
+  value: unknown,
+  field: "settingsJson"
+): SqlErdJsonObject {
+  if (value === undefined) {
+    return {};
+  }
+
+  if (!isPlainJsonObject(value)) {
+    throw badRequest(`${field} must be an object`);
+  }
+
+  return value;
+}
+
+function readModelCounts(modelJson: SqlErdJsonObject): {
+  tableCount: number;
+  relationCount: number;
+} {
+  const schema = modelJson.schema;
+  if (!isPlainJsonObject(schema)) {
+    throw badRequest("modelJson.schema must be an object");
+  }
+
+  if (!Array.isArray(schema.tables)) {
+    throw badRequest("modelJson.schema.tables must be an array");
+  }
+
+  if (!Array.isArray(schema.relations)) {
+    throw badRequest("modelJson.schema.relations must be an array");
+  }
+
+  const tableCount = schema.tables.length;
+  const relationCount = schema.relations.length;
+  if (tableCount > MAX_TABLE_COUNT) {
+    throw badRequest("table count limit exceeded");
+  }
+
+  if (relationCount > MAX_RELATION_COUNT) {
+    throw badRequest("relation count limit exceeded");
+  }
+
+  return {
+    tableCount,
+    relationCount
+  };
+}
+
+function isPlainJsonObject(value: unknown): value is SqlErdJsonObject {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

@@ -6,6 +6,18 @@ export type SqlErdSourceFormat = "sql";
 export type SqlErdDialect = "auto" | "postgresql" | "mysql";
 export type SqlErdJsonObject = Record<string, unknown>;
 
+export interface NormalizedCreateSqlErdSessionInput {
+  title: string;
+  sourceFormat: SqlErdSourceFormat;
+  dialect: SqlErdDialect;
+  sourceText: string;
+  modelJson: SqlErdJsonObject;
+  layoutJson: SqlErdJsonObject;
+  settingsJson: SqlErdJsonObject;
+  tableCount: number;
+  relationCount: number;
+}
+
 export interface SqlErdSessionRow extends QueryResultRow {
   id: string;
   workspace_id: string;
