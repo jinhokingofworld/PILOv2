@@ -19,3 +19,8 @@ export interface ListBoardIssuesQuery {
   page?: unknown;
   limit?: unknown;
 }
+
+export interface UpdateBoardIssueStatusRequest {
+  columnId?: unknown;
+  previousColumnId?: unknown;
+}

@@ -14,6 +14,7 @@ import { GithubOAuthIntegrationService } from "./github-oauth-integration.servic
 import { GithubOAuthStateService } from "./github-oauth-state.service";
 import { GithubProjectV2SyncTokenService } from "./github-project-v2-sync-token.service";
 import { GithubProjectV2Service } from "./github-project-v2.service";
+import { GithubProjectV2WriteService } from "./github-project-v2-write.service";
 import { GithubPullRequestRemoteService } from "./github-pull-request-remote.service";
 import { GithubReviewSubmissionService } from "./github-review-submission.service";
 import { GithubSourceReadService } from "./github-source-read.service";
@@ -37,6 +38,7 @@ import { GithubWebhookService } from "./github-webhook.service";
     GithubOAuthStateService,
     GithubProjectV2SyncTokenService,
     GithubProjectV2Service,
+    GithubProjectV2WriteService,
     GithubPullRequestRemoteService,
     GithubReviewSubmissionService,
     GithubSourceReadService,
@@ -45,6 +47,6 @@ import { GithubWebhookService } from "./github-webhook.service";
     GithubTokenEncryptionService,
     GithubWebhookService
   ],
-  exports: [GithubIntegrationService]
+  exports: [GithubIntegrationService, GithubProjectV2WriteService]
 })
 export class GithubIntegrationModule {}
