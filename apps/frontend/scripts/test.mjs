@@ -153,6 +153,13 @@ const piloCanvasStateReporter = await readFile(
   ),
   "utf8"
 );
+const piloCanvasArrowBindings = await readFile(
+  new URL(
+    "../src/features/canvas/components/engine/surface/pilo-canvas-arrow-bindings.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
 const piloCanvasTypes = await readFile(
   new URL("../src/features/canvas/components/engine/types.ts", import.meta.url),
   "utf8"
@@ -491,7 +498,16 @@ assert.doesNotMatch(piloTldrawCanvas, /PiloCanvasSmartGuides/);
 assert.doesNotMatch(piloTldrawCanvas, /applyPiloSmartSnap/);
 assert.doesNotMatch(piloTldrawCanvas, /SmartGuidesOverlay/);
 assert.match(piloTldrawCanvas, /cameraRestoreVersion/);
-assert.match(piloTldrawCanvas, /resetFreeformShapes\(editor, freeformShapesRef\.current\)/);
+assert.match(piloTldrawCanvas, /resetFreeformShapes\(/);
+assert.match(piloTldrawCanvas, /freeformShapesRef\.current/);
+assert.match(piloTldrawCanvas, /pendingArrowBindingsRef/);
+assert.match(piloTldrawCanvas, /piloDefaultArrowKindHydrationGuardRef/);
+assert.match(piloTldrawCanvas, /readSerializedArrowBindings/);
+assert.match(piloTldrawCanvas, /restoreSerializedArrowBindings/);
+assert.match(piloTldrawCanvas, /uniquePendingArrowBindings/);
+assert.match(piloTldrawCanvas, /shape\.props\.kind !== "elbow"/);
+assert.match(piloTldrawCanvas, /kind: "elbow"/);
+assert.match(piloTldrawCanvas, /editor\.createShapes\(sortFreeformShapesForCreate\(shapes\)\)/);
 assert.match(piloTldrawCanvas, /onShapeDetailRequest/);
 assert.match(piloTldrawCanvas, /onViewportBoundsChange/);
 assert.match(piloTldrawCanvas, /placePiloCanvasShapeAt/);
@@ -501,6 +517,13 @@ assert.match(piloCanvasStateReporter, /onFreeformShapesChange/);
 assert.match(piloCanvasStateReporter, /onFreeformShapesDraftChange/);
 assert.match(piloCanvasStateReporter, /onViewChange/);
 assert.match(piloCanvasStateReporter, /getViewportPageBounds/);
+assert.match(piloCanvasStateReporter, /withSerializedArrowBindings/);
+assert.match(piloCanvasArrowBindings, /piloArrowBindingsV1/);
+assert.match(piloCanvasArrowBindings, /getBindingsInvolvingShape\(shape\.id, "arrow"\)/);
+assert.match(piloCanvasArrowBindings, /editor\.createBindings/);
+assert.match(piloCanvasArrowBindings, /pending/);
+assert.doesNotMatch(piloCanvasArrowBindings, /fetch\(/);
+assert.doesNotMatch(piloCanvasArrowBindings, /src\/shared\/tldraw/);
 assert.match(piloCanvasTypes, /export type PiloCanvasFreeformShape/);
 assert.match(piloCanvasTypes, /export type PiloCanvasViewSetting/);
 assert.match(piloCanvasTypes, /export type PiloCanvasViewportBounds/);
