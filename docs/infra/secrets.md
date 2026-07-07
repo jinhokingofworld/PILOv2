@@ -83,9 +83,8 @@ fallback으로만 사용한다.
 
 | Secret key | 설명 |
 | --- | --- |
-| `DATABASE_URL` | 필요한 경우 PostgreSQL 접속 문자열. MVP에서는 source of truth로 사용하지 않는다. |
+| `DATABASE_URL` | PostgreSQL 접속 문자열. Socket bearer session 검증과 canvas room access 검증에 사용한다. |
 | `REDIS_URL` | app-level realtime pub/sub용 Redis 접속 문자열 |
-| `JWT_SECRET` | socket 인증 검증용 |
 
 ### AI Worker
 
@@ -151,7 +150,8 @@ UI Preview는 local 개발 편의 기능이며 실제 bearer session이나 Works
 | 변수 | 설명 |
 | --- | --- |
 | `PORT` | Realtime Server port |
-| `CORS_ORIGIN` | 허용 frontend origin |
+| `DATABASE_SSL` | Set to `true` when `DATABASE_URL` requires SSL. |
+| `SOCKET_IO_CORS_ORIGIN` | Socket.IO 허용 frontend origin. 여러 개면 comma-separated로 설정한다. |
 | `REALTIME_SCOPE` | MVP 기본값: `notifications_status_only` |
 
 ### AI Worker
