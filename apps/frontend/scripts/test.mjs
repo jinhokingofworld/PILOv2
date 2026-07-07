@@ -665,3 +665,4 @@ assert.match(pages, /Panel/);
 await import("./calendar/test.mjs");
 await import("./meeting/test.mjs");
 await import("./pr-review/test.mjs");
+await import("./sql-erd/test.mjs");
