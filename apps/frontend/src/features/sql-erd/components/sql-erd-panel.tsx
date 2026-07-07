@@ -11,9 +11,15 @@ import {
   Play
 } from "lucide-react";
 
+import { useAuthSession } from "@/features/auth/auth-session";
+import { createSqlErdApiClient } from "@/features/sql-erd/api/client";
 import { SqlErdCanvas } from "@/features/sql-erd/components/sql-erd-canvas";
 import { commerceSqltoerdFixture } from "@/features/sql-erd/fixtures/commerce";
-import type { SqlErdSelection } from "@/features/sql-erd/types";
+import type {
+  SqlErdSelection,
+  SqltoerdSessionPayload,
+  SqltoerdSessionFixture
+} from "@/features/sql-erd/types";
 import {
   createSqlErdInspectorViewModel,
   formatSqlErdRelationEndpoint,
@@ -27,19 +33,84 @@ import {
 } from "@/features/sql-erd/utils/model";
 import { cn } from "@/lib/utils";
 
-const sampleSql = commerceSqltoerdFixture.sourceText;
-const fixtureModelJson = commerceSqltoerdFixture.modelJson;
-const fixtureLayoutJson = commerceSqltoerdFixture.layoutJson;
-const fixtureCounts = getSqltoerdModelCounts(fixtureModelJson);
+type SqlErdViewSession = Pick<
+  SqltoerdSessionPayload,
+  | "dialect"
+  | "layoutJson"
+  | "modelJson"
+  | "settingsJson"
+  | "sourceFormat"
+  | "sourceText"
+  | "title"
+> & {
+  id: string | null;
+  revision: number | null;
+};
+
+type SqlErdSessionLoadState = {
+  label: string;
+  message: string;
+  tone: "neutral" | "success";
+};
+
+const sampleSqlErdViewSession = createSampleSqlErdViewSession(
+  commerceSqltoerdFixture
+);
+
+function createSampleSqlErdViewSession(
+  fixture: SqltoerdSessionFixture
+): SqlErdViewSession {
+  return {
+    id: null,
+    revision: null,
+    title: fixture.title,
+    sourceFormat: fixture.sourceFormat,
+    dialect: fixture.dialect,
+    sourceText: fixture.sourceText,
+    modelJson: fixture.modelJson,
+    layoutJson: fixture.layoutJson,
+    settingsJson: fixture.settingsJson
+  };
+}
+
+function createWorkspaceSqlErdViewSession(
+  session: SqltoerdSessionPayload
+): SqlErdViewSession {
+  return {
+    id: session.id,
+    revision: session.revision,
+    title: session.title,
+    sourceFormat: session.sourceFormat,
+    dialect: session.dialect,
+    sourceText: session.sourceText,
+    modelJson: session.modelJson,
+    layoutJson: session.layoutJson,
+    settingsJson: session.settingsJson
+  };
+}
 
 export function SqlErdPanel() {
+  const authSession = useAuthSession();
   const [isSourceOpen, setIsSourceOpen] = useState(false);
   const [isInspectorOpen, setIsInspectorOpen] = useState(false);
+  const [sqlErdViewSession, setSqlErdViewSession] = useState<SqlErdViewSession>(
+    sampleSqlErdViewSession
+  );
+  const [sessionLoadState, setSessionLoadState] =
+    useState<SqlErdSessionLoadState>({
+      label: "Sample",
+      message: "Built-in sample ERD",
+      tone: "neutral"
+    });
   const [selectedSqlErdObject, setSelectedSqlErdObject] =
     useState<SqlErdSelection>({ type: "none" });
   const modelIndex = useMemo(
-    () => createSqltoerdModelIndex(fixtureModelJson),
-    []
+    () => createSqltoerdModelIndex(sqlErdViewSession.modelJson),
+    [sqlErdViewSession.modelJson]
+  );
+  const sessionCounts = useMemo(
+    () => getSqltoerdModelCounts(sqlErdViewSession.modelJson),
+    [sqlErdViewSession.modelJson]
   );
   const inspectorViewModel = useMemo(
     () => createSqlErdInspectorViewModel(selectedSqlErdObject, modelIndex),
@@ -51,15 +122,94 @@ export function SqlErdPanel() {
     setIsInspectorOpen(window.matchMedia("(min-width: 1280px)").matches);
   }, []);
 
+  useEffect(() => {
+    if (!authSession) {
+      setSqlErdViewSession(sampleSqlErdViewSession);
+      setSessionLoadState({
+        label: "Sample",
+        message: "Built-in sample ERD",
+        tone: "neutral"
+      });
+      return;
+    }
+
+    let cancelled = false;
+    const { accessToken, activeWorkspaceId } = authSession;
+    const sqlErdApiClient = createSqlErdApiClient({
+      accessToken
+    });
+
+    setSessionLoadState({
+      label: "Loading",
+      message: "Loading workspace session",
+      tone: "neutral"
+    });
+
+    async function loadActiveSession() {
+      try {
+        const activeSession = await sqlErdApiClient.getActiveSession(
+          activeWorkspaceId
+        );
+
+        if (cancelled) {
+          return;
+        }
+
+        if (activeSession) {
+          setSqlErdViewSession(createWorkspaceSqlErdViewSession(activeSession));
+          setSessionLoadState({
+            label: "Workspace",
+            message: `Workspace session revision ${activeSession.revision}`,
+            tone: "success"
+          });
+        } else {
+          setSqlErdViewSession(sampleSqlErdViewSession);
+          setSessionLoadState({
+            label: "Sample",
+            message: "No saved workspace session",
+            tone: "neutral"
+          });
+        }
+
+        setSelectedSqlErdObject({ type: "none" });
+      } catch {
+        if (cancelled) {
+          return;
+        }
+
+        setSqlErdViewSession(sampleSqlErdViewSession);
+        setSessionLoadState({
+          label: "Sample",
+          message: "Workspace session could not be loaded",
+          tone: "neutral"
+        });
+        setSelectedSqlErdObject({ type: "none" });
+      }
+    }
+
+    void loadActiveSession();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authSession?.accessToken, authSession?.activeWorkspaceId]);
+
   return (
     <section className="flex min-h-[calc(100vh-8.5rem)] overflow-hidden rounded-lg border bg-background shadow-sm">
       <SourcePanel
+        counts={sessionCounts}
         isOpen={isSourceOpen}
         onToggle={() => setIsSourceOpen((current) => !current)}
+        sessionLoadState={sessionLoadState}
+        sourceText={sqlErdViewSession.sourceText}
       />
       <CanvasShell
+        layoutJson={sqlErdViewSession.layoutJson}
+        modelJson={sqlErdViewSession.modelJson}
         onSelectionChange={setSelectedSqlErdObject}
         selectedSqlErdObject={selectedSqlErdObject}
+        sessionLoadState={sessionLoadState}
+        title={sqlErdViewSession.title}
       />
       <InspectorPanel
         isOpen={isInspectorOpen}
@@ -75,7 +225,19 @@ type PanelToggleProps = {
   onToggle: () => void;
 };
 
-function SourcePanel({ isOpen, onToggle }: PanelToggleProps) {
+type SourcePanelProps = PanelToggleProps & {
+  counts: ReturnType<typeof getSqltoerdModelCounts>;
+  sessionLoadState: SqlErdSessionLoadState;
+  sourceText: string;
+};
+
+function SourcePanel({
+  counts,
+  isOpen,
+  onToggle,
+  sessionLoadState,
+  sourceText
+}: SourcePanelProps) {
   if (!isOpen) {
     return (
       <CollapsedPanelButton
@@ -98,10 +260,13 @@ function SourcePanel({ isOpen, onToggle }: PanelToggleProps) {
             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               SQL Source
             </p>
-            <StatusPill label="Idle" tone="neutral" />
+            <StatusPill
+              label={sessionLoadState.label}
+              tone={sessionLoadState.tone}
+            />
           </div>
           <p className="mt-1 text-xs text-muted-foreground">
-            {fixtureCounts.tableCount} tables / {fixtureCounts.relationCount}{" "}
+            {counts.tableCount} tables / {counts.relationCount}{" "}
             relations
           </p>
         </div>
@@ -137,7 +302,8 @@ function SourcePanel({ isOpen, onToggle }: PanelToggleProps) {
         <textarea
           aria-label="SQL source"
           className="min-h-0 flex-1 resize-none overflow-auto border-0 bg-[#0d1117] p-4 font-mono text-[13px] leading-6 text-slate-100 outline-none placeholder:text-slate-500"
-          defaultValue={sampleSql}
+          defaultValue={sourceText}
+          key={sourceText}
           spellCheck={false}
         />
       </div>
@@ -164,13 +330,21 @@ function SelectorLabel({ label, value }: SelectorLabelProps) {
 }
 
 type CanvasShellProps = {
+  layoutJson: SqltoerdSessionPayload["layoutJson"];
+  modelJson: SqltoerdSessionPayload["modelJson"];
   onSelectionChange: (selection: SqlErdSelection) => void;
   selectedSqlErdObject: SqlErdSelection;
+  sessionLoadState: SqlErdSessionLoadState;
+  title: string;
 };
 
 function CanvasShell({
+  layoutJson,
+  modelJson,
   onSelectionChange,
-  selectedSqlErdObject
+  selectedSqlErdObject,
+  sessionLoadState,
+  title
 }: CanvasShellProps) {
   return (
     <div className="relative flex min-w-0 flex-1 flex-col">
@@ -183,23 +357,25 @@ function CanvasShell({
             <Database className="size-4 text-muted-foreground" />
           </div>
           <div className="min-w-0">
-            <p className="truncate text-sm font-semibold">SQLtoERD Canvas</p>
+            <p className="truncate text-sm font-semibold">{title}</p>
             <p className="truncate text-xs text-muted-foreground">
-              Fixture table card canvas
+              {sessionLoadState.message}
             </p>
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <StatusPill label="Fixture" tone="neutral" />
-          <StatusPill label="Ready" tone="success" />
+          <StatusPill
+            label={sessionLoadState.label}
+            tone={sessionLoadState.tone}
+          />
         </div>
       </div>
 
       <div className="relative min-h-0 flex-1 overflow-hidden">
         <SqlErdCanvas
           className="absolute inset-0"
-          layoutJson={fixtureLayoutJson}
-          modelJson={fixtureModelJson}
+          layoutJson={layoutJson}
+          modelJson={modelJson}
           onSelectionChange={onSelectionChange}
           selectedSqlErdObject={selectedSqlErdObject}
         />

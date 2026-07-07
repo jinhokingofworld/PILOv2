@@ -383,28 +383,43 @@ function resetSqlErdCanvas(
   editor: Editor,
   shapes: TLShapePartial[]
 ) {
-  const existingShapeIds = editor
-    .getCurrentPageShapes()
-    .map((shape) => shape.id as TLShapeId);
+  editor.run(
+    () => {
+      const existingShapeIds = editor
+        .getCurrentPageShapes()
+        .map((shape) => shape.id as TLShapeId);
 
-  if (existingShapeIds.length) {
-    editor.deleteShapes(existingShapeIds);
-  }
+      if (existingShapeIds.length) {
+        editor.deleteShapes(existingShapeIds);
+      }
 
-  if (!shapes.length) {
-    editor.selectNone();
-    return;
-  }
+      if (!shapes.length) {
+        editor.selectNone();
+        return;
+      }
 
-  editor.createShapes(shapes);
-  editor.sendToBack(
-    shapes
-      .filter((shape) => shape.type === SQLTOERD_RELATION_SHAPE_TYPE)
-      .map((shape) => shape.id as TLShapeId)
+      editor.createShapes(shapes);
+      editor.sendToBack(
+        shapes
+          .filter((shape) => shape.type === SQLTOERD_RELATION_SHAPE_TYPE)
+          .map((shape) => shape.id as TLShapeId)
+      );
+    },
+    { history: "ignore" }
   );
   window.requestAnimationFrame(() => {
     editor.zoomToFit({ animation: { duration: 160 } });
   });
+}
+
+function SqlErdCanvasShapeSync({ shapes }: { shapes: TLShapePartial[] }) {
+  const editor = useEditor();
+
+  useEffect(() => {
+    resetSqlErdCanvas(editor, shapes);
+  }, [editor, shapes]);
+
+  return null;
 }
 
 function SqlErdRelationLayoutSync() {
@@ -541,9 +556,8 @@ export function SqlErdCanvas({
   const handleMount = useCallback(
     (editor: Editor) => {
       editor.setCurrentTool("select.idle");
-      resetSqlErdCanvas(editor, shapes);
     },
-    [shapes]
+    []
   );
 
   return (
@@ -554,6 +568,7 @@ export function SqlErdCanvas({
       onMount={handleMount}
       shapeUtils={sqlErdShapeUtils}
     >
+      <SqlErdCanvasShapeSync shapes={shapes} />
       <SqlErdRelationLayoutSync />
       {onSelectionChange ? (
         <SqlErdSelectionSync

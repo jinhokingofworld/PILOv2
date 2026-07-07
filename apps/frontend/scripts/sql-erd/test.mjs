@@ -16,6 +16,7 @@ async function compileSqlErdRuntimeModules() {
   const modelOutputPath = join(outputDir, "model.mjs");
   const inspectorOutputPath = join(outputDir, "inspector.mjs");
   const ddlParserOutputPath = join(outputDir, "ddl-parser.mjs");
+  const apiClientOutputPath = join(outputDir, "api-client.mjs");
 
   try {
     await compileTypeScriptModule(
@@ -32,19 +33,29 @@ async function compileSqlErdRuntimeModules() {
       ddlParserOutputPath,
       [[/from "@\/features\/sql-erd\/types"/g, 'from "./types-stub.mjs"']]
     );
+    await compileTypeScriptModule(
+      "../../src/features/sql-erd/api/client.ts",
+      apiClientOutputPath
+    );
 
     await writeFile(
       join(outputDir, "types-stub.mjs"),
       "export const SQLTOERD_MODEL_JSON_VERSION = 1;\n"
     );
 
-    const [modelRuntime, inspectorRuntime, ddlParserRuntime] = await Promise.all([
+    const [
+      modelRuntime,
+      inspectorRuntime,
+      ddlParserRuntime,
+      apiClientRuntime
+    ] = await Promise.all([
       import(pathToFileHref(modelOutputPath)),
       import(pathToFileHref(inspectorOutputPath)),
-      import(pathToFileHref(ddlParserOutputPath))
+      import(pathToFileHref(ddlParserOutputPath)),
+      import(pathToFileHref(apiClientOutputPath))
     ]);
 
-    return { ddlParserRuntime, inspectorRuntime, modelRuntime };
+    return { apiClientRuntime, ddlParserRuntime, inspectorRuntime, modelRuntime };
   } finally {
     await rm(outputDir, { force: true, recursive: true });
   }
@@ -162,6 +173,38 @@ function createRuntimeTestModel() {
   };
 }
 
+function createRuntimeTestSession(overrides = {}) {
+  const modelJson = overrides.modelJson ?? createRuntimeTestModel();
+
+  return {
+    id: overrides.id ?? "session-1",
+    workspaceId: overrides.workspaceId ?? "workspace-1",
+    title: overrides.title ?? "Runtime ERD",
+    sourceFormat: overrides.sourceFormat ?? "sql",
+    dialect: overrides.dialect ?? "postgresql",
+    sourceText: overrides.sourceText ?? "CREATE TABLE users (id BIGINT);",
+    modelJson,
+    layoutJson:
+      overrides.layoutJson ?? {
+        version: 1,
+        tableLayouts: [
+          { tableId: "table.users", x: 10, y: 20, width: 240 },
+          { tableId: "table.orders", x: 360, y: 20, width: 260 }
+        ]
+      },
+    settingsJson: overrides.settingsJson ?? {},
+    tableCount: overrides.tableCount ?? modelJson.schema.tables.length,
+    relationCount:
+      overrides.relationCount ?? modelJson.schema.relations.length,
+    revision: overrides.revision ?? 3,
+    createdBy: overrides.createdBy ?? "user-1",
+    updatedBy: overrides.updatedBy ?? "user-1",
+    createdAt: overrides.createdAt ?? "2026-07-07T00:00:00.000Z",
+    updatedAt: overrides.updatedAt ?? "2026-07-07T00:01:00.000Z",
+    deletedAt: overrides.deletedAt ?? null
+  };
+}
+
 const [
   apiSpec,
   types,
@@ -174,6 +217,7 @@ const [
   tableShape,
   relationShape,
   ddlParserUtils,
+  apiClient,
   packageJson
 ] =
   await Promise.all([
@@ -188,10 +232,11 @@ const [
     readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-table-shape.tsx"),
     readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-relation-shape.tsx"),
     readSqlErdFile("../../src/features/sql-erd/utils/ddl-parser.ts"),
+    readSqlErdFile("../../src/features/sql-erd/api/client.ts"),
     readSqlErdFile("../../package.json")
   ]);
 
-const { ddlParserRuntime, inspectorRuntime, modelRuntime } =
+const { apiClientRuntime, ddlParserRuntime, inspectorRuntime, modelRuntime } =
   await compileSqlErdRuntimeModules();
 const runtimeModel = createRuntimeTestModel();
 const runtimeModelIndex = modelRuntime.createSqltoerdModelIndex(runtimeModel);
@@ -261,6 +306,69 @@ assert.equal(
     (relation) => relation.id === runtimeUsersSelfRelation.id
   ).length,
   1
+);
+
+const sqlErdApiRequests = [];
+const runtimeSession = createRuntimeTestSession();
+const sqlErdApiClient = apiClientRuntime.createSqlErdApiClient({
+  accessToken: "token-1",
+  baseUrl: "https://api.example.test/api/v1/",
+  fetcher: async (url, init) => {
+    sqlErdApiRequests.push({ init, url });
+
+    return new Response(
+      JSON.stringify({
+        success: true,
+        data: runtimeSession
+      }),
+      {
+        headers: { "Content-Type": "application/json" },
+        status: 200
+      }
+    );
+  }
+});
+
+const restoredSession = await sqlErdApiClient.getActiveSession("workspace 1");
+
+assert.deepEqual(restoredSession, runtimeSession);
+assert.equal(sqlErdApiRequests.length, 1);
+assert.equal(
+  sqlErdApiRequests[0].url,
+  "https://api.example.test/api/v1/workspaces/workspace%201/sql-erd-session"
+);
+assert.equal(sqlErdApiRequests[0].init.method, "GET");
+assert.equal(sqlErdApiRequests[0].init.credentials, "same-origin");
+assert.equal(sqlErdApiRequests[0].init.headers.Authorization, "Bearer token-1");
+assert.equal(sqlErdApiRequests[0].init.headers.Accept, "application/json");
+
+const emptySqlErdApiClient = apiClientRuntime.createSqlErdApiClient({
+  fetcher: async () =>
+    new Response(JSON.stringify({ success: true, data: null }), {
+      headers: { "Content-Type": "application/json" },
+      status: 200
+    })
+});
+
+assert.equal(await emptySqlErdApiClient.getActiveSession("workspace-1"), null);
+
+const failingSqlErdApiClient = apiClientRuntime.createSqlErdApiClient({
+  fetcher: async () =>
+    new Response(
+      JSON.stringify({
+        success: false,
+        error: { code: "UNAUTHORIZED", message: "Unauthorized" }
+      }),
+      {
+        headers: { "Content-Type": "application/json" },
+        status: 401
+      }
+    )
+});
+
+await assert.rejects(
+  () => failingSqlErdApiClient.getActiveSession("workspace-1"),
+  /Unauthorized/
 );
 
 const postgresParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
@@ -461,6 +569,7 @@ assert.match(types, /export type SqlErdSelection/);
 assert.match(types, /type: "table"/);
 assert.match(types, /type: "column"/);
 assert.match(types, /type: "relation"/);
+assert.match(types, /export type SqltoerdSessionPayload/);
 
 assert.match(commerceFixture, /commerceSqltoerdFixture/);
 assert.match(commerceFixture, /title: "Commerce ERD"/);
@@ -503,6 +612,11 @@ assert.match(navigation, /SQLtoERD/);
 assert.match(navigation, /href: "\/sql-erd"/);
 
 assert.match(panel, /SqlErdCanvas/);
+assert.match(panel, /useAuthSession/);
+assert.match(panel, /createSqlErdApiClient/);
+assert.match(panel, /getActiveSession/);
+assert.match(panel, /sessionLoadState/);
+assert.match(panel, /setSqlErdViewSession/);
 assert.match(panel, /selectedSqlErdObject/);
 assert.match(panel, /setSelectedSqlErdObject/);
 assert.match(panel, /createSqlErdInspectorViewModel/);
@@ -510,6 +624,10 @@ assert.match(panel, /Column details/);
 assert.match(panel, /Table details/);
 assert.match(panel, /Relation details/);
 assert.match(panel, /features\/sql-erd\/utils\/inspector/);
+assert.match(panel, /sourceText=\{sqlErdViewSession\.sourceText\}/);
+assert.match(panel, /modelJson=\{sqlErdViewSession\.modelJson\}/);
+assert.match(panel, /layoutJson=\{sqlErdViewSession\.layoutJson\}/);
+assert.match(panel, /label=\{sessionLoadState\.label\}/);
 assert.doesNotMatch(panel, /PreviewTableCard/);
 
 assert.match(inspectorUtils, /createSqlErdInspectorViewModel/);
@@ -519,6 +637,7 @@ assert.match(inspectorUtils, /relation\.toTableId === tableId/);
 
 assert.match(canvasSurface, /TldrawSurface/);
 assert.match(canvasSurface, /commerceSqltoerdFixture/);
+assert.match(canvasSurface, /SqlErdCanvasShapeSync/);
 assert.match(canvasSurface, /createSqltoerdTableShapes/);
 assert.match(canvasSurface, /createSqltoerdRelationShapes/);
 assert.match(canvasSurface, /createSqltoerdCanvasShapes/);
@@ -538,6 +657,7 @@ assert.match(canvasSurface, /SqlErdRelationShapeUtil/);
 assert.match(canvasSurface, /getSqlErdTableShapeId/);
 assert.match(canvasSurface, /hashSqlErdShapeSourceId/);
 assert.match(canvasSurface, /zoomToFit/);
+assert.match(canvasSurface, /resetSqlErdCanvas\(editor, shapes\)/);
 assert.doesNotMatch(canvasSurface, /createShapeId\(`sqltoerd-table-\$\{shapeIdSuffix\(table\.id\)\}`\)/);
 
 assert.match(tableShape, /SQLTOERD_TABLE_SHAPE_TYPE/);
@@ -592,3 +712,9 @@ assert.match(ddlParserUtils, /createRelationFromReference/);
 assert.match(ddlParserUtils, /primary_key/);
 assert.match(ddlParserUtils, /foreign_key/);
 assert.match(ddlParserUtils, /unique/);
+
+assert.match(apiClient, /createSqlErdApiClient/);
+assert.match(apiClient, /getActiveSession/);
+assert.match(apiClient, /\/workspaces\/\$\{encodeURIComponent\(workspaceId\)\}\/sql-erd-session/);
+assert.match(apiClient, /Authorization: `Bearer \$\{accessToken\}`/);
+assert.match(apiClient, /credentials: "same-origin"/);
