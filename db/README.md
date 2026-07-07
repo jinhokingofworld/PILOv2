@@ -31,3 +31,4 @@ The database schema source of truth is the migration history in `db/migrations/`
 - `migrations/012_create_sql_erd_sessions.sql` adds Workspace sqltoerd session storage with one active session per Workspace.
 - `migrations/013_canvas_shape_operations.sql` adds Canvas realtime collaboration operation ordering, shape operation log, idempotency constraints, and presence activity timestamp.
 - `migrations/014_create_drive_items_and_uploads.sql` adds Workspace shared drive metadata and presigned upload tracking.
+- `migrations/015_canvas_shape_parent_relation.sql` adds Canvas shape parent relation storage and indexing for frame-scoped lazy loading.
