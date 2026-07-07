@@ -64,11 +64,19 @@ assert.match(sqlErdService, /relation_count/);
 assert.match(sqlErdService, /created_by/);
 assert.match(sqlErdService, /updated_by/);
 assert.match(sqlErdService, /UNIQUE_VIOLATION_CODE/);
+assert.match(sqlErdService, /CHECK_VIOLATION_CODE/);
+assert.match(sqlErdService, /sql_erd_sessions_model_json_size_check/);
+assert.match(sqlErdService, /sql_erd_sessions_layout_json_size_check/);
+assert.match(sqlErdService, /sql_erd_sessions_settings_json_size_check/);
 assert.match(sqlErdValidation, /validateSqlErdSessionId/);
 assert.match(sqlErdValidation, /validateCreateSqlErdSessionRequest/);
 assert.match(sqlErdValidation, /validateUpdateSqlErdSessionRequest/);
 assert.match(sqlErdValidation, /validateDeleteSqlErdSessionQuery/);
+assert.match(sqlErdValidation, /MAX_MODEL_JSON_BYTES = 1024 \* 1024/);
+assert.match(sqlErdValidation, /MAX_LAYOUT_JSON_BYTES = 1024 \* 1024/);
+assert.match(sqlErdValidation, /MAX_SETTINGS_JSON_BYTES = 64 \* 1024/);
 assert.match(sqlErdValidation, /readVersionedJsonObject/);
+assert.match(sqlErdValidation, /assertJsonByteLength/);
 assert.match(sqlErdValidation, /\$\{field\}\.version must be 1/);
 assert.match(sqlErdMapper, /mapSqlErdSession/);
 assert.match(sqlErdMapper, /mapDeletedSqlErdSession/);
@@ -128,6 +136,10 @@ function layoutJson(overrides = {}) {
     tableLayouts: [],
     ...overrides
   };
+}
+
+function oversizedText(size) {
+  return "x".repeat(size);
 }
 
 function sessionRow(overrides = {}) {
@@ -291,6 +303,84 @@ async function assertApiError(action, status, code, messagePattern, forbiddenPat
 }
 
 {
+  const sensitiveSql = "CREATE TABLE secret_users (password TEXT);";
+  const { service } = createSubject();
+
+  await assertApiError(
+    () =>
+      service.createSession(currentUserId, workspaceId, {
+        sourceFormat: "sql",
+        dialect: "postgresql",
+        sourceText: sensitiveSql,
+        modelJson: modelJson({ filler: oversizedText(1024 * 1024) }),
+        layoutJson: layoutJson()
+      }),
+    413,
+    "PAYLOAD_TOO_LARGE",
+    /modelJson is too large/,
+    /secret_users|password/
+  );
+
+  await assertApiError(
+    () =>
+      service.createSession(currentUserId, workspaceId, {
+        sourceFormat: "sql",
+        dialect: "postgresql",
+        sourceText: sensitiveSql,
+        modelJson: modelJson(),
+        layoutJson: layoutJson({ filler: oversizedText(1024 * 1024) })
+      }),
+    413,
+    "PAYLOAD_TOO_LARGE",
+    /layoutJson is too large/,
+    /secret_users|password/
+  );
+
+  await assertApiError(
+    () =>
+      service.createSession(currentUserId, workspaceId, {
+        sourceFormat: "sql",
+        dialect: "postgresql",
+        sourceText: sensitiveSql,
+        modelJson: modelJson(),
+        layoutJson: layoutJson(),
+        settingsJson: { filler: oversizedText(64 * 1024) }
+      }),
+    413,
+    "PAYLOAD_TOO_LARGE",
+    /settingsJson is too large/,
+    /secret_users|password/
+  );
+}
+
+{
+  const database = new FakeDatabase({
+    queryOneRows: [
+      null,
+      () => {
+        throw {
+          code: "23514",
+          constraint: "sql_erd_sessions_model_json_size_check"
+        };
+      }
+    ]
+  });
+  const { service } = createSubject(database);
+
+  await assertApiError(
+    () =>
+      service.createSession(currentUserId, workspaceId, {
+        sourceFormat: "sql",
+        modelJson: modelJson(),
+        layoutJson: layoutJson()
+      }),
+    413,
+    "PAYLOAD_TOO_LARGE",
+    /JSON payload is too large/
+  );
+}
+
+{
   const updatedSourceText = "CREATE TABLE users (id BIGINT PRIMARY KEY, email TEXT);";
   const updatedModelJson = {
     version: 1,
@@ -443,6 +533,76 @@ async function assertApiError(action, status, code, messagePattern, forbiddenPat
     400,
     "BAD_REQUEST",
     /At least one update field is required/
+  );
+}
+
+{
+  const sensitiveSql = "CREATE TABLE secret_users (password TEXT);";
+  const { service } = createSubject();
+
+  await assertApiError(
+    () =>
+      service.updateSession(currentUserId, workspaceId, sessionId, {
+        baseRevision: 1,
+        sourceText: sensitiveSql,
+        modelJson: modelJson({ filler: oversizedText(1024 * 1024) })
+      }),
+    413,
+    "PAYLOAD_TOO_LARGE",
+    /modelJson is too large/,
+    /secret_users|password/
+  );
+
+  await assertApiError(
+    () =>
+      service.updateSession(currentUserId, workspaceId, sessionId, {
+        baseRevision: 1,
+        sourceText: sensitiveSql,
+        layoutJson: layoutJson({ filler: oversizedText(1024 * 1024) })
+      }),
+    413,
+    "PAYLOAD_TOO_LARGE",
+    /layoutJson is too large/,
+    /secret_users|password/
+  );
+
+  await assertApiError(
+    () =>
+      service.updateSession(currentUserId, workspaceId, sessionId, {
+        baseRevision: 1,
+        sourceText: sensitiveSql,
+        settingsJson: { filler: oversizedText(64 * 1024) }
+      }),
+    413,
+    "PAYLOAD_TOO_LARGE",
+    /settingsJson is too large/,
+    /secret_users|password/
+  );
+}
+
+{
+  const database = new FakeDatabase({
+    queryOneRows: [
+      sessionRow({ revision: 1 }),
+      () => {
+        throw {
+          code: "23514",
+          constraint: "sql_erd_sessions_layout_json_size_check"
+        };
+      }
+    ]
+  });
+  const { service } = createSubject(database);
+
+  await assertApiError(
+    () =>
+      service.updateSession(currentUserId, workspaceId, sessionId, {
+        baseRevision: 1,
+        layoutJson: layoutJson()
+      }),
+    413,
+    "PAYLOAD_TOO_LARGE",
+    /JSON payload is too large/
   );
 }
 
