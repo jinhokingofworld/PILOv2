@@ -34,11 +34,20 @@ const issueReadServiceFile = await readSource(
 const issueStatusServiceFile = await readSource(
   "../../src/modules/board/board-issue-status.service.ts"
 );
+const issueUpdateServiceFile = await readSource(
+  "../../src/modules/board/board-issue-update.service.ts"
+);
 const readQueriesFile = await readSource(
   "../../src/modules/board/queries/board-read.queries.ts"
 );
 const statusQueriesFile = await readSource(
   "../../src/modules/board/queries/board-issue-status.queries.ts"
+);
+const updateQueriesFile = await readSource(
+  "../../src/modules/board/queries/board-issue-update.queries.ts"
+);
+const githubIssueWriteServiceFile = await readSource(
+  "../../src/modules/github-integration/github-issue-write.service.ts"
 );
 const hydrationServiceFile = await readSource(
   "../../src/modules/board/board-hydration.service.ts"
@@ -61,9 +70,11 @@ assert.match(moduleFile, /providers: \[[\s\S]*BoardService[\s\S]*\]/);
 assert.match(moduleFile, /providers: \[[\s\S]*BoardHydrationService[\s\S]*\]/);
 assert.match(moduleFile, /providers: \[[\s\S]*BoardIssueReadService[\s\S]*\]/);
 assert.match(moduleFile, /providers: \[[\s\S]*BoardIssueStatusService[\s\S]*\]/);
+assert.match(moduleFile, /providers: \[[\s\S]*BoardIssueUpdateService[\s\S]*\]/);
 assert.match(moduleFile, /providers: \[[\s\S]*BoardReadService[\s\S]*\]/);
 assert.match(moduleFile, /providers: \[[\s\S]*BoardReadQueries[\s\S]*\]/);
 assert.match(moduleFile, /providers: \[[\s\S]*BoardIssueStatusQueries[\s\S]*\]/);
+assert.match(moduleFile, /providers: \[[\s\S]*BoardIssueUpdateQueries[\s\S]*\]/);
 assert.match(moduleFile, /exports: \[BoardService\]/);
 
 assert.match(controllerFile, /@Controller\("workspaces\/:workspaceId\/boards"\)/);
@@ -78,6 +89,7 @@ assert.match(controllerFile, /@Get\(":boardId\/issues\/:issueId"\)/);
 assert.match(controllerFile, /@Get\(":boardId\/issues\/:issueId\/pull-requests"\)/);
 assert.match(controllerFile, /@Get\(":boardId\/filter-options"\)/);
 assert.match(controllerFile, /@Patch\(":boardId\/issues\/:issueId\/status"\)/);
+assert.match(controllerFile, /@Patch\(":boardId\/issues\/:issueId"\)/);
 assert.match(controllerFile, /@CurrentUserId\(\) currentUserId: string/);
 assert.match(controllerFile, /@Param\("workspaceId"\) workspaceId: string/);
 assert.match(controllerFile, /@Body\(\) body: unknown/);
@@ -95,6 +107,7 @@ assert.match(serviceFile, /getBoardIssue/);
 assert.match(serviceFile, /listBoardIssuePullRequests/);
 assert.match(serviceFile, /getBoardFilterOptions/);
 assert.match(serviceFile, /updateBoardIssueStatus/);
+assert.match(serviceFile, /updateBoardIssue/);
 
 assert.match(readServiceFile, /class BoardReadService/);
 assert.match(readServiceFile, /assertWorkspaceAccess/);
@@ -115,6 +128,12 @@ assert.match(issueStatusServiceFile, /updateProjectV2ItemStatus/);
 assert.match(issueStatusServiceFile, /previousColumnId/);
 assert.doesNotMatch(issueStatusServiceFile, /FROM pilo_issues/);
 
+assert.match(issueUpdateServiceFile, /class BoardIssueUpdateService/);
+assert.match(issueUpdateServiceFile, /assertWorkspaceAccess/);
+assert.match(issueUpdateServiceFile, /updateIssue/);
+assert.match(issueUpdateServiceFile, /title\/body\/state/);
+assert.doesNotMatch(issueUpdateServiceFile, /FROM pilo_issues/);
+
 assert.match(readQueriesFile, /class BoardReadQueries/);
 assert.match(readQueriesFile, /FROM boards b/);
 assert.match(readQueriesFile, /FROM board_columns bc/);
@@ -127,6 +146,16 @@ assert.match(statusQueriesFile, /JOIN board_columns target_col/);
 assert.match(statusQueriesFile, /UPDATE github_project_v2_items/);
 assert.match(statusQueriesFile, /UPDATE pilo_issues/);
 
+assert.match(updateQueriesFile, /class BoardIssueUpdateQueries/);
+assert.match(updateQueriesFile, /FROM pilo_issues pi/);
+assert.match(updateQueriesFile, /JOIN github_repositories gr/);
+assert.match(updateQueriesFile, /UPDATE github_issues/);
+assert.match(updateQueriesFile, /UPDATE pilo_issues/);
+
+assert.match(githubIssueWriteServiceFile, /class GithubIssueWriteService/);
+assert.match(githubIssueWriteServiceFile, /github_access_token_encrypted/);
+assert.match(githubIssueWriteServiceFile, /updateRepositoryIssue/);
+
 assert.match(hydrationServiceFile, /class BoardHydrationService/);
 assert.match(hydrationServiceFile, /assertWorkspaceAccess/);
 assert.match(hydrationServiceFile, /github_project_v2_repositories/);
@@ -134,7 +163,9 @@ assert.match(hydrationServiceFile, /hydrate_pilo_board_from_github/);
 assert.match(hydrationServiceFile, /FROM boards/);
 
 assert.match(dtoIndexFile, /CreateBoardRequest/);
+assert.match(dtoIndexFile, /UpdateBoardIssueRequest/);
 assert.match(typesIndexFile, /BoardPayload/);
+assert.match(typesIndexFile, /UpdateBoardIssuePayload/);
 
 assert.match(readmeFile, /API contract: `docs\/api\/board-api\.md`/);
 
@@ -148,5 +179,6 @@ await import("./read.test.mjs");
 await import("./issues.test.mjs");
 await import("./issue-detail.test.mjs");
 await import("./status-update.test.mjs");
+await import("./issue-update.test.mjs");
 await import("./contract.test.mjs");
 await import("./github-sync-workspace-isolation.test.mjs");

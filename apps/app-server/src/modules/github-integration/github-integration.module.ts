@@ -9,6 +9,7 @@ import { GithubCallbackStateService } from "./github-callback-state.service";
 import { GithubIntegrationConfigService } from "./github-integration-config.service";
 import { GithubIntegrationController } from "./github-integration.controller";
 import { GithubIntegrationService } from "./github-integration.service";
+import { GithubIssueWriteService } from "./github-issue-write.service";
 import { GithubOAuthClient } from "./github-oauth.client";
 import { GithubOAuthIntegrationService } from "./github-oauth-integration.service";
 import { GithubOAuthStateService } from "./github-oauth-state.service";
@@ -33,6 +34,7 @@ import { GithubWebhookService } from "./github-webhook.service";
     GithubAppInstallationService,
     GithubAppInstallationStateService,
     GithubCallbackStateService,
+    GithubIssueWriteService,
     GithubOAuthClient,
     GithubOAuthIntegrationService,
     GithubOAuthStateService,
@@ -47,6 +49,10 @@ import { GithubWebhookService } from "./github-webhook.service";
     GithubTokenEncryptionService,
     GithubWebhookService
   ],
-  exports: [GithubIntegrationService, GithubProjectV2WriteService]
+  exports: [
+    GithubIntegrationService,
+    GithubIssueWriteService,
+    GithubProjectV2WriteService
+  ]
 })
 export class GithubIntegrationModule {}

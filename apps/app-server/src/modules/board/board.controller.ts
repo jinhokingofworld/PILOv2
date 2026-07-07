@@ -24,6 +24,7 @@ import type {
   BoardPaginatedPayload,
   BoardPayload,
   UpdateBoardIssueStatusPayload,
+  UpdateBoardIssuePayload,
   BoardRelatedPullRequestPayload
 } from "./types";
 
@@ -136,6 +137,25 @@ export class BoardController {
     @Body() body: unknown
   ): Promise<ApiSuccessResponse<UpdateBoardIssueStatusPayload>> {
     const result = await this.boardService.updateBoardIssueStatus(
+      currentUserId,
+      workspaceId,
+      boardId,
+      issueId,
+      body
+    );
+
+    return apiResponse(result);
+  }
+
+  @Patch(":boardId/issues/:issueId")
+  async updateBoardIssue(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("boardId") boardId: string,
+    @Param("issueId") issueId: string,
+    @Body() body: unknown
+  ): Promise<ApiSuccessResponse<UpdateBoardIssuePayload>> {
+    const result = await this.boardService.updateBoardIssue(
       currentUserId,
       workspaceId,
       boardId,
