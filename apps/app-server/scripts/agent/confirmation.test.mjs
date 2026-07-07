@@ -5,11 +5,13 @@ const require = createRequire(import.meta.url);
 const { AgentConfirmationService } = require(
   "../../dist/modules/agent/agent-confirmation.service.js"
 );
+const { badRequest } = require("../../dist/common/api-error.js");
 
 const USER_ID = "11111111-1111-1111-1111-111111111111";
 const WORKSPACE_ID = "22222222-2222-2222-2222-222222222222";
 const RUN_ID = "33333333-3333-3333-3333-333333333333";
 const CONFIRMATION_ID = "44444444-4444-4444-4444-444444444444";
+const STEP_ID = "55555555-5555-5555-5555-555555555555";
 
 function createPlan(toolName = "create_calendar_event") {
   return {
@@ -21,11 +23,59 @@ function createPlan(toolName = "create_calendar_event") {
     },
     before: null,
     after: {
-      title: "주간 회의"
+      title: "주간 회의",
+      description: null,
+      color: "#3B82F6",
+      isAllDay: false,
+      startDate: "2026-07-08",
+      endDate: "2026-07-08",
+      startTime: "15:00",
+      endTime: null
     },
     call: {
       method: "POST",
-      path: "/api/v1/workspaces/{workspaceId}/calendar/events"
+      path: "/api/v1/workspaces/{workspaceId}/calendar/events",
+      body: {
+        title: "주간 회의",
+        description: null,
+        color: "#3B82F6",
+        isAllDay: false,
+        startDate: "2026-07-08",
+        endDate: "2026-07-08",
+        startTime: "15:00",
+        endTime: null
+      }
+    }
+  };
+}
+
+function createUpdatePlan() {
+  return {
+    toolName: "update_calendar_event",
+    summary: "주간 회의 일정을 수정합니다.",
+    target: {
+      domain: "calendar",
+      resourceType: "event",
+      resourceId: "77",
+      label: "주간 회의"
+    },
+    before: {
+      title: "주간 회의",
+      startDate: "2026-07-08",
+      startTime: "15:00"
+    },
+    after: {
+      title: "변경된 회의",
+      startTime: "16:00"
+    },
+    call: {
+      method: "PATCH",
+      path: "/api/v1/workspaces/{workspaceId}/calendar/events/77",
+      eventId: "77",
+      body: {
+        title: "변경된 회의",
+        startTime: "16:00"
+      }
     }
   };
 }
@@ -81,6 +131,151 @@ class FakeDatabaseService {
 
   async transaction(callback) {
     return callback(new FakeTransaction(this.state));
+  }
+}
+
+class FakeAgentLoggingService {
+  constructor(state) {
+    this.state = state;
+    this.calls = [];
+  }
+
+  async startNextStep(currentUserId, workspaceId, input) {
+    this.calls.push({
+      method: "startNextStep",
+      currentUserId,
+      workspaceId,
+      input
+    });
+
+    return {
+      id: STEP_ID,
+      runId: input.runId,
+      status: "running"
+    };
+  }
+
+  async completeStep(currentUserId, workspaceId, input) {
+    this.calls.push({
+      method: "completeStep",
+      currentUserId,
+      workspaceId,
+      input
+    });
+
+    return {
+      id: input.stepId,
+      runId: input.runId,
+      status: "completed"
+    };
+  }
+
+  async failStep(currentUserId, workspaceId, input) {
+    this.calls.push({
+      method: "failStep",
+      currentUserId,
+      workspaceId,
+      input
+    });
+
+    return {
+      id: input.stepId,
+      runId: input.runId,
+      status: "failed"
+    };
+  }
+
+  async completeRun(currentUserId, workspaceId, input) {
+    this.calls.push({
+      method: "completeRun",
+      currentUserId,
+      workspaceId,
+      input
+    });
+
+    const run = this.state.runs.find((candidate) => candidate.id === input.runId);
+    run.status = "completed";
+    run.message = input.message;
+
+    return {
+      id: run.id,
+      status: run.status,
+      message: run.message
+    };
+  }
+
+  async failRun(currentUserId, workspaceId, input) {
+    this.calls.push({
+      method: "failRun",
+      currentUserId,
+      workspaceId,
+      input
+    });
+
+    const run = this.state.runs.find((candidate) => candidate.id === input.runId);
+    run.status = "failed";
+    run.message = input.message;
+
+    return {
+      id: run.id,
+      status: run.status,
+      message: run.message
+    };
+  }
+}
+
+class FakeAgentToolRegistryService {
+  constructor(state) {
+    this.state = state;
+    this.calls = [];
+  }
+
+  getDefinition(name) {
+    if (this.state.missingTool) {
+      return null;
+    }
+
+    return {
+      validateInput: (input) => {
+        this.calls.push({
+          method: "validateInput",
+          name,
+          input
+        });
+
+        if (this.state.validationError) {
+          throw this.state.validationError;
+        }
+
+        return input;
+      },
+      execute: async (context, input) => {
+        this.calls.push({
+          method: "execute",
+          name,
+          context,
+          input
+        });
+
+        if (this.state.executionError) {
+          throw this.state.executionError;
+        }
+
+        return {
+          outputSummary: {
+            action: "created"
+          },
+          resourceRefs: [
+            {
+              domain: "calendar",
+              resourceType: "event",
+              resourceId: "1",
+              label: "주간 회의"
+            }
+          ]
+        };
+      }
+    };
   }
 }
 
@@ -254,10 +449,19 @@ class FakeTransaction {
 function createService(state) {
   const workspaceService = new FakeWorkspaceService();
   const database = new FakeDatabaseService(state);
+  const loggingService = new FakeAgentLoggingService(state);
+  const toolRegistryService = new FakeAgentToolRegistryService(state);
 
   return {
-    service: new AgentConfirmationService(database, workspaceService),
-    workspaceService
+    service: new AgentConfirmationService(
+      database,
+      workspaceService,
+      loggingService,
+      toolRegistryService
+    ),
+    workspaceService,
+    loggingService,
+    toolRegistryService
   };
 }
 
@@ -296,7 +500,8 @@ function errorMessage(error) {
     runs: [createRun()],
     confirmations: [createConfirmation()]
   };
-  const { service, workspaceService } = createService(state);
+  const { service, workspaceService, loggingService, toolRegistryService } =
+    createService(state);
   const result = await service.approveConfirmation(
     USER_ID,
     WORKSPACE_ID,
@@ -305,12 +510,58 @@ function errorMessage(error) {
     undefined
   );
 
-  assert.equal(result.run.status, "running");
+  assert.equal(result.run.status, "completed");
   assert.equal(result.run.confirmation.status, "approved");
   assert.equal(result.run.confirmation.approvedAt, "2026-07-08T00:03:00.000Z");
   assert.equal(state.confirmations[0].approved_by_user_id, USER_ID);
-  assert.equal(state.runs[0].message, "승인된 작업을 실행하고 있습니다.");
+  assert.equal(state.runs[0].message, "승인된 작업을 완료했습니다.");
   assert.equal(workspaceService.calls.length, 1);
+  assert.deepEqual(
+    loggingService.calls.map((call) => call.method),
+    ["startNextStep", "completeStep", "completeRun"]
+  );
+  assert.deepEqual(
+    toolRegistryService.calls.map((call) => call.method),
+    ["validateInput", "execute"]
+  );
+  assert.equal(toolRegistryService.calls[1].input.title, "주간 회의");
+}
+
+{
+  const updatePlan = createUpdatePlan();
+  const state = {
+    runs: [createRun()],
+    confirmations: [
+      createConfirmation({
+        tool_name: "update_calendar_event",
+        summary: updatePlan.summary,
+        plan_json: updatePlan
+      })
+    ]
+  };
+  const { service, toolRegistryService } = createService(state);
+  const result = await service.approveConfirmation(
+    USER_ID,
+    WORKSPACE_ID,
+    RUN_ID,
+    CONFIRMATION_ID,
+    undefined
+  );
+
+  assert.equal(result.run.status, "completed");
+  assert.equal(result.run.confirmation.status, "approved");
+  assert.deepEqual(toolRegistryService.calls[1].input, {
+    eventId: "77",
+    before: {
+      title: "주간 회의",
+      startDate: "2026-07-08",
+      startTime: "15:00"
+    },
+    changes: {
+      title: "변경된 회의",
+      startTime: "16:00"
+    }
+  });
 }
 
 {
@@ -337,6 +588,57 @@ function errorMessage(error) {
     }
   );
   assert.equal(state.confirmations[0].status, "pending");
+}
+
+{
+  const state = {
+    runs: [createRun()],
+    confirmations: [createConfirmation()],
+    executionError: new Error("Calendar execution failed")
+  };
+  const { service, loggingService } = createService(state);
+  const result = await service.approveConfirmation(
+    USER_ID,
+    WORKSPACE_ID,
+    RUN_ID,
+    CONFIRMATION_ID,
+    undefined
+  );
+
+  assert.equal(result.run.status, "failed");
+  assert.equal(result.run.message, "승인된 Calendar 작업을 실행하지 못했습니다.");
+  assert.equal(result.run.confirmation.status, "approved");
+  assert.deepEqual(
+    loggingService.calls.map((call) => call.method),
+    ["startNextStep", "failStep", "failRun"]
+  );
+  assert.equal(loggingService.calls[1].input.errorCode, "CALENDAR_TOOL_FAILED");
+  assert.equal(
+    loggingService.calls[2].input.errorMessage,
+    "Calendar 작업 실행 중 오류가 발생했습니다."
+  );
+}
+
+{
+  const state = {
+    runs: [createRun()],
+    confirmations: [createConfirmation()],
+    executionError: badRequest("title is required")
+  };
+  const { service, loggingService } = createService(state);
+  const result = await service.approveConfirmation(
+    USER_ID,
+    WORKSPACE_ID,
+    RUN_ID,
+    CONFIRMATION_ID,
+    undefined
+  );
+
+  assert.equal(result.run.status, "failed");
+  assert.equal(
+    loggingService.calls[2].input.errorMessage,
+    "title is required"
+  );
 }
 
 {
