@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import {
   AlertCircle,
@@ -37,8 +37,13 @@ CREATE TABLE orders (
 const shellState: ShellState = "empty";
 
 export function SqlErdPanel() {
-  const [isSourceOpen, setIsSourceOpen] = useState(true);
-  const [isInspectorOpen, setIsInspectorOpen] = useState(true);
+  const [isSourceOpen, setIsSourceOpen] = useState(false);
+  const [isInspectorOpen, setIsInspectorOpen] = useState(false);
+
+  useEffect(() => {
+    setIsSourceOpen(window.matchMedia("(min-width: 1024px)").matches);
+    setIsInspectorOpen(window.matchMedia("(min-width: 1280px)").matches);
+  }, []);
 
   return (
     <section className="flex min-h-[calc(100vh-8.5rem)] overflow-hidden rounded-lg border bg-background shadow-sm">
@@ -78,7 +83,7 @@ function SourcePanel({ isOpen, onToggle }: PanelToggleProps) {
 
   return (
     <aside
-      className="flex w-[360px] shrink-0 flex-col border-r bg-muted/20"
+      className="flex w-[min(360px,42vw)] min-w-64 max-w-[360px] shrink-0 flex-col border-r bg-muted/20"
       id="source"
     >
       <div className="flex min-h-14 items-center justify-between gap-3 border-b px-4">
@@ -114,7 +119,8 @@ function SourcePanel({ isOpen, onToggle }: PanelToggleProps) {
             Source text
           </span>
           <button
-            className="inline-flex h-8 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+            className="inline-flex h-8 cursor-not-allowed items-center gap-1.5 rounded-md bg-primary/70 px-3 text-xs font-medium text-primary-foreground opacity-60"
+            disabled
             type="button"
           >
             <Play className="size-3.5" />
@@ -140,7 +146,8 @@ type SelectorLabelProps = {
 function SelectorLabel({ label, value }: SelectorLabelProps) {
   return (
     <button
-      className="flex h-10 items-center justify-between rounded-md border bg-background px-3 text-left transition-colors hover:bg-muted"
+      className="flex h-10 cursor-not-allowed items-center justify-between rounded-md border bg-muted/40 px-3 text-left text-muted-foreground opacity-75"
+      disabled
       type="button"
     >
       <span className="text-xs text-muted-foreground">{label}</span>
@@ -292,7 +299,7 @@ function InspectorPanel({ isOpen, onToggle }: PanelToggleProps) {
 
   return (
     <aside
-      className="flex w-[320px] shrink-0 flex-col border-l bg-background"
+      className="flex w-[min(320px,34vw)] min-w-72 max-w-[320px] shrink-0 flex-col border-l bg-background"
       id="inspector"
     >
       <div className="flex min-h-14 items-center justify-between gap-3 border-b px-4">
