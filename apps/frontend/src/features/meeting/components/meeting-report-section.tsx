@@ -3,6 +3,7 @@
 import {
   AlertCircle,
   ArrowDownWideNarrow,
+  CalendarPlus,
   CheckCircle2,
   Clock3,
   FileText,
@@ -264,6 +265,7 @@ function ReportTextBlock({
 function MeetingReportDetailModal({
   detailError,
   detailStatus,
+  onCreateSchedule,
   onClose,
   onRegenerate,
   open,
@@ -272,6 +274,7 @@ function MeetingReportDetailModal({
 }: {
   detailError: string | null;
   detailStatus: ReportDetailStatus;
+  onCreateSchedule: (item: ParsedActionItemCandidate) => void;
   onClose: () => void;
   onRegenerate: (report: MeetingReportSummary) => void;
   open: boolean;
@@ -289,7 +292,7 @@ function MeetingReportDetailModal({
     >
       <DialogPrimitive.Portal>
         <DialogPrimitive.Backdrop className="fixed inset-0 z-50 bg-black/20 backdrop-blur-xs transition-opacity duration-150 data-ending-style:opacity-0 data-starting-style:opacity-0" />
-        <DialogPrimitive.Popup className="fixed top-1/2 left-1/2 z-50 flex max-h-[min(760px,calc(100vh-2rem))] w-[calc(100vw-2rem)] max-w-4xl -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl border bg-popover text-popover-foreground shadow-2xl shadow-slate-950/20 outline-none transition duration-150 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0">
+        <DialogPrimitive.Popup className="fixed top-1/2 left-1/2 z-50 flex max-h-[min(988px,calc(100vh-2rem))] w-[calc(100vw-2rem)] max-w-[1080px] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl border bg-popover text-popover-foreground shadow-2xl shadow-slate-950/20 outline-none transition duration-150 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0">
           <div className="border-b p-5 pr-14">
             <DialogPrimitive.Title className="font-heading text-lg font-semibold">
               회의록 상세
@@ -419,23 +422,35 @@ function MeetingReportDetailModal({
                       {actionItems.map((item, index) => (
                         <li
                           key={`${item.title}-${index}`}
-                          className="rounded-lg border bg-background p-3 text-sm"
+                          className="grid gap-3 rounded-lg border bg-background p-3 text-sm sm:grid-cols-[minmax(0,1fr)_auto]"
                         >
-                          <div className="flex flex-wrap items-start justify-between gap-2">
-                            <p className="min-w-0 flex-1 font-medium">
+                          <div className="min-w-0">
+                            <p className="break-words font-medium text-foreground">
                               {item.title}
                             </p>
+                            {item.description ? (
+                              <p className="mt-2 whitespace-pre-wrap break-words text-muted-foreground">
+                                {item.description}
+                              </p>
+                            ) : null}
+                          </div>
+
+                          <div className="flex shrink-0 flex-col items-start gap-2 sm:items-end">
                             {item.priority ? (
                               <span className="rounded-full border bg-muted/40 px-2 py-0.5 text-xs font-medium text-muted-foreground">
                                 {getActionPriorityLabel(item.priority)}
                               </span>
                             ) : null}
+                            <Button
+                              type="button"
+                              size="sm"
+                              className="bg-emerald-600 text-white hover:bg-emerald-700 focus-visible:border-emerald-500 focus-visible:ring-emerald-500/30"
+                              onClick={() => onCreateSchedule(item)}
+                            >
+                              <CalendarPlus className="size-3.5" />
+                              일정 생성
+                            </Button>
                           </div>
-                          {item.description ? (
-                            <p className="mt-2 whitespace-pre-wrap break-words text-muted-foreground">
-                              {item.description}
-                            </p>
-                          ) : null}
                         </li>
                       ))}
                     </ul>
@@ -611,6 +626,13 @@ export function MeetingReportSection({
     ]
   );
 
+  const handleCreateSchedule = useCallback(
+    (item: ParsedActionItemCandidate) => {
+      onToastMessage(`"${item.title}" 일정 생성 액션을 선택했습니다.`);
+    },
+    [onToastMessage]
+  );
+
   useEffect(() => {
     if (
       !canLoad ||
@@ -640,7 +662,7 @@ export function MeetingReportSection({
   return (
     <section
       id="report"
-      className="grid min-h-[calc(100vh-8rem)] gap-5 rounded-xl border bg-card p-4 sm:p-6"
+      className="grid min-h-[calc(100vh-8rem)] content-start gap-5 rounded-xl border bg-card p-4 sm:p-6"
     >
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
@@ -664,18 +686,20 @@ export function MeetingReportSection({
         </Button>
       </div>
 
-      <div className="grid gap-3 rounded-lg border bg-muted/30 p-3 lg:grid-cols-[minmax(0,1fr)_auto]">
-        <div className="relative">
+      <div className="mx-auto flex w-full max-w-5xl flex-col gap-2 rounded-lg border bg-muted/20 p-2 sm:flex-row sm:items-center">
+        <div className="relative min-w-0 flex-1">
           <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
-            className="pl-9"
+            className="h-9 pl-9"
             placeholder="회의록 검색"
             value={searchQuery}
             onChange={(event) => setSearchQuery(event.target.value)}
           />
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="hidden h-6 w-px bg-border sm:block" />
+
+        <div className="flex shrink-0 flex-wrap items-center gap-2 sm:flex-nowrap">
           {REPORT_STATUS_FILTERS.map((filter) => (
             <Button
               key={filter.value}
@@ -708,7 +732,7 @@ export function MeetingReportSection({
         </div>
       ) : null}
 
-      <div className="min-h-96 rounded-lg border bg-muted/20 p-3 sm:p-5">
+      <div className="mx-auto min-h-96 w-full max-w-5xl rounded-lg border bg-muted/20 p-3 sm:p-5">
         {isInitialLoading ? (
           <ReportListSkeleton />
         ) : showError ? (
@@ -828,6 +852,7 @@ export function MeetingReportSection({
           regeneratingReportId === selectedReport?.id
         }
         report={selectedReport}
+        onCreateSchedule={handleCreateSchedule}
         onClose={handleCloseReport}
         onRegenerate={(report) => void handleRegenerateReport(report)}
       />
