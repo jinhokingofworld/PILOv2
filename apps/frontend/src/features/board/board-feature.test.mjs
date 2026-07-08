@@ -89,6 +89,27 @@ assert.match(boardPanel, /statusMoveError/);
 assert.match(boardPanel, /issueCreateError/);
 assert.match(boardPanel, /selectedRepositoryId/);
 assert.match(boardPanel, /selectedProjectV2Id/);
+assert.match(boardPanel, /selectProjectV2IdForRepository/);
+assert.match(
+  boardPanel,
+  /const linkedBoardProjects = useMemo\([\s\S]*project\.repositoryIds\.includes\(selectedRepositoryId\)[\s\S]*\);/,
+  "Board setup should only show ProjectV2 choices linked to the selected repository"
+);
+assert.match(
+  boardPanel,
+  /function handleSelectBoardRepository\(repositoryId: string\)[\s\S]*selectProjectV2IdForRepository\([\s\S]*projects: boardData\.projects[\s\S]*preferredProjectV2Id: selectedProjectV2Id[\s\S]*repositoryId[\s\S]*setSelectedProjectV2Id\(hasLinkedProjectV2 \? nextProjectV2Id : ""\)/,
+  "Changing the Board setup repository should select a linked ProjectV2"
+);
+assert.match(
+  boardPanel,
+  /projects=\{linkedBoardProjects\}/,
+  "Board hydrate form should receive only ProjectV2 entries linked to the selected repository"
+);
+assert.match(
+  boardPanel,
+  /onSelectRepository=\{handleSelectBoardRepository\}/,
+  "Board hydrate form should use repository-aware selection"
+);
 assert.match(boardPanel, /query/);
 assert.match(boardPanel, /state/);
 assert.match(boardPanel, /assignee/);

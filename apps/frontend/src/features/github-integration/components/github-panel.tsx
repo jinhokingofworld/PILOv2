@@ -468,19 +468,16 @@ export function GithubPanel() {
       installationId: selectedInstallationId,
       target: syncTarget
     };
-    const shouldScopeGithubSyncTarget = syncTarget !== "full";
 
     if (
-      shouldScopeGithubSyncTarget &&
-      repositoryScopedSyncTargets.has(syncTarget) &&
+      (syncTarget === "full" || repositoryScopedSyncTargets.has(syncTarget)) &&
       selectedRepositoryId
     ) {
       body.repositoryId = selectedRepositoryId;
     }
 
     if (
-      shouldScopeGithubSyncTarget &&
-      projectScopedSyncTargets.has(syncTarget) &&
+      (syncTarget === "full" || projectScopedSyncTargets.has(syncTarget)) &&
       selectedProjectV2Id
     ) {
       body.projectV2Id = selectedProjectV2Id;

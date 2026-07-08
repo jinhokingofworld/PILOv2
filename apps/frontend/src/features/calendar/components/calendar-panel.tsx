@@ -55,10 +55,6 @@ type CalendarSheetMode =
       type: "create";
     }
   | {
-      type: "detail";
-      event: CalendarEvent;
-    }
-  | {
       type: "edit";
       event: CalendarEvent;
     }
@@ -443,7 +439,6 @@ function CalendarEventSheet({
   onClose,
   onConfirmDelete,
   onFormChange,
-  onOpenEdit,
   onRequestDelete,
   onSubmit
 }: {
@@ -458,7 +453,6 @@ function CalendarEventSheet({
     field: Field,
     value: CalendarFormState[Field]
   ) => void;
-  onOpenEdit: (event: CalendarEvent) => void;
   onRequestDelete: (
     event: CalendarEvent,
     returnTo: Extract<CalendarSheetMode, { type: "delete" }>["returnTo"]
@@ -471,98 +465,7 @@ function CalendarEventSheet({
     <Sheet open={Boolean(mode)} onOpenChange={(open) => !open && onClose()}>
       {mode ? (
         <SheetContent className="w-full sm:max-w-lg">
-          {mode.type === "detail" ? (
-            <div className="flex min-h-0 flex-1 flex-col">
-              <SheetHeader>
-                <SheetTitle>일정 상세</SheetTitle>
-                <SheetDescription>{getEventDateLabel(mode.event)}</SheetDescription>
-              </SheetHeader>
-
-              <div className="flex-1 space-y-4 overflow-y-auto px-4 pb-2">
-                <div className="flex items-start gap-3 rounded-lg border bg-muted/20 p-3">
-                  <span
-                    className="mt-1 size-3 shrink-0 rounded-full"
-                    style={{ backgroundColor: mode.event.color }}
-                  />
-                  <div className="min-w-0">
-                    <h3 className="break-words font-heading text-lg font-semibold">
-                      {mode.event.title}
-                    </h3>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      {getEventTimeLabel(mode.event)}
-                    </p>
-                  </div>
-                </div>
-
-                <dl className="grid gap-3 text-sm">
-                  <div className="grid gap-1">
-                    <dt className="font-medium text-muted-foreground">날짜</dt>
-                    <dd>{getEventDateLabel(mode.event)}</dd>
-                  </div>
-                  <div className="grid gap-1">
-                    <dt className="font-medium text-muted-foreground">시간</dt>
-                    <dd>{getEventTimeLabel(mode.event)}</dd>
-                  </div>
-                  <div className="grid gap-1">
-                    <dt className="font-medium text-muted-foreground">설명</dt>
-                    <dd className="whitespace-pre-wrap break-words">
-                      {mode.event.description || "등록된 설명이 없습니다."}
-                    </dd>
-                  </div>
-                  <div className="grid gap-1">
-                    <dt className="font-medium text-muted-foreground">
-                      등록자
-                    </dt>
-                    <dd>{getEventCreatorLabel(mode.event)}</dd>
-                  </div>
-                  <div className="grid gap-1">
-                    <dt className="font-medium text-muted-foreground">
-                      생성일
-                    </dt>
-                    <dd>{formatDateTimeLabel(mode.event.createdAt)}</dd>
-                  </div>
-                  <div className="grid gap-1">
-                    <dt className="font-medium text-muted-foreground">
-                      수정일
-                    </dt>
-                    <dd>{formatDateTimeLabel(mode.event.updatedAt)}</dd>
-                  </div>
-                </dl>
-              </div>
-
-              <SheetFooter className="border-t">
-                <Button
-                  type="button"
-                  variant="destructive"
-                  disabled={isSubmitting}
-                  onClick={() => onRequestDelete(mode.event, "detail")}
-                >
-                  <Trash2 />
-                  삭제
-                </Button>
-                <div className="flex gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="flex-1"
-                    disabled={isSubmitting}
-                    onClick={onClose}
-                  >
-                    닫기
-                  </Button>
-                  <Button
-                    type="button"
-                    className="flex-1"
-                    disabled={isSubmitting}
-                    onClick={() => onOpenEdit(mode.event)}
-                  >
-                    <Pencil />
-                    수정
-                  </Button>
-                </div>
-              </SheetFooter>
-            </div>
-          ) : mode.type === "delete" ? (
+          {mode.type === "delete" ? (
             <div className="flex min-h-0 flex-1 flex-col">
               <SheetHeader>
                 <SheetTitle>일정 삭제</SheetTitle>
@@ -781,6 +684,156 @@ function CalendarEventSheet({
   );
 }
 
+function CalendarEventDetailDialog({
+  event,
+  isSubmitting,
+  onClose,
+  onOpenEdit,
+  onRequestDelete
+}: {
+  event: CalendarEvent | null;
+  isSubmitting: boolean;
+  onClose: () => void;
+  onOpenEdit: (event: CalendarEvent) => void;
+  onRequestDelete: (
+    event: CalendarEvent,
+    returnTo: Extract<CalendarSheetMode, { type: "delete" }>["returnTo"]
+  ) => void;
+}) {
+  if (!event) {
+    return null;
+  }
+
+  return (
+    <div
+      aria-labelledby="calendar-event-detail-dialog-title"
+      aria-modal="true"
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/35 p-3 sm:items-center sm:p-6"
+      role="dialog"
+    >
+      <button
+        type="button"
+        className="absolute inset-0 cursor-default"
+        aria-label="일정 상세 닫기"
+        onClick={onClose}
+      />
+      <div className="relative flex max-h-[min(620px,calc(100vh-2rem))] w-full max-w-lg flex-col rounded-lg border bg-background shadow-xl">
+        <div className="flex items-start justify-between gap-3 border-b p-4">
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-muted-foreground">
+              일정 상세
+            </p>
+            <h2
+              id="calendar-event-detail-dialog-title"
+              className="mt-1 break-words font-heading text-xl font-semibold"
+            >
+              {event.title}
+            </h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {getEventDateLabel(event)}
+            </p>
+          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            aria-label="닫기"
+            disabled={isSubmitting}
+            onClick={onClose}
+          >
+            <X />
+          </Button>
+        </div>
+
+        <div
+          className="h-1 shrink-0"
+          style={{ backgroundColor: event.color }}
+        />
+
+        <div className="flex-1 overflow-y-auto p-4">
+          <div className="flex items-start gap-3">
+            <span
+              className="mt-1 size-3 shrink-0 rounded-full"
+              style={{ backgroundColor: event.color }}
+            />
+            <div className="min-w-0">
+              <p className="text-sm font-medium">{getEventTimeLabel(event)}</p>
+              <p className="mt-1 whitespace-pre-wrap break-words text-sm text-muted-foreground">
+                {event.description || "등록된 설명이 없습니다."}
+              </p>
+            </div>
+          </div>
+
+          <dl className="mt-5 grid gap-3 text-sm sm:grid-cols-2">
+            <div className="grid gap-1">
+              <dt className="font-medium text-muted-foreground">날짜</dt>
+              <dd>{getEventDateLabel(event)}</dd>
+            </div>
+            <div className="grid gap-1">
+              <dt className="font-medium text-muted-foreground">시간</dt>
+              <dd>{getEventTimeLabel(event)}</dd>
+            </div>
+            <div className="grid gap-1">
+              <dt className="font-medium text-muted-foreground">등록자</dt>
+              <dd>{getEventCreatorLabel(event)}</dd>
+            </div>
+            <div className="grid gap-1">
+              <dt className="font-medium text-muted-foreground">색상</dt>
+              <dd className="flex items-center gap-2">
+                <span
+                  className="size-3 rounded-full"
+                  style={{ backgroundColor: event.color }}
+                />
+                <span>{event.color}</span>
+              </dd>
+            </div>
+            <div className="grid gap-1">
+              <dt className="font-medium text-muted-foreground">생성일</dt>
+              <dd>{formatDateTimeLabel(event.createdAt)}</dd>
+            </div>
+            <div className="grid gap-1">
+              <dt className="font-medium text-muted-foreground">수정일</dt>
+              <dd>{formatDateTimeLabel(event.updatedAt)}</dd>
+            </div>
+          </dl>
+        </div>
+
+        <div className="flex flex-col-reverse gap-2 border-t p-4 sm:flex-row sm:items-center sm:justify-between">
+          <Button
+            type="button"
+            variant="destructive"
+            disabled={isSubmitting}
+            onClick={() => onRequestDelete(event, "detail")}
+          >
+            <Trash2 />
+            삭제
+          </Button>
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              className="flex-1 sm:flex-none"
+              disabled={isSubmitting}
+              onClick={onClose}
+            >
+              닫기
+            </Button>
+            <Button
+              type="button"
+              className="flex-1 sm:flex-none"
+              disabled={isSubmitting}
+              onClick={() => onOpenEdit(event)}
+            >
+              <Pencil />
+              수정
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function CalendarEventsDialog({
   dialog,
   onClose,
@@ -866,6 +919,7 @@ export function CalendarPanel() {
     formatCalendarDate(new Date())
   );
   const [sheetMode, setSheetMode] = useState<CalendarSheetMode | null>(null);
+  const [detailEvent, setDetailEvent] = useState<CalendarEvent | null>(null);
   const [eventsDialog, setEventsDialog] =
     useState<CalendarEventsDialogState>(null);
   const [formState, setFormState] = useState(() =>
@@ -917,6 +971,7 @@ export function CalendarPanel() {
 
     setMonthDate(draftMonthDate);
     setSelectedDate(draftFormState.startDate);
+    setDetailEvent(null);
     setEventsDialog(null);
     setFormState(draftFormState);
     setFormError(null);
@@ -937,18 +992,21 @@ export function CalendarPanel() {
   }, []);
 
   const openCreateSheet = useCallback((date: string) => {
+    setDetailEvent(null);
     setFormState(createDefaultFormState(date));
     setFormError(null);
     setSheetMode({ type: "create" });
   }, []);
 
-  const openDetailSheet = useCallback((event: CalendarEvent) => {
+  const openDetailDialog = useCallback((event: CalendarEvent) => {
     setEventsDialog(null);
     setFormError(null);
-    setSheetMode({ type: "detail", event });
+    setSheetMode(null);
+    setDetailEvent(event);
   }, []);
 
   const openEditSheet = useCallback((event: CalendarEvent) => {
+    setDetailEvent(null);
     setEventsDialog(null);
     setFormState(createFormStateFromEvent(event));
     setFormError(null);
@@ -960,6 +1018,8 @@ export function CalendarPanel() {
       event: CalendarEvent,
       returnTo: Extract<CalendarSheetMode, { type: "delete" }>["returnTo"]
     ) => {
+      setDetailEvent(null);
+      setEventsDialog(null);
       setFormError(null);
       setSheetMode({ type: "delete", event, returnTo });
     },
@@ -977,7 +1037,8 @@ export function CalendarPanel() {
       return;
     }
 
-    setSheetMode({ type: "detail", event: sheetMode.event });
+    setSheetMode(null);
+    setDetailEvent(sheetMode.event);
   }, [sheetMode]);
 
   const closeSheet = useCallback(() => {
@@ -989,6 +1050,7 @@ export function CalendarPanel() {
 
   const openEventsDialog = useCallback((date: string, events: CalendarEvent[]) => {
     setSelectedDate(date);
+    setDetailEvent(null);
     setEventsDialog({ date, events });
   }, []);
 
@@ -1071,6 +1133,7 @@ export function CalendarPanel() {
     try {
       await calendarClient.deleteEvent(workspaceId, sheetMode.event.id);
       setSheetMode(null);
+      setDetailEvent(null);
       await calendarEvents.reload();
     } catch (deleteError) {
       setFormError(errorMessageFromUnknown(deleteError));
@@ -1221,7 +1284,7 @@ export function CalendarPanel() {
                         )}
                         onClick={() => {
                           setSelectedDate(date);
-                          openDetailSheet(event);
+                          openDetailDialog(event);
                         }}
                       >
                         <CalendarEventChip event={event} />
@@ -1247,7 +1310,15 @@ export function CalendarPanel() {
       <CalendarEventsDialog
         dialog={eventsDialog}
         onClose={() => setEventsDialog(null)}
-        onOpenEvent={openDetailSheet}
+        onOpenEvent={openDetailDialog}
+      />
+
+      <CalendarEventDetailDialog
+        event={detailEvent}
+        isSubmitting={isSubmitting}
+        onClose={() => setDetailEvent(null)}
+        onOpenEdit={openEditSheet}
+        onRequestDelete={requestDeleteSheet}
       />
 
       <CalendarEventSheet
@@ -1259,7 +1330,6 @@ export function CalendarPanel() {
         onClose={closeSheet}
         onConfirmDelete={handleConfirmDeleteEvent}
         onFormChange={updateFormField}
-        onOpenEdit={openEditSheet}
         onRequestDelete={requestDeleteSheet}
         onSubmit={handleFormSubmit}
       />

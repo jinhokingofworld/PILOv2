@@ -35,7 +35,6 @@ import {
   CanvasOperationsCatchupPayload,
   CanvasRow,
   CanvasShapeBatchPayload,
-  CanvasShapeCleanupRow,
   CanvasShapeDeletePayload,
   CanvasShapeDeleteRow,
   CanvasShapeOperationPayload,
@@ -317,24 +316,61 @@ export class CanvasService {
     const operations = await this.database.query<CanvasShapeOperationRow>(
       `
         SELECT
-          id,
-          workspace_id,
-          canvas_id,
-          shape_id,
-          actor_user_id,
-          operation_type,
-          op_seq,
-          client_operation_id,
-          base_revision,
-          result_revision,
-          content_hash,
-          payload,
-          created_at
-        FROM canvas_shape_operations
-        WHERE workspace_id = $1
-          AND canvas_id = $2
-          AND op_seq > $3
-        ORDER BY op_seq ASC, created_at ASC, id ASC
+          o.id,
+          o.workspace_id,
+          o.canvas_id,
+          o.shape_id,
+          o.actor_user_id,
+          CASE
+            WHEN o.operation_type <> 'delete'
+              AND (s.id IS NULL OR s.deleted_at IS NOT NULL)
+              THEN 'delete'
+            ELSE o.operation_type
+          END AS operation_type,
+          o.op_seq,
+          o.client_operation_id,
+          o.base_revision,
+          CASE
+            WHEN o.operation_type <> 'delete'
+              AND (s.id IS NULL OR s.deleted_at IS NOT NULL)
+              THEN COALESCE(s.revision, o.result_revision)
+            ELSE o.result_revision
+          END AS result_revision,
+          CASE
+            WHEN o.operation_type <> 'delete'
+              AND (s.id IS NULL OR s.deleted_at IS NOT NULL)
+              THEN COALESCE(s.content_hash, o.content_hash)
+            ELSE o.content_hash
+          END AS content_hash,
+          CASE
+            WHEN o.operation_type <> 'delete'
+              AND (s.id IS NULL OR s.deleted_at IS NOT NULL)
+              THEN jsonb_build_object(
+                'deletedShape',
+                jsonb_build_object(
+                  'id',
+                  COALESCE(s.id, o.shape_id),
+                  'deleted',
+                  true,
+                  'deletedAt',
+                  COALESCE(s.deleted_at, o.created_at),
+                  'contentHash',
+                  COALESCE(s.content_hash, o.content_hash),
+                  'revision',
+                  COALESCE(s.revision, o.result_revision)
+                )
+              )
+            ELSE o.payload
+          END AS payload,
+          o.created_at
+        FROM canvas_shape_operations o
+        LEFT JOIN canvas_freeform_shapes s
+          ON s.id = o.shape_id
+          AND s.canvas_id = o.canvas_id
+        WHERE o.workspace_id = $1
+          AND o.canvas_id = $2
+          AND o.op_seq > $3
+        ORDER BY o.op_seq ASC, o.created_at ASC, o.id ASC
         LIMIT 500
       `,
       [workspaceId, canvas.id, afterSeq]
@@ -966,23 +1002,9 @@ export class CanvasService {
         throw badRequest("Canvas user state could not be recorded");
       }
 
-      const cleanup = await transaction.queryOne<CanvasShapeCleanupRow>(
-        `
-          WITH deleted_shapes AS (
-            DELETE FROM canvas_freeform_shapes
-            WHERE canvas_id = $1
-              AND deleted_at IS NOT NULL
-            RETURNING id
-          )
-          SELECT COUNT(*)::int AS deleted_count
-          FROM deleted_shapes
-        `,
-        [canvas.id]
-      );
-
       return {
         ...mapCanvasUserState(userState),
-        permanentlyDeletedShapeCount: Number(cleanup?.deleted_count ?? 0)
+        permanentlyDeletedShapeCount: 0
       };
     });
   }

@@ -445,6 +445,12 @@ Query:
 - `actorUserId`가 현재 사용자와 같으면 echo event로 보고 remote apply 대신
   `clientOperationId` 기준 reconcile만 수행한다.
 
+Note: if a shape is already soft-deleted or no longer exists in the shape table,
+catch-up returns prior `create`/`update` log entries for that shape as `delete`
+operations with the original `opSeq`. This preserves contiguous `opSeq`
+catch-up while preventing deleted shapes from being resurrected after refresh
+or reconnect.
+
 ## Socket.IO Canvas Events
 
 Socket.IO는 source of truth가 아니라 접속 중인 사용자에게 operation과 presence를 빠르게 전달하는 통로다.
