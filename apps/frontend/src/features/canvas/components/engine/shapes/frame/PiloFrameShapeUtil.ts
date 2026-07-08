@@ -72,8 +72,8 @@ const PiloBaseFrameShapeUtil = FrameShapeUtil.configure({
 });
 
 export class PiloFrameShapeUtil extends PiloBaseFrameShapeUtil {
-  override shouldClipChild(child: TLShape) {
-    return child.type !== "text";
+  override shouldClipChild(_child: TLShape) {
+    return false;
   }
 }
 

@@ -9,6 +9,7 @@ import type {
   PiloCanvasViewSetting,
 } from "../types";
 import { withSerializedArrowBindings } from "./pilo-canvas-arrow-bindings";
+import { withPiloMediaAsset } from "../assets/pilo-canvas-assets";
 
 function isPersistableFreeformShape(_shape: TLShape) {
   return true;
@@ -18,7 +19,7 @@ function toFreeformSnapshot(
   editor: Editor,
   shape: TLShape,
 ): PiloCanvasFreeformShape {
-  return withSerializedArrowBindings(editor, shape);
+  return withPiloMediaAsset(editor, withSerializedArrowBindings(editor, shape));
 }
 
 export function CanvasStateReporter({
