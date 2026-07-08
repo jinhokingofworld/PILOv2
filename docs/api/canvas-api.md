@@ -494,6 +494,11 @@ shape를 반환한다.
 operation log cleanup은 request/leave 흐름에서 수행하지 않고, 후속 background
 정책으로 분리한다.
 
+Background cleanup permanently deletes rows from `canvas_freeform_shapes` every
+10 minutes when `deleted_at IS NOT NULL`. The `canvas_shape_operations` log can
+outlive those shape rows, so operation catch-up must continue to synthesize
+delete operations for missing shape rows.
+
 ## View Settings
 
 ```json

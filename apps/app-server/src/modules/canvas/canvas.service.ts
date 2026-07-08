@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { Injectable } from "@nestjs/common";
+import { Injectable, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
 import type { DatabaseTransaction } from "../../database/database.service";
 import { badRequest, notFound } from "../../common/api-error";
 import { DatabaseService } from "../../database/database.service";
@@ -35,6 +35,7 @@ import {
   CanvasOperationsCatchupPayload,
   CanvasRow,
   CanvasShapeBatchPayload,
+  CanvasShapeCleanupRow,
   CanvasShapeDeletePayload,
   CanvasShapeDeleteRow,
   CanvasShapeOperationPayload,
@@ -57,6 +58,7 @@ import {
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const CANVAS_SHAPE_CLEANUP_INTERVAL_MS = 10 * 60 * 1000;
 
 type CanvasShapeOperationWriteInput = {
   actorUserId: string;
@@ -85,12 +87,30 @@ type CanvasShapeOperationWriteResult<TPayload> = {
 };
 
 @Injectable()
-export class CanvasService {
+export class CanvasService implements OnModuleDestroy, OnModuleInit {
+  private canvasShapeCleanupInterval: ReturnType<typeof setInterval> | null =
+    null;
+
   constructor(
     private readonly database: DatabaseService,
     private readonly operationPublisher: CanvasOperationPublisherService,
     private readonly workspaceService: WorkspaceService
   ) {}
+
+  onModuleInit(): void {
+    this.canvasShapeCleanupInterval = setInterval(() => {
+      void this.cleanupDeletedFreeformShapes().catch((error: unknown) => {
+        console.error("Canvas deleted shape cleanup failed", error);
+      });
+    }, CANVAS_SHAPE_CLEANUP_INTERVAL_MS);
+  }
+
+  onModuleDestroy(): void {
+    if (this.canvasShapeCleanupInterval) {
+      clearInterval(this.canvasShapeCleanupInterval);
+      this.canvasShapeCleanupInterval = null;
+    }
+  }
 
   async listCanvases(
     currentUserId: string,
@@ -1524,6 +1544,22 @@ export class CanvasService {
         console.error("Canvas shape operation publish failed", error);
       }
     }
+  }
+
+  private async cleanupDeletedFreeformShapes(): Promise<number> {
+    const cleanup = await this.database.queryOne<CanvasShapeCleanupRow>(
+      `
+        WITH deleted_shapes AS (
+          DELETE FROM canvas_freeform_shapes
+          WHERE deleted_at IS NOT NULL
+          RETURNING id
+        )
+        SELECT COUNT(*)::int AS deleted_count
+        FROM deleted_shapes
+      `
+    );
+
+    return Number(cleanup?.deleted_count ?? 0);
   }
 
   private isRecord(value: unknown): value is Record<string, unknown> {
