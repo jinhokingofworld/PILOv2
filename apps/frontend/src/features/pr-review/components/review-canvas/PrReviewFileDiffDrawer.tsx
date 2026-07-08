@@ -87,17 +87,6 @@ function getInitialDecisionStatus(file: PrReviewFile) {
   return file.currentStatus === "not_reviewed" ? "approved" : file.currentStatus;
 }
 
-function getRowClassName(type: PrReviewDiffRow["type"]) {
-  switch (type) {
-    case "added":
-      return "bg-emerald-50/80";
-    case "deleted":
-      return "bg-rose-50/80";
-    case "unchanged":
-      return "bg-white";
-  }
-}
-
 function getCodeClassName(type: PrReviewDiffRow["type"]) {
   switch (type) {
     case "added":
@@ -605,6 +594,119 @@ function FlowMemberships({
   );
 }
 
+type DiffPaneSide = "old" | "new";
+
+type DiffPaneRow = {
+  key: string;
+  lineNumber: number | null;
+  text: string;
+  type: PrReviewDiffRow["type"];
+};
+
+const diffPaneLabels: Record<
+  DiffPaneSide,
+  {
+    emptyMessage: string;
+    lineLabel: string;
+    title: string;
+  }
+> = {
+  old: {
+    emptyMessage: "Before content is empty.",
+    lineLabel: "Old",
+    title: "Before"
+  },
+  new: {
+    emptyMessage: "After content is empty.",
+    lineLabel: "New",
+    title: "After"
+  }
+};
+
+function getDiffPaneRows(
+  rows: PrReviewDiffRow[],
+  side: DiffPaneSide
+): DiffPaneRow[] {
+  return rows.flatMap((row, index) => {
+    const lineNumber = side === "old" ? row.oldLineNumber : row.newLineNumber;
+    const text = side === "old" ? row.oldText : row.newText;
+
+    if (text === null) {
+      return [];
+    }
+
+    return [
+      {
+        key: `${side}-${lineNumber ?? "x"}-${index}`,
+        lineNumber,
+        text,
+        type: row.type
+      }
+    ];
+  });
+}
+
+function getDiffPaneRowClassName(type: PrReviewDiffRow["type"]) {
+  switch (type) {
+    case "added":
+      return "bg-emerald-50/80";
+    case "deleted":
+      return "bg-rose-50/80";
+    case "unchanged":
+      return "bg-white";
+  }
+}
+
+function DiffCodePane({
+  rows,
+  side
+}: {
+  rows: DiffPaneRow[];
+  side: DiffPaneSide;
+}) {
+  const labels = diffPaneLabels[side];
+
+  return (
+    <div className="min-w-0 overflow-hidden rounded-lg border border-slate-200 bg-white">
+      <div className="grid grid-cols-[72px_minmax(0,1fr)] border-b border-slate-200 bg-slate-100 text-xs font-semibold uppercase text-slate-500">
+        <span className="px-2 py-2 text-right">{labels.lineLabel}</span>
+        <span className="px-3 py-2">{labels.title}</span>
+      </div>
+      <div className="max-h-[calc(100vh-260px)] overflow-auto">
+        {rows.length ? (
+          <div className="min-w-max text-xs leading-5">
+            {rows.map((row) => (
+              <div
+                className={cn(
+                  "grid min-w-full grid-cols-[72px_minmax(520px,1fr)] border-b border-slate-100 last:border-b-0",
+                  getDiffPaneRowClassName(row.type)
+                )}
+                key={row.key}
+              >
+                <span className="select-none px-2 py-1.5 text-right font-mono text-slate-400">
+                  {row.lineNumber ?? ""}
+                </span>
+                <code
+                  className={cn(
+                    "block min-w-0 whitespace-pre-wrap break-words px-3 py-1.5 font-mono",
+                    getCodeClassName(row.type)
+                  )}
+                >
+                  {row.text}
+                </code>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="px-4 py-8 text-center text-sm text-slate-500">
+            {labels.emptyMessage}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function DiffView({ diff }: { diff: PrReviewFileDiff }) {
   if (diff.mode !== "side_by_side") {
     return (
@@ -642,49 +744,14 @@ function DiffView({ diff }: { diff: PrReviewFileDiff }) {
     );
   }
 
+  const beforeRows = getDiffPaneRows(diff.rows, "old");
+  const afterRows = getDiffPaneRows(diff.rows, "new");
+
   return (
     <section className="p-5">
-      <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
-        <div className="grid min-w-[860px] grid-cols-[72px_minmax(280px,1fr)_72px_minmax(280px,1fr)] border-b border-slate-200 bg-slate-100 text-xs font-semibold uppercase text-slate-500">
-          <span className="px-2 py-2 text-right">Old</span>
-          <span className="px-3 py-2">Before</span>
-          <span className="px-2 py-2 text-right">New</span>
-          <span className="px-3 py-2">After</span>
-        </div>
-        <div className="max-h-[calc(100vh-220px)] overflow-auto">
-          {diff.rows.map((row, index) => (
-            <div
-              className={cn(
-                "grid min-w-[860px] grid-cols-[72px_minmax(280px,1fr)_72px_minmax(280px,1fr)] border-b border-slate-100 last:border-b-0",
-                getRowClassName(row.type)
-              )}
-              key={`${row.oldLineNumber ?? "x"}-${row.newLineNumber ?? "x"}-${index}`}
-            >
-              <span className="select-none px-2 py-1.5 text-right font-mono text-xs text-slate-400">
-                {row.oldLineNumber ?? ""}
-              </span>
-              <code
-                className={cn(
-                  "min-w-0 whitespace-pre-wrap break-words px-3 py-1.5 font-mono text-xs leading-5",
-                  getCodeClassName(row.type)
-                )}
-              >
-                {row.oldText ?? ""}
-              </code>
-              <span className="select-none px-2 py-1.5 text-right font-mono text-xs text-slate-400">
-                {row.newLineNumber ?? ""}
-              </span>
-              <code
-                className={cn(
-                  "min-w-0 whitespace-pre-wrap break-words px-3 py-1.5 font-mono text-xs leading-5",
-                  getCodeClassName(row.type)
-                )}
-              >
-                {row.newText ?? ""}
-              </code>
-            </div>
-          ))}
-        </div>
+      <div className="grid min-w-0 gap-4 xl:grid-cols-2">
+        <DiffCodePane rows={beforeRows} side="old" />
+        <DiffCodePane rows={afterRows} side="new" />
       </div>
     </section>
   );
