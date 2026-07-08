@@ -1,5 +1,13 @@
-import type { ReactNode } from "react";
+"use client";
 
+import { ChevronDown } from "lucide-react";
+import { useState, type ReactNode } from "react";
+
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger
+} from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 
 type PanelProps = {
@@ -8,8 +16,10 @@ type PanelProps = {
   icon?: ReactNode;
   action?: ReactNode;
   children: ReactNode;
+  collapsible?: boolean;
   className?: string;
   contentClassName?: string;
+  defaultOpen?: boolean;
 };
 
 type PillTone = "default" | "success" | "warning" | "danger" | "info";
@@ -28,34 +38,77 @@ export function GithubConnectPanel({
   icon,
   action,
   children,
+  collapsible = false,
   className,
-  contentClassName
+  contentClassName,
+  defaultOpen = true
 }: PanelProps) {
-  return (
-    <section
-      className={cn(
-        "rounded-[8px] border border-[#d9dee8] bg-white shadow-[0_18px_45px_rgba(15,20,34,0.08)]",
-        className
-      )}
-    >
-      <div className="flex items-start justify-between gap-4 border-b border-[#eef1f6] px-5 py-4">
-        <div className="min-w-0">
-          <h2 className="flex items-center gap-2 text-[15px] font-semibold text-[#101828]">
-            {icon ? (
-              <span className="inline-flex size-8 shrink-0 items-center justify-center rounded-[8px] bg-[#f0f4ff] text-[#3157d5]">
-                {icon}
-              </span>
-            ) : null}
-            <span className="truncate">{title}</span>
-          </h2>
-          {subtitle ? (
-            <p className="mt-1 text-[13px] leading-5 text-[#687184]">
-              {subtitle}
-            </p>
+  const [isOpen, setIsOpen] = useState(defaultOpen);
+  const panelClassName = cn(
+    "rounded-[8px] border border-[#d9dee8] bg-white shadow-[0_18px_45px_rgba(15,20,34,0.08)]",
+    className
+  );
+  const headerClassName = cn(
+    "flex items-start justify-between gap-4 px-5 py-4",
+    (!collapsible || isOpen) && "border-b border-[#eef1f6]"
+  );
+  const header = (
+    <div className={headerClassName}>
+      <div className="min-w-0">
+        <h2 className="flex items-center gap-2 text-[15px] font-semibold text-[#101828]">
+          {icon ? (
+            <span className="inline-flex size-8 shrink-0 items-center justify-center rounded-[8px] bg-[#f0f4ff] text-[#3157d5]">
+              {icon}
+            </span>
+          ) : null}
+          <span className="truncate">{title}</span>
+        </h2>
+        {subtitle ? (
+          <p className="mt-1 text-[13px] leading-5 text-[#687184]">
+            {subtitle}
+          </p>
+        ) : null}
+      </div>
+      {action || collapsible ? (
+        <div className="flex shrink-0 items-center gap-2">
+          {action ? <div className="shrink-0">{action}</div> : null}
+          {collapsible ? (
+            <CollapsibleTrigger
+              aria-label={`${title} 섹션 접기/펼치기`}
+              className="inline-flex size-8 items-center justify-center rounded-[8px] border border-[#d9dee8] bg-white text-[#687184] transition-colors hover:bg-[#f7f8fb] hover:text-[#101828] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3157d5]/30"
+              type="button"
+            >
+              <ChevronDown
+                className={cn(
+                  "size-4 transition-transform",
+                  isOpen && "rotate-180"
+                )}
+              />
+            </CollapsibleTrigger>
           ) : null}
         </div>
-        {action ? <div className="shrink-0">{action}</div> : null}
-      </div>
+      ) : null}
+    </div>
+  );
+
+  if (collapsible) {
+    return (
+      <section className={panelClassName}>
+        <Collapsible onOpenChange={setIsOpen} open={isOpen}>
+          {header}
+          {isOpen ? (
+            <CollapsibleContent className={cn("px-5 py-4", contentClassName)}>
+              {children}
+            </CollapsibleContent>
+          ) : null}
+        </Collapsible>
+      </section>
+    );
+  }
+
+  return (
+    <section className={panelClassName}>
+      {header}
       <div className={cn("px-5 py-4", contentClassName)}>{children}</div>
     </section>
   );

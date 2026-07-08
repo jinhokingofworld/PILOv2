@@ -1,9 +1,10 @@
-import { ExternalLink, FolderGit2, Search } from "lucide-react";
+import { ExternalLink, FolderGit2, GitPullRequest, Search } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import type {
+  GithubPullRequest,
   GithubProjectV2,
   GithubRepository
 } from "@/features/github-integration/types";
@@ -25,6 +26,10 @@ type SourceTablesProps = {
   filteredRepositories: GithubRepository[];
   repositoryQuery: string;
   selectedRepositoryId: string;
+  selectedRepository: GithubRepository | undefined;
+  pullRequests: GithubPullRequest[];
+  pullRequestsTotal: number;
+  isPullRequestsLoading: boolean;
   projects: GithubProjectV2[];
   projectsTotal: number;
   selectedProjectV2Id: string;
@@ -40,6 +45,10 @@ export function GithubConnectSourceTables({
   filteredRepositories,
   repositoryQuery,
   selectedRepositoryId,
+  selectedRepository,
+  pullRequests,
+  pullRequestsTotal,
+  isPullRequestsLoading,
   projects,
   projectsTotal,
   selectedProjectV2Id,
@@ -56,6 +65,7 @@ export function GithubConnectSourceTables({
             {formatGithubConnectNumber(repositoriesTotal)} total
           </span>
         }
+        collapsible
         icon={<FolderGit2 className="size-4" />}
         title="저장소"
         subtitle="GitHub 설치가 허용한 repository를 확인하고 Pull Request 조회 기준을 선택합니다."
@@ -110,11 +120,61 @@ export function GithubConnectSourceTables({
       </GithubConnectPanel>
 
       <GithubConnectPanel
+        collapsible
+        icon={<GitPullRequest className="size-4" />}
+        title="Pull Requests"
+        subtitle={
+          selectedRepository
+            ? `${selectedRepository.fullName} · ${formatGithubConnectNumber(
+                pullRequestsTotal
+              )}개`
+            : "저장소를 선택하면 PR 목록을 조회합니다."
+        }
+      >
+        {isPullRequestsLoading ? (
+          <LoadingStack rows={3} />
+        ) : pullRequests.length === 0 ? (
+          <GithubConnectEmptyState>
+            선택한 저장소의 Pull Request가 없거나 아직 동기화되지 않았습니다.
+          </GithubConnectEmptyState>
+        ) : (
+          <div className="space-y-2">
+            {pullRequests.map((pullRequest) => (
+              <a
+                className="block rounded-[8px] border border-[#e5e9f2] bg-[#fbfcfe] p-3 transition-colors hover:border-[#c7d2fe] hover:bg-[#f5f7ff]"
+                href={pullRequest.githubUrl}
+                key={pullRequest.id}
+                rel="noreferrer"
+                target="_blank"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <p className="min-w-0 text-[13px] font-semibold leading-5 text-[#101828]">
+                    #{pullRequest.githubNumber} {pullRequest.title}
+                  </p>
+                  <GithubConnectPill
+                    tone={pullRequest.state === "open" ? "success" : "default"}
+                  >
+                    {pullRequest.state}
+                  </GithubConnectPill>
+                </div>
+                <p className="mt-2 text-[12px] text-[#7a8497]">
+                  {pullRequest.headBranch ?? "-"} →{" "}
+                  {pullRequest.baseBranch ?? "-"} ·{" "}
+                  {pullRequest.changedFilesCount} files
+                </p>
+              </a>
+            ))}
+          </div>
+        )}
+      </GithubConnectPanel>
+
+      <GithubConnectPanel
         action={
           <span className="text-[13px] font-semibold text-[#687184]">
             {formatGithubConnectNumber(projectsTotal)} total
           </span>
         }
+        collapsible
         icon={<FolderGit2 className="size-4" />}
         title="Projects v2"
         subtitle="GitHub GraphQL API를 통해 동기화된 Project v2 목록입니다."
@@ -274,6 +334,16 @@ function LoadingTable({ rows }: { rows: number }) {
     <div className="space-y-2">
       {Array.from({ length: rows }).map((_, index) => (
         <Skeleton className="h-14 rounded-[8px]" key={index} />
+      ))}
+    </div>
+  );
+}
+
+function LoadingStack({ rows }: { rows: number }) {
+  return (
+    <div className="space-y-2">
+      {Array.from({ length: rows }).map((_, index) => (
+        <Skeleton className="h-16 rounded-[8px]" key={index} />
       ))}
     </div>
   );

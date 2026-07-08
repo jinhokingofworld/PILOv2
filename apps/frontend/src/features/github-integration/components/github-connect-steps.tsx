@@ -42,6 +42,15 @@ type StepsProps = {
   onConfirmDeleteInstallation: () => void;
 };
 
+const pendingTaskCardClassName =
+  "flex h-full flex-col rounded-[8px] border border-[#d9dee8] bg-[#fbfcfe] p-4";
+const completedTaskCardClassName =
+  "flex h-full flex-col rounded-[8px] border border-[#b8e8ca] bg-[#f0fdf4] p-4";
+const completedDisconnectButtonClassName =
+  "h-10 rounded-[8px] border-[#b8e8ca] bg-white px-4 text-[#14532d] hover:bg-[#ecfdf3]";
+const completedDestructiveButtonClassName =
+  "h-10 rounded-[8px] border-[#ffc9c9] bg-white px-4 text-[#b42318] hover:bg-[#fff1f1]";
+
 export function GithubConnectSteps({
   connected,
   projectOAuth,
@@ -104,7 +113,11 @@ export function GithubConnectSteps({
         subtitle="현재 연결 상태에 따라 다음에 필요한 작업만 노출합니다."
       >
         <div className="grid gap-4 md:grid-cols-3">
-          <div className="flex h-full flex-col rounded-[8px] border border-[#d9dee8] bg-[#fbfcfe] p-4">
+          <div
+            className={
+              connected ? completedTaskCardClassName : pendingTaskCardClassName
+            }
+          >
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <p className="text-[13px] font-semibold uppercase tracking-[0.06em] text-[#7a8497]">
@@ -123,22 +136,9 @@ export function GithubConnectSteps({
               검증합니다.
             </p>
             <div className="mt-auto flex flex-wrap gap-2 pt-5">
-              <Button
-                className="h-10 rounded-[8px] bg-[#111827] px-4 text-white hover:bg-[#2b3343]"
-                disabled={connected || redirectAction === "oauth" || isLoading}
-                onClick={onStartOAuth}
-                type="button"
-              >
-                {redirectAction === "oauth" ? (
-                  <Loader2 className="animate-spin" data-icon="inline-start" />
-                ) : (
-                  <GitBranch data-icon="inline-start" />
-                )}
-                GitHub로 연결
-              </Button>
               {connected ? (
                 <Button
-                  className="h-10 rounded-[8px]"
+                  className={completedDisconnectButtonClassName}
                   disabled={isDisconnecting || isLoading}
                   onClick={onDisconnectOAuth}
                   type="button"
@@ -151,11 +151,34 @@ export function GithubConnectSteps({
                   )}
                   연결 해제
                 </Button>
-              ) : null}
+              ) : (
+                <Button
+                  className="h-10 rounded-[8px] bg-[#111827] px-4 text-white hover:bg-[#2b3343]"
+                  disabled={redirectAction === "oauth" || isLoading}
+                  onClick={onStartOAuth}
+                  type="button"
+                >
+                  {redirectAction === "oauth" ? (
+                    <Loader2
+                      className="animate-spin"
+                      data-icon="inline-start"
+                    />
+                  ) : (
+                    <GitBranch data-icon="inline-start" />
+                  )}
+                  GitHub로 연결
+                </Button>
+              )}
             </div>
           </div>
 
-          <div className="flex h-full flex-col rounded-[8px] border border-[#d9dee8] bg-[#fbfcfe] p-4">
+          <div
+            className={
+              hasInstallation
+                ? completedTaskCardClassName
+                : pendingTaskCardClassName
+            }
+          >
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <p className="text-[13px] font-semibold uppercase tracking-[0.06em] text-[#7a8497]">
@@ -174,31 +197,13 @@ export function GithubConnectSteps({
               동기화합니다.
             </p>
             <div className="mt-auto flex flex-wrap gap-2 pt-5">
-              <Button
-                className="h-10 rounded-[8px] bg-[#3157d5] px-4 text-white hover:bg-[#2447bd]"
-                disabled={
-                  !connected ||
-                  hasInstallation ||
-                  redirectAction === "installation" ||
-                  isLoading
-                }
-                onClick={onStartInstallation}
-                type="button"
-              >
-                {redirectAction === "installation" ? (
-                  <Loader2 className="animate-spin" data-icon="inline-start" />
-                ) : (
-                  <ExternalLink data-icon="inline-start" />
-                )}
-                GitHub에서 설치 시작
-              </Button>
               {hasInstallation ? (
                 <Button
-                  className="h-10 rounded-[8px]"
+                  className={completedDestructiveButtonClassName}
                   disabled={isDeletingInstallation || isLoading}
                   onClick={onRequestDeleteInstallation}
                   type="button"
-                  variant="destructive"
+                  variant="outline"
                 >
                   {isDeletingInstallation ? (
                     <Loader2 className="animate-spin" data-icon="inline-start" />
@@ -207,7 +212,28 @@ export function GithubConnectSteps({
                   )}
                   GitHub에서 App 설치 해제
                 </Button>
-              ) : null}
+              ) : (
+                <Button
+                  className="h-10 rounded-[8px] bg-[#3157d5] px-4 text-white hover:bg-[#2447bd]"
+                  disabled={
+                    !connected ||
+                    redirectAction === "installation" ||
+                    isLoading
+                  }
+                  onClick={onStartInstallation}
+                  type="button"
+                >
+                  {redirectAction === "installation" ? (
+                    <Loader2
+                      className="animate-spin"
+                      data-icon="inline-start"
+                    />
+                  ) : (
+                    <ExternalLink data-icon="inline-start" />
+                  )}
+                  GitHub에서 설치 시작
+                </Button>
+              )}
             </div>
             {isInstallationDeleteRequested && selectedInstallation ? (
               <div className="mt-4 rounded-[8px] border border-[#ffc9c9] bg-[#fff7f7] p-3">
@@ -249,7 +275,13 @@ export function GithubConnectSteps({
             ) : null}
           </div>
 
-          <div className="flex h-full flex-col rounded-[8px] border border-[#d9dee8] bg-[#fbfcfe] p-4">
+          <div
+            className={
+              projectOAuthConnected
+                ? completedTaskCardClassName
+                : pendingTaskCardClassName
+            }
+          >
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <p className="text-[13px] font-semibold uppercase tracking-[0.06em] text-[#7a8497]">
@@ -271,26 +303,9 @@ export function GithubConnectSteps({
               토큰이 필요합니다.
             </p>
             <div className="mt-auto flex flex-wrap gap-2 pt-5">
-              <Button
-                className="h-10 rounded-[8px] bg-[#111827] px-4 text-white hover:bg-[#2b3343]"
-                disabled={
-                  projectOAuthConnected ||
-                  redirectAction === "project_oauth" ||
-                  isLoading
-                }
-                onClick={onStartGithubProjectOAuth}
-                type="button"
-              >
-                {redirectAction === "project_oauth" ? (
-                  <Loader2 className="animate-spin" data-icon="inline-start" />
-                ) : (
-                  <GitBranch data-icon="inline-start" />
-                )}
-                Project access 연결
-              </Button>
               {projectOAuthConnected ? (
                 <Button
-                  className="h-10 rounded-[8px]"
+                  className={completedDisconnectButtonClassName}
                   disabled={isDisconnectingProjectOAuth || isLoading}
                   onClick={onDisconnectGithubProjectOAuth}
                   type="button"
@@ -303,7 +318,24 @@ export function GithubConnectSteps({
                   )}
                   연결 해제
                 </Button>
-              ) : null}
+              ) : (
+                <Button
+                  className="h-10 rounded-[8px] bg-[#111827] px-4 text-white hover:bg-[#2b3343]"
+                  disabled={redirectAction === "project_oauth" || isLoading}
+                  onClick={onStartGithubProjectOAuth}
+                  type="button"
+                >
+                  {redirectAction === "project_oauth" ? (
+                    <Loader2
+                      className="animate-spin"
+                      data-icon="inline-start"
+                    />
+                  ) : (
+                    <GitBranch data-icon="inline-start" />
+                  )}
+                  Project access 연결
+                </Button>
+              )}
             </div>
           </div>
         </div>

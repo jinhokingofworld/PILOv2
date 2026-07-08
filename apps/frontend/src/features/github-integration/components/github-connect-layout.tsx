@@ -173,7 +173,7 @@ export function GithubConnectLayout({
           selectedInstallation={selectedInstallation}
         />
 
-        <div className="main-grid grid gap-[15px] xl:grid-cols-[minmax(0,1.55fr)_minmax(320px,1fr)]">
+        <div className="main-grid grid items-start gap-[15px] xl:grid-cols-[minmax(0,1.55fr)_minmax(320px,1fr)]">
           <GithubConnectSourceTables
             filteredRepositories={filteredRepositories}
             isLoading={isLoading}
@@ -182,24 +182,24 @@ export function GithubConnectLayout({
             onSelectRepository={onSelectRepository}
             projects={projects}
             projectsTotal={projectsTotal}
+            pullRequests={pullRequests}
+            pullRequestsTotal={pullRequestsTotal}
             repositories={repositories}
             repositoriesTotal={repositoriesTotal}
             repositoryQuery={repositoryQuery}
+            selectedRepository={selectedRepository}
             selectedProjectV2Id={selectedProjectV2Id}
             selectedRepositoryId={selectedRepositoryId}
+            isPullRequestsLoading={isPullRequestsLoading}
           />
 
           <GithubConnectSidebar
             isLoading={isLoading}
-            isPullRequestsLoading={isPullRequestsLoading}
             isSyncing={isSyncing}
             onStartSync={onStartSync}
             onSyncTargetChange={onSyncTargetChange}
-            pullRequests={pullRequests}
-            pullRequestsTotal={pullRequestsTotal}
             installations={installations}
             selectedInstallationId={selectedInstallationId}
-            selectedRepository={selectedRepository}
             syncRuns={syncRuns}
             syncRunsTotal={syncRunsTotal}
             syncTarget={syncTarget}
