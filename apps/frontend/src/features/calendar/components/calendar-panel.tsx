@@ -10,6 +10,7 @@ import {
   Trash2,
   X
 } from "lucide-react";
+import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
 import {
   useCallback,
   useEffect,
@@ -705,44 +706,40 @@ function CalendarEventDetailDialog({
   }
 
   return (
-    <div
-      aria-labelledby="calendar-event-detail-dialog-title"
-      aria-modal="true"
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/35 p-3 sm:items-center sm:p-6"
-      role="dialog"
+    <DialogPrimitive.Root
+      open={Boolean(event)}
+      onOpenChange={(nextOpen) => !nextOpen && onClose()}
     >
-      <button
-        type="button"
-        className="absolute inset-0 cursor-default"
-        aria-label="일정 상세 닫기"
-        onClick={onClose}
-      />
-      <div className="relative flex max-h-[min(620px,calc(100vh-2rem))] w-full max-w-lg flex-col rounded-lg border bg-background shadow-xl">
+      <DialogPrimitive.Portal>
+        <DialogPrimitive.Backdrop className="fixed inset-0 z-50 bg-black/35 transition-opacity duration-150 data-ending-style:opacity-0 data-starting-style:opacity-0" />
+        <DialogPrimitive.Popup className="fixed inset-x-3 bottom-3 z-50 flex max-h-[min(620px,calc(100vh-2rem))] flex-col rounded-lg border bg-background shadow-xl outline-none transition duration-150 data-ending-style:translate-y-2 data-ending-style:opacity-0 data-starting-style:translate-y-2 data-starting-style:opacity-0 sm:top-1/2 sm:left-1/2 sm:bottom-auto sm:w-[calc(100vw-2rem)] sm:max-w-lg sm:-translate-x-1/2 sm:-translate-y-1/2 sm:data-ending-style:translate-y-0 sm:data-ending-style:scale-95 sm:data-starting-style:translate-y-0 sm:data-starting-style:scale-95">
         <div className="flex items-start justify-between gap-3 border-b p-4">
           <div className="min-w-0">
             <p className="text-sm font-medium text-muted-foreground">
               일정 상세
             </p>
-            <h2
-              id="calendar-event-detail-dialog-title"
+            <DialogPrimitive.Title
               className="mt-1 break-words font-heading text-xl font-semibold"
             >
               {event.title}
-            </h2>
-            <p className="mt-1 text-sm text-muted-foreground">
+            </DialogPrimitive.Title>
+            <DialogPrimitive.Description className="mt-1 text-sm text-muted-foreground">
               {getEventDateLabel(event)}
-            </p>
+            </DialogPrimitive.Description>
           </div>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            aria-label="닫기"
+          <DialogPrimitive.Close
             disabled={isSubmitting}
-            onClick={onClose}
+            render={
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                aria-label="닫기"
+              />
+            }
           >
             <X />
-          </Button>
+          </DialogPrimitive.Close>
         </div>
 
         <div
@@ -809,15 +806,18 @@ function CalendarEventDetailDialog({
             삭제
           </Button>
           <div className="flex gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              className="flex-1 sm:flex-none"
+            <DialogPrimitive.Close
               disabled={isSubmitting}
-              onClick={onClose}
+              render={
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="flex-1 sm:flex-none"
+                />
+              }
             >
               닫기
-            </Button>
+            </DialogPrimitive.Close>
             <Button
               type="button"
               className="flex-1 sm:flex-none"
@@ -829,8 +829,9 @@ function CalendarEventDetailDialog({
             </Button>
           </div>
         </div>
-      </div>
-    </div>
+        </DialogPrimitive.Popup>
+      </DialogPrimitive.Portal>
+    </DialogPrimitive.Root>
   );
 }
 
@@ -848,40 +849,34 @@ function CalendarEventsDialog({
   }
 
   return (
-    <div
-      aria-labelledby="calendar-events-dialog-title"
-      aria-modal="true"
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/35 p-3 sm:items-center sm:p-6"
-      role="dialog"
+    <DialogPrimitive.Root
+      open={Boolean(dialog)}
+      onOpenChange={(nextOpen) => !nextOpen && onClose()}
     >
-      <button
-        type="button"
-        className="absolute inset-0 cursor-default"
-        aria-label="일정 목록 닫기"
-        onClick={onClose}
-      />
-      <div className="relative flex max-h-[min(560px,calc(100vh-2rem))] w-full max-w-md flex-col rounded-lg border bg-background shadow-xl">
+      <DialogPrimitive.Portal>
+        <DialogPrimitive.Backdrop className="fixed inset-0 z-50 bg-black/35 transition-opacity duration-150 data-ending-style:opacity-0 data-starting-style:opacity-0" />
+        <DialogPrimitive.Popup className="fixed inset-x-3 bottom-3 z-50 flex max-h-[min(560px,calc(100vh-2rem))] flex-col rounded-lg border bg-background shadow-xl outline-none transition duration-150 data-ending-style:translate-y-2 data-ending-style:opacity-0 data-starting-style:translate-y-2 data-starting-style:opacity-0 sm:top-1/2 sm:left-1/2 sm:bottom-auto sm:w-[calc(100vw-2rem)] sm:max-w-md sm:-translate-x-1/2 sm:-translate-y-1/2 sm:data-ending-style:translate-y-0 sm:data-ending-style:scale-95 sm:data-starting-style:translate-y-0 sm:data-starting-style:scale-95">
         <div className="flex items-start justify-between gap-3 border-b p-4">
           <div className="min-w-0">
-            <h2
-              id="calendar-events-dialog-title"
-              className="font-heading text-lg font-semibold"
-            >
+            <DialogPrimitive.Title className="font-heading text-lg font-semibold">
               일정 목록
-            </h2>
-            <p className="mt-1 text-sm text-muted-foreground">
+            </DialogPrimitive.Title>
+            <DialogPrimitive.Description className="mt-1 text-sm text-muted-foreground">
               {formatDateLabel(dialog.date)} · {dialog.events.length}개 일정
-            </p>
+            </DialogPrimitive.Description>
           </div>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            aria-label="닫기"
-            onClick={onClose}
+          <DialogPrimitive.Close
+            render={
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                aria-label="닫기"
+              />
+            }
           >
             <X />
-          </Button>
+          </DialogPrimitive.Close>
         </div>
 
         <ul className="grid gap-2 overflow-y-auto p-4">
@@ -905,8 +900,9 @@ function CalendarEventsDialog({
             </li>
           ))}
         </ul>
-      </div>
-    </div>
+        </DialogPrimitive.Popup>
+      </DialogPrimitive.Portal>
+    </DialogPrimitive.Root>
   );
 }
 
