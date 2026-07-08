@@ -213,6 +213,7 @@ const [
   commerceFixture,
   modelUtils,
   inspectorUtils,
+  page,
   navigation,
   panel,
   canvasSurface,
@@ -228,6 +229,7 @@ const [
     readSqlErdFile("../../src/features/sql-erd/fixtures/commerce.ts"),
     readSqlErdFile("../../src/features/sql-erd/utils/model.ts"),
     readSqlErdFile("../../src/features/sql-erd/utils/inspector.ts"),
+    readSqlErdFile("../../src/features/sql-erd/page.tsx"),
     readSqlErdFile("../../src/features/sql-erd/navigation.ts"),
     readSqlErdFile("../../src/features/sql-erd/components/sql-erd-panel.tsx"),
     readSqlErdFile("../../src/features/sql-erd/components/sql-erd-canvas.tsx"),
@@ -738,10 +740,14 @@ assert.match(modelUtils, /columnsByTableId/);
 assert.match(modelUtils, /relation\.fromTableId === relation\.toTableId/);
 assert.doesNotMatch(modelUtils, /columnsById: Map<string, SqltoerdColumnRef>/);
 
+assert.match(page, /sql-erd-full-bleed/);
+assert.match(page, /-m-6/);
+assert.match(page, /h-\[calc\(100vh-3\.5rem\)\]/);
+
 assert.match(navigation, /SQLtoERD/);
 assert.match(navigation, /href: "\/sql-erd"/);
 assert.doesNotMatch(navigation, /Inspector/);
-assert.match(navigation, /상세 정보/);
+assert.doesNotMatch(navigation, /href: "\/sql-erd#inspector"/);
 
 assert.match(panel, /SqlErdCanvas/);
 assert.match(panel, /useAuthSession/);
@@ -779,9 +785,25 @@ assert.match(panel, /setSqlErdViewSession/);
 assert.match(panel, /selectedSqlErdObject/);
 assert.match(panel, /setSelectedSqlErdObject/);
 assert.match(panel, /createSqlErdInspectorViewModel/);
+assert.match(panel, /SOURCE_PANEL_DEFAULT_WIDTH/);
+assert.match(panel, /INSPECTOR_PANEL_DEFAULT_WIDTH/);
+assert.match(panel, /clampPanelWidth/);
+assert.match(panel, /PanelResizeHandle/);
+assert.match(panel, /Resize source panel/);
+assert.match(panel, /Resize inspector panel/);
+assert.match(panel, /role="separator"/);
+assert.match(panel, /aria-orientation="vertical"/);
+assert.match(panel, /onPointerDown/);
+assert.match(panel, /sourcePanelWidth/);
+assert.match(panel, /inspectorPanelWidth/);
+assert.match(panel, /emptyState=\{\{/);
+assert.match(panel, /title: sqlErdViewSession\.title/);
 assert.match(panel, /const inspectorSubtitle = getInspectorSubtitle\(viewModel\)/);
 assert.match(panel, /inspectorSubtitle \?/);
 assert.doesNotMatch(panel, /viewModel\.title\}.*table/i);
+assert.doesNotMatch(panel, /min-h-\[calc\(100vh-8\.5rem\)\]/);
+assert.doesNotMatch(panel, /rounded-lg border bg-background shadow-sm/);
+assert.doesNotMatch(panel, /bg-background\/95 px-4 backdrop-blur/);
 assert.match(panel, /상세 정보/);
 assert.match(panel, /선택 정보/);
 assert.match(panel, /컬럼 정보/);
