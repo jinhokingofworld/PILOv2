@@ -34,8 +34,11 @@ export function BoardHydrationForm({
   selectedProjectV2Id,
   selectedRepositoryId
 }: BoardHydrationFormProps) {
+  const hasSelectedProjectV2 = projects.some(
+    (project) => project.id === selectedProjectV2Id
+  );
   const canHydrate = Boolean(
-    selectedRepositoryId && selectedProjectV2Id && !isHydrating
+    selectedRepositoryId && selectedProjectV2Id && hasSelectedProjectV2 && !isHydrating
   );
 
   return (
@@ -73,7 +76,9 @@ export function BoardHydrationForm({
             value={selectedProjectV2Id}
             onChange={(event) => onSelectProjectV2(event.currentTarget.value)}
           >
-            <option value="">ProjectV2 선택</option>
+            <option value="">
+              {projects.length === 0 ? "연결된 ProjectV2 없음" : "ProjectV2 선택"}
+            </option>
             {projects.map((project) => (
               <option key={project.id} value={project.id}>
                 #{project.projectNumber} {project.title}
