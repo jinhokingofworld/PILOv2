@@ -37,6 +37,7 @@ type UseCanvasViewportQueriesOptions = {
   shapeDetailCacheRef: RuntimeRef<Map<string, PiloCanvasFreeformShape>>;
   shapeDetailRequestSeqRef: RuntimeRef<number>;
   storageMode: CanvasRuntimeStorageMode;
+  deletedShapeIdsRef: RuntimeRef<Set<string>>;
   unloadedShapeIdsRef: RuntimeRef<Set<string>>;
   viewportShapeLoadRequestSeqRef: RuntimeRef<number>;
   viewportShapeLoadTimerRef: RuntimeRef<ReturnType<typeof setTimeout> | null>;
@@ -62,6 +63,7 @@ export function useCanvasViewportQueries({
   shapeDetailCacheRef,
   shapeDetailRequestSeqRef,
   storageMode,
+  deletedShapeIdsRef,
   unloadedShapeIdsRef,
   viewportShapeLoadRequestSeqRef,
   viewportShapeLoadTimerRef,
@@ -81,16 +83,22 @@ export function useCanvasViewportQueries({
       loadingFrameChildrenRef.current.add(frameId);
 
       function mergeFrameChildren(loadedShapes: PiloCanvasFreeformShape[]) {
-        if (!loadedShapes.length) return;
+        const nextLoadedShapes = loadedShapes.filter(
+          (shape) =>
+            typeof shape.id !== "string" ||
+            !deletedShapeIdsRef.current.has(shape.id),
+        );
 
-        loadedShapes.forEach((shape) => {
+        if (!nextLoadedShapes.length) return;
+
+        nextLoadedShapes.forEach((shape) => {
           if (typeof shape.id === "string") {
             unloadedShapeIdsRef.current.delete(shape.id);
             shapeDetailCacheRef.current.set(shape.id, shape);
           }
         });
-        mergeLoadedFreeformShapes(loadedShapes);
-        loadedShapes.forEach((shape) => {
+        mergeLoadedFreeformShapes(nextLoadedShapes);
+        nextLoadedShapes.forEach((shape) => {
           if (shouldLoadExpandedFrameChildren(shape)) {
             loadFrameChildren(shape.id, nextVisitedFrameIds);
           }
@@ -98,7 +106,10 @@ export function useCanvasViewportQueries({
       }
 
       const cachedShapes = Array.from(shapeDetailCacheRef.current.values()).filter(
-        (shape) => shape.parentId === frameId,
+        (shape) =>
+          shape.parentId === frameId &&
+          (typeof shape.id !== "string" ||
+            !deletedShapeIdsRef.current.has(shape.id)),
       );
 
       mergeFrameChildren(cachedShapes);
@@ -158,6 +169,7 @@ export function useCanvasViewportQueries({
       board.id,
       board.workspaceId,
       canvasClient,
+      deletedShapeIdsRef,
       mergeLoadedFreeformShapes,
       queryClient,
       shapeDetailCacheRef,
@@ -238,9 +250,14 @@ export function useCanvasViewportQueries({
             const loadedShapes = normalizeCanvasFreeformShapes(
               shapes,
             ) as PiloCanvasFreeformShape[];
+            const nextLoadedShapes = loadedShapes.filter(
+              (shape) =>
+                typeof shape.id !== "string" ||
+                !deletedShapeIdsRef.current.has(shape.id),
+            );
 
-            mergeLoadedFreeformShapes(loadedShapes);
-            loadedShapes.forEach((shape) => {
+            mergeLoadedFreeformShapes(nextLoadedShapes);
+            nextLoadedShapes.forEach((shape) => {
               if (shouldLoadExpandedFrameChildren(shape)) {
                 loadFrameChildren(shape.id);
               }
@@ -259,6 +276,7 @@ export function useCanvasViewportQueries({
       board.id,
       board.workspaceId,
       canvasClient,
+      deletedShapeIdsRef,
       latestViewportBoundsRef,
       loadFrameChildren,
       mergeLoadedFreeformShapes,
@@ -274,6 +292,11 @@ export function useCanvasViewportQueries({
       if (zoom < CANVAS_SHAPE_DETAIL_MIN_ZOOM) {
         pendingShapeDetailRef.current = null;
         shapeDetailRequestSeqRef.current += 1;
+        return;
+      }
+
+      if (deletedShapeIdsRef.current.has(shapeId)) {
+        shapeDetailCacheRef.current.delete(shapeId);
         return;
       }
 
@@ -331,6 +354,7 @@ export function useCanvasViewportQueries({
           ]) as PiloCanvasFreeformShape[];
 
           if (!detailShape) return;
+          if (deletedShapeIdsRef.current.has(shapeId)) return;
 
           shapeDetailCacheRef.current.set(shapeId, detailShape);
           mergeLoadedFreeformShapes([detailShape]);
@@ -346,6 +370,7 @@ export function useCanvasViewportQueries({
     [
       board.workspaceId,
       canvasClient,
+      deletedShapeIdsRef,
       mergeLoadedFreeformShapes,
       pendingShapeDetailRef,
       queryClient,

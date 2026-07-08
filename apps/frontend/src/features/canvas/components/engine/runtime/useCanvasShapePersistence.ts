@@ -38,6 +38,7 @@ type UseCanvasShapePersistenceOptions = {
   shapeDetailCacheRef: RuntimeRef<Map<string, PiloCanvasFreeformShape>>;
   shapeSyncQueueRef: RuntimeRef<CanvasShapeSyncQueue | null>;
   storageMode: CanvasRuntimeStorageMode;
+  deletedShapeIdsRef: RuntimeRef<Set<string>>;
   unloadedShapeIdsRef: RuntimeRef<Set<string>>;
 };
 
@@ -53,12 +54,15 @@ export function useCanvasShapePersistence({
   shapeDetailCacheRef,
   shapeSyncQueueRef,
   storageMode,
+  deletedShapeIdsRef,
   unloadedShapeIdsRef,
 }: UseCanvasShapePersistenceOptions) {
   function buildPersistableLocalShapes(shapes: PiloCanvasFreeformShape[]) {
     const shapeMap = buildFreeformShapeMap(shapes);
 
     unloadedShapeIdsRef.current.forEach((shapeId) => {
+      if (deletedShapeIdsRef.current.has(shapeId)) return;
+
       const unloadedShape = shapeDetailCacheRef.current.get(shapeId);
 
       if (unloadedShape) {
@@ -91,8 +95,11 @@ export function useCanvasShapePersistence({
       pendingVersions.set(shapeId, version);
 
       if (nextShape) {
+        deletedShapeIdsRef.current.delete(shapeId);
         shapeDetailCacheRef.current.set(shapeId, nextShape);
       } else {
+        deletedShapeIdsRef.current.add(shapeId);
+        unloadedShapeIdsRef.current.delete(shapeId);
         shapeDetailCacheRef.current.delete(shapeId);
       }
     });
@@ -140,7 +147,11 @@ export function useCanvasShapePersistence({
       const nextLoadedShapes = loadedShapes.filter((shape) => {
         const shapeId = getFreeformShapeId(shape);
 
-        return !shapeId || !pendingLocalShapeVersionsRef.current.has(shapeId);
+        return (
+          !shapeId ||
+          (!deletedShapeIdsRef.current.has(shapeId) &&
+            !pendingLocalShapeVersionsRef.current.has(shapeId))
+        );
       });
 
       if (!nextLoadedShapes.length) return;
@@ -162,6 +173,7 @@ export function useCanvasShapePersistence({
     },
     [
       freeformShapesRef,
+      deletedShapeIdsRef,
       pendingLocalShapeVersionsRef,
       setCanvasHydrationVersion,
       setFreeformShapes,
@@ -200,6 +212,7 @@ export function useCanvasShapePersistence({
                   clearPendingLocalShapeChanges(pendingLocalShapeVersions),
                 )
                 .catch((error: unknown) => {
+                  clearPendingLocalShapeChanges(pendingLocalShapeVersions);
                   console.error("Canvas API shape sync failed", error);
                 });
             }
@@ -214,6 +227,7 @@ export function useCanvasShapePersistence({
                 clearPendingLocalShapeChanges(pendingLocalShapeVersions),
               )
               .catch((error: unknown) => {
+                clearPendingLocalShapeChanges(pendingLocalShapeVersions);
                 console.error("Canvas API shape sync failed", error);
               });
           }
@@ -232,6 +246,7 @@ export function useCanvasShapePersistence({
       board.id,
       board.workspaceId,
       canvasClient,
+      deletedShapeIdsRef,
       freeformShapesRef,
       onLocalShapeSyncIdle,
       setFreeformShapes,

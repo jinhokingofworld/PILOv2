@@ -488,6 +488,8 @@ assert.match(canvasShapePersistence, /shapeSyncQueue\.enqueue/);
 assert.match(canvasShapePersistence, /areCanvasFreeformShapesEqual/);
 assert.match(canvasRuntime, /captureDraftFreeformShapes/);
 assert.match(canvasShapePersistence, /shapeDetailCacheRef\.current\.set\(shapeId, nextShape\)/);
+assert.match(canvasShapePersistence, /deletedShapeIdsRef\.current\.add\(shapeId\)/);
+assert.match(canvasShapePersistence, /deletedShapeIdsRef\.current\.has\(shapeId\)/);
 assert.match(canvasShapePersistence, /unloadedShapeIdsRef/);
 assert.match(canvasShapePersistence, /buildPersistableLocalShapes/);
 assert.match(canvasShapePersistence, /nextShapes: buildPersistableLocalShapes\(nextFreeformShapes\)/);
@@ -545,6 +547,8 @@ assert.match(canvasRuntime, /catchUpCanvasOperations/);
 assert.match(canvasRuntime, /applyRemoteCanvasOperations/);
 assert.match(canvasRuntime, /deferredRemoteOperationsRef/);
 assert.match(canvasRuntime, /remoteShapeRevisionRef/);
+assert.match(canvasRuntime, /deletedShapeIdsRef/);
+assert.match(canvasRuntime, /markShapeDeleted/);
 assert.match(canvasRuntime, /pendingLocalShapeVersionsRef\.current\.has/);
 assert.match(canvasRuntime, /actorUserId === currentRealtimeUserId/);
 assert.match(canvasRuntime, /listOperationsAfterSeq/);
@@ -611,6 +615,7 @@ assert.match(canvasShapeSync, /DEFAULT_CANVAS_SHAPE_SYNC_QUEUE_DEBOUNCE_MS = 500
 assert.match(canvasShapeSync, /DEFAULT_CANVAS_SHAPE_SYNC_RETRY_ATTEMPTS = 3/);
 assert.match(canvasShapeSync, /DEFAULT_CANVAS_SHAPE_SYNC_BATCH_SIZE = 100/);
 assert.match(canvasShapeSync, /NON_RETRYABLE_CANVAS_API_STATUSES/);
+assert.match(canvasShapeSync, /isStaleMissingShapeOperation/);
 assert.match(canvasShapeSync, /CanvasShapeSyncFailure/);
 assert.match(canvasShapeSync, /isNonRetryableCanvasShapeSyncError/);
 assert.match(canvasShapeSync, /shouldRetry\(\{ error \}\)/);
@@ -627,6 +632,7 @@ assert.match(canvasShapeSync, /queuedDuringFlush/);
 assert.match(canvasShapeSync, /whenIdle: \(\) => Promise<void>/);
 assert.match(canvasShapeSync, /resolveIdleWaiters/);
 assert.match(canvasShapeSync, /syncShapesBatch/);
+assert.match(canvasShapeSync, /runBatchOperationsIndividually/);
 assert.match(canvasShapeSync, /operations\.slice\(\s*index,\s*index \+ DEFAULT_CANVAS_SHAPE_SYNC_BATCH_SIZE/);
 assert.match(canvasShapeSync, /createShape\(\s*boardId,/);
 assert.match(canvasShapeSync, /updateShape\(\s*operation\.shapeId,/);
@@ -802,6 +808,333 @@ assert.match(routes, /as default/);
 assert.doesNotMatch(routes, /MainShell/);
 assert.match(pages, /MainShell/);
 assert.match(pages, /Panel/);
+
+function createScenarioShape(id, value = 0) {
+  return {
+    id,
+    type: "geo",
+    x: value,
+    y: value,
+    props: {
+      h: 100,
+      w: 100
+    }
+  };
+}
+
+function shapeMap(shapes) {
+  return new Map(shapes.map((shape) => [shape.id, shape]));
+}
+
+function createScenarioSyncOperations(previousShapes, nextShapes) {
+  const previousShapeMap = shapeMap(previousShapes);
+  const nextShapeMap = shapeMap(nextShapes);
+  const operations = [];
+
+  nextShapes.forEach((shape) => {
+    const previousShape = previousShapeMap.get(shape.id);
+
+    if (!previousShape) {
+      operations.push({
+        shapeId: shape.id,
+        type: "create",
+        payload: shape
+      });
+      return;
+    }
+
+    if (JSON.stringify(previousShape) !== JSON.stringify(shape)) {
+      operations.push({
+        shapeId: shape.id,
+        type: "update",
+        payload: shape
+      });
+    }
+  });
+
+  previousShapes.forEach((shape) => {
+    if (nextShapeMap.has(shape.id)) return;
+
+    operations.push({
+      shapeId: shape.id,
+      type: "delete"
+    });
+  });
+
+  return operations;
+}
+
+function mergeScenarioQueuedOperation(pendingOperations, operation) {
+  const pendingOperation = pendingOperations.get(operation.shapeId);
+
+  if (!pendingOperation) {
+    pendingOperations.set(operation.shapeId, operation);
+    return;
+  }
+
+  if (operation.type === "create") {
+    pendingOperations.set(
+      operation.shapeId,
+      pendingOperation.type === "create"
+        ? operation
+        : {
+            shapeId: operation.shapeId,
+            type: "update",
+            payload: operation.payload
+          }
+    );
+    return;
+  }
+
+  if (operation.type === "update") {
+    pendingOperations.set(
+      operation.shapeId,
+      pendingOperation.type === "create"
+        ? {
+            shapeId: operation.shapeId,
+            type: "create",
+            payload: operation.payload
+          }
+        : operation
+    );
+    return;
+  }
+
+  if (pendingOperation.type === "create") {
+    pendingOperations.delete(operation.shapeId);
+    return;
+  }
+
+  pendingOperations.set(operation.shapeId, operation);
+}
+
+function applyScenarioRemoteOperation(state, operation) {
+  if (operation.type === "delete") {
+    state.deletedShapeIds.add(operation.shapeId);
+    state.cache.delete(operation.shapeId);
+    state.unloadedShapeIds.delete(operation.shapeId);
+    state.shapes = state.shapes.filter((shape) => shape.id !== operation.shapeId);
+    return;
+  }
+
+  if (state.deletedShapeIds.has(operation.shapeId)) {
+    return;
+  }
+
+  const nextShape = operation.payload ?? createScenarioShape(operation.shapeId);
+  const existingIndex = state.shapes.findIndex((shape) => shape.id === operation.shapeId);
+  state.cache.set(operation.shapeId, nextShape);
+
+  if (existingIndex >= 0) {
+    state.shapes = state.shapes.map((shape) =>
+      shape.id === operation.shapeId ? nextShape : shape
+    );
+    return;
+  }
+
+  state.shapes = [...state.shapes, nextShape];
+}
+
+function mergeScenarioLoadedShapes(state, loadedShapes) {
+  loadedShapes.forEach((shape) => {
+    if (state.deletedShapeIds.has(shape.id)) return;
+
+    const existingIndex = state.shapes.findIndex((currentShape) => currentShape.id === shape.id);
+    state.cache.set(shape.id, shape);
+
+    if (existingIndex >= 0) {
+      state.shapes = state.shapes.map((currentShape) =>
+        currentShape.id === shape.id ? shape : currentShape
+      );
+      return;
+    }
+
+    state.shapes = [...state.shapes, shape];
+  });
+}
+
+function buildScenarioPersistableShapes(state) {
+  const nextShapeMap = shapeMap(state.shapes);
+
+  state.unloadedShapeIds.forEach((shapeId) => {
+    if (state.deletedShapeIds.has(shapeId)) return;
+
+    const cachedShape = state.cache.get(shapeId);
+
+    if (cachedShape) {
+      nextShapeMap.set(shapeId, cachedShape);
+    }
+  });
+
+  return Array.from(nextShapeMap.values());
+}
+
+function canvasApiError(status) {
+  return Object.assign(new Error(`Canvas API ${status}`), { status });
+}
+
+async function runScenarioBatchFallback(operations, runBatch) {
+  try {
+    await runBatch(operations);
+    return;
+  } catch (error) {
+    if (error.status !== 404 || operations.length <= 1) {
+      throw error;
+    }
+  }
+
+  for (const operation of operations) {
+    try {
+      await runBatch([operation]);
+    } catch (error) {
+      if (error.status === 404 && operation.type !== "create") {
+        continue;
+      }
+
+      throw error;
+    }
+  }
+}
+
+{
+  const pendingOperations = new Map();
+  mergeScenarioQueuedOperation(pendingOperations, {
+    shapeId: "shape:1",
+    type: "create",
+    payload: createScenarioShape("shape:1", 1)
+  });
+  mergeScenarioQueuedOperation(pendingOperations, {
+    shapeId: "shape:1",
+    type: "update",
+    payload: createScenarioShape("shape:1", 2)
+  });
+  assert.deepEqual(Array.from(pendingOperations.values()), [
+    {
+      shapeId: "shape:1",
+      type: "create",
+      payload: createScenarioShape("shape:1", 2)
+    }
+  ]);
+}
+
+{
+  const pendingOperations = new Map();
+  mergeScenarioQueuedOperation(pendingOperations, {
+    shapeId: "shape:1",
+    type: "create",
+    payload: createScenarioShape("shape:1", 1)
+  });
+  mergeScenarioQueuedOperation(pendingOperations, {
+    shapeId: "shape:1",
+    type: "delete"
+  });
+  assert.equal(pendingOperations.size, 0);
+}
+
+{
+  const pendingOperations = new Map();
+  mergeScenarioQueuedOperation(pendingOperations, {
+    shapeId: "shape:1",
+    type: "update",
+    payload: createScenarioShape("shape:1", 2)
+  });
+  mergeScenarioQueuedOperation(pendingOperations, {
+    shapeId: "shape:1",
+    type: "delete"
+  });
+  assert.deepEqual(Array.from(pendingOperations.values()), [
+    {
+      shapeId: "shape:1",
+      type: "delete"
+    }
+  ]);
+}
+
+{
+  const operations = createScenarioSyncOperations(
+    [createScenarioShape("shape:1", 1), createScenarioShape("shape:2", 1)],
+    [createScenarioShape("shape:1", 2), createScenarioShape("shape:3", 1)]
+  );
+  assert.deepEqual(
+    operations.map((operation) => `${operation.type}:${operation.shapeId}`),
+    ["update:shape:1", "create:shape:3", "delete:shape:2"]
+  );
+}
+
+{
+  const state = {
+    cache: new Map([["shape:1", createScenarioShape("shape:1", 1)]]),
+    deletedShapeIds: new Set(),
+    shapes: [createScenarioShape("shape:1", 1)],
+    unloadedShapeIds: new Set()
+  };
+
+  applyScenarioRemoteOperation(state, {
+    shapeId: "shape:1",
+    type: "delete"
+  });
+  applyScenarioRemoteOperation(state, {
+    shapeId: "shape:1",
+    type: "update",
+    payload: createScenarioShape("shape:1", 2)
+  });
+  mergeScenarioLoadedShapes(state, [createScenarioShape("shape:1", 3)]);
+  assert.deepEqual(state.shapes, []);
+  assert.equal(state.deletedShapeIds.has("shape:1"), true);
+  assert.equal(state.cache.has("shape:1"), false);
+}
+
+{
+  const state = {
+    cache: new Map([["shape:child", createScenarioShape("shape:child", 1)]]),
+    deletedShapeIds: new Set(["shape:child"]),
+    shapes: [],
+    unloadedShapeIds: new Set(["shape:child"])
+  };
+
+  assert.deepEqual(buildScenarioPersistableShapes(state), []);
+}
+
+{
+  const sentOperations = [];
+  const operations = [
+    { shapeId: "shape:stale-update", type: "update" },
+    { shapeId: "shape:new", type: "create" },
+    { shapeId: "shape:stale-delete", type: "delete" },
+    { shapeId: "shape:move", type: "update" }
+  ];
+
+  await runScenarioBatchFallback(operations, async (batchOperations) => {
+    if (batchOperations.length > 1) {
+      throw canvasApiError(404);
+    }
+
+    const [operation] = batchOperations;
+
+    if (operation.shapeId.includes("stale")) {
+      throw canvasApiError(404);
+    }
+
+    sentOperations.push(operation);
+  });
+  assert.deepEqual(sentOperations, [
+    { shapeId: "shape:new", type: "create" },
+    { shapeId: "shape:move", type: "update" }
+  ]);
+}
+
+{
+  await assert.rejects(
+    () =>
+      runScenarioBatchFallback(
+        [{ shapeId: "shape:create-missing", type: "create" }],
+        async () => {
+          throw canvasApiError(404);
+        }
+      ),
+    /Canvas API 404/
+  );
+}
 
 await import("./calendar/test.mjs");
 await import("./github-integration/test.mjs");

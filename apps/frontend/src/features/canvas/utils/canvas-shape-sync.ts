@@ -129,6 +129,17 @@ function isNonRetryableCanvasApiError(error: unknown) {
   return status !== null && NON_RETRYABLE_CANVAS_API_STATUSES.has(status);
 }
 
+function isMissingCanvasApiError(error: unknown) {
+  return readCanvasApiErrorStatus(error) === 404;
+}
+
+function isStaleMissingShapeOperation(
+  error: unknown,
+  operation: CanvasShapeSyncOperation,
+) {
+  return operation.type !== "create" && isMissingCanvasApiError(error);
+}
+
 function isNonRetryableCanvasShapeSyncError(error: unknown) {
   if (isNonRetryableCanvasApiError(error)) {
     return true;
@@ -412,6 +423,39 @@ async function runCanvasShapeSyncOperations({
   const syncShapesBatch = canvasClient.syncShapesBatch;
 
   if (syncShapesBatch) {
+    const runSyncShapesBatch = syncShapesBatch;
+
+    async function runBatchOperationsIndividually(
+      batchOperations: CanvasShapeSyncOperation[],
+    ) {
+      for (let index = 0; index < batchOperations.length; index += 1) {
+        const operation = batchOperations[index];
+
+        try {
+          await runWithRetry(async () => {
+            await runSyncShapesBatch(
+              boardId,
+              {
+                operations: [operation],
+              },
+              {
+                workspaceId,
+              },
+            );
+          });
+        } catch (error) {
+          if (isStaleMissingShapeOperation(error, operation)) {
+            continue;
+          }
+
+          throw new CanvasShapeSyncFailure(
+            error,
+            batchOperations.slice(index),
+          );
+        }
+      }
+    }
+
     for (
       let index = 0;
       index < operations.length;
@@ -424,7 +468,7 @@ async function runCanvasShapeSyncOperations({
 
       try {
         await runWithRetry(async () => {
-          await syncShapesBatch(
+          await runSyncShapesBatch(
             boardId,
             {
               operations: batchOperations,
@@ -435,6 +479,20 @@ async function runCanvasShapeSyncOperations({
           );
         });
       } catch (error) {
+        if (
+          batchOperations.length > 1 &&
+          isNonRetryableCanvasApiError(error)
+        ) {
+          try {
+            await runBatchOperationsIndividually(batchOperations);
+            continue;
+          } catch (fallbackError) {
+            if (fallbackError instanceof CanvasShapeSyncFailure) {
+              throw fallbackError;
+            }
+          }
+        }
+
         throw new CanvasShapeSyncFailure(error, operations.slice(index));
       }
     }
