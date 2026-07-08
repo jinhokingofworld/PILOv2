@@ -1,3 +1,5 @@
+/* Canvas screen shell */
+
 .canvas-feature {
   color-scheme: light;
   --pilo-ink: #0f1422;
@@ -42,6 +44,8 @@
   background: transparent;
 }
 
+/* Shared floating panel chrome */
+
 .canvas-zoom-controls,
 .canvas-detail-panel,
 .canvas-node {
@@ -63,6 +67,8 @@
 .canvas-zoom-controls button:hover {
   background: #eef2f7;
 }
+
+/* Right tool rail */
 
 .canvas-tool-rail {
   position: absolute;
@@ -480,6 +486,8 @@
   box-shadow: 0 7px 16px rgba(15, 23, 42, 0.18);
 }
 
+/* Realtime presence overlays */
+
 .canvas-remote-cursor-pointer {
   width: 18px;
   height: 22px;
@@ -503,6 +511,8 @@
   box-shadow: 0 7px 16px rgba(15, 23, 42, 0.18);
 }
 
+/* tldraw built-in overrides */
+
 .pilo-tldraw-canvas .tl-frame-heading-hit-area,
 .pilo-tldraw-canvas .tl-frame-label {
   background: transparent;
@@ -519,12 +529,15 @@
 .pilo-tldraw-canvas .tl-frame-label__editing {
   background: transparent;
   box-shadow: none;
+  color: transparent;
 }
 
 .pilo-tldraw-canvas .tl-frame-name-input {
   color: #6b7280;
   padding: 0 2px;
 }
+
+/* Selection toolbars */
 
 .pilo-group-toolbar {
   position: absolute;
@@ -1133,6 +1146,8 @@
   background: #ffffff;
 }
 
+/* Canvas background grid */
+
 .pilo-canvas-background {
   position: absolute;
   inset: 0;
@@ -1163,6 +1178,8 @@
   width: 100%;
   height: 100%;
 }
+
+/* PILO custom shape containers */
 
 .pilo-sticky-note-shape {
   contain: layout paint;
@@ -1229,6 +1246,8 @@
   cursor: grabbing;
 }
 
+/* Sticky note shape */
+
 .pilo-sticky-note {
   width: 100%;
   height: 100%;
@@ -1280,6 +1299,8 @@
 .pilo-sticky-note p:empty::before {
   content: "";
 }
+
+/* Code block shape */
 
 .pilo-code-block {
   display: grid;
@@ -1540,6 +1561,8 @@
   -webkit-line-clamp: 1;
 }
 
+/* Bottom zoom and snap controls */
+
 .canvas-zoom-controls {
   position: absolute;
   right: 16px;
@@ -1554,6 +1577,7 @@
 
 .canvas-zoom-controls button {
   position: relative;
+  box-sizing: border-box;
   display: grid;
   width: 32px;
   height: 32px;
@@ -1561,6 +1585,9 @@
   border-radius: 7px;
   font-size: 14px;
   font-weight: 900;
+  line-height: 1;
+  padding: 0;
+  touch-action: manipulation;
 }
 
 .canvas-zoom-controls button.is-active {

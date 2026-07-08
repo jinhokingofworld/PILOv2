@@ -1,6 +1,6 @@
 "use client";
 
-import { FrameShapeUtil, type Editor } from "tldraw";
+import { FrameShapeUtil, type Editor, type TLShape } from "tldraw";
 
 import {
   isPiloFrameShape,
@@ -43,7 +43,7 @@ const piloFrameDisplayColors: Partial<
   white: { fill: "#ffffff", stroke: "#cbd2df", headingText: "#111827" },
 };
 
-export const PiloFrameShapeUtil = FrameShapeUtil.configure({
+const PiloBaseFrameShapeUtil = FrameShapeUtil.configure({
   showColors: true,
   getCustomDisplayValues(_editor, shape) {
     if (isPiloFrameCollapsed(shape)) {
@@ -70,6 +70,12 @@ export const PiloFrameShapeUtil = FrameShapeUtil.configure({
     };
   },
 });
+
+export class PiloFrameShapeUtil extends PiloBaseFrameShapeUtil {
+  override shouldClipChild(child: TLShape) {
+    return child.type !== "text";
+  }
+}
 
 export function resolveNextFrameName(editor: Editor) {
   const usedFrameNumbers = new Set<number>();

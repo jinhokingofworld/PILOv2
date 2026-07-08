@@ -721,6 +721,8 @@ assert.doesNotMatch(piloCanvasShapeUtils, /frame\/PiloFrameSelectionToolbar/);
 assert.match(piloFrameShapeUtil, /FrameShapeUtil\.configure/);
 assert.match(piloFrameShapeUtil, /resolveNextFrameName/);
 assert.match(piloFrameShapeUtil, /isPiloFrameCollapsed/);
+assert.match(piloFrameShapeUtil, /shouldClipChild/);
+assert.match(piloFrameShapeUtil, /child\.type !== "text"/);
 assert.doesNotMatch(piloFrameSelectionToolbar, /FrameShapeUtil\.configure/);
 assert.match(piloFrameSelectionToolbar, /onFrameCollapsedChange/);
 assert.match(piloFrameSelectionToolbar, /FRAME_TOOLBAR_BASE_WIDTH/);
