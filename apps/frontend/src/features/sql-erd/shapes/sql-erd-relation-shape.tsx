@@ -200,6 +200,26 @@ function getRelationCurvePathData(points: SqlErdRelationRoutePoint[]) {
     return "";
   }
 
+  const [controlPointOne, controlPointTwo] =
+    getRelationCurveControlPoints(points);
+
+  if (!controlPointOne || !controlPointTwo) {
+    return "";
+  }
+
+  return `M ${startPoint.x} ${startPoint.y} C ${controlPointOne.x} ${controlPointOne.y}, ${controlPointTwo.x} ${controlPointTwo.y}, ${endPoint.x} ${endPoint.y}`;
+}
+
+function getRelationCurveControlPoints(
+  points: SqlErdRelationRoutePoint[]
+): SqlErdRelationRoutePoint[] {
+  const startPoint = points[0];
+  const endPoint = points.at(-1);
+
+  if (!startPoint || !endPoint) {
+    return [];
+  }
+
   const dx = endPoint.x - startPoint.x;
   const direction = dx >= 0 ? 1 : -1;
   const controlOffset = Math.max(
@@ -215,7 +235,36 @@ function getRelationCurvePathData(points: SqlErdRelationRoutePoint[]) {
     y: endPoint.y
   };
 
-  return `M ${startPoint.x} ${startPoint.y} C ${controlPointOne.x} ${controlPointOne.y}, ${controlPointTwo.x} ${controlPointTwo.y}, ${endPoint.x} ${endPoint.y}`;
+  return [controlPointOne, controlPointTwo];
+}
+
+function getRelationCurveBoundsPoints(
+  points: SqlErdRelationRoutePoint[]
+): SqlErdRelationRoutePoint[] {
+  return [
+    ...points,
+    ...getRelationCurveControlPoints(points)
+  ];
+}
+
+function getRelationCurveGeometryPoints(
+  points: SqlErdRelationRoutePoint[]
+): SqlErdRelationRoutePoint[] {
+  const startPoint = points[0];
+  const endPoint = points.at(-1);
+  const [controlPointOne, controlPointTwo] =
+    getRelationCurveControlPoints(points);
+
+  if (!startPoint || !endPoint || !controlPointOne || !controlPointTwo) {
+    return points;
+  }
+
+  return [
+    startPoint,
+    controlPointOne,
+    controlPointTwo,
+    endPoint
+  ];
 }
 
 function getPointListData(points: SqlErdRelationRoutePoint[]) {
@@ -292,7 +341,10 @@ export function getSqlErdRelationShapeLayout(
   const anchors = getSqlErdRelationColumnAnchors(fromTable, toTable, columnIds);
   const pagePoints = getSqlErdRelationRoutePoints(anchors);
   const pageArrowPoints = getArrowPoints(pagePoints);
-  const bounds = getPaddedBounds([...pagePoints, ...pageArrowPoints]);
+  const bounds = getPaddedBounds([
+    ...getRelationCurveBoundsPoints(pagePoints),
+    ...pageArrowPoints
+  ]);
 
   return {
     ...bounds,
@@ -387,7 +439,9 @@ export class SqlErdRelationShapeUtil extends ShapeUtil<SqlErdRelationShape> {
 
   override getGeometry(shape: SqlErdRelationShape) {
     return new Polyline2d({
-      points: shape.props.points.map((point) => new Vec(point.x, point.y))
+      points: getRelationCurveGeometryPoints(shape.props.points).map(
+        (point) => new Vec(point.x, point.y)
+      )
     });
   }
 

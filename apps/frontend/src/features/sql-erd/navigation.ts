@@ -13,6 +13,6 @@ export const sqlErdNavigation: FeatureNavigationItem = {
   items: [
     { title: "Source", href: "/sql-erd#source" },
     { title: "Canvas", href: "/sql-erd#canvas" },
-    { title: "Inspector", href: "/sql-erd#inspector" }
+    { title: "상세 정보", href: "/sql-erd#inspector" }
   ]
 };
