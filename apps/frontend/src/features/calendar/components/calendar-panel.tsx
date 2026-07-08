@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import {
   useCallback,
+  useEffect,
   useMemo,
   useState,
   type FormEvent
@@ -73,6 +74,18 @@ type CalendarEventsDialogState = {
 } | null;
 
 const DEFAULT_EVENT_COLOR = "#3B82F6";
+const CALENDAR_DRAFT_ACTION_SEARCH_PARAM = "calendarAction";
+const CALENDAR_DRAFT_SEARCH_PARAMS = [
+  CALENDAR_DRAFT_ACTION_SEARCH_PARAM,
+  "color",
+  "date",
+  "description",
+  "endDate",
+  "endTime",
+  "isAllDay",
+  "startTime",
+  "title"
+] as const;
 const calendarGridCellCount = 42;
 const calendarWeekdayLabels = ["일", "월", "화", "수", "목", "금", "토"];
 const calendarColorOptions = [
@@ -123,6 +136,23 @@ function formatDateLabel(date: string) {
 
   const [year, month, day] = date.split("-");
   return `${year}년 ${Number(month)}월 ${Number(day)}일`;
+}
+
+function isCalendarDateInputValue(value: string | null) {
+  return Boolean(value && /^\d{4}-\d{2}-\d{2}$/.test(value));
+}
+
+function isCalendarTimeInputValue(value: string | null) {
+  return Boolean(value && /^([01]\d|2[0-3]):[0-5]\d$/.test(value));
+}
+
+function isCalendarColorValue(value: string | null) {
+  return Boolean(value && /^#[\dA-Fa-f]{6}$/.test(value));
+}
+
+function parseCalendarDateInput(value: string) {
+  const [year, month, day] = value.split("-").map(Number);
+  return new Date(year, month - 1, day);
 }
 
 function formatCellDay(date: string) {
@@ -284,6 +314,54 @@ function createDefaultFormState(date: string): CalendarFormState {
     startTime: "09:00",
     endTime: ""
   };
+}
+
+function readCalendarDraftFormState(
+  search: string,
+  fallbackDate: string
+): CalendarFormState | null {
+  const params = new URLSearchParams(search);
+
+  if (params.get(CALENDAR_DRAFT_ACTION_SEARCH_PARAM) !== "create") {
+    return null;
+  }
+
+  const startDate = isCalendarDateInputValue(params.get("date"))
+    ? params.get("date")!
+    : fallbackDate;
+  const endDate = isCalendarDateInputValue(params.get("endDate"))
+    ? params.get("endDate")!
+    : startDate;
+  const isAllDay = params.get("isAllDay") === "true";
+  const defaultFormState = createDefaultFormState(startDate);
+
+  return {
+    ...defaultFormState,
+    color: isCalendarColorValue(params.get("color"))
+      ? params.get("color")!
+      : defaultFormState.color,
+    description: params.get("description")?.slice(0, 1000) ?? "",
+    endDate: endDate < startDate ? startDate : endDate,
+    endTime: isCalendarTimeInputValue(params.get("endTime"))
+      ? params.get("endTime")!
+      : "",
+    isAllDay,
+    startTime: isCalendarTimeInputValue(params.get("startTime"))
+      ? params.get("startTime")!
+      : defaultFormState.startTime,
+    title: params.get("title")?.slice(0, 255) ?? ""
+  };
+}
+
+function clearCalendarDraftSearchParams() {
+  const url = new URL(window.location.href);
+
+  CALENDAR_DRAFT_SEARCH_PARAMS.forEach((param) =>
+    url.searchParams.delete(param)
+  );
+
+  const nextUrl = `${url.pathname}${url.search}${url.hash}`;
+  window.history.replaceState(null, "", nextUrl);
 }
 
 function createFormStateFromEvent(event: CalendarEvent): CalendarFormState {
@@ -822,6 +900,29 @@ export function CalendarPanel() {
   const needsSignIn = !normalizedAccessToken;
   const isLoading = calendarEvents.status === "loading";
   const canUseCalendar = Boolean(workspaceId.trim() && normalizedAccessToken);
+
+  useEffect(() => {
+    const draftFormState = readCalendarDraftFormState(
+      window.location.search,
+      today
+    );
+
+    if (!draftFormState) {
+      return;
+    }
+
+    const draftMonthDate = startOfCalendarMonth(
+      parseCalendarDateInput(draftFormState.startDate)
+    );
+
+    setMonthDate(draftMonthDate);
+    setSelectedDate(draftFormState.startDate);
+    setEventsDialog(null);
+    setFormState(draftFormState);
+    setFormError(null);
+    setSheetMode({ type: "create" });
+    clearCalendarDraftSearchParams();
+  }, [today]);
 
   const goToMonth = useCallback((nextMonthDate: Date) => {
     const nextMonthStart = startOfCalendarMonth(nextMonthDate);
