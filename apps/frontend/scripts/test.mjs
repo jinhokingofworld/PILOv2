@@ -31,6 +31,10 @@ const canvasNormalizers = await readFile(
   new URL("../src/features/canvas/api/canvas-normalizers.ts", import.meta.url),
   "utf8"
 );
+const canvasStorage = await readFile(
+  new URL("../src/features/canvas/utils/canvas-storage.ts", import.meta.url),
+  "utf8"
+);
 const canvasTypes = await readFile(
   new URL("../src/features/canvas/api/canvas-types.ts", import.meta.url),
   "utf8"
@@ -460,6 +464,13 @@ assert.match(canvasNormalizers, /unwrapCanvasApiData/);
 assert.match(canvasNormalizers, /normalizeCanvasShapes/);
 assert.match(canvasNormalizers, /PILO_CHILD_SHAPE_COUNT_META_KEY/);
 assert.match(canvasNormalizers, /value\.parentShapeId/);
+assert.match(canvasNormalizers, /rawShape\.id = id/);
+assert.match(canvasNormalizers, /rawShape\.type = shapeType/);
+assert.match(canvasNormalizers, /delete rawShape\.parentId/);
+assert.match(canvasStorage, /normalizeParentId/);
+assert.match(canvasStorage, /delete normalizedShape\.parentId/);
+assert.match(canvasStorage, /delete normalizedShape\.index/);
+assert.match(canvasStorage, /delete props\.assetId/);
 assert.match(canvasRuntime, /@tanstack\/react-query/);
 assert.match(canvasRuntime, /QueryClientProvider/);
 assert.match(canvasRuntime, /viewportShapeLoadRequestSeqRef/);

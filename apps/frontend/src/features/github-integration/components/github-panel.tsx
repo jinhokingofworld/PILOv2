@@ -22,6 +22,7 @@ import {
   getGithubConnectSyncStatusLabel,
   getGithubConnectSyncTargetLabel
 } from "@/features/github-integration/utils/github-connect-format";
+import { rememberGithubBoardSelection } from "@/features/github-integration/utils/github-board-selection";
 import { selectProjectV2IdForRepository } from "@/features/github-integration/utils/github-project-selection";
 import { useAuthSession } from "@/features/auth/auth-session";
 
@@ -252,6 +253,10 @@ export function GithubPanel() {
       setSelectedRepositoryId(nextRepositoryId);
       setSelectedProjectV2Id(nextProjectV2Id);
       setSelectedInstallationId(nextInstallationId);
+      rememberGithubBoardSelection(workspaceId, {
+        projectV2Id: nextProjectV2Id,
+        repositoryId: nextRepositoryId
+      });
       setIsInstallationDeleteRequested(false);
       setPanelStatus("ready");
 
@@ -420,7 +425,19 @@ export function GithubPanel() {
     });
     setSelectedRepositoryId(repositoryId);
     setSelectedProjectV2Id(nextProjectV2Id);
+    rememberGithubBoardSelection(workspaceId, {
+      projectV2Id: nextProjectV2Id,
+      repositoryId
+    });
     await loadGithubPullRequests(repositoryId);
+  }
+
+  function handleSelectProjectV2(projectV2Id: string) {
+    setSelectedProjectV2Id(projectV2Id);
+    rememberGithubBoardSelection(workspaceId, {
+      projectV2Id,
+      repositoryId: selectedRepositoryId
+    });
   }
 
   async function handleStartGithubSyncRun() {
@@ -538,7 +555,7 @@ export function GithubPanel() {
         )
       }
       onRepositoryQueryChange={setRepositoryQuery}
-      onSelectProjectV2={setSelectedProjectV2Id}
+      onSelectProjectV2={handleSelectProjectV2}
       onSelectRepository={(repositoryId) => void handleSelectRepository(repositoryId)}
       onRequestDeleteInstallation={handleRequestDeleteGithubAppInstallation}
       onStartInstallation={() => void handleStartGithubAppInstallation()}

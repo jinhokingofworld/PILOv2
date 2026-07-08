@@ -38,9 +38,27 @@ export function normalizeCanvasShape(value: unknown) {
   const rawShape = { ...value.rawShape };
   const meta = isRecord(rawShape.meta) ? { ...rawShape.meta } : {};
   const childShapeCount = normalizeNumber(value.childShapeCount, 0);
+  const id = normalizeString(value.id, normalizeString(rawShape.id));
+  const shapeType = normalizeString(
+    value.shapeType,
+    normalizeString(rawShape.type),
+  );
 
-  if (typeof value.parentShapeId === "string" && value.parentShapeId) {
+  if (id) {
+    rawShape.id = id;
+  }
+
+  if (shapeType) {
+    rawShape.type = shapeType;
+  }
+
+  if (
+    typeof value.parentShapeId === "string" &&
+    value.parentShapeId.startsWith("shape:")
+  ) {
     rawShape.parentId = value.parentShapeId;
+  } else {
+    delete rawShape.parentId;
   }
 
   if (childShapeCount > 0) {

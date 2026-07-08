@@ -1,8 +1,8 @@
 "use client";
 
 import {
-  KanbanSquare,
   Loader2,
+  Plus,
   RefreshCw,
   Search,
   SlidersHorizontal
@@ -11,19 +11,20 @@ import { useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { BoardHydrationForm } from "@/features/board/components/board-hydration-form";
-import { BoardIssueCreateForm } from "@/features/board/components/board-issue-create-form";
+import { BoardIssueCreateDialog } from "@/features/board/components/board-issue-create-dialog";
 import { BoardIssueSheet } from "@/features/board/components/board-issue-sheet";
 import { BoardKanban } from "@/features/board/components/board-kanban";
 import { useBoardWorkspaceData } from "@/features/board/hooks/use-board-workspace-data";
-import { boardNavigation } from "@/features/board/navigation";
 import type {
   BoardIssueCardPayload,
   BoardIssueState
 } from "@/features/board/types";
 import { formatBoardDateTime } from "@/features/board/utils/board-format";
 import { useAuthSession } from "@/features/auth";
-import { selectProjectV2IdForRepository } from "@/features/github-integration/utils/github-project-selection";
+import {
+  readGithubBoardSelection,
+  type GithubBoardSelection
+} from "@/features/github-integration/utils/github-board-selection";
 import { cn } from "@/lib/utils";
 
 const selectClassName =
@@ -55,9 +56,10 @@ export function BoardPanel() {
   const workspaceId = authSession?.activeWorkspaceId ?? "";
   const accessToken = authSession?.accessToken.trim() ?? "";
   const [selectedBoardId, setSelectedBoardId] = useState("");
-  const [selectedRepositoryId, setSelectedRepositoryId] = useState("");
-  const [selectedProjectV2Id, setSelectedProjectV2Id] = useState("");
   const [selectedIssueId, setSelectedIssueId] = useState<string | null>(null);
+  const [isIssueCreateModalOpen, setIsIssueCreateModalOpen] = useState(false);
+  const [githubBoardSelection, setGithubBoardSelection] =
+    useState<GithubBoardSelection | null>(null);
   const [query, setQuery] = useState("");
   const [state, setState] = useState<BoardIssueState | "">("");
   const [assignee, setAssignee] = useState("");
@@ -68,6 +70,7 @@ export function BoardPanel() {
   const [isHydrating, setIsHydrating] = useState(false);
   const [isCreatingIssue, setIsCreatingIssue] = useState(false);
   const [movingIssueId, setMovingIssueId] = useState<string | null>(null);
+  const [hydratingSelectionKey, setHydratingSelectionKey] = useState("");
   const issueQuery = useMemo(
     () => ({
       assignee: assignee || undefined,
@@ -84,18 +87,33 @@ export function BoardPanel() {
     issueQuery,
     workspaceId
   });
-  const linkedBoardProjects = useMemo(() => {
-    if (!selectedRepositoryId) {
-      return boardData.projects;
+  const targetBoard = useMemo(() => {
+    if (!githubBoardSelection) {
+      return undefined;
     }
 
-    return boardData.projects.filter((project) =>
-      project.repositoryIds.includes(selectedRepositoryId)
+    return boardData.boards.find(
+      (board) =>
+        board.repository.id === githubBoardSelection.repositoryId &&
+        board.project.id === githubBoardSelection.projectV2Id
     );
-  }, [boardData.projects, selectedRepositoryId]);
+  }, [boardData.boards, githubBoardSelection]);
   const selectedBoardSummary = boardData.boards.find(
     (board) => board.id === selectedBoardId
   );
+  const selectedGithubRepository = githubBoardSelection
+    ? boardData.repositories.find(
+        (repository) => repository.id === githubBoardSelection.repositoryId
+      )
+    : undefined;
+  const selectedGithubProject = githubBoardSelection
+    ? boardData.projects.find(
+        (project) => project.id === githubBoardSelection.projectV2Id
+      )
+    : undefined;
+  const githubBoardSelectionKey = githubBoardSelection
+    ? `${githubBoardSelection.repositoryId}:${githubBoardSelection.projectV2Id}`
+    : "";
   const canUseBoard = Boolean(workspaceId.trim() && accessToken);
   const needsSignIn = !accessToken;
   const isCatalogLoading = boardData.catalogStatus === "loading";
@@ -110,8 +128,25 @@ export function BoardPanel() {
     null;
 
   useEffect(() => {
+    setGithubBoardSelection(
+      workspaceId ? readGithubBoardSelection(workspaceId) : null
+    );
+  }, [workspaceId]);
+
+  useEffect(() => {
+    setHydratingSelectionKey("");
+  }, [githubBoardSelectionKey]);
+
+  useEffect(() => {
     if (!boardData.boards.length) {
       setSelectedBoardId("");
+      return;
+    }
+
+    if (targetBoard) {
+      if (selectedBoardId !== targetBoard.id) {
+        setSelectedBoardId(targetBoard.id);
+      }
       return;
     }
 
@@ -121,79 +156,95 @@ export function BoardPanel() {
     ) {
       setSelectedBoardId(boardData.boards[0].id);
     }
-  }, [boardData.boards, selectedBoardId]);
+  }, [boardData.boards, selectedBoardId, targetBoard]);
 
   useEffect(() => {
-    if (!selectedBoardSummary) return;
-
-    setSelectedRepositoryId(selectedBoardSummary.repository.id);
-    setSelectedProjectV2Id(selectedBoardSummary.project.id);
-  }, [selectedBoardSummary]);
-
-  useEffect(() => {
-    if (selectedBoardSummary) return;
-
-    const nextRepositoryId =
-      selectedRepositoryId || boardData.repositories[0]?.id || "";
-    if (nextRepositoryId !== selectedRepositoryId) {
-      setSelectedRepositoryId(nextRepositoryId);
+    if (!canUseBoard || boardData.catalogStatus !== "success") {
+      return;
     }
 
-    const nextProjectV2Id = selectProjectV2IdForRepository({
-      projects: boardData.projects,
-      preferredProjectV2Id: selectedProjectV2Id,
-      repositoryId: nextRepositoryId
-    });
-    const hasLinkedProjectV2 = boardData.projects.some(
-      (project) =>
-        project.id === nextProjectV2Id &&
-        (!nextRepositoryId || project.repositoryIds.includes(nextRepositoryId))
-    );
-    const linkedProjectV2Id = hasLinkedProjectV2 ? nextProjectV2Id : "";
-    if (linkedProjectV2Id !== selectedProjectV2Id) {
-      setSelectedProjectV2Id(linkedProjectV2Id);
+    if (!githubBoardSelection) {
+      setHydrateError(
+        boardData.boards.length
+          ? null
+          : "GitHub에서 저장소와 ProjectV2를 먼저 선택해주세요."
+      );
+      return;
     }
+
+    if (!selectedGithubRepository || !selectedGithubProject) {
+      setHydrateError(
+        "GitHub에서 선택한 저장소 또는 ProjectV2를 찾을 수 없습니다. GitHub 화면에서 다시 동기화해주세요."
+      );
+      return;
+    }
+
+    if (
+      !selectedGithubProject.repositoryIds.includes(
+        githubBoardSelection.repositoryId
+      )
+    ) {
+      setHydrateError(
+        "GitHub에서 선택한 ProjectV2가 선택한 저장소와 연결되어 있지 않습니다."
+      );
+      return;
+    }
+
+    if (targetBoard) {
+      setHydrateError(null);
+      return;
+    }
+
+    if (isHydrating || hydratingSelectionKey === githubBoardSelectionKey) {
+      return;
+    }
+
+    void handleHydrateBoard();
   }, [
-    boardData.projects,
-    boardData.repositories,
-    selectedBoardSummary,
-    selectedProjectV2Id,
-    selectedRepositoryId
+    boardData.catalogStatus,
+    boardData.boards.length,
+    canUseBoard,
+    githubBoardSelection,
+    githubBoardSelectionKey,
+    hydratingSelectionKey,
+    isHydrating,
+    selectedGithubProject,
+    selectedGithubRepository,
+    targetBoard
   ]);
 
-  function handleSelectBoardRepository(repositoryId: string) {
-    const nextProjectV2Id = selectProjectV2IdForRepository({
-      projects: boardData.projects,
-      preferredProjectV2Id: selectedProjectV2Id,
-      repositoryId
-    });
-    const hasLinkedProjectV2 = boardData.projects.some(
-      (project) =>
-        project.id === nextProjectV2Id && project.repositoryIds.includes(repositoryId)
-    );
-
-    setSelectedRepositoryId(repositoryId);
-    setSelectedProjectV2Id(hasLinkedProjectV2 ? nextProjectV2Id : "");
-    setHydrateError(null);
-  }
-
   async function handleHydrateBoard() {
-    const hasLinkedProjectV2 = linkedBoardProjects.some(
-      (project) => project.id === selectedProjectV2Id
-    );
+    if (!githubBoardSelection) {
+      setHydrateError("GitHub에서 저장소와 ProjectV2를 먼저 선택해주세요.");
+      return;
+    }
 
-    if (!selectedRepositoryId || !selectedProjectV2Id || !hasLinkedProjectV2) {
-      setHydrateError("저장소와 연결된 ProjectV2를 선택해주세요.");
+    if (!selectedGithubRepository || !selectedGithubProject) {
+      setHydrateError(
+        "GitHub에서 선택한 저장소 또는 ProjectV2를 찾을 수 없습니다. GitHub 화면에서 다시 동기화해주세요."
+      );
+      return;
+    }
+
+    if (
+      !selectedGithubProject.repositoryIds.includes(
+        githubBoardSelection.repositoryId
+      )
+    ) {
+      setHydrateError(
+        "GitHub에서 선택한 ProjectV2가 선택한 저장소와 연결되어 있지 않습니다."
+      );
       return;
     }
 
     setIsHydrating(true);
+    setHydratingSelectionKey(githubBoardSelectionKey);
     setHydrateError(null);
 
     try {
       const board = await boardData.hydrateBoard({
-        projectV2Id: selectedProjectV2Id,
-        repositoryId: selectedRepositoryId
+        projectV2Id: githubBoardSelection.projectV2Id,
+        repositoryId: githubBoardSelection.repositoryId
       });
       setSelectedBoardId(board.id);
     } catch (error) {
@@ -215,17 +266,20 @@ export function BoardPanel() {
     body?: string;
     columnId: string;
     title: string;
-  }) {
+  }): Promise<boolean> {
     setIsCreatingIssue(true);
     setIssueCreateError(null);
 
     try {
       const issue = await boardData.createBoardIssue(input);
+      setIsIssueCreateModalOpen(false);
       setSelectedIssueId(issue.id);
+      return true;
     } catch (error) {
       setIssueCreateError(
         error instanceof Error ? error.message : "Board issue를 생성하지 못했습니다."
       );
+      return false;
     } finally {
       setIsCreatingIssue(false);
     }
@@ -268,23 +322,8 @@ export function BoardPanel() {
       data-board-main
       className="workspace-board -m-6 min-h-[calc(100vh-3.5rem)] overflow-hidden border-l border-slate-200 bg-slate-50 text-slate-950"
     >
-      <section className="board-toolbar flex min-h-[74px] flex-wrap items-center justify-between gap-4 border-b border-slate-200 bg-white/90 px-7 py-5 backdrop-blur">
-        <div className="board-title flex min-w-0 items-center gap-3">
-          <div className="board-icon grid size-10 shrink-0 place-items-center rounded-xl border border-violet-200 bg-violet-50 text-violet-600">
-            <KanbanSquare className="size-5" />
-          </div>
-          <div className="min-w-0">
-            <h1 className="truncate text-[26px] font-bold leading-tight tracking-normal">
-              {selectedBoardSummary?.name ?? boardNavigation.title}
-            </h1>
-            <p className="mt-1 truncate text-[12.5px] font-medium text-slate-500">
-              {selectedBoardSummary?.repository.fullName ??
-                boardNavigation.description}
-            </p>
-          </div>
-        </div>
-
-        <div className="board-controls flex min-w-0 flex-wrap items-center justify-end gap-2">
+      <section className="board-toolbar flex min-h-[74px] items-center justify-end border-b border-slate-200 bg-white/90 px-7 py-5 backdrop-blur">
+        <div className="board-controls flex w-full min-w-0 flex-wrap items-center justify-end gap-2">
           <label className="relative w-[min(100%,260px)] min-w-48">
             <span className="sr-only">이슈 검색</span>
             <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
@@ -322,6 +361,7 @@ export function BoardPanel() {
             size="sm"
             disabled={!canUseBoard || isCatalogLoading || isBoardLoading}
             onClick={() => {
+              setHydratingSelectionKey("");
               void boardData.reloadWorkspace();
               void boardData.reloadBoard();
             }}
@@ -332,6 +372,19 @@ export function BoardPanel() {
               <RefreshCw />
             )}
             새로고침
+          </Button>
+
+          <Button
+            type="button"
+            size="sm"
+            disabled={!canUseBoard || !selectedBoardId || isBoardLoading}
+            onClick={() => {
+              setIssueCreateError(null);
+              setIsIssueCreateModalOpen(true);
+            }}
+          >
+            <Plus />
+            새 이슈
           </Button>
         </div>
       </section>
@@ -348,29 +401,17 @@ export function BoardPanel() {
         </p>
       ) : null}
 
-      <div className="board-hydrate-dock border-b border-slate-200 bg-white/70 px-7 py-4">
-        <BoardHydrationForm
-          error={hydrateError}
-          isHydrating={isHydrating}
-          projects={linkedBoardProjects}
-          repositories={boardData.repositories}
-          selectedProjectV2Id={selectedProjectV2Id}
-          selectedRepositoryId={selectedRepositoryId}
-          onHydrate={() => void handleHydrateBoard()}
-          onSelectProjectV2={setSelectedProjectV2Id}
-          onSelectRepository={handleSelectBoardRepository}
-        />
-      </div>
+      {isHydrating ? (
+        <p className="mx-7 mt-4 rounded-xl border border-violet-200 bg-violet-50 px-4 py-3 text-sm font-medium text-violet-700">
+          GitHub에서 선택한 저장소와 ProjectV2로 Board cache를 구성하고 있습니다.
+        </p>
+      ) : null}
 
-      <div className="board-issue-create-dock border-b border-slate-200 bg-white/70 px-7 py-4">
-        <BoardIssueCreateForm
-          columns={boardData.columns}
-          disabled={!canUseBoard || !selectedBoardId || isBoardLoading}
-          error={issueCreateError}
-          isCreating={isCreatingIssue}
-          onCreateIssue={(input) => handleCreateIssue(input)}
-        />
-      </div>
+      {hydrateError && !isHydrating ? (
+        <p className="mx-7 mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-700">
+          {hydrateError}
+        </p>
+      ) : null}
 
       <section className="board-summary flex items-center gap-2 overflow-x-auto border-b border-slate-200 bg-white/60 px-7 py-4">
         <SummaryChip>
@@ -462,7 +503,7 @@ export function BoardPanel() {
 
       <BoardKanban
         board={boardData.board}
-        boardStatus={boardData.boardStatus}
+        boardStatus={isHydrating ? "loading" : boardData.boardStatus}
         columns={boardData.columns}
         issues={boardData.issues}
         movingIssueId={movingIssueId}
@@ -472,6 +513,23 @@ export function BoardPanel() {
       />
 
       <section id="issues" className="sr-only" aria-label="이슈 상세" />
+
+      <BoardIssueCreateDialog
+        columns={boardData.columns}
+        disabled={!canUseBoard || !selectedBoardId || isBoardLoading}
+        error={issueCreateError}
+        isCreating={isCreatingIssue}
+        open={isIssueCreateModalOpen}
+        onClose={() => {
+          if (isCreatingIssue) {
+            return;
+          }
+
+          setIsIssueCreateModalOpen(false);
+          setIssueCreateError(null);
+        }}
+        onCreateIssue={(input) => handleCreateIssue(input)}
+      />
 
       <BoardIssueSheet
         accessToken={accessToken}

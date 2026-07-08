@@ -11,13 +11,20 @@ function readFeatureFile(path) {
   });
 }
 
-const [boardDataHook, githubPanel, githubProjectSelection, githubTypes] =
+const [
+  boardDataHook,
+  githubPanel,
+  githubBoardSelection,
+  githubProjectSelection,
+  githubTypes
+] =
   await Promise.all([
   readFeatureFile("./hooks/use-board-workspace-data.ts"),
   readFile(
     new URL("../github-integration/components/github-panel.tsx", import.meta.url),
     "utf8"
   ),
+  readFeatureFile("../github-integration/utils/github-board-selection.ts"),
   readFeatureFile("../github-integration/utils/github-project-selection.ts"),
   readFeatureFile("../github-integration/types/index.ts")
 ]);
@@ -62,6 +69,36 @@ assert.match(
   githubPanel,
   /selectProjectV2IdForRepository\(/,
   "GitHub panel should use repository-aware ProjectV2 selection"
+);
+assert.match(
+  githubBoardSelection,
+  /export function rememberGithubBoardSelection/,
+  "GitHub board selection should expose a persistence helper"
+);
+assert.match(
+  githubBoardSelection,
+  /export function readGithubBoardSelection/,
+  "Board panel should be able to read the repository/project selected in GitHub"
+);
+assert.match(
+  githubBoardSelection,
+  /localStorage/,
+  "GitHub board selection should persist across route changes"
+);
+assert.match(
+  githubBoardSelection,
+  /workspaceId/,
+  "Persisted GitHub board selection should be scoped per workspace"
+);
+assert.match(
+  githubPanel,
+  /rememberGithubBoardSelection/,
+  "GitHub panel should remember the selected repository and ProjectV2 for Board configuration"
+);
+assert.match(
+  githubPanel,
+  /function handleSelectProjectV2\(projectV2Id: string\)/,
+  "ProjectV2 selection should go through a handler that persists the Board target"
 );
 assert.match(
   githubPanel,

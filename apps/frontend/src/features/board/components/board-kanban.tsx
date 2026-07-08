@@ -285,7 +285,7 @@ export function BoardKanban({
         <div className="rounded-2xl border border-dashed border-slate-300 bg-white/70 p-8 text-center">
           <h2 className="text-lg font-bold">구성된 Board가 없습니다</h2>
           <p className="mt-2 text-sm font-medium text-slate-500">
-            저장소와 ProjectV2를 선택해 Board cache를 먼저 구성하세요.
+            GitHub에서 저장소와 ProjectV2를 선택하면 Board cache를 구성합니다.
           </p>
         </div>
       </section>
@@ -298,7 +298,7 @@ export function BoardKanban({
         <div className="rounded-2xl border border-dashed border-slate-300 bg-white/70 p-8 text-center">
           <h2 className="text-lg font-bold">컬럼이 없습니다</h2>
           <p className="mt-2 text-sm font-medium text-slate-500">
-            GitHub ProjectV2 Status field 동기화 뒤 Board를 다시 구성하세요.
+            GitHub ProjectV2 Status field를 동기화한 뒤 Board를 새로고침하세요.
           </p>
         </div>
       </section>

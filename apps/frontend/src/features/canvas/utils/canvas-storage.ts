@@ -60,6 +60,10 @@ function normalizePoint(value: unknown, fallback: { x: number; y: number }) {
 function normalizeShapeProps(shape: Record<string, unknown>) {
   const props = isRecord(shape.props) ? { ...shape.props } : {};
 
+  if ("assetId" in props && typeof props.assetId !== "string") {
+    delete props.assetId;
+  }
+
   if (
     shape.type === "text" ||
     shape.type === "geo" ||
@@ -87,6 +91,13 @@ function normalizeShapeProps(shape: Record<string, unknown>) {
   }
 
   return props;
+}
+
+function normalizeParentId(parentId: unknown) {
+  return typeof parentId === "string" &&
+    (parentId.startsWith("page:") || parentId.startsWith("shape:"))
+    ? parentId
+    : null;
 }
 
 export function readCanvasStorage(
@@ -134,11 +145,26 @@ export function normalizeCanvasFreeformShapes(value: unknown) {
       return [];
     }
 
-    return [
-      {
-        ...shape,
-        props: normalizeShapeProps(shape),
-      },
-    ];
+    const normalizedShape: Record<string, unknown> = {
+      ...shape,
+      props: normalizeShapeProps(shape),
+    };
+    const parentId = normalizeParentId(shape.parentId);
+
+    if (parentId) {
+      normalizedShape.parentId = parentId;
+    } else {
+      delete normalizedShape.parentId;
+    }
+
+    if (typeof normalizedShape.index !== "string") {
+      delete normalizedShape.index;
+    }
+
+    normalizedShape.meta = isRecord(normalizedShape.meta)
+      ? normalizedShape.meta
+      : {};
+
+    return [normalizedShape];
   });
 }

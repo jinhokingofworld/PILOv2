@@ -10,19 +10,19 @@ const [
   boardApiClient,
   boardDataHook,
   boardPanel,
-  boardHydrationForm,
   boardKanban,
   boardIssueSheet,
-  boardIssueCreateForm
+  boardIssueCreateForm,
+  boardIssueCreateDialog
 ] = await Promise.all([
   readFeatureFile("./types/index.ts"),
   readFeatureFile("./api/client.ts"),
   readFeatureFile("./hooks/use-board-workspace-data.ts"),
   readFeatureFile("./components/board-panel.tsx"),
-  readFeatureFile("./components/board-hydration-form.tsx"),
   readFeatureFile("./components/board-kanban.tsx"),
   readFeatureFile("./components/board-issue-sheet.tsx"),
-  readFeatureFile("./components/board-issue-create-form.tsx")
+  readFeatureFile("./components/board-issue-create-form.tsx"),
+  readFeatureFile("./components/board-issue-create-dialog.tsx")
 ]);
 
 assert.match(boardTypes, /export type BoardPayload/);
@@ -78,8 +78,7 @@ assert.match(boardDataHook, /setBoardState/);
 assert.match(boardPanel, /useAuthSession/);
 assert.match(boardPanel, /activeWorkspaceId/);
 assert.match(boardPanel, /useBoardWorkspaceData/);
-assert.match(boardPanel, /BoardHydrationForm/);
-assert.match(boardPanel, /BoardIssueCreateForm/);
+assert.match(boardPanel, /BoardIssueCreateDialog/);
 assert.match(boardPanel, /BoardKanban/);
 assert.match(boardPanel, /BoardIssueSheet/);
 assert.match(boardPanel, /onIssueUpdated/);
@@ -87,29 +86,23 @@ assert.match(boardPanel, /createBoardIssue/);
 assert.match(boardPanel, /moveIssueStatus/);
 assert.match(boardPanel, /statusMoveError/);
 assert.match(boardPanel, /issueCreateError/);
-assert.match(boardPanel, /selectedRepositoryId/);
-assert.match(boardPanel, /selectedProjectV2Id/);
-assert.match(boardPanel, /selectProjectV2IdForRepository/);
+assert.match(boardPanel, /isIssueCreateModalOpen/);
+assert.match(boardPanel, /readGithubBoardSelection/);
+assert.match(boardPanel, /githubBoardSelection/);
+assert.match(boardPanel, /targetBoard/);
+assert.match(boardPanel, /hydratingSelectionKey/);
 assert.match(
   boardPanel,
-  /const linkedBoardProjects = useMemo\([\s\S]*project\.repositoryIds\.includes\(selectedRepositoryId\)[\s\S]*\);/,
-  "Board setup should only show ProjectV2 choices linked to the selected repository"
+  /boardData\.hydrateBoard\(\{\s*projectV2Id: githubBoardSelection\.projectV2Id,\s*repositoryId: githubBoardSelection\.repositoryId\s*\}\)/,
+  "Board should hydrate with the repository and ProjectV2 selected in GitHub"
 );
 assert.match(
   boardPanel,
-  /function handleSelectBoardRepository\(repositoryId: string\)[\s\S]*selectProjectV2IdForRepository\([\s\S]*projects: boardData\.projects[\s\S]*preferredProjectV2Id: selectedProjectV2Id[\s\S]*repositoryId[\s\S]*setSelectedProjectV2Id\(hasLinkedProjectV2 \? nextProjectV2Id : ""\)/,
-  "Changing the Board setup repository should select a linked ProjectV2"
+  /targetBoard = useMemo\([\s\S]*board\.repository\.id === githubBoardSelection\.repositoryId[\s\S]*board\.project\.id === githubBoardSelection\.projectV2Id/,
+  "Board should select an existing Board that matches the GitHub selection before hydrating"
 );
-assert.match(
-  boardPanel,
-  /projects=\{linkedBoardProjects\}/,
-  "Board hydrate form should receive only ProjectV2 entries linked to the selected repository"
-);
-assert.match(
-  boardPanel,
-  /onSelectRepository=\{handleSelectBoardRepository\}/,
-  "Board hydrate form should use repository-aware selection"
-);
+assert.doesNotMatch(boardPanel, /BoardHydrationForm/);
+assert.doesNotMatch(boardPanel, /board-hydrate-dock/);
 assert.match(boardPanel, /query/);
 assert.match(boardPanel, /state/);
 assert.match(boardPanel, /assignee/);
@@ -120,14 +113,14 @@ assert.match(boardPanel, /board-toolbar/);
 assert.match(boardPanel, /board-summary/);
 assert.match(boardPanel, /summary-chip/);
 assert.match(boardPanel, /board-controls/);
-
-assert.match(boardHydrationForm, /repositories/);
-assert.match(boardHydrationForm, /projects/);
-assert.match(boardHydrationForm, /onHydrate/);
-assert.match(boardHydrationForm, /저장소/);
-assert.match(boardHydrationForm, /ProjectV2/);
-assert.match(boardHydrationForm, /board-hydrate-form/);
-assert.doesNotMatch(boardHydrationForm, /Card/);
+assert.match(
+  boardPanel,
+  /board-controls[\s\S]*placeholder="Search issues"[\s\S]*<select[\s\S]*Board 선택[\s\S]*RefreshCw[\s\S]*setIsIssueCreateModalOpen\(true\)/,
+  "Board toolbar controls should keep search, board selection, refresh, and new issue together"
+);
+assert.doesNotMatch(boardPanel, /board-title/);
+assert.doesNotMatch(boardPanel, /board-icon/);
+assert.doesNotMatch(boardPanel, /board-issue-create-dock/);
 
 assert.match(boardIssueCreateForm, /BoardIssueCreateForm/);
 assert.match(boardIssueCreateForm, /columns/);
@@ -136,7 +129,16 @@ assert.match(boardIssueCreateForm, /title/);
 assert.match(boardIssueCreateForm, /body/);
 assert.match(boardIssueCreateForm, /columnId/);
 assert.match(boardIssueCreateForm, /새 이슈/);
+assert.match(boardIssueCreateForm, /created === false/);
 assert.doesNotMatch(boardIssueCreateForm, /Card/);
+
+assert.match(boardIssueCreateDialog, /BoardIssueCreateDialog/);
+assert.match(boardIssueCreateDialog, /DialogPrimitive/);
+assert.match(boardIssueCreateDialog, /DialogPrimitive\.Popup/);
+assert.match(boardIssueCreateDialog, /top-1\/2 left-1\/2/);
+assert.match(boardIssueCreateDialog, /max-w-\[720px\]/);
+assert.match(boardIssueCreateDialog, /BoardIssueCreateForm/);
+assert.match(boardIssueCreateDialog, /새 이슈/);
 
 assert.match(boardKanban, /columns/);
 assert.match(boardKanban, /issuesByColumnId/);
@@ -151,7 +153,12 @@ assert.match(boardKanban, /lane-stack/);
 assert.match(boardKanban, /issue-card/);
 assert.doesNotMatch(boardKanban, /읽기 전용/);
 
-assert.match(boardIssueSheet, /Sheet/);
+assert.match(boardIssueSheet, /DialogPrimitive/);
+assert.match(boardIssueSheet, /DialogPrimitive\.Popup/);
+assert.match(boardIssueSheet, /top-1\/2 left-1\/2/);
+assert.match(boardIssueSheet, /max-w-\[1080px\]/);
+assert.match(boardIssueSheet, /overflow-y-auto/);
+assert.doesNotMatch(boardIssueSheet, /@\/components\/ui\/sheet/);
 assert.match(boardIssueSheet, /getBoardIssue/);
 assert.match(boardIssueSheet, /updateBoardIssue/);
 assert.match(boardIssueSheet, /listBoardIssuePullRequests/);
