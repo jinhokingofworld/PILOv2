@@ -17,6 +17,7 @@ async function compileSqlErdRuntimeModules() {
   const inspectorOutputPath = join(outputDir, "inspector.mjs");
   const ddlParserOutputPath = join(outputDir, "ddl-parser.mjs");
   const apiClientOutputPath = join(outputDir, "api-client.mjs");
+  const sessionStateOutputPath = join(outputDir, "session-state.mjs");
 
   try {
     await compileTypeScriptModule(
@@ -37,6 +38,10 @@ async function compileSqlErdRuntimeModules() {
       "../../src/features/sql-erd/api/client.ts",
       apiClientOutputPath
     );
+    await compileTypeScriptModule(
+      "../../src/features/sql-erd/utils/session-state.ts",
+      sessionStateOutputPath
+    );
 
     await writeFile(
       join(outputDir, "types-stub.mjs"),
@@ -47,15 +52,23 @@ async function compileSqlErdRuntimeModules() {
       modelRuntime,
       inspectorRuntime,
       ddlParserRuntime,
-      apiClientRuntime
+      apiClientRuntime,
+      sessionStateRuntime
     ] = await Promise.all([
       import(pathToFileHref(modelOutputPath)),
       import(pathToFileHref(inspectorOutputPath)),
       import(pathToFileHref(ddlParserOutputPath)),
-      import(pathToFileHref(apiClientOutputPath))
+      import(pathToFileHref(apiClientOutputPath)),
+      import(pathToFileHref(sessionStateOutputPath))
     ]);
 
-    return { apiClientRuntime, ddlParserRuntime, inspectorRuntime, modelRuntime };
+    return {
+      apiClientRuntime,
+      ddlParserRuntime,
+      inspectorRuntime,
+      modelRuntime,
+      sessionStateRuntime
+    };
   } finally {
     await rm(outputDir, { force: true, recursive: true });
   }
@@ -216,6 +229,7 @@ const [
   page,
   navigation,
   panel,
+  sessionStateUtils,
   canvasSurface,
   tableShape,
   relationShape,
@@ -232,6 +246,7 @@ const [
     readSqlErdFile("../../src/features/sql-erd/page.tsx"),
     readSqlErdFile("../../src/features/sql-erd/navigation.ts"),
     readSqlErdFile("../../src/features/sql-erd/components/sql-erd-panel.tsx"),
+    readSqlErdFile("../../src/features/sql-erd/utils/session-state.ts"),
     readSqlErdFile("../../src/features/sql-erd/components/sql-erd-canvas.tsx"),
     readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-table-shape.tsx"),
     readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-relation-shape.tsx"),
@@ -240,8 +255,13 @@ const [
     readSqlErdFile("../../package.json")
   ]);
 
-const { apiClientRuntime, ddlParserRuntime, inspectorRuntime, modelRuntime } =
-  await compileSqlErdRuntimeModules();
+const {
+  apiClientRuntime,
+  ddlParserRuntime,
+  inspectorRuntime,
+  modelRuntime,
+  sessionStateRuntime
+} = await compileSqlErdRuntimeModules();
 const runtimeModel = createRuntimeTestModel();
 const runtimeModelIndex = modelRuntime.createSqltoerdModelIndex(runtimeModel);
 const runtimeOrdersToUsersRelation =
@@ -310,6 +330,35 @@ assert.equal(
     (relation) => relation.id === runtimeUsersSelfRelation.id
   ).length,
   1
+);
+
+const manualReloadFailureAction =
+  sessionStateRuntime.getSqlErdSessionReloadFailureAction({
+    fallbackToSampleOnFailure: false
+  });
+
+assert.equal(manualReloadFailureAction.kind, "preserve_current");
+assert.equal(
+  manualReloadFailureAction.sessionLoadState.label,
+  "Reload failed"
+);
+
+const initialReloadFailureAction =
+  sessionStateRuntime.getSqlErdSessionReloadFailureAction({
+    fallbackToSampleOnFailure: true
+  });
+
+assert.equal(initialReloadFailureAction.kind, "fallback_to_sample");
+assert.deepEqual(initialReloadFailureAction.selectedSqlErdObject, {
+  type: "none"
+});
+assert.equal(
+  sessionStateRuntime.shouldApplySqlErdSessionLoadResult(7, 7),
+  true
+);
+assert.equal(
+  sessionStateRuntime.shouldApplySqlErdSessionLoadResult(7, 8),
+  false
 );
 
 const sqlErdApiRequests = [];
@@ -788,6 +837,11 @@ assert.match(navigation, /href: "\/sql-erd"/);
 assert.doesNotMatch(navigation, /Inspector/);
 assert.doesNotMatch(navigation, /href: "\/sql-erd#inspector"/);
 
+assert.match(sessionStateUtils, /getSqlErdSessionReloadFailureAction/);
+assert.match(sessionStateUtils, /kind: "preserve_current"/);
+assert.match(sessionStateUtils, /kind: "fallback_to_sample"/);
+assert.match(sessionStateUtils, /shouldApplySqlErdSessionLoadResult/);
+
 assert.match(panel, /SqlErdCanvas/);
 assert.match(panel, /useAuthSession/);
 assert.match(panel, /createSqlErdApiClient/);
@@ -809,8 +863,23 @@ assert.match(panel, /Autosave paused/);
 assert.match(panel, /Reload session/);
 assert.match(panel, /Retry once/);
 assert.match(panel, /handleReloadSession/);
+assert.match(panel, /handleReloadPausedSession/);
 assert.match(panel, /handleRetryLayoutAutosaveOnce/);
 assert.match(panel, /handleLayoutChange/);
+assert.match(panel, /sessionLoadRequestIdRef/);
+assert.match(panel, /shouldApplySqlErdSessionLoadResult/);
+assert.match(panel, /fallbackToSampleOnFailure/);
+assert.match(panel, /getSqlErdSessionReloadFailureAction/);
+assert.match(
+  panel,
+  /void handleReloadSession\(\{ fallbackToSampleOnFailure: true \}\)/
+);
+assert.match(panel, /onReloadSession=\{handleReloadPausedSession\}/);
+assert.doesNotMatch(panel, /onReloadSession=\{handleReloadSession\}/);
+assert.doesNotMatch(
+  panel,
+  /catch \{\s*setSqlErdViewSession\(sampleSqlErdViewSession\);[\s\S]*?setPendingLayoutAutosaveJson\(null\);/
+);
 assert.doesNotMatch(panel, /isLayoutAutosaveBlocked/);
 assert.match(panel, /status === 409/);
 assert.match(panel, /isSqlErdApiTransientAutosaveError/);

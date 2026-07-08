@@ -48,9 +48,17 @@ import type {
   SqlErdSelection,
   SqltoerdDialect,
   SqltoerdLayoutJsonV1,
-  SqltoerdSessionPayload,
-  SqltoerdSessionFixture
+  SqltoerdSessionPayload
 } from "@/features/sql-erd/types";
+import {
+  createSampleSqlErdViewSession,
+  createWorkspaceSqlErdViewSession,
+  getSqlErdSessionReloadFailureAction,
+  shouldApplySqlErdSessionLoadResult,
+  type LayoutAutosaveBlockReason,
+  type SqlErdSessionLoadState,
+  type SqlErdViewSession
+} from "@/features/sql-erd/utils/session-state";
 import {
   createSqlErdInspectorViewModel,
   formatSqlErdRelationEndpoint,
@@ -66,34 +74,6 @@ import {
 } from "@/features/sql-erd/utils/model";
 import { parseSqlDdlToErdModel } from "@/features/sql-erd/utils/ddl-parser";
 import { cn } from "@/lib/utils";
-
-type SqlErdViewSession = Pick<
-  SqltoerdSessionPayload,
-  | "dialect"
-  | "layoutJson"
-  | "modelJson"
-  | "settingsJson"
-  | "sourceFormat"
-  | "sourceText"
-  | "title"
-> & {
-  id: string | null;
-  revision: number | null;
-};
-
-type SqlErdSessionLoadState = {
-  label: string;
-  message: string;
-  tone: "error" | "neutral" | "success";
-};
-
-type LayoutAutosaveBlockReason =
-  | "conflict"
-  | "unauthorized"
-  | "forbidden"
-  | "not_found"
-  | "invalid_payload"
-  | "unknown_non_transient";
 
 type LayoutAutosavePausedBannerViewModel = {
   canRetry: boolean;
@@ -162,38 +142,6 @@ const sqlSourceEditorTheme = EditorView.theme({
     outline: "none"
   }
 });
-
-function createSampleSqlErdViewSession(
-  fixture: SqltoerdSessionFixture
-): SqlErdViewSession {
-  return {
-    id: null,
-    revision: null,
-    title: fixture.title,
-    sourceFormat: fixture.sourceFormat,
-    dialect: fixture.dialect,
-    sourceText: fixture.sourceText,
-    modelJson: fixture.modelJson,
-    layoutJson: fixture.layoutJson,
-    settingsJson: fixture.settingsJson
-  };
-}
-
-function createWorkspaceSqlErdViewSession(
-  session: SqltoerdSessionPayload
-): SqlErdViewSession {
-  return {
-    id: session.id,
-    revision: session.revision,
-    title: session.title,
-    sourceFormat: session.sourceFormat,
-    dialect: session.dialect,
-    sourceText: session.sourceText,
-    modelJson: session.modelJson,
-    layoutJson: session.layoutJson,
-    settingsJson: session.settingsJson
-  };
-}
 
 function getSqlErdGenerateErrorMessage(errorCode: string) {
   if (errorCode === "EMPTY_SOURCE") {
@@ -322,6 +270,7 @@ export function SqlErdPanel() {
   const accessToken = authSession?.accessToken ?? null;
   const panelContainerRef = useRef<HTMLElement | null>(null);
   const manualLayoutAutosaveRetryRef = useRef(false);
+  const sessionLoadRequestIdRef = useRef(0);
   const [isSourceOpen, setIsSourceOpen] = useState(false);
   const [isInspectorOpen, setIsInspectorOpen] = useState(false);
   const [panelContainerWidth, setPanelContainerWidth] = useState(0);
@@ -436,69 +385,95 @@ export function SqlErdPanel() {
       tone: "neutral"
     });
   }, [pendingLayoutAutosaveJson]);
-  const handleReloadSession = useCallback(async () => {
-    if (!accessToken || !activeWorkspaceId) {
-      setSqlErdViewSession(sampleSqlErdViewSession);
-      setPendingLayoutAutosaveJson(null);
-      setLayoutAutosaveRetryAttempt(0);
-      setLayoutAutosaveBlockReason(null);
-      setSessionLoadState({
-        label: "Sample",
-        message: "Built-in sample ERD",
-        tone: "neutral"
-      });
-      setSelectedSqlErdObject({ type: "none" });
-      return;
-    }
+  const handleReloadSession = useCallback(
+    async ({
+      fallbackToSampleOnFailure = false
+    }: { fallbackToSampleOnFailure?: boolean } = {}) => {
+      const requestId = sessionLoadRequestIdRef.current + 1;
+      sessionLoadRequestIdRef.current = requestId;
 
-    const sqlErdApiClient = createSqlErdApiClient({
-      accessToken
-    });
-
-    setSessionLoadState({
-      label: "Loading",
-      message: "Loading workspace session",
-      tone: "neutral"
-    });
-
-    try {
-      const activeSession = await sqlErdApiClient.getActiveSession(
-        activeWorkspaceId
-      );
-
-      if (activeSession) {
-        setSqlErdViewSession(createWorkspaceSqlErdViewSession(activeSession));
-        setSessionLoadState({
-          label: "Workspace",
-          message: `Workspace session revision ${activeSession.revision}`,
-          tone: "success"
-        });
-      } else {
-        setSqlErdViewSession(sampleSqlErdViewSession);
-        setSessionLoadState({
-          label: "Sample",
-          message: "No saved workspace session",
-          tone: "neutral"
-        });
+      function isCurrentRequest() {
+        return shouldApplySqlErdSessionLoadResult(
+          requestId,
+          sessionLoadRequestIdRef.current
+        );
       }
 
-      setPendingLayoutAutosaveJson(null);
-      setLayoutAutosaveRetryAttempt(0);
-      setLayoutAutosaveBlockReason(null);
-      setSelectedSqlErdObject({ type: "none" });
-    } catch {
-      setSqlErdViewSession(sampleSqlErdViewSession);
-      setPendingLayoutAutosaveJson(null);
-      setLayoutAutosaveRetryAttempt(0);
-      setLayoutAutosaveBlockReason(null);
+      function applyReloadFailure() {
+        if (!isCurrentRequest()) {
+          return;
+        }
+
+        const action = getSqlErdSessionReloadFailureAction({
+          fallbackToSampleOnFailure
+        });
+
+        if (action.kind === "fallback_to_sample") {
+          setSqlErdViewSession(sampleSqlErdViewSession);
+          setPendingLayoutAutosaveJson(null);
+          setLayoutAutosaveRetryAttempt(0);
+          setLayoutAutosaveBlockReason(null);
+          setSessionLoadState(action.sessionLoadState);
+          setSelectedSqlErdObject(action.selectedSqlErdObject);
+          return;
+        }
+
+        setSessionLoadState(action.sessionLoadState);
+      }
+
+      if (!accessToken || !activeWorkspaceId) {
+        applyReloadFailure();
+        return;
+      }
+
+      const sqlErdApiClient = createSqlErdApiClient({
+        accessToken
+      });
+
       setSessionLoadState({
-        label: "Sample",
-        message: "Workspace session could not be loaded",
+        label: "Loading",
+        message: "Loading workspace session",
         tone: "neutral"
       });
-      setSelectedSqlErdObject({ type: "none" });
-    }
-  }, [accessToken, activeWorkspaceId]);
+
+      try {
+        const activeSession = await sqlErdApiClient.getActiveSession(
+          activeWorkspaceId
+        );
+
+        if (!isCurrentRequest()) {
+          return;
+        }
+
+        if (activeSession) {
+          setSqlErdViewSession(createWorkspaceSqlErdViewSession(activeSession));
+          setSessionLoadState({
+            label: "Workspace",
+            message: `Workspace session revision ${activeSession.revision}`,
+            tone: "success"
+          });
+        } else {
+          setSqlErdViewSession(sampleSqlErdViewSession);
+          setSessionLoadState({
+            label: "Sample",
+            message: "No saved workspace session",
+            tone: "neutral"
+          });
+        }
+
+        setPendingLayoutAutosaveJson(null);
+        setLayoutAutosaveRetryAttempt(0);
+        setLayoutAutosaveBlockReason(null);
+        setSelectedSqlErdObject({ type: "none" });
+      } catch {
+        applyReloadFailure();
+      }
+    },
+    [accessToken, activeWorkspaceId]
+  );
+  const handleReloadPausedSession = useCallback(() => {
+    void handleReloadSession({ fallbackToSampleOnFailure: false });
+  }, [handleReloadSession]);
   const handleGenerate = useCallback(async () => {
     if (isGenerating) {
       return;
@@ -750,7 +725,11 @@ export function SqlErdPanel() {
   }, []);
 
   useEffect(() => {
-    void handleReloadSession();
+    void handleReloadSession({ fallbackToSampleOnFailure: true });
+
+    return () => {
+      sessionLoadRequestIdRef.current += 1;
+    };
   }, [handleReloadSession]);
 
   const openResizeHandleWidth =
@@ -866,7 +845,7 @@ export function SqlErdPanel() {
         layoutJson={sqlErdViewSession.layoutJson}
         modelJson={sqlErdViewSession.modelJson}
         onLayoutChange={handleLayoutChange}
-        onReloadSession={handleReloadSession}
+        onReloadSession={handleReloadPausedSession}
         onRetryLayoutAutosaveOnce={handleRetryLayoutAutosaveOnce}
         onSelectionChange={setSelectedSqlErdObject}
         selectedSqlErdObject={selectedSqlErdObject}
