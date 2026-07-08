@@ -1,5 +1,6 @@
 "use client";
 
+import { useRef, type PointerEvent } from "react";
 import {
   HTMLContainer,
   Rectangle2d,
@@ -30,6 +31,7 @@ const ROW_CONTENT_SAFETY_PADDING = 16;
 const TABLE_NAME_CHAR_WIDTH = 13;
 const COLUMN_NAME_CHAR_WIDTH = 10.5;
 const COLUMN_TYPE_CHAR_WIDTH = 9.5;
+const COLUMN_CLICK_DRAG_THRESHOLD = 4;
 
 export type SqlErdTableColumnShapeProps = {
   id: string;
@@ -220,6 +222,13 @@ function getColumnBadges(column: SqlErdTableColumnShapeProps): ColumnBadge[] {
 
 function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
   const editor = useEditor();
+  const columnPointerStartRef = useRef<{
+    columnId: string;
+    pointerId: number;
+    x: number;
+    y: number;
+  } | null>(null);
+  const suppressNextColumnClickRef = useRef(false);
   const displayName = shape.props.schemaName
     ? `${shape.props.schemaName}.${shape.props.tableName}`
     : shape.props.tableName;
@@ -234,6 +243,50 @@ function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
       columnId,
       tableId: shape.props.tableId
     });
+  }
+
+  function handleColumnPointerDown(
+    event: PointerEvent<HTMLDivElement>,
+    columnId: string
+  ) {
+    columnPointerStartRef.current = {
+      columnId,
+      pointerId: event.pointerId,
+      x: event.clientX,
+      y: event.clientY
+    };
+    suppressNextColumnClickRef.current = false;
+  }
+
+  function handleColumnPointerUp(
+    event: PointerEvent<HTMLDivElement>,
+    columnId: string
+  ) {
+    const start = columnPointerStartRef.current;
+    columnPointerStartRef.current = null;
+
+    if (
+      !start ||
+      start.columnId !== columnId ||
+      start.pointerId !== event.pointerId
+    ) {
+      return;
+    }
+
+    const movedDistance = Math.hypot(
+      event.clientX - start.x,
+      event.clientY - start.y
+    );
+
+    if (movedDistance > COLUMN_CLICK_DRAG_THRESHOLD) {
+      suppressNextColumnClickRef.current = true;
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    handleColumnClick(columnId);
+    suppressNextColumnClickRef.current = true;
   }
 
   return (
@@ -269,6 +322,12 @@ function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
                 key={column.id}
                 onClick={(event) => {
                   event.stopPropagation();
+
+                  if (suppressNextColumnClickRef.current) {
+                    suppressNextColumnClickRef.current = false;
+                    return;
+                  }
+
                   handleColumnClick(column.id);
                 }}
                 onKeyDown={(event) => {
@@ -279,6 +338,15 @@ function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
                   event.preventDefault();
                   event.stopPropagation();
                   handleColumnClick(column.id);
+                }}
+                onPointerCancel={() => {
+                  columnPointerStartRef.current = null;
+                }}
+                onPointerDown={(event) => {
+                  handleColumnPointerDown(event, column.id);
+                }}
+                onPointerUp={(event) => {
+                  handleColumnPointerUp(event, column.id);
                 }}
                 role="button"
                 style={{

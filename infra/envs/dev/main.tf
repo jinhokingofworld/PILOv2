@@ -197,6 +197,8 @@ module "ecs" {
         API_BASE_PATH                 = "/api/v1"
         LIVEKIT_RECORDING_MODE        = "room_audio_only"
         LIVEKIT_EGRESS_S3_PREFIX      = "recordings/meetings"
+        OPENAI_PR_REVIEW_MODEL        = "gpt-5.5"
+        OPENAI_PR_REVIEW_TIMEOUT_MS   = "45000"
       }
       secrets = module.secrets.app_server_ecs_secrets
     }

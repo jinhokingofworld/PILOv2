@@ -1,7 +1,29 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
+import {
+  defaultKeymap,
+  history,
+  historyKeymap,
+  indentWithTab
+} from "@codemirror/commands";
+import { sql } from "@codemirror/lang-sql";
+import {
+  bracketMatching,
+  defaultHighlightStyle,
+  indentOnInput,
+  syntaxHighlighting
+} from "@codemirror/language";
+import { Compartment, EditorState } from "@codemirror/state";
+import {
+  drawSelection,
+  EditorView,
+  highlightActiveLine,
+  highlightActiveLineGutter,
+  keymap,
+  lineNumbers
+} from "@codemirror/view";
 import {
   Database,
   PanelLeftClose,
@@ -59,6 +81,51 @@ type SqlErdSessionLoadState = {
 const sampleSqlErdViewSession = createSampleSqlErdViewSession(
   commerceSqltoerdFixture
 );
+
+const sqlSourceEditorTheme = EditorView.theme({
+  "&": {
+    backgroundColor: "#ffffff",
+    color: "#0f172a",
+    fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+    fontSize: "13px",
+    height: "100%"
+  },
+  ".cm-scroller": {
+    lineHeight: "1.65",
+    overflow: "auto"
+  },
+  ".cm-content": {
+    caretColor: "#2563eb",
+    minHeight: "100%",
+    padding: "14px 16px"
+  },
+  ".cm-line": {
+    padding: "0 2px"
+  },
+  ".cm-gutters": {
+    backgroundColor: "#f8fafc",
+    borderRight: "1px solid #e2e8f0",
+    color: "#94a3b8"
+  },
+  ".cm-lineNumbers .cm-gutterElement": {
+    minWidth: "40px",
+    padding: "0 10px 0 0",
+    textAlign: "right"
+  },
+  ".cm-activeLine": {
+    backgroundColor: "#eff6ff"
+  },
+  ".cm-activeLineGutter": {
+    backgroundColor: "#e0f2fe",
+    color: "#475569"
+  },
+  ".cm-selectionBackground": {
+    backgroundColor: "rgba(59, 130, 246, 0.24) !important"
+  },
+  ".cm-focused": {
+    outline: "none"
+  }
+});
 
 function createSampleSqlErdViewSession(
   fixture: SqltoerdSessionFixture
@@ -463,19 +530,116 @@ function SourcePanel({
             {isGenerating ? "Generating" : "Generate"}
           </button>
         </div>
-        <textarea
-          aria-label="SQL source"
-          className={cn(
-            "min-h-0 flex-1 resize-none overflow-auto border-0 bg-[#0d1117] p-4 font-mono text-[13px] leading-6 text-slate-100 outline-none placeholder:text-slate-500",
-            isSourceTextReadOnly && "cursor-progress opacity-80"
-          )}
-          onChange={(event) => onSourceTextChange(event.target.value)}
+        <SqlSourceEditor
+          onChange={onSourceTextChange}
           readOnly={isSourceTextReadOnly}
           value={sourceText}
-          spellCheck={false}
         />
       </div>
     </aside>
+  );
+}
+
+type SqlSourceEditorProps = {
+  onChange: (sourceText: string) => void;
+  readOnly: boolean;
+  value: string;
+};
+
+function SqlSourceEditor({ onChange, readOnly, value }: SqlSourceEditorProps) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const viewRef = useRef<EditorView | null>(null);
+  const readOnlyCompartmentRef = useRef(new Compartment());
+  const isApplyingExternalValueRef = useRef(false);
+  const onChangeRef = useRef(onChange);
+
+  useEffect(() => {
+    onChangeRef.current = onChange;
+  }, [onChange]);
+
+  useEffect(() => {
+    const container = containerRef.current;
+
+    if (!container) {
+      return;
+    }
+
+    const readOnlyCompartment = readOnlyCompartmentRef.current;
+    const view = new EditorView({
+      parent: container,
+      state: EditorState.create({
+        doc: value,
+        extensions: [
+          lineNumbers(),
+          history(),
+          drawSelection(),
+          indentOnInput(),
+          bracketMatching(),
+          highlightActiveLine(),
+          highlightActiveLineGutter(),
+          syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+          sql(),
+          keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
+          sqlSourceEditorTheme,
+          readOnlyCompartment.of([
+            EditorState.readOnly.of(readOnly),
+            EditorView.editable.of(!readOnly)
+          ]),
+          EditorView.updateListener.of((update) => {
+            if (!update.docChanged || isApplyingExternalValueRef.current) {
+              return;
+            }
+
+            onChangeRef.current(update.state.doc.toString());
+          })
+        ]
+      })
+    });
+
+    viewRef.current = view;
+
+    return () => {
+      view.destroy();
+      viewRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    const view = viewRef.current;
+
+    if (!view || view.state.doc.toString() === value) {
+      return;
+    }
+
+    isApplyingExternalValueRef.current = true;
+    view.dispatch({
+      changes: {
+        from: 0,
+        insert: value,
+        to: view.state.doc.length
+      }
+    });
+    isApplyingExternalValueRef.current = false;
+  }, [value]);
+
+  useEffect(() => {
+    viewRef.current?.dispatch({
+      effects: readOnlyCompartmentRef.current.reconfigure([
+        EditorState.readOnly.of(readOnly),
+        EditorView.editable.of(!readOnly)
+      ])
+    });
+  }, [readOnly]);
+
+  return (
+    <div
+      aria-label="SQL source"
+      className={cn(
+        "min-h-0 flex-1 overflow-hidden border-0 bg-white text-slate-900",
+        readOnly && "cursor-progress opacity-80"
+      )}
+      ref={containerRef}
+    />
   );
 }
 
@@ -590,6 +754,8 @@ type InspectorPanelProps = PanelToggleProps & {
 };
 
 function InspectorPanel({ isOpen, onToggle, viewModel }: InspectorPanelProps) {
+  const inspectorSubtitle = getInspectorSubtitle(viewModel);
+
   if (!isOpen) {
     return (
       <CollapsedPanelButton
@@ -610,9 +776,11 @@ function InspectorPanel({ isOpen, onToggle, viewModel }: InspectorPanelProps) {
       <div className="flex min-h-20 items-center justify-between gap-3 border-b px-6">
         <div className="min-w-0">
           <p className="text-xl font-semibold">상세 정보</p>
-          <p className="truncate text-base text-muted-foreground">
-            {getInspectorSubtitle(viewModel)}
-          </p>
+          {inspectorSubtitle ? (
+            <p className="truncate text-base text-muted-foreground">
+              {inspectorSubtitle}
+            </p>
+          ) : null}
         </div>
         <button
           aria-label="상세 정보 패널 닫기"
@@ -650,7 +818,7 @@ function InspectorPanel({ isOpen, onToggle, viewModel }: InspectorPanelProps) {
 
 function getInspectorSubtitle(viewModel: SqlErdInspectorViewModel) {
   if (viewModel.type === "table") {
-    return `${viewModel.title} 테이블`;
+    return null;
   }
 
   if (viewModel.type === "column") {

@@ -29,7 +29,6 @@ import {
   isDevPreviewEnabled,
   PILO_DEV_PREVIEW_ACCESS_TOKEN,
   getStoredAuthSession,
-  saveDevPreviewAuthSession,
   saveSelectedWorkspaceId
 } from "@/features/auth/session-storage";
 
@@ -102,7 +101,7 @@ export function LoginPage() {
     }
   };
 
-  async function handleDevPreviewLogin() {
+  function handleDevPreviewLogin() {
     setStatus({
       pendingProvider: "preview",
       errorMessage: null
@@ -116,19 +115,7 @@ export function LoginPage() {
       return;
     }
 
-    try {
-      saveDevPreviewAuthSession();
-      const session = await loadAuthSessionEntry(PILO_DEV_PREVIEW_ACCESS_TOKEN);
-      routeToEntry(router, session, readReturnUrl());
-    } catch (error) {
-      setStatus({
-        pendingProvider: null,
-        errorMessage:
-          error instanceof Error
-            ? error.message
-            : "UI Preview를 시작하지 못했습니다."
-      });
-    }
+    window.location.assign(buildDevPreviewCallbackUrl(readReturnUrl()));
   }
 
   return (
@@ -215,6 +202,16 @@ function readReturnUrl() {
   return returnUrl?.startsWith("/") && !returnUrl.startsWith("//")
     ? returnUrl
     : "/calendar";
+}
+
+function buildDevPreviewCallbackUrl(returnUrl: string) {
+  const callbackUrl = new URL("/login/callback/", window.location.origin);
+  callbackUrl.hash = new URLSearchParams({
+    access_token: PILO_DEV_PREVIEW_ACCESS_TOKEN,
+    return_to: returnUrl
+  }).toString();
+
+  return callbackUrl.toString();
 }
 
 function routeToEntry(
