@@ -102,6 +102,7 @@ const PANEL_RESIZE_HANDLE_WIDTH = 4;
 const COLLAPSED_PANEL_BUTTON_WIDTH = 48;
 const PANEL_RESIZE_KEYBOARD_STEP = 24;
 const AUTOSAVE_DEBOUNCE_MS = 2000;
+const AUTOSAVE_MAX_RETRY_DELAY_MS = 30000;
 
 const sqlSourceEditorTheme = EditorView.theme({
   "&": {
@@ -200,6 +201,13 @@ function isSqlErdApiConflictError(error: unknown) {
   return error instanceof SqlErdApiError && error.status === 409;
 }
 
+function getLayoutAutosaveDelayMs(retryAttempt: number) {
+  return Math.min(
+    AUTOSAVE_DEBOUNCE_MS * 2 ** retryAttempt,
+    AUTOSAVE_MAX_RETRY_DELAY_MS
+  );
+}
+
 export function SqlErdPanel() {
   const authSession = useAuthSession();
   const activeWorkspaceId = authSession?.activeWorkspaceId ?? null;
@@ -228,6 +236,8 @@ export function SqlErdPanel() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [pendingLayoutAutosaveJson, setPendingLayoutAutosaveJson] =
     useState<SqltoerdLayoutJsonV1 | null>(null);
+  const [layoutAutosaveRetryAttempt, setLayoutAutosaveRetryAttempt] =
+    useState(0);
   const [isLayoutAutosaveBlocked, setIsLayoutAutosaveBlocked] =
     useState(false);
   const modelIndex = useMemo(
@@ -286,6 +296,7 @@ export function SqlErdPanel() {
       }
 
       setPendingLayoutAutosaveJson(layoutJson);
+      setLayoutAutosaveRetryAttempt(0);
       setSessionLoadState({
         label: "Unsaved",
         message: "Table layout changes will autosave",
@@ -377,6 +388,7 @@ export function SqlErdPanel() {
 
       setSqlErdViewSession(createWorkspaceSqlErdViewSession(savedSession));
       setPendingLayoutAutosaveJson(null);
+      setLayoutAutosaveRetryAttempt(0);
       setIsLayoutAutosaveBlocked(false);
       setSessionLoadState({
         label: "Workspace",
@@ -429,7 +441,7 @@ export function SqlErdPanel() {
           currentSessionId,
           {
             baseRevision: currentRevision,
-            layoutJson: pendingLayoutAutosaveJson
+            layoutJson: requestLayoutJson
           }
         );
 
@@ -455,6 +467,7 @@ export function SqlErdPanel() {
             ? null
             : currentLayoutJson
         );
+        setLayoutAutosaveRetryAttempt(0);
         setSessionLoadState({
           label: "Workspace",
           message: `Workspace session revision ${savedSession.revision}`,
@@ -463,6 +476,7 @@ export function SqlErdPanel() {
       } catch (error) {
         if (isSqlErdApiConflictError(error)) {
           setPendingLayoutAutosaveJson(null);
+          setLayoutAutosaveRetryAttempt(0);
           setIsLayoutAutosaveBlocked(true);
           setSessionLoadState({
             label: "Conflict",
@@ -472,19 +486,14 @@ export function SqlErdPanel() {
           return;
         }
 
-        setPendingLayoutAutosaveJson((currentLayoutJson) =>
-          currentLayoutJson &&
-          areSqltoerdLayoutsEqual(currentLayoutJson, requestLayoutJson)
-            ? null
-            : currentLayoutJson
-        );
+        setLayoutAutosaveRetryAttempt((currentAttempt) => currentAttempt + 1);
         setSessionLoadState({
           label: "Save error",
-          message: "Table layout could not be autosaved",
+          message: "Table layout could not be autosaved. Retrying soon",
           tone: "error"
         });
       }
-    }, AUTOSAVE_DEBOUNCE_MS);
+    }, getLayoutAutosaveDelayMs(layoutAutosaveRetryAttempt));
 
     return () => {
       window.clearTimeout(timeoutId);
@@ -494,6 +503,7 @@ export function SqlErdPanel() {
     activeWorkspaceId,
     isGenerating,
     isLayoutAutosaveBlocked,
+    layoutAutosaveRetryAttempt,
     pendingLayoutAutosaveJson,
     sqlErdViewSession.id,
     sqlErdViewSession.revision
@@ -533,6 +543,7 @@ export function SqlErdPanel() {
     if (!authSession) {
       setSqlErdViewSession(sampleSqlErdViewSession);
       setPendingLayoutAutosaveJson(null);
+      setLayoutAutosaveRetryAttempt(0);
       setIsLayoutAutosaveBlocked(false);
       setSessionLoadState({
         label: "Sample",
@@ -567,6 +578,7 @@ export function SqlErdPanel() {
         if (activeSession) {
           setSqlErdViewSession(createWorkspaceSqlErdViewSession(activeSession));
           setPendingLayoutAutosaveJson(null);
+          setLayoutAutosaveRetryAttempt(0);
           setIsLayoutAutosaveBlocked(false);
           setSessionLoadState({
             label: "Workspace",
@@ -576,6 +588,7 @@ export function SqlErdPanel() {
         } else {
           setSqlErdViewSession(sampleSqlErdViewSession);
           setPendingLayoutAutosaveJson(null);
+          setLayoutAutosaveRetryAttempt(0);
           setIsLayoutAutosaveBlocked(false);
           setSessionLoadState({
             label: "Sample",
@@ -592,6 +605,7 @@ export function SqlErdPanel() {
 
         setSqlErdViewSession(sampleSqlErdViewSession);
         setPendingLayoutAutosaveJson(null);
+        setLayoutAutosaveRetryAttempt(0);
         setIsLayoutAutosaveBlocked(false);
         setSessionLoadState({
           label: "Sample",

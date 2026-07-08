@@ -799,11 +799,25 @@ assert.match(panel, /updateSession/);
 assert.match(panel, /baseRevision: sqlErdViewSession\.revision/);
 assert.match(panel, /AUTOSAVE_DEBOUNCE_MS = 2000/);
 assert.match(panel, /pendingLayoutAutosaveJson/);
+assert.match(panel, /layoutAutosaveRetryAttempt/);
 assert.match(panel, /handleLayoutChange/);
 assert.match(panel, /isLayoutAutosaveBlocked/);
 assert.match(panel, /status === 409/);
 assert.match(panel, /baseRevision: currentRevision/);
-assert.match(panel, /layoutJson: pendingLayoutAutosaveJson/);
+assert.match(panel, /layoutJson: requestLayoutJson/);
+assert.match(panel, /getLayoutAutosaveDelayMs\(layoutAutosaveRetryAttempt\)/);
+const layoutAutosaveNonConflictCatch =
+  panel.match(
+    /if \(isSqlErdApiConflictError\(error\)\) \{[\s\S]*?return;\n\s*\}\n\n([\s\S]*?)\n\s*\}\n\s*\}, getLayoutAutosaveDelayMs/
+  )?.[1] ?? "";
+assert.match(
+  layoutAutosaveNonConflictCatch,
+  /setLayoutAutosaveRetryAttempt\(\(currentAttempt\) => currentAttempt \+ 1\)/
+);
+assert.doesNotMatch(
+  layoutAutosaveNonConflictCatch,
+  /setPendingLayoutAutosaveJson/
+);
 assert.match(panel, /createSqltoerdLayoutForModel/);
 assert.match(panel, /handleDialectChange/);
 assert.match(panel, /onDialectChange=\{handleDialectChange\}/);
