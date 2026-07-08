@@ -1522,7 +1522,7 @@ function projectV2ItemApiItem(overrides = {}) {
       (text, values) => {
         assert.match(text, /FROM github_issues/i);
         assert.deepEqual(values, [workspaceId, "I_kgDOExample"]);
-        return { id: issueId };
+        return { id: issueId, repository_id: repositoryId };
       },
       (text, values) => {
         assert.match(text, /FROM github_project_v2_field_options/i);
@@ -1608,6 +1608,16 @@ function projectV2ItemApiItem(overrides = {}) {
     fieldValueUpsert.values[12],
     JSON.stringify(projectV2ItemFieldValueApiItem().raw)
   );
+  const projectRepositoryLink = database.queries.find(
+    (query) =>
+      query.method === "execute" &&
+      /INSERT INTO github_project_v2_repositories/i.test(query.text)
+  );
+  assert.ok(
+    projectRepositoryLink,
+    "ProjectV2 item sync should backfill the project-repository link from synced issue content"
+  );
+  assert.deepEqual(projectRepositoryLink.values, [projectV2Id, repositoryId]);
 }
 
 {

@@ -12,7 +12,6 @@ export const sqlErdNavigation: FeatureNavigationItem = {
   icon: Database,
   items: [
     { title: "Source", href: "/sql-erd#source" },
-    { title: "Canvas", href: "/sql-erd#canvas" },
-    { title: "상세 정보", href: "/sql-erd#inspector" }
+    { title: "Canvas", href: "/sql-erd#canvas" }
   ]
 };

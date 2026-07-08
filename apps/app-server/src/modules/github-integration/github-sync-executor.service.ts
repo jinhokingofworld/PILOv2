@@ -64,6 +64,7 @@ interface GithubProjectV2FieldOptionSyncRow extends QueryResultRow {
 
 interface GithubProjectV2ContentSyncRow extends QueryResultRow {
   id: string;
+  repository_id: string;
 }
 
 interface GithubProjectV2ItemSyncRow extends QueryResultRow {
@@ -780,6 +781,11 @@ export class GithubSyncExecutorService {
       return null;
     }
 
+    await this.ensureGithubProjectV2RepositoryLink(
+      projectV2.id,
+      contentIds.repositoryId
+    );
+
     const status = item.statusOptionId
       ? await this.findGithubProjectV2StatusOption(projectV2.id, item.statusOptionId)
       : null;
@@ -962,14 +968,20 @@ export class GithubSyncExecutorService {
   private async resolveGithubProjectV2ItemContentIds(
     workspaceId: string,
     item: GithubProjectV2ItemApiItem
-  ): Promise<{ issueId: string | null; pullRequestId: string | null } | null> {
+  ): Promise<{
+    issueId: string | null;
+    pullRequestId: string | null;
+    repositoryId: string | null;
+  } | null> {
     if (item.contentType === "ISSUE") {
       if (!item.contentNodeId) {
         return null;
       }
 
       const row = await this.findGithubIssueByNodeId(workspaceId, item.contentNodeId);
-      return row ? { issueId: row.id, pullRequestId: null } : null;
+      return row
+        ? { issueId: row.id, pullRequestId: null, repositoryId: row.repository_id }
+        : null;
     }
 
     if (item.contentType === "PULL_REQUEST") {
@@ -981,13 +993,38 @@ export class GithubSyncExecutorService {
         workspaceId,
         item.contentNodeId
       );
-      return row ? { issueId: null, pullRequestId: row.id } : null;
+      return row
+        ? { issueId: null, pullRequestId: row.id, repositoryId: row.repository_id }
+        : null;
     }
 
     return {
       issueId: null,
-      pullRequestId: null
+      pullRequestId: null,
+      repositoryId: null
     };
+  }
+
+  private async ensureGithubProjectV2RepositoryLink(
+    projectV2Id: string,
+    repositoryId: string | null
+  ): Promise<void> {
+    if (!repositoryId) {
+      return;
+    }
+
+    await this.database.execute(
+      `
+        INSERT INTO github_project_v2_repositories (
+          project_v2_id,
+          repository_id
+        )
+        VALUES ($1, $2)
+        ON CONFLICT (project_v2_id, repository_id)
+        DO NOTHING
+      `,
+      [projectV2Id, repositoryId]
+    );
   }
 
   private async findGithubIssueByNodeId(
@@ -996,7 +1033,7 @@ export class GithubSyncExecutorService {
   ): Promise<GithubProjectV2ContentSyncRow | null> {
     return this.database.queryOne<GithubProjectV2ContentSyncRow>(
       `
-        SELECT id
+        SELECT id, repository_id
         FROM github_issues
         WHERE workspace_id = $1
           AND github_node_id = $2
@@ -1011,7 +1048,7 @@ export class GithubSyncExecutorService {
   ): Promise<GithubProjectV2ContentSyncRow | null> {
     return this.database.queryOne<GithubProjectV2ContentSyncRow>(
       `
-        SELECT id
+        SELECT id, repository_id
         FROM github_pull_requests
         WHERE workspace_id = $1
           AND github_node_id = $2

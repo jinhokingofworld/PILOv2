@@ -119,20 +119,11 @@ assert.match(githubPanel, /deleteGithubAppInstallation/);
 assert.match(githubPanel, /isDeletingInstallation/);
 assert.match(githubPanel, /handleStartGithubAppInstallation/);
 assert.match(githubPanel, /handleStartGithubSyncRun/);
-assert.match(githubPanel, /const shouldScopeGithubSyncTarget = syncTarget !== "full";/);
 assert.match(
-  githubPanel,
-  /shouldScopeGithubSyncTarget &&[\s\S]*repositoryScopedSyncTargets\.has\(syncTarget\)/
-);
-assert.match(
-  githubPanel,
-  /shouldScopeGithubSyncTarget &&[\s\S]*projectScopedSyncTargets\.has\(syncTarget\)/
-);
-assert.doesNotMatch(
   githubPanel,
   /\(syncTarget === "full" \|\| repositoryScopedSyncTargets\.has\(syncTarget\)\)/
 );
-assert.doesNotMatch(
+assert.match(
   githubPanel,
   /\(syncTarget === "full" \|\| projectScopedSyncTargets\.has\(syncTarget\)\)/
 );
@@ -148,10 +139,15 @@ assert.match(githubConnectLayout, /onConfirmDeleteInstallation/);
 assert.doesNotMatch(githubConnectLayout, /GithubConnectSummary/);
 assert.doesNotMatch(githubConnectLayout, /summary-strip/);
 assert.match(githubConnectLayout, /main-grid/);
+assert.match(githubConnectLayout, /main-grid grid items-start/);
 assert.doesNotMatch(githubConnectLayout, /PILO GitHub Connect/);
 assert.match(githubConnectPrimitives, /GithubConnectPanel/);
 assert.match(githubConnectPrimitives, /GithubConnectPill/);
 assert.match(githubConnectPrimitives, /GithubConnectEmptyState/);
+assert.match(githubConnectPrimitives, /@\/components\/ui\/collapsible/);
+assert.match(githubConnectPrimitives, /CollapsibleContent/);
+assert.match(githubConnectPrimitives, /CollapsibleTrigger/);
+assert.match(githubConnectPrimitives, /collapsible\?: boolean/);
 assert.match(githubConnectSteps, /GithubConnectSteps/);
 assert.match(githubConnectSteps, /현재 작업/);
 assert.match(githubConnectSteps, /1\. GitHub 계정 연결/);
@@ -163,14 +159,42 @@ assert.match(githubConnectSteps, /ProjectV2 OAuth/);
 assert.match(githubConnectSteps, /onStartGithubProjectOAuth/);
 assert.match(githubConnectSteps, /onDisconnectGithubProjectOAuth/);
 assert.match(githubConnectSteps, /onStartSync/);
+assert.match(githubConnectSteps, /completedTaskCardClassName/);
+assert.match(githubConnectSteps, /pendingTaskCardClassName/);
+assert.match(
+  githubConnectSteps,
+  /connected \? completedTaskCardClassName : pendingTaskCardClassName/
+);
+assert.match(
+  githubConnectSteps,
+  /hasInstallation[\s\S]*\? completedTaskCardClassName[\s\S]*: pendingTaskCardClassName/
+);
+assert.match(
+  githubConnectSteps,
+  /projectOAuthConnected[\s\S]*\? completedTaskCardClassName[\s\S]*: pendingTaskCardClassName/
+);
+assert.doesNotMatch(githubConnectSteps, /disabled=\{connected \|\|/);
+assert.doesNotMatch(
+  githubConnectSteps,
+  /!connected \|\|[\s\S]*hasInstallation \|\|[\s\S]*redirectAction === "installation"/
+);
+assert.doesNotMatch(
+  githubConnectSteps,
+  /projectOAuthConnected \|\|[\s\S]*redirectAction === "project_oauth"/
+);
 assert.doesNotMatch(githubConnectSteps, /step-card/);
 assert.match(githubConnectSteps, /GitHub에서 App 설치 해제/);
 assert.match(githubConnectSteps, /설치 해제 확인/);
 assert.match(githubConnectTables, /GithubConnectSourceTables/);
 assert.match(githubConnectTables, /repo-table/);
 assert.match(githubConnectTables, /project-table/);
+assert.match(githubConnectTables, /title="Pull Requests"/);
+assert.match(githubConnectTables, /pullRequestsTotal/);
+assert.equal((githubConnectTables.match(/collapsible/g) ?? []).length, 3);
 assert.match(githubConnectSidebar, /GithubConnectSidebar/);
 assert.match(githubConnectSidebar, /job-list/);
+assert.equal((githubConnectSidebar.match(/collapsible/g) ?? []).length, 1);
+assert.doesNotMatch(githubConnectSidebar, /title="Pull Requests"/);
 assert.doesNotMatch(githubConnectSidebar, /health-list/);
 assert.doesNotMatch(githubConnectSidebar, /HealthRow/);
 assert.match(githubConnectFormat, /formatGithubConnectDateTime/);

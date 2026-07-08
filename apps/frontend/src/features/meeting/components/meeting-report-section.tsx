@@ -16,6 +16,7 @@ import {
   XCircle
 } from "lucide-react";
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -48,6 +49,8 @@ type ParsedActionItemCandidate = {
 };
 
 const REPORT_POLL_INTERVAL_MS = 10000;
+const CALENDAR_DRAFT_TITLE_MAX_LENGTH = 255;
+const CALENDAR_DRAFT_DESCRIPTION_MAX_LENGTH = 1000;
 const REPORT_STATUS_FILTERS: Array<{
   label: string;
   value: MeetingReportStatusFilter;
@@ -90,6 +93,49 @@ function formatReportDateTime(value: string | null | undefined) {
     month: "numeric",
     year: "numeric"
   }).format(date);
+}
+
+function formatCalendarDraftDate(value: string | null | undefined) {
+  const date = value ? new Date(value) : new Date();
+  const normalizedDate = Number.isNaN(date.getTime()) ? new Date() : date;
+
+  return [
+    normalizedDate.getFullYear(),
+    String(normalizedDate.getMonth() + 1).padStart(2, "0"),
+    String(normalizedDate.getDate()).padStart(2, "0")
+  ].join("-");
+}
+
+function truncateCalendarDraftValue(value: string, maxLength: number) {
+  return value.trim().slice(0, maxLength);
+}
+
+function buildCalendarDraftHref(
+  item: ParsedActionItemCandidate,
+  report: MeetingReportDetail
+) {
+  const params = new URLSearchParams({
+    calendarAction: "create",
+    color: "#22C55E",
+    date: formatCalendarDraftDate(report.createdAt),
+    isAllDay: "true",
+    title: truncateCalendarDraftValue(
+      item.title,
+      CALENDAR_DRAFT_TITLE_MAX_LENGTH
+    )
+  });
+
+  if (item.description) {
+    params.set(
+      "description",
+      truncateCalendarDraftValue(
+        item.description,
+        CALENDAR_DRAFT_DESCRIPTION_MAX_LENGTH
+      )
+    );
+  }
+
+  return `/calendar?${params.toString()}`;
 }
 
 function formatReportTitle(report: Pick<MeetingReportSummary, "createdAt">) {
@@ -274,7 +320,10 @@ function MeetingReportDetailModal({
 }: {
   detailError: string | null;
   detailStatus: ReportDetailStatus;
-  onCreateSchedule: (item: ParsedActionItemCandidate) => void;
+  onCreateSchedule: (
+    item: ParsedActionItemCandidate,
+    report: MeetingReportDetail
+  ) => void;
   onClose: () => void;
   onRegenerate: (report: MeetingReportSummary) => void;
   open: boolean;
@@ -445,7 +494,7 @@ function MeetingReportDetailModal({
                               type="button"
                               size="sm"
                               className="bg-emerald-600 text-white hover:bg-emerald-700 focus-visible:border-emerald-500 focus-visible:ring-emerald-500/30"
-                              onClick={() => onCreateSchedule(item)}
+                              onClick={() => onCreateSchedule(item, report)}
                             >
                               <CalendarPlus className="size-3.5" />
                               일정 생성
@@ -503,6 +552,7 @@ export function MeetingReportSection({
   onToastMessage,
   statusFilter
 }: MeetingReportSectionProps) {
+  const router = useRouter();
   const {
     canLoad,
     getMeetingReport,
@@ -627,10 +677,10 @@ export function MeetingReportSection({
   );
 
   const handleCreateSchedule = useCallback(
-    (item: ParsedActionItemCandidate) => {
-      onToastMessage(`"${item.title}" 일정 생성 액션을 선택했습니다.`);
+    (item: ParsedActionItemCandidate, report: MeetingReportDetail) => {
+      router.push(buildCalendarDraftHref(item, report));
     },
-    [onToastMessage]
+    [router]
   );
 
   useEffect(() => {

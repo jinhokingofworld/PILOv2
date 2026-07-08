@@ -1,11 +1,9 @@
-import { GitPullRequest, Loader2, Play } from "lucide-react";
+import { Loader2, Play } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import type {
   GithubAppInstallation,
-  GithubPullRequest,
-  GithubRepository,
   GithubSyncRun,
   GithubSyncTarget
 } from "@/features/github-integration/types";
@@ -41,10 +39,6 @@ type SidebarProps = {
   isLoading: boolean;
   installations: GithubAppInstallation[];
   selectedInstallationId: string;
-  selectedRepository: GithubRepository | undefined;
-  pullRequests: GithubPullRequest[];
-  pullRequestsTotal: number;
-  isPullRequestsLoading: boolean;
   syncRuns: GithubSyncRun[];
   syncRunsTotal: number;
   syncTarget: GithubSyncTarget;
@@ -57,10 +51,6 @@ export function GithubConnectSidebar({
   isLoading,
   installations,
   selectedInstallationId,
-  selectedRepository,
-  pullRequests,
-  pullRequestsTotal,
-  isPullRequestsLoading,
   syncRuns,
   syncRunsTotal,
   syncTarget,
@@ -112,6 +102,7 @@ export function GithubConnectSidebar({
       </GithubConnectPanel>
 
       <GithubConnectPanel
+        collapsible
         title="최근 작업"
         subtitle={`${formatGithubConnectNumber(syncRunsTotal)}개 sync run 기록`}
       >
@@ -180,53 +171,6 @@ export function GithubConnectSidebar({
         )}
       </GithubConnectPanel>
 
-      <GithubConnectPanel
-        icon={<GitPullRequest className="size-4" />}
-        title="Pull Requests"
-        subtitle={
-          selectedRepository
-            ? `${selectedRepository.fullName} · ${formatGithubConnectNumber(
-                pullRequestsTotal
-              )}개`
-            : "저장소를 선택하면 PR 목록을 조회합니다."
-        }
-      >
-        {isPullRequestsLoading ? (
-          <LoadingStack rows={3} />
-        ) : pullRequests.length === 0 ? (
-          <GithubConnectEmptyState>
-            선택한 저장소의 Pull Request가 없거나 아직 동기화되지 않았습니다.
-          </GithubConnectEmptyState>
-        ) : (
-          <div className="space-y-2">
-            {pullRequests.map((pullRequest) => (
-              <a
-                className="block rounded-[8px] border border-[#e5e9f2] bg-[#fbfcfe] p-3 transition-colors hover:border-[#c7d2fe] hover:bg-[#f5f7ff]"
-                href={pullRequest.githubUrl}
-                key={pullRequest.id}
-                rel="noreferrer"
-                target="_blank"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <p className="min-w-0 text-[13px] font-semibold leading-5 text-[#101828]">
-                    #{pullRequest.githubNumber} {pullRequest.title}
-                  </p>
-                  <GithubConnectPill
-                    tone={pullRequest.state === "open" ? "success" : "default"}
-                  >
-                    {pullRequest.state}
-                  </GithubConnectPill>
-                </div>
-                <p className="mt-2 text-[12px] text-[#7a8497]">
-                  {pullRequest.headBranch ?? "-"} →{" "}
-                  {pullRequest.baseBranch ?? "-"} · {pullRequest.changedFilesCount}
-                  files
-                </p>
-              </a>
-            ))}
-          </div>
-        )}
-      </GithubConnectPanel>
     </aside>
   );
 }

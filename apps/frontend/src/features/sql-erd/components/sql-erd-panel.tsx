@@ -1,7 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ReactNode } from "react";
+import type {
+  KeyboardEvent as ReactKeyboardEvent,
+  PointerEvent as ReactPointerEvent,
+  ReactNode
+} from "react";
 import {
   defaultKeymap,
   history,
@@ -81,6 +85,17 @@ type SqlErdSessionLoadState = {
 const sampleSqlErdViewSession = createSampleSqlErdViewSession(
   commerceSqltoerdFixture
 );
+
+const SOURCE_PANEL_MIN_WIDTH = 280;
+const SOURCE_PANEL_DEFAULT_WIDTH = 360;
+const SOURCE_PANEL_MAX_WIDTH = 560;
+const INSPECTOR_PANEL_MIN_WIDTH = 320;
+const INSPECTOR_PANEL_DEFAULT_WIDTH = 400;
+const INSPECTOR_PANEL_MAX_WIDTH = 560;
+const MIN_CANVAS_WIDTH = 480;
+const PANEL_RESIZE_HANDLE_WIDTH = 4;
+const COLLAPSED_PANEL_BUTTON_WIDTH = 48;
+const PANEL_RESIZE_KEYBOARD_STEP = 24;
 
 const sqlSourceEditorTheme = EditorView.theme({
   "&": {
@@ -177,8 +192,16 @@ function getSqlErdGenerateErrorMessage(errorCode: string) {
 
 export function SqlErdPanel() {
   const authSession = useAuthSession();
+  const panelContainerRef = useRef<HTMLElement | null>(null);
   const [isSourceOpen, setIsSourceOpen] = useState(false);
   const [isInspectorOpen, setIsInspectorOpen] = useState(false);
+  const [panelContainerWidth, setPanelContainerWidth] = useState(0);
+  const [sourcePanelWidth, setSourcePanelWidth] = useState(
+    SOURCE_PANEL_DEFAULT_WIDTH
+  );
+  const [inspectorPanelWidth, setInspectorPanelWidth] = useState(
+    INSPECTOR_PANEL_DEFAULT_WIDTH
+  );
   const [sqlErdViewSession, setSqlErdViewSession] = useState<SqlErdViewSession>(
     sampleSqlErdViewSession
   );
@@ -314,6 +337,31 @@ export function SqlErdPanel() {
   }, []);
 
   useEffect(() => {
+    const panelContainer = panelContainerRef.current;
+
+    if (!panelContainer) {
+      return;
+    }
+
+    const panelContainerElement = panelContainer;
+
+    function updatePanelContainerWidth() {
+      setPanelContainerWidth(
+        panelContainerElement.getBoundingClientRect().width
+      );
+    }
+
+    updatePanelContainerWidth();
+
+    const resizeObserver = new ResizeObserver(updatePanelContainerWidth);
+    resizeObserver.observe(panelContainerElement);
+
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, []);
+
+  useEffect(() => {
     if (!authSession) {
       setSqlErdViewSession(sampleSqlErdViewSession);
       setSessionLoadState({
@@ -385,8 +433,79 @@ export function SqlErdPanel() {
     };
   }, [authSession?.accessToken, authSession?.activeWorkspaceId]);
 
+  const openResizeHandleWidth =
+    (isSourceOpen ? PANEL_RESIZE_HANDLE_WIDTH : 0) +
+    (isInspectorOpen ? PANEL_RESIZE_HANDLE_WIDTH : 0);
+  const sourcePanelMaxWidth = useMemo(
+    () =>
+      getResizablePanelMaxWidth({
+        containerWidth: panelContainerWidth,
+        maxWidth: SOURCE_PANEL_MAX_WIDTH,
+        minWidth: SOURCE_PANEL_MIN_WIDTH,
+        reservedWidth:
+          (isInspectorOpen
+            ? inspectorPanelWidth
+            : COLLAPSED_PANEL_BUTTON_WIDTH) + openResizeHandleWidth
+      }),
+    [
+      inspectorPanelWidth,
+      isInspectorOpen,
+      openResizeHandleWidth,
+      panelContainerWidth
+    ]
+  );
+  const inspectorPanelMaxWidth = useMemo(
+    () =>
+      getResizablePanelMaxWidth({
+        containerWidth: panelContainerWidth,
+        maxWidth: INSPECTOR_PANEL_MAX_WIDTH,
+        minWidth: INSPECTOR_PANEL_MIN_WIDTH,
+        reservedWidth:
+          (isSourceOpen ? sourcePanelWidth : COLLAPSED_PANEL_BUTTON_WIDTH) +
+          openResizeHandleWidth
+      }),
+    [isSourceOpen, openResizeHandleWidth, panelContainerWidth, sourcePanelWidth]
+  );
+  const clampedSourcePanelWidth = clampPanelWidth(
+    sourcePanelWidth,
+    SOURCE_PANEL_MIN_WIDTH,
+    sourcePanelMaxWidth
+  );
+  const clampedInspectorPanelWidth = clampPanelWidth(
+    inspectorPanelWidth,
+    INSPECTOR_PANEL_MIN_WIDTH,
+    inspectorPanelMaxWidth
+  );
+
+  useEffect(() => {
+    setSourcePanelWidth((currentWidth) => {
+      const nextWidth = clampPanelWidth(
+        currentWidth,
+        SOURCE_PANEL_MIN_WIDTH,
+        sourcePanelMaxWidth
+      );
+
+      return nextWidth === currentWidth ? currentWidth : nextWidth;
+    });
+  }, [sourcePanelMaxWidth]);
+
+  useEffect(() => {
+    setInspectorPanelWidth((currentWidth) => {
+      const nextWidth = clampPanelWidth(
+        currentWidth,
+        INSPECTOR_PANEL_MIN_WIDTH,
+        inspectorPanelMaxWidth
+      );
+
+      return nextWidth === currentWidth ? currentWidth : nextWidth;
+    });
+  }, [inspectorPanelMaxWidth]);
+
   return (
-    <section className="flex min-h-[calc(100vh-8.5rem)] overflow-hidden rounded-lg border bg-background shadow-sm">
+    <section
+      className="flex h-full min-h-0 overflow-hidden bg-background"
+      ref={panelContainerRef}
+    >
       <SourcePanel
         counts={sessionCounts}
         dialect={sqlErdViewSession.dialect}
@@ -407,19 +526,43 @@ export function SqlErdPanel() {
           isGenerating || sessionLoadState.label === "Loading"
         }
         sourceText={sqlErdViewSession.sourceText}
+        width={clampedSourcePanelWidth}
       />
+      {isSourceOpen ? (
+        <PanelResizeHandle
+          ariaLabel="Resize source panel"
+          maxWidth={sourcePanelMaxWidth}
+          minWidth={SOURCE_PANEL_MIN_WIDTH}
+          onWidthChange={setSourcePanelWidth}
+          side="left"
+          width={clampedSourcePanelWidth}
+        />
+      ) : null}
       <CanvasShell
         layoutJson={sqlErdViewSession.layoutJson}
         modelJson={sqlErdViewSession.modelJson}
         onSelectionChange={setSelectedSqlErdObject}
         selectedSqlErdObject={selectedSqlErdObject}
-        sessionLoadState={sessionLoadState}
-        title={sqlErdViewSession.title}
       />
+      {isInspectorOpen ? (
+        <PanelResizeHandle
+          ariaLabel="Resize inspector panel"
+          maxWidth={inspectorPanelMaxWidth}
+          minWidth={INSPECTOR_PANEL_MIN_WIDTH}
+          onWidthChange={setInspectorPanelWidth}
+          side="right"
+          width={clampedInspectorPanelWidth}
+        />
+      ) : null}
       <InspectorPanel
+        emptyState={{
+          sessionLoadState,
+          title: sqlErdViewSession.title
+        }}
         isOpen={isInspectorOpen}
         onToggle={() => setIsInspectorOpen((current) => !current)}
         viewModel={inspectorViewModel}
+        width={clampedInspectorPanelWidth}
       />
     </section>
   );
@@ -442,6 +585,7 @@ type SourcePanelProps = PanelToggleProps & {
   onSourceTextChange: (sourceText: string) => void;
   sessionLoadState: SqlErdSessionLoadState;
   sourceText: string;
+  width: number;
 };
 
 function SourcePanel({
@@ -457,7 +601,8 @@ function SourcePanel({
   onSourceTextChange,
   onToggle,
   sessionLoadState,
-  sourceText
+  sourceText,
+  width
 }: SourcePanelProps) {
   if (!isOpen) {
     return (
@@ -472,8 +617,9 @@ function SourcePanel({
 
   return (
     <aside
-      className="flex w-[min(360px,42vw)] min-w-64 max-w-[360px] shrink-0 flex-col border-r bg-muted/20"
+      className="flex shrink-0 flex-col border-r bg-muted/20"
       id="source"
+      style={{ width }}
     >
       <div className="flex min-h-14 items-center justify-between gap-3 border-b px-4">
         <div className="min-w-0">
@@ -694,66 +840,157 @@ function SelectorLabel({ label, value }: SelectorLabelProps) {
   );
 }
 
+function clampPanelWidth(width: number, minWidth: number, maxWidth: number) {
+  return Math.min(Math.max(width, minWidth), maxWidth);
+}
+
+type ResizablePanelMaxWidthInput = {
+  containerWidth: number;
+  maxWidth: number;
+  minWidth: number;
+  reservedWidth: number;
+};
+
+function getResizablePanelMaxWidth({
+  containerWidth,
+  maxWidth,
+  minWidth,
+  reservedWidth
+}: ResizablePanelMaxWidthInput) {
+  if (containerWidth <= 0) {
+    return maxWidth;
+  }
+
+  const availablePanelWidth =
+    containerWidth - reservedWidth - MIN_CANVAS_WIDTH;
+
+  return Math.max(minWidth, Math.min(maxWidth, availablePanelWidth));
+}
+
+type PanelResizeHandleProps = {
+  ariaLabel: string;
+  maxWidth: number;
+  minWidth: number;
+  onWidthChange: (width: number) => void;
+  side: "left" | "right";
+  width: number;
+};
+
+function PanelResizeHandle({
+  ariaLabel,
+  maxWidth,
+  minWidth,
+  onWidthChange,
+  side,
+  width
+}: PanelResizeHandleProps) {
+  function handlePointerDown(event: ReactPointerEvent<HTMLDivElement>) {
+    event.preventDefault();
+
+    const startX = event.clientX;
+    const startWidth = width;
+    const previousCursor = document.body.style.cursor;
+    const previousUserSelect = document.body.style.userSelect;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+
+    function handlePointerMove(moveEvent: PointerEvent) {
+      const deltaX = moveEvent.clientX - startX;
+      const nextWidth =
+        side === "left" ? startWidth + deltaX : startWidth - deltaX;
+
+      onWidthChange(clampPanelWidth(nextWidth, minWidth, maxWidth));
+    }
+
+    function stopResize() {
+      document.body.style.cursor = previousCursor;
+      document.body.style.userSelect = previousUserSelect;
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", stopResize);
+      window.removeEventListener("pointercancel", stopResize);
+    }
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", stopResize, { once: true });
+    window.addEventListener("pointercancel", stopResize, { once: true });
+  }
+
+  function handleKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") {
+      return;
+    }
+
+    event.preventDefault();
+
+    const direction = event.key === "ArrowRight" ? 1 : -1;
+    const signedDirection = side === "left" ? direction : -direction;
+    const nextWidth = width + signedDirection * PANEL_RESIZE_KEYBOARD_STEP;
+
+    onWidthChange(clampPanelWidth(nextWidth, minWidth, maxWidth));
+  }
+
+  return (
+    <div
+      aria-label={ariaLabel}
+      aria-orientation="vertical"
+      aria-valuemax={maxWidth}
+      aria-valuemin={minWidth}
+      aria-valuenow={width}
+      className="group relative z-10 flex w-1 shrink-0 cursor-col-resize items-stretch justify-center outline-none transition-colors hover:bg-primary/10 focus-visible:bg-primary/20"
+      onKeyDown={handleKeyDown}
+      onPointerDown={handlePointerDown}
+      role="separator"
+      tabIndex={0}
+    >
+      <div className="h-full w-px bg-border transition-colors group-hover:bg-primary/40" />
+    </div>
+  );
+}
+
 type CanvasShellProps = {
   layoutJson: SqltoerdSessionPayload["layoutJson"];
   modelJson: SqltoerdSessionPayload["modelJson"];
   onSelectionChange: (selection: SqlErdSelection) => void;
   selectedSqlErdObject: SqlErdSelection;
-  sessionLoadState: SqlErdSessionLoadState;
-  title: string;
 };
 
 function CanvasShell({
   layoutJson,
   modelJson,
   onSelectionChange,
-  selectedSqlErdObject,
-  sessionLoadState,
-  title
+  selectedSqlErdObject
 }: CanvasShellProps) {
   return (
-    <div className="relative flex min-w-0 flex-1 flex-col">
-      <div
-        className="flex min-h-14 items-center justify-between gap-3 border-b bg-background/95 px-4 backdrop-blur"
-        id="canvas"
-      >
-        <div className="flex min-w-0 items-center gap-3">
-          <div className="flex size-8 shrink-0 items-center justify-center rounded-md border bg-background">
-            <Database className="size-4 text-muted-foreground" />
-          </div>
-          <div className="min-w-0">
-            <p className="truncate text-sm font-semibold">{title}</p>
-            <p className="truncate text-xs text-muted-foreground">
-              {sessionLoadState.message}
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <StatusPill
-            label={sessionLoadState.label}
-            tone={sessionLoadState.tone}
-          />
-        </div>
-      </div>
-
-      <div className="relative min-h-0 flex-1 overflow-hidden">
-        <SqlErdCanvas
-          className="absolute inset-0"
-          layoutJson={layoutJson}
-          modelJson={modelJson}
-          onSelectionChange={onSelectionChange}
-          selectedSqlErdObject={selectedSqlErdObject}
-        />
-      </div>
+    <div className="relative min-w-0 flex-1 overflow-hidden" id="canvas">
+      <SqlErdCanvas
+        className="absolute inset-0"
+        layoutJson={layoutJson}
+        modelJson={modelJson}
+        onSelectionChange={onSelectionChange}
+        selectedSqlErdObject={selectedSqlErdObject}
+      />
     </div>
   );
 }
 
-type InspectorPanelProps = PanelToggleProps & {
-  viewModel: SqlErdInspectorViewModel;
+type InspectorEmptyState = {
+  sessionLoadState: SqlErdSessionLoadState;
+  title: string;
 };
 
-function InspectorPanel({ isOpen, onToggle, viewModel }: InspectorPanelProps) {
+type InspectorPanelProps = PanelToggleProps & {
+  emptyState: InspectorEmptyState;
+  viewModel: SqlErdInspectorViewModel;
+  width: number;
+};
+
+function InspectorPanel({
+  emptyState,
+  isOpen,
+  onToggle,
+  viewModel,
+  width
+}: InspectorPanelProps) {
   const inspectorSubtitle = getInspectorSubtitle(viewModel);
 
   if (!isOpen) {
@@ -770,8 +1007,9 @@ function InspectorPanel({ isOpen, onToggle, viewModel }: InspectorPanelProps) {
 
   return (
     <aside
-      className="flex w-[min(400px,40vw)] min-w-96 max-w-[400px] shrink-0 flex-col border-l bg-background"
+      className="flex shrink-0 flex-col border-l bg-background"
       id="inspector"
+      style={{ width }}
     >
       <div className="flex min-h-20 items-center justify-between gap-3 border-b px-6">
         <div className="min-w-0">
@@ -793,7 +1031,7 @@ function InspectorPanel({ isOpen, onToggle, viewModel }: InspectorPanelProps) {
       </div>
 
       <div className="flex flex-1 flex-col gap-6 overflow-auto p-6">
-        <InspectorContent viewModel={viewModel} />
+        <InspectorContent emptyState={emptyState} viewModel={viewModel} />
 
         <div className="mt-auto grid gap-2">
           <button
@@ -833,8 +1071,10 @@ function getInspectorSubtitle(viewModel: SqlErdInspectorViewModel) {
 }
 
 function InspectorContent({
+  emptyState,
   viewModel
 }: {
+  emptyState: InspectorEmptyState;
   viewModel: SqlErdInspectorViewModel;
 }) {
   if (viewModel.type === "table") {
@@ -851,10 +1091,29 @@ function InspectorContent({
 
   return (
     <div className="rounded-md border border-dashed p-4">
-      <p className="text-lg font-medium">선택 정보</p>
-      <p className="mt-1 text-base leading-7 text-muted-foreground">
-        선택한 테이블, 컬럼, 관계가 없습니다
-      </p>
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 items-start gap-3">
+          <div className="flex size-9 shrink-0 items-center justify-center rounded-md border bg-background">
+            <Database className="size-4 text-muted-foreground" />
+          </div>
+          <div className="min-w-0">
+            <p className="truncate text-lg font-semibold">{emptyState.title}</p>
+            <p className="mt-1 text-base leading-7 text-muted-foreground">
+              {emptyState.sessionLoadState.message}
+            </p>
+          </div>
+        </div>
+        <StatusPill
+          label={emptyState.sessionLoadState.label}
+          tone={emptyState.sessionLoadState.tone}
+        />
+      </div>
+      <div className="mt-4 border-t pt-4">
+        <p className="text-lg font-medium">선택 정보</p>
+        <p className="mt-1 text-base leading-7 text-muted-foreground">
+          선택한 테이블, 컬럼, 관계가 없습니다
+        </p>
+      </div>
     </div>
   );
 }
