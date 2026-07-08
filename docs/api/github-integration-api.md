@@ -101,6 +101,8 @@ token으로 GitHub의 user installations 목록을 조회해 callback의
   ProjectV2는 현재 사용자의 ProjectV2 OAuth token을 사용한다. 발견한
   ProjectV2는 `github_projects_v2`에 upsert하고, GitHub repository node id와
   동기화된 저장소를 매칭해 `github_project_v2_repositories` 관계를 갱신한다.
+  ProjectV2 item sync는 GitHub ProjectV2 repository 연결 목록이 불완전한 경우에도
+  동기화된 issue/PR content의 repository를 기준으로 이 관계를 보강한다.
 - `full` sync 요청에 `repositoryId`가 있으면, 선택된 ProjectV2가 없는 경우에도
   발견한 ProjectV2 중 해당 repository에 연결된 ProjectV2만 fields/items
   동기화 대상으로 삼는다. `projectV2Id`가 있으면 그 ProjectV2를 우선한다.

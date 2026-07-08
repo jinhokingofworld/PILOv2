@@ -23,6 +23,7 @@ import type {
 } from "@/features/board/types";
 import { formatBoardDateTime } from "@/features/board/utils/board-format";
 import { useAuthSession } from "@/features/auth";
+import { selectProjectV2IdForRepository } from "@/features/github-integration/utils/github-project-selection";
 import { cn } from "@/lib/utils";
 
 const selectClassName =
@@ -83,6 +84,15 @@ export function BoardPanel() {
     issueQuery,
     workspaceId
   });
+  const linkedBoardProjects = useMemo(() => {
+    if (!selectedRepositoryId) {
+      return boardData.projects;
+    }
+
+    return boardData.projects.filter((project) =>
+      project.repositoryIds.includes(selectedRepositoryId)
+    );
+  }, [boardData.projects, selectedRepositoryId]);
   const selectedBoardSummary = boardData.boards.find(
     (board) => board.id === selectedBoardId
   );
@@ -123,12 +133,25 @@ export function BoardPanel() {
   useEffect(() => {
     if (selectedBoardSummary) return;
 
-    if (!selectedRepositoryId && boardData.repositories[0]) {
-      setSelectedRepositoryId(boardData.repositories[0].id);
+    const nextRepositoryId =
+      selectedRepositoryId || boardData.repositories[0]?.id || "";
+    if (nextRepositoryId !== selectedRepositoryId) {
+      setSelectedRepositoryId(nextRepositoryId);
     }
 
-    if (!selectedProjectV2Id && boardData.projects[0]) {
-      setSelectedProjectV2Id(boardData.projects[0].id);
+    const nextProjectV2Id = selectProjectV2IdForRepository({
+      projects: boardData.projects,
+      preferredProjectV2Id: selectedProjectV2Id,
+      repositoryId: nextRepositoryId
+    });
+    const hasLinkedProjectV2 = boardData.projects.some(
+      (project) =>
+        project.id === nextProjectV2Id &&
+        (!nextRepositoryId || project.repositoryIds.includes(nextRepositoryId))
+    );
+    const linkedProjectV2Id = hasLinkedProjectV2 ? nextProjectV2Id : "";
+    if (linkedProjectV2Id !== selectedProjectV2Id) {
+      setSelectedProjectV2Id(linkedProjectV2Id);
     }
   }, [
     boardData.projects,
@@ -138,9 +161,29 @@ export function BoardPanel() {
     selectedRepositoryId
   ]);
 
+  function handleSelectBoardRepository(repositoryId: string) {
+    const nextProjectV2Id = selectProjectV2IdForRepository({
+      projects: boardData.projects,
+      preferredProjectV2Id: selectedProjectV2Id,
+      repositoryId
+    });
+    const hasLinkedProjectV2 = boardData.projects.some(
+      (project) =>
+        project.id === nextProjectV2Id && project.repositoryIds.includes(repositoryId)
+    );
+
+    setSelectedRepositoryId(repositoryId);
+    setSelectedProjectV2Id(hasLinkedProjectV2 ? nextProjectV2Id : "");
+    setHydrateError(null);
+  }
+
   async function handleHydrateBoard() {
-    if (!selectedRepositoryId || !selectedProjectV2Id) {
-      setHydrateError("저장소와 ProjectV2를 선택해주세요.");
+    const hasLinkedProjectV2 = linkedBoardProjects.some(
+      (project) => project.id === selectedProjectV2Id
+    );
+
+    if (!selectedRepositoryId || !selectedProjectV2Id || !hasLinkedProjectV2) {
+      setHydrateError("저장소와 연결된 ProjectV2를 선택해주세요.");
       return;
     }
 
@@ -309,13 +352,13 @@ export function BoardPanel() {
         <BoardHydrationForm
           error={hydrateError}
           isHydrating={isHydrating}
-          projects={boardData.projects}
+          projects={linkedBoardProjects}
           repositories={boardData.repositories}
           selectedProjectV2Id={selectedProjectV2Id}
           selectedRepositoryId={selectedRepositoryId}
           onHydrate={() => void handleHydrateBoard()}
           onSelectProjectV2={setSelectedProjectV2Id}
-          onSelectRepository={setSelectedRepositoryId}
+          onSelectRepository={handleSelectBoardRepository}
         />
       </div>
 

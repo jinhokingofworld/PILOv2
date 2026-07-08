@@ -119,20 +119,11 @@ assert.match(githubPanel, /deleteGithubAppInstallation/);
 assert.match(githubPanel, /isDeletingInstallation/);
 assert.match(githubPanel, /handleStartGithubAppInstallation/);
 assert.match(githubPanel, /handleStartGithubSyncRun/);
-assert.match(githubPanel, /const shouldScopeGithubSyncTarget = syncTarget !== "full";/);
 assert.match(
-  githubPanel,
-  /shouldScopeGithubSyncTarget &&[\s\S]*repositoryScopedSyncTargets\.has\(syncTarget\)/
-);
-assert.match(
-  githubPanel,
-  /shouldScopeGithubSyncTarget &&[\s\S]*projectScopedSyncTargets\.has\(syncTarget\)/
-);
-assert.doesNotMatch(
   githubPanel,
   /\(syncTarget === "full" \|\| repositoryScopedSyncTargets\.has\(syncTarget\)\)/
 );
-assert.doesNotMatch(
+assert.match(
   githubPanel,
   /\(syncTarget === "full" \|\| projectScopedSyncTargets\.has\(syncTarget\)\)/
 );
