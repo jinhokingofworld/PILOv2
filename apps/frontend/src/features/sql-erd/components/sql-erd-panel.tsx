@@ -92,6 +92,9 @@ const SOURCE_PANEL_MAX_WIDTH = 560;
 const INSPECTOR_PANEL_MIN_WIDTH = 320;
 const INSPECTOR_PANEL_DEFAULT_WIDTH = 400;
 const INSPECTOR_PANEL_MAX_WIDTH = 560;
+const MIN_CANVAS_WIDTH = 480;
+const PANEL_RESIZE_HANDLE_WIDTH = 4;
+const COLLAPSED_PANEL_BUTTON_WIDTH = 48;
 const PANEL_RESIZE_KEYBOARD_STEP = 24;
 
 const sqlSourceEditorTheme = EditorView.theme({
@@ -189,8 +192,10 @@ function getSqlErdGenerateErrorMessage(errorCode: string) {
 
 export function SqlErdPanel() {
   const authSession = useAuthSession();
+  const panelContainerRef = useRef<HTMLElement | null>(null);
   const [isSourceOpen, setIsSourceOpen] = useState(false);
   const [isInspectorOpen, setIsInspectorOpen] = useState(false);
+  const [panelContainerWidth, setPanelContainerWidth] = useState(0);
   const [sourcePanelWidth, setSourcePanelWidth] = useState(
     SOURCE_PANEL_DEFAULT_WIDTH
   );
@@ -332,6 +337,31 @@ export function SqlErdPanel() {
   }, []);
 
   useEffect(() => {
+    const panelContainer = panelContainerRef.current;
+
+    if (!panelContainer) {
+      return;
+    }
+
+    const panelContainerElement = panelContainer;
+
+    function updatePanelContainerWidth() {
+      setPanelContainerWidth(
+        panelContainerElement.getBoundingClientRect().width
+      );
+    }
+
+    updatePanelContainerWidth();
+
+    const resizeObserver = new ResizeObserver(updatePanelContainerWidth);
+    resizeObserver.observe(panelContainerElement);
+
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, []);
+
+  useEffect(() => {
     if (!authSession) {
       setSqlErdViewSession(sampleSqlErdViewSession);
       setSessionLoadState({
@@ -403,8 +433,79 @@ export function SqlErdPanel() {
     };
   }, [authSession?.accessToken, authSession?.activeWorkspaceId]);
 
+  const openResizeHandleWidth =
+    (isSourceOpen ? PANEL_RESIZE_HANDLE_WIDTH : 0) +
+    (isInspectorOpen ? PANEL_RESIZE_HANDLE_WIDTH : 0);
+  const sourcePanelMaxWidth = useMemo(
+    () =>
+      getResizablePanelMaxWidth({
+        containerWidth: panelContainerWidth,
+        maxWidth: SOURCE_PANEL_MAX_WIDTH,
+        minWidth: SOURCE_PANEL_MIN_WIDTH,
+        reservedWidth:
+          (isInspectorOpen
+            ? inspectorPanelWidth
+            : COLLAPSED_PANEL_BUTTON_WIDTH) + openResizeHandleWidth
+      }),
+    [
+      inspectorPanelWidth,
+      isInspectorOpen,
+      openResizeHandleWidth,
+      panelContainerWidth
+    ]
+  );
+  const inspectorPanelMaxWidth = useMemo(
+    () =>
+      getResizablePanelMaxWidth({
+        containerWidth: panelContainerWidth,
+        maxWidth: INSPECTOR_PANEL_MAX_WIDTH,
+        minWidth: INSPECTOR_PANEL_MIN_WIDTH,
+        reservedWidth:
+          (isSourceOpen ? sourcePanelWidth : COLLAPSED_PANEL_BUTTON_WIDTH) +
+          openResizeHandleWidth
+      }),
+    [isSourceOpen, openResizeHandleWidth, panelContainerWidth, sourcePanelWidth]
+  );
+  const clampedSourcePanelWidth = clampPanelWidth(
+    sourcePanelWidth,
+    SOURCE_PANEL_MIN_WIDTH,
+    sourcePanelMaxWidth
+  );
+  const clampedInspectorPanelWidth = clampPanelWidth(
+    inspectorPanelWidth,
+    INSPECTOR_PANEL_MIN_WIDTH,
+    inspectorPanelMaxWidth
+  );
+
+  useEffect(() => {
+    setSourcePanelWidth((currentWidth) => {
+      const nextWidth = clampPanelWidth(
+        currentWidth,
+        SOURCE_PANEL_MIN_WIDTH,
+        sourcePanelMaxWidth
+      );
+
+      return nextWidth === currentWidth ? currentWidth : nextWidth;
+    });
+  }, [sourcePanelMaxWidth]);
+
+  useEffect(() => {
+    setInspectorPanelWidth((currentWidth) => {
+      const nextWidth = clampPanelWidth(
+        currentWidth,
+        INSPECTOR_PANEL_MIN_WIDTH,
+        inspectorPanelMaxWidth
+      );
+
+      return nextWidth === currentWidth ? currentWidth : nextWidth;
+    });
+  }, [inspectorPanelMaxWidth]);
+
   return (
-    <section className="flex h-full min-h-0 overflow-hidden bg-background">
+    <section
+      className="flex h-full min-h-0 overflow-hidden bg-background"
+      ref={panelContainerRef}
+    >
       <SourcePanel
         counts={sessionCounts}
         dialect={sqlErdViewSession.dialect}
@@ -425,16 +526,16 @@ export function SqlErdPanel() {
           isGenerating || sessionLoadState.label === "Loading"
         }
         sourceText={sqlErdViewSession.sourceText}
-        width={sourcePanelWidth}
+        width={clampedSourcePanelWidth}
       />
       {isSourceOpen ? (
         <PanelResizeHandle
           ariaLabel="Resize source panel"
-          maxWidth={SOURCE_PANEL_MAX_WIDTH}
+          maxWidth={sourcePanelMaxWidth}
           minWidth={SOURCE_PANEL_MIN_WIDTH}
           onWidthChange={setSourcePanelWidth}
           side="left"
-          width={sourcePanelWidth}
+          width={clampedSourcePanelWidth}
         />
       ) : null}
       <CanvasShell
@@ -446,11 +547,11 @@ export function SqlErdPanel() {
       {isInspectorOpen ? (
         <PanelResizeHandle
           ariaLabel="Resize inspector panel"
-          maxWidth={INSPECTOR_PANEL_MAX_WIDTH}
+          maxWidth={inspectorPanelMaxWidth}
           minWidth={INSPECTOR_PANEL_MIN_WIDTH}
           onWidthChange={setInspectorPanelWidth}
           side="right"
-          width={inspectorPanelWidth}
+          width={clampedInspectorPanelWidth}
         />
       ) : null}
       <InspectorPanel
@@ -461,7 +562,7 @@ export function SqlErdPanel() {
         isOpen={isInspectorOpen}
         onToggle={() => setIsInspectorOpen((current) => !current)}
         viewModel={inspectorViewModel}
-        width={inspectorPanelWidth}
+        width={clampedInspectorPanelWidth}
       />
     </section>
   );
@@ -743,6 +844,29 @@ function clampPanelWidth(width: number, minWidth: number, maxWidth: number) {
   return Math.min(Math.max(width, minWidth), maxWidth);
 }
 
+type ResizablePanelMaxWidthInput = {
+  containerWidth: number;
+  maxWidth: number;
+  minWidth: number;
+  reservedWidth: number;
+};
+
+function getResizablePanelMaxWidth({
+  containerWidth,
+  maxWidth,
+  minWidth,
+  reservedWidth
+}: ResizablePanelMaxWidthInput) {
+  if (containerWidth <= 0) {
+    return maxWidth;
+  }
+
+  const availablePanelWidth =
+    containerWidth - reservedWidth - MIN_CANVAS_WIDTH;
+
+  return Math.max(minWidth, Math.min(maxWidth, availablePanelWidth));
+}
+
 type PanelResizeHandleProps = {
   ariaLabel: string;
   maxWidth: number;
@@ -809,6 +933,9 @@ function PanelResizeHandle({
     <div
       aria-label={ariaLabel}
       aria-orientation="vertical"
+      aria-valuemax={maxWidth}
+      aria-valuemin={minWidth}
+      aria-valuenow={width}
       className="group relative z-10 flex w-1 shrink-0 cursor-col-resize items-stretch justify-center outline-none transition-colors hover:bg-primary/10 focus-visible:bg-primary/20"
       onKeyDown={handleKeyDown}
       onPointerDown={handlePointerDown}
