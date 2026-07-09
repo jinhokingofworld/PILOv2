@@ -56,6 +56,10 @@ import { createBoardApiClient } from "@/features/board/api/client";
 import type { BoardIssueCardPayload, BoardPayload } from "@/features/board/types";
 import { createCalendarApiClient } from "@/features/calendar/api/client";
 import type { CalendarEvent } from "@/features/calendar/types";
+import {
+  createCanvasClient,
+  type CanvasBoardSummary
+} from "@/features/canvas/api/canvas-client";
 import { createGithubIntegrationApiClient } from "@/features/github-integration/api/client";
 import type {
   GithubPullRequest,
@@ -94,6 +98,12 @@ type HomeMeetingReportsState = {
   reports: MeetingReportSummary[];
   status: "idle" | "loading" | "success" | "error";
   todayCount: number;
+};
+
+type HomeCanvasState = {
+  error: Error | null;
+  recentBoard: CanvasBoardSummary | null;
+  status: "idle" | "loading" | "success" | "error";
 };
 
 const mockWorkspaceMembers: WorkspaceMember[] = [
@@ -998,9 +1008,17 @@ function GithubWorkspaceCards() {
 
 function CanvasShortcutCard() {
   const router = useRouter();
-  const recentCanvas = {
-    updatedLabel: "14분 전"
-  };
+  const authSession = useAuthSession();
+  const canvasState = useHomeCanvasSummary({
+    accessToken: authSession?.accessToken ?? null,
+    workspaceId: authSession?.activeWorkspaceId ?? ""
+  });
+  const updatedLabel =
+    canvasState.status === "loading"
+      ? "불러오는 중"
+      : canvasState.recentBoard
+        ? formatRelativeTimeFromNow(canvasState.recentBoard.updatedAt)
+        : "-";
 
   const handleNavigateToCanvas = () => {
     router.push("/canvas");
@@ -1051,7 +1069,7 @@ function CanvasShortcutCard() {
             마지막 수정
           </p>
           <p className="text-xs font-medium leading-4 text-white">
-            {recentCanvas.updatedLabel}
+            {updatedLabel}
           </p>
         </div>
       </CardContent>
@@ -1806,6 +1824,12 @@ const emptyHomeMeetingReportsState: HomeMeetingReportsState = {
   todayCount: 0
 };
 
+const emptyHomeCanvasState: HomeCanvasState = {
+  error: null,
+  recentBoard: null,
+  status: "idle"
+};
+
 function useHomeIssues({
   accessToken,
   workspaceId
@@ -2078,6 +2102,71 @@ function useHomeMeetingReports({
   return state;
 }
 
+function useHomeCanvasSummary({
+  accessToken,
+  workspaceId
+}: {
+  accessToken: string | null;
+  workspaceId: string;
+}) {
+  const normalizedAccessToken = accessToken?.trim() || null;
+  const normalizedWorkspaceId = workspaceId.trim();
+  const canvasClient = useMemo(
+    () =>
+      createCanvasClient({
+        authToken: normalizedAccessToken
+      }),
+    [normalizedAccessToken]
+  );
+  const [state, setState] = useState<HomeCanvasState>(emptyHomeCanvasState);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadCanvasSummary() {
+      if (!normalizedAccessToken || !normalizedWorkspaceId) {
+        setState(emptyHomeCanvasState);
+        return;
+      }
+
+      setState({
+        ...emptyHomeCanvasState,
+        status: "loading"
+      });
+
+      try {
+        const boards = (await canvasClient.listBoards(
+          normalizedWorkspaceId
+        )) as CanvasBoardSummary[];
+
+        if (active) {
+          setState({
+            error: null,
+            recentBoard: selectRecentlyUpdatedCanvasBoard(boards),
+            status: "success"
+          });
+        }
+      } catch (error) {
+        if (active) {
+          setState({
+            ...emptyHomeCanvasState,
+            error: errorFromUnknown(error),
+            status: "error"
+          });
+        }
+      }
+    }
+
+    void loadCanvasSummary();
+
+    return () => {
+      active = false;
+    };
+  }, [canvasClient, normalizedAccessToken, normalizedWorkspaceId]);
+
+  return state;
+}
+
 function selectHomeBoard(boards: BoardPayload[], workspaceId: string) {
   const selection = readGithubBoardSelection(workspaceId);
 
@@ -2203,6 +2292,23 @@ function errorFromUnknown(error: unknown) {
     : new Error("Home data could not be loaded");
 }
 
+function selectRecentlyUpdatedCanvasBoard(boards: CanvasBoardSummary[]) {
+  return boards.reduce<CanvasBoardSummary | null>((selectedBoard, board) => {
+    if (!board.updatedAt) {
+      return selectedBoard;
+    }
+
+    if (!selectedBoard) {
+      return board;
+    }
+
+    return new Date(board.updatedAt).getTime() >
+      new Date(selectedBoard.updatedAt).getTime()
+      ? board
+      : selectedBoard;
+  }, null);
+}
+
 function countTodayMeetingReports(reports: MeetingReportSummary[]) {
   const today = new Date();
 
@@ -2230,6 +2336,39 @@ function getMeetingReportFallbackSummary(report: MeetingReportSummary) {
   }
 
   return report.status === "PROCESSING" ? "요약 생성 중" : "요약이 없습니다";
+}
+
+function formatRelativeTimeFromNow(value: string) {
+  const timestamp = new Date(value).getTime();
+
+  if (Number.isNaN(timestamp)) {
+    return "-";
+  }
+
+  const diffMinutes = Math.max(0, Math.round((Date.now() - timestamp) / 60000));
+
+  if (diffMinutes < 1) {
+    return "방금 전";
+  }
+
+  if (diffMinutes < 60) {
+    return `${diffMinutes}분 전`;
+  }
+
+  const diffHours = Math.round(diffMinutes / 60);
+  if (diffHours < 24) {
+    return `${diffHours}시간 전`;
+  }
+
+  const diffDays = Math.round(diffHours / 24);
+  if (diffDays < 30) {
+    return `${diffDays}일 전`;
+  }
+
+  return new Intl.DateTimeFormat("ko-KR", {
+    day: "numeric",
+    month: "short"
+  }).format(new Date(timestamp));
 }
 
 function isCalendarEventOnDate(event: CalendarEvent, date: string) {
