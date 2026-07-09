@@ -1477,6 +1477,7 @@ assert.match(tableShape, /isHighlighted/);
 assert.match(tableShape, /data-sqltoerd-column-highlighted/);
 assert.match(tableShape, /data-sqltoerd-table-selected/);
 assert.match(tableShape, /pointer-events-auto/);
+assert.match(tableShape, /pointerEvents: "all"/);
 assert.match(tableShape, /justify-self-end/);
 assert.match(tableShape, /minmax\(max-content, 1fr\)/);
 assert.doesNotMatch(tableShape, /const BADGE_COLUMN_WIDTH = 72/);

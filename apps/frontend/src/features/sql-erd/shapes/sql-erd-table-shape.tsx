@@ -309,7 +309,11 @@ function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
   return (
     <HTMLContainer
       className="pointer-events-auto overflow-visible"
-      style={{ width: shape.props.w, height: shape.props.h }}
+      style={{
+        height: shape.props.h,
+        pointerEvents: "all",
+        width: shape.props.w
+      }}
     >
       <article
         className={`overflow-hidden rounded-md border bg-white shadow-[0_12px_28px_rgba(15,23,42,0.12)] transition-[border-color,box-shadow] ${
