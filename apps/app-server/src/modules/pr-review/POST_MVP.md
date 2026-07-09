@@ -3,6 +3,7 @@
 이 문서는 PR Review MVP 이후 고도화 방향을 정리하는 결정 기록이다.
 API 계약 문서는 아니며, 구현 중 API나 DB schema가 바뀌면
 `docs/api/pr-review-api.md`와 관련 도메인 API 문서를 함께 수정한다.
+Conflict 구현 진행 체크리스트는 `POST_MVP_CONFLICT_IMPLEMENTATION_CHECKLIST.md`를 따른다.
 
 ## Post-MVP Pillars
 
