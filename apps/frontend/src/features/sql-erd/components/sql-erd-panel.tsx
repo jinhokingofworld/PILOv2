@@ -77,6 +77,7 @@ import {
   getTableDisplayName
 } from "@/features/sql-erd/utils/model";
 import { createSqlErdGenerateWorkspaceRequest } from "@/features/sql-erd/utils/generate-session";
+import { createSqlErdLayoutAutosaveRequest } from "@/features/sql-erd/utils/layout-autosave";
 import { cn } from "@/lib/utils";
 
 const sampleSqlErdViewSession = createSampleSqlErdViewSession(
@@ -466,16 +467,21 @@ export function SqlErdPanel() {
       !pendingLayoutAutosaveJson ||
       !accessToken ||
       !activeWorkspaceId ||
-      !sqlErdViewSession.id ||
-      sqlErdViewSession.revision === null ||
       isGenerating ||
       layoutAutosaveBlockReason
     ) {
       return;
     }
 
-    const currentSessionId = sqlErdViewSession.id;
-    const currentRevision = sqlErdViewSession.revision;
+    const layoutAutosaveRequest = createSqlErdLayoutAutosaveRequest(
+      sqlErdViewSession,
+      pendingLayoutAutosaveJson
+    );
+
+    if (!layoutAutosaveRequest.ok) {
+      return;
+    }
+
     const requestLayoutJson = pendingLayoutAutosaveJson;
     const autosaveDelayMs = manualLayoutAutosaveRetryRef.current
       ? 0
@@ -496,11 +502,8 @@ export function SqlErdPanel() {
       try {
         const savedSession = await sqlErdApiClient.updateSession(
           activeWorkspaceId,
-          currentSessionId,
-          {
-            baseRevision: currentRevision,
-            layoutJson: requestLayoutJson
-          }
+          layoutAutosaveRequest.sessionId,
+          layoutAutosaveRequest.payload
         );
 
         setSqlErdViewSession((currentSession) => {
