@@ -104,6 +104,14 @@ class FakeTransaction {
       return this.findRunByClientRequest(values);
     }
 
+    if (text.includes("FROM agent_steps") && text.includes("step_type = 'tool'")) {
+      return this.findExistingToolStep(values);
+    }
+
+    if (text.includes("COALESCE(MAX(step_order)")) {
+      return this.nextStepOrder(values);
+    }
+
     if (text.includes("FROM agent_runs")) {
       return this.findOwnedRun(values);
     }
@@ -148,6 +156,22 @@ class FakeTransaction {
     );
 
     return run ? { ...run } : null;
+  }
+
+  findExistingToolStep([runId]) {
+    const step = this.state.steps.find(
+      (candidate) => candidate.run_id === runId && candidate.step_type === "tool"
+    );
+
+    return step ? { id: step.id } : null;
+  }
+
+  nextStepOrder([runId]) {
+    const maxOrder = this.state.steps
+      .filter((candidate) => candidate.run_id === runId)
+      .reduce((max, candidate) => Math.max(max, candidate.step_order), 0);
+
+    return { next_order: maxOrder + 1 };
   }
 
   insertRun([
@@ -466,6 +490,50 @@ function errorMessage(error) {
   assert.deepEqual(step.inputSummary, { dateRange: "2026-07-08" });
   assert.equal(state.steps.length, 1);
   assert.equal(state.logs[0].event_type, "step_started");
+}
+
+{
+  const state = {
+    runs: [createRun()],
+    steps: [],
+    logs: []
+  };
+  const { service } = createService(state);
+  const step = await service.startNextToolStepIfAbsent(USER_ID, WORKSPACE_ID, {
+    runId: RUN_ID,
+    toolName: "list_calendar_events",
+    riskLevel: "low",
+    inputSummary: {
+      dateRange: "2026-07-08"
+    }
+  });
+
+  assert.equal(step.status, "running");
+  assert.equal(step.order, 1);
+  assert.equal(step.type, "tool");
+  assert.equal(state.steps.length, 1);
+  assert.equal(state.logs[0].event_type, "step_started");
+}
+
+{
+  const state = {
+    runs: [createRun()],
+    steps: [createStep()],
+    logs: []
+  };
+  const { service } = createService(state);
+  const step = await service.startNextToolStepIfAbsent(USER_ID, WORKSPACE_ID, {
+    runId: RUN_ID,
+    toolName: "list_calendar_events",
+    riskLevel: "low",
+    inputSummary: {
+      dateRange: "2026-07-08"
+    }
+  });
+
+  assert.equal(step, null);
+  assert.equal(state.steps.length, 1);
+  assert.equal(state.logs.length, 0);
 }
 
 {

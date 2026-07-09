@@ -35,6 +35,10 @@ export type AgentExecutionResult =
   | {
       status: "failed";
       run: AgentRunPayload;
+    }
+  | {
+      status: "skipped";
+      reason: "not_ready" | "already_started";
     };
 
 interface AgentRunRow extends QueryResultRow {
@@ -55,7 +59,6 @@ interface PlannedToolCandidate {
   requiresConfirmation: boolean;
 }
 
-const EXECUTABLE_RUN_STATUSES = ["planning", "running"] as const;
 const RISK_LEVELS = ["low", "medium", "high"] as const;
 const EXECUTION_MODES = ["auto", "confirmation_required"] as const;
 const FORBIDDEN_JSON_KEY_PARTS = [
@@ -86,8 +89,25 @@ export class AgentExecutionService {
     workspaceId: string,
     runId: string
   ): Promise<AgentExecutionResult> {
-    await this.assertRunExecutable(currentUserId, workspaceId, runId);
-    const plannerStep = await this.findLatestPlannerStep(runId);
+    const plannerStep = await this.findReadyPlannerStep(
+      currentUserId,
+      workspaceId,
+      runId
+    );
+    if (!plannerStep) {
+      return {
+        status: "skipped",
+        reason: "not_ready"
+      };
+    }
+
+    const executionStarted = await this.hasExecutionStarted(runId);
+    if (executionStarted) {
+      return {
+        status: "skipped",
+        reason: "already_started"
+      };
+    }
 
     return this.executePlannerOutput(currentUserId, workspaceId, runId, {
       plannerOutput: plannerStep.output_json
@@ -160,11 +180,11 @@ export class AgentExecutionService {
     );
   }
 
-  private async assertRunExecutable(
+  private async findReadyPlannerStep(
     currentUserId: string,
     workspaceId: string,
     runId: string
-  ): Promise<void> {
+  ): Promise<AgentPlannerStepRow | null> {
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
 
     const run = await this.database.queryOne<AgentRunRow>(
@@ -182,14 +202,16 @@ export class AgentExecutionService {
       throw notFound("Agent run not found");
     }
 
-    if (!EXECUTABLE_RUN_STATUSES.some((status) => status === run.status)) {
-      throw badRequest("Agent run is not executable");
+    if (run.status !== "running") {
+      return null;
     }
+
+    return this.findLatestPlannerStep(runId);
   }
 
   private async findLatestPlannerStep(
     runId: string
-  ): Promise<AgentPlannerStepRow> {
+  ): Promise<AgentPlannerStepRow | null> {
     const step = await this.database.queryOne<AgentPlannerStepRow>(
       `
         SELECT id, output_json
@@ -203,11 +225,31 @@ export class AgentExecutionService {
       [runId]
     );
 
-    if (!step) {
-      throw badRequest("Agent planner output is not available");
+    if (!step || step.output_json.status !== "tool_candidate") {
+      return null;
     }
 
     return step;
+  }
+
+  private async hasExecutionStarted(runId: string): Promise<boolean> {
+    const row = await this.database.queryOne<{ started: boolean }>(
+      `
+        SELECT EXISTS (
+          SELECT 1
+          FROM agent_steps
+          WHERE run_id = $1
+            AND step_type = 'tool'
+        ) OR EXISTS (
+          SELECT 1
+          FROM agent_confirmations
+          WHERE run_id = $1
+        ) AS started
+      `,
+      [runId]
+    );
+
+    return row?.started === true;
   }
 
   private parsePlannerOutput(output: AgentJsonObject): PlannedToolCandidate {
@@ -325,6 +367,13 @@ export class AgentExecutionService {
         confirmation
       };
     } catch (error) {
+      if (this.isAgentErrorCode(error, "CONFIRMATION_NOT_PENDING")) {
+        return {
+          status: "skipped",
+          reason: "already_started"
+        };
+      }
+
       return this.failRun(currentUserId, workspaceId, runId, {
         errorCode: "AGENT_TOOL_CONFIRMATION_FAILED",
         errorMessage: this.toSafeErrorMessage(
@@ -344,12 +393,11 @@ export class AgentExecutionService {
     validatedInput: unknown,
     plannerInput: AgentJsonObject
   ): Promise<AgentExecutionResult> {
-    const step = await this.agentLoggingService.startNextStep(
+    const step = await this.agentLoggingService.startNextToolStepIfAbsent(
       currentUserId,
       workspaceId,
       {
         runId,
-        type: "tool",
         toolName: definition.name,
         riskLevel: definition.riskLevel,
         inputSummary: {
@@ -360,6 +408,12 @@ export class AgentExecutionService {
         }
       }
     );
+    if (!step) {
+      return {
+        status: "skipped",
+        reason: "already_started"
+      };
+    }
 
     try {
       const result = await definition.execute(
@@ -507,6 +561,23 @@ export class AgentExecutionService {
     }
 
     return null;
+  }
+
+  private isAgentErrorCode(error: unknown, code: string): boolean {
+    if (!(error instanceof HttpException)) {
+      return false;
+    }
+
+    const response = error.getResponse();
+    if (!this.isPlainObject(response)) {
+      return false;
+    }
+
+    const maybeError = response.error;
+    return (
+      this.isPlainObject(maybeError) &&
+      maybeError.code === code
+    );
   }
 
   private sanitizeJsonObject(input: unknown): AgentJsonObject {

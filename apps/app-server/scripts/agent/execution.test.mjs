@@ -73,6 +73,12 @@ class FakeDatabaseService {
   async queryOne(text, values = []) {
     this.calls.push({ text, values });
 
+    if (text.includes(" AS started")) {
+      return {
+        started: this.state.executionStarted ?? false
+      };
+    }
+
     if (text.includes("FROM agent_runs")) {
       const [runId, workspaceId, currentUserId] = values;
       const run = this.state.run;
@@ -98,9 +104,9 @@ class FakeAgentLoggingService {
     this.calls = [];
   }
 
-  async startNextStep(currentUserId, workspaceId, input) {
+  async startNextToolStepIfAbsent(currentUserId, workspaceId, input) {
     this.calls.push({
-      method: "startNextStep",
+      method: "startNextToolStepIfAbsent",
       currentUserId,
       workspaceId,
       input
@@ -304,7 +310,8 @@ class FakeAgentToolRegistryService {
 function createService({
   registryState = {},
   runStatus = "running",
-  planner = plannerOutput()
+  planner = plannerOutput(),
+  executionStarted = false
 } = {}) {
   const state = {
     run: {
@@ -316,7 +323,8 @@ function createService({
     plannerStep: {
       id: STEP_ID,
       output_json: planner
-    }
+    },
+    executionStarted
   };
   const workspaceService = new FakeWorkspaceService();
   const database = new FakeDatabaseService(state);
@@ -355,14 +363,14 @@ function createService({
   assert.deepEqual(workspaceService.calls, [
     { currentUserId: USER_ID, workspaceId: WORKSPACE_ID }
   ]);
-  assert.equal(database.calls.length, 2);
+  assert.equal(database.calls.length, 3);
   assert.deepEqual(
     toolRegistryService.calls.map((call) => call.method),
     ["getDefinition", "validateInput", "execute"]
   );
   assert.deepEqual(
     loggingService.calls.map((call) => call.method),
-    ["startNextStep", "completeStep", "completeRun"]
+    ["startNextToolStepIfAbsent", "completeStep", "completeRun"]
   );
   assert.equal(
     "providerRawResponse" in loggingService.calls[0].input.inputSummary.input,
@@ -382,6 +390,23 @@ function createService({
     false
   );
   assert.match(loggingService.calls[2].input.finalAnswer, /관련 리소스 1개/);
+}
+
+{
+  const { service, loggingService, toolRegistryService } = createService({
+    executionStarted: true
+  });
+
+  const result = await service.executeLatestPlannedTool(
+    USER_ID,
+    WORKSPACE_ID,
+    RUN_ID
+  );
+
+  assert.equal(result.status, "skipped");
+  assert.equal(result.reason, "already_started");
+  assert.deepEqual(loggingService.calls, []);
+  assert.deepEqual(toolRegistryService.calls, []);
 }
 
 {
@@ -501,7 +526,7 @@ function createService({
   assert.equal(result.status, "failed");
   assert.deepEqual(
     loggingService.calls.map((call) => call.method),
-    ["startNextStep", "failStep", "failRun"]
+    ["startNextToolStepIfAbsent", "failStep", "failRun"]
   );
   assert.equal(
     loggingService.calls[2].input.errorMessage,

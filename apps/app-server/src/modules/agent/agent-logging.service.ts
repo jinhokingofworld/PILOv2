@@ -373,6 +373,57 @@ export class AgentLoggingService {
     });
   }
 
+  async startNextToolStepIfAbsent(
+    currentUserId: string,
+    workspaceId: string,
+    input: Omit<StartNextAgentStepInput, "type">
+  ): Promise<AgentStepPayload | null> {
+    const inputSummary = this.assertSafeObject(
+      input.inputSummary ?? {},
+      INPUT_JSON_MAX_BYTES,
+      "step input"
+    );
+
+    return this.database.transaction(async (transaction) => {
+      await this.findOwnedRunForUpdate(transaction, {
+        currentUserId,
+        workspaceId,
+        runId: input.runId
+      });
+
+      const existing = await transaction.queryOne<{ id: string }>(
+        `
+          SELECT id
+          FROM agent_steps
+          WHERE run_id = $1
+            AND step_type = 'tool'
+          LIMIT 1
+        `,
+        [input.runId]
+      );
+
+      if (existing) {
+        return null;
+      }
+
+      const nextOrder = await transaction.queryOne<{ next_order: number | string }>(
+        `
+          SELECT COALESCE(MAX(step_order), 0) + 1 AS next_order
+          FROM agent_steps
+          WHERE run_id = $1
+        `,
+        [input.runId]
+      );
+
+      return this.insertRunningStep(transaction, workspaceId, {
+        ...input,
+        type: "tool",
+        order: Number(nextOrder?.next_order ?? 1),
+        inputSummary
+      });
+    });
+  }
+
   async completeStep(
     currentUserId: string,
     workspaceId: string,

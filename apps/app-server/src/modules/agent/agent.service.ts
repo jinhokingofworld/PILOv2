@@ -4,6 +4,7 @@ import { badRequest, notFound } from "../../common/api-error";
 import { DatabaseService } from "../../database/database.service";
 import { WorkspaceService } from "../workspace/workspace.service";
 import { agentJobUnavailable } from "./agent-api-error";
+import { AgentExecutionService } from "./agent-execution.service";
 import {
   AGENT_TOOL_SCHEMA_VERSION,
   AgentJobService,
@@ -217,7 +218,8 @@ export class AgentService {
     private readonly workspaceService: WorkspaceService,
     private readonly agentLoggingService: AgentLoggingService,
     private readonly agentJobService: AgentJobService,
-    private readonly agentToolRegistryService: AgentToolRegistryService
+    private readonly agentToolRegistryService: AgentToolRegistryService,
+    private readonly agentExecutionService: AgentExecutionService
   ) {}
 
   async createRun(
@@ -362,6 +364,11 @@ export class AgentService {
     runId: string
   ): Promise<AgentRunDetailPayload> {
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+    await this.agentExecutionService.executeLatestPlannedTool(
+      currentUserId,
+      workspaceId,
+      runId
+    );
 
     const run = await this.database.queryOne<AgentRunRow>(
       `
