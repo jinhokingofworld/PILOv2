@@ -160,6 +160,22 @@ export interface GithubProjectV2DetailPayload
   githubClosedAt: string | null;
 }
 
+export type GithubProjectV2AccessPermission = "ADMIN" | "WRITE" | "READ";
+
+export interface GithubProjectV2AccessStatusPayload {
+  project: {
+    id: string;
+    title: string;
+    ownerLogin: string;
+  };
+  githubLogin: string;
+  permission: GithubProjectV2AccessPermission | null;
+  hasAccess: boolean;
+  canUpdate: boolean;
+  canManageAccess: boolean;
+  checkedAt: string;
+}
+
 export interface GithubProjectV2FieldPayload {
   id: string;
   projectV2Id: string;

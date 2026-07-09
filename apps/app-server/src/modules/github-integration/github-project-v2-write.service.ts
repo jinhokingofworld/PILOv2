@@ -35,6 +35,11 @@ export interface AddGithubProjectV2ItemResult {
   itemNodeId: string;
 }
 
+export interface GithubProjectV2OAuthAccess {
+  accessToken: string;
+  githubLogin: string;
+}
+
 const GITHUB_PROJECT_OAUTH_REQUIRED_MESSAGE =
   "GitHub ProjectV2 OAuth connection is required for ProjectV2 write";
 const GITHUB_PROJECT_OAUTH_SCOPE_ERROR_MESSAGE =
@@ -53,6 +58,26 @@ export class GithubProjectV2WriteService {
     const oauthConfig = this.configService.getGithubProjectOAuthConfig();
     const connection = await this.getGithubProjectOAuthConnectionRow(currentUserId);
     this.getConnectedGithubProjectOAuthAccess(connection, oauthConfig);
+  }
+
+  async getConnectedProjectV2OAuthAccess(
+    currentUserId: string
+  ): Promise<GithubProjectV2OAuthAccess> {
+    const oauthConfig = this.configService.getGithubProjectOAuthConfig();
+    const connection = await this.getGithubProjectOAuthConnectionRow(currentUserId);
+    const accessToken = this.getConnectedGithubProjectOAuthAccess(
+      connection,
+      oauthConfig
+    );
+    const githubLogin = connection.github_project_login;
+    if (!githubLogin) {
+      throw badRequest(GITHUB_PROJECT_OAUTH_REQUIRED_MESSAGE);
+    }
+
+    return {
+      accessToken,
+      githubLogin
+    };
   }
 
   async updateProjectV2ItemStatus(
@@ -141,6 +166,7 @@ export class GithubProjectV2WriteService {
     row: GithubProjectOAuthConnectionRow
   ): row is GithubProjectOAuthConnectionRow & {
     github_project_access_token_encrypted: string;
+    github_project_login: string;
   } {
     return Boolean(
       row.github_project_login &&

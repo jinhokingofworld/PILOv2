@@ -104,6 +104,22 @@ export type GithubProjectV2 = {
   lastSyncedAt: string | null;
 };
 
+export type GithubProjectV2AccessPermission = "ADMIN" | "WRITE" | "READ";
+
+export type GithubProjectV2AccessStatus = {
+  project: {
+    id: string;
+    title: string;
+    ownerLogin: string;
+  };
+  githubLogin: string;
+  permission: GithubProjectV2AccessPermission | null;
+  hasAccess: boolean;
+  canUpdate: boolean;
+  canManageAccess: boolean;
+  checkedAt: string;
+};
+
 export type GithubPullRequest = {
   id: string;
   repositoryId: string;

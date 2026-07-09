@@ -159,6 +159,7 @@ token으로 GitHub의 user installations 목록을 조회해 callback의
 | `GET` | `/workspaces/{workspaceId}/github/repositories/{repositoryId}` | Repository 상세 조회 |
 | `GET` | `/workspaces/{workspaceId}/github/repositories/{repositoryId}/collaborator-status` | 현재 사용자의 Repository collaborator 권한 조회 |
 | `GET` | `/workspaces/{workspaceId}/github/projects-v2` | 동기화된 ProjectV2 목록 조회 |
+| `GET` | `/workspaces/{workspaceId}/github/projects-v2/{projectV2Id}/access-status` | 현재 사용자의 ProjectV2 접근 권한 조회 |
 | `GET` | `/workspaces/{workspaceId}/github/projects-v2/{projectV2Id}` | ProjectV2 상세 조회 |
 | `GET` | `/workspaces/{workspaceId}/github/projects-v2/{projectV2Id}/fields` | ProjectV2 Field 목록 조회 |
 | `GET` | `/workspaces/{workspaceId}/github/projects-v2/{projectV2Id}/status-options` | ProjectV2 Status 옵션 조회 |
@@ -231,6 +232,37 @@ GitHub OAuth 연결이 없거나 해제된 사용자는 `400 BAD_REQUEST`를 반
   "githubLogin": "ndh5178",
   "permission": "write",
   "hasAccess": true,
+  "checkedAt": "2026-07-09T06:00:00.000Z"
+}
+```
+
+### ProjectV2 접근 권한 응답
+
+`GET /workspaces/{workspaceId}/github/projects-v2/{projectV2Id}/access-status`는
+현재 PILO bearer session 사용자 기준으로 ProjectV2 접근 권한을 조회한다.
+Workspace owner/member 모두 호출할 수 있지만, 현재 사용자의 ProjectV2 OAuth 연결과
+`project` scope가 필요하다. 서버는 `boards.project_v2_id`를 직접 결정하지 않으며,
+호출자가 선택한 ProjectV2 id를 전달한다. Home은 현재 Board 선택값의 `project_v2_id`를
+사용한다.
+
+서버는 저장된 ProjectV2 OAuth token으로 GitHub GraphQL `projectsV2`를
+`ADMIN`, `WRITE`, `READ` 순서의 `minPermissionLevel`로 조회해 현재 사용자의 권한을
+판정한다. `ADMIN`이면 `canManageAccess`가 `true`이며 GitHub Project의 Manage access
+수준 권한으로 본다. ProjectV2 OAuth 연결이 없거나 scope가 부족하면 `400 BAD_REQUEST`를
+반환한다. ProjectV2가 현재 Workspace에 없으면 `404 NOT_FOUND`를 반환한다.
+
+```json
+{
+  "project": {
+    "id": "project_v2_uuid",
+    "title": "PILO Workspace",
+    "ownerLogin": "PILO-APP"
+  },
+  "githubLogin": "ndh5178",
+  "permission": "ADMIN",
+  "hasAccess": true,
+  "canUpdate": true,
+  "canManageAccess": true,
   "checkedAt": "2026-07-09T06:00:00.000Z"
 }
 ```

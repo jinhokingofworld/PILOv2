@@ -67,7 +67,11 @@ import {
 } from "@/features/auth/api/client";
 import { useAuthSession } from "@/features/auth/auth-session";
 import { createBoardApiClient } from "@/features/board/api/client";
-import type { BoardIssueCardPayload, BoardPayload } from "@/features/board/types";
+import type {
+  BoardIssueCardPayload,
+  BoardPayload,
+  BoardProjectPayload
+} from "@/features/board/types";
 import { createCalendarApiClient } from "@/features/calendar/api/client";
 import type { CalendarEvent } from "@/features/calendar/types";
 import {
@@ -78,6 +82,7 @@ import { createGithubIntegrationApiClient } from "@/features/github-integration/
 import type {
   GithubOAuthStatus,
   GithubPullRequest,
+  GithubProjectV2AccessStatus,
   GithubRepository,
   GithubRepositoryCollaboratorStatus
 } from "@/features/github-integration/types";
@@ -143,12 +148,11 @@ type HomeRepositoryAccessState = {
   status: "idle" | "loading" | "success" | "error";
 };
 
-const mockGithubConnectionStatus = {
-  project: {
-    title: "PILO Workspace",
-    owner: "PILO-APP",
-    hasAccess: false
-  }
+type HomeProjectAccessState = {
+  access: GithubProjectV2AccessStatus | null;
+  error: Error | null;
+  project: BoardProjectPayload | null;
+  status: "idle" | "loading" | "success" | "error";
 };
 
 export function HomeDashboard() {
@@ -168,7 +172,7 @@ export function HomeDashboard() {
 
   return (
     <section className="flex min-h-0 flex-1 flex-col gap-4">
-      <div className="grid min-h-0 gap-4 xl:grid-cols-[0.9fr_1.75fr_1fr] xl:grid-rows-[minmax(260px,0.95fr)_minmax(272px,0.96fr)_minmax(128px,0.44fr)]">
+      <div className="grid min-h-0 flex-1 gap-4 xl:grid-cols-[0.9fr_1.75fr_1fr] xl:grid-rows-[330px_minmax(272px,1fr)_128px]">
         <MembersCard />
         <CalendarCard
           issuesState={issuesState}
@@ -922,6 +926,10 @@ function GithubConnectionCard() {
     accessToken: isGithubConnected ? (authSession?.accessToken ?? null) : null,
     workspaceId: authSession?.activeWorkspaceId ?? ""
   });
+  const projectAccessState = useHomeProjectAccess({
+    accessToken: authSession?.accessToken ?? null,
+    workspaceId: authSession?.activeWorkspaceId ?? ""
+  });
   const githubLogin = githubOAuth?.githubLogin?.trim() || null;
   const githubStatusLabel =
     githubOAuthState.status === "loading"
@@ -977,6 +985,34 @@ function GithubConnectionCard() {
       : repositoryAccessState.access?.hasAccess === true
         ? "success"
         : "danger";
+  const projectLabel =
+    projectAccessState.project?.title ??
+    projectAccessState.access?.project.title ??
+    (projectAccessState.status === "loading"
+      ? "확인 중"
+      : projectAccessState.status === "error"
+        ? "Project 확인 실패"
+        : "연결된 Project 없음");
+  const projectAccessLabel =
+    projectAccessState.status === "loading"
+      ? "확인 중"
+      : projectAccessState.status === "error"
+        ? "확인 실패"
+        : projectAccessState.access?.permission
+          ? projectAccessState.access.permission
+          : projectAccessState.project
+            ? "권한 없음"
+            : "없음";
+  const projectAccessTone: "danger" | "muted" | "neutral" | "success" =
+    projectAccessState.status === "loading" ||
+    (!projectAccessState.project && projectAccessState.status !== "error")
+      ? "muted"
+      : projectAccessState.access?.permission === "ADMIN" ||
+          projectAccessState.access?.permission === "WRITE"
+        ? "success"
+        : projectAccessState.access?.permission === "READ"
+          ? "neutral"
+          : "danger";
 
   return (
     <div className="grid min-h-0 grid-rows-[repeat(3,minmax(0,1fr))] gap-3 xl:col-start-3 xl:row-start-1">
@@ -1037,21 +1073,11 @@ function GithubConnectionCard() {
               <p className="truncate text-sm font-medium">Project</p>
             </div>
             <StatusPill
-              label={
-                mockGithubConnectionStatus.project.hasAccess
-                  ? "권한 있음"
-                  : "권한 없음"
-              }
-              tone={
-                mockGithubConnectionStatus.project.hasAccess
-                  ? "success"
-                  : "danger"
-              }
+              label={projectAccessLabel}
+              tone={projectAccessTone}
             />
           </div>
-          <p className="truncate text-sm font-medium">
-            {mockGithubConnectionStatus.project.title}
-          </p>
+          <p className="truncate text-sm font-medium">{projectLabel}</p>
         </CardContent>
       </Card>
     </div>
@@ -1430,7 +1456,7 @@ function DashboardCard({
   titleClassName?: string;
 }) {
   return (
-    <Card className={`relative ${className ?? ""} shadow-sm`} size="sm">
+    <Card className={`relative h-full min-h-0 ${className ?? ""} shadow-sm`} size="sm">
       {background ? (
         <div aria-hidden="true" className="pointer-events-none absolute inset-0">
           {background}
@@ -2054,6 +2080,13 @@ const emptyHomeRepositoryAccessState: HomeRepositoryAccessState = {
   status: "idle"
 };
 
+const emptyHomeProjectAccessState: HomeProjectAccessState = {
+  access: null,
+  error: null,
+  project: null,
+  status: "idle"
+};
+
 function useHomeGithubOAuthStatus({
   accessToken
 }: {
@@ -2218,6 +2251,123 @@ function useHomeRepositoryAccess({
       active = false;
     };
   }, [githubClient, normalizedAccessToken, normalizedWorkspaceId]);
+
+  return state;
+}
+
+function useHomeProjectAccess({
+  accessToken,
+  workspaceId
+}: {
+  accessToken: string | null;
+  workspaceId: string;
+}) {
+  const normalizedAccessToken = accessToken?.trim() || null;
+  const normalizedWorkspaceId = workspaceId.trim();
+  const boardClient = useMemo(
+    () => createBoardApiClient({ accessToken: normalizedAccessToken }),
+    [normalizedAccessToken]
+  );
+  const githubClient = useMemo(
+    () =>
+      createGithubIntegrationApiClient({
+        accessToken: normalizedAccessToken
+      }),
+    [normalizedAccessToken]
+  );
+  const [state, setState] = useState<HomeProjectAccessState>(
+    emptyHomeProjectAccessState
+  );
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadProjectAccess() {
+      if (!normalizedAccessToken || !normalizedWorkspaceId) {
+        setState(emptyHomeProjectAccessState);
+        return;
+      }
+
+      setState({
+        ...emptyHomeProjectAccessState,
+        status: "loading"
+      });
+
+      try {
+        const boards = await boardClient.listBoards(normalizedWorkspaceId, {
+          limit: 50
+        });
+        const board = selectHomeBoard(boards.data, normalizedWorkspaceId);
+        const project = board?.project ?? null;
+
+        if (!project) {
+          if (active) {
+            setState({
+              ...emptyHomeProjectAccessState,
+              status: "success"
+            });
+          }
+          return;
+        }
+
+        const projectOAuth = await githubClient
+          .getGithubProjectOAuthStatus()
+          .catch(() => null);
+
+        if (projectOAuth?.connected !== true) {
+          if (active) {
+            setState({
+              access: null,
+              error: null,
+              project,
+              status: "success"
+            });
+          }
+          return;
+        }
+
+        try {
+          const access = await githubClient.getGithubProjectV2AccessStatus(
+            normalizedWorkspaceId,
+            project.id
+          );
+
+          if (active) {
+            setState({
+              access,
+              error: null,
+              project,
+              status: "success"
+            });
+          }
+        } catch (error) {
+          if (active) {
+            setState({
+              access: null,
+              error: errorFromUnknown(error),
+              project,
+              status: "error"
+            });
+          }
+        }
+      } catch (error) {
+        if (active) {
+          setState({
+            access: null,
+            error: errorFromUnknown(error),
+            project: null,
+            status: "error"
+          });
+        }
+      }
+    }
+
+    void loadProjectAccess();
+
+    return () => {
+      active = false;
+    };
+  }, [boardClient, githubClient, normalizedAccessToken, normalizedWorkspaceId]);
 
   return state;
 }

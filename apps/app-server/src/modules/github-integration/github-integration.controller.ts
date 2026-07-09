@@ -45,6 +45,7 @@ import type {
   GithubProjectOAuthDisconnectPayload,
   GithubProjectOAuthStartPayload,
   GithubProjectOAuthStatusPayload,
+  GithubProjectV2AccessStatusPayload,
   GithubProjectV2DetailPayload,
   GithubProjectV2FieldPayload,
   GithubProjectV2ItemPayload,
@@ -388,6 +389,22 @@ export class GithubIntegrationController {
       query
     );
     return apiPaginatedResponse(result);
+  }
+
+  @Get("workspaces/:workspaceId/github/projects-v2/:projectV2Id/access-status")
+  @UseGuards(AuthGuard)
+  async getGithubProjectV2AccessStatus(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("projectV2Id") projectV2Id: string
+  ): Promise<ApiSuccessResponse<GithubProjectV2AccessStatusPayload>> {
+    const result =
+      await this.githubIntegrationService.getGithubProjectV2AccessStatus(
+        currentUserId,
+        workspaceId,
+        projectV2Id
+      );
+    return apiResponse(result);
   }
 
   @Get("workspaces/:workspaceId/github/projects-v2/:projectV2Id")

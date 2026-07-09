@@ -14,6 +14,7 @@ import { GithubOAuthStateService } from "./github-oauth-state.service";
 import { GithubProjectOAuthIntegrationService } from "./github-project-oauth-integration.service";
 import { GithubProjectV2SyncTokenService } from "./github-project-v2-sync-token.service";
 import { GithubProjectV2Service } from "./github-project-v2.service";
+import { GithubProjectV2WriteService } from "./github-project-v2-write.service";
 import { GithubPullRequestRemoteService } from "./github-pull-request-remote.service";
 import { GithubReviewSubmissionService } from "./github-review-submission.service";
 import { GithubSourceReadService } from "./github-source-read.service";
@@ -50,6 +51,7 @@ import type {
   GithubProjectOAuthDisconnectPayload,
   GithubProjectOAuthStartPayload,
   GithubProjectOAuthStatusPayload,
+  GithubProjectV2AccessStatusPayload,
   GithubProjectV2DetailPayload,
   GithubProjectV2FieldPayload,
   GithubProjectV2ItemPayload,
@@ -128,7 +130,9 @@ export class GithubIntegrationService {
     @Optional()
     githubProjectV2SyncTokenService?: GithubProjectV2SyncTokenService,
     @Optional()
-    githubProjectOAuthIntegrationService?: GithubProjectOAuthIntegrationService
+    githubProjectOAuthIntegrationService?: GithubProjectOAuthIntegrationService,
+    @Optional()
+    githubProjectV2WriteService?: GithubProjectV2WriteService
   ) {
     const callbackStateService =
       githubCallbackStateService ?? new GithubCallbackStateService(database);
@@ -187,9 +191,22 @@ export class GithubIntegrationService {
     this.githubSourceReadService =
       githubSourceReadService ??
       new GithubSourceReadService(database, workspaceService);
+    const projectV2WriteService =
+      githubProjectV2WriteService ??
+      new GithubProjectV2WriteService(
+        database,
+        githubAppClient,
+        tokenEncryptionService,
+        configService
+      );
     this.githubProjectV2Service =
       githubProjectV2Service ??
-      new GithubProjectV2Service(database, workspaceService);
+      new GithubProjectV2Service(
+        database,
+        workspaceService,
+        githubAppClient,
+        projectV2WriteService
+      );
     this.githubPullRequestRemoteService =
       githubPullRequestRemoteService ??
       new GithubPullRequestRemoteService(
@@ -450,6 +467,18 @@ export class GithubIntegrationService {
     projectV2Id: string
   ): Promise<GithubProjectV2DetailPayload> {
     return this.githubProjectV2Service.getGithubProjectV2(
+      currentUserId,
+      workspaceId,
+      projectV2Id
+    );
+  }
+
+  async getGithubProjectV2AccessStatus(
+    currentUserId: string,
+    workspaceId: string,
+    projectV2Id: string
+  ): Promise<GithubProjectV2AccessStatusPayload> {
+    return this.githubProjectV2Service.getGithubProjectV2AccessStatus(
       currentUserId,
       workspaceId,
       projectV2Id

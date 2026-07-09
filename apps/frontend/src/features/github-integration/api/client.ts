@@ -11,6 +11,7 @@ import type {
   GithubProjectOAuthStart,
   GithubProjectOAuthStatus,
   GithubProjectV2,
+  GithubProjectV2AccessStatus,
   GithubPullRequest,
   GithubRepository,
   GithubRepositoryCollaboratorStatus,
@@ -477,6 +478,17 @@ export function createGithubIntegrationApiClient({
     async getGithubProjectV2(workspaceId: string, projectV2Id: string) {
       return requestGithubIntegrationData<GithubProjectV2>(
         projectV2GithubPath(workspaceId, projectV2Id),
+        undefined,
+        requestOptions
+      );
+    },
+
+    async getGithubProjectV2AccessStatus(
+      workspaceId: string,
+      projectV2Id: string
+    ) {
+      return requestGithubIntegrationData<GithubProjectV2AccessStatus>(
+        `${projectV2GithubPath(workspaceId, projectV2Id)}/access-status`,
         undefined,
         requestOptions
       );

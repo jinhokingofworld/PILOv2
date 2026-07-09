@@ -408,6 +408,27 @@ export function AppSidebar({
               {items.map((item) => {
                 const isActive = selectedItemId === item.id;
                 const isOpen = openMenuIds[item.id] ?? false;
+                const hasSubItems = item.items.length > 0;
+
+                if (!hasSubItems) {
+                  return (
+                    <SidebarMenuItem key={item.id}>
+                      <SidebarMenuButton
+                        aria-current={isActive ? "page" : undefined}
+                        className="transition-colors group-data-[collapsible=icon]:justify-center data-[active=true]:shadow-sm"
+                        isActive={isActive}
+                        onClick={() => handleSelectItem(item.id, item.href)}
+                        size="lg"
+                        tooltip={item.title}
+                      >
+                        <item.icon />
+                        <div className="grid flex-1 text-left leading-tight group-data-[collapsible=icon]:hidden">
+                          <span className="truncate">{item.title}</span>
+                        </div>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  );
+                }
 
                 return (
                   <SidebarMenuItem key={item.id}>
