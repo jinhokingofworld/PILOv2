@@ -703,7 +703,7 @@ function MemberPresenceHeader({
   type: "offline" | "online";
 }) {
   const isOnline = type === "online";
-  const title = isOnline ? "온라인" : "오프라인";
+  const title = isOnline ? "워크스페이스 접속중" : "오프라인";
   const presenceClassName = isOnline
     ? "bg-[#23A55A] ring-4 ring-[#23A55A]/20"
     : "bg-[#80848E] ring-4 ring-[#80848E]/18";
