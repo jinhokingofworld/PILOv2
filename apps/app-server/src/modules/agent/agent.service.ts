@@ -3,6 +3,8 @@ import { QueryResultRow } from "pg";
 import { badRequest, notFound } from "../../common/api-error";
 import { DatabaseService } from "../../database/database.service";
 import { WorkspaceService } from "../workspace/workspace.service";
+import { agentJobUnavailable } from "./agent-api-error";
+import { AgentJobService } from "./agent-job.service";
 import {
   AgentLoggingService,
   AgentRunPayload as StoredAgentRunPayload,
@@ -208,7 +210,8 @@ export class AgentService {
   constructor(
     private readonly database: DatabaseService,
     private readonly workspaceService: WorkspaceService,
-    private readonly agentLoggingService: AgentLoggingService
+    private readonly agentLoggingService: AgentLoggingService,
+    private readonly agentJobService: AgentJobService
   ) {}
 
   async createRun(
@@ -223,6 +226,10 @@ export class AgentService {
       input
     );
 
+    if (result.created) {
+      await this.enqueueCreatedRun(currentUserId, workspaceId, result.run.id);
+    }
+
     return {
       run: {
         ...this.mapStoredRun(result.run),
@@ -231,6 +238,46 @@ export class AgentService {
       },
       created: result.created
     };
+  }
+
+  private async enqueueCreatedRun(
+    currentUserId: string,
+    workspaceId: string,
+    runId: string
+  ): Promise<void> {
+    try {
+      await this.agentJobService.enqueueAgentRunRequestedJob({
+        jobType: "agent_run_requested",
+        runId,
+        workspaceId,
+        requestedByUserId: currentUserId
+      });
+    } catch {
+      await this.markRunFailedAfterEnqueueFailure(
+        currentUserId,
+        workspaceId,
+        runId
+      );
+      throw agentJobUnavailable("Agent job could not be enqueued");
+    }
+  }
+
+  private async markRunFailedAfterEnqueueFailure(
+    currentUserId: string,
+    workspaceId: string,
+    runId: string
+  ): Promise<void> {
+    try {
+      await this.agentLoggingService.failRun(currentUserId, workspaceId, {
+        runId,
+        errorCode: "AGENT_JOB_ENQUEUE_FAILED",
+        errorMessage: "Agent job could not be enqueued",
+        message: "요청을 시작하지 못했습니다. 잠시 후 다시 시도해주세요."
+      });
+    } catch {
+      // The API still returns the safe enqueue failure even if failure persistence
+      // cannot be completed.
+    }
   }
 
   async listRuns(

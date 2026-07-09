@@ -6,6 +6,7 @@ import { MeetingModule } from "../meeting/meeting.module";
 import { WorkspaceModule } from "../workspace/workspace.module";
 import { AgentConfirmationService } from "./agent-confirmation.service";
 import { AgentController } from "./agent.controller";
+import { AgentJobService } from "./agent-job.service";
 import { AgentLoggingService } from "./agent-logging.service";
 import { AgentPlannerService } from "./agent-planner.service";
 import { AgentService } from "./agent.service";
@@ -25,6 +26,7 @@ import { MeetingAgentToolsService } from "./tools/meeting-agent-tools.service";
   providers: [
     AgentService,
     AgentConfirmationService,
+    AgentJobService,
     AgentLoggingService,
     AgentPlannerService,
     AgentToolRegistryService,
