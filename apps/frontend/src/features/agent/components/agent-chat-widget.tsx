@@ -202,7 +202,9 @@ export function AgentChatWidget() {
   const activeRunAbortControllerRef = useRef<AbortController | null>(null);
 
   const isBusy = busyState !== "idle";
-  const canSend = draft.trim().length > 0 && !isBusy;
+  const hasActiveAgentRequest =
+    isBusy || activeRunAbortControllerRef.current !== null;
+  const canSend = draft.trim().length > 0 && !hasActiveAgentRequest;
   const panelTitleId = useMemo(() => "agent-chat-title", []);
   const hasPendingConfirmation = useMemo(
     () =>
@@ -365,7 +367,13 @@ export function AgentChatWidget() {
     const run = message.run;
     const confirmation = run?.confirmation;
 
-    if (!run || !confirmation || confirmationAction) {
+    if (
+      !run ||
+      !confirmation ||
+      confirmationAction ||
+      isBusy ||
+      activeRunAbortControllerRef.current !== null
+    ) {
       return;
     }
 
@@ -514,10 +522,12 @@ export function AgentChatWidget() {
                     <span
                       className={cn(
                         "size-1.5 rounded-full",
-                        isBusy ? "bg-amber-500" : "bg-emerald-500"
+                        hasActiveAgentRequest
+                          ? "bg-amber-500"
+                          : "bg-emerald-500"
                       )}
                     />
-                    {isBusy ? "처리 중" : "API 연결"}
+                    {hasActiveAgentRequest ? "처리 중" : "API 연결"}
                   </div>
                 </div>
               </div>
@@ -570,7 +580,11 @@ export function AgentChatWidget() {
                       {confirmation ? (
                         <AgentConfirmationCard
                           confirmation={confirmation}
-                          disabled={!workspaceId || !accessToken?.trim()}
+                          disabled={
+                            !workspaceId ||
+                            !accessToken?.trim() ||
+                            hasActiveAgentRequest
+                          }
                           isApproving={
                             isActionTarget &&
                             confirmationAction?.action === "approve"
@@ -600,7 +614,7 @@ export function AgentChatWidget() {
                   <button
                     key={suggestion.label}
                     type="button"
-                    disabled={isBusy}
+                    disabled={hasActiveAgentRequest}
                     className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300"
                     onClick={() => void appendPrompt(suggestion.prompt)}
                   >

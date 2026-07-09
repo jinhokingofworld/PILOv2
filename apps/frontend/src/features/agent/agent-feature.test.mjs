@@ -75,6 +75,13 @@ assert.match(agentChatWidget, /AgentConfirmationCard/);
 assert.match(agentChatWidget, /handleConfirmationAction/);
 assert.match(agentChatWidget, /CONFIRMATION_EXPIRED/);
 assert.match(agentChatWidget, /CONFIRMATION_NOT_PENDING/);
+assert.match(agentChatWidget, /hasActiveAgentRequest/);
+assert.match(
+  agentChatWidget,
+  /confirmationAction \|\|\s+isBusy \|\|\s+activeRunAbortControllerRef\.current !== null/
+);
+assert.match(agentChatWidget, /disabled=\{\s*!workspaceId[\s\S]*hasActiveAgentRequest/);
+assert.match(agentChatWidget, /const canSend = draft\.trim\(\)\.length > 0 && !hasActiveAgentRequest/);
 assert.match(agentChatWidget, /AGENT_RUN_POLL_INTERVAL_MS/);
 assert.match(agentChatWidget, /waiting_confirmation/);
 assert.match(agentChatWidget, /completed/);
