@@ -216,6 +216,16 @@ export async function removeWorkspaceMember(
   );
 }
 
+export async function leaveWorkspace(accessToken: string, workspaceId: string) {
+  return requestJson<{ removed: true }>(
+    `/workspaces/${encodeURIComponent(workspaceId)}/members/me`,
+    {
+      accessToken,
+      method: "DELETE"
+    }
+  );
+}
+
 export async function listWorkspaceInvitations(
   accessToken: string,
   workspaceId: string

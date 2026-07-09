@@ -114,6 +114,17 @@ export interface GithubRepositoryDetailPayload
   githubUpdatedAt: string | null;
 }
 
+export interface GithubRepositoryCollaboratorStatusPayload {
+  repository: {
+    id: string;
+    fullName: string;
+  };
+  githubLogin: string;
+  permission: string | null;
+  hasAccess: boolean;
+  checkedAt: string;
+}
+
 export type GithubProjectV2OwnerType = "User" | "Organization";
 
 export type GithubProjectV2ItemContentType =
@@ -147,6 +158,22 @@ export interface GithubProjectV2DetailPayload
   githubCreatedAt: string | null;
   githubUpdatedAt: string | null;
   githubClosedAt: string | null;
+}
+
+export type GithubProjectV2AccessPermission = "ADMIN" | "WRITE" | "READ";
+
+export interface GithubProjectV2AccessStatusPayload {
+  project: {
+    id: string;
+    title: string;
+    ownerLogin: string;
+  };
+  githubLogin: string;
+  permission: GithubProjectV2AccessPermission | null;
+  hasAccess: boolean;
+  canUpdate: boolean;
+  canManageAccess: boolean;
+  checkedAt: string;
 }
 
 export interface GithubProjectV2FieldPayload {

@@ -45,6 +45,7 @@ import type {
   GithubProjectOAuthDisconnectPayload,
   GithubProjectOAuthStartPayload,
   GithubProjectOAuthStatusPayload,
+  GithubProjectV2AccessStatusPayload,
   GithubProjectV2DetailPayload,
   GithubProjectV2FieldPayload,
   GithubProjectV2ItemPayload,
@@ -57,6 +58,7 @@ import type {
   GithubPullRequestListItemPayload,
   GithubWebhookDeliveryPayload,
   GithubRepositoryDetailPayload,
+  GithubRepositoryCollaboratorStatusPayload,
   GithubRepositoryListItemPayload,
   GithubSyncRunDetailPayload,
   GithubSyncRunPayload
@@ -343,6 +345,22 @@ export class GithubIntegrationController {
     return apiPaginatedResponse(result);
   }
 
+  @Get("workspaces/:workspaceId/github/repositories/:repositoryId/collaborator-status")
+  @UseGuards(AuthGuard)
+  async getGithubRepositoryCollaboratorStatus(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("repositoryId") repositoryId: string
+  ): Promise<ApiSuccessResponse<GithubRepositoryCollaboratorStatusPayload>> {
+    const result =
+      await this.githubIntegrationService.getGithubRepositoryCollaboratorStatus(
+        currentUserId,
+        workspaceId,
+        repositoryId
+      );
+    return apiResponse(result);
+  }
+
   @Get("workspaces/:workspaceId/github/repositories/:repositoryId")
   @UseGuards(AuthGuard)
   async getGithubRepository(
@@ -371,6 +389,22 @@ export class GithubIntegrationController {
       query
     );
     return apiPaginatedResponse(result);
+  }
+
+  @Get("workspaces/:workspaceId/github/projects-v2/:projectV2Id/access-status")
+  @UseGuards(AuthGuard)
+  async getGithubProjectV2AccessStatus(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("projectV2Id") projectV2Id: string
+  ): Promise<ApiSuccessResponse<GithubProjectV2AccessStatusPayload>> {
+    const result =
+      await this.githubIntegrationService.getGithubProjectV2AccessStatus(
+        currentUserId,
+        workspaceId,
+        projectV2Id
+      );
+    return apiResponse(result);
   }
 
   @Get("workspaces/:workspaceId/github/projects-v2/:projectV2Id")
