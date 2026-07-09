@@ -20,6 +20,11 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger
+} from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import type { createPrReviewApiClient } from "@/features/pr-review/api/client";
 import { PrReviewCanvasSurface } from "@/features/pr-review/components/review-canvas/PrReviewCanvasSurface";
@@ -368,10 +373,17 @@ export function PrReviewCanvasShell({
             <Send className="size-4" />
             {reviewSubmitted ? "제출 완료" : "Review 제출"}
           </Button>
-          <Button disabled type="button" variant="outline">
-            <GitMerge className="size-4" />
-            Merge
-          </Button>
+          <Tooltip>
+            <TooltipTrigger render={<span />}>
+              <Button disabled type="button" variant="outline">
+                <GitMerge className="size-4" />
+                Merge
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              현재 버전에서는 GitHub에서 merge를 진행해주세요.
+            </TooltipContent>
+          </Tooltip>
         </div>
       </header>
 
@@ -535,13 +547,6 @@ function ReviewDetailPanel({
 
   return (
     <div className="space-y-6 p-5">
-      <section className="rounded-lg border border-amber-200 bg-amber-50 p-4">
-        <p className="text-xs font-semibold text-amber-700">안내</p>
-        <p className="mt-2 text-sm font-medium leading-6 text-amber-950">
-          데모 PR 리뷰 데이터로 워크플로우와 변경 차이를 표시합니다.
-        </p>
-      </section>
-
       <section>
         <p className="text-xs font-semibold uppercase text-slate-500">PR</p>
         <h2 className="mt-2 text-xl font-semibold leading-7">{displayTitle}</h2>

@@ -1,6 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode
+} from "react";
 import {
   AlertCircle,
   ArrowLeft,
@@ -11,8 +18,7 @@ import {
   HelpCircle,
   Loader2,
   MessageSquareWarning,
-  RefreshCcw,
-  Save
+  RefreshCcw
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -83,8 +89,14 @@ function formatNumber(value: number) {
   return new Intl.NumberFormat("ko-KR").format(value);
 }
 
-function getInitialDecisionStatus(file: PrReviewFile) {
-  return file.currentStatus === "not_reviewed" ? "approved" : file.currentStatus;
+function getInitialDecisionStatus(
+  file: PrReviewFile
+): PrReviewFileDecisionStatus | null {
+  return file.currentStatus === "not_reviewed" ? null : file.currentStatus;
+}
+
+function getStoredComment(value: string) {
+  return value.trim() || null;
 }
 
 function getCodeClassName(type: PrReviewDiffRow["type"]) {
@@ -125,15 +137,16 @@ const riskLevelClassNames: Record<PrReviewFileRiskLevel, string> = {
   unknown: "bg-slate-100 text-slate-600"
 };
 
-function getSaveButtonLabel(status: SaveStatus) {
+function getSaveStatusLabel(status: SaveStatus) {
   switch (status) {
     case "saving":
       return "저장 중";
     case "saved":
       return "저장됨";
     case "error":
+      return "저장 실패";
     case "idle":
-      return "판단 저장";
+      return "자동 저장 대기";
   }
 }
 
@@ -149,16 +162,73 @@ export function PrReviewFileDiffDrawer({
   const [file, setFile] = useState<PrReviewFile | null>(null);
   const [diff, setDiff] = useState<PrReviewFileDiff | null>(null);
   const [decisionStatus, setDecisionStatus] =
-    useState<PrReviewFileDecisionStatus>("approved");
+    useState<PrReviewFileDecisionStatus | null>(null);
   const [comment, setComment] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [saveErrorMessage, setSaveErrorMessage] = useState<string | null>(null);
   const [reloadVersion, setReloadVersion] = useState(0);
+  const commentSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
+
+  const clearScheduledCommentSave = useCallback(() => {
+    if (commentSaveTimerRef.current) {
+      clearTimeout(commentSaveTimerRef.current);
+      commentSaveTimerRef.current = null;
+    }
+  }, []);
+
+  const enqueueDecisionSave = useCallback(
+    (nextStatus: PrReviewFileDecisionStatus, nextComment: string) => {
+      const saveTask = saveQueueRef.current
+        .catch(() => undefined)
+        .then(async () => {
+          setSaveStatus("saving");
+          setSaveErrorMessage(null);
+
+          const storedComment = getStoredComment(nextComment);
+          const updatedFile = await apiClient.updateReviewFileDecision(
+            workspaceId,
+            reviewFileId,
+            {
+              comment: storedComment,
+              status: nextStatus
+            }
+          );
+          const savedFile: PrReviewFile = {
+            ...updatedFile,
+            comment: storedComment,
+            currentStatus: nextStatus
+          };
+
+          setFile(savedFile);
+          setDecisionStatus((currentStatus) =>
+            currentStatus === null || currentStatus === nextStatus
+              ? getInitialDecisionStatus(savedFile)
+              : currentStatus
+          );
+          setComment((currentComment) =>
+            currentComment === nextComment ? savedFile.comment ?? "" : currentComment
+          );
+          setSaveStatus("saved");
+          onDecisionSaved(savedFile);
+        })
+        .catch((error) => {
+          setSaveStatus("error");
+          setSaveErrorMessage(getErrorMessage(error));
+        });
+
+      saveQueueRef.current = saveTask;
+
+      return saveTask;
+    },
+    [apiClient, onDecisionSaved, reviewFileId, workspaceId]
+  );
 
   useEffect(() => {
     let cancelled = false;
 
     async function loadReviewFile() {
+      clearScheduledCommentSave();
       setStatus("loading");
       setSaveStatus("idle");
       setErrorMessage(null);
@@ -196,42 +266,50 @@ export function PrReviewFileDiffDrawer({
     return () => {
       cancelled = true;
     };
-  }, [apiClient, reloadVersion, reviewFileId, workspaceId]);
+  }, [
+    apiClient,
+    clearScheduledCommentSave,
+    reloadVersion,
+    reviewFileId,
+    workspaceId
+  ]);
+
+  useEffect(() => {
+    return () => {
+      clearScheduledCommentSave();
+    };
+  }, [clearScheduledCommentSave]);
 
   const selectedDecision = useMemo(
     () => decisionOptions.find((option) => option.status === decisionStatus),
     [decisionStatus]
   );
 
-  async function saveDecision() {
-    setSaveStatus("saving");
-    setSaveErrorMessage(null);
-
-    try {
-      const nextComment = comment.trim() || null;
-      const updatedFile = await apiClient.updateReviewFileDecision(
-        workspaceId,
-        reviewFileId,
-        {
-          comment: nextComment,
-          status: decisionStatus
-        }
-      );
-      const savedFile: PrReviewFile = {
-        ...updatedFile,
-        comment: nextComment,
-        currentStatus: decisionStatus
-      };
-
-      setFile(savedFile);
-      setDecisionStatus(getInitialDecisionStatus(savedFile));
-      setComment(savedFile.comment ?? "");
-      setSaveStatus("saved");
-      onDecisionSaved(savedFile);
-    } catch (error) {
-      setSaveStatus("error");
-      setSaveErrorMessage(getErrorMessage(error));
+  function scheduleCommentSave(nextComment: string) {
+    if (!decisionStatus) {
+      return;
     }
+
+    clearScheduledCommentSave();
+    commentSaveTimerRef.current = setTimeout(() => {
+      commentSaveTimerRef.current = null;
+      void enqueueDecisionSave(decisionStatus, nextComment);
+    }, 500);
+  }
+
+  function flushCommentSave() {
+    if (!decisionStatus) {
+      return;
+    }
+
+    clearScheduledCommentSave();
+    void enqueueDecisionSave(decisionStatus, comment);
+  }
+
+  function handleDecisionStatusChange(nextStatus: PrReviewFileDecisionStatus) {
+    clearScheduledCommentSave();
+    setDecisionStatus(nextStatus);
+    void enqueueDecisionSave(nextStatus, comment);
   }
 
   return (
@@ -273,17 +351,13 @@ export function PrReviewFileDiffDrawer({
               onCommentChange={(value) => {
                 setComment(value);
                 setSaveStatus("idle");
+                scheduleCommentSave(value);
               }}
-              onDecisionStatusChange={(nextStatus) => {
-                setDecisionStatus(nextStatus);
-                setSaveStatus("idle");
-              }}
-              onSaveDecision={() => void saveDecision()}
+              onCommentBlur={flushCommentSave}
+              onDecisionStatusChange={handleDecisionStatusChange}
               saveErrorMessage={saveErrorMessage}
               saveStatus={saveStatus}
-              selectedDecisionLabel={
-                selectedDecision?.label ?? decisionLabelByStatus[decisionStatus]
-              }
+              selectedDecisionLabel={selectedDecision?.label ?? "아직 선택 안 됨"}
             />
           </aside>
         </main>
@@ -389,19 +463,19 @@ function ReviewNodePanel({
   comment,
   decisionStatus,
   file,
+  onCommentBlur,
   onCommentChange,
   onDecisionStatusChange,
-  onSaveDecision,
   saveErrorMessage,
   saveStatus,
   selectedDecisionLabel
 }: {
   comment: string;
-  decisionStatus: PrReviewFileDecisionStatus;
+  decisionStatus: PrReviewFileDecisionStatus | null;
   file: PrReviewFile;
+  onCommentBlur: () => void;
   onCommentChange: (value: string) => void;
   onDecisionStatusChange: (status: PrReviewFileDecisionStatus) => void;
-  onSaveDecision: () => void;
   saveErrorMessage: string | null;
   saveStatus: SaveStatus;
   selectedDecisionLabel: string;
@@ -475,6 +549,7 @@ function ReviewNodePanel({
           </p>
           <textarea
             className="mt-2 min-h-28 w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm leading-6 outline-none transition-colors placeholder:text-slate-400 focus:border-blue-400 focus:ring-3 focus:ring-blue-100"
+            onBlur={onCommentBlur}
             onChange={(event) => onCommentChange(event.target.value)}
             placeholder="파일 리뷰 코멘트를 남겨주세요."
             value={comment}
@@ -517,19 +592,12 @@ function ReviewNodePanel({
           <p className="mt-1 text-sm font-semibold text-slate-950">
             {selectedDecisionLabel}
           </p>
-          <Button
-            className="mt-3 w-full"
-            disabled={saveStatus === "saving"}
-            onClick={onSaveDecision}
-            type="button"
-          >
+          <p className="mt-2 flex items-center gap-2 text-xs font-medium text-slate-500">
             {saveStatus === "saving" ? (
               <Loader2 className="size-4 animate-spin" />
-            ) : (
-              <Save className="size-4" />
-            )}
-            {getSaveButtonLabel(saveStatus)}
-          </Button>
+            ) : null}
+            {getSaveStatusLabel(saveStatus)}
+          </p>
         </div>
 
         {saveErrorMessage ? (

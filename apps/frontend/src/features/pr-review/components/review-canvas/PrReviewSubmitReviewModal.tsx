@@ -169,7 +169,7 @@ export function PrReviewSubmitReviewModal({
   const [submitStatus, setSubmitStatus] = useState<SubmitStatus>("idle");
   const [createStatus, setCreateStatus] = useState<CreateStatus>("idle");
   const [result, setResult] = useState<PrReviewSessionResult | null>(null);
-  const [submitType, setSubmitType] = useState<PrReviewSubmitType>("COMMENT");
+  const [submitType, setSubmitType] = useState<PrReviewSubmitType | null>(null);
   const [reviewBody, setReviewBody] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [submitErrorMessage, setSubmitErrorMessage] = useState<string | null>(
@@ -187,6 +187,7 @@ export function PrReviewSubmitReviewModal({
   const canSubmit =
     loadStatus === "ready" &&
     Boolean(result) &&
+    Boolean(submitType) &&
     Boolean(reviewBody.trim()) &&
     submitStatus !== "submitting" &&
     !knownStaleSession &&
@@ -237,7 +238,7 @@ export function PrReviewSubmitReviewModal({
   }, [apiClient, knownStaleSession, reloadVersion, session.id, workspaceId]);
 
   async function submitReview() {
-    if (!canSubmit) {
+    if (!canSubmit || !submitType) {
       return;
     }
 
