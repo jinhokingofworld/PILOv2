@@ -5,6 +5,15 @@ const require = createRequire(import.meta.url);
 const { AgentExecutionService } = require(
   "../../dist/modules/agent/agent-execution.service.js"
 );
+const { AgentToolRegistryService } = require(
+  "../../dist/modules/agent/agent-tool-registry.service.js"
+);
+const { CalendarAgentToolsService } = require(
+  "../../dist/modules/agent/tools/calendar-agent-tools.service.js"
+);
+const { MeetingAgentToolsService } = require(
+  "../../dist/modules/agent/tools/meeting-agent-tools.service.js"
+);
 const { badRequest } = require("../../dist/common/api-error.js");
 
 const USER_ID = "11111111-1111-1111-1111-111111111111";
@@ -12,6 +21,7 @@ const WORKSPACE_ID = "22222222-2222-2222-2222-222222222222";
 const RUN_ID = "33333333-3333-3333-3333-333333333333";
 const STEP_ID = "44444444-4444-4444-4444-444444444444";
 const CONFIRMATION_ID = "55555555-5555-5555-5555-555555555555";
+const REPORT_ID = "66666666-6666-4666-8666-666666666666";
 
 function plannerOutput(overrides = {}) {
   return {
@@ -307,6 +317,165 @@ class FakeAgentToolRegistryService {
   }
 }
 
+function createSmokeEvent(overrides = {}) {
+  return {
+    id: 1,
+    title: "주간 회의",
+    description: null,
+    color: "#3B82F6",
+    isAllDay: false,
+    startDate: "2026-07-10",
+    endDate: "2026-07-10",
+    startTime: "15:00",
+    endTime: "16:00",
+    createdBy: USER_ID,
+    createdByUser: {
+      id: USER_ID,
+      name: "Jin",
+      avatarUrl: null
+    },
+    createdAt: "2026-07-10T00:00:00.000Z",
+    updatedAt: "2026-07-10T00:00:00.000Z",
+    ...overrides
+  };
+}
+
+function createSmokeReport(overrides = {}) {
+  return {
+    id: REPORT_ID,
+    meetingId: "77777777-7777-7777-8777-777777777777",
+    recordingId: "88888888-8888-8888-8888-888888888888",
+    status: "COMPLETED",
+    failedStep: null,
+    errorMessage: null,
+    transcriptText: "Agent smoke test must not persist transcript text.",
+    summary: "회의 요약",
+    discussionPoints: "논의사항",
+    decisions: "결정사항",
+    actionItemCandidates: [],
+    retryCount: 0,
+    createdAt: "2026-07-10T00:00:00.000Z",
+    updatedAt: "2026-07-10T00:00:00.000Z",
+    ...overrides
+  };
+}
+
+class SmokeCalendarService {
+  constructor() {
+    this.calls = [];
+  }
+
+  async listEvents(currentUserId, workspaceId, query) {
+    this.calls.push({
+      method: "listEvents",
+      currentUserId,
+      workspaceId,
+      query
+    });
+    return [createSmokeEvent()];
+  }
+
+  async createEvent(currentUserId, workspaceId, body) {
+    this.calls.push({
+      method: "createEvent",
+      currentUserId,
+      workspaceId,
+      body
+    });
+    return createSmokeEvent(body);
+  }
+
+  async updateEvent(currentUserId, workspaceId, eventId, body) {
+    this.calls.push({
+      method: "updateEvent",
+      currentUserId,
+      workspaceId,
+      eventId,
+      body
+    });
+    return createSmokeEvent({ id: Number(eventId), ...body });
+  }
+}
+
+class SmokeMeetingService {
+  constructor() {
+    this.calls = [];
+    this.report = createSmokeReport();
+  }
+
+  async listReports(currentUserId, workspaceId, query) {
+    this.calls.push({
+      method: "listReports",
+      currentUserId,
+      workspaceId,
+      query
+    });
+    const { transcriptText, ...summary } = this.report;
+    return {
+      reports: [summary]
+    };
+  }
+
+  async getReport(currentUserId, workspaceId, reportId) {
+    this.calls.push({
+      method: "getReport",
+      currentUserId,
+      workspaceId,
+      reportId
+    });
+    return {
+      report: this.report
+    };
+  }
+}
+
+function createSmokeRegistry() {
+  const calendarService = new SmokeCalendarService();
+  const meetingService = new SmokeMeetingService();
+  const registry = new AgentToolRegistryService(
+    new CalendarAgentToolsService(calendarService),
+    new MeetingAgentToolsService(meetingService)
+  );
+
+  return {
+    calendarService,
+    meetingService,
+    registry
+  };
+}
+
+function createExecutionServiceWithRegistry(planner, registry) {
+  const state = {
+    run: {
+      id: RUN_ID,
+      workspace_id: WORKSPACE_ID,
+      requested_by_user_id: USER_ID,
+      status: "running"
+    },
+    plannerStep: {
+      id: STEP_ID,
+      output_json: planner
+    }
+  };
+  const workspaceService = new FakeWorkspaceService();
+  const database = new FakeDatabaseService(state);
+  const loggingService = new FakeAgentLoggingService(state);
+  const confirmationService = new FakeAgentConfirmationService();
+
+  return {
+    service: new AgentExecutionService(
+      database,
+      workspaceService,
+      loggingService,
+      confirmationService,
+      registry
+    ),
+    confirmationService,
+    loggingService,
+    workspaceService
+  };
+}
+
 function createService({
   registryState = {},
   runStatus = "running",
@@ -535,5 +704,158 @@ function createService({
   assert.doesNotMatch(
     JSON.stringify(loggingService.calls),
     /raw provider failure must not leak/
+  );
+}
+
+{
+  const { registry } = createSmokeRegistry();
+  const registeredToolNames = registry
+    .listDefinitions()
+    .map((definition) => definition.name);
+
+  assert.deepEqual(registeredToolNames, [
+    "list_calendar_events",
+    "create_calendar_event",
+    "update_calendar_event",
+    "list_meeting_reports",
+    "get_meeting_report",
+    "summarize_meeting_report"
+  ]);
+  assert.equal(registry.getDefinition("search_board_issues"), null);
+  assert.equal(registry.getDefinition("move_board_issue_status"), null);
+}
+
+{
+  const { calendarService, registry } = createSmokeRegistry();
+  const { service, loggingService, workspaceService } =
+    createExecutionServiceWithRegistry(
+      plannerOutput({
+        toolName: "list_calendar_events",
+        riskLevel: "low",
+        executionMode: "auto",
+        requiresConfirmation: false,
+        input: {
+          start: "2026-07-09",
+          end: "2026-07-16"
+        }
+      }),
+      registry
+    );
+
+  const result = await service.executeLatestPlannedTool(
+    USER_ID,
+    WORKSPACE_ID,
+    RUN_ID
+  );
+
+  assert.equal(result.status, "completed");
+  assert.equal(result.run.status, "completed");
+  assert.deepEqual(workspaceService.calls, [
+    { currentUserId: USER_ID, workspaceId: WORKSPACE_ID }
+  ]);
+  assert.deepEqual(calendarService.calls[0], {
+    method: "listEvents",
+    currentUserId: USER_ID,
+    workspaceId: WORKSPACE_ID,
+    query: {
+      start: "2026-07-09",
+      end: "2026-07-16"
+    }
+  });
+  assert.equal(loggingService.calls[1].input.outputSummary.count, 1);
+}
+
+{
+  const { registry } = createSmokeRegistry();
+  const { confirmationService, loggingService, service } =
+    createExecutionServiceWithRegistry(
+      plannerOutput({
+        toolName: "create_calendar_event",
+        riskLevel: "medium",
+        executionMode: "confirmation_required",
+        requiresConfirmation: true,
+        input: {
+          title: "주간 회의",
+          startDate: "2026-07-10",
+          endDate: "2026-07-10",
+          startTime: "15:00"
+        }
+      }),
+      registry
+    );
+
+  const result = await service.executeLatestPlannedTool(
+    USER_ID,
+    WORKSPACE_ID,
+    RUN_ID
+  );
+
+  assert.equal(result.status, "waiting_confirmation");
+  assert.equal(result.confirmation.status, "pending");
+  assert.equal(confirmationService.calls[0].input.toolName, "create_calendar_event");
+  assert.equal(confirmationService.calls[0].input.riskLevel, "medium");
+  assert.equal(confirmationService.calls[0].input.plan.after.title, "주간 회의");
+  assert.equal(confirmationService.calls[0].input.plan.call.method, "POST");
+  assert.deepEqual(loggingService.calls, []);
+}
+
+{
+  const { meetingService, registry } = createSmokeRegistry();
+  const { service, loggingService } = createExecutionServiceWithRegistry(
+    plannerOutput({
+      toolName: "summarize_meeting_report",
+      riskLevel: "low",
+      executionMode: "auto",
+      requiresConfirmation: false,
+      input: {
+        reportId: REPORT_ID
+      }
+    }),
+    registry
+  );
+
+  const result = await service.executeLatestPlannedTool(
+    USER_ID,
+    WORKSPACE_ID,
+    RUN_ID
+  );
+  const outputSummary = loggingService.calls[1].input.outputSummary;
+
+  assert.equal(result.status, "completed");
+  assert.equal(meetingService.calls[0].method, "getReport");
+  assert.equal(outputSummary.report.reportId, REPORT_ID);
+  assert.equal("transcript" in outputSummary.report, false);
+  assert.doesNotMatch(
+    JSON.stringify(outputSummary),
+    /Agent smoke test must not persist transcript text/
+  );
+}
+
+{
+  const { registry } = createSmokeRegistry();
+  const { loggingService, service } = createExecutionServiceWithRegistry(
+    plannerOutput({
+      toolName: "search_board_issues",
+      riskLevel: "low",
+      executionMode: "auto",
+      requiresConfirmation: false,
+      input: {
+        query: "Agent"
+      }
+    }),
+    registry
+  );
+
+  const result = await service.executeLatestPlannedTool(
+    USER_ID,
+    WORKSPACE_ID,
+    RUN_ID
+  );
+
+  assert.equal(result.status, "failed");
+  assert.equal(loggingService.calls[0].input.errorCode, "AGENT_TOOL_NOT_EXECUTABLE");
+  assert.equal(
+    loggingService.calls[0].input.message,
+    "요청을 처리할 수 있는 Agent 도구가 없습니다."
   );
 }
