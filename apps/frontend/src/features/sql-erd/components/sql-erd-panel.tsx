@@ -72,12 +72,11 @@ import {
 } from "@/features/sql-erd/utils/inspector";
 import {
   areSqltoerdLayoutsEqual,
-  createSqltoerdLayoutForModel,
   createSqltoerdModelIndex,
   getSqltoerdModelCounts,
   getTableDisplayName
 } from "@/features/sql-erd/utils/model";
-import { parseSqlDdlToErdModel } from "@/features/sql-erd/utils/ddl-parser";
+import { createSqlErdGenerateWorkspaceRequest } from "@/features/sql-erd/utils/generate-session";
 import { cn } from "@/lib/utils";
 
 const sampleSqlErdViewSession = createSampleSqlErdViewSession(
@@ -405,37 +404,22 @@ export function SqlErdPanel() {
       tone: "neutral"
     });
 
-    const parseResult = parseSqlDdlToErdModel({
-      dialect: sqlErdViewSession.dialect,
-      sourceText: sqlErdViewSession.sourceText
-    });
+    const generateRequest =
+      createSqlErdGenerateWorkspaceRequest(sqlErdViewSession);
 
-    if (!parseResult.ok) {
+    if (!generateRequest.ok) {
       setSessionLoadState({
         label: "Parse error",
-        message: getSqlErdGenerateErrorMessage(parseResult.error.code),
+        message: getSqlErdGenerateErrorMessage(generateRequest.error.code),
         tone: "error"
       });
       setIsGenerating(false);
       return;
     }
 
-    const nextLayoutJson = createSqltoerdLayoutForModel(
-      parseResult.modelJson,
-      sqlErdViewSession.layoutJson
-    );
     const sqlErdApiClient = createSqlErdApiClient({
       accessToken: authSession.accessToken
     });
-    const writePayload = {
-      title: sqlErdViewSession.title,
-      sourceFormat: sqlErdViewSession.sourceFormat,
-      dialect: sqlErdViewSession.dialect,
-      sourceText: sqlErdViewSession.sourceText,
-      modelJson: parseResult.modelJson,
-      layoutJson: nextLayoutJson,
-      settingsJson: sqlErdViewSession.settingsJson
-    };
 
     setSessionLoadState({
       label: "Saving",
@@ -445,18 +429,15 @@ export function SqlErdPanel() {
 
     try {
       const savedSession =
-        sqlErdViewSession.id && sqlErdViewSession.revision !== null
+        generateRequest.kind === "update"
           ? await sqlErdApiClient.updateSession(
               authSession.activeWorkspaceId,
-              sqlErdViewSession.id,
-              {
-                baseRevision: sqlErdViewSession.revision,
-                ...writePayload
-              }
+              generateRequest.sessionId,
+              generateRequest.payload
             )
           : await sqlErdApiClient.createSession(
               authSession.activeWorkspaceId,
-              writePayload
+              generateRequest.payload
             );
 
       setSqlErdViewSession(createWorkspaceSqlErdViewSession(savedSession));

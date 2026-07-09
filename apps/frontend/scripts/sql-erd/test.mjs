@@ -16,6 +16,7 @@ async function compileSqlErdRuntimeModules() {
   const modelOutputPath = join(outputDir, "model.mjs");
   const inspectorOutputPath = join(outputDir, "inspector.mjs");
   const ddlParserOutputPath = join(outputDir, "ddl-parser.mjs");
+  const generateSessionOutputPath = join(outputDir, "generate-session.mjs");
   const apiClientOutputPath = join(outputDir, "api-client.mjs");
   const sessionStateOutputPath = join(outputDir, "session-state.mjs");
 
@@ -35,6 +36,17 @@ async function compileSqlErdRuntimeModules() {
       [[/from "@\/features\/sql-erd\/types"/g, 'from "./types-stub.mjs"']]
     );
     await compileTypeScriptModule(
+      "../../src/features/sql-erd/utils/generate-session.ts",
+      generateSessionOutputPath,
+      [
+        [
+          /from "@\/features\/sql-erd\/utils\/ddl-parser"/g,
+          'from "./ddl-parser.mjs"'
+        ],
+        [/from "@\/features\/sql-erd\/utils\/model"/g, 'from "./model.mjs"']
+      ]
+    );
+    await compileTypeScriptModule(
       "../../src/features/sql-erd/api/client.ts",
       apiClientOutputPath
     );
@@ -52,12 +64,14 @@ async function compileSqlErdRuntimeModules() {
       modelRuntime,
       inspectorRuntime,
       ddlParserRuntime,
+      generateSessionRuntime,
       apiClientRuntime,
       sessionStateRuntime
     ] = await Promise.all([
       import(pathToFileHref(modelOutputPath)),
       import(pathToFileHref(inspectorOutputPath)),
       import(pathToFileHref(ddlParserOutputPath)),
+      import(pathToFileHref(generateSessionOutputPath)),
       import(pathToFileHref(apiClientOutputPath)),
       import(pathToFileHref(sessionStateOutputPath))
     ]);
@@ -65,6 +79,7 @@ async function compileSqlErdRuntimeModules() {
     return {
       apiClientRuntime,
       ddlParserRuntime,
+      generateSessionRuntime,
       inspectorRuntime,
       modelRuntime,
       sessionStateRuntime
@@ -230,6 +245,7 @@ const [
   navigation,
   panel,
   sessionStateUtils,
+  generateSessionUtils,
   canvasSurface,
   tableShape,
   relationShape,
@@ -247,6 +263,7 @@ const [
     readSqlErdFile("../../src/features/sql-erd/navigation.ts"),
     readSqlErdFile("../../src/features/sql-erd/components/sql-erd-panel.tsx"),
     readSqlErdFile("../../src/features/sql-erd/utils/session-state.ts"),
+    readSqlErdFile("../../src/features/sql-erd/utils/generate-session.ts"),
     readSqlErdFile("../../src/features/sql-erd/components/sql-erd-canvas.tsx"),
     readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-table-shape.tsx"),
     readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-relation-shape.tsx"),
@@ -258,6 +275,7 @@ const [
 const {
   apiClientRuntime,
   ddlParserRuntime,
+  generateSessionRuntime,
   inspectorRuntime,
   modelRuntime,
   sessionStateRuntime
@@ -422,6 +440,81 @@ assert.deepEqual(
     reason: "invalid_payload"
   }
 );
+
+const generateSmokeSource = `
+CREATE TABLE users (
+  id BIGINT PRIMARY KEY,
+  email VARCHAR(255) NOT NULL UNIQUE
+);
+
+CREATE TABLE posts (
+  id BIGINT PRIMARY KEY,
+  user_id BIGINT NOT NULL,
+  title VARCHAR(120) NOT NULL,
+  FOREIGN KEY (user_id) REFERENCES users(id)
+);
+`;
+const generateSmokeBaseSession = {
+  id: null,
+  revision: null,
+  title: "Generated ERD",
+  sourceFormat: "sql",
+  dialect: "postgresql",
+  sourceText: generateSmokeSource,
+  modelJson: createRuntimeTestModel(),
+  layoutJson: {
+    version: 1,
+    tableLayouts: [{ tableId: "table.users", x: 512, y: 256, width: 320 }]
+  },
+  settingsJson: { sourcePanelOpen: true }
+};
+const createGenerateRequest =
+  generateSessionRuntime.createSqlErdGenerateWorkspaceRequest(
+    generateSmokeBaseSession
+  );
+
+assert.equal(createGenerateRequest.ok, true);
+assert.equal(createGenerateRequest.kind, "create");
+assert.equal(createGenerateRequest.payload.title, "Generated ERD");
+assert.equal(createGenerateRequest.payload.sourceText, generateSmokeSource);
+assert.equal(createGenerateRequest.payload.dialect, "postgresql");
+assert.equal(createGenerateRequest.payload.modelJson.schema.tables.length, 2);
+assert.equal(createGenerateRequest.payload.modelJson.schema.relations.length, 1);
+assert.deepEqual(createGenerateRequest.payload.layoutJson.tableLayouts[0], {
+  tableId: "table.users",
+  x: 512,
+  y: 256,
+  width: 320
+});
+assert.equal(
+  createGenerateRequest.payload.layoutJson.tableLayouts[1].tableId,
+  "table.posts"
+);
+assert.deepEqual(createGenerateRequest.payload.settingsJson, {
+  sourcePanelOpen: true
+});
+
+const updateGenerateRequest =
+  generateSessionRuntime.createSqlErdGenerateWorkspaceRequest({
+    ...generateSmokeBaseSession,
+    id: "session-1",
+    revision: 7
+  });
+
+assert.equal(updateGenerateRequest.ok, true);
+assert.equal(updateGenerateRequest.kind, "update");
+assert.equal(updateGenerateRequest.sessionId, "session-1");
+assert.equal(updateGenerateRequest.payload.baseRevision, 7);
+assert.equal(updateGenerateRequest.payload.modelJson.schema.tables.length, 2);
+
+const invalidGenerateRequest =
+  generateSessionRuntime.createSqlErdGenerateWorkspaceRequest({
+    ...generateSmokeBaseSession,
+    sourceText: "SELECT 1;"
+  });
+
+assert.equal(invalidGenerateRequest.ok, false);
+assert.equal(invalidGenerateRequest.error.code, "NO_CREATE_TABLE");
 
 const sqlErdApiRequests = [];
 const runtimeSession = createRuntimeTestSession({
@@ -919,15 +1012,21 @@ assert.match(sessionStateUtils, /status === 403/);
 assert.match(sessionStateUtils, /status === 404/);
 assert.match(sessionStateUtils, /status === 400 \|\| status === 413/);
 
+assert.match(generateSessionUtils, /createSqlErdGenerateWorkspaceRequest/);
+assert.match(generateSessionUtils, /parseSqlDdlToErdModel/);
+assert.match(generateSessionUtils, /createSqltoerdLayoutForModel/);
+assert.match(generateSessionUtils, /kind: "create"/);
+assert.match(generateSessionUtils, /kind: "update"/);
+assert.match(generateSessionUtils, /baseRevision: session\.revision/);
+
 assert.match(panel, /SqlErdCanvas/);
 assert.match(panel, /useAuthSession/);
 assert.match(panel, /createSqlErdApiClient/);
 assert.match(panel, /getActiveSession/);
-assert.match(panel, /parseSqlDdlToErdModel/);
+assert.match(panel, /createSqlErdGenerateWorkspaceRequest/);
 assert.match(panel, /handleGenerate/);
 assert.match(panel, /createSession/);
 assert.match(panel, /updateSession/);
-assert.match(panel, /baseRevision: sqlErdViewSession\.revision/);
 assert.match(panel, /pendingLayoutAutosaveJson/);
 assert.match(panel, /layoutAutosaveRetryAttempt/);
 assert.match(panel, /type LayoutAutosaveBlockReason/);
@@ -987,7 +1086,6 @@ assert.doesNotMatch(
   layoutAutosaveConflictCatch,
   /setPendingLayoutAutosaveJson\(null\)/
 );
-assert.match(panel, /createSqltoerdLayoutForModel/);
 assert.match(panel, /handleDialectChange/);
 assert.match(panel, /onDialectChange=\{handleDialectChange\}/);
 assert.match(panel, /DialectSelect/);
