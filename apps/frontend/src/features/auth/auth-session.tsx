@@ -85,11 +85,23 @@ export function AuthGate({ children }: { children: ReactNode }) {
     session: null,
     message: "세션 확인 중"
   });
+  const currentAccessToken =
+    state.status === "ready" ? state.session.accessToken : null;
 
   useEffect(() => {
     let cancelled = false;
 
     async function loadSession() {
+      const storedSession = getStoredAuthSession();
+      if (!storedSession) {
+        router.replace(`/login?returnUrl=${encodeURIComponent(pathname || "/home")}`);
+        return;
+      }
+
+      if (currentAccessToken === storedSession.accessToken) {
+        return;
+      }
+
       setState((currentState) =>
         currentState.status === "ready"
           ? currentState
@@ -99,12 +111,6 @@ export function AuthGate({ children }: { children: ReactNode }) {
               message: "세션 확인 중"
             }
       );
-
-      const storedSession = getStoredAuthSession();
-      if (!storedSession) {
-        router.replace(`/login?returnUrl=${encodeURIComponent(pathname || "/home")}`);
-        return;
-      }
 
       try {
         const session = await loadAuthSessionEntry(storedSession.accessToken);
@@ -130,7 +136,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [pathname, router]);
+  }, [currentAccessToken, pathname, router]);
 
   const setActiveWorkspaceId = useCallback(
     (workspaceId: string) => {
