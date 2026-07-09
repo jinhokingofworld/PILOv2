@@ -14,6 +14,7 @@ import { TldrawSurface } from "@/shared/tldraw/TldrawSurface";
 import type {
   PrReviewCanvas,
   PrReviewCanvasFlow,
+  PrReviewConflictAnalysis,
   PrReviewFlowFile
 } from "@/features/pr-review/types";
 import { PrReviewCanvasBackground } from "@/features/pr-review/components/review-canvas/PrReviewCanvasBackground";
@@ -33,6 +34,7 @@ import { prReviewShapeUtils } from "@/features/pr-review/components/review-canva
 type PrReviewCanvasSurfaceProps = {
   canvas: PrReviewCanvas;
   className?: string;
+  conflictAnalysis?: PrReviewConflictAnalysis | null;
   onFileSelect?: (reviewFileId: string | null) => void;
   selectedReviewFileId?: string | null;
 };
@@ -62,10 +64,15 @@ type Connector = {
   reason: string;
 };
 
+type FileConflictNodeMetadata = {
+  conflictReason: string | null;
+  conflictState: "none" | "unresolved" | "unsupported";
+};
+
 const START_NODE_ID = "__start";
 const END_NODE_ID = "__end";
 const NODE_WIDTH = 292;
-const NODE_HEIGHT = 104;
+const NODE_HEIGHT = 124;
 const MILESTONE_WIDTH = 176;
 const MILESTONE_HEIGHT = 72;
 const FLOW_LABEL_MIN_WIDTH = 720;
@@ -217,7 +224,8 @@ function getPlacementKey(flowId: string, nodeId: string) {
 
 function createFileNodeShape(
   file: PrReviewFlowFile,
-  placement: NodePlacement
+  placement: NodePlacement,
+  conflictMetadata: FileConflictNodeMetadata
 ): TLShapePartial<PrReviewFileNodeShape> {
   const fileNodeData = file.fileNodeData;
 
@@ -243,8 +251,44 @@ function createFileNodeShape(
       fileStatus: file.fileStatus,
       roleSummary: fileNodeData.roleSummary,
       riskLevel: fileNodeData.riskLevel,
-      reviewStatus: fileNodeData.reviewStatus
+      reviewStatus: fileNodeData.reviewStatus,
+      conflictState: conflictMetadata.conflictState,
+      conflictReason: conflictMetadata.conflictReason
     }
+  };
+}
+
+function createConflictMetadataResolver(
+  analysis: PrReviewConflictAnalysis | null | undefined
+) {
+  const contentConflictByFileId = new Map(
+    (analysis?.files ?? []).map((file) => [file.reviewFileId, file])
+  );
+  const unsupportedConflictByFileId = new Map(
+    (analysis?.unsupportedFiles ?? []).map((file) => [file.reviewFileId, file])
+  );
+
+  return (reviewFileId: string): FileConflictNodeMetadata => {
+    const contentConflict = contentConflictByFileId.get(reviewFileId);
+    if (contentConflict) {
+      return {
+        conflictReason: "충돌 해결 전에는 일반 판단을 저장할 수 없습니다.",
+        conflictState: "unresolved"
+      };
+    }
+
+    const unsupportedConflict = unsupportedConflictByFileId.get(reviewFileId);
+    if (unsupportedConflict) {
+      return {
+        conflictReason: unsupportedConflict.reason,
+        conflictState: "unsupported"
+      };
+    }
+
+    return {
+      conflictReason: null,
+      conflictState: "none"
+    };
   };
 }
 
@@ -424,9 +468,13 @@ function buildFlowConnectors(
   return connectors;
 }
 
-function buildPrReviewCanvasShapes(canvas: PrReviewCanvas): TLShapePartial[] {
+function buildPrReviewCanvasShapes(
+  canvas: PrReviewCanvas,
+  conflictAnalysis?: PrReviewConflictAnalysis | null
+): TLShapePartial[] {
   const shapes: TLShapePartial[] = [];
   const placementByKey = new Map<string, NodePlacement>();
+  const getConflictMetadata = createConflictMetadataResolver(conflictAnalysis);
   const connectors: Connector[] = [];
   let nextFlowY = CANVAS_PADDING_Y;
 
@@ -473,7 +521,13 @@ function buildPrReviewCanvasShapes(canvas: PrReviewCanvas): TLShapePartial[] {
           getPlacementKey(flow.id, file.reviewFileId),
           placement
         );
-        shapes.push(createFileNodeShape(file, placement));
+        shapes.push(
+          createFileNodeShape(
+            file,
+            placement,
+            getConflictMetadata(file.reviewFileId)
+          )
+        );
       });
     });
 
@@ -595,6 +649,7 @@ function PrReviewSelectionBridge({
 export function PrReviewCanvasSurface({
   canvas,
   className,
+  conflictAnalysis,
   onFileSelect,
   selectedReviewFileId
 }: PrReviewCanvasSurfaceProps) {
@@ -602,7 +657,10 @@ export function PrReviewCanvasSurface({
   const selectedReviewFileIdRef = useRef<string | null>(
     selectedReviewFileId ?? null
   );
-  const shapes = useMemo(() => buildPrReviewCanvasShapes(canvas), [canvas]);
+  const shapes = useMemo(
+    () => buildPrReviewCanvasShapes(canvas, conflictAnalysis),
+    [canvas, conflictAnalysis]
+  );
   const handleMount = useCallback(
     (editor: Editor) => {
       editorRef.current = editor;

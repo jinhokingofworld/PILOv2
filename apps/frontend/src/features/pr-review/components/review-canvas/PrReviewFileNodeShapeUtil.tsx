@@ -38,6 +38,8 @@ export type PrReviewFileNodeShapeProps = {
   roleSummary: string | null;
   riskLevel: PrReviewFileRiskLevel;
   reviewStatus: PrReviewFileReviewStatus;
+  conflictState: "none" | "unresolved" | "unsupported";
+  conflictReason: string | null;
 };
 
 export type PrReviewFlowEdgeShapeProps = {
@@ -143,6 +145,30 @@ const riskBadgeClasses: Record<PrReviewFileRiskLevel, string> = {
   unknown: "border-slate-200 bg-white text-slate-600"
 };
 
+const conflictNodeClasses: Record<
+  Exclude<PrReviewFileNodeShapeProps["conflictState"], "none">,
+  string
+> = {
+  unresolved: "border-rose-400 bg-rose-50/95 shadow-rose-100",
+  unsupported: "border-amber-400 bg-amber-50/95 shadow-amber-100"
+};
+
+const conflictBadgeLabels: Record<
+  Exclude<PrReviewFileNodeShapeProps["conflictState"], "none">,
+  string
+> = {
+  unresolved: "conflict",
+  unsupported: "unsupported"
+};
+
+const conflictBadgeClasses: Record<
+  Exclude<PrReviewFileNodeShapeProps["conflictState"], "none">,
+  string
+> = {
+  unresolved: "border-rose-200 bg-white text-rose-700",
+  unsupported: "border-amber-200 bg-white text-amber-700"
+};
+
 function getEdgePathData(shape: PrReviewFlowEdgeShape) {
   const { startX, startY, endX, endY } = shape.props;
   if (startX === endX || startY === endY) {
@@ -161,6 +187,9 @@ export function isPrReviewFileNodeShape(
 }
 
 function PrReviewFileNode({ shape }: { shape: PrReviewFileNodeShape }) {
+  const conflictState =
+    shape.props.conflictState === "none" ? null : shape.props.conflictState;
+
   return (
     <HTMLContainer
       className="overflow-visible rounded-lg"
@@ -169,7 +198,9 @@ function PrReviewFileNode({ shape }: { shape: PrReviewFileNodeShape }) {
       <article
         className={cn(
           "flex h-full w-full flex-col justify-between rounded-md border-2 px-4 py-3 shadow-sm",
-          riskNodeClasses[shape.props.riskLevel]
+          conflictState
+            ? conflictNodeClasses[conflictState]
+            : riskNodeClasses[shape.props.riskLevel]
         )}
       >
         <div className="flex min-w-0 items-start gap-3">
@@ -189,22 +220,35 @@ function PrReviewFileNode({ shape }: { shape: PrReviewFileNodeShape }) {
           <span className="truncate font-medium text-slate-600">
             {shape.props.roleSummary || fileStatusLabels[shape.props.fileStatus]}
           </span>
-          <span
-            className={cn(
-              "shrink-0 rounded-full border px-2 py-0.5 font-semibold",
-              riskBadgeClasses[shape.props.riskLevel]
-            )}
-          >
-            {riskLevelLabels[shape.props.riskLevel]}
-          </span>
-          <span
-            className={cn(
-              "shrink-0 rounded-full border px-2 py-0.5 font-medium",
-              reviewStatusClasses[shape.props.reviewStatus]
-            )}
-          >
-            {reviewStatusLabels[shape.props.reviewStatus]}
-          </span>
+          <div className="flex shrink-0 items-center gap-1">
+            {conflictState ? (
+              <span
+                className={cn(
+                  "rounded-full border px-2 py-0.5 font-semibold",
+                  conflictBadgeClasses[conflictState]
+                )}
+                title={shape.props.conflictReason ?? undefined}
+              >
+                {conflictBadgeLabels[conflictState]}
+              </span>
+            ) : null}
+            <span
+              className={cn(
+                "rounded-full border px-2 py-0.5 font-semibold",
+                riskBadgeClasses[shape.props.riskLevel]
+              )}
+            >
+              {riskLevelLabels[shape.props.riskLevel]}
+            </span>
+            <span
+              className={cn(
+                "rounded-full border px-2 py-0.5 font-medium",
+                reviewStatusClasses[shape.props.reviewStatus]
+              )}
+            >
+              {reviewStatusLabels[shape.props.reviewStatus]}
+            </span>
+          </div>
         </div>
       </article>
     </HTMLContainer>
@@ -307,7 +351,9 @@ export class PrReviewFileNodeShapeUtil extends ShapeUtil<PrReviewFileNodeShape> 
       "approved",
       "discussion_needed",
       "unknown"
-    )
+    ),
+    conflictState: T.literalEnum("none", "unresolved", "unsupported"),
+    conflictReason: T.nullable(T.string)
   };
 
   override canBind() {
@@ -332,7 +378,9 @@ export class PrReviewFileNodeShapeUtil extends ShapeUtil<PrReviewFileNodeShape> 
       fileStatus: "modified",
       roleSummary: null,
       riskLevel: "unknown",
-      reviewStatus: "not_reviewed"
+      reviewStatus: "not_reviewed",
+      conflictState: "none",
+      conflictReason: null
     };
   }
 
