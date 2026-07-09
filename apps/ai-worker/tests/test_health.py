@@ -22,4 +22,5 @@ def test_supported_jobs_match_mvp_scope() -> None:
 
     assert "pr_analysis" in jobs
     assert "meeting_report" in jobs
+    assert "agent_run_requested" in jobs
     assert "kanban_agent" not in jobs

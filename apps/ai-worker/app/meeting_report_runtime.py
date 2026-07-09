@@ -8,6 +8,8 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+from app.agent_processor import AgentRunContext, AgentRunJob, AgentRunProcessor
+from app.job_dispatcher import JobDispatcher
 from app.meeting_report_processor import (
     AudioObjectMetadata,
     GeneratedMeetingReport,
@@ -179,6 +181,78 @@ class PgMeetingReportRepository:
         )
 
 
+class PgAgentRunRepository:
+    def __init__(self, database_url: str, database_ssl: bool) -> None:
+        import psycopg
+        from psycopg.rows import dict_row
+
+        kwargs: dict[str, Any] = {"autocommit": True, "row_factory": dict_row}
+        if database_ssl:
+            kwargs["sslmode"] = "require"
+        self.connection = psycopg.connect(database_url, **kwargs)
+
+    def close(self) -> None:
+        self.connection.close()
+
+    def try_acquire_run_lock(self, run_id: str) -> bool:
+        lock_key = _advisory_lock_key(run_id)
+        row = self.connection.execute(
+            "SELECT pg_try_advisory_lock(%s) AS acquired",
+            (lock_key,),
+        ).fetchone()
+        return bool(row["acquired"])
+
+    def release_run_lock(self, run_id: str) -> None:
+        lock_key = _advisory_lock_key(run_id)
+        self.connection.execute("SELECT pg_advisory_unlock(%s)", (lock_key,))
+
+    def get_run_context(self, job: AgentRunJob) -> AgentRunContext | None:
+        row = self.connection.execute(
+            """
+            SELECT id, workspace_id, requested_by_user_id, status
+            FROM agent_runs
+            WHERE id = %s
+              AND workspace_id = %s
+              AND requested_by_user_id = %s
+            LIMIT 1
+            """,
+            (job.run_id, job.workspace_id, job.requested_by_user_id),
+        ).fetchone()
+
+        if row is None:
+            return None
+
+        return AgentRunContext(
+            run_id=str(row["id"]),
+            workspace_id=str(row["workspace_id"]),
+            requested_by_user_id=str(row["requested_by_user_id"]),
+            status=str(row["status"]),
+        )
+
+    def mark_failed(
+        self,
+        run_id: str,
+        error_code: str,
+        error_message: str,
+        message: str,
+    ) -> None:
+        self.connection.execute(
+            """
+            UPDATE agent_runs
+            SET
+              status = 'failed',
+              error_code = %s,
+              error_message = %s,
+              message = %s,
+              completed_at = now(),
+              updated_at = now()
+            WHERE id = %s
+              AND status NOT IN ('completed', 'failed', 'cancelled')
+            """,
+            (error_code, error_message, message, run_id),
+        )
+
+
 class S3RecordingStorage:
     def __init__(self, client: Any, bucket: str) -> None:
         self.client = client
@@ -281,15 +355,15 @@ class OpenAiMeetingReportClient:
         return parse_generated_report_json(output_text, transcript_text)
 
 
-class SqsMeetingReportWorker:
+class SqsAiJobWorker:
     def __init__(
         self,
         settings: RuntimeSettings,
-        processor: MeetingReportProcessor,
+        dispatcher: JobDispatcher,
         sqs_client: Any,
     ) -> None:
         self.settings = settings
-        self.processor = processor
+        self.dispatcher = dispatcher
         self.sqs_client = sqs_client
 
     def run_forever(self) -> None:
@@ -309,12 +383,13 @@ class SqsMeetingReportWorker:
         for message in messages:
             body = message.get("Body", "")
             receipt_handle = message.get("ReceiptHandle")
-            result = self.processor.process_message(body)
+            result = self.dispatcher.process_message(body)
 
             LOGGER.info(
-                "meeting_report job result reason=%s report_id=%s message_id=%s",
+                "ai job result job_type=%s reason=%s resource_id=%s message_id=%s",
+                result.job_type,
                 result.reason,
-                result.report_id,
+                result.resource_id,
                 message.get("MessageId"),
             )
             if result.delete_message and receipt_handle:
@@ -326,7 +401,7 @@ class SqsMeetingReportWorker:
         return len(messages)
 
 
-def create_worker(settings: RuntimeSettings | None = None) -> SqsMeetingReportWorker:
+def create_worker(settings: RuntimeSettings | None = None) -> SqsAiJobWorker:
     import boto3
 
     resolved_settings = settings or RuntimeSettings.from_env()
@@ -336,7 +411,11 @@ def create_worker(settings: RuntimeSettings | None = None) -> SqsMeetingReportWo
 
     sqs_client = boto3.client("sqs", **boto_kwargs)
     s3_client = boto3.client("s3", **boto_kwargs)
-    repository = PgMeetingReportRepository(
+    meeting_report_repository = PgMeetingReportRepository(
+        resolved_settings.database_url,
+        resolved_settings.database_ssl,
+    )
+    agent_run_repository = PgAgentRunRepository(
         resolved_settings.database_url,
         resolved_settings.database_ssl,
     )
@@ -346,8 +425,14 @@ def create_worker(settings: RuntimeSettings | None = None) -> SqsMeetingReportWo
         resolved_settings.openai_stt_model,
         resolved_settings.openai_meeting_report_model,
     )
-    processor = MeetingReportProcessor(repository, storage, ai_client)
-    return SqsMeetingReportWorker(resolved_settings, processor, sqs_client)
+    meeting_report_processor = MeetingReportProcessor(
+        meeting_report_repository,
+        storage,
+        ai_client,
+    )
+    agent_run_processor = AgentRunProcessor(agent_run_repository)
+    dispatcher = JobDispatcher(meeting_report_processor, agent_run_processor)
+    return SqsAiJobWorker(resolved_settings, dispatcher, sqs_client)
 
 
 def run_worker() -> None:

@@ -157,7 +157,7 @@ def test_parse_meeting_report_job_validates_required_payload() -> None:
         parse_meeting_report_job(meeting_report_job_payload(jobType="pr_analysis"))
 
 
-def test_processor_keeps_agent_run_requested_job_for_future_processor() -> None:
+def test_processor_deletes_unsupported_job_type() -> None:
     repository = FakeRepository()
     processor = MeetingReportProcessor(repository, FakeStorage(), FakeAiClient())
 
@@ -172,8 +172,8 @@ def test_processor_keeps_agent_run_requested_job_for_future_processor() -> None:
         )
     )
 
-    assert result.delete_message is False
-    assert result.reason == "agent_run_requested_not_implemented"
+    assert result.delete_message is True
+    assert result.reason == "invalid_job"
     assert result.report_id is None
     assert repository.lock_calls == []
     assert repository.release_calls == []
