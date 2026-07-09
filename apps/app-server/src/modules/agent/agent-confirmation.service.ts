@@ -19,7 +19,11 @@ import { AgentToolRegistryService } from "./agent-tool-registry.service";
 import type {
   AgentConfirmationPlan,
   AgentJsonObject,
-  AgentRiskLevel
+  AgentJsonValue,
+  AgentResourceRef,
+  AgentRiskLevel,
+  AgentToolDefinition,
+  AgentToolExecutionResult
 } from "./types/agent-tool.types";
 
 type AgentRunStatus =
@@ -62,6 +66,11 @@ interface AgentConfirmationWithRunRow extends AgentConfirmationRow {
   run_message: string | null;
 }
 
+interface ApprovedToolExecution {
+  definition: AgentToolDefinition<unknown>;
+  toolInput: unknown;
+}
+
 export interface CreateAgentConfirmationInput {
   runId: string;
   toolName: string;
@@ -99,6 +108,18 @@ export interface AgentConfirmationActionPayload {
 }
 
 const CONFIRMATION_TTL_MS = 15 * 60 * 1000;
+const FORBIDDEN_JSON_KEY_PARTS = [
+  "authorization",
+  "cookie",
+  "credential",
+  "password",
+  "providerraw",
+  "rawresponse",
+  "secret",
+  "token",
+  "transcript",
+  "transcripttext"
+];
 
 @Injectable()
 export class AgentConfirmationService {
@@ -225,7 +246,7 @@ export class AgentConfirmationService {
       }
 
       this.assertExecutablePlan(confirmation.plan_json, confirmation.tool_name);
-      const toolInput = this.validateApprovedPlan(confirmation.plan_json);
+      const toolExecution = this.validateApprovedPlan(confirmation);
 
       const approved = await transaction.queryOne<AgentConfirmationRow>(
         `
@@ -253,7 +274,7 @@ export class AgentConfirmationService {
         expired: false,
         payload: this.mapActionPayload(run, approved),
         confirmation: approved,
-        toolInput
+        toolExecution
       } as const;
     });
 
@@ -266,7 +287,7 @@ export class AgentConfirmationService {
       workspaceId,
       runId,
       result.confirmation,
-      result.toolInput
+      result.toolExecution
     );
   }
 
@@ -454,14 +475,39 @@ export class AgentConfirmationService {
     }
   }
 
-  private validateApprovedPlan(plan: AgentConfirmationPlan): unknown {
+  private validateApprovedPlan(
+    confirmation: AgentConfirmationRow
+  ): ApprovedToolExecution {
+    const plan = confirmation.plan_json;
     const definition = this.agentToolRegistryService.getDefinition(plan.toolName);
     if (!definition) {
       throw badRequest(`Agent tool is not executable: ${plan.toolName}`);
     }
 
-    const toolInput = this.buildToolInputFromPlan(plan);
-    return definition.validateInput(toolInput);
+    if (
+      definition.name !== confirmation.tool_name ||
+      definition.name !== plan.toolName
+    ) {
+      throw badRequest("Confirmation plan tool does not match registered tool");
+    }
+
+    if (definition.riskLevel !== confirmation.risk_level) {
+      throw badRequest("Confirmation risk level does not match registered tool");
+    }
+
+    if (definition.executionMode !== "confirmation_required") {
+      throw badRequest(`Agent tool is not executable: ${plan.toolName}`);
+    }
+
+    if (definition.riskLevel === "high") {
+      throw badRequest("High-risk Agent tool execution is not supported");
+    }
+
+    const toolInput = this.buildToolInputFromPlan(plan, definition);
+    return {
+      definition,
+      toolInput: definition.validateInput(toolInput)
+    };
   }
 
   private async executeApprovedPlan(
@@ -469,15 +515,8 @@ export class AgentConfirmationService {
     workspaceId: string,
     runId: string,
     confirmation: AgentConfirmationRow,
-    toolInput: unknown
+    toolExecution: ApprovedToolExecution
   ): Promise<AgentConfirmationActionPayload> {
-    const definition = this.agentToolRegistryService.getDefinition(
-      confirmation.tool_name
-    );
-    if (!definition) {
-      throw badRequest(`Agent tool is not executable: ${confirmation.tool_name}`);
-    }
-
     let step: AgentStepPayload | null = null;
 
     try {
@@ -493,20 +532,22 @@ export class AgentConfirmationService {
         }
       );
 
-      const result = await definition.execute(
+      const result = await toolExecution.definition.execute(
         {
           currentUserId,
           workspaceId,
           runId
         },
-        toolInput
+        toolExecution.toolInput
       );
+      const outputSummary = this.buildOutputSummary(result);
+      const resourceRefs = this.sanitizeResourceRefs(result.resourceRefs);
 
       await this.agentLoggingService.completeStep(currentUserId, workspaceId, {
         runId,
         stepId: step.id,
-        outputSummary: result.outputSummary,
-        resourceRefs: result.resourceRefs
+        outputSummary,
+        resourceRefs
       });
 
       const run = await this.agentLoggingService.completeRun(
@@ -515,7 +556,7 @@ export class AgentConfirmationService {
         {
           runId,
           riskLevel: confirmation.risk_level,
-          finalAnswer: "승인된 Calendar 작업을 완료했습니다.",
+          finalAnswer: this.buildFinalAnswer(confirmation.tool_name, resourceRefs),
           message: "승인된 작업을 완료했습니다."
         }
       );
@@ -528,7 +569,7 @@ export class AgentConfirmationService {
         await this.agentLoggingService.failStep(currentUserId, workspaceId, {
           runId,
           stepId: step.id,
-          errorCode: "CALENDAR_TOOL_FAILED",
+          errorCode: "AGENT_TOOL_EXECUTION_FAILED",
           errorMessage: message
         });
       }
@@ -538,9 +579,9 @@ export class AgentConfirmationService {
         workspaceId,
         {
           runId,
-          errorCode: "CALENDAR_TOOL_FAILED",
+          errorCode: "AGENT_TOOL_EXECUTION_FAILED",
           errorMessage: message,
-          message: "승인된 Calendar 작업을 실행하지 못했습니다."
+          message: "승인된 작업을 실행하지 못했습니다."
         }
       );
 
@@ -548,12 +589,15 @@ export class AgentConfirmationService {
     }
   }
 
-  private buildToolInputFromPlan(plan: AgentConfirmationPlan): unknown {
-    if (plan.toolName === "create_calendar_event") {
+  private buildToolInputFromPlan(
+    plan: AgentConfirmationPlan,
+    definition: AgentToolDefinition<unknown>
+  ): unknown {
+    if (definition.name === "create_calendar_event") {
       return plan.after;
     }
 
-    if (plan.toolName === "update_calendar_event") {
+    if (definition.name === "update_calendar_event") {
       return {
         eventId: this.readCalendarEventId(plan),
         before: plan.before ?? {},
@@ -570,6 +614,35 @@ export class AgentConfirmationService {
       target: plan.target,
       after: plan.after
     };
+  }
+
+  private buildOutputSummary(
+    result: AgentToolExecutionResult
+  ): AgentJsonObject {
+    const outputSummary = this.sanitizeJsonObject(result.outputSummary);
+    if (result.status && !("status" in outputSummary)) {
+      outputSummary.status = result.status;
+    }
+
+    return outputSummary;
+  }
+
+  private sanitizeResourceRefs(input: unknown): AgentResourceRef[] {
+    const sanitized = this.sanitizeJsonValue(input);
+    return Array.isArray(sanitized)
+      ? (sanitized as unknown as AgentResourceRef[])
+      : [];
+  }
+
+  private buildFinalAnswer(
+    toolName: string,
+    resourceRefs: AgentResourceRef[]
+  ): string {
+    if (resourceRefs.length === 0) {
+      return `${toolName} 실행을 완료했습니다.`;
+    }
+
+    return `${toolName} 실행을 완료했습니다. 관련 리소스 ${resourceRefs.length}개를 확인했습니다.`;
   }
 
   private readCalendarEventId(plan: AgentConfirmationPlan): string {
@@ -653,7 +726,7 @@ export class AgentConfirmationService {
       }
     }
 
-    return "Calendar 작업 실행 중 오류가 발생했습니다.";
+    return "Agent tool execution failed";
   }
 
   private readHttpExceptionMessage(error: HttpException): string | null {
@@ -695,5 +768,50 @@ export class AgentConfirmationService {
       value !== null &&
       !Array.isArray(value)
     );
+  }
+
+  private sanitizeJsonObject(input: unknown): AgentJsonObject {
+    const sanitized = this.sanitizeJsonValue(input);
+    return this.isPlainObject(sanitized) ? sanitized : {};
+  }
+
+  private sanitizeJsonValue(input: unknown): AgentJsonValue {
+    if (Array.isArray(input)) {
+      return input
+        .slice(0, 100)
+        .map((item) => this.sanitizeJsonValue(item)) as AgentJsonValue[];
+    }
+
+    if (this.isPlainObject(input)) {
+      const sanitized: AgentJsonObject = {};
+      for (const [key, value] of Object.entries(input)) {
+        if (this.isForbiddenJsonKey(key)) {
+          continue;
+        }
+
+        sanitized[key] = this.sanitizeJsonValue(value);
+      }
+
+      return sanitized;
+    }
+
+    if (typeof input === "string") {
+      return input.slice(0, 2000);
+    }
+
+    if (
+      typeof input === "number" ||
+      typeof input === "boolean" ||
+      input === null
+    ) {
+      return input;
+    }
+
+    return null;
+  }
+
+  private isForbiddenJsonKey(key: string): boolean {
+    const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, "");
+    return FORBIDDEN_JSON_KEY_PARTS.some((part) => normalized.includes(part));
   }
 }

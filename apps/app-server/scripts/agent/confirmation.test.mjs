@@ -231,11 +231,20 @@ class FakeAgentToolRegistryService {
   }
 
   getDefinition(name) {
+    this.calls.push({
+      method: "getDefinition",
+      name
+    });
+
     if (this.state.missingTool) {
       return null;
     }
 
     return {
+      name: this.state.definitionName ?? name,
+      riskLevel: this.state.definitionRiskLevel ?? "medium",
+      executionMode:
+        this.state.definitionExecutionMode ?? "confirmation_required",
       validateInput: (input) => {
         this.calls.push({
           method: "validateInput",
@@ -263,14 +272,24 @@ class FakeAgentToolRegistryService {
 
         return {
           outputSummary: {
-            action: "created"
+            action: "created",
+            transcriptText: "must-not-leak",
+            nested: {
+              visible: "ok",
+              token: "must-not-leak"
+            },
+            ...(this.state.outputSummary ?? {})
           },
           resourceRefs: [
             {
               domain: "calendar",
               resourceType: "event",
               resourceId: "1",
-              label: "주간 회의"
+              label: "주간 회의",
+              metadata: {
+                token: "must-not-leak",
+                visible: "ok"
+              }
             }
           ]
         };
@@ -522,9 +541,23 @@ function errorMessage(error) {
   );
   assert.deepEqual(
     toolRegistryService.calls.map((call) => call.method),
-    ["validateInput", "execute"]
+    ["getDefinition", "validateInput", "execute"]
   );
-  assert.equal(toolRegistryService.calls[1].input.title, "주간 회의");
+  assert.equal(toolRegistryService.calls[2].input.title, "주간 회의");
+  assert.equal(
+    "transcriptText" in loggingService.calls[1].input.outputSummary,
+    false
+  );
+  assert.equal(loggingService.calls[1].input.outputSummary.nested.visible, "ok");
+  assert.equal(
+    "token" in loggingService.calls[1].input.outputSummary.nested,
+    false
+  );
+  assert.equal(
+    "token" in loggingService.calls[1].input.resourceRefs[0].metadata,
+    false
+  );
+  assert.match(loggingService.calls[2].input.finalAnswer, /관련 리소스 1개/);
 }
 
 {
@@ -550,7 +583,7 @@ function errorMessage(error) {
 
   assert.equal(result.run.status, "completed");
   assert.equal(result.run.confirmation.status, "approved");
-  assert.deepEqual(toolRegistryService.calls[1].input, {
+  assert.deepEqual(toolRegistryService.calls[2].input, {
     eventId: "77",
     before: {
       title: "주간 회의",
@@ -606,16 +639,19 @@ function errorMessage(error) {
   );
 
   assert.equal(result.run.status, "failed");
-  assert.equal(result.run.message, "승인된 Calendar 작업을 실행하지 못했습니다.");
+  assert.equal(result.run.message, "승인된 작업을 실행하지 못했습니다.");
   assert.equal(result.run.confirmation.status, "approved");
   assert.deepEqual(
     loggingService.calls.map((call) => call.method),
     ["startNextStep", "failStep", "failRun"]
   );
-  assert.equal(loggingService.calls[1].input.errorCode, "CALENDAR_TOOL_FAILED");
+  assert.equal(
+    loggingService.calls[1].input.errorCode,
+    "AGENT_TOOL_EXECUTION_FAILED"
+  );
   assert.equal(
     loggingService.calls[2].input.errorMessage,
-    "Calendar 작업 실행 중 오류가 발생했습니다."
+    "Agent tool execution failed"
   );
 }
 
@@ -646,7 +682,7 @@ function errorMessage(error) {
     runs: [createRun()],
     confirmations: [createConfirmation()]
   };
-  const { service } = createService(state);
+  const { service, toolRegistryService } = createService(state);
   const result = await service.rejectConfirmation(
     USER_ID,
     WORKSPACE_ID,
@@ -659,6 +695,79 @@ function errorMessage(error) {
   assert.equal(result.run.confirmation.status, "rejected");
   assert.equal(result.run.confirmation.rejectedAt, "2026-07-08T00:04:00.000Z");
   assert.equal(state.confirmations[0].rejected_by_user_id, USER_ID);
+  assert.deepEqual(toolRegistryService.calls, []);
+}
+
+{
+  const state = {
+    runs: [createRun()],
+    confirmations: [createConfirmation()],
+    missingTool: true
+  };
+  const { service, loggingService, toolRegistryService } = createService(state);
+
+  await assert.rejects(
+    () =>
+      service.approveConfirmation(
+        USER_ID,
+        WORKSPACE_ID,
+        RUN_ID,
+        CONFIRMATION_ID,
+        undefined
+      ),
+    (error) => {
+      assert.equal(error.getStatus(), 400);
+      assert.equal(errorCode(error), "BAD_REQUEST");
+      assert.equal(
+        errorMessage(error),
+        "Agent tool is not executable: create_calendar_event"
+      );
+      return true;
+    }
+  );
+  assert.equal(state.confirmations[0].status, "pending");
+  assert.equal(state.runs[0].status, "waiting_confirmation");
+  assert.deepEqual(loggingService.calls, []);
+  assert.deepEqual(
+    toolRegistryService.calls.map((call) => call.method),
+    ["getDefinition"]
+  );
+}
+
+{
+  const state = {
+    runs: [createRun()],
+    confirmations: [createConfirmation()],
+    definitionExecutionMode: "auto"
+  };
+  const { service, loggingService, toolRegistryService } = createService(state);
+
+  await assert.rejects(
+    () =>
+      service.approveConfirmation(
+        USER_ID,
+        WORKSPACE_ID,
+        RUN_ID,
+        CONFIRMATION_ID,
+        undefined
+      ),
+    (error) => {
+      assert.equal(error.getStatus(), 400);
+      assert.equal(errorCode(error), "BAD_REQUEST");
+      assert.equal(
+        errorMessage(error),
+        "Agent tool is not executable: create_calendar_event"
+      );
+      return true;
+    }
+  );
+  assert.equal(state.confirmations[0].status, "pending");
+  assert.equal(state.runs[0].status, "waiting_confirmation");
+  assert.deepEqual(loggingService.calls, []);
+  assert.deepEqual(
+    toolRegistryService.calls.map((call) => call.method),
+    ["getDefinition"]
+  );
 }
 
 {
