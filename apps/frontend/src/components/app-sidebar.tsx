@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import type { FormEvent, MouseEvent } from "react";
+import { useEffect, useState } from "react";
+import type { MouseEvent } from "react";
 import { useRouter } from "next/navigation";
 import {
   BadgeCheck,
@@ -11,9 +11,7 @@ import {
   GalleryVerticalEnd,
   Loader2,
   LogOut,
-  Send,
   Sparkles,
-  X,
   UserRound
 } from "lucide-react";
 
@@ -44,7 +42,6 @@ import {
   DropdownMenuShortcut,
   DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
 import {
   Sidebar,
   SidebarContent,
@@ -66,15 +63,8 @@ import {
 import { useAuthSession } from "@/features/auth";
 import {
   acceptCurrentUserWorkspaceInvitation,
-  createWorkspaceInvitation,
   listCurrentUserWorkspaceInvitations,
-  listWorkspaceMembers,
-  listWorkspaceInvitations,
-  removeWorkspaceMember,
-  revokeWorkspaceInvitation,
-  type CurrentUserWorkspaceInvitation,
-  type WorkspaceInvitation,
-  type WorkspaceMember
+  type CurrentUserWorkspaceInvitation
 } from "@/features/auth/api/client";
 import { useMeetingRuntime } from "@/features/meeting/runtime/meeting-runtime-provider";
 import type { FeatureNavigationItem } from "@/features/navigation-types";
@@ -134,17 +124,6 @@ export function AppSidebar({
   const [openMenuIds, setOpenMenuIds] = useState<Record<string, boolean>>({
     [selectedItemId]: true
   });
-  const [inviteEmail, setInviteEmail] = useState("");
-  const [inviteStatus, setInviteStatus] = useState<string | null>(null);
-  const [inviteError, setInviteError] = useState<string | null>(null);
-  const [inviteUrl, setInviteUrl] = useState<string | null>(null);
-  const [workspaceInvitations, setWorkspaceInvitations] = useState<
-    WorkspaceInvitation[]
-  >([]);
-  const [hiddenInvitationIds, setHiddenInvitationIds] = useState<string[]>([]);
-  const [workspaceMembers, setWorkspaceMembers] = useState<WorkspaceMember[]>(
-    []
-  );
   const [currentUserInvitations, setCurrentUserInvitations] = useState<
     CurrentUserWorkspaceInvitation[]
   >([]);
@@ -156,18 +135,12 @@ export function AppSidebar({
   const [acceptingInvitationId, setAcceptingInvitationId] = useState<
     string | null
   >(null);
-  const [removingMemberUserId, setRemovingMemberUserId] = useState<
-    string | null
-  >(null);
-  const [isInviteSubmitting, setIsInviteSubmitting] = useState(false);
   const [sessionActionError, setSessionActionError] = useState<string | null>(
     null
   );
   const [sessionActionStatus, setSessionActionStatus] = useState<
     "idle" | "logging-out" | "switching-workspace"
   >("idle");
-  const activeWorkspaceDetail = authSession?.activeWorkspace;
-  const canManageWorkspace = activeWorkspaceDetail?.role === "owner";
   const pendingInvitationCount = currentUserInvitations.length;
   const isSessionActionPending = sessionActionStatus !== "idle";
   const workspaceOptions =
@@ -200,25 +173,6 @@ export function AppSidebar({
       }
     : currentUser;
   const selectedItem = items.find((item) => item.id === selectedItemId);
-  const visibleWorkspaceInvitations = workspaceInvitations.filter(
-    (invitation) => !hiddenInvitationIds.includes(invitation.id)
-  );
-
-  const refreshWorkspaceManagement = useCallback(async () => {
-    if (!authSession || !activeWorkspaceDetail || !canManageWorkspace) {
-      setWorkspaceInvitations([]);
-      setWorkspaceMembers([]);
-      return;
-    }
-
-    const [invitations, members] = await Promise.all([
-      listWorkspaceInvitations(authSession.accessToken, activeWorkspaceDetail.id),
-      listWorkspaceMembers(authSession.accessToken, activeWorkspaceDetail.id)
-    ]);
-
-    setWorkspaceInvitations(invitations);
-    setWorkspaceMembers(members);
-  }, [activeWorkspaceDetail, authSession, canManageWorkspace]);
 
   useEffect(() => {
     setOpenMenuIds((currentOpenMenuIds) => ({
@@ -227,46 +181,6 @@ export function AppSidebar({
     }));
     setActiveSubItemHref(selectedItem?.href);
   }, [selectedItem?.href, selectedItemId]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    if (!authSession || !activeWorkspaceDetail || !canManageWorkspace) {
-      setWorkspaceInvitations([]);
-      setWorkspaceMembers([]);
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    async function loadWorkspaceManagement() {
-      try {
-        if (!cancelled) {
-          await refreshWorkspaceManagement();
-        }
-      } catch {
-        if (!cancelled) {
-          setWorkspaceInvitations([]);
-          setWorkspaceMembers([]);
-        }
-      }
-    }
-
-    void loadWorkspaceManagement();
-    const intervalId = window.setInterval(() => {
-      void loadWorkspaceManagement();
-    }, 5000);
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(intervalId);
-    };
-  }, [
-    activeWorkspaceDetail?.id,
-    authSession,
-    canManageWorkspace,
-    refreshWorkspaceManagement
-  ]);
 
   useEffect(() => {
     let cancelled = false;
@@ -352,119 +266,6 @@ export function AppSidebar({
     }
 
     setActiveWorkspaceIndex(index);
-  };
-
-  const handleSubmitInvitation = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-
-    if (
-      !authSession ||
-      !activeWorkspaceDetail ||
-      !canManageWorkspace ||
-      isInviteSubmitting
-    ) {
-      return;
-    }
-
-    setInviteError(null);
-    setInviteStatus(null);
-    setInviteUrl(null);
-    setIsInviteSubmitting(true);
-
-    void createWorkspaceInvitation(
-      authSession.accessToken,
-      activeWorkspaceDetail.id,
-      inviteEmail
-    )
-      .then((result) => {
-        setInviteEmail("");
-        setInviteStatus(`${result.invitation.email} 초대 생성됨`);
-        setInviteUrl(result.acceptUrl);
-        setWorkspaceInvitations((currentInvitations) => [
-          result.invitation,
-          ...currentInvitations.filter(
-            (invitation) => invitation.id !== result.invitation.id
-          )
-        ]);
-      })
-      .catch((error: unknown) => {
-        setInviteError(
-          error instanceof Error ? error.message : "초대 생성에 실패했습니다"
-        );
-      })
-      .finally(() => {
-        setIsInviteSubmitting(false);
-      });
-  };
-
-  const handleRemoveWorkspaceMember = (member: WorkspaceMember) => {
-    if (
-      !authSession ||
-      !activeWorkspaceDetail ||
-      !canManageWorkspace ||
-      removingMemberUserId
-    ) {
-      return;
-    }
-
-    setInviteError(null);
-    setRemovingMemberUserId(member.userId);
-
-    void removeWorkspaceMember(
-      authSession.accessToken,
-      activeWorkspaceDetail.id,
-      member.userId
-    )
-      .then(async () => {
-        setInviteStatus(`${member.user.email ?? "멤버"} 추방됨`);
-        await refreshWorkspaceManagement();
-      })
-      .catch((error: unknown) => {
-        setInviteError(
-          error instanceof Error ? error.message : "멤버 추방에 실패했습니다"
-        );
-      })
-      .finally(() => {
-        setRemovingMemberUserId(null);
-      });
-  };
-
-  const handleRevokeInvitation = (invitationId: string) => {
-    if (!authSession || !activeWorkspaceDetail || !canManageWorkspace) {
-      return;
-    }
-
-    setInviteError(null);
-
-    void revokeWorkspaceInvitation(
-      authSession.accessToken,
-      activeWorkspaceDetail.id,
-      invitationId
-    )
-      .then((invitation) => {
-        setWorkspaceInvitations((currentInvitations) =>
-          currentInvitations.map((currentInvitation) =>
-            currentInvitation.id === invitation.id
-              ? invitation
-              : currentInvitation
-          )
-        );
-        setInviteStatus(`${invitation.email} 초대 취소됨`);
-      })
-      .catch((error: unknown) => {
-        setInviteError(
-          error instanceof Error ? error.message : "초대 취소에 실패했습니다"
-        );
-      });
-  };
-
-  const handleHideInvitation = (invitationId: string) => {
-    setHiddenInvitationIds((currentInvitationIds) =>
-      currentInvitationIds.includes(invitationId)
-        ? currentInvitationIds
-        : [...currentInvitationIds, invitationId]
-    );
   };
 
   const handleOpenInvitations = () => {
@@ -591,141 +392,6 @@ export function AppSidebar({
                     </DropdownMenuItem>
                   ))}
                 </DropdownMenuGroup>
-                {canManageWorkspace ? (
-                  <>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuGroup>
-                      <DropdownMenuLabel>멤버 관리</DropdownMenuLabel>
-                      <div
-                        className="space-y-2 px-2 pb-2"
-                        onClick={(event) => event.stopPropagation()}
-                        onKeyDown={(event) => event.stopPropagation()}
-                      >
-                        <form
-                          className="flex items-center gap-2"
-                          onSubmit={handleSubmitInvitation}
-                        >
-                          <Input
-                            aria-label="초대 이메일"
-                            className="h-8"
-                            onChange={(event) =>
-                              setInviteEmail(event.target.value)
-                            }
-                            placeholder="member@example.com"
-                            type="email"
-                            value={inviteEmail}
-                          />
-                          <button
-                            aria-label="멤버 초대"
-                            className="inline-flex h-8 shrink-0 items-center gap-1 rounded-md bg-primary px-2 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
-                            disabled={isInviteSubmitting || inviteEmail.trim() === ""}
-                            type="submit"
-                          >
-                            <Send className="size-3.5" />
-                            초대
-                          </button>
-                        </form>
-                        {inviteError ? (
-                          <p className="text-xs text-destructive">
-                            {inviteError}
-                          </p>
-                        ) : null}
-                        {inviteStatus ? (
-                          <p className="text-xs text-muted-foreground">
-                            {inviteStatus}
-                          </p>
-                        ) : null}
-                        {inviteUrl ? (
-                          <p className="line-clamp-2 break-all text-[11px] text-muted-foreground">
-                            {inviteUrl}
-                          </p>
-                        ) : null}
-                        {visibleWorkspaceInvitations.length > 0 ? (
-                          <div className="space-y-1">
-                            {visibleWorkspaceInvitations
-                              .slice(0, 5)
-                              .map((invitation) => {
-                                const acceptedMember =
-                                  invitation.status === "accepted"
-                                    ? findAcceptedInvitationMember(
-                                        workspaceMembers,
-                                        invitation
-                                      )
-                                    : null;
-
-                                if (
-                                  invitation.status === "accepted" &&
-                                  !acceptedMember
-                                ) {
-                                  return null;
-                                }
-
-                                return (
-                                  <div
-                                    className="flex items-center gap-2 rounded-md border bg-background px-2 py-1.5"
-                                    key={invitation.id}
-                                  >
-                                    <div className="min-w-0 flex-1">
-                                      <p className="truncate text-xs font-medium">
-                                        {invitation.email}
-                                      </p>
-                                      <p className="text-[11px] text-muted-foreground">
-                                        {getInvitationStatusLabel(
-                                          invitation.status
-                                        )}
-                                      </p>
-                                    </div>
-                                    {acceptedMember ? (
-                                      <button
-                                        className="inline-flex h-6 shrink-0 items-center rounded-md bg-destructive/10 px-2 text-[11px] font-medium text-destructive transition-colors hover:bg-destructive/20 disabled:cursor-not-allowed disabled:opacity-60"
-                                        disabled={
-                                          removingMemberUserId ===
-                                          acceptedMember.userId
-                                        }
-                                        onClick={() =>
-                                          handleRemoveWorkspaceMember(
-                                            acceptedMember
-                                          )
-                                        }
-                                        type="button"
-                                      >
-                                        {removingMemberUserId ===
-                                        acceptedMember.userId
-                                          ? "추방 중"
-                                          : "추방"}
-                                      </button>
-                                    ) : invitation.status === "pending" ? (
-                                      <button
-                                        aria-label="초대 취소"
-                                        className="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                                        onClick={() =>
-                                          handleRevokeInvitation(invitation.id)
-                                        }
-                                        type="button"
-                                      >
-                                        <X className="size-3.5" />
-                                      </button>
-                                    ) : (
-                                      <button
-                                        aria-label="초대 내역 숨기기"
-                                        className="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                                        onClick={() =>
-                                          handleHideInvitation(invitation.id)
-                                        }
-                                        type="button"
-                                      >
-                                        <X className="size-3.5" />
-                                      </button>
-                                    )}
-                                  </div>
-                                );
-                              })}
-                          </div>
-                        ) : null}
-                      </div>
-                    </DropdownMenuGroup>
-                  </>
-                ) : null}
               </DropdownMenuContent>
             </DropdownMenu>
           </SidebarMenuItem>
@@ -988,36 +654,6 @@ function getUserInitials(name: string | null, email: string | null) {
     .join("");
 
   return initials || "P";
-}
-
-function findAcceptedInvitationMember(
-  members: WorkspaceMember[],
-  invitation: WorkspaceInvitation
-) {
-  return (
-    members.find((member) => member.userId === invitation.acceptedByUserId) ??
-    members.find(
-      (member) =>
-        member.user.email?.toLowerCase() === invitation.email.toLowerCase()
-    ) ??
-    null
-  );
-}
-
-function getInvitationStatusLabel(status: WorkspaceInvitation["status"]) {
-  if (status === "pending") {
-    return "대기중";
-  }
-
-  if (status === "accepted") {
-    return "수락됨";
-  }
-
-  if (status === "revoked") {
-    return "취소됨";
-  }
-
-  return "만료됨";
 }
 
 function formatInvitationDate(value: string) {

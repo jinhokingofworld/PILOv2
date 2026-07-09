@@ -69,6 +69,7 @@ type CalendarEventsDialogState = {
 
 const DEFAULT_EVENT_COLOR = "#3B82F6";
 const CALENDAR_DRAFT_ACTION_SEARCH_PARAM = "calendarAction";
+const CALENDAR_SELECTED_DATE_SEARCH_PARAM = "date";
 const CALENDAR_DRAFT_SEARCH_PARAMS = [
   CALENDAR_DRAFT_ACTION_SEARCH_PARAM,
   "color",
@@ -134,6 +135,14 @@ function formatDateLabel(date: string) {
 
 function isCalendarDateInputValue(value: string | null) {
   return Boolean(value && /^\d{4}-\d{2}-\d{2}$/.test(value));
+}
+
+function isValidCalendarDateInput(value: string | null): value is string {
+  if (!value || !isCalendarDateInputValue(value)) {
+    return false;
+  }
+
+  return formatCalendarDate(parseCalendarDateInput(value)) === value;
 }
 
 function isCalendarTimeInputValue(value: string | null) {
@@ -1078,6 +1087,27 @@ export function CalendarPanel() {
     setIsCreateDialogOpen(true);
     clearCalendarDraftSearchParams();
   }, [today]);
+
+  useEffect(() => {
+    const searchParams = new URLSearchParams(window.location.search);
+
+    if (searchParams.has(CALENDAR_DRAFT_ACTION_SEARCH_PARAM)) {
+      return;
+    }
+
+    const selectedDateParam = searchParams.get(CALENDAR_SELECTED_DATE_SEARCH_PARAM);
+    if (!isValidCalendarDateInput(selectedDateParam)) {
+      return;
+    }
+
+    setMonthDate(startOfCalendarMonth(parseCalendarDateInput(selectedDateParam)));
+    setSelectedDate(selectedDateParam);
+    setDetailEvent(null);
+    setEventsDialog(null);
+    setFormError(null);
+    setSheetMode(null);
+    setIsCreateDialogOpen(false);
+  }, []);
 
   const goToMonth = useCallback((nextMonthDate: Date) => {
     const nextMonthStart = startOfCalendarMonth(nextMonthDate);
