@@ -88,6 +88,19 @@ export interface GithubProjectV2LookupRequest
   projectNodeId: string;
 }
 
+export type GithubProjectV2PermissionLevel = "ADMIN" | "WRITE" | "READ";
+
+export interface GithubProjectV2PermissionLookupRequest {
+  ownerLogin: string;
+  ownerType: "User" | "Organization";
+  projectNodeId: string;
+  userAccessToken: string;
+}
+
+export interface GithubProjectV2PermissionLookupResult {
+  permission: GithubProjectV2PermissionLevel | null;
+}
+
 export interface GithubProjectV2ItemAddRequest
   extends GithubProjectV2UserAccessTokenRequest {
   projectNodeId: string;
@@ -443,6 +456,52 @@ const GITHUB_PROJECT_V2_QUERY = `
         createdAt
         updatedAt
         closedAt
+      }
+    }
+  }
+`;
+const GITHUB_PROJECT_V2_ORGANIZATION_PERMISSION_QUERY = `
+  query PiloOrganizationProjectV2Permission(
+    $login: String!,
+    $cursor: String,
+    $minPermissionLevel: ProjectV2PermissionLevel!
+  ) {
+    organization(login: $login) {
+      projectsV2(
+        first: 100,
+        after: $cursor,
+        minPermissionLevel: $minPermissionLevel
+      ) {
+        nodes {
+          id
+        }
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
+      }
+    }
+  }
+`;
+const GITHUB_PROJECT_V2_USER_PERMISSION_QUERY = `
+  query PiloUserProjectV2Permission(
+    $login: String!,
+    $cursor: String,
+    $minPermissionLevel: ProjectV2PermissionLevel!
+  ) {
+    user(login: $login) {
+      projectsV2(
+        first: 100,
+        after: $cursor,
+        minPermissionLevel: $minPermissionLevel
+      ) {
+        nodes {
+          id
+        }
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
       }
     }
   }
@@ -1129,6 +1188,24 @@ export class GithubAppClient {
     return this.mapProjectV2(project);
   }
 
+  async getProjectV2PermissionLevel(
+    input: GithubProjectV2PermissionLookupRequest
+  ): Promise<GithubProjectV2PermissionLookupResult> {
+    const levels: GithubProjectV2PermissionLevel[] = ["ADMIN", "WRITE", "READ"];
+
+    for (const level of levels) {
+      if (await this.hasProjectV2PermissionLevel(input, level)) {
+        return {
+          permission: level
+        };
+      }
+    }
+
+    return {
+      permission: null
+    };
+  }
+
   async listProjectV2Fields(
     input: GithubProjectV2LookupRequest
   ): Promise<GithubProjectV2FieldApiItem[]> {
@@ -1473,6 +1550,47 @@ export class GithubAppClient {
     return repositoryNodeIds;
   }
 
+  private async hasProjectV2PermissionLevel(
+    input: GithubProjectV2PermissionLookupRequest,
+    permission: GithubProjectV2PermissionLevel
+  ): Promise<boolean> {
+    const query =
+      input.ownerType === "Organization"
+        ? GITHUB_PROJECT_V2_ORGANIZATION_PERMISSION_QUERY
+        : GITHUB_PROJECT_V2_USER_PERMISSION_QUERY;
+    let cursor: string | null = null;
+
+    do {
+      const data = await this.fetchGraphqlWithToken(
+        input.userAccessToken,
+        query,
+        {
+          cursor,
+          login: input.ownerLogin,
+          minPermissionLevel: permission
+        },
+        "GitHub ProjectV2 permission lookup failed",
+        {
+          accountType: input.ownerType,
+          tokenSource: "user"
+        }
+      );
+      const page = this.readProjectV2PermissionPage(
+        data,
+        input.ownerType,
+        "GitHub ProjectV2 permission lookup failed"
+      );
+
+      if (page.nodeIds.includes(input.projectNodeId)) {
+        return true;
+      }
+
+      cursor = page.hasNextPage ? page.endCursor : null;
+    } while (cursor);
+
+    return false;
+  }
+
   private async listRemainingProjectV2ItemFieldValues(
     graphqlAuth: GithubProjectV2GraphqlAuth,
     itemNodeId: string,
@@ -1672,6 +1790,41 @@ export class GithubAppClient {
 
     return {
       nodes,
+      hasNextPage: pageInfo.hasNextPage,
+      endCursor:
+        typeof pageInfo.endCursor === "string" && pageInfo.endCursor
+          ? pageInfo.endCursor
+          : null
+    };
+  }
+
+  private readProjectV2PermissionPage(
+    data: unknown,
+    accountType: "User" | "Organization",
+    errorMessage: string
+  ): {
+    nodeIds: string[];
+    hasNextPage: boolean;
+    endCursor: string | null;
+  } {
+    const ownerField = accountType === "Organization" ? "organization" : "user";
+    const owner = this.toObject(this.toObject(data)[ownerField]);
+    const connection = this.toObject(owner.projectsV2);
+    const nodes = Array.isArray(connection.nodes)
+      ? connection.nodes.filter((node): node is Record<string, unknown> =>
+          this.isRecord(node)
+        )
+      : null;
+    const pageInfo = this.toObject(connection.pageInfo);
+
+    if (!nodes || typeof pageInfo.hasNextPage !== "boolean") {
+      throw badRequest(errorMessage);
+    }
+
+    return {
+      nodeIds: nodes
+        .map((node) => node.id)
+        .filter((id): id is string => typeof id === "string" && id.length > 0),
       hasNextPage: pageInfo.hasNextPage,
       endCursor:
         typeof pageInfo.endCursor === "string" && pageInfo.endCursor

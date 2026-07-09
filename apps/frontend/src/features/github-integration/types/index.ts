@@ -75,6 +75,17 @@ export type GithubRepository = {
   lastSyncedAt: string | null;
 };
 
+export type GithubRepositoryCollaboratorStatus = {
+  repository: {
+    id: string;
+    fullName: string;
+  };
+  githubLogin: string;
+  permission: string | null;
+  hasAccess: boolean;
+  checkedAt: string;
+};
+
 export type GithubProjectV2 = {
   id: string;
   installationId: string;
@@ -91,6 +102,22 @@ export type GithubProjectV2 = {
   template: boolean;
   repositoryIds: string[];
   lastSyncedAt: string | null;
+};
+
+export type GithubProjectV2AccessPermission = "ADMIN" | "WRITE" | "READ";
+
+export type GithubProjectV2AccessStatus = {
+  project: {
+    id: string;
+    title: string;
+    ownerLogin: string;
+  };
+  githubLogin: string;
+  permission: GithubProjectV2AccessPermission | null;
+  hasAccess: boolean;
+  canUpdate: boolean;
+  canManageAccess: boolean;
+  checkedAt: string;
 };
 
 export type GithubPullRequest = {

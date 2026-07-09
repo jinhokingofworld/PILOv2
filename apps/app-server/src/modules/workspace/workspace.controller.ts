@@ -48,6 +48,18 @@ export class WorkspaceController {
     return apiResponse(members);
   }
 
+  @Delete(":workspaceId/members/me")
+  async leaveWorkspace(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string
+  ): Promise<ApiSuccessResponse<RemoveWorkspaceMemberPayload>> {
+    const result = await this.workspaceService.leaveWorkspace(
+      currentUserId,
+      workspaceId
+    );
+    return apiResponse(result);
+  }
+
   @Delete(":workspaceId/members/:userId")
   async removeMember(
     @CurrentUserId() currentUserId: string,

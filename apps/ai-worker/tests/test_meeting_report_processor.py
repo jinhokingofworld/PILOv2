@@ -157,6 +157,28 @@ def test_parse_meeting_report_job_validates_required_payload() -> None:
         parse_meeting_report_job(meeting_report_job_payload(jobType="pr_analysis"))
 
 
+def test_processor_keeps_agent_run_requested_job_for_future_processor() -> None:
+    repository = FakeRepository()
+    processor = MeetingReportProcessor(repository, FakeStorage(), FakeAiClient())
+
+    result = processor.process_message(
+        json.dumps(
+            {
+                "jobType": "agent_run_requested",
+                "runId": "33333333-3333-3333-3333-333333333333",
+                "workspaceId": "22222222-2222-2222-2222-222222222222",
+                "requestedByUserId": "11111111-1111-1111-1111-111111111111",
+            }
+        )
+    )
+
+    assert result.delete_message is False
+    assert result.reason == "agent_run_requested_not_implemented"
+    assert result.report_id is None
+    assert repository.lock_calls == []
+    assert repository.release_calls == []
+
+
 def test_processor_completes_processing_report() -> None:
     repository = FakeRepository()
     storage = FakeStorage()

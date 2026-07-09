@@ -158,11 +158,37 @@ class FakeAgentLoggingService {
   constructor(result) {
     this.result = result;
     this.calls = [];
+    this.failCalls = [];
   }
 
   async createRun(currentUserId, workspaceId, input) {
     this.calls.push({ currentUserId, workspaceId, input });
     return this.result;
+  }
+
+  async failRun(currentUserId, workspaceId, input) {
+    this.failCalls.push({ currentUserId, workspaceId, input });
+    return createStoredRun({
+      status: "failed",
+      message: input.message,
+      errorCode: input.errorCode,
+      errorMessage: input.errorMessage
+    });
+  }
+}
+
+class FakeAgentJobService {
+  constructor({ shouldFail = false } = {}) {
+    this.shouldFail = shouldFail;
+    this.calls = [];
+  }
+
+  async enqueueAgentRunRequestedJob(payload) {
+    this.calls.push(payload);
+
+    if (this.shouldFail) {
+      throw new Error("raw SQS failure with pilo-dev-ai-jobs queue url");
+    }
   }
 }
 
@@ -241,17 +267,24 @@ function createService({
     runRows: [],
     stepRows: [],
     confirmationRows: []
-  }
+  },
+  agentJobService = new FakeAgentJobService()
 } = {}) {
   const workspaceService = new FakeWorkspaceService();
   const database = new FakeDatabaseService(state);
   const agentLoggingService = new FakeAgentLoggingService(loggingResult);
 
   return {
-    service: new AgentService(database, workspaceService, agentLoggingService),
+    service: new AgentService(
+      database,
+      workspaceService,
+      agentLoggingService,
+      agentJobService
+    ),
     workspaceService,
     database,
-    agentLoggingService
+    agentLoggingService,
+    agentJobService
   };
 }
 
@@ -318,7 +351,7 @@ function errorMessage(error) {
 }
 
 {
-  const { service, agentLoggingService } = createService();
+  const { service, agentLoggingService, agentJobService } = createService();
   const result = await service.createRun(USER_ID, WORKSPACE_ID, {
     prompt: "  내일 회의 일정 만들어줘  ",
     timezone: "Asia/Seoul",
@@ -340,10 +373,18 @@ function errorMessage(error) {
       }
     }
   ]);
+  assert.deepEqual(agentJobService.calls, [
+    {
+      jobType: "agent_run_requested",
+      runId: RUN_ID,
+      workspaceId: WORKSPACE_ID,
+      requestedByUserId: USER_ID
+    }
+  ]);
 }
 
 {
-  const { service } = createService({
+  const { service, agentJobService } = createService({
     loggingResult: {
       run: createStoredRun(),
       created: false
@@ -356,6 +397,49 @@ function errorMessage(error) {
 
   assert.equal(result.created, false);
   assert.equal(result.run.status, "planning");
+  assert.deepEqual(agentJobService.calls, []);
+}
+
+{
+  const agentJobService = new FakeAgentJobService({ shouldFail: true });
+  const { service, agentLoggingService } = createService({ agentJobService });
+
+  await assert.rejects(
+    () =>
+      service.createRun(USER_ID, WORKSPACE_ID, {
+        prompt: "내일 회의 일정 만들어줘"
+      }),
+    (error) => {
+      assert.equal(error.getStatus(), 503);
+      assert.equal(errorCode(error), "SERVICE_UNAVAILABLE");
+      assert.equal(errorMessage(error), "Agent job could not be enqueued");
+      assert.doesNotMatch(
+        JSON.stringify(error.getResponse()),
+        /raw SQS failure|pilo-dev-ai-jobs/
+      );
+      return true;
+    }
+  );
+  assert.deepEqual(agentJobService.calls, [
+    {
+      jobType: "agent_run_requested",
+      runId: RUN_ID,
+      workspaceId: WORKSPACE_ID,
+      requestedByUserId: USER_ID
+    }
+  ]);
+  assert.deepEqual(agentLoggingService.failCalls, [
+    {
+      currentUserId: USER_ID,
+      workspaceId: WORKSPACE_ID,
+      input: {
+        runId: RUN_ID,
+        errorCode: "AGENT_JOB_ENQUEUE_FAILED",
+        errorMessage: "Agent job could not be enqueued",
+        message: "요청을 시작하지 못했습니다. 잠시 후 다시 시도해주세요."
+      }
+    }
+  ]);
 }
 
 {

@@ -4,8 +4,11 @@ import { badRequest, notFound } from "../../common/api-error";
 import { DatabaseService } from "../../database/database.service";
 import { WorkspaceService } from "../workspace/workspace.service";
 import { ListGithubProjectsV2Query } from "./dto";
+import { GithubAppClient } from "./github-app.client";
+import { GithubProjectV2WriteService } from "./github-project-v2-write.service";
 import type {
   GithubPaginatedPayload,
+  GithubProjectV2AccessStatusPayload,
   GithubProjectV2DetailPayload,
   GithubProjectV2FieldPayload,
   GithubProjectV2ItemContentType,
@@ -116,7 +119,9 @@ const MAX_PAGE_LIMIT = 100;
 export class GithubProjectV2Service {
   constructor(
     private readonly database: DatabaseService,
-    private readonly workspaceService: WorkspaceService
+    private readonly workspaceService: WorkspaceService,
+    private readonly githubAppClient: GithubAppClient,
+    private readonly githubProjectV2WriteService: GithubProjectV2WriteService
   ) {}
 
   async listGithubProjectsV2(
@@ -174,6 +179,45 @@ export class GithubProjectV2Service {
     }
 
     return this.mapGithubProjectV2Detail(row);
+  }
+
+  async getGithubProjectV2AccessStatus(
+    currentUserId: string,
+    workspaceId: string,
+    projectV2Id: string
+  ): Promise<GithubProjectV2AccessStatusPayload> {
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+
+    const row = await this.findGithubProjectV2(workspaceId, projectV2Id);
+    if (!row) {
+      throw notFound("GitHub ProjectV2 not found");
+    }
+
+    const { accessToken, githubLogin } =
+      await this.githubProjectV2WriteService.getConnectedProjectV2OAuthAccess(
+        currentUserId
+      );
+    const { permission } =
+      await this.githubAppClient.getProjectV2PermissionLevel({
+        ownerLogin: row.owner_login,
+        ownerType: row.owner_type,
+        projectNodeId: row.github_project_node_id,
+        userAccessToken: accessToken
+      });
+
+    return {
+      project: {
+        id: row.id,
+        title: row.title,
+        ownerLogin: row.owner_login
+      },
+      githubLogin,
+      permission,
+      hasAccess: permission !== null,
+      canUpdate: permission === "ADMIN" || permission === "WRITE",
+      canManageAccess: permission === "ADMIN",
+      checkedAt: new Date().toISOString()
+    };
   }
 
   async listGithubProjectV2Fields(

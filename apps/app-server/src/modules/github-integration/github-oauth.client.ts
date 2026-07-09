@@ -47,11 +47,26 @@ export interface GithubPullRequestReviewSubmissionResponse {
   githubReviewUrl: string | null;
 }
 
+export interface GithubRepositoryCollaboratorPermissionRequest {
+  accessToken: string;
+  owner: string;
+  repo: string;
+  username: string;
+}
+
+export interface GithubRepositoryCollaboratorPermissionResponse {
+  permission: string | null;
+}
+
 interface GithubUserInstallationsApiPayload {
   total_count?: number;
   installations?: Array<{
     id?: number;
   }>;
+}
+
+interface GithubRepositoryCollaboratorPermissionApiPayload {
+  permission?: unknown;
 }
 
 interface GithubPullRequestReviewApiPayload {
@@ -213,6 +228,57 @@ export class GithubOAuthClient {
     };
   }
 
+  async getRepositoryCollaboratorPermission(
+    input: GithubRepositoryCollaboratorPermissionRequest
+  ): Promise<GithubRepositoryCollaboratorPermissionResponse> {
+    const url = new URL(
+      `https://api.github.com/repos/${encodeURIComponent(input.owner)}/${encodeURIComponent(input.repo)}/collaborators/${encodeURIComponent(input.username)}/permission`
+    );
+
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        headers: {
+          Accept: "application/vnd.github+json",
+          Authorization: `Bearer ${input.accessToken}`,
+          "X-GitHub-Api-Version": GITHUB_API_VERSION
+        }
+      });
+    } catch {
+      throw badRequest("GitHub repository collaborator permission lookup failed");
+    }
+
+    if (response.status === 404) {
+      return {
+        permission: null
+      };
+    }
+
+    if (response.status === 401) {
+      throw badRequest("GitHub OAuth connection is invalid");
+    }
+
+    if (response.status === 403) {
+      throw forbidden("GitHub repository permission lookup is forbidden");
+    }
+
+    if (!response.ok) {
+      throw badRequest("GitHub repository collaborator permission lookup failed");
+    }
+
+    const payload = await this.readJson(
+      response,
+      "GitHub repository collaborator permission lookup failed"
+    );
+    if (!this.isRepositoryCollaboratorPermissionPayload(payload)) {
+      throw badRequest("GitHub repository collaborator permission lookup failed");
+    }
+
+    return {
+      permission: payload.permission
+    };
+  }
+
   private async fetchUserInstallationsPage(
     accessToken: string,
     page: number,
@@ -294,6 +360,19 @@ export class GithubOAuthClient {
     value: unknown
   ): value is GithubPullRequestReviewApiPayload {
     return typeof value === "object" && value !== null && !Array.isArray(value);
+  }
+
+  private isRepositoryCollaboratorPermissionPayload(
+    value: unknown
+  ): value is { permission: string } {
+    return (
+      typeof value === "object" &&
+      value !== null &&
+      !Array.isArray(value) &&
+      "permission" in value &&
+      typeof (value as GithubRepositoryCollaboratorPermissionApiPayload)
+        .permission === "string"
+    );
   }
 
   private isUserInstallationsPayload(

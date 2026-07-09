@@ -16,6 +16,7 @@ SAFE_STT_ERROR = "Meeting recording could not be transcribed."
 SAFE_LLM_ERROR = "Meeting report could not be generated."
 SAFE_AUDIO_MISSING_ERROR = "Meeting recording audio file is unavailable."
 SAFE_AUDIO_TOO_LARGE_ERROR = "Meeting recording audio file exceeds the 25 MB transcription limit."
+AGENT_RUN_REQUESTED_JOB_TYPE = "agent_run_requested"
 
 
 @dataclass(frozen=True)
@@ -147,6 +148,11 @@ class MeetingReportProcessor:
         try:
             job = parse_meeting_report_job(message_body)
         except ValueError:
+            if _is_agent_run_requested_job(message_body):
+                return ProcessResult(
+                    delete_message=False,
+                    reason="agent_run_requested_not_implemented",
+                )
             return ProcessResult(delete_message=True, reason="invalid_job")
 
         lock_acquired = self.repository.try_acquire_report_lock(job.report_id)
@@ -287,6 +293,15 @@ def serialize_action_items(action_items: list[ActionItemCandidate]) -> str:
         ],
         ensure_ascii=False,
     )
+
+
+def _is_agent_run_requested_job(message_body: str) -> bool:
+    try:
+        payload = json.loads(message_body)
+    except json.JSONDecodeError:
+        return False
+
+    return isinstance(payload, dict) and payload.get("jobType") == AGENT_RUN_REQUESTED_JOB_TYPE
 
 
 def _parse_action_item(value: object) -> ActionItemCandidate:

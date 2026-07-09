@@ -14,12 +14,23 @@ import {
   FileText,
   GitPullRequest,
   ListChecks,
+  LogOut,
   Send,
   UserPlus,
   Users,
   XIcon
 } from "lucide-react";
 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle
+} from "@/components/ui/alert-dialog";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -46,6 +57,9 @@ import {
 import { Separator } from "@/components/ui/separator";
 import {
   createWorkspaceInvitation,
+  leaveWorkspace,
+  listWorkspaceInvitations,
+  listWorkspaceMembers,
   removeWorkspaceMember,
   revokeWorkspaceInvitation,
   type WorkspaceInvitation,
@@ -53,7 +67,11 @@ import {
 } from "@/features/auth/api/client";
 import { useAuthSession } from "@/features/auth/auth-session";
 import { createBoardApiClient } from "@/features/board/api/client";
-import type { BoardIssueCardPayload, BoardPayload } from "@/features/board/types";
+import type {
+  BoardIssueCardPayload,
+  BoardPayload,
+  BoardProjectPayload
+} from "@/features/board/types";
 import { createCalendarApiClient } from "@/features/calendar/api/client";
 import type { CalendarEvent } from "@/features/calendar/types";
 import {
@@ -62,8 +80,11 @@ import {
 } from "@/features/canvas/api/canvas-client";
 import { createGithubIntegrationApiClient } from "@/features/github-integration/api/client";
 import type {
+  GithubOAuthStatus,
   GithubPullRequest,
-  GithubRepository
+  GithubProjectV2AccessStatus,
+  GithubRepository,
+  GithubRepositoryCollaboratorStatus
 } from "@/features/github-integration/types";
 import { readGithubBoardSelection } from "@/features/github-integration/utils/github-board-selection";
 import { createMeetingApiClient } from "@/features/meeting/api/client";
@@ -114,101 +135,24 @@ type HomeSqlErdState = {
   status: "idle" | "loading" | "success" | "error";
 };
 
-const mockWorkspaceMembers: WorkspaceMember[] = [
-  {
-    id: "membership_owner_001",
-    workspaceId: "workspace_pilo_preview",
-    userId: "user_donghyun",
-    role: "owner",
-    invitedByUserId: null,
-    joinedAt: "2026-07-04T09:00:00.000Z",
-    createdAt: "2026-07-04T09:00:00.000Z",
-    updatedAt: "2026-07-04T09:00:00.000Z",
-    user: {
-      id: "user_donghyun",
-      name: "동현",
-      email: "donghyun@pilo.local",
-      avatarUrl: null
-    }
-  },
-  {
-    id: "membership_member_002",
-    workspaceId: "workspace_pilo_preview",
-    userId: "user_sein",
-    role: "member",
-    invitedByUserId: "user_donghyun",
-    joinedAt: "2026-07-06T01:30:00.000Z",
-    createdAt: "2026-07-06T01:30:00.000Z",
-    updatedAt: "2026-07-06T01:30:00.000Z",
-    user: {
-      id: "user_sein",
-      name: "세인",
-      email: "sein@pilo.local",
-      avatarUrl: null
-    }
-  },
-  {
-    id: "membership_member_003",
-    workspaceId: "workspace_pilo_preview",
-    userId: "user_eunjae",
-    role: "member",
-    invitedByUserId: "user_donghyun",
-    joinedAt: "2026-07-07T02:20:00.000Z",
-    createdAt: "2026-07-07T02:20:00.000Z",
-    updatedAt: "2026-07-07T02:20:00.000Z",
-    user: {
-      id: "user_eunjae",
-      name: "은재",
-      email: "eunjae@pilo.local",
-      avatarUrl: null
-    }
-  },
-  {
-    id: "membership_member_004",
-    workspaceId: "workspace_pilo_preview",
-    userId: "user_juho",
-    role: "member",
-    invitedByUserId: "user_donghyun",
-    joinedAt: "2026-07-07T06:15:00.000Z",
-    createdAt: "2026-07-07T06:15:00.000Z",
-    updatedAt: "2026-07-07T06:15:00.000Z",
-    user: {
-      id: "user_juho",
-      name: "주호",
-      email: "juho@pilo.local",
-      avatarUrl: null
-    }
-  },
-  {
-    id: "membership_member_005",
-    workspaceId: "workspace_pilo_preview",
-    userId: "user_jinho",
-    role: "member",
-    invitedByUserId: "user_donghyun",
-    joinedAt: "2026-07-08T03:10:00.000Z",
-    createdAt: "2026-07-08T03:10:00.000Z",
-    updatedAt: "2026-07-08T03:10:00.000Z",
-    user: {
-      id: "user_jinho",
-      name: "진호",
-      email: "jinho@pilo.local",
-      avatarUrl: null
-    }
-  }
-];
+type HomeGithubOAuthState = {
+  error: Error | null;
+  status: "idle" | "loading" | "success" | "error";
+  value: GithubOAuthStatus | null;
+};
 
-const mockGithubConnectionStatus = {
-  account: "ndh5178",
-  repository: {
-    name: "PILO",
-    fullName: "PILO-APP/PILO",
-    hasCollaboratorAccess: true
-  },
-  project: {
-    title: "PILO Workspace",
-    owner: "PILO-APP",
-    hasAccess: false
-  }
+type HomeRepositoryAccessState = {
+  access: GithubRepositoryCollaboratorStatus | null;
+  error: Error | null;
+  repository: GithubRepository | null;
+  status: "idle" | "loading" | "success" | "error";
+};
+
+type HomeProjectAccessState = {
+  access: GithubProjectV2AccessStatus | null;
+  error: Error | null;
+  project: BoardProjectPayload | null;
+  status: "idle" | "loading" | "success" | "error";
 };
 
 export function HomeDashboard() {
@@ -228,7 +172,7 @@ export function HomeDashboard() {
 
   return (
     <section className="flex min-h-0 flex-1 flex-col gap-4">
-      <div className="grid min-h-0 gap-4 xl:grid-cols-[0.9fr_1.75fr_1fr] xl:grid-rows-[minmax(260px,0.95fr)_minmax(272px,0.96fr)_minmax(128px,0.44fr)]">
+      <div className="grid min-h-0 flex-1 gap-4 xl:grid-cols-[0.9fr_1.75fr_1fr] xl:grid-rows-[330px_minmax(272px,1fr)_128px]">
         <MembersCard />
         <CalendarCard
           issuesState={issuesState}
@@ -255,7 +199,16 @@ function MembersCard() {
   const [inviteUrl, setInviteUrl] = useState<string | null>(null);
   const [isInvitePopoverOpen, setIsInvitePopoverOpen] = useState(false);
   const [isInviteSubmitting, setIsInviteSubmitting] = useState(false);
-  const [members, setMembers] = useState<WorkspaceMember[]>(mockWorkspaceMembers);
+  const [isLeaveDialogOpen, setIsLeaveDialogOpen] = useState(false);
+  const [isLeavingWorkspace, setIsLeavingWorkspace] = useState(false);
+  const [leaveWorkspaceError, setLeaveWorkspaceError] = useState<string | null>(
+    null
+  );
+  const [members, setMembers] = useState<WorkspaceMember[]>([]);
+  const [membersError, setMembersError] = useState<string | null>(null);
+  const [membersStatus, setMembersStatus] = useState<
+    "idle" | "loading" | "success" | "error"
+  >("idle");
   const [pendingInvitations, setPendingInvitations] = useState<
     WorkspaceInvitation[]
   >([]);
@@ -278,6 +231,74 @@ function MembersCard() {
   const currentUserId = authSession?.user.id ?? null;
   const onlineMembers = members;
   const offlineMembers: WorkspaceMember[] = [];
+  const canLeaveWorkspace = Boolean(activeWorkspace) && !canManageWorkspace;
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadWorkspaceMembers() {
+      if (!authSession || !activeWorkspace) {
+        setMembers([]);
+        setMembersError(null);
+        setMembersStatus("idle");
+        setPendingInvitations([]);
+        return;
+      }
+
+      setMembersStatus("loading");
+      setMembersError(null);
+
+      try {
+        const workspaceMembers = await listWorkspaceMembers(
+          authSession.accessToken,
+          activeWorkspace.id
+        );
+
+        if (!active) {
+          return;
+        }
+
+        setMembers(workspaceMembers);
+        setMembersStatus("success");
+
+        if (canManageWorkspace) {
+          try {
+            const invitations = await listWorkspaceInvitations(
+              authSession.accessToken,
+              activeWorkspace.id
+            );
+
+            if (active) {
+              setPendingInvitations(invitations);
+            }
+          } catch {
+            if (active) {
+              setPendingInvitations([]);
+            }
+          }
+        } else {
+          setPendingInvitations([]);
+        }
+      } catch (error) {
+        if (!active) {
+          return;
+        }
+
+        setMembers([]);
+        setMembersStatus("error");
+        setMembersError(
+          error instanceof Error ? error.message : "멤버 목록을 불러오지 못했습니다"
+        );
+        setPendingInvitations([]);
+      }
+    }
+
+    void loadWorkspaceMembers();
+
+    return () => {
+      active = false;
+    };
+  }, [activeWorkspace, authSession, canManageWorkspace]);
 
   const handleSubmitInvitation = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -396,94 +417,136 @@ function MembersCard() {
       });
   };
 
+  const handleLeaveWorkspace = () => {
+    if (!authSession || !activeWorkspace || !canLeaveWorkspace) {
+      return;
+    }
+
+    const nextWorkspaceId = authSession.workspaces.find(
+      (workspace) => workspace.id !== activeWorkspace.id
+    )?.id;
+
+    setLeaveWorkspaceError(null);
+    setIsLeavingWorkspace(true);
+
+    void leaveWorkspace(authSession.accessToken, activeWorkspace.id)
+      .then(async () => {
+        setIsLeaveDialogOpen(false);
+        await authSession.refreshSession(nextWorkspaceId);
+      })
+      .catch((error: unknown) => {
+        setLeaveWorkspaceError(
+          error instanceof Error ? error.message : "워크스페이스 나가기에 실패했습니다"
+        );
+      })
+      .finally(() => {
+        setIsLeavingWorkspace(false);
+      });
+  };
+
   return (
     <>
       <DashboardCard
         className="border-[#1E1F22] bg-[#2B2D31] text-[#F2F3F5] shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_10px_24px_rgba(15,23,42,0.12)] xl:row-start-1 [&_[data-slot=card-action]_button]:border-[#3F4147] [&_[data-slot=card-action]_button]:bg-[#313338] [&_[data-slot=card-action]_button]:text-[#F2F3F5] [&_[data-slot=card-action]_button:hover]:bg-[#404249] [&_[data-slot=card-title]>span]:border-[#3F4147] [&_[data-slot=card-title]>span]:bg-[#313338] [&_[data-slot=card-title]>span]:text-[#B5BAC1] [&_[data-slot=card-title]]:text-[#F2F3F5]"
         action={
-          <Popover
-            open={isInvitePopoverOpen}
-            onOpenChange={(open) => {
-              setIsInvitePopoverOpen(open);
-              if (open) {
-                setInviteError(null);
-                setInviteStatus(null);
-                setInviteUrl(null);
-              }
-            }}
-          >
-            <PopoverTrigger
-              render={
-                <Button aria-label="멤버 초대 열기" size="sm" variant="outline" />
-              }
+          canManageWorkspace ? (
+            <Popover
+              open={isInvitePopoverOpen}
+              onOpenChange={(open) => {
+                setIsInvitePopoverOpen(open);
+                if (open) {
+                  setInviteError(null);
+                  setInviteStatus(null);
+                  setInviteUrl(null);
+                }
+              }}
             >
-              <UserPlus />
-              초대
-            </PopoverTrigger>
-            <PopoverContent
-              align="center"
-              className="z-[100] w-64 border-[#3F4147] bg-[#313338] p-2.5 text-[#F2F3F5] shadow-xl shadow-slate-950/25"
-              side="right"
-              sideOffset={10}
+              <PopoverTrigger
+                render={
+                  <Button aria-label="멤버 초대 열기" size="sm" variant="outline" />
+                }
+              >
+                <UserPlus />
+                초대
+              </PopoverTrigger>
+              <PopoverContent
+                align="center"
+                className="z-[100] w-64 border-[#3F4147] bg-[#313338] p-2.5 text-[#F2F3F5] shadow-xl shadow-slate-950/25"
+                side="right"
+                sideOffset={10}
+              >
+                <form className="grid gap-2" onSubmit={handleSubmitInvitation}>
+                  <div className="flex items-center gap-1.5">
+                    <Input
+                      aria-label="초대 이메일"
+                      className="h-7 rounded-lg border-[#3F4147] bg-[#1E1F22] text-xs text-[#F2F3F5] placeholder:text-[#80848E] focus-visible:border-[#5865F2] focus-visible:ring-[#5865F2]/35"
+                      disabled={isInviteSubmitting}
+                      inputMode="email"
+                      onChange={(event) => setInviteEmail(event.target.value)}
+                      placeholder="이메일"
+                      type="email"
+                      value={inviteEmail}
+                    />
+                    <Button
+                      className="bg-[#5865F2] text-white hover:bg-[#4752C4]"
+                      disabled={isInviteSubmitting || inviteEmail.trim() === ""}
+                      size="sm"
+                      type="submit"
+                    >
+                      <Send />
+                      {isInviteSubmitting ? "초대 중" : "초대"}
+                    </Button>
+                  </div>
+                  {inviteError ? (
+                    <p className="text-xs text-[#F23F42]">{inviteError}</p>
+                  ) : null}
+                  {inviteStatus ? (
+                    <p className="text-xs text-[#B5BAC1]">{inviteStatus}</p>
+                  ) : null}
+                  {inviteUrl ? (
+                    <p className="break-all rounded-lg border border-[#3F4147] bg-[#1E1F22] p-2 text-xs text-[#B5BAC1]">
+                      {inviteUrl}
+                    </p>
+                  ) : null}
+                </form>
+              </PopoverContent>
+            </Popover>
+          ) : (
+            <Button
+              aria-label="워크스페이스 나가기"
+              disabled={!canLeaveWorkspace}
+              onClick={() => {
+                setLeaveWorkspaceError(null);
+                setIsLeaveDialogOpen(true);
+              }}
+              size="sm"
+              variant="outline"
             >
-              <form className="grid gap-2" onSubmit={handleSubmitInvitation}>
-                <div className="flex items-center gap-1.5">
-                  <Input
-                    aria-label="초대 이메일"
-                    className="h-7 rounded-lg border-[#3F4147] bg-[#1E1F22] text-xs text-[#F2F3F5] placeholder:text-[#80848E] focus-visible:border-[#5865F2] focus-visible:ring-[#5865F2]/35"
-                    disabled={!canManageWorkspace || isInviteSubmitting}
-                    inputMode="email"
-                    onChange={(event) => setInviteEmail(event.target.value)}
-                    placeholder="이메일"
-                    type="email"
-                    value={inviteEmail}
-                  />
-                  <Button
-                    className="bg-[#5865F2] text-white hover:bg-[#4752C4]"
-                    disabled={
-                      !canManageWorkspace ||
-                      isInviteSubmitting ||
-                      inviteEmail.trim() === ""
-                    }
-                    size="sm"
-                    type="submit"
-                  >
-                    <Send />
-                    {isInviteSubmitting ? "초대 중" : "초대"}
-                  </Button>
-                </div>
-                {!canManageWorkspace ? (
-                  <p className="text-xs text-[#B5BAC1]">
-                    Owner 권한이 있는 workspace에서만 멤버를 초대할 수 있습니다.
-                  </p>
-                ) : null}
-                {inviteError ? (
-                  <p className="text-xs text-[#F23F42]">{inviteError}</p>
-                ) : null}
-                {inviteStatus ? (
-                  <p className="text-xs text-[#B5BAC1]">{inviteStatus}</p>
-                ) : null}
-                {inviteUrl ? (
-                  <p className="break-all rounded-lg border border-[#3F4147] bg-[#1E1F22] p-2 text-xs text-[#B5BAC1]">
-                    {inviteUrl}
-                  </p>
-                ) : null}
-              </form>
-            </PopoverContent>
-          </Popover>
+              <LogOut />
+              나가기
+            </Button>
+          )
         }
         description={null}
         icon={<Users className="size-4" />}
         title="멤버"
       >
         <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
-          <MemberPresencePanel
-            offlineMembers={offlineMembers}
-            onlineMembers={onlineMembers}
-            onSelectMember={setSelectedMember}
-            selectedView={memberPresenceView}
-            setSelectedView={setMemberPresenceView}
-          />
+          {membersStatus === "loading" ? (
+            <MemberCardMessage>멤버 불러오는 중</MemberCardMessage>
+          ) : membersStatus === "error" ? (
+            <MemberCardMessage tone="danger">
+              {membersError ?? "멤버 목록을 불러오지 못했습니다"}
+            </MemberCardMessage>
+          ) : (
+            <MemberPresencePanel
+              offlineMembers={offlineMembers}
+              onlineMembers={onlineMembers}
+              onSelectMember={setSelectedMember}
+              selectedView={memberPresenceView}
+              setSelectedView={setMemberPresenceView}
+            />
+          )}
           {pendingInvitations
             .filter((invitation) => invitation.status === "pending")
             .map((invitation) => (
@@ -528,6 +591,39 @@ function MembersCard() {
         onClose={() => setSelectedMember(null)}
         onRemoveMember={handleRemoveMember}
       />
+      <AlertDialog
+        open={isLeaveDialogOpen}
+        onOpenChange={(open) => {
+          if (!isLeavingWorkspace) {
+            setIsLeaveDialogOpen(open);
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>워크스페이스에서 나갈까요?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {activeWorkspace?.name ?? "현재 workspace"}에서 나가면 이 workspace의
+              기능과 데이터에 접근할 수 없습니다.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {leaveWorkspaceError ? (
+            <p className="text-sm text-destructive">{leaveWorkspaceError}</p>
+          ) : null}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isLeavingWorkspace}>
+              취소
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={isLeavingWorkspace || !canLeaveWorkspace}
+              onClick={handleLeaveWorkspace}
+              variant="destructive"
+            >
+              {isLeavingWorkspace ? "나가는 중" : "나가기"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }
@@ -647,6 +743,11 @@ function MemberPresenceList({
         .join(" ")}
     >
       <div className="grid min-h-0 content-start gap-1.5 overflow-y-auto py-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {members.length === 0 ? (
+          <div className="rounded-md border border-[#3F4147] bg-[#313338] px-2 py-3 text-center text-xs text-[#B5BAC1]">
+            표시할 멤버가 없습니다
+          </div>
+        ) : null}
         {members.map((member) => (
           <button
             key={member.id}
@@ -815,28 +916,126 @@ function MiddleDashboardCards({
 }
 
 function GithubConnectionCard() {
+  const authSession = useAuthSession();
+  const githubOAuthState = useHomeGithubOAuthStatus({
+    accessToken: authSession?.accessToken ?? null
+  });
+  const githubOAuth = githubOAuthState.value;
+  const isGithubConnected = githubOAuth?.connected === true;
+  const repositoryAccessState = useHomeRepositoryAccess({
+    accessToken: isGithubConnected ? (authSession?.accessToken ?? null) : null,
+    workspaceId: authSession?.activeWorkspaceId ?? ""
+  });
+  const projectAccessState = useHomeProjectAccess({
+    accessToken: authSession?.accessToken ?? null,
+    workspaceId: authSession?.activeWorkspaceId ?? ""
+  });
+  const githubLogin = githubOAuth?.githubLogin?.trim() || null;
+  const githubStatusLabel =
+    githubOAuthState.status === "loading"
+      ? "확인 중"
+      : isGithubConnected
+        ? "연결됨"
+        : githubOAuthState.status === "error"
+          ? "확인 실패"
+          : "미연결";
+  const githubStatusTone =
+    githubOAuthState.status === "loading"
+      ? "bg-muted-foreground"
+      : isGithubConnected
+        ? "bg-emerald-500"
+        : "bg-red-500";
+  const githubAccountLabel =
+    githubOAuthState.status === "loading"
+      ? "확인 중"
+      : githubLogin
+        ? `@${githubLogin}`
+        : githubOAuthState.status === "error"
+          ? "확인 실패"
+          : "연결 필요";
+  const githubAccountClassName =
+    githubOAuthState.status === "error"
+      ? "text-red-600"
+      : isGithubConnected
+        ? "text-foreground"
+        : "text-muted-foreground";
+  const repositoryLabel =
+    repositoryAccessState.repository?.fullName ??
+    repositoryAccessState.access?.repository.fullName ??
+    (repositoryAccessState.status === "loading"
+      ? "확인 중"
+      : repositoryAccessState.status === "error"
+        ? "Repository 확인 실패"
+        : "연결된 Repository 없음");
+  const repositoryAccessLabel =
+    repositoryAccessState.status === "loading"
+      ? "확인 중"
+      : repositoryAccessState.status === "error"
+        ? "확인 실패"
+        : repositoryAccessState.access?.hasAccess === true
+          ? "권한 있음"
+          : repositoryAccessState.repository
+            ? "권한 없음"
+            : "없음";
+  const repositoryAccessTone: "danger" | "muted" | "neutral" | "success" =
+    repositoryAccessState.status === "loading" ||
+    (!repositoryAccessState.repository &&
+      repositoryAccessState.status !== "error")
+      ? "muted"
+      : repositoryAccessState.access?.hasAccess === true
+        ? "success"
+        : "danger";
+  const projectLabel =
+    projectAccessState.project?.title ??
+    projectAccessState.access?.project.title ??
+    (projectAccessState.status === "loading"
+      ? "확인 중"
+      : projectAccessState.status === "error"
+        ? "Project 확인 실패"
+        : "연결된 Project 없음");
+  const projectAccessLabel =
+    projectAccessState.status === "loading"
+      ? "확인 중"
+      : projectAccessState.status === "error"
+        ? "확인 실패"
+        : projectAccessState.access?.permission
+          ? projectAccessState.access.permission
+          : projectAccessState.project
+            ? "권한 없음"
+            : "없음";
+  const projectAccessTone: "danger" | "muted" | "neutral" | "success" =
+    projectAccessState.status === "loading" ||
+    (!projectAccessState.project && projectAccessState.status !== "error")
+      ? "muted"
+      : projectAccessState.access?.permission === "ADMIN" ||
+          projectAccessState.access?.permission === "WRITE"
+        ? "success"
+        : projectAccessState.access?.permission === "READ"
+          ? "neutral"
+          : "danger";
+
   return (
     <div className="grid min-h-0 grid-rows-[repeat(3,minmax(0,1fr))] gap-3 xl:col-start-3 xl:row-start-1">
       <Card
         className="min-h-0 bg-[linear-gradient(180deg,#f8fafc_0%,#ffffff_100%)] shadow-sm"
         size="sm"
       >
-        <CardContent className="flex min-h-0 flex-1 flex-col justify-center gap-2">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex min-w-0 items-center gap-2">
-              <span className="flex size-7 shrink-0 items-center justify-center rounded-lg border bg-background text-muted-foreground">
-                <GithubMarkIcon className="size-4" />
-              </span>
-              <p className="truncate text-sm font-medium">GitHub 연결</p>
-            </div>
-            <span className="inline-flex items-center gap-1 rounded-md border bg-background px-2 py-1 text-xs text-muted-foreground">
-              <span className="size-1.5 rounded-full bg-emerald-500" />
-              연결됨
+        <CardContent className="flex min-h-0 flex-1 items-center justify-between gap-3">
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            <span className="flex size-7 shrink-0 items-center justify-center rounded-lg border bg-background text-muted-foreground">
+              <GithubMarkIcon className="size-4" />
             </span>
+            <p className="shrink-0 text-sm font-medium">GitHub 연결</p>
+            <p
+              className={`min-w-0 flex-1 truncate text-sm font-semibold ${githubAccountClassName}`}
+            >
+              {githubAccountLabel}
+            </p>
           </div>
-          <p className="truncate text-xs text-muted-foreground">
-            @{mockGithubConnectionStatus.account}
-          </p>
+          <span className="inline-flex shrink-0 items-center gap-1 rounded-md border bg-background px-2 py-1 text-xs text-muted-foreground">
+            <span className={`size-1.5 rounded-full ${githubStatusTone}`} />
+            {githubStatusLabel}
+          </span>
         </CardContent>
       </Card>
       <Card
@@ -852,20 +1051,12 @@ function GithubConnectionCard() {
               <p className="truncate text-sm font-medium">Repository</p>
             </div>
             <StatusPill
-              label={
-                mockGithubConnectionStatus.repository.hasCollaboratorAccess
-                  ? "권한 있음"
-                  : "권한 없음"
-              }
-              tone={
-                mockGithubConnectionStatus.repository.hasCollaboratorAccess
-                  ? "success"
-                  : "danger"
-              }
+              label={repositoryAccessLabel}
+              tone={repositoryAccessTone}
             />
           </div>
           <p className="truncate text-sm font-medium">
-            {mockGithubConnectionStatus.repository.fullName}
+            {repositoryLabel}
           </p>
         </CardContent>
       </Card>
@@ -882,21 +1073,11 @@ function GithubConnectionCard() {
               <p className="truncate text-sm font-medium">Project</p>
             </div>
             <StatusPill
-              label={
-                mockGithubConnectionStatus.project.hasAccess
-                  ? "권한 있음"
-                  : "권한 없음"
-              }
-              tone={
-                mockGithubConnectionStatus.project.hasAccess
-                  ? "success"
-                  : "danger"
-              }
+              label={projectAccessLabel}
+              tone={projectAccessTone}
             />
           </div>
-          <p className="truncate text-sm font-medium">
-            {mockGithubConnectionStatus.project.title}
-          </p>
+          <p className="truncate text-sm font-medium">{projectLabel}</p>
         </CardContent>
       </Card>
     </div>
@@ -972,6 +1153,24 @@ function buildMeetingReportHref(reportId: string) {
   });
 
   return `/meeting?${searchParams.toString()}#report`;
+}
+
+function MemberCardMessage({
+  children,
+  tone = "muted"
+}: {
+  children: ReactNode;
+  tone?: "danger" | "muted";
+}) {
+  return (
+    <div
+      className={`flex min-h-0 flex-1 items-center justify-center rounded-md border border-[#3F4147] bg-[#313338] p-3 text-center text-xs font-medium ${
+        tone === "danger" ? "text-[#F23F42]" : "text-[#B5BAC1]"
+      }`}
+    >
+      {children}
+    </div>
+  );
 }
 
 function IssuesCard({ issuesState }: { issuesState: HomeIssuesState }) {
@@ -1257,7 +1456,7 @@ function DashboardCard({
   titleClassName?: string;
 }) {
   return (
-    <Card className={`relative ${className ?? ""} shadow-sm`} size="sm">
+    <Card className={`relative h-full min-h-0 ${className ?? ""} shadow-sm`} size="sm">
       {background ? (
         <div aria-hidden="true" className="pointer-events-none absolute inset-0">
           {background}
@@ -1867,6 +2066,311 @@ const emptyHomeSqlErdState: HomeSqlErdState = {
   session: null,
   status: "idle"
 };
+
+const emptyHomeGithubOAuthState: HomeGithubOAuthState = {
+  error: null,
+  status: "idle",
+  value: null
+};
+
+const emptyHomeRepositoryAccessState: HomeRepositoryAccessState = {
+  access: null,
+  error: null,
+  repository: null,
+  status: "idle"
+};
+
+const emptyHomeProjectAccessState: HomeProjectAccessState = {
+  access: null,
+  error: null,
+  project: null,
+  status: "idle"
+};
+
+function useHomeGithubOAuthStatus({
+  accessToken
+}: {
+  accessToken: string | null;
+}) {
+  const normalizedAccessToken = accessToken?.trim() || null;
+  const githubClient = useMemo(
+    () =>
+      createGithubIntegrationApiClient({
+        accessToken: normalizedAccessToken
+      }),
+    [normalizedAccessToken]
+  );
+  const [state, setState] = useState<HomeGithubOAuthState>(
+    emptyHomeGithubOAuthState
+  );
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadGithubOAuthStatus() {
+      if (!normalizedAccessToken) {
+        setState(emptyHomeGithubOAuthState);
+        return;
+      }
+
+      setState({
+        ...emptyHomeGithubOAuthState,
+        status: "loading"
+      });
+
+      try {
+        const value = await githubClient.getGithubOAuthStatus();
+
+        if (active) {
+          setState({
+            error: null,
+            status: "success",
+            value
+          });
+        }
+      } catch (error) {
+        if (active) {
+          setState({
+            error: error instanceof Error ? error : new Error(String(error)),
+            status: "error",
+            value: null
+          });
+        }
+      }
+    }
+
+    void loadGithubOAuthStatus();
+
+    return () => {
+      active = false;
+    };
+  }, [githubClient, normalizedAccessToken]);
+
+  return state;
+}
+
+function useHomeRepositoryAccess({
+  accessToken,
+  workspaceId
+}: {
+  accessToken: string | null;
+  workspaceId: string;
+}) {
+  const normalizedAccessToken = accessToken?.trim() || null;
+  const normalizedWorkspaceId = workspaceId.trim();
+  const githubClient = useMemo(
+    () =>
+      createGithubIntegrationApiClient({
+        accessToken: normalizedAccessToken
+      }),
+    [normalizedAccessToken]
+  );
+  const [state, setState] = useState<HomeRepositoryAccessState>(
+    emptyHomeRepositoryAccessState
+  );
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadRepositoryAccess() {
+      if (!normalizedAccessToken || !normalizedWorkspaceId) {
+        setState(emptyHomeRepositoryAccessState);
+        return;
+      }
+
+      setState({
+        ...emptyHomeRepositoryAccessState,
+        status: "loading"
+      });
+
+      try {
+        const repositories = await githubClient.listGithubRepositories(
+          normalizedWorkspaceId,
+          {
+            includeArchived: false,
+            limit: 50
+          }
+        );
+        const repositoryId = selectHomeRepositoryId(
+          repositories.data,
+          normalizedWorkspaceId
+        );
+        const repository =
+          repositories.data.find((item) => item.id === repositoryId) ?? null;
+
+        if (!repository) {
+          if (active) {
+            setState({
+              ...emptyHomeRepositoryAccessState,
+              status: "success"
+            });
+          }
+          return;
+        }
+
+        try {
+          const access =
+            await githubClient.getGithubRepositoryCollaboratorStatus(
+              normalizedWorkspaceId,
+              repository.id
+            );
+
+          if (active) {
+            setState({
+              access,
+              error: null,
+              repository,
+              status: "success"
+            });
+          }
+        } catch (error) {
+          if (active) {
+            setState({
+              access: null,
+              error: errorFromUnknown(error),
+              repository,
+              status: "error"
+            });
+          }
+        }
+      } catch (error) {
+        if (active) {
+          setState({
+            access: null,
+            error: errorFromUnknown(error),
+            repository: null,
+            status: "error"
+          });
+        }
+      }
+    }
+
+    void loadRepositoryAccess();
+
+    return () => {
+      active = false;
+    };
+  }, [githubClient, normalizedAccessToken, normalizedWorkspaceId]);
+
+  return state;
+}
+
+function useHomeProjectAccess({
+  accessToken,
+  workspaceId
+}: {
+  accessToken: string | null;
+  workspaceId: string;
+}) {
+  const normalizedAccessToken = accessToken?.trim() || null;
+  const normalizedWorkspaceId = workspaceId.trim();
+  const boardClient = useMemo(
+    () => createBoardApiClient({ accessToken: normalizedAccessToken }),
+    [normalizedAccessToken]
+  );
+  const githubClient = useMemo(
+    () =>
+      createGithubIntegrationApiClient({
+        accessToken: normalizedAccessToken
+      }),
+    [normalizedAccessToken]
+  );
+  const [state, setState] = useState<HomeProjectAccessState>(
+    emptyHomeProjectAccessState
+  );
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadProjectAccess() {
+      if (!normalizedAccessToken || !normalizedWorkspaceId) {
+        setState(emptyHomeProjectAccessState);
+        return;
+      }
+
+      setState({
+        ...emptyHomeProjectAccessState,
+        status: "loading"
+      });
+
+      try {
+        const boards = await boardClient.listBoards(normalizedWorkspaceId, {
+          limit: 50
+        });
+        const board = selectHomeBoard(boards.data, normalizedWorkspaceId);
+        const project = board?.project ?? null;
+
+        if (!project) {
+          if (active) {
+            setState({
+              ...emptyHomeProjectAccessState,
+              status: "success"
+            });
+          }
+          return;
+        }
+
+        const projectOAuth = await githubClient
+          .getGithubProjectOAuthStatus()
+          .catch(() => null);
+
+        if (projectOAuth?.connected !== true) {
+          if (active) {
+            setState({
+              access: null,
+              error: null,
+              project,
+              status: "success"
+            });
+          }
+          return;
+        }
+
+        try {
+          const access = await githubClient.getGithubProjectV2AccessStatus(
+            normalizedWorkspaceId,
+            project.id
+          );
+
+          if (active) {
+            setState({
+              access,
+              error: null,
+              project,
+              status: "success"
+            });
+          }
+        } catch (error) {
+          if (active) {
+            setState({
+              access: null,
+              error: errorFromUnknown(error),
+              project,
+              status: "error"
+            });
+          }
+        }
+      } catch (error) {
+        if (active) {
+          setState({
+            access: null,
+            error: errorFromUnknown(error),
+            project: null,
+            status: "error"
+          });
+        }
+      }
+    }
+
+    void loadProjectAccess();
+
+    return () => {
+      active = false;
+    };
+  }, [boardClient, githubClient, normalizedAccessToken, normalizedWorkspaceId]);
+
+  return state;
+}
 
 function useHomeIssues({
   accessToken,

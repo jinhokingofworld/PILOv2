@@ -3,7 +3,8 @@ import { HttpException, HttpStatus } from "@nestjs/common";
 type AgentApiErrorCode =
   | "CLIENT_REQUEST_ID_CONFLICT"
   | "CONFIRMATION_EXPIRED"
-  | "CONFIRMATION_NOT_PENDING";
+  | "CONFIRMATION_NOT_PENDING"
+  | "SERVICE_UNAVAILABLE";
 
 function agentApiError(
   status: HttpStatus,
@@ -38,6 +39,14 @@ export function clientRequestIdConflict(message: string): HttpException {
   return agentApiError(
     HttpStatus.CONFLICT,
     "CLIENT_REQUEST_ID_CONFLICT",
+    message
+  );
+}
+
+export function agentJobUnavailable(message: string): HttpException {
+  return agentApiError(
+    HttpStatus.SERVICE_UNAVAILABLE,
+    "SERVICE_UNAVAILABLE",
     message
   );
 }
