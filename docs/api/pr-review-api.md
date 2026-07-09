@@ -49,6 +49,8 @@ comment, PR merge/close, ProjectV2 write는 이 문서의 범위가 아니다.
 | `reviewSubmission.submitType` | `COMMENT`, `APPROVE`, `REQUEST_CHANGES` |
 | `reviewSubmission.githubSubmitStatus` | `not_submitted`, `submitting`, `submitted`, `failed` |
 | `conflictStatus` | `checking`, `clean`, `conflicted`, `unknown` |
+| `conflictFile.type` | `content`, `modify_delete`, `rename_modify`, `add_add`, `unsupported` |
+| `conflictFile.resolutionStatus` | `unresolved`, `suggested`, `applied` |
 | `diff.mode` | `side_by_side`, `binary`, `large` |
 
 ## API 목록
@@ -62,6 +64,7 @@ comment, PR merge/close, ProjectV2 write는 이 문서의 범위가 아니다.
 | `GET` | `/workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}/summary` | PR 요약 패널 조회 |
 | `GET` | `/workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}/result` | 전체 리뷰 결과 조회 |
 | `GET` | `/workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}/canvas` | 리뷰 canvas view model 조회 |
+| `GET` | `/workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}/conflicts` | Post-MVP read-only conflict 분석 조회 |
 | `GET` | `/workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}/flows` | Flow 목록 조회 |
 | `GET` | `/workspaces/{workspaceId}/github/review-flows/{flowId}/files` | Flow에 속한 file 목록 조회 |
 | `GET` | `/workspaces/{workspaceId}/github/review-files/{reviewFileId}` | Review file 상세 조회 |
@@ -435,6 +438,89 @@ Binary 또는 large diff 응답:
   }
 }
 ```
+
+## Conflict Analysis 조회
+
+Post-MVP Phase 1-B에서 구현할 read-only conflict 분석 계약이다.
+초기 구현은 conflict 정보를 저장하지 않고 요청 시 계산하며, PR head branch를 수정하거나
+GitHub merge API를 호출하지 않는다.
+
+```http
+GET /api/v1/workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}/conflicts
+```
+
+응답:
+
+```json
+{
+  "success": true,
+  "data": {
+    "reviewSessionId": "review_session_uuid",
+    "pullRequestId": "pull_request_uuid",
+    "headSha": "abc123",
+    "baseSha": "def456",
+    "conflictStatus": "conflicted",
+    "analysisMode": "sync",
+    "stored": false,
+    "supportedTypes": ["content"],
+    "files": [
+      {
+        "reviewFileId": "review_file_1",
+        "filePath": "apps/frontend/VoiceMeetingPage.tsx",
+        "previousFilePath": null,
+        "type": "content",
+        "isSupported": true,
+        "resolutionStatus": "unresolved",
+        "hunks": [
+          {
+            "id": "hunk_1",
+            "header": "@@ -10,5 +10,7 @@",
+            "baseStartLine": 10,
+            "baseLineCount": 5,
+            "currentStartLine": 10,
+            "currentLineCount": 6,
+            "incomingStartLine": 10,
+            "incomingLineCount": 7,
+            "baseText": "const title = 'Meeting';",
+            "currentText": "const title = 'Voice meeting';",
+            "incomingText": "const title = 'Meeting room';"
+          }
+        ],
+        "aiSummary": null,
+        "aiSuggestion": null,
+        "resolvedContent": null
+      }
+    ],
+    "unsupportedFiles": [
+      {
+        "reviewFileId": "review_file_2",
+        "filePath": "assets/report-preview.png",
+        "type": "unsupported",
+        "reason": "binary conflict is not supported in the initial read-only slice"
+      }
+    ]
+  }
+}
+```
+
+서버 규칙:
+
+- 이 endpoint는 review session 기준으로 동작한다.
+- 현재 사용자는 review session이 속한 Workspace에 접근할 수 있어야 한다.
+- 현재 GitHub PR head SHA가 session의 `headSha`와 다르면 stale session으로 보고
+  `409 Conflict`를 반환한다.
+- `conflictStatus`가 `clean`, `checking`, `unknown`이면 `files`는 빈 배열로 반환한다.
+- 초기 read-only slice는 `content` conflict만 `isSupported: true`로 반환한다.
+- `baseText`는 merge base의 원본 구간이고, `currentText`는 base branch 쪽 변경,
+  `incomingText`는 PR head branch 쪽 변경이다.
+- `modify_delete`, `rename_modify`, `add_add`, `unsupported`는 후속 slice에서 처리하며,
+  초기 구현에서는 `unsupportedFiles`에 안내용 metadata만 반환할 수 있다.
+- conflict 분석 결과는 초기 read-only slice에서 DB에 저장하지 않는다.
+- `review_files.current_status`, `file_review_decisions`, `review_submissions`를 변경하지 않는다.
+- GitHub 원본 content 조회와 merge simulation은 PR Review 내부 dependency adapter를 통해
+  수행하며, GitHub token은 응답과 로그에 노출하지 않는다.
+- AI explanation, AI suggestion, Apply resolution, PR head branch commit, merge 실행은 이
+  endpoint의 범위가 아니다.
 
 ## 파일별 Review Decision 저장
 

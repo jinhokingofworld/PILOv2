@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, type PointerEvent } from "react";
+import { useRef, type KeyboardEvent, type PointerEvent } from "react";
 import {
   HTMLContainer,
   Rectangle2d,
@@ -234,7 +234,18 @@ function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
     : shape.props.tableName;
 
   function handleTableClick() {
+    editor.select(shape.id);
     selectSqlErdTable({ tableId: shape.props.tableId });
+  }
+
+  function handleTableKeyDown(event: KeyboardEvent<HTMLElement>) {
+    if (event.key !== "Enter" && event.key !== " ") {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    handleTableClick();
   }
 
   function handleColumnClick(columnId: string) {
@@ -296,14 +307,23 @@ function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
     >
       <article
         className="overflow-hidden rounded-md border border-slate-200 bg-white shadow-[0_12px_28px_rgba(15,23,42,0.12)]"
-        onClick={handleTableClick}
         style={{
           height: shape.props.h,
           minWidth: shape.props.w,
           width: shape.props.w
         }}
       >
-        <header className="flex h-[54px] items-center border-b border-slate-200 bg-slate-100 px-6">
+        <header
+          className="flex h-[54px] cursor-grab items-center border-b border-slate-200 bg-slate-100 px-6 outline-none transition-colors active:cursor-grabbing focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-inset"
+          data-sqltoerd-table-header
+          onClick={(event) => {
+            event.stopPropagation();
+            handleTableClick();
+          }}
+          onKeyDown={handleTableKeyDown}
+          role="button"
+          tabIndex={0}
+        >
           <h3 className="whitespace-nowrap text-[22px] font-semibold leading-none text-slate-950">
             {displayName}
           </h3>
@@ -365,20 +385,12 @@ function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
               >
                 <span
                   aria-hidden="true"
-                  className={`pointer-events-none absolute left-[-4px] top-1/2 size-2 -translate-y-1/2 rounded-full border bg-white shadow-sm transition-opacity ${
-                    isSelected || column.foreignKey
-                      ? "border-blue-400 opacity-100"
-                      : "border-slate-300 opacity-0 group-hover:opacity-100"
-                  }`}
+                  className="pointer-events-none absolute left-[-4px] top-1/2 size-2 -translate-y-1/2 rounded-full border border-blue-400 bg-white opacity-0 shadow-sm transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
                   data-sqltoerd-column-port="left"
                 />
                 <span
                   aria-hidden="true"
-                  className={`pointer-events-none absolute right-[-4px] top-1/2 size-2 -translate-y-1/2 rounded-full border bg-white shadow-sm transition-opacity ${
-                    isSelected || column.foreignKey
-                      ? "border-blue-400 opacity-100"
-                      : "border-slate-300 opacity-0 group-hover:opacity-100"
-                  }`}
+                  className="pointer-events-none absolute right-[-4px] top-1/2 size-2 -translate-y-1/2 rounded-full border border-blue-400 bg-white opacity-0 shadow-sm transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
                   data-sqltoerd-column-port="right"
                 />
                 <div className="flex min-w-0 items-center gap-1">

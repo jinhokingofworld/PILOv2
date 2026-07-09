@@ -16,6 +16,9 @@ const prReviewGithubDependencyService = await readSource(
 const prReviewDiffParser = await readSource(
   "../../src/modules/pr-review/pr-review-diff-parser.ts"
 );
+const prReviewConflictAnalyzer = await readSource(
+  "../../src/modules/pr-review/pr-review-conflict-analyzer.ts"
+);
 const prReviewAnalysisService = await readSource(
   "../../src/modules/pr-review/pr-review-analysis.service.ts"
 );
@@ -71,6 +74,10 @@ assert.match(
 assert.match(prReviewController, /@Get\("review-files\/:reviewFileId\/diff"\)/);
 assert.match(
   prReviewController,
+  /@Get\("review-sessions\/:reviewSessionId\/conflicts"\)/
+);
+assert.match(
+  prReviewController,
   /@Post\("review-sessions\/:reviewSessionId\/submissions"\)/
 );
 assert.match(
@@ -87,12 +94,15 @@ assert.match(prReviewGithubDependencyService, /getCurrentUserGithubOAuthStatus/)
 assert.match(prReviewGithubDependencyService, /getPullRequestDetail/);
 assert.match(prReviewGithubDependencyService, /getPullRequestChangedFiles/);
 assert.match(prReviewGithubDependencyService, /getPullRequestConflictStatus/);
+assert.match(prReviewGithubDependencyService, /getPullRequestConflictInputs/);
 assert.match(prReviewGithubDependencyService, /submitPullRequestReview/);
 assert.match(prReviewGithubDependencyService, /getGithubPullRequest/);
 assert.match(prReviewGithubDependencyService, /listGithubPullRequestFiles/);
 assert.match(prReviewGithubDependencyService, /getGithubPullRequestConflictStatus/);
+assert.match(prReviewGithubDependencyService, /getGithubPullRequestConflictInputs/);
 assert.match(prReviewGithubDependencyService, /submitGithubPullRequestReview/);
 assert.match(prReviewGithubDependencyService, /mapPullRequestDetail/);
+assert.match(prReviewGithubDependencyService, /mapConflictInputs/);
 assert.match(prReviewGithubDependencyService, /mapChangedFile/);
 assert.match(prReviewGithubDependencyService, /normalizeFileStatus/);
 assert.match(prReviewGithubDependencyService, /case "removed"/);
@@ -125,6 +135,7 @@ assert.match(prReviewService, /getReviewFile/);
 assert.match(prReviewService, /updateReviewFileDecision/);
 assert.match(prReviewService, /listReviewFileDecisions/);
 assert.match(prReviewService, /getReviewFileDiff/);
+assert.match(prReviewService, /getReviewSessionConflicts/);
 assert.match(prReviewService, /submitReviewSession/);
 assert.match(prReviewService, /listReviewSubmissions/);
 assert.match(prReviewService, /getReviewSubmission/);
@@ -149,6 +160,13 @@ assert.match(prReviewService, /total_file_count/);
 assert.match(prReviewService, /github_submit_status = 'submitted'/);
 assert.match(prReviewService, /github_submit_status = 'failed'/);
 assert.match(prReviewService, /Review session head SHA is stale/);
+assert.match(prReviewService, /conflictError\("Review session head SHA is stale"\)/);
+assert.match(prReviewService, /stored: false/);
+assert.match(prReviewService, /supportedTypes: \["content"\]/);
+assert.match(prReviewService, /extractContentConflictHunks/);
+assert.match(prReviewService, /getPullRequestConflictInputs/);
+assert.match(prReviewService, /binary conflict is not supported/);
+assert.match(prReviewService, /large diff conflict is not supported/);
 assert.match(prReviewService, /GitHub OAuth connection is required/);
 assert.match(prReviewService, /current_status = \$3/);
 assert.match(prReviewService, /reviewed_by_user_id = \$5/);
@@ -186,7 +204,15 @@ assert.match(prReviewDiffParser, /newLineNumber/);
 assert.match(prReviewDiffParser, /type: "unchanged"/);
 assert.match(prReviewDiffParser, /type: "deleted"/);
 assert.match(prReviewDiffParser, /type: "added"/);
+assert.match(prReviewConflictAnalyzer, /node-diff3/);
+assert.match(prReviewConflictAnalyzer, /diff3Merge/);
+assert.match(prReviewConflictAnalyzer, /extractContentConflictHunks/);
+assert.match(prReviewConflictAnalyzer, /excludeFalseConflicts: true/);
+assert.match(prReviewConflictAnalyzer, /baseText/);
+assert.match(prReviewConflictAnalyzer, /currentText/);
+assert.match(prReviewConflictAnalyzer, /incomingText/);
 assert.match(prReviewTypes, /PrReviewFileReviewStatus/);
+assert.match(prReviewTypes, /PrReviewGithubConflictInputsPayload/);
 assert.match(prReviewTypes, /PrReviewGithubReviewSubmitType/);
 assert.match(prReviewTypes, /PrReviewGithubReviewSubmissionPayload/);
 assert.match(prReviewApi, /Pull requests: write/);
@@ -198,6 +224,8 @@ assert.match(prReviewApi, /Diff View Model/);
 assert.match(prReviewApi, /파일별 review decision 저장/);
 assert.match(prReviewApi, /파일별 decision history 조회/);
 assert.match(prReviewApi, /Decision history response/);
+assert.match(prReviewApi, /Conflict Analysis/);
+assert.match(prReviewApi, /stored": false/);
 assert.match(prReviewApi, /githubCreatedAt/);
 assert.match(prReviewApi, /fileNodeData/);
 assert.match(prReviewApi, /riskLevel/);
@@ -209,4 +237,5 @@ assert.match(databaseService, /COMMIT/);
 assert.match(databaseService, /ROLLBACK/);
 
 await import("./diff-parser.test.mjs");
+await import("./conflict-analyzer.test.mjs");
 await import("./submission.test.mjs");

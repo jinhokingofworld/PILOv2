@@ -5,6 +5,7 @@ import { CurrentUserId } from "../../common/current-user.decorator";
 import {
   DeletePrReviewSessionPayload,
   PrReviewCanvasPayload,
+  PrReviewConflictAnalysisPayload,
   PrReviewFileDecisionListPayload,
   PrReviewFileDiffPayload,
   PrReviewFilePayload,
@@ -77,6 +78,20 @@ export class PrReviewController {
       reviewSessionId
     );
     return apiResponse(result);
+  }
+
+  @Get("review-sessions/:reviewSessionId/conflicts")
+  async getReviewSessionConflicts(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("reviewSessionId") reviewSessionId: string
+  ): Promise<ApiSuccessResponse<PrReviewConflictAnalysisPayload>> {
+    const conflicts = await this.prReviewService.getReviewSessionConflicts(
+      currentUserId,
+      workspaceId,
+      reviewSessionId
+    );
+    return apiResponse(conflicts);
   }
 
   @Get("review-sessions/:reviewSessionId/canvas")
