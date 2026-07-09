@@ -319,6 +319,18 @@ def test_runtime_settings_default_meeting_report_model(monkeypatch) -> None:
     settings = RuntimeSettings.from_env()
 
     assert settings.openai_meeting_report_model == "gpt-5.4-mini"
+    assert settings.openai_agent_planner_model == "gpt-5.4-mini"
+
+
+def test_runtime_settings_reads_agent_planner_model(monkeypatch) -> None:
+    monkeypatch.setenv("SQS_AI_JOBS_QUEUE_URL", "https://sqs.example.com/jobs")
+    monkeypatch.setenv("S3_RECORDINGS_BUCKET", "recordings")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("OPENAI_AGENT_PLANNER_MODEL", "gpt-agent-planner")
+
+    settings = RuntimeSettings.from_env()
+
+    assert settings.openai_agent_planner_model == "gpt-agent-planner"
 
 
 def test_runtime_settings_reads_database_ssl(monkeypatch) -> None:

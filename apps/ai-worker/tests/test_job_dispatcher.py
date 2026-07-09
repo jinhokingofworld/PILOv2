@@ -32,8 +32,8 @@ class FakeAgentRunProcessor:
         error: Exception | None = None,
     ) -> None:
         self.result = result or AgentProcessResult(
-            delete_message=False,
-            reason="agent_planning_not_implemented",
+            delete_message=True,
+            reason="agent_planning_completed",
             run_id=RUN_ID,
         )
         self.error = error
@@ -78,7 +78,7 @@ def test_dispatcher_routes_meeting_report_jobs() -> None:
     assert agent_processor.payloads == []
 
 
-def test_dispatcher_routes_agent_run_jobs_without_deleting_message() -> None:
+def test_dispatcher_routes_agent_run_jobs() -> None:
     meeting_processor = FakeMeetingReportProcessor()
     agent_processor = FakeAgentRunProcessor()
     dispatcher = create_dispatcher(meeting_processor, agent_processor)
@@ -92,8 +92,8 @@ def test_dispatcher_routes_agent_run_jobs_without_deleting_message() -> None:
         )
     )
 
-    assert result.delete_message is False
-    assert result.reason == "agent_planning_not_implemented"
+    assert result.delete_message is True
+    assert result.reason == "agent_planning_completed"
     assert result.job_type == "agent_run_requested"
     assert result.resource_id == RUN_ID
     assert meeting_processor.payloads == []

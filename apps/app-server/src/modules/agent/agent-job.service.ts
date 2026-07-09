@@ -1,12 +1,29 @@
 import { SendMessageCommand, SQSClient } from "@aws-sdk/client-sqs";
 import { Injectable, OnModuleDestroy } from "@nestjs/common";
 import { agentJobUnavailable } from "./agent-api-error";
+import type {
+  AgentRiskLevel,
+  AgentToolExecutionMode,
+  AgentToolInputSchema
+} from "./types/agent-tool.types";
+
+export const AGENT_TOOL_SCHEMA_VERSION = "agent-tools:v1";
+
+export interface AgentToolSchemaSnapshotItem {
+  name: string;
+  description: string;
+  riskLevel: AgentRiskLevel;
+  executionMode: AgentToolExecutionMode;
+  inputSchema: AgentToolInputSchema;
+}
 
 export interface AgentRunRequestedJobPayload {
   jobType: "agent_run_requested";
   runId: string;
   workspaceId: string;
   requestedByUserId: string;
+  toolSchemaVersion: string;
+  tools: AgentToolSchemaSnapshotItem[];
 }
 
 interface AgentJobConfig {

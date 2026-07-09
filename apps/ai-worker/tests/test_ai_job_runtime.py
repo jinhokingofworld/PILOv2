@@ -47,6 +47,7 @@ def runtime_settings() -> RuntimeSettings:
         openai_api_key="test-key",
         openai_stt_model="gpt-4o-mini-transcribe",
         openai_meeting_report_model="gpt-5.4-mini",
+        openai_agent_planner_model="gpt-5.4-mini",
         concurrency=2,
         wait_time_seconds=1,
         visibility_timeout_seconds=30,

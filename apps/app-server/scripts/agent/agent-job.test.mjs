@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
-const { AgentJobService } = require(
+const { AGENT_TOOL_SCHEMA_VERSION, AgentJobService } = require(
   "../../dist/modules/agent/agent-job.service.js"
 );
 
@@ -16,7 +16,30 @@ const payload = {
   jobType: "agent_run_requested",
   runId: "33333333-3333-3333-3333-333333333333",
   workspaceId: "22222222-2222-2222-2222-222222222222",
-  requestedByUserId: "11111111-1111-1111-1111-111111111111"
+  requestedByUserId: "11111111-1111-1111-1111-111111111111",
+  toolSchemaVersion: AGENT_TOOL_SCHEMA_VERSION,
+  tools: [
+    {
+      name: "list_calendar_events",
+      description: "Calendar 일정 목록을 날짜 범위 기준으로 조회합니다.",
+      riskLevel: "low",
+      executionMode: "auto",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          start: {
+            type: "string",
+            format: "date"
+          },
+          end: {
+            type: "string",
+            format: "date"
+          }
+        }
+      }
+    }
+  ]
 };
 
 class FakeSqsClient {

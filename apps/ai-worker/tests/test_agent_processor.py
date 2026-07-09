@@ -1,6 +1,13 @@
+import json
+from datetime import date
+
 from app.agent_processor import (
+    AGENT_TOOL_SCHEMA_VERSION,
+    AgentPlannerDecision,
     AgentRunContext,
     AgentRunProcessor,
+    _agent_planner_schema,
+    parse_agent_planner_output,
     parse_agent_run_job_payload,
 )
 from app.meeting_report_processor import InfrastructureError
@@ -8,7 +15,27 @@ from app.meeting_report_processor import InfrastructureError
 RUN_ID = "33333333-3333-3333-3333-333333333333"
 WORKSPACE_ID = "22222222-2222-2222-2222-222222222222"
 USER_ID = "11111111-1111-1111-1111-111111111111"
+STEP_ID = "44444444-4444-4444-4444-444444444444"
 _DEFAULT_CONTEXT = object()
+
+
+def tool_snapshot(**overrides: object) -> dict[str, object]:
+    return {
+        "name": "list_calendar_events",
+        "description": "Calendar 일정 목록을 날짜 범위 기준으로 조회합니다.",
+        "riskLevel": "low",
+        "executionMode": "auto",
+        "inputSchema": {
+            "type": "object",
+            "required": ["start", "end"],
+            "additionalProperties": False,
+            "properties": {
+                "start": {"type": "string", "format": "date"},
+                "end": {"type": "string", "format": "date"},
+            },
+        },
+        **overrides,
+    }
 
 
 def agent_payload(**overrides: object) -> dict[str, object]:
@@ -17,6 +44,8 @@ def agent_payload(**overrides: object) -> dict[str, object]:
         "runId": RUN_ID,
         "workspaceId": WORKSPACE_ID,
         "requestedByUserId": USER_ID,
+        "toolSchemaVersion": AGENT_TOOL_SCHEMA_VERSION,
+        "tools": [tool_snapshot()],
         **overrides,
     }
 
@@ -27,9 +56,30 @@ def run_context(**overrides: object) -> AgentRunContext:
         "workspace_id": WORKSPACE_ID,
         "requested_by_user_id": USER_ID,
         "status": "planning",
+        "prompt": "이번 주 일정 알려줘",
+        "timezone": "Asia/Seoul",
         **overrides,
     }
     return AgentRunContext(**values)
+
+
+def planner_decision(**overrides: object) -> AgentPlannerDecision:
+    values = {
+        "status": "tool_candidate",
+        "message": "Calendar 일정 조회 후보입니다.",
+        "final_answer_draft": "일정 조회 계획을 만들었습니다.",
+        "tool_name": "list_calendar_events",
+        "tool_input": {
+            "start": "2026-07-09",
+            "end": "2026-07-16",
+            "providerRawResponse": "must-not-leak",
+        },
+        "requires_confirmation": False,
+        "missing_fields": (),
+        "unsupported_reason": None,
+        **overrides,
+    }
+    return AgentPlannerDecision(**values)
 
 
 class FakeAgentRunRepository:
@@ -45,6 +95,10 @@ class FakeAgentRunRepository:
         self.lock_calls: list[str] = []
         self.release_calls: list[str] = []
         self.failed_updates: list[tuple[str, str, str, str]] = []
+        self.started_steps: list[tuple[str, str, int]] = []
+        self.completed_steps: list[tuple[str, str, dict[str, object]]] = []
+        self.failed_steps: list[tuple[str, str, str, str]] = []
+        self.completed_runs: list[tuple[str, str, str, str | None]] = []
 
     def try_acquire_run_lock(self, run_id: str) -> bool:
         self.lock_calls.append(run_id)
@@ -58,6 +112,36 @@ class FakeAgentRunRepository:
             raise self.context_error
         return self.context
 
+    def start_planner_step(self, job, context) -> str:
+        self.started_steps.append((job.run_id, context.timezone, len(job.tools)))
+        return STEP_ID
+
+    def complete_planner_step(
+        self,
+        run_id: str,
+        step_id: str,
+        output_summary: dict[str, object],
+    ) -> None:
+        self.completed_steps.append((run_id, step_id, output_summary))
+
+    def fail_planner_step(
+        self,
+        run_id: str,
+        step_id: str,
+        error_code: str,
+        error_message: str,
+    ) -> None:
+        self.failed_steps.append((run_id, step_id, error_code, error_message))
+
+    def complete_run(
+        self,
+        run_id: str,
+        final_answer: str,
+        message: str,
+        risk_level: str | None,
+    ) -> None:
+        self.completed_runs.append((run_id, final_answer, message, risk_level))
+
     def mark_failed(
         self,
         run_id: str,
@@ -68,12 +152,42 @@ class FakeAgentRunRepository:
         self.failed_updates.append((run_id, error_code, error_message, message))
 
 
+class FakePlannerClient:
+    def __init__(
+        self,
+        decision: AgentPlannerDecision | None = None,
+        error: Exception | None = None,
+    ) -> None:
+        self.decision = decision or planner_decision()
+        self.error = error
+        self.requests = []
+
+    def plan(self, request):
+        self.requests.append(request)
+        if self.error:
+            raise self.error
+        return self.decision
+
+
+def create_processor(
+    repository: FakeAgentRunRepository,
+    planner_client: FakePlannerClient | None = None,
+) -> AgentRunProcessor:
+    return AgentRunProcessor(
+        repository,
+        planner_client or FakePlannerClient(),
+        current_date_provider=lambda _timezone: date(2026, 7, 9),
+    )
+
+
 def test_parse_agent_run_job_payload_validates_required_ids() -> None:
     job = parse_agent_run_job_payload(agent_payload())
 
     assert job.run_id == RUN_ID
     assert job.workspace_id == WORKSPACE_ID
     assert job.requested_by_user_id == USER_ID
+    assert job.tool_schema_version == AGENT_TOOL_SCHEMA_VERSION
+    assert job.tools[0].name == "list_calendar_events"
 
     for key in ["runId", "workspaceId", "requestedByUserId"]:
         payload = agent_payload(**{key: "not-a-uuid"})
@@ -84,24 +198,73 @@ def test_parse_agent_run_job_payload_validates_required_ids() -> None:
         else:
             raise AssertionError(f"{key} should be validated")
 
+    try:
+        parse_agent_run_job_payload(agent_payload(toolSchemaVersion=""))
+    except ValueError as error:
+        assert "toolSchemaVersion" in str(error)
+    else:
+        raise AssertionError("toolSchemaVersion should be validated")
 
-def test_processor_leaves_planning_run_for_next_agent_phase() -> None:
+
+def test_processor_completes_planning_run_with_tool_candidate() -> None:
     repository = FakeAgentRunRepository()
-    processor = AgentRunProcessor(repository)
+    planner_client = FakePlannerClient()
+    processor = create_processor(repository, planner_client)
 
     result = processor.process_payload(agent_payload())
 
-    assert result.delete_message is False
-    assert result.reason == "agent_planning_not_implemented"
+    assert result.delete_message is True
+    assert result.reason == "agent_planning_completed"
     assert result.run_id == RUN_ID
     assert repository.lock_calls == [RUN_ID]
     assert repository.release_calls == [RUN_ID]
+    assert repository.started_steps == [(RUN_ID, "Asia/Seoul", 1)]
+    assert repository.completed_steps[0][0:2] == (RUN_ID, STEP_ID)
+    output_summary = repository.completed_steps[0][2]
+    assert output_summary["status"] == "tool_candidate"
+    assert output_summary["toolName"] == "list_calendar_events"
+    assert output_summary["toolInputValidation"] == "app_server_required"
+    assert output_summary["input"] == {
+        "start": "2026-07-09",
+        "end": "2026-07-16",
+    }
+    assert repository.completed_runs == [
+        (
+            RUN_ID,
+            "일정 조회 계획을 만들었습니다.",
+            "Calendar 일정 조회 후보입니다.",
+            "low",
+        )
+    ]
     assert repository.failed_updates == []
+    assert planner_client.requests[0].current_date == "2026-07-09"
+    assert planner_client.requests[0].timezone == "Asia/Seoul"
+
+
+def test_processor_uses_run_timezone_for_current_date() -> None:
+    repository = FakeAgentRunRepository(context=run_context(timezone="America/Los_Angeles"))
+    planner_client = FakePlannerClient()
+    seen_timezones: list[str] = []
+    processor = AgentRunProcessor(
+        repository,
+        planner_client,
+        current_date_provider=lambda timezone: (
+            seen_timezones.append(timezone) or date(2026, 7, 8)
+        ),
+    )
+
+    result = processor.process_payload(agent_payload())
+
+    assert result.delete_message is True
+    assert result.reason == "agent_planning_completed"
+    assert seen_timezones == ["America/Los_Angeles"]
+    assert planner_client.requests[0].current_date == "2026-07-08"
+    assert planner_client.requests[0].timezone == "America/Los_Angeles"
 
 
 def test_processor_deletes_invalid_agent_payload_without_repository_calls() -> None:
     repository = FakeAgentRunRepository()
-    processor = AgentRunProcessor(repository)
+    processor = create_processor(repository)
 
     result = processor.process_payload(agent_payload(runId="not-a-uuid"))
 
@@ -116,8 +279,8 @@ def test_processor_deletes_missing_or_terminal_runs() -> None:
     missing_repository = FakeAgentRunRepository(context=None)
     terminal_repository = FakeAgentRunRepository(context=run_context(status="completed"))
 
-    missing = AgentRunProcessor(missing_repository).process_payload(agent_payload())
-    terminal = AgentRunProcessor(terminal_repository).process_payload(agent_payload())
+    missing = create_processor(missing_repository).process_payload(agent_payload())
+    terminal = create_processor(terminal_repository).process_payload(agent_payload())
 
     assert missing.delete_message is True
     assert missing.reason == "agent_run_not_found"
@@ -131,8 +294,8 @@ def test_processor_deletes_waiting_confirmation_and_unsupported_status() -> None
     waiting_repository = FakeAgentRunRepository(context=run_context(status="waiting_confirmation"))
     running_repository = FakeAgentRunRepository(context=run_context(status="running"))
 
-    waiting = AgentRunProcessor(waiting_repository).process_payload(agent_payload())
-    running = AgentRunProcessor(running_repository).process_payload(agent_payload())
+    waiting = create_processor(waiting_repository).process_payload(agent_payload())
+    running = create_processor(running_repository).process_payload(agent_payload())
 
     assert waiting.delete_message is True
     assert waiting.reason == "agent_run_waiting_confirmation"
@@ -146,8 +309,8 @@ def test_processor_leaves_duplicate_or_infrastructure_failure_for_retry() -> Non
         context_error=InfrastructureError("database unavailable")
     )
 
-    duplicate = AgentRunProcessor(duplicate_repository).process_payload(agent_payload())
-    error = AgentRunProcessor(error_repository).process_payload(agent_payload())
+    duplicate = create_processor(duplicate_repository).process_payload(agent_payload())
+    error = create_processor(error_repository).process_payload(agent_payload())
 
     assert duplicate.delete_message is False
     assert duplicate.reason == "agent_run_duplicate_in_progress"
@@ -156,3 +319,167 @@ def test_processor_leaves_duplicate_or_infrastructure_failure_for_retry() -> Non
     assert error.reason == "infrastructure_failure"
     assert error.run_id == RUN_ID
     assert error_repository.release_calls == [RUN_ID]
+
+
+def test_processor_completes_unregistered_tool_as_unsupported() -> None:
+    repository = FakeAgentRunRepository()
+    planner_client = FakePlannerClient(
+        decision=planner_decision(
+            tool_name="search_board_issues",
+            final_answer_draft="Board 도구는 아직 사용할 수 없습니다.",
+        )
+    )
+    processor = create_processor(repository, planner_client)
+
+    result = processor.process_payload(agent_payload())
+
+    assert result.delete_message is True
+    assert result.reason == "agent_planning_completed"
+    output_summary = repository.completed_steps[0][2]
+    assert output_summary["status"] == "unsupported"
+    assert output_summary["unsupportedReason"] == "unknown_intent"
+    assert repository.completed_runs[0] == (
+        RUN_ID,
+        "현재 사용할 수 없는 Agent 도구가 필요한 요청입니다.",
+        "지원하지 않는 Agent 도구 요청입니다.",
+        None,
+    )
+
+
+def test_processor_completes_missing_fields_with_final_answer() -> None:
+    repository = FakeAgentRunRepository()
+    planner_client = FakePlannerClient(
+        decision=planner_decision(
+            status="needs_clarification",
+            message="일정 생성을 위해 시간이 필요합니다.",
+            final_answer_draft="몇 시에 일정을 만들까요?",
+            tool_name=None,
+            tool_input={},
+            missing_fields=("calendar_event_time",),
+        )
+    )
+    processor = create_processor(repository, planner_client)
+
+    result = processor.process_payload(agent_payload())
+
+    assert result.delete_message is True
+    assert result.reason == "agent_planning_completed"
+    output_summary = repository.completed_steps[0][2]
+    assert output_summary["status"] == "needs_clarification"
+    assert output_summary["missingFields"] == ["calendar_event_time"]
+    assert repository.completed_runs[0] == (
+        RUN_ID,
+        "몇 시에 일정을 만들까요?",
+        "일정 생성을 위해 시간이 필요합니다.",
+        None,
+    )
+
+
+def test_processor_marks_planning_failed_for_invalid_planner_output() -> None:
+    repository = FakeAgentRunRepository()
+    planner_client = FakePlannerClient(decision=planner_decision(status="bad_status"))
+    processor = create_processor(repository, planner_client)
+
+    result = processor.process_payload(agent_payload())
+
+    assert result.delete_message is True
+    assert result.reason == "agent_planning_failed"
+    assert repository.failed_steps == [
+        (
+            RUN_ID,
+            STEP_ID,
+            "AGENT_PLANNER_FAILED",
+            "Agent planner returned an invalid status",
+        )
+    ]
+    assert repository.failed_updates == [
+        (
+            RUN_ID,
+            "AGENT_PLANNER_FAILED",
+            "Agent planner returned an invalid status",
+            "요청을 분석하지 못했습니다. 다시 시도해주세요.",
+        )
+    ]
+
+
+def test_processor_retries_planner_infrastructure_failure() -> None:
+    repository = FakeAgentRunRepository()
+    planner_client = FakePlannerClient(error=InfrastructureError("OpenAI unavailable"))
+    processor = create_processor(repository, planner_client)
+
+    result = processor.process_payload(agent_payload())
+
+    assert result.delete_message is False
+    assert result.reason == "infrastructure_failure"
+    assert repository.release_calls == [RUN_ID]
+
+
+def test_parse_agent_planner_output_sanitizes_sensitive_fields() -> None:
+    decision = parse_agent_planner_output(
+        json.dumps(
+            {
+                "status": "tool_candidate",
+                "message": "Calendar 일정 조회 후보입니다.",
+                "finalAnswerDraft": "일정 조회 계획을 만들었습니다.",
+                "toolName": "list_calendar_events",
+                "inputJson": json.dumps(
+                    {
+                        "start": "2026-07-09",
+                        "end": "2026-07-16",
+                        "token": "must-not-leak",
+                        "nested": {
+                            "providerRawResponse": "must-not-leak",
+                            "visible": "ok",
+                        },
+                    }
+                ),
+                "requiresConfirmation": False,
+                "missingFields": [],
+                "unsupportedReason": None,
+            }
+        )
+    )
+
+    assert decision.tool_input == {
+        "start": "2026-07-09",
+        "end": "2026-07-16",
+        "nested": {
+            "visible": "ok",
+        },
+    }
+
+
+def test_parse_agent_planner_output_rejects_invalid_input_json() -> None:
+    try:
+        parse_agent_planner_output(
+            json.dumps(
+                {
+                    "status": "tool_candidate",
+                    "message": "Calendar 일정 조회 후보입니다.",
+                    "finalAnswerDraft": "일정 조회 계획을 만들었습니다.",
+                    "toolName": "list_calendar_events",
+                    "inputJson": "{not-json",
+                    "requiresConfirmation": False,
+                    "missingFields": [],
+                    "unsupportedReason": None,
+                }
+            )
+        )
+    except Exception as error:
+        assert "inputJson must be valid JSON" in str(error)
+    else:
+        raise AssertionError("invalid inputJson should be rejected")
+
+
+def test_agent_planner_schema_is_strict_closed_schema() -> None:
+    def assert_closed_objects(schema: object) -> None:
+        if isinstance(schema, dict):
+            if schema.get("type") == "object":
+                assert schema.get("additionalProperties") is False
+            for value in schema.values():
+                assert_closed_objects(value)
+        elif isinstance(schema, list):
+            for value in schema:
+                assert_closed_objects(value)
+
+    assert_closed_objects(_agent_planner_schema())

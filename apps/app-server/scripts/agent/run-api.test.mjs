@@ -5,6 +5,9 @@ const require = createRequire(import.meta.url);
 const { AgentController } = require(
   "../../dist/modules/agent/agent.controller.js"
 );
+const { AGENT_TOOL_SCHEMA_VERSION } = require(
+  "../../dist/modules/agent/agent-job.service.js"
+);
 const { AgentService } = require("../../dist/modules/agent/agent.service.js");
 
 const USER_ID = "11111111-1111-1111-1111-111111111111";
@@ -17,6 +20,53 @@ const CREATED_AT = new Date("2026-07-08T00:00:00.000Z");
 const UPDATED_AT = new Date("2026-07-08T00:01:00.000Z");
 const EXPIRES_AT = new Date("2026-08-07T00:00:00.000Z");
 const CONFIRMATION_EXPIRES_AT = new Date("2026-07-08T00:15:00.000Z");
+const TOOL_SCHEMA_SNAPSHOT = [
+  {
+    name: "list_calendar_events",
+    description: "Calendar 일정 목록을 날짜 범위 기준으로 조회합니다.",
+    riskLevel: "low",
+    executionMode: "auto",
+    inputSchema: {
+      type: "object",
+      required: ["start", "end"],
+      additionalProperties: false,
+      properties: {
+        start: {
+          type: "string",
+          format: "date"
+        },
+        end: {
+          type: "string",
+          format: "date"
+        }
+      }
+    }
+  },
+  {
+    name: "create_calendar_event",
+    description: "Calendar 일정을 생성합니다. 실행 전 confirmation이 필요합니다.",
+    riskLevel: "medium",
+    executionMode: "confirmation_required",
+    inputSchema: {
+      type: "object",
+      required: ["title", "startDate", "endDate"],
+      additionalProperties: false,
+      properties: {
+        title: {
+          type: "string"
+        },
+        startDate: {
+          type: "string",
+          format: "date"
+        },
+        endDate: {
+          type: "string",
+          format: "date"
+        }
+      }
+    }
+  }
+];
 
 function createStoredRun(overrides = {}) {
   return {
@@ -192,6 +242,19 @@ class FakeAgentJobService {
   }
 }
 
+class FakeAgentToolRegistryService {
+  listDefinitions() {
+    return TOOL_SCHEMA_SNAPSHOT.map((tool) => ({
+      ...tool,
+      validateInput: () => ({}),
+      execute: async () => ({
+        outputSummary: {},
+        resourceRefs: []
+      })
+    }));
+  }
+}
+
 class FakeAgentRunService {
   constructor(results) {
     this.results = [...results];
@@ -273,18 +336,21 @@ function createService({
   const workspaceService = new FakeWorkspaceService();
   const database = new FakeDatabaseService(state);
   const agentLoggingService = new FakeAgentLoggingService(loggingResult);
+  const agentToolRegistryService = new FakeAgentToolRegistryService();
 
   return {
     service: new AgentService(
       database,
       workspaceService,
       agentLoggingService,
-      agentJobService
+      agentJobService,
+      agentToolRegistryService
     ),
     workspaceService,
     database,
     agentLoggingService,
-    agentJobService
+    agentJobService,
+    agentToolRegistryService
   };
 }
 
@@ -378,9 +444,13 @@ function errorMessage(error) {
       jobType: "agent_run_requested",
       runId: RUN_ID,
       workspaceId: WORKSPACE_ID,
-      requestedByUserId: USER_ID
+      requestedByUserId: USER_ID,
+      toolSchemaVersion: AGENT_TOOL_SCHEMA_VERSION,
+      tools: TOOL_SCHEMA_SNAPSHOT
     }
   ]);
+  assert.equal("validateInput" in agentJobService.calls[0].tools[0], false);
+  assert.equal("execute" in agentJobService.calls[0].tools[0], false);
 }
 
 {
@@ -425,7 +495,9 @@ function errorMessage(error) {
       jobType: "agent_run_requested",
       runId: RUN_ID,
       workspaceId: WORKSPACE_ID,
-      requestedByUserId: USER_ID
+      requestedByUserId: USER_ID,
+      toolSchemaVersion: AGENT_TOOL_SCHEMA_VERSION,
+      tools: TOOL_SCHEMA_SNAPSHOT
     }
   ]);
   assert.deepEqual(agentLoggingService.failCalls, [
