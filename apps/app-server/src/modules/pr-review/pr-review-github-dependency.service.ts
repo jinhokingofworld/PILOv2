@@ -2,11 +2,13 @@ import { Injectable } from "@nestjs/common";
 import { badRequest } from "../../common/api-error";
 import { GithubIntegrationService } from "../github-integration/github-integration.service";
 import type {
+  GithubPullRequestConflictInputsPayload,
   GithubPullRequestDetailPayload,
   GithubPullRequestFilePayload
 } from "../github-integration/types";
 import type {
   PrReviewGithubChangedFile,
+  PrReviewGithubConflictInputsPayload,
   PrReviewGithubConflictStatusPayload,
   PrReviewGithubDependency,
   PrReviewGithubOAuthStatus,
@@ -88,6 +90,27 @@ export class PrReviewGithubDependencyService implements PrReviewGithubDependency
     };
   }
 
+  async getPullRequestConflictInputs(
+    currentUserId: string,
+    workspaceId: string,
+    pullRequestId: string,
+    input: {
+      baseSha: string;
+      headSha: string;
+      filePaths: string[];
+    }
+  ): Promise<PrReviewGithubConflictInputsPayload> {
+    const conflictInputs =
+      await this.githubIntegrationService.getGithubPullRequestConflictInputs(
+        currentUserId,
+        workspaceId,
+        pullRequestId,
+        input
+      );
+
+    return this.mapConflictInputs(conflictInputs);
+  }
+
   async submitPullRequestReview(
     currentUserId: string,
     workspaceId: string,
@@ -132,6 +155,21 @@ export class PrReviewGithubDependencyService implements PrReviewGithubDependency
       deletions: pullRequest.deletions,
       commitsCount: pullRequest.commitsCount,
       htmlUrl: pullRequest.githubUrl
+    };
+  }
+
+  private mapConflictInputs(
+    input: GithubPullRequestConflictInputsPayload
+  ): PrReviewGithubConflictInputsPayload {
+    return {
+      mergeBaseSha: input.mergeBaseSha,
+      files: input.files.map((file) => ({
+        filePath: file.filePath,
+        mergeBaseContent: file.mergeBaseContent,
+        baseContent: file.baseContent,
+        headContent: file.headContent,
+        unsupportedReason: file.unsupportedReason
+      }))
     };
   }
 

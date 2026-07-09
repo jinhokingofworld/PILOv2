@@ -1,6 +1,11 @@
 import { Injectable } from "@nestjs/common";
 import { QueryResultRow } from "pg";
-import { ApiError, badRequest, notFound } from "../../common/api-error";
+import {
+  ApiError,
+  badRequest,
+  conflict as conflictError,
+  notFound
+} from "../../common/api-error";
 import {
   DatabaseService,
   type DatabaseTransaction
@@ -10,6 +15,10 @@ import {
   parseUnifiedDiffPatch,
   type PrReviewDiffRowPayload
 } from "./pr-review-diff-parser";
+import {
+  extractContentConflictHunks,
+  type PrReviewConflictHunkPayload
+} from "./pr-review-conflict-analyzer";
 import {
   PrReviewAnalysisService,
   type PrReviewAnalysisResult,
@@ -136,6 +145,15 @@ interface ReviewFileDetailRow extends QueryResultRow {
   latest_decision_comment: string | null;
   latest_decision_reviewed_by_user_id: string | null;
   latest_decision_reviewed_at: Date | string | null;
+}
+
+interface ReviewFileConflictTargetRow extends QueryResultRow {
+  id: string;
+  file_path: string;
+  previous_file_path: string | null;
+  file_status: PrReviewFileStatus;
+  is_binary: boolean;
+  is_large_diff: boolean;
 }
 
 type PrReviewDecisionStatus = Exclude<PrReviewFileReviewStatus, "not_reviewed">;
@@ -414,6 +432,51 @@ export interface PrReviewFileDiffPayload {
   rows: PrReviewDiffRowPayload[];
 }
 
+export type PrReviewConflictFileType =
+  | "content"
+  | "modify_delete"
+  | "rename_modify"
+  | "add_add"
+  | "unsupported";
+
+export type PrReviewConflictResolutionStatus =
+  | "unresolved"
+  | "suggested"
+  | "applied";
+
+export interface PrReviewConflictFilePayload {
+  reviewFileId: string;
+  filePath: string;
+  previousFilePath: string | null;
+  type: PrReviewConflictFileType;
+  isSupported: true;
+  resolutionStatus: PrReviewConflictResolutionStatus;
+  hunks: PrReviewConflictHunkPayload[];
+  aiSummary: string | null;
+  aiSuggestion: string | null;
+  resolvedContent: string | null;
+}
+
+export interface PrReviewUnsupportedConflictFilePayload {
+  reviewFileId: string;
+  filePath: string;
+  type: "unsupported";
+  reason: string;
+}
+
+export interface PrReviewConflictAnalysisPayload {
+  reviewSessionId: string;
+  pullRequestId: string;
+  headSha: string;
+  baseSha: string;
+  conflictStatus: PrReviewConflictStatus;
+  analysisMode: "sync";
+  stored: false;
+  supportedTypes: ["content"];
+  files: PrReviewConflictFilePayload[];
+  unsupportedFiles: PrReviewUnsupportedConflictFilePayload[];
+}
+
 export interface PrReviewSubmissionFileResultPayload {
   fileName: string;
   filePath: string;
@@ -617,6 +680,131 @@ export class PrReviewService {
       })),
       readyToSubmit: this.isReadyToSubmit(counts)
     };
+  }
+
+  async getReviewSessionConflicts(
+    currentUserId: string,
+    workspaceId: string,
+    reviewSessionId: string
+  ): Promise<PrReviewConflictAnalysisPayload> {
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+
+    const session = await this.findReviewSession(workspaceId, reviewSessionId);
+    if (!session) {
+      throw notFound("Review session not found");
+    }
+
+    const currentPullRequest = await this.githubDependency.getPullRequestDetail(
+      currentUserId,
+      workspaceId,
+      session.pull_request_id
+    );
+    if (currentPullRequest.headSha !== session.head_sha) {
+      throw conflictError("Review session head SHA is stale");
+    }
+
+    if (!currentPullRequest.baseSha) {
+      throw badRequest("GitHub pull request base SHA is not synced");
+    }
+
+    if (session.conflict_status !== "conflicted") {
+      return this.buildConflictAnalysisPayload({
+        session,
+        baseSha: currentPullRequest.baseSha,
+        files: [],
+        unsupportedFiles: []
+      });
+    }
+
+    const reviewFiles = await this.listReviewFilesForConflictAnalysis(
+      workspaceId,
+      session.id
+    );
+    const contentCandidates: ReviewFileConflictTargetRow[] = [];
+    const unsupportedFiles: PrReviewUnsupportedConflictFilePayload[] = [];
+
+    for (const file of reviewFiles) {
+      const unsupportedReason = this.getUnsupportedConflictFileReason(file);
+      if (unsupportedReason) {
+        unsupportedFiles.push(
+          this.mapUnsupportedConflictFile(file, unsupportedReason)
+        );
+        continue;
+      }
+
+      contentCandidates.push(file);
+    }
+
+    if (contentCandidates.length === 0) {
+      return this.buildConflictAnalysisPayload({
+        session,
+        baseSha: currentPullRequest.baseSha,
+        files: [],
+        unsupportedFiles
+      });
+    }
+
+    const conflictInputs = await this.githubDependency.getPullRequestConflictInputs(
+      currentUserId,
+      workspaceId,
+      session.pull_request_id,
+      {
+        baseSha: currentPullRequest.baseSha,
+        headSha: session.head_sha,
+        filePaths: contentCandidates.map((file) => file.file_path)
+      }
+    );
+    const conflictInputByPath = new Map(
+      conflictInputs.files.map((file) => [file.filePath, file])
+    );
+    const files: PrReviewConflictFilePayload[] = [];
+
+    for (const file of contentCandidates) {
+      const conflictInput = conflictInputByPath.get(file.file_path);
+      if (!conflictInput || conflictInput.unsupportedReason) {
+        unsupportedFiles.push(
+          this.mapUnsupportedConflictFile(
+            file,
+            conflictInput?.unsupportedReason ??
+              "content conflict input is not available"
+          )
+        );
+        continue;
+      }
+
+      if (
+        conflictInput.mergeBaseContent === null ||
+        conflictInput.baseContent === null ||
+        conflictInput.headContent === null
+      ) {
+        unsupportedFiles.push(
+          this.mapUnsupportedConflictFile(
+            file,
+            "content conflict input is not available"
+          )
+        );
+        continue;
+      }
+
+      const hunks = extractContentConflictHunks({
+        mergeBaseContent: conflictInput.mergeBaseContent,
+        baseContent: conflictInput.baseContent,
+        headContent: conflictInput.headContent
+      });
+
+      if (hunks.length === 0) {
+        continue;
+      }
+
+      files.push(this.mapContentConflictFile(file, hunks));
+    }
+
+    return this.buildConflictAnalysisPayload({
+      session,
+      baseSha: currentPullRequest.baseSha,
+      files,
+      unsupportedFiles
+    });
   }
 
   async getReviewSessionCanvas(
@@ -1183,6 +1371,32 @@ export class PrReviewService {
           review_file.reviewed_by_user_id,
           review_file.reviewed_at
         ORDER BY workflow_order ASC NULLS LAST, review_file.file_path ASC
+      `,
+      [workspaceId, this.requireUuid(reviewSessionId, "reviewSessionId")]
+    );
+  }
+
+  private async listReviewFilesForConflictAnalysis(
+    workspaceId: string,
+    reviewSessionId: string
+  ): Promise<ReviewFileConflictTargetRow[]> {
+    return this.database.query<ReviewFileConflictTargetRow>(
+      `
+        SELECT
+          review_file.id,
+          review_file.file_path,
+          review_file.previous_file_path,
+          review_file.file_status,
+          review_file.is_binary,
+          review_file.is_large_diff
+        FROM review_files AS review_file
+        JOIN pr_review_sessions AS review_session
+          ON review_session.id = review_file.session_id
+        JOIN github_pull_requests AS pull_request
+          ON pull_request.id = review_session.pull_request_id
+        WHERE pull_request.workspace_id = $1
+          AND review_session.id = $2
+        ORDER BY review_file.file_path ASC
       `,
       [workspaceId, this.requireUuid(reviewSessionId, "reviewSessionId")]
     );
@@ -2040,6 +2254,79 @@ export class PrReviewService {
         return "Binary 파일은 PILO diff에서 미리보기하지 않습니다. GitHub에서 확인해주세요.";
       case "large":
         return "큰 diff 또는 patch가 누락된 파일은 PILO diff에서 미리보기하지 않습니다. GitHub에서 확인해주세요.";
+    }
+  }
+
+  private buildConflictAnalysisPayload(input: {
+    session: PrReviewSessionRow;
+    baseSha: string;
+    files: PrReviewConflictFilePayload[];
+    unsupportedFiles: PrReviewUnsupportedConflictFilePayload[];
+  }): PrReviewConflictAnalysisPayload {
+    return {
+      reviewSessionId: input.session.id,
+      pullRequestId: input.session.pull_request_id,
+      headSha: input.session.head_sha,
+      baseSha: input.baseSha,
+      conflictStatus: input.session.conflict_status,
+      analysisMode: "sync",
+      stored: false,
+      supportedTypes: ["content"],
+      files: input.files,
+      unsupportedFiles: input.unsupportedFiles
+    };
+  }
+
+  private mapContentConflictFile(
+    file: ReviewFileConflictTargetRow,
+    hunks: PrReviewConflictHunkPayload[]
+  ): PrReviewConflictFilePayload {
+    return {
+      reviewFileId: file.id,
+      filePath: file.file_path,
+      previousFilePath: file.previous_file_path,
+      type: "content",
+      isSupported: true,
+      resolutionStatus: "unresolved",
+      hunks,
+      aiSummary: null,
+      aiSuggestion: null,
+      resolvedContent: null
+    };
+  }
+
+  private mapUnsupportedConflictFile(
+    file: ReviewFileConflictTargetRow,
+    reason: string
+  ): PrReviewUnsupportedConflictFilePayload {
+    return {
+      reviewFileId: file.id,
+      filePath: file.file_path,
+      type: "unsupported",
+      reason
+    };
+  }
+
+  private getUnsupportedConflictFileReason(
+    file: ReviewFileConflictTargetRow
+  ): string | null {
+    if (file.is_binary) {
+      return "binary conflict is not supported in the initial read-only slice";
+    }
+
+    if (file.is_large_diff) {
+      return "large diff conflict is not supported in the initial read-only slice";
+    }
+
+    switch (file.file_status) {
+      case "modified":
+        return null;
+      case "added":
+        return "add/add conflict is not supported in the initial read-only slice";
+      case "deleted":
+        return "modify/delete conflict is not supported in the initial read-only slice";
+      case "renamed":
+        return "rename/modify conflict is not supported in the initial read-only slice";
     }
   }
 

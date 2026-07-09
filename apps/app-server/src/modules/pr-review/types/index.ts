@@ -77,6 +77,19 @@ export interface PrReviewGithubConflictStatusPayload {
   checkedAt: string | null;
 }
 
+export interface PrReviewGithubConflictContentPayload {
+  filePath: string;
+  mergeBaseContent: string | null;
+  baseContent: string | null;
+  headContent: string | null;
+  unsupportedReason: string | null;
+}
+
+export interface PrReviewGithubConflictInputsPayload {
+  mergeBaseSha: string;
+  files: PrReviewGithubConflictContentPayload[];
+}
+
 export type PrReviewGithubReviewSubmitType =
   | "COMMENT"
   | "APPROVE"
@@ -111,6 +124,17 @@ export interface PrReviewGithubDependency {
     workspaceId: string,
     pullRequestId: string
   ): Promise<PrReviewGithubConflictStatusPayload>;
+
+  getPullRequestConflictInputs(
+    currentUserId: string,
+    workspaceId: string,
+    pullRequestId: string,
+    input: {
+      baseSha: string;
+      headSha: string;
+      filePaths: string[];
+    }
+  ): Promise<PrReviewGithubConflictInputsPayload>;
 
   submitPullRequestReview(
     currentUserId: string,

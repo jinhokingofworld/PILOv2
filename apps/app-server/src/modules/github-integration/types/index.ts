@@ -343,6 +343,19 @@ export interface GithubPullRequestConflictStatusPayload {
   message: string;
 }
 
+export interface GithubPullRequestConflictContentPayload {
+  filePath: string;
+  mergeBaseContent: string | null;
+  baseContent: string | null;
+  headContent: string | null;
+  unsupportedReason: string | null;
+}
+
+export interface GithubPullRequestConflictInputsPayload {
+  mergeBaseSha: string;
+  files: GithubPullRequestConflictContentPayload[];
+}
+
 export type GithubPullRequestReviewSubmitType =
   | "COMMENT"
   | "APPROVE"
