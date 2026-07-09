@@ -41,6 +41,14 @@ type MeetingReportSectionProps = {
 
 type ReportDetailStatus = "idle" | "loading" | "success" | "error";
 
+function readInitialMeetingReportId() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  return new URLSearchParams(window.location.search).get("reportId")?.trim() || null;
+}
+
 type ParsedActionItemCandidate = {
   assigneeUserId: string | null;
   description: string | null;
@@ -571,6 +579,10 @@ export function MeetingReportSection({
   const [detailError, setDetailError] = useState<string | null>(null);
   const [regeneratingReportId, setRegeneratingReportId] =
     useState<string | null>(null);
+  const [initialReportId] = useState(readInitialMeetingReportId);
+  const [openedInitialReportId, setOpenedInitialReportId] = useState<
+    string | null
+  >(null);
 
   const filteredReports = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
@@ -635,6 +647,20 @@ export function MeetingReportSection({
     setDetailStatus("idle");
     setDetailError(null);
   }, []);
+
+  useEffect(() => {
+    if (
+      !canLoad ||
+      !initialReportId ||
+      openedInitialReportId === initialReportId
+    ) {
+      return;
+    }
+
+    setOpenedInitialReportId(initialReportId);
+    setSelectedReportId(initialReportId);
+    void loadReportDetail(initialReportId);
+  }, [canLoad, initialReportId, loadReportDetail, openedInitialReportId]);
 
   const handleRegenerateReport = useCallback(
     async (report: MeetingReportSummary) => {

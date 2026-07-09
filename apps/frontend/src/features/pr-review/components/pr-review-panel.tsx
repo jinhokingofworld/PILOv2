@@ -52,11 +52,32 @@ type DetailStatus = "idle" | "loading" | "ready" | "error";
 const PR_PAGE_SIZE = 10;
 const FILE_PREVIEW_LIMIT = 6;
 
+type PrReviewRouteSelection = {
+  pullRequestId: string | null;
+  repositoryId: string | null;
+};
+
 const emptyPagination: PrReviewPaginationMeta = {
   limit: PR_PAGE_SIZE,
   page: 1,
   total: 0
 };
+
+function readInitialPrReviewRouteSelection(): PrReviewRouteSelection {
+  if (typeof window === "undefined") {
+    return {
+      pullRequestId: null,
+      repositoryId: null
+    };
+  }
+
+  const searchParams = new URLSearchParams(window.location.search);
+
+  return {
+    pullRequestId: searchParams.get("pullRequestId")?.trim() || null,
+    repositoryId: searchParams.get("repositoryId")?.trim() || null
+  };
+}
 
 function getErrorMessage(error: unknown) {
   if (error instanceof PrReviewApiError) {
@@ -167,6 +188,10 @@ export function PrReviewPanel() {
   const [activeReviewPullRequest, setActiveReviewPullRequest] = useState<
     PrReviewPullRequest | PrReviewPullRequestDetail | null
   >(null);
+  const [routeSelection] = useState(readInitialPrReviewRouteSelection);
+  const [autoOpenedPullRequestId, setAutoOpenedPullRequestId] = useState<
+    string | null
+  >(null);
 
   const repositoryConnected = repositoryStatus === "ready" && repository !== null;
   const isRepositoryLoading =
@@ -212,6 +237,41 @@ export function PrReviewPanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [repositoryConnected, repository?.id, page, debouncedQuery]);
 
+  useEffect(() => {
+    if (
+      !routeSelection.pullRequestId ||
+      !repositoryConnected ||
+      !workspaceId ||
+      selectedPullRequest ||
+      activeReviewSession ||
+      autoOpenedPullRequestId === routeSelection.pullRequestId
+    ) {
+      return;
+    }
+
+    const listedPullRequest = pullRequests.find(
+      (pullRequest) => pullRequest.id === routeSelection.pullRequestId
+    );
+
+    setAutoOpenedPullRequestId(routeSelection.pullRequestId);
+
+    if (listedPullRequest) {
+      void openPullRequestDetail(listedPullRequest);
+      return;
+    }
+
+    void openPullRequestDetailById(routeSelection.pullRequestId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    activeReviewSession,
+    autoOpenedPullRequestId,
+    pullRequests,
+    repositoryConnected,
+    routeSelection.pullRequestId,
+    selectedPullRequest,
+    workspaceId
+  ]);
+
   async function loadConnectedRepository() {
     if (!workspaceId) {
       setRepositoryStatus("ready");
@@ -229,9 +289,15 @@ export function PrReviewPanel() {
     try {
       const repositoriesPage = await apiClient.listRepositories(workspaceId, {
         includeArchived: false,
-        limit: 2
+        limit: routeSelection.repositoryId ? 100 : 2
       });
+      const requestedRepository = routeSelection.repositoryId
+        ? repositoriesPage.data.find(
+            (candidate) => candidate.id === routeSelection.repositoryId
+          )
+        : null;
       const nextRepository =
+        requestedRepository ??
         repositoriesPage.data.find((candidate) => !candidate.archived) ??
         repositoriesPage.data[0] ??
         null;
@@ -245,6 +311,30 @@ export function PrReviewPanel() {
       setRepository(null);
       setRepositoryStatus("error");
       setRepositoryError(getErrorMessage(error));
+    }
+  }
+
+  async function openPullRequestDetailById(pullRequestId: string) {
+    setSelectedPullRequest(null);
+    setPullRequestDetail(null);
+    setPullRequestFiles([]);
+    setDescriptionExpanded(false);
+    setDetailError(null);
+    setSessionError(null);
+    setDetailStatus("loading");
+
+    try {
+      const [detail, files] = await Promise.all([
+        apiClient.getPullRequest(workspaceId, pullRequestId),
+        apiClient.listPullRequestFiles(workspaceId, pullRequestId)
+      ]);
+      setSelectedPullRequest(detail);
+      setPullRequestDetail(detail);
+      setPullRequestFiles(files);
+      setDetailStatus("ready");
+    } catch (error) {
+      setDetailStatus("error");
+      setDetailError(getErrorMessage(error));
     }
   }
 

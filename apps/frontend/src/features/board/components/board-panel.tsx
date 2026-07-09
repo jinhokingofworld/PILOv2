@@ -57,6 +57,7 @@ export function BoardPanel() {
   const accessToken = authSession?.accessToken.trim() ?? "";
   const [selectedBoardId, setSelectedBoardId] = useState("");
   const [selectedIssueId, setSelectedIssueId] = useState<string | null>(null);
+  const [requestedBoardId, setRequestedBoardId] = useState("");
   const [isIssueCreateModalOpen, setIsIssueCreateModalOpen] = useState(false);
   const [githubBoardSelection, setGithubBoardSelection] =
     useState<GithubBoardSelection | null>(null);
@@ -128,6 +129,21 @@ export function BoardPanel() {
     null;
 
   useEffect(() => {
+    const searchParams = new URLSearchParams(window.location.search);
+    const boardId = searchParams.get("boardId")?.trim() ?? "";
+    const issueId = searchParams.get("issueId")?.trim() ?? "";
+
+    if (boardId) {
+      setRequestedBoardId(boardId);
+      setSelectedBoardId(boardId);
+    }
+
+    if (issueId) {
+      setSelectedIssueId(issueId);
+    }
+  }, []);
+
+  useEffect(() => {
     setGithubBoardSelection(
       workspaceId ? readGithubBoardSelection(workspaceId) : null
     );
@@ -139,7 +155,21 @@ export function BoardPanel() {
 
   useEffect(() => {
     if (!boardData.boards.length) {
+      if (requestedBoardId) {
+        return;
+      }
+
       setSelectedBoardId("");
+      return;
+    }
+
+    if (
+      requestedBoardId &&
+      boardData.boards.some((board) => board.id === requestedBoardId)
+    ) {
+      if (selectedBoardId !== requestedBoardId) {
+        setSelectedBoardId(requestedBoardId);
+      }
       return;
     }
 
@@ -156,7 +186,7 @@ export function BoardPanel() {
     ) {
       setSelectedBoardId(boardData.boards[0].id);
     }
-  }, [boardData.boards, selectedBoardId, targetBoard]);
+  }, [boardData.boards, requestedBoardId, selectedBoardId, targetBoard]);
 
   useEffect(() => {
     if (!canUseBoard || boardData.catalogStatus !== "success") {
@@ -343,6 +373,7 @@ export function BoardPanel() {
             disabled={!boardData.boards.length || isBoardLoading}
             value={selectedBoardId}
             onChange={(event) => {
+              setRequestedBoardId("");
               setSelectedBoardId(event.currentTarget.value);
               setSelectedIssueId(null);
             }}
