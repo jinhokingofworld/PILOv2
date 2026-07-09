@@ -17,6 +17,7 @@ async function compileSqlErdRuntimeModules() {
   const inspectorOutputPath = join(outputDir, "inspector.mjs");
   const ddlParserOutputPath = join(outputDir, "ddl-parser.mjs");
   const apiClientOutputPath = join(outputDir, "api-client.mjs");
+  const sessionStateOutputPath = join(outputDir, "session-state.mjs");
 
   try {
     await compileTypeScriptModule(
@@ -37,6 +38,10 @@ async function compileSqlErdRuntimeModules() {
       "../../src/features/sql-erd/api/client.ts",
       apiClientOutputPath
     );
+    await compileTypeScriptModule(
+      "../../src/features/sql-erd/utils/session-state.ts",
+      sessionStateOutputPath
+    );
 
     await writeFile(
       join(outputDir, "types-stub.mjs"),
@@ -47,15 +52,23 @@ async function compileSqlErdRuntimeModules() {
       modelRuntime,
       inspectorRuntime,
       ddlParserRuntime,
-      apiClientRuntime
+      apiClientRuntime,
+      sessionStateRuntime
     ] = await Promise.all([
       import(pathToFileHref(modelOutputPath)),
       import(pathToFileHref(inspectorOutputPath)),
       import(pathToFileHref(ddlParserOutputPath)),
-      import(pathToFileHref(apiClientOutputPath))
+      import(pathToFileHref(apiClientOutputPath)),
+      import(pathToFileHref(sessionStateOutputPath))
     ]);
 
-    return { apiClientRuntime, ddlParserRuntime, inspectorRuntime, modelRuntime };
+    return {
+      apiClientRuntime,
+      ddlParserRuntime,
+      inspectorRuntime,
+      modelRuntime,
+      sessionStateRuntime
+    };
   } finally {
     await rm(outputDir, { force: true, recursive: true });
   }
@@ -216,6 +229,7 @@ const [
   page,
   navigation,
   panel,
+  sessionStateUtils,
   canvasSurface,
   tableShape,
   relationShape,
@@ -232,6 +246,7 @@ const [
     readSqlErdFile("../../src/features/sql-erd/page.tsx"),
     readSqlErdFile("../../src/features/sql-erd/navigation.ts"),
     readSqlErdFile("../../src/features/sql-erd/components/sql-erd-panel.tsx"),
+    readSqlErdFile("../../src/features/sql-erd/utils/session-state.ts"),
     readSqlErdFile("../../src/features/sql-erd/components/sql-erd-canvas.tsx"),
     readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-table-shape.tsx"),
     readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-relation-shape.tsx"),
@@ -240,8 +255,13 @@ const [
     readSqlErdFile("../../package.json")
   ]);
 
-const { apiClientRuntime, ddlParserRuntime, inspectorRuntime, modelRuntime } =
-  await compileSqlErdRuntimeModules();
+const {
+  apiClientRuntime,
+  ddlParserRuntime,
+  inspectorRuntime,
+  modelRuntime,
+  sessionStateRuntime
+} = await compileSqlErdRuntimeModules();
 const runtimeModel = createRuntimeTestModel();
 const runtimeModelIndex = modelRuntime.createSqltoerdModelIndex(runtimeModel);
 const runtimeOrdersToUsersRelation =
@@ -310,6 +330,35 @@ assert.equal(
     (relation) => relation.id === runtimeUsersSelfRelation.id
   ).length,
   1
+);
+
+const manualReloadFailureAction =
+  sessionStateRuntime.getSqlErdSessionReloadFailureAction({
+    fallbackToSampleOnFailure: false
+  });
+
+assert.equal(manualReloadFailureAction.kind, "preserve_current");
+assert.equal(
+  manualReloadFailureAction.sessionLoadState.label,
+  "Reload failed"
+);
+
+const initialReloadFailureAction =
+  sessionStateRuntime.getSqlErdSessionReloadFailureAction({
+    fallbackToSampleOnFailure: true
+  });
+
+assert.equal(initialReloadFailureAction.kind, "fallback_to_sample");
+assert.deepEqual(initialReloadFailureAction.selectedSqlErdObject, {
+  type: "none"
+});
+assert.equal(
+  sessionStateRuntime.shouldApplySqlErdSessionLoadResult(7, 7),
+  true
+);
+assert.equal(
+  sessionStateRuntime.shouldApplySqlErdSessionLoadResult(7, 8),
+  false
 );
 
 const sqlErdApiRequests = [];
@@ -653,6 +702,43 @@ assert.deepEqual(generatedLayout.tableLayouts[1], {
   y: 80
 });
 
+const movedRuntimeLayout = modelRuntime.updateSqltoerdLayoutWithTablePositions(
+  runtimeModel,
+  {
+    version: 1,
+    tableLayouts: [
+      { tableId: "table.users", x: 10, y: 20, width: 240 },
+      { tableId: "table.orders", x: 360, y: 20, width: 260 }
+    ]
+  },
+  [
+    { tableId: "table.orders", x: 460, y: 180 },
+    { tableId: "table.unknown", x: 999, y: 999 }
+  ]
+);
+
+assert.deepEqual(movedRuntimeLayout.tableLayouts, [
+  { tableId: "table.users", x: 10, y: 20, width: 240 },
+  { tableId: "table.orders", x: 460, y: 180, width: 260 }
+]);
+assert.equal(
+  modelRuntime.areSqltoerdLayoutsEqual(
+    movedRuntimeLayout,
+    movedRuntimeLayout
+  ),
+  true
+);
+assert.equal(
+  modelRuntime.areSqltoerdLayoutsEqual(movedRuntimeLayout, {
+    version: 1,
+    tableLayouts: [
+      { tableId: "table.users", x: 10, y: 20, width: 240 },
+      { tableId: "table.orders", x: 461, y: 180, width: 260 }
+    ]
+  }),
+  false
+);
+
 const autoDialectParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
   dialect: "auto",
   sourceText: `CREATE TABLE users (
@@ -735,6 +821,8 @@ assert.match(modelUtils, /getTableLayout/);
 assert.match(modelUtils, /getRelationEndpoints/);
 assert.match(modelUtils, /getTableDisplayName/);
 assert.match(modelUtils, /createSqltoerdLayoutForModel/);
+assert.match(modelUtils, /updateSqltoerdLayoutWithTablePositions/);
+assert.match(modelUtils, /areSqltoerdLayoutsEqual/);
 assert.match(modelUtils, /relationsByTableId/);
 assert.match(modelUtils, /columnsByTableId/);
 assert.match(modelUtils, /relation\.fromTableId === relation\.toTableId/);
@@ -749,6 +837,11 @@ assert.match(navigation, /href: "\/sql-erd"/);
 assert.doesNotMatch(navigation, /Inspector/);
 assert.doesNotMatch(navigation, /href: "\/sql-erd#inspector"/);
 
+assert.match(sessionStateUtils, /getSqlErdSessionReloadFailureAction/);
+assert.match(sessionStateUtils, /kind: "preserve_current"/);
+assert.match(sessionStateUtils, /kind: "fallback_to_sample"/);
+assert.match(sessionStateUtils, /shouldApplySqlErdSessionLoadResult/);
+
 assert.match(panel, /SqlErdCanvas/);
 assert.match(panel, /useAuthSession/);
 assert.match(panel, /createSqlErdApiClient/);
@@ -758,6 +851,70 @@ assert.match(panel, /handleGenerate/);
 assert.match(panel, /createSession/);
 assert.match(panel, /updateSession/);
 assert.match(panel, /baseRevision: sqlErdViewSession\.revision/);
+assert.match(panel, /AUTOSAVE_DEBOUNCE_MS = 2000/);
+assert.match(panel, /pendingLayoutAutosaveJson/);
+assert.match(panel, /layoutAutosaveRetryAttempt/);
+assert.match(panel, /type LayoutAutosaveBlockReason/);
+assert.match(panel, /layoutAutosaveBlockReason/);
+assert.match(panel, /getLayoutAutosaveBlockReason/);
+assert.match(panel, /getLayoutAutosavePausedBanner/);
+assert.match(panel, /AutosavePausedBanner/);
+assert.match(panel, /Autosave paused/);
+assert.match(panel, /Reload session/);
+assert.match(panel, /Retry once/);
+assert.match(panel, /handleReloadSession/);
+assert.match(panel, /handleReloadPausedSession/);
+assert.match(panel, /handleRetryLayoutAutosaveOnce/);
+assert.match(panel, /handleLayoutChange/);
+assert.match(panel, /sessionLoadRequestIdRef/);
+assert.match(panel, /shouldApplySqlErdSessionLoadResult/);
+assert.match(panel, /fallbackToSampleOnFailure/);
+assert.match(panel, /getSqlErdSessionReloadFailureAction/);
+assert.match(
+  panel,
+  /void handleReloadSession\(\{ fallbackToSampleOnFailure: true \}\)/
+);
+assert.match(panel, /onReloadSession=\{handleReloadPausedSession\}/);
+assert.doesNotMatch(panel, /onReloadSession=\{handleReloadSession\}/);
+assert.doesNotMatch(
+  panel,
+  /catch \{\s*setSqlErdViewSession\(sampleSqlErdViewSession\);[\s\S]*?setPendingLayoutAutosaveJson\(null\);/
+);
+assert.doesNotMatch(panel, /isLayoutAutosaveBlocked/);
+assert.match(panel, /status === 409/);
+assert.match(panel, /isSqlErdApiTransientAutosaveError/);
+assert.match(panel, /status === 408 \|\| status === 429 \|\| status >= 500/);
+assert.match(panel, /status === 401/);
+assert.match(panel, /status === 403/);
+assert.match(panel, /status === 404/);
+assert.match(panel, /status === 400 \|\| status === 413/);
+assert.match(panel, /baseRevision: currentRevision/);
+assert.match(panel, /layoutJson: requestLayoutJson/);
+assert.match(panel, /getLayoutAutosaveDelayMs\(layoutAutosaveRetryAttempt\)/);
+const layoutAutosaveNonConflictCatch =
+  panel.match(
+    /if \(isSqlErdApiConflictError\(error\)\) \{[\s\S]*?return;\n\s*\}\n\n([\s\S]*?)\n\s*\}\n\s*\}, autosaveDelayMs/
+  )?.[1] ?? "";
+assert.match(
+  layoutAutosaveNonConflictCatch,
+  /setLayoutAutosaveRetryAttempt\(\(currentAttempt\) => currentAttempt \+ 1\)/
+);
+assert.match(
+  layoutAutosaveNonConflictCatch,
+  /if \(layoutAutosaveBlockReason\) \{[\s\S]*?setLayoutAutosaveBlockReason\(layoutAutosaveBlockReason\)[\s\S]*?return;/
+);
+assert.doesNotMatch(
+  layoutAutosaveNonConflictCatch,
+  /setPendingLayoutAutosaveJson/
+);
+const layoutAutosaveConflictCatch =
+  panel.match(
+    /if \(isSqlErdApiConflictError\(error\)\) \{([\s\S]*?)\n\s*return;\n\s*\}/
+  )?.[1] ?? "";
+assert.doesNotMatch(
+  layoutAutosaveConflictCatch,
+  /setPendingLayoutAutosaveJson\(null\)/
+);
 assert.match(panel, /createSqltoerdLayoutForModel/);
 assert.match(panel, /handleDialectChange/);
 assert.match(panel, /onDialectChange=\{handleDialectChange\}/);
@@ -840,6 +997,7 @@ assert.match(inspectorUtils, /relation\.toTableId === tableId/);
 assert.match(canvasSurface, /TldrawSurface/);
 assert.match(canvasSurface, /commerceSqltoerdFixture/);
 assert.match(canvasSurface, /SqlErdCanvasShapeSync/);
+assert.match(canvasSurface, /areSqlErdCanvasShapesApplied/);
 assert.match(canvasSurface, /createSqltoerdTableShapes/);
 assert.match(canvasSurface, /createSqltoerdRelationShapes/);
 assert.match(canvasSurface, /createSqltoerdCanvasShapes/);
@@ -851,6 +1009,9 @@ assert.match(canvasSurface, /editor\.updateShapes/);
 assert.match(canvasSurface, /history: "ignore"/);
 assert.match(canvasSurface, /SqlErdSelectionSync/);
 assert.match(canvasSurface, /SqlErdSelectedColumnSync/);
+assert.match(canvasSurface, /SqlErdLayoutSync/);
+assert.match(canvasSurface, /onLayoutChange/);
+assert.match(canvasSurface, /updateSqltoerdLayoutWithTablePositions/);
 assert.match(canvasSurface, /onSelectionChange/);
 assert.match(canvasSurface, /SQLTOERD_COLUMN_SELECT_EVENT/);
 assert.match(canvasSurface, /editor\.getSelectedShapes/);

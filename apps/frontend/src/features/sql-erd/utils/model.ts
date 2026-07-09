@@ -25,6 +25,11 @@ export type SqltoerdModelIndex = {
   relationsByTableId: Map<string, ErdRelation[]>;
 };
 
+export type SqltoerdTablePosition = Pick<
+  SqltoerdTableLayout,
+  "tableId" | "x" | "y"
+>;
+
 export function getSqltoerdModelCounts(
   modelJson: SqltoerdModelJsonV1
 ): SqltoerdModelCounts {
@@ -65,6 +70,71 @@ export function createSqltoerdLayoutForModel(
       };
     })
   };
+}
+
+export function updateSqltoerdLayoutWithTablePositions(
+  modelJson: SqltoerdModelJsonV1,
+  previousLayoutJson: SqltoerdLayoutJsonV1,
+  tablePositions: SqltoerdTablePosition[]
+): SqltoerdLayoutJsonV1 {
+  const tablePositionsById = new Map(
+    tablePositions.map((tablePosition) => [
+      tablePosition.tableId,
+      tablePosition
+    ])
+  );
+  const baseLayoutJson = createSqltoerdLayoutForModel(
+    modelJson,
+    previousLayoutJson
+  );
+
+  return {
+    version: baseLayoutJson.version,
+    tableLayouts: baseLayoutJson.tableLayouts.map((tableLayout) => {
+      const tablePosition = tablePositionsById.get(tableLayout.tableId);
+
+      if (!tablePosition) {
+        return tableLayout;
+      }
+
+      return {
+        ...tableLayout,
+        x: tablePosition.x,
+        y: tablePosition.y
+      };
+    }),
+    ...(previousLayoutJson.viewport
+      ? { viewport: previousLayoutJson.viewport }
+      : {})
+  };
+}
+
+export function areSqltoerdLayoutsEqual(
+  leftLayoutJson: SqltoerdLayoutJsonV1,
+  rightLayoutJson: SqltoerdLayoutJsonV1
+) {
+  if (
+    leftLayoutJson.version !== rightLayoutJson.version ||
+    leftLayoutJson.tableLayouts.length !== rightLayoutJson.tableLayouts.length
+  ) {
+    return false;
+  }
+
+  for (let index = 0; index < leftLayoutJson.tableLayouts.length; index += 1) {
+    if (
+      !areSqltoerdTableLayoutsEqual(
+        leftLayoutJson.tableLayouts[index],
+        rightLayoutJson.tableLayouts[index]
+      )
+    ) {
+      return false;
+    }
+  }
+
+  return areSqltoerdViewportsEqual(
+    leftLayoutJson.viewport,
+    rightLayoutJson.viewport
+  );
 }
 
 export function createSqltoerdModelIndex(
@@ -175,6 +245,41 @@ export function getRelationEndpoints(
       columns: toColumns
     }
   };
+}
+
+function areOptionalNumbersEqual(left?: number, right?: number) {
+  if (left === undefined || right === undefined) {
+    return left === right;
+  }
+
+  return Math.abs(left - right) < 0.01;
+}
+
+function areSqltoerdTableLayoutsEqual(
+  leftTableLayout: SqltoerdTableLayout,
+  rightTableLayout: SqltoerdTableLayout
+) {
+  return (
+    leftTableLayout.tableId === rightTableLayout.tableId &&
+    Math.abs(leftTableLayout.x - rightTableLayout.x) < 0.01 &&
+    Math.abs(leftTableLayout.y - rightTableLayout.y) < 0.01 &&
+    areOptionalNumbersEqual(leftTableLayout.width, rightTableLayout.width)
+  );
+}
+
+function areSqltoerdViewportsEqual(
+  leftViewport: SqltoerdLayoutJsonV1["viewport"],
+  rightViewport: SqltoerdLayoutJsonV1["viewport"]
+) {
+  if (!leftViewport || !rightViewport) {
+    return leftViewport === rightViewport;
+  }
+
+  return (
+    Math.abs(leftViewport.x - rightViewport.x) < 0.01 &&
+    Math.abs(leftViewport.y - rightViewport.y) < 0.01 &&
+    Math.abs(leftViewport.zoom - rightViewport.zoom) < 0.01
+  );
 }
 
 function createColumnsById(table: ErdTable) {
