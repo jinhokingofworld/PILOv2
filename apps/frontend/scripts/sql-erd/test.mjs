@@ -20,6 +20,7 @@ async function compileSqlErdRuntimeModules() {
   const layoutAutosaveOutputPath = join(outputDir, "layout-autosave.mjs");
   const apiClientOutputPath = join(outputDir, "api-client.mjs");
   const sessionStateOutputPath = join(outputDir, "session-state.mjs");
+  const statusCopyOutputPath = join(outputDir, "status-copy.mjs");
 
   try {
     await compileTypeScriptModule(
@@ -59,6 +60,10 @@ async function compileSqlErdRuntimeModules() {
       "../../src/features/sql-erd/utils/session-state.ts",
       sessionStateOutputPath
     );
+    await compileTypeScriptModule(
+      "../../src/features/sql-erd/utils/status-copy.ts",
+      statusCopyOutputPath
+    );
 
     await writeFile(
       join(outputDir, "types-stub.mjs"),
@@ -72,7 +77,8 @@ async function compileSqlErdRuntimeModules() {
       generateSessionRuntime,
       layoutAutosaveRuntime,
       apiClientRuntime,
-      sessionStateRuntime
+      sessionStateRuntime,
+      statusCopyRuntime
     ] = await Promise.all([
       import(pathToFileHref(modelOutputPath)),
       import(pathToFileHref(inspectorOutputPath)),
@@ -80,7 +86,8 @@ async function compileSqlErdRuntimeModules() {
       import(pathToFileHref(generateSessionOutputPath)),
       import(pathToFileHref(layoutAutosaveOutputPath)),
       import(pathToFileHref(apiClientOutputPath)),
-      import(pathToFileHref(sessionStateOutputPath))
+      import(pathToFileHref(sessionStateOutputPath)),
+      import(pathToFileHref(statusCopyOutputPath))
     ]);
 
     return {
@@ -90,7 +97,8 @@ async function compileSqlErdRuntimeModules() {
       layoutAutosaveRuntime,
       inspectorRuntime,
       modelRuntime,
-      sessionStateRuntime
+      sessionStateRuntime,
+      statusCopyRuntime
     };
   } finally {
     await rm(outputDir, { force: true, recursive: true });
@@ -255,6 +263,7 @@ const [
   sessionStateUtils,
   generateSessionUtils,
   layoutAutosaveUtils,
+  statusCopyUtils,
   canvasSurface,
   tableShape,
   relationShape,
@@ -274,6 +283,7 @@ const [
     readSqlErdFile("../../src/features/sql-erd/utils/session-state.ts"),
     readSqlErdFile("../../src/features/sql-erd/utils/generate-session.ts"),
     readSqlErdFile("../../src/features/sql-erd/utils/layout-autosave.ts"),
+    readSqlErdFile("../../src/features/sql-erd/utils/status-copy.ts"),
     readSqlErdFile("../../src/features/sql-erd/components/sql-erd-canvas.tsx"),
     readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-table-shape.tsx"),
     readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-relation-shape.tsx"),
@@ -289,7 +299,8 @@ const {
   layoutAutosaveRuntime,
   inspectorRuntime,
   modelRuntime,
-  sessionStateRuntime
+  sessionStateRuntime,
+  statusCopyRuntime
 } = await compileSqlErdRuntimeModules();
 const runtimeModel = createRuntimeTestModel();
 const runtimeModelIndex = modelRuntime.createSqltoerdModelIndex(runtimeModel);
@@ -371,6 +382,10 @@ assert.equal(
   manualReloadFailureAction.sessionLoadState.label,
   "Reload failed"
 );
+assert.equal(
+  manualReloadFailureAction.sessionLoadState.message,
+  "Workspace session could not be reloaded. Keep editing the current ERD or try reloading again."
+);
 
 const initialReloadFailureAction =
   sessionStateRuntime.getSqlErdSessionReloadFailureAction({
@@ -380,6 +395,11 @@ const initialReloadFailureAction =
 assert.equal(initialReloadFailureAction.kind, "fallback_to_sample");
 assert.deepEqual(initialReloadFailureAction.selectedSqlErdObject, {
   type: "none"
+});
+assert.deepEqual(initialReloadFailureAction.sessionLoadState, {
+  label: "Sample",
+  message: "Workspace session could not be loaded. Showing the built-in sample instead.",
+  tone: "neutral"
 });
 assert.equal(
   sessionStateRuntime.shouldApplySqlErdSessionLoadResult(7, 7),
@@ -440,17 +460,70 @@ assert.equal(sessionStateRuntime.getLayoutAutosaveDelayMs(1), 4000);
 assert.equal(sessionStateRuntime.getLayoutAutosaveDelayMs(4), 30000);
 assert.deepEqual(sessionStateRuntime.getLayoutAutosavePausedBanner("conflict"), {
   canRetry: false,
-  message: "Workspace session changed. Reload the latest session.",
+  message: "Workspace session changed. Reload the latest session before saving this layout.",
   reason: "conflict"
+});
+assert.deepEqual(
+  sessionStateRuntime.getLayoutAutosavePausedBanner("unauthorized"),
+  {
+    canRetry: false,
+    message: "Sign in again, then reload this SQLtoERD session.",
+    reason: "unauthorized"
+  }
+);
+assert.deepEqual(sessionStateRuntime.getLayoutAutosavePausedBanner("forbidden"), {
+  canRetry: false,
+  message: "You do not have permission to save this SQLtoERD session.",
+  reason: "forbidden"
+});
+assert.deepEqual(sessionStateRuntime.getLayoutAutosavePausedBanner("not_found"), {
+  canRetry: false,
+  message: "This SQLtoERD session was deleted or cannot be found. Reload the session.",
+  reason: "not_found"
 });
 assert.deepEqual(
   sessionStateRuntime.getLayoutAutosavePausedBanner("invalid_payload"),
   {
     canRetry: true,
-    message: "Current layout payload cannot be saved automatically.",
+    message: "Current layout payload cannot be autosaved. Try moving a table again or reload the session.",
     reason: "invalid_payload"
   }
 );
+assert.deepEqual(
+  sessionStateRuntime.getLayoutAutosavePausedBanner("unknown_non_transient"),
+  {
+    canRetry: true,
+    message: "Autosave stopped after a non-retryable API error. Retry once or reload the session.",
+    reason: "unknown_non_transient"
+  }
+);
+
+assert.equal(
+  statusCopyRuntime.getSqlErdGenerateErrorMessage("EMPTY_SOURCE"),
+  "Enter at least one CREATE TABLE statement to generate an ERD."
+);
+assert.equal(
+  statusCopyRuntime.getSqlErdGenerateErrorMessage("UNSUPPORTED_DIALECT"),
+  "This SQL dialect is not supported yet. Choose PostgreSQL or MySQL."
+);
+assert.equal(
+  statusCopyRuntime.getSqlErdGenerateErrorMessage("NO_CREATE_TABLE"),
+  "SQLtoERD MVP supports CREATE TABLE DDL. Add at least one CREATE TABLE statement."
+);
+assert.equal(
+  statusCopyRuntime.getSqlErdGenerateErrorMessage("PARSE_FAILED"),
+  "SQL DDL could not be parsed. Check the CREATE TABLE syntax and try again."
+);
+assert.deepEqual(statusCopyRuntime.getSqlErdSignInRequiredState(), {
+  label: "Sign in",
+  message: "Sign in to save this SQLtoERD session in the Workspace.",
+  tone: "error"
+});
+assert.deepEqual(statusCopyRuntime.getSqlErdWorkspaceSaveErrorState(), {
+  label: "Save error",
+  message: "Workspace session could not be saved. Check your connection and try Generate again.",
+  tone: "error"
+});
 
 const generateSmokeSource = `
 CREATE TABLE users (
@@ -1090,11 +1163,20 @@ assert.match(layoutAutosaveUtils, /baseRevision: session\.revision/);
 assert.match(layoutAutosaveUtils, /layoutJson/);
 assert.match(layoutAutosaveUtils, /missing_workspace_session/);
 
+assert.match(statusCopyUtils, /getSqlErdGenerateErrorMessage/);
+assert.match(statusCopyUtils, /getSqlErdSignInRequiredState/);
+assert.match(statusCopyUtils, /getSqlErdWorkspaceSaveErrorState/);
+assert.match(statusCopyUtils, /CREATE TABLE statement/);
+assert.match(statusCopyUtils, /Check your connection and try Generate again/);
+
 assert.match(panel, /SqlErdCanvas/);
 assert.match(panel, /useAuthSession/);
 assert.match(panel, /createSqlErdApiClient/);
 assert.match(panel, /getActiveSession/);
 assert.match(panel, /createSqlErdGenerateWorkspaceRequest/);
+assert.match(panel, /getSqlErdGenerateErrorMessage/);
+assert.match(panel, /getSqlErdSignInRequiredState/);
+assert.match(panel, /getSqlErdWorkspaceSaveErrorState/);
 assert.match(panel, /handleGenerate/);
 assert.match(panel, /createSession/);
 assert.match(panel, /updateSession/);

@@ -78,6 +78,11 @@ import {
 } from "@/features/sql-erd/utils/model";
 import { createSqlErdGenerateWorkspaceRequest } from "@/features/sql-erd/utils/generate-session";
 import { createSqlErdLayoutAutosaveRequest } from "@/features/sql-erd/utils/layout-autosave";
+import {
+  getSqlErdGenerateErrorMessage,
+  getSqlErdSignInRequiredState,
+  getSqlErdWorkspaceSaveErrorState
+} from "@/features/sql-erd/utils/status-copy";
 import { cn } from "@/lib/utils";
 
 const sampleSqlErdViewSession = createSampleSqlErdViewSession(
@@ -139,22 +144,6 @@ const sqlSourceEditorTheme = EditorView.theme({
     outline: "none"
   }
 });
-
-function getSqlErdGenerateErrorMessage(errorCode: string) {
-  if (errorCode === "EMPTY_SOURCE") {
-    return "Enter one or more CREATE TABLE statements";
-  }
-
-  if (errorCode === "UNSUPPORTED_DIALECT") {
-    return "Selected SQL dialect is not supported by the MVP parser";
-  }
-
-  if (errorCode === "NO_CREATE_TABLE") {
-    return "SQLtoERD MVP expects CREATE TABLE statements";
-  }
-
-  return "SQL DDL could not be parsed";
-}
 
 function isSqlErdApiConflictError(error: unknown) {
   return error instanceof SqlErdApiError && error.status === 409;
@@ -390,11 +379,7 @@ export function SqlErdPanel() {
     }
 
     if (!authSession) {
-      setSessionLoadState({
-        label: "Sign in",
-        message: "Sign in to save a Workspace session",
-        tone: "error"
-      });
+      setSessionLoadState(getSqlErdSignInRequiredState());
       return;
     }
 
@@ -452,11 +437,7 @@ export function SqlErdPanel() {
       });
       setSelectedSqlErdObject({ type: "none" });
     } catch {
-      setSessionLoadState({
-        label: "Save error",
-        message: "Workspace session could not be saved",
-        tone: "error"
-      });
+      setSessionLoadState(getSqlErdWorkspaceSaveErrorState());
     } finally {
       setIsGenerating(false);
     }

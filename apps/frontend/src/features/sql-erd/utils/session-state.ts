@@ -137,7 +137,8 @@ export function getLayoutAutosavePausedBanner(
   if (reason === "conflict") {
     return {
       canRetry: false,
-      message: "Workspace session changed. Reload the latest session.",
+      message:
+        "Workspace session changed. Reload the latest session before saving this layout.",
       reason
     };
   }
@@ -153,7 +154,7 @@ export function getLayoutAutosavePausedBanner(
   if (reason === "forbidden") {
     return {
       canRetry: false,
-      message: "You do not have permission to save in this Workspace.",
+      message: "You do not have permission to save this SQLtoERD session.",
       reason
     };
   }
@@ -161,7 +162,8 @@ export function getLayoutAutosavePausedBanner(
   if (reason === "not_found") {
     return {
       canRetry: false,
-      message: "This SQLtoERD session was deleted or cannot be found.",
+      message:
+        "This SQLtoERD session was deleted or cannot be found. Reload the session.",
       reason
     };
   }
@@ -169,14 +171,16 @@ export function getLayoutAutosavePausedBanner(
   if (reason === "invalid_payload") {
     return {
       canRetry: true,
-      message: "Current layout payload cannot be saved automatically.",
+      message:
+        "Current layout payload cannot be autosaved. Try moving a table again or reload the session.",
       reason
     };
   }
 
   return {
     canRetry: true,
-    message: "Autosave stopped after a non-retryable API error.",
+    message:
+      "Autosave stopped after a non-retryable API error. Retry once or reload the session.",
     reason
   };
 }
@@ -192,7 +196,8 @@ export function getSqlErdSessionReloadFailureAction({
       selectedSqlErdObject: { type: "none" },
       sessionLoadState: {
         label: "Sample",
-        message: "Workspace session could not be loaded",
+        message:
+          "Workspace session could not be loaded. Showing the built-in sample instead.",
         tone: "neutral"
       }
     };
@@ -202,7 +207,8 @@ export function getSqlErdSessionReloadFailureAction({
     kind: "preserve_current",
     sessionLoadState: {
       label: "Reload failed",
-      message: "Workspace session could not be reloaded",
+      message:
+        "Workspace session could not be reloaded. Keep editing the current ERD or try reloading again.",
       tone: "error"
     }
   };
