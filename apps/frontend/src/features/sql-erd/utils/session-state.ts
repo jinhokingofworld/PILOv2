@@ -32,6 +32,15 @@ export type LayoutAutosaveBlockReason =
   | "invalid_payload"
   | "unknown_non_transient";
 
+export type LayoutAutosavePausedBannerViewModel = {
+  canRetry: boolean;
+  message: string;
+  reason: LayoutAutosaveBlockReason;
+};
+
+export const SQL_ERD_LAYOUT_AUTOSAVE_DEBOUNCE_MS = 2000;
+export const SQL_ERD_LAYOUT_AUTOSAVE_MAX_RETRY_DELAY_MS = 30000;
+
 export type SqlErdSessionReloadFailureAction =
   | {
       kind: "fallback_to_sample";
@@ -72,6 +81,103 @@ export function createWorkspaceSqlErdViewSession(
     modelJson: session.modelJson,
     layoutJson: session.layoutJson,
     settingsJson: session.settingsJson
+  };
+}
+
+export function getLayoutAutosaveBlockReasonForStatus(
+  status: number | null | undefined
+): LayoutAutosaveBlockReason | null {
+  if (status === 409) {
+    return "conflict";
+  }
+
+  if (status === 401) {
+    return "unauthorized";
+  }
+
+  if (status === 403) {
+    return "forbidden";
+  }
+
+  if (status === 404) {
+    return "not_found";
+  }
+
+  if (status === 400 || status === 413) {
+    return "invalid_payload";
+  }
+
+  if (typeof status !== "number") {
+    return null;
+  }
+
+  if (status === 408 || status === 429 || status >= 500) {
+    return null;
+  }
+
+  return "unknown_non_transient";
+}
+
+export function isLayoutAutosaveTransientStatus(
+  status: number | null | undefined
+) {
+  return getLayoutAutosaveBlockReasonForStatus(status) === null;
+}
+
+export function getLayoutAutosaveDelayMs(retryAttempt: number) {
+  return Math.min(
+    SQL_ERD_LAYOUT_AUTOSAVE_DEBOUNCE_MS * 2 ** retryAttempt,
+    SQL_ERD_LAYOUT_AUTOSAVE_MAX_RETRY_DELAY_MS
+  );
+}
+
+export function getLayoutAutosavePausedBanner(
+  reason: LayoutAutosaveBlockReason
+): LayoutAutosavePausedBannerViewModel {
+  if (reason === "conflict") {
+    return {
+      canRetry: false,
+      message: "Workspace session changed. Reload the latest session.",
+      reason
+    };
+  }
+
+  if (reason === "unauthorized") {
+    return {
+      canRetry: false,
+      message: "Sign in again, then reload this SQLtoERD session.",
+      reason
+    };
+  }
+
+  if (reason === "forbidden") {
+    return {
+      canRetry: false,
+      message: "You do not have permission to save in this Workspace.",
+      reason
+    };
+  }
+
+  if (reason === "not_found") {
+    return {
+      canRetry: false,
+      message: "This SQLtoERD session was deleted or cannot be found.",
+      reason
+    };
+  }
+
+  if (reason === "invalid_payload") {
+    return {
+      canRetry: true,
+      message: "Current layout payload cannot be saved automatically.",
+      reason
+    };
+  }
+
+  return {
+    canRetry: true,
+    message: "Autosave stopped after a non-retryable API error.",
+    reason
   };
 }
 
