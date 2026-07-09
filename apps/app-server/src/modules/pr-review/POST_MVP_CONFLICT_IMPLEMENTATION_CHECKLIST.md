@@ -20,7 +20,7 @@
 | 1-A | Scope and contract | #503 | #504 | 완료 |
 | 1-B | Read-only conflict analysis backend | #506 | #507 | 완료 |
 | 1-C | Review room conflict UX | #508 | #511 | 완료 |
-| 1-D | AI suggestion draft | #512 | TBD | 구현 완료 |
+| 1-D | AI suggestion draft | #512 | #515 | 구현 완료 |
 | 1-E | Apply resolution write path | TBD | TBD | 예정 |
 
 ## 공통 Stop Gate
