@@ -69,8 +69,7 @@ import { useAuthSession } from "@/features/auth/auth-session";
 import { createBoardApiClient } from "@/features/board/api/client";
 import type {
   BoardIssueCardPayload,
-  BoardPayload,
-  BoardProjectPayload
+  BoardPayload
 } from "@/features/board/types";
 import { createCalendarApiClient } from "@/features/calendar/api/client";
 import type { CalendarEvent } from "@/features/calendar/types";
@@ -82,9 +81,7 @@ import { createGithubIntegrationApiClient } from "@/features/github-integration/
 import type {
   GithubOAuthStatus,
   GithubPullRequest,
-  GithubProjectV2AccessStatus,
-  GithubRepository,
-  GithubRepositoryCollaboratorStatus
+  GithubRepository
 } from "@/features/github-integration/types";
 import { readGithubBoardSelection } from "@/features/github-integration/utils/github-board-selection";
 import { createMeetingApiClient } from "@/features/meeting/api/client";
@@ -141,22 +138,22 @@ type HomeGithubOAuthState = {
   value: GithubOAuthStatus | null;
 };
 
-type HomeRepositoryAccessState = {
-  access: GithubRepositoryCollaboratorStatus | null;
-  error: Error | null;
-  repository: GithubRepository | null;
-  status: "idle" | "loading" | "success" | "error";
-};
-
-type HomeProjectAccessState = {
-  access: GithubProjectV2AccessStatus | null;
-  error: Error | null;
-  project: BoardProjectPayload | null;
-  status: "idle" | "loading" | "success" | "error";
-};
-
 export function HomeDashboard() {
   const authSession = useAuthSession();
+  const today = useMemo(() => new Date(), []);
+  const calendarDates = useMemo(() => getCalendarRangeDates(today, 14), [today]);
+  const calendarRange = useMemo(
+    () => ({
+      end: formatCalendarDate(calendarDates[calendarDates.length - 1]),
+      start: formatCalendarDate(calendarDates[0])
+    }),
+    [calendarDates]
+  );
+  const calendarEventsState = useHomeWeekCalendarEvents({
+    accessToken: authSession?.accessToken ?? null,
+    range: calendarRange,
+    workspaceId: authSession?.activeWorkspaceId ?? ""
+  });
   const issuesState = useHomeIssues({
     accessToken: authSession?.accessToken ?? null,
     workspaceId: authSession?.activeWorkspaceId ?? ""
@@ -172,14 +169,20 @@ export function HomeDashboard() {
 
   return (
     <section className="flex min-h-0 flex-1 flex-col gap-4">
-      <div className="grid min-h-0 flex-1 gap-4 xl:grid-cols-[0.9fr_1.75fr_1fr] xl:grid-rows-[330px_minmax(272px,1fr)_128px]">
+      <div className="grid min-h-0 flex-1 gap-4 xl:grid-cols-[0.9fr_1.75fr_1fr] xl:grid-rows-[minmax(0,330px)_minmax(272px,1fr)_128px]">
         <MembersCard />
         <CalendarCard
+          calendarDates={calendarDates}
+          calendarEventsState={calendarEventsState}
+          today={today}
+        />
+        <SummaryMetricsPanel
+          calendarEventsState={calendarEventsState}
           issuesState={issuesState}
           meetingReportsState={meetingReportsState}
           pullRequestsState={pullRequestsState}
+          today={today}
         />
-        <GithubConnectionCard />
         <MiddleDashboardCards
           issuesState={issuesState}
           meetingReportsState={meetingReportsState}
@@ -229,8 +232,20 @@ function MembersCard() {
   const canManageWorkspace =
     activeWorkspace?.role === "owner" || activeWorkspace?.isOwner === true;
   const currentUserId = authSession?.user.id ?? null;
-  const onlineMembers = members;
-  const offlineMembers: WorkspaceMember[] = [];
+  const onlineMembers = activeWorkspace
+    ? members.filter(
+        (member) =>
+          member.user.activeWorkspaceId === activeWorkspace.id ||
+          member.userId === currentUserId
+      )
+    : [];
+  const offlineMembers = activeWorkspace
+    ? members.filter(
+        (member) =>
+          member.user.activeWorkspaceId !== activeWorkspace.id &&
+          member.userId !== currentUserId
+      )
+    : [];
   const canLeaveWorkspace = Boolean(activeWorkspace) && !canManageWorkspace;
 
   useEffect(() => {
@@ -447,7 +462,7 @@ function MembersCard() {
   return (
     <>
       <DashboardCard
-        className="border-[#1E1F22] bg-[#2B2D31] text-[#F2F3F5] shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_10px_24px_rgba(15,23,42,0.12)] xl:row-start-1 [&_[data-slot=card-action]_button]:border-[#3F4147] [&_[data-slot=card-action]_button]:bg-[#313338] [&_[data-slot=card-action]_button]:text-[#F2F3F5] [&_[data-slot=card-action]_button:hover]:bg-[#404249] [&_[data-slot=card-title]>span]:border-[#3F4147] [&_[data-slot=card-title]>span]:bg-[#313338] [&_[data-slot=card-title]>span]:text-[#B5BAC1] [&_[data-slot=card-title]]:text-[#F2F3F5]"
+        className="overflow-hidden border-[#1E1F22] bg-[#2B2D31] text-[#F2F3F5] shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_10px_24px_rgba(15,23,42,0.12)] xl:row-start-1 [&_[data-slot=card-action]_button]:border-[#3F4147] [&_[data-slot=card-action]_button]:bg-[#313338] [&_[data-slot=card-action]_button]:text-[#F2F3F5] [&_[data-slot=card-action]_button:hover]:bg-[#404249] [&_[data-slot=card-title]>span]:border-[#3F4147] [&_[data-slot=card-title]>span]:bg-[#313338] [&_[data-slot=card-title]>span]:text-[#B5BAC1] [&_[data-slot=card-title]]:text-[#F2F3F5]"
         action={
           canManageWorkspace ? (
             <Popover
@@ -878,21 +893,51 @@ function MemberProfileDialog({
 }
 
 function CalendarCard({
+  calendarDates,
+  calendarEventsState,
+  today
+}: {
+  calendarDates: Date[];
+  calendarEventsState: HomeWeekCalendarEventsState;
+  today: Date;
+}) {
+  return (
+    <div className="h-full min-h-0 overflow-hidden xl:col-start-2 xl:row-start-1">
+      <ReadonlyCalendar
+        calendarDates={calendarDates}
+        calendarEventsState={calendarEventsState}
+        today={today}
+      />
+    </div>
+  );
+}
+
+function SummaryMetricsPanel({
+  calendarEventsState,
   issuesState,
   meetingReportsState,
-  pullRequestsState
+  pullRequestsState,
+  today
 }: {
+  calendarEventsState: HomeWeekCalendarEventsState;
   issuesState: HomeIssuesState;
   meetingReportsState: HomeMeetingReportsState;
   pullRequestsState: HomePullRequestsState;
+  today: Date;
 }) {
+  const summaryItems = getHomeSummaryItems({
+    calendarEventsState,
+    issuesState,
+    meetingReportsState,
+    pullRequestsState,
+    today
+  });
+
   return (
-    <div className="grid min-h-0 grid-rows-[minmax(108px,4fr)_minmax(0,6fr)] gap-3 xl:row-start-1">
-      <ReadonlyCalendar
-        issuesState={issuesState}
-        meetingReportsState={meetingReportsState}
-        pullRequestsState={pullRequestsState}
-      />
+    <div className="grid h-full min-h-0 grid-rows-4 gap-3 overflow-hidden xl:col-start-3 xl:row-start-1">
+      {summaryItems.map((item) => (
+        <SummaryMetricCard key={item.label} item={item} variant="compact" />
+      ))}
     </div>
   );
 }
@@ -911,175 +956,6 @@ function MiddleDashboardCards({
       <IssuesCard issuesState={issuesState} />
       <PullRequestsCard pullRequestsState={pullRequestsState} />
       <MeetingReportsCard meetingReportsState={meetingReportsState} />
-    </div>
-  );
-}
-
-function GithubConnectionCard() {
-  const authSession = useAuthSession();
-  const githubOAuthState = useHomeGithubOAuthStatus({
-    accessToken: authSession?.accessToken ?? null
-  });
-  const githubOAuth = githubOAuthState.value;
-  const isGithubConnected = githubOAuth?.connected === true;
-  const repositoryAccessState = useHomeRepositoryAccess({
-    accessToken: isGithubConnected ? (authSession?.accessToken ?? null) : null,
-    workspaceId: authSession?.activeWorkspaceId ?? ""
-  });
-  const projectAccessState = useHomeProjectAccess({
-    accessToken: authSession?.accessToken ?? null,
-    workspaceId: authSession?.activeWorkspaceId ?? ""
-  });
-  const githubLogin = githubOAuth?.githubLogin?.trim() || null;
-  const githubStatusLabel =
-    githubOAuthState.status === "loading"
-      ? "확인 중"
-      : isGithubConnected
-        ? "연결됨"
-        : githubOAuthState.status === "error"
-          ? "확인 실패"
-          : "미연결";
-  const githubStatusTone =
-    githubOAuthState.status === "loading"
-      ? "bg-muted-foreground"
-      : isGithubConnected
-        ? "bg-emerald-500"
-        : "bg-red-500";
-  const githubAccountLabel =
-    githubOAuthState.status === "loading"
-      ? "확인 중"
-      : githubLogin
-        ? `@${githubLogin}`
-        : githubOAuthState.status === "error"
-          ? "확인 실패"
-          : "연결 필요";
-  const githubAccountClassName =
-    githubOAuthState.status === "error"
-      ? "text-red-600"
-      : isGithubConnected
-        ? "text-foreground"
-        : "text-muted-foreground";
-  const repositoryLabel =
-    repositoryAccessState.repository?.fullName ??
-    repositoryAccessState.access?.repository.fullName ??
-    (repositoryAccessState.status === "loading"
-      ? "확인 중"
-      : repositoryAccessState.status === "error"
-        ? "Repository 확인 실패"
-        : "연결된 Repository 없음");
-  const repositoryAccessLabel =
-    repositoryAccessState.status === "loading"
-      ? "확인 중"
-      : repositoryAccessState.status === "error"
-        ? "확인 실패"
-        : repositoryAccessState.access?.hasAccess === true
-          ? "권한 있음"
-          : repositoryAccessState.repository
-            ? "권한 없음"
-            : "없음";
-  const repositoryAccessTone: "danger" | "muted" | "neutral" | "success" =
-    repositoryAccessState.status === "loading" ||
-    (!repositoryAccessState.repository &&
-      repositoryAccessState.status !== "error")
-      ? "muted"
-      : repositoryAccessState.access?.hasAccess === true
-        ? "success"
-        : "danger";
-  const projectLabel =
-    projectAccessState.project?.title ??
-    projectAccessState.access?.project.title ??
-    (projectAccessState.status === "loading"
-      ? "확인 중"
-      : projectAccessState.status === "error"
-        ? "Project 확인 실패"
-        : "연결된 Project 없음");
-  const projectAccessLabel =
-    projectAccessState.status === "loading"
-      ? "확인 중"
-      : projectAccessState.status === "error"
-        ? "확인 실패"
-        : projectAccessState.access?.permission
-          ? projectAccessState.access.permission
-          : projectAccessState.project
-            ? "권한 없음"
-            : "없음";
-  const projectAccessTone: "danger" | "muted" | "neutral" | "success" =
-    projectAccessState.status === "loading" ||
-    (!projectAccessState.project && projectAccessState.status !== "error")
-      ? "muted"
-      : projectAccessState.access?.permission === "ADMIN" ||
-          projectAccessState.access?.permission === "WRITE"
-        ? "success"
-        : projectAccessState.access?.permission === "READ"
-          ? "neutral"
-          : "danger";
-
-  return (
-    <div className="grid min-h-0 grid-rows-[repeat(3,minmax(0,1fr))] gap-3 xl:col-start-3 xl:row-start-1">
-      <Card
-        className="min-h-0 bg-[linear-gradient(180deg,#f8fafc_0%,#ffffff_100%)] shadow-sm"
-        size="sm"
-      >
-        <CardContent className="flex min-h-0 flex-1 items-center justify-between gap-3">
-          <div className="flex min-w-0 flex-1 items-center gap-2">
-            <span className="flex size-7 shrink-0 items-center justify-center rounded-lg border bg-background text-muted-foreground">
-              <GithubMarkIcon className="size-4" />
-            </span>
-            <p className="shrink-0 text-sm font-medium">GitHub 연결</p>
-            <p
-              className={`min-w-0 flex-1 truncate text-sm font-semibold ${githubAccountClassName}`}
-            >
-              {githubAccountLabel}
-            </p>
-          </div>
-          <span className="inline-flex shrink-0 items-center gap-1 rounded-md border bg-background px-2 py-1 text-xs text-muted-foreground">
-            <span className={`size-1.5 rounded-full ${githubStatusTone}`} />
-            {githubStatusLabel}
-          </span>
-        </CardContent>
-      </Card>
-      <Card
-        className="min-h-0 bg-[linear-gradient(180deg,#ffffff_0%,#f8fafc_100%)] shadow-sm"
-        size="sm"
-      >
-        <CardContent className="flex min-h-0 flex-1 flex-col justify-center gap-1.5">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex min-w-0 items-center gap-2">
-              <span className="flex size-7 shrink-0 items-center justify-center rounded-lg border bg-background text-muted-foreground">
-                <GithubRepositoryIcon className="size-4" />
-              </span>
-              <p className="truncate text-sm font-medium">Repository</p>
-            </div>
-            <StatusPill
-              label={repositoryAccessLabel}
-              tone={repositoryAccessTone}
-            />
-          </div>
-          <p className="truncate text-sm font-medium">
-            {repositoryLabel}
-          </p>
-        </CardContent>
-      </Card>
-      <Card
-        className="min-h-0 bg-[linear-gradient(180deg,#ffffff_0%,#eef2ff_100%)] shadow-sm"
-        size="sm"
-      >
-        <CardContent className="flex min-h-0 flex-1 flex-col justify-center gap-1.5">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex min-w-0 items-center gap-2">
-              <span className="flex size-7 shrink-0 items-center justify-center rounded-lg border bg-background text-muted-foreground">
-                <GithubProjectIcon className="size-4" />
-              </span>
-              <p className="truncate text-sm font-medium">Project</p>
-            </div>
-            <StatusPill
-              label={projectAccessLabel}
-              tone={projectAccessTone}
-            />
-          </div>
-          <p className="truncate text-sm font-medium">{projectLabel}</p>
-        </CardContent>
-      </Card>
     </div>
   );
 }
@@ -1593,36 +1469,145 @@ function PullRequestsBackground() {
 }
 
 function ReadonlyCalendar({
-  issuesState,
-  meetingReportsState,
-  pullRequestsState
+  calendarDates,
+  calendarEventsState,
+  today
 }: {
-  issuesState: HomeIssuesState;
-  meetingReportsState: HomeMeetingReportsState;
-  pullRequestsState: HomePullRequestsState;
+  calendarDates: Date[];
+  calendarEventsState: HomeWeekCalendarEventsState;
+  today: Date;
 }) {
   const router = useRouter();
-  const authSession = useAuthSession();
-  const today = useMemo(() => new Date(), []);
-  const weekDates = useMemo(() => getCalendarWeekDates(today), [today]);
-  const weekRange = useMemo(
-    () => ({
-      end: formatCalendarDate(weekDates[weekDates.length - 1]),
-      start: formatCalendarDate(weekDates[0])
-    }),
-    [weekDates]
-  );
   const {
     events: calendarEvents,
     error: calendarEventsError,
     status: calendarEventsStatus
-  } = useHomeWeekCalendarEvents({
-    accessToken: authSession?.accessToken ?? null,
-    range: weekRange,
-    workspaceId: authSession?.activeWorkspaceId ?? ""
-  });
+  } = calendarEventsState;
+  const calendarTitle = formatCalendarRangeMonthTitle(calendarDates);
+
+  return (
+    <>
+      <Card
+        className="relative h-full min-h-0 border-[#B7DCD7] bg-[#F4FBFA] shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_10px_24px_rgba(15,23,42,0.08)]"
+        size="sm"
+      >
+        <div aria-hidden="true" className="pointer-events-none absolute inset-0">
+          <CalendarBackground />
+        </div>
+        <CardContent className="relative z-10 flex min-h-0 flex-1 flex-col">
+          <div className="mb-2 flex items-center gap-2">
+            <span className="flex size-7 shrink-0 items-center justify-center rounded-lg border bg-background text-muted-foreground">
+              <CalendarDays className="size-4" />
+            </span>
+            <p className="text-sm font-semibold text-foreground">{calendarTitle}</p>
+            {calendarEventsStatus === "error" ? (
+              <span
+                className="truncate text-xs text-destructive"
+                title={calendarEventsError?.message}
+              >
+                일정 불러오기 실패
+              </span>
+            ) : null}
+            <Button
+              aria-label="캘린더로 이동"
+              className="ml-auto"
+              onClick={() => router.push("/calendar")}
+              size="icon-sm"
+              type="button"
+              variant="ghost"
+            >
+              <ChevronRight />
+            </Button>
+          </div>
+          <div className="grid min-h-0 flex-1 grid-cols-7 grid-rows-2 gap-1.5">
+            {calendarDates.map((date) => {
+              const isToday = isSameCalendarDate(date, today);
+              const dateValue = formatCalendarDate(date);
+              const dateEvents = calendarEvents.filter((event) =>
+                isCalendarEventOnDate(event, dateValue)
+              );
+              const visibleEvents = dateEvents.slice(0, 3);
+              const hiddenEventCount = Math.max(
+                0,
+                dateEvents.length - visibleEvents.length
+              );
+
+              return (
+                <button
+                  key={date.toISOString()}
+                  aria-label={`${dateValue} 캘린더로 이동`}
+                  onClick={() => router.push(`/calendar?date=${dateValue}`)}
+                  className={[
+                    "flex min-h-0 min-w-0 flex-col items-stretch justify-between gap-1 rounded-md border bg-background/80 p-1.5 text-left text-xs shadow-sm transition hover:bg-muted/60 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+                    isToday ? "border-primary text-primary" : ""
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
+                  type="button"
+                >
+                  <span className="flex items-center justify-between gap-1">
+                    <span className="text-[0.65rem] font-medium leading-none text-muted-foreground">
+                      {calendarWeekdayLabels[date.getDay()]}
+                    </span>
+                    <span
+                      className={
+                        isToday
+                          ? "flex size-5 items-center justify-center rounded-full bg-primary font-semibold text-primary-foreground"
+                          : "flex size-5 items-center justify-center font-medium"
+                      }
+                    >
+                      {date.getDate()}
+                    </span>
+                  </span>
+                  <span className="flex min-h-0 flex-1 flex-col justify-center gap-1">
+                    {visibleEvents.length > 0 ? (
+                      <>
+                        {visibleEvents.map((event) => (
+                          <span
+                            key={event.id}
+                            className="block min-w-0 truncate rounded-sm px-1 py-0.5 text-center text-[0.65rem] leading-none text-white"
+                            style={{ backgroundColor: event.color }}
+                          >
+                            {event.isAllDay ? "종일" : event.startTime}{" "}
+                            {event.title}
+                          </span>
+                        ))}
+                        {hiddenEventCount > 0 ? (
+                          <span
+                            aria-label={`${hiddenEventCount}개 일정 더 있음`}
+                            className="self-center rounded-full border border-[#B7DCD7] bg-[#2EC4B6]/10 px-1.5 py-0.5 text-[0.6rem] font-semibold leading-none text-[#0F766E]"
+                          >
+                            +{hiddenEventCount}
+                          </span>
+                        ) : null}
+                      </>
+                    ) : null}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </CardContent>
+      </Card>
+    </>
+  );
+}
+
+function getHomeSummaryItems({
+  calendarEventsState,
+  issuesState,
+  meetingReportsState,
+  pullRequestsState,
+  today
+}: {
+  calendarEventsState: HomeWeekCalendarEventsState;
+  issuesState: HomeIssuesState;
+  meetingReportsState: HomeMeetingReportsState;
+  pullRequestsState: HomePullRequestsState;
+  today: Date;
+}) {
   const todayDate = formatCalendarDate(today);
-  const todayEventCount = calendarEvents.filter((event) =>
+  const todayEventCount = calendarEventsState.events.filter((event) =>
     isCalendarEventOnDate(event, todayDate)
   ).length;
   const issueCount =
@@ -1635,7 +1620,8 @@ function ReadonlyCalendar({
     meetingReportsState.status === "loading"
       ? "-"
       : String(meetingReportsState.todayCount);
-  const summaryItems: SummaryMetricItem[] = [
+
+  return [
     {
       icon: <CalendarDays className="size-4" />,
       label: "오늘 일정",
@@ -1691,113 +1677,7 @@ function ReadonlyCalendar({
             ),
       tone: "meetingReports"
     }
-  ];
-
-  return (
-    <>
-      <Card
-        className="relative min-h-0 border-[#B7DCD7] bg-[#F4FBFA] shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_10px_24px_rgba(15,23,42,0.08)]"
-        size="sm"
-      >
-        <div aria-hidden="true" className="pointer-events-none absolute inset-0">
-          <CalendarBackground />
-        </div>
-        <CardContent className="relative z-10 flex min-h-0 flex-1 flex-col">
-          <div className="mb-2 flex items-center gap-2">
-            <span className="flex size-7 shrink-0 items-center justify-center rounded-lg border bg-background text-muted-foreground">
-              <CalendarDays className="size-4" />
-            </span>
-            <p className="text-sm font-semibold text-foreground">이번 주</p>
-            {calendarEventsStatus === "error" ? (
-              <span
-                className="truncate text-xs text-destructive"
-                title={calendarEventsError?.message}
-              >
-                일정 불러오기 실패
-              </span>
-            ) : null}
-            <Button
-              aria-label="캘린더로 이동"
-              className="ml-auto"
-              onClick={() => router.push("/calendar")}
-              size="icon-sm"
-              type="button"
-              variant="ghost"
-            >
-              <ChevronRight />
-            </Button>
-          </div>
-          <div className="grid min-h-0 flex-1 grid-cols-7 gap-1">
-            {weekDates.map((date) => {
-              const isToday = isSameCalendarDate(date, today);
-              const dateValue = formatCalendarDate(date);
-              const dateEvents = calendarEvents.filter((event) =>
-                isCalendarEventOnDate(event, dateValue)
-              );
-              const firstEvent = dateEvents[0];
-              const hiddenEventCount = Math.max(0, dateEvents.length - 1);
-
-              return (
-                <button
-                  key={date.toISOString()}
-                  aria-label={`${dateValue} 캘린더로 이동`}
-                  onClick={() => router.push(`/calendar?date=${dateValue}`)}
-                  className={[
-                    "flex min-h-16 min-w-0 flex-col items-stretch justify-between gap-1 rounded-md border bg-background/80 p-1.5 text-left text-xs shadow-sm transition hover:bg-muted/60 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 sm:min-h-18",
-                    isToday ? "border-primary text-primary" : ""
-                  ]
-                    .filter(Boolean)
-                    .join(" ")}
-                  type="button"
-                >
-                  <span className="flex items-center justify-between gap-1">
-                    <span className="text-[0.65rem] font-medium leading-none text-muted-foreground">
-                      {calendarWeekdayLabels[date.getDay()]}
-                    </span>
-                    <span
-                      className={
-                        isToday
-                          ? "flex size-5 items-center justify-center rounded-full bg-primary font-semibold text-primary-foreground"
-                          : "flex size-5 items-center justify-center font-medium"
-                      }
-                    >
-                      {date.getDate()}
-                    </span>
-                  </span>
-                  <span className="flex min-h-0 flex-1 items-center justify-center">
-                    {firstEvent ? (
-                      <span className="flex max-w-full min-w-0 items-center justify-center gap-1">
-                        <span
-                          className="block min-w-0 truncate rounded-sm px-1 py-0.5 text-center text-[0.65rem] leading-none text-white"
-                          style={{ backgroundColor: firstEvent.color }}
-                        >
-                          {firstEvent.isAllDay ? "종일" : firstEvent.startTime}{" "}
-                          {firstEvent.title}
-                        </span>
-                        {hiddenEventCount > 0 ? (
-                          <span
-                            aria-label={`${hiddenEventCount}개 일정 더 있음`}
-                            className="shrink-0 rounded-full border border-[#B7DCD7] bg-[#2EC4B6]/10 px-1.5 py-0.5 text-[0.6rem] font-semibold leading-none text-[#0F766E]"
-                          >
-                            +{hiddenEventCount}
-                          </span>
-                        ) : null}
-                      </span>
-                    ) : null}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </CardContent>
-      </Card>
-      <div className="grid min-h-0 grid-cols-4 gap-3">
-        {summaryItems.map((item) => (
-          <SummaryMetricCard key={item.label} item={item} />
-        ))}
-      </div>
-    </>
-  );
+  ] satisfies SummaryMetricItem[];
 }
 
 function SummaryCalendarBackground() {
@@ -1856,8 +1736,61 @@ type SummaryMetricItem = {
   value: string;
 };
 
-function SummaryMetricCard({ item }: { item: SummaryMetricItem }) {
+function SummaryMetricCard({
+  item,
+  variant = "default"
+}: {
+  item: SummaryMetricItem;
+  variant?: "compact" | "default";
+}) {
   const tone = getSummaryMetricTone(item.tone);
+
+  if (variant === "compact") {
+    return (
+      <Card
+        className={`relative min-h-0 overflow-hidden shadow-sm ${tone.borderClassName} ${tone.surfaceClassName} ${item.className ?? ""}`}
+        size="sm"
+      >
+        <div aria-hidden="true" className="pointer-events-none absolute inset-0">
+          {item.background}
+        </div>
+        <CardContent className="relative z-10 flex min-h-0 flex-1 flex-col justify-between gap-1.5">
+          <div className="flex min-h-0 items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-2">
+              <span
+                className={`flex size-7 shrink-0 items-center justify-center rounded-lg border bg-background/90 text-muted-foreground backdrop-blur ${tone.iconBorderClassName}`}
+              >
+                {item.icon}
+              </span>
+              <p
+                className={`min-w-0 truncate text-sm font-semibold ${tone.labelClassName}`}
+              >
+                {item.label}
+              </p>
+            </div>
+            <div className="flex shrink-0 items-baseline gap-1 text-right">
+              <span
+                className={`text-3xl font-semibold leading-none ${tone.valueClassName}`}
+              >
+                {item.value}
+              </span>
+              <span
+                className={`rounded-full border px-1.5 py-0.5 text-[0.65rem] font-medium leading-none ${tone.unitClassName}`}
+              >
+                개
+              </span>
+            </div>
+          </div>
+          <div className="h-1 overflow-hidden rounded-full bg-slate-950/5">
+            <div
+              className={`h-full rounded-full ${tone.progressClassName}`}
+              style={{ width: item.progress }}
+            />
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <Card
@@ -2021,15 +1954,29 @@ function PullRequestRow({ pullRequest }: { pullRequest: GithubPullRequest }) {
   );
 }
 
-function getCalendarWeekDates(anchorDate: Date) {
-  const weekStartDate = new Date(anchorDate);
-  weekStartDate.setDate(anchorDate.getDate() - anchorDate.getDay());
+function getCalendarRangeDates(anchorDate: Date, dayCount: number) {
+  const rangeStartDate = new Date(anchorDate);
+  rangeStartDate.setDate(anchorDate.getDate() - anchorDate.getDay());
 
-  return Array.from({ length: 7 }, (_, index) => {
-    const date = new Date(weekStartDate);
-    date.setDate(weekStartDate.getDate() + index);
+  return Array.from({ length: dayCount }, (_, index) => {
+    const date = new Date(rangeStartDate);
+    date.setDate(rangeStartDate.getDate() + index);
     return date;
   });
+}
+
+function formatCalendarRangeMonthTitle(dates: Date[]) {
+  const firstDate = dates[0];
+  const lastDate = dates[dates.length - 1];
+
+  if (!firstDate || !lastDate) {
+    return "";
+  }
+
+  const firstMonth = `${firstDate.getMonth() + 1}월`;
+  const lastMonth = `${lastDate.getMonth() + 1}월`;
+
+  return firstMonth === lastMonth ? firstMonth : `${firstMonth} - ${lastMonth}`;
 }
 
 const emptyHomeIssuesState: HomeIssuesState = {
@@ -2071,20 +2018,6 @@ const emptyHomeGithubOAuthState: HomeGithubOAuthState = {
   error: null,
   status: "idle",
   value: null
-};
-
-const emptyHomeRepositoryAccessState: HomeRepositoryAccessState = {
-  access: null,
-  error: null,
-  repository: null,
-  status: "idle"
-};
-
-const emptyHomeProjectAccessState: HomeProjectAccessState = {
-  access: null,
-  error: null,
-  project: null,
-  status: "idle"
 };
 
 function useHomeGithubOAuthStatus({
@@ -2145,229 +2078,6 @@ function useHomeGithubOAuthStatus({
       active = false;
     };
   }, [githubClient, normalizedAccessToken]);
-
-  return state;
-}
-
-function useHomeRepositoryAccess({
-  accessToken,
-  workspaceId
-}: {
-  accessToken: string | null;
-  workspaceId: string;
-}) {
-  const normalizedAccessToken = accessToken?.trim() || null;
-  const normalizedWorkspaceId = workspaceId.trim();
-  const githubClient = useMemo(
-    () =>
-      createGithubIntegrationApiClient({
-        accessToken: normalizedAccessToken
-      }),
-    [normalizedAccessToken]
-  );
-  const [state, setState] = useState<HomeRepositoryAccessState>(
-    emptyHomeRepositoryAccessState
-  );
-
-  useEffect(() => {
-    let active = true;
-
-    async function loadRepositoryAccess() {
-      if (!normalizedAccessToken || !normalizedWorkspaceId) {
-        setState(emptyHomeRepositoryAccessState);
-        return;
-      }
-
-      setState({
-        ...emptyHomeRepositoryAccessState,
-        status: "loading"
-      });
-
-      try {
-        const repositories = await githubClient.listGithubRepositories(
-          normalizedWorkspaceId,
-          {
-            includeArchived: false,
-            limit: 50
-          }
-        );
-        const repositoryId = selectHomeRepositoryId(
-          repositories.data,
-          normalizedWorkspaceId
-        );
-        const repository =
-          repositories.data.find((item) => item.id === repositoryId) ?? null;
-
-        if (!repository) {
-          if (active) {
-            setState({
-              ...emptyHomeRepositoryAccessState,
-              status: "success"
-            });
-          }
-          return;
-        }
-
-        try {
-          const access =
-            await githubClient.getGithubRepositoryCollaboratorStatus(
-              normalizedWorkspaceId,
-              repository.id
-            );
-
-          if (active) {
-            setState({
-              access,
-              error: null,
-              repository,
-              status: "success"
-            });
-          }
-        } catch (error) {
-          if (active) {
-            setState({
-              access: null,
-              error: errorFromUnknown(error),
-              repository,
-              status: "error"
-            });
-          }
-        }
-      } catch (error) {
-        if (active) {
-          setState({
-            access: null,
-            error: errorFromUnknown(error),
-            repository: null,
-            status: "error"
-          });
-        }
-      }
-    }
-
-    void loadRepositoryAccess();
-
-    return () => {
-      active = false;
-    };
-  }, [githubClient, normalizedAccessToken, normalizedWorkspaceId]);
-
-  return state;
-}
-
-function useHomeProjectAccess({
-  accessToken,
-  workspaceId
-}: {
-  accessToken: string | null;
-  workspaceId: string;
-}) {
-  const normalizedAccessToken = accessToken?.trim() || null;
-  const normalizedWorkspaceId = workspaceId.trim();
-  const boardClient = useMemo(
-    () => createBoardApiClient({ accessToken: normalizedAccessToken }),
-    [normalizedAccessToken]
-  );
-  const githubClient = useMemo(
-    () =>
-      createGithubIntegrationApiClient({
-        accessToken: normalizedAccessToken
-      }),
-    [normalizedAccessToken]
-  );
-  const [state, setState] = useState<HomeProjectAccessState>(
-    emptyHomeProjectAccessState
-  );
-
-  useEffect(() => {
-    let active = true;
-
-    async function loadProjectAccess() {
-      if (!normalizedAccessToken || !normalizedWorkspaceId) {
-        setState(emptyHomeProjectAccessState);
-        return;
-      }
-
-      setState({
-        ...emptyHomeProjectAccessState,
-        status: "loading"
-      });
-
-      try {
-        const boards = await boardClient.listBoards(normalizedWorkspaceId, {
-          limit: 50
-        });
-        const board = selectHomeBoard(boards.data, normalizedWorkspaceId);
-        const project = board?.project ?? null;
-
-        if (!project) {
-          if (active) {
-            setState({
-              ...emptyHomeProjectAccessState,
-              status: "success"
-            });
-          }
-          return;
-        }
-
-        const projectOAuth = await githubClient
-          .getGithubProjectOAuthStatus()
-          .catch(() => null);
-
-        if (projectOAuth?.connected !== true) {
-          if (active) {
-            setState({
-              access: null,
-              error: null,
-              project,
-              status: "success"
-            });
-          }
-          return;
-        }
-
-        try {
-          const access = await githubClient.getGithubProjectV2AccessStatus(
-            normalizedWorkspaceId,
-            project.id
-          );
-
-          if (active) {
-            setState({
-              access,
-              error: null,
-              project,
-              status: "success"
-            });
-          }
-        } catch (error) {
-          if (active) {
-            setState({
-              access: null,
-              error: errorFromUnknown(error),
-              project,
-              status: "error"
-            });
-          }
-        }
-      } catch (error) {
-        if (active) {
-          setState({
-            access: null,
-            error: errorFromUnknown(error),
-            project: null,
-            status: "error"
-          });
-        }
-      }
-    }
-
-    void loadProjectAccess();
-
-    return () => {
-      active = false;
-    };
-  }, [boardClient, githubClient, normalizedAccessToken, normalizedWorkspaceId]);
 
   return state;
 }
@@ -3018,47 +2728,6 @@ function StatusPill({
     >
       {label}
     </span>
-  );
-}
-
-function GithubMarkIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      aria-hidden="true"
-      className={className}
-      fill="currentColor"
-      viewBox="0 0 24 24"
-    >
-      <path d="M12 2C6.48 2 2 6.58 2 12.26c0 4.5 2.87 8.32 6.84 9.68.5.09.68-.22.68-.49 0-.24-.01-1.04-.02-1.88-2.78.62-3.37-1.22-3.37-1.22-.45-1.18-1.11-1.49-1.11-1.49-.91-.64.07-.63.07-.63 1 .07 1.53 1.06 1.53 1.06.89 1.56 2.34 1.11 2.91.85.09-.66.35-1.11.63-1.37-2.22-.26-4.56-1.14-4.56-5.07 0-1.12.39-2.03 1.03-2.75-.1-.26-.45-1.3.1-2.71 0 0 .84-.28 2.75 1.05A9.32 9.32 0 0 1 12 6.95c.85 0 1.71.12 2.51.34 1.91-1.33 2.75-1.05 2.75-1.05.55 1.41.2 2.45.1 2.71.64.72 1.03 1.63 1.03 2.75 0 3.94-2.34 4.81-4.57 5.07.36.32.68.94.68 1.9 0 1.37-.01 2.47-.01 2.8 0 .27.18.59.69.49A10.1 10.1 0 0 0 22 12.26C22 6.58 17.52 2 12 2Z" />
-    </svg>
-  );
-}
-
-function GithubRepositoryIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      aria-hidden="true"
-      className={className}
-      fill="currentColor"
-      viewBox="0 0 16 16"
-    >
-      <path d="M2 2.5A2.5 2.5 0 0 1 4.5 0h8.75a.75.75 0 0 1 .75.75v12.5a.75.75 0 0 1-.75.75H4.5A2.5 2.5 0 0 1 2 11.5Zm10.5-1h-8a1 1 0 0 0-1 1v6.71A2.48 2.48 0 0 1 4.5 9h8ZM3.5 11.5a1 1 0 0 0 1 1h8v-2h-8a1 1 0 0 0-1 1Z" />
-      <path d="M5.25 3.5h5.5a.75.75 0 0 1 0 1.5h-5.5a.75.75 0 0 1 0-1.5Z" />
-    </svg>
-  );
-}
-
-function GithubProjectIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      aria-hidden="true"
-      className={className}
-      fill="currentColor"
-      viewBox="0 0 16 16"
-    >
-      <path d="M1.75 0h12.5C15.216 0 16 .784 16 1.75v12.5A1.75 1.75 0 0 1 14.25 16H1.75A1.75 1.75 0 0 1 0 14.25V1.75C0 .784.784 0 1.75 0Zm0 1.5a.25.25 0 0 0-.25.25v12.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25V1.75a.25.25 0 0 0-.25-.25Z" />
-      <path d="M4 4.25a.75.75 0 0 1 .75-.75h6.5a.75.75 0 0 1 0 1.5h-6.5A.75.75 0 0 1 4 4.25Zm0 3.75a.75.75 0 0 1 .75-.75h6.5a.75.75 0 0 1 0 1.5h-6.5A.75.75 0 0 1 4 8Zm0 3.75a.75.75 0 0 1 .75-.75h3.5a.75.75 0 0 1 0 1.5h-3.5A.75.75 0 0 1 4 11.75Z" />
-    </svg>
   );
 }
 

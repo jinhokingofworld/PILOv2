@@ -15,6 +15,7 @@ import {
   getCurrentUser,
   listWorkspaces,
   logoutSession,
+  updateCurrentUserPresence,
   type UserProfile,
   type Workspace
 } from "@/features/auth/api/client";
@@ -85,8 +86,8 @@ export function AuthGate({ children }: { children: ReactNode }) {
     session: null,
     message: "세션 확인 중"
   });
-  const currentAccessToken =
-    state.status === "ready" ? state.session.accessToken : null;
+  const readySession = state.status === "ready" ? state.session : null;
+  const currentAccessToken = readySession?.accessToken ?? null;
 
   useEffect(() => {
     let cancelled = false;
@@ -161,6 +162,44 @@ export function AuthGate({ children }: { children: ReactNode }) {
     },
     [state]
   );
+
+  useEffect(() => {
+    if (!readySession || isDevPreviewAccessToken(readySession.accessToken)) {
+      return;
+    }
+
+    const { accessToken, activeWorkspaceId, workspaces } = readySession;
+
+    void updateCurrentUserPresence(accessToken, activeWorkspaceId).catch(
+      () => undefined
+    );
+
+    const fallbackWorkspaceId = getPresenceFallbackWorkspaceId(workspaces);
+    if (!fallbackWorkspaceId) {
+      return;
+    }
+
+    const resetPresenceToFallbackWorkspace = () => {
+      void updateCurrentUserPresence(accessToken, fallbackWorkspaceId, {
+        keepalive: true
+      }).catch(() => undefined);
+    };
+
+    window.addEventListener("pagehide", resetPresenceToFallbackWorkspace);
+    window.addEventListener("beforeunload", resetPresenceToFallbackWorkspace);
+
+    return () => {
+      window.removeEventListener("pagehide", resetPresenceToFallbackWorkspace);
+      window.removeEventListener(
+        "beforeunload",
+        resetPresenceToFallbackWorkspace
+      );
+    };
+  }, [
+    readySession?.accessToken,
+    readySession?.activeWorkspaceId,
+    readySession?.workspaces
+  ]);
 
   const logout = useCallback(async () => {
     const accessToken = state.session?.accessToken;
@@ -265,4 +304,13 @@ export async function loadAuthSessionEntry(
     activeWorkspaceId: activeWorkspace.id,
     activeWorkspace
   };
+}
+
+function getPresenceFallbackWorkspaceId(workspaces: Workspace[]) {
+  return (
+    workspaces.find((workspace) => workspace.isOwner || workspace.role === "owner")
+      ?.id ??
+    workspaces[0]?.id ??
+    null
+  );
 }

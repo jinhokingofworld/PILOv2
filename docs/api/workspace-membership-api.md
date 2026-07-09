@@ -145,10 +145,14 @@ Workspace 조회 API의 payload에는 현재 사용자의 role이 포함된다.
     "id": "user_uuid",
     "name": "PILO User",
     "email": "member@example.com",
-    "avatarUrl": null
+    "avatarUrl": null,
+    "activeWorkspaceId": "workspace_uuid",
+    "lastSeenAt": "2026-07-09T06:00:00.000Z"
   }
 }
 ```
+
+`activeWorkspaceId`와 `lastSeenAt`은 Home 멤버 presence 표시용 필드다. 같은 Workspace를 보고 있는지 판단하기 위해 사용하며, 실시간 접속 보장값은 아니다.
 
 ### Invitation Payload
 
@@ -197,7 +201,9 @@ GET /api/v1/workspaces/{workspaceId}/members
         "id": "owner_user_uuid",
         "name": "Owner",
         "email": "owner@example.com",
-        "avatarUrl": null
+        "avatarUrl": null,
+        "activeWorkspaceId": "workspace_uuid",
+        "lastSeenAt": "2026-07-09T06:00:00.000Z"
       }
     }
   ]
@@ -211,6 +217,8 @@ GET /api/v1/workspaces/{workspaceId}/members
   구현해도 된다.
 - member 목록은 같은 Workspace에 속한 사용자에게 공개할 수 있다. 초대/제거 같은
   관리 작업은 owner-only로 유지한다.
+- 응답의 `user.activeWorkspaceId`가 요청한 `workspaceId`와 같으면 Home에서는 온라인으로 표시할 수 있다.
+- `user.activeWorkspaceId`가 다르거나 `null`이면 Home에서는 오프라인으로 표시할 수 있다.
 
 ## Member 제거
 

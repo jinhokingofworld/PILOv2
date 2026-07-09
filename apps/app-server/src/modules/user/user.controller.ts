@@ -1,8 +1,13 @@
-import { Controller, Get, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Post, UseGuards } from "@nestjs/common";
 import { apiResponse, ApiSuccessResponse } from "../../common/api-response";
 import { AuthGuard } from "../../common/auth.guard";
 import { CurrentUserId } from "../../common/current-user.decorator";
-import { UserProfile, UserService } from "./user.service";
+import {
+  UpdateCurrentUserPresenceRequest,
+  UserPresencePayload,
+  UserProfile,
+  UserService
+} from "./user.service";
 
 @Controller("me")
 @UseGuards(AuthGuard)
@@ -15,5 +20,17 @@ export class UserController {
   ): Promise<ApiSuccessResponse<UserProfile>> {
     const user = await this.userService.getCurrentUser(currentUserId);
     return apiResponse(user);
+  }
+
+  @Post("presence")
+  async updatePresence(
+    @CurrentUserId() currentUserId: string,
+    @Body() request: UpdateCurrentUserPresenceRequest | undefined
+  ): Promise<ApiSuccessResponse<UserPresencePayload>> {
+    const presence = await this.userService.updateCurrentUserPresence(
+      currentUserId,
+      request
+    );
+    return apiResponse(presence);
   }
 }
