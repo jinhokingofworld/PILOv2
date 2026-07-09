@@ -1,10 +1,18 @@
 "use client";
 
-import { type FormEvent, useMemo, useState } from "react";
+import {
+  type FormEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState
+} from "react";
 import {
   Bot,
   CalendarPlus,
   CheckCircle2,
+  Loader2,
   MessageCircle,
   SendHorizontal,
   Sparkles,
@@ -17,6 +25,12 @@ import {
   TooltipContent,
   TooltipTrigger
 } from "@/components/ui/tooltip";
+import { useAuthSession } from "@/features/auth";
+import {
+  AgentApiError,
+  createAgentApiClient
+} from "@/features/agent/api/client";
+import type { AgentRun } from "@/features/agent/types";
 import { cn } from "@/lib/utils";
 
 type AgentChatMessage = {
@@ -24,6 +38,11 @@ type AgentChatMessage = {
   content: string;
   role: "assistant" | "user";
 };
+
+type AgentChatBusyState = "idle" | "polling" | "submitting";
+
+const AGENT_RUN_POLL_INTERVAL_MS = 1800;
+const DEFAULT_AGENT_TIMEZONE = "Asia/Seoul";
 
 const initialMessages: AgentChatMessage[] = [
   {
@@ -57,57 +76,234 @@ const suggestionPrompts = [
   }
 ];
 
-function createMockAssistantReply(prompt: string) {
-  if (prompt.includes("일정") || prompt.includes("캘린더")) {
-    return "일정 생성 요청으로 이해했어요. 실제 연결 후에는 제목, 날짜, 시간, 참석자를 확인하고 승인 요청을 띄울 예정입니다.";
+function createClientId(prefix: string) {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `${prefix}-${crypto.randomUUID()}`;
   }
 
-  if (prompt.includes("회의") || prompt.includes("회의록")) {
-    return "회의록 조회 요청으로 이해했어요. 실제 연결 후에는 최근 MeetingReport를 찾아 요약과 결정사항을 보여줄 예정입니다.";
-  }
-
-  if (
-    prompt.toLowerCase().includes("board") ||
-    prompt.includes("이슈") ||
-    prompt.includes("칸반")
-  ) {
-    return "Board 이슈 검색 요청으로 이해했어요. 실제 연결 후에는 조건에 맞는 이슈와 현재 컬럼을 찾아 보여줄 예정입니다.";
-  }
-
-  return "요청을 받았어요. 실제 Agent API가 연결되면 필요한 워크스페이스 tool을 선택해 실행하거나 승인 요청을 만들 예정입니다.";
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-export function AgentChatWidget() {
-  const [isOpen, setIsOpen] = useState(false);
-  const [messages, setMessages] = useState<AgentChatMessage[]>(initialMessages);
-  const [draft, setDraft] = useState("");
+function getBrowserTimezone() {
+  if (typeof Intl === "undefined") {
+    return DEFAULT_AGENT_TIMEZONE;
+  }
 
-  const canSend = draft.trim().length > 0;
-  const panelTitleId = useMemo(() => "agent-chat-title", []);
+  return (
+    Intl.DateTimeFormat().resolvedOptions().timeZone || DEFAULT_AGENT_TIMEZONE
+  );
+}
 
-  function appendPrompt(prompt: string) {
-    const trimmedPrompt = prompt.trim();
+function createAbortError() {
+  const error = new Error("Agent run polling was aborted");
+  error.name = "AbortError";
+  return error;
+}
 
-    if (!trimmedPrompt) {
+function isAbortError(error: unknown) {
+  return error instanceof Error && error.name === "AbortError";
+}
+
+function waitForAgentRunPollInterval(signal: AbortSignal) {
+  return new Promise<void>((resolve, reject) => {
+    if (signal.aborted) {
+      reject(createAbortError());
       return;
     }
 
-    const timestamp = Date.now();
+    const handleAbort = () => {
+      window.clearTimeout(timeoutId);
+      reject(createAbortError());
+    };
+    const timeoutId = window.setTimeout(() => {
+      signal.removeEventListener("abort", handleAbort);
+      resolve();
+    }, AGENT_RUN_POLL_INTERVAL_MS);
+
+    signal.addEventListener("abort", handleAbort, {
+      once: true
+    });
+  });
+}
+
+function shouldStopPolling(run: AgentRun) {
+  return (
+    run.status === "waiting_confirmation" ||
+    run.status === "completed" ||
+    run.status === "failed" ||
+    run.status === "cancelled"
+  );
+}
+
+function getAgentRunDisplayMessage(run: AgentRun) {
+  switch (run.status) {
+    case "completed":
+      return (
+        run.finalAnswer?.trim() ||
+        run.message?.trim() ||
+        "요청 처리가 완료됐습니다."
+      );
+    case "failed":
+      return (
+        run.errorMessage?.trim() ||
+        run.message?.trim() ||
+        "요청 처리 중 문제가 발생했습니다. 잠시 후 다시 시도해주세요."
+      );
+    case "cancelled":
+      return run.message?.trim() || "요청이 취소됐습니다.";
+    case "waiting_confirmation": {
+      const confirmationSummary = run.confirmation?.plan?.summary?.trim();
+      const summaryLine = confirmationSummary ? `\n${confirmationSummary}` : "";
+      return `승인이 필요한 작업입니다.${summaryLine}\n승인/거절 UI는 다음 단계에서 연결됩니다.`;
+    }
+    case "running":
+      return run.message?.trim() || "요청한 작업을 실행하고 있습니다.";
+    case "planning":
+      return run.message?.trim() || "요청을 분석하고 있습니다.";
+  }
+}
+
+function getAgentRequestErrorMessage(error: unknown) {
+  if (error instanceof AgentApiError) {
+    return error.message;
+  }
+
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return "Agent 요청을 처리하지 못했습니다. 잠시 후 다시 시도해주세요.";
+}
+
+export function AgentChatWidget() {
+  const authSession = useAuthSession();
+  const workspaceId = authSession?.activeWorkspaceId ?? "";
+  const accessToken = authSession?.accessToken ?? null;
+  const agentApiClient = useMemo(
+    () =>
+      createAgentApiClient({
+        accessToken
+      }),
+    [accessToken]
+  );
+  const [isOpen, setIsOpen] = useState(false);
+  const [messages, setMessages] = useState<AgentChatMessage[]>(initialMessages);
+  const [draft, setDraft] = useState("");
+  const [busyState, setBusyState] = useState<AgentChatBusyState>("idle");
+  const activeRunAbortControllerRef = useRef<AbortController | null>(null);
+
+  const isBusy = busyState !== "idle";
+  const canSend = draft.trim().length > 0 && !isBusy;
+  const panelTitleId = useMemo(() => "agent-chat-title", []);
+
+  useEffect(() => {
+    return () => {
+      activeRunAbortControllerRef.current?.abort();
+    };
+  }, []);
+
+  const updateAssistantMessage = useCallback((messageId: string, content: string) => {
+    setMessages((currentMessages) =>
+      currentMessages.map((message) =>
+        message.id === messageId
+          ? {
+              ...message,
+              content
+            }
+          : message
+      )
+    );
+  }, []);
+
+  async function appendPrompt(prompt: string) {
+    const trimmedPrompt = prompt.trim();
+
+    if (!trimmedPrompt || isBusy || activeRunAbortControllerRef.current) {
+      return;
+    }
+
+    const userMessageId = createClientId("user");
+    const assistantMessageId = createClientId("assistant");
+    const clientRequestId = createClientId("agent-run");
+
     setMessages((currentMessages) => [
       ...currentMessages,
       {
-        id: `user-${timestamp}`,
+        id: userMessageId,
         role: "user",
         content: trimmedPrompt
       },
       {
-        id: `assistant-${timestamp}`,
+        id: assistantMessageId,
         role: "assistant",
-        content: createMockAssistantReply(trimmedPrompt)
+        content: "요청을 Agent API로 보내고 있습니다."
       }
     ]);
     setDraft("");
     setIsOpen(true);
+
+    if (!workspaceId || !accessToken?.trim()) {
+      updateAssistantMessage(
+        assistantMessageId,
+        "Agent를 사용하려면 로그인과 워크스페이스 선택이 필요합니다."
+      );
+      return;
+    }
+
+    const abortController = new AbortController();
+    activeRunAbortControllerRef.current = abortController;
+    setBusyState("submitting");
+
+    try {
+      const createdRunPayload = await agentApiClient.createRun(
+        workspaceId,
+        {
+          clientRequestId,
+          prompt: trimmedPrompt,
+          timezone: getBrowserTimezone()
+        },
+        {
+          signal: abortController.signal
+        }
+      );
+      let currentRun = createdRunPayload.run;
+      updateAssistantMessage(
+        assistantMessageId,
+        getAgentRunDisplayMessage(currentRun)
+      );
+
+      if (!shouldStopPolling(currentRun)) {
+        setBusyState("polling");
+      }
+
+      while (!shouldStopPolling(currentRun)) {
+        await waitForAgentRunPollInterval(abortController.signal);
+        const runPayload = await agentApiClient.getRun(
+          workspaceId,
+          currentRun.id,
+          {
+            signal: abortController.signal
+          }
+        );
+        currentRun = runPayload.run;
+        updateAssistantMessage(
+          assistantMessageId,
+          getAgentRunDisplayMessage(currentRun)
+        );
+      }
+    } catch (error) {
+      if (!isAbortError(error)) {
+        updateAssistantMessage(
+          assistantMessageId,
+          getAgentRequestErrorMessage(error)
+        );
+      }
+    } finally {
+      if (activeRunAbortControllerRef.current === abortController) {
+        activeRunAbortControllerRef.current = null;
+      }
+      setBusyState("idle");
+    }
   }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -117,7 +313,7 @@ export function AgentChatWidget() {
       return;
     }
 
-    appendPrompt(draft);
+    void appendPrompt(draft);
   }
 
   return (
@@ -141,8 +337,13 @@ export function AgentChatWidget() {
                     PILO AI
                   </h2>
                   <div className="mt-0.5 flex items-center gap-1.5 text-xs text-slate-500">
-                    <span className="size-1.5 rounded-full bg-emerald-500" />
-                    Mockup
+                    <span
+                      className={cn(
+                        "size-1.5 rounded-full",
+                        isBusy ? "bg-amber-500" : "bg-emerald-500"
+                      )}
+                    />
+                    {isBusy ? "처리 중" : "API 연결"}
                   </div>
                 </div>
               </div>
@@ -169,7 +370,7 @@ export function AgentChatWidget() {
                 >
                   <div
                     className={cn(
-                      "max-w-[82%] rounded-lg px-3 py-2 text-sm leading-6",
+                      "max-w-[82%] whitespace-pre-wrap rounded-lg px-3 py-2 text-sm leading-6",
                       message.role === "user"
                         ? "bg-slate-900 text-white"
                         : "border border-slate-200 bg-slate-50 text-slate-800"
@@ -187,8 +388,9 @@ export function AgentChatWidget() {
                   <button
                     key={suggestion.label}
                     type="button"
+                    disabled={isBusy}
                     className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300"
-                    onClick={() => appendPrompt(suggestion.prompt)}
+                    onClick={() => void appendPrompt(suggestion.prompt)}
                   >
                     {suggestion.icon === "calendar" ? (
                       <CalendarPlus className="size-3.5" />
@@ -210,6 +412,7 @@ export function AgentChatWidget() {
                   placeholder="메시지를 입력하세요"
                   className="min-h-9 flex-1 resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm leading-5 text-slate-900 outline-none transition placeholder:text-slate-400 focus-visible:border-slate-400 focus-visible:ring-2 focus-visible:ring-slate-200"
                   onChange={(event) => setDraft(event.target.value)}
+                  disabled={isBusy}
                 />
                 <Button
                   type="submit"
@@ -217,7 +420,11 @@ export function AgentChatWidget() {
                   aria-label="AI에게 메시지 보내기"
                   disabled={!canSend}
                 >
-                  <SendHorizontal className="size-4" />
+                  {isBusy ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <SendHorizontal className="size-4" />
+                  )}
                 </Button>
               </form>
             </div>
