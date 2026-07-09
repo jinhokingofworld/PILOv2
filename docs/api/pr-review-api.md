@@ -51,6 +51,7 @@ comment, PR merge/close, ProjectV2 write는 이 문서의 범위가 아니다.
 | `conflictStatus` | `checking`, `clean`, `conflicted`, `unknown` |
 | `conflictFile.type` | `content`, `modify_delete`, `rename_modify`, `add_add`, `unsupported` |
 | `conflictFile.resolutionStatus` | `unresolved`, `suggested`, `applied` |
+| `conflictSuggestion.status` | `suggested`, `invalid` |
 | `diff.mode` | `side_by_side`, `binary`, `large` |
 
 ## API 목록
@@ -65,6 +66,7 @@ comment, PR merge/close, ProjectV2 write는 이 문서의 범위가 아니다.
 | `GET` | `/workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}/result` | 전체 리뷰 결과 조회 |
 | `GET` | `/workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}/canvas` | 리뷰 canvas view model 조회 |
 | `GET` | `/workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}/conflicts` | Post-MVP read-only conflict 분석 조회 |
+| `POST` | `/workspaces/{workspaceId}/github/review-files/{reviewFileId}/conflict-suggestion` | Post-MVP AI conflict 해결 초안 생성 |
 | `GET` | `/workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}/flows` | Flow 목록 조회 |
 | `GET` | `/workspaces/{workspaceId}/github/review-flows/{flowId}/files` | Flow에 속한 file 목록 조회 |
 | `GET` | `/workspaces/{workspaceId}/github/review-files/{reviewFileId}` | Review file 상세 조회 |
@@ -521,6 +523,59 @@ GET /api/v1/workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}/co
   수행하며, GitHub token은 응답과 로그에 노출하지 않는다.
 - AI explanation, AI suggestion, Apply resolution, PR head branch commit, merge 실행은 이
   endpoint의 범위가 아니다.
+
+## AI Conflict Suggestion Draft 생성
+
+Post-MVP Phase 1-D에서 구현하는 사용자 요청 기반 AI suggestion 생성 계약이다.
+이 endpoint는 conflict 파일 하나에 대해 transient 해결 초안을 반환하며, DB에 저장하거나
+PR head branch를 수정하지 않는다.
+
+```http
+POST /api/v1/workspaces/{workspaceId}/github/review-files/{reviewFileId}/conflict-suggestion
+```
+
+요청 body:
+
+```json
+{}
+```
+
+응답:
+
+```json
+{
+  "success": true,
+  "data": {
+    "reviewFileId": "review_file_1",
+    "filePath": "apps/frontend/VoiceMeetingPage.tsx",
+    "previousFilePath": null,
+    "type": "content",
+    "status": "suggested",
+    "aiSummary": "같은 title 상수를 base branch와 head branch가 서로 다른 문구로 수정해 충돌했습니다.",
+    "aiSuggestion": "두 문구의 의미를 합쳐 화면 맥락이 드러나는 이름으로 정리하는 초안입니다.",
+    "resolvedContent": "const title = 'Voice meeting room';",
+    "validationMessages": [],
+    "stored": false
+  }
+}
+```
+
+서버 규칙:
+
+- 현재 사용자는 review file이 속한 Workspace에 접근할 수 있어야 한다.
+- 현재 GitHub PR head SHA가 session의 `headSha`와 다르면 stale session으로 보고
+  `409 Conflict`를 반환한다.
+- `content` conflict file만 suggestion 생성 대상이다.
+- `binary`, `large`, `modify_delete`, `rename_modify`, `add_add`, `unsupported` conflict는
+  초기 AI suggestion slice에서 `400 Bad Request`로 막는다.
+- `OPENAI_API_KEY`가 있으면 OpenAI Responses API structured output을 사용하고,
+  key 누락/API 실패/응답 검증 실패 시 deterministic fallback 초안을 반환한다.
+- AI output은 사용자가 확인하기 전까지 suggestion으로만 취급한다.
+- `resolvedContent`가 비어 있거나 `<<<<<<<`, `=======`, `>>>>>>>` conflict marker를 포함하면
+  `status: "invalid"`와 `validationMessages`를 반환한다.
+- suggestion 결과는 DB에 저장하지 않는다.
+- `review_files.current_status`, `file_review_decisions`, `review_submissions`를 변경하지 않는다.
+- GitHub branch commit, GitHub merge API 호출, Apply resolution은 이 endpoint의 범위가 아니다.
 
 ## 파일별 Review Decision 저장
 
