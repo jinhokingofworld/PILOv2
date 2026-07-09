@@ -158,8 +158,10 @@ export function createSqltoerdRelationShapes(
         constraintName: relation.constraintName,
         fromTableShapeId: getSqlErdTableShapeId(relation.fromTableId),
         toTableShapeId: getSqlErdTableShapeId(relation.toTableId),
+        endSide: layout.endSide,
         points: layout.points,
-        arrowPoints: layout.arrowPoints
+        arrowPoints: layout.arrowPoints,
+        startSide: layout.startSide
       }
     };
   });
@@ -184,11 +186,13 @@ function getFallbackSqlErdRelationShapeLayout(): SqlErdRelationShapeLayout {
     y: 0,
     w: 1,
     h: 1,
+    endSide: "left",
     points: [
       { x: 0, y: 0 },
       { x: 1, y: 1 }
     ],
-    arrowPoints: []
+    arrowPoints: [],
+    startSide: "right"
   };
 }
 
@@ -321,8 +325,10 @@ function getSqlErdRelationShapeUpdates(
         ...shape.props,
         w: layout.w,
         h: layout.h,
+        endSide: layout.endSide,
         points: layout.points,
-        arrowPoints: layout.arrowPoints
+        arrowPoints: layout.arrowPoints,
+        startSide: layout.startSide
       }
     });
   }
@@ -534,6 +540,8 @@ function isSqlErdRelationShapePartialApplied(
     currentShape.props.fromTableId === nextProps.fromTableId &&
     currentShape.props.toTableId === nextProps.toTableId &&
     currentShape.props.constraintName === nextProps.constraintName &&
+    currentShape.props.startSide === nextProps.startSide &&
+    currentShape.props.endSide === nextProps.endSide &&
     areStringArraysEqual(
       currentShape.props.fromColumnIds,
       nextProps.fromColumnIds

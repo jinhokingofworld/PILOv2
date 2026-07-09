@@ -23,6 +23,15 @@ type MainShellProps = {
 export function MainShell({ children }: MainShellProps) {
   const pathname = usePathname();
   const activeFeature = getFeatureNavigationItemForPathname(pathname);
+  const isSqlErdImmersiveRoute = pathname.startsWith("/sql-erd");
+
+  if (isSqlErdImmersiveRoute) {
+    return (
+      <main className="h-svh overflow-hidden bg-background">
+        {children}
+      </main>
+    );
+  }
 
   return (
     <SidebarProvider>
