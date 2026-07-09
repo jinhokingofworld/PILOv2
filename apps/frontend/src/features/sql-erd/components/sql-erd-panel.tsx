@@ -53,9 +53,14 @@ import type {
 import {
   createSampleSqlErdViewSession,
   createWorkspaceSqlErdViewSession,
+  getLayoutAutosaveBlockReasonForStatus,
+  getLayoutAutosaveDelayMs,
+  getLayoutAutosavePausedBanner,
   getSqlErdSessionReloadFailureAction,
+  isLayoutAutosaveTransientStatus,
   shouldApplySqlErdSessionLoadResult,
   type LayoutAutosaveBlockReason,
+  type LayoutAutosavePausedBannerViewModel,
   type SqlErdSessionLoadState,
   type SqlErdViewSession
 } from "@/features/sql-erd/utils/session-state";
@@ -75,12 +80,6 @@ import {
 import { parseSqlDdlToErdModel } from "@/features/sql-erd/utils/ddl-parser";
 import { cn } from "@/lib/utils";
 
-type LayoutAutosavePausedBannerViewModel = {
-  canRetry: boolean;
-  message: string;
-  reason: LayoutAutosaveBlockReason;
-};
-
 const sampleSqlErdViewSession = createSampleSqlErdViewSession(
   commerceSqltoerdFixture
 );
@@ -95,8 +94,6 @@ const MIN_CANVAS_WIDTH = 480;
 const PANEL_RESIZE_HANDLE_WIDTH = 4;
 const COLLAPSED_PANEL_BUTTON_WIDTH = 48;
 const PANEL_RESIZE_KEYBOARD_STEP = 24;
-const AUTOSAVE_DEBOUNCE_MS = 2000;
-const AUTOSAVE_MAX_RETRY_DELAY_MS = 30000;
 
 const sqlSourceEditorTheme = EditorView.theme({
   "&": {
@@ -166,102 +163,15 @@ function isSqlErdApiConflictError(error: unknown) {
 function getLayoutAutosaveBlockReason(
   error: unknown
 ): LayoutAutosaveBlockReason | null {
-  if (!(error instanceof SqlErdApiError)) {
-    return null;
-  }
-
-  const status = error.status;
-
-  if (status === 409) {
-    return "conflict";
-  }
-
-  if (status === 401) {
-    return "unauthorized";
-  }
-
-  if (status === 403) {
-    return "forbidden";
-  }
-
-  if (status === 404) {
-    return "not_found";
-  }
-
-  if (status === 400 || status === 413) {
-    return "invalid_payload";
-  }
-
-  if (typeof status !== "number") {
-    return null;
-  }
-
-  if (status === 408 || status === 429 || status >= 500) {
-    return null;
-  }
-
-  return "unknown_non_transient";
-}
-
-function isSqlErdApiTransientAutosaveError(error: unknown) {
-  return getLayoutAutosaveBlockReason(error) === null;
-}
-
-function getLayoutAutosaveDelayMs(retryAttempt: number) {
-  return Math.min(
-    AUTOSAVE_DEBOUNCE_MS * 2 ** retryAttempt,
-    AUTOSAVE_MAX_RETRY_DELAY_MS
+  return getLayoutAutosaveBlockReasonForStatus(
+    error instanceof SqlErdApiError ? error.status : undefined
   );
 }
 
-function getLayoutAutosavePausedBanner(
-  reason: LayoutAutosaveBlockReason
-): LayoutAutosavePausedBannerViewModel {
-  if (reason === "conflict") {
-    return {
-      canRetry: false,
-      message: "Workspace session changed. Reload the latest session.",
-      reason
-    };
-  }
-
-  if (reason === "unauthorized") {
-    return {
-      canRetry: false,
-      message: "Sign in again, then reload this SQLtoERD session.",
-      reason
-    };
-  }
-
-  if (reason === "forbidden") {
-    return {
-      canRetry: false,
-      message: "You do not have permission to save in this Workspace.",
-      reason
-    };
-  }
-
-  if (reason === "not_found") {
-    return {
-      canRetry: false,
-      message: "This SQLtoERD session was deleted or cannot be found.",
-      reason
-    };
-  }
-
-  if (reason === "invalid_payload") {
-    return {
-      canRetry: true,
-      message: "Current layout payload cannot be saved automatically.",
-      reason
-    };
-  }
-
-  return {
-    canRetry: true,
-    message: "Autosave stopped after a non-retryable API error.",
-    reason
-  };
+function isSqlErdApiTransientAutosaveError(error: unknown) {
+  return isLayoutAutosaveTransientStatus(
+    error instanceof SqlErdApiError ? error.status : undefined
+  );
 }
 
 export function SqlErdPanel() {

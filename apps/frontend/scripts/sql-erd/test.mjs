@@ -360,6 +360,68 @@ assert.equal(
   sessionStateRuntime.shouldApplySqlErdSessionLoadResult(7, 8),
   false
 );
+assert.equal(
+  sessionStateRuntime.getLayoutAutosaveBlockReasonForStatus(409),
+  "conflict"
+);
+assert.equal(
+  sessionStateRuntime.getLayoutAutosaveBlockReasonForStatus(401),
+  "unauthorized"
+);
+assert.equal(
+  sessionStateRuntime.getLayoutAutosaveBlockReasonForStatus(403),
+  "forbidden"
+);
+assert.equal(
+  sessionStateRuntime.getLayoutAutosaveBlockReasonForStatus(404),
+  "not_found"
+);
+assert.equal(
+  sessionStateRuntime.getLayoutAutosaveBlockReasonForStatus(400),
+  "invalid_payload"
+);
+assert.equal(
+  sessionStateRuntime.getLayoutAutosaveBlockReasonForStatus(413),
+  "invalid_payload"
+);
+assert.equal(
+  sessionStateRuntime.getLayoutAutosaveBlockReasonForStatus(418),
+  "unknown_non_transient"
+);
+assert.equal(
+  sessionStateRuntime.getLayoutAutosaveBlockReasonForStatus(408),
+  null
+);
+assert.equal(
+  sessionStateRuntime.getLayoutAutosaveBlockReasonForStatus(429),
+  null
+);
+assert.equal(
+  sessionStateRuntime.getLayoutAutosaveBlockReasonForStatus(500),
+  null
+);
+assert.equal(
+  sessionStateRuntime.getLayoutAutosaveBlockReasonForStatus(undefined),
+  null
+);
+assert.equal(sessionStateRuntime.isLayoutAutosaveTransientStatus(500), true);
+assert.equal(sessionStateRuntime.isLayoutAutosaveTransientStatus(400), false);
+assert.equal(sessionStateRuntime.getLayoutAutosaveDelayMs(0), 2000);
+assert.equal(sessionStateRuntime.getLayoutAutosaveDelayMs(1), 4000);
+assert.equal(sessionStateRuntime.getLayoutAutosaveDelayMs(4), 30000);
+assert.deepEqual(sessionStateRuntime.getLayoutAutosavePausedBanner("conflict"), {
+  canRetry: false,
+  message: "Workspace session changed. Reload the latest session.",
+  reason: "conflict"
+});
+assert.deepEqual(
+  sessionStateRuntime.getLayoutAutosavePausedBanner("invalid_payload"),
+  {
+    canRetry: true,
+    message: "Current layout payload cannot be saved automatically.",
+    reason: "invalid_payload"
+  }
+);
 
 const sqlErdApiRequests = [];
 const runtimeSession = createRuntimeTestSession({
@@ -841,6 +903,21 @@ assert.match(sessionStateUtils, /getSqlErdSessionReloadFailureAction/);
 assert.match(sessionStateUtils, /kind: "preserve_current"/);
 assert.match(sessionStateUtils, /kind: "fallback_to_sample"/);
 assert.match(sessionStateUtils, /shouldApplySqlErdSessionLoadResult/);
+assert.match(sessionStateUtils, /SQL_ERD_LAYOUT_AUTOSAVE_DEBOUNCE_MS = 2000/);
+assert.match(
+  sessionStateUtils,
+  /SQL_ERD_LAYOUT_AUTOSAVE_MAX_RETRY_DELAY_MS = 30000/
+);
+assert.match(sessionStateUtils, /getLayoutAutosaveBlockReasonForStatus/);
+assert.match(sessionStateUtils, /isLayoutAutosaveTransientStatus/);
+assert.match(sessionStateUtils, /getLayoutAutosaveDelayMs/);
+assert.match(sessionStateUtils, /getLayoutAutosavePausedBanner/);
+assert.match(sessionStateUtils, /status === 409/);
+assert.match(sessionStateUtils, /status === 408 \|\| status === 429 \|\| status >= 500/);
+assert.match(sessionStateUtils, /status === 401/);
+assert.match(sessionStateUtils, /status === 403/);
+assert.match(sessionStateUtils, /status === 404/);
+assert.match(sessionStateUtils, /status === 400 \|\| status === 413/);
 
 assert.match(panel, /SqlErdCanvas/);
 assert.match(panel, /useAuthSession/);
@@ -851,7 +928,6 @@ assert.match(panel, /handleGenerate/);
 assert.match(panel, /createSession/);
 assert.match(panel, /updateSession/);
 assert.match(panel, /baseRevision: sqlErdViewSession\.revision/);
-assert.match(panel, /AUTOSAVE_DEBOUNCE_MS = 2000/);
 assert.match(panel, /pendingLayoutAutosaveJson/);
 assert.match(panel, /layoutAutosaveRetryAttempt/);
 assert.match(panel, /type LayoutAutosaveBlockReason/);
@@ -881,13 +957,9 @@ assert.doesNotMatch(
   /catch \{\s*setSqlErdViewSession\(sampleSqlErdViewSession\);[\s\S]*?setPendingLayoutAutosaveJson\(null\);/
 );
 assert.doesNotMatch(panel, /isLayoutAutosaveBlocked/);
-assert.match(panel, /status === 409/);
 assert.match(panel, /isSqlErdApiTransientAutosaveError/);
-assert.match(panel, /status === 408 \|\| status === 429 \|\| status >= 500/);
-assert.match(panel, /status === 401/);
-assert.match(panel, /status === 403/);
-assert.match(panel, /status === 404/);
-assert.match(panel, /status === 400 \|\| status === 413/);
+assert.match(panel, /getLayoutAutosaveBlockReasonForStatus/);
+assert.match(panel, /isLayoutAutosaveTransientStatus/);
 assert.match(panel, /baseRevision: currentRevision/);
 assert.match(panel, /layoutJson: requestLayoutJson/);
 assert.match(panel, /getLayoutAutosaveDelayMs\(layoutAutosaveRetryAttempt\)/);
