@@ -20,7 +20,7 @@ import {
   XIcon
 } from "lucide-react";
 
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -68,6 +68,8 @@ import type {
 import { readGithubBoardSelection } from "@/features/github-integration/utils/github-board-selection";
 import { createMeetingApiClient } from "@/features/meeting/api/client";
 import type { MeetingReportSummary } from "@/features/meeting/types";
+import { createSqlErdApiClient } from "@/features/sql-erd/api/client";
+import type { SqltoerdSessionPayload } from "@/features/sql-erd/types";
 
 const calendarWeekdayLabels = ["일", "월", "화", "수", "목", "금", "토"];
 const homeIssueListLimit = 5;
@@ -103,6 +105,12 @@ type HomeMeetingReportsState = {
 type HomeCanvasState = {
   error: Error | null;
   recentBoard: CanvasBoardSummary | null;
+  status: "idle" | "loading" | "success" | "error";
+};
+
+type HomeSqlErdState = {
+  error: Error | null;
+  session: SqltoerdSessionPayload | null;
   status: "idle" | "loading" | "success" | "error";
 };
 
@@ -638,7 +646,7 @@ function MemberPresenceList({
         .filter(Boolean)
         .join(" ")}
     >
-      <div className="grid min-h-0 content-start gap-1.5 overflow-hidden py-1.5">
+      <div className="grid min-h-0 content-start gap-1.5 overflow-y-auto py-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {members.map((member) => (
           <button
             key={member.id}
@@ -648,6 +656,12 @@ function MemberPresenceList({
             type="button"
           >
             <Avatar size="sm">
+              {member.user.avatarUrl ? (
+                <AvatarImage
+                  alt={member.user.name ?? "Workspace member"}
+                  src={member.user.avatarUrl}
+                />
+              ) : null}
               <AvatarFallback className="bg-[#5865F2] text-white">
                 {getInitial(member.user.name)}
               </AvatarFallback>
@@ -704,6 +718,12 @@ function MemberProfileDialog({
 
             <div className="flex items-center gap-3">
               <Avatar>
+                {member.user.avatarUrl ? (
+                  <AvatarImage
+                    alt={member.user.name ?? "Workspace member"}
+                    src={member.user.avatarUrl}
+                  />
+                ) : null}
                 <AvatarFallback>{getInitial(member.user.name)}</AvatarFallback>
               </Avatar>
               <div className="min-w-0">
@@ -1079,9 +1099,18 @@ function CanvasShortcutCard() {
 
 function SqlErdShortcutCard() {
   const router = useRouter();
-  const recentErd = {
-    title: "workspace-schema"
-  };
+  const authSession = useAuthSession();
+  const sqlErdState = useHomeSqlErdSession({
+    accessToken: authSession?.accessToken ?? null,
+    workspaceId: authSession?.activeWorkspaceId ?? ""
+  });
+  const recentErdTitle = sqlErdState.session?.title ?? "-";
+  const updatedLabel =
+    sqlErdState.status === "loading"
+      ? "불러오는 중"
+      : sqlErdState.session
+        ? formatRelativeTimeFromNow(sqlErdState.session.updatedAt)
+        : "-";
 
   const handleNavigateToSqlErd = () => {
     router.push("/sql-erd");
@@ -1146,10 +1175,13 @@ function SqlErdShortcutCard() {
         </div>
         <div className="min-w-0 shrink-0 text-right">
           <p className="text-[0.7rem] font-medium leading-4 text-white/60">
-            최근 ERD
+            마지막 수정
           </p>
           <p className="max-w-28 truncate text-xs font-medium leading-4 text-white">
-            {recentErd.title}
+            {updatedLabel}
+          </p>
+          <p className="max-w-28 truncate text-[0.7rem] font-medium leading-4 text-white/60">
+            {recentErdTitle}
           </p>
         </div>
       </CardContent>
@@ -1830,6 +1862,12 @@ const emptyHomeCanvasState: HomeCanvasState = {
   status: "idle"
 };
 
+const emptyHomeSqlErdState: HomeSqlErdState = {
+  error: null,
+  session: null,
+  status: "idle"
+};
+
 function useHomeIssues({
   accessToken,
   workspaceId
@@ -2163,6 +2201,69 @@ function useHomeCanvasSummary({
       active = false;
     };
   }, [canvasClient, normalizedAccessToken, normalizedWorkspaceId]);
+
+  return state;
+}
+
+function useHomeSqlErdSession({
+  accessToken,
+  workspaceId
+}: {
+  accessToken: string | null;
+  workspaceId: string;
+}) {
+  const normalizedAccessToken = accessToken?.trim() || null;
+  const normalizedWorkspaceId = workspaceId.trim();
+  const sqlErdClient = useMemo(
+    () =>
+      createSqlErdApiClient({
+        accessToken: normalizedAccessToken
+      }),
+    [normalizedAccessToken]
+  );
+  const [state, setState] = useState<HomeSqlErdState>(emptyHomeSqlErdState);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadSqlErdSession() {
+      if (!normalizedAccessToken || !normalizedWorkspaceId) {
+        setState(emptyHomeSqlErdState);
+        return;
+      }
+
+      setState({
+        ...emptyHomeSqlErdState,
+        status: "loading"
+      });
+
+      try {
+        const session = await sqlErdClient.getActiveSession(normalizedWorkspaceId);
+
+        if (active) {
+          setState({
+            error: null,
+            session,
+            status: "success"
+          });
+        }
+      } catch (error) {
+        if (active) {
+          setState({
+            ...emptyHomeSqlErdState,
+            error: errorFromUnknown(error),
+            status: "error"
+          });
+        }
+      }
+    }
+
+    void loadSqlErdSession();
+
+    return () => {
+      active = false;
+    };
+  }, [normalizedAccessToken, normalizedWorkspaceId, sqlErdClient]);
 
   return state;
 }
