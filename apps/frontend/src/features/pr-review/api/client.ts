@@ -2,6 +2,7 @@ import type {
   ListPrReviewPullRequestsQuery,
   ListPrReviewRepositoriesQuery,
   PrReviewCanvas,
+  PrReviewConflictAnalysis,
   PrReviewFile,
   PrReviewFileDiff,
   PrReviewPaginatedPayload,
@@ -417,6 +418,17 @@ export function createPrReviewApiClient({
     ) {
       return requestPrReviewData<PrReviewCanvas>(
         `${reviewSessionGithubPath(workspaceId, reviewSessionId)}/canvas`,
+        undefined,
+        requestOptions
+      );
+    },
+
+    async getReviewSessionConflicts(
+      workspaceId: string,
+      reviewSessionId: string
+    ) {
+      return requestPrReviewData<PrReviewConflictAnalysis>(
+        `${reviewSessionGithubPath(workspaceId, reviewSessionId)}/conflicts`,
         undefined,
         requestOptions
       );

@@ -19,7 +19,7 @@
 | --- | --- | --- | --- | --- |
 | 1-A | Scope and contract | #503 | #504 | 완료 |
 | 1-B | Read-only conflict analysis backend | #506 | TBD | 구현 완료 |
-| 1-C | Review room conflict UX | TBD | TBD | 예정 |
+| 1-C | Review room conflict UX | #508 | TBD | 구현 완료 |
 | 1-D | AI suggestion draft | TBD | TBD | 예정 |
 | 1-E | Apply resolution write path | TBD | TBD | 예정 |
 
@@ -84,11 +84,11 @@
 
 작업 체크리스트:
 
-- [ ] conflict status를 header와 file node에 표시한다.
-- [ ] conflict file 클릭 시 Conflict Resolution drawer로 진입한다.
-- [ ] unresolved conflict file에서는 일반 decision 저장을 숨기거나 비활성화한다.
-- [ ] loading, empty, unsupported, stale 상태를 화면에 표시한다.
-- [ ] frontend test 또는 smoke test를 갱신한다.
+- [x] conflict status를 header와 file node에 표시한다.
+- [x] conflict file 클릭 시 Conflict Resolution drawer로 진입한다.
+- [x] unresolved conflict file에서는 일반 decision 저장을 숨기거나 비활성화한다.
+- [x] loading, empty, unsupported, stale 상태를 화면에 표시한다.
+- [x] frontend test 또는 smoke test를 갱신한다.
 
 ## 1-D AI Suggestion Draft
 

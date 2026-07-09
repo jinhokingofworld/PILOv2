@@ -27,23 +27,36 @@ import { cn } from "@/lib/utils";
 import type { createPrReviewApiClient } from "@/features/pr-review/api/client";
 import type {
   PrReviewDiffRow,
+  PrReviewConflictFile,
   PrReviewFile,
   PrReviewFileDecisionStatus,
   PrReviewFileDiff,
   PrReviewFileFlowMembership,
-  PrReviewFileRiskLevel
+  PrReviewFileRiskLevel,
+  PrReviewUnsupportedConflictFile
 } from "@/features/pr-review/types";
 
 type PrReviewApiClient = ReturnType<typeof createPrReviewApiClient>;
 
 type FileReviewStatus = "idle" | "loading" | "ready" | "error";
+type ConflictAnalysisLoadStatus =
+  | "idle"
+  | "loading"
+  | "ready"
+  | "error"
+  | "stale";
 type SaveStatus = "idle" | "saving" | "saved" | "error";
 
 type PrReviewFileDiffDrawerProps = {
   apiClient: PrReviewApiClient;
+  conflictAnalysisErrorMessage: string | null;
+  conflictAnalysisStatus: ConflictAnalysisLoadStatus;
+  conflictFile: PrReviewConflictFile | null;
+  isReviewSessionConflicted: boolean;
   onClose: () => void;
   onDecisionSaved: (file: PrReviewFile) => void;
   reviewFileId: string;
+  unsupportedConflictFile: PrReviewUnsupportedConflictFile | null;
   workspaceId: string;
 };
 
@@ -150,11 +163,80 @@ function getSaveStatusLabel(status: SaveStatus) {
   }
 }
 
+function getUnsupportedConflictReasonLabel(reason: string) {
+  if (reason.includes("binary")) {
+    return "바이너리 파일 conflict는 아직 지원하지 않습니다.";
+  }
+
+  if (reason.includes("large diff")) {
+    return "큰 diff conflict는 아직 지원하지 않습니다.";
+  }
+
+  if (reason.includes("add/add")) {
+    return "add/add conflict는 아직 지원하지 않습니다.";
+  }
+
+  if (reason.includes("modify/delete")) {
+    return "modify/delete conflict는 아직 지원하지 않습니다.";
+  }
+
+  if (reason.includes("rename/modify")) {
+    return "rename/modify conflict는 아직 지원하지 않습니다.";
+  }
+
+  if (reason.includes("content")) {
+    return "Conflict 분석에 필요한 파일 내용을 가져오지 못했습니다.";
+  }
+
+  return reason;
+}
+
+function getDecisionDisabledReason(input: {
+  conflictAnalysisErrorMessage: string | null;
+  conflictAnalysisStatus: ConflictAnalysisLoadStatus;
+  conflictFile: PrReviewConflictFile | null;
+  isReviewSessionConflicted: boolean;
+  unsupportedConflictFile: PrReviewUnsupportedConflictFile | null;
+}) {
+  if (input.conflictFile?.resolutionStatus === "unresolved") {
+    return "Conflict 해결 전에는 일반 판단을 저장할 수 없습니다.";
+  }
+
+  if (input.unsupportedConflictFile) {
+    return getUnsupportedConflictReasonLabel(input.unsupportedConflictFile.reason);
+  }
+
+  if (!input.isReviewSessionConflicted) {
+    return null;
+  }
+
+  if (
+    input.conflictAnalysisStatus === "idle" ||
+    input.conflictAnalysisStatus === "loading"
+  ) {
+    return "Conflict 정보를 확인한 뒤 판단을 저장할 수 있습니다.";
+  }
+
+  if (input.conflictAnalysisStatus === "stale") {
+    return (
+      input.conflictAnalysisErrorMessage ??
+      "PR head가 변경되어 새 review session이 필요합니다."
+    );
+  }
+
+  return null;
+}
+
 export function PrReviewFileDiffDrawer({
   apiClient,
+  conflictAnalysisErrorMessage,
+  conflictAnalysisStatus,
+  conflictFile,
+  isReviewSessionConflicted,
   onClose,
   onDecisionSaved,
   reviewFileId,
+  unsupportedConflictFile,
   workspaceId
 }: PrReviewFileDiffDrawerProps) {
   const [status, setStatus] = useState<FileReviewStatus>("idle");
@@ -284,8 +366,29 @@ export function PrReviewFileDiffDrawer({
     () => decisionOptions.find((option) => option.status === decisionStatus),
     [decisionStatus]
   );
+  const decisionDisabledReason = getDecisionDisabledReason({
+    conflictAnalysisErrorMessage,
+    conflictAnalysisStatus,
+    conflictFile,
+    isReviewSessionConflicted,
+    unsupportedConflictFile
+  });
+  const decisionDisabled = decisionDisabledReason !== null;
+  const drawerModeLabel = decisionDisabled
+    ? "Conflict Resolution"
+    : "파일 경로";
+
+  useEffect(() => {
+    if (decisionDisabled) {
+      clearScheduledCommentSave();
+    }
+  }, [clearScheduledCommentSave, decisionDisabled]);
 
   function scheduleCommentSave(nextComment: string) {
+    if (decisionDisabled) {
+      return;
+    }
+
     if (!decisionStatus) {
       return;
     }
@@ -298,6 +401,10 @@ export function PrReviewFileDiffDrawer({
   }
 
   function flushCommentSave() {
+    if (decisionDisabled) {
+      return;
+    }
+
     if (!decisionStatus) {
       return;
     }
@@ -307,6 +414,10 @@ export function PrReviewFileDiffDrawer({
   }
 
   function handleDecisionStatusChange(nextStatus: PrReviewFileDecisionStatus) {
+    if (decisionDisabled) {
+      return;
+    }
+
     clearScheduledCommentSave();
     setDecisionStatus(nextStatus);
     void enqueueDecisionSave(nextStatus, comment);
@@ -321,7 +432,9 @@ export function PrReviewFileDiffDrawer({
         </Button>
         <div className="flex h-10 min-w-0 items-center gap-2 rounded-lg border border-slate-200 px-3 text-sm">
           <FileText className="size-4 shrink-0 text-blue-600" />
-          <span className="shrink-0 font-medium text-slate-500">파일 경로</span>
+          <span className="shrink-0 font-medium text-slate-500">
+            {drawerModeLabel}
+          </span>
           <span className="max-w-[48vw] truncate font-semibold">
             {file?.filePath ?? "파일 리뷰"}
           </span>
@@ -346,7 +459,9 @@ export function PrReviewFileDiffDrawer({
           <aside className="min-h-0 w-full shrink-0 overflow-y-auto border-t border-slate-200 bg-white lg:w-[400px] lg:border-l lg:border-t-0">
             <ReviewNodePanel
               comment={comment}
+              conflictFile={conflictFile}
               decisionStatus={decisionStatus}
+              decisionDisabledReason={decisionDisabledReason}
               file={file}
               onCommentChange={(value) => {
                 setComment(value);
@@ -358,6 +473,7 @@ export function PrReviewFileDiffDrawer({
               saveErrorMessage={saveErrorMessage}
               saveStatus={saveStatus}
               selectedDecisionLabel={selectedDecision?.label ?? "아직 선택 안 됨"}
+              unsupportedConflictFile={unsupportedConflictFile}
             />
           </aside>
         </main>
@@ -461,17 +577,22 @@ function FileDiffHeader({ file }: { file: PrReviewFile }) {
 
 function ReviewNodePanel({
   comment,
+  conflictFile,
   decisionStatus,
+  decisionDisabledReason,
   file,
   onCommentBlur,
   onCommentChange,
   onDecisionStatusChange,
   saveErrorMessage,
   saveStatus,
-  selectedDecisionLabel
+  selectedDecisionLabel,
+  unsupportedConflictFile
 }: {
   comment: string;
+  conflictFile: PrReviewConflictFile | null;
   decisionStatus: PrReviewFileDecisionStatus | null;
+  decisionDisabledReason: string | null;
   file: PrReviewFile;
   onCommentBlur: () => void;
   onCommentChange: (value: string) => void;
@@ -479,7 +600,10 @@ function ReviewNodePanel({
   saveErrorMessage: string | null;
   saveStatus: SaveStatus;
   selectedDecisionLabel: string;
+  unsupportedConflictFile: PrReviewUnsupportedConflictFile | null;
 }) {
+  const decisionDisabled = decisionDisabledReason !== null;
+
   return (
     <div className="flex min-h-full flex-col">
       <div className="space-y-5 p-5">
@@ -509,6 +633,14 @@ function ReviewNodePanel({
             </span>
           </div>
         </section>
+
+        {decisionDisabledReason ? (
+          <ConflictResolutionPanel
+            conflictFile={conflictFile}
+            reason={decisionDisabledReason}
+            unsupportedConflictFile={unsupportedConflictFile}
+          />
+        ) : null}
 
         <Separator />
 
@@ -548,10 +680,20 @@ function ReviewNodePanel({
             리뷰 코멘트
           </p>
           <textarea
-            className="mt-2 min-h-28 w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm leading-6 outline-none transition-colors placeholder:text-slate-400 focus:border-blue-400 focus:ring-3 focus:ring-blue-100"
+            className={cn(
+              "mt-2 min-h-28 w-full resize-y rounded-lg border px-3 py-2 text-sm leading-6 outline-none transition-colors placeholder:text-slate-400 focus:ring-3",
+              decisionDisabled
+                ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-500 focus:border-slate-200 focus:ring-transparent"
+                : "border-slate-200 bg-white focus:border-blue-400 focus:ring-blue-100"
+            )}
+            disabled={decisionDisabled}
             onBlur={onCommentBlur}
             onChange={(event) => onCommentChange(event.target.value)}
-            placeholder="파일 리뷰 코멘트를 남겨주세요."
+            placeholder={
+              decisionDisabled
+                ? "Conflict 해결 후 코멘트를 저장할 수 있습니다."
+                : "파일 리뷰 코멘트를 남겨주세요."
+            }
             value={comment}
           />
         </section>
@@ -565,10 +707,13 @@ function ReviewNodePanel({
               <button
                 className={cn(
                   "rounded-lg border px-3 py-2 text-left transition-colors",
-                  selected
-                    ? "border-blue-500 bg-blue-50 text-blue-950"
-                    : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                  decisionDisabled
+                    ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400"
+                    : selected
+                      ? "border-blue-500 bg-blue-50 text-blue-950"
+                      : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
                 )}
+                disabled={decisionDisabled}
                 key={option.status}
                 onClick={() => onDecisionStatusChange(option.status)}
                 type="button"
@@ -596,11 +741,15 @@ function ReviewNodePanel({
             {saveStatus === "saving" ? (
               <Loader2 className="size-4 animate-spin" />
             ) : null}
-            {getSaveStatusLabel(saveStatus)}
+            {decisionDisabled ? "Conflict 해결 필요" : getSaveStatusLabel(saveStatus)}
           </p>
         </div>
 
-        {saveErrorMessage ? (
+        {decisionDisabledReason ? (
+          <p className="mt-3 text-sm leading-6 text-amber-700">
+            {decisionDisabledReason}
+          </p>
+        ) : saveErrorMessage ? (
           <p className="mt-3 text-sm leading-6 text-rose-600">
             {saveErrorMessage}
           </p>
@@ -610,6 +759,64 @@ function ReviewNodePanel({
           </p>
         ) : null}
       </div>
+    </div>
+  );
+}
+
+function ConflictResolutionPanel({
+  conflictFile,
+  reason,
+  unsupportedConflictFile
+}: {
+  conflictFile: PrReviewConflictFile | null;
+  reason: string;
+  unsupportedConflictFile: PrReviewUnsupportedConflictFile | null;
+}) {
+  return (
+    <section className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
+      <p className="flex items-center gap-2 text-sm font-semibold text-amber-950">
+        <AlertCircle className="size-4 shrink-0" />
+        Conflict Resolution
+      </p>
+      <p className="mt-2 text-sm leading-6 text-amber-900">{reason}</p>
+      {unsupportedConflictFile ? (
+        <p className="mt-2 text-xs leading-5 text-amber-800">
+          이 파일은 후속 conflict type slice에서 처리합니다.
+        </p>
+      ) : null}
+      {conflictFile ? (
+        <div className="mt-3 space-y-3">
+          <p className="text-xs font-semibold uppercase text-amber-800">
+            {conflictFile.hunks.length} conflict hunk
+          </p>
+          {conflictFile.hunks.map((hunk) => (
+            <div
+              className="overflow-hidden rounded-lg border border-amber-200 bg-white"
+              key={hunk.id}
+            >
+              <div className="border-b border-amber-100 bg-amber-50 px-3 py-2 font-mono text-xs text-amber-900">
+                {hunk.header}
+              </div>
+              <div className="grid gap-2 p-3 text-xs">
+                <ConflictTextBlock label="Base" value={hunk.baseText} />
+                <ConflictTextBlock label="Current" value={hunk.currentText} />
+                <ConflictTextBlock label="Incoming" value={hunk.incomingText} />
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function ConflictTextBlock({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <p className="mb-1 font-semibold text-slate-500">{label}</p>
+      <pre className="max-h-24 overflow-auto rounded-md bg-slate-950 px-3 py-2 font-mono text-[11px] leading-5 text-slate-100">
+        {value || "(empty)"}
+      </pre>
     </div>
   );
 }

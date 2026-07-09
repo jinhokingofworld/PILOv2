@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useState,
   type PointerEvent as ReactPointerEvent
 } from "react";
@@ -26,19 +27,25 @@ import {
   TooltipTrigger
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import type { createPrReviewApiClient } from "@/features/pr-review/api/client";
+import {
+  PrReviewApiError,
+  type createPrReviewApiClient
+} from "@/features/pr-review/api/client";
 import { PrReviewCanvasSurface } from "@/features/pr-review/components/review-canvas/PrReviewCanvasSurface";
 import { PrReviewFileDiffDrawer } from "@/features/pr-review/components/review-canvas/PrReviewFileDiffDrawer";
 import { PrReviewSubmitReviewModal } from "@/features/pr-review/components/review-canvas/PrReviewSubmitReviewModal";
 import type {
   PrReviewCanvas,
+  PrReviewConflictAnalysis,
+  PrReviewConflictFile,
   PrReviewConflictStatus,
   PrReviewFile,
   PrReviewFileReviewStatus,
   PrReviewPullRequest,
   PrReviewPullRequestDetail,
   PrReviewSession,
-  PrReviewSummary
+  PrReviewSummary,
+  PrReviewUnsupportedConflictFile
 } from "@/features/pr-review/types";
 
 type PrReviewApiClient = ReturnType<typeof createPrReviewApiClient>;
@@ -54,6 +61,12 @@ type PrReviewCanvasShellProps = {
 };
 
 type CanvasLoadStatus = "idle" | "loading" | "ready" | "error";
+type ConflictAnalysisLoadStatus =
+  | "idle"
+  | "loading"
+  | "ready"
+  | "error"
+  | "stale";
 type LoadCanvasDataOptions = {
   quiet?: boolean;
 };
@@ -72,6 +85,28 @@ function getErrorMessage(error: unknown) {
   }
 
   return "리뷰 캔버스를 불러오지 못했습니다.";
+}
+
+function getConflictAnalysisErrorState(error: unknown): {
+  message: string;
+  status: Exclude<ConflictAnalysisLoadStatus, "idle" | "loading" | "ready">;
+} {
+  const message =
+    error instanceof Error
+      ? error.message
+      : "Conflict 정보를 불러오지 못했습니다.";
+
+  if (error instanceof PrReviewApiError && error.status === 409) {
+    return {
+      message,
+      status: "stale"
+    };
+  }
+
+  return {
+    message,
+    status: "error"
+  };
 }
 
 function formatNumber(value: number) {
@@ -162,6 +197,13 @@ export function PrReviewCanvasShell({
   const [loadStatus, setLoadStatus] = useState<CanvasLoadStatus>("idle");
   const [summary, setSummary] = useState<PrReviewSummary | null>(null);
   const [canvas, setCanvas] = useState<PrReviewCanvas | null>(null);
+  const [conflictAnalysis, setConflictAnalysis] =
+    useState<PrReviewConflictAnalysis | null>(null);
+  const [conflictAnalysisStatus, setConflictAnalysisStatus] =
+    useState<ConflictAnalysisLoadStatus>("idle");
+  const [conflictAnalysisError, setConflictAnalysisError] = useState<
+    string | null
+  >(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedReviewFileId, setSelectedReviewFileId] = useState<
     string | null
@@ -176,12 +218,17 @@ export function PrReviewCanvasShell({
       setLoadError("워크스페이스 정보를 확인할 수 없습니다.");
       setSummary(null);
       setCanvas(null);
+      setConflictAnalysis(null);
+      setConflictAnalysisStatus("error");
+      setConflictAnalysisError("워크스페이스 정보를 확인할 수 없습니다.");
       return;
     }
 
     if (!quiet) {
       setLoadStatus("loading");
       setLoadError(null);
+      setConflictAnalysisStatus("loading");
+      setConflictAnalysisError(null);
     }
 
     try {
@@ -189,9 +236,30 @@ export function PrReviewCanvasShell({
         apiClient.getReviewSessionSummary(workspaceId, session.id),
         apiClient.getReviewSessionCanvas(workspaceId, session.id)
       ]);
+      const nextConflictStatus =
+        nextCanvas.conflictStatus ?? nextSummary.conflictStatus;
+      let nextConflictAnalysis: PrReviewConflictAnalysis | null = null;
+      let nextConflictAnalysisStatus: ConflictAnalysisLoadStatus = "ready";
+      let nextConflictAnalysisError: string | null = null;
+
+      if (nextConflictStatus === "conflicted") {
+        try {
+          nextConflictAnalysis = await apiClient.getReviewSessionConflicts(
+            workspaceId,
+            session.id
+          );
+        } catch (error) {
+          const conflictErrorState = getConflictAnalysisErrorState(error);
+          nextConflictAnalysisStatus = conflictErrorState.status;
+          nextConflictAnalysisError = conflictErrorState.message;
+        }
+      }
 
       setSummary(nextSummary);
       setCanvas(nextCanvas);
+      setConflictAnalysis(nextConflictAnalysis);
+      setConflictAnalysisStatus(nextConflictAnalysisStatus);
+      setConflictAnalysisError(nextConflictAnalysisError);
       setLoadStatus("ready");
       setLoadError(null);
     } catch (error) {
@@ -202,6 +270,9 @@ export function PrReviewCanvasShell({
 
       setSummary(null);
       setCanvas(null);
+      setConflictAnalysis(null);
+      setConflictAnalysisStatus("error");
+      setConflictAnalysisError(getErrorMessage(error));
       setLoadStatus("error");
       setLoadError(getErrorMessage(error));
     }
@@ -297,6 +368,29 @@ export function PrReviewCanvasShell({
     canvas?.totalFileCount ?? summary?.totalFileCount ?? session.totalFileCount;
   const conflictStatus =
     canvas?.conflictStatus ?? summary?.conflictStatus ?? session.conflictStatus;
+  const contentConflictByFileId = useMemo(
+    () =>
+      new Map(
+        (conflictAnalysis?.files ?? []).map((file) => [file.reviewFileId, file])
+      ),
+    [conflictAnalysis]
+  );
+  const unsupportedConflictByFileId = useMemo(
+    () =>
+      new Map(
+        (conflictAnalysis?.unsupportedFiles ?? []).map((file) => [
+          file.reviewFileId,
+          file
+        ])
+      ),
+    [conflictAnalysis]
+  );
+  const selectedConflictFile = selectedReviewFileId
+    ? contentConflictByFileId.get(selectedReviewFileId) ?? null
+    : null;
+  const selectedUnsupportedConflictFile = selectedReviewFileId
+    ? unsupportedConflictByFileId.get(selectedReviewFileId) ?? null
+    : null;
   const reviewSubmitted = (summary?.status ?? session.status) === "submitted";
   const progressLabel = `${formatNumber(reviewedCount)} / ${formatNumber(
     totalFileCount
@@ -397,21 +491,35 @@ export function PrReviewCanvasShell({
               onRetry={() => void loadCanvasData()}
             />
           ) : canvas && canvas.flows.length > 0 ? (
-            <PrReviewCanvasSurface
-              canvas={canvas}
-              className="h-full w-full"
-              onFileSelect={setSelectedReviewFileId}
-              selectedReviewFileId={selectedReviewFileId}
-            />
+            <>
+              <ConflictAnalysisNotice
+                analysis={conflictAnalysis}
+                conflictStatus={conflictStatus}
+                errorMessage={conflictAnalysisError}
+                status={conflictAnalysisStatus}
+              />
+              <PrReviewCanvasSurface
+                canvas={canvas}
+                className="h-full w-full"
+                conflictAnalysis={conflictAnalysis}
+                onFileSelect={setSelectedReviewFileId}
+                selectedReviewFileId={selectedReviewFileId}
+              />
+            </>
           ) : (
             <CanvasEmptyState />
           )}
           {selectedReviewFileId ? (
             <PrReviewFileDiffDrawer
               apiClient={apiClient}
+              conflictAnalysisErrorMessage={conflictAnalysisError}
+              conflictAnalysisStatus={conflictAnalysisStatus}
+              conflictFile={selectedConflictFile}
+              isReviewSessionConflicted={conflictStatus === "conflicted"}
               onClose={() => setSelectedReviewFileId(null)}
               onDecisionSaved={handleDecisionSaved}
               reviewFileId={selectedReviewFileId}
+              unsupportedConflictFile={selectedUnsupportedConflictFile}
               workspaceId={workspaceId}
             />
           ) : null}
@@ -451,6 +559,75 @@ export function PrReviewCanvasShell({
           session={session}
           workspaceId={workspaceId}
         />
+      ) : null}
+    </div>
+  );
+}
+
+function ConflictAnalysisNotice({
+  analysis,
+  conflictStatus,
+  errorMessage,
+  status
+}: {
+  analysis: PrReviewConflictAnalysis | null;
+  conflictStatus: PrReviewConflictStatus;
+  errorMessage: string | null;
+  status: ConflictAnalysisLoadStatus;
+}) {
+  if (conflictStatus !== "conflicted") {
+    return null;
+  }
+
+  const supportedCount = analysis?.files.length ?? 0;
+  const unsupportedCount = analysis?.unsupportedFiles.length ?? 0;
+  const totalConflictFileCount = supportedCount + unsupportedCount;
+  let title: string | null = null;
+  let description: string | null = null;
+  let className = "border-blue-200 bg-blue-50 text-blue-900";
+
+  if (status === "idle" || status === "loading") {
+    title = "Conflict 파일 확인 중";
+    description = "파일별 충돌 정보를 불러오고 있습니다.";
+  } else if (status === "stale") {
+    title = "Conflict 정보가 오래되었습니다";
+    description =
+      errorMessage ?? "PR head가 변경되어 새 review session이 필요합니다.";
+    className = "border-rose-200 bg-rose-50 text-rose-900";
+  } else if (status === "error") {
+    title = "Conflict 정보를 불러오지 못했습니다";
+    description = errorMessage ?? "잠시 후 다시 시도해 주세요.";
+    className = "border-amber-200 bg-amber-50 text-amber-950";
+  } else if (totalConflictFileCount === 0) {
+    title = "파일 단위 Conflict 정보가 없습니다";
+    description = "GitHub PR은 conflict 상태지만 표시할 hunk가 없습니다.";
+    className = "border-slate-200 bg-white text-slate-700";
+  } else if (unsupportedCount > 0) {
+    title = `${formatNumber(unsupportedCount)}개 Conflict 파일은 아직 지원하지 않습니다`;
+    description =
+      supportedCount > 0
+        ? `${formatNumber(supportedCount)}개 파일은 Conflict Resolution mode로 확인할 수 있습니다.`
+        : "초기 버전에서는 content conflict만 Resolution mode로 확인할 수 있습니다.";
+    className = "border-amber-200 bg-amber-50 text-amber-950";
+  }
+
+  if (!title) {
+    return null;
+  }
+
+  return (
+    <div
+      className={cn(
+        "absolute left-4 top-4 z-10 max-w-md rounded-lg border px-4 py-3 shadow-sm",
+        className
+      )}
+    >
+      <p className="flex items-center gap-2 text-sm font-semibold">
+        <AlertCircle className="size-4 shrink-0" />
+        {title}
+      </p>
+      {description ? (
+        <p className="mt-1 text-sm leading-5 opacity-85">{description}</p>
       ) : null}
     </div>
   );

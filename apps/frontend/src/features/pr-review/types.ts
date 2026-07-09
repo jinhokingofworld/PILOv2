@@ -277,6 +277,65 @@ export type PrReviewFileDiff = {
   rows: PrReviewDiffRow[];
 };
 
+export type PrReviewConflictFileType =
+  | "content"
+  | "modify_delete"
+  | "rename_modify"
+  | "add_add"
+  | "unsupported";
+
+export type PrReviewConflictResolutionStatus =
+  | "unresolved"
+  | "suggested"
+  | "applied";
+
+export type PrReviewConflictHunk = {
+  id: string;
+  header: string;
+  baseStartLine: number;
+  baseLineCount: number;
+  currentStartLine: number;
+  currentLineCount: number;
+  incomingStartLine: number;
+  incomingLineCount: number;
+  baseText: string;
+  currentText: string;
+  incomingText: string;
+};
+
+export type PrReviewConflictFile = {
+  reviewFileId: string;
+  filePath: string;
+  previousFilePath: string | null;
+  type: PrReviewConflictFileType;
+  isSupported: true;
+  resolutionStatus: PrReviewConflictResolutionStatus;
+  hunks: PrReviewConflictHunk[];
+  aiSummary: string | null;
+  aiSuggestion: string | null;
+  resolvedContent: string | null;
+};
+
+export type PrReviewUnsupportedConflictFile = {
+  reviewFileId: string;
+  filePath: string;
+  type: "unsupported";
+  reason: string;
+};
+
+export type PrReviewConflictAnalysis = {
+  reviewSessionId: string;
+  pullRequestId: string;
+  headSha: string;
+  baseSha: string;
+  conflictStatus: PrReviewConflictStatus;
+  analysisMode: "sync";
+  stored: false;
+  supportedTypes: ["content"];
+  files: PrReviewConflictFile[];
+  unsupportedFiles: PrReviewUnsupportedConflictFile[];
+};
+
 export type UpdatePrReviewFileDecisionInput = {
   status: PrReviewFileDecisionStatus;
   comment: string | null;
