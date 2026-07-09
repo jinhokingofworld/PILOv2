@@ -14,12 +14,23 @@ import {
   FileText,
   GitPullRequest,
   ListChecks,
+  LogOut,
   Send,
   UserPlus,
   Users,
   XIcon
 } from "lucide-react";
 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle
+} from "@/components/ui/alert-dialog";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -46,6 +57,9 @@ import {
 import { Separator } from "@/components/ui/separator";
 import {
   createWorkspaceInvitation,
+  leaveWorkspace,
+  listWorkspaceInvitations,
+  listWorkspaceMembers,
   removeWorkspaceMember,
   revokeWorkspaceInvitation,
   type WorkspaceInvitation,
@@ -114,89 +128,6 @@ type HomeSqlErdState = {
   status: "idle" | "loading" | "success" | "error";
 };
 
-const mockWorkspaceMembers: WorkspaceMember[] = [
-  {
-    id: "membership_owner_001",
-    workspaceId: "workspace_pilo_preview",
-    userId: "user_donghyun",
-    role: "owner",
-    invitedByUserId: null,
-    joinedAt: "2026-07-04T09:00:00.000Z",
-    createdAt: "2026-07-04T09:00:00.000Z",
-    updatedAt: "2026-07-04T09:00:00.000Z",
-    user: {
-      id: "user_donghyun",
-      name: "동현",
-      email: "donghyun@pilo.local",
-      avatarUrl: null
-    }
-  },
-  {
-    id: "membership_member_002",
-    workspaceId: "workspace_pilo_preview",
-    userId: "user_sein",
-    role: "member",
-    invitedByUserId: "user_donghyun",
-    joinedAt: "2026-07-06T01:30:00.000Z",
-    createdAt: "2026-07-06T01:30:00.000Z",
-    updatedAt: "2026-07-06T01:30:00.000Z",
-    user: {
-      id: "user_sein",
-      name: "세인",
-      email: "sein@pilo.local",
-      avatarUrl: null
-    }
-  },
-  {
-    id: "membership_member_003",
-    workspaceId: "workspace_pilo_preview",
-    userId: "user_eunjae",
-    role: "member",
-    invitedByUserId: "user_donghyun",
-    joinedAt: "2026-07-07T02:20:00.000Z",
-    createdAt: "2026-07-07T02:20:00.000Z",
-    updatedAt: "2026-07-07T02:20:00.000Z",
-    user: {
-      id: "user_eunjae",
-      name: "은재",
-      email: "eunjae@pilo.local",
-      avatarUrl: null
-    }
-  },
-  {
-    id: "membership_member_004",
-    workspaceId: "workspace_pilo_preview",
-    userId: "user_juho",
-    role: "member",
-    invitedByUserId: "user_donghyun",
-    joinedAt: "2026-07-07T06:15:00.000Z",
-    createdAt: "2026-07-07T06:15:00.000Z",
-    updatedAt: "2026-07-07T06:15:00.000Z",
-    user: {
-      id: "user_juho",
-      name: "주호",
-      email: "juho@pilo.local",
-      avatarUrl: null
-    }
-  },
-  {
-    id: "membership_member_005",
-    workspaceId: "workspace_pilo_preview",
-    userId: "user_jinho",
-    role: "member",
-    invitedByUserId: "user_donghyun",
-    joinedAt: "2026-07-08T03:10:00.000Z",
-    createdAt: "2026-07-08T03:10:00.000Z",
-    updatedAt: "2026-07-08T03:10:00.000Z",
-    user: {
-      id: "user_jinho",
-      name: "진호",
-      email: "jinho@pilo.local",
-      avatarUrl: null
-    }
-  }
-];
-
 const mockGithubConnectionStatus = {
   account: "ndh5178",
   repository: {
@@ -255,7 +186,16 @@ function MembersCard() {
   const [inviteUrl, setInviteUrl] = useState<string | null>(null);
   const [isInvitePopoverOpen, setIsInvitePopoverOpen] = useState(false);
   const [isInviteSubmitting, setIsInviteSubmitting] = useState(false);
-  const [members, setMembers] = useState<WorkspaceMember[]>(mockWorkspaceMembers);
+  const [isLeaveDialogOpen, setIsLeaveDialogOpen] = useState(false);
+  const [isLeavingWorkspace, setIsLeavingWorkspace] = useState(false);
+  const [leaveWorkspaceError, setLeaveWorkspaceError] = useState<string | null>(
+    null
+  );
+  const [members, setMembers] = useState<WorkspaceMember[]>([]);
+  const [membersError, setMembersError] = useState<string | null>(null);
+  const [membersStatus, setMembersStatus] = useState<
+    "idle" | "loading" | "success" | "error"
+  >("idle");
   const [pendingInvitations, setPendingInvitations] = useState<
     WorkspaceInvitation[]
   >([]);
@@ -278,6 +218,74 @@ function MembersCard() {
   const currentUserId = authSession?.user.id ?? null;
   const onlineMembers = members;
   const offlineMembers: WorkspaceMember[] = [];
+  const canLeaveWorkspace = Boolean(activeWorkspace) && !canManageWorkspace;
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadWorkspaceMembers() {
+      if (!authSession || !activeWorkspace) {
+        setMembers([]);
+        setMembersError(null);
+        setMembersStatus("idle");
+        setPendingInvitations([]);
+        return;
+      }
+
+      setMembersStatus("loading");
+      setMembersError(null);
+
+      try {
+        const workspaceMembers = await listWorkspaceMembers(
+          authSession.accessToken,
+          activeWorkspace.id
+        );
+
+        if (!active) {
+          return;
+        }
+
+        setMembers(workspaceMembers);
+        setMembersStatus("success");
+
+        if (canManageWorkspace) {
+          try {
+            const invitations = await listWorkspaceInvitations(
+              authSession.accessToken,
+              activeWorkspace.id
+            );
+
+            if (active) {
+              setPendingInvitations(invitations);
+            }
+          } catch {
+            if (active) {
+              setPendingInvitations([]);
+            }
+          }
+        } else {
+          setPendingInvitations([]);
+        }
+      } catch (error) {
+        if (!active) {
+          return;
+        }
+
+        setMembers([]);
+        setMembersStatus("error");
+        setMembersError(
+          error instanceof Error ? error.message : "멤버 목록을 불러오지 못했습니다"
+        );
+        setPendingInvitations([]);
+      }
+    }
+
+    void loadWorkspaceMembers();
+
+    return () => {
+      active = false;
+    };
+  }, [activeWorkspace, authSession, canManageWorkspace]);
 
   const handleSubmitInvitation = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -396,94 +404,136 @@ function MembersCard() {
       });
   };
 
+  const handleLeaveWorkspace = () => {
+    if (!authSession || !activeWorkspace || !canLeaveWorkspace) {
+      return;
+    }
+
+    const nextWorkspaceId = authSession.workspaces.find(
+      (workspace) => workspace.id !== activeWorkspace.id
+    )?.id;
+
+    setLeaveWorkspaceError(null);
+    setIsLeavingWorkspace(true);
+
+    void leaveWorkspace(authSession.accessToken, activeWorkspace.id)
+      .then(async () => {
+        setIsLeaveDialogOpen(false);
+        await authSession.refreshSession(nextWorkspaceId);
+      })
+      .catch((error: unknown) => {
+        setLeaveWorkspaceError(
+          error instanceof Error ? error.message : "워크스페이스 나가기에 실패했습니다"
+        );
+      })
+      .finally(() => {
+        setIsLeavingWorkspace(false);
+      });
+  };
+
   return (
     <>
       <DashboardCard
         className="border-[#1E1F22] bg-[#2B2D31] text-[#F2F3F5] shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_10px_24px_rgba(15,23,42,0.12)] xl:row-start-1 [&_[data-slot=card-action]_button]:border-[#3F4147] [&_[data-slot=card-action]_button]:bg-[#313338] [&_[data-slot=card-action]_button]:text-[#F2F3F5] [&_[data-slot=card-action]_button:hover]:bg-[#404249] [&_[data-slot=card-title]>span]:border-[#3F4147] [&_[data-slot=card-title]>span]:bg-[#313338] [&_[data-slot=card-title]>span]:text-[#B5BAC1] [&_[data-slot=card-title]]:text-[#F2F3F5]"
         action={
-          <Popover
-            open={isInvitePopoverOpen}
-            onOpenChange={(open) => {
-              setIsInvitePopoverOpen(open);
-              if (open) {
-                setInviteError(null);
-                setInviteStatus(null);
-                setInviteUrl(null);
-              }
-            }}
-          >
-            <PopoverTrigger
-              render={
-                <Button aria-label="멤버 초대 열기" size="sm" variant="outline" />
-              }
+          canManageWorkspace ? (
+            <Popover
+              open={isInvitePopoverOpen}
+              onOpenChange={(open) => {
+                setIsInvitePopoverOpen(open);
+                if (open) {
+                  setInviteError(null);
+                  setInviteStatus(null);
+                  setInviteUrl(null);
+                }
+              }}
             >
-              <UserPlus />
-              초대
-            </PopoverTrigger>
-            <PopoverContent
-              align="center"
-              className="z-[100] w-64 border-[#3F4147] bg-[#313338] p-2.5 text-[#F2F3F5] shadow-xl shadow-slate-950/25"
-              side="right"
-              sideOffset={10}
+              <PopoverTrigger
+                render={
+                  <Button aria-label="멤버 초대 열기" size="sm" variant="outline" />
+                }
+              >
+                <UserPlus />
+                초대
+              </PopoverTrigger>
+              <PopoverContent
+                align="center"
+                className="z-[100] w-64 border-[#3F4147] bg-[#313338] p-2.5 text-[#F2F3F5] shadow-xl shadow-slate-950/25"
+                side="right"
+                sideOffset={10}
+              >
+                <form className="grid gap-2" onSubmit={handleSubmitInvitation}>
+                  <div className="flex items-center gap-1.5">
+                    <Input
+                      aria-label="초대 이메일"
+                      className="h-7 rounded-lg border-[#3F4147] bg-[#1E1F22] text-xs text-[#F2F3F5] placeholder:text-[#80848E] focus-visible:border-[#5865F2] focus-visible:ring-[#5865F2]/35"
+                      disabled={isInviteSubmitting}
+                      inputMode="email"
+                      onChange={(event) => setInviteEmail(event.target.value)}
+                      placeholder="이메일"
+                      type="email"
+                      value={inviteEmail}
+                    />
+                    <Button
+                      className="bg-[#5865F2] text-white hover:bg-[#4752C4]"
+                      disabled={isInviteSubmitting || inviteEmail.trim() === ""}
+                      size="sm"
+                      type="submit"
+                    >
+                      <Send />
+                      {isInviteSubmitting ? "초대 중" : "초대"}
+                    </Button>
+                  </div>
+                  {inviteError ? (
+                    <p className="text-xs text-[#F23F42]">{inviteError}</p>
+                  ) : null}
+                  {inviteStatus ? (
+                    <p className="text-xs text-[#B5BAC1]">{inviteStatus}</p>
+                  ) : null}
+                  {inviteUrl ? (
+                    <p className="break-all rounded-lg border border-[#3F4147] bg-[#1E1F22] p-2 text-xs text-[#B5BAC1]">
+                      {inviteUrl}
+                    </p>
+                  ) : null}
+                </form>
+              </PopoverContent>
+            </Popover>
+          ) : (
+            <Button
+              aria-label="워크스페이스 나가기"
+              disabled={!canLeaveWorkspace}
+              onClick={() => {
+                setLeaveWorkspaceError(null);
+                setIsLeaveDialogOpen(true);
+              }}
+              size="sm"
+              variant="outline"
             >
-              <form className="grid gap-2" onSubmit={handleSubmitInvitation}>
-                <div className="flex items-center gap-1.5">
-                  <Input
-                    aria-label="초대 이메일"
-                    className="h-7 rounded-lg border-[#3F4147] bg-[#1E1F22] text-xs text-[#F2F3F5] placeholder:text-[#80848E] focus-visible:border-[#5865F2] focus-visible:ring-[#5865F2]/35"
-                    disabled={!canManageWorkspace || isInviteSubmitting}
-                    inputMode="email"
-                    onChange={(event) => setInviteEmail(event.target.value)}
-                    placeholder="이메일"
-                    type="email"
-                    value={inviteEmail}
-                  />
-                  <Button
-                    className="bg-[#5865F2] text-white hover:bg-[#4752C4]"
-                    disabled={
-                      !canManageWorkspace ||
-                      isInviteSubmitting ||
-                      inviteEmail.trim() === ""
-                    }
-                    size="sm"
-                    type="submit"
-                  >
-                    <Send />
-                    {isInviteSubmitting ? "초대 중" : "초대"}
-                  </Button>
-                </div>
-                {!canManageWorkspace ? (
-                  <p className="text-xs text-[#B5BAC1]">
-                    Owner 권한이 있는 workspace에서만 멤버를 초대할 수 있습니다.
-                  </p>
-                ) : null}
-                {inviteError ? (
-                  <p className="text-xs text-[#F23F42]">{inviteError}</p>
-                ) : null}
-                {inviteStatus ? (
-                  <p className="text-xs text-[#B5BAC1]">{inviteStatus}</p>
-                ) : null}
-                {inviteUrl ? (
-                  <p className="break-all rounded-lg border border-[#3F4147] bg-[#1E1F22] p-2 text-xs text-[#B5BAC1]">
-                    {inviteUrl}
-                  </p>
-                ) : null}
-              </form>
-            </PopoverContent>
-          </Popover>
+              <LogOut />
+              나가기
+            </Button>
+          )
         }
         description={null}
         icon={<Users className="size-4" />}
         title="멤버"
       >
         <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
-          <MemberPresencePanel
-            offlineMembers={offlineMembers}
-            onlineMembers={onlineMembers}
-            onSelectMember={setSelectedMember}
-            selectedView={memberPresenceView}
-            setSelectedView={setMemberPresenceView}
-          />
+          {membersStatus === "loading" ? (
+            <MemberCardMessage>멤버 불러오는 중</MemberCardMessage>
+          ) : membersStatus === "error" ? (
+            <MemberCardMessage tone="danger">
+              {membersError ?? "멤버 목록을 불러오지 못했습니다"}
+            </MemberCardMessage>
+          ) : (
+            <MemberPresencePanel
+              offlineMembers={offlineMembers}
+              onlineMembers={onlineMembers}
+              onSelectMember={setSelectedMember}
+              selectedView={memberPresenceView}
+              setSelectedView={setMemberPresenceView}
+            />
+          )}
           {pendingInvitations
             .filter((invitation) => invitation.status === "pending")
             .map((invitation) => (
@@ -528,6 +578,39 @@ function MembersCard() {
         onClose={() => setSelectedMember(null)}
         onRemoveMember={handleRemoveMember}
       />
+      <AlertDialog
+        open={isLeaveDialogOpen}
+        onOpenChange={(open) => {
+          if (!isLeavingWorkspace) {
+            setIsLeaveDialogOpen(open);
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>워크스페이스에서 나갈까요?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {activeWorkspace?.name ?? "현재 workspace"}에서 나가면 이 workspace의
+              기능과 데이터에 접근할 수 없습니다.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {leaveWorkspaceError ? (
+            <p className="text-sm text-destructive">{leaveWorkspaceError}</p>
+          ) : null}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isLeavingWorkspace}>
+              취소
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={isLeavingWorkspace || !canLeaveWorkspace}
+              onClick={handleLeaveWorkspace}
+              variant="destructive"
+            >
+              {isLeavingWorkspace ? "나가는 중" : "나가기"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }
@@ -647,6 +730,11 @@ function MemberPresenceList({
         .join(" ")}
     >
       <div className="grid min-h-0 content-start gap-1.5 overflow-y-auto py-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {members.length === 0 ? (
+          <div className="rounded-md border border-[#3F4147] bg-[#313338] px-2 py-3 text-center text-xs text-[#B5BAC1]">
+            표시할 멤버가 없습니다
+          </div>
+        ) : null}
         {members.map((member) => (
           <button
             key={member.id}
@@ -972,6 +1060,24 @@ function buildMeetingReportHref(reportId: string) {
   });
 
   return `/meeting?${searchParams.toString()}#report`;
+}
+
+function MemberCardMessage({
+  children,
+  tone = "muted"
+}: {
+  children: ReactNode;
+  tone?: "danger" | "muted";
+}) {
+  return (
+    <div
+      className={`flex min-h-0 flex-1 items-center justify-center rounded-md border border-[#3F4147] bg-[#313338] p-3 text-center text-xs font-medium ${
+        tone === "danger" ? "text-[#F23F42]" : "text-[#B5BAC1]"
+      }`}
+    >
+      {children}
+    </div>
+  );
 }
 
 function IssuesCard({ issuesState }: { issuesState: HomeIssuesState }) {

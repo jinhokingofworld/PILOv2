@@ -22,7 +22,8 @@ Workspace 생성, 삭제, 이름 수정, owner transfer, admin/viewer/read-only 
 - 실제 Workspace 접근 기준은 `workspace_members` membership이다.
 - owner는 Workspace 관리, member 초대/제거, GitHub installation 연결/해제 같은
   관리 작업을 수행할 수 있다.
-- member는 Workspace 내부 데이터 read/write가 가능하다.
+- member는 Workspace 내부 데이터 read/write와 Workspace member 목록 조회가
+  가능하다.
 - member는 Workspace 관리, member 초대/제거, GitHub installation 관리 작업을
   수행할 수 없다.
 - GitHub OAuth token은 user 소유로 유지한다.
@@ -94,7 +95,8 @@ Workspace 생성, 삭제, 이름 수정, owner transfer, admin/viewer/read-only 
 
 | Method | Endpoint | 인증 | 설명 |
 | --- | --- | --- | --- |
-| `GET` | `/workspaces/{workspaceId}/members` | owner | Workspace member 목록 조회 |
+| `GET` | `/workspaces/{workspaceId}/members` | owner/member | Workspace member 목록 조회 |
+| `DELETE` | `/workspaces/{workspaceId}/members/me` | member | 현재 사용자가 Workspace 나가기 |
 | `DELETE` | `/workspaces/{workspaceId}/members/{userId}` | owner | Workspace member 제거 |
 | `GET` | `/workspaces/{workspaceId}/invitations` | owner | Workspace 초대 목록 조회 |
 | `POST` | `/workspaces/{workspaceId}/invitations` | owner | member 초대 생성 |
@@ -204,10 +206,11 @@ GET /api/v1/workspaces/{workspaceId}/members
 
 서버 규칙:
 
-- 현재 사용자가 해당 Workspace의 owner가 아니면 `403 FORBIDDEN`을 반환한다.
+- 현재 사용자가 해당 Workspace의 owner 또는 member가 아니면 `403 FORBIDDEN`을 반환한다.
 - 정렬은 `role ASC`, `joinedAt ASC`를 기본값으로 한다. owner가 먼저 보이도록
   구현해도 된다.
-- member 목록은 Workspace 관리 UI용이다. 일반 member에게 공개하지 않는다.
+- member 목록은 같은 Workspace에 속한 사용자에게 공개할 수 있다. 초대/제거 같은
+  관리 작업은 owner-only로 유지한다.
 
 ## Member 제거
 
@@ -233,6 +236,30 @@ DELETE /api/v1/workspaces/{workspaceId}/members/{userId}
 - `owner` membership은 이 endpoint로 제거할 수 없다.
 - 마지막 owner 제거는 허용하지 않는다.
 - member 제거는 `workspace_members` row delete로 처리한다.
+
+## Workspace 나가기
+
+```http
+DELETE /api/v1/workspaces/{workspaceId}/members/me
+```
+
+응답:
+
+```json
+{
+  "success": true,
+  "data": {
+    "removed": true
+  }
+}
+```
+
+서버 규칙:
+
+- 현재 사용자가 해당 Workspace의 member가 아니면 `403 FORBIDDEN`을 반환한다.
+- 현재 사용자가 해당 Workspace의 owner이면 `400 BAD_REQUEST`를 반환한다.
+- 나가기는 현재 bearer session user의 `workspace_members` row delete로 처리한다.
+- 나가기 후 현재 user의 기본 owner Workspace가 없으면 기본 Workspace를 보장한다.
 
 ## 초대 목록 조회
 
@@ -504,12 +531,19 @@ owner-only 기능은 `role = 'owner'`일 때만 통과한다.
 
 owner-only 기능:
 
-- Workspace member 목록 조회
 - Workspace member 초대 생성
 - Workspace member 제거
 - Workspace 초대 취소
 - GitHub App installation 연결/해제
 - GitHub 수동 sync 같은 Workspace 관리 작업
+
+owner/member 공통 조회 기능:
+
+- Workspace member 목록 조회
+
+member self-service 기능:
+
+- Workspace 나가기
 
 ## 로그인 후 기본 Workspace 보장
 

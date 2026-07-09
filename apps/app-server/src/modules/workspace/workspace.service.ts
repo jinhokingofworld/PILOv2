@@ -269,7 +269,7 @@ export class WorkspaceService {
     currentUserId: string,
     workspaceId: string
   ): Promise<WorkspaceMemberPayload[]> {
-    await this.assertWorkspaceOwnerAccess(currentUserId, workspaceId);
+    await this.assertWorkspaceAccess(currentUserId, workspaceId);
 
     const members = await this.database.query<WorkspaceMemberRow>(
       `
@@ -361,6 +361,32 @@ export class WorkspaceService {
         [workspaceId, targetUserId]
       );
     });
+
+    return {
+      removed: true
+    };
+  }
+
+  async leaveWorkspace(
+    currentUserId: string,
+    workspaceId: string
+  ): Promise<RemoveWorkspaceMemberPayload> {
+    const workspace = await this.assertWorkspaceAccess(currentUserId, workspaceId);
+
+    if (workspace.role === "owner") {
+      throw badRequest("Workspace owner cannot leave own workspace");
+    }
+
+    await this.database.execute(
+      `
+        DELETE FROM workspace_members
+        WHERE workspace_id = $1
+          AND user_id = $2
+      `,
+      [workspaceId, currentUserId]
+    );
+
+    await this.ensureDefaultWorkspaceForUser(currentUserId);
 
     return {
       removed: true
