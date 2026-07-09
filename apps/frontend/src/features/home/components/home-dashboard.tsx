@@ -178,7 +178,6 @@ const mockWorkspaceMembers: WorkspaceMember[] = [
     }
   }
 ];
-const mockActiveWorkspaceUserIds = new Set(["user_donghyun", "user_sein"]);
 
 const mockGithubConnectionStatus = {
   account: "ndh5178",
@@ -259,12 +258,8 @@ function MembersCard() {
   const canManageWorkspace =
     activeWorkspace?.role === "owner" || activeWorkspace?.isOwner === true;
   const currentUserId = authSession?.user.id ?? null;
-  const onlineMembers = members.filter((member) =>
-    isWorkspaceMemberActive(member, currentUserId)
-  );
-  const offlineMembers = members.filter(
-    (member) => !isWorkspaceMemberActive(member, currentUserId)
-  );
+  const onlineMembers = members;
+  const offlineMembers: WorkspaceMember[] = [];
 
   const handleSubmitInvitation = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -316,7 +311,8 @@ function MembersCard() {
       !activeWorkspace ||
       !canManageWorkspace ||
       removingMemberUserId ||
-      member.userId === authSession.user.id
+      member.userId === authSession.user.id ||
+      member.role === "owner"
     ) {
       return;
     }
@@ -507,7 +503,7 @@ function MembersCard() {
 
       <MemberProfileDialog
         canRemoveMember={canManageWorkspace}
-        currentUserId={authSession?.user.id ?? null}
+        currentUserId={currentUserId}
         error={removeMemberError}
         isRemoving={removingMemberUserId === selectedMember?.userId}
         member={selectedMember}
@@ -678,11 +674,13 @@ function MemberProfileDialog({
   onClose: () => void;
   onRemoveMember: (member: WorkspaceMember) => void;
 }) {
-  const isActive = member
-    ? isWorkspaceMemberActive(member, currentUserId)
-    : false;
+  const isActive = Boolean(member);
   const canRemoveSelectedMember =
-    Boolean(member) && canRemoveMember && member?.userId !== currentUserId;
+    Boolean(member) &&
+    canRemoveMember &&
+    member?.userId !== currentUserId &&
+    member?.role !== "owner";
+  const showRemoveAction = member?.role !== "owner";
 
   return (
     <Dialog open={Boolean(member)} onOpenChange={(open) => !open && onClose()}>
@@ -730,15 +728,17 @@ function MemberProfileDialog({
 
             {error ? <p className="text-xs text-destructive">{error}</p> : null}
 
-            <div className="flex justify-end">
-              <Button
-                disabled={!canRemoveSelectedMember || isRemoving}
-                onClick={() => onRemoveMember(member)}
-                variant="destructive"
-              >
-                {isRemoving ? "추방 중" : "추방"}
-              </Button>
-            </div>
+            {showRemoveAction ? (
+              <div className="flex justify-end">
+                <Button
+                  disabled={!canRemoveSelectedMember || isRemoving}
+                  onClick={() => onRemoveMember(member)}
+                  variant="destructive"
+                >
+                  {isRemoving ? "추방 중" : "추방"}
+                </Button>
+              </div>
+            ) : null}
           </>
         ) : null}
       </DialogContent>
@@ -2344,13 +2344,6 @@ function getInitial(name: string | null) {
 
 function formatWorkspaceRole(role: WorkspaceMember["role"]) {
   return role;
-}
-
-function isWorkspaceMemberActive(
-  member: WorkspaceMember,
-  currentUserId: string | null
-) {
-  return member.userId === currentUserId || mockActiveWorkspaceUserIds.has(member.userId);
 }
 
 function formatCalendarDate(date: Date) {
