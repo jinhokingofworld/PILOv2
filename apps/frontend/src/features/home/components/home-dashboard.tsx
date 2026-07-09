@@ -52,16 +52,31 @@ import {
   type WorkspaceMember
 } from "@/features/auth/api/client";
 import { useAuthSession } from "@/features/auth/auth-session";
-import type { BoardIssueCardPayload } from "@/features/board/types";
+import { createBoardApiClient } from "@/features/board/api/client";
+import type { BoardIssueCardPayload, BoardPayload } from "@/features/board/types";
 import { createCalendarApiClient } from "@/features/calendar/api/client";
 import type { CalendarEvent } from "@/features/calendar/types";
+import { createGithubIntegrationApiClient } from "@/features/github-integration/api/client";
 import type { GithubPullRequest } from "@/features/github-integration/types";
+import { readGithubBoardSelection } from "@/features/github-integration/utils/github-board-selection";
 import type { MeetingReportSummary } from "@/features/meeting/types";
 
 const calendarWeekdayLabels = ["일", "월", "화", "수", "목", "금", "토"];
+const homeIssueListLimit = 5;
 
 type HomeMeetingReportPreview = MeetingReportSummary & {
   title: string;
+};
+
+type HomeIssuesMode = "assigned" | "recent";
+
+type HomeIssuesState = {
+  error: Error | null;
+  githubLogin: string | null;
+  issues: BoardIssueCardPayload[];
+  mode: HomeIssuesMode;
+  status: "idle" | "loading" | "success" | "error";
+  total: number;
 };
 
 const mockWorkspaceMembers: WorkspaceMember[] = [
@@ -244,119 +259,6 @@ const mockMeetingReports: HomeMeetingReportPreview[] = [
   }
 ];
 
-const mockTodoIssues: BoardIssueCardPayload[] = [
-  {
-    id: "board_issue_001",
-    boardId: "board_home",
-    columnId: "column_todo",
-    repositoryId: "repo_pilo",
-    githubIssueId: "415",
-    projectItemId: "project_item_415",
-    githubIssueNodeId: "I_kwDOPILO415",
-    githubProjectItemNodeId: "PVTI_lADO415",
-    githubIssueNumber: 415,
-    issueNumber: "#415",
-    title: "Home 메인페이지 대시보드 UI 구성",
-    htmlUrl: "https://github.com/pilo/pilo/issues/415",
-    state: "open",
-    labels: [{ name: "home" }, { name: "frontend" }],
-    assignees: [{ login: "ndh5178" }],
-    position: 1,
-    githubUpdatedAt: "2026-07-09T06:00:00.000Z",
-    lastSyncedAt: "2026-07-09T06:10:00.000Z",
-    createdAt: "2026-07-08T04:00:00.000Z",
-    updatedAt: "2026-07-09T06:10:00.000Z"
-  },
-  {
-    id: "board_issue_002",
-    boardId: "board_home",
-    columnId: "column_todo",
-    repositoryId: "repo_pilo",
-    githubIssueId: "428",
-    projectItemId: "project_item_428",
-    githubIssueNodeId: "I_kwDOPILO428",
-    githubProjectItemNodeId: "PVTI_lADO428",
-    githubIssueNumber: 428,
-    issueNumber: "#428",
-    title: "회의록 카드 데이터 연결",
-    htmlUrl: "https://github.com/pilo/pilo/issues/428",
-    state: "open",
-    labels: [{ name: "meeting" }],
-    assignees: [{ login: "ndh5178" }],
-    position: 2,
-    githubUpdatedAt: "2026-07-08T12:30:00.000Z",
-    lastSyncedAt: "2026-07-09T06:10:00.000Z",
-    createdAt: "2026-07-08T12:00:00.000Z",
-    updatedAt: "2026-07-09T06:10:00.000Z"
-  },
-  {
-    id: "board_issue_003",
-    boardId: "board_home",
-    columnId: "column_todo",
-    repositoryId: "repo_pilo",
-    githubIssueId: "432",
-    projectItemId: "project_item_432",
-    githubIssueNodeId: "I_kwDOPILO432",
-    githubProjectItemNodeId: "PVTI_lADO432",
-    githubIssueNumber: 432,
-    issueNumber: "#432",
-    title: "Home 멤버 초대 UI 정리",
-    htmlUrl: "https://github.com/pilo/pilo/issues/432",
-    state: "open",
-    labels: [{ name: "home" }, { name: "workspace" }],
-    assignees: [{ login: "ndh5178" }],
-    position: 3,
-    githubUpdatedAt: "2026-07-08T15:00:00.000Z",
-    lastSyncedAt: "2026-07-09T06:10:00.000Z",
-    createdAt: "2026-07-08T14:20:00.000Z",
-    updatedAt: "2026-07-09T06:10:00.000Z"
-  },
-  {
-    id: "board_issue_004",
-    boardId: "board_home",
-    columnId: "column_todo",
-    repositoryId: "repo_pilo",
-    githubIssueId: "436",
-    projectItemId: "project_item_436",
-    githubIssueNodeId: "I_kwDOPILO436",
-    githubProjectItemNodeId: "PVTI_lADO436",
-    githubIssueNumber: 436,
-    issueNumber: "#436",
-    title: "Home 이슈 목록 표시 밀도 조정",
-    htmlUrl: "https://github.com/pilo/pilo/issues/436",
-    state: "open",
-    labels: [{ name: "home" }, { name: "ui" }],
-    assignees: [{ login: "ndh5178" }],
-    position: 4,
-    githubUpdatedAt: "2026-07-08T16:20:00.000Z",
-    lastSyncedAt: "2026-07-09T06:10:00.000Z",
-    createdAt: "2026-07-08T16:00:00.000Z",
-    updatedAt: "2026-07-09T06:10:00.000Z"
-  },
-  {
-    id: "board_issue_005",
-    boardId: "board_home",
-    columnId: "column_todo",
-    repositoryId: "repo_pilo",
-    githubIssueId: "441",
-    projectItemId: "project_item_441",
-    githubIssueNodeId: "I_kwDOPILO441",
-    githubProjectItemNodeId: "PVTI_lADO441",
-    githubIssueNumber: 441,
-    issueNumber: "#441",
-    title: "Home 카드 그림자와 간격 최종 확인",
-    htmlUrl: "https://github.com/pilo/pilo/issues/441",
-    state: "open",
-    labels: [{ name: "home" }, { name: "design" }],
-    assignees: [{ login: "ndh5178" }],
-    position: 5,
-    githubUpdatedAt: "2026-07-09T01:40:00.000Z",
-    lastSyncedAt: "2026-07-09T06:10:00.000Z",
-    createdAt: "2026-07-09T01:10:00.000Z",
-    updatedAt: "2026-07-09T06:10:00.000Z"
-  }
-];
-
 const mockPullRequests: GithubPullRequest[] = [
   {
     id: "pull_request_001",
@@ -442,13 +344,19 @@ const mockPullRequests: GithubPullRequest[] = [
 ];
 
 export function HomeDashboard() {
+  const authSession = useAuthSession();
+  const issuesState = useHomeIssues({
+    accessToken: authSession?.accessToken ?? null,
+    workspaceId: authSession?.activeWorkspaceId ?? ""
+  });
+
   return (
     <section className="flex min-h-0 flex-1 flex-col gap-4">
       <div className="grid min-h-0 gap-4 xl:grid-cols-[0.9fr_1.75fr_1fr] xl:grid-rows-[minmax(260px,0.95fr)_minmax(272px,0.96fr)_minmax(128px,0.44fr)]">
         <MembersCard />
-        <CalendarCard />
+        <CalendarCard issuesState={issuesState} />
         <GithubConnectionCard />
-        <MiddleDashboardCards />
+        <MiddleDashboardCards issuesState={issuesState} />
         <GithubWorkspaceCards />
       </div>
     </section>
@@ -971,18 +879,18 @@ function MemberProfileDialog({
   );
 }
 
-function CalendarCard() {
+function CalendarCard({ issuesState }: { issuesState: HomeIssuesState }) {
   return (
     <div className="grid min-h-0 grid-rows-[minmax(108px,4fr)_minmax(0,6fr)] gap-3 xl:row-start-1">
-      <ReadonlyCalendar />
+      <ReadonlyCalendar issuesState={issuesState} />
     </div>
   );
 }
 
-function MiddleDashboardCards() {
+function MiddleDashboardCards({ issuesState }: { issuesState: HomeIssuesState }) {
   return (
     <div className="grid min-h-0 gap-4 md:grid-cols-3 xl:col-span-3 xl:col-start-1 xl:row-start-2">
-      <IssuesCard />
+      <IssuesCard issuesState={issuesState} />
       <PullRequestsCard />
       <MeetingReportsCard />
     </div>
@@ -1119,8 +1027,10 @@ function MeetingReportsCard() {
   );
 }
 
-function IssuesCard() {
-  const visibleTodoIssues = mockTodoIssues.slice(0, 5);
+function IssuesCard({ issuesState }: { issuesState: HomeIssuesState }) {
+  const visibleTodoIssues = issuesState.issues.slice(0, homeIssueListLimit);
+  const isLoading = issuesState.status === "loading";
+  const isRecentMode = issuesState.mode === "recent";
 
   return (
     <DashboardCard
@@ -1131,13 +1041,28 @@ function IssuesCard() {
       className="border-[#D8D1FF] bg-[#F7F5FF] shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_10px_24px_rgba(15,23,42,0.08)]"
       description={null}
       icon={<ListChecks className="size-4" />}
-      title="이슈"
+      title={isRecentMode ? "최근 이슈" : "내 이슈"}
+      titleAdornment={
+        isRecentMode ? (
+          <span className="min-w-0 truncate text-[0.7rem] font-medium text-destructive">
+            GitHub 연결 시 내 담당 이슈만 볼 수 있어요
+          </span>
+        ) : null
+      }
       titleClassName="text-[#5B4BC4]"
     >
       <div className="grid min-h-0 flex-1 grid-rows-[repeat(5,minmax(0,1fr))] gap-2 overflow-hidden">
-        {visibleTodoIssues.map((issue) => (
-          <IssueTodoRow key={issue.id} issue={issue} />
-        ))}
+        {isLoading ? (
+          <IssueCardMessage>이슈 불러오는 중</IssueCardMessage>
+        ) : issuesState.status === "error" ? (
+          <IssueCardMessage tone="danger">이슈를 불러오지 못했습니다</IssueCardMessage>
+        ) : visibleTodoIssues.length > 0 ? (
+          visibleTodoIssues.map((issue) => (
+            <IssueTodoRow key={issue.id} issue={issue} />
+          ))
+        ) : (
+          <IssueCardMessage>표시할 open 이슈가 없습니다</IssueCardMessage>
+        )}
       </div>
     </DashboardCard>
   );
@@ -1327,6 +1252,7 @@ function DashboardCard({
   icon,
   action,
   title,
+  titleAdornment,
   titleClassName
 }: {
   background?: ReactNode;
@@ -1336,6 +1262,7 @@ function DashboardCard({
   icon: ReactNode;
   action?: ReactNode;
   title: string;
+  titleAdornment?: ReactNode;
   titleClassName?: string;
 }) {
   return (
@@ -1351,6 +1278,7 @@ function DashboardCard({
             {icon}
           </span>
           <span className={titleClassName}>{title}</span>
+          {titleAdornment}
         </CardTitle>
         {description ? <CardDescription>{description}</CardDescription> : null}
         <CardAction>
@@ -1474,7 +1402,7 @@ function PullRequestsBackground() {
   );
 }
 
-function ReadonlyCalendar() {
+function ReadonlyCalendar({ issuesState }: { issuesState: HomeIssuesState }) {
   const router = useRouter();
   const authSession = useAuthSession();
   const today = useMemo(() => new Date(), []);
@@ -1499,6 +1427,10 @@ function ReadonlyCalendar() {
   const todayEventCount = calendarEvents.filter((event) =>
     isCalendarEventOnDate(event, todayDate)
   ).length;
+  const issueCount =
+    issuesState.status === "loading" ? "-" : String(issuesState.total);
+  const issueSummaryLabel =
+    issuesState.mode === "assigned" ? "내 이슈" : "최근 이슈";
   const summaryItems: SummaryMetricItem[] = [
     {
       icon: <CalendarDays className="size-4" />,
@@ -1512,12 +1444,15 @@ function ReadonlyCalendar() {
     },
     {
       icon: <ListChecks className="size-4" />,
-      label: "내 이슈",
-      value: "5",
+      label: issueSummaryLabel,
+      value: issueCount,
       background: <SummaryIssuesBackground />,
       className:
         "border-[#D8D1FF] bg-[#F7F5FF] shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_10px_24px_rgba(15,23,42,0.08)]",
-      progress: "100%",
+      progress:
+        issuesState.status === "loading"
+          ? "0%"
+          : getCappedProgressPercent(issuesState.total, homeIssueListLimit),
       tone: "issues"
     },
     {
@@ -1791,14 +1726,35 @@ function getSummaryMetricTone(tone: SummaryMetricTone) {
   }[tone];
 }
 
+function IssueCardMessage({
+  children,
+  tone = "muted"
+}: {
+  children: ReactNode;
+  tone?: "danger" | "muted";
+}) {
+  return (
+    <div
+      className={`row-span-5 flex min-h-0 items-center justify-center rounded-lg border bg-background/80 p-3 text-center text-xs font-medium shadow-sm backdrop-blur ${
+        tone === "danger" ? "text-destructive" : "text-muted-foreground"
+      }`}
+    >
+      {children}
+    </div>
+  );
+}
+
 function IssueTodoRow({ issue }: { issue: BoardIssueCardPayload }) {
   const router = useRouter();
+  const boardIssueHref = `/board?boardId=${encodeURIComponent(
+    issue.boardId
+  )}&issueId=${encodeURIComponent(issue.id)}#issues`;
 
   return (
     <button
       aria-label={`${issue.title} 이슈로 이동`}
       className="flex min-h-0 min-w-0 items-center overflow-hidden rounded-lg border bg-background/90 p-3 text-left shadow-sm backdrop-blur transition hover:bg-background hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-      onClick={() => router.push("/board#issues")}
+      onClick={() => router.push(boardIssueHref)}
       type="button"
     >
       <div className="flex min-w-0 flex-1 items-center justify-between gap-2">
@@ -1847,6 +1803,136 @@ function getCalendarWeekDates(anchorDate: Date) {
     date.setDate(weekStartDate.getDate() + index);
     return date;
   });
+}
+
+const emptyHomeIssuesState: HomeIssuesState = {
+  error: null,
+  githubLogin: null,
+  issues: [],
+  mode: "recent",
+  status: "idle",
+  total: 0
+};
+
+function useHomeIssues({
+  accessToken,
+  workspaceId
+}: {
+  accessToken: string | null;
+  workspaceId: string;
+}) {
+  const normalizedAccessToken = accessToken?.trim() || null;
+  const normalizedWorkspaceId = workspaceId.trim();
+  const boardClient = useMemo(
+    () => createBoardApiClient({ accessToken: normalizedAccessToken }),
+    [normalizedAccessToken]
+  );
+  const githubClient = useMemo(
+    () =>
+      createGithubIntegrationApiClient({
+        accessToken: normalizedAccessToken
+      }),
+    [normalizedAccessToken]
+  );
+  const [state, setState] = useState<HomeIssuesState>(emptyHomeIssuesState);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadIssues() {
+      if (!normalizedAccessToken || !normalizedWorkspaceId) {
+        setState(emptyHomeIssuesState);
+        return;
+      }
+
+      setState({
+        ...emptyHomeIssuesState,
+        status: "loading"
+      });
+
+      try {
+        const [boards, githubStatus] = await Promise.all([
+          boardClient.listBoards(normalizedWorkspaceId, {
+            limit: 50
+          }),
+          githubClient.getGithubOAuthStatus().catch(() => null)
+        ]);
+        const board = selectHomeBoard(boards.data, normalizedWorkspaceId);
+        const githubLogin = githubStatus?.githubLogin?.trim() || null;
+        const mode: HomeIssuesMode = githubLogin ? "assigned" : "recent";
+
+        if (!board) {
+          if (active) {
+            setState({
+              error: null,
+              githubLogin,
+              issues: [],
+              mode,
+              status: "success",
+              total: 0
+            });
+          }
+          return;
+        }
+
+        const issues = await boardClient.listBoardIssues(
+          normalizedWorkspaceId,
+          board.id,
+          {
+            assignee: githubLogin ?? undefined,
+            limit: homeIssueListLimit,
+            page: 1,
+            state: "open"
+          }
+        );
+
+        if (active) {
+          setState({
+            error: null,
+            githubLogin,
+            issues: issues.data,
+            mode,
+            status: "success",
+            total: issues.meta.total
+          });
+        }
+      } catch (error) {
+        if (active) {
+          setState({
+            ...emptyHomeIssuesState,
+            error: errorFromUnknown(error),
+            status: "error"
+          });
+        }
+      }
+    }
+
+    void loadIssues();
+
+    return () => {
+      active = false;
+    };
+  }, [boardClient, githubClient, normalizedAccessToken, normalizedWorkspaceId]);
+
+  return state;
+}
+
+function selectHomeBoard(boards: BoardPayload[], workspaceId: string) {
+  const selection = readGithubBoardSelection(workspaceId);
+
+  if (selection) {
+    const selectedBoard = boards.find(
+      (board) =>
+        board.repository.id === selection.repositoryId &&
+        board.project.id === selection.projectV2Id
+    );
+
+    if (selectedBoard) {
+      return selectedBoard;
+    }
+  }
+
+  return boards[0] ?? null;
 }
 
 type HomeWeekCalendarEventsState = {
