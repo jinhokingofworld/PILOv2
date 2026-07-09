@@ -6,7 +6,8 @@ import { WorkspaceService } from "../workspace/workspace.service";
 import { ListGithubPullRequestFilesQuery } from "./dto";
 import {
   GithubAppClient,
-  type GithubPullRequestFileApiItem
+  type GithubPullRequestFileApiItem,
+  type GithubRepositoryFileContentApiDetails
 } from "./github-app.client";
 import {
   GithubIntegrationConfigService,
@@ -16,6 +17,7 @@ import type {
   GithubPaginatedPayload,
   GithubPullRequestConflictStatus,
   GithubPullRequestConflictStatusPayload,
+  GithubPullRequestConflictInputsPayload,
   GithubPullRequestFilePayload
 } from "./types";
 
@@ -177,6 +179,78 @@ export class GithubPullRequestRemoteService {
     };
   }
 
+  async getGithubPullRequestConflictInputs(
+    currentUserId: string,
+    workspaceId: string,
+    pullRequestId: string,
+    input: {
+      baseSha: string;
+      headSha: string;
+      filePaths: string[];
+    }
+  ): Promise<GithubPullRequestConflictInputsPayload> {
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+
+    if (!input.baseSha.trim() || !input.headSha.trim()) {
+      throw badRequest("GitHub pull request base and head SHA are required");
+    }
+
+    const context = await this.findGithubPullRequestRemoteContext(
+      workspaceId,
+      pullRequestId
+    );
+    const config = this.configService.getGithubAppConfig();
+    const installationId = this.readGithubInstallationId(context);
+    const mergeBase = await this.githubAppClient.getRepositoryMergeBase({
+      installationId,
+      appId: config.appId,
+      privateKey: config.privateKey,
+      owner: context.owner_login,
+      repo: context.name,
+      baseRef: input.baseSha,
+      headRef: input.headSha,
+      now: config.now
+    });
+    const files: GithubPullRequestConflictInputsPayload["files"] = [];
+
+    for (const filePath of input.filePaths) {
+      const [mergeBaseFile, baseFile, headFile] = await Promise.all([
+        this.getRepositoryFileContent(context, config, {
+          installationId,
+          filePath,
+          ref: mergeBase.mergeBaseSha
+        }),
+        this.getRepositoryFileContent(context, config, {
+          installationId,
+          filePath,
+          ref: input.baseSha
+        }),
+        this.getRepositoryFileContent(context, config, {
+          installationId,
+          filePath,
+          ref: input.headSha
+        })
+      ]);
+
+      files.push({
+        filePath,
+        mergeBaseContent: mergeBaseFile?.content ?? null,
+        baseContent: baseFile?.content ?? null,
+        headContent: headFile?.content ?? null,
+        unsupportedReason: this.getMissingConflictContentReason({
+          mergeBaseFile,
+          baseFile,
+          headFile
+        })
+      });
+    }
+
+    return {
+      mergeBaseSha: mergeBase.mergeBaseSha,
+      files
+    };
+  }
+
   private mapGithubPullRequestFile(
     file: GithubPullRequestFileApiItem,
     context: GithubPullRequestRemoteContextRow
@@ -214,6 +288,47 @@ export class GithubPullRequestRemoteService {
       githubFileUrl: this.buildGithubFileUrl(context.html_url, file.sha ?? null),
       patch: isBinary || isLargeDiff ? null : patch
     };
+  }
+
+  private getRepositoryFileContent(
+    context: GithubPullRequestRemoteContextRow,
+    config: GithubAppRuntimeConfig,
+    input: {
+      installationId: number;
+      filePath: string;
+      ref: string;
+    }
+  ): Promise<GithubRepositoryFileContentApiDetails | null> {
+    return this.githubAppClient.getRepositoryFileContent({
+      installationId: input.installationId,
+      appId: config.appId,
+      privateKey: config.privateKey,
+      owner: context.owner_login,
+      repo: context.name,
+      path: input.filePath,
+      ref: input.ref,
+      now: config.now
+    });
+  }
+
+  private getMissingConflictContentReason(input: {
+    mergeBaseFile: GithubRepositoryFileContentApiDetails | null;
+    baseFile: GithubRepositoryFileContentApiDetails | null;
+    headFile: GithubRepositoryFileContentApiDetails | null;
+  }): string | null {
+    if (!input.mergeBaseFile) {
+      return "merge base content is not available";
+    }
+
+    if (!input.baseFile) {
+      return "base branch content is not available";
+    }
+
+    if (!input.headFile) {
+      return "head branch content is not available";
+    }
+
+    return null;
   }
 
   private async findGithubPullRequestRemoteContext(

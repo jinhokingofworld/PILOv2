@@ -58,6 +58,7 @@ import type {
   GithubProjectV2KanbanPayload,
   GithubProjectV2ListItemPayload,
   GithubProjectV2StatusOptionPayload,
+  GithubPullRequestConflictInputsPayload,
   GithubPullRequestConflictStatusPayload,
   GithubPullRequestDetailPayload,
   GithubPullRequestFilePayload,
@@ -594,6 +595,24 @@ export class GithubIntegrationService {
       currentUserId,
       workspaceId,
       pullRequestId
+    );
+  }
+
+  async getGithubPullRequestConflictInputs(
+    currentUserId: string,
+    workspaceId: string,
+    pullRequestId: string,
+    input: {
+      baseSha: string;
+      headSha: string;
+      filePaths: string[];
+    }
+  ): Promise<GithubPullRequestConflictInputsPayload> {
+    return this.githubPullRequestRemoteService.getGithubPullRequestConflictInputs(
+      currentUserId,
+      workspaceId,
+      pullRequestId,
+      input
     );
   }
 
