@@ -96,3 +96,17 @@ export type CreateAgentRunInput = {
 export type AgentRunDetailPayload = {
   run: AgentRun;
 };
+
+export type AgentConfirmationActionPayload = {
+  run: {
+    id: string;
+    status: AgentRunStatus;
+    message: string | null;
+    confirmation: {
+      id: string;
+      status: AgentConfirmationStatus;
+      approvedAt: string | null;
+      rejectedAt: string | null;
+    };
+  };
+};

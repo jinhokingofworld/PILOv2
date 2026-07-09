@@ -1,4 +1,5 @@
 import type {
+  AgentConfirmationActionPayload,
   AgentRunDetailPayload,
   CreateAgentRunInput
 } from "@/features/agent/types";
@@ -211,6 +212,17 @@ function agentRunPath(workspaceId: string, runId: string) {
   return `${agentRunsPath(workspaceId)}/${encodeURIComponent(runId)}` as const;
 }
 
+function agentConfirmationPath(
+  workspaceId: string,
+  runId: string,
+  confirmationId: string,
+  action: "approve" | "reject"
+) {
+  return `${agentRunPath(workspaceId, runId)}/confirmations/${encodeURIComponent(
+    confirmationId
+  )}/${action}` as const;
+}
+
 export function createAgentApiClient({
   accessToken = null,
   baseUrl = defaultAgentApiBaseUrl(),
@@ -247,6 +259,38 @@ export function createAgentApiClient({
         agentRunPath(workspaceId, runId),
         {
           method: "GET",
+          signal: options.signal
+        },
+        requestOptions
+      );
+    },
+
+    async approveConfirmation(
+      workspaceId: string,
+      runId: string,
+      confirmationId: string,
+      options: AgentRequestOptions = {}
+    ) {
+      return requestAgentData<AgentConfirmationActionPayload>(
+        agentConfirmationPath(workspaceId, runId, confirmationId, "approve"),
+        {
+          method: "POST",
+          signal: options.signal
+        },
+        requestOptions
+      );
+    },
+
+    async rejectConfirmation(
+      workspaceId: string,
+      runId: string,
+      confirmationId: string,
+      options: AgentRequestOptions = {}
+    ) {
+      return requestAgentData<AgentConfirmationActionPayload>(
+        agentConfirmationPath(workspaceId, runId, confirmationId, "reject"),
+        {
+          method: "POST",
           signal: options.signal
         },
         requestOptions
