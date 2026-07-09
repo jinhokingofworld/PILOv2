@@ -21,6 +21,7 @@ async function compileSqlErdRuntimeModules() {
   const apiClientOutputPath = join(outputDir, "api-client.mjs");
   const sessionStateOutputPath = join(outputDir, "session-state.mjs");
   const statusCopyOutputPath = join(outputDir, "status-copy.mjs");
+  const relationShapeOutputPath = join(outputDir, "relation-shape.mjs");
 
   try {
     await compileTypeScriptModule(
@@ -64,10 +65,35 @@ async function compileSqlErdRuntimeModules() {
       "../../src/features/sql-erd/utils/status-copy.ts",
       statusCopyOutputPath
     );
+    await compileTypeScriptModule(
+      "../../src/features/sql-erd/shapes/sql-erd-relation-shape.tsx",
+      relationShapeOutputPath,
+      [
+        [/from "tldraw"/g, 'from "./tldraw-stub.mjs"'],
+        [
+          /from "@\/features\/sql-erd\/shapes\/sql-erd-table-shape"/g,
+          'from "./table-shape-stub.mjs"'
+        ]
+      ]
+    );
 
     await writeFile(
       join(outputDir, "types-stub.mjs"),
       "export const SQLTOERD_MODEL_JSON_VERSION = 1;\n"
+    );
+    await writeFile(
+      join(outputDir, "tldraw-stub.mjs"),
+      [
+        "export class Polyline2d { constructor(config) { this.config = config; } }",
+        "export class ShapeUtil {}",
+        "export function SVGContainer(props) { return props.children ?? null; }",
+        "export const T = { arrayOf: (value) => value, nullable: (value) => value, number: {}, object: (value) => value, string: {} };",
+        "export class Vec { constructor(x, y) { this.x = x; this.y = y; } }"
+      ].join("\n")
+    );
+    await writeFile(
+      join(outputDir, "table-shape-stub.mjs"),
+      "export function isSqlErdTableShape(shape) { return shape?.type === 'sqltoerd_table'; }\n"
     );
 
     const [
@@ -78,7 +104,8 @@ async function compileSqlErdRuntimeModules() {
       layoutAutosaveRuntime,
       apiClientRuntime,
       sessionStateRuntime,
-      statusCopyRuntime
+      statusCopyRuntime,
+      relationShapeRuntime
     ] = await Promise.all([
       import(pathToFileHref(modelOutputPath)),
       import(pathToFileHref(inspectorOutputPath)),
@@ -87,7 +114,8 @@ async function compileSqlErdRuntimeModules() {
       import(pathToFileHref(layoutAutosaveOutputPath)),
       import(pathToFileHref(apiClientOutputPath)),
       import(pathToFileHref(sessionStateOutputPath)),
-      import(pathToFileHref(statusCopyOutputPath))
+      import(pathToFileHref(statusCopyOutputPath)),
+      import(pathToFileHref(relationShapeOutputPath))
     ]);
 
     return {
@@ -97,6 +125,7 @@ async function compileSqlErdRuntimeModules() {
       layoutAutosaveRuntime,
       inspectorRuntime,
       modelRuntime,
+      relationShapeRuntime,
       sessionStateRuntime,
       statusCopyRuntime
     };
@@ -265,6 +294,7 @@ const [
   layoutAutosaveUtils,
   statusCopyUtils,
   canvasSurface,
+  mainShell,
   tableShape,
   relationShape,
   ddlParserUtils,
@@ -285,6 +315,7 @@ const [
     readSqlErdFile("../../src/features/sql-erd/utils/layout-autosave.ts"),
     readSqlErdFile("../../src/features/sql-erd/utils/status-copy.ts"),
     readSqlErdFile("../../src/features/sql-erd/components/sql-erd-canvas.tsx"),
+    readSqlErdFile("../../src/components/main-shell.tsx"),
     readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-table-shape.tsx"),
     readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-relation-shape.tsx"),
     readSqlErdFile("../../src/features/sql-erd/utils/ddl-parser.ts"),
@@ -299,6 +330,7 @@ const {
   layoutAutosaveRuntime,
   inspectorRuntime,
   modelRuntime,
+  relationShapeRuntime,
   sessionStateRuntime,
   statusCopyRuntime
 } = await compileSqlErdRuntimeModules();
@@ -1022,6 +1054,54 @@ assert.equal(
   ),
   true
 );
+
+const stackedRelationLayout = relationShapeRuntime.getSqlErdRelationShapeLayout(
+  {
+    columns: [
+      { id: "column.posts.id" },
+      { id: "column.posts.user_id" },
+      { id: "column.posts.title" },
+      { id: "column.posts.body" },
+      { id: "column.posts.created_at" }
+    ],
+    h: 266,
+    w: 300,
+    x: 100,
+    y: 40
+  },
+  {
+    columns: [
+      { id: "column.users.id" },
+      { id: "column.users.email" },
+      { id: "column.users.created_at" }
+    ],
+    h: 182,
+    w: 300,
+    x: 100,
+    y: 360
+  },
+  {
+    fromColumnIds: ["column.posts.user_id"],
+    toColumnIds: ["column.users.id"]
+  }
+);
+const stackedRelationStartPoint = {
+  x: stackedRelationLayout.x + stackedRelationLayout.points[0].x,
+  y: stackedRelationLayout.y + stackedRelationLayout.points[0].y
+};
+const stackedRelationEndPoint = {
+  x:
+    stackedRelationLayout.x +
+    stackedRelationLayout.points[stackedRelationLayout.points.length - 1].x,
+  y:
+    stackedRelationLayout.y +
+    stackedRelationLayout.points[stackedRelationLayout.points.length - 1].y
+};
+
+assert.deepEqual(stackedRelationStartPoint, { x: 400, y: 158 });
+assert.deepEqual(stackedRelationEndPoint, { x: 400, y: 436 });
+assert.equal(stackedRelationLayout.startSide, "right");
+assert.equal(stackedRelationLayout.endSide, "right");
 assert.equal(
   modelRuntime.areSqltoerdLayoutsEqual(movedRuntimeLayout, {
     version: 1,
@@ -1123,8 +1203,12 @@ assert.match(modelUtils, /relation\.fromTableId === relation\.toTableId/);
 assert.doesNotMatch(modelUtils, /columnsById: Map<string, SqltoerdColumnRef>/);
 
 assert.match(page, /sql-erd-full-bleed/);
-assert.match(page, /-m-6/);
-assert.match(page, /h-\[calc\(100vh-3\.5rem\)\]/);
+assert.match(page, /h-screen/);
+assert.doesNotMatch(page, /-m-6/);
+assert.doesNotMatch(page, /h-\[calc\(100vh-3\.5rem\)\]/);
+
+assert.match(mainShell, /isSqlErdImmersiveRoute/);
+assert.match(mainShell, /pathname\.startsWith\("\/sql-erd"\)/);
 
 assert.match(navigation, /SQLtoERD/);
 assert.match(navigation, /href: "\/sql-erd"/);
@@ -1362,6 +1446,7 @@ assert.match(tableShape, /ROW_COLUMN_GAP \* 2/);
 assert.match(tableShape, /SQLTOERD_COLUMN_SELECT_EVENT/);
 assert.match(tableShape, /selectSqlErdColumn/);
 assert.match(tableShape, /data-sqltoerd-column-id/);
+assert.match(tableShape, /data-sqltoerd-column-port/);
 assert.match(tableShape, /selectedColumnId/);
 assert.match(tableShape, /aria-pressed=\{isSelected\}/);
 assert.match(tableShape, /COLUMN_CLICK_DRAG_THRESHOLD/);
@@ -1396,13 +1481,16 @@ assert.match(relationShape, /fromColumnIds/);
 assert.match(relationShape, /toColumnIds/);
 assert.match(relationShape, /fromTableShapeId/);
 assert.match(relationShape, /toTableShapeId/);
+assert.match(relationShape, /startSide: T\.string/);
+assert.match(relationShape, /endSide: T\.string/);
 assert.match(relationShape, /points: T\.arrayOf/);
 assert.match(relationShape, /arrowPoints: T\.arrayOf/);
 assert.match(relationShape, /fromColumnIds: string\[\]/);
 assert.match(relationShape, /toColumnIds: string\[\]/);
-assert.match(relationShape, /getRelationCurvePathData\(shape\.props\.points\)/);
-assert.match(relationShape, /getRelationCurveGeometryPoints\(shape\.props\.points\)/);
-assert.match(relationShape, /getRelationCurveGeometryPoints\(shape\.props\.points\)\.map/);
+assert.match(relationShape, /shape\.props\.startSide/);
+assert.match(relationShape, /shape\.props\.endSide/);
+assert.match(relationShape, /getRelationCurvePathData\(/);
+assert.match(relationShape, /getRelationCurveGeometryPoints\(/);
 assert.match(relationShape, / C /);
 assert.doesNotMatch(relationShape, /useValue/);
 assert.doesNotMatch(relationShape, /canCull\(\)/);

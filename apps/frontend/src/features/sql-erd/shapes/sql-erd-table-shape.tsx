@@ -317,7 +317,7 @@ function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
             return (
               <div
                 aria-pressed={isSelected}
-                className="grid h-[42px] cursor-pointer items-center px-6 font-mono text-[20px] leading-none outline-none transition-colors focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-inset"
+                className="group relative grid h-[42px] cursor-pointer items-center px-6 font-mono text-[20px] leading-none outline-none transition-colors focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-inset"
                 data-sqltoerd-column-id={column.id}
                 key={column.id}
                 onClick={(event) => {
@@ -342,10 +342,10 @@ function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
                 onPointerCancel={() => {
                   columnPointerStartRef.current = null;
                 }}
-                onPointerDown={(event) => {
+                onPointerDownCapture={(event) => {
                   handleColumnPointerDown(event, column.id);
                 }}
-                onPointerUp={(event) => {
+                onPointerUpCapture={(event) => {
                   handleColumnPointerUp(event, column.id);
                 }}
                 role="button"
@@ -363,6 +363,24 @@ function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
                 }}
                 tabIndex={0}
               >
+                <span
+                  aria-hidden="true"
+                  className={`pointer-events-none absolute left-[-4px] top-1/2 size-2 -translate-y-1/2 rounded-full border bg-white shadow-sm transition-opacity ${
+                    isSelected || column.foreignKey
+                      ? "border-blue-400 opacity-100"
+                      : "border-slate-300 opacity-0 group-hover:opacity-100"
+                  }`}
+                  data-sqltoerd-column-port="left"
+                />
+                <span
+                  aria-hidden="true"
+                  className={`pointer-events-none absolute right-[-4px] top-1/2 size-2 -translate-y-1/2 rounded-full border bg-white shadow-sm transition-opacity ${
+                    isSelected || column.foreignKey
+                      ? "border-blue-400 opacity-100"
+                      : "border-slate-300 opacity-0 group-hover:opacity-100"
+                  }`}
+                  data-sqltoerd-column-port="right"
+                />
                 <div className="flex min-w-0 items-center gap-1">
                   {badges.map((badge) => (
                     <span
