@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { readFile } from "node:fs/promises";
 
+const require = createRequire(import.meta.url);
+require("reflect-metadata");
+
 function readSource(path) {
   return readFile(new URL(path, import.meta.url), "utf8");
 }
@@ -25,9 +28,18 @@ const sqlErdValidation = await readSource(
 const sqlErdMapper = await readSource(
   "../../src/modules/sql-erd/sql-erd.mapper.ts"
 );
-const require = createRequire(import.meta.url);
+const { Module } = require("@nestjs/common");
+const { NestFactory } = require("@nestjs/core");
+const { FastifyAdapter } = require("@nestjs/platform-fastify");
+const { SessionService } = require("../../dist/common/session.service.js");
 const { SqlErdService } = require(
   "../../dist/modules/sql-erd/sql-erd.service.js"
+);
+const { SqlErdSessionController } = require(
+  "../../dist/modules/sql-erd/sql-erd.controller.js"
+);
+const { SQL_ERD_REQUEST_BODY_LIMIT_BYTES } = require(
+  "../../dist/modules/sql-erd/sql-erd.types.js"
 );
 
 const currentUserId = "11111111-1111-4111-8111-111111111111";
@@ -286,6 +298,94 @@ function sessionRow(overrides = {}) {
   };
 }
 
+class FakeSqlErdHttpService {
+  constructor() {
+    this.calls = [];
+  }
+
+  async getActiveSession() {
+    this.calls.push("getActiveSession");
+    return null;
+  }
+
+  async createSession() {
+    this.calls.push("createSession");
+    throw new Error("bodyLimit should reject before createSession");
+  }
+
+  async updateSession() {
+    this.calls.push("updateSession");
+    throw new Error("bodyLimit should reject before updateSession");
+  }
+
+  async deleteSession() {
+    this.calls.push("deleteSession");
+    return { id: sessionId, deletedAt: deletedAt.toISOString(), revision: 2 };
+  }
+}
+
+async function createSqlErdHttpTestApp(sqlErdService) {
+  class SqlErdBodyLimitTestModule {}
+  Module({
+    controllers: [SqlErdSessionController],
+    providers: [
+      {
+        provide: SqlErdService,
+        useValue: sqlErdService
+      },
+      {
+        provide: SessionService,
+        useValue: {
+          async validateSessionToken() {
+            return currentUserId;
+          }
+        }
+      }
+    ]
+  })(SqlErdBodyLimitTestModule);
+
+  const app = await NestFactory.create(
+    SqlErdBodyLimitTestModule,
+    new FastifyAdapter(),
+    { abortOnError: false, logger: false }
+  );
+  app.setGlobalPrefix("api/v1");
+  await app.init();
+  await app.getHttpAdapter().getInstance().ready();
+  return app;
+}
+
+function oversizedHttpBody() {
+  return JSON.stringify({
+    sourceText: `CREATE TABLE secret_users (password TEXT); ${oversizedText(
+      SQL_ERD_REQUEST_BODY_LIMIT_BYTES
+    )}`
+  });
+}
+
+async function assertRouteBodyLimit(method, url, blockedServiceCall) {
+  const service = new FakeSqlErdHttpService();
+  const app = await createSqlErdHttpTestApp(service);
+
+  try {
+    const response = await app.getHttpAdapter().getInstance().inject({
+      method,
+      url,
+      headers: {
+        authorization: "Bearer test-token",
+        "content-type": "application/json"
+      },
+      payload: oversizedHttpBody()
+    });
+
+    assert.equal(response.statusCode, 413);
+    assert.doesNotMatch(response.body, /secret_users|password/);
+    assert.equal(service.calls.includes(blockedServiceCall), false);
+  } finally {
+    await app.close();
+  }
+}
+
 async function assertApiError(action, status, code, messagePattern, forbiddenPattern) {
   await assert.rejects(action, (error) => {
     const message = error.getResponse().error.message;
@@ -298,6 +398,18 @@ async function assertApiError(action, status, code, messagePattern, forbiddenPat
     return true;
   });
 }
+
+await assertRouteBodyLimit(
+  "POST",
+  `/api/v1/workspaces/${workspaceId}/sql-erd-session`,
+  "createSession"
+);
+
+await assertRouteBodyLimit(
+  "PATCH",
+  `/api/v1/workspaces/${workspaceId}/sql-erd-session/${sessionId}`,
+  "updateSession"
+);
 
 {
   const database = new FakeDatabase({
@@ -797,6 +909,128 @@ async function assertApiError(action, status, code, messagePattern, forbiddenPat
 
 {
   const { service } = createSubject();
+
+  await assertApiError(
+    () =>
+      service.createSession(currentUserId, workspaceId, {
+        sourceFormat: "sql",
+        dialect: "postgresql",
+        sourceText: `CREATE TABLE secret_users (password TEXT); ${oversizedText(
+          1024 * 1024
+        )}`,
+        modelJson: modelJson(),
+        layoutJson: layoutJson()
+      }),
+    413,
+    "PAYLOAD_TOO_LARGE",
+    /sourceText is too large/,
+    /secret_users|password/
+  );
+
+  await assertApiError(
+    () =>
+      service.updateSession(currentUserId, workspaceId, sessionId, {
+        baseRevision: 1,
+        sourceText: `CREATE TABLE secret_users (password TEXT); ${oversizedText(
+          1024 * 1024
+        )}`
+      }),
+    413,
+    "PAYLOAD_TOO_LARGE",
+    /sourceText is too large/,
+    /secret_users|password/
+  );
+}
+
+{
+  const { service } = createSubject();
+  const tooManyTables = Array.from({ length: 101 }, (_, index) =>
+    table(`table_${index}`, `table_${index}`, [
+      column(`column_${index}_id`, "id", "BIGINT")
+    ])
+  );
+
+  await assertApiError(
+    () =>
+      service.createSession(currentUserId, workspaceId, {
+        sourceFormat: "sql",
+        modelJson: modelJson({
+          schema: {
+            tables: tooManyTables,
+            relations: []
+          }
+        }),
+        layoutJson: layoutJson()
+      }),
+    400,
+    "BAD_REQUEST",
+    /table count limit exceeded/
+  );
+
+  const baseTables = [
+    table("table_from", "from_table", [
+      column("column_from_id", "id", "BIGINT")
+    ]),
+    table("table_to", "to_table", [column("column_to_id", "id", "BIGINT")])
+  ];
+  const tooManyRelations = Array.from({ length: 301 }, (_, index) =>
+    relation(
+      `relation_${index}`,
+      "table_from",
+      ["column_from_id"],
+      "table_to",
+      ["column_to_id"]
+    )
+  );
+
+  await assertApiError(
+    () =>
+      service.createSession(currentUserId, workspaceId, {
+        sourceFormat: "sql",
+        modelJson: modelJson({
+          schema: {
+            tables: baseTables,
+            relations: tooManyRelations
+          }
+        }),
+        layoutJson: layoutJson()
+      }),
+    400,
+    "BAD_REQUEST",
+    /relation count limit exceeded/
+  );
+
+  const tooManyTotalColumns = Array.from({ length: 6 }, (_, tableIndex) =>
+    table(
+      `table_total_${tableIndex}`,
+      `total_${tableIndex}`,
+      Array.from({ length: 167 }, (_, columnIndex) =>
+        column(
+          `column_total_${tableIndex}_${columnIndex}`,
+          `column_${columnIndex}`,
+          "BIGINT"
+        )
+      )
+    )
+  );
+
+  await assertApiError(
+    () =>
+      service.createSession(currentUserId, workspaceId, {
+        sourceFormat: "sql",
+        modelJson: modelJson({
+          schema: {
+            tables: tooManyTotalColumns,
+            relations: []
+          }
+        }),
+        layoutJson: layoutJson()
+      }),
+    400,
+    "BAD_REQUEST",
+    /column count limit exceeded/
+  );
+
   const tooManyColumns = Array.from({ length: 201 }, (_, index) =>
     column(`column_too_many_${index}`, `column_${index}`, "BIGINT")
   );
@@ -874,6 +1108,24 @@ async function assertApiError(action, status, code, messagePattern, forbiddenPat
     400,
     "BAD_REQUEST",
     /layoutJson has unknown field/
+  );
+
+  await assertApiError(
+    () =>
+      service.createSession(currentUserId, workspaceId, {
+        sourceFormat: "sql",
+        modelJson: modelJson(),
+        layoutJson: layoutJson({
+          tableLayouts: [
+            { tableId: "table_users", x: 0, y: 0 },
+            { tableId: "table_orders", x: 10, y: 10 },
+            { tableId: "table_users", x: 20, y: 20 }
+          ]
+        })
+      }),
+    400,
+    "BAD_REQUEST",
+    /layoutJson.tableLayouts length limit exceeded/
   );
 
   await assertApiError(
