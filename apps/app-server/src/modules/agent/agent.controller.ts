@@ -1,4 +1,14 @@
-import { Body, Controller, Param, Post, UseGuards } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  Query,
+  Res,
+  UseGuards
+} from "@nestjs/common";
+import type { FastifyReply } from "fastify";
 import { apiResponse, ApiSuccessResponse } from "../../common/api-response";
 import { AuthGuard } from "../../common/auth.guard";
 import { CurrentUserId } from "../../common/current-user.decorator";
@@ -6,11 +16,70 @@ import {
   AgentConfirmationActionPayload,
   AgentConfirmationService
 } from "./agent-confirmation.service";
+import {
+  AgentRunCreatePayload,
+  AgentRunDetailPayload,
+  AgentRunListPayload,
+  AgentRunListQuery,
+  AgentService
+} from "./agent.service";
 
 @Controller("workspaces/:workspaceId/agent")
 @UseGuards(AuthGuard)
 export class AgentController {
-  constructor(private readonly agentConfirmationService: AgentConfirmationService) {}
+  constructor(
+    private readonly agentService: AgentService,
+    private readonly agentConfirmationService: AgentConfirmationService
+  ) {}
+
+  @Post("runs")
+  async createRun(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Body() body: unknown,
+    @Res({ passthrough: true }) reply: FastifyReply
+  ): Promise<ApiSuccessResponse<AgentRunCreatePayload>> {
+    const result = await this.agentService.createRun(
+      currentUserId,
+      workspaceId,
+      body
+    );
+
+    reply.status(result.created ? 202 : 200);
+    return apiResponse({
+      run: result.run
+    });
+  }
+
+  @Get("runs")
+  async listRuns(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Query() query: AgentRunListQuery
+  ): Promise<ApiSuccessResponse<AgentRunListPayload>> {
+    const result = await this.agentService.listRuns(
+      currentUserId,
+      workspaceId,
+      query
+    );
+
+    return apiResponse(result);
+  }
+
+  @Get("runs/:runId")
+  async getRun(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("runId") runId: string
+  ): Promise<ApiSuccessResponse<AgentRunDetailPayload>> {
+    const result = await this.agentService.getRun(
+      currentUserId,
+      workspaceId,
+      runId
+    );
+
+    return apiResponse(result);
+  }
 
   @Post("runs/:runId/confirmations/:confirmationId/approve")
   async approveConfirmation(
