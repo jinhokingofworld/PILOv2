@@ -5,9 +5,6 @@ const require = createRequire(import.meta.url);
 const { AgentController } = require(
   "../../dist/modules/agent/agent.controller.js"
 );
-const { AGENT_TOOL_SCHEMA_VERSION } = require(
-  "../../dist/modules/agent/agent-job.service.js"
-);
 const { AgentService } = require("../../dist/modules/agent/agent.service.js");
 
 const USER_ID = "11111111-1111-1111-1111-111111111111";
@@ -20,54 +17,6 @@ const CREATED_AT = new Date("2026-07-08T00:00:00.000Z");
 const UPDATED_AT = new Date("2026-07-08T00:01:00.000Z");
 const EXPIRES_AT = new Date("2026-08-07T00:00:00.000Z");
 const CONFIRMATION_EXPIRES_AT = new Date("2026-07-08T00:15:00.000Z");
-const TOOL_SCHEMA_SNAPSHOT = [
-  {
-    name: "list_calendar_events",
-    description: "Calendar 일정 목록을 날짜 범위 기준으로 조회합니다.",
-    riskLevel: "low",
-    executionMode: "auto",
-    inputSchema: {
-      type: "object",
-      required: ["start", "end"],
-      additionalProperties: false,
-      properties: {
-        start: {
-          type: "string",
-          format: "date"
-        },
-        end: {
-          type: "string",
-          format: "date"
-        }
-      }
-    }
-  },
-  {
-    name: "create_calendar_event",
-    description: "Calendar 일정을 생성합니다. 실행 전 confirmation이 필요합니다.",
-    riskLevel: "medium",
-    executionMode: "confirmation_required",
-    inputSchema: {
-      type: "object",
-      required: ["title", "startDate", "endDate"],
-      additionalProperties: false,
-      properties: {
-        title: {
-          type: "string"
-        },
-        startDate: {
-          type: "string",
-          format: "date"
-        },
-        endDate: {
-          type: "string",
-          format: "date"
-        }
-      }
-    }
-  }
-];
-
 function createStoredRun(overrides = {}) {
   return {
     id: RUN_ID,
@@ -233,31 +182,13 @@ class FakeAgentLoggingService {
   }
 }
 
-class FakeAgentJobService {
-  constructor({ shouldFail = false } = {}) {
-    this.shouldFail = shouldFail;
+class FakeAgentOutboxPublisherService {
+  constructor() {
     this.calls = [];
   }
 
-  async enqueueAgentRunRequestedJob(payload) {
-    this.calls.push(payload);
-
-    if (this.shouldFail) {
-      throw new Error("raw SQS failure with pilo-dev-ai-jobs queue url");
-    }
-  }
-}
-
-class FakeAgentToolRegistryService {
-  listDefinitions() {
-    return TOOL_SCHEMA_SNAPSHOT.map((tool) => ({
-      ...tool,
-      validateInput: () => ({}),
-      execute: async () => ({
-        outputSummary: {},
-        resourceRefs: []
-      })
-    }));
+  async publishCreatedRun(runId) {
+    this.calls.push(runId);
   }
 }
 
@@ -348,7 +279,7 @@ function createService({
     stepRows: [],
     confirmationRows: []
   },
-  agentJobService = new FakeAgentJobService(),
+  agentOutboxPublisherService = new FakeAgentOutboxPublisherService(),
   loggingError = null
 } = {}) {
   const workspaceService = new FakeWorkspaceService();
@@ -357,21 +288,18 @@ function createService({
     loggingResult,
     loggingError
   );
-  const agentToolRegistryService = new FakeAgentToolRegistryService();
 
   return {
     service: new AgentService(
       database,
       workspaceService,
       agentLoggingService,
-      agentJobService,
-      agentToolRegistryService
+      agentOutboxPublisherService
     ),
     workspaceService,
     database,
     agentLoggingService,
-    agentJobService,
-    agentToolRegistryService
+    agentOutboxPublisherService
   };
 }
 
@@ -431,14 +359,15 @@ function errorMessage(error) {
     reusedReply
   );
 
-  assert.equal(createdReply.statusCode, 202);
+  assert.equal(createdReply.statusCode, 201);
   assert.equal(reusedReply.statusCode, 200);
   assert.equal(created.success, true);
   assert.equal(reused.success, true);
 }
 
 {
-  const { service, agentLoggingService, agentJobService } = createService();
+  const { service, agentLoggingService, agentOutboxPublisherService } =
+    createService();
   const result = await service.createRun(USER_ID, WORKSPACE_ID, {
     prompt: "  내일 회의 일정 만들어줘  ",
     timezone: "Asia/Seoul",
@@ -460,22 +389,11 @@ function errorMessage(error) {
       }
     }
   ]);
-  assert.deepEqual(agentJobService.calls, [
-    {
-      jobType: "agent_run_requested",
-      runId: RUN_ID,
-      workspaceId: WORKSPACE_ID,
-      requestedByUserId: USER_ID,
-      toolSchemaVersion: AGENT_TOOL_SCHEMA_VERSION,
-      tools: TOOL_SCHEMA_SNAPSHOT
-    }
-  ]);
-  assert.equal("validateInput" in agentJobService.calls[0].tools[0], false);
-  assert.equal("execute" in agentJobService.calls[0].tools[0], false);
+  assert.deepEqual(agentOutboxPublisherService.calls, [RUN_ID]);
 }
 
 {
-  const { service, agentJobService } = createService({
+  const { service, agentOutboxPublisherService } = createService({
     loggingResult: {
       run: createStoredRun(),
       created: false
@@ -488,55 +406,24 @@ function errorMessage(error) {
 
   assert.equal(result.created, false);
   assert.equal(result.run.status, "planning");
-  assert.deepEqual(agentJobService.calls, []);
+  assert.deepEqual(agentOutboxPublisherService.calls, []);
 }
 
 {
-  const agentJobService = new FakeAgentJobService({ shouldFail: true });
-  const { service, agentLoggingService } = createService({ agentJobService });
+  const { service, agentLoggingService, agentOutboxPublisherService } =
+    createService();
+  const result = await service.createRun(USER_ID, WORKSPACE_ID, {
+    prompt: "내일 회의 일정 만들어줘"
+  });
 
-  await assert.rejects(
-    () =>
-      service.createRun(USER_ID, WORKSPACE_ID, {
-        prompt: "내일 회의 일정 만들어줘"
-      }),
-    (error) => {
-      assert.equal(error.getStatus(), 503);
-      assert.equal(errorCode(error), "SERVICE_UNAVAILABLE");
-      assert.equal(errorMessage(error), "Agent job could not be enqueued");
-      assert.doesNotMatch(
-        JSON.stringify(error.getResponse()),
-        /raw SQS failure|pilo-dev-ai-jobs/
-      );
-      return true;
-    }
-  );
-  assert.deepEqual(agentJobService.calls, [
-    {
-      jobType: "agent_run_requested",
-      runId: RUN_ID,
-      workspaceId: WORKSPACE_ID,
-      requestedByUserId: USER_ID,
-      toolSchemaVersion: AGENT_TOOL_SCHEMA_VERSION,
-      tools: TOOL_SCHEMA_SNAPSHOT
-    }
-  ]);
-  assert.deepEqual(agentLoggingService.failCalls, [
-    {
-      currentUserId: USER_ID,
-      workspaceId: WORKSPACE_ID,
-      input: {
-        runId: RUN_ID,
-        errorCode: "AGENT_JOB_ENQUEUE_FAILED",
-        errorMessage: "Agent job could not be enqueued",
-        message: "요청을 시작하지 못했습니다. 잠시 후 다시 시도해주세요."
-      }
-    }
-  ]);
+  assert.equal(result.run.status, "planning");
+  assert.deepEqual(agentOutboxPublisherService.calls, [RUN_ID]);
+  assert.deepEqual(agentLoggingService.failCalls, []);
 }
 
 {
-  const { service, agentLoggingService, agentJobService } = createService({
+  const { service, agentLoggingService, agentOutboxPublisherService } =
+    createService({
     loggingError: new Error('relation "agent_runs" does not exist')
   });
 
@@ -554,7 +441,7 @@ function errorMessage(error) {
     }
   );
   assert.equal(agentLoggingService.calls.length, 1);
-  assert.deepEqual(agentJobService.calls, []);
+  assert.deepEqual(agentOutboxPublisherService.calls, []);
 }
 
 {

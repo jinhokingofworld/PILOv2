@@ -199,6 +199,16 @@ assert.match(prReviewCanvasShell, /Merge/);
 assert.match(prReviewCanvasShell, /getMergeDisabledReason/);
 assert.match(prReviewCanvasShell, /handleMergeReviewSession/);
 assert.match(prReviewCanvasShell, /mergeReviewSession/);
+assert.match(
+  prReviewCanvasShell,
+  /const nextConflictStatus = nextSummary\.conflictStatus/
+);
+assert.match(
+  prReviewCanvasShell,
+  /summary\?\.conflictStatus \?\? canvas\?\.conflictStatus/
+);
+assert.match(prReviewCanvasShell, /CONFLICT_STATUS_POLL_MAX_ATTEMPTS/);
+assert.match(prReviewCanvasShell, /window\.setInterval/);
 assert.doesNotMatch(prReviewCanvasShell, /Review all files before merge/);
 assert.match(prReviewCanvasShell, /expectedHeadSha/);
 assert.match(prReviewCanvasShell, /confirm: true/);
