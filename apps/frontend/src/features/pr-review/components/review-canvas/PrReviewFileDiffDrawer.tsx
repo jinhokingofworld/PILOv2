@@ -18,7 +18,8 @@ import {
   HelpCircle,
   Loader2,
   MessageSquareWarning,
-  RefreshCcw
+  RefreshCcw,
+  Sparkles
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -28,6 +29,7 @@ import type { createPrReviewApiClient } from "@/features/pr-review/api/client";
 import type {
   PrReviewDiffRow,
   PrReviewConflictFile,
+  PrReviewConflictSuggestion,
   PrReviewFile,
   PrReviewFileDecisionStatus,
   PrReviewFileDiff,
@@ -46,6 +48,7 @@ type ConflictAnalysisLoadStatus =
   | "error"
   | "stale";
 type SaveStatus = "idle" | "saving" | "saved" | "error";
+type ConflictSuggestionLoadStatus = "idle" | "loading" | "ready" | "error";
 
 type PrReviewFileDiffDrawerProps = {
   apiClient: PrReviewApiClient;
@@ -248,6 +251,13 @@ export function PrReviewFileDiffDrawer({
   const [comment, setComment] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [saveErrorMessage, setSaveErrorMessage] = useState<string | null>(null);
+  const [conflictSuggestion, setConflictSuggestion] =
+    useState<PrReviewConflictSuggestion | null>(null);
+  const [conflictSuggestionStatus, setConflictSuggestionStatus] =
+    useState<ConflictSuggestionLoadStatus>("idle");
+  const [conflictSuggestionError, setConflictSuggestionError] = useState<
+    string | null
+  >(null);
   const [reloadVersion, setReloadVersion] = useState(0);
   const commentSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
@@ -315,6 +325,9 @@ export function PrReviewFileDiffDrawer({
       setSaveStatus("idle");
       setErrorMessage(null);
       setSaveErrorMessage(null);
+      setConflictSuggestion(null);
+      setConflictSuggestionStatus("idle");
+      setConflictSuggestionError(null);
       setFile(null);
       setDiff(null);
 
@@ -377,6 +390,27 @@ export function PrReviewFileDiffDrawer({
   const drawerModeLabel = decisionDisabled
     ? "Conflict Resolution"
     : "파일 경로";
+
+  const handleCreateConflictSuggestion = useCallback(async () => {
+    if (!conflictFile || conflictSuggestionStatus === "loading") {
+      return;
+    }
+
+    setConflictSuggestionStatus("loading");
+    setConflictSuggestionError(null);
+
+    try {
+      const suggestion = await apiClient.createReviewFileConflictSuggestion(
+        workspaceId,
+        conflictFile.reviewFileId
+      );
+      setConflictSuggestion(suggestion);
+      setConflictSuggestionStatus("ready");
+    } catch (error) {
+      setConflictSuggestionStatus("error");
+      setConflictSuggestionError(getErrorMessage(error));
+    }
+  }, [apiClient, conflictFile, conflictSuggestionStatus, workspaceId]);
 
   useEffect(() => {
     if (decisionDisabled) {
@@ -460,6 +494,9 @@ export function PrReviewFileDiffDrawer({
             <ReviewNodePanel
               comment={comment}
               conflictFile={conflictFile}
+              conflictSuggestion={conflictSuggestion}
+              conflictSuggestionErrorMessage={conflictSuggestionError}
+              conflictSuggestionStatus={conflictSuggestionStatus}
               decisionStatus={decisionStatus}
               decisionDisabledReason={decisionDisabledReason}
               file={file}
@@ -469,6 +506,7 @@ export function PrReviewFileDiffDrawer({
                 scheduleCommentSave(value);
               }}
               onCommentBlur={flushCommentSave}
+              onCreateConflictSuggestion={handleCreateConflictSuggestion}
               onDecisionStatusChange={handleDecisionStatusChange}
               saveErrorMessage={saveErrorMessage}
               saveStatus={saveStatus}
@@ -578,11 +616,15 @@ function FileDiffHeader({ file }: { file: PrReviewFile }) {
 function ReviewNodePanel({
   comment,
   conflictFile,
+  conflictSuggestion,
+  conflictSuggestionErrorMessage,
+  conflictSuggestionStatus,
   decisionStatus,
   decisionDisabledReason,
   file,
   onCommentBlur,
   onCommentChange,
+  onCreateConflictSuggestion,
   onDecisionStatusChange,
   saveErrorMessage,
   saveStatus,
@@ -591,11 +633,15 @@ function ReviewNodePanel({
 }: {
   comment: string;
   conflictFile: PrReviewConflictFile | null;
+  conflictSuggestion: PrReviewConflictSuggestion | null;
+  conflictSuggestionErrorMessage: string | null;
+  conflictSuggestionStatus: ConflictSuggestionLoadStatus;
   decisionStatus: PrReviewFileDecisionStatus | null;
   decisionDisabledReason: string | null;
   file: PrReviewFile;
   onCommentBlur: () => void;
   onCommentChange: (value: string) => void;
+  onCreateConflictSuggestion: () => void;
   onDecisionStatusChange: (status: PrReviewFileDecisionStatus) => void;
   saveErrorMessage: string | null;
   saveStatus: SaveStatus;
@@ -637,6 +683,10 @@ function ReviewNodePanel({
         {decisionDisabledReason ? (
           <ConflictResolutionPanel
             conflictFile={conflictFile}
+            conflictSuggestion={conflictSuggestion}
+            conflictSuggestionErrorMessage={conflictSuggestionErrorMessage}
+            conflictSuggestionStatus={conflictSuggestionStatus}
+            onCreateConflictSuggestion={onCreateConflictSuggestion}
             reason={decisionDisabledReason}
             unsupportedConflictFile={unsupportedConflictFile}
           />
@@ -765,13 +815,23 @@ function ReviewNodePanel({
 
 function ConflictResolutionPanel({
   conflictFile,
+  conflictSuggestion,
+  conflictSuggestionErrorMessage,
+  conflictSuggestionStatus,
+  onCreateConflictSuggestion,
   reason,
   unsupportedConflictFile
 }: {
   conflictFile: PrReviewConflictFile | null;
+  conflictSuggestion: PrReviewConflictSuggestion | null;
+  conflictSuggestionErrorMessage: string | null;
+  conflictSuggestionStatus: ConflictSuggestionLoadStatus;
+  onCreateConflictSuggestion: () => void;
   reason: string;
   unsupportedConflictFile: PrReviewUnsupportedConflictFile | null;
 }) {
+  const isSuggestionLoading = conflictSuggestionStatus === "loading";
+
   return (
     <section className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
       <p className="flex items-center gap-2 text-sm font-semibold text-amber-950">
@@ -786,6 +846,45 @@ function ConflictResolutionPanel({
       ) : null}
       {conflictFile ? (
         <div className="mt-3 space-y-3">
+          <div className="rounded-lg border border-amber-200 bg-white p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p className="text-xs font-semibold uppercase text-amber-800">
+                  AI draft
+                </p>
+                <p className="mt-1 text-xs leading-5 text-slate-500">
+                  {conflictSuggestion
+                    ? conflictSuggestion.status === "invalid"
+                      ? "검증 실패"
+                      : "초안 준비됨"
+                    : "초안 없음"}
+                </p>
+              </div>
+              <Button
+                disabled={isSuggestionLoading}
+                onClick={onCreateConflictSuggestion}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                {isSuggestionLoading ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <Sparkles className="size-3.5" />
+                )}
+                AI 해결안 생성
+              </Button>
+            </div>
+            {conflictSuggestionErrorMessage ? (
+              <p className="mt-3 text-xs leading-5 text-rose-600">
+                {conflictSuggestionErrorMessage}
+              </p>
+            ) : null}
+            {conflictSuggestion ? (
+              <ConflictSuggestionPreview suggestion={conflictSuggestion} />
+            ) : null}
+          </div>
+
           <p className="text-xs font-semibold uppercase text-amber-800">
             {conflictFile.hunks.length} conflict hunk
           </p>
@@ -807,6 +906,58 @@ function ConflictResolutionPanel({
         </div>
       ) : null}
     </section>
+  );
+}
+
+function ConflictSuggestionPreview({
+  suggestion
+}: {
+  suggestion: PrReviewConflictSuggestion;
+}) {
+  const invalid = suggestion.status === "invalid";
+
+  return (
+    <div className="mt-3 space-y-3">
+      <div
+        className={cn(
+          "rounded-md border px-3 py-2 text-xs font-semibold",
+          invalid
+            ? "border-rose-200 bg-rose-50 text-rose-700"
+            : "border-emerald-200 bg-emerald-50 text-emerald-700"
+        )}
+      >
+        {invalid ? "검증 실패" : "초안 준비됨"}
+      </div>
+
+      <PanelSection title="AI 원인 요약">
+        <p>{suggestion.aiSummary}</p>
+      </PanelSection>
+
+      <PanelSection title="AI 해결 방향">
+        <p>{suggestion.aiSuggestion}</p>
+      </PanelSection>
+
+      {suggestion.validationMessages.length ? (
+        <PanelSection title="검증 메시지">
+          <ul className="space-y-1">
+            {suggestion.validationMessages.map((message) => (
+              <li className="text-rose-600" key={message}>
+                {message}
+              </li>
+            ))}
+          </ul>
+        </PanelSection>
+      ) : null}
+
+      <div>
+        <p className="mb-1 text-xs font-semibold text-slate-500">
+          Resolved draft
+        </p>
+        <pre className="max-h-64 overflow-auto rounded-md bg-slate-950 px-3 py-2 font-mono text-[11px] leading-5 text-slate-100">
+          {suggestion.resolvedContent || "(empty)"}
+        </pre>
+      </div>
+    </div>
   );
 }
 

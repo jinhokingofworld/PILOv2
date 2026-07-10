@@ -78,6 +78,10 @@ assert.match(
 );
 assert.match(
   prReviewController,
+  /@Post\("review-files\/:reviewFileId\/conflict-suggestion"\)/
+);
+assert.match(
+  prReviewController,
   /@Post\("review-sessions\/:reviewSessionId\/submissions"\)/
 );
 assert.match(
@@ -136,6 +140,7 @@ assert.match(prReviewService, /updateReviewFileDecision/);
 assert.match(prReviewService, /listReviewFileDecisions/);
 assert.match(prReviewService, /getReviewFileDiff/);
 assert.match(prReviewService, /getReviewSessionConflicts/);
+assert.match(prReviewService, /createReviewFileConflictSuggestion/);
 assert.match(prReviewService, /submitReviewSession/);
 assert.match(prReviewService, /listReviewSubmissions/);
 assert.match(prReviewService, /getReviewSubmission/);
@@ -165,6 +170,9 @@ assert.match(prReviewService, /stored: false/);
 assert.match(prReviewService, /supportedTypes: \["content"\]/);
 assert.match(prReviewService, /extractContentConflictHunks/);
 assert.match(prReviewService, /getPullRequestConflictInputs/);
+assert.match(prReviewService, /analysisService\.suggestConflictResolution/);
+assert.match(prReviewService, /findReviewFileConflictSuggestionTarget/);
+assert.match(prReviewService, /mapConflictSuggestion/);
 assert.match(prReviewService, /binary conflict is not supported/);
 assert.match(prReviewService, /large diff conflict is not supported/);
 assert.match(prReviewService, /GitHub OAuth connection is required/);
@@ -189,6 +197,11 @@ assert.match(prReviewAnalysisService, /OPENAI_PR_REVIEW_TIMEOUT_MS/);
 assert.match(prReviewAnalysisService, /https:\/\/api\.openai\.com\/v1\/responses/);
 assert.match(prReviewAnalysisService, /json_schema/);
 assert.match(prReviewAnalysisService, /strict: true/);
+assert.match(prReviewAnalysisService, /PR_REVIEW_CONFLICT_SUGGESTION_SCHEMA/);
+assert.match(prReviewAnalysisService, /pr_review_conflict_suggestion/);
+assert.match(prReviewAnalysisService, /suggestConflictResolution/);
+assert.match(prReviewAnalysisService, /buildDeterministicConflictSuggestion/);
+assert.match(prReviewAnalysisService, /CONFLICT_MARKER_PATTERN/);
 assert.match(prReviewAnalysisService, /riskLevel/);
 assert.match(prReviewAnalysisService, /output_text/);
 assert.match(prReviewAnalysisService, /buildPromptInput/);
@@ -225,6 +238,9 @@ assert.match(prReviewApi, /파일별 review decision 저장/);
 assert.match(prReviewApi, /파일별 decision history 조회/);
 assert.match(prReviewApi, /Decision history response/);
 assert.match(prReviewApi, /Conflict Analysis/);
+assert.match(prReviewApi, /AI Conflict Suggestion Draft/);
+assert.match(prReviewApi, /conflict-suggestion/);
+assert.match(prReviewApi, /conflictSuggestion\.status/);
 assert.match(prReviewApi, /stored": false/);
 assert.match(prReviewApi, /githubCreatedAt/);
 assert.match(prReviewApi, /fileNodeData/);

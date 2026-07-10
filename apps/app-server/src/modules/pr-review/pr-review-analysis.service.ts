@@ -1,4 +1,5 @@
 import { Injectable, Logger } from "@nestjs/common";
+import type { PrReviewConflictHunkPayload } from "./pr-review-conflict-analyzer";
 import type {
   PrReviewGithubChangedFile,
   PrReviewGithubPullRequestDetail,
@@ -11,6 +12,10 @@ const DEFAULT_TIMEOUT_MS = 15000;
 const MAX_PR_BODY_CHARS = 4000;
 const MAX_PATCH_CHARS_PER_FILE = 4000;
 const MAX_TOTAL_PATCH_CHARS = 32000;
+const MAX_CONFLICT_HUNKS = 8;
+const MAX_CONFLICT_TEXT_CHARS_PER_HUNK = 3000;
+const MAX_RESOLVED_CONTENT_CHARS = 16000;
+const CONFLICT_MARKER_PATTERN = /(^|\n)(<<<<<<<|=======|>>>>>>>)(?:\s|$)/;
 
 export interface ReviewFileMetadata {
   filePath: string;
@@ -29,6 +34,28 @@ export interface PrReviewAnalysisResult {
   flowTitle: string;
   flowDescription: string;
   files: ReviewFileMetadata[];
+}
+
+export interface PrReviewConflictSuggestionInput {
+  filePath: string;
+  previousFilePath: string | null;
+  hunks: PrReviewConflictHunkPayload[];
+}
+
+export type PrReviewConflictSuggestionValidationStatus = "valid" | "invalid";
+
+export interface PrReviewConflictSuggestionResult {
+  aiSummary: string;
+  aiSuggestion: string;
+  resolvedContent: string;
+  validationStatus: PrReviewConflictSuggestionValidationStatus;
+  validationMessages: string[];
+}
+
+interface PrReviewConflictSuggestionDraft {
+  aiSummary: string;
+  aiSuggestion: string;
+  resolvedContent: string;
 }
 
 interface OpenAiResponseBody {
@@ -96,6 +123,17 @@ const PR_REVIEW_ANALYSIS_SCHEMA = {
   }
 } as const;
 
+const PR_REVIEW_CONFLICT_SUGGESTION_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["aiSummary", "aiSuggestion", "resolvedContent"],
+  properties: {
+    aiSummary: { type: "string" },
+    aiSuggestion: { type: "string" },
+    resolvedContent: { type: "string" }
+  }
+} as const;
+
 @Injectable()
 export class PrReviewAnalysisService {
   private readonly logger = new Logger(PrReviewAnalysisService.name);
@@ -118,6 +156,31 @@ export class PrReviewAnalysisService {
         `PR Review AI analysis fallback used: ${this.getErrorMessage(error)}`
       );
       return fallback;
+    }
+  }
+
+  async suggestConflictResolution(
+    input: PrReviewConflictSuggestionInput
+  ): Promise<PrReviewConflictSuggestionResult> {
+    const fallback = this.buildDeterministicConflictSuggestion(input);
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      return this.withConflictSuggestionValidation(fallback);
+    }
+
+    try {
+      const rawSuggestion = await this.requestOpenAiConflictSuggestion(
+        apiKey,
+        input
+      );
+      return this.normalizeConflictSuggestion(rawSuggestion, fallback);
+    } catch (error) {
+      this.logger.warn(
+        `PR Review conflict suggestion fallback used: ${this.getErrorMessage(
+          error
+        )}`
+      );
+      return this.withConflictSuggestionValidation(fallback);
     }
   }
 
@@ -159,6 +222,72 @@ export class PrReviewAnalysisService {
                 type: "json_schema",
                 name: "pr_review_analysis",
                 schema: PR_REVIEW_ANALYSIS_SCHEMA,
+                strict: true
+              }
+            }
+          }),
+          signal: controller.signal
+        }
+      );
+      const body = await this.readJsonResponse(response);
+      if (!response.ok) {
+        const message =
+          typeof body.error?.message === "string"
+            ? body.error.message
+            : `OpenAI Responses API returned ${response.status}`;
+        throw new Error(message);
+      }
+
+      const outputText = this.extractOutputText(body);
+      if (!outputText) {
+        throw new Error("OpenAI response did not include output text");
+      }
+
+      return JSON.parse(outputText);
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  private async requestOpenAiConflictSuggestion(
+    apiKey: string,
+    input: PrReviewConflictSuggestionInput
+  ): Promise<unknown> {
+    const controller = new AbortController();
+    const timeout = setTimeout(
+      () => controller.abort(),
+      this.getOpenAiTimeoutMs()
+    );
+
+    try {
+      const response = await fetch(
+        process.env.OPENAI_RESPONSES_API_URL ?? OPENAI_RESPONSES_URL,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            model: process.env.OPENAI_PR_REVIEW_MODEL ?? DEFAULT_OPENAI_MODEL,
+            input: [
+              {
+                role: "system",
+                content:
+                  "You are PILO's PR conflict resolution assistant. Return concise Korean explanation and raw resolved code only in the requested JSON schema."
+              },
+              {
+                role: "user",
+                content: JSON.stringify(
+                  this.buildConflictSuggestionPromptInput(input)
+                )
+              }
+            ],
+            text: {
+              format: {
+                type: "json_schema",
+                name: "pr_review_conflict_suggestion",
+                schema: PR_REVIEW_CONFLICT_SUGGESTION_SCHEMA,
                 strict: true
               }
             }
@@ -247,6 +376,51 @@ export class PrReviewAnalysisService {
     };
   }
 
+  private buildConflictSuggestionPromptInput(
+    input: PrReviewConflictSuggestionInput
+  ): unknown {
+    return {
+      task:
+        "Create a draft resolution for the provided content conflict hunks. Do not claim that the branch was modified or the PR was merged.",
+      outputRules: {
+        aiSummary:
+          "Explain the conflict cause in Korean in one or two concise sentences.",
+        aiSuggestion:
+          "Describe the resolution direction in Korean without mentioning unsupported write actions.",
+        resolvedContent:
+          "Return only the resolved code draft for the conflict hunks. Do not wrap it in Markdown fences and do not include conflict markers."
+      },
+      validationRules: [
+        "resolvedContent must not contain <<<<<<<, =======, or >>>>>>>.",
+        "resolvedContent must not be empty.",
+        "Prefer preserving both current and incoming intent when they do not contradict each other."
+      ],
+      file: {
+        filePath: input.filePath,
+        previousFilePath: input.previousFilePath
+      },
+      hunks: input.hunks.slice(0, MAX_CONFLICT_HUNKS).map((hunk) => ({
+        id: hunk.id,
+        header: hunk.header,
+        baseStartLine: hunk.baseStartLine,
+        currentStartLine: hunk.currentStartLine,
+        incomingStartLine: hunk.incomingStartLine,
+        baseText: this.truncateText(
+          hunk.baseText,
+          MAX_CONFLICT_TEXT_CHARS_PER_HUNK
+        ),
+        currentText: this.truncateText(
+          hunk.currentText,
+          MAX_CONFLICT_TEXT_CHARS_PER_HUNK
+        ),
+        incomingText: this.truncateText(
+          hunk.incomingText,
+          MAX_CONFLICT_TEXT_CHARS_PER_HUNK
+        )
+      }))
+    };
+  }
+
   private takePatchSnippet(patch: string | null, remainingChars: number): string | null {
     if (patch === null || remainingChars <= 0) {
       return null;
@@ -303,6 +477,26 @@ export class PrReviewAnalysisService {
       ),
       files: normalizedFiles
     };
+  }
+
+  private normalizeConflictSuggestion(
+    value: unknown,
+    fallback: PrReviewConflictSuggestionDraft
+  ): PrReviewConflictSuggestionResult {
+    if (!this.isRecord(value)) {
+      throw new Error("AI conflict suggestion result must be an object");
+    }
+
+    const resolvedContent =
+      typeof value.resolvedContent === "string"
+        ? value.resolvedContent.trim()
+        : fallback.resolvedContent;
+
+    return this.withConflictSuggestionValidation({
+      aiSummary: this.cleanString(value.aiSummary, fallback.aiSummary),
+      aiSuggestion: this.cleanString(value.aiSuggestion, fallback.aiSuggestion),
+      resolvedContent
+    });
   }
 
   private normalizeFileMetadata(
@@ -375,6 +569,59 @@ export class PrReviewAnalysisService {
           "리뷰 판단을 approved, discussion_needed, unknown 중 하나로 남긴다."
         ]
       }))
+    };
+  }
+
+  private buildDeterministicConflictSuggestion(
+    input: PrReviewConflictSuggestionInput
+  ): PrReviewConflictSuggestionDraft {
+    const resolvedSections = input.hunks.map((hunk) => {
+      const currentText = hunk.currentText.trim();
+      const incomingText = hunk.incomingText.trim();
+
+      if (!currentText) {
+        return incomingText;
+      }
+
+      if (!incomingText || incomingText === currentText) {
+        return currentText;
+      }
+
+      return `${currentText}\n${incomingText}`;
+    });
+
+    return {
+      aiSummary: `${input.filePath}에서 ${input.hunks.length}개 content conflict 구간이 발견되었습니다.`,
+      aiSuggestion:
+        "Current와 Incoming 변경 의도를 모두 보존하는 초안을 먼저 확인한 뒤, 중복되거나 충돌하는 줄은 사용자가 적용 전에 조정해야 합니다.",
+      resolvedContent: resolvedSections.join("\n\n")
+    };
+  }
+
+  private withConflictSuggestionValidation(
+    draft: PrReviewConflictSuggestionDraft
+  ): PrReviewConflictSuggestionResult {
+    const resolvedContent =
+      this.truncateText(
+        draft.resolvedContent.trim(),
+        MAX_RESOLVED_CONTENT_CHARS
+      ) ?? "";
+    const validationMessages: string[] = [];
+
+    if (!resolvedContent) {
+      validationMessages.push("resolvedContent is empty");
+    }
+
+    if (CONFLICT_MARKER_PATTERN.test(resolvedContent)) {
+      validationMessages.push("resolvedContent contains conflict marker");
+    }
+
+    return {
+      aiSummary: draft.aiSummary,
+      aiSuggestion: draft.aiSuggestion,
+      resolvedContent,
+      validationStatus: validationMessages.length ? "invalid" : "valid",
+      validationMessages
     };
   }
 

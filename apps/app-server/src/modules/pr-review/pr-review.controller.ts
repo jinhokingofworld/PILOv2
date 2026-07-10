@@ -6,6 +6,7 @@ import {
   DeletePrReviewSessionPayload,
   PrReviewCanvasPayload,
   PrReviewConflictAnalysisPayload,
+  PrReviewConflictSuggestionPayload,
   PrReviewFileDecisionListPayload,
   PrReviewFileDiffPayload,
   PrReviewFilePayload,
@@ -92,6 +93,21 @@ export class PrReviewController {
       reviewSessionId
     );
     return apiResponse(conflicts);
+  }
+
+  @Post("review-files/:reviewFileId/conflict-suggestion")
+  async createReviewFileConflictSuggestion(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("reviewFileId") reviewFileId: string
+  ): Promise<ApiSuccessResponse<PrReviewConflictSuggestionPayload>> {
+    const suggestion =
+      await this.prReviewService.createReviewFileConflictSuggestion(
+        currentUserId,
+        workspaceId,
+        reviewFileId
+      );
+    return apiResponse(suggestion);
   }
 
   @Get("review-sessions/:reviewSessionId/canvas")

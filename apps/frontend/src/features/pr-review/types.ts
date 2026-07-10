@@ -289,6 +289,8 @@ export type PrReviewConflictResolutionStatus =
   | "suggested"
   | "applied";
 
+export type PrReviewConflictSuggestionStatus = "suggested" | "invalid";
+
 export type PrReviewConflictHunk = {
   id: string;
   header: string;
@@ -334,6 +336,19 @@ export type PrReviewConflictAnalysis = {
   supportedTypes: ["content"];
   files: PrReviewConflictFile[];
   unsupportedFiles: PrReviewUnsupportedConflictFile[];
+};
+
+export type PrReviewConflictSuggestion = {
+  reviewFileId: string;
+  filePath: string;
+  previousFilePath: string | null;
+  type: "content";
+  status: PrReviewConflictSuggestionStatus;
+  aiSummary: string;
+  aiSuggestion: string;
+  resolvedContent: string;
+  validationMessages: string[];
+  stored: false;
 };
 
 export type UpdatePrReviewFileDecisionInput = {

@@ -18,9 +18,9 @@
 | Phase | 목적 | Issue | PR | 상태 |
 | --- | --- | --- | --- | --- |
 | 1-A | Scope and contract | #503 | #504 | 완료 |
-| 1-B | Read-only conflict analysis backend | #506 | TBD | 구현 완료 |
-| 1-C | Review room conflict UX | #508 | TBD | 구현 완료 |
-| 1-D | AI suggestion draft | TBD | TBD | 예정 |
+| 1-B | Read-only conflict analysis backend | #506 | #507 | 완료 |
+| 1-C | Review room conflict UX | #508 | #511 | 완료 |
+| 1-D | AI suggestion draft | #512 | #515 | 구현 완료 |
 | 1-E | Apply resolution write path | TBD | TBD | 예정 |
 
 ## 공통 Stop Gate
@@ -99,10 +99,10 @@
 
 작업 체크리스트:
 
-- [ ] AI request/response schema를 문서화한다.
-- [ ] AI 실패 시 read-only conflict hunk는 계속 볼 수 있게 한다.
-- [ ] resolved draft에 conflict marker가 남아 있으면 invalid suggestion으로 처리한다.
-- [ ] suggestion 저장 여부를 별도 결정한다.
+- [x] AI request/response schema를 문서화한다.
+- [x] AI 실패 시 read-only conflict hunk는 계속 볼 수 있게 한다.
+- [x] resolved draft에 conflict marker가 남아 있으면 invalid suggestion으로 처리한다.
+- [x] suggestion 저장 여부를 별도 결정한다.
 
 ## 1-E Apply Resolution Write Path
 
@@ -126,7 +126,7 @@
 - [x] `docs/api/README.md`와 `docs/api/pr-review-api.md`를 확인했다.
 - [x] `apps/frontend/FRONTEND_COMMON_AREAS.md`를 확인했다.
 - [x] `apps/app-server/APP_SERVER_COMMON_AREAS.md`를 확인했다.
-- [ ] API 계약 변경 여부를 PR 본문에 적었다.
-- [ ] DB schema 변경 여부를 PR 본문에 적었다.
-- [ ] GitHub write action 포함 여부를 PR 본문에 적었다.
-- [ ] 실행한 검증 명령과 결과를 PR 본문에 적었다.
+- [x] API 계약 변경 여부를 PR 본문에 적었다.
+- [x] DB schema 변경 여부를 PR 본문에 적었다.
+- [x] GitHub write action 포함 여부를 PR 본문에 적었다.
+- [x] 실행한 검증 명령과 결과를 PR 본문에 적었다.
