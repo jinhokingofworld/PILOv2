@@ -16,7 +16,11 @@ import {
 } from "./github-app.client";
 import type { GithubAppRuntimeConfig } from "./github-integration-config.service";
 import { serializeGithubJsonb } from "./github-jsonb";
-import type { GithubSyncTarget } from "./types";
+import { getGithubFullSyncProjectProgressPercent } from "./github-sync-progress";
+import type {
+  GithubSyncProgressStage,
+  GithubSyncTarget
+} from "./types";
 
 export interface GithubSyncInstallationRow extends QueryResultRow {
   id: string;
@@ -88,6 +92,13 @@ export interface GithubSyncRunContext {
   projectV2: GithubSyncProjectV2ContextRow | null;
   githubUserAccessToken: string | null;
   config: GithubAppRuntimeConfig;
+  reportProgress?: (progress: GithubSyncRunProgress) => Promise<void>;
+}
+
+export interface GithubSyncRunProgress {
+  progressPercent: number;
+  progressStage: GithubSyncProgressStage;
+  summary: GithubSyncRunSummary;
 }
 
 interface GithubProjectV2DiscoveryContext
@@ -120,38 +131,67 @@ export class GithubSyncExecutorService {
     target: GithubSyncTarget,
     context: GithubSyncRunContext
   ): Promise<GithubSyncRunSummary> {
+    if (target === "full") {
+      return this.syncGithubFull(context);
+    }
+
+    const stage = target satisfies GithubSyncProgressStage;
+    await this.reportGithubSyncProgress(
+      context,
+      5,
+      stage,
+      this.createGithubSyncSummary()
+    );
+
+    let summary: GithubSyncRunSummary;
     switch (target) {
       case "repositories":
-        return this.syncGithubRepositories(context);
+        summary = await this.syncGithubRepositories(context);
+        break;
       case "issues":
-        return this.syncGithubIssues(context);
+        summary = await this.syncGithubIssues(context);
+        break;
       case "pull_requests":
-        return this.syncGithubPullRequests(context);
+        summary = await this.syncGithubPullRequests(context);
+        break;
       case "project_v2":
-        return this.syncGithubProjectV2(context);
+        summary = await this.syncGithubProjectV2(context);
+        break;
       case "project_v2_fields":
-        return this.syncGithubProjectV2FieldsAndHydrate(context);
+        summary = await this.syncGithubProjectV2FieldsAndHydrate(context);
+        break;
       case "project_v2_items":
-        return this.syncGithubProjectV2ItemsAndHydrate(context);
-      case "full":
-        return this.syncGithubFull(context);
+        summary = await this.syncGithubProjectV2ItemsAndHydrate(context);
+        break;
     }
+
+    await this.reportGithubSyncProgress(context, 95, stage, summary);
+    return summary;
   }
 
   private async syncGithubFull(
     context: GithubSyncRunContext
   ): Promise<GithubSyncRunSummary> {
     let summary = this.createGithubSyncSummary();
+    await this.reportGithubSyncProgress(context, 5, "repositories", summary);
     summary = this.mergeGithubSyncSummaries(
       summary,
       await this.syncGithubRepositories(context)
     );
+    await this.reportGithubSyncProgress(
+      context,
+      15,
+      "project_v2_discovery",
+      summary
+    );
     const discovery = await this.syncGithubProjectV2Discovery(context);
     summary = this.mergeGithubSyncSummaries(summary, discovery.summary);
+    await this.reportGithubSyncProgress(context, 25, "issues", summary);
     summary = this.mergeGithubSyncSummaries(
       summary,
       await this.syncGithubIssues(context)
     );
+    await this.reportGithubSyncProgress(context, 45, "pull_requests", summary);
     summary = this.mergeGithubSyncSummaries(
       summary,
       await this.syncGithubPullRequests(context)
@@ -161,24 +201,47 @@ export class GithubSyncExecutorService {
       context,
       discovery.projectV2s
     );
+    const stepsPerProject = context.projectV2 ? 4 : 3;
+    const totalProjectSteps = projectV2Contexts.length * stepsPerProject;
+    let completedProjectSteps = 0;
+    const startProjectStep = async (
+      stage: GithubSyncProgressStage
+    ): Promise<void> => {
+      const percent = getGithubFullSyncProjectProgressPercent(
+        completedProjectSteps,
+        totalProjectSteps
+      );
+      await this.reportGithubSyncProgress(context, percent, stage, summary);
+    };
+
     for (const projectV2 of projectV2Contexts) {
       const projectContext = this.withGithubSyncProjectV2(context, projectV2);
       if (context.projectV2) {
+        await startProjectStep("project_v2");
         summary = this.mergeGithubSyncSummaries(
           summary,
           await this.syncGithubProjectV2(projectContext)
         );
+        completedProjectSteps += 1;
       }
+      await startProjectStep("project_v2_fields");
       summary = this.mergeGithubSyncSummaries(
         summary,
         await this.syncGithubProjectV2Fields(projectContext)
       );
+      completedProjectSteps += 1;
+      await startProjectStep("project_v2_items");
       summary = this.mergeGithubSyncSummaries(
         summary,
         await this.syncGithubProjectV2Items(projectContext)
       );
+      completedProjectSteps += 1;
+      await startProjectStep("board_hydration");
       await this.hydrateExistingBoardsForGithubProjectV2(projectContext);
+      completedProjectSteps += 1;
     }
+
+    await this.reportGithubSyncProgress(context, 95, "finalizing", summary);
 
     return summary;
   }
@@ -1545,6 +1608,19 @@ export class GithubSyncExecutorService {
     return context.installation.account_type === "User"
       ? context.githubUserAccessToken ?? undefined
       : undefined;
+  }
+
+  private async reportGithubSyncProgress(
+    context: GithubSyncRunContext,
+    progressPercent: number,
+    progressStage: GithubSyncProgressStage,
+    summary: GithubSyncRunSummary
+  ): Promise<void> {
+    await context.reportProgress?.({
+      progressPercent,
+      progressStage,
+      summary
+    });
   }
 
   private createGithubSyncSummary(
