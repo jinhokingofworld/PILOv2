@@ -50,3 +50,11 @@ export function agentJobUnavailable(message: string): HttpException {
     message
   );
 }
+
+export function agentStorageUnavailable(message: string): HttpException {
+  return agentApiError(
+    HttpStatus.SERVICE_UNAVAILABLE,
+    "SERVICE_UNAVAILABLE",
+    message
+  );
+}

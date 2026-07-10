@@ -344,6 +344,32 @@ def test_runtime_settings_reads_database_ssl(monkeypatch) -> None:
     assert settings.database_ssl is True
 
 
+def test_runtime_settings_allows_local_database_fallback(monkeypatch) -> None:
+    monkeypatch.setenv("SQS_AI_JOBS_QUEUE_URL", "https://sqs.example.com/jobs")
+    monkeypatch.setenv("S3_RECORDINGS_BUCKET", "recordings")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("APP_ENV", "local")
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+
+    settings = RuntimeSettings.from_env()
+
+    assert settings.database_url == "postgresql://pilo:pilo@localhost:5432/pilo"
+
+
+def test_runtime_settings_requires_database_url_in_deployed_env(monkeypatch) -> None:
+    monkeypatch.setenv("SQS_AI_JOBS_QUEUE_URL", "https://sqs.example.com/jobs")
+    monkeypatch.setenv("S3_RECORDINGS_BUCKET", "recordings")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("APP_ENV", "dev")
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+
+    with pytest.raises(
+        RuntimeError,
+        match="DATABASE_URL is required outside local ai-worker environments",
+    ):
+        RuntimeSettings.from_env()
+
+
 def test_openai_transcribe_uses_json_response_format(tmp_path) -> None:
     audio_path = tmp_path / "recording.m4a"
     audio_path.write_bytes(b"audio")

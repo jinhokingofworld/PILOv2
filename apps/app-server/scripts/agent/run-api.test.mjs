@@ -205,14 +205,20 @@ class FakeWorkspaceService {
 }
 
 class FakeAgentLoggingService {
-  constructor(result) {
+  constructor(result, error = null) {
     this.result = result;
+    this.error = error;
     this.calls = [];
     this.failCalls = [];
   }
 
   async createRun(currentUserId, workspaceId, input) {
     this.calls.push({ currentUserId, workspaceId, input });
+
+    if (this.error) {
+      throw this.error;
+    }
+
     return this.result;
   }
 
@@ -346,11 +352,15 @@ function createService({
     confirmationRows: []
   },
   agentJobService = new FakeAgentJobService(),
-  agentExecutionService = new FakeAgentExecutionService()
+  agentExecutionService = new FakeAgentExecutionService(),
+  loggingError = null
 } = {}) {
   const workspaceService = new FakeWorkspaceService();
   const database = new FakeDatabaseService(state);
-  const agentLoggingService = new FakeAgentLoggingService(loggingResult);
+  const agentLoggingService = new FakeAgentLoggingService(
+    loggingResult,
+    loggingError
+  );
   const agentToolRegistryService = new FakeAgentToolRegistryService();
 
   return {
@@ -529,6 +539,28 @@ function errorMessage(error) {
       }
     }
   ]);
+}
+
+{
+  const { service, agentLoggingService, agentJobService } = createService({
+    loggingError: new Error('relation "agent_runs" does not exist')
+  });
+
+  await assert.rejects(
+    () =>
+      service.createRun(USER_ID, WORKSPACE_ID, {
+        prompt: "내일 회의 일정 만들어줘"
+      }),
+    (error) => {
+      assert.equal(error.getStatus(), 503);
+      assert.equal(errorCode(error), "SERVICE_UNAVAILABLE");
+      assert.equal(errorMessage(error), "Agent run storage is unavailable");
+      assert.doesNotMatch(JSON.stringify(error.getResponse()), /agent_runs/);
+      return true;
+    }
+  );
+  assert.equal(agentLoggingService.calls.length, 1);
+  assert.deepEqual(agentJobService.calls, []);
 }
 
 {

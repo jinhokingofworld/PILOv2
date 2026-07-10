@@ -1,9 +1,9 @@
-import { Injectable } from "@nestjs/common";
+import { HttpException, Injectable } from "@nestjs/common";
 import { QueryResultRow } from "pg";
 import { badRequest, notFound } from "../../common/api-error";
 import { DatabaseService } from "../../database/database.service";
 import { WorkspaceService } from "../workspace/workspace.service";
-import { agentJobUnavailable } from "./agent-api-error";
+import { agentJobUnavailable, agentStorageUnavailable } from "./agent-api-error";
 import { AgentExecutionService } from "./agent-execution.service";
 import {
   AGENT_TOOL_SCHEMA_VERSION,
@@ -11,6 +11,7 @@ import {
   AgentToolSchemaSnapshotItem
 } from "./agent-job.service";
 import {
+  CreateAgentRunResult as StoredCreateAgentRunResult,
   AgentLoggingService,
   AgentRunPayload as StoredAgentRunPayload,
   AgentRunStatus,
@@ -228,11 +229,7 @@ export class AgentService {
     body: unknown
   ): Promise<AgentRunCreateResult> {
     const input = this.normalizeCreateRunInput(body);
-    const result = await this.agentLoggingService.createRun(
-      currentUserId,
-      workspaceId,
-      input
-    );
+    const result = await this.createStoredRun(currentUserId, workspaceId, input);
 
     if (result.created) {
       await this.enqueueCreatedRun(currentUserId, workspaceId, result.run.id);
@@ -246,6 +243,26 @@ export class AgentService {
       },
       created: result.created
     };
+  }
+
+  private async createStoredRun(
+    currentUserId: string,
+    workspaceId: string,
+    input: AgentRunCreateInput
+  ): Promise<StoredCreateAgentRunResult> {
+    try {
+      return await this.agentLoggingService.createRun(
+        currentUserId,
+        workspaceId,
+        input
+      );
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+
+      throw agentStorageUnavailable("Agent run storage is unavailable");
+    }
   }
 
   private async enqueueCreatedRun(

@@ -1,5 +1,11 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { createRequire } from "node:module";
+
+const require = createRequire(import.meta.url);
+const { resolveDatabaseUrl, shouldRequireDatabaseUrl } = require(
+  "../dist/database/database.service.js"
+);
 
 function readSource(path) {
   return readFile(new URL(path, import.meta.url), "utf8");
@@ -85,6 +91,35 @@ const canvasShapeParentMigration = await readSource(
 const devTerraformMain = await readSource("../../../infra/envs/dev/main.tf");
 const terraformSecretsModule = await readSource(
   "../../../infra/modules/secrets/main.tf"
+);
+
+assert.equal(
+  resolveDatabaseUrl({
+    APP_ENV: "local"
+  }),
+  "postgresql://pilo:pilo@localhost:5432/pilo"
+);
+assert.equal(
+  resolveDatabaseUrl({
+    NODE_ENV: "test"
+  }),
+  "postgresql://pilo:pilo@localhost:5432/pilo"
+);
+assert.equal(
+  resolveDatabaseUrl({
+    APP_ENV: "dev",
+    DATABASE_URL: " postgresql://example.test/pilo "
+  }),
+  "postgresql://example.test/pilo"
+);
+assert.equal(shouldRequireDatabaseUrl({ APP_ENV: "dev" }), true);
+assert.equal(shouldRequireDatabaseUrl({ NODE_ENV: "production" }), true);
+assert.throws(
+  () =>
+    resolveDatabaseUrl({
+      APP_ENV: "dev"
+    }),
+  /DATABASE_URL is required outside local app-server environments/
 );
 
 assert.match(main, /setGlobalPrefix\("api\/v1"\)/);

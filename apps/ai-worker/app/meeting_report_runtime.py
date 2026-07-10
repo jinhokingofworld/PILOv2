@@ -36,6 +36,7 @@ DEFAULT_STT_MODEL = "gpt-4o-mini-transcribe"
 DEFAULT_MEETING_REPORT_MODEL = "gpt-5.4-mini"
 DEFAULT_WAIT_TIME_SECONDS = 20
 DEFAULT_VISIBILITY_TIMEOUT_SECONDS = 900
+LOCAL_APP_ENVS = {"local", "test", "development"}
 
 
 @dataclass(frozen=True)
@@ -60,7 +61,7 @@ class RuntimeSettings:
             aws_region=_env("AWS_REGION", "ap-northeast-2"),
             sqs_queue_url=_require_env("SQS_AI_JOBS_QUEUE_URL"),
             sqs_endpoint=_optional_env("SQS_ENDPOINT"),
-            database_url=_env("DATABASE_URL", DEFAULT_DATABASE_URL),
+            database_url=_database_url(),
             database_ssl=_env("DATABASE_SSL", "false").lower() == "true",
             recordings_bucket=_require_env("S3_RECORDINGS_BUCKET"),
             openai_api_key=_require_env("OPENAI_API_KEY"),
@@ -613,6 +614,25 @@ def _env(key: str, default: str) -> str:
     if value is None or not value.strip():
         return default
     return value.strip()
+
+
+def _database_url() -> str:
+    value = os.getenv("DATABASE_URL")
+    if value is not None and value.strip():
+        return value.strip()
+
+    if _requires_database_url():
+        raise RuntimeError("DATABASE_URL is required outside local ai-worker environments")
+
+    return DEFAULT_DATABASE_URL
+
+
+def _requires_database_url() -> bool:
+    app_env = os.getenv("APP_ENV", "").strip().lower()
+    if app_env:
+        return app_env not in LOCAL_APP_ENVS
+
+    return os.getenv("NODE_ENV", "").strip().lower() == "production"
 
 
 def _optional_env(key: str) -> str | None:
