@@ -648,9 +648,11 @@ export function PrReviewCanvasShell({
           {selectedReviewFileId ? (
             <PrReviewFileDiffDrawer
               apiClient={apiClient}
+              baseBranch={summary?.baseBranch ?? pullRequest?.baseBranch ?? null}
               conflictAnalysisErrorMessage={conflictAnalysisError}
               conflictAnalysisStatus={conflictAnalysisStatus}
               conflictFile={selectedConflictFile}
+              headBranch={summary?.headBranch ?? pullRequest?.headBranch ?? null}
               isReviewSessionConflicted={conflictStatus === "conflicted"}
               onClose={() => setSelectedReviewFileId(null)}
               onConflictApplied={handleConflictApplied}
