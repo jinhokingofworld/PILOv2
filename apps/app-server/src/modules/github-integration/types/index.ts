@@ -391,6 +391,22 @@ export interface GithubPullRequestFileResolutionPayload {
   headBlobShaAfter: string;
 }
 
+export type GithubPullRequestMergeMethod = "merge";
+
+export interface MergeGithubPullRequestInput {
+  expectedHeadSha: string;
+}
+
+export interface GithubPullRequestMergePayload {
+  mergedByGithubLogin: string;
+  mergeMethod: GithubPullRequestMergeMethod;
+  mergeCommitSha: string;
+  mergeCommitUrl: string | null;
+  pullRequestState: "closed";
+  mergedAt: string | null;
+  headSha: string;
+}
+
 export type GithubSyncTarget =
   | "repositories"
   | "issues"

@@ -33,6 +33,7 @@ import type {
   PrReviewFileStatus,
   PrReviewGithubChangedFile,
   PrReviewGithubPullRequestDetail,
+  PrReviewGithubPullRequestMergePayload,
   PrReviewGithubReviewSubmissionPayload,
   PrReviewGithubReviewSubmitType,
   PrReviewModuleInfo,
@@ -75,6 +76,9 @@ interface PrReviewSummaryRow extends PrReviewSessionRow {
   deletions: number | string;
   commits_count: number | string;
   html_url: string;
+  pull_request_state: string;
+  pull_request_mergeable: boolean | null;
+  pull_request_merged_at: Date | string | null;
 }
 
 interface ReviewFlowRow extends QueryResultRow {
@@ -231,6 +235,11 @@ interface PrReviewConflictApplyDraft {
   expectedHeadBlobSha?: unknown;
 }
 
+interface PrReviewMergeDraft {
+  expectedHeadSha?: unknown;
+  confirm?: unknown;
+}
+
 interface ReviewProgressRow extends QueryResultRow {
   reviewed_count: number | string;
   total_file_count: number | string;
@@ -271,6 +280,9 @@ export interface PrReviewSummaryPayload {
   commitsCount: number;
   githubUrl: string;
   headSha: string;
+  pullRequestState: "open" | "closed";
+  pullRequestMergeable: boolean | null;
+  pullRequestMergedAt: string | null;
   status: PrReviewSessionStatus;
   prPurpose: string | null;
   changeSummary: string[];
@@ -557,6 +569,19 @@ export interface PrReviewSubmissionPayload extends PrReviewSubmissionListItemPay
 export interface PrReviewSubmissionListPayload {
   reviewSessionId: string;
   submissions: PrReviewSubmissionListItemPayload[];
+}
+
+export interface PrReviewMergePayload {
+  reviewSessionId: string;
+  pullRequestId: string;
+  status: "merged";
+  mergedByGithubLogin: string;
+  mergeMethod: "merge";
+  mergeCommitSha: string;
+  mergeCommitUrl: string | null;
+  pullRequestState: "closed";
+  mergedAt: string | null;
+  headSha: string;
 }
 
 export interface DeletePrReviewSessionPayload {
@@ -1320,6 +1345,52 @@ export class PrReviewService {
     };
   }
 
+  async mergeReviewSession(
+    currentUserId: string,
+    workspaceId: string,
+    reviewSessionId: string,
+    body: unknown
+  ): Promise<PrReviewMergePayload> {
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+
+    const input = this.normalizeReviewSessionMerge(body);
+    const session = await this.findReviewSession(workspaceId, reviewSessionId);
+    if (!session) {
+      throw notFound("Review session not found");
+    }
+
+    const files = await this.listReviewFilesForSession(workspaceId, session.id);
+    const counts = this.countReviewStatuses(files);
+    this.assertReviewSessionMergeable(session, counts);
+
+    if (session.head_sha !== input.expectedHeadSha) {
+      throw conflictError("Review session head SHA is stale");
+    }
+
+    const mergeResult: PrReviewGithubPullRequestMergePayload =
+      await this.githubDependency.mergePullRequest(
+        currentUserId,
+        workspaceId,
+        session.pull_request_id,
+        {
+          expectedHeadSha: input.expectedHeadSha
+        }
+      );
+
+    return {
+      reviewSessionId: session.id,
+      pullRequestId: session.pull_request_id,
+      status: "merged",
+      mergedByGithubLogin: mergeResult.mergedByGithubLogin,
+      mergeMethod: mergeResult.mergeMethod,
+      mergeCommitSha: mergeResult.mergeCommitSha,
+      mergeCommitUrl: mergeResult.mergeCommitUrl,
+      pullRequestState: mergeResult.pullRequestState,
+      mergedAt: mergeResult.mergedAt,
+      headSha: mergeResult.headSha
+    };
+  }
+
   async submitReviewSession(
     currentUserId: string,
     workspaceId: string,
@@ -1640,7 +1711,16 @@ export class PrReviewService {
           pull_request.additions,
           pull_request.deletions,
           pull_request.commits_count,
-          pull_request.html_url
+          pull_request.html_url,
+          COALESCE(NULLIF(pull_request.raw->>'state', ''), pull_request.state::text)
+            AS pull_request_state,
+          CASE
+            WHEN pull_request.raw ? 'mergeable'
+              AND jsonb_typeof(pull_request.raw->'mergeable') = 'boolean'
+              THEN (pull_request.raw->>'mergeable')::boolean
+            ELSE pull_request.mergeable
+          END AS pull_request_mergeable,
+          pull_request.merged_at AS pull_request_merged_at
         FROM pr_review_sessions AS review_session
         JOIN github_pull_requests AS pull_request
           ON pull_request.id = review_session.pull_request_id
@@ -2799,6 +2879,30 @@ export class PrReviewService {
     };
   }
 
+  private normalizeReviewSessionMerge(body: unknown): {
+    expectedHeadSha: string;
+  } {
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      throw badRequest("Request body must be an object");
+    }
+
+    const draft = body as PrReviewMergeDraft;
+    if (draft.confirm !== true) {
+      throw badRequest("confirm must be true");
+    }
+
+    if (
+      typeof draft.expectedHeadSha !== "string" ||
+      !draft.expectedHeadSha.trim()
+    ) {
+      throw badRequest("expectedHeadSha must not be empty");
+    }
+
+    return {
+      expectedHeadSha: draft.expectedHeadSha.trim()
+    };
+  }
+
   private normalizeReviewSubmission(body: unknown): {
     submitType: PrReviewGithubReviewSubmitType;
     reviewBody: string;
@@ -2843,6 +2947,23 @@ export class PrReviewService {
 
     if (session.status !== "reviewing" && session.status !== "ready_to_submit") {
       throw badRequest("Review session is not ready to submit");
+    }
+  }
+
+  private assertReviewSessionMergeable(
+    session: PrReviewSessionRow,
+    counts: PrReviewStatusCountsPayload
+  ): void {
+    if (session.status !== "submitted") {
+      throw badRequest("GitHub Review must be submitted before merge");
+    }
+
+    if (session.conflict_status !== "clean") {
+      throw badRequest("Resolve PR conflicts before merge");
+    }
+
+    if (counts.total === 0 || counts.notReviewed > 0) {
+      throw badRequest("Review all files before merge");
     }
   }
 
@@ -2920,6 +3041,12 @@ export class PrReviewService {
       commitsCount: Number(summary.commits_count),
       githubUrl: summary.html_url,
       headSha: summary.head_sha,
+      pullRequestState:
+        summary.pull_request_state === "closed" ? "closed" : "open",
+      pullRequestMergeable: summary.pull_request_mergeable,
+      pullRequestMergedAt: this.toNullableIsoString(
+        summary.pull_request_merged_at
+      ),
       status: summary.status,
       prPurpose: summary.pr_purpose,
       changeSummary: this.toStringArray(summary.change_summary),

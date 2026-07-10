@@ -14,6 +14,8 @@ import type {
   PrReviewGithubConflictStatusPayload,
   PrReviewGithubDependency,
   PrReviewGithubOAuthStatus,
+  PrReviewGithubPullRequestMergeInput,
+  PrReviewGithubPullRequestMergePayload,
   PrReviewGithubPullRequestDetail,
   PrReviewGithubReviewSubmitType,
   PrReviewGithubReviewSubmissionPayload
@@ -137,6 +139,20 @@ export class PrReviewGithubDependencyService implements PrReviewGithubDependency
     input: PrReviewGithubConflictApplyInput
   ): Promise<PrReviewGithubConflictApplyPayload> {
     return this.githubIntegrationService.applyGithubPullRequestFileResolution(
+      currentUserId,
+      workspaceId,
+      pullRequestId,
+      input
+    );
+  }
+
+  async mergePullRequest(
+    currentUserId: string,
+    workspaceId: string,
+    pullRequestId: string,
+    input: PrReviewGithubPullRequestMergeInput
+  ): Promise<PrReviewGithubPullRequestMergePayload> {
+    return this.githubIntegrationService.mergeGithubPullRequest(
       currentUserId,
       workspaceId,
       pullRequestId,

@@ -19,6 +19,17 @@ import {
   Send
 } from "lucide-react";
 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogMedia,
+  AlertDialogTitle
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -67,6 +78,7 @@ type ConflictAnalysisLoadStatus =
   | "ready"
   | "error"
   | "stale";
+type MergeStatus = "idle" | "merging" | "merged" | "error";
 type LoadCanvasDataOptions = {
   quiet?: boolean;
 };
@@ -182,6 +194,56 @@ function findReviewFileStatus(
   return null;
 }
 
+function getPullRequestMergedAt(
+  pullRequest: PrReviewPullRequest | PrReviewPullRequestDetail | null
+): string | null {
+  return pullRequest && "mergedAt" in pullRequest ? pullRequest.mergedAt : null;
+}
+
+function getMergeErrorMessage(error: unknown) {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return "GitHub pull request merge failed";
+}
+
+function getMergeDisabledReason(input: {
+  conflictStatus: PrReviewConflictStatus;
+  isPullRequestMerged: boolean;
+  loadStatus: CanvasLoadStatus;
+  pullRequestState: "open" | "closed";
+  reviewedCount: number;
+  reviewSubmitted: boolean;
+  totalFileCount: number;
+}): string | null {
+  if (input.loadStatus !== "ready") {
+    return "Review data is still loading";
+  }
+
+  if (input.isPullRequestMerged) {
+    return "Pull request is already merged";
+  }
+
+  if (input.pullRequestState !== "open") {
+    return "Only open pull requests can be merged";
+  }
+
+  if (!input.reviewSubmitted) {
+    return "Submit the GitHub Review before merge";
+  }
+
+  if (input.conflictStatus !== "clean") {
+    return "Resolve PR conflicts before merge";
+  }
+
+  if (input.totalFileCount === 0 || input.reviewedCount < input.totalFileCount) {
+    return "Review all files before merge";
+  }
+
+  return null;
+}
+
 export function PrReviewCanvasShell({
   apiClient,
   onBackToSelection,
@@ -209,6 +271,9 @@ export function PrReviewCanvasShell({
     string | null
   >(null);
   const [isSubmitReviewModalOpen, setIsSubmitReviewModalOpen] = useState(false);
+  const [isMergeConfirmOpen, setIsMergeConfirmOpen] = useState(false);
+  const [mergeStatus, setMergeStatus] = useState<MergeStatus>("idle");
+  const [mergeError, setMergeError] = useState<string | null>(null);
 
   const loadCanvasData = useCallback(async (options: LoadCanvasDataOptions = {}) => {
     const quiet = options.quiet ?? false;
@@ -396,6 +461,21 @@ export function PrReviewCanvasShell({
     ? unsupportedConflictByFileId.get(selectedReviewFileId) ?? null
     : null;
   const reviewSubmitted = (summary?.status ?? session.status) === "submitted";
+  const pullRequestState = summary?.pullRequestState ?? pullRequest?.state ?? "open";
+  const pullRequestMergedAt =
+    summary?.pullRequestMergedAt ?? getPullRequestMergedAt(pullRequest);
+  const isPullRequestMerged =
+    pullRequestState === "closed" && Boolean(pullRequestMergedAt);
+  const expectedMergeHeadSha = summary?.headSha ?? session.headSha;
+  const mergeDisabledReason = getMergeDisabledReason({
+    conflictStatus,
+    isPullRequestMerged,
+    loadStatus,
+    pullRequestState,
+    reviewedCount,
+    reviewSubmitted,
+    totalFileCount
+  });
   const progressLabel = `${formatNumber(reviewedCount)} / ${formatNumber(
     totalFileCount
   )}`;
@@ -436,6 +516,35 @@ export function PrReviewCanvasShell({
     window.addEventListener("pointerup", handlePointerUp);
   }
 
+  async function handleMergeReviewSession() {
+    setMergeStatus("merging");
+    setMergeError(null);
+
+    try {
+      const result = await apiClient.mergeReviewSession(workspaceId, session.id, {
+        confirm: true,
+        expectedHeadSha: expectedMergeHeadSha
+      });
+
+      setSummary((currentSummary) =>
+        currentSummary
+          ? {
+              ...currentSummary,
+              pullRequestMergeable: false,
+              pullRequestMergedAt: result.mergedAt,
+              pullRequestState: result.pullRequestState
+            }
+          : currentSummary
+      );
+      setMergeStatus("merged");
+      setIsMergeConfirmOpen(false);
+      void loadCanvasData({ quiet: true });
+    } catch (error) {
+      setMergeStatus("error");
+      setMergeError(getMergeErrorMessage(error));
+    }
+  }
+
   return (
     <div className="fixed inset-0 z-[60] flex flex-col overflow-hidden bg-slate-50 text-slate-950">
       <header className="flex h-16 shrink-0 items-center gap-3 overflow-x-auto border-b border-slate-200 bg-white px-4">
@@ -473,15 +582,43 @@ export function PrReviewCanvasShell({
           </Button>
           <Tooltip>
             <TooltipTrigger render={<span />}>
-              <Button disabled type="button" variant="outline">
-                <GitMerge className="size-4" />
-                Merge
+              <Button
+                disabled={
+                  Boolean(mergeDisabledReason) || mergeStatus === "merging"
+                }
+                onClick={() => {
+                  setMergeError(null);
+                  setIsMergeConfirmOpen(true);
+                }}
+                type="button"
+                variant="outline"
+              >
+                {mergeStatus === "merging" ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <GitMerge className="size-4" />
+                )}
+                {isPullRequestMerged || mergeStatus === "merged"
+                  ? "Merged"
+                  : mergeStatus === "merging"
+                    ? "Merging"
+                    : "Merge"}
               </Button>
             </TooltipTrigger>
             <TooltipContent>
-              현재 버전에서는 GitHub에서 merge를 진행해주세요.
+              {mergeDisabledReason ??
+                "Merge this PR through the GitHub merge API."}
             </TooltipContent>
           </Tooltip>
+          {mergeError ? (
+            <span className="max-w-64 truncate text-xs font-medium text-rose-600">
+              {mergeError}
+            </span>
+          ) : mergeStatus === "merged" || isPullRequestMerged ? (
+            <span className="text-xs font-medium text-emerald-700">
+              Merge complete
+            </span>
+          ) : null}
         </div>
       </header>
 
@@ -565,6 +702,52 @@ export function PrReviewCanvasShell({
           workspaceId={workspaceId}
         />
       ) : null}
+
+      <AlertDialog
+        open={isMergeConfirmOpen}
+        onOpenChange={(open) => {
+          if (mergeStatus !== "merging") {
+            setIsMergeConfirmOpen(open);
+          }
+        }}
+      >
+        <AlertDialogContent size="default">
+          <AlertDialogHeader>
+            <AlertDialogMedia className="bg-blue-50 text-blue-700">
+              <GitMerge className="size-5" />
+            </AlertDialogMedia>
+            <AlertDialogTitle>Merge pull request?</AlertDialogTitle>
+            <AlertDialogDescription>
+              GitHub Review submitted PR will be merged with a merge commit.
+              Branch protection and required checks are enforced by GitHub.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {mergeError ? (
+            <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">
+              {mergeError}
+            </div>
+          ) : null}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={mergeStatus === "merging"}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={mergeStatus === "merging"}
+              onClick={(event) => {
+                event.preventDefault();
+                void handleMergeReviewSession();
+              }}
+            >
+              {mergeStatus === "merging" ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <GitMerge className="size-4" />
+              )}
+              Merge
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

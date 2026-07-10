@@ -84,6 +84,7 @@ assert.match(
   prReviewController,
   /@Post\("review-sessions\/:reviewSessionId\/submissions"\)/
 );
+assert.match(prReviewController, /@Post\("review-sessions\/:reviewSessionId\/merge"\)/);
 assert.match(
   prReviewController,
   /@Get\("review-sessions\/:reviewSessionId\/submissions"\)/
@@ -100,11 +101,13 @@ assert.match(prReviewGithubDependencyService, /getPullRequestChangedFiles/);
 assert.match(prReviewGithubDependencyService, /getPullRequestConflictStatus/);
 assert.match(prReviewGithubDependencyService, /getPullRequestConflictInputs/);
 assert.match(prReviewGithubDependencyService, /submitPullRequestReview/);
+assert.match(prReviewGithubDependencyService, /mergePullRequest/);
 assert.match(prReviewGithubDependencyService, /getGithubPullRequest/);
 assert.match(prReviewGithubDependencyService, /listGithubPullRequestFiles/);
 assert.match(prReviewGithubDependencyService, /getGithubPullRequestConflictStatus/);
 assert.match(prReviewGithubDependencyService, /getGithubPullRequestConflictInputs/);
 assert.match(prReviewGithubDependencyService, /submitGithubPullRequestReview/);
+assert.match(prReviewGithubDependencyService, /mergeGithubPullRequest/);
 assert.match(prReviewGithubDependencyService, /mapPullRequestDetail/);
 assert.match(prReviewGithubDependencyService, /mapConflictInputs/);
 assert.match(prReviewGithubDependencyService, /mapChangedFile/);
@@ -141,6 +144,9 @@ assert.match(prReviewService, /listReviewFileDecisions/);
 assert.match(prReviewService, /getReviewFileDiff/);
 assert.match(prReviewService, /getReviewSessionConflicts/);
 assert.match(prReviewService, /createReviewFileConflictSuggestion/);
+assert.match(prReviewService, /mergeReviewSession/);
+assert.match(prReviewService, /assertReviewSessionMergeable/);
+assert.match(prReviewService, /normalizeReviewSessionMerge/);
 assert.match(prReviewService, /submitReviewSession/);
 assert.match(prReviewService, /listReviewSubmissions/);
 assert.match(prReviewService, /getReviewSubmission/);

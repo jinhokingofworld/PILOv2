@@ -13,6 +13,7 @@ import {
   PrReviewFilePayload,
   PrReviewFlowFilesPayload,
   PrReviewFlowListPayload,
+  PrReviewMergePayload,
   PrReviewResultPayload,
   PrReviewService,
   PrReviewSubmissionListPayload,
@@ -242,6 +243,22 @@ export class PrReviewController {
       body
     );
     return apiResponse(submission);
+  }
+
+  @Post("review-sessions/:reviewSessionId/merge")
+  async mergeReviewSession(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("reviewSessionId") reviewSessionId: string,
+    @Body() body: unknown
+  ): Promise<ApiSuccessResponse<PrReviewMergePayload>> {
+    const mergeResult = await this.prReviewService.mergeReviewSession(
+      currentUserId,
+      workspaceId,
+      reviewSessionId,
+      body
+    );
+    return apiResponse(mergeResult);
   }
 
   @Get("review-sessions/:reviewSessionId/submissions")

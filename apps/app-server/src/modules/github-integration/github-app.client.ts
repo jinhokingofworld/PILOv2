@@ -236,11 +236,16 @@ export interface GithubPullRequestFileApiItem {
 }
 
 export interface GithubPullRequestApiDetails {
+  state: "open" | "closed";
   changed_files: number;
   additions: number;
   deletions: number;
   commits: number;
+  draft: boolean;
   mergeable: boolean | null;
+  htmlUrl: string;
+  closedAt: string | null;
+  mergedAt: string | null;
   head?: GithubPullRequestApiItem["head"];
   headRef: string;
   headSha: string;
@@ -1476,13 +1481,18 @@ export class GithubAppClient {
       throw badRequest("GitHub pull request lookup failed");
     }
 
-    const pullRequest = payload as GithubPullRequestApiDetails;
+    const pullRequest = payload as GithubPullRequestApiItem;
     if (
       typeof pullRequest.changed_files !== "number" ||
       typeof pullRequest.additions !== "number" ||
       typeof pullRequest.deletions !== "number" ||
       typeof pullRequest.commits !== "number"
     ) {
+      throw badRequest("GitHub pull request lookup failed");
+    }
+
+    const state = pullRequest.state;
+    if (state !== "open" && state !== "closed") {
       throw badRequest("GitHub pull request lookup failed");
     }
 
@@ -1512,11 +1522,16 @@ export class GithubAppClient {
     }
 
     return {
+      state,
       changed_files: pullRequest.changed_files,
       additions: pullRequest.additions,
       deletions: pullRequest.deletions,
       commits: pullRequest.commits,
+      draft: pullRequest.draft ?? false,
       mergeable,
+      htmlUrl: pullRequest.html_url,
+      closedAt: pullRequest.closed_at ?? null,
+      mergedAt: pullRequest.merged_at ?? null,
       headRef,
       headSha,
       headRepositoryOwner,

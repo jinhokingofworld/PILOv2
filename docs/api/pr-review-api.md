@@ -82,6 +82,7 @@ comment, PR merge/close, ProjectV2 write는 이 문서의 범위가 아니다.
 | `PATCH` | `/workspaces/{workspaceId}/github/review-files/{reviewFileId}/review` | 파일별 review decision 저장 |
 | `GET` | `/workspaces/{workspaceId}/github/review-files/{reviewFileId}/decisions` | 파일별 decision history 조회 |
 | `POST` | `/workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}/submissions` | GitHub Review 제출 |
+| `POST` | `/workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}/merge` | Post-MVP GitHub PR merge 실행 |
 | `GET` | `/workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}/submissions` | 제출 이력 조회 |
 | `GET` | `/workspaces/{workspaceId}/github/review-submissions/{submissionId}` | 제출 상세 조회 |
 
@@ -173,6 +174,9 @@ DELETE /api/v1/workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}
     "commitsCount": 3,
     "githubUrl": "https://github.com/my-team/pilo/pull/24",
     "headSha": "abc123",
+    "pullRequestState": "open",
+    "pullRequestMergeable": true,
+    "pullRequestMergedAt": null,
     "status": "reviewing",
     "prPurpose": "음성 회의 페이지와 회의 종료 후 리포트 UI 흐름 추가",
     "changeSummary": ["음성 회의 페이지 추가", "리포트 게시판 화면 추가"],
@@ -784,8 +788,64 @@ Session submission history response:
 `GET /workspaces/{workspaceId}/github/review-submissions/{submissionId}`는 제출 성공 응답과
 같은 detail payload를 반환한다.
 
+## GitHub PR Merge 실행
+
+Post-MVP Phase 1-F에서 구현하는 사용자 확인 기반 PR merge 실행 계약이다.
+이 endpoint는 GitHub Review 제출 완료 후 PR Review room에서 GitHub PR merge API를 호출한다.
+merge 방식은 1차에서 `merge` commit만 지원하며, `squash`, `rebase`, head branch 삭제는 수행하지 않는다.
+
+```http
+POST /api/v1/workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}/merge
+```
+
+요청 body:
+
+```json
+{
+  "expectedHeadSha": "abc123",
+  "confirm": true
+}
+```
+
+응답:
+
+```json
+{
+  "success": true,
+  "data": {
+    "reviewSessionId": "review_session_uuid",
+    "pullRequestId": "pull_request_uuid",
+    "status": "merged",
+    "mergedByGithubLogin": "octocat",
+    "mergeMethod": "merge",
+    "mergeCommitSha": "merge_commit_sha",
+    "mergeCommitUrl": "https://github.com/my-team/pilo/commit/merge_commit_sha",
+    "pullRequestState": "closed",
+    "mergedAt": "2026-07-10T00:00:00.000Z",
+    "headSha": "abc123"
+  }
+}
+```
+
+서버 규칙:
+
+- 현재 사용자는 review session이 속한 Workspace에 접근할 수 있어야 한다.
+- 요청 body는 `confirm: true`와 `expectedHeadSha`를 포함해야 한다.
+- review session status가 `submitted`여야 한다. GitHub Review 제출 전 merge는 허용하지 않는다.
+- `conflictStatus`가 `clean`이어야 한다.
+- 모든 review file이 `not_reviewed`가 아니어야 한다.
+- review session `headSha`와 요청 `expectedHeadSha`가 다르면 stale session으로 보고 `409 Conflict`를 반환한다.
+- GitHub App user OAuth 연결이 필요하며, 실제 merge는 현재 사용자의 OAuth token으로 수행한다.
+- GitHub 원격 PR state가 `open`이 아니거나 head SHA가 stale이면 merge를 막는다.
+- GitHub 원격 PR `mergeable`이 `false`이면 conflict로 보고 merge를 막는다. `null`이면 GitHub mergeability 계산 중으로 보고 재시도를 안내한다.
+- Branch protection, required checks, required reviews, conversation resolution, merge method 제한은 PILO가 사전 판정하지 않고 GitHub merge API 응답을 안전한 API error로 매핑한다.
+- merge 성공 후 `github_pull_requests` cache의 PR state, merged timestamp, head SHA, mergeable 상태를 갱신한다.
+- review session status는 별도 `merged` 상태로 바꾸지 않고 기존 `submitted` 상태를 유지한다.
+- GitHub token, raw provider error, secret은 API 응답이나 로그에 노출하지 않는다.
+
 ## MVP 제외
 
 - GitHub inline review comment
-- PR merge/close
+- PR close without merge
+- PR head branch delete after merge
 - MVP에서 AI 생성 flow graph 편집

@@ -16,6 +16,7 @@ import { GithubProjectV2SyncTokenService } from "./github-project-v2-sync-token.
 import { GithubProjectV2Service } from "./github-project-v2.service";
 import { GithubProjectV2WriteService } from "./github-project-v2-write.service";
 import { GithubPullRequestFileWriteService } from "./github-pull-request-file-write.service";
+import { GithubPullRequestMergeService } from "./github-pull-request-merge.service";
 import { GithubPullRequestRemoteService } from "./github-pull-request-remote.service";
 import { GithubReviewSubmissionService } from "./github-review-submission.service";
 import { GithubSourceReadService } from "./github-source-read.service";
@@ -62,6 +63,7 @@ import type {
   GithubPullRequestConflictInputsPayload,
   GithubPullRequestConflictStatusPayload,
   GithubPullRequestFileResolutionPayload,
+  GithubPullRequestMergePayload,
   GithubPullRequestDetailPayload,
   GithubPullRequestFilePayload,
   GithubPullRequestListItemPayload,
@@ -70,6 +72,7 @@ import type {
   GithubRepositoryDetailPayload,
   GithubRepositoryCollaboratorStatusPayload,
   GithubRepositoryListItemPayload,
+  MergeGithubPullRequestInput,
   SubmitGithubPullRequestReviewInput,
   GithubSyncRunDetailPayload,
   GithubSyncRunPayload
@@ -98,6 +101,7 @@ export class GithubIntegrationService {
   private readonly githubProjectV2Service: GithubProjectV2Service;
   private readonly githubPullRequestRemoteService: GithubPullRequestRemoteService;
   private readonly githubPullRequestFileWriteService: GithubPullRequestFileWriteService;
+  private readonly githubPullRequestMergeService: GithubPullRequestMergeService;
   private readonly githubReviewSubmissionService: GithubReviewSubmissionService;
   private readonly githubWebhookService: GithubWebhookService;
   private readonly githubSyncRunService: GithubSyncRunService;
@@ -138,7 +142,9 @@ export class GithubIntegrationService {
     @Optional()
     githubProjectV2WriteService?: GithubProjectV2WriteService,
     @Optional()
-    githubPullRequestFileWriteService?: GithubPullRequestFileWriteService
+    githubPullRequestFileWriteService?: GithubPullRequestFileWriteService,
+    @Optional()
+    githubPullRequestMergeService?: GithubPullRequestMergeService
   ) {
     const callbackStateService =
       githubCallbackStateService ?? new GithubCallbackStateService(database);
@@ -224,6 +230,16 @@ export class GithubIntegrationService {
     this.githubPullRequestFileWriteService =
       githubPullRequestFileWriteService ??
       new GithubPullRequestFileWriteService(
+        database,
+        githubAppClient,
+        githubOAuthClient,
+        tokenEncryptionService,
+        configService,
+        workspaceService
+      );
+    this.githubPullRequestMergeService =
+      githubPullRequestMergeService ??
+      new GithubPullRequestMergeService(
         database,
         githubAppClient,
         githubOAuthClient,
@@ -647,6 +663,20 @@ export class GithubIntegrationService {
     }
   ): Promise<GithubPullRequestFileResolutionPayload> {
     return this.githubPullRequestFileWriteService.applyGithubPullRequestFileResolution(
+      currentUserId,
+      workspaceId,
+      pullRequestId,
+      input
+    );
+  }
+
+  async mergeGithubPullRequest(
+    currentUserId: string,
+    workspaceId: string,
+    pullRequestId: string,
+    input: MergeGithubPullRequestInput
+  ): Promise<GithubPullRequestMergePayload> {
+    return this.githubPullRequestMergeService.mergeGithubPullRequest(
       currentUserId,
       workspaceId,
       pullRequestId,

@@ -120,6 +120,20 @@ export interface PrReviewGithubConflictApplyPayload {
   headBlobShaAfter: string;
 }
 
+export interface PrReviewGithubPullRequestMergeInput {
+  expectedHeadSha: string;
+}
+
+export interface PrReviewGithubPullRequestMergePayload {
+  mergedByGithubLogin: string;
+  mergeMethod: "merge";
+  mergeCommitSha: string;
+  mergeCommitUrl: string | null;
+  pullRequestState: "closed";
+  mergedAt: string | null;
+  headSha: string;
+}
+
 export interface PrReviewGithubDependency {
   getCurrentUserGithubOAuthStatus(
     currentUserId: string
@@ -170,4 +184,11 @@ export interface PrReviewGithubDependency {
     pullRequestId: string,
     input: PrReviewGithubConflictApplyInput
   ): Promise<PrReviewGithubConflictApplyPayload>;
+
+  mergePullRequest(
+    currentUserId: string,
+    workspaceId: string,
+    pullRequestId: string,
+    input: PrReviewGithubPullRequestMergeInput
+  ): Promise<PrReviewGithubPullRequestMergePayload>;
 }

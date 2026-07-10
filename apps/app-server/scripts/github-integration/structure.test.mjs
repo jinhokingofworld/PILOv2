@@ -44,6 +44,10 @@ const featureServices = [
     className: "GithubPullRequestRemoteService"
   },
   {
+    fileName: "github-pull-request-merge.service.ts",
+    className: "GithubPullRequestMergeService"
+  },
+  {
     fileName: "github-webhook.service.ts",
     className: "GithubWebhookService"
   },
@@ -188,6 +192,11 @@ const delegatedMethods = [
     methodName: "getGithubPullRequestConflictStatus",
     serviceName: "githubPullRequestRemoteService",
     args: "currentUserId, workspaceId, pullRequestId"
+  },
+  {
+    methodName: "mergeGithubPullRequest",
+    serviceName: "githubPullRequestMergeService",
+    args: "currentUserId, workspaceId, pullRequestId, input"
   },
   {
     methodName: "receiveGithubWebhook",

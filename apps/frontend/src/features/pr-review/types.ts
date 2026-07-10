@@ -143,6 +143,9 @@ export type PrReviewSummary = {
   commitsCount: number;
   githubUrl: string;
   headSha: string;
+  pullRequestState: "open" | "closed";
+  pullRequestMergeable: boolean | null;
+  pullRequestMergedAt: string | null;
   status: PrReviewSessionStatus;
   prPurpose: string | null;
   changeSummary: string[];
@@ -439,6 +442,24 @@ export type PrReviewSubmission = PrReviewSubmissionListItem & {
 export type SubmitPrReviewSessionInput = {
   submitType: PrReviewSubmitType;
   reviewBody: string;
+};
+
+export type MergePrReviewSessionInput = {
+  expectedHeadSha: string;
+  confirm: true;
+};
+
+export type PrReviewMergeResult = {
+  reviewSessionId: string;
+  pullRequestId: string;
+  status: "merged";
+  mergedByGithubLogin: string;
+  mergeMethod: "merge";
+  mergeCommitSha: string;
+  mergeCommitUrl: string | null;
+  pullRequestState: "closed";
+  mergedAt: string | null;
+  headSha: string;
 };
 
 export type ListPrReviewRepositoriesQuery = {
