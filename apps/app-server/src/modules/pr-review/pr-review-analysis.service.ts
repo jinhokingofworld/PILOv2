@@ -1,5 +1,10 @@
 import { Injectable, Logger } from "@nestjs/common";
 import type { PrReviewConflictHunkPayload } from "./pr-review-conflict-analyzer";
+import {
+  buildResolvedFileContent,
+  normalizeConflictContent,
+  type PrReviewResolvedHunkPayload
+} from "./pr-review-conflict-resolution";
 import type {
   PrReviewGithubChangedFile,
   PrReviewGithubPullRequestDetail,
@@ -48,6 +53,7 @@ export type PrReviewConflictSuggestionValidationStatus = "valid" | "invalid";
 export interface PrReviewConflictSuggestionResult {
   aiSummary: string;
   aiSuggestion: string;
+  resolvedHunks: PrReviewResolvedHunkPayload[];
   resolvedContent: string;
   validationStatus: PrReviewConflictSuggestionValidationStatus;
   validationMessages: string[];
@@ -56,7 +62,7 @@ export interface PrReviewConflictSuggestionResult {
 interface PrReviewConflictSuggestionDraft {
   aiSummary: string;
   aiSuggestion: string;
-  resolvedContent: string;
+  resolvedHunks: PrReviewResolvedHunkPayload[];
 }
 
 interface OpenAiResponseBody {
@@ -127,11 +133,22 @@ const PR_REVIEW_ANALYSIS_SCHEMA = {
 const PR_REVIEW_CONFLICT_SUGGESTION_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["aiSummary", "aiSuggestion", "resolvedContent"],
+  required: ["aiSummary", "aiSuggestion", "resolvedHunks"],
   properties: {
     aiSummary: { type: "string" },
     aiSuggestion: { type: "string" },
-    resolvedContent: { type: "string" }
+    resolvedHunks: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["hunkId", "resolvedText"],
+        properties: {
+          hunkId: { type: "string" },
+          resolvedText: { type: "string" }
+        }
+      }
+    }
   }
 } as const;
 
@@ -166,7 +183,7 @@ export class PrReviewAnalysisService {
     const fallback = this.buildDeterministicConflictSuggestion(input);
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
-      return this.withConflictSuggestionValidation(fallback);
+      return this.withConflictSuggestionValidation(input, fallback);
     }
 
     try {
@@ -174,14 +191,14 @@ export class PrReviewAnalysisService {
         apiKey,
         input
       );
-      return this.normalizeConflictSuggestion(rawSuggestion, fallback);
+      return this.normalizeConflictSuggestion(rawSuggestion, fallback, input);
     } catch (error) {
       this.logger.warn(
         `PR Review conflict suggestion fallback used: ${this.getErrorMessage(
           error
         )}`
       );
-      return this.withConflictSuggestionValidation(fallback);
+      return this.withConflictSuggestionValidation(input, fallback);
     }
   }
 
@@ -275,7 +292,7 @@ export class PrReviewAnalysisService {
               {
                 role: "system",
                 content:
-                  "You are PILO's PR conflict resolution assistant. Return concise Korean explanation and raw resolved code only in the requested JSON schema."
+                  "You are PILO's PR conflict resolution assistant. Return concise Korean explanation and one raw resolved code block for every requested conflict hunk in the requested JSON schema."
               },
               {
                 role: "user",
@@ -382,18 +399,19 @@ export class PrReviewAnalysisService {
   ): unknown {
     return {
       task:
-        "Create a draft resolution for the provided content conflict hunks. Return the complete resolved file content. Do not claim that the branch was modified or the PR was merged.",
+        "Create one draft resolution for every provided content conflict hunk. Match each result by hunkId. Do not claim that the branch was modified or the PR was merged.",
       outputRules: {
         aiSummary:
           "Explain the conflict cause in Korean in one or two concise sentences.",
         aiSuggestion:
           "Describe the resolution direction in Korean without mentioning unsupported write actions.",
-        resolvedContent:
-          "Return the complete file content after applying the resolution. Do not wrap it in Markdown fences and do not include conflict markers."
+        resolvedHunks:
+          "Return every requested hunkId exactly once with only the raw resolved code for that hunk. Do not wrap code in Markdown fences and do not include conflict markers."
       },
       validationRules: [
-        "resolvedContent must not contain <<<<<<<, =======, or >>>>>>>.",
-        "resolvedContent must not be empty.",
+        "Every requested hunkId must appear exactly once.",
+        "resolvedText must not contain <<<<<<<, =======, or >>>>>>>.",
+        "An empty resolvedText is allowed only when deleting the entire conflict hunk is intentional.",
         "Prefer preserving both current and incoming intent when they do not contradict each other."
       ],
       file: {
@@ -486,21 +504,48 @@ export class PrReviewAnalysisService {
 
   private normalizeConflictSuggestion(
     value: unknown,
-    fallback: PrReviewConflictSuggestionDraft
+    fallback: PrReviewConflictSuggestionDraft,
+    input: PrReviewConflictSuggestionInput
   ): PrReviewConflictSuggestionResult {
     if (!this.isRecord(value)) {
       throw new Error("AI conflict suggestion result must be an object");
     }
 
-    const resolvedContent =
-      typeof value.resolvedContent === "string"
-        ? value.resolvedContent.trim()
-        : fallback.resolvedContent;
+    const fallbackByHunkId = new Map(
+      fallback.resolvedHunks.map((hunk) => [hunk.hunkId, hunk.resolvedText])
+    );
+    const rawResolvedHunks = Array.isArray(value.resolvedHunks)
+      ? value.resolvedHunks
+      : [];
+    const resolvedTextByHunkId = new Map<string, string>();
 
-    return this.withConflictSuggestionValidation({
+    for (const candidate of rawResolvedHunks) {
+      if (
+        !this.isRecord(candidate) ||
+        typeof candidate.hunkId !== "string" ||
+        typeof candidate.resolvedText !== "string"
+      ) {
+        continue;
+      }
+
+      resolvedTextByHunkId.set(
+        candidate.hunkId,
+        normalizeConflictContent(candidate.resolvedText)
+      );
+    }
+
+    const resolvedHunks = input.hunks.map((hunk) => ({
+      hunkId: hunk.id,
+      resolvedText:
+        resolvedTextByHunkId.get(hunk.id) ??
+        fallbackByHunkId.get(hunk.id) ??
+        hunk.incomingText
+    }));
+
+    return this.withConflictSuggestionValidation(input, {
       aiSummary: this.cleanString(value.aiSummary, fallback.aiSummary),
       aiSuggestion: this.cleanString(value.aiSuggestion, fallback.aiSuggestion),
-      resolvedContent
+      resolvedHunks
     });
   }
 
@@ -584,15 +629,40 @@ export class PrReviewAnalysisService {
       aiSummary: `${input.filePath}에서 ${input.hunks.length}개 content conflict 구간이 발견되었습니다.`,
       aiSuggestion:
         "Current와 Incoming 변경 의도를 모두 보존하는 초안을 먼저 확인한 뒤, 중복되거나 충돌하는 줄은 사용자가 적용 전에 조정해야 합니다.",
-      resolvedContent: this.buildDeterministicResolvedFileContent(input)
+      resolvedHunks: input.hunks.map((hunk) => ({
+        hunkId: hunk.id,
+        resolvedText: this.buildDeterministicResolvedHunkText(hunk)
+      }))
     };
   }
 
   private withConflictSuggestionValidation(
+    input: PrReviewConflictSuggestionInput,
     draft: PrReviewConflictSuggestionDraft
   ): PrReviewConflictSuggestionResult {
-    const resolvedContent = this.normalizeLineEndings(draft.resolvedContent);
     const validationMessages: string[] = [];
+    const resolvedHunks = input.hunks.map((hunk) => {
+      const candidate = draft.resolvedHunks.find(
+        (resolvedHunk) => resolvedHunk.hunkId === hunk.id
+      );
+      const resolvedText = normalizeConflictContent(
+        candidate?.resolvedText ?? hunk.incomingText
+      );
+
+      if (CONFLICT_MARKER_PATTERN.test(resolvedText)) {
+        validationMessages.push(`${hunk.id} resolvedText contains conflict marker`);
+      }
+
+      return {
+        hunkId: hunk.id,
+        resolvedText
+      };
+    });
+    const resolvedContent = buildResolvedFileContent({
+      headContent: input.headContent,
+      hunks: input.hunks,
+      resolvedHunks
+    });
 
     if (!resolvedContent.trim()) {
       validationMessages.push("resolvedContent is empty");
@@ -609,44 +679,18 @@ export class PrReviewAnalysisService {
     return {
       aiSummary: draft.aiSummary,
       aiSuggestion: draft.aiSuggestion,
+      resolvedHunks,
       resolvedContent,
       validationStatus: validationMessages.length ? "invalid" : "valid",
       validationMessages
     };
   }
 
-  private buildDeterministicResolvedFileContent(
-    input: PrReviewConflictSuggestionInput
-  ): string {
-    const lines = this.splitContentLines(input.headContent);
-    const replacements = input.hunks
-      .map((hunk) => ({
-        startIndex: Math.max(0, hunk.incomingStartLine - 1),
-        deleteCount: Math.max(0, hunk.incomingLineCount),
-        lines: this.splitContentLines(this.buildDeterministicResolvedHunkText(hunk))
-      }))
-      .sort((left, right) => right.startIndex - left.startIndex);
-
-    for (const replacement of replacements) {
-      if (replacement.startIndex > lines.length) {
-        continue;
-      }
-
-      lines.splice(
-        replacement.startIndex,
-        replacement.deleteCount,
-        ...replacement.lines
-      );
-    }
-
-    return lines.join("\n");
-  }
-
   private buildDeterministicResolvedHunkText(
     hunk: PrReviewConflictHunkPayload
   ): string {
-    const currentText = this.normalizeLineEndings(hunk.currentText);
-    const incomingText = this.normalizeLineEndings(hunk.incomingText);
+    const currentText = normalizeConflictContent(hunk.currentText);
+    const incomingText = normalizeConflictContent(hunk.incomingText);
     const currentTrimmed = currentText.trim();
     const incomingTrimmed = incomingText.trim();
 
@@ -658,18 +702,9 @@ export class PrReviewAnalysisService {
       return currentText;
     }
 
-    return [currentText, incomingText]
+    return [incomingText, currentText]
       .filter((text) => text.trim().length > 0)
       .join("\n");
-  }
-
-  private splitContentLines(content: string): string[] {
-    const normalized = this.normalizeLineEndings(content);
-    return normalized.length === 0 ? [] : normalized.split("\n");
-  }
-
-  private normalizeLineEndings(content: string): string {
-    return content.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
   }
 
   private describeFileRole(filePath: string): string {

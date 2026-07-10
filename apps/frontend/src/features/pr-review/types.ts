@@ -316,6 +316,7 @@ export type PrReviewConflictFile = {
   isSupported: true;
   resolutionStatus: PrReviewConflictResolutionStatus;
   headBlobSha: string;
+  headContent: string;
   hunks: PrReviewConflictHunk[];
   aiSummary: string | null;
   aiSuggestion: string | null;
@@ -352,9 +353,15 @@ export type PrReviewConflictSuggestion = {
   headBlobSha: string;
   aiSummary: string;
   aiSuggestion: string;
+  resolvedHunks: PrReviewConflictResolvedHunk[];
   resolvedContent: string;
   validationMessages: string[];
   stored: false;
+};
+
+export type PrReviewConflictResolvedHunk = {
+  hunkId: string;
+  resolvedText: string;
 };
 
 export type ApplyPrReviewConflictResolutionInput = {

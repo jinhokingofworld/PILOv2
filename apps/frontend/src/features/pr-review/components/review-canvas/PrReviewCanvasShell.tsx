@@ -652,6 +652,7 @@ export function PrReviewCanvasShell({
               conflictAnalysisErrorMessage={conflictAnalysisError}
               conflictAnalysisStatus={conflictAnalysisStatus}
               conflictFile={selectedConflictFile}
+              conflictHeadSha={conflictAnalysis?.headSha ?? null}
               headBranch={summary?.headBranch ?? pullRequest?.headBranch ?? null}
               isReviewSessionConflicted={conflictStatus === "conflicted"}
               onClose={() => setSelectedReviewFileId(null)}

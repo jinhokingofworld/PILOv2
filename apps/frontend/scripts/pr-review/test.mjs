@@ -49,6 +49,20 @@ const prReviewFileDiffDrawer = await readFile(
   ),
   "utf8"
 );
+const prReviewResolvedCodeEditor = await readFile(
+  new URL(
+    "../../src/features/pr-review/components/review-canvas/PrReviewResolvedCodeEditor.tsx",
+    import.meta.url
+  ),
+  "utf8"
+);
+const prReviewConflictResolution = await readFile(
+  new URL(
+    "../../src/features/pr-review/components/review-canvas/pr-review-conflict-resolution.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
 const prReviewSubmitReviewModal = await readFile(
   new URL(
     "../../src/features/pr-review/components/review-canvas/PrReviewSubmitReviewModal.tsx",
@@ -83,6 +97,9 @@ assert.match(prReviewTypes, /export type PrReviewFileDiff =/);
 assert.match(prReviewTypes, /export type PrReviewConflictAnalysis =/);
 assert.match(prReviewTypes, /export type PrReviewConflictFile =/);
 assert.match(prReviewTypes, /export type PrReviewConflictSuggestion =/);
+assert.match(prReviewTypes, /export type PrReviewConflictResolvedHunk =/);
+assert.match(prReviewTypes, /headContent: string/);
+assert.match(prReviewTypes, /resolvedHunks: PrReviewConflictResolvedHunk\[\]/);
 assert.match(prReviewTypes, /export type PrReviewUnsupportedConflictFile =/);
 assert.match(prReviewTypes, /export type PrReviewConflictHunk =/);
 assert.match(prReviewTypes, /export type UpdatePrReviewFileDecisionInput =/);
@@ -221,8 +238,8 @@ assert.match(prReviewFileDiffDrawer, /ConflictSuggestionPreview/);
 assert.match(prReviewFileDiffDrawer, /createReviewFileConflictSuggestion/);
 assert.match(prReviewFileDiffDrawer, /applyReviewFileConflictResolution/);
 assert.match(prReviewFileDiffDrawer, /onApply: \(\) => Promise<boolean>/);
-assert.match(prReviewFileDiffDrawer, /event\.preventDefault\(\)/);
 assert.match(prReviewFileDiffDrawer, /void onApply\(\)\.then/);
+assert.doesNotMatch(prReviewFileDiffDrawer, /<AlertDialog/);
 assert.match(prReviewFileDiffDrawer, /ConflictApplySuccessNotice/);
 assert.match(prReviewFileDiffDrawer, /setReloadVersion\(\(version\) => version \+ 1\)/);
 assert.match(prReviewFileDiffDrawer, /검증 실패/);
@@ -231,6 +248,14 @@ assert.match(prReviewFileDiffDrawer, /disabled=\{decisionDisabled\}/);
 assert.match(prReviewFileDiffDrawer, /Conflict 해결 전에는 일반 판단을 저장할 수 없습니다/);
 assert.match(prReviewFileDiffDrawer, /ConflictResolutionPanel/);
 assert.match(prReviewFileDiffDrawer, /ConflictHunkComparison/);
+assert.match(prReviewFileDiffDrawer, /ConflictUnifiedCodePane/);
+assert.match(prReviewFileDiffDrawer, /ConflictWorkspaceTabs/);
+assert.match(prReviewFileDiffDrawer, /ResolvedDraftWorkspace/);
+assert.match(prReviewFileDiffDrawer, /AI RESOLUTION/);
+assert.match(prReviewFileDiffDrawer, /PR 브랜치 선택/);
+assert.match(prReviewFileDiffDrawer, /대상 브랜치 선택/);
+assert.match(prReviewFileDiffDrawer, /둘 다 선택/);
+assert.match(prReviewFileDiffDrawer, /GitHub에 적용/);
 assert.match(prReviewFileDiffDrawer, /Target branch:/);
 assert.match(prReviewFileDiffDrawer, /PR branch:/);
 assert.match(prReviewFileDiffDrawer, /selectedConflictHunkIndex/);
@@ -256,6 +281,13 @@ assert.match(prReviewFileDiffDrawer, /textarea/);
 assert.match(prReviewFileDiffDrawer, /DiffView/);
 assert.match(prReviewFileDiffDrawer, /reloadVersion/);
 assert.doesNotMatch(prReviewFileDiffDrawer, /features\/canvas/);
+assert.match(prReviewResolvedCodeEditor, /EditorView/);
+assert.match(prReviewResolvedCodeEditor, /lineNumbers/);
+assert.match(prReviewResolvedCodeEditor, /syntaxHighlighting/);
+assert.doesNotMatch(prReviewResolvedCodeEditor, /features\/canvas/);
+assert.match(prReviewConflictResolution, /buildConflictResolutionDraft/);
+assert.match(prReviewConflictResolution, /isConflictResolutionComplete/);
+assert.match(prReviewConflictResolution, /right\.startIndex - left\.startIndex/);
 assert.match(prReviewSubmitReviewModal, /getReviewSessionResult/);
 assert.match(prReviewSubmitReviewModal, /submitReviewSession/);
 assert.match(prReviewSubmitReviewModal, /useState<PrReviewSubmitType \| null>\(null\)/);

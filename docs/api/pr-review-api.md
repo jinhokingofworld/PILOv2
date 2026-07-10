@@ -486,6 +486,7 @@ GET /api/v1/workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}/co
         "isSupported": true,
         "resolutionStatus": "unresolved",
         "headBlobSha": "file_blob_sha",
+        "headContent": "const title = 'Meeting room';",
         "hunks": [
           {
             "id": "hunk_1",
@@ -528,6 +529,8 @@ GET /api/v1/workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}/co
 - 초기 read-only slice는 `content` conflict만 `isSupported: true`로 반환한다.
 - `content` conflict file은 PR head branch의 현재 file blob SHA를 `headBlobSha`로 포함한다.
   이 값은 후속 apply 요청의 변경 감지 guard로 사용한다.
+- `headContent`는 PR head branch의 파일 전체 원문이다. 클라이언트는 이 원문에 hunk별
+  선택 결과를 적용해 최종 `resolvedContent`를 조립한다.
 - `baseText`는 merge base의 원본 구간이고, `currentText`는 base branch 쪽 변경,
   `incomingText`는 PR head branch 쪽 변경이다.
 - `modify_delete`, `rename_modify`, `add_add`, `unsupported`는 후속 slice에서 처리하며,
@@ -542,8 +545,8 @@ GET /api/v1/workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}/co
 ## AI Conflict Suggestion Draft 생성
 
 Post-MVP Phase 1-D에서 구현하는 사용자 요청 기반 AI suggestion 생성 계약이다.
-이 endpoint는 conflict 파일 하나에 대해 transient 파일 전체 해결 초안을 반환하며, DB에 저장하거나
-PR head branch를 수정하지 않는다.
+이 endpoint는 conflict 파일 하나에 대해 transient hunk별 AI 해결안과 서버가 조립한 파일 전체
+초안을 반환하며, DB에 저장하거나 PR head branch를 수정하지 않는다.
 
 ```http
 POST /api/v1/workspaces/{workspaceId}/github/review-files/{reviewFileId}/conflict-suggestion
@@ -570,6 +573,12 @@ POST /api/v1/workspaces/{workspaceId}/github/review-files/{reviewFileId}/conflic
     "headBlobSha": "file_blob_sha",
     "aiSummary": "같은 title 상수를 base branch와 head branch가 서로 다른 문구로 수정해 충돌했습니다.",
     "aiSuggestion": "두 문구의 의미를 합쳐 화면 맥락이 드러나는 이름으로 정리하는 초안입니다.",
+    "resolvedHunks": [
+      {
+        "hunkId": "hunk_1",
+        "resolvedText": "const title = 'Voice meeting room';"
+      }
+    ],
     "resolvedContent": "const title = 'Voice meeting room';",
     "validationMessages": [],
     "stored": false
@@ -588,11 +597,16 @@ POST /api/v1/workspaces/{workspaceId}/github/review-files/{reviewFileId}/conflic
 - `OPENAI_API_KEY`가 있으면 OpenAI Responses API structured output을 사용하고,
   key 누락/API 실패/응답 검증 실패 시 deterministic fallback 초안을 반환한다.
 - AI output은 사용자가 확인하기 전까지 suggestion으로만 취급한다.
+- `resolvedHunks`는 요청 시점에 계산된 모든 conflict hunk를 `hunkId`로 식별하며, 각
+  `resolvedText`는 해당 hunk만 대체할 코드다. 코드 전체를 Markdown fence로 감싸지 않는다.
+- 서버는 PR head 파일 원문에 `resolvedHunks`를 뒤쪽 hunk부터 적용해 `resolvedContent`를
+  조립한다. AI가 누락한 hunk는 deterministic fallback 결과로 보완한다.
 - `resolvedContent`는 GitHub Contents API apply에 사용할 수 있는 파일 전체 내용이어야 한다.
 - 응답의 `headSha`와 `headBlobSha`는 suggestion 생성 시점의 PR head/file blob guard 값이다.
   사용자는 이 값을 그대로 apply 요청에 전달해야 한다.
-- `resolvedContent`가 비어 있거나 `<<<<<<<`, `=======`, `>>>>>>>` conflict marker를 포함하면
-  `status: "invalid"`와 `validationMessages`를 반환한다.
+- hunk의 `resolvedText` 또는 조립된 `resolvedContent`가 `<<<<<<<`, `=======`, `>>>>>>>`
+  conflict marker를 포함하거나, `resolvedContent`가 비어 있으면 `status: "invalid"`와
+  `validationMessages`를 반환한다. hunk 전체 삭제를 뜻하는 빈 `resolvedText`는 허용한다.
 - PR head 파일 전체 content가 apply 크기 제한을 초과하면 suggestion/apply 대상에서 제외한다.
 - suggestion 결과는 DB에 저장하지 않는다.
 - `review_files.current_status`, `file_review_decisions`, `review_submissions`를 변경하지 않는다.

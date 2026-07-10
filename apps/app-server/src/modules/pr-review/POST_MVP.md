@@ -156,10 +156,15 @@ type ConflictFile = {
   path: string;
   previousPath?: string | null;
   type: ConflictType;
+  headContent: string;
   hunks: ConflictHunk[];
   resolutionStatus: "unresolved" | "suggested" | "applied";
   aiSummary?: string;
   aiSuggestion?: string;
+  resolvedHunks?: Array<{
+    hunkId: string;
+    resolvedText: string;
+  }>;
   resolvedContent?: string;
 };
 ```
