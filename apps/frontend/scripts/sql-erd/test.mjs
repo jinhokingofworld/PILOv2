@@ -1183,7 +1183,28 @@ const generateSmokeBaseSession = {
   modelJson: createRuntimeTestModel(),
   layoutJson: {
     version: 1,
-    tableLayouts: [{ tableId: "table.users", x: 512, y: 256, width: 320 }]
+    tableLayouts: [{ tableId: "table.users", x: 512, y: 256, width: 320 }],
+    annotations: {
+      version: 1,
+      links: [
+        {
+          id: "annotation.generate.valid",
+          kind: "column_link",
+          fromTableId: "table.users",
+          fromColumnId: "column.users.email",
+          toTableId: "table.posts",
+          toColumnId: "column.posts.title",
+          label: "owns"
+        },
+        {
+          id: "annotation.generate.removed",
+          kind: "table_link",
+          fromTableId: "table.users",
+          toTableId: "table.removed",
+          label: "removed"
+        }
+      ]
+    }
   },
   settingsJson: { sourcePanelOpen: true }
 };
@@ -1210,6 +1231,10 @@ assert.equal(
   createGenerateRequest.payload.layoutJson.tableLayouts[1].tableId,
   "table.posts"
 );
+assert.deepEqual(createGenerateRequest.payload.layoutJson.annotations, {
+  version: 1,
+  links: [generateSmokeBaseSession.layoutJson.annotations.links[0]]
+});
 assert.deepEqual(createGenerateRequest.payload.settingsJson, {
   sourcePanelOpen: true
 });
@@ -1909,11 +1934,64 @@ assert.equal(
   "BIGINT UNSIGNED"
 );
 
+const mysqlModelIndex = modelRuntime.createSqltoerdModelIndex(
+  mysqlParseResult.modelJson
+);
+assert.equal(
+  mysqlModelIndex.columnsByTableId
+    .get("table.users")
+    ?.has("column.users.email"),
+  true
+);
+assert.equal(
+  mysqlModelIndex.columnsByTableId
+    .get("table.orders")
+    ?.has("column.orders.id"),
+  true
+);
+
 const generatedLayout = modelRuntime.createSqltoerdLayoutForModel(
   mysqlParseResult.modelJson,
   {
     version: 1,
-    tableLayouts: [{ tableId: "table.users", x: 44, y: 55, width: 288 }]
+    tableLayouts: [{ tableId: "table.users", x: 44, y: 55, width: 288 }],
+    annotations: {
+      version: 1,
+      links: [
+        {
+          id: "annotation.valid.table",
+          kind: "table_link",
+          fromTableId: "table.users",
+          toTableId: "table.orders",
+          label: "places"
+        },
+        {
+          id: "annotation.valid.column",
+          kind: "column_link",
+          fromTableId: "table.users",
+          fromColumnId: "column.users.email",
+          toTableId: "table.orders",
+          toColumnId: "column.orders.id",
+          label: "business owner"
+        },
+        {
+          id: "annotation.invalid.table",
+          kind: "table_link",
+          fromTableId: "table.users",
+          toTableId: "table.removed",
+          label: "removed"
+        },
+        {
+          id: "annotation.invalid.column",
+          kind: "column_link",
+          fromTableId: "table.users",
+          fromColumnId: "column.users.removed",
+          toTableId: "table.orders",
+          toColumnId: "column.orders.id",
+          label: "removed"
+        }
+      ]
+    }
   }
 );
 
@@ -1928,6 +2006,10 @@ assert.deepEqual(generatedLayout.tableLayouts[1], {
   x: 440,
   y: 80
 });
+assert.deepEqual(
+  generatedLayout.annotations.links.map((annotation) => annotation.id),
+  ["annotation.valid.table", "annotation.valid.column"]
+);
 
 const movedRuntimeLayout = modelRuntime.updateSqltoerdLayoutWithTablePositions(
   runtimeModel,
@@ -1936,7 +2018,8 @@ const movedRuntimeLayout = modelRuntime.updateSqltoerdLayoutWithTablePositions(
     tableLayouts: [
       { tableId: "table.users", x: 10, y: 20, width: 240 },
       { tableId: "table.orders", x: 360, y: 20, width: 260 }
-    ]
+    ],
+    annotations: generatedLayout.annotations
   },
   [
     { tableId: "table.orders", x: 460, y: 180 },
@@ -1948,10 +2031,30 @@ assert.deepEqual(movedRuntimeLayout.tableLayouts, [
   { tableId: "table.users", x: 10, y: 20, width: 240 },
   { tableId: "table.orders", x: 460, y: 180, width: 260 }
 ]);
+assert.deepEqual(movedRuntimeLayout.annotations, generatedLayout.annotations);
 assert.equal(
   modelRuntime.areSqltoerdLayoutsEqual(
     movedRuntimeLayout,
     movedRuntimeLayout
+  ),
+  true
+);
+assert.equal(
+  modelRuntime.areSqltoerdLayoutsEqual(movedRuntimeLayout, {
+    ...movedRuntimeLayout,
+    annotations: {
+      version: 1,
+      links: movedRuntimeLayout.annotations.links.map((annotation, index) =>
+        index === 0 ? { ...annotation, label: "changed" } : annotation
+      )
+    }
+  }),
+  false
+);
+assert.equal(
+  modelRuntime.areSqltoerdLayoutsEqual(
+    { version: 1, tableLayouts: [] },
+    { version: 1, tableLayouts: [], annotations: { version: 1, links: [] } }
   ),
   true
 );
