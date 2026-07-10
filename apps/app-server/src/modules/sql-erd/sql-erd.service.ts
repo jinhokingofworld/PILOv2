@@ -7,19 +7,28 @@ import {
 } from "../../common/api-error";
 import { DatabaseService } from "../../database/database.service";
 import { WorkspaceService } from "../workspace/workspace.service";
-import { mapDeletedSqlErdSession, mapSqlErdSession } from "./sql-erd.mapper";
+import { encodeSqlErdSessionCursor } from "./sql-erd.cursor";
+import {
+  mapDeletedSqlErdSession,
+  mapSqlErdSession,
+  mapSqlErdSessionSummary
+} from "./sql-erd.mapper";
 import {
   CreateSqlErdSessionRequest,
   DeleteSqlErdSessionQuery,
+  ListSqlErdSessionsQuery,
   NormalizedUpdateSqlErdSessionInput,
   SqlErdDeletedSessionPayload,
+  SqlErdSessionListPayload,
   SqlErdSessionPayload,
   SqlErdSessionRow,
+  SqlErdSessionSummaryRow,
   UpdateSqlErdSessionRequest
 } from "./sql-erd.types";
 import {
   validateCreateSqlErdSessionRequest,
   validateDeleteSqlErdSessionQuery,
+  validateListSqlErdSessionsQuery,
   validateSqlErdLayoutJson,
   validateSqlErdSessionId,
   validateUpdateSqlErdSessionRequest
@@ -44,6 +53,26 @@ const SQL_ERD_SESSION_SELECT = `
     created_at,
     updated_at,
     deleted_at
+  FROM sql_erd_sessions
+`;
+const SQL_ERD_SESSION_SUMMARY_SELECT = `
+  SELECT
+    id,
+    workspace_id,
+    title,
+    source_format,
+    dialect,
+    table_count,
+    relation_count,
+    revision,
+    created_by,
+    updated_by,
+    created_at,
+    updated_at,
+    to_char(
+      updated_at AT TIME ZONE 'UTC',
+      'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
+    ) AS cursor_updated_at
   FROM sql_erd_sessions
 `;
 const UNIQUE_VIOLATION_CODE = "23505";
@@ -76,6 +105,65 @@ export class SqlErdService {
 
     const session = await this.findActiveSession(workspaceId);
     return session ? mapSqlErdSession(session) : null;
+  }
+
+  async listSessions(
+    currentUserId: string,
+    workspaceId: string,
+    query: ListSqlErdSessionsQuery
+  ): Promise<SqlErdSessionListPayload> {
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+
+    const input = validateListSqlErdSessionsQuery(query);
+    const rows = await this.database.query<SqlErdSessionSummaryRow>(
+      `
+        ${SQL_ERD_SESSION_SUMMARY_SELECT}
+        WHERE workspace_id = $1
+          AND deleted_at IS NULL
+          AND (
+            $2::timestamptz IS NULL
+            OR (updated_at, id) < ($2::timestamptz, $3::uuid)
+          )
+        ORDER BY updated_at DESC, id DESC
+        LIMIT $4
+      `,
+      [
+        workspaceId,
+        input.cursor?.updatedAt ?? null,
+        input.cursor?.id ?? null,
+        input.limit + 1
+      ]
+    );
+    const hasNextPage = rows.length > input.limit;
+    const pageRows = rows.slice(0, input.limit);
+    const lastRow = pageRows.at(-1);
+
+    return {
+      items: pageRows.map(mapSqlErdSessionSummary),
+      nextCursor:
+        hasNextPage && lastRow
+          ? encodeSqlErdSessionCursor({
+              updatedAt: lastRow.cursor_updated_at,
+              id: lastRow.id
+            })
+          : null
+    };
+  }
+
+  async getSession(
+    currentUserId: string,
+    workspaceId: string,
+    sessionId: string
+  ): Promise<SqlErdSessionPayload> {
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+
+    const validSessionId = validateSqlErdSessionId(sessionId);
+    const session = await this.findActiveSessionById(workspaceId, validSessionId);
+    if (!session) {
+      throw notFound("sqltoerd session not found");
+    }
+
+    return mapSqlErdSession(session);
   }
 
   async createSession(
@@ -290,6 +378,8 @@ export class SqlErdService {
         ${SQL_ERD_SESSION_SELECT}
         WHERE workspace_id = $1
           AND deleted_at IS NULL
+        ORDER BY updated_at DESC, id DESC
+        LIMIT 1
       `,
       [workspaceId]
     );

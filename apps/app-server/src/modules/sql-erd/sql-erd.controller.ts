@@ -17,8 +17,10 @@ import { SqlErdService } from "./sql-erd.service";
 import {
   CreateSqlErdSessionRequest,
   DeleteSqlErdSessionQuery,
+  ListSqlErdSessionsQuery,
   SQL_ERD_REQUEST_BODY_LIMIT_BYTES,
   SqlErdDeletedSessionPayload,
+  SqlErdSessionListPayload,
   SqlErdSessionPayload,
   UpdateSqlErdSessionRequest
 } from "./sql-erd.types";
@@ -36,6 +38,36 @@ export class SqlErdSessionController {
     const session = await this.sqlErdService.getActiveSession(
       currentUserId,
       workspaceId
+    );
+
+    return apiResponse(session);
+  }
+
+  @Get("sql-erd-sessions")
+  async listSessions(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Query() query: ListSqlErdSessionsQuery
+  ): Promise<ApiSuccessResponse<SqlErdSessionListPayload>> {
+    const sessions = await this.sqlErdService.listSessions(
+      currentUserId,
+      workspaceId,
+      query
+    );
+
+    return apiResponse(sessions);
+  }
+
+  @Get("sql-erd-sessions/:sessionId")
+  async getSession(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("sessionId") sessionId: string
+  ): Promise<ApiSuccessResponse<SqlErdSessionPayload>> {
+    const session = await this.sqlErdService.getSession(
+      currentUserId,
+      workspaceId,
+      sessionId
     );
 
     return apiResponse(session);

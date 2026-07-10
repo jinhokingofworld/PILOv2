@@ -66,6 +66,8 @@ assert.match(sqlErdController, /@Get\("sql-erd-session"\)/);
 assert.match(sqlErdController, /@Post\("sql-erd-session"\)/);
 assert.match(sqlErdController, /@Patch\("sql-erd-session\/:sessionId"\)/);
 assert.match(sqlErdController, /@Delete\("sql-erd-session\/:sessionId"\)/);
+assert.match(sqlErdController, /@Get\("sql-erd-sessions"\)/);
+assert.match(sqlErdController, /@Get\("sql-erd-sessions\/:sessionId"\)/);
 assert.equal(sqlErdController.match(/@RouteConfig/g)?.length, 2);
 assert.equal(sqlErdController.match(/bodyLimit/g)?.length, 2);
 assert.match(sqlErdTypes, /SQL_ERD_REQUEST_BODY_LIMIT_BYTES = 2 \* 1024 \* 1024/);
@@ -138,13 +140,24 @@ assert.match(sqlErdMapper, /mapSqlErdSession/);
 assert.match(sqlErdMapper, /mapDeletedSqlErdSession/);
 
 class FakeDatabase {
-  constructor({ queryOneRows = [] } = {}) {
+  constructor({ queryRows = [], queryOneRows = [] } = {}) {
+    this.queryRows = [...queryRows];
     this.queryOneRows = [...queryOneRows];
     this.queries = [];
   }
 
+  async query(text, values = []) {
+    this.queries.push({ method: "query", text, values });
+    const next = this.queryRows.shift();
+    if (typeof next === "function") {
+      return next(text, values);
+    }
+
+    return next ?? [];
+  }
+
   async queryOne(text, values = []) {
-    this.queries.push({ text, values });
+    this.queries.push({ method: "queryOne", text, values });
     const next = this.queryOneRows.shift();
     if (typeof next === "function") {
       return next(text, values);
@@ -334,6 +347,26 @@ function sessionRow(overrides = {}) {
   };
 }
 
+function sessionSummaryRow(overrides = {}) {
+  const row = sessionRow(overrides);
+  return {
+    id: row.id,
+    workspace_id: row.workspace_id,
+    title: row.title,
+    source_format: row.source_format,
+    dialect: row.dialect,
+    table_count: row.table_count,
+    relation_count: row.relation_count,
+    revision: row.revision,
+    created_by: row.created_by,
+    updated_by: row.updated_by,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    cursor_updated_at:
+      overrides.cursor_updated_at ?? "2026-07-07T08:05:00.123456Z"
+  };
+}
+
 class FakeSqlErdHttpService {
   constructor() {
     this.calls = [];
@@ -475,6 +508,120 @@ await assertRouteBodyLimit(
   const session = await service.getActiveSession(currentUserId, workspaceId);
 
   assert.equal(session, null);
+}
+
+{
+  const firstId = "33333333-3333-4333-8333-333333333333";
+  const secondId = "44444444-4444-4444-8444-444444444444";
+  const thirdId = "55555555-5555-4555-8555-555555555555";
+  const database = new FakeDatabase({
+    queryRows: [
+      (text, values) => {
+        assert.match(text, /FROM sql_erd_sessions/);
+        assert.match(text, /ORDER BY updated_at DESC, id DESC/);
+        assert.match(text, /LIMIT \$4/);
+        assert.deepEqual(values, [workspaceId, null, null, 3]);
+        return [
+          sessionSummaryRow({ id: firstId }),
+          sessionSummaryRow({
+            id: secondId,
+            updated_at: new Date("2026-07-07T08:04:00.123Z"),
+            cursor_updated_at: "2026-07-07T08:04:00.123456Z"
+          }),
+          sessionSummaryRow({
+            id: thirdId,
+            updated_at: new Date("2026-07-07T08:03:00.123Z"),
+            cursor_updated_at: "2026-07-07T08:03:00.123456Z"
+          })
+        ];
+      }
+    ]
+  });
+  const { service, workspaceService } = createSubject(database);
+
+  assert.equal(typeof service.listSessions, "function");
+  const result = await service.listSessions(currentUserId, workspaceId, {
+    limit: "2"
+  });
+
+  assert.deepEqual(workspaceService.calls, [{ userId: currentUserId, workspaceId }]);
+  assert.equal(result.items.length, 2);
+  assert.equal(result.items[0].id, firstId);
+  assert.equal(result.items[1].id, secondId);
+  assert.equal(typeof result.nextCursor, "string");
+  assert.equal("sourceText" in result.items[0], false);
+  assert.equal("modelJson" in result.items[0], false);
+  assert.equal("layoutJson" in result.items[0], false);
+  assert.equal("settingsJson" in result.items[0], false);
+
+  const nextDatabase = new FakeDatabase({
+    queryRows: [
+      (text, values) => {
+        assert.match(text, /\(updated_at, id\) < \(\$2::timestamptz, \$3::uuid\)/);
+        assert.deepEqual(values, [
+          workspaceId,
+          "2026-07-07T08:04:00.123456Z",
+          secondId,
+          21
+        ]);
+        return [];
+      }
+    ]
+  });
+  const { service: nextService } = createSubject(nextDatabase);
+  const nextPage = await nextService.listSessions(currentUserId, workspaceId, {
+    cursor: result.nextCursor
+  });
+
+  assert.deepEqual(nextPage, { items: [], nextCursor: null });
+}
+
+{
+  const { service } = createSubject();
+
+  await assertApiError(
+    () =>
+      service.listSessions(currentUserId, workspaceId, {
+        cursor: "not-a-server-cursor"
+      }),
+    400,
+    "BAD_REQUEST",
+    /cursor is invalid/
+  );
+
+  await assertApiError(
+    () =>
+      service.listSessions(currentUserId, workspaceId, {
+        limit: "20",
+        sort: "title"
+      }),
+    400,
+    "BAD_REQUEST",
+    /unknown field/
+  );
+}
+
+{
+  const database = new FakeDatabase({ queryOneRows: [sessionRow()] });
+  const { service } = createSubject(database);
+
+  assert.equal(typeof service.getSession, "function");
+  const session = await service.getSession(currentUserId, workspaceId, sessionId);
+
+  assert.equal(session.id, sessionId);
+  assert.equal(session.deletedAt, null);
+}
+
+{
+  const database = new FakeDatabase({ queryOneRows: [null] });
+  const { service } = createSubject(database);
+
+  await assertApiError(
+    () => service.getSession(currentUserId, workspaceId, sessionId),
+    404,
+    "NOT_FOUND",
+    /session not found/
+  );
 }
 
 {

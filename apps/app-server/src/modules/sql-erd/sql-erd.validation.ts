@@ -1,9 +1,12 @@
 import { badRequest, payloadTooLarge } from "../../common/api-error";
+import { decodeSqlErdSessionCursor } from "./sql-erd.cursor";
 import {
   CreateSqlErdSessionRequest,
   DeleteSqlErdSessionQuery,
+  ListSqlErdSessionsQuery,
   NormalizedCreateSqlErdSessionInput,
   NormalizedDeleteSqlErdSessionInput,
+  NormalizedListSqlErdSessionsInput,
   NormalizedUpdateSqlErdSessionInput,
   SqlErdDialect,
   SqlErdJsonObject,
@@ -51,6 +54,10 @@ const UPDATE_REQUEST_FIELDS = new Set([
   "settingsJson"
 ]);
 const DELETE_QUERY_FIELDS = new Set(["baseRevision"]);
+const LIST_QUERY_FIELDS = new Set(["limit", "cursor"]);
+const DEFAULT_LIST_LIMIT = 20;
+const MAX_LIST_LIMIT = 100;
+const MAX_CURSOR_LENGTH = 2048;
 
 interface ModelMetadata {
   tableCount: number;
@@ -125,6 +132,20 @@ export function validateDeleteSqlErdSessionQuery(
   };
 }
 
+export function validateListSqlErdSessionsQuery(
+  query: ListSqlErdSessionsQuery
+): NormalizedListSqlErdSessionsInput {
+  if (!isPlainJsonObject(query)) {
+    throw badRequest("Query must be an object");
+  }
+
+  assertAllowedFields(query, LIST_QUERY_FIELDS, "Query");
+  return {
+    limit: readListLimit(query.limit),
+    cursor: readListCursor(query.cursor)
+  };
+}
+
 export function validateSqlErdLayoutJson(
   layoutJson: SqlErdJsonObject,
   modelJson: SqlErdJsonObject
@@ -145,6 +166,37 @@ function readBody(
   assertAllowedFields(body, allowedFields, "Request body");
 
   return body;
+}
+
+function readListLimit(value: unknown): number {
+  if (value === undefined) {
+    return DEFAULT_LIST_LIMIT;
+  }
+
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string" && /^\d+$/.test(value)
+        ? Number(value)
+        : Number.NaN;
+
+  if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > MAX_LIST_LIMIT) {
+    throw badRequest("limit must be an integer between 1 and 100");
+  }
+
+  return parsed;
+}
+
+function readListCursor(value: unknown): NormalizedListSqlErdSessionsInput["cursor"] {
+  if (value === undefined) {
+    return null;
+  }
+
+  if (typeof value !== "string" || value.length > MAX_CURSOR_LENGTH) {
+    throw badRequest("sqltoerd cursor is invalid");
+  }
+
+  return decodeSqlErdSessionCursor(value);
 }
 
 function readTitle(value: unknown): string {
