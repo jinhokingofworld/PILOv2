@@ -49,6 +49,15 @@ assert.match(boardApi, /"state": "open"/);
 assert.match(boardApi, /## Issue 생성/);
 assert.match(boardApi, /"columnId": "column_uuid"/);
 assert.match(boardApi, /서버는 Board가 참조하는 repository와 ProjectV2를 사용한다/);
+assert.match(boardApi, /Idempotency-Key/);
+assert.match(boardApi, /`Idempotency-Key`는 필수/);
+assert.match(boardApi, /같은 key와 같은 요청/);
+assert.match(boardApi, /기존 성공 응답과 `201 Created`/);
+assert.match(boardApi, /같은 key와 다른 요청/);
+assert.match(boardApi, /`409 CONFLICT`/);
+assert.match(boardApi, /`processing`/);
+assert.match(boardApi, /`retryable`/);
+assert.match(boardApi, /GitHub Issue 생성 응답을 받지 못한 경우/);
 
 assert.match(boardApi, /권한 규칙/);
 assert.match(boardApi, /현재 사용자는 해당 Workspace에 접근할 수 있어야 한다/);
