@@ -7,7 +7,6 @@ import { CalendarCard } from "./calendar-card";
 import { GithubWorkspaceCards } from "./shortcut-cards";
 import { MembersCard } from "./members-card";
 import { MiddleDashboardCards } from "./middle-dashboard-cards";
-import { SummaryMetricsPanel } from "./summary-metrics-panel";
 import {
   useHomeIssues,
   useHomeMeetingReports,
@@ -47,18 +46,11 @@ export function HomeDashboard() {
 
   return (
     <section className="flex min-h-0 flex-1 flex-col gap-4">
-      <div className="grid min-h-0 flex-1 gap-4 xl:grid-cols-[0.9fr_1.75fr_1fr] xl:grid-rows-[minmax(0,330px)_minmax(272px,1fr)_128px]">
+      <div className="grid min-h-0 flex-1 gap-4 2xl:grid-cols-[0.9fr_1.75fr_1fr] 2xl:grid-rows-[minmax(0,330px)_minmax(272px,1fr)_128px]">
         <MembersCard />
         <CalendarCard
           calendarDates={calendarDates}
           calendarEventsState={calendarEventsState}
-          today={today}
-        />
-        <SummaryMetricsPanel
-          calendarEventsState={calendarEventsState}
-          issuesState={issuesState}
-          meetingReportsState={meetingReportsState}
-          pullRequestsState={pullRequestsState}
           today={today}
         />
         <MiddleDashboardCards

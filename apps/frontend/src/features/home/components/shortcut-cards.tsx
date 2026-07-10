@@ -12,7 +12,7 @@ import { formatRelativeTimeFromNow } from "../utils/home-date";
 
 export function GithubWorkspaceCards() {
   return (
-    <div className="grid min-h-0 gap-4 md:grid-cols-2 xl:col-span-3 xl:col-start-1 xl:row-start-3">
+    <div className="grid min-h-0 gap-4 md:grid-cols-2 2xl:col-span-3 2xl:col-start-1 2xl:row-start-3">
       <CanvasShortcutCard />
       <SqlErdShortcutCard />
     </div>

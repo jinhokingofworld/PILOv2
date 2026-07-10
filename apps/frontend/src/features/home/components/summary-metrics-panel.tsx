@@ -47,7 +47,7 @@ export function SummaryMetricsPanel({
   });
 
   return (
-    <div className="grid h-full min-h-0 grid-rows-4 gap-3 overflow-hidden xl:col-start-3 xl:row-start-1">
+    <div className="grid h-full min-h-0 grid-rows-4 gap-3 overflow-hidden 2xl:col-start-3 2xl:row-start-1">
       {summaryItems.map((item) => (
         <SummaryMetricCard key={item.label} item={item} variant="compact" />
       ))}
