@@ -279,6 +279,17 @@ class FakeDatabaseService {
     this.calls = [];
   }
 
+  async transaction(callback) {
+    return callback({
+      execute: this.execute.bind(this)
+    });
+  }
+
+  async execute(text, values = []) {
+    this.calls.push({ method: "execute", text, values });
+    return { rows: [] };
+  }
+
   async queryOne(text, values = []) {
     this.calls.push({ method: "queryOne", text, values });
 
@@ -606,12 +617,28 @@ function errorMessage(error) {
   assert.deepEqual(workspaceService.calls, [
     { currentUserId: USER_ID, workspaceId: WORKSPACE_ID }
   ]);
-  assert.deepEqual(database.calls[0].values, [
+  const lifecycleCalls = database.calls.filter(
+    (call) => call.method === "execute"
+  );
+  assert.equal(lifecycleCalls.length, 2);
+  assert.deepEqual(lifecycleCalls[0].values, [WORKSPACE_ID, USER_ID]);
+  assert.match(lifecycleCalls[0].text, /SET status = 'expired'/);
+  assert.deepEqual(lifecycleCalls[1].values, [
+    WORKSPACE_ID,
+    USER_ID,
+    100
+  ]);
+  assert.match(lifecycleCalls[1].text, /DELETE FROM agent_runs/);
+
+  const listCalls = database.calls.filter(
+    (call) => call.method !== "execute"
+  );
+  assert.deepEqual(listCalls[0].values, [
     WORKSPACE_ID,
     USER_ID,
     "waiting_confirmation"
   ]);
-  assert.deepEqual(database.calls[1].values, [
+  assert.deepEqual(listCalls[1].values, [
     WORKSPACE_ID,
     USER_ID,
     "waiting_confirmation",
