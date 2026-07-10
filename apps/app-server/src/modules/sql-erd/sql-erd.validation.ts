@@ -66,7 +66,6 @@ interface ModelMetadata {
   relationCount: number;
   tableIds: Set<string>;
   tableColumnIds: Map<string, Set<string>>;
-  relationEndpointKeys: Set<string>;
 }
 
 export function validateSqlErdSessionId(value: unknown): string {
@@ -430,7 +429,6 @@ function readModelMetadata(modelJson: SqlErdJsonObject): ModelMetadata {
   const relationCount = schema.relations.length;
   const tableIds = new Set<string>();
   const tableColumnIds = new Map<string, Set<string>>();
-  const relationEndpointKeys = new Set<string>();
   let columnCount = 0;
 
   if (tableCount > MAX_TABLE_COUNT) {
@@ -623,15 +621,6 @@ function readModelMetadata(modelJson: SqlErdJsonObject): ModelMetadata {
         throw badRequest("relation toColumnIds reference is invalid");
       }
     });
-    fromColumnIds.forEach((columnId, columnIndex) => {
-      relationEndpointKeys.add(
-        createUndirectedEndpointKey(
-          "column_link",
-          [fromTableId, columnId],
-          [toTableId, toColumnIds[columnIndex]]
-        )
-      );
-    });
     readNullableIdentifier(
       relationObject.constraintName,
       `${relationPath}.constraintName`
@@ -642,8 +631,7 @@ function readModelMetadata(modelJson: SqlErdJsonObject): ModelMetadata {
     tableCount,
     relationCount,
     tableIds,
-    tableColumnIds,
-    relationEndpointKeys
+    tableColumnIds
   };
 }
 
@@ -809,9 +797,6 @@ function validateAnnotations(value: unknown, metadata: ModelMetadata): void {
         [fromTableId, fromColumnId],
         [toTableId, toColumnId]
       );
-      if (metadata.relationEndpointKeys.has(endpointKey)) {
-        throw badRequest("annotation endpoint conflicts with relation");
-      }
     }
 
     if (endpointKeys.has(endpointKey)) {

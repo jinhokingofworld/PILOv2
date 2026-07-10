@@ -279,7 +279,11 @@ type SqltoerdColumnAnnotationLink = {
 - annotation의 table/column endpoint는 `modelJson`에 존재하는 id를 참조해야 한다.
 - annotation endpoint는 방향이 없는 관계로 취급하며 정방향과 역방향을 중복으로
   저장할 수 없다.
-- Column annotation endpoint가 실제 FK relation endpoint와 같으면 저장할 수 없다.
+- SQL 직접 편집과 Generate로 기존 Column annotation endpoint에 실제 FK가 생긴 경우,
+  API는 annotation을 자동 삭제하지 않고 일시적인 충돌 상태를 저장할 수 있다.
+- 신규 Column annotation 생성 UI는 실제 FK와 같은 endpoint를 선택하지 못하게 한다.
+- FK와 annotation이 충돌하면 실제 FK를 우선 표시하고, 후속 UI에서 사용자가 설명선
+  제거 또는 label 보관을 선택하게 한다.
 - annotation `label`은 빈 문자열을 허용하며 최대 200자다.
 - `id`, `name`, `schemaName`, `dataType`, `constraintName`, `comment`는 HTML로
   주입하지 않고 text로 렌더링해야 한다.

@@ -1666,20 +1666,6 @@ await assertRouteBodyLimit(
     {
       layout: layoutJson({
         annotations: annotations([
-          columnAnnotation(
-            "annotation_fk_collision",
-            "table_orders",
-            "column_orders_user_id",
-            "table_users",
-            "column_users_id"
-          )
-        ])
-      }),
-      message: /annotation endpoint conflicts with relation/
-    },
-    {
-      layout: layoutJson({
-        annotations: annotations([
           tableAnnotation("annotation_unknown_field", "table_users", "table_orders", {
             extra: true
           })
@@ -1715,31 +1701,108 @@ await assertRouteBodyLimit(
 }
 
 {
-  const collisionLayoutJson = layoutJson({
-    annotations: annotations([
-      columnAnnotation(
-        "annotation_fk_collision",
+  const baseModelJson = modelJson();
+  const compositeModelJson = modelJson({
+    schema: {
+      tables: [
+        table(
+          "table_users",
+          "users",
+          [
+            ...baseModelJson.schema.tables[0].columns,
+            column("column_users_tenant_id", "tenant_id", "BIGINT")
+          ],
+          baseModelJson.schema.tables[0].constraints
+        ),
+        table(
+          "table_orders",
+          "orders",
+          [
+            ...baseModelJson.schema.tables[1].columns,
+            column("column_orders_tenant_id", "tenant_id", "BIGINT")
+          ],
+          baseModelJson.schema.tables[1].constraints
+        )
+      ],
+      relations: [
+        relation(
+          "relation_orders_users_composite",
+          "table_orders",
+          ["column_orders_user_id", "column_orders_tenant_id"],
+          "table_users",
+          ["column_users_id", "column_users_tenant_id"]
+        )
+      ]
+    }
+  });
+  const collisionCases = [
+    {
+      model: baseModelJson,
+      link: columnAnnotation(
+        "annotation_fk_forward",
         "table_orders",
         "column_orders_user_id",
         "table_users",
         "column_users_id"
       )
-    ])
+    },
+    {
+      model: baseModelJson,
+      link: columnAnnotation(
+        "annotation_fk_reverse",
+        "table_users",
+        "column_users_id",
+        "table_orders",
+        "column_orders_user_id"
+      )
+    },
+    {
+      model: compositeModelJson,
+      link: columnAnnotation(
+        "annotation_fk_composite_member",
+        "table_orders",
+        "column_orders_tenant_id",
+        "table_users",
+        "column_users_tenant_id"
+      )
+    }
+  ];
+
+  for (const collisionCase of collisionCases) {
+    const collisionLayoutJson = layoutJson({
+      annotations: annotations([collisionCase.link])
+    });
+    const normalized = validateCreateSqlErdSessionRequest({
+      sourceFormat: "sql",
+      modelJson: collisionCase.model,
+      layoutJson: collisionLayoutJson
+    });
+
+    assert.deepEqual(normalized.layoutJson, collisionLayoutJson);
+  }
+
+  const collisionLayoutJson = layoutJson({
+    annotations: annotations([collisionCases[0].link])
   });
-  const { service } = createSubject(
-    new FakeDatabase({ queryOneRows: [sessionRow({ revision: 2 })] })
+  const database = new FakeDatabase({
+    queryOneRows: [
+      sessionRow({ revision: 2 }),
+      sessionRow({ revision: 3, layout_json: collisionLayoutJson })
+    ]
+  });
+  const { service } = createSubject(database);
+
+  const session = await service.updateSession(
+    currentUserId,
+    workspaceId,
+    sessionId,
+    {
+      baseRevision: 2,
+      layoutJson: collisionLayoutJson
+    }
   );
 
-  await assertApiError(
-    () =>
-      service.updateSession(currentUserId, workspaceId, sessionId, {
-        baseRevision: 2,
-        layoutJson: collisionLayoutJson
-      }),
-    400,
-    "BAD_REQUEST",
-    /annotation endpoint conflicts with relation/
-  );
+  assert.deepEqual(session.layoutJson, collisionLayoutJson);
 }
 
 {

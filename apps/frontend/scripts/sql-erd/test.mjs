@@ -1197,6 +1197,15 @@ const generateSmokeBaseSession = {
           label: "owns"
         },
         {
+          id: "annotation.generate.fk-conflict",
+          kind: "column_link",
+          fromTableId: "table.posts",
+          fromColumnId: "column.posts.user_id",
+          toTableId: "table.users",
+          toColumnId: "column.users.id",
+          label: "same endpoint as FK"
+        },
+        {
           id: "annotation.generate.removed",
           kind: "table_link",
           fromTableId: "table.users",
@@ -1233,7 +1242,7 @@ assert.equal(
 );
 assert.deepEqual(createGenerateRequest.payload.layoutJson.annotations, {
   version: 1,
-  links: [generateSmokeBaseSession.layoutJson.annotations.links[0]]
+  links: generateSmokeBaseSession.layoutJson.annotations.links.slice(0, 2)
 });
 assert.deepEqual(createGenerateRequest.payload.settingsJson, {
   sourcePanelOpen: true
