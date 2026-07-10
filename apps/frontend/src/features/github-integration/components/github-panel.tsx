@@ -1,5 +1,6 @@
 "use client";
 
+import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 import {
@@ -70,6 +71,10 @@ const PERSONAL_PROJECT_OAUTH_ACCOUNT_MISMATCH_MESSAGE =
   "GitHub ProjectV2 OAuth account does not match this personal ProjectV2 owner";
 const PERSONAL_PROJECT_OAUTH_SCOPE_MESSAGE =
   "GitHub ProjectV2 OAuth connection must be reconnected with project scope";
+const GITHUB_OAUTH_CALLBACK_ERROR_PARAM = "github_oauth_error";
+const GITHUB_OAUTH_ACCOUNT_ALREADY_CONNECTED_ERROR = "account_already_connected";
+const GITHUB_OAUTH_ACCOUNT_ALREADY_CONNECTED_MESSAGE =
+  "이미 다른 PILO 계정에 연결된 GitHub 계정입니다. 다른 GitHub 계정을 사용하거나 기존 연결을 해제한 뒤 다시 시도하세요.";
 
 function requiresProjectOAuth(target: GithubSyncTarget) {
   return target === "full" || projectScopedSyncTargets.has(target);
@@ -95,8 +100,27 @@ function getErrorMessage(error: unknown) {
   return "GitHub 연동 정보를 불러오지 못했습니다.";
 }
 
+function getGithubOAuthCallbackErrorMessage(value: string | null) {
+  if (value === GITHUB_OAUTH_ACCOUNT_ALREADY_CONNECTED_ERROR) {
+    return GITHUB_OAUTH_ACCOUNT_ALREADY_CONNECTED_MESSAGE;
+  }
+
+  return null;
+}
+
+function removeGithubOAuthCallbackErrorFromUrl() {
+  const url = new URL(window.location.href);
+  url.searchParams.delete(GITHUB_OAUTH_CALLBACK_ERROR_PARAM);
+  window.history.replaceState(
+    window.history.state,
+    "",
+    `${url.pathname}${url.search}${url.hash}`
+  );
+}
+
 export function GithubPanel() {
   const authSession = useAuthSession();
+  const searchParams = useSearchParams();
   const workspaceId = authSession?.activeWorkspaceId ?? "";
   const apiClient = useMemo(
     () =>
@@ -281,6 +305,20 @@ export function GithubPanel() {
     // refreshes data explicitly through handlers.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceId, apiClient]);
+
+  useEffect(() => {
+    const callbackError = getGithubOAuthCallbackErrorMessage(
+      searchParams.get(GITHUB_OAUTH_CALLBACK_ERROR_PARAM)
+    );
+    if (!callbackError) {
+      return;
+    }
+
+    setActionError(callbackError);
+    setActionMessage(null);
+    setRedirectAction(null);
+    removeGithubOAuthCallbackErrorFromUrl();
+  }, [searchParams]);
 
   async function handleStartGithubOAuth() {
     setRedirectAction("oauth");

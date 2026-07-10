@@ -100,10 +100,18 @@ assert.match(githubApiClient, /credentials: "include"/);
 assert.match(githubApiClient, /success === true/);
 assert.doesNotMatch(githubApiClient, /pilo_access_token/);
 assert.match(githubPanel, /useAuthSession/);
+assert.match(githubPanel, /useSearchParams/);
 assert.match(githubPanel, /activeWorkspaceId/);
 assert.match(githubPanel, /authSession\?\.accessToken/);
 assert.match(githubPanel, /createGithubIntegrationApiClient/);
 assert.match(githubPanel, /loadGithubIntegrationSnapshot/);
+assert.match(githubPanel, /github_oauth_error/);
+assert.match(githubPanel, /account_already_connected/);
+assert.match(
+  githubPanel,
+  /이미 다른 PILO 계정에 연결된 GitHub 계정입니다/
+);
+assert.match(githubPanel, /window\.history\.replaceState/);
 assert.match(githubPanel, /handleStartGithubOAuth/);
 assert.match(githubPanel, /handleDisconnectGithubOAuth/);
 assert.match(githubPanel, /handleStartGithubProjectOAuth/);
