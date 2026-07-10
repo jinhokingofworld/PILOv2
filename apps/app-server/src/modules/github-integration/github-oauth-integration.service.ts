@@ -5,6 +5,10 @@ import { DatabaseService } from "../../database/database.service";
 import { GithubOAuthCallbackQuery, StartGithubOAuthRequest } from "./dto";
 import { GithubCallbackStateService } from "./github-callback-state.service";
 import { GithubIntegrationConfigService } from "./github-integration-config.service";
+import {
+  GithubOAuthAccountAlreadyConnectedError,
+  isGithubOAuthAccountUniqueViolation
+} from "./github-oauth-callback-error";
 import { GithubOAuthClient } from "./github-oauth.client";
 import { GithubOAuthStateService } from "./github-oauth-state.service";
 import { validateGithubCallbackReturnUrl } from "./github-return-url";
@@ -139,32 +143,41 @@ export class GithubOAuthIntegrationService {
       token.accessToken,
       config
     );
-    const row = await this.database.queryOne<GithubOAuthStatusRow>(
-      `
-        UPDATE users
-        SET
-          github_user_id = $2,
-          github_login = $3,
-          github_access_token_encrypted = $4,
-          github_token_scope = $5,
-          github_connected_at = now(),
-          github_revoked_at = NULL
-        WHERE id = $1
-        RETURNING
-          github_user_id,
-          github_login,
-          github_token_scope,
-          github_connected_at,
-          github_revoked_at
-      `,
-      [
-        storedState.userId,
-        githubUser.id,
-        githubUser.login,
-        encryptedToken,
-        token.scope
-      ]
-    );
+    let row: GithubOAuthStatusRow | null;
+    try {
+      row = await this.database.queryOne<GithubOAuthStatusRow>(
+        `
+          UPDATE users
+          SET
+            github_user_id = $2,
+            github_login = $3,
+            github_access_token_encrypted = $4,
+            github_token_scope = $5,
+            github_connected_at = now(),
+            github_revoked_at = NULL
+          WHERE id = $1
+          RETURNING
+            github_user_id,
+            github_login,
+            github_token_scope,
+            github_connected_at,
+            github_revoked_at
+        `,
+        [
+          storedState.userId,
+          githubUser.id,
+          githubUser.login,
+          encryptedToken,
+          token.scope
+        ]
+      );
+    } catch (error) {
+      if (isGithubOAuthAccountUniqueViolation(error)) {
+        throw new GithubOAuthAccountAlreadyConnectedError(storedState.returnUrl);
+      }
+
+      throw error;
+    }
 
     if (!row) {
       throw badRequest("Invalid OAuth state");

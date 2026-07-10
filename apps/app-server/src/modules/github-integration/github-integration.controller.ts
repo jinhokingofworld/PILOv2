@@ -29,6 +29,11 @@ import type {
   StartGithubOAuthRequest
 } from "./dto";
 import { GithubIntegrationService } from "./github-integration.service";
+import {
+  appendGithubOAuthCallbackError,
+  GITHUB_OAUTH_ACCOUNT_ALREADY_CONNECTED_QUERY_VALUE,
+  GithubOAuthAccountAlreadyConnectedError
+} from "./github-oauth-callback-error";
 import type {
   GithubAppInstallationCallbackPayload,
   GithubAppInstallationDeletePayload,
@@ -87,6 +92,19 @@ function redirectToReturnUrl(reply: FastifyReply, returnUrl: string | null): boo
   return true;
 }
 
+function redirectToGithubOAuthCallbackError(
+  reply: FastifyReply,
+  returnUrl: string | null,
+  errorValue: string
+): boolean {
+  if (!returnUrl) {
+    return false;
+  }
+
+  reply.redirect(appendGithubOAuthCallbackError(returnUrl, errorValue), 302);
+  return true;
+}
+
 @Controller()
 export class GithubIntegrationController {
   constructor(private readonly githubIntegrationService: GithubIntegrationService) {}
@@ -121,10 +139,27 @@ export class GithubIntegrationController {
     @Headers("cookie") cookieHeader: string | undefined,
     @Res({ passthrough: true }) reply: FastifyReply
   ): Promise<ApiSuccessResponse<GithubOAuthCallbackPayload> | undefined> {
-    const result = await this.githubIntegrationService.completeGithubOAuthCallback(
-      query,
-      cookieHeader
-    );
+    let result: GithubOAuthCallbackPayload;
+    try {
+      result = await this.githubIntegrationService.completeGithubOAuthCallback(
+        query,
+        cookieHeader
+      );
+    } catch (error) {
+      if (
+        error instanceof GithubOAuthAccountAlreadyConnectedError &&
+        redirectToGithubOAuthCallbackError(
+          reply,
+          error.returnUrl,
+          GITHUB_OAUTH_ACCOUNT_ALREADY_CONNECTED_QUERY_VALUE
+        )
+      ) {
+        return undefined;
+      }
+
+      throw error;
+    }
+
     if (redirectToReturnUrl(reply, result.returnUrl)) {
       return undefined;
     }

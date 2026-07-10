@@ -4,6 +4,9 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 
 const { GithubIntegrationController } = require("../../dist/modules/github-integration/github-integration.controller.js");
+const {
+  GithubOAuthAccountAlreadyConnectedError
+} = require("../../dist/modules/github-integration/github-oauth-callback-error.js");
 
 function createReply() {
   return {
@@ -80,6 +83,31 @@ function createReply() {
     }
   });
   assert.deepEqual(reply.redirects, []);
+}
+
+{
+  const controller = new GithubIntegrationController({
+    async completeGithubOAuthCallback() {
+      throw new GithubOAuthAccountAlreadyConnectedError(
+        "https://pilo.test/settings/integrations/github?tab=connect"
+      );
+    }
+  });
+  const reply = createReply();
+
+  const result = await controller.completeGithubOAuthCallback(
+    { code: "oauth-code", state: "oauth-state" },
+    "pilo_github_oauth_state=binding-token",
+    reply
+  );
+
+  assert.equal(result, undefined);
+  assert.deepEqual(reply.redirects, [
+    {
+      url: "https://pilo.test/settings/integrations/github?tab=connect&github_oauth_error=account_already_connected",
+      statusCode: 302
+    }
+  ]);
 }
 
 {

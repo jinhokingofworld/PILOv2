@@ -483,6 +483,74 @@ const projectOAuthConnectedRow = {
     },
     baseConfig
   );
+  const statePayload = stateService.verifyState(state, baseConfig);
+  const uniqueViolation = new Error("duplicate GitHub account");
+  uniqueViolation.code = "23505";
+  uniqueViolation.constraint = "users_github_user_id_key";
+  const database = new FakeDatabase([], {
+    queryOne(text) {
+      if (/UPDATE github_callback_states/i.test(text)) {
+        return {
+          user_id: "user-1",
+          workspace_id: null,
+          return_url: null,
+          expires_at: new Date(statePayload.expiresAt)
+        };
+      }
+
+      if (/UPDATE users/i.test(text)) {
+        throw uniqueViolation;
+      }
+
+      return undefined;
+    }
+  });
+  const service = new GithubIntegrationService(
+    database,
+    {
+      async exchangeCodeForAccessToken() {
+        return {
+          accessToken: "plain-access-token",
+          scope: ""
+        };
+      },
+      async getAuthenticatedUser() {
+        return {
+          id: 12345678,
+          login: "juhyeong"
+        };
+      }
+    },
+    stateService,
+    tokenEncryption,
+    configService
+  );
+
+  await assert.rejects(
+    () =>
+      service.completeGithubOAuthCallback(
+        {
+          code: "oauth-code",
+          state
+        },
+        "pilo_github_oauth_state=oauth-binding-token"
+      ),
+    (error) =>
+      error?.getStatus?.() === 409 &&
+      error?.response?.error?.code === "CONFLICT" &&
+      error?.response?.error?.message ===
+        "GitHub account is already connected to another PILO account"
+  );
+}
+
+{
+  const state = stateService.createState(
+    {
+      userId: "user-1",
+      returnUrl: null
+    },
+    baseConfig
+  );
   let stateConsumeCount = 0;
   const database = new FakeDatabase([], {
     queryOne(text) {
