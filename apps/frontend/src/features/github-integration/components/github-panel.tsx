@@ -1,7 +1,7 @@
 "use client";
 
 import { useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   createGithubIntegrationApiClient,
@@ -24,6 +24,12 @@ import {
   getGithubConnectSyncTargetLabel
 } from "@/features/github-integration/utils/github-connect-format";
 import { selectProjectV2IdForRepository } from "@/features/github-integration/utils/github-project-selection";
+import {
+  createGithubSyncPollLoop,
+  createGithubSyncRequestGate,
+  GITHUB_SYNC_POLL_INTERVAL_MS,
+  shouldPollGithubSyncRuns
+} from "@/features/github-integration/utils/github-sync-progress";
 import { useAuthSession } from "@/features/auth/auth-session";
 import { rememberGithubBoardSelection } from "@/shared/github/board-selection";
 
@@ -167,6 +173,7 @@ export function GithubPanel() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [syncPollingError, setSyncPollingError] = useState<string | null>(null);
   const [redirectAction, setRedirectAction] = useState<RedirectAction>(null);
   const [isDisconnecting, setIsDisconnecting] = useState(false);
   const [isDisconnectingProjectOAuth, setIsDisconnectingProjectOAuth] =
@@ -175,6 +182,7 @@ export function GithubPanel() {
   const [isInstallationDeleteRequested, setIsInstallationDeleteRequested] =
     useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [hasRunningSyncRun, setHasRunningSyncRun] = useState(false);
   const [snapshot, setSnapshot] =
     useState<GithubIntegrationSnapshot>(emptySnapshot);
   const [pullRequests, setPullRequests] = useState<GithubPullRequest[]>([]);
@@ -185,9 +193,12 @@ export function GithubPanel() {
   const [selectedProjectV2Id, setSelectedProjectV2Id] = useState("");
   const [syncTarget, setSyncTarget] = useState<GithubSyncTarget>("full");
   const [repositoryQuery, setRepositoryQuery] = useState("");
+  const snapshotRequestGateRef = useRef(createGithubSyncRequestGate());
+  const syncRunsRequestGateRef = useRef(createGithubSyncRequestGate());
 
   const isLoading = panelStatus === "loading" || panelStatus === "idle";
   const connected = snapshot.oauth?.connected === true;
+  const isSyncActive = isSyncing || hasRunningSyncRun;
   const selectedRepository = snapshot.repositories.find(
     (repository) => repository.id === selectedRepositoryId
   );
@@ -234,13 +245,47 @@ export function GithubPanel() {
     }
   }
 
+  async function refreshGithubSyncRuns() {
+    if (!workspaceId) {
+      return null;
+    }
+
+    const requestGeneration = syncRunsRequestGateRef.current.begin();
+    const [syncRuns, runningSyncRuns] = await Promise.all([
+      apiClient.listGithubSyncRuns(workspaceId, {
+        limit: 8
+      }),
+      apiClient.listGithubSyncRuns(workspaceId, {
+        status: "running",
+        limit: 1
+      })
+    ]);
+    if (!syncRunsRequestGateRef.current.isCurrent(requestGeneration)) {
+      return null;
+    }
+
+    const hasRunningRun = runningSyncRuns.meta.total > 0;
+    setSnapshot((current) => ({
+      ...current,
+      syncRuns: syncRuns.data,
+      syncRunsTotal: syncRuns.meta.total
+    }));
+    setHasRunningSyncRun(hasRunningRun);
+    setSyncPollingError(null);
+    return hasRunningRun;
+  }
+
   async function loadGithubIntegrationSnapshot(
     preferredRepositoryId?: string,
     preferredProjectV2Id?: string
   ) {
     if (!workspaceId) {
+      snapshotRequestGateRef.current.invalidate();
+      syncRunsRequestGateRef.current.invalidate();
       setPanelStatus("ready");
       setSnapshot(emptySnapshot);
+      setHasRunningSyncRun(false);
+      setSyncPollingError(null);
       setPullRequests([]);
       setPullRequestsTotal(0);
       setSelectedRepositoryId("");
@@ -253,6 +298,12 @@ export function GithubPanel() {
     setPanelStatus("loading");
     setErrorMessage(null);
     setActionError(null);
+    setSyncPollingError(null);
+
+    const snapshotRequestGeneration =
+      snapshotRequestGateRef.current.begin();
+    const syncRunsRequestGeneration =
+      syncRunsRequestGateRef.current.begin();
 
     try {
       const [
@@ -261,7 +312,8 @@ export function GithubPanel() {
         installations,
         repositories,
         projects,
-        syncRuns
+        syncRuns,
+        runningSyncRuns
       ] =
         await Promise.all([
           apiClient.getGithubOAuthStatus(),
@@ -276,8 +328,21 @@ export function GithubPanel() {
           }),
           apiClient.listGithubSyncRuns(workspaceId, {
             limit: 8
+          }),
+          apiClient.listGithubSyncRuns(workspaceId, {
+            status: "running",
+            limit: 1
           })
         ]);
+
+      if (
+        !snapshotRequestGateRef.current.isCurrent(snapshotRequestGeneration)
+      ) {
+        return;
+      }
+
+      const canApplySyncRuns =
+        syncRunsRequestGateRef.current.isCurrent(syncRunsRequestGeneration);
 
       const nextRepositoryId =
         repositories.data.find(
@@ -297,7 +362,7 @@ export function GithubPanel() {
         installations[0]?.id ??
         "";
 
-      setSnapshot({
+      setSnapshot((current) => ({
         oauth,
         projectOAuth,
         installations,
@@ -305,9 +370,14 @@ export function GithubPanel() {
         projectsTotal: projects.meta.total,
         repositories: repositories.data,
         repositoriesTotal: repositories.meta.total,
-        syncRuns: syncRuns.data,
-        syncRunsTotal: syncRuns.meta.total
-      });
+        syncRuns: canApplySyncRuns ? syncRuns.data : current.syncRuns,
+        syncRunsTotal: canApplySyncRuns
+          ? syncRuns.meta.total
+          : current.syncRunsTotal
+      }));
+      if (canApplySyncRuns) {
+        setHasRunningSyncRun(runningSyncRuns.meta.total > 0);
+      }
       setSelectedRepositoryId(nextRepositoryId);
       setSelectedProjectV2Id(nextProjectV2Id);
       setSelectedInstallationId(nextInstallationId);
@@ -325,9 +395,20 @@ export function GithubPanel() {
         setPullRequestsTotal(0);
       }
     } catch (error) {
+      if (
+        !snapshotRequestGateRef.current.isCurrent(snapshotRequestGeneration)
+      ) {
+        return;
+      }
+
       setPanelStatus("error");
       setErrorMessage(getErrorMessage(error));
       setSnapshot(emptySnapshot);
+      if (
+        syncRunsRequestGateRef.current.isCurrent(syncRunsRequestGeneration)
+      ) {
+        setHasRunningSyncRun(false);
+      }
       setPullRequests([]);
       setPullRequestsTotal(0);
     }
@@ -335,10 +416,42 @@ export function GithubPanel() {
 
   useEffect(() => {
     void loadGithubIntegrationSnapshot();
+
     // The panel reloads when workspace or token changes; interactive selection
     // refreshes data explicitly through handlers.
+    return () => {
+      snapshotRequestGateRef.current.invalidate();
+      syncRunsRequestGateRef.current.invalidate();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceId, apiClient]);
+
+  useEffect(() => {
+    if (!workspaceId || !shouldPollGithubSyncRuns(isSyncing, hasRunningSyncRun)) {
+      return;
+    }
+
+    const pollLoop = createGithubSyncPollLoop({
+      intervalMs: GITHUB_SYNC_POLL_INTERVAL_MS,
+      poll: refreshGithubSyncRuns,
+      shouldContinue: (hasRunningRun) =>
+        shouldPollGithubSyncRuns(
+          isSyncing,
+          hasRunningRun ?? hasRunningSyncRun
+        ),
+      onError: (error) => setSyncPollingError(getErrorMessage(error)),
+      schedule: (callback, delayMs) => setTimeout(callback, delayMs),
+      clear: (timer) => clearTimeout(timer)
+    });
+    pollLoop.start();
+
+    return () => {
+      pollLoop.stop();
+      syncRunsRequestGateRef.current.invalidate();
+    };
+    // Polling depends on the local request and the latest server-side running state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspaceId, apiClient, isSyncing, hasRunningSyncRun]);
 
   useEffect(() => {
     const callbackError = getGithubCallbackErrorMessage(searchParams);
@@ -596,7 +709,7 @@ export function GithubPanel() {
 
   return (
     <GithubConnectLayout
-      actionError={actionError}
+      actionError={actionError ?? syncPollingError}
       actionMessage={actionMessage}
       connected={connected}
       errorMessage={errorMessage}
@@ -607,7 +720,7 @@ export function GithubPanel() {
       isInstallationDeleteRequested={isInstallationDeleteRequested}
       isLoading={isLoading}
       isPullRequestsLoading={isPullRequestsLoading}
-      isSyncing={isSyncing}
+      isSyncing={isSyncActive}
       oauth={snapshot.oauth}
       projectOAuth={snapshot.projectOAuth}
       onDisconnectOAuth={() => void handleDisconnectGithubOAuth()}

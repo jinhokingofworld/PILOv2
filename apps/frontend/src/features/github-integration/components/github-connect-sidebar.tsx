@@ -10,10 +10,13 @@ import type {
 import {
   formatGithubConnectDateTime,
   formatGithubConnectNumber,
-  getGithubConnectSyncProgress,
   getGithubConnectSyncStatusLabel,
   getGithubConnectSyncTargetLabel
 } from "@/features/github-integration/utils/github-connect-format";
+import {
+  getGithubSyncProgress,
+  getGithubSyncProgressStageLabel
+} from "@/features/github-integration/utils/github-sync-progress";
 
 import {
   GithubConnectEmptyState,
@@ -118,6 +121,7 @@ export function GithubConnectSidebar({
               const installation = syncRun.installationId
                 ? installations.find((item) => item.id === syncRun.installationId)
                 : null;
+              const progress = getGithubSyncProgress(syncRun);
 
               return (
                 <div
@@ -151,9 +155,11 @@ export function GithubConnectSidebar({
                   </GithubConnectPill>
                 </div>
                 <div className="mt-3">
-                  <GithubConnectProgress
-                    value={getGithubConnectSyncProgress(syncRun)}
-                  />
+                  <GithubConnectProgress value={progress} />
+                </div>
+                <div className="mt-2 flex items-center justify-between gap-3 text-[12px] text-[#7a8497]">
+                  <span>{getGithubSyncProgressStageLabel(syncRun.progressStage)}</span>
+                  <span className="font-semibold text-[#3157d5]">{progress}%</span>
                 </div>
                 <p className="mt-2 text-[12px] text-[#7a8497]">
                   fetched {syncRun.fetchedCount} · created{" "}

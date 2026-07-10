@@ -141,6 +141,8 @@ assert.match(githubIntegrationApi, /github_callback_error=authorization_cancelle
 assert.match(githubIntegrationApi, /github_callback_error=token_exchange_failed/);
 assert.match(githubIntegrationApi, /github_callback_error=installation_not_accessible/);
 assert.match(githubIntegrationApi, /github_oauth_error=account_already_connected/);
+assert.match(githubIntegrationApi, /progressPercent/);
+assert.match(githubIntegrationApi, /progressStage/);
 assert.deepEqual(directoryNames.sort(), ["dto", "queries", "types"]);
 
 const tscScript = fileURLToPath(
@@ -162,6 +164,7 @@ await import("./source-read.test.mjs");
 await import("./project-v2.test.mjs");
 await import("./pr-files.test.mjs");
 await import("./review-submission.test.mjs");
+await import("./sync-progress.test.mjs");
 await import("./sync-runs.test.mjs");
 await import("./project-v2-write.test.mjs");
 await import("./webhook.test.mjs");

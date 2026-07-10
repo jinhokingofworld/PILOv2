@@ -417,10 +417,36 @@ API error로 반환한다.
     "createdCount": 2,
     "updatedCount": 2,
     "skippedCount": 1,
+    "progressPercent": 100,
+    "progressStage": "completed",
     "errorMessage": null
   }
 }
 ```
+
+`progressPercent`는 sync run 전체 진행률을 나타내는 `0` 이상 `100` 이하
+정수다. 처리 통계인 `fetchedCount`, `createdCount`, `updatedCount`,
+`skippedCount`의 비율과는 별도 값이며, 실행 중에는 단계 완료 시 단조 증가하고
+`success` 상태에서는 항상 `100`이다. `failed` 상태에서는 실패 직전 마지막
+진행률을 유지한다.
+
+`progressStage` 값은 다음 중 하나다.
+
+- `initializing`
+- `repositories`
+- `project_v2_discovery`
+- `issues`
+- `pull_requests`
+- `project_v2`
+- `project_v2_fields`
+- `project_v2_items`
+- `board_hydration`
+- `finalizing`
+- `completed`
+
+서버는 실행 중 progress와 누적 count를 `github_sync_runs`에 저장한다. 기존
+progress 정보가 없는 sync run은 `success`면 `100 / completed`, 그 외 상태면
+`0 / initializing`으로 응답한다.
 
 `GET /workspaces/{workspaceId}/github/sync-runs/{syncRunId}`는 위 payload에
 `cursor: Record<string, unknown>`을 추가로 포함한다.
