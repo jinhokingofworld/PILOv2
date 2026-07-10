@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { MySQL, PostgreSQL } from "@codemirror/lang-sql";
 import ts from "typescript";
 
 async function readSqlErdFile(path) {
@@ -21,6 +22,7 @@ async function compileSqlErdRuntimeModules() {
   const apiClientOutputPath = join(outputDir, "api-client.mjs");
   const sessionStateOutputPath = join(outputDir, "session-state.mjs");
   const statusCopyOutputPath = join(outputDir, "status-copy.mjs");
+  const sqlEditorDialectOutputPath = join(outputDir, "sql-editor-dialect.mjs");
   const relationShapeOutputPath = join(outputDir, "relation-shape.mjs");
   const tableShapeOutputPath = join(outputDir, "table-shape.mjs");
   const canvasSelectionOutputPath = join(outputDir, "canvas-selection.mjs");
@@ -66,6 +68,10 @@ async function compileSqlErdRuntimeModules() {
     await compileTypeScriptModule(
       "../../src/features/sql-erd/utils/status-copy.ts",
       statusCopyOutputPath
+    );
+    await compileTypeScriptModule(
+      "../../src/features/sql-erd/utils/sql-editor-dialect.ts",
+      sqlEditorDialectOutputPath
     );
     await compileTypeScriptModule(
       "../../src/features/sql-erd/shapes/sql-erd-relation-shape.tsx",
@@ -143,6 +149,7 @@ async function compileSqlErdRuntimeModules() {
       layoutAutosaveRuntime,
       apiClientRuntime,
       sessionStateRuntime,
+      sqlEditorDialectRuntime,
       statusCopyRuntime,
       relationShapeRuntime,
       tableShapeRuntime,
@@ -155,6 +162,7 @@ async function compileSqlErdRuntimeModules() {
       import(pathToFileHref(layoutAutosaveOutputPath)),
       import(pathToFileHref(apiClientOutputPath)),
       import(pathToFileHref(sessionStateOutputPath)),
+      import(pathToFileHref(sqlEditorDialectOutputPath)),
       import(pathToFileHref(statusCopyOutputPath)),
       import(pathToFileHref(relationShapeOutputPath)),
       import(pathToFileHref(tableShapeOutputPath)),
@@ -171,6 +179,7 @@ async function compileSqlErdRuntimeModules() {
       modelRuntime,
       relationShapeRuntime,
       sessionStateRuntime,
+      sqlEditorDialectRuntime,
       statusCopyRuntime,
       tableShapeRuntime
     };
@@ -411,6 +420,7 @@ const [
   tableShape,
   relationShape,
   ddlParserUtils,
+  sqlEditorDialectUtils,
   apiClient,
   packageJson
 ] =
@@ -432,6 +442,7 @@ const [
     readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-table-shape.tsx"),
     readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-relation-shape.tsx"),
     readSqlErdFile("../../src/features/sql-erd/utils/ddl-parser.ts"),
+    readSqlErdFile("../../src/features/sql-erd/utils/sql-editor-dialect.ts"),
     readSqlErdFile("../../src/features/sql-erd/api/client.ts"),
     readSqlErdFile("../../package.json")
   ]);
@@ -446,10 +457,36 @@ const {
   modelRuntime,
   relationShapeRuntime,
   sessionStateRuntime,
+  sqlEditorDialectRuntime,
   statusCopyRuntime,
   tableShapeRuntime
 } = await compileSqlErdRuntimeModules();
 const runtimeModel = createRuntimeTestModel();
+
+assert.equal(
+  sqlEditorDialectRuntime.resolveSqlSourceEditorDialect("postgresql", "mysql"),
+  "postgresql"
+);
+assert.equal(
+  sqlEditorDialectRuntime.resolveSqlSourceEditorDialect("mysql", "postgresql"),
+  "mysql"
+);
+assert.equal(
+  sqlEditorDialectRuntime.resolveSqlSourceEditorDialect("auto", null),
+  "postgresql"
+);
+assert.equal(
+  sqlEditorDialectRuntime.resolveSqlSourceEditorDialect("auto", "mysql"),
+  "mysql"
+);
+assert.equal(
+  sqlEditorDialectRuntime.getSqlSourceEditorCodeMirrorDialect("postgresql"),
+  PostgreSQL
+);
+assert.equal(
+  sqlEditorDialectRuntime.getSqlSourceEditorCodeMirrorDialect("mysql"),
+  MySQL
+);
 const runtimeModelIndex = modelRuntime.createSqltoerdModelIndex(runtimeModel);
 const runtimeOrdersToUsersRelation =
   runtimeModel.schema.relations.find(
@@ -1847,14 +1884,21 @@ assert.match(panel, /disabled=\{isDialectSelectDisabled\}/);
 assert.match(panel, /isDialectSelectDisabled/);
 assert.match(panel, /onSourceTextChange/);
 assert.match(panel, /isSourceTextReadOnly/);
-assert.match(panel, /@codemirror\/lang-sql/);
+assert.match(sqlEditorDialectUtils, /@codemirror\/lang-sql/);
 assert.match(panel, /@codemirror\/state/);
 assert.match(panel, /@codemirror\/view/);
 assert.match(panel, /SqlSourceEditor/);
 assert.match(panel, /sqlSourceEditorTheme/);
+assert.match(panel, /lastResolvedDialect/);
+assert.match(panel, /resolveSqlSourceEditorDialect/);
+assert.match(panel, /setLastResolvedDialect\(generateRequest\.resolvedDialect\)/);
+assert.match(panel, /languageCompartmentRef/);
+assert.match(panel, /getSqlSourceEditorLanguageExtension/);
+assert.match(panel, /languageCompartment\.of/);
+assert.match(panel, /languageCompartmentRef\.current\.reconfigure/);
 assert.match(panel, /EditorState\.readOnly\.of\(readOnly\)/);
 assert.match(panel, /EditorView\.editable\.of\(!readOnly\)/);
-assert.match(panel, /sql\(\)/);
+assert.doesNotMatch(panel, /\bsql\(\)/);
 assert.doesNotMatch(panel, /<textarea/);
 assert.match(panel, /setSqlErdViewSession\(\(currentSession\) =>/);
 assert.match(panel, /sessionLoadState/);
