@@ -639,3 +639,12 @@ DELETE /api/v1/workspaces/{workspaceId}/github/installations/{installationId}
 - On callback success, app-server redirects to `returnUrl` with `302`.
 - If `returnUrl` is omitted, the callback returns the JSON payload for
   diagnostic/API-client use.
+- If `GET /github/oauth/callback` cannot save the GitHub account because
+  `users.github_user_id` or `users.github_login` already belongs to another
+  PILO user, the failure is treated as a safe duplicate-account conflict.
+  Without `returnUrl`, the callback returns `409 CONFLICT` with
+  `error.code = "CONFLICT"` and
+  `error.message = "GitHub account is already connected to another PILO account"`.
+  With `returnUrl`, app-server redirects to `returnUrl` with `302` and appends
+  `github_oauth_error=account_already_connected` so the frontend can show a
+  user-facing error message instead of exposing raw JSON or a raw 500 page.

@@ -28,6 +28,10 @@ const envExample = await readFile(
   new URL("../../../../.env.example", import.meta.url),
   "utf8"
 );
+const githubIntegrationApi = await readFile(
+  new URL("../../../../docs/api/github-integration-api.md", import.meta.url),
+  "utf8"
+);
 
 const githubIntegrationDirectory = new URL(
   "../../src/modules/github-integration/",
@@ -130,6 +134,9 @@ assert.match(dtoIndex, /ListGithubSyncRunsQuery/);
 assert.match(envExample, /^API_PUBLIC_ORIGIN=/m);
 assert.match(envExample, /^GITHUB_PROJECT_OAUTH_CLIENT_ID=/m);
 assert.match(envExample, /^GITHUB_PROJECT_OAUTH_CLIENT_SECRET=/m);
+assert.match(githubIntegrationApi, /GitHub account is already connected to another PILO account/);
+assert.match(githubIntegrationApi, /409 CONFLICT/);
+assert.match(githubIntegrationApi, /github_oauth_error=account_already_connected/);
 assert.deepEqual(directoryNames.sort(), ["dto", "queries", "types"]);
 
 const tscScript = fileURLToPath(
