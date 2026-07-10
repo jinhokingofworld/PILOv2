@@ -1484,9 +1484,52 @@ assert.equal(
   ),
   true
 );
+const runtimeRelationCompartment = new Compartment();
+let runtimeRelationEditorState = EditorState.create({
+  doc: postgresSourceText,
+  selection: { anchor: postgresSourceText.indexOf("user_id") },
+  extensions: [
+    history(),
+    runtimeRelationCompartment.of(
+      sqlSourceDecorationRuntime.createSqlErdRelationSourceDecorationExtension(
+        [],
+        postgresSourceText.length
+      )
+    )
+  ]
+});
+runtimeRelationEditorState = runtimeRelationEditorState.update({
+  changes: { from: postgresSourceText.length, insert: "\n" },
+  selection: { anchor: postgresSourceText.indexOf("orders") },
+  userEvent: "input"
+}).state;
+const runtimeRelationDocument = runtimeRelationEditorState.doc.toString();
+const runtimeRelationSelection = runtimeRelationEditorState.selection.main;
+const runtimeRelationUndoDepth = undoDepth(runtimeRelationEditorState);
+
+runtimeRelationEditorState = runtimeRelationEditorState.update({
+  effects: runtimeRelationCompartment.reconfigure(
+    sqlSourceDecorationRuntime.createSqlErdRelationSourceDecorationExtension(
+      selectedPostgresRelationRanges,
+      runtimeRelationEditorState.doc.length
+    )
+  )
+}).state;
+
+assert.equal(runtimeRelationEditorState.doc.toString(), runtimeRelationDocument);
+assert.deepEqual(runtimeRelationEditorState.selection.main, runtimeRelationSelection);
+assert.equal(undoDepth(runtimeRelationEditorState), runtimeRelationUndoDepth);
 assert.deepEqual(
   sqlSourceMapRuntime.getSelectedSqlErdRelationSourceRanges({
     selection: { type: "none" },
+    sourceMap: postgresParseResult.sourceMap,
+    sourceText: postgresSourceText
+  }),
+  []
+);
+assert.deepEqual(
+  sqlSourceMapRuntime.getSelectedSqlErdRelationSourceRanges({
+    selection: { type: "relation", relationId: "relation.missing" },
     sourceMap: postgresParseResult.sourceMap,
     sourceText: postgresSourceText
   }),
@@ -2070,6 +2113,7 @@ assert.match(generateSessionUtils, /sourceMap: parseResult\.sourceMap/);
 assert.match(sqlSourceDecorationUtils, /Decoration\.mark/);
 assert.match(sqlSourceDecorationUtils, /EditorView\.decorations\.of/);
 assert.match(sqlSourceDecorationUtils, /range\.to > documentLength/);
+assert.doesNotMatch(sqlSourceDecorationUtils, /\bcolor\b/);
 
 assert.match(layoutAutosaveUtils, /createSqlErdLayoutAutosaveRequest/);
 assert.match(layoutAutosaveUtils, /baseRevision: session\.revision/);
@@ -2171,6 +2215,9 @@ assert.match(panel, /lastResolvedDialect/);
 assert.match(panel, /sqlSourceMap/);
 assert.match(panel, /setSqlSourceMap\(null\)/);
 assert.match(panel, /setSqlSourceMap\(generateRequest\.sourceMap\)/);
+assert.match(panel, /relationSourceCompartmentRef/);
+assert.match(panel, /getSelectedSqlErdRelationSourceRanges/);
+assert.doesNotMatch(panel, /scrollIntoView/);
 assert.match(panel, /resolveSqlSourceEditorDialect/);
 assert.match(panel, /setLastResolvedDialect\(generateRequest\.resolvedDialect\)/);
 assert.match(panel, /languageCompartmentRef/);
