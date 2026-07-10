@@ -1,7 +1,9 @@
 import {
   SqlErdDeletedSessionPayload,
   SqlErdSessionPayload,
-  SqlErdSessionRow
+  SqlErdSessionRow,
+  SqlErdSessionSummaryPayload,
+  SqlErdSessionSummaryRow
 } from "./sql-erd.types";
 
 export function mapSqlErdSession(
@@ -26,6 +28,25 @@ export function mapSqlErdSession(
     updatedAt: toIsoString(session.updated_at),
     deletedAt:
       session.deleted_at === null ? null : toIsoString(session.deleted_at)
+  };
+}
+
+export function mapSqlErdSessionSummary(
+  session: SqlErdSessionSummaryRow
+): SqlErdSessionSummaryPayload {
+  return {
+    id: session.id,
+    workspaceId: session.workspace_id,
+    title: session.title,
+    sourceFormat: session.source_format,
+    dialect: session.dialect,
+    tableCount: Number(session.table_count),
+    relationCount: Number(session.relation_count),
+    revision: Number(session.revision),
+    createdBy: session.created_by,
+    updatedBy: session.updated_by,
+    createdAt: toIsoString(session.created_at),
+    updatedAt: toIsoString(session.updated_at)
   };
 }
 
