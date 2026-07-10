@@ -1733,6 +1733,53 @@ assert.deepEqual(
   ["BIGSERIAL", "ORDER_STATUS", "CURRENCY_AMOUNT"]
 );
 
+const caseSensitivePostgreSqlDomainParseResult =
+  ddlParserRuntime.parseSqlDdlToErdModel({
+    dialect: "postgresql",
+    sourceText: `CREATE DOMAIN "CaseType570" AS TEXT;
+CREATE DOMAIN "casetype570" AS TEXT;
+
+CREATE TABLE case_sensitive_values (
+  upper_value "CaseType570" NOT NULL,
+  lower_value "casetype570" NOT NULL
+);`
+  });
+
+assert.equal(caseSensitivePostgreSqlDomainParseResult.ok, true);
+
+const commentOnlyPostgreSqlTypeParseResult =
+  ddlParserRuntime.parseSqlDdlToErdModel({
+    dialect: "postgresql",
+    sourceText: `-- CREATE TYPE comment_only_type_570 AS ENUM ('ignored');
+CREATE TABLE comment_only_values (
+  value comment_only_type_570 NOT NULL
+);`
+  });
+
+assert.equal(commentOnlyPostgreSqlTypeParseResult.ok, false);
+
+const stringOnlyPostgreSqlTypeParseResult =
+  ddlParserRuntime.parseSqlDdlToErdModel({
+    dialect: "postgresql",
+    sourceText: `CREATE TABLE string_only_values (
+  note TEXT DEFAULT 'CREATE DOMAIN string_only_type_570',
+  value string_only_type_570 NOT NULL
+);`
+  });
+
+assert.equal(stringOnlyPostgreSqlTypeParseResult.ok, false);
+
+assert.deepEqual(
+  ddlParserRuntime.collectPostgreSqlUserDefinedTypeDeclarations(`-- CREATE TYPE comment_type AS ENUM ('ignored');
+/* CREATE DOMAIN block_comment_type AS TEXT; */
+SELECT 'CREATE DOMAIN string_type AS TEXT';
+DO $body$ BEGIN RAISE NOTICE 'CREATE TYPE dollar_string_type'; END $body$;
+CREATE /* real declaration */ DOMAIN "CaseType570" AS TEXT;
+CREATE DOMAIN "casetype570" AS TEXT;
+CREATE TYPE public.order_status AS ENUM ('pending');`),
+  ["\"CaseType570\"", "\"casetype570\"", "public.order_status"]
+);
+
 const invalidParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
   dialect: "postgresql",
   sourceText: "SELECT * FROM users"

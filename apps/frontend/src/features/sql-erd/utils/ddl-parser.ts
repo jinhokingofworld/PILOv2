@@ -1,3 +1,4 @@
+import { PostgreSQL } from "@codemirror/lang-sql";
 import sqlParser from "node-sql-parser";
 
 import {
@@ -40,6 +41,10 @@ type MutableTableParseState = {
   table: ErdTable;
   columnsByName: Map<string, ErdColumn>;
 };
+
+type PostgreSqlSyntaxNode = ReturnType<
+  typeof PostgreSQL.language.parser.parse
+>["topNode"];
 
 const parser = new Parser();
 
@@ -132,29 +137,15 @@ export function parseSqlDdlToErdModel(
 }
 
 function preparePostgreSqlParserSource(sourceText: string) {
-  const identifier = String.raw`(?:"(?:[^"]|"")*"|[A-Za-z_][A-Za-z0-9_$]*)`;
-  const qualifiedIdentifier = `${identifier}(?:\\s*\\.\\s*${identifier})?`;
-  const declarationPattern = new RegExp(
-    `\\bCREATE\\s+(?:OR\\s+REPLACE\\s+)?(?:TYPE|DOMAIN)\\s+(${qualifiedIdentifier})`,
-    "gi"
-  );
-  const declaredTypes = new Map<string, string>();
+  const declaredTypes = collectPostgreSqlUserDefinedTypeDeclarations(sourceText);
 
-  for (const match of sourceText.matchAll(declarationPattern)) {
-    const typeName = match[1];
-
-    if (typeName) {
-      declaredTypes.set(typeName.replace(/\s+/g, "").toLowerCase(), typeName);
-    }
-  }
-
-  if (declaredTypes.size === 0) {
+  if (declaredTypes.length === 0) {
     return sourceText;
   }
 
   // node-sql-parser registers CREATE TYPE names but not CREATE DOMAIN names.
   // Register both in a parser-only prelude so table columns keep their original type.
-  const parserPrelude = [...declaredTypes.values()]
+  const parserPrelude = declaredTypes
     .map(
       (typeName) =>
         `CREATE TYPE ${typeName} AS ENUM ('__pilo_sqltoerd_parser_type__');`
@@ -162,6 +153,130 @@ function preparePostgreSqlParserSource(sourceText: string) {
     .join("\n");
 
   return `${parserPrelude}\n${sourceText}`;
+}
+
+export function collectPostgreSqlUserDefinedTypeDeclarations(
+  sourceText: string
+) {
+  const tree = PostgreSQL.language.parser.parse(sourceText);
+  const rootCursor = tree.cursor();
+  const declaredTypes = new Map<string, string>();
+
+  if (!rootCursor.firstChild()) {
+    return [];
+  }
+
+  do {
+    if (rootCursor.name !== "Statement") {
+      continue;
+    }
+
+    const statementNodes = getPostgreSqlStatementNodes(rootCursor.node);
+    let cursor = 0;
+
+    if (readPostgreSqlKeyword(statementNodes[cursor], sourceText) !== "CREATE") {
+      continue;
+    }
+
+    cursor += 1;
+
+    if (
+      readPostgreSqlKeyword(statementNodes[cursor], sourceText) === "OR" &&
+      readPostgreSqlKeyword(statementNodes[cursor + 1], sourceText) === "REPLACE"
+    ) {
+      cursor += 2;
+    }
+
+    const declarationKind = readPostgreSqlKeyword(
+      statementNodes[cursor],
+      sourceText
+    );
+
+    if (declarationKind !== "TYPE" && declarationKind !== "DOMAIN") {
+      continue;
+    }
+
+    const typeNameNode = statementNodes[cursor + 1];
+    const typeKey = createPostgreSqlTypeNameKey(typeNameNode, sourceText);
+
+    if (typeKey && !declaredTypes.has(typeKey)) {
+      declaredTypes.set(
+        typeKey,
+        sourceText.slice(typeNameNode.from, typeNameNode.to)
+      );
+    }
+  } while (rootCursor.nextSibling());
+
+  return [...declaredTypes.values()];
+}
+
+function getPostgreSqlStatementNodes(statementNode: PostgreSqlSyntaxNode) {
+  const cursor = statementNode.cursor();
+  const nodes: PostgreSqlSyntaxNode[] = [];
+
+  if (!cursor.firstChild()) {
+    return nodes;
+  }
+
+  do {
+    if (!cursor.name.endsWith("Comment")) {
+      nodes.push(cursor.node);
+    }
+  } while (cursor.nextSibling());
+
+  return nodes;
+}
+
+function readPostgreSqlKeyword(
+  node: PostgreSqlSyntaxNode | undefined,
+  sourceText: string
+) {
+  return node?.name === "Keyword"
+    ? sourceText.slice(node.from, node.to).toUpperCase()
+    : null;
+}
+
+function createPostgreSqlTypeNameKey(
+  node: PostgreSqlSyntaxNode | undefined,
+  sourceText: string
+) {
+  if (!node) {
+    return null;
+  }
+
+  if (node.name === "Identifier" || node.name === "QuotedIdentifier") {
+    return createPostgreSqlIdentifierKey(node, sourceText);
+  }
+
+  if (node.name !== "CompositeIdentifier") {
+    return null;
+  }
+
+  const cursor = node.cursor();
+  const identifiers: string[] = [];
+
+  if (!cursor.firstChild()) {
+    return null;
+  }
+
+  do {
+    if (cursor.name === "Identifier" || cursor.name === "QuotedIdentifier") {
+      identifiers.push(createPostgreSqlIdentifierKey(cursor.node, sourceText));
+    }
+  } while (cursor.nextSibling());
+
+  return identifiers.length > 0 ? identifiers.join(".") : null;
+}
+
+function createPostgreSqlIdentifierKey(
+  node: PostgreSqlSyntaxNode,
+  sourceText: string
+) {
+  const identifier = sourceText.slice(node.from, node.to);
+
+  return node.name === "QuotedIdentifier"
+    ? `quoted:${identifier.slice(1, -1).replace(/""/g, '"')}`
+    : `unquoted:${identifier.toLowerCase()}`;
 }
 
 function resolveParserDatabases(
