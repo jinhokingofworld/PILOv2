@@ -384,6 +384,7 @@ export type PrReviewConflictApplyResult = {
   headBlobShaAfter: string;
   conflictStatus: PrReviewConflictStatus;
   conflictCheckedAt: string | null;
+  localStateStatus: "updated" | "sync_required";
 };
 
 export type UpdatePrReviewFileDecisionInput = {

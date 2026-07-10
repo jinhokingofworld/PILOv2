@@ -121,6 +121,54 @@ function getErrorMessage(error: unknown) {
   return "파일 리뷰 정보를 불러오지 못했습니다.";
 }
 
+function getConflictApplyErrorMessage(error: unknown) {
+  const message = getErrorMessage(error);
+
+  if (
+    message.includes("Single supported content conflict file is required") ||
+    message.includes("multiple conflicted files")
+  ) {
+    return "현재는 지원 가능한 Conflict 파일이 1개인 PR만 적용할 수 있습니다.";
+  }
+
+  if (
+    message.includes("Review session head SHA is stale") ||
+    message.includes("GitHub pull request head SHA is stale") ||
+    message.includes("Review session base SHA is stale") ||
+    message.includes("GitHub pull request base SHA is stale") ||
+    message.includes("Review file blob SHA is stale") ||
+    message.includes("pull request conflict no longer exists")
+  ) {
+    return "PR 브랜치가 변경되었습니다. 동기화 후 새 리뷰를 시작해 주세요.";
+  }
+
+  if (
+    message.includes("repository file lookup is temporarily unavailable") ||
+    message.includes("repository file content lookup failed") ||
+    message.includes("repository content lookup failed")
+  ) {
+    return "GitHub 파일 정보를 잠시 불러오지 못했습니다. 다시 시도해 주세요.";
+  }
+
+  if (message.includes("Contents write permission is required")) {
+    return "GitHub App에 Contents 쓰기 권한이 필요합니다.";
+  }
+
+  if (message.includes("GitHub OAuth connection is required")) {
+    return "GitHub 연결이 필요합니다. 설정에서 GitHub를 연결한 뒤 다시 시도해 주세요.";
+  }
+
+  if (message.includes("GitHub OAuth connection is invalid")) {
+    return "GitHub 연결이 유효하지 않습니다. GitHub를 다시 연결해 주세요.";
+  }
+
+  if (message.includes("GitHub conflict merge commit apply failed")) {
+    return "GitHub에 Conflict 해결 commit을 적용하지 못했습니다. 다시 시도해 주세요.";
+  }
+
+  return message;
+}
+
 function formatNumber(value: number) {
   return new Intl.NumberFormat("ko-KR").format(value);
 }
@@ -604,7 +652,7 @@ export function PrReviewFileDiffDrawer({
       return true;
     } catch (error) {
       setConflictApplyStatus("error");
-      setConflictApplyError(getErrorMessage(error));
+      setConflictApplyError(getConflictApplyErrorMessage(error));
       return false;
     }
   }, [
@@ -1386,18 +1434,27 @@ function ConflictApplySuccessNotice({
 }: {
   result: PrReviewConflictApplyResult;
 }) {
-  const statusMessage =
-    result.conflictStatus === "clean"
-      ? "GitHub confirmed that this PR has no remaining merge conflict."
+  const requiresSync = result.localStateStatus === "sync_required";
+  const statusMessage = requiresSync
+    ? "GitHub에는 적용됐지만 PILO 상태 갱신에 실패했습니다. GitHub 동기화 후 새 리뷰를 시작해 주세요."
+    : result.conflictStatus === "clean"
+      ? "GitHub에서 남은 Conflict가 없음을 확인했습니다."
       : result.conflictStatus === "checking"
-        ? "GitHub is checking the updated PR for remaining conflicts."
-        : "GitHub refreshed the PR conflict status after the commit.";
+        ? "GitHub에서 갱신된 PR의 Conflict 상태를 확인하고 있습니다."
+        : "GitHub의 최신 Conflict 상태를 다시 확인했습니다.";
 
   return (
-    <section className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-emerald-900">
+    <section
+      className={cn(
+        "rounded-lg border px-4 py-3",
+        requiresSync
+          ? "border-amber-200 bg-amber-50 text-amber-950"
+          : "border-emerald-200 bg-emerald-50 text-emerald-900"
+      )}
+    >
       <p className="flex items-center gap-2 text-sm font-semibold">
         <CheckCircle2 className="size-4 shrink-0" />
-        Conflict resolution committed
+        Conflict 해결 merge commit 완료
       </p>
       <p className="mt-2 text-xs leading-5">{statusMessage}</p>
       <p className="mt-2 font-mono text-xs">
