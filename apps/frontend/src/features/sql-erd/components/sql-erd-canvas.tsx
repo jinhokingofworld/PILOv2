@@ -69,7 +69,7 @@ const sqlErdShapeUtils = [SqlErdRelationShapeUtil, SqlErdTableShapeUtil];
 const SQLTOERD_LAYOUT_SYNC_DELAY_MS = 250;
 
 const sqlErdTldrawComponents = {
-  Background: SqlErdCanvasBackground
+  Background: null
 };
 
 function shapeIdSuffix(value: string) {
@@ -1120,12 +1120,6 @@ function SqlErdLayoutSync({
   return null;
 }
 
-function SqlErdCanvasBackground() {
-  return (
-    <div className="absolute inset-0 bg-slate-50 bg-[radial-gradient(circle_at_1px_1px,rgba(15,23,42,0.12)_1px,transparent_0)] [background-size:24px_24px]" />
-  );
-}
-
 export function SqlErdCanvas({
   className,
   layoutJson = commerceSqltoerdFixture.layoutJson,
@@ -1147,7 +1141,10 @@ export function SqlErdCanvas({
 
   return (
     <TldrawSurface
-      className={cn("h-full w-full", className)}
+      className={cn(
+        "h-full w-full bg-slate-50 bg-[radial-gradient(circle_at_1px_1px,rgba(15,23,42,0.12)_1px,transparent_0)] [background-size:24px_24px]",
+        className
+      )}
       components={sqlErdTldrawComponents}
       hideUi
       onMount={handleMount}

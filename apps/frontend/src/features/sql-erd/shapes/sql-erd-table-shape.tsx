@@ -1,6 +1,11 @@
 "use client";
 
-import { useRef, type KeyboardEvent, type PointerEvent } from "react";
+import {
+  useRef,
+  type KeyboardEvent,
+  type MouseEvent,
+  type PointerEvent
+} from "react";
 import {
   HTMLContainer,
   Rectangle2d,
@@ -90,6 +95,44 @@ type SqlErdColumnSelectEventDetail = {
 type SqlErdTableSelectEventDetail = {
   tableId: string;
 };
+
+export function getSqlErdTableSelectionAtLocalPoint(
+  shape: SqlErdTableShape,
+  point: { x: number; y: number }
+):
+  | { type: "table" }
+  | { type: "column"; columnId: string }
+  | null {
+  if (
+    point.x < 0 ||
+    point.x > shape.props.w ||
+    point.y < 0 ||
+    point.y > shape.props.h
+  ) {
+    return null;
+  }
+
+  if (point.y < TABLE_HEADER_HEIGHT) {
+    return { type: "table" };
+  }
+
+  const columnIndex = Math.floor(
+    (point.y - TABLE_HEADER_HEIGHT) / TABLE_ROW_HEIGHT
+  );
+  const column = shape.props.columns[columnIndex];
+
+  return column ? { type: "column", columnId: column.id } : null;
+}
+
+export function isSqlErdColumnPointerDrag(
+  start: { x: number; y: number },
+  end: { x: number; y: number }
+) {
+  return (
+    Math.hypot(end.x - start.x, end.y - start.y) >
+    COLUMN_CLICK_DRAG_THRESHOLD
+  );
+}
 
 export function selectSqlErdColumn(detail: SqlErdColumnSelectEventDetail) {
   window.dispatchEvent(
@@ -323,15 +366,39 @@ function getColumnBadges(column: SqlErdTableColumnShapeProps): ColumnBadge[] {
   return badges;
 }
 
+export function getSqlErdColumnRowVisualStyle({
+  isAlternateRow,
+  isHighlighted,
+  isSelected
+}: {
+  isAlternateRow: boolean;
+  isHighlighted: boolean;
+  isSelected: boolean;
+}) {
+  if (isSelected) {
+    return {
+      backgroundColor: "#dbeafe",
+      boxShadow:
+        "inset 4px 0 0 #2563eb, inset 0 0 0 1px rgba(37, 99, 235, 0.32)"
+    };
+  }
+
+  if (isHighlighted) {
+    return {
+      backgroundColor: "#f0f7ff",
+      boxShadow: "inset 3px 0 0 rgba(96, 165, 250, 0.55)"
+    };
+  }
+
+  return {
+    backgroundColor: isAlternateRow ? "#f8fafc" : "#ffffff",
+    boxShadow: undefined
+  };
+}
+
 function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
   const editor = useEditor();
-  const columnPointerStartRef = useRef<{
-    columnId: string;
-    pointerId: number;
-    x: number;
-    y: number;
-  } | null>(null);
-  const suppressNextColumnClickRef = useRef(false);
+  const columnPointerStartRef = useRef<{ x: number; y: number } | null>(null);
   const displayName = shape.props.schemaName
     ? `${shape.props.schemaName}.${shape.props.tableName}`
     : shape.props.tableName;
@@ -361,48 +428,32 @@ function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
     });
   }
 
-  function handleColumnPointerDown(
-    event: PointerEvent<HTMLDivElement>,
-    columnId: string
-  ) {
+  function handleColumnPointerDown(event: PointerEvent<HTMLDivElement>) {
     columnPointerStartRef.current = {
-      columnId,
-      pointerId: event.pointerId,
       x: event.clientX,
       y: event.clientY
     };
-    suppressNextColumnClickRef.current = false;
   }
 
-  function handleColumnPointerUp(
-    event: PointerEvent<HTMLDivElement>,
+  function handleColumnDomClick(
+    event: MouseEvent<HTMLDivElement>,
     columnId: string
   ) {
-    const start = columnPointerStartRef.current;
+    const pointerStart = columnPointerStartRef.current;
     columnPointerStartRef.current = null;
 
     if (
-      !start ||
-      start.columnId !== columnId ||
-      start.pointerId !== event.pointerId
+      pointerStart &&
+      isSqlErdColumnPointerDrag(pointerStart, {
+        x: event.clientX,
+        y: event.clientY
+      })
     ) {
       return;
     }
 
-    const movedDistance = Math.hypot(
-      event.clientX - start.x,
-      event.clientY - start.y
-    );
-
-    if (movedDistance > COLUMN_CLICK_DRAG_THRESHOLD) {
-      suppressNextColumnClickRef.current = true;
-      return;
-    }
-
-    event.preventDefault();
     event.stopPropagation();
     handleColumnClick(columnId);
-    suppressNextColumnClickRef.current = true;
   }
 
   return (
@@ -463,14 +514,7 @@ function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
                 }
                 key={column.id}
                 onClick={(event) => {
-                  event.stopPropagation();
-
-                  if (suppressNextColumnClickRef.current) {
-                    suppressNextColumnClickRef.current = false;
-                    return;
-                  }
-
-                  handleColumnClick(column.id);
+                  handleColumnDomClick(event, column.id);
                 }}
                 onKeyDown={(event) => {
                   if (event.key !== "Enter" && event.key !== " ") {
@@ -484,26 +528,14 @@ function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
                 onPointerCancel={() => {
                   columnPointerStartRef.current = null;
                 }}
-                onPointerDownCapture={(event) => {
-                  handleColumnPointerDown(event, column.id);
-                }}
-                onPointerUpCapture={(event) => {
-                  handleColumnPointerUp(event, column.id);
-                }}
+                onPointerDownCapture={handleColumnPointerDown}
                 role="button"
                 style={{
-                  backgroundColor: isSelected
-                    ? "#eff6ff"
-                    : isHighlighted
-                      ? "#f0f7ff"
-                    : columnIndex % 2 === 0
-                      ? "#ffffff"
-                      : "#f8fafc",
-                  boxShadow: isSelected
-                    ? "inset 3px 0 0 rgba(37, 99, 235, 0.85)"
-                    : isHighlighted
-                      ? "inset 3px 0 0 rgba(96, 165, 250, 0.55)"
-                      : undefined,
+                  ...getSqlErdColumnRowVisualStyle({
+                    isAlternateRow: columnIndex % 2 !== 0,
+                    isHighlighted,
+                    isSelected
+                  }),
                   columnGap: ROW_COLUMN_GAP,
                   gridTemplateColumns: `${shape.props.badgeColumnWidth}px max-content minmax(max-content, 1fr)`
                 }}
@@ -580,6 +612,38 @@ export class SqlErdTableShapeUtil extends ShapeUtil<SqlErdTableShape> {
 
   override canResize() {
     return false;
+  }
+
+  override hideSelectionBoundsBg() {
+    return true;
+  }
+
+  override hideSelectionBoundsFg(shape: SqlErdTableShape) {
+    return shape.props.selectedState === "column";
+  }
+
+  override onClick(shape: SqlErdTableShape) {
+    const localPoint = this.editor.getPointInShapeSpace(
+      shape,
+      this.editor.inputs.getCurrentPagePoint()
+    );
+    const selection = getSqlErdTableSelectionAtLocalPoint(shape, localPoint);
+
+    if (!selection) {
+      return;
+    }
+
+    if (selection.type === "column") {
+      selectSqlErdTableShapeColumn(this.editor, shape, selection.columnId);
+      selectSqlErdColumn({
+        columnId: selection.columnId,
+        tableId: shape.props.tableId
+      });
+      return;
+    }
+
+    selectSqlErdTableShape(this.editor, shape);
+    selectSqlErdTable({ tableId: shape.props.tableId });
   }
 
   override getDefaultProps(): SqlErdTableShape["props"] {
