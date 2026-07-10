@@ -20,7 +20,7 @@ import type {
 import { createMeetingApiClient } from "@/features/meeting/api/client";
 import type { MeetingReportSummary } from "@/features/meeting/types";
 import { createSqlErdApiClient } from "@/features/sql-erd/api/client";
-import type { SqltoerdSessionPayload } from "@/features/sql-erd/types";
+import type { SqltoerdSessionSummary } from "@/features/sql-erd/types";
 import { readGithubBoardSelection } from "@/shared/github/board-selection";
 
 export const homeIssueListLimit = 5;
@@ -61,7 +61,7 @@ export type HomeCanvasState = {
 
 export type HomeSqlErdState = {
   error: Error | null;
-  session: SqltoerdSessionPayload | null;
+  session: SqltoerdSessionSummary | null;
   status: "idle" | "loading" | "success" | "error";
 };
 
@@ -545,7 +545,10 @@ export function useHomeSqlErdSession({
       });
 
       try {
-        const session = await sqlErdClient.getActiveSession(normalizedWorkspaceId);
+        const result = await sqlErdClient.listSessions(normalizedWorkspaceId, {
+          limit: 1
+        });
+        const session = result.items[0] ?? null;
 
         if (active) {
           setState({

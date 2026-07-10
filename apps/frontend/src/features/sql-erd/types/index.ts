@@ -99,6 +99,33 @@ export type SqltoerdSessionPayload = {
   deletedAt: string | null;
 };
 
+export type SqltoerdSessionSummary = Pick<
+  SqltoerdSessionPayload,
+  | "id"
+  | "workspaceId"
+  | "title"
+  | "sourceFormat"
+  | "dialect"
+  | "tableCount"
+  | "relationCount"
+  | "revision"
+  | "createdBy"
+  | "updatedBy"
+  | "createdAt"
+  | "updatedAt"
+>;
+
+export type SqltoerdSessionListPayload = {
+  items: SqltoerdSessionSummary[];
+  nextCursor: string | null;
+};
+
+export type SqltoerdSessionDeletePayload = {
+  id: string;
+  deletedAt: string;
+  revision: number;
+};
+
 export type SqltoerdSessionFixture = {
   title: string;
   sourceFormat: SqltoerdSourceFormat;

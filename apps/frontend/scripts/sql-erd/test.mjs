@@ -27,6 +27,10 @@ async function compileSqlErdRuntimeModules() {
   const generateSessionOutputPath = join(outputDir, "generate-session.mjs");
   const layoutAutosaveOutputPath = join(outputDir, "layout-autosave.mjs");
   const apiClientOutputPath = join(outputDir, "api-client.mjs");
+  const sessionNavigationOutputPath = join(
+    outputDir,
+    "session-navigation.mjs"
+  );
   const sessionStateOutputPath = join(outputDir, "session-state.mjs");
   const statusCopyOutputPath = join(outputDir, "status-copy.mjs");
   const sqlEditorDialectOutputPath = join(outputDir, "sql-editor-dialect.mjs");
@@ -81,6 +85,10 @@ async function compileSqlErdRuntimeModules() {
     await compileTypeScriptModule(
       "../../src/features/sql-erd/api/client.ts",
       apiClientOutputPath
+    );
+    await compileTypeScriptModule(
+      "../../src/features/sql-erd/utils/session-navigation.ts",
+      sessionNavigationOutputPath
     );
     await compileTypeScriptModule(
       "../../src/features/sql-erd/utils/session-state.ts",
@@ -171,6 +179,7 @@ async function compileSqlErdRuntimeModules() {
       generateSessionRuntime,
       layoutAutosaveRuntime,
       apiClientRuntime,
+      sessionNavigationRuntime,
       sessionStateRuntime,
       sqlEditorDialectRuntime,
       statusCopyRuntime,
@@ -186,6 +195,7 @@ async function compileSqlErdRuntimeModules() {
       import(pathToFileHref(generateSessionOutputPath)),
       import(pathToFileHref(layoutAutosaveOutputPath)),
       import(pathToFileHref(apiClientOutputPath)),
+      import(pathToFileHref(sessionNavigationOutputPath)),
       import(pathToFileHref(sessionStateOutputPath)),
       import(pathToFileHref(sqlEditorDialectOutputPath)),
       import(pathToFileHref(statusCopyOutputPath)),
@@ -205,6 +215,7 @@ async function compileSqlErdRuntimeModules() {
       inspectorRuntime,
       modelRuntime,
       relationShapeRuntime,
+      sessionNavigationRuntime,
       sessionStateRuntime,
       sqlEditorDialectRuntime,
       statusCopyRuntime,
@@ -483,11 +494,16 @@ const [
   apiSpec,
   types,
   commerceFixture,
+  homeDashboardData,
   modelUtils,
   inspectorUtils,
   page,
+  sessionPage,
+  sessionRouteBridge,
   navigation,
   panel,
+  sessionList,
+  sessionNavigationUtils,
   sessionStateUtils,
   generateSessionUtils,
   layoutAutosaveUtils,
@@ -506,11 +522,18 @@ const [
     readSqlErdFile("../../../../docs/api/sqltoerd-api.md"),
     readSqlErdFile("../../src/features/sql-erd/types/index.ts"),
     readSqlErdFile("../../src/features/sql-erd/fixtures/commerce.ts"),
+    readSqlErdFile("../../src/features/home/hooks/use-home-dashboard-data.ts"),
     readSqlErdFile("../../src/features/sql-erd/utils/model.ts"),
     readSqlErdFile("../../src/features/sql-erd/utils/inspector.ts"),
     readSqlErdFile("../../src/features/sql-erd/page.tsx"),
+    readSqlErdFile("../../src/features/sql-erd/session-page.tsx"),
+    readSqlErdFile("../../src/app/(workspace)/sql-erd/session/page.tsx"),
     readSqlErdFile("../../src/features/sql-erd/navigation.ts"),
     readSqlErdFile("../../src/features/sql-erd/components/sql-erd-panel.tsx"),
+    readSqlErdFile(
+      "../../src/features/sql-erd/components/sql-erd-session-list.tsx"
+    ),
+    readSqlErdFile("../../src/features/sql-erd/utils/session-navigation.ts"),
     readSqlErdFile("../../src/features/sql-erd/utils/session-state.ts"),
     readSqlErdFile("../../src/features/sql-erd/utils/generate-session.ts"),
     readSqlErdFile("../../src/features/sql-erd/utils/layout-autosave.ts"),
@@ -528,6 +551,7 @@ const [
 
 const {
   apiClientRuntime,
+  sessionNavigationRuntime,
   canvasSelectionRuntime,
   ddlParserRuntime,
   sqlSourceMapRuntime,
@@ -1294,21 +1318,46 @@ assert.equal(
   "missing_workspace_session"
 );
 
-const sqlErdApiRequests = [];
 const runtimeSession = createRuntimeTestSession({
   createdBy: null,
   updatedBy: null
 });
-const sqlErdApiClient = apiClientRuntime.createSqlErdApiClient({
+const runtimeSessionSummary = {
+  id: runtimeSession.id,
+  workspaceId: runtimeSession.workspaceId,
+  title: runtimeSession.title,
+  sourceFormat: runtimeSession.sourceFormat,
+  dialect: runtimeSession.dialect,
+  tableCount: runtimeSession.tableCount,
+  relationCount: runtimeSession.relationCount,
+  revision: runtimeSession.revision,
+  createdBy: runtimeSession.createdBy,
+  updatedBy: runtimeSession.updatedBy,
+  createdAt: runtimeSession.createdAt,
+  updatedAt: runtimeSession.updatedAt
+};
+
+assert.equal(
+  sessionNavigationRuntime.buildSqlErdSessionHref("session 1"),
+  "/sql-erd/session?sessionId=session+1"
+);
+assert.equal(
+  sessionNavigationRuntime.readSqlErdSessionId("?sessionId=session%201"),
+  "session 1"
+);
+assert.equal(sessionNavigationRuntime.readSqlErdSessionId("?sessionId=%20"), null);
+
+const listSqlErdSessionRequests = [];
+const listSqlErdSessionClient = apiClientRuntime.createSqlErdApiClient({
   accessToken: "token-1",
   baseUrl: "https://api.example.test/api/v1/",
   fetcher: async (url, init) => {
-    sqlErdApiRequests.push({ init, url });
+    listSqlErdSessionRequests.push({ init, url });
 
     return new Response(
       JSON.stringify({
         success: true,
-        data: runtimeSession
+        data: { items: [runtimeSessionSummary], nextCursor: "cursor-2" }
       }),
       {
         headers: { "Content-Type": "application/json" },
@@ -1318,30 +1367,45 @@ const sqlErdApiClient = apiClientRuntime.createSqlErdApiClient({
   }
 });
 
-const restoredSession = await sqlErdApiClient.getActiveSession("workspace 1");
-
-assert.deepEqual(restoredSession, runtimeSession);
-assert.equal(restoredSession.createdBy, null);
-assert.equal(restoredSession.updatedBy, null);
-assert.equal(sqlErdApiRequests.length, 1);
-assert.equal(
-  sqlErdApiRequests[0].url,
-  "https://api.example.test/api/v1/workspaces/workspace%201/sql-erd-session"
+const listedSessions = await listSqlErdSessionClient.listSessions(
+  "workspace 1",
+  { cursor: "cursor value", limit: 20 }
 );
-assert.equal(sqlErdApiRequests[0].init.method, "GET");
-assert.equal(sqlErdApiRequests[0].init.credentials, "same-origin");
-assert.equal(sqlErdApiRequests[0].init.headers.Authorization, "Bearer token-1");
-assert.equal(sqlErdApiRequests[0].init.headers.Accept, "application/json");
 
-const emptySqlErdApiClient = apiClientRuntime.createSqlErdApiClient({
-  fetcher: async () =>
-    new Response(JSON.stringify({ success: true, data: null }), {
-      headers: { "Content-Type": "application/json" },
-      status: 200
-    })
+assert.deepEqual(listedSessions.items, [runtimeSessionSummary]);
+assert.equal(listedSessions.nextCursor, "cursor-2");
+assert.equal(listSqlErdSessionRequests.length, 1);
+assert.equal(
+  listSqlErdSessionRequests[0].url,
+  "https://api.example.test/api/v1/workspaces/workspace%201/sql-erd-sessions?limit=20&cursor=cursor+value"
+);
+assert.equal(listSqlErdSessionRequests[0].init.method, "GET");
+assert.equal(listSqlErdSessionRequests[0].init.credentials, "same-origin");
+assert.equal(
+  listSqlErdSessionRequests[0].init.headers.Authorization,
+  "Bearer token-1"
+);
+
+const detailSqlErdSessionRequests = [];
+const detailSqlErdSessionClient = apiClientRuntime.createSqlErdApiClient({
+  fetcher: async (url, init) => {
+    detailSqlErdSessionRequests.push({ init, url });
+
+    return new Response(
+      JSON.stringify({ success: true, data: runtimeSession }),
+      { headers: { "Content-Type": "application/json" }, status: 200 }
+    );
+  }
 });
 
-assert.equal(await emptySqlErdApiClient.getActiveSession("workspace-1"), null);
+assert.deepEqual(
+  await detailSqlErdSessionClient.getSession("workspace 1", "session 1"),
+  runtimeSession
+);
+assert.equal(
+  detailSqlErdSessionRequests[0].url,
+  "http://localhost:4000/api/v1/workspaces/workspace%201/sql-erd-sessions/session%201"
+);
 
 const createSqlErdSessionRequests = [];
 const createSqlErdSessionClient = apiClientRuntime.createSqlErdApiClient({
@@ -1383,7 +1447,7 @@ assert.equal(createdSqlErdSession.revision, 1);
 assert.equal(createSqlErdSessionRequests.length, 1);
 assert.equal(
   createSqlErdSessionRequests[0].url,
-  "https://api.example.test/api/v1/workspaces/workspace%201/sql-erd-session"
+  "https://api.example.test/api/v1/workspaces/workspace%201/sql-erd-sessions"
 );
 assert.equal(createSqlErdSessionRequests[0].init.method, "POST");
 assert.equal(
@@ -1435,13 +1499,45 @@ assert.equal(updatedSqlErdSession.revision, 4);
 assert.equal(updateSqlErdSessionRequests.length, 1);
 assert.equal(
   updateSqlErdSessionRequests[0].url,
-  "http://localhost:4000/api/v1/workspaces/workspace%201/sql-erd-session/session%201"
+  "http://localhost:4000/api/v1/workspaces/workspace%201/sql-erd-sessions/session%201"
 );
 assert.equal(updateSqlErdSessionRequests[0].init.method, "PATCH");
 assert.deepEqual(
   JSON.parse(updateSqlErdSessionRequests[0].init.body),
   updateSessionPayload
 );
+
+const deleteSqlErdSessionRequests = [];
+const deleteSqlErdSessionClient = apiClientRuntime.createSqlErdApiClient({
+  fetcher: async (url, init) => {
+    deleteSqlErdSessionRequests.push({ init, url });
+
+    return new Response(
+      JSON.stringify({
+        success: true,
+        data: {
+          id: "session 1",
+          deletedAt: "2026-07-10T15:00:00.000Z",
+          revision: 4
+        }
+      }),
+      { headers: { "Content-Type": "application/json" }, status: 200 }
+    );
+  }
+});
+
+const deletedSqlErdSession = await deleteSqlErdSessionClient.deleteSession(
+  "workspace 1",
+  "session 1",
+  3
+);
+
+assert.equal(deletedSqlErdSession.revision, 4);
+assert.equal(
+  deleteSqlErdSessionRequests[0].url,
+  "http://localhost:4000/api/v1/workspaces/workspace%201/sql-erd-sessions/session%201?baseRevision=3"
+);
+assert.equal(deleteSqlErdSessionRequests[0].init.method, "DELETE");
 
 const failingSqlErdApiClient = apiClientRuntime.createSqlErdApiClient({
   fetcher: async () =>
@@ -1458,7 +1554,7 @@ const failingSqlErdApiClient = apiClientRuntime.createSqlErdApiClient({
 });
 
 await assert.rejects(
-  () => failingSqlErdApiClient.getActiveSession("workspace-1"),
+  () => failingSqlErdApiClient.getSession("workspace-1", "session-1"),
   /Unauthorized/
 );
 
@@ -2372,8 +2468,14 @@ assert.match(modelUtils, /columnsByTableId/);
 assert.match(modelUtils, /relation\.fromTableId === relation\.toTableId/);
 assert.doesNotMatch(modelUtils, /columnsById: Map<string, SqltoerdColumnRef>/);
 
-assert.match(page, /sql-erd-full-bleed/);
-assert.match(page, /h-screen/);
+assert.match(page, /SqlErdSessionList/);
+assert.doesNotMatch(page, /SqlErdPanel/);
+assert.match(sessionPage, /SqlErdPanel/);
+assert.match(sessionPage, /readSqlErdSessionId/);
+assert.match(sessionPage, /window\.location\.search/);
+assert.match(sessionPage, /sql-erd-full-bleed/);
+assert.match(sessionPage, /h-screen/);
+assert.match(sessionRouteBridge, /SqlErdSessionPage as default/);
 assert.doesNotMatch(page, /-m-6/);
 assert.doesNotMatch(page, /h-\[calc\(100vh-3\.5rem\)\]/);
 
@@ -2384,6 +2486,20 @@ assert.match(navigation, /SQLtoERD/);
 assert.match(navigation, /href: "\/sql-erd"/);
 assert.doesNotMatch(navigation, /Inspector/);
 assert.doesNotMatch(navigation, /href: "\/sql-erd#inspector"/);
+assert.match(homeDashboardData, /listSessions\(normalizedWorkspaceId/);
+assert.match(homeDashboardData, /limit: 1/);
+assert.doesNotMatch(homeDashboardData, /getActiveSession/);
+
+assert.match(sessionList, /listSessions/);
+assert.match(sessionList, /buildSqlErdSessionHref/);
+assert.match(sessionList, /createSession/);
+assert.match(sessionList, /deleteSession/);
+assert.match(sessionList, /nextCursor/);
+assert.match(sessionList, /더 보기/);
+assert.match(sessionList, /session\.revision/);
+assert.match(sessionList, /세션이 없습니다/);
+assert.match(sessionNavigationUtils, /buildSqlErdSessionHref/);
+assert.match(sessionNavigationUtils, /readSqlErdSessionId/);
 
 assert.match(sessionStateUtils, /getSqlErdSessionReloadFailureAction/);
 assert.match(sessionStateUtils, /kind: "preserve_current"/);
@@ -2432,14 +2548,16 @@ assert.match(statusCopyUtils, /Check your connection and try Generate again/);
 assert.match(panel, /SqlErdCanvas/);
 assert.match(panel, /useAuthSession/);
 assert.match(panel, /createSqlErdApiClient/);
-assert.match(panel, /getActiveSession/);
+assert.match(panel, /getSession/);
+assert.match(panel, /sessionId: string/);
 assert.match(panel, /createSqlErdGenerateWorkspaceRequest/);
 assert.match(panel, /getSqlErdGenerateErrorMessage/);
 assert.match(panel, /getSqlErdSignInRequiredState/);
 assert.match(panel, /getSqlErdWorkspaceSaveErrorState/);
 assert.match(panel, /handleGenerate/);
-assert.match(panel, /createSession/);
 assert.match(panel, /updateSession/);
+assert.doesNotMatch(panel, /sqlErdApiClient\.createSession/);
+assert.match(panel, /label: "Save conflict"/);
 assert.match(panel, /pendingLayoutAutosaveJson/);
 assert.match(panel, /layoutAutosaveRetryAttempt/);
 assert.match(panel, /type LayoutAutosaveBlockReason/);
@@ -2456,12 +2574,14 @@ assert.match(panel, /handleRetryLayoutAutosaveOnce/);
 assert.match(panel, /handleLayoutChange/);
 assert.match(panel, /sessionLoadRequestIdRef/);
 assert.match(panel, /shouldApplySqlErdSessionLoadResult/);
-assert.match(panel, /fallbackToSampleOnFailure/);
 assert.match(panel, /getSqlErdSessionReloadFailureAction/);
+assert.match(panel, /SessionLoadPlaceholder/);
+assert.match(panel, /Session을 다시 불러오기/);
 assert.match(
   panel,
-  /void handleReloadSession\(\{ fallbackToSampleOnFailure: true \}\)/
+  /fallbackToSampleOnFailure: false/
 );
+assert.match(panel, /void handleReloadSession\(\)/);
 assert.match(panel, /onReloadSession=\{handleReloadPausedSession\}/);
 assert.doesNotMatch(panel, /onReloadSession=\{handleReloadSession\}/);
 assert.doesNotMatch(
@@ -2474,8 +2594,11 @@ assert.match(panel, /getLayoutAutosaveBlockReasonForStatus/);
 assert.match(panel, /isLayoutAutosaveTransientStatus/);
 assert.match(panel, /createSqlErdLayoutAutosaveRequest/);
 assert.match(panel, /getLayoutAutosaveDelayMs\(layoutAutosaveRetryAttempt\)/);
+const layoutAutosaveEffect = panel.slice(
+  panel.indexOf("const layoutAutosaveRequest")
+);
 const layoutAutosaveNonConflictCatch =
-  panel.match(
+  layoutAutosaveEffect.match(
     /if \(isSqlErdApiConflictError\(error\)\) \{[\s\S]*?return;\n\s*\}\n\n([\s\S]*?)\n\s*\}\n\s*\}, autosaveDelayMs/
   )?.[1] ?? "";
 assert.match(
@@ -2491,7 +2614,7 @@ assert.doesNotMatch(
   /setPendingLayoutAutosaveJson/
 );
 const layoutAutosaveConflictCatch =
-  panel.match(
+  layoutAutosaveEffect.match(
     /if \(isSqlErdApiConflictError\(error\)\) \{([\s\S]*?)\n\s*return;\n\s*\}/
   )?.[1] ?? "";
 assert.doesNotMatch(
@@ -2527,6 +2650,8 @@ assert.match(panel, /getSelectedSqlErdRelationSourceRanges/);
 assert.match(panel, /import Link from "next\/link"/);
 assert.match(panel, /\bHome\b/);
 assert.match(panel, /function SqlErdHomeNavigationButton/);
+assert.match(panel, /href="\/sql-erd"/);
+assert.match(panel, /세션 목록으로 이동/);
 assert.match(panel, /function CollapsedSourcePanel/);
 assert.match(panel, /href="\/home"/);
 assert.match(panel, /aria-label="홈으로 이동"/);
@@ -2765,10 +2890,12 @@ assert.match(ddlParserUtils, /foreign_key/);
 assert.match(ddlParserUtils, /unique/);
 
 assert.match(apiClient, /createSqlErdApiClient/);
-assert.match(apiClient, /getActiveSession/);
+assert.match(apiClient, /listSessions/);
+assert.match(apiClient, /getSession/);
 assert.match(apiClient, /createSession/);
 assert.match(apiClient, /updateSession/);
-assert.match(apiClient, /\/workspaces\/\$\{encodeURIComponent\(workspaceId\)\}\/sql-erd-session/);
-assert.match(apiClient, /\/workspaces\/\$\{encodeURIComponent\(workspaceId\)\}\/sql-erd-session\/\$\{encodeURIComponent\(sessionId\)\}/);
+assert.match(apiClient, /deleteSession/);
+assert.match(apiClient, /sql-erd-sessions/);
+assert.doesNotMatch(apiClient, /sql-erd-session`/);
 assert.match(apiClient, /Authorization: `Bearer \$\{accessToken\}`/);
 assert.match(apiClient, /credentials: "same-origin"/);

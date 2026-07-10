@@ -31,6 +31,7 @@ import {
 import {
   Database,
   Home,
+  List as ListIcon,
   PanelLeftClose,
   PanelLeftOpen,
   PanelRightClose,
@@ -49,7 +50,6 @@ import {
   SqlErdApiError
 } from "@/features/sql-erd/api/client";
 import { SqlErdCanvas } from "@/features/sql-erd/components/sql-erd-canvas";
-import { commerceSqltoerdFixture } from "@/features/sql-erd/fixtures/commerce";
 import type {
   SqlErdSelection,
   SqltoerdDialect,
@@ -58,7 +58,6 @@ import type {
   SqltoerdSessionPayload
 } from "@/features/sql-erd/types";
 import {
-  createSampleSqlErdViewSession,
   createWorkspaceSqlErdViewSession,
   getLayoutAutosaveBlockReasonForStatus,
   getLayoutAutosaveDelayMs,
@@ -106,16 +105,26 @@ import {
 } from "@/features/sql-erd/utils/sql-source-map";
 import { cn } from "@/lib/utils";
 
-const sampleSqlErdViewSession = createSampleSqlErdViewSession(
-  commerceSqltoerdFixture
-);
-const sampleSqlErdParseResult = parseSqlDdlToErdModel({
-  dialect: sampleSqlErdViewSession.dialect,
-  sourceText: sampleSqlErdViewSession.sourceText
-});
-const sampleSqlErdSourceMap = sampleSqlErdParseResult.ok
-  ? sampleSqlErdParseResult.sourceMap
-  : null;
+const emptySqlErdViewSession: SqlErdViewSession = {
+  id: null,
+  revision: null,
+  title: "Untitled ERD",
+  sourceFormat: "sql",
+  dialect: "auto",
+  sourceText: "",
+  modelJson: {
+    version: 1,
+    schema: {
+      tables: [],
+      relations: []
+    }
+  },
+  layoutJson: {
+    version: 1,
+    tableLayouts: []
+  },
+  settingsJson: {}
+};
 
 const SOURCE_PANEL_MIN_WIDTH = 280;
 const SOURCE_PANEL_DEFAULT_WIDTH = 360;
@@ -195,7 +204,7 @@ function isSqlErdApiTransientAutosaveError(error: unknown) {
   );
 }
 
-export function SqlErdPanel() {
+export function SqlErdPanel({ sessionId }: { sessionId: string }) {
   const authSession = useAuthSession();
   const activeWorkspaceId = authSession?.activeWorkspaceId ?? null;
   const accessToken = authSession?.accessToken ?? null;
@@ -212,12 +221,12 @@ export function SqlErdPanel() {
     INSPECTOR_PANEL_DEFAULT_WIDTH
   );
   const [sqlErdViewSession, setSqlErdViewSession] = useState<SqlErdViewSession>(
-    sampleSqlErdViewSession
+    emptySqlErdViewSession
   );
   const [sessionLoadState, setSessionLoadState] =
     useState<SqlErdSessionLoadState>({
-      label: "Sample",
-      message: "Built-in sample ERD",
+      label: "Loading",
+      message: "Loading workspace session",
       tone: "neutral"
     });
   const [selectedSqlErdObject, setSelectedSqlErdObject] =
@@ -232,7 +241,10 @@ export function SqlErdPanel() {
   const [lastResolvedDialect, setLastResolvedDialect] =
     useState<SqltoerdResolvedDialect | null>(null);
   const [sqlSourceMap, setSqlSourceMap] =
-    useState<SqltoerdSourceMap | null>(sampleSqlErdSourceMap);
+    useState<SqltoerdSourceMap | null>(null);
+  const isSessionReady =
+    sqlErdViewSession.id === sessionId &&
+    sqlErdViewSession.revision !== null;
   const sourceEditorDialect = resolveSqlSourceEditorDialect(
     sqlErdViewSession.dialect,
     lastResolvedDialect
@@ -336,9 +348,7 @@ export function SqlErdPanel() {
     });
   }, [pendingLayoutAutosaveJson]);
   const handleReloadSession = useCallback(
-    async ({
-      fallbackToSampleOnFailure = false
-    }: { fallbackToSampleOnFailure?: boolean } = {}) => {
+    async () => {
       const requestId = sessionLoadRequestIdRef.current + 1;
       sessionLoadRequestIdRef.current = requestId;
 
@@ -355,21 +365,8 @@ export function SqlErdPanel() {
         }
 
         const action = getSqlErdSessionReloadFailureAction({
-          fallbackToSampleOnFailure
+          fallbackToSampleOnFailure: false
         });
-
-        if (action.kind === "fallback_to_sample") {
-          setSqlErdViewSession(sampleSqlErdViewSession);
-          setLastResolvedDialect(null);
-          setSqlSourceMap(sampleSqlErdSourceMap);
-          setPendingLayoutAutosaveJson(null);
-          setLayoutAutosaveRetryAttempt(0);
-          setLayoutAutosaveBlockReason(null);
-          setSessionLoadState(action.sessionLoadState);
-          setSelectedSqlErdObject(action.selectedSqlErdObject);
-          return;
-        }
-
         setSessionLoadState(action.sessionLoadState);
       }
 
@@ -389,49 +386,39 @@ export function SqlErdPanel() {
       });
 
       try {
-        const activeSession = await sqlErdApiClient.getActiveSession(
-          activeWorkspaceId
+        const activeSession = await sqlErdApiClient.getSession(
+          activeWorkspaceId,
+          sessionId
         );
 
         if (!isCurrentRequest()) {
           return;
         }
 
-        if (activeSession) {
-          const activeViewSession =
-            createWorkspaceSqlErdViewSession(activeSession);
-          const activeParseResult = parseSqlDdlToErdModel({
-            dialect: activeViewSession.dialect,
-            sourceMapModelJson: activeViewSession.modelJson,
-            sourceText: activeViewSession.sourceText
-          });
+        const activeViewSession =
+          createWorkspaceSqlErdViewSession(activeSession);
+        const activeParseResult = parseSqlDdlToErdModel({
+          dialect: activeViewSession.dialect,
+          sourceMapModelJson: activeViewSession.modelJson,
+          sourceText: activeViewSession.sourceText
+        });
 
-          setSqlErdViewSession(activeViewSession);
-          setLastResolvedDialect(
-            activeParseResult.ok
-              ? activeParseResult.resolvedDialect
-              : activeSession.dialect === "auto"
-                ? null
-                : activeSession.dialect
-          );
-          setSqlSourceMap(
-            activeParseResult.ok ? activeParseResult.sourceMap : null
-          );
-          setSessionLoadState({
-            label: "Workspace",
-            message: `Workspace session revision ${activeSession.revision}`,
-            tone: "success"
-          });
-        } else {
-          setSqlErdViewSession(sampleSqlErdViewSession);
-          setLastResolvedDialect(null);
-          setSqlSourceMap(sampleSqlErdSourceMap);
-          setSessionLoadState({
-            label: "Sample",
-            message: "No saved workspace session",
-            tone: "neutral"
-          });
-        }
+        setSqlErdViewSession(activeViewSession);
+        setLastResolvedDialect(
+          activeParseResult.ok
+            ? activeParseResult.resolvedDialect
+            : activeSession.dialect === "auto"
+              ? null
+              : activeSession.dialect
+        );
+        setSqlSourceMap(
+          activeParseResult.ok ? activeParseResult.sourceMap : null
+        );
+        setSessionLoadState({
+          label: "Workspace",
+          message: `Workspace session revision ${activeSession.revision}`,
+          tone: "success"
+        });
 
         setPendingLayoutAutosaveJson(null);
         setLayoutAutosaveRetryAttempt(0);
@@ -441,10 +428,10 @@ export function SqlErdPanel() {
         applyReloadFailure();
       }
     },
-    [accessToken, activeWorkspaceId]
+    [accessToken, activeWorkspaceId, sessionId]
   );
   const handleReloadPausedSession = useCallback(() => {
-    void handleReloadSession({ fallbackToSampleOnFailure: false });
+    void handleReloadSession();
   }, [handleReloadSession]);
   const handleGenerate = useCallback(async () => {
     if (isGenerating) {
@@ -477,6 +464,16 @@ export function SqlErdPanel() {
       return;
     }
 
+    if (generateRequest.kind !== "update") {
+      setSessionLoadState({
+        label: "Session unavailable",
+        message: "Return to the session list and open this session again.",
+        tone: "error"
+      });
+      setIsGenerating(false);
+      return;
+    }
+
     setLastResolvedDialect(generateRequest.resolvedDialect);
 
     const sqlErdApiClient = createSqlErdApiClient({
@@ -490,17 +487,11 @@ export function SqlErdPanel() {
     });
 
     try {
-      const savedSession =
-        generateRequest.kind === "update"
-          ? await sqlErdApiClient.updateSession(
-              authSession.activeWorkspaceId,
-              generateRequest.sessionId,
-              generateRequest.payload
-            )
-          : await sqlErdApiClient.createSession(
-              authSession.activeWorkspaceId,
-              generateRequest.payload
-            );
+      const savedSession = await sqlErdApiClient.updateSession(
+        authSession.activeWorkspaceId,
+        generateRequest.sessionId,
+        generateRequest.payload
+      );
 
       setSqlErdViewSession(createWorkspaceSqlErdViewSession(savedSession));
       setSqlSourceMap(generateRequest.sourceMap);
@@ -513,8 +504,17 @@ export function SqlErdPanel() {
         tone: "success"
       });
       setSelectedSqlErdObject({ type: "none" });
-    } catch {
-      setSessionLoadState(getSqlErdWorkspaceSaveErrorState());
+    } catch (error) {
+      if (isSqlErdApiConflictError(error)) {
+        setLayoutAutosaveBlockReason("conflict");
+        setSessionLoadState({
+          label: "Save conflict",
+          message: getLayoutAutosavePausedBanner("conflict").message,
+          tone: "error"
+        });
+      } else {
+        setSessionLoadState(getSqlErdWorkspaceSaveErrorState());
+      }
     } finally {
       setIsGenerating(false);
     }
@@ -677,7 +677,7 @@ export function SqlErdPanel() {
   }, []);
 
   useEffect(() => {
-    void handleReloadSession({ fallbackToSampleOnFailure: true });
+    void handleReloadSession();
 
     return () => {
       sessionLoadRequestIdRef.current += 1;
@@ -765,10 +765,10 @@ export function SqlErdPanel() {
         dialect={sqlErdViewSession.dialect}
         isOpen={isSourceOpen}
         isDialectSelectDisabled={
-          isGenerating || sessionLoadState.label === "Loading"
+          isGenerating || !isSessionReady
         }
         isGenerateDisabled={
-          isGenerating || !authSession || sessionLoadState.label === "Loading"
+          isGenerating || !authSession || !isSessionReady
         }
         isGenerating={isGenerating}
         onDialectChange={handleDialectChange}
@@ -777,7 +777,7 @@ export function SqlErdPanel() {
         onToggle={() => setIsSourceOpen((current) => !current)}
         sessionLoadState={sessionLoadState}
         isSourceTextReadOnly={
-          isGenerating || sessionLoadState.label === "Loading"
+          isGenerating || !isSessionReady
         }
         sourceText={sqlErdViewSession.sourceText}
         resolvedDialect={sourceEditorDialect}
@@ -794,16 +794,23 @@ export function SqlErdPanel() {
           width={clampedSourcePanelWidth}
         />
       ) : null}
-      <CanvasShell
-        autosavePausedBanner={layoutAutosavePausedBanner}
-        layoutJson={sqlErdViewSession.layoutJson}
-        modelJson={sqlErdViewSession.modelJson}
-        onLayoutChange={handleLayoutChange}
-        onReloadSession={handleReloadPausedSession}
-        onRetryLayoutAutosaveOnce={handleRetryLayoutAutosaveOnce}
-        onSelectionChange={setSelectedSqlErdObject}
-        selectedSqlErdObject={selectedSqlErdObject}
-      />
+      {isSessionReady ? (
+        <CanvasShell
+          autosavePausedBanner={layoutAutosavePausedBanner}
+          layoutJson={sqlErdViewSession.layoutJson}
+          modelJson={sqlErdViewSession.modelJson}
+          onLayoutChange={handleLayoutChange}
+          onReloadSession={handleReloadPausedSession}
+          onRetryLayoutAutosaveOnce={handleRetryLayoutAutosaveOnce}
+          onSelectionChange={setSelectedSqlErdObject}
+          selectedSqlErdObject={selectedSqlErdObject}
+        />
+      ) : (
+        <SessionLoadPlaceholder
+          onRetry={handleReloadPausedSession}
+          sessionLoadState={sessionLoadState}
+        />
+      )}
       {isInspectorOpen ? (
         <PanelResizeHandle
           ariaLabel="Resize inspector panel"
@@ -825,6 +832,47 @@ export function SqlErdPanel() {
         width={clampedInspectorPanelWidth}
       />
     </section>
+  );
+}
+
+function SessionLoadPlaceholder({
+  onRetry,
+  sessionLoadState
+}: {
+  onRetry: () => void;
+  sessionLoadState: SqlErdSessionLoadState;
+}) {
+  const isError = sessionLoadState.tone === "error";
+
+  return (
+    <div className="flex min-w-0 flex-1 items-center justify-center bg-muted/10 px-6 text-center">
+      <div className="max-w-md rounded-xl border bg-background p-8 shadow-sm">
+        <Database className="mx-auto size-10 text-muted-foreground/60" />
+        <h2 className="mt-4 text-lg font-semibold">
+          {isError ? "Session을 불러오지 못했습니다" : "Session을 불러오는 중입니다"}
+        </h2>
+        <p className="mt-2 text-sm leading-6 text-muted-foreground">
+          {sessionLoadState.message}
+        </p>
+        {isError ? (
+          <div className="mt-6 flex flex-wrap justify-center gap-2">
+            <button
+              className="inline-flex h-10 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground"
+              onClick={onRetry}
+              type="button"
+            >
+              Session을 다시 불러오기
+            </button>
+            <Link
+              className="inline-flex h-10 items-center rounded-md border px-4 text-sm font-medium"
+              href="/sql-erd"
+            >
+              Session 목록으로
+            </Link>
+          </div>
+        ) : null}
+      </div>
+    </div>
   );
 }
 
@@ -881,6 +929,7 @@ function SourcePanel({
       <div className="flex min-h-14 items-center justify-between gap-3 border-b px-4">
         <div className="flex min-w-0 items-center gap-2">
           <SqlErdHomeNavigationButton />
+          <SqlErdSessionListNavigationButton />
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -967,11 +1016,31 @@ function SqlErdHomeNavigationButton() {
   );
 }
 
+function SqlErdSessionListNavigationButton() {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Link
+            aria-label="세션 목록으로 이동"
+            className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            href="/sql-erd"
+          >
+            <ListIcon className="size-4" />
+          </Link>
+        }
+      />
+      <TooltipContent side="right">세션 목록으로 이동</TooltipContent>
+    </Tooltip>
+  );
+}
+
 function CollapsedSourcePanel({ onToggle }: { onToggle: () => void }) {
   return (
     <aside className="flex w-12 shrink-0 flex-col border-r bg-muted/20">
-      <div className="flex min-h-14 items-center justify-center border-b">
+      <div className="flex min-h-24 flex-col items-center justify-center gap-1 border-b">
         <SqlErdHomeNavigationButton />
+        <SqlErdSessionListNavigationButton />
       </div>
       <button
         aria-label="Open source panel"
