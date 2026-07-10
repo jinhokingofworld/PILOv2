@@ -197,12 +197,57 @@ type SqltoerdLayoutJsonV1 = {
     y: number;
     zoom: number;
   };
+  annotations?: SqltoerdAnnotationsV1;
+};
+
+type SqltoerdAnnotationsV1 = {
+  version: 1;
+  links: SqltoerdAnnotationLink[];
+};
+
+type SqltoerdAnnotationLink =
+  | SqltoerdTableAnnotationLink
+  | SqltoerdColumnAnnotationLink;
+
+type SqltoerdTableAnnotationLink = {
+  id: string;
+  kind: "table_link";
+  fromTableId: string;
+  toTableId: string;
+  label: string;
+};
+
+type SqltoerdColumnAnnotationLink = {
+  id: string;
+  kind: "column_link";
+  fromTableId: string;
+  fromColumnId: string;
+  toTableId: string;
+  toColumnId: string;
+  label: string;
 };
 ```
+
+`annotations`는 SQL에 반영되지 않는 Canvas 설명 관계 전용 영역이다. 실제 FK는
+`modelJson.schema.relations`에만 저장하고 annotation link를 `ErdRelation`으로
+취급하지 않는다.
+
+#### Annotation Version과 하위 호환
+
+- `layoutJson.annotations`는 optional이다.
+- `annotations`가 없는 기존 `layoutJson v1`은 `{ version: 1, links: [] }`와 같은
+  빈 annotation collection으로 해석한다.
+- annotation schema의 호환되지 않는 변경은 `layoutJson.version`과 별개로
+  `annotations.version`을 올리고 명시적인 migration을 추가한다.
+- 현재 app-server는 `annotations.version: 1`만 저장한다.
+- API mapper는 legacy payload에 `annotations`를 강제로 추가하지 않고 저장된 JSON을
+  그대로 반환한다.
 
 ### Canonical Rules
 
 - FK의 canonical source는 `modelJson.schema.relations`다.
+- 사용자 설명 관계의 canonical source는 `layoutJson.annotations.links`다.
+- 사용자 설명 관계는 SQL source, FK relation, table/relation count를 변경하지 않는다.
 - PK와 unique의 canonical source는 각 table의 `constraints`다.
 - `ErdColumn.primaryKey`, `ErdColumn.foreignKey`, `ErdColumn.unique`는 UI 표시와
   빠른 조회를 위한 column-level summary 값이다.
@@ -228,6 +273,14 @@ type SqltoerdLayoutJsonV1 = {
 - `layoutJson.tableLayouts[].x`, `y`, `width`, `viewport.x`, `viewport.y`,
   `viewport.zoom`은 finite number여야 한다.
 - `viewport.zoom`은 0보다 커야 한다.
+- `layoutJson.annotations.version`은 `1`만 허용한다.
+- `layoutJson.annotations.links`는 최대 300개다.
+- annotation `id`는 전체 link 배열에서 중복될 수 없다.
+- annotation의 table/column endpoint는 `modelJson`에 존재하는 id를 참조해야 한다.
+- annotation endpoint는 방향이 없는 관계로 취급하며 정방향과 역방향을 중복으로
+  저장할 수 없다.
+- Column annotation endpoint가 실제 FK relation endpoint와 같으면 저장할 수 없다.
+- annotation `label`은 빈 문자열을 허용하며 최대 200자다.
 - `id`, `name`, `schemaName`, `dataType`, `constraintName`, `comment`는 HTML로
   주입하지 않고 text로 렌더링해야 한다.
 - table, column, relation id는 parser가 안정적으로 생성해야 한다. 같은 SQL source에서
@@ -239,6 +292,7 @@ type SqltoerdLayoutJsonV1 = {
 - `relationCount`는 `modelJson.schema.relations.length`에서 계산한다.
 - client가 보낸 `tableCount`, `relationCount`는 사용하지 않는다.
 - `layoutJson.tableLayouts.length`는 table 개수를 초과할 수 없다.
+- `layoutJson.annotations.links.length`는 table/relation count에 포함하지 않는다.
 
 ## Session Read Model
 
@@ -621,6 +675,8 @@ DB migration과 app-server/frontend 구현이 완료되기 전에는 plural endp
 | Column 총합 | 1,000개 | 초과 시 `400 Bad Request` |
 | Table당 column 개수 | 200개 | 초과 시 `400 Bad Request` |
 | Relation 개수 | 300개 | 초과 시 `400 Bad Request` |
+| Annotation link 개수 | 300개 | 초과 시 `400 Bad Request` |
+| Annotation label | 200자 이하 | 초과 시 `400 Bad Request` |
 | Identifier 길이 | 256자 | 초과 시 `400 Bad Request` |
 | Column type 길이 | 512자 | 초과 시 `400 Bad Request` |
 | JSON depth | 20단계 | 초과 시 `400 Bad Request` |
