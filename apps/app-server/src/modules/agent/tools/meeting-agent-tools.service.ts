@@ -148,7 +148,9 @@ export class MeetingAgentToolsService {
       context.workspaceId,
       input
     );
-    const reports = result.reports.map((report) =>
+    const selectedReports =
+      input.limit === 1 ? result.reports.slice(0, 1) : result.reports;
+    const reports = selectedReports.map((report) =>
       this.normalizeMeetingReportForAgent(report, {
         sectionTextLimit: LIST_SECTION_TEXT_LIMIT
       })
@@ -159,7 +161,7 @@ export class MeetingAgentToolsService {
         count: reports.length,
         reports
       },
-      resourceRefs: result.reports.map((report) => this.toResourceRef(report)),
+      resourceRefs: selectedReports.map((report) => this.toResourceRef(report)),
       status: "completed"
     };
   }
