@@ -526,6 +526,8 @@ await assertRouteBodyLimit(
       (text, values) => {
         assert.match(text, /FROM sql_erd_sessions/);
         assert.match(text, /deleted_at IS NULL/);
+        assert.match(text, /ORDER BY updated_at DESC, id DESC/);
+        assert.match(text, /LIMIT 1/);
         assert.deepEqual(values, [workspaceId]);
         return sessionRow();
       }
@@ -619,10 +621,29 @@ await assertRouteBodyLimit(
 {
   const { service } = createSubject();
 
+  for (const limit of ["0", "101", "1.5"]) {
+    await assertApiError(
+      () => service.listSessions(currentUserId, workspaceId, { limit }),
+      400,
+      "BAD_REQUEST",
+      /limit must be an integer between 1 and 100/
+    );
+  }
+
   await assertApiError(
     () =>
       service.listSessions(currentUserId, workspaceId, {
         cursor: "not-a-server-cursor"
+      }),
+    400,
+    "BAD_REQUEST",
+    /cursor is invalid/
+  );
+
+  await assertApiError(
+    () =>
+      service.listSessions(currentUserId, workspaceId, {
+        cursor: "x".repeat(2049)
       }),
     400,
     "BAD_REQUEST",
