@@ -8,6 +8,11 @@ const { GithubIntegrationController } = require("../../dist/modules/github-integ
 const {
   GithubOAuthAccountAlreadyConnectedError
 } = require("../../dist/modules/github-integration/github-oauth-callback-error.js");
+const {
+  validateGithubCallbackReturnUrl
+} = require("../../dist/modules/github-integration/github-return-url.js");
+
+const frontendUrl = "https://pilo.test";
 
 function createReply() {
   return {
@@ -20,6 +25,47 @@ function createReply() {
       this.redirects.push({ url, statusCode });
     }
   };
+}
+
+{
+  const allowedReturnUrls = new Map([
+    [
+      "/settings/integrations?tab=github#connected",
+      "https://pilo.test/settings/integrations?tab=github#connected"
+    ],
+    [
+      "https://pilo.test/settings/integrations/github",
+      "https://pilo.test/settings/integrations/github"
+    ],
+    [
+      "https://pilo.test/github?return_to=%2Fboard",
+      "https://pilo.test/github?return_to=%2Fboard"
+    ]
+  ]);
+
+  for (const [returnUrl, expected] of allowedReturnUrls) {
+    assert.equal(validateGithubCallbackReturnUrl(returnUrl, frontendUrl), expected);
+  }
+}
+
+{
+  const rejectedReturnUrls = [
+    "/\\evil.example",
+    "/\\\\evil.example",
+    "//evil.example",
+    "/%5cevil.example",
+    "/%5C%5Cevil.example",
+    "/%2f%2fevil.example",
+    "https://pilo.test/%5cevil.example"
+  ];
+
+  for (const returnUrl of rejectedReturnUrls) {
+    assert.throws(
+      () => validateGithubCallbackReturnUrl(returnUrl, frontendUrl),
+      (error) => error?.response?.error?.message === "Invalid returnUrl",
+      `Expected ${JSON.stringify(returnUrl)} to be rejected`
+    );
+  }
 }
 
 {
