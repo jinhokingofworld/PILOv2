@@ -291,35 +291,36 @@ export class GithubPullRequestMergeService {
                   jsonb_set(
                     jsonb_set(
                       jsonb_set(
-                        COALESCE(raw, '{}'::jsonb),
-                        '{state}',
-                        to_jsonb('closed'::text),
+                        jsonb_set(
+                          COALESCE(raw, '{}'::jsonb),
+                          '{state}',
+                          to_jsonb('closed'::text),
+                          true
+                        ),
+                        '{draft}',
+                        to_jsonb($3::boolean),
                         true
                       ),
-                      '{draft}',
-                      to_jsonb($3::boolean),
+                      '{mergeable}',
+                      COALESCE(to_jsonb($4::boolean), 'null'::jsonb),
                       true
                     ),
-                    '{mergeable}',
-                    COALESCE(to_jsonb($4::boolean), 'null'::jsonb),
+                    '{head,ref}',
+                    to_jsonb($5::text),
                     true
                   ),
-                  '{head,ref}',
-                  to_jsonb($5::text),
+                  '{head,sha}',
+                  to_jsonb($6::text),
                   true
                 ),
-                '{head,sha}',
-                to_jsonb($6::text),
+                '{closed_at}',
+                COALESCE(to_jsonb($11::text), 'null'::jsonb),
                 true
               ),
-              '{closed_at}',
-              COALESCE(to_jsonb($11::text), 'null'::jsonb),
+              '{merged_at}',
+              COALESCE(to_jsonb($12::text), 'null'::jsonb),
               true
             ),
-            '{merged_at}',
-            COALESCE(to_jsonb($12::text), 'null'::jsonb),
-            true
-          ),
             '{updated_at}',
             COALESCE(to_jsonb($13::text), 'null'::jsonb),
             true
