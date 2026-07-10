@@ -1,6 +1,8 @@
 import type {
+  ApplyPrReviewConflictResolutionInput,
   ListPrReviewPullRequestsQuery,
   ListPrReviewRepositoriesQuery,
+  PrReviewConflictApplyResult,
   PrReviewCanvas,
   PrReviewConflictAnalysis,
   PrReviewConflictSuggestion,
@@ -442,6 +444,21 @@ export function createPrReviewApiClient({
       return requestPrReviewData<PrReviewConflictSuggestion>(
         `${reviewFileGithubPath(workspaceId, reviewFileId)}/conflict-suggestion`,
         { method: "POST" },
+        requestOptions
+      );
+    },
+
+    async applyReviewFileConflictResolution(
+      workspaceId: string,
+      reviewFileId: string,
+      input: ApplyPrReviewConflictResolutionInput
+    ) {
+      return requestPrReviewData<PrReviewConflictApplyResult>(
+        `${reviewFileGithubPath(workspaceId, reviewFileId)}/conflict-apply`,
+        {
+          body: JSON.stringify(input),
+          method: "POST"
+        },
         requestOptions
       );
     },

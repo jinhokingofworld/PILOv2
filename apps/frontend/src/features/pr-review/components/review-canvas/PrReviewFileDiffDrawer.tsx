@@ -9,6 +9,17 @@ import {
   type ReactNode
 } from "react";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogMedia,
+  AlertDialogTitle
+} from "@/components/ui/alert-dialog";
+import {
   AlertCircle,
   ArrowLeft,
   CheckCircle2,
@@ -28,6 +39,7 @@ import { cn } from "@/lib/utils";
 import type { createPrReviewApiClient } from "@/features/pr-review/api/client";
 import type {
   PrReviewDiffRow,
+  PrReviewConflictApplyResult,
   PrReviewConflictFile,
   PrReviewConflictSuggestion,
   PrReviewFile,
@@ -49,6 +61,7 @@ type ConflictAnalysisLoadStatus =
   | "stale";
 type SaveStatus = "idle" | "saving" | "saved" | "error";
 type ConflictSuggestionLoadStatus = "idle" | "loading" | "ready" | "error";
+type ConflictApplyStatus = "idle" | "applying" | "applied" | "error";
 
 type PrReviewFileDiffDrawerProps = {
   apiClient: PrReviewApiClient;
@@ -57,6 +70,7 @@ type PrReviewFileDiffDrawerProps = {
   conflictFile: PrReviewConflictFile | null;
   isReviewSessionConflicted: boolean;
   onClose: () => void;
+  onConflictApplied: (result: PrReviewConflictApplyResult) => void | Promise<void>;
   onDecisionSaved: (file: PrReviewFile) => void;
   reviewFileId: string;
   unsupportedConflictFile: PrReviewUnsupportedConflictFile | null;
@@ -113,6 +127,12 @@ function getInitialDecisionStatus(
 
 function getStoredComment(value: string) {
   return value.trim() || null;
+}
+
+const CONFLICT_MARKER_PATTERN = /(^|\n)(<<<<<<<|=======|>>>>>>>)(?:\s|$)/;
+
+function hasConflictMarkers(value: string) {
+  return CONFLICT_MARKER_PATTERN.test(value.replace(/\r\n/g, "\n").replace(/\r/g, "\n"));
 }
 
 function getCodeClassName(type: PrReviewDiffRow["type"]) {
@@ -237,6 +257,7 @@ export function PrReviewFileDiffDrawer({
   conflictFile,
   isReviewSessionConflicted,
   onClose,
+  onConflictApplied,
   onDecisionSaved,
   reviewFileId,
   unsupportedConflictFile,
@@ -258,6 +279,14 @@ export function PrReviewFileDiffDrawer({
   const [conflictSuggestionError, setConflictSuggestionError] = useState<
     string | null
   >(null);
+  const [conflictApplyStatus, setConflictApplyStatus] =
+    useState<ConflictApplyStatus>("idle");
+  const [conflictApplyError, setConflictApplyError] = useState<string | null>(
+    null
+  );
+  const [conflictApplyResult, setConflictApplyResult] =
+    useState<PrReviewConflictApplyResult | null>(null);
+  const [resolvedContentDraft, setResolvedContentDraft] = useState("");
   const [reloadVersion, setReloadVersion] = useState(0);
   const commentSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
@@ -328,6 +357,10 @@ export function PrReviewFileDiffDrawer({
       setConflictSuggestion(null);
       setConflictSuggestionStatus("idle");
       setConflictSuggestionError(null);
+      setConflictApplyStatus("idle");
+      setConflictApplyError(null);
+      setConflictApplyResult(null);
+      setResolvedContentDraft("");
       setFile(null);
       setDiff(null);
 
@@ -405,12 +438,57 @@ export function PrReviewFileDiffDrawer({
         conflictFile.reviewFileId
       );
       setConflictSuggestion(suggestion);
+      setResolvedContentDraft(suggestion.resolvedContent);
+      setConflictApplyStatus("idle");
+      setConflictApplyError(null);
+      setConflictApplyResult(null);
       setConflictSuggestionStatus("ready");
     } catch (error) {
       setConflictSuggestionStatus("error");
       setConflictSuggestionError(getErrorMessage(error));
     }
   }, [apiClient, conflictFile, conflictSuggestionStatus, workspaceId]);
+
+  const handleApplyConflictResolution = useCallback(async () => {
+    if (
+      !conflictFile ||
+      !conflictSuggestion ||
+      conflictSuggestion.status === "invalid" ||
+      conflictApplyStatus === "applying"
+    ) {
+      return;
+    }
+
+    setConflictApplyStatus("applying");
+    setConflictApplyError(null);
+
+    try {
+      const result = await apiClient.applyReviewFileConflictResolution(
+        workspaceId,
+        conflictFile.reviewFileId,
+        {
+          expectedHeadBlobSha: conflictSuggestion.headBlobSha,
+          expectedHeadSha: conflictSuggestion.headSha,
+          resolvedContent: resolvedContentDraft
+        }
+      );
+
+      setConflictApplyResult(result);
+      setConflictApplyStatus("applied");
+      await onConflictApplied(result);
+    } catch (error) {
+      setConflictApplyStatus("error");
+      setConflictApplyError(getErrorMessage(error));
+    }
+  }, [
+    apiClient,
+    conflictApplyStatus,
+    conflictFile,
+    conflictSuggestion,
+    onConflictApplied,
+    resolvedContentDraft,
+    workspaceId
+  ]);
 
   useEffect(() => {
     if (decisionDisabled) {
@@ -497,6 +575,9 @@ export function PrReviewFileDiffDrawer({
               conflictSuggestion={conflictSuggestion}
               conflictSuggestionErrorMessage={conflictSuggestionError}
               conflictSuggestionStatus={conflictSuggestionStatus}
+              conflictApplyErrorMessage={conflictApplyError}
+              conflictApplyResult={conflictApplyResult}
+              conflictApplyStatus={conflictApplyStatus}
               decisionStatus={decisionStatus}
               decisionDisabledReason={decisionDisabledReason}
               file={file}
@@ -506,8 +587,11 @@ export function PrReviewFileDiffDrawer({
                 scheduleCommentSave(value);
               }}
               onCommentBlur={flushCommentSave}
+              onApplyConflictResolution={handleApplyConflictResolution}
               onCreateConflictSuggestion={handleCreateConflictSuggestion}
               onDecisionStatusChange={handleDecisionStatusChange}
+              onResolvedContentDraftChange={setResolvedContentDraft}
+              resolvedContentDraft={resolvedContentDraft}
               saveErrorMessage={saveErrorMessage}
               saveStatus={saveStatus}
               selectedDecisionLabel={selectedDecision?.label ?? "아직 선택 안 됨"}
@@ -616,16 +700,22 @@ function FileDiffHeader({ file }: { file: PrReviewFile }) {
 function ReviewNodePanel({
   comment,
   conflictFile,
+  conflictApplyErrorMessage,
+  conflictApplyResult,
+  conflictApplyStatus,
   conflictSuggestion,
   conflictSuggestionErrorMessage,
   conflictSuggestionStatus,
   decisionStatus,
   decisionDisabledReason,
   file,
+  onApplyConflictResolution,
   onCommentBlur,
   onCommentChange,
   onCreateConflictSuggestion,
   onDecisionStatusChange,
+  onResolvedContentDraftChange,
+  resolvedContentDraft,
   saveErrorMessage,
   saveStatus,
   selectedDecisionLabel,
@@ -633,16 +723,22 @@ function ReviewNodePanel({
 }: {
   comment: string;
   conflictFile: PrReviewConflictFile | null;
+  conflictApplyErrorMessage: string | null;
+  conflictApplyResult: PrReviewConflictApplyResult | null;
+  conflictApplyStatus: ConflictApplyStatus;
   conflictSuggestion: PrReviewConflictSuggestion | null;
   conflictSuggestionErrorMessage: string | null;
   conflictSuggestionStatus: ConflictSuggestionLoadStatus;
   decisionStatus: PrReviewFileDecisionStatus | null;
   decisionDisabledReason: string | null;
   file: PrReviewFile;
+  onApplyConflictResolution: () => void;
   onCommentBlur: () => void;
   onCommentChange: (value: string) => void;
   onCreateConflictSuggestion: () => void;
   onDecisionStatusChange: (status: PrReviewFileDecisionStatus) => void;
+  onResolvedContentDraftChange: (value: string) => void;
+  resolvedContentDraft: string;
   saveErrorMessage: string | null;
   saveStatus: SaveStatus;
   selectedDecisionLabel: string;
@@ -683,11 +779,17 @@ function ReviewNodePanel({
         {decisionDisabledReason ? (
           <ConflictResolutionPanel
             conflictFile={conflictFile}
+            conflictApplyErrorMessage={conflictApplyErrorMessage}
+            conflictApplyResult={conflictApplyResult}
+            conflictApplyStatus={conflictApplyStatus}
             conflictSuggestion={conflictSuggestion}
             conflictSuggestionErrorMessage={conflictSuggestionErrorMessage}
             conflictSuggestionStatus={conflictSuggestionStatus}
+            onApplyConflictResolution={onApplyConflictResolution}
             onCreateConflictSuggestion={onCreateConflictSuggestion}
+            onResolvedContentDraftChange={onResolvedContentDraftChange}
             reason={decisionDisabledReason}
+            resolvedContentDraft={resolvedContentDraft}
             unsupportedConflictFile={unsupportedConflictFile}
           />
         ) : null}
@@ -815,19 +917,31 @@ function ReviewNodePanel({
 
 function ConflictResolutionPanel({
   conflictFile,
+  conflictApplyErrorMessage,
+  conflictApplyResult,
+  conflictApplyStatus,
   conflictSuggestion,
   conflictSuggestionErrorMessage,
   conflictSuggestionStatus,
+  onApplyConflictResolution,
   onCreateConflictSuggestion,
+  onResolvedContentDraftChange,
   reason,
+  resolvedContentDraft,
   unsupportedConflictFile
 }: {
   conflictFile: PrReviewConflictFile | null;
+  conflictApplyErrorMessage: string | null;
+  conflictApplyResult: PrReviewConflictApplyResult | null;
+  conflictApplyStatus: ConflictApplyStatus;
   conflictSuggestion: PrReviewConflictSuggestion | null;
   conflictSuggestionErrorMessage: string | null;
   conflictSuggestionStatus: ConflictSuggestionLoadStatus;
+  onApplyConflictResolution: () => void;
   onCreateConflictSuggestion: () => void;
+  onResolvedContentDraftChange: (value: string) => void;
   reason: string;
+  resolvedContentDraft: string;
   unsupportedConflictFile: PrReviewUnsupportedConflictFile | null;
 }) {
   const isSuggestionLoading = conflictSuggestionStatus === "loading";
@@ -881,7 +995,15 @@ function ConflictResolutionPanel({
               </p>
             ) : null}
             {conflictSuggestion ? (
-              <ConflictSuggestionPreview suggestion={conflictSuggestion} />
+              <ConflictSuggestionPreview
+                applyErrorMessage={conflictApplyErrorMessage}
+                applyResult={conflictApplyResult}
+                applyStatus={conflictApplyStatus}
+                onApply={onApplyConflictResolution}
+                onResolvedContentChange={onResolvedContentDraftChange}
+                resolvedContent={resolvedContentDraft}
+                suggestion={conflictSuggestion}
+              />
             ) : null}
           </div>
 
@@ -910,11 +1032,37 @@ function ConflictResolutionPanel({
 }
 
 function ConflictSuggestionPreview({
+  applyErrorMessage,
+  applyResult,
+  applyStatus,
+  onApply,
+  onResolvedContentChange,
+  resolvedContent,
   suggestion
 }: {
+  applyErrorMessage: string | null;
+  applyResult: PrReviewConflictApplyResult | null;
+  applyStatus: ConflictApplyStatus;
+  onApply: () => void;
+  onResolvedContentChange: (value: string) => void;
+  resolvedContent: string;
   suggestion: PrReviewConflictSuggestion;
 }) {
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const invalid = suggestion.status === "invalid";
+  const draftEmpty = !resolvedContent.trim();
+  const draftHasConflictMarkers = hasConflictMarkers(resolvedContent);
+  const isApplying = applyStatus === "applying";
+  const applied = applyStatus === "applied";
+  const canApply =
+    !invalid && !draftEmpty && !draftHasConflictMarkers && !isApplying && !applied;
+  const applyDisabledReason = invalid
+    ? "AI draft validation failed"
+    : draftEmpty
+      ? "Resolved content is empty"
+      : draftHasConflictMarkers
+        ? "Resolved content still has conflict markers"
+        : null;
 
   return (
     <div className="mt-3 space-y-3">
@@ -953,9 +1101,87 @@ function ConflictSuggestionPreview({
         <p className="mb-1 text-xs font-semibold text-slate-500">
           Resolved draft
         </p>
-        <pre className="max-h-64 overflow-auto rounded-md bg-slate-950 px-3 py-2 font-mono text-[11px] leading-5 text-slate-100">
-          {suggestion.resolvedContent || "(empty)"}
-        </pre>
+        <textarea
+          className="min-h-56 w-full resize-y rounded-md border border-slate-200 bg-slate-950 px-3 py-2 font-mono text-[11px] leading-5 text-slate-100 outline-none transition-colors placeholder:text-slate-500 focus:border-blue-400 focus:ring-3 focus:ring-blue-100"
+          disabled={isApplying || applied}
+          onChange={(event) => onResolvedContentChange(event.target.value)}
+          spellCheck={false}
+          value={resolvedContent}
+        />
+      </div>
+
+      {applyDisabledReason ? (
+        <p className="text-xs leading-5 text-rose-600">{applyDisabledReason}</p>
+      ) : null}
+
+      {applyErrorMessage ? (
+        <p className="text-xs leading-5 text-rose-600">{applyErrorMessage}</p>
+      ) : null}
+
+      {applyResult ? (
+        <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs leading-5 text-emerald-800">
+          <p className="font-semibold">Applied by {applyResult.appliedByGithubLogin}</p>
+          <p className="mt-1 font-mono">
+            {applyResult.headShaBefore.slice(0, 7)} -&gt;{" "}
+            {applyResult.headShaAfter.slice(0, 7)}
+          </p>
+          {applyResult.commitUrl ? (
+            <a
+              className="mt-1 inline-flex items-center gap-1 font-semibold text-emerald-700 hover:text-emerald-900"
+              href={applyResult.commitUrl}
+              rel="noreferrer"
+              target="_blank"
+            >
+              Commit
+              <ExternalLink className="size-3" />
+            </a>
+          ) : null}
+        </div>
+      ) : null}
+
+      <div className="flex justify-end">
+        <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+          <Button
+            disabled={!canApply}
+            onClick={() => setConfirmOpen(true)}
+            size="sm"
+            type="button"
+          >
+            {isApplying ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <CheckCircle2 className="size-3.5" />
+            )}
+            Apply resolution
+          </Button>
+          <AlertDialogContent size="default">
+            <AlertDialogHeader>
+              <AlertDialogMedia className="bg-emerald-50 text-emerald-700">
+                <CheckCircle2 className="size-5" />
+              </AlertDialogMedia>
+              <AlertDialogTitle>Apply conflict resolution?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This commits the resolved file content to the PR head branch.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={isApplying}>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                disabled={isApplying}
+                onClick={() => {
+                  setConfirmOpen(false);
+                  onApply();
+                }}
+                type="button"
+              >
+                {isApplying ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : null}
+                Apply
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </div>
   );

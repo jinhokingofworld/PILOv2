@@ -356,6 +356,10 @@ export function PrReviewCanvasShell({
     [canvas, loadCanvasData]
   );
 
+  const handleConflictApplied = useCallback(() => {
+    void loadCanvasData({ quiet: true });
+  }, [loadCanvasData]);
+
   const headBranch =
     canvas?.headBranch ??
     summary?.headBranch ??
@@ -517,6 +521,7 @@ export function PrReviewCanvasShell({
               conflictFile={selectedConflictFile}
               isReviewSessionConflicted={conflictStatus === "conflicted"}
               onClose={() => setSelectedReviewFileId(null)}
+              onConflictApplied={handleConflictApplied}
               onDecisionSaved={handleDecisionSaved}
               reviewFileId={selectedReviewFileId}
               unsupportedConflictFile={selectedUnsupportedConflictFile}

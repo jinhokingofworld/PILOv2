@@ -312,6 +312,7 @@ export type PrReviewConflictFile = {
   type: PrReviewConflictFileType;
   isSupported: true;
   resolutionStatus: PrReviewConflictResolutionStatus;
+  headBlobSha: string;
   hunks: PrReviewConflictHunk[];
   aiSummary: string | null;
   aiSuggestion: string | null;
@@ -344,11 +345,35 @@ export type PrReviewConflictSuggestion = {
   previousFilePath: string | null;
   type: "content";
   status: PrReviewConflictSuggestionStatus;
+  headSha: string;
+  headBlobSha: string;
   aiSummary: string;
   aiSuggestion: string;
   resolvedContent: string;
   validationMessages: string[];
   stored: false;
+};
+
+export type ApplyPrReviewConflictResolutionInput = {
+  resolvedContent: string;
+  expectedHeadSha: string;
+  expectedHeadBlobSha: string;
+};
+
+export type PrReviewConflictApplyResult = {
+  reviewFileId: string;
+  filePath: string;
+  type: "content";
+  status: "applied";
+  appliedByGithubLogin: string;
+  commitSha: string;
+  commitUrl: string | null;
+  headShaBefore: string;
+  headShaAfter: string;
+  headBlobShaBefore: string;
+  headBlobShaAfter: string;
+  conflictStatus: PrReviewConflictStatus;
+  conflictCheckedAt: string | null;
 };
 
 export type UpdatePrReviewFileDecisionInput = {

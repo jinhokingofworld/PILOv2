@@ -14,7 +14,7 @@ const MAX_PATCH_CHARS_PER_FILE = 4000;
 const MAX_TOTAL_PATCH_CHARS = 32000;
 const MAX_CONFLICT_HUNKS = 8;
 const MAX_CONFLICT_TEXT_CHARS_PER_HUNK = 3000;
-const MAX_RESOLVED_CONTENT_CHARS = 16000;
+const MAX_RESOLVED_CONTENT_CHARS = 200 * 1024;
 const CONFLICT_MARKER_PATTERN = /(^|\n)(<<<<<<<|=======|>>>>>>>)(?:\s|$)/;
 
 export interface ReviewFileMetadata {
@@ -39,6 +39,7 @@ export interface PrReviewAnalysisResult {
 export interface PrReviewConflictSuggestionInput {
   filePath: string;
   previousFilePath: string | null;
+  headContent: string;
   hunks: PrReviewConflictHunkPayload[];
 }
 
@@ -381,14 +382,14 @@ export class PrReviewAnalysisService {
   ): unknown {
     return {
       task:
-        "Create a draft resolution for the provided content conflict hunks. Do not claim that the branch was modified or the PR was merged.",
+        "Create a draft resolution for the provided content conflict hunks. Return the complete resolved file content. Do not claim that the branch was modified or the PR was merged.",
       outputRules: {
         aiSummary:
           "Explain the conflict cause in Korean in one or two concise sentences.",
         aiSuggestion:
           "Describe the resolution direction in Korean without mentioning unsupported write actions.",
         resolvedContent:
-          "Return only the resolved code draft for the conflict hunks. Do not wrap it in Markdown fences and do not include conflict markers."
+          "Return the complete file content after applying the resolution. Do not wrap it in Markdown fences and do not include conflict markers."
       },
       validationRules: [
         "resolvedContent must not contain <<<<<<<, =======, or >>>>>>>.",
@@ -397,7 +398,11 @@ export class PrReviewAnalysisService {
       ],
       file: {
         filePath: input.filePath,
-        previousFilePath: input.previousFilePath
+        previousFilePath: input.previousFilePath,
+        headContent: this.truncateText(
+          input.headContent,
+          MAX_RESOLVED_CONTENT_CHARS
+        )
       },
       hunks: input.hunks.slice(0, MAX_CONFLICT_HUNKS).map((hunk) => ({
         id: hunk.id,
@@ -575,41 +580,26 @@ export class PrReviewAnalysisService {
   private buildDeterministicConflictSuggestion(
     input: PrReviewConflictSuggestionInput
   ): PrReviewConflictSuggestionDraft {
-    const resolvedSections = input.hunks.map((hunk) => {
-      const currentText = hunk.currentText.trim();
-      const incomingText = hunk.incomingText.trim();
-
-      if (!currentText) {
-        return incomingText;
-      }
-
-      if (!incomingText || incomingText === currentText) {
-        return currentText;
-      }
-
-      return `${currentText}\n${incomingText}`;
-    });
-
     return {
       aiSummary: `${input.filePath}에서 ${input.hunks.length}개 content conflict 구간이 발견되었습니다.`,
       aiSuggestion:
         "Current와 Incoming 변경 의도를 모두 보존하는 초안을 먼저 확인한 뒤, 중복되거나 충돌하는 줄은 사용자가 적용 전에 조정해야 합니다.",
-      resolvedContent: resolvedSections.join("\n\n")
+      resolvedContent: this.buildDeterministicResolvedFileContent(input)
     };
   }
 
   private withConflictSuggestionValidation(
     draft: PrReviewConflictSuggestionDraft
   ): PrReviewConflictSuggestionResult {
-    const resolvedContent =
-      this.truncateText(
-        draft.resolvedContent.trim(),
-        MAX_RESOLVED_CONTENT_CHARS
-      ) ?? "";
+    const resolvedContent = this.normalizeLineEndings(draft.resolvedContent);
     const validationMessages: string[] = [];
 
-    if (!resolvedContent) {
+    if (!resolvedContent.trim()) {
       validationMessages.push("resolvedContent is empty");
+    }
+
+    if (resolvedContent.length > MAX_RESOLVED_CONTENT_CHARS) {
+      validationMessages.push("resolvedContent is too large");
     }
 
     if (CONFLICT_MARKER_PATTERN.test(resolvedContent)) {
@@ -623,6 +613,63 @@ export class PrReviewAnalysisService {
       validationStatus: validationMessages.length ? "invalid" : "valid",
       validationMessages
     };
+  }
+
+  private buildDeterministicResolvedFileContent(
+    input: PrReviewConflictSuggestionInput
+  ): string {
+    const lines = this.splitContentLines(input.headContent);
+    const replacements = input.hunks
+      .map((hunk) => ({
+        startIndex: Math.max(0, hunk.incomingStartLine - 1),
+        deleteCount: Math.max(0, hunk.incomingLineCount),
+        lines: this.splitContentLines(this.buildDeterministicResolvedHunkText(hunk))
+      }))
+      .sort((left, right) => right.startIndex - left.startIndex);
+
+    for (const replacement of replacements) {
+      if (replacement.startIndex > lines.length) {
+        continue;
+      }
+
+      lines.splice(
+        replacement.startIndex,
+        replacement.deleteCount,
+        ...replacement.lines
+      );
+    }
+
+    return lines.join("\n");
+  }
+
+  private buildDeterministicResolvedHunkText(
+    hunk: PrReviewConflictHunkPayload
+  ): string {
+    const currentText = this.normalizeLineEndings(hunk.currentText);
+    const incomingText = this.normalizeLineEndings(hunk.incomingText);
+    const currentTrimmed = currentText.trim();
+    const incomingTrimmed = incomingText.trim();
+
+    if (!currentTrimmed) {
+      return incomingText;
+    }
+
+    if (!incomingTrimmed || incomingText === currentText) {
+      return currentText;
+    }
+
+    return [currentText, incomingText]
+      .filter((text) => text.trim().length > 0)
+      .join("\n");
+  }
+
+  private splitContentLines(content: string): string[] {
+    const normalized = this.normalizeLineEndings(content);
+    return normalized.length === 0 ? [] : normalized.split("\n");
+  }
+
+  private normalizeLineEndings(content: string): string {
+    return content.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
   }
 
   private describeFileRole(filePath: string): string {

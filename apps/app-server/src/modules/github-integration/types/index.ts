@@ -348,6 +348,7 @@ export interface GithubPullRequestConflictContentPayload {
   mergeBaseContent: string | null;
   baseContent: string | null;
   headContent: string | null;
+  headBlobSha: string | null;
   unsupportedReason: string | null;
 }
 
@@ -371,6 +372,23 @@ export interface GithubPullRequestReviewSubmissionPayload {
   githubReviewId: string | null;
   githubReviewUrl: string | null;
   submittedAt: string;
+}
+
+export interface ApplyGithubPullRequestFileResolutionInput {
+  filePath: string;
+  resolvedContent: string;
+  expectedHeadSha: string;
+  expectedHeadBlobSha: string;
+}
+
+export interface GithubPullRequestFileResolutionPayload {
+  appliedByGithubLogin: string;
+  commitSha: string;
+  commitUrl: string | null;
+  headShaBefore: string;
+  headShaAfter: string;
+  headBlobShaBefore: string;
+  headBlobShaAfter: string;
 }
 
 export type GithubSyncTarget =

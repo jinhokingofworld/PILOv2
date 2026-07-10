@@ -237,6 +237,7 @@ export class GithubPullRequestRemoteService {
         mergeBaseContent: mergeBaseFile?.content ?? null,
         baseContent: baseFile?.content ?? null,
         headContent: headFile?.content ?? null,
+        headBlobSha: headFile?.sha ?? null,
         unsupportedReason: this.getMissingConflictContentReason({
           mergeBaseFile,
           baseFile,

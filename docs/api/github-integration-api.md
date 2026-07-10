@@ -42,6 +42,7 @@ PR 리뷰 세션, 파일별 리뷰 판단, Kanban board cache hydrate, GitHub is
 | Repository/Issue/PR와 organization ProjectV2 조회와 동기화 | GitHub App installation token | `github_installations` |
 | personal ProjectV2 read/write and sync | regular GitHub OAuth App token with `project` scope | `users.github_project_access_token_encrypted` |
 | GitHub Review 제출 | 현재 사용자의 GitHub App user OAuth token | `users.github_access_token_encrypted` |
+| PR Review conflict resolution apply commit | 현재 사용자의 GitHub App user OAuth token | `users.github_access_token_encrypted` |
 | PILO API 호출 | PILO access token | application auth/session layer |
 
 GitHub token은 복호화된 상태로 응답하거나 로그에 남기지 않는다.
@@ -64,6 +65,13 @@ GitHub Review 제출 adapter만 제공한다. 이 adapter는 `event`, `body`만 
 inline `comments` payload는 보내지 않는다.
 GitHub Review 제출에는 GitHub App `Pull requests: write` permission이 필요하며,
 GitHub 403 응답은 provider raw error 대신 safe permission error로 매핑한다.
+
+PR Review conflict resolution apply commit은 GitHub Integration 공개 API endpoint가 아니다.
+PR Review API가 사용자 확인 workflow와 review session head 갱신을 소유하고, GitHub
+Integration은 PR Review가 호출하는 서버 내부 dependency로 현재 사용자의 OAuth token
+복호화 경계와 single-file Contents API update adapter만 제공한다. 이 adapter에는 GitHub App
+`Contents: write` permission이 필요하며, GitHub 403 응답은 provider raw error 대신 safe
+permission error로 매핑한다.
 
 GitHub App installation 검증은 GitHub의 `/user/installations` endpoint를
 호출한다. 저장된 사용자 token은 GitHub App client id/secret으로 발급받은
@@ -290,7 +298,7 @@ Installation 목록 응답:
       "accountLogin": "my-team",
       "accountType": "Organization",
       "repositorySelection": "selected",
-      "permissions": { "contents": "read", "pull_requests": "write" },
+      "permissions": { "contents": "write", "pull_requests": "write" },
       "installedByUserId": "user_uuid",
       "installedAt": "2026-07-07T12:00:00.000Z",
       "suspendedAt": null,

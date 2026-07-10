@@ -1,5 +1,9 @@
 import { Injectable } from "@nestjs/common";
-import { badRequest, forbidden } from "../../common/api-error";
+import {
+  badRequest,
+  conflict as conflictError,
+  forbidden
+} from "../../common/api-error";
 import { GITHUB_API_VERSION } from "./github-api.constants";
 
 export interface GithubOAuthTokenRequest {
@@ -58,6 +62,24 @@ export interface GithubRepositoryCollaboratorPermissionResponse {
   permission: string | null;
 }
 
+export interface GithubRepositoryFileContentUpdateRequest {
+  accessToken: string;
+  owner: string;
+  repo: string;
+  path: string;
+  branch: string;
+  message: string;
+  content: string;
+  sha: string;
+}
+
+export interface GithubRepositoryFileContentUpdateResponse {
+  commitSha: string;
+  commitUrl: string | null;
+  contentPath: string;
+  contentSha: string;
+}
+
 interface GithubUserInstallationsApiPayload {
   total_count?: number;
   installations?: Array<{
@@ -72,6 +94,17 @@ interface GithubRepositoryCollaboratorPermissionApiPayload {
 interface GithubPullRequestReviewApiPayload {
   id?: unknown;
   html_url?: unknown;
+}
+
+interface GithubRepositoryFileContentUpdateApiPayload {
+  content?: {
+    path?: unknown;
+    sha?: unknown;
+  } | null;
+  commit?: {
+    sha?: unknown;
+    html_url?: unknown;
+  } | null;
 }
 
 @Injectable()
@@ -279,6 +312,74 @@ export class GithubOAuthClient {
     };
   }
 
+  async updateRepositoryFileContent(
+    input: GithubRepositoryFileContentUpdateRequest
+  ): Promise<GithubRepositoryFileContentUpdateResponse> {
+    const encodedPath = input.path
+      .split("/")
+      .map((part) => encodeURIComponent(part))
+      .join("/");
+    const url = new URL(
+      `https://api.github.com/repos/${encodeURIComponent(input.owner)}/${encodeURIComponent(input.repo)}/contents/${encodedPath}`
+    );
+
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: "PUT",
+        headers: {
+          Accept: "application/vnd.github+json",
+          Authorization: `Bearer ${input.accessToken}`,
+          "Content-Type": "application/json",
+          "X-GitHub-Api-Version": GITHUB_API_VERSION
+        },
+        body: JSON.stringify({
+          branch: input.branch,
+          content: Buffer.from(input.content, "utf8").toString("base64"),
+          message: input.message,
+          sha: input.sha
+        })
+      });
+    } catch {
+      throw badRequest("GitHub file content update failed");
+    }
+
+    if (response.status === 401) {
+      throw badRequest("GitHub OAuth connection is invalid");
+    }
+
+    if (response.status === 403) {
+      throw forbidden("GitHub App Contents write permission is required");
+    }
+
+    if (response.status === 409) {
+      throw conflictError("GitHub file content is stale");
+    }
+
+    if (!response.ok) {
+      throw badRequest("GitHub file content update failed");
+    }
+
+    const payload = await this.readJson(
+      response,
+      "GitHub file content update failed"
+    );
+    if (!this.isRepositoryFileContentUpdatePayload(payload)) {
+      throw badRequest("GitHub file content update failed");
+    }
+
+    return {
+      commitSha: payload.commit.sha,
+      commitUrl:
+        typeof payload.commit.html_url === "string" &&
+        payload.commit.html_url.length > 0
+          ? payload.commit.html_url
+          : null,
+      contentPath: payload.content.path,
+      contentSha: payload.content.sha
+    };
+  }
+
   private async fetchUserInstallationsPage(
     accessToken: string,
     page: number,
@@ -360,6 +461,31 @@ export class GithubOAuthClient {
     value: unknown
   ): value is GithubPullRequestReviewApiPayload {
     return typeof value === "object" && value !== null && !Array.isArray(value);
+  }
+
+  private isRepositoryFileContentUpdatePayload(
+    value: unknown
+  ): value is {
+    content: { path: string; sha: string };
+    commit: { sha: string; html_url?: string | null };
+  } {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+      return false;
+    }
+
+    const payload = value as GithubRepositoryFileContentUpdateApiPayload;
+    return (
+      typeof payload.content === "object" &&
+      payload.content !== null &&
+      typeof payload.content.path === "string" &&
+      payload.content.path.length > 0 &&
+      typeof payload.content.sha === "string" &&
+      payload.content.sha.length > 0 &&
+      typeof payload.commit === "object" &&
+      payload.commit !== null &&
+      typeof payload.commit.sha === "string" &&
+      payload.commit.sha.length > 0
+    );
   }
 
   private isRepositoryCollaboratorPermissionPayload(

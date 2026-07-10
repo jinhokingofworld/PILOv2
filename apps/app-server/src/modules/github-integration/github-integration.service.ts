@@ -15,6 +15,7 @@ import { GithubProjectOAuthIntegrationService } from "./github-project-oauth-int
 import { GithubProjectV2SyncTokenService } from "./github-project-v2-sync-token.service";
 import { GithubProjectV2Service } from "./github-project-v2.service";
 import { GithubProjectV2WriteService } from "./github-project-v2-write.service";
+import { GithubPullRequestFileWriteService } from "./github-pull-request-file-write.service";
 import { GithubPullRequestRemoteService } from "./github-pull-request-remote.service";
 import { GithubReviewSubmissionService } from "./github-review-submission.service";
 import { GithubSourceReadService } from "./github-source-read.service";
@@ -60,6 +61,7 @@ import type {
   GithubProjectV2StatusOptionPayload,
   GithubPullRequestConflictInputsPayload,
   GithubPullRequestConflictStatusPayload,
+  GithubPullRequestFileResolutionPayload,
   GithubPullRequestDetailPayload,
   GithubPullRequestFilePayload,
   GithubPullRequestListItemPayload,
@@ -95,6 +97,7 @@ export class GithubIntegrationService {
   private readonly githubSourceReadService: GithubSourceReadService;
   private readonly githubProjectV2Service: GithubProjectV2Service;
   private readonly githubPullRequestRemoteService: GithubPullRequestRemoteService;
+  private readonly githubPullRequestFileWriteService: GithubPullRequestFileWriteService;
   private readonly githubReviewSubmissionService: GithubReviewSubmissionService;
   private readonly githubWebhookService: GithubWebhookService;
   private readonly githubSyncRunService: GithubSyncRunService;
@@ -133,7 +136,9 @@ export class GithubIntegrationService {
     @Optional()
     githubProjectOAuthIntegrationService?: GithubProjectOAuthIntegrationService,
     @Optional()
-    githubProjectV2WriteService?: GithubProjectV2WriteService
+    githubProjectV2WriteService?: GithubProjectV2WriteService,
+    @Optional()
+    githubPullRequestFileWriteService?: GithubPullRequestFileWriteService
   ) {
     const callbackStateService =
       githubCallbackStateService ?? new GithubCallbackStateService(database);
@@ -213,6 +218,16 @@ export class GithubIntegrationService {
       new GithubPullRequestRemoteService(
         database,
         githubAppClient,
+        configService,
+        workspaceService
+      );
+    this.githubPullRequestFileWriteService =
+      githubPullRequestFileWriteService ??
+      new GithubPullRequestFileWriteService(
+        database,
+        githubAppClient,
+        githubOAuthClient,
+        tokenEncryptionService,
         configService,
         workspaceService
       );
@@ -613,6 +628,25 @@ export class GithubIntegrationService {
     }
   ): Promise<GithubPullRequestConflictInputsPayload> {
     return this.githubPullRequestRemoteService.getGithubPullRequestConflictInputs(
+      currentUserId,
+      workspaceId,
+      pullRequestId,
+      input
+    );
+  }
+
+  async applyGithubPullRequestFileResolution(
+    currentUserId: string,
+    workspaceId: string,
+    pullRequestId: string,
+    input: {
+      filePath: string;
+      resolvedContent: string;
+      expectedHeadSha: string;
+      expectedHeadBlobSha: string;
+    }
+  ): Promise<GithubPullRequestFileResolutionPayload> {
+    return this.githubPullRequestFileWriteService.applyGithubPullRequestFileResolution(
       currentUserId,
       workspaceId,
       pullRequestId,

@@ -193,6 +193,13 @@ export interface GithubPullRequestApiItem {
   head?: {
     ref?: string | null;
     sha?: string | null;
+    repo?: {
+      name?: string | null;
+      full_name?: string | null;
+      owner?: {
+        login?: string | null;
+      } | null;
+    } | null;
   } | null;
   base?: {
     ref?: string | null;
@@ -234,6 +241,12 @@ export interface GithubPullRequestApiDetails {
   deletions: number;
   commits: number;
   mergeable: boolean | null;
+  head?: GithubPullRequestApiItem["head"];
+  headRef: string;
+  headSha: string;
+  headRepositoryOwner: string;
+  headRepositoryName: string;
+  headRepositoryFullName: string;
 }
 
 export interface GithubRepositoryMergeBaseApiDetails {
@@ -1478,12 +1491,37 @@ export class GithubAppClient {
       throw badRequest("GitHub pull request lookup failed");
     }
 
+    const headRef = pullRequest.head?.ref;
+    const headSha = pullRequest.head?.sha;
+    const headRepositoryOwner = pullRequest.head?.repo?.owner?.login;
+    const headRepositoryName = pullRequest.head?.repo?.name;
+    const headRepositoryFullName = pullRequest.head?.repo?.full_name;
+    if (
+      typeof headRef !== "string" ||
+      headRef.length === 0 ||
+      typeof headSha !== "string" ||
+      headSha.length === 0 ||
+      typeof headRepositoryOwner !== "string" ||
+      headRepositoryOwner.length === 0 ||
+      typeof headRepositoryName !== "string" ||
+      headRepositoryName.length === 0 ||
+      typeof headRepositoryFullName !== "string" ||
+      headRepositoryFullName.length === 0
+    ) {
+      throw badRequest("GitHub pull request lookup failed");
+    }
+
     return {
       changed_files: pullRequest.changed_files,
       additions: pullRequest.additions,
       deletions: pullRequest.deletions,
       commits: pullRequest.commits,
-      mergeable
+      mergeable,
+      headRef,
+      headSha,
+      headRepositoryOwner,
+      headRepositoryName,
+      headRepositoryFullName
     };
   }
 

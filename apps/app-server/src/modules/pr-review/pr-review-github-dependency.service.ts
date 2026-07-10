@@ -8,6 +8,8 @@ import type {
 } from "../github-integration/types";
 import type {
   PrReviewGithubChangedFile,
+  PrReviewGithubConflictApplyInput,
+  PrReviewGithubConflictApplyPayload,
   PrReviewGithubConflictInputsPayload,
   PrReviewGithubConflictStatusPayload,
   PrReviewGithubDependency,
@@ -128,6 +130,20 @@ export class PrReviewGithubDependencyService implements PrReviewGithubDependency
     );
   }
 
+  async applyPullRequestFileResolution(
+    currentUserId: string,
+    workspaceId: string,
+    pullRequestId: string,
+    input: PrReviewGithubConflictApplyInput
+  ): Promise<PrReviewGithubConflictApplyPayload> {
+    return this.githubIntegrationService.applyGithubPullRequestFileResolution(
+      currentUserId,
+      workspaceId,
+      pullRequestId,
+      input
+    );
+  }
+
   private mapPullRequestDetail(
     pullRequest: GithubPullRequestDetailPayload
   ): PrReviewGithubPullRequestDetail {
@@ -168,6 +184,7 @@ export class PrReviewGithubDependencyService implements PrReviewGithubDependency
         mergeBaseContent: file.mergeBaseContent,
         baseContent: file.baseContent,
         headContent: file.headContent,
+        headBlobSha: file.headBlobSha,
         unsupportedReason: file.unsupportedReason
       }))
     };

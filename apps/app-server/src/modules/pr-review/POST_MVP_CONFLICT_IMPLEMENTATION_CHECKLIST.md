@@ -21,7 +21,7 @@
 | 1-B | Read-only conflict analysis backend | #506 | #507 | 완료 |
 | 1-C | Review room conflict UX | #508 | #511 | 완료 |
 | 1-D | AI suggestion draft | #512 | #515 | 구현 완료 |
-| 1-E | Apply resolution write path | TBD | TBD | 예정 |
+| 1-E | Apply resolution write path | #529 | TBD | 구현 완료 |
 
 ## 공통 Stop Gate
 
@@ -113,12 +113,12 @@
 
 작업 체크리스트:
 
-- [ ] GitHub write permission 요구사항을 문서화한다.
-- [ ] apply request/response 계약을 추가한다.
-- [ ] head SHA와 blob SHA guard를 구현한다.
-- [ ] resolved content empty/marker validation을 구현한다.
-- [ ] apply 결과 후 conflict status를 재확인한다.
-- [ ] merge 실행은 별도 action으로 분리한다.
+- [x] GitHub write permission 요구사항을 문서화한다.
+- [x] apply request/response 계약을 추가한다.
+- [x] head SHA와 blob SHA guard를 구현한다.
+- [x] resolved content empty/marker validation을 구현한다.
+- [x] apply 결과 후 conflict status를 재확인한다.
+- [x] merge 실행은 별도 action으로 분리한다.
 
 ## PR 전 확인
 
