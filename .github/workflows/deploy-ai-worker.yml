@@ -46,9 +46,11 @@ jobs:
             ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
             ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
 
-      - name: Deploy ECS service
+      - name: Deploy ECS services
         run: |
-          aws ecs update-service \
-            --cluster "${{ vars.ECS_CLUSTER_NAME }}" \
-            --service "${{ vars.ECS_AI_WORKER_SERVICE }}" \
-            --force-new-deployment
+          for service in "${{ vars.ECS_AI_WORKER_SERVICE }}" "${{ vars.ECS_AI_AGENT_WORKER_SERVICE }}"; do
+            aws ecs update-service \
+              --cluster "${{ vars.ECS_CLUSTER_NAME }}" \
+              --service "$service" \
+              --force-new-deployment
+          done

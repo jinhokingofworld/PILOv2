@@ -190,7 +190,8 @@ module "ecs" {
         PORT                          = tostring(var.app_server_port)
         DATABASE_SSL                  = "true"
         S3_UPLOADS_BUCKET             = module.s3.uploads_bucket_name
-        SQS_AI_JOBS_QUEUE_URL         = module.sqs.ai_jobs_queue_url
+        SQS_AGENT_JOBS_QUEUE_URL            = module.sqs.agent_jobs_queue_url
+        SQS_MEETING_REPORT_JOBS_QUEUE_URL = module.sqs.ai_jobs_queue_url
         SQS_GITHUB_WEBHOOKS_QUEUE_URL = module.sqs.github_webhooks_queue_url
         FRONTEND_URL                  = local.frontend_domain == "" ? "" : "https://${local.frontend_domain}"
         API_PUBLIC_ORIGIN             = local.api_domain == "" ? "http://${module.alb.alb_dns_name}" : "https://${local.api_domain}"
@@ -243,7 +244,31 @@ module "ecs" {
         AGENT_EXECUTION_HANDOFF_TIMEOUT_SECONDS = "10"
         OPENAI_STT_MODEL                        = "gpt-4o-mini-transcribe"
         OPENAI_MEETING_REPORT_MODEL             = "gpt-5.4-mini"
-        AI_WORKER_CONCURRENCY                   = "1"
+      }
+      secrets = module.secrets.ai_worker_ecs_secrets
+    }
+
+    ai-agent-worker = {
+      image              = "${module.ecr.repository_urls["pilo-ai-worker"]}:latest"
+      cpu                = var.ai_worker_cpu
+      memory             = var.ai_worker_memory
+      desired_count      = var.ai_agent_worker_desired_count
+      container_port     = null
+      security_group_ids = [module.security_groups.ai_worker_security_group_id]
+      task_role_arn      = module.iam.ai_worker_task_role_arn
+      target_group_arn   = null
+      environment = {
+        APP_ENV                                 = var.environment
+        AWS_REGION                              = var.aws_region
+        DATABASE_SSL                            = "true"
+        S3_UPLOADS_BUCKET                       = module.s3.uploads_bucket_name
+        S3_RECORDINGS_BUCKET                    = module.s3.uploads_bucket_name
+        SQS_AI_JOBS_QUEUE_URL                   = module.sqs.agent_jobs_queue_url
+        SQS_GITHUB_WEBHOOKS_QUEUE_URL           = module.sqs.github_webhooks_queue_url
+        AGENT_EXECUTION_HANDOFF_BASE_URL        = local.api_domain == "" ? "http://${module.alb.alb_dns_name}" : "https://${local.api_domain}"
+        AGENT_EXECUTION_HANDOFF_TIMEOUT_SECONDS = "10"
+        OPENAI_STT_MODEL                        = "gpt-4o-mini-transcribe"
+        OPENAI_MEETING_REPORT_MODEL             = "gpt-5.4-mini"
       }
       secrets = module.secrets.ai_worker_ecs_secrets
     }
