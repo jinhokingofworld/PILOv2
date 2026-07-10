@@ -45,7 +45,7 @@ export class AgentController {
       body
     );
 
-    reply.status(result.created ? 202 : 200);
+    reply.status(result.created ? 201 : 200);
     return apiResponse({
       run: result.run
     });

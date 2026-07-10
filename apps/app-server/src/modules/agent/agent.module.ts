@@ -11,6 +11,7 @@ import { AgentExecutionHandoffGuard } from "./agent-execution-handoff.guard";
 import { AgentInternalController } from "./agent-internal.controller";
 import { AgentJobService } from "./agent-job.service";
 import { AgentLoggingService } from "./agent-logging.service";
+import { AgentOutboxPublisherService } from "./agent-outbox-publisher.service";
 import { AgentPlannerService } from "./agent-planner.service";
 import { AgentService } from "./agent.service";
 import { AgentToolRegistryService } from "./agent-tool-registry.service";
@@ -33,6 +34,7 @@ import { MeetingAgentToolsService } from "./tools/meeting-agent-tools.service";
     AgentExecutionHandoffGuard,
     AgentJobService,
     AgentLoggingService,
+    AgentOutboxPublisherService,
     AgentPlannerService,
     AgentToolRegistryService,
     CalendarAgentToolsService,

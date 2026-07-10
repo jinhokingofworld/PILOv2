@@ -288,6 +288,14 @@ export class AgentLoggingService {
         resourceRefs: []
       });
 
+      await transaction.execute(
+        `
+          INSERT INTO agent_run_outbox (run_id, workspace_id)
+          VALUES ($1, $2)
+        `,
+        [run.id, workspaceId]
+      );
+
       return {
         run: this.mapRun(run),
         created: true

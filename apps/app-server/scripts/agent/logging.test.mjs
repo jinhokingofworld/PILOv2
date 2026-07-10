@@ -132,6 +132,20 @@ class FakeTransaction {
       };
     }
 
+    if (text.includes("INSERT INTO agent_run_outbox")) {
+      const [runId, workspaceId] = values;
+      this.state.outbox ??= [];
+      this.state.outbox.push({
+        run_id: runId,
+        workspace_id: workspaceId,
+        status: "pending"
+      });
+      return {
+        rowCount: 1,
+        rows: []
+      };
+    }
+
     throw new Error(`Unhandled execute: ${text}`);
   }
 
@@ -356,6 +370,13 @@ function errorMessage(error) {
   assert.equal(result.run.clientRequestId, "request-1");
   assert.equal(state.runs.length, 1);
   assert.equal(state.logs[0].event_type, "run_created");
+  assert.deepEqual(state.outbox, [
+    {
+      run_id: RUN_ID,
+      workspace_id: WORKSPACE_ID,
+      status: "pending"
+    }
+  ]);
   assert.equal(state.lastLogResourceRefsParameter, "[]");
   assert.deepEqual(workspaceService.calls, [
     { currentUserId: USER_ID, workspaceId: WORKSPACE_ID }
