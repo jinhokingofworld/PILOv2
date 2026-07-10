@@ -106,6 +106,7 @@ export interface PrReviewGithubReviewSubmissionPayload {
 export interface PrReviewGithubConflictApplyInput {
   filePath: string;
   resolvedContent: string;
+  expectedBaseSha: string;
   expectedHeadSha: string;
   expectedHeadBlobSha: string;
 }
@@ -118,6 +119,7 @@ export interface PrReviewGithubConflictApplyPayload {
   headShaAfter: string;
   headBlobShaBefore: string;
   headBlobShaAfter: string;
+  localCacheUpdated: boolean;
 }
 
 export interface PrReviewGithubPullRequestMergeInput {

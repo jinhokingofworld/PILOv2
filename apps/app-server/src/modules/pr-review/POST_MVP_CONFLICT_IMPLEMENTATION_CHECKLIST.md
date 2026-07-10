@@ -108,7 +108,7 @@
 
 목표:
 
-- 사용자가 확인한 resolved content만 PR head branch에 적용한다.
+- 사용자가 확인한 resolved content만 PR head와 base를 parent로 갖는 merge commit에 적용한다.
 - 모든 write action은 명시적 사용자 확인과 guard를 통과해야 한다.
 
 작업 체크리스트:
@@ -119,6 +119,9 @@
 - [x] resolved content empty/marker validation을 구현한다.
 - [x] apply 결과 후 conflict status를 재확인한다.
 - [x] merge 실행은 별도 action으로 분리한다.
+- [x] single-file merge commit으로 실제 conflict를 해소한다. (#614)
+- [x] 다중 또는 unsupported conflict file은 부분 적용 없이 차단한다. (#614)
+- [x] GitHub 적용 후 local 갱신 실패를 `sync_required`로 보존한다. (#614)
 
 ## PR 전 확인
 

@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
 import { QueryResultRow } from "pg";
 import {
   ApiError,
@@ -33,6 +33,7 @@ import type {
   PrReviewFileReviewStatus,
   PrReviewFileStatus,
   PrReviewGithubChangedFile,
+  PrReviewGithubConflictStatusPayload,
   PrReviewGithubPullRequestDetail,
   PrReviewGithubPullRequestMergePayload,
   PrReviewGithubReviewSubmissionPayload,
@@ -551,6 +552,7 @@ export interface PrReviewConflictApplyPayload {
   headBlobShaAfter: string;
   conflictStatus: PrReviewConflictStatus;
   conflictCheckedAt: string | null;
+  localStateStatus: "updated" | "sync_required";
 }
 
 export interface PrReviewSubmissionFileResultPayload {
@@ -633,6 +635,7 @@ const CONFLICT_MARKER_PATTERN = /(^|\n)(<<<<<<<|=======|>>>>>>>)(?:\s|$)/;
 
 @Injectable()
 export class PrReviewService {
+  private readonly logger = new Logger(PrReviewService.name);
   private readonly inFlightSessionCreations = new Set<string>();
 
   constructor(
@@ -1261,64 +1264,22 @@ export class PrReviewService {
       throw conflictError("Review session head SHA is stale");
     }
 
-    const currentPullRequest = await this.githubDependency.getPullRequestDetail(
+    const conflictAnalysis = await this.getReviewSessionConflicts(
       currentUserId,
       workspaceId,
-      file.pull_request_id
+      file.session_id
     );
-    if (currentPullRequest.headSha !== file.head_sha) {
-      throw conflictError("Review session head SHA is stale");
-    }
-
-    if (!currentPullRequest.baseSha) {
-      throw badRequest("GitHub pull request base SHA is not synced");
-    }
-
-    const conflictInputs = await this.githubDependency.getPullRequestConflictInputs(
-      currentUserId,
-      workspaceId,
-      file.pull_request_id,
-      {
-        baseSha: currentPullRequest.baseSha,
-        headSha: file.head_sha,
-        filePaths: [file.file_path]
-      }
-    );
-    const conflictInput = conflictInputs.files.find(
-      (candidate) => candidate.filePath === file.file_path
-    );
-
-    if (!conflictInput || conflictInput.unsupportedReason) {
-      throw badRequest(
-        conflictInput?.unsupportedReason ?? "content conflict input is not available"
-      );
-    }
-
+    const conflictFile = conflictAnalysis.files[0];
     if (
-      conflictInput.mergeBaseContent === null ||
-      conflictInput.baseContent === null ||
-      conflictInput.headContent === null ||
-      conflictInput.headBlobSha === null
+      conflictAnalysis.unsupportedFiles.length > 0 ||
+      conflictAnalysis.files.length !== 1 ||
+      conflictFile?.reviewFileId !== file.id
     ) {
-      throw badRequest("content conflict input is not available");
+      throw badRequest("Single supported content conflict file is required");
     }
 
-    if (conflictInput.headContent.length > MAX_CONFLICT_APPLY_CONTENT_CHARS) {
-      throw badRequest("file content is too large for conflict resolution apply");
-    }
-
-    if (conflictInput.headBlobSha !== input.expectedHeadBlobSha) {
+    if (conflictFile.headBlobSha !== input.expectedHeadBlobSha) {
       throw conflictError("Review file blob SHA is stale");
-    }
-
-    const hunks = extractContentConflictHunks({
-      mergeBaseContent: conflictInput.mergeBaseContent,
-      baseContent: conflictInput.baseContent,
-      headContent: conflictInput.headContent
-    });
-
-    if (hunks.length === 0) {
-      throw badRequest("Content conflict hunk not found");
     }
 
     const applyResult = await this.githubDependency.applyPullRequestFileResolution(
@@ -1328,23 +1289,45 @@ export class PrReviewService {
       {
         filePath: file.file_path,
         resolvedContent: input.resolvedContent,
+        expectedBaseSha: conflictAnalysis.baseSha,
         expectedHeadSha: input.expectedHeadSha,
         expectedHeadBlobSha: input.expectedHeadBlobSha
       }
     );
-    const refreshedConflict =
-      await this.githubDependency.getPullRequestConflictStatus(
-        currentUserId,
-        workspaceId,
-        file.pull_request_id
+    let conflictStatusRefreshed = true;
+    let refreshedConflict: PrReviewGithubConflictStatusPayload;
+    try {
+      refreshedConflict =
+        await this.githubDependency.getPullRequestConflictStatus(
+          currentUserId,
+          workspaceId,
+          file.pull_request_id
+        );
+    } catch {
+      conflictStatusRefreshed = false;
+      refreshedConflict = {
+        conflictStatus: "unknown",
+        checkedAt: null
+      };
+      this.logger.warn(
+        `GitHub conflict merge commit ${applyResult.commitSha} succeeded but conflict status refresh failed for ${file.pull_request_id}`
       );
+    }
 
-    await this.updateReviewSessionAfterConflictApply({
-      reviewSessionId: file.session_id,
-      headSha: applyResult.headShaAfter,
-      conflictStatus: refreshedConflict.conflictStatus,
-      conflictCheckedAt: refreshedConflict.checkedAt
-    });
+    let reviewSessionUpdated = true;
+    try {
+      await this.updateReviewSessionAfterConflictApply({
+        reviewSessionId: file.session_id,
+        headSha: applyResult.headShaAfter,
+        conflictStatus: refreshedConflict.conflictStatus,
+        conflictCheckedAt: refreshedConflict.checkedAt
+      });
+    } catch {
+      reviewSessionUpdated = false;
+      this.logger.warn(
+        `GitHub conflict merge commit ${applyResult.commitSha} succeeded but review session update failed for ${file.session_id}`
+      );
+    }
 
     return {
       reviewFileId: file.id,
@@ -1359,7 +1342,13 @@ export class PrReviewService {
       headBlobShaBefore: applyResult.headBlobShaBefore,
       headBlobShaAfter: applyResult.headBlobShaAfter,
       conflictStatus: refreshedConflict.conflictStatus,
-      conflictCheckedAt: refreshedConflict.checkedAt
+      conflictCheckedAt: refreshedConflict.checkedAt,
+      localStateStatus:
+        applyResult.localCacheUpdated &&
+        conflictStatusRefreshed &&
+        reviewSessionUpdated
+          ? "updated"
+          : "sync_required"
     };
   }
 

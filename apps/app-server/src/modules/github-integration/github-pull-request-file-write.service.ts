@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
 import type { QueryResultRow } from "pg";
 import {
   badRequest,
@@ -9,11 +9,11 @@ import {
 import { DatabaseService } from "../../database/database.service";
 import { WorkspaceService } from "../workspace/workspace.service";
 import { GithubAppClient } from "./github-app.client";
+import { GithubConflictMergeService } from "./github-conflict-merge.service";
 import {
   GithubIntegrationConfigService,
   type GithubOAuthRuntimeConfig
 } from "./github-integration-config.service";
-import { GithubOAuthClient } from "./github-oauth.client";
 import { GithubTokenEncryptionService } from "./github-token-encryption.service";
 import type {
   ApplyGithubPullRequestFileResolutionInput,
@@ -37,10 +37,12 @@ interface GithubPullRequestFileWriteTargetRow extends QueryResultRow {
 
 @Injectable()
 export class GithubPullRequestFileWriteService {
+  private readonly logger = new Logger(GithubPullRequestFileWriteService.name);
+
   constructor(
     private readonly database: DatabaseService,
     private readonly githubAppClient: GithubAppClient,
-    private readonly githubOAuthClient: GithubOAuthClient,
+    private readonly githubConflictMergeService: GithubConflictMergeService,
     private readonly tokenEncryptionService: GithubTokenEncryptionService,
     private readonly configService: GithubIntegrationConfigService,
     private readonly workspaceService: WorkspaceService
@@ -82,32 +84,56 @@ export class GithubPullRequestFileWriteService {
       throw conflictError("Review session head SHA is stale");
     }
 
-    const update = await this.githubOAuthClient.updateRepositoryFileContent({
-      accessToken: connectedOAuth.accessToken,
-      owner: pullRequest.headRepositoryOwner,
-      repo: pullRequest.headRepositoryName,
-      path: input.filePath,
-      branch: pullRequest.headRef,
-      message: `Resolve conflict in ${input.filePath}`,
-      content: input.resolvedContent,
-      sha: input.expectedHeadBlobSha
-    });
+    if (pullRequest.baseSha !== input.expectedBaseSha) {
+      throw conflictError("Review session base SHA is stale");
+    }
 
-    await this.updateLocalPullRequestHeadSha(
-      workspaceId,
-      pullRequestId,
-      update.commitSha,
-      pullRequest.headRef
+    const update = await this.githubConflictMergeService.createConflictMergeCommit(
+      {
+        accessToken: connectedOAuth.accessToken,
+        authorName: connectedOAuth.githubLogin,
+        baseBranch: pullRequest.baseRef,
+        baseRepositoryUrl: this.buildGithubRepositoryUrl(
+          target.owner_login,
+          target.name
+        ),
+        baseSha: input.expectedBaseSha,
+        content: input.resolvedContent,
+        headBranch: pullRequest.headRef,
+        headRepositoryUrl: this.buildGithubRepositoryUrl(
+          pullRequest.headRepositoryOwner,
+          pullRequest.headRepositoryName
+        ),
+        headSha: input.expectedHeadSha,
+        message: `Resolve conflict in ${input.filePath}`,
+        path: input.filePath
+      }
     );
+
+    let localCacheUpdated = true;
+    try {
+      await this.updateLocalPullRequestHeadSha(
+        workspaceId,
+        pullRequestId,
+        update.commitSha,
+        pullRequest.headRef
+      );
+    } catch {
+      localCacheUpdated = false;
+      this.logger.warn(
+        `GitHub conflict merge commit ${update.commitSha} succeeded but pull request cache update failed for ${pullRequestId}`
+      );
+    }
 
     return {
       appliedByGithubLogin: connectedOAuth.githubLogin,
       commitSha: update.commitSha,
-      commitUrl: update.commitUrl,
+      commitUrl: `https://github.com/${encodeURIComponent(pullRequest.headRepositoryOwner)}/${encodeURIComponent(pullRequest.headRepositoryName)}/commit/${update.commitSha}`,
       headShaBefore: pullRequest.headSha,
       headShaAfter: update.commitSha,
       headBlobShaBefore: input.expectedHeadBlobSha,
-      headBlobShaAfter: update.contentSha
+      headBlobShaAfter: update.contentSha,
+      localCacheUpdated
     };
   }
 
@@ -207,12 +233,16 @@ export class GithubPullRequestFileWriteService {
       `
         UPDATE github_pull_requests
         SET
-          head_sha = $3,
           head_branch = $4,
           raw = jsonb_set(
-            COALESCE(raw, '{}'::jsonb),
-            '{head,sha}',
-            to_jsonb($3::text),
+            jsonb_set(
+              COALESCE(raw, '{}'::jsonb),
+              '{head,sha}',
+              to_jsonb($3::text),
+              true
+            ),
+            '{mergeable}',
+            'null'::jsonb,
             true
           ),
           last_synced_at = now(),
@@ -240,6 +270,10 @@ export class GithubPullRequestFileWriteService {
       row.github_installation_id,
       "Invalid GitHub installation id"
     );
+  }
+
+  private buildGithubRepositoryUrl(owner: string, repo: string): string {
+    return `https://github.com/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}.git`;
   }
 
   private toPositiveInteger(value: string | number, message: string): number {

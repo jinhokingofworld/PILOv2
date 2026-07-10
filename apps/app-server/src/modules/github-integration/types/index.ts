@@ -377,6 +377,7 @@ export interface GithubPullRequestReviewSubmissionPayload {
 export interface ApplyGithubPullRequestFileResolutionInput {
   filePath: string;
   resolvedContent: string;
+  expectedBaseSha: string;
   expectedHeadSha: string;
   expectedHeadBlobSha: string;
 }
@@ -389,6 +390,7 @@ export interface GithubPullRequestFileResolutionPayload {
   headShaAfter: string;
   headBlobShaBefore: string;
   headBlobShaAfter: string;
+  localCacheUpdated: boolean;
 }
 
 export type GithubPullRequestMergeMethod = "merge";

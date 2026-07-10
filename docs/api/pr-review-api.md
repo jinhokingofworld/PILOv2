@@ -39,7 +39,7 @@ comment, PR merge/close, ProjectV2 write는 이 문서의 범위가 아니다.
 - GitHub Review 제출은 GitHub Integration에서 연결한 현재 사용자의 GitHub App user OAuth token으로 수행하며 review body만 제출한다.
 - 현재 GitHub PR head SHA가 session의 `headSha`와 다르면 제출을 막는다.
 - Conflict resolution apply는 현재 사용자의 GitHub App user OAuth token으로 PR head branch에
-  단일 파일 commit을 만든다.
+  단일 conflict 파일을 해결한 merge commit을 만든다.
 - PILO가 만든 conflict resolution apply commit에 한해서 review session의 `headSha`와
   `conflictStatus`를 새 PR head 기준으로 갱신할 수 있다.
 - Conflict resolution apply는 file review decision, review submission history, PR merge 상태를
@@ -601,7 +601,7 @@ POST /api/v1/workspaces/{workspaceId}/github/review-files/{reviewFileId}/conflic
   `resolvedText`는 해당 hunk만 대체할 코드다. 코드 전체를 Markdown fence로 감싸지 않는다.
 - 서버는 PR head 파일 원문에 `resolvedHunks`를 뒤쪽 hunk부터 적용해 `resolvedContent`를
   조립한다. AI가 누락한 hunk는 deterministic fallback 결과로 보완한다.
-- `resolvedContent`는 GitHub Contents API apply에 사용할 수 있는 파일 전체 내용이어야 한다.
+- `resolvedContent`는 실제 Git merge 결과에서 선택한 conflict 파일을 대체할 전체 내용이어야 한다.
 - 응답의 `headSha`와 `headBlobSha`는 suggestion 생성 시점의 PR head/file blob guard 값이다.
   사용자는 이 값을 그대로 apply 요청에 전달해야 한다.
 - hunk의 `resolvedText` 또는 조립된 `resolvedContent`가 `<<<<<<<`, `=======`, `>>>>>>>`
@@ -616,7 +616,7 @@ POST /api/v1/workspaces/{workspaceId}/github/review-files/{reviewFileId}/conflic
 
 Post-MVP Phase 1-E에서 구현하는 사용자 확인 기반 conflict 해결 적용 계약이다.
 이 endpoint는 `content` conflict 파일 하나에 대해 사용자가 확인한 `resolvedContent`를
-PR head branch에 commit한다. PR merge/close는 수행하지 않는다.
+PR head와 base를 parent로 갖는 merge commit으로 적용한다. PR merge/close는 수행하지 않는다.
 
 ```http
 POST /api/v1/workspaces/{workspaceId}/github/review-files/{reviewFileId}/conflict-apply
@@ -650,7 +650,8 @@ POST /api/v1/workspaces/{workspaceId}/github/review-files/{reviewFileId}/conflic
     "headBlobShaBefore": "file_blob_sha",
     "headBlobShaAfter": "new_file_blob_sha",
     "conflictStatus": "clean",
-    "conflictCheckedAt": "2026-07-10T00:00:00.000Z"
+    "conflictCheckedAt": "2026-07-10T00:00:00.000Z",
+    "localStateStatus": "updated"
   }
 }
 ```
@@ -663,6 +664,11 @@ POST /api/v1/workspaces/{workspaceId}/github/review-files/{reviewFileId}/conflic
   `403`을 반환하면 provider raw error 대신 안전한 권한 오류를 반환한다.
 - `content` conflict file만 apply 대상이다. `binary`, `large`, `modify_delete`,
   `rename_modify`, `add_add`, `unsupported` conflict는 `400 Bad Request`로 막는다.
+- 초기 merge commit apply는 PR 전체에서 지원 가능한 `content` conflict file이 정확히
+  1개이고 unsupported conflict 후보가 없을 때만 허용한다. 여러 conflict file 또는
+  unsupported 후보가 있으면 일부 파일만 확정하지 않도록 `400 Bad Request`로 막는다.
+- 한 파일 안의 conflict hunk 개수에는 제한을 두지 않는다. 모든 hunk가 반영된 파일 전체
+  `resolvedContent`를 하나의 resolved blob으로 사용한다.
 - 현재 GitHub PR head SHA가 session의 `headSha` 또는 요청의 `expectedHeadSha`와 다르면
   stale session으로 보고 `409 Conflict`를 반환한다.
 - PR head branch의 현재 file blob SHA가 요청의 `expectedHeadBlobSha`와 다르면
@@ -670,11 +676,29 @@ POST /api/v1/workspaces/{workspaceId}/github/review-files/{reviewFileId}/conflic
 - `resolvedContent`가 비어 있거나 `<<<<<<<`, `=======`, `>>>>>>>` conflict marker를
   포함하면 `400 Bad Request`를 반환한다.
 - PR head 파일 전체 content가 apply 크기 제한을 초과하면 `400 Bad Request`를 반환한다.
-- 서버는 GitHub Contents API로 PR head branch의 해당 파일을 update하고, commit message는
+- 서버는 격리된 임시 Git working tree에서 PR head commit을 checkout하고 base commit을
+  `--no-commit --no-ff`로 실제 merge한다. 이 과정에서 충돌 없이 합쳐지는 base 변경도 결과에
+  포함해야 한다.
+- 실제 Git merge의 미해결 경로가 선택한 conflict 파일 하나인지 다시 검증한다. 분석 이후
+  conflict 파일이 추가되었거나 선택한 파일의 conflict가 사라졌다면 push 없이
+  `409 Conflict`를 반환한다.
+- 서버는 사용자가 확인한 `resolvedContent`를 선택 파일에 기록한 뒤 미해결 경로가 0개인지
+  확인하고, `[PR head SHA, base SHA]` 두 parent를 갖는 merge commit을 만든다. commit message는
   `Resolve conflict in {filePath}` 형식으로 생성한다.
+- push 직전에 원격 PR head SHA와 base branch SHA가 분석 시점과 같은지 확인하고, force 없이
+  PR head branch를 갱신한다. 임시 working tree는 성공/실패와 관계없이 삭제한다.
 - apply 성공 후 GitHub PR head SHA와 conflict 상태를 다시 조회한다.
 - apply 성공 후 `pr_review_sessions.head_sha`, `conflict_status`, `conflict_checked_at`은
   새 PR head 기준으로 갱신한다. 이 갱신은 PILO apply commit 성공 후에만 허용한다.
+- GitHub PR head branch 갱신은 성공했지만 conflict 상태 재조회, PILO의 PR cache 또는
+  review session 갱신이 실패하면
+  endpoint는 GitHub 성공을 실패로 응답하지 않는다. `status: "applied"`와
+  `localStateStatus: "sync_required"`를 반환해 GitHub 동기화와 새 review session이 필요함을
+  알린다. conflict 상태 재조회 자체가 실패한 경우 `conflictStatus: "unknown"`과
+  `conflictCheckedAt: null`을 반환한다. 모든 local 갱신이 성공하면
+  `localStateStatus: "updated"`를 반환한다.
+- GitHub branch 갱신 전에 head/base SHA가 바뀌거나 fast-forward가 거절되면
+  `409 Conflict`를 반환한다.
 - `review_files.current_status`, `file_review_decisions`, `review_submissions`를 변경하지 않는다.
 - GitHub merge API 호출, PR close, review submission은 이 endpoint의 범위가 아니다.
 
