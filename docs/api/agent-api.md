@@ -49,8 +49,10 @@ Workspace 상태 변경은 기존 도메인 service/API 계약을 따른다.
 
 ## 처리 구조
 
-Agent run 생성 후 App Server는 run을 저장하고 AI job을 enqueue한다. AI Worker는
-LLM을 호출해 intent, tool plan, 최종 답변 생성을 담당한다.
+Agent run 생성 transaction은 run과 planning-job outbox intent를 함께 저장한다. App Server는
+저장 직후 publisher를 깨워 SQS AI job 발행을 시도하고, 60초 recovery sweep으로 미발행 intent와
+stale publisher claim을 재시도한다. AI Worker는 LLM을 호출해 intent, tool plan, 최종 답변 생성을
+담당한다.
 
 domain tool 실행은 read-only tool과 write tool 모두 App Server가 담당한다. AI Worker는
 Calendar, Board, Meeting 도메인 service를 직접 호출하거나 도메인 DB를 직접 수정하지 않는다.
@@ -59,8 +61,9 @@ write tool은 App Server가 저장된 confirmation plan을 검증한 뒤 기존 
 ```text
 Frontend
   -> App Server Agent API
-    -> Agent run 저장
-    -> SQS AI job enqueue
+    -> Agent run + outbox intent 저장 (same transaction)
+    -> 즉시 publisher wake / 60초 recovery sweep
+    -> SQS AI job enqueue (at-least-once)
       -> AI Worker LLM planning/answer generation
       -> App Server internal execution handoff
     -> App Server domain tool execution
@@ -119,7 +122,8 @@ confirmation을 중복 생성하지 않는다. 이 내부 endpoint는 public API
 | `failed` | 실행 중 복구 불가능한 실패가 발생함 |
 | `cancelled` | 사용자가 confirmation을 거절했거나 confirmation 만료로 실행이 취소됨 |
 
-`planning`은 SQS enqueue 이후 AI Worker가 아직 처리하지 않은 queued 상태도 포함한다.
+`planning`은 outbox publisher가 SQS 발행을 재시도하는 상태와, SQS enqueue 이후 AI Worker가 아직
+처리하지 않은 queued 상태를 포함한다.
 
 ### AgentStep status
 
@@ -288,10 +292,15 @@ Request:
 - `prompt`는 trim 후 저장한다.
 - `timezone`이 없으면 `Asia/Seoul`을 저장한다.
 - `clientRequestId`가 있으면 같은 Workspace와 요청자가 같은 key로 만든 run을 중복 생성하지 않는다.
-- 같은 `clientRequestId`, `prompt`, `timezone`으로 재시도하면 기존 run을 반환하고 AI job을 새로 enqueue하지 않는다.
+- 같은 `clientRequestId`, `prompt`, `timezone`으로 재시도하면 기존 run을 반환하고 새 outbox intent를 만들지 않는다.
 - 같은 `clientRequestId`로 다른 `prompt` 또는 `timezone`을 보내면 `409 CLIENT_REQUEST_ID_CONFLICT`를 반환한다.
-- run은 `planning` 상태로 생성된다.
-- App Server는 Agent planning job을 AI Worker queue에 enqueue한다.
+- 새 run은 `planning` 상태와 pending outbox intent를 같은 transaction으로 생성한다.
+- App Server는 생성 직후 publisher를 깨워 Agent planning job 발행을 시도한다. SQS 발행 오류도 새 run의
+  `201 Created` 응답을 바꾸지 않으며 run은 `planning`을 유지한다.
+- publisher는 1, 2, 4, 8, 16분 backoff로 최대 5회 재시도한다. 재시도 소진 후에만 run을 safe `failed`로
+  전환하고 Agent log에 운영용 event를 남긴다.
+- SQS send 성공 뒤 publisher 상태 저장 전에 process가 종료되면 같은 job이 다시 발행될 수 있다. AI Worker의
+  run lock과 상태 전이가 중복 planner 실행을 막는다.
 - 클라이언트는 응답의 `run.id`로 상세 조회를 polling한다.
 
 응답:
@@ -323,7 +332,7 @@ Request:
 }
 ```
 
-Status code: 새 run 생성은 `202 Accepted`, 기존 run idempotent 반환은 `200 OK`
+Status code: 새 run 생성은 `201 Created`, 기존 run idempotent 반환은 `200 OK`
 
 주요 오류:
 
@@ -333,7 +342,7 @@ Status code: 새 run 생성은 `202 Accepted`, 기존 run idempotent 반환은 `
 | `401` | `UNAUTHORIZED` | 인증 없음 또는 만료 |
 | `403` | `FORBIDDEN` | Workspace 접근 불가 |
 | `409` | `CLIENT_REQUEST_ID_CONFLICT` | 같은 clientRequestId로 다른 요청을 보냄 |
-| `503` | `SERVICE_UNAVAILABLE` | Agent run storage 또는 AI job queue 사용 불가 |
+| `503` | `SERVICE_UNAVAILABLE` | Agent run storage 사용 불가 |
 
 ## Run 목록 조회
 
