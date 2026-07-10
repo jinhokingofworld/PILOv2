@@ -7,6 +7,7 @@ from app.agent_processor import (
     AgentRunContext,
     AgentRunProcessor,
     _agent_planner_schema,
+    normalize_agent_planner_decision,
     parse_agent_planner_output,
     parse_agent_run_job_payload,
 )
@@ -426,6 +427,98 @@ def test_processor_completes_missing_fields_with_final_answer() -> None:
         "일정 생성을 위해 시간이 필요합니다.",
         None,
     )
+
+
+def test_normalizer_blocks_calendar_update_without_event_id() -> None:
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=[
+                tool_snapshot(
+                    name="update_calendar_event",
+                    description="Calendar 일정 수정",
+                    riskLevel="medium",
+                    executionMode="confirmation_required",
+                    inputSchema={
+                        "type": "object",
+                        "required": ["eventId", "changes"],
+                        "additionalProperties": False,
+                        "properties": {},
+                    },
+                )
+            ]
+        )
+    )
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="update_calendar_event",
+            tool_input={"changes": {"startTime": "16:00"}},
+            requires_confirmation=True,
+        ),
+        job,
+    )
+
+    assert normalized.status == "needs_clarification"
+    assert normalized.risk_level is None
+    assert normalized.output_summary["missingFields"] == ["eventId"]
+    assert "수정할 일정" in normalized.final_answer
+
+
+def test_normalizer_blocks_meeting_detail_without_report_id() -> None:
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=[
+                tool_snapshot(
+                    name="summarize_meeting_report",
+                    description="MeetingReport 요약",
+                    inputSchema={
+                        "type": "object",
+                        "required": ["reportId"],
+                        "additionalProperties": False,
+                        "properties": {},
+                    },
+                )
+            ]
+        )
+    )
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="summarize_meeting_report",
+            tool_input={},
+        ),
+        job,
+    )
+
+    assert normalized.status == "unsupported"
+    assert normalized.risk_level is None
+    assert normalized.output_summary["unsupportedReason"] == "meeting_report_id_required"
+
+
+def test_normalizer_keeps_latest_meeting_report_list_candidate() -> None:
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=[
+                tool_snapshot(
+                    name="list_meeting_reports",
+                    description="최신 MeetingReport 목록 조회",
+                    inputSchema={
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {"limit": {"type": "integer", "minimum": 1, "maximum": 100}},
+                    },
+                )
+            ]
+        )
+    )
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="list_meeting_reports",
+            tool_input={"limit": 1},
+        ),
+        job,
+    )
+
+    assert normalized.status == "tool_candidate"
+    assert normalized.output_summary["input"] == {"limit": 1}
 
 
 def test_processor_marks_planning_failed_for_invalid_planner_output() -> None:

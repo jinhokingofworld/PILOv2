@@ -151,6 +151,19 @@ function errorCode(error) {
 }
 
 {
+  const { meetingService, registry } = createRegistry();
+  const tool = registry.getDefinition("list_meeting_reports");
+  const input = tool.validateInput({ limit: 1 });
+  const result = await tool.execute(context, input);
+
+  assert.equal(result.outputSummary.count, 1);
+  assert.deepEqual(meetingService.calls[0].query, {
+    status: undefined,
+    limit: 1
+  });
+}
+
+{
   const { registry } = createRegistry();
   const tool = registry.getDefinition("summarize_meeting_report");
   const input = tool.validateInput({
