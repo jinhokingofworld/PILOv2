@@ -10,6 +10,7 @@ const {
   BoardIssueCreateService
 } = require("../../dist/modules/board/board-issue-create.service.js");
 const { boardBadGateway } = require("../../dist/modules/board/board-api-error.js");
+const { forbidden } = require("../../dist/common/api-error.js");
 
 const currentUserId = "22222222-2222-4222-8222-222222222222";
 const workspaceId = "11111111-1111-4111-8111-111111111111";
@@ -452,7 +453,8 @@ class FakeGithubIssueWriteService {
 }
 
 class FakeGithubProjectV2WriteService {
-  constructor({ addFailures = 0, statusFailures = 0 } = {}) {
+  constructor({ addError = null, addFailures = 0, statusFailures = 0 } = {}) {
+    this.addError = addError;
     this.addFailures = addFailures;
     this.statusFailures = statusFailures;
     this.accessChecks = [];
@@ -466,6 +468,10 @@ class FakeGithubProjectV2WriteService {
 
   async addProjectV2ItemByContentId(input) {
     this.addCalls.push(input);
+    if (this.addError) {
+      throw this.addError;
+    }
+
     if (this.addFailures > 0) {
       this.addFailures -= 1;
       throw new Error("raw provider failure");
@@ -483,12 +489,18 @@ class FakeGithubProjectV2WriteService {
   }
 }
 
-function createOrchestrator({ addFailures = 0, statusFailures = 0, cacheFailures = 0 } = {}) {
+function createOrchestrator({
+  addError = null,
+  addFailures = 0,
+  statusFailures = 0,
+  cacheFailures = 0
+} = {}) {
   const createQueries = new FakeCreateQueries({ cacheFailures });
   const operationQueries = new FakeOperationQueries();
   const operationService = new BoardIssueCreateOperationService(operationQueries);
   const githubIssueWriteService = new FakeGithubIssueWriteService();
   const githubProjectV2WriteService = new FakeGithubProjectV2WriteService({
+    addError,
     addFailures,
     statusFailures
   });
@@ -559,6 +571,28 @@ function isBoardError(error, status, message) {
   assert.equal(subject.githubProjectV2WriteService.addCalls.length, 1);
   assert.equal(subject.githubProjectV2WriteService.statusCalls.length, 2);
   assert.equal(subject.createQueries.cacheTransactions, 1);
+}
+
+{
+  const permissionMessage = "GitHub ProjectV2 write permission is required";
+  const subject = createOrchestrator({
+    addError: forbidden(permissionMessage)
+  });
+
+  await assert.rejects(
+    () => createIssue(subject.service, "board-create-permission-key"),
+    (error) => isBoardError(error, 403, permissionMessage)
+  );
+
+  assert.equal(subject.operationQueries.operation.last_error_code, "FORBIDDEN");
+  assert.equal(
+    subject.operationQueries.operation.last_error_message,
+    permissionMessage
+  );
+  assert.doesNotMatch(
+    subject.operationQueries.operation.last_error_message,
+    /raw provider/
+  );
 }
 
 {

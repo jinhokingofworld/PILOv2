@@ -532,7 +532,7 @@ Request:
 - `columnId`는 필수 양의 정수 문자열이다.
 - `previousColumnId`는 선택 양의 정수 문자열이다.
 - `"columnId": "column_uuid"`처럼 UUID placeholder 형태의 값은 허용하지 않는다.
-- `"previousColumnId": "previous_column_uuid"`처럼 UUID placeholder 형태의 값은 허용하지 않는다.
+- `previousColumnId`에도 UUID placeholder 형태의 값은 허용하지 않는다.
 - 이 API는 ProjectV2 `Status` field value를 변경한다.
 - `columnId`는 같은 board에 속한 `board_columns.id`여야 한다.
 - `previousColumnId`가 있으면 서버는 현재 cache의 column과 비교해 stale move를 감지한다.
@@ -573,7 +573,7 @@ Request:
       "createdAt": "2026-07-06T01:06:00.000Z",
       "updatedAt": "2026-07-06T01:07:00.000Z"
     },
-    "previousColumnId": "previous_column_uuid"
+    "previousColumnId": "6"
   }
 }
 ```

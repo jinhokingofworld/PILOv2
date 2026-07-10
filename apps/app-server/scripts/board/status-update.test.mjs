@@ -10,6 +10,7 @@ const {
   BoardIssueStatusService
 } = require("../../dist/modules/board/board-issue-status.service.js");
 const { BoardService } = require("../../dist/modules/board/board.service.js");
+const { forbidden } = require("../../dist/common/api-error.js");
 
 const currentUserId = "22222222-2222-4222-8222-222222222222";
 const workspaceId = "11111111-1111-4111-8111-111111111111";
@@ -154,13 +155,18 @@ class FakeWorkspaceService {
 }
 
 class FakeGithubProjectV2WriteService {
-  constructor({ fail = false } = {}) {
+  constructor({ error = null, fail = false } = {}) {
+    this.error = error;
     this.fail = fail;
     this.calls = [];
   }
 
   async updateProjectV2ItemStatus(input) {
     this.calls.push(input);
+    if (this.error) {
+      throw this.error;
+    }
+
     if (this.fail) {
       throw new Error("raw provider failure");
     }
@@ -453,4 +459,41 @@ function issueRow(overrides = {}) {
   lockedTargetQueries.forEach((query) => {
     assert.match(query.text, /FOR UPDATE OF pi/i);
   });
+}
+
+{
+  const database = new FakeDatabase({
+    queryOneRows: [statusTargetRow()]
+  });
+  const permissionError = forbidden(
+    "GitHub ProjectV2 write permission is required"
+  );
+  const githubWriteService = new FakeGithubProjectV2WriteService({
+    error: permissionError
+  });
+  const { database: db, service } = createSubject(database, githubWriteService);
+
+  await assert.rejects(
+    () =>
+      service.updateBoardIssueStatus(
+        currentUserId,
+        workspaceId,
+        boardId,
+        issueId,
+        {
+          columnId: targetColumnId
+        }
+      ),
+    (error) => {
+      assert.equal(error.getStatus(), 403);
+      assert.equal(error.getResponse().error.code, "FORBIDDEN");
+      assert.equal(
+        error.getResponse().error.message,
+        "GitHub ProjectV2 write permission is required"
+      );
+      return true;
+    }
+  );
+
+  assert.equal(db.transactions.length, 1);
 }

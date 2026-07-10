@@ -20,6 +20,7 @@ function escapeRegExp(value) {
 const boardApi = await readSource("../../../../docs/api/board-api.md");
 const apiReadme = await readSource("../../../../docs/api/README.md");
 const mvpExcluded = section(boardApi, "## MVP 제외");
+const issueStatus = section(boardApi, "## Issue Status 변경");
 
 const writeEndpoints = [
   "PATCH /api/v1/workspaces/{workspaceId}/boards/{boardId}/issues/{issueId}/status",
@@ -36,10 +37,10 @@ assert.match(boardApi, /Board API는 GitHub를 source of truth로 사용한다/)
 assert.match(boardApi, /GitHub write 성공 후 로컬 `pilo_issues` cache를 갱신한다/);
 assert.match(boardApi, /실패 시 클라이언트는 GitHub 기준으로 rollback 또는 refresh한다/);
 
-assert.match(boardApi, /## Issue Status 변경/);
-assert.match(boardApi, /"columnId": "column_uuid"/);
-assert.match(boardApi, /"previousColumnId": "previous_column_uuid"/);
-assert.match(boardApi, /ProjectV2 `Status` field value를 변경한다/);
+assert.match(issueStatus, /"columnId": "column_uuid"/);
+assert.doesNotMatch(issueStatus, /previous_column_uuid/);
+assert.match(issueStatus, /성공 응답:[\s\S]*"previousColumnId": "6"/);
+assert.match(issueStatus, /ProjectV2 `Status` field value를 변경한다/);
 
 assert.match(boardApi, /## Issue 수정/);
 assert.match(boardApi, /"title": "OAuth callback state 바인딩 보강"/);

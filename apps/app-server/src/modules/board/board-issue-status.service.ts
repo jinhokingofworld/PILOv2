@@ -1,9 +1,10 @@
 import { Injectable } from "@nestjs/common";
-import { ApiError, badRequest, notFound } from "../../common/api-error";
+import { badRequest, notFound } from "../../common/api-error";
 import type { DatabaseTransaction } from "../../database/database.service";
 import { WorkspaceService } from "../workspace/workspace.service";
 import { GithubProjectV2WriteService } from "../github-integration/github-project-v2-write.service";
-import { boardBadGateway, boardConflict } from "./board-api-error";
+import { boardConflict } from "./board-api-error";
+import { rethrowBoardGithubWriteError } from "./board-github-write-error";
 import type { UpdateBoardIssueStatusRequest } from "./dto";
 import {
   BoardIssueStatusQueries,
@@ -186,11 +187,7 @@ export class BoardIssueStatusService {
         singleSelectOptionId: target.target_status_option_github_id
       });
     } catch (error) {
-      if (this.isGithubConnectionError(error)) {
-        throw error;
-      }
-
-      throw boardBadGateway("GitHub ProjectV2 status update failed");
+      rethrowBoardGithubWriteError(error, "GitHub ProjectV2 status update failed");
     }
   }
 
@@ -234,30 +231,6 @@ export class BoardIssueStatusService {
       boardId,
       issueId,
       columnId
-    );
-  }
-
-  private isGithubConnectionError(error: unknown): boolean {
-    if (!(error instanceof ApiError)) {
-      return false;
-    }
-
-    const response = error.getResponse();
-    if (
-      !response ||
-      typeof response !== "object" ||
-      Array.isArray(response) ||
-      !("error" in response)
-    ) {
-      return false;
-    }
-
-    const apiError = (response as { error?: { message?: unknown } }).error;
-    return (
-      typeof apiError?.message === "string" &&
-      (apiError.message.includes("GitHub OAuth connection") ||
-        apiError.message.includes("GitHub ProjectV2 OAuth") ||
-        apiError.message.includes("Current user not found"))
     );
   }
 

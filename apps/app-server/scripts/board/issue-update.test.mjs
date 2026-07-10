@@ -10,6 +10,7 @@ const {
   BoardIssueUpdateService
 } = require("../../dist/modules/board/board-issue-update.service.js");
 const { BoardService } = require("../../dist/modules/board/board.service.js");
+const { forbidden } = require("../../dist/common/api-error.js");
 
 const currentUserId = "22222222-2222-4222-8222-222222222222";
 const workspaceId = "11111111-1111-4111-8111-111111111111";
@@ -98,13 +99,18 @@ class FakeWorkspaceService {
 }
 
 class FakeGithubIssueWriteService {
-  constructor({ fail = false } = {}) {
+  constructor({ error = null, fail = false } = {}) {
+    this.error = error;
     this.fail = fail;
     this.calls = [];
   }
 
   async updateIssue(input) {
     this.calls.push(input);
+    if (this.error) {
+      throw this.error;
+    }
+
     if (this.fail) {
       throw new Error("raw provider failure");
     }
@@ -377,6 +383,44 @@ function githubIssuePayload(overrides = {}) {
       assert.equal(error.getStatus(), 502);
       assert.equal(error.getResponse().error.code, "BAD_GATEWAY");
       assert.equal(error.getResponse().error.message, "GitHub issue update failed");
+      return true;
+    }
+  );
+
+  assert.equal(db.transactions.length, 0);
+}
+
+{
+  const database = new FakeDatabase({
+    queryOneRows: [updateTargetRow()]
+  });
+  const permissionError = forbidden("GitHub Issue write permission is required");
+  const githubIssueWriteService = new FakeGithubIssueWriteService({
+    error: permissionError
+  });
+  const { database: db, service } = createSubject(
+    database,
+    githubIssueWriteService
+  );
+
+  await assert.rejects(
+    () =>
+      service.updateBoardIssue(
+        currentUserId,
+        workspaceId,
+        boardId,
+        issueId,
+        {
+          title: "Permission denied update"
+        }
+      ),
+    (error) => {
+      assert.equal(error.getStatus(), 403);
+      assert.equal(error.getResponse().error.code, "FORBIDDEN");
+      assert.equal(
+        error.getResponse().error.message,
+        "GitHub Issue write permission is required"
+      );
       return true;
     }
   );
