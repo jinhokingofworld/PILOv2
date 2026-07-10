@@ -408,8 +408,10 @@ GET /api/v1/workspaces/{workspaceId}/agent/runs/{runId}
 
 - 현재 사용자가 생성한 run만 조회할 수 있다.
 - run은 path의 `workspaceId`에 속해야 한다.
-- 이 조회는 tool execution을 시작하거나 Agent run, step, confirmation 상태를 변경하지 않는다.
-  confirmation 만료 정리는 별도 cleanup 정책으로 처리한다.
+- 이 조회는 새로운 tool execution을 시작하거나 기존 tool step의 실행 상태를 변경하지 않는다.
+- 다만 request-time lifecycle 정책에 따라 만료된 pending confirmation을 `expired`로 전환하고,
+  해당 `waiting_confirmation` run을 `cancelled`로 전환할 수 있다.
+- 같은 lifecycle에서 현재 사용자·Workspace의 30일 경과 run을 최대 100건 삭제할 수 있다.
 
 응답:
 
