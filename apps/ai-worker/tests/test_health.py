@@ -14,7 +14,6 @@ def test_worker_settings_defaults() -> None:
 
     assert settings.app_env
     assert settings.aws_region == "ap-northeast-2"
-    assert settings.concurrency >= 1
 
 
 def test_supported_jobs_match_mvp_scope() -> None:

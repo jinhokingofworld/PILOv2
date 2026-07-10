@@ -64,7 +64,6 @@ class RuntimeSettings:
     agent_execution_handoff_token: str
     agent_execution_handoff_timeout_seconds: int
     agent_stale_execution_sweep_interval_seconds: int
-    concurrency: int
     wait_time_seconds: int
     visibility_timeout_seconds: int
 
@@ -97,7 +96,6 @@ class RuntimeSettings:
                 "AGENT_STALE_EXECUTION_SWEEP_INTERVAL_SECONDS",
                 DEFAULT_AGENT_STALE_EXECUTION_SWEEP_INTERVAL_SECONDS,
             ),
-            concurrency=_positive_int_env("AI_WORKER_CONCURRENCY", 1),
             wait_time_seconds=_positive_int_env(
                 "AI_WORKER_SQS_WAIT_TIME_SECONDS",
                 DEFAULT_WAIT_TIME_SECONDS,
@@ -643,7 +641,7 @@ class SqsAiJobWorker:
         self.recover_stale_executions_if_due()
         response = self.sqs_client.receive_message(
             QueueUrl=self.settings.sqs_queue_url,
-            MaxNumberOfMessages=min(max(self.settings.concurrency, 1), 10),
+            MaxNumberOfMessages=1,
             WaitTimeSeconds=self.settings.wait_time_seconds,
             VisibilityTimeout=self.settings.visibility_timeout_seconds,
             AttributeNames=["ApproximateReceiveCount"],

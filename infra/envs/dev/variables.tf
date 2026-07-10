@@ -107,7 +107,13 @@ variable "realtime_server_desired_count" {
 }
 
 variable "ai_worker_desired_count" {
-  description = "Dev AI worker task count."
+  description = "Dev MeetingReport and legacy AI worker task count."
+  type        = number
+  default     = 1
+}
+
+variable "ai_agent_worker_desired_count" {
+  description = "Dev Agent worker task count."
   type        = number
   default     = 1
 }

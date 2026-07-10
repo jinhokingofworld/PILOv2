@@ -109,7 +109,6 @@ def runtime_settings() -> RuntimeSettings:
         agent_execution_handoff_token="test-handoff-token",
         agent_execution_handoff_timeout_seconds=10,
         agent_stale_execution_sweep_interval_seconds=60,
-        concurrency=2,
         wait_time_seconds=1,
         visibility_timeout_seconds=30,
     )
@@ -149,6 +148,7 @@ def test_sqs_worker_deletes_only_dispatcher_completed_messages() -> None:
         }
     ]
     assert sqs_client.receive_calls[0]["AttributeNames"] == ["ApproximateReceiveCount"]
+    assert sqs_client.receive_calls[0]["MaxNumberOfMessages"] == 1
 
 
 def test_sqs_worker_terminalizes_third_agent_infrastructure_failure() -> None:
