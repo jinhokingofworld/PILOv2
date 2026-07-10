@@ -51,7 +51,7 @@ export type SqlErdRelationShapeLayout = {
   startSide: RelationPortSide;
 };
 
-type RelationPortSide = "left" | "right";
+export type RelationPortSide = "left" | "right";
 
 type RelationAnchors = {
   endX: number;
@@ -498,7 +498,7 @@ export function getSqlErdRelationRoutePoints(
   ];
 }
 
-function getRelationCurvePathData(
+export function getSqlErdRelationCurvePathData(
   points: SqlErdRelationRoutePoint[],
   startSide: RelationPortSide,
   endSide: RelationPortSide
@@ -562,7 +562,7 @@ function getRelationCurveBoundsPoints(
   ];
 }
 
-function getRelationCurveGeometryPoints(
+export function getSqlErdRelationCurveGeometryPoints(
   points: SqlErdRelationRoutePoint[],
   startSide: RelationPortSide,
   endSide: RelationPortSide
@@ -739,7 +739,7 @@ function SqlErdRelationLine({ shape }: { shape: SqlErdRelationShape }) {
     () => editor.getOnlySelectedShape()?.id === shape.id,
     [editor, shape.id]
   );
-  const pathData = getRelationCurvePathData(
+  const pathData = getSqlErdRelationCurvePathData(
     shape.props.points,
     shape.props.startSide,
     shape.props.endSide
@@ -904,7 +904,7 @@ export class SqlErdRelationShapeUtil extends ShapeUtil<SqlErdRelationShape> {
 
   override getGeometry(shape: SqlErdRelationShape) {
     return new Polyline2d({
-      points: getRelationCurveGeometryPoints(
+      points: getSqlErdRelationCurveGeometryPoints(
         shape.props.points,
         shape.props.startSide,
         shape.props.endSide
@@ -926,7 +926,7 @@ export class SqlErdRelationShapeUtil extends ShapeUtil<SqlErdRelationShape> {
 
   override getIndicatorPath(shape: SqlErdRelationShape) {
     return new Path2D(
-      getRelationCurvePathData(
+      getSqlErdRelationCurvePathData(
         shape.props.points,
         shape.props.startSide,
         shape.props.endSide

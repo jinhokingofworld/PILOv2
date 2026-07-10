@@ -23,6 +23,8 @@ import { getTableDisplayName } from "@/features/sql-erd/utils/model";
 
 export const SQLTOERD_TABLE_SHAPE_TYPE = "sqltoerd_table";
 export const SQLTOERD_COLUMN_SELECT_EVENT = "sqltoerd:column-select";
+export const SQLTOERD_COLUMN_CONNECT_START_EVENT =
+  "sqltoerd:column-connect-start";
 export const SQLTOERD_TABLE_SELECT_EVENT = "sqltoerd:table-select";
 
 const TABLE_MIN_WIDTH = 260;
@@ -96,6 +98,15 @@ type SqlErdTableSelectEventDetail = {
   tableId: string;
 };
 
+export type SqlErdColumnConnectStartEventDetail = {
+  clientX: number;
+  clientY: number;
+  columnId: string;
+  pointerId: number;
+  side: "left" | "right";
+  tableId: string;
+};
+
 export function getSqlErdTableSelectionAtLocalPoint(
   shape: SqlErdTableShape,
   point: { x: number; y: number }
@@ -145,6 +156,16 @@ export function selectSqlErdColumn(detail: SqlErdColumnSelectEventDetail) {
 export function selectSqlErdTable(detail: SqlErdTableSelectEventDetail) {
   window.dispatchEvent(
     new CustomEvent(SQLTOERD_TABLE_SELECT_EVENT, {
+      detail
+    })
+  );
+}
+
+export function startSqlErdColumnConnection(
+  detail: SqlErdColumnConnectStartEventDetail
+) {
+  window.dispatchEvent(
+    new CustomEvent(SQLTOERD_COLUMN_CONNECT_START_EVENT, {
       detail
     })
   );
@@ -466,7 +487,7 @@ function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
       }}
     >
       <article
-        className={`overflow-hidden rounded-md border bg-white shadow-[0_12px_28px_rgba(15,23,42,0.12)] transition-[border-color,box-shadow] ${
+        className={`overflow-visible rounded-md border bg-white shadow-[0_12px_28px_rgba(15,23,42,0.12)] transition-[border-color,box-shadow] ${
           selectedState === "table"
             ? "border-blue-500 ring-2 ring-blue-200"
             : selectedState === "column"
@@ -483,7 +504,7 @@ function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
         }}
       >
         <header
-          className="flex h-[54px] cursor-grab items-center border-b border-slate-200 bg-slate-100 px-6 outline-none transition-colors active:cursor-grabbing focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-inset"
+          className="flex h-[54px] cursor-grab items-center rounded-t-md border-b border-slate-200 bg-slate-100 px-6 outline-none transition-colors active:cursor-grabbing focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-inset"
           data-sqltoerd-table-header
           onClick={(event) => {
             event.stopPropagation();
@@ -507,8 +528,9 @@ function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
             return (
               <div
                 aria-pressed={isSelected}
-                className="group relative grid h-[42px] cursor-pointer items-center px-6 font-mono text-[20px] leading-none outline-none transition-colors focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-inset"
+                className="group relative grid h-[42px] cursor-pointer items-center px-6 font-mono text-[20px] leading-none outline-none transition-colors last:rounded-b-md focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-inset"
                 data-sqltoerd-column-id={column.id}
+                data-sqltoerd-table-id={shape.props.tableId}
                 data-sqltoerd-column-highlighted={
                   isHighlighted ? "true" : undefined
                 }
@@ -541,20 +563,60 @@ function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
                 }}
                 tabIndex={0}
               >
-                <span
-                  aria-hidden="true"
-                  className={`pointer-events-none absolute left-[-4px] top-1/2 size-2 -translate-y-1/2 rounded-full border border-blue-400 bg-white shadow-sm transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100 ${
-                    isSelected || isHighlighted ? "opacity-100" : "opacity-0"
-                  }`}
-                  data-sqltoerd-column-port="left"
-                />
-                <span
-                  aria-hidden="true"
-                  className={`pointer-events-none absolute right-[-4px] top-1/2 size-2 -translate-y-1/2 rounded-full border border-blue-400 bg-white shadow-sm transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100 ${
-                    isSelected || isHighlighted ? "opacity-100" : "opacity-0"
-                  }`}
-                  data-sqltoerd-column-port="right"
-                />
+                {(["left", "right"] as const).map((side) => {
+                  const isPortActive =
+                    isSelected || isHighlighted || selectedState === "table";
+
+                  return (
+                    <button
+                      aria-hidden="true"
+                      className={`absolute top-1/2 z-10 flex size-5 -translate-y-1/2 items-center justify-center rounded-full transition-opacity ${
+                        side === "left" ? "left-[-10px]" : "right-[-10px]"
+                      } ${
+                        isPortActive
+                          ? `pointer-events-auto ${
+                              isSelected || isHighlighted
+                                ? "opacity-100"
+                                : "opacity-45"
+                            }`
+                          : "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-visible:pointer-events-auto group-focus-visible:opacity-100"
+                      }`}
+                      data-sqltoerd-column-id={column.id}
+                      data-sqltoerd-column-port={side}
+                      data-sqltoerd-column-port-hit
+                      data-sqltoerd-table-id={shape.props.tableId}
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                      }}
+                      onPointerDown={(event) => {
+                        if (event.button !== 0 || !event.isPrimary) {
+                          return;
+                        }
+
+                        event.preventDefault();
+                        event.stopPropagation();
+                        columnPointerStartRef.current = null;
+                        startSqlErdColumnConnection({
+                          clientX: event.clientX,
+                          clientY: event.clientY,
+                          columnId: column.id,
+                          pointerId: event.pointerId,
+                          side,
+                          tableId: shape.props.tableId
+                        });
+                      }}
+                      title="드래그하여 SQL에 반영되지 않는 설명 관계 추가"
+                      tabIndex={-1}
+                      type="button"
+                    >
+                      <span
+                        aria-hidden="true"
+                        className="size-2 rounded-full border border-blue-500 bg-white shadow-sm"
+                      />
+                    </button>
+                  );
+                })}
                 <div className="flex min-w-0 items-center gap-1">
                   {badges.map((badge) => (
                     <span
