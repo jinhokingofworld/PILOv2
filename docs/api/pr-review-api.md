@@ -191,6 +191,12 @@ DELETE /api/v1/workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}
 }
 ```
 
+`summary` 조회 시 저장된 `conflictStatus`가 `checking` 또는 `unknown`이면 GitHub의
+최신 conflict 상태를 다시 확인한다. `checking`은 짧은 간격으로 제한된 횟수만
+재확인하며, 같은 session `headSha`가 유지되는 경우에만 최신 상태와 확인 시각을
+`pr_review_sessions`에 저장한다. 재확인에 실패하면 기존 상태를 유지해 요약 조회 자체는
+실패시키지 않는다.
+
 ## 전체 리뷰 결과 조회
 
 `result` endpoint는 GitHub Review 제출 모달에서 파일별 판단 결과를 요약할 수 있는
@@ -687,9 +693,13 @@ POST /api/v1/workspaces/{workspaceId}/github/review-files/{reviewFileId}/conflic
   `Resolve conflict in {filePath}` 형식으로 생성한다.
 - push 직전에 원격 PR head SHA와 base branch SHA가 분석 시점과 같은지 확인하고, force 없이
   PR head branch를 갱신한다. 임시 working tree는 성공/실패와 관계없이 삭제한다.
-- apply 성공 후 GitHub PR head SHA와 conflict 상태를 다시 조회한다.
+- apply 성공 후 GitHub PR head SHA와 conflict 상태를 다시 조회한다. GitHub가 새 merge
+  commit의 mergeability를 계산 중이라 `checking`을 반환하면 짧은 간격으로 제한된 횟수만
+  재확인한다.
 - apply 성공 후 `pr_review_sessions.head_sha`, `conflict_status`, `conflict_checked_at`은
   새 PR head 기준으로 갱신한다. 이 갱신은 PILO apply commit 성공 후에만 허용한다.
+- 제한된 재확인 뒤에도 `checking`이면 해당 상태를 응답하고 저장한다. PR Review room은
+  `summary`를 제한적으로 다시 조회하며 GitHub 계산이 끝나면 Merge 활성화 상태를 갱신한다.
 - GitHub PR head branch 갱신은 성공했지만 conflict 상태 재조회, PILO의 PR cache 또는
   review session 갱신이 실패하면
   endpoint는 GitHub 성공을 실패로 응답하지 않는다. `status: "applied"`와
@@ -870,7 +880,10 @@ POST /api/v1/workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}/m
 - 현재 사용자는 review session이 속한 Workspace에 접근할 수 있어야 한다.
 - 요청 body는 `confirm: true`와 `expectedHeadSha`를 포함해야 한다.
 - review session status가 `submitted`여야 한다. GitHub Review 제출 전 merge는 허용하지 않는다.
-- `conflictStatus`가 `clean`이어야 한다.
+- Merge 실행 직전에 GitHub의 최신 conflict 상태를 제한적으로 재확인하고 같은 session
+  `headSha`가 유지되는 경우 `pr_review_sessions`에 저장한다.
+- 재확인한 `conflictStatus`가 `clean`이어야 한다. 오래된 local `checking` 값만으로 정상 PR을
+  차단하거나, 오래된 local `clean` 값만으로 Merge를 허용하지 않는다.
 - review file 판단 완료 여부는 merge hard guard가 아니다. `not_reviewed` 파일이
   남아 있어도 사용자가 확인하면 merge를 시도할 수 있다.
 - review session `headSha`와 요청 `expectedHeadSha`가 다르면 stale session으로 보고 `409 Conflict`를 반환한다.

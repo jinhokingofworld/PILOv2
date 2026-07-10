@@ -87,6 +87,8 @@ type LoadCanvasDataOptions = {
 const DETAIL_PANEL_MIN_WIDTH = 360;
 const DETAIL_PANEL_MAX_WIDTH = 620;
 const DETAIL_PANEL_DEFAULT_WIDTH = 440;
+const CONFLICT_STATUS_POLL_INTERVAL_MS = 2_000;
+const CONFLICT_STATUS_POLL_MAX_ATTEMPTS = 5;
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
@@ -293,8 +295,7 @@ export function PrReviewCanvasShell({
         apiClient.getReviewSessionSummary(workspaceId, session.id),
         apiClient.getReviewSessionCanvas(workspaceId, session.id)
       ]);
-      const nextConflictStatus =
-        nextCanvas.conflictStatus ?? nextSummary.conflictStatus;
+      const nextConflictStatus = nextSummary.conflictStatus;
       let nextConflictAnalysis: PrReviewConflictAnalysis | null = null;
       let nextConflictAnalysisStatus: ConflictAnalysisLoadStatus = "ready";
       let nextConflictAnalysisError: string | null = null;
@@ -450,7 +451,7 @@ export function PrReviewCanvasShell({
   const totalFileCount =
     canvas?.totalFileCount ?? summary?.totalFileCount ?? session.totalFileCount;
   const conflictStatus =
-    canvas?.conflictStatus ?? summary?.conflictStatus ?? session.conflictStatus;
+    summary?.conflictStatus ?? canvas?.conflictStatus ?? session.conflictStatus;
   const contentConflictByFileId = useMemo(
     () =>
       new Map(
@@ -491,6 +492,35 @@ export function PrReviewCanvasShell({
   const progressLabel = `${formatNumber(reviewedCount)} / ${formatNumber(
     totalFileCount
   )}`;
+
+  useEffect(() => {
+    if (loadStatus !== "ready" || conflictStatus !== "checking") {
+      return;
+    }
+
+    let attemptCount = 0;
+    let refreshInFlight = false;
+    const intervalId = window.setInterval(() => {
+      if (refreshInFlight) {
+        return;
+      }
+
+      if (attemptCount >= CONFLICT_STATUS_POLL_MAX_ATTEMPTS) {
+        window.clearInterval(intervalId);
+        return;
+      }
+
+      attemptCount += 1;
+      refreshInFlight = true;
+      void loadCanvasData({ quiet: true }).finally(() => {
+        refreshInFlight = false;
+      });
+    }, CONFLICT_STATUS_POLL_INTERVAL_MS);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [conflictStatus, loadCanvasData, loadStatus]);
 
   async function createNewReviewSession() {
     const pullRequestId = summary?.pullRequestId ?? session.pullRequestId;
@@ -554,6 +584,7 @@ export function PrReviewCanvasShell({
     } catch (error) {
       setMergeStatus("error");
       setMergeError(getMergeErrorMessage(error));
+      void loadCanvasData({ quiet: true });
     }
   }
 
