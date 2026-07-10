@@ -1,9 +1,9 @@
 import { Injectable } from "@nestjs/common";
-import { ApiError, badRequest, notFound } from "../../common/api-error";
+import { badRequest, notFound } from "../../common/api-error";
 import { GithubIssueWriteService } from "../github-integration/github-issue-write.service";
 import { GithubProjectV2WriteService } from "../github-integration/github-project-v2-write.service";
 import { WorkspaceService } from "../workspace/workspace.service";
-import { boardBadGateway } from "./board-api-error";
+import { rethrowBoardGithubWriteError } from "./board-github-write-error";
 import {
   BoardIssueCreateOperationService,
   type BoardIssueCreateAttempt
@@ -258,11 +258,7 @@ export class BoardIssueCreateService {
         title: input.title
       });
     } catch (error) {
-      if (this.isGithubConnectionError(error)) {
-        throw error;
-      }
-
-      throw boardBadGateway("GitHub issue create failed");
+      rethrowBoardGithubWriteError(error, "GitHub issue create failed");
     }
   }
 
@@ -280,11 +276,7 @@ export class BoardIssueCreateService {
         projectNodeId: target.github_project_node_id
       });
     } catch (error) {
-      if (this.isGithubConnectionError(error)) {
-        throw error;
-      }
-
-      throw boardBadGateway("GitHub ProjectV2 item add failed");
+      rethrowBoardGithubWriteError(error, "GitHub ProjectV2 item add failed");
     }
   }
 
@@ -305,11 +297,7 @@ export class BoardIssueCreateService {
         singleSelectOptionId: target.target_status_option_github_id
       });
     } catch (error) {
-      if (this.isGithubConnectionError(error)) {
-        throw error;
-      }
-
-      throw boardBadGateway("GitHub ProjectV2 status update failed");
+      rethrowBoardGithubWriteError(error, "GitHub ProjectV2 status update failed");
     }
   }
 
@@ -411,30 +399,6 @@ export class BoardIssueCreateService {
     if (target.target_status_option_id && !target.target_status_option_github_id) {
       throw badRequest("Board column is missing GitHub Status option metadata");
     }
-  }
-
-  private isGithubConnectionError(error: unknown): boolean {
-    if (!(error instanceof ApiError)) {
-      return false;
-    }
-
-    const response = error.getResponse();
-    if (
-      !response ||
-      typeof response !== "object" ||
-      Array.isArray(response) ||
-      !("error" in response)
-    ) {
-      return false;
-    }
-
-    const apiError = (response as { error?: { message?: unknown } }).error;
-    return (
-      typeof apiError?.message === "string" &&
-      (apiError.message.includes("GitHub OAuth connection") ||
-        apiError.message.includes("GitHub ProjectV2 OAuth") ||
-        apiError.message.includes("Current user not found"))
-    );
   }
 
   private mapBoardIssue(row: BoardIssueCreateIssueRow): BoardIssueCardPayload {

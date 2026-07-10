@@ -1,8 +1,8 @@
 import { Injectable } from "@nestjs/common";
-import { ApiError, badRequest, notFound } from "../../common/api-error";
+import { badRequest, notFound } from "../../common/api-error";
 import { GithubIssueWriteService } from "../github-integration/github-issue-write.service";
 import { WorkspaceService } from "../workspace/workspace.service";
-import { boardBadGateway } from "./board-api-error";
+import { rethrowBoardGithubWriteError } from "./board-github-write-error";
 import type { UpdateBoardIssueRequest } from "./dto";
 import {
   BoardIssueUpdateQueries,
@@ -123,11 +123,7 @@ export class BoardIssueUpdateService {
         title: input.title
       });
     } catch (error) {
-      if (this.isGithubConnectionError(error)) {
-        throw error;
-      }
-
-      throw boardBadGateway("GitHub issue update failed");
+      rethrowBoardGithubWriteError(error, "GitHub issue update failed");
     }
   }
 
@@ -249,30 +245,6 @@ export class BoardIssueUpdateService {
     if (issueNumber === null) {
       throw badRequest("Board issue is missing GitHub issue metadata");
     }
-  }
-
-  private isGithubConnectionError(error: unknown): boolean {
-    if (!(error instanceof ApiError)) {
-      return false;
-    }
-
-    const response = error.getResponse();
-    if (
-      !response ||
-      typeof response !== "object" ||
-      Array.isArray(response) ||
-      !("error" in response)
-    ) {
-      return false;
-    }
-
-    const apiError = (response as { error?: { message?: unknown } }).error;
-    return (
-      typeof apiError?.message === "string" &&
-      (apiError.message.includes("GitHub OAuth connection") ||
-        apiError.message.includes("GitHub ProjectV2 OAuth") ||
-        apiError.message.includes("Current user not found"))
-    );
   }
 
   private mapBoardIssueDetail(

@@ -175,6 +175,153 @@ function projectNode(overrides = {}) {
 
 {
   const originalFetch = globalThis.fetch;
+  const rawProviderMessage = "provider permission details should not leak";
+  globalThis.fetch = async () => ({
+    ok: false,
+    status: 403,
+    async json() {
+      return { message: rawProviderMessage };
+    }
+  });
+
+  try {
+    await assert.rejects(
+      () =>
+        new GithubAppClient().createRepositoryIssue({
+          owner: "Developer-EJ",
+          repo: "PILO",
+          title: "Permission test issue",
+          userAccessToken: "user-oauth-token"
+        }),
+      (error) => {
+        assert.equal(error?.getStatus?.(), 403);
+        assert.equal(error?.response?.error?.code, "FORBIDDEN");
+        assert.equal(
+          error?.response?.error?.message,
+          "GitHub Issue write permission is required"
+        );
+        assert.doesNotMatch(JSON.stringify(error?.response), /provider permission/);
+        return true;
+      }
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
+{
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({
+    ok: false,
+    status: 403,
+    async json() {
+      return { message: "provider permission details should not leak" };
+    }
+  });
+
+  try {
+    await assert.rejects(
+      () =>
+        new GithubAppClient().updateRepositoryIssue({
+          issueNumber: 544,
+          owner: "Developer-EJ",
+          repo: "PILO",
+          title: "Updated title",
+          userAccessToken: "user-oauth-token"
+        }),
+      (error) => {
+        assert.equal(error?.getStatus?.(), 403);
+        assert.equal(error?.response?.error?.code, "FORBIDDEN");
+        assert.equal(
+          error?.response?.error?.message,
+          "GitHub Issue write permission is required"
+        );
+        assert.doesNotMatch(JSON.stringify(error?.response), /provider permission/);
+        return true;
+      }
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
+{
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({
+    ok: false,
+    status: 403,
+    async json() {
+      return { message: "provider permission details should not leak" };
+    }
+  });
+
+  try {
+    await assert.rejects(
+      () =>
+        new GithubAppClient().updateProjectV2ItemStatus({
+          fieldNodeId: "PVTSSF_lADOExample",
+          itemNodeId: "PVTI_lADOExample",
+          projectNodeId: "PVT_kwDOExample",
+          singleSelectOptionId: "option-todo",
+          userAccessToken: "user-oauth-token"
+        }),
+      (error) => {
+        assert.equal(error?.getStatus?.(), 403);
+        assert.equal(error?.response?.error?.code, "FORBIDDEN");
+        assert.equal(
+          error?.response?.error?.message,
+          "GitHub ProjectV2 write permission is required"
+        );
+        assert.doesNotMatch(JSON.stringify(error?.response), /provider permission/);
+        return true;
+      }
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
+{
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    async json() {
+      return {
+        errors: [{ message: "Resource not accessible by integration" }]
+      };
+    }
+  });
+
+  try {
+    await assert.rejects(
+      () =>
+        new GithubAppClient().addProjectV2ItemByContentId({
+          contentNodeId: "I_kwDOExample",
+          projectNodeId: "PVT_kwDOExample",
+          userAccessToken: "user-oauth-token"
+        }),
+      (error) => {
+        assert.equal(error?.getStatus?.(), 403);
+        assert.equal(error?.response?.error?.code, "FORBIDDEN");
+        assert.equal(
+          error?.response?.error?.message,
+          "GitHub ProjectV2 write permission is required"
+        );
+        assert.doesNotMatch(
+          JSON.stringify(error?.response),
+          /Resource not accessible/
+        );
+        return true;
+      }
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
+{
+  const originalFetch = globalThis.fetch;
   const privateKeyPem = createPrivateKeyPem();
   let graphqlRequestCount = 0;
 

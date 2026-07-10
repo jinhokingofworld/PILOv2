@@ -1,6 +1,6 @@
 import { createSign } from "node:crypto";
 import { Injectable } from "@nestjs/common";
-import { badRequest } from "../../common/api-error";
+import { badRequest, forbidden } from "../../common/api-error";
 import { GITHUB_API_VERSION } from "./github-api.constants";
 
 export interface GithubAppInstallationLookupRequest {
@@ -388,6 +388,7 @@ interface GithubProjectV2GraphqlAuth {
 interface GithubProjectV2GraphqlErrorContext {
   tokenSource: GithubProjectV2GraphqlTokenSource;
   accountType?: "User" | "Organization";
+  writePermissionMessage?: string;
 }
 
 const GITHUB_SYNC_PER_PAGE = 100;
@@ -404,6 +405,10 @@ const GITHUB_PROJECT_V2_ORGANIZATION_INSTALLATION_ACCESS_ERROR_MESSAGE =
   "GitHub App installation token cannot access organization ProjectV2";
 const GITHUB_PROJECT_V2_USER_ACCESS_ERROR_MESSAGE =
   "GitHub ProjectV2 OAuth token cannot access this ProjectV2";
+const GITHUB_ISSUE_WRITE_PERMISSION_ERROR_MESSAGE =
+  "GitHub Issue write permission is required";
+const GITHUB_PROJECT_V2_WRITE_PERMISSION_ERROR_MESSAGE =
+  "GitHub ProjectV2 write permission is required";
 const GITHUB_PROJECT_V2_DISCOVERY_FRAGMENT = `
   fragment PiloProjectV2DiscoveryFields on ProjectV2 {
     id
@@ -1081,6 +1086,10 @@ export class GithubAppClient {
       throw badRequest("GitHub issue update failed");
     }
 
+    if (response.status === 403) {
+      throw forbidden(GITHUB_ISSUE_WRITE_PERMISSION_ERROR_MESSAGE);
+    }
+
     if (!response.ok) {
       throw badRequest("GitHub issue update failed");
     }
@@ -1124,6 +1133,10 @@ export class GithubAppClient {
       );
     } catch {
       throw badRequest("GitHub issue create failed");
+    }
+
+    if (response.status === 403) {
+      throw forbidden(GITHUB_ISSUE_WRITE_PERMISSION_ERROR_MESSAGE);
     }
 
     if (!response.ok) {
@@ -1384,7 +1397,8 @@ export class GithubAppClient {
       variables,
       errorMessage,
       {
-        tokenSource: "user"
+        tokenSource: "user",
+        writePermissionMessage: GITHUB_PROJECT_V2_WRITE_PERMISSION_ERROR_MESSAGE
       }
     );
 
@@ -1408,7 +1422,8 @@ export class GithubAppClient {
       },
       errorMessage,
       {
-        tokenSource: "user"
+        tokenSource: "user",
+        writePermissionMessage: GITHUB_PROJECT_V2_WRITE_PERMISSION_ERROR_MESSAGE
       }
     );
 
@@ -1695,6 +1710,10 @@ export class GithubAppClient {
       throw badRequest(errorMessage);
     }
 
+    if (response.status === 403 && context?.writePermissionMessage) {
+      throw forbidden(context.writePermissionMessage);
+    }
+
     if (!response.ok) {
       throw badRequest(
         this.mapGraphqlHttpErrorMessage(response.status, errorMessage, context)
@@ -1704,6 +1723,13 @@ export class GithubAppClient {
     const payload = await this.readJson(response, errorMessage);
     const record = this.toObject(payload);
     if (Array.isArray(record.errors) && record.errors.length > 0) {
+      if (
+        context?.writePermissionMessage &&
+        record.errors.some((error) => this.isProjectV2WritePermissionError(error))
+      ) {
+        throw forbidden(context.writePermissionMessage);
+      }
+
       throw badRequest(
         this.mapGraphqlErrorMessage(record.errors, errorMessage, context)
       );
@@ -1934,6 +1960,23 @@ export class GithubAppClient {
       message.includes("permission") ||
       message.includes("could not resolve to a user") ||
       message.includes("could not resolve to an organization")
+    );
+  }
+
+  private isProjectV2WritePermissionError(error: unknown): boolean {
+    if (
+      !this.isRecord(error) ||
+      this.isProjectV2ScopeError(error) ||
+      this.isProjectV2OwnerResolutionError(error)
+    ) {
+      return false;
+    }
+
+    const message = this.toNullableString(error.message)?.toLowerCase();
+    return Boolean(
+      message &&
+        (message.includes("resource not accessible") ||
+          message.includes("permission"))
     );
   }
 
