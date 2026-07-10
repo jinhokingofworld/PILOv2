@@ -192,6 +192,10 @@ export type CreateBoardIssueInput = {
   columnId: string;
 };
 
+export type CreateBoardIssueCommand = CreateBoardIssueInput & {
+  idempotencyKey: string;
+};
+
 export type CreateBoardIssuePayload = {
   issue: BoardIssueCardPayload;
 };

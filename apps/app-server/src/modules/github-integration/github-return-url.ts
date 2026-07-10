@@ -1,5 +1,7 @@
 import { badRequest } from "../../common/api-error";
 
+const ENCODED_PATH_SEPARATOR_PATTERN = /%(?:2f|5c)/i;
+
 export function validateGithubCallbackReturnUrl(
   value: unknown,
   frontendUrl: string
@@ -12,17 +14,19 @@ export function validateGithubCallbackReturnUrl(
     throw badRequest("Invalid returnUrl");
   }
 
-  if (value.startsWith("/") && !value.startsWith("//")) {
-    return new URL(value, frontendUrl).toString();
-  }
-
   try {
-    const url = new URL(value);
+    const url =
+      value.startsWith("/") && !value.startsWith("//")
+        ? new URL(value, frontendUrl)
+        : new URL(value);
     if (url.protocol !== "http:" && url.protocol !== "https:") {
       throw new Error("Unsupported returnUrl protocol");
     }
     if (url.origin !== frontendUrl) {
       throw new Error("Unsupported returnUrl origin");
+    }
+    if (ENCODED_PATH_SEPARATOR_PATTERN.test(url.pathname)) {
+      throw new Error("Unsupported encoded returnUrl path separator");
     }
 
     return url.toString();

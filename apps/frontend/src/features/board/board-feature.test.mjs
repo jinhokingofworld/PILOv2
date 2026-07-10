@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
+await import("./board-issue-idempotency.test.mjs");
+
 async function readFeatureFile(path) {
   return readFile(new URL(path, import.meta.url), "utf8");
 }

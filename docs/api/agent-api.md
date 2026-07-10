@@ -318,7 +318,7 @@ Status code: 새 run 생성은 `202 Accepted`, 기존 run idempotent 반환은 `
 | `401` | `UNAUTHORIZED` | 인증 없음 또는 만료 |
 | `403` | `FORBIDDEN` | Workspace 접근 불가 |
 | `409` | `CLIENT_REQUEST_ID_CONFLICT` | 같은 clientRequestId로 다른 요청을 보냄 |
-| `503` | `SERVICE_UNAVAILABLE` | AI job queue enqueue 실패 |
+| `503` | `SERVICE_UNAVAILABLE` | Agent run storage 또는 AI job queue 사용 불가 |
 
 ## Run 목록 조회
 

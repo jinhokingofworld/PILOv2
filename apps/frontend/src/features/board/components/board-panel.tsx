@@ -17,7 +17,8 @@ import { BoardKanban } from "@/features/board/components/board-kanban";
 import { useBoardWorkspaceData } from "@/features/board/hooks/use-board-workspace-data";
 import type {
   BoardIssueCardPayload,
-  BoardIssueState
+  BoardIssueState,
+  CreateBoardIssueCommand
 } from "@/features/board/types";
 import { formatBoardDateTime } from "@/features/board/utils/board-format";
 import { useAuthSession } from "@/features/auth";
@@ -292,11 +293,9 @@ export function BoardPanel() {
     setSelectedIssueId(issue.id);
   }
 
-  async function handleCreateIssue(input: {
-    body?: string;
-    columnId: string;
-    title: string;
-  }): Promise<boolean> {
+  async function handleCreateIssue(
+    input: CreateBoardIssueCommand
+  ): Promise<boolean> {
     setIsCreatingIssue(true);
     setIssueCreateError(null);
 

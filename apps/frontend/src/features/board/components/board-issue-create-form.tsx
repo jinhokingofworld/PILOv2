@@ -7,8 +7,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type {
   BoardColumnPayload,
-  CreateBoardIssueInput
+  CreateBoardIssueCommand
 } from "@/features/board/types";
+import { resolveBoardIssueCreateIdempotencyKey } from "@/features/board/utils/board-issue-create-idempotency";
 
 type BoardIssueCreateFormProps = {
   columns: BoardColumnPayload[];
@@ -16,7 +17,7 @@ type BoardIssueCreateFormProps = {
   error?: string | null;
   isCreating?: boolean;
   onCreateIssue: (
-    input: CreateBoardIssueInput
+    input: CreateBoardIssueCommand
   ) => Promise<boolean | void> | boolean | void;
 };
 
@@ -33,18 +34,36 @@ export function BoardIssueCreateForm({
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [columnId, setColumnId] = useState("");
+  const [idempotencyKey, setIdempotencyKey] = useState<string | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!columns.length) {
       setColumnId("");
+      setIdempotencyKey(null);
       return;
     }
 
     if (!columnId || !columns.some((column) => column.id === columnId)) {
       setColumnId(columns[0].id);
+      setIdempotencyKey(null);
     }
   }, [columnId, columns]);
+
+  function handleTitleChange(value: string) {
+    setTitle(value);
+    setIdempotencyKey(null);
+  }
+
+  function handleBodyChange(value: string) {
+    setBody(value);
+    setIdempotencyKey(null);
+  }
+
+  function handleColumnChange(value: string) {
+    setColumnId(value);
+    setIdempotencyKey(null);
+  }
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -62,9 +81,15 @@ export function BoardIssueCreateForm({
 
     setValidationError(null);
 
+    const nextIdempotencyKey = resolveBoardIssueCreateIdempotencyKey(
+      idempotencyKey
+    );
+    setIdempotencyKey(nextIdempotencyKey);
+
     const created = await onCreateIssue({
       body,
       columnId,
+      idempotencyKey: nextIdempotencyKey,
       title: trimmedTitle
     });
 
@@ -74,6 +99,7 @@ export function BoardIssueCreateForm({
 
     setTitle("");
     setBody("");
+    setIdempotencyKey(null);
   }
 
   const submitDisabled = disabled || isCreating || !columns.length;
@@ -90,7 +116,7 @@ export function BoardIssueCreateForm({
           disabled={submitDisabled}
           placeholder="새 이슈 제목"
           value={title}
-          onChange={(event) => setTitle(event.currentTarget.value)}
+          onChange={(event) => handleTitleChange(event.currentTarget.value)}
         />
       </label>
 
@@ -101,7 +127,7 @@ export function BoardIssueCreateForm({
           disabled={submitDisabled}
           placeholder="본문 markdown"
           value={body}
-          onChange={(event) => setBody(event.currentTarget.value)}
+          onChange={(event) => handleBodyChange(event.currentTarget.value)}
         />
       </label>
 
@@ -111,7 +137,7 @@ export function BoardIssueCreateForm({
           className={selectClassName}
           disabled={submitDisabled}
           value={columnId}
-          onChange={(event) => setColumnId(event.currentTarget.value)}
+          onChange={(event) => handleColumnChange(event.currentTarget.value)}
         >
           <option value="">컬럼 선택</option>
           {columns.map((column) => (

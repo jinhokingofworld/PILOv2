@@ -8,7 +8,7 @@ import type {
   BoardPayload,
   BoardRelatedPullRequestPayload,
   CreateBoardInput,
-  CreateBoardIssueInput,
+  CreateBoardIssueCommand,
   CreateBoardIssuePayload,
   ListBoardIssuesQuery,
   ListBoardsQuery,
@@ -317,11 +317,16 @@ export function createBoardApiClient({
     async createBoardIssue(
       workspaceId: string,
       boardId: string,
-      body: CreateBoardIssueInput
+      body: CreateBoardIssueCommand
     ) {
+      const { idempotencyKey, ...requestBody } = body;
+
       return requestBoardData<CreateBoardIssuePayload>(
         `${boardPath(workspaceId, boardId)}/issues`,
-        withJsonBody(body, { method: "POST" }),
+        withJsonBody(requestBody, {
+          headers: { "Idempotency-Key": idempotencyKey },
+          method: "POST"
+        }),
         requestOptions
       );
     },

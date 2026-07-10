@@ -650,6 +650,8 @@ Status code: `200 OK`
 
 ```http
 POST /api/v1/workspaces/{workspaceId}/boards/{boardId}/issues
+Idempotency-Key: 550e8400-e29b-41d4-a716-446655440000
+Content-Type: application/json
 ```
 
 Request:
@@ -665,6 +667,13 @@ Request:
 규칙:
 
 - Request body는 object여야 한다.
+- `Idempotency-Key`는 필수 HTTP header다. trim 후 UTF-8 기준 1~128 bytes여야 하며 누락되거나 형식이 잘못되면 `400 BAD_REQUEST`를 반환한다.
+- operation 범위는 같은 Workspace, 현재 사용자, `Idempotency-Key` 조합이다.
+- 요청 동일성은 `boardId`, `columnId`, trim한 `title`, `body`를 정규화한 hash로 판단한다.
+- 같은 key와 같은 요청이 이미 성공했으면 기존 성공 응답과 `201 Created`를 반환하며 GitHub write를 다시 호출하지 않는다.
+- 같은 key와 다른 요청이면 `409 CONFLICT`를 반환한다.
+- 같은 key의 operation이 유효한 lease를 가진 `processing` 상태면 `409 CONFLICT`를 반환한다.
+- `retryable` 상태이거나 `processing` lease가 만료된 operation은 마지막 완료 checkpoint부터 이어서 처리한다.
 - 서버는 Board가 참조하는 repository와 ProjectV2를 사용한다.
 - `title`은 필수 문자열이며 trim 후 빈 문자열일 수 없고 최대 255자다.
 - `body`는 선택 문자열이다.
@@ -677,6 +686,11 @@ Request:
 - 서버는 GitHub Issue를 생성한 뒤 ProjectV2 item으로 추가한다.
 - 서버는 선택한 column의 ProjectV2 `Status` field value를 설정한다.
 - GitHub write 성공 후 `github_issues`, `github_project_v2_items`, `github_project_v2_item_field_values`, `pilo_issues` cache를 갱신한다.
+- checkpoint 순서는 GitHub Issue 생성, ProjectV2 item 추가, Status 변경, local cache 저장이다.
+- local cache upsert와 operation 성공 처리는 하나의 DB transaction으로 반영한다.
+- full sync가 먼저 같은 remote object를 저장했더라도 remote node id 기준 upsert로 수렴한 뒤 operation을 완료한다.
+- operation에는 provider raw error, token, secret을 저장하지 않고 안전한 오류 code와 message만 저장한다.
+- GitHub Issue 생성 응답을 받지 못한 경우에는 원격 Issue 식별자를 저장할 수 없으므로 이 API의 checkpoint 복구 범위에 포함하지 않는다.
 - 새 issue의 local position은 target column의 마지막 position 뒤에 배치한다.
 - GitHub issue 생성 실패는 `502 BAD_GATEWAY`와 `GitHub issue create failed`로 매핑한다.
 - ProjectV2 item 추가 실패는 `502 BAD_GATEWAY`와 `GitHub ProjectV2 item add failed`로 매핑한다.
@@ -732,11 +746,11 @@ Board API 오류 응답은 공통 API 오류 포맷을 따른다.
 
 | Status | Code | 상황 |
 | --- | --- | --- |
-| `400 BAD_REQUEST` | `BAD_REQUEST` | request body, path id, query가 잘못됨. GitHub metadata가 부족함 |
+| `400 BAD_REQUEST` | `BAD_REQUEST` | request body, path id, query, `Idempotency-Key`가 잘못됨. GitHub metadata가 부족함 |
 | `401 UNAUTHORIZED` | `UNAUTHORIZED` | PILO bearer token 없음 또는 만료 |
 | `403 FORBIDDEN` | `FORBIDDEN` | Workspace 접근 권한 또는 GitHub write 권한 없음 |
 | `404 NOT_FOUND` | `NOT_FOUND` | Board, issue, column, repository, ProjectV2를 찾을 수 없음 |
-| `409 CONFLICT` | `CONFLICT` | `previousColumnId`가 현재 cache column과 다름 |
+| `409 CONFLICT` | `CONFLICT` | `previousColumnId`가 현재 cache column과 다름. 같은 idempotency key의 payload가 다르거나 operation이 처리 중임 |
 | `502 BAD_GATEWAY` | `BAD_GATEWAY` | GitHub provider write 실패. provider raw error는 노출하지 않음 |
 
 대표 메시지:

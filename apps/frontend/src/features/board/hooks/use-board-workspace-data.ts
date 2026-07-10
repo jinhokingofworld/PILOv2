@@ -11,7 +11,7 @@ import type {
   BoardPaginatedPayload,
   BoardPayload,
   CreateBoardInput,
-  CreateBoardIssueInput,
+  CreateBoardIssueCommand,
   ListBoardIssuesQuery,
   UpdateBoardIssueStatusInput
 } from "@/features/board/types";
@@ -284,7 +284,7 @@ export function useBoardWorkspaceData({
   );
 
   const createBoardIssue = useCallback(
-    async (input: CreateBoardIssueInput): Promise<BoardIssueCardPayload> => {
+    async (input: CreateBoardIssueCommand): Promise<BoardIssueCardPayload> => {
       if (!canLoad || !normalizedBoardId) {
         throw new Error("Board issue creation requires an authenticated board");
       }

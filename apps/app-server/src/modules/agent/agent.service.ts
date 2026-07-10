@@ -1,4 +1,4 @@
-import { HttpException, Injectable } from "@nestjs/common";
+import { HttpException, Injectable, Logger } from "@nestjs/common";
 import { QueryResultRow } from "pg";
 import { badRequest, notFound } from "../../common/api-error";
 import { DatabaseService } from "../../database/database.service";
@@ -179,6 +179,15 @@ interface AgentRunWithConfirmationRow extends AgentRunRow {
   confirmation_expires_at: Date | string | null;
 }
 
+interface SafeStorageErrorLog {
+  category: string;
+  code?: string;
+  constraint?: string;
+  name: string;
+  schema?: string;
+  table?: string;
+}
+
 const DEFAULT_TIMEZONE = "Asia/Seoul";
 const DEFAULT_PAGE_LIMIT = 20;
 const MAX_PAGE_LIMIT = 100;
@@ -214,6 +223,8 @@ const FORBIDDEN_JSON_KEY_PARTS = [
 
 @Injectable()
 export class AgentService {
+  private readonly logger = new Logger(AgentService.name);
+
   constructor(
     private readonly database: DatabaseService,
     private readonly workspaceService: WorkspaceService,
@@ -261,8 +272,68 @@ export class AgentService {
         throw error;
       }
 
+      this.logger.error(
+        `Agent run storage failed: ${JSON.stringify(
+          this.toSafeStorageErrorLog(error)
+        )}`
+      );
       throw agentStorageUnavailable("Agent run storage is unavailable");
     }
+  }
+
+  private toSafeStorageErrorLog(error: unknown): SafeStorageErrorLog {
+    const record = this.isPlainObject(error) ? error : {};
+
+    return {
+      category: this.categorizeStorageError(error),
+      code: this.readStringProperty(record, "code"),
+      constraint: this.readStringProperty(record, "constraint"),
+      name: error instanceof Error ? error.name : typeof error,
+      schema: this.readStringProperty(record, "schema"),
+      table: this.readStringProperty(record, "table")
+    };
+  }
+
+  private categorizeStorageError(error: unknown): string {
+    const message = error instanceof Error ? error.message.toLowerCase() : "";
+
+    if (message.includes("row-level security")) {
+      return "row_level_security";
+    }
+
+    if (message.includes("permission denied")) {
+      return "permission_denied";
+    }
+
+    if (message.includes("does not exist")) {
+      return "relation_missing";
+    }
+
+    if (message.includes("foreign key")) {
+      return "foreign_key";
+    }
+
+    if (message.includes("duplicate key")) {
+      return "duplicate_key";
+    }
+
+    if (
+      message.includes("econnrefused") ||
+      message.includes("timeout") ||
+      message.includes("connection")
+    ) {
+      return "connection";
+    }
+
+    return "unknown";
+  }
+
+  private readStringProperty(
+    record: AgentJsonObject,
+    key: string
+  ): string | undefined {
+    const value = record[key];
+    return typeof value === "string" ? value : undefined;
   }
 
   private async enqueueCreatedRun(
