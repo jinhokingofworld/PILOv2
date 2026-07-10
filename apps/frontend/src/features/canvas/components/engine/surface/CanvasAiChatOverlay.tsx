@@ -2,6 +2,10 @@
 
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { Bot, SendHorizontal, X } from "lucide-react";
+import type {
+  CanvasAgentDraft,
+  CanvasAgentIntentExample,
+} from "@/features/canvas/api/canvas-agent-types";
 
 export type CanvasAiChatAnchor = {
   x: number;
@@ -10,8 +14,20 @@ export type CanvasAiChatAnchor = {
 
 type CanvasAiChatOverlayProps = {
   anchor: CanvasAiChatAnchor | null;
+  canRememberIntent: boolean;
+  draft: CanvasAgentDraft | null;
+  error: string | null;
   holdProgress: (CanvasAiChatAnchor & { progress: number }) | null;
+  intentExample: CanvasAgentIntentExample | null;
+  isRunning: boolean;
+  onApproveIntentExample: () => void;
+  onApplyDraft: () => void;
   onClose: () => void;
+  onDiscardDraft: () => void;
+  onRejectIntentExample: () => void;
+  onRememberIntent: () => void;
+  onSubmit: (message: string, options?: { toolHelpMode?: boolean }) => void;
+  statusMessage: string | null;
 };
 
 type CanvasAiMessage = {
@@ -21,40 +37,77 @@ type CanvasAiMessage = {
 
 export function CanvasAiChatOverlay({
   anchor,
+  canRememberIntent,
+  draft,
+  error,
   holdProgress,
+  intentExample,
+  isRunning,
+  onApplyDraft,
+  onApproveIntentExample,
   onClose,
+  onDiscardDraft,
+  onRejectIntentExample,
+  onRememberIntent,
+  onSubmit,
+  statusMessage,
 }: CanvasAiChatOverlayProps) {
-  const [draft, setDraft] = useState("");
+  const [input, setInput] = useState("");
+  const [isToolHelpMode, setIsToolHelpMode] = useState(false);
   const [messages, setMessages] = useState<CanvasAiMessage[]>([
     {
       content:
-        "캔버스에 관한 작업을 도와드릴게요. 저는 C를 꾹 누르면 어디서든 부를 수 있어요.",
+        "캔버스에 관한 작업을 도와드릴게요. 저는 C를 0.5초 길게 누르면 어디서든 부를 수 있어요.",
       role: "assistant",
     },
   ]);
+  const lastAssistantFeedbackRef = useRef<string | null>(null);
   const messageListEndRef = useRef<HTMLDivElement>(null);
+  const assistantFeedback = (error ?? statusMessage)?.trim() || null;
+
+  useEffect(() => {
+    if (!assistantFeedback || lastAssistantFeedbackRef.current === assistantFeedback) {
+      return;
+    }
+
+    lastAssistantFeedbackRef.current = assistantFeedback;
+    setMessages((currentMessages) => {
+      const lastMessage = currentMessages[currentMessages.length - 1];
+      if (
+        lastMessage?.role === "assistant"
+        && lastMessage.content === assistantFeedback
+      ) {
+        return currentMessages;
+      }
+      return [
+        ...currentMessages,
+        { content: assistantFeedback, role: "assistant" },
+      ];
+    });
+  }, [assistantFeedback]);
 
   useEffect(() => {
     messageListEndRef.current?.scrollIntoView({ block: "end" });
-  }, [messages]);
+  }, [draft, intentExample, messages]);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const message = draft.trim();
-
-    if (!message) return;
+    const message = input.trim();
+    if (!message || isRunning) return;
 
     setMessages((currentMessages) => [
       ...currentMessages,
       { content: message, role: "user" },
     ]);
-    setDraft("");
+    lastAssistantFeedbackRef.current = null;
+    onSubmit(message, { toolHelpMode: isToolHelpMode });
+    setInput("");
   }
 
   const panelStyle = anchor
     ? {
         left: Math.max(12, Math.min(anchor.x + 20, window.innerWidth - 372)),
-        top: Math.max(12, Math.min(anchor.y + 20, window.innerHeight - 380)),
+        top: Math.max(12, Math.min(anchor.y + 20, window.innerHeight - 420)),
       }
     : undefined;
 
@@ -89,14 +142,28 @@ export function CanvasAiChatOverlay({
               </span>
               Canvas AI
             </div>
-            <button
-              aria-label="Canvas AI 채팅 닫기"
-              className="grid size-8 place-items-center rounded-lg text-slate-500 transition hover:bg-white hover:text-slate-950"
-              onClick={onClose}
-              type="button"
-            >
-              <X className="size-4" />
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                aria-pressed={isToolHelpMode}
+                className={
+                  isToolHelpMode
+                    ? "rounded-full bg-slate-950 px-3 py-1 text-xs font-semibold text-cyan-100 shadow-sm"
+                    : "rounded-full border border-cyan-200 bg-white/70 px-3 py-1 text-xs font-semibold text-slate-600 transition hover:bg-white hover:text-slate-950"
+                }
+                onClick={() => setIsToolHelpMode((current) => !current)}
+                type="button"
+              >
+                기능 설명
+              </button>
+              <button
+                aria-label="Canvas AI 채팅 닫기"
+                className="grid size-8 place-items-center rounded-lg text-slate-500 transition hover:bg-white hover:text-slate-950"
+                onClick={onClose}
+                type="button"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
           </header>
 
           <div className="max-h-64 space-y-2 overflow-y-auto bg-white px-4 py-4 text-sm leading-6 text-slate-700 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
@@ -112,9 +179,73 @@ export function CanvasAiChatOverlay({
                 {message.content}
               </p>
             ))}
-            <p className="text-xs text-slate-400">
-              Canvas AI 응답 연결은 다음 단계에서 추가됩니다.
-            </p>
+            {draft ? (
+              <div className="rounded-xl border border-cyan-200 bg-cyan-50 p-3 text-xs text-slate-700">
+                <strong className="block text-sm text-slate-950">{draft.spec.title}</strong>
+                <span className="mt-1 block">{draft.summary}</span>
+                <span className="mt-1 block text-slate-500">
+                  {draft.spec.nodes.filter((node) => node.kind !== "frame").length}개 도형 초안
+                </span>
+                <div className="mt-3 flex gap-2">
+                  <button
+                    className="rounded-lg bg-slate-950 px-3 py-1.5 font-medium text-white"
+                    onClick={onApplyDraft}
+                    type="button"
+                  >
+                    적용
+                  </button>
+                  <button
+                    className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 font-medium text-slate-700"
+                    onClick={onDiscardDraft}
+                    type="button"
+                  >
+                    폐기
+                  </button>
+                </div>
+              </div>
+            ) : null}
+            {intentExample?.status === "pending" ? (
+              <div className="rounded-xl border border-violet-200 bg-violet-50 p-3 text-xs text-slate-700">
+                <strong className="block text-sm text-slate-950">이 표현을 기억할까요?</strong>
+                <span className="mt-1 block">
+                  {intentExample.embeddingStatus === "completed"
+                    ? "승인하면 다음 Canvas 작업에서만 비슷한 표현을 빠르게 처리합니다."
+                    : "Canvas AI가 이 표현을 로컬 검색용으로 준비하고 있습니다."}
+                </span>
+                <div className="mt-3 flex gap-2">
+                  <button
+                    className="rounded-lg bg-violet-700 px-3 py-1.5 font-medium text-white disabled:cursor-not-allowed disabled:bg-violet-300"
+                    disabled={intentExample.embeddingStatus !== "completed"}
+                    onClick={onApproveIntentExample}
+                    type="button"
+                  >
+                    승인
+                  </button>
+                  <button
+                    className="rounded-lg border border-violet-200 bg-white px-3 py-1.5 font-medium text-slate-700"
+                    onClick={onRejectIntentExample}
+                    type="button"
+                  >
+                    기억 안 함
+                  </button>
+                </div>
+              </div>
+            ) : null}
+            {canRememberIntent && !intentExample ? (
+              <div className="rounded-xl border border-violet-200 bg-violet-50 p-3 text-xs text-slate-700">
+                <strong className="block text-sm text-slate-950">이 표현을 기억할까요?</strong>
+                <span className="mt-1 block">
+                  같은 종류의 Canvas 작업을 다음에는 로컬 검색으로 먼저 처리할 수 있습니다.
+                </span>
+                <button
+                  className="mt-3 rounded-lg bg-violet-700 px-3 py-1.5 font-medium text-white"
+                  onClick={onRememberIntent}
+                  type="button"
+                >
+                  이 표현 기억
+                </button>
+              </div>
+            ) : null}
             <div ref={messageListEndRef} />
           </div>
 
@@ -122,14 +253,14 @@ export function CanvasAiChatOverlay({
             <input
               aria-label="Canvas AI 메시지"
               className="h-10 min-w-0 flex-1 rounded-xl border border-slate-200 px-3 text-sm outline-none placeholder:text-slate-400 focus:border-cyan-400 focus:ring-2 focus:ring-cyan-100"
-              onChange={(event) => setDraft(event.target.value)}
-              placeholder="Canvas AI에게 물어보세요"
-              value={draft}
+              onChange={(event) => setInput(event.target.value)}
+              placeholder={isToolHelpMode ? "기능 이름이나 위치를 물어보세요" : "Canvas AI에게 물어보세요"}
+              value={input}
             />
             <button
               aria-label="Canvas AI 메시지 보내기"
               className="grid size-10 place-items-center rounded-xl bg-slate-950 text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
-              disabled={!draft.trim()}
+              disabled={!input.trim() || isRunning}
               type="submit"
             >
               <SendHorizontal className="size-4" />

@@ -26,6 +26,7 @@ def supported_jobs() -> list[str]:
         "meeting_transcription",
         "meeting_report",
         "agent_run_requested",
+        "canvas_agent_step_requested",
     ]
 
 

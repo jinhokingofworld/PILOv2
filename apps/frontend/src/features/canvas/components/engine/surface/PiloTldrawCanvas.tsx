@@ -22,6 +22,7 @@ import {
 } from "tldraw";
 import { Bot } from "lucide-react";
 import { useValue } from "@tldraw/state-react";
+import { useCanvasAgent } from "@/features/canvas/agent/use-canvas-agent";
 import { TldrawSurface } from "@/shared/tldraw";
 import type { CanvasPresenceController } from "@/features/canvas/realtime/useCanvasPresence";
 import { RemoteCursorOverlay } from "@/features/canvas/realtime/RemoteCursorOverlay";
@@ -34,6 +35,7 @@ import {
   CanvasAiChatOverlay,
   type CanvasAiChatAnchor,
 } from "./CanvasAiChatOverlay";
+import { CanvasAgentVisualOverlay } from "./CanvasAgentVisualOverlay";
 import { PiloCollapsedFrameOverlay } from "./PiloCollapsedFrameOverlay";
 import { SelectedShapeStackingManager } from "../interactions/PiloCanvasStackingManager";
 import { SelectedGroupToolbar } from "../interactions/PiloCanvasGroupToolbar";
@@ -93,6 +95,7 @@ export type { PiloInsertableTool } from "../shapes/pilo-canvas-shape-factory";
 
 type CanvasBoardDetail = {
   id: string;
+  workspaceId: string;
   title: string;
   shapeCount: number;
 };
@@ -171,6 +174,7 @@ type PiloTldrawCanvasProps = {
   presence?: CanvasPresenceController;
   onSnapStateChange: (state: PiloCanvasSnapState) => void;
   onOneShotToolCreated?: () => void;
+  canvasAgentEnabled?: boolean;
 };
 
 const tldrawComponents = {
@@ -178,7 +182,7 @@ const tldrawComponents = {
 };
 
 const PILO_COLLAPSED_FRAME_SIZE = 144;
-const CANVAS_AI_CHAT_HOLD_MS = 1_000;
+const CANVAS_AI_CHAT_HOLD_MS = 500;
 const connectionTools = new Set<PiloCanvasTool>(["arrow", "line"]);
 const PILO_FRAME_EXPANDED_FALLBACK_SIZE = {
   h: 180,
@@ -450,8 +454,10 @@ export function PiloTldrawCanvas({
   presence,
   onSnapStateChange,
   onOneShotToolCreated,
+  canvasAgentEnabled = false,
 }: PiloTldrawCanvasProps) {
   const editorRef = useRef<Editor | null>(null);
+  const [canvasEditor, setCanvasEditor] = useState<Editor | null>(null);
   const placementRequestRef = useRef<PiloPlacementRequest | null>(null);
   const returnToSelectAfterPlacementRef = useRef(false);
   const onOneShotToolCreatedRef = useRef(onOneShotToolCreated);
@@ -473,6 +479,26 @@ export function PiloTldrawCanvas({
   const [canvasAiChatHoldProgress, setCanvasAiChatHoldProgress] = useState<
     (CanvasAiChatAnchor & { progress: number }) | null
   >(null);
+  const isCanvasAiChatVisible = Boolean(canvasAiChatAnchor || canvasAiChatHoldProgress);
+  const handleCanvasAgentApplied = useCallback(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const bounds = editor.getViewportPageBounds();
+    onViewportBoundsChange({
+      x: bounds.x,
+      y: bounds.y,
+      width: bounds.w,
+      height: bounds.h,
+      zoom: editor.getCamera().z,
+    });
+  }, [onViewportBoundsChange]);
+  const canvasAgent = useCanvasAgent({
+    canvasId: board.id,
+    editor: canvasEditor,
+    enabled: canvasAgentEnabled,
+    onApplied: handleCanvasAgentApplied,
+    workspaceId: board.workspaceId,
+  });
 
   useEffect(() => {
     onOneShotToolCreatedRef.current = onOneShotToolCreated;
@@ -569,8 +595,29 @@ export function PiloTldrawCanvas({
     };
   }, []);
 
+  useEffect(() => {
+    if (!isCanvasAiChatVisible) return undefined;
+
+    function closeCanvasAiChatWithEscape(event: KeyboardEvent) {
+      if (event.defaultPrevented || event.isComposing || event.key !== "Escape") {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      cancelCanvasAiChatHold();
+      setCanvasAiChatAnchor(null);
+    }
+
+    window.addEventListener("keydown", closeCanvasAiChatWithEscape, true);
+    return () => {
+      window.removeEventListener("keydown", closeCanvasAiChatWithEscape, true);
+    };
+  }, [isCanvasAiChatVisible]);
+
   function mountEditor(editor: Editor) {
     editorRef.current = editor;
+    setCanvasEditor(editor);
     canvasWheelCleanupRef.current?.();
 
     const canvasContainer = editor.getContainer();
@@ -1198,6 +1245,7 @@ export function PiloTldrawCanvas({
       <button
         aria-label="Canvas AI 채팅 열기"
         className="canvas-ai-tool absolute right-4 top-4 z-50"
+        data-canvas-agent-target="toolbar.canvas_ai"
         onClick={openCanvasAiChatFromButton}
         type="button"
       >
@@ -1205,8 +1253,25 @@ export function PiloTldrawCanvas({
       </button>
       <CanvasAiChatOverlay
         anchor={canvasAiChatAnchor}
+        canRememberIntent={canvasAgent.canRememberIntent}
+        draft={canvasAgent.draft}
+        error={canvasAgent.error}
         holdProgress={canvasAiChatHoldProgress}
+        intentExample={canvasAgent.intentExample}
+        isRunning={canvasAgent.isRunning}
+        onApplyDraft={canvasAgent.applyDraft}
+        onApproveIntentExample={canvasAgent.approveIntentExample}
         onClose={() => setCanvasAiChatAnchor(null)}
+        onDiscardDraft={canvasAgent.discardDraft}
+        onRejectIntentExample={canvasAgent.rejectIntentExample}
+        onRememberIntent={canvasAgent.rememberRunIntent}
+        onSubmit={canvasAgent.submit}
+        statusMessage={canvasAgent.message}
+      />
+      <CanvasAgentVisualOverlay
+        draft={canvasAgent.draft}
+        editor={canvasEditor}
+        progress={canvasAgent.progress}
       />
     </div>
   );

@@ -55,6 +55,10 @@ import {
   PiloCanvasRuntime,
   type CanvasBoardDetail,
 } from "@/features/canvas/components/engine/runtime/PiloCanvasRuntime";
+import {
+  canvasAgentToolTargetEventName,
+  getCanvasAgentToolTargetPopover,
+} from "@/features/canvas/agent/canvas-agent-tool-targets";
 import type { CanvasRealtimeConfig } from "@/features/canvas/realtime/canvas-realtime-types";
 import {
   type PiloCanvasActions,
@@ -74,6 +78,7 @@ type CanvasBoardState = {
 type ToolButtonProps = {
   label: string;
   active?: boolean;
+  agentTarget?: string;
   children: ReactNode;
   disabled?: boolean;
   onClick: () => void;
@@ -105,6 +110,7 @@ const initialCanvasHistoryState: PiloCanvasHistoryState = {
 function ToolButton({
   label,
   active,
+  agentTarget,
   children,
   disabled,
   onClick,
@@ -113,6 +119,7 @@ function ToolButton({
     <button
       type="button"
       aria-label={label}
+      data-canvas-agent-target={agentTarget}
       data-tooltip={label}
       className={active ? "is-active" : undefined}
       disabled={disabled}
@@ -298,6 +305,20 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
       cancelled = true;
     };
   }, [boardId, canvasClient, canvasClientMode, fallbackBoard, workspaceId]);
+
+  useEffect(() => {
+    function handleCanvasAgentToolTarget(event: Event) {
+      const detail = (event as CustomEvent<{ toolTarget?: unknown }>).detail;
+      const toolTarget = typeof detail?.toolTarget === "string" ? detail.toolTarget : "";
+      const nextPopover = getCanvasAgentToolTargetPopover(toolTarget);
+      if (nextPopover) setOpenPopover(nextPopover);
+    }
+
+    window.addEventListener(canvasAgentToolTargetEventName, handleCanvasAgentToolTarget);
+    return () => {
+      window.removeEventListener(canvasAgentToolTargetEventName, handleCanvasAgentToolTarget);
+    };
+  }, []);
 
   const closePopover = useCallback(() => {
     setOpenPopover(null);
@@ -514,6 +535,7 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
           <section className="canvas-tool-section" aria-label="주요 도구">
             <ToolButton
               label="선택"
+              agentTarget="toolbar.select"
               active={isCanvasToolActive("select")}
               onClick={() => selectCanvasTool("select")}
             >
@@ -521,6 +543,7 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
             </ToolButton>
             <ToolButton
               label="메모"
+              agentTarget="toolbar.memo"
               active={isCanvasToolActive("note")}
               onClick={createMemo}
             >
@@ -528,6 +551,7 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
             </ToolButton>
             <ToolButton
               label="프레임"
+              agentTarget="toolbar.frame"
               active={isCanvasToolActive("frame")}
               onClick={() => selectCanvasTool("frame")}
             >
@@ -535,6 +559,7 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
             </ToolButton>
             <ToolButton
               label="코드블럭"
+              agentTarget="toolbar.code"
               active={isCanvasToolActive("code")}
               onClick={createCodeBlock}
             >
@@ -542,6 +567,7 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
             </ToolButton>
             <ToolButton
               label="텍스트"
+              agentTarget="toolbar.text"
               active={isCanvasToolActive("text")}
               onClick={() => selectCanvasTool("text")}
             >
@@ -549,6 +575,7 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
             </ToolButton>
             <ToolButton
               label="화살표/선"
+              agentTarget="toolbar.line"
               active={openPopover === "line"}
               onClick={() => togglePopover("line")}
             >
@@ -556,6 +583,7 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
             </ToolButton>
             <ToolButton
               label="그리기"
+              agentTarget="toolbar.draw"
               active={openPopover === "draw"}
               onClick={() => {
                 togglePopover("draw");
@@ -566,6 +594,7 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
             </ToolButton>
             <ToolButton
               label="색상"
+              agentTarget="toolbar.color"
               active={openPopover === "color"}
               onClick={() => togglePopover("color")}
             >
@@ -573,12 +602,13 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
             </ToolButton>
             <ToolButton
               label="더보기"
+              agentTarget="toolbar.more"
               active={openPopover === "insert"}
               onClick={() => togglePopover("insert")}
             >
               <Plus />
             </ToolButton>
-            <ToolButton label="화면 맞춤" onClick={() => canvasActions?.fit()}>
+            <ToolButton label="화면 맞춤" agentTarget="toolbar.fit" onClick={() => canvasActions?.fit()}>
               <Maximize2 />
             </ToolButton>
           </section>
@@ -590,6 +620,7 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
             >
               <ToolButton
                 label="펜"
+                agentTarget="toolbar.draw.pen"
                 active={activeDrawingPreset === "pen"}
                 onClick={() => selectDrawingPreset("pen")}
               >
@@ -597,6 +628,7 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
               </ToolButton>
               <ToolButton
                 label="형광펜"
+                agentTarget="toolbar.draw.highlight"
                 active={activeDrawingPreset === "highlight"}
                 onClick={() => selectDrawingPreset("highlight")}
               >
@@ -604,6 +636,7 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
               </ToolButton>
               <ToolButton
                 label="지우개"
+                agentTarget="toolbar.draw.eraser"
                 active={activeDrawingPreset === "eraser"}
                 onClick={() => selectDrawingPreset("eraser")}
               >
@@ -611,6 +644,7 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
               </ToolButton>
               <ToolButton
                 label="사각형"
+                agentTarget="toolbar.draw.rectangle"
                 active={activeDrawingPreset === "rectangle"}
                 onClick={() => selectShapePreset("rectangle")}
               >
@@ -618,6 +652,7 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
               </ToolButton>
               <ToolButton
                 label="원"
+                agentTarget="toolbar.draw.circle"
                 active={activeDrawingPreset === "circle"}
                 onClick={() => selectShapePreset("circle")}
               >
@@ -625,6 +660,7 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
               </ToolButton>
               <ToolButton
                 label="삼각형"
+                agentTarget="toolbar.draw.triangle"
                 active={activeDrawingPreset === "triangle"}
                 onClick={() => selectShapePreset("triangle")}
               >
@@ -662,6 +698,7 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
             >
               <ToolButton
                 label="화살표"
+                agentTarget="toolbar.line.arrow"
                 active={activeCanvasTool === "arrow"}
                 onClick={() => selectCanvasTool("arrow")}
               >
@@ -669,6 +706,7 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
               </ToolButton>
               <ToolButton
                 label="직선"
+                agentTarget="toolbar.line.line"
                 active={activeCanvasTool === "line"}
                 onClick={() => selectCanvasTool("line")}
               >
@@ -682,25 +720,27 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
               className="canvas-tool-popover canvas-draw-popover"
               aria-label="더보기 도구"
             >
-              <ToolButton label="이미지" onClick={() => openMediaFilePicker("image")}>
+              <ToolButton label="이미지" agentTarget="toolbar.more.image" onClick={() => openMediaFilePicker("image")}>
                 <Image />
               </ToolButton>
-              <ToolButton label="비디오" onClick={() => openMediaFilePicker("video")}>
+              <ToolButton label="비디오" agentTarget="toolbar.more.video" onClick={() => openMediaFilePicker("video")}>
                 <Video />
               </ToolButton>
               <ToolButton
                 label="북마크"
+                agentTarget="toolbar.more.bookmark"
                 onClick={() => createInsertableShape("bookmark")}
               >
                 <Bookmark />
               </ToolButton>
               <ToolButton
                 label="임베드"
+                agentTarget="toolbar.more.embed"
                 onClick={() => createInsertableShape("embed")}
               >
                 <PanelsTopLeft />
               </ToolButton>
-              <ToolButton label="그룹" onClick={groupSelectedShapes}>
+              <ToolButton label="그룹" agentTarget="toolbar.more.group" onClick={groupSelectedShapes}>
                 <Group />
               </ToolButton>
             </section>
@@ -709,6 +749,7 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
           <section className="canvas-history-section" aria-label="작업 기록">
             <ToolButton
               label="실행 취소"
+              agentTarget="toolbar.undo"
               active={canvasHistoryState.canUndo}
               disabled={!canvasHistoryState.canUndo}
               onClick={() => canvasActions?.undo()}
@@ -717,6 +758,7 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
             </ToolButton>
             <ToolButton
               label="다시 실행"
+              agentTarget="toolbar.redo"
               active={canvasHistoryState.canRedo}
               disabled={!canvasHistoryState.canRedo}
               onClick={() => canvasActions?.redo()}

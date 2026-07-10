@@ -421,6 +421,7 @@ function PiloCanvasRuntimeInner({
           presence={canvasPresence}
           onSnapStateChange={handleSnapStateChange}
           onOneShotToolCreated={onOneShotToolCreated}
+          canvasAgentEnabled={storageMode === "api"}
         />
       </section>
 

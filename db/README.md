@@ -40,3 +40,5 @@ The database schema source of truth is the migration history in `db/migrations/`
 - `migrations/021_add_user_workspace_presence.sql` adds current active Workspace presence fields to `users`.
 - `migrations/022_create_board_issue_create_operations.sql` adds durable Board Issue creation idempotency, step checkpoints, retry leases, and remote-resource lookup indexes.
 - `migrations/023_enable_sql_erd_multi_sessions.sql` removes the one-active-session-per-Workspace unique index and adds the active session recent-order index for SQLtoERD multi-session storage.
+- `migrations/024_replace_pilo_sticky_notes_with_tldraw_notes.sql` converts legacy custom Canvas sticky notes to Tldraw native notes.
+- `migrations/025_create_canvas_agent_runtime.sql` adds Canvas AI run, bounded step, per-user draft storage, Canvas-only pgvector shape indexing, and user-approved expression-memory routing.

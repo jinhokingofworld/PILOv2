@@ -19,6 +19,17 @@ from app.agent_processor import (
     AgentRunProcessor,
     OpenAiAgentPlannerClient,
 )
+from app.canvas_agent.embedding_processor import CanvasEmbeddingProcessor
+from app.canvas_agent.embeddings import (
+    DEFAULT_CANVAS_EMBEDDING_MODEL,
+    DEFAULT_CANVAS_EMBEDDING_REVISION,
+    DEFAULT_MAX_SEQUENCE_LENGTH,
+    LocalSentenceTransformerCanvasEmbedder,
+)
+from app.canvas_agent.planner import OpenAiCanvasAgentPlanner
+from app.canvas_agent.processor import CanvasAgentProcessor
+from app.canvas_agent.repository import PgCanvasAgentRepository
+from app.canvas_agent.semantic_router import CanvasSemanticRouter
 from app.job_dispatcher import JobDispatcher
 from app.meeting_report_processor import (
     AudioObjectMetadata,
@@ -61,6 +72,12 @@ class RuntimeSettings:
     agent_execution_handoff_token: str
     agent_execution_handoff_timeout_seconds: int
     agent_stale_execution_sweep_interval_seconds: int
+    canvas_embedding_model: str
+    canvas_embedding_revision: str
+    canvas_embedding_max_sequence_length: int
+    canvas_agent_intent_similarity_min: float
+    canvas_agent_shape_similarity_min: float
+    canvas_agent_similarity_margin_min: float
     concurrency: int
     wait_time_seconds: int
     visibility_timeout_seconds: int
@@ -93,6 +110,36 @@ class RuntimeSettings:
             agent_stale_execution_sweep_interval_seconds=_positive_int_env(
                 "AGENT_STALE_EXECUTION_SWEEP_INTERVAL_SECONDS",
                 DEFAULT_AGENT_STALE_EXECUTION_SWEEP_INTERVAL_SECONDS,
+            ),
+            canvas_embedding_model=_env(
+                "CANVAS_EMBEDDING_MODEL",
+                DEFAULT_CANVAS_EMBEDDING_MODEL,
+            ),
+            canvas_embedding_revision=_env(
+                "CANVAS_EMBEDDING_REVISION",
+                DEFAULT_CANVAS_EMBEDDING_REVISION,
+            ),
+            canvas_embedding_max_sequence_length=_positive_int_env(
+                "CANVAS_EMBEDDING_MAX_SEQUENCE_LENGTH",
+                DEFAULT_MAX_SEQUENCE_LENGTH,
+            ),
+            canvas_agent_intent_similarity_min=_bounded_float_env(
+                "CANVAS_AGENT_INTENT_SIMILARITY_MIN",
+                0.9,
+                minimum=0.5,
+                maximum=1.0,
+            ),
+            canvas_agent_shape_similarity_min=_bounded_float_env(
+                "CANVAS_AGENT_SHAPE_SIMILARITY_MIN",
+                0.78,
+                minimum=0.5,
+                maximum=1.0,
+            ),
+            canvas_agent_similarity_margin_min=_bounded_float_env(
+                "CANVAS_AGENT_SIMILARITY_MARGIN_MIN",
+                0.08,
+                minimum=0.0,
+                maximum=0.5,
             ),
             concurrency=_positive_int_env("AI_WORKER_CONCURRENCY", 1),
             wait_time_seconds=_positive_int_env(
@@ -533,12 +580,14 @@ class SqsAiJobWorker:
         dispatcher: JobDispatcher,
         sqs_client: Any,
         stale_execution_recovery: Any | None = None,
+        canvas_embedding_processor: CanvasEmbeddingProcessor | None = None,
         monotonic_time: Callable[[], float] = time.monotonic,
     ) -> None:
         self.settings = settings
         self.dispatcher = dispatcher
         self.sqs_client = sqs_client
         self.stale_execution_recovery = stale_execution_recovery
+        self.canvas_embedding_processor = canvas_embedding_processor
         self.monotonic_time = monotonic_time
         self.last_stale_execution_sweep_at: float | None = None
 
@@ -549,6 +598,7 @@ class SqsAiJobWorker:
 
     def run_once(self) -> int:
         self.recover_stale_executions_if_due()
+        self._process_canvas_embedding_jobs()
         response = self.sqs_client.receive_message(
             QueueUrl=self.settings.sqs_queue_url,
             MaxNumberOfMessages=min(max(self.settings.concurrency, 1), 10),
@@ -594,6 +644,15 @@ class SqsAiJobWorker:
             self.stale_execution_recovery.recover_stale_executions()
         except InfrastructureError:
             LOGGER.exception("stale Agent execution recovery failed")
+
+    def _process_canvas_embedding_jobs(self) -> None:
+        if self.canvas_embedding_processor is None:
+            return
+        for _ in range(4):
+            result = self.canvas_embedding_processor.process_next()
+            if result is None:
+                return
+            LOGGER.info("canvas embedding result=%s", result)
 
 
 class HttpAgentExecutionHandoffClient(AgentExecutionHandoffClient):
@@ -646,6 +705,10 @@ def create_worker(settings: RuntimeSettings | None = None) -> SqsAiJobWorker:
         resolved_settings.database_url,
         resolved_settings.database_ssl,
     )
+    canvas_agent_repository = PgCanvasAgentRepository(
+        resolved_settings.database_url,
+        resolved_settings.database_ssl,
+    )
     storage = S3RecordingStorage(s3_client, resolved_settings.recordings_bucket)
     ai_client = OpenAiMeetingReportClient(
         resolved_settings.openai_api_key,
@@ -655,6 +718,26 @@ def create_worker(settings: RuntimeSettings | None = None) -> SqsAiJobWorker:
     agent_planner_client = OpenAiAgentPlannerClient(
         resolved_settings.openai_api_key,
         resolved_settings.openai_agent_planner_model,
+    )
+    canvas_agent_planner = OpenAiCanvasAgentPlanner(
+        resolved_settings.openai_api_key,
+        resolved_settings.openai_agent_planner_model,
+    )
+    canvas_embedder = LocalSentenceTransformerCanvasEmbedder(
+        model_name=resolved_settings.canvas_embedding_model,
+        model_version=resolved_settings.canvas_embedding_revision,
+        max_sequence_length=resolved_settings.canvas_embedding_max_sequence_length,
+    )
+    canvas_semantic_router = CanvasSemanticRouter(
+        canvas_agent_repository,
+        canvas_embedder,
+        intent_similarity_min=resolved_settings.canvas_agent_intent_similarity_min,
+        shape_similarity_min=resolved_settings.canvas_agent_shape_similarity_min,
+        similarity_margin_min=resolved_settings.canvas_agent_similarity_margin_min,
+    )
+    canvas_embedding_processor = CanvasEmbeddingProcessor(
+        canvas_agent_repository,
+        canvas_embedder,
     )
     meeting_report_processor = MeetingReportProcessor(
         meeting_report_repository,
@@ -671,12 +754,22 @@ def create_worker(settings: RuntimeSettings | None = None) -> SqsAiJobWorker:
         agent_planner_client,
         agent_execution_handoff_client,
     )
-    dispatcher = JobDispatcher(meeting_report_processor, agent_run_processor)
+    canvas_agent_processor = CanvasAgentProcessor(
+        canvas_agent_repository,
+        canvas_agent_planner,
+        canvas_semantic_router,
+    )
+    dispatcher = JobDispatcher(
+        meeting_report_processor,
+        agent_run_processor,
+        canvas_agent_processor,
+    )
     return SqsAiJobWorker(
         resolved_settings,
         dispatcher,
         sqs_client,
         stale_execution_recovery=agent_execution_handoff_client,
+        canvas_embedding_processor=canvas_embedding_processor,
     )
 
 
@@ -750,6 +843,19 @@ def _positive_int_env(key: str, default: int) -> int:
         return default
 
     return max(parsed, 1)
+
+
+def _bounded_float_env(key: str, default: float, *, minimum: float, maximum: float) -> float:
+    value = os.getenv(key)
+    if value is None or not value.strip():
+        return default
+    try:
+        parsed = float(value)
+    except ValueError:
+        return default
+    if parsed < minimum or parsed > maximum:
+        return default
+    return parsed
 
 
 def _openai_retryable_errors() -> tuple[type[BaseException], ...]:

@@ -57,6 +57,11 @@ component 연결만 담당하고, CodeMirror 설정과 code editor UI는 code-bl
 - `canvas-normalizers.ts`: API/mock 응답을 Canvas runtime 입력 형태로 정규화
 - `canvas-types.ts`: API client와 mock client가 공유하는 타입
 
+`agent/`는 Canvas AI run 생성·polling·개인 초안 적용/폐기와 개인 표현 기억 승인 UI
+상태를 담당한다.
+Canvas AI의 가상 포인터, 도형 강조, 초안 preview는 현재 사용자 브라우저에서만
+렌더링하며 Canvas presence나 shape persistence queue에는 넣지 않는다.
+
 `TldrawSurface`는 Canvas API/DB 저장 흐름을 소유하지 않는다. PR Review 같은 다른
 도메인은 필요한 경우 이 surface만 가져가고, 자기 도메인 payload와 source of
 truth를 유지해야 한다.
