@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { BoardIssueCreateForm } from "@/features/board/components/board-issue-create-form";
 import type {
   BoardColumnPayload,
-  CreateBoardIssueInput
+  CreateBoardIssueCommand
 } from "@/features/board/types";
 
 type BoardIssueCreateDialogProps = {
@@ -17,7 +17,7 @@ type BoardIssueCreateDialogProps = {
   isCreating?: boolean;
   onClose: () => void;
   onCreateIssue: (
-    input: CreateBoardIssueInput
+    input: CreateBoardIssueCommand
   ) => Promise<boolean | void> | boolean | void;
   open: boolean;
 };
