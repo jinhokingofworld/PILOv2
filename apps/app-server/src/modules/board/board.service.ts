@@ -150,13 +150,15 @@ export class BoardService {
     currentUserId: string,
     workspaceId: string,
     boardId: string,
-    body: unknown
+    body: unknown,
+    idempotencyKey: unknown
   ): Promise<CreateBoardIssueResult> {
     return this.boardIssueCreateService.createBoardIssue(
       currentUserId,
       workspaceId,
       boardId,
-      body
+      body,
+      idempotencyKey
     );
   }
 

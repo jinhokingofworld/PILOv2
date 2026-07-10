@@ -6,6 +6,9 @@ const require = createRequire(import.meta.url);
 const {
   BoardIssueCreateOperationService
 } = require("../../dist/modules/board/board-issue-create-operation.service.js");
+const {
+  BoardIssueCreateService
+} = require("../../dist/modules/board/board-issue-create.service.js");
 const { boardBadGateway } = require("../../dist/modules/board/board-api-error.js");
 
 const currentUserId = "22222222-2222-4222-8222-222222222222";
@@ -339,3 +342,240 @@ assert.match(operationQueriesSource, /FOR UPDATE/);
 assert.match(operationQueriesSource, /lease_token =/);
 assert.match(operationQueriesSource, /locked_until <= now\(\)/);
 assert.match(operationQueriesSource, /completed_stage = 'cache_persisted'/);
+
+const repositoryId = "33333333-3333-4333-8333-333333333333";
+const githubIssueUuid = "44444444-4444-4444-8444-444444444444";
+const projectItemId = "55555555-5555-4555-8555-555555555555";
+const statusFieldId = "66666666-6666-4666-8666-666666666666";
+
+function createTargetRow() {
+  return {
+    board_id: boardId,
+    repository_id: repositoryId,
+    repository_owner_login: "Developer-EJ",
+    repository_name: "PILO",
+    project_v2_id: "77777777-7777-4777-8777-777777777777",
+    github_project_node_id: "PVT_kwDOExample",
+    status_field_id: statusFieldId,
+    github_field_node_id: "PVTSSF_lADOExample",
+    status_field_name: "Status",
+    target_column_id: columnId,
+    target_status_option_id: "88888888-8888-4888-8888-888888888888",
+    target_status_option_github_id: "option-todo",
+    target_status_name: "Todo",
+    target_status_normalized_name: "todo"
+  };
+}
+
+function createdIssueRow() {
+  return {
+    id: "1001",
+    board_id: boardId,
+    column_id: columnId,
+    repository_id: repositoryId,
+    github_issue_id: githubIssueUuid,
+    project_item_id: projectItemId,
+    github_issue_node_id: githubIssue.node_id,
+    github_project_item_node_id: "PVTI_lADOExample",
+    github_issue_number: githubIssue.number,
+    issue_number: `#${githubIssue.number}`,
+    title: githubIssue.title,
+    html_url: githubIssue.html_url,
+    state: githubIssue.state,
+    labels: githubIssue.labels,
+    assignees: githubIssue.assignees,
+    position: 0,
+    github_updated_at: githubIssue.updated_at,
+    last_synced_at: "2026-07-07T04:44:40.000Z",
+    created_at: "2026-07-07T04:44:40.000Z",
+    updated_at: "2026-07-07T04:44:40.000Z"
+  };
+}
+
+class FakeCreateQueries {
+  constructor({ cacheFailures = 0 } = {}) {
+    this.cacheFailures = cacheFailures;
+    this.cacheTransactions = 0;
+  }
+
+  async findIssueCreateTarget() {
+    return createTargetRow();
+  }
+
+  async transaction(callback) {
+    this.cacheTransactions += 1;
+    if (this.cacheFailures > 0) {
+      this.cacheFailures -= 1;
+      throw new Error("local cache failure");
+    }
+
+    return callback({});
+  }
+
+  async upsertGithubIssueCache() {
+    return githubIssueUuid;
+  }
+
+  async upsertProjectItemCache() {
+    return projectItemId;
+  }
+
+  async upsertProjectItemStatusFieldValue() {}
+
+  async clearProjectItemStatusFieldValue() {}
+
+  async insertPiloIssueCache() {
+    return "1001";
+  }
+
+  async updatePiloIssueProjectItemNodeId() {}
+
+  async findCreatedIssueCard(...args) {
+    assert.ok(args.length === 3 || args.length === 4);
+    return createdIssueRow();
+  }
+}
+
+class FakeWorkspaceService {
+  async assertWorkspaceAccess() {}
+}
+
+class FakeGithubIssueWriteService {
+  constructor() {
+    this.calls = [];
+  }
+
+  async createIssue(input) {
+    this.calls.push(input);
+    return { ...githubIssue };
+  }
+}
+
+class FakeGithubProjectV2WriteService {
+  constructor({ addFailures = 0, statusFailures = 0 } = {}) {
+    this.addFailures = addFailures;
+    this.statusFailures = statusFailures;
+    this.accessChecks = [];
+    this.addCalls = [];
+    this.statusCalls = [];
+  }
+
+  async assertProjectV2WriteAccess(userId) {
+    this.accessChecks.push(userId);
+  }
+
+  async addProjectV2ItemByContentId(input) {
+    this.addCalls.push(input);
+    if (this.addFailures > 0) {
+      this.addFailures -= 1;
+      throw new Error("raw provider failure");
+    }
+
+    return { itemNodeId: "PVTI_lADOExample" };
+  }
+
+  async updateProjectV2ItemStatus(input) {
+    this.statusCalls.push(input);
+    if (this.statusFailures > 0) {
+      this.statusFailures -= 1;
+      throw new Error("raw provider failure");
+    }
+  }
+}
+
+function createOrchestrator({ addFailures = 0, statusFailures = 0, cacheFailures = 0 } = {}) {
+  const createQueries = new FakeCreateQueries({ cacheFailures });
+  const operationQueries = new FakeOperationQueries();
+  const operationService = new BoardIssueCreateOperationService(operationQueries);
+  const githubIssueWriteService = new FakeGithubIssueWriteService();
+  const githubProjectV2WriteService = new FakeGithubProjectV2WriteService({
+    addFailures,
+    statusFailures
+  });
+  const service = new BoardIssueCreateService(
+    createQueries,
+    new FakeWorkspaceService(),
+    githubIssueWriteService,
+    githubProjectV2WriteService,
+    operationService
+  );
+
+  return {
+    createQueries,
+    githubIssueWriteService,
+    githubProjectV2WriteService,
+    operationQueries,
+    service
+  };
+}
+
+async function createIssue(service, idempotencyKey = "board-create-retry-key") {
+  return service.createBoardIssue(
+    currentUserId,
+    workspaceId,
+    boardId,
+    {
+      body: githubIssue.body,
+      columnId,
+      title: githubIssue.title
+    },
+    idempotencyKey
+  );
+}
+
+function isBoardError(error, status, message) {
+  return Boolean(
+    error &&
+      typeof error.getStatus === "function" &&
+      error.getStatus() === status &&
+      error.getResponse()?.error?.message === message
+  );
+}
+
+{
+  const subject = createOrchestrator({ addFailures: 1 });
+  await assert.rejects(
+    () => createIssue(subject.service),
+    (error) => isBoardError(error, 502, "GitHub ProjectV2 item add failed")
+  );
+  const result = await createIssue(subject.service);
+
+  assert.equal(subject.githubIssueWriteService.calls.length, 1);
+  assert.equal(subject.githubProjectV2WriteService.addCalls.length, 2);
+  assert.equal(subject.githubProjectV2WriteService.statusCalls.length, 1);
+  assert.equal(subject.createQueries.cacheTransactions, 1);
+  assert.equal(result.issue.id, "1001");
+}
+
+{
+  const subject = createOrchestrator({ statusFailures: 1 });
+  await assert.rejects(
+    () => createIssue(subject.service),
+    (error) => isBoardError(error, 502, "GitHub ProjectV2 status update failed")
+  );
+  await createIssue(subject.service);
+
+  assert.equal(subject.githubIssueWriteService.calls.length, 1);
+  assert.equal(subject.githubProjectV2WriteService.addCalls.length, 1);
+  assert.equal(subject.githubProjectV2WriteService.statusCalls.length, 2);
+  assert.equal(subject.createQueries.cacheTransactions, 1);
+}
+
+{
+  const subject = createOrchestrator({ cacheFailures: 1 });
+  await assert.rejects(() => createIssue(subject.service), /local cache failure/);
+  const result = await createIssue(subject.service);
+
+  assert.equal(subject.githubIssueWriteService.calls.length, 1);
+  assert.equal(subject.githubProjectV2WriteService.addCalls.length, 1);
+  assert.equal(subject.githubProjectV2WriteService.statusCalls.length, 1);
+  assert.equal(subject.createQueries.cacheTransactions, 2);
+  assert.equal(result.issue.id, "1001");
+
+  const replay = await createIssue(subject.service);
+  assert.deepEqual(replay, result);
+  assert.equal(subject.githubIssueWriteService.calls.length, 1);
+  assert.equal(subject.githubProjectV2WriteService.addCalls.length, 1);
+  assert.equal(subject.githubProjectV2WriteService.statusCalls.length, 1);
+  assert.equal(subject.createQueries.cacheTransactions, 2);
+}

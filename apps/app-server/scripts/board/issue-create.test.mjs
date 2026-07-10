@@ -138,6 +138,48 @@ class FakeGithubProjectV2WriteService {
   }
 }
 
+class FakeBoardIssueCreateOperationService {
+  async claimOperation() {
+    return {
+      kind: "execute",
+      attempt: {
+        operationId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        leaseToken: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        completedStage: "none",
+        githubIssue: null,
+        githubProjectItemNodeId: null
+      }
+    };
+  }
+
+  async saveGithubIssue(attempt, issue) {
+    return {
+      ...attempt,
+      completedStage: "github_issue_created",
+      githubIssue: issue
+    };
+  }
+
+  async saveProjectItem(attempt, itemNodeId) {
+    return {
+      ...attempt,
+      completedStage: "project_item_added",
+      githubProjectItemNodeId: itemNodeId
+    };
+  }
+
+  async saveStatusUpdated(attempt) {
+    return {
+      ...attempt,
+      completedStage: "status_updated"
+    };
+  }
+
+  async markRetryableSafely() {}
+
+  async markSucceeded() {}
+}
+
 function createSubject(
   database,
   githubIssueWriteService = new FakeGithubIssueWriteService(),
@@ -149,7 +191,8 @@ function createSubject(
     createQueries,
     workspaceService,
     githubIssueWriteService,
-    githubProjectV2WriteService
+    githubProjectV2WriteService,
+    new FakeBoardIssueCreateOperationService()
   );
   const service = new BoardService(
     undefined,
@@ -271,7 +314,8 @@ function createdIssueRow(overrides = {}) {
       body: "Issue body",
       columnId,
       title: "  New board issue  "
-    }
+    },
+    "board-create-success-key"
   );
 
   assert.deepEqual(workspaceService.calls, [{ userId: currentUserId, workspaceId }]);
@@ -348,7 +392,7 @@ function createdIssueRow(overrides = {}) {
       service.createBoardIssue(currentUserId, workspaceId, boardId, {
         body: "Issue body",
         columnId
-      }),
+      }, "board-create-invalid-key"),
     (error) => {
       assert.equal(error.getStatus(), 400);
       assert.equal(error.getResponse().error.code, "BAD_REQUEST");
@@ -377,7 +421,7 @@ function createdIssueRow(overrides = {}) {
       service.createBoardIssue(currentUserId, workspaceId, boardId, {
         columnId,
         title: "New board issue"
-      }),
+      }, "board-create-failure-key"),
     (error) => {
       assert.equal(error.getStatus(), 502);
       assert.equal(error.getResponse().error.code, "BAD_GATEWAY");
