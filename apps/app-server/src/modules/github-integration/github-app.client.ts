@@ -409,6 +409,14 @@ const GITHUB_ISSUE_WRITE_PERMISSION_ERROR_MESSAGE =
   "GitHub Issue write permission is required";
 const GITHUB_PROJECT_V2_WRITE_PERMISSION_ERROR_MESSAGE =
   "GitHub ProjectV2 write permission is required";
+const GITHUB_PROJECT_V2_SUPPORTED_ITEM_FIELD_VALUE_TYPENAMES: ReadonlySet<string> =
+  new Set([
+    "ProjectV2ItemFieldTextValue",
+    "ProjectV2ItemFieldNumberValue",
+    "ProjectV2ItemFieldDateValue",
+    "ProjectV2ItemFieldSingleSelectValue",
+    "ProjectV2ItemFieldIterationValue"
+  ]);
 const GITHUB_PROJECT_V2_DISCOVERY_FRAGMENT = `
   fragment PiloProjectV2DiscoveryFields on ProjectV2 {
     id
@@ -2311,6 +2319,7 @@ export class GithubAppClient {
         .filter((fieldValue): fieldValue is Record<string, unknown> =>
           this.isRecord(fieldValue)
         )
+        .filter((fieldValue) => this.isSupportedProjectV2ItemFieldValue(fieldValue))
         .map((fieldValue) => this.mapProjectV2ItemFieldValue(fieldValue)),
       hasNextPage: pageInfo.hasNextPage === true,
       endCursor:
@@ -2318,6 +2327,17 @@ export class GithubAppClient {
           ? pageInfo.endCursor
           : null
     };
+  }
+
+  private isSupportedProjectV2ItemFieldValue(
+    fieldValue: Record<string, unknown>
+  ): boolean {
+    return (
+      typeof fieldValue.__typename === "string" &&
+      GITHUB_PROJECT_V2_SUPPORTED_ITEM_FIELD_VALUE_TYPENAMES.has(
+        fieldValue.__typename
+      )
+    );
   }
 
   private mapProjectV2ItemFieldValue(

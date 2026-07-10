@@ -431,6 +431,9 @@ function projectNode(overrides = {}) {
                               name: "Notes",
                               dataType: "TEXT"
                             }
+                          },
+                          {
+                            __typename: "ProjectV2ItemFieldRepositoryValue"
                           }
                         ],
                         pageInfo: {
@@ -510,6 +513,10 @@ function projectNode(overrides = {}) {
     assert.equal(items[0].statusOptionId, "status-in-progress");
     assert.equal(items[0].statusName, "In Progress");
     assert.equal(items[0].fieldValues.length, 2);
+    assert.deepEqual(
+      items[0].fieldValues.map((fieldValue) => fieldValue.fieldName),
+      ["Notes", "Status"]
+    );
   } finally {
     globalThis.fetch = originalFetch;
   }
