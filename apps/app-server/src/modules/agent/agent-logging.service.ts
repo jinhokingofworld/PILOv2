@@ -424,6 +424,33 @@ export class AgentLoggingService {
     });
   }
 
+  async createToolExecutionClaim(
+    transaction: DatabaseTransaction,
+    workspaceId: string,
+    input: Omit<StartNextAgentStepInput, "type" | "order">
+  ): Promise<AgentStepPayload> {
+    const inputSummary = this.assertSafeObject(
+      input.inputSummary ?? {},
+      INPUT_JSON_MAX_BYTES,
+      "step input"
+    );
+    const nextOrder = await transaction.queryOne<{ next_order: number | string }>(
+      `
+        SELECT COALESCE(MAX(step_order), 0) + 1 AS next_order
+        FROM agent_steps
+        WHERE run_id = $1
+      `,
+      [input.runId]
+    );
+
+    return this.insertRunningStep(transaction, workspaceId, {
+      ...input,
+      type: "tool",
+      order: Number(nextOrder?.next_order ?? 1),
+      inputSummary
+    });
+  }
+
   async completeStep(
     currentUserId: string,
     workspaceId: string,
@@ -452,15 +479,21 @@ export class AgentLoggingService {
           UPDATE agent_steps
           SET status = 'completed',
               output_json = $3,
-              resource_refs = $4,
+              resource_refs = $4::jsonb,
               error_code = NULL,
               error_message = NULL,
               completed_at = now()
           WHERE id = $1
             AND run_id = $2
+            AND status = 'running'
           RETURNING *
         `,
-        [input.stepId, input.runId, outputSummary, resourceRefs]
+        [
+          input.stepId,
+          input.runId,
+          outputSummary,
+          this.serializeResourceRefs(resourceRefs)
+        ]
       );
 
       if (!step) {
@@ -575,6 +608,7 @@ export class AgentLoggingService {
               completed_at = now()
           WHERE id = $1
             AND workspace_id = $2
+            AND status = 'running'
           RETURNING *
         `,
         [
@@ -857,7 +891,7 @@ export class AgentLoggingService {
           metadata_json,
           resource_refs
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb)
       `,
       [
         input.workspaceId,
@@ -870,9 +904,14 @@ export class AgentLoggingService {
         this.normalizeRequiredText(input.eventType, "log event type"),
         this.normalizeRequiredText(input.message, "log message"),
         metadata,
-        resourceRefs
+        this.serializeResourceRefs(resourceRefs)
       ]
     );
+  }
+
+  private serializeResourceRefs(resourceRefs: AgentResourceRef[]): string {
+    // node-postgres otherwise encodes JavaScript arrays as PostgreSQL arrays.
+    return JSON.stringify(resourceRefs);
   }
 
   private assertSafeObject(

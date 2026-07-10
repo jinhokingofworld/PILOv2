@@ -7,25 +7,22 @@ import type {
   BoardColumnPayload,
   BoardDetailPayload,
   BoardFilterOptionsPayload,
+  BoardGithubProjectV2Payload,
+  BoardGithubRepositoryPayload,
   BoardIssueCardPayload,
   BoardPaginatedPayload,
   BoardPayload,
   CreateBoardInput,
-  CreateBoardIssueInput,
+  CreateBoardIssueCommand,
   ListBoardIssuesQuery,
   UpdateBoardIssueStatusInput
 } from "@/features/board/types";
-import { createGithubIntegrationApiClient } from "@/features/github-integration/api/client";
-import type {
-  GithubProjectV2,
-  GithubRepository
-} from "@/features/github-integration/types";
 
 type BoardWorkspaceStatus = "idle" | "loading" | "success" | "error";
 
 type BoardWorkspaceCatalog = {
-  repositories: GithubRepository[];
-  projects: GithubProjectV2[];
+  repositories: BoardGithubRepositoryPayload[];
+  projects: BoardGithubProjectV2Payload[];
   boards: BoardPayload[];
   boardsMeta: BoardPaginatedPayload<BoardPayload>["meta"] | null;
 };
@@ -92,13 +89,6 @@ export function useBoardWorkspaceData({
     () => createBoardApiClient({ accessToken: normalizedAccessToken }),
     [normalizedAccessToken]
   );
-  const githubClient = useMemo(
-    () =>
-      createGithubIntegrationApiClient({
-        accessToken: normalizedAccessToken
-      }),
-    [normalizedAccessToken]
-  );
 
   const loadWorkspaceData = useCallback(async () => {
     if (!canLoad) {
@@ -106,11 +96,11 @@ export function useBoardWorkspaceData({
     }
 
     const [repositories, projects, boards] = await Promise.all([
-      githubClient.listGithubRepositories(normalizedWorkspaceId, {
+      boardClient.listGithubRepositories(normalizedWorkspaceId, {
         includeArchived: false,
         limit: 100
       }),
-      githubClient.listGithubProjectsV2(normalizedWorkspaceId, {
+      boardClient.listGithubProjectsV2(normalizedWorkspaceId, {
         closed: false,
         limit: 100
       }),
@@ -120,12 +110,12 @@ export function useBoardWorkspaceData({
     ]);
 
     return {
-      repositories: repositories.data,
-      projects: projects.data,
+      repositories,
+      projects,
       boards: boards.data,
       boardsMeta: boards.meta
     };
-  }, [boardClient, canLoad, githubClient, normalizedWorkspaceId]);
+  }, [boardClient, canLoad, normalizedWorkspaceId]);
 
   const loadBoardData = useCallback(async () => {
     if (!canLoad || !normalizedBoardId) {
@@ -284,7 +274,7 @@ export function useBoardWorkspaceData({
   );
 
   const createBoardIssue = useCallback(
-    async (input: CreateBoardIssueInput): Promise<BoardIssueCardPayload> => {
+    async (input: CreateBoardIssueCommand): Promise<BoardIssueCardPayload> => {
       if (!canLoad || !normalizedBoardId) {
         throw new Error("Board issue creation requires an authenticated board");
       }

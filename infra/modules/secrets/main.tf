@@ -49,10 +49,15 @@ locals {
     "GITHUB_APP_PRIVATE_KEY",
   ]
 
+  shared_ecs_secret_names = [
+    "AGENT_EXECUTION_HANDOFF_TOKEN",
+  ]
+
   all_secret_names = toset(concat(
     [for name in local.app_server_managed_secret_names : "app-server/${name}"],
     [for name in local.realtime_server_ecs_secret_names : "realtime-server/${name}"],
     [for name in local.ai_worker_ecs_secret_names : "ai-worker/${name}"],
+    [for name in local.shared_ecs_secret_names : "shared/${name}"],
   ))
 }
 

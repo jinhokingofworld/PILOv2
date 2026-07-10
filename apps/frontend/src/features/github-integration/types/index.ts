@@ -159,6 +159,19 @@ export type GithubSyncTarget =
 
 export type GithubSyncStatus = "running" | "success" | "failed";
 
+export type GithubSyncProgressStage =
+  | "initializing"
+  | "repositories"
+  | "project_v2_discovery"
+  | "issues"
+  | "pull_requests"
+  | "project_v2"
+  | "project_v2_fields"
+  | "project_v2_items"
+  | "board_hydration"
+  | "finalizing"
+  | "completed";
+
 export type GithubSyncRun = {
   id: string;
   target: GithubSyncTarget;
@@ -172,6 +185,8 @@ export type GithubSyncRun = {
   createdCount: number;
   updatedCount: number;
   skippedCount: number;
+  progressPercent: number;
+  progressStage: GithubSyncProgressStage;
   errorMessage: string | null;
 };
 

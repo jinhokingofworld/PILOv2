@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
 import { QueryResultRow } from "pg";
 import {
   ApiError,
@@ -19,6 +19,7 @@ import {
   extractContentConflictHunks,
   type PrReviewConflictHunkPayload
 } from "./pr-review-conflict-analyzer";
+import type { PrReviewResolvedHunkPayload } from "./pr-review-conflict-resolution";
 import {
   PrReviewAnalysisService,
   type PrReviewConflictSuggestionResult,
@@ -32,7 +33,9 @@ import type {
   PrReviewFileReviewStatus,
   PrReviewFileStatus,
   PrReviewGithubChangedFile,
+  PrReviewGithubConflictStatusPayload,
   PrReviewGithubPullRequestDetail,
+  PrReviewGithubPullRequestMergePayload,
   PrReviewGithubReviewSubmissionPayload,
   PrReviewGithubReviewSubmitType,
   PrReviewModuleInfo,
@@ -75,6 +78,9 @@ interface PrReviewSummaryRow extends PrReviewSessionRow {
   deletions: number | string;
   commits_count: number | string;
   html_url: string;
+  pull_request_state: string;
+  pull_request_mergeable: boolean | null;
+  pull_request_merged_at: Date | string | null;
 }
 
 interface ReviewFlowRow extends QueryResultRow {
@@ -117,6 +123,18 @@ interface ReviewFileResultRow extends QueryResultRow {
   reviewed_by_user_id: string | null;
   reviewed_at: Date | string | null;
   workflow_order: number | string | null;
+}
+
+interface ReviewCanvasFallbackFileRow extends QueryResultRow {
+  id: string;
+  session_id: string;
+  file_path: string;
+  file_name: string;
+  file_status: PrReviewFileStatus;
+  file_role: string | null;
+  risk_level: PrReviewFileRiskLevel | null;
+  current_status: PrReviewFileReviewStatus;
+  workflow_order: number | string;
 }
 
 interface ReviewFileDetailRow extends QueryResultRow {
@@ -225,6 +243,17 @@ interface PrReviewSubmissionDraft {
   reviewBody?: unknown;
 }
 
+interface PrReviewConflictApplyDraft {
+  resolvedContent?: unknown;
+  expectedHeadSha?: unknown;
+  expectedHeadBlobSha?: unknown;
+}
+
+interface PrReviewMergeDraft {
+  expectedHeadSha?: unknown;
+  confirm?: unknown;
+}
+
 interface ReviewProgressRow extends QueryResultRow {
   reviewed_count: number | string;
   total_file_count: number | string;
@@ -265,6 +294,9 @@ export interface PrReviewSummaryPayload {
   commitsCount: number;
   githubUrl: string;
   headSha: string;
+  pullRequestState: "open" | "closed";
+  pullRequestMergeable: boolean | null;
+  pullRequestMergedAt: string | null;
   status: PrReviewSessionStatus;
   prPurpose: string | null;
   changeSummary: string[];
@@ -460,6 +492,8 @@ export interface PrReviewConflictFilePayload {
   type: PrReviewConflictFileType;
   isSupported: true;
   resolutionStatus: PrReviewConflictResolutionStatus;
+  headBlobSha: string;
+  headContent: string;
   hunks: PrReviewConflictHunkPayload[];
   aiSummary: string | null;
   aiSuggestion: string | null;
@@ -494,11 +528,31 @@ export interface PrReviewConflictSuggestionPayload {
   previousFilePath: string | null;
   type: "content";
   status: PrReviewConflictSuggestionStatus;
+  headSha: string;
+  headBlobSha: string;
   aiSummary: string;
   aiSuggestion: string;
+  resolvedHunks: PrReviewResolvedHunkPayload[];
   resolvedContent: string;
   validationMessages: string[];
   stored: false;
+}
+
+export interface PrReviewConflictApplyPayload {
+  reviewFileId: string;
+  filePath: string;
+  type: "content";
+  status: "applied";
+  appliedByGithubLogin: string;
+  commitSha: string;
+  commitUrl: string | null;
+  headShaBefore: string;
+  headShaAfter: string;
+  headBlobShaBefore: string;
+  headBlobShaAfter: string;
+  conflictStatus: PrReviewConflictStatus;
+  conflictCheckedAt: string | null;
+  localStateStatus: "updated" | "sync_required";
 }
 
 export interface PrReviewSubmissionFileResultPayload {
@@ -534,6 +588,19 @@ export interface PrReviewSubmissionListPayload {
   submissions: PrReviewSubmissionListItemPayload[];
 }
 
+export interface PrReviewMergePayload {
+  reviewSessionId: string;
+  pullRequestId: string;
+  status: "merged";
+  mergedByGithubLogin: string;
+  mergeMethod: "merge";
+  mergeCommitSha: string;
+  mergeCommitUrl: string | null;
+  pullRequestState: "closed";
+  mergedAt: string | null;
+  headSha: string;
+}
+
 export interface DeletePrReviewSessionPayload {
   deleted: true;
 }
@@ -563,9 +630,14 @@ const REVIEW_SUBMIT_TYPES: readonly PrReviewGithubReviewSubmitType[] = [
 
 const LARGE_DIFF_LINE_THRESHOLD = 1000;
 const LARGE_DIFF_PATCH_BYTES = 200 * 1024;
+const MAX_CONFLICT_APPLY_CONTENT_CHARS = 200 * 1024;
+const CONFLICT_STATUS_SETTLE_MAX_ATTEMPTS = 4;
+const CONFLICT_STATUS_SETTLE_DELAY_MS = 250;
+const CONFLICT_MARKER_PATTERN = /(^|\n)(<<<<<<<|=======|>>>>>>>)(?:\s|$)/;
 
 @Injectable()
 export class PrReviewService {
+  private readonly logger = new Logger(PrReviewService.name);
   private readonly inFlightSessionCreations = new Set<string>();
 
   constructor(
@@ -670,7 +742,14 @@ export class PrReviewService {
       throw notFound("Review session not found");
     }
 
-    return this.mapSummary(summary);
+    const refreshedSummary =
+      await this.refreshPendingReviewSessionConflictStatus(
+        currentUserId,
+        workspaceId,
+        summary
+      );
+
+    return this.mapSummary(refreshedSummary);
   }
 
   async getReviewSessionResult(
@@ -799,12 +878,23 @@ export class PrReviewService {
       if (
         conflictInput.mergeBaseContent === null ||
         conflictInput.baseContent === null ||
-        conflictInput.headContent === null
+        conflictInput.headContent === null ||
+        conflictInput.headBlobSha === null
       ) {
         unsupportedFiles.push(
           this.mapUnsupportedConflictFile(
             file,
             "content conflict input is not available"
+          )
+        );
+        continue;
+      }
+
+      if (conflictInput.headContent.length > MAX_CONFLICT_APPLY_CONTENT_CHARS) {
+        unsupportedFiles.push(
+          this.mapUnsupportedConflictFile(
+            file,
+            "file content is too large for conflict resolution apply"
           )
         );
         continue;
@@ -820,7 +910,14 @@ export class PrReviewService {
         continue;
       }
 
-      files.push(this.mapContentConflictFile(file, hunks));
+      files.push(
+        this.mapContentConflictFile(
+          file,
+          hunks,
+          conflictInput.headBlobSha,
+          conflictInput.headContent
+        )
+      );
     }
 
     return this.buildConflictAnalysisPayload({
@@ -843,34 +940,30 @@ export class PrReviewService {
       throw notFound("Review session not found");
     }
 
-    const [flows, flowFiles] = await Promise.all([
-      this.listReviewFlowsForSession(workspaceId, reviewSessionId),
-      this.listReviewFlowFilesForSession(workspaceId, reviewSessionId)
-    ]);
-    const filesByFlow = new Map<string, PrReviewFlowFilePayload[]>();
+    try {
+      const [flows, flowFiles] = await Promise.all([
+        this.listReviewFlowsForSession(workspaceId, reviewSessionId),
+        this.listReviewFlowFilesForSession(workspaceId, reviewSessionId)
+      ]);
+      const canvasFlows = this.buildCanvasFlows(flows, flowFiles);
 
-    for (const flowFile of flowFiles) {
-      const payload = this.mapFlowFile(flowFile);
-      const files = filesByFlow.get(payload.flowId) ?? [];
-      files.push(payload);
-      filesByFlow.set(payload.flowId, files);
+      if (this.shouldUseCanvasFallback(summary, canvasFlows)) {
+        return this.buildFallbackReviewSessionCanvas(
+          workspaceId,
+          reviewSessionId,
+          summary,
+          flows
+        );
+      }
+
+      return this.buildReviewSessionCanvasPayload(summary, canvasFlows);
+    } catch {
+      return this.buildFallbackReviewSessionCanvas(
+        workspaceId,
+        reviewSessionId,
+        summary
+      );
     }
-
-    const canvasFlows: PrReviewCanvasFlowPayload[] = flows.map((flow) => ({
-      ...this.mapFlow(flow),
-      files: filesByFlow.get(flow.id) ?? []
-    }));
-
-    return {
-      reviewSessionId: summary.id,
-      headBranch: summary.head_branch,
-      baseBranch: summary.base_branch,
-      reviewedCount: Number(summary.reviewed_count),
-      totalFileCount: Number(summary.total_file_count),
-      conflictStatus: summary.conflict_status,
-      flows: canvasFlows,
-      edges: this.buildCanvasEdges(canvasFlows)
-    };
   }
 
   async listReviewFlows(
@@ -1120,9 +1213,14 @@ export class PrReviewService {
     if (
       conflictInput.mergeBaseContent === null ||
       conflictInput.baseContent === null ||
-      conflictInput.headContent === null
+      conflictInput.headContent === null ||
+      conflictInput.headBlobSha === null
     ) {
       throw badRequest("content conflict input is not available");
+    }
+
+    if (conflictInput.headContent.length > MAX_CONFLICT_APPLY_CONTENT_CHARS) {
+      throw badRequest("file content is too large for conflict resolution apply");
     }
 
     const hunks = extractContentConflictHunks({
@@ -1138,10 +1236,202 @@ export class PrReviewService {
     const suggestion = await this.analysisService.suggestConflictResolution({
       filePath: file.file_path,
       previousFilePath: file.previous_file_path,
+      headContent: conflictInput.headContent,
       hunks
     });
 
-    return this.mapConflictSuggestion(file, suggestion);
+    return this.mapConflictSuggestion(file, conflictInput.headBlobSha, suggestion);
+  }
+
+  async applyReviewFileConflictResolution(
+    currentUserId: string,
+    workspaceId: string,
+    reviewFileId: string,
+    body: unknown
+  ): Promise<PrReviewConflictApplyPayload> {
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+
+    const input = this.normalizeConflictApply(body);
+    const file = await this.findReviewFileConflictSuggestionTarget(
+      workspaceId,
+      reviewFileId
+    );
+    if (!file) {
+      throw notFound("Review file not found");
+    }
+
+    if (file.conflict_status !== "conflicted") {
+      throw badRequest("Review session is not conflicted");
+    }
+
+    const unsupportedReason = this.getUnsupportedConflictFileReason(file);
+    if (unsupportedReason) {
+      throw badRequest(unsupportedReason);
+    }
+
+    if (file.head_sha !== input.expectedHeadSha) {
+      throw conflictError("Review session head SHA is stale");
+    }
+
+    const conflictAnalysis = await this.getReviewSessionConflicts(
+      currentUserId,
+      workspaceId,
+      file.session_id
+    );
+    const conflictFile = conflictAnalysis.files[0];
+    if (
+      conflictAnalysis.unsupportedFiles.length > 0 ||
+      conflictAnalysis.files.length !== 1 ||
+      conflictFile?.reviewFileId !== file.id
+    ) {
+      throw badRequest("Single supported content conflict file is required");
+    }
+
+    if (conflictFile.headBlobSha !== input.expectedHeadBlobSha) {
+      throw conflictError("Review file blob SHA is stale");
+    }
+
+    const applyResult = await this.githubDependency.applyPullRequestFileResolution(
+      currentUserId,
+      workspaceId,
+      file.pull_request_id,
+      {
+        filePath: file.file_path,
+        resolvedContent: input.resolvedContent,
+        expectedBaseSha: conflictAnalysis.baseSha,
+        expectedHeadSha: input.expectedHeadSha,
+        expectedHeadBlobSha: input.expectedHeadBlobSha
+      }
+    );
+    let conflictStatusRefreshed = true;
+    let refreshedConflict: PrReviewGithubConflictStatusPayload;
+    try {
+      refreshedConflict = await this.getSettledPullRequestConflictStatus(
+        currentUserId,
+        workspaceId,
+        file.pull_request_id
+      );
+    } catch {
+      conflictStatusRefreshed = false;
+      refreshedConflict = {
+        conflictStatus: "unknown",
+        checkedAt: null
+      };
+      this.logger.warn(
+        `GitHub conflict merge commit ${applyResult.commitSha} succeeded but conflict status refresh failed for ${file.pull_request_id}`
+      );
+    }
+
+    let reviewSessionUpdated = true;
+    try {
+      await this.updateReviewSessionAfterConflictApply({
+        reviewSessionId: file.session_id,
+        headSha: applyResult.headShaAfter,
+        conflictStatus: refreshedConflict.conflictStatus,
+        conflictCheckedAt: refreshedConflict.checkedAt
+      });
+    } catch {
+      reviewSessionUpdated = false;
+      this.logger.warn(
+        `GitHub conflict merge commit ${applyResult.commitSha} succeeded but review session update failed for ${file.session_id}`
+      );
+    }
+
+    return {
+      reviewFileId: file.id,
+      filePath: file.file_path,
+      type: "content",
+      status: "applied",
+      appliedByGithubLogin: applyResult.appliedByGithubLogin,
+      commitSha: applyResult.commitSha,
+      commitUrl: applyResult.commitUrl,
+      headShaBefore: applyResult.headShaBefore,
+      headShaAfter: applyResult.headShaAfter,
+      headBlobShaBefore: applyResult.headBlobShaBefore,
+      headBlobShaAfter: applyResult.headBlobShaAfter,
+      conflictStatus: refreshedConflict.conflictStatus,
+      conflictCheckedAt: refreshedConflict.checkedAt,
+      localStateStatus:
+        applyResult.localCacheUpdated &&
+        conflictStatusRefreshed &&
+        reviewSessionUpdated
+          ? "updated"
+          : "sync_required"
+    };
+  }
+
+  async mergeReviewSession(
+    currentUserId: string,
+    workspaceId: string,
+    reviewSessionId: string,
+    body: unknown
+  ): Promise<PrReviewMergePayload> {
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+
+    const input = this.normalizeReviewSessionMerge(body);
+    const session = await this.findReviewSession(workspaceId, reviewSessionId);
+    if (!session) {
+      throw notFound("Review session not found");
+    }
+
+    this.assertReviewSessionSubmitted(session);
+
+    if (session.head_sha !== input.expectedHeadSha) {
+      throw conflictError("Review session head SHA is stale");
+    }
+
+    let refreshedConflict: PrReviewGithubConflictStatusPayload;
+    try {
+      refreshedConflict = await this.getSettledPullRequestConflictStatus(
+        currentUserId,
+        workspaceId,
+        session.pull_request_id
+      );
+    } catch {
+      throw badRequest("GitHub pull request conflict status could not be verified");
+    }
+
+    try {
+      await this.updateReviewSessionConflictStatus({
+        reviewSessionId: session.id,
+        expectedHeadSha: session.head_sha,
+        conflictStatus: refreshedConflict.conflictStatus,
+        conflictCheckedAt: refreshedConflict.checkedAt
+      });
+    } catch {
+      this.logger.warn(
+        `GitHub conflict status was refreshed but review session update failed for ${session.id}`
+      );
+    }
+
+    this.assertReviewSessionMergeable({
+      ...session,
+      conflict_status: refreshedConflict.conflictStatus,
+      conflict_checked_at: refreshedConflict.checkedAt
+    });
+
+    const mergeResult: PrReviewGithubPullRequestMergePayload =
+      await this.githubDependency.mergePullRequest(
+        currentUserId,
+        workspaceId,
+        session.pull_request_id,
+        {
+          expectedHeadSha: input.expectedHeadSha
+        }
+      );
+
+    return {
+      reviewSessionId: session.id,
+      pullRequestId: session.pull_request_id,
+      status: "merged",
+      mergedByGithubLogin: mergeResult.mergedByGithubLogin,
+      mergeMethod: mergeResult.mergeMethod,
+      mergeCommitSha: mergeResult.mergeCommitSha,
+      mergeCommitUrl: mergeResult.mergeCommitUrl,
+      pullRequestState: mergeResult.pullRequestState,
+      mergedAt: mergeResult.mergedAt,
+      headSha: mergeResult.headSha
+    };
   }
 
   async submitReviewSession(
@@ -1313,6 +1603,144 @@ export class PrReviewService {
     return this.mapSession(session);
   }
 
+  private async updateReviewSessionAfterConflictApply(input: {
+    reviewSessionId: string;
+    headSha: string;
+    conflictStatus: PrReviewConflictStatus;
+    conflictCheckedAt: string | null;
+  }): Promise<void> {
+    const updated = await this.database.queryOne<{ id: string }>(
+      `
+        UPDATE pr_review_sessions
+        SET
+          head_sha = $2,
+          conflict_status = $3,
+          conflict_checked_at = $4,
+          updated_at = now()
+        WHERE id = $1
+        RETURNING id
+      `,
+      [
+        input.reviewSessionId,
+        input.headSha,
+        input.conflictStatus,
+        input.conflictCheckedAt
+      ]
+    );
+
+    if (!updated) {
+      throw badRequest("Review session could not be updated");
+    }
+  }
+
+  private async refreshPendingReviewSessionConflictStatus<
+    T extends PrReviewSessionRow
+  >(
+    currentUserId: string,
+    workspaceId: string,
+    session: T
+  ): Promise<T> {
+    if (
+      session.conflict_status !== "checking" &&
+      session.conflict_status !== "unknown"
+    ) {
+      return session;
+    }
+
+    try {
+      const conflict = await this.getSettledPullRequestConflictStatus(
+        currentUserId,
+        workspaceId,
+        session.pull_request_id
+      );
+      const updated = await this.updateReviewSessionConflictStatus({
+        reviewSessionId: session.id,
+        expectedHeadSha: session.head_sha,
+        conflictStatus: conflict.conflictStatus,
+        conflictCheckedAt: conflict.checkedAt
+      });
+
+      if (!updated) {
+        return session;
+      }
+
+      return {
+        ...session,
+        conflict_status: conflict.conflictStatus,
+        conflict_checked_at: conflict.checkedAt
+      };
+    } catch {
+      this.logger.warn(
+        `GitHub conflict status refresh failed for review session ${session.id}`
+      );
+      return session;
+    }
+  }
+
+  private async getSettledPullRequestConflictStatus(
+    currentUserId: string,
+    workspaceId: string,
+    pullRequestId: string
+  ): Promise<PrReviewGithubConflictStatusPayload> {
+    let conflict: PrReviewGithubConflictStatusPayload = {
+      conflictStatus: "checking",
+      checkedAt: null
+    };
+
+    for (
+      let attempt = 1;
+      attempt <= CONFLICT_STATUS_SETTLE_MAX_ATTEMPTS;
+      attempt += 1
+    ) {
+      conflict = await this.githubDependency.getPullRequestConflictStatus(
+        currentUserId,
+        workspaceId,
+        pullRequestId
+      );
+
+      if (
+        conflict.conflictStatus !== "checking" ||
+        attempt === CONFLICT_STATUS_SETTLE_MAX_ATTEMPTS
+      ) {
+        return conflict;
+      }
+
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, CONFLICT_STATUS_SETTLE_DELAY_MS * attempt);
+      });
+    }
+
+    return conflict;
+  }
+
+  private async updateReviewSessionConflictStatus(input: {
+    reviewSessionId: string;
+    expectedHeadSha: string;
+    conflictStatus: PrReviewConflictStatus;
+    conflictCheckedAt: string | null;
+  }): Promise<boolean> {
+    const updated = await this.database.queryOne<{ id: string }>(
+      `
+        UPDATE pr_review_sessions
+        SET
+          conflict_status = $3,
+          conflict_checked_at = $4,
+          updated_at = now()
+        WHERE id = $1
+          AND head_sha = $2
+        RETURNING id
+      `,
+      [
+        input.reviewSessionId,
+        input.expectedHeadSha,
+        input.conflictStatus,
+        input.conflictCheckedAt
+      ]
+    );
+
+    return Boolean(updated);
+  }
+
   async deleteReviewSession(
     currentUserId: string,
     workspaceId: string,
@@ -1434,7 +1862,23 @@ export class PrReviewService {
           pull_request.additions,
           pull_request.deletions,
           pull_request.commits_count,
-          pull_request.html_url
+          pull_request.html_url,
+          COALESCE(
+            NULLIF(pull_request.raw->>'state', ''),
+            CASE
+              WHEN pull_request.merged_at IS NOT NULL
+                OR pull_request.github_closed_at IS NOT NULL
+                THEN 'closed'
+              ELSE 'open'
+            END
+          ) AS pull_request_state,
+          CASE
+            WHEN pull_request.raw ? 'mergeable'
+              AND jsonb_typeof(pull_request.raw->'mergeable') = 'boolean'
+              THEN (pull_request.raw->>'mergeable')::boolean
+            ELSE NULL
+          END AS pull_request_mergeable,
+          pull_request.merged_at AS pull_request_merged_at
         FROM pr_review_sessions AS review_session
         JOIN github_pull_requests AS pull_request
           ON pull_request.id = review_session.pull_request_id
@@ -1497,6 +1941,35 @@ export class PrReviewService {
           review_file.file_status,
           review_file.is_binary,
           review_file.is_large_diff
+        FROM review_files AS review_file
+        JOIN pr_review_sessions AS review_session
+          ON review_session.id = review_file.session_id
+        JOIN github_pull_requests AS pull_request
+          ON pull_request.id = review_session.pull_request_id
+        WHERE pull_request.workspace_id = $1
+          AND review_session.id = $2
+        ORDER BY review_file.file_path ASC
+      `,
+      [workspaceId, this.requireUuid(reviewSessionId, "reviewSessionId")]
+    );
+  }
+
+  private async listReviewFilesForCanvasFallback(
+    workspaceId: string,
+    reviewSessionId: string
+  ): Promise<ReviewCanvasFallbackFileRow[]> {
+    return this.database.query<ReviewCanvasFallbackFileRow>(
+      `
+        SELECT
+          review_file.id,
+          review_file.session_id,
+          review_file.file_path,
+          review_file.file_name,
+          review_file.file_status,
+          review_file.file_role,
+          review_file.risk_level,
+          review_file.current_status,
+          ROW_NUMBER() OVER (ORDER BY review_file.file_path ASC) AS workflow_order
         FROM review_files AS review_file
         JOIN pr_review_sessions AS review_session
           ON review_session.id = review_file.session_id
@@ -2045,14 +2518,12 @@ export class PrReviewService {
             comment = $4,
             reviewed_by_user_id = $5,
             reviewed_at = now()
+        FROM pr_review_sessions AS review_session
+        JOIN github_pull_requests AS pull_request
+          ON pull_request.id = review_session.pull_request_id
         WHERE review_file.id = $2
-          AND review_file.session_id IN (
-            SELECT review_session.id
-            FROM pr_review_sessions AS review_session
-            JOIN github_pull_requests AS pull_request
-              ON pull_request.id = review_session.pull_request_id
-            WHERE pull_request.workspace_id = $1
-          )
+          AND review_file.session_id = review_session.id
+          AND pull_request.workspace_id = $1
         RETURNING review_file.id, review_file.session_id
       `,
       [
@@ -2420,7 +2891,9 @@ export class PrReviewService {
 
   private mapContentConflictFile(
     file: ReviewFileConflictTargetRow,
-    hunks: PrReviewConflictHunkPayload[]
+    hunks: PrReviewConflictHunkPayload[],
+    headBlobSha: string,
+    headContent: string
   ): PrReviewConflictFilePayload {
     return {
       reviewFileId: file.id,
@@ -2429,6 +2902,8 @@ export class PrReviewService {
       type: "content",
       isSupported: true,
       resolutionStatus: "unresolved",
+      headBlobSha,
+      headContent,
       hunks,
       aiSummary: null,
       aiSuggestion: null,
@@ -2450,6 +2925,7 @@ export class PrReviewService {
 
   private mapConflictSuggestion(
     file: ReviewFileConflictSuggestionTargetRow,
+    headBlobSha: string,
     suggestion: PrReviewConflictSuggestionResult
   ): PrReviewConflictSuggestionPayload {
     return {
@@ -2459,8 +2935,11 @@ export class PrReviewService {
       type: "content",
       status:
         suggestion.validationStatus === "valid" ? "suggested" : "invalid",
+      headSha: file.head_sha,
+      headBlobSha,
       aiSummary: suggestion.aiSummary,
       aiSuggestion: suggestion.aiSuggestion,
+      resolvedHunks: suggestion.resolvedHunks,
       resolvedContent: suggestion.resolvedContent,
       validationMessages: suggestion.validationMessages,
       stored: false
@@ -2538,6 +3017,80 @@ export class PrReviewService {
     };
   }
 
+  private normalizeConflictApply(body: unknown): {
+    resolvedContent: string;
+    expectedHeadSha: string;
+    expectedHeadBlobSha: string;
+  } {
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      throw badRequest("Request body must be an object");
+    }
+
+    const draft = body as PrReviewConflictApplyDraft;
+    if (typeof draft.resolvedContent !== "string") {
+      throw badRequest("resolvedContent must be a string");
+    }
+
+    const resolvedContent = draft.resolvedContent
+      .replace(/\r\n/g, "\n")
+      .replace(/\r/g, "\n");
+    if (!resolvedContent.trim()) {
+      throw badRequest("resolvedContent must not be empty");
+    }
+
+    if (resolvedContent.length > MAX_CONFLICT_APPLY_CONTENT_CHARS) {
+      throw badRequest("resolvedContent is too large");
+    }
+
+    if (CONFLICT_MARKER_PATTERN.test(resolvedContent)) {
+      throw badRequest("resolvedContent must not contain conflict markers");
+    }
+
+    if (
+      typeof draft.expectedHeadSha !== "string" ||
+      !draft.expectedHeadSha.trim()
+    ) {
+      throw badRequest("expectedHeadSha must not be empty");
+    }
+
+    if (
+      typeof draft.expectedHeadBlobSha !== "string" ||
+      !draft.expectedHeadBlobSha.trim()
+    ) {
+      throw badRequest("expectedHeadBlobSha must not be empty");
+    }
+
+    return {
+      resolvedContent,
+      expectedHeadSha: draft.expectedHeadSha.trim(),
+      expectedHeadBlobSha: draft.expectedHeadBlobSha.trim()
+    };
+  }
+
+  private normalizeReviewSessionMerge(body: unknown): {
+    expectedHeadSha: string;
+  } {
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      throw badRequest("Request body must be an object");
+    }
+
+    const draft = body as PrReviewMergeDraft;
+    if (draft.confirm !== true) {
+      throw badRequest("confirm must be true");
+    }
+
+    if (
+      typeof draft.expectedHeadSha !== "string" ||
+      !draft.expectedHeadSha.trim()
+    ) {
+      throw badRequest("expectedHeadSha must not be empty");
+    }
+
+    return {
+      expectedHeadSha: draft.expectedHeadSha.trim()
+    };
+  }
+
   private normalizeReviewSubmission(body: unknown): {
     submitType: PrReviewGithubReviewSubmitType;
     reviewBody: string;
@@ -2585,6 +3138,20 @@ export class PrReviewService {
     }
   }
 
+  private assertReviewSessionSubmitted(session: PrReviewSessionRow): void {
+    if (session.status !== "submitted") {
+      throw badRequest("GitHub Review must be submitted before merge");
+    }
+  }
+
+  private assertReviewSessionMergeable(session: PrReviewSessionRow): void {
+    this.assertReviewSessionSubmitted(session);
+
+    if (session.conflict_status !== "clean") {
+      throw badRequest("Resolve PR conflicts before merge");
+    }
+  }
+
   private isSessionStatus(value: string): value is PrReviewSessionStatus {
     return SESSION_STATUSES.includes(value as PrReviewSessionStatus);
   }
@@ -2616,6 +3183,89 @@ export class PrReviewService {
     }
 
     return value;
+  }
+
+  private buildCanvasFlows(
+    flows: ReviewFlowListRow[],
+    flowFiles: ReviewFlowFileRow[]
+  ): PrReviewCanvasFlowPayload[] {
+    const filesByFlow = new Map<string, PrReviewFlowFilePayload[]>();
+
+    for (const flowFile of flowFiles) {
+      const payload = this.mapFlowFile(flowFile);
+      const files = filesByFlow.get(payload.flowId) ?? [];
+      files.push(payload);
+      filesByFlow.set(payload.flowId, files);
+    }
+
+    return flows.map((flow) => ({
+      ...this.mapFlow(flow),
+      files: filesByFlow.get(flow.id) ?? []
+    }));
+  }
+
+  private shouldUseCanvasFallback(
+    summary: PrReviewSummaryRow,
+    flows: PrReviewCanvasFlowPayload[]
+  ): boolean {
+    return (
+      Number(summary.total_file_count) > 0 &&
+      flows.reduce((count, flow) => count + flow.files.length, 0) === 0
+    );
+  }
+
+  private async buildFallbackReviewSessionCanvas(
+    workspaceId: string,
+    reviewSessionId: string,
+    summary: PrReviewSummaryRow,
+    flows: ReviewFlowListRow[] = []
+  ): Promise<PrReviewCanvasPayload> {
+    const files = await this.listReviewFilesForCanvasFallback(
+      workspaceId,
+      reviewSessionId
+    );
+
+    if (files.length === 0) {
+      return this.buildReviewSessionCanvasPayload(
+        summary,
+        flows.map((flow) => ({
+          ...this.mapFlow(flow),
+          files: []
+        }))
+      );
+    }
+
+    const primaryFlow = flows[0] ?? null;
+    const fallbackFlowId = primaryFlow?.id ?? `${summary.id}:fallback-flow`;
+    const fallbackFlow: PrReviewCanvasFlowPayload = {
+      id: fallbackFlowId,
+      reviewSessionId: summary.id,
+      title: primaryFlow?.title ?? "PR 변경 파일 리뷰",
+      description:
+        primaryFlow?.description ??
+        "리뷰 흐름 연결 정보를 사용할 수 없어 변경 파일 기준으로 구성했습니다.",
+      sortOrder: primaryFlow ? Number(primaryFlow.sort_order) : 1,
+      fileCount: files.length,
+      files: files.map((file) => this.mapFallbackFlowFile(file, fallbackFlowId))
+    };
+
+    return this.buildReviewSessionCanvasPayload(summary, [fallbackFlow]);
+  }
+
+  private buildReviewSessionCanvasPayload(
+    summary: PrReviewSummaryRow,
+    flows: PrReviewCanvasFlowPayload[]
+  ): PrReviewCanvasPayload {
+    return {
+      reviewSessionId: summary.id,
+      headBranch: summary.head_branch,
+      baseBranch: summary.base_branch,
+      reviewedCount: Number(summary.reviewed_count),
+      totalFileCount: Number(summary.total_file_count),
+      conflictStatus: summary.conflict_status,
+      flows,
+      edges: this.buildCanvasEdges(flows)
+    };
   }
 
   private mapSession(session: PrReviewSessionRow): PrReviewSessionPayload {
@@ -2659,6 +3309,12 @@ export class PrReviewService {
       commitsCount: Number(summary.commits_count),
       githubUrl: summary.html_url,
       headSha: summary.head_sha,
+      pullRequestState:
+        summary.pull_request_state === "closed" ? "closed" : "open",
+      pullRequestMergeable: summary.pull_request_mergeable,
+      pullRequestMergedAt: this.toNullableIsoString(
+        summary.pull_request_merged_at
+      ),
       status: summary.status,
       prPurpose: summary.pr_purpose,
       changeSummary: this.toStringArray(summary.change_summary),
@@ -2704,6 +3360,41 @@ export class PrReviewService {
         reviewSessionId: file.session_id,
         reviewFlowFileId: file.id,
         flowId: file.flow_id,
+        workflowOrder,
+        fileName: file.file_name,
+        filePath: file.file_path,
+        roleSummary: file.file_role,
+        riskLevel,
+        reviewStatus: file.current_status
+      }
+    };
+  }
+
+  private mapFallbackFlowFile(
+    file: ReviewCanvasFallbackFileRow,
+    flowId: string
+  ): PrReviewFlowFilePayload {
+    const workflowOrder = Number(file.workflow_order);
+    const riskLevel = this.normalizeRiskLevel(file.risk_level);
+    const fallbackReviewFlowFileId = `${flowId}:${file.id}:fallback`;
+
+    return {
+      id: fallbackReviewFlowFileId,
+      reviewSessionId: file.session_id,
+      flowId,
+      reviewFileId: file.id,
+      workflowOrder,
+      filePath: file.file_path,
+      fileName: file.file_name,
+      fileStatus: file.file_status,
+      fileRole: file.file_role,
+      riskLevel,
+      currentStatus: file.current_status,
+      fileNodeData: {
+        reviewFileId: file.id,
+        reviewSessionId: file.session_id,
+        reviewFlowFileId: fallbackReviewFlowFileId,
+        flowId,
         workflowOrder,
         fileName: file.file_name,
         filePath: file.file_path,

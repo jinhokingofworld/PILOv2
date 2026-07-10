@@ -7,11 +7,18 @@ import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { createBoardApiClient } from "@/features/board/api/client";
+import { BoardIssueAssigneeSelector } from "@/features/board/components/board-issue-assignee-selector";
 import type {
+  BoardIssueAssigneeOptionPayload,
   BoardIssueDetailPayload,
   BoardIssueState,
-  BoardRelatedPullRequestPayload
+  BoardRelatedPullRequestPayload,
+  UpdateBoardIssueInput
 } from "@/features/board/types";
+import {
+  haveSameAssigneeLogins,
+  startAssigneeEditSession
+} from "@/features/board/utils/board-assignee-state";
 import {
   formatBoardDateTime,
   formatBoardIssueNumber,
@@ -30,6 +37,12 @@ type BoardIssueSheetProps = {
   onIssueUpdated?: (issue: BoardIssueDetailPayload) => void;
   workspaceId: string;
 };
+
+function readAssigneeLogins(issue: BoardIssueDetailPayload): string[] {
+  return issue.assignees
+    .map(readBoardAssigneeLogin)
+    .filter((login): login is string => Boolean(login));
+}
 
 function ProjectFieldValue({
   value
@@ -65,6 +78,16 @@ export function BoardIssueSheet({
   const [pullRequests, setPullRequests] = useState<
     BoardRelatedPullRequestPayload[]
   >([]);
+  const [assigneeOptions, setAssigneeOptions] = useState<
+    BoardIssueAssigneeOptionPayload[]
+  >([]);
+  const [assigneeOptionsStatus, setAssigneeOptionsStatus] = useState<
+    "idle" | "loading" | "success" | "error"
+  >("idle");
+  const [assigneeOptionsError, setAssigneeOptionsError] = useState<string | null>(
+    null
+  );
+  const [assigneeOptionsRequestKey, setAssigneeOptionsRequestKey] = useState(0);
   const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">(
     "idle"
   );
@@ -75,6 +98,7 @@ export function BoardIssueSheet({
   const [draftTitle, setDraftTitle] = useState("");
   const [draftBody, setDraftBody] = useState("");
   const [draftState, setDraftState] = useState<BoardIssueState>("open");
+  const [draftAssignees, setDraftAssignees] = useState<string[]>([]);
   const boardClient = useMemo(
     () => createBoardApiClient({ accessToken }),
     [accessToken]
@@ -85,6 +109,7 @@ export function BoardIssueSheet({
     setDraftTitle(nextIssue.title);
     setDraftBody(nextIssue.body ?? "");
     setDraftState(nextIssue.state ?? "open");
+    setDraftAssignees(readAssigneeLogins(nextIssue));
   }
 
   useEffect(() => {
@@ -94,6 +119,9 @@ export function BoardIssueSheet({
       if (!open || !issueId || !workspaceId || !boardId || !accessToken) {
         setIssue(null);
         setPullRequests([]);
+        setAssigneeOptions([]);
+        setAssigneeOptionsStatus("idle");
+        setAssigneeOptionsError(null);
         setStatus("idle");
         setError(null);
         setIsEditing(false);
@@ -102,6 +130,10 @@ export function BoardIssueSheet({
       }
 
       setStatus("loading");
+      setIsEditing(false);
+      setAssigneeOptions([]);
+      setAssigneeOptionsStatus("idle");
+      setAssigneeOptionsError(null);
       setError(null);
       setSaveError(null);
 
@@ -140,6 +172,80 @@ export function BoardIssueSheet({
     };
   }, [accessToken, boardClient, boardId, issueId, open, workspaceId]);
 
+  useEffect(() => {
+    let active = true;
+
+    async function loadAssigneeOptions() {
+      if (
+        !isEditing ||
+        !open ||
+        !issueId ||
+        issue?.id !== issueId ||
+        !workspaceId ||
+        !boardId ||
+        !accessToken ||
+        assigneeOptionsStatus !== "idle"
+      ) {
+        return;
+      }
+
+      setAssigneeOptionsStatus("loading");
+      setAssigneeOptionsError(null);
+      try {
+        const options = await boardClient.listBoardIssueAssigneeOptions(
+          workspaceId,
+          boardId,
+          issueId
+        );
+        if (!active) return;
+        setAssigneeOptions(options);
+        setAssigneeOptionsStatus("success");
+      } catch (loadError) {
+        if (!active) return;
+        setAssigneeOptions([]);
+        setAssigneeOptionsStatus("error");
+        setAssigneeOptionsError(
+          loadError instanceof Error
+            ? loadError.message
+            : "담당자 후보를 불러오지 못했습니다."
+        );
+      }
+    }
+
+    void loadAssigneeOptions();
+
+    return () => {
+      active = false;
+    };
+  }, [
+    accessToken,
+    assigneeOptionsRequestKey,
+    boardClient,
+    boardId,
+    isEditing,
+    issue?.id,
+    issueId,
+    open,
+    workspaceId
+  ]);
+
+  function handleStartEditing() {
+    if (!issue) return;
+
+    const nextSession = startAssigneeEditSession(assigneeOptionsStatus);
+    resetDraft(issue);
+    setAssigneeOptionsStatus(nextSession.status);
+    setAssigneeOptionsError(nextSession.error);
+    setSaveError(null);
+    setIsEditing(true);
+  }
+
+  function handleRetryAssigneeOptions() {
+    setAssigneeOptionsStatus("idle");
+    setAssigneeOptionsError(null);
+    setAssigneeOptionsRequestKey((requestKey) => requestKey + 1);
+  }
+
   async function handleSaveIssue() {
     if (!issue || !issueId) return;
 
@@ -153,15 +259,24 @@ export function BoardIssueSheet({
     setSaveError(null);
 
     try {
+      const assigneesChanged = !haveSameAssigneeLogins(
+        draftAssignees,
+        readAssigneeLogins(issue)
+      );
+      const updateInput: UpdateBoardIssueInput = {
+        body: draftBody,
+        state: draftState,
+        title
+      };
+      if (assigneeOptionsStatus === "success" && assigneesChanged) {
+        updateInput.assignees = draftAssignees;
+      }
+
       const result = await boardClient.updateBoardIssue(
         workspaceId,
         boardId,
         issueId,
-        {
-          body: draftBody,
-          state: draftState,
-          title
-        }
+        updateInput
       );
 
       setIssue(result.issue);
@@ -302,11 +417,7 @@ export function BoardIssueSheet({
                         type="button"
                         size="sm"
                         variant="outline"
-                        onClick={() => {
-                          resetDraft(issue);
-                          setSaveError(null);
-                          setIsEditing(true);
-                        }}
+                        onClick={handleStartEditing}
                       >
                         <Pencil />
                         수정
@@ -360,11 +471,21 @@ export function BoardIssueSheet({
                   <div>
                     <dt className="font-medium text-muted-foreground">담당자</dt>
                     <dd className="mt-1">
-                      {issue.assignees
-                        .map(readBoardAssigneeLogin)
-                        .filter(Boolean)
-                        .map((login) => `@${login}`)
-                        .join(", ") || "없음"}
+                      {isEditing ? (
+                        <BoardIssueAssigneeSelector
+                          disabled={isSaving}
+                          error={assigneeOptionsError}
+                          onChange={setDraftAssignees}
+                          onRetry={handleRetryAssigneeOptions}
+                          options={assigneeOptions}
+                          status={assigneeOptionsStatus}
+                          value={draftAssignees}
+                        />
+                      ) : (
+                        readAssigneeLogins(issue)
+                          .map((login) => `@${login}`)
+                          .join(", ") || "없음"
+                      )}
                     </dd>
                   </div>
                   <div>

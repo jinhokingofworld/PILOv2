@@ -4,6 +4,7 @@ export const SQLTOERD_LAYOUT_JSON_VERSION = 1;
 export type SqltoerdSourceFormat = "sql";
 
 export type SqltoerdDialect = "auto" | "postgresql" | "mysql";
+export type SqltoerdResolvedDialect = Exclude<SqltoerdDialect, "auto">;
 
 export type SqlErdSelection =
   | { type: "none" }

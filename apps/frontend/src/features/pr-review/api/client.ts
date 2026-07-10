@@ -1,6 +1,9 @@
 import type {
+  ApplyPrReviewConflictResolutionInput,
   ListPrReviewPullRequestsQuery,
   ListPrReviewRepositoriesQuery,
+  MergePrReviewSessionInput,
+  PrReviewConflictApplyResult,
   PrReviewCanvas,
   PrReviewConflictAnalysis,
   PrReviewConflictSuggestion,
@@ -10,6 +13,7 @@ import type {
   PrReviewPullRequest,
   PrReviewPullRequestDetail,
   PrReviewPullRequestFile,
+  PrReviewMergeResult,
   PrReviewRepository,
   PrReviewSession,
   PrReviewSessionResult,
@@ -446,6 +450,21 @@ export function createPrReviewApiClient({
       );
     },
 
+    async applyReviewFileConflictResolution(
+      workspaceId: string,
+      reviewFileId: string,
+      input: ApplyPrReviewConflictResolutionInput
+    ) {
+      return requestPrReviewData<PrReviewConflictApplyResult>(
+        `${reviewFileGithubPath(workspaceId, reviewFileId)}/conflict-apply`,
+        {
+          body: JSON.stringify(input),
+          method: "POST"
+        },
+        requestOptions
+      );
+    },
+
     async getReviewSessionResult(
       workspaceId: string,
       reviewSessionId: string
@@ -464,6 +483,21 @@ export function createPrReviewApiClient({
     ) {
       return requestPrReviewData<PrReviewSubmission>(
         `${reviewSessionGithubPath(workspaceId, reviewSessionId)}/submissions`,
+        {
+          body: JSON.stringify(input),
+          method: "POST"
+        },
+        requestOptions
+      );
+    },
+
+    async mergeReviewSession(
+      workspaceId: string,
+      reviewSessionId: string,
+      input: MergePrReviewSessionInput
+    ) {
+      return requestPrReviewData<PrReviewMergeResult>(
+        `${reviewSessionGithubPath(workspaceId, reviewSessionId)}/merge`,
         {
           body: JSON.stringify(input),
           method: "POST"

@@ -19,6 +19,7 @@
 
 ## 하위 폴더
 
+- `github/`: 여러 feature가 공유하는 GitHub 기반 UI 선택값 adapter. API/DB source of truth와 GitHub token을 소유하지 않는다.
 - `tldraw/`: tldraw 기반 rendering surface. Canvas API/DB 저장 흐름은 소유하지 않는다.
 
 ## 변경 기준

@@ -1,23 +1,35 @@
 # sqltoerd API
 
+## 상태
+
+- 대상 단계: Post-MVP Phase 1 Workspace multi-session
+- 현재 구현: singular MVP API
+- canonical API: 이 문서의 plural endpoint
+- 전환기 API: plural 구현 이후 singular endpoint를 compatibility API로 유지
+- 적용 순서: API 계약 확정, DB migration, app-server 구현, frontend 전환
+
+plural endpoint가 app-server에 구현되기 전까지 현재 singular endpoint가 실제 API다.
+구현 이후 신규 consumer는 plural endpoint만 사용한다.
+
 ## 범위
 
-sqltoerd API는 로그인한 Workspace 사용자가 MVP sqltoerd session을 Workspace에
-저장하고 복원하기 위한 API다.
-
-MVP에서는 active Workspace당 활성 sqltoerd session 1개만 지원한다. 이 문서에서는
+sqltoerd API는 로그인한 Workspace 사용자가 여러 sqltoerd session을 Workspace에
+저장하고 목록에서 선택, 조회, 수정, 삭제하기 위한 API다. 이 문서에서는
 `project`라는 용어를 사용하지 않고 `session`이라는 용어를 사용한다.
 
 API가 담당하는 범위:
 
-- active Workspace의 단일 sqltoerd session 조회
-- sqltoerd session 생성
-- sqltoerd session 자동 저장/수정
-- sqltoerd session soft delete
+- Workspace의 활성 sqltoerd session 목록 조회
+- 특정 sqltoerd session 상세 조회
+- 여러 sqltoerd session 생성
+- 특정 sqltoerd session 자동 저장/수정
+- 특정 sqltoerd session soft delete
+- 목록 cursor pagination과 최근 수정순 정렬
+- singular endpoint의 전환기 호환
 - revision 기반 autosave conflict 감지
 - 저장 payload validation
 
-MVP API 범위가 아닌 것:
+이번 API 계약 범위가 아닌 것:
 
 - SQL 실행
 - SQL migration 적용
@@ -38,7 +50,8 @@ MVP API 범위가 아닌 것:
 - URL 공유
 - 실시간 협업
 - 자유형 Canvas shape API와 sqltoerd object의 양방향 동기화
-- Workspace별 여러 sqltoerd session 목록/최근 session 관리
+- 최근 열람 시각 또는 최근 session pointer 저장
+- 삭제 session 복구와 version history
 
 sqltoerd는 자유형 Canvas의 하위 도구가 아니라 Workspace의 독립 기능이다. 화면은
 tldraw 기반 surface를 사용할 수 있지만, 저장 API는 `canvas-api.md`의 freeform
@@ -58,17 +71,34 @@ canvas shape API를 재사용하지 않는다.
 - app-server는 SQL/source text를 DB query, migration, parser input, log message로 사용하지 않는다.
 - 응답과 error message에는 SQL/source text 일부를 echo하지 않는다.
 - 삭제는 `deletedAt`을 사용하는 soft delete로 처리한다.
+- 목록과 상세 조회는 `deletedAt IS NULL`인 session만 반환한다.
+- session title은 같은 Workspace 안에서 중복될 수 있다.
+- 목록 summary에는 `sourceText`, `modelJson`, `layoutJson`, `settingsJson`을
+  포함하지 않는다.
+- 목록/상세 조회 자체는 `updatedAt`이나 `revision`을 변경하지 않는다.
 - 자동 저장은 client에서 session당 2초에 1회 이하로 debounce/throttle한다.
 - 같은 session을 여러 탭이나 기기에서 수정할 수 있으므로 `revision` 기반 conflict 처리를 사용한다.
 
 ## API 목록
 
+### Canonical plural API
+
 | Method | Endpoint | 설명 |
 | --- | --- | --- |
-| `GET` | `/workspaces/{workspaceId}/sql-erd-session` | active Workspace의 활성 sqltoerd session 조회 |
-| `POST` | `/workspaces/{workspaceId}/sql-erd-session` | sqltoerd session 생성 |
-| `PATCH` | `/workspaces/{workspaceId}/sql-erd-session/{sessionId}` | sqltoerd session 자동 저장/수정 |
-| `DELETE` | `/workspaces/{workspaceId}/sql-erd-session/{sessionId}` | sqltoerd session soft delete |
+| `GET` | `/workspaces/{workspaceId}/sql-erd-sessions` | 활성 session 목록 조회 |
+| `POST` | `/workspaces/{workspaceId}/sql-erd-sessions` | session 생성 |
+| `GET` | `/workspaces/{workspaceId}/sql-erd-sessions/{sessionId}` | session 상세 조회 |
+| `PATCH` | `/workspaces/{workspaceId}/sql-erd-sessions/{sessionId}` | session 자동 저장/수정 |
+| `DELETE` | `/workspaces/{workspaceId}/sql-erd-sessions/{sessionId}` | session soft delete |
+
+### Singular compatibility API
+
+| Method | Endpoint | 설명 |
+| --- | --- | --- |
+| `GET` | `/workspaces/{workspaceId}/sql-erd-session` | 가장 최근에 수정된 활성 session 조회 |
+| `POST` | `/workspaces/{workspaceId}/sql-erd-session` | 활성 session이 없을 때만 legacy session 생성 |
+| `PATCH` | `/workspaces/{workspaceId}/sql-erd-session/{sessionId}` | 기존 session 수정 |
+| `DELETE` | `/workspaces/{workspaceId}/sql-erd-session/{sessionId}` | 기존 session soft delete |
 
 Endpoint 표는 공통 API 문서 규칙에 따라 `/api/v1` base path를 생략한다.
 
@@ -76,7 +106,7 @@ Endpoint 표는 공통 API 문서 규칙에 따라 `/api/v1` base path를 생략
 
 ### Source Format
 
-MVP write API는 아래 값만 허용한다.
+현재 write API는 아래 값만 허용한다.
 
 ```text
 sql
@@ -84,7 +114,7 @@ sql
 
 ### SQL Dialect
 
-MVP write API는 아래 값을 허용한다.
+현재 write API는 아래 값을 허용한다.
 
 ```text
 auto
@@ -210,7 +240,33 @@ type SqltoerdLayoutJsonV1 = {
 - client가 보낸 `tableCount`, `relationCount`는 사용하지 않는다.
 - `layoutJson.tableLayouts.length`는 table 개수를 초과할 수 없다.
 
-## Session Payload
+## Session Read Model
+
+### Session Summary
+
+목록 API는 SQL 원문과 큰 JSON payload를 제외한 summary만 반환한다.
+
+```ts
+type SqltoerdWorkspaceSessionSummary = {
+  id: string;
+  workspaceId: string;
+  title: string;
+  sourceFormat: "sql";
+  dialect: "auto" | "postgresql" | "mysql";
+  tableCount: number;
+  relationCount: number;
+  revision: number;
+  createdBy: string | null;
+  updatedBy: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+```
+
+`sourceText`, `modelJson`, `layoutJson`, `settingsJson`, `deletedAt`은
+목록 summary에 포함하지 않는다.
+
+### Session Detail Payload
 
 ```json
 {
@@ -243,19 +299,97 @@ type SqltoerdLayoutJsonV1 = {
 }
 ```
 
-`settingsJson`은 MVP에서 선택값으로 받을 수 있으나, theme 전환이나 panel preference
-저장은 MVP 수용 기준으로 삼지 않는다.
+`SqltoerdWorkspaceSessionDetail`은 summary field와 `sourceText`, `modelJson`,
+`layoutJson`, `settingsJson`, `deletedAt`을 포함한다. 상세 API는 활성 session만
+조회하므로 정상 응답의 `deletedAt`은 항상 `null`이다.
 
-## 활성 Session 조회
+`settingsJson`은 선택값으로 받을 수 있으나, theme 전환이나 panel preference
+저장은 이번 multi-session 계약의 수용 기준으로 삼지 않는다.
+
+## Session 목록 조회
+
+```http
+GET /api/v1/workspaces/{workspaceId}/sql-erd-sessions?limit=20&cursor={cursor}
+```
+
+Workspace의 `deletedAt IS NULL`인 session을 summary로 조회한다. SQL 원문과
+`modelJson`, `layoutJson`, `settingsJson`은 목록 응답에 포함하지 않는다.
+
+### Query
+
+| 이름 | 필수 | 기본값 | 제한 | 설명 |
+| --- | --- | --- | --- | --- |
+| `limit` | 아니요 | `20` | 1 이상 100 이하 정수 | 한 번에 반환할 최대 session 수 |
+| `cursor` | 아니요 | 없음 | 2,048자 이하의 서버 발급 opaque string | 다음 page 시작 위치 |
+
+정렬은 `updatedAt DESC, id DESC`로 고정한다. 이번 계약에서는 임의의 sort field나
+ascending order query를 제공하지 않는다.
+
+cursor는 마지막 item의 `updatedAt`과 `id`를 기준으로 서버가 발급한다. client는
+cursor 내부 형식에 의존하거나 수정하지 않고 다음 요청에 그대로 전달한다. 형식이
+잘못되었거나 현재 목록 정렬에 사용할 수 없는 cursor는 `400 Bad Request`다.
+`limit`과 `cursor` 이외의 query field는 허용하지 않는다.
+
+첫 page는 cursor 없이 요청한다. 응답 item이 없으면 `items`는 빈 배열이고
+`nextCursor`는 `null`이다.
+
+응답:
+
+```json
+{
+  "data": {
+    "items": [
+      {
+        "id": "session_uuid",
+        "workspaceId": "workspace_uuid",
+        "title": "Commerce ERD",
+        "sourceFormat": "sql",
+        "dialect": "postgresql",
+        "tableCount": 6,
+        "relationCount": 7,
+        "revision": 3,
+        "createdBy": "user_uuid",
+        "updatedBy": "user_uuid",
+        "createdAt": "2026-07-07T08:20:00.000Z",
+        "updatedAt": "2026-07-07T08:25:00.000Z"
+      }
+    ],
+    "nextCursor": "opaque_cursor_or_null"
+  }
+}
+```
+
+`nextCursor`는 다음 page가 있을 때만 string이고, 마지막 page에서는 `null`이다.
+page 경계에서는 동일한 `updatedAt`을 가진 session도 `id`를 tie-breaker로 사용해
+중복이나 누락 없이 이어서 조회한다.
+
+## Session 상세 조회
+
+```http
+GET /api/v1/workspaces/{workspaceId}/sql-erd-sessions/{sessionId}
+```
+
+`workspaceId`와 `sessionId`가 함께 일치하고 `deletedAt IS NULL`인 session의
+detail payload를 반환한다.
+
+- session이 없거나 soft delete되었으면 `404 Not Found`다.
+- 다른 Workspace의 session id를 전달해도 `404 Not Found`로 처리한다.
+- 이 조회는 `updatedAt`, `revision`, 최근 열람 시각을 변경하지 않는다.
+
+응답은 공통 success envelope의 `data`에
+`SqltoerdWorkspaceSessionDetail`을 담는다.
+
+## Compatibility: 최근 활성 Session 조회
 
 ```http
 GET /api/v1/workspaces/{workspaceId}/sql-erd-session
 ```
 
-Workspace에 활성 sqltoerd session이 있으면 session payload를 반환한다.
+Workspace에 활성 sqltoerd session이 있으면 `updatedAt DESC, id DESC` 기준 첫 번째
+session의 detail payload를 반환한다.
 
 활성 session이 없으면 `404`가 아니라 `data: null`을 반환한다. 첫 사용자에게 빈
-sqltoerd 화면을 보여주기 위한 동작이다.
+sqltoerd 화면을 보여주던 기존 frontend 동작을 유지하기 위한 compatibility API다.
 
 응답:
 
@@ -303,13 +437,11 @@ sqltoerd 화면을 보여주기 위한 동작이다.
 ## Session 생성
 
 ```http
-POST /api/v1/workspaces/{workspaceId}/sql-erd-session
+POST /api/v1/workspaces/{workspaceId}/sql-erd-sessions
 ```
 
-첫 Generate 성공 시 아직 session id가 없으면 client가 이 API를 호출한다.
-
-MVP에서는 active Workspace당 활성 sqltoerd session 1개만 허용한다. 이미 활성
-session이 있으면 `409 Conflict`를 반환한다.
+사용자가 새 SQLtoERD canvas를 생성할 때 client가 호출한다. 한 Workspace에 여러
+활성 session을 생성할 수 있고 title 중복을 허용한다.
 
 Request:
 
@@ -337,18 +469,21 @@ Request:
 생성 규칙:
 
 - `title`이 없으면 `Untitled ERD`를 사용한다.
-- `sourceFormat`은 `sql`만 허용한다.
+- `sourceFormat`이 없으면 `sql`을 사용하며 현재는 `sql`만 허용한다.
 - `dialect`가 없으면 `auto`를 사용한다.
+- `sourceText`가 없으면 빈 문자열 `""`을 사용한다.
+- `modelJson`과 `layoutJson`은 필수다.
 - `sourceText`, `modelJson`, `layoutJson`은 Generate 성공 결과를 기준으로 보낸다.
 - `settingsJson`이 없으면 `{}`를 사용한다.
 - 서버는 `modelJson`에서 `tableCount`, `relationCount`를 계산한다.
 - 서버는 `revision = 1`로 생성한다.
 - 서버는 `createdBy`, `updatedBy`를 current user로 설정한다.
+- 생성 성공 시 `201 Created`와 session detail payload를 반환한다.
 
 ## Session 자동 저장
 
 ```http
-PATCH /api/v1/workspaces/{workspaceId}/sql-erd-session/{sessionId}
+PATCH /api/v1/workspaces/{workspaceId}/sql-erd-sessions/{sessionId}
 ```
 
 Generate 성공, table 위치 변경, 저장 대상 설정 변경 시 client가 이 API로 자동
@@ -381,6 +516,8 @@ Request:
 수정 규칙:
 
 - `baseRevision`은 필수다.
+- `baseRevision` 외에 수정 가능한 field를 최소 하나 포함해야 한다.
+- `baseRevision`만 보낸 request는 `400 Bad Request`다.
 - 서버의 현재 `revision`과 `baseRevision`이 다르면 `409 Conflict`를 반환한다.
 - 수정 가능한 필드는 `title`, `sourceFormat`, `dialect`, `sourceText`, `modelJson`, `layoutJson`, `settingsJson`이다.
 - `workspaceId`와 `sessionId`가 함께 일치하는 활성 session만 수정한다.
@@ -406,11 +543,11 @@ Request:
 ## Session 삭제
 
 ```http
-DELETE /api/v1/workspaces/{workspaceId}/sql-erd-session/{sessionId}?baseRevision=4
+DELETE /api/v1/workspaces/{workspaceId}/sql-erd-sessions/{sessionId}?baseRevision=4
 ```
 
-MVP에서는 삭제 버튼을 UI에 노출하지 않을 수 있지만, 서버 API는 soft delete를
-지원한다.
+목록 또는 편집 화면에서 session을 삭제할 때 호출한다. 삭제는 soft delete로
+처리하며 삭제된 session은 목록과 상세 조회에서 제외한다.
 
 삭제 규칙:
 
@@ -432,10 +569,46 @@ MVP에서는 삭제 버튼을 UI에 노출하지 않을 수 있지만, 서버 AP
 }
 ```
 
+## Singular compatibility 정책
+
+기존 frontend가 plural API로 전환될 때까지 singular endpoint를 유지한다.
+
+- plural API가 배포되고 singular endpoint의 deprecation이 시작되면 singular 응답에
+  [RFC 9745](https://www.rfc-editor.org/rfc/rfc9745.html#section-2.1)의 Structured
+  Field Date 형식인 `Deprecation` header를 포함한다.
+- `Deprecation`에는 boolean value를 사용하지 않는다. 형식 예시는
+  `Deprecation: @1688169599`다.
+- 실제 `Deprecation` timestamp는 plural API 운영 배포 시각을 기준으로 구현 PR에서
+  확정한다. deprecation 시작 전에는 이 header를 보내지 않는다.
+- `GET /sql-erd-session`은 `updatedAt DESC, id DESC` 기준 첫 번째 활성 session
+  detail 또는 `data: null`을 반환한다.
+- `POST /sql-erd-session`은 활성 session이 하나라도 있으면 기존 동작대로
+  `409 Conflict`를 반환한다. 두 번째 session 생성에는 plural POST를 사용한다.
+- singular PATCH/DELETE의 request, response, validation, revision 규칙은 같은
+  `sessionId`를 사용하는 plural PATCH/DELETE와 동일하다.
+- 신규 frontend와 다른 신규 consumer는 singular endpoint를 사용하지 않는다.
+- 제거 예정일이 확정되지 않았으므로 이번 계약에서는 `Sunset` header를 보내지 않는다.
+- frontend의 singular 호출 제거와 운영 전환 확인 후 별도 breaking-change Issue에서
+  singular endpoint 제거를 진행한다.
+
+## 적용 순서
+
+1. 이 API 계약을 확정한다.
+2. `sql_erd_sessions`의 active Workspace unique index를 제거하는 DB migration을
+   별도 Issue에서 추가한다.
+3. app-server에 plural endpoint와 singular compatibility 동작을 함께 구현한다.
+4. frontend 목록/상세 route를 plural API로 전환한다.
+5. 운영 consumer 전환을 확인한 뒤 singular endpoint 제거 여부를 결정한다.
+
+DB migration과 app-server/frontend 구현이 완료되기 전에는 plural endpoint를 사용할
+수 없다.
+
 ## Validation
 
 | 항목 | 제한 | 처리 |
 | --- | ---: | --- |
+| 목록 `limit` | 기본 20, 최소 1, 최대 100 | 위반 시 `400 Bad Request` |
+| 목록 `cursor` | 2,048자 이하의 서버 발급 opaque string | 길이/해석/검증 실패 시 `400 Bad Request` |
 | request body | UTF-8 기준 2 MiB | 초과 시 `413 Payload Too Large` |
 | `title` | 1자 이상 120자 이하 | 위반 시 `400 Bad Request` |
 | `sourceFormat` | `sql` | 위반 시 `400 Bad Request` |
@@ -463,11 +636,11 @@ MVP에서는 삭제 버튼을 UI에 노출하지 않을 수 있지만, 서버 AP
 
 | Status | 상황 |
 | ---: | --- |
-| `400 Bad Request` | validation 실패, 잘못된 enum, 잘못된 JSON 구조, `baseRevision` 누락 |
+| `400 Bad Request` | validation 실패, 잘못된 enum/JSON/cursor 구조, `baseRevision` 누락, PATCH 수정 field 누락 |
 | `401 Unauthorized` | 인증 없음 또는 만료된 bearer token |
 | `403 Forbidden` | Workspace 접근 권한 없음 |
-| `404 Not Found` | Workspace 없음, 수정/삭제 대상 session 없음, 삭제된 session 수정/삭제 |
-| `409 Conflict` | 활성 session 중복 생성, `revision` conflict |
+| `404 Not Found` | Workspace 없음, 상세/수정/삭제 대상 session 없음, 삭제된 session 접근 |
+| `409 Conflict` | `revision` conflict, singular 중복 생성 |
 | `413 Payload Too Large` | request body 또는 `sourceText` 크기 초과 |
 | `429 Too Many Requests` | 과도한 autosave 요청 |
 | `500 Internal Server Error` | 예상하지 못한 서버 오류 |
@@ -481,15 +654,20 @@ MVP에서는 삭제 버튼을 UI에 노출하지 않을 수 있지만, 서버 AP
 - API error response는 SQL 일부를 echo하지 않는다.
 - DB 저장은 parameterized query만 사용한다.
 - 화면 출력은 HTML 주입이 아니라 React text rendering/escape를 사용한다.
-- 모든 조회/수정/삭제는 `workspaceId`와 `sessionId`를 함께 조건으로 검증한다.
+- 목록 조회와 singular GET은 current user의 Workspace 접근 권한과 `workspaceId`를
+  검증한다.
+- 상세 조회, PATCH, DELETE는 Workspace 접근 권한을 확인한 뒤 `workspaceId`,
+  `sessionId`, `deletedAt IS NULL`을 함께 조건으로 검증한다.
+- POST는 Workspace 접근 권한을 확인하고 request body가 아닌 path의 `workspaceId`와
+  current user를 저장 기준으로 사용한다.
 
 ## 향후 확장
 
-아래 기능은 MVP 이후 별도 API 변경으로 추가한다.
+아래 기능은 후속 API 변경으로 추가한다.
 
 - Local-only에서 Workspace 저장 전환 API
-- Workspace별 여러 sqltoerd session 목록 API
-- Workspace별 최근 session API
+- 최근 열람 시각 또는 최근 session pointer API
+- 삭제 session 복구와 version history
 - JSON import/export API
 - PNG/SVG export API
 - BigQuery CTE lineage 저장

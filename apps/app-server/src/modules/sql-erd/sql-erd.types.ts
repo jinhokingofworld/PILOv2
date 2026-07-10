@@ -35,6 +35,16 @@ export interface NormalizedDeleteSqlErdSessionInput {
   baseRevision: number;
 }
 
+export interface SqlErdSessionCursor {
+  updatedAt: string;
+  id: string;
+}
+
+export interface NormalizedListSqlErdSessionsInput {
+  limit: number;
+  cursor: SqlErdSessionCursor | null;
+}
+
 export interface SqlErdSessionRow extends QueryResultRow {
   id: string;
   workspace_id: string;
@@ -53,6 +63,42 @@ export interface SqlErdSessionRow extends QueryResultRow {
   created_at: Date | string;
   updated_at: Date | string;
   deleted_at: Date | string | null;
+}
+
+export interface SqlErdSessionSummaryRow extends QueryResultRow {
+  id: string;
+  workspace_id: string;
+  title: string;
+  source_format: SqlErdSourceFormat;
+  dialect: SqlErdDialect;
+  table_count: number | string;
+  relation_count: number | string;
+  revision: number | string;
+  created_by: string | null;
+  updated_by: string | null;
+  created_at: Date | string;
+  updated_at: Date | string;
+  cursor_updated_at: string;
+}
+
+export interface SqlErdSessionSummaryPayload {
+  id: string;
+  workspaceId: string;
+  title: string;
+  sourceFormat: SqlErdSourceFormat;
+  dialect: SqlErdDialect;
+  tableCount: number;
+  relationCount: number;
+  revision: number;
+  createdBy: string | null;
+  updatedBy: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SqlErdSessionListPayload {
+  items: SqlErdSessionSummaryPayload[];
+  nextCursor: string | null;
 }
 
 export interface SqlErdSessionPayload {
@@ -83,6 +129,7 @@ export interface SqlErdDeletedSessionPayload {
 
 export type CreateSqlErdSessionRequest = Record<string, unknown>;
 export type UpdateSqlErdSessionRequest = Record<string, unknown>;
+export type ListSqlErdSessionsQuery = Record<string, unknown>;
 
 export interface DeleteSqlErdSessionQuery {
   baseRevision?: unknown;

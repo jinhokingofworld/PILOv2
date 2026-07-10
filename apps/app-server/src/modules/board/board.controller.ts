@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Headers,
   Param,
   Patch,
   Post,
@@ -19,14 +20,15 @@ import type {
   BoardColumnPayload,
   BoardDetailPayload,
   BoardFilterOptionsPayload,
+  BoardIssueAssigneeOptionPayload,
   BoardIssueCardPayload,
   BoardIssueDetailPayload,
   BoardPaginatedPayload,
   BoardPayload,
   UpdateBoardIssueStatusPayload,
   UpdateBoardIssuePayload,
-  CreateBoardIssuePayload,
-  BoardRelatedPullRequestPayload
+  BoardRelatedPullRequestPayload,
+  CreateBoardIssuePayload
 } from "./types";
 
 @Controller("workspaces/:workspaceId/boards")
@@ -118,13 +120,15 @@ export class BoardController {
     @Param("workspaceId") workspaceId: string,
     @Param("boardId") boardId: string,
     @Body() body: unknown,
+    @Headers("idempotency-key") idempotencyKey: unknown,
     @Res({ passthrough: true }) reply: FastifyReply
   ): Promise<ApiSuccessResponse<CreateBoardIssuePayload>> {
     const result = await this.boardService.createBoardIssue(
       currentUserId,
       workspaceId,
       boardId,
-      body
+      body,
+      idempotencyKey
     );
 
     reply.status(201);
@@ -165,6 +169,23 @@ export class BoardController {
     );
 
     return apiResponse(result);
+  }
+
+  @Get(":boardId/issues/:issueId/assignee-options")
+  async listBoardIssueAssigneeOptions(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("boardId") boardId: string,
+    @Param("issueId") issueId: string
+  ): Promise<ApiSuccessResponse<BoardIssueAssigneeOptionPayload[]>> {
+    const options = await this.boardService.listBoardIssueAssigneeOptions(
+      currentUserId,
+      workspaceId,
+      boardId,
+      issueId
+    );
+
+    return apiResponse(options);
   }
 
   @Patch(":boardId/issues/:issueId")

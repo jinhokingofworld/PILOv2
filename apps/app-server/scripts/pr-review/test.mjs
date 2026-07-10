@@ -19,6 +19,9 @@ const prReviewDiffParser = await readSource(
 const prReviewConflictAnalyzer = await readSource(
   "../../src/modules/pr-review/pr-review-conflict-analyzer.ts"
 );
+const prReviewConflictResolution = await readSource(
+  "../../src/modules/pr-review/pr-review-conflict-resolution.ts"
+);
 const prReviewAnalysisService = await readSource(
   "../../src/modules/pr-review/pr-review-analysis.service.ts"
 );
@@ -84,6 +87,7 @@ assert.match(
   prReviewController,
   /@Post\("review-sessions\/:reviewSessionId\/submissions"\)/
 );
+assert.match(prReviewController, /@Post\("review-sessions\/:reviewSessionId\/merge"\)/);
 assert.match(
   prReviewController,
   /@Get\("review-sessions\/:reviewSessionId\/submissions"\)/
@@ -100,11 +104,13 @@ assert.match(prReviewGithubDependencyService, /getPullRequestChangedFiles/);
 assert.match(prReviewGithubDependencyService, /getPullRequestConflictStatus/);
 assert.match(prReviewGithubDependencyService, /getPullRequestConflictInputs/);
 assert.match(prReviewGithubDependencyService, /submitPullRequestReview/);
+assert.match(prReviewGithubDependencyService, /mergePullRequest/);
 assert.match(prReviewGithubDependencyService, /getGithubPullRequest/);
 assert.match(prReviewGithubDependencyService, /listGithubPullRequestFiles/);
 assert.match(prReviewGithubDependencyService, /getGithubPullRequestConflictStatus/);
 assert.match(prReviewGithubDependencyService, /getGithubPullRequestConflictInputs/);
 assert.match(prReviewGithubDependencyService, /submitGithubPullRequestReview/);
+assert.match(prReviewGithubDependencyService, /mergeGithubPullRequest/);
 assert.match(prReviewGithubDependencyService, /mapPullRequestDetail/);
 assert.match(prReviewGithubDependencyService, /mapConflictInputs/);
 assert.match(prReviewGithubDependencyService, /mapChangedFile/);
@@ -141,6 +147,12 @@ assert.match(prReviewService, /listReviewFileDecisions/);
 assert.match(prReviewService, /getReviewFileDiff/);
 assert.match(prReviewService, /getReviewSessionConflicts/);
 assert.match(prReviewService, /createReviewFileConflictSuggestion/);
+assert.match(prReviewService, /mergeReviewSession/);
+assert.match(prReviewService, /assertReviewSessionMergeable/);
+assert.match(prReviewService, /refreshPendingReviewSessionConflictStatus/);
+assert.match(prReviewService, /getSettledPullRequestConflictStatus/);
+assert.match(prReviewService, /updateReviewSessionConflictStatus/);
+assert.match(prReviewService, /normalizeReviewSessionMerge/);
 assert.match(prReviewService, /submitReviewSession/);
 assert.match(prReviewService, /listReviewSubmissions/);
 assert.match(prReviewService, /getReviewSubmission/);
@@ -149,8 +161,16 @@ assert.match(prReviewService, /LARGE_DIFF_LINE_THRESHOLD = 1000/);
 assert.match(prReviewService, /LARGE_DIFF_PATCH_BYTES = 200 \* 1024/);
 assert.match(prReviewService, /REVIEW_DECISION_STATUSES/);
 assert.match(prReviewService, /findReviewSessionSummary/);
+assert.match(prReviewService, /pull_request\.raw->>'state'/);
+assert.match(prReviewService, /pull_request\.github_closed_at IS NOT NULL/);
+assert.match(prReviewService, /pull_request\.raw \? 'mergeable'/);
+assert.doesNotMatch(prReviewService, /pull_request\.state::text/);
+assert.doesNotMatch(prReviewService, /pull_request\.mergeable/);
 assert.match(prReviewService, /listReviewFlowsForSession/);
 assert.match(prReviewService, /listReviewFlowFilesForSession/);
+assert.match(prReviewService, /listReviewFilesForCanvasFallback/);
+assert.match(prReviewService, /buildFallbackReviewSessionCanvas/);
+assert.match(prReviewService, /shouldUseCanvasFallback/);
 assert.match(prReviewService, /listReviewFileFlowMemberships/);
 assert.match(prReviewService, /listReviewFileDecisionRows/);
 assert.match(prReviewService, /updateReviewFileDecisionState/);
@@ -178,13 +198,14 @@ assert.match(prReviewService, /large diff conflict is not supported/);
 assert.match(prReviewService, /GitHub OAuth connection is required/);
 assert.match(prReviewService, /current_status = \$3/);
 assert.match(prReviewService, /reviewed_by_user_id = \$5/);
-assert.match(prReviewService, /review_file\.session_id IN/);
+assert.match(prReviewService, /review_file\.session_id = review_session\.id/);
 assert.match(prReviewService, /risk_level/);
 assert.match(prReviewService, /status must be approved, discussion_needed, or unknown/);
 assert.match(prReviewService, /readyToSubmit/);
 assert.match(prReviewService, /ready_to_submit/);
 assert.match(prReviewService, /fileNodeData/);
 assert.match(prReviewService, /리뷰 순서/);
+assert.match(prReviewService, /리뷰 흐름 연결 정보를 사용할 수 없어/);
 assert.match(prReviewService, /mode: "side_by_side"/);
 assert.match(prReviewService, /mode === "binary"/);
 assert.match(prReviewService, /mode === "large"/);
@@ -201,6 +222,8 @@ assert.match(prReviewAnalysisService, /PR_REVIEW_CONFLICT_SUGGESTION_SCHEMA/);
 assert.match(prReviewAnalysisService, /pr_review_conflict_suggestion/);
 assert.match(prReviewAnalysisService, /suggestConflictResolution/);
 assert.match(prReviewAnalysisService, /buildDeterministicConflictSuggestion/);
+assert.match(prReviewAnalysisService, /resolvedHunks/);
+assert.match(prReviewAnalysisService, /buildResolvedFileContent/);
 assert.match(prReviewAnalysisService, /CONFLICT_MARKER_PATTERN/);
 assert.match(prReviewAnalysisService, /riskLevel/);
 assert.match(prReviewAnalysisService, /output_text/);
@@ -224,6 +247,10 @@ assert.match(prReviewConflictAnalyzer, /excludeFalseConflicts: true/);
 assert.match(prReviewConflictAnalyzer, /baseText/);
 assert.match(prReviewConflictAnalyzer, /currentText/);
 assert.match(prReviewConflictAnalyzer, /incomingText/);
+assert.match(prReviewConflictResolution, /buildResolvedFileContent/);
+assert.match(prReviewConflictResolution, /resolvedTextByHunkId/);
+assert.match(prReviewService, /headContent/);
+assert.match(prReviewService, /resolvedHunks/);
 assert.match(prReviewTypes, /PrReviewFileReviewStatus/);
 assert.match(prReviewTypes, /PrReviewGithubConflictInputsPayload/);
 assert.match(prReviewTypes, /PrReviewGithubReviewSubmitType/);
@@ -241,6 +268,8 @@ assert.match(prReviewApi, /Conflict Analysis/);
 assert.match(prReviewApi, /AI Conflict Suggestion Draft/);
 assert.match(prReviewApi, /conflict-suggestion/);
 assert.match(prReviewApi, /conflictSuggestion\.status/);
+assert.match(prReviewApi, /"headContent"/);
+assert.match(prReviewApi, /"resolvedHunks"/);
 assert.match(prReviewApi, /stored": false/);
 assert.match(prReviewApi, /githubCreatedAt/);
 assert.match(prReviewApi, /fileNodeData/);
@@ -254,4 +283,7 @@ assert.match(databaseService, /ROLLBACK/);
 
 await import("./diff-parser.test.mjs");
 await import("./conflict-analyzer.test.mjs");
+await import("./conflict-resolution.test.mjs");
+await import("./conflict-apply.test.mjs");
+await import("./conflict-status-refresh.test.mjs");
 await import("./submission.test.mjs");

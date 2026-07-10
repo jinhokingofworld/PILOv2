@@ -7,6 +7,7 @@ from app.agent_processor import (
     AgentRunContext,
     AgentRunProcessor,
     _agent_planner_schema,
+    normalize_agent_planner_decision,
     parse_agent_planner_output,
     parse_agent_run_job_payload,
 )
@@ -178,13 +179,26 @@ class FakePlannerClient:
         return self.decision
 
 
+class FakeExecutionHandoffClient:
+    def __init__(self, error: Exception | None = None) -> None:
+        self.error = error
+        self.calls: list[str] = []
+
+    def execute(self, run_id: str) -> None:
+        self.calls.append(run_id)
+        if self.error:
+            raise self.error
+
+
 def create_processor(
     repository: FakeAgentRunRepository,
     planner_client: FakePlannerClient | None = None,
+    execution_handoff_client: FakeExecutionHandoffClient | None = None,
 ) -> AgentRunProcessor:
     return AgentRunProcessor(
         repository,
         planner_client or FakePlannerClient(),
+        execution_handoff_client or FakeExecutionHandoffClient(),
         current_date_provider=lambda _timezone: date(2026, 7, 9),
     )
 
@@ -218,12 +232,13 @@ def test_parse_agent_run_job_payload_validates_required_ids() -> None:
 def test_processor_completes_planning_run_with_tool_candidate() -> None:
     repository = FakeAgentRunRepository()
     planner_client = FakePlannerClient()
-    processor = create_processor(repository, planner_client)
+    handoff_client = FakeExecutionHandoffClient()
+    processor = create_processor(repository, planner_client, handoff_client)
 
     result = processor.process_payload(agent_payload())
 
     assert result.delete_message is True
-    assert result.reason == "agent_tool_candidate_planned"
+    assert result.reason == "agent_execution_handoff_completed"
     assert result.run_id == RUN_ID
     assert repository.lock_calls == [RUN_ID]
     assert repository.release_calls == [RUN_ID]
@@ -246,6 +261,7 @@ def test_processor_completes_planning_run_with_tool_candidate() -> None:
         )
     ]
     assert repository.failed_updates == []
+    assert handoff_client.calls == [RUN_ID]
     assert planner_client.requests[0].current_date == "2026-07-09"
     assert planner_client.requests[0].timezone == "Asia/Seoul"
 
@@ -257,6 +273,7 @@ def test_processor_uses_run_timezone_for_current_date() -> None:
     processor = AgentRunProcessor(
         repository,
         planner_client,
+        FakeExecutionHandoffClient(),
         current_date_provider=lambda timezone: (
             seen_timezones.append(timezone) or date(2026, 7, 8)
         ),
@@ -265,7 +282,7 @@ def test_processor_uses_run_timezone_for_current_date() -> None:
     result = processor.process_payload(agent_payload())
 
     assert result.delete_message is True
-    assert result.reason == "agent_tool_candidate_planned"
+    assert result.reason == "agent_execution_handoff_completed"
     assert seen_timezones == ["America/Los_Angeles"]
     assert planner_client.requests[0].current_date == "2026-07-08"
     assert planner_client.requests[0].timezone == "America/Los_Angeles"
@@ -299,17 +316,45 @@ def test_processor_deletes_missing_or_terminal_runs() -> None:
     assert terminal_repository.release_calls == [RUN_ID]
 
 
-def test_processor_deletes_waiting_confirmation_and_unsupported_status() -> None:
+def test_processor_deletes_waiting_confirmation_and_retries_running_handoff() -> None:
     waiting_repository = FakeAgentRunRepository(context=run_context(status="waiting_confirmation"))
     running_repository = FakeAgentRunRepository(context=run_context(status="running"))
+    handoff_client = FakeExecutionHandoffClient()
 
     waiting = create_processor(waiting_repository).process_payload(agent_payload())
-    running = create_processor(running_repository).process_payload(agent_payload())
+    running = create_processor(
+        running_repository,
+        execution_handoff_client=handoff_client,
+    ).process_payload(agent_payload())
 
     assert waiting.delete_message is True
     assert waiting.reason == "agent_run_waiting_confirmation"
     assert running.delete_message is True
-    assert running.reason == "agent_run_unsupported_status"
+    assert running.reason == "agent_execution_handoff_retried"
+    assert handoff_client.calls == [RUN_ID]
+
+
+def test_processor_retries_handoff_without_replanning_after_failure() -> None:
+    repository = FakeAgentRunRepository()
+    planner_client = FakePlannerClient()
+    handoff_client = FakeExecutionHandoffClient(error=InfrastructureError("App Server unavailable"))
+    processor = create_processor(repository, planner_client, handoff_client)
+
+    first = processor.process_payload(agent_payload())
+
+    assert first.delete_message is False
+    assert first.reason == "agent_execution_handoff_unavailable"
+    assert planner_client.requests
+    assert handoff_client.calls == [RUN_ID]
+
+    repository.context = run_context(status="running")
+    handoff_client.error = None
+    second = processor.process_payload(agent_payload())
+
+    assert second.delete_message is True
+    assert second.reason == "agent_execution_handoff_retried"
+    assert len(planner_client.requests) == 1
+    assert handoff_client.calls == [RUN_ID, RUN_ID]
 
 
 def test_processor_leaves_duplicate_or_infrastructure_failure_for_retry() -> None:
@@ -382,6 +427,98 @@ def test_processor_completes_missing_fields_with_final_answer() -> None:
         "일정 생성을 위해 시간이 필요합니다.",
         None,
     )
+
+
+def test_normalizer_blocks_calendar_update_without_event_id() -> None:
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=[
+                tool_snapshot(
+                    name="update_calendar_event",
+                    description="Calendar 일정 수정",
+                    riskLevel="medium",
+                    executionMode="confirmation_required",
+                    inputSchema={
+                        "type": "object",
+                        "required": ["eventId", "changes"],
+                        "additionalProperties": False,
+                        "properties": {},
+                    },
+                )
+            ]
+        )
+    )
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="update_calendar_event",
+            tool_input={"changes": {"startTime": "16:00"}},
+            requires_confirmation=True,
+        ),
+        job,
+    )
+
+    assert normalized.status == "needs_clarification"
+    assert normalized.risk_level is None
+    assert normalized.output_summary["missingFields"] == ["eventId"]
+    assert "수정할 일정" in normalized.final_answer
+
+
+def test_normalizer_blocks_meeting_detail_without_report_id() -> None:
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=[
+                tool_snapshot(
+                    name="summarize_meeting_report",
+                    description="MeetingReport 요약",
+                    inputSchema={
+                        "type": "object",
+                        "required": ["reportId"],
+                        "additionalProperties": False,
+                        "properties": {},
+                    },
+                )
+            ]
+        )
+    )
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="summarize_meeting_report",
+            tool_input={},
+        ),
+        job,
+    )
+
+    assert normalized.status == "unsupported"
+    assert normalized.risk_level is None
+    assert normalized.output_summary["unsupportedReason"] == "meeting_report_id_required"
+
+
+def test_normalizer_keeps_latest_meeting_report_list_candidate() -> None:
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=[
+                tool_snapshot(
+                    name="list_meeting_reports",
+                    description="최신 MeetingReport 목록 조회",
+                    inputSchema={
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {"limit": {"type": "integer", "minimum": 1, "maximum": 100}},
+                    },
+                )
+            ]
+        )
+    )
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="list_meeting_reports",
+            tool_input={"limit": 1},
+        ),
+        job,
+    )
+
+    assert normalized.status == "tool_candidate"
+    assert normalized.output_summary["input"] == {"limit": 1}
 
 
 def test_processor_marks_planning_failed_for_invalid_planner_output() -> None:

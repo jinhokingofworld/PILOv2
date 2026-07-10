@@ -32,7 +32,6 @@ interface CreateCalendarEventInput {
 
 interface UpdateCalendarEventInput {
   eventId: string;
-  before: AgentJsonObject;
   changes: Partial<CreateCalendarEventInput>;
 }
 
@@ -58,7 +57,7 @@ const CREATE_INPUT_FIELDS = [
   "startTime",
   "endTime"
 ];
-const UPDATE_INPUT_FIELDS = ["eventId", "before", "changes"];
+const UPDATE_INPUT_FIELDS = ["eventId", "changes"];
 
 @Injectable()
 export class CalendarAgentToolsService {
@@ -145,7 +144,7 @@ export class CalendarAgentToolsService {
         }
       },
       validateInput: (input) => this.validateCreateInput(input),
-      buildConfirmation: (input) =>
+      buildConfirmation: (_context, input) =>
         this.buildCreateConfirmation(this.validateCreateInput(input)),
       execute: (context, input) =>
         this.executeCreateCalendarEvent(context, this.validateCreateInput(input))
@@ -155,20 +154,18 @@ export class CalendarAgentToolsService {
   private updateCalendarEventDefinition(): AgentToolDefinition<unknown> {
     return {
       name: "update_calendar_event",
-      description: "Calendar 일정을 수정합니다. 실행 전 confirmation이 필요합니다.",
+      description:
+        "Calendar 일정을 eventId와 변경값으로 수정합니다. 현재값은 서버가 조회하며 실행 전 confirmation이 필요합니다.",
       riskLevel: "medium",
       executionMode: "confirmation_required",
       inputSchema: {
         type: "object",
-        required: ["eventId", "before", "changes"],
+        required: ["eventId", "changes"],
         additionalProperties: false,
         properties: {
           eventId: {
             type: "string",
             pattern: "^[1-9][0-9]*$"
-          },
-          before: {
-            type: "object"
           },
           changes: {
             type: "object",
@@ -177,8 +174,11 @@ export class CalendarAgentToolsService {
         }
       },
       validateInput: (input) => this.validateUpdateInput(input),
-      buildConfirmation: (input) =>
-        this.buildUpdateConfirmation(this.validateUpdateInput(input)),
+      buildConfirmation: (context, input) =>
+        this.buildUpdateConfirmation(
+          context,
+          this.validateUpdateInput(input)
+        ),
       execute: (context, input) =>
         this.executeUpdateCalendarEvent(context, this.validateUpdateInput(input))
     };
@@ -268,9 +268,16 @@ export class CalendarAgentToolsService {
     };
   }
 
-  private buildUpdateConfirmation(
+  private async buildUpdateConfirmation(
+    context: AgentToolContext,
     input: UpdateCalendarEventInput
-  ): AgentConfirmationPlan {
+  ): Promise<AgentConfirmationPlan> {
+    const event = await this.calendarService.getEvent(
+      context.currentUserId,
+      context.workspaceId,
+      input.eventId
+    );
+
     return {
       toolName: "update_calendar_event",
       summary: `Calendar 일정 #${input.eventId}을 수정합니다.`,
@@ -279,7 +286,7 @@ export class CalendarAgentToolsService {
         resourceType: "event",
         resourceId: input.eventId
       },
-      before: input.before,
+      before: this.toConfirmationBefore(event),
       after: this.toCalendarBody(input.changes),
       call: {
         service: "CalendarService.updateEvent",
@@ -347,8 +354,6 @@ export class CalendarAgentToolsService {
       draft.changes,
       "Calendar update changes"
     );
-    const before = this.requireJsonObject(draft.before, "Calendar event before");
-
     this.rejectForbiddenCalendarBodyFields(draft);
     this.rejectForbiddenCalendarBodyFields(changes);
     this.assertOnlyAllowedFields(
@@ -368,7 +373,6 @@ export class CalendarAgentToolsService {
 
     return {
       eventId: this.requireEventId(draft.eventId),
-      before,
       changes: this.validateUpdateChanges(changes)
     };
   }
@@ -456,6 +460,20 @@ export class CalendarAgentToolsService {
     };
   }
 
+  private toConfirmationBefore(event: CalendarEventPayload): AgentJsonObject {
+    return {
+      id: event.id,
+      title: event.title,
+      description: event.description,
+      color: event.color,
+      isAllDay: event.isAllDay,
+      startDate: event.startDate,
+      endDate: event.endDate,
+      startTime: event.startTime,
+      endTime: event.endTime
+    };
+  }
+
   private toResourceRef(
     event: CalendarEventPayload,
     status = "available"
@@ -496,17 +514,6 @@ export class CalendarAgentToolsService {
     }
 
     return input;
-  }
-
-  private requireJsonObject(input: unknown, label: string): AgentJsonObject {
-    const object = this.requirePlainObject(input, label);
-    for (const [key, value] of Object.entries(object)) {
-      if (!this.isJsonValue(value)) {
-        throw badRequest(`${label}.${key} must be JSON serializable`);
-      }
-    }
-
-    return object;
   }
 
   private rejectForbiddenCalendarBodyFields(input: AgentJsonObject): void {
@@ -681,24 +688,4 @@ export class CalendarAgentToolsService {
     return Boolean(input) && typeof input === "object" && !Array.isArray(input);
   }
 
-  private isJsonValue(input: unknown): input is AgentJsonValue {
-    if (
-      input === null ||
-      typeof input === "string" ||
-      typeof input === "number" ||
-      typeof input === "boolean"
-    ) {
-      return true;
-    }
-
-    if (Array.isArray(input)) {
-      return input.every((value) => this.isJsonValue(value));
-    }
-
-    if (this.isPlainObject(input)) {
-      return Object.values(input).every((value) => this.isJsonValue(value));
-    }
-
-    return false;
-  }
 }

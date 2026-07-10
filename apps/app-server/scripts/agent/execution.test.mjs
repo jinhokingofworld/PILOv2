@@ -5,6 +5,12 @@ const require = createRequire(import.meta.url);
 const { AgentExecutionService } = require(
   "../../dist/modules/agent/agent-execution.service.js"
 );
+const { buildAgentReadResultAnswer } = require(
+  "../../dist/modules/agent/agent-read-result-formatter.js"
+);
+const { AgentExecutionHandoffGuard } = require(
+  "../../dist/modules/agent/agent-execution-handoff.guard.js"
+);
 const { AgentToolRegistryService } = require(
   "../../dist/modules/agent/agent-tool-registry.service.js"
 );
@@ -87,6 +93,12 @@ class FakeDatabaseService {
       return {
         started: this.state.executionStarted ?? false
       };
+    }
+
+    if (text.includes("SELECT id, workspace_id, requested_by_user_id, status")) {
+      const [runId] = values;
+      const run = this.state.run;
+      return run && run.id === runId ? run : null;
     }
 
     if (text.includes("FROM agent_runs")) {
@@ -444,13 +456,22 @@ function createSmokeRegistry() {
   };
 }
 
-function createExecutionServiceWithRegistry(planner, registry) {
+function createExecutionServiceWithRegistry(
+  planner,
+  registry,
+  {
+    prompt = "이번 주 일정 알려줘",
+    timezone = "Asia/Seoul"
+  } = {}
+) {
   const state = {
     run: {
       id: RUN_ID,
       workspace_id: WORKSPACE_ID,
       requested_by_user_id: USER_ID,
-      status: "running"
+      status: "running",
+      prompt,
+      timezone
     },
     plannerStep: {
       id: STEP_ID,
@@ -487,7 +508,9 @@ function createService({
       id: RUN_ID,
       workspace_id: WORKSPACE_ID,
       requested_by_user_id: USER_ID,
-      status: runStatus
+      status: runStatus,
+      prompt: "이번 주 일정 알려줘",
+      timezone: "Asia/Seoul"
     },
     plannerStep: {
       id: STEP_ID,
@@ -517,22 +540,303 @@ function createService({
   };
 }
 
+function createHandoffGuardContext(token) {
+  return {
+    switchToHttp() {
+      return {
+        getRequest() {
+          return {
+            headers: {
+              "x-agent-execution-handoff-token": token
+            }
+          };
+        }
+      };
+    }
+  };
+}
+
+function formatterMeetingReport(index, overrides = {}) {
+  return {
+    reportId: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+    meetingId: `10000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+    status: "COMPLETED",
+    createdAt: `2026-07-${String(index).padStart(2, "0")}T00:00:00.000Z`,
+    sections: [
+      { key: "summary", title: "요약", text: `회의 요약 ${index}` },
+      {
+        key: "discussionPoints",
+        title: "논의사항",
+        text: `논의사항 ${index}`
+      },
+      { key: "decisions", title: "결정사항", text: `결정사항 ${index}` }
+    ],
+    actionItems: [{ title: `후속 작업 ${index}` }],
+    transcript: {
+      available: true,
+      stored: false,
+      token: "must-not-leak"
+    },
+    ...overrides
+  };
+}
+
+{
+  const events = Array.from({ length: 6 }, (_, index) => ({
+    id: index + 1,
+    title: `일정 ${index + 1}`,
+    isAllDay: false,
+    startDate: "2026-07-10",
+    endDate: "2026-07-10",
+    startTime: `${String(9 + index).padStart(2, "0")}:00`,
+    endTime: `${String(10 + index).padStart(2, "0")}:00`,
+    status: "available"
+  }));
+  const answer = buildAgentReadResultAnswer({
+    toolName: "list_calendar_events",
+    outputSummary: {
+      start: "2026-07-10",
+      end: "2026-07-10",
+      count: events.length,
+      events
+    },
+    resourceRefs: []
+  });
+
+  assert.match(answer, /2026-07-10 일정 6개/);
+  assert.match(answer, /09:00-10:00 · 일정 1/);
+  assert.match(answer, /외 1개/);
+  assert.doesNotMatch(answer, /일정 6$/m);
+}
+
+{
+  const answer = buildAgentReadResultAnswer({
+    toolName: "list_calendar_events",
+    outputSummary: {
+      start: "2026-07-10",
+      end: "2026-07-10",
+      count: 0,
+      events: []
+    },
+    resourceRefs: []
+  });
+
+  assert.equal(answer, "2026-07-10 일정이 없습니다.");
+}
+
+{
+  const answer = buildAgentReadResultAnswer({
+    toolName: "summarize_meeting_report",
+    prompt: "이 회의록 보여줘",
+    timezone: "Asia/Seoul",
+    outputSummary: {
+      report: formatterMeetingReport(8)
+    },
+    resourceRefs: []
+  });
+
+  assert.match(answer, /2026-07-08 09:00 · 완료/);
+  assert.match(answer, /요약: 회의 요약 8/);
+  assert.match(answer, /논의사항: 논의사항 8/);
+  assert.match(answer, /결정사항: 결정사항 8/);
+  assert.match(answer, /후속 작업:\n- 후속 작업 8/);
+  assert.doesNotMatch(answer, /00000000-0000/);
+  assert.doesNotMatch(answer, /must-not-leak/);
+}
+
+{
+  const answer = buildAgentReadResultAnswer({
+    toolName: "summarize_meeting_report",
+    prompt: "결정사항만 알려줘",
+    timezone: "Asia/Seoul",
+    outputSummary: {
+      report: formatterMeetingReport(8)
+    },
+    resourceRefs: []
+  });
+
+  assert.match(answer, /결정사항: 결정사항 8/);
+  assert.doesNotMatch(answer, /요약:/);
+  assert.doesNotMatch(answer, /논의사항:/);
+  assert.doesNotMatch(answer, /후속 작업:/);
+}
+
+{
+  const answer = buildAgentReadResultAnswer({
+    toolName: "summarize_meeting_report",
+    prompt: "요약 말고 결정사항만 알려줘",
+    outputSummary: {
+      report: formatterMeetingReport(8)
+    },
+    resourceRefs: []
+  });
+
+  assert.match(answer, /결정사항: 결정사항 8/);
+  assert.doesNotMatch(answer, /요약:/);
+  assert.doesNotMatch(answer, /논의사항:/);
+  assert.doesNotMatch(answer, /후속 작업:/);
+}
+
+{
+  const answer = buildAgentReadResultAnswer({
+    toolName: "summarize_meeting_report",
+    prompt: "요약과 논의사항은 빼고 결정사항과 후속 작업만 알려줘",
+    outputSummary: {
+      report: formatterMeetingReport(8)
+    },
+    resourceRefs: []
+  });
+
+  assert.match(answer, /결정사항: 결정사항 8/);
+  assert.match(answer, /후속 작업:\n- 후속 작업 8/);
+  assert.doesNotMatch(answer, /요약:/);
+  assert.doesNotMatch(answer, /논의사항:/);
+}
+
+{
+  const answer = buildAgentReadResultAnswer({
+    toolName: "summarize_meeting_report",
+    prompt: "요약은 빼고 보여줘",
+    outputSummary: {
+      report: formatterMeetingReport(8)
+    },
+    resourceRefs: []
+  });
+
+  assert.doesNotMatch(answer, /요약:/);
+  assert.match(answer, /논의사항: 논의사항 8/);
+  assert.match(answer, /결정사항: 결정사항 8/);
+  assert.match(answer, /후속 작업:\n- 후속 작업 8/);
+}
+
+{
+  const reports = Array.from({ length: 6 }, (_, index) =>
+    formatterMeetingReport(index + 1)
+  );
+  const answer = buildAgentReadResultAnswer({
+    toolName: "list_meeting_reports",
+    prompt: "최근 회의록 보여줘",
+    timezone: "Asia/Seoul",
+    outputSummary: {
+      count: reports.length,
+      reports
+    },
+    resourceRefs: []
+  });
+
+  assert.match(answer, /회의록 6개/);
+  assert.match(answer, /요약: 회의 요약 1/);
+  assert.match(answer, /외 1개/);
+  assert.doesNotMatch(answer, /회의 요약 6/);
+}
+
+{
+  const answer = buildAgentReadResultAnswer({
+    toolName: "list_meeting_reports",
+    outputSummary: {
+      count: 0,
+      reports: []
+    },
+    resourceRefs: []
+  });
+
+  assert.equal(answer, "조회된 회의록이 없습니다.");
+}
+
+{
+  const answer = buildAgentReadResultAnswer({
+    toolName: "get_meeting_report",
+    outputSummary: {
+      report: formatterMeetingReport(8, {
+        status: "PROCESSING",
+        sections: [],
+        actionItems: []
+      })
+    },
+    resourceRefs: []
+  });
+
+  assert.match(answer, /생성 중/);
+  assert.match(answer, /회의록을 생성하고 있습니다/);
+}
+
+{
+  const longSummary = "긴 요약 ".repeat(200);
+  const answer = buildAgentReadResultAnswer({
+    toolName: "summarize_meeting_report",
+    prompt: "요약만 알려줘",
+    outputSummary: {
+      report: formatterMeetingReport(8, {
+        sections: [{ key: "summary", title: "요약", text: longSummary }]
+      })
+    },
+    resourceRefs: []
+  });
+
+  assert.equal(answer.length < longSummary.length, true);
+  assert.match(answer, /…$/);
+}
+
+{
+  const previousToken = process.env.AGENT_EXECUTION_HANDOFF_TOKEN;
+  process.env.AGENT_EXECUTION_HANDOFF_TOKEN = "handoff-test-token";
+  const guard = new AgentExecutionHandoffGuard();
+
+  assert.equal(
+    await guard.canActivate(createHandoffGuardContext("handoff-test-token")),
+    true
+  );
+  await assert.rejects(
+    () => guard.canActivate(createHandoffGuardContext("incorrect-token")),
+    (error) => error.getStatus() === 401
+  );
+
+  if (previousToken === undefined) {
+    delete process.env.AGENT_EXECUTION_HANDOFF_TOKEN;
+  } else {
+    process.env.AGENT_EXECUTION_HANDOFF_TOKEN = previousToken;
+  }
+}
+
+{
+  const { service, loggingService, workspaceService } = createService();
+  const result = await service.executeReadyRun(RUN_ID);
+
+  assert.equal(result.status, "completed");
+  assert.deepEqual(workspaceService.calls, [
+    { currentUserId: USER_ID, workspaceId: WORKSPACE_ID }
+  ]);
+  assert.deepEqual(
+    loggingService.calls.map((call) => call.method),
+    ["startNextToolStepIfAbsent", "completeStep", "completeRun"]
+  );
+}
+
+{
+  const { service, loggingService } = createService({
+    runStatus: "completed"
+  });
+  const result = await service.executeReadyRun(RUN_ID);
+
+  assert.deepEqual(result, {
+    status: "skipped",
+    reason: "not_ready"
+  });
+  assert.deepEqual(loggingService.calls, []);
+}
+
 {
   const { service, workspaceService, database, loggingService, toolRegistryService } =
     createService();
 
-  const result = await service.executeLatestPlannedTool(
-    USER_ID,
-    WORKSPACE_ID,
-    RUN_ID
-  );
+  const result = await service.executeReadyRun(RUN_ID);
 
   assert.equal(result.status, "completed");
   assert.equal(result.run.status, "completed");
   assert.deepEqual(workspaceService.calls, [
     { currentUserId: USER_ID, workspaceId: WORKSPACE_ID }
   ]);
-  assert.equal(database.calls.length, 3);
+  assert.equal(database.calls.length, 4);
   assert.deepEqual(
     toolRegistryService.calls.map((call) => call.method),
     ["getDefinition", "validateInput", "execute"]
@@ -566,11 +870,7 @@ function createService({
     executionStarted: true
   });
 
-  const result = await service.executeLatestPlannedTool(
-    USER_ID,
-    WORKSPACE_ID,
-    RUN_ID
-  );
+  const result = await service.executeReadyRun(RUN_ID);
 
   assert.equal(result.status, "skipped");
   assert.equal(result.reason, "already_started");
@@ -811,20 +1111,23 @@ function createService({
         reportId: REPORT_ID
       }
     }),
-    registry
+    registry,
+    {
+      prompt: "결정사항만 알려줘",
+      timezone: "Asia/Seoul"
+    }
   );
 
-  const result = await service.executeLatestPlannedTool(
-    USER_ID,
-    WORKSPACE_ID,
-    RUN_ID
-  );
+  const result = await service.executeReadyRun(RUN_ID);
   const outputSummary = loggingService.calls[1].input.outputSummary;
 
   assert.equal(result.status, "completed");
   assert.equal(meetingService.calls[0].method, "getReport");
   assert.equal(outputSummary.report.reportId, REPORT_ID);
   assert.equal("transcript" in outputSummary.report, false);
+  assert.match(result.run.finalAnswer, /결정사항: 결정사항/);
+  assert.doesNotMatch(result.run.finalAnswer, /요약:/);
+  assert.doesNotMatch(result.run.finalAnswer, /논의사항:/);
   assert.doesNotMatch(
     JSON.stringify(outputSummary),
     /Agent smoke test must not persist transcript text/

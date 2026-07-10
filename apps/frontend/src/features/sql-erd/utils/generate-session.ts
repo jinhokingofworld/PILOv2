@@ -3,6 +3,8 @@ import type {
   UpdateSqlErdSessionRequest
 } from "@/features/sql-erd/api/client";
 import type { SqlErdViewSession } from "@/features/sql-erd/utils/session-state";
+import type { SqltoerdResolvedDialect } from "@/features/sql-erd/types";
+import type { SqltoerdSourceMap } from "@/features/sql-erd/utils/sql-source-map";
 import {
   parseSqlDdlToErdModel,
   type SqltoerdDdlParseError
@@ -14,12 +16,16 @@ export type SqlErdGenerateWorkspaceRequest =
       kind: "create";
       ok: true;
       payload: CreateSqlErdSessionRequest;
+      resolvedDialect: SqltoerdResolvedDialect;
+      sourceMap: SqltoerdSourceMap;
     }
   | {
       kind: "update";
       ok: true;
       payload: UpdateSqlErdSessionRequest;
+      resolvedDialect: SqltoerdResolvedDialect;
       sessionId: string;
+      sourceMap: SqltoerdSourceMap;
     }
   | {
       error: SqltoerdDdlParseError;
@@ -58,6 +64,8 @@ export function createSqlErdGenerateWorkspaceRequest(
     return {
       kind: "update",
       ok: true,
+      resolvedDialect: parseResult.resolvedDialect,
+      sourceMap: parseResult.sourceMap,
       payload: {
         baseRevision: session.revision,
         ...writePayload
@@ -69,6 +77,8 @@ export function createSqlErdGenerateWorkspaceRequest(
   return {
     kind: "create",
     ok: true,
+    resolvedDialect: parseResult.resolvedDialect,
+    sourceMap: parseResult.sourceMap,
     payload: writePayload
   };
 }

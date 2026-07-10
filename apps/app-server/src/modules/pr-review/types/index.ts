@@ -82,6 +82,7 @@ export interface PrReviewGithubConflictContentPayload {
   mergeBaseContent: string | null;
   baseContent: string | null;
   headContent: string | null;
+  headBlobSha: string | null;
   unsupportedReason: string | null;
 }
 
@@ -100,6 +101,39 @@ export interface PrReviewGithubReviewSubmissionPayload {
   githubReviewId: string | null;
   githubReviewUrl: string | null;
   submittedAt: string;
+}
+
+export interface PrReviewGithubConflictApplyInput {
+  filePath: string;
+  resolvedContent: string;
+  expectedBaseSha: string;
+  expectedHeadSha: string;
+  expectedHeadBlobSha: string;
+}
+
+export interface PrReviewGithubConflictApplyPayload {
+  appliedByGithubLogin: string;
+  commitSha: string;
+  commitUrl: string | null;
+  headShaBefore: string;
+  headShaAfter: string;
+  headBlobShaBefore: string;
+  headBlobShaAfter: string;
+  localCacheUpdated: boolean;
+}
+
+export interface PrReviewGithubPullRequestMergeInput {
+  expectedHeadSha: string;
+}
+
+export interface PrReviewGithubPullRequestMergePayload {
+  mergedByGithubLogin: string;
+  mergeMethod: "merge";
+  mergeCommitSha: string;
+  mergeCommitUrl: string | null;
+  pullRequestState: "closed";
+  mergedAt: string | null;
+  headSha: string;
 }
 
 export interface PrReviewGithubDependency {
@@ -145,4 +179,18 @@ export interface PrReviewGithubDependency {
       reviewBody: string;
     }
   ): Promise<PrReviewGithubReviewSubmissionPayload>;
+
+  applyPullRequestFileResolution(
+    currentUserId: string,
+    workspaceId: string,
+    pullRequestId: string,
+    input: PrReviewGithubConflictApplyInput
+  ): Promise<PrReviewGithubConflictApplyPayload>;
+
+  mergePullRequest(
+    currentUserId: string,
+    workspaceId: string,
+    pullRequestId: string,
+    input: PrReviewGithubPullRequestMergeInput
+  ): Promise<PrReviewGithubPullRequestMergePayload>;
 }

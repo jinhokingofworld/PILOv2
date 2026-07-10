@@ -10,6 +10,10 @@ const serviceFile = await readFile(
   new URL("github-integration.service.ts", moduleDirectory),
   "utf8"
 );
+const pullRequestMergeServiceFile = await readFile(
+  new URL("github-pull-request-merge.service.ts", moduleDirectory),
+  "utf8"
+);
 const compactServiceFile = serviceFile.replace(/\s+/g, "");
 const entries = await readdir(moduleDirectory, { withFileTypes: true });
 const fileNames = entries.filter((entry) => entry.isFile()).map((entry) => entry.name);
@@ -42,6 +46,10 @@ const featureServices = [
   {
     fileName: "github-pull-request-remote.service.ts",
     className: "GithubPullRequestRemoteService"
+  },
+  {
+    fileName: "github-pull-request-merge.service.ts",
+    className: "GithubPullRequestMergeService"
   },
   {
     fileName: "github-webhook.service.ts",
@@ -190,6 +198,11 @@ const delegatedMethods = [
     args: "currentUserId, workspaceId, pullRequestId"
   },
   {
+    methodName: "mergeGithubPullRequest",
+    serviceName: "githubPullRequestMergeService",
+    args: "currentUserId, workspaceId, pullRequestId, input"
+  },
+  {
     methodName: "receiveGithubWebhook",
     serviceName: "githubWebhookService",
     args: "input"
@@ -222,3 +235,14 @@ for (const { methodName, serviceName, args } of delegatedMethods) {
     `${methodName} must delegate to ${serviceName}.`
   );
 }
+
+assert.match(
+  pullRequestMergeServiceFile,
+  /github_updated_at\s*=\s*\$13::timestamptz/,
+  "PR merge must refresh github_updated_at so PR lists do not keep stale ordering metadata."
+);
+assert.match(
+  pullRequestMergeServiceFile,
+  /\{updated_at\}/,
+  "PR merge must refresh raw.updated_at alongside merged_at."
+);

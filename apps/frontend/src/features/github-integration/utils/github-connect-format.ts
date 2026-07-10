@@ -1,5 +1,4 @@
 import type {
-  GithubSyncRun,
   GithubSyncStatus,
   GithubSyncTarget
 } from "@/features/github-integration/types";
@@ -60,15 +59,4 @@ export function getGithubConnectSyncTargetLabel(target: GithubSyncTarget) {
   };
 
   return labels[target];
-}
-
-export function getGithubConnectSyncProgress(syncRun: GithubSyncRun) {
-  const processed =
-    syncRun.createdCount + syncRun.updatedCount + syncRun.skippedCount;
-
-  if (syncRun.fetchedCount <= 0) {
-    return syncRun.status === "success" ? 100 : 0;
-  }
-
-  return Math.min(100, Math.round((processed / syncRun.fetchedCount) * 100));
 }

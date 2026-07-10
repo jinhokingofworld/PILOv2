@@ -33,7 +33,7 @@ GitHub Integration API는 Workspace 단위 GitHub 연결과 원본 데이터 조
 - GitHub webhook 수신과 처리 이력
 
 PR 리뷰 세션, 파일별 리뷰 판단, Kanban board cache hydrate, GitHub issue
-수정, PR merge, inline review comment는 이 문서의 범위가 아니다.
+수정, 공개 PR merge/close endpoint, inline review comment는 이 문서의 범위가 아니다.
 
 ## 인증 구조
 
@@ -42,6 +42,8 @@ PR 리뷰 세션, 파일별 리뷰 판단, Kanban board cache hydrate, GitHub is
 | Repository/Issue/PR와 organization ProjectV2 조회와 동기화 | GitHub App installation token | `github_installations` |
 | personal ProjectV2 read/write and sync | regular GitHub OAuth App token with `project` scope | `users.github_project_access_token_encrypted` |
 | GitHub Review 제출 | 현재 사용자의 GitHub App user OAuth token | `users.github_access_token_encrypted` |
+| PR Review conflict resolution apply commit | 현재 사용자의 GitHub App user OAuth token | `users.github_access_token_encrypted` |
+| PR Review merge action | 현재 사용자의 GitHub App user OAuth token | `users.github_access_token_encrypted` |
 | PILO API 호출 | PILO access token | application auth/session layer |
 
 GitHub token은 복호화된 상태로 응답하거나 로그에 남기지 않는다.
@@ -64,6 +66,27 @@ GitHub Review 제출 adapter만 제공한다. 이 adapter는 `event`, `body`만 
 inline `comments` payload는 보내지 않는다.
 GitHub Review 제출에는 GitHub App `Pull requests: write` permission이 필요하며,
 GitHub 403 응답은 provider raw error 대신 safe permission error로 매핑한다.
+
+PR Review conflict resolution apply commit은 GitHub Integration 공개 API endpoint가 아니다.
+PR Review API가 사용자 확인 workflow와 review session head 갱신을 소유하고, GitHub
+Integration은 PR Review가 호출하는 서버 내부 dependency로 현재 사용자의 OAuth token
+복호화 경계와 single-file merge commit adapter만 제공한다. adapter는 임시 Git working tree에서
+PR head에 base commit을 실제로 merge하고, 충돌 없는 base 변경을 보존한 상태에서 사용자가
+확인한 resolved content를 적용한다. 미해결 경로가 선택한 파일 하나뿐인지와 결과 commit의
+parent가 `[PR head SHA, base SHA]`인지 검증한 뒤 PR head branch에 force 없이 push한다.
+이 adapter에는 GitHub App `Contents: write` permission이 필요하며, GitHub 403 응답은 provider
+raw error 대신 safe permission error로 매핑한다.
+GitHub ref 갱신이 성공한 뒤 local PR cache 갱신이 실패해도 GitHub 성공을 실패로 되돌리지
+않고 PR Review에 local sync 필요 상태를 전달한다.
+
+PR Review merge action은 GitHub Integration 공개 API endpoint가 아니다. PR Review API가
+merge 가능 조건, confirmation, review room 상태 갱신을 소유하고, GitHub Integration은
+PR Review가 호출하는 서버 내부 dependency로 현재 사용자의 OAuth token 복호화 경계와
+GitHub `PUT /repos/{owner}/{repo}/pulls/{pull_number}/merge` adapter만 제공한다. 이 adapter는
+1차에서 `merge` commit 방식만 사용한다. Branch protection, required checks, required reviews,
+conversation resolution, merge method 제한은 PILO가 사전 판정하지 않고 GitHub merge API 응답을
+safe permission/conflict/bad request error로 매핑한다. GitHub token, raw provider error, secret은
+API 응답이나 로그에 노출하지 않는다.
 
 GitHub App installation 검증은 GitHub의 `/user/installations` endpoint를
 호출한다. 저장된 사용자 token은 GitHub App client id/secret으로 발급받은
@@ -290,7 +313,7 @@ Installation 목록 응답:
       "accountLogin": "my-team",
       "accountType": "Organization",
       "repositorySelection": "selected",
-      "permissions": { "contents": "read", "pull_requests": "write" },
+      "permissions": { "contents": "write", "pull_requests": "write" },
       "installedByUserId": "user_uuid",
       "installedAt": "2026-07-07T12:00:00.000Z",
       "suspendedAt": null,
@@ -399,10 +422,36 @@ API error로 반환한다.
     "createdCount": 2,
     "updatedCount": 2,
     "skippedCount": 1,
+    "progressPercent": 100,
+    "progressStage": "completed",
     "errorMessage": null
   }
 }
 ```
+
+`progressPercent`는 sync run 전체 진행률을 나타내는 `0` 이상 `100` 이하
+정수다. 처리 통계인 `fetchedCount`, `createdCount`, `updatedCount`,
+`skippedCount`의 비율과는 별도 값이며, 실행 중에는 단계 완료 시 단조 증가하고
+`success` 상태에서는 항상 `100`이다. `failed` 상태에서는 실패 직전 마지막
+진행률을 유지한다.
+
+`progressStage` 값은 다음 중 하나다.
+
+- `initializing`
+- `repositories`
+- `project_v2_discovery`
+- `issues`
+- `pull_requests`
+- `project_v2`
+- `project_v2_fields`
+- `project_v2_items`
+- `board_hydration`
+- `finalizing`
+- `completed`
+
+서버는 실행 중 progress와 누적 count를 `github_sync_runs`에 저장한다. 기존
+progress 정보가 없는 sync run은 `success`면 `100 / completed`, 그 외 상태면
+`0 / initializing`으로 응답한다.
 
 `GET /workspaces/{workspaceId}/github/sync-runs/{syncRunId}`는 위 payload에
 `cursor: Record<string, unknown>`을 추가로 포함한다.
@@ -599,7 +648,7 @@ DELETE /api/v1/workspaces/{workspaceId}/github/installations/{installationId}
 - GitHub repository 생성/삭제
 - GitHub issue 생성/수정/삭제
 - GitHub ProjectV2 field/option write
-- PR merge/close
+- Public PR merge/close endpoint
 - GitHub inline review comment
 
 ## Callback redirect rule

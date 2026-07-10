@@ -10,6 +10,7 @@ const {
   BoardIssueStatusService
 } = require("../../dist/modules/board/board-issue-status.service.js");
 const { BoardService } = require("../../dist/modules/board/board.service.js");
+const { forbidden } = require("../../dist/common/api-error.js");
 
 const currentUserId = "22222222-2222-4222-8222-222222222222";
 const workspaceId = "11111111-1111-4111-8111-111111111111";
@@ -17,6 +18,7 @@ const boardId = "42";
 const issueId = "1001";
 const sourceColumnId = "10";
 const targetColumnId = "20";
+const alternateTargetColumnId = "30";
 const repositoryId = "33333333-3333-4333-8333-333333333333";
 const githubIssueId = "44444444-4444-4444-8444-444444444444";
 const projectItemId = "55555555-5555-4555-8555-555555555555";
@@ -67,6 +69,80 @@ class FakeTransaction {
   }
 }
 
+class SerializedStatusDatabase {
+  constructor() {
+    this.columnId = sourceColumnId;
+    this.queries = [];
+    this.transactions = [];
+    this.transactionTail = Promise.resolve();
+  }
+
+  async queryOne(text, values = []) {
+    return this.readQuery(text, values, false);
+  }
+
+  async execute(text, values = []) {
+    this.queries.push({ text, values, transaction: false });
+    return { rows: [], rowCount: 1 };
+  }
+
+  async transaction(callback) {
+    const previousTransaction = this.transactionTail;
+    let releaseTransaction;
+    this.transactionTail = new Promise((resolve) => {
+      releaseTransaction = resolve;
+    });
+    await previousTransaction;
+
+    let pendingColumnId = this.columnId;
+    const transaction = {
+      queryOne: async (text, values = []) => this.readQuery(text, values, true),
+      execute: async (text, values = []) => {
+        this.queries.push({ text, values, transaction: true });
+        if (/UPDATE pilo_issues[\s\S]*column_id/i.test(text)) {
+          pendingColumnId = String(values[2]);
+        }
+
+        return { rows: [], rowCount: 1 };
+      }
+    };
+    this.transactions.push(transaction);
+
+    try {
+      const result = await callback(transaction);
+      this.columnId = pendingColumnId;
+      return result;
+    } finally {
+      releaseTransaction();
+    }
+  }
+
+  readQuery(text, values, transaction) {
+    this.queries.push({ text, values, transaction });
+
+    if (/JOIN board_columns target_col/i.test(text)) {
+      const requestedTargetColumnId = String(values[3]);
+      return statusTargetRow({
+        column_id: this.columnId,
+        target_column_id: requestedTargetColumnId,
+        target_status_option_id:
+          requestedTargetColumnId === targetColumnId
+            ? "88888888-8888-4888-8888-888888888888"
+            : "99999999-9999-4999-8999-999999999999",
+        target_status_option_github_id: `option-${requestedTargetColumnId}`,
+        target_status_name: `Column ${requestedTargetColumnId}`,
+        target_status_normalized_name: `column-${requestedTargetColumnId}`
+      });
+    }
+
+    if (/FROM pilo_issues pi/i.test(text)) {
+      return issueRow({ column_id: this.columnId });
+    }
+
+    return null;
+  }
+}
+
 class FakeWorkspaceService {
   constructor() {
     this.calls = [];
@@ -79,13 +155,18 @@ class FakeWorkspaceService {
 }
 
 class FakeGithubProjectV2WriteService {
-  constructor({ fail = false } = {}) {
+  constructor({ error = null, fail = false } = {}) {
+    this.error = error;
     this.fail = fail;
     this.calls = [];
   }
 
   async updateProjectV2ItemStatus(input) {
     this.calls.push(input);
+    if (this.error) {
+      throw this.error;
+    }
+
     if (this.fail) {
       throw new Error("raw provider failure");
     }
@@ -196,6 +277,11 @@ function issueRow(overrides = {}) {
     }
   ]);
   assert.equal(db.transactions.length, 1);
+  const lockedTargetQuery = db.queries.find(
+    (query) => query.transaction && /JOIN board_columns target_col/i.test(query.text)
+  );
+  assert.ok(lockedTargetQuery);
+  assert.match(lockedTargetQuery.text, /FOR UPDATE OF pi/i);
   assert.ok(
     db.queries.some((query) =>
       /UPDATE github_project_v2_items[\s\S]*status_option_id/i.test(query.text)
@@ -285,7 +371,7 @@ function issueRow(overrides = {}) {
   );
 
   assert.equal(githubWriteService.calls.length, 0);
-  assert.equal(db.transactions.length, 0);
+  assert.equal(db.transactions.length, 1);
 }
 
 {
@@ -319,5 +405,95 @@ function issueRow(overrides = {}) {
     }
   );
 
-  assert.equal(db.transactions.length, 0);
+  assert.equal(db.transactions.length, 1);
+}
+
+{
+  const database = new SerializedStatusDatabase();
+  const { githubWriteService, service } = createSubject(database);
+
+  const results = await Promise.allSettled([
+    service.updateBoardIssueStatus(
+      currentUserId,
+      workspaceId,
+      boardId,
+      issueId,
+      {
+        columnId: targetColumnId,
+        previousColumnId: sourceColumnId
+      }
+    ),
+    service.updateBoardIssueStatus(
+      currentUserId,
+      workspaceId,
+      boardId,
+      issueId,
+      {
+        columnId: alternateTargetColumnId,
+        previousColumnId: sourceColumnId
+      }
+    )
+  ]);
+
+  const fulfilled = results.filter((result) => result.status === "fulfilled");
+  const rejected = results.filter((result) => result.status === "rejected");
+
+  assert.equal(fulfilled.length, 1);
+  assert.equal(rejected.length, 1);
+  assert.equal(rejected[0].reason.getStatus(), 409);
+  assert.equal(
+    rejected[0].reason.getResponse().error.message,
+    "Board issue column changed before status update"
+  );
+  assert.equal(githubWriteService.calls.length, 1);
+  assert.equal(
+    githubWriteService.calls[0].singleSelectOptionId,
+    `option-${targetColumnId}`
+  );
+  assert.equal(database.columnId, targetColumnId);
+
+  const lockedTargetQueries = database.queries.filter(
+    (query) => query.transaction && /JOIN board_columns target_col/i.test(query.text)
+  );
+  assert.equal(lockedTargetQueries.length, 2);
+  lockedTargetQueries.forEach((query) => {
+    assert.match(query.text, /FOR UPDATE OF pi/i);
+  });
+}
+
+{
+  const database = new FakeDatabase({
+    queryOneRows: [statusTargetRow()]
+  });
+  const permissionError = forbidden(
+    "GitHub ProjectV2 write permission is required"
+  );
+  const githubWriteService = new FakeGithubProjectV2WriteService({
+    error: permissionError
+  });
+  const { database: db, service } = createSubject(database, githubWriteService);
+
+  await assert.rejects(
+    () =>
+      service.updateBoardIssueStatus(
+        currentUserId,
+        workspaceId,
+        boardId,
+        issueId,
+        {
+          columnId: targetColumnId
+        }
+      ),
+    (error) => {
+      assert.equal(error.getStatus(), 403);
+      assert.equal(error.getResponse().error.code, "FORBIDDEN");
+      assert.equal(
+        error.getResponse().error.message,
+        "GitHub ProjectV2 write permission is required"
+      );
+      return true;
+    }
+  );
+
+  assert.equal(db.transactions.length, 1);
 }

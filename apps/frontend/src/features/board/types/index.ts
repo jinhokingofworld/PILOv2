@@ -1,6 +1,15 @@
 export type BoardSyncStatus = "running" | "success" | "failed";
 export type BoardIssueState = "open" | "closed";
 
+export type BoardGithubRepositoryPayload = {
+  id: string;
+};
+
+export type BoardGithubProjectV2Payload = {
+  id: string;
+  repositoryIds: string[];
+};
+
 export type BoardRepositoryPayload = {
   id: string;
   fullName: string;
@@ -168,6 +177,11 @@ export type BoardFilterAssigneeOptionPayload = {
   count: number;
 };
 
+export type BoardIssueAssigneeOptionPayload = {
+  login: string;
+  avatarUrl: string | null;
+};
+
 export type BoardFilterLabelOptionPayload = {
   name: string;
   color: string | null;
@@ -192,6 +206,10 @@ export type CreateBoardIssueInput = {
   columnId: string;
 };
 
+export type CreateBoardIssueCommand = CreateBoardIssueInput & {
+  idempotencyKey: string;
+};
+
 export type CreateBoardIssuePayload = {
   issue: BoardIssueCardPayload;
 };
@@ -207,6 +225,7 @@ export type UpdateBoardIssueStatusPayload = {
 };
 
 export type UpdateBoardIssueInput = {
+  assignees?: string[];
   title?: string;
   body?: string;
   state?: BoardIssueState;
@@ -220,6 +239,16 @@ export type ListBoardsQuery = {
   repositoryId?: string;
   projectV2Id?: string;
   page?: number;
+  limit?: number;
+};
+
+export type ListBoardGithubRepositoriesQuery = {
+  includeArchived?: boolean;
+  limit?: number;
+};
+
+export type ListBoardGithubProjectsV2Query = {
+  closed?: boolean;
   limit?: number;
 };
 

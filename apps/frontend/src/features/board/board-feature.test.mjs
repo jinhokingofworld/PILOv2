@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
+await import("./board-issue-idempotency.test.mjs");
+await import("./board-structure.test.mjs");
+await import("./board-assignees.test.mjs");
+
 async function readFeatureFile(path) {
   return readFile(new URL(path, import.meta.url), "utf8");
 }
@@ -26,6 +30,8 @@ const [
 ]);
 
 assert.match(boardTypes, /export type BoardPayload/);
+assert.match(boardTypes, /export type BoardGithubRepositoryPayload/);
+assert.match(boardTypes, /export type BoardGithubProjectV2Payload/);
 assert.match(boardTypes, /export type BoardColumnPayload/);
 assert.match(boardTypes, /export type BoardIssueCardPayload/);
 assert.match(boardTypes, /export type BoardIssueDetailPayload/);
@@ -57,12 +63,32 @@ assert.match(boardApiClient, /method: "PATCH"/);
 assert.match(boardApiClient, /\/status/);
 assert.match(boardApiClient, /listBoardIssuePullRequests/);
 assert.match(boardApiClient, /getBoardFilterOptions/);
+assert.match(boardApiClient, /listGithubRepositories/);
+assert.match(boardApiClient, /listGithubProjectsV2/);
+assert.match(
+  boardApiClient,
+  /workspaceGithubPath\(workspaceId, "\/repositories"\)/
+);
+assert.match(
+  boardApiClient,
+  /workspaceGithubPath\(workspaceId, "\/projects-v2"\)/
+);
+assert.match(boardApiClient, /credentials: "include"/);
 
 assert.match(boardDataHook, /useBoardWorkspaceData/);
 assert.match(boardDataHook, /createBoardApiClient/);
-assert.match(boardDataHook, /createGithubIntegrationApiClient/);
+assert.doesNotMatch(boardDataHook, /createGithubIntegrationApiClient/);
+assert.doesNotMatch(boardDataHook, /@\/features\/github-integration/);
 assert.match(boardDataHook, /listGithubRepositories/);
 assert.match(boardDataHook, /listGithubProjectsV2/);
+assert.match(
+  boardDataHook,
+  /listGithubRepositories\(normalizedWorkspaceId, \{\s*includeArchived: false,\s*limit: 100\s*\}\)/
+);
+assert.match(
+  boardDataHook,
+  /listGithubProjectsV2\(normalizedWorkspaceId, \{\s*closed: false,\s*limit: 100\s*\}\)/
+);
 assert.match(boardDataHook, /listBoards/);
 assert.match(boardDataHook, /listBoardColumns/);
 assert.match(boardDataHook, /listBoardIssues/);

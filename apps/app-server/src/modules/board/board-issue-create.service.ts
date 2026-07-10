@@ -1,9 +1,13 @@
 import { Injectable } from "@nestjs/common";
-import { ApiError, badRequest, notFound } from "../../common/api-error";
+import { badRequest, notFound } from "../../common/api-error";
 import { GithubIssueWriteService } from "../github-integration/github-issue-write.service";
 import { GithubProjectV2WriteService } from "../github-integration/github-project-v2-write.service";
 import { WorkspaceService } from "../workspace/workspace.service";
-import { boardBadGateway } from "./board-api-error";
+import { rethrowBoardGithubWriteError } from "./board-github-write-error";
+import {
+  BoardIssueCreateOperationService,
+  type BoardIssueCreateAttempt
+} from "./board-issue-create-operation.service";
 import type { CreateBoardIssueRequest } from "./dto";
 import {
   BoardIssueCreateQueries,
@@ -28,14 +32,16 @@ export class BoardIssueCreateService {
     private readonly boardIssueCreateQueries: BoardIssueCreateQueries,
     private readonly workspaceService: WorkspaceService,
     private readonly githubIssueWriteService: GithubIssueWriteService,
-    private readonly githubProjectV2WriteService: GithubProjectV2WriteService
+    private readonly githubProjectV2WriteService: GithubProjectV2WriteService,
+    private readonly operationService: BoardIssueCreateOperationService
   ) {}
 
   async createBoardIssue(
     currentUserId: string,
     workspaceId: string,
     boardId: string,
-    body: unknown
+    body: unknown,
+    idempotencyKey: unknown
   ): Promise<CreateBoardIssueResult> {
     const normalizedBoardId = this.readBoardId(boardId);
     const input = this.normalizeIssueCreateInput(body);
@@ -54,13 +60,85 @@ export class BoardIssueCreateService {
 
     this.assertGithubCreateTarget(target);
 
-    await this.githubProjectV2WriteService.assertProjectV2WriteAccess(currentUserId);
-    const githubIssue = await this.createGithubIssue(currentUserId, target, input);
-    const projectItem = await this.addProjectItem(currentUserId, target, githubIssue.node_id);
-    await this.updateProjectItemStatus(currentUserId, target, projectItem.itemNodeId);
+    const claim = await this.operationService.claimOperation({
+      actorUserId: currentUserId,
+      workspaceId,
+      boardId: normalizedBoardId,
+      columnId: input.columnId,
+      title: input.title,
+      body: input.body,
+      idempotencyKey
+    });
+    if (claim.kind === "replay") {
+      return claim.result;
+    }
 
-    let createdIssueId = "";
-    await this.boardIssueCreateQueries.transaction(async (transaction) => {
+    let attempt = claim.attempt;
+    try {
+      if (attempt.completedStage !== "status_updated") {
+        await this.githubProjectV2WriteService.assertProjectV2WriteAccess(currentUserId);
+      }
+
+      if (attempt.completedStage === "none") {
+        const githubIssue = await this.createGithubIssue(currentUserId, target, input);
+        attempt = await this.operationService.saveGithubIssue(attempt, githubIssue);
+      }
+
+      if (attempt.completedStage === "github_issue_created") {
+        const githubIssue = this.requireCheckpointedGithubIssue(attempt);
+        const projectItem = await this.addProjectItem(
+          currentUserId,
+          target,
+          githubIssue.node_id
+        );
+        attempt = await this.operationService.saveProjectItem(
+          attempt,
+          projectItem.itemNodeId
+        );
+      }
+
+      if (attempt.completedStage === "project_item_added") {
+        const projectItemNodeId = this.requireCheckpointedProjectItem(attempt);
+        await this.updateProjectItemStatus(currentUserId, target, projectItemNodeId);
+        attempt = await this.operationService.saveStatusUpdated(attempt);
+      }
+
+      return await this.persistCachesAndComplete(
+        attempt,
+        target,
+        input,
+        workspaceId,
+        normalizedBoardId
+      );
+    } catch (error) {
+      await this.operationService.markRetryableSafely(attempt, error);
+      throw error;
+    }
+  }
+
+  private async persistCachesAndComplete(
+    attempt: BoardIssueCreateAttempt,
+    target: BoardIssueCreateTargetRow & {
+      github_field_node_id: string;
+      github_project_node_id: string;
+      project_v2_id: string;
+      repository_id: string;
+      repository_name: string;
+      repository_owner_login: string;
+      status_field_id: string;
+    },
+    input: NormalizedIssueCreateInput,
+    workspaceId: string,
+    boardId: string
+  ): Promise<CreateBoardIssueResult> {
+    if (attempt.completedStage !== "status_updated") {
+      throw new Error("Board issue creation operation is not ready for cache persistence");
+    }
+
+    const githubIssue = this.requireCheckpointedGithubIssue(attempt);
+    const projectItemNodeId = this.requireCheckpointedProjectItem(attempt);
+
+    return this.boardIssueCreateQueries.transaction(async (transaction) => {
       const githubIssueId = await this.boardIssueCreateQueries.upsertGithubIssueCache(
         transaction,
         {
@@ -73,7 +151,7 @@ export class BoardIssueCreateService {
       const projectItemId =
         await this.boardIssueCreateQueries.upsertProjectItemCache(transaction, {
           githubIssueId,
-          itemNodeId: projectItem.itemNodeId,
+          itemNodeId: projectItemNodeId,
           projectV2Id: target.project_v2_id,
           statusFieldId: target.status_field_id,
           statusName: target.target_status_name,
@@ -102,10 +180,10 @@ export class BoardIssueCreateService {
         );
       }
 
-      createdIssueId = await this.boardIssueCreateQueries.insertPiloIssueCache(
+      const createdIssueId = await this.boardIssueCreateQueries.insertPiloIssueCache(
         transaction,
         {
-          boardId: normalizedBoardId,
+          boardId,
           columnId: input.columnId,
           githubIssueId,
           issue: githubIssue,
@@ -117,25 +195,50 @@ export class BoardIssueCreateService {
 
       await this.boardIssueCreateQueries.updatePiloIssueProjectItemNodeId(
         transaction,
-        normalizedBoardId,
+        boardId,
         createdIssueId,
-        projectItem.itemNodeId
+        projectItemNodeId
       );
+
+      const issue = await this.boardIssueCreateQueries.findCreatedIssueCard(
+        transaction,
+        workspaceId,
+        boardId,
+        createdIssueId
+      );
+      if (!issue) {
+        throw notFound("Board issue not found");
+      }
+
+      const result = {
+        issue: this.mapBoardIssue(issue)
+      };
+      await this.operationService.markSucceeded(transaction, {
+        attempt,
+        piloIssueId: createdIssueId,
+        result
+      });
+
+      return result;
     });
+  }
 
-    const issue = await this.boardIssueCreateQueries.findCreatedIssueCard(
-      workspaceId,
-      normalizedBoardId,
-      createdIssueId
-    );
-
-    if (!issue) {
-      throw notFound("Board issue not found");
+  private requireCheckpointedGithubIssue(
+    attempt: BoardIssueCreateAttempt
+  ): NonNullable<BoardIssueCreateAttempt["githubIssue"]> {
+    if (!attempt.githubIssue) {
+      throw new Error("Board issue creation operation is missing its Issue checkpoint");
     }
 
-    return {
-      issue: this.mapBoardIssue(issue)
-    };
+    return attempt.githubIssue;
+  }
+
+  private requireCheckpointedProjectItem(attempt: BoardIssueCreateAttempt): string {
+    if (!attempt.githubProjectItemNodeId) {
+      throw new Error("Board issue creation operation is missing its ProjectV2 item checkpoint");
+    }
+
+    return attempt.githubProjectItemNodeId;
   }
 
   private async createGithubIssue(
@@ -155,11 +258,7 @@ export class BoardIssueCreateService {
         title: input.title
       });
     } catch (error) {
-      if (this.isGithubConnectionError(error)) {
-        throw error;
-      }
-
-      throw boardBadGateway("GitHub issue create failed");
+      rethrowBoardGithubWriteError(error, "GitHub issue create failed");
     }
   }
 
@@ -177,11 +276,7 @@ export class BoardIssueCreateService {
         projectNodeId: target.github_project_node_id
       });
     } catch (error) {
-      if (this.isGithubConnectionError(error)) {
-        throw error;
-      }
-
-      throw boardBadGateway("GitHub ProjectV2 item add failed");
+      rethrowBoardGithubWriteError(error, "GitHub ProjectV2 item add failed");
     }
   }
 
@@ -202,11 +297,7 @@ export class BoardIssueCreateService {
         singleSelectOptionId: target.target_status_option_github_id
       });
     } catch (error) {
-      if (this.isGithubConnectionError(error)) {
-        throw error;
-      }
-
-      throw boardBadGateway("GitHub ProjectV2 status update failed");
+      rethrowBoardGithubWriteError(error, "GitHub ProjectV2 status update failed");
     }
   }
 
@@ -308,30 +399,6 @@ export class BoardIssueCreateService {
     if (target.target_status_option_id && !target.target_status_option_github_id) {
       throw badRequest("Board column is missing GitHub Status option metadata");
     }
-  }
-
-  private isGithubConnectionError(error: unknown): boolean {
-    if (!(error instanceof ApiError)) {
-      return false;
-    }
-
-    const response = error.getResponse();
-    if (
-      !response ||
-      typeof response !== "object" ||
-      Array.isArray(response) ||
-      !("error" in response)
-    ) {
-      return false;
-    }
-
-    const apiError = (response as { error?: { message?: unknown } }).error;
-    return (
-      typeof apiError?.message === "string" &&
-      (apiError.message.includes("GitHub OAuth connection") ||
-        apiError.message.includes("GitHub ProjectV2 OAuth") ||
-        apiError.message.includes("Current user not found"))
-    );
   }
 
   private mapBoardIssue(row: BoardIssueCreateIssueRow): BoardIssueCardPayload {

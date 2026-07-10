@@ -232,16 +232,18 @@ module "ecs" {
       task_role_arn      = module.iam.ai_worker_task_role_arn
       target_group_arn   = null
       environment = {
-        APP_ENV                       = var.environment
-        AWS_REGION                    = var.aws_region
-        DATABASE_SSL                  = "true"
-        S3_UPLOADS_BUCKET             = module.s3.uploads_bucket_name
-        S3_RECORDINGS_BUCKET          = module.s3.uploads_bucket_name
-        SQS_AI_JOBS_QUEUE_URL         = module.sqs.ai_jobs_queue_url
-        SQS_GITHUB_WEBHOOKS_QUEUE_URL = module.sqs.github_webhooks_queue_url
-        OPENAI_STT_MODEL              = "gpt-4o-mini-transcribe"
-        OPENAI_MEETING_REPORT_MODEL   = "gpt-5.4-mini"
-        AI_WORKER_CONCURRENCY         = "1"
+        APP_ENV                                 = var.environment
+        AWS_REGION                              = var.aws_region
+        DATABASE_SSL                            = "true"
+        S3_UPLOADS_BUCKET                       = module.s3.uploads_bucket_name
+        S3_RECORDINGS_BUCKET                    = module.s3.uploads_bucket_name
+        SQS_AI_JOBS_QUEUE_URL                   = module.sqs.ai_jobs_queue_url
+        SQS_GITHUB_WEBHOOKS_QUEUE_URL           = module.sqs.github_webhooks_queue_url
+        AGENT_EXECUTION_HANDOFF_BASE_URL        = local.api_domain == "" ? "http://${module.alb.alb_dns_name}" : "https://${local.api_domain}"
+        AGENT_EXECUTION_HANDOFF_TIMEOUT_SECONDS = "10"
+        OPENAI_STT_MODEL                        = "gpt-4o-mini-transcribe"
+        OPENAI_MEETING_REPORT_MODEL             = "gpt-5.4-mini"
+        AI_WORKER_CONCURRENCY                   = "1"
       }
       secrets = module.secrets.ai_worker_ecs_secrets
     }

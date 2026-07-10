@@ -6,6 +6,8 @@ import { GithubAppClient } from "./github-app.client";
 import { GithubAppInstallationService } from "./github-app-installation.service";
 import { GithubAppInstallationStateService } from "./github-app-installation-state.service";
 import { GithubCallbackStateService } from "./github-callback-state.service";
+import { GithubConflictMergeService } from "./github-conflict-merge.service";
+import { GithubGitCommandRunner } from "./github-git-command-runner";
 import { GithubIntegrationConfigService } from "./github-integration-config.service";
 import { GithubIntegrationController } from "./github-integration.controller";
 import { GithubIntegrationService } from "./github-integration.service";
@@ -17,6 +19,8 @@ import { GithubProjectOAuthIntegrationService } from "./github-project-oauth-int
 import { GithubProjectV2SyncTokenService } from "./github-project-v2-sync-token.service";
 import { GithubProjectV2Service } from "./github-project-v2.service";
 import { GithubProjectV2WriteService } from "./github-project-v2-write.service";
+import { GithubPullRequestFileWriteService } from "./github-pull-request-file-write.service";
+import { GithubPullRequestMergeService } from "./github-pull-request-merge.service";
 import { GithubPullRequestRemoteService } from "./github-pull-request-remote.service";
 import { GithubReviewSubmissionService } from "./github-review-submission.service";
 import { GithubSourceReadService } from "./github-source-read.service";
@@ -35,6 +39,8 @@ import { GithubWebhookService } from "./github-webhook.service";
     GithubAppInstallationService,
     GithubAppInstallationStateService,
     GithubCallbackStateService,
+    GithubConflictMergeService,
+    GithubGitCommandRunner,
     GithubIssueWriteService,
     GithubOAuthClient,
     GithubOAuthIntegrationService,
@@ -43,6 +49,8 @@ import { GithubWebhookService } from "./github-webhook.service";
     GithubProjectV2SyncTokenService,
     GithubProjectV2Service,
     GithubProjectV2WriteService,
+    GithubPullRequestFileWriteService,
+    GithubPullRequestMergeService,
     GithubPullRequestRemoteService,
     GithubReviewSubmissionService,
     GithubSourceReadService,

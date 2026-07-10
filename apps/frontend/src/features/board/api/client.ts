@@ -2,14 +2,19 @@ import type {
   BoardColumnPayload,
   BoardDetailPayload,
   BoardFilterOptionsPayload,
+  BoardGithubProjectV2Payload,
+  BoardGithubRepositoryPayload,
   BoardIssueCardPayload,
   BoardIssueDetailPayload,
+  BoardIssueAssigneeOptionPayload,
   BoardPaginatedPayload,
   BoardPayload,
   BoardRelatedPullRequestPayload,
   CreateBoardInput,
-  CreateBoardIssueInput,
+  CreateBoardIssueCommand,
   CreateBoardIssuePayload,
+  ListBoardGithubProjectsV2Query,
+  ListBoardGithubRepositoriesQuery,
   ListBoardIssuesQuery,
   ListBoardsQuery,
   UpdateBoardIssueInput,
@@ -244,6 +249,10 @@ async function requestBoardData<T>(
   });
 }
 
+function workspaceGithubPath(workspaceId: string, path: string) {
+  return `/workspaces/${encodeURIComponent(workspaceId)}/github${path}` as const;
+}
+
 function boardsPath(workspaceId: string) {
   return `/workspaces/${encodeURIComponent(workspaceId)}/boards` as const;
 }
@@ -270,6 +279,34 @@ export function createBoardApiClient({
   };
 
   return {
+    async listGithubRepositories(
+      workspaceId: string,
+      query: ListBoardGithubRepositoriesQuery = {}
+    ) {
+      return requestBoardData<BoardGithubRepositoryPayload[]>(
+        withQueryParams(
+          workspaceGithubPath(workspaceId, "/repositories"),
+          query
+        ),
+        { credentials: "include" },
+        requestOptions
+      );
+    },
+
+    async listGithubProjectsV2(
+      workspaceId: string,
+      query: ListBoardGithubProjectsV2Query = {}
+    ) {
+      return requestBoardData<BoardGithubProjectV2Payload[]>(
+        withQueryParams(
+          workspaceGithubPath(workspaceId, "/projects-v2"),
+          query
+        ),
+        { credentials: "include" },
+        requestOptions
+      );
+    },
+
     async listBoards(workspaceId: string, query: ListBoardsQuery = {}) {
       return requestBoardData<BoardPaginatedPayload<BoardPayload>>(
         withQueryParams(boardsPath(workspaceId), query),
@@ -317,11 +354,16 @@ export function createBoardApiClient({
     async createBoardIssue(
       workspaceId: string,
       boardId: string,
-      body: CreateBoardIssueInput
+      body: CreateBoardIssueCommand
     ) {
+      const { idempotencyKey, ...requestBody } = body;
+
       return requestBoardData<CreateBoardIssuePayload>(
         `${boardPath(workspaceId, boardId)}/issues`,
-        withJsonBody(body, { method: "POST" }),
+        withJsonBody(requestBody, {
+          headers: { "Idempotency-Key": idempotencyKey },
+          method: "POST"
+        }),
         requestOptions
       );
     },
@@ -333,6 +375,18 @@ export function createBoardApiClient({
     ) {
       return requestBoardData<BoardIssueDetailPayload>(
         boardIssuePath(workspaceId, boardId, issueId),
+        undefined,
+        requestOptions
+      );
+    },
+
+    async listBoardIssueAssigneeOptions(
+      workspaceId: string,
+      boardId: string,
+      issueId: string
+    ) {
+      return requestBoardData<BoardIssueAssigneeOptionPayload[]>(
+        `${boardIssuePath(workspaceId, boardId, issueId)}/assignee-options`,
         undefined,
         requestOptions
       );

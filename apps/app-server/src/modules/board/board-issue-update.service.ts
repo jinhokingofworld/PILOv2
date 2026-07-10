@@ -1,8 +1,8 @@
 import { Injectable } from "@nestjs/common";
-import { ApiError, badRequest, notFound } from "../../common/api-error";
+import { badRequest, forbidden, notFound } from "../../common/api-error";
 import { GithubIssueWriteService } from "../github-integration/github-issue-write.service";
 import { WorkspaceService } from "../workspace/workspace.service";
-import { boardBadGateway } from "./board-api-error";
+import { rethrowBoardGithubWriteError } from "./board-github-write-error";
 import type { UpdateBoardIssueRequest } from "./dto";
 import {
   BoardIssueUpdateQueries,
@@ -17,6 +17,7 @@ import type {
 } from "./types";
 
 interface NormalizedIssueUpdateInput {
+  assignees?: string[];
   title?: string;
   body?: string;
   state?: BoardIssueState;
@@ -62,13 +63,18 @@ export class BoardIssueUpdateService {
       target.github_issue_number,
       "Invalid GitHub issue number"
     );
-    const githubIssue = await this.updateGithubIssue(currentUserId, target, issueNumber, input);
+    const githubUpdate = await this.updateGithubIssue(
+      currentUserId,
+      target,
+      issueNumber,
+      input
+    );
 
     await this.boardIssueUpdateQueries.transaction(async (transaction) => {
       const cacheInput = {
         boardId: normalizedBoardId,
         githubIssueId: target.github_issue_id,
-        issue: githubIssue,
+        issue: githubUpdate.issue,
         issueId: normalizedIssueId,
         workspaceId
       };
@@ -82,6 +88,10 @@ export class BoardIssueUpdateService {
         cacheInput
       );
     });
+
+    if (!githubUpdate.assigneesApplied) {
+      throw forbidden("GitHub Issue assignee update was not applied");
+    }
 
     const issue = await this.boardIssueUpdateQueries.findUpdatedIssueDetail(
       workspaceId,
@@ -114,6 +124,7 @@ export class BoardIssueUpdateService {
   ) {
     try {
       return await this.githubIssueWriteService.updateIssue({
+        assignees: input.assignees,
         body: input.body,
         currentUserId,
         issueNumber,
@@ -123,17 +134,17 @@ export class BoardIssueUpdateService {
         title: input.title
       });
     } catch (error) {
-      if (this.isGithubConnectionError(error)) {
-        throw error;
-      }
-
-      throw boardBadGateway("GitHub issue update failed");
+      rethrowBoardGithubWriteError(error, "GitHub issue update failed");
     }
   }
 
   private normalizeIssueUpdateInput(body: unknown): NormalizedIssueUpdateInput {
     const draft = this.readBody(body);
     const input: NormalizedIssueUpdateInput = {};
+
+    if (Object.hasOwn(draft, "assignees")) {
+      input.assignees = this.readAssignees(draft.assignees);
+    }
 
     if (Object.hasOwn(draft, "title")) {
       input.title = this.readTitle(draft.title);
@@ -148,11 +159,12 @@ export class BoardIssueUpdateService {
     }
 
     if (
+      !Object.hasOwn(input, "assignees") &&
       !Object.hasOwn(input, "title") &&
       !Object.hasOwn(input, "body") &&
       !Object.hasOwn(input, "state")
     ) {
-      throw badRequest("At least one of title/body/state is required");
+      throw badRequest("At least one of title/body/state/assignees is required");
     }
 
     return input;
@@ -164,6 +176,33 @@ export class BoardIssueUpdateService {
     }
 
     return body as UpdateBoardIssueRequest;
+  }
+
+  private readAssignees(value: unknown): string[] {
+    if (!Array.isArray(value)) {
+      throw badRequest("assignees must be an array of GitHub logins");
+    }
+
+    if (value.length > 10) {
+      throw badRequest("assignees must contain 10 or fewer GitHub logins");
+    }
+
+    const assignees: string[] = [];
+    const seen = new Set<string>();
+    for (const entry of value) {
+      if (typeof entry !== "string" || !entry.trim()) {
+        throw badRequest("assignees must be an array of GitHub logins");
+      }
+
+      const login = entry.trim();
+      const normalizedLogin = login.toLowerCase();
+      if (!seen.has(normalizedLogin)) {
+        seen.add(normalizedLogin);
+        assignees.push(login);
+      }
+    }
+
+    return assignees;
   }
 
   private readTitle(value: unknown): string {
@@ -249,30 +288,6 @@ export class BoardIssueUpdateService {
     if (issueNumber === null) {
       throw badRequest("Board issue is missing GitHub issue metadata");
     }
-  }
-
-  private isGithubConnectionError(error: unknown): boolean {
-    if (!(error instanceof ApiError)) {
-      return false;
-    }
-
-    const response = error.getResponse();
-    if (
-      !response ||
-      typeof response !== "object" ||
-      Array.isArray(response) ||
-      !("error" in response)
-    ) {
-      return false;
-    }
-
-    const apiError = (response as { error?: { message?: unknown } }).error;
-    return (
-      typeof apiError?.message === "string" &&
-      (apiError.message.includes("GitHub OAuth connection") ||
-        apiError.message.includes("GitHub ProjectV2 OAuth") ||
-        apiError.message.includes("Current user not found"))
-    );
   }
 
   private mapBoardIssueDetail(

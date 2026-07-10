@@ -26,6 +26,7 @@ export interface UpdateBoardIssueStatusRequest {
 }
 
 export interface UpdateBoardIssueRequest {
+  assignees?: unknown;
   title?: unknown;
   body?: unknown;
   state?: unknown;

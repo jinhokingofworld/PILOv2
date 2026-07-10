@@ -9,6 +9,9 @@ function readSource(path) {
   return readFile(new URL(path, import.meta.url), "utf8");
 }
 
+const SQL_ERD_SESSION_DATA_MUTATION_PATTERN =
+  /\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM|TRUNCATE)\s+(?:public\.)?sql_erd_sessions\b/i;
+
 const appModule = await readSource("../../src/app.module.ts");
 const sqlErdModule = await readSource(
   "../../src/modules/sql-erd/sql-erd.module.ts"
@@ -28,6 +31,10 @@ const sqlErdValidation = await readSource(
 const sqlErdMapper = await readSource(
   "../../src/modules/sql-erd/sql-erd.mapper.ts"
 );
+const sqlErdMultiSessionMigration = await readSource(
+  "../../../../db/migrations/023_enable_sql_erd_multi_sessions.sql"
+);
+const dbReadme = await readSource("../../../../db/README.md");
 const { Module } = require("@nestjs/common");
 const { NestFactory } = require("@nestjs/core");
 const { FastifyAdapter } = require("@nestjs/platform-fastify");
@@ -59,13 +66,21 @@ assert.match(sqlErdController, /@Get\("sql-erd-session"\)/);
 assert.match(sqlErdController, /@Post\("sql-erd-session"\)/);
 assert.match(sqlErdController, /@Patch\("sql-erd-session\/:sessionId"\)/);
 assert.match(sqlErdController, /@Delete\("sql-erd-session\/:sessionId"\)/);
-assert.equal(sqlErdController.match(/@RouteConfig/g)?.length, 2);
-assert.equal(sqlErdController.match(/bodyLimit/g)?.length, 2);
+assert.match(sqlErdController, /@Get\("sql-erd-sessions"\)/);
+assert.match(sqlErdController, /@Post\("sql-erd-sessions"\)/);
+assert.match(sqlErdController, /@Get\("sql-erd-sessions\/:sessionId"\)/);
+assert.match(sqlErdController, /@Patch\("sql-erd-sessions\/:sessionId"\)/);
+assert.match(sqlErdController, /@Delete\("sql-erd-sessions\/:sessionId"\)/);
+assert.equal(sqlErdController.match(/@RouteConfig/g)?.length, 4);
+assert.equal(sqlErdController.match(/bodyLimit/g)?.length, 4);
 assert.match(sqlErdTypes, /SQL_ERD_REQUEST_BODY_LIMIT_BYTES = 2 \* 1024 \* 1024/);
 assert.match(sqlErdService, /domain: "sqltoerd"/);
 assert.match(sqlErdService, /apiContract: "docs\/api\/sqltoerd-api.md"/);
 assert.match(sqlErdService, /assertWorkspaceAccess/);
 assert.match(sqlErdService, /DatabaseService/);
+assert.match(sqlErdService, /DatabaseTransaction/);
+assert.match(sqlErdService, /database\.transaction/);
+assert.match(sqlErdService, /FOR UPDATE/);
 assert.match(sqlErdService, /FROM sql_erd_sessions/);
 assert.match(sqlErdService, /INSERT INTO sql_erd_sessions/);
 assert.match(sqlErdService, /UPDATE sql_erd_sessions/);
@@ -80,6 +95,35 @@ assert.match(sqlErdService, /CHECK_VIOLATION_CODE/);
 assert.match(sqlErdService, /sql_erd_sessions_model_json_size_check/);
 assert.match(sqlErdService, /sql_erd_sessions_layout_json_size_check/);
 assert.match(sqlErdService, /sql_erd_sessions_settings_json_size_check/);
+assert.match(
+  sqlErdMultiSessionMigration,
+  /DROP INDEX IF EXISTS public\.ux_sql_erd_sessions_workspace_active/
+);
+assert.match(
+  sqlErdMultiSessionMigration,
+  /DROP INDEX IF EXISTS public\.idx_sql_erd_sessions_workspace_updated_at/
+);
+assert.match(
+  sqlErdMultiSessionMigration,
+  /CREATE INDEX idx_sql_erd_sessions_workspace_updated_at_id/
+);
+assert.match(
+  sqlErdMultiSessionMigration,
+  /ON public\.sql_erd_sessions\s*\(workspace_id, updated_at DESC, id DESC\)\s*WHERE deleted_at IS NULL/s
+);
+[
+  "INSERT INTO public.sql_erd_sessions (id) VALUES ('session-id')",
+  "UPDATE sql_erd_sessions SET title = 'Updated'",
+  "DELETE FROM public.sql_erd_sessions",
+  "TRUNCATE public.sql_erd_sessions"
+].forEach((statement) => {
+  assert.match(statement, SQL_ERD_SESSION_DATA_MUTATION_PATTERN);
+});
+assert.doesNotMatch(
+  sqlErdMultiSessionMigration,
+  SQL_ERD_SESSION_DATA_MUTATION_PATTERN
+);
+assert.match(dbReadme, /023_enable_sql_erd_multi_sessions\.sql/);
 assert.match(sqlErdValidation, /validateSqlErdSessionId/);
 assert.match(sqlErdValidation, /validateCreateSqlErdSessionRequest/);
 assert.match(sqlErdValidation, /validateUpdateSqlErdSessionRequest/);
@@ -102,13 +146,42 @@ assert.match(sqlErdMapper, /mapSqlErdSession/);
 assert.match(sqlErdMapper, /mapDeletedSqlErdSession/);
 
 class FakeDatabase {
-  constructor({ queryOneRows = [] } = {}) {
+  constructor({ queryRows = [], queryOneRows = [] } = {}) {
+    this.queryRows = [...queryRows];
     this.queryOneRows = [...queryOneRows];
     this.queries = [];
+    this.transactions = [];
+  }
+
+  async query(text, values = []) {
+    return this.readQuery(text, values, false);
   }
 
   async queryOne(text, values = []) {
-    this.queries.push({ text, values });
+    return this.readQueryOne(text, values, false);
+  }
+
+  async transaction(callback) {
+    const transaction = {
+      query: (text, values = []) => this.readQuery(text, values, true),
+      queryOne: (text, values = []) => this.readQueryOne(text, values, true)
+    };
+    this.transactions.push(transaction);
+    return callback(transaction);
+  }
+
+  async readQuery(text, values, transaction) {
+    this.queries.push({ method: "query", text, values, transaction });
+    const next = this.queryRows.shift();
+    if (typeof next === "function") {
+      return next(text, values);
+    }
+
+    return next ?? [];
+  }
+
+  async readQueryOne(text, values, transaction) {
+    this.queries.push({ method: "queryOne", text, values, transaction });
     const next = this.queryOneRows.shift();
     if (typeof next === "function") {
       return next(text, values);
@@ -298,6 +371,30 @@ function sessionRow(overrides = {}) {
   };
 }
 
+function sessionSummaryRow(overrides = {}) {
+  const row = sessionRow(overrides);
+  return {
+    id: row.id,
+    workspace_id: row.workspace_id,
+    title: row.title,
+    source_format: row.source_format,
+    dialect: row.dialect,
+    table_count: row.table_count,
+    relation_count: row.relation_count,
+    revision: row.revision,
+    created_by: row.created_by,
+    updated_by: row.updated_by,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    cursor_updated_at:
+      overrides.cursor_updated_at ?? "2026-07-07T08:05:00.123456Z"
+  };
+}
+
+function workspaceLockRow() {
+  return { id: workspaceId };
+}
+
 class FakeSqlErdHttpService {
   constructor() {
     this.calls = [];
@@ -406,6 +503,18 @@ await assertRouteBodyLimit(
 );
 
 await assertRouteBodyLimit(
+  "POST",
+  `/api/v1/workspaces/${workspaceId}/sql-erd-sessions`,
+  "createPluralSession"
+);
+
+await assertRouteBodyLimit(
+  "PATCH",
+  `/api/v1/workspaces/${workspaceId}/sql-erd-sessions/${sessionId}`,
+  "updateSession"
+);
+
+await assertRouteBodyLimit(
   "PATCH",
   `/api/v1/workspaces/${workspaceId}/sql-erd-session/${sessionId}`,
   "updateSession"
@@ -417,6 +526,8 @@ await assertRouteBodyLimit(
       (text, values) => {
         assert.match(text, /FROM sql_erd_sessions/);
         assert.match(text, /deleted_at IS NULL/);
+        assert.match(text, /ORDER BY updated_at DESC, id DESC/);
+        assert.match(text, /LIMIT 1/);
         assert.deepEqual(values, [workspaceId]);
         return sessionRow();
       }
@@ -442,11 +553,150 @@ await assertRouteBodyLimit(
 }
 
 {
+  const firstId = "33333333-3333-4333-8333-333333333333";
+  const secondId = "44444444-4444-4444-8444-444444444444";
+  const thirdId = "55555555-5555-4555-8555-555555555555";
+  const database = new FakeDatabase({
+    queryRows: [
+      (text, values) => {
+        assert.match(text, /FROM sql_erd_sessions/);
+        assert.match(text, /ORDER BY updated_at DESC, id DESC/);
+        assert.match(text, /LIMIT \$4/);
+        assert.deepEqual(values, [workspaceId, null, null, 3]);
+        return [
+          sessionSummaryRow({ id: firstId }),
+          sessionSummaryRow({
+            id: secondId,
+            updated_at: new Date("2026-07-07T08:04:00.123Z"),
+            cursor_updated_at: "2026-07-07T08:04:00.123456Z"
+          }),
+          sessionSummaryRow({
+            id: thirdId,
+            updated_at: new Date("2026-07-07T08:03:00.123Z"),
+            cursor_updated_at: "2026-07-07T08:03:00.123456Z"
+          })
+        ];
+      }
+    ]
+  });
+  const { service, workspaceService } = createSubject(database);
+
+  assert.equal(typeof service.listSessions, "function");
+  const result = await service.listSessions(currentUserId, workspaceId, {
+    limit: "2"
+  });
+
+  assert.deepEqual(workspaceService.calls, [{ userId: currentUserId, workspaceId }]);
+  assert.equal(result.items.length, 2);
+  assert.equal(result.items[0].id, firstId);
+  assert.equal(result.items[1].id, secondId);
+  assert.equal(typeof result.nextCursor, "string");
+  assert.equal("sourceText" in result.items[0], false);
+  assert.equal("modelJson" in result.items[0], false);
+  assert.equal("layoutJson" in result.items[0], false);
+  assert.equal("settingsJson" in result.items[0], false);
+
+  const nextDatabase = new FakeDatabase({
+    queryRows: [
+      (text, values) => {
+        assert.match(text, /\(updated_at, id\) < \(\$2::timestamptz, \$3::uuid\)/);
+        assert.deepEqual(values, [
+          workspaceId,
+          "2026-07-07T08:04:00.123456Z",
+          secondId,
+          21
+        ]);
+        return [];
+      }
+    ]
+  });
+  const { service: nextService } = createSubject(nextDatabase);
+  const nextPage = await nextService.listSessions(currentUserId, workspaceId, {
+    cursor: result.nextCursor
+  });
+
+  assert.deepEqual(nextPage, { items: [], nextCursor: null });
+}
+
+{
+  const { service } = createSubject();
+
+  for (const limit of ["0", "101", "1.5"]) {
+    await assertApiError(
+      () => service.listSessions(currentUserId, workspaceId, { limit }),
+      400,
+      "BAD_REQUEST",
+      /limit must be an integer between 1 and 100/
+    );
+  }
+
+  await assertApiError(
+    () =>
+      service.listSessions(currentUserId, workspaceId, {
+        cursor: "not-a-server-cursor"
+      }),
+    400,
+    "BAD_REQUEST",
+    /cursor is invalid/
+  );
+
+  await assertApiError(
+    () =>
+      service.listSessions(currentUserId, workspaceId, {
+        cursor: "x".repeat(2049)
+      }),
+    400,
+    "BAD_REQUEST",
+    /cursor is invalid/
+  );
+
+  await assertApiError(
+    () =>
+      service.listSessions(currentUserId, workspaceId, {
+        limit: "20",
+        sort: "title"
+      }),
+    400,
+    "BAD_REQUEST",
+    /unknown field/
+  );
+}
+
+{
+  const database = new FakeDatabase({ queryOneRows: [sessionRow()] });
+  const { service } = createSubject(database);
+
+  assert.equal(typeof service.getSession, "function");
+  const session = await service.getSession(currentUserId, workspaceId, sessionId);
+
+  assert.equal(session.id, sessionId);
+  assert.equal(session.deletedAt, null);
+}
+
+{
+  const database = new FakeDatabase({ queryOneRows: [null] });
+  const { service } = createSubject(database);
+
+  await assertApiError(
+    () => service.getSession(currentUserId, workspaceId, sessionId),
+    404,
+    "NOT_FOUND",
+    /session not found/
+  );
+}
+
+{
   const sourceText = "CREATE TABLE users (id BIGINT PRIMARY KEY);";
   const requestModelJson = modelJson();
   const requestLayoutJson = layoutJson();
   const database = new FakeDatabase({
     queryOneRows: [
+      (text, values) => {
+        assert.match(text, /FROM workspaces/);
+        assert.match(text, /FOR UPDATE/);
+        assert.deepEqual(values, [workspaceId]);
+        return workspaceLockRow();
+      },
       (text, values) => {
         assert.match(text, /FROM sql_erd_sessions/);
         assert.deepEqual(values, [workspaceId]);
@@ -492,10 +742,14 @@ await assertRouteBodyLimit(
   assert.equal(session.relationCount, 1);
   assert.equal(session.createdBy, currentUserId);
   assert.equal(session.updatedBy, currentUserId);
+  assert.equal(database.transactions.length, 1);
+  assert.equal(database.queries.every((query) => query.transaction), true);
 }
 
 {
-  const database = new FakeDatabase({ queryOneRows: [sessionRow()] });
+  const database = new FakeDatabase({
+    queryOneRows: [workspaceLockRow(), sessionRow()]
+  });
   const { service } = createSubject(database);
 
   await assertApiError(
@@ -514,6 +768,7 @@ await assertRouteBodyLimit(
 {
   const database = new FakeDatabase({
     queryOneRows: [
+      workspaceLockRow(),
       null,
       () => {
         throw { code: "23505" };
@@ -589,6 +844,7 @@ await assertRouteBodyLimit(
 {
   const database = new FakeDatabase({
     queryOneRows: [
+      workspaceLockRow(),
       null,
       () => {
         throw {
@@ -610,6 +866,71 @@ await assertRouteBodyLimit(
     413,
     "PAYLOAD_TOO_LARGE",
     /JSON payload is too large/
+  );
+}
+
+{
+  const requestModelJson = modelJson();
+  const requestLayoutJson = layoutJson();
+  const database = new FakeDatabase({
+    queryOneRows: [
+      workspaceLockRow(),
+      (text, values) => {
+        assert.match(text, /INSERT INTO sql_erd_sessions/);
+        assert.deepEqual(values, [
+          workspaceId,
+          "Untitled ERD",
+          "sql",
+          "auto",
+          "",
+          JSON.stringify(requestModelJson),
+          JSON.stringify(requestLayoutJson),
+          JSON.stringify({}),
+          2,
+          1,
+          currentUserId
+        ]);
+        return sessionRow();
+      }
+    ]
+  });
+  const { service } = createSubject(database);
+
+  assert.equal(typeof service.createPluralSession, "function");
+  const session = await service.createPluralSession(currentUserId, workspaceId, {
+    modelJson: requestModelJson,
+    layoutJson: requestLayoutJson
+  });
+
+  assert.equal(session.id, sessionId);
+  assert.equal(database.transactions.length, 1);
+  assert.equal(
+    database.queries.some((query) => /FROM sql_erd_sessions/.test(query.text)),
+    false
+  );
+  assert.equal(database.queries.every((query) => query.transaction), true);
+}
+
+{
+  const database = new FakeDatabase({
+    queryOneRows: [
+      workspaceLockRow(),
+      () => {
+        throw { code: "23505" };
+      }
+    ]
+  });
+  const { service } = createSubject(database);
+
+  await assertApiError(
+    () =>
+      service.createPluralSession(currentUserId, workspaceId, {
+        modelJson: modelJson(),
+        layoutJson: layoutJson()
+      }),
+    409,
+    "CONFLICT",
+    /database schema conflict/
   );
 }
 

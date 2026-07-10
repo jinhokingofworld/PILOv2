@@ -2,6 +2,7 @@ import { Injectable, OnModuleDestroy } from "@nestjs/common";
 import { Pool, PoolClient, PoolConfig, QueryResult, QueryResultRow } from "pg";
 
 const DEFAULT_DATABASE_URL = "postgresql://pilo:pilo@localhost:5432/pilo";
+const LOCAL_APP_ENVS = new Set(["local", "test", "development"]);
 
 export interface DatabaseTransaction {
   query<T extends QueryResultRow = QueryResultRow>(
@@ -24,7 +25,7 @@ export class DatabaseService implements OnModuleDestroy {
 
   constructor() {
     const config: PoolConfig = {
-      connectionString: process.env.DATABASE_URL ?? DEFAULT_DATABASE_URL
+      connectionString: resolveDatabaseUrl()
     };
 
     if (process.env.DATABASE_SSL === "true") {
@@ -106,4 +107,32 @@ export class DatabaseService implements OnModuleDestroy {
       }
     };
   }
+}
+
+export function resolveDatabaseUrl(
+  env: NodeJS.ProcessEnv = process.env
+): string {
+  const databaseUrl = env.DATABASE_URL?.trim();
+  if (databaseUrl) {
+    return databaseUrl;
+  }
+
+  if (shouldRequireDatabaseUrl(env)) {
+    throw new Error(
+      "DATABASE_URL is required outside local app-server environments"
+    );
+  }
+
+  return DEFAULT_DATABASE_URL;
+}
+
+export function shouldRequireDatabaseUrl(
+  env: NodeJS.ProcessEnv = process.env
+): boolean {
+  const appEnv = env.APP_ENV?.trim().toLowerCase();
+  if (appEnv) {
+    return !LOCAL_APP_ENVS.has(appEnv);
+  }
+
+  return env.NODE_ENV?.trim().toLowerCase() === "production";
 }

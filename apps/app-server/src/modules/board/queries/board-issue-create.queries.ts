@@ -522,11 +522,12 @@ export class BoardIssueCreateQueries {
   }
 
   async findCreatedIssueCard(
+    transaction: DatabaseTransaction,
     workspaceId: string,
     boardId: string,
     issueId: string
   ): Promise<BoardIssueCreateIssueRow | null> {
-    return this.database.queryOne<BoardIssueCreateIssueRow>(
+    return transaction.queryOne<BoardIssueCreateIssueRow>(
       `
         SELECT
           pi.id::text AS id,

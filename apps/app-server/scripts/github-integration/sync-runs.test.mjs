@@ -566,6 +566,8 @@ function projectV2ItemApiItem(overrides = {}) {
         createdCount: 2,
         updatedCount: 2,
         skippedCount: 1,
+        progressPercent: 100,
+        progressStage: "completed",
         errorMessage: null
       }
     ],
@@ -612,6 +614,8 @@ function projectV2ItemApiItem(overrides = {}) {
     createdCount: 2,
     updatedCount: 2,
     skippedCount: 1,
+    progressPercent: 100,
+    progressStage: "completed",
     errorMessage: null,
     cursor: { hasNextPage: false }
   });
@@ -712,6 +716,8 @@ function projectV2ItemApiItem(overrides = {}) {
     createdCount: 1,
     updatedCount: 1,
     skippedCount: 0,
+    progressPercent: 100,
+    progressStage: "completed",
     errorMessage: null
   });
   assert.equal(githubAppClient.calls.length, 1);

@@ -7,6 +7,8 @@ import { GithubAppClient } from "./github-app.client";
 import { GithubAppInstallationService } from "./github-app-installation.service";
 import { GithubAppInstallationStateService } from "./github-app-installation-state.service";
 import { GithubCallbackStateService } from "./github-callback-state.service";
+import { GithubConflictMergeService } from "./github-conflict-merge.service";
+import { GithubGitCommandRunner } from "./github-git-command-runner";
 import { GithubIntegrationConfigService } from "./github-integration-config.service";
 import { GithubOAuthClient } from "./github-oauth.client";
 import { GithubOAuthIntegrationService } from "./github-oauth-integration.service";
@@ -15,6 +17,8 @@ import { GithubProjectOAuthIntegrationService } from "./github-project-oauth-int
 import { GithubProjectV2SyncTokenService } from "./github-project-v2-sync-token.service";
 import { GithubProjectV2Service } from "./github-project-v2.service";
 import { GithubProjectV2WriteService } from "./github-project-v2-write.service";
+import { GithubPullRequestFileWriteService } from "./github-pull-request-file-write.service";
+import { GithubPullRequestMergeService } from "./github-pull-request-merge.service";
 import { GithubPullRequestRemoteService } from "./github-pull-request-remote.service";
 import { GithubReviewSubmissionService } from "./github-review-submission.service";
 import { GithubSourceReadService } from "./github-source-read.service";
@@ -37,6 +41,7 @@ import type {
 } from "./dto";
 import type {
   GitHubIntegrationModuleInfo,
+  ApplyGithubPullRequestFileResolutionInput,
   GithubAppInstallationCallbackPayload,
   GithubAppInstallationDeletePayload,
   GithubAppInstallationPayload,
@@ -60,6 +65,8 @@ import type {
   GithubProjectV2StatusOptionPayload,
   GithubPullRequestConflictInputsPayload,
   GithubPullRequestConflictStatusPayload,
+  GithubPullRequestFileResolutionPayload,
+  GithubPullRequestMergePayload,
   GithubPullRequestDetailPayload,
   GithubPullRequestFilePayload,
   GithubPullRequestListItemPayload,
@@ -68,6 +75,7 @@ import type {
   GithubRepositoryDetailPayload,
   GithubRepositoryCollaboratorStatusPayload,
   GithubRepositoryListItemPayload,
+  MergeGithubPullRequestInput,
   SubmitGithubPullRequestReviewInput,
   GithubSyncRunDetailPayload,
   GithubSyncRunPayload
@@ -95,6 +103,8 @@ export class GithubIntegrationService {
   private readonly githubSourceReadService: GithubSourceReadService;
   private readonly githubProjectV2Service: GithubProjectV2Service;
   private readonly githubPullRequestRemoteService: GithubPullRequestRemoteService;
+  private readonly githubPullRequestFileWriteService: GithubPullRequestFileWriteService;
+  private readonly githubPullRequestMergeService: GithubPullRequestMergeService;
   private readonly githubReviewSubmissionService: GithubReviewSubmissionService;
   private readonly githubWebhookService: GithubWebhookService;
   private readonly githubSyncRunService: GithubSyncRunService;
@@ -133,7 +143,11 @@ export class GithubIntegrationService {
     @Optional()
     githubProjectOAuthIntegrationService?: GithubProjectOAuthIntegrationService,
     @Optional()
-    githubProjectV2WriteService?: GithubProjectV2WriteService
+    githubProjectV2WriteService?: GithubProjectV2WriteService,
+    @Optional()
+    githubPullRequestFileWriteService?: GithubPullRequestFileWriteService,
+    @Optional()
+    githubPullRequestMergeService?: GithubPullRequestMergeService
   ) {
     const callbackStateService =
       githubCallbackStateService ?? new GithubCallbackStateService(database);
@@ -213,6 +227,26 @@ export class GithubIntegrationService {
       new GithubPullRequestRemoteService(
         database,
         githubAppClient,
+        configService,
+        workspaceService
+      );
+    this.githubPullRequestFileWriteService =
+      githubPullRequestFileWriteService ??
+      new GithubPullRequestFileWriteService(
+        database,
+        githubAppClient,
+        new GithubConflictMergeService(new GithubGitCommandRunner()),
+        tokenEncryptionService,
+        configService,
+        workspaceService
+      );
+    this.githubPullRequestMergeService =
+      githubPullRequestMergeService ??
+      new GithubPullRequestMergeService(
+        database,
+        githubAppClient,
+        githubOAuthClient,
+        tokenEncryptionService,
         configService,
         workspaceService
       );
@@ -613,6 +647,34 @@ export class GithubIntegrationService {
     }
   ): Promise<GithubPullRequestConflictInputsPayload> {
     return this.githubPullRequestRemoteService.getGithubPullRequestConflictInputs(
+      currentUserId,
+      workspaceId,
+      pullRequestId,
+      input
+    );
+  }
+
+  async applyGithubPullRequestFileResolution(
+    currentUserId: string,
+    workspaceId: string,
+    pullRequestId: string,
+    input: ApplyGithubPullRequestFileResolutionInput
+  ): Promise<GithubPullRequestFileResolutionPayload> {
+    return this.githubPullRequestFileWriteService.applyGithubPullRequestFileResolution(
+      currentUserId,
+      workspaceId,
+      pullRequestId,
+      input
+    );
+  }
+
+  async mergeGithubPullRequest(
+    currentUserId: string,
+    workspaceId: string,
+    pullRequestId: string,
+    input: MergeGithubPullRequestInput
+  ): Promise<GithubPullRequestMergePayload> {
+    return this.githubPullRequestMergeService.mergeGithubPullRequest(
       currentUserId,
       workspaceId,
       pullRequestId,

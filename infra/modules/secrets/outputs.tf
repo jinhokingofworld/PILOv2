@@ -3,10 +3,16 @@ output "secret_arns" {
 }
 
 output "app_server_ecs_secrets" {
-  value = {
-    for name in local.app_server_ecs_secret_names :
-    name => aws_secretsmanager_secret.this["app-server/${name}"].arn
-  }
+  value = merge(
+    {
+      for name in local.app_server_ecs_secret_names :
+      name => aws_secretsmanager_secret.this["app-server/${name}"].arn
+    },
+    {
+      for name in local.shared_ecs_secret_names :
+      name => aws_secretsmanager_secret.this["shared/${name}"].arn
+    },
+  )
 }
 
 output "realtime_server_ecs_secrets" {
@@ -17,10 +23,16 @@ output "realtime_server_ecs_secrets" {
 }
 
 output "ai_worker_ecs_secrets" {
-  value = {
-    for name in local.ai_worker_ecs_secret_names :
-    name => aws_secretsmanager_secret.this["ai-worker/${name}"].arn
-  }
+  value = merge(
+    {
+      for name in local.ai_worker_ecs_secret_names :
+      name => aws_secretsmanager_secret.this["ai-worker/${name}"].arn
+    },
+    {
+      for name in local.shared_ecs_secret_names :
+      name => aws_secretsmanager_secret.this["shared/${name}"].arn
+    },
+  )
 }
 
 output "livekit_host_secret_arns" {

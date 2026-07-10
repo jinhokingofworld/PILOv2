@@ -150,7 +150,13 @@ export function GithubConnectEmptyState({
 
 export function GithubConnectProgress({ value }: { value: number }) {
   return (
-    <div className="h-2 overflow-hidden rounded-full bg-[#eef1f6]">
+    <div
+      aria-valuemax={100}
+      aria-valuemin={0}
+      aria-valuenow={value}
+      className="h-2 overflow-hidden rounded-full bg-[#eef1f6]"
+      role="progressbar"
+    >
       <span
         className="block h-full rounded-full bg-[#2f6bff]"
         style={{ width: `${Math.max(0, Math.min(100, value))}%` }}

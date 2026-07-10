@@ -143,6 +143,9 @@ export type PrReviewSummary = {
   commitsCount: number;
   githubUrl: string;
   headSha: string;
+  pullRequestState: "open" | "closed";
+  pullRequestMergeable: boolean | null;
+  pullRequestMergedAt: string | null;
   status: PrReviewSessionStatus;
   prPurpose: string | null;
   changeSummary: string[];
@@ -312,6 +315,8 @@ export type PrReviewConflictFile = {
   type: PrReviewConflictFileType;
   isSupported: true;
   resolutionStatus: PrReviewConflictResolutionStatus;
+  headBlobSha: string;
+  headContent: string;
   hunks: PrReviewConflictHunk[];
   aiSummary: string | null;
   aiSuggestion: string | null;
@@ -344,11 +349,42 @@ export type PrReviewConflictSuggestion = {
   previousFilePath: string | null;
   type: "content";
   status: PrReviewConflictSuggestionStatus;
+  headSha: string;
+  headBlobSha: string;
   aiSummary: string;
   aiSuggestion: string;
+  resolvedHunks: PrReviewConflictResolvedHunk[];
   resolvedContent: string;
   validationMessages: string[];
   stored: false;
+};
+
+export type PrReviewConflictResolvedHunk = {
+  hunkId: string;
+  resolvedText: string;
+};
+
+export type ApplyPrReviewConflictResolutionInput = {
+  resolvedContent: string;
+  expectedHeadSha: string;
+  expectedHeadBlobSha: string;
+};
+
+export type PrReviewConflictApplyResult = {
+  reviewFileId: string;
+  filePath: string;
+  type: "content";
+  status: "applied";
+  appliedByGithubLogin: string;
+  commitSha: string;
+  commitUrl: string | null;
+  headShaBefore: string;
+  headShaAfter: string;
+  headBlobShaBefore: string;
+  headBlobShaAfter: string;
+  conflictStatus: PrReviewConflictStatus;
+  conflictCheckedAt: string | null;
+  localStateStatus: "updated" | "sync_required";
 };
 
 export type UpdatePrReviewFileDecisionInput = {
@@ -414,6 +450,24 @@ export type PrReviewSubmission = PrReviewSubmissionListItem & {
 export type SubmitPrReviewSessionInput = {
   submitType: PrReviewSubmitType;
   reviewBody: string;
+};
+
+export type MergePrReviewSessionInput = {
+  expectedHeadSha: string;
+  confirm: true;
+};
+
+export type PrReviewMergeResult = {
+  reviewSessionId: string;
+  pullRequestId: string;
+  status: "merged";
+  mergedByGithubLogin: string;
+  mergeMethod: "merge";
+  mergeCommitSha: string;
+  mergeCommitUrl: string | null;
+  pullRequestState: "closed";
+  mergedAt: string | null;
+  headSha: string;
 };
 
 export type ListPrReviewRepositoriesQuery = {

@@ -2,6 +2,7 @@
 
 import {
   type FormEvent,
+  type KeyboardEvent,
   useCallback,
   useEffect,
   useMemo,
@@ -10,12 +11,12 @@ import {
 } from "react";
 import {
   Bot,
-  CalendarPlus,
-  CheckCircle2,
+  CalendarDays,
+  GitPullRequest,
+  ListTodo,
   Loader2,
   MessageCircle,
   SendHorizontal,
-  Sparkles,
   X
 } from "lucide-react";
 
@@ -68,19 +69,19 @@ const initialMessages: AgentChatMessage[] = [
 
 const suggestionPrompts = [
   {
-    icon: "calendar",
-    label: "일정 생성",
-    prompt: "내일 오후 3시에 디자인 리뷰 일정 만들어줘"
+    icon: CalendarDays,
+    label: "오늘 일정 보기",
+    prompt: "오늘 일정 보여줘"
   },
   {
-    icon: "meeting",
-    label: "회의록 확인",
-    prompt: "지난 회의 결정사항 찾아줘"
+    icon: ListTodo,
+    label: "내 이슈 확인",
+    prompt: "내 이슈 보여줘"
   },
   {
-    icon: "board",
-    label: "Board 이슈",
-    prompt: "진행 중인 Board 이슈 보여줘"
+    icon: GitPullRequest,
+    label: "현재 PR 보기",
+    prompt: "현재 PR 보여줘"
   }
 ];
 
@@ -498,15 +499,31 @@ export function AgentChatWidget() {
     void appendPrompt(draft);
   }
 
+  function handleDraftKeyDown(
+    event: KeyboardEvent<HTMLTextAreaElement>
+  ) {
+    if (
+      event.key !== "Enter" ||
+      event.shiftKey ||
+      event.nativeEvent.isComposing
+    ) {
+      return;
+    }
+
+    event.preventDefault();
+    if (canSend) {
+      void appendPrompt(draft);
+    }
+  }
+
   return (
-    <div className="pointer-events-none fixed inset-x-0 bottom-4 z-50 flex justify-end px-4 sm:bottom-6 sm:px-6">
-      <div className="pointer-events-auto flex w-full max-w-[400px] flex-col items-end gap-3">
-        {isOpen ? (
-          <section
-            aria-labelledby={panelTitleId}
-            className="w-full overflow-hidden rounded-lg border border-slate-200 bg-white shadow-2xl shadow-slate-950/12"
-          >
-            <header className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-4 py-3">
+    <>
+      {isOpen ? (
+        <section
+          aria-labelledby={panelTitleId}
+          className="fixed inset-y-0 right-0 z-50 flex w-full max-w-[420px] flex-col border-l border-slate-200 bg-white shadow-2xl shadow-slate-950/15"
+        >
+          <header className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-4 py-3">
               <div className="flex min-w-0 items-center gap-3">
                 <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-slate-900 text-white">
                   <Bot className="size-4" />
@@ -541,9 +558,9 @@ export function AgentChatWidget() {
               >
                 <X className="size-4" />
               </Button>
-            </header>
+          </header>
 
-            <div className="max-h-[min(520px,calc(100vh-220px))] space-y-3 overflow-y-auto bg-white px-4 py-4">
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto bg-white px-4 py-4">
               {messages.map((message) => {
                 const confirmation =
                   message.run?.status === "waiting_confirmation"
@@ -606,28 +623,26 @@ export function AgentChatWidget() {
                   </div>
                 );
               })}
-            </div>
+          </div>
 
-            <div className="border-t border-slate-200 bg-white px-4 py-3">
+          <div className="border-t border-slate-200 bg-white px-4 py-3">
               <div className="mb-3 flex gap-2 overflow-x-auto pb-1">
-                {suggestionPrompts.map((suggestion) => (
-                  <button
-                    key={suggestion.label}
-                    type="button"
-                    disabled={hasActiveAgentRequest}
-                    className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300"
-                    onClick={() => void appendPrompt(suggestion.prompt)}
-                  >
-                    {suggestion.icon === "calendar" ? (
-                      <CalendarPlus className="size-3.5" />
-                    ) : suggestion.icon === "meeting" ? (
-                      <CheckCircle2 className="size-3.5" />
-                    ) : (
-                      <Sparkles className="size-3.5" />
-                    )}
-                    {suggestion.label}
-                  </button>
-                ))}
+                {suggestionPrompts.map((suggestion) => {
+                  const SuggestionIcon = suggestion.icon;
+
+                  return (
+                    <button
+                      key={suggestion.label}
+                      type="button"
+                      disabled={hasActiveAgentRequest}
+                      className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300"
+                      onClick={() => void appendPrompt(suggestion.prompt)}
+                    >
+                      <SuggestionIcon className="size-3.5" />
+                      {suggestion.label}
+                    </button>
+                  );
+                })}
               </div>
 
               <form className="flex items-end gap-2" onSubmit={handleSubmit}>
@@ -638,6 +653,7 @@ export function AgentChatWidget() {
                   placeholder="메시지를 입력하세요"
                   className="min-h-9 flex-1 resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm leading-5 text-slate-900 outline-none transition placeholder:text-slate-400 focus-visible:border-slate-400 focus-visible:ring-2 focus-visible:ring-slate-200"
                   onChange={(event) => setDraft(event.target.value)}
+                  onKeyDown={handleDraftKeyDown}
                   disabled={isBusy}
                 />
                 <Button
@@ -653,31 +669,33 @@ export function AgentChatWidget() {
                   )}
                 </Button>
               </form>
-            </div>
-          </section>
-        ) : null}
+          </div>
+        </section>
+      ) : null}
 
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                type="button"
-                size="icon-lg"
-                aria-label={isOpen ? "AI 채팅 접기" : "AI 채팅 열기"}
-                className="size-14 rounded-full border border-slate-800 bg-slate-950 text-white shadow-xl shadow-slate-950/20 hover:bg-slate-800"
-                onClick={() => setIsOpen((currentValue) => !currentValue)}
-              >
-                {isOpen ? (
-                  <X className="size-5" />
-                ) : (
-                  <MessageCircle className="size-5" />
-                )}
-              </Button>
-            }
-          />
-          <TooltipContent side="left">PILO AI</TooltipContent>
-        </Tooltip>
-      </div>
-    </div>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              type="button"
+              size="icon-lg"
+              aria-label={isOpen ? "AI 채팅 접기" : "AI 채팅 열기"}
+              className={cn(
+                "fixed bottom-4 right-4 z-40 size-14 rounded-full border border-slate-800 bg-slate-950 text-white shadow-xl shadow-slate-950/20 hover:bg-slate-800 sm:bottom-6 sm:right-6",
+                isOpen && "pointer-events-none opacity-0"
+              )}
+              onClick={() => setIsOpen((currentValue) => !currentValue)}
+            >
+              {isOpen ? (
+                <X className="size-5" />
+              ) : (
+                <MessageCircle className="size-5" />
+              )}
+            </Button>
+          }
+        />
+        <TooltipContent side="left">PILO AI</TooltipContent>
+      </Tooltip>
+    </>
   );
 }

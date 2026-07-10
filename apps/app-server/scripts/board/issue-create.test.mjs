@@ -10,6 +10,7 @@ const {
   BoardIssueCreateService
 } = require("../../dist/modules/board/board-issue-create.service.js");
 const { BoardService } = require("../../dist/modules/board/board.service.js");
+const { forbidden } = require("../../dist/common/api-error.js");
 
 const currentUserId = "22222222-2222-4222-8222-222222222222";
 const workspaceId = "11111111-1111-4111-8111-111111111111";
@@ -88,13 +89,18 @@ class FakeWorkspaceService {
 }
 
 class FakeGithubIssueWriteService {
-  constructor({ fail = false } = {}) {
+  constructor({ error = null, fail = false } = {}) {
+    this.error = error;
     this.fail = fail;
     this.calls = [];
   }
 
   async createIssue(input) {
     this.calls.push(input);
+    if (this.error) {
+      throw this.error;
+    }
+
     if (this.fail) {
       throw new Error("raw provider failure");
     }
@@ -107,8 +113,10 @@ class FakeGithubIssueWriteService {
 }
 
 class FakeGithubProjectV2WriteService {
-  constructor({ addFail = false, statusFail = false } = {}) {
+  constructor({ addError = null, addFail = false, statusError = null, statusFail = false } = {}) {
+    this.addError = addError;
     this.addFail = addFail;
+    this.statusError = statusError;
     this.statusFail = statusFail;
     this.accessChecks = [];
     this.addCalls = [];
@@ -121,6 +129,10 @@ class FakeGithubProjectV2WriteService {
 
   async addProjectV2ItemByContentId(input) {
     this.addCalls.push(input);
+    if (this.addError) {
+      throw this.addError;
+    }
+
     if (this.addFail) {
       throw new Error("raw provider failure");
     }
@@ -132,10 +144,56 @@ class FakeGithubProjectV2WriteService {
 
   async updateProjectV2ItemStatus(input) {
     this.statusCalls.push(input);
+    if (this.statusError) {
+      throw this.statusError;
+    }
+
     if (this.statusFail) {
       throw new Error("raw provider failure");
     }
   }
+}
+
+class FakeBoardIssueCreateOperationService {
+  async claimOperation() {
+    return {
+      kind: "execute",
+      attempt: {
+        operationId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        leaseToken: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        completedStage: "none",
+        githubIssue: null,
+        githubProjectItemNodeId: null
+      }
+    };
+  }
+
+  async saveGithubIssue(attempt, issue) {
+    return {
+      ...attempt,
+      completedStage: "github_issue_created",
+      githubIssue: issue
+    };
+  }
+
+  async saveProjectItem(attempt, itemNodeId) {
+    return {
+      ...attempt,
+      completedStage: "project_item_added",
+      githubProjectItemNodeId: itemNodeId
+    };
+  }
+
+  async saveStatusUpdated(attempt) {
+    return {
+      ...attempt,
+      completedStage: "status_updated"
+    };
+  }
+
+  async markRetryableSafely() {}
+
+  async markSucceeded() {}
 }
 
 function createSubject(
@@ -149,7 +207,8 @@ function createSubject(
     createQueries,
     workspaceService,
     githubIssueWriteService,
-    githubProjectV2WriteService
+    githubProjectV2WriteService,
+    new FakeBoardIssueCreateOperationService()
   );
   const service = new BoardService(
     undefined,
@@ -271,7 +330,8 @@ function createdIssueRow(overrides = {}) {
       body: "Issue body",
       columnId,
       title: "  New board issue  "
-    }
+    },
+    "board-create-success-key"
   );
 
   assert.deepEqual(workspaceService.calls, [{ userId: currentUserId, workspaceId }]);
@@ -348,7 +408,7 @@ function createdIssueRow(overrides = {}) {
       service.createBoardIssue(currentUserId, workspaceId, boardId, {
         body: "Issue body",
         columnId
-      }),
+      }, "board-create-invalid-key"),
     (error) => {
       assert.equal(error.getStatus(), 400);
       assert.equal(error.getResponse().error.code, "BAD_REQUEST");
@@ -377,7 +437,7 @@ function createdIssueRow(overrides = {}) {
       service.createBoardIssue(currentUserId, workspaceId, boardId, {
         columnId,
         title: "New board issue"
-      }),
+      }, "board-create-failure-key"),
     (error) => {
       assert.equal(error.getStatus(), 502);
       assert.equal(error.getResponse().error.code, "BAD_GATEWAY");
@@ -387,4 +447,118 @@ function createdIssueRow(overrides = {}) {
   );
 
   assert.equal(db.transactions.length, 0);
+}
+
+{
+  const database = new FakeDatabase({
+    queryOneRows: [createTargetRow()]
+  });
+  const permissionError = forbidden("GitHub Issue write permission is required");
+  const githubIssueWriteService = new FakeGithubIssueWriteService({
+    error: permissionError
+  });
+  const { service } = createSubject(database, githubIssueWriteService);
+
+  await assert.rejects(
+    () =>
+      service.createBoardIssue(
+        currentUserId,
+        workspaceId,
+        boardId,
+        {
+          columnId,
+          title: "Permission denied issue"
+        },
+        "board-create-permission-key"
+      ),
+    (error) => {
+      assert.equal(error.getStatus(), 403);
+      assert.equal(error.getResponse().error.code, "FORBIDDEN");
+      assert.equal(
+        error.getResponse().error.message,
+        "GitHub Issue write permission is required"
+      );
+      return true;
+    }
+  );
+}
+
+{
+  const database = new FakeDatabase({
+    queryOneRows: [createTargetRow()]
+  });
+  const permissionError = forbidden(
+    "GitHub ProjectV2 write permission is required"
+  );
+  const githubProjectV2WriteService = new FakeGithubProjectV2WriteService({
+    addError: permissionError
+  });
+  const { service } = createSubject(
+    database,
+    new FakeGithubIssueWriteService(),
+    githubProjectV2WriteService
+  );
+
+  await assert.rejects(
+    () =>
+      service.createBoardIssue(
+        currentUserId,
+        workspaceId,
+        boardId,
+        {
+          columnId,
+          title: "Project item permission denied"
+        },
+        "board-create-project-item-permission-key"
+      ),
+    (error) => {
+      assert.equal(error.getStatus(), 403);
+      assert.equal(error.getResponse().error.code, "FORBIDDEN");
+      assert.equal(
+        error.getResponse().error.message,
+        "GitHub ProjectV2 write permission is required"
+      );
+      return true;
+    }
+  );
+}
+
+{
+  const database = new FakeDatabase({
+    queryOneRows: [createTargetRow()]
+  });
+  const permissionError = forbidden(
+    "GitHub ProjectV2 write permission is required"
+  );
+  const githubProjectV2WriteService = new FakeGithubProjectV2WriteService({
+    statusError: permissionError
+  });
+  const { service } = createSubject(
+    database,
+    new FakeGithubIssueWriteService(),
+    githubProjectV2WriteService
+  );
+
+  await assert.rejects(
+    () =>
+      service.createBoardIssue(
+        currentUserId,
+        workspaceId,
+        boardId,
+        {
+          columnId,
+          title: "Project status permission denied"
+        },
+        "board-create-project-status-permission-key"
+      ),
+    (error) => {
+      assert.equal(error.getStatus(), 403);
+      assert.equal(error.getResponse().error.code, "FORBIDDEN");
+      assert.equal(
+        error.getResponse().error.message,
+        "GitHub ProjectV2 write permission is required"
+      );
+      return true;
+    }
+  );
 }

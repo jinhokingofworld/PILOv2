@@ -4,6 +4,9 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 
 const { GithubIntegrationService } = require("../../dist/modules/github-integration/github-integration.service.js");
+const { GithubPullRequestRemoteService } = require(
+  "../../dist/modules/github-integration/github-pull-request-remote.service.js"
+);
 
 class FakeDatabase {
   constructor({ queryOneRows = [] } = {}) {
@@ -309,6 +312,82 @@ for (const { mergeable, conflictStatus, message } of [
     conflictStatus,
     conflictCheckedAt: "2026-07-04T12:00:00.000Z",
     message
+  });
+}
+
+{
+  const database = new FakeDatabase({
+    queryOneRows: [pullRequestRemoteContextRow()]
+  });
+  const workspaceService = new FakeWorkspaceService();
+  const tokenRequests = [];
+  const mergeBaseRequests = [];
+  const contentRequests = [];
+  const githubAppClient = {
+    async createInstallationAccessToken(input) {
+      tokenRequests.push(input);
+      return {
+        token: "shared-installation-token",
+        expiresAt: "2026-07-04T13:00:00.000Z"
+      };
+    },
+    async getRepositoryMergeBase(input) {
+      mergeBaseRequests.push(input);
+      return { mergeBaseSha: "merge-base-sha" };
+    },
+    async getRepositoryFileContent(input) {
+      contentRequests.push(input);
+      return {
+        path: input.path,
+        sha: `${input.ref}-blob-sha`,
+        size: 20,
+        content: `${input.ref}-content`
+      };
+    }
+  };
+  const service = new GithubPullRequestRemoteService(
+    database,
+    githubAppClient,
+    {
+      getGithubAppConfig() {
+        return githubAppConfig;
+      }
+    },
+    workspaceService
+  );
+
+  const result = await service.getGithubPullRequestConflictInputs(
+    currentUserId,
+    workspaceId,
+    pullRequestId,
+    {
+      baseSha: "base-sha",
+      headSha: "head-sha",
+      filePaths: ["src/conflicted.ts"]
+    }
+  );
+
+  assert.equal(tokenRequests.length, 1);
+  assert.equal(mergeBaseRequests[0].installationAccessToken, "shared-installation-token");
+  assert.equal(contentRequests.length, 3);
+  assert.ok(
+    contentRequests.every(
+      (request) =>
+        request.installationAccessToken === "shared-installation-token"
+    )
+  );
+  assert.deepEqual(result, {
+    mergeBaseSha: "merge-base-sha",
+    files: [
+      {
+        filePath: "src/conflicted.ts",
+        mergeBaseContent: "merge-base-sha-content",
+        baseContent: "base-sha-content",
+        headContent: "head-sha-content",
+        headBlobSha: "head-sha-blob-sha",
+        unsupportedReason: null
+      }
+    ]
   });
 }
 

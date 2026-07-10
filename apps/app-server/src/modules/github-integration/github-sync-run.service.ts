@@ -8,10 +8,15 @@ import { GithubIntegrationConfigService } from "./github-integration-config.serv
 import { serializeGithubJsonb } from "./github-jsonb";
 import { GithubProjectV2SyncTokenService } from "./github-project-v2-sync-token.service";
 import {
+  createGithubSyncProgressCursor,
+  readGithubSyncProgress
+} from "./github-sync-progress";
+import {
   GithubSyncExecutorService,
   type GithubSyncInstallationRow,
   type GithubSyncProjectV2ContextRow,
   type GithubSyncRepositoryContextRow,
+  type GithubSyncRunProgress,
   type GithubSyncRunSummary
 } from "./github-sync-executor.service";
 import type {
@@ -154,7 +159,9 @@ export class GithubSyncRunService {
         repository,
         projectV2,
         githubUserAccessToken,
-        config
+        config,
+        reportProgress: (progress) =>
+          this.updateGithubSyncRunProgress(syncRun.id, progress)
       });
       const completed = await this.completeGithubSyncRunSuccess(syncRun.id, summary);
       return this.mapGithubSyncRun(completed);
@@ -240,6 +247,7 @@ export class GithubSyncRunService {
     if (!startedAt) {
       throw badRequest("Invalid GitHub sync start time");
     }
+    const progress = readGithubSyncProgress(row.status, row.cursor);
 
     return {
       id: row.id,
@@ -254,6 +262,7 @@ export class GithubSyncRunService {
       createdCount: this.toInteger(row.created_count, "Invalid GitHub sync created count"),
       updatedCount: this.toInteger(row.updated_count, "Invalid GitHub sync updated count"),
       skippedCount: this.toInteger(row.skipped_count, "Invalid GitHub sync skipped count"),
+      ...progress,
       errorMessage: row.error_message
     };
   }
@@ -315,6 +324,38 @@ export class GithubSyncRunService {
     }
 
     return row;
+  }
+
+  private async updateGithubSyncRunProgress(
+    syncRunId: string,
+    progress: GithubSyncRunProgress
+  ): Promise<void> {
+    await this.database.execute(
+      `
+        UPDATE github_sync_runs
+        SET
+          fetched_count = $2,
+          created_count = $3,
+          updated_count = $4,
+          skipped_count = $5,
+          cursor = jsonb_set(cursor, '{progress}', $6::jsonb, true)
+        WHERE id = $1
+          AND status = 'running'
+      `,
+      [
+        syncRunId,
+        progress.summary.fetchedCount,
+        progress.summary.createdCount,
+        progress.summary.updatedCount,
+        progress.summary.skippedCount,
+        serializeGithubJsonb(
+          createGithubSyncProgressCursor(
+            progress.progressPercent,
+            progress.progressStage
+          )
+        )
+      ]
+    );
   }
 
   private async completeGithubSyncRunSuccess(

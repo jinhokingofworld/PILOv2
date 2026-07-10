@@ -348,6 +348,7 @@ export interface GithubPullRequestConflictContentPayload {
   mergeBaseContent: string | null;
   baseContent: string | null;
   headContent: string | null;
+  headBlobSha: string | null;
   unsupportedReason: string | null;
 }
 
@@ -373,6 +374,41 @@ export interface GithubPullRequestReviewSubmissionPayload {
   submittedAt: string;
 }
 
+export interface ApplyGithubPullRequestFileResolutionInput {
+  filePath: string;
+  resolvedContent: string;
+  expectedBaseSha: string;
+  expectedHeadSha: string;
+  expectedHeadBlobSha: string;
+}
+
+export interface GithubPullRequestFileResolutionPayload {
+  appliedByGithubLogin: string;
+  commitSha: string;
+  commitUrl: string | null;
+  headShaBefore: string;
+  headShaAfter: string;
+  headBlobShaBefore: string;
+  headBlobShaAfter: string;
+  localCacheUpdated: boolean;
+}
+
+export type GithubPullRequestMergeMethod = "merge";
+
+export interface MergeGithubPullRequestInput {
+  expectedHeadSha: string;
+}
+
+export interface GithubPullRequestMergePayload {
+  mergedByGithubLogin: string;
+  mergeMethod: GithubPullRequestMergeMethod;
+  mergeCommitSha: string;
+  mergeCommitUrl: string | null;
+  pullRequestState: "closed";
+  mergedAt: string | null;
+  headSha: string;
+}
+
 export type GithubSyncTarget =
   | "repositories"
   | "issues"
@@ -383,6 +419,19 @@ export type GithubSyncTarget =
   | "full";
 
 export type GithubSyncStatus = "running" | "success" | "failed";
+
+export type GithubSyncProgressStage =
+  | "initializing"
+  | "repositories"
+  | "project_v2_discovery"
+  | "issues"
+  | "pull_requests"
+  | "project_v2"
+  | "project_v2_fields"
+  | "project_v2_items"
+  | "board_hydration"
+  | "finalizing"
+  | "completed";
 
 export interface GithubSyncRunPayload {
   id: string;
@@ -397,6 +446,8 @@ export interface GithubSyncRunPayload {
   createdCount: number;
   updatedCount: number;
   skippedCount: number;
+  progressPercent: number;
+  progressStage: GithubSyncProgressStage;
   errorMessage: string | null;
 }
 
