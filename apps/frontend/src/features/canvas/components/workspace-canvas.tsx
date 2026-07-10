@@ -30,6 +30,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type FormEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
@@ -40,6 +41,15 @@ import {
   resolveCanvasClientMode,
 } from "@/features/canvas/api/canvas-client";
 import { useAuthSession } from "@/features/auth";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { isDevPreviewAccessToken } from "@/features/auth/session-storage";
 import {
   PiloCanvasRuntime,
@@ -68,6 +78,8 @@ type ToolButtonProps = {
   disabled?: boolean;
   onClick: () => void;
 };
+
+type CanvasUrlInsertTool = Extract<PiloInsertableTool, "bookmark" | "embed">;
 
 const MOCK_CANVAS_WORKSPACE_ID = "pilo-local-workspace";
 
@@ -148,6 +160,10 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
     useState<PiloDrawingPreset>("pen");
   const [activeCanvasColor, setActiveCanvasColor] =
     useState<PiloCanvasColor>("default");
+  const [urlInsertTool, setUrlInsertTool] = useState<CanvasUrlInsertTool | null>(
+    null,
+  );
+  const [urlInsertValue, setUrlInsertValue] = useState("");
   const [openPopover, setOpenPopover] = useState<
     "color" | "draw" | "line" | "insert" | null
   >(null);
@@ -344,16 +360,25 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
   }, [canvasActions, closePopover]);
 
   const createInsertableShape = useCallback(
-    (tool: PiloInsertableTool) => {
-      const url = window.prompt("URL을 입력하세요", getDefaultInsertUrl(tool));
+    (tool: CanvasUrlInsertTool) => {
+      setUrlInsertValue("");
+      setUrlInsertTool(tool);
+    },
+    [],
+  );
 
-      if (!url?.trim()) return;
+  const submitUrlInsert = useCallback(
+    (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+
+      if (!urlInsertTool || !urlInsertValue.trim()) return;
 
       setOpenPopover("insert");
       setActiveCanvasTool("select");
-      canvasActions?.createInsertableShape(tool, url.trim());
+      canvasActions?.createInsertableShape(urlInsertTool, urlInsertValue.trim());
+      setUrlInsertTool(null);
     },
-    [canvasActions],
+    [canvasActions, urlInsertTool, urlInsertValue],
   );
 
   const openMediaFilePicker = useCallback(
@@ -439,6 +464,46 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
             event.target.value = "";
           }}
         />
+        <Dialog
+          open={urlInsertTool !== null}
+          onOpenChange={(open) => {
+            if (!open) setUrlInsertTool(null);
+          }}
+        >
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>
+                {urlInsertTool === "bookmark" ? "북마크" : "임베드"} URL 추가
+              </DialogTitle>
+              <DialogDescription>
+                캔버스에 추가할 URL을 입력하세요.
+              </DialogDescription>
+            </DialogHeader>
+            <form className="grid gap-4" onSubmit={submitUrlInsert}>
+              <Input
+                autoFocus
+                onChange={(event) => setUrlInsertValue(event.target.value)}
+                placeholder={
+                  urlInsertTool ? getDefaultInsertUrl(urlInsertTool) : undefined
+                }
+                type="url"
+                value={urlInsertValue}
+              />
+              <div className="flex justify-end gap-2">
+                <Button
+                  onClick={() => setUrlInsertTool(null)}
+                  type="button"
+                  variant="outline"
+                >
+                  취소
+                </Button>
+                <Button disabled={!urlInsertValue.trim()} type="submit">
+                  추가
+                </Button>
+              </div>
+            </form>
+          </DialogContent>
+        </Dialog>
 
         <nav
           className="canvas-tool-rail"
