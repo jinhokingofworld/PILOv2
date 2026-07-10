@@ -115,7 +115,7 @@ class AgentRunRepository(Protocol):
         run_id: str,
         step_id: str,
         output_summary: dict[str, object],
-    ) -> None: ...
+    ) -> bool: ...
 
     def fail_planner_step(
         self,
@@ -266,11 +266,17 @@ class AgentRunProcessor:
                 )
             )
             normalized = normalize_agent_planner_decision(decision, job)
-            self.repository.complete_planner_step(
+            planner_step_completed = self.repository.complete_planner_step(
                 job.run_id,
                 step_id,
                 normalized.output_summary,
             )
+            if not planner_step_completed:
+                return self._result(
+                    job,
+                    delete_message=True,
+                    reason="agent_planner_step_no_longer_running",
+                )
             if normalized.status == "tool_candidate" and normalized.risk_level is not None:
                 self.repository.mark_tool_execution_ready(
                     job.run_id,

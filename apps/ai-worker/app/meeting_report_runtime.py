@@ -42,6 +42,9 @@ DEFAULT_WAIT_TIME_SECONDS = 20
 DEFAULT_VISIBILITY_TIMEOUT_SECONDS = 900
 DEFAULT_AGENT_EXECUTION_HANDOFF_TIMEOUT_SECONDS = 10
 DEFAULT_AGENT_STALE_EXECUTION_SWEEP_INTERVAL_SECONDS = 60
+AGENT_RETRY_TERMINAL_RECEIVE_COUNT = 3
+AGENT_RETRY_EXHAUSTED_ERROR_CODE = "AGENT_PLANNER_RETRY_EXHAUSTED"
+AGENT_RETRY_EXHAUSTED_ERROR_MESSAGE = "요청을 분석하지 못했습니다. 잠시 후 다시 시도해주세요."
 LOCAL_APP_ENVS = {"local", "test", "development"}
 
 
@@ -314,8 +317,8 @@ class PgAgentRunRepository:
         run_id: str,
         step_id: str,
         output_summary: dict[str, object],
-    ) -> None:
-        self.connection.execute(
+    ) -> bool:
+        row = self.connection.execute(
             """
             UPDATE agent_steps
             SET
@@ -325,9 +328,12 @@ class PgAgentRunRepository:
               updated_at = now()
             WHERE id = %s
               AND run_id = %s
+              AND status = 'running'
+            RETURNING id
             """,
             (json.dumps(output_summary, ensure_ascii=False), step_id, run_id),
-        )
+        ).fetchone()
+        return row is not None
 
     def fail_planner_step(
         self,
@@ -422,6 +428,90 @@ class PgAgentRunRepository:
             """,
             (error_code, error_message, message, run_id),
         )
+
+    def fail_planning_after_retry_exhaustion(self, run_id: str) -> bool:
+        if not self.try_acquire_run_lock(run_id):
+            return False
+
+        try:
+            with self.connection.transaction():
+                run = self.connection.execute(
+                    """
+                    UPDATE agent_runs
+                    SET
+                      status = 'failed',
+                      error_code = %s,
+                      error_message = %s,
+                      message = %s,
+                      completed_at = now(),
+                      updated_at = now()
+                    WHERE id = %s
+                      AND status = 'planning'
+                    RETURNING workspace_id
+                    """,
+                    (
+                        AGENT_RETRY_EXHAUSTED_ERROR_CODE,
+                        AGENT_RETRY_EXHAUSTED_ERROR_MESSAGE,
+                        AGENT_RETRY_EXHAUSTED_ERROR_MESSAGE,
+                        run_id,
+                    ),
+                ).fetchone()
+
+                if run is None:
+                    return False
+
+                self.connection.execute(
+                    """
+                    UPDATE agent_steps
+                    SET
+                      status = 'failed',
+                      error_code = %s,
+                      error_message = %s,
+                      completed_at = now(),
+                      updated_at = now()
+                    WHERE run_id = %s
+                      AND step_type = 'planner'
+                      AND status = 'running'
+                    """,
+                    (
+                        AGENT_RETRY_EXHAUSTED_ERROR_CODE,
+                        AGENT_RETRY_EXHAUSTED_ERROR_MESSAGE,
+                        run_id,
+                    ),
+                )
+                self.connection.execute(
+                    """
+                    INSERT INTO agent_logs (
+                      workspace_id,
+                      run_id,
+                      actor_type,
+                      level,
+                      event_type,
+                      message,
+                      metadata_json,
+                      resource_refs
+                    )
+                    VALUES (
+                      %s,
+                      %s,
+                      'system',
+                      'error',
+                      'planner_retry_exhausted',
+                      %s,
+                      %s::jsonb,
+                      '[]'::jsonb
+                    )
+                    """,
+                    (
+                        str(run["workspace_id"]),
+                        run_id,
+                        "Agent planner retries exhausted",
+                        json.dumps({"maxReceiveCount": AGENT_RETRY_TERMINAL_RECEIVE_COUNT}),
+                    ),
+                )
+                return True
+        finally:
+            self.release_run_lock(run_id)
 
 
 class S3RecordingStorage:
@@ -533,12 +623,14 @@ class SqsAiJobWorker:
         dispatcher: JobDispatcher,
         sqs_client: Any,
         stale_execution_recovery: Any | None = None,
+        agent_retry_exhaustion_recovery: Any | None = None,
         monotonic_time: Callable[[], float] = time.monotonic,
     ) -> None:
         self.settings = settings
         self.dispatcher = dispatcher
         self.sqs_client = sqs_client
         self.stale_execution_recovery = stale_execution_recovery
+        self.agent_retry_exhaustion_recovery = agent_retry_exhaustion_recovery
         self.monotonic_time = monotonic_time
         self.last_stale_execution_sweep_at: float | None = None
 
@@ -554,6 +646,7 @@ class SqsAiJobWorker:
             MaxNumberOfMessages=min(max(self.settings.concurrency, 1), 10),
             WaitTimeSeconds=self.settings.wait_time_seconds,
             VisibilityTimeout=self.settings.visibility_timeout_seconds,
+            AttributeNames=["ApproximateReceiveCount"],
         )
         messages = response.get("Messages", [])
 
@@ -569,13 +662,53 @@ class SqsAiJobWorker:
                 result.resource_id,
                 message.get("MessageId"),
             )
-            if result.delete_message and receipt_handle:
+            should_delete = result.delete_message or self._terminalize_agent_retry(
+                result,
+                message,
+            )
+            if should_delete and receipt_handle:
                 self.sqs_client.delete_message(
                     QueueUrl=self.settings.sqs_queue_url,
                     ReceiptHandle=receipt_handle,
                 )
 
         return len(messages)
+
+    def _terminalize_agent_retry(self, result: Any, message: dict[str, Any]) -> bool:
+        if (
+            self.agent_retry_exhaustion_recovery is None
+            or result.job_type != "agent_run_requested"
+            or result.reason != "infrastructure_failure"
+            or not result.resource_id
+            or self._receive_count(message) < AGENT_RETRY_TERMINAL_RECEIVE_COUNT
+        ):
+            return False
+
+        try:
+            return bool(
+                self.agent_retry_exhaustion_recovery.fail_planning_after_retry_exhaustion(
+                    result.resource_id
+                )
+            )
+        except Exception:
+            LOGGER.exception(
+                "Agent retry terminalization failed run_id=%s message_id=%s",
+                result.resource_id,
+                message.get("MessageId"),
+            )
+            return False
+
+    @staticmethod
+    def _receive_count(message: dict[str, Any]) -> int:
+        attributes = message.get("Attributes")
+        if not isinstance(attributes, dict):
+            return 0
+
+        raw_count = attributes.get("ApproximateReceiveCount")
+        try:
+            return int(raw_count)
+        except (TypeError, ValueError):
+            return 0
 
     def recover_stale_executions_if_due(self) -> None:
         if self.stale_execution_recovery is None:
@@ -677,6 +810,7 @@ def create_worker(settings: RuntimeSettings | None = None) -> SqsAiJobWorker:
         dispatcher,
         sqs_client,
         stale_execution_recovery=agent_execution_handoff_client,
+        agent_retry_exhaustion_recovery=agent_run_repository,
     )
 
 
