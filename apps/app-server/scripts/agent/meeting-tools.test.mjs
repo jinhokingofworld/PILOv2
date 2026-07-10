@@ -130,6 +130,7 @@ function errorCode(error) {
   assert.equal(result.outputSummary.count, 1);
   assert.equal(report.reportId, REPORT_ID);
   assert.equal(report.status, "COMPLETED");
+  assert.equal(report.createdAt, "2026-07-08T00:00:00.000Z");
   assert.deepEqual(
     report.sections.map((section) => section.key),
     ["summary", "discussionPoints", "decisions"]
