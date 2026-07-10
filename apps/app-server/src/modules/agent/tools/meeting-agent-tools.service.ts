@@ -64,7 +64,8 @@ export class MeetingAgentToolsService {
   private listMeetingReportsDefinition(): AgentToolDefinition<unknown> {
     return {
       name: "list_meeting_reports",
-      description: "Workspace MeetingReport 목록을 조회합니다.",
+      description:
+        "Workspace MeetingReport 목록을 최신 생성 시각 순으로 조회합니다. 최신 회의록 결과가 필요하면 limit을 1로 설정합니다.",
       riskLevel: "low",
       executionMode: "auto",
       inputSchema: {

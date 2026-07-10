@@ -391,7 +391,14 @@ export class AgentExecutionService {
     }
 
     try {
-      const plan = await definition.buildConfirmation(input);
+      const plan = await definition.buildConfirmation(
+        {
+          currentUserId,
+          workspaceId,
+          runId
+        },
+        input
+      );
       const confirmation = await this.agentConfirmationService.createConfirmation(
         currentUserId,
         workspaceId,

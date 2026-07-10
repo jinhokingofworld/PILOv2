@@ -613,6 +613,10 @@ Status code: `200 OK`
 
 - Agent는 Calendar event 생성/수정 시 `workspaceId`, `createdBy`를 body로 보내지 않는다.
 - `workspaceId`는 path에서 오고, `createdBy`는 현재 로그인 사용자에서 온다.
+- `update_calendar_event` planner input은 `eventId`와 `changes`만 받는다. confirmation의 `before`는
+  App Server가 같은 Workspace의 현재 event를 조회해 만든다. planner가 작성한 현재값은 신뢰하지 않는다.
+- `eventId` 또는 `changes`가 없으면 현재 run은 `needs_clarification`으로 완료하며, 다른 event를
+  자동 선택하지 않는다.
 - 시간 지정 일정에서 `endTime`이 없으면 Calendar API의 `startTime + 1시간` 정규화를 따른다.
 - 일정 삭제는 1차 Agent tool이 아니다.
 
@@ -620,6 +624,11 @@ Status code: `200 OK`
 
 - Agent는 MeetingReport 목록/상세를 읽고 요약할 수 있다.
 - 목록 응답의 요약 필드를 우선 사용한다.
+- report ID 없는 넓은 조회(예: `지난 회의 결정사항 보여줘`)는 `list_meeting_reports`에 `limit: 1`을
+  사용한다. Meeting domain의 `created_at DESC, id ASC` 정렬에 따라 같은 Workspace의 최신 report 하나를
+  조회하고, 요청한 범주만 답변에 표시한다.
+- 특정 MeetingReport 상세/요약은 UUID `reportId`가 필요하다. 현재 one prompt = one run에서는 후보
+  선택을 이어갈 수 없으므로 ID 없는 특정 상세 요청은 `unsupported`로 완료한다.
 - 상세 조회의 `transcriptText`는 답변 생성에 사용할 수 있지만 Agent run/step/confirmation에는 전문 저장하지 않는다.
 - 녹음 시작, 녹음 종료, 회의록 재생성 요청은 1차 Agent tool이 아니다.
 

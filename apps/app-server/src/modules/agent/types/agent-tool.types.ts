@@ -58,6 +58,7 @@ export interface AgentToolDefinition<TInput> {
   inputSchema: AgentToolInputSchema;
   validateInput: (input: unknown) => TInput;
   buildConfirmation?: (
+    context: AgentToolContext,
     input: TInput
   ) => AgentConfirmationPlan | Promise<AgentConfirmationPlan>;
   execute: (
