@@ -218,3 +218,6 @@ assert.match(githubConnectFormat, /formatGithubConnectDateTime/);
 assert.match(githubConnectFormat, /getGithubConnectSyncStatusLabel/);
 assert.doesNotMatch(githubPanel, /window\.confirm/);
 assert.doesNotMatch(githubPanel, /pilo_access_token/);
+
+await import("../../src/features/github-integration/github-sync-progress.test.mjs");
+await import("../../src/features/github-integration/github-sync-polling.test.mjs");
