@@ -114,7 +114,7 @@ async function compileSqlErdRuntimeModules() {
         "export function HTMLContainer(props) { return props.children ?? null; }",
         "export class Polyline2d { constructor(config) { this.config = config; } }",
         "export class Rectangle2d { constructor(config) { this.config = config; } }",
-        "export class ShapeUtil {}",
+        "export class ShapeUtil { constructor(editor) { this.editor = editor; } }",
         "export function SVGContainer(props) { return props.children ?? null; }",
         "export const T = { arrayOf: (value) => value, boolean: {}, nullable: (value) => value, number: {}, object: (value) => value, string: {} };",
         "export function useEditor() { return null; }",
@@ -346,6 +346,7 @@ function createRuntimeTableShape(id, table, tableShapeRuntime, overrides = {}) {
 }
 
 function createRuntimeTableSelectionEditor(shapes) {
+  let currentPagePoint = { x: 0, y: 0 };
   let selectedShapeId = null;
   const runOptions = [];
 
@@ -355,6 +356,10 @@ function createRuntimeTableSelectionEditor(shapes) {
       selectedShapeId
         ? shapes.filter((shape) => shape.id === selectedShapeId)
         : [],
+    getPointInShapeSpace: (_shape, point) => point,
+    inputs: {
+      getCurrentPagePoint: () => currentPagePoint
+    },
     run: (callback, options) => {
       runOptions.push(options);
       callback();
@@ -362,6 +367,9 @@ function createRuntimeTableSelectionEditor(shapes) {
     runOptions,
     select: (shapeId) => {
       selectedShapeId = shapeId;
+    },
+    setCurrentPagePoint: (point) => {
+      currentPagePoint = point;
     },
     updateShapes: (updates) => {
       for (const update of updates) {
@@ -531,6 +539,94 @@ const runtimeOrdersShape = createRuntimeTableShape(
   runtimeOrdersTable,
   tableShapeRuntime
 );
+
+assert.deepEqual(
+  tableShapeRuntime.getSqlErdTableSelectionAtLocalPoint(runtimeOrdersShape, {
+    x: 20,
+    y: 20
+  }),
+  { type: "table" }
+);
+assert.deepEqual(
+  tableShapeRuntime.getSqlErdTableSelectionAtLocalPoint(runtimeOrdersShape, {
+    x: 20,
+    y: 117
+  }),
+  { type: "column", columnId: "user_id" }
+);
+assert.equal(
+  tableShapeRuntime.getSqlErdTableSelectionAtLocalPoint(runtimeOrdersShape, {
+    x: 20,
+    y: runtimeOrdersShape.props.h + 1
+  }),
+  null
+);
+
+const runtimeClickOrdersShape = createRuntimeTableShape(
+  "shape:click-orders",
+  runtimeOrdersTable,
+  tableShapeRuntime
+);
+const runtimeClickUsersShape = createRuntimeTableShape(
+  "shape:click-users",
+  runtimeUsersTable,
+  tableShapeRuntime
+);
+const runtimeClickEditor = createRuntimeTableSelectionEditor([
+  runtimeClickUsersShape,
+  runtimeClickOrdersShape
+]);
+const runtimeClickEvents = [];
+const previousRuntimeWindow = globalThis.window;
+
+globalThis.window = {
+  dispatchEvent(event) {
+    runtimeClickEvents.push(event);
+    return true;
+  }
+};
+
+try {
+  const runtimeClickShapeUtil = new tableShapeRuntime.SqlErdTableShapeUtil(
+    runtimeClickEditor
+  );
+
+  runtimeClickEditor.setCurrentPagePoint({ x: 20, y: 117 });
+  runtimeClickShapeUtil.onClick(runtimeClickOrdersShape);
+
+  assert.equal(runtimeClickOrdersShape.props.selectedState, "column");
+  assert.equal(runtimeClickOrdersShape.props.selectedColumnId, "user_id");
+  assert.equal(runtimeClickEvents.at(-1).type, "sqltoerd:column-select");
+  assert.deepEqual(runtimeClickEvents.at(-1).detail, {
+    columnId: "user_id",
+    tableId: "table.orders"
+  });
+
+  runtimeClickEditor.setCurrentPagePoint({ x: 20, y: 20 });
+  runtimeClickShapeUtil.onClick(runtimeClickOrdersShape);
+
+  assert.equal(runtimeClickOrdersShape.props.selectedState, "table");
+  assert.equal(runtimeClickOrdersShape.props.selectedColumnId, null);
+  assert.equal(runtimeClickEvents.at(-1).type, "sqltoerd:table-select");
+  assert.deepEqual(runtimeClickEvents.at(-1).detail, {
+    tableId: "table.orders"
+  });
+  assert.equal(
+    runtimeClickShapeUtil.hideSelectionBoundsBg(runtimeClickOrdersShape),
+    true
+  );
+  assert.equal(
+    runtimeClickShapeUtil.hideSelectionBoundsFg(runtimeClickOrdersShape),
+    false
+  );
+} finally {
+  if (previousRuntimeWindow === undefined) {
+    delete globalThis.window;
+  } else {
+    globalThis.window = previousRuntimeWindow;
+  }
+}
+
 const runtimeSelectionEditor = createRuntimeTableSelectionEditor([
   runtimeUsersShape,
   runtimeOrdersShape
@@ -550,6 +646,42 @@ assert.equal(runtimeOrdersShape.props.selectedColumnId, "user_id");
 assert.equal(runtimeUsersShape.props.selectedState, "none");
 assert.equal(runtimeUsersShape.props.selectedColumnId, null);
 
+const runtimeTableShapeUtil = new tableShapeRuntime.SqlErdTableShapeUtil();
+
+assert.equal(
+  runtimeTableShapeUtil.hideSelectionBoundsBg(runtimeOrdersShape),
+  true
+);
+assert.equal(
+  runtimeTableShapeUtil.hideSelectionBoundsFg(runtimeOrdersShape),
+  true
+);
+assert.deepEqual(
+  tableShapeRuntime.getSqlErdColumnRowVisualStyle({
+    isAlternateRow: false,
+    isHighlighted: false,
+    isSelected: true
+  }),
+  {
+    backgroundColor: "#dbeafe",
+    boxShadow:
+      "inset 4px 0 0 #2563eb, inset 0 0 0 1px rgba(37, 99, 235, 0.32)"
+  }
+);
+assert.equal(
+  tableShapeRuntime.isSqlErdColumnPointerDrag(
+    { x: 10, y: 10 },
+    { x: 13, y: 12 }
+  ),
+  false
+);
+assert.equal(
+  tableShapeRuntime.isSqlErdColumnPointerDrag(
+    { x: 10, y: 10 },
+    { x: 15, y: 10 }
+  ),
+  true
+);
 const selectedColumnFromCanvas =
   canvasSelectionRuntime.getSqlErdSelectionFromSelectedShapes(
     runtimeSelectionEditor.getSelectedShapes()
@@ -1629,6 +1761,9 @@ assert.match(canvasSurface, /selectedColumnId/);
 assert.match(canvasSurface, /selectedState/);
 assert.match(canvasSurface, /highlightedColumnIds/);
 assert.match(canvasSurface, /SQLTOERD_RELATION_HOVER_EVENT/);
+assert.match(canvasSurface, /Background: null/);
+assert.match(canvasSurface, /bg-\[radial-gradient/);
+assert.doesNotMatch(canvasSurface, /function SqlErdCanvasBackground/);
 assert.doesNotMatch(canvasSurface, /createShapeId\(`sqltoerd-table-\$\{shapeIdSuffix\(table\.id\)\}`\)/);
 
 assert.match(tableShape, /SQLTOERD_TABLE_SHAPE_TYPE/);
@@ -1660,11 +1795,12 @@ assert.match(
 );
 assert.match(tableShape, /aria-pressed=\{isSelected\}/);
 assert.match(tableShape, /function handleTableKeyDown/);
-assert.match(tableShape, /COLUMN_CLICK_DRAG_THRESHOLD/);
+assert.match(tableShape, /override onClick\(shape: SqlErdTableShape\)/);
+assert.match(tableShape, /isSqlErdColumnPointerDrag/);
 assert.match(tableShape, /columnPointerStartRef/);
-assert.match(tableShape, /suppressNextColumnClickRef/);
-assert.match(tableShape, /onPointerDown/);
-assert.match(tableShape, /onPointerUp/);
+assert.doesNotMatch(tableShape, /suppressNextColumnClickRef/);
+assert.match(tableShape, /onPointerDownCapture/);
+assert.doesNotMatch(tableShape, /onPointerUpCapture/);
 assert.doesNotMatch(tableShape, /<article[\s\S]*?onClick=\{handleTableClick\}/);
 assert.doesNotMatch(tableShape, /isSelected \|\| column\.foreignKey\s*\?\s*"border-blue-400 opacity-100"/);
 assert.match(tableShape, /isHighlighted/);
