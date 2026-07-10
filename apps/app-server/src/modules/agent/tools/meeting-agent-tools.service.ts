@@ -64,7 +64,8 @@ export class MeetingAgentToolsService {
   private listMeetingReportsDefinition(): AgentToolDefinition<unknown> {
     return {
       name: "list_meeting_reports",
-      description: "Workspace MeetingReport 목록을 조회합니다.",
+      description:
+        "Workspace MeetingReport 목록을 최신 생성 시각 순으로 조회합니다. 최신 회의록 결과가 필요하면 limit을 1로 설정합니다.",
       riskLevel: "low",
       executionMode: "auto",
       inputSchema: {
@@ -147,7 +148,9 @@ export class MeetingAgentToolsService {
       context.workspaceId,
       input
     );
-    const reports = result.reports.map((report) =>
+    const selectedReports =
+      input.limit === 1 ? result.reports.slice(0, 1) : result.reports;
+    const reports = selectedReports.map((report) =>
       this.normalizeMeetingReportForAgent(report, {
         sectionTextLimit: LIST_SECTION_TEXT_LIMIT
       })
@@ -158,7 +161,7 @@ export class MeetingAgentToolsService {
         count: reports.length,
         reports
       },
-      resourceRefs: result.reports.map((report) => this.toResourceRef(report)),
+      resourceRefs: selectedReports.map((report) => this.toResourceRef(report)),
       status: "completed"
     };
   }

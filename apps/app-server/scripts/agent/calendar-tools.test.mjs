@@ -52,6 +52,16 @@ class FakeCalendarService {
     return this.events;
   }
 
+  async getEvent(currentUserId, workspaceId, eventId) {
+    this.calls.push({
+      method: "getEvent",
+      currentUserId,
+      workspaceId,
+      eventId
+    });
+    return this.events.find((event) => event.id === Number(eventId));
+  }
+
   async createEvent(currentUserId, workspaceId, body) {
     this.calls.push({
       method: "createEvent",
@@ -139,7 +149,7 @@ function errorCode(error) {
     endDate: "2026-07-08",
     startTime: "15:00"
   });
-  const plan = tool.buildConfirmation(input);
+  const plan = await tool.buildConfirmation(context, input);
   const result = await tool.execute(context, input);
 
   assert.equal(plan.toolName, "create_calendar_event");
@@ -189,29 +199,30 @@ function errorCode(error) {
   const tool = registry.getDefinition("update_calendar_event");
   const input = tool.validateInput({
     eventId: "1",
-    before: {
-      id: 1,
-      title: "주간 회의",
-      startDate: "2026-07-08",
-      startTime: "15:00"
-    },
     changes: {
       startTime: "16:00",
       endTime: "17:00"
     }
   });
-  const plan = tool.buildConfirmation(input);
+  const plan = await tool.buildConfirmation(context, input);
   const result = await tool.execute(context, input);
 
   assert.equal(plan.toolName, "update_calendar_event");
   assert.equal(plan.target.resourceId, "1");
   assert.equal(plan.before.title, "주간 회의");
+  assert.equal(plan.before.color, "#3B82F6");
   assert.deepEqual(plan.after, {
     startTime: "16:00",
     endTime: "17:00"
   });
   assert.equal(result.status, "updated");
-  assert.deepEqual(calendarService.calls[0].body, {
+  assert.deepEqual(calendarService.calls[0], {
+    method: "getEvent",
+    currentUserId: USER_ID,
+    workspaceId: WORKSPACE_ID,
+    eventId: "1"
+  });
+  assert.deepEqual(calendarService.calls[1].body, {
     startTime: "16:00",
     endTime: "17:00"
   });
@@ -289,10 +300,26 @@ function errorCode(error) {
     () =>
       tool.validateInput({
         eventId: "1",
-        before: {
-          id: 1,
-          title: "주간 회의"
-        },
+        before: { title: "LLM이 만든 현재값" },
+        changes: { startTime: "16:00" }
+      }),
+    (error) => {
+      assert.equal(error.getStatus(), 400);
+      assert.equal(errorCode(error), "BAD_REQUEST");
+      assert.match(error.getResponse().error.message, /before/);
+      return true;
+    }
+  );
+}
+
+{
+  const { registry } = createRegistry();
+  const tool = registry.getDefinition("update_calendar_event");
+
+  assert.throws(
+    () =>
+      tool.validateInput({
+        eventId: "1",
         changes: {
           unsupported: "value"
         }
