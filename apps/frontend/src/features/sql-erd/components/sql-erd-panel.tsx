@@ -393,6 +393,7 @@ export function SqlErdPanel() {
             createWorkspaceSqlErdViewSession(activeSession);
           const activeParseResult = parseSqlDdlToErdModel({
             dialect: activeViewSession.dialect,
+            sourceMapModelJson: activeViewSession.modelJson,
             sourceText: activeViewSession.sourceText
           });
 

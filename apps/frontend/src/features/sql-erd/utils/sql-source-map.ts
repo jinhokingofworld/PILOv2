@@ -38,7 +38,10 @@ export type SqltoerdRelationSourceRanges = {
 };
 
 export type SqltoerdSourceMap = {
-  columnsById: Record<string, SqltoerdSourceRange>;
+  columnRangesByTableId: Record<
+    string,
+    Record<string, SqltoerdSourceRange>
+  >;
   dialect: SqltoerdResolvedDialect;
   relationsById: Record<string, SqltoerdRelationSourceRanges>;
   sourceText: string;
@@ -51,7 +54,10 @@ export function createSqltoerdSourceMap(input: {
 }): SqltoerdSourceMap {
   const language = input.dialect === "mysql" ? MySQL.language : PostgreSQL.language;
   const tree = language.parser.parse(input.sourceText);
-  const columnsById: Record<string, SqltoerdSourceRange> = {};
+  const columnRangesByTableId: Record<
+    string,
+    Record<string, SqltoerdSourceRange>
+  > = {};
   const pendingRelations: PendingRelationRange[] = [];
   const rootCursor = tree.cursor();
 
@@ -62,7 +68,7 @@ export function createSqltoerdSourceMap(input: {
       }
 
       collectCreateTableRanges({
-        columnsById,
+        columnRangesByTableId,
         modelJson: input.modelJson,
         pendingRelations,
         sourceText: input.sourceText,
@@ -72,12 +78,12 @@ export function createSqltoerdSourceMap(input: {
   }
 
   return {
-    columnsById,
+    columnRangesByTableId,
     dialect: input.dialect,
     relationsById: createRelationRanges(
       input.modelJson.schema.relations,
       pendingRelations,
-      columnsById
+      columnRangesByTableId
     ),
     sourceText: input.sourceText
   };
@@ -109,7 +115,10 @@ export function getSelectedSqlErdRelationSourceRanges(input: {
 }
 
 function collectCreateTableRanges(input: {
-  columnsById: Record<string, SqltoerdSourceRange>;
+  columnRangesByTableId: Record<
+    string,
+    Record<string, SqltoerdSourceRange>
+  >;
   modelJson: SqltoerdModelJsonV1;
   pendingRelations: PendingRelationRange[];
   sourceText: string;
@@ -181,7 +190,11 @@ function collectCreateTableRanges(input: {
       continue;
     }
 
-    input.columnsById[column.id] = {
+    const columnRangesById =
+      input.columnRangesByTableId[table.id] ??
+      (input.columnRangesByTableId[table.id] = {});
+
+    columnRangesById[column.id] = {
       from: segment[0].from,
       to: segment[0].to
     };
@@ -313,7 +326,10 @@ function createPendingRelationRange(input: {
 function createRelationRanges(
   relations: ErdRelation[],
   pendingRelations: PendingRelationRange[],
-  columnsById: Record<string, SqltoerdSourceRange>
+  columnRangesByTableId: Record<
+    string,
+    Record<string, SqltoerdSourceRange>
+  >
 ) {
   const relationsById: Record<string, SqltoerdRelationSourceRanges> = {};
 
@@ -333,11 +349,15 @@ function createRelationRanges(
       continue;
     }
 
+    const fromColumnRangesById =
+      columnRangesByTableId[relation.fromTableId] ?? {};
+    const toColumnRangesById =
+      columnRangesByTableId[relation.toTableId] ?? {};
     const fromColumnRanges = relation.fromColumnIds
-      .map((columnId) => columnsById[columnId])
+      .map((columnId) => fromColumnRangesById[columnId])
       .filter((range): range is SqltoerdSourceRange => Boolean(range));
     const toColumnRanges = relation.toColumnIds
-      .map((columnId) => columnsById[columnId])
+      .map((columnId) => toColumnRangesById[columnId])
       .filter((range): range is SqltoerdSourceRange => Boolean(range));
 
     if (

@@ -21,6 +21,7 @@ const { Parser } = sqlParser;
 export type SqltoerdDdlParseInput = {
   sourceText: string;
   dialect: SqltoerdDialect;
+  sourceMapModelJson?: SqltoerdModelJsonV1;
 };
 
 export type SqltoerdDdlParseResult =
@@ -142,7 +143,7 @@ export function parseSqlDdlToErdModel(
     modelJson,
     sourceMap: createSqltoerdSourceMap({
       dialect: resolvedDialect,
-      modelJson,
+      modelJson: input.sourceMapModelJson ?? modelJson,
       sourceText: input.sourceText
     })
   };

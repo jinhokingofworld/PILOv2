@@ -327,6 +327,56 @@ function createRuntimeTestModel() {
   };
 }
 
+function createRuntimeModelWithStableIdPrefix(modelJson, prefix) {
+  const stableModelJson = structuredClone(modelJson);
+  const tableIds = new Map();
+  const columnIdsByTableId = new Map();
+
+  for (const table of stableModelJson.schema.tables) {
+    const originalTableId = table.id;
+    const columnIds = new Map();
+
+    table.id = `${prefix}${originalTableId}`;
+    tableIds.set(originalTableId, table.id);
+
+    for (const column of table.columns) {
+      const originalColumnId = column.id;
+
+      column.id = `${prefix}${originalColumnId}`;
+      columnIds.set(originalColumnId, column.id);
+    }
+
+    for (const constraint of table.constraints) {
+      constraint.id = `${prefix}${constraint.id}`;
+      constraint.columnIds = constraint.columnIds.map(
+        (columnId) => columnIds.get(columnId) ?? columnId
+      );
+    }
+
+    columnIdsByTableId.set(originalTableId, columnIds);
+  }
+
+  for (const relation of stableModelJson.schema.relations) {
+    const originalFromTableId = relation.fromTableId;
+    const originalToTableId = relation.toTableId;
+    const fromColumnIds = columnIdsByTableId.get(originalFromTableId);
+    const toColumnIds = columnIdsByTableId.get(originalToTableId);
+
+    relation.id = `${prefix}${relation.id}`;
+    relation.fromTableId =
+      tableIds.get(originalFromTableId) ?? originalFromTableId;
+    relation.toTableId = tableIds.get(originalToTableId) ?? originalToTableId;
+    relation.fromColumnIds = relation.fromColumnIds.map(
+      (columnId) => fromColumnIds?.get(columnId) ?? columnId
+    );
+    relation.toColumnIds = relation.toColumnIds.map(
+      (columnId) => toColumnIds?.get(columnId) ?? columnId
+    );
+  }
+
+  return stableModelJson;
+}
+
 function createRuntimeTestSession(overrides = {}) {
   const modelJson = overrides.modelJson ?? createRuntimeTestModel();
 
@@ -1381,21 +1431,33 @@ assert.equal(postgresParseResult.sourceMap.sourceText, postgresSourceText);
 assert.equal(postgresParseResult.sourceMap.dialect, "postgresql");
 assert.equal(
   postgresSourceText.slice(
-    postgresParseResult.sourceMap.columnsById["column.users.id"].from,
-    postgresParseResult.sourceMap.columnsById["column.users.id"].to
+    postgresParseResult.sourceMap.columnRangesByTableId["table.users"][
+      "column.users.id"
+    ].from,
+    postgresParseResult.sourceMap.columnRangesByTableId["table.users"][
+      "column.users.id"
+    ].to
   ),
   "id"
 );
 assert.equal(
   postgresSourceText.slice(
-    postgresParseResult.sourceMap.columnsById["column.orders.id"].from,
-    postgresParseResult.sourceMap.columnsById["column.orders.id"].to
+    postgresParseResult.sourceMap.columnRangesByTableId["table.orders"][
+      "column.orders.id"
+    ].from,
+    postgresParseResult.sourceMap.columnRangesByTableId["table.orders"][
+      "column.orders.id"
+    ].to
   ),
   "id"
 );
 assert.notEqual(
-  postgresParseResult.sourceMap.columnsById["column.users.id"].from,
-  postgresParseResult.sourceMap.columnsById["column.orders.id"].from
+  postgresParseResult.sourceMap.columnRangesByTableId["table.users"][
+    "column.users.id"
+  ].from,
+  postgresParseResult.sourceMap.columnRangesByTableId["table.orders"][
+    "column.orders.id"
+  ].from
 );
 const postgresTableRelationRange =
   postgresParseResult.sourceMap.relationsById[
@@ -1449,6 +1511,103 @@ assert.deepEqual(
     "id",
     "CONSTRAINT fk_orders_user FOREIGN KEY (user_id) REFERENCES users(id)"
   ]
+);
+const storedStableIdModel = createRuntimeModelWithStableIdPrefix(
+  postgresParseResult.modelJson,
+  "stored."
+);
+const storedStableIdParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
+  dialect: "postgresql",
+  sourceMapModelJson: storedStableIdModel,
+  sourceText: postgresSourceText
+});
+
+assert.equal(storedStableIdParseResult.ok, true);
+assert.deepEqual(
+  Object.keys(storedStableIdParseResult.sourceMap.relationsById),
+  [
+    "stored.relation.orders.user_id.users.id",
+    "stored.relation.reviews.user_id.users.id"
+  ]
+);
+const storedStableIdSelectedRanges =
+  sqlSourceMapRuntime.getSelectedSqlErdRelationSourceRanges({
+    selection: {
+      type: "relation",
+      relationId: "stored.relation.orders.user_id.users.id"
+    },
+    sourceMap: storedStableIdParseResult.sourceMap,
+    sourceText: postgresSourceText
+  });
+assert.deepEqual(
+  storedStableIdSelectedRanges.map((range) =>
+    postgresSourceText.slice(range.from, range.to)
+  ),
+  [
+    "user_id",
+    "id",
+    "CONSTRAINT fk_orders_user FOREIGN KEY (user_id) REFERENCES users(id)"
+  ]
+);
+const tableScopedColumnIdSourceText = `CREATE TABLE parents (
+  id BIGINT PRIMARY KEY
+);
+
+CREATE TABLE children (
+  id BIGINT PRIMARY KEY,
+  parent_id BIGINT NOT NULL,
+  CONSTRAINT fk_children_parent FOREIGN KEY (parent_id) REFERENCES parents(id)
+);`;
+const tableScopedColumnIdParseResult =
+  ddlParserRuntime.parseSqlDdlToErdModel({
+    dialect: "postgresql",
+    sourceText: tableScopedColumnIdSourceText
+  });
+
+assert.equal(tableScopedColumnIdParseResult.ok, true);
+const tableScopedColumnIdModel = createRuntimeModelWithStableIdPrefix(
+  tableScopedColumnIdParseResult.modelJson,
+  "stored."
+);
+const tableScopedParents = tableScopedColumnIdModel.schema.tables.find(
+  (table) => table.name === "parents"
+);
+const tableScopedChildren = tableScopedColumnIdModel.schema.tables.find(
+  (table) => table.name === "children"
+);
+const tableScopedRelation = tableScopedColumnIdModel.schema.relations[0];
+const originalParentColumnId = tableScopedParents.columns[0].id;
+const originalChildColumnId = tableScopedChildren.columns[1].id;
+
+tableScopedParents.columns[0].id = "shared-column-id";
+tableScopedParents.constraints[0].columnIds = ["shared-column-id"];
+tableScopedChildren.columns[1].id = "shared-column-id";
+tableScopedRelation.fromColumnIds = ["shared-column-id"];
+tableScopedRelation.toColumnIds = ["shared-column-id"];
+
+assert.notEqual(originalParentColumnId, originalChildColumnId);
+const tableScopedColumnIdSourceMap =
+  sqlSourceMapRuntime.createSqltoerdSourceMap({
+    dialect: "postgresql",
+    modelJson: tableScopedColumnIdModel,
+    sourceText: tableScopedColumnIdSourceText
+  });
+const tableScopedColumnIdRelationRange =
+  tableScopedColumnIdSourceMap.relationsById[
+    "stored.relation.children.parent_id.parents.id"
+  ];
+
+assert.deepEqual(
+  tableScopedColumnIdRelationRange.fromColumnRanges.map((range) =>
+    tableScopedColumnIdSourceText.slice(range.from, range.to)
+  ),
+  ["parent_id"]
+);
+assert.deepEqual(
+  tableScopedColumnIdRelationRange.toColumnRanges.map((range) =>
+    tableScopedColumnIdSourceText.slice(range.from, range.to)
+  ),
+  ["id"]
 );
 const runtimeRelationDecorations =
   sqlSourceDecorationRuntime.createSqlErdRelationSourceDecorations(
@@ -2215,6 +2374,10 @@ assert.match(panel, /lastResolvedDialect/);
 assert.match(panel, /sqlSourceMap/);
 assert.match(panel, /setSqlSourceMap\(null\)/);
 assert.match(panel, /setSqlSourceMap\(generateRequest\.sourceMap\)/);
+assert.match(
+  panel,
+  /sourceMapModelJson: activeViewSession\.modelJson/
+);
 assert.match(panel, /relationSourceCompartmentRef/);
 assert.match(panel, /getSelectedSqlErdRelationSourceRanges/);
 assert.doesNotMatch(panel, /scrollIntoView/);
