@@ -123,6 +123,18 @@ interface ReviewFileResultRow extends QueryResultRow {
   workflow_order: number | string | null;
 }
 
+interface ReviewCanvasFallbackFileRow extends QueryResultRow {
+  id: string;
+  session_id: string;
+  file_path: string;
+  file_name: string;
+  file_status: PrReviewFileStatus;
+  file_role: string | null;
+  risk_level: PrReviewFileRiskLevel | null;
+  current_status: PrReviewFileReviewStatus;
+  workflow_order: number | string;
+}
+
 interface ReviewFileDetailRow extends QueryResultRow {
   id: string;
   session_id: string;
@@ -906,34 +918,30 @@ export class PrReviewService {
       throw notFound("Review session not found");
     }
 
-    const [flows, flowFiles] = await Promise.all([
-      this.listReviewFlowsForSession(workspaceId, reviewSessionId),
-      this.listReviewFlowFilesForSession(workspaceId, reviewSessionId)
-    ]);
-    const filesByFlow = new Map<string, PrReviewFlowFilePayload[]>();
+    try {
+      const [flows, flowFiles] = await Promise.all([
+        this.listReviewFlowsForSession(workspaceId, reviewSessionId),
+        this.listReviewFlowFilesForSession(workspaceId, reviewSessionId)
+      ]);
+      const canvasFlows = this.buildCanvasFlows(flows, flowFiles);
 
-    for (const flowFile of flowFiles) {
-      const payload = this.mapFlowFile(flowFile);
-      const files = filesByFlow.get(payload.flowId) ?? [];
-      files.push(payload);
-      filesByFlow.set(payload.flowId, files);
+      if (this.shouldUseCanvasFallback(summary, canvasFlows)) {
+        return this.buildFallbackReviewSessionCanvas(
+          workspaceId,
+          reviewSessionId,
+          summary,
+          flows
+        );
+      }
+
+      return this.buildReviewSessionCanvasPayload(summary, canvasFlows);
+    } catch {
+      return this.buildFallbackReviewSessionCanvas(
+        workspaceId,
+        reviewSessionId,
+        summary
+      );
     }
-
-    const canvasFlows: PrReviewCanvasFlowPayload[] = flows.map((flow) => ({
-      ...this.mapFlow(flow),
-      files: filesByFlow.get(flow.id) ?? []
-    }));
-
-    return {
-      reviewSessionId: summary.id,
-      headBranch: summary.head_branch,
-      baseBranch: summary.base_branch,
-      reviewedCount: Number(summary.reviewed_count),
-      totalFileCount: Number(summary.total_file_count),
-      conflictStatus: summary.conflict_status,
-      flows: canvasFlows,
-      edges: this.buildCanvasEdges(canvasFlows)
-    };
   }
 
   async listReviewFlows(
@@ -1710,13 +1718,20 @@ export class PrReviewService {
           pull_request.deletions,
           pull_request.commits_count,
           pull_request.html_url,
-          COALESCE(NULLIF(pull_request.raw->>'state', ''), pull_request.state::text)
-            AS pull_request_state,
+          COALESCE(
+            NULLIF(pull_request.raw->>'state', ''),
+            CASE
+              WHEN pull_request.merged_at IS NOT NULL
+                OR pull_request.github_closed_at IS NOT NULL
+                THEN 'closed'
+              ELSE 'open'
+            END
+          ) AS pull_request_state,
           CASE
             WHEN pull_request.raw ? 'mergeable'
               AND jsonb_typeof(pull_request.raw->'mergeable') = 'boolean'
               THEN (pull_request.raw->>'mergeable')::boolean
-            ELSE pull_request.mergeable
+            ELSE NULL
           END AS pull_request_mergeable,
           pull_request.merged_at AS pull_request_merged_at
         FROM pr_review_sessions AS review_session
@@ -1781,6 +1796,35 @@ export class PrReviewService {
           review_file.file_status,
           review_file.is_binary,
           review_file.is_large_diff
+        FROM review_files AS review_file
+        JOIN pr_review_sessions AS review_session
+          ON review_session.id = review_file.session_id
+        JOIN github_pull_requests AS pull_request
+          ON pull_request.id = review_session.pull_request_id
+        WHERE pull_request.workspace_id = $1
+          AND review_session.id = $2
+        ORDER BY review_file.file_path ASC
+      `,
+      [workspaceId, this.requireUuid(reviewSessionId, "reviewSessionId")]
+    );
+  }
+
+  private async listReviewFilesForCanvasFallback(
+    workspaceId: string,
+    reviewSessionId: string
+  ): Promise<ReviewCanvasFallbackFileRow[]> {
+    return this.database.query<ReviewCanvasFallbackFileRow>(
+      `
+        SELECT
+          review_file.id,
+          review_file.session_id,
+          review_file.file_path,
+          review_file.file_name,
+          review_file.file_status,
+          review_file.file_role,
+          review_file.risk_level,
+          review_file.current_status,
+          ROW_NUMBER() OVER (ORDER BY review_file.file_path ASC) AS workflow_order
         FROM review_files AS review_file
         JOIN pr_review_sessions AS review_session
           ON review_session.id = review_file.session_id
@@ -2989,6 +3033,89 @@ export class PrReviewService {
     return value;
   }
 
+  private buildCanvasFlows(
+    flows: ReviewFlowListRow[],
+    flowFiles: ReviewFlowFileRow[]
+  ): PrReviewCanvasFlowPayload[] {
+    const filesByFlow = new Map<string, PrReviewFlowFilePayload[]>();
+
+    for (const flowFile of flowFiles) {
+      const payload = this.mapFlowFile(flowFile);
+      const files = filesByFlow.get(payload.flowId) ?? [];
+      files.push(payload);
+      filesByFlow.set(payload.flowId, files);
+    }
+
+    return flows.map((flow) => ({
+      ...this.mapFlow(flow),
+      files: filesByFlow.get(flow.id) ?? []
+    }));
+  }
+
+  private shouldUseCanvasFallback(
+    summary: PrReviewSummaryRow,
+    flows: PrReviewCanvasFlowPayload[]
+  ): boolean {
+    return (
+      Number(summary.total_file_count) > 0 &&
+      flows.reduce((count, flow) => count + flow.files.length, 0) === 0
+    );
+  }
+
+  private async buildFallbackReviewSessionCanvas(
+    workspaceId: string,
+    reviewSessionId: string,
+    summary: PrReviewSummaryRow,
+    flows: ReviewFlowListRow[] = []
+  ): Promise<PrReviewCanvasPayload> {
+    const files = await this.listReviewFilesForCanvasFallback(
+      workspaceId,
+      reviewSessionId
+    );
+
+    if (files.length === 0) {
+      return this.buildReviewSessionCanvasPayload(
+        summary,
+        flows.map((flow) => ({
+          ...this.mapFlow(flow),
+          files: []
+        }))
+      );
+    }
+
+    const primaryFlow = flows[0] ?? null;
+    const fallbackFlowId = primaryFlow?.id ?? `${summary.id}:fallback-flow`;
+    const fallbackFlow: PrReviewCanvasFlowPayload = {
+      id: fallbackFlowId,
+      reviewSessionId: summary.id,
+      title: primaryFlow?.title ?? "PR 변경 파일 리뷰",
+      description:
+        primaryFlow?.description ??
+        "리뷰 흐름 연결 정보를 사용할 수 없어 변경 파일 기준으로 구성했습니다.",
+      sortOrder: primaryFlow ? Number(primaryFlow.sort_order) : 1,
+      fileCount: files.length,
+      files: files.map((file) => this.mapFallbackFlowFile(file, fallbackFlowId))
+    };
+
+    return this.buildReviewSessionCanvasPayload(summary, [fallbackFlow]);
+  }
+
+  private buildReviewSessionCanvasPayload(
+    summary: PrReviewSummaryRow,
+    flows: PrReviewCanvasFlowPayload[]
+  ): PrReviewCanvasPayload {
+    return {
+      reviewSessionId: summary.id,
+      headBranch: summary.head_branch,
+      baseBranch: summary.base_branch,
+      reviewedCount: Number(summary.reviewed_count),
+      totalFileCount: Number(summary.total_file_count),
+      conflictStatus: summary.conflict_status,
+      flows,
+      edges: this.buildCanvasEdges(flows)
+    };
+  }
+
   private mapSession(session: PrReviewSessionRow): PrReviewSessionPayload {
     return {
       id: session.id,
@@ -3081,6 +3208,41 @@ export class PrReviewService {
         reviewSessionId: file.session_id,
         reviewFlowFileId: file.id,
         flowId: file.flow_id,
+        workflowOrder,
+        fileName: file.file_name,
+        filePath: file.file_path,
+        roleSummary: file.file_role,
+        riskLevel,
+        reviewStatus: file.current_status
+      }
+    };
+  }
+
+  private mapFallbackFlowFile(
+    file: ReviewCanvasFallbackFileRow,
+    flowId: string
+  ): PrReviewFlowFilePayload {
+    const workflowOrder = Number(file.workflow_order);
+    const riskLevel = this.normalizeRiskLevel(file.risk_level);
+    const fallbackReviewFlowFileId = `${flowId}:${file.id}:fallback`;
+
+    return {
+      id: fallbackReviewFlowFileId,
+      reviewSessionId: file.session_id,
+      flowId,
+      reviewFileId: file.id,
+      workflowOrder,
+      filePath: file.file_path,
+      fileName: file.file_name,
+      fileStatus: file.file_status,
+      fileRole: file.file_role,
+      riskLevel,
+      currentStatus: file.current_status,
+      fileNodeData: {
+        reviewFileId: file.id,
+        reviewSessionId: file.session_id,
+        reviewFlowFileId: fallbackReviewFlowFileId,
+        flowId,
         workflowOrder,
         fileName: file.file_name,
         filePath: file.file_path,

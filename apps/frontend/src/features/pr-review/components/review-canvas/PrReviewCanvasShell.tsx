@@ -92,6 +92,11 @@ function clamp(value: number, min: number, max: number) {
 }
 
 function getErrorMessage(error: unknown) {
+  if (error instanceof PrReviewApiError) {
+    const detail = [error.status, error.path].filter(Boolean).join(" ");
+    return detail ? `${error.message} (${detail})` : error.message;
+  }
+
   if (error instanceof Error) {
     return error.message;
   }
