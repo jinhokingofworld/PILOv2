@@ -62,6 +62,34 @@ export type SqltoerdLayoutJsonV1 = {
   version: typeof SQLTOERD_LAYOUT_JSON_VERSION;
   tableLayouts: SqltoerdTableLayout[];
   viewport?: SqltoerdViewport;
+  annotations?: SqltoerdAnnotationsV1;
+};
+
+export type SqltoerdAnnotationsV1 = {
+  version: 1;
+  links: SqltoerdAnnotationLink[];
+};
+
+export type SqltoerdAnnotationLink =
+  | SqltoerdTableAnnotationLink
+  | SqltoerdColumnAnnotationLink;
+
+export type SqltoerdTableAnnotationLink = {
+  id: string;
+  kind: "table_link";
+  fromTableId: string;
+  toTableId: string;
+  label: string;
+};
+
+export type SqltoerdColumnAnnotationLink = {
+  id: string;
+  kind: "column_link";
+  fromTableId: string;
+  fromColumnId: string;
+  toTableId: string;
+  toColumnId: string;
+  label: string;
 };
 
 export type SqltoerdTableLayout = {

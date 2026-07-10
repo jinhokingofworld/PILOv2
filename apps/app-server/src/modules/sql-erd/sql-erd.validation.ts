@@ -26,10 +26,12 @@ const MAX_LAYOUT_JSON_BYTES = 1024 * 1024;
 const MAX_SETTINGS_JSON_BYTES = 64 * 1024;
 const MAX_TABLE_COUNT = 100;
 const MAX_RELATION_COUNT = 300;
+const MAX_ANNOTATION_COUNT = 300;
 const MAX_COLUMN_COUNT = 1000;
 const MAX_COLUMNS_PER_TABLE = 200;
 const MAX_IDENTIFIER_LENGTH = 256;
 const MAX_COLUMN_TYPE_LENGTH = 512;
+const MAX_ANNOTATION_LABEL_LENGTH = 200;
 const MAX_JSON_DEPTH = 20;
 const SOURCE_FORMATS = new Set<SqlErdSourceFormat>(["sql"]);
 const DIALECTS = new Set<SqlErdDialect>(["auto", "postgresql", "mysql"]);
@@ -81,7 +83,7 @@ export function validateCreateSqlErdSessionRequest(
   const modelJson = readVersionedJsonObject(draft.modelJson, "modelJson");
   const layoutJson = readVersionedJsonObject(draft.layoutJson, "layoutJson");
   const metadata = readModelMetadata(modelJson);
-  validateLayoutJson(layoutJson, metadata.tableIds);
+  validateLayoutJson(layoutJson, metadata);
 
   return {
     title: readTitle(draft.title),
@@ -151,7 +153,7 @@ export function validateSqlErdLayoutJson(
   modelJson: SqlErdJsonObject
 ): void {
   const metadata = readModelMetadata(modelJson);
-  validateLayoutJson(layoutJson, metadata.tableIds);
+  validateLayoutJson(layoutJson, metadata);
 }
 
 function readBody(
@@ -635,11 +637,12 @@ function readModelMetadata(modelJson: SqlErdJsonObject): ModelMetadata {
 
 function validateLayoutJson(
   layoutJson: SqlErdJsonObject,
-  tableIds: Set<string>
+  metadata: ModelMetadata
 ): void {
+  const { tableIds } = metadata;
   assertAllowedFields(
     layoutJson,
-    new Set(["version", "tableLayouts", "viewport"]),
+    new Set(["version", "tableLayouts", "viewport", "annotations"]),
     "layoutJson"
   );
 
@@ -692,6 +695,124 @@ function validateLayoutJson(
       throw badRequest("layoutJson.viewport.zoom must be greater than 0");
     }
   }
+
+  if (layoutJson.annotations !== undefined) {
+    validateAnnotations(layoutJson.annotations, metadata);
+  }
+}
+
+function validateAnnotations(value: unknown, metadata: ModelMetadata): void {
+  const annotations = readPlainJsonObject(value, "layoutJson.annotations");
+  assertAllowedFields(
+    annotations,
+    new Set(["version", "links"]),
+    "layoutJson.annotations"
+  );
+
+  if (annotations.version !== 1) {
+    throw badRequest("layoutJson.annotations.version must be 1");
+  }
+
+  if (!Array.isArray(annotations.links)) {
+    throw badRequest("layoutJson.annotations.links must be an array");
+  }
+
+  if (annotations.links.length > MAX_ANNOTATION_COUNT) {
+    throw badRequest("layoutJson.annotations.links length limit exceeded");
+  }
+
+  const annotationIds = new Set<string>();
+  const endpointKeys = new Set<string>();
+
+  annotations.links.forEach((link, linkIndex) => {
+    const linkPath = `layoutJson.annotations.links[${linkIndex}]`;
+    const linkObject = readPlainJsonObject(link, linkPath);
+    const kind = linkObject.kind;
+
+    if (kind !== "table_link" && kind !== "column_link") {
+      throw badRequest(`${linkPath}.kind is invalid`);
+    }
+
+    assertAllowedFields(
+      linkObject,
+      kind === "table_link"
+        ? new Set(["id", "kind", "fromTableId", "toTableId", "label"])
+        : new Set([
+            "id",
+            "kind",
+            "fromTableId",
+            "fromColumnId",
+            "toTableId",
+            "toColumnId",
+            "label"
+          ]),
+      linkPath
+    );
+
+    const annotationId = readIdentifier(linkObject.id, `${linkPath}.id`);
+    if (annotationIds.has(annotationId)) {
+      throw badRequest("duplicate annotation id");
+    }
+    annotationIds.add(annotationId);
+
+    const fromTableId = readIdentifier(
+      linkObject.fromTableId,
+      `${linkPath}.fromTableId`
+    );
+    const toTableId = readIdentifier(
+      linkObject.toTableId,
+      `${linkPath}.toTableId`
+    );
+    if (!metadata.tableIds.has(fromTableId) || !metadata.tableIds.has(toTableId)) {
+      throw badRequest("annotation table reference is invalid");
+    }
+
+    readAnnotationLabel(linkObject.label, `${linkPath}.label`);
+
+    let endpointKey: string;
+    if (kind === "table_link") {
+      endpointKey = createUndirectedEndpointKey(
+        kind,
+        [fromTableId],
+        [toTableId]
+      );
+    } else {
+      const fromColumnId = readIdentifier(
+        linkObject.fromColumnId,
+        `${linkPath}.fromColumnId`
+      );
+      const toColumnId = readIdentifier(
+        linkObject.toColumnId,
+        `${linkPath}.toColumnId`
+      );
+      if (
+        !metadata.tableColumnIds.get(fromTableId)?.has(fromColumnId) ||
+        !metadata.tableColumnIds.get(toTableId)?.has(toColumnId)
+      ) {
+        throw badRequest("annotation column reference is invalid");
+      }
+
+      endpointKey = createUndirectedEndpointKey(
+        kind,
+        [fromTableId, fromColumnId],
+        [toTableId, toColumnId]
+      );
+    }
+
+    if (endpointKeys.has(endpointKey)) {
+      throw badRequest("duplicate annotation endpoint");
+    }
+    endpointKeys.add(endpointKey);
+  });
+}
+
+function createUndirectedEndpointKey(
+  kind: "table_link" | "column_link",
+  from: readonly string[],
+  to: readonly string[]
+): string {
+  const endpoints = [JSON.stringify(from), JSON.stringify(to)].sort();
+  return JSON.stringify([kind, ...endpoints]);
 }
 
 function assertAllowedFields(
@@ -823,6 +944,18 @@ function readColumnType(value: unknown, field: string): string {
   }
 
   if (value.length > MAX_COLUMN_TYPE_LENGTH) {
+    throw badRequest(`${field} length limit exceeded`);
+  }
+
+  return value;
+}
+
+function readAnnotationLabel(value: unknown, field: string): string {
+  if (typeof value !== "string") {
+    throw badRequest(`${field} must be a string`);
+  }
+
+  if (value.length > MAX_ANNOTATION_LABEL_LENGTH) {
     throw badRequest(`${field} length limit exceeded`);
   }
 

@@ -48,6 +48,9 @@ const { SqlErdSessionController } = require(
 const { SQL_ERD_REQUEST_BODY_LIMIT_BYTES } = require(
   "../../dist/modules/sql-erd/sql-erd.types.js"
 );
+const { validateCreateSqlErdSessionRequest } = require(
+  "../../dist/modules/sql-erd/sql-erd.validation.js"
+);
 
 const currentUserId = "11111111-1111-4111-8111-111111111111";
 const workspaceId = "22222222-2222-4222-8222-222222222222";
@@ -322,6 +325,45 @@ function layoutJson(overrides = {}) {
   return {
     version: 1,
     tableLayouts: [],
+    ...overrides
+  };
+}
+
+function tableAnnotation(id, fromTableId, toTableId, overrides = {}) {
+  return {
+    id,
+    kind: "table_link",
+    fromTableId,
+    toTableId,
+    label: "",
+    ...overrides
+  };
+}
+
+function columnAnnotation(
+  id,
+  fromTableId,
+  fromColumnId,
+  toTableId,
+  toColumnId,
+  overrides = {}
+) {
+  return {
+    id,
+    kind: "column_link",
+    fromTableId,
+    fromColumnId,
+    toTableId,
+    toColumnId,
+    label: "",
+    ...overrides
+  };
+}
+
+function annotations(links, overrides = {}) {
+  return {
+    version: 1,
+    links,
     ...overrides
   };
 }
@@ -688,7 +730,13 @@ await assertRouteBodyLimit(
 {
   const sourceText = "CREATE TABLE users (id BIGINT PRIMARY KEY);";
   const requestModelJson = modelJson();
-  const requestLayoutJson = layoutJson();
+  const requestLayoutJson = layoutJson({
+    annotations: annotations([
+      tableAnnotation("annotation_users_orders", "table_users", "table_orders", {
+        label: "places"
+      })
+    ])
+  });
   const database = new FakeDatabase({
     queryOneRows: [
       (text, values) => {
@@ -740,6 +788,7 @@ await assertRouteBodyLimit(
   assert.equal(session.sourceText, sourceText);
   assert.equal(session.tableCount, 2);
   assert.equal(session.relationCount, 1);
+  assert.deepEqual(session.layoutJson, requestLayoutJson);
   assert.equal(session.createdBy, currentUserId);
   assert.equal(session.updatedBy, currentUserId);
   assert.equal(database.transactions.length, 1);
@@ -1510,6 +1559,285 @@ await assertRouteBodyLimit(
 }
 
 {
+  const validAnnotations = annotations([
+    tableAnnotation("annotation_users_orders", "table_users", "table_orders", {
+      label: "places"
+    }),
+    columnAnnotation(
+      "annotation_users_email_orders_user_id",
+      "table_users",
+      "column_users_email",
+      "table_orders",
+      "column_orders_user_id",
+      { label: "business owner" }
+    )
+  ]);
+  const normalizedLegacy = validateCreateSqlErdSessionRequest({
+    sourceFormat: "sql",
+    modelJson: modelJson(),
+    layoutJson: layoutJson()
+  });
+  const normalizedWithAnnotations = validateCreateSqlErdSessionRequest({
+    sourceFormat: "sql",
+    modelJson: modelJson(),
+    layoutJson: layoutJson({ annotations: validAnnotations })
+  });
+
+  assert.equal("annotations" in normalizedLegacy.layoutJson, false);
+  assert.deepEqual(normalizedWithAnnotations.layoutJson.annotations, validAnnotations);
+
+  const invalidCases = [
+    {
+      layout: layoutJson({
+        annotations: annotations([], { version: 2 })
+      }),
+      message: /layoutJson\.annotations\.version must be 1/
+    },
+    {
+      layout: layoutJson({
+        annotations: annotations(
+          Array.from({ length: 301 }, (_, index) =>
+            tableAnnotation(
+              `annotation_${index}`,
+              "table_users",
+              "table_orders"
+            )
+          )
+        )
+      }),
+      message: /layoutJson\.annotations\.links length limit exceeded/
+    },
+    {
+      layout: layoutJson({
+        annotations: annotations([
+          tableAnnotation("annotation_long_label", "table_users", "table_orders", {
+            label: oversizedText(201)
+          })
+        ])
+      }),
+      message: /layoutJson\.annotations\.links\[0\]\.label length limit exceeded/
+    },
+    {
+      layout: layoutJson({
+        annotations: annotations([
+          tableAnnotation("annotation_missing_table", "table_missing", "table_orders")
+        ])
+      }),
+      message: /annotation table reference is invalid/
+    },
+    {
+      layout: layoutJson({
+        annotations: annotations([
+          columnAnnotation(
+            "annotation_missing_column",
+            "table_users",
+            "column_missing",
+            "table_orders",
+            "column_orders_user_id"
+          )
+        ])
+      }),
+      message: /annotation column reference is invalid/
+    },
+    {
+      layout: layoutJson({
+        annotations: annotations([
+          tableAnnotation("annotation_duplicate_id", "table_users", "table_orders"),
+          columnAnnotation(
+            "annotation_duplicate_id",
+            "table_users",
+            "column_users_email",
+            "table_orders",
+            "column_orders_user_id"
+          )
+        ])
+      }),
+      message: /duplicate annotation id/
+    },
+    {
+      layout: layoutJson({
+        annotations: annotations([
+          tableAnnotation("annotation_forward", "table_users", "table_orders"),
+          tableAnnotation("annotation_reverse", "table_orders", "table_users")
+        ])
+      }),
+      message: /duplicate annotation endpoint/
+    },
+    {
+      layout: layoutJson({
+        annotations: annotations([
+          tableAnnotation("annotation_unknown_field", "table_users", "table_orders", {
+            extra: true
+          })
+        ])
+      }),
+      message: /layoutJson\.annotations\.links\[0\] has unknown field/
+    },
+    {
+      layout: layoutJson({
+        annotations: annotations([
+          tableAnnotation("annotation_unknown_kind", "table_users", "table_orders", {
+            kind: "unknown_link"
+          })
+        ])
+      }),
+      message: /layoutJson\.annotations\.links\[0\]\.kind is invalid/
+    }
+  ];
+
+  for (const invalidCase of invalidCases) {
+    await assertApiError(
+      async () =>
+        validateCreateSqlErdSessionRequest({
+          sourceFormat: "sql",
+          modelJson: modelJson(),
+          layoutJson: invalidCase.layout
+        }),
+      400,
+      "BAD_REQUEST",
+      invalidCase.message
+    );
+  }
+}
+
+{
+  const baseModelJson = modelJson();
+  const compositeModelJson = modelJson({
+    schema: {
+      tables: [
+        table(
+          "table_users",
+          "users",
+          [
+            ...baseModelJson.schema.tables[0].columns,
+            column("column_users_tenant_id", "tenant_id", "BIGINT")
+          ],
+          baseModelJson.schema.tables[0].constraints
+        ),
+        table(
+          "table_orders",
+          "orders",
+          [
+            ...baseModelJson.schema.tables[1].columns,
+            column("column_orders_tenant_id", "tenant_id", "BIGINT")
+          ],
+          baseModelJson.schema.tables[1].constraints
+        )
+      ],
+      relations: [
+        relation(
+          "relation_orders_users_composite",
+          "table_orders",
+          ["column_orders_user_id", "column_orders_tenant_id"],
+          "table_users",
+          ["column_users_id", "column_users_tenant_id"]
+        )
+      ]
+    }
+  });
+  const collisionCases = [
+    {
+      model: baseModelJson,
+      link: columnAnnotation(
+        "annotation_fk_forward",
+        "table_orders",
+        "column_orders_user_id",
+        "table_users",
+        "column_users_id"
+      )
+    },
+    {
+      model: baseModelJson,
+      link: columnAnnotation(
+        "annotation_fk_reverse",
+        "table_users",
+        "column_users_id",
+        "table_orders",
+        "column_orders_user_id"
+      )
+    },
+    {
+      model: compositeModelJson,
+      link: columnAnnotation(
+        "annotation_fk_composite_member",
+        "table_orders",
+        "column_orders_tenant_id",
+        "table_users",
+        "column_users_tenant_id"
+      )
+    }
+  ];
+
+  for (const collisionCase of collisionCases) {
+    const collisionLayoutJson = layoutJson({
+      annotations: annotations([collisionCase.link])
+    });
+    const normalized = validateCreateSqlErdSessionRequest({
+      sourceFormat: "sql",
+      modelJson: collisionCase.model,
+      layoutJson: collisionLayoutJson
+    });
+
+    assert.deepEqual(normalized.layoutJson, collisionLayoutJson);
+  }
+
+  const collisionLayoutJson = layoutJson({
+    annotations: annotations([collisionCases[0].link])
+  });
+  const database = new FakeDatabase({
+    queryOneRows: [
+      sessionRow({ revision: 2 }),
+      sessionRow({ revision: 3, layout_json: collisionLayoutJson })
+    ]
+  });
+  const { service } = createSubject(database);
+
+  const session = await service.updateSession(
+    currentUserId,
+    workspaceId,
+    sessionId,
+    {
+      baseRevision: 2,
+      layoutJson: collisionLayoutJson
+    }
+  );
+
+  assert.deepEqual(session.layoutJson, collisionLayoutJson);
+}
+
+{
+  const existingLayoutJson = layoutJson({
+    annotations: annotations([
+      tableAnnotation("annotation_users_orders", "table_users", "table_orders")
+    ])
+  });
+  const usersOnlyModelJson = modelJson({
+    schema: {
+      tables: [modelJson().schema.tables[0]],
+      relations: []
+    }
+  });
+  const { service } = createSubject(
+    new FakeDatabase({
+      queryOneRows: [
+        sessionRow({ revision: 2, layout_json: existingLayoutJson })
+      ]
+    })
+  );
+
+  await assertApiError(
+    () =>
+      service.updateSession(currentUserId, workspaceId, sessionId, {
+        baseRevision: 2,
+        modelJson: usersOnlyModelJson
+      }),
+    400,
+    "BAD_REQUEST",
+    /annotation table reference is invalid/
+  );
+}
+
+{
   const updatedSourceText = "CREATE TABLE users (id BIGINT PRIMARY KEY, email TEXT);";
   const updatedModelJson = modelJson({
     schema: {
@@ -1546,7 +1874,17 @@ await assertRouteBodyLimit(
   });
   const updatedLayoutJson = {
     version: 1,
-    tableLayouts: [{ tableId: "table_users", x: 10, y: 20 }]
+    tableLayouts: [{ tableId: "table_users", x: 10, y: 20 }],
+    annotations: annotations([
+      columnAnnotation(
+        "annotation_users_email_orders_user_id",
+        "table_users",
+        "column_users_email",
+        "table_orders",
+        "column_orders_user_id",
+        { label: "business owner" }
+      )
+    ])
   };
   const updatedSettingsJson = { panel: { leftCollapsed: false } };
   const database = new FakeDatabase({
@@ -1602,6 +1940,7 @@ await assertRouteBodyLimit(
   assert.equal(session.dialect, "mysql");
   assert.equal(session.tableCount, 3);
   assert.equal(session.relationCount, 2);
+  assert.deepEqual(session.layoutJson, updatedLayoutJson);
   assert.equal(session.revision, 4);
   assert.equal(session.updatedBy, currentUserId);
 }
