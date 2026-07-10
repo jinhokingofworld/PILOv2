@@ -470,14 +470,14 @@ export function PrReviewFileDiffDrawer({
     }
   }, [apiClient, conflictFile, conflictSuggestionStatus, workspaceId]);
 
-  const handleApplyConflictResolution = useCallback(async () => {
+  const handleApplyConflictResolution = useCallback(async (): Promise<boolean> => {
     if (
       !conflictFile ||
       !conflictSuggestion ||
       conflictSuggestion.status === "invalid" ||
       conflictApplyStatus === "applying"
     ) {
-      return;
+      return false;
     }
 
     setConflictApplyStatus("applying");
@@ -497,9 +497,12 @@ export function PrReviewFileDiffDrawer({
       setConflictApplyResult(result);
       setConflictApplyStatus("applied");
       await onConflictApplied(result);
+      setReloadVersion((version) => version + 1);
+      return true;
     } catch (error) {
       setConflictApplyStatus("error");
       setConflictApplyError(getErrorMessage(error));
+      return false;
     }
   }, [
     apiClient,
@@ -768,7 +771,7 @@ function ReviewNodePanel({
   decisionStatus: PrReviewFileDecisionStatus | null;
   decisionDisabledReason: string | null;
   file: PrReviewFile;
-  onApplyConflictResolution: () => void;
+  onApplyConflictResolution: () => Promise<boolean>;
   onCommentBlur: () => void;
   onCommentChange: (value: string) => void;
   onCreateConflictSuggestion: () => void;
@@ -812,11 +815,14 @@ function ReviewNodePanel({
           </div>
         </section>
 
+        {conflictApplyResult ? (
+          <ConflictApplySuccessNotice result={conflictApplyResult} />
+        ) : null}
+
         {decisionDisabledReason ? (
           <ConflictResolutionPanel
             conflictFile={conflictFile}
             conflictApplyErrorMessage={conflictApplyErrorMessage}
-            conflictApplyResult={conflictApplyResult}
             conflictApplyStatus={conflictApplyStatus}
             conflictSuggestion={conflictSuggestion}
             conflictSuggestionErrorMessage={conflictSuggestionErrorMessage}
@@ -954,7 +960,6 @@ function ReviewNodePanel({
 function ConflictResolutionPanel({
   conflictFile,
   conflictApplyErrorMessage,
-  conflictApplyResult,
   conflictApplyStatus,
   conflictSuggestion,
   conflictSuggestionErrorMessage,
@@ -968,12 +973,11 @@ function ConflictResolutionPanel({
 }: {
   conflictFile: PrReviewConflictFile | null;
   conflictApplyErrorMessage: string | null;
-  conflictApplyResult: PrReviewConflictApplyResult | null;
   conflictApplyStatus: ConflictApplyStatus;
   conflictSuggestion: PrReviewConflictSuggestion | null;
   conflictSuggestionErrorMessage: string | null;
   conflictSuggestionStatus: ConflictSuggestionLoadStatus;
-  onApplyConflictResolution: () => void;
+  onApplyConflictResolution: () => Promise<boolean>;
   onCreateConflictSuggestion: () => void;
   onResolvedContentDraftChange: (value: string) => void;
   reason: string;
@@ -1033,7 +1037,6 @@ function ConflictResolutionPanel({
             {conflictSuggestion ? (
               <ConflictSuggestionPreview
                 applyErrorMessage={conflictApplyErrorMessage}
-                applyResult={conflictApplyResult}
                 applyStatus={conflictApplyStatus}
                 onApply={onApplyConflictResolution}
                 onResolvedContentChange={onResolvedContentDraftChange}
@@ -1055,7 +1058,6 @@ function ConflictResolutionPanel({
 
 function ConflictSuggestionPreview({
   applyErrorMessage,
-  applyResult,
   applyStatus,
   onApply,
   onResolvedContentChange,
@@ -1063,9 +1065,8 @@ function ConflictSuggestionPreview({
   suggestion
 }: {
   applyErrorMessage: string | null;
-  applyResult: PrReviewConflictApplyResult | null;
   applyStatus: ConflictApplyStatus;
-  onApply: () => void;
+  onApply: () => Promise<boolean>;
   onResolvedContentChange: (value: string) => void;
   resolvedContent: string;
   suggestion: PrReviewConflictSuggestion;
@@ -1136,33 +1137,15 @@ function ConflictSuggestionPreview({
         <p className="text-xs leading-5 text-rose-600">{applyDisabledReason}</p>
       ) : null}
 
-      {applyErrorMessage ? (
-        <p className="text-xs leading-5 text-rose-600">{applyErrorMessage}</p>
-      ) : null}
-
-      {applyResult ? (
-        <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs leading-5 text-emerald-800">
-          <p className="font-semibold">Applied by {applyResult.appliedByGithubLogin}</p>
-          <p className="mt-1 font-mono">
-            {applyResult.headShaBefore.slice(0, 7)} -&gt;{" "}
-            {applyResult.headShaAfter.slice(0, 7)}
-          </p>
-          {applyResult.commitUrl ? (
-            <a
-              className="mt-1 inline-flex items-center gap-1 font-semibold text-emerald-700 hover:text-emerald-900"
-              href={applyResult.commitUrl}
-              rel="noreferrer"
-              target="_blank"
-            >
-              Commit
-              <ExternalLink className="size-3" />
-            </a>
-          ) : null}
-        </div>
-      ) : null}
-
       <div className="flex justify-end">
-        <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <AlertDialog
+          open={confirmOpen}
+          onOpenChange={(open) => {
+            if (!isApplying) {
+              setConfirmOpen(open);
+            }
+          }}
+        >
           <Button
             disabled={!canApply}
             onClick={() => setConfirmOpen(true)}
@@ -1186,13 +1169,25 @@ function ConflictSuggestionPreview({
                 This commits the resolved file content to the PR head branch.
               </AlertDialogDescription>
             </AlertDialogHeader>
+            {applyErrorMessage ? (
+              <div
+                aria-live="polite"
+                className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm leading-5 text-rose-700"
+              >
+                {applyErrorMessage}
+              </div>
+            ) : null}
             <AlertDialogFooter>
               <AlertDialogCancel disabled={isApplying}>Cancel</AlertDialogCancel>
               <AlertDialogAction
                 disabled={isApplying}
-                onClick={() => {
-                  setConfirmOpen(false);
-                  onApply();
+                onClick={(event) => {
+                  event.preventDefault();
+                  void onApply().then((applied) => {
+                    if (applied) {
+                      setConfirmOpen(false);
+                    }
+                  });
                 }}
                 type="button"
               >
@@ -1206,6 +1201,43 @@ function ConflictSuggestionPreview({
         </AlertDialog>
       </div>
     </div>
+  );
+}
+
+function ConflictApplySuccessNotice({
+  result
+}: {
+  result: PrReviewConflictApplyResult;
+}) {
+  const statusMessage =
+    result.conflictStatus === "clean"
+      ? "GitHub confirmed that this PR has no remaining merge conflict."
+      : result.conflictStatus === "checking"
+        ? "GitHub is checking the updated PR for remaining conflicts."
+        : "GitHub refreshed the PR conflict status after the commit.";
+
+  return (
+    <section className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-emerald-900">
+      <p className="flex items-center gap-2 text-sm font-semibold">
+        <CheckCircle2 className="size-4 shrink-0" />
+        Conflict resolution committed
+      </p>
+      <p className="mt-2 text-xs leading-5">{statusMessage}</p>
+      <p className="mt-2 font-mono text-xs">
+        {result.headShaBefore.slice(0, 7)} -&gt; {result.headShaAfter.slice(0, 7)}
+      </p>
+      {result.commitUrl ? (
+        <a
+          className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 hover:text-emerald-900"
+          href={result.commitUrl}
+          rel="noreferrer"
+          target="_blank"
+        >
+          Commit
+          <ExternalLink className="size-3" />
+        </a>
+      ) : null}
+    </section>
   );
 }
 

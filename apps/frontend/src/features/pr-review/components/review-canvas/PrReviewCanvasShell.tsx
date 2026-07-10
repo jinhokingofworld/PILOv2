@@ -418,8 +418,8 @@ export function PrReviewCanvasShell({
     [loadCanvasData]
   );
 
-  const handleConflictApplied = useCallback(() => {
-    void loadCanvasData({ quiet: true });
+  const handleConflictApplied = useCallback(async () => {
+    await loadCanvasData({ quiet: true });
   }, [loadCanvasData]);
 
   const headBranch =
