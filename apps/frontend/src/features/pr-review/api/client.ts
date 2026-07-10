@@ -38,6 +38,11 @@ type PrReviewApiSuccessResponse<T> = {
   meta?: PrReviewPaginatedPayload<unknown>["meta"];
 };
 
+type PrReviewGithubOAuthStart = {
+  authorizeUrl: string;
+  state: string;
+};
+
 function trimTrailingSlash(value: string) {
   return value.replace(/\/+$/, "");
 }
@@ -353,6 +358,18 @@ export function createPrReviewApiClient({
   };
 
   return {
+    async startGithubOAuth(returnUrl = "/github") {
+      return requestPrReviewData<PrReviewGithubOAuthStart>(
+        "/me/github/oauth/start",
+        {
+          body: JSON.stringify({ returnUrl }),
+          credentials: "include",
+          method: "POST"
+        },
+        requestOptions
+      );
+    },
+
     async listRepositories(
       workspaceId: string,
       query: ListPrReviewRepositoriesQuery = {}

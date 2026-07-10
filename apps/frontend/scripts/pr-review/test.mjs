@@ -63,6 +63,13 @@ const prReviewConflictResolution = await readFile(
   ),
   "utf8"
 );
+const prReviewResolvedCodeDiff = await readFile(
+  new URL(
+    "../../src/features/pr-review/components/review-canvas/pr-review-resolved-code-diff.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
 const prReviewSubmitReviewModal = await readFile(
   new URL(
     "../../src/features/pr-review/components/review-canvas/PrReviewSubmitReviewModal.tsx",
@@ -116,6 +123,9 @@ assert.doesNotMatch(prReviewNavigation, /\/pr-review#/);
 assert.match(prReviewPage, /<PrReviewPanel \/>/);
 assert.match(prReviewRoutePage, /import "tldraw\/tldraw\.css"/);
 assert.match(prReviewApiClient, /createPrReviewApiClient/);
+assert.match(prReviewApiClient, /startGithubOAuth/);
+assert.match(prReviewApiClient, /\/me\/github\/oauth\/start/);
+assert.match(prReviewApiClient, /credentials: "include"/);
 assert.match(prReviewApiClient, /\/api\/v1/);
 assert.match(prReviewApiClient, /NEXT_PUBLIC_PILO_APP_SERVER_URL/);
 assert.match(prReviewApiClient, /Authorization/);
@@ -244,7 +254,7 @@ assert.doesNotMatch(prReviewCanvasSurface, /PiloCanvasRuntime/);
 assert.doesNotMatch(prReviewCanvasSurface, /canvas_freeform_shapes/);
 assert.match(prReviewFileDiffDrawer, /getReviewFileDiff/);
 assert.match(prReviewFileDiffDrawer, /updateReviewFileDecision/);
-assert.match(prReviewFileDiffDrawer, /Conflict Resolution/);
+assert.match(prReviewFileDiffDrawer, /Conflict 해결/);
 assert.match(prReviewFileDiffDrawer, /AI 해결안 생성/);
 assert.match(prReviewFileDiffDrawer, /ConflictSuggestionPreview/);
 assert.match(prReviewFileDiffDrawer, /createReviewFileConflictSuggestion/);
@@ -265,13 +275,22 @@ assert.match(prReviewFileDiffDrawer, /ConflictHunkComparison/);
 assert.match(prReviewFileDiffDrawer, /ConflictUnifiedCodePane/);
 assert.match(prReviewFileDiffDrawer, /ConflictWorkspaceTabs/);
 assert.match(prReviewFileDiffDrawer, /ResolvedDraftWorkspace/);
-assert.match(prReviewFileDiffDrawer, /AI RESOLUTION/);
+assert.match(prReviewFileDiffDrawer, /AI 해결안/);
+assert.match(prReviewFileDiffDrawer, /GitHub 재연결/);
+assert.match(prReviewFileDiffDrawer, /pilo-github-oauth-reconnect/);
+assert.match(prReviewFileDiffDrawer, /변경점 보기/);
+assert.match(prReviewFileDiffDrawer, /전체 코드 편집/);
+assert.match(prReviewFileDiffDrawer, /buildPrReviewResolvedCodeDiff/);
+assert.doesNotMatch(
+  prReviewFileDiffDrawer,
+  /Conflict Resolution|AI RESOLUTION|Resolution progress|Apply resolution/
+);
 assert.match(prReviewFileDiffDrawer, /PR 브랜치 선택/);
 assert.match(prReviewFileDiffDrawer, /대상 브랜치 선택/);
 assert.match(prReviewFileDiffDrawer, /둘 다 선택/);
 assert.match(prReviewFileDiffDrawer, /GitHub에 적용/);
-assert.match(prReviewFileDiffDrawer, /Target branch:/);
-assert.match(prReviewFileDiffDrawer, /PR branch:/);
+assert.match(prReviewFileDiffDrawer, /대상 브랜치:/);
+assert.match(prReviewFileDiffDrawer, /PR 브랜치:/);
 assert.match(prReviewFileDiffDrawer, /selectedConflictHunkIndex/);
 assert.match(prReviewFileDiffDrawer, /isBaseComparisonOpen/);
 assert.match(prReviewFileDiffDrawer, /hunk\.currentStartLine/);
@@ -298,7 +317,13 @@ assert.doesNotMatch(prReviewFileDiffDrawer, /features\/canvas/);
 assert.match(prReviewResolvedCodeEditor, /EditorView/);
 assert.match(prReviewResolvedCodeEditor, /lineNumbers/);
 assert.match(prReviewResolvedCodeEditor, /syntaxHighlighting/);
+assert.match(prReviewResolvedCodeEditor, /Decoration\.line/);
+assert.match(prReviewResolvedCodeEditor, /cm-resolvedChangedLine/);
+assert.match(prReviewResolvedCodeEditor, /scrollIntoView/);
 assert.doesNotMatch(prReviewResolvedCodeEditor, /features\/canvas/);
+assert.match(prReviewResolvedCodeDiff, /diffLines/);
+assert.match(prReviewResolvedCodeDiff, /changedLineNumbers/);
+assert.match(prReviewResolvedCodeDiff, /changeBlocks/);
 assert.match(prReviewConflictResolution, /buildConflictResolutionDraft/);
 assert.match(prReviewConflictResolution, /isConflictResolutionComplete/);
 assert.match(prReviewConflictResolution, /right\.startIndex - left\.startIndex/);
@@ -333,3 +358,6 @@ assert.match(prReviewShapeUtils, /PrReviewFileNodeShapeUtil/);
 assert.match(prReviewShapeUtils, /PrReviewFlowEdgeShapeUtil/);
 assert.match(prReviewShapeUtils, /PrReviewFlowLabelShapeUtil/);
 assert.match(prReviewShapeUtils, /PrReviewFlowMilestoneShapeUtil/);
+
+await import("./resolved-code-diff.test.mjs");
+await import("./oauth-reconnect-client.test.mjs");

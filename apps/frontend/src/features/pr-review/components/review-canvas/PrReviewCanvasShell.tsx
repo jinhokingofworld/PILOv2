@@ -842,8 +842,8 @@ function ConflictAnalysisNotice({
     title = `${formatNumber(unsupportedCount)}개 Conflict 파일은 아직 지원하지 않습니다`;
     description =
       supportedCount > 0
-        ? `${formatNumber(supportedCount)}개 파일은 Conflict Resolution mode로 확인할 수 있습니다.`
-        : "초기 버전에서는 content conflict만 Resolution mode로 확인할 수 있습니다.";
+        ? `${formatNumber(supportedCount)}개 파일은 Conflict 해결 모드로 확인할 수 있습니다.`
+        : "초기 버전에서는 content Conflict만 해결 모드로 확인할 수 있습니다.";
     className = "border-amber-200 bg-amber-50 text-amber-950";
   }
 
