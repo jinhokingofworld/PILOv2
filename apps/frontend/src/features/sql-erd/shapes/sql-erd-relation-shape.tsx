@@ -1,10 +1,13 @@
 "use client";
 
+import { useState } from "react";
 import {
   Polyline2d,
   ShapeUtil,
   SVGContainer,
   T,
+  useEditor,
+  useValue,
   Vec,
   type TLBaseShape,
   type TLShape
@@ -14,6 +17,7 @@ import { isSqlErdTableShape } from "@/features/sql-erd/shapes/sql-erd-table-shap
 
 export const SQLTOERD_RELATION_SHAPE_TYPE = "sqltoerd_relation";
 export const SQLTOERD_RELATION_HOVER_EVENT = "sqltoerd:relation-hover";
+export const SQLTOERD_RELATION_HIT_STROKE_WIDTH = 16;
 
 const RELATION_BOUNDS_PADDING = 16;
 const TABLE_HEADER_HEIGHT = 54;
@@ -88,6 +92,19 @@ export type SqlErdRelationShapeProps = {
   startSide: RelationPortSide;
 };
 
+export type SqlErdRelationHighlightDetail = {
+  relationId: string;
+  fromTableId: string;
+  fromColumnIds: string[];
+  toTableId: string;
+  toColumnIds: string[];
+};
+
+export type SqlErdRelationHoverEventDetail =
+  SqlErdRelationHighlightDetail & {
+    isHovered: boolean;
+  };
+
 export type SqlErdRelationShape = TLBaseShape<
   typeof SQLTOERD_RELATION_SHAPE_TYPE,
   SqlErdRelationShapeProps
@@ -103,6 +120,61 @@ export function isSqlErdRelationShape(
   shape: TLShape | null | undefined
 ): shape is SqlErdRelationShape {
   return shape?.type === SQLTOERD_RELATION_SHAPE_TYPE;
+}
+
+export function getSqlErdRelationVisualStyle({
+  isHovered,
+  isSelected
+}: {
+  isHovered: boolean;
+  isSelected: boolean;
+}) {
+  if (isSelected) {
+    return {
+      stroke: "rgba(37, 99, 235, 0.98)",
+      strokeWidth: 4
+    };
+  }
+
+  if (isHovered) {
+    return {
+      stroke: "rgba(37, 99, 235, 0.82)",
+      strokeWidth: 3.25
+    };
+  }
+
+  return {
+    stroke: "rgba(37, 99, 235, 0.58)",
+    strokeWidth: 2.5
+  };
+}
+
+export function resolveSqlErdRelationHighlightDetail(
+  selectedDetail: SqlErdRelationHighlightDetail | null,
+  hoveredDetail: SqlErdRelationHighlightDetail | null
+) {
+  return selectedDetail ?? hoveredDetail;
+}
+
+export function getSqlErdHighlightedColumnIdsForTable(
+  detail: SqlErdRelationHighlightDetail | null,
+  tableId: string
+) {
+  if (!detail) {
+    return [];
+  }
+
+  const columnIds = new Set<string>();
+
+  if (detail.fromTableId === tableId) {
+    detail.fromColumnIds.forEach((columnId) => columnIds.add(columnId));
+  }
+
+  if (detail.toTableId === tableId) {
+    detail.toColumnIds.forEach((columnId) => columnIds.add(columnId));
+  }
+
+  return [...columnIds];
 }
 
 function emitSqlErdRelationHover(
@@ -492,10 +564,37 @@ export function getSqlErdRelationShapeLayout(
 }
 
 function SqlErdRelationLine({ shape }: { shape: SqlErdRelationShape }) {
+  const editor = useEditor();
+  const [isHovered, setIsHovered] = useState(false);
+  const isSelected = useValue(
+    `sqltoerd-relation-selected-${shape.id}`,
+    () => editor.getOnlySelectedShape()?.id === shape.id,
+    [editor, shape.id]
+  );
+  const pathData = getRelationCurvePathData(
+    shape.props.points,
+    shape.props.startSide,
+    shape.props.endSide
+  );
+  const visualStyle = getSqlErdRelationVisualStyle({
+    isHovered,
+    isSelected
+  });
+
+  function handlePointerEnter() {
+    setIsHovered(true);
+    emitSqlErdRelationHover(shape, true);
+  }
+
+  function handlePointerLeave() {
+    setIsHovered(false);
+    emitSqlErdRelationHover(shape, false);
+  }
+
   return (
     <SVGContainer
-      onPointerEnter={() => emitSqlErdRelationHover(shape, true)}
-      onPointerLeave={() => emitSqlErdRelationHover(shape, false)}
+      onPointerEnter={handlePointerEnter}
+      onPointerLeave={handlePointerLeave}
       style={{
         height: shape.props.h,
         overflow: "visible",
@@ -504,20 +603,29 @@ function SqlErdRelationLine({ shape }: { shape: SqlErdRelationShape }) {
       }}
     >
       <path
-        d={getRelationCurvePathData(
-          shape.props.points,
-          shape.props.startSide,
-          shape.props.endSide
-        )}
+        data-sqltoerd-relation-hit-target
+        d={pathData}
         fill="none"
         pointerEvents="stroke"
-        stroke="rgba(37, 99, 235, 0.58)"
+        stroke="transparent"
         strokeLinecap="round"
         strokeLinejoin="round"
-        strokeWidth="2.5"
+        strokeWidth={SQLTOERD_RELATION_HIT_STROKE_WIDTH}
+      />
+      <path
+        data-sqltoerd-relation-state={
+          isSelected ? "selected" : isHovered ? "hovered" : "default"
+        }
+        d={pathData}
+        fill="none"
+        pointerEvents="none"
+        stroke={visualStyle.stroke}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={visualStyle.strokeWidth}
       />
       <polygon
-        fill="rgba(37, 99, 235, 0.7)"
+        fill={visualStyle.stroke}
         pointerEvents="auto"
         points={getPointListData(shape.props.arrowPoints)}
       />
