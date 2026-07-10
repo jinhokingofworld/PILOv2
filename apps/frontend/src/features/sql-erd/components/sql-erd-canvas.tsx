@@ -16,7 +16,7 @@ import {
   getSqlErdRelationShapeLayout,
   getSqlErdTableBoundsFromShape,
   isSqlErdRelationShape,
-  resolveSqlErdRelationHighlightDetail,
+  resolveSqlErdRelationHighlightFromIds,
   SQLTOERD_RELATION_HOVER_EVENT,
   SQLTOERD_RELATION_SHAPE_TYPE,
   SqlErdRelationShapeUtil,
@@ -957,31 +957,6 @@ function parseSqlErdRelationHoverEventDetail(
   };
 }
 
-function getSelectedSqlErdRelationHighlightDetail(
-  modelJson: SqltoerdModelJsonV1,
-  selectedSqlErdObject: SqlErdSelection
-): SqlErdRelationHighlightDetail | null {
-  if (selectedSqlErdObject.type !== "relation") {
-    return null;
-  }
-
-  const relation = modelJson.schema.relations.find(
-    (candidate) => candidate.id === selectedSqlErdObject.relationId
-  );
-
-  if (!relation) {
-    return null;
-  }
-
-  return {
-    relationId: relation.id,
-    fromTableId: relation.fromTableId,
-    fromColumnIds: relation.fromColumnIds,
-    toTableId: relation.toTableId,
-    toColumnIds: relation.toColumnIds
-  };
-}
-
 function SqlErdRelationHighlightSync({
   modelJson,
   selectedSqlErdObject
@@ -990,29 +965,26 @@ function SqlErdRelationHighlightSync({
   selectedSqlErdObject: SqlErdSelection;
 }) {
   const editor = useEditor();
-  const hoveredDetailRef = useRef<SqlErdRelationHighlightDetail | null>(null);
-  const selectedDetail = useMemo(
-    () =>
-      getSelectedSqlErdRelationHighlightDetail(
-        modelJson,
-        selectedSqlErdObject
-      ),
-    [modelJson, selectedSqlErdObject]
-  );
-  const selectedDetailRef = useRef<SqlErdRelationHighlightDetail | null>(
-    selectedDetail
-  );
+  const hoveredRelationIdRef = useRef<string | null>(null);
+  const modelJsonRef = useRef(modelJson);
+  const selectedRelationId =
+    selectedSqlErdObject.type === "relation"
+      ? selectedSqlErdObject.relationId
+      : null;
+  const selectedRelationIdRef = useRef<string | null>(selectedRelationId);
 
   useEffect(() => {
-    selectedDetailRef.current = selectedDetail;
+    modelJsonRef.current = modelJson;
+    selectedRelationIdRef.current = selectedRelationId;
     syncSqlErdHighlightedColumnShapes(
       editor,
-      resolveSqlErdRelationHighlightDetail(
-        selectedDetail,
-        hoveredDetailRef.current
+      resolveSqlErdRelationHighlightFromIds(
+        modelJson.schema.relations,
+        selectedRelationId,
+        hoveredRelationIdRef.current
       )
     );
-  }, [editor, selectedDetail]);
+  }, [editor, modelJson, selectedRelationId]);
 
   useEffect(() => {
     function handleRelationHover(event: Event) {
@@ -1025,26 +997,28 @@ function SqlErdRelationHighlightSync({
       }
 
       if (detail.isHovered) {
-        hoveredDetailRef.current = detail;
+        hoveredRelationIdRef.current = detail.relationId;
         syncSqlErdHighlightedColumnShapes(
           editor,
-          resolveSqlErdRelationHighlightDetail(
-            selectedDetailRef.current,
-            detail
+          resolveSqlErdRelationHighlightFromIds(
+            modelJsonRef.current.schema.relations,
+            selectedRelationIdRef.current,
+            detail.relationId
           )
         );
         return;
       }
 
-      if (hoveredDetailRef.current?.relationId !== detail.relationId) {
+      if (hoveredRelationIdRef.current !== detail.relationId) {
         return;
       }
 
-      hoveredDetailRef.current = null;
+      hoveredRelationIdRef.current = null;
       syncSqlErdHighlightedColumnShapes(
         editor,
-        resolveSqlErdRelationHighlightDetail(
-          selectedDetailRef.current,
+        resolveSqlErdRelationHighlightFromIds(
+          modelJsonRef.current.schema.relations,
+          selectedRelationIdRef.current,
           null
         )
       );
@@ -1060,7 +1034,7 @@ function SqlErdRelationHighlightSync({
         SQLTOERD_RELATION_HOVER_EVENT,
         handleRelationHover
       );
-      hoveredDetailRef.current = null;
+      hoveredRelationIdRef.current = null;
       syncSqlErdHighlightedColumnShapes(editor, null);
     };
   }, [editor]);

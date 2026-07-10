@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type MouseEvent } from "react";
 import {
+  type Editor,
   Polyline2d,
   ShapeUtil,
   SVGContainer,
@@ -14,6 +15,7 @@ import {
 } from "tldraw";
 
 import { isSqlErdTableShape } from "@/features/sql-erd/shapes/sql-erd-table-shape";
+import type { ErdRelation } from "@/features/sql-erd/types";
 
 export const SQLTOERD_RELATION_SHAPE_TYPE = "sqltoerd_relation";
 export const SQLTOERD_RELATION_HOVER_EVENT = "sqltoerd:relation-hover";
@@ -149,11 +151,46 @@ export function getSqlErdRelationVisualStyle({
   };
 }
 
-export function resolveSqlErdRelationHighlightDetail(
-  selectedDetail: SqlErdRelationHighlightDetail | null,
-  hoveredDetail: SqlErdRelationHighlightDetail | null
+export function getSqlErdRelationHighlightDetail(
+  relations: ErdRelation[],
+  relationId: string | null
+): SqlErdRelationHighlightDetail | null {
+  if (!relationId) {
+    return null;
+  }
+
+  const relation = relations.find((candidate) => candidate.id === relationId);
+
+  if (!relation) {
+    return null;
+  }
+
+  return {
+    relationId: relation.id,
+    fromTableId: relation.fromTableId,
+    fromColumnIds: relation.fromColumnIds,
+    toTableId: relation.toTableId,
+    toColumnIds: relation.toColumnIds
+  };
+}
+
+export function resolveSqlErdRelationHighlightFromIds(
+  relations: ErdRelation[],
+  selectedRelationId: string | null,
+  hoveredRelationId: string | null
 ) {
-  return selectedDetail ?? hoveredDetail;
+  if (selectedRelationId) {
+    return getSqlErdRelationHighlightDetail(relations, selectedRelationId);
+  }
+
+  return getSqlErdRelationHighlightDetail(relations, hoveredRelationId);
+}
+
+export function selectSqlErdRelationShape(
+  editor: Pick<Editor, "select">,
+  shape: Pick<SqlErdRelationShape, "id">
+) {
+  editor.select(shape.id);
 }
 
 export function getSqlErdHighlightedColumnIdsForTable(
@@ -591,10 +628,13 @@ function SqlErdRelationLine({ shape }: { shape: SqlErdRelationShape }) {
     emitSqlErdRelationHover(shape, false);
   }
 
+  function handleClick(event: MouseEvent<SVGPathElement>) {
+    event.stopPropagation();
+    selectSqlErdRelationShape(editor, shape);
+  }
+
   return (
     <SVGContainer
-      onPointerEnter={handlePointerEnter}
-      onPointerLeave={handlePointerLeave}
       style={{
         height: shape.props.h,
         overflow: "visible",
@@ -606,6 +646,9 @@ function SqlErdRelationLine({ shape }: { shape: SqlErdRelationShape }) {
         data-sqltoerd-relation-hit-target
         d={pathData}
         fill="none"
+        onClick={handleClick}
+        onPointerEnter={handlePointerEnter}
+        onPointerLeave={handlePointerLeave}
         pointerEvents="stroke"
         stroke="transparent"
         strokeLinecap="round"
@@ -626,7 +669,7 @@ function SqlErdRelationLine({ shape }: { shape: SqlErdRelationShape }) {
       />
       <polygon
         fill={visualStyle.stroke}
-        pointerEvents="auto"
+        pointerEvents="none"
         points={getPointListData(shape.props.arrowPoints)}
       />
     </SVGContainer>

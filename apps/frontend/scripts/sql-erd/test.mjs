@@ -1486,13 +1486,6 @@ assert.deepEqual(
     strokeWidth: 4
   }
 );
-const hoveredRelationHighlight = {
-  relationId: "relation.reviews.user_id.users.id",
-  fromTableId: "table.reviews",
-  fromColumnIds: ["user_id"],
-  toTableId: "table.users",
-  toColumnIds: ["id"]
-};
 const selectedRelationHighlight = {
   relationId: "relation.orders.user_id.users.id",
   fromTableId: "table.orders",
@@ -1501,20 +1494,6 @@ const selectedRelationHighlight = {
   toColumnIds: ["id"]
 };
 
-assert.equal(
-  relationShapeRuntime.resolveSqlErdRelationHighlightDetail(
-    selectedRelationHighlight,
-    hoveredRelationHighlight
-  ),
-  selectedRelationHighlight
-);
-assert.equal(
-  relationShapeRuntime.resolveSqlErdRelationHighlightDetail(
-    null,
-    hoveredRelationHighlight
-  ),
-  hoveredRelationHighlight
-);
 assert.deepEqual(
   relationShapeRuntime.getSqlErdHighlightedColumnIdsForTable(
     selectedRelationHighlight,
@@ -1535,6 +1514,104 @@ assert.deepEqual(
   ),
   ["manager_id", "id"]
 );
+assert.deepEqual(
+  relationShapeRuntime.getSqlErdRelationHighlightDetail(
+    [
+      {
+        id: "relation.orders.customer_id.customers.id",
+        kind: "foreign_key",
+        fromTableId: "table.orders",
+        fromColumnIds: ["customer_id"],
+        toTableId: "table.customers",
+        toColumnIds: ["id"],
+        constraintName: "orders_customer_id_fkey"
+      }
+    ],
+    "relation.orders.customer_id.customers.id"
+  ),
+  {
+    relationId: "relation.orders.customer_id.customers.id",
+    fromTableId: "table.orders",
+    fromColumnIds: ["customer_id"],
+    toTableId: "table.customers",
+    toColumnIds: ["id"]
+  }
+);
+assert.equal(
+  relationShapeRuntime.getSqlErdRelationHighlightDetail(
+    [],
+    "relation.orders.customer_id.customers.id"
+  ),
+  null
+);
+const currentInteractionRelations = [
+  {
+    id: "relation.orders.customer_id.customers.id",
+    kind: "foreign_key",
+    fromTableId: "table.orders",
+    fromColumnIds: ["customer_id_v2"],
+    toTableId: "table.customers",
+    toColumnIds: ["customer_pk_v2"],
+    constraintName: "orders_customer_id_fkey"
+  },
+  {
+    id: "relation.orders.store_id.stores.id",
+    kind: "foreign_key",
+    fromTableId: "table.orders",
+    fromColumnIds: ["store_id"],
+    toTableId: "table.stores",
+    toColumnIds: ["id"],
+    constraintName: "orders_store_id_fkey"
+  }
+];
+
+assert.deepEqual(
+  relationShapeRuntime.resolveSqlErdRelationHighlightFromIds(
+    currentInteractionRelations,
+    null,
+    "relation.orders.customer_id.customers.id"
+  ),
+  {
+    relationId: "relation.orders.customer_id.customers.id",
+    fromTableId: "table.orders",
+    fromColumnIds: ["customer_id_v2"],
+    toTableId: "table.customers",
+    toColumnIds: ["customer_pk_v2"]
+  }
+);
+assert.equal(
+  relationShapeRuntime.resolveSqlErdRelationHighlightFromIds(
+    currentInteractionRelations,
+    "relation.missing",
+    "relation.orders.customer_id.customers.id"
+  ),
+  null
+);
+assert.equal(
+  relationShapeRuntime.resolveSqlErdRelationHighlightFromIds(
+    currentInteractionRelations,
+    "relation.orders.store_id.stores.id",
+    "relation.orders.customer_id.customers.id"
+  )?.relationId,
+  "relation.orders.store_id.stores.id"
+);
+const runtimeRelationSelectionEditor = {
+  selectedShapeIds: [],
+  select(shapeId) {
+    this.selectedShapeIds = [shapeId];
+  }
+};
+
+relationShapeRuntime.selectSqlErdRelationShape(
+  runtimeRelationSelectionEditor,
+  {
+    id: "shape:relation.orders.customer_id.customers.id"
+  }
+);
+
+assert.deepEqual(runtimeRelationSelectionEditor.selectedShapeIds, [
+  "shape:relation.orders.customer_id.customers.id"
+]);
 assert.equal(
   modelRuntime.areSqltoerdLayoutsEqual(movedRuntimeLayout, {
     version: 1,
@@ -1847,8 +1924,10 @@ assert.match(canvasSurface, /createSqltoerdRelationShapes/);
 assert.match(canvasSurface, /createSqltoerdCanvasShapes/);
 assert.match(canvasSurface, /SqlErdRelationLayoutSync/);
 assert.match(canvasSurface, /SqlErdRelationHighlightSync/);
-assert.match(canvasSurface, /getSelectedSqlErdRelationHighlightDetail/);
-assert.match(canvasSurface, /resolveSqlErdRelationHighlightDetail/);
+assert.match(canvasSurface, /resolveSqlErdRelationHighlightFromIds/);
+assert.match(canvasSurface, /hoveredRelationIdRef/);
+assert.match(canvasSurface, /selectedRelationIdRef/);
+assert.doesNotMatch(canvasSurface, /hoveredDetailRef/);
 assert.match(canvasSurface, /syncSqlErdRelationShapes/);
 assert.match(canvasSurface, /editor\.store\.listen/);
 assert.match(canvasSurface, /editor\.run/);
