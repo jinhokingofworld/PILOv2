@@ -61,9 +61,15 @@ Frontend
     -> Agent run 저장
     -> SQS AI job enqueue
       -> AI Worker LLM planning/answer generation
+      -> App Server internal execution handoff
     -> App Server domain tool execution
       -> CalendarService / BoardService / MeetingService
 ```
+
+AI Worker가 `tool_candidate` planner 결과를 저장하면 인증된 내부 handoff로 App Server에 실행을
+요청한다. handoff는 at-least-once 전달될 수 있으며, App Server는 이미 생성된 tool step 또는
+confirmation을 중복 생성하지 않는다. 이 내부 endpoint는 public API가 아니며 사용자 bearer token을
+받지 않는다.
 
 ## 실행 모델
 
@@ -393,8 +399,8 @@ GET /api/v1/workspaces/{workspaceId}/agent/runs/{runId}
 
 - 현재 사용자가 생성한 run만 조회할 수 있다.
 - run은 path의 `workspaceId`에 속해야 한다.
-- pending confirmation이 만료됐다면 서버는 조회 시점에 confirmation을 `expired`로,
-  run을 `cancelled`로 정리할 수 있다.
+- 이 조회는 tool execution을 시작하거나 Agent run, step, confirmation 상태를 변경하지 않는다.
+  confirmation 만료 정리는 별도 cleanup 정책으로 처리한다.
 
 응답:
 
