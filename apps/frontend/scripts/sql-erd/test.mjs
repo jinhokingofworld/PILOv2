@@ -20,6 +20,10 @@ async function compileSqlErdRuntimeModules() {
   const inspectorOutputPath = join(outputDir, "inspector.mjs");
   const ddlParserOutputPath = join(outputDir, "ddl-parser.mjs");
   const sqlSourceMapOutputPath = join(outputDir, "sql-source-map.mjs");
+  const sqlSourceDecorationOutputPath = join(
+    outputDir,
+    "sql-source-decoration.mjs"
+  );
   const generateSessionOutputPath = join(outputDir, "generate-session.mjs");
   const layoutAutosaveOutputPath = join(outputDir, "layout-autosave.mjs");
   const apiClientOutputPath = join(outputDir, "api-client.mjs");
@@ -43,6 +47,10 @@ async function compileSqlErdRuntimeModules() {
     await compileTypeScriptModule(
       "../../src/features/sql-erd/utils/sql-source-map.ts",
       sqlSourceMapOutputPath
+    );
+    await compileTypeScriptModule(
+      "../../src/features/sql-erd/utils/sql-source-decoration.ts",
+      sqlSourceDecorationOutputPath
     );
     await compileTypeScriptModule(
       "../../src/features/sql-erd/utils/ddl-parser.ts",
@@ -158,6 +166,8 @@ async function compileSqlErdRuntimeModules() {
       modelRuntime,
       inspectorRuntime,
       ddlParserRuntime,
+      sqlSourceMapRuntime,
+      sqlSourceDecorationRuntime,
       generateSessionRuntime,
       layoutAutosaveRuntime,
       apiClientRuntime,
@@ -171,6 +181,8 @@ async function compileSqlErdRuntimeModules() {
       import(pathToFileHref(modelOutputPath)),
       import(pathToFileHref(inspectorOutputPath)),
       import(pathToFileHref(ddlParserOutputPath)),
+      import(pathToFileHref(sqlSourceMapOutputPath)),
+      import(pathToFileHref(sqlSourceDecorationOutputPath)),
       import(pathToFileHref(generateSessionOutputPath)),
       import(pathToFileHref(layoutAutosaveOutputPath)),
       import(pathToFileHref(apiClientOutputPath)),
@@ -186,6 +198,8 @@ async function compileSqlErdRuntimeModules() {
       apiClientRuntime,
       canvasSelectionRuntime,
       ddlParserRuntime,
+      sqlSourceMapRuntime,
+      sqlSourceDecorationRuntime,
       generateSessionRuntime,
       layoutAutosaveRuntime,
       inspectorRuntime,
@@ -434,6 +448,7 @@ const [
   relationShape,
   ddlParserUtils,
   sqlEditorDialectUtils,
+  sqlSourceDecorationUtils,
   apiClient,
   packageJson
 ] =
@@ -456,6 +471,7 @@ const [
     readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-relation-shape.tsx"),
     readSqlErdFile("../../src/features/sql-erd/utils/ddl-parser.ts"),
     readSqlErdFile("../../src/features/sql-erd/utils/sql-editor-dialect.ts"),
+    readSqlErdFile("../../src/features/sql-erd/utils/sql-source-decoration.ts"),
     readSqlErdFile("../../src/features/sql-erd/api/client.ts"),
     readSqlErdFile("../../package.json")
   ]);
@@ -464,6 +480,8 @@ const {
   apiClientRuntime,
   canvasSelectionRuntime,
   ddlParserRuntime,
+  sqlSourceMapRuntime,
+  sqlSourceDecorationRuntime,
   generateSessionRuntime,
   layoutAutosaveRuntime,
   inspectorRuntime,
@@ -1041,6 +1059,9 @@ assert.equal(
 assert.deepEqual(createGenerateRequest.payload.settingsJson, {
   sourcePanelOpen: true
 });
+assert.equal(createGenerateRequest.sourceMap.sourceText, generateSmokeSource);
+assert.equal(createGenerateRequest.sourceMap.dialect, "postgresql");
+assert.equal("sourceMap" in createGenerateRequest.payload, false);
 
 const updateGenerateRequest =
   generateSessionRuntime.createSqlErdGenerateWorkspaceRequest({
@@ -1409,6 +1430,78 @@ assert.equal(
     postgresInlineRelationRange.constraintRange.to
   ),
   "REFERENCES users(id)"
+);
+const selectedPostgresRelationRanges =
+  sqlSourceMapRuntime.getSelectedSqlErdRelationSourceRanges({
+    selection: {
+      type: "relation",
+      relationId: "relation.orders.user_id.users.id"
+    },
+    sourceMap: postgresParseResult.sourceMap,
+    sourceText: postgresSourceText
+  });
+assert.deepEqual(
+  selectedPostgresRelationRanges.map((range) =>
+    postgresSourceText.slice(range.from, range.to)
+  ),
+  [
+    "user_id",
+    "id",
+    "CONSTRAINT fk_orders_user FOREIGN KEY (user_id) REFERENCES users(id)"
+  ]
+);
+const runtimeRelationDecorations =
+  sqlSourceDecorationRuntime.createSqlErdRelationSourceDecorations(
+    [
+      ...selectedPostgresRelationRanges,
+      selectedPostgresRelationRanges[0],
+      { from: -1, to: 3 },
+      { from: 0, to: postgresSourceText.length + 1 }
+    ],
+    postgresSourceText.length
+  );
+const runtimeRelationDecorationRanges = [];
+runtimeRelationDecorations.between(
+  0,
+  postgresSourceText.length,
+  (from, to, decoration) => {
+    runtimeRelationDecorationRanges.push({
+      className: decoration.spec.class,
+      from,
+      to
+    });
+  }
+);
+assert.deepEqual(
+  runtimeRelationDecorationRanges.map(({ from, to }) => ({ from, to })),
+  [...selectedPostgresRelationRanges].sort(
+    (left, right) => left.from - right.from || left.to - right.to
+  )
+);
+assert.equal(
+  runtimeRelationDecorationRanges.every(
+    ({ className }) => className === "cm-sqltoerd-relation-source"
+  ),
+  true
+);
+assert.deepEqual(
+  sqlSourceMapRuntime.getSelectedSqlErdRelationSourceRanges({
+    selection: { type: "none" },
+    sourceMap: postgresParseResult.sourceMap,
+    sourceText: postgresSourceText
+  }),
+  []
+);
+assert.deepEqual(
+  sqlSourceMapRuntime.getSelectedSqlErdRelationSourceRanges({
+    selection: {
+      type: "relation",
+      relationId: "relation.orders.user_id.users.id"
+    },
+    sourceMap: postgresParseResult.sourceMap,
+    sourceText: `${postgresSourceText}\n-- stale`
+  }),
+  []
 );
 
 const postgresTypeParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
@@ -1972,6 +2065,11 @@ assert.match(generateSessionUtils, /createSqltoerdLayoutForModel/);
 assert.match(generateSessionUtils, /kind: "create"/);
 assert.match(generateSessionUtils, /kind: "update"/);
 assert.match(generateSessionUtils, /baseRevision: session\.revision/);
+assert.match(generateSessionUtils, /sourceMap: parseResult\.sourceMap/);
+
+assert.match(sqlSourceDecorationUtils, /Decoration\.mark/);
+assert.match(sqlSourceDecorationUtils, /EditorView\.decorations\.of/);
+assert.match(sqlSourceDecorationUtils, /range\.to > documentLength/);
 
 assert.match(layoutAutosaveUtils, /createSqlErdLayoutAutosaveRequest/);
 assert.match(layoutAutosaveUtils, /baseRevision: session\.revision/);
@@ -2070,6 +2168,9 @@ assert.match(panel, /@codemirror\/view/);
 assert.match(panel, /SqlSourceEditor/);
 assert.match(panel, /sqlSourceEditorTheme/);
 assert.match(panel, /lastResolvedDialect/);
+assert.match(panel, /sqlSourceMap/);
+assert.match(panel, /setSqlSourceMap\(null\)/);
+assert.match(panel, /setSqlSourceMap\(generateRequest\.sourceMap\)/);
 assert.match(panel, /resolveSqlSourceEditorDialect/);
 assert.match(panel, /setLastResolvedDialect\(generateRequest\.resolvedDialect\)/);
 assert.match(panel, /languageCompartmentRef/);

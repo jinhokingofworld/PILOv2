@@ -4,6 +4,7 @@ import type {
   ErdColumn,
   ErdRelation,
   ErdTable,
+  SqlErdSelection,
   SqltoerdModelJsonV1,
   SqltoerdResolvedDialect
 } from "@/features/sql-erd/types";
@@ -80,6 +81,31 @@ export function createSqltoerdSourceMap(input: {
     ),
     sourceText: input.sourceText
   };
+}
+
+export function getSelectedSqlErdRelationSourceRanges(input: {
+  selection: SqlErdSelection;
+  sourceMap: SqltoerdSourceMap | null;
+  sourceText: string;
+}) {
+  if (
+    input.selection.type !== "relation" ||
+    !input.sourceMap ||
+    input.sourceMap.sourceText !== input.sourceText
+  ) {
+    return [];
+  }
+
+  const relationRanges =
+    input.sourceMap.relationsById[input.selection.relationId];
+
+  return relationRanges
+    ? [
+        ...relationRanges.fromColumnRanges,
+        ...relationRanges.toColumnRanges,
+        relationRanges.constraintRange
+      ]
+    : [];
 }
 
 function collectCreateTableRanges(input: {

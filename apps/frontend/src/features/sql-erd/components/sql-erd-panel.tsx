@@ -70,6 +70,7 @@ import {
   type RelationSummary,
   type SqlErdInspectorViewModel
 } from "@/features/sql-erd/utils/inspector";
+import { parseSqlDdlToErdModel } from "@/features/sql-erd/utils/ddl-parser";
 import {
   areSqltoerdLayoutsEqual,
   createSqltoerdModelIndex,
@@ -88,11 +89,24 @@ import {
   getSqlSourceEditorLanguageExtension,
   resolveSqlSourceEditorDialect
 } from "@/features/sql-erd/utils/sql-editor-dialect";
+import { createSqlErdRelationSourceDecorationExtension } from "@/features/sql-erd/utils/sql-source-decoration";
+import {
+  getSelectedSqlErdRelationSourceRanges,
+  type SqltoerdSourceMap,
+  type SqltoerdSourceRange
+} from "@/features/sql-erd/utils/sql-source-map";
 import { cn } from "@/lib/utils";
 
 const sampleSqlErdViewSession = createSampleSqlErdViewSession(
   commerceSqltoerdFixture
 );
+const sampleSqlErdParseResult = parseSqlDdlToErdModel({
+  dialect: sampleSqlErdViewSession.dialect,
+  sourceText: sampleSqlErdViewSession.sourceText
+});
+const sampleSqlErdSourceMap = sampleSqlErdParseResult.ok
+  ? sampleSqlErdParseResult.sourceMap
+  : null;
 
 const SOURCE_PANEL_MIN_WIDTH = 280;
 const SOURCE_PANEL_DEFAULT_WIDTH = 360;
@@ -144,6 +158,10 @@ const sqlSourceEditorTheme = EditorView.theme({
   },
   ".cm-selectionBackground": {
     backgroundColor: "rgba(59, 130, 246, 0.24) !important"
+  },
+  ".cm-sqltoerd-relation-source": {
+    backgroundColor: "rgba(147, 197, 253, 0.28)",
+    borderBottom: "2px solid #60a5fa"
   },
   ".cm-focused": {
     outline: "none"
@@ -204,9 +222,20 @@ export function SqlErdPanel() {
     useState<LayoutAutosaveBlockReason | null>(null);
   const [lastResolvedDialect, setLastResolvedDialect] =
     useState<SqltoerdResolvedDialect | null>(null);
+  const [sqlSourceMap, setSqlSourceMap] =
+    useState<SqltoerdSourceMap | null>(sampleSqlErdSourceMap);
   const sourceEditorDialect = resolveSqlSourceEditorDialect(
     sqlErdViewSession.dialect,
     lastResolvedDialect
+  );
+  const selectedRelationSourceRanges = useMemo(
+    () =>
+      getSelectedSqlErdRelationSourceRanges({
+        selection: selectedSqlErdObject,
+        sourceMap: sqlSourceMap,
+        sourceText: sqlErdViewSession.sourceText
+      }),
+    [selectedSqlErdObject, sqlErdViewSession.sourceText, sqlSourceMap]
   );
   const modelIndex = useMemo(
     () => createSqltoerdModelIndex(sqlErdViewSession.modelJson),
@@ -221,12 +250,14 @@ export function SqlErdPanel() {
     [modelIndex, selectedSqlErdObject]
   );
   const handleSourceTextChange = useCallback((sourceText: string) => {
+    setSqlSourceMap(null);
     setSqlErdViewSession((currentSession) => ({
       ...currentSession,
       sourceText
     }));
   }, []);
   const handleDialectChange = useCallback((dialect: SqltoerdDialect) => {
+    setSqlSourceMap(null);
     setSqlErdViewSession((currentSession) => ({
       ...currentSession,
       dialect
@@ -321,6 +352,7 @@ export function SqlErdPanel() {
         if (action.kind === "fallback_to_sample") {
           setSqlErdViewSession(sampleSqlErdViewSession);
           setLastResolvedDialect(null);
+          setSqlSourceMap(sampleSqlErdSourceMap);
           setPendingLayoutAutosaveJson(null);
           setLayoutAutosaveRetryAttempt(0);
           setLayoutAutosaveBlockReason(null);
@@ -357,9 +389,23 @@ export function SqlErdPanel() {
         }
 
         if (activeSession) {
-          setSqlErdViewSession(createWorkspaceSqlErdViewSession(activeSession));
+          const activeViewSession =
+            createWorkspaceSqlErdViewSession(activeSession);
+          const activeParseResult = parseSqlDdlToErdModel({
+            dialect: activeViewSession.dialect,
+            sourceText: activeViewSession.sourceText
+          });
+
+          setSqlErdViewSession(activeViewSession);
           setLastResolvedDialect(
-            activeSession.dialect === "auto" ? null : activeSession.dialect
+            activeParseResult.ok
+              ? activeParseResult.resolvedDialect
+              : activeSession.dialect === "auto"
+                ? null
+                : activeSession.dialect
+          );
+          setSqlSourceMap(
+            activeParseResult.ok ? activeParseResult.sourceMap : null
           );
           setSessionLoadState({
             label: "Workspace",
@@ -369,6 +415,7 @@ export function SqlErdPanel() {
         } else {
           setSqlErdViewSession(sampleSqlErdViewSession);
           setLastResolvedDialect(null);
+          setSqlSourceMap(sampleSqlErdSourceMap);
           setSessionLoadState({
             label: "Sample",
             message: "No saved workspace session",
@@ -410,6 +457,7 @@ export function SqlErdPanel() {
       createSqlErdGenerateWorkspaceRequest(sqlErdViewSession);
 
     if (!generateRequest.ok) {
+      setSqlSourceMap(null);
       setSessionLoadState({
         label: "Parse error",
         message: getSqlErdGenerateErrorMessage(generateRequest.error.code),
@@ -445,6 +493,7 @@ export function SqlErdPanel() {
             );
 
       setSqlErdViewSession(createWorkspaceSqlErdViewSession(savedSession));
+      setSqlSourceMap(generateRequest.sourceMap);
       setPendingLayoutAutosaveJson(null);
       setLayoutAutosaveRetryAttempt(0);
       setLayoutAutosaveBlockReason(null);
@@ -722,6 +771,7 @@ export function SqlErdPanel() {
         }
         sourceText={sqlErdViewSession.sourceText}
         resolvedDialect={sourceEditorDialect}
+        relationSourceRanges={selectedRelationSourceRanges}
         width={clampedSourcePanelWidth}
       />
       {isSourceOpen ? (
@@ -786,6 +836,7 @@ type SourcePanelProps = PanelToggleProps & {
   sessionLoadState: SqlErdSessionLoadState;
   sourceText: string;
   resolvedDialect: SqltoerdResolvedDialect;
+  relationSourceRanges: SqltoerdSourceRange[];
   width: number;
 };
 
@@ -804,6 +855,7 @@ function SourcePanel({
   sessionLoadState,
   sourceText,
   resolvedDialect,
+  relationSourceRanges,
   width
 }: SourcePanelProps) {
   if (!isOpen) {
@@ -882,6 +934,7 @@ function SourcePanel({
           dialect={resolvedDialect}
           onChange={onSourceTextChange}
           readOnly={isSourceTextReadOnly}
+          relationSourceRanges={relationSourceRanges}
           value={sourceText}
         />
       </div>
@@ -893,6 +946,7 @@ type SqlSourceEditorProps = {
   dialect: SqltoerdResolvedDialect;
   onChange: (sourceText: string) => void;
   readOnly: boolean;
+  relationSourceRanges: SqltoerdSourceRange[];
   value: string;
 };
 
@@ -900,12 +954,14 @@ function SqlSourceEditor({
   dialect,
   onChange,
   readOnly,
+  relationSourceRanges,
   value
 }: SqlSourceEditorProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
   const languageCompartmentRef = useRef(new Compartment());
   const readOnlyCompartmentRef = useRef(new Compartment());
+  const relationSourceCompartmentRef = useRef(new Compartment());
   const isApplyingExternalValueRef = useRef(false);
   const onChangeRef = useRef(onChange);
 
@@ -922,6 +978,7 @@ function SqlSourceEditor({
 
     const languageCompartment = languageCompartmentRef.current;
     const readOnlyCompartment = readOnlyCompartmentRef.current;
+    const relationSourceCompartment = relationSourceCompartmentRef.current;
     const view = new EditorView({
       parent: container,
       state: EditorState.create({
@@ -937,6 +994,12 @@ function SqlSourceEditor({
           syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
           languageCompartment.of(
             getSqlSourceEditorLanguageExtension(dialect)
+          ),
+          relationSourceCompartment.of(
+            createSqlErdRelationSourceDecorationExtension(
+              relationSourceRanges,
+              value.length
+            )
           ),
           keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
           sqlSourceEditorTheme,
@@ -980,6 +1043,23 @@ function SqlSourceEditor({
     });
     isApplyingExternalValueRef.current = false;
   }, [value]);
+
+  useEffect(() => {
+    const view = viewRef.current;
+
+    if (!view) {
+      return;
+    }
+
+    view.dispatch({
+      effects: relationSourceCompartmentRef.current.reconfigure(
+        createSqlErdRelationSourceDecorationExtension(
+          relationSourceRanges,
+          view.state.doc.length
+        )
+      )
+    });
+  }, [relationSourceRanges]);
 
   useEffect(() => {
     viewRef.current?.dispatch({
