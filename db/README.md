@@ -38,3 +38,4 @@ The database schema source of truth is the migration history in `db/migrations/`
 - `migrations/019_normalize_canvas_page_parent_shapes.sql` restores accidentally persisted tldraw page parents to top-level Canvas shapes.
 - `migrations/020_backfill_project_item_field_value_uniqueness.sql` removes duplicate ProjectV2 item field-value cache rows and ensures `(project_item_id, field_name)` uniqueness for Board write upserts.
 - `migrations/021_add_user_workspace_presence.sql` adds current active Workspace presence fields to `users`.
+- `migrations/022_create_board_issue_create_operations.sql` adds durable Board Issue creation idempotency, step checkpoints, retry leases, and remote-resource lookup indexes.
