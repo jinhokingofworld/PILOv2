@@ -177,23 +177,6 @@ function updateReviewedCount(
   return currentCount + (isReviewed ? 1 : -1);
 }
 
-function findReviewFileStatus(
-  canvas: PrReviewCanvas | null,
-  reviewFileId: string
-): PrReviewFileReviewStatus | null {
-  for (const flow of canvas?.flows ?? []) {
-    const file = flow.files.find(
-      (flowFile) => flowFile.reviewFileId === reviewFileId
-    );
-
-    if (file) {
-      return file.currentStatus;
-    }
-  }
-
-  return null;
-}
-
 function getPullRequestMergedAt(
   pullRequest: PrReviewPullRequest | PrReviewPullRequestDetail | null
 ): string | null {
@@ -213,9 +196,7 @@ function getMergeDisabledReason(input: {
   isPullRequestMerged: boolean;
   loadStatus: CanvasLoadStatus;
   pullRequestState: "open" | "closed";
-  reviewedCount: number;
   reviewSubmitted: boolean;
-  totalFileCount: number;
 }): string | null {
   if (input.loadStatus !== "ready") {
     return "Review data is still loading";
@@ -235,10 +216,6 @@ function getMergeDisabledReason(input: {
 
   if (input.conflictStatus !== "clean") {
     return "Resolve PR conflicts before merge";
-  }
-
-  if (input.totalFileCount === 0 || input.reviewedCount < input.totalFileCount) {
-    return "Review all files before merge";
   }
 
   return null;
@@ -348,15 +325,17 @@ export function PrReviewCanvasShell({
   }, [loadCanvasData]);
 
   const handleDecisionSaved = useCallback(
-    (updatedFile: PrReviewFile) => {
-      const previousReviewStatus = findReviewFileStatus(canvas, updatedFile.id);
-
+    (
+      updatedFile: PrReviewFile,
+      previousReviewStatus: PrReviewFileReviewStatus
+    ) => {
       setCanvas((currentCanvas) => {
         if (!currentCanvas) {
           return currentCanvas;
         }
 
         let previousStatus: PrReviewFileReviewStatus | null = null;
+        let matchedFile = false;
         const flows = currentCanvas.flows.map((flow) => ({
           ...flow,
           files: flow.files.map((flowFile) => {
@@ -364,6 +343,7 @@ export function PrReviewCanvasShell({
               return flowFile;
             }
 
+            matchedFile = true;
             if (previousStatus === null) {
               previousStatus = flowFile.currentStatus;
             }
@@ -383,6 +363,18 @@ export function PrReviewCanvasShell({
           })
         }));
 
+        const reviewStatusBefore = previousStatus ?? previousReviewStatus;
+        if (!matchedFile) {
+          return {
+            ...currentCanvas,
+            reviewedCount: updateReviewedCount(
+              currentCanvas.reviewedCount,
+              reviewStatusBefore,
+              updatedFile.currentStatus
+            )
+          };
+        }
+
         if (previousStatus === null) {
           return currentCanvas;
         }
@@ -391,7 +383,7 @@ export function PrReviewCanvasShell({
           ...currentCanvas,
           reviewedCount: updateReviewedCount(
             currentCanvas.reviewedCount,
-            previousStatus,
+            reviewStatusBefore,
             updatedFile.currentStatus
           ),
           flows
@@ -399,7 +391,7 @@ export function PrReviewCanvasShell({
       });
 
       setSummary((currentSummary) => {
-        if (!currentSummary || previousReviewStatus === null) {
+        if (!currentSummary) {
           return currentSummary;
         }
 
@@ -418,7 +410,7 @@ export function PrReviewCanvasShell({
 
       void loadCanvasData({ quiet: true });
     },
-    [canvas, loadCanvasData]
+    [loadCanvasData]
   );
 
   const handleConflictApplied = useCallback(() => {
@@ -472,9 +464,7 @@ export function PrReviewCanvasShell({
     isPullRequestMerged,
     loadStatus,
     pullRequestState,
-    reviewedCount,
-    reviewSubmitted,
-    totalFileCount
+    reviewSubmitted
   });
   const progressLabel = `${formatNumber(reviewedCount)} / ${formatNumber(
     totalFileCount

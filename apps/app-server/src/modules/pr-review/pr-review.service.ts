@@ -1359,9 +1359,7 @@ export class PrReviewService {
       throw notFound("Review session not found");
     }
 
-    const files = await this.listReviewFilesForSession(workspaceId, session.id);
-    const counts = this.countReviewStatuses(files);
-    this.assertReviewSessionMergeable(session, counts);
+    this.assertReviewSessionMergeable(session);
 
     if (session.head_sha !== input.expectedHeadSha) {
       throw conflictError("Review session head SHA is stale");
@@ -2331,14 +2329,12 @@ export class PrReviewService {
             comment = $4,
             reviewed_by_user_id = $5,
             reviewed_at = now()
+        FROM pr_review_sessions AS review_session
+        JOIN github_pull_requests AS pull_request
+          ON pull_request.id = review_session.pull_request_id
         WHERE review_file.id = $2
-          AND review_file.session_id IN (
-            SELECT review_session.id
-            FROM pr_review_sessions AS review_session
-            JOIN github_pull_requests AS pull_request
-              ON pull_request.id = review_session.pull_request_id
-            WHERE pull_request.workspace_id = $1
-          )
+          AND review_file.session_id = review_session.id
+          AND pull_request.workspace_id = $1
         RETURNING review_file.id, review_file.session_id
       `,
       [
@@ -2950,20 +2946,13 @@ export class PrReviewService {
     }
   }
 
-  private assertReviewSessionMergeable(
-    session: PrReviewSessionRow,
-    counts: PrReviewStatusCountsPayload
-  ): void {
+  private assertReviewSessionMergeable(session: PrReviewSessionRow): void {
     if (session.status !== "submitted") {
       throw badRequest("GitHub Review must be submitted before merge");
     }
 
     if (session.conflict_status !== "clean") {
       throw badRequest("Resolve PR conflicts before merge");
-    }
-
-    if (counts.total === 0 || counts.notReviewed > 0) {
-      throw badRequest("Review all files before merge");
     }
   }
 

@@ -184,7 +184,7 @@ assert.match(prReviewService, /large diff conflict is not supported/);
 assert.match(prReviewService, /GitHub OAuth connection is required/);
 assert.match(prReviewService, /current_status = \$3/);
 assert.match(prReviewService, /reviewed_by_user_id = \$5/);
-assert.match(prReviewService, /review_file\.session_id IN/);
+assert.match(prReviewService, /review_file\.session_id = review_session\.id/);
 assert.match(prReviewService, /risk_level/);
 assert.match(prReviewService, /status must be approved, discussion_needed, or unknown/);
 assert.match(prReviewService, /readyToSubmit/);

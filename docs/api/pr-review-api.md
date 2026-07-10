@@ -833,7 +833,8 @@ POST /api/v1/workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}/m
 - 요청 body는 `confirm: true`와 `expectedHeadSha`를 포함해야 한다.
 - review session status가 `submitted`여야 한다. GitHub Review 제출 전 merge는 허용하지 않는다.
 - `conflictStatus`가 `clean`이어야 한다.
-- 모든 review file이 `not_reviewed`가 아니어야 한다.
+- review file 판단 완료 여부는 merge hard guard가 아니다. `not_reviewed` 파일이
+  남아 있어도 사용자가 확인하면 merge를 시도할 수 있다.
 - review session `headSha`와 요청 `expectedHeadSha`가 다르면 stale session으로 보고 `409 Conflict`를 반환한다.
 - GitHub App user OAuth 연결이 필요하며, 실제 merge는 현재 사용자의 OAuth token으로 수행한다.
 - GitHub 원격 PR state가 `open`이 아니거나 head SHA가 stale이면 merge를 막는다.

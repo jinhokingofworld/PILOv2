@@ -47,6 +47,7 @@ import type {
   PrReviewFileDiff,
   PrReviewFileFlowMembership,
   PrReviewFileRiskLevel,
+  PrReviewFileReviewStatus,
   PrReviewUnsupportedConflictFile
 } from "@/features/pr-review/types";
 
@@ -71,7 +72,10 @@ type PrReviewFileDiffDrawerProps = {
   isReviewSessionConflicted: boolean;
   onClose: () => void;
   onConflictApplied: (result: PrReviewConflictApplyResult) => void | Promise<void>;
-  onDecisionSaved: (file: PrReviewFile) => void;
+  onDecisionSaved: (
+    file: PrReviewFile,
+    previousStatus: PrReviewFileReviewStatus
+  ) => void;
   reviewFileId: string;
   unsupportedConflictFile: PrReviewUnsupportedConflictFile | null;
   workspaceId: string;
@@ -306,6 +310,7 @@ export function PrReviewFileDiffDrawer({
           setSaveStatus("saving");
           setSaveErrorMessage(null);
 
+          const previousStatus = file?.currentStatus ?? "not_reviewed";
           const storedComment = getStoredComment(nextComment);
           const updatedFile = await apiClient.updateReviewFileDecision(
             workspaceId,
@@ -331,7 +336,7 @@ export function PrReviewFileDiffDrawer({
             currentComment === nextComment ? savedFile.comment ?? "" : currentComment
           );
           setSaveStatus("saved");
-          onDecisionSaved(savedFile);
+          onDecisionSaved(savedFile, previousStatus);
         })
         .catch((error) => {
           setSaveStatus("error");
@@ -342,7 +347,7 @@ export function PrReviewFileDiffDrawer({
 
       return saveTask;
     },
-    [apiClient, onDecisionSaved, reviewFileId, workspaceId]
+    [apiClient, file?.currentStatus, onDecisionSaved, reviewFileId, workspaceId]
   );
 
   useEffect(() => {
