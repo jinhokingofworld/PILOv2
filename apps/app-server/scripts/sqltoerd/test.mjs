@@ -9,6 +9,9 @@ function readSource(path) {
   return readFile(new URL(path, import.meta.url), "utf8");
 }
 
+const SQL_ERD_SESSION_DATA_MUTATION_PATTERN =
+  /\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM|TRUNCATE)\s+(?:public\.)?sql_erd_sessions\b/i;
+
 const appModule = await readSource("../../src/app.module.ts");
 const sqlErdModule = await readSource(
   "../../src/modules/sql-erd/sql-erd.module.ts"
@@ -28,6 +31,10 @@ const sqlErdValidation = await readSource(
 const sqlErdMapper = await readSource(
   "../../src/modules/sql-erd/sql-erd.mapper.ts"
 );
+const sqlErdMultiSessionMigration = await readSource(
+  "../../../../db/migrations/023_enable_sql_erd_multi_sessions.sql"
+);
+const dbReadme = await readSource("../../../../db/README.md");
 const { Module } = require("@nestjs/common");
 const { NestFactory } = require("@nestjs/core");
 const { FastifyAdapter } = require("@nestjs/platform-fastify");
@@ -80,6 +87,35 @@ assert.match(sqlErdService, /CHECK_VIOLATION_CODE/);
 assert.match(sqlErdService, /sql_erd_sessions_model_json_size_check/);
 assert.match(sqlErdService, /sql_erd_sessions_layout_json_size_check/);
 assert.match(sqlErdService, /sql_erd_sessions_settings_json_size_check/);
+assert.match(
+  sqlErdMultiSessionMigration,
+  /DROP INDEX IF EXISTS public\.ux_sql_erd_sessions_workspace_active/
+);
+assert.match(
+  sqlErdMultiSessionMigration,
+  /DROP INDEX IF EXISTS public\.idx_sql_erd_sessions_workspace_updated_at/
+);
+assert.match(
+  sqlErdMultiSessionMigration,
+  /CREATE INDEX idx_sql_erd_sessions_workspace_updated_at_id/
+);
+assert.match(
+  sqlErdMultiSessionMigration,
+  /ON public\.sql_erd_sessions\s*\(workspace_id, updated_at DESC, id DESC\)\s*WHERE deleted_at IS NULL/s
+);
+[
+  "INSERT INTO public.sql_erd_sessions (id) VALUES ('session-id')",
+  "UPDATE sql_erd_sessions SET title = 'Updated'",
+  "DELETE FROM public.sql_erd_sessions",
+  "TRUNCATE public.sql_erd_sessions"
+].forEach((statement) => {
+  assert.match(statement, SQL_ERD_SESSION_DATA_MUTATION_PATTERN);
+});
+assert.doesNotMatch(
+  sqlErdMultiSessionMigration,
+  SQL_ERD_SESSION_DATA_MUTATION_PATTERN
+);
+assert.match(dbReadme, /023_enable_sql_erd_multi_sessions\.sql/);
 assert.match(sqlErdValidation, /validateSqlErdSessionId/);
 assert.match(sqlErdValidation, /validateCreateSqlErdSessionRequest/);
 assert.match(sqlErdValidation, /validateUpdateSqlErdSessionRequest/);
