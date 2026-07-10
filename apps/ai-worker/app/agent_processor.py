@@ -152,7 +152,15 @@ class AgentPlannerClient(Protocol):
     def plan(self, request: AgentPlanningRequest) -> AgentPlannerDecision: ...
 
 
+class AgentExecutionHandoffClient(Protocol):
+    def execute(self, run_id: str) -> None: ...
+
+
 class AgentPlannerOutputError(Exception):
+    pass
+
+
+class AgentExecutionHandoffError(InfrastructureError):
     pass
 
 
@@ -174,10 +182,12 @@ class AgentRunProcessor:
         self,
         repository: AgentRunRepository,
         planner_client: AgentPlannerClient,
+        execution_handoff_client: AgentExecutionHandoffClient,
         current_date_provider: Callable[[str], date] | None = None,
     ) -> None:
         self.repository = repository
         self.planner_client = planner_client
+        self.execution_handoff_client = execution_handoff_client
         self.current_date_provider = current_date_provider or _current_date_for_timezone
 
     def process_payload(self, payload: dict[str, object]) -> AgentProcessResult:
@@ -188,6 +198,12 @@ class AgentRunProcessor:
 
         try:
             return self.process_job(job)
+        except AgentExecutionHandoffError:
+            return AgentProcessResult(
+                delete_message=False,
+                reason="agent_execution_handoff_unavailable",
+                run_id=job.run_id,
+            )
         except InfrastructureError:
             return AgentProcessResult(
                 delete_message=False,
@@ -219,6 +235,9 @@ class AgentRunProcessor:
                     delete_message=True,
                     reason="agent_run_waiting_confirmation",
                 )
+
+            if status == "running":
+                return self._handoff_execution(job, retried=True)
 
             if status != "planning":
                 return self._result(
@@ -257,11 +276,7 @@ class AgentRunProcessor:
                     normalized.message,
                     normalized.risk_level,
                 )
-                return self._result(
-                    job,
-                    delete_message=True,
-                    reason="agent_tool_candidate_planned",
-                )
+                return self._handoff_execution(job, retried=False)
 
             self.repository.complete_run(
                 job.run_id,
@@ -283,6 +298,26 @@ class AgentRunProcessor:
                 delete_message=True,
                 reason="agent_planning_failed",
             )
+
+    def _handoff_execution(
+        self,
+        job: AgentRunJob,
+        *,
+        retried: bool,
+    ) -> AgentProcessResult:
+        try:
+            self.execution_handoff_client.execute(job.run_id)
+        except InfrastructureError as error:
+            raise AgentExecutionHandoffError() from error
+        return self._result(
+            job,
+            delete_message=True,
+            reason=(
+                "agent_execution_handoff_retried"
+                if retried
+                else "agent_execution_handoff_completed"
+            ),
+        )
 
     def _fail_planning(
         self,

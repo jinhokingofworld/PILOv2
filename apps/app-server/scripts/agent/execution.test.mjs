@@ -5,6 +5,9 @@ const require = createRequire(import.meta.url);
 const { AgentExecutionService } = require(
   "../../dist/modules/agent/agent-execution.service.js"
 );
+const { AgentExecutionHandoffGuard } = require(
+  "../../dist/modules/agent/agent-execution-handoff.guard.js"
+);
 const { AgentToolRegistryService } = require(
   "../../dist/modules/agent/agent-tool-registry.service.js"
 );
@@ -87,6 +90,12 @@ class FakeDatabaseService {
       return {
         started: this.state.executionStarted ?? false
       };
+    }
+
+    if (text.includes("SELECT id, workspace_id, requested_by_user_id, status")) {
+      const [runId] = values;
+      const run = this.state.run;
+      return run && run.id === runId ? run : null;
     }
 
     if (text.includes("FROM agent_runs")) {
@@ -517,22 +526,82 @@ function createService({
   };
 }
 
+function createHandoffGuardContext(token) {
+  return {
+    switchToHttp() {
+      return {
+        getRequest() {
+          return {
+            headers: {
+              "x-agent-execution-handoff-token": token
+            }
+          };
+        }
+      };
+    }
+  };
+}
+
+{
+  const previousToken = process.env.AGENT_EXECUTION_HANDOFF_TOKEN;
+  process.env.AGENT_EXECUTION_HANDOFF_TOKEN = "handoff-test-token";
+  const guard = new AgentExecutionHandoffGuard();
+
+  assert.equal(
+    await guard.canActivate(createHandoffGuardContext("handoff-test-token")),
+    true
+  );
+  await assert.rejects(
+    () => guard.canActivate(createHandoffGuardContext("incorrect-token")),
+    (error) => error.getStatus() === 401
+  );
+
+  if (previousToken === undefined) {
+    delete process.env.AGENT_EXECUTION_HANDOFF_TOKEN;
+  } else {
+    process.env.AGENT_EXECUTION_HANDOFF_TOKEN = previousToken;
+  }
+}
+
+{
+  const { service, loggingService, workspaceService } = createService();
+  const result = await service.executeReadyRun(RUN_ID);
+
+  assert.equal(result.status, "completed");
+  assert.deepEqual(workspaceService.calls, [
+    { currentUserId: USER_ID, workspaceId: WORKSPACE_ID }
+  ]);
+  assert.deepEqual(
+    loggingService.calls.map((call) => call.method),
+    ["startNextToolStepIfAbsent", "completeStep", "completeRun"]
+  );
+}
+
+{
+  const { service, loggingService } = createService({
+    runStatus: "completed"
+  });
+  const result = await service.executeReadyRun(RUN_ID);
+
+  assert.deepEqual(result, {
+    status: "skipped",
+    reason: "not_ready"
+  });
+  assert.deepEqual(loggingService.calls, []);
+}
+
 {
   const { service, workspaceService, database, loggingService, toolRegistryService } =
     createService();
 
-  const result = await service.executeLatestPlannedTool(
-    USER_ID,
-    WORKSPACE_ID,
-    RUN_ID
-  );
+  const result = await service.executeReadyRun(RUN_ID);
 
   assert.equal(result.status, "completed");
   assert.equal(result.run.status, "completed");
   assert.deepEqual(workspaceService.calls, [
     { currentUserId: USER_ID, workspaceId: WORKSPACE_ID }
   ]);
-  assert.equal(database.calls.length, 3);
+  assert.equal(database.calls.length, 4);
   assert.deepEqual(
     toolRegistryService.calls.map((call) => call.method),
     ["getDefinition", "validateInput", "execute"]
@@ -566,11 +635,7 @@ function createService({
     executionStarted: true
   });
 
-  const result = await service.executeLatestPlannedTool(
-    USER_ID,
-    WORKSPACE_ID,
-    RUN_ID
-  );
+  const result = await service.executeReadyRun(RUN_ID);
 
   assert.equal(result.status, "skipped");
   assert.equal(result.reason, "already_started");

@@ -261,20 +261,6 @@ class FakeAgentToolRegistryService {
   }
 }
 
-class FakeAgentExecutionService {
-  constructor() {
-    this.calls = [];
-  }
-
-  async executeLatestPlannedTool(currentUserId, workspaceId, runId) {
-    this.calls.push({ currentUserId, workspaceId, runId });
-    return {
-      status: "skipped",
-      reason: "not_ready"
-    };
-  }
-}
-
 class FakeAgentRunService {
   constructor(results) {
     this.results = [...results];
@@ -352,7 +338,6 @@ function createService({
     confirmationRows: []
   },
   agentJobService = new FakeAgentJobService(),
-  agentExecutionService = new FakeAgentExecutionService(),
   loggingError = null
 } = {}) {
   const workspaceService = new FakeWorkspaceService();
@@ -369,15 +354,13 @@ function createService({
       workspaceService,
       agentLoggingService,
       agentJobService,
-      agentToolRegistryService,
-      agentExecutionService
+      agentToolRegistryService
     ),
     workspaceService,
     database,
     agentLoggingService,
     agentJobService,
-    agentToolRegistryService,
-    agentExecutionService
+    agentToolRegistryService
   };
 }
 
@@ -670,13 +653,12 @@ function errorMessage(error) {
     stepRows: [createStepRow()],
     confirmationRows: [createConfirmationRow()]
   };
-  const { service, agentExecutionService } = createService({ state });
+  const { service } = createService({ state });
   const result = await service.getRun(USER_ID, WORKSPACE_ID, RUN_ID);
+  const repeatedResult = await service.getRun(USER_ID, WORKSPACE_ID, RUN_ID);
 
-  assert.deepEqual(agentExecutionService.calls, [
-    { currentUserId: USER_ID, workspaceId: WORKSPACE_ID, runId: RUN_ID }
-  ]);
   assert.equal(result.run.id, RUN_ID);
+  assert.equal(repeatedResult.run.id, RUN_ID);
   assert.equal(result.run.steps[0].inputSummary.promptLength, 12);
   assert.equal("authorizationToken" in result.run.steps[0].inputSummary, false);
   assert.equal("transcriptText" in result.run.steps[0].outputSummary, false);

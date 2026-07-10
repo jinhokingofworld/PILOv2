@@ -46,6 +46,11 @@ interface AgentRunRow extends QueryResultRow {
   status: string;
 }
 
+interface AgentExecutionRunRow extends AgentRunRow {
+  workspace_id: string;
+  requested_by_user_id: string;
+}
+
 interface AgentPlannerStepRow extends QueryResultRow {
   id: string;
   output_json: AgentJsonObject;
@@ -83,6 +88,27 @@ export class AgentExecutionService {
     private readonly agentConfirmationService: AgentConfirmationService,
     private readonly agentToolRegistryService: AgentToolRegistryService
   ) {}
+
+  async executeReadyRun(runId: string): Promise<AgentExecutionResult> {
+    const run = await this.database.queryOne<AgentExecutionRunRow>(
+      `
+        SELECT id, workspace_id, requested_by_user_id, status
+        FROM agent_runs
+        WHERE id = $1
+      `,
+      [runId]
+    );
+
+    if (!run) {
+      throw notFound("Agent run not found");
+    }
+
+    return this.executeLatestPlannedTool(
+      run.requested_by_user_id,
+      run.workspace_id,
+      run.id
+    );
+  }
 
   async executeLatestPlannedTool(
     currentUserId: string,

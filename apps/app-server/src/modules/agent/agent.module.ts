@@ -7,6 +7,8 @@ import { WorkspaceModule } from "../workspace/workspace.module";
 import { AgentConfirmationService } from "./agent-confirmation.service";
 import { AgentController } from "./agent.controller";
 import { AgentExecutionService } from "./agent-execution.service";
+import { AgentExecutionHandoffGuard } from "./agent-execution-handoff.guard";
+import { AgentInternalController } from "./agent-internal.controller";
 import { AgentJobService } from "./agent-job.service";
 import { AgentLoggingService } from "./agent-logging.service";
 import { AgentPlannerService } from "./agent-planner.service";
@@ -23,11 +25,12 @@ import { MeetingAgentToolsService } from "./tools/meeting-agent-tools.service";
     CalendarModule,
     MeetingModule
   ],
-  controllers: [AgentController],
+  controllers: [AgentController, AgentInternalController],
   providers: [
     AgentService,
     AgentConfirmationService,
     AgentExecutionService,
+    AgentExecutionHandoffGuard,
     AgentJobService,
     AgentLoggingService,
     AgentPlannerService,

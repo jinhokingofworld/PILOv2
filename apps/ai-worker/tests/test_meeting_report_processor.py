@@ -27,6 +27,12 @@ RECORDING_ID = "55555555-5555-5555-5555-555555555555"
 AUDIO_FILE_KEY = "recordings/meetings/workspaces/ws/meetings/mt/recordings/rec.m4a"
 
 
+@pytest.fixture(autouse=True)
+def agent_execution_handoff_env(monkeypatch) -> None:
+    monkeypatch.setenv("AGENT_EXECUTION_HANDOFF_BASE_URL", "http://localhost:4000")
+    monkeypatch.setenv("AGENT_EXECUTION_HANDOFF_TOKEN", "test-handoff-token")
+
+
 def meeting_report_job_payload(**overrides: object) -> str:
     payload = {
         "jobType": "meeting_report",

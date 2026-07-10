@@ -8,8 +8,11 @@ import tempfile
 import time
 from dataclasses import dataclass
 from typing import Any
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 from app.agent_processor import (
+    AgentExecutionHandoffClient,
     AgentRunContext,
     AgentRunJob,
     AgentRunProcessor,
@@ -36,6 +39,7 @@ DEFAULT_STT_MODEL = "gpt-4o-mini-transcribe"
 DEFAULT_MEETING_REPORT_MODEL = "gpt-5.4-mini"
 DEFAULT_WAIT_TIME_SECONDS = 20
 DEFAULT_VISIBILITY_TIMEOUT_SECONDS = 900
+DEFAULT_AGENT_EXECUTION_HANDOFF_TIMEOUT_SECONDS = 10
 LOCAL_APP_ENVS = {"local", "test", "development"}
 
 
@@ -51,6 +55,9 @@ class RuntimeSettings:
     openai_stt_model: str
     openai_meeting_report_model: str
     openai_agent_planner_model: str
+    agent_execution_handoff_base_url: str
+    agent_execution_handoff_token: str
+    agent_execution_handoff_timeout_seconds: int
     concurrency: int
     wait_time_seconds: int
     visibility_timeout_seconds: int
@@ -73,6 +80,12 @@ class RuntimeSettings:
             openai_agent_planner_model=_env(
                 "OPENAI_AGENT_PLANNER_MODEL",
                 _env("OPENAI_MEETING_REPORT_MODEL", DEFAULT_MEETING_REPORT_MODEL),
+            ),
+            agent_execution_handoff_base_url=_require_env("AGENT_EXECUTION_HANDOFF_BASE_URL"),
+            agent_execution_handoff_token=_require_env("AGENT_EXECUTION_HANDOFF_TOKEN"),
+            agent_execution_handoff_timeout_seconds=_positive_int_env(
+                "AGENT_EXECUTION_HANDOFF_TIMEOUT_SECONDS",
+                DEFAULT_AGENT_EXECUTION_HANDOFF_TIMEOUT_SECONDS,
             ),
             concurrency=_positive_int_env("AI_WORKER_CONCURRENCY", 1),
             wait_time_seconds=_positive_int_env(
@@ -552,6 +565,32 @@ class SqsAiJobWorker:
         return len(messages)
 
 
+class HttpAgentExecutionHandoffClient(AgentExecutionHandoffClient):
+    def __init__(self, base_url: str, token: str, timeout_seconds: int) -> None:
+        self.base_url = base_url.rstrip("/")
+        self.token = token
+        self.timeout_seconds = timeout_seconds
+
+    def execute(self, run_id: str) -> None:
+        request = Request(
+            f"{self.base_url}/api/v1/internal/agent/runs/{run_id}/execution",
+            data=b"",
+            headers={
+                "X-Agent-Execution-Handoff-Token": self.token,
+            },
+            method="POST",
+        )
+        try:
+            with urlopen(request, timeout=self.timeout_seconds):
+                return
+        except HTTPError as error:
+            raise InfrastructureError(
+                f"Agent execution handoff returned HTTP {error.code}"
+            ) from error
+        except (OSError, TimeoutError, URLError) as error:
+            raise InfrastructureError("Agent execution handoff is unavailable") from error
+
+
 def create_worker(settings: RuntimeSettings | None = None) -> SqsAiJobWorker:
     import boto3
 
@@ -585,7 +624,16 @@ def create_worker(settings: RuntimeSettings | None = None) -> SqsAiJobWorker:
         storage,
         ai_client,
     )
-    agent_run_processor = AgentRunProcessor(agent_run_repository, agent_planner_client)
+    agent_execution_handoff_client = HttpAgentExecutionHandoffClient(
+        resolved_settings.agent_execution_handoff_base_url,
+        resolved_settings.agent_execution_handoff_token,
+        resolved_settings.agent_execution_handoff_timeout_seconds,
+    )
+    agent_run_processor = AgentRunProcessor(
+        agent_run_repository,
+        agent_planner_client,
+        agent_execution_handoff_client,
+    )
     dispatcher = JobDispatcher(meeting_report_processor, agent_run_processor)
     return SqsAiJobWorker(resolved_settings, dispatcher, sqs_client)
 

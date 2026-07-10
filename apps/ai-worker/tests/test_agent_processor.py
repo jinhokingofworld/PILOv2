@@ -178,13 +178,26 @@ class FakePlannerClient:
         return self.decision
 
 
+class FakeExecutionHandoffClient:
+    def __init__(self, error: Exception | None = None) -> None:
+        self.error = error
+        self.calls: list[str] = []
+
+    def execute(self, run_id: str) -> None:
+        self.calls.append(run_id)
+        if self.error:
+            raise self.error
+
+
 def create_processor(
     repository: FakeAgentRunRepository,
     planner_client: FakePlannerClient | None = None,
+    execution_handoff_client: FakeExecutionHandoffClient | None = None,
 ) -> AgentRunProcessor:
     return AgentRunProcessor(
         repository,
         planner_client or FakePlannerClient(),
+        execution_handoff_client or FakeExecutionHandoffClient(),
         current_date_provider=lambda _timezone: date(2026, 7, 9),
     )
 
@@ -218,12 +231,13 @@ def test_parse_agent_run_job_payload_validates_required_ids() -> None:
 def test_processor_completes_planning_run_with_tool_candidate() -> None:
     repository = FakeAgentRunRepository()
     planner_client = FakePlannerClient()
-    processor = create_processor(repository, planner_client)
+    handoff_client = FakeExecutionHandoffClient()
+    processor = create_processor(repository, planner_client, handoff_client)
 
     result = processor.process_payload(agent_payload())
 
     assert result.delete_message is True
-    assert result.reason == "agent_tool_candidate_planned"
+    assert result.reason == "agent_execution_handoff_completed"
     assert result.run_id == RUN_ID
     assert repository.lock_calls == [RUN_ID]
     assert repository.release_calls == [RUN_ID]
@@ -246,6 +260,7 @@ def test_processor_completes_planning_run_with_tool_candidate() -> None:
         )
     ]
     assert repository.failed_updates == []
+    assert handoff_client.calls == [RUN_ID]
     assert planner_client.requests[0].current_date == "2026-07-09"
     assert planner_client.requests[0].timezone == "Asia/Seoul"
 
@@ -257,6 +272,7 @@ def test_processor_uses_run_timezone_for_current_date() -> None:
     processor = AgentRunProcessor(
         repository,
         planner_client,
+        FakeExecutionHandoffClient(),
         current_date_provider=lambda timezone: (
             seen_timezones.append(timezone) or date(2026, 7, 8)
         ),
@@ -265,7 +281,7 @@ def test_processor_uses_run_timezone_for_current_date() -> None:
     result = processor.process_payload(agent_payload())
 
     assert result.delete_message is True
-    assert result.reason == "agent_tool_candidate_planned"
+    assert result.reason == "agent_execution_handoff_completed"
     assert seen_timezones == ["America/Los_Angeles"]
     assert planner_client.requests[0].current_date == "2026-07-08"
     assert planner_client.requests[0].timezone == "America/Los_Angeles"
@@ -299,17 +315,45 @@ def test_processor_deletes_missing_or_terminal_runs() -> None:
     assert terminal_repository.release_calls == [RUN_ID]
 
 
-def test_processor_deletes_waiting_confirmation_and_unsupported_status() -> None:
+def test_processor_deletes_waiting_confirmation_and_retries_running_handoff() -> None:
     waiting_repository = FakeAgentRunRepository(context=run_context(status="waiting_confirmation"))
     running_repository = FakeAgentRunRepository(context=run_context(status="running"))
+    handoff_client = FakeExecutionHandoffClient()
 
     waiting = create_processor(waiting_repository).process_payload(agent_payload())
-    running = create_processor(running_repository).process_payload(agent_payload())
+    running = create_processor(
+        running_repository,
+        execution_handoff_client=handoff_client,
+    ).process_payload(agent_payload())
 
     assert waiting.delete_message is True
     assert waiting.reason == "agent_run_waiting_confirmation"
     assert running.delete_message is True
-    assert running.reason == "agent_run_unsupported_status"
+    assert running.reason == "agent_execution_handoff_retried"
+    assert handoff_client.calls == [RUN_ID]
+
+
+def test_processor_retries_handoff_without_replanning_after_failure() -> None:
+    repository = FakeAgentRunRepository()
+    planner_client = FakePlannerClient()
+    handoff_client = FakeExecutionHandoffClient(error=InfrastructureError("App Server unavailable"))
+    processor = create_processor(repository, planner_client, handoff_client)
+
+    first = processor.process_payload(agent_payload())
+
+    assert first.delete_message is False
+    assert first.reason == "agent_execution_handoff_unavailable"
+    assert planner_client.requests
+    assert handoff_client.calls == [RUN_ID]
+
+    repository.context = run_context(status="running")
+    handoff_client.error = None
+    second = processor.process_payload(agent_payload())
+
+    assert second.delete_message is True
+    assert second.reason == "agent_execution_handoff_retried"
+    assert len(planner_client.requests) == 1
+    assert handoff_client.calls == [RUN_ID, RUN_ID]
 
 
 def test_processor_leaves_duplicate_or_infrastructure_failure_for_retry() -> None:
