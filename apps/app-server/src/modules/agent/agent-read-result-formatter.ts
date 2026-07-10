@@ -60,6 +60,10 @@ const MEETING_SECTIONS: readonly MeetingSectionDefinition[] = [
     ]
   }
 ];
+const MEETING_EXCLUSION_PATTERN =
+  /말고|빼(?:고|줘|주세요)|제외(?:하고|해줘|해주세요|한|해|하여)?|없이|생략(?:하고|해줘|해주세요|한|해)?|필요\s*없(?:고|어|습니다)?|안\s*(?:보여|알려)(?:줘|주고|주세요)?/g;
+const MEETING_CLAUSE_BREAK_PATTERN =
+  /[.!?;\n]|(?:보여|알려|포함|출력)(?:줘|주세요|주고|달라|주되)/g;
 
 export function buildAgentReadResultAnswer(
   input: AgentReadResultFormatterInput
@@ -308,14 +312,55 @@ function selectMeetingSections(prompt: string | undefined): {
   keys: MeetingSectionKey[];
 } {
   const normalizedPrompt = prompt?.trim() ?? "";
-  const keys = MEETING_SECTIONS.filter((section) =>
+  const mentionedKeys = MEETING_SECTIONS.filter((section) =>
     section.patterns.some((pattern) => pattern.test(normalizedPrompt))
   ).map((section) => section.key);
+  const excludedKeys = findExcludedMeetingSections(normalizedPrompt);
+  const includedKeys = mentionedKeys.filter((key) => !excludedKeys.has(key));
+  const keys =
+    includedKeys.length > 0
+      ? includedKeys
+      : excludedKeys.size > 0
+        ? MEETING_SECTIONS.map((section) => section.key).filter(
+            (key) => !excludedKeys.has(key)
+          )
+        : mentionedKeys;
 
   return {
-    explicit: keys.length > 0,
+    explicit: mentionedKeys.length > 0 || excludedKeys.size > 0,
     keys
   };
+}
+
+function findExcludedMeetingSections(prompt: string): Set<MeetingSectionKey> {
+  const excluded = new Set<MeetingSectionKey>();
+
+  for (const marker of prompt.matchAll(MEETING_EXCLUSION_PATTERN)) {
+    const markerIndex = marker.index;
+    if (markerIndex === undefined) {
+      continue;
+    }
+
+    const beforeMarker = prompt.slice(0, markerIndex);
+    const clause = beforeMarker.slice(findLastMeetingClauseBreak(beforeMarker));
+    for (const section of MEETING_SECTIONS) {
+      if (section.patterns.some((pattern) => pattern.test(clause))) {
+        excluded.add(section.key);
+      }
+    }
+  }
+
+  return excluded;
+}
+
+function findLastMeetingClauseBreak(input: string): number {
+  let clauseStart = 0;
+  for (const match of input.matchAll(MEETING_CLAUSE_BREAK_PATTERN)) {
+    if (match.index !== undefined) {
+      clauseStart = match.index + match[0].length;
+    }
+  }
+  return clauseStart;
 }
 
 function hasMeetingContent(report: AgentJsonObject): boolean {

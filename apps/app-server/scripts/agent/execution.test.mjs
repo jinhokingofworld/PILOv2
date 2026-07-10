@@ -662,6 +662,54 @@ function formatterMeetingReport(index, overrides = {}) {
 }
 
 {
+  const answer = buildAgentReadResultAnswer({
+    toolName: "summarize_meeting_report",
+    prompt: "요약 말고 결정사항만 알려줘",
+    outputSummary: {
+      report: formatterMeetingReport(8)
+    },
+    resourceRefs: []
+  });
+
+  assert.match(answer, /결정사항: 결정사항 8/);
+  assert.doesNotMatch(answer, /요약:/);
+  assert.doesNotMatch(answer, /논의사항:/);
+  assert.doesNotMatch(answer, /후속 작업:/);
+}
+
+{
+  const answer = buildAgentReadResultAnswer({
+    toolName: "summarize_meeting_report",
+    prompt: "요약과 논의사항은 빼고 결정사항과 후속 작업만 알려줘",
+    outputSummary: {
+      report: formatterMeetingReport(8)
+    },
+    resourceRefs: []
+  });
+
+  assert.match(answer, /결정사항: 결정사항 8/);
+  assert.match(answer, /후속 작업:\n- 후속 작업 8/);
+  assert.doesNotMatch(answer, /요약:/);
+  assert.doesNotMatch(answer, /논의사항:/);
+}
+
+{
+  const answer = buildAgentReadResultAnswer({
+    toolName: "summarize_meeting_report",
+    prompt: "요약은 빼고 보여줘",
+    outputSummary: {
+      report: formatterMeetingReport(8)
+    },
+    resourceRefs: []
+  });
+
+  assert.doesNotMatch(answer, /요약:/);
+  assert.match(answer, /논의사항: 논의사항 8/);
+  assert.match(answer, /결정사항: 결정사항 8/);
+  assert.match(answer, /후속 작업:\n- 후속 작업 8/);
+}
+
+{
   const reports = Array.from({ length: 6 }, (_, index) =>
     formatterMeetingReport(index + 1)
   );
