@@ -23,6 +23,8 @@ import {
   AlertCircle,
   ArrowLeft,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   ExternalLink,
   FileText,
   GitBranch,
@@ -41,6 +43,7 @@ import type {
   PrReviewDiffRow,
   PrReviewConflictApplyResult,
   PrReviewConflictFile,
+  PrReviewConflictHunk,
   PrReviewConflictSuggestion,
   PrReviewFile,
   PrReviewFileDecisionStatus,
@@ -66,9 +69,11 @@ type ConflictApplyStatus = "idle" | "applying" | "applied" | "error";
 
 type PrReviewFileDiffDrawerProps = {
   apiClient: PrReviewApiClient;
+  baseBranch: string | null;
   conflictAnalysisErrorMessage: string | null;
   conflictAnalysisStatus: ConflictAnalysisLoadStatus;
   conflictFile: PrReviewConflictFile | null;
+  headBranch: string | null;
   isReviewSessionConflicted: boolean;
   onClose: () => void;
   onConflictApplied: (result: PrReviewConflictApplyResult) => void | Promise<void>;
@@ -256,9 +261,11 @@ function getDecisionDisabledReason(input: {
 
 export function PrReviewFileDiffDrawer({
   apiClient,
+  baseBranch,
   conflictAnalysisErrorMessage,
   conflictAnalysisStatus,
   conflictFile,
+  headBranch,
   isReviewSessionConflicted,
   onClose,
   onConflictApplied,
@@ -292,6 +299,8 @@ export function PrReviewFileDiffDrawer({
     useState<PrReviewConflictApplyResult | null>(null);
   const [resolvedContentDraft, setResolvedContentDraft] = useState("");
   const [reloadVersion, setReloadVersion] = useState(0);
+  const [selectedConflictHunkIndex, setSelectedConflictHunkIndex] = useState(0);
+  const [isBaseComparisonOpen, setIsBaseComparisonOpen] = useState(false);
   const commentSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
 
@@ -413,6 +422,11 @@ export function PrReviewFileDiffDrawer({
     };
   }, [clearScheduledCommentSave]);
 
+  useEffect(() => {
+    setSelectedConflictHunkIndex(0);
+    setIsBaseComparisonOpen(false);
+  }, [conflictFile?.reviewFileId]);
+
   const selectedDecision = useMemo(
     () => decisionOptions.find((option) => option.status === decisionStatus),
     [decisionStatus]
@@ -425,6 +439,8 @@ export function PrReviewFileDiffDrawer({
     unsupportedConflictFile
   });
   const decisionDisabled = decisionDisabledReason !== null;
+  const selectedConflictHunk =
+    conflictFile?.hunks[selectedConflictHunkIndex] ?? null;
   const drawerModeLabel = decisionDisabled
     ? "Conflict Resolution"
     : "파일 경로";
@@ -570,7 +586,22 @@ export function PrReviewFileDiffDrawer({
           <section className="min-h-0 min-w-0 flex-1 overflow-y-auto bg-slate-50">
             <FileDiffHeader file={file} />
             <Separator />
-            <DiffView diff={diff} />
+            {conflictFile && selectedConflictHunk ? (
+              <ConflictHunkComparison
+                baseBranch={baseBranch}
+                headBranch={headBranch}
+                hunk={selectedConflictHunk}
+                hunkCount={conflictFile.hunks.length}
+                hunkIndex={selectedConflictHunkIndex}
+                isBaseComparisonOpen={isBaseComparisonOpen}
+                onHunkIndexChange={setSelectedConflictHunkIndex}
+                onToggleBaseComparison={() =>
+                  setIsBaseComparisonOpen((current) => !current)
+                }
+              />
+            ) : (
+              <DiffView diff={diff} />
+            )}
           </section>
 
           <aside className="min-h-0 w-full shrink-0 overflow-y-auto border-t border-slate-200 bg-white lg:w-[400px] lg:border-l lg:border-t-0">
@@ -1012,24 +1043,10 @@ function ConflictResolutionPanel({
             ) : null}
           </div>
 
-          <p className="text-xs font-semibold uppercase text-amber-800">
-            {conflictFile.hunks.length} conflict hunk
+          <p className="text-xs leading-5 text-amber-800">
+            {conflictFile.hunks.length}개의 conflict hunk를 중앙 비교 화면에서
+            확인할 수 있습니다.
           </p>
-          {conflictFile.hunks.map((hunk) => (
-            <div
-              className="overflow-hidden rounded-lg border border-amber-200 bg-white"
-              key={hunk.id}
-            >
-              <div className="border-b border-amber-100 bg-amber-50 px-3 py-2 font-mono text-xs text-amber-900">
-                {hunk.header}
-              </div>
-              <div className="grid gap-2 p-3 text-xs">
-                <ConflictTextBlock label="Base" value={hunk.baseText} />
-                <ConflictTextBlock label="Current" value={hunk.currentText} />
-                <ConflictTextBlock label="Incoming" value={hunk.incomingText} />
-              </div>
-            </div>
-          ))}
         </div>
       ) : null}
     </section>
@@ -1192,14 +1209,159 @@ function ConflictSuggestionPreview({
   );
 }
 
-function ConflictTextBlock({ label, value }: { label: string; value: string }) {
+function ConflictHunkComparison({
+  baseBranch,
+  headBranch,
+  hunk,
+  hunkCount,
+  hunkIndex,
+  isBaseComparisonOpen,
+  onHunkIndexChange,
+  onToggleBaseComparison
+}: {
+  baseBranch: string | null;
+  headBranch: string | null;
+  hunk: PrReviewConflictHunk;
+  hunkCount: number;
+  hunkIndex: number;
+  isBaseComparisonOpen: boolean;
+  onHunkIndexChange: (index: number) => void;
+  onToggleBaseComparison: () => void;
+}) {
+  const targetBranchLabel = baseBranch ?? "Target branch";
+  const headBranchLabel = headBranch ?? "PR branch";
+
   return (
-    <div>
-      <p className="mb-1 font-semibold text-slate-500">{label}</p>
-      <pre className="max-h-24 overflow-auto rounded-md bg-slate-950 px-3 py-2 font-mono text-[11px] leading-5 text-slate-100">
-        {value || "(empty)"}
-      </pre>
-    </div>
+    <section className="flex min-h-0 flex-1 flex-col p-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase text-amber-700">
+            Conflict hunk
+          </p>
+          <p className="mt-1 font-mono text-xs text-slate-600">{hunk.header}</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button
+            aria-label="이전 conflict hunk"
+            disabled={hunkIndex === 0}
+            onClick={() => onHunkIndexChange(hunkIndex - 1)}
+            size="icon"
+            type="button"
+            variant="outline"
+          >
+            <ChevronLeft className="size-4" />
+          </Button>
+          <span aria-live="polite" className="min-w-12 text-center text-sm font-semibold">
+            {hunkIndex + 1} / {hunkCount}
+          </span>
+          <Button
+            aria-label="다음 conflict hunk"
+            disabled={hunkIndex === hunkCount - 1}
+            onClick={() => onHunkIndexChange(hunkIndex + 1)}
+            size="icon"
+            type="button"
+            variant="outline"
+          >
+            <ChevronRight className="size-4" />
+          </Button>
+          <Button
+            onClick={onToggleBaseComparison}
+            size="sm"
+            type="button"
+            variant="outline"
+          >
+            {isBaseComparisonOpen ? "Base 숨기기" : "Base 보기"}
+          </Button>
+        </div>
+      </div>
+
+      {hunkCount > 1 ? (
+        <div aria-label="Conflict hunk 선택" className="mt-4 flex flex-wrap gap-2">
+          {Array.from({ length: hunkCount }, (_, index) => (
+            <Button
+              key={index}
+              onClick={() => onHunkIndexChange(index)}
+              size="sm"
+              type="button"
+              variant={index === hunkIndex ? "default" : "outline"}
+            >
+              Hunk {index + 1}
+            </Button>
+          ))}
+        </div>
+      ) : null}
+
+      <div className="mt-5 grid min-h-0 gap-4 lg:grid-cols-2">
+        <ConflictCodePane
+          label={`Target branch: ${targetBranchLabel}`}
+          lineStart={hunk.currentStartLine}
+          tone="target"
+          value={hunk.currentText}
+        />
+        <ConflictCodePane
+          label={`PR branch: ${headBranchLabel}`}
+          lineStart={hunk.incomingStartLine}
+          tone="incoming"
+          value={hunk.incomingText}
+        />
+      </div>
+
+      {isBaseComparisonOpen ? (
+        <div className="mt-4">
+          <ConflictCodePane
+            label="Base: common ancestor"
+            lineStart={hunk.baseStartLine}
+            tone="base"
+            value={hunk.baseText}
+          />
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function ConflictCodePane({
+  label,
+  lineStart,
+  tone,
+  value
+}: {
+  label: string;
+  lineStart: number;
+  tone: "base" | "target" | "incoming";
+  value: string;
+}) {
+  const lines = value ? value.replace(/\r\n/g, "\n").split("\n") : ["(empty)"];
+  const classNameByTone = {
+    base: "border-slate-200 bg-slate-50 text-slate-800",
+    target: "border-blue-200 bg-blue-50 text-blue-950",
+    incoming: "border-emerald-200 bg-emerald-50 text-emerald-950"
+  } as const;
+
+  return (
+    <section
+      className={cn(
+        "min-h-0 overflow-hidden rounded-lg border",
+        classNameByTone[tone]
+      )}
+    >
+      <header className="flex items-center justify-between gap-3 border-b border-current/10 px-4 py-3">
+        <p className="truncate text-sm font-semibold">{label}</p>
+        <span className="shrink-0 font-mono text-xs opacity-75">line {lineStart}</span>
+      </header>
+      <div className="max-h-[calc(100vh-300px)] overflow-auto bg-slate-950 text-slate-100">
+        <div className="min-w-max py-2 text-xs leading-5">
+          {lines.map((line, index) => (
+            <div className="grid grid-cols-[4rem_minmax(0,1fr)]" key={`${lineStart}-${index}`}>
+              <span className="select-none px-3 text-right font-mono text-slate-500">
+                {value ? lineStart + index : ""}
+              </span>
+              <code className="whitespace-pre px-3 font-mono">{line || " "}</code>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
   );
 }
 
