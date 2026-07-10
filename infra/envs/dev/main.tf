@@ -185,21 +185,21 @@ module "ecs" {
       task_role_arn      = module.iam.app_server_task_role_arn
       target_group_arn   = module.alb.app_target_group_arn
       environment = {
-        APP_ENV                       = var.environment
-        AWS_REGION                    = var.aws_region
-        PORT                          = tostring(var.app_server_port)
-        DATABASE_SSL                  = "true"
-        S3_UPLOADS_BUCKET             = module.s3.uploads_bucket_name
+        APP_ENV                           = var.environment
+        AWS_REGION                        = var.aws_region
+        PORT                              = tostring(var.app_server_port)
+        DATABASE_SSL                      = "true"
+        S3_UPLOADS_BUCKET                 = module.s3.uploads_bucket_name
         SQS_AGENT_JOBS_QUEUE_URL          = module.sqs.agent_jobs_queue_url
         SQS_MEETING_REPORT_JOBS_QUEUE_URL = module.sqs.ai_jobs_queue_url
-        SQS_GITHUB_WEBHOOKS_QUEUE_URL = module.sqs.github_webhooks_queue_url
-        FRONTEND_URL                  = local.frontend_domain == "" ? "" : "https://${local.frontend_domain}"
-        API_PUBLIC_ORIGIN             = local.api_domain == "" ? "http://${module.alb.alb_dns_name}" : "https://${local.api_domain}"
-        API_BASE_PATH                 = "/api/v1"
-        LIVEKIT_RECORDING_MODE        = "room_audio_only"
-        LIVEKIT_EGRESS_S3_PREFIX      = "recordings/meetings"
-        OPENAI_PR_REVIEW_MODEL        = "gpt-5.5"
-        OPENAI_PR_REVIEW_TIMEOUT_MS   = "45000"
+        SQS_GITHUB_WEBHOOKS_QUEUE_URL     = module.sqs.github_webhooks_queue_url
+        FRONTEND_URL                      = local.frontend_domain == "" ? "" : "https://${local.frontend_domain}"
+        API_PUBLIC_ORIGIN                 = local.api_domain == "" ? "http://${module.alb.alb_dns_name}" : "https://${local.api_domain}"
+        API_BASE_PATH                     = "/api/v1"
+        LIVEKIT_RECORDING_MODE            = "room_audio_only"
+        LIVEKIT_EGRESS_S3_PREFIX          = "recordings/meetings"
+        OPENAI_PR_REVIEW_MODEL            = "gpt-5.5"
+        OPENAI_PR_REVIEW_TIMEOUT_MS       = "45000"
       }
       secrets = module.secrets.app_server_ecs_secrets
     }
