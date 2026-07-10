@@ -41,6 +41,7 @@ import type {
 } from "./dto";
 import type {
   GitHubIntegrationModuleInfo,
+  ApplyGithubPullRequestConflictResolutionInput,
   ApplyGithubPullRequestFileResolutionInput,
   GithubAppInstallationCallbackPayload,
   GithubAppInstallationDeletePayload,
@@ -65,6 +66,7 @@ import type {
   GithubProjectV2StatusOptionPayload,
   GithubPullRequestConflictInputsPayload,
   GithubPullRequestConflictStatusPayload,
+  GithubPullRequestConflictResolutionPayload,
   GithubPullRequestFileResolutionPayload,
   GithubPullRequestMergePayload,
   GithubPullRequestDetailPayload,
@@ -661,6 +663,20 @@ export class GithubIntegrationService {
     input: ApplyGithubPullRequestFileResolutionInput
   ): Promise<GithubPullRequestFileResolutionPayload> {
     return this.githubPullRequestFileWriteService.applyGithubPullRequestFileResolution(
+      currentUserId,
+      workspaceId,
+      pullRequestId,
+      input
+    );
+  }
+
+  async applyGithubPullRequestConflictResolutions(
+    currentUserId: string,
+    workspaceId: string,
+    pullRequestId: string,
+    input: ApplyGithubPullRequestConflictResolutionInput
+  ): Promise<GithubPullRequestConflictResolutionPayload> {
+    return this.githubPullRequestFileWriteService.applyGithubPullRequestConflictResolutions(
       currentUserId,
       workspaceId,
       pullRequestId,

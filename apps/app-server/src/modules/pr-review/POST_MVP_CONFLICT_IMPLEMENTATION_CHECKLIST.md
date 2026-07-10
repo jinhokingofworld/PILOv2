@@ -22,6 +22,7 @@
 | 1-C | Review room conflict UX | #508 | #511 | 완료 |
 | 1-D | AI suggestion draft | #512 | #515 | 구현 완료 |
 | 1-E | Apply resolution write path | #529 | TBD | 구현 완료 |
+| 1-F | Multi-file atomic apply | #628 | TBD | 진행 중 |
 
 ## 공통 Stop Gate
 
@@ -122,6 +123,22 @@
 - [x] single-file merge commit으로 실제 conflict를 해소한다. (#614)
 - [x] 다중 또는 unsupported conflict file은 부분 적용 없이 차단한다. (#614)
 - [x] GitHub 적용 후 local 갱신 실패를 `sync_required`로 보존한다. (#614)
+
+## 1-F Multi-file Atomic Apply
+
+목표:
+
+- 여러 content conflict 파일의 사용자가 확인한 해결 코드를 merge commit 하나로 적용한다.
+- 일부 파일만 commit되거나 push되는 중간 상태를 만들지 않는다.
+
+작업 체크리스트:
+
+- [x] session 단위 다중 conflict apply 요청/응답 계약을 문서화한다. (#628)
+- [x] 요청 파일 집합과 실제 Git 미해결 경로 집합을 정확히 비교한다. (#628)
+- [x] 모든 해결 파일을 하나의 merge commit으로 stage하고 push한다. (#628)
+- [x] head/base SHA와 파일별 blob SHA stale guard를 유지한다. (#628)
+- [x] 기존 단일 파일 apply endpoint 호환성을 유지한다. (#628)
+- [ ] frontend에서 파일별 해결 초안을 유지하고 전체 적용 action을 연결한다.
 
 ## PR 전 확인
 

@@ -84,7 +84,8 @@ Conflict PR 선택
 5. `1-E. Apply resolution write path`
    - 사용자가 확인한 resolved content만 PR head branch의 merge commit에 적용한다.
    - head SHA, blob SHA, conflict marker 검증을 통과해야 한다.
-   - 초기에는 지원 가능한 content conflict file이 정확히 1개인 PR만 적용한다.
+   - 초기에는 지원 가능한 content conflict file이 정확히 1개인 PR만 적용하고, 후속
+     multi-file slice에서는 모든 conflict 파일을 하나의 merge commit으로 원자적으로 적용한다.
    - 임시 Git working tree에서 base를 실제 merge해 충돌 없는 base 변경도 함께 보존한다.
    - 최종 merge는 별도 명시적 사용자 action으로 둔다.
 
@@ -209,7 +210,7 @@ Apply resolution 시 확인할 것:
 - 대상 파일의 최신 blob SHA가 예상과 같은지
 - resolved content가 비어 있거나 conflict marker를 그대로 포함하지 않는지
 - GitHub write 권한이 있는지
-- PR 전체에서 지원 가능한 conflict file이 정확히 1개인지
+- 요청한 conflict file 집합이 분석 결과 및 실제 Git 미해결 경로 집합과 정확히 일치하는지
 - merge commit이 PR head와 base를 모두 parent로 포함하는지
 
 Merge 시 확인할 것:

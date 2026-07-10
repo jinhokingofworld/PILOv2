@@ -16,23 +16,32 @@ const GIT_CLONE_TIMEOUT_MS = 300_000;
 const GIT_NETWORK_TIMEOUT_MS = 180_000;
 const GIT_SHA_PATTERN = /^[0-9a-f]{40,64}$/i;
 
+export interface GithubConflictMergeFileRequest {
+  content: string;
+  path: string;
+}
+
 export interface GithubConflictMergeRequest {
   accessToken: string;
   authorName: string;
   baseBranch: string;
   baseRepositoryUrl: string;
   baseSha: string;
-  content: string;
+  files: GithubConflictMergeFileRequest[];
   headBranch: string;
   headRepositoryUrl: string;
   headSha: string;
   message: string;
+}
+
+export interface GithubConflictMergeFileResponse {
+  contentSha: string;
   path: string;
 }
 
 export interface GithubConflictMergeResponse {
   commitSha: string;
-  contentSha: string;
+  files: GithubConflictMergeFileResponse[];
 }
 
 @Injectable()
@@ -42,7 +51,7 @@ export class GithubConflictMergeService {
   async createConflictMergeCommit(
     input: GithubConflictMergeRequest
   ): Promise<GithubConflictMergeResponse> {
-    const filePath = this.normalizeRepositoryPath(input.path);
+    const files = this.normalizeConflictFiles(input.files);
     this.assertCommitSha(input.headSha);
     this.assertCommitSha(input.baseSha);
     await this.assertBranchName(input.headBranch);
@@ -77,19 +86,21 @@ export class GithubConflictMergeService {
         authenticationEnvironment,
         authorName: input.authorName,
         baseSha: input.baseSha,
-        filePath,
+        filePaths: files.map((file) => file.path),
         headSha: input.headSha,
         repositoryDirectory
       });
-      await this.writeResolvedFile(
-        repositoryDirectory,
-        filePath,
-        input.content
-      );
+      for (const file of files) {
+        await this.writeResolvedFile(
+          repositoryDirectory,
+          file.path,
+          file.content
+        );
+      }
       await this.finishConflictMerge({
         authenticationEnvironment,
         baseSha: input.baseSha,
-        filePath,
+        filePaths: files.map((file) => file.path),
         headSha: input.headSha,
         message: input.message,
         repositoryDirectory
@@ -98,10 +109,15 @@ export class GithubConflictMergeService {
         repositoryDirectory,
         authenticationEnvironment
       );
-      const contentSha = await this.readFileBlobSha(
-        repositoryDirectory,
-        filePath,
-        authenticationEnvironment
+      const resolvedFiles = await Promise.all(
+        files.map(async (file) => ({
+          contentSha: await this.readFileBlobSha(
+            repositoryDirectory,
+            file.path,
+            authenticationEnvironment
+          ),
+          path: file.path
+        }))
       );
       await this.assertRemoteHeadSha(
         repositoryDirectory,
@@ -127,7 +143,7 @@ export class GithubConflictMergeService {
 
       return {
         commitSha,
-        contentSha
+        files: resolvedFiles
       };
     } finally {
       await rm(temporaryRoot, { force: true, recursive: true });
@@ -217,7 +233,7 @@ export class GithubConflictMergeService {
     authenticationEnvironment: Record<string, string>;
     authorName: string;
     baseSha: string;
-    filePath: string;
+    filePaths: string[];
     headSha: string;
     repositoryDirectory: string;
   }): Promise<void> {
@@ -277,10 +293,8 @@ export class GithubConflictMergeService {
       throw badRequest("GitHub conflict merge preparation failed");
     }
 
-    if (unmergedPaths.length !== 1 || unmergedPaths[0] !== input.filePath) {
-      throw conflictError(
-        "GitHub pull request has multiple conflicted files"
-      );
+    if (!this.haveSamePaths(unmergedPaths, input.filePaths)) {
+      throw conflictError("GitHub pull request conflicted file set is stale");
     }
   }
 
@@ -331,14 +345,14 @@ export class GithubConflictMergeService {
   private async finishConflictMerge(input: {
     authenticationEnvironment: Record<string, string>;
     baseSha: string;
-    filePath: string;
+    filePaths: string[];
     headSha: string;
     message: string;
     repositoryDirectory: string;
   }): Promise<void> {
     await this.runGitOrBadRequest(
       input.repositoryDirectory,
-      ["add", "--", input.filePath],
+      ["add", "--", ...input.filePaths],
       "GitHub conflict resolution staging failed",
       input.authenticationEnvironment
     );
@@ -585,6 +599,38 @@ export class GithubConflictMergeService {
     }
 
     return parts.join("/");
+  }
+
+  private normalizeConflictFiles(
+    files: GithubConflictMergeFileRequest[]
+  ): GithubConflictMergeFileRequest[] {
+    if (!Array.isArray(files) || files.length === 0) {
+      throw badRequest("GitHub conflict files must not be empty");
+    }
+
+    const normalizedFiles = files.map((file) => ({
+      content: file.content,
+      path: this.normalizeRepositoryPath(file.path)
+    }));
+    const uniquePaths = new Set(normalizedFiles.map((file) => file.path));
+    if (uniquePaths.size !== normalizedFiles.length) {
+      throw badRequest("GitHub conflict file paths must be unique");
+    }
+
+    return normalizedFiles;
+  }
+
+  private haveSamePaths(
+    actualPaths: string[],
+    expectedPaths: string[]
+  ): boolean {
+    if (actualPaths.length !== expectedPaths.length) {
+      return false;
+    }
+
+    const sortedActual = [...actualPaths].sort();
+    const sortedExpected = [...expectedPaths].sort();
+    return sortedActual.every((path, index) => path === sortedExpected[index]);
   }
 
   private normalizeAuthorName(authorName: string): string {

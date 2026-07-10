@@ -16,7 +16,9 @@ import {
 } from "./github-integration-config.service";
 import { GithubTokenEncryptionService } from "./github-token-encryption.service";
 import type {
+  ApplyGithubPullRequestConflictResolutionInput,
   ApplyGithubPullRequestFileResolutionInput,
+  GithubPullRequestConflictResolutionPayload,
   GithubPullRequestFileResolutionPayload
 } from "./types";
 
@@ -54,6 +56,50 @@ export class GithubPullRequestFileWriteService {
     pullRequestId: string,
     input: ApplyGithubPullRequestFileResolutionInput
   ): Promise<GithubPullRequestFileResolutionPayload> {
+    const result = await this.applyGithubPullRequestConflictResolutions(
+      currentUserId,
+      workspaceId,
+      pullRequestId,
+      {
+        expectedBaseSha: input.expectedBaseSha,
+        expectedHeadSha: input.expectedHeadSha,
+        files: [
+          {
+            expectedHeadBlobSha: input.expectedHeadBlobSha,
+            filePath: input.filePath,
+            resolvedContent: input.resolvedContent
+          }
+        ]
+      }
+    );
+    const file = result.files[0];
+    if (!file) {
+      throw badRequest("GitHub conflict resolution result is invalid");
+    }
+
+    return {
+      appliedByGithubLogin: result.appliedByGithubLogin,
+      commitSha: result.commitSha,
+      commitUrl: result.commitUrl,
+      headShaBefore: result.headShaBefore,
+      headShaAfter: result.headShaAfter,
+      headBlobShaBefore: file.headBlobShaBefore,
+      headBlobShaAfter: file.headBlobShaAfter,
+      localCacheUpdated: result.localCacheUpdated
+    };
+  }
+
+  async applyGithubPullRequestConflictResolutions(
+    currentUserId: string,
+    workspaceId: string,
+    pullRequestId: string,
+    input: ApplyGithubPullRequestConflictResolutionInput
+  ): Promise<GithubPullRequestConflictResolutionPayload> {
+    const firstFile = input.files[0];
+    if (!firstFile) {
+      throw badRequest("GitHub conflict files must not be empty");
+    }
+
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
 
     const oauthConfig = this.configService.getGithubOAuthConfig();
@@ -98,17 +144,38 @@ export class GithubPullRequestFileWriteService {
           target.name
         ),
         baseSha: input.expectedBaseSha,
-        content: input.resolvedContent,
+        files: input.files.map((file) => ({
+          content: file.resolvedContent,
+          path: file.filePath
+        })),
         headBranch: pullRequest.headRef,
         headRepositoryUrl: this.buildGithubRepositoryUrl(
           pullRequest.headRepositoryOwner,
           pullRequest.headRepositoryName
         ),
         headSha: input.expectedHeadSha,
-        message: `Resolve conflict in ${input.filePath}`,
-        path: input.filePath
+        message:
+          input.files.length === 1
+            ? `Resolve conflict in ${firstFile.filePath}`
+            : `Resolve conflicts in ${input.files.length} files`
       }
     );
+
+    const resolvedFileByPath = new Map(
+      update.files.map((file) => [file.path, file])
+    );
+    const resolvedFiles = input.files.map((file) => {
+      const resolvedFile = resolvedFileByPath.get(file.filePath);
+      if (!resolvedFile) {
+        throw badRequest("GitHub conflict resolution result is invalid");
+      }
+
+      return {
+        filePath: file.filePath,
+        headBlobShaBefore: file.expectedHeadBlobSha,
+        headBlobShaAfter: resolvedFile.contentSha
+      };
+    });
 
     let localCacheUpdated = true;
     try {
@@ -131,8 +198,7 @@ export class GithubPullRequestFileWriteService {
       commitUrl: `https://github.com/${encodeURIComponent(pullRequest.headRepositoryOwner)}/${encodeURIComponent(pullRequest.headRepositoryName)}/commit/${update.commitSha}`,
       headShaBefore: pullRequest.headSha,
       headShaAfter: update.commitSha,
-      headBlobShaBefore: input.expectedHeadBlobSha,
-      headBlobShaAfter: update.contentSha,
+      files: resolvedFiles,
       localCacheUpdated
     };
   }
