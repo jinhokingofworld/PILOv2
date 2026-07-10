@@ -19,6 +19,7 @@ async function compileSqlErdRuntimeModules() {
   const modelOutputPath = join(outputDir, "model.mjs");
   const inspectorOutputPath = join(outputDir, "inspector.mjs");
   const ddlParserOutputPath = join(outputDir, "ddl-parser.mjs");
+  const sqlSourceMapOutputPath = join(outputDir, "sql-source-map.mjs");
   const generateSessionOutputPath = join(outputDir, "generate-session.mjs");
   const layoutAutosaveOutputPath = join(outputDir, "layout-autosave.mjs");
   const apiClientOutputPath = join(outputDir, "api-client.mjs");
@@ -40,9 +41,19 @@ async function compileSqlErdRuntimeModules() {
       [[/from "\.\/model"/g, 'from "./model.mjs"']]
     );
     await compileTypeScriptModule(
+      "../../src/features/sql-erd/utils/sql-source-map.ts",
+      sqlSourceMapOutputPath
+    );
+    await compileTypeScriptModule(
       "../../src/features/sql-erd/utils/ddl-parser.ts",
       ddlParserOutputPath,
-      [[/from "@\/features\/sql-erd\/types"/g, 'from "./types-stub.mjs"']]
+      [
+        [/from "@\/features\/sql-erd\/types"/g, 'from "./types-stub.mjs"'],
+        [
+          /from "@\/features\/sql-erd\/utils\/sql-source-map"/g,
+          'from "./sql-source-map.mjs"'
+        ]
+      ]
     );
     await compileTypeScriptModule(
       "../../src/features/sql-erd/utils/generate-session.ts",
@@ -1276,9 +1287,7 @@ await assert.rejects(
   /Unauthorized/
 );
 
-const postgresParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
-  dialect: "postgresql",
-  sourceText: `CREATE TABLE users (
+const postgresSourceText = `CREATE TABLE users (
   id BIGSERIAL PRIMARY KEY,
   email VARCHAR(255) NOT NULL UNIQUE,
   full_name TEXT,
@@ -1299,7 +1308,10 @@ CREATE TABLE reviews (
   user_id BIGINT REFERENCES users(id),
   rating SMALLINT NOT NULL,
   body TEXT
-);`
+);`;
+const postgresParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
+  dialect: "postgresql",
+  sourceText: postgresSourceText
 });
 
 assert.equal(postgresParseResult.ok, true);
@@ -1344,6 +1356,60 @@ assert.equal(
   postgresParseResult.modelJson.schema.relations[0].constraintName,
   "fk_orders_user"
 );
+assert.equal(postgresParseResult.sourceMap.sourceText, postgresSourceText);
+assert.equal(postgresParseResult.sourceMap.dialect, "postgresql");
+assert.equal(
+  postgresSourceText.slice(
+    postgresParseResult.sourceMap.columnsById["column.users.id"].from,
+    postgresParseResult.sourceMap.columnsById["column.users.id"].to
+  ),
+  "id"
+);
+assert.equal(
+  postgresSourceText.slice(
+    postgresParseResult.sourceMap.columnsById["column.orders.id"].from,
+    postgresParseResult.sourceMap.columnsById["column.orders.id"].to
+  ),
+  "id"
+);
+assert.notEqual(
+  postgresParseResult.sourceMap.columnsById["column.users.id"].from,
+  postgresParseResult.sourceMap.columnsById["column.orders.id"].from
+);
+const postgresTableRelationRange =
+  postgresParseResult.sourceMap.relationsById[
+    "relation.orders.user_id.users.id"
+  ];
+assert.equal(
+  postgresSourceText.slice(
+    postgresTableRelationRange.constraintRange.from,
+    postgresTableRelationRange.constraintRange.to
+  ),
+  "CONSTRAINT fk_orders_user FOREIGN KEY (user_id) REFERENCES users(id)"
+);
+assert.deepEqual(
+  postgresTableRelationRange.fromColumnRanges.map((range) =>
+    postgresSourceText.slice(range.from, range.to)
+  ),
+  ["user_id"]
+);
+assert.deepEqual(
+  postgresTableRelationRange.toColumnRanges.map((range) =>
+    postgresSourceText.slice(range.from, range.to)
+  ),
+  ["id"]
+);
+const postgresInlineRelationRange =
+  postgresParseResult.sourceMap.relationsById[
+    "relation.reviews.user_id.users.id"
+  ];
+assert.equal(
+  postgresSourceText.slice(
+    postgresInlineRelationRange.constraintRange.from,
+    postgresInlineRelationRange.constraintRange.to
+  ),
+  "REFERENCES users(id)"
+);
 
 const postgresTypeParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
   dialect: "postgresql",
@@ -1368,9 +1434,7 @@ assert.equal(
   "TIMESTAMP WITH TIME ZONE"
 );
 
-const mysqlParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
-  dialect: "mysql",
-  sourceText: `CREATE TABLE users (
+const mysqlSourceText = `CREATE TABLE users (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   email VARCHAR(255) NOT NULL UNIQUE,
   created_at DATETIME NOT NULL
@@ -1382,7 +1446,10 @@ CREATE TABLE orders (
   status VARCHAR(32) NOT NULL,
   UNIQUE KEY uq_orders_status (status),
   CONSTRAINT fk_orders_user FOREIGN KEY (user_id) REFERENCES users(id)
-);`
+);`;
+const mysqlParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
+  dialect: "mysql",
+  sourceText: mysqlSourceText
 });
 
 assert.equal(mysqlParseResult.ok, true);
@@ -1412,6 +1479,18 @@ assert.deepEqual(mysqlParseResult.modelJson.schema.relations, [
     constraintName: "fk_orders_user"
   }
 ]);
+assert.equal(mysqlParseResult.sourceMap.dialect, "mysql");
+assert.equal(
+  mysqlSourceText.slice(
+    mysqlParseResult.sourceMap.relationsById[
+      "relation.orders.user_id.users.id"
+    ].constraintRange.from,
+    mysqlParseResult.sourceMap.relationsById[
+      "relation.orders.user_id.users.id"
+    ].constraintRange.to
+  ),
+  "CONSTRAINT fk_orders_user FOREIGN KEY (user_id) REFERENCES users(id)"
+);
 
 const mysqlTypeParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
   dialect: "mysql",
