@@ -3,7 +3,9 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { history, undoDepth } from "@codemirror/commands";
 import { MySQL, PostgreSQL } from "@codemirror/lang-sql";
+import { Compartment, EditorState } from "@codemirror/state";
 import ts from "typescript";
 
 async function readSqlErdFile(path) {
@@ -487,6 +489,37 @@ assert.equal(
   sqlEditorDialectRuntime.getSqlSourceEditorCodeMirrorDialect("mysql"),
   MySQL
 );
+const runtimeDialectCompartment = new Compartment();
+let runtimeDialectEditorState = EditorState.create({
+  doc: "CREATE TABLE users (id BIGINT);",
+  selection: { anchor: 13 },
+  extensions: [
+    history(),
+    runtimeDialectCompartment.of(
+      sqlEditorDialectRuntime.getSqlSourceEditorLanguageExtension("postgresql")
+    )
+  ]
+});
+runtimeDialectEditorState = runtimeDialectEditorState.update({
+  changes: { from: runtimeDialectEditorState.doc.length, insert: "\n" },
+  selection: { anchor: 6 },
+  userEvent: "input"
+}).state;
+const runtimeDialectDocument = runtimeDialectEditorState.doc.toString();
+const runtimeDialectSelection = runtimeDialectEditorState.selection.main;
+const runtimeDialectUndoDepth = undoDepth(runtimeDialectEditorState);
+
+runtimeDialectEditorState = runtimeDialectEditorState.update({
+  effects:
+    sqlEditorDialectRuntime.createSqlSourceEditorDialectReconfigureEffect(
+      runtimeDialectCompartment,
+      "mysql"
+    )
+}).state;
+
+assert.equal(runtimeDialectEditorState.doc.toString(), runtimeDialectDocument);
+assert.deepEqual(runtimeDialectEditorState.selection.main, runtimeDialectSelection);
+assert.equal(undoDepth(runtimeDialectEditorState), runtimeDialectUndoDepth);
 const runtimeModelIndex = modelRuntime.createSqltoerdModelIndex(runtimeModel);
 const runtimeOrdersToUsersRelation =
   runtimeModel.schema.relations.find(
@@ -1679,6 +1712,27 @@ assert.equal(
   "BIGINT"
 );
 
+const customPostgreSqlTypeParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
+  dialect: "postgresql",
+  sourceText: `CREATE TYPE order_status AS ENUM ('pending', 'paid');
+CREATE DOMAIN currency_amount AS NUMERIC(12, 2);
+
+CREATE TABLE payments (
+  id BIGSERIAL PRIMARY KEY,
+  status order_status NOT NULL,
+  amount currency_amount
+);`
+});
+
+assert.equal(customPostgreSqlTypeParseResult.ok, true);
+assert.equal(customPostgreSqlTypeParseResult.resolvedDialect, "postgresql");
+assert.deepEqual(
+  customPostgreSqlTypeParseResult.modelJson.schema.tables[0].columns.map(
+    (column) => column.dataType
+  ),
+  ["BIGSERIAL", "ORDER_STATUS", "CURRENCY_AMOUNT"]
+);
+
 const invalidParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
   dialect: "postgresql",
   sourceText: "SELECT * FROM users"
@@ -1895,7 +1949,7 @@ assert.match(panel, /setLastResolvedDialect\(generateRequest\.resolvedDialect\)/
 assert.match(panel, /languageCompartmentRef/);
 assert.match(panel, /getSqlSourceEditorLanguageExtension/);
 assert.match(panel, /languageCompartment\.of/);
-assert.match(panel, /languageCompartmentRef\.current\.reconfigure/);
+assert.match(panel, /createSqlSourceEditorDialectReconfigureEffect/);
 assert.match(panel, /EditorState\.readOnly\.of\(readOnly\)/);
 assert.match(panel, /EditorView\.editable\.of\(!readOnly\)/);
 assert.doesNotMatch(panel, /\bsql\(\)/);

@@ -67,7 +67,11 @@ export function parseSqlDdlToErdModel(
 
   for (const database of databases) {
     try {
-      const ast = parser.astify(sourceText, { database });
+      const parserSourceText =
+        database === "postgresql"
+          ? preparePostgreSqlParserSource(sourceText)
+          : sourceText;
+      const ast = parser.astify(parserSourceText, { database });
       astNodes = (Array.isArray(ast) ? ast : [ast]) as unknown as SqlParserAstNode[];
       resolvedDialect = database;
       break;
@@ -125,6 +129,39 @@ export function parseSqlDdlToErdModel(
       }
     }
   };
+}
+
+function preparePostgreSqlParserSource(sourceText: string) {
+  const identifier = String.raw`(?:"(?:[^"]|"")*"|[A-Za-z_][A-Za-z0-9_$]*)`;
+  const qualifiedIdentifier = `${identifier}(?:\\s*\\.\\s*${identifier})?`;
+  const declarationPattern = new RegExp(
+    `\\bCREATE\\s+(?:OR\\s+REPLACE\\s+)?(?:TYPE|DOMAIN)\\s+(${qualifiedIdentifier})`,
+    "gi"
+  );
+  const declaredTypes = new Map<string, string>();
+
+  for (const match of sourceText.matchAll(declarationPattern)) {
+    const typeName = match[1];
+
+    if (typeName) {
+      declaredTypes.set(typeName.replace(/\s+/g, "").toLowerCase(), typeName);
+    }
+  }
+
+  if (declaredTypes.size === 0) {
+    return sourceText;
+  }
+
+  // node-sql-parser registers CREATE TYPE names but not CREATE DOMAIN names.
+  // Register both in a parser-only prelude so table columns keep their original type.
+  const parserPrelude = [...declaredTypes.values()]
+    .map(
+      (typeName) =>
+        `CREATE TYPE ${typeName} AS ENUM ('__pilo_sqltoerd_parser_type__');`
+    )
+    .join("\n");
+
+  return `${parserPrelude}\n${sourceText}`;
 }
 
 function resolveParserDatabases(

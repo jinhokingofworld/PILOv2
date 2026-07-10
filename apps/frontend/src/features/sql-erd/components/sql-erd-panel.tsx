@@ -84,6 +84,7 @@ import {
   getSqlErdWorkspaceSaveErrorState
 } from "@/features/sql-erd/utils/status-copy";
 import {
+  createSqlSourceEditorDialectReconfigureEffect,
   getSqlSourceEditorLanguageExtension,
   resolveSqlSourceEditorDialect
 } from "@/features/sql-erd/utils/sql-editor-dialect";
@@ -982,8 +983,9 @@ function SqlSourceEditor({
 
   useEffect(() => {
     viewRef.current?.dispatch({
-      effects: languageCompartmentRef.current.reconfigure(
-        getSqlSourceEditorLanguageExtension(dialect)
+      effects: createSqlSourceEditorDialectReconfigureEffect(
+        languageCompartmentRef.current,
+        dialect
       )
     });
   }, [dialect]);

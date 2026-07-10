@@ -4,7 +4,7 @@ import {
   sql,
   type SQLDialect
 } from "@codemirror/lang-sql";
-import type { Extension } from "@codemirror/state";
+import { Compartment, type Extension } from "@codemirror/state";
 
 import type {
   SqltoerdDialect,
@@ -37,4 +37,13 @@ export function getSqlSourceEditorLanguageExtension(
   return sql({
     dialect: getSqlSourceEditorCodeMirrorDialect(dialect)
   });
+}
+
+export function createSqlSourceEditorDialectReconfigureEffect(
+  compartment: Compartment,
+  dialect: SqltoerdResolvedDialect
+) {
+  return compartment.reconfigure(
+    getSqlSourceEditorLanguageExtension(dialect)
+  );
 }
