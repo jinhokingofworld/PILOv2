@@ -23,9 +23,9 @@ import {
   getGithubConnectSyncStatusLabel,
   getGithubConnectSyncTargetLabel
 } from "@/features/github-integration/utils/github-connect-format";
-import { rememberGithubBoardSelection } from "@/features/github-integration/utils/github-board-selection";
 import { selectProjectV2IdForRepository } from "@/features/github-integration/utils/github-project-selection";
 import { useAuthSession } from "@/features/auth/auth-session";
+import { rememberGithubBoardSelection } from "@/shared/github/board-selection";
 
 type PanelStatus = "idle" | "loading" | "ready" | "error";
 type RedirectAction = "oauth" | "installation" | "project_oauth" | null;
