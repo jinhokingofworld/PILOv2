@@ -62,7 +62,7 @@ import {
   getLayoutAutosaveBlockReasonForStatus,
   getLayoutAutosaveDelayMs,
   getLayoutAutosavePausedBanner,
-  getSqlErdSessionReloadFailureAction,
+  getSqlErdSessionLoadFailureState,
   isLayoutAutosaveTransientStatus,
   shouldApplySqlErdSessionLoadResult,
   type LayoutAutosaveBlockReason,
@@ -211,6 +211,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
   const panelContainerRef = useRef<HTMLElement | null>(null);
   const manualLayoutAutosaveRetryRef = useRef(false);
   const sessionLoadRequestIdRef = useRef(0);
+  const hasLoadedSessionRef = useRef(false);
   const [isSourceOpen, setIsSourceOpen] = useState(false);
   const [isInspectorOpen, setIsInspectorOpen] = useState(false);
   const [panelContainerWidth, setPanelContainerWidth] = useState(0);
@@ -364,10 +365,11 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           return;
         }
 
-        const action = getSqlErdSessionReloadFailureAction({
-          fallbackToSampleOnFailure: false
-        });
-        setSessionLoadState(action.sessionLoadState);
+        setSessionLoadState(
+          getSqlErdSessionLoadFailureState({
+            hasLoadedSession: hasLoadedSessionRef.current
+          })
+        );
       }
 
       if (!accessToken || !activeWorkspaceId) {
@@ -419,6 +421,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           message: `Workspace session revision ${activeSession.revision}`,
           tone: "success"
         });
+        hasLoadedSessionRef.current = true;
 
         setPendingLayoutAutosaveJson(null);
         setLayoutAutosaveRetryAttempt(0);
@@ -675,6 +678,10 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
       resizeObserver.disconnect();
     };
   }, []);
+
+  useEffect(() => {
+    hasLoadedSessionRef.current = false;
+  }, [activeWorkspaceId, sessionId]);
 
   useEffect(() => {
     void handleReloadSession();

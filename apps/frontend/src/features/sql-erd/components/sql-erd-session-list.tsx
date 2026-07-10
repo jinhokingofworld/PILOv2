@@ -17,6 +17,10 @@ import {
   SqlErdApiError
 } from "@/features/sql-erd/api/client";
 import type { SqltoerdSessionSummary } from "@/features/sql-erd/types";
+import {
+  getSqlErdSessionListViewState,
+  removeSqlErdSession
+} from "@/features/sql-erd/utils/session-list-state";
 import { buildSqlErdSessionHref } from "@/features/sql-erd/utils/session-navigation";
 
 const SQL_ERD_SESSION_PAGE_LIMIT = 20;
@@ -24,6 +28,7 @@ const SQL_ERD_SESSION_PAGE_LIMIT = 20;
 type LoadSqlErdSessionsOptions = {
   append?: boolean;
   cursor?: string | null;
+  failureMessage?: string;
 };
 
 const emptySqlErdSessionPayload = {
@@ -59,6 +64,7 @@ export function SqlErdSessionList() {
   const requestIdRef = useRef(0);
   const [sessions, setSessions] = useState<SqltoerdSessionSummary[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [hasLoadedSessions, setHasLoadedSessions] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
@@ -77,7 +83,8 @@ export function SqlErdSessionList() {
   const loadSessions = useCallback(
     async ({
       append = false,
-      cursor = null
+      cursor = null,
+      failureMessage
     }: LoadSqlErdSessionsOptions = {}) => {
       if (!apiClient || !authSession) {
         setIsLoading(false);
@@ -111,12 +118,14 @@ export function SqlErdSessionList() {
           append ? [...currentSessions, ...result.items] : result.items
         );
         setNextCursor(result.nextCursor);
+        setHasLoadedSessions(true);
       } catch {
         if (requestId === requestIdRef.current) {
           setErrorMessage(
-            append
-              ? "다음 session을 불러오지 못했습니다. 다시 시도해 주세요."
-              : "Session 목록을 불러오지 못했습니다. 다시 시도해 주세요."
+            failureMessage ??
+              (append
+                ? "다음 session을 불러오지 못했습니다. 다시 시도해 주세요."
+                : "Session 목록을 불러오지 못했습니다. 다시 시도해 주세요.")
           );
         }
       } finally {
@@ -132,6 +141,7 @@ export function SqlErdSessionList() {
   useEffect(() => {
     setSessions([]);
     setNextCursor(null);
+    setHasLoadedSessions(false);
     void loadSessions();
 
     return () => {
@@ -178,19 +188,34 @@ export function SqlErdSessionList() {
           session.id,
           session.revision
         );
-        await loadSessions();
       } catch (error) {
         setErrorMessage(
           error instanceof SqlErdApiError && error.status === 409
             ? "Session이 다른 곳에서 변경됐습니다. 목록을 새로고침한 뒤 다시 삭제해 주세요."
             : "Session을 삭제하지 못했습니다. 다시 시도해 주세요."
         );
-      } finally {
         setDeletingSessionId(null);
+        return;
       }
+
+      setSessions((currentSessions) =>
+        removeSqlErdSession(currentSessions, session.id)
+      );
+      setDeletingSessionId(null);
+      await loadSessions({
+        failureMessage:
+          "Session은 삭제됐지만 목록을 갱신하지 못했습니다. 다시 시도해 주세요."
+      });
     },
     [apiClient, authSession, deletingSessionId, loadSessions]
   );
+
+  const sessionListViewState = getSqlErdSessionListViewState({
+    errorMessage,
+    hasLoadedSessions,
+    isLoading,
+    sessionCount: sessions.length
+  });
 
   return (
     <main className="min-h-screen overflow-auto bg-muted/20">
@@ -233,7 +258,7 @@ export function SqlErdSessionList() {
       </header>
 
       <div className="mx-auto w-full max-w-6xl px-6 py-8">
-        {errorMessage ? (
+        {errorMessage && hasLoadedSessions ? (
           <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
             <p>{errorMessage}</p>
             <button
@@ -246,12 +271,28 @@ export function SqlErdSessionList() {
           </div>
         ) : null}
 
-        {isLoading ? (
+        {sessionListViewState === "loading" ? (
           <div className="flex min-h-72 items-center justify-center rounded-xl border bg-background text-sm text-muted-foreground">
             <LoaderCircle className="mr-2 size-4 animate-spin" />
             Session 목록을 불러오는 중입니다.
           </div>
-        ) : sessions.length === 0 ? (
+        ) : sessionListViewState === "error" ? (
+          <div className="flex min-h-72 flex-col items-center justify-center rounded-xl border border-red-200 bg-background px-6 text-center">
+            <h2 className="text-lg font-semibold text-red-700">
+              Session 목록을 불러오지 못했습니다
+            </h2>
+            <p className="mt-2 max-w-md text-sm leading-6 text-muted-foreground">
+              {errorMessage}
+            </p>
+            <button
+              className="mt-5 inline-flex h-10 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground"
+              onClick={() => void loadSessions()}
+              type="button"
+            >
+              다시 시도
+            </button>
+          </div>
+        ) : sessionListViewState === "empty" ? (
           <div className="flex min-h-72 flex-col items-center justify-center rounded-xl border border-dashed bg-background px-6 text-center">
             <Database className="size-10 text-muted-foreground/60" />
             <h2 className="mt-4 text-lg font-semibold">세션이 없습니다</h2>

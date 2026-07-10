@@ -31,6 +31,10 @@ async function compileSqlErdRuntimeModules() {
     outputDir,
     "session-navigation.mjs"
   );
+  const sessionListStateOutputPath = join(
+    outputDir,
+    "session-list-state.mjs"
+  );
   const sessionStateOutputPath = join(outputDir, "session-state.mjs");
   const statusCopyOutputPath = join(outputDir, "status-copy.mjs");
   const sqlEditorDialectOutputPath = join(outputDir, "sql-editor-dialect.mjs");
@@ -89,6 +93,10 @@ async function compileSqlErdRuntimeModules() {
     await compileTypeScriptModule(
       "../../src/features/sql-erd/utils/session-navigation.ts",
       sessionNavigationOutputPath
+    );
+    await compileTypeScriptModule(
+      "../../src/features/sql-erd/utils/session-list-state.ts",
+      sessionListStateOutputPath
     );
     await compileTypeScriptModule(
       "../../src/features/sql-erd/utils/session-state.ts",
@@ -180,6 +188,7 @@ async function compileSqlErdRuntimeModules() {
       layoutAutosaveRuntime,
       apiClientRuntime,
       sessionNavigationRuntime,
+      sessionListStateRuntime,
       sessionStateRuntime,
       sqlEditorDialectRuntime,
       statusCopyRuntime,
@@ -196,6 +205,7 @@ async function compileSqlErdRuntimeModules() {
       import(pathToFileHref(layoutAutosaveOutputPath)),
       import(pathToFileHref(apiClientOutputPath)),
       import(pathToFileHref(sessionNavigationOutputPath)),
+      import(pathToFileHref(sessionListStateOutputPath)),
       import(pathToFileHref(sessionStateOutputPath)),
       import(pathToFileHref(sqlEditorDialectOutputPath)),
       import(pathToFileHref(statusCopyOutputPath)),
@@ -215,6 +225,7 @@ async function compileSqlErdRuntimeModules() {
       inspectorRuntime,
       modelRuntime,
       relationShapeRuntime,
+      sessionListStateRuntime,
       sessionNavigationRuntime,
       sessionStateRuntime,
       sqlEditorDialectRuntime,
@@ -503,6 +514,7 @@ const [
   navigation,
   panel,
   sessionList,
+  sessionListStateUtils,
   sessionNavigationUtils,
   sessionStateUtils,
   generateSessionUtils,
@@ -533,6 +545,7 @@ const [
     readSqlErdFile(
       "../../src/features/sql-erd/components/sql-erd-session-list.tsx"
     ),
+    readSqlErdFile("../../src/features/sql-erd/utils/session-list-state.ts"),
     readSqlErdFile("../../src/features/sql-erd/utils/session-navigation.ts"),
     readSqlErdFile("../../src/features/sql-erd/utils/session-state.ts"),
     readSqlErdFile("../../src/features/sql-erd/utils/generate-session.ts"),
@@ -551,6 +564,7 @@ const [
 
 const {
   apiClientRuntime,
+  sessionListStateRuntime,
   sessionNavigationRuntime,
   canvasSelectionRuntime,
   ddlParserRuntime,
@@ -1060,6 +1074,23 @@ assert.deepEqual(initialReloadFailureAction.sessionLoadState, {
   message: "Workspace session could not be loaded. Showing the built-in sample instead.",
   tone: "neutral"
 });
+assert.deepEqual(
+  sessionStateRuntime.getSqlErdSessionLoadFailureState({
+    hasLoadedSession: false
+  }),
+  {
+    label: "Load failed",
+    message:
+      "Workspace session could not be loaded. Try again or return to the session list.",
+    tone: "error"
+  }
+);
+assert.deepEqual(
+  sessionStateRuntime.getSqlErdSessionLoadFailureState({
+    hasLoadedSession: true
+  }),
+  manualReloadFailureAction.sessionLoadState
+);
 assert.equal(
   sessionStateRuntime.shouldApplySqlErdSessionLoadResult(7, 7),
   true
@@ -1346,6 +1377,40 @@ assert.equal(
   "session 1"
 );
 assert.equal(sessionNavigationRuntime.readSqlErdSessionId("?sessionId=%20"), null);
+assert.equal(
+  sessionListStateRuntime.getSqlErdSessionListViewState({
+    errorMessage: "Session 목록을 불러오지 못했습니다.",
+    hasLoadedSessions: false,
+    isLoading: false,
+    sessionCount: 0
+  }),
+  "error"
+);
+assert.equal(
+  sessionListStateRuntime.getSqlErdSessionListViewState({
+    errorMessage: null,
+    hasLoadedSessions: true,
+    isLoading: false,
+    sessionCount: 0
+  }),
+  "empty"
+);
+assert.equal(
+  sessionListStateRuntime.getSqlErdSessionListViewState({
+    errorMessage: null,
+    hasLoadedSessions: true,
+    isLoading: true,
+    sessionCount: 0
+  }),
+  "loading"
+);
+assert.deepEqual(
+  sessionListStateRuntime.removeSqlErdSession(
+    [{ id: "session-1" }, { id: "session-2" }],
+    "session-1"
+  ),
+  [{ id: "session-2" }]
+);
 
 const listSqlErdSessionRequests = [];
 const listSqlErdSessionClient = apiClientRuntime.createSqlErdApiClient({
@@ -2498,10 +2563,19 @@ assert.match(sessionList, /nextCursor/);
 assert.match(sessionList, /더 보기/);
 assert.match(sessionList, /session\.revision/);
 assert.match(sessionList, /세션이 없습니다/);
+assert.match(sessionList, /getSqlErdSessionListViewState/);
+assert.match(sessionList, /removeSqlErdSession/);
+assert.match(
+  sessionList,
+  /await apiClient\.deleteSession[\s\S]*?setSessions\(\(currentSessions\) =>[\s\S]*?removeSqlErdSession[\s\S]*?await loadSessions/
+);
+assert.match(sessionListStateUtils, /getSqlErdSessionListViewState/);
+assert.match(sessionListStateUtils, /removeSqlErdSession/);
 assert.match(sessionNavigationUtils, /buildSqlErdSessionHref/);
 assert.match(sessionNavigationUtils, /readSqlErdSessionId/);
 
 assert.match(sessionStateUtils, /getSqlErdSessionReloadFailureAction/);
+assert.match(sessionStateUtils, /getSqlErdSessionLoadFailureState/);
 assert.match(sessionStateUtils, /kind: "preserve_current"/);
 assert.match(sessionStateUtils, /kind: "fallback_to_sample"/);
 assert.match(sessionStateUtils, /shouldApplySqlErdSessionLoadResult/);
@@ -2574,13 +2648,11 @@ assert.match(panel, /handleRetryLayoutAutosaveOnce/);
 assert.match(panel, /handleLayoutChange/);
 assert.match(panel, /sessionLoadRequestIdRef/);
 assert.match(panel, /shouldApplySqlErdSessionLoadResult/);
-assert.match(panel, /getSqlErdSessionReloadFailureAction/);
+assert.match(panel, /getSqlErdSessionLoadFailureState/);
+assert.match(panel, /hasLoadedSessionRef/);
 assert.match(panel, /SessionLoadPlaceholder/);
 assert.match(panel, /Session을 다시 불러오기/);
-assert.match(
-  panel,
-  /fallbackToSampleOnFailure: false/
-);
+assert.doesNotMatch(panel, /fallbackToSampleOnFailure/);
 assert.match(panel, /void handleReloadSession\(\)/);
 assert.match(panel, /onReloadSession=\{handleReloadPausedSession\}/);
 assert.doesNotMatch(panel, /onReloadSession=\{handleReloadSession\}/);

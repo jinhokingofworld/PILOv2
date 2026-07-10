@@ -214,6 +214,25 @@ export function getSqlErdSessionReloadFailureAction({
   };
 }
 
+export function getSqlErdSessionLoadFailureState({
+  hasLoadedSession
+}: {
+  hasLoadedSession: boolean;
+}): SqlErdSessionLoadState {
+  if (!hasLoadedSession) {
+    return {
+      label: "Load failed",
+      message:
+        "Workspace session could not be loaded. Try again or return to the session list.",
+      tone: "error"
+    };
+  }
+
+  return getSqlErdSessionReloadFailureAction({
+    fallbackToSampleOnFailure: false
+  }).sessionLoadState;
+}
+
 export function shouldApplySqlErdSessionLoadResult(
   requestId: number,
   currentRequestId: number
