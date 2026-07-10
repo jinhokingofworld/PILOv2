@@ -1,5 +1,9 @@
 from app.job_dispatcher import JobProcessResult
-from app.meeting_report_runtime import RuntimeSettings, SqsAiJobWorker
+from app.meeting_report_runtime import (
+    PgAgentRunRepository,
+    RuntimeSettings,
+    SqsAiJobWorker,
+)
 
 
 class FakeDispatcher:
@@ -57,6 +61,36 @@ class FakeAgentRetryExhaustionRecovery:
         if self.error:
             raise self.error
         return self.result
+
+
+class FakeLockRow:
+    def __init__(self, acquired: bool) -> None:
+        self.acquired = acquired
+
+    def __getitem__(self, key: str) -> bool:
+        assert key == "acquired"
+        return self.acquired
+
+
+class FakeLockCursor:
+    def __init__(self, acquired: bool) -> None:
+        self.acquired = acquired
+
+    def fetchone(self) -> FakeLockRow:
+        return FakeLockRow(self.acquired)
+
+
+class FakeLockConnection:
+    def __init__(self, acquired: bool) -> None:
+        self.acquired = acquired
+        self.transaction_calls = 0
+
+    def execute(self, _query: str, _values: tuple[object, ...]) -> FakeLockCursor:
+        return FakeLockCursor(self.acquired)
+
+    def transaction(self):
+        self.transaction_calls += 1
+        raise AssertionError("terminal transaction must not run without the run lock")
 
 
 def runtime_settings() -> RuntimeSettings:
@@ -228,6 +262,15 @@ def test_sqs_worker_preserves_agent_message_when_terminalization_errors() -> Non
 
     assert recovery.calls == ["run-1"]
     assert sqs_client.deleted == []
+
+
+def test_retry_terminalizer_preserves_message_when_planner_lock_is_held() -> None:
+    repository = object.__new__(PgAgentRunRepository)
+    connection = FakeLockConnection(acquired=False)
+    repository.connection = connection
+
+    assert repository.fail_planning_after_retry_exhaustion("run-1") is False
+    assert connection.transaction_calls == 0
 
 
 def test_sqs_worker_sweeps_stale_agent_executions_on_interval() -> None:

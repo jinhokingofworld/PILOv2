@@ -317,8 +317,8 @@ class PgAgentRunRepository:
         run_id: str,
         step_id: str,
         output_summary: dict[str, object],
-    ) -> None:
-        self.connection.execute(
+    ) -> bool:
+        row = self.connection.execute(
             """
             UPDATE agent_steps
             SET
@@ -328,9 +328,12 @@ class PgAgentRunRepository:
               updated_at = now()
             WHERE id = %s
               AND run_id = %s
+              AND status = 'running'
+            RETURNING id
             """,
             (json.dumps(output_summary, ensure_ascii=False), step_id, run_id),
-        )
+        ).fetchone()
+        return row is not None
 
     def fail_planner_step(
         self,
@@ -427,82 +430,88 @@ class PgAgentRunRepository:
         )
 
     def fail_planning_after_retry_exhaustion(self, run_id: str) -> bool:
-        with self.connection.transaction():
-            run = self.connection.execute(
-                """
-                UPDATE agent_runs
-                SET
-                  status = 'failed',
-                  error_code = %s,
-                  error_message = %s,
-                  message = %s,
-                  completed_at = now(),
-                  updated_at = now()
-                WHERE id = %s
-                  AND status = 'planning'
-                RETURNING workspace_id
-                """,
-                (
-                    AGENT_RETRY_EXHAUSTED_ERROR_CODE,
-                    AGENT_RETRY_EXHAUSTED_ERROR_MESSAGE,
-                    AGENT_RETRY_EXHAUSTED_ERROR_MESSAGE,
-                    run_id,
-                ),
-            ).fetchone()
+        if not self.try_acquire_run_lock(run_id):
+            return False
 
-            if run is None:
-                return False
+        try:
+            with self.connection.transaction():
+                run = self.connection.execute(
+                    """
+                    UPDATE agent_runs
+                    SET
+                      status = 'failed',
+                      error_code = %s,
+                      error_message = %s,
+                      message = %s,
+                      completed_at = now(),
+                      updated_at = now()
+                    WHERE id = %s
+                      AND status = 'planning'
+                    RETURNING workspace_id
+                    """,
+                    (
+                        AGENT_RETRY_EXHAUSTED_ERROR_CODE,
+                        AGENT_RETRY_EXHAUSTED_ERROR_MESSAGE,
+                        AGENT_RETRY_EXHAUSTED_ERROR_MESSAGE,
+                        run_id,
+                    ),
+                ).fetchone()
 
-            self.connection.execute(
-                """
-                UPDATE agent_steps
-                SET
-                  status = 'failed',
-                  error_code = %s,
-                  error_message = %s,
-                  completed_at = now(),
-                  updated_at = now()
-                WHERE run_id = %s
-                  AND step_type = 'planner'
-                  AND status = 'running'
-                """,
-                (
-                    AGENT_RETRY_EXHAUSTED_ERROR_CODE,
-                    AGENT_RETRY_EXHAUSTED_ERROR_MESSAGE,
-                    run_id,
-                ),
-            )
-            self.connection.execute(
-                """
-                INSERT INTO agent_logs (
-                  workspace_id,
-                  run_id,
-                  actor_type,
-                  level,
-                  event_type,
-                  message,
-                  metadata_json,
-                  resource_refs
+                if run is None:
+                    return False
+
+                self.connection.execute(
+                    """
+                    UPDATE agent_steps
+                    SET
+                      status = 'failed',
+                      error_code = %s,
+                      error_message = %s,
+                      completed_at = now(),
+                      updated_at = now()
+                    WHERE run_id = %s
+                      AND step_type = 'planner'
+                      AND status = 'running'
+                    """,
+                    (
+                        AGENT_RETRY_EXHAUSTED_ERROR_CODE,
+                        AGENT_RETRY_EXHAUSTED_ERROR_MESSAGE,
+                        run_id,
+                    ),
                 )
-                VALUES (
-                  %s,
-                  %s,
-                  'system',
-                  'error',
-                  'planner_retry_exhausted',
-                  %s,
-                  %s::jsonb,
-                  '[]'::jsonb
+                self.connection.execute(
+                    """
+                    INSERT INTO agent_logs (
+                      workspace_id,
+                      run_id,
+                      actor_type,
+                      level,
+                      event_type,
+                      message,
+                      metadata_json,
+                      resource_refs
+                    )
+                    VALUES (
+                      %s,
+                      %s,
+                      'system',
+                      'error',
+                      'planner_retry_exhausted',
+                      %s,
+                      %s::jsonb,
+                      '[]'::jsonb
+                    )
+                    """,
+                    (
+                        str(run["workspace_id"]),
+                        run_id,
+                        "Agent planner retries exhausted",
+                        json.dumps({"maxReceiveCount": AGENT_RETRY_TERMINAL_RECEIVE_COUNT}),
+                    ),
                 )
-                """,
-                (
-                    str(run["workspace_id"]),
-                    run_id,
-                    "Agent planner retries exhausted",
-                    json.dumps({"maxReceiveCount": AGENT_RETRY_TERMINAL_RECEIVE_COUNT}),
-                ),
-            )
-            return True
+                return True
+        finally:
+            self.release_run_lock(run_id)
 
 
 class S3RecordingStorage:
