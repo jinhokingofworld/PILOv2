@@ -19,6 +19,7 @@ import {
   extractContentConflictHunks,
   type PrReviewConflictHunkPayload
 } from "./pr-review-conflict-analyzer";
+import type { PrReviewResolvedHunkPayload } from "./pr-review-conflict-resolution";
 import {
   PrReviewAnalysisService,
   type PrReviewConflictSuggestionResult,
@@ -491,6 +492,7 @@ export interface PrReviewConflictFilePayload {
   isSupported: true;
   resolutionStatus: PrReviewConflictResolutionStatus;
   headBlobSha: string;
+  headContent: string;
   hunks: PrReviewConflictHunkPayload[];
   aiSummary: string | null;
   aiSuggestion: string | null;
@@ -529,6 +531,7 @@ export interface PrReviewConflictSuggestionPayload {
   headBlobSha: string;
   aiSummary: string;
   aiSuggestion: string;
+  resolvedHunks: PrReviewResolvedHunkPayload[];
   resolvedContent: string;
   validationMessages: string[];
   stored: false;
@@ -895,7 +898,14 @@ export class PrReviewService {
         continue;
       }
 
-      files.push(this.mapContentConflictFile(file, hunks, conflictInput.headBlobSha));
+      files.push(
+        this.mapContentConflictFile(
+          file,
+          hunks,
+          conflictInput.headBlobSha,
+          conflictInput.headContent
+        )
+      );
     }
 
     return this.buildConflictAnalysisPayload({
@@ -2747,7 +2757,8 @@ export class PrReviewService {
   private mapContentConflictFile(
     file: ReviewFileConflictTargetRow,
     hunks: PrReviewConflictHunkPayload[],
-    headBlobSha: string
+    headBlobSha: string,
+    headContent: string
   ): PrReviewConflictFilePayload {
     return {
       reviewFileId: file.id,
@@ -2757,6 +2768,7 @@ export class PrReviewService {
       isSupported: true,
       resolutionStatus: "unresolved",
       headBlobSha,
+      headContent,
       hunks,
       aiSummary: null,
       aiSuggestion: null,
@@ -2792,6 +2804,7 @@ export class PrReviewService {
       headBlobSha,
       aiSummary: suggestion.aiSummary,
       aiSuggestion: suggestion.aiSuggestion,
+      resolvedHunks: suggestion.resolvedHunks,
       resolvedContent: suggestion.resolvedContent,
       validationMessages: suggestion.validationMessages,
       stored: false

@@ -19,6 +19,9 @@ const prReviewDiffParser = await readSource(
 const prReviewConflictAnalyzer = await readSource(
   "../../src/modules/pr-review/pr-review-conflict-analyzer.ts"
 );
+const prReviewConflictResolution = await readSource(
+  "../../src/modules/pr-review/pr-review-conflict-resolution.ts"
+);
 const prReviewAnalysisService = await readSource(
   "../../src/modules/pr-review/pr-review-analysis.service.ts"
 );
@@ -216,6 +219,8 @@ assert.match(prReviewAnalysisService, /PR_REVIEW_CONFLICT_SUGGESTION_SCHEMA/);
 assert.match(prReviewAnalysisService, /pr_review_conflict_suggestion/);
 assert.match(prReviewAnalysisService, /suggestConflictResolution/);
 assert.match(prReviewAnalysisService, /buildDeterministicConflictSuggestion/);
+assert.match(prReviewAnalysisService, /resolvedHunks/);
+assert.match(prReviewAnalysisService, /buildResolvedFileContent/);
 assert.match(prReviewAnalysisService, /CONFLICT_MARKER_PATTERN/);
 assert.match(prReviewAnalysisService, /riskLevel/);
 assert.match(prReviewAnalysisService, /output_text/);
@@ -239,6 +244,10 @@ assert.match(prReviewConflictAnalyzer, /excludeFalseConflicts: true/);
 assert.match(prReviewConflictAnalyzer, /baseText/);
 assert.match(prReviewConflictAnalyzer, /currentText/);
 assert.match(prReviewConflictAnalyzer, /incomingText/);
+assert.match(prReviewConflictResolution, /buildResolvedFileContent/);
+assert.match(prReviewConflictResolution, /resolvedTextByHunkId/);
+assert.match(prReviewService, /headContent/);
+assert.match(prReviewService, /resolvedHunks/);
 assert.match(prReviewTypes, /PrReviewFileReviewStatus/);
 assert.match(prReviewTypes, /PrReviewGithubConflictInputsPayload/);
 assert.match(prReviewTypes, /PrReviewGithubReviewSubmitType/);
@@ -256,6 +265,8 @@ assert.match(prReviewApi, /Conflict Analysis/);
 assert.match(prReviewApi, /AI Conflict Suggestion Draft/);
 assert.match(prReviewApi, /conflict-suggestion/);
 assert.match(prReviewApi, /conflictSuggestion\.status/);
+assert.match(prReviewApi, /"headContent"/);
+assert.match(prReviewApi, /"resolvedHunks"/);
 assert.match(prReviewApi, /stored": false/);
 assert.match(prReviewApi, /githubCreatedAt/);
 assert.match(prReviewApi, /fileNodeData/);
@@ -269,4 +280,5 @@ assert.match(databaseService, /ROLLBACK/);
 
 await import("./diff-parser.test.mjs");
 await import("./conflict-analyzer.test.mjs");
+await import("./conflict-resolution.test.mjs");
 await import("./submission.test.mjs");
