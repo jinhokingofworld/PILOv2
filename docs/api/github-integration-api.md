@@ -52,7 +52,10 @@ installation lookup and PR review submission. Personal ProjectV2 discovery and
 ProjectV2 item status writes use `/me/github/project-oauth/start`, which
 requests `read:user user:email project` and stores the encrypted token in
 `users.github_project_access_token_encrypted`. The callback rejects tokens whose
-scope does not include `project`.
+scope does not include `project`. If the user already has an active
+`/me/github/oauth/start` connection, the ProjectV2 OAuth callback also rejects a
+different GitHub login with
+`GitHub ProjectV2 OAuth account must match GitHub OAuth account`.
 
 GitHub Review 제출은 GitHub Integration 공개 API endpoint가 아니다. PR Review API가
 제출 workflow와 local submission history를 소유하고, GitHub Integration은 PR Review가
@@ -82,7 +85,9 @@ GitHub App installation 연결을 시작하려면 현재 사용자의 GitHub OAu
 선행되어야 한다. Installation callback 처리 시 서버는 저장된 사용자 OAuth
 token으로 GitHub의 user installations 목록을 조회해 callback의
 `installation_id`가 현재 연결된 GitHub 사용자에게 접근 가능한 installation인지
-검증한 뒤 `github_installations`에 저장한다.
+검증한 뒤 `github_installations`에 저장한다. 저장 성공 후 서버는 같은 요청 흐름에서
+초기 `full` sync run을 시도한다. 초기 sync 실패는 callback 자체를 실패시키지 않고
+서버 warning log와 실패한 sync run 기록으로 남긴다.
 
 ## 데이터 규칙
 
@@ -139,6 +144,24 @@ token으로 GitHub의 user installations 목록을 조회해 callback의
   `github_repository_id`를 다시 발견하면 해당 Workspace 안의 기존 repository cache
   `installation_id`가 새 installation으로 갱신된다.
 
+## 공통 조회/페이지네이션 규칙
+
+- 모든 `/workspaces/{workspaceId}/github/*` 조회 API는 PILO bearer token과
+  Workspace 접근 권한을 요구한다.
+- `DELETE /workspaces/{workspaceId}/github/installations/{installationId}`만
+  Workspace owner 권한을 요구한다. Installation 시작, 목록, 원본 조회, sync run
+  조회/시작은 Workspace 접근 권한을 사용한다.
+- 페이지네이션 query는 `page`, `limit`을 사용한다. `page`와 `limit`은 양의 정수여야
+  하며 `limit` 최대값은 `100`이다.
+- repository 목록, ProjectV2 목록, sync run 목록, PR file 목록의 기본 `limit`은
+  `20`이다. repository별 PR 목록의 기본 `limit`은 `10`이다.
+- 페이지네이션 응답은 `{ success: true, data: [...], meta: { page, limit, total } }`
+  형태다.
+- boolean query는 구현상 문자열 `true` 또는 `false`만 허용한다. 빈 값은 생략으로
+  처리한다.
+- string query는 배열이면 거절하고, 앞뒤 공백을 제거한 뒤 빈 문자열이면 생략으로
+  처리한다.
+
 ## API 목록
 
 | Method | Endpoint | 설명 |
@@ -177,6 +200,164 @@ token으로 GitHub의 user installations 목록을 조회해 callback의
 
 ## 주요 요청
 
+### OAuth 상태, 시작, 해제
+
+`GET /me/github`와 `GET /me/github/project-oauth`는 같은 shape를 반환한다. 연결이
+해제됐거나 아직 연결되지 않은 경우 `connected=false`이며 `tokenScope`는 `null`이다.
+
+```json
+{
+  "success": true,
+  "data": {
+    "connected": true,
+    "githubUserId": 123456,
+    "githubLogin": "octocat",
+    "tokenScope": "read:user,user:email,project",
+    "githubConnectedAt": "2026-07-07T12:00:00.000Z",
+    "githubRevokedAt": null
+  }
+}
+```
+
+`POST /me/github/oauth/start`, `POST /me/github/project-oauth/start`,
+`POST /workspaces/{workspaceId}/github/installations/start`는 선택 body
+`{ "returnUrl": "/settings/integrations" }`를 받을 수 있다. 성공 시 JSON에는
+provider URL과 signed state만 포함되고, callback binding token은 `Set-Cookie`
+header로만 전달된다.
+
+```json
+{
+  "success": true,
+  "data": {
+    "authorizeUrl": "https://github.com/login/oauth/authorize?...",
+    "state": "signed_state"
+  }
+}
+```
+
+Installation 시작 응답은 `authorizeUrl` 대신 `installUrl`을 사용한다.
+
+```json
+{
+  "success": true,
+  "data": {
+    "installUrl": "https://github.com/apps/pilo-github-app/installations/new?state=signed_state",
+    "state": "signed_state"
+  }
+}
+```
+
+`DELETE /me/github`와 `DELETE /me/github/project-oauth`는 현재 사용자의 암호화된
+token과 scope를 제거하고 revoked timestamp를 남긴다.
+
+```json
+{
+  "success": true,
+  "data": {
+    "disconnected": true
+  }
+}
+```
+
+### GitHub App installation
+
+`POST /workspaces/{workspaceId}/github/installations/start`는 Workspace 접근 권한,
+활성 `/me/github/oauth/start` 연결, GitHub `/user/installations` 조회 가능 여부를
+검증한 뒤 GitHub App 설치 URL을 생성한다.
+
+`GET /github/installations/callback` query:
+
+| Query | 설명 |
+| --- | --- |
+| `installation_id` | GitHub installation id. 양의 정수여야 한다. |
+| `setup_action` | GitHub App setup action. 값 자체는 저장하지 않지만 필수다. |
+| `state` | 설치 시작 API가 만든 signed state. |
+
+callback은 state와 binding cookie를 소비한 뒤, 저장된 사용자 OAuth token으로 해당
+installation이 현재 GitHub 사용자에게 접근 가능한지 검증한다. 성공하면
+`github_installations`를 upsert하고 초기 `full` sync를 시도한다.
+
+Installation 목록 응답:
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "installation_uuid",
+      "workspaceId": "workspace_uuid",
+      "githubInstallationId": 12345678,
+      "accountLogin": "my-team",
+      "accountType": "Organization",
+      "repositorySelection": "selected",
+      "permissions": { "contents": "read", "pull_requests": "write" },
+      "installedByUserId": "user_uuid",
+      "installedAt": "2026-07-07T12:00:00.000Z",
+      "suspendedAt": null,
+      "lastSyncedAt": "2026-07-07T12:05:00.000Z"
+    }
+  ]
+}
+```
+
+### 원본 조회 Query
+
+Repository 목록:
+
+```http
+GET /api/v1/workspaces/{workspaceId}/github/repositories?q=pilo&includeArchived=false&page=1&limit=20
+```
+
+| Query | 설명 |
+| --- | --- |
+| `q` | `ownerLogin`, `name`, `fullName` 부분 검색 |
+| `includeArchived` | `true`면 archived repository도 포함. 생략 또는 `false`면 제외 |
+| `page`, `limit` | 기본 `1`, `20`; 최대 limit `100` |
+
+Repository 목록은 `installation_id IS NOT NULL`인 현재 active installation cache만
+반환하며 `fullName ASC, id ASC`로 정렬한다.
+
+ProjectV2 목록:
+
+```http
+GET /api/v1/workspaces/{workspaceId}/github/projects-v2?ownerLogin=my-team&closed=false&q=MVP&page=1&limit=20
+```
+
+| Query | 설명 |
+| --- | --- |
+| `ownerLogin` | GitHub owner login exact match |
+| `closed` | `true`면 closed ProjectV2도 포함. 생략 또는 `false`면 `closed=false`만 반환 |
+| `q` | `title`, `shortDescription` 부분 검색 |
+| `page`, `limit` | 기본 `1`, `20`; 최대 limit `100` |
+
+ProjectV2 목록은 `ownerLogin ASC, projectNumber ASC, id ASC`로 정렬한다.
+
+Repository PR 목록:
+
+```http
+GET /api/v1/workspaces/{workspaceId}/github/repositories/{repositoryId}/pull-requests?state=open&query=24&page=1&limit=10
+```
+
+| Query | 설명 |
+| --- | --- |
+| `state` | `open` 또는 `closed` |
+| `query` | PR title 또는 PR number text 부분 검색 |
+| `page`, `limit` | 기본 `1`, `10`; 최대 limit `100` |
+
+PR state는 `github_pull_requests.raw.state`를 우선 사용하고, 없으면
+`merged_at` 또는 `github_closed_at` 존재 여부에서 파생한다. 목록은
+`github_updated_at DESC NULLS LAST, pr_number DESC, id ASC`로 정렬한다.
+
+Sync run 목록:
+
+| Query | 설명 |
+| --- | --- |
+| `target` | `repositories`, `issues`, `pull_requests`, `project_v2`, `project_v2_fields`, `project_v2_items`, `full` |
+| `status` | `running`, `success`, `failed` |
+| `repositoryId` | 특정 repository 관련 run만 조회 |
+| `projectV2Id` | 특정 ProjectV2 관련 run만 조회 |
+| `page`, `limit` | 기본 `1`, `20`; 최대 limit `100` |
+
 ### 수동 동기화 시작
 
 ```json
@@ -188,10 +369,45 @@ token으로 GitHub의 user installations 목록을 조회해 callback의
 }
 ```
 
-`repositoryId`, `projectV2Id`는 target에 따라 선택값이다. 서버는
-`github_sync_runs`에 status와 count를 기록한다.
+`target`과 `installationId`는 필수다. `repositoryId`, `projectV2Id`는 선택값이지만,
+값이 있으면 path의 Workspace 안에 존재하고 같은 installation에 속해야 한다.
+`project_v2`, `project_v2_fields`, `project_v2_items` target은 `projectV2Id`가
+필수다. `issues`와 `pull_requests`는 `repositoryId`가 있으면 해당 repository만,
+없으면 installation에 연결된 repository 전체를 동기화한다.
 
-### ProjectV2 목록/상세 응답
+수동 sync API는 `github_sync_runs` row를 `running`으로 만든 뒤 executor를 실행하고,
+완료된 `success` 또는 `failed` payload를 반환한다. Provider 처리 중 발생한 오류는
+가능한 경우 API 예외 대신 `status="failed"`와 `errorMessage`로 기록해 반환한다.
+요청 validation, Workspace 범위, installation/repository/project lookup 실패는 일반
+API error로 반환한다.
+
+응답 예시:
+
+```json
+{
+  "success": true,
+  "data": {
+    "id": "sync_run_uuid",
+    "target": "full",
+    "status": "success",
+    "installationId": "installation_uuid",
+    "repositoryId": "repository_uuid",
+    "projectV2Id": "project_v2_uuid",
+    "startedAt": "2026-07-07T12:00:00.000Z",
+    "finishedAt": "2026-07-07T12:01:00.000Z",
+    "fetchedCount": 5,
+    "createdCount": 2,
+    "updatedCount": 2,
+    "skippedCount": 1,
+    "errorMessage": null
+  }
+}
+```
+
+`GET /workspaces/{workspaceId}/github/sync-runs/{syncRunId}`는 위 payload에
+`cursor: Record<string, unknown>`을 추가로 포함한다.
+
+### ProjectV2 응답
 
 `GET /workspaces/{workspaceId}/github/projects-v2`와
 `GET /workspaces/{workspaceId}/github/projects-v2/{projectV2Id}`의 ProjectV2
@@ -202,76 +418,91 @@ payload는 board 구성을 위해 연결된 repository id 목록을 포함한다
   "id": "project_v2_uuid",
   "installationId": "installation_uuid",
   "githubProjectNodeId": "PVT_kwDOExample",
+  "githubProjectFullDatabaseId": 42,
   "ownerLogin": "my-team",
   "ownerType": "Organization",
   "projectNumber": 10,
   "title": "PILO MVP",
+  "shortDescription": "MVP board",
+  "url": "https://github.com/orgs/my-team/projects/10",
+  "public": false,
+  "closed": false,
+  "template": false,
   "repositoryIds": ["repository_uuid"],
   "lastSyncedAt": "2026-07-07T12:00:00.000Z"
 }
 ```
 
-### Repository collaborator 권한 응답
+상세 응답은 목록 필드에 `readme`, `resourcePath`, `githubCreatedAt`,
+`githubUpdatedAt`, `githubClosedAt`을 추가한다.
 
-`GET /workspaces/{workspaceId}/github/repositories/{repositoryId}/collaborator-status`는
-현재 PILO bearer session 사용자 기준으로 Repository collaborator 권한을 조회한다.
-Workspace owner/member 모두 호출할 수 있지만, 현재 사용자의 GitHub App user OAuth
-연결이 필요하다. 서버는 `users.github_login`과 저장된 OAuth token으로 GitHub REST
-`GET /repos/{owner}/{repo}/collaborators/{username}/permission`을 호출한다.
+`GET /workspaces/{workspaceId}/github/projects-v2/{projectV2Id}/kanban`은
+동기화된 Status field와 option, item cache를 원본 view 형태로 묶어 반환한다.
+Status field가 없으면 `statusField=null`, `columns=[]`가 될 수 있으며 status option에
+매핑되지 않는 item은 `unmappedItems`에 들어간다.
 
-GitHub OAuth 연결이 없거나 해제된 사용자는 `400 BAD_REQUEST`를 반환한다. Repository가
-현재 Workspace에 없으면 `404 NOT_FOUND`를 반환한다. GitHub가 collaborator가 아니라고
-응답하면 `permission`은 `null`, `hasAccess`는 `false`다.
+### PR 변경 파일과 conflict 상태
 
-```json
-{
-  "repository": {
-    "id": "repository_uuid",
-    "fullName": "PILO-APP/PILO"
-  },
-  "githubLogin": "ndh5178",
-  "permission": "write",
-  "hasAccess": true,
-  "checkedAt": "2026-07-09T06:00:00.000Z"
-}
-```
-
-### ProjectV2 접근 권한 응답
-
-`GET /workspaces/{workspaceId}/github/projects-v2/{projectV2Id}/access-status`는
-현재 PILO bearer session 사용자 기준으로 ProjectV2 접근 권한을 조회한다.
-Workspace owner/member 모두 호출할 수 있지만, 현재 사용자의 ProjectV2 OAuth 연결과
-`project` scope가 필요하다. 서버는 `boards.project_v2_id`를 직접 결정하지 않으며,
-호출자가 선택한 ProjectV2 id를 전달한다. Home은 현재 Board 선택값의 `project_v2_id`를
-사용한다.
-
-서버는 저장된 ProjectV2 OAuth token으로 GitHub GraphQL `projectsV2`를
-`ADMIN`, `WRITE`, `READ` 순서의 `minPermissionLevel`로 조회해 현재 사용자의 권한을
-판정한다. `ADMIN`이면 `canManageAccess`가 `true`이며 GitHub Project의 Manage access
-수준 권한으로 본다. ProjectV2 OAuth 연결이 없거나 scope가 부족하면 `400 BAD_REQUEST`를
-반환한다. ProjectV2가 현재 Workspace에 없으면 `404 NOT_FOUND`를 반환한다.
+PR 변경 파일은 DB에 캐시하지 않고 요청 시 GitHub App installation token으로 GitHub에서
+조회한다. 응답 `meta.total`은 cached PR의 `changedFilesCount`를 사용한다.
 
 ```json
 {
-  "project": {
-    "id": "project_v2_uuid",
-    "title": "PILO Workspace",
-    "ownerLogin": "PILO-APP"
-  },
-  "githubLogin": "ndh5178",
-  "permission": "ADMIN",
-  "hasAccess": true,
-  "canUpdate": true,
-  "canManageAccess": true,
-  "checkedAt": "2026-07-09T06:00:00.000Z"
+  "success": true,
+  "data": [
+    {
+      "filePath": "apps/frontend/page.tsx",
+      "previousFilePath": null,
+      "fileName": "page.tsx",
+      "fileStatus": "modified",
+      "additions": 84,
+      "deletions": 12,
+      "changes": 96,
+      "isBinary": false,
+      "isLargeDiff": false,
+      "blobUrl": "https://github.com/org/repo/blob/abc/apps/frontend/page.tsx",
+      "rawUrl": "https://github.com/org/repo/raw/abc/apps/frontend/page.tsx",
+      "contentsUrl": "https://api.github.com/repos/org/repo/contents/apps/frontend/page.tsx",
+      "githubFileUrl": "https://github.com/org/repo/pull/24/files#diff-abc",
+      "patch": "@@ -10,6 +10,18 @@..."
+    }
+  ],
+  "meta": {
+    "page": 1,
+    "limit": 20,
+    "total": 5
+  }
 }
 ```
+
+`patch`는 GitHub API 응답값이며 DB 저장 컬럼이 아니다. Binary 파일이거나 큰 diff이면
+`patch=null`로 반환한다. 큰 diff 기준은 `additions + deletions >= 1000`,
+patch 누락, 또는 UTF-8 patch byte length `>= 200KB` 중 하나다.
+
+Conflict 상태 응답:
+
+```json
+{
+  "success": true,
+  "data": {
+    "conflictStatus": "clean",
+    "conflictCheckedAt": "2026-07-07T12:00:00.000Z",
+    "message": "Conflict가 없는 상태입니다."
+  }
+}
+```
+
+GitHub PR `mergeable=true`는 `clean`, `false`는 `conflicted`, `null`은 `checking`으로
+매핑한다. GitHub PR 조회 자체가 실패하면 provider raw error를 노출하지 않고
+`unknown`과 `Conflict 상태를 확인할 수 없습니다.` 메시지를 반환한다.
 
 ### GitHub webhook receiver
 
 GitHub App webhook 설정 URL은 `{API_PUBLIC_ORIGIN}/api/v1/github/webhooks`이다.
 
-요청은 GitHub가 보내는 raw body 기준으로 `X-Hub-Signature-256` HMAC-SHA256 signature를 검증한다. signature 검증에는 `GITHUB_WEBHOOK_SECRET`을 사용하며, webhook secret이나 provider 원문 오류는 응답 또는 로그에 노출하지 않는다.
+요청은 GitHub가 보내는 raw body 기준으로 `X-Hub-Signature-256` HMAC-SHA256
+signature를 검증한다. signature 검증에는 `GITHUB_WEBHOOK_SECRET`을 사용하며, webhook
+secret이나 provider 원문 오류는 응답 또는 로그에 노출하지 않는다.
 
 필수 header:
 
@@ -281,12 +512,30 @@ GitHub App webhook 설정 URL은 `{API_PUBLIC_ORIGIN}/api/v1/github/webhooks`이
 | `X-GitHub-Event` | GitHub event name. `github_webhook_deliveries.event_name`에 저장한다. |
 | `X-Hub-Signature-256` | `sha256=` prefix를 포함한 GitHub webhook signature. |
 
+지원 event:
+
+```text
+ping
+installation
+installation_repositories
+repository
+issues
+issue_comment
+pull_request
+pull_request_review
+pull_request_review_comment
+projects_v2
+projects_v2_item
+projects_v2_status_update
+github_app_authorization
+```
+
 처리 규칙:
 
 - signature가 유효하지 않으면 delivery를 `failed`로 기록하고 `400 BAD_REQUEST`를 반환한다.
-- 이미 같은 `delivery_id` row가 있으면 신규 insert나 overwrite 없이 기존 row를 반환한다.
+- 이미 같은 `delivery_id` row가 있고 상태가 `received` 또는 `ignored`이면 신규 insert나 overwrite 없이 기존 row를 반환한다.
 - 지원하는 event는 `received`로 기록한다. `received`는 delivery가 검증되어 수신됐다는 의미이며, source table 동기화 완료를 의미하지 않는다.
-- 지원하지 않는 event는 오류 없이 `ignored`로 기록한다.
+- 지원하지 않는 event는 오류 없이 `ignored`로 기록하고 `processedAt`을 기록한다.
 - 현재 receiver는 sync run이나 background job을 직접 시작하지 않는다. webhook 기반 자동 동기화가 필요하면 별도 worker/queue 계약을 추가로 정의한다.
 
 응답 예시:
@@ -344,35 +593,6 @@ DELETE /api/v1/workspaces/{workspaceId}/github/installations/{installationId}
   }
 }
 ```
-
-### PR 변경 파일 응답
-
-```json
-{
-  "success": true,
-  "data": [
-    {
-      "filePath": "apps/frontend/page.tsx",
-      "previousFilePath": null,
-      "fileName": "page.tsx",
-      "fileStatus": "modified",
-      "additions": 84,
-      "deletions": 12,
-      "isBinary": false,
-      "isLargeDiff": false,
-      "githubFileUrl": "https://github.com/org/repo/pull/24/files#diff-abc",
-      "patch": "@@ -10,6 +10,18 @@..."
-    }
-  ],
-  "meta": {
-    "page": 1,
-    "limit": 20,
-    "total": 5
-  }
-}
-```
-
-`patch`는 GitHub API 응답값이며 DB 저장 컬럼이 아니다.
 
 ## MVP 제외
 
