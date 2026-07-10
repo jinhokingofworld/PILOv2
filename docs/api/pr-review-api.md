@@ -39,7 +39,7 @@ comment, PR merge/close, ProjectV2 write는 이 문서의 범위가 아니다.
 - GitHub Review 제출은 GitHub Integration에서 연결한 현재 사용자의 GitHub App user OAuth token으로 수행하며 review body만 제출한다.
 - 현재 GitHub PR head SHA가 session의 `headSha`와 다르면 제출을 막는다.
 - Conflict resolution apply는 현재 사용자의 GitHub App user OAuth token으로 PR head branch에
-  단일 conflict 파일을 해결한 merge commit을 만든다.
+  하나 이상의 content conflict 파일을 해결한 단일 merge commit을 만든다.
 - PILO가 만든 conflict resolution apply commit에 한해서 review session의 `headSha`와
   `conflictStatus`를 새 PR head 기준으로 갱신할 수 있다.
 - Conflict resolution apply는 file review decision, review submission history, PR merge 상태를
@@ -73,8 +73,9 @@ comment, PR merge/close, ProjectV2 write는 이 문서의 범위가 아니다.
 | `GET` | `/workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}/result` | 전체 리뷰 결과 조회 |
 | `GET` | `/workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}/canvas` | 리뷰 canvas view model 조회 |
 | `GET` | `/workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}/conflicts` | Post-MVP read-only conflict 분석 조회 |
+| `POST` | `/workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}/conflict-apply` | Post-MVP 다중 conflict 해결안을 하나의 merge commit으로 적용 |
 | `POST` | `/workspaces/{workspaceId}/github/review-files/{reviewFileId}/conflict-suggestion` | Post-MVP AI conflict 해결 초안 생성 |
-| `POST` | `/workspaces/{workspaceId}/github/review-files/{reviewFileId}/conflict-apply` | Post-MVP conflict 해결안을 PR head branch에 적용 |
+| `POST` | `/workspaces/{workspaceId}/github/review-files/{reviewFileId}/conflict-apply` | 단일 conflict 해결안 적용 호환 endpoint |
 | `GET` | `/workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}/flows` | Flow 목록 조회 |
 | `GET` | `/workspaces/{workspaceId}/github/review-flows/{flowId}/files` | Flow에 속한 file 목록 조회 |
 | `GET` | `/workspaces/{workspaceId}/github/review-files/{reviewFileId}` | Review file 상세 조회 |
@@ -620,9 +621,70 @@ POST /api/v1/workspaces/{workspaceId}/github/review-files/{reviewFileId}/conflic
 
 ## Conflict Resolution Apply
 
-Post-MVP Phase 1-E에서 구현하는 사용자 확인 기반 conflict 해결 적용 계약이다.
-이 endpoint는 `content` conflict 파일 하나에 대해 사용자가 확인한 `resolvedContent`를
-PR head와 base를 parent로 갖는 merge commit으로 적용한다. PR merge/close는 수행하지 않는다.
+사용자 확인 기반 conflict 해결 적용 계약이다. session 단위 endpoint는 모든 `content`
+conflict 파일의 해결 코드를 한 요청으로 받아 PR head와 base를 parent로 갖는 merge commit
+하나로 적용한다. 일부 파일만 commit하거나 PR merge/close를 수행하지 않는다.
+
+```http
+POST /api/v1/workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}/conflict-apply
+```
+
+요청 body:
+
+```json
+{
+  "expectedHeadSha": "abc123",
+  "files": [
+    {
+      "reviewFileId": "review_file_1",
+      "resolvedContent": "const title = 'Voice meeting room';",
+      "expectedHeadBlobSha": "file_blob_sha_1"
+    },
+    {
+      "reviewFileId": "review_file_2",
+      "resolvedContent": "export const timeout = 45;",
+      "expectedHeadBlobSha": "file_blob_sha_2"
+    }
+  ]
+}
+```
+
+응답:
+
+```json
+{
+  "success": true,
+  "data": {
+    "reviewSessionId": "review_session_1",
+    "pullRequestId": "pull_request_1",
+    "status": "applied",
+    "appliedByGithubLogin": "octocat",
+    "commitSha": "commit_sha",
+    "commitUrl": "https://github.com/org/repo/commit/commit_sha",
+    "headShaBefore": "abc123",
+    "headShaAfter": "def456",
+    "files": [
+      {
+        "reviewFileId": "review_file_1",
+        "filePath": "apps/frontend/VoiceMeetingPage.tsx",
+        "headBlobShaBefore": "file_blob_sha_1",
+        "headBlobShaAfter": "new_file_blob_sha_1"
+      },
+      {
+        "reviewFileId": "review_file_2",
+        "filePath": "apps/app-server/src/meeting.ts",
+        "headBlobShaBefore": "file_blob_sha_2",
+        "headBlobShaAfter": "new_file_blob_sha_2"
+      }
+    ],
+    "conflictStatus": "clean",
+    "conflictCheckedAt": "2026-07-10T00:00:00.000Z",
+    "localStateStatus": "updated"
+  }
+}
+```
+
+단일 파일 호환 endpoint:
 
 ```http
 POST /api/v1/workspaces/{workspaceId}/github/review-files/{reviewFileId}/conflict-apply
@@ -664,33 +726,34 @@ POST /api/v1/workspaces/{workspaceId}/github/review-files/{reviewFileId}/conflic
 
 서버 규칙:
 
-- 현재 사용자는 review file이 속한 Workspace에 접근할 수 있어야 한다.
+- 현재 사용자는 review session 또는 review file이 속한 Workspace에 접근할 수 있어야 한다.
 - 현재 사용자의 GitHub App user OAuth 연결이 필요하다.
 - GitHub App에는 `Contents: write` permission이 필요하다. 권한 부족으로 GitHub가
   `403`을 반환하면 provider raw error 대신 안전한 권한 오류를 반환한다.
 - `content` conflict file만 apply 대상이다. `binary`, `large`, `modify_delete`,
   `rename_modify`, `add_add`, `unsupported` conflict는 `400 Bad Request`로 막는다.
-- 초기 merge commit apply는 PR 전체에서 지원 가능한 `content` conflict file이 정확히
-  1개이고 unsupported conflict 후보가 없을 때만 허용한다. 여러 conflict file 또는
-  unsupported 후보가 있으면 일부 파일만 확정하지 않도록 `400 Bad Request`로 막는다.
+- session 단위 요청의 `files`는 비어 있을 수 없고 `reviewFileId`가 중복될 수 없다.
+- PR에 unsupported conflict 후보가 하나라도 있으면 전체 적용을 막는다.
+- 요청 파일 집합은 분석된 모든 supported conflict 파일 집합 및 실제 Git merge의 미해결
+  경로 집합과 정확히 일치해야 한다. 파일이 누락·추가되거나 분석 후 conflict 상태가
+  바뀌었으면 push 없이 `409 Conflict`를 반환한다.
+- 단일 파일 호환 endpoint는 PR 전체의 supported conflict 파일이 정확히 1개일 때만 허용한다.
 - 한 파일 안의 conflict hunk 개수에는 제한을 두지 않는다. 모든 hunk가 반영된 파일 전체
   `resolvedContent`를 하나의 resolved blob으로 사용한다.
 - 현재 GitHub PR head SHA가 session의 `headSha` 또는 요청의 `expectedHeadSha`와 다르면
   stale session으로 보고 `409 Conflict`를 반환한다.
-- PR head branch의 현재 file blob SHA가 요청의 `expectedHeadBlobSha`와 다르면
+- PR head branch의 현재 file blob SHA가 각 파일의 `expectedHeadBlobSha`와 다르면
   stale file로 보고 `409 Conflict`를 반환한다.
-- `resolvedContent`가 비어 있거나 `<<<<<<<`, `=======`, `>>>>>>>` conflict marker를
+- 각 `resolvedContent`가 비어 있거나 `<<<<<<<`, `=======`, `>>>>>>>` conflict marker를
   포함하면 `400 Bad Request`를 반환한다.
-- PR head 파일 전체 content가 apply 크기 제한을 초과하면 `400 Bad Request`를 반환한다.
+- 각 PR head 파일 전체 content가 apply 크기 제한을 초과하면 `400 Bad Request`를 반환한다.
 - 서버는 격리된 임시 Git working tree에서 PR head commit을 checkout하고 base commit을
   `--no-commit --no-ff`로 실제 merge한다. 이 과정에서 충돌 없이 합쳐지는 base 변경도 결과에
   포함해야 한다.
-- 실제 Git merge의 미해결 경로가 선택한 conflict 파일 하나인지 다시 검증한다. 분석 이후
-  conflict 파일이 추가되었거나 선택한 파일의 conflict가 사라졌다면 push 없이
-  `409 Conflict`를 반환한다.
-- 서버는 사용자가 확인한 `resolvedContent`를 선택 파일에 기록한 뒤 미해결 경로가 0개인지
+- 서버는 사용자가 확인한 모든 `resolvedContent`를 해당 파일에 기록한 뒤 미해결 경로가 0개인지
   확인하고, `[PR head SHA, base SHA]` 두 parent를 갖는 merge commit을 만든다. commit message는
-  `Resolve conflict in {filePath}` 형식으로 생성한다.
+  단일 파일이면 `Resolve conflict in {filePath}`, 다중 파일이면
+  `Resolve conflicts in {fileCount} files` 형식으로 생성한다.
 - push 직전에 원격 PR head SHA와 base branch SHA가 분석 시점과 같은지 확인하고, force 없이
   PR head branch를 갱신한다. 임시 working tree는 성공/실패와 관계없이 삭제한다.
 - apply 성공 후 GitHub PR head SHA와 conflict 상태를 다시 조회한다. GitHub가 새 merge
