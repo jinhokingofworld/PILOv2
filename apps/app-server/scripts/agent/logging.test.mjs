@@ -58,6 +58,10 @@ function createStep(overrides = {}) {
   };
 }
 
+function parseJsonParameter(value) {
+  return typeof value === "string" ? JSON.parse(value) : value;
+}
+
 class FakeWorkspaceService {
   constructor() {
     this.calls = [];
@@ -232,9 +236,10 @@ class FakeTransaction {
 
     if (text.includes("status = 'completed'")) {
       const [, , outputSummary, resourceRefs] = values;
+      this.state.lastStepResourceRefsParameter = resourceRefs;
       step.status = "completed";
       step.output_json = outputSummary;
-      step.resource_refs = resourceRefs;
+      step.resource_refs = parseJsonParameter(resourceRefs);
       step.error_code = null;
       step.error_message = null;
       step.completed_at = new Date("2026-07-08T00:02:00.000Z");
@@ -298,6 +303,7 @@ class FakeTransaction {
     metadata,
     resourceRefs
   ]) {
+    this.state.lastLogResourceRefsParameter = resourceRefs;
     this.state.logs.push({
       workspace_id: workspaceId,
       run_id: runId,
@@ -309,7 +315,7 @@ class FakeTransaction {
       event_type: eventType,
       message,
       metadata_json: metadata,
-      resource_refs: resourceRefs
+      resource_refs: parseJsonParameter(resourceRefs)
     });
   }
 }
@@ -350,6 +356,7 @@ function errorMessage(error) {
   assert.equal(result.run.clientRequestId, "request-1");
   assert.equal(state.runs.length, 1);
   assert.equal(state.logs[0].event_type, "run_created");
+  assert.equal(state.lastLogResourceRefsParameter, "[]");
   assert.deepEqual(workspaceService.calls, [
     { currentUserId: USER_ID, workspaceId: WORKSPACE_ID }
   ]);
@@ -543,26 +550,32 @@ function errorMessage(error) {
     logs: []
   };
   const { service } = createService(state);
+  const resourceRefs = [
+    {
+      domain: "calendar",
+      resourceType: "event",
+      resourceId: "event-1",
+      label: "주간 회의"
+    }
+  ];
   const step = await service.completeStep(USER_ID, WORKSPACE_ID, {
     runId: RUN_ID,
     stepId: STEP_ID,
     outputSummary: {
       count: 1
     },
-    resourceRefs: [
-      {
-        domain: "calendar",
-        resourceType: "event",
-        resourceId: "event-1",
-        label: "주간 회의"
-      }
-    ]
+    resourceRefs
   });
 
   assert.equal(step.status, "completed");
   assert.equal(step.outputSummary.count, 1);
   assert.equal(step.resourceRefs[0].resourceId, "event-1");
+  assert.equal(
+    state.lastStepResourceRefsParameter,
+    JSON.stringify(resourceRefs)
+  );
   assert.equal(state.logs[0].event_type, "step_completed");
+  assert.equal(state.lastLogResourceRefsParameter, JSON.stringify(resourceRefs));
   assert.equal(state.logs[0].resource_refs[0].label, "주간 회의");
 }
 

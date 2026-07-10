@@ -452,7 +452,7 @@ export class AgentLoggingService {
           UPDATE agent_steps
           SET status = 'completed',
               output_json = $3,
-              resource_refs = $4,
+              resource_refs = $4::jsonb,
               error_code = NULL,
               error_message = NULL,
               completed_at = now()
@@ -460,7 +460,12 @@ export class AgentLoggingService {
             AND run_id = $2
           RETURNING *
         `,
-        [input.stepId, input.runId, outputSummary, resourceRefs]
+        [
+          input.stepId,
+          input.runId,
+          outputSummary,
+          this.serializeResourceRefs(resourceRefs)
+        ]
       );
 
       if (!step) {
@@ -857,7 +862,7 @@ export class AgentLoggingService {
           metadata_json,
           resource_refs
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb)
       `,
       [
         input.workspaceId,
@@ -870,9 +875,14 @@ export class AgentLoggingService {
         this.normalizeRequiredText(input.eventType, "log event type"),
         this.normalizeRequiredText(input.message, "log message"),
         metadata,
-        resourceRefs
+        this.serializeResourceRefs(resourceRefs)
       ]
     );
+  }
+
+  private serializeResourceRefs(resourceRefs: AgentResourceRef[]): string {
+    // node-postgres otherwise encodes JavaScript arrays as PostgreSQL arrays.
+    return JSON.stringify(resourceRefs);
   }
 
   private assertSafeObject(
