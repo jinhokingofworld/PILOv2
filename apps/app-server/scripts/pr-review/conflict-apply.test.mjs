@@ -70,13 +70,16 @@ class FakeDatabase {
 }
 
 function createGithubDependency({
+  conflictStatuses = ["clean"],
   failConflictRefresh = false,
   localCacheUpdated = true
 } = {}) {
   const applyRequests = [];
+  const conflictStatusRequests = [];
 
   return {
     applyRequests,
+    conflictStatusRequests,
     dependency: {
       async getPullRequestDetail() {
         return {
@@ -115,12 +118,17 @@ function createGithubDependency({
         };
       },
       async getPullRequestConflictStatus() {
+        conflictStatusRequests.push({ pullRequestId });
         if (failConflictRefresh) {
           throw new Error("GitHub temporarily unavailable");
         }
 
+        const conflictStatus =
+          conflictStatuses[
+            Math.min(conflictStatusRequests.length - 1, conflictStatuses.length - 1)
+          ];
         return {
-          conflictStatus: "clean",
+          conflictStatus,
           checkedAt: "2026-07-10T12:00:00.000Z"
         };
       }
@@ -167,6 +175,31 @@ function createService(database, githubDependency) {
     }
   ]);
   assert.equal(result.status, "applied");
+  assert.equal(result.localStateStatus, "updated");
+}
+
+{
+  const database = new FakeDatabase([
+    reviewFile(reviewFileId, "src/conflicted.ts")
+  ]);
+  const { dependency, conflictStatusRequests } = createGithubDependency({
+    conflictStatuses: ["checking", "clean"]
+  });
+  const service = createService(database, dependency);
+
+  const result = await service.applyReviewFileConflictResolution(
+    "user-id",
+    workspaceId,
+    reviewFileId,
+    {
+      resolvedContent: "const value = 'resolved';",
+      expectedHeadSha: "head-sha",
+      expectedHeadBlobSha: "head-blob-sha"
+    }
+  );
+
+  assert.equal(conflictStatusRequests.length, 2);
+  assert.equal(result.conflictStatus, "clean");
   assert.equal(result.localStateStatus, "updated");
 }
 

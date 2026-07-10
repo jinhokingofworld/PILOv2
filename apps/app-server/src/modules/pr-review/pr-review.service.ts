@@ -631,6 +631,8 @@ const REVIEW_SUBMIT_TYPES: readonly PrReviewGithubReviewSubmitType[] = [
 const LARGE_DIFF_LINE_THRESHOLD = 1000;
 const LARGE_DIFF_PATCH_BYTES = 200 * 1024;
 const MAX_CONFLICT_APPLY_CONTENT_CHARS = 200 * 1024;
+const CONFLICT_STATUS_SETTLE_MAX_ATTEMPTS = 4;
+const CONFLICT_STATUS_SETTLE_DELAY_MS = 250;
 const CONFLICT_MARKER_PATTERN = /(^|\n)(<<<<<<<|=======|>>>>>>>)(?:\s|$)/;
 
 @Injectable()
@@ -740,7 +742,14 @@ export class PrReviewService {
       throw notFound("Review session not found");
     }
 
-    return this.mapSummary(summary);
+    const refreshedSummary =
+      await this.refreshPendingReviewSessionConflictStatus(
+        currentUserId,
+        workspaceId,
+        summary
+      );
+
+    return this.mapSummary(refreshedSummary);
   }
 
   async getReviewSessionResult(
@@ -1297,12 +1306,11 @@ export class PrReviewService {
     let conflictStatusRefreshed = true;
     let refreshedConflict: PrReviewGithubConflictStatusPayload;
     try {
-      refreshedConflict =
-        await this.githubDependency.getPullRequestConflictStatus(
-          currentUserId,
-          workspaceId,
-          file.pull_request_id
-        );
+      refreshedConflict = await this.getSettledPullRequestConflictStatus(
+        currentUserId,
+        workspaceId,
+        file.pull_request_id
+      );
     } catch {
       conflictStatusRefreshed = false;
       refreshedConflict = {
@@ -1366,11 +1374,41 @@ export class PrReviewService {
       throw notFound("Review session not found");
     }
 
-    this.assertReviewSessionMergeable(session);
+    this.assertReviewSessionSubmitted(session);
 
     if (session.head_sha !== input.expectedHeadSha) {
       throw conflictError("Review session head SHA is stale");
     }
+
+    let refreshedConflict: PrReviewGithubConflictStatusPayload;
+    try {
+      refreshedConflict = await this.getSettledPullRequestConflictStatus(
+        currentUserId,
+        workspaceId,
+        session.pull_request_id
+      );
+    } catch {
+      throw badRequest("GitHub pull request conflict status could not be verified");
+    }
+
+    try {
+      await this.updateReviewSessionConflictStatus({
+        reviewSessionId: session.id,
+        expectedHeadSha: session.head_sha,
+        conflictStatus: refreshedConflict.conflictStatus,
+        conflictCheckedAt: refreshedConflict.checkedAt
+      });
+    } catch {
+      this.logger.warn(
+        `GitHub conflict status was refreshed but review session update failed for ${session.id}`
+      );
+    }
+
+    this.assertReviewSessionMergeable({
+      ...session,
+      conflict_status: refreshedConflict.conflictStatus,
+      conflict_checked_at: refreshedConflict.checkedAt
+    });
 
     const mergeResult: PrReviewGithubPullRequestMergePayload =
       await this.githubDependency.mergePullRequest(
@@ -1593,6 +1631,114 @@ export class PrReviewService {
     if (!updated) {
       throw badRequest("Review session could not be updated");
     }
+  }
+
+  private async refreshPendingReviewSessionConflictStatus<
+    T extends PrReviewSessionRow
+  >(
+    currentUserId: string,
+    workspaceId: string,
+    session: T
+  ): Promise<T> {
+    if (
+      session.conflict_status !== "checking" &&
+      session.conflict_status !== "unknown"
+    ) {
+      return session;
+    }
+
+    try {
+      const conflict = await this.getSettledPullRequestConflictStatus(
+        currentUserId,
+        workspaceId,
+        session.pull_request_id
+      );
+      const updated = await this.updateReviewSessionConflictStatus({
+        reviewSessionId: session.id,
+        expectedHeadSha: session.head_sha,
+        conflictStatus: conflict.conflictStatus,
+        conflictCheckedAt: conflict.checkedAt
+      });
+
+      if (!updated) {
+        return session;
+      }
+
+      return {
+        ...session,
+        conflict_status: conflict.conflictStatus,
+        conflict_checked_at: conflict.checkedAt
+      };
+    } catch {
+      this.logger.warn(
+        `GitHub conflict status refresh failed for review session ${session.id}`
+      );
+      return session;
+    }
+  }
+
+  private async getSettledPullRequestConflictStatus(
+    currentUserId: string,
+    workspaceId: string,
+    pullRequestId: string
+  ): Promise<PrReviewGithubConflictStatusPayload> {
+    let conflict: PrReviewGithubConflictStatusPayload = {
+      conflictStatus: "checking",
+      checkedAt: null
+    };
+
+    for (
+      let attempt = 1;
+      attempt <= CONFLICT_STATUS_SETTLE_MAX_ATTEMPTS;
+      attempt += 1
+    ) {
+      conflict = await this.githubDependency.getPullRequestConflictStatus(
+        currentUserId,
+        workspaceId,
+        pullRequestId
+      );
+
+      if (
+        conflict.conflictStatus !== "checking" ||
+        attempt === CONFLICT_STATUS_SETTLE_MAX_ATTEMPTS
+      ) {
+        return conflict;
+      }
+
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, CONFLICT_STATUS_SETTLE_DELAY_MS * attempt);
+      });
+    }
+
+    return conflict;
+  }
+
+  private async updateReviewSessionConflictStatus(input: {
+    reviewSessionId: string;
+    expectedHeadSha: string;
+    conflictStatus: PrReviewConflictStatus;
+    conflictCheckedAt: string | null;
+  }): Promise<boolean> {
+    const updated = await this.database.queryOne<{ id: string }>(
+      `
+        UPDATE pr_review_sessions
+        SET
+          conflict_status = $3,
+          conflict_checked_at = $4,
+          updated_at = now()
+        WHERE id = $1
+          AND head_sha = $2
+        RETURNING id
+      `,
+      [
+        input.reviewSessionId,
+        input.expectedHeadSha,
+        input.conflictStatus,
+        input.conflictCheckedAt
+      ]
+    );
+
+    return Boolean(updated);
   }
 
   async deleteReviewSession(
@@ -2992,10 +3138,14 @@ export class PrReviewService {
     }
   }
 
-  private assertReviewSessionMergeable(session: PrReviewSessionRow): void {
+  private assertReviewSessionSubmitted(session: PrReviewSessionRow): void {
     if (session.status !== "submitted") {
       throw badRequest("GitHub Review must be submitted before merge");
     }
+  }
+
+  private assertReviewSessionMergeable(session: PrReviewSessionRow): void {
+    this.assertReviewSessionSubmitted(session);
 
     if (session.conflict_status !== "clean") {
       throw badRequest("Resolve PR conflicts before merge");
