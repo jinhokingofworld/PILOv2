@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   KeyboardEvent as ReactKeyboardEvent,
@@ -29,6 +30,7 @@ import {
 } from "@codemirror/view";
 import {
   Database,
+  Home,
   PanelLeftClose,
   PanelLeftOpen,
   PanelRightClose,
@@ -36,6 +38,11 @@ import {
   Play
 } from "lucide-react";
 
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger
+} from "@/components/ui/tooltip";
 import { useAuthSession } from "@/features/auth/auth-session";
 import {
   createSqlErdApiClient,
@@ -75,7 +82,9 @@ import {
   areSqltoerdLayoutsEqual,
   createSqltoerdModelIndex,
   getSqltoerdModelCounts,
-  getTableDisplayName
+  getTableDisplayName,
+  type SqlErdRelationCardinality,
+  type SqlErdRelationCardinalityEndpoints
 } from "@/features/sql-erd/utils/model";
 import { createSqlErdGenerateWorkspaceRequest } from "@/features/sql-erd/utils/generate-session";
 import { createSqlErdLayoutAutosaveRequest } from "@/features/sql-erd/utils/layout-autosave";
@@ -860,14 +869,7 @@ function SourcePanel({
   width
 }: SourcePanelProps) {
   if (!isOpen) {
-    return (
-      <CollapsedPanelButton
-        ariaLabel="Open source panel"
-        icon={<PanelLeftOpen className="size-4" />}
-        label="Source"
-        onClick={onToggle}
-      />
-    );
+    return <CollapsedSourcePanel onToggle={onToggle} />;
   }
 
   return (
@@ -877,20 +879,23 @@ function SourcePanel({
       style={{ width }}
     >
       <div className="flex min-h-14 items-center justify-between gap-3 border-b px-4">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              SQL Source
+        <div className="flex min-w-0 items-center gap-2">
+          <SqlErdHomeNavigationButton />
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                SQL Source
+              </p>
+              <StatusPill
+                label={sessionLoadState.label}
+                tone={sessionLoadState.tone}
+              />
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {counts.tableCount} tables / {counts.relationCount}{" "}
+              relations
             </p>
-            <StatusPill
-              label={sessionLoadState.label}
-              tone={sessionLoadState.tone}
-            />
           </div>
-          <p className="mt-1 text-xs text-muted-foreground">
-            {counts.tableCount} tables / {counts.relationCount}{" "}
-            relations
-          </p>
         </div>
         <button
           aria-label="Close source panel"
@@ -939,6 +944,46 @@ function SourcePanel({
           value={sourceText}
         />
       </div>
+    </aside>
+  );
+}
+
+function SqlErdHomeNavigationButton() {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Link
+            aria-label="홈으로 이동"
+            className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            href="/home"
+          >
+            <Home className="size-4" />
+          </Link>
+        }
+      />
+      <TooltipContent side="right">홈으로 이동</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function CollapsedSourcePanel({ onToggle }: { onToggle: () => void }) {
+  return (
+    <aside className="flex w-12 shrink-0 flex-col border-r bg-muted/20">
+      <div className="flex min-h-14 items-center justify-center border-b">
+        <SqlErdHomeNavigationButton />
+      </div>
+      <button
+        aria-label="Open source panel"
+        className="flex flex-col items-center gap-3 py-3 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        onClick={onToggle}
+        type="button"
+      >
+        <PanelLeftOpen className="size-4" />
+        <span className="text-xs font-medium [writing-mode:vertical-rl]">
+          Source
+        </span>
+      </button>
     </aside>
   );
 }
@@ -1547,7 +1592,7 @@ function RelationInspector({
 }: {
   viewModel: Extract<SqlErdInspectorViewModel, { type: "relation" }>;
 }) {
-  const { endpoints, relation } = viewModel;
+  const { cardinality, endpoints, relation } = viewModel;
 
   return (
     <>
@@ -1556,7 +1601,7 @@ function RelationInspector({
         <InspectorRow label="종류" value="foreign key" />
         <InspectorRow label="제약 조건" value={relation.constraintName ?? "-"} />
         <InspectorRow
-          label="From"
+          label="참조 컬럼"
           value={
             endpoints
               ? formatSqlErdRelationEndpoint(
@@ -1567,7 +1612,7 @@ function RelationInspector({
           }
         />
         <InspectorRow
-          label="To"
+          label="대상 컬럼"
           value={
             endpoints
               ? formatSqlErdRelationEndpoint(
@@ -1577,9 +1622,33 @@ function RelationInspector({
               : relation.toTableId
           }
         />
+        {cardinality ? (
+          <InspectorRow
+            label="관계 의미"
+            value={formatSqlErdRelationCardinalityMeaning(cardinality)}
+          />
+        ) : null}
       </div>
     </>
   );
+}
+
+function formatSqlErdRelationCardinalityMeaning(
+  cardinality: SqlErdRelationCardinalityEndpoints
+) {
+  return `자식 행은 부모 ${formatSqlErdCardinality(cardinality.to)}, 부모 행은 자식 ${formatSqlErdCardinality(cardinality.from)}`;
+}
+
+function formatSqlErdCardinality(cardinality: SqlErdRelationCardinality) {
+  if (cardinality === "one") {
+    return "1개";
+  }
+
+  if (cardinality === "zero_or_one") {
+    return "0~1개";
+  }
+
+  return "0~N개";
 }
 
 function RelationList({ relations }: { relations: RelationSummary[] }) {

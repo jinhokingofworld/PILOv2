@@ -627,6 +627,99 @@ assert.deepEqual(
   runtimeRelationEndpoints.to.columns.map((column) => column.name),
   ["id"]
 );
+
+function getRuntimeRelationCardinality({ nullable, unique }) {
+  const modelJson = structuredClone(runtimeModel);
+  const ordersTable = modelJson.schema.tables.find(
+    (table) => table.id === "table.orders"
+  );
+  const userIdColumn = ordersTable?.columns.find(
+    (column) => column.id === "user_id"
+  );
+  const relation = modelJson.schema.relations.find(
+    (candidate) => candidate.id === "relation.orders.user_id.users.id"
+  );
+
+  assert.ok(userIdColumn);
+  assert.ok(relation);
+
+  userIdColumn.nullable = nullable;
+  userIdColumn.unique = unique;
+
+  return modelRuntime.inferSqlErdRelationCardinality(
+    relation,
+    modelRuntime.createSqltoerdModelIndex(modelJson)
+  );
+}
+
+assert.deepEqual(
+  getRuntimeRelationCardinality({ nullable: true, unique: false }),
+  {
+    from: "zero_or_many",
+    to: "zero_or_one"
+  }
+);
+assert.deepEqual(
+  getRuntimeRelationCardinality({ nullable: false, unique: false }),
+  {
+    from: "zero_or_many",
+    to: "one"
+  }
+);
+assert.deepEqual(
+  getRuntimeRelationCardinality({ nullable: true, unique: true }),
+  {
+    from: "zero_or_one",
+    to: "zero_or_one"
+  }
+);
+assert.deepEqual(
+  getRuntimeRelationCardinality({ nullable: false, unique: true }),
+  {
+    from: "zero_or_one",
+    to: "one"
+  }
+);
+
+const compositePrimaryKeyModel = structuredClone(runtimeModel);
+const compositePrimaryKeyOrdersTable =
+  compositePrimaryKeyModel.schema.tables.find(
+    (table) => table.id === "table.orders"
+  );
+const compositePrimaryKeyUserIdColumn =
+  compositePrimaryKeyOrdersTable?.columns.find(
+    (column) => column.id === "user_id"
+  );
+const compositePrimaryKeyRelation =
+  compositePrimaryKeyModel.schema.relations.find(
+    (relation) => relation.id === "relation.orders.user_id.users.id"
+  );
+
+assert.ok(compositePrimaryKeyOrdersTable);
+assert.ok(compositePrimaryKeyUserIdColumn);
+assert.ok(compositePrimaryKeyRelation);
+
+compositePrimaryKeyUserIdColumn.primaryKey = true;
+compositePrimaryKeyUserIdColumn.unique = false;
+compositePrimaryKeyOrdersTable.constraints = [
+  {
+    id: "constraint.orders.pk",
+    kind: "primary_key",
+    columnIds: ["id", "user_id"],
+    name: null
+  }
+];
+
+assert.deepEqual(
+  modelRuntime.inferSqlErdRelationCardinality(
+    compositePrimaryKeyRelation,
+    modelRuntime.createSqltoerdModelIndex(compositePrimaryKeyModel)
+  ),
+  {
+    from: "zero_or_many",
+    to: "zero_or_one"
+  }
+);
 assert.equal(
   runtimeModelIndex.relationsByTableId
     .get("table.users")
@@ -889,6 +982,17 @@ const selectedRelationFromCanvas =
 assert.deepEqual(selectedRelationFromCanvas, {
   type: "relation",
   relationId: "relation.orders.user_id.users.id"
+});
+const selectedRelationInspectorView =
+  inspectorRuntime.createSqlErdInspectorViewModel(
+    selectedRelationFromCanvas,
+    runtimeModelIndex
+  );
+
+assert.equal(selectedRelationInspectorView.type, "relation");
+assert.deepEqual(selectedRelationInspectorView.cardinality, {
+  from: "zero_or_many",
+  to: "zero_or_one"
 });
 assert.deepEqual(
   canvasSelectionRuntime.getSqlErdSelectionFromSelectedShapes([
@@ -1904,6 +2008,46 @@ assert.equal(
   16
 );
 assert.deepEqual(
+  relationShapeRuntime.getSqlErdCardinalityMarkerGeometry(
+    { x: 10, y: 20 },
+    "right",
+    "one"
+  ),
+  {
+    circles: [],
+    segments: [
+      { x1: 15, y1: 14, x2: 15, y2: 26 },
+      { x1: 22, y1: 14, x2: 22, y2: 26 }
+    ]
+  }
+);
+assert.deepEqual(
+  relationShapeRuntime.getSqlErdCardinalityMarkerGeometry(
+    { x: 10, y: 20 },
+    "left",
+    "zero_or_one"
+  ),
+  {
+    circles: [{ cx: -4, cy: 20, r: 3.5 }],
+    segments: [{ x1: 5, y1: 14, x2: 5, y2: 26 }]
+  }
+);
+assert.deepEqual(
+  relationShapeRuntime.getSqlErdCardinalityMarkerGeometry(
+    { x: 10, y: 20 },
+    "right",
+    "zero_or_many"
+  ),
+  {
+    circles: [{ cx: 31, cy: 20, r: 3.5 }],
+    segments: [
+      { x1: 24, y1: 20, x2: 15, y2: 14 },
+      { x1: 24, y1: 20, x2: 15, y2: 20 },
+      { x1: 24, y1: 20, x2: 15, y2: 26 }
+    ]
+  }
+);
+assert.deepEqual(
   relationShapeRuntime.getSqlErdRelationVisualStyle({
     isHovered: false,
     isSelected: false
@@ -2380,6 +2524,13 @@ assert.match(
 );
 assert.match(panel, /relationSourceCompartmentRef/);
 assert.match(panel, /getSelectedSqlErdRelationSourceRanges/);
+assert.match(panel, /import Link from "next\/link"/);
+assert.match(panel, /\bHome\b/);
+assert.match(panel, /function SqlErdHomeNavigationButton/);
+assert.match(panel, /function CollapsedSourcePanel/);
+assert.match(panel, /href="\/home"/);
+assert.match(panel, /aria-label="홈으로 이동"/);
+assert.match(panel, /<CollapsedSourcePanel onToggle=\{onToggle\} \/>/);
 assert.doesNotMatch(panel, /scrollIntoView/);
 assert.match(panel, /resolveSqlSourceEditorDialect/);
 assert.match(panel, /setLastResolvedDialect\(generateRequest\.resolvedDialect\)/);
@@ -2568,6 +2719,8 @@ assert.match(relationShape, /fromTableShapeId/);
 assert.match(relationShape, /toTableShapeId/);
 assert.match(relationShape, /startSide: T\.string/);
 assert.match(relationShape, /endSide: T\.string/);
+assert.match(relationShape, /startCardinality: T\.nullable\(T\.string\)/);
+assert.match(relationShape, /endCardinality: T\.nullable\(T\.string\)/);
 assert.match(relationShape, /points: T\.arrayOf/);
 assert.match(relationShape, /arrowPoints: T\.arrayOf/);
 assert.match(relationShape, /fromColumnIds: string\[\]/);
@@ -2581,6 +2734,8 @@ assert.match(relationShape, /getRelationCurveGeometryPoints\(/);
 assert.match(relationShape, / C /);
 assert.match(relationShape, /useValue/);
 assert.match(relationShape, /data-sqltoerd-relation-hit-target/);
+assert.match(relationShape, /data-sqltoerd-cardinality-marker/);
+assert.match(relationShape, /getSqlErdCardinalityMarkerGeometry/);
 assert.match(relationShape, /stroke="transparent"/);
 assert.match(relationShape, /SQLTOERD_RELATION_HIT_STROKE_WIDTH/);
 assert.doesNotMatch(relationShape, /canCull\(\)/);
@@ -2590,6 +2745,12 @@ assert.match(canvasSurface, /fromColumnIds: relation\.fromColumnIds/);
 assert.match(canvasSurface, /toColumnIds: relation\.toColumnIds/);
 assert.match(canvasSurface, /shape\.props\.fromColumnIds/);
 assert.match(canvasSurface, /shape\.props\.toColumnIds/);
+assert.match(canvasSurface, /inferSqlErdRelationCardinality/);
+assert.match(canvasSurface, /startCardinality: cardinality\?\.from \?\? null/);
+assert.match(canvasSurface, /endCardinality: cardinality\?\.to \?\? null/);
+assert.match(panel, /참조 컬럼/);
+assert.match(panel, /대상 컬럼/);
+assert.match(panel, /관계 의미/);
 
 assert.match(packageJson, /"node-sql-parser"/);
 assert.match(ddlParserUtils, /parseSqlDdlToErdModel/);
