@@ -31,6 +31,7 @@ import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import type { createPrReviewApiClient } from "@/features/pr-review/api/client";
 import { PrReviewResolvedCodeEditor } from "./PrReviewResolvedCodeEditor";
+import type { PrReviewConflictDraft } from "./pr-review-conflict-drafts";
 import {
   buildConflictResolutionDraft,
   isConflictResolutionComplete,
@@ -43,7 +44,6 @@ import {
 } from "./pr-review-resolved-code-diff";
 import type {
   PrReviewDiffRow,
-  PrReviewConflictApplyResult,
   PrReviewConflictFile,
   PrReviewConflictHunk,
   PrReviewConflictSuggestion,
@@ -67,8 +67,6 @@ type ConflictAnalysisLoadStatus =
   | "stale";
 type SaveStatus = "idle" | "saving" | "saved" | "error";
 type ConflictSuggestionLoadStatus = "idle" | "loading" | "ready" | "error";
-type ConflictApplyStatus = "idle" | "applying" | "applied" | "error";
-type GithubReconnectStatus = "idle" | "opening" | "opened" | "error";
 type ConflictWorkspaceView = "conflict" | "resolved";
 type ResolvedWorkspaceView = "changes" | "editor";
 
@@ -77,12 +75,15 @@ type PrReviewFileDiffDrawerProps = {
   baseBranch: string | null;
   conflictAnalysisErrorMessage: string | null;
   conflictAnalysisStatus: ConflictAnalysisLoadStatus;
+  conflictDraft: PrReviewConflictDraft | null;
   conflictFile: PrReviewConflictFile | null;
-  conflictHeadSha: string | null;
   headBranch: string | null;
   isReviewSessionConflicted: boolean;
   onClose: () => void;
-  onConflictApplied: (result: PrReviewConflictApplyResult) => void | Promise<void>;
+  onConflictDraftChange: (
+    reviewFileId: string,
+    draft: PrReviewConflictDraft
+  ) => void;
   onDecisionSaved: (
     file: PrReviewFile,
     previousStatus: PrReviewFileReviewStatus
@@ -130,63 +131,6 @@ function getErrorMessage(error: unknown) {
   return "파일 리뷰 정보를 불러오지 못했습니다.";
 }
 
-function getConflictApplyErrorMessage(error: unknown) {
-  const message = getErrorMessage(error);
-
-  if (
-    message.includes("Single supported content conflict file is required") ||
-    message.includes("multiple conflicted files")
-  ) {
-    return "현재는 지원 가능한 Conflict 파일이 1개인 PR만 적용할 수 있습니다.";
-  }
-
-  if (
-    message.includes("Review session head SHA is stale") ||
-    message.includes("GitHub pull request head SHA is stale") ||
-    message.includes("Review session base SHA is stale") ||
-    message.includes("GitHub pull request base SHA is stale") ||
-    message.includes("Review file blob SHA is stale") ||
-    message.includes("pull request conflict no longer exists")
-  ) {
-    return "PR 브랜치가 변경되었습니다. 동기화 후 새 리뷰를 시작해 주세요.";
-  }
-
-  if (
-    message.includes("repository file lookup is temporarily unavailable") ||
-    message.includes("repository file content lookup failed") ||
-    message.includes("repository content lookup failed")
-  ) {
-    return "GitHub 파일 정보를 잠시 불러오지 못했습니다. 다시 시도해 주세요.";
-  }
-
-  if (message.includes("Contents write permission is required")) {
-    return "GitHub App에 Contents 쓰기 권한이 필요합니다.";
-  }
-
-  if (message.includes("GitHub OAuth connection is required")) {
-    return "GitHub 연결이 필요합니다. 설정에서 GitHub를 연결한 뒤 다시 시도해 주세요.";
-  }
-
-  if (message.includes("GitHub OAuth connection is invalid")) {
-    return "GitHub 연결이 유효하지 않습니다. GitHub를 다시 연결해 주세요.";
-  }
-
-  if (message.includes("GitHub conflict merge commit apply failed")) {
-    return "GitHub에 Conflict 해결 commit을 적용하지 못했습니다. 다시 시도해 주세요.";
-  }
-
-  return message;
-}
-
-function isGithubOAuthReconnectError(error: unknown) {
-  const message = getErrorMessage(error);
-
-  return (
-    message.includes("GitHub OAuth connection is required") ||
-    message.includes("GitHub OAuth connection is invalid")
-  );
-}
-
 function formatNumber(value: number) {
   return new Intl.NumberFormat("ko-KR").format(value);
 }
@@ -199,12 +143,6 @@ function getInitialDecisionStatus(
 
 function getStoredComment(value: string) {
   return value.trim() || null;
-}
-
-const CONFLICT_MARKER_PATTERN = /(^|\n)(<<<<<<<|=======|>>>>>>>)(?:\s|$)/;
-
-function hasConflictMarkers(value: string) {
-  return CONFLICT_MARKER_PATTERN.test(value.replace(/\r\n/g, "\n").replace(/\r/g, "\n"));
 }
 
 function getCodeClassName(type: PrReviewDiffRow["type"]) {
@@ -327,12 +265,12 @@ export function PrReviewFileDiffDrawer({
   baseBranch,
   conflictAnalysisErrorMessage,
   conflictAnalysisStatus,
+  conflictDraft,
   conflictFile,
-  conflictHeadSha,
   headBranch,
   isReviewSessionConflicted,
   onClose,
-  onConflictApplied,
+  onConflictDraftChange,
   onDecisionSaved,
   reviewFileId,
   unsupportedConflictFile,
@@ -347,38 +285,20 @@ export function PrReviewFileDiffDrawer({
   const [comment, setComment] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [saveErrorMessage, setSaveErrorMessage] = useState<string | null>(null);
-  const [conflictSuggestion, setConflictSuggestion] =
-    useState<PrReviewConflictSuggestion | null>(null);
   const [conflictSuggestionStatus, setConflictSuggestionStatus] =
     useState<ConflictSuggestionLoadStatus>("idle");
   const [conflictSuggestionError, setConflictSuggestionError] = useState<
     string | null
   >(null);
-  const [conflictApplyStatus, setConflictApplyStatus] =
-    useState<ConflictApplyStatus>("idle");
-  const [conflictApplyError, setConflictApplyError] = useState<string | null>(
-    null
-  );
-  const [conflictApplyResult, setConflictApplyResult] =
-    useState<PrReviewConflictApplyResult | null>(null);
-  const [conflictApplyRequiresGithubReconnect, setConflictApplyRequiresGithubReconnect] =
-    useState(false);
-  const [githubReconnectStatus, setGithubReconnectStatus] =
-    useState<GithubReconnectStatus>("idle");
-  const [githubReconnectMessage, setGithubReconnectMessage] = useState<
-    string | null
-  >(null);
-  const [resolvedContentDraft, setResolvedContentDraft] = useState("");
   const [reloadVersion, setReloadVersion] = useState(0);
   const [selectedConflictHunkIndex, setSelectedConflictHunkIndex] = useState(0);
   const [isBaseComparisonOpen, setIsBaseComparisonOpen] = useState(false);
   const [conflictWorkspaceView, setConflictWorkspaceView] =
     useState<ConflictWorkspaceView>("conflict");
-  const [resolutionChoices, setResolutionChoices] = useState<
-    Record<string, PrReviewConflictResolutionChoice>
-  >({});
-  const [isResolvedDraftCustomized, setIsResolvedDraftCustomized] =
-    useState(false);
+  const conflictSuggestion = conflictDraft?.suggestion ?? null;
+  const resolvedContentDraft = conflictDraft?.resolvedContent ?? "";
+  const resolutionChoices = conflictDraft?.resolutionChoices ?? {};
+  const isResolvedDraftCustomized = conflictDraft?.isCustomized ?? false;
   const commentSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
 
@@ -446,19 +366,9 @@ export function PrReviewFileDiffDrawer({
       setSaveStatus("idle");
       setErrorMessage(null);
       setSaveErrorMessage(null);
-      setConflictSuggestion(null);
       setConflictSuggestionStatus("idle");
       setConflictSuggestionError(null);
-      setConflictApplyStatus("idle");
-      setConflictApplyError(null);
-      setConflictApplyResult(null);
-      setConflictApplyRequiresGithubReconnect(false);
-      setGithubReconnectStatus("idle");
-      setGithubReconnectMessage(null);
-      setResolvedContentDraft("");
       setConflictWorkspaceView("conflict");
-      setResolutionChoices({});
-      setIsResolvedDraftCustomized(false);
       setFile(null);
       setDiff(null);
 
@@ -510,13 +420,7 @@ export function PrReviewFileDiffDrawer({
     setSelectedConflictHunkIndex(0);
     setIsBaseComparisonOpen(false);
     setConflictWorkspaceView("conflict");
-    setResolutionChoices({});
-    setIsResolvedDraftCustomized(false);
-    setResolvedContentDraft(conflictFile?.headContent ?? "");
-    setConflictApplyRequiresGithubReconnect(false);
-    setGithubReconnectStatus("idle");
-    setGithubReconnectMessage(null);
-  }, [conflictFile?.headContent, conflictFile?.reviewFileId]);
+  }, [conflictFile?.reviewFileId]);
 
   const selectedDecision = useMemo(
     () => decisionOptions.find((option) => option.status === decisionStatus),
@@ -552,20 +456,28 @@ export function PrReviewFileDiffDrawer({
       nextChoices: Record<string, PrReviewConflictResolutionChoice>,
       nextAiResolvedHunks = aiResolvedHunks
     ) => {
-      if (!conflictFile) {
+      if (!conflictFile || !conflictDraft) {
         return;
       }
 
-      setResolvedContentDraft(
-        buildConflictResolutionDraft({
+      onConflictDraftChange(conflictFile.reviewFileId, {
+        ...conflictDraft,
+        resolutionChoices: nextChoices,
+        resolvedContent: buildConflictResolutionDraft({
           headContent: conflictFile.headContent,
           hunks: conflictFile.hunks,
           choices: nextChoices,
           aiResolvedHunks: nextAiResolvedHunks
-        })
-      );
+        }),
+        isCustomized: false
+      });
     },
-    [aiResolvedHunks, conflictFile]
+    [
+      aiResolvedHunks,
+      conflictDraft,
+      conflictFile,
+      onConflictDraftChange
+    ]
   );
 
   const handleResolutionChoiceChange = useCallback(
@@ -578,11 +490,7 @@ export function PrReviewFileDiffDrawer({
         ...resolutionChoices,
         [hunkId]: choice
       };
-      setResolutionChoices(nextChoices);
       rebuildResolvedDraft(nextChoices);
-      setConflictApplyStatus("idle");
-      setConflictApplyError(null);
-      setConflictApplyResult(null);
     },
     [
       conflictFile,
@@ -594,10 +502,6 @@ export function PrReviewFileDiffDrawer({
 
   const handleResetCustomizedDraft = useCallback(() => {
     rebuildResolvedDraft(resolutionChoices);
-    setIsResolvedDraftCustomized(false);
-    setConflictApplyStatus("idle");
-    setConflictApplyError(null);
-    setConflictApplyResult(null);
   }, [rebuildResolvedDraft, resolutionChoices]);
 
   const handleCreateConflictSuggestion = useCallback(async () => {
@@ -613,129 +517,32 @@ export function PrReviewFileDiffDrawer({
         workspaceId,
         conflictFile.reviewFileId
       );
-      setConflictSuggestion(suggestion);
-      setResolutionChoices(
-        Object.fromEntries(
+      if (!conflictDraft) {
+        throw new Error("Conflict draft is not ready");
+      }
+      onConflictDraftChange(conflictFile.reviewFileId, {
+        ...conflictDraft,
+        suggestion,
+        resolutionChoices: Object.fromEntries(
           conflictFile.hunks.map((hunk) => [hunk.id, "ai"])
-        ) as Record<string, PrReviewConflictResolutionChoice>
-      );
-      setResolvedContentDraft(suggestion.resolvedContent);
-      setIsResolvedDraftCustomized(false);
+        ) as Record<string, PrReviewConflictResolutionChoice>,
+        resolvedContent: suggestion.resolvedContent,
+        isCustomized: false
+      });
       setConflictWorkspaceView("resolved");
-      setConflictApplyStatus("idle");
-      setConflictApplyError(null);
-      setConflictApplyResult(null);
       setConflictSuggestionStatus("ready");
     } catch (error) {
       setConflictSuggestionStatus("error");
       setConflictSuggestionError(getErrorMessage(error));
     }
-  }, [apiClient, conflictFile, conflictSuggestionStatus, workspaceId]);
-
-  const handleApplyConflictResolution = useCallback(async (): Promise<boolean> => {
-    if (conflictApplyStatus === "applying") {
-      return false;
-    }
-
-    const expectedHeadSha = conflictSuggestion?.headSha ?? conflictHeadSha;
-    const expectedHeadBlobSha =
-      conflictSuggestion?.headBlobSha ?? conflictFile?.headBlobSha;
-
-    if (!conflictFile || !expectedHeadSha || !expectedHeadBlobSha) {
-      setConflictApplyStatus("error");
-      setConflictApplyError("Conflict 적용 기준 정보를 확인할 수 없습니다.");
-      return false;
-    }
-
-    if (!resolutionComplete) {
-      setConflictApplyStatus("error");
-      setConflictApplyError("모든 Conflict 구간의 해결 방식을 선택해 주세요.");
-      return false;
-    }
-
-    if (!resolvedContentDraft.trim() || hasConflictMarkers(resolvedContentDraft)) {
-      setConflictApplyStatus("error");
-      setConflictApplyError("최종 해결 코드가 비어 있거나 conflict marker가 남아 있습니다.");
-      return false;
-    }
-
-    setConflictApplyStatus("applying");
-    setConflictApplyError(null);
-    setConflictApplyRequiresGithubReconnect(false);
-
-    try {
-      const result = await apiClient.applyReviewFileConflictResolution(
-        workspaceId,
-        conflictFile.reviewFileId,
-        {
-          expectedHeadBlobSha,
-          expectedHeadSha,
-          resolvedContent: resolvedContentDraft
-        }
-      );
-
-      setConflictApplyResult(result);
-      setConflictApplyStatus("applied");
-      setGithubReconnectStatus("idle");
-      setGithubReconnectMessage(null);
-      await onConflictApplied(result);
-      void apiClient
-        .getReviewFileDiff(workspaceId, conflictFile.reviewFileId)
-        .then(setDiff)
-        .catch(() => undefined);
-      return true;
-    } catch (error) {
-      setConflictApplyStatus("error");
-      setConflictApplyError(getConflictApplyErrorMessage(error));
-      setConflictApplyRequiresGithubReconnect(
-        isGithubOAuthReconnectError(error)
-      );
-      return false;
-    }
   }, [
     apiClient,
-    conflictApplyStatus,
+    conflictDraft,
     conflictFile,
-    conflictHeadSha,
-    conflictSuggestion,
-    onConflictApplied,
-    resolutionComplete,
-    resolvedContentDraft,
+    conflictSuggestionStatus,
+    onConflictDraftChange,
     workspaceId
   ]);
-
-  const handleReconnectGithubOAuth = useCallback(async () => {
-    const reconnectWindow = window.open(
-      "about:blank",
-      "pilo-github-oauth-reconnect",
-      "popup=yes,width=760,height=820"
-    );
-
-    if (!reconnectWindow) {
-      setGithubReconnectStatus("error");
-      setGithubReconnectMessage(
-        "새 창을 열 수 없습니다. 브라우저의 팝업 차단을 해제해 주세요."
-      );
-      return;
-    }
-
-    reconnectWindow.opener = null;
-    setGithubReconnectStatus("opening");
-    setGithubReconnectMessage(null);
-
-    try {
-      const result = await apiClient.startGithubOAuth("/github");
-      reconnectWindow.location.replace(result.authorizeUrl);
-      setGithubReconnectStatus("opened");
-      setGithubReconnectMessage(
-        "새 창에서 GitHub 재연결을 완료한 뒤 이 화면에서 다시 적용해 주세요."
-      );
-    } catch (error) {
-      reconnectWindow.close();
-      setGithubReconnectStatus("error");
-      setGithubReconnectMessage(getErrorMessage(error));
-    }
-  }, [apiClient]);
 
   useEffect(() => {
     if (decisionDisabled) {
@@ -849,16 +656,16 @@ export function PrReviewFileDiffDrawer({
                     filePath={file.filePath}
                     isCustomized={isResolvedDraftCustomized}
                     onChange={(value) => {
-                      setResolvedContentDraft(value);
-                      setIsResolvedDraftCustomized(true);
-                      setConflictApplyStatus("idle");
-                      setConflictApplyError(null);
-                      setConflictApplyResult(null);
+                      if (!conflictDraft || !conflictFile) {
+                        return;
+                      }
+                      onConflictDraftChange(conflictFile.reviewFileId, {
+                        ...conflictDraft,
+                        resolvedContent: value,
+                        isCustomized: true
+                      });
                     }}
-                    readOnly={
-                      conflictApplyStatus === "applying" ||
-                      conflictApplyStatus === "applied"
-                    }
+                    readOnly={false}
                     originalValue={conflictFile.headContent}
                     value={resolvedContentDraft}
                   />
@@ -878,32 +685,21 @@ export function PrReviewFileDiffDrawer({
               conflictSuggestion={conflictSuggestion}
               conflictSuggestionErrorMessage={conflictSuggestionError}
               conflictSuggestionStatus={conflictSuggestionStatus}
-              conflictApplyErrorMessage={conflictApplyError}
-              conflictApplyRequiresGithubReconnect={
-                conflictApplyRequiresGithubReconnect
-              }
-              conflictApplyResult={conflictApplyResult}
-              conflictApplyStatus={conflictApplyStatus}
               decisionStatus={decisionStatus}
               decisionDisabledReason={decisionDisabledReason}
               file={file}
               isResolvedDraftCustomized={isResolvedDraftCustomized}
-              githubReconnectMessage={githubReconnectMessage}
-              githubReconnectStatus={githubReconnectStatus}
               onCommentChange={(value) => {
                 setComment(value);
                 setSaveStatus("idle");
                 scheduleCommentSave(value);
               }}
               onCommentBlur={flushCommentSave}
-              onApplyConflictResolution={handleApplyConflictResolution}
               onCreateConflictSuggestion={handleCreateConflictSuggestion}
               onDecisionStatusChange={handleDecisionStatusChange}
               onOpenResolvedDraft={() => setConflictWorkspaceView("resolved")}
-              onReconnectGithubOAuth={handleReconnectGithubOAuth}
               resolutionComplete={resolutionComplete}
               resolvedHunkCount={resolvedHunkCount}
-              resolvedContentDraft={resolvedContentDraft}
               saveErrorMessage={saveErrorMessage}
               saveStatus={saveStatus}
               selectedDecisionLabel={selectedDecision?.label ?? "아직 선택 안 됨"}
@@ -1012,29 +808,20 @@ function FileDiffHeader({ file }: { file: PrReviewFile }) {
 function ReviewNodePanel({
   comment,
   conflictFile,
-  conflictApplyErrorMessage,
-  conflictApplyRequiresGithubReconnect,
-  conflictApplyResult,
-  conflictApplyStatus,
   conflictSuggestion,
   conflictSuggestionErrorMessage,
   conflictSuggestionStatus,
   decisionStatus,
   decisionDisabledReason,
   file,
-  githubReconnectMessage,
-  githubReconnectStatus,
   isResolvedDraftCustomized,
-  onApplyConflictResolution,
   onCommentBlur,
   onCommentChange,
   onCreateConflictSuggestion,
   onDecisionStatusChange,
   onOpenResolvedDraft,
-  onReconnectGithubOAuth,
   resolutionComplete,
   resolvedHunkCount,
-  resolvedContentDraft,
   saveErrorMessage,
   saveStatus,
   selectedDecisionLabel,
@@ -1042,29 +829,20 @@ function ReviewNodePanel({
 }: {
   comment: string;
   conflictFile: PrReviewConflictFile | null;
-  conflictApplyErrorMessage: string | null;
-  conflictApplyRequiresGithubReconnect: boolean;
-  conflictApplyResult: PrReviewConflictApplyResult | null;
-  conflictApplyStatus: ConflictApplyStatus;
   conflictSuggestion: PrReviewConflictSuggestion | null;
   conflictSuggestionErrorMessage: string | null;
   conflictSuggestionStatus: ConflictSuggestionLoadStatus;
   decisionStatus: PrReviewFileDecisionStatus | null;
   decisionDisabledReason: string | null;
   file: PrReviewFile;
-  githubReconnectMessage: string | null;
-  githubReconnectStatus: GithubReconnectStatus;
   isResolvedDraftCustomized: boolean;
-  onApplyConflictResolution: () => Promise<boolean>;
   onCommentBlur: () => void;
   onCommentChange: (value: string) => void;
   onCreateConflictSuggestion: () => void;
   onDecisionStatusChange: (status: PrReviewFileDecisionStatus) => void;
   onOpenResolvedDraft: () => void;
-  onReconnectGithubOAuth: () => void;
   resolutionComplete: boolean;
   resolvedHunkCount: number;
-  resolvedContentDraft: string;
   saveErrorMessage: string | null;
   saveStatus: SaveStatus;
   selectedDecisionLabel: string;
@@ -1102,32 +880,18 @@ function ReviewNodePanel({
           </div>
         </section>
 
-        {conflictApplyResult ? (
-          <ConflictApplySuccessNotice result={conflictApplyResult} />
-        ) : null}
-
         {decisionDisabledReason ? (
           <ConflictResolutionPanel
             conflictFile={conflictFile}
-            conflictApplyErrorMessage={conflictApplyErrorMessage}
-            conflictApplyRequiresGithubReconnect={
-              conflictApplyRequiresGithubReconnect
-            }
-            conflictApplyStatus={conflictApplyStatus}
             conflictSuggestion={conflictSuggestion}
             conflictSuggestionErrorMessage={conflictSuggestionErrorMessage}
             conflictSuggestionStatus={conflictSuggestionStatus}
             isResolvedDraftCustomized={isResolvedDraftCustomized}
-            githubReconnectMessage={githubReconnectMessage}
-            githubReconnectStatus={githubReconnectStatus}
-            onApplyConflictResolution={onApplyConflictResolution}
             onCreateConflictSuggestion={onCreateConflictSuggestion}
             onOpenResolvedDraft={onOpenResolvedDraft}
-            onReconnectGithubOAuth={onReconnectGithubOAuth}
             reason={decisionDisabledReason}
             resolutionComplete={resolutionComplete}
             resolvedHunkCount={resolvedHunkCount}
-            resolvedContentDraft={resolvedContentDraft}
             unsupportedConflictFile={unsupportedConflictFile}
           />
         ) : null}
@@ -1255,43 +1019,27 @@ function ReviewNodePanel({
 
 function ConflictResolutionPanel({
   conflictFile,
-  conflictApplyErrorMessage,
-  conflictApplyRequiresGithubReconnect,
-  conflictApplyStatus,
   conflictSuggestion,
   conflictSuggestionErrorMessage,
   conflictSuggestionStatus,
-  githubReconnectMessage,
-  githubReconnectStatus,
   isResolvedDraftCustomized,
-  onApplyConflictResolution,
   onCreateConflictSuggestion,
   onOpenResolvedDraft,
-  onReconnectGithubOAuth,
   reason,
   resolutionComplete,
   resolvedHunkCount,
-  resolvedContentDraft,
   unsupportedConflictFile
 }: {
   conflictFile: PrReviewConflictFile | null;
-  conflictApplyErrorMessage: string | null;
-  conflictApplyRequiresGithubReconnect: boolean;
-  conflictApplyStatus: ConflictApplyStatus;
   conflictSuggestion: PrReviewConflictSuggestion | null;
   conflictSuggestionErrorMessage: string | null;
   conflictSuggestionStatus: ConflictSuggestionLoadStatus;
-  githubReconnectMessage: string | null;
-  githubReconnectStatus: GithubReconnectStatus;
   isResolvedDraftCustomized: boolean;
-  onApplyConflictResolution: () => Promise<boolean>;
   onCreateConflictSuggestion: () => void;
   onOpenResolvedDraft: () => void;
-  onReconnectGithubOAuth: () => void;
   reason: string;
   resolutionComplete: boolean;
   resolvedHunkCount: number;
-  resolvedContentDraft: string;
   unsupportedConflictFile: PrReviewUnsupportedConflictFile | null;
 }) {
   const isSuggestionLoading = conflictSuggestionStatus === "loading";
@@ -1370,19 +1118,24 @@ function ConflictResolutionPanel({
             </div>
           </div>
 
-          <ConflictApplyControls
-            applyErrorMessage={conflictApplyErrorMessage}
-            applyRequiresGithubReconnect={
-              conflictApplyRequiresGithubReconnect
-            }
-            applyStatus={conflictApplyStatus}
-            githubReconnectMessage={githubReconnectMessage}
-            githubReconnectStatus={githubReconnectStatus}
-            onApply={onApplyConflictResolution}
-            onReconnectGithubOAuth={onReconnectGithubOAuth}
-            resolutionComplete={resolutionComplete}
-            resolvedContent={resolvedContentDraft}
-          />
+          <div
+            className={cn(
+              "rounded-lg border px-3 py-3",
+              resolutionComplete
+                ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+                : "border-amber-200 bg-white text-amber-900"
+            )}
+          >
+            <p className="flex items-center gap-2 text-sm font-semibold">
+              <CheckCircle2 className="size-4" />
+              {resolutionComplete ? "이 파일은 해결 준비됨" : "해결 선택 진행 중"}
+            </p>
+            <p className="mt-1 text-xs leading-5">
+              {resolutionComplete
+                ? "다른 Conflict 파일도 준비되면 상단에서 전체 적용할 수 있습니다."
+                : "모든 Conflict 구간의 해결 방식을 선택해 주세요."}
+            </p>
+          </div>
         </div>
       ) : null}
     </section>
@@ -1429,205 +1182,6 @@ function ConflictSuggestionPreview({
         </PanelSection>
       ) : null}
     </div>
-  );
-}
-
-function ConflictApplyControls({
-  applyErrorMessage,
-  applyRequiresGithubReconnect,
-  applyStatus,
-  githubReconnectMessage,
-  githubReconnectStatus,
-  onApply,
-  onReconnectGithubOAuth,
-  resolutionComplete,
-  resolvedContent
-}: {
-  applyErrorMessage: string | null;
-  applyRequiresGithubReconnect: boolean;
-  applyStatus: ConflictApplyStatus;
-  githubReconnectMessage: string | null;
-  githubReconnectStatus: GithubReconnectStatus;
-  onApply: () => Promise<boolean>;
-  onReconnectGithubOAuth: () => void;
-  resolutionComplete: boolean;
-  resolvedContent: string;
-}) {
-  const [isConfirming, setIsConfirming] = useState(false);
-  const isApplying = applyStatus === "applying";
-  const applied = applyStatus === "applied";
-  const draftEmpty = !resolvedContent.trim();
-  const draftHasConflictMarkers = hasConflictMarkers(resolvedContent);
-  const canApply =
-    resolutionComplete &&
-    !draftEmpty &&
-    !draftHasConflictMarkers &&
-    !isApplying &&
-    !applied;
-  const applyDisabledReason = !resolutionComplete
-    ? "모든 Conflict 구간의 해결 방식을 선택해 주세요."
-    : draftEmpty
-      ? "최종 해결 코드가 비어 있습니다."
-      : draftHasConflictMarkers
-        ? "최종 해결 코드에 conflict marker가 남아 있습니다."
-        : null;
-
-  return (
-    <div className="rounded-lg border border-amber-200 bg-white p-3">
-      {applyDisabledReason ? (
-        <p className="text-xs leading-5 text-amber-800">{applyDisabledReason}</p>
-      ) : null}
-
-      {applyErrorMessage ? (
-        <div
-          aria-live="polite"
-          className="mb-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-700"
-        >
-          <p className="font-semibold">적용 실패</p>
-          <p className="mt-1">{applyErrorMessage}</p>
-        </div>
-      ) : null}
-
-      {applyRequiresGithubReconnect ? (
-        <div className="mb-3 space-y-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2">
-          <p className="text-xs leading-5 text-blue-900">
-            새 창에서 GitHub 사용자 연결만 갱신합니다. 이 리뷰 탭과 최종 해결 코드는 그대로 유지됩니다.
-          </p>
-          <Button
-            disabled={githubReconnectStatus === "opening"}
-            onClick={onReconnectGithubOAuth}
-            size="sm"
-            type="button"
-            variant="outline"
-          >
-            {githubReconnectStatus === "opening" ? (
-              <Loader2 className="size-3.5 animate-spin" />
-            ) : (
-              <RefreshCcw className="size-3.5" />
-            )}
-            {githubReconnectStatus === "opening"
-              ? "재연결 준비 중"
-              : githubReconnectStatus === "opened"
-                ? "재연결 창 다시 열기"
-                : "GitHub 재연결"}
-          </Button>
-          {githubReconnectMessage ? (
-            <p
-              aria-live="polite"
-              className={cn(
-                "text-xs leading-5",
-                githubReconnectStatus === "error"
-                  ? "text-rose-700"
-                  : "text-blue-800"
-              )}
-            >
-              {githubReconnectMessage}
-            </p>
-          ) : null}
-        </div>
-      ) : null}
-
-      {isConfirming ? (
-        <div className="space-y-3">
-          <div className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2">
-            <p className="text-sm font-semibold text-blue-950">
-              이 해결 코드를 PR 브랜치에 커밋할까요?
-            </p>
-            <p className="mt-1 text-xs leading-5 text-blue-800">
-              적용 후에는 GitHub의 최신 conflict 상태를 다시 확인합니다.
-            </p>
-          </div>
-          <div className="flex justify-end gap-2">
-            <Button
-              disabled={isApplying}
-              onClick={() => setIsConfirming(false)}
-              size="sm"
-              type="button"
-              variant="outline"
-            >
-              취소
-            </Button>
-            <Button
-              disabled={isApplying || !canApply}
-              onClick={() => {
-                void onApply().then((success) => {
-                  if (success) {
-                    setIsConfirming(false);
-                  }
-                });
-              }}
-              size="sm"
-              type="button"
-            >
-              {isApplying ? <Loader2 className="size-3.5 animate-spin" /> : null}
-              {isApplying
-                ? "적용 중"
-                : applyRequiresGithubReconnect
-                  ? "GitHub에 다시 적용"
-                  : "GitHub에 적용"}
-            </Button>
-          </div>
-        </div>
-      ) : (
-        <div className="flex justify-end">
-          <Button
-            disabled={!canApply}
-            onClick={() => setIsConfirming(true)}
-            size="sm"
-            type="button"
-          >
-            <CheckCircle2 className="size-3.5" />
-            해결안 적용
-          </Button>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ConflictApplySuccessNotice({
-  result
-}: {
-  result: PrReviewConflictApplyResult;
-}) {
-  const requiresSync = result.localStateStatus === "sync_required";
-  const statusMessage = requiresSync
-    ? "GitHub에는 적용됐지만 PILO 상태 갱신에 실패했습니다. GitHub 동기화 후 새 리뷰를 시작해 주세요."
-    : result.conflictStatus === "clean"
-      ? "GitHub에서 남은 Conflict가 없음을 확인했습니다."
-      : result.conflictStatus === "checking"
-        ? "GitHub에서 갱신된 PR의 Conflict 상태를 확인하고 있습니다."
-        : "GitHub의 최신 Conflict 상태를 다시 확인했습니다.";
-
-  return (
-    <section
-      className={cn(
-        "rounded-lg border px-4 py-3",
-        requiresSync
-          ? "border-amber-200 bg-amber-50 text-amber-950"
-          : "border-emerald-200 bg-emerald-50 text-emerald-900"
-      )}
-    >
-      <p className="flex items-center gap-2 text-sm font-semibold">
-        <CheckCircle2 className="size-4 shrink-0" />
-        Conflict 해결 merge commit 완료
-      </p>
-      <p className="mt-2 text-xs leading-5">{statusMessage}</p>
-      <p className="mt-2 font-mono text-xs">
-        {result.headShaBefore.slice(0, 7)} -&gt; {result.headShaAfter.slice(0, 7)}
-      </p>
-      {result.commitUrl ? (
-        <a
-          className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 hover:text-emerald-900"
-          href={result.commitUrl}
-          rel="noreferrer"
-          target="_blank"
-        >
-          GitHub 커밋 보기
-          <ExternalLink className="size-3" />
-        </a>
-      ) : null}
-    </section>
   );
 }
 

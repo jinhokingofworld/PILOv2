@@ -22,7 +22,7 @@
 | 1-C | Review room conflict UX | #508 | #511 | 완료 |
 | 1-D | AI suggestion draft | #512 | #515 | 구현 완료 |
 | 1-E | Apply resolution write path | #529 | TBD | 구현 완료 |
-| 1-F | Multi-file atomic apply | #628 | TBD | 진행 중 |
+| 1-F | Multi-file atomic apply | #628, #633 | #631, TBD | 구현 완료 |
 
 ## 공통 Stop Gate
 
@@ -138,7 +138,7 @@
 - [x] 모든 해결 파일을 하나의 merge commit으로 stage하고 push한다. (#628)
 - [x] head/base SHA와 파일별 blob SHA stale guard를 유지한다. (#628)
 - [x] 기존 단일 파일 apply endpoint 호환성을 유지한다. (#628)
-- [ ] frontend에서 파일별 해결 초안을 유지하고 전체 적용 action을 연결한다.
+- [x] frontend에서 파일별 해결 초안을 유지하고 전체 적용 action을 연결한다. (#633)
 
 ## PR 전 확인
 

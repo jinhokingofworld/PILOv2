@@ -38,7 +38,7 @@ export type PrReviewFileNodeShapeProps = {
   roleSummary: string | null;
   riskLevel: PrReviewFileRiskLevel;
   reviewStatus: PrReviewFileReviewStatus;
-  conflictState: "none" | "unresolved" | "unsupported";
+  conflictState: "none" | "unresolved" | "ready" | "unsupported";
   conflictReason: string | null;
 };
 
@@ -150,6 +150,7 @@ const conflictNodeClasses: Record<
   string
 > = {
   unresolved: "border-rose-400 bg-rose-50/95 shadow-rose-100",
+  ready: "border-emerald-400 bg-emerald-50/95 shadow-emerald-100",
   unsupported: "border-amber-400 bg-amber-50/95 shadow-amber-100"
 };
 
@@ -158,6 +159,7 @@ const conflictBadgeLabels: Record<
   string
 > = {
   unresolved: "conflict",
+  ready: "해결 준비",
   unsupported: "unsupported"
 };
 
@@ -166,6 +168,7 @@ const conflictBadgeClasses: Record<
   string
 > = {
   unresolved: "border-rose-200 bg-white text-rose-700",
+  ready: "border-emerald-200 bg-white text-emerald-700",
   unsupported: "border-amber-200 bg-white text-amber-700"
 };
 
@@ -352,7 +355,12 @@ export class PrReviewFileNodeShapeUtil extends ShapeUtil<PrReviewFileNodeShape> 
       "discussion_needed",
       "unknown"
     ),
-    conflictState: T.literalEnum("none", "unresolved", "unsupported"),
+    conflictState: T.literalEnum(
+      "none",
+      "unresolved",
+      "ready",
+      "unsupported"
+    ),
     conflictReason: T.nullable(T.string)
   };
 

@@ -1,9 +1,11 @@
 import type {
   ApplyPrReviewConflictResolutionInput,
+  ApplyPrReviewConflictsInput,
   ListPrReviewPullRequestsQuery,
   ListPrReviewRepositoriesQuery,
   MergePrReviewSessionInput,
   PrReviewConflictApplyResult,
+  PrReviewConflictsApplyResult,
   PrReviewCanvas,
   PrReviewConflictAnalysis,
   PrReviewConflictSuggestion,
@@ -474,6 +476,21 @@ export function createPrReviewApiClient({
     ) {
       return requestPrReviewData<PrReviewConflictApplyResult>(
         `${reviewFileGithubPath(workspaceId, reviewFileId)}/conflict-apply`,
+        {
+          body: JSON.stringify(input),
+          method: "POST"
+        },
+        requestOptions
+      );
+    },
+
+    async applyReviewSessionConflictResolutions(
+      workspaceId: string,
+      reviewSessionId: string,
+      input: ApplyPrReviewConflictsInput
+    ) {
+      return requestPrReviewData<PrReviewConflictsApplyResult>(
+        `${reviewSessionGithubPath(workspaceId, reviewSessionId)}/conflict-apply`,
         {
           body: JSON.stringify(input),
           method: "POST"
