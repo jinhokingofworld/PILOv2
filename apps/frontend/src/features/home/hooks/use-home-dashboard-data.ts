@@ -17,11 +17,11 @@ import type {
   GithubPullRequest,
   GithubRepository
 } from "@/features/github-integration/types";
-import { readGithubBoardSelection } from "@/features/github-integration/utils/github-board-selection";
 import { createMeetingApiClient } from "@/features/meeting/api/client";
 import type { MeetingReportSummary } from "@/features/meeting/types";
 import { createSqlErdApiClient } from "@/features/sql-erd/api/client";
 import type { SqltoerdSessionPayload } from "@/features/sql-erd/types";
+import { readGithubBoardSelection } from "@/shared/github/board-selection";
 
 export const homeIssueListLimit = 5;
 export const homePullRequestListLimit = 3;

@@ -25,7 +25,7 @@ import { useAuthSession } from "@/features/auth";
 import {
   readGithubBoardSelection,
   type GithubBoardSelection
-} from "@/features/github-integration/utils/github-board-selection";
+} from "@/shared/github/board-selection";
 import { cn } from "@/lib/utils";
 
 const selectClassName =

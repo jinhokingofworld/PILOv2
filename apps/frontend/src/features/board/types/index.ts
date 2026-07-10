@@ -1,6 +1,15 @@
 export type BoardSyncStatus = "running" | "success" | "failed";
 export type BoardIssueState = "open" | "closed";
 
+export type BoardGithubRepositoryPayload = {
+  id: string;
+};
+
+export type BoardGithubProjectV2Payload = {
+  id: string;
+  repositoryIds: string[];
+};
+
 export type BoardRepositoryPayload = {
   id: string;
   fullName: string;
@@ -224,6 +233,16 @@ export type ListBoardsQuery = {
   repositoryId?: string;
   projectV2Id?: string;
   page?: number;
+  limit?: number;
+};
+
+export type ListBoardGithubRepositoriesQuery = {
+  includeArchived?: boolean;
+  limit?: number;
+};
+
+export type ListBoardGithubProjectsV2Query = {
+  closed?: boolean;
   limit?: number;
 };
 

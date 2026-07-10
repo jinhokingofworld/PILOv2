@@ -24,7 +24,7 @@ const [
     new URL("../github-integration/components/github-panel.tsx", import.meta.url),
     "utf8"
   ),
-  readFeatureFile("../github-integration/utils/github-board-selection.ts"),
+  readFeatureFile("../../shared/github/board-selection.ts"),
   readFeatureFile("../github-integration/utils/github-project-selection.ts"),
   readFeatureFile("../github-integration/types/index.ts")
 ]);

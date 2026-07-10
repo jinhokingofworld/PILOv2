@@ -2,6 +2,8 @@ import type {
   BoardColumnPayload,
   BoardDetailPayload,
   BoardFilterOptionsPayload,
+  BoardGithubProjectV2Payload,
+  BoardGithubRepositoryPayload,
   BoardIssueCardPayload,
   BoardIssueDetailPayload,
   BoardPaginatedPayload,
@@ -10,6 +12,8 @@ import type {
   CreateBoardInput,
   CreateBoardIssueCommand,
   CreateBoardIssuePayload,
+  ListBoardGithubProjectsV2Query,
+  ListBoardGithubRepositoriesQuery,
   ListBoardIssuesQuery,
   ListBoardsQuery,
   UpdateBoardIssueInput,
@@ -244,6 +248,10 @@ async function requestBoardData<T>(
   });
 }
 
+function workspaceGithubPath(workspaceId: string, path: string) {
+  return `/workspaces/${encodeURIComponent(workspaceId)}/github${path}` as const;
+}
+
 function boardsPath(workspaceId: string) {
   return `/workspaces/${encodeURIComponent(workspaceId)}/boards` as const;
 }
@@ -270,6 +278,34 @@ export function createBoardApiClient({
   };
 
   return {
+    async listGithubRepositories(
+      workspaceId: string,
+      query: ListBoardGithubRepositoriesQuery = {}
+    ) {
+      return requestBoardData<BoardGithubRepositoryPayload[]>(
+        withQueryParams(
+          workspaceGithubPath(workspaceId, "/repositories"),
+          query
+        ),
+        { credentials: "include" },
+        requestOptions
+      );
+    },
+
+    async listGithubProjectsV2(
+      workspaceId: string,
+      query: ListBoardGithubProjectsV2Query = {}
+    ) {
+      return requestBoardData<BoardGithubProjectV2Payload[]>(
+        withQueryParams(
+          workspaceGithubPath(workspaceId, "/projects-v2"),
+          query
+        ),
+        { credentials: "include" },
+        requestOptions
+      );
+    },
+
     async listBoards(workspaceId: string, query: ListBoardsQuery = {}) {
       return requestBoardData<BoardPaginatedPayload<BoardPayload>>(
         withQueryParams(boardsPath(workspaceId), query),
