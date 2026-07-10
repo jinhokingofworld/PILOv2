@@ -4,7 +4,6 @@ import { badRequest, notFound } from "../../common/api-error";
 import { DatabaseService } from "../../database/database.service";
 import { WorkspaceService } from "../workspace/workspace.service";
 import { agentJobUnavailable, agentStorageUnavailable } from "./agent-api-error";
-import { AgentExecutionService } from "./agent-execution.service";
 import {
   AGENT_TOOL_SCHEMA_VERSION,
   AgentJobService,
@@ -202,6 +201,7 @@ const AGENT_RUN_STATUSES: AgentRunStatus[] = [
   "failed",
   "cancelled"
 ];
+const RETENTION_CLEANUP_BATCH_SIZE = 100;
 const FORBIDDEN_BODY_FIELDS = [
   "workspaceId",
   "userId",
@@ -230,8 +230,7 @@ export class AgentService {
     private readonly workspaceService: WorkspaceService,
     private readonly agentLoggingService: AgentLoggingService,
     private readonly agentJobService: AgentJobService,
-    private readonly agentToolRegistryService: AgentToolRegistryService,
-    private readonly agentExecutionService: AgentExecutionService
+    private readonly agentToolRegistryService: AgentToolRegistryService
   ) {}
 
   async createRun(
@@ -394,6 +393,7 @@ export class AgentService {
     query: AgentRunListQuery
   ): Promise<AgentRunListPayload> {
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+    await this.applyRequestTimeLifecycle(currentUserId, workspaceId);
 
     const status = this.normalizeOptionalStatus(query.status);
     const pagination = this.normalizePagination(query);
@@ -452,12 +452,7 @@ export class AgentService {
     runId: string
   ): Promise<AgentRunDetailPayload> {
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
-    await this.agentExecutionService.executeLatestPlannedTool(
-      currentUserId,
-      workspaceId,
-      runId
-    );
-
+    await this.applyRequestTimeLifecycle(currentUserId, workspaceId);
     const run = await this.database.queryOne<AgentRunRow>(
       `
         SELECT *
@@ -506,6 +501,55 @@ export class AgentService {
           : null
       }
     };
+  }
+
+  private async applyRequestTimeLifecycle(
+    currentUserId: string,
+    workspaceId: string
+  ): Promise<void> {
+    await this.database.transaction(async (transaction) => {
+      await transaction.execute(
+        `
+          WITH expired_confirmations AS (
+            UPDATE agent_confirmations AS confirmation
+            SET status = 'expired'
+            FROM agent_runs AS run
+            WHERE confirmation.run_id = run.id
+              AND confirmation.status = 'pending'
+              AND confirmation.expires_at <= now()
+              AND run.workspace_id = $1
+              AND run.requested_by_user_id = $2
+            RETURNING confirmation.run_id
+          )
+          UPDATE agent_runs AS run
+          SET status = 'cancelled',
+              message = '승인 대기 시간이 만료되었습니다.',
+              completed_at = now()
+          WHERE run.id IN (SELECT run_id FROM expired_confirmations)
+            AND run.status = 'waiting_confirmation'
+        `,
+        [workspaceId, currentUserId]
+      );
+
+      await transaction.execute(
+        `
+          WITH expired_runs AS (
+            SELECT id
+            FROM agent_runs
+            WHERE workspace_id = $1
+              AND requested_by_user_id = $2
+              AND expires_at <= now()
+            ORDER BY expires_at ASC
+            LIMIT $3
+            FOR UPDATE SKIP LOCKED
+          )
+          DELETE FROM agent_runs AS run
+          USING expired_runs
+          WHERE run.id = expired_runs.id
+        `,
+        [workspaceId, currentUserId, RETENTION_CLEANUP_BATCH_SIZE]
+      );
+    });
   }
 
   private normalizeCreateRunInput(body: unknown): AgentRunCreateInput {

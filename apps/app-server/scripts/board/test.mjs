@@ -234,6 +234,7 @@ await import("./create-hydrate.test.mjs");
 await import("./read.test.mjs");
 await import("./issues.test.mjs");
 await import("./issue-detail.test.mjs");
+await import("./issue-assignees.test.mjs");
 await import("./status-update.test.mjs");
 await import("./issue-update.test.mjs");
 await import("./issue-create.test.mjs");

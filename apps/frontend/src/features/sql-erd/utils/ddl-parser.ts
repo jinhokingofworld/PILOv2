@@ -1,3 +1,4 @@
+import { PostgreSQL } from "@codemirror/lang-sql";
 import sqlParser from "node-sql-parser";
 
 import {
@@ -7,20 +8,28 @@ import {
   type ErdRelation,
   type ErdTable,
   type SqltoerdDialect,
-  type SqltoerdModelJsonV1
+  type SqltoerdModelJsonV1,
+  type SqltoerdResolvedDialect
 } from "@/features/sql-erd/types";
+import {
+  createSqltoerdSourceMap,
+  type SqltoerdSourceMap
+} from "@/features/sql-erd/utils/sql-source-map";
 
 const { Parser } = sqlParser;
 
 export type SqltoerdDdlParseInput = {
   sourceText: string;
   dialect: SqltoerdDialect;
+  sourceMapModelJson?: SqltoerdModelJsonV1;
 };
 
 export type SqltoerdDdlParseResult =
   | {
       ok: true;
       modelJson: SqltoerdModelJsonV1;
+      resolvedDialect: SqltoerdResolvedDialect;
+      sourceMap: SqltoerdSourceMap;
     }
   | {
       ok: false;
@@ -39,6 +48,10 @@ type MutableTableParseState = {
   columnsByName: Map<string, ErdColumn>;
 };
 
+type PostgreSqlSyntaxNode = ReturnType<
+  typeof PostgreSQL.language.parser.parse
+>["topNode"];
+
 const parser = new Parser();
 
 export function parseSqlDdlToErdModel(
@@ -50,7 +63,7 @@ export function parseSqlDdlToErdModel(
     return createParseFailure("EMPTY_SOURCE", "SQL DDL source is empty.");
   }
 
-  const databases = resolveParserDatabases(input.dialect);
+  const databases = resolveParserDatabases(input.dialect, sourceText);
 
   if (databases.length === 0) {
     return createParseFailure(
@@ -60,12 +73,18 @@ export function parseSqlDdlToErdModel(
   }
 
   let astNodes: SqlParserAstNode[] | null = null;
+  let resolvedDialect: SqltoerdResolvedDialect | null = null;
   let lastParseErrorMessage = "Failed to parse SQL DDL.";
 
   for (const database of databases) {
     try {
-      const ast = parser.astify(sourceText, { database });
+      const parserSourceText =
+        database === "postgresql"
+          ? preparePostgreSqlParserSource(sourceText)
+          : sourceText;
+      const ast = parser.astify(parserSourceText, { database });
       astNodes = (Array.isArray(ast) ? ast : [ast]) as unknown as SqlParserAstNode[];
+      resolvedDialect = database;
       break;
     } catch (error) {
       lastParseErrorMessage =
@@ -73,7 +92,7 @@ export function parseSqlDdlToErdModel(
     }
   }
 
-  if (!astNodes) {
+  if (!astNodes || !resolvedDialect) {
     return createParseFailure(
       "PARSE_FAILED",
       lastParseErrorMessage
@@ -110,21 +129,175 @@ export function parseSqlDdlToErdModel(
     );
   }
 
+  const modelJson: SqltoerdModelJsonV1 = {
+    version: SQLTOERD_MODEL_JSON_VERSION,
+    schema: {
+      tables: tableStates.map((tableState) => tableState.table),
+      relations
+    }
+  };
+
   return {
     ok: true,
-    modelJson: {
-      version: SQLTOERD_MODEL_JSON_VERSION,
-      schema: {
-        tables: tableStates.map((tableState) => tableState.table),
-        relations
-      }
-    }
+    resolvedDialect,
+    modelJson,
+    sourceMap: createSqltoerdSourceMap({
+      dialect: resolvedDialect,
+      modelJson: input.sourceMapModelJson ?? modelJson,
+      sourceText: input.sourceText
+    })
   };
 }
 
-function resolveParserDatabases(dialect: SqltoerdDialect) {
+function preparePostgreSqlParserSource(sourceText: string) {
+  const declaredTypes = collectPostgreSqlUserDefinedTypeDeclarations(sourceText);
+
+  if (declaredTypes.length === 0) {
+    return sourceText;
+  }
+
+  // node-sql-parser registers CREATE TYPE names but not CREATE DOMAIN names.
+  // Register both in a parser-only prelude so table columns keep their original type.
+  const parserPrelude = declaredTypes
+    .map(
+      (typeName) =>
+        `CREATE TYPE ${typeName} AS ENUM ('__pilo_sqltoerd_parser_type__');`
+    )
+    .join("\n");
+
+  return `${parserPrelude}\n${sourceText}`;
+}
+
+export function collectPostgreSqlUserDefinedTypeDeclarations(
+  sourceText: string
+) {
+  const tree = PostgreSQL.language.parser.parse(sourceText);
+  const rootCursor = tree.cursor();
+  const declaredTypes = new Map<string, string>();
+
+  if (!rootCursor.firstChild()) {
+    return [];
+  }
+
+  do {
+    if (rootCursor.name !== "Statement") {
+      continue;
+    }
+
+    const statementNodes = getPostgreSqlStatementNodes(rootCursor.node);
+    let cursor = 0;
+
+    if (readPostgreSqlKeyword(statementNodes[cursor], sourceText) !== "CREATE") {
+      continue;
+    }
+
+    cursor += 1;
+
+    if (
+      readPostgreSqlKeyword(statementNodes[cursor], sourceText) === "OR" &&
+      readPostgreSqlKeyword(statementNodes[cursor + 1], sourceText) === "REPLACE"
+    ) {
+      cursor += 2;
+    }
+
+    const declarationKind = readPostgreSqlKeyword(
+      statementNodes[cursor],
+      sourceText
+    );
+
+    if (declarationKind !== "TYPE" && declarationKind !== "DOMAIN") {
+      continue;
+    }
+
+    const typeNameNode = statementNodes[cursor + 1];
+    const typeKey = createPostgreSqlTypeNameKey(typeNameNode, sourceText);
+
+    if (typeKey && !declaredTypes.has(typeKey)) {
+      declaredTypes.set(
+        typeKey,
+        sourceText.slice(typeNameNode.from, typeNameNode.to)
+      );
+    }
+  } while (rootCursor.nextSibling());
+
+  return [...declaredTypes.values()];
+}
+
+function getPostgreSqlStatementNodes(statementNode: PostgreSqlSyntaxNode) {
+  const cursor = statementNode.cursor();
+  const nodes: PostgreSqlSyntaxNode[] = [];
+
+  if (!cursor.firstChild()) {
+    return nodes;
+  }
+
+  do {
+    if (!cursor.name.endsWith("Comment")) {
+      nodes.push(cursor.node);
+    }
+  } while (cursor.nextSibling());
+
+  return nodes;
+}
+
+function readPostgreSqlKeyword(
+  node: PostgreSqlSyntaxNode | undefined,
+  sourceText: string
+) {
+  return node?.name === "Keyword"
+    ? sourceText.slice(node.from, node.to).toUpperCase()
+    : null;
+}
+
+function createPostgreSqlTypeNameKey(
+  node: PostgreSqlSyntaxNode | undefined,
+  sourceText: string
+) {
+  if (!node) {
+    return null;
+  }
+
+  if (node.name === "Identifier" || node.name === "QuotedIdentifier") {
+    return createPostgreSqlIdentifierKey(node, sourceText);
+  }
+
+  if (node.name !== "CompositeIdentifier") {
+    return null;
+  }
+
+  const cursor = node.cursor();
+  const identifiers: string[] = [];
+
+  if (!cursor.firstChild()) {
+    return null;
+  }
+
+  do {
+    if (cursor.name === "Identifier" || cursor.name === "QuotedIdentifier") {
+      identifiers.push(createPostgreSqlIdentifierKey(cursor.node, sourceText));
+    }
+  } while (cursor.nextSibling());
+
+  return identifiers.length > 0 ? identifiers.join(".") : null;
+}
+
+function createPostgreSqlIdentifierKey(
+  node: PostgreSqlSyntaxNode,
+  sourceText: string
+) {
+  const identifier = sourceText.slice(node.from, node.to);
+
+  return node.name === "QuotedIdentifier"
+    ? `quoted:${identifier.slice(1, -1).replace(/""/g, '"')}`
+    : `unquoted:${identifier.toLowerCase()}`;
+}
+
+function resolveParserDatabases(
+  dialect: SqltoerdDialect,
+  sourceText: string
+): SqltoerdResolvedDialect[] {
   if (dialect === "auto") {
-    return ["postgresql", "mysql"];
+    return getAutoParserDatabases(sourceText);
   }
 
   if (dialect === "postgresql") {
@@ -136,6 +309,25 @@ function resolveParserDatabases(dialect: SqltoerdDialect) {
   }
 
   return [];
+}
+
+function getAutoParserDatabases(
+  sourceText: string
+): SqltoerdResolvedDialect[] {
+  const hasMySqlMarker =
+    /\b(?:AUTO_INCREMENT|UNSIGNED|UNIQUE\s+KEY|DATETIME)\b|\bENGINE\s*=|`[^`]+`/i.test(
+      sourceText
+    );
+  const hasPostgreSqlMarker =
+    /\b(?:BIGSERIAL|SMALLSERIAL|SERIAL|TIMESTAMPTZ|JSONB|BYTEA)\b|::/i.test(
+      sourceText
+    );
+
+  if (hasMySqlMarker && !hasPostgreSqlMarker) {
+    return ["mysql", "postgresql"];
+  }
+
+  return ["postgresql", "mysql"];
 }
 
 function createTableState(createTableNode: SqlParserAstNode): MutableTableParseState {

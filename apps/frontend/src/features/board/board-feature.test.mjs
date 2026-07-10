@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 
 await import("./board-issue-idempotency.test.mjs");
 await import("./board-structure.test.mjs");
+await import("./board-assignees.test.mjs");
 
 async function readFeatureFile(path) {
   return readFile(new URL(path, import.meta.url), "utf8");

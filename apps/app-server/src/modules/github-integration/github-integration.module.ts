@@ -6,6 +6,8 @@ import { GithubAppClient } from "./github-app.client";
 import { GithubAppInstallationService } from "./github-app-installation.service";
 import { GithubAppInstallationStateService } from "./github-app-installation-state.service";
 import { GithubCallbackStateService } from "./github-callback-state.service";
+import { GithubConflictMergeService } from "./github-conflict-merge.service";
+import { GithubGitCommandRunner } from "./github-git-command-runner";
 import { GithubIntegrationConfigService } from "./github-integration-config.service";
 import { GithubIntegrationController } from "./github-integration.controller";
 import { GithubIntegrationService } from "./github-integration.service";
@@ -37,6 +39,8 @@ import { GithubWebhookService } from "./github-webhook.service";
     GithubAppInstallationService,
     GithubAppInstallationStateService,
     GithubCallbackStateService,
+    GithubConflictMergeService,
+    GithubGitCommandRunner,
     GithubIssueWriteService,
     GithubOAuthClient,
     GithubOAuthIntegrationService,

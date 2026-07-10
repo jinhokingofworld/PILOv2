@@ -3,6 +3,9 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { history, undoDepth } from "@codemirror/commands";
+import { MySQL, PostgreSQL } from "@codemirror/lang-sql";
+import { Compartment, EditorState } from "@codemirror/state";
 import ts from "typescript";
 
 async function readSqlErdFile(path) {
@@ -16,11 +19,17 @@ async function compileSqlErdRuntimeModules() {
   const modelOutputPath = join(outputDir, "model.mjs");
   const inspectorOutputPath = join(outputDir, "inspector.mjs");
   const ddlParserOutputPath = join(outputDir, "ddl-parser.mjs");
+  const sqlSourceMapOutputPath = join(outputDir, "sql-source-map.mjs");
+  const sqlSourceDecorationOutputPath = join(
+    outputDir,
+    "sql-source-decoration.mjs"
+  );
   const generateSessionOutputPath = join(outputDir, "generate-session.mjs");
   const layoutAutosaveOutputPath = join(outputDir, "layout-autosave.mjs");
   const apiClientOutputPath = join(outputDir, "api-client.mjs");
   const sessionStateOutputPath = join(outputDir, "session-state.mjs");
   const statusCopyOutputPath = join(outputDir, "status-copy.mjs");
+  const sqlEditorDialectOutputPath = join(outputDir, "sql-editor-dialect.mjs");
   const relationShapeOutputPath = join(outputDir, "relation-shape.mjs");
   const tableShapeOutputPath = join(outputDir, "table-shape.mjs");
   const canvasSelectionOutputPath = join(outputDir, "canvas-selection.mjs");
@@ -36,9 +45,23 @@ async function compileSqlErdRuntimeModules() {
       [[/from "\.\/model"/g, 'from "./model.mjs"']]
     );
     await compileTypeScriptModule(
+      "../../src/features/sql-erd/utils/sql-source-map.ts",
+      sqlSourceMapOutputPath
+    );
+    await compileTypeScriptModule(
+      "../../src/features/sql-erd/utils/sql-source-decoration.ts",
+      sqlSourceDecorationOutputPath
+    );
+    await compileTypeScriptModule(
       "../../src/features/sql-erd/utils/ddl-parser.ts",
       ddlParserOutputPath,
-      [[/from "@\/features\/sql-erd\/types"/g, 'from "./types-stub.mjs"']]
+      [
+        [/from "@\/features\/sql-erd\/types"/g, 'from "./types-stub.mjs"'],
+        [
+          /from "@\/features\/sql-erd\/utils\/sql-source-map"/g,
+          'from "./sql-source-map.mjs"'
+        ]
+      ]
     );
     await compileTypeScriptModule(
       "../../src/features/sql-erd/utils/generate-session.ts",
@@ -66,6 +89,10 @@ async function compileSqlErdRuntimeModules() {
     await compileTypeScriptModule(
       "../../src/features/sql-erd/utils/status-copy.ts",
       statusCopyOutputPath
+    );
+    await compileTypeScriptModule(
+      "../../src/features/sql-erd/utils/sql-editor-dialect.ts",
+      sqlEditorDialectOutputPath
     );
     await compileTypeScriptModule(
       "../../src/features/sql-erd/shapes/sql-erd-relation-shape.tsx",
@@ -139,10 +166,13 @@ async function compileSqlErdRuntimeModules() {
       modelRuntime,
       inspectorRuntime,
       ddlParserRuntime,
+      sqlSourceMapRuntime,
+      sqlSourceDecorationRuntime,
       generateSessionRuntime,
       layoutAutosaveRuntime,
       apiClientRuntime,
       sessionStateRuntime,
+      sqlEditorDialectRuntime,
       statusCopyRuntime,
       relationShapeRuntime,
       tableShapeRuntime,
@@ -151,10 +181,13 @@ async function compileSqlErdRuntimeModules() {
       import(pathToFileHref(modelOutputPath)),
       import(pathToFileHref(inspectorOutputPath)),
       import(pathToFileHref(ddlParserOutputPath)),
+      import(pathToFileHref(sqlSourceMapOutputPath)),
+      import(pathToFileHref(sqlSourceDecorationOutputPath)),
       import(pathToFileHref(generateSessionOutputPath)),
       import(pathToFileHref(layoutAutosaveOutputPath)),
       import(pathToFileHref(apiClientOutputPath)),
       import(pathToFileHref(sessionStateOutputPath)),
+      import(pathToFileHref(sqlEditorDialectOutputPath)),
       import(pathToFileHref(statusCopyOutputPath)),
       import(pathToFileHref(relationShapeOutputPath)),
       import(pathToFileHref(tableShapeOutputPath)),
@@ -165,12 +198,15 @@ async function compileSqlErdRuntimeModules() {
       apiClientRuntime,
       canvasSelectionRuntime,
       ddlParserRuntime,
+      sqlSourceMapRuntime,
+      sqlSourceDecorationRuntime,
       generateSessionRuntime,
       layoutAutosaveRuntime,
       inspectorRuntime,
       modelRuntime,
       relationShapeRuntime,
       sessionStateRuntime,
+      sqlEditorDialectRuntime,
       statusCopyRuntime,
       tableShapeRuntime
     };
@@ -289,6 +325,56 @@ function createRuntimeTestModel() {
       ]
     }
   };
+}
+
+function createRuntimeModelWithStableIdPrefix(modelJson, prefix) {
+  const stableModelJson = structuredClone(modelJson);
+  const tableIds = new Map();
+  const columnIdsByTableId = new Map();
+
+  for (const table of stableModelJson.schema.tables) {
+    const originalTableId = table.id;
+    const columnIds = new Map();
+
+    table.id = `${prefix}${originalTableId}`;
+    tableIds.set(originalTableId, table.id);
+
+    for (const column of table.columns) {
+      const originalColumnId = column.id;
+
+      column.id = `${prefix}${originalColumnId}`;
+      columnIds.set(originalColumnId, column.id);
+    }
+
+    for (const constraint of table.constraints) {
+      constraint.id = `${prefix}${constraint.id}`;
+      constraint.columnIds = constraint.columnIds.map(
+        (columnId) => columnIds.get(columnId) ?? columnId
+      );
+    }
+
+    columnIdsByTableId.set(originalTableId, columnIds);
+  }
+
+  for (const relation of stableModelJson.schema.relations) {
+    const originalFromTableId = relation.fromTableId;
+    const originalToTableId = relation.toTableId;
+    const fromColumnIds = columnIdsByTableId.get(originalFromTableId);
+    const toColumnIds = columnIdsByTableId.get(originalToTableId);
+
+    relation.id = `${prefix}${relation.id}`;
+    relation.fromTableId =
+      tableIds.get(originalFromTableId) ?? originalFromTableId;
+    relation.toTableId = tableIds.get(originalToTableId) ?? originalToTableId;
+    relation.fromColumnIds = relation.fromColumnIds.map(
+      (columnId) => fromColumnIds?.get(columnId) ?? columnId
+    );
+    relation.toColumnIds = relation.toColumnIds.map(
+      (columnId) => toColumnIds?.get(columnId) ?? columnId
+    );
+  }
+
+  return stableModelJson;
 }
 
 function createRuntimeTestSession(overrides = {}) {
@@ -411,6 +497,8 @@ const [
   tableShape,
   relationShape,
   ddlParserUtils,
+  sqlEditorDialectUtils,
+  sqlSourceDecorationUtils,
   apiClient,
   packageJson
 ] =
@@ -432,6 +520,8 @@ const [
     readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-table-shape.tsx"),
     readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-relation-shape.tsx"),
     readSqlErdFile("../../src/features/sql-erd/utils/ddl-parser.ts"),
+    readSqlErdFile("../../src/features/sql-erd/utils/sql-editor-dialect.ts"),
+    readSqlErdFile("../../src/features/sql-erd/utils/sql-source-decoration.ts"),
     readSqlErdFile("../../src/features/sql-erd/api/client.ts"),
     readSqlErdFile("../../package.json")
   ]);
@@ -440,16 +530,75 @@ const {
   apiClientRuntime,
   canvasSelectionRuntime,
   ddlParserRuntime,
+  sqlSourceMapRuntime,
+  sqlSourceDecorationRuntime,
   generateSessionRuntime,
   layoutAutosaveRuntime,
   inspectorRuntime,
   modelRuntime,
   relationShapeRuntime,
   sessionStateRuntime,
+  sqlEditorDialectRuntime,
   statusCopyRuntime,
   tableShapeRuntime
 } = await compileSqlErdRuntimeModules();
 const runtimeModel = createRuntimeTestModel();
+
+assert.equal(
+  sqlEditorDialectRuntime.resolveSqlSourceEditorDialect("postgresql", "mysql"),
+  "postgresql"
+);
+assert.equal(
+  sqlEditorDialectRuntime.resolveSqlSourceEditorDialect("mysql", "postgresql"),
+  "mysql"
+);
+assert.equal(
+  sqlEditorDialectRuntime.resolveSqlSourceEditorDialect("auto", null),
+  "postgresql"
+);
+assert.equal(
+  sqlEditorDialectRuntime.resolveSqlSourceEditorDialect("auto", "mysql"),
+  "mysql"
+);
+assert.equal(
+  sqlEditorDialectRuntime.getSqlSourceEditorCodeMirrorDialect("postgresql"),
+  PostgreSQL
+);
+assert.equal(
+  sqlEditorDialectRuntime.getSqlSourceEditorCodeMirrorDialect("mysql"),
+  MySQL
+);
+const runtimeDialectCompartment = new Compartment();
+let runtimeDialectEditorState = EditorState.create({
+  doc: "CREATE TABLE users (id BIGINT);",
+  selection: { anchor: 13 },
+  extensions: [
+    history(),
+    runtimeDialectCompartment.of(
+      sqlEditorDialectRuntime.getSqlSourceEditorLanguageExtension("postgresql")
+    )
+  ]
+});
+runtimeDialectEditorState = runtimeDialectEditorState.update({
+  changes: { from: runtimeDialectEditorState.doc.length, insert: "\n" },
+  selection: { anchor: 6 },
+  userEvent: "input"
+}).state;
+const runtimeDialectDocument = runtimeDialectEditorState.doc.toString();
+const runtimeDialectSelection = runtimeDialectEditorState.selection.main;
+const runtimeDialectUndoDepth = undoDepth(runtimeDialectEditorState);
+
+runtimeDialectEditorState = runtimeDialectEditorState.update({
+  effects:
+    sqlEditorDialectRuntime.createSqlSourceEditorDialectReconfigureEffect(
+      runtimeDialectCompartment,
+      "mysql"
+    )
+}).state;
+
+assert.equal(runtimeDialectEditorState.doc.toString(), runtimeDialectDocument);
+assert.deepEqual(runtimeDialectEditorState.selection.main, runtimeDialectSelection);
+assert.equal(undoDepth(runtimeDialectEditorState), runtimeDialectUndoDepth);
 const runtimeModelIndex = modelRuntime.createSqltoerdModelIndex(runtimeModel);
 const runtimeOrdersToUsersRelation =
   runtimeModel.schema.relations.find(
@@ -941,6 +1090,7 @@ const createGenerateRequest =
 
 assert.equal(createGenerateRequest.ok, true);
 assert.equal(createGenerateRequest.kind, "create");
+assert.equal(createGenerateRequest.resolvedDialect, "postgresql");
 assert.equal(createGenerateRequest.payload.title, "Generated ERD");
 assert.equal(createGenerateRequest.payload.sourceText, generateSmokeSource);
 assert.equal(createGenerateRequest.payload.dialect, "postgresql");
@@ -959,6 +1109,9 @@ assert.equal(
 assert.deepEqual(createGenerateRequest.payload.settingsJson, {
   sourcePanelOpen: true
 });
+assert.equal(createGenerateRequest.sourceMap.sourceText, generateSmokeSource);
+assert.equal(createGenerateRequest.sourceMap.dialect, "postgresql");
+assert.equal("sourceMap" in createGenerateRequest.payload, false);
 
 const updateGenerateRequest =
   generateSessionRuntime.createSqlErdGenerateWorkspaceRequest({
@@ -1205,9 +1358,7 @@ await assert.rejects(
   /Unauthorized/
 );
 
-const postgresParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
-  dialect: "postgresql",
-  sourceText: `CREATE TABLE users (
+const postgresSourceText = `CREATE TABLE users (
   id BIGSERIAL PRIMARY KEY,
   email VARCHAR(255) NOT NULL UNIQUE,
   full_name TEXT,
@@ -1228,10 +1379,14 @@ CREATE TABLE reviews (
   user_id BIGINT REFERENCES users(id),
   rating SMALLINT NOT NULL,
   body TEXT
-);`
+);`;
+const postgresParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
+  dialect: "postgresql",
+  sourceText: postgresSourceText
 });
 
 assert.equal(postgresParseResult.ok, true);
+assert.equal(postgresParseResult.resolvedDialect, "postgresql");
 assert.equal(postgresParseResult.modelJson.version, 1);
 assert.deepEqual(
   postgresParseResult.modelJson.schema.tables.map((table) => table.id),
@@ -1272,6 +1427,284 @@ assert.equal(
   postgresParseResult.modelJson.schema.relations[0].constraintName,
   "fk_orders_user"
 );
+assert.equal(postgresParseResult.sourceMap.sourceText, postgresSourceText);
+assert.equal(postgresParseResult.sourceMap.dialect, "postgresql");
+assert.equal(
+  postgresSourceText.slice(
+    postgresParseResult.sourceMap.columnRangesByTableId["table.users"][
+      "column.users.id"
+    ].from,
+    postgresParseResult.sourceMap.columnRangesByTableId["table.users"][
+      "column.users.id"
+    ].to
+  ),
+  "id"
+);
+assert.equal(
+  postgresSourceText.slice(
+    postgresParseResult.sourceMap.columnRangesByTableId["table.orders"][
+      "column.orders.id"
+    ].from,
+    postgresParseResult.sourceMap.columnRangesByTableId["table.orders"][
+      "column.orders.id"
+    ].to
+  ),
+  "id"
+);
+assert.notEqual(
+  postgresParseResult.sourceMap.columnRangesByTableId["table.users"][
+    "column.users.id"
+  ].from,
+  postgresParseResult.sourceMap.columnRangesByTableId["table.orders"][
+    "column.orders.id"
+  ].from
+);
+const postgresTableRelationRange =
+  postgresParseResult.sourceMap.relationsById[
+    "relation.orders.user_id.users.id"
+  ];
+assert.equal(
+  postgresSourceText.slice(
+    postgresTableRelationRange.constraintRange.from,
+    postgresTableRelationRange.constraintRange.to
+  ),
+  "CONSTRAINT fk_orders_user FOREIGN KEY (user_id) REFERENCES users(id)"
+);
+assert.deepEqual(
+  postgresTableRelationRange.fromColumnRanges.map((range) =>
+    postgresSourceText.slice(range.from, range.to)
+  ),
+  ["user_id"]
+);
+assert.deepEqual(
+  postgresTableRelationRange.toColumnRanges.map((range) =>
+    postgresSourceText.slice(range.from, range.to)
+  ),
+  ["id"]
+);
+const postgresInlineRelationRange =
+  postgresParseResult.sourceMap.relationsById[
+    "relation.reviews.user_id.users.id"
+  ];
+assert.equal(
+  postgresSourceText.slice(
+    postgresInlineRelationRange.constraintRange.from,
+    postgresInlineRelationRange.constraintRange.to
+  ),
+  "REFERENCES users(id)"
+);
+const selectedPostgresRelationRanges =
+  sqlSourceMapRuntime.getSelectedSqlErdRelationSourceRanges({
+    selection: {
+      type: "relation",
+      relationId: "relation.orders.user_id.users.id"
+    },
+    sourceMap: postgresParseResult.sourceMap,
+    sourceText: postgresSourceText
+  });
+assert.deepEqual(
+  selectedPostgresRelationRanges.map((range) =>
+    postgresSourceText.slice(range.from, range.to)
+  ),
+  [
+    "user_id",
+    "id",
+    "CONSTRAINT fk_orders_user FOREIGN KEY (user_id) REFERENCES users(id)"
+  ]
+);
+const storedStableIdModel = createRuntimeModelWithStableIdPrefix(
+  postgresParseResult.modelJson,
+  "stored."
+);
+const storedStableIdParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
+  dialect: "postgresql",
+  sourceMapModelJson: storedStableIdModel,
+  sourceText: postgresSourceText
+});
+
+assert.equal(storedStableIdParseResult.ok, true);
+assert.deepEqual(
+  Object.keys(storedStableIdParseResult.sourceMap.relationsById),
+  [
+    "stored.relation.orders.user_id.users.id",
+    "stored.relation.reviews.user_id.users.id"
+  ]
+);
+const storedStableIdSelectedRanges =
+  sqlSourceMapRuntime.getSelectedSqlErdRelationSourceRanges({
+    selection: {
+      type: "relation",
+      relationId: "stored.relation.orders.user_id.users.id"
+    },
+    sourceMap: storedStableIdParseResult.sourceMap,
+    sourceText: postgresSourceText
+  });
+assert.deepEqual(
+  storedStableIdSelectedRanges.map((range) =>
+    postgresSourceText.slice(range.from, range.to)
+  ),
+  [
+    "user_id",
+    "id",
+    "CONSTRAINT fk_orders_user FOREIGN KEY (user_id) REFERENCES users(id)"
+  ]
+);
+const tableScopedColumnIdSourceText = `CREATE TABLE parents (
+  id BIGINT PRIMARY KEY
+);
+
+CREATE TABLE children (
+  id BIGINT PRIMARY KEY,
+  parent_id BIGINT NOT NULL,
+  CONSTRAINT fk_children_parent FOREIGN KEY (parent_id) REFERENCES parents(id)
+);`;
+const tableScopedColumnIdParseResult =
+  ddlParserRuntime.parseSqlDdlToErdModel({
+    dialect: "postgresql",
+    sourceText: tableScopedColumnIdSourceText
+  });
+
+assert.equal(tableScopedColumnIdParseResult.ok, true);
+const tableScopedColumnIdModel = createRuntimeModelWithStableIdPrefix(
+  tableScopedColumnIdParseResult.modelJson,
+  "stored."
+);
+const tableScopedParents = tableScopedColumnIdModel.schema.tables.find(
+  (table) => table.name === "parents"
+);
+const tableScopedChildren = tableScopedColumnIdModel.schema.tables.find(
+  (table) => table.name === "children"
+);
+const tableScopedRelation = tableScopedColumnIdModel.schema.relations[0];
+const originalParentColumnId = tableScopedParents.columns[0].id;
+const originalChildColumnId = tableScopedChildren.columns[1].id;
+
+tableScopedParents.columns[0].id = "shared-column-id";
+tableScopedParents.constraints[0].columnIds = ["shared-column-id"];
+tableScopedChildren.columns[1].id = "shared-column-id";
+tableScopedRelation.fromColumnIds = ["shared-column-id"];
+tableScopedRelation.toColumnIds = ["shared-column-id"];
+
+assert.notEqual(originalParentColumnId, originalChildColumnId);
+const tableScopedColumnIdSourceMap =
+  sqlSourceMapRuntime.createSqltoerdSourceMap({
+    dialect: "postgresql",
+    modelJson: tableScopedColumnIdModel,
+    sourceText: tableScopedColumnIdSourceText
+  });
+const tableScopedColumnIdRelationRange =
+  tableScopedColumnIdSourceMap.relationsById[
+    "stored.relation.children.parent_id.parents.id"
+  ];
+
+assert.deepEqual(
+  tableScopedColumnIdRelationRange.fromColumnRanges.map((range) =>
+    tableScopedColumnIdSourceText.slice(range.from, range.to)
+  ),
+  ["parent_id"]
+);
+assert.deepEqual(
+  tableScopedColumnIdRelationRange.toColumnRanges.map((range) =>
+    tableScopedColumnIdSourceText.slice(range.from, range.to)
+  ),
+  ["id"]
+);
+const runtimeRelationDecorations =
+  sqlSourceDecorationRuntime.createSqlErdRelationSourceDecorations(
+    [
+      ...selectedPostgresRelationRanges,
+      selectedPostgresRelationRanges[0],
+      { from: -1, to: 3 },
+      { from: 0, to: postgresSourceText.length + 1 }
+    ],
+    postgresSourceText.length
+  );
+const runtimeRelationDecorationRanges = [];
+runtimeRelationDecorations.between(
+  0,
+  postgresSourceText.length,
+  (from, to, decoration) => {
+    runtimeRelationDecorationRanges.push({
+      className: decoration.spec.class,
+      from,
+      to
+    });
+  }
+);
+assert.deepEqual(
+  runtimeRelationDecorationRanges.map(({ from, to }) => ({ from, to })),
+  [...selectedPostgresRelationRanges].sort(
+    (left, right) => left.from - right.from || left.to - right.to
+  )
+);
+assert.equal(
+  runtimeRelationDecorationRanges.every(
+    ({ className }) => className === "cm-sqltoerd-relation-source"
+  ),
+  true
+);
+const runtimeRelationCompartment = new Compartment();
+let runtimeRelationEditorState = EditorState.create({
+  doc: postgresSourceText,
+  selection: { anchor: postgresSourceText.indexOf("user_id") },
+  extensions: [
+    history(),
+    runtimeRelationCompartment.of(
+      sqlSourceDecorationRuntime.createSqlErdRelationSourceDecorationExtension(
+        [],
+        postgresSourceText.length
+      )
+    )
+  ]
+});
+runtimeRelationEditorState = runtimeRelationEditorState.update({
+  changes: { from: postgresSourceText.length, insert: "\n" },
+  selection: { anchor: postgresSourceText.indexOf("orders") },
+  userEvent: "input"
+}).state;
+const runtimeRelationDocument = runtimeRelationEditorState.doc.toString();
+const runtimeRelationSelection = runtimeRelationEditorState.selection.main;
+const runtimeRelationUndoDepth = undoDepth(runtimeRelationEditorState);
+
+runtimeRelationEditorState = runtimeRelationEditorState.update({
+  effects: runtimeRelationCompartment.reconfigure(
+    sqlSourceDecorationRuntime.createSqlErdRelationSourceDecorationExtension(
+      selectedPostgresRelationRanges,
+      runtimeRelationEditorState.doc.length
+    )
+  )
+}).state;
+
+assert.equal(runtimeRelationEditorState.doc.toString(), runtimeRelationDocument);
+assert.deepEqual(runtimeRelationEditorState.selection.main, runtimeRelationSelection);
+assert.equal(undoDepth(runtimeRelationEditorState), runtimeRelationUndoDepth);
+assert.deepEqual(
+  sqlSourceMapRuntime.getSelectedSqlErdRelationSourceRanges({
+    selection: { type: "none" },
+    sourceMap: postgresParseResult.sourceMap,
+    sourceText: postgresSourceText
+  }),
+  []
+);
+assert.deepEqual(
+  sqlSourceMapRuntime.getSelectedSqlErdRelationSourceRanges({
+    selection: { type: "relation", relationId: "relation.missing" },
+    sourceMap: postgresParseResult.sourceMap,
+    sourceText: postgresSourceText
+  }),
+  []
+);
+assert.deepEqual(
+  sqlSourceMapRuntime.getSelectedSqlErdRelationSourceRanges({
+    selection: {
+      type: "relation",
+      relationId: "relation.orders.user_id.users.id"
+    },
+    sourceMap: postgresParseResult.sourceMap,
+    sourceText: `${postgresSourceText}\n-- stale`
+  }),
+  []
+);
 
 const postgresTypeParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
   dialect: "postgresql",
@@ -1296,9 +1729,7 @@ assert.equal(
   "TIMESTAMP WITH TIME ZONE"
 );
 
-const mysqlParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
-  dialect: "mysql",
-  sourceText: `CREATE TABLE users (
+const mysqlSourceText = `CREATE TABLE users (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   email VARCHAR(255) NOT NULL UNIQUE,
   created_at DATETIME NOT NULL
@@ -1310,10 +1741,14 @@ CREATE TABLE orders (
   status VARCHAR(32) NOT NULL,
   UNIQUE KEY uq_orders_status (status),
   CONSTRAINT fk_orders_user FOREIGN KEY (user_id) REFERENCES users(id)
-);`
+);`;
+const mysqlParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
+  dialect: "mysql",
+  sourceText: mysqlSourceText
 });
 
 assert.equal(mysqlParseResult.ok, true);
+assert.equal(mysqlParseResult.resolvedDialect, "mysql");
 assert.deepEqual(
   mysqlParseResult.modelJson.schema.tables.map((table) => table.id),
   ["table.users", "table.orders"]
@@ -1339,6 +1774,18 @@ assert.deepEqual(mysqlParseResult.modelJson.schema.relations, [
     constraintName: "fk_orders_user"
   }
 ]);
+assert.equal(mysqlParseResult.sourceMap.dialect, "mysql");
+assert.equal(
+  mysqlSourceText.slice(
+    mysqlParseResult.sourceMap.relationsById[
+      "relation.orders.user_id.users.id"
+    ].constraintRange.from,
+    mysqlParseResult.sourceMap.relationsById[
+      "relation.orders.user_id.users.id"
+    ].constraintRange.to
+  ),
+  "CONSTRAINT fk_orders_user FOREIGN KEY (user_id) REFERENCES users(id)"
+);
 
 const mysqlTypeParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
   dialect: "mysql",
@@ -1632,10 +2079,79 @@ const autoDialectParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
 });
 
 assert.equal(autoDialectParseResult.ok, true);
+assert.equal(autoDialectParseResult.resolvedDialect, "mysql");
 assert.equal(autoDialectParseResult.modelJson.schema.tables[0].id, "table.users");
 assert.equal(
   autoDialectParseResult.modelJson.schema.tables[0].columns[0].dataType,
   "BIGINT"
+);
+
+const customPostgreSqlTypeParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
+  dialect: "postgresql",
+  sourceText: `CREATE TYPE order_status AS ENUM ('pending', 'paid');
+CREATE DOMAIN currency_amount AS NUMERIC(12, 2);
+
+CREATE TABLE payments (
+  id BIGSERIAL PRIMARY KEY,
+  status order_status NOT NULL,
+  amount currency_amount
+);`
+});
+
+assert.equal(customPostgreSqlTypeParseResult.ok, true);
+assert.equal(customPostgreSqlTypeParseResult.resolvedDialect, "postgresql");
+assert.deepEqual(
+  customPostgreSqlTypeParseResult.modelJson.schema.tables[0].columns.map(
+    (column) => column.dataType
+  ),
+  ["BIGSERIAL", "ORDER_STATUS", "CURRENCY_AMOUNT"]
+);
+
+const caseSensitivePostgreSqlDomainParseResult =
+  ddlParserRuntime.parseSqlDdlToErdModel({
+    dialect: "postgresql",
+    sourceText: `CREATE DOMAIN "CaseType570" AS TEXT;
+CREATE DOMAIN "casetype570" AS TEXT;
+
+CREATE TABLE case_sensitive_values (
+  upper_value "CaseType570" NOT NULL,
+  lower_value "casetype570" NOT NULL
+);`
+  });
+
+assert.equal(caseSensitivePostgreSqlDomainParseResult.ok, true);
+
+const commentOnlyPostgreSqlTypeParseResult =
+  ddlParserRuntime.parseSqlDdlToErdModel({
+    dialect: "postgresql",
+    sourceText: `-- CREATE TYPE comment_only_type_570 AS ENUM ('ignored');
+CREATE TABLE comment_only_values (
+  value comment_only_type_570 NOT NULL
+);`
+  });
+
+assert.equal(commentOnlyPostgreSqlTypeParseResult.ok, false);
+
+const stringOnlyPostgreSqlTypeParseResult =
+  ddlParserRuntime.parseSqlDdlToErdModel({
+    dialect: "postgresql",
+    sourceText: `CREATE TABLE string_only_values (
+  note TEXT DEFAULT 'CREATE DOMAIN string_only_type_570',
+  value string_only_type_570 NOT NULL
+);`
+  });
+
+assert.equal(stringOnlyPostgreSqlTypeParseResult.ok, false);
+
+assert.deepEqual(
+  ddlParserRuntime.collectPostgreSqlUserDefinedTypeDeclarations(`-- CREATE TYPE comment_type AS ENUM ('ignored');
+/* CREATE DOMAIN block_comment_type AS TEXT; */
+SELECT 'CREATE DOMAIN string_type AS TEXT';
+DO $body$ BEGIN RAISE NOTICE 'CREATE TYPE dollar_string_type'; END $body$;
+CREATE /* real declaration */ DOMAIN "CaseType570" AS TEXT;
+CREATE DOMAIN "casetype570" AS TEXT;
+CREATE TYPE public.order_status AS ENUM ('pending');`),
+  ["\"CaseType570\"", "\"casetype570\"", "public.order_status"]
 );
 
 const invalidParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
@@ -1751,6 +2267,12 @@ assert.match(generateSessionUtils, /createSqltoerdLayoutForModel/);
 assert.match(generateSessionUtils, /kind: "create"/);
 assert.match(generateSessionUtils, /kind: "update"/);
 assert.match(generateSessionUtils, /baseRevision: session\.revision/);
+assert.match(generateSessionUtils, /sourceMap: parseResult\.sourceMap/);
+
+assert.match(sqlSourceDecorationUtils, /Decoration\.mark/);
+assert.match(sqlSourceDecorationUtils, /EditorView\.decorations\.of/);
+assert.match(sqlSourceDecorationUtils, /range\.to > documentLength/);
+assert.doesNotMatch(sqlSourceDecorationUtils, /\bcolor\b/);
 
 assert.match(layoutAutosaveUtils, /createSqlErdLayoutAutosaveRequest/);
 assert.match(layoutAutosaveUtils, /baseRevision: session\.revision/);
@@ -1843,14 +2365,31 @@ assert.match(panel, /disabled=\{isDialectSelectDisabled\}/);
 assert.match(panel, /isDialectSelectDisabled/);
 assert.match(panel, /onSourceTextChange/);
 assert.match(panel, /isSourceTextReadOnly/);
-assert.match(panel, /@codemirror\/lang-sql/);
+assert.match(sqlEditorDialectUtils, /@codemirror\/lang-sql/);
 assert.match(panel, /@codemirror\/state/);
 assert.match(panel, /@codemirror\/view/);
 assert.match(panel, /SqlSourceEditor/);
 assert.match(panel, /sqlSourceEditorTheme/);
+assert.match(panel, /lastResolvedDialect/);
+assert.match(panel, /sqlSourceMap/);
+assert.match(panel, /setSqlSourceMap\(null\)/);
+assert.match(panel, /setSqlSourceMap\(generateRequest\.sourceMap\)/);
+assert.match(
+  panel,
+  /sourceMapModelJson: activeViewSession\.modelJson/
+);
+assert.match(panel, /relationSourceCompartmentRef/);
+assert.match(panel, /getSelectedSqlErdRelationSourceRanges/);
+assert.doesNotMatch(panel, /scrollIntoView/);
+assert.match(panel, /resolveSqlSourceEditorDialect/);
+assert.match(panel, /setLastResolvedDialect\(generateRequest\.resolvedDialect\)/);
+assert.match(panel, /languageCompartmentRef/);
+assert.match(panel, /getSqlSourceEditorLanguageExtension/);
+assert.match(panel, /languageCompartment\.of/);
+assert.match(panel, /createSqlSourceEditorDialectReconfigureEffect/);
 assert.match(panel, /EditorState\.readOnly\.of\(readOnly\)/);
 assert.match(panel, /EditorView\.editable\.of\(!readOnly\)/);
-assert.match(panel, /sql\(\)/);
+assert.doesNotMatch(panel, /\bsql\(\)/);
 assert.doesNotMatch(panel, /<textarea/);
 assert.match(panel, /setSqlErdViewSession\(\(currentSession\) =>/);
 assert.match(panel, /sessionLoadState/);

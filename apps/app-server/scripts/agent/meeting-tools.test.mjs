@@ -13,6 +13,7 @@ const USER_ID = "11111111-1111-1111-1111-111111111111";
 const WORKSPACE_ID = "22222222-2222-2222-2222-222222222222";
 const RUN_ID = "33333333-3333-3333-3333-333333333333";
 const REPORT_ID = "44444444-4444-4444-8444-444444444444";
+const SECOND_REPORT_ID = "77777777-7777-4777-8777-777777777777";
 const MEETING_ID = "55555555-5555-5555-8555-555555555555";
 const RECORDING_ID = "66666666-6666-6666-8666-666666666666";
 
@@ -130,6 +131,7 @@ function errorCode(error) {
   assert.equal(result.outputSummary.count, 1);
   assert.equal(report.reportId, REPORT_ID);
   assert.equal(report.status, "COMPLETED");
+  assert.equal(report.createdAt, "2026-07-08T00:00:00.000Z");
   assert.deepEqual(
     report.sections.map((section) => section.key),
     ["summary", "discussionPoints", "decisions"]
@@ -146,6 +148,30 @@ function errorCode(error) {
       status: "COMPLETED",
       limit: 20
     }
+  });
+}
+
+{
+  const { meetingService, registry } = createRegistry();
+  meetingService.reports = [
+    createReport(),
+    createReport({
+      id: SECOND_REPORT_ID,
+      createdAt: "2026-07-07T00:00:00.000Z"
+    })
+  ];
+  const tool = registry.getDefinition("list_meeting_reports");
+  const input = tool.validateInput({ limit: 1 });
+  const result = await tool.execute(context, input);
+
+  assert.equal(result.outputSummary.count, 1);
+  assert.equal(result.outputSummary.reports.length, 1);
+  assert.equal(result.outputSummary.reports[0].reportId, REPORT_ID);
+  assert.equal(result.resourceRefs.length, 1);
+  assert.equal(result.resourceRefs[0].resourceId, REPORT_ID);
+  assert.deepEqual(meetingService.calls[0].query, {
+    status: undefined,
+    limit: 1
   });
 }
 

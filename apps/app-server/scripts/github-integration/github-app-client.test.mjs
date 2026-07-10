@@ -50,6 +50,22 @@ function projectNode(overrides = {}) {
   };
 }
 
+function githubIssuePayload(overrides = {}) {
+  return {
+    id: 9999,
+    node_id: "I_kwDOExample",
+    number: 609,
+    title: "Board issue 담당자 변경",
+    body: "본문",
+    state: "open",
+    html_url: "https://github.com/Developer-EJ/PILO/issues/609",
+    labels: [],
+    assignees: [],
+    milestone: null,
+    ...overrides
+  };
+}
+
 {
   const originalFetch = globalThis.fetch;
   const privateKeyPem = createPrivateKeyPem();
@@ -167,6 +183,143 @@ function projectNode(overrides = {}) {
         raw: projectNode(),
         repositoryNodeIds: ["R_kgDOExample", "R_kgDOSecond"]
       }
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
+{
+  const originalFetch = globalThis.fetch;
+  const originalSetTimeout = globalThis.setTimeout;
+  const originalClearTimeout = globalThis.clearTimeout;
+  const requests = [];
+  const timeoutHandle = Symbol("assignee lookup timeout");
+  let timeoutCallback;
+  let clearedTimeoutHandle;
+
+  globalThis.setTimeout = (callback, delay) => {
+    timeoutCallback = callback;
+    assert.equal(delay, 30_000);
+    return timeoutHandle;
+  };
+  globalThis.clearTimeout = (handle) => {
+    clearedTimeoutHandle = handle;
+  };
+  globalThis.fetch = async (url, options = {}) => {
+    requests.push({ url: url.toString(), options });
+    return {
+      ok: true,
+      status: 200,
+      async json() {
+        if (requests.length === 1) {
+          return Array.from({ length: 100 }, (_value, index) => ({
+            login: `user-${index}`,
+            avatar_url: `https://avatar.test/user-${index}`
+          }));
+        }
+
+        return [{ login: "last-user", avatar_url: null }];
+      }
+    };
+  };
+
+  try {
+    const assignees = await new GithubAppClient().listRepositoryAssignees({
+      owner: "Developer-EJ",
+      repo: "PILO",
+      userAccessToken: "user-oauth-token"
+    });
+
+    assert.equal(assignees.length, 101);
+    assert.equal(assignees.at(-1)?.login, "last-user");
+    assert.equal(requests.length, 2);
+    assert.equal(
+      requests[0].url,
+      "https://api.github.com/repos/Developer-EJ/PILO/assignees?page=1&per_page=100"
+    );
+    assert.equal(
+      requests[1].url,
+      "https://api.github.com/repos/Developer-EJ/PILO/assignees?page=2&per_page=100"
+    );
+    assert.equal(
+      requests[0].options.headers.Authorization,
+      "Bearer user-oauth-token"
+    );
+    assert.ok(requests[0].options.signal instanceof AbortSignal);
+    assert.equal(requests[0].options.signal, requests[1].options.signal);
+    assert.equal(requests[0].options.signal.aborted, false);
+    assert.equal(typeof timeoutCallback, "function");
+    assert.equal(clearedTimeoutHandle, timeoutHandle);
+    timeoutCallback();
+    assert.equal(requests[0].options.signal.aborted, true);
+  } finally {
+    globalThis.fetch = originalFetch;
+    globalThis.setTimeout = originalSetTimeout;
+    globalThis.clearTimeout = originalClearTimeout;
+  }
+}
+
+{
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    async json() {
+      return [{ login: "alice", avatar_url: 42 }];
+    }
+  });
+
+  try {
+    await assert.rejects(
+      () =>
+        new GithubAppClient().listRepositoryAssignees({
+          owner: "Developer-EJ",
+          repo: "PILO",
+          userAccessToken: "user-oauth-token"
+        }),
+      (error) => {
+        assert.equal(error?.getStatus?.(), 400);
+        assert.equal(
+          error?.response?.error?.message,
+          "GitHub issue assignee lookup failed"
+        );
+        return true;
+      }
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
+{
+  const originalFetch = globalThis.fetch;
+  let requestBody;
+  globalThis.fetch = async (_url, options = {}) => {
+    requestBody = JSON.parse(options.body);
+    return {
+      ok: true,
+      status: 200,
+      async json() {
+        return githubIssuePayload({
+          assignees: [{ login: "alice", avatar_url: "https://avatar.test/alice" }]
+        });
+      }
+    };
+  };
+
+  try {
+    const issue = await new GithubAppClient().updateRepositoryIssue({
+      assignees: ["alice"],
+      issueNumber: 609,
+      owner: "Developer-EJ",
+      repo: "PILO",
+      userAccessToken: "user-oauth-token"
+    });
+
+    assert.deepEqual(requestBody.assignees, ["alice"]);
+    assert.deepEqual(issue.assignees, [
+      { login: "alice", avatar_url: "https://avatar.test/alice" }
     ]);
   } finally {
     globalThis.fetch = originalFetch;
@@ -431,6 +584,9 @@ function projectNode(overrides = {}) {
                               name: "Notes",
                               dataType: "TEXT"
                             }
+                          },
+                          {
+                            __typename: "ProjectV2ItemFieldRepositoryValue"
                           }
                         ],
                         pageInfo: {
@@ -510,6 +666,10 @@ function projectNode(overrides = {}) {
     assert.equal(items[0].statusOptionId, "status-in-progress");
     assert.equal(items[0].statusName, "In Progress");
     assert.equal(items[0].fieldValues.length, 2);
+    assert.deepEqual(
+      items[0].fieldValues.map((fieldValue) => fieldValue.fieldName),
+      ["Notes", "Status"]
+    );
   } finally {
     globalThis.fetch = originalFetch;
   }

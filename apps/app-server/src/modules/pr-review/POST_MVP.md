@@ -43,7 +43,7 @@ Conflict PR 선택
   -> AI가 해결안 생성
   -> 사용자가 해결안을 확인/수정
   -> Apply resolution
-  -> PR head branch에 commit
+  -> PR head와 base를 parent로 갖는 merge commit
   -> conflict 재확인
   -> Merge
 ```
@@ -52,7 +52,8 @@ Conflict PR 선택
 
 - AI: 충돌 원인 설명, 해결 방향 제안, resolved content 또는 patch 초안 생성
 - 사용자: 해결안 확인, 필요 시 수정, 적용 승인, merge 최종 승인
-- 서버: conflict 추출, AI 요청, GitHub branch commit, PR 상태 재확인, merge API 호출
+- 서버: conflict 추출, AI 요청, 실제 Git merge 기반 conflict 해결 commit, PR 상태 재확인,
+  merge API 호출
 
 ### Phase 1 PR 분할
 
@@ -81,8 +82,10 @@ Conflict PR 선택
    - AI output은 사용자가 확인하기 전까지 suggestion으로만 취급한다.
 
 5. `1-E. Apply resolution write path`
-   - 사용자가 확인한 resolved content만 PR head branch에 적용한다.
+   - 사용자가 확인한 resolved content만 PR head branch의 merge commit에 적용한다.
    - head SHA, blob SHA, conflict marker 검증을 통과해야 한다.
+   - 초기에는 지원 가능한 content conflict file이 정확히 1개인 PR만 적용한다.
+   - 임시 Git working tree에서 base를 실제 merge해 충돌 없는 base 변경도 함께 보존한다.
    - 최종 merge는 별도 명시적 사용자 action으로 둔다.
 
 ### Phase 1-A 확정 범위
@@ -206,6 +209,8 @@ Apply resolution 시 확인할 것:
 - 대상 파일의 최신 blob SHA가 예상과 같은지
 - resolved content가 비어 있거나 conflict marker를 그대로 포함하지 않는지
 - GitHub write 권한이 있는지
+- PR 전체에서 지원 가능한 conflict file이 정확히 1개인지
+- merge commit이 PR head와 base를 모두 parent로 포함하는지
 
 Merge 시 확인할 것:
 

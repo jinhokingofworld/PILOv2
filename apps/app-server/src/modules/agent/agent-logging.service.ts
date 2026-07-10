@@ -424,6 +424,33 @@ export class AgentLoggingService {
     });
   }
 
+  async createToolExecutionClaim(
+    transaction: DatabaseTransaction,
+    workspaceId: string,
+    input: Omit<StartNextAgentStepInput, "type" | "order">
+  ): Promise<AgentStepPayload> {
+    const inputSummary = this.assertSafeObject(
+      input.inputSummary ?? {},
+      INPUT_JSON_MAX_BYTES,
+      "step input"
+    );
+    const nextOrder = await transaction.queryOne<{ next_order: number | string }>(
+      `
+        SELECT COALESCE(MAX(step_order), 0) + 1 AS next_order
+        FROM agent_steps
+        WHERE run_id = $1
+      `,
+      [input.runId]
+    );
+
+    return this.insertRunningStep(transaction, workspaceId, {
+      ...input,
+      type: "tool",
+      order: Number(nextOrder?.next_order ?? 1),
+      inputSummary
+    });
+  }
+
   async completeStep(
     currentUserId: string,
     workspaceId: string,
@@ -458,6 +485,7 @@ export class AgentLoggingService {
               completed_at = now()
           WHERE id = $1
             AND run_id = $2
+            AND status = 'running'
           RETURNING *
         `,
         [
@@ -580,6 +608,7 @@ export class AgentLoggingService {
               completed_at = now()
           WHERE id = $1
             AND workspace_id = $2
+            AND status = 'running'
           RETURNING *
         `,
         [

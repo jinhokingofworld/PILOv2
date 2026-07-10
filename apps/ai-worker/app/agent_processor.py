@@ -16,6 +16,7 @@ TERMINAL_AGENT_RUN_STATUSES = {"completed", "failed", "cancelled"}
 PLANNER_STATUSES = {"tool_candidate", "needs_clarification", "unsupported"}
 TOOL_RISK_LEVELS = {"low", "medium", "high"}
 TOOL_EXECUTION_MODES = {"auto", "confirmation_required"}
+MEETING_REPORT_ID_TOOLS = {"get_meeting_report", "summarize_meeting_report"}
 FORBIDDEN_JSON_KEY_PARTS = (
     "authorization",
     "cookie",
@@ -152,7 +153,15 @@ class AgentPlannerClient(Protocol):
     def plan(self, request: AgentPlanningRequest) -> AgentPlannerDecision: ...
 
 
+class AgentExecutionHandoffClient(Protocol):
+    def execute(self, run_id: str) -> None: ...
+
+
 class AgentPlannerOutputError(Exception):
+    pass
+
+
+class AgentExecutionHandoffError(InfrastructureError):
     pass
 
 
@@ -174,10 +183,12 @@ class AgentRunProcessor:
         self,
         repository: AgentRunRepository,
         planner_client: AgentPlannerClient,
+        execution_handoff_client: AgentExecutionHandoffClient,
         current_date_provider: Callable[[str], date] | None = None,
     ) -> None:
         self.repository = repository
         self.planner_client = planner_client
+        self.execution_handoff_client = execution_handoff_client
         self.current_date_provider = current_date_provider or _current_date_for_timezone
 
     def process_payload(self, payload: dict[str, object]) -> AgentProcessResult:
@@ -188,6 +199,12 @@ class AgentRunProcessor:
 
         try:
             return self.process_job(job)
+        except AgentExecutionHandoffError:
+            return AgentProcessResult(
+                delete_message=False,
+                reason="agent_execution_handoff_unavailable",
+                run_id=job.run_id,
+            )
         except InfrastructureError:
             return AgentProcessResult(
                 delete_message=False,
@@ -219,6 +236,9 @@ class AgentRunProcessor:
                     delete_message=True,
                     reason="agent_run_waiting_confirmation",
                 )
+
+            if status == "running":
+                return self._handoff_execution(job, retried=True)
 
             if status != "planning":
                 return self._result(
@@ -257,11 +277,7 @@ class AgentRunProcessor:
                     normalized.message,
                     normalized.risk_level,
                 )
-                return self._result(
-                    job,
-                    delete_message=True,
-                    reason="agent_tool_candidate_planned",
-                )
+                return self._handoff_execution(job, retried=False)
 
             self.repository.complete_run(
                 job.run_id,
@@ -283,6 +299,26 @@ class AgentRunProcessor:
                 delete_message=True,
                 reason="agent_planning_failed",
             )
+
+    def _handoff_execution(
+        self,
+        job: AgentRunJob,
+        *,
+        retried: bool,
+    ) -> AgentProcessResult:
+        try:
+            self.execution_handoff_client.execute(job.run_id)
+        except InfrastructureError as error:
+            raise AgentExecutionHandoffError() from error
+        return self._result(
+            job,
+            delete_message=True,
+            reason=(
+                "agent_execution_handoff_retried"
+                if retried
+                else "agent_execution_handoff_completed"
+            ),
+        )
 
     def _fail_planning(
         self,
@@ -395,11 +431,36 @@ def normalize_agent_planner_decision(
     message = _safe_text(decision.message, "요청 분석을 완료했습니다.")
     final_answer = _safe_text(decision.final_answer_draft, message)
     tool = tools_by_name.get(decision.tool_name or "")
+    missing_fields = tuple(decision.missing_fields)
+    unsupported_reason = decision.unsupported_reason
 
     if status == "tool_candidate" and tool is None:
         status = "unsupported"
         final_answer = "현재 사용할 수 없는 Agent 도구가 필요한 요청입니다."
         message = "지원하지 않는 Agent 도구 요청입니다."
+
+    if status == "tool_candidate" and tool is not None:
+        missing_fields = _missing_required_tool_input_fields(tool, decision.tool_input)
+        if tool.name == "update_calendar_event":
+            missing_fields = _missing_calendar_update_fields(
+                decision.tool_input,
+                missing_fields,
+            )
+
+        if tool.name in MEETING_REPORT_ID_TOOLS and not _has_valid_uuid(
+            decision.tool_input.get("reportId")
+        ):
+            status = "unsupported"
+            message = "특정 회의록을 식별할 수 없습니다."
+            final_answer = (
+                "현재 요청에서는 특정 회의록을 선택할 수 없습니다. "
+                "최신 회의록의 결과가 필요하면 최신 회의록을 요청해주세요."
+            )
+            unsupported_reason = "meeting_report_id_required"
+        elif missing_fields:
+            status = "needs_clarification"
+            message = "요청을 처리할 정보가 부족합니다."
+            final_answer = _clarification_answer(missing_fields)
 
     output_summary: dict[str, object] = {
         "status": status,
@@ -425,10 +486,10 @@ def normalize_agent_planner_decision(
         if not final_answer:
             final_answer = "요청을 처리하기 위한 Agent tool plan을 만들었습니다."
     elif status == "needs_clarification":
-        output_summary["missingFields"] = list(decision.missing_fields)
+        output_summary["missingFields"] = list(missing_fields)
         final_answer = final_answer or "요청을 처리하려면 추가 정보가 필요합니다."
     else:
-        output_summary["unsupportedReason"] = decision.unsupported_reason or "unknown_intent"
+        output_summary["unsupportedReason"] = unsupported_reason or "unknown_intent"
         final_answer = final_answer or "현재 Agent 1차 범위에서 지원하지 않는 요청입니다."
 
     return NormalizedPlannerDecision(
@@ -438,6 +499,73 @@ def normalize_agent_planner_decision(
         output_summary=output_summary,
         risk_level=risk_level,
     )
+
+
+def _missing_required_tool_input_fields(
+    tool: AgentToolSchema,
+    input_value: dict[str, object],
+) -> tuple[str, ...]:
+    required = tool.input_schema.get("required")
+    if not isinstance(required, list):
+        return ()
+
+    missing: list[str] = []
+    for field in required:
+        if not isinstance(field, str) or not field:
+            continue
+        value = input_value.get(field)
+        if value is None or value == "" or value == {}:
+            missing.append(field)
+    return tuple(missing)
+
+
+def _missing_calendar_update_fields(
+    input_value: dict[str, object],
+    missing_fields: tuple[str, ...],
+) -> tuple[str, ...]:
+    missing = set(missing_fields)
+    event_id = input_value.get("eventId")
+    if (
+        not isinstance(event_id, str)
+        or not event_id.isascii()
+        or not event_id.isdigit()
+        or event_id.startswith("0")
+    ):
+        missing.add("eventId")
+
+    changes = input_value.get("changes")
+    if not isinstance(changes, dict) or not changes:
+        missing.add("changes")
+
+    return tuple(sorted(missing))
+
+
+def _has_valid_uuid(value: object) -> bool:
+    if not isinstance(value, str):
+        return False
+
+    try:
+        parsed = UUID(value)
+    except (TypeError, ValueError, AttributeError):
+        return False
+
+    return str(parsed) == value.lower()
+
+
+def _clarification_answer(missing_fields: tuple[str, ...]) -> str:
+    labels = {
+        "eventId": "수정할 일정",
+        "changes": "변경할 내용",
+        "title": "일정 제목",
+        "startDate": "시작 날짜",
+        "endDate": "종료 날짜",
+        "start": "조회 시작일",
+        "end": "조회 종료일",
+    }
+    fields = [labels.get(field, field) for field in missing_fields]
+    if not fields:
+        return "요청을 처리하려면 추가 정보가 필요합니다."
+    return f"요청을 처리하려면 {', '.join(fields)} 정보를 알려주세요."
 
 
 class OpenAiAgentPlannerClient:
@@ -526,6 +654,11 @@ def _agent_planner_system_prompt() -> str:
         "must be unsupported. "
         "If required fields are missing, return needs_clarification and ask one concise "
         "question in finalAnswerDraft. "
+        "Never invent Calendar event IDs or MeetingReport IDs. Calendar updates require "
+        "eventId and changes only; the server loads the current values for confirmation. "
+        "For a broad MeetingReport request without a report ID, use list_meeting_reports "
+        "with limit 1 to return the latest report. A specific MeetingReport detail or "
+        "summary request without a valid report ID must be unsupported. "
         "Normalize relative dates using the provided timezone and current date. "
         "Use YYYY-MM-DD dates and HH:mm 24-hour times in tool inputs. "
         "Put the selected tool input object into inputJson as a compact JSON string. "

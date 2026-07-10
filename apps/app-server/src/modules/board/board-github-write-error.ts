@@ -1,7 +1,8 @@
 import { ApiError } from "../../common/api-error";
+import { GithubIssueAssigneeValidationError } from "../github-integration/github-issue-assignee.error";
 import { boardBadGateway } from "./board-api-error";
 
-const GITHUB_CONNECTION_ERROR_MESSAGES = [
+const PRESERVED_GITHUB_ERROR_MESSAGES = [
   "GitHub OAuth connection",
   "GitHub ProjectV2 OAuth",
   "Current user not found"
@@ -19,6 +20,10 @@ export function rethrowBoardGithubWriteError(
 }
 
 function shouldPreserveApiError(error: ApiError): boolean {
+  if (error instanceof GithubIssueAssigneeValidationError) {
+    return true;
+  }
+
   if (error.getStatus() === 403) {
     return true;
   }
@@ -39,7 +44,7 @@ function shouldPreserveApiError(error: ApiError): boolean {
     return false;
   }
 
-  return GITHUB_CONNECTION_ERROR_MESSAGES.some((message) =>
+  return PRESERVED_GITHUB_ERROR_MESSAGES.some((message) =>
     errorMessage.includes(message)
   );
 }

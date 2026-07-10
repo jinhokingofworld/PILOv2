@@ -177,6 +177,11 @@ export type BoardFilterAssigneeOptionPayload = {
   count: number;
 };
 
+export type BoardIssueAssigneeOptionPayload = {
+  login: string;
+  avatarUrl: string | null;
+};
+
 export type BoardFilterLabelOptionPayload = {
   name: string;
   color: string | null;
@@ -220,6 +225,7 @@ export type UpdateBoardIssueStatusPayload = {
 };
 
 export type UpdateBoardIssueInput = {
+  assignees?: string[];
   title?: string;
   body?: string;
   state?: BoardIssueState;

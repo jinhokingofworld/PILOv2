@@ -6,6 +6,7 @@ import type {
   BoardGithubRepositoryPayload,
   BoardIssueCardPayload,
   BoardIssueDetailPayload,
+  BoardIssueAssigneeOptionPayload,
   BoardPaginatedPayload,
   BoardPayload,
   BoardRelatedPullRequestPayload,
@@ -374,6 +375,18 @@ export function createBoardApiClient({
     ) {
       return requestBoardData<BoardIssueDetailPayload>(
         boardIssuePath(workspaceId, boardId, issueId),
+        undefined,
+        requestOptions
+      );
+    },
+
+    async listBoardIssueAssigneeOptions(
+      workspaceId: string,
+      boardId: string,
+      issueId: string
+    ) {
+      return requestBoardData<BoardIssueAssigneeOptionPayload[]>(
+        `${boardIssuePath(workspaceId, boardId, issueId)}/assignee-options`,
         undefined,
         requestOptions
       );

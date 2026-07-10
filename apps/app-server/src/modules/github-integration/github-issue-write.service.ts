@@ -4,6 +4,7 @@ import { badRequest, unauthorized } from "../../common/api-error";
 import { DatabaseService } from "../../database/database.service";
 import {
   GithubAppClient,
+  type GithubIssueAssigneeApiItem,
   type GithubIssueApiItem
 } from "./github-app.client";
 import {
@@ -11,6 +12,7 @@ import {
   type GithubOAuthRuntimeConfig
 } from "./github-integration-config.service";
 import { GithubTokenEncryptionService } from "./github-token-encryption.service";
+import { GithubIssueAssigneeValidationError } from "./github-issue-assignee.error";
 
 interface GithubOAuthConnectionRow extends QueryResultRow {
   github_login: string | null;
@@ -24,9 +26,21 @@ export interface UpdateGithubIssueInput {
   owner: string;
   repo: string;
   issueNumber: number;
+  assignees?: string[];
   title?: string;
   body?: string;
   state?: "open" | "closed";
+}
+
+export interface UpdateGithubIssueResult {
+  issue: GithubIssueApiItem;
+  assigneesApplied: boolean;
+}
+
+export interface ListGithubIssueAssigneesInput {
+  currentUserId: string;
+  owner: string;
+  repo: string;
 }
 
 export interface CreateGithubIssueInput {
@@ -46,18 +60,56 @@ export class GithubIssueWriteService {
     private readonly configService: GithubIntegrationConfigService
   ) {}
 
-  async updateIssue(input: UpdateGithubIssueInput): Promise<GithubIssueApiItem> {
+  async updateIssue(input: UpdateGithubIssueInput): Promise<UpdateGithubIssueResult> {
     const oauthConfig = this.configService.getGithubOAuthConfig();
     const connection = await this.getGithubOAuthConnectionRow(input.currentUserId);
     const accessToken = this.getConnectedGithubOAuthAccess(connection, oauthConfig);
 
-    return this.githubAppClient.updateRepositoryIssue({
+    if (input.assignees !== undefined) {
+      const assignableUsers = await this.githubAppClient.listRepositoryAssignees({
+        owner: input.owner,
+        repo: input.repo,
+        userAccessToken: accessToken
+      });
+      const assignableLogins = new Set(
+        assignableUsers.map((assignee) => assignee.login.toLowerCase())
+      );
+      if (
+        input.assignees.some((login) => !assignableLogins.has(login.toLowerCase()))
+      ) {
+        throw new GithubIssueAssigneeValidationError();
+      }
+    }
+
+    const issue = await this.githubAppClient.updateRepositoryIssue({
+      assignees: input.assignees,
       body: input.body,
       issueNumber: input.issueNumber,
       owner: input.owner,
       repo: input.repo,
       state: input.state,
       title: input.title,
+      userAccessToken: accessToken
+    });
+
+    return {
+      assigneesApplied:
+        input.assignees === undefined ||
+        this.haveSameAssignees(input.assignees, issue.assignees),
+      issue
+    };
+  }
+
+  async listAssignableUsers(
+    input: ListGithubIssueAssigneesInput
+  ): Promise<GithubIssueAssigneeApiItem[]> {
+    const oauthConfig = this.configService.getGithubOAuthConfig();
+    const connection = await this.getGithubOAuthConnectionRow(input.currentUserId);
+    const accessToken = this.getConnectedGithubOAuthAccess(connection, oauthConfig);
+
+    return this.githubAppClient.listRepositoryAssignees({
+      owner: input.owner,
+      repo: input.repo,
       userAccessToken: accessToken
     });
   }
@@ -123,6 +175,33 @@ export class GithubIssueWriteService {
         row.github_access_token_encrypted &&
         row.github_connected_at &&
         !row.github_revoked_at
+    );
+  }
+
+  private haveSameAssignees(
+    expected: string[],
+    actual: unknown[] | undefined
+  ): boolean {
+    if (!Array.isArray(actual)) {
+      return false;
+    }
+
+    const expectedLogins = expected.map((login) => login.toLowerCase()).sort();
+    const actualLogins = actual
+      .map((assignee) => {
+        if (!assignee || typeof assignee !== "object" || Array.isArray(assignee)) {
+          return null;
+        }
+
+        const login = (assignee as { login?: unknown }).login;
+        return typeof login === "string" ? login.toLowerCase() : null;
+      })
+      .filter((login): login is string => login !== null)
+      .sort();
+
+    return (
+      expectedLogins.length === actualLogins.length &&
+      expectedLogins.every((login, index) => login === actualLogins[index])
     );
   }
 }

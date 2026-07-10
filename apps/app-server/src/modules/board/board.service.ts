@@ -13,6 +13,7 @@ import {
   BoardIssueCreateService,
   type CreateBoardIssueResult
 } from "./board-issue-create.service";
+import { BoardIssueAssigneeService } from "./board-issue-assignee.service";
 import { BoardReadService } from "./board-read.service";
 import type { ListBoardIssuesQuery, ListBoardsQuery } from "./dto";
 import type {
@@ -21,6 +22,7 @@ import type {
   BoardFilterOptionsPayload,
   BoardIssueCardPayload,
   BoardIssueDetailPayload,
+  BoardIssueAssigneeOptionPayload,
   BoardPaginatedPayload,
   BoardPayload,
   BoardRelatedPullRequestPayload,
@@ -40,7 +42,8 @@ export class BoardService {
     private readonly boardIssueReadService: BoardIssueReadService,
     private readonly boardIssueStatusService: BoardIssueStatusService,
     private readonly boardIssueUpdateService: BoardIssueUpdateService,
-    private readonly boardIssueCreateService: BoardIssueCreateService
+    private readonly boardIssueCreateService: BoardIssueCreateService,
+    private readonly boardIssueAssigneeService: BoardIssueAssigneeService
   ) {}
 
   getModuleInfo(): BoardModuleInfo {
@@ -107,6 +110,20 @@ export class BoardService {
     issueId: string
   ): Promise<BoardIssueDetailPayload> {
     return this.boardIssueReadService.getBoardIssue(
+      currentUserId,
+      workspaceId,
+      boardId,
+      issueId
+    );
+  }
+
+  async listBoardIssueAssigneeOptions(
+    currentUserId: string,
+    workspaceId: string,
+    boardId: string,
+    issueId: string
+  ): Promise<BoardIssueAssigneeOptionPayload[]> {
+    return this.boardIssueAssigneeService.listAssigneeOptions(
       currentUserId,
       workspaceId,
       boardId,

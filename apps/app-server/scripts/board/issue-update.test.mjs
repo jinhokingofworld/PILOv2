@@ -11,6 +11,9 @@ const {
 } = require("../../dist/modules/board/board-issue-update.service.js");
 const { BoardService } = require("../../dist/modules/board/board.service.js");
 const { forbidden } = require("../../dist/common/api-error.js");
+const {
+  GithubIssueAssigneeValidationError
+} = require("../../dist/modules/github-integration/github-issue-assignee.error.js");
 
 const currentUserId = "22222222-2222-4222-8222-222222222222";
 const workspaceId = "11111111-1111-4111-8111-111111111111";
@@ -99,7 +102,8 @@ class FakeWorkspaceService {
 }
 
 class FakeGithubIssueWriteService {
-  constructor({ error = null, fail = false } = {}) {
+  constructor({ assigneesApplied = true, error = null, fail = false } = {}) {
+    this.assigneesApplied = assigneesApplied;
     this.error = error;
     this.fail = fail;
     this.calls = [];
@@ -115,11 +119,20 @@ class FakeGithubIssueWriteService {
       throw new Error("raw provider failure");
     }
 
-    return githubIssuePayload({
-      body: input.body ?? "Updated body",
-      state: input.state ?? "open",
-      title: input.title ?? "Updated title"
-    });
+    return {
+      assigneesApplied: this.assigneesApplied,
+      issue: githubIssuePayload({
+        assignees: (
+          this.assigneesApplied ? input.assignees ?? ["juhyeong"] : []
+        ).map((login) => ({
+          login,
+          avatar_url: `https://avatar.test/${login}`
+        })),
+        body: input.body ?? "Updated body",
+        state: input.state ?? "open",
+        title: input.title ?? "Updated title"
+      })
+    };
   }
 }
 
@@ -260,6 +273,7 @@ function githubIssuePayload(overrides = {}) {
     boardId,
     issueId,
     {
+      assignees: ["juhyeong"],
       body: "Updated issue body",
       state: "closed",
       title: "Updated issue title"
@@ -269,6 +283,7 @@ function githubIssuePayload(overrides = {}) {
   assert.deepEqual(workspaceService.calls, [{ userId: currentUserId, workspaceId }]);
   assert.deepEqual(githubIssueWriteService.calls, [
     {
+      assignees: ["juhyeong"],
       body: "Updated issue body",
       currentUserId,
       issueNumber: 203,
@@ -304,6 +319,202 @@ function githubIssuePayload(overrides = {}) {
 }
 
 {
+  const database = new FakeDatabase({
+    queryOneRows: [updateTargetRow()]
+  });
+  const invalidAssigneeError = new GithubIssueAssigneeValidationError();
+  const githubIssueWriteService = new FakeGithubIssueWriteService({
+    error: invalidAssigneeError
+  });
+  const { database: db, service } = createSubject(
+    database,
+    githubIssueWriteService
+  );
+
+  await assert.rejects(
+    () =>
+      service.updateBoardIssue(currentUserId, workspaceId, boardId, issueId, {
+        assignees: ["missing-user"]
+      }),
+    (error) => {
+      assert.equal(error.getStatus(), 400);
+      assert.equal(error.getResponse().error.code, "BAD_REQUEST");
+      assert.equal(
+        error.getResponse().error.message,
+        "One or more assignees cannot be assigned to this repository"
+      );
+      return true;
+    }
+  );
+  assert.equal(db.transactions.length, 0);
+}
+
+{
+  const database = new FakeDatabase({
+    queryOneRows: [
+      updateTargetRow({ assignees: [{ login: "juhyeong" }] }),
+      updatedIssueRow({ assignees: [] })
+    ],
+    queryRows: [[projectFieldRow()]]
+  });
+  const { githubIssueWriteService, service } = createSubject(database);
+
+  const result = await service.updateBoardIssue(
+    currentUserId,
+    workspaceId,
+    boardId,
+    issueId,
+    { assignees: [] }
+  );
+
+  assert.deepEqual(githubIssueWriteService.calls, [
+    {
+      assignees: [],
+      body: undefined,
+      currentUserId,
+      issueNumber: 203,
+      owner: "Developer-EJ",
+      repo: "PILO",
+      state: undefined,
+      title: undefined
+    }
+  ]);
+  assert.deepEqual(result.issue.assignees, []);
+}
+
+for (const { input, expected, name } of [
+  {
+    name: "exactly ten assignees",
+    input: Array.from({ length: 10 }, (_, index) => `user-${index + 1}`),
+    expected: Array.from({ length: 10 }, (_, index) => `user-${index + 1}`)
+  },
+  {
+    name: "trimmed and case-insensitively deduplicated assignees",
+    input: [" Alice ", "alice", " BOB", "bob "],
+    expected: ["Alice", "BOB"]
+  }
+]) {
+  const database = new FakeDatabase({
+    queryOneRows: [
+      updateTargetRow(),
+      updatedIssueRow({
+        assignees: expected.map((login) => ({ login }))
+      })
+    ],
+    queryRows: [[projectFieldRow()]]
+  });
+  const { githubIssueWriteService, service } = createSubject(database);
+
+  const result = await service.updateBoardIssue(
+    currentUserId,
+    workspaceId,
+    boardId,
+    issueId,
+    { assignees: input }
+  );
+
+  assert.deepEqual(
+    githubIssueWriteService.calls[0].assignees,
+    expected,
+    `${name} should be forwarded in normalized form`
+  );
+  assert.deepEqual(
+    result.issue.assignees,
+    expected.map((login) => ({ login })),
+    `${name} should be returned from the refreshed cache`
+  );
+}
+
+for (const { input, message, name } of [
+  {
+    name: "eleven assignees",
+    input: Array.from({ length: 11 }, (_, index) => `user-${index + 1}`),
+    message: "assignees must contain 10 or fewer GitHub logins"
+  },
+  {
+    name: "a blank assignee",
+    input: ["alice", "   "],
+    message: "assignees must be an array of GitHub logins"
+  },
+  {
+    name: "a non-string assignee",
+    input: ["alice", 42],
+    message: "assignees must be an array of GitHub logins"
+  }
+]) {
+  const database = new FakeDatabase();
+  const { githubIssueWriteService, service } = createSubject(database);
+
+  await assert.rejects(
+    () =>
+      service.updateBoardIssue(currentUserId, workspaceId, boardId, issueId, {
+        assignees: input
+      }),
+    (error) => {
+      assert.equal(error.getStatus(), 400, name);
+      assert.equal(error.getResponse().error.message, message, name);
+      return true;
+    }
+  );
+
+  assert.equal(
+    githubIssueWriteService.calls.length,
+    0,
+    `${name} must not perform a GitHub write`
+  );
+  assert.equal(database.queries.length, 0, `${name} should fail before lookup`);
+}
+
+{
+  const database = new FakeDatabase({
+    queryOneRows: [updateTargetRow()]
+  });
+  const githubIssueWriteService = new FakeGithubIssueWriteService({
+    assigneesApplied: false
+  });
+  const { database: db, service } = createSubject(
+    database,
+    githubIssueWriteService
+  );
+
+  await assert.rejects(
+    () =>
+      service.updateBoardIssue(currentUserId, workspaceId, boardId, issueId, {
+        assignees: ["alice"],
+        title: "Provider applied this title"
+      }),
+    (error) => {
+      assert.equal(error.getStatus(), 403);
+      assert.equal(
+        error.getResponse().error.message,
+        "GitHub Issue assignee update was not applied"
+      );
+      return true;
+    }
+  );
+
+  assert.equal(db.transactions.length, 1);
+  assert.ok(
+    db.queries.some(
+      (query) =>
+        query.method === "execute" &&
+        /UPDATE github_issues/i.test(query.text) &&
+        query.values.includes("Provider applied this title")
+    ),
+    "the authoritative GitHub issue cache should be updated before the 403"
+  );
+  assert.ok(
+    db.queries.some(
+      (query) =>
+        query.method === "execute" &&
+        /UPDATE pilo_issues/i.test(query.text) &&
+        query.values.includes("Provider applied this title")
+    ),
+    "the Board issue cache should be updated before the 403"
+  );
+}
+
+{
   const database = new FakeDatabase();
   const { service } = createSubject(database);
 
@@ -321,7 +532,34 @@ function githubIssuePayload(overrides = {}) {
       assert.equal(error.getResponse().error.code, "BAD_REQUEST");
       assert.equal(
         error.getResponse().error.message,
-        "At least one of title/body/state is required"
+        "At least one of title/body/state/assignees is required"
+      );
+      return true;
+    }
+  );
+
+  assert.equal(database.queries.length, 0);
+}
+
+{
+  const database = new FakeDatabase();
+  const { service } = createSubject(database);
+
+  await assert.rejects(
+    () =>
+      service.updateBoardIssue(
+        currentUserId,
+        workspaceId,
+        boardId,
+        issueId,
+        { assignees: "juhyeong" }
+      ),
+    (error) => {
+      assert.equal(error.getStatus(), 400);
+      assert.equal(error.getResponse().error.code, "BAD_REQUEST");
+      assert.equal(
+        error.getResponse().error.message,
+        "assignees must be an array of GitHub logins"
       );
       return true;
     }

@@ -261,20 +261,6 @@ class FakeAgentToolRegistryService {
   }
 }
 
-class FakeAgentExecutionService {
-  constructor() {
-    this.calls = [];
-  }
-
-  async executeLatestPlannedTool(currentUserId, workspaceId, runId) {
-    this.calls.push({ currentUserId, workspaceId, runId });
-    return {
-      status: "skipped",
-      reason: "not_ready"
-    };
-  }
-}
-
 class FakeAgentRunService {
   constructor(results) {
     this.results = [...results];
@@ -291,6 +277,17 @@ class FakeDatabaseService {
   constructor(state) {
     this.state = state;
     this.calls = [];
+  }
+
+  async transaction(callback) {
+    return callback({
+      execute: this.execute.bind(this)
+    });
+  }
+
+  async execute(text, values = []) {
+    this.calls.push({ method: "execute", text, values });
+    return { rows: [] };
   }
 
   async queryOne(text, values = []) {
@@ -352,7 +349,6 @@ function createService({
     confirmationRows: []
   },
   agentJobService = new FakeAgentJobService(),
-  agentExecutionService = new FakeAgentExecutionService(),
   loggingError = null
 } = {}) {
   const workspaceService = new FakeWorkspaceService();
@@ -369,15 +365,13 @@ function createService({
       workspaceService,
       agentLoggingService,
       agentJobService,
-      agentToolRegistryService,
-      agentExecutionService
+      agentToolRegistryService
     ),
     workspaceService,
     database,
     agentLoggingService,
     agentJobService,
-    agentToolRegistryService,
-    agentExecutionService
+    agentToolRegistryService
   };
 }
 
@@ -623,12 +617,28 @@ function errorMessage(error) {
   assert.deepEqual(workspaceService.calls, [
     { currentUserId: USER_ID, workspaceId: WORKSPACE_ID }
   ]);
-  assert.deepEqual(database.calls[0].values, [
+  const lifecycleCalls = database.calls.filter(
+    (call) => call.method === "execute"
+  );
+  assert.equal(lifecycleCalls.length, 2);
+  assert.deepEqual(lifecycleCalls[0].values, [WORKSPACE_ID, USER_ID]);
+  assert.match(lifecycleCalls[0].text, /SET status = 'expired'/);
+  assert.deepEqual(lifecycleCalls[1].values, [
+    WORKSPACE_ID,
+    USER_ID,
+    100
+  ]);
+  assert.match(lifecycleCalls[1].text, /DELETE FROM agent_runs/);
+
+  const listCalls = database.calls.filter(
+    (call) => call.method !== "execute"
+  );
+  assert.deepEqual(listCalls[0].values, [
     WORKSPACE_ID,
     USER_ID,
     "waiting_confirmation"
   ]);
-  assert.deepEqual(database.calls[1].values, [
+  assert.deepEqual(listCalls[1].values, [
     WORKSPACE_ID,
     USER_ID,
     "waiting_confirmation",
@@ -670,13 +680,12 @@ function errorMessage(error) {
     stepRows: [createStepRow()],
     confirmationRows: [createConfirmationRow()]
   };
-  const { service, agentExecutionService } = createService({ state });
+  const { service } = createService({ state });
   const result = await service.getRun(USER_ID, WORKSPACE_ID, RUN_ID);
+  const repeatedResult = await service.getRun(USER_ID, WORKSPACE_ID, RUN_ID);
 
-  assert.deepEqual(agentExecutionService.calls, [
-    { currentUserId: USER_ID, workspaceId: WORKSPACE_ID, runId: RUN_ID }
-  ]);
   assert.equal(result.run.id, RUN_ID);
+  assert.equal(repeatedResult.run.id, RUN_ID);
   assert.equal(result.run.steps[0].inputSummary.promptLength, 12);
   assert.equal("authorizationToken" in result.run.steps[0].inputSummary, false);
   assert.equal("transcriptText" in result.run.steps[0].outputSummary, false);

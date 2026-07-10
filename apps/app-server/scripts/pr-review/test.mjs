@@ -281,4 +281,5 @@ assert.match(databaseService, /ROLLBACK/);
 await import("./diff-parser.test.mjs");
 await import("./conflict-analyzer.test.mjs");
 await import("./conflict-resolution.test.mjs");
+await import("./conflict-apply.test.mjs");
 await import("./submission.test.mjs");

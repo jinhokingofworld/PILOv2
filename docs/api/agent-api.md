@@ -42,7 +42,8 @@ Workspace 상태 변경은 기존 도메인 service/API 계약을 따른다.
 - 현재 사용자는 path의 `workspaceId`에 접근할 수 있어야 한다.
 - Workspace 접근 권한이 없으면 `403 FORBIDDEN`을 반환한다.
 - Agent 응답과 저장 데이터에는 provider raw response, token, secret, 복호화된 credential을 포함하지 않는다.
-- Agent run 보존 기간은 30일이다.
+- Agent run 보존 기간은 생성 시점부터 30일이다. 목록·상세 조회는 현재 사용자와
+  Workspace 범위에서 만료된 run을 최대 100건씩 삭제한다.
 - 1차는 streaming 없이 polling으로 run 상태를 조회한다.
 - `clientRequestId`는 선택값이며, 같은 Workspace와 요청자 안에서 run 생성 재시도 idempotency key로 사용한다.
 
@@ -61,9 +62,15 @@ Frontend
     -> Agent run 저장
     -> SQS AI job enqueue
       -> AI Worker LLM planning/answer generation
+      -> App Server internal execution handoff
     -> App Server domain tool execution
       -> CalendarService / BoardService / MeetingService
 ```
+
+AI Worker가 `tool_candidate` planner 결과를 저장하면 인증된 내부 handoff로 App Server에 실행을
+요청한다. handoff는 at-least-once 전달될 수 있으며, App Server는 이미 생성된 tool step 또는
+confirmation을 중복 생성하지 않는다. 이 내부 endpoint는 public API가 아니며 사용자 bearer token을
+받지 않는다.
 
 ## 실행 모델
 
@@ -72,8 +79,16 @@ Frontend
 - read-only 요청은 confirmation 없이 자동 실행할 수 있다.
 - write 요청은 `waiting_confirmation` 상태의 run과 pending confirmation을 만든다.
 - 사용자가 승인하면 서버는 confirmation에 저장된 plan만 실행한다.
+- 승인 transaction은 `running` tool step을 execution claim으로 함께 만든다. 승인 직후 process가
+  중단돼도 tool step이 없는 `running` run을 남기지 않는다.
+- AI Worker는 60초마다 2분 이상 stale인 승인 execution을 확인한다. `running` tool step이 남아 있으면
+  domain tool을 재실행하지 않고 safe failure로 terminal 상태를 만든다.
 - 사용자가 거절하거나 confirmation이 만료되면 write tool은 실행하지 않는다.
 - confirmation 만료 시간은 생성 시점 기준 15분이다.
+- 목록·상세 조회 전에 서버는 만료된 pending confirmation을 `expired`로 전환하고,
+  해당 `waiting_confirmation` run을 `cancelled`로 전환한다.
+- 별도 일일 cleanup 작업은 두지 않는다. 목록·상세 조회에서 30일이 지난 run을
+  최대 100건씩 삭제하며, run 삭제의 FK cascade로 step, confirmation, log도 함께 삭제된다.
 - 상대 날짜 해석 기준은 사용자 timezone이다.
 - 요청에 timezone이 없으면 `Asia/Seoul`을 사용한다.
 
@@ -393,8 +408,10 @@ GET /api/v1/workspaces/{workspaceId}/agent/runs/{runId}
 
 - 현재 사용자가 생성한 run만 조회할 수 있다.
 - run은 path의 `workspaceId`에 속해야 한다.
-- pending confirmation이 만료됐다면 서버는 조회 시점에 confirmation을 `expired`로,
-  run을 `cancelled`로 정리할 수 있다.
+- 이 조회는 새로운 tool execution을 시작하거나 기존 tool step의 실행 상태를 변경하지 않는다.
+- 다만 request-time lifecycle 정책에 따라 만료된 pending confirmation을 `expired`로 전환하고,
+  해당 `waiting_confirmation` run을 `cancelled`로 전환할 수 있다.
+- 같은 lifecycle에서 현재 사용자·Workspace의 30일 경과 run을 최대 100건 삭제할 수 있다.
 
 응답:
 
@@ -607,6 +624,10 @@ Status code: `200 OK`
 
 - Agent는 Calendar event 생성/수정 시 `workspaceId`, `createdBy`를 body로 보내지 않는다.
 - `workspaceId`는 path에서 오고, `createdBy`는 현재 로그인 사용자에서 온다.
+- `update_calendar_event` planner input은 `eventId`와 `changes`만 받는다. confirmation의 `before`는
+  App Server가 같은 Workspace의 현재 event를 조회해 만든다. planner가 작성한 현재값은 신뢰하지 않는다.
+- `eventId` 또는 `changes`가 없으면 현재 run은 `needs_clarification`으로 완료하며, 다른 event를
+  자동 선택하지 않는다.
 - 시간 지정 일정에서 `endTime`이 없으면 Calendar API의 `startTime + 1시간` 정규화를 따른다.
 - 일정 삭제는 1차 Agent tool이 아니다.
 
@@ -614,6 +635,11 @@ Status code: `200 OK`
 
 - Agent는 MeetingReport 목록/상세를 읽고 요약할 수 있다.
 - 목록 응답의 요약 필드를 우선 사용한다.
+- report ID 없는 넓은 조회(예: `지난 회의 결정사항 보여줘`)는 `list_meeting_reports`에 `limit: 1`을
+  사용한다. Meeting domain의 `created_at DESC, id ASC` 정렬에 따라 같은 Workspace의 최신 report 하나를
+  조회하고, 요청한 범주만 답변에 표시한다.
+- 특정 MeetingReport 상세/요약은 UUID `reportId`가 필요하다. 현재 one prompt = one run에서는 후보
+  선택을 이어갈 수 없으므로 ID 없는 특정 상세 요청은 `unsupported`로 완료한다.
 - 상세 조회의 `transcriptText`는 답변 생성에 사용할 수 있지만 Agent run/step/confirmation에는 전문 저장하지 않는다.
 - 녹음 시작, 녹음 종료, 회의록 재생성 요청은 1차 Agent tool이 아니다.
 

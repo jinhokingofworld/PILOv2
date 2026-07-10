@@ -11,7 +11,9 @@ export interface GithubAppInstallationLookupRequest {
 }
 
 export interface GithubAppInstallationTokenRequest
-  extends GithubAppInstallationLookupRequest {}
+  extends GithubAppInstallationLookupRequest {
+  installationAccessToken?: string;
+}
 
 export interface GithubAppInstallationDeleteResult {
   deleted: true;
@@ -85,9 +87,16 @@ export interface GithubRepositoryIssueUpdateRequest
   owner: string;
   repo: string;
   issueNumber: number;
+  assignees?: string[];
   title?: string;
   body?: string;
   state?: "open" | "closed";
+}
+
+export interface GithubRepositoryAssigneesRequest
+  extends GithubProjectV2UserAccessTokenRequest {
+  owner: string;
+  repo: string;
 }
 
 export interface GithubRepositoryIssueCreateRequest
@@ -180,6 +189,11 @@ export interface GithubIssueApiItem {
   closed_at?: string | null;
 }
 
+export interface GithubIssueAssigneeApiItem {
+  login: string;
+  avatar_url?: string | null;
+}
+
 export interface GithubPullRequestApiItem {
   id: number;
   node_id: string;
@@ -250,6 +264,8 @@ export interface GithubPullRequestApiDetails {
   head?: GithubPullRequestApiItem["head"];
   headRef: string;
   headSha: string;
+  baseRef: string;
+  baseSha: string;
   headRepositoryOwner: string;
   headRepositoryName: string;
   headRepositoryFullName: string;
@@ -393,6 +409,7 @@ interface GithubProjectV2GraphqlErrorContext {
 
 const GITHUB_SYNC_PER_PAGE = 100;
 const GITHUB_SYNC_MAX_PAGES = 100;
+const GITHUB_ASSIGNEE_LOOKUP_TIMEOUT_MS = 30_000;
 const GITHUB_PROJECT_V2_OAUTH_SCOPE_ERROR_MESSAGE =
   "GitHub ProjectV2 OAuth connection must be reconnected with project scope";
 const GITHUB_PROJECT_V2_OWNER_RESOLUTION_ERROR_MESSAGE =
@@ -409,6 +426,14 @@ const GITHUB_ISSUE_WRITE_PERMISSION_ERROR_MESSAGE =
   "GitHub Issue write permission is required";
 const GITHUB_PROJECT_V2_WRITE_PERMISSION_ERROR_MESSAGE =
   "GitHub ProjectV2 write permission is required";
+const GITHUB_PROJECT_V2_SUPPORTED_ITEM_FIELD_VALUE_TYPENAMES: ReadonlySet<string> =
+  new Set([
+    "ProjectV2ItemFieldTextValue",
+    "ProjectV2ItemFieldNumberValue",
+    "ProjectV2ItemFieldDateValue",
+    "ProjectV2ItemFieldSingleSelectValue",
+    "ProjectV2ItemFieldIterationValue"
+  ]);
 const GITHUB_PROJECT_V2_DISCOVERY_FRAGMENT = `
   fragment PiloProjectV2DiscoveryFields on ProjectV2 {
     id
@@ -1057,6 +1082,9 @@ export class GithubAppClient {
     }
 
     const body: Record<string, unknown> = {};
+    if (input.assignees !== undefined) {
+      body.assignees = input.assignees;
+    }
     if (input.title !== undefined) {
       body.title = input.title;
     }
@@ -1100,6 +1128,53 @@ export class GithubAppClient {
     }
 
     return payload;
+  }
+
+  async listRepositoryAssignees(
+    input: GithubRepositoryAssigneesRequest
+  ): Promise<GithubIssueAssigneeApiItem[]> {
+    if (!input.userAccessToken) {
+      throw badRequest("GitHub OAuth connection is required");
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(
+      () => controller.abort(),
+      GITHUB_ASSIGNEE_LOOKUP_TIMEOUT_MS
+    );
+
+    try {
+      const assignees: GithubIssueAssigneeApiItem[] = [];
+      for (let page = 1; page <= GITHUB_SYNC_MAX_PAGES; page += 1) {
+        const url = new URL(
+          `https://api.github.com/repos/${encodeURIComponent(input.owner)}/${encodeURIComponent(input.repo)}/assignees`
+        );
+        url.searchParams.set("page", String(page));
+        url.searchParams.set("per_page", String(GITHUB_SYNC_PER_PAGE));
+
+        const payload = await this.fetchJsonWithToken(
+          url,
+          input.userAccessToken,
+          "GitHub issue assignee lookup failed",
+          controller.signal
+        );
+        if (
+          !Array.isArray(payload) ||
+          !payload.every((item) => this.isIssueAssigneePayload(item))
+        ) {
+          throw badRequest("GitHub issue assignee lookup failed");
+        }
+
+        assignees.push(...payload);
+        if (payload.length < GITHUB_SYNC_PER_PAGE) {
+          break;
+        }
+      }
+
+      return assignees;
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
   async createRepositoryIssue(
@@ -1519,6 +1594,8 @@ export class GithubAppClient {
 
     const headRef = pullRequest.head?.ref;
     const headSha = pullRequest.head?.sha;
+    const baseRef = pullRequest.base?.ref;
+    const baseSha = pullRequest.base?.sha;
     const headRepositoryOwner = pullRequest.head?.repo?.owner?.login;
     const headRepositoryName = pullRequest.head?.repo?.name;
     const headRepositoryFullName = pullRequest.head?.repo?.full_name;
@@ -1527,6 +1604,10 @@ export class GithubAppClient {
       headRef.length === 0 ||
       typeof headSha !== "string" ||
       headSha.length === 0 ||
+      typeof baseRef !== "string" ||
+      baseRef.length === 0 ||
+      typeof baseSha !== "string" ||
+      baseSha.length === 0 ||
       typeof headRepositoryOwner !== "string" ||
       headRepositoryOwner.length === 0 ||
       typeof headRepositoryName !== "string" ||
@@ -1551,6 +1632,8 @@ export class GithubAppClient {
       mergedAt: pullRequest.merged_at ?? null,
       headRef,
       headSha,
+      baseRef,
+      baseSha,
       headRepositoryOwner,
       headRepositoryName,
       headRepositoryFullName
@@ -1560,13 +1643,13 @@ export class GithubAppClient {
   async getRepositoryMergeBase(
     input: GithubRepositoryCompareRequest
   ): Promise<GithubRepositoryMergeBaseApiDetails> {
-    const installationToken = await this.createInstallationAccessToken(input);
+    const installationToken = await this.resolveInstallationAccessToken(input);
     const url = new URL(
       `https://api.github.com/repos/${encodeURIComponent(input.owner)}/${encodeURIComponent(input.repo)}/compare/${encodeURIComponent(input.baseRef)}...${encodeURIComponent(input.headRef)}`
     );
     const payload = await this.fetchJsonWithToken(
       url,
-      installationToken.token,
+      installationToken,
       "GitHub repository compare lookup failed"
     );
 
@@ -1592,7 +1675,7 @@ export class GithubAppClient {
   async getRepositoryFileContent(
     input: GithubRepositoryFileContentRequest
   ): Promise<GithubRepositoryFileContentApiDetails | null> {
-    const installationToken = await this.createInstallationAccessToken(input);
+    const installationToken = await this.resolveInstallationAccessToken(input);
     const encodedPath = input.path
       .split("/")
       .map((part) => encodeURIComponent(part))
@@ -1602,21 +1685,32 @@ export class GithubAppClient {
     );
     url.searchParams.set("ref", input.ref);
 
-    let response: Response;
-    try {
-      response = await fetch(url, {
-        headers: {
-          Accept: "application/vnd.github+json",
-          Authorization: `Bearer ${installationToken.token}`,
-          "X-GitHub-Api-Version": GITHUB_API_VERSION
-        }
-      });
-    } catch {
-      throw badRequest("GitHub repository file content lookup failed");
-    }
+    const response = await this.fetchRepositoryFileContentWithRetry(
+      url,
+      installationToken
+    );
 
     if (response.status === 404) {
       return null;
+    }
+
+    if (response.status === 401) {
+      throw badRequest("GitHub App installation token is invalid");
+    }
+
+    if (
+      (response.status === 403 && this.shouldRetryRepositoryRead(response)) ||
+      response.status === 429 ||
+      response.status === 500 ||
+      response.status === 502 ||
+      response.status === 503 ||
+      response.status === 504
+    ) {
+      throw badRequest("GitHub repository file lookup is temporarily unavailable");
+    }
+
+    if (response.status === 403) {
+      throw forbidden("GitHub App Contents read permission is required");
     }
 
     if (!response.ok) {
@@ -1659,6 +1753,73 @@ export class GithubAppClient {
         "base64"
       ).toString("utf8")
     };
+  }
+
+  private async resolveInstallationAccessToken(
+    input: GithubAppInstallationTokenRequest
+  ): Promise<string> {
+    if (input.installationAccessToken) {
+      return input.installationAccessToken;
+    }
+
+    return (await this.createInstallationAccessToken(input)).token;
+  }
+
+  private async fetchRepositoryFileContentWithRetry(
+    url: URL,
+    accessToken: string
+  ): Promise<Response> {
+    const maxAttempts = 2;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      let response: Response;
+      try {
+        response = await fetch(url, {
+          headers: {
+            Accept: "application/vnd.github+json",
+            Authorization: `Bearer ${accessToken}`,
+            "X-GitHub-Api-Version": GITHUB_API_VERSION
+          }
+        });
+      } catch {
+        if (attempt === maxAttempts) {
+          throw badRequest("GitHub repository file lookup is temporarily unavailable");
+        }
+
+        await this.waitForRepositoryReadRetry(attempt);
+        continue;
+      }
+
+      if (!this.shouldRetryRepositoryRead(response) || attempt === maxAttempts) {
+        return response;
+      }
+
+      await this.waitForRepositoryReadRetry(attempt);
+    }
+
+    throw badRequest("GitHub repository file lookup is temporarily unavailable");
+  }
+
+  private shouldRetryRepositoryRead(response: Response): boolean {
+    if (
+      response.status === 429 ||
+      response.status === 500 ||
+      response.status === 502 ||
+      response.status === 503 ||
+      response.status === 504
+    ) {
+      return true;
+    }
+
+    return (
+      response.status === 403 &&
+      (response.headers.get("retry-after") !== null ||
+        response.headers.get("x-ratelimit-remaining") === "0")
+    );
+  }
+
+  private async waitForRepositoryReadRetry(attempt: number): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, attempt * 100));
   }
 
   private async getProjectV2GraphqlAuth(
@@ -2311,6 +2472,7 @@ export class GithubAppClient {
         .filter((fieldValue): fieldValue is Record<string, unknown> =>
           this.isRecord(fieldValue)
         )
+        .filter((fieldValue) => this.isSupportedProjectV2ItemFieldValue(fieldValue))
         .map((fieldValue) => this.mapProjectV2ItemFieldValue(fieldValue)),
       hasNextPage: pageInfo.hasNextPage === true,
       endCursor:
@@ -2318,6 +2480,17 @@ export class GithubAppClient {
           ? pageInfo.endCursor
           : null
     };
+  }
+
+  private isSupportedProjectV2ItemFieldValue(
+    fieldValue: Record<string, unknown>
+  ): boolean {
+    return (
+      typeof fieldValue.__typename === "string" &&
+      GITHUB_PROJECT_V2_SUPPORTED_ITEM_FIELD_VALUE_TYPENAMES.has(
+        fieldValue.__typename
+      )
+    );
   }
 
   private mapProjectV2ItemFieldValue(
@@ -2382,7 +2555,8 @@ export class GithubAppClient {
   private async fetchJsonWithToken(
     url: URL,
     token: string,
-    errorMessage: string
+    errorMessage: string,
+    signal?: AbortSignal
   ): Promise<unknown> {
     let response: Response;
     try {
@@ -2391,7 +2565,8 @@ export class GithubAppClient {
           Accept: "application/vnd.github+json",
           Authorization: `Bearer ${token}`,
           "X-GitHub-Api-Version": GITHUB_API_VERSION
-        }
+        },
+        ...(signal ? { signal } : {})
       });
     } catch {
       throw badRequest(errorMessage);
@@ -2529,6 +2704,21 @@ export class GithubAppClient {
       this.isOptionalString(payload.created_at) &&
       this.isOptionalString(payload.updated_at) &&
       this.isOptionalString(payload.closed_at)
+    );
+  }
+
+  private isIssueAssigneePayload(
+    value: unknown
+  ): value is GithubIssueAssigneeApiItem {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+      return false;
+    }
+
+    const payload = value as GithubIssueAssigneeApiItem;
+    return (
+      typeof payload.login === "string" &&
+      payload.login.length > 0 &&
+      this.isOptionalString(payload.avatar_url)
     );
   }
 

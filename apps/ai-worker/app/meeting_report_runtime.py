@@ -6,10 +6,14 @@ import logging
 import os
 import tempfile
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 from app.agent_processor import (
+    AgentExecutionHandoffClient,
     AgentRunContext,
     AgentRunJob,
     AgentRunProcessor,
@@ -36,6 +40,8 @@ DEFAULT_STT_MODEL = "gpt-4o-mini-transcribe"
 DEFAULT_MEETING_REPORT_MODEL = "gpt-5.4-mini"
 DEFAULT_WAIT_TIME_SECONDS = 20
 DEFAULT_VISIBILITY_TIMEOUT_SECONDS = 900
+DEFAULT_AGENT_EXECUTION_HANDOFF_TIMEOUT_SECONDS = 10
+DEFAULT_AGENT_STALE_EXECUTION_SWEEP_INTERVAL_SECONDS = 60
 LOCAL_APP_ENVS = {"local", "test", "development"}
 
 
@@ -51,6 +57,10 @@ class RuntimeSettings:
     openai_stt_model: str
     openai_meeting_report_model: str
     openai_agent_planner_model: str
+    agent_execution_handoff_base_url: str
+    agent_execution_handoff_token: str
+    agent_execution_handoff_timeout_seconds: int
+    agent_stale_execution_sweep_interval_seconds: int
     concurrency: int
     wait_time_seconds: int
     visibility_timeout_seconds: int
@@ -73,6 +83,16 @@ class RuntimeSettings:
             openai_agent_planner_model=_env(
                 "OPENAI_AGENT_PLANNER_MODEL",
                 _env("OPENAI_MEETING_REPORT_MODEL", DEFAULT_MEETING_REPORT_MODEL),
+            ),
+            agent_execution_handoff_base_url=_require_env("AGENT_EXECUTION_HANDOFF_BASE_URL"),
+            agent_execution_handoff_token=_require_env("AGENT_EXECUTION_HANDOFF_TOKEN"),
+            agent_execution_handoff_timeout_seconds=_positive_int_env(
+                "AGENT_EXECUTION_HANDOFF_TIMEOUT_SECONDS",
+                DEFAULT_AGENT_EXECUTION_HANDOFF_TIMEOUT_SECONDS,
+            ),
+            agent_stale_execution_sweep_interval_seconds=_positive_int_env(
+                "AGENT_STALE_EXECUTION_SWEEP_INTERVAL_SECONDS",
+                DEFAULT_AGENT_STALE_EXECUTION_SWEEP_INTERVAL_SECONDS,
             ),
             concurrency=_positive_int_env("AI_WORKER_CONCURRENCY", 1),
             wait_time_seconds=_positive_int_env(
@@ -512,10 +532,15 @@ class SqsAiJobWorker:
         settings: RuntimeSettings,
         dispatcher: JobDispatcher,
         sqs_client: Any,
+        stale_execution_recovery: Any | None = None,
+        monotonic_time: Callable[[], float] = time.monotonic,
     ) -> None:
         self.settings = settings
         self.dispatcher = dispatcher
         self.sqs_client = sqs_client
+        self.stale_execution_recovery = stale_execution_recovery
+        self.monotonic_time = monotonic_time
+        self.last_stale_execution_sweep_at: float | None = None
 
     def run_forever(self) -> None:
         LOGGER.info("ai-worker SQS consumer started")
@@ -523,6 +548,7 @@ class SqsAiJobWorker:
             self.run_once()
 
     def run_once(self) -> int:
+        self.recover_stale_executions_if_due()
         response = self.sqs_client.receive_message(
             QueueUrl=self.settings.sqs_queue_url,
             MaxNumberOfMessages=min(max(self.settings.concurrency, 1), 10),
@@ -550,6 +576,56 @@ class SqsAiJobWorker:
                 )
 
         return len(messages)
+
+    def recover_stale_executions_if_due(self) -> None:
+        if self.stale_execution_recovery is None:
+            return
+
+        now = self.monotonic_time()
+        if (
+            self.last_stale_execution_sweep_at is not None
+            and now - self.last_stale_execution_sweep_at
+            < self.settings.agent_stale_execution_sweep_interval_seconds
+        ):
+            return
+
+        self.last_stale_execution_sweep_at = now
+        try:
+            self.stale_execution_recovery.recover_stale_executions()
+        except InfrastructureError:
+            LOGGER.exception("stale Agent execution recovery failed")
+
+
+class HttpAgentExecutionHandoffClient(AgentExecutionHandoffClient):
+    def __init__(self, base_url: str, token: str, timeout_seconds: int) -> None:
+        self.base_url = base_url.rstrip("/")
+        self.token = token
+        self.timeout_seconds = timeout_seconds
+
+    def execute(self, run_id: str) -> None:
+        self._post(f"/api/v1/internal/agent/runs/{run_id}/execution")
+
+    def recover_stale_executions(self) -> None:
+        self._post("/api/v1/internal/agent/stale-executions/recover")
+
+    def _post(self, path: str) -> None:
+        request = Request(
+            f"{self.base_url}{path}",
+            data=b"",
+            headers={
+                "X-Agent-Execution-Handoff-Token": self.token,
+            },
+            method="POST",
+        )
+        try:
+            with urlopen(request, timeout=self.timeout_seconds):
+                return
+        except HTTPError as error:
+            raise InfrastructureError(
+                f"Agent execution handoff returned HTTP {error.code}"
+            ) from error
+        except (OSError, TimeoutError, URLError) as error:
+            raise InfrastructureError("Agent execution handoff is unavailable") from error
 
 
 def create_worker(settings: RuntimeSettings | None = None) -> SqsAiJobWorker:
@@ -585,9 +661,23 @@ def create_worker(settings: RuntimeSettings | None = None) -> SqsAiJobWorker:
         storage,
         ai_client,
     )
-    agent_run_processor = AgentRunProcessor(agent_run_repository, agent_planner_client)
+    agent_execution_handoff_client = HttpAgentExecutionHandoffClient(
+        resolved_settings.agent_execution_handoff_base_url,
+        resolved_settings.agent_execution_handoff_token,
+        resolved_settings.agent_execution_handoff_timeout_seconds,
+    )
+    agent_run_processor = AgentRunProcessor(
+        agent_run_repository,
+        agent_planner_client,
+        agent_execution_handoff_client,
+    )
     dispatcher = JobDispatcher(meeting_report_processor, agent_run_processor)
-    return SqsAiJobWorker(resolved_settings, dispatcher, sqs_client)
+    return SqsAiJobWorker(
+        resolved_settings,
+        dispatcher,
+        sqs_client,
+        stale_execution_recovery=agent_execution_handoff_client,
+    )
 
 
 def run_worker() -> None:

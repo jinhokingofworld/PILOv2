@@ -36,6 +36,14 @@ class FakeSqsClient:
         self.deleted.append(kwargs)
 
 
+class FakeStaleExecutionRecovery:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def recover_stale_executions(self) -> None:
+        self.calls += 1
+
+
 def runtime_settings() -> RuntimeSettings:
     return RuntimeSettings(
         aws_region="ap-northeast-2",
@@ -48,6 +56,10 @@ def runtime_settings() -> RuntimeSettings:
         openai_stt_model="gpt-4o-mini-transcribe",
         openai_meeting_report_model="gpt-5.4-mini",
         openai_agent_planner_model="gpt-5.4-mini",
+        agent_execution_handoff_base_url="http://localhost:4000",
+        agent_execution_handoff_token="test-handoff-token",
+        agent_execution_handoff_timeout_seconds=10,
+        agent_stale_execution_sweep_interval_seconds=60,
         concurrency=2,
         wait_time_seconds=1,
         visibility_timeout_seconds=30,
@@ -87,3 +99,22 @@ def test_sqs_worker_deletes_only_dispatcher_completed_messages() -> None:
             "ReceiptHandle": "receipt-delete",
         }
     ]
+
+
+def test_sqs_worker_sweeps_stale_agent_executions_on_interval() -> None:
+    recovery = FakeStaleExecutionRecovery()
+    now = [0.0]
+    worker = SqsAiJobWorker(
+        runtime_settings(),
+        FakeDispatcher([]),
+        FakeSqsClient(),
+        stale_execution_recovery=recovery,
+        monotonic_time=lambda: now[0],
+    )
+
+    worker.recover_stale_executions_if_due()
+    worker.recover_stale_executions_if_due()
+    now[0] = 60.0
+    worker.recover_stale_executions_if_due()
+
+    assert recovery.calls == 2

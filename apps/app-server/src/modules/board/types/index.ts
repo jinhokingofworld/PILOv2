@@ -168,6 +168,11 @@ export interface BoardFilterAssigneeOptionPayload {
   count: number;
 }
 
+export interface BoardIssueAssigneeOptionPayload {
+  login: string;
+  avatarUrl: string | null;
+}
+
 export interface BoardFilterLabelOptionPayload {
   name: string;
   color: string | null;

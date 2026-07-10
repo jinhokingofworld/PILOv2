@@ -7,6 +7,8 @@ import { GithubAppClient } from "./github-app.client";
 import { GithubAppInstallationService } from "./github-app-installation.service";
 import { GithubAppInstallationStateService } from "./github-app-installation-state.service";
 import { GithubCallbackStateService } from "./github-callback-state.service";
+import { GithubConflictMergeService } from "./github-conflict-merge.service";
+import { GithubGitCommandRunner } from "./github-git-command-runner";
 import { GithubIntegrationConfigService } from "./github-integration-config.service";
 import { GithubOAuthClient } from "./github-oauth.client";
 import { GithubOAuthIntegrationService } from "./github-oauth-integration.service";
@@ -39,6 +41,7 @@ import type {
 } from "./dto";
 import type {
   GitHubIntegrationModuleInfo,
+  ApplyGithubPullRequestFileResolutionInput,
   GithubAppInstallationCallbackPayload,
   GithubAppInstallationDeletePayload,
   GithubAppInstallationPayload,
@@ -232,7 +235,7 @@ export class GithubIntegrationService {
       new GithubPullRequestFileWriteService(
         database,
         githubAppClient,
-        githubOAuthClient,
+        new GithubConflictMergeService(new GithubGitCommandRunner()),
         tokenEncryptionService,
         configService,
         workspaceService
@@ -655,12 +658,7 @@ export class GithubIntegrationService {
     currentUserId: string,
     workspaceId: string,
     pullRequestId: string,
-    input: {
-      filePath: string;
-      resolvedContent: string;
-      expectedHeadSha: string;
-      expectedHeadBlobSha: string;
-    }
+    input: ApplyGithubPullRequestFileResolutionInput
   ): Promise<GithubPullRequestFileResolutionPayload> {
     return this.githubPullRequestFileWriteService.applyGithubPullRequestFileResolution(
       currentUserId,

@@ -377,6 +377,7 @@ export interface GithubPullRequestReviewSubmissionPayload {
 export interface ApplyGithubPullRequestFileResolutionInput {
   filePath: string;
   resolvedContent: string;
+  expectedBaseSha: string;
   expectedHeadSha: string;
   expectedHeadBlobSha: string;
 }
@@ -389,6 +390,7 @@ export interface GithubPullRequestFileResolutionPayload {
   headShaAfter: string;
   headBlobShaBefore: string;
   headBlobShaAfter: string;
+  localCacheUpdated: boolean;
 }
 
 export type GithubPullRequestMergeMethod = "merge";
@@ -418,6 +420,19 @@ export type GithubSyncTarget =
 
 export type GithubSyncStatus = "running" | "success" | "failed";
 
+export type GithubSyncProgressStage =
+  | "initializing"
+  | "repositories"
+  | "project_v2_discovery"
+  | "issues"
+  | "pull_requests"
+  | "project_v2"
+  | "project_v2_fields"
+  | "project_v2_items"
+  | "board_hydration"
+  | "finalizing"
+  | "completed";
+
 export interface GithubSyncRunPayload {
   id: string;
   target: GithubSyncTarget;
@@ -431,6 +446,8 @@ export interface GithubSyncRunPayload {
   createdCount: number;
   updatedCount: number;
   skippedCount: number;
+  progressPercent: number;
+  progressStage: GithubSyncProgressStage;
   errorMessage: string | null;
 }
 

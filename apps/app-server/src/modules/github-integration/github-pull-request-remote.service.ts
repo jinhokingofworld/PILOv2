@@ -201,8 +201,17 @@ export class GithubPullRequestRemoteService {
     );
     const config = this.configService.getGithubAppConfig();
     const installationId = this.readGithubInstallationId(context);
+    const installationAccessToken = (
+      await this.githubAppClient.createInstallationAccessToken({
+        installationId,
+        appId: config.appId,
+        privateKey: config.privateKey,
+        now: config.now
+      })
+    ).token;
     const mergeBase = await this.githubAppClient.getRepositoryMergeBase({
       installationId,
+      installationAccessToken,
       appId: config.appId,
       privateKey: config.privateKey,
       owner: context.owner_login,
@@ -217,16 +226,19 @@ export class GithubPullRequestRemoteService {
       const [mergeBaseFile, baseFile, headFile] = await Promise.all([
         this.getRepositoryFileContent(context, config, {
           installationId,
+          installationAccessToken,
           filePath,
           ref: mergeBase.mergeBaseSha
         }),
         this.getRepositoryFileContent(context, config, {
           installationId,
+          installationAccessToken,
           filePath,
           ref: input.baseSha
         }),
         this.getRepositoryFileContent(context, config, {
           installationId,
+          installationAccessToken,
           filePath,
           ref: input.headSha
         })
@@ -296,12 +308,14 @@ export class GithubPullRequestRemoteService {
     config: GithubAppRuntimeConfig,
     input: {
       installationId: number;
+      installationAccessToken: string;
       filePath: string;
       ref: string;
     }
   ): Promise<GithubRepositoryFileContentApiDetails | null> {
     return this.githubAppClient.getRepositoryFileContent({
       installationId: input.installationId,
+      installationAccessToken: input.installationAccessToken,
       appId: config.appId,
       privateKey: config.privateKey,
       owner: context.owner_login,

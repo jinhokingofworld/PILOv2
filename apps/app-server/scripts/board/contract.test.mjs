@@ -21,6 +21,8 @@ const boardApi = await readSource("../../../../docs/api/board-api.md");
 const apiReadme = await readSource("../../../../docs/api/README.md");
 const mvpExcluded = section(boardApi, "## MVP 제외");
 const issueStatus = section(boardApi, "## Issue Status 변경");
+const issueUpdate = section(boardApi, "## Issue 수정");
+const assigneeOptions = section(boardApi, "## Issue 담당자 후보 조회");
 
 const writeEndpoints = [
   "PATCH /api/v1/workspaces/{workspaceId}/boards/{boardId}/issues/{issueId}/status",
@@ -46,6 +48,21 @@ assert.match(boardApi, /## Issue 수정/);
 assert.match(boardApi, /"title": "OAuth callback state 바인딩 보강"/);
 assert.match(boardApi, /"body": "본문 markdown"/);
 assert.match(boardApi, /"state": "open"/);
+assert.match(issueUpdate, /"assignees": \["Developer-EJ"\]/);
+assert.match(issueUpdate, /빈 배열.*모든 담당자/);
+assert.match(
+  issueUpdate,
+  /성공 응답:[\s\S]*"assignees": \[[\s\S]*"login": "Developer-EJ"[\s\S]*"avatar_url": "https:\/\/avatars\.githubusercontent\.com\/u\/1\?v=4"/
+);
+assert.doesNotMatch(issueUpdate, /labels, assignees, milestone/);
+assert.match(issueUpdate, /title\/body\/state\/assignees 외 labels, milestone/);
+
+assert.match(
+  assigneeOptions,
+  /GET \/api\/v1\/workspaces\/\{workspaceId\}\/boards\/\{boardId\}\/issues\/\{issueId\}\/assignee-options/
+);
+assert.match(assigneeOptions, /저장소에 지정 가능한 GitHub 사용자/);
+assert.match(assigneeOptions, /"avatarUrl"/);
 
 assert.match(boardApi, /## Issue 생성/);
 assert.match(boardApi, /"columnId": "column_uuid"/);
@@ -70,6 +87,7 @@ assert.match(boardApi, /403 FORBIDDEN/);
 assert.match(boardApi, /404 NOT_FOUND/);
 assert.match(boardApi, /409 CONFLICT/);
 assert.match(boardApi, /502 BAD_GATEWAY/);
+assert.doesNotMatch(mvpExcluded, /issue label, assignee, milestone 직접 변경/);
 
 assert.match(
   apiReadme,
