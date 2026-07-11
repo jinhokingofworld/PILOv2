@@ -64,6 +64,10 @@ const mainShell = await readFile(
   new URL("../src/components/main-shell.tsx", import.meta.url),
   "utf8"
 );
+const headerNotificationDropdown = await readFile(
+  new URL("../src/components/header-notification-dropdown.tsx", import.meta.url),
+  "utf8"
+);
 const workspaceLayout = await readFile(
   new URL("../src/app/(workspace)/layout.tsx", import.meta.url),
   "utf8"
@@ -370,7 +374,8 @@ assert.match(authApiClient, /listCurrentUserWorkspaceInvitations/);
 assert.match(authApiClient, /acceptCurrentUserWorkspaceInvitation/);
 assert.match(authApiClient, /listWorkspaceInvitations/);
 assert.match(authApiClient, /createWorkspaceInvitation/);
-assert.match(authApiClient, /revokeWorkspaceInvitation/);
+assert.doesNotMatch(authApiClient, /revokeWorkspaceInvitation/);
+assert.match(authApiClient, /rejectCurrentUserWorkspaceInvitation/);
 assert.match(authApiClient, /acceptWorkspaceInvitation/);
 assert.doesNotMatch(authSession, /createWorkspace\(/);
 assert.doesNotMatch(authApiClient, /createWorkspace\(/);
@@ -394,10 +399,20 @@ assert.doesNotMatch(mainShell, /AuthGate/);
 assert.match(mainShell, /usePathname/);
 assert.match(mainShell, /getFeatureNavigationItemForPathname/);
 assert.match(mainShell, /HeaderMeetingStatus/);
+assert.match(mainShell, /HeaderNotificationDropdown/);
 assert.match(mainShell, /sticky top-0/);
 assert.match(mainShell, /<span className="truncate">\{activeFeature\.title\}<\/span>/);
 assert.match(mainShell, /peer-data-\[variant=inset\]:!m-0/);
 assert.match(mainShell, /peer-data-\[state=collapsed\]:!ml-0/);
+assert.match(headerNotificationDropdown, /PopoverTrigger/);
+assert.match(headerNotificationDropdown, /PopoverContent/);
+assert.match(headerNotificationDropdown, /DialogContent/);
+assert.match(headerNotificationDropdown, /unreadCount > 0/);
+assert.doesNotMatch(headerNotificationDropdown, /INITIAL_NOTIFICATIONS/);
+assert.match(headerNotificationDropdown, /표시할 알림이 없습니다/);
+assert.match(headerNotificationDropdown, /READ_INVITATIONS_STORAGE_PREFIX/);
+assert.match(headerNotificationDropdown, /localStorage/);
+assert.match(headerNotificationDropdown, /closeInvitationDialogAsRead/);
 assert.match(appSidebar, /useAuthSession/);
 assert.match(appSidebar, /useMeetingRuntime/);
 assert.match(appSidebar, /leaveActiveMeeting/);
@@ -405,15 +420,23 @@ assert.match(appSidebar, /logout/);
 assert.match(appSidebar, /ACTIVE_MEETING_LEAVE_FAILED_MESSAGE/);
 assert.match(appSidebar, /sessionActionStatus/);
 assert.match(
-  appSidebar,
+  headerNotificationDropdown,
   /await meetingRuntime\.leaveActiveMeeting\(\);[\s\S]*await acceptCurrentUserWorkspaceInvitation\(/
 );
-assert.match(appSidebar, /pendingInvitationCount/);
-assert.match(appSidebar, /handleAcceptCurrentUserInvitation/);
-assert.match(appSidebar, /listCurrentUserWorkspaceInvitations/);
-assert.match(appSidebar, /acceptCurrentUserWorkspaceInvitation/);
+assert.match(headerNotificationDropdown, /workspaceInvitations/);
+assert.match(headerNotificationDropdown, /acceptSelectedInvitation/);
+assert.match(headerNotificationDropdown, /rejectSelectedInvitation/);
+assert.match(headerNotificationDropdown, /listCurrentUserWorkspaceInvitations/);
+assert.match(headerNotificationDropdown, /acceptCurrentUserWorkspaceInvitation/);
+assert.match(headerNotificationDropdown, /rejectCurrentUserWorkspaceInvitation/);
+assert.doesNotMatch(appSidebar, /pendingInvitationCount/);
+assert.doesNotMatch(appSidebar, /handleOpenInvitations/);
+assert.doesNotMatch(appSidebar, /listCurrentUserWorkspaceInvitations/);
 assert.match(appSidebar, /handleSelectWorkspace/);
-assert.match(appSidebar, /authSession\.refreshSession\(result\.workspace\.id\)/);
+assert.match(
+  headerNotificationDropdown,
+  /authSession\.refreshSession\(result\.workspace\.id\)/
+);
 assert.doesNotMatch(appSidebar, /activeWorkspaceDetail/);
 assert.doesNotMatch(appSidebar, /canManageWorkspace/);
 assert.doesNotMatch(appSidebar, /listWorkspaceMembers/);
@@ -421,8 +444,8 @@ assert.doesNotMatch(appSidebar, /removeWorkspaceMember/);
 assert.doesNotMatch(appSidebar, /handleRemoveWorkspaceMember/);
 assert.doesNotMatch(appSidebar, /handleHideInvitation/);
 assert.doesNotMatch(appSidebar, /findAcceptedInvitationMember/);
-assert.match(appSidebar, /AlertDialogContent/);
-assert.match(appSidebar, /AlertDialogAction/);
+assert.doesNotMatch(appSidebar, /AlertDialogContent/);
+assert.doesNotMatch(appSidebar, /AlertDialogAction/);
 assert.doesNotMatch(appSidebar, /createWorkspaceInvitation/);
 assert.doesNotMatch(appSidebar, /listWorkspaceInvitations/);
 assert.doesNotMatch(appSidebar, /revokeWorkspaceInvitation/);
