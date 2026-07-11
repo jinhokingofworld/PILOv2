@@ -51,4 +51,4 @@ The database schema source of truth is the migration history in `db/migrations/`
 - `migrations/032_create_livekit_webhook_deliveries.sql` adds durable verified LiveKit participant departure webhook delivery records with all-deny RLS.
 - `migrations/033_create_meeting_report_outbox.sql` adds durable MeetingReport SQS delivery intents and retry lease state with all-deny RLS.
 - `migrations/034_repository_scope_github_project_v2_selections.sql` adds the `source` GitHub sync target and scopes ProjectV2 selections to repositories while preserving cache tables and all-deny RLS.
-- `migrations/035_add_github_project_v2_webhook_reconcile_context.sql` adds ProjectV2 webhook delivery context, processing leases, retry attempts, and a runnable-delivery index. It is recorded in Supabase migration history as `20260711230721_add_github_project_v2_webhook_reconcile_context`.
+- `migrations/037_add_github_project_v2_webhook_reconcile_context.sql` adds ProjectV2 webhook delivery context, processing leases, retry attempts, and a runnable-delivery index. It is recorded in Supabase migration history as `20260711230721_037_add_github_project_v2_webhook_reconcile_context`.
