@@ -1,29 +1,36 @@
 import type {
+  CreatePrReviewConflictSuggestionInput,
+  PrReviewConflictFile,
   PrReviewConflictHunk,
-  PrReviewConflictResolvedHunk
+  PrReviewConflictSuggestion
 } from "@/features/pr-review/types";
+import type { PrReviewConflictDraft } from "./pr-review-conflict-drafts";
 
 export type PrReviewConflictResolutionChoice =
   | "ai"
   | "pr"
   | "target"
-  | "both";
+  | "both"
+  | "manual";
 
 export function buildConflictResolutionDraft(input: {
   headContent: string;
   hunks: PrReviewConflictHunk[];
   choices: Record<string, PrReviewConflictResolutionChoice>;
-  aiResolvedHunks: PrReviewConflictResolvedHunk[];
+  acceptedAiResolvedTexts: Record<string, string>;
+  manualResolvedTexts: Record<string, string>;
 }): string {
   const lines = splitContentLines(input.headContent);
-  const aiTextByHunkId = new Map(
-    input.aiResolvedHunks.map((hunk) => [hunk.hunkId, hunk.resolvedText])
-  );
   const replacements = input.hunks
     .flatMap((hunk) => {
       const choice = input.choices[hunk.id];
       const resolvedText = choice
-        ? getResolutionText(hunk, choice, aiTextByHunkId)
+        ? getConflictResolutionText({
+            hunk,
+            choice,
+            acceptedAiResolvedTexts: input.acceptedAiResolvedTexts,
+            manualResolvedTexts: input.manualResolvedTexts
+          })
         : null;
 
       if (resolvedText === null) {
@@ -58,33 +65,110 @@ export function buildConflictResolutionDraft(input: {
 export function isConflictResolutionComplete(input: {
   hunks: PrReviewConflictHunk[];
   choices: Record<string, PrReviewConflictResolutionChoice>;
-  aiResolvedHunks: PrReviewConflictResolvedHunk[];
+  acceptedAiResolvedTexts: Record<string, string>;
+  manualResolvedTexts: Record<string, string>;
 }): boolean {
-  const aiHunkIds = new Set(input.aiResolvedHunks.map((hunk) => hunk.hunkId));
-
   return input.hunks.every((hunk) => {
     const choice = input.choices[hunk.id];
-    return Boolean(choice && (choice !== "ai" || aiHunkIds.has(hunk.id)));
+    if (!choice) {
+      return false;
+    }
+
+    return choice === "ai"
+      ? Object.hasOwn(input.acceptedAiResolvedTexts, hunk.id)
+      : choice === "manual"
+        ? Object.hasOwn(input.manualResolvedTexts, hunk.id)
+        : true;
   });
 }
 
-function getResolutionText(
-  hunk: PrReviewConflictHunk,
-  choice: PrReviewConflictResolutionChoice,
-  aiTextByHunkId: Map<string, string>
-): string | null {
-  switch (choice) {
+export function getConflictResolutionText(input: {
+  hunk: PrReviewConflictHunk;
+  choice: PrReviewConflictResolutionChoice;
+  acceptedAiResolvedTexts: Record<string, string>;
+  manualResolvedTexts: Record<string, string>;
+}): string | null {
+  switch (input.choice) {
     case "ai":
-      return aiTextByHunkId.get(hunk.id) ?? null;
+      return input.acceptedAiResolvedTexts[input.hunk.id] ?? null;
     case "pr":
-      return hunk.incomingText;
+      return input.hunk.incomingText;
     case "target":
-      return hunk.currentText;
+      return input.hunk.currentText;
     case "both":
-      return [hunk.incomingText, hunk.currentText]
+      return [input.hunk.incomingText, input.hunk.currentText]
         .filter((text) => text.length > 0)
         .join("\n");
+    case "manual":
+      return Object.hasOwn(input.manualResolvedTexts, input.hunk.id)
+        ? input.manualResolvedTexts[input.hunk.id]
+        : null;
   }
+}
+
+export function buildPrReviewConflictSuggestionInput(
+  file: PrReviewConflictFile,
+  draft: PrReviewConflictDraft
+): CreatePrReviewConflictSuggestionInput {
+  return {
+    currentDraft: {
+      resolvedContent: draft.resolvedContent,
+      hunks: file.hunks.flatMap((hunk) => {
+        const source = draft.resolutionChoices[hunk.id];
+        if (!source) {
+          return [];
+        }
+        const resolvedText = getConflictResolutionText({
+          hunk,
+          choice: source,
+          acceptedAiResolvedTexts: draft.acceptedAiResolvedTexts,
+          manualResolvedTexts: draft.manualResolvedTexts
+        });
+
+        return resolvedText === null
+          ? []
+          : [{ hunkId: hunk.id, source, resolvedText }];
+      })
+    }
+  };
+}
+
+export function updatePrReviewConflictSuggestion(
+  draft: PrReviewConflictDraft,
+  suggestion: PrReviewConflictSuggestion
+): PrReviewConflictDraft {
+  return {
+    ...draft,
+    suggestion
+  };
+}
+
+export function applyAllPrReviewConflictSuggestion(
+  file: PrReviewConflictFile,
+  draft: PrReviewConflictDraft,
+  suggestion: PrReviewConflictSuggestion
+): PrReviewConflictDraft {
+  const acceptedAiResolvedTexts = Object.fromEntries(
+    suggestion.resolvedHunks.map((hunk) => [hunk.hunkId, hunk.resolvedText])
+  );
+  const resolutionChoices = Object.fromEntries(
+    file.hunks.map((hunk) => [hunk.id, "ai"])
+  ) as Record<string, PrReviewConflictResolutionChoice>;
+
+  return {
+    ...draft,
+    suggestion,
+    acceptedAiResolvedTexts,
+    resolutionChoices,
+    resolvedContent: buildConflictResolutionDraft({
+      headContent: file.headContent,
+      hunks: file.hunks,
+      choices: resolutionChoices,
+      acceptedAiResolvedTexts,
+      manualResolvedTexts: draft.manualResolvedTexts
+    }),
+    isCustomized: false
+  };
 }
 
 function splitContentLines(content: string): string[] {

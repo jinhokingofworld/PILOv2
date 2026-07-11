@@ -4,12 +4,13 @@ import type {
   PrReviewConflictFile,
   PrReviewConflictSuggestion
 } from "@/features/pr-review/types";
-
-type PrReviewConflictResolutionChoice = "ai" | "pr" | "target" | "both";
+import type { PrReviewConflictResolutionChoice } from "./pr-review-conflict-resolution";
 
 export type PrReviewConflictDraft = {
   sourceHeadBlobSha: string;
   resolutionChoices: Record<string, PrReviewConflictResolutionChoice>;
+  acceptedAiResolvedTexts: Record<string, string>;
+  manualResolvedTexts: Record<string, string>;
   suggestion: PrReviewConflictSuggestion | null;
   resolvedContent: string;
   isCustomized: boolean;
@@ -25,6 +26,8 @@ export function createPrReviewConflictDraft(
   return {
     sourceHeadBlobSha: file.headBlobSha,
     resolutionChoices: {},
+    acceptedAiResolvedTexts: {},
+    manualResolvedTexts: {},
     suggestion: null,
     resolvedContent: file.headContent,
     isCustomized: false
@@ -67,12 +70,16 @@ export function isPrReviewConflictDraftReady(
     return false;
   }
 
-  const aiHunkIds = new Set(
-    (draft.suggestion?.resolvedHunks ?? []).map((hunk) => hunk.hunkId)
-  );
   return file.hunks.every((hunk) => {
     const choice = draft.resolutionChoices[hunk.id];
-    return Boolean(choice && (choice !== "ai" || aiHunkIds.has(hunk.id)));
+    if (!choice) {
+      return false;
+    }
+    return choice === "ai"
+      ? Object.hasOwn(draft.acceptedAiResolvedTexts, hunk.id)
+      : choice === "manual"
+        ? Object.hasOwn(draft.manualResolvedTexts, hunk.id)
+        : true;
   });
 }
 

@@ -87,6 +87,7 @@ assert.match(
   prReviewController,
   /@Post\("review-files\/:reviewFileId\/conflict-suggestion"\)/
 );
+assert.match(prReviewController, /@Body\(\) body: unknown/);
 assert.match(
   prReviewController,
   /@Post\("review-files\/:reviewFileId\/conflict-apply"\)/
@@ -209,6 +210,8 @@ assert.match(prReviewService, /supportedTypes: \["content"\]/);
 assert.match(prReviewService, /extractContentConflictHunks/);
 assert.match(prReviewService, /getPullRequestConflictInputs/);
 assert.match(prReviewService, /analysisService\.suggestConflictResolution/);
+assert.match(prReviewService, /normalizeConflictSuggestionCurrentDraft/);
+assert.match(prReviewService, /CONFLICT_SUGGESTION_DRAFT_SOURCES/);
 assert.match(prReviewService, /findReviewFileConflictSuggestionTarget/);
 assert.match(prReviewService, /mapConflictSuggestion/);
 assert.match(prReviewService, /binary conflict is not supported/);
@@ -241,6 +244,8 @@ assert.match(prReviewAnalysisService, /pr_review_conflict_suggestion/);
 assert.match(prReviewAnalysisService, /suggestConflictResolution/);
 assert.match(prReviewAnalysisService, /buildDeterministicConflictSuggestion/);
 assert.match(prReviewAnalysisService, /resolvedHunks/);
+assert.match(prReviewAnalysisService, /currentDraft/);
+assert.match(prReviewAnalysisService, /Treat currentDraft as user work/);
 assert.match(prReviewAnalysisService, /buildResolvedFileContent/);
 assert.match(prReviewAnalysisService, /CONFLICT_MARKER_PATTERN/);
 assert.match(prReviewAnalysisService, /riskLevel/);
@@ -288,6 +293,8 @@ assert.match(prReviewApi, /conflict-suggestion/);
 assert.match(prReviewApi, /conflictSuggestion\.status/);
 assert.match(prReviewApi, /"headContent"/);
 assert.match(prReviewApi, /"resolvedHunks"/);
+assert.match(prReviewApi, /"currentDraft"/);
+assert.match(prReviewApi, /"manual"/);
 assert.match(prReviewApi, /stored": false/);
 assert.match(prReviewApi, /githubCreatedAt/);
 assert.match(prReviewApi, /fileNodeData/);
@@ -302,6 +309,7 @@ assert.match(databaseService, /ROLLBACK/);
 await import("./diff-parser.test.mjs");
 await import("./conflict-analyzer.test.mjs");
 await import("./conflict-resolution.test.mjs");
+await import("./conflict-suggestion-context.test.mjs");
 await import("./conflict-apply.test.mjs");
 await import("./conflict-status-refresh.test.mjs");
 await import("./submission.test.mjs");

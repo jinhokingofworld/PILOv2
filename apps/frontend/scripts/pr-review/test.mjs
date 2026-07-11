@@ -376,5 +376,6 @@ assert.match(prReviewShapeUtils, /PrReviewFlowMilestoneShapeUtil/);
 
 await import("./resolved-code-diff.test.mjs");
 await import("./multi-file-conflict-draft.test.mjs");
+await import("./conflict-hunk-manual.test.mjs");
 await import("./multi-file-conflict-client.test.mjs");
 await import("./oauth-reconnect-client.test.mjs");

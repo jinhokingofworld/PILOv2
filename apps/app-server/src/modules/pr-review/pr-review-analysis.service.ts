@@ -46,6 +46,23 @@ export interface PrReviewConflictSuggestionInput {
   previousFilePath: string | null;
   headContent: string;
   hunks: PrReviewConflictHunkPayload[];
+  currentDraft: PrReviewConflictSuggestionCurrentDraft | null;
+}
+
+export type PrReviewConflictSuggestionDraftSource =
+  | "ai"
+  | "pr"
+  | "target"
+  | "both"
+  | "manual";
+
+export interface PrReviewConflictSuggestionCurrentDraft {
+  resolvedContent: string;
+  hunks: Array<{
+    hunkId: string;
+    source: PrReviewConflictSuggestionDraftSource;
+    resolvedText: string;
+  }>;
 }
 
 export type PrReviewConflictSuggestionValidationStatus = "valid" | "invalid";
@@ -412,7 +429,8 @@ export class PrReviewAnalysisService {
         "Every requested hunkId must appear exactly once.",
         "resolvedText must not contain <<<<<<<, =======, or >>>>>>>.",
         "An empty resolvedText is allowed only when deleting the entire conflict hunk is intentional.",
-        "Prefer preserving both current and incoming intent when they do not contradict each other."
+        "Prefer preserving both current and incoming intent when they do not contradict each other.",
+        "Treat currentDraft as user work that should inform every suggestion. Do not discard manual intent without a clear conflict."
       ],
       file: {
         filePath: input.filePath,
@@ -440,7 +458,23 @@ export class PrReviewAnalysisService {
           hunk.incomingText,
           MAX_CONFLICT_TEXT_CHARS_PER_HUNK
         )
-      }))
+      })),
+      currentDraft: input.currentDraft
+        ? {
+            resolvedContent: this.truncateText(
+              input.currentDraft.resolvedContent,
+              MAX_RESOLVED_CONTENT_CHARS
+            ),
+            hunks: input.currentDraft.hunks.map((hunk) => ({
+              hunkId: hunk.hunkId,
+              source: hunk.source,
+              resolvedText: this.truncateText(
+                hunk.resolvedText,
+                MAX_CONFLICT_TEXT_CHARS_PER_HUNK
+              )
+            }))
+          }
+        : null
     };
   }
 
@@ -625,13 +659,22 @@ export class PrReviewAnalysisService {
   private buildDeterministicConflictSuggestion(
     input: PrReviewConflictSuggestionInput
   ): PrReviewConflictSuggestionDraft {
+    const currentTextByHunkId = new Map(
+      (input.currentDraft?.hunks ?? []).map((hunk) => [
+        hunk.hunkId,
+        hunk.resolvedText
+      ])
+    );
+
     return {
       aiSummary: `${input.filePath}에서 ${input.hunks.length}개 content conflict 구간이 발견되었습니다.`,
       aiSuggestion:
         "Current와 Incoming 변경 의도를 모두 보존하는 초안을 먼저 확인한 뒤, 중복되거나 충돌하는 줄은 사용자가 적용 전에 조정해야 합니다.",
       resolvedHunks: input.hunks.map((hunk) => ({
         hunkId: hunk.id,
-        resolvedText: this.buildDeterministicResolvedHunkText(hunk)
+        resolvedText:
+          currentTextByHunkId.get(hunk.id) ??
+          this.buildDeterministicResolvedHunkText(hunk)
       }))
     };
   }

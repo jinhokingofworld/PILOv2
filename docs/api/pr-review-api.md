@@ -562,8 +562,23 @@ POST /api/v1/workspaces/{workspaceId}/github/review-files/{reviewFileId}/conflic
 요청 body:
 
 ```json
-{}
+{
+  "currentDraft": {
+    "resolvedContent": "const title = 'Voice meeting room';",
+    "hunks": [
+      {
+        "hunkId": "hunk_1",
+        "source": "manual",
+        "resolvedText": "const title = 'Voice meeting room';"
+      }
+    ]
+  }
+}
 ```
+
+`currentDraft`는 선택값이다. 생략하면 기존과 같이 원본 Conflict만 사용해 초안을
+생성한다. 현재 해결 작업이 있으면 파일 전체 코드와 이미 선택하거나 직접 편집한 hunk를
+함께 전달한다. `source`는 `ai`, `pr`, `target`, `both`, `manual` 중 하나다.
 
 응답:
 
@@ -604,6 +619,12 @@ POST /api/v1/workspaces/{workspaceId}/github/review-files/{reviewFileId}/conflic
 - `OPENAI_API_KEY`가 있으면 OpenAI Responses API structured output을 사용하고,
   key 누락/API 실패/응답 검증 실패 시 deterministic fallback 초안을 반환한다.
 - AI output은 사용자가 확인하기 전까지 suggestion으로만 취급한다.
+- `currentDraft`가 있으면 AI는 현재 선택과 수동 수정 내용을 사용자 의도로 취급하고 다른
+  hunk와 함께 검토한다. suggestion 생성만으로 현재 draft나 선택을 변경하지 않는다.
+- `currentDraft.hunks`는 현재 선택이 있는 hunk만 전달할 수 있다. `hunkId`는 요청 시점의
+  Conflict hunk와 일치해야 하고 중복될 수 없다.
+- `currentDraft.resolvedContent`와 각 `resolvedText`는 conflict marker를 포함할 수 없으며
+  파일 적용 크기 제한을 넘을 수 없다. hunk 전체 삭제를 나타내는 빈 `resolvedText`는 허용한다.
 - `resolvedHunks`는 요청 시점에 계산된 모든 conflict hunk를 `hunkId`로 식별하며, 각
   `resolvedText`는 해당 hunk만 대체할 코드다. 코드 전체를 Markdown fence로 감싸지 않는다.
 - 서버는 PR head 파일 원문에 `resolvedHunks`를 뒤쪽 hunk부터 적용해 `resolvedContent`를
