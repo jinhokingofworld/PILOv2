@@ -10,6 +10,7 @@ import { ApiError, badRequest } from "../../common/api-error";
 import { DatabaseService } from "../../database/database.service";
 import { GithubIntegrationConfigService } from "./github-integration-config.service";
 import { GithubProjectV2SyncTokenService } from "./github-project-v2-sync-token.service";
+import { GithubProjectV2WebhookReconcileService } from "./github-project-v2-webhook-reconcile.service";
 import {
   GithubSyncExecutorService,
   type GithubSyncInstallationRow,
@@ -34,10 +35,6 @@ interface SyncJobRow extends QueryResultRow {
   attempt_count: number;
 }
 
-interface DeliveryIdRow extends QueryResultRow {
-  delivery_id: string;
-}
-
 class TerminalSyncJobError extends Error {}
 
 export class GithubSyncJobEnqueueError extends ApiError {
@@ -57,7 +54,8 @@ export class GithubSyncJobService implements OnModuleDestroy {
     private readonly database: DatabaseService,
     private readonly configService: GithubIntegrationConfigService,
     private readonly executor: GithubSyncExecutorService,
-    private readonly tokenService: GithubProjectV2SyncTokenService
+    private readonly tokenService: GithubProjectV2SyncTokenService,
+    private readonly webhookReconcileService: GithubProjectV2WebhookReconcileService
   ) {}
 
   async enqueueSyncJob(syncRunId: string, requestedByUserId: string): Promise<void> {
@@ -132,11 +130,7 @@ export class GithubSyncJobService implements OnModuleDestroy {
   }
 
   async processWebhookDelivery(deliveryId: string): Promise<"terminal" | "retry"> {
-    const result = await this.database.execute(
-      `UPDATE github_webhook_deliveries SET status='processed', processed_at=now(), error_message=NULL
-       WHERE delivery_id=$1 AND status='received'`, [deliveryId]
-    );
-    return (result.rowCount ?? 0) > 0 ? "terminal" : "terminal";
+    return this.webhookReconcileService.processDelivery(deliveryId);
   }
 
   async pollOnce(): Promise<void> {
@@ -160,24 +154,13 @@ export class GithubSyncJobService implements OnModuleDestroy {
   }
 
   private async recoverWebhookOutbox(): Promise<void> {
-    const rows = await this.database.query<DeliveryIdRow>(
-      `SELECT delivery_id FROM github_webhook_deliveries
-       WHERE status = 'failed'
-         AND error_message = 'GitHub webhook could not be enqueued'
-       ORDER BY received_at ASC LIMIT 10`
+    const failures = await this.webhookReconcileService.recoverDeliveries(
+      (deliveryId) => this.enqueueWebhookDelivery(deliveryId)
     );
-    for (const row of rows) {
-      try {
-        await this.enqueueWebhookDelivery(row.delivery_id);
-        await this.database.execute(
-          `UPDATE github_webhook_deliveries
-           SET status='received', processed_at=NULL, error_message=NULL
-           WHERE delivery_id=$1`,
-          [row.delivery_id]
-        );
-      } catch (error) {
-        this.logger.warn(`GitHub webhook delivery ${row.delivery_id} remains queued for recovery: ${this.errorMessage(error)}`);
-      }
+    for (const failure of failures) {
+      this.logger.warn(
+        `GitHub webhook delivery ${failure.deliveryId} remains queued for recovery: ${this.errorMessage(failure.error)}`
+      );
     }
   }
 

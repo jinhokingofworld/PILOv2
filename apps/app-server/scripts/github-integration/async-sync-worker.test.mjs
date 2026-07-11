@@ -123,8 +123,12 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
       return null;
     },
     async execute(text, values) {
-      if (/status='failed'/.test(text)) delivery = { ...delivery, status: "failed", error_message: values[1] };
-      if (/status='received'/.test(text)) delivery = { ...delivery, status: "received", error_message: null, processed_at: null };
+      if (/SET\s+status='failed'/.test(text)) {
+        delivery = { ...delivery, status: "failed", error_message: values[1] };
+      }
+      if (/SET\s+status='received'/.test(text)) {
+        delivery = { ...delivery, status: "received", error_message: null, processed_at: null };
+      }
       return { rowCount: 1 };
     }
   };
@@ -146,14 +150,19 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
     {
       query: async () => [{ delivery_id: "persisted-delivery" }],
       execute: async (text, values) => { writes.push({ text, values }); return { rowCount: 1 }; }
-    }, {}, {}, {}
+    }, {}, {}, {}, {
+      recoverDeliveries: async (enqueueDelivery) => {
+        await enqueueDelivery("persisted-delivery");
+        return [];
+      }
+    }
   );
   const commands = [];
   worker.client = () => ({ send: async (command) => { commands.push(command.constructor.name); return {}; } });
   process.env.SQS_GITHUB_WEBHOOKS_QUEUE_URL = "queue-url";
   await worker.recoverWebhookOutbox();
   assert.deepEqual(commands, ["SendMessageCommand"]);
-  assert.match(writes[0].text, /status='received'/);
+  assert.equal(writes.length, 0, "worker recovery must not update webhook delivery lifecycle state");
 }
 
 console.log("GitHub async sync worker behavioral tests passed");

@@ -17,6 +17,7 @@ import { GithubOAuthIntegrationService } from "./github-oauth-integration.servic
 import { GithubOAuthStateService } from "./github-oauth-state.service";
 import { GithubProjectOAuthIntegrationService } from "./github-project-oauth-integration.service";
 import { GithubProjectV2SyncTokenService } from "./github-project-v2-sync-token.service";
+import { GithubProjectV2WebhookReconcileService } from "./github-project-v2-webhook-reconcile.service";
 import { GithubProjectV2Service } from "./github-project-v2.service";
 import { GithubProjectV2WriteService } from "./github-project-v2-write.service";
 import { GithubPullRequestFileWriteService } from "./github-pull-request-file-write.service";
@@ -57,6 +58,7 @@ import { GithubWebhookService } from "./github-webhook.service";
     GithubSourceReadService,
     GithubSyncExecutorService,
     GithubSyncJobService,
+    GithubProjectV2WebhookReconcileService,
     GithubSyncRunService,
     GithubTokenEncryptionService,
     GithubWebhookService
