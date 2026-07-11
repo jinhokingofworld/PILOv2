@@ -1,4 +1,4 @@
-import { HttpStatus, Injectable } from "@nestjs/common";
+import { HttpStatus, Injectable, Logger } from "@nestjs/common";
 import { QueryResultRow } from "pg";
 import {
   ApiError,
@@ -345,6 +345,8 @@ const UUID_PATTERN =
 
 @Injectable()
 export class MeetingService {
+  private readonly logger = new Logger(MeetingService.name);
+
   constructor(
     private readonly database: DatabaseService,
     private readonly workspaceService: WorkspaceService,
@@ -1923,7 +1925,7 @@ export class MeetingService {
 
     try {
       await this.enqueueMeetingReportJob(job);
-      await this.database.execute(
+      const outbox = await this.database.queryOne<{ id: string }>(
         `
           UPDATE meeting_report_outbox
           SET
@@ -1934,11 +1936,20 @@ export class MeetingService {
             updated_at = now()
           WHERE report_id = $1
             AND status = 'pending'
+          RETURNING id
         `,
         [job.reportId]
       );
+      if (outbox !== null) {
+        this.logger.log(
+          `MeetingReport outbox event=fast_path_delivered outbox_id=${outbox.id} report_id=${job.reportId} meeting_id=${job.meetingId} recording_id=${job.recordingId}`
+        );
+      }
     } catch {
       // Keep the committed pending intent for MP-05 dispatcher retry.
+      this.logger.warn(
+        `MeetingReport outbox event=fast_path_pending report_id=${job.reportId} meeting_id=${job.meetingId} recording_id=${job.recordingId} failure_step=none`
+      );
     }
   }
 

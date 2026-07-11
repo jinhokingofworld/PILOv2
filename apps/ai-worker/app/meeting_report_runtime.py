@@ -54,6 +54,14 @@ AGENT_RETRY_EXHAUSTED_ERROR_CODE = "AGENT_PLANNER_RETRY_EXHAUSTED"
 PR_REVIEW_ANALYSIS_RETRY_TERMINAL_RECEIVE_COUNT = 3
 AGENT_RETRY_EXHAUSTED_ERROR_MESSAGE = "요청을 분석하지 못했습니다. 잠시 후 다시 시도해주세요."
 LOCAL_APP_ENVS = {"local", "test", "development"}
+MEETING_REPORT_FAILURE_STEPS = {
+    "recording_not_completed": "STT",
+    "audio_key_mismatch": "STT",
+    "audio_unavailable": "STT",
+    "audio_too_large": "STT",
+    "stt_failed": "STT",
+    "llm_failed": "LLM",
+}
 
 
 @dataclass(frozen=True)
@@ -669,15 +677,43 @@ class SqsAiJobWorker:
         for message in messages:
             body = message.get("Body", "")
             receipt_handle = message.get("ReceiptHandle")
+            meeting_correlation = _meeting_report_correlation(body)
+            if meeting_correlation is not None:
+                LOGGER.info(
+                    "meeting report job event=received report_id=%s meeting_id=%s "
+                    "recording_id=%s retry_count=%s sqs_message_id=%s receive_count=%s",
+                    meeting_correlation["report_id"],
+                    meeting_correlation["meeting_id"],
+                    meeting_correlation["recording_id"],
+                    meeting_correlation["retry_count"],
+                    message.get("MessageId"),
+                    self._receive_count(message),
+                )
             result = self.dispatcher.process_message(body)
 
-            LOGGER.info(
-                "ai job result job_type=%s reason=%s resource_id=%s message_id=%s",
-                result.job_type,
-                result.reason,
-                result.resource_id,
-                message.get("MessageId"),
-            )
+            if meeting_correlation is not None:
+                LOGGER.info(
+                    "meeting report job event=processed report_id=%s meeting_id=%s "
+                    "recording_id=%s retry_count=%s reason=%s failure_step=%s "
+                    "delete_message=%s sqs_message_id=%s receive_count=%s",
+                    meeting_correlation["report_id"],
+                    meeting_correlation["meeting_id"],
+                    meeting_correlation["recording_id"],
+                    meeting_correlation["retry_count"],
+                    result.reason,
+                    MEETING_REPORT_FAILURE_STEPS.get(result.reason, "none"),
+                    result.delete_message,
+                    message.get("MessageId"),
+                    self._receive_count(message),
+                )
+            else:
+                LOGGER.info(
+                    "ai job result job_type=%s reason=%s resource_id=%s message_id=%s",
+                    result.job_type,
+                    result.reason,
+                    result.resource_id,
+                    message.get("MessageId"),
+                )
             should_delete = (
                 result.delete_message
                 or self._terminalize_agent_retry(result, message)
@@ -913,6 +949,39 @@ def run_worker() -> None:
 def _advisory_lock_key(value: str) -> int:
     digest = hashlib.sha256(value.encode("utf-8")).digest()
     return int.from_bytes(digest[:8], byteorder="big", signed=True)
+
+
+def _meeting_report_correlation(message_body: object) -> dict[str, str | int] | None:
+    if not isinstance(message_body, str):
+        return None
+
+    try:
+        payload = json.loads(message_body)
+    except json.JSONDecodeError:
+        return None
+
+    if not isinstance(payload, dict) or payload.get("jobType") != "meeting_report":
+        return None
+
+    report_id = payload.get("reportId")
+    meeting_id = payload.get("meetingId")
+    recording_id = payload.get("recordingId")
+    retry_count = payload.get("retryCount")
+    if (
+        not isinstance(report_id, str)
+        or not isinstance(meeting_id, str)
+        or not isinstance(recording_id, str)
+        or not isinstance(retry_count, int)
+        or isinstance(retry_count, bool)
+    ):
+        return None
+
+    return {
+        "report_id": report_id,
+        "meeting_id": meeting_id,
+        "recording_id": recording_id,
+        "retry_count": retry_count,
+    }
 
 
 def _env(key: str, default: str) -> str:

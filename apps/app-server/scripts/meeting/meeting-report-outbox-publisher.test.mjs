@@ -151,7 +151,12 @@ class FakeMeetingReportJobService {
 
 {
   const database = new FakeOutboxDatabase({
-    recoveryCandidates: [{ id: claim.report_id }]
+    recoveryCandidates: [{
+      id: claim.report_id,
+      meeting_id: claim.meeting_id,
+      recording_id: claim.recording_id,
+      outbox_id: claim.id
+    }]
   });
   const recovery = new MeetingReportOutboxRecoveryService(database);
 
@@ -171,7 +176,12 @@ class FakeMeetingReportJobService {
 
 {
   const database = new FakeOutboxDatabase({
-    recoveryCandidates: [{ id: claim.report_id }],
+    recoveryCandidates: [{
+      id: claim.report_id,
+      meeting_id: claim.meeting_id,
+      recording_id: claim.recording_id,
+      outbox_id: claim.id
+    }],
     lockAcquired: false
   });
   const recovery = new MeetingReportOutboxRecoveryService(database);

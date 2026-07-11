@@ -28,8 +28,13 @@ export class MeetingReportOutboxRecoveryService implements OnModuleInit, OnModul
 
   async recoverStaleReports(): Promise<number> {
     const recovered = await this.database.transaction(async transaction => {
-      const candidates = await transaction.query<{ id: string }>(
-        `SELECT report.id
+      const candidates = await transaction.query<{
+        id: string;
+        meeting_id: string;
+        recording_id: string;
+        outbox_id: string;
+      }>(
+        `SELECT report.id, report.meeting_id, report.recording_id, outbox.id AS outbox_id
          FROM meeting_reports AS report
          JOIN meeting_report_outbox AS outbox ON outbox.report_id = report.id
          WHERE report.status = 'PROCESSING'
@@ -52,7 +57,12 @@ export class MeetingReportOutboxRecoveryService implements OnModuleInit, OnModul
             `UPDATE meeting_reports SET status = 'FAILED', failed_step = 'STT', error_message = 'Meeting report processing timed out', updated_at = now()
              WHERE id = $1 AND status = 'PROCESSING' RETURNING id`, [candidate.id]
           );
-          if (report) count += 1;
+          if (report) {
+            count += 1;
+            this.logger.warn(
+              `MeetingReport outbox event=stale_report_failed outbox_id=${candidate.outbox_id} report_id=${candidate.id} meeting_id=${candidate.meeting_id} recording_id=${candidate.recording_id} failure_step=STT`
+            );
+          }
         } finally {
           await transaction.execute("SELECT pg_advisory_unlock($1::bigint)", [lockKey]);
         }
