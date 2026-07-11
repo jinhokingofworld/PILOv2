@@ -215,6 +215,26 @@ function createService(database, github) {
 }
 
 {
+  const database = new FakeDatabase(
+    jobRow({ status: "failed", session_status: "failed" })
+  );
+  const github = new FakeGithubDependency();
+  const result = await createService(database, github).storeAnalysisJobResult(
+    JOB_ID,
+    resultBody()
+  );
+
+  assert.deepEqual(result, {
+    reviewSessionId: SESSION_ID,
+    status: "failed",
+    persisted: false
+  });
+  assert.equal(database.transactionCalls, 0);
+  assert.deepEqual(github.detailCalls, []);
+  assert.deepEqual(github.fileCalls, []);
+}
+
+{
   const database = new FakeDatabase(jobRow());
   const github = new FakeGithubDependency({ headSha: "different-head" });
   const result = await createService(database, github).storeAnalysisJobResult(

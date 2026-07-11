@@ -942,6 +942,24 @@ export class PrReviewService {
       throw badRequest("PR Review analysis job has no requesting user");
     }
 
+    const claimedJob = await this.database.queryOne<{ id: string }>(
+      `
+        UPDATE pr_review_analysis_jobs
+        SET status = 'processing',
+            published_at = COALESCE(published_at, now()),
+            publish_claim_token = NULL,
+            publish_claimed_at = NULL
+        WHERE id = $1
+          AND status IN ('publishing', 'queued', 'processing')
+        RETURNING id
+      `,
+      [job.id]
+    );
+
+    if (!claimedJob) {
+      throw conflictError("PR Review analysis job is no longer active");
+    }
+
     const [detail, files] = await Promise.all([
       this.githubDependency.getPullRequestDetail(
         job.created_by_user_id,
