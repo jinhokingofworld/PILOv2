@@ -5,7 +5,6 @@ import {
   useCallback,
   useRef,
   useState,
-  type MouseEvent,
   type MutableRefObject,
   type PointerEvent,
 } from "react";
@@ -20,7 +19,6 @@ import {
   type TLShapePartial,
   useEditor,
 } from "tldraw";
-import { Bot } from "lucide-react";
 import { useValue } from "@tldraw/state-react";
 import { useCanvasAgent } from "@/features/canvas/agent/use-canvas-agent";
 import { TldrawSurface } from "@/shared/tldraw";
@@ -130,6 +128,7 @@ export type PiloDrawingPreset =
 
 export type PiloCanvasActions = {
   markUiEventAsHandled: (event: PointerEvent<HTMLElement>) => void;
+  openCanvasAiChat: (anchor: CanvasAiChatAnchor) => void;
   selectTool: (tool: PiloCanvasTool) => void;
   selectDrawingPreset: (preset: PiloDrawingPreset) => void;
   setColor: (color: PiloCanvasColor) => void;
@@ -648,6 +647,13 @@ export function PiloTldrawCanvas({
         editor.markEventAsHandled(event);
         event.stopPropagation();
       },
+      openCanvasAiChat(anchor) {
+        placementRequestRef.current = null;
+        returnToSelectAfterPlacementRef.current = false;
+        editor.cancel();
+        editor.setCurrentTool("select.idle");
+        openCanvasAiChatAt(anchor);
+      },
       selectTool(tool) {
         placementRequestRef.current = null;
         returnToSelectAfterPlacementRef.current =
@@ -1044,7 +1050,7 @@ export function PiloTldrawCanvas({
   function handleCanvasPointerDownCapture(event: PointerEvent<HTMLDivElement>) {
     if (
       event.target instanceof Element &&
-      event.target.closest(".canvas-ai-chat, .canvas-ai-tool")
+      event.target.closest(".canvas-ai-chat")
     ) {
       return;
     }
@@ -1125,6 +1131,11 @@ export function PiloTldrawCanvas({
     editor.setCurrentTool("select");
     editor.select(frameShape.id);
     requestShapeDetail(editor, frameShape.id);
+
+    if (!frameShape.isLocked) {
+      return;
+    }
+
     event.preventDefault();
     event.stopPropagation();
   }
@@ -1185,19 +1196,12 @@ export function PiloTldrawCanvas({
     setCanvasAiChatHoldProgress(null);
   }
 
-  function openCanvasAiChatFromButton(
-    event: MouseEvent<HTMLButtonElement>,
-  ) {
-    const buttonBounds = event.currentTarget.getBoundingClientRect();
-
+  function openCanvasAiChatAt(anchor: CanvasAiChatAnchor) {
     cancelCanvasAiChatHold();
     setCanvasAiChatAnchor((currentAnchor) => {
       if (currentAnchor) return null;
 
-      return {
-        x: buttonBounds.left + buttonBounds.width / 2,
-        y: buttonBounds.top + buttonBounds.height,
-      };
+      return anchor;
     });
   }
 
@@ -1242,15 +1246,6 @@ export function PiloTldrawCanvas({
           onFrameCollapsedChange={handleFrameCollapsedChange}
         />
       </TldrawSurface>
-      <button
-        aria-label="Canvas AI 채팅 열기"
-        className="canvas-ai-tool absolute right-4 top-4 z-50"
-        data-canvas-agent-target="toolbar.canvas_ai"
-        onClick={openCanvasAiChatFromButton}
-        type="button"
-      >
-        <Bot className="size-5" />
-      </button>
       <CanvasAiChatOverlay
         anchor={canvasAiChatAnchor}
         draft={canvasAgent.draft}
@@ -1266,6 +1261,7 @@ export function PiloTldrawCanvas({
       <CanvasAgentVisualOverlay
         draft={canvasAgent.draft}
         editor={canvasEditor}
+        playbackEnabled={canvasAgent.presentationMode !== "background"}
         progress={canvasAgent.progress}
       />
     </div>

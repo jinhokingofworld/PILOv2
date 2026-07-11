@@ -246,6 +246,12 @@ connect step -> move the private pointer to the generated relationship area
 This animation is local preview/progress only. The actual Canvas mutation still
 happens only when the requester applies the draft.
 
+When `presentationMode` is `background`, the server may still store the same
+draft and derived `toolSteps` for traceability, but clients must not play the
+private Canvas pointer/tool animation. This mode is intended for delegated PILO
+AI requests from outside the Canvas surface where the user should receive the
+Canvas AI final answer without seeing Canvas-local pointer movement.
+
 ## Existing shape connection contract
 
 `connect_shapes` is for connecting two shapes that already exist on the Canvas.
@@ -382,6 +388,7 @@ Request:
     "width": 1440,
     "height": 900
   },
+  "presentationMode": "interactive",
   "toolHelpMode": false,
   "clientRequestId": "canvas-ai-20260710-0001"
 }
@@ -392,6 +399,7 @@ Request:
 | `prompt` | Yes | Trimmed user request, 1 to 32768 bytes. |
 | `selectedShapeIds` | No | Current Canvas selection. Every id must belong to the path Canvas. |
 | `viewport` | No | Current visible Canvas bounds used only to create minimal planning context. |
+| `presentationMode` | No | `interactive` shows requester-only progress, pointer, and `toolSteps` playback on the Canvas surface. `background` creates the run/draft without Canvas pointer playback. Defaults to `interactive`. |
 | `toolHelpMode` | No | When `true`, route the prompt to the built-in Canvas toolbar/help dictionary instead of Canvas content search or planner routing. Defaults to `false`. |
 | `clientRequestId` | No | Stable retry idempotency key, up to 128 bytes. |
 
@@ -419,6 +427,7 @@ Response: `202 Accepted`
       "id": "canvas_agent_run_uuid",
       "workspaceId": "workspace_uuid",
       "canvasId": "canvas_uuid",
+      "presentationMode": "interactive",
       "status": "queued",
       "prompt": "선택한 메모를 발표용 흐름도로 정리해줘",
       "message": "Canvas AI 요청을 준비하고 있습니다.",
@@ -450,6 +459,7 @@ resource ids, not raw shape payloads or AI provider output.
       "id": "canvas_agent_run_uuid",
       "workspaceId": "workspace_uuid",
       "canvasId": "canvas_uuid",
+      "presentationMode": "interactive",
       "status": "draft_ready",
       "prompt": "선택한 메모를 발표용 흐름도로 정리해줘",
       "summary": "메모 2개를 발표용 흐름도 초안으로 정리했습니다.",

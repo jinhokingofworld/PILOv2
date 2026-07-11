@@ -5,6 +5,8 @@ export type CanvasAgentViewport = {
   height: number;
 };
 
+export type CanvasAgentPresentationMode = "interactive" | "background";
+
 export type CanvasAgentProgress = {
   message: string;
   highlightedShapeIds: string[];
@@ -17,6 +19,7 @@ export type CanvasAgentRun = {
   id: string;
   workspaceId: string;
   canvasId: string;
+  presentationMode: CanvasAgentPresentationMode;
   status:
     | "queued"
     | "planning"

@@ -19,10 +19,12 @@ import {
 export function CanvasAgentVisualOverlay({
   draft,
   editor,
+  playbackEnabled = true,
   progress,
 }: {
   draft: CanvasAgentDraft | null;
   editor: Editor | null;
+  playbackEnabled?: boolean;
   progress: CanvasAgentProgress | null;
 }) {
   const camera = useValue(
@@ -30,7 +32,7 @@ export function CanvasAgentVisualOverlay({
     () => editor?.getCamera() ?? { x: 0, y: 0, z: 1 },
     [editor],
   );
-  const playback = useCanvasAgentToolStepPlayback(draft);
+  const playback = useCanvasAgentToolStepPlayback(playbackEnabled ? draft : null);
   const activeToolTarget = playback.activeStep
     ? playback.activeStep.kind === "tool"
       ? playback.activeStep.toolTarget ?? null

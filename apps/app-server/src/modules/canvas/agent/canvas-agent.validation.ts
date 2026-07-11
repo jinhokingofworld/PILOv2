@@ -1,5 +1,6 @@
 import { badRequest } from "../../../common/api-error";
 import type {
+  CanvasAgentPresentationMode,
   CanvasAgentRequestContext,
   CanvasAgentViewport,
   CreateCanvasAgentRunRequest
@@ -25,6 +26,7 @@ export function validateCanvasAgentRunRequest(
     clientRequestId: validateClientRequestId(input.clientRequestId),
     toolHelpMode: input.toolHelpMode === true,
     context: {
+      presentationMode: validatePresentationMode(input.presentationMode),
       selectedShapeIds: validateSelectedShapeIds(input.selectedShapeIds),
       viewport: validateViewport(input.viewport)
     }
@@ -72,6 +74,12 @@ function validateSelectedShapeIds(value: unknown): string[] {
   });
 
   return Array.from(new Set(ids));
+}
+
+function validatePresentationMode(value: unknown): CanvasAgentPresentationMode {
+  if (value === undefined || value === null || value === "") return "interactive";
+  if (value === "interactive" || value === "background") return value;
+  throw badRequest("Canvas Agent presentationMode must be either interactive or background");
 }
 
 function validateViewport(value: unknown): CanvasAgentViewport | null {
