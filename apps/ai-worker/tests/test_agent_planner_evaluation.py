@@ -97,6 +97,7 @@ def test_evaluate_suite_scores_normalized_planner_output(tmp_path) -> None:
     assert [result.passed for result in results] == [True, True]
     assert planner.requests[0].current_date == "2026-07-11"
     assert report["passedCases"] == 2
+    assert report["totalAttempts"] == 2
     assert report["toolSelectionAccuracy"] == 1.0
     assert report["requiredInputAccuracy"] == 1.0
     assert report["results"][0]["classification"] == "exact"
@@ -128,6 +129,43 @@ def test_evaluate_suite_reports_input_and_confirmation_mismatches(tmp_path) -> N
     assert build_evaluation_report((result,))["results"][0]["classification"] == "partial"
 
 
+def test_evaluate_suite_repetitions_reports_flaky_cases(tmp_path) -> None:
+    suite = load_evaluation_suite(
+        write_suite(
+            tmp_path,
+            [
+                {
+                    "id": "repeat",
+                    "prompt": "오늘 일정 보여줘",
+                    "expected": {
+                        "status": "tool_candidate",
+                        "toolName": "list_calendar_events",
+                    },
+                }
+            ],
+        )
+    )
+    results = evaluate_suite(
+        FakePlanner(
+            [
+                decision(),
+                decision(status="unsupported", tool_name=None, tool_input={}),
+            ]
+        ),
+        suite,
+        current_date="2026-07-08",
+        repetitions=2,
+    )
+    report = build_evaluation_report(results)
+
+    assert [result.attempt for result in results] == [1, 2]
+    assert report["totalCases"] == 1
+    assert report["totalAttempts"] == 2
+    assert report["passedCases"] == 0
+    assert report["flakyCaseIds"] == ["repeat"]
+    assert report["caseSummaries"][0]["exactRate"] == 0.5
+
+
 def test_load_evaluation_suite_rejects_duplicate_case_ids(tmp_path) -> None:
     path = write_suite(
         tmp_path,
@@ -151,7 +189,7 @@ def test_fixed_korean_suite_loads() -> None:
     suite = load_evaluation_suite(suite_path)
 
     assert suite.version == "agent-planner-korean:v1"
-    assert len(suite.cases) == 22
+    assert len(suite.cases) == 30
     assert {tool.name for tool in suite.job.tools} == {
         "list_calendar_events",
         "create_calendar_event",
@@ -162,10 +200,14 @@ def test_fixed_korean_suite_loads() -> None:
     }
     expectations = {case.case_id: case.expectation for case in suite.cases}
     assert expectations["calendar_today"].input_contains == {
-        "start": "2026-07-11",
-        "end": "2026-07-11",
+        "start": "2026-07-08",
+        "end": "2026-07-08",
     }
     assert expectations["calendar_next_monday"].input_contains == {
         "start": "2026-07-13",
         "end": "2026-07-13",
+    }
+    assert expectations["calendar_this_sunday"].input_contains == {
+        "start": "2026-07-12",
+        "end": "2026-07-12",
     }

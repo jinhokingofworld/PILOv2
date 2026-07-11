@@ -11,9 +11,13 @@ confirmation 승인은 수행하지 않는다.
 ```bash
 cd apps/ai-worker
 OPENAI_API_KEY=... PYTHONPATH=. .venv/bin/python scripts/evaluate_agent_planner.py \
-  --current-date 2026-07-11 > agent-planner-evaluation.json
+  --current-date 2026-07-08 --repetitions 5 > agent-planner-evaluation.json
 ```
 
 결과의 `passedCases`, `statusAccuracy`, `toolSelectionAccuracy`, `requiredInputAccuracy`,
 `confirmationAccuracy`, `clarificationAccuracy`를 기준선으로 기록한다. 같은 `--current-date`와
 동일한 평가셋으로 재실행해야 전후 결과를 비교할 수 있다.
+
+기준선은 30개 case를 각각 5회 실행한다. 결과 JSON의 `metadata`, case별 `exactRate`,
+`flakyCaseIds`, `failureCategoryCandidates`와 모든 비정확 결과를 함께 검토한다. 이 평가는
+Planner 판단만 측정하며, 배포된 dev의 SQS·handoff·tool execution E2E는 별도 #723에서 검증한다.
