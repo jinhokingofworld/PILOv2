@@ -1,0 +1,93 @@
+{
+  "version": "agent-planner-korean:v1",
+  "toolSchemaVersion": "agent-tools:v1",
+  "tools": [
+    {
+      "name": "list_calendar_events",
+      "description": "Calendar 일정 목록을 날짜 범위 기준으로 조회합니다.",
+      "riskLevel": "low",
+      "executionMode": "auto",
+      "inputSchema": {
+        "type": "object",
+        "required": ["start", "end"],
+        "additionalProperties": false,
+        "properties": {"start": {"type": "string", "format": "date", "description": "조회 시작일. YYYY-MM-DD"}, "end": {"type": "string", "format": "date", "description": "조회 종료일. YYYY-MM-DD"}}
+      }
+    },
+    {
+      "name": "create_calendar_event",
+      "description": "Calendar 일정을 생성합니다. 실행 전 confirmation이 필요합니다.",
+      "riskLevel": "medium",
+      "executionMode": "confirmation_required",
+      "inputSchema": {
+        "type": "object",
+        "required": ["title", "startDate", "endDate"],
+        "additionalProperties": false,
+        "properties": {
+          "title": {"type": "string", "maxLength": 255}, "description": {"type": ["string", "null"]}, "color": {"type": "string", "pattern": "^#[0-9a-fA-F]{6}$"}, "isAllDay": {"type": "boolean"}, "startDate": {"type": "string", "format": "date"}, "endDate": {"type": "string", "format": "date"}, "startTime": {"type": ["string", "null"], "pattern": "^([01]\\d|2[0-3]):([0-5]\\d)$"}, "endTime": {"type": ["string", "null"], "pattern": "^([01]\\d|2[0-3]):([0-5]\\d)$"}
+        }
+      }
+    },
+    {
+      "name": "update_calendar_event",
+      "description": "Calendar 일정을 eventId와 변경값으로 수정합니다. 현재값은 서버가 조회하며 실행 전 confirmation이 필요합니다.",
+      "riskLevel": "medium",
+      "executionMode": "confirmation_required",
+      "inputSchema": {
+        "type": "object",
+        "required": ["eventId", "changes"],
+        "additionalProperties": false,
+        "properties": {"eventId": {"type": "string", "pattern": "^[1-9][0-9]*$"}, "changes": {"type": "object", "minProperties": 1}}
+      }
+    },
+    {
+      "name": "list_meeting_reports",
+      "description": "Workspace MeetingReport 목록을 최신 생성 시각 순으로 조회합니다. 최신 회의록 결과가 필요하면 limit을 1로 설정합니다.",
+      "riskLevel": "low",
+      "executionMode": "auto",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {"status": {"type": "string", "enum": ["PROCESSING", "COMPLETED", "FAILED"]}, "limit": {"type": "integer", "minimum": 1, "maximum": 100}}
+      }
+    },
+    {
+      "name": "get_meeting_report",
+      "description": "MeetingReport 상세를 Agent용 보고서 projection으로 조회합니다.",
+      "riskLevel": "low",
+      "executionMode": "auto",
+      "inputSchema": {"type": "object", "required": ["reportId"], "additionalProperties": false, "properties": {"reportId": {"type": "string", "format": "uuid"}}}
+    },
+    {
+      "name": "summarize_meeting_report",
+      "description": "MeetingReport를 Agent가 소비할 수 있는 sections/actionItems projection으로 요약합니다.",
+      "riskLevel": "low",
+      "executionMode": "auto",
+      "inputSchema": {"type": "object", "required": ["reportId"], "additionalProperties": false, "properties": {"reportId": {"type": "string", "format": "uuid"}}}
+    }
+  ],
+  "cases": [
+    {"id": "calendar_today", "prompt": "오늘 일정 보여줘", "expected": {"status": "tool_candidate", "toolName": "list_calendar_events", "inputContains": {"start": "2026-07-11", "end": "2026-07-11"}, "requiresConfirmation": false}},
+    {"id": "calendar_tomorrow", "prompt": "내일 일정 알려줘", "expected": {"status": "tool_candidate", "toolName": "list_calendar_events", "inputContains": {"start": "2026-07-12", "end": "2026-07-12"}, "requiresConfirmation": false}},
+    {"id": "calendar_this_week", "prompt": "이번 주 일정 보여줘", "expected": {"status": "tool_candidate", "toolName": "list_calendar_events", "inputContains": {"start": "2026-07-06", "end": "2026-07-12"}, "requiresConfirmation": false}},
+    {"id": "calendar_next_monday", "prompt": "다음 주 월요일 일정 보여줘", "expected": {"status": "tool_candidate", "toolName": "list_calendar_events", "inputContains": {"start": "2026-07-13", "end": "2026-07-13"}, "requiresConfirmation": false}},
+    {"id": "calendar_explicit_range", "prompt": "2026년 7월 20일부터 22일까지 일정 보여줘", "expected": {"status": "tool_candidate", "toolName": "list_calendar_events", "inputContains": {"start": "2026-07-20", "end": "2026-07-22"}, "requiresConfirmation": false}},
+    {"id": "calendar_create_timed", "prompt": "7월 14일 오후 3시에 디자인 리뷰 일정 만들어줘", "expected": {"status": "tool_candidate", "toolName": "create_calendar_event", "inputContains": {"title": "디자인 리뷰", "startDate": "2026-07-14", "endDate": "2026-07-14", "startTime": "15:00"}, "requiresConfirmation": true}},
+    {"id": "calendar_create_all_day", "prompt": "7월 18일 워크숍 일정 만들어줘", "expected": {"status": "tool_candidate", "toolName": "create_calendar_event", "inputContains": {"title": "워크숍", "startDate": "2026-07-18", "endDate": "2026-07-18"}, "requiresConfirmation": true}},
+    {"id": "calendar_create_missing_date", "prompt": "디자인 리뷰 일정 만들어줘", "expected": {"status": "needs_clarification", "missingFields": ["startDate", "endDate"]}},
+    {"id": "calendar_create_missing_title", "prompt": "내일 오후 3시에 일정 만들어줘", "expected": {"status": "needs_clarification", "missingFields": ["title"]}},
+    {"id": "calendar_update", "prompt": "일정 42번을 내일 오후 4시로 바꿔줘", "expected": {"status": "tool_candidate", "toolName": "update_calendar_event", "inputContains": {"eventId": "42"}, "requiresConfirmation": true}},
+    {"id": "calendar_update_missing_id", "prompt": "내일 오후 4시로 일정 바꿔줘", "expected": {"status": "needs_clarification", "missingFields": ["eventId"]}},
+    {"id": "meeting_latest", "prompt": "가장 최신 회의록을 보여줘", "expected": {"status": "tool_candidate", "toolName": "list_meeting_reports", "inputContains": {"limit": 1}, "requiresConfirmation": false}},
+    {"id": "meeting_recent", "prompt": "최근 회의록 목록 보여줘", "expected": {"status": "tool_candidate", "toolName": "list_meeting_reports", "requiresConfirmation": false}},
+    {"id": "meeting_completed", "prompt": "완료된 회의록만 보여줘", "expected": {"status": "tool_candidate", "toolName": "list_meeting_reports", "inputContains": {"status": "COMPLETED"}, "requiresConfirmation": false}},
+    {"id": "meeting_processing", "prompt": "처리 중인 회의록 보여줘", "expected": {"status": "tool_candidate", "toolName": "list_meeting_reports", "inputContains": {"status": "PROCESSING"}, "requiresConfirmation": false}},
+    {"id": "meeting_detail_without_id", "prompt": "지난 회의록 상세를 보여줘", "expected": {"status": "unsupported"}},
+    {"id": "meeting_summary_without_id", "prompt": "지난 회의록 요약해줘", "expected": {"status": "unsupported"}},
+    {"id": "meeting_detail_with_id", "prompt": "회의록 123e4567-e89b-12d3-a456-426614174000 상세 보여줘", "expected": {"status": "tool_candidate", "toolName": "get_meeting_report", "inputContains": {"reportId": "123e4567-e89b-12d3-a456-426614174000"}, "requiresConfirmation": false}},
+    {"id": "meeting_summary_with_id", "prompt": "회의록 123e4567-e89b-12d3-a456-426614174000 요약해줘", "expected": {"status": "tool_candidate", "toolName": "summarize_meeting_report", "inputContains": {"reportId": "123e4567-e89b-12d3-a456-426614174000"}, "requiresConfirmation": false}},
+    {"id": "unsupported_board", "prompt": "Board에서 내 이슈 검색해줘", "expected": {"status": "unsupported"}},
+    {"id": "unsupported_pr_review", "prompt": "이 PR을 리뷰해줘", "expected": {"status": "unsupported"}},
+    {"id": "unsupported_delete", "prompt": "내일 일정을 삭제해줘", "expected": {"status": "unsupported"}}
+  ]
+}
