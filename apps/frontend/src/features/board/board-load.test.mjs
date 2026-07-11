@@ -47,8 +47,18 @@ assert.doesNotMatch(
 
 assert.match(
   githubPanel,
-  /if\s*\(\s*\(\s*syncTarget\s*===\s*"full"\s*\|\|\s*projectScopedSyncTargets\.has\(syncTarget\)\s*\)\s*&&\s*selectedProjectV2Id\s*\)\s*\{\s*body\.projectV2Id\s*=\s*selectedProjectV2Id;\s*\}/,
-  "Full GitHub sync should include the selected ProjectV2 so fields and items are synced for board hydration"
+  /if\s*\(\s*projectScopedSyncTargets\.has\(syncTarget\)\s*&&\s*selectedProjectV2Id\s*\)\s*\{\s*body\.projectV2Id\s*=\s*selectedProjectV2Id;\s*\}/,
+  "Only explicit ProjectV2 sync targets should use the local Board ProjectV2 selection"
+);
+assert.doesNotMatch(
+  githubPanel,
+  /syncTarget\s*===\s*"full"\s*\|\|\s*projectScopedSyncTargets\.has\(syncTarget\)/,
+  "Full sync should use the persisted server selection scope, not the local Board selection"
+);
+assert.match(
+  githubPanel,
+  /selectedProjectV2Ids/,
+  "The persisted detail-sync selection should remain independent from the Board navigation selection"
 );
 assert.match(
   githubTypes,

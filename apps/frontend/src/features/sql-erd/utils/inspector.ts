@@ -7,7 +7,9 @@ import type {
 import {
   getRelationEndpoints,
   getTableDisplayName,
+  inferSqlErdRelationCardinality,
   type SqltoerdModelIndex,
+  type SqlErdRelationCardinalityEndpoints,
   type SqltoerdRelationEndpoints
 } from "./model";
 
@@ -37,6 +39,7 @@ export type SqlErdInspectorViewModel =
     }
   | {
       type: "relation";
+      cardinality: SqlErdRelationCardinalityEndpoints | null;
       endpoints: SqltoerdRelationEndpoints | null;
       relation: ErdRelation;
       title: string;
@@ -97,6 +100,7 @@ export function createSqlErdInspectorViewModel(
 
     return {
       type: "relation",
+      cardinality: inferSqlErdRelationCardinality(relation, modelIndex),
       endpoints: getRelationEndpoints(relation, modelIndex),
       relation,
       title: relation.constraintName ?? relation.id

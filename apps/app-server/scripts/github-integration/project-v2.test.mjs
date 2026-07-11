@@ -96,6 +96,7 @@ function projectRow(overrides = {}) {
     github_updated_at: "2026-07-01T14:30:00.000Z",
     github_closed_at: null,
     last_synced_at: "2026-07-02T05:20:00.000Z",
+    selected: false,
     raw: { viewerCanUpdate: false },
     ...overrides
   };
@@ -223,6 +224,7 @@ function assertNoSecretLookup(database) {
         closed: false,
         template: false,
         repositoryIds: [],
+        selected: false,
         lastSyncedAt: "2026-07-02T05:20:00.000Z"
       }
     ],
@@ -270,6 +272,7 @@ function assertNoSecretLookup(database) {
     closed: false,
     template: false,
     repositoryIds: [],
+    selected: false,
     githubCreatedAt: "2026-06-20T03:00:00.000Z",
     githubUpdatedAt: "2026-07-01T14:30:00.000Z",
     githubClosedAt: null,

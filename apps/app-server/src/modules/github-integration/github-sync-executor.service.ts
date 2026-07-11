@@ -120,6 +120,10 @@ interface HydratedBoardRow extends QueryResultRow {
   board_id: string | number | null;
 }
 
+interface GithubProjectV2SelectionRow extends QueryResultRow {
+  project_v2_id: string;
+}
+
 @Injectable()
 export class GithubSyncExecutorService {
   constructor(
@@ -197,11 +201,16 @@ export class GithubSyncExecutorService {
       await this.syncGithubPullRequests(context)
     );
 
+    const selectedProjectV2Ids = await this.listSelectedGithubProjectV2Ids(
+      context.workspaceId,
+      context.installation.id
+    );
     const projectV2Contexts = this.getGithubProjectV2ContextsForFullSync(
       context,
-      discovery.projectV2s
+      discovery.projectV2s,
+      selectedProjectV2Ids
     );
-    const stepsPerProject = context.projectV2 ? 4 : 3;
+    const stepsPerProject = 3;
     const totalProjectSteps = projectV2Contexts.length * stepsPerProject;
     let completedProjectSteps = 0;
     const startProjectStep = async (
@@ -216,14 +225,6 @@ export class GithubSyncExecutorService {
 
     for (const projectV2 of projectV2Contexts) {
       const projectContext = this.withGithubSyncProjectV2(context, projectV2);
-      if (context.projectV2) {
-        await startProjectStep("project_v2");
-        summary = this.mergeGithubSyncSummaries(
-          summary,
-          await this.syncGithubProjectV2(projectContext)
-        );
-        completedProjectSteps += 1;
-      }
       await startProjectStep("project_v2_fields");
       summary = this.mergeGithubSyncSummaries(
         summary,
@@ -1540,24 +1541,33 @@ export class GithubSyncExecutorService {
 
   private getGithubProjectV2ContextsForFullSync(
     context: GithubSyncRunContext,
-    discoveredProjectV2s: GithubProjectV2DiscoveryContext[]
+    discoveredProjectV2s: GithubProjectV2DiscoveryContext[],
+    selectedProjectV2Ids: ReadonlySet<string>
   ): GithubSyncProjectV2ContextRow[] {
-    if (context.projectV2) {
-      return [context.projectV2];
-    }
-
-    if (!context.repository) {
-      return discoveredProjectV2s;
-    }
-
-    const repositoryNodeId = context.repository.github_node_id;
-    if (!repositoryNodeId) {
-      return [];
-    }
-
-    return discoveredProjectV2s.filter((projectV2) =>
-      projectV2.repositoryNodeIds.includes(repositoryNodeId)
+    const repositoryNodeId = context.repository?.github_node_id ?? null;
+    return discoveredProjectV2s.filter(
+      (projectV2) =>
+        selectedProjectV2Ids.has(projectV2.id) &&
+        (!repositoryNodeId || projectV2.repositoryNodeIds.includes(repositoryNodeId))
     );
+  }
+
+  private async listSelectedGithubProjectV2Ids(
+    workspaceId: string,
+    installationId: string
+  ): Promise<Set<string>> {
+    const rows = await this.database.query<GithubProjectV2SelectionRow>(
+      `
+        SELECT gps.project_v2_id
+        FROM github_project_v2_selections gps
+        INNER JOIN github_projects_v2 gp ON gp.id = gps.project_v2_id
+        WHERE gp.workspace_id = $1
+          AND gps.installation_id = $2
+      `,
+      [workspaceId, installationId]
+    );
+
+    return new Set(rows.map((row) => row.project_v2_id));
   }
 
   private withGithubSyncProjectV2(

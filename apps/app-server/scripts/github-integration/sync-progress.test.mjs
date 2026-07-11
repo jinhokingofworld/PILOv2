@@ -298,6 +298,85 @@ function fullSyncContext(reportProgress) {
     { progressPercent: 15, progressStage: "project_v2_discovery" },
     { progressPercent: 25, progressStage: "issues" },
     { progressPercent: 45, progressStage: "pull_requests" },
+    { progressPercent: 95, progressStage: "finalizing" }
+  ]);
+}
+
+{
+  const progressUpdates = [];
+  const database = {
+    async query(text) {
+      if (/FROM github_project_v2_selections/i.test(text)) {
+        return [{ project_v2_id: "project-v2-id" }];
+      }
+
+      return [];
+    },
+    async queryOne() {
+      return {
+        id: "project-v2-id",
+        created: true
+      };
+    },
+    async execute() {
+      return {
+        rows: [],
+        rowCount: 1
+      };
+    }
+  };
+  const githubAppClient = {
+    async listInstallationRepositories() {
+      return [];
+    },
+    async listProjectV2s() {
+      return [
+        {
+          id: "PVT_example",
+          databaseId: 1,
+          ownerLogin: "example",
+          ownerType: "Organization",
+          number: 1,
+          title: "Example",
+          shortDescription: null,
+          readme: null,
+          url: "https://example.invalid/projects/1",
+          resourcePath: "/orgs/example/projects/1",
+          public: false,
+          closed: false,
+          template: false,
+          createdAt: "2026-07-01T00:00:00.000Z",
+          updatedAt: "2026-07-02T00:00:00.000Z",
+          closedAt: null,
+          repositoryNodeIds: [],
+          raw: {}
+        }
+      ];
+    },
+    async listProjectV2Fields() {
+      return [];
+    },
+    async listProjectV2Items() {
+      return [];
+    }
+  };
+  const executor = new GithubSyncExecutorService(database, githubAppClient);
+
+  await executor.runGithubSyncTarget(
+    "full",
+    fullSyncContext(async (progress) => {
+      progressUpdates.push({
+        progressPercent: progress.progressPercent,
+        progressStage: progress.progressStage
+      });
+    })
+  );
+
+  assert.deepEqual(progressUpdates, [
+    { progressPercent: 5, progressStage: "repositories" },
+    { progressPercent: 15, progressStage: "project_v2_discovery" },
+    { progressPercent: 25, progressStage: "issues" },
+    { progressPercent: 45, progressStage: "pull_requests" },
     { progressPercent: 65, progressStage: "project_v2_fields" },
     { progressPercent: 75, progressStage: "project_v2_items" },
     { progressPercent: 85, progressStage: "board_hydration" },

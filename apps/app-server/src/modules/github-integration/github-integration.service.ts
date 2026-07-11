@@ -35,12 +35,14 @@ import type {
   ListGithubPullRequestsQuery,
   ListGithubProjectsV2Query,
   ListGithubRepositoriesQuery,
+  ReplaceGithubProjectV2SelectionsRequest,
   StartGithubAppInstallationRequest,
   StartGithubSyncRunRequest,
   StartGithubOAuthRequest
 } from "./dto";
 import type {
   GitHubIntegrationModuleInfo,
+  ApplyGithubPullRequestConflictResolutionInput,
   ApplyGithubPullRequestFileResolutionInput,
   GithubAppInstallationCallbackPayload,
   GithubAppInstallationDeletePayload,
@@ -62,9 +64,11 @@ import type {
   GithubProjectV2ItemPayload,
   GithubProjectV2KanbanPayload,
   GithubProjectV2ListItemPayload,
+  GithubProjectV2SelectionPayload,
   GithubProjectV2StatusOptionPayload,
   GithubPullRequestConflictInputsPayload,
   GithubPullRequestConflictStatusPayload,
+  GithubPullRequestConflictResolutionPayload,
   GithubPullRequestFileResolutionPayload,
   GithubPullRequestMergePayload,
   GithubPullRequestDetailPayload,
@@ -500,6 +504,18 @@ export class GithubIntegrationService {
     );
   }
 
+  async replaceGithubProjectV2Selections(
+    currentUserId: string,
+    workspaceId: string,
+    input: ReplaceGithubProjectV2SelectionsRequest | undefined
+  ): Promise<GithubProjectV2SelectionPayload> {
+    return this.githubProjectV2Service.replaceGithubProjectV2Selections(
+      currentUserId,
+      workspaceId,
+      input
+    );
+  }
+
   async getGithubProjectV2(
     currentUserId: string,
     workspaceId: string,
@@ -661,6 +677,20 @@ export class GithubIntegrationService {
     input: ApplyGithubPullRequestFileResolutionInput
   ): Promise<GithubPullRequestFileResolutionPayload> {
     return this.githubPullRequestFileWriteService.applyGithubPullRequestFileResolution(
+      currentUserId,
+      workspaceId,
+      pullRequestId,
+      input
+    );
+  }
+
+  async applyGithubPullRequestConflictResolutions(
+    currentUserId: string,
+    workspaceId: string,
+    pullRequestId: string,
+    input: ApplyGithubPullRequestConflictResolutionInput
+  ): Promise<GithubPullRequestConflictResolutionPayload> {
+    return this.githubPullRequestFileWriteService.applyGithubPullRequestConflictResolutions(
       currentUserId,
       workspaceId,
       pullRequestId,

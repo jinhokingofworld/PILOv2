@@ -6,6 +6,7 @@ import {
   Headers,
   Param,
   Post,
+  Put,
   Query,
   RawBody,
   Res,
@@ -24,6 +25,7 @@ import type {
   ListGithubPullRequestsQuery,
   ListGithubProjectsV2Query,
   ListGithubRepositoriesQuery,
+  ReplaceGithubProjectV2SelectionsRequest,
   StartGithubAppInstallationRequest,
   StartGithubSyncRunRequest,
   StartGithubOAuthRequest
@@ -56,6 +58,7 @@ import type {
   GithubProjectV2ItemPayload,
   GithubProjectV2KanbanPayload,
   GithubProjectV2ListItemPayload,
+  GithubProjectV2SelectionPayload,
   GithubProjectV2StatusOptionPayload,
   GithubPullRequestConflictStatusPayload,
   GithubPullRequestDetailPayload,
@@ -466,6 +469,21 @@ export class GithubIntegrationController {
       query
     );
     return apiPaginatedResponse(result);
+  }
+
+  @Put("workspaces/:workspaceId/github/project-v2-selections")
+  @UseGuards(AuthGuard)
+  async replaceGithubProjectV2Selections(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Body() body: ReplaceGithubProjectV2SelectionsRequest | undefined
+  ): Promise<ApiSuccessResponse<GithubProjectV2SelectionPayload>> {
+    const result = await this.githubIntegrationService.replaceGithubProjectV2Selections(
+      currentUserId,
+      workspaceId,
+      body
+    );
+    return apiResponse(result);
   }
 
   @Get("workspaces/:workspaceId/github/projects-v2/:projectV2Id/access-status")

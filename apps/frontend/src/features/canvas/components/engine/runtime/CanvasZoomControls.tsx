@@ -34,6 +34,7 @@ export function CanvasZoomControls({
       <button
         type="button"
         aria-label="축소"
+        data-canvas-agent-target="controls.zoom_out"
         onClick={() => {
           canvasActions?.zoomOut();
         }}
@@ -44,6 +45,7 @@ export function CanvasZoomControls({
       <button
         type="button"
         aria-label="확대"
+        data-canvas-agent-target="controls.zoom_in"
         onClick={() => {
           canvasActions?.zoomIn();
         }}
@@ -56,6 +58,7 @@ export function CanvasZoomControls({
         className={
           canvasSnapState.isSmartGuideEnabled ? "is-active" : undefined
         }
+        data-canvas-agent-target="controls.smart_guides"
         data-tooltip="스마트가이드"
         disabled={!canvasActions}
         onClick={onToggleSmartGuides}
@@ -66,6 +69,7 @@ export function CanvasZoomControls({
         type="button"
         aria-label="선택 삭제"
         className="canvas-trash-drop-zone"
+        data-canvas-agent-target="controls.trash"
         data-tooltip="휴지통"
         disabled={!canvasActions}
         onClick={() => {

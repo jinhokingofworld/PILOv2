@@ -114,6 +114,10 @@ token으로 GitHub의 user installations 목록을 조회해 callback의
 
 ## 데이터 규칙
 
+- ProjectV2 상세 동기화 선택은 workspace와 installation 단위로 저장한다. `full` sync
+  request body는 `projectV2Id`를 허용하지 않는다. `full` sync는 ProjectV2 metadata와
+  repository link를 발견하지만 fields, items, Board hydration은 선택된 ProjectV2에만
+  수행한다. 선택이 비어 있으면 해당 상세 단계는 건너뛴다.
 - `github_pull_requests.raw`에서 `state`, `draft`, `mergeable`, `head_sha`, `base_sha`를 파생한다.
 - PR 변경 파일은 GitHub Integration의 별도 캐시 테이블에 저장하지 않는다.
 - PR 변경 파일과 patch text는 요청 시 GitHub에서 조회한다.
@@ -131,9 +135,10 @@ token으로 GitHub의 user installations 목록을 조회해 callback의
   동기화된 저장소를 매칭해 `github_project_v2_repositories` 관계를 갱신한다.
   ProjectV2 item sync는 GitHub ProjectV2 repository 연결 목록이 불완전한 경우에도
   동기화된 issue/PR content의 repository를 기준으로 이 관계를 보강한다.
-- `full` sync 요청에 `repositoryId`가 있으면, 선택된 ProjectV2가 없는 경우에도
-  발견한 ProjectV2 중 해당 repository에 연결된 ProjectV2만 fields/items
-  동기화 대상으로 삼는다. `projectV2Id`가 있으면 그 ProjectV2를 우선한다.
+- Full sync discovers every ProjectV2 metadata record and repository link; only
+  stored selections receive fields, items, and Board hydration. `repositoryId`
+  can limit repository discovery but never expands the selected ProjectV2 detail
+  scope.
 - ProjectV2 fields/items 동기화가 끝나면 서버는 같은 workspace의 기존 Board
   cache 중 해당 ProjectV2와 repository 조합으로 이미 생성된 board만 다시
   hydrate한다. 이 동작은 새 board를 자동 생성하지 않는다.
@@ -205,6 +210,7 @@ token으로 GitHub의 user installations 목록을 조회해 callback의
 | `GET` | `/workspaces/{workspaceId}/github/repositories/{repositoryId}` | Repository 상세 조회 |
 | `GET` | `/workspaces/{workspaceId}/github/repositories/{repositoryId}/collaborator-status` | 현재 사용자의 Repository collaborator 권한 조회 |
 | `GET` | `/workspaces/{workspaceId}/github/projects-v2` | 동기화된 ProjectV2 목록 조회 |
+| `PUT` | `/workspaces/{workspaceId}/github/project-v2-selections` | installation별 ProjectV2 상세 동기화 선택 목록 교체 |
 | `GET` | `/workspaces/{workspaceId}/github/projects-v2/{projectV2Id}/access-status` | 현재 사용자의 ProjectV2 접근 권한 조회 |
 | `GET` | `/workspaces/{workspaceId}/github/projects-v2/{projectV2Id}` | ProjectV2 상세 조회 |
 | `GET` | `/workspaces/{workspaceId}/github/projects-v2/{projectV2Id}/fields` | ProjectV2 Field 목록 조회 |
@@ -387,16 +393,15 @@ Sync run 목록:
 {
   "target": "full",
   "installationId": "installation_uuid",
-  "repositoryId": "repository_uuid",
-  "projectV2Id": "project_v2_uuid"
+  "repositoryId": "repository_uuid"
 }
 ```
 
-`target`과 `installationId`는 필수다. `repositoryId`, `projectV2Id`는 선택값이지만,
-값이 있으면 path의 Workspace 안에 존재하고 같은 installation에 속해야 한다.
-`project_v2`, `project_v2_fields`, `project_v2_items` target은 `projectV2Id`가
-필수다. `issues`와 `pull_requests`는 `repositoryId`가 있으면 해당 repository만,
-없으면 installation에 연결된 repository 전체를 동기화한다.
+`target`과 `installationId`는 필수다. `repositoryId`는 선택값이며 값이 있으면 path의
+Workspace 안에 존재하고 같은 installation에 속해야 한다. `full` target rejects
+`projectV2Id`; `project_v2`, `project_v2_fields`, and `project_v2_items` require it.
+`issues`와 `pull_requests`는 `repositoryId`가 있으면 해당 repository만, 없으면
+installation에 연결된 repository 전체를 동기화한다.
 
 수동 sync API는 `github_sync_runs` row를 `running`으로 만든 뒤 executor를 실행하고,
 완료된 `success` 또는 `failed` payload를 반환한다. Provider 처리 중 발생한 오류는
@@ -478,7 +483,41 @@ payload는 board 구성을 위해 연결된 repository id 목록을 포함한다
   "closed": false,
   "template": false,
   "repositoryIds": ["repository_uuid"],
+  "selected": true,
   "lastSyncedAt": "2026-07-07T12:00:00.000Z"
+}
+```
+
+`selected`: boolean은 해당 ProjectV2가 workspace 및 installation별로 저장된 상세 동기화
+선택 목록에 포함되었는지를 나타낸다.
+
+### ProjectV2 상세 동기화 선택 저장
+
+```http
+PUT /api/v1/workspaces/{workspaceId}/github/project-v2-selections
+Content-Type: application/json
+```
+
+```json
+{
+  "installationId": "installation_uuid",
+  "projectV2Ids": ["project_v2_uuid_1", "project_v2_uuid_2"]
+}
+```
+
+이 요청은 한 installation의 선택된 ProjectV2 목록을 원자적으로 교체한다. 모든 ProjectV2는
+요청 workspace와 installation에 속해야 하며, 빈 `projectV2Ids` 배열은 유효하고 해당
+installation의 상세 동기화를 비활성화한다. 선택 저장은 sync를 시작하지 않는다.
+
+응답:
+
+```json
+{
+  "success": true,
+  "data": {
+    "installationId": "installation_uuid",
+    "projectV2Ids": ["project_v2_uuid_1", "project_v2_uuid_2"]
+  }
 }
 ```
 

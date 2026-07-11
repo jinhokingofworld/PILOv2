@@ -1,9 +1,5 @@
-import { SqlErdPanel } from "@/features/sql-erd/components/sql-erd-panel";
+import { SqlErdSessionList } from "@/features/sql-erd/components/sql-erd-session-list";
 
 export function SqlErdPage() {
-  return (
-    <div className="sql-erd-full-bleed h-screen overflow-hidden">
-      <SqlErdPanel />
-    </div>
-  );
+  return <SqlErdSessionList />;
 }

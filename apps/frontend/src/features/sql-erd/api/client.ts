@@ -2,6 +2,8 @@ import type {
   SqltoerdDialect,
   SqltoerdLayoutJsonV1,
   SqltoerdModelJsonV1,
+  SqltoerdSessionDeletePayload,
+  SqltoerdSessionListPayload,
   SqltoerdSessionPayload,
   SqltoerdSettingsJson,
   SqltoerdSourceFormat
@@ -22,17 +24,22 @@ type SqlErdApiSuccessResponse<T> = {
 };
 
 export type CreateSqlErdSessionRequest = {
-  title: string;
-  sourceFormat: SqltoerdSourceFormat;
-  dialect: SqltoerdDialect;
-  sourceText: string;
   modelJson: SqltoerdModelJsonV1;
   layoutJson: SqltoerdLayoutJsonV1;
-  settingsJson: SqltoerdSettingsJson;
+  title?: string;
+  sourceFormat?: SqltoerdSourceFormat;
+  dialect?: SqltoerdDialect;
+  sourceText?: string;
+  settingsJson?: SqltoerdSettingsJson;
 };
 
 export type UpdateSqlErdSessionRequest = Partial<CreateSqlErdSessionRequest> & {
   baseRevision: number;
+};
+
+export type ListSqlErdSessionsQuery = {
+  cursor?: string | null;
+  limit?: number;
 };
 
 function trimTrailingSlash(value: string) {
@@ -210,10 +217,42 @@ export function createSqlErdApiClient({
 }: SqlErdApiClientOptions = {}) {
   const requestOptions = { accessToken, baseUrl, fetcher };
 
+  function sessionsPath(workspaceId: string) {
+    return `/workspaces/${encodeURIComponent(workspaceId)}/sql-erd-sessions` as const;
+  }
+
+  function sessionPath(workspaceId: string, sessionId: string) {
+    return `${sessionsPath(workspaceId)}/${encodeURIComponent(sessionId)}` as const;
+  }
+
   return {
-    async getActiveSession(workspaceId: string) {
-      return requestSqlErdApiPayload<SqltoerdSessionPayload | null>(
-        `/workspaces/${encodeURIComponent(workspaceId)}/sql-erd-session`,
+    async listSessions(
+      workspaceId: string,
+      { cursor = null, limit }: ListSqlErdSessionsQuery = {}
+    ) {
+      const searchParams = new URLSearchParams();
+
+      if (limit !== undefined) {
+        searchParams.set("limit", String(limit));
+      }
+
+      if (cursor) {
+        searchParams.set("cursor", cursor);
+      }
+
+      const queryString = searchParams.toString();
+      const path = `${sessionsPath(workspaceId)}${queryString ? `?${queryString}` : ""}` as `/${string}`;
+
+      return requestSqlErdApiPayload<SqltoerdSessionListPayload>(
+        path,
+        { method: "GET" },
+        requestOptions
+      );
+    },
+
+    async getSession(workspaceId: string, sessionId: string) {
+      return requestSqlErdApiPayload<SqltoerdSessionPayload>(
+        sessionPath(workspaceId, sessionId),
         { method: "GET" },
         requestOptions
       );
@@ -224,7 +263,7 @@ export function createSqlErdApiClient({
       payload: CreateSqlErdSessionRequest
     ) {
       return requestSqlErdApiPayload<SqltoerdSessionPayload>(
-        `/workspaces/${encodeURIComponent(workspaceId)}/sql-erd-session`,
+        sessionsPath(workspaceId),
         {
           body: JSON.stringify(payload),
           method: "POST"
@@ -239,11 +278,25 @@ export function createSqlErdApiClient({
       payload: UpdateSqlErdSessionRequest
     ) {
       return requestSqlErdApiPayload<SqltoerdSessionPayload>(
-        `/workspaces/${encodeURIComponent(workspaceId)}/sql-erd-session/${encodeURIComponent(sessionId)}`,
+        sessionPath(workspaceId, sessionId),
         {
           body: JSON.stringify(payload),
           method: "PATCH"
         },
+        requestOptions
+      );
+    },
+
+    async deleteSession(
+      workspaceId: string,
+      sessionId: string,
+      baseRevision: number
+    ) {
+      const path = `${sessionPath(workspaceId, sessionId)}?baseRevision=${encodeURIComponent(String(baseRevision))}` as const;
+
+      return requestSqlErdApiPayload<SqltoerdSessionDeletePayload>(
+        path,
+        { method: "DELETE" },
         requestOptions
       );
     }

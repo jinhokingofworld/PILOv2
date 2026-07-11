@@ -15,7 +15,7 @@ assert.match(
 );
 assert.match(
   syncExecutorFile,
-  /const projectV2Contexts = this\.getGithubProjectV2ContextsForFullSync\(\s*context,\s*discovery\.projectV2s\s*\);/
+  /const selectedProjectV2Ids = await this\.listSelectedGithubProjectV2Ids\(\s*context\.workspaceId,\s*context\.installation\.id\s*\);[\s\S]*const projectV2Contexts = this\.getGithubProjectV2ContextsForFullSync\(\s*context,\s*discovery\.projectV2s,\s*selectedProjectV2Ids\s*\);/
 );
 assert.match(
   syncExecutorFile,
@@ -43,7 +43,11 @@ assert.match(
 );
 assert.match(
   syncExecutorFile,
-  /private getGithubProjectV2ContextsForFullSync\([\s\S]*const repositoryNodeId = context\.repository\.github_node_id;[\s\S]*projectV2\.repositoryNodeIds\.includes\(repositoryNodeId\)/
+  /private async listSelectedGithubProjectV2Ids\([\s\S]*FROM github_project_v2_selections[\s\S]*gp\.workspace_id = \$1[\s\S]*gps\.installation_id = \$2/
+);
+assert.match(
+  syncExecutorFile,
+  /private getGithubProjectV2ContextsForFullSync\([\s\S]*selectedProjectV2Ids\.has\(projectV2\.id\)[\s\S]*projectV2\.repositoryNodeIds\.includes\(repositoryNodeId\)/
 );
 assert.match(
   syncExecutorFile,

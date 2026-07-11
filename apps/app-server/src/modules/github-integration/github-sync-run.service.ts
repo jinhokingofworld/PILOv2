@@ -711,6 +711,10 @@ export class GithubSyncRunService {
     target: GithubSyncTarget,
     projectV2Id: string | null
   ): void {
+    if (target === "full" && projectV2Id) {
+      throw badRequest("projectV2Id is not allowed for full sync");
+    }
+
     if (
       (target === "project_v2" ||
         target === "project_v2_fields" ||

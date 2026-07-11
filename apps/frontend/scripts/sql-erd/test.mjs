@@ -27,6 +27,14 @@ async function compileSqlErdRuntimeModules() {
   const generateSessionOutputPath = join(outputDir, "generate-session.mjs");
   const layoutAutosaveOutputPath = join(outputDir, "layout-autosave.mjs");
   const apiClientOutputPath = join(outputDir, "api-client.mjs");
+  const sessionNavigationOutputPath = join(
+    outputDir,
+    "session-navigation.mjs"
+  );
+  const sessionListStateOutputPath = join(
+    outputDir,
+    "session-list-state.mjs"
+  );
   const sessionStateOutputPath = join(outputDir, "session-state.mjs");
   const statusCopyOutputPath = join(outputDir, "status-copy.mjs");
   const sqlEditorDialectOutputPath = join(outputDir, "sql-editor-dialect.mjs");
@@ -81,6 +89,14 @@ async function compileSqlErdRuntimeModules() {
     await compileTypeScriptModule(
       "../../src/features/sql-erd/api/client.ts",
       apiClientOutputPath
+    );
+    await compileTypeScriptModule(
+      "../../src/features/sql-erd/utils/session-navigation.ts",
+      sessionNavigationOutputPath
+    );
+    await compileTypeScriptModule(
+      "../../src/features/sql-erd/utils/session-list-state.ts",
+      sessionListStateOutputPath
     );
     await compileTypeScriptModule(
       "../../src/features/sql-erd/utils/session-state.ts",
@@ -171,6 +187,8 @@ async function compileSqlErdRuntimeModules() {
       generateSessionRuntime,
       layoutAutosaveRuntime,
       apiClientRuntime,
+      sessionNavigationRuntime,
+      sessionListStateRuntime,
       sessionStateRuntime,
       sqlEditorDialectRuntime,
       statusCopyRuntime,
@@ -186,6 +204,8 @@ async function compileSqlErdRuntimeModules() {
       import(pathToFileHref(generateSessionOutputPath)),
       import(pathToFileHref(layoutAutosaveOutputPath)),
       import(pathToFileHref(apiClientOutputPath)),
+      import(pathToFileHref(sessionNavigationOutputPath)),
+      import(pathToFileHref(sessionListStateOutputPath)),
       import(pathToFileHref(sessionStateOutputPath)),
       import(pathToFileHref(sqlEditorDialectOutputPath)),
       import(pathToFileHref(statusCopyOutputPath)),
@@ -205,6 +225,8 @@ async function compileSqlErdRuntimeModules() {
       inspectorRuntime,
       modelRuntime,
       relationShapeRuntime,
+      sessionListStateRuntime,
+      sessionNavigationRuntime,
       sessionStateRuntime,
       sqlEditorDialectRuntime,
       statusCopyRuntime,
@@ -483,11 +505,17 @@ const [
   apiSpec,
   types,
   commerceFixture,
+  homeDashboardData,
   modelUtils,
   inspectorUtils,
   page,
+  sessionPage,
+  sessionRouteBridge,
   navigation,
   panel,
+  sessionList,
+  sessionListStateUtils,
+  sessionNavigationUtils,
   sessionStateUtils,
   generateSessionUtils,
   layoutAutosaveUtils,
@@ -506,11 +534,19 @@ const [
     readSqlErdFile("../../../../docs/api/sqltoerd-api.md"),
     readSqlErdFile("../../src/features/sql-erd/types/index.ts"),
     readSqlErdFile("../../src/features/sql-erd/fixtures/commerce.ts"),
+    readSqlErdFile("../../src/features/home/hooks/use-home-dashboard-data.ts"),
     readSqlErdFile("../../src/features/sql-erd/utils/model.ts"),
     readSqlErdFile("../../src/features/sql-erd/utils/inspector.ts"),
     readSqlErdFile("../../src/features/sql-erd/page.tsx"),
+    readSqlErdFile("../../src/features/sql-erd/session-page.tsx"),
+    readSqlErdFile("../../src/app/(workspace)/sql-erd/session/page.tsx"),
     readSqlErdFile("../../src/features/sql-erd/navigation.ts"),
     readSqlErdFile("../../src/features/sql-erd/components/sql-erd-panel.tsx"),
+    readSqlErdFile(
+      "../../src/features/sql-erd/components/sql-erd-session-list.tsx"
+    ),
+    readSqlErdFile("../../src/features/sql-erd/utils/session-list-state.ts"),
+    readSqlErdFile("../../src/features/sql-erd/utils/session-navigation.ts"),
     readSqlErdFile("../../src/features/sql-erd/utils/session-state.ts"),
     readSqlErdFile("../../src/features/sql-erd/utils/generate-session.ts"),
     readSqlErdFile("../../src/features/sql-erd/utils/layout-autosave.ts"),
@@ -528,6 +564,8 @@ const [
 
 const {
   apiClientRuntime,
+  sessionListStateRuntime,
+  sessionNavigationRuntime,
   canvasSelectionRuntime,
   ddlParserRuntime,
   sqlSourceMapRuntime,
@@ -626,6 +664,99 @@ assert.equal(runtimeRelationEndpoints.to.table.id, "table.users");
 assert.deepEqual(
   runtimeRelationEndpoints.to.columns.map((column) => column.name),
   ["id"]
+);
+
+function getRuntimeRelationCardinality({ nullable, unique }) {
+  const modelJson = structuredClone(runtimeModel);
+  const ordersTable = modelJson.schema.tables.find(
+    (table) => table.id === "table.orders"
+  );
+  const userIdColumn = ordersTable?.columns.find(
+    (column) => column.id === "user_id"
+  );
+  const relation = modelJson.schema.relations.find(
+    (candidate) => candidate.id === "relation.orders.user_id.users.id"
+  );
+
+  assert.ok(userIdColumn);
+  assert.ok(relation);
+
+  userIdColumn.nullable = nullable;
+  userIdColumn.unique = unique;
+
+  return modelRuntime.inferSqlErdRelationCardinality(
+    relation,
+    modelRuntime.createSqltoerdModelIndex(modelJson)
+  );
+}
+
+assert.deepEqual(
+  getRuntimeRelationCardinality({ nullable: true, unique: false }),
+  {
+    from: "zero_or_many",
+    to: "zero_or_one"
+  }
+);
+assert.deepEqual(
+  getRuntimeRelationCardinality({ nullable: false, unique: false }),
+  {
+    from: "zero_or_many",
+    to: "one"
+  }
+);
+assert.deepEqual(
+  getRuntimeRelationCardinality({ nullable: true, unique: true }),
+  {
+    from: "zero_or_one",
+    to: "zero_or_one"
+  }
+);
+assert.deepEqual(
+  getRuntimeRelationCardinality({ nullable: false, unique: true }),
+  {
+    from: "zero_or_one",
+    to: "one"
+  }
+);
+
+const compositePrimaryKeyModel = structuredClone(runtimeModel);
+const compositePrimaryKeyOrdersTable =
+  compositePrimaryKeyModel.schema.tables.find(
+    (table) => table.id === "table.orders"
+  );
+const compositePrimaryKeyUserIdColumn =
+  compositePrimaryKeyOrdersTable?.columns.find(
+    (column) => column.id === "user_id"
+  );
+const compositePrimaryKeyRelation =
+  compositePrimaryKeyModel.schema.relations.find(
+    (relation) => relation.id === "relation.orders.user_id.users.id"
+  );
+
+assert.ok(compositePrimaryKeyOrdersTable);
+assert.ok(compositePrimaryKeyUserIdColumn);
+assert.ok(compositePrimaryKeyRelation);
+
+compositePrimaryKeyUserIdColumn.primaryKey = true;
+compositePrimaryKeyUserIdColumn.unique = false;
+compositePrimaryKeyOrdersTable.constraints = [
+  {
+    id: "constraint.orders.pk",
+    kind: "primary_key",
+    columnIds: ["id", "user_id"],
+    name: null
+  }
+];
+
+assert.deepEqual(
+  modelRuntime.inferSqlErdRelationCardinality(
+    compositePrimaryKeyRelation,
+    modelRuntime.createSqltoerdModelIndex(compositePrimaryKeyModel)
+  ),
+  {
+    from: "zero_or_many",
+    to: "zero_or_one"
+  }
 );
 assert.equal(
   runtimeModelIndex.relationsByTableId
@@ -890,6 +1021,17 @@ assert.deepEqual(selectedRelationFromCanvas, {
   type: "relation",
   relationId: "relation.orders.user_id.users.id"
 });
+const selectedRelationInspectorView =
+  inspectorRuntime.createSqlErdInspectorViewModel(
+    selectedRelationFromCanvas,
+    runtimeModelIndex
+  );
+
+assert.equal(selectedRelationInspectorView.type, "relation");
+assert.deepEqual(selectedRelationInspectorView.cardinality, {
+  from: "zero_or_many",
+  to: "zero_or_one"
+});
 assert.deepEqual(
   canvasSelectionRuntime.getSqlErdSelectionFromSelectedShapes([
     {
@@ -932,6 +1074,23 @@ assert.deepEqual(initialReloadFailureAction.sessionLoadState, {
   message: "Workspace session could not be loaded. Showing the built-in sample instead.",
   tone: "neutral"
 });
+assert.deepEqual(
+  sessionStateRuntime.getSqlErdSessionLoadFailureState({
+    hasLoadedSession: false
+  }),
+  {
+    label: "Load failed",
+    message:
+      "Workspace session could not be loaded. Try again or return to the session list.",
+    tone: "error"
+  }
+);
+assert.deepEqual(
+  sessionStateRuntime.getSqlErdSessionLoadFailureState({
+    hasLoadedSession: true
+  }),
+  manualReloadFailureAction.sessionLoadState
+);
 assert.equal(
   sessionStateRuntime.shouldApplySqlErdSessionLoadResult(7, 7),
   true
@@ -1079,7 +1238,37 @@ const generateSmokeBaseSession = {
   modelJson: createRuntimeTestModel(),
   layoutJson: {
     version: 1,
-    tableLayouts: [{ tableId: "table.users", x: 512, y: 256, width: 320 }]
+    tableLayouts: [{ tableId: "table.users", x: 512, y: 256, width: 320 }],
+    annotations: {
+      version: 1,
+      links: [
+        {
+          id: "annotation.generate.valid",
+          kind: "column_link",
+          fromTableId: "table.users",
+          fromColumnId: "column.users.email",
+          toTableId: "table.posts",
+          toColumnId: "column.posts.title",
+          label: "owns"
+        },
+        {
+          id: "annotation.generate.fk-conflict",
+          kind: "column_link",
+          fromTableId: "table.posts",
+          fromColumnId: "column.posts.user_id",
+          toTableId: "table.users",
+          toColumnId: "column.users.id",
+          label: "same endpoint as FK"
+        },
+        {
+          id: "annotation.generate.removed",
+          kind: "table_link",
+          fromTableId: "table.users",
+          toTableId: "table.removed",
+          label: "removed"
+        }
+      ]
+    }
   },
   settingsJson: { sourcePanelOpen: true }
 };
@@ -1106,6 +1295,10 @@ assert.equal(
   createGenerateRequest.payload.layoutJson.tableLayouts[1].tableId,
   "table.posts"
 );
+assert.deepEqual(createGenerateRequest.payload.layoutJson.annotations, {
+  version: 1,
+  links: generateSmokeBaseSession.layoutJson.annotations.links.slice(0, 2)
+});
 assert.deepEqual(createGenerateRequest.payload.settingsJson, {
   sourcePanelOpen: true
 });
@@ -1190,21 +1383,80 @@ assert.equal(
   "missing_workspace_session"
 );
 
-const sqlErdApiRequests = [];
 const runtimeSession = createRuntimeTestSession({
   createdBy: null,
   updatedBy: null
 });
-const sqlErdApiClient = apiClientRuntime.createSqlErdApiClient({
+const runtimeSessionSummary = {
+  id: runtimeSession.id,
+  workspaceId: runtimeSession.workspaceId,
+  title: runtimeSession.title,
+  sourceFormat: runtimeSession.sourceFormat,
+  dialect: runtimeSession.dialect,
+  tableCount: runtimeSession.tableCount,
+  relationCount: runtimeSession.relationCount,
+  revision: runtimeSession.revision,
+  createdBy: runtimeSession.createdBy,
+  updatedBy: runtimeSession.updatedBy,
+  createdAt: runtimeSession.createdAt,
+  updatedAt: runtimeSession.updatedAt
+};
+
+assert.equal(
+  sessionNavigationRuntime.buildSqlErdSessionHref("session 1"),
+  "/sql-erd/session?sessionId=session+1"
+);
+assert.equal(
+  sessionNavigationRuntime.readSqlErdSessionId("?sessionId=session%201"),
+  "session 1"
+);
+assert.equal(sessionNavigationRuntime.readSqlErdSessionId("?sessionId=%20"), null);
+assert.equal(
+  sessionListStateRuntime.getSqlErdSessionListViewState({
+    errorMessage: "Session 목록을 불러오지 못했습니다.",
+    hasLoadedSessions: false,
+    isLoading: false,
+    sessionCount: 0
+  }),
+  "error"
+);
+assert.equal(
+  sessionListStateRuntime.getSqlErdSessionListViewState({
+    errorMessage: null,
+    hasLoadedSessions: true,
+    isLoading: false,
+    sessionCount: 0
+  }),
+  "empty"
+);
+assert.equal(
+  sessionListStateRuntime.getSqlErdSessionListViewState({
+    errorMessage: null,
+    hasLoadedSessions: true,
+    isLoading: true,
+    sessionCount: 0
+  }),
+  "loading"
+);
+assert.deepEqual(
+  sessionListStateRuntime.removeSqlErdSession(
+    [{ id: "session-1" }, { id: "session-2" }],
+    "session-1"
+  ),
+  [{ id: "session-2" }]
+);
+
+const listSqlErdSessionRequests = [];
+const listSqlErdSessionClient = apiClientRuntime.createSqlErdApiClient({
   accessToken: "token-1",
   baseUrl: "https://api.example.test/api/v1/",
   fetcher: async (url, init) => {
-    sqlErdApiRequests.push({ init, url });
+    listSqlErdSessionRequests.push({ init, url });
 
     return new Response(
       JSON.stringify({
         success: true,
-        data: runtimeSession
+        data: { items: [runtimeSessionSummary], nextCursor: "cursor-2" }
       }),
       {
         headers: { "Content-Type": "application/json" },
@@ -1214,30 +1466,45 @@ const sqlErdApiClient = apiClientRuntime.createSqlErdApiClient({
   }
 });
 
-const restoredSession = await sqlErdApiClient.getActiveSession("workspace 1");
-
-assert.deepEqual(restoredSession, runtimeSession);
-assert.equal(restoredSession.createdBy, null);
-assert.equal(restoredSession.updatedBy, null);
-assert.equal(sqlErdApiRequests.length, 1);
-assert.equal(
-  sqlErdApiRequests[0].url,
-  "https://api.example.test/api/v1/workspaces/workspace%201/sql-erd-session"
+const listedSessions = await listSqlErdSessionClient.listSessions(
+  "workspace 1",
+  { cursor: "cursor value", limit: 20 }
 );
-assert.equal(sqlErdApiRequests[0].init.method, "GET");
-assert.equal(sqlErdApiRequests[0].init.credentials, "same-origin");
-assert.equal(sqlErdApiRequests[0].init.headers.Authorization, "Bearer token-1");
-assert.equal(sqlErdApiRequests[0].init.headers.Accept, "application/json");
 
-const emptySqlErdApiClient = apiClientRuntime.createSqlErdApiClient({
-  fetcher: async () =>
-    new Response(JSON.stringify({ success: true, data: null }), {
-      headers: { "Content-Type": "application/json" },
-      status: 200
-    })
+assert.deepEqual(listedSessions.items, [runtimeSessionSummary]);
+assert.equal(listedSessions.nextCursor, "cursor-2");
+assert.equal(listSqlErdSessionRequests.length, 1);
+assert.equal(
+  listSqlErdSessionRequests[0].url,
+  "https://api.example.test/api/v1/workspaces/workspace%201/sql-erd-sessions?limit=20&cursor=cursor+value"
+);
+assert.equal(listSqlErdSessionRequests[0].init.method, "GET");
+assert.equal(listSqlErdSessionRequests[0].init.credentials, "same-origin");
+assert.equal(
+  listSqlErdSessionRequests[0].init.headers.Authorization,
+  "Bearer token-1"
+);
+
+const detailSqlErdSessionRequests = [];
+const detailSqlErdSessionClient = apiClientRuntime.createSqlErdApiClient({
+  fetcher: async (url, init) => {
+    detailSqlErdSessionRequests.push({ init, url });
+
+    return new Response(
+      JSON.stringify({ success: true, data: runtimeSession }),
+      { headers: { "Content-Type": "application/json" }, status: 200 }
+    );
+  }
 });
 
-assert.equal(await emptySqlErdApiClient.getActiveSession("workspace-1"), null);
+assert.deepEqual(
+  await detailSqlErdSessionClient.getSession("workspace 1", "session 1"),
+  runtimeSession
+);
+assert.equal(
+  detailSqlErdSessionRequests[0].url,
+  "http://localhost:4000/api/v1/workspaces/workspace%201/sql-erd-sessions/session%201"
+);
 
 const createSqlErdSessionRequests = [];
 const createSqlErdSessionClient = apiClientRuntime.createSqlErdApiClient({
@@ -1279,7 +1546,7 @@ assert.equal(createdSqlErdSession.revision, 1);
 assert.equal(createSqlErdSessionRequests.length, 1);
 assert.equal(
   createSqlErdSessionRequests[0].url,
-  "https://api.example.test/api/v1/workspaces/workspace%201/sql-erd-session"
+  "https://api.example.test/api/v1/workspaces/workspace%201/sql-erd-sessions"
 );
 assert.equal(createSqlErdSessionRequests[0].init.method, "POST");
 assert.equal(
@@ -1331,13 +1598,45 @@ assert.equal(updatedSqlErdSession.revision, 4);
 assert.equal(updateSqlErdSessionRequests.length, 1);
 assert.equal(
   updateSqlErdSessionRequests[0].url,
-  "http://localhost:4000/api/v1/workspaces/workspace%201/sql-erd-session/session%201"
+  "http://localhost:4000/api/v1/workspaces/workspace%201/sql-erd-sessions/session%201"
 );
 assert.equal(updateSqlErdSessionRequests[0].init.method, "PATCH");
 assert.deepEqual(
   JSON.parse(updateSqlErdSessionRequests[0].init.body),
   updateSessionPayload
 );
+
+const deleteSqlErdSessionRequests = [];
+const deleteSqlErdSessionClient = apiClientRuntime.createSqlErdApiClient({
+  fetcher: async (url, init) => {
+    deleteSqlErdSessionRequests.push({ init, url });
+
+    return new Response(
+      JSON.stringify({
+        success: true,
+        data: {
+          id: "session 1",
+          deletedAt: "2026-07-10T15:00:00.000Z",
+          revision: 4
+        }
+      }),
+      { headers: { "Content-Type": "application/json" }, status: 200 }
+    );
+  }
+});
+
+const deletedSqlErdSession = await deleteSqlErdSessionClient.deleteSession(
+  "workspace 1",
+  "session 1",
+  3
+);
+
+assert.equal(deletedSqlErdSession.revision, 4);
+assert.equal(
+  deleteSqlErdSessionRequests[0].url,
+  "http://localhost:4000/api/v1/workspaces/workspace%201/sql-erd-sessions/session%201?baseRevision=3"
+);
+assert.equal(deleteSqlErdSessionRequests[0].init.method, "DELETE");
 
 const failingSqlErdApiClient = apiClientRuntime.createSqlErdApiClient({
   fetcher: async () =>
@@ -1354,7 +1653,7 @@ const failingSqlErdApiClient = apiClientRuntime.createSqlErdApiClient({
 });
 
 await assert.rejects(
-  () => failingSqlErdApiClient.getActiveSession("workspace-1"),
+  () => failingSqlErdApiClient.getSession("workspace-1", "session-1"),
   /Unauthorized/
 );
 
@@ -1805,11 +2104,64 @@ assert.equal(
   "BIGINT UNSIGNED"
 );
 
+const mysqlModelIndex = modelRuntime.createSqltoerdModelIndex(
+  mysqlParseResult.modelJson
+);
+assert.equal(
+  mysqlModelIndex.columnsByTableId
+    .get("table.users")
+    ?.has("column.users.email"),
+  true
+);
+assert.equal(
+  mysqlModelIndex.columnsByTableId
+    .get("table.orders")
+    ?.has("column.orders.id"),
+  true
+);
+
 const generatedLayout = modelRuntime.createSqltoerdLayoutForModel(
   mysqlParseResult.modelJson,
   {
     version: 1,
-    tableLayouts: [{ tableId: "table.users", x: 44, y: 55, width: 288 }]
+    tableLayouts: [{ tableId: "table.users", x: 44, y: 55, width: 288 }],
+    annotations: {
+      version: 1,
+      links: [
+        {
+          id: "annotation.valid.table",
+          kind: "table_link",
+          fromTableId: "table.users",
+          toTableId: "table.orders",
+          label: "places"
+        },
+        {
+          id: "annotation.valid.column",
+          kind: "column_link",
+          fromTableId: "table.users",
+          fromColumnId: "column.users.email",
+          toTableId: "table.orders",
+          toColumnId: "column.orders.id",
+          label: "business owner"
+        },
+        {
+          id: "annotation.invalid.table",
+          kind: "table_link",
+          fromTableId: "table.users",
+          toTableId: "table.removed",
+          label: "removed"
+        },
+        {
+          id: "annotation.invalid.column",
+          kind: "column_link",
+          fromTableId: "table.users",
+          fromColumnId: "column.users.removed",
+          toTableId: "table.orders",
+          toColumnId: "column.orders.id",
+          label: "removed"
+        }
+      ]
+    }
   }
 );
 
@@ -1824,6 +2176,10 @@ assert.deepEqual(generatedLayout.tableLayouts[1], {
   x: 440,
   y: 80
 });
+assert.deepEqual(
+  generatedLayout.annotations.links.map((annotation) => annotation.id),
+  ["annotation.valid.table", "annotation.valid.column"]
+);
 
 const movedRuntimeLayout = modelRuntime.updateSqltoerdLayoutWithTablePositions(
   runtimeModel,
@@ -1832,7 +2188,8 @@ const movedRuntimeLayout = modelRuntime.updateSqltoerdLayoutWithTablePositions(
     tableLayouts: [
       { tableId: "table.users", x: 10, y: 20, width: 240 },
       { tableId: "table.orders", x: 360, y: 20, width: 260 }
-    ]
+    ],
+    annotations: generatedLayout.annotations
   },
   [
     { tableId: "table.orders", x: 460, y: 180 },
@@ -1844,10 +2201,30 @@ assert.deepEqual(movedRuntimeLayout.tableLayouts, [
   { tableId: "table.users", x: 10, y: 20, width: 240 },
   { tableId: "table.orders", x: 460, y: 180, width: 260 }
 ]);
+assert.deepEqual(movedRuntimeLayout.annotations, generatedLayout.annotations);
 assert.equal(
   modelRuntime.areSqltoerdLayoutsEqual(
     movedRuntimeLayout,
     movedRuntimeLayout
+  ),
+  true
+);
+assert.equal(
+  modelRuntime.areSqltoerdLayoutsEqual(movedRuntimeLayout, {
+    ...movedRuntimeLayout,
+    annotations: {
+      version: 1,
+      links: movedRuntimeLayout.annotations.links.map((annotation, index) =>
+        index === 0 ? { ...annotation, label: "changed" } : annotation
+      )
+    }
+  }),
+  false
+);
+assert.equal(
+  modelRuntime.areSqltoerdLayoutsEqual(
+    { version: 1, tableLayouts: [] },
+    { version: 1, tableLayouts: [], annotations: { version: 1, links: [] } }
   ),
   true
 );
@@ -1902,6 +2279,46 @@ assert.equal(stackedRelationLayout.endSide, "right");
 assert.equal(
   relationShapeRuntime.SQLTOERD_RELATION_HIT_STROKE_WIDTH,
   16
+);
+assert.deepEqual(
+  relationShapeRuntime.getSqlErdCardinalityMarkerGeometry(
+    { x: 10, y: 20 },
+    "right",
+    "one"
+  ),
+  {
+    circles: [],
+    segments: [
+      { x1: 15, y1: 14, x2: 15, y2: 26 },
+      { x1: 22, y1: 14, x2: 22, y2: 26 }
+    ]
+  }
+);
+assert.deepEqual(
+  relationShapeRuntime.getSqlErdCardinalityMarkerGeometry(
+    { x: 10, y: 20 },
+    "left",
+    "zero_or_one"
+  ),
+  {
+    circles: [{ cx: -4, cy: 20, r: 3.5 }],
+    segments: [{ x1: 5, y1: 14, x2: 5, y2: 26 }]
+  }
+);
+assert.deepEqual(
+  relationShapeRuntime.getSqlErdCardinalityMarkerGeometry(
+    { x: 10, y: 20 },
+    "right",
+    "zero_or_many"
+  ),
+  {
+    circles: [{ cx: 31, cy: 20, r: 3.5 }],
+    segments: [
+      { x1: 24, y1: 20, x2: 15, y2: 14 },
+      { x1: 24, y1: 20, x2: 15, y2: 20 },
+      { x1: 24, y1: 20, x2: 15, y2: 26 }
+    ]
+  }
 );
 assert.deepEqual(
   relationShapeRuntime.getSqlErdRelationVisualStyle({
@@ -2228,8 +2645,14 @@ assert.match(modelUtils, /columnsByTableId/);
 assert.match(modelUtils, /relation\.fromTableId === relation\.toTableId/);
 assert.doesNotMatch(modelUtils, /columnsById: Map<string, SqltoerdColumnRef>/);
 
-assert.match(page, /sql-erd-full-bleed/);
-assert.match(page, /h-screen/);
+assert.match(page, /SqlErdSessionList/);
+assert.doesNotMatch(page, /SqlErdPanel/);
+assert.match(sessionPage, /SqlErdPanel/);
+assert.match(sessionPage, /readSqlErdSessionId/);
+assert.match(sessionPage, /window\.location\.search/);
+assert.match(sessionPage, /sql-erd-full-bleed/);
+assert.match(sessionPage, /h-screen/);
+assert.match(sessionRouteBridge, /SqlErdSessionPage as default/);
 assert.doesNotMatch(page, /-m-6/);
 assert.doesNotMatch(page, /h-\[calc\(100vh-3\.5rem\)\]/);
 
@@ -2240,8 +2663,31 @@ assert.match(navigation, /SQLtoERD/);
 assert.match(navigation, /href: "\/sql-erd"/);
 assert.doesNotMatch(navigation, /Inspector/);
 assert.doesNotMatch(navigation, /href: "\/sql-erd#inspector"/);
+assert.match(homeDashboardData, /listSessions\(normalizedWorkspaceId/);
+assert.match(homeDashboardData, /limit: 1/);
+assert.doesNotMatch(homeDashboardData, /getActiveSession/);
+
+assert.match(sessionList, /listSessions/);
+assert.match(sessionList, /buildSqlErdSessionHref/);
+assert.match(sessionList, /createSession/);
+assert.match(sessionList, /deleteSession/);
+assert.match(sessionList, /nextCursor/);
+assert.match(sessionList, /더 보기/);
+assert.match(sessionList, /session\.revision/);
+assert.match(sessionList, /세션이 없습니다/);
+assert.match(sessionList, /getSqlErdSessionListViewState/);
+assert.match(sessionList, /removeSqlErdSession/);
+assert.match(
+  sessionList,
+  /await apiClient\.deleteSession[\s\S]*?setSessions\(\(currentSessions\) =>[\s\S]*?removeSqlErdSession[\s\S]*?await loadSessions/
+);
+assert.match(sessionListStateUtils, /getSqlErdSessionListViewState/);
+assert.match(sessionListStateUtils, /removeSqlErdSession/);
+assert.match(sessionNavigationUtils, /buildSqlErdSessionHref/);
+assert.match(sessionNavigationUtils, /readSqlErdSessionId/);
 
 assert.match(sessionStateUtils, /getSqlErdSessionReloadFailureAction/);
+assert.match(sessionStateUtils, /getSqlErdSessionLoadFailureState/);
 assert.match(sessionStateUtils, /kind: "preserve_current"/);
 assert.match(sessionStateUtils, /kind: "fallback_to_sample"/);
 assert.match(sessionStateUtils, /shouldApplySqlErdSessionLoadResult/);
@@ -2288,14 +2734,16 @@ assert.match(statusCopyUtils, /Check your connection and try Generate again/);
 assert.match(panel, /SqlErdCanvas/);
 assert.match(panel, /useAuthSession/);
 assert.match(panel, /createSqlErdApiClient/);
-assert.match(panel, /getActiveSession/);
+assert.match(panel, /getSession/);
+assert.match(panel, /sessionId: string/);
 assert.match(panel, /createSqlErdGenerateWorkspaceRequest/);
 assert.match(panel, /getSqlErdGenerateErrorMessage/);
 assert.match(panel, /getSqlErdSignInRequiredState/);
 assert.match(panel, /getSqlErdWorkspaceSaveErrorState/);
 assert.match(panel, /handleGenerate/);
-assert.match(panel, /createSession/);
 assert.match(panel, /updateSession/);
+assert.doesNotMatch(panel, /sqlErdApiClient\.createSession/);
+assert.match(panel, /label: "Save conflict"/);
 assert.match(panel, /pendingLayoutAutosaveJson/);
 assert.match(panel, /layoutAutosaveRetryAttempt/);
 assert.match(panel, /type LayoutAutosaveBlockReason/);
@@ -2312,12 +2760,12 @@ assert.match(panel, /handleRetryLayoutAutosaveOnce/);
 assert.match(panel, /handleLayoutChange/);
 assert.match(panel, /sessionLoadRequestIdRef/);
 assert.match(panel, /shouldApplySqlErdSessionLoadResult/);
-assert.match(panel, /fallbackToSampleOnFailure/);
-assert.match(panel, /getSqlErdSessionReloadFailureAction/);
-assert.match(
-  panel,
-  /void handleReloadSession\(\{ fallbackToSampleOnFailure: true \}\)/
-);
+assert.match(panel, /getSqlErdSessionLoadFailureState/);
+assert.match(panel, /hasLoadedSessionRef/);
+assert.match(panel, /SessionLoadPlaceholder/);
+assert.match(panel, /Session을 다시 불러오기/);
+assert.doesNotMatch(panel, /fallbackToSampleOnFailure/);
+assert.match(panel, /void handleReloadSession\(\)/);
 assert.match(panel, /onReloadSession=\{handleReloadPausedSession\}/);
 assert.doesNotMatch(panel, /onReloadSession=\{handleReloadSession\}/);
 assert.doesNotMatch(
@@ -2330,8 +2778,11 @@ assert.match(panel, /getLayoutAutosaveBlockReasonForStatus/);
 assert.match(panel, /isLayoutAutosaveTransientStatus/);
 assert.match(panel, /createSqlErdLayoutAutosaveRequest/);
 assert.match(panel, /getLayoutAutosaveDelayMs\(layoutAutosaveRetryAttempt\)/);
+const layoutAutosaveEffect = panel.slice(
+  panel.indexOf("const layoutAutosaveRequest")
+);
 const layoutAutosaveNonConflictCatch =
-  panel.match(
+  layoutAutosaveEffect.match(
     /if \(isSqlErdApiConflictError\(error\)\) \{[\s\S]*?return;\n\s*\}\n\n([\s\S]*?)\n\s*\}\n\s*\}, autosaveDelayMs/
   )?.[1] ?? "";
 assert.match(
@@ -2347,7 +2798,7 @@ assert.doesNotMatch(
   /setPendingLayoutAutosaveJson/
 );
 const layoutAutosaveConflictCatch =
-  panel.match(
+  layoutAutosaveEffect.match(
     /if \(isSqlErdApiConflictError\(error\)\) \{([\s\S]*?)\n\s*return;\n\s*\}/
   )?.[1] ?? "";
 assert.doesNotMatch(
@@ -2380,6 +2831,15 @@ assert.match(
 );
 assert.match(panel, /relationSourceCompartmentRef/);
 assert.match(panel, /getSelectedSqlErdRelationSourceRanges/);
+assert.match(panel, /import Link from "next\/link"/);
+assert.match(panel, /\bHome\b/);
+assert.match(panel, /function SqlErdHomeNavigationButton/);
+assert.match(panel, /href="\/sql-erd"/);
+assert.match(panel, /세션 목록으로 이동/);
+assert.match(panel, /function CollapsedSourcePanel/);
+assert.match(panel, /href="\/home"/);
+assert.match(panel, /aria-label="홈으로 이동"/);
+assert.match(panel, /<CollapsedSourcePanel onToggle=\{onToggle\} \/>/);
 assert.doesNotMatch(panel, /scrollIntoView/);
 assert.match(panel, /resolveSqlSourceEditorDialect/);
 assert.match(panel, /setLastResolvedDialect\(generateRequest\.resolvedDialect\)/);
@@ -2568,6 +3028,8 @@ assert.match(relationShape, /fromTableShapeId/);
 assert.match(relationShape, /toTableShapeId/);
 assert.match(relationShape, /startSide: T\.string/);
 assert.match(relationShape, /endSide: T\.string/);
+assert.match(relationShape, /startCardinality: T\.nullable\(T\.string\)/);
+assert.match(relationShape, /endCardinality: T\.nullable\(T\.string\)/);
 assert.match(relationShape, /points: T\.arrayOf/);
 assert.match(relationShape, /arrowPoints: T\.arrayOf/);
 assert.match(relationShape, /fromColumnIds: string\[\]/);
@@ -2581,6 +3043,8 @@ assert.match(relationShape, /getRelationCurveGeometryPoints\(/);
 assert.match(relationShape, / C /);
 assert.match(relationShape, /useValue/);
 assert.match(relationShape, /data-sqltoerd-relation-hit-target/);
+assert.match(relationShape, /data-sqltoerd-cardinality-marker/);
+assert.match(relationShape, /getSqlErdCardinalityMarkerGeometry/);
 assert.match(relationShape, /stroke="transparent"/);
 assert.match(relationShape, /SQLTOERD_RELATION_HIT_STROKE_WIDTH/);
 assert.doesNotMatch(relationShape, /canCull\(\)/);
@@ -2590,6 +3054,12 @@ assert.match(canvasSurface, /fromColumnIds: relation\.fromColumnIds/);
 assert.match(canvasSurface, /toColumnIds: relation\.toColumnIds/);
 assert.match(canvasSurface, /shape\.props\.fromColumnIds/);
 assert.match(canvasSurface, /shape\.props\.toColumnIds/);
+assert.match(canvasSurface, /inferSqlErdRelationCardinality/);
+assert.match(canvasSurface, /startCardinality: cardinality\?\.from \?\? null/);
+assert.match(canvasSurface, /endCardinality: cardinality\?\.to \?\? null/);
+assert.match(panel, /참조 컬럼/);
+assert.match(panel, /대상 컬럼/);
+assert.match(panel, /관계 의미/);
 
 assert.match(packageJson, /"node-sql-parser"/);
 assert.match(ddlParserUtils, /parseSqlDdlToErdModel/);
@@ -2604,10 +3074,12 @@ assert.match(ddlParserUtils, /foreign_key/);
 assert.match(ddlParserUtils, /unique/);
 
 assert.match(apiClient, /createSqlErdApiClient/);
-assert.match(apiClient, /getActiveSession/);
+assert.match(apiClient, /listSessions/);
+assert.match(apiClient, /getSession/);
 assert.match(apiClient, /createSession/);
 assert.match(apiClient, /updateSession/);
-assert.match(apiClient, /\/workspaces\/\$\{encodeURIComponent\(workspaceId\)\}\/sql-erd-session/);
-assert.match(apiClient, /\/workspaces\/\$\{encodeURIComponent\(workspaceId\)\}\/sql-erd-session\/\$\{encodeURIComponent\(sessionId\)\}/);
+assert.match(apiClient, /deleteSession/);
+assert.match(apiClient, /sql-erd-sessions/);
+assert.doesNotMatch(apiClient, /sql-erd-session`/);
 assert.match(apiClient, /Authorization: `Bearer \$\{accessToken\}`/);
 assert.match(apiClient, /credentials: "same-origin"/);

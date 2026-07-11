@@ -16,6 +16,7 @@ import {
 
 import { isSqlErdTableShape } from "@/features/sql-erd/shapes/sql-erd-table-shape";
 import type { ErdRelation } from "@/features/sql-erd/types";
+import type { SqlErdRelationCardinality } from "@/features/sql-erd/utils/model";
 
 export const SQLTOERD_RELATION_SHAPE_TYPE = "sqltoerd_relation";
 export const SQLTOERD_RELATION_HOVER_EVENT = "sqltoerd:relation-hover";
@@ -26,6 +27,13 @@ const TABLE_HEADER_HEIGHT = 54;
 const TABLE_ROW_HEIGHT = 42;
 const TABLE_BORDER_WIDTH = 1;
 const RELATION_CURVE_MIN_CONTROL_OFFSET = 80;
+const CARDINALITY_MARKER_HALF_HEIGHT = 6;
+const CARDINALITY_MARKER_NEAR_OFFSET = 5;
+const CARDINALITY_MARKER_FAR_OFFSET = 12;
+const CARDINALITY_MARKER_CIRCLE_OFFSET = 14;
+const CARDINALITY_MARKER_MANY_JUNCTION_OFFSET = 14;
+const CARDINALITY_MARKER_MANY_CIRCLE_OFFSET = 21;
+const CARDINALITY_MARKER_CIRCLE_RADIUS = 3.5;
 
 export type SqlErdRelationRoutePoint = {
   x: number;
@@ -60,6 +68,24 @@ type RelationPortAnchor = {
   y: number;
 };
 
+type CardinalityMarkerSegment = {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+};
+
+type CardinalityMarkerCircle = {
+  cx: number;
+  cy: number;
+  r: number;
+};
+
+export type SqlErdCardinalityMarkerGeometry = {
+  circles: CardinalityMarkerCircle[];
+  segments: CardinalityMarkerSegment[];
+};
+
 type RelationColumnIds = {
   fromColumnIds: string[];
   toColumnIds: string[];
@@ -88,9 +114,11 @@ export type SqlErdRelationShapeProps = {
   constraintName: string | null;
   fromTableShapeId: string;
   toTableShapeId: string;
+  endCardinality: SqlErdRelationCardinality | null;
   endSide: RelationPortSide;
   points: SqlErdRelationRoutePoint[];
   arrowPoints: SqlErdRelationRoutePoint[];
+  startCardinality: SqlErdRelationCardinality | null;
   startSide: RelationPortSide;
 };
 
@@ -148,6 +176,63 @@ export function getSqlErdRelationVisualStyle({
   return {
     stroke: "rgba(37, 99, 235, 0.58)",
     strokeWidth: 2.5
+  };
+}
+
+export function getSqlErdCardinalityMarkerGeometry(
+  endpoint: SqlErdRelationRoutePoint,
+  side: RelationPortSide,
+  cardinality: SqlErdRelationCardinality
+): SqlErdCardinalityMarkerGeometry {
+  const direction = side === "right" ? 1 : -1;
+  const createVerticalSegment = (offset: number) => ({
+    x1: endpoint.x + offset * direction,
+    y1: endpoint.y - CARDINALITY_MARKER_HALF_HEIGHT,
+    x2: endpoint.x + offset * direction,
+    y2: endpoint.y + CARDINALITY_MARKER_HALF_HEIGHT
+  });
+
+  if (cardinality === "one") {
+    return {
+      circles: [],
+      segments: [
+        createVerticalSegment(CARDINALITY_MARKER_NEAR_OFFSET),
+        createVerticalSegment(CARDINALITY_MARKER_FAR_OFFSET)
+      ]
+    };
+  }
+
+  if (cardinality === "zero_or_one") {
+    return {
+      circles: [
+        {
+          cx: endpoint.x + CARDINALITY_MARKER_CIRCLE_OFFSET * direction,
+          cy: endpoint.y,
+          r: CARDINALITY_MARKER_CIRCLE_RADIUS
+        }
+      ],
+      segments: [createVerticalSegment(CARDINALITY_MARKER_NEAR_OFFSET)]
+    };
+  }
+
+  const junctionX =
+    endpoint.x + CARDINALITY_MARKER_MANY_JUNCTION_OFFSET * direction;
+  const prongX = endpoint.x + CARDINALITY_MARKER_NEAR_OFFSET * direction;
+
+  return {
+    circles: [
+      {
+        cx: endpoint.x + CARDINALITY_MARKER_MANY_CIRCLE_OFFSET * direction,
+        cy: endpoint.y,
+        r: CARDINALITY_MARKER_CIRCLE_RADIUS
+      }
+    ],
+    segments: [-1, 0, 1].map((verticalDirection) => ({
+      x1: junctionX,
+      y1: endpoint.y,
+      x2: prongX,
+      y2: endpoint.y + CARDINALITY_MARKER_HALF_HEIGHT * verticalDirection
+    }))
   };
 }
 
@@ -600,6 +685,52 @@ export function getSqlErdRelationShapeLayout(
   };
 }
 
+function SqlErdCardinalityMarker({
+  cardinality,
+  endpoint,
+  side,
+  stroke,
+  strokeWidth
+}: {
+  cardinality: SqlErdRelationCardinality;
+  endpoint: SqlErdRelationRoutePoint;
+  side: RelationPortSide;
+  stroke: string;
+  strokeWidth: number;
+}) {
+  const geometry = getSqlErdCardinalityMarkerGeometry(
+    endpoint,
+    side,
+    cardinality
+  );
+
+  return (
+    <g
+      data-sqltoerd-cardinality-marker={cardinality}
+      pointerEvents="none"
+    >
+      {geometry.segments.map((segment, index) => (
+        <line
+          key={`segment-${index}`}
+          stroke={stroke}
+          strokeLinecap="round"
+          strokeWidth={strokeWidth}
+          {...segment}
+        />
+      ))}
+      {geometry.circles.map((circle, index) => (
+        <circle
+          fill="var(--background)"
+          key={`circle-${index}`}
+          stroke={stroke}
+          strokeWidth={strokeWidth}
+          {...circle}
+        />
+      ))}
+    </g>
+  );
+}
+
 function SqlErdRelationLine({ shape }: { shape: SqlErdRelationShape }) {
   const editor = useEditor();
   const [isHovered, setIsHovered] = useState(false);
@@ -617,6 +748,14 @@ function SqlErdRelationLine({ shape }: { shape: SqlErdRelationShape }) {
     isHovered,
     isSelected
   });
+  const startPoint = shape.props.points[0];
+  const endPoint = shape.props.points.at(-1);
+  const hasCardinalityMarkers = Boolean(
+    startPoint &&
+      endPoint &&
+      shape.props.startCardinality &&
+      shape.props.endCardinality
+  );
 
   function handlePointerEnter() {
     setIsHovered(true);
@@ -667,11 +806,34 @@ function SqlErdRelationLine({ shape }: { shape: SqlErdRelationShape }) {
         strokeLinejoin="round"
         strokeWidth={visualStyle.strokeWidth}
       />
-      <polygon
-        fill={visualStyle.stroke}
-        pointerEvents="none"
-        points={getPointListData(shape.props.arrowPoints)}
-      />
+      {hasCardinalityMarkers &&
+      startPoint &&
+      endPoint &&
+      shape.props.startCardinality &&
+      shape.props.endCardinality ? (
+        <>
+          <SqlErdCardinalityMarker
+            cardinality={shape.props.startCardinality}
+            endpoint={startPoint}
+            side={shape.props.startSide}
+            stroke={visualStyle.stroke}
+            strokeWidth={visualStyle.strokeWidth}
+          />
+          <SqlErdCardinalityMarker
+            cardinality={shape.props.endCardinality}
+            endpoint={endPoint}
+            side={shape.props.endSide}
+            stroke={visualStyle.stroke}
+            strokeWidth={visualStyle.strokeWidth}
+          />
+        </>
+      ) : (
+        <polygon
+          fill={visualStyle.stroke}
+          pointerEvents="none"
+          points={getPointListData(shape.props.arrowPoints)}
+        />
+      )}
     </SVGContainer>
   );
 }
@@ -690,6 +852,7 @@ export class SqlErdRelationShapeUtil extends ShapeUtil<SqlErdRelationShape> {
     constraintName: T.nullable(T.string),
     fromTableShapeId: T.string,
     toTableShapeId: T.string,
+    endCardinality: T.nullable(T.string),
     endSide: T.string,
     points: T.arrayOf(
       T.object({
@@ -703,6 +866,7 @@ export class SqlErdRelationShapeUtil extends ShapeUtil<SqlErdRelationShape> {
         y: T.number
       })
     ),
+    startCardinality: T.nullable(T.string),
     startSide: T.string
   };
 
@@ -726,12 +890,14 @@ export class SqlErdRelationShapeUtil extends ShapeUtil<SqlErdRelationShape> {
       constraintName: null,
       fromTableShapeId: "",
       toTableShapeId: "",
+      endCardinality: null,
       endSide: "left",
       points: [
         { x: 0, y: 0 },
         { x: 1, y: 1 }
       ],
       arrowPoints: [],
+      startCardinality: null,
       startSide: "right"
     };
   }

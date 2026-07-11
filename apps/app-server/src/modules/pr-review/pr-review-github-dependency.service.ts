@@ -10,6 +10,8 @@ import type {
   PrReviewGithubChangedFile,
   PrReviewGithubConflictApplyInput,
   PrReviewGithubConflictApplyPayload,
+  PrReviewGithubConflictsApplyInput,
+  PrReviewGithubConflictsApplyPayload,
   PrReviewGithubConflictInputsPayload,
   PrReviewGithubConflictStatusPayload,
   PrReviewGithubDependency,
@@ -139,6 +141,20 @@ export class PrReviewGithubDependencyService implements PrReviewGithubDependency
     input: PrReviewGithubConflictApplyInput
   ): Promise<PrReviewGithubConflictApplyPayload> {
     return this.githubIntegrationService.applyGithubPullRequestFileResolution(
+      currentUserId,
+      workspaceId,
+      pullRequestId,
+      input
+    );
+  }
+
+  async applyPullRequestConflictResolutions(
+    currentUserId: string,
+    workspaceId: string,
+    pullRequestId: string,
+    input: PrReviewGithubConflictsApplyInput
+  ): Promise<PrReviewGithubConflictsApplyPayload> {
+    return this.githubIntegrationService.applyGithubPullRequestConflictResolutions(
       currentUserId,
       workspaceId,
       pullRequestId,

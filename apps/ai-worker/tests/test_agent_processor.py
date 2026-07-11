@@ -88,10 +88,12 @@ class FakeAgentRunRepository:
         self,
         context: AgentRunContext | None | object = _DEFAULT_CONTEXT,
         lock: bool = True,
+        complete_step_result: bool = True,
         context_error: Exception | None = None,
     ) -> None:
         self.context = run_context() if context is _DEFAULT_CONTEXT else context
         self.lock = lock
+        self.complete_step_result = complete_step_result
         self.context_error = context_error
         self.lock_calls: list[str] = []
         self.release_calls: list[str] = []
@@ -123,8 +125,9 @@ class FakeAgentRunRepository:
         run_id: str,
         step_id: str,
         output_summary: dict[str, object],
-    ) -> None:
+    ) -> bool:
         self.completed_steps.append((run_id, step_id, output_summary))
+        return self.complete_step_result
 
     def fail_planner_step(
         self,
@@ -264,6 +267,20 @@ def test_processor_completes_planning_run_with_tool_candidate() -> None:
     assert handoff_client.calls == [RUN_ID]
     assert planner_client.requests[0].current_date == "2026-07-09"
     assert planner_client.requests[0].timezone == "Asia/Seoul"
+
+
+def test_processor_stops_when_planner_step_completion_loses_claim() -> None:
+    repository = FakeAgentRunRepository(complete_step_result=False)
+    handoff_client = FakeExecutionHandoffClient()
+    processor = create_processor(repository, execution_handoff_client=handoff_client)
+
+    result = processor.process_payload(agent_payload())
+
+    assert result.delete_message is True
+    assert result.reason == "agent_planner_step_no_longer_running"
+    assert repository.tool_execution_ready_updates == []
+    assert repository.completed_runs == []
+    assert handoff_client.calls == []
 
 
 def test_processor_uses_run_timezone_for_current_date() -> None:

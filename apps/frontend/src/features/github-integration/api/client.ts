@@ -20,6 +20,8 @@ import type {
   ListGithubPullRequestsQuery,
   ListGithubRepositoriesQuery,
   ListGithubSyncRunsQuery,
+  GithubProjectV2Selection,
+  ReplaceGithubProjectV2SelectionsInput,
   StartGithubAppInstallationInput,
   StartGithubOAuthInput,
   StartGithubSyncRunInput
@@ -479,6 +481,17 @@ export function createGithubIntegrationApiClient({
       return requestGithubIntegrationData<GithubProjectV2>(
         projectV2GithubPath(workspaceId, projectV2Id),
         undefined,
+        requestOptions
+      );
+    },
+
+    async replaceGithubProjectV2Selections(
+      workspaceId: string,
+      body: ReplaceGithubProjectV2SelectionsInput
+    ) {
+      return requestGithubIntegrationData<GithubProjectV2Selection>(
+        workspaceGithubPath(workspaceId, "/project-v2-selections"),
+        withJsonBody(body, { method: "PUT" }),
         requestOptions
       );
     },

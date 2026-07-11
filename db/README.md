@@ -41,3 +41,6 @@ The database schema source of truth is the migration history in `db/migrations/`
 - `migrations/022_create_board_issue_create_operations.sql` adds durable Board Issue creation idempotency, step checkpoints, retry leases, and remote-resource lookup indexes.
 - `migrations/023_enable_sql_erd_multi_sessions.sql` removes the one-active-session-per-Workspace unique index and adds the active session recent-order index for SQLtoERD multi-session storage.
 - `migrations/024_create_agent_run_outbox.sql` adds durable Agent planning-job delivery intents, bounded retry state, and recovery claim indexes.
+- `migrations/025_create_github_project_v2_selections.sql` adds selected GitHub ProjectV2 storage per installation with RLS enabled.
+- `migrations/026_replace_pilo_sticky_notes_with_tldraw_notes.sql` migrates saved custom PILO sticky notes to Tldraw built-in note shapes while preserving note text.
+- `migrations/027_create_canvas_agent_runtime.sql` adds Canvas AI runtime tables, per-user draft storage, semantic shape embeddings, and pgvector support for Canvas-only actions.

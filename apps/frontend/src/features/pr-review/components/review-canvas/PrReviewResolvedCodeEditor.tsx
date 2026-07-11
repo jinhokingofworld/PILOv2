@@ -24,6 +24,7 @@ import {
 } from "@codemirror/language";
 import { Compartment, EditorState, type Extension } from "@codemirror/state";
 import {
+  Decoration,
   drawSelection,
   EditorView,
   highlightActiveLine,
@@ -33,9 +34,12 @@ import {
 } from "@codemirror/view";
 
 type PrReviewResolvedCodeEditorProps = {
+  changedLineNumbers: number[];
   filePath: string;
   onChange: (value: string) => void;
   readOnly: boolean;
+  revealLine: number | null;
+  revealRequestId: number;
   value: string;
 };
 
@@ -70,6 +74,10 @@ const editorTheme = EditorView.theme({
   ".cm-activeLine, .cm-activeLineGutter": {
     backgroundColor: "#eff6ff"
   },
+  ".cm-resolvedChangedLine": {
+    backgroundColor: "#ecfdf5",
+    boxShadow: "inset 3px 0 0 #10b981"
+  },
   ".cm-selectionBackground": {
     backgroundColor: "#bfdbfe !important"
   },
@@ -77,6 +85,28 @@ const editorTheme = EditorView.theme({
     outline: "none"
   }
 });
+
+function buildChangedLineHighlightExtension(changedLineNumbers: number[]) {
+  const uniqueLineNumbers = [...new Set(changedLineNumbers)].sort(
+    (left, right) => left - right
+  );
+
+  return EditorView.decorations.compute(["doc"], (state) =>
+    Decoration.set(
+      uniqueLineNumbers.flatMap((lineNumber) => {
+        if (lineNumber < 1 || lineNumber > state.doc.lines) {
+          return [];
+        }
+
+        return [
+          Decoration.line({ class: "cm-resolvedChangedLine" }).range(
+            state.doc.line(lineNumber).from
+          )
+        ];
+      })
+    )
+  );
+}
 
 function getLanguageExtension(filePath: string): Extension {
   const extension = filePath.split(".").pop()?.toLowerCase();
@@ -118,14 +148,18 @@ function getLanguageExtension(filePath: string): Extension {
 }
 
 export function PrReviewResolvedCodeEditor({
+  changedLineNumbers,
   filePath,
   onChange,
   readOnly,
+  revealLine,
+  revealRequestId,
   value
 }: PrReviewResolvedCodeEditorProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
   const readOnlyCompartmentRef = useRef(new Compartment());
+  const changedLinesCompartmentRef = useRef(new Compartment());
   const isApplyingExternalValueRef = useRef(false);
   const onChangeRef = useRef(onChange);
 
@@ -156,6 +190,9 @@ export function PrReviewResolvedCodeEditor({
           getLanguageExtension(filePath),
           keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
           editorTheme,
+          changedLinesCompartmentRef.current.of(
+            buildChangedLineHighlightExtension(changedLineNumbers)
+          ),
           readOnlyCompartmentRef.current.of([
             EditorState.readOnly.of(readOnly),
             EditorView.editable.of(!readOnly)
@@ -204,6 +241,29 @@ export function PrReviewResolvedCodeEditor({
       ])
     });
   }, [readOnly]);
+
+  useEffect(() => {
+    viewRef.current?.dispatch({
+      effects: changedLinesCompartmentRef.current.reconfigure(
+        buildChangedLineHighlightExtension(changedLineNumbers)
+      )
+    });
+  }, [changedLineNumbers]);
+
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view || revealLine === null) {
+      return;
+    }
+
+    const lineNumber = Math.min(Math.max(revealLine, 1), view.state.doc.lines);
+    const line = view.state.doc.line(lineNumber);
+    view.dispatch({
+      effects: EditorView.scrollIntoView(line.from, { y: "center" }),
+      selection: { anchor: line.from }
+    });
+    view.focus();
+  }, [revealLine, revealRequestId]);
 
   return (
     <div

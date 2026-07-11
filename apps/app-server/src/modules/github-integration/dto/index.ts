@@ -41,6 +41,11 @@ export interface ListGithubProjectsV2Query {
   limit?: unknown;
 }
 
+export interface ReplaceGithubProjectV2SelectionsRequest {
+  installationId?: unknown;
+  projectV2Ids?: unknown;
+}
+
 export interface ListGithubPullRequestsQuery {
   state?: unknown;
   query?: unknown;

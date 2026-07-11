@@ -3,6 +3,8 @@ import {
   Controller,
   Delete,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
   Patch,
   Post,
@@ -14,6 +16,15 @@ import { apiResponse, ApiSuccessResponse } from "../../common/api-response";
 import { AuthGuard } from "../../common/auth.guard";
 import { CurrentUserId } from "../../common/current-user.decorator";
 import { CanvasService } from "./canvas.service";
+import { CanvasAgentService } from "./agent/canvas-agent.service";
+import type {
+  ApplyCanvasAgentDraftRequest,
+  CanvasAgentDraftApplyPayload,
+  CanvasAgentDraftPayload,
+  CanvasAgentRunDetailPayload,
+  CanvasAgentRunPayload,
+  CreateCanvasAgentRunRequest
+} from "./agent/canvas-agent.types";
 import {
   CanvasBoardDetailPayload,
   CanvasBoardPayload,
@@ -37,7 +48,98 @@ import {
 @Controller("workspaces/:workspaceId")
 @UseGuards(AuthGuard)
 export class CanvasController {
-  constructor(private readonly canvasService: CanvasService) {}
+  constructor(
+    private readonly canvasService: CanvasService,
+    private readonly canvasAgentService: CanvasAgentService
+  ) {}
+
+  @Post("canvases/:canvasId/agent-runs")
+  @HttpCode(HttpStatus.ACCEPTED)
+  async createCanvasAgentRun(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("canvasId") canvasId: string,
+    @Body() body: CreateCanvasAgentRunRequest
+  ): Promise<ApiSuccessResponse<{ run: CanvasAgentRunPayload }>> {
+    const run = await this.canvasAgentService.createRun(
+      currentUserId,
+      workspaceId,
+      canvasId,
+      body
+    );
+
+    return apiResponse({ run });
+  }
+
+  @Get("canvases/:canvasId/agent-runs/:runId")
+  async getCanvasAgentRun(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("canvasId") canvasId: string,
+    @Param("runId") runId: string
+  ): Promise<ApiSuccessResponse<CanvasAgentRunDetailPayload>> {
+    const detail = await this.canvasAgentService.getRunDetail(
+      currentUserId,
+      workspaceId,
+      canvasId,
+      runId
+    );
+
+    return apiResponse(detail);
+  }
+
+  @Post("canvases/:canvasId/agent-runs/:runId/cancel")
+  async cancelCanvasAgentRun(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("canvasId") canvasId: string,
+    @Param("runId") runId: string
+  ): Promise<ApiSuccessResponse<{ run: CanvasAgentRunPayload }>> {
+    const run = await this.canvasAgentService.cancelRun(
+      currentUserId,
+      workspaceId,
+      canvasId,
+      runId
+    );
+
+    return apiResponse({ run });
+  }
+
+  @Post("canvases/:canvasId/agent-drafts/:draftId/apply")
+  async applyCanvasAgentDraft(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("canvasId") canvasId: string,
+    @Param("draftId") draftId: string,
+    @Body() body: ApplyCanvasAgentDraftRequest
+  ): Promise<ApiSuccessResponse<CanvasAgentDraftApplyPayload>> {
+    const result = await this.canvasAgentService.applyDraft(
+      currentUserId,
+      workspaceId,
+      canvasId,
+      draftId,
+      body
+    );
+
+    return apiResponse(result);
+  }
+
+  @Post("canvases/:canvasId/agent-drafts/:draftId/discard")
+  async discardCanvasAgentDraft(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("canvasId") canvasId: string,
+    @Param("draftId") draftId: string
+  ): Promise<ApiSuccessResponse<{ draft: CanvasAgentDraftPayload }>> {
+    const draft = await this.canvasAgentService.discardDraft(
+      currentUserId,
+      workspaceId,
+      canvasId,
+      draftId
+    );
+
+    return apiResponse({ draft });
+  }
 
   @Get("canvases")
   async listCanvases(

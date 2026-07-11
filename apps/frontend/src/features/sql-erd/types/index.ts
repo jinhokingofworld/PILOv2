@@ -62,6 +62,34 @@ export type SqltoerdLayoutJsonV1 = {
   version: typeof SQLTOERD_LAYOUT_JSON_VERSION;
   tableLayouts: SqltoerdTableLayout[];
   viewport?: SqltoerdViewport;
+  annotations?: SqltoerdAnnotationsV1;
+};
+
+export type SqltoerdAnnotationsV1 = {
+  version: 1;
+  links: SqltoerdAnnotationLink[];
+};
+
+export type SqltoerdAnnotationLink =
+  | SqltoerdTableAnnotationLink
+  | SqltoerdColumnAnnotationLink;
+
+export type SqltoerdTableAnnotationLink = {
+  id: string;
+  kind: "table_link";
+  fromTableId: string;
+  toTableId: string;
+  label: string;
+};
+
+export type SqltoerdColumnAnnotationLink = {
+  id: string;
+  kind: "column_link";
+  fromTableId: string;
+  fromColumnId: string;
+  toTableId: string;
+  toColumnId: string;
+  label: string;
 };
 
 export type SqltoerdTableLayout = {
@@ -97,6 +125,33 @@ export type SqltoerdSessionPayload = {
   createdAt: string;
   updatedAt: string;
   deletedAt: string | null;
+};
+
+export type SqltoerdSessionSummary = Pick<
+  SqltoerdSessionPayload,
+  | "id"
+  | "workspaceId"
+  | "title"
+  | "sourceFormat"
+  | "dialect"
+  | "tableCount"
+  | "relationCount"
+  | "revision"
+  | "createdBy"
+  | "updatedBy"
+  | "createdAt"
+  | "updatedAt"
+>;
+
+export type SqltoerdSessionListPayload = {
+  items: SqltoerdSessionSummary[];
+  nextCursor: string | null;
+};
+
+export type SqltoerdSessionDeletePayload = {
+  id: string;
+  deletedAt: string;
+  revision: number;
 };
 
 export type SqltoerdSessionFixture = {

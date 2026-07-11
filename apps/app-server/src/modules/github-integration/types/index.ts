@@ -148,7 +148,13 @@ export interface GithubProjectV2ListItemPayload {
   closed: boolean;
   template: boolean;
   repositoryIds: string[];
+  selected: boolean;
   lastSyncedAt: string | null;
+}
+
+export interface GithubProjectV2SelectionPayload {
+  installationId: string;
+  projectV2Ids: string[];
 }
 
 export interface GithubProjectV2DetailPayload
@@ -382,6 +388,18 @@ export interface ApplyGithubPullRequestFileResolutionInput {
   expectedHeadBlobSha: string;
 }
 
+export interface ApplyGithubPullRequestConflictResolutionFileInput {
+  filePath: string;
+  resolvedContent: string;
+  expectedHeadBlobSha: string;
+}
+
+export interface ApplyGithubPullRequestConflictResolutionInput {
+  files: ApplyGithubPullRequestConflictResolutionFileInput[];
+  expectedBaseSha: string;
+  expectedHeadSha: string;
+}
+
 export interface GithubPullRequestFileResolutionPayload {
   appliedByGithubLogin: string;
   commitSha: string;
@@ -390,6 +408,22 @@ export interface GithubPullRequestFileResolutionPayload {
   headShaAfter: string;
   headBlobShaBefore: string;
   headBlobShaAfter: string;
+  localCacheUpdated: boolean;
+}
+
+export interface GithubPullRequestConflictResolutionFilePayload {
+  filePath: string;
+  headBlobShaBefore: string;
+  headBlobShaAfter: string;
+}
+
+export interface GithubPullRequestConflictResolutionPayload {
+  appliedByGithubLogin: string;
+  commitSha: string;
+  commitUrl: string | null;
+  headShaBefore: string;
+  headShaAfter: string;
+  files: GithubPullRequestConflictResolutionFilePayload[];
   localCacheUpdated: boolean;
 }
 

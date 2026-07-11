@@ -8,6 +8,7 @@ from app.agent_processor import (
     AGENT_RUN_REQUESTED_JOB_TYPE,
     AgentProcessResult,
 )
+from app.canvas_agent.types import CANVAS_AGENT_JOB_TYPE, CanvasAgentProcessResult
 from app.meeting_report_processor import InfrastructureError, ProcessResult
 
 MEETING_REPORT_JOB_TYPE = "meeting_report"
@@ -29,14 +30,20 @@ class AgentRunProcessorLike(Protocol):
     def process_payload(self, payload: dict[str, object]) -> AgentProcessResult: ...
 
 
+class CanvasAgentProcessorLike(Protocol):
+    def process_payload(self, payload: dict[str, object]) -> CanvasAgentProcessResult: ...
+
+
 class JobDispatcher:
     def __init__(
         self,
         meeting_report_processor: MeetingReportProcessorLike,
         agent_run_processor: AgentRunProcessorLike,
+        canvas_agent_processor: CanvasAgentProcessorLike | None = None,
     ) -> None:
         self.meeting_report_processor = meeting_report_processor
         self.agent_run_processor = agent_run_processor
+        self.canvas_agent_processor = canvas_agent_processor
 
     def process_message(self, message_body: str) -> JobProcessResult:
         try:
@@ -59,6 +66,9 @@ class JobDispatcher:
 
             if normalized_job_type == AGENT_RUN_REQUESTED_JOB_TYPE:
                 return self._process_agent_run(payload)
+
+            if normalized_job_type == CANVAS_AGENT_JOB_TYPE:
+                return self._process_canvas_agent(payload)
         except InfrastructureError:
             return JobProcessResult(
                 delete_message=False,
@@ -87,5 +97,21 @@ class JobDispatcher:
             delete_message=result.delete_message,
             reason=result.reason,
             job_type=AGENT_RUN_REQUESTED_JOB_TYPE,
+            resource_id=result.run_id,
+        )
+
+    def _process_canvas_agent(self, payload: dict[str, object]) -> JobProcessResult:
+        if self.canvas_agent_processor is None:
+            return JobProcessResult(
+                delete_message=True,
+                reason="canvas_agent_processor_unavailable",
+                job_type=CANVAS_AGENT_JOB_TYPE,
+            )
+
+        result = self.canvas_agent_processor.process_payload(payload)
+        return JobProcessResult(
+            delete_message=result.delete_message,
+            reason=result.reason,
+            job_type=CANVAS_AGENT_JOB_TYPE,
             resource_id=result.run_id,
         )

@@ -81,7 +81,15 @@ assert.match(
 );
 assert.match(
   prReviewController,
+  /@Post\("review-sessions\/:reviewSessionId\/conflict-apply"\)/
+);
+assert.match(
+  prReviewController,
   /@Post\("review-files\/:reviewFileId\/conflict-suggestion"\)/
+);
+assert.match(
+  prReviewController,
+  /@Post\("review-files\/:reviewFileId\/conflict-apply"\)/
 );
 assert.match(
   prReviewController,
@@ -98,6 +106,16 @@ assert.match(prReviewController, /@Delete\("review-sessions\/:reviewSessionId"\)
 assert.match(prReviewController, /apiResponse/);
 
 assert.match(prReviewGithubDependencyService, /GithubIntegrationService/);
+assert.match(
+  prReviewGithubDependencyService,
+  /applyGithubPullRequestConflictResolutions/
+);
+assert.match(prReviewService, /applyReviewSessionConflictResolutions/);
+assert.match(prReviewService, /Review session conflict file set is stale/);
+assert.match(
+  prReviewApi,
+  /review-sessions\/\{reviewSessionId\}\/conflict-apply/
+);
 assert.match(prReviewGithubDependencyService, /getCurrentUserGithubOAuthStatus/);
 assert.match(prReviewGithubDependencyService, /getPullRequestDetail/);
 assert.match(prReviewGithubDependencyService, /getPullRequestChangedFiles/);

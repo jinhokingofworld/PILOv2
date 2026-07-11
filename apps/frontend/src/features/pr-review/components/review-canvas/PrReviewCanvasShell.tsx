@@ -10,6 +10,8 @@ import {
 import {
   AlertCircle,
   ArrowLeft,
+  CheckCircle2,
+  ExternalLink,
   FileText,
   GitBranch,
   GitMerge,
@@ -45,10 +47,19 @@ import {
 import { PrReviewCanvasSurface } from "@/features/pr-review/components/review-canvas/PrReviewCanvasSurface";
 import { PrReviewFileDiffDrawer } from "@/features/pr-review/components/review-canvas/PrReviewFileDiffDrawer";
 import { PrReviewSubmitReviewModal } from "@/features/pr-review/components/review-canvas/PrReviewSubmitReviewModal";
+import {
+  buildPrReviewConflictsApplyInput,
+  createPrReviewConflictDraft,
+  getPrReviewConflictDraftProgress,
+  isPrReviewConflictDraftReady,
+  reconcilePrReviewConflictDrafts,
+  type PrReviewConflictDraft,
+  type PrReviewConflictDraftMap
+} from "@/features/pr-review/components/review-canvas/pr-review-conflict-drafts";
 import type {
   PrReviewCanvas,
   PrReviewConflictAnalysis,
-  PrReviewConflictApplyResult,
+  PrReviewConflictsApplyResult,
   PrReviewConflictFile,
   PrReviewConflictStatus,
   PrReviewFile,
@@ -80,6 +91,8 @@ type ConflictAnalysisLoadStatus =
   | "error"
   | "stale";
 type MergeStatus = "idle" | "merging" | "merged" | "error";
+type ConflictApplyStatus = "idle" | "applying" | "applied" | "error";
+type GithubReconnectStatus = "idle" | "opening" | "opened" | "error";
 type LoadCanvasDataOptions = {
   quiet?: boolean;
 };
@@ -208,6 +221,43 @@ function getMergeErrorMessage(error: unknown) {
   return "GitHub pull request merge failed";
 }
 
+function getConflictApplyErrorMessage(error: unknown) {
+  const message =
+    error instanceof Error ? error.message : "Conflict 적용에 실패했습니다.";
+
+  if (
+    message.includes("conflict file set is stale") ||
+    message.includes("head SHA is stale") ||
+    message.includes("base SHA is stale") ||
+    message.includes("blob SHA is stale") ||
+    message.includes("pull request conflict no longer exists")
+  ) {
+    return "PR 브랜치의 Conflict 상태가 바뀌었습니다. 동기화 후 새 리뷰를 시작해 주세요.";
+  }
+  if (message.includes("Unsupported conflict files")) {
+    return "PILO에서 지원하지 않는 Conflict 파일이 있어 전체 적용할 수 없습니다.";
+  }
+  if (message.includes("Contents write permission is required")) {
+    return "GitHub App에 Contents 쓰기 권한이 필요합니다.";
+  }
+  if (message.includes("GitHub OAuth connection is required")) {
+    return "GitHub 연결이 필요합니다. GitHub를 연결한 뒤 다시 시도해 주세요.";
+  }
+  if (message.includes("GitHub OAuth connection is invalid")) {
+    return "GitHub 연결이 유효하지 않습니다. GitHub를 다시 연결해 주세요.";
+  }
+
+  return message;
+}
+
+function isGithubOAuthReconnectError(error: unknown) {
+  const message = error instanceof Error ? error.message : "";
+  return (
+    message.includes("GitHub OAuth connection is required") ||
+    message.includes("GitHub OAuth connection is invalid")
+  );
+}
+
 function getMergeDisabledReason(input: {
   conflictStatus: PrReviewConflictStatus;
   isPullRequestMerged: boolean;
@@ -268,6 +318,26 @@ export function PrReviewCanvasShell({
   const [isMergeConfirmOpen, setIsMergeConfirmOpen] = useState(false);
   const [mergeStatus, setMergeStatus] = useState<MergeStatus>("idle");
   const [mergeError, setMergeError] = useState<string | null>(null);
+  const [conflictDrafts, setConflictDrafts] =
+    useState<PrReviewConflictDraftMap>({});
+  const [isConflictApplyConfirmOpen, setIsConflictApplyConfirmOpen] =
+    useState(false);
+  const [conflictApplyStatus, setConflictApplyStatus] =
+    useState<ConflictApplyStatus>("idle");
+  const [conflictApplyError, setConflictApplyError] = useState<string | null>(
+    null
+  );
+  const [conflictApplyResult, setConflictApplyResult] =
+    useState<PrReviewConflictsApplyResult | null>(null);
+  const [
+    conflictApplyRequiresGithubReconnect,
+    setConflictApplyRequiresGithubReconnect
+  ] = useState(false);
+  const [githubReconnectStatus, setGithubReconnectStatus] =
+    useState<GithubReconnectStatus>("idle");
+  const [githubReconnectMessage, setGithubReconnectMessage] = useState<
+    string | null
+  >(null);
 
   const loadCanvasData = useCallback(async (options: LoadCanvasDataOptions = {}) => {
     const quiet = options.quiet ?? false;
@@ -339,6 +409,26 @@ export function PrReviewCanvasShell({
   useEffect(() => {
     void loadCanvasData();
   }, [loadCanvasData]);
+
+  useEffect(() => {
+    setConflictDrafts({});
+    setConflictApplyStatus("idle");
+    setConflictApplyError(null);
+    setConflictApplyResult(null);
+    setConflictApplyRequiresGithubReconnect(false);
+    setGithubReconnectStatus("idle");
+    setGithubReconnectMessage(null);
+  }, [session.id]);
+
+  useEffect(() => {
+    if (!conflictAnalysis || conflictAnalysis.reviewSessionId !== session.id) {
+      return;
+    }
+
+    setConflictDrafts((currentDrafts) =>
+      reconcilePrReviewConflictDrafts(conflictAnalysis, currentDrafts)
+    );
+  }, [conflictAnalysis, session.id]);
 
   const handleDecisionSaved = useCallback(
     (
@@ -429,15 +519,17 @@ export function PrReviewCanvasShell({
     [loadCanvasData]
   );
 
-  const handleConflictApplied = useCallback(
-    async (result: PrReviewConflictApplyResult) => {
-      if (result.localStateStatus === "sync_required") {
-        return;
-      }
-
-      await loadCanvasData({ quiet: true });
+  const handleConflictDraftChange = useCallback(
+    (reviewFileId: string, draft: PrReviewConflictDraft) => {
+      setConflictDrafts((currentDrafts) => ({
+        ...currentDrafts,
+        [reviewFileId]: draft
+      }));
+      setConflictApplyStatus("idle");
+      setConflictApplyError(null);
+      setConflictApplyResult(null);
     },
-    [loadCanvasData]
+    []
   );
 
   const headBranch =
@@ -472,9 +564,52 @@ export function PrReviewCanvasShell({
   const selectedConflictFile = selectedReviewFileId
     ? contentConflictByFileId.get(selectedReviewFileId) ?? null
     : null;
+  const selectedConflictDraft = selectedConflictFile
+    ? conflictDrafts[selectedConflictFile.reviewFileId] ??
+      createPrReviewConflictDraft(selectedConflictFile)
+    : null;
   const selectedUnsupportedConflictFile = selectedReviewFileId
     ? unsupportedConflictByFileId.get(selectedReviewFileId) ?? null
     : null;
+  const conflictDraftProgress = useMemo(
+    () => getPrReviewConflictDraftProgress(conflictAnalysis, conflictDrafts),
+    [conflictAnalysis, conflictDrafts]
+  );
+  const preparedConflictFileIdKey = useMemo(
+    () =>
+      (conflictAnalysis?.files ?? [])
+        .filter((file) =>
+          isPrReviewConflictDraftReady(
+            file,
+            conflictDrafts[file.reviewFileId]
+          )
+        )
+        .map((file) => file.reviewFileId)
+        .sort()
+        .join("\0"),
+    [conflictAnalysis, conflictDrafts]
+  );
+  const preparedConflictFileIds = useMemo(
+    () =>
+      new Set(
+        preparedConflictFileIdKey ? preparedConflictFileIdKey.split("\0") : []
+      ),
+    [preparedConflictFileIdKey]
+  );
+  const conflictApplyDisabledReason =
+    conflictStatus !== "conflicted"
+      ? "적용할 Conflict가 없습니다."
+      : conflictAnalysisStatus !== "ready" || !conflictAnalysis
+        ? "Conflict 분석이 끝난 뒤 적용할 수 있습니다."
+        : conflictAnalysis.unsupportedFiles.length > 0
+          ? "지원하지 않는 Conflict 파일이 있어 전체 적용할 수 없습니다."
+          : conflictDraftProgress.total === 0
+            ? "적용할 수 있는 Conflict 파일이 없습니다."
+            : !conflictDraftProgress.allReady
+              ? `${formatNumber(
+                  conflictDraftProgress.total - conflictDraftProgress.ready
+                )}개 파일의 해결안을 더 준비해 주세요.`
+              : null;
   const reviewSubmitted = (summary?.status ?? session.status) === "submitted";
   const pullRequestState = summary?.pullRequestState ?? pullRequest?.state ?? "open";
   const pullRequestMergedAt =
@@ -588,6 +723,85 @@ export function PrReviewCanvasShell({
     }
   }
 
+  async function handleApplyConflictResolutions() {
+    if (!conflictAnalysis || conflictApplyStatus === "applying") {
+      return;
+    }
+
+    const input = buildPrReviewConflictsApplyInput(
+      conflictAnalysis,
+      conflictDrafts
+    );
+    if (!input) {
+      setConflictApplyStatus("error");
+      setConflictApplyError(
+        conflictApplyDisabledReason ??
+          "모든 Conflict 파일의 해결안을 준비해 주세요."
+      );
+      return;
+    }
+
+    setConflictApplyStatus("applying");
+    setConflictApplyError(null);
+    setConflictApplyRequiresGithubReconnect(false);
+
+    try {
+      const result = await apiClient.applyReviewSessionConflictResolutions(
+        workspaceId,
+        session.id,
+        input
+      );
+      setConflictApplyResult(result);
+      setConflictApplyStatus("applied");
+      setGithubReconnectStatus("idle");
+      setGithubReconnectMessage(null);
+      setConflictDrafts({});
+
+      if (result.localStateStatus === "updated") {
+        await loadCanvasData({ quiet: true });
+      }
+    } catch (error) {
+      setConflictApplyStatus("error");
+      setConflictApplyError(getConflictApplyErrorMessage(error));
+      setConflictApplyRequiresGithubReconnect(
+        isGithubOAuthReconnectError(error)
+      );
+    }
+  }
+
+  async function handleReconnectGithubOAuth() {
+    const reconnectWindow = window.open(
+      "about:blank",
+      "pilo-github-oauth-reconnect",
+      "popup=yes,width=760,height=820"
+    );
+
+    if (!reconnectWindow) {
+      setGithubReconnectStatus("error");
+      setGithubReconnectMessage(
+        "새 창을 열 수 없습니다. 브라우저의 팝업 차단을 해제해 주세요."
+      );
+      return;
+    }
+
+    reconnectWindow.opener = null;
+    setGithubReconnectStatus("opening");
+    setGithubReconnectMessage(null);
+
+    try {
+      const result = await apiClient.startGithubOAuth("/github");
+      reconnectWindow.location.replace(result.authorizeUrl);
+      setGithubReconnectStatus("opened");
+      setGithubReconnectMessage(
+        "새 창에서 GitHub 재연결을 마친 뒤 이 모달에서 다시 적용해 주세요."
+      );
+    } catch (error) {
+      reconnectWindow.close();
+      setGithubReconnectStatus("error");
+      setGithubReconnectMessage(getErrorMessage(error));
+    }
+  }
+
   return (
     <div className="fixed inset-0 z-[60] flex flex-col overflow-hidden bg-slate-50 text-slate-950">
       <header className="flex h-16 shrink-0 items-center gap-3 overflow-x-auto border-b border-slate-200 bg-white px-4">
@@ -615,6 +829,44 @@ export function PrReviewCanvasShell({
           >
             {getConflictLabel(conflictStatus)}
           </span>
+          {conflictStatus === "conflicted" ? (
+            <>
+              <span className="inline-flex h-10 items-center rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700">
+                해결 준비&nbsp;
+                <strong>
+                  {formatNumber(conflictDraftProgress.ready)} /{" "}
+                  {formatNumber(conflictDraftProgress.total)}
+                </strong>
+              </span>
+              <Tooltip>
+                <TooltipTrigger render={<span />}>
+                  <Button
+                    disabled={
+                      Boolean(conflictApplyDisabledReason) ||
+                      conflictApplyStatus === "applying"
+                    }
+                    onClick={() => {
+                      setConflictApplyError(null);
+                      setConflictApplyResult(null);
+                      setConflictApplyStatus("idle");
+                      setConflictApplyRequiresGithubReconnect(false);
+                      setGithubReconnectStatus("idle");
+                      setGithubReconnectMessage(null);
+                      setIsConflictApplyConfirmOpen(true);
+                    }}
+                    type="button"
+                  >
+                    <GitMerge className="size-4" />
+                    GitHub에 전체 적용
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {conflictApplyDisabledReason ??
+                    "준비한 모든 Conflict 파일을 merge commit 하나로 적용합니다."}
+                </TooltipContent>
+              </Tooltip>
+            </>
+          ) : null}
           <Button
             disabled={loadStatus !== "ready" || reviewSubmitted}
             onClick={() => setIsSubmitReviewModalOpen(true)}
@@ -695,6 +947,7 @@ export function PrReviewCanvasShell({
                 className="h-full w-full"
                 conflictAnalysis={conflictAnalysis}
                 onFileSelect={setSelectedReviewFileId}
+                preparedConflictFileIds={preparedConflictFileIds}
                 selectedReviewFileId={selectedReviewFileId}
               />
             </>
@@ -712,12 +965,12 @@ export function PrReviewCanvasShell({
               baseBranch={summary?.baseBranch ?? pullRequest?.baseBranch ?? null}
               conflictAnalysisErrorMessage={conflictAnalysisError}
               conflictAnalysisStatus={conflictAnalysisStatus}
+              conflictDraft={selectedConflictDraft}
               conflictFile={selectedConflictFile}
-              conflictHeadSha={conflictAnalysis?.headSha ?? null}
               headBranch={summary?.headBranch ?? pullRequest?.headBranch ?? null}
               isReviewSessionConflicted={conflictStatus === "conflicted"}
               onClose={() => setSelectedReviewFileId(null)}
-              onConflictApplied={handleConflictApplied}
+              onConflictDraftChange={handleConflictDraftChange}
               onDecisionSaved={handleDecisionSaved}
               reviewFileId={selectedReviewFileId}
               unsupportedConflictFile={selectedUnsupportedConflictFile}
@@ -761,6 +1014,162 @@ export function PrReviewCanvasShell({
           workspaceId={workspaceId}
         />
       ) : null}
+
+      <AlertDialog
+        open={isConflictApplyConfirmOpen}
+        onOpenChange={(open) => {
+          if (conflictApplyStatus !== "applying") {
+            setIsConflictApplyConfirmOpen(open);
+          }
+        }}
+      >
+        <AlertDialogContent size="default">
+          <AlertDialogHeader>
+            <AlertDialogMedia className="bg-amber-50 text-amber-700">
+              <GitMerge className="size-5" />
+            </AlertDialogMedia>
+            <AlertDialogTitle>Conflict 해결안 전체 적용</AlertDialogTitle>
+            <AlertDialogDescription>
+              준비한 모든 파일을 PR head와 base를 부모로 갖는 merge commit
+              하나로 적용합니다. 일부 파일만 적용되지는 않습니다.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+
+          {conflictApplyResult ? (
+            <div
+              className={cn(
+                "rounded-lg border px-4 py-3",
+                conflictApplyResult.localStateStatus === "updated"
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+                  : "border-amber-200 bg-amber-50 text-amber-950"
+              )}
+            >
+              <p className="flex items-center gap-2 text-sm font-semibold">
+                <CheckCircle2 className="size-4" />
+                {formatNumber(conflictApplyResult.files.length)}개 파일 적용 완료
+              </p>
+              <p className="mt-2 text-xs leading-5">
+                {conflictApplyResult.localStateStatus === "updated"
+                  ? "GitHub의 최신 Conflict 상태와 Merge 가능 여부를 다시 불러왔습니다."
+                  : "GitHub에는 적용됐지만 PILO 상태 갱신이 필요합니다. GitHub 동기화 후 새 리뷰를 시작해 주세요."}
+              </p>
+              <p className="mt-2 font-mono text-xs">
+                {conflictApplyResult.headShaBefore.slice(0, 7)} →{" "}
+                {conflictApplyResult.headShaAfter.slice(0, 7)}
+              </p>
+              {conflictApplyResult.commitUrl ? (
+                <a
+                  className="mt-2 inline-flex items-center gap-1 text-xs font-semibold underline-offset-2 hover:underline"
+                  href={conflictApplyResult.commitUrl}
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  GitHub 커밋 보기
+                  <ExternalLink className="size-3" />
+                </a>
+              ) : null}
+            </div>
+          ) : (
+            <div className="max-h-56 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-2">
+              {(conflictAnalysis?.files ?? []).map((file) => (
+                <div
+                  className="flex items-center gap-2 rounded-md px-2 py-2 text-sm text-slate-700"
+                  key={file.reviewFileId}
+                >
+                  <CheckCircle2 className="size-4 shrink-0 text-emerald-600" />
+                  <span className="min-w-0 truncate font-medium">
+                    {file.filePath}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {conflictApplyError ? (
+            <div
+              aria-live="polite"
+              className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800"
+            >
+              <p className="font-semibold">적용 실패</p>
+              <p className="mt-1">{conflictApplyError}</p>
+            </div>
+          ) : null}
+
+          {conflictApplyRequiresGithubReconnect ? (
+            <div className="space-y-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-3">
+              <p className="text-sm leading-6 text-blue-900">
+                새 창에서 GitHub 사용자 연결만 갱신합니다. 이 탭의 모든 해결 초안은 그대로 유지됩니다.
+              </p>
+              <Button
+                disabled={githubReconnectStatus === "opening"}
+                onClick={() => void handleReconnectGithubOAuth()}
+                type="button"
+                variant="outline"
+              >
+                {githubReconnectStatus === "opening" ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <RefreshCcw className="size-4" />
+                )}
+                {githubReconnectStatus === "opening"
+                  ? "재연결 준비 중"
+                  : "GitHub 재연결"}
+              </Button>
+              {githubReconnectMessage ? (
+                <p
+                  className={cn(
+                    "text-xs leading-5",
+                    githubReconnectStatus === "error"
+                      ? "text-rose-700"
+                      : "text-blue-800"
+                  )}
+                >
+                  {githubReconnectMessage}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+
+          <AlertDialogFooter>
+            {conflictApplyResult ? (
+              <AlertDialogAction
+                onClick={() => setIsConflictApplyConfirmOpen(false)}
+              >
+                닫기
+              </AlertDialogAction>
+            ) : (
+              <>
+                <AlertDialogCancel
+                  disabled={conflictApplyStatus === "applying"}
+                >
+                  취소
+                </AlertDialogCancel>
+                <AlertDialogAction
+                  disabled={
+                    conflictApplyStatus === "applying" ||
+                    Boolean(conflictApplyDisabledReason)
+                  }
+                  onClick={(event) => {
+                    event.preventDefault();
+                    void handleApplyConflictResolutions();
+                  }}
+                >
+                  {conflictApplyStatus === "applying" ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <GitMerge className="size-4" />
+                  )}
+                  {conflictApplyStatus === "applying"
+                    ? "전체 적용 중"
+                    : conflictApplyRequiresGithubReconnect
+                      ? "GitHub에 다시 적용"
+                      : "GitHub에 전체 적용"}
+                </AlertDialogAction>
+              </>
+            )}
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog
         open={isMergeConfirmOpen}
@@ -842,8 +1251,8 @@ function ConflictAnalysisNotice({
     title = `${formatNumber(unsupportedCount)}개 Conflict 파일은 아직 지원하지 않습니다`;
     description =
       supportedCount > 0
-        ? `${formatNumber(supportedCount)}개 파일은 Conflict Resolution mode로 확인할 수 있습니다.`
-        : "초기 버전에서는 content conflict만 Resolution mode로 확인할 수 있습니다.";
+        ? `${formatNumber(supportedCount)}개 파일은 Conflict 해결 모드로 확인할 수 있습니다.`
+        : "초기 버전에서는 content Conflict만 해결 모드로 확인할 수 있습니다.";
     className = "border-amber-200 bg-amber-50 text-amber-950";
   }
 

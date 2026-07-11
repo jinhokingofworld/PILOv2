@@ -122,7 +122,7 @@ async function createConflictFixture({ multipleConflicts = false } = {}) {
   return { baseSha, headSha, remote, root, seed };
 }
 
-async function applyFixtureResolution(fixture) {
+async function applyFixtureResolution(fixture, { includeSecondary = false } = {}) {
   const service = new GithubConflictMergeService(new GithubGitCommandRunner());
   return service.createConflictMergeCommit({
     accessToken: "test-token",
@@ -130,13 +130,27 @@ async function applyFixtureResolution(fixture) {
     baseBranch: "dev",
     baseRepositoryUrl: fixture.remote,
     baseSha: fixture.baseSha,
-    content:
-      "export function summarize(value: string) {\n  return `resolved:${value.trim().toUpperCase()}`;\n}\n",
+    files: [
+      {
+        content:
+          "export function summarize(value: string) {\n  return `resolved:${value.trim().toUpperCase()}`;\n}\n",
+        path: "src/conflicted.ts"
+      },
+      ...(includeSecondary
+        ? [
+            {
+              content: "export const secondaryMode = \"resolved\";\n",
+              path: "src/secondary.ts"
+            }
+          ]
+        : [])
+    ],
     headBranch: "feature/conflict",
     headRepositoryUrl: fixture.remote,
     headSha: fixture.headSha,
-    message: "Resolve conflict in src/conflicted.ts",
-    path: "src/conflicted.ts"
+    message: includeSecondary
+      ? "Resolve conflicts in 2 files"
+      : "Resolve conflict in src/conflicted.ts"
   });
 }
 
@@ -163,12 +177,16 @@ async function applyFixtureResolution(fixture) {
         baseBranch: "dev",
         baseRepositoryUrl: "https://github.com/Developer-EJ/PILO.git",
         baseSha: "b".repeat(40),
-        content: "const resolved = true;\n",
+        files: [
+          {
+            content: "const resolved = true;\n",
+            path: "src/conflicted.ts"
+          }
+        ],
         headBranch: "feature/conflict",
         headRepositoryUrl: "https://github.com/Developer-EJ/PILO.git",
         headSha: "a".repeat(40),
-        message: "Resolve conflict in src/conflicted.ts",
-        path: "src/conflicted.ts"
+        message: "Resolve conflict in src/conflicted.ts"
       }),
     (error) => {
       assert.equal(error?.getStatus?.(), 403);
@@ -223,7 +241,7 @@ async function applyFixtureResolution(fixture) {
     ]);
     assert.equal(
       git(verification, ["rev-parse", "HEAD:src/conflicted.ts"]),
-      result.contentSha
+      result.files.find((file) => file.path === "src/conflicted.ts")?.contentSha
     );
   } finally {
     await rm(fixture.root, { force: true, recursive: true });
@@ -239,7 +257,7 @@ async function applyFixtureResolution(fixture) {
         assert.equal(error?.getStatus?.(), 409);
         assert.equal(
           error?.response?.error?.message,
-          "GitHub pull request has multiple conflicted files"
+          "GitHub pull request conflicted file set is stale"
         );
         return true;
       }
@@ -252,6 +270,29 @@ async function applyFixtureResolution(fixture) {
         "refs/heads/feature/conflict"
       ]),
       fixture.headSha
+    );
+
+    const result = await applyFixtureResolution(fixture, {
+      includeSecondary: true
+    });
+    const verification = join(fixture.root, "multi-file-verification");
+    git(fixture.root, [
+      "clone",
+      "--branch",
+      "feature/conflict",
+      fixture.remote,
+      verification
+    ]);
+    assert.equal(git(verification, ["rev-parse", "HEAD"]), result.commitSha);
+    assert.equal(
+      normalizeLineEndings(
+        await readFile(join(verification, "src", "secondary.ts"), "utf8")
+      ),
+      "export const secondaryMode = \"resolved\";\n"
+    );
+    assert.deepEqual(
+      result.files.map((file) => file.path).sort(),
+      ["src/conflicted.ts", "src/secondary.ts"]
     );
   } finally {
     await rm(fixture.root, { force: true, recursive: true });
@@ -477,7 +518,10 @@ function createFileWriteService(database, mergeRequests) {
         mergeRequests.push(input);
         return {
           commitSha: "merge-commit-sha",
-          contentSha: "resolved-blob-sha"
+          files: input.files.map((file) => ({
+            contentSha: "resolved-blob-sha",
+            path: file.path
+          }))
         };
       }
     },
@@ -529,12 +573,16 @@ for (const { failCacheUpdate, expectedCacheUpdated } of [
     baseBranch: "dev",
     baseRepositoryUrl: "https://github.com/Developer-EJ/PILO.git",
     baseSha: "base-sha",
-    content: "const resolved = true;",
+    files: [
+      {
+        content: "const resolved = true;",
+        path: "src/conflicted.ts"
+      }
+    ],
     headBranch: "feature/conflict",
     headRepositoryUrl: "https://github.com/Developer-EJ/PILO.git",
     headSha: "head-sha",
-    message: "Resolve conflict in src/conflicted.ts",
-    path: "src/conflicted.ts"
+    message: "Resolve conflict in src/conflicted.ts"
   });
   assert.equal(result.localCacheUpdated, expectedCacheUpdated);
   assert.equal(
@@ -547,6 +595,57 @@ for (const { failCacheUpdate, expectedCacheUpdated } of [
   assert.ok(cacheUpdate);
   assert.doesNotMatch(cacheUpdate.text, /head_sha\s*=/i);
   assert.match(cacheUpdate.text, /\{head,sha\}/);
+}
+
+{
+  const database = new FakeDatabase();
+  const mergeRequests = [];
+  const service = createFileWriteService(database, mergeRequests);
+  const result = await service.applyGithubPullRequestConflictResolutions(
+    "user-id",
+    "workspace-id",
+    "pull-request-id",
+    {
+      expectedBaseSha: "base-sha",
+      expectedHeadSha: "head-sha",
+      files: [
+        {
+          filePath: "src/conflicted.ts",
+          resolvedContent: "const resolved = true;",
+          expectedHeadBlobSha: "first-head-blob-sha"
+        },
+        {
+          filePath: "src/secondary.ts",
+          resolvedContent: "const secondary = true;",
+          expectedHeadBlobSha: "second-head-blob-sha"
+        }
+      ]
+    }
+  );
+
+  assert.deepEqual(mergeRequests[0].files, [
+    {
+      content: "const resolved = true;",
+      path: "src/conflicted.ts"
+    },
+    {
+      content: "const secondary = true;",
+      path: "src/secondary.ts"
+    }
+  ]);
+  assert.equal(mergeRequests[0].message, "Resolve conflicts in 2 files");
+  assert.deepEqual(result.files, [
+    {
+      filePath: "src/conflicted.ts",
+      headBlobShaBefore: "first-head-blob-sha",
+      headBlobShaAfter: "resolved-blob-sha"
+    },
+    {
+      filePath: "src/secondary.ts",
+      headBlobShaBefore: "second-head-blob-sha",
+      headBlobShaAfter: "resolved-blob-sha"
+    }
+  ]);
 }
 
 console.log("GitHub conflict merge tests passed");

@@ -5,6 +5,7 @@ import {
   useCallback,
   useRef,
   useState,
+  type MouseEvent,
   type MutableRefObject,
   type PointerEvent,
 } from "react";
@@ -16,9 +17,12 @@ import {
   type Editor,
   type TLShape,
   type TLShapeId,
+  type TLShapePartial,
   useEditor,
 } from "tldraw";
+import { Bot } from "lucide-react";
 import { useValue } from "@tldraw/state-react";
+import { useCanvasAgent } from "@/features/canvas/agent/use-canvas-agent";
 import { TldrawSurface } from "@/shared/tldraw";
 import type { CanvasPresenceController } from "@/features/canvas/realtime/useCanvasPresence";
 import { RemoteCursorOverlay } from "@/features/canvas/realtime/RemoteCursorOverlay";
@@ -27,6 +31,11 @@ import type {
   CanvasPresenceViewport,
 } from "@/features/canvas/realtime/canvas-realtime-types";
 import { PiloCanvasBackground } from "./PiloCanvasBackground";
+import {
+  CanvasAiChatOverlay,
+  type CanvasAiChatAnchor,
+} from "./CanvasAiChatOverlay";
+import { CanvasAgentVisualOverlay } from "./CanvasAgentVisualOverlay";
 import { PiloCollapsedFrameOverlay } from "./PiloCollapsedFrameOverlay";
 import { SelectedShapeStackingManager } from "../interactions/PiloCanvasStackingManager";
 import { SelectedGroupToolbar } from "../interactions/PiloCanvasGroupToolbar";
@@ -73,7 +82,6 @@ import {
   importCodeFilesFromDataTransfer,
   type PiloCodeFileImportResult,
 } from "../interactions/pilo-canvas-file-import";
-import type { PiloStickyNoteColor } from "../shapes/sticky-note/PiloStickyNoteShapeUtil";
 import {
   PILO_CHILD_SHAPE_COUNT_META_KEY,
   PILO_FRAME_EXPANDED_SIZE_META_KEY,
@@ -87,12 +95,14 @@ export type { PiloInsertableTool } from "../shapes/pilo-canvas-shape-factory";
 
 type CanvasBoardDetail = {
   id: string;
+  workspaceId: string;
   title: string;
   shapeCount: number;
 };
 
 export type PiloCanvasTool =
   | "select"
+  | "note"
   | "draw"
   | "text"
   | "arrow"
@@ -101,13 +111,8 @@ export type PiloCanvasTool =
   | "frame"
   | "code";
 
-export type PiloDrawingPreset =
-  | "pen"
-  | "highlight"
-  | "eraser"
-  | "rectangle"
-  | "circle"
-  | "triangle"
+export type PiloCanvasColor =
+  | "default"
   | "black"
   | "red"
   | "yellow"
@@ -115,31 +120,23 @@ export type PiloDrawingPreset =
   | "blue"
   | "violet";
 
-const piloDrawingColorPresets = [
-  "black",
-  "red",
-  "yellow",
-  "green",
-  "blue",
-  "violet",
-] as const;
-
-function isPiloDrawingColorPreset(
-  preset: PiloDrawingPreset,
-): preset is (typeof piloDrawingColorPresets)[number] {
-  return piloDrawingColorPresets.includes(
-    preset as (typeof piloDrawingColorPresets)[number],
-  );
-}
+export type PiloDrawingPreset =
+  | "pen"
+  | "highlight"
+  | "eraser"
+  | "rectangle"
+  | "circle"
+  | "triangle";
 
 export type PiloCanvasActions = {
   markUiEventAsHandled: (event: PointerEvent<HTMLElement>) => void;
   selectTool: (tool: PiloCanvasTool) => void;
   selectDrawingPreset: (preset: PiloDrawingPreset) => void;
+  setColor: (color: PiloCanvasColor) => void;
   createInsertableShape: (tool: PiloInsertableTool, url: string) => void;
   groupSelection: () => void;
   setSmartGuidesEnabled: (enabled: boolean) => void;
-  createStickyNote: (color?: PiloStickyNoteColor) => void;
+  createNote: () => void;
   createCodeBlock: () => void;
   clearSelection: () => void;
   deleteSelection: () => void;
@@ -176,6 +173,8 @@ type PiloTldrawCanvasProps = {
   onHistoryStateChange: (state: PiloCanvasHistoryState) => void;
   presence?: CanvasPresenceController;
   onSnapStateChange: (state: PiloCanvasSnapState) => void;
+  onOneShotToolCreated?: () => void;
+  canvasAgentEnabled?: boolean;
 };
 
 const tldrawComponents = {
@@ -183,6 +182,8 @@ const tldrawComponents = {
 };
 
 const PILO_COLLAPSED_FRAME_SIZE = 144;
+const CANVAS_AI_CHAT_HOLD_MS = 500;
+const connectionTools = new Set<PiloCanvasTool>(["arrow", "line"]);
 const PILO_FRAME_EXPANDED_FALLBACK_SIZE = {
   h: 180,
   w: 320,
@@ -424,6 +425,17 @@ function deleteSelectedShapes(editor: Editor) {
   return true;
 }
 
+function getArrowAtPoint(editor: Editor, pagePoint: { x: number; y: number }) {
+  const hitMargin = 8 / editor.getZoomLevel();
+
+  return editor
+    .getShapesAtPoint(pagePoint, {
+      hitInside: true,
+      margin: hitMargin,
+    })
+    .find((shape) => shape.type === "arrow");
+}
+
 export function PiloTldrawCanvas({
   board,
   cameraRestoreVersion,
@@ -441,9 +453,18 @@ export function PiloTldrawCanvas({
   onHistoryStateChange,
   presence,
   onSnapStateChange,
+  onOneShotToolCreated,
+  canvasAgentEnabled = false,
 }: PiloTldrawCanvasProps) {
   const editorRef = useRef<Editor | null>(null);
+  const [canvasEditor, setCanvasEditor] = useState<Editor | null>(null);
   const placementRequestRef = useRef<PiloPlacementRequest | null>(null);
+  const returnToSelectAfterPlacementRef = useRef(false);
+  const onOneShotToolCreatedRef = useRef(onOneShotToolCreated);
+  const canvasAiChatPointerRef = useRef<CanvasAiChatAnchor | null>(null);
+  const canvasAiChatHoldFrameRef = useRef<number | null>(null);
+  const canvasAiChatHoldStartedAtRef = useRef<number | null>(null);
+  const canvasAiChatHoldPositionRef = useRef<CanvasAiChatAnchor | null>(null);
   const pendingArrowBindingsRef = useRef<PiloArrowBindingSnapshot[]>([]);
   const piloDefaultArrowKindHydrationGuardRef = useRef(false);
   const createdLocalCardsRef = useRef(0);
@@ -453,6 +474,35 @@ export function PiloTldrawCanvas({
     useRef<ReturnType<typeof setTimeout> | null>(null);
   const initialViewSettingRef = useRef(initialViewSetting);
   const seedKey = board.id;
+  const [canvasAiChatAnchor, setCanvasAiChatAnchor] =
+    useState<CanvasAiChatAnchor | null>(null);
+  const [canvasAiChatHoldProgress, setCanvasAiChatHoldProgress] = useState<
+    (CanvasAiChatAnchor & { progress: number }) | null
+  >(null);
+  const isCanvasAiChatVisible = Boolean(canvasAiChatAnchor || canvasAiChatHoldProgress);
+  const handleCanvasAgentApplied = useCallback(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const bounds = editor.getViewportPageBounds();
+    onViewportBoundsChange({
+      x: bounds.x,
+      y: bounds.y,
+      width: bounds.w,
+      height: bounds.h,
+      zoom: editor.getCamera().z,
+    });
+  }, [onViewportBoundsChange]);
+  const canvasAgent = useCanvasAgent({
+    canvasId: board.id,
+    editor: canvasEditor,
+    enabled: canvasAgentEnabled,
+    onApplied: handleCanvasAgentApplied,
+    workspaceId: board.workspaceId,
+  });
+
+  useEffect(() => {
+    onOneShotToolCreatedRef.current = onOneShotToolCreated;
+  }, [onOneShotToolCreated]);
 
   useEffect(() => {
     freeformShapesRef.current = freeformShapes;
@@ -464,6 +514,10 @@ export function PiloTldrawCanvas({
 
   useEffect(
     () => () => {
+      if (canvasAiChatHoldFrameRef.current !== null) {
+        window.cancelAnimationFrame(canvasAiChatHoldFrameRef.current);
+      }
+
       if (frameChildrenRequestTimerRef.current) {
         clearTimeout(frameChildrenRequestTimerRef.current);
         frameChildrenRequestTimerRef.current = null;
@@ -493,8 +547,77 @@ export function PiloTldrawCanvas({
     applyViewSetting(editor, initialViewSettingRef.current);
   }, [cameraRestoreVersion, seedKey]);
 
+  useEffect(() => {
+    function shouldIgnoreCanvasAiChatShortcut(event: KeyboardEvent) {
+      return (
+        event.defaultPrevented ||
+        event.isComposing ||
+        event.altKey ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.key.toLowerCase() !== "c" ||
+        (event.target instanceof Element &&
+          event.target.closest(
+            "input, textarea, select, [contenteditable=\"true\"], .pilo-code-mirror",
+          ))
+      );
+    }
+
+    function startCanvasAiChatWithShortcut(event: KeyboardEvent) {
+      if (
+        event.repeat ||
+        shouldIgnoreCanvasAiChatShortcut(event)
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      startCanvasAiChatHold(
+        canvasAiChatPointerRef.current ?? {
+          x: window.innerWidth / 2,
+          y: window.innerHeight / 2,
+        },
+      );
+    }
+
+    function cancelCanvasAiChatWithShortcut(event: KeyboardEvent) {
+      if (shouldIgnoreCanvasAiChatShortcut(event)) return;
+
+      event.preventDefault();
+      cancelCanvasAiChatHold();
+    }
+
+    window.addEventListener("keydown", startCanvasAiChatWithShortcut, true);
+    window.addEventListener("keyup", cancelCanvasAiChatWithShortcut, true);
+    return () => {
+      window.removeEventListener("keydown", startCanvasAiChatWithShortcut, true);
+      window.removeEventListener("keyup", cancelCanvasAiChatWithShortcut, true);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isCanvasAiChatVisible) return undefined;
+
+    function closeCanvasAiChatWithEscape(event: KeyboardEvent) {
+      if (event.defaultPrevented || event.isComposing || event.key !== "Escape") {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      cancelCanvasAiChatHold();
+      setCanvasAiChatAnchor(null);
+    }
+
+    window.addEventListener("keydown", closeCanvasAiChatWithEscape, true);
+    return () => {
+      window.removeEventListener("keydown", closeCanvasAiChatWithEscape, true);
+    };
+  }, [isCanvasAiChatVisible]);
+
   function mountEditor(editor: Editor) {
     editorRef.current = editor;
+    setCanvasEditor(editor);
     canvasWheelCleanupRef.current?.();
 
     const canvasContainer = editor.getContainer();
@@ -527,15 +650,20 @@ export function PiloTldrawCanvas({
       },
       selectTool(tool) {
         placementRequestRef.current = null;
+        returnToSelectAfterPlacementRef.current =
+          tool !== "select" && !connectionTools.has(tool);
         editor.cancel();
+        editor.updateInstanceState({ isToolLocked: false });
         editor.setCurrentTool(tool === "select" ? "select.idle" : tool);
       },
       selectDrawingPreset(preset) {
         placementRequestRef.current = null;
+        const shouldKeepDrawing = preset === "pen" || preset === "highlight";
+        returnToSelectAfterPlacementRef.current = !shouldKeepDrawing;
         editor.cancel();
+        editor.updateInstanceState({ isToolLocked: shouldKeepDrawing });
 
         if (preset === "highlight") {
-          editor.setStyleForNextShapes(DefaultColorStyle, "yellow");
           editor.setStyleForNextShapes(DefaultSizeStyle, "xl");
           editor.setCurrentTool("highlight");
           return;
@@ -564,26 +692,56 @@ export function PiloTldrawCanvas({
           return;
         }
 
-        if (isPiloDrawingColorPreset(preset)) {
-          editor.setStyleForNextShapes(DefaultColorStyle, preset);
-          editor.setCurrentTool("draw");
-          return;
-        }
-
-        editor.setStyleForNextShapes(DefaultColorStyle, "blue");
         editor.setStyleForNextShapes(DefaultDashStyle, "draw");
         editor.setStyleForNextShapes(DefaultSizeStyle, "m");
         editor.setCurrentTool("draw");
       },
-      createStickyNote(color) {
+      setColor(color) {
+        if (color === "default") {
+          const { [DefaultColorStyle.id]: _color, ...stylesForNextShape } =
+            editor.getInstanceState().stylesForNextShape;
+          const selectedShapeColorUpdates = editor
+            .getSelectedShapes()
+            .flatMap((shape) => {
+              const defaultProps = editor.getShapeUtil(shape).getDefaultProps();
+
+              if (!("color" in defaultProps) || !("color" in shape.props)) {
+                return [];
+              }
+
+              return [
+                {
+                  id: shape.id,
+                  type: shape.type,
+                  props: { color: defaultProps.color },
+                } as unknown as TLShapePartial,
+              ];
+            });
+
+          editor.updateInstanceState({ stylesForNextShape });
+
+          if (selectedShapeColorUpdates.length) {
+            editor.updateShapes(selectedShapeColorUpdates);
+          }
+
+          return;
+        }
+
+        editor.setStyleForNextShapes(DefaultColorStyle, color);
+
+        if (editor.getSelectedShapeIds().length) {
+          editor.setStyleForSelectedShapes(DefaultColorStyle, color);
+        }
+      },
+      createNote() {
+        placementRequestRef.current = null;
+        returnToSelectAfterPlacementRef.current = true;
         editor.cancel();
-        editor.setCurrentTool("select.idle");
-        placementRequestRef.current = {
-          type: "sticky",
-          color,
-        };
+        editor.updateInstanceState({ isToolLocked: false });
+        editor.setCurrentTool("note");
       },
       createCodeBlock() {
+        returnToSelectAfterPlacementRef.current = false;
         editor.cancel();
         editor.setCurrentTool("select.idle");
         placementRequestRef.current = {
@@ -591,6 +749,7 @@ export function PiloTldrawCanvas({
         };
       },
       createInsertableShape(tool, url) {
+        returnToSelectAfterPlacementRef.current = false;
         editor.cancel();
         editor.setCurrentTool("select.idle");
         placementRequestRef.current = {
@@ -607,9 +766,11 @@ export function PiloTldrawCanvas({
       },
       setSmartGuidesEnabled(enabled) {
         editor.user.updateUserPreferences({ isSnapMode: enabled });
+        editor.updateInstanceState({ isGridMode: enabled });
       },
       clearSelection() {
         placementRequestRef.current = null;
+        returnToSelectAfterPlacementRef.current = false;
         editor.selectNone();
       },
       deleteSelection() {
@@ -659,6 +820,20 @@ export function PiloTldrawCanvas({
 
       if (!editor || event.isPrimary === false) return;
       clearTrashDropZoneAttraction();
+
+      if (
+        returnToSelectAfterPlacementRef.current &&
+        !(event.target instanceof Element && event.target.closest(".canvas-tool-rail"))
+      ) {
+        window.requestAnimationFrame(() => {
+          if (!returnToSelectAfterPlacementRef.current) return;
+
+          returnToSelectAfterPlacementRef.current = false;
+          editor.setCurrentTool("select.idle");
+          onOneShotToolCreatedRef.current?.();
+        });
+      }
+
       if (!isPointerInsideTrashDropZone(event)) return;
 
       const selectedShapeIds = editor.getSelectedShapeIds();
@@ -700,7 +875,7 @@ export function PiloTldrawCanvas({
     if (
       event.target instanceof Element &&
       event.target.closest(
-        ".pilo-code-block input, .pilo-code-block select, .pilo-code-mirror, .pilo-sticky-note p, .pilo-sticky-note textarea",
+        ".pilo-code-block input, .pilo-code-block select, .pilo-code-mirror",
       )
     ) {
       return;
@@ -750,6 +925,8 @@ export function PiloTldrawCanvas({
 
     if (result.placed) {
       createdLocalCardsRef.current += result.createdCount;
+      editor.setCurrentTool("select.idle");
+      onOneShotToolCreatedRef.current?.();
     }
 
     return result.placed;
@@ -865,6 +1042,13 @@ export function PiloTldrawCanvas({
   );
 
   function handleCanvasPointerDownCapture(event: PointerEvent<HTMLDivElement>) {
+    if (
+      event.target instanceof Element &&
+      event.target.closest(".canvas-ai-chat, .canvas-ai-tool")
+    ) {
+      return;
+    }
+
     const editor = editorRef.current;
 
     if (!editor || event.button !== 0) return;
@@ -890,29 +1074,38 @@ export function PiloTldrawCanvas({
       }
     }
 
+    // Frame and shape detail selection are select-tool affordances. Let an
+    // active drawing tool receive its first click so an arrow can start from
+    // a frame instead of the frame stealing that click.
+    if (editor.getCurrentToolId() !== "select") return;
+
     const directShape = editor.getShapeAtPoint(pagePoint, {
       hitInside: true,
       hitLabels: true,
       hitLocked: true,
     });
+    // Frames are filled hit targets, so getShapeAtPoint can return the frame
+    // even when the pointer is directly on an arrow inside it. Prefer the
+    // arrow here so a connector remains selectable.
+    const pointedShape = getArrowAtPoint(editor, pagePoint) ?? directShape;
 
-    if (isPiloCodeBlockShape(directShape)) {
-      if (!editor.getSelectedShapeIds().includes(directShape.id)) {
+    if (isPiloCodeBlockShape(pointedShape)) {
+      if (!editor.getSelectedShapeIds().includes(pointedShape.id)) {
         editor.setCurrentTool("select");
-        editor.select(directShape.id);
+        editor.select(pointedShape.id);
       }
 
-      requestShapeDetail(editor, directShape.id);
+      requestShapeDetail(editor, pointedShape.id);
       return;
     }
 
-    if (directShape && !isPiloFrameShape(directShape)) {
-      requestShapeDetail(editor, directShape.id as TLShapeId);
+    if (pointedShape && !isPiloFrameShape(pointedShape)) {
+      requestShapeDetail(editor, pointedShape.id as TLShapeId);
       return;
     }
 
-    const frameShape = isPiloFrameShape(directShape)
-      ? directShape
+    const frameShape = isPiloFrameShape(pointedShape)
+      ? pointedShape
       : editor.getShapeAtPoint(pagePoint, {
           filter: isPiloFrameShape,
           hitFrameInside: true,
@@ -936,43 +1129,146 @@ export function PiloTldrawCanvas({
     event.stopPropagation();
   }
 
+  function trackCanvasAiChatPointer(event: PointerEvent<HTMLDivElement>) {
+    canvasAiChatPointerRef.current = {
+      x: event.clientX,
+      y: event.clientY,
+    };
+  }
+
+  function startCanvasAiChatHold(position: CanvasAiChatAnchor) {
+    cancelCanvasAiChatHold();
+    setCanvasAiChatAnchor(null);
+    canvasAiChatHoldPositionRef.current = position;
+    canvasAiChatHoldStartedAtRef.current = window.performance.now();
+    setCanvasAiChatHoldProgress({ ...position, progress: 0 });
+
+    function updateHoldProgress(timestamp: number) {
+      const startedAt = canvasAiChatHoldStartedAtRef.current ?? timestamp;
+      const holdPosition = canvasAiChatHoldPositionRef.current;
+
+      if (!holdPosition) return;
+
+      const progress = Math.min(
+        1,
+        (timestamp - startedAt) / CANVAS_AI_CHAT_HOLD_MS,
+      );
+      setCanvasAiChatHoldProgress({ ...holdPosition, progress });
+
+      if (progress < 1) {
+        canvasAiChatHoldFrameRef.current = window.requestAnimationFrame(
+          updateHoldProgress,
+        );
+        return;
+      }
+
+      canvasAiChatHoldFrameRef.current = null;
+      canvasAiChatHoldStartedAtRef.current = null;
+      canvasAiChatHoldPositionRef.current = null;
+      setCanvasAiChatHoldProgress(null);
+      setCanvasAiChatAnchor(holdPosition);
+    }
+
+    canvasAiChatHoldFrameRef.current = window.requestAnimationFrame(
+      updateHoldProgress,
+    );
+  }
+
+  function cancelCanvasAiChatHold() {
+    if (canvasAiChatHoldFrameRef.current !== null) {
+      window.cancelAnimationFrame(canvasAiChatHoldFrameRef.current);
+      canvasAiChatHoldFrameRef.current = null;
+    }
+
+    canvasAiChatHoldStartedAtRef.current = null;
+    canvasAiChatHoldPositionRef.current = null;
+    setCanvasAiChatHoldProgress(null);
+  }
+
+  function openCanvasAiChatFromButton(
+    event: MouseEvent<HTMLButtonElement>,
+  ) {
+    const buttonBounds = event.currentTarget.getBoundingClientRect();
+
+    cancelCanvasAiChatHold();
+    setCanvasAiChatAnchor((currentAnchor) => {
+      if (currentAnchor) return null;
+
+      return {
+        x: buttonBounds.left + buttonBounds.width / 2,
+        y: buttonBounds.top + buttonBounds.height,
+      };
+    });
+  }
+
   return (
-    <TldrawSurface
-      className="pilo-tldraw-canvas"
-      hideUi
-      licenseKey={process.env.NEXT_PUBLIC_TLDRAW_LICENSE_KEY}
-      shapeUtils={piloCanvasShapeUtils}
-      components={tldrawComponents}
-      onMount={mountEditor}
+    <div
+      className="h-full"
       onPointerDownCapture={handleCanvasPointerDownCapture}
+      onPointerMoveCapture={trackCanvasAiChatPointer}
     >
-      <CanvasStateReporter
-        onFreeformShapesDraftChange={onFreeformShapesDraftChange}
-        onFreeformShapesChange={onFreeformShapesChange}
-        onViewChange={onViewChange}
-        onViewportBoundsChange={onViewportBoundsChange}
-      />
-      <CanvasHistoryStateReporter
-        onHistoryStateChange={onHistoryStateChange}
-      />
-      <CanvasFileDropImporter />
-      {presence?.enabled ? <CanvasPresenceReporter presence={presence} /> : null}
-      {presence ? (
-        <RemoteCursorOverlay
-          currentUserId={presence.currentUserId}
-          presence={presence.remotePresence}
+      <TldrawSurface
+        className="pilo-tldraw-canvas"
+        hideUi
+        licenseKey={process.env.NEXT_PUBLIC_TLDRAW_LICENSE_KEY}
+        shapeUtils={piloCanvasShapeUtils}
+        components={tldrawComponents}
+        onMount={mountEditor}
+      >
+        <CanvasStateReporter
+          onFreeformShapesDraftChange={onFreeformShapesDraftChange}
+          onFreeformShapesChange={onFreeformShapesChange}
+          onViewChange={onViewChange}
+          onViewportBoundsChange={onViewportBoundsChange}
         />
-      ) : null}
-      <CanvasSnapStateReporter onSnapStateChange={onSnapStateChange} />
-      <SelectedShapeStackingManager />
-      <SelectedGroupToolbar />
-      <PiloCollapsedFrameOverlay
-        onFrameCollapsedChange={handleFrameCollapsedChange}
+        <CanvasHistoryStateReporter
+          onHistoryStateChange={onHistoryStateChange}
+        />
+        <CanvasFileDropImporter />
+        {presence?.enabled ? <CanvasPresenceReporter presence={presence} /> : null}
+        {presence ? (
+          <RemoteCursorOverlay
+            currentUserId={presence.currentUserId}
+            presence={presence.remotePresence}
+          />
+        ) : null}
+        <CanvasSnapStateReporter onSnapStateChange={onSnapStateChange} />
+        <SelectedShapeStackingManager />
+        <SelectedGroupToolbar />
+        <PiloCollapsedFrameOverlay
+          onFrameCollapsedChange={handleFrameCollapsedChange}
+        />
+        <FrameSelectionToolbar
+          onFrameCollapsedChange={handleFrameCollapsedChange}
+        />
+      </TldrawSurface>
+      <button
+        aria-label="Canvas AI 채팅 열기"
+        className="canvas-ai-tool absolute right-4 top-4 z-50"
+        data-canvas-agent-target="toolbar.canvas_ai"
+        onClick={openCanvasAiChatFromButton}
+        type="button"
+      >
+        <Bot className="size-5" />
+      </button>
+      <CanvasAiChatOverlay
+        anchor={canvasAiChatAnchor}
+        draft={canvasAgent.draft}
+        error={canvasAgent.error}
+        holdProgress={canvasAiChatHoldProgress}
+        isRunning={canvasAgent.isRunning}
+        onApplyDraft={canvasAgent.applyDraft}
+        onClose={() => setCanvasAiChatAnchor(null)}
+        onDiscardDraft={canvasAgent.discardDraft}
+        onSubmit={canvasAgent.submit}
+        statusMessage={canvasAgent.message}
       />
-      <FrameSelectionToolbar
-        onFrameCollapsedChange={handleFrameCollapsedChange}
+      <CanvasAgentVisualOverlay
+        draft={canvasAgent.draft}
+        editor={canvasEditor}
+        progress={canvasAgent.progress}
       />
-    </TldrawSurface>
+    </div>
   );
 }
 

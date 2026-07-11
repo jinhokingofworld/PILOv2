@@ -101,8 +101,16 @@ export type GithubProjectV2 = {
   closed: boolean;
   template: boolean;
   repositoryIds: string[];
+  selected: boolean;
   lastSyncedAt: string | null;
 };
+
+export type ReplaceGithubProjectV2SelectionsInput = {
+  installationId: string;
+  projectV2Ids: string[];
+};
+
+export type GithubProjectV2Selection = ReplaceGithubProjectV2SelectionsInput;
 
 export type GithubProjectV2AccessPermission = "ADMIN" | "WRITE" | "READ";
 

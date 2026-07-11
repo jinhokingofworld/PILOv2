@@ -24,6 +24,7 @@ import {
   getGithubConnectSyncTargetLabel
 } from "@/features/github-integration/utils/github-connect-format";
 import { selectProjectV2IdForRepository } from "@/features/github-integration/utils/github-project-selection";
+import { collectGithubProjectV2Pages } from "@/features/github-integration/utils/github-project-v2-pagination";
 import {
   createGithubSyncPollLoop,
   createGithubSyncRequestGate,
@@ -191,6 +192,11 @@ export function GithubPanel() {
   const [selectedRepositoryId, setSelectedRepositoryId] = useState("");
   const [selectedInstallationId, setSelectedInstallationId] = useState("");
   const [selectedProjectV2Id, setSelectedProjectV2Id] = useState("");
+  const [selectedProjectV2Ids, setSelectedProjectV2Ids] = useState<Set<string>>(
+    new Set()
+  );
+  const [isSavingProjectV2Selections, setIsSavingProjectV2Selections] =
+    useState(false);
   const [syncTarget, setSyncTarget] = useState<GithubSyncTarget>("full");
   const [repositoryQuery, setRepositoryQuery] = useState("");
   const snapshotRequestGateRef = useRef(createGithubSyncRequestGate());
@@ -275,6 +281,16 @@ export function GithubPanel() {
     return hasRunningRun;
   }
 
+  async function listAllGithubProjectsV2() {
+    return collectGithubProjectV2Pages((page) =>
+      apiClient.listGithubProjectsV2(workspaceId, {
+        closed: true,
+        limit: 100,
+        page
+      })
+    );
+  }
+
   async function loadGithubIntegrationSnapshot(
     preferredRepositoryId?: string,
     preferredProjectV2Id?: string
@@ -291,6 +307,7 @@ export function GithubPanel() {
       setSelectedRepositoryId("");
       setSelectedInstallationId("");
       setSelectedProjectV2Id("");
+      setSelectedProjectV2Ids(new Set());
       setIsInstallationDeleteRequested(false);
       return;
     }
@@ -323,9 +340,7 @@ export function GithubPanel() {
             includeArchived: true,
             limit: 20
           }),
-          apiClient.listGithubProjectsV2(workspaceId, {
-            limit: 20
-          }),
+          listAllGithubProjectsV2(),
           apiClient.listGithubSyncRuns(workspaceId, {
             limit: 8
           }),
@@ -351,7 +366,7 @@ export function GithubPanel() {
         repositories.data[0]?.id ??
         "";
       const nextProjectV2Id = selectProjectV2IdForRepository({
-        projects: projects.data,
+        projects,
         preferredProjectV2Id,
         repositoryId: nextRepositoryId
       });
@@ -366,8 +381,8 @@ export function GithubPanel() {
         oauth,
         projectOAuth,
         installations,
-        projects: projects.data,
-        projectsTotal: projects.meta.total,
+        projects,
+        projectsTotal: projects.length,
         repositories: repositories.data,
         repositoriesTotal: repositories.meta.total,
         syncRuns: canApplySyncRuns ? syncRuns.data : current.syncRuns,
@@ -381,6 +396,13 @@ export function GithubPanel() {
       setSelectedRepositoryId(nextRepositoryId);
       setSelectedProjectV2Id(nextProjectV2Id);
       setSelectedInstallationId(nextInstallationId);
+      setSelectedProjectV2Ids(
+        new Set(
+          projects
+            .filter((project) => project.selected)
+            .map((project) => project.id)
+        )
+      );
       rememberGithubBoardSelection(workspaceId, {
         projectV2Id: nextProjectV2Id,
         repositoryId: nextRepositoryId
@@ -623,6 +645,61 @@ export function GithubPanel() {
     });
   }
 
+  function handleToggleProjectV2Selection(projectV2Id: string) {
+    setSelectedProjectV2Ids((current) => {
+      const next = new Set(current);
+      if (next.has(projectV2Id)) {
+        next.delete(projectV2Id);
+      } else {
+        next.add(projectV2Id);
+      }
+      return next;
+    });
+  }
+
+  async function handleSaveProjectV2Selections() {
+    if (!workspaceId) {
+      setActionError("활성 워크스페이스를 확인할 수 없습니다.");
+      return;
+    }
+
+    const projectIdsByInstallation = new Map<string, string[]>();
+    for (const project of snapshot.projects) {
+      const selectedProjectIds = projectIdsByInstallation.get(
+        project.installationId
+      ) ?? [];
+      if (selectedProjectV2Ids.has(project.id)) {
+        selectedProjectIds.push(project.id);
+      }
+      projectIdsByInstallation.set(project.installationId, selectedProjectIds);
+    }
+
+    setIsSavingProjectV2Selections(true);
+    setActionError(null);
+    setActionMessage(null);
+
+    try {
+      await Promise.all(
+        [...projectIdsByInstallation].map(
+          ([installationId, projectV2Ids]) =>
+            apiClient.replaceGithubProjectV2Selections(workspaceId, {
+              installationId,
+              projectV2Ids
+            })
+        )
+      );
+      setActionMessage("ProjectV2 상세 동기화 선택을 저장했습니다.");
+      await loadGithubIntegrationSnapshot(
+        selectedRepositoryId,
+        selectedProjectV2Id
+      );
+    } catch (error) {
+      setActionError(getErrorMessage(error));
+    } finally {
+      setIsSavingProjectV2Selections(false);
+    }
+  }
+
   async function handleStartGithubSyncRun() {
     if (!workspaceId) {
       setActionError("활성 워크스페이스를 확인할 수 없습니다.");
@@ -677,7 +754,7 @@ export function GithubPanel() {
     }
 
     if (
-      (syncTarget === "full" || projectScopedSyncTargets.has(syncTarget)) &&
+      projectScopedSyncTargets.has(syncTarget) &&
       selectedProjectV2Id
     ) {
       body.projectV2Id = selectedProjectV2Id;
@@ -739,6 +816,10 @@ export function GithubPanel() {
       }
       onRepositoryQueryChange={setRepositoryQuery}
       onSelectProjectV2={handleSelectProjectV2}
+      onToggleProjectV2Selection={handleToggleProjectV2Selection}
+      onSaveProjectV2Selections={() =>
+        void handleSaveProjectV2Selections()
+      }
       onSelectRepository={(repositoryId) => void handleSelectRepository(repositoryId)}
       onRequestDeleteInstallation={handleRequestDeleteGithubAppInstallation}
       onStartInstallation={() => void handleStartGithubAppInstallation()}
@@ -760,11 +841,13 @@ export function GithubPanel() {
       selectedInstallationId={selectedInstallationId}
       selectedProject={selectedProject}
       selectedProjectV2Id={selectedProjectV2Id}
+      selectedProjectV2Ids={selectedProjectV2Ids}
       selectedRepository={selectedRepository}
       selectedRepositoryId={selectedRepositoryId}
       syncRuns={snapshot.syncRuns}
       syncRunsTotal={snapshot.syncRunsTotal}
       syncTarget={syncTarget}
+      isSavingProjectV2Selections={isSavingProjectV2Selections}
     />
   );
 }

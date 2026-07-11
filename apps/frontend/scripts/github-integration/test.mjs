@@ -142,6 +142,10 @@ assert.match(
 );
 assert.match(
   githubPanel,
+  /projectScopedSyncTargets\.has\(syncTarget\)\s*&&\s*selectedProjectV2Id/
+);
+assert.doesNotMatch(
+  githubPanel,
   /\(syncTarget === "full" \|\| projectScopedSyncTargets\.has\(syncTarget\)\)/
 );
 assert.match(githubPanel, /setSelectedRepositoryId/);

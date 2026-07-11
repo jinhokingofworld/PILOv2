@@ -1,9 +1,11 @@
 import type {
   ApplyPrReviewConflictResolutionInput,
+  ApplyPrReviewConflictsInput,
   ListPrReviewPullRequestsQuery,
   ListPrReviewRepositoriesQuery,
   MergePrReviewSessionInput,
   PrReviewConflictApplyResult,
+  PrReviewConflictsApplyResult,
   PrReviewCanvas,
   PrReviewConflictAnalysis,
   PrReviewConflictSuggestion,
@@ -36,6 +38,11 @@ type PrReviewApiSuccessResponse<T> = {
   success: true;
   data: T;
   meta?: PrReviewPaginatedPayload<unknown>["meta"];
+};
+
+type PrReviewGithubOAuthStart = {
+  authorizeUrl: string;
+  state: string;
 };
 
 function trimTrailingSlash(value: string) {
@@ -353,6 +360,18 @@ export function createPrReviewApiClient({
   };
 
   return {
+    async startGithubOAuth(returnUrl = "/github") {
+      return requestPrReviewData<PrReviewGithubOAuthStart>(
+        "/me/github/oauth/start",
+        {
+          body: JSON.stringify({ returnUrl }),
+          credentials: "include",
+          method: "POST"
+        },
+        requestOptions
+      );
+    },
+
     async listRepositories(
       workspaceId: string,
       query: ListPrReviewRepositoriesQuery = {}
@@ -457,6 +476,21 @@ export function createPrReviewApiClient({
     ) {
       return requestPrReviewData<PrReviewConflictApplyResult>(
         `${reviewFileGithubPath(workspaceId, reviewFileId)}/conflict-apply`,
+        {
+          body: JSON.stringify(input),
+          method: "POST"
+        },
+        requestOptions
+      );
+    },
+
+    async applyReviewSessionConflictResolutions(
+      workspaceId: string,
+      reviewSessionId: string,
+      input: ApplyPrReviewConflictsInput
+    ) {
+      return requestPrReviewData<PrReviewConflictsApplyResult>(
+        `${reviewSessionGithubPath(workspaceId, reviewSessionId)}/conflict-apply`,
         {
           body: JSON.stringify(input),
           method: "POST"

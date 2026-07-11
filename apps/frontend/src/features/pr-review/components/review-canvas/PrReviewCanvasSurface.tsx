@@ -36,6 +36,7 @@ type PrReviewCanvasSurfaceProps = {
   className?: string;
   conflictAnalysis?: PrReviewConflictAnalysis | null;
   onFileSelect?: (reviewFileId: string | null) => void;
+  preparedConflictFileIds?: Set<string>;
   selectedReviewFileId?: string | null;
 };
 
@@ -66,7 +67,7 @@ type Connector = {
 
 type FileConflictNodeMetadata = {
   conflictReason: string | null;
-  conflictState: "none" | "unresolved" | "unsupported";
+  conflictState: "none" | "unresolved" | "ready" | "unsupported";
 };
 
 const START_NODE_ID = "__start";
@@ -259,7 +260,8 @@ function createFileNodeShape(
 }
 
 function createConflictMetadataResolver(
-  analysis: PrReviewConflictAnalysis | null | undefined
+  analysis: PrReviewConflictAnalysis | null | undefined,
+  preparedConflictFileIds: Set<string>
 ) {
   const contentConflictByFileId = new Map(
     (analysis?.files ?? []).map((file) => [file.reviewFileId, file])
@@ -271,9 +273,12 @@ function createConflictMetadataResolver(
   return (reviewFileId: string): FileConflictNodeMetadata => {
     const contentConflict = contentConflictByFileId.get(reviewFileId);
     if (contentConflict) {
+      const ready = preparedConflictFileIds.has(reviewFileId);
       return {
-        conflictReason: "충돌 해결 전에는 일반 판단을 저장할 수 없습니다.",
-        conflictState: "unresolved"
+        conflictReason: ready
+          ? "해결안이 준비되어 전체 적용을 기다리고 있습니다."
+          : "충돌 해결 전에는 일반 판단을 저장할 수 없습니다.",
+        conflictState: ready ? "ready" : "unresolved"
       };
     }
 
@@ -470,11 +475,15 @@ function buildFlowConnectors(
 
 function buildPrReviewCanvasShapes(
   canvas: PrReviewCanvas,
-  conflictAnalysis?: PrReviewConflictAnalysis | null
+  conflictAnalysis: PrReviewConflictAnalysis | null | undefined,
+  preparedConflictFileIds: Set<string>
 ): TLShapePartial[] {
   const shapes: TLShapePartial[] = [];
   const placementByKey = new Map<string, NodePlacement>();
-  const getConflictMetadata = createConflictMetadataResolver(conflictAnalysis);
+  const getConflictMetadata = createConflictMetadataResolver(
+    conflictAnalysis,
+    preparedConflictFileIds
+  );
   const connectors: Connector[] = [];
   let nextFlowY = CANVAS_PADDING_Y;
 
@@ -651,6 +660,7 @@ export function PrReviewCanvasSurface({
   className,
   conflictAnalysis,
   onFileSelect,
+  preparedConflictFileIds = new Set<string>(),
   selectedReviewFileId
 }: PrReviewCanvasSurfaceProps) {
   const editorRef = useRef<Editor | null>(null);
@@ -658,8 +668,13 @@ export function PrReviewCanvasSurface({
     selectedReviewFileId ?? null
   );
   const shapes = useMemo(
-    () => buildPrReviewCanvasShapes(canvas, conflictAnalysis),
-    [canvas, conflictAnalysis]
+    () =>
+      buildPrReviewCanvasShapes(
+        canvas,
+        conflictAnalysis,
+        preparedConflictFileIds
+      ),
+    [canvas, conflictAnalysis, preparedConflictFileIds]
   );
   const handleMount = useCallback(
     (editor: Editor) => {

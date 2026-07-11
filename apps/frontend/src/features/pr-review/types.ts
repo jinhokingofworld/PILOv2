@@ -370,6 +370,15 @@ export type ApplyPrReviewConflictResolutionInput = {
   expectedHeadBlobSha: string;
 };
 
+export type ApplyPrReviewConflictsInput = {
+  expectedHeadSha: string;
+  files: Array<{
+    reviewFileId: string;
+    resolvedContent: string;
+    expectedHeadBlobSha: string;
+  }>;
+};
+
 export type PrReviewConflictApplyResult = {
   reviewFileId: string;
   filePath: string;
@@ -382,6 +391,28 @@ export type PrReviewConflictApplyResult = {
   headShaAfter: string;
   headBlobShaBefore: string;
   headBlobShaAfter: string;
+  conflictStatus: PrReviewConflictStatus;
+  conflictCheckedAt: string | null;
+  localStateStatus: "updated" | "sync_required";
+};
+
+export type PrReviewConflictsApplyFileResult = {
+  reviewFileId: string;
+  filePath: string;
+  headBlobShaBefore: string;
+  headBlobShaAfter: string;
+};
+
+export type PrReviewConflictsApplyResult = {
+  reviewSessionId: string;
+  pullRequestId: string;
+  status: "applied";
+  appliedByGithubLogin: string;
+  commitSha: string;
+  commitUrl: string | null;
+  headShaBefore: string;
+  headShaAfter: string;
+  files: PrReviewConflictsApplyFileResult[];
   conflictStatus: PrReviewConflictStatus;
   conflictCheckedAt: string | null;
   localStateStatus: "updated" | "sync_required";

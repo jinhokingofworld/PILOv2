@@ -249,6 +249,17 @@ interface PrReviewConflictApplyDraft {
   expectedHeadBlobSha?: unknown;
 }
 
+interface PrReviewConflictsApplyFileDraft {
+  reviewFileId?: unknown;
+  resolvedContent?: unknown;
+  expectedHeadBlobSha?: unknown;
+}
+
+interface PrReviewConflictsApplyDraft {
+  expectedHeadSha?: unknown;
+  files?: unknown;
+}
+
 interface PrReviewMergeDraft {
   expectedHeadSha?: unknown;
   confirm?: unknown;
@@ -550,6 +561,28 @@ export interface PrReviewConflictApplyPayload {
   headShaAfter: string;
   headBlobShaBefore: string;
   headBlobShaAfter: string;
+  conflictStatus: PrReviewConflictStatus;
+  conflictCheckedAt: string | null;
+  localStateStatus: "updated" | "sync_required";
+}
+
+export interface PrReviewConflictsApplyFilePayload {
+  reviewFileId: string;
+  filePath: string;
+  headBlobShaBefore: string;
+  headBlobShaAfter: string;
+}
+
+export interface PrReviewConflictsApplyPayload {
+  reviewSessionId: string;
+  pullRequestId: string;
+  status: "applied";
+  appliedByGithubLogin: string;
+  commitSha: string;
+  commitUrl: string | null;
+  headShaBefore: string;
+  headShaAfter: string;
+  files: PrReviewConflictsApplyFilePayload[];
   conflictStatus: PrReviewConflictStatus;
   conflictCheckedAt: string | null;
   localStateStatus: "updated" | "sync_required";
@@ -1241,6 +1274,152 @@ export class PrReviewService {
     });
 
     return this.mapConflictSuggestion(file, conflictInput.headBlobSha, suggestion);
+  }
+
+  async applyReviewSessionConflictResolutions(
+    currentUserId: string,
+    workspaceId: string,
+    reviewSessionId: string,
+    body: unknown
+  ): Promise<PrReviewConflictsApplyPayload> {
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+
+    const input = this.normalizeConflictsApply(body);
+    const session = await this.findReviewSession(workspaceId, reviewSessionId);
+    if (!session) {
+      throw notFound("Review session not found");
+    }
+
+    if (session.conflict_status !== "conflicted") {
+      throw badRequest("Review session is not conflicted");
+    }
+
+    if (session.head_sha !== input.expectedHeadSha) {
+      throw conflictError("Review session head SHA is stale");
+    }
+
+    const conflictAnalysis = await this.getReviewSessionConflicts(
+      currentUserId,
+      workspaceId,
+      reviewSessionId
+    );
+    if (conflictAnalysis.unsupportedFiles.length > 0) {
+      throw badRequest("Unsupported conflict files must be resolved outside PILO");
+    }
+
+    const requestedFileById = new Map(
+      input.files.map((file) => [file.reviewFileId, file])
+    );
+    if (
+      conflictAnalysis.files.length !== input.files.length ||
+      conflictAnalysis.files.some(
+        (file) => !requestedFileById.has(file.reviewFileId)
+      )
+    ) {
+      throw conflictError("Review session conflict file set is stale");
+    }
+
+    const resolvedFiles = conflictAnalysis.files.map((file) => {
+      const requestedFile = requestedFileById.get(file.reviewFileId);
+      if (!requestedFile) {
+        throw conflictError("Review session conflict file set is stale");
+      }
+      if (file.headBlobSha !== requestedFile.expectedHeadBlobSha) {
+        throw conflictError(`Review file blob SHA is stale: ${file.filePath}`);
+      }
+
+      return {
+        reviewFileId: file.reviewFileId,
+        filePath: file.filePath,
+        resolvedContent: requestedFile.resolvedContent,
+        expectedHeadBlobSha: requestedFile.expectedHeadBlobSha
+      };
+    });
+
+    const applyResult =
+      await this.githubDependency.applyPullRequestConflictResolutions(
+        currentUserId,
+        workspaceId,
+        session.pull_request_id,
+        {
+          files: resolvedFiles.map((file) => ({
+            filePath: file.filePath,
+            resolvedContent: file.resolvedContent,
+            expectedHeadBlobSha: file.expectedHeadBlobSha
+          })),
+          expectedBaseSha: conflictAnalysis.baseSha,
+          expectedHeadSha: input.expectedHeadSha
+        }
+      );
+    let conflictStatusRefreshed = true;
+    let refreshedConflict: PrReviewGithubConflictStatusPayload;
+    try {
+      refreshedConflict = await this.getSettledPullRequestConflictStatus(
+        currentUserId,
+        workspaceId,
+        session.pull_request_id
+      );
+    } catch {
+      conflictStatusRefreshed = false;
+      refreshedConflict = {
+        conflictStatus: "unknown",
+        checkedAt: null
+      };
+      this.logger.warn(
+        `GitHub conflict merge commit ${applyResult.commitSha} succeeded but conflict status refresh failed for ${session.pull_request_id}`
+      );
+    }
+
+    let reviewSessionUpdated = true;
+    try {
+      await this.updateReviewSessionAfterConflictApply({
+        reviewSessionId: session.id,
+        headSha: applyResult.headShaAfter,
+        conflictStatus: refreshedConflict.conflictStatus,
+        conflictCheckedAt: refreshedConflict.checkedAt
+      });
+    } catch {
+      reviewSessionUpdated = false;
+      this.logger.warn(
+        `GitHub conflict merge commit ${applyResult.commitSha} succeeded but review session update failed for ${session.id}`
+      );
+    }
+
+    const appliedFileByPath = new Map(
+      applyResult.files.map((file) => [file.filePath, file])
+    );
+
+    return {
+      reviewSessionId: session.id,
+      pullRequestId: session.pull_request_id,
+      status: "applied",
+      appliedByGithubLogin: applyResult.appliedByGithubLogin,
+      commitSha: applyResult.commitSha,
+      commitUrl: applyResult.commitUrl,
+      headShaBefore: applyResult.headShaBefore,
+      headShaAfter: applyResult.headShaAfter,
+      files: resolvedFiles.map((file) => {
+        const appliedFile = appliedFileByPath.get(file.filePath);
+        if (!appliedFile) {
+          throw badRequest("GitHub conflict resolution result is invalid");
+        }
+
+        return {
+          reviewFileId: file.reviewFileId,
+          filePath: file.filePath,
+          headBlobShaBefore: appliedFile.headBlobShaBefore,
+          headBlobShaAfter: appliedFile.headBlobShaAfter
+        };
+      }),
+      conflictStatus: refreshedConflict.conflictStatus,
+      conflictCheckedAt: refreshedConflict.checkedAt,
+      localStateStatus:
+        applyResult.localCacheUpdated &&
+        conflictStatusRefreshed &&
+        reviewSessionUpdated
+          ? "updated"
+          : "sync_required"
+    };
   }
 
   async applyReviewFileConflictResolution(
@@ -3017,6 +3196,66 @@ export class PrReviewService {
     };
   }
 
+  private normalizeConflictsApply(body: unknown): {
+    expectedHeadSha: string;
+    files: Array<{
+      reviewFileId: string;
+      resolvedContent: string;
+      expectedHeadBlobSha: string;
+    }>;
+  } {
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      throw badRequest("Request body must be an object");
+    }
+
+    const draft = body as PrReviewConflictsApplyDraft;
+    if (
+      typeof draft.expectedHeadSha !== "string" ||
+      !draft.expectedHeadSha.trim()
+    ) {
+      throw badRequest("expectedHeadSha must not be empty");
+    }
+    if (!Array.isArray(draft.files) || draft.files.length === 0) {
+      throw badRequest("files must be a non-empty array");
+    }
+
+    const files = draft.files.map((value, index) => {
+      if (!value || typeof value !== "object" || Array.isArray(value)) {
+        throw badRequest(`files[${index}] must be an object`);
+      }
+
+      const file = value as PrReviewConflictsApplyFileDraft;
+      if (typeof file.reviewFileId !== "string" || !file.reviewFileId.trim()) {
+        throw badRequest(`files[${index}].reviewFileId must not be empty`);
+      }
+      if (
+        typeof file.expectedHeadBlobSha !== "string" ||
+        !file.expectedHeadBlobSha.trim()
+      ) {
+        throw badRequest(
+          `files[${index}].expectedHeadBlobSha must not be empty`
+        );
+      }
+
+      return {
+        reviewFileId: file.reviewFileId.trim(),
+        resolvedContent: this.normalizeResolvedConflictContent(
+          file.resolvedContent,
+          `files[${index}].resolvedContent`
+        ),
+        expectedHeadBlobSha: file.expectedHeadBlobSha.trim()
+      };
+    });
+    if (new Set(files.map((file) => file.reviewFileId)).size !== files.length) {
+      throw badRequest("files must not contain duplicate reviewFileId values");
+    }
+
+    return {
+      expectedHeadSha: draft.expectedHeadSha.trim(),
+      files
+    };
+  }
+
   private normalizeConflictApply(body: unknown): {
     resolvedContent: string;
     expectedHeadSha: string;
@@ -3025,26 +3264,11 @@ export class PrReviewService {
     if (!body || typeof body !== "object" || Array.isArray(body)) {
       throw badRequest("Request body must be an object");
     }
-
     const draft = body as PrReviewConflictApplyDraft;
-    if (typeof draft.resolvedContent !== "string") {
-      throw badRequest("resolvedContent must be a string");
-    }
-
-    const resolvedContent = draft.resolvedContent
-      .replace(/\r\n/g, "\n")
-      .replace(/\r/g, "\n");
-    if (!resolvedContent.trim()) {
-      throw badRequest("resolvedContent must not be empty");
-    }
-
-    if (resolvedContent.length > MAX_CONFLICT_APPLY_CONTENT_CHARS) {
-      throw badRequest("resolvedContent is too large");
-    }
-
-    if (CONFLICT_MARKER_PATTERN.test(resolvedContent)) {
-      throw badRequest("resolvedContent must not contain conflict markers");
-    }
+    const resolvedContent = this.normalizeResolvedConflictContent(
+      draft.resolvedContent,
+      "resolvedContent"
+    );
 
     if (
       typeof draft.expectedHeadSha !== "string" ||
@@ -3065,6 +3289,30 @@ export class PrReviewService {
       expectedHeadSha: draft.expectedHeadSha.trim(),
       expectedHeadBlobSha: draft.expectedHeadBlobSha.trim()
     };
+  }
+
+  private normalizeResolvedConflictContent(
+    value: unknown,
+    field: string
+  ): string {
+    if (typeof value !== "string") {
+      throw badRequest(`${field} must be a string`);
+    }
+
+    const resolvedContent = value
+      .replace(/\r\n/g, "\n")
+      .replace(/\r/g, "\n");
+    if (!resolvedContent.trim()) {
+      throw badRequest(`${field} must not be empty`);
+    }
+    if (resolvedContent.length > MAX_CONFLICT_APPLY_CONTENT_CHARS) {
+      throw badRequest(`${field} is too large`);
+    }
+    if (CONFLICT_MARKER_PATTERN.test(resolvedContent)) {
+      throw badRequest(`${field} must not contain conflict markers`);
+    }
+
+    return resolvedContent;
   }
 
   private normalizeReviewSessionMerge(body: unknown): {

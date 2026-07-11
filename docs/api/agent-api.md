@@ -299,6 +299,9 @@ Request:
   `201 Created` 응답을 바꾸지 않으며 run은 `planning`을 유지한다.
 - publisher는 1, 2, 4, 8, 16분 backoff로 최대 5회 재시도한다. 재시도 소진 후에만 run을 safe `failed`로
   전환하고 Agent log에 운영용 event를 남긴다.
+- AI Worker planner의 infrastructure failure는 원본 SQS queue에서 세 번째 수신까지 재시도한다. 세 번째
+  수신에서 `planning` run과 남은 planner step을 safe `failed`로 전환하는 DB transaction이 성공할 때만
+  메시지를 삭제한다. 이 transaction도 실패하면 메시지는 삭제하지 않아 DLQ 보관함으로 이동한다.
 - SQS send 성공 뒤 publisher 상태 저장 전에 process가 종료되면 같은 job이 다시 발행될 수 있다. AI Worker의
   run lock과 상태 전이가 중복 planner 실행을 막는다.
 - 클라이언트는 응답의 `run.id`로 상세 조회를 polling한다.
@@ -695,7 +698,9 @@ Status code: `200 OK`
 - PR Review 자동 제출
 - GitHub issue label/assignee/milestone/due date 변경
 - Board due date 자동 변경
-- Canvas 자유 편집 자동 생성/수정
+- Canvas 자유 편집 자동 생성/수정 (일반 Agent 범위). Canvas 전용 요청은
+  `docs/api/canvas-agent-api.md`의 별도 Canvas Agent 계약만 사용하며, Calendar,
+  Issue, PR, Meeting 등 외부 도메인 도구에는 접근하지 않는다.
 - Meeting 녹음 시작/종료
 - MeetingReport 재생성 요청
 - Calendar 일정 삭제

@@ -72,13 +72,16 @@ class FakeDatabase {
 function createGithubDependency({
   conflictStatuses = ["clean"],
   failConflictRefresh = false,
-  localCacheUpdated = true
+  localCacheUpdated = true,
+  unsupportedPaths = []
 } = {}) {
   const applyRequests = [];
+  const multiApplyRequests = [];
   const conflictStatusRequests = [];
 
   return {
     applyRequests,
+    multiApplyRequests,
     conflictStatusRequests,
     dependency: {
       async getPullRequestDetail() {
@@ -99,7 +102,9 @@ function createGithubDependency({
               filePath === "src/conflicted.ts"
                 ? "head-blob-sha"
                 : "second-head-blob-sha",
-            unsupportedReason: null
+            unsupportedReason: unsupportedPaths.includes(filePath)
+              ? "binary conflict is not supported"
+              : null
           }))
         };
       },
@@ -114,6 +119,28 @@ function createGithubDependency({
           headShaAfter: "merge-commit-sha",
           headBlobShaBefore: "head-blob-sha",
           headBlobShaAfter: "resolved-blob-sha",
+          localCacheUpdated
+        };
+      },
+      async applyPullRequestConflictResolutions(
+        _userId,
+        _workspaceId,
+        _prId,
+        input
+      ) {
+        multiApplyRequests.push(input);
+        return {
+          appliedByGithubLogin: "Developer-EJ",
+          commitSha: "multi-merge-commit-sha",
+          commitUrl:
+            "https://github.com/Developer-EJ/PILO/commit/multi-merge-commit-sha",
+          headShaBefore: "head-sha",
+          headShaAfter: "multi-merge-commit-sha",
+          files: input.files.map((file) => ({
+            filePath: file.filePath,
+            headBlobShaBefore: file.expectedHeadBlobSha,
+            headBlobShaAfter: `${file.filePath}-resolved-blob-sha`
+          })),
           localCacheUpdated
         };
       },
@@ -134,6 +161,197 @@ function createGithubDependency({
       }
     }
   };
+}
+
+{
+  const database = new FakeDatabase([
+    reviewFile(reviewFileId, "src/conflicted.ts"),
+    reviewFile(secondReviewFileId, "src/second-conflict.ts")
+  ]);
+  const { dependency, multiApplyRequests } = createGithubDependency();
+  const service = createService(database, dependency);
+
+  const result = await service.applyReviewSessionConflictResolutions(
+    "user-id",
+    workspaceId,
+    reviewSessionId,
+    {
+      expectedHeadSha: "head-sha",
+      files: [
+        {
+          reviewFileId,
+          resolvedContent: "const value = 'resolved';",
+          expectedHeadBlobSha: "head-blob-sha"
+        },
+        {
+          reviewFileId: secondReviewFileId,
+          resolvedContent: "const second = 'resolved';",
+          expectedHeadBlobSha: "second-head-blob-sha"
+        }
+      ]
+    }
+  );
+
+  assert.deepEqual(multiApplyRequests, [
+    {
+      expectedBaseSha: "base-sha",
+      expectedHeadSha: "head-sha",
+      files: [
+        {
+          filePath: "src/conflicted.ts",
+          resolvedContent: "const value = 'resolved';",
+          expectedHeadBlobSha: "head-blob-sha"
+        },
+        {
+          filePath: "src/second-conflict.ts",
+          resolvedContent: "const second = 'resolved';",
+          expectedHeadBlobSha: "second-head-blob-sha"
+        }
+      ]
+    }
+  ]);
+  assert.equal(result.status, "applied");
+  assert.equal(result.files.length, 2);
+  assert.equal(result.localStateStatus, "updated");
+}
+
+{
+  const database = new FakeDatabase([
+    reviewFile(reviewFileId, "src/conflicted.ts"),
+    reviewFile(secondReviewFileId, "src/second-conflict.ts")
+  ]);
+  const { dependency, multiApplyRequests } = createGithubDependency();
+  const service = createService(database, dependency);
+
+  await assert.rejects(
+    () =>
+      service.applyReviewSessionConflictResolutions(
+        "user-id",
+        workspaceId,
+        reviewSessionId,
+        {
+          expectedHeadSha: "head-sha",
+          files: [
+            {
+              reviewFileId,
+              resolvedContent: "const value = 'resolved';",
+              expectedHeadBlobSha: "head-blob-sha"
+            }
+          ]
+        }
+      ),
+    (error) =>
+      error?.response?.error?.message ===
+      "Review session conflict file set is stale"
+  );
+  assert.deepEqual(multiApplyRequests, []);
+}
+
+{
+  const database = new FakeDatabase([
+    reviewFile(reviewFileId, "src/conflicted.ts"),
+    reviewFile(secondReviewFileId, "src/second-conflict.ts")
+  ]);
+  const { dependency, multiApplyRequests } = createGithubDependency();
+  const service = createService(database, dependency);
+
+  await assert.rejects(
+    () =>
+      service.applyReviewSessionConflictResolutions(
+        "user-id",
+        workspaceId,
+        reviewSessionId,
+        {
+          expectedHeadSha: "head-sha",
+          files: [
+            {
+              reviewFileId,
+              resolvedContent: "const value = 'resolved';",
+              expectedHeadBlobSha: "stale-blob-sha"
+            },
+            {
+              reviewFileId: secondReviewFileId,
+              resolvedContent: "const second = 'resolved';",
+              expectedHeadBlobSha: "second-head-blob-sha"
+            }
+          ]
+        }
+      ),
+    (error) =>
+      error?.response?.error?.message ===
+      "Review file blob SHA is stale: src/conflicted.ts"
+  );
+  assert.deepEqual(multiApplyRequests, []);
+}
+
+{
+  const database = new FakeDatabase([
+    reviewFile(reviewFileId, "src/conflicted.ts"),
+    reviewFile(secondReviewFileId, "src/second-conflict.ts")
+  ]);
+  const { dependency, multiApplyRequests } = createGithubDependency({
+    unsupportedPaths: ["src/second-conflict.ts"]
+  });
+  const service = createService(database, dependency);
+
+  await assert.rejects(
+    () =>
+      service.applyReviewSessionConflictResolutions(
+        "user-id",
+        workspaceId,
+        reviewSessionId,
+        {
+          expectedHeadSha: "head-sha",
+          files: [
+            {
+              reviewFileId,
+              resolvedContent: "const value = 'resolved';",
+              expectedHeadBlobSha: "head-blob-sha"
+            }
+          ]
+        }
+      ),
+    (error) =>
+      error?.response?.error?.message ===
+      "Unsupported conflict files must be resolved outside PILO"
+  );
+  assert.deepEqual(multiApplyRequests, []);
+}
+
+{
+  const database = new FakeDatabase([
+    reviewFile(reviewFileId, "src/conflicted.ts")
+  ]);
+  const { dependency, multiApplyRequests } = createGithubDependency();
+  const service = createService(database, dependency);
+
+  await assert.rejects(
+    () =>
+      service.applyReviewSessionConflictResolutions(
+        "user-id",
+        workspaceId,
+        reviewSessionId,
+        {
+          expectedHeadSha: "head-sha",
+          files: [
+            {
+              reviewFileId,
+              resolvedContent: "const value = 'first';",
+              expectedHeadBlobSha: "head-blob-sha"
+            },
+            {
+              reviewFileId,
+              resolvedContent: "const value = 'second';",
+              expectedHeadBlobSha: "head-blob-sha"
+            }
+          ]
+        }
+      ),
+    (error) =>
+      error?.response?.error?.message ===
+      "files must not contain duplicate reviewFileId values"
+  );
+  assert.deepEqual(multiApplyRequests, []);
 }
 
 function createService(database, githubDependency) {

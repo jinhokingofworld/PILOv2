@@ -43,7 +43,9 @@ import type {
 } from "@/features/sql-erd/types";
 import {
   areSqltoerdLayoutsEqual,
+  createSqltoerdModelIndex,
   getTableLayout,
+  inferSqlErdRelationCardinality,
   updateSqltoerdLayoutWithTablePositions,
   type SqltoerdTablePosition
 } from "@/features/sql-erd/utils/model";
@@ -134,11 +136,13 @@ export function createSqltoerdRelationShapes(
   modelJson: SqltoerdModelJsonV1,
   tableShapes: TLShapePartial<SqlErdTableShape>[]
 ): TLShapePartial<SqlErdRelationShape>[] {
+  const modelIndex = createSqltoerdModelIndex(modelJson);
   const tableShapeById = new Map(
     tableShapes.map((shape) => [shape.props?.tableId, shape])
   );
 
   return modelJson.schema.relations.map((relation) => {
+    const cardinality = inferSqlErdRelationCardinality(relation, modelIndex);
     const fromTableShape = tableShapeById.get(relation.fromTableId);
     const toTableShape = tableShapeById.get(relation.toTableId);
     const layout =
@@ -167,9 +171,11 @@ export function createSqltoerdRelationShapes(
         constraintName: relation.constraintName,
         fromTableShapeId: getSqlErdTableShapeId(relation.fromTableId),
         toTableShapeId: getSqlErdTableShapeId(relation.toTableId),
+        endCardinality: cardinality?.to ?? null,
         endSide: layout.endSide,
         points: layout.points,
         arrowPoints: layout.arrowPoints,
+        startCardinality: cardinality?.from ?? null,
         startSide: layout.startSide
       }
     };
@@ -602,6 +608,8 @@ function isSqlErdRelationShapePartialApplied(
     currentShape.props.fromTableId === nextProps.fromTableId &&
     currentShape.props.toTableId === nextProps.toTableId &&
     currentShape.props.constraintName === nextProps.constraintName &&
+    currentShape.props.startCardinality === nextProps.startCardinality &&
+    currentShape.props.endCardinality === nextProps.endCardinality &&
     currentShape.props.startSide === nextProps.startSide &&
     currentShape.props.endSide === nextProps.endSide &&
     areStringArraysEqual(

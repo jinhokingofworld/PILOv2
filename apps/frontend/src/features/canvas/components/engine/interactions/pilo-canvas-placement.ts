@@ -4,16 +4,10 @@ import type { Editor, TLShapeId } from "tldraw";
 import {
   createCodeBlockShape,
   createInsertableShape,
-  createStickyNoteShape,
   type PiloInsertableTool,
 } from "../shapes/pilo-canvas-shape-factory";
-import type { PiloStickyNoteColor } from "../shapes/sticky-note/PiloStickyNoteShapeUtil";
 
 export type PiloPlacementRequest =
-  | {
-      type: "sticky";
-      color?: PiloStickyNoteColor;
-    }
   | {
       type: "code";
     }
@@ -33,14 +27,6 @@ export function placePiloCanvasShapeAt({
   placementRequest: PiloPlacementRequest;
   point: { x: number; y: number };
 }) {
-  if (placementRequest.type === "sticky") {
-    const shape = createStickyNoteShape(index, point, placementRequest.color);
-
-    editor.createShapes([shape]);
-    editor.select(shape.id as TLShapeId);
-    return { placed: true, createdCount: 1 };
-  }
-
   if (placementRequest.type === "code") {
     const shape = createCodeBlockShape(index, point);
 

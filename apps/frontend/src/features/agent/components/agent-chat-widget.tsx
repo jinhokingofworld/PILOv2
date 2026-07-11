@@ -12,8 +12,6 @@ import {
 import {
   Bot,
   CalendarDays,
-  GitPullRequest,
-  ListTodo,
   Loader2,
   MessageCircle,
   SendHorizontal,
@@ -57,8 +55,7 @@ const initialMessages: AgentChatMessage[] = [
   {
     id: "assistant-welcome",
     role: "assistant",
-    content:
-      "안녕하세요. 일정 생성, 회의록 확인, Board 이슈 검색 같은 워크스페이스 작업을 도와드릴게요."
+    content: "안녕하세요. 일정 생성과 회의록 확인을 도와드릴게요."
   },
   {
     id: "assistant-example",
@@ -72,16 +69,6 @@ const suggestionPrompts = [
     icon: CalendarDays,
     label: "오늘 일정 보기",
     prompt: "오늘 일정 보여줘"
-  },
-  {
-    icon: ListTodo,
-    label: "내 이슈 확인",
-    prompt: "내 이슈 보여줘"
-  },
-  {
-    icon: GitPullRequest,
-    label: "현재 PR 보기",
-    prompt: "현재 PR 보여줘"
   }
 ];
 
