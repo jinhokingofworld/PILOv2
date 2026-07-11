@@ -10,6 +10,10 @@ from app.agent_processor import (
 )
 from app.canvas_agent.types import CANVAS_AGENT_JOB_TYPE, CanvasAgentProcessResult
 from app.meeting_report_processor import InfrastructureError, ProcessResult
+from app.pr_review_analysis_processor import (
+    PR_REVIEW_ANALYSIS_JOB_TYPE,
+    PrReviewAnalysisProcessResult,
+)
 
 MEETING_REPORT_JOB_TYPE = "meeting_report"
 
@@ -34,16 +38,22 @@ class CanvasAgentProcessorLike(Protocol):
     def process_payload(self, payload: dict[str, object]) -> CanvasAgentProcessResult: ...
 
 
+class PrReviewAnalysisProcessorLike(Protocol):
+    def process_payload(self, payload: dict[str, object]) -> PrReviewAnalysisProcessResult: ...
+
+
 class JobDispatcher:
     def __init__(
         self,
-        meeting_report_processor: MeetingReportProcessorLike,
-        agent_run_processor: AgentRunProcessorLike,
+        meeting_report_processor: MeetingReportProcessorLike | None = None,
+        agent_run_processor: AgentRunProcessorLike | None = None,
         canvas_agent_processor: CanvasAgentProcessorLike | None = None,
+        pr_review_analysis_processor: PrReviewAnalysisProcessorLike | None = None,
     ) -> None:
         self.meeting_report_processor = meeting_report_processor
         self.agent_run_processor = agent_run_processor
         self.canvas_agent_processor = canvas_agent_processor
+        self.pr_review_analysis_processor = pr_review_analysis_processor
 
     def process_message(self, message_body: str) -> JobProcessResult:
         try:
@@ -69,6 +79,9 @@ class JobDispatcher:
 
             if normalized_job_type == CANVAS_AGENT_JOB_TYPE:
                 return self._process_canvas_agent(payload)
+
+            if normalized_job_type == PR_REVIEW_ANALYSIS_JOB_TYPE:
+                return self._process_pr_review_analysis(payload)
         except InfrastructureError:
             return JobProcessResult(
                 delete_message=False,
@@ -83,6 +96,12 @@ class JobDispatcher:
         )
 
     def _process_meeting_report(self, payload: dict[str, object]) -> JobProcessResult:
+        if self.meeting_report_processor is None:
+            return JobProcessResult(
+                delete_message=True,
+                reason="meeting_report_processor_unavailable",
+                job_type=MEETING_REPORT_JOB_TYPE,
+            )
         result = self.meeting_report_processor.process_payload(payload)
         return JobProcessResult(
             delete_message=result.delete_message,
@@ -92,6 +111,12 @@ class JobDispatcher:
         )
 
     def _process_agent_run(self, payload: dict[str, object]) -> JobProcessResult:
+        if self.agent_run_processor is None:
+            return JobProcessResult(
+                delete_message=True,
+                reason="agent_run_processor_unavailable",
+                job_type=AGENT_RUN_REQUESTED_JOB_TYPE,
+            )
         result = self.agent_run_processor.process_payload(payload)
         return JobProcessResult(
             delete_message=result.delete_message,
@@ -114,4 +139,20 @@ class JobDispatcher:
             reason=result.reason,
             job_type=CANVAS_AGENT_JOB_TYPE,
             resource_id=result.run_id,
+        )
+
+    def _process_pr_review_analysis(self, payload: dict[str, object]) -> JobProcessResult:
+        if self.pr_review_analysis_processor is None:
+            return JobProcessResult(
+                delete_message=True,
+                reason="pr_review_analysis_processor_unavailable",
+                job_type=PR_REVIEW_ANALYSIS_JOB_TYPE,
+            )
+
+        result = self.pr_review_analysis_processor.process_payload(payload)
+        return JobProcessResult(
+            delete_message=result.delete_message,
+            reason=result.reason,
+            job_type=PR_REVIEW_ANALYSIS_JOB_TYPE,
+            resource_id=result.job_id,
         )
