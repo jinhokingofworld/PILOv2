@@ -13,6 +13,21 @@ resource "aws_sqs_queue" "ai_jobs" {
   })
 }
 
+resource "aws_sqs_queue" "pr_review_analysis_dlq" {
+  name                      = "${var.name_prefix}-pr-review-analysis-dlq"
+  message_retention_seconds = 1209600
+}
+
+resource "aws_sqs_queue" "pr_review_analysis" {
+  name                       = "${var.name_prefix}-pr-review-analysis"
+  visibility_timeout_seconds = 900
+
+  redrive_policy = jsonencode({
+    deadLetterTargetArn = aws_sqs_queue.pr_review_analysis_dlq.arn
+    maxReceiveCount     = 3
+  })
+}
+
 resource "aws_sqs_queue" "github_webhooks_dlq" {
   name                      = "${var.name_prefix}-github-webhooks-dlq"
   message_retention_seconds = 1209600
