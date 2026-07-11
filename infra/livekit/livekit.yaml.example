@@ -16,6 +16,10 @@ redis:
 keys:
   pilo_dev_key: replace-me-with-a-strong-secret
 
+webhook:
+  urls:
+    - https://api.dev.pilo.example.com/api/v1/livekit/webhooks
+
 turn:
   enabled: true
   domain: turn.dev.pilo.my

@@ -7,6 +7,7 @@ import { PrReviewAnalysisService } from "./pr-review-analysis.service";
 import { PrReviewAnalysisHandoffGuard } from "./pr-review-analysis-handoff.guard";
 import { PrReviewAnalysisInternalController } from "./pr-review-analysis-internal.controller";
 import { PrReviewAnalysisJobPublisherService } from "./pr-review-analysis-job-publisher.service";
+import { PrReviewAnalysisJobRecoveryService } from "./pr-review-analysis-job-recovery.service";
 import { PrReviewAnalysisJobService } from "./pr-review-analysis-job.service";
 import { PrReviewGithubDependencyService } from "./pr-review-github-dependency.service";
 import { PrReviewController } from "./pr-review.controller";
@@ -21,14 +22,16 @@ import { PrReviewService } from "./pr-review.service";
     PrReviewAnalysisService,
     PrReviewAnalysisHandoffGuard,
     PrReviewAnalysisJobService,
-    PrReviewAnalysisJobPublisherService
+    PrReviewAnalysisJobPublisherService,
+    PrReviewAnalysisJobRecoveryService
   ],
   exports: [
     PrReviewService,
     PrReviewGithubDependencyService,
     PrReviewAnalysisService,
     PrReviewAnalysisJobService,
-    PrReviewAnalysisJobPublisherService
+    PrReviewAnalysisJobPublisherService,
+    PrReviewAnalysisJobRecoveryService
   ]
 })
 export class PrReviewModule {}

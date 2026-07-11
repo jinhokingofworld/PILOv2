@@ -6,6 +6,7 @@ param(
   [string]$AcmeEmail = "ejaj1217@gmail.com",
   [string]$RecordingsBucket = "pilo-dev-683655334891-uploads",
   [string]$RecordingsPrefix = "recordings/",
+  [string]$WebhookUrl = "https://api.dev.pilo.my/api/v1/livekit/webhooks",
   [string]$ApiKey = "pilo_dev_key",
   [string]$ApiSecret = "",
   [switch]$NonInteractive,
@@ -155,6 +156,7 @@ if ($NonInteractive) {
   $acmeEmail = $AcmeEmail.Trim()
   $recordingsBucket = $RecordingsBucket.Trim()
   $recordingsPrefix = $RecordingsPrefix.Trim()
+  $webhookUrl = $WebhookUrl.Trim()
   $apiKey = $ApiKey.Trim()
   $apiSecret = $ApiSecret.Trim()
 
@@ -173,6 +175,7 @@ else {
   $acmeEmail = Read-Value "ACME_EMAIL" $AcmeEmail
   $recordingsBucket = Read-Value "LIVEKIT_RECORDINGS_BUCKET" $RecordingsBucket
   $recordingsPrefix = Read-Value "LIVEKIT_EGRESS_S3_PREFIX" $RecordingsPrefix
+  $webhookUrl = Read-Value "LIVEKIT_WEBHOOK_URL" $WebhookUrl
   $apiKey = Read-Value "LIVEKIT_API_KEY" $ApiKey
 
   if ([string]::IsNullOrWhiteSpace($ApiSecret)) {
@@ -191,6 +194,7 @@ $values = @{
   ACME_EMAIL                 = $acmeEmail
   LIVEKIT_RECORDINGS_BUCKET  = $recordingsBucket
   LIVEKIT_EGRESS_S3_PREFIX   = $recordingsPrefix
+  LIVEKIT_WEBHOOK_URL         = $webhookUrl
   LIVEKIT_API_KEY            = $apiKey
   LIVEKIT_API_SECRET         = $apiSecret
 }
@@ -215,6 +219,7 @@ Write-GeneratedFile $envPath @(
   "AWS_REGION=$Region",
   "LIVEKIT_EGRESS_S3_BUCKET=$recordingsBucket",
   "LIVEKIT_EGRESS_S3_PREFIX=$recordingsPrefix",
+  "LIVEKIT_WEBHOOK_URL=$webhookUrl",
   "",
   "LIVEKIT_API_KEY=$apiKey",
   "LIVEKIT_API_SECRET=$apiSecret"
@@ -238,6 +243,10 @@ Write-GeneratedFile $livekitConfigPath @(
   "",
   "keys:",
   "  $(Format-YamlScalar $apiKey): $(Format-YamlScalar $apiSecret)",
+  "",
+  "webhook:",
+  "  urls:",
+  "    - $(Format-YamlScalar $webhookUrl)",
   "",
   "turn:",
   "  enabled: true",

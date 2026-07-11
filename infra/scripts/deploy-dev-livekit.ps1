@@ -7,6 +7,7 @@ param(
   [string]$AcmeEmail = "ejaj1217@gmail.com",
   [string]$RecordingsBucket = "pilo-dev-683655334891-uploads",
   [string]$RecordingsPrefix = "recordings/",
+  [string]$WebhookUrl = "https://api.dev.pilo.my/api/v1/livekit/webhooks",
   [string]$DockerComposeVersion = "v2.29.7"
 )
 
@@ -118,6 +119,7 @@ TURN_DOMAIN="{{TURN_DOMAIN}}"
 ACME_EMAIL="{{ACME_EMAIL}}"
 RECORDINGS_BUCKET="{{RECORDINGS_BUCKET}}"
 RECORDINGS_PREFIX="{{RECORDINGS_PREFIX}}"
+WEBHOOK_URL="{{WEBHOOK_URL}}"
 DOCKER_COMPOSE_VERSION="{{DOCKER_COMPOSE_VERSION}}"
 
 if ! command -v docker >/dev/null 2>&1; then
@@ -224,6 +226,7 @@ ACME_EMAIL=$ACME_EMAIL
 AWS_REGION=$REGION
 LIVEKIT_EGRESS_S3_BUCKET=$LIVEKIT_RECORDINGS_BUCKET
 LIVEKIT_EGRESS_S3_PREFIX=$RECORDINGS_PREFIX
+LIVEKIT_WEBHOOK_URL=$WEBHOOK_URL
 LIVEKIT_API_KEY=$LIVEKIT_API_KEY
 LIVEKIT_API_SECRET=$LIVEKIT_API_SECRET
 EOF
@@ -243,6 +246,10 @@ redis:
 
 keys:
   "$LIVEKIT_API_KEY": "$LIVEKIT_API_SECRET"
+
+webhook:
+  urls:
+    - "$WEBHOOK_URL"
 
 turn:
   enabled: true
@@ -290,6 +297,7 @@ $remoteScript = $remoteScriptTemplate.
   Replace("{{ACME_EMAIL}}", $AcmeEmail).
   Replace("{{RECORDINGS_BUCKET}}", $RecordingsBucket).
   Replace("{{RECORDINGS_PREFIX}}", $RecordingsPrefix).
+  Replace("{{WEBHOOK_URL}}", $WebhookUrl).
   Replace("{{DOCKER_COMPOSE_VERSION}}", $DockerComposeVersion)
 
 $payloadPath = Write-TempJson @{

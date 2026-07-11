@@ -48,3 +48,8 @@ The database schema source of truth is the migration history in `db/migrations/`
 - `migrations/029_create_github_sync_jobs.sql` adds durable GitHub worker job lease state and queued sync-run indexes for asynchronous GitHub synchronization.
 - `migrations/030_enable_github_sync_jobs_rls.sql` enables all-deny RLS for durable GitHub sync worker jobs.
 - `migrations/031_create_pr_review_analysis_jobs.sql` adds asynchronous PR Review analysis jobs, durable SQS publish state, analysis failure fields, and duplicate-analyzing-session protection.
+- `migrations/032_create_livekit_webhook_deliveries.sql` adds durable verified LiveKit participant departure webhook delivery records with all-deny RLS.
+- `migrations/033_create_meeting_report_outbox.sql` adds durable MeetingReport SQS delivery intents and retry lease state with all-deny RLS.
+- `migrations/034_repository_scope_github_project_v2_selections.sql` adds the `source` GitHub sync target and scopes ProjectV2 selections to repositories while preserving cache tables and all-deny RLS.
+- `migrations/035_remove_owner_workspace_unique_limit.sql` removes the one-owner-Workspace-per-user unique index and restores a non-unique owner lookup index for multi-Workspace ownership.
+- `migrations/036_add_workspace_icon.sql` adds an optional Workspace icon with a bounded text length for navigation and onboarding display.

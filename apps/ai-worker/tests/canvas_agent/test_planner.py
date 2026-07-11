@@ -5,6 +5,8 @@ import json
 import pytest
 
 from app.canvas_agent.planning.planner import CanvasAgentPlannerError, parse_canvas_agent_plan
+from app.canvas_agent.planning.prompts import user_prompt
+from app.canvas_agent.types import CanvasAgentRunContext
 
 
 def test_parse_canvas_agent_plan_accepts_bounded_action() -> None:
@@ -123,3 +125,43 @@ def test_parse_canvas_agent_plan_rejects_unknown_action() -> None:
                 }
             )
         )
+
+
+def test_parse_canvas_agent_plan_rejects_disallowed_tool_help_action() -> None:
+    with pytest.raises(CanvasAgentPlannerError):
+        parse_canvas_agent_plan(
+            json.dumps(
+                {
+                    "actionName": "find_canvas_tool",
+                    "message": "Memo 도구를 찾겠습니다.",
+                    "inputJson": json.dumps(
+                        {"toolTarget": "toolbar.memo", "toolTargetLabel": "Memo"}
+                    ),
+                }
+            ),
+            {"find_shapes", "connect_shapes", "create_draft", "finish"},
+        )
+
+
+def test_user_prompt_allows_tool_help_only_in_tool_help_mode() -> None:
+    normal_payload = json.loads(user_prompt(run_context(tool_help_mode=False)))
+    tool_help_payload = json.loads(user_prompt(run_context(tool_help_mode=True)))
+
+    normal_actions = {action["name"] for action in normal_payload["allowedActions"]}
+    tool_help_actions = {action["name"] for action in tool_help_payload["allowedActions"]}
+
+    assert "find_canvas_tool" not in normal_actions
+    assert "find_canvas_tool" in tool_help_actions
+
+
+def run_context(tool_help_mode: bool) -> CanvasAgentRunContext:
+    return CanvasAgentRunContext(
+        run_id="run-1",
+        workspace_id="workspace-1",
+        canvas_id="canvas-1",
+        requested_by_user_id="user-1",
+        status="planning",
+        prompt="메모랑 프레임이랑 연결해줘",
+        request_context={"selectedShapeIds": [], "toolHelpMode": tool_help_mode},
+        previous_action=None,
+    )

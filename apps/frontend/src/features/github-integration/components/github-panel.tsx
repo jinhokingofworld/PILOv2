@@ -80,7 +80,8 @@ const PERSONAL_PROJECT_OAUTH_SCOPE_MESSAGE =
   "GitHub ProjectV2 OAuth connection must be reconnected with project scope";
 const GITHUB_CALLBACK_ERROR_PARAM = "github_callback_error";
 const GITHUB_OAUTH_CALLBACK_ERROR_PARAM = "github_oauth_error";
-const GITHUB_OAUTH_ACCOUNT_ALREADY_CONNECTED_ERROR = "account_already_connected";
+const GITHUB_OAUTH_ACCOUNT_ALREADY_CONNECTED_ERROR =
+  "account_already_connected";
 const GITHUB_OAUTH_ACCOUNT_ALREADY_CONNECTED_MESSAGE =
   "이미 다른 PILO 계정에 연결된 GitHub 계정입니다. 다른 GitHub 계정을 사용하거나 기존 연결을 해제한 뒤 다시 시도하세요.";
 const GITHUB_CALLBACK_ERROR_MESSAGES: Record<string, string> = {
@@ -202,6 +203,7 @@ export function GithubPanel() {
   const [repositoryQuery, setRepositoryQuery] = useState("");
   const snapshotRequestGateRef = useRef(createGithubSyncRequestGate());
   const syncRunsRequestGateRef = useRef(createGithubSyncRequestGate());
+  const selectedRepositoryIdRef = useRef("");
 
   const isLoading = panelStatus === "loading" || panelStatus === "idle";
   const connected = snapshot.oauth?.connected === true;
@@ -241,13 +243,22 @@ export function GithubPanel() {
           limit: 8
         }
       );
+      if (selectedRepositoryIdRef.current !== repositoryId) {
+        return;
+      }
       setPullRequests(page.data);
       setPullRequestsTotal(page.meta.total);
     } catch (error) {
+      if (selectedRepositoryIdRef.current !== repositoryId) {
+        return;
+      }
       setPullRequests([]);
       setPullRequestsTotal(0);
       setActionError(getErrorMessage(error));
     } finally {
+      if (selectedRepositoryIdRef.current !== repositoryId) {
+        return;
+      }
       setIsPullRequestsLoading(false);
     }
   }
@@ -282,15 +293,53 @@ export function GithubPanel() {
     return hasRunningRun;
   }
 
-  async function listAllGithubProjectsV2() {
+  async function listAllGithubProjectsV2(repositoryId: string) {
     return collectGithubProjectV2Pages((page) =>
       apiClient.listGithubProjectsV2(workspaceId, {
+        repositoryId,
         closed: true,
         limit: 100,
         management: true,
         page
       })
     );
+  }
+
+  async function loadGithubProjectV2s(repositoryId: string) {
+    try {
+      const projects = await listAllGithubProjectsV2(repositoryId);
+      if (selectedRepositoryIdRef.current !== repositoryId) {
+        return;
+      }
+
+      const nextProjectV2Id = selectProjectV2IdForRepository({
+        projects,
+        preferredProjectV2Id: selectedProjectV2Id,
+        repositoryId
+      });
+      setSnapshot((current) => ({
+        ...current,
+        projects,
+        projectsTotal: projects.length
+      }));
+      setSelectedProjectV2Ids(
+        new Set(
+          projects
+            .filter((project) => project.selected)
+            .map((project) => project.id)
+        )
+      );
+      setSelectedProjectV2Id(nextProjectV2Id);
+      rememberGithubBoardSelection(workspaceId, {
+        projectV2Id: nextProjectV2Id,
+        repositoryId
+      });
+    } catch (error) {
+      if (selectedRepositoryIdRef.current !== repositoryId) {
+        return;
+      }
+      throw error;
+    }
   }
 
   async function loadGithubIntegrationSnapshot(
@@ -307,6 +356,7 @@ export function GithubPanel() {
       setPullRequests([]);
       setPullRequestsTotal(0);
       setSelectedRepositoryId("");
+      selectedRepositoryIdRef.current = "";
       setSelectedInstallationId("");
       setSelectedProjectV2Id("");
       setSelectedProjectV2Ids(new Set());
@@ -314,15 +364,18 @@ export function GithubPanel() {
       return;
     }
 
+    if (!selectedRepositoryId) {
+      setPullRequests([]);
+      setPullRequestsTotal(0);
+    }
+
     setPanelStatus("loading");
     setErrorMessage(null);
     setActionError(null);
     setSyncPollingError(null);
 
-    const snapshotRequestGeneration =
-      snapshotRequestGateRef.current.begin();
-    const syncRunsRequestGeneration =
-      syncRunsRequestGateRef.current.begin();
+    const snapshotRequestGeneration = snapshotRequestGateRef.current.begin();
+    const syncRunsRequestGeneration = syncRunsRequestGateRef.current.begin();
 
     try {
       const [
@@ -330,27 +383,24 @@ export function GithubPanel() {
         projectOAuth,
         installations,
         repositories,
-        projects,
         syncRuns,
         runningSyncRuns
-      ] =
-        await Promise.all([
-          apiClient.getGithubOAuthStatus(),
-          apiClient.getGithubProjectOAuthStatus(),
-          apiClient.listGithubAppInstallations(workspaceId),
-          apiClient.listGithubRepositories(workspaceId, {
-            includeArchived: true,
-            limit: 20
-          }),
-          listAllGithubProjectsV2(),
-          apiClient.listGithubSyncRuns(workspaceId, {
-            limit: 8
-          }),
-          apiClient.listGithubSyncRuns(workspaceId, {
-            status: "running",
-            limit: 1
-          })
-        ]);
+      ] = await Promise.all([
+        apiClient.getGithubOAuthStatus(),
+        apiClient.getGithubProjectOAuthStatus(),
+        apiClient.listGithubAppInstallations(workspaceId),
+        apiClient.listGithubRepositories(workspaceId, {
+          includeArchived: true,
+          limit: 20
+        }),
+        apiClient.listGithubSyncRuns(workspaceId, {
+          limit: 8
+        }),
+        apiClient.listGithubSyncRuns(workspaceId, {
+          status: "running",
+          limit: 1
+        })
+      ]);
 
       if (
         !snapshotRequestGateRef.current.isCurrent(snapshotRequestGeneration)
@@ -358,20 +408,15 @@ export function GithubPanel() {
         return;
       }
 
-      const canApplySyncRuns =
-        syncRunsRequestGateRef.current.isCurrent(syncRunsRequestGeneration);
+      const canApplySyncRuns = syncRunsRequestGateRef.current.isCurrent(
+        syncRunsRequestGeneration
+      );
 
       const nextRepositoryId =
         repositories.data.find(
           (repository) => repository.id === preferredRepositoryId
-        )?.id ??
-        repositories.data[0]?.id ??
-        "";
-      const nextProjectV2Id = selectProjectV2IdForRepository({
-        projects,
-        preferredProjectV2Id,
-        repositoryId: nextRepositoryId
-      });
+        )?.id ?? "";
+      const nextProjectV2Id = "";
       const nextInstallationId =
         installations.find(
           (installation) => installation.id === selectedInstallationId
@@ -383,8 +428,8 @@ export function GithubPanel() {
         oauth,
         projectOAuth,
         installations,
-        projects,
-        projectsTotal: projects.length,
+        projects: [],
+        projectsTotal: 0,
         repositories: repositories.data,
         repositoriesTotal: repositories.meta.total,
         syncRuns: canApplySyncRuns ? syncRuns.data : current.syncRuns,
@@ -396,15 +441,10 @@ export function GithubPanel() {
         setHasRunningSyncRun(runningSyncRuns.meta.total > 0);
       }
       setSelectedRepositoryId(nextRepositoryId);
+      selectedRepositoryIdRef.current = nextRepositoryId;
       setSelectedProjectV2Id(nextProjectV2Id);
       setSelectedInstallationId(nextInstallationId);
-      setSelectedProjectV2Ids(
-        new Set(
-          projects
-            .filter((project) => project.selected)
-            .map((project) => project.id)
-        )
-      );
+      setSelectedProjectV2Ids(new Set([]));
       rememberGithubBoardSelection(workspaceId, {
         projectV2Id: nextProjectV2Id,
         repositoryId: nextRepositoryId
@@ -412,12 +452,8 @@ export function GithubPanel() {
       setIsInstallationDeleteRequested(false);
       setPanelStatus("ready");
 
-      if (nextRepositoryId) {
-        await loadGithubPullRequests(nextRepositoryId);
-      } else {
-        setPullRequests([]);
-        setPullRequestsTotal(0);
-      }
+      setPullRequests([]);
+      setPullRequestsTotal(0);
     } catch (error) {
       if (
         !snapshotRequestGateRef.current.isCurrent(snapshotRequestGeneration)
@@ -428,9 +464,7 @@ export function GithubPanel() {
       setPanelStatus("error");
       setErrorMessage(getErrorMessage(error));
       setSnapshot(emptySnapshot);
-      if (
-        syncRunsRequestGateRef.current.isCurrent(syncRunsRequestGeneration)
-      ) {
+      if (syncRunsRequestGateRef.current.isCurrent(syncRunsRequestGeneration)) {
         setHasRunningSyncRun(false);
       }
       setPullRequests([]);
@@ -451,7 +485,10 @@ export function GithubPanel() {
   }, [workspaceId, apiClient]);
 
   useEffect(() => {
-    if (!workspaceId || !shouldPollGithubSyncRuns(isSyncing, hasRunningSyncRun)) {
+    if (
+      !workspaceId ||
+      !shouldPollGithubSyncRuns(isSyncing, hasRunningSyncRun)
+    ) {
       return;
     }
 
@@ -459,10 +496,7 @@ export function GithubPanel() {
       intervalMs: GITHUB_SYNC_POLL_INTERVAL_MS,
       poll: refreshGithubSyncRuns,
       shouldContinue: (hasRunningRun) =>
-        shouldPollGithubSyncRuns(
-          isSyncing,
-          hasRunningRun ?? hasRunningSyncRun
-        ),
+        shouldPollGithubSyncRuns(isSyncing, hasRunningRun ?? hasRunningSyncRun),
       onError: (error) => setSyncPollingError(getErrorMessage(error)),
       schedule: (callback, delayMs) => setTimeout(callback, delayMs),
       clear: (timer) => clearTimeout(timer)
@@ -491,7 +525,11 @@ export function GithubPanel() {
 
   useEffect(() => {
     const installationId = searchParams.get("github_installation_id");
-    if (!workspaceId || !installationId || discoveredInstallationIdRef.current === installationId) {
+    if (
+      !workspaceId ||
+      !installationId ||
+      discoveredInstallationIdRef.current === installationId
+    ) {
       return;
     }
     discoveredInstallationIdRef.current = installationId;
@@ -546,20 +584,39 @@ export function GithubPanel() {
     }
   }
 
-  async function handleDiscoverGithubProjectV2(installationId: string) {
-    if (!workspaceId) return;
+  async function handleDiscoverGithubProjectV2(
+    installationId: string,
+    repositoryId = selectedRepositoryId
+  ) {
+    if (!workspaceId || !repositoryId) {
+      setActionError(
+        "저장소를 선택한 뒤 ProjectV2 동기화 범위를 관리할 수 있습니다."
+      );
+      return;
+    }
     setActionError(null);
     try {
-      const discovery = await apiClient.discoverGithubProjectV2(workspaceId, installationId);
+      const discovery = await apiClient.discoverGithubProjectV2(
+        workspaceId,
+        installationId,
+        {
+          repositoryId
+        }
+      );
+      if (selectedRepositoryIdRef.current !== repositoryId) {
+        return;
+      }
       if (discovery.connectionRequired) {
         discoveredInstallationIdRef.current = null;
         await handleStartGithubProjectOAuth();
         return;
       }
       setSelectedInstallationId(installationId);
-      setSelectedProjectV2Ids(new Set(discovery.projects.filter((project) => project.selected).map((project) => project.id)));
-      await loadGithubIntegrationSnapshot(undefined, undefined);
+      await loadGithubProjectV2s(repositoryId);
     } catch (error) {
+      if (selectedRepositoryIdRef.current !== repositoryId) {
+        return;
+      }
       setActionError(getErrorMessage(error));
     }
   }
@@ -652,18 +709,20 @@ export function GithubPanel() {
   }
 
   async function handleSelectRepository(repositoryId: string) {
-    const nextProjectV2Id = selectProjectV2IdForRepository({
-      projects: snapshot.projects,
-      preferredProjectV2Id: selectedProjectV2Id,
-      repositoryId
-    });
+    if (!workspaceId) return;
     setSelectedRepositoryId(repositoryId);
-    setSelectedProjectV2Id(nextProjectV2Id);
+    selectedRepositoryIdRef.current = repositoryId;
+    setSnapshot((current) => ({ ...current, projects: [], projectsTotal: 0 }));
+    setSelectedProjectV2Ids(new Set());
+    setSelectedProjectV2Id("");
     rememberGithubBoardSelection(workspaceId, {
-      projectV2Id: nextProjectV2Id,
+      projectV2Id: "",
       repositoryId
     });
-    await loadGithubPullRequests(repositoryId);
+    await Promise.all([
+      loadGithubPullRequests(repositoryId),
+      handleDiscoverGithubProjectV2(selectedInstallationId, repositoryId)
+    ]);
   }
 
   function handleSelectProjectV2(projectV2Id: string) {
@@ -687,16 +746,15 @@ export function GithubPanel() {
   }
 
   async function handleSaveProjectV2Selections() {
-    if (!workspaceId) {
+    if (!workspaceId || !selectedRepositoryId) {
       setActionError("활성 워크스페이스를 확인할 수 없습니다.");
       return;
     }
 
     const projectIdsByInstallation = new Map<string, string[]>();
     for (const project of snapshot.projects) {
-      const selectedProjectIds = projectIdsByInstallation.get(
-        project.installationId
-      ) ?? [];
+      const selectedProjectIds =
+        projectIdsByInstallation.get(project.installationId) ?? [];
       if (selectedProjectV2Ids.has(project.id)) {
         selectedProjectIds.push(project.id);
       }
@@ -709,12 +767,12 @@ export function GithubPanel() {
 
     try {
       const selections = await Promise.all(
-        [...projectIdsByInstallation].map(
-          ([installationId, projectV2Ids]) =>
-            apiClient.replaceGithubProjectV2Selections(workspaceId, {
-              installationId,
-              projectV2Ids
-            })
+        [...projectIdsByInstallation].map(([installationId, projectV2Ids]) =>
+          apiClient.replaceGithubProjectV2Selections(workspaceId, {
+            installationId,
+            repositoryId: selectedRepositoryId,
+            projectV2Ids
+          })
         )
       );
       setActionMessage("ProjectV2 상세 동기화 선택을 저장했습니다.");
@@ -726,7 +784,9 @@ export function GithubPanel() {
       );
       if (failedSelection) {
         setActionError(
-          `ProjectV2 선택은 저장됐지만 동기화를 시작하지 못했습니다. ${failedSelection.syncError ?? "다시 시도하세요."}`
+          `ProjectV2 선택은 저장됐지만 동기화를 시작하지 못했습니다. ${
+            failedSelection.syncError ?? "다시 시도하세요."
+          }`
         );
       }
       if (hasQueuedSelection) {
@@ -737,10 +797,10 @@ export function GithubPanel() {
           "선택된 프로젝트가 없어 보드에 표시할 내용이 없습니다. 프로젝트 선택 관리에서 동기화할 ProjectV2를 선택할 수 있습니다."
         );
       }
-      await loadGithubIntegrationSnapshot(
-        selectedRepositoryId,
-        selectedProjectV2Id
-      );
+      await Promise.all([
+        loadGithubProjectV2s(selectedRepositoryId),
+        refreshGithubSyncRuns()
+      ]);
     } catch (error) {
       setActionError(getErrorMessage(error));
     } finally {
@@ -756,6 +816,12 @@ export function GithubPanel() {
 
     if (!selectedInstallationId) {
       setActionError("동기화할 GitHub App 설치를 먼저 선택해야 합니다.");
+      return;
+    }
+
+    const requiresSelectedRepository = syncTarget !== "source";
+    if (requiresSelectedRepository && !selectedRepositoryId) {
+      setActionError("저장소를 선택한 뒤 해당 동기화를 시작할 수 있습니다.");
       return;
     }
 
@@ -794,17 +860,11 @@ export function GithubPanel() {
       target: syncTarget
     };
 
-    if (
-      (syncTarget === "full" || repositoryScopedSyncTargets.has(syncTarget)) &&
-      selectedRepositoryId
-    ) {
+    if (requiresSelectedRepository && selectedRepositoryId) {
       body.repositoryId = selectedRepositoryId;
     }
 
-    if (
-      projectScopedSyncTargets.has(syncTarget) &&
-      selectedProjectV2Id
-    ) {
+    if (projectScopedSyncTargets.has(syncTarget) && selectedProjectV2Id) {
       body.projectV2Id = selectedProjectV2Id;
     }
 
@@ -865,10 +925,10 @@ export function GithubPanel() {
       onRepositoryQueryChange={setRepositoryQuery}
       onSelectProjectV2={handleSelectProjectV2}
       onToggleProjectV2Selection={handleToggleProjectV2Selection}
-      onSaveProjectV2Selections={() =>
-        void handleSaveProjectV2Selections()
+      onSaveProjectV2Selections={() => void handleSaveProjectV2Selections()}
+      onSelectRepository={(repositoryId) =>
+        void handleSelectRepository(repositoryId)
       }
-      onSelectRepository={(repositoryId) => void handleSelectRepository(repositoryId)}
       onRequestDeleteInstallation={handleRequestDeleteGithubAppInstallation}
       onStartInstallation={() => void handleStartGithubAppInstallation()}
       onStartOAuth={() => void handleStartGithubOAuth()}

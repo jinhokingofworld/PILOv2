@@ -1,4 +1,4 @@
-import { HttpStatus, Injectable } from "@nestjs/common";
+import { HttpStatus, Injectable, Logger } from "@nestjs/common";
 import { QueryResultRow } from "pg";
 import {
   ApiError,
@@ -281,6 +281,16 @@ export interface LeaveMeetingPayload {
   currentRecording: RecordingPayload | null;
 }
 
+export interface LiveKitParticipantDepartureInput {
+  roomName: string | null;
+  participantIdentity: string | null;
+  eventCreatedAt: Date | null;
+}
+
+export interface LiveKitParticipantDepartureResult {
+  job: MeetingReportJobPayload | null;
+}
+
 export interface MeetingDetailPayload {
   meeting: MeetingPayload;
   currentRecording: RecordingPayload | null;
@@ -335,6 +345,8 @@ const UUID_PATTERN =
 
 @Injectable()
 export class MeetingService {
+  private readonly logger = new Logger(MeetingService.name);
+
   constructor(
     private readonly database: DatabaseService,
     private readonly workspaceService: WorkspaceService,
@@ -629,22 +641,82 @@ export class MeetingService {
       }
     );
 
-    try {
-      await this.enqueueMeetingReportJob(result.job);
-    } catch (error) {
-      if (result.job !== null) {
-        await this.restoreLeaveMeetingAfterReportEnqueueFailure({
-          workspaceId,
-          meetingId,
-          currentUserId,
-          reportId: result.job.reportId
-        });
-      }
-
-      throw error;
-    }
+    await this.publishMeetingReportOutbox(result.job);
 
     return result.payload;
+  }
+
+  async reconcileLiveKitParticipantDeparture(
+    transaction: DatabaseTransaction,
+    input: LiveKitParticipantDepartureInput
+  ): Promise<LiveKitParticipantDepartureResult> {
+    if (
+      input.roomName === null ||
+      input.participantIdentity === null ||
+      input.eventCreatedAt === null
+    ) {
+      return { job: null };
+    }
+
+    const meeting = await this.findActiveMeetingByLiveKitRoomName(
+      transaction,
+      input.roomName
+    );
+    if (meeting === null) {
+      return { job: null };
+    }
+
+    const participant = await this.findParticipantByLiveKitIdentity(
+      transaction,
+      meeting.id,
+      input.participantIdentity,
+      { lockParticipant: true }
+    );
+    if (
+      participant === null ||
+      participant.left_at !== null ||
+      input.eventCreatedAt.getTime() <= this.toDate(participant.joined_at).getTime()
+    ) {
+      return { job: null };
+    }
+
+    const activeParticipantCount = await this.countActiveParticipants(
+      transaction,
+      meeting.id
+    );
+    const shouldEndMeeting = activeParticipantCount === 1;
+    const runningRecording =
+      shouldEndMeeting && meeting.recording_id !== null
+        ? await this.findRunningRecording(transaction, meeting.id, {
+            lockRecording: true
+          })
+        : null;
+    const stoppedRecording =
+      runningRecording === null
+        ? null
+        : await this.stopRunningRecording(transaction, meeting, runningRecording);
+    const reportPreparation =
+      stoppedRecording === null
+        ? { report: null, job: null }
+        : await this.prepareReportForStoppedRecording(transaction, stoppedRecording);
+
+    await this.markParticipantLeft(transaction, meeting.id, participant.user_id);
+
+    if (shouldEndMeeting) {
+      await this.endMeetingIfStillActive(
+        transaction,
+        meeting.workspace_id,
+        meeting.id
+      );
+    }
+
+    return { job: reportPreparation.job };
+  }
+
+  async enqueueReconciledMeetingReportJob(
+    job: MeetingReportJobPayload | null
+  ): Promise<void> {
+    await this.publishMeetingReportOutbox(job);
   }
 
   async startRecording(
@@ -816,7 +888,7 @@ export class MeetingService {
       }
     );
 
-    await this.enqueueMeetingReportJob(result.job);
+    await this.publishMeetingReportOutbox(result.job);
     return result.payload;
   }
 
@@ -1313,6 +1385,70 @@ export class MeetingService {
     );
   }
 
+  private async findActiveMeetingByLiveKitRoomName(
+    executor: QueryOneExecutor,
+    liveKitRoomName: string
+  ): Promise<CurrentMeetingRow | null> {
+    return executor.queryOne<CurrentMeetingRow>(
+      `
+        SELECT
+          meetings.id,
+          meetings.workspace_id,
+          meetings.room_key,
+          meetings.livekit_room_name,
+          meetings.created_by_id,
+          meetings.ended_by_id,
+          meetings.started_at,
+          meetings.ended_at,
+          meetings.created_at,
+          meetings.updated_at,
+          current_recording.id AS recording_id,
+          current_recording.meeting_id AS recording_meeting_id,
+          current_recording.livekit_egress_id AS recording_livekit_egress_id,
+          current_recording.status AS recording_status,
+          current_recording.audio_file_url AS recording_audio_file_url,
+          current_recording.audio_file_key AS recording_audio_file_key,
+          current_recording.duration_sec AS recording_duration_sec,
+          current_recording.file_size_bytes AS recording_file_size_bytes,
+          current_recording.started_at AS recording_started_at,
+          current_recording.ended_at AS recording_ended_at,
+          current_recording.error_message AS recording_error_message,
+          active_participants.count AS active_participant_count
+        FROM meetings
+        LEFT JOIN LATERAL (
+          SELECT
+            id,
+            meeting_id,
+            livekit_egress_id,
+            status,
+            audio_file_url,
+            audio_file_key,
+            duration_sec,
+            file_size_bytes,
+            started_at,
+            ended_at,
+            error_message
+          FROM meeting_recordings
+          WHERE meeting_recordings.meeting_id = meetings.id
+            AND meeting_recordings.status = 'RUNNING'
+          ORDER BY meeting_recordings.started_at DESC, meeting_recordings.id ASC
+          LIMIT 1
+        ) AS current_recording ON true
+        LEFT JOIN LATERAL (
+          SELECT COUNT(*)::int AS count
+          FROM meeting_participants
+          WHERE meeting_participants.meeting_id = meetings.id
+            AND meeting_participants.left_at IS NULL
+        ) AS active_participants ON true
+        WHERE meetings.livekit_room_name = $1
+          AND meetings.ended_at IS NULL
+        LIMIT 1
+        FOR UPDATE OF meetings
+      `,
+      [liveKitRoomName]
+    );
+  }
+
   private async listRecordingRows(meetingId: string): Promise<RecordingRow[]> {
     return this.database.query<RecordingRow>(
       `
@@ -1622,12 +1758,18 @@ export class MeetingService {
     }
 
     const result = await this.insertProcessingMeetingReport(executor, recording);
+    const job =
+      result.inserted && recording.audio_file_key !== null
+        ? this.buildMeetingReportJobPayload(result.report, recording)
+        : null;
+
+    if (job !== null) {
+      await this.insertMeetingReportOutbox(executor, job);
+    }
+
     return {
       report: result.report,
-      job:
-        result.inserted && recording.audio_file_key !== null
-          ? this.buildMeetingReportJobPayload(result.report, recording)
-          : null
+      job
     };
   }
 
@@ -1736,6 +1878,79 @@ export class MeetingService {
     }
 
     await this.meetingReportJobService.enqueueMeetingReportJob(job);
+  }
+
+  private async insertMeetingReportOutbox(
+    executor: QueryOneExecutor,
+    job: MeetingReportJobPayload
+  ): Promise<void> {
+    const outbox = await executor.queryOne<{ id: string }>(
+      `
+        INSERT INTO meeting_report_outbox (
+          report_id,
+          meeting_id,
+          recording_id,
+          audio_file_key
+        )
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT (report_id) DO NOTHING
+        RETURNING id
+      `,
+      [job.reportId, job.meetingId, job.recordingId, job.audioFileKey]
+    );
+
+    if (outbox === null) {
+      const existing = await executor.queryOne<{ id: string }>(
+        `
+          SELECT id
+          FROM meeting_report_outbox
+          WHERE report_id = $1
+          LIMIT 1
+        `,
+        [job.reportId]
+      );
+
+      if (existing === null) {
+        throw badRequest("Meeting report outbox could not be saved");
+      }
+    }
+  }
+
+  private async publishMeetingReportOutbox(
+    job: MeetingReportJobPayload | null
+  ): Promise<void> {
+    if (job === null) {
+      return;
+    }
+
+    try {
+      await this.enqueueMeetingReportJob(job);
+      const outbox = await this.database.queryOne<{ id: string }>(
+        `
+          UPDATE meeting_report_outbox
+          SET
+            status = 'delivered',
+            delivered_at = now(),
+            error_code = NULL,
+            error_message = NULL,
+            updated_at = now()
+          WHERE report_id = $1
+            AND status = 'pending'
+          RETURNING id
+        `,
+        [job.reportId]
+      );
+      if (outbox !== null) {
+        this.logger.log(
+          `MeetingReport outbox event=fast_path_delivered outbox_id=${outbox.id} report_id=${job.reportId} meeting_id=${job.meetingId} recording_id=${job.recordingId}`
+        );
+      }
+    } catch {
+      // Keep the committed pending intent for MP-05 dispatcher retry.
+      this.logger.warn(
+        `MeetingReport outbox event=fast_path_pending report_id=${job.reportId} meeting_id=${job.meetingId} recording_id=${job.recordingId} failure_step=none`
+      );
+    }
   }
 
   private async restoreLeaveMeetingAfterReportEnqueueFailure(input: {
@@ -2051,6 +2266,35 @@ export class MeetingService {
         LIMIT 1
       `,
       [meetingId, currentUserId]
+    );
+  }
+
+  private async findParticipantByLiveKitIdentity(
+    executor: QueryOneExecutor,
+    meetingId: string,
+    liveKitIdentity: string,
+    options: { lockParticipant?: boolean } = {}
+  ): Promise<ParticipantRow | null> {
+    return executor.queryOne<ParticipantRow>(
+      `
+        SELECT
+          meeting_participants.id,
+          meeting_participants.meeting_id,
+          meeting_participants.user_id,
+          meeting_participants.livekit_identity,
+          meeting_participants.joined_at,
+          meeting_participants.left_at,
+          users.name AS user_name,
+          users.avatar_url AS user_avatar_url
+        FROM meeting_participants
+        JOIN users
+          ON users.id = meeting_participants.user_id
+        WHERE meeting_participants.meeting_id = $1
+          AND meeting_participants.livekit_identity = $2
+        LIMIT 1
+        ${options.lockParticipant === true ? "FOR UPDATE OF meeting_participants" : ""}
+      `,
+      [meetingId, liveKitIdentity]
     );
   }
 
@@ -2480,6 +2724,10 @@ export class MeetingService {
 
   private toIsoString(value: Date | string): string {
     return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
+  }
+
+  private toDate(value: Date | string): Date {
+    return value instanceof Date ? value : new Date(value);
   }
 
   private toNullableIsoString(value: Date | string | null): string | null {

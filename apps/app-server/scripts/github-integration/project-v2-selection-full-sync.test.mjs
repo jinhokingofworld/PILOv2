@@ -23,8 +23,13 @@ assert.match(
 );
 assert.match(
   syncExecutor,
-  /FROM github_project_v2_selections[\s\S]{0,260}installation_id = \$2/,
-  "Full sync must load stored selected ProjectV2 IDs for its installation."
+  /listSelectedGithubProjectV2Ids\([\s\S]{0,180}context\.workspaceId,[\s\S]{0,120}context\.installation\.id,[\s\S]{0,120}context\.repository\?\.id \?\? null/,
+  "Full sync must pass the repository context into stored ProjectV2 selection lookup."
+);
+assert.match(
+  syncExecutor,
+  /const repositoryFilter = repositoryId\s*\?\s*"AND gps\.repository_id = \$3"/,
+  "Repository-scoped full sync must filter stored ProjectV2 selections by repository."
 );
 assert.match(
   syncExecutor,
@@ -52,6 +57,7 @@ const {
 
 const workspaceId = "11111111-1111-4111-8111-111111111111";
 const installationId = "22222222-2222-4222-8222-222222222222";
+const repositoryId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const selectedProjectId = "33333333-3333-4333-8333-333333333333";
 const unselectedProjectId = "44444444-4444-4444-8444-444444444444";
 
@@ -75,11 +81,25 @@ function summary() {
   };
 }
 
-async function assertFullSyncOnlyDetailsSelectedProjects(accountType, selectedIds) {
+async function assertFullSyncOnlyDetailsSelectedProjects(
+  accountType,
+  selectedIds,
+  repository = null
+) {
   const database = {
     async query(text, values) {
       assert.match(text, /FROM github_project_v2_selections/i);
-      assert.deepEqual(values, [workspaceId, installationId]);
+      if (repository) {
+        assert.match(text, /gps\.repository_id = \$3/);
+      } else {
+        assert.doesNotMatch(text, /gps\.repository_id = \$3/);
+      }
+      assert.deepEqual(
+        values,
+        repository
+          ? [workspaceId, installationId, repository.id]
+          : [workspaceId, installationId]
+      );
       return selectedIds.map((project_v2_id) => ({ project_v2_id }));
     }
   };
@@ -115,7 +135,7 @@ async function assertFullSyncOnlyDetailsSelectedProjects(accountType, selectedId
       account_login: "owner",
       account_type: accountType
     },
-    repository: null,
+    repository,
     projectV2: null,
     githubUserAccessToken: null,
     config: {},
@@ -129,6 +149,11 @@ async function assertFullSyncOnlyDetailsSelectedProjects(accountType, selectedId
 await assertFullSyncOnlyDetailsSelectedProjects("User", [selectedProjectId]);
 await assertFullSyncOnlyDetailsSelectedProjects("Organization", [selectedProjectId]);
 await assertFullSyncOnlyDetailsSelectedProjects("Organization", []);
+await assertFullSyncOnlyDetailsSelectedProjects(
+  "Organization",
+  [selectedProjectId],
+  { id: repositoryId, github_node_id: null }
+);
 
 {
   const service = new GithubSyncRunService(

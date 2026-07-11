@@ -1,3 +1,6 @@
+import json
+import logging
+
 from app.job_dispatcher import JobProcessResult
 from app.meeting_report_runtime import (
     PgAgentRunRepository,
@@ -173,6 +176,57 @@ def test_sqs_worker_deletes_only_dispatcher_completed_messages() -> None:
     ]
     assert sqs_client.receive_calls[0]["AttributeNames"] == ["ApproximateReceiveCount"]
     assert sqs_client.receive_calls[0]["MaxNumberOfMessages"] == 1
+
+
+def test_sqs_worker_logs_meeting_report_correlation(caplog) -> None:
+    report_id = "77777777-7777-7777-7777-777777777777"
+    meeting_id = "22222222-2222-2222-2222-222222222222"
+    recording_id = "55555555-5555-5555-5555-555555555555"
+    dispatcher = FakeDispatcher(
+        [
+            JobProcessResult(
+                delete_message=True,
+                reason="llm_failed",
+                job_type="meeting_report",
+                resource_id=report_id,
+            )
+        ]
+    )
+    sqs_client = FakeSqsClient()
+    sqs_client.receive_message = lambda **_kwargs: {
+        "Messages": [
+            {
+                "Body": json.dumps(
+                    {
+                        "jobType": "meeting_report",
+                        "reportId": report_id,
+                        "meetingId": meeting_id,
+                        "recordingId": recording_id,
+                        "retryCount": 2,
+                    }
+                ),
+                "ReceiptHandle": "receipt-correlation",
+                "MessageId": "message-correlation",
+                "Attributes": {"ApproximateReceiveCount": "3"},
+            }
+        ]
+    }
+    worker = SqsAiJobWorker(runtime_settings(), dispatcher, sqs_client)
+
+    with caplog.at_level(logging.INFO, logger="app.meeting_report_runtime"):
+        worker.run_once()
+
+    assert (
+        "meeting report job event=received "
+        f"report_id={report_id} meeting_id={meeting_id} recording_id={recording_id} "
+        "retry_count=2 sqs_message_id=message-correlation receive_count=3"
+    ) in caplog.text
+    assert (
+        "meeting report job event=processed "
+        f"report_id={report_id} meeting_id={meeting_id} recording_id={recording_id} "
+        "retry_count=2 reason=llm_failed failure_step=LLM delete_message=True "
+        "sqs_message_id=message-correlation receive_count=3"
+    ) in caplog.text
 
 
 def test_sqs_worker_processes_canvas_embedding_jobs_before_sqs_poll() -> None:

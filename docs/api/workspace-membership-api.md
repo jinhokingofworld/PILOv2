@@ -6,13 +6,14 @@ Workspace Membership API는 PILO의 Workspace 접근 권한, owner/member 역할
 초대 MVP 흐름을 담당한다.
 
 - Workspace member 목록 조회
-- owner의 member 초대 생성과 초대 취소
-- 초대 token 조회와 수락
+- owner의 member 초대 생성
+- 초대 token 조회, 대상 user의 수락과 거절
 - member 제거
 - Workspace 접근 기준을 `workspace_members` membership으로 판단
 
-Workspace 생성, 삭제, 이름 수정, owner transfer, admin/viewer/read-only role,
-실제 email 발송 인프라는 이 문서의 범위가 아니다.
+Workspace 생성 계약은 [workspace-api.md](workspace-api.md)를 따른다. Workspace 삭제,
+이름 수정, owner transfer, admin/viewer/read-only role, 실제 email 발송 인프라는 이
+문서의 범위가 아니다.
 
 ## 핵심 정책
 
@@ -20,6 +21,7 @@ Workspace 생성, 삭제, 이름 수정, owner transfer, admin/viewer/read-only 
 - `admin`, `viewer`, `read-only` role은 만들지 않는다.
 - `workspaces.owner_user_id`는 제거하지 않고 기존 호환과 owner 표시용으로 유지한다.
 - 실제 Workspace 접근 기준은 `workspace_members` membership이다.
+- 한 user는 여러 Workspace에서 `owner` membership을 가질 수 있다.
 - owner는 Workspace 관리, member 초대/제거, GitHub installation 연결/해제 같은
   관리 작업을 수행할 수 있다.
 - member는 Workspace 내부 데이터 read/write와 Workspace member 목록 조회가
@@ -73,10 +75,10 @@ Workspace 생성, 삭제, 이름 수정, owner transfer, admin/viewer/read-only 
 | `status` | `TEXT NOT NULL DEFAULT 'pending'` | `pending`, `accepted`, `revoked`, `expired` 상태 관리 |
 | `invited_by_user_id` | `UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT` | 초대를 생성한 owner 기록 |
 | `accepted_by_user_id` | `UUID REFERENCES users(id) ON DELETE SET NULL` | 초대를 수락한 user 기록 |
-| `revoked_by_user_id` | `UUID REFERENCES users(id) ON DELETE SET NULL` | 초대를 취소한 owner 기록 |
+| `revoked_by_user_id` | `UUID REFERENCES users(id) ON DELETE SET NULL` | 초대를 거절한 대상 user 기록 |
 | `expires_at` | `TIMESTAMPTZ NOT NULL` | 초대 만료 기준 |
 | `accepted_at` | `TIMESTAMPTZ` | 초대 수락 시점 |
-| `revoked_at` | `TIMESTAMPTZ` | 초대 취소 시점 |
+| `revoked_at` | `TIMESTAMPTZ` | 대상 user가 초대를 거절한 시점 |
 | `created_at` | `TIMESTAMPTZ NOT NULL DEFAULT now()` | 초대 생성 시점 |
 | `updated_at` | `TIMESTAMPTZ NOT NULL DEFAULT now()` | 상태 변경 시점 |
 
@@ -100,9 +102,9 @@ Workspace 생성, 삭제, 이름 수정, owner transfer, admin/viewer/read-only 
 | `DELETE` | `/workspaces/{workspaceId}/members/{userId}` | owner | Workspace member 제거 |
 | `GET` | `/workspaces/{workspaceId}/invitations` | owner | Workspace 초대 목록 조회 |
 | `POST` | `/workspaces/{workspaceId}/invitations` | owner | member 초대 생성 |
-| `POST` | `/workspaces/{workspaceId}/invitations/{invitationId}/revoke` | owner | pending 초대 취소 |
 | `GET` | `/me/workspace-invitations` | bearer session | 현재 user email로 받은 pending 초대 목록 조회 |
 | `POST` | `/me/workspace-invitations/{invitationId}/accept` | bearer session | 현재 user가 받은 초대를 token 없이 수락 |
+| `POST` | `/me/workspace-invitations/{invitationId}/reject` | bearer session | 현재 user가 받은 pending 초대를 거절 |
 | `GET` | `/workspace-invitations/{invitationToken}` | bearer session | 초대 token 조회 |
 | `POST` | `/workspace-invitations/{invitationToken}/accept` | bearer session | 초대 수락 |
 
@@ -118,6 +120,7 @@ Workspace 조회 API의 payload에는 현재 사용자의 role이 포함된다.
 {
   "id": "workspace_uuid",
   "name": "PILO-a1b2c3d4",
+  "icon": "🚀",
   "ownerUserId": "user_uuid",
   "role": "owner",
   "isOwner": true,
@@ -267,7 +270,8 @@ DELETE /api/v1/workspaces/{workspaceId}/members/me
 - 현재 사용자가 해당 Workspace의 member가 아니면 `403 FORBIDDEN`을 반환한다.
 - 현재 사용자가 해당 Workspace의 owner이면 `400 BAD_REQUEST`를 반환한다.
 - 나가기는 현재 bearer session user의 `workspace_members` row delete로 처리한다.
-- 나가기 후 현재 user의 기본 owner Workspace가 없으면 기본 Workspace를 보장한다.
+- 나가기 후 접근 가능한 Workspace가 없으면 사용자는 onboarding 필요 상태가 될 수
+  있다. 서버가 기본 Workspace를 자동 생성하지 않는다.
 
 ## 초대 목록 조회
 
@@ -360,11 +364,13 @@ role은 `400 BAD_REQUEST`를 반환한다.
 - 같은 Workspace와 email에 pending 초대가 있으면 `400 BAD_REQUEST`를 반환한다.
 - email과 일치하는 user가 이미 같은 Workspace member이면 `400 BAD_REQUEST`를 반환한다.
 - 실제 email 발송은 MVP 범위가 아니다. Frontend는 `acceptUrl`을 copy/share할 수 있다.
+- 생성된 pending 초대는 owner가 취소할 수 없으며, 대상 user가 수락하거나 거절하거나
+  만료될 때까지 유지한다.
 
-## 초대 취소
+## 내 pending 초대 거절
 
 ```http
-POST /api/v1/workspaces/{workspaceId}/invitations/{invitationId}/revoke
+POST /api/v1/me/workspace-invitations/{invitationId}/reject
 ```
 
 응답:
@@ -380,7 +386,7 @@ POST /api/v1/workspaces/{workspaceId}/invitations/{invitationId}/revoke
     "status": "revoked",
     "invitedByUserId": "owner_user_uuid",
     "acceptedByUserId": null,
-    "revokedByUserId": "owner_user_uuid",
+    "revokedByUserId": "member_user_uuid",
     "expiresAt": "2026-07-14T00:00:00.000Z",
     "acceptedAt": null,
     "revokedAt": "2026-07-07T01:00:00.000Z",
@@ -392,9 +398,12 @@ POST /api/v1/workspaces/{workspaceId}/invitations/{invitationId}/revoke
 
 서버 규칙:
 
-- 현재 사용자가 해당 Workspace의 owner가 아니면 `403 FORBIDDEN`을 반환한다.
-- pending 초대만 취소할 수 있다.
-- 이미 accepted, revoked, expired 상태인 초대는 `400 BAD_REQUEST`를 반환한다.
+- bearer session이 없으면 `401 UNAUTHORIZED`를 반환한다.
+- invitation id와 일치하는 초대가 없으면 `404 NOT_FOUND`를 반환한다.
+- pending 초대만 거절할 수 있다.
+- 현재 user의 email이 초대 email과 일치하지 않으면 `403 FORBIDDEN`을 반환한다.
+- 거절 시 `status = 'revoked'`, `revoked_by_user_id = current user`,
+  `revoked_at = now()`를 기록한다.
 
 ## 내 pending 초대 목록 조회
 
@@ -494,6 +503,7 @@ POST /api/v1/workspace-invitations/{invitationToken}/accept
     "workspace": {
       "id": "workspace_uuid",
       "name": "PILO-a1b2c3d4",
+      "icon": "🚀",
       "ownerUserId": "owner_user_uuid",
       "role": "member",
       "isOwner": false,
@@ -541,7 +551,6 @@ owner-only 기능:
 
 - Workspace member 초대 생성
 - Workspace member 제거
-- Workspace 초대 취소
 - GitHub App installation 연결/해제
 - GitHub 수동 sync 같은 Workspace 관리 작업
 
@@ -553,17 +562,21 @@ member self-service 기능:
 
 - Workspace 나가기
 
-## 로그인 후 기본 Workspace 보장
+## 로그인 후 Workspace onboarding
 
-OAuth login callback은 user row를 생성하거나 갱신한 뒤 WorkspaceService를 통해
-기본 Workspace와 owner membership을 함께 보장한다.
+OAuth login callback은 user row와 bearer session을 생성하거나 갱신하지만 Workspace를
+자동 생성하지 않는다.
 
 처리 규칙:
 
-- `workspaces.owner_user_id = currentUserId`인 기본 Workspace가 없으면 생성한다.
-- 해당 Workspace의 `workspace_members(owner)` row가 없으면 생성한다.
-- 기존 Workspace가 있는 user는 새 Workspace를 만들지 않고 owner membership만 보강한다.
-- 이 보장 흐름은 transaction으로 처리한다.
+- 로그인 후 `GET /workspaces`가 빈 배열을 반환하는 것은 정상 상태다.
+- Frontend는 빈 배열을 onboarding 필요 상태로 처리한다.
+- 사용자가 이름을 입력해 `POST /workspaces`를 호출하면 Workspace와 현재 user의
+  `workspace_members(owner)` row를 transaction으로 생성한다.
+- 기존 Workspace가 있는 user도 `POST /workspaces`로 추가 owner Workspace를 생성할 수
+  있다.
+- GitHub Integration 연결 여부는 Workspace 및 owner membership 생성의 선행 조건이
+  아니다.
 
 ## 에러 규칙
 
@@ -576,7 +589,7 @@ OAuth login callback은 user row를 생성하거나 갱신한 뒤 WorkspaceServi
 | 지원하지 않는 role | `400` | `BAD_REQUEST` |
 | 중복 pending 초대 | `400` | `BAD_REQUEST` |
 | 이미 member인 email 초대 | `400` | `BAD_REQUEST` |
-| revoked/expired/accepted 초대 수락 | `400` | `BAD_REQUEST` |
+| revoked/expired/accepted 초대 수락 또는 거절 | `400` | `BAD_REQUEST` |
 | 초대 email과 현재 user email 불일치 | `403` | `FORBIDDEN` |
 
 ## MVP 제외
@@ -585,7 +598,7 @@ OAuth login callback은 user row를 생성하거나 갱신한 뒤 WorkspaceServi
 - viewer/read-only role
 - owner transfer
 - 여러 owner 정책
-- Workspace 생성/삭제/이름 수정
+- Workspace 삭제/이름 수정
 - 실제 email 발송 인프라
 - public link share
 - realtime 협업 권한 모델

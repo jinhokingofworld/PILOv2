@@ -51,6 +51,7 @@ jobs:
         env:
           ECS_CLUSTER_NAME: ${{ vars.ECS_CLUSTER_NAME }}
           ECS_AI_WORKER_SERVICE: ${{ vars.ECS_AI_WORKER_SERVICE }}
+          ECS_PR_REVIEW_AI_WORKER_SERVICE: ${{ vars.ECS_PR_REVIEW_AI_WORKER_SERVICE }}
         run: |
           test -n "$ECS_CLUSTER_NAME"
           test -n "$ECS_AI_WORKER_SERVICE"
@@ -78,3 +79,29 @@ jobs:
           aws ecs wait services-stable \
             --cluster "$ECS_CLUSTER_NAME" \
             --services "$ECS_AI_WORKER_SERVICE"
+
+          if [ -n "$ECS_PR_REVIEW_AI_WORKER_SERVICE" ]; then
+            pr_review_task_definition=$(aws ecs describe-services \
+              --cluster "$ECS_CLUSTER_NAME" \
+              --services "$ECS_PR_REVIEW_AI_WORKER_SERVICE" \
+              --query 'services[0].taskDefinition' \
+              --output text)
+            test -n "$pr_review_task_definition"
+            test "$pr_review_task_definition" != "None"
+
+            pr_review_queue_url=$(aws ecs describe-task-definition \
+              --task-definition "$pr_review_task_definition" \
+              --query 'taskDefinition.containerDefinitions[0].environment[?name==`SQS_PR_REVIEW_ANALYSIS_QUEUE_URL`].value | [0]' \
+              --output text)
+            test -n "$pr_review_queue_url"
+            test "$pr_review_queue_url" != "None"
+
+            aws ecs update-service \
+              --cluster "$ECS_CLUSTER_NAME" \
+              --service "$ECS_PR_REVIEW_AI_WORKER_SERVICE" \
+              --force-new-deployment
+
+            aws ecs wait services-stable \
+              --cluster "$ECS_CLUSTER_NAME" \
+              --services "$ECS_PR_REVIEW_AI_WORKER_SERVICE"
+          fi

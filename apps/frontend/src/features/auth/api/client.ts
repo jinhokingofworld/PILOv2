@@ -18,6 +18,7 @@ export type UserProfile = {
 export type Workspace = {
   id: string;
   name: string;
+  icon: string | null;
   ownerUserId: string | null;
   role: WorkspaceRole;
   isOwner: boolean;
@@ -215,6 +216,20 @@ export async function listWorkspaces(accessToken: string) {
   });
 }
 
+export async function createWorkspace(
+  accessToken: string,
+  input: {
+    icon: string | null;
+    name: string;
+  }
+) {
+  return requestJson<Workspace>("/workspaces", {
+    accessToken,
+    body: input,
+    method: "POST"
+  });
+}
+
 export async function listWorkspaceMembers(
   accessToken: string,
   workspaceId: string
@@ -283,22 +298,6 @@ export async function createWorkspaceInvitation(
   );
 }
 
-export async function revokeWorkspaceInvitation(
-  accessToken: string,
-  workspaceId: string,
-  invitationId: string
-) {
-  return requestJson<WorkspaceInvitation>(
-    `/workspaces/${encodeURIComponent(
-      workspaceId
-    )}/invitations/${encodeURIComponent(invitationId)}/revoke`,
-    {
-      accessToken,
-      method: "POST"
-    }
-  );
-}
-
 export async function listCurrentUserWorkspaceInvitations(accessToken: string) {
   return requestJson<CurrentUserWorkspaceInvitation[]>(
     "/me/workspace-invitations",
@@ -314,6 +313,19 @@ export async function acceptCurrentUserWorkspaceInvitation(
 ) {
   return requestJson<AcceptWorkspaceInvitationPayload>(
     `/me/workspace-invitations/${encodeURIComponent(invitationId)}/accept`,
+    {
+      accessToken,
+      method: "POST"
+    }
+  );
+}
+
+export async function rejectCurrentUserWorkspaceInvitation(
+  accessToken: string,
+  invitationId: string
+) {
+  return requestJson<WorkspaceInvitation>(
+    `/me/workspace-invitations/${encodeURIComponent(invitationId)}/reject`,
     {
       accessToken,
       method: "POST"

@@ -87,9 +87,10 @@ export class CanvasAgentActionService {
       : await this.repository.searchShapes(run.canvas_id, query);
     const shapeIds = shapes.map((shape) => shape.id);
     const viewport = this.viewportForShapes(shapes);
+    const routingPrefix = this.routingPrefix(input);
     const summary = shapes.length
-      ? `“${query}” 관련 도형 ${shapes.length}개를 찾았습니다.`
-      : `“${query}” 관련 도형을 찾지 못했습니다.`;
+      ? `${routingPrefix}“${query}” 관련 도형 ${shapes.length}개를 찾았습니다.`
+      : `${routingPrefix}“${query}” 관련 도형을 찾지 못했습니다.`;
 
     return {
       summary,
@@ -147,12 +148,10 @@ export class CanvasAgentActionService {
     );
     const kind = input.kind === "code" ? "code" : defaultKind;
     const viewport = this.readViewport(run.context_json.viewport);
-    const occupiedShapes = await this.repository.listShapesForPlacement(run.canvas_id, viewport);
     const spec = this.drafts.createDraftSpec({
       kind,
       prompt: run.prompt,
       sourceShapes,
-      occupiedShapes,
       viewport,
       connections: input.connections,
       nodes: input.nodes,
@@ -162,7 +161,7 @@ export class CanvasAgentActionService {
       title: this.readText(input.title) || undefined,
       code: this.readText(input.code) || undefined
     });
-    const summary = `${spec.summary}을 만들었습니다. 적용하거나 폐기할 수 있습니다.`;
+    const summary = `${this.routingPrefix(input)}${spec.summary}을 만들었습니다. 적용하거나 폐기할 수 있습니다.`;
 
     return {
       draftSpec: spec,
@@ -188,9 +187,10 @@ export class CanvasAgentActionService {
     if (shapes.length !== 2) throw badRequest("Canvas Agent connect_shapes target shapes were not found");
     const connectionKind = step.input_json.connectionKind === "line" ? "line" : "arrow";
     const label = this.readText(step.input_json.label) || null;
+    const routingPrefix = this.routingPrefix(step.input_json);
     const summary = connectionKind === "line"
-      ? "요청한 두 도형을 선으로 연결했습니다."
-      : "요청한 두 도형을 화살표로 연결했습니다.";
+      ? `${routingPrefix}요청한 두 도형을 선으로 연결했습니다.`
+      : `${routingPrefix}요청한 두 도형을 화살표로 연결했습니다.`;
     const shapeBatch = this.drafts.createConnectionBatch({
       clientOperationId: `canvas-agent:${step.id}:connect`,
       connectionKind,
@@ -256,6 +256,12 @@ export class CanvasAgentActionService {
   private queryFromPrompt(prompt: string): string {
     const match = prompt.match(/^(.+?)(?:\s*관련)?\s*(?:메모|도형|내용)?\s*(?:을|를)?\s*(?:찾아|찾아줘|검색)/);
     return match?.[1]?.trim() ?? "";
+  }
+
+  private routingPrefix(input: Record<string, unknown>): string {
+    if (input.routingSource === "shape_embedding") return "임베딩 검색으로 ";
+    if (input.routingSource === "llm_planner") return "Canvas Planner가 판단해서 ";
+    return "";
   }
 
   private readText(value: unknown): string {

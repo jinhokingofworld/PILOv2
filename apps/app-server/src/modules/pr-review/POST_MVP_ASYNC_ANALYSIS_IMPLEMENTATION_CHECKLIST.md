@@ -41,9 +41,11 @@
 | 2-A | Scope, API, 상태 전이와 Worker 경계 확정 | #652 | #658 | 완료 |
 | 2-B | `analyzing` 세션 생성과 durable Job enqueue | #659 | #664 | 완료 |
 | 2-C | AI Worker PR 분석 processor | #666 | #668 | 완료 |
-| 2-D | 분석 결과 원자 저장과 stale/idempotency guard | #670 | #699 | 진행 |
-| 2-E | Review room 분석 진행/실패/retry UX | #703 | #704 | 진행 |
-| 2-F | 운영 복구, 관측성, 배포 검증 | TBD | TBD | 대기 |
+| 2-D | 분석 결과 원자 저장과 stale/idempotency guard | #670 | #699 | 완료 |
+| 2-E | Review room 분석 진행/실패/retry UX | #703 | #704 | 완료 |
+| 2-F1 | stale 분석 복구와 retry/DLQ 정합성 | #709 | #715 | 완료 |
+| 2-F2 | 관측성, health와 배포 설정 | #710 | #736 | 진행 |
+| 2-F3 | dev E2E와 운영 재처리 절차 | #711 | TBD | 대기 |
 
 ## 공통 Stop Gate
 
@@ -252,14 +254,31 @@
 
 작업 체크리스트:
 
-- [ ] SQS visibility timeout이 PR Review 분석 최대 처리 시간보다 긴지 확인한다.
-- [ ] DLQ redrive max receive count와 application terminalization 시점을 일치시킨다.
-- [ ] 오래 `analyzing`인 session과 stale execution을 복구하는 sweep을 구현한다.
-- [ ] pending/publishing/processing/succeeded/failed 수를 추적할 운영 지표를 정의한다.
-- [ ] 로그에 job ID와 session ID correlation을 적용한다.
-- [ ] AI Worker health가 processor 초기화 실패를 감지하는지 확인한다.
-- [ ] App Server와 AI Worker의 env/secrets/model 설정을 문서화한다.
-- [ ] queue 또는 ECS service 변경 시 Terraform, IAM, 배포 workflow를 함께 반영한다.
+### 2-F1 Stale Recovery and Retry Alignment (#709)
+
+- [x] Worker visibility timeout 기본값 900초가 handoff·OpenAI·결과 전달의 최대 요청 예산
+  80초보다 긴지 확인한다.
+- [x] application terminalization을 receive count 3에서 수행한다. 전용 DLQ의 실제
+  `maxReceiveCount = 3` Terraform 반영과 배포 확인은 2-F2(#710)에서 완료한다.
+- [x] Worker가 분석 입력을 인수할 때 Job을 `processing`으로 전환하고 처리 시작 시각을 추적한다.
+- [x] `processing` 20분, `queued` 60분 기준으로 오래 `analyzing`인 session과 stale
+  execution을 terminal 처리하는 60초 sweep을 구현한다.
+- [x] 중복 전달과 늦게 도착한 Worker 결과가 terminal 상태를 덮어쓰지 않는지 검증한다.
+
+### 2-F2 Observability and Deployment (#710)
+
+> App Server 직접 실행 구조의 재현 기준과 당시 설정은
+> `PR_REVIEW_ANALYSIS_BENCHMARK_BASELINE.md`에 기록한다.
+
+- [x] 최근 24시간 pending/publishing/processing/succeeded/failed 수를 60초 상태 집계 로그로 남기고,
+  SQS/ECS 기본 CloudWatch metric과 함께 추적하도록 정의한다.
+- [x] App Server publish/recovery와 AI Worker 처리 로그에 job ID와 session ID correlation을 적용한다.
+- [x] PR Review Worker processor 초기화 실패가 재시작 loop에 숨지 않고 process exit로 드러나게 한다.
+- [x] App Server와 AI Worker의 env/secrets/model 설정을 문서화한다.
+- [x] 기존 AI jobs 경로를 유지한 채 전용 SQS/DLQ, 별도 ECS service와 배포 workflow를 추가한다.
+
+### 2-F3 Dev E2E and Operations Runbook (#711)
+
 - [ ] dev 배포에서 enqueue, consume, DB 반영, Frontend 전환을 end-to-end로 확인한다.
 - [ ] DLQ 또는 terminal failure session을 운영자가 재처리하는 절차를 문서화한다.
 
@@ -277,7 +296,9 @@
 3. `2-C`: AI Worker processor와 dispatcher
 4. `2-D`: 결과 저장, idempotency, stale/retry terminalization
 5. `2-E`: Frontend 진행/실패/retry UX
-6. `2-F`: 운영 복구, 인프라와 end-to-end 검증
+6. `2-F1`: stale 분석 복구와 retry/DLQ 정합성
+7. `2-F2`: 관측성, health와 배포 설정
+8. `2-F3`: dev end-to-end 검증과 운영 재처리 절차
 
 API 계약과 DB schema가 동시에 확정되어야 하는 경우에도 구현 PR은 가능한 한 위 경계를
 유지한다. 공통 영역이나 Terraform 변경이 포함되는 PR은 사이렌 변경으로 표시하고 관련

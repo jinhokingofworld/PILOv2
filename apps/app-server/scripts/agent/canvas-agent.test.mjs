@@ -32,7 +32,6 @@ class FakeRepository {
   constructor() {
     this.searchCalls = [];
     this.findByIdCalls = [];
-    this.placementResults = [];
     this.searchResults = [];
     this.shapesById = [];
   }
@@ -45,10 +44,6 @@ class FakeRepository {
   async findShapesByIds(canvasId, shapeIds) {
     this.findByIdCalls.push({ canvasId, shapeIds });
     return this.shapesById;
-  }
-
-  async listShapesForPlacement() {
-    return this.placementResults;
   }
 }
 
@@ -306,9 +301,6 @@ function deterministicPlan(prompt, selectedShapeIds = [], toolHelpMode = false) 
 {
   const drafts = new CanvasAgentDraftService();
   const repository = new FakeRepository();
-  repository.placementResults = [
-    shape("busy", { x: 120, y: 120, width: 900, height: 500 }),
-  ];
   const service = new CanvasAgentActionService(drafts, repository);
 
   const result = await service.execute(
@@ -371,7 +363,8 @@ function deterministicPlan(prompt, selectedShapeIds = [], toolHelpMode = false) 
 
   assert.equal(result.shouldContinue, false);
   assert.equal(result.draftSpec.nodes.length, 3);
-  assert.ok(result.draftSpec.nodes[0].x > 1000);
+  assert.equal(result.draftSpec.nodes[0].x, 180);
+  assert.equal(result.draftSpec.nodes[0].y, 180);
   assert.equal(result.draftSpec.nodes[1].kind, "rectangle");
   assert.equal(result.draftSpec.toolSteps.length, 8);
   assert.deepEqual(result.draftSpec.availableColors.map((color) => color.name), [

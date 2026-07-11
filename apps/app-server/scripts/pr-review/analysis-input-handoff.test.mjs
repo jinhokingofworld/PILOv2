@@ -37,6 +37,9 @@ class FakeDatabase {
   async queryOne(text, values = []) {
     this.calls.push({ text, values });
     if (text.includes("FROM pr_review_analysis_jobs")) return this.row;
+    if (text.includes("UPDATE pr_review_analysis_jobs")) {
+      return this.row ? { id: this.row.id } : null;
+    }
     throw new Error(`Unhandled query: ${text}`);
   }
 }
@@ -129,6 +132,8 @@ function createService(database, github) {
   assert.deepEqual(github.detailCalls, [[USER_ID, WORKSPACE_ID, PULL_REQUEST_ID]]);
   assert.deepEqual(github.fileCalls, [[USER_ID, WORKSPACE_ID, PULL_REQUEST_ID]]);
   assert.match(database.calls[0].text, /pr_review_analysis_jobs/);
+  assert.match(database.calls[1].text, /SET status = 'processing'/);
+  assert.match(database.calls[1].text, /status IN \('publishing', 'queued', 'processing'\)/);
 }
 
 for (const row of [

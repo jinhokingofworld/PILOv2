@@ -29,6 +29,7 @@ const syncTargetOptions: Array<{
   value: GithubSyncTarget;
   label: string;
 }> = [
+  { value: "source", label: "소스" },
   { value: "full", label: "전체" },
   { value: "repositories", label: "저장소" },
   { value: "issues", label: "Issue" },
@@ -42,6 +43,7 @@ type SidebarProps = {
   isLoading: boolean;
   installations: GithubAppInstallation[];
   selectedInstallationId: string;
+  selectedRepositoryId: string;
   syncRuns: GithubSyncRun[];
   syncRunsTotal: number;
   syncTarget: GithubSyncTarget;
@@ -54,6 +56,7 @@ export function GithubConnectSidebar({
   isLoading,
   installations,
   selectedInstallationId,
+  selectedRepositoryId,
   syncRuns,
   syncRunsTotal,
   syncTarget,
@@ -81,7 +84,11 @@ export function GithubConnectSidebar({
               value={syncTarget}
             >
               {syncTargetOptions.map((option) => (
-                <option key={option.value} value={option.value}>
+                <option
+                  disabled={!selectedRepositoryId && option.value !== "source"}
+                  key={option.value}
+                  value={option.value}
+                >
                   {option.label}
                 </option>
               ))}
@@ -90,7 +97,12 @@ export function GithubConnectSidebar({
 
           <Button
             className="h-10 w-full rounded-[8px] bg-[#3157d5] text-white hover:bg-[#2447bd]"
-            disabled={!selectedInstallationId || isSyncing || isLoading}
+            disabled={
+              !selectedInstallationId ||
+              isSyncing ||
+              isLoading ||
+              (!selectedRepositoryId && syncTarget !== "source")
+            }
             onClick={onStartSync}
             type="button"
           >

@@ -12,6 +12,8 @@ if ([string]::IsNullOrWhiteSpace($region)) {
 
 aws --endpoint-url $endpoint sqs create-queue --queue-name pilo-dev-ai-jobs-dlq --region $region | Out-Null
 aws --endpoint-url $endpoint sqs create-queue --queue-name pilo-dev-ai-jobs --region $region | Out-Null
+aws --endpoint-url $endpoint sqs create-queue --queue-name pilo-dev-pr-review-analysis-dlq --region $region | Out-Null
+aws --endpoint-url $endpoint sqs create-queue --queue-name pilo-dev-pr-review-analysis --region $region | Out-Null
 aws --endpoint-url $endpoint sqs create-queue --queue-name pilo-dev-github-webhooks-dlq --region $region | Out-Null
 aws --endpoint-url $endpoint sqs create-queue --queue-name pilo-dev-github-webhooks --region $region | Out-Null
 

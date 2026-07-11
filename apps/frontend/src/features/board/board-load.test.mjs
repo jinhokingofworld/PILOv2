@@ -112,6 +112,11 @@ assert.match(
 );
 assert.match(
   githubPanel,
-  /if\s*\(\s*\(\s*syncTarget\s*===\s*"full"\s*\|\|\s*repositoryScopedSyncTargets\.has\(syncTarget\)\s*\)\s*&&\s*selectedRepositoryId\s*\)\s*\{\s*body\.repositoryId\s*=\s*selectedRepositoryId;\s*\}/,
-  "Full GitHub sync should include the selected repository so first-sync project hydration can be scoped"
+  /const\s+requiresSelectedRepository\s*=\s*syncTarget\s*!==\s*"source";\s*if\s*\(\s*requiresSelectedRepository\s*&&\s*!selectedRepositoryId\s*\)/,
+  "Only source sync may run before a repository is selected"
+);
+assert.match(
+  githubPanel,
+  /if\s*\(\s*requiresSelectedRepository\s*&&\s*selectedRepositoryId\s*\)\s*\{\s*body\.repositoryId\s*=\s*selectedRepositoryId;\s*\}/,
+  "Repository-scoped sync targets should include the selected repository"
 );

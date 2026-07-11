@@ -8,9 +8,9 @@ from app.canvas_agent.planning.draft_schema import (
     GENERATION_RULES,
 )
 from app.canvas_agent.planning.tool_catalog import (
-    ALLOWED_ACTIONS,
     AVAILABLE_CANVAS_COLORS,
     AVAILABLE_CANVAS_TOOLS,
+    allowed_actions_for_context,
 )
 from app.canvas_agent.types import CanvasAgentRunContext
 
@@ -26,8 +26,9 @@ def system_prompt() -> str:
         "When using create_draft, return exact nodes and connections with x, y, width, "
         "height, text, color, and parentId when useful. "
         "Also return recommendedColors that explain the small palette you chose for the draft. "
-        "Use find_canvas_tool when the user asks where a built-in Canvas toolbar "
-        "button or tool is. "
+        "Use find_canvas_tool only when requestContext.toolHelpMode is true and "
+        "the user asks where a built-in Canvas toolbar button or tool is. "
+        "Never use find_canvas_tool when requestContext.toolHelpMode is false. "
         "Use find_shapes for semantic Canvas content search. "
         "Use focus_viewport or select_shapes only with shapeIds provided by the previous "
         "action result or request selection. "
@@ -59,7 +60,7 @@ def user_prompt(context: CanvasAgentRunContext) -> str:
             "generationRules": GENERATION_RULES,
             "draftKindRules": DRAFT_KIND_RULES,
             "draftTemplates": DRAFT_TEMPLATES,
-            "allowedActions": ALLOWED_ACTIONS,
+            "allowedActions": allowed_actions_for_context(context),
         },
         ensure_ascii=False,
     )

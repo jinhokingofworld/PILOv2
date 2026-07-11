@@ -135,6 +135,10 @@ export class GithubSyncExecutorService {
     target: GithubSyncTarget,
     context: GithubSyncRunContext
   ): Promise<GithubSyncRunSummary> {
+    if (target === "source") {
+      return this.syncGithubSource(context);
+    }
+
     if (target === "full") {
       return this.syncGithubFull(context);
     }
@@ -214,7 +218,8 @@ export class GithubSyncExecutorService {
 
     const selectedProjectV2Ids = await this.listSelectedGithubProjectV2Ids(
       context.workspaceId,
-      context.installation.id
+      context.installation.id,
+      context.repository?.id ?? null
     );
     const projectV2Contexts = this.getGithubProjectV2ContextsForFullSync(
       context,
@@ -255,6 +260,29 @@ export class GithubSyncExecutorService {
 
     await this.reportGithubSyncProgress(context, 95, "finalizing", summary);
 
+    return summary;
+  }
+
+  private async syncGithubSource(
+    context: GithubSyncRunContext
+  ): Promise<GithubSyncRunSummary> {
+    let summary = this.createGithubSyncSummary();
+    await this.reportGithubSyncProgress(context, 5, "repositories", summary);
+    summary = this.mergeGithubSyncSummaries(
+      summary,
+      await this.syncGithubRepositories(context)
+    );
+    await this.reportGithubSyncProgress(context, 35, "issues", summary);
+    summary = this.mergeGithubSyncSummaries(
+      summary,
+      await this.syncGithubIssues(context)
+    );
+    await this.reportGithubSyncProgress(context, 70, "pull_requests", summary);
+    summary = this.mergeGithubSyncSummaries(
+      summary,
+      await this.syncGithubPullRequests(context)
+    );
+    await this.reportGithubSyncProgress(context, 95, "finalizing", summary);
     return summary;
   }
 
@@ -1565,8 +1593,15 @@ export class GithubSyncExecutorService {
 
   private async listSelectedGithubProjectV2Ids(
     workspaceId: string,
-    installationId: string
+    installationId: string,
+    repositoryId: string | null
   ): Promise<Set<string>> {
+    const repositoryFilter = repositoryId
+      ? "AND gps.repository_id = $3"
+      : "";
+    const values = repositoryId
+      ? [workspaceId, installationId, repositoryId]
+      : [workspaceId, installationId];
     const rows = await this.database.query<GithubProjectV2SelectionRow>(
       `
         SELECT gps.project_v2_id
@@ -1574,8 +1609,9 @@ export class GithubSyncExecutorService {
         INNER JOIN github_projects_v2 gp ON gp.id = gps.project_v2_id
         WHERE gp.workspace_id = $1
           AND gps.installation_id = $2
+          ${repositoryFilter}
       `,
-      [workspaceId, installationId]
+      values
     );
 
     return new Set(rows.map((row) => row.project_v2_id));

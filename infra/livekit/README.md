@@ -77,6 +77,12 @@ environment:
 - `LIVEKIT_RECORDINGS_BUCKET`
 - `LIVEKIT_RECORDING_MODE=room_audio_only`
 
+For participant departure reconciliation, also set `LIVEKIT_WEBHOOK_URL` on the
+LiveKit host to the public App Server callback URL, for example
+`https://api.dev.pilo.my/api/v1/livekit/webhooks`. The LiveKit API key and
+secret already configured on the host sign webhook deliveries; do not add a
+second shared webhook secret.
+
 AI Worker should receive the recordings bucket or prefix used by App Server when
 creating STT jobs.
 

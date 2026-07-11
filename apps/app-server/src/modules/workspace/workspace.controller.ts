@@ -12,6 +12,7 @@ import { AuthGuard } from "../../common/auth.guard";
 import { CurrentUserId } from "../../common/current-user.decorator";
 import {
   AcceptWorkspaceInvitationPayload,
+  CreateWorkspaceRequest,
   CreateWorkspaceInvitationPayload,
   CreateWorkspaceInvitationRequest,
   CurrentUserWorkspaceInvitationPayload,
@@ -34,6 +35,18 @@ export class WorkspaceController {
   ): Promise<ApiSuccessResponse<WorkspacePayload[]>> {
     const workspaces = await this.workspaceService.listWorkspaces(currentUserId);
     return apiResponse(workspaces);
+  }
+
+  @Post()
+  async createWorkspace(
+    @CurrentUserId() currentUserId: string,
+    @Body() request: CreateWorkspaceRequest
+  ): Promise<ApiSuccessResponse<WorkspacePayload>> {
+    const workspace = await this.workspaceService.createWorkspace(
+      currentUserId,
+      request
+    );
+    return apiResponse(workspace);
   }
 
   @Get(":workspaceId/members")
@@ -100,20 +113,6 @@ export class WorkspaceController {
     return apiResponse(invitation);
   }
 
-  @Post(":workspaceId/invitations/:invitationId/revoke")
-  async revokeInvitation(
-    @CurrentUserId() currentUserId: string,
-    @Param("workspaceId") workspaceId: string,
-    @Param("invitationId") invitationId: string
-  ): Promise<ApiSuccessResponse<WorkspaceInvitationPayload>> {
-    const invitation = await this.workspaceService.revokeInvitation(
-      currentUserId,
-      workspaceId,
-      invitationId
-    );
-    return apiResponse(invitation);
-  }
-
   @Get(":workspaceId")
   async getWorkspace(
     @CurrentUserId() currentUserId: string,
@@ -151,6 +150,18 @@ export class CurrentUserWorkspaceInvitationController {
       invitationId
     );
     return apiResponse(result);
+  }
+
+  @Post(":invitationId/reject")
+  async rejectCurrentUserInvitation(
+    @CurrentUserId() currentUserId: string,
+    @Param("invitationId") invitationId: string
+  ): Promise<ApiSuccessResponse<WorkspaceInvitationPayload>> {
+    const invitation = await this.workspaceService.rejectCurrentUserInvitation(
+      currentUserId,
+      invitationId
+    );
+    return apiResponse(invitation);
   }
 }
 

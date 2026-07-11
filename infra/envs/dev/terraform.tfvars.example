@@ -17,9 +17,10 @@ github_owner = "Developer-EJ"
 github_repo  = "PILO"
 
 # Dev images are available in ECR, so each service runs one task by default.
-app_server_desired_count      = 1
-realtime_server_desired_count = 1
-ai_worker_desired_count       = 1
+app_server_desired_count            = 1
+realtime_server_desired_count       = 1
+ai_worker_desired_count             = 1
+pr_review_ai_worker_desired_count   = 1
 
 # Self-hosted LiveKit MVP host. Keep public CIDRs open for WebRTC unless a
 # stricter access policy is ready.

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
@@ -7,6 +8,15 @@ const { AGENT_TOOL_SCHEMA_VERSION, AgentJobService } = require(
 );
 const { AgentOutboxPublisherService } = require(
   "../../dist/modules/agent/agent-outbox-publisher.service.js"
+);
+const { AgentToolRegistryService } = require(
+  "../../dist/modules/agent/agent-tool-registry.service.js"
+);
+const { CalendarAgentToolsService } = require(
+  "../../dist/modules/agent/tools/calendar-agent-tools.service.js"
+);
+const { MeetingAgentToolsService } = require(
+  "../../dist/modules/agent/tools/meeting-agent-tools.service.js"
 );
 
 const originalEnv = {
@@ -44,6 +54,28 @@ const payload = {
     }
   ]
 };
+
+{
+  const suite = JSON.parse(
+    readFileSync(
+      new URL("../../../ai-worker/evals/agent_planner_korean_v1.json", import.meta.url),
+      "utf8"
+    )
+  );
+  const registry = new AgentToolRegistryService(
+    new CalendarAgentToolsService({}),
+    new MeetingAgentToolsService({})
+  );
+  const actualSnapshot = registry.listDefinitions().map((definition) => ({
+    name: definition.name,
+    description: definition.description,
+    riskLevel: definition.riskLevel,
+    executionMode: definition.executionMode,
+    inputSchema: definition.inputSchema
+  }));
+
+  assert.deepEqual(suite.tools, actualSnapshot);
+}
 
 class FakeSqsClient {
   constructor({ shouldFail = false } = {}) {

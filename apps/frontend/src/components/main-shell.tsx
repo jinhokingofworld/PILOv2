@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { LayoutDashboard } from "lucide-react";
 
 import { AppSidebar } from "@/components/app-sidebar";
+import { HeaderNotificationDropdown } from "@/components/header-notification-dropdown";
 import {
   SidebarInset,
   SidebarProvider,
@@ -56,7 +57,12 @@ export function MainShell({ children }: MainShellProps) {
               <span className="truncate">{activeFeature.title}</span>
             </div>
           </div>
-          <HeaderMeetingStatus />
+          <div className="flex shrink-0 items-center gap-2">
+            <div className="hidden min-[480px]:block">
+              <HeaderMeetingStatus />
+            </div>
+            <HeaderNotificationDropdown />
+          </div>
         </header>
 
         <main className="flex flex-1 flex-col gap-6 p-6">{children}</main>

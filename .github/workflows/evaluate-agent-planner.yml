@@ -1,0 +1,74 @@
+name: Evaluate Agent Planner
+
+on:
+  workflow_dispatch:
+    inputs:
+      current_date:
+        description: Fixed planner current date (YYYY-MM-DD)
+        required: true
+        default: "2026-07-08"
+      repetitions:
+        description: Number of attempts for every fixed evaluation case
+        required: true
+        default: "5"
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AWS_REGION: ap-northeast-2
+  APP_PATH: apps/ai-worker
+  EVALUATION_SOURCE_REF: dev
+
+jobs:
+  evaluate:
+    if: ${{ github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout dev evaluation source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.EVALUATION_SOURCE_REF }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_GITHUB_ACTIONS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install Planner evaluation dependency
+        run: python -m pip install "openai>=2,<3"
+
+      - name: Run dev Planner evaluation
+        working-directory: ${{ env.APP_PATH }}
+        env:
+          CURRENT_DATE: ${{ inputs.current_date }}
+          REPETITIONS: ${{ inputs.repetitions }}
+        run: |
+          set -euo pipefail
+
+          OPENAI_API_KEY="$(aws secretsmanager get-secret-value \
+            --secret-id pilo-dev/ai-worker/OPENAI_API_KEY \
+            --query SecretString \
+            --output text)" \
+          PYTHONPATH=. python scripts/evaluate_agent_planner.py \
+            --current-date "$CURRENT_DATE" \
+            --timezone Asia/Seoul \
+            --model gpt-5.4-mini \
+            --repetitions "$REPETITIONS" \
+            > "agent-planner-baseline-${CURRENT_DATE}.json"
+
+      - name: Upload evaluation result
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-planner-baseline-${{ inputs.current_date }}
+          path: ${{ env.APP_PATH }}/agent-planner-baseline-${{ inputs.current_date }}.json
+          if-no-files-found: error
+          retention-days: 30

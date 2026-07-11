@@ -56,6 +56,12 @@ type AuthGateState =
     };
 
 const AuthSessionContext = createContext<AuthSessionContextValue | null>(null);
+export class WorkspaceOnboardingRequiredError extends Error {
+  constructor() {
+    super("Workspace onboarding is required");
+    this.name = "WorkspaceOnboardingRequiredError";
+  }
+}
 const DEV_PREVIEW_USER_ID = "00000000-0000-4000-8000-000000000137";
 const DEV_PREVIEW_TIMESTAMP = "2026-07-06T00:00:00.000Z";
 
@@ -71,6 +77,7 @@ const devPreviewUser: UserProfile = {
 const devPreviewWorkspace: Workspace = {
   id: PILO_DEV_PREVIEW_WORKSPACE_ID,
   name: "PILO UI Preview",
+  icon: null,
   ownerUserId: DEV_PREVIEW_USER_ID,
   role: "owner",
   isOwner: true,
@@ -122,7 +129,14 @@ export function AuthGate({ children }: { children: ReactNode }) {
             message: "세션 확인 완료"
           });
         }
-      } catch {
+      } catch (error) {
+        if (error instanceof WorkspaceOnboardingRequiredError) {
+          if (!cancelled) {
+            router.replace("/workspace/new?onboarding=1");
+          }
+          return;
+        }
+
         clearStoredAuthSession();
         if (!cancelled) {
           router.replace(
@@ -287,7 +301,7 @@ export async function loadAuthSessionEntry(
   const workspaces = await listWorkspaces(accessToken);
 
   if (workspaces.length === 0) {
-    throw new Error("Default workspace was not initialized during login");
+    throw new WorkspaceOnboardingRequiredError();
   }
 
   const storedWorkspaceId = getSelectedWorkspaceId();

@@ -155,6 +155,7 @@ export interface GithubProjectV2ListItemPayload {
 
 export interface GithubProjectV2SelectionPayload {
   installationId: string;
+  repositoryId: string;
   projectV2Ids: string[];
   syncRunId: string | null;
   syncStatus: "queued" | "failed" | null;
@@ -164,6 +165,7 @@ export interface GithubProjectV2SelectionPayload {
 export interface GithubProjectV2DiscoveryPayload {
   connectionRequired: boolean;
   installationId: string;
+  repositoryId: string;
   projects: GithubProjectV2ListItemPayload[];
 }
 
@@ -454,6 +456,7 @@ export interface GithubPullRequestMergePayload {
 }
 
 export type GithubSyncTarget =
+  | "source"
   | "repositories"
   | "issues"
   | "pull_requests"

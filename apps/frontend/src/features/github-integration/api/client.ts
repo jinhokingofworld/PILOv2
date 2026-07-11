@@ -109,9 +109,7 @@ function readApiErrorMessage(payload: unknown) {
   ) {
     return {
       code:
-        typeof payload.error.code === "string"
-          ? payload.error.code
-          : undefined,
+        typeof payload.error.code === "string" ? payload.error.code : undefined,
       message: payload.error.message
     };
   }
@@ -199,10 +197,7 @@ function appendSearchParam(
   params.set(key, String(value));
 }
 
-function withQueryParams(
-  path: `/${string}`,
-  query: object = {}
-) {
+function withQueryParams(path: `/${string}`, query: object = {}) {
   const params = new URLSearchParams();
 
   for (const [key, value] of Object.entries(query)) {
@@ -319,7 +314,9 @@ async function requestGithubIntegrationPage<T>(
 }
 
 function workspaceGithubPath(workspaceId: string, path: string) {
-  return `/workspaces/${encodeURIComponent(workspaceId)}/github${path}` as const;
+  return `/workspaces/${encodeURIComponent(
+    workspaceId
+  )}/github${path}` as const;
 }
 
 function repositoryGithubPath(workspaceId: string, repositoryId: string) {
@@ -415,9 +412,15 @@ export function createGithubIntegrationApiClient({
       );
     },
 
-    async deleteGithubAppInstallation(workspaceId: string, installationId: string) {
+    async deleteGithubAppInstallation(
+      workspaceId: string,
+      installationId: string
+    ) {
       return requestGithubIntegrationData<GithubAppInstallationDelete>(
-        workspaceGithubPath(workspaceId, `/installations/${encodeURIComponent(installationId)}`),
+        workspaceGithubPath(
+          workspaceId,
+          `/installations/${encodeURIComponent(installationId)}`
+        ),
         { method: "DELETE" },
         requestOptions
       );
@@ -428,7 +431,10 @@ export function createGithubIntegrationApiClient({
       query: ListGithubRepositoriesQuery = {}
     ) {
       return requestGithubIntegrationPage<GithubRepository>(
-        withQueryParams(workspaceGithubPath(workspaceId, "/repositories"), query),
+        withQueryParams(
+          workspaceGithubPath(workspaceId, "/repositories"),
+          query
+        ),
         undefined,
         requestOptions
       );
@@ -447,7 +453,10 @@ export function createGithubIntegrationApiClient({
       repositoryId: string
     ) {
       return requestGithubIntegrationData<GithubRepositoryCollaboratorStatus>(
-        `${repositoryGithubPath(workspaceId, repositoryId)}/collaborator-status`,
+        `${repositoryGithubPath(
+          workspaceId,
+          repositoryId
+        )}/collaborator-status`,
         undefined,
         requestOptions
       );
@@ -470,19 +479,31 @@ export function createGithubIntegrationApiClient({
 
     async listGithubProjectsV2(
       workspaceId: string,
-      query: ListGithubProjectsV2Query = {}
+      query: ListGithubProjectsV2Query
     ) {
       return requestGithubIntegrationPage<GithubProjectV2>(
-        withQueryParams(workspaceGithubPath(workspaceId, "/projects-v2"), query),
+        withQueryParams(
+          workspaceGithubPath(workspaceId, "/projects-v2"),
+          query
+        ),
         undefined,
         requestOptions
       );
     },
 
-    async discoverGithubProjectV2(workspaceId: string, installationId: string) {
+    async discoverGithubProjectV2(
+      workspaceId: string,
+      installationId: string,
+      body: { repositoryId: string }
+    ) {
       return requestGithubIntegrationData<GithubProjectV2Discovery>(
-        workspaceGithubPath(workspaceId, `/installations/${encodeURIComponent(installationId)}/projects-v2/discovery`),
-        { method: "POST" },
+        workspaceGithubPath(
+          workspaceId,
+          `/installations/${encodeURIComponent(
+            installationId
+          )}/projects-v2/discovery`
+        ),
+        withJsonBody(body, { method: "POST" }),
         requestOptions
       );
     },

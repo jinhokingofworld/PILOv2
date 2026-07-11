@@ -31,6 +31,9 @@ const prReviewAnalysisJobService = await readSource(
 const prReviewAnalysisJobPublisher = await readSource(
   "../../src/modules/pr-review/pr-review-analysis-job-publisher.service.ts"
 );
+const prReviewAnalysisJobRecovery = await readSource(
+  "../../src/modules/pr-review/pr-review-analysis-job-recovery.service.ts"
+);
 const prReviewAnalysisHandoffGuard = await readSource(
   "../../src/modules/pr-review/pr-review-analysis-handoff.guard.ts"
 );
@@ -61,6 +64,7 @@ assert.match(prReviewModule, /PrReviewGithubDependencyService/);
 assert.match(prReviewModule, /PrReviewAnalysisService/);
 assert.match(prReviewModule, /PrReviewAnalysisJobService/);
 assert.match(prReviewModule, /PrReviewAnalysisJobPublisherService/);
+assert.match(prReviewModule, /PrReviewAnalysisJobRecoveryService/);
 assert.match(prReviewModule, /PrReviewAnalysisHandoffGuard/);
 assert.match(prReviewModule, /PrReviewAnalysisInternalController/);
 
@@ -216,6 +220,26 @@ assert.match(prReviewAnalysisJobService, /pr-review-analysis:v1/);
 assert.match(prReviewAnalysisJobPublisher, /FOR UPDATE OF job SKIP LOCKED/);
 assert.match(prReviewAnalysisJobPublisher, /ANALYSIS_ENQUEUE_FAILED/);
 assert.match(prReviewAnalysisJobPublisher, /publishDueJobs/);
+assert.match(prReviewAnalysisJobRecovery, /PROCESSING_STALE_TIMEOUT_SECONDS/);
+assert.match(prReviewAnalysisJobRecovery, /QUEUED_STALE_TIMEOUT_SECONDS/);
+assert.match(prReviewAnalysisJobRecovery, /recoverStaleJobs/);
+assert.match(prReviewAnalysisJobRecovery, /logStatusCounts/);
+assert.match(
+  prReviewAnalysisJobPublisher,
+  /publishDueJobs\(\)\.catch\(\(error: unknown\) => \{\s*this\.logger\.error\("PR Review analysis publish recovery sweep failed", error\);/
+);
+assert.match(
+  prReviewAnalysisJobPublisher,
+  /publishDueJobs\(\)\.catch\(\(error: unknown\) => \{\s*this\.logger\.error\("Initial PR Review analysis publish recovery sweep failed", error\);/
+);
+assert.match(
+  prReviewAnalysisJobPublisher,
+  /catch \(error: unknown\) \{\s*this\.logger\.error\(`Immediate PR Review analysis publish failed job_id=\$\{jobId\}`, error\);/
+);
+assert.match(
+  prReviewAnalysisJobPublisher,
+  /catch \(error: unknown\) \{\s*this\.logger\.error\(\s*`PR Review analysis publish enqueue failed job_id=\$\{claim\.id\} session_id=\$\{claim\.review_session_id\}`,\s*error\s*\);\s*await this\.markPublishFailure\(claim\);/
+);
 assert.match(prReviewAnalysisJobMigration, /CREATE TABLE public\.pr_review_analysis_jobs/);
 assert.match(prReviewAnalysisJobMigration, /UNIQUE \(review_session_id\)/);
 assert.match(
@@ -387,3 +411,4 @@ await import("./submission.test.mjs");
 await import("./async-analysis-enqueue.test.mjs");
 await import("./analysis-input-handoff.test.mjs");
 await import("./analysis-result-handoff.test.mjs");
+await import("./analysis-job-recovery.test.mjs");

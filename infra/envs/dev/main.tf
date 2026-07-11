@@ -188,21 +188,22 @@ module "ecs" {
       task_role_arn      = module.iam.app_server_task_role_arn
       target_group_arn   = module.alb.app_target_group_arn
       environment = {
-        APP_ENV                        = var.environment
-        AWS_REGION                     = var.aws_region
-        PORT                           = tostring(var.app_server_port)
-        DATABASE_SSL                   = "true"
-        S3_UPLOADS_BUCKET              = module.s3.uploads_bucket_name
-        SQS_AI_JOBS_QUEUE_URL          = module.sqs.ai_jobs_queue_url
-        SQS_GITHUB_WEBHOOKS_QUEUE_URL  = module.sqs.github_webhooks_queue_url
-        SQS_GITHUB_SYNC_JOBS_QUEUE_URL = module.sqs.github_sync_jobs_queue_url
-        FRONTEND_URL                   = local.frontend_domain == "" ? "" : "https://${local.frontend_domain}"
-        API_PUBLIC_ORIGIN              = local.api_domain == "" ? "http://${module.alb.alb_dns_name}" : "https://${local.api_domain}"
-        API_BASE_PATH                  = "/api/v1"
-        LIVEKIT_RECORDING_MODE         = "room_audio_only"
-        LIVEKIT_EGRESS_S3_PREFIX       = "recordings/meetings"
-        OPENAI_PR_REVIEW_MODEL         = "gpt-5.5"
-        OPENAI_PR_REVIEW_TIMEOUT_MS    = "45000"
+        APP_ENV                          = var.environment
+        AWS_REGION                       = var.aws_region
+        PORT                             = tostring(var.app_server_port)
+        DATABASE_SSL                     = "true"
+        S3_UPLOADS_BUCKET                = module.s3.uploads_bucket_name
+        SQS_AI_JOBS_QUEUE_URL            = module.sqs.ai_jobs_queue_url
+        SQS_PR_REVIEW_ANALYSIS_QUEUE_URL = module.sqs.pr_review_analysis_queue_url
+        SQS_GITHUB_WEBHOOKS_QUEUE_URL    = module.sqs.github_webhooks_queue_url
+        SQS_GITHUB_SYNC_JOBS_QUEUE_URL   = module.sqs.github_sync_jobs_queue_url
+        FRONTEND_URL                     = local.frontend_domain == "" ? "" : "https://${local.frontend_domain}"
+        API_PUBLIC_ORIGIN                = local.api_domain == "" ? "http://${module.alb.alb_dns_name}" : "https://${local.api_domain}"
+        API_BASE_PATH                    = "/api/v1"
+        LIVEKIT_RECORDING_MODE           = "room_audio_only"
+        LIVEKIT_EGRESS_S3_PREFIX         = "recordings/meetings"
+        OPENAI_PR_REVIEW_MODEL           = "gpt-5.5"
+        OPENAI_PR_REVIEW_TIMEOUT_MS      = "45000"
       }
       secrets = module.secrets.app_server_ecs_secrets
     }
@@ -251,6 +252,29 @@ module "ecs" {
       secrets = module.secrets.ai_worker_ecs_secrets
     }
 
+    pr-review-ai-worker = {
+      image              = "${module.ecr.repository_urls["pilo-ai-worker"]}:latest"
+      cpu                = var.ai_worker_cpu
+      memory             = var.ai_worker_memory
+      desired_count      = var.pr_review_ai_worker_desired_count
+      container_port     = null
+      command            = ["python", "-m", "app.pr_review_analysis_runtime"]
+      security_group_ids = [module.security_groups.ai_worker_security_group_id]
+      task_role_arn      = module.iam.ai_worker_task_role_arn
+      target_group_arn   = null
+      environment = {
+        APP_ENV                                    = var.environment
+        AWS_REGION                                 = var.aws_region
+        SQS_PR_REVIEW_ANALYSIS_QUEUE_URL           = module.sqs.pr_review_analysis_queue_url
+        PR_REVIEW_ANALYSIS_HANDOFF_BASE_URL        = local.api_domain == "" ? "http://${module.alb.alb_dns_name}" : "https://${local.api_domain}"
+        PR_REVIEW_ANALYSIS_HANDOFF_TIMEOUT_SECONDS = "10"
+        OPENAI_PR_REVIEW_MODEL                     = "gpt-5.5"
+        OPENAI_PR_REVIEW_TIMEOUT_MS                = "60000"
+        AI_WORKER_SQS_VISIBILITY_TIMEOUT_SECONDS   = "900"
+      }
+      secrets = module.secrets.pr_review_ai_worker_ecs_secrets
+    }
+
     github-sync-worker = {
       image              = "${module.ecr.repository_urls["pilo-app-server"]}:latest"
       cpu                = var.app_server_cpu
@@ -265,6 +289,7 @@ module "ecs" {
         APP_ENV                        = var.environment
         AWS_REGION                     = var.aws_region
         DATABASE_SSL                   = "true"
+        API_PUBLIC_ORIGIN              = local.api_domain == "" ? "http://${module.alb.alb_dns_name}" : "https://${local.api_domain}"
         SQS_GITHUB_WEBHOOKS_QUEUE_URL  = module.sqs.github_webhooks_queue_url
         SQS_GITHUB_SYNC_JOBS_QUEUE_URL = module.sqs.github_sync_jobs_queue_url
       }

@@ -108,20 +108,27 @@ GitHub App installation 연결을 시작하려면 현재 사용자의 GitHub OAu
 선행되어야 한다. Installation callback 처리 시 서버는 저장된 사용자 OAuth
 token으로 GitHub의 user installations 목록을 조회해 callback의
 `installation_id`가 현재 연결된 GitHub 사용자에게 접근 가능한 installation인지
-검증한 뒤 `github_installations`에 저장한다. 설치 callback은 초기 `full` sync를
-시작하지 않고, 저장된 installation을 ProjectV2 선택 단계로 전달한다.
+검증한 뒤 `github_installations`에 저장한다. 설치 callback은 초기 `full` sync 대신
+repository, Issue, pull request만 처리하는 `source` sync를 enqueue하며, enqueue 실패도
+callback 성공 redirect를 실패로 바꾸지 않는다.
 
 ## 데이터 규칙
 
-- ProjectV2 상세 동기화 선택은 workspace와 installation 단위로 저장한다. `full` sync
-  request body는 `projectV2Id`를 허용하지 않는다. `full` sync는 ProjectV2 metadata와
-  repository link를 발견하지만 fields, items, Board hydration은 선택된 ProjectV2에만
-  수행한다. 선택이 비어 있으면 해당 상세 단계는 건너뛴다.
+### Repository-scoped ProjectV2 sync
+
+- Installation callback creates a `source` sync run for repositories, Issues, and pull requests. Its success redirect keeps `github_installation_id` and exposes the source run state through sync runs.
+- ProjectV2 list, discovery, and selection requests require `repositoryId`. Discovery and list results include only ProjectV2 records linked to that repository.
+- ProjectV2 selection replacement is scoped to one `{ installationId, repositoryId }` pair and returns `installationId`, `repositoryId`, `projectV2Ids`, `syncRunId`, `syncStatus`, and `syncError`.
+
+- ProjectV2 상세 동기화 선택은 workspace, installation, repository 단위로 저장한다.
+  `full` sync request body는 `projectV2Id`를 허용하지 않는다. `full` sync는 선택한
+  repository의 선택된 ProjectV2에만 fields, items, Board hydration을 수행한다. 선택이
+  비어 있으면 해당 상세 단계는 건너뛴다.
 - `github_pull_requests.raw`에서 `state`, `draft`, `mergeable`, `head_sha`, `base_sha`를 파생한다.
 - PR 변경 파일은 GitHub Integration의 별도 캐시 테이블에 저장하지 않는다.
 - PR 변경 파일과 patch text는 요청 시 GitHub에서 조회한다.
 - PR Review는 세션 생성 시 `review_files`에 파일 metadata를 저장할 수 있다. Diff 응답과 큰 diff 판단 기준은 PR Review API 문서를 따른다.
-- `github_sync_target` 값은 `repositories`, `issues`, `pull_requests`, `project_v2`, `project_v2_fields`, `project_v2_items`, `full`이다.
+- `github_sync_target` 값은 `source`, `repositories`, `issues`, `pull_requests`, `project_v2`, `project_v2_fields`, `project_v2_items`, `full`이다. `source`는 repository, Issue, pull request만 동기화하며 ProjectV2 discovery·field·item·Board hydration을 수행하지 않는다.
 - GitHub 원본 cache identity는 Workspace 범위다. 같은 GitHub
   installation/repository/issue/PR/ProjectV2/field/item이 여러 Workspace에
   동기화될 수 있으며, sync upsert는 현재 Workspace 또는 현재 ProjectV2 안에서만
@@ -348,11 +355,12 @@ Repository 목록은 `installation_id IS NOT NULL`인 현재 active installation
 ProjectV2 목록:
 
 ```http
-GET /api/v1/workspaces/{workspaceId}/github/projects-v2?ownerLogin=my-team&closed=false&q=MVP&page=1&limit=20
+GET /api/v1/workspaces/{workspaceId}/github/projects-v2?repositoryId=repository_uuid&ownerLogin=my-team&closed=false&q=MVP&page=1&limit=20
 ```
 
 | Query | 설명 |
 | --- | --- |
+| `repositoryId` | 필수. 해당 repository와 연결된 ProjectV2만 반환 |
 | `ownerLogin` | GitHub owner login exact match |
 | `closed` | `true`면 closed ProjectV2도 포함. 생략 또는 `false`면 `closed=false`만 반환 |
 | `q` | `title`, `shortDescription` 부분 검색 |
@@ -380,7 +388,7 @@ Sync run 목록:
 
 | Query | 설명 |
 | --- | --- |
-| `target` | `repositories`, `issues`, `pull_requests`, `project_v2`, `project_v2_fields`, `project_v2_items`, `full` |
+| `target` | `source`, `repositories`, `issues`, `pull_requests`, `project_v2`, `project_v2_fields`, `project_v2_items`, `full` |
 | `status` | `queued`, `running`, `success`, `failed` |
 | `repositoryId` | 특정 repository 관련 run만 조회 |
 | `projectV2Id` | 특정 ProjectV2 관련 run만 조회 |
@@ -501,13 +509,14 @@ Content-Type: application/json
 ```json
 {
   "installationId": "installation_uuid",
+  "repositoryId": "repository_uuid",
   "projectV2Ids": ["project_v2_uuid_1", "project_v2_uuid_2"]
 }
 ```
 
-이 요청은 한 installation의 선택된 ProjectV2 목록을 원자적으로 교체한다. 모든 ProjectV2는
-요청 workspace와 installation에 속해야 하며, 빈 `projectV2Ids` 배열은 유효하고 해당
-installation의 상세 동기화를 비활성화한다. 선택 저장은 sync를 시작하지 않는다.
+이 요청은 한 `{ installationId, repositoryId }` 조합의 선택된 ProjectV2 목록을 원자적으로 교체한다.
+repository는 요청 workspace와 installation에 속해야 하며, 모든 ProjectV2는 해당 repository와
+연결되어 있어야 한다. 빈 `projectV2Ids` 배열은 유효하며 해당 repository의 선택만 해제한다.
 
 응답:
 
@@ -516,7 +525,11 @@ installation의 상세 동기화를 비활성화한다. 선택 저장은 sync를
   "success": true,
   "data": {
     "installationId": "installation_uuid",
-    "projectV2Ids": ["project_v2_uuid_1", "project_v2_uuid_2"]
+    "repositoryId": "repository_uuid",
+    "projectV2Ids": ["project_v2_uuid_1", "project_v2_uuid_2"],
+    "syncRunId": "sync_run_uuid",
+    "syncStatus": "queued",
+    "syncError": null
   }
 }
 ```
@@ -724,10 +737,10 @@ DELETE /api/v1/workspaces/{workspaceId}/github/installations/{installationId}
 - Missing cookies, expired rows, already-consumed rows, or nonce/binding
   mismatches are rejected as invalid callback state. Callback state is one-time
   use and MUST NOT be accepted on replay.
-- On callback success, app-server does not enqueue an initial `full` sync. It redirects to
-  `returnUrl` with `302` and appends `github_installation_id` as a query parameter so the
-  client can begin ProjectV2 discovery and selection. The client starts sync only after a
-  nonempty ProjectV2 selection is saved.
+- On callback success, app-server creates a `source` sync run for the installation and
+  attempts to publish it without changing the success redirect. It redirects to `returnUrl`
+  with `302` and appends `github_installation_id` as a query parameter. If queue publication
+  fails, the run is recorded as `failed`; the callback still completes successfully.
 - If `returnUrl` is omitted, the callback returns the JSON payload for
   diagnostic/API-client use.
 - If `GET /github/oauth/callback` cannot save the GitHub account because
@@ -777,34 +790,45 @@ marks the run failed and returns an API error instead of leaving a stranded queu
 
 ## ProjectV2 setup and selected sync scope
 
-An installation callback persists the installation and redirects with the
-`github_installation_id` query parameter. It does **not** start a full sync.
-The client must call `POST /workspaces/{workspaceId}/github/installations/{installationId}/projects-v2/discovery`
-before showing the selection UI. Discovery stores only ProjectV2 list metadata and
-repository links. Organization installations use the installation token; a personal
-installation without a valid matching Project OAuth token with `project` scope returns:
+An installation callback persists the installation, starts `source` sync for repositories,
+Issues, and pull requests, and redirects with the `github_installation_id` query parameter.
+The client does not request PRs or ProjectV2 data until a repository is selected. It must then
+call `POST /workspaces/{workspaceId}/github/installations/{installationId}/projects-v2/discovery`
+with `{ "repositoryId": "..." }`. Discovery stores ProjectV2 metadata and repository links;
+its result and subsequent ProjectV2 lists are limited to that repository. Organization
+installations use the installation token; a personal installation without a valid matching
+Project OAuth token with `project` scope returns:
 
 ```json
-{ "success": true, "data": { "connectionRequired": true, "installationId": "...", "projects": [] } }
+{
+  "success": true,
+  "data": {
+    "connectionRequired": true,
+    "installationId": "...",
+    "repositoryId": "...",
+    "projects": []
+  }
+}
 ```
 
 The client starts `/me/github/project-oauth/start` in that case and retries discovery
-after its callback. A successful discovery returns `connectionRequired: false` and all
-discovered ProjectV2 metadata for the installation.
+after its callback. A successful discovery returns `connectionRequired: false` and ProjectV2
+metadata linked to the requested repository only.
 
-`PUT /workspaces/{workspaceId}/github/project-v2-selections` atomically replaces an
-installation's selection. With one or more IDs it immediately creates one queued
-`full` sync and returns `{ installationId, projectV2Ids, syncRunId, syncStatus: "queued", syncError: null }`.
+`PUT /workspaces/{workspaceId}/github/project-v2-selections` atomically replaces one
+repository's selection for an installation. With one or more IDs it immediately creates one queued
+`full` sync and returns `{ installationId, repositoryId, projectV2Ids, syncRunId, syncStatus: "queued", syncError: null }`.
 If queue publication fails after selection persistence, it returns the failed run as
 `{ syncRunId, syncStatus: "failed", syncError }` so the client can distinguish saved
 selection from failed sync. With an empty array it clears the selection, creates no sync
 job, and returns `syncRunId: null`, `syncStatus: null`, and `syncError: null`.
 Existing ProjectV2, field, item, and Board cache rows are not deleted by deselection.
 
-Normal `GET /workspaces/{workspaceId}/github/projects-v2` responses contain only
-selected ProjectV2 rows. The selection-management screen may pass `management=true`
-to retrieve the full discovered list. Full sync continues repository discovery but
-performs ProjectV2 fields, items, and Board hydration only for stored selections.
+`GET /workspaces/{workspaceId}/github/projects-v2` requires `repositoryId`. Normal
+responses contain only that repository's selected ProjectV2 rows; the selection-management
+screen may pass `management=true` to retrieve its full discovered list. Full sync is limited
+to the selected repository and performs ProjectV2 fields, items, and Board hydration only for
+its stored selections.
 
 ## Worker rollout
 

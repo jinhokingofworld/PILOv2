@@ -143,7 +143,8 @@ VPC
 │  └─ ECS Fargate tasks
 │     ├─ app-server
 │     ├─ realtime-server
-│     └─ ai-worker
+│     ├─ ai-worker
+│     └─ pr-review-ai-worker
 │
 ├─ Public Subnet B
 │  ├─ ALB
@@ -304,6 +305,8 @@ SQS는 NestJS App Server와 AI Worker/GitHub Worker 사이의 비동기 작업 �
 
 - `pilo-dev-ai-jobs`
 - `pilo-dev-ai-jobs-dlq`
+- `pilo-dev-pr-review-analysis`
+- `pilo-dev-pr-review-analysis-dlq`
 - `pilo-dev-github-webhooks`
 - `pilo-dev-github-webhooks-dlq`
 

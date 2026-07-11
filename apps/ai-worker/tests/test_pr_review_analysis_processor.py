@@ -1,4 +1,5 @@
 import json
+import logging
 
 from app.meeting_report_processor import InfrastructureError
 from app.pr_review_analysis_processor import (
@@ -205,7 +206,8 @@ def test_input_handoff_requires_matching_identity_and_unique_paths() -> None:
             raise AssertionError("mismatched handoff input must be rejected")
 
 
-def test_processor_forwards_normalized_analysis_to_next_handoff() -> None:
+def test_processor_forwards_normalized_analysis_to_next_handoff(caplog) -> None:
+    caplog.set_level(logging.INFO)
     handoff = FakeHandoffClient(input_value=parsed_input())
     analysis_client = FakeAnalysisClient()
     result = PrReviewAnalysisProcessor(handoff, analysis_client).process_payload(job_payload())
@@ -215,6 +217,8 @@ def test_processor_forwards_normalized_analysis_to_next_handoff() -> None:
     assert result.job_id == JOB_ID
     assert len(analysis_client.inputs) == 1
     assert handoff.submitted_results == [(handoff.requested_jobs[0], analysis_result())]
+    assert JOB_ID in caplog.text
+    assert SESSION_ID in caplog.text
 
 
 def test_processor_deletes_invalid_payload_and_terminal_input_or_output_errors() -> None:
