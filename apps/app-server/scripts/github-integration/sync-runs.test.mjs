@@ -995,6 +995,11 @@ function projectV2ItemApiItem(overrides = {}) {
         assert.match(text, /FROM github_repositories/i);
         assert.deepEqual(values, [workspaceId, installationId]);
         return [repositoryContextRow()];
+      },
+      (text, values) => {
+        assert.match(text, /FROM github_project_v2_selections/i);
+        assert.deepEqual(values, [workspaceId, installationId]);
+        return [{ project_v2_id: projectV2Id }];
       }
     ]
   });
@@ -1127,22 +1132,12 @@ function projectV2ItemApiItem(overrides = {}) {
     githubAppClient.calls.map((call) => call.method),
     [
       "listInstallationRepositories",
-      "listProjectV2s",
-      "listProjectV2Fields",
-      "listProjectV2Items"
+      "listProjectV2s"
     ]
   );
   assert.equal(githubAppClient.calls[0].input.userAccessToken, undefined);
   assert.equal(
     githubAppClient.calls[1].input.userAccessToken,
-    "decrypted-project-oauth-token"
-  );
-  assert.equal(
-    githubAppClient.calls[2].input.userAccessToken,
-    "decrypted-project-oauth-token"
-  );
-  assert.equal(
-    githubAppClient.calls[3].input.userAccessToken,
     "decrypted-project-oauth-token"
   );
   assert.doesNotMatch(
