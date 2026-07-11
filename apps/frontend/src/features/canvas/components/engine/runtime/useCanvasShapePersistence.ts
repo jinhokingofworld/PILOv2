@@ -2,7 +2,9 @@ import { useCallback } from "react";
 import { writeCanvasStorage } from "../../../utils/canvas-storage";
 import {
   areCanvasFreeformShapesEqual,
+  isCanvasShapeSyncConflictError,
   syncCanvasFreeformShapes,
+  type CanvasShapeSyncConflict,
   type CanvasShapeSyncQueue,
 } from "../../../utils/canvas-shape-sync";
 import type { PiloCanvasFreeformShape } from "../types";
@@ -28,6 +30,7 @@ type UseCanvasShapePersistenceOptions = {
   freeformShapesRef: RuntimeRef<PiloCanvasFreeformShape[]>;
   localShapeVersionRef: RuntimeRef<number>;
   onLocalShapeSyncIdle?: () => void;
+  onShapeSyncConflict?: (conflict: CanvasShapeSyncConflict) => void;
   pendingLocalShapeVersionsRef: RuntimeRef<Map<string, number>>;
   remoteShapeRevisionRef: RuntimeRef<Map<string, number>>;
   setCanvasHydrationVersion: (updater: (version: number) => number) => void;
@@ -49,6 +52,7 @@ export function useCanvasShapePersistence({
   freeformShapesRef,
   localShapeVersionRef,
   onLocalShapeSyncIdle,
+  onShapeSyncConflict,
   pendingLocalShapeVersionsRef,
   remoteShapeRevisionRef,
   setCanvasHydrationVersion,
@@ -215,6 +219,8 @@ export function useCanvasShapePersistence({
                 )
                 .catch((error: unknown) => {
                   clearPendingLocalShapeChanges(pendingLocalShapeVersions);
+                  if (isCanvasShapeSyncConflictError(error)) return;
+
                   console.error("Canvas API shape sync failed", error);
                 });
             }
@@ -226,6 +232,7 @@ export function useCanvasShapePersistence({
                 return remoteShapeRevisionRef.current.get(shapeId) ?? null;
               },
               ...syncInput,
+              onConflict: onShapeSyncConflict,
               workspaceId: board.workspaceId,
             })
               .then(() =>
@@ -233,6 +240,8 @@ export function useCanvasShapePersistence({
               )
               .catch((error: unknown) => {
                 clearPendingLocalShapeChanges(pendingLocalShapeVersions);
+                if (isCanvasShapeSyncConflictError(error)) return;
+
                 console.error("Canvas API shape sync failed", error);
               });
           }
@@ -254,6 +263,7 @@ export function useCanvasShapePersistence({
       deletedShapeIdsRef,
       freeformShapesRef,
       onLocalShapeSyncIdle,
+      onShapeSyncConflict,
       remoteShapeRevisionRef,
       setFreeformShapes,
       shapeSyncQueueRef,
