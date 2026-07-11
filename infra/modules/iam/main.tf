@@ -145,16 +145,16 @@ resource "aws_iam_role_policy" "github_sync_worker_task" {
   name = "${var.name_prefix}-github-sync-worker-task-policy"
   role = aws_iam_role.github_sync_worker_task.id
   policy = jsonencode({ Version = "2012-10-17", Statement = [{
-    Effect = "Allow"
-    Action = ["sqs:ReceiveMessage", "sqs:DeleteMessage", "sqs:GetQueueAttributes", "sqs:GetQueueUrl", "sqs:ChangeMessageVisibility"]
+    Effect   = "Allow"
+    Action   = ["sqs:ReceiveMessage", "sqs:DeleteMessage", "sqs:GetQueueAttributes", "sqs:GetQueueUrl", "sqs:ChangeMessageVisibility"]
     Resource = var.github_sync_worker_queue_arns
-  }, {
-    Effect = "Allow"
-    Action = ["sqs:SendMessage"]
+    }, {
+    Effect   = "Allow"
+    Action   = ["sqs:SendMessage"]
     Resource = var.github_webhooks_queue_arn
-  }, {
-    Effect = "Allow"
-    Action = ["secretsmanager:GetSecretValue"]
+    }, {
+    Effect   = "Allow"
+    Action   = ["secretsmanager:GetSecretValue"]
     Resource = var.secrets_manager_arns
   }] })
 }
