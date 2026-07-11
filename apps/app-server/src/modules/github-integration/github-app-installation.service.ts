@@ -19,6 +19,8 @@ import { GithubOAuthClient } from "./github-oauth.client";
 import { githubCallbackBadRequest } from "./github-oauth-callback-error";
 import { validateGithubCallbackReturnUrl } from "./github-return-url";
 import { GithubTokenEncryptionService } from "./github-token-encryption.service";
+import { GithubSyncJobEnqueueError } from "./github-sync-job.service";
+import { GithubSyncRunService } from "./github-sync-run.service";
 import type {
   GithubAppInstallationCallbackPayload,
   GithubAppInstallationDeletePayload,
@@ -60,7 +62,8 @@ export class GithubAppInstallationService {
     private readonly workspaceService: WorkspaceService,
     private readonly installationStateService: GithubAppInstallationStateService,
     private readonly callbackStateService: GithubCallbackStateService,
-    private readonly githubAppClient: GithubAppClient
+    private readonly githubAppClient: GithubAppClient,
+    private readonly syncRunService: GithubSyncRunService
   ) {}
 
   async startGithubAppInstallation(
@@ -237,11 +240,27 @@ export class GithubAppInstallationService {
       );
     }
 
+    let syncRunId: string | null = null;
+    try {
+      const syncRun = await this.syncRunService.startGithubSyncRun(
+        storedState.userId,
+        storedState.workspaceId,
+        { installationId: row.id, target: "source" }
+      );
+      syncRunId = syncRun.id;
+    } catch (error) {
+      if (error instanceof GithubSyncJobEnqueueError) {
+        syncRunId = error.syncRunId;
+      } else {
+        throw error;
+      }
+    }
+
     const { id, ...payload } = this.mapGithubInstallation(row);
     return {
       ...payload,
       installationId: id,
-      syncRunId: null,
+      syncRunId,
       returnUrl: this.appendInstallationId(storedState.returnUrl, id)
     };
   }

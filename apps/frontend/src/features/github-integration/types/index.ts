@@ -107,6 +107,7 @@ export type GithubProjectV2 = {
 
 export type ReplaceGithubProjectV2SelectionsInput = {
   installationId: string;
+  repositoryId: string;
   projectV2Ids: string[];
 };
 
@@ -121,6 +122,7 @@ export type GithubProjectV2SelectionResult = GithubProjectV2Selection & {
 export type GithubProjectV2Discovery = {
   connectionRequired: boolean;
   installationId: string;
+  repositoryId: string;
   projects: GithubProjectV2[];
 };
 
@@ -169,6 +171,7 @@ export type GithubPullRequest = {
 };
 
 export type GithubSyncTarget =
+  | "source"
   | "repositories"
   | "issues"
   | "pull_requests"
@@ -177,7 +180,7 @@ export type GithubSyncTarget =
   | "project_v2_items"
   | "full";
 
-export type GithubSyncStatus = "running" | "success" | "failed";
+export type GithubSyncStatus = "queued" | "running" | "success" | "failed";
 
 export type GithubSyncProgressStage =
   | "initializing"
@@ -226,6 +229,7 @@ export type ListGithubRepositoriesQuery = {
 };
 
 export type ListGithubProjectsV2Query = {
+  repositoryId: string;
   ownerLogin?: string;
   closed?: boolean;
   q?: string;

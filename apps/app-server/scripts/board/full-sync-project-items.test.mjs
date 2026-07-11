@@ -15,7 +15,7 @@ assert.match(
 );
 assert.match(
   syncExecutorFile,
-  /const selectedProjectV2Ids = await this\.listSelectedGithubProjectV2Ids\(\s*context\.workspaceId,\s*context\.installation\.id\s*\);[\s\S]*const projectV2Contexts = this\.getGithubProjectV2ContextsForFullSync\(\s*context,\s*discovery\.projectV2s,\s*selectedProjectV2Ids\s*\);/
+  /const selectedProjectV2Ids = await this\.listSelectedGithubProjectV2Ids\(\s*context\.workspaceId,\s*context\.installation\.id,\s*context\.repository\?\.id \?\? null\s*\);[\s\S]*const projectV2Contexts = this\.getGithubProjectV2ContextsForFullSync\(\s*context,\s*discovery\.projectV2s,\s*selectedProjectV2Ids\s*\);/
 );
 assert.match(
   syncExecutorFile,
@@ -43,7 +43,7 @@ assert.match(
 );
 assert.match(
   syncExecutorFile,
-  /private async listSelectedGithubProjectV2Ids\([\s\S]*FROM github_project_v2_selections[\s\S]*gp\.workspace_id = \$1[\s\S]*gps\.installation_id = \$2/
+  /private async listSelectedGithubProjectV2Ids\([\s\S]*repositoryId: string \| null[\s\S]*const repositoryFilter = repositoryId[\s\S]*gps\.repository_id = \$3[\s\S]*const values = repositoryId[\s\S]*\[workspaceId, installationId, repositoryId\][\s\S]*:\s*\[workspaceId, installationId\][\s\S]*FROM github_project_v2_selections[\s\S]*gp\.workspace_id = \$1[\s\S]*gps\.installation_id = \$2/
 );
 assert.match(
   syncExecutorFile,

@@ -9,6 +9,7 @@ const { GithubAppInstallationStateService } = require("../../dist/modules/github
 const { GithubAppClient } = require("../../dist/modules/github-integration/github-app.client.js");
 const { GithubOAuthClient } = require("../../dist/modules/github-integration/github-oauth.client.js");
 const { GithubTokenEncryptionService } = require("../../dist/modules/github-integration/github-token-encryption.service.js");
+const { GithubSyncJobEnqueueError } = require("../../dist/modules/github-integration/github-sync-job.service.js");
 
 class FakeDatabase {
   constructor({ oneRows = [], rows = [], handlers = {} } = {}) {
@@ -389,7 +390,7 @@ function createService({
     installedAt: "2026-07-04T12:30:00.000Z",
     suspendedAt: "2026-07-04T12:45:00.000Z",
     lastSyncedAt: null,
-    syncRunId: null,
+    syncRunId: "77777777-7777-4777-8777-777777777777",
     returnUrl: "https://pilo.test/workspaces/11111111-1111-4111-8111-111111111111/github?github_installation_id=33333333-3333-4333-8333-333333333333"
   });
 
@@ -415,7 +416,14 @@ function createService({
     "2026-07-04T12:30:00.000Z",
     "2026-07-04T12:45:00.000Z"
   ]);
-  assert.deepEqual(githubSyncRunService.calls, []);
+  assert.deepEqual(githubSyncRunService.calls, [{
+    currentUserId,
+    workspaceId,
+    input: {
+      installationId: "33333333-3333-4333-8333-333333333333",
+      target: "source"
+    }
+  }]);
 }
 
 {
@@ -570,7 +578,7 @@ function createService({
     }
   });
   const githubSyncRunService = new FakeGithubSyncRunService({
-    error: new Error("sync run could not be created")
+    error: new GithubSyncJobEnqueueError("88888888-8888-4888-8888-888888888888")
   });
   const service = createService({
     database,
@@ -607,7 +615,14 @@ function createService({
       "pilo_github_app_installation_state=installation-binding-token"
     )
   );
-  assert.deepEqual(githubSyncRunService.calls, []);
+  assert.deepEqual(githubSyncRunService.calls, [{
+    currentUserId,
+    workspaceId,
+    input: {
+      installationId: "33333333-3333-4333-8333-333333333333",
+      target: "source"
+    }
+  }]);
 }
 
 {

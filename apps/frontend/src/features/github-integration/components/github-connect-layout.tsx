@@ -212,6 +212,7 @@ export function GithubConnectLayout({
             onSyncTargetChange={onSyncTargetChange}
             installations={installations}
             selectedInstallationId={selectedInstallationId}
+            selectedRepositoryId={selectedRepositoryId}
             syncRuns={syncRuns}
             syncRunsTotal={syncRunsTotal}
             syncTarget={syncTarget}

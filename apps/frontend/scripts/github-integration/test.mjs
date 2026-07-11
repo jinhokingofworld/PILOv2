@@ -86,7 +86,7 @@ assert.match(githubApiClient, /\/me\/github\/project-oauth/);
 assert.match(githubApiClient, /deleteGithubAppInstallation/);
 assert.match(
   githubApiClient,
-  /workspaceGithubPath\(workspaceId, `\/installations\/\$\{encodeURIComponent\(installationId\)\}`\)/
+  /workspaceGithubPath\([\s\S]{0,120}`\/installations\/\$\{encodeURIComponent\(installationId\)\}`/
 );
 assert.match(githubApiClient, /startGithubAppInstallation/);
 assert.match(githubApiClient, /listGithubAppInstallations/);
@@ -138,7 +138,7 @@ assert.match(githubPanel, /handleStartGithubAppInstallation/);
 assert.match(githubPanel, /handleStartGithubSyncRun/);
 assert.match(
   githubPanel,
-  /\(syncTarget === "full" \|\| repositoryScopedSyncTargets\.has\(syncTarget\)\)/
+  /const requiresSelectedRepository = syncTarget !== "source"/
 );
 assert.match(
   githubPanel,

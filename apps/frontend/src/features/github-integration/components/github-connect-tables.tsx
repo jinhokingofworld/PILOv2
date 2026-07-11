@@ -6,18 +6,18 @@ import { Skeleton } from "@/components/ui/skeleton";
 import type {
   GithubPullRequest,
   GithubProjectV2,
-  GithubRepository
+  GithubRepository,
 } from "@/features/github-integration/types";
 import {
   formatGithubConnectDateTime,
   formatGithubConnectNumber,
-  formatGithubConnectShortDate
+  formatGithubConnectShortDate,
 } from "@/features/github-integration/utils/github-connect-format";
 
 import {
   GithubConnectEmptyState,
   GithubConnectPanel,
-  GithubConnectPill
+  GithubConnectPill,
 } from "./github-connect-primitives";
 
 type SourceTablesProps = {
@@ -63,7 +63,7 @@ export function GithubConnectSourceTables({
   onSelectRepository,
   onSelectProjectV2,
   onToggleProjectV2Selection,
-  onSaveProjectV2Selections
+  onSaveProjectV2Selections,
 }: SourceTablesProps) {
   return (
     <div className="grid gap-[15px]">
@@ -139,7 +139,11 @@ export function GithubConnectSourceTables({
             : "저장소를 선택하면 PR 목록을 조회합니다."
         }
       >
-        {isPullRequestsLoading ? (
+        {!selectedRepository ? (
+          <GithubConnectEmptyState>
+            저장소를 선택하면 PR 및 ProjectV2 동기화 범위를 관리할 수 있습니다.
+          </GithubConnectEmptyState>
+        ) : isPullRequestsLoading ? (
           <LoadingStack rows={3} />
         ) : pullRequests.length === 0 ? (
           <GithubConnectEmptyState>
@@ -199,7 +203,11 @@ export function GithubConnectSourceTables({
         title="Projects v2"
         subtitle="GitHub GraphQL API를 통해 동기화된 Project v2 목록입니다."
       >
-        {isLoading ? (
+        {!selectedRepository ? (
+          <GithubConnectEmptyState>
+            저장소를 선택하면 PR 및 ProjectV2 동기화 범위를 관리할 수 있습니다.
+          </GithubConnectEmptyState>
+        ) : isLoading ? (
           <LoadingTable rows={3} />
         ) : projects.length === 0 ? (
           <GithubConnectEmptyState>
@@ -244,7 +252,7 @@ export function GithubConnectSourceTables({
 function RepositoryRow({
   repository,
   isSelected,
-  onSelect
+  onSelect,
 }: {
   repository: GithubRepository;
   isSelected: boolean;
@@ -303,7 +311,7 @@ function ProjectRow({
   isSelected,
   isSyncSelected,
   onSelect,
-  onToggleSyncSelection
+  onToggleSyncSelection,
 }: {
   project: GithubProjectV2;
   isSelected: boolean;
