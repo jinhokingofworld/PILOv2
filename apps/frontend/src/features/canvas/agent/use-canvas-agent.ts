@@ -212,9 +212,11 @@ export function useCanvasAgent({
     }
   }, [canvasId, client, draft, workspaceId]);
 
+  const runStatus = run?.status ?? null;
+
   useEffect(() => {
     const runId = runIdRef.current;
-    if (!runId || !run || !ACTIVE_STATUSES.has(run.status)) return undefined;
+    if (!runId || !runStatus || !ACTIVE_STATUSES.has(runStatus)) return undefined;
     let cancelled = false;
     const poll = async () => {
       try {
@@ -233,7 +235,7 @@ export function useCanvasAgent({
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [canvasId, client, presentRun, run, workspaceId]);
+  }, [canvasId, client, presentRun, runStatus, workspaceId]);
 
   useEffect(() => () => clearProgressHideTimer(), [clearProgressHideTimer]);
 

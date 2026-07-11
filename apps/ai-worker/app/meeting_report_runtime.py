@@ -19,6 +19,12 @@ from app.agent_processor import (
     AgentRunProcessor,
     OpenAiAgentPlannerClient,
 )
+from app.canvas_agent.embedding_processor import CanvasEmbeddingProcessor
+from app.canvas_agent.embeddings import LocalSentenceTransformerCanvasEmbedder
+from app.canvas_agent.planning.planner import OpenAiCanvasAgentPlanner
+from app.canvas_agent.processor import CanvasAgentProcessor
+from app.canvas_agent.repository import PgCanvasAgentRepository
+from app.canvas_agent.routing.semantic_router import CanvasSemanticRouter
 from app.job_dispatcher import JobDispatcher
 from app.meeting_report_processor import (
     AudioObjectMetadata,
@@ -42,6 +48,7 @@ DEFAULT_WAIT_TIME_SECONDS = 20
 DEFAULT_VISIBILITY_TIMEOUT_SECONDS = 900
 DEFAULT_AGENT_EXECUTION_HANDOFF_TIMEOUT_SECONDS = 10
 DEFAULT_AGENT_STALE_EXECUTION_SWEEP_INTERVAL_SECONDS = 60
+DEFAULT_CANVAS_EMBEDDING_JOBS_PER_TICK = 10
 AGENT_RETRY_TERMINAL_RECEIVE_COUNT = 3
 AGENT_RETRY_EXHAUSTED_ERROR_CODE = "AGENT_PLANNER_RETRY_EXHAUSTED"
 AGENT_RETRY_EXHAUSTED_ERROR_MESSAGE = "요청을 분석하지 못했습니다. 잠시 후 다시 시도해주세요."
@@ -66,6 +73,7 @@ class RuntimeSettings:
     agent_stale_execution_sweep_interval_seconds: int
     wait_time_seconds: int
     visibility_timeout_seconds: int
+    canvas_embedding_jobs_per_tick: int
 
     @classmethod
     def from_env(cls) -> RuntimeSettings:
@@ -103,6 +111,10 @@ class RuntimeSettings:
             visibility_timeout_seconds=_positive_int_env(
                 "AI_WORKER_SQS_VISIBILITY_TIMEOUT_SECONDS",
                 DEFAULT_VISIBILITY_TIMEOUT_SECONDS,
+            ),
+            canvas_embedding_jobs_per_tick=_positive_int_env(
+                "CANVAS_EMBEDDING_JOBS_PER_TICK",
+                DEFAULT_CANVAS_EMBEDDING_JOBS_PER_TICK,
             ),
         )
 
@@ -620,6 +632,7 @@ class SqsAiJobWorker:
         settings: RuntimeSettings,
         dispatcher: JobDispatcher,
         sqs_client: Any,
+        canvas_embedding_processor: Any | None = None,
         stale_execution_recovery: Any | None = None,
         agent_retry_exhaustion_recovery: Any | None = None,
         monotonic_time: Callable[[], float] = time.monotonic,
@@ -627,6 +640,7 @@ class SqsAiJobWorker:
         self.settings = settings
         self.dispatcher = dispatcher
         self.sqs_client = sqs_client
+        self.canvas_embedding_processor = canvas_embedding_processor
         self.stale_execution_recovery = stale_execution_recovery
         self.agent_retry_exhaustion_recovery = agent_retry_exhaustion_recovery
         self.monotonic_time = monotonic_time
@@ -639,6 +653,7 @@ class SqsAiJobWorker:
 
     def run_once(self) -> int:
         self.recover_stale_executions_if_due()
+        self.process_canvas_embedding_jobs()
         response = self.sqs_client.receive_message(
             QueueUrl=self.settings.sqs_queue_url,
             MaxNumberOfMessages=1,
@@ -671,6 +686,28 @@ class SqsAiJobWorker:
                 )
 
         return len(messages)
+
+    def process_canvas_embedding_jobs(self) -> int:
+        if self.canvas_embedding_processor is None:
+            return 0
+
+        processed = 0
+        for _ in range(self.settings.canvas_embedding_jobs_per_tick):
+            try:
+                result = self.canvas_embedding_processor.process_next()
+            except InfrastructureError:
+                LOGGER.exception("Canvas embedding job processing failed")
+                break
+            except Exception:
+                LOGGER.exception("Unexpected Canvas embedding job failure")
+                break
+            if result is None:
+                break
+
+            processed += 1
+            LOGGER.info("canvas embedding job result reason=%s", result)
+
+        return processed
 
     def _terminalize_agent_retry(self, result: Any, message: dict[str, Any]) -> bool:
         if (
@@ -777,6 +814,10 @@ def create_worker(settings: RuntimeSettings | None = None) -> SqsAiJobWorker:
         resolved_settings.database_url,
         resolved_settings.database_ssl,
     )
+    canvas_agent_repository = PgCanvasAgentRepository(
+        resolved_settings.database_url,
+        resolved_settings.database_ssl,
+    )
     storage = S3RecordingStorage(s3_client, resolved_settings.recordings_bucket)
     ai_client = OpenAiMeetingReportClient(
         resolved_settings.openai_api_key,
@@ -787,6 +828,11 @@ def create_worker(settings: RuntimeSettings | None = None) -> SqsAiJobWorker:
         resolved_settings.openai_api_key,
         resolved_settings.openai_agent_planner_model,
     )
+    canvas_agent_planner = OpenAiCanvasAgentPlanner(
+        resolved_settings.openai_api_key,
+        resolved_settings.openai_agent_planner_model,
+    )
+    canvas_embedder = LocalSentenceTransformerCanvasEmbedder()
     meeting_report_processor = MeetingReportProcessor(
         meeting_report_repository,
         storage,
@@ -802,11 +848,22 @@ def create_worker(settings: RuntimeSettings | None = None) -> SqsAiJobWorker:
         agent_planner_client,
         agent_execution_handoff_client,
     )
-    dispatcher = JobDispatcher(meeting_report_processor, agent_run_processor)
+    canvas_agent_processor = CanvasAgentProcessor(
+        canvas_agent_repository,
+        canvas_agent_planner,
+        CanvasSemanticRouter(canvas_agent_repository, canvas_embedder),
+    )
+    canvas_embedding_processor = CanvasEmbeddingProcessor(canvas_agent_repository, canvas_embedder)
+    dispatcher = JobDispatcher(
+        meeting_report_processor,
+        agent_run_processor,
+        canvas_agent_processor,
+    )
     return SqsAiJobWorker(
         resolved_settings,
         dispatcher,
         sqs_client,
+        canvas_embedding_processor=canvas_embedding_processor,
         stale_execution_recovery=agent_execution_handoff_client,
         agent_retry_exhaustion_recovery=agent_run_repository,
     )
