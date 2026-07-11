@@ -265,6 +265,7 @@ module "ecs" {
         APP_ENV                        = var.environment
         AWS_REGION                     = var.aws_region
         DATABASE_SSL                   = "true"
+        API_PUBLIC_ORIGIN              = local.api_domain == "" ? "http://${module.alb.alb_dns_name}" : "https://${local.api_domain}"
         SQS_GITHUB_WEBHOOKS_QUEUE_URL  = module.sqs.github_webhooks_queue_url
         SQS_GITHUB_SYNC_JOBS_QUEUE_URL = module.sqs.github_sync_jobs_queue_url
       }
