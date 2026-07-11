@@ -47,38 +47,34 @@ jobs:
             ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
             ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
 
-      - name: Deploy ECS services
+      - name: Deploy ECS service
         env:
           ECS_CLUSTER_NAME: ${{ vars.ECS_CLUSTER_NAME }}
           ECS_AI_WORKER_SERVICE: ${{ vars.ECS_AI_WORKER_SERVICE }}
-          ECS_AI_AGENT_WORKER_SERVICE: ${{ vars.ECS_AI_AGENT_WORKER_SERVICE }}
         run: |
           test -n "$ECS_CLUSTER_NAME"
           test -n "$ECS_AI_WORKER_SERVICE"
-          test -n "$ECS_AI_AGENT_WORKER_SERVICE"
 
-          for service in "$ECS_AI_WORKER_SERVICE" "$ECS_AI_AGENT_WORKER_SERVICE"; do
-            task_definition=$(aws ecs describe-services \
-              --cluster "$ECS_CLUSTER_NAME" \
-              --services "$service" \
-              --query 'services[0].taskDefinition' \
-              --output text)
-            test -n "$task_definition"
-            test "$task_definition" != "None"
+          task_definition=$(aws ecs describe-services \
+            --cluster "$ECS_CLUSTER_NAME" \
+            --services "$ECS_AI_WORKER_SERVICE" \
+            --query 'services[0].taskDefinition' \
+            --output text)
+          test -n "$task_definition"
+          test "$task_definition" != "None"
 
-            queue_url=$(aws ecs describe-task-definition \
-              --task-definition "$task_definition" \
-              --query 'taskDefinition.containerDefinitions[0].environment[?name==`SQS_AI_JOBS_QUEUE_URL`].value | [0]' \
-              --output text)
-            test -n "$queue_url"
-            test "$queue_url" != "None"
+          queue_url=$(aws ecs describe-task-definition \
+            --task-definition "$task_definition" \
+            --query 'taskDefinition.containerDefinitions[0].environment[?name==`SQS_AI_JOBS_QUEUE_URL`].value | [0]' \
+            --output text)
+          test -n "$queue_url"
+          test "$queue_url" != "None"
 
-            aws ecs update-service \
-              --cluster "$ECS_CLUSTER_NAME" \
-              --service "$service" \
-              --force-new-deployment
-          done
+          aws ecs update-service \
+            --cluster "$ECS_CLUSTER_NAME" \
+            --service "$ECS_AI_WORKER_SERVICE" \
+            --force-new-deployment
 
           aws ecs wait services-stable \
             --cluster "$ECS_CLUSTER_NAME" \
-            --services "$ECS_AI_WORKER_SERVICE" "$ECS_AI_AGENT_WORKER_SERVICE"
+            --services "$ECS_AI_WORKER_SERVICE"
