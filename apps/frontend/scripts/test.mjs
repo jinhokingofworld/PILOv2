@@ -76,6 +76,10 @@ const appSidebar = await readFile(
   new URL("../src/components/app-sidebar.tsx", import.meta.url),
   "utf8"
 );
+const appSettingsDialog = await readFile(
+  new URL("../src/components/app-settings-dialog.tsx", import.meta.url),
+  "utf8"
+);
 const canvasRuntime = await readFile(
   new URL(
     "../src/features/canvas/components/engine/runtime/PiloCanvasRuntime.tsx",
@@ -455,6 +459,15 @@ assert.match(appSidebar, /src=\{displayUser\.avatarUrl \|\| undefined\}/);
 assert.match(appSidebar, /group-data-\[collapsible=icon\]:justify-center/);
 assert.match(appSidebar, /group-data-\[collapsible=icon\]:hidden/);
 assert.doesNotMatch(appSidebar, /\{item\.description\}/);
+assert.match(appSidebar, /AppSettingsDialog/);
+assert.match(appSidebar, /setIsSettingsDialogOpen\(true\)/);
+assert.match(appSettingsDialog, /DialogContent/);
+assert.match(appSettingsDialog, /SETTINGS_TABS/);
+assert.match(appSettingsDialog, /aria-label="설정 메뉴"/);
+assert.match(appSettingsDialog, /MOCK_CONNECTIONS/);
+assert.match(appSettingsDialog, /MOCK_WORKSPACES/);
+assert.match(appSettingsDialog, /MOCK_SESSIONS/);
+assert.match(appSettingsDialog, /현재 설정 데이터와 동작은 목업입니다/);
 assert.match(canvasClientFacade, /const DEFAULT_CANVAS_MODE = "api"/);
 assert.match(canvasClientFacade, /createCanvasApiClient\(options\)/);
 assert.match(canvasClientFacade, /createMockCanvasClient\(\)/);

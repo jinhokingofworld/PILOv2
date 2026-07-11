@@ -10,11 +10,13 @@ import {
   GalleryVerticalEnd,
   Loader2,
   LogOut,
+  Settings,
   Sparkles,
   UserRound
 } from "lucide-react";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { AppSettingsDialog } from "@/components/app-settings-dialog";
 import {
   Collapsible,
   CollapsibleContent,
@@ -113,6 +115,7 @@ export function AppSidebar({
   const [sessionActionStatus, setSessionActionStatus] = useState<
     "idle" | "logging-out" | "switching-workspace"
   >("idle");
+  const [isSettingsDialogOpen, setIsSettingsDialogOpen] = useState(false);
   const isSessionActionPending = sessionActionStatus !== "idle";
   const workspaceOptions =
     authSession?.workspaces.map((workspace) => ({
@@ -226,7 +229,8 @@ export function AppSidebar({
   };
 
   return (
-    <Sidebar collapsible="icon" variant="inset">
+    <>
+      <Sidebar collapsible="icon" variant="inset">
       <SidebarHeader>
         <SidebarMenu>
           <SidebarMenuItem>
@@ -387,7 +391,14 @@ export function AppSidebar({
         <SidebarMenu>
           <SidebarMenuItem>
             <DropdownMenu>
-              <DropdownMenuTrigger render={<SidebarMenuButton size="lg" />}>
+              <DropdownMenuTrigger
+                render={
+                  <SidebarMenuButton
+                    className="group-data-[collapsible=icon]:justify-center"
+                    size="lg"
+                  />
+                }
+              >
                 <Avatar size="sm">
                   <AvatarImage
                     alt={displayUser.name}
@@ -395,7 +406,7 @@ export function AppSidebar({
                   />
                   <AvatarFallback>{displayUser.initials}</AvatarFallback>
                 </Avatar>
-                <div className="grid flex-1 text-left text-sm leading-tight">
+                <div className="grid flex-1 text-left text-sm leading-tight group-data-[collapsible=icon]:hidden">
                   <span className="truncate font-medium">
                     {displayUser.name}
                   </span>
@@ -403,7 +414,7 @@ export function AppSidebar({
                     {displayUser.email}
                   </span>
                 </div>
-                <ChevronsUpDown className="ml-auto size-4" />
+                <ChevronsUpDown className="ml-auto size-4 group-data-[collapsible=icon]:hidden" />
               </DropdownMenuTrigger>
               <DropdownMenuContent
                 align="end"
@@ -440,6 +451,13 @@ export function AppSidebar({
                     <UserRound />
                     프로필
                   </DropdownMenuItem>
+                  <DropdownMenuItem
+                    className="gap-2"
+                    onClick={() => setIsSettingsDialogOpen(true)}
+                  >
+                    <Settings />
+                    설정
+                  </DropdownMenuItem>
                 </DropdownMenuGroup>
                 <DropdownMenuSeparator />
                 <DropdownMenuGroup>
@@ -465,7 +483,14 @@ export function AppSidebar({
       </SidebarFooter>
 
       <SidebarRail />
-    </Sidebar>
+      </Sidebar>
+      <AppSettingsDialog
+        email={displayUser.email}
+        name={displayUser.name}
+        onOpenChange={setIsSettingsDialogOpen}
+        open={isSettingsDialogOpen}
+      />
+    </>
   );
 }
 
