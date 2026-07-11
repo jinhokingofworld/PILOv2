@@ -1,4 +1,5 @@
 import type { SqlErdSessionLoadState } from "@/features/sql-erd/utils/session-state";
+import type { SqlErdParseState } from "@/features/sql-erd/utils/sql-edit-state";
 
 export type SqlErdGenerateErrorCode =
   | "EMPTY_SOURCE"
@@ -41,7 +42,65 @@ export function getSqlErdWorkspaceSaveErrorState(): SqlErdSessionLoadState {
   return {
     label: "Save error",
     message:
-      "Workspace session could not be saved. Check your connection and try Generate again.",
+      "Workspace session could not be autosaved. Check your connection; SQL changes will retry automatically.",
     tone: "error"
   };
+}
+
+export type SqlErdSourceAutosaveState = "idle" | "pending" | "saving";
+
+export function getSqlErdSourceStatus({
+  fallbackState,
+  isDraftDirty,
+  parse,
+  sourceAutosaveState
+}: {
+  fallbackState: SqlErdSessionLoadState;
+  isDraftDirty: boolean;
+  parse: SqlErdParseState;
+  sourceAutosaveState: SqlErdSourceAutosaveState;
+}): SqlErdSessionLoadState {
+  if (parse.status === "error") {
+    return {
+      label: "Parse error",
+      message: getSqlErdGenerateErrorMessage(
+        parse.error?.code ?? "PARSE_FAILED"
+      ),
+      tone: "error"
+    };
+  }
+
+  if (parse.status === "parsing") {
+    return {
+      label: "Parsing",
+      message: "Parsing SQL DDL",
+      tone: "neutral"
+    };
+  }
+
+  if (isDraftDirty) {
+    return {
+      label: "Waiting",
+      message: "Waiting to parse SQL changes",
+      tone: "neutral"
+    };
+  }
+
+  if (sourceAutosaveState === "pending") {
+    return {
+      label: "Unsaved",
+      message: "Parsed SQL changes will autosave",
+      tone: "neutral"
+    };
+  }
+
+  if (sourceAutosaveState === "saving") {
+    return {
+      label: "Saving",
+      message: "Autosaving parsed SQL changes",
+      tone: "neutral"
+    };
+  }
+
+  return fallbackState;
 }

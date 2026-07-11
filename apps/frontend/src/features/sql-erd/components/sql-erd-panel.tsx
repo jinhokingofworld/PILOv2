@@ -35,8 +35,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   PanelRightClose,
-  PanelRightOpen,
-  Play
+  PanelRightOpen
 } from "lucide-react";
 
 import {
@@ -86,19 +85,25 @@ import {
   type SqlErdRelationCardinalityEndpoints
 } from "@/features/sql-erd/utils/model";
 import { createSqlErdGenerateWorkspaceRequest } from "@/features/sql-erd/utils/generate-session";
-import { createSqlErdLayoutAutosaveRequest } from "@/features/sql-erd/utils/layout-autosave";
+import {
+  createSqlErdLayoutAutosaveRequest,
+  createSqlErdSourceAutosaveRequest
+} from "@/features/sql-erd/utils/layout-autosave";
 import {
   beginSqlErdParse,
   createSqlErdEditState,
+  isSqlErdDraftDirty,
   isSqlErdParseRequestCurrent,
   reduceSqlErdEditState,
+  shouldScheduleSqlErdAutoParse,
+  SQL_ERD_AUTO_PARSE_DEBOUNCE_MS,
   type SqlErdEditAction
 } from "@/features/sql-erd/utils/sql-edit-state";
 import {
-  getSqlErdGenerateErrorMessage,
-  getSqlErdSignInRequiredState,
+  getSqlErdSourceStatus,
   getSqlErdWorkspaceSaveErrorState
 } from "@/features/sql-erd/utils/status-copy";
+import type { SqlErdSourceAutosaveState } from "@/features/sql-erd/utils/status-copy";
 import {
   createSqlSourceEditorDialectReconfigureEffect,
   getSqlSourceEditorLanguageExtension,
@@ -216,9 +221,14 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
   const activeWorkspaceId = authSession?.activeWorkspaceId ?? null;
   const accessToken = authSession?.accessToken ?? null;
   const panelContainerRef = useRef<HTMLElement | null>(null);
-  const manualLayoutAutosaveRetryRef = useRef(false);
+  const manualAutosaveRetryRef = useRef(false);
   const sessionLoadRequestIdRef = useRef(0);
   const hasLoadedSessionRef = useRef(false);
+  const currentSessionIdRef = useRef(sessionId);
+  const autosaveInFlightRef = useRef(false);
+  const pendingSourceAutosaveSnapshotRef =
+    useRef<SqlErdViewSession | null>(null);
+  currentSessionIdRef.current = sessionId;
   const [isSourceOpen, setIsSourceOpen] = useState(false);
   const [isInspectorOpen, setIsInspectorOpen] = useState(false);
   const [panelContainerWidth, setPanelContainerWidth] = useState(0);
@@ -244,6 +254,33 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
     },
     []
   );
+  const setPendingSourceAutosaveSnapshot = useCallback(
+    (snapshot: SqlErdViewSession | null) => {
+      pendingSourceAutosaveSnapshotRef.current = snapshot;
+      setPendingSourceAutosaveSnapshotState(snapshot);
+      setSourceAutosaveState(snapshot ? "pending" : "idle");
+    },
+    []
+  );
+  const tryBeginAutosave = useCallback(() => {
+    if (autosaveInFlightRef.current) {
+      return false;
+    }
+
+    autosaveInFlightRef.current = true;
+    return true;
+  }, []);
+  const completeAutosave = useCallback(() => {
+    autosaveInFlightRef.current = false;
+    setAutosaveCompletionEpoch((currentEpoch) => currentEpoch + 1);
+  }, []);
+  const isCurrentAutosaveSession = useCallback((requestSessionId: string) => {
+    return (
+      currentSessionIdRef.current === requestSessionId &&
+      sqlErdEditStateRef.current.lastSuccessfulSnapshot.id ===
+        requestSessionId
+    );
+  }, []);
   const sqlErdViewSession =
     sqlErdEditState.lastSuccessfulSnapshot;
   const [sessionLoadState, setSessionLoadState] =
@@ -254,7 +291,12 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
     });
   const [selectedSqlErdObject, setSelectedSqlErdObject] =
     useState<SqlErdSelection>({ type: "none" });
-  const [isGenerating, setIsGenerating] = useState(false);
+  const [pendingSourceAutosaveSnapshot, setPendingSourceAutosaveSnapshotState] =
+    useState<SqlErdViewSession | null>(null);
+  const [sourceAutosaveState, setSourceAutosaveState] =
+    useState<SqlErdSourceAutosaveState>("idle");
+  const [sourceAutosaveRetryAttempt, setSourceAutosaveRetryAttempt] =
+    useState(0);
   const [pendingLayoutAutosaveJson, setPendingLayoutAutosaveJson] =
     useState<SqltoerdLayoutJsonV1 | null>(null);
   const [layoutAutosaveRetryAttempt, setLayoutAutosaveRetryAttempt] =
@@ -265,6 +307,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
     useState<SqltoerdResolvedDialect | null>(null);
   const [sqlSourceMap, setSqlSourceMap] =
     useState<SqltoerdSourceMap | null>(null);
+  const [autosaveCompletionEpoch, setAutosaveCompletionEpoch] = useState(0);
   const isSessionReady =
     sqlErdViewSession.id === sessionId &&
     sqlErdViewSession.revision !== null;
@@ -272,6 +315,12 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
     sqlErdEditState.draftDialect,
     lastResolvedDialect
   );
+  const sourceStatus = getSqlErdSourceStatus({
+    fallbackState: sessionLoadState,
+    isDraftDirty: isSqlErdDraftDirty(sqlErdEditState),
+    parse: sqlErdEditState.parse,
+    sourceAutosaveState
+  });
   const selectedRelationSourceRanges = useMemo(
     () =>
       getSelectedSqlErdRelationSourceRanges({
@@ -352,19 +401,23 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
     ]
   );
   const handleRetryLayoutAutosaveOnce = useCallback(() => {
-    if (!pendingLayoutAutosaveJson) {
+    if (!pendingLayoutAutosaveJson && !pendingSourceAutosaveSnapshot) {
       return;
     }
 
-    manualLayoutAutosaveRetryRef.current = true;
+    manualAutosaveRetryRef.current = true;
     setLayoutAutosaveBlockReason(null);
     setLayoutAutosaveRetryAttempt(0);
+    setSourceAutosaveRetryAttempt(0);
+    if (pendingSourceAutosaveSnapshot) {
+      setSourceAutosaveState("pending");
+    }
     setSessionLoadState({
       label: "Saving",
-      message: "Retrying table layout autosave",
+      message: "Retrying pending SQLtoERD changes",
       tone: "neutral"
     });
-  }, [pendingLayoutAutosaveJson]);
+  }, [pendingLayoutAutosaveJson, pendingSourceAutosaveSnapshot]);
   const handleReloadSession = useCallback(
     async () => {
       const requestId = sessionLoadRequestIdRef.current + 1;
@@ -443,6 +496,8 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
         });
         hasLoadedSessionRef.current = true;
 
+        setPendingSourceAutosaveSnapshot(null);
+        setSourceAutosaveRetryAttempt(0);
         setPendingLayoutAutosaveJson(null);
         setLayoutAutosaveRetryAttempt(0);
         setLayoutAutosaveBlockReason(null);
@@ -451,174 +506,260 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
         applyReloadFailure();
       }
     },
-    [accessToken, activeWorkspaceId, applySqlErdEditAction, sessionId]
+    [
+      accessToken,
+      activeWorkspaceId,
+      applySqlErdEditAction,
+      sessionId,
+      setPendingSourceAutosaveSnapshot
+    ]
   );
   const handleReloadPausedSession = useCallback(() => {
     void handleReloadSession();
   }, [handleReloadSession]);
-  const handleGenerate = useCallback(async () => {
-    if (isGenerating) {
+  useEffect(() => {
+    if (
+      !isSessionReady ||
+      !shouldScheduleSqlErdAutoParse(sqlErdEditState)
+    ) {
       return;
     }
 
-    if (!authSession) {
-      setSessionLoadState(getSqlErdSignInRequiredState());
-      return;
-    }
+    const timeoutId = window.setTimeout(() => {
+      const parseStart = beginSqlErdParse(sqlErdEditStateRef.current);
+      sqlErdEditStateRef.current = parseStart.state;
+      setSqlErdEditState(parseStart.state);
 
-    setIsGenerating(true);
-    setSessionLoadState({
-      label: "Parsing",
-      message: "Parsing SQL DDL",
-      tone: "neutral"
-    });
-
-    const parseStart = beginSqlErdParse(sqlErdEditStateRef.current);
-    sqlErdEditStateRef.current = parseStart.state;
-    setSqlErdEditState(parseStart.state);
-
-    const generateRequest =
-      createSqlErdGenerateWorkspaceRequest(parseStart.session);
-
-    if (!generateRequest.ok) {
-      applySqlErdEditAction({
-        error: generateRequest.error,
-        requestSequence: parseStart.requestSequence,
-        type: "parse_failed"
-      });
-      setSqlSourceMap(null);
-      setSessionLoadState({
-        label: "Parse error",
-        message: getSqlErdGenerateErrorMessage(generateRequest.error.code),
-        tone: "error"
-      });
-      setIsGenerating(false);
-      return;
-    }
-
-    if (generateRequest.kind !== "update") {
-      applySqlErdEditAction({
-        requestSequence: parseStart.requestSequence,
-        type: "parse_finished"
-      });
-      setSessionLoadState({
-        label: "Session unavailable",
-        message: "Return to the session list and open this session again.",
-        tone: "error"
-      });
-      setIsGenerating(false);
-      return;
-    }
-
-    setLastResolvedDialect(generateRequest.resolvedDialect);
-
-    const sqlErdApiClient = createSqlErdApiClient({
-      accessToken: authSession.accessToken
-    });
-
-    setSessionLoadState({
-      label: "Saving",
-      message: "Saving Workspace session",
-      tone: "neutral"
-    });
-
-    try {
-      const savedSession = await sqlErdApiClient.updateSession(
-        authSession.activeWorkspaceId,
-        generateRequest.sessionId,
-        generateRequest.payload
-      );
+      const generateRequest =
+        createSqlErdGenerateWorkspaceRequest(parseStart.session);
 
       if (
         !isSqlErdParseRequestCurrent(
           sqlErdEditStateRef.current,
           parseStart.requestSequence
-        )
+        ) ||
+        parseStart.session.id !== currentSessionIdRef.current
       ) {
         return;
       }
+
+      if (!generateRequest.ok) {
+        applySqlErdEditAction({
+          error: generateRequest.error,
+          requestSequence: parseStart.requestSequence,
+          type: "parse_failed"
+        });
+        return;
+      }
+
+      if (generateRequest.kind !== "update") {
+        applySqlErdEditAction({
+          requestSequence: parseStart.requestSequence,
+          type: "parse_finished"
+        });
+        return;
+      }
+
+      const parsedSnapshot: SqlErdViewSession = {
+        ...parseStart.session,
+        layoutJson: generateRequest.payload.layoutJson!,
+        modelJson: generateRequest.payload.modelJson!
+      };
 
       applySqlErdEditAction({
         requestLayoutJson: parseStart.session.layoutJson,
         requestSequence: parseStart.requestSequence,
-        snapshot: createWorkspaceSqlErdViewSession(savedSession),
+        snapshot: parsedSnapshot,
         type: "parse_succeeded"
       });
+      setLastResolvedDialect(generateRequest.resolvedDialect);
       setSqlSourceMap(generateRequest.sourceMap);
-      setPendingLayoutAutosaveJson((currentLayoutJson) =>
-        currentLayoutJson &&
-        !areSqltoerdLayoutsEqual(
-          currentLayoutJson,
-          parseStart.session.layoutJson
-        )
-          ? currentLayoutJson
-          : null
-      );
-      setLayoutAutosaveRetryAttempt(0);
-      setLayoutAutosaveBlockReason(null);
-      setSessionLoadState({
-        label: "Workspace",
-        message: `Workspace session revision ${savedSession.revision}`,
-        tone: "success"
-      });
+      setPendingSourceAutosaveSnapshot(parsedSnapshot);
+      setSourceAutosaveRetryAttempt(0);
       setSelectedSqlErdObject({ type: "none" });
-    } catch (error) {
+    }, SQL_ERD_AUTO_PARSE_DEBOUNCE_MS);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [
+    applySqlErdEditAction,
+    isSessionReady,
+    setPendingSourceAutosaveSnapshot,
+    sqlErdEditState
+  ]);
+
+  useEffect(() => {
+    if (
+      !pendingSourceAutosaveSnapshot ||
+      !pendingSourceAutosaveSnapshot.id ||
+      !accessToken ||
+      !activeWorkspaceId ||
+      layoutAutosaveBlockReason
+    ) {
+      return;
+    }
+
+    const requestParsedSnapshot = pendingSourceAutosaveSnapshot;
+    const requestSessionId = requestParsedSnapshot.id;
+    if (!requestSessionId) {
+      return;
+    }
+    const autosaveDelayMs = manualAutosaveRetryRef.current
+      ? 0
+      : getLayoutAutosaveDelayMs(sourceAutosaveRetryAttempt);
+    manualAutosaveRetryRef.current = false;
+
+    const timeoutId = window.setTimeout(async () => {
       if (
-        !isSqlErdParseRequestCurrent(
-          sqlErdEditStateRef.current,
-          parseStart.requestSequence
-        )
+        !isCurrentAutosaveSession(requestSessionId) ||
+        !tryBeginAutosave()
       ) {
         return;
       }
 
-      applySqlErdEditAction({
-        requestSequence: parseStart.requestSequence,
-        type: "parse_finished"
-      });
+      const sourceAutosaveRequest = createSqlErdSourceAutosaveRequest(
+        requestParsedSnapshot,
+        sqlErdEditStateRef.current.lastSuccessfulSnapshot
+      );
 
-      if (isSqlErdApiConflictError(error)) {
-        setLayoutAutosaveBlockReason("conflict");
-        setSessionLoadState({
-          label: "Save conflict",
-          message: getLayoutAutosavePausedBanner("conflict").message,
-          tone: "error"
-        });
-      } else {
-        setSessionLoadState(getSqlErdWorkspaceSaveErrorState());
+      if (!sourceAutosaveRequest.ok) {
+        completeAutosave();
+        return;
       }
-    } finally {
-      setIsGenerating(false);
-    }
-  }, [applySqlErdEditAction, authSession, isGenerating]);
+
+      const requestLayoutJson = sourceAutosaveRequest.payload.layoutJson!;
+      if (
+        pendingSourceAutosaveSnapshotRef.current === requestParsedSnapshot
+      ) {
+        setSourceAutosaveState("saving");
+      }
+
+      const sqlErdApiClient = createSqlErdApiClient({ accessToken });
+
+      try {
+        const savedSession = await sqlErdApiClient.updateSession(
+          activeWorkspaceId,
+          sourceAutosaveRequest.sessionId,
+          sourceAutosaveRequest.payload
+        );
+
+        if (!isCurrentAutosaveSession(requestSessionId)) {
+          return;
+        }
+
+        applySqlErdEditAction({
+          snapshot: createWorkspaceSqlErdViewSession(savedSession),
+          type: "source_autosave_saved"
+        });
+        if (
+          pendingSourceAutosaveSnapshotRef.current === requestParsedSnapshot
+        ) {
+          setPendingSourceAutosaveSnapshot(null);
+        } else {
+          setSourceAutosaveState("pending");
+        }
+        setPendingLayoutAutosaveJson((currentLayoutJson) =>
+          currentLayoutJson &&
+          areSqltoerdLayoutsEqual(currentLayoutJson, requestLayoutJson)
+            ? null
+            : currentLayoutJson
+        );
+        setSourceAutosaveRetryAttempt(0);
+        setLayoutAutosaveRetryAttempt(0);
+        setLayoutAutosaveBlockReason(null);
+        setSessionLoadState({
+          label: "Workspace",
+          message: `Workspace session revision ${savedSession.revision}`,
+          tone: "success"
+        });
+      } catch (error) {
+        if (!isCurrentAutosaveSession(requestSessionId)) {
+          return;
+        }
+
+        setSourceAutosaveState("pending");
+        const autosaveBlockReason = getLayoutAutosaveBlockReason(error);
+
+        if (autosaveBlockReason) {
+          setSourceAutosaveRetryAttempt(0);
+          setLayoutAutosaveBlockReason(autosaveBlockReason);
+          setSessionLoadState({
+            label:
+              autosaveBlockReason === "conflict"
+                ? "Save conflict"
+                : "Autosave paused",
+            message: getLayoutAutosavePausedBanner(autosaveBlockReason)
+              .message,
+            tone: "error"
+          });
+          return;
+        }
+
+        if (isSqlErdApiTransientAutosaveError(error)) {
+          setSourceAutosaveRetryAttempt(
+            (currentAttempt) => currentAttempt + 1
+          );
+          setSessionLoadState(getSqlErdWorkspaceSaveErrorState());
+        }
+      } finally {
+        completeAutosave();
+      }
+    }, autosaveDelayMs);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [
+    accessToken,
+    activeWorkspaceId,
+    applySqlErdEditAction,
+    autosaveCompletionEpoch,
+    completeAutosave,
+    isCurrentAutosaveSession,
+    layoutAutosaveBlockReason,
+    pendingSourceAutosaveSnapshot,
+    setPendingSourceAutosaveSnapshot,
+    sourceAutosaveRetryAttempt,
+    tryBeginAutosave
+  ]);
 
   useEffect(() => {
     if (
       !pendingLayoutAutosaveJson ||
       !accessToken ||
       !activeWorkspaceId ||
-      isGenerating ||
+      !sqlErdViewSession.id ||
       layoutAutosaveBlockReason
     ) {
       return;
     }
 
-    const layoutAutosaveRequest = createSqlErdLayoutAutosaveRequest(
-      sqlErdViewSession,
-      pendingLayoutAutosaveJson
-    );
-
-    if (!layoutAutosaveRequest.ok) {
-      return;
-    }
-
     const requestLayoutJson = pendingLayoutAutosaveJson;
-    const autosaveDelayMs = manualLayoutAutosaveRetryRef.current
+    const requestSessionId = sqlErdViewSession.id;
+    const autosaveDelayMs = manualAutosaveRetryRef.current
       ? 0
       : getLayoutAutosaveDelayMs(layoutAutosaveRetryAttempt);
-    manualLayoutAutosaveRetryRef.current = false;
+    manualAutosaveRetryRef.current = false;
 
     const timeoutId = window.setTimeout(async () => {
+      if (
+        !isCurrentAutosaveSession(requestSessionId) ||
+        !tryBeginAutosave()
+      ) {
+        return;
+      }
+
+      const layoutAutosaveRequest = createSqlErdLayoutAutosaveRequest(
+        sqlErdEditStateRef.current.lastSuccessfulSnapshot,
+        requestLayoutJson
+      );
+
+      if (!layoutAutosaveRequest.ok) {
+        completeAutosave();
+        return;
+      }
+
       const sqlErdApiClient = createSqlErdApiClient({
         accessToken
       });
@@ -635,6 +776,10 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           layoutAutosaveRequest.sessionId,
           layoutAutosaveRequest.payload
         );
+
+        if (!isCurrentAutosaveSession(requestSessionId)) {
+          return;
+        }
 
         applySqlErdEditAction({
           requestLayoutJson,
@@ -654,6 +799,10 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           tone: "success"
         });
       } catch (error) {
+        if (!isCurrentAutosaveSession(requestSessionId)) {
+          return;
+        }
+
         if (isSqlErdApiConflictError(error)) {
           setLayoutAutosaveRetryAttempt(0);
           setLayoutAutosaveBlockReason("conflict");
@@ -690,6 +839,8 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           message: "Table layout could not be autosaved. Retrying soon",
           tone: "error"
         });
+      } finally {
+        completeAutosave();
       }
     }, autosaveDelayMs);
 
@@ -700,12 +851,14 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
     accessToken,
     activeWorkspaceId,
     applySqlErdEditAction,
-    isGenerating,
+    autosaveCompletionEpoch,
+    completeAutosave,
+    isCurrentAutosaveSession,
     layoutAutosaveBlockReason,
     layoutAutosaveRetryAttempt,
     pendingLayoutAutosaveJson,
     sqlErdViewSession.id,
-    sqlErdViewSession.revision
+    tryBeginAutosave
   ]);
 
   useEffect(() => {
@@ -740,7 +893,12 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
 
   useEffect(() => {
     hasLoadedSessionRef.current = false;
-  }, [activeWorkspaceId, sessionId]);
+    setPendingSourceAutosaveSnapshot(null);
+    setSourceAutosaveRetryAttempt(0);
+    setPendingLayoutAutosaveJson(null);
+    setLayoutAutosaveRetryAttempt(0);
+    setLayoutAutosaveBlockReason(null);
+  }, [activeWorkspaceId, sessionId, setPendingSourceAutosaveSnapshot]);
 
   useEffect(() => {
     void handleReloadSession();
@@ -830,21 +988,12 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
         counts={sessionCounts}
         dialect={sqlErdEditState.draftDialect}
         isOpen={isSourceOpen}
-        isDialectSelectDisabled={
-          isGenerating || !isSessionReady
-        }
-        isGenerateDisabled={
-          isGenerating || !authSession || !isSessionReady
-        }
-        isGenerating={isGenerating}
+        isDialectSelectDisabled={!isSessionReady}
         onDialectChange={handleDialectChange}
-        onGenerate={handleGenerate}
         onSourceTextChange={handleSourceTextChange}
         onToggle={() => setIsSourceOpen((current) => !current)}
-        sessionLoadState={sessionLoadState}
-        isSourceTextReadOnly={
-          isGenerating || !isSessionReady
-        }
+        sessionLoadState={sourceStatus}
+        isSourceTextReadOnly={!isSessionReady}
         sourceText={sqlErdEditState.draftSourceText}
         resolvedDialect={sourceEditorDialect}
         relationSourceRanges={selectedRelationSourceRanges}
@@ -951,11 +1100,8 @@ type SourcePanelProps = PanelToggleProps & {
   counts: ReturnType<typeof getSqltoerdModelCounts>;
   dialect: SqlErdViewSession["dialect"];
   isDialectSelectDisabled: boolean;
-  isGenerateDisabled: boolean;
-  isGenerating: boolean;
   isSourceTextReadOnly: boolean;
   onDialectChange: (dialect: SqltoerdDialect) => void;
-  onGenerate: () => void;
   onSourceTextChange: (sourceText: string) => void;
   sessionLoadState: SqlErdSessionLoadState;
   sourceText: string;
@@ -969,11 +1115,8 @@ function SourcePanel({
   dialect,
   isOpen,
   isDialectSelectDisabled,
-  isGenerateDisabled,
-  isGenerating,
   isSourceTextReadOnly,
   onDialectChange,
-  onGenerate,
   onSourceTextChange,
   onToggle,
   sessionLoadState,
@@ -1032,25 +1175,17 @@ function SourcePanel({
       </div>
 
       <div className="flex flex-1 flex-col overflow-hidden">
-        <div className="flex items-center justify-between border-b px-4 py-2">
+        <div className="flex items-center border-b px-4 py-2">
           <span className="text-xs font-medium text-muted-foreground">
             Source text
           </span>
-          <button
-            className={cn(
-              "inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-xs font-medium transition-colors",
-              isGenerateDisabled
-                ? "cursor-not-allowed bg-primary/70 text-primary-foreground opacity-60"
-                : "bg-primary text-primary-foreground hover:bg-primary/90"
-            )}
-            disabled={isGenerateDisabled}
-            onClick={onGenerate}
-            type="button"
-          >
-            <Play className="size-3.5" />
-            {isGenerating ? "Generating" : "Generate"}
-          </button>
         </div>
+        <p
+          aria-live="polite"
+          className="border-b px-4 py-2 text-xs text-muted-foreground"
+        >
+          {sessionLoadState.message}
+        </p>
         <SqlSourceEditor
           dialect={resolvedDialect}
           onChange={onSourceTextChange}
