@@ -539,90 +539,6 @@ export class WorkspaceService {
     }
   }
 
-  async revokeInvitation(
-    currentUserId: string,
-    workspaceId: string,
-    invitationId: string
-  ): Promise<WorkspaceInvitationPayload> {
-    await this.assertWorkspaceOwnerAccess(currentUserId, workspaceId);
-    this.validateInvitationId(invitationId);
-
-    const invitation = await this.database.queryOne<WorkspaceInvitationRow>(
-      `
-        SELECT
-          id,
-          workspace_id,
-          email,
-          role,
-          token_hash,
-          status,
-          invited_by_user_id,
-          accepted_by_user_id,
-          revoked_by_user_id,
-          expires_at,
-          accepted_at,
-          revoked_at,
-          created_at,
-          updated_at
-        FROM workspace_invitations
-        WHERE workspace_id = $1
-          AND id = $2
-      `,
-      [workspaceId, invitationId]
-    );
-
-    if (!invitation) {
-      throw notFound("Workspace invitation not found");
-    }
-
-    if (this.shouldExpireInvitation(invitation)) {
-      const expiredInvitation = await this.markInvitationExpired(invitation.id);
-      throw badRequest(
-        expiredInvitation
-          ? "Workspace invitation has expired"
-          : "Workspace invitation is not pending"
-      );
-    }
-
-    if (invitation.status !== "pending") {
-      throw badRequest("Workspace invitation is not pending");
-    }
-
-    const revokedInvitation = await this.database.queryOne<WorkspaceInvitationRow>(
-      `
-        UPDATE workspace_invitations
-        SET
-          status = 'revoked',
-          revoked_by_user_id = $3,
-          revoked_at = now()
-        WHERE workspace_id = $1
-          AND id = $2
-        RETURNING
-          id,
-          workspace_id,
-          email,
-          role,
-          token_hash,
-          status,
-          invited_by_user_id,
-          accepted_by_user_id,
-          revoked_by_user_id,
-          expires_at,
-          accepted_at,
-          revoked_at,
-          created_at,
-          updated_at
-      `,
-      [workspaceId, invitationId, currentUserId]
-    );
-
-    if (!revokedInvitation) {
-      throw notFound("Workspace invitation not found");
-    }
-
-    return this.mapInvitation(revokedInvitation);
-  }
-
   async getInvitationByToken(
     invitationToken: string
   ): Promise<WorkspaceInvitationTokenPayload> {
@@ -739,6 +655,100 @@ export class WorkspaceService {
       }
 
       return this.acceptPendingInvitation(transaction, currentUserId, invitation);
+    });
+  }
+
+  async rejectCurrentUserInvitation(
+    currentUserId: string,
+    invitationId: string
+  ): Promise<WorkspaceInvitationPayload> {
+    this.validateInvitationId(invitationId);
+
+    return this.database.transaction(async (transaction) => {
+      const invitation = await transaction.queryOne<WorkspaceInvitationRow>(
+        `
+          SELECT
+            id,
+            workspace_id,
+            email,
+            role,
+            token_hash,
+            status,
+            invited_by_user_id,
+            accepted_by_user_id,
+            revoked_by_user_id,
+            expires_at,
+            accepted_at,
+            revoked_at,
+            created_at,
+            updated_at
+          FROM workspace_invitations
+          WHERE id = $1
+          FOR UPDATE
+        `,
+        [invitationId]
+      );
+
+      if (!invitation) {
+        throw notFound("Workspace invitation not found");
+      }
+
+      if (this.shouldExpireInvitation(invitation)) {
+        throw badRequest("Workspace invitation has expired");
+      }
+
+      if (invitation.status !== "pending") {
+        throw badRequest("Workspace invitation is not pending");
+      }
+
+      const user = await transaction.queryOne<UserEmailRow>(
+        `
+          SELECT id, email
+          FROM users
+          WHERE id = $1
+        `,
+        [currentUserId]
+      );
+      const userEmail = user?.email?.trim().toLowerCase();
+
+      if (!userEmail || userEmail !== invitation.email.trim().toLowerCase()) {
+        throw forbidden("Workspace invitation email does not match current user");
+      }
+
+      const revokedInvitation =
+        await transaction.queryOne<WorkspaceInvitationRow>(
+          `
+            UPDATE workspace_invitations
+            SET
+              status = 'revoked',
+              revoked_by_user_id = $2,
+              revoked_at = now()
+            WHERE id = $1
+              AND status = 'pending'
+            RETURNING
+              id,
+              workspace_id,
+              email,
+              role,
+              token_hash,
+              status,
+              invited_by_user_id,
+              accepted_by_user_id,
+              revoked_by_user_id,
+              expires_at,
+              accepted_at,
+              revoked_at,
+              created_at,
+              updated_at
+          `,
+          [invitationId, currentUserId]
+        );
+
+      if (!revokedInvitation) {
+        throw badRequest("Workspace invitation is not pending");
+      }
+
+      return this.mapInvitation(revokedInvitation);
     });
   }
 

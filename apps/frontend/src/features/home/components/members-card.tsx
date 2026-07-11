@@ -6,8 +6,7 @@ import {
   LogOut,
   Send,
   UserPlus,
-  Users,
-  XIcon
+  Users
 } from "lucide-react";
 
 import {
@@ -42,7 +41,6 @@ import {
   listWorkspaceInvitations,
   listWorkspaceMembers,
   removeWorkspaceMember,
-  revokeWorkspaceInvitation,
   type WorkspaceInvitation,
   type WorkspaceMember
 } from "@/features/auth/api/client";
@@ -72,9 +70,6 @@ export function MembersCard() {
   >([]);
   const [removeMemberError, setRemoveMemberError] = useState<string | null>(null);
   const [removingMemberUserId, setRemovingMemberUserId] = useState<string | null>(
-    null
-  );
-  const [revokingInvitationId, setRevokingInvitationId] = useState<string | null>(
     null
   );
   const [selectedMember, setSelectedMember] = useState<WorkspaceMember | null>(
@@ -252,41 +247,6 @@ export function MembersCard() {
       });
   };
 
-  const handleRevokeInvitation = (invitation: WorkspaceInvitation) => {
-    if (
-      !authSession ||
-      !activeWorkspace ||
-      !canManageWorkspace ||
-      revokingInvitationId
-    ) {
-      return;
-    }
-
-    setInviteError(null);
-    setRevokingInvitationId(invitation.id);
-
-    void revokeWorkspaceInvitation(
-      authSession.accessToken,
-      activeWorkspace.id,
-      invitation.id
-    )
-      .then(() => {
-        setPendingInvitations((currentInvitations) =>
-          currentInvitations.filter(
-            (currentInvitation) => currentInvitation.id !== invitation.id
-          )
-        );
-      })
-      .catch((error: unknown) => {
-        setInviteError(
-          error instanceof Error ? error.message : "초대 취소에 실패했습니다"
-        );
-      })
-      .finally(() => {
-        setRevokingInvitationId(null);
-      });
-  };
-
   const handleLeaveWorkspace = () => {
     if (!authSession || !activeWorkspace || !canLeaveWorkspace) {
       return;
@@ -437,16 +397,6 @@ export function MembersCard() {
                     대기중
                   </p>
                 </div>
-                <Button
-                  aria-label={`${invitation.email} 초대 취소`}
-                  className="text-[#B5BAC1] hover:bg-[#35373C] hover:text-[#F2F3F5]"
-                  disabled={revokingInvitationId === invitation.id}
-                  onClick={() => handleRevokeInvitation(invitation)}
-                  size="icon-sm"
-                  variant="ghost"
-                >
-                  <XIcon />
-                </Button>
               </div>
             ))}
         </div>

@@ -6,8 +6,8 @@ Workspace Membership API는 PILO의 Workspace 접근 권한, owner/member 역할
 초대 MVP 흐름을 담당한다.
 
 - Workspace member 목록 조회
-- owner의 member 초대 생성과 초대 취소
-- 초대 token 조회와 수락
+- owner의 member 초대 생성
+- 초대 token 조회, 대상 user의 수락과 거절
 - member 제거
 - Workspace 접근 기준을 `workspace_members` membership으로 판단
 
@@ -73,10 +73,10 @@ Workspace 생성, 삭제, 이름 수정, owner transfer, admin/viewer/read-only 
 | `status` | `TEXT NOT NULL DEFAULT 'pending'` | `pending`, `accepted`, `revoked`, `expired` 상태 관리 |
 | `invited_by_user_id` | `UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT` | 초대를 생성한 owner 기록 |
 | `accepted_by_user_id` | `UUID REFERENCES users(id) ON DELETE SET NULL` | 초대를 수락한 user 기록 |
-| `revoked_by_user_id` | `UUID REFERENCES users(id) ON DELETE SET NULL` | 초대를 취소한 owner 기록 |
+| `revoked_by_user_id` | `UUID REFERENCES users(id) ON DELETE SET NULL` | 초대를 거절한 대상 user 기록 |
 | `expires_at` | `TIMESTAMPTZ NOT NULL` | 초대 만료 기준 |
 | `accepted_at` | `TIMESTAMPTZ` | 초대 수락 시점 |
-| `revoked_at` | `TIMESTAMPTZ` | 초대 취소 시점 |
+| `revoked_at` | `TIMESTAMPTZ` | 대상 user가 초대를 거절한 시점 |
 | `created_at` | `TIMESTAMPTZ NOT NULL DEFAULT now()` | 초대 생성 시점 |
 | `updated_at` | `TIMESTAMPTZ NOT NULL DEFAULT now()` | 상태 변경 시점 |
 
@@ -100,9 +100,9 @@ Workspace 생성, 삭제, 이름 수정, owner transfer, admin/viewer/read-only 
 | `DELETE` | `/workspaces/{workspaceId}/members/{userId}` | owner | Workspace member 제거 |
 | `GET` | `/workspaces/{workspaceId}/invitations` | owner | Workspace 초대 목록 조회 |
 | `POST` | `/workspaces/{workspaceId}/invitations` | owner | member 초대 생성 |
-| `POST` | `/workspaces/{workspaceId}/invitations/{invitationId}/revoke` | owner | pending 초대 취소 |
 | `GET` | `/me/workspace-invitations` | bearer session | 현재 user email로 받은 pending 초대 목록 조회 |
 | `POST` | `/me/workspace-invitations/{invitationId}/accept` | bearer session | 현재 user가 받은 초대를 token 없이 수락 |
+| `POST` | `/me/workspace-invitations/{invitationId}/reject` | bearer session | 현재 user가 받은 pending 초대를 거절 |
 | `GET` | `/workspace-invitations/{invitationToken}` | bearer session | 초대 token 조회 |
 | `POST` | `/workspace-invitations/{invitationToken}/accept` | bearer session | 초대 수락 |
 
@@ -360,11 +360,13 @@ role은 `400 BAD_REQUEST`를 반환한다.
 - 같은 Workspace와 email에 pending 초대가 있으면 `400 BAD_REQUEST`를 반환한다.
 - email과 일치하는 user가 이미 같은 Workspace member이면 `400 BAD_REQUEST`를 반환한다.
 - 실제 email 발송은 MVP 범위가 아니다. Frontend는 `acceptUrl`을 copy/share할 수 있다.
+- 생성된 pending 초대는 owner가 취소할 수 없으며, 대상 user가 수락하거나 거절하거나
+  만료될 때까지 유지한다.
 
-## 초대 취소
+## 내 pending 초대 거절
 
 ```http
-POST /api/v1/workspaces/{workspaceId}/invitations/{invitationId}/revoke
+POST /api/v1/me/workspace-invitations/{invitationId}/reject
 ```
 
 응답:
@@ -380,7 +382,7 @@ POST /api/v1/workspaces/{workspaceId}/invitations/{invitationId}/revoke
     "status": "revoked",
     "invitedByUserId": "owner_user_uuid",
     "acceptedByUserId": null,
-    "revokedByUserId": "owner_user_uuid",
+    "revokedByUserId": "member_user_uuid",
     "expiresAt": "2026-07-14T00:00:00.000Z",
     "acceptedAt": null,
     "revokedAt": "2026-07-07T01:00:00.000Z",
@@ -392,9 +394,12 @@ POST /api/v1/workspaces/{workspaceId}/invitations/{invitationId}/revoke
 
 서버 규칙:
 
-- 현재 사용자가 해당 Workspace의 owner가 아니면 `403 FORBIDDEN`을 반환한다.
-- pending 초대만 취소할 수 있다.
-- 이미 accepted, revoked, expired 상태인 초대는 `400 BAD_REQUEST`를 반환한다.
+- bearer session이 없으면 `401 UNAUTHORIZED`를 반환한다.
+- invitation id와 일치하는 초대가 없으면 `404 NOT_FOUND`를 반환한다.
+- pending 초대만 거절할 수 있다.
+- 현재 user의 email이 초대 email과 일치하지 않으면 `403 FORBIDDEN`을 반환한다.
+- 거절 시 `status = 'revoked'`, `revoked_by_user_id = current user`,
+  `revoked_at = now()`를 기록한다.
 
 ## 내 pending 초대 목록 조회
 
@@ -541,7 +546,6 @@ owner-only 기능:
 
 - Workspace member 초대 생성
 - Workspace member 제거
-- Workspace 초대 취소
 - GitHub App installation 연결/해제
 - GitHub 수동 sync 같은 Workspace 관리 작업
 
@@ -576,7 +580,7 @@ OAuth login callback은 user row를 생성하거나 갱신한 뒤 WorkspaceServi
 | 지원하지 않는 role | `400` | `BAD_REQUEST` |
 | 중복 pending 초대 | `400` | `BAD_REQUEST` |
 | 이미 member인 email 초대 | `400` | `BAD_REQUEST` |
-| revoked/expired/accepted 초대 수락 | `400` | `BAD_REQUEST` |
+| revoked/expired/accepted 초대 수락 또는 거절 | `400` | `BAD_REQUEST` |
 | 초대 email과 현재 user email 불일치 | `403` | `FORBIDDEN` |
 
 ## MVP 제외
