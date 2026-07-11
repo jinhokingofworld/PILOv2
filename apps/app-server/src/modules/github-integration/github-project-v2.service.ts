@@ -173,7 +173,7 @@ export class GithubProjectV2Service {
       this.readOptionalBoolean(query.closed, "closed") ?? false;
     const management =
       this.readOptionalBoolean(query.management, "management") ?? false;
-    const repositoryId = this.readOptionalUuid(query.repositoryId, "repositoryId");
+    const repositoryId = this.readUuid(query.repositoryId, "repositoryId");
     const { whereSql, values } = this.buildGithubProjectV2Filters(
       workspaceId,
       ownerLogin,
@@ -188,7 +188,7 @@ export class GithubProjectV2Service {
     );
     const rows = await this.database.query<GithubProjectV2Row>(
       `
-        ${this.githubProjectV2SelectSql(repositoryId ? values.length : null)}
+        ${this.githubProjectV2SelectSql(values.length)}
         WHERE ${whereSql}
         ORDER BY owner_login ASC, project_number ASC, id ASC
         LIMIT $${values.length + 1} OFFSET $${values.length + 2}
@@ -685,21 +685,20 @@ export class GithubProjectV2Service {
       );
     }
 
-    if (repositoryId) {
-      values.push(repositoryId);
-      filters.push(`EXISTS (
-        SELECT 1
-        FROM github_project_v2_repositories gpr
-        WHERE gpr.project_v2_id = id
-          AND gpr.repository_id = $${values.length}
-      )`);
-    }
+    values.push(repositoryId);
+    filters.push(`EXISTS (
+      SELECT 1
+      FROM github_project_v2_repositories gpr
+      WHERE gpr.project_v2_id = id
+        AND gpr.repository_id = $${values.length}
+    )`);
 
     if (!management) {
       filters.push(`EXISTS (
         SELECT 1 FROM github_project_v2_selections gps
-        WHERE gps.installation_id = installation_id
-          AND gps.project_v2_id = id
+          WHERE gps.installation_id = installation_id
+            AND gps.project_v2_id = id
+            AND gps.repository_id = $${values.length}
       )`);
     }
 

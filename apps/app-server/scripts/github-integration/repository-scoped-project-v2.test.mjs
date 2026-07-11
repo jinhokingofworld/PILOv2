@@ -70,6 +70,18 @@ function selectionDatabase({ repository = { id: repositoryId }, links = ["555555
 }
 
 {
+  const service = createService({
+    queryOne: async () => ({ total: 0 }),
+    query: async () => []
+  });
+  await assert.rejects(
+    () => service.listGithubProjectsV2(currentUserId, workspaceId, {}),
+    (error) => error.getResponse().error.message === "repositoryId is required",
+    "ProjectV2 listing must reject an unscoped request"
+  );
+}
+
+{
   const database = selectionDatabase({ links: [] });
   const service = createService(database);
   await assert.rejects(
@@ -136,6 +148,16 @@ function selectionDatabase({ repository = { id: repositoryId }, links = ["555555
   assert.match(source, /repositoryId,\s*target: "full"/);
   assert.doesNotMatch(source, /DELETE FROM github_projects_v2|DELETE FROM github_project_v2_fields|DELETE FROM github_project_v2_items|DELETE FROM github_issues|DELETE FROM github_pull_requests|DELETE FROM boards/i);
   assert.match(executor, /gps\.repository_id = \$3/);
+  assert.match(
+    source,
+    /if \(!management\) \{[\s\S]{0,360}gps\.repository_id = \$\$\{values\.length\}/,
+    "A normal repository-scoped list must only expose selections from that repository"
+  );
+  assert.match(
+    source,
+    /const repositoryId = this\.readUuid\(query\.repositoryId, "repositoryId"\)/,
+    "ProjectV2 listing must require repositoryId"
+  );
 }
 
 console.log("repository-scoped ProjectV2 tests passed");

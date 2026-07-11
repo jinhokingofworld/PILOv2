@@ -299,7 +299,7 @@ for (const input of [
   });
   const { service } = createService(database);
 
-  const result = await service.listGithubProjectsV2(currentUserId, workspaceId, {});
+  const result = await service.listGithubProjectsV2(currentUserId, workspaceId, { repositoryId });
 
   assert.equal(result.data[0].selected, true);
   assert.match(database.queries[1].text, /EXISTS\s*\(\s*SELECT 1\s*FROM github_project_v2_selections/i);

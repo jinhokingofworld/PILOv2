@@ -34,7 +34,7 @@ export interface ListGithubRepositoriesQuery {
 }
 
 export interface ListGithubProjectsV2Query {
-  repositoryId?: unknown;
+  repositoryId: unknown;
   ownerLogin?: unknown;
   closed?: unknown;
   q?: unknown;
