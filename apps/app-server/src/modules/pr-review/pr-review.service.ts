@@ -70,6 +70,18 @@ interface PrReviewSessionRow extends QueryResultRow {
   updated_at: Date | string;
 }
 
+interface PrReviewAnalysisJobInputRow extends QueryResultRow {
+  id: string;
+  review_session_id: string;
+  workspace_id: string;
+  head_sha: string;
+  status: string;
+  pull_request_id: string;
+  created_by_user_id: string | null;
+  session_head_sha: string;
+  session_status: PrReviewSessionStatus;
+}
+
 interface PrReviewSummaryRow extends PrReviewSessionRow {
   pr_number: number | string;
   title: string;
@@ -318,6 +330,40 @@ export interface PrReviewAnalysisErrorPayload {
 export interface PrReviewSessionCreateResult {
   session: PrReviewSessionPayload;
   created: boolean;
+}
+
+export interface PrReviewAnalysisInputPayload {
+  jobId: string;
+  reviewSessionId: string;
+  workspaceId: string;
+  headSha: string;
+  pullRequest: {
+    prNumber: number;
+    title: string;
+    body: string | null;
+    state: "open" | "closed";
+    draft: boolean;
+    mergeable: boolean | null;
+    authorLogin: string | null;
+    headBranch: string | null;
+    baseBranch: string | null;
+    baseSha: string | null;
+    changedFilesCount: number;
+    additions: number;
+    deletions: number;
+    commitsCount: number;
+  };
+  files: Array<{
+    filePath: string;
+    previousFilePath: string | null;
+    fileName: string;
+    fileStatus: PrReviewFileStatus;
+    additions: number;
+    deletions: number;
+    isBinary: boolean;
+    isLargeDiff: boolean;
+    patch: string | null;
+  }>;
 }
 
 export interface PrReviewSummaryPayload {
@@ -804,6 +850,106 @@ export class PrReviewService {
         created: false
       };
     }
+  }
+
+  async getAnalysisJobInput(jobId: string): Promise<PrReviewAnalysisInputPayload> {
+    if (!UUID_PATTERN.test(jobId)) {
+      throw notFound("PR Review analysis job not found");
+    }
+
+    const job = await this.database.queryOne<PrReviewAnalysisJobInputRow>(
+      `
+        SELECT
+          job.id,
+          job.review_session_id,
+          job.workspace_id,
+          job.head_sha,
+          job.status,
+          review_session.pull_request_id,
+          review_session.created_by_user_id,
+          review_session.head_sha AS session_head_sha,
+          review_session.status AS session_status
+        FROM pr_review_analysis_jobs AS job
+        JOIN pr_review_sessions AS review_session
+          ON review_session.id = job.review_session_id
+        JOIN github_pull_requests AS pull_request
+          ON pull_request.id = review_session.pull_request_id
+         AND pull_request.workspace_id = job.workspace_id
+        WHERE job.id = $1
+      `,
+      [jobId]
+    );
+
+    if (!job) {
+      throw notFound("PR Review analysis job not found");
+    }
+
+    if (job.session_status !== "analyzing") {
+      throw conflictError("PR Review analysis session is no longer active");
+    }
+
+    if (!this.isAnalysisJobInputAvailable(job.status)) {
+      throw conflictError("PR Review analysis job is not ready for input");
+    }
+
+    if (job.head_sha !== job.session_head_sha) {
+      throw conflictError("PR Review analysis job head SHA is stale");
+    }
+
+    if (!job.created_by_user_id) {
+      throw badRequest("PR Review analysis job has no requesting user");
+    }
+
+    const [detail, files] = await Promise.all([
+      this.githubDependency.getPullRequestDetail(
+        job.created_by_user_id,
+        job.workspace_id,
+        job.pull_request_id
+      ),
+      this.githubDependency.getPullRequestChangedFiles(
+        job.created_by_user_id,
+        job.workspace_id,
+        job.pull_request_id
+      )
+    ]);
+
+    if (detail.headSha !== job.head_sha) {
+      throw conflictError("PR Review analysis job head SHA is stale");
+    }
+
+    return {
+      jobId: job.id,
+      reviewSessionId: job.review_session_id,
+      workspaceId: job.workspace_id,
+      headSha: job.head_sha,
+      pullRequest: {
+        prNumber: detail.prNumber,
+        title: detail.title,
+        body: detail.body,
+        state: detail.state,
+        draft: detail.draft,
+        mergeable: detail.mergeable,
+        authorLogin: detail.authorLogin,
+        headBranch: detail.headBranch,
+        baseBranch: detail.baseBranch,
+        baseSha: detail.baseSha,
+        changedFilesCount: detail.changedFilesCount,
+        additions: detail.additions,
+        deletions: detail.deletions,
+        commitsCount: detail.commitsCount
+      },
+      files: files.map((file) => ({
+        filePath: file.filePath,
+        previousFilePath: file.previousFilePath,
+        fileName: file.fileName,
+        fileStatus: file.fileStatus,
+        additions: file.additions,
+        deletions: file.deletions,
+        isBinary: file.isBinary,
+        isLargeDiff: file.isLargeDiff,
+        patch: file.patch
+      }))
+    };
   }
 
   async getReviewSession(
@@ -2076,6 +2222,10 @@ export class PrReviewService {
     }
 
     return (error as { code?: unknown }).code === "23505";
+  }
+
+  private isAnalysisJobInputAvailable(status: string): boolean {
+    return status === "publishing" || status === "queued" || status === "processing";
   }
 
   private async findReviewSession(

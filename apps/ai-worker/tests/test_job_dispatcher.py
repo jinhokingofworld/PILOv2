@@ -3,6 +3,7 @@ import json
 from app.agent_processor import AgentProcessResult
 from app.job_dispatcher import JobDispatcher
 from app.meeting_report_processor import InfrastructureError, ProcessResult
+from app.pr_review_analysis_processor import PrReviewAnalysisProcessResult
 
 RUN_ID = "33333333-3333-3333-3333-333333333333"
 REPORT_ID = "77777777-7777-7777-7777-777777777777"
@@ -44,6 +45,19 @@ class FakeAgentRunProcessor:
         if self.error:
             raise self.error
         return self.result
+
+
+class FakePrReviewAnalysisProcessor:
+    def __init__(self) -> None:
+        self.payloads: list[dict[str, object]] = []
+
+    def process_payload(self, payload: dict[str, object]) -> PrReviewAnalysisProcessResult:
+        self.payloads.append(payload)
+        return PrReviewAnalysisProcessResult(
+            delete_message=True,
+            reason="pr_review_analysis_completed",
+            job_id="88888888-8888-8888-8888-888888888888",
+        )
 
 
 def create_dispatcher(
@@ -151,3 +165,28 @@ def test_dispatcher_leaves_retryable_processor_failure_for_sqs_retry() -> None:
     assert result.reason == "infrastructure_failure"
     assert result.job_type == "meeting_report"
     assert result.resource_id is None
+
+
+def test_dispatcher_routes_pr_review_analysis_jobs() -> None:
+    pr_review_processor = FakePrReviewAnalysisProcessor()
+    dispatcher = JobDispatcher(pr_review_analysis_processor=pr_review_processor)
+
+    result = dispatcher.process_message(
+        json.dumps(
+            {
+                "jobType": "pr_review_analysis_requested",
+                "schemaVersion": "pr-review-analysis:v1",
+            }
+        )
+    )
+
+    assert result.delete_message is True
+    assert result.reason == "pr_review_analysis_completed"
+    assert result.job_type == "pr_review_analysis_requested"
+    assert result.resource_id == "88888888-8888-8888-8888-888888888888"
+    assert pr_review_processor.payloads == [
+        {
+            "jobType": "pr_review_analysis_requested",
+            "schemaVersion": "pr-review-analysis:v1",
+        }
+    ]

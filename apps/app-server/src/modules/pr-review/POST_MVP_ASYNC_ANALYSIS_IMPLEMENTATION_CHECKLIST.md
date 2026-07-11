@@ -40,7 +40,7 @@
 | --- | --- | --- | --- | --- |
 | 2-A | Scope, API, 상태 전이와 Worker 경계 확정 | #652 | #658 | 완료 |
 | 2-B | `analyzing` 세션 생성과 durable Job enqueue | #659 | #664 | 완료 |
-| 2-C | AI Worker PR 분석 processor | TBD | TBD | 대기 |
+| 2-C | AI Worker PR 분석 processor | #666 | #668 | 완료 |
 | 2-D | 분석 결과 원자 저장과 stale/idempotency guard | TBD | TBD | 대기 |
 | 2-E | Review room 분석 진행/실패/retry UX | TBD | TBD | 대기 |
 | 2-F | 운영 복구, 관측성, 배포 검증 | TBD | TBD | 대기 |
@@ -167,25 +167,25 @@
 
 작업 체크리스트:
 
-- [ ] `pr_review_analysis_requested` Job type과 payload parser를 추가한다.
-- [ ] dispatcher가 PR Review processor로 Job을 전달하도록 확장한다.
-- [ ] 존재하지 않거나 이미 terminal 상태인 session의 처리 규칙을 구현한다.
-- [ ] 분석 입력을 확정된 App Server/DB 경계에서 조회한다.
-- [ ] Job의 `headSha`와 분석 입력 snapshot의 head SHA가 일치하는지 확인한다.
-- [ ] 현재 TypeScript 분석의 prompt budget, structured output schema, normalization 규칙을
+- [x] `pr_review_analysis_requested` Job type과 payload parser를 추가한다.
+- [x] dispatcher가 PR Review processor로 Job을 전달하도록 확장한다.
+- [x] 존재하지 않거나 이미 terminal 상태인 session의 처리 규칙을 구현한다.
+- [x] 분석 입력을 확정된 App Server/DB 경계에서 조회한다.
+- [x] Job의 `headSha`와 분석 입력 snapshot의 head SHA가 일치하는지 확인한다.
+- [x] 현재 TypeScript 분석의 prompt budget, structured output schema, normalization 규칙을
   Worker 구현으로 옮기거나 공유 가능한 계약으로 고정한다.
-- [ ] 파일 누락, 중복 file path, 잘못된 risk level과 빈 핵심 필드를 검증한다.
-- [ ] timeout, rate limit, provider 5xx를 retryable infrastructure failure로 분류한다.
-- [ ] 잘못된 payload/schema와 존재하지 않는 resource를 non-retryable failure로 분류한다.
-- [ ] OpenAI model/env를 AI Worker 배포 환경에 명시한다.
-- [ ] 로그에는 job ID, session ID, reason code만 남기고 PR 코드와 provider 원문은 남기지 않는다.
+- [x] 파일 누락, 중복 file path, 잘못된 risk level과 빈 핵심 필드를 검증한다.
+- [x] timeout, rate limit, provider 5xx를 retryable infrastructure failure로 분류한다.
+- [x] 잘못된 payload/schema와 존재하지 않는 resource를 non-retryable failure로 분류한다.
+- [x] OpenAI model/env를 AI Worker 배포 환경에 명시한다.
+- [x] 로그에는 job ID, session ID, reason code만 남기고 PR 코드와 provider 원문은 남기지 않는다.
 
 완료 기준:
 
-- [ ] 정상 Job은 검증된 분석 결과를 다음 저장 단계로 전달한다.
-- [ ] retryable failure는 SQS 재수신 대상으로 남는다.
-- [ ] non-retryable failure는 무한 재시도 없이 terminal 처리된다.
-- [ ] 동일 Job을 여러 번 받아도 새 분석 결과를 중복 확정하지 않는다.
+- [x] 정상 Job은 검증된 분석 결과를 다음 저장 단계로 전달한다.
+- [x] retryable failure는 SQS 재수신 대상으로 남는다.
+- [x] non-retryable failure는 무한 재시도 없이 terminal 처리된다.
+- [x] 동일 Job을 여러 번 받아도 새 분석 결과를 중복 확정하지 않는다.
 
 ## 2-D Atomic Result Persistence and Guards
 
