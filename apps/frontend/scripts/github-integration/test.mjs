@@ -138,7 +138,7 @@ assert.match(githubPanel, /handleStartGithubAppInstallation/);
 assert.match(githubPanel, /handleStartGithubSyncRun/);
 assert.match(
   githubPanel,
-  /\(syncTarget === "full" \|\| repositoryScopedSyncTargets\.has\(syncTarget\)\)/
+  /const requiresSelectedRepository = syncTarget !== "source"/
 );
 assert.match(
   githubPanel,
