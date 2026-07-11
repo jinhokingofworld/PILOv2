@@ -29,6 +29,7 @@ type UseCanvasShapePersistenceOptions = {
   localShapeVersionRef: RuntimeRef<number>;
   onLocalShapeSyncIdle?: () => void;
   pendingLocalShapeVersionsRef: RuntimeRef<Map<string, number>>;
+  remoteShapeRevisionRef: RuntimeRef<Map<string, number>>;
   setCanvasHydrationVersion: (updater: (version: number) => number) => void;
   setFreeformShapes: (
     updater:
@@ -49,6 +50,7 @@ export function useCanvasShapePersistence({
   localShapeVersionRef,
   onLocalShapeSyncIdle,
   pendingLocalShapeVersionsRef,
+  remoteShapeRevisionRef,
   setCanvasHydrationVersion,
   setFreeformShapes,
   shapeDetailCacheRef,
@@ -220,6 +222,9 @@ export function useCanvasShapePersistence({
             void syncCanvasFreeformShapes({
               boardId: board.id,
               canvasClient,
+              getBaseRevision(shapeId) {
+                return remoteShapeRevisionRef.current.get(shapeId) ?? null;
+              },
               ...syncInput,
               workspaceId: board.workspaceId,
             })
@@ -249,6 +254,7 @@ export function useCanvasShapePersistence({
       deletedShapeIdsRef,
       freeformShapesRef,
       onLocalShapeSyncIdle,
+      remoteShapeRevisionRef,
       setFreeformShapes,
       shapeSyncQueueRef,
       storageMode,

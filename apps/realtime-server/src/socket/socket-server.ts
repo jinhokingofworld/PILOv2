@@ -12,6 +12,7 @@ import { createCanvasPresenceService } from "../canvas/canvas-presence.service";
 import { createCanvasRoomService } from "../canvas/canvas-room.service";
 import type {
   CanvasJoinPayload,
+  CanvasPresenceEditingMode,
   CanvasPresencePoint,
   CanvasPresenceUpdatePayload,
   CanvasRoomRef,
@@ -97,6 +98,21 @@ function isCanvasPresenceViewport(
   );
 }
 
+function isCanvasPresenceEditingMode(
+  value: unknown,
+): value is CanvasPresenceEditingMode {
+  return (
+    value === "code" ||
+    value === "draw" ||
+    value === "hand" ||
+    value === "move" ||
+    value === "placement" ||
+    value === "resize" ||
+    value === "select" ||
+    value === "text"
+  );
+}
+
 function isIsoDateString(value: unknown): value is string {
   return typeof value === "string" && Number.isFinite(Date.parse(value));
 }
@@ -157,11 +173,27 @@ function readPresenceUpdatePayload(
 
   const cursor = payload.cursor;
   const selectedShapeIds = payload.selectedShapeIds;
+  const editingShapeId = payload.editingShapeId;
+  const editingMode = payload.editingMode;
   const sentAt = payload.sentAt;
   const viewport = payload.viewport;
   const validCursor = cursor === null || isCanvasPresencePoint(cursor);
 
   if (!validCursor) return null;
+  if (
+    editingShapeId !== undefined &&
+    editingShapeId !== null &&
+    typeof editingShapeId !== "string"
+  ) {
+    return null;
+  }
+  if (
+    editingMode !== undefined &&
+    editingMode !== null &&
+    !isCanvasPresenceEditingMode(editingMode)
+  ) {
+    return null;
+  }
   if (sentAt !== undefined && !isIsoDateString(sentAt)) return null;
   if (viewport !== undefined && !isCanvasPresenceViewport(viewport)) return null;
   if (
@@ -174,6 +206,11 @@ function readPresenceUpdatePayload(
   return {
     ...room,
     cursor,
+    editingMode: editingMode ?? null,
+    editingShapeId:
+      typeof editingShapeId === "string" && editingShapeId
+        ? editingShapeId
+        : null,
     selectedShapeIds,
     ...(sentAt ? { sentAt } : {}),
     ...(viewport ? { viewport } : {}),

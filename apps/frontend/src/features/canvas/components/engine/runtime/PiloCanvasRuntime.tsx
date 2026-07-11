@@ -65,6 +65,15 @@ const initialLocalInteractionState: PiloCanvasLocalInteractionState = {
   protectedShapeIds: [],
   selectedShapeIds: [],
 };
+const MAX_DEFERRED_REMOTE_OPERATIONS = 80;
+
+type DeferredRemoteOperationReason = "local-interaction" | "pending-local-sync";
+
+type DeferredRemoteOperation = {
+  deferredAt: number;
+  operation: CanvasShapeOperationPayload;
+  reason: DeferredRemoteOperationReason;
+};
 
 function isRemoteOperationProtectedByLocalInteraction({
   localInteractionState,
@@ -74,6 +83,69 @@ function isRemoteOperationProtectedByLocalInteraction({
   operation: CanvasShapeOperationPayload;
 }) {
   return localInteractionState.protectedShapeIds.includes(operation.shapeId);
+}
+
+function queueDeferredRemoteOperation(
+  queue: Map<number, DeferredRemoteOperation>,
+  operation: CanvasShapeOperationPayload,
+  reason: DeferredRemoteOperationReason,
+) {
+  queue.forEach((deferredOperation, opSeq) => {
+    if (
+      deferredOperation.operation.shapeId === operation.shapeId &&
+      opSeq < operation.opSeq
+    ) {
+      queue.delete(opSeq);
+    }
+  });
+
+  queue.set(operation.opSeq, {
+    deferredAt: Date.now(),
+    operation,
+    reason,
+  });
+
+  if (queue.size <= MAX_DEFERRED_REMOTE_OPERATIONS) {
+    return;
+  }
+
+  const orderedEntries = Array.from(queue.entries()).sort(
+    ([, left], [, right]) => left.operation.opSeq - right.operation.opSeq,
+  );
+  const latestOpSeqByShapeId = new Map<string, number>();
+
+  orderedEntries.forEach(([opSeq, deferredOperation]) => {
+    latestOpSeqByShapeId.set(deferredOperation.operation.shapeId, opSeq);
+  });
+
+  for (const [opSeq, deferredOperation] of orderedEntries) {
+    if (queue.size <= MAX_DEFERRED_REMOTE_OPERATIONS) break;
+    if (deferredOperation.operation.operationType === "delete") continue;
+    if (latestOpSeqByShapeId.get(deferredOperation.operation.shapeId) === opSeq) {
+      continue;
+    }
+
+    queue.delete(opSeq);
+  }
+
+  for (const [opSeq] of orderedEntries) {
+    if (queue.size <= MAX_DEFERRED_REMOTE_OPERATIONS) break;
+    queue.delete(opSeq);
+  }
+
+  console.warn("Canvas deferred remote operation queue was compacted.", {
+    limit: MAX_DEFERRED_REMOTE_OPERATIONS,
+    reason,
+    shapeId: operation.shapeId,
+  });
+}
+
+function readDeferredRemoteOperations(
+  queue: Map<number, DeferredRemoteOperation>,
+) {
+  return Array.from(queue.values())
+    .sort((left, right) => left.operation.opSeq - right.operation.opSeq)
+    .map(({ operation }) => operation);
 }
 
 export function PiloCanvasRuntime({
@@ -140,7 +212,7 @@ function PiloCanvasRuntimeInner({
   const pendingLocalShapeVersionsRef = useRef(new Map<string, number>());
   const pendingRemoteFrameChildrenRequestRef = useRef(new Set<string>());
   const deferredRemoteOperationsRef = useRef(
-    new Map<number, CanvasShapeOperationPayload>(),
+    new Map<number, DeferredRemoteOperation>(),
   );
   const localInteractionStateRef = useRef<PiloCanvasLocalInteractionState>(
     initialLocalInteractionState,
@@ -205,7 +277,11 @@ function PiloCanvasRuntimeInner({
             operation,
           })
         ) {
-          deferredRemoteOperationsRef.current.set(operation.opSeq, operation);
+          queueDeferredRemoteOperation(
+            deferredRemoteOperationsRef.current,
+            operation,
+            "local-interaction",
+          );
           return;
         }
 
@@ -223,7 +299,11 @@ function PiloCanvasRuntimeInner({
         }
 
         if (pendingLocalShapeVersionsRef.current.has(operation.shapeId)) {
-          deferredRemoteOperationsRef.current.set(operation.opSeq, operation);
+          queueDeferredRemoteOperation(
+            deferredRemoteOperationsRef.current,
+            operation,
+            "pending-local-sync",
+          );
           return;
         }
 
@@ -280,7 +360,7 @@ function PiloCanvasRuntimeInner({
     }
 
     applyRemoteCanvasOperations(
-      Array.from(deferredRemoteOperationsRef.current.values()),
+      readDeferredRemoteOperations(deferredRemoteOperationsRef.current),
     );
   }, [applyRemoteCanvasOperations]);
   const handleLocalInteractionStateChange = useCallback(
@@ -336,6 +416,7 @@ function PiloCanvasRuntimeInner({
     pendingShapeDetailRef,
     pendingViewSettingRef,
     queryClient,
+    remoteShapeRevisionRef,
     shapeSyncQueueRef,
     storageMode,
     viewSettingSyncTimerRef,
@@ -353,6 +434,7 @@ function PiloCanvasRuntimeInner({
     localShapeVersionRef,
     onLocalShapeSyncIdle: flushDeferredRemoteOperations,
     pendingLocalShapeVersionsRef,
+    remoteShapeRevisionRef,
     setCanvasHydrationVersion,
     setFreeformShapes,
     shapeDetailCacheRef,

@@ -475,6 +475,9 @@ canvas:error
 ```
 
 Presence payload는 cursor page 좌표, `selectedShapeIds`, viewport, `sentAt`을 포함한다.
+또한 soft lock UI를 위해 realtime-only 편집 의도 필드 `editingShapeId`와
+`editingMode`(`select`, `move`, `resize`, `text`, `code`, `draw`, `placement`,
+`hand`)를 포함한다. 이 필드는 DB와 operation log에 저장하지 않는다.
 Presence는 operation log에 저장하지 않고, disconnect/leave 또는 stale timeout으로 제거한다.
 
 ## DB 조회 정책

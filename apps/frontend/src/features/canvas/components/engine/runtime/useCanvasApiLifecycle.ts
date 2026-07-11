@@ -23,6 +23,7 @@ type UseCanvasApiLifecycleOptions = {
   pendingShapeDetailRef: RuntimeRef<string | null>;
   pendingViewSettingRef: RuntimeRef<CanvasViewSetting | null>;
   queryClient: QueryClient;
+  remoteShapeRevisionRef: RuntimeRef<Map<string, number>>;
   shapeSyncQueueRef: RuntimeRef<CanvasShapeSyncQueue | null>;
   storageMode: CanvasRuntimeStorageMode;
   viewSettingSyncTimerRef: RuntimeRef<ReturnType<typeof setTimeout> | null>;
@@ -36,6 +37,7 @@ export function useCanvasApiLifecycle({
   pendingShapeDetailRef,
   pendingViewSettingRef,
   queryClient,
+  remoteShapeRevisionRef,
   shapeSyncQueueRef,
   storageMode,
   viewSettingSyncTimerRef,
@@ -51,6 +53,9 @@ export function useCanvasApiLifecycle({
     const shapeSyncQueue = createCanvasShapeSyncQueue({
       boardId: board.id,
       canvasClient,
+      getBaseRevision(shapeId) {
+        return remoteShapeRevisionRef.current.get(shapeId) ?? null;
+      },
       onError(error: unknown) {
         console.error("Canvas API shape sync failed", error);
       },
@@ -139,6 +144,7 @@ export function useCanvasApiLifecycle({
     pendingShapeDetailRef,
     pendingViewSettingRef,
     queryClient,
+    remoteShapeRevisionRef,
     shapeSyncQueueRef,
     storageMode,
     viewSettingSyncTimerRef,

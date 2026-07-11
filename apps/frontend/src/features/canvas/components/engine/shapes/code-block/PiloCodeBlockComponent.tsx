@@ -4,7 +4,10 @@ import { useRef, useState } from "react";
 import type { PointerEvent } from "react";
 import { useValue } from "@tldraw/state-react";
 import { HTMLContainer, useEditor } from "tldraw";
-import { useCanvasRemoteShapePresence } from "@/features/canvas/realtime/CanvasRemotePresenceContext";
+import {
+  useCanvasRemoteShapeEditingPresence,
+  useCanvasRemoteShapePresence,
+} from "@/features/canvas/realtime/CanvasRemotePresenceContext";
 import {
   piloCodeLanguages,
   type PiloCodeBlockShape,
@@ -44,17 +47,27 @@ export function PiloCodeBlockComponent({
   const lineCount = getCodeLineCount(shape.props.code);
   const preview = getCodePreview(shape.props.code);
   const remoteShapePresence = useCanvasRemoteShapePresence(String(shape.id));
+  const remoteShapeEditingPresence = useCanvasRemoteShapeEditingPresence(
+    String(shape.id),
+  );
   const remoteShapePresenceLabel =
     remoteShapePresence.length > 1
       ? `${remoteShapePresence.length}명 선택 중`
       : remoteShapePresence[0]
         ? `${remoteShapePresence[0].displayName || "다른 사용자"} 선택 중`
         : null;
+  const remoteShapeEditingLabel =
+    remoteShapeEditingPresence.length > 1
+      ? `${remoteShapeEditingPresence.length} users editing`
+      : remoteShapeEditingPresence[0]
+        ? `${remoteShapeEditingPresence[0].displayName || "Another user"} editing`
+        : null;
   const isEditing = useValue(
     "pilo-code-block-editing",
     () => editor.getEditingShapeId() === shape.id,
     [editor, shape.id],
   );
+  const isEditSoftLocked = !isEditing && Boolean(remoteShapeEditingLabel);
 
   function updateProps(props: Partial<PiloCodeBlockShapeProps>) {
     const currentShape = editor.getShape(shape.id);
@@ -168,13 +181,17 @@ export function PiloCodeBlockComponent({
 
   return (
     <HTMLContainer
-      className={`pilo-code-block-shape${isEditing ? " is-editing" : ""}${isCollapsed ? " is-collapsed" : ""}${remoteShapePresenceLabel ? " is-remotely-selected" : ""}`}
+      className={`pilo-code-block-shape${isEditing ? " is-editing" : ""}${isCollapsed ? " is-collapsed" : ""}${remoteShapePresenceLabel ? " is-remotely-selected" : ""}${isEditSoftLocked ? " is-remotely-edit-locked" : ""}`}
       style={{
         width: shape.props.w,
         height: shape.props.h,
       }}
       onDoubleClick={(event) => {
         event.stopPropagation();
+        if (isEditSoftLocked) {
+          editor.markEventAsHandled(event);
+          return;
+        }
         if (isPiloCodeBlockShape(editor.getShape(shape.id))) {
           editor.setEditingShape(shape.id);
         }
@@ -191,6 +208,14 @@ export function PiloCodeBlockComponent({
               title="현재 realtime 계약은 선택 상태만 전달하므로 실제 텍스트 편집 여부는 표시하지 않습니다."
             >
               {remoteShapePresenceLabel}
+            </span>
+          ) : null}
+          {remoteShapeEditingLabel ? (
+            <span
+              className="pilo-code-remote-edit-badge"
+              title="Another user is editing this code block. New edit entry is locked to avoid text conflicts."
+            >
+              {remoteShapeEditingLabel}
             </span>
           ) : null}
           {isEditing ? (

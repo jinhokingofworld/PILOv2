@@ -61,6 +61,9 @@ assert.match(socketServer, /emit\(canvasServerEvents\.presenceUpdate, presence\)
 assert.doesNotMatch(socketServer, /presence,\s*[\r\n]\s*workspaceId/);
 assert.match(socketServer, /room_not_joined/);
 assert.match(socketServer, /isCanvasPresenceViewport/);
+assert.match(socketServer, /isCanvasPresenceEditingMode/);
+assert.match(socketServer, /editingShapeId/);
+assert.match(socketServer, /editingMode/);
 assert.match(socketServer, /isIsoDateString/);
 assert.match(socketServer, /createSocketIoRedisAdapter/);
 assert.match(socketServer, /CANVAS_OPERATION_REDIS_CHANNEL = "canvas:operations"/);
@@ -72,6 +75,8 @@ assert.match(canvasPresence, /clearRoomPresence/);
 assert.match(canvasPresence, /clearSocket/);
 assert.match(canvasPresence, /payload\.sentAt/);
 assert.match(canvasPresence, /payload\.viewport/);
+assert.match(canvasPresence, /payload\.editingShapeId/);
+assert.match(canvasPresence, /payload\.editingMode/);
 assert.match(canvasPresence, /userId: user\.userId/);
 assert.match(canvasPresence, /workspaceId: payload\.workspaceId/);
 assert.match(redisPubSub, /createAdapter/);

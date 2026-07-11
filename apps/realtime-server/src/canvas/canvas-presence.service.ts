@@ -92,6 +92,8 @@ export function createCanvasPresenceService(): CanvasPresenceService {
         canvasId: payload.canvasId,
         cursor: payload.cursor,
         ...(user.displayName ? { displayName: user.displayName } : {}),
+        editingMode: payload.editingMode ?? null,
+        editingShapeId: payload.editingShapeId ?? null,
         selectedShapeIds: payload.selectedShapeIds,
         ...(payload.sentAt ? { sentAt: payload.sentAt } : {}),
         socketId,

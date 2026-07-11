@@ -29,10 +29,22 @@ export type CanvasPresenceViewport = {
   zoom: number;
 };
 
+export type CanvasPresenceEditingMode =
+  | "code"
+  | "draw"
+  | "hand"
+  | "move"
+  | "placement"
+  | "resize"
+  | "select"
+  | "text";
+
 export type CanvasRemotePresenceState = CanvasRealtimeUser & {
   workspaceId: string;
   canvasId: string;
   cursor: CanvasPresencePoint | null;
+  editingMode: CanvasPresenceEditingMode | null;
+  editingShapeId: string | null;
   selectedShapeIds: string[];
   sentAt?: string;
   updatedAt: string;
@@ -56,7 +68,9 @@ export type CanvasJoinedPayload = {
 export type CanvasPresenceUpdatePayload = {
   workspaceId: string;
   canvasId: string;
-  cursor: CanvasPresencePoint;
+  cursor: CanvasPresencePoint | null;
+  editingMode: CanvasPresenceEditingMode | null;
+  editingShapeId: string | null;
   selectedShapeIds: string[];
   sentAt: string;
   viewport: CanvasPresenceViewport;

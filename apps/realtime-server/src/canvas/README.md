@@ -10,7 +10,8 @@ This module owns Canvas Socket.IO rooms and presence delivery.
 
 - Validate Canvas room join payloads.
 - Check workspace/canvas access before joining a room.
-- Broadcast cursor and selection presence to other sockets in the room.
+- Broadcast cursor, selection, and edit-intent presence to other sockets in the
+  room.
 - Emit leave events when a socket leaves or disconnects.
 - Return `canvas:joined` with current in-memory room presence.
 
@@ -21,6 +22,7 @@ This module owns Canvas Socket.IO rooms and presence delivery.
 - `operations?afterSeq` catch-up API.
 - CRDT, Yjs, or tldraw sync.
 - Long-term presence storage.
+- Persisting `editingShapeId` or `editingMode`; edit intent is realtime-only.
 
 ## Event Boundary
 

@@ -26,6 +26,7 @@ import type { CanvasPresenceController } from "@/features/canvas/realtime/useCan
 import { RemoteCursorOverlay } from "@/features/canvas/realtime/RemoteCursorOverlay";
 import { CanvasRemotePresenceProvider } from "@/features/canvas/realtime/CanvasRemotePresenceContext";
 import type {
+  CanvasPresenceEditingMode,
   CanvasPresencePoint,
   CanvasPresenceViewport,
 } from "@/features/canvas/realtime/canvas-realtime-types";
@@ -1860,8 +1861,12 @@ function hasSameSelectedShapeIds(
 
 function hasCursorMovedEnough(
   previousCursor: CanvasPresencePoint | null,
-  nextCursor: CanvasPresencePoint,
+  nextCursor: CanvasPresencePoint | null,
 ) {
+  if (!nextCursor) {
+    return previousCursor !== null;
+  }
+
   if (!previousCursor) {
     return true;
   }
@@ -1871,6 +1876,22 @@ function hasCursorMovedEnough(
       nextCursor.x - previousCursor.x,
       nextCursor.y - previousCursor.y,
     ) >= 1.5
+  );
+}
+
+function hasSamePresenceEditingIntent(
+  previousIntent: {
+    editingMode: CanvasPresenceEditingMode | null;
+    editingShapeId: string | null;
+  },
+  nextIntent: {
+    editingMode: CanvasPresenceEditingMode | null;
+    editingShapeId: string | null;
+  },
+) {
+  return (
+    previousIntent.editingMode === nextIntent.editingMode &&
+    previousIntent.editingShapeId === nextIntent.editingShapeId
   );
 }
 
@@ -1886,6 +1907,34 @@ function getCanvasPresenceViewport(editor: Editor): CanvasPresenceViewport {
   };
 }
 
+function getCanvasPresenceEditingMode({
+  currentToolId,
+  editingShapeId,
+  editor,
+  selectedShapeIds,
+}: {
+  currentToolId: string;
+  editingShapeId: string | null;
+  editor: Editor;
+  selectedShapeIds: string[];
+}): CanvasPresenceEditingMode | null {
+  if (editingShapeId) {
+    const editingShape = editor.getShape(editingShapeId as TLShapeId);
+
+    return editingShape && isPiloCodeBlockShape(editingShape) ? "code" : "text";
+  }
+
+  if (currentToolId.includes("draw")) return "draw";
+  if (currentToolId.includes("hand")) return "hand";
+  if (currentToolId.includes("resize")) return "resize";
+  if (currentToolId.includes("translate")) return "move";
+  if (currentToolId !== "select.idle" && currentToolId !== "select") {
+    return "placement";
+  }
+
+  return selectedShapeIds.length ? "select" : null;
+}
+
 function CanvasPresenceReporter({
   presence,
 }: {
@@ -1898,13 +1947,41 @@ function CanvasPresenceReporter({
     () => editor.getSelectedShapeIds().map(String),
     [editor],
   );
+  const editingShapeId = useValue(
+    "pilo-presence-editing-shape-id",
+    () => {
+      const nextEditingShapeId = editor.getEditingShapeId();
+
+      return nextEditingShapeId ? String(nextEditingShapeId) : null;
+    },
+    [editor],
+  );
+  const currentToolId = useValue(
+    "pilo-presence-current-tool-id",
+    () => editor.getCurrentToolId(),
+    [editor],
+  );
+  const editingMode = getCanvasPresenceEditingMode({
+    currentToolId,
+    editingShapeId,
+    editor,
+    selectedShapeIds,
+  });
   const selectedShapeIdsRef = useRef<string[]>(selectedShapeIds);
+  const editingIntentRef = useRef<{
+    editingMode: CanvasPresenceEditingMode | null;
+    editingShapeId: string | null;
+  }>({ editingMode, editingShapeId });
   const lastSentAtRef = useRef(0);
   const lastSentPayloadRef = useRef<{
     cursor: CanvasPresencePoint | null;
+    editingMode: CanvasPresenceEditingMode | null;
+    editingShapeId: string | null;
     selectedShapeIds: string[];
   }>({
     cursor: null,
+    editingMode: null,
+    editingShapeId: null,
     selectedShapeIds: [],
   });
   const pendingCursorRef = useRef<CanvasPresencePoint | null>(null);
@@ -1914,9 +1991,14 @@ function CanvasPresenceReporter({
     selectedShapeIdsRef.current = selectedShapeIds;
   }, [selectedShapeIds]);
 
+  useEffect(() => {
+    editingIntentRef.current = { editingMode, editingShapeId };
+  }, [editingMode, editingShapeId]);
+
   const flushPresence = useCallback(
-    (cursor: CanvasPresencePoint) => {
+    (cursor: CanvasPresencePoint | null) => {
       const nextSelectedShapeIds = selectedShapeIdsRef.current;
+      const nextEditingIntent = editingIntentRef.current;
       const lastPayload = lastSentPayloadRef.current;
 
       if (
@@ -1924,7 +2006,8 @@ function CanvasPresenceReporter({
         hasSameSelectedShapeIds(
           lastPayload.selectedShapeIds,
           nextSelectedShapeIds,
-        )
+        ) &&
+        hasSamePresenceEditingIntent(lastPayload, nextEditingIntent)
       ) {
         return;
       }
@@ -1933,10 +2016,13 @@ function CanvasPresenceReporter({
         cursor,
         nextSelectedShapeIds,
         getCanvasPresenceViewport(editor),
+        nextEditingIntent.editingShapeId,
+        nextEditingIntent.editingMode,
       );
       lastSentAtRef.current = Date.now();
       lastSentPayloadRef.current = {
         cursor,
+        ...nextEditingIntent,
         selectedShapeIds: nextSelectedShapeIds,
       };
     },
@@ -1973,6 +2059,14 @@ function CanvasPresenceReporter({
     },
     [flushPresence],
   );
+
+  useEffect(() => {
+    if (!presence.enabled) {
+      return;
+    }
+
+    flushPresence(lastSentPayloadRef.current.cursor);
+  }, [editingMode, editingShapeId, flushPresence, presence.enabled, selectedShapeIds]);
 
   useEffect(() => {
     if (!presence.enabled) {

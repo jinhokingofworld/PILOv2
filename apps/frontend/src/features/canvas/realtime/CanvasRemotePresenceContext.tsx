@@ -37,3 +37,12 @@ export function useCanvasRemoteShapePresence(shapeId: string) {
     [presence, shapeId],
   );
 }
+
+export function useCanvasRemoteShapeEditingPresence(shapeId: string) {
+  const presence = useContext(CanvasRemotePresenceContext);
+
+  return useMemo(
+    () => presence.filter((entry) => entry.editingShapeId === shapeId),
+    [presence, shapeId],
+  );
+}

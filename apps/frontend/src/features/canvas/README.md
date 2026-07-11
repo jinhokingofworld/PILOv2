@@ -90,7 +90,7 @@ Canvas의 아래 흐름은 Canvas 도메인 전용이다.
 ## Realtime Presence
 
 - Canvas presence는 `src/features/canvas/realtime/`에서 Socket.IO client, hook, overlay를 분리해 조립한다.
-- `PiloCanvasRuntime`은 socket state를 만들고, `PiloTldrawCanvas`는 `TldrawSurface` child에서 `useEditor()` 기반 cursor 좌표를 report한다.
-- cursor 좌표와 selection presence는 DB에 저장하지 않는다.
+- `PiloCanvasRuntime`은 socket state를 만들고, `PiloTldrawCanvas`는 `TldrawSurface` child에서 `useEditor()` 기반 cursor 좌표, selection, edit intent를 report한다.
+- cursor 좌표, selection, `editingShapeId`, `editingMode` presence는 DB에 저장하지 않는다.
 - local UI Preview의 fake session은 realtime-server DB session 검증을 통과하지 않으므로 presence를 켜지 않는다.
 - `src/shared/tldraw/TldrawSurface`는 presence를 소유하지 않는다. PR Review 같은 다른 tldraw 화면은 필요하면 realtime 모듈을 자기 화면 흐름에 맞게 조립한다.
