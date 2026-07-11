@@ -38,8 +38,8 @@
 
 | Phase | 목적 | Issue | PR | 상태 |
 | --- | --- | --- | --- | --- |
-| 2-A | Scope, API, 상태 전이와 Worker 경계 확정 | #652 | TBD | 완료 |
-| 2-B | `analyzing` 세션 생성과 durable Job enqueue | #659 | TBD | 완료 |
+| 2-A | Scope, API, 상태 전이와 Worker 경계 확정 | #652 | #658 | 완료 |
+| 2-B | `analyzing` 세션 생성과 durable Job enqueue | #659 | #664 | 완료 |
 | 2-C | AI Worker PR 분석 processor | TBD | TBD | 대기 |
 | 2-D | 분석 결과 원자 저장과 stale/idempotency guard | TBD | TBD | 대기 |
 | 2-E | Review room 분석 진행/실패/retry UX | TBD | TBD | 대기 |
