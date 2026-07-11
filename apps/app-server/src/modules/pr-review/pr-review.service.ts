@@ -22,6 +22,8 @@ import {
 import type { PrReviewResolvedHunkPayload } from "./pr-review-conflict-resolution";
 import {
   PrReviewAnalysisService,
+  type PrReviewConflictSuggestionCurrentDraft,
+  type PrReviewConflictSuggestionDraftSource,
   type PrReviewConflictSuggestionResult,
   type PrReviewAnalysisResult,
   type ReviewFileMetadata
@@ -247,6 +249,21 @@ interface PrReviewConflictApplyDraft {
   resolvedContent?: unknown;
   expectedHeadSha?: unknown;
   expectedHeadBlobSha?: unknown;
+}
+
+interface PrReviewConflictSuggestionDraftInput {
+  currentDraft?: unknown;
+}
+
+interface PrReviewConflictSuggestionCurrentDraftInput {
+  resolvedContent?: unknown;
+  hunks?: unknown;
+}
+
+interface PrReviewConflictSuggestionHunkDraftInput {
+  hunkId?: unknown;
+  source?: unknown;
+  resolvedText?: unknown;
 }
 
 interface PrReviewConflictsApplyFileDraft {
@@ -664,6 +681,13 @@ const REVIEW_SUBMIT_TYPES: readonly PrReviewGithubReviewSubmitType[] = [
 const LARGE_DIFF_LINE_THRESHOLD = 1000;
 const LARGE_DIFF_PATCH_BYTES = 200 * 1024;
 const MAX_CONFLICT_APPLY_CONTENT_CHARS = 200 * 1024;
+const CONFLICT_SUGGESTION_DRAFT_SOURCES: readonly PrReviewConflictSuggestionDraftSource[] = [
+  "ai",
+  "pr",
+  "target",
+  "both",
+  "manual"
+];
 const CONFLICT_STATUS_SETTLE_MAX_ATTEMPTS = 4;
 const CONFLICT_STATUS_SETTLE_DELAY_MS = 250;
 const CONFLICT_MARKER_PATTERN = /(^|\n)(<<<<<<<|=======|>>>>>>>)(?:\s|$)/;
@@ -1189,7 +1213,8 @@ export class PrReviewService {
   async createReviewFileConflictSuggestion(
     currentUserId: string,
     workspaceId: string,
-    reviewFileId: string
+    reviewFileId: string,
+    body: unknown
   ): Promise<PrReviewConflictSuggestionPayload> {
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
 
@@ -1266,11 +1291,17 @@ export class PrReviewService {
       throw badRequest("Content conflict hunk not found");
     }
 
+    const currentDraft = this.normalizeConflictSuggestionCurrentDraft(
+      body,
+      hunks
+    );
+
     const suggestion = await this.analysisService.suggestConflictResolution({
       filePath: file.file_path,
       previousFilePath: file.previous_file_path,
       headContent: conflictInput.headContent,
-      hunks
+      hunks,
+      currentDraft
     });
 
     return this.mapConflictSuggestion(file, conflictInput.headBlobSha, suggestion);
@@ -3289,6 +3320,118 @@ export class PrReviewService {
       expectedHeadSha: draft.expectedHeadSha.trim(),
       expectedHeadBlobSha: draft.expectedHeadBlobSha.trim()
     };
+  }
+
+  private normalizeConflictSuggestionCurrentDraft(
+    body: unknown,
+    hunks: PrReviewConflictHunkPayload[]
+  ): PrReviewConflictSuggestionCurrentDraft | null {
+    if (body === undefined || body === null) {
+      return null;
+    }
+    if (typeof body !== "object" || Array.isArray(body)) {
+      throw badRequest("Request body must be an object");
+    }
+
+    const draftInput = body as PrReviewConflictSuggestionDraftInput;
+    if (draftInput.currentDraft === undefined) {
+      return null;
+    }
+    if (
+      !draftInput.currentDraft ||
+      typeof draftInput.currentDraft !== "object" ||
+      Array.isArray(draftInput.currentDraft)
+    ) {
+      throw badRequest("currentDraft must be an object");
+    }
+
+    const currentDraft =
+      draftInput.currentDraft as PrReviewConflictSuggestionCurrentDraftInput;
+    const resolvedContent = this.normalizeResolvedConflictContent(
+      currentDraft.resolvedContent,
+      "currentDraft.resolvedContent"
+    );
+    if (!Array.isArray(currentDraft.hunks)) {
+      throw badRequest("currentDraft.hunks must be an array");
+    }
+
+    const conflictHunkIds = new Set(hunks.map((hunk) => hunk.id));
+    const normalizedHunks = currentDraft.hunks.map((value, index) => {
+      if (!value || typeof value !== "object" || Array.isArray(value)) {
+        throw badRequest(`currentDraft.hunks[${index}] must be an object`);
+      }
+
+      const hunk = value as PrReviewConflictSuggestionHunkDraftInput;
+      if (typeof hunk.hunkId !== "string" || !hunk.hunkId.trim()) {
+        throw badRequest(
+          `currentDraft.hunks[${index}].hunkId must not be empty`
+        );
+      }
+      const hunkId = hunk.hunkId.trim();
+      if (!conflictHunkIds.has(hunkId)) {
+        throw badRequest(
+          `currentDraft.hunks[${index}].hunkId is not a current conflict hunk`
+        );
+      }
+      if (
+        typeof hunk.source !== "string" ||
+        !CONFLICT_SUGGESTION_DRAFT_SOURCES.includes(
+          hunk.source as PrReviewConflictSuggestionDraftSource
+        )
+      ) {
+        throw badRequest(
+          `currentDraft.hunks[${index}].source is not supported`
+        );
+      }
+
+      return {
+        hunkId,
+        source: hunk.source as PrReviewConflictSuggestionDraftSource,
+        resolvedText: this.normalizeConflictSuggestionHunkText(
+          hunk.resolvedText,
+          `currentDraft.hunks[${index}].resolvedText`
+        )
+      };
+    });
+
+    if (
+      new Set(normalizedHunks.map((hunk) => hunk.hunkId)).size !==
+      normalizedHunks.length
+    ) {
+      throw badRequest("currentDraft.hunks must not contain duplicate hunkId values");
+    }
+    if (
+      normalizedHunks.reduce(
+        (total, hunk) => total + hunk.resolvedText.length,
+        0
+      ) > MAX_CONFLICT_APPLY_CONTENT_CHARS
+    ) {
+      throw badRequest("currentDraft.hunks resolvedText is too large");
+    }
+
+    return {
+      resolvedContent,
+      hunks: normalizedHunks
+    };
+  }
+
+  private normalizeConflictSuggestionHunkText(
+    value: unknown,
+    field: string
+  ): string {
+    if (typeof value !== "string") {
+      throw badRequest(`${field} must be a string`);
+    }
+
+    const resolvedText = value.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+    if (resolvedText.length > MAX_CONFLICT_APPLY_CONTENT_CHARS) {
+      throw badRequest(`${field} is too large`);
+    }
+    if (CONFLICT_MARKER_PATTERN.test(resolvedText)) {
+      throw badRequest(`${field} must not contain conflict markers`);
+    }
+
+    return resolvedText;
   }
 
   private normalizeResolvedConflictContent(

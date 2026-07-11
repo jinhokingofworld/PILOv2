@@ -119,13 +119,15 @@ export class PrReviewController {
   async createReviewFileConflictSuggestion(
     @CurrentUserId() currentUserId: string,
     @Param("workspaceId") workspaceId: string,
-    @Param("reviewFileId") reviewFileId: string
+    @Param("reviewFileId") reviewFileId: string,
+    @Body() body: unknown
   ): Promise<ApiSuccessResponse<PrReviewConflictSuggestionPayload>> {
     const suggestion =
       await this.prReviewService.createReviewFileConflictSuggestion(
         currentUserId,
         workspaceId,
-        reviewFileId
+        reviewFileId,
+        body
       );
     return apiResponse(suggestion);
   }
