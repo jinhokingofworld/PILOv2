@@ -3671,6 +3671,18 @@ for (const typeName of [
   assert.match(types, new RegExp(`export type ${typeName}`));
 }
 
+assert.doesNotMatch(apiSpec, /SQL 직접 편집과 Generate로/);
+assert.doesNotMatch(apiSpec, /Generate 성공 결과를 기준으로 보낸다/);
+assert.doesNotMatch(apiSpec, /Generate 성공, table 위치 변경/);
+assert.match(
+  apiSpec,
+  /sourceText.*,.*modelJson.*,.*layoutJson.*자동 parsing에 성공한 동일 snapshot/
+);
+assert.match(
+  apiSpec,
+  /자동 parsing 성공, table 위치 변경, 저장 대상 설정 변경 시 client가 이 API로 자동/
+);
+
 assert.match(types, /export const SQLTOERD_MODEL_JSON_VERSION = 1/);
 assert.match(types, /export const SQLTOERD_LAYOUT_JSON_VERSION = 1/);
 assert.match(types, /export type SqltoerdSourceFormat = "sql"/);
