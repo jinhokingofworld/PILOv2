@@ -391,9 +391,16 @@ Request body 없음.
 
 `recording.durationSec`이 60을 초과하면 App Server는 `MeetingReport.status =
 PROCESSING`과 durable outbox intent를 같은 transaction으로 생성하고 AI job 발행을
-시도한다. SQS 일시 실패는 outbox에 `pending`으로 남아 후속 dispatcher가 재개한다.
-MVP에서는 `PROCESSING`을 queued와 running을 모두 포함하는 상태로 사용한다. AI Worker는 job을 consume해 OpenAI STT
-API로 transcript를 만들고, OpenAI LLM API로 보고서를 생성한 뒤 DB의
+시도한다. SQS 일시 실패는 outbox에 `pending`으로 남고, dispatcher가 시작 직후와
+60초마다 다시 발행한다. 각 발행은 60초 claim lease와 `FOR UPDATE SKIP LOCKED`를
+사용하며, 실패 시 1·2·4·8·16분 뒤 재시도한다. 5회 재시도 뒤에도 실패하면 outbox와
+Report를 `FAILED`로 전환한다. SQS 발행은 at-least-once이므로, 발행 성공 뒤
+delivery 기록이 유실된 경우 같은 report job이 다시 전달될 수 있다.
+
+MVP에서는 `PROCESSING`을 queued와 running을 모두 포함하는 상태로 사용한다. AI
+Worker가 이미 delivery된 job을 처리하지 못해 Report가 20분 넘게 `PROCESSING`이면,
+dispatcher는 Worker가 보유한 report advisory lock이 없는 경우에만 해당 Report를
+`FAILED`로 전환한다. AI Worker가 job을 consume해 OpenAI STT API로 transcript를 만들고, OpenAI LLM API로 보고서를 생성한 뒤 DB의
 MeetingReport를 `COMPLETED` 또는 `FAILED`로 갱신한다. Frontend는 App Server API로
 MeetingReport 상태를 조회한다. API 응답과 화면 조회의 source of truth는 DB의
 MeetingReport다.
