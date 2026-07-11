@@ -31,18 +31,21 @@ function defaultCanvasAuthToken() {
 }
 
 export class CanvasApiError extends Error {
+  body?: unknown;
   status?: number;
   path?: string;
 
   constructor(
     message: string,
     options: {
+      body?: unknown;
       status?: number;
       path?: string;
     } = {},
   ) {
     super(message);
     this.name = "CanvasApiError";
+    this.body = options.body;
     this.status = options.status;
     this.path = options.path;
   }
@@ -76,6 +79,14 @@ async function readCanvasJson(response: Response, path: string) {
   }
 }
 
+async function readCanvasErrorBody(response: Response) {
+  try {
+    return (await response.json()) as unknown;
+  } catch {
+    return null;
+  }
+}
+
 async function requestCanvasJson(
   path: string,
   init: RequestInit | undefined,
@@ -103,7 +114,10 @@ async function requestCanvasJson(
   });
 
   if (!response.ok) {
+    const body = await readCanvasErrorBody(response);
+
     throw new CanvasApiError("Canvas API request failed", {
+      body,
       status: response.status,
       path,
     });
@@ -267,10 +281,14 @@ export function createCanvasApiClient({
       );
     },
 
-    async deleteShape(shapeId: string, { workspaceId }: { workspaceId: string }) {
+    async deleteShape(
+      shapeId: string,
+      body: unknown,
+      { workspaceId }: { workspaceId: string },
+    ) {
       return requestCanvasJson(
         `/workspaces/${encodeURIComponent(workspaceId)}/canvas-shapes/${encodeURIComponent(shapeId)}`,
-        { method: "DELETE" },
+        withJsonBody(body, { method: "DELETE" }),
         requestOptions,
       );
     },

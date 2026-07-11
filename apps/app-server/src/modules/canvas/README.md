@@ -12,6 +12,7 @@ Canvas Agent contract: `docs/api/canvas-agent-api.md`
 - shape 생성, 이동, 수정, 삭제
 - viewport 상태
 - shape `contentHash`, `revision`, viewport bounds 기반 조회
+- shape update/delete `baseRevision` stale conflict 판정과 `409 CONFLICT` 응답
 
 구조:
 

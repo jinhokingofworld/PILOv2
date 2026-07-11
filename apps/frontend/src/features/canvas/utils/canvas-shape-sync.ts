@@ -53,6 +53,7 @@ export type CanvasShapeApiClient = {
   ) => Promise<unknown>;
   deleteShape: (
     shapeId: string,
+    body: { baseRevision: number | null; clientOperationId: string },
     options: { workspaceId: string },
   ) => Promise<unknown>;
 };
@@ -104,7 +105,7 @@ const DEFAULT_CANVAS_SHAPE_SYNC_QUEUE_DEBOUNCE_MS = 500;
 const DEFAULT_CANVAS_SHAPE_SYNC_RETRY_ATTEMPTS = 3;
 const DEFAULT_CANVAS_SHAPE_SYNC_RETRY_DELAY_MS = 320;
 const DEFAULT_CANVAS_SHAPE_SYNC_BATCH_SIZE = 100;
-const NON_RETRYABLE_CANVAS_API_STATUSES = new Set([400, 401, 403, 404]);
+const NON_RETRYABLE_CANVAS_API_STATUSES = new Set([400, 401, 403, 404, 409]);
 
 class CanvasShapeSyncFailure extends Error {
   readonly cause: unknown;
@@ -454,9 +455,16 @@ function runCanvasShapeSyncOperation({
     );
   }
 
-  return canvasClient.deleteShape(operation.shapeId, {
-    workspaceId,
-  });
+  return canvasClient.deleteShape(
+    operation.shapeId,
+    {
+      baseRevision: operation.baseRevision,
+      clientOperationId: operation.clientOperationId,
+    },
+    {
+      workspaceId,
+    },
+  );
 }
 
 function runWithRetry(task: () => Promise<unknown>) {
