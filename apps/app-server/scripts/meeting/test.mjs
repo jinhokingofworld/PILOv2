@@ -41,12 +41,26 @@ class FakeDatabase {
 
   async queryOne(text, values = []) {
     this.queries.push({ text, values });
+
+    if (/INSERT INTO meeting_report_outbox/.test(text)) {
+      return { id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" };
+    }
+
+    if (/SELECT id\s+FROM meeting_report_outbox/.test(text)) {
+      return { id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" };
+    }
+
     const next = this.queryOneRows.shift();
     if (typeof next === "function") {
       return next(text, values);
     }
 
     return next ?? null;
+  }
+
+  async execute(text, values = []) {
+    this.queries.push({ text, values });
+    return { rows: [] };
   }
 
   async transaction(callback) {
@@ -768,8 +782,16 @@ async function assertError(action, messagePattern) {
       retryCount: 0
     }
   ]);
-  assert.match(database.queries.at(-1).text, /UPDATE meetings/);
-  assert.match(database.queries.at(-1).text, /AND ended_at IS NULL/);
+  assert.equal(
+    database.queries.some(({ text }) =>
+      /UPDATE meetings/.test(text) && /AND ended_at IS NULL/.test(text)
+    ),
+    true
+  );
+  assert.equal(
+    database.queries.some(({ text }) => /UPDATE meeting_report_outbox/.test(text)),
+    true
+  );
 }
 
 {
@@ -967,10 +989,8 @@ async function assertError(action, messagePattern) {
     new FakeMeetingReportJobService({ shouldFail: true })
   );
 
-  await assertBadRequest(
-    () => service.leaveMeeting(currentUserId, workspaceId, meetingId),
-    /Meeting report job could not be enqueued/
-  );
+  const left = await service.leaveMeeting(currentUserId, workspaceId, meetingId);
+  assert.equal(left.meetingEnded, true);
 
   assert.deepEqual(meetingReportJobService.calls, [
     {
@@ -983,22 +1003,20 @@ async function assertError(action, messagePattern) {
     }
   ]);
   assert.equal(
-    database.queries.some(
-      ({ text }) => text.includes("status = 'FAILED'") && text.includes("failed_step")
-    ),
-    true
+    database.queries.some(({ text }) => text.includes("status = 'FAILED'")),
+    false
   );
   assert.equal(
     database.queries.some(
       ({ text }) => text.includes("UPDATE meeting_participants") && text.includes("left_at = NULL")
     ),
-    true
+    false
   );
   assert.equal(
     database.queries.some(
       ({ text }) => text.includes("UPDATE meetings") && text.includes("ended_at = NULL")
     ),
-    true
+    false
   );
 }
 
@@ -2343,5 +2361,9 @@ async function assertError(action, messagePattern) {
   });
 
   assert.equal(meetingReportJobService.calls.length, 1);
-  assert.equal(database.queryOneRows.length, 0);
+  assert.equal(database.queryOneRows.length, 1);
+  assert.equal(
+    database.queries.some(({ text }) => /UPDATE meeting_reports/.test(text)),
+    false
+  );
 }

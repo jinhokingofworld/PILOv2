@@ -321,9 +321,9 @@ participant는 나갈 수 있다. 단, 마지막 active participant가 나가는
 `RUNNING` Recording이 있으면 서버는 먼저 녹음을 정상 종료하고 MeetingReport 생성
 trigger를 수행한 뒤 participant를 나가게 하고 회의를 자동 종료한다. 녹음 종료가
 정상 완료되지 않으면 나가기 요청은 실패하고 participant는 active 상태로 남는다.
-MeetingReport job enqueue가 실패하면 요청은 실패하고 participant와 meeting 종료
-상태는 보정되며, 생성된 MeetingReport는 `FAILED` 상태로 남아 재생성 요청 대상이
-된다.
+MeetingReport SQS 발행이 일시 실패해도 요청은 성공한다. 생성된 MeetingReport는
+`PROCESSING`으로 남고, 서버는 durable outbox에 재발행 의도를 보존한다. 이후
+dispatcher가 해당 job을 다시 발행한다.
 이미 나간 상태에서 다시 호출해도 같은 결과를 반환한다.
 
 Response `data`:
@@ -390,8 +390,9 @@ Request body 없음.
 보고서 생성 요청 side effect는 서버에서 한 번만 수행되어야 한다.
 
 `recording.durationSec`이 60을 초과하면 App Server는 `MeetingReport.status =
-PROCESSING`을 생성하고 AI job을 enqueue한다. MVP에서는 `PROCESSING`을 queued와
-running을 모두 포함하는 상태로 사용한다. AI Worker는 job을 consume해 OpenAI STT
+PROCESSING`과 durable outbox intent를 같은 transaction으로 생성하고 AI job 발행을
+시도한다. SQS 일시 실패는 outbox에 `pending`으로 남아 후속 dispatcher가 재개한다.
+MVP에서는 `PROCESSING`을 queued와 running을 모두 포함하는 상태로 사용한다. AI Worker는 job을 consume해 OpenAI STT
 API로 transcript를 만들고, OpenAI LLM API로 보고서를 생성한 뒤 DB의
 MeetingReport를 `COMPLETED` 또는 `FAILED`로 갱신한다. Frontend는 App Server API로
 MeetingReport 상태를 조회한다. API 응답과 화면 조회의 source of truth는 DB의
