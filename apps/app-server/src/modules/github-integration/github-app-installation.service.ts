@@ -1,4 +1,4 @@
-import { Injectable, Logger } from "@nestjs/common";
+import { Injectable } from "@nestjs/common";
 import { QueryResultRow } from "pg";
 import { badRequest, notFound, unauthorized } from "../../common/api-error";
 import { DatabaseService } from "../../database/database.service";
@@ -15,7 +15,6 @@ import {
   GithubIntegrationConfigService,
   type GithubOAuthRuntimeConfig
 } from "./github-integration-config.service";
-import { GithubSyncRunService } from "./github-sync-run.service";
 import { GithubOAuthClient } from "./github-oauth.client";
 import { githubCallbackBadRequest } from "./github-oauth-callback-error";
 import { validateGithubCallbackReturnUrl } from "./github-return-url";
@@ -53,8 +52,6 @@ type GithubAppInstallationStartResult = GithubAppInstallationStartPayload & {
 
 @Injectable()
 export class GithubAppInstallationService {
-  private readonly logger = new Logger(GithubAppInstallationService.name);
-
   constructor(
     private readonly database: DatabaseService,
     private readonly githubOAuthClient: GithubOAuthClient,
@@ -63,8 +60,7 @@ export class GithubAppInstallationService {
     private readonly workspaceService: WorkspaceService,
     private readonly installationStateService: GithubAppInstallationStateService,
     private readonly callbackStateService: GithubCallbackStateService,
-    private readonly githubAppClient: GithubAppClient,
-    private readonly syncRunService: GithubSyncRunService
+    private readonly githubAppClient: GithubAppClient
   ) {}
 
   async startGithubAppInstallation(
@@ -241,35 +237,20 @@ export class GithubAppInstallationService {
       );
     }
 
-    await this.triggerInitialFullSync(
-      storedState.userId,
-      storedState.workspaceId,
-      row.id
-    );
-
     const { id, ...payload } = this.mapGithubInstallation(row);
     return {
       ...payload,
       installationId: id,
-      returnUrl: storedState.returnUrl
+      syncRunId: null,
+      returnUrl: this.appendInstallationId(storedState.returnUrl, id)
     };
   }
 
-  private async triggerInitialFullSync(
-    currentUserId: string,
-    workspaceId: string,
-    installationId: string
-  ): Promise<void> {
-    try {
-      await this.syncRunService.startGithubSyncRun(currentUserId, workspaceId, {
-        target: "full",
-        installationId
-      });
-    } catch (error) {
-      this.logger.warn(
-        `GitHub initial full sync failed after installation callback: ${this.getErrorMessage(error)}`
-      );
-    }
+  private appendInstallationId(returnUrl: string | null, installationId: string): string | null {
+    if (!returnUrl) return null;
+    const url = new URL(returnUrl);
+    url.searchParams.set("github_installation_id", installationId);
+    return url.toString();
   }
 
   private async getConnectedGithubOAuthAccessTokenForCallback(
@@ -553,7 +534,4 @@ export class GithubAppInstallationService {
     return {};
   }
 
-  private getErrorMessage(error: unknown): string {
-    return error instanceof Error ? error.message : "Unknown error";
-  }
 }

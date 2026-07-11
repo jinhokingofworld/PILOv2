@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent
+} from "react";
 import {
   createShapeId,
   type Editor,
@@ -11,6 +18,18 @@ import {
 } from "tldraw";
 
 import { commerceSqltoerdFixture } from "@/features/sql-erd/fixtures/commerce";
+import {
+  isSqlErdAnnotationShape,
+  SQLTOERD_ANNOTATION_DELETE_EVENT,
+  SQLTOERD_ANNOTATION_LABEL_CHANGE_EVENT,
+  SQLTOERD_ANNOTATION_SELECT_EVENT,
+  SQLTOERD_ANNOTATION_SHAPE_TYPE,
+  SqlErdAnnotationShapeUtil,
+  type SqlErdAnnotationDeleteEventDetail,
+  type SqlErdAnnotationLabelChangeEventDetail,
+  type SqlErdAnnotationSelectEventDetail,
+  type SqlErdAnnotationShape
+} from "@/features/sql-erd/shapes/sql-erd-annotation-shape";
 import {
   getSqlErdHighlightedColumnIdsForTable,
   getSqlErdRelationShapeLayout,
@@ -27,25 +46,33 @@ import {
 } from "@/features/sql-erd/shapes/sql-erd-relation-shape";
 import {
   getSqlErdTableShapeSize,
+  SQLTOERD_COLUMN_CONNECT_START_EVENT,
   SQLTOERD_COLUMN_SELECT_EVENT,
   SQLTOERD_TABLE_SELECT_EVENT,
   SQLTOERD_TABLE_SHAPE_TYPE,
   SqlErdTableShapeUtil,
+  startSqlErdColumnConnection,
   toSqlErdTableShapeColumns,
   isSqlErdTableShape,
+  type SqlErdColumnConnectStartEventDetail,
   type SqlErdTableShape,
   type SqlErdTableSelectionState
 } from "@/features/sql-erd/shapes/sql-erd-table-shape";
 import type {
   SqlErdSelection,
+  SqltoerdColumnAnnotationLink,
   SqltoerdLayoutJsonV1,
   SqltoerdModelJsonV1
 } from "@/features/sql-erd/types";
 import {
   areSqltoerdLayoutsEqual,
+  addSqltoerdColumnAnnotation,
   createSqltoerdModelIndex,
+  getSqltoerdRenderableAnnotations,
   getTableLayout,
   inferSqlErdRelationCardinality,
+  removeSqltoerdAnnotation,
+  updateSqltoerdAnnotationLabel,
   updateSqltoerdLayoutWithTablePositions,
   type SqltoerdTablePosition
 } from "@/features/sql-erd/utils/model";
@@ -62,7 +89,11 @@ type SqlErdCanvasProps = {
   selectedSqlErdObject?: SqlErdSelection;
 };
 
-const sqlErdShapeUtils = [SqlErdRelationShapeUtil, SqlErdTableShapeUtil];
+const sqlErdShapeUtils = [
+  SqlErdAnnotationShapeUtil,
+  SqlErdRelationShapeUtil,
+  SqlErdTableShapeUtil
+];
 const SQLTOERD_LAYOUT_SYNC_DELAY_MS = 250;
 
 const sqlErdTldrawComponents = {
@@ -95,6 +126,14 @@ export function getSqlErdTableShapeId(tableId: string) {
 export function getSqlErdRelationShapeId(relationId: string) {
   return createShapeId(
     `sqltoerd-relation-${shapeIdSuffix(relationId)}-${hashSqlErdShapeSourceId(relationId)}`
+  );
+}
+
+export function getSqlErdAnnotationShapeId(annotationId: string) {
+  return createShapeId(
+    `sqltoerd-annotation-${shapeIdSuffix(annotationId)}-${hashSqlErdShapeSourceId(
+      annotationId
+    )}`
   );
 }
 
@@ -182,16 +221,78 @@ export function createSqltoerdRelationShapes(
   });
 }
 
+export function createSqltoerdAnnotationShapes(
+  modelJson: SqltoerdModelJsonV1,
+  layoutJson: SqltoerdLayoutJsonV1,
+  tableShapes: TLShapePartial<SqlErdTableShape>[]
+): TLShapePartial<SqlErdAnnotationShape>[] {
+  const tableShapeById = new Map(
+    tableShapes.map((shape) => [shape.props?.tableId, shape])
+  );
+
+  const annotations = getSqltoerdRenderableAnnotations(
+    modelJson,
+    layoutJson.annotations
+  );
+
+  return (annotations?.links ?? []).flatMap((annotation) => {
+    if (annotation.kind !== "column_link") {
+      return [];
+    }
+
+    const layout =
+      getSqlErdRelationShapeLayoutFromTablePartials(
+        tableShapeById.get(annotation.fromTableId),
+        tableShapeById.get(annotation.toTableId),
+        {
+          fromColumnIds: [annotation.fromColumnId],
+          toColumnIds: [annotation.toColumnId]
+        }
+      ) ?? getFallbackSqlErdRelationShapeLayout();
+
+    return [
+      {
+        id: getSqlErdAnnotationShapeId(annotation.id),
+        type: SQLTOERD_ANNOTATION_SHAPE_TYPE,
+        x: layout.x,
+        y: layout.y,
+        props: {
+          w: layout.w,
+          h: layout.h,
+          annotationId: annotation.id,
+          fromTableId: annotation.fromTableId,
+          fromColumnId: annotation.fromColumnId,
+          toTableId: annotation.toTableId,
+          toColumnId: annotation.toColumnId,
+          fromTableShapeId: getSqlErdTableShapeId(annotation.fromTableId),
+          toTableShapeId: getSqlErdTableShapeId(annotation.toTableId),
+          label: annotation.label,
+          selected: false,
+          endSide: layout.endSide,
+          points: layout.points,
+          startSide: layout.startSide
+        }
+      }
+    ];
+  });
+}
+
 export function createSqltoerdCanvasShapes(
   modelJson: SqltoerdModelJsonV1,
   layoutJson: SqltoerdLayoutJsonV1
 ) {
   const tableShapes = createSqltoerdTableShapes(modelJson, layoutJson);
   const relationShapes = createSqltoerdRelationShapes(modelJson, tableShapes);
+  const annotationShapes = createSqltoerdAnnotationShapes(
+    modelJson,
+    layoutJson,
+    tableShapes
+  );
 
   return [
     ...relationShapes,
-    ...tableShapes
+    ...tableShapes,
+    ...annotationShapes
   ];
 }
 
@@ -370,6 +471,94 @@ export function syncSqlErdRelationShapes(editor: Editor) {
   return updates.length;
 }
 
+function getSqlErdAnnotationShapeLayoutFromEditor(
+  editor: Editor,
+  shape: SqlErdAnnotationShape
+) {
+  const fromTableShape = editor.getShape(
+    shape.props.fromTableShapeId as TLShapeId
+  );
+  const toTableShape = editor.getShape(shape.props.toTableShapeId as TLShapeId);
+  const fromTable = getSqlErdTableBoundsFromShape(fromTableShape);
+  const toTable = getSqlErdTableBoundsFromShape(toTableShape);
+
+  if (!fromTable || !toTable) {
+    return null;
+  }
+
+  return getSqlErdRelationShapeLayout(fromTable, toTable, {
+    fromColumnIds: [shape.props.fromColumnId],
+    toColumnIds: [shape.props.toColumnId]
+  });
+}
+
+function getSqlErdAnnotationShapeUpdates(
+  editor: Editor
+): TLShapePartial<SqlErdAnnotationShape>[] {
+  const updates: TLShapePartial<SqlErdAnnotationShape>[] = [];
+
+  for (const shape of editor.getCurrentPageShapes()) {
+    if (!isSqlErdAnnotationShape(shape)) {
+      continue;
+    }
+
+    const layout = getSqlErdAnnotationShapeLayoutFromEditor(editor, shape);
+
+    if (!layout || isSqlErdAnnotationLayoutEqual(shape, layout)) {
+      continue;
+    }
+
+    updates.push({
+      id: shape.id,
+      type: SQLTOERD_ANNOTATION_SHAPE_TYPE,
+      x: layout.x,
+      y: layout.y,
+      props: {
+        ...shape.props,
+        w: layout.w,
+        h: layout.h,
+        endSide: layout.endSide,
+        points: layout.points,
+        startSide: layout.startSide
+      }
+    });
+  }
+
+  return updates;
+}
+
+function isSqlErdAnnotationLayoutEqual(
+  shape: SqlErdAnnotationShape,
+  layout: SqlErdRelationShapeLayout
+) {
+  return (
+    Math.abs(shape.x - layout.x) < 0.01 &&
+    Math.abs(shape.y - layout.y) < 0.01 &&
+    Math.abs(shape.props.w - layout.w) < 0.01 &&
+    Math.abs(shape.props.h - layout.h) < 0.01 &&
+    shape.props.startSide === layout.startSide &&
+    shape.props.endSide === layout.endSide &&
+    areSqlErdRelationPointsEqual(shape.props.points, layout.points)
+  );
+}
+
+export function syncSqlErdAnnotationShapes(editor: Editor) {
+  const updates = getSqlErdAnnotationShapeUpdates(editor);
+
+  if (!updates.length) {
+    return 0;
+  }
+
+  editor.run(
+    () => {
+      editor.updateShapes(updates);
+    },
+    { history: "ignore" }
+  );
+
+  return updates.length;
+}
+
 function areSqlErdSelectionsEqual(
   left: SqlErdSelection,
   right: SqlErdSelection
@@ -397,6 +586,18 @@ function getSqlErdSelectionFromEditor(editor: Editor): SqlErdSelection {
   return getSqlErdSelectionFromSelectedShapes(editor.getSelectedShapes());
 }
 
+function isSqlErdBackgroundLineShapePartial(shape: TLShapePartial) {
+  return shape.type === SQLTOERD_RELATION_SHAPE_TYPE;
+}
+
+function isSqlErdCanvasShape(shape: TLShape) {
+  return (
+    isSqlErdTableShape(shape) ||
+    isSqlErdRelationShape(shape) ||
+    isSqlErdAnnotationShape(shape)
+  );
+}
+
 function resetSqlErdCanvas(
   editor: Editor,
   shapes: TLShapePartial[],
@@ -420,7 +621,7 @@ function resetSqlErdCanvas(
       editor.createShapes(shapes);
       editor.sendToBack(
         shapes
-          .filter((shape) => shape.type === SQLTOERD_RELATION_SHAPE_TYPE)
+          .filter(isSqlErdBackgroundLineShapePartial)
           .map((shape) => shape.id as TLShapeId)
       );
     },
@@ -437,9 +638,7 @@ function resetSqlErdCanvas(
 function shouldResetSqlErdCanvas(editor: Editor, shapes: TLShapePartial[]) {
   const currentSqlErdShapes = editor
     .getCurrentPageShapes()
-    .filter(
-      (shape) => isSqlErdTableShape(shape) || isSqlErdRelationShape(shape)
-    );
+    .filter(isSqlErdCanvasShape);
 
   if (!currentSqlErdShapes.length) {
     return true;
@@ -479,6 +678,25 @@ function preserveSqlErdTableInteractionState(
   };
 }
 
+function preserveSqlErdAnnotationInteractionState(
+  editor: Editor,
+  shape: TLShapePartial<SqlErdAnnotationShape>
+): TLShapePartial<SqlErdAnnotationShape> {
+  const currentShape = editor.getShape(shape.id as TLShapeId);
+
+  if (!isSqlErdAnnotationShape(currentShape) || !shape.props) {
+    return shape;
+  }
+
+  return {
+    ...shape,
+    props: {
+      ...shape.props,
+      selected: currentShape.props.selected
+    }
+  };
+}
+
 function applySqlErdCanvasShapes(editor: Editor, shapes: TLShapePartial[]) {
   if (shouldResetSqlErdCanvas(editor, shapes)) {
     resetSqlErdCanvas(editor, shapes);
@@ -493,6 +711,11 @@ function applySqlErdCanvasShapes(editor: Editor, shapes: TLShapePartial[]) {
             editor,
             shape as TLShapePartial<SqlErdTableShape>
           )
+        : shape.type === SQLTOERD_ANNOTATION_SHAPE_TYPE
+          ? preserveSqlErdAnnotationInteractionState(
+              editor,
+              shape as TLShapePartial<SqlErdAnnotationShape>
+            )
         : shape
     );
 
@@ -505,7 +728,7 @@ function applySqlErdCanvasShapes(editor: Editor, shapes: TLShapePartial[]) {
       editor.updateShapes(updates);
       editor.sendToBack(
         shapes
-          .filter((shape) => shape.type === SQLTOERD_RELATION_SHAPE_TYPE)
+          .filter(isSqlErdBackgroundLineShapePartial)
           .map((shape) => shape.id as TLShapeId)
       );
     },
@@ -633,6 +856,38 @@ function isSqlErdRelationShapePartialApplied(
   );
 }
 
+function isSqlErdAnnotationShapePartialApplied(
+  currentShape: TLShape | null | undefined,
+  nextShape: TLShapePartial<SqlErdAnnotationShape>
+) {
+  const nextProps = nextShape.props;
+
+  if (
+    !isSqlErdAnnotationShape(currentShape) ||
+    !nextProps?.points
+  ) {
+    return false;
+  }
+
+  return (
+    areShapeNumbersEqual(currentShape.x, nextShape.x) &&
+    areShapeNumbersEqual(currentShape.y, nextShape.y) &&
+    areShapeNumbersEqual(currentShape.props.w, nextProps.w) &&
+    areShapeNumbersEqual(currentShape.props.h, nextProps.h) &&
+    currentShape.props.annotationId === nextProps.annotationId &&
+    currentShape.props.fromTableId === nextProps.fromTableId &&
+    currentShape.props.fromColumnId === nextProps.fromColumnId &&
+    currentShape.props.toTableId === nextProps.toTableId &&
+    currentShape.props.toColumnId === nextProps.toColumnId &&
+    currentShape.props.fromTableShapeId === nextProps.fromTableShapeId &&
+    currentShape.props.toTableShapeId === nextProps.toTableShapeId &&
+    currentShape.props.label === nextProps.label &&
+    currentShape.props.startSide === nextProps.startSide &&
+    currentShape.props.endSide === nextProps.endSide &&
+    areSqlErdRelationPointsEqual(currentShape.props.points, nextProps.points)
+  );
+}
+
 function isSqlErdCanvasShapePartialApplied(
   editor: Editor,
   shape: TLShapePartial
@@ -653,6 +908,13 @@ function isSqlErdCanvasShapePartialApplied(
     );
   }
 
+  if (shape.type === SQLTOERD_ANNOTATION_SHAPE_TYPE) {
+    return isSqlErdAnnotationShapePartialApplied(
+      currentShape,
+      shape as TLShapePartial<SqlErdAnnotationShape>
+    );
+  }
+
   return false;
 }
 
@@ -662,9 +924,7 @@ function areSqlErdCanvasShapesApplied(
 ) {
   const currentSqlErdShapeCount = editor
     .getCurrentPageShapes()
-    .filter(
-      (shape) => isSqlErdTableShape(shape) || isSqlErdRelationShape(shape)
-    ).length;
+    .filter(isSqlErdCanvasShape).length;
 
   return (
     currentSqlErdShapeCount === shapes.length &&
@@ -700,6 +960,7 @@ function SqlErdRelationLayoutSync() {
 
       try {
         syncSqlErdRelationShapes(editor);
+        syncSqlErdAnnotationShapes(editor);
       } finally {
         isSyncingRef.current = false;
       }
@@ -1050,6 +1311,513 @@ function SqlErdRelationHighlightSync({
   return null;
 }
 
+type SqlErdColumnConnectorDrag = SqlErdColumnConnectStartEventDetail & {
+  currentClientX: number;
+  currentClientY: number;
+};
+
+type SqlErdColumnAnnotationInteractionSyncProps = {
+  layoutJson: SqltoerdLayoutJsonV1;
+  modelJson: SqltoerdModelJsonV1;
+  onLayoutChange: (layoutJson: SqltoerdLayoutJsonV1) => void;
+};
+
+function getSqlErdAnnotationSelectionUpdates(
+  editor: Editor,
+  selectedAnnotationId: string | null
+) {
+  return editor
+    .getCurrentPageShapes()
+    .filter(isSqlErdAnnotationShape)
+    .flatMap((shape): TLShapePartial<SqlErdAnnotationShape>[] => {
+      const selected = shape.props.annotationId === selectedAnnotationId;
+
+      if (shape.props.selected === selected) {
+        return [];
+      }
+
+      return [
+        {
+          id: shape.id,
+          type: SQLTOERD_ANNOTATION_SHAPE_TYPE,
+          props: {
+            ...shape.props,
+            selected
+          }
+        }
+      ];
+    });
+}
+
+function selectSqlErdAnnotationShape(
+  editor: Editor,
+  annotationId: string,
+  selectionSyncGuard: { current: boolean }
+) {
+  const shapeId = getSqlErdAnnotationShapeId(annotationId);
+  const updates = getSqlErdAnnotationSelectionUpdates(editor, annotationId);
+
+  selectionSyncGuard.current = true;
+
+  try {
+    editor.run(
+      () => {
+        if (editor.getShape(shapeId)) {
+          editor.select(shapeId);
+        }
+
+        if (updates.length) {
+          editor.updateShapes(updates);
+        }
+      },
+      { history: "ignore" }
+    );
+  } finally {
+    selectionSyncGuard.current = false;
+  }
+}
+
+function syncSqlErdAnnotationSelectionFromEditor(editor: Editor) {
+  const selectedShape = editor.getOnlySelectedShape();
+  const selectedAnnotationId = isSqlErdAnnotationShape(selectedShape)
+    ? selectedShape.props.annotationId
+    : null;
+  const updates = getSqlErdAnnotationSelectionUpdates(
+    editor,
+    selectedAnnotationId
+  );
+
+  if (!updates.length) {
+    return;
+  }
+
+  editor.run(() => editor.updateShapes(updates), { history: "ignore" });
+}
+
+function parseColumnConnectStartDetail(
+  detail: unknown
+): SqlErdColumnConnectStartEventDetail | null {
+  if (!detail || typeof detail !== "object") {
+    return null;
+  }
+
+  const value = detail as Partial<SqlErdColumnConnectStartEventDetail>;
+
+  if (
+    typeof value.clientX !== "number" ||
+    typeof value.clientY !== "number" ||
+    typeof value.columnId !== "string" ||
+    typeof value.pointerId !== "number" ||
+    (value.side !== "left" && value.side !== "right") ||
+    typeof value.tableId !== "string"
+  ) {
+    return null;
+  }
+
+  return {
+    clientX: value.clientX,
+    clientY: value.clientY,
+    columnId: value.columnId,
+    pointerId: value.pointerId,
+    side: value.side,
+    tableId: value.tableId
+  };
+}
+
+function getColumnConnectorTargetAtPoint(clientX: number, clientY: number) {
+  const target = document
+    .elementFromPoint(clientX, clientY)
+    ?.closest<HTMLElement>(
+      "[data-sqltoerd-column-port-hit], [role='button'][data-sqltoerd-column-id][data-sqltoerd-table-id]"
+    );
+  const tableId = target?.dataset.sqltoerdTableId;
+  const columnId = target?.dataset.sqltoerdColumnId;
+
+  return tableId && columnId ? { tableId, columnId } : null;
+}
+
+function createSqlErdColumnAnnotationId() {
+  const uniqueValue =
+    typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+  return `annotation.${uniqueValue}`;
+}
+
+function getColumnAnnotationBlockMessage(
+  reason:
+    | "annotation_exists"
+    | "annotation_limit"
+    | "foreign_key_exists"
+    | "invalid_endpoint"
+    | "same_endpoint"
+) {
+  switch (reason) {
+    case "annotation_exists":
+      return "두 컬럼 사이에 이미 설명 관계가 있습니다.";
+    case "annotation_limit":
+      return "설명 관계는 최대 300개까지 추가할 수 있습니다.";
+    case "foreign_key_exists":
+      return "두 컬럼은 이미 SQL FK 관계로 연결되어 있습니다.";
+    case "same_endpoint":
+      return "같은 컬럼끼리는 설명 관계를 만들 수 없습니다.";
+    default:
+      return "연결할 컬럼을 찾을 수 없습니다.";
+  }
+}
+
+function SqlErdColumnAnnotationInteractionSync({
+  layoutJson,
+  modelJson,
+  onLayoutChange
+}: SqlErdColumnAnnotationInteractionSyncProps) {
+  const editor = useEditor();
+  const [drag, setDrag] = useState<SqlErdColumnConnectorDrag | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const dragRef = useRef<SqlErdColumnConnectorDrag | null>(null);
+  const layoutJsonRef = useRef(layoutJson);
+  const messageTimeoutRef = useRef<number | null>(null);
+  const modelJsonRef = useRef(modelJson);
+  const onLayoutChangeRef = useRef(onLayoutChange);
+  const selectionSyncGuardRef = useRef(false);
+
+  useEffect(() => {
+    layoutJsonRef.current = layoutJson;
+  }, [layoutJson]);
+
+  useEffect(() => {
+    modelJsonRef.current = modelJson;
+  }, [modelJson]);
+
+  useEffect(() => {
+    onLayoutChangeRef.current = onLayoutChange;
+  }, [onLayoutChange]);
+
+  useEffect(() => {
+    function showMessage(nextMessage: string) {
+      setMessage(nextMessage);
+
+      if (messageTimeoutRef.current !== null) {
+        window.clearTimeout(messageTimeoutRef.current);
+      }
+
+      messageTimeoutRef.current = window.setTimeout(() => {
+        messageTimeoutRef.current = null;
+        setMessage(null);
+      }, 2600);
+    }
+
+    function publishLayout(nextLayoutJson: SqltoerdLayoutJsonV1) {
+      if (areSqltoerdLayoutsEqual(layoutJsonRef.current, nextLayoutJson)) {
+        return;
+      }
+
+      layoutJsonRef.current = nextLayoutJson;
+      onLayoutChangeRef.current(nextLayoutJson);
+    }
+
+    function handleConnectStart(event: Event) {
+      const detail = parseColumnConnectStartDetail(
+        (event as CustomEvent).detail
+      );
+
+      if (!detail) {
+        return;
+      }
+
+      const nextDrag = {
+        ...detail,
+        currentClientX: detail.clientX,
+        currentClientY: detail.clientY
+      };
+
+      dragRef.current = nextDrag;
+      setDrag(nextDrag);
+      setMessage(null);
+    }
+
+    function handlePointerMove(event: globalThis.PointerEvent) {
+      const currentDrag = dragRef.current;
+
+      if (!currentDrag || currentDrag.pointerId !== event.pointerId) {
+        return;
+      }
+
+      const nextDrag = {
+        ...currentDrag,
+        currentClientX: event.clientX,
+        currentClientY: event.clientY
+      };
+
+      dragRef.current = nextDrag;
+      setDrag(nextDrag);
+    }
+
+    function clearDrag() {
+      dragRef.current = null;
+      setDrag(null);
+    }
+
+    function handlePointerUp(event: globalThis.PointerEvent) {
+      const currentDrag = dragRef.current;
+
+      if (!currentDrag || currentDrag.pointerId !== event.pointerId) {
+        return;
+      }
+
+      const target = getColumnConnectorTargetAtPoint(
+        event.clientX,
+        event.clientY
+      );
+      clearDrag();
+
+      if (!target) {
+        return;
+      }
+
+      const annotation: SqltoerdColumnAnnotationLink = {
+        id: createSqlErdColumnAnnotationId(),
+        kind: "column_link",
+        fromTableId: currentDrag.tableId,
+        fromColumnId: currentDrag.columnId,
+        toTableId: target.tableId,
+        toColumnId: target.columnId,
+        label: ""
+      };
+      const result = addSqltoerdColumnAnnotation(
+        modelJsonRef.current,
+        layoutJsonRef.current,
+        annotation
+      );
+
+      if (!result.ok) {
+        showMessage(getColumnAnnotationBlockMessage(result.reason));
+        return;
+      }
+
+      const tableShapes = editor
+        .getCurrentPageShapes()
+        .filter(isSqlErdTableShape);
+      const annotationShape = createSqltoerdAnnotationShapes(
+        modelJsonRef.current,
+        result.layoutJson,
+        tableShapes
+      ).find((shape) => shape.props?.annotationId === annotation.id);
+
+      if (annotationShape) {
+        editor.run(
+          () => {
+            editor.createShape(annotationShape);
+          },
+          { history: "ignore" }
+        );
+      }
+
+      publishLayout(result.layoutJson);
+
+      window.requestAnimationFrame(() => {
+        selectSqlErdAnnotationShape(
+          editor,
+          annotation.id,
+          selectionSyncGuardRef
+        );
+      });
+    }
+
+    function handlePointerCancel(event: globalThis.PointerEvent) {
+      if (dragRef.current?.pointerId === event.pointerId) {
+        clearDrag();
+      }
+    }
+
+    function deleteAnnotation(annotationId: string) {
+      const shapeId = getSqlErdAnnotationShapeId(annotationId);
+
+      if (editor.getShape(shapeId)) {
+        editor.run(() => editor.deleteShapes([shapeId]), { history: "ignore" });
+      }
+
+      publishLayout(
+        removeSqltoerdAnnotation(layoutJsonRef.current, annotationId)
+      );
+    }
+
+    function isEditableKeyboardTarget(target: EventTarget | null) {
+      return (
+        target instanceof HTMLElement &&
+        (target.isContentEditable ||
+          target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.tagName === "SELECT")
+      );
+    }
+
+    function handleKeyDown(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape" && dragRef.current) {
+        clearDrag();
+        return;
+      }
+
+      if (
+        (event.key === "Delete" || event.key === "Backspace") &&
+        !isEditableKeyboardTarget(event.target)
+      ) {
+        const selectedShape = editor.getOnlySelectedShape();
+
+        if (isSqlErdAnnotationShape(selectedShape)) {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          deleteAnnotation(selectedShape.props.annotationId);
+        }
+      }
+    }
+
+    function handleLabelChange(event: Event) {
+      const detail = (event as CustomEvent<SqlErdAnnotationLabelChangeEventDetail>)
+        .detail;
+
+      if (
+        !detail ||
+        typeof detail.annotationId !== "string" ||
+        typeof detail.label !== "string"
+      ) {
+        return;
+      }
+
+      publishLayout(
+        updateSqltoerdAnnotationLabel(
+          layoutJsonRef.current,
+          detail.annotationId,
+          detail.label
+        )
+      );
+    }
+
+    function handleDelete(event: Event) {
+      const detail = (event as CustomEvent<SqlErdAnnotationDeleteEventDetail>)
+        .detail;
+
+      if (!detail || typeof detail.annotationId !== "string") {
+        return;
+      }
+
+      deleteAnnotation(detail.annotationId);
+    }
+
+    function handleAnnotationSelect(event: Event) {
+      const detail = (event as CustomEvent<SqlErdAnnotationSelectEventDetail>)
+        .detail;
+
+      if (!detail || typeof detail.annotationId !== "string") {
+        return;
+      }
+
+      window.requestAnimationFrame(() => {
+        selectSqlErdAnnotationShape(
+          editor,
+          detail.annotationId,
+          selectionSyncGuardRef
+        );
+      });
+    }
+
+    const removeAnnotationSelectionListener = editor.store.listen(
+      () => {
+        if (!selectionSyncGuardRef.current) {
+          syncSqlErdAnnotationSelectionFromEditor(editor);
+        }
+      },
+      {
+        scope: "all",
+        source: "all"
+      }
+    );
+
+    window.addEventListener(
+      SQLTOERD_COLUMN_CONNECT_START_EVENT,
+      handleConnectStart
+    );
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    window.addEventListener("pointercancel", handlePointerCancel);
+    window.addEventListener("keydown", handleKeyDown, true);
+    window.addEventListener(
+      SQLTOERD_ANNOTATION_LABEL_CHANGE_EVENT,
+      handleLabelChange
+    );
+    window.addEventListener(SQLTOERD_ANNOTATION_DELETE_EVENT, handleDelete);
+    window.addEventListener(SQLTOERD_ANNOTATION_SELECT_EVENT, handleAnnotationSelect);
+
+    return () => {
+      removeAnnotationSelectionListener();
+      window.removeEventListener(
+        SQLTOERD_COLUMN_CONNECT_START_EVENT,
+        handleConnectStart
+      );
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointercancel", handlePointerCancel);
+      window.removeEventListener("keydown", handleKeyDown, true);
+      window.removeEventListener(
+        SQLTOERD_ANNOTATION_LABEL_CHANGE_EVENT,
+        handleLabelChange
+      );
+      window.removeEventListener(
+        SQLTOERD_ANNOTATION_DELETE_EVENT,
+        handleDelete
+      );
+      window.removeEventListener(
+        SQLTOERD_ANNOTATION_SELECT_EVENT,
+        handleAnnotationSelect
+      );
+
+      if (messageTimeoutRef.current !== null) {
+        window.clearTimeout(messageTimeoutRef.current);
+      }
+    };
+  }, [editor]);
+
+  const previewPath = drag
+    ? `M ${drag.clientX} ${drag.clientY} C ${
+        (drag.clientX + drag.currentClientX) / 2
+      } ${drag.clientY}, ${(drag.clientX + drag.currentClientX) / 2} ${
+        drag.currentClientY
+      }, ${drag.currentClientX} ${drag.currentClientY}`
+    : null;
+
+  return (
+    <>
+      {previewPath ? (
+        <svg
+          aria-hidden="true"
+          className="pointer-events-none fixed inset-0 z-[100] h-screen w-screen"
+          data-sqltoerd-annotation-preview
+        >
+          <path
+            d={previewPath}
+            fill="none"
+            stroke="#64748b"
+            strokeDasharray="8 6"
+            strokeLinecap="round"
+            strokeWidth="2"
+          />
+        </svg>
+      ) : null}
+      {message ? (
+        <div
+          aria-live="polite"
+          className="pointer-events-none fixed left-1/2 top-20 z-[101] -translate-x-1/2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-md"
+          data-sqltoerd-annotation-message
+          role="status"
+        >
+          {message}
+        </div>
+      ) : null}
+    </>
+  );
+}
+
 function getSqlErdTablePositionsFromEditor(
   editor: Editor
 ): SqltoerdTablePosition[] {
@@ -1160,6 +1928,66 @@ export function SqlErdCanvas({
     },
     []
   );
+  const handlePointerDownCapture = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      const eventTarget = event.target as Element;
+      const annotationTarget = eventTarget.closest<HTMLElement>(
+        "[data-sqltoerd-annotation-id]"
+      );
+      const annotationId = annotationTarget?.dataset.sqltoerdAnnotationId;
+
+      if (annotationId) {
+        window.dispatchEvent(
+          new CustomEvent<SqlErdAnnotationSelectEventDetail>(
+            SQLTOERD_ANNOTATION_SELECT_EVENT,
+            { detail: { annotationId } }
+          )
+        );
+
+        if (eventTarget.closest("[data-sqltoerd-annotation-delete]")) {
+          event.preventDefault();
+          event.stopPropagation();
+          window.dispatchEvent(
+            new CustomEvent<SqlErdAnnotationDeleteEventDetail>(
+              SQLTOERD_ANNOTATION_DELETE_EVENT,
+              { detail: { annotationId } }
+            )
+          );
+          return;
+        }
+      }
+
+      const port = eventTarget.closest<HTMLElement>(
+        "[data-sqltoerd-column-port-hit]"
+      );
+      const columnId = port?.dataset.sqltoerdColumnId;
+      const side = port?.dataset.sqltoerdColumnPort;
+      const tableId = port?.dataset.sqltoerdTableId;
+
+      if (
+        !port ||
+        !columnId ||
+        (side !== "left" && side !== "right") ||
+        !tableId ||
+        event.button !== 0 ||
+        !event.isPrimary
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      startSqlErdColumnConnection({
+        clientX: event.clientX,
+        clientY: event.clientY,
+        columnId,
+        pointerId: event.pointerId,
+        side,
+        tableId
+      });
+    },
+    []
+  );
 
   return (
     <TldrawSurface
@@ -1170,6 +1998,7 @@ export function SqlErdCanvas({
       components={sqlErdTldrawComponents}
       hideUi
       onMount={handleMount}
+      onPointerDownCapture={handlePointerDownCapture}
       shapeUtils={sqlErdShapeUtils}
     >
       <SqlErdCanvasShapeSync shapes={shapes} />
@@ -1180,11 +2009,18 @@ export function SqlErdCanvas({
       />
       <SqlErdSelectedColumnSync selectedSqlErdObject={selectedSqlErdObject} />
       {onLayoutChange ? (
-        <SqlErdLayoutSync
-          layoutJson={layoutJson}
-          modelJson={modelJson}
-          onLayoutChange={onLayoutChange}
-        />
+        <>
+          <SqlErdColumnAnnotationInteractionSync
+            layoutJson={layoutJson}
+            modelJson={modelJson}
+            onLayoutChange={onLayoutChange}
+          />
+          <SqlErdLayoutSync
+            layoutJson={layoutJson}
+            modelJson={modelJson}
+            onLayoutChange={onLayoutChange}
+          />
+        </>
       ) : null}
       {onSelectionChange ? (
         <SqlErdSelectionSync

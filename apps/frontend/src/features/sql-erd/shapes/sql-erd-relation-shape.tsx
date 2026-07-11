@@ -51,7 +51,7 @@ export type SqlErdRelationShapeLayout = {
   startSide: RelationPortSide;
 };
 
-type RelationPortSide = "left" | "right";
+export type RelationPortSide = "left" | "right";
 
 type RelationAnchors = {
   endX: number;
@@ -498,7 +498,7 @@ export function getSqlErdRelationRoutePoints(
   ];
 }
 
-function getRelationCurvePathData(
+export function getSqlErdRelationCurvePathData(
   points: SqlErdRelationRoutePoint[],
   startSide: RelationPortSide,
   endSide: RelationPortSide
@@ -518,6 +518,39 @@ function getRelationCurvePathData(
   }
 
   return `M ${startPoint.x} ${startPoint.y} C ${controlPointOne.x} ${controlPointOne.y}, ${controlPointTwo.x} ${controlPointTwo.y}, ${endPoint.x} ${endPoint.y}`;
+}
+
+export function getSqlErdRelationCurveMidpoint(
+  points: SqlErdRelationRoutePoint[],
+  startSide: RelationPortSide,
+  endSide: RelationPortSide
+): SqlErdRelationRoutePoint {
+  const startPoint = points[0] ?? { x: 0, y: 0 };
+  const endPoint = points.at(-1) ?? startPoint;
+  const [controlPointOne, controlPointTwo] =
+    getRelationCurveControlPoints(points, startSide, endSide);
+
+  if (!controlPointOne || !controlPointTwo) {
+    return {
+      x: (startPoint.x + endPoint.x) / 2,
+      y: (startPoint.y + endPoint.y) / 2
+    };
+  }
+
+  return {
+    x:
+      (startPoint.x +
+        3 * controlPointOne.x +
+        3 * controlPointTwo.x +
+        endPoint.x) /
+      8,
+    y:
+      (startPoint.y +
+        3 * controlPointOne.y +
+        3 * controlPointTwo.y +
+        endPoint.y) /
+      8
+  };
 }
 
 function getRelationCurveControlPoints(
@@ -562,7 +595,7 @@ function getRelationCurveBoundsPoints(
   ];
 }
 
-function getRelationCurveGeometryPoints(
+export function getSqlErdRelationCurveGeometryPoints(
   points: SqlErdRelationRoutePoint[],
   startSide: RelationPortSide,
   endSide: RelationPortSide
@@ -739,7 +772,7 @@ function SqlErdRelationLine({ shape }: { shape: SqlErdRelationShape }) {
     () => editor.getOnlySelectedShape()?.id === shape.id,
     [editor, shape.id]
   );
-  const pathData = getRelationCurvePathData(
+  const pathData = getSqlErdRelationCurvePathData(
     shape.props.points,
     shape.props.startSide,
     shape.props.endSide
@@ -904,7 +937,7 @@ export class SqlErdRelationShapeUtil extends ShapeUtil<SqlErdRelationShape> {
 
   override getGeometry(shape: SqlErdRelationShape) {
     return new Polyline2d({
-      points: getRelationCurveGeometryPoints(
+      points: getSqlErdRelationCurveGeometryPoints(
         shape.props.points,
         shape.props.startSide,
         shape.props.endSide
@@ -926,7 +959,7 @@ export class SqlErdRelationShapeUtil extends ShapeUtil<SqlErdRelationShape> {
 
   override getIndicatorPath(shape: SqlErdRelationShape) {
     return new Path2D(
-      getRelationCurvePathData(
+      getSqlErdRelationCurvePathData(
         shape.props.points,
         shape.props.startSide,
         shape.props.endSide

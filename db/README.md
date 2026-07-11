@@ -44,3 +44,7 @@ The database schema source of truth is the migration history in `db/migrations/`
 - `migrations/025_create_github_project_v2_selections.sql` adds selected GitHub ProjectV2 storage per installation with RLS enabled.
 - `migrations/026_replace_pilo_sticky_notes_with_tldraw_notes.sql` migrates saved custom PILO sticky notes to Tldraw built-in note shapes while preserving note text.
 - `migrations/027_create_canvas_agent_runtime.sql` adds Canvas AI runtime tables, per-user draft storage, semantic shape embeddings, and pgvector support for Canvas-only actions.
+- `migrations/028_add_queued_github_sync_status.sql` adds the queued GitHub sync status in a standalone transaction.
+- `migrations/029_create_github_sync_jobs.sql` adds durable GitHub worker job lease state and queued sync-run indexes for asynchronous GitHub synchronization.
+- `migrations/030_enable_github_sync_jobs_rls.sql` enables all-deny RLS for durable GitHub sync worker jobs.
+- `migrations/031_create_pr_review_analysis_jobs.sql` adds asynchronous PR Review analysis jobs, durable SQS publish state, analysis failure fields, and duplicate-analyzing-session protection.

@@ -4,6 +4,7 @@ import type {
   ErdTable,
   SqltoerdAnnotationLink,
   SqltoerdAnnotationsV1,
+  SqltoerdColumnAnnotationLink,
   SqltoerdLayoutJsonV1,
   SqltoerdModelCounts,
   SqltoerdModelJsonV1,
@@ -41,6 +42,23 @@ export type SqltoerdTablePosition = Pick<
   SqltoerdTableLayout,
   "tableId" | "x" | "y"
 >;
+
+export type SqltoerdColumnAnnotationAddFailureReason =
+  | "annotation_exists"
+  | "annotation_limit"
+  | "foreign_key_exists"
+  | "invalid_endpoint"
+  | "same_endpoint";
+
+export type SqltoerdColumnAnnotationAddResult =
+  | {
+      ok: true;
+      layoutJson: SqltoerdLayoutJsonV1;
+    }
+  | {
+      ok: false;
+      reason: SqltoerdColumnAnnotationAddFailureReason;
+    };
 
 export function getSqltoerdModelCounts(
   modelJson: SqltoerdModelJsonV1
@@ -158,6 +176,183 @@ export function areSqltoerdLayoutsEqual(
     leftLayoutJson.annotations,
     rightLayoutJson.annotations
   );
+}
+
+export function addSqltoerdColumnAnnotation(
+  modelJson: SqltoerdModelJsonV1,
+  layoutJson: SqltoerdLayoutJsonV1,
+  annotation: SqltoerdColumnAnnotationLink
+): SqltoerdColumnAnnotationAddResult {
+  if ((layoutJson.annotations?.links.length ?? 0) >= 300) {
+    return { ok: false, reason: "annotation_limit" };
+  }
+
+  const modelIndex = createSqltoerdModelIndex(modelJson);
+  const fromEndpoint = getSqltoerdColumnAnnotationEndpoint(
+    annotation.fromTableId,
+    annotation.fromColumnId
+  );
+  const toEndpoint = getSqltoerdColumnAnnotationEndpoint(
+    annotation.toTableId,
+    annotation.toColumnId
+  );
+
+  if (
+    !modelIndex.columnsByTableId
+      .get(annotation.fromTableId)
+      ?.has(annotation.fromColumnId) ||
+    !modelIndex.columnsByTableId
+      .get(annotation.toTableId)
+      ?.has(annotation.toColumnId)
+  ) {
+    return { ok: false, reason: "invalid_endpoint" };
+  }
+
+  if (fromEndpoint === toEndpoint) {
+    return { ok: false, reason: "same_endpoint" };
+  }
+
+  const annotationKey = getSqltoerdUndirectedEndpointKey(
+    fromEndpoint,
+    toEndpoint
+  );
+
+  if (hasSqltoerdColumnAnnotationForeignKeyConflict(modelJson, annotation)) {
+    return { ok: false, reason: "foreign_key_exists" };
+  }
+
+  if (
+    layoutJson.annotations?.links.some(
+      (link) =>
+        link.kind === "column_link" &&
+        getSqltoerdUndirectedEndpointKey(
+          getSqltoerdColumnAnnotationEndpoint(
+            link.fromTableId,
+            link.fromColumnId
+          ),
+          getSqltoerdColumnAnnotationEndpoint(link.toTableId, link.toColumnId)
+        ) === annotationKey
+    )
+  ) {
+    return { ok: false, reason: "annotation_exists" };
+  }
+
+  return {
+    ok: true,
+    layoutJson: {
+      ...layoutJson,
+      annotations: {
+        version: 1,
+        links: [...(layoutJson.annotations?.links ?? []), annotation]
+      }
+    }
+  };
+}
+
+export function getSqltoerdRenderableAnnotations(
+  modelJson: SqltoerdModelJsonV1,
+  annotations: SqltoerdAnnotationsV1 | undefined
+): SqltoerdAnnotationsV1 | undefined {
+  if (!annotations) {
+    return undefined;
+  }
+
+  return {
+    ...annotations,
+    links: annotations.links.filter(
+      (annotation) =>
+        annotation.kind !== "column_link" ||
+        !hasSqltoerdColumnAnnotationForeignKeyConflict(modelJson, annotation)
+    )
+  };
+}
+
+function hasSqltoerdColumnAnnotationForeignKeyConflict(
+  modelJson: SqltoerdModelJsonV1,
+  annotation: SqltoerdColumnAnnotationLink
+) {
+  const annotationKey = getSqltoerdUndirectedEndpointKey(
+    getSqltoerdColumnAnnotationEndpoint(
+      annotation.fromTableId,
+      annotation.fromColumnId
+    ),
+    getSqltoerdColumnAnnotationEndpoint(
+      annotation.toTableId,
+      annotation.toColumnId
+    )
+  );
+
+  return modelJson.schema.relations.some((relation) =>
+    relation.fromColumnIds.some((fromColumnId, index) => {
+      const toColumnId = relation.toColumnIds[index];
+
+      return (
+        typeof toColumnId === "string" &&
+        getSqltoerdUndirectedEndpointKey(
+          getSqltoerdColumnAnnotationEndpoint(
+            relation.fromTableId,
+            fromColumnId
+          ),
+          getSqltoerdColumnAnnotationEndpoint(relation.toTableId, toColumnId)
+        ) === annotationKey
+      );
+    })
+  );
+}
+
+export function updateSqltoerdAnnotationLabel(
+  layoutJson: SqltoerdLayoutJsonV1,
+  annotationId: string,
+  label: string
+): SqltoerdLayoutJsonV1 {
+  if (!layoutJson.annotations) {
+    return layoutJson;
+  }
+
+  return {
+    ...layoutJson,
+    annotations: {
+      ...layoutJson.annotations,
+      links: layoutJson.annotations.links.map((annotation) =>
+        annotation.id === annotationId ? { ...annotation, label } : annotation
+      )
+    }
+  };
+}
+
+export function removeSqltoerdAnnotation(
+  layoutJson: SqltoerdLayoutJsonV1,
+  annotationId: string
+): SqltoerdLayoutJsonV1 {
+  if (!layoutJson.annotations) {
+    return layoutJson;
+  }
+
+  return {
+    ...layoutJson,
+    annotations: {
+      ...layoutJson.annotations,
+      links: layoutJson.annotations.links.filter(
+        (annotation) => annotation.id !== annotationId
+      )
+    }
+  };
+}
+
+function getSqltoerdColumnAnnotationEndpoint(
+  tableId: string,
+  columnId: string
+) {
+  return JSON.stringify([tableId, columnId]);
+}
+
+function getSqltoerdUndirectedEndpointKey(
+  leftEndpoint: string,
+  rightEndpoint: string
+) {
+  return leftEndpoint < rightEndpoint
+    ? `${leftEndpoint}:${rightEndpoint}`
+    : `${rightEndpoint}:${leftEndpoint}`;
 }
 
 export function createSqltoerdModelIndex(

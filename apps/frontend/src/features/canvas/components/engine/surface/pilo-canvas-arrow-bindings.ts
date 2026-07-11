@@ -130,14 +130,23 @@ function toArrowBindingSnapshot(
   };
 }
 
+function getArrowBindingSnapshotKey(snapshot: PiloArrowBindingSnapshot) {
+  return [
+    snapshot.fromId,
+    snapshot.toId,
+    snapshot.props.terminal,
+    snapshot.props.normalizedAnchor.x,
+    snapshot.props.normalizedAnchor.y,
+  ].join("|");
+}
+
 function hasArrowBindingSnapshot(
   binding: TLArrowBinding,
   snapshot: PiloArrowBindingSnapshot,
 ) {
   return (
-    binding.fromId === snapshot.fromId &&
-    binding.toId === snapshot.toId &&
-    binding.props.terminal === snapshot.props.terminal
+    getArrowBindingSnapshotKey(toArrowBindingSnapshot(binding)) ===
+    getArrowBindingSnapshotKey(snapshot)
   );
 }
 
@@ -250,4 +259,41 @@ export function restoreSerializedArrowBindings(
     pending,
     restored: createBindings.length,
   };
+}
+
+export function removeStaleSerializedArrowBindings(
+  editor: Editor,
+  shapes: PiloCanvasFreeformShape[],
+) {
+  const staleBindings: TLArrowBinding[] = [];
+
+  shapes.forEach((shape) => {
+    const shapeId = typeof shape.id === "string" ? shape.id : null;
+    const desiredBindings = readSerializedArrowBindings(shape);
+
+    if (shape.type !== "arrow" || !shapeId || !desiredBindings.length) {
+      return;
+    }
+
+    const desiredBindingKeys = new Set(
+      desiredBindings.map(getArrowBindingSnapshotKey),
+    );
+
+    editor
+      .getBindingsInvolvingShape(shapeId as TLShapeId, "arrow")
+      .filter((binding) => binding.fromId === shapeId)
+      .forEach((binding) => {
+        const bindingKey = getArrowBindingSnapshotKey(
+          toArrowBindingSnapshot(binding),
+        );
+
+        if (!desiredBindingKeys.has(bindingKey)) {
+          staleBindings.push(binding);
+        }
+      });
+  });
+
+  if (staleBindings.length) {
+    editor.deleteBindings(staleBindings);
+  }
 }

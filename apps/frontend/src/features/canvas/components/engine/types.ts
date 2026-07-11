@@ -2,6 +2,15 @@ import type { TLCreateShapePartial, TLShape } from "tldraw";
 
 export type PiloCanvasFreeformShape = TLCreateShapePartial<TLShape>;
 
+export type PiloCanvasLocalInteractionState = {
+  currentToolId: string;
+  editingShapeId: string | null;
+  focusedGroupId: string | null;
+  isFocused: boolean;
+  protectedShapeIds: string[];
+  selectedShapeIds: string[];
+};
+
 export type PiloCanvasViewSetting = {
   zoom: number;
   viewportX: number;

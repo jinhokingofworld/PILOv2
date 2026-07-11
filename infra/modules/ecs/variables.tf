@@ -33,6 +33,7 @@ variable "services" {
     security_group_ids = list(string)
     task_role_arn      = string
     target_group_arn   = optional(string)
+    command            = optional(list(string))
     environment        = map(string)
     secrets            = map(string)
   }))

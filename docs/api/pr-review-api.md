@@ -66,6 +66,7 @@ comment, PR merge/close, ProjectV2 write는 이 문서의 범위가 아니다.
 | Method | Endpoint | 설명 |
 | --- | --- | --- |
 | `POST` | `/workspaces/{workspaceId}/github/pull-requests/{pullRequestId}/review-sessions` | Review session 생성 |
+| `POST` | `/workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}/retry` | Post-MVP 실패한 비동기 분석을 새 session으로 재시도 |
 | `GET` | `/workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}` | Review session 상세 조회 |
 | `PATCH` | `/workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}` | Review session 상태 수정 |
 | `DELETE` | `/workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}` | Review session 삭제 |
@@ -93,35 +94,291 @@ comment, PR merge/close, ProjectV2 write는 이 문서의 범위가 아니다.
 {}
 ```
 
-응답 주요 필드:
+성공 응답은 `201 Created`다. 분석 자체는 비동기로 진행하므로 응답은 분석 결과가 없는
+최소 session을 즉시 반환한다.
 
 ```json
 {
   "id": "review_session_uuid",
   "pullRequestId": "pull_request_uuid",
   "headSha": "abc123",
-  "status": "reviewing",
-  "prPurpose": "Why this PR exists",
-  "changeSummary": ["Summary item"],
-  "recommendedReviewOrder": "Review shared structure first",
-  "cautionPoints": ["Check auth edge cases"],
+  "status": "analyzing",
+  "prPurpose": null,
+  "changeSummary": [],
+  "recommendedReviewOrder": null,
+  "cautionPoints": [],
   "reviewedCount": 0,
-  "totalFileCount": 5,
+  "totalFileCount": 0,
   "conflictStatus": "clean",
+  "analysisError": null,
   "createdByUserId": "user_uuid"
 }
 ```
 
 서버 규칙:
 
-- GitHub Integration API로 PR 상세, 변경 파일, conflict 상태를 조회한다.
+- 생성 시 GitHub Integration API로 PR 상세와 conflict 상태를 조회한다. 변경 파일과
+  patch 조회, OpenAI 분석은 HTTP 요청 경로에서 수행하지 않는다.
 - 생성 시점의 `headSha`를 저장한다.
-- 파일 metadata는 `review_files`에 저장한다.
-- App Server는 PR 상세와 변경 파일 정보를 입력으로 AI 분석을 생성한다.
-- `OPENAI_API_KEY`가 있으면 OpenAI Responses API structured output을 사용하고, key 누락/API 실패/응답 검증 실패 시 deterministic fallback 결과를 저장한다.
-- Diff 생성에 필요한 patch 정보는 GitHub Integration API의 PR 변경 파일 응답을 기준으로 사용한다.
-- 같은 PR을 다시 리뷰하더라도 새 Review Session을 생성한다.
-- 중복 클릭 방지는 프론트 버튼 disabled와 서버의 진행 중 생성 요청 방어 로직으로 처리한다.
+- session row와 `pr_review_analysis_jobs` row는 하나의 DB transaction으로 저장한다.
+  `pr_review_analysis_jobs`는 job 자체와 durable outbox 발행 상태를 함께 보관하므로 별도
+  outbox table을 만들지 않는다.
+- transaction이 끝난 뒤 outbox publisher가 전용 SQS에 job을 발행한다. 발행 실패는 HTTP
+  응답을 실패로 바꾸지 않으며, session은 `analyzing`으로 남아 발행 재시도 또는 terminal
+  failure를 기다린다.
+- 같은 사용자와 PR 조합에 이미 `analyzing` session이 있으면 새 job을 만들지 않는다.
+  기존 session을 `200 OK`로 반환한다. `reviewing`, `failed` 등 terminal session은 이 규칙의
+  대상이 아니므로 새 session 생성이 가능하다.
+- `OPENAI_API_KEY` 누락, provider 오류, output 검증 오류를 deterministic fallback으로
+  숨기지 않는다. 정해진 재시도 횟수가 소진되면 session을 `failed`로 전환한다.
+- Diff 생성에 필요한 patch는 Worker가 인증된 내부 handoff로 App Server에서 받아오며 SQS
+  payload, API 응답, 로그에 넣지 않는다.
+
+### 분석 상태와 조회 규칙
+
+`GET /workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}`는 모든 session
+상태에서 `200 OK`로 아래 필드를 포함한다. Frontend는 이 endpoint를 polling해 분석 상태를
+갱신한다. 초기 polling 간격과 최대 대기 시간은 Frontend 구현 PR에서 정하며, realtime은
+후속 범위다.
+
+```json
+{
+  "status": "failed",
+  "analysisError": {
+    "code": "PR_HEAD_CHANGED",
+    "message": "PR의 최신 커밋이 분석 시작 시점과 달라 새 분석이 필요합니다."
+  }
+}
+```
+
+`analysisError`는 `analyzing`, `reviewing`, `ready_to_submit`, `submitted`, `archived` 상태에서
+`null`이다. `failed`일 때에만 아래의 안전한 reason code와 사용자 노출 메시지를 반환한다.
+provider 원문, token, patch, 내부 오류 상세는 반환하지 않는다.
+
+| Code | 의미 | 사용자 다음 행동 |
+| --- | --- | --- |
+| `ANALYSIS_ENQUEUE_FAILED` | outbox의 SQS 발행 재시도가 소진됨 | 재시도 |
+| `ANALYSIS_PROVIDER_FAILED` | OpenAI timeout, rate limit, provider 5xx 재시도가 소진됨 | 재시도 |
+| `ANALYSIS_INPUT_INVALID` | 분석 입력 또는 structured output이 계약을 만족하지 않음 | 재시도 |
+| `PR_HEAD_CHANGED` | Job/session head SHA와 현재 GitHub PR head SHA가 다름 | 재시도하여 새 session 생성 |
+
+분석 결과가 필요한 `summary`, `result`, `canvas`, `flows` endpoint는 session이 `analyzing`이면
+`409 REVIEW_ANALYSIS_NOT_READY`를 반환하고, `failed`이면 `409 REVIEW_ANALYSIS_FAILED`를
+반환한다. 빈 graph 또는 fallback 결과를 성공 응답으로 반환하지 않는다.
+
+### 분석 재시도
+
+```http
+POST /api/v1/workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}/retry
+```
+
+재시도는 `failed` session에서만 허용한다. 기존 session의 head SHA나 분석 결과를 바꾸지
+않고, 현재 PR 상태를 기준으로 새 `analyzing` session과 새 job/outbox intent를 생성해
+`201 Created`로 반환한다. `failed`가 아닌 상태에는 `409 REVIEW_ANALYSIS_RETRY_NOT_ALLOWED`를
+반환한다.
+
+### Worker job 및 internal handoff 계약
+
+PR Review analysis job은 전용 SQS와 DLQ를 사용한다. 기존 Meeting/Agent AI queue와 Worker
+service는 공유하지 않으며, 동일한 AI Worker 이미지를 실행하는 PR Review 전용 ECS service가
+이 queue만 polling한다.
+
+SQS message는 아래 식별자만 포함한다. patch, GitHub token, 사용자 OAuth token, provider
+response는 포함하지 않는다.
+
+```json
+{
+  "jobType": "pr_review_analysis_requested",
+  "schemaVersion": "pr-review-analysis:v1",
+  "jobId": "pr_review_analysis_job_uuid",
+  "reviewSessionId": "review_session_uuid",
+  "workspaceId": "workspace_uuid",
+  "headSha": "abc123"
+}
+```
+
+AI Worker는 DB에 PR Review 결과를 직접 쓰지 않는다. 전용 worker token으로 보호된 App Server
+internal handoff를 사용한다.
+
+세 internal endpoint는 `X-Pr-Review-Analysis-Worker-Token` header가
+`PR_REVIEW_ANALYSIS_WORKER_TOKEN`과 일치할 때만 호출할 수 있다. 누락되었거나 일치하지 않는
+token은 `401`로 거부한다. 이 token은 사용자 API, SQS message, 로그에 노출하지 않는다.
+
+| Method | Internal endpoint | 책임 |
+| --- | --- | --- |
+| `GET` | `/api/v1/internal/pr-review/analysis-jobs/{jobId}/input` | session/job 상태와 head SHA를 검증하고 PR detail·변경 파일·patch를 Worker에 전달 |
+| `POST` | `/api/v1/internal/pr-review/analysis-jobs/{jobId}/result` | 결과를 검증하고 현재 GitHub head SHA를 다시 확인한 뒤 session, flow, file 관계를 원자 저장 |
+| `POST` | `/api/v1/internal/pr-review/analysis-jobs/{jobId}/failure` | 안전한 failure code를 저장하고 terminal session 처리 |
+
+`GET /api/v1/internal/pr-review/analysis-jobs/{jobId}/input` 성공 응답은 아래처럼
+공통 response envelope 안에 Worker 분석 입력을 담는다. Worker는 response의 `jobId`,
+`reviewSessionId`, `workspaceId`, `headSha`가 SQS payload와 모두 일치할 때만 분석한다.
+
+```json
+{
+  "success": true,
+  "data": {
+    "jobId": "pr_review_analysis_job_uuid",
+    "reviewSessionId": "review_session_uuid",
+    "workspaceId": "workspace_uuid",
+    "headSha": "abc123",
+    "pullRequest": {
+      "prNumber": 24,
+      "title": "Async PR analysis",
+      "body": "...",
+      "state": "open",
+      "draft": false,
+      "mergeable": true,
+      "authorLogin": "octocat",
+      "headBranch": "feature/async",
+      "baseBranch": "dev",
+      "baseSha": "base_sha",
+      "changedFilesCount": 2,
+      "additions": 20,
+      "deletions": 4,
+      "commitsCount": 2
+    },
+    "files": [
+      {
+        "filePath": "apps/app-server/src/pr-review.ts",
+        "previousFilePath": null,
+        "fileName": "pr-review.ts",
+        "fileStatus": "modified",
+        "additions": 12,
+        "deletions": 3,
+        "isBinary": false,
+        "isLargeDiff": false,
+        "patch": "..."
+      }
+    ]
+  }
+}
+```
+
+`POST /api/v1/internal/pr-review/analysis-jobs/{jobId}/result`는 Worker가 검증한 분석
+결과를 아래 형식으로 전달한다. path의 `jobId`와 body의 네 식별자(`jobId`,
+`reviewSessionId`, `workspaceId`, `headSha`)는 모두 Job row와 일치해야 한다.
+
+```json
+{
+  "jobId": "pr_review_analysis_job_uuid",
+  "reviewSessionId": "review_session_uuid",
+  "workspaceId": "workspace_uuid",
+  "headSha": "abc123",
+  "analysis": {
+    "prPurpose": "string",
+    "changeSummary": ["string"],
+    "recommendedReviewOrder": "string",
+    "cautionPoints": ["string"],
+    "flowTitle": "string",
+    "flowDescription": "string",
+    "files": [
+      {
+        "filePath": "string",
+        "fileRole": "string",
+        "riskLevel": "high | medium | low | unknown",
+        "changeReason": "string",
+        "changeSummary": "string",
+        "reviewPoints": ["string"]
+      }
+    ]
+  }
+}
+```
+
+App Server는 현재 GitHub head SHA, Job head SHA, session head SHA를 다시 비교한다.
+셋 중 하나라도 다르면 flow/file을 만들지 않고 Job과 session을
+`failed(PR_HEAD_CHANGED)`로 끝낸다. 일치하면 summary, flow, file, flow-file 관계와
+Job terminal 상태를 하나의 transaction으로 저장하고, 마지막에만 session을
+`reviewing`으로 전환한다. 같은 Job의 재전달은 이미 저장된 terminal 결과를 반환하며
+새 row를 만들지 않는다.
+
+`POST /api/v1/internal/pr-review/analysis-jobs/{jobId}/failure`는 raw provider 오류를
+보내지 않고 아래의 안전한 code만 전달한다. App Server는 code별 사용자 메시지를
+session에 저장하고, Job에는 운영 추적용 terminal 상태만 남긴다.
+
+```json
+{
+  "jobId": "pr_review_analysis_job_uuid",
+  "reviewSessionId": "review_session_uuid",
+  "workspaceId": "workspace_uuid",
+  "headSha": "abc123",
+  "code": "ANALYSIS_PROVIDER_FAILED"
+}
+```
+
+두 POST endpoint의 성공 응답은 다음과 같다. `persisted: false`는 중복 전달로 이미
+같은 terminal 결과가 존재한다는 뜻이다.
+
+```json
+{
+  "success": true,
+  "data": {
+    "reviewSessionId": "review_session_uuid",
+    "status": "reviewing | failed",
+    "persisted": true
+  }
+}
+```
+
+App Server는 job/session이 여전히 `analyzing`이고 job 상태가 `publishing`, `queued`,
+`processing` 중 하나이며 job·session·현재 GitHub head SHA가 모두 같을 때만 이 입력을
+반환한다. `publishing` 허용은 SQS send 성공과 publisher의 `queued` 갱신 사이에 Worker가
+먼저 message를 받는 at-least-once race를 처리하기 위한 것이다. 응답에는 GitHub OAuth token,
+GitHub URL, provider raw error를 포함하지 않는다.
+
+Worker는 `pr_review_analysis_requested`와 `pr-review-analysis:v1`만 수용한다. malformed
+payload, input 불일치, strict output의 빈 핵심 필드·누락/중복 file path·잘못된 risk level은
+terminal 처리한다. timeout, rate limit, provider 5xx, internal handoff network/5xx 오류는
+SQS 재수신 대상으로 남긴다. Worker는 DB에 직접 결과를 쓰지 않고, 검증한 분석 결과만
+`result` internal endpoint로 전달한다.
+
+결과 저장은 session이 여전히 `analyzing`이고 job/session/current GitHub head SHA가 모두 같은
+경우에만 수행한다. 저장 transaction의 마지막 단계에서 session을 `reviewing`으로 전환한다.
+동일 job의 SQS 재전달 또는 result 재전송은 이미 성공한 결과를 그대로 인정하며 새 flow/file을
+만들지 않는다.
+
+outbox 발행은 1, 2, 4, 8, 16분 간격으로 최대 5회 재시도한다. Worker의 timeout, rate limit,
+provider 5xx와 handoff 일시 오류는 SQS receive count 3회까지 재시도한다. 각 재시도 소진 시
+App Server가 session을 해당 안전한 `failed` reason code로 전환한 뒤 메시지를 terminal 처리한다.
+
+### OpenAI 분석 계약
+
+PR Review 전용 Worker는 Responses API의 strict JSON schema `pr_review_analysis`를 사용한다.
+모델은 `OPENAI_PR_REVIEW_MODEL`을 사용하고, 값이 없으면 `gpt-5.1-mini`를 사용한다. Worker의
+provider timeout은 `OPENAI_PR_REVIEW_TIMEOUT_MS`로 설정하며 기본값은 60초다. PR Review 전용
+worker runtime은 `SQS_PR_REVIEW_ANALYSIS_QUEUE_URL`, `PR_REVIEW_ANALYSIS_HANDOFF_BASE_URL`,
+`PR_REVIEW_ANALYSIS_WORKER_TOKEN`을 별도로 사용한다. 이 분석 계약은
+기존 동기 PR 분석의 모델·prompt 목적·출력 구조를 유지한 것이며, conflict suggestion의 모델,
+prompt, 동기 호출 방식은 변경하지 않는다.
+
+입력은 PR body 최대 4,000자, 각 file patch 최대 4,000자, 전체 patch 최대 32,000자로 제한한다.
+출력에는 아래 필드가 모두 있어야 하며, 각 input file path는 정확히 한 번씩 대응해야 한다.
+
+```json
+{
+  "prPurpose": "string",
+  "changeSummary": ["string"],
+  "recommendedReviewOrder": "string",
+  "cautionPoints": ["string"],
+  "flowTitle": "string",
+  "flowDescription": "string",
+  "files": [
+    {
+      "filePath": "string",
+      "fileRole": "string",
+      "riskLevel": "high | medium | low | unknown",
+      "changeReason": "string",
+      "changeSummary": "string",
+      "reviewPoints": ["string"]
+    }
+  ]
+}
+```
+
+빈 핵심 필드, input에 없는 file path, 중복 file path, 허용되지 않은 risk level은
+`ANALYSIS_INPUT_INVALID`로 terminal 처리한다. 비동기 PR 분석에는 deterministic fallback을
+사용하지 않는다.
 
 ## Review Session 삭제
 

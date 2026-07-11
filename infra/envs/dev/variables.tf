@@ -112,6 +112,12 @@ variable "ai_worker_desired_count" {
   default     = 1
 }
 
+variable "github_sync_worker_desired_count" {
+  description = "Dev GitHub sync worker task count."
+  type        = number
+  default     = 1
+}
+
 variable "app_server_cpu" {
   type    = number
   default = 256
@@ -166,6 +172,11 @@ variable "livekit_instance_type" {
   description = "EC2 instance type for the self-hosted LiveKit MVP host."
   type        = string
   default     = "t3.small"
+}
+
+variable "livekit_ami_id" {
+  description = "Pinned AMI ID for the LiveKit host. Change only for a planned host rotation."
+  type        = string
 }
 
 variable "livekit_root_volume_size" {

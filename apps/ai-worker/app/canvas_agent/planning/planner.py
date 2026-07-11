@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from app.canvas_agent.prompts import system_prompt, user_prompt
+from app.canvas_agent.planning.prompts import system_prompt, user_prompt
 from app.canvas_agent.types import CANVAS_AGENT_ACTIONS, CanvasAgentPlan, CanvasAgentRunContext
 from app.meeting_report_processor import InfrastructureError
 

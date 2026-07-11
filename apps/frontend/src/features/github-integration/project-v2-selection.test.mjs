@@ -36,6 +36,8 @@ const paginationModule = await import(
 assert.match(types, /export type GithubProjectV2 = \{[\s\S]*?selected: boolean;/);
 assert.match(types, /export type ReplaceGithubProjectV2SelectionsInput = \{[\s\S]*?installationId: string;[\s\S]*?projectV2Ids: string\[\];/);
 assert.match(client, /replaceGithubProjectV2Selections\(/);
+assert.match(client, /discoverGithubProjectV2/);
+assert.match(client, /projects-v2\/discovery/);
 assert.match(client, /project-v2-selections/);
 assert.match(client, /method: "PUT"/);
 assert.match(tables, /type="checkbox"/);
@@ -55,11 +57,25 @@ const nextHandlerStart = panel.indexOf(
   saveSelectionStart
 );
 assert.ok(saveSelectionStart >= 0 && nextHandlerStart > saveSelectionStart);
-assert.doesNotMatch(
+assert.match(
   panel.slice(saveSelectionStart, nextHandlerStart),
-  /startGithubSyncRun/,
-  "saving a selection must not start a sync"
+  /selection\.syncStatus === "queued"/,
+  "saving a nonempty selection must begin sync polling"
 );
+assert.match(panel, /선택된 프로젝트가 없어 보드에 표시할 내용이 없습니다/);
+assert.match(
+  panel,
+  /selection\.syncStatus === "failed"[\s\S]*?선택은 저장됐지만 동기화를 시작하지 못했습니다/,
+  "a saved selection with an enqueue failure must show a distinct sync failure message"
+);
+assert.match(
+  panel,
+  /hasQueuedSelection[\s\S]*?setHasRunningSyncRun\(true\)/,
+  "a queued selection must start polling even when another selection fails"
+);
+assert.match(panel, /handleDiscoverGithubProjectV2/);
+assert.match(panel, /discovery\.connectionRequired/);
+assert.match(panel, /handleStartGithubProjectOAuth/);
 assert.match(
   panel,
   /projectScopedSyncTargets\.has\(syncTarget\)\s*&&\s*selectedProjectV2Id[\s\S]*?body\.projectV2Id/,

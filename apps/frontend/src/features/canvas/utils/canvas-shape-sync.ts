@@ -31,6 +31,7 @@ export type CanvasShapePayload = {
 };
 
 type CanvasShapeMutationPayload = CanvasShapePayload & {
+  baseRevision?: number | null;
   clientOperationId?: string;
 };
 
@@ -52,24 +53,28 @@ export type CanvasShapeApiClient = {
   ) => Promise<unknown>;
   deleteShape: (
     shapeId: string,
+    body: { baseRevision: number | null; clientOperationId: string },
     options: { workspaceId: string },
   ) => Promise<unknown>;
 };
 
 export type CanvasShapeSyncOperation =
   | {
+      baseRevision?: number | null;
       clientOperationId: string;
       type: "create";
       shapeId: string;
       payload: CanvasShapePayload;
     }
   | {
+      baseRevision: number | null;
       clientOperationId: string;
       type: "update";
       shapeId: string;
       payload: CanvasShapePayload;
     }
   | {
+      baseRevision: number | null;
       clientOperationId: string;
       type: "delete";
       shapeId: string;
@@ -90,6 +95,7 @@ type CanvasShapeSyncQueueOptions = {
   boardId: string;
   canvasClient: CanvasShapeApiClient;
   debounceMs?: number;
+  getBaseRevision?: (shapeId: string) => number | null;
   onError?: (error: unknown) => void;
   onSynced?: (operations: CanvasShapeSyncOperation[]) => void;
   workspaceId: string;
@@ -99,7 +105,7 @@ const DEFAULT_CANVAS_SHAPE_SYNC_QUEUE_DEBOUNCE_MS = 500;
 const DEFAULT_CANVAS_SHAPE_SYNC_RETRY_ATTEMPTS = 3;
 const DEFAULT_CANVAS_SHAPE_SYNC_RETRY_DELAY_MS = 320;
 const DEFAULT_CANVAS_SHAPE_SYNC_BATCH_SIZE = 100;
-const NON_RETRYABLE_CANVAS_API_STATUSES = new Set([400, 401, 403, 404]);
+const NON_RETRYABLE_CANVAS_API_STATUSES = new Set([400, 401, 403, 404, 409]);
 
 class CanvasShapeSyncFailure extends Error {
   readonly cause: unknown;
@@ -131,6 +137,26 @@ function isNonRetryableCanvasApiError(error: unknown) {
 
 function isMissingCanvasApiError(error: unknown) {
   return readCanvasApiErrorStatus(error) === 404;
+}
+
+function readCanvasShapeRevision(shape: CanvasFreeformShapeSnapshot | undefined) {
+  const revision = shape?.revision;
+
+  return typeof revision === "number" && Number.isInteger(revision) && revision > 0
+    ? revision
+    : null;
+}
+
+function resolveCanvasShapeBaseRevision({
+  getBaseRevision,
+  shape,
+  shapeId,
+}: {
+  getBaseRevision?: (shapeId: string) => number | null;
+  shape: CanvasFreeformShapeSnapshot | undefined;
+  shapeId: string;
+}) {
+  return readCanvasShapeRevision(shape) ?? getBaseRevision?.(shapeId) ?? null;
 }
 
 function isStaleMissingShapeOperation(
@@ -272,6 +298,9 @@ export function toCanvasShapePayload(
 export function buildCanvasShapeSyncOperations(
   previousShapes: CanvasFreeformShapeSnapshot[],
   nextShapes: CanvasFreeformShapeSnapshot[],
+  options: {
+    getBaseRevision?: (shapeId: string) => number | null;
+  } = {},
 ): CanvasShapeSyncOperation[] {
   const previousShapeMap = toShapeMap(previousShapes);
   const nextShapeMap = toShapeMap(nextShapes);
@@ -285,6 +314,7 @@ export function buildCanvasShapeSyncOperations(
 
     if (!previousShape) {
       operations.push({
+        baseRevision: null,
         clientOperationId: createCanvasClientOperationId(),
         type: "create",
         shapeId: shape.id,
@@ -295,6 +325,11 @@ export function buildCanvasShapeSyncOperations(
 
     if (hasCanvasFreeformShapeChanged(previousShape, shape)) {
       operations.push({
+        baseRevision: resolveCanvasShapeBaseRevision({
+          getBaseRevision: options.getBaseRevision,
+          shape: previousShape,
+          shapeId: shape.id,
+        }),
         clientOperationId: createCanvasClientOperationId(),
         type: "update",
         shapeId: shape.id,
@@ -308,6 +343,11 @@ export function buildCanvasShapeSyncOperations(
     if (nextShapeMap.has(shape.id)) return;
 
     operations.push({
+      baseRevision: resolveCanvasShapeBaseRevision({
+        getBaseRevision: options.getBaseRevision,
+        shape,
+        shapeId: shape.id,
+      }),
       clientOperationId: createCanvasClientOperationId(),
       type: "delete",
       shapeId: shape.id,
@@ -334,6 +374,8 @@ function mergeQueuedCanvasShapeSyncOperation(
       pendingOperation.type === "create"
         ? operation
         : {
+            baseRevision:
+              pendingOperation.baseRevision ?? operation.baseRevision ?? null,
             clientOperationId: operation.clientOperationId,
             type: "update",
             shapeId: operation.shapeId,
@@ -348,12 +390,17 @@ function mergeQueuedCanvasShapeSyncOperation(
       operation.shapeId,
       pendingOperation.type === "create"
         ? {
+            baseRevision: null,
             clientOperationId: pendingOperation.clientOperationId,
             type: "create",
             shapeId: operation.shapeId,
             payload: operation.payload,
           }
-        : operation,
+        : {
+            ...operation,
+            baseRevision:
+              pendingOperation.baseRevision ?? operation.baseRevision,
+          },
     );
     return;
   }
@@ -363,7 +410,10 @@ function mergeQueuedCanvasShapeSyncOperation(
     return;
   }
 
-  pendingOperations.set(operation.shapeId, operation);
+  pendingOperations.set(operation.shapeId, {
+    ...operation,
+    baseRevision: pendingOperation.baseRevision ?? operation.baseRevision,
+  });
 }
 
 function runCanvasShapeSyncOperation({
@@ -382,6 +432,7 @@ function runCanvasShapeSyncOperation({
       boardId,
       {
         ...operation.payload,
+        baseRevision: operation.baseRevision ?? null,
         clientOperationId: operation.clientOperationId,
       },
       {
@@ -395,6 +446,7 @@ function runCanvasShapeSyncOperation({
       operation.shapeId,
       {
         ...operation.payload,
+        baseRevision: operation.baseRevision,
         clientOperationId: operation.clientOperationId,
       },
       {
@@ -403,9 +455,16 @@ function runCanvasShapeSyncOperation({
     );
   }
 
-  return canvasClient.deleteShape(operation.shapeId, {
-    workspaceId,
-  });
+  return canvasClient.deleteShape(
+    operation.shapeId,
+    {
+      baseRevision: operation.baseRevision,
+      clientOperationId: operation.clientOperationId,
+    },
+    {
+      workspaceId,
+    },
+  );
 }
 
 function runWithRetry(task: () => Promise<unknown>) {
@@ -536,6 +595,7 @@ export function createCanvasShapeSyncQueue({
   boardId,
   canvasClient,
   debounceMs = DEFAULT_CANVAS_SHAPE_SYNC_QUEUE_DEBOUNCE_MS,
+  getBaseRevision,
   onError,
   onSynced,
   workspaceId,
@@ -667,6 +727,7 @@ export function createCanvasShapeSyncQueue({
       const operations = buildCanvasShapeSyncOperations(
         previousShapes,
         nextShapes,
+        { getBaseRevision },
       );
 
       operations.forEach((operation) => {
@@ -694,17 +755,21 @@ export function createCanvasShapeSyncQueue({
 export async function syncCanvasFreeformShapes({
   boardId,
   canvasClient,
+  getBaseRevision,
   nextShapes,
   previousShapes,
   workspaceId,
 }: {
   boardId: string;
   canvasClient: CanvasShapeApiClient;
+  getBaseRevision?: (shapeId: string) => number | null;
   nextShapes: CanvasFreeformShapeSnapshot[];
   previousShapes: CanvasFreeformShapeSnapshot[];
   workspaceId: string;
 }) {
-  const operations = buildCanvasShapeSyncOperations(previousShapes, nextShapes);
+  const operations = buildCanvasShapeSyncOperations(previousShapes, nextShapes, {
+    getBaseRevision,
+  });
 
   await runCanvasShapeSyncOperations({
     boardId,

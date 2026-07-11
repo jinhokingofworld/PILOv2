@@ -524,6 +524,7 @@ const [
   mainShell,
   tableShape,
   relationShape,
+  annotationShape,
   ddlParserUtils,
   sqlEditorDialectUtils,
   sqlSourceDecorationUtils,
@@ -555,6 +556,7 @@ const [
     readSqlErdFile("../../src/components/main-shell.tsx"),
     readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-table-shape.tsx"),
     readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-relation-shape.tsx"),
+    readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-annotation-shape.tsx"),
     readSqlErdFile("../../src/features/sql-erd/utils/ddl-parser.ts"),
     readSqlErdFile("../../src/features/sql-erd/utils/sql-editor-dialect.ts"),
     readSqlErdFile("../../src/features/sql-erd/utils/sql-source-decoration.ts"),
@@ -2229,6 +2231,165 @@ assert.equal(
   true
 );
 
+assert.equal(typeof modelRuntime.addSqltoerdColumnAnnotation, "function");
+assert.equal(
+  typeof modelRuntime.getSqltoerdRenderableAnnotations,
+  "function"
+);
+
+const annotationBaseLayout = {
+  version: 1,
+  tableLayouts: movedRuntimeLayout.tableLayouts,
+  annotations: { version: 1, links: [] }
+};
+const validColumnAnnotation = {
+  id: "annotation.users.id.orders.id",
+  kind: "column_link",
+  fromTableId: "table.users",
+  fromColumnId: "id",
+  toTableId: "table.orders",
+  toColumnId: "id",
+  label: "same business key"
+};
+const validColumnAnnotationResult = modelRuntime.addSqltoerdColumnAnnotation(
+  runtimeModel,
+  annotationBaseLayout,
+  validColumnAnnotation
+);
+
+assert.equal(validColumnAnnotationResult.ok, true);
+assert.deepEqual(
+  validColumnAnnotationResult.layoutJson.annotations.links,
+  [validColumnAnnotation]
+);
+assert.deepEqual(annotationBaseLayout.annotations.links, []);
+assert.equal(
+  modelRuntime.addSqltoerdColumnAnnotation(
+    runtimeModel,
+    validColumnAnnotationResult.layoutJson,
+    { ...validColumnAnnotation, id: "annotation.duplicate" }
+  ).reason,
+  "annotation_exists"
+);
+assert.equal(
+  modelRuntime.addSqltoerdColumnAnnotation(
+    runtimeModel,
+    validColumnAnnotationResult.layoutJson,
+    {
+      ...validColumnAnnotation,
+      id: "annotation.reverse",
+      fromTableId: validColumnAnnotation.toTableId,
+      fromColumnId: validColumnAnnotation.toColumnId,
+      toTableId: validColumnAnnotation.fromTableId,
+      toColumnId: validColumnAnnotation.fromColumnId
+    }
+  ).reason,
+  "annotation_exists"
+);
+assert.equal(
+  modelRuntime.addSqltoerdColumnAnnotation(runtimeModel, annotationBaseLayout, {
+    ...validColumnAnnotation,
+    id: "annotation.fk-collision",
+    fromTableId: "table.users",
+    fromColumnId: "id",
+    toTableId: "table.orders",
+    toColumnId: "user_id"
+  }).reason,
+  "foreign_key_exists"
+);
+
+const fkConflictAnnotation = {
+  ...validColumnAnnotation,
+  id: "annotation.saved-fk-collision",
+  fromTableId: "table.orders",
+  fromColumnId: "user_id",
+  toTableId: "table.users",
+  toColumnId: "id"
+};
+const renderableAnnotations = modelRuntime.getSqltoerdRenderableAnnotations(
+  runtimeModel,
+  {
+    version: 1,
+    links: [validColumnAnnotation, fkConflictAnnotation]
+  }
+);
+
+assert.deepEqual(renderableAnnotations.links, [validColumnAnnotation]);
+assert.equal(
+  modelRuntime.getSqltoerdRenderableAnnotations(runtimeModel, {
+    version: 1,
+    links: [
+      {
+        ...fkConflictAnnotation,
+        id: "annotation.saved-reverse-fk-collision",
+        fromTableId: fkConflictAnnotation.toTableId,
+        fromColumnId: fkConflictAnnotation.toColumnId,
+        toTableId: fkConflictAnnotation.fromTableId,
+        toColumnId: fkConflictAnnotation.fromColumnId
+      }
+    ]
+  }).links.length,
+  0
+);
+assert.equal(
+  modelRuntime.addSqltoerdColumnAnnotation(runtimeModel, annotationBaseLayout, {
+    ...validColumnAnnotation,
+    id: "annotation.same-endpoint",
+    toTableId: "table.users",
+    toColumnId: "id"
+  }).reason,
+  "same_endpoint"
+);
+assert.equal(
+  modelRuntime.addSqltoerdColumnAnnotation(runtimeModel, annotationBaseLayout, {
+    ...validColumnAnnotation,
+    id: "annotation.invalid-endpoint",
+    toColumnId: "missing"
+  }).reason,
+  "invalid_endpoint"
+);
+assert.equal(
+  modelRuntime.addSqltoerdColumnAnnotation(
+    runtimeModel,
+    {
+      ...annotationBaseLayout,
+      annotations: {
+        version: 1,
+        links: Array.from({ length: 300 }, (_, index) => ({
+          id: `annotation.limit.${index}`,
+          kind: "table_link",
+          fromTableId: "table.users",
+          toTableId: "table.orders",
+          label: ""
+        }))
+      }
+    },
+    validColumnAnnotation
+  ).reason,
+  "annotation_limit"
+);
+
+const renamedColumnAnnotationLayout = modelRuntime.updateSqltoerdAnnotationLabel(
+  validColumnAnnotationResult.layoutJson,
+  validColumnAnnotation.id,
+  "renamed label"
+);
+assert.equal(
+  renamedColumnAnnotationLayout.annotations.links[0].label,
+  "renamed label"
+);
+assert.equal(
+  validColumnAnnotationResult.layoutJson.annotations.links[0].label,
+  "same business key"
+);
+assert.deepEqual(
+  modelRuntime.removeSqltoerdAnnotation(
+    renamedColumnAnnotationLayout,
+    validColumnAnnotation.id
+  ).annotations.links,
+  []
+);
+
 const stackedRelationLayout = relationShapeRuntime.getSqlErdRelationShapeLayout(
   {
     columns: [
@@ -2258,6 +2419,20 @@ const stackedRelationLayout = relationShapeRuntime.getSqlErdRelationShapeLayout(
     fromColumnIds: ["column.posts.user_id"],
     toColumnIds: ["column.users.id"]
   }
+);
+
+assert.deepEqual(
+  relationShapeRuntime.getSqlErdRelationCurveMidpoint(
+    [
+      { x: 0, y: 0 },
+      { x: 50, y: 0 },
+      { x: 50, y: 100 },
+      { x: 100, y: 100 }
+    ],
+    "right",
+    "right"
+  ),
+  { x: 110, y: 50 }
 );
 const stackedRelationStartPoint = {
   x: stackedRelationLayout.x + stackedRelationLayout.points[0].x,
@@ -2920,8 +3095,18 @@ assert.match(canvasSurface, /shouldResetSqlErdCanvas/);
 assert.match(canvasSurface, /editor\.updateShapes\(updates\)/);
 assert.match(canvasSurface, /createSqltoerdTableShapes/);
 assert.match(canvasSurface, /createSqltoerdRelationShapes/);
+assert.match(canvasSurface, /createSqltoerdAnnotationShapes/);
 assert.match(canvasSurface, /createSqltoerdCanvasShapes/);
 assert.match(canvasSurface, /SqlErdRelationLayoutSync/);
+assert.match(canvasSurface, /SqlErdColumnAnnotationInteractionSync/);
+assert.match(canvasSurface, /syncSqlErdAnnotationShapes/);
+assert.match(canvasSurface, /addSqltoerdColumnAnnotation/);
+assert.match(canvasSurface, /updateSqltoerdAnnotationLabel/);
+assert.match(canvasSurface, /removeSqltoerdAnnotation/);
+assert.match(canvasSurface, /event\.key === "Delete"/);
+assert.match(canvasSurface, /event\.key === "Backspace"/);
+assert.match(canvasSurface, /window\.addEventListener\("keydown", handleKeyDown, true\)/);
+assert.match(canvasSurface, /getSqltoerdRenderableAnnotations/);
 assert.match(canvasSurface, /SqlErdRelationHighlightSync/);
 assert.match(canvasSurface, /resolveSqlErdRelationHighlightFromIds/);
 assert.match(canvasSurface, /hoveredRelationIdRef/);
@@ -2944,6 +3129,8 @@ assert.match(canvasSurface, /editor\.getSelectedShapes/);
 assert.match(canvasSurface, /SQLTOERD_TABLE_SHAPE_TYPE/);
 assert.match(canvasSurface, /SQLTOERD_RELATION_SHAPE_TYPE/);
 assert.match(canvasSurface, /SqlErdRelationShapeUtil/);
+assert.match(canvasSurface, /SQLTOERD_ANNOTATION_SHAPE_TYPE/);
+assert.match(canvasSurface, /SqlErdAnnotationShapeUtil/);
 assert.match(canvasSurface, /getSqlErdTableShapeId/);
 assert.match(canvasSurface, /hashSqlErdShapeSourceId/);
 assert.match(canvasSurface, /zoomToFit/);
@@ -2974,6 +3161,10 @@ assert.match(tableShape, /selectSqlErdColumn/);
 assert.match(tableShape, /data-sqltoerd-table-header/);
 assert.match(tableShape, /data-sqltoerd-column-id/);
 assert.match(tableShape, /data-sqltoerd-column-port/);
+assert.match(tableShape, /SQLTOERD_COLUMN_CONNECT_START_EVENT/);
+assert.match(tableShape, /data-sqltoerd-column-port-hit/);
+assert.match(tableShape, /size-5/);
+assert.match(tableShape, /size-2/);
 assert.match(tableShape, /selectedColumnId/);
 assert.match(tableShape, /selectedState/);
 assert.match(tableShape, /highlightedColumnIds/);
@@ -3017,7 +3208,7 @@ assert.match(relationShape, /getSqlErdRelationColumnAnchors/);
 assert.match(relationShape, /getSqlErdColumnAnchorY/);
 assert.match(relationShape, /getRelationCurveControlPoints/);
 assert.match(relationShape, /getRelationCurveBoundsPoints/);
-assert.match(relationShape, /getRelationCurveGeometryPoints/);
+assert.match(relationShape, /getSqlErdRelationCurveGeometryPoints/);
 assert.match(relationShape, /TABLE_HEADER_HEIGHT/);
 assert.match(relationShape, /TABLE_ROW_HEIGHT/);
 assert.match(relationShape, /fromTableId/);
@@ -3038,8 +3229,8 @@ assert.match(relationShape, /shape\.props\.startSide/);
 assert.match(relationShape, /shape\.props\.endSide/);
 assert.match(relationShape, /onPointerEnter/);
 assert.match(relationShape, /onPointerLeave/);
-assert.match(relationShape, /getRelationCurvePathData\(/);
-assert.match(relationShape, /getRelationCurveGeometryPoints\(/);
+assert.match(relationShape, /getSqlErdRelationCurvePathData\(/);
+assert.match(relationShape, /getSqlErdRelationCurveGeometryPoints\(/);
 assert.match(relationShape, / C /);
 assert.match(relationShape, /useValue/);
 assert.match(relationShape, /data-sqltoerd-relation-hit-target/);
@@ -3048,6 +3239,23 @@ assert.match(relationShape, /getSqlErdCardinalityMarkerGeometry/);
 assert.match(relationShape, /stroke="transparent"/);
 assert.match(relationShape, /SQLTOERD_RELATION_HIT_STROKE_WIDTH/);
 assert.doesNotMatch(relationShape, /canCull\(\)/);
+
+assert.match(annotationShape, /SQLTOERD_ANNOTATION_SHAPE_TYPE/);
+assert.match(annotationShape, /class SqlErdAnnotationShapeUtil extends ShapeUtil/);
+assert.match(annotationShape, /data-sqltoerd-annotation-hit-target/);
+assert.match(annotationShape, /SQLTOERD_ANNOTATION_HIT_STROKE_WIDTH = 16/);
+assert.match(annotationShape, /strokeDasharray="8 6"/);
+assert.match(annotationShape, /data-sqltoerd-annotation-label/);
+assert.match(annotationShape, /maxLength=\{200\}/);
+assert.match(annotationShape, /SQLTOERD_ANNOTATION_LABEL_CHANGE_EVENT/);
+assert.match(annotationShape, /SQLTOERD_ANNOTATION_DELETE_EVENT/);
+assert.match(annotationShape, /getSqlErdRelationCurvePathData/);
+assert.match(annotationShape, /getSqlErdRelationCurveMidpoint/);
+assert.doesNotMatch(
+  annotationShape,
+  /\(startPoint\.x \+ endPoint\.x\) \/ 2/
+);
+assert.doesNotMatch(annotationShape, /Cardinality/);
 assert.match(relationShape, /hideSelectionBoundsBg/);
 assert.match(relationShape, /hideSelectionBoundsFg/);
 assert.match(canvasSurface, /fromColumnIds: relation\.fromColumnIds/);

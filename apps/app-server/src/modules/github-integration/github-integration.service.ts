@@ -23,6 +23,7 @@ import { GithubPullRequestRemoteService } from "./github-pull-request-remote.ser
 import { GithubReviewSubmissionService } from "./github-review-submission.service";
 import { GithubSourceReadService } from "./github-source-read.service";
 import { GithubSyncExecutorService } from "./github-sync-executor.service";
+import { GithubSyncJobService } from "./github-sync-job.service";
 import { GithubSyncRunService } from "./github-sync-run.service";
 import { GithubTokenEncryptionService } from "./github-token-encryption.service";
 import { GithubWebhookService } from "./github-webhook.service";
@@ -60,6 +61,7 @@ import type {
   GithubProjectOAuthStatusPayload,
   GithubProjectV2AccessStatusPayload,
   GithubProjectV2DetailPayload,
+  GithubProjectV2DiscoveryPayload,
   GithubProjectV2FieldPayload,
   GithubProjectV2ItemPayload,
   GithubProjectV2KanbanPayload,
@@ -151,7 +153,9 @@ export class GithubIntegrationService {
     @Optional()
     githubPullRequestFileWriteService?: GithubPullRequestFileWriteService,
     @Optional()
-    githubPullRequestMergeService?: GithubPullRequestMergeService
+    githubPullRequestMergeService?: GithubPullRequestMergeService,
+    @Optional()
+    githubSyncJobService?: GithubSyncJobService
   ) {
     const callbackStateService =
       githubCallbackStateService ?? new GithubCallbackStateService(database);
@@ -192,7 +196,8 @@ export class GithubIntegrationService {
         configService,
         workspaceService,
         syncExecutorService,
-        projectV2SyncTokenService
+        projectV2SyncTokenService,
+        githubSyncJobService
       );
     this.githubAppInstallationService =
       githubAppInstallationService ??
@@ -204,8 +209,7 @@ export class GithubIntegrationService {
         workspaceService,
         installationStateService,
         callbackStateService,
-        githubAppClient,
-        syncRunService
+        githubAppClient
       );
     this.githubSourceReadService =
       githubSourceReadService ??
@@ -224,7 +228,11 @@ export class GithubIntegrationService {
         database,
         workspaceService,
         githubAppClient,
-        projectV2WriteService
+        projectV2WriteService,
+        syncExecutorService,
+        syncRunService,
+        projectV2SyncTokenService,
+        configService
       );
     this.githubPullRequestRemoteService =
       githubPullRequestRemoteService ??
@@ -264,7 +272,7 @@ export class GithubIntegrationService {
         workspaceService
       );
     this.githubWebhookService =
-      githubWebhookService ?? new GithubWebhookService(database, configService);
+      githubWebhookService ?? new GithubWebhookService(database, configService, githubSyncJobService);
     this.githubSyncRunService = syncRunService;
   }
 
@@ -501,6 +509,16 @@ export class GithubIntegrationService {
       currentUserId,
       workspaceId,
       query
+    );
+  }
+
+  async discoverGithubProjectV2(
+    currentUserId: string,
+    workspaceId: string,
+    installationId: string
+  ): Promise<GithubProjectV2DiscoveryPayload> {
+    return this.githubProjectV2Service.discoverGithubProjectV2(
+      currentUserId, workspaceId, installationId
     );
   }
 

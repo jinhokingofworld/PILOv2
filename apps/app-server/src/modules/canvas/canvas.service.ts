@@ -1,5 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { Injectable, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
+import {
+  HttpException,
+  HttpStatus,
+  Injectable,
+  OnModuleDestroy,
+  OnModuleInit
+} from "@nestjs/common";
 import type { DatabaseTransaction } from "../../database/database.service";
 import { badRequest, notFound } from "../../common/api-error";
 import { DatabaseService } from "../../database/database.service";
@@ -49,6 +55,7 @@ import {
   CanvasViewSettingPayload,
   CreateCanvasRequest,
   CreateCanvasShapeRequest,
+  DeleteCanvasShapeRequest,
   ListCanvasOperationsQuery,
   ListCanvasShapesQuery,
   SyncCanvasShapesBatchRequest,
@@ -84,6 +91,15 @@ type CanvasShapeOperationWriteResult<TPayload> = {
   isNewOperation: boolean;
   operation: CanvasShapeOperationPayload;
   payload: TPayload;
+};
+
+type CanvasShapeStaleRevisionConflictDetails = {
+  reason: "STALE_SHAPE_REVISION";
+  shapeId: string;
+  baseRevision: number;
+  currentRevision: number;
+  latestShape: CanvasShapePayload;
+  latestOperation: CanvasShapeOperationPayload | null;
 };
 
 @Injectable()
@@ -718,39 +734,22 @@ export class CanvasService implements OnModuleDestroy, OnModuleInit {
               workspaceId
             },
             async () => {
-              const currentShape = await transaction.queryOne<CanvasShapeRow>(
-                `
-                  SELECT
-                    id,
-                    canvas_id,
-                    parent_shape_id,
-                    shape_type,
-                    title,
-                    text_content,
-                    x,
-                    y,
-                    width,
-                    height,
-                    rotation,
-                    z_index,
-                    raw_shape,
-                    content_hash,
-                    revision,
-                    created_at,
-                    updated_at,
-                    deleted_at
-                  FROM canvas_freeform_shapes
-                  WHERE id = $1
-                    AND canvas_id = $2
-                    AND deleted_at IS NULL
-                  FOR UPDATE
-                `,
-                [operation.shapeId, canvas.id]
+              const currentShape = await this.findActiveShapeForUpdate(
+                transaction,
+                canvas.id,
+                operation.shapeId
               );
 
               if (!currentShape) {
                 throw notFound("Canvas shape not found");
               }
+
+              await this.assertFreshShapeBaseRevision(transaction, {
+                baseRevision: operation.baseRevision,
+                currentShape,
+                shapeId: operation.shapeId,
+                workspaceId
+              });
 
               const mergedValues = mergeShapeWriteValues(currentShape, values);
               const contentHash = computeShapeContentHash(mergedValues);
@@ -847,6 +846,23 @@ export class CanvasService implements OnModuleDestroy, OnModuleInit {
               workspaceId
             },
             async () => {
+              const currentShape = await this.findActiveShapeForUpdate(
+                transaction,
+                canvas.id,
+                operation.shapeId
+              );
+
+              if (!currentShape) {
+                throw notFound("Canvas shape not found");
+              }
+
+              await this.assertFreshShapeBaseRevision(transaction, {
+                baseRevision: operation.baseRevision,
+                currentShape,
+                shapeId: operation.shapeId,
+                workspaceId
+              });
+
               const shape = await transaction.queryOne<CanvasShapeDeleteRow>(
                 `
                   UPDATE canvas_freeform_shapes s
@@ -1142,39 +1158,22 @@ export class CanvasService implements OnModuleDestroy, OnModuleInit {
           workspaceId
         },
         async () => {
-          const currentShape = await transaction.queryOne<CanvasShapeRow>(
-            `
-              SELECT
-                id,
-                canvas_id,
-                parent_shape_id,
-                shape_type,
-                title,
-                text_content,
-                x,
-                y,
-                width,
-                height,
-                rotation,
-                z_index,
-                raw_shape,
-                content_hash,
-                revision,
-                created_at,
-                updated_at,
-                deleted_at
-              FROM canvas_freeform_shapes
-              WHERE id = $1
-                AND canvas_id = $2
-                AND deleted_at IS NULL
-              FOR UPDATE
-            `,
-            [id, targetShape.canvas_id]
+          const currentShape = await this.findActiveShapeForUpdate(
+            transaction,
+            targetShape.canvas_id,
+            id
           );
 
           if (!currentShape) {
             throw notFound("Canvas shape not found");
           }
+
+          await this.assertFreshShapeBaseRevision(transaction, {
+            baseRevision,
+            currentShape,
+            shapeId: id,
+            workspaceId
+          });
 
           const mergedValues = mergeShapeWriteValues(currentShape, values);
           const contentHash = computeShapeContentHash(mergedValues);
@@ -1262,11 +1261,16 @@ export class CanvasService implements OnModuleDestroy, OnModuleInit {
   async deleteShape(
     currentUserId: string,
     workspaceId: string,
-    shapeId: string
+    shapeId: string,
+    input: DeleteCanvasShapeRequest | undefined
   ): Promise<CanvasShapeDeletePayload> {
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
 
     const id = validateShapeId(shapeId);
+    const clientOperationId = validateOptionalClientOperationId(
+      input?.clientOperationId
+    );
+    const baseRevision = validateOptionalBaseRevision(input?.baseRevision);
     const targetShape = await this.database.queryOne<CanvasShapeRow>(
       `
         SELECT
@@ -1307,14 +1311,31 @@ export class CanvasService implements OnModuleDestroy, OnModuleInit {
         transaction,
         {
           actorUserId: currentUserId,
-          baseRevision: null,
+          baseRevision,
           canvasId: targetShape.canvas_id,
-          clientOperationId: null,
+          clientOperationId,
           operationType: "delete",
           shapeId: id,
           workspaceId
         },
         async () => {
+          const currentShape = await this.findActiveShapeForUpdate(
+            transaction,
+            targetShape.canvas_id,
+            id
+          );
+
+          if (!currentShape) {
+            throw notFound("Canvas shape not found");
+          }
+
+          await this.assertFreshShapeBaseRevision(transaction, {
+            baseRevision,
+            currentShape,
+            shapeId: id,
+            workspaceId
+          });
+
           const shape = await transaction.queryOne<CanvasShapeDeleteRow>(
             `
               UPDATE canvas_freeform_shapes s
@@ -1484,6 +1505,130 @@ export class CanvasService implements OnModuleDestroy, OnModuleInit {
         operation
       ) as TPayload
     };
+  }
+
+  private async findActiveShapeForUpdate(
+    transaction: DatabaseTransaction,
+    canvasId: string,
+    shapeId: string
+  ): Promise<CanvasShapeRow | null> {
+    return transaction.queryOne<CanvasShapeRow>(
+      `
+        SELECT
+          id,
+          canvas_id,
+          parent_shape_id,
+          shape_type,
+          title,
+          text_content,
+          x,
+          y,
+          width,
+          height,
+          rotation,
+          z_index,
+          raw_shape,
+          content_hash,
+          revision,
+          created_at,
+          updated_at,
+          deleted_at
+        FROM canvas_freeform_shapes
+        WHERE id = $1
+          AND canvas_id = $2
+          AND deleted_at IS NULL
+        FOR UPDATE
+      `,
+      [shapeId, canvasId]
+    );
+  }
+
+  private async assertFreshShapeBaseRevision(
+    transaction: DatabaseTransaction,
+    {
+      baseRevision,
+      currentShape,
+      shapeId,
+      workspaceId
+    }: {
+      baseRevision: number | null;
+      currentShape: CanvasShapeRow;
+      shapeId: string;
+      workspaceId: string;
+    }
+  ): Promise<void> {
+    if (baseRevision === null) {
+      return;
+    }
+
+    const currentRevision = Number(currentShape.revision);
+
+    if (baseRevision === currentRevision) {
+      return;
+    }
+
+    const latestOperation = await this.findLatestShapeOperation(
+      transaction,
+      workspaceId,
+      currentShape.canvas_id,
+      shapeId
+    );
+
+    const details: CanvasShapeStaleRevisionConflictDetails = {
+      reason: "STALE_SHAPE_REVISION",
+      shapeId,
+      baseRevision,
+      currentRevision,
+      latestShape: mapShape(currentShape),
+      latestOperation: latestOperation
+        ? mapShapeOperation(latestOperation)
+        : null
+    };
+
+    throw new HttpException(
+      {
+        success: false,
+        error: {
+          code: "CONFLICT",
+          message: "Canvas shape has changed since the requested baseRevision",
+          details
+        }
+      },
+      HttpStatus.CONFLICT
+    );
+  }
+
+  private async findLatestShapeOperation(
+    transaction: DatabaseTransaction,
+    workspaceId: string,
+    canvasId: string,
+    shapeId: string
+  ): Promise<CanvasShapeOperationRow | null> {
+    return transaction.queryOne<CanvasShapeOperationRow>(
+      `
+        SELECT
+          id,
+          workspace_id,
+          canvas_id,
+          shape_id,
+          actor_user_id,
+          operation_type,
+          op_seq,
+          client_operation_id,
+          base_revision,
+          result_revision,
+          content_hash,
+          payload,
+          created_at
+        FROM canvas_shape_operations
+        WHERE workspace_id = $1
+          AND canvas_id = $2
+          AND shape_id = $3
+        ORDER BY op_seq DESC, created_at DESC, id DESC
+        LIMIT 1
+      `,
+      [workspaceId, canvasId, shapeId]
+    );
   }
 
   private async findShapeOperationByClientId(

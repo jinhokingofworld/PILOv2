@@ -68,7 +68,7 @@ export class CanvasAgentService implements OnModuleDestroy, OnModuleInit {
     if (values.clientRequestId) {
       const existing = await this.repository.findRunByClientRequestId(workspaceId, canvasId, currentUserId, values.clientRequestId);
       if (existing) {
-        if (existing.prompt !== values.prompt || JSON.stringify(existing.context_json) !== JSON.stringify(values.context)) {
+        if (existing.prompt !== values.prompt || JSON.stringify(this.normalizeContext(existing.context_json)) !== JSON.stringify(values.context)) {
           throw canvasAgentClientRequestIdConflict("Canvas Agent clientRequestId was already used for a different request");
         }
         return this.mapRun(existing);
@@ -359,10 +359,12 @@ export class CanvasAgentService implements OnModuleDestroy, OnModuleInit {
 
   private mapRun(row: CanvasAgentRunRow): CanvasAgentRunPayload {
     const progress = this.readProgress(row.result_json);
+    const presentationMode = this.normalizeContext(row.context_json).presentationMode;
     return {
       id: row.id,
       workspaceId: row.workspace_id,
       canvasId: row.canvas_id,
+      presentationMode,
       status: row.status,
       prompt: row.prompt,
       message: row.result_summary,
@@ -372,6 +374,16 @@ export class CanvasAgentService implements OnModuleDestroy, OnModuleInit {
       createdAt: this.iso(row.created_at),
       completedAt: row.completed_at === null ? null : this.iso(row.completed_at),
       expiresAt: this.iso(row.expires_at)
+    };
+  }
+
+  private normalizeContext(context: Record<string, unknown>) {
+    return {
+      presentationMode: context.presentationMode === "background" ? "background" as const : "interactive" as const,
+      selectedShapeIds: Array.isArray(context.selectedShapeIds)
+        ? context.selectedShapeIds.filter((item): item is string => typeof item === "string")
+        : [],
+      viewport: this.readContextViewport(context.viewport)
     };
   }
 
@@ -418,6 +430,14 @@ export class CanvasAgentService implements OnModuleDestroy, OnModuleInit {
       ? payload.toolTargetLabel.trim()
       : null;
     return { message: payload.message, highlightedShapeIds, targetViewport, toolTarget, toolTargetLabel };
+  }
+
+  private readContextViewport(value: unknown) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    const payload = value as Record<string, unknown>;
+    return ["x", "y", "width", "height"].every((key) => typeof payload[key] === "number")
+      ? payload as { x: number; y: number; width: number; height: number }
+      : null;
   }
 
   private iso(value: Date | string): string {

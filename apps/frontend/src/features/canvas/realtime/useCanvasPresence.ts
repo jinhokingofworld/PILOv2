@@ -13,6 +13,7 @@ import type {
 } from "../api/canvas-types";
 import type {
   CanvasJoinedPayload,
+  CanvasPresenceEditingMode,
   CanvasPresencePoint,
   CanvasPresenceViewport,
   CanvasRealtimeConfig,
@@ -37,9 +38,11 @@ export type CanvasPresenceController = {
   operationSync: CanvasOperationCatchupState;
   remotePresence: CanvasRemotePresenceState[];
   sendPresenceUpdate: (
-    cursor: CanvasPresencePoint,
+    cursor: CanvasPresencePoint | null,
     selectedShapeIds: string[],
     viewport: CanvasPresenceViewport,
+    editingShapeId?: string | null,
+    editingMode?: CanvasPresenceEditingMode | null,
   ) => void;
 };
 
@@ -109,6 +112,21 @@ function isPresenceViewport(value: unknown): value is CanvasPresenceViewport {
   );
 }
 
+function isPresenceEditingMode(
+  value: unknown,
+): value is CanvasPresenceEditingMode {
+  return (
+    value === "code" ||
+    value === "draw" ||
+    value === "hand" ||
+    value === "move" ||
+    value === "placement" ||
+    value === "resize" ||
+    value === "select" ||
+    value === "text"
+  );
+}
+
 function normalizeRemotePresence(
   payload: unknown,
 ): CanvasRemotePresenceState | null {
@@ -143,6 +161,13 @@ function normalizeRemotePresence(
   const selectedShapeIds = Array.isArray(source.selectedShapeIds)
     ? source.selectedShapeIds.filter((shapeId) => typeof shapeId === "string")
     : [];
+  const editingShapeId =
+    typeof source.editingShapeId === "string" && source.editingShapeId
+      ? source.editingShapeId
+      : null;
+  const editingMode = isPresenceEditingMode(source.editingMode)
+    ? source.editingMode
+    : null;
   const cursor = source.cursor === null ? null : source.cursor;
   const updatedAt =
     typeof source.updatedAt === "string"
@@ -166,6 +191,8 @@ function normalizeRemotePresence(
         : typeof nestedUser?.displayName === "string"
           ? nestedUser.displayName
           : "PILO",
+    editingMode,
+    editingShapeId,
     selectedShapeIds,
     ...(typeof source.sentAt === "string" ? { sentAt: source.sentAt } : {}),
     updatedAt,
@@ -630,9 +657,11 @@ export function useCanvasPresence(
 
   const sendPresenceUpdate = useCallback(
     (
-      cursor: CanvasPresencePoint,
+      cursor: CanvasPresencePoint | null,
       selectedShapeIds: string[],
       viewport: CanvasPresenceViewport,
+      editingShapeId: string | null = null,
+      editingMode: CanvasPresenceEditingMode | null = null,
     ) => {
       const socket = socketRef.current;
       const room = roomRef.current;
@@ -644,6 +673,8 @@ export function useCanvasPresence(
       socket.emit("canvas:presence:update", {
         ...room,
         cursor,
+        editingMode,
+        editingShapeId,
         selectedShapeIds,
         sentAt: new Date().toISOString(),
         viewport,

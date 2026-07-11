@@ -47,9 +47,39 @@ jobs:
             ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
             ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
 
-      - name: Deploy ECS service
+      - name: Deploy ECS services
+        env:
+          ECS_CLUSTER_NAME: ${{ vars.ECS_CLUSTER_NAME }}
+          ECS_APP_SERVER_SERVICE: ${{ vars.ECS_APP_SERVER_SERVICE }}
+          ECS_GITHUB_SYNC_WORKER_SERVICE: ${{ vars.ECS_GITHUB_SYNC_WORKER_SERVICE }}
         run: |
-          aws ecs update-service \
-            --cluster "${{ vars.ECS_CLUSTER_NAME }}" \
-            --service "${{ vars.ECS_APP_SERVER_SERVICE }}" \
-            --force-new-deployment
+          set -euo pipefail
+
+          services=("$ECS_APP_SERVER_SERVICE")
+          if [[ -n "${ECS_GITHUB_SYNC_WORKER_SERVICE:-}" ]]; then
+            if worker_service_name="$(aws ecs describe-services \
+              --cluster "$ECS_CLUSTER_NAME" \
+              --services "$ECS_GITHUB_SYNC_WORKER_SERVICE" \
+              --query 'services[0].serviceName' \
+              --output text)"; then
+              if [[ "$worker_service_name" == "$ECS_GITHUB_SYNC_WORKER_SERVICE" ]]; then
+                services+=("$ECS_GITHUB_SYNC_WORKER_SERVICE")
+              else
+                echo "GitHub sync worker service does not exist yet; skipping worker deployment."
+              fi
+            else
+              echo "Unable to verify GitHub sync worker service." >&2
+              exit 1
+            fi
+          fi
+
+          for service in "${services[@]}"; do
+            aws ecs update-service \
+              --cluster "$ECS_CLUSTER_NAME" \
+              --service "$service" \
+              --force-new-deployment
+          done
+
+          aws ecs wait services-stable \
+            --cluster "$ECS_CLUSTER_NAME" \
+            --services "${services[@]}"

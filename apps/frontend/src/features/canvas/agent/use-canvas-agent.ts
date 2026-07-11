@@ -5,6 +5,7 @@ import type { Editor, TLShapeId } from "tldraw";
 import { createCanvasAgentClient } from "../api/canvas-agent-client";
 import type {
   CanvasAgentDraft,
+  CanvasAgentPresentationMode,
   CanvasAgentProgress,
   CanvasAgentRun,
   CanvasAgentViewport,
@@ -47,7 +48,7 @@ export function useCanvasAgent({
   const presentRun = useCallback(
     (nextRun: CanvasAgentRun) => {
       setRun(nextRun);
-      const progress = nextRun.progress;
+      const progress = nextRun.presentationMode === "background" ? null : nextRun.progress;
       clearProgressHideTimer();
       setVisibleProgress(progress);
       if (progress && !ACTIVE_STATUSES.has(nextRun.status)) {
@@ -82,7 +83,10 @@ export function useCanvasAgent({
   );
 
   const submit = useCallback(
-    async (prompt: string, options?: { toolHelpMode?: boolean }) => {
+    async (
+      prompt: string,
+      options?: { presentationMode?: CanvasAgentPresentationMode; toolHelpMode?: boolean },
+    ) => {
       if (!editor) {
         setError("Canvas API 연결 후 Canvas AI를 사용할 수 있습니다.");
         return;
@@ -104,6 +108,7 @@ export function useCanvasAgent({
             id: `local-canvas-agent-${crypto.randomUUID()}`,
             workspaceId,
             canvasId,
+            presentationMode: "interactive",
             status: "completed",
             prompt,
             message,
@@ -132,6 +137,7 @@ export function useCanvasAgent({
           id: `local-canvas-agent-${crypto.randomUUID()}`,
           workspaceId,
           canvasId,
+          presentationMode: "interactive",
           status: "completed",
           prompt,
           message,
@@ -160,6 +166,7 @@ export function useCanvasAgent({
       try {
         const result = await client.createRun(workspaceId, canvasId, {
           prompt,
+          presentationMode: options?.presentationMode ?? "interactive",
           selectedShapeIds: editor.getSelectedShapeIds().map(String),
           viewport,
           toolHelpMode: options?.toolHelpMode === true,
@@ -205,9 +212,11 @@ export function useCanvasAgent({
     }
   }, [canvasId, client, draft, workspaceId]);
 
+  const runStatus = run?.status ?? null;
+
   useEffect(() => {
     const runId = runIdRef.current;
-    if (!runId || !run || !ACTIVE_STATUSES.has(run.status)) return undefined;
+    if (!runId || !runStatus || !ACTIVE_STATUSES.has(runStatus)) return undefined;
     let cancelled = false;
     const poll = async () => {
       try {
@@ -226,7 +235,7 @@ export function useCanvasAgent({
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [canvasId, client, presentRun, run, workspaceId]);
+  }, [canvasId, client, presentRun, runStatus, workspaceId]);
 
   useEffect(() => () => clearProgressHideTimer(), [clearProgressHideTimer]);
 
@@ -239,6 +248,7 @@ export function useCanvasAgent({
     isRunning: run ? ACTIVE_STATUSES.has(run.status) : false,
     message: error ?? run?.progress?.message ?? run?.message ?? null,
     progress: visibleProgress,
+    presentationMode: run?.presentationMode ?? "interactive",
     submit,
   };
 }

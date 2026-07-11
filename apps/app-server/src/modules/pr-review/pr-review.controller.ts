@@ -1,4 +1,15 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Res,
+  UseGuards
+} from "@nestjs/common";
+import type { FastifyReply } from "fastify";
 import { apiResponse, type ApiSuccessResponse } from "../../common/api-response";
 import { AuthGuard } from "../../common/auth.guard";
 import { CurrentUserId } from "../../common/current-user.decorator";
@@ -32,14 +43,17 @@ export class PrReviewController {
   async createReviewSession(
     @CurrentUserId() currentUserId: string,
     @Param("workspaceId") workspaceId: string,
-    @Param("pullRequestId") pullRequestId: string
+    @Param("pullRequestId") pullRequestId: string,
+    @Res({ passthrough: true }) reply: FastifyReply
   ): Promise<ApiSuccessResponse<PrReviewSessionPayload>> {
-    const session = await this.prReviewService.createReviewSession(
+    const result = await this.prReviewService.createReviewSession(
       currentUserId,
       workspaceId,
       pullRequestId
     );
-    return apiResponse(session);
+
+    reply.status(result.created ? 201 : 200);
+    return apiResponse(result.session);
   }
 
   @Get("review-sessions/:reviewSessionId")

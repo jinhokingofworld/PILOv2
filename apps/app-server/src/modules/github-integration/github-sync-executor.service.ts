@@ -173,6 +173,17 @@ export class GithubSyncExecutorService {
     return summary;
   }
 
+  /**
+   * Stores only ProjectV2 list metadata and repository links.  Installation
+   * setup uses this before a user has chosen projects, so it must not fetch
+   * fields, items, or hydrate Boards.
+   */
+  async discoverGithubProjectV2Metadata(
+    context: GithubSyncRunContext
+  ): Promise<GithubSyncRunSummary> {
+    return (await this.syncGithubProjectV2Discovery(context)).summary;
+  }
+
   private async syncGithubFull(
     context: GithubSyncRunContext
   ): Promise<GithubSyncRunSummary> {

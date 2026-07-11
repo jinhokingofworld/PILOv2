@@ -19,6 +19,12 @@ variable "livekit_secret_arns" {
   default = []
 }
 
+variable "ami_id" {
+  description = "Pinned AMI ID for the LiveKit host. Update only during a planned host rotation."
+  type        = string
+  sensitive   = true
+}
+
 variable "instance_type" {
   type = string
 }

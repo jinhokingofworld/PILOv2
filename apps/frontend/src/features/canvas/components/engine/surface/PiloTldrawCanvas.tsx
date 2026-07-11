@@ -5,7 +5,6 @@ import {
   useCallback,
   useRef,
   useState,
-  type MouseEvent,
   type MutableRefObject,
   type PointerEvent,
 } from "react";
@@ -20,13 +19,14 @@ import {
   type TLShapePartial,
   useEditor,
 } from "tldraw";
-import { Bot } from "lucide-react";
 import { useValue } from "@tldraw/state-react";
 import { useCanvasAgent } from "@/features/canvas/agent/use-canvas-agent";
 import { TldrawSurface } from "@/shared/tldraw";
 import type { CanvasPresenceController } from "@/features/canvas/realtime/useCanvasPresence";
 import { RemoteCursorOverlay } from "@/features/canvas/realtime/RemoteCursorOverlay";
+import { CanvasRemotePresenceProvider } from "@/features/canvas/realtime/CanvasRemotePresenceContext";
 import type {
+  CanvasPresenceEditingMode,
   CanvasPresencePoint,
   CanvasPresenceViewport,
 } from "@/features/canvas/realtime/canvas-realtime-types";
@@ -53,6 +53,7 @@ import {
 import { restorePiloShapeAssets } from "../assets/pilo-canvas-assets";
 import { CanvasStateReporter } from "./pilo-canvas-state-reporter";
 import {
+  removeStaleSerializedArrowBindings,
   readSerializedArrowBindings,
   restoreSerializedArrowBindings,
   withSerializedArrowBindings,
@@ -61,6 +62,7 @@ import {
 import type {
   PiloCanvasShapeDetailRequest,
   PiloCanvasFreeformShape,
+  PiloCanvasLocalInteractionState,
   PiloCanvasViewportBounds,
   PiloCanvasViewSetting,
 } from "../types";
@@ -130,6 +132,7 @@ export type PiloDrawingPreset =
 
 export type PiloCanvasActions = {
   markUiEventAsHandled: (event: PointerEvent<HTMLElement>) => void;
+  openCanvasAiChat: (anchor: CanvasAiChatAnchor) => void;
   selectTool: (tool: PiloCanvasTool) => void;
   selectDrawingPreset: (preset: PiloDrawingPreset) => void;
   setColor: (color: PiloCanvasColor) => void;
@@ -171,6 +174,9 @@ type PiloTldrawCanvasProps = {
   onViewportBoundsChange: (bounds: PiloCanvasViewportBounds) => void;
   onShapeDetailRequest: (request: PiloCanvasShapeDetailRequest) => void;
   onHistoryStateChange: (state: PiloCanvasHistoryState) => void;
+  onLocalInteractionStateChange: (
+    state: PiloCanvasLocalInteractionState,
+  ) => void;
   presence?: CanvasPresenceController;
   onSnapStateChange: (state: PiloCanvasSnapState) => void;
   onOneShotToolCreated?: () => void;
@@ -188,6 +194,46 @@ const PILO_FRAME_EXPANDED_FALLBACK_SIZE = {
   h: 180,
   w: 320,
 };
+
+const localInteractionStateIdle: PiloCanvasLocalInteractionState = {
+  currentToolId: "select.idle",
+  editingShapeId: null,
+  focusedGroupId: null,
+  isFocused: false,
+  protectedShapeIds: [],
+  selectedShapeIds: [],
+};
+
+function getRestorableToolId(toolId: string) {
+  if (!toolId || toolId.startsWith("select.")) {
+    return "select.idle";
+  }
+
+  return toolId;
+}
+
+function getProtectedLocalShapeIds(
+  selectedShapeIds: TLShapeId[],
+  editingShapeId: TLShapeId | null,
+  currentToolId: string,
+) {
+  const protectedShapeIds = new Set<string>();
+
+  if (editingShapeId) {
+    protectedShapeIds.add(String(editingShapeId));
+  }
+
+  if (
+    currentToolId.startsWith("select.") &&
+    currentToolId !== "select.idle"
+  ) {
+    selectedShapeIds.forEach((shapeId) => {
+      protectedShapeIds.add(String(shapeId));
+    });
+  }
+
+  return Array.from(protectedShapeIds);
+}
 
 function collectSerializedArrowBindings(shapes: PiloCanvasFreeformShape[]) {
   return shapes.flatMap(readSerializedArrowBindings);
@@ -211,6 +257,43 @@ function uniquePendingArrowBindings(bindings: PiloArrowBindingSnapshot[]) {
   return Array.from(bindingMap.values());
 }
 
+function getFreeformShapeId(shape: PiloCanvasFreeformShape | TLShape) {
+  return typeof shape.id === "string" ? shape.id : null;
+}
+
+function serializeFreeformShape(shape: PiloCanvasFreeformShape) {
+  return JSON.stringify(shape);
+}
+
+function hasFreeformShapeChanged(
+  editor: Editor,
+  currentShape: TLShape,
+  nextShape: PiloCanvasFreeformShape,
+) {
+  return (
+    serializeFreeformShape(withSerializedArrowBindings(editor, currentShape)) !==
+    serializeFreeformShape(nextShape)
+  );
+}
+
+function restoreFreeformShapeBindings(
+  editor: Editor,
+  shapes: PiloCanvasFreeformShape[],
+  pendingArrowBindingsRef: MutableRefObject<PiloArrowBindingSnapshot[]>,
+) {
+  const bindingsToRestore = uniquePendingArrowBindings([
+    ...pendingArrowBindingsRef.current,
+    ...collectSerializedArrowBindings(shapes),
+  ]);
+
+  removeStaleSerializedArrowBindings(editor, shapes);
+
+  if (!bindingsToRestore.length) return;
+
+  const result = restoreSerializedArrowBindings(editor, bindingsToRestore);
+  pendingArrowBindingsRef.current = uniquePendingArrowBindings(result.pending);
+}
+
 function createFreeformShapeRecords(
   editor: Editor,
   shapes: PiloCanvasFreeformShape[],
@@ -227,15 +310,7 @@ function createFreeformShapeRecords(
     piloDefaultArrowKindHydrationGuardRef.current = false;
   }
 
-  const bindingsToRestore = uniquePendingArrowBindings([
-    ...pendingArrowBindingsRef.current,
-    ...collectSerializedArrowBindings(shapes),
-  ]);
-
-  if (!bindingsToRestore.length) return;
-
-  const result = restoreSerializedArrowBindings(editor, bindingsToRestore);
-  pendingArrowBindingsRef.current = uniquePendingArrowBindings(result.pending);
+  restoreFreeformShapeBindings(editor, shapes, pendingArrowBindingsRef);
 }
 
 function hydrateFreeformShapes(
@@ -279,7 +354,17 @@ function resetFreeformShapes(
   shapes: PiloCanvasFreeformShape[],
   pendingArrowBindingsRef: MutableRefObject<PiloArrowBindingSnapshot[]>,
   piloDefaultArrowKindHydrationGuardRef: MutableRefObject<boolean>,
+  { preserveLocalState = false }: { preserveLocalState?: boolean } = {},
 ) {
+  const selectedShapeIds = preserveLocalState ? editor.getSelectedShapeIds() : [];
+  const editingShapeId = preserveLocalState ? editor.getEditingShapeId() : null;
+  const currentPageState = preserveLocalState
+    ? editor.getCurrentPageState()
+    : null;
+  const focusedGroupId = currentPageState?.focusedGroupId ?? null;
+  const currentToolId = preserveLocalState ? editor.getCurrentToolId() : null;
+  const isFocused = preserveLocalState ? editor.getIsFocused() : false;
+
   editor.run(
     () => {
       pendingArrowBindingsRef.current = [];
@@ -297,6 +382,121 @@ function resetFreeformShapes(
         pendingArrowBindingsRef,
         piloDefaultArrowKindHydrationGuardRef,
       );
+
+      if (preserveLocalState) {
+        const nextSelectedShapeIds = selectedShapeIds.filter((shapeId) =>
+          editor.getShape(shapeId),
+        );
+
+        if (nextSelectedShapeIds.length) {
+          editor.setSelectedShapes(nextSelectedShapeIds);
+        }
+
+        if (focusedGroupId && editor.getShape(focusedGroupId)) {
+          editor.setFocusedGroup(focusedGroupId);
+        }
+
+        if (editingShapeId && editor.getShape(editingShapeId)) {
+          editor.setEditingShape(editingShapeId);
+        }
+
+        if (currentToolId) {
+          editor.setCurrentTool(getRestorableToolId(currentToolId));
+        }
+      }
+    },
+    { history: "ignore" },
+  );
+
+  if (isFocused) {
+    editor.focus({ focusContainer: false });
+  }
+}
+
+function syncFreeformShapesIncrementally(
+  editor: Editor,
+  shapes: PiloCanvasFreeformShape[],
+  pendingArrowBindingsRef: MutableRefObject<PiloArrowBindingSnapshot[]>,
+  piloDefaultArrowKindHydrationGuardRef: MutableRefObject<boolean>,
+) {
+  editor.run(
+    () => {
+      const incomingShapeMap = new Map<string, PiloCanvasFreeformShape>();
+      const currentShapeMap = new Map<string, TLShape>();
+      const shapeIdsToDelete: TLShapeId[] = [];
+      const shapesToCreate: PiloCanvasFreeformShape[] = [];
+      const shapesToUpdate: PiloCanvasFreeformShape[] = [];
+      const changedShapesForBindingRestore: PiloCanvasFreeformShape[] = [];
+
+      shapes.forEach((shape) => {
+        const shapeId = getFreeformShapeId(shape);
+
+        if (shapeId) {
+          incomingShapeMap.set(shapeId, shape);
+        }
+      });
+
+      editor.getCurrentPageShapes().forEach((shape) => {
+        currentShapeMap.set(String(shape.id), shape);
+
+        if (!incomingShapeMap.has(String(shape.id))) {
+          shapeIdsToDelete.push(shape.id as TLShapeId);
+        }
+      });
+
+      shapes.forEach((shape) => {
+        const shapeId = getFreeformShapeId(shape);
+        const currentShape = shapeId ? currentShapeMap.get(shapeId) : null;
+
+        if (!currentShape) {
+          shapesToCreate.push(shape);
+          changedShapesForBindingRestore.push(shape);
+          return;
+        }
+
+        if (currentShape.type !== shape.type) {
+          shapeIdsToDelete.push(currentShape.id as TLShapeId);
+          shapesToCreate.push(shape);
+          changedShapesForBindingRestore.push(shape);
+          return;
+        }
+
+        if (hasFreeformShapeChanged(editor, currentShape, shape)) {
+          shapesToUpdate.push(shape as TLShapePartial<TLShape>);
+          changedShapesForBindingRestore.push(shape);
+        }
+      });
+
+      if (shapeIdsToDelete.length) {
+        editor.deleteShapes(Array.from(new Set(shapeIdsToDelete)));
+      }
+
+      if (shapesToCreate.length || shapesToUpdate.length) {
+        restorePiloShapeAssets(editor, [...shapesToCreate, ...shapesToUpdate]);
+      }
+
+      if (shapesToCreate.length) {
+        piloDefaultArrowKindHydrationGuardRef.current = true;
+        try {
+          editor.createShapes(sortFreeformShapesForCreate(shapesToCreate));
+        } finally {
+          piloDefaultArrowKindHydrationGuardRef.current = false;
+        }
+      }
+
+      if (shapesToUpdate.length) {
+        editor.updateShapes(shapesToUpdate as TLShapePartial<TLShape>[]);
+      }
+
+      if (changedShapesForBindingRestore.length) {
+        restoreFreeformShapeBindings(
+          editor,
+          changedShapesForBindingRestore,
+          pendingArrowBindingsRef,
+        );
+      } else if (pendingArrowBindingsRef.current.length) {
+        restoreFreeformShapeBindings(editor, [], pendingArrowBindingsRef);
+      }
     },
     { history: "ignore" },
   );
@@ -451,6 +651,7 @@ export function PiloTldrawCanvas({
   onViewportBoundsChange,
   onShapeDetailRequest,
   onHistoryStateChange,
+  onLocalInteractionStateChange,
   presence,
   onSnapStateChange,
   onOneShotToolCreated,
@@ -470,6 +671,7 @@ export function PiloTldrawCanvas({
   const createdLocalCardsRef = useRef(0);
   const freeformShapesRef = useRef(freeformShapes);
   const canvasWheelCleanupRef = useRef<(() => void) | null>(null);
+  const lastHydratedSeedKeyRef = useRef<string | null>(null);
   const frameChildrenRequestTimerRef =
     useRef<ReturnType<typeof setTimeout> | null>(null);
   const initialViewSettingRef = useRef(initialViewSetting);
@@ -531,12 +733,26 @@ export function PiloTldrawCanvas({
 
     if (!editor) return;
 
-    resetFreeformShapes(
-      editor,
-      freeformShapesRef.current,
-      pendingArrowBindingsRef,
-      piloDefaultArrowKindHydrationGuardRef,
-    );
+    const shouldPreserveLocalState =
+      lastHydratedSeedKeyRef.current === seedKey;
+
+    if (shouldPreserveLocalState) {
+      syncFreeformShapesIncrementally(
+        editor,
+        freeformShapesRef.current,
+        pendingArrowBindingsRef,
+        piloDefaultArrowKindHydrationGuardRef,
+      );
+    } else {
+      resetFreeformShapes(
+        editor,
+        freeformShapesRef.current,
+        pendingArrowBindingsRef,
+        piloDefaultArrowKindHydrationGuardRef,
+      );
+    }
+
+    lastHydratedSeedKeyRef.current = seedKey;
   }, [hydrationVersion, seedKey]);
 
   useEffect(() => {
@@ -647,6 +863,13 @@ export function PiloTldrawCanvas({
       markUiEventAsHandled(event) {
         editor.markEventAsHandled(event);
         event.stopPropagation();
+      },
+      openCanvasAiChat(anchor) {
+        placementRequestRef.current = null;
+        returnToSelectAfterPlacementRef.current = false;
+        editor.cancel();
+        editor.setCurrentTool("select.idle");
+        openCanvasAiChatAt(anchor);
       },
       selectTool(tool) {
         placementRequestRef.current = null;
@@ -1044,7 +1267,7 @@ export function PiloTldrawCanvas({
   function handleCanvasPointerDownCapture(event: PointerEvent<HTMLDivElement>) {
     if (
       event.target instanceof Element &&
-      event.target.closest(".canvas-ai-chat, .canvas-ai-tool")
+      event.target.closest(".canvas-ai-chat")
     ) {
       return;
     }
@@ -1125,6 +1348,11 @@ export function PiloTldrawCanvas({
     editor.setCurrentTool("select");
     editor.select(frameShape.id);
     requestShapeDetail(editor, frameShape.id);
+
+    if (!frameShape.isLocked) {
+      return;
+    }
+
     event.preventDefault();
     event.stopPropagation();
   }
@@ -1185,19 +1413,12 @@ export function PiloTldrawCanvas({
     setCanvasAiChatHoldProgress(null);
   }
 
-  function openCanvasAiChatFromButton(
-    event: MouseEvent<HTMLButtonElement>,
-  ) {
-    const buttonBounds = event.currentTarget.getBoundingClientRect();
-
+  function openCanvasAiChatAt(anchor: CanvasAiChatAnchor) {
     cancelCanvasAiChatHold();
     setCanvasAiChatAnchor((currentAnchor) => {
       if (currentAnchor) return null;
 
-      return {
-        x: buttonBounds.left + buttonBounds.width / 2,
-        y: buttonBounds.top + buttonBounds.height,
-      };
+      return anchor;
     });
   }
 
@@ -1207,50 +1428,46 @@ export function PiloTldrawCanvas({
       onPointerDownCapture={handleCanvasPointerDownCapture}
       onPointerMoveCapture={trackCanvasAiChatPointer}
     >
-      <TldrawSurface
-        className="pilo-tldraw-canvas"
-        hideUi
-        licenseKey={process.env.NEXT_PUBLIC_TLDRAW_LICENSE_KEY}
-        shapeUtils={piloCanvasShapeUtils}
-        components={tldrawComponents}
-        onMount={mountEditor}
-      >
-        <CanvasStateReporter
-          onFreeformShapesDraftChange={onFreeformShapesDraftChange}
-          onFreeformShapesChange={onFreeformShapesChange}
-          onViewChange={onViewChange}
-          onViewportBoundsChange={onViewportBoundsChange}
-        />
-        <CanvasHistoryStateReporter
-          onHistoryStateChange={onHistoryStateChange}
-        />
-        <CanvasFileDropImporter />
-        {presence?.enabled ? <CanvasPresenceReporter presence={presence} /> : null}
-        {presence ? (
-          <RemoteCursorOverlay
-            currentUserId={presence.currentUserId}
-            presence={presence.remotePresence}
+      <CanvasRemotePresenceProvider presence={presence?.remotePresence ?? []}>
+        <TldrawSurface
+          className="pilo-tldraw-canvas"
+          hideUi
+          licenseKey={process.env.NEXT_PUBLIC_TLDRAW_LICENSE_KEY}
+          shapeUtils={piloCanvasShapeUtils}
+          components={tldrawComponents}
+          onMount={mountEditor}
+        >
+          <CanvasLocalInteractionReporter
+            onChange={onLocalInteractionStateChange}
           />
-        ) : null}
-        <CanvasSnapStateReporter onSnapStateChange={onSnapStateChange} />
-        <SelectedShapeStackingManager />
-        <SelectedGroupToolbar />
-        <PiloCollapsedFrameOverlay
-          onFrameCollapsedChange={handleFrameCollapsedChange}
-        />
-        <FrameSelectionToolbar
-          onFrameCollapsedChange={handleFrameCollapsedChange}
-        />
-      </TldrawSurface>
-      <button
-        aria-label="Canvas AI 채팅 열기"
-        className="canvas-ai-tool absolute right-4 top-4 z-50"
-        data-canvas-agent-target="toolbar.canvas_ai"
-        onClick={openCanvasAiChatFromButton}
-        type="button"
-      >
-        <Bot className="size-5" />
-      </button>
+          <CanvasStateReporter
+            onFreeformShapesDraftChange={onFreeformShapesDraftChange}
+            onFreeformShapesChange={onFreeformShapesChange}
+            onViewChange={onViewChange}
+            onViewportBoundsChange={onViewportBoundsChange}
+          />
+          <CanvasHistoryStateReporter
+            onHistoryStateChange={onHistoryStateChange}
+          />
+          <CanvasFileDropImporter />
+          {presence?.enabled ? <CanvasPresenceReporter presence={presence} /> : null}
+          {presence ? (
+            <RemoteCursorOverlay
+              currentUserId={presence.currentUserId}
+              presence={presence.remotePresence}
+            />
+          ) : null}
+          <CanvasSnapStateReporter onSnapStateChange={onSnapStateChange} />
+          <SelectedShapeStackingManager />
+          <SelectedGroupToolbar />
+          <PiloCollapsedFrameOverlay
+            onFrameCollapsedChange={handleFrameCollapsedChange}
+          />
+          <FrameSelectionToolbar
+            onFrameCollapsedChange={handleFrameCollapsedChange}
+          />
+        </TldrawSurface>
+      </CanvasRemotePresenceProvider>
       <CanvasAiChatOverlay
         anchor={canvasAiChatAnchor}
         draft={canvasAgent.draft}
@@ -1266,10 +1483,57 @@ export function PiloTldrawCanvas({
       <CanvasAgentVisualOverlay
         draft={canvasAgent.draft}
         editor={canvasEditor}
+        playbackEnabled={canvasAgent.presentationMode !== "background"}
         progress={canvasAgent.progress}
       />
     </div>
   );
+}
+
+function CanvasLocalInteractionReporter({
+  onChange,
+}: {
+  onChange: (state: PiloCanvasLocalInteractionState) => void;
+}) {
+  const editor = useEditor();
+  const localInteractionState = useValue(
+    "pilo-local-interaction-state",
+    () => {
+      const selectedShapeIds = editor.getSelectedShapeIds();
+      const editingShapeId = editor.getEditingShapeId();
+      const currentToolId = editor.getCurrentToolId();
+      const pageState = editor.getCurrentPageState();
+
+      return {
+        currentToolId,
+        editingShapeId: editingShapeId ? String(editingShapeId) : null,
+        focusedGroupId: pageState.focusedGroupId
+          ? String(pageState.focusedGroupId)
+          : null,
+        isFocused: editor.getIsFocused(),
+        protectedShapeIds: getProtectedLocalShapeIds(
+          selectedShapeIds,
+          editingShapeId,
+          currentToolId,
+        ),
+        selectedShapeIds: selectedShapeIds.map(String),
+      };
+    },
+    [editor],
+  );
+
+  useEffect(() => {
+    onChange(localInteractionState);
+  }, [localInteractionState, onChange]);
+
+  useEffect(
+    () => () => {
+      onChange(localInteractionStateIdle);
+    },
+    [onChange],
+  );
+
+  return null;
 }
 
 const PILO_CODE_IMPORT_GRID_GAP_X = 56;
@@ -1597,8 +1861,12 @@ function hasSameSelectedShapeIds(
 
 function hasCursorMovedEnough(
   previousCursor: CanvasPresencePoint | null,
-  nextCursor: CanvasPresencePoint,
+  nextCursor: CanvasPresencePoint | null,
 ) {
+  if (!nextCursor) {
+    return previousCursor !== null;
+  }
+
   if (!previousCursor) {
     return true;
   }
@@ -1608,6 +1876,22 @@ function hasCursorMovedEnough(
       nextCursor.x - previousCursor.x,
       nextCursor.y - previousCursor.y,
     ) >= 1.5
+  );
+}
+
+function hasSamePresenceEditingIntent(
+  previousIntent: {
+    editingMode: CanvasPresenceEditingMode | null;
+    editingShapeId: string | null;
+  },
+  nextIntent: {
+    editingMode: CanvasPresenceEditingMode | null;
+    editingShapeId: string | null;
+  },
+) {
+  return (
+    previousIntent.editingMode === nextIntent.editingMode &&
+    previousIntent.editingShapeId === nextIntent.editingShapeId
   );
 }
 
@@ -1623,6 +1907,34 @@ function getCanvasPresenceViewport(editor: Editor): CanvasPresenceViewport {
   };
 }
 
+function getCanvasPresenceEditingMode({
+  currentToolId,
+  editingShapeId,
+  editor,
+  selectedShapeIds,
+}: {
+  currentToolId: string;
+  editingShapeId: string | null;
+  editor: Editor;
+  selectedShapeIds: string[];
+}): CanvasPresenceEditingMode | null {
+  if (editingShapeId) {
+    const editingShape = editor.getShape(editingShapeId as TLShapeId);
+
+    return editingShape && isPiloCodeBlockShape(editingShape) ? "code" : "text";
+  }
+
+  if (currentToolId.includes("draw")) return "draw";
+  if (currentToolId.includes("hand")) return "hand";
+  if (currentToolId.includes("resize")) return "resize";
+  if (currentToolId.includes("translate")) return "move";
+  if (currentToolId !== "select.idle" && currentToolId !== "select") {
+    return "placement";
+  }
+
+  return selectedShapeIds.length ? "select" : null;
+}
+
 function CanvasPresenceReporter({
   presence,
 }: {
@@ -1635,13 +1947,41 @@ function CanvasPresenceReporter({
     () => editor.getSelectedShapeIds().map(String),
     [editor],
   );
+  const editingShapeId = useValue(
+    "pilo-presence-editing-shape-id",
+    () => {
+      const nextEditingShapeId = editor.getEditingShapeId();
+
+      return nextEditingShapeId ? String(nextEditingShapeId) : null;
+    },
+    [editor],
+  );
+  const currentToolId = useValue(
+    "pilo-presence-current-tool-id",
+    () => editor.getCurrentToolId(),
+    [editor],
+  );
+  const editingMode = getCanvasPresenceEditingMode({
+    currentToolId,
+    editingShapeId,
+    editor,
+    selectedShapeIds,
+  });
   const selectedShapeIdsRef = useRef<string[]>(selectedShapeIds);
+  const editingIntentRef = useRef<{
+    editingMode: CanvasPresenceEditingMode | null;
+    editingShapeId: string | null;
+  }>({ editingMode, editingShapeId });
   const lastSentAtRef = useRef(0);
   const lastSentPayloadRef = useRef<{
     cursor: CanvasPresencePoint | null;
+    editingMode: CanvasPresenceEditingMode | null;
+    editingShapeId: string | null;
     selectedShapeIds: string[];
   }>({
     cursor: null,
+    editingMode: null,
+    editingShapeId: null,
     selectedShapeIds: [],
   });
   const pendingCursorRef = useRef<CanvasPresencePoint | null>(null);
@@ -1651,9 +1991,14 @@ function CanvasPresenceReporter({
     selectedShapeIdsRef.current = selectedShapeIds;
   }, [selectedShapeIds]);
 
+  useEffect(() => {
+    editingIntentRef.current = { editingMode, editingShapeId };
+  }, [editingMode, editingShapeId]);
+
   const flushPresence = useCallback(
-    (cursor: CanvasPresencePoint) => {
+    (cursor: CanvasPresencePoint | null) => {
       const nextSelectedShapeIds = selectedShapeIdsRef.current;
+      const nextEditingIntent = editingIntentRef.current;
       const lastPayload = lastSentPayloadRef.current;
 
       if (
@@ -1661,7 +2006,8 @@ function CanvasPresenceReporter({
         hasSameSelectedShapeIds(
           lastPayload.selectedShapeIds,
           nextSelectedShapeIds,
-        )
+        ) &&
+        hasSamePresenceEditingIntent(lastPayload, nextEditingIntent)
       ) {
         return;
       }
@@ -1670,10 +2016,13 @@ function CanvasPresenceReporter({
         cursor,
         nextSelectedShapeIds,
         getCanvasPresenceViewport(editor),
+        nextEditingIntent.editingShapeId,
+        nextEditingIntent.editingMode,
       );
       lastSentAtRef.current = Date.now();
       lastSentPayloadRef.current = {
         cursor,
+        ...nextEditingIntent,
         selectedShapeIds: nextSelectedShapeIds,
       };
     },
@@ -1710,6 +2059,14 @@ function CanvasPresenceReporter({
     },
     [flushPresence],
   );
+
+  useEffect(() => {
+    if (!presence.enabled) {
+      return;
+    }
+
+    flushPresence(lastSentPayloadRef.current.cursor);
+  }, [editingMode, editingShapeId, flushPresence, presence.enabled, selectedShapeIds]);
 
   useEffect(() => {
     if (!presence.enabled) {

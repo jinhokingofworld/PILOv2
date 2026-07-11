@@ -39,6 +39,7 @@ export interface ListGithubProjectsV2Query {
   q?: unknown;
   page?: unknown;
   limit?: unknown;
+  management?: unknown;
 }
 
 export interface ReplaceGithubProjectV2SelectionsRequest {

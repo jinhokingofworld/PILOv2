@@ -11,6 +11,7 @@ import type {
   GithubProjectOAuthStart,
   GithubProjectOAuthStatus,
   GithubProjectV2,
+  GithubProjectV2Discovery,
   GithubProjectV2AccessStatus,
   GithubPullRequest,
   GithubRepository,
@@ -21,6 +22,7 @@ import type {
   ListGithubRepositoriesQuery,
   ListGithubSyncRunsQuery,
   GithubProjectV2Selection,
+  GithubProjectV2SelectionResult,
   ReplaceGithubProjectV2SelectionsInput,
   StartGithubAppInstallationInput,
   StartGithubOAuthInput,
@@ -477,6 +479,14 @@ export function createGithubIntegrationApiClient({
       );
     },
 
+    async discoverGithubProjectV2(workspaceId: string, installationId: string) {
+      return requestGithubIntegrationData<GithubProjectV2Discovery>(
+        workspaceGithubPath(workspaceId, `/installations/${encodeURIComponent(installationId)}/projects-v2/discovery`),
+        { method: "POST" },
+        requestOptions
+      );
+    },
+
     async getGithubProjectV2(workspaceId: string, projectV2Id: string) {
       return requestGithubIntegrationData<GithubProjectV2>(
         projectV2GithubPath(workspaceId, projectV2Id),
@@ -489,7 +499,7 @@ export function createGithubIntegrationApiClient({
       workspaceId: string,
       body: ReplaceGithubProjectV2SelectionsInput
     ) {
-      return requestGithubIntegrationData<GithubProjectV2Selection>(
+      return requestGithubIntegrationData<GithubProjectV2SelectionResult>(
         workspaceGithubPath(workspaceId, "/project-v2-selections"),
         withJsonBody(body, { method: "PUT" }),
         requestOptions

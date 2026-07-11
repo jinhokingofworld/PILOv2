@@ -83,6 +83,9 @@ Canvas의 아래 흐름은 Canvas 도메인 전용이다.
 - API 저장 모드에서는 shape 변경 operation을 Canvas feature 내부 queue에서 직렬로 보낸다.
 - 저장 queue는 `p-queue` `concurrency: 1`로 직렬화한다.
 - 저장 실패 시 pending operation을 버리지 않고 `p-retry` retry/backoff 후 다시 보낸다.
+- 서버가 stale `baseRevision`을 `409 CONFLICT`로 거절하면 같은 payload를 retry해도
+  성공하지 않으므로 non-retryable 오류로 처리한다. 이후 충돌 UI는 API 응답의
+  `latestShape`와 `latestOperation.actorUserId`를 기준으로 사용자 선택지를 구성한다.
 - shape 변경 감지는 전체 snapshot `JSON.stringify` 비교 대신 shape id별 `microdiff`를 사용한다.
 - viewport/detail 조회는 `@tanstack/react-query` query key, cancellation, cache invalidation과 local dirty shape 상태를 확인한 뒤 반영한다.
 - `contentHash`와 `revision`은 Canvas API 응답 기준 metadata이며, shared `TldrawSurface`가 아니라 Canvas runtime/API 경계에서 다룬다.
@@ -90,7 +93,7 @@ Canvas의 아래 흐름은 Canvas 도메인 전용이다.
 ## Realtime Presence
 
 - Canvas presence는 `src/features/canvas/realtime/`에서 Socket.IO client, hook, overlay를 분리해 조립한다.
-- `PiloCanvasRuntime`은 socket state를 만들고, `PiloTldrawCanvas`는 `TldrawSurface` child에서 `useEditor()` 기반 cursor 좌표를 report한다.
-- cursor 좌표와 selection presence는 DB에 저장하지 않는다.
+- `PiloCanvasRuntime`은 socket state를 만들고, `PiloTldrawCanvas`는 `TldrawSurface` child에서 `useEditor()` 기반 cursor 좌표, selection, edit intent를 report한다.
+- cursor 좌표, selection, `editingShapeId`, `editingMode` presence는 DB에 저장하지 않는다.
 - local UI Preview의 fake session은 realtime-server DB session 검증을 통과하지 않으므로 presence를 켜지 않는다.
 - `src/shared/tldraw/TldrawSurface`는 presence를 소유하지 않는다. PR Review 같은 다른 tldraw 화면은 필요하면 realtime 모듈을 자기 화면 흐름에 맞게 조립한다.
