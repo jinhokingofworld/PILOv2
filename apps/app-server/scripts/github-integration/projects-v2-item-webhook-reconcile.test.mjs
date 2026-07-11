@@ -5,7 +5,9 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const { GithubAppClient } = require("../../dist/modules/github-integration/github-app.client.js");
 const { GithubSyncExecutorService } = require("../../dist/modules/github-integration/github-sync-executor.service.js");
+const { GithubSyncJobService } = require("../../dist/modules/github-integration/github-sync-job.service.js");
 const { GithubWebhookService } = require("../../dist/modules/github-integration/github-webhook.service.js");
+const { GithubProjectV2WebhookReconcileService } = require("../../dist/modules/github-integration/github-project-v2-webhook-reconcile.service.js");
 
 const webhookSecret = "test-webhook-secret";
 const receivedAt = "2026-07-11T09:00:00.000Z";
@@ -313,6 +315,210 @@ function reconcileContext() {
       now: () => new Date("2026-07-11T09:00:00.000Z")
     }
   };
+}
+
+class DeliveryLeaseFakeDatabase {
+  constructor({
+    deliveryId,
+    status = "received",
+    leaseExpired = false,
+    projectV2Context = true
+  }) {
+    this.delivery = {
+      delivery_id: deliveryId,
+      status,
+      lease_expires_at: leaseExpired ? receivedAt : "2026-07-11T10:00:00.000Z",
+      attempt_count: 0
+    };
+    this.projectV2Context = projectV2Context;
+    this.queries = [];
+    this.updates = [];
+  }
+
+  async queryOne(text, values = []) {
+    this.queries.push({ method: "queryOne", text, values });
+    assert.match(text, /UPDATE github_webhook_deliveries/i);
+    assert.match(text, /status\s*=\s*'received'/i);
+    assert.match(text, /status\s*=\s*'processing'/i);
+    assert.match(text, /lease_expires_at\s*<\s*now\(\)/i);
+    assert.match(text, /attempt_count\s*=\s*.*attempt_count\s*\+\s*1/i);
+    assert.match(text, /lease_owner\s*=\s*\$2/i);
+    assert.match(text, /interval '10 minutes'/i);
+    assert.match(text, /JOIN github_projects_v2/i);
+    assert.match(text, /JOIN github_project_v2_selections/i);
+    assert.match(text, /owner_type\s*=\s*'Organization'/i);
+
+    const claimable = this.projectV2Context && (
+      this.delivery.status === "received" ||
+      (this.delivery.status === "processing" && this.delivery.lease_expires_at === receivedAt)
+    );
+    if (!claimable) return null;
+
+    this.delivery.status = "processing";
+    this.delivery.attempt_count += 1;
+    this.delivery.lease_owner = values[1];
+    this.delivery.lease_expires_at = "2026-07-11T09:10:00.000Z";
+    return {
+      delivery_id: this.delivery.delivery_id,
+      project_item_node_id: context.projectItemNodeId,
+      workspace_id: "workspace-1",
+      installation_id: "installation-1",
+      github_installation_id: context.githubInstallationId,
+      account_login: "example",
+      account_type: "Organization",
+      project_v2_id: "project-1",
+      project_v2_installation_id: "installation-1",
+      project_v2_workspace_id: "workspace-1",
+      github_project_node_id: context.projectV2NodeId
+    };
+  }
+
+  async execute(text, values = []) {
+    const update = { method: "execute", text, values };
+    this.queries.push(update);
+    this.updates.push(update);
+
+    if (/status='processed'/i.test(text)) {
+      this.delivery.status = "processed";
+      this.delivery.lease_owner = null;
+      this.delivery.lease_expires_at = null;
+      return { rowCount: 1 };
+    }
+
+    if (/status='received'/i.test(text)) {
+      this.delivery.status = "received";
+      this.delivery.lease_owner = null;
+      this.delivery.lease_expires_at = null;
+      this.delivery.error_message = values.at(-1);
+      return { rowCount: 1 };
+    }
+
+    throw new Error(`Unexpected execute: ${text}`);
+  }
+}
+
+function createDeliveryReconcileService(database, { getProjectV2Item, reconcile, archive }) {
+  return new GithubProjectV2WebhookReconcileService(
+    database,
+    { getGithubAppConfig: () => ({ appId: "12345", privateKey: "unused" }) },
+    { getProjectV2Item },
+    {
+      reconcileGithubProjectV2WebhookItem: reconcile,
+      archiveGithubProjectV2WebhookItem: archive
+    }
+  );
+}
+
+{
+  const deliveryId = "projects-v2-item-delivery-success";
+  const database = new DeliveryLeaseFakeDatabase({ deliveryId });
+  const graphqlCalls = [];
+  const reconcileService = createDeliveryReconcileService(database, {
+    getProjectV2Item: async (input) => {
+      graphqlCalls.push(input);
+      return { item: { id: context.projectItemNodeId } };
+    },
+    reconcile: async () => {},
+    archive: async () => {}
+  });
+
+  assert.equal(await reconcileService.processDelivery(deliveryId), "terminal");
+  assert.equal(graphqlCalls.length, 1);
+  assert.match(database.updates.at(-1).text, /status='processed'/);
+}
+
+{
+  const deliveryId = "projects-v2-item-delivery-retry";
+  const database = new DeliveryLeaseFakeDatabase({ deliveryId });
+  const retryingService = createDeliveryReconcileService(database, {
+    getProjectV2Item: async () => {
+      throw new Error("provider token=secret private_key=private rawBody=payload");
+    },
+    reconcile: async () => {},
+    archive: async () => {}
+  });
+
+  assert.equal(await retryingService.processDelivery(deliveryId), "retry");
+  assert.match(database.updates.at(-1).text, /status='received'/);
+  assert.doesNotMatch(database.updates.at(-1).text, /token|private_key|rawBody/i);
+  assert.doesNotMatch(database.delivery.error_message, /token|private_key|rawBody/i);
+}
+
+{
+  const deliveryId = "projects-v2-item-active-lease";
+  const database = new DeliveryLeaseFakeDatabase({ deliveryId, status: "processing" });
+  const graphqlCalls = [];
+  const leasedService = createDeliveryReconcileService(database, {
+    getProjectV2Item: async () => {
+      graphqlCalls.push("called");
+      return null;
+    },
+    reconcile: async () => {},
+    archive: async () => {}
+  });
+
+  assert.equal(await leasedService.processDelivery(deliveryId), "terminal");
+  assert.equal(graphqlCalls.length, 0, "active lease must not be processed twice");
+}
+
+{
+  const deliveryId = "non-project-v2-delivery";
+  const database = new DeliveryLeaseFakeDatabase({
+    deliveryId,
+    projectV2Context: false
+  });
+  const graphqlCalls = [];
+  const reconcileService = createDeliveryReconcileService(database, {
+    getProjectV2Item: async () => {
+      graphqlCalls.push("called");
+      return null;
+    },
+    reconcile: async () => {},
+    archive: async () => {}
+  });
+
+  assert.equal(await reconcileService.processDelivery(deliveryId), "terminal");
+  assert.equal(graphqlCalls.length, 0, "unmatched delivery must not call GitHub");
+  assert.match(database.updates.at(-1).text, /status='processed'/);
+}
+
+{
+  const deliveryId = "projects-v2-item-expired-lease";
+  const database = new DeliveryLeaseFakeDatabase({
+    deliveryId,
+    status: "processing",
+    leaseExpired: true
+  });
+  const graphqlCalls = [];
+  const expiredLeaseService = createDeliveryReconcileService(database, {
+    getProjectV2Item: async () => {
+      graphqlCalls.push("called");
+      return null;
+    },
+    reconcile: async () => {},
+    archive: async () => {}
+  });
+
+  assert.equal(await expiredLeaseService.processDelivery(deliveryId), "terminal");
+  assert.equal(graphqlCalls.length, 1, "expired lease must become claimable again");
+  assert.match(database.updates.at(-1).text, /status='processed'/);
+}
+
+{
+  const deliveryIds = [];
+  const worker = new GithubSyncJobService(
+    { execute: async () => ({ rowCount: 1 }) },
+    {},
+    {},
+    {},
+    { processDelivery: async (deliveryId) => {
+      deliveryIds.push(deliveryId);
+      return "retry";
+    } }
+  );
+
+  assert.equal(await worker.processWebhookDelivery("delegated-delivery"), "retry");
+  assert.deepEqual(deliveryIds, ["delegated-delivery"]);
 }
 
 let fetchedTargetItem;

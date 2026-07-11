@@ -10,6 +10,7 @@ import { ApiError, badRequest } from "../../common/api-error";
 import { DatabaseService } from "../../database/database.service";
 import { GithubIntegrationConfigService } from "./github-integration-config.service";
 import { GithubProjectV2SyncTokenService } from "./github-project-v2-sync-token.service";
+import { GithubProjectV2WebhookReconcileService } from "./github-project-v2-webhook-reconcile.service";
 import {
   GithubSyncExecutorService,
   type GithubSyncInstallationRow,
@@ -57,7 +58,8 @@ export class GithubSyncJobService implements OnModuleDestroy {
     private readonly database: DatabaseService,
     private readonly configService: GithubIntegrationConfigService,
     private readonly executor: GithubSyncExecutorService,
-    private readonly tokenService: GithubProjectV2SyncTokenService
+    private readonly tokenService: GithubProjectV2SyncTokenService,
+    private readonly webhookReconcileService: GithubProjectV2WebhookReconcileService
   ) {}
 
   async enqueueSyncJob(syncRunId: string, requestedByUserId: string): Promise<void> {
@@ -132,11 +134,7 @@ export class GithubSyncJobService implements OnModuleDestroy {
   }
 
   async processWebhookDelivery(deliveryId: string): Promise<"terminal" | "retry"> {
-    const result = await this.database.execute(
-      `UPDATE github_webhook_deliveries SET status='processed', processed_at=now(), error_message=NULL
-       WHERE delivery_id=$1 AND status='received'`, [deliveryId]
-    );
-    return (result.rowCount ?? 0) > 0 ? "terminal" : "terminal";
+    return this.webhookReconcileService.processDelivery(deliveryId);
   }
 
   async pollOnce(): Promise<void> {
