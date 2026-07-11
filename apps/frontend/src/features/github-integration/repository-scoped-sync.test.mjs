@@ -33,7 +33,7 @@ assert.match(
 );
 assert.match(
   panel,
-  /apiClient\.discoverGithubProjectV2\([\s\S]{0,160}\{ repositoryId \}/
+  /apiClient\.discoverGithubProjectV2\([\s\S]{0,160}\{\s*repositoryId\s*\}/
 );
 assert.match(panel, /repositoryId:\s*selectedRepositoryId/);
 assert.match(panel, /selectedRepositoryIdRef\.current = repositoryId/);
