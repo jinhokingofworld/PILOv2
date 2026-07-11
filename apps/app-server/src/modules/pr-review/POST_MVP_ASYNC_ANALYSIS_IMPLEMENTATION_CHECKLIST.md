@@ -42,7 +42,7 @@
 | 2-B | `analyzing` 세션 생성과 durable Job enqueue | #659 | #664 | 완료 |
 | 2-C | AI Worker PR 분석 processor | #666 | #668 | 완료 |
 | 2-D | 분석 결과 원자 저장과 stale/idempotency guard | #670 | #699 | 진행 |
-| 2-E | Review room 분석 진행/실패/retry UX | #703 | TBD | 진행 |
+| 2-E | Review room 분석 진행/실패/retry UX | #703 | #704 | 진행 |
 | 2-F | 운영 복구, 관측성, 배포 검증 | TBD | TBD | 대기 |
 
 ## 공통 Stop Gate
@@ -217,7 +217,7 @@
 
 ## 2-E Frontend Analysis Status UX
 
-> Tracking: Issue #703. 2초 polling, 5분 분석 지연 안내, 완료/실패 전환과 retry UX를 이 slice에서 구현한다.
+> Tracking: Issue #703, PR #704. 2초 polling, 5분 분석 지연 안내, 완료/실패 전환과 retry UX를 이 slice에서 구현한다.
 
 목표:
 
