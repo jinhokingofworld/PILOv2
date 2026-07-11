@@ -489,11 +489,20 @@ function createDeliveryReconcileService(database, { getProjectV2Item, reconcile,
 }
 
 {
-  const [workerSource, reconcileSource] = await Promise.all([
+  const [apiContract, workerSource, reconcileSource] = await Promise.all([
+    readFile(new URL("../../../../docs/api/github-integration-api.md", import.meta.url), "utf8"),
     readFile(new URL("../../src/modules/github-integration/github-sync-job.service.ts", import.meta.url), "utf8"),
     readFile(new URL("../../src/modules/github-integration/github-project-v2-webhook-reconcile.service.ts", import.meta.url), "utf8")
   ]);
 
+  assert.match(apiContract, /selected `projects_v2_item` delivery/i);
+  assert.match(apiContract, /ignored.*SQS.*GraphQL/i);
+  assert.match(apiContract, /lease.*retry/i);
+  assert.match(apiContract, /unselected queued delivery.*processed.*without GitHub GraphQL/i);
+  assert.match(apiContract, /projectItemNodeId-only GitHub GraphQL source-of-truth fetch/i);
+  assert.match(apiContract, /missing target.*archives.*matching local item.*existing Board cache/i);
+  assert.match(apiContract, /expired `processing` lease.*recovery.*requeue/i);
+  assert.doesNotMatch(apiContract, /receiver.*does not.*background job/i);
   assert.doesNotMatch(workerSource, /FROM github_webhook_deliveries/i);
   assert.match(reconcileSource, /SELECT delivery_id FROM github_webhook_deliveries/i);
   assert.match(reconcileSource, /status\s*=\s*'processing'\s+AND lease_expires_at < now\(\)/i);
