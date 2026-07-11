@@ -4,6 +4,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
+from uuid import NAMESPACE_URL, uuid5
 
 from app.agent_processor import (
     AGENT_RUN_REQUESTED_JOB_TYPE,
@@ -46,6 +47,8 @@ class EvaluationSuite:
 @dataclass(frozen=True)
 class CaseEvaluationResult:
     case_id: str
+    attempt: int
+    prompt: str
     passed: bool
     failure_reasons: tuple[str, ...]
     expected: EvaluationExpectation
@@ -96,9 +99,15 @@ def evaluate_suite(
     suite: EvaluationSuite,
     current_date: str,
     timezone: str = "Asia/Seoul",
+    repetitions: int = 1,
 ) -> tuple[CaseEvaluationResult, ...]:
+    if repetitions < 1:
+        raise ValueError("Evaluation repetitions must be at least 1")
+
     return tuple(
-        evaluate_case(planner, suite.job, case, current_date, timezone) for case in suite.cases
+        evaluate_case(planner, suite.job, case, current_date, timezone, attempt)
+        for attempt in range(1, repetitions + 1)
+        for case in suite.cases
     )
 
 
@@ -108,10 +117,11 @@ def evaluate_case(
     case: EvaluationCase,
     current_date: str,
     timezone: str,
+    attempt: int,
 ) -> CaseEvaluationResult:
     decision = planner.plan(
         AgentPlanningRequest(
-            run_id=f"{EVALUATION_RUN_ID[:-1]}{case.case_id[-1:]}",
+            run_id=str(uuid5(NAMESPACE_URL, f"agent-planner-evaluation:{case.case_id}:{attempt}")),
             prompt=case.prompt,
             timezone=timezone,
             current_date=current_date,
@@ -123,6 +133,8 @@ def evaluate_case(
     failures = _compare(case.expectation, actual)
     return CaseEvaluationResult(
         case_id=case.case_id,
+        attempt=attempt,
+        prompt=case.prompt,
         passed=not failures,
         failure_reasons=tuple(failures),
         expected=case.expectation,
@@ -137,21 +149,40 @@ def build_evaluation_report(results: tuple[CaseEvaluationResult, ...]) -> dict[s
         result for result in results if result.expected.requires_confirmation is not None
     ]
     clarification_cases = [result for result in results if result.expected.missing_fields]
+    cases_by_id: dict[str, list[CaseEvaluationResult]] = {}
+    for result in results:
+        cases_by_id.setdefault(result.case_id, []).append(result)
+
+    case_summaries = [
+        _case_summary(case_id, case_results)
+        for case_id, case_results in sorted(cases_by_id.items())
+    ]
 
     return {
-        "totalCases": len(results),
-        "passedCases": sum(result.passed for result in results),
+        "totalCases": len(case_summaries),
+        "totalAttempts": len(results),
+        "passedCases": sum(summary["exactRate"] == 1.0 for summary in case_summaries),
+        "passedAttempts": sum(result.passed for result in results),
+        "exactAttemptRate": _exact_rate(results),
         "statusAccuracy": _accuracy(results, "status"),
         "toolSelectionAccuracy": _accuracy(tool_cases, "tool"),
         "requiredInputAccuracy": _accuracy(input_cases, "input"),
         "confirmationAccuracy": _accuracy(confirmation_cases, "confirmation"),
         "clarificationAccuracy": _accuracy(clarification_cases, "missing_fields"),
+        "flakyCaseIds": [
+            summary["id"] for summary in case_summaries if 0.0 < summary["exactRate"] < 1.0
+        ],
+        "caseSummaries": case_summaries,
         "results": [
             {
                 "id": result.case_id,
+                "attempt": result.attempt,
+                "prompt": result.prompt,
+                "expected": _expected_output(result.expected),
                 "passed": result.passed,
                 "classification": _classification(result),
                 "failureReasons": list(result.failure_reasons),
+                "failureCategoryCandidates": _failure_category_candidates(result),
                 "actual": result.actual.output_summary,
             }
             for result in results
@@ -234,6 +265,65 @@ def _accuracy(results: list[CaseEvaluationResult], category: str) -> float | Non
     return round(
         sum(category not in result.failure_reasons for result in results) / len(results), 4
     )
+
+
+def _exact_rate(results: list[CaseEvaluationResult]) -> float | None:
+    if not results:
+        return None
+    return round(sum(result.passed for result in results) / len(results), 4)
+
+
+def _case_summary(
+    case_id: str,
+    results: list[CaseEvaluationResult],
+) -> dict[str, object]:
+    return {
+        "id": case_id,
+        "prompt": results[0].prompt,
+        "expected": _expected_output(results[0].expected),
+        "attempts": len(results),
+        "exactCount": sum(result.passed for result in results),
+        "exactRate": _exact_rate(results),
+        "requiresManualReview": not all(result.passed for result in results),
+        "failureCategoryCandidates": sorted(
+            {category for result in results for category in _failure_category_candidates(result)}
+        ),
+    }
+
+
+def _expected_output(expected: EvaluationExpectation) -> dict[str, object]:
+    output: dict[str, object] = {"status": expected.status}
+    if expected.tool_name:
+        output["toolName"] = expected.tool_name
+    if expected.input_contains:
+        output["inputContains"] = expected.input_contains
+    if expected.requires_confirmation is not None:
+        output["requiresConfirmation"] = expected.requires_confirmation
+    if expected.missing_fields:
+        output["missingFields"] = list(expected.missing_fields)
+    return output
+
+
+def _failure_category_candidates(result: CaseEvaluationResult) -> list[str]:
+    categories: list[str] = []
+    expected = result.expected
+    if expected.status == "unsupported" and result.actual.status != "unsupported":
+        categories.append("unsafe_candidate")
+    if "tool" in result.failure_reasons:
+        categories.append("wrong_tool")
+    if "status" in result.failure_reasons:
+        categories.append("wrong_status")
+    if "input" in result.failure_reasons:
+        input_keys = set(expected.input_contains)
+        if input_keys & {"start", "end", "startDate", "endDate", "startTime", "endTime"}:
+            categories.append("date_time_normalization")
+        else:
+            categories.append("required_input")
+    if "missing_fields" in result.failure_reasons:
+        categories.append("missing_field_handling")
+    if "confirmation" in result.failure_reasons:
+        categories.append("confirmation_policy")
+    return categories
 
 
 def _classification(result: CaseEvaluationResult) -> str:
