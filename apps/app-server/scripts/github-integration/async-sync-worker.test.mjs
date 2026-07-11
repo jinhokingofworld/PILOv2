@@ -17,7 +17,7 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
 {
   const iam = readFileSync(`${root}/infra/modules/iam/main.tf`, "utf8");
   const env = readFileSync(`${root}/infra/envs/dev/main.tf`, "utf8");
-  assert.match(iam, /Action = \["sqs:SendMessage"\][\s\S]*Resource = var\.github_webhooks_queue_arn/);
+  assert.match(iam, /Action\s*=\s*\["sqs:SendMessage"\][\s\S]*Resource\s*=\s*var\.github_webhooks_queue_arn/);
   assert.match(env, /github_webhooks_queue_arn\s+= module\.sqs\.github_webhooks_queue_arn/);
 }
 
