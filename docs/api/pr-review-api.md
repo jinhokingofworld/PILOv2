@@ -120,7 +120,9 @@ comment, PR merge/close, ProjectV2 write는 이 문서의 범위가 아니다.
 - 생성 시 GitHub Integration API로 PR 상세와 conflict 상태를 조회한다. 변경 파일과
   patch 조회, OpenAI 분석은 HTTP 요청 경로에서 수행하지 않는다.
 - 생성 시점의 `headSha`를 저장한다.
-- session row와 PR Review analysis job/outbox intent는 하나의 DB transaction으로 저장한다.
+- session row와 `pr_review_analysis_jobs` row는 하나의 DB transaction으로 저장한다.
+  `pr_review_analysis_jobs`는 job 자체와 durable outbox 발행 상태를 함께 보관하므로 별도
+  outbox table을 만들지 않는다.
 - transaction이 끝난 뒤 outbox publisher가 전용 SQS에 job을 발행한다. 발행 실패는 HTTP
   응답을 실패로 바꾸지 않으며, session은 `analyzing`으로 남아 발행 재시도 또는 terminal
   failure를 기다린다.

@@ -25,6 +25,12 @@ const prReviewConflictResolution = await readSource(
 const prReviewAnalysisService = await readSource(
   "../../src/modules/pr-review/pr-review-analysis.service.ts"
 );
+const prReviewAnalysisJobService = await readSource(
+  "../../src/modules/pr-review/pr-review-analysis-job.service.ts"
+);
+const prReviewAnalysisJobPublisher = await readSource(
+  "../../src/modules/pr-review/pr-review-analysis-job-publisher.service.ts"
+);
 const prReviewModule = await readSource(
   "../../src/modules/pr-review/pr-review.module.ts"
 );
@@ -33,6 +39,10 @@ const prReviewService = await readSource(
 );
 const prReviewTypes = await readSource("../../src/modules/pr-review/types/index.ts");
 const prReviewApi = await readSource("../../../../docs/api/pr-review-api.md");
+const prReviewAnalysisJobMigration = await readSource(
+  "../../../../db/migrations/028_create_pr_review_analysis_jobs.sql"
+);
+const databaseReadme = await readSource("../../../../db/README.md");
 
 assert.match(appModule, /PrReviewModule/);
 assert.match(prReviewModule, /CommonModule/);
@@ -43,6 +53,8 @@ assert.match(prReviewModule, /PrReviewController/);
 assert.match(prReviewModule, /PrReviewService/);
 assert.match(prReviewModule, /PrReviewGithubDependencyService/);
 assert.match(prReviewModule, /PrReviewAnalysisService/);
+assert.match(prReviewModule, /PrReviewAnalysisJobService/);
+assert.match(prReviewModule, /PrReviewAnalysisJobPublisherService/);
 
 assert.match(prReviewController, /@Controller\("workspaces\/:workspaceId\/github"\)/);
 assert.match(prReviewController, /@UseGuards\(AuthGuard\)/);
@@ -50,6 +62,8 @@ assert.match(
   prReviewController,
   /@Post\("pull-requests\/:pullRequestId\/review-sessions"\)/
 );
+assert.match(prReviewController, /@Res\(\{ passthrough: true \}\)/);
+assert.match(prReviewController, /reply\.status\(result\.created \? 201 : 200\)/);
 assert.match(prReviewController, /@Get\("review-sessions\/:reviewSessionId"\)/);
 assert.match(
   prReviewController,
@@ -150,10 +164,29 @@ assert.match(prReviewService, /pr_review_sessions/);
 assert.match(prReviewService, /review_files/);
 assert.match(prReviewService, /review_flows/);
 assert.match(prReviewService, /review_flow_files/);
-assert.match(prReviewService, /inFlightSessionCreations/);
 assert.match(prReviewService, /transaction/);
 assert.match(prReviewService, /Pull request not found in workspace/);
-assert.match(prReviewService, /analysisService\.analyzePullRequest/);
+assert.doesNotMatch(prReviewService, /analysisService\.analyzePullRequest/);
+assert.match(prReviewService, /insertAnalyzingReviewSession/);
+assert.match(prReviewService, /insertReviewAnalysisJob/);
+assert.match(prReviewService, /findActiveAnalyzingReviewSession/);
+assert.match(prReviewService, /analysisJobPublisher\.publishCreatedJob/);
+assert.match(prReviewService, /analysisError/);
+assert.match(prReviewAnalysisJobService, /SQS_PR_REVIEW_ANALYSIS_QUEUE_URL/);
+assert.match(prReviewAnalysisJobService, /pr_review_analysis_requested/);
+assert.match(prReviewAnalysisJobService, /pr-review-analysis:v1/);
+assert.match(prReviewAnalysisJobPublisher, /FOR UPDATE OF job SKIP LOCKED/);
+assert.match(prReviewAnalysisJobPublisher, /ANALYSIS_ENQUEUE_FAILED/);
+assert.match(prReviewAnalysisJobPublisher, /publishDueJobs/);
+assert.match(prReviewAnalysisJobMigration, /CREATE TABLE public\.pr_review_analysis_jobs/);
+assert.match(prReviewAnalysisJobMigration, /UNIQUE \(review_session_id\)/);
+assert.match(
+  prReviewAnalysisJobMigration,
+  /idx_pr_review_sessions_active_creator_pull_request/
+);
+assert.match(prReviewAnalysisJobMigration, /FOR EACH ROW/);
+assert.match(prReviewAnalysisJobMigration, /ENABLE ROW LEVEL SECURITY/);
+assert.match(databaseReadme, /028_create_pr_review_analysis_jobs\.sql/);
 assert.match(prReviewAnalysisService, /PR 변경 파일 리뷰/);
 assert.match(prReviewService, /getReviewSessionSummary/);
 assert.match(prReviewService, /getReviewSessionResult/);
@@ -313,3 +346,4 @@ await import("./conflict-suggestion-context.test.mjs");
 await import("./conflict-apply.test.mjs");
 await import("./conflict-status-refresh.test.mjs");
 await import("./submission.test.mjs");
+await import("./async-analysis-enqueue.test.mjs");

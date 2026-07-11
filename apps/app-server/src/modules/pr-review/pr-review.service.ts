@@ -31,6 +31,7 @@ import {
 import { PrReviewGithubDependencyService } from "./pr-review-github-dependency.service";
 import type {
   PrReviewConflictStatus,
+  PrReviewAnalysisErrorCode,
   PrReviewFileRiskLevel,
   PrReviewFileReviewStatus,
   PrReviewFileStatus,
@@ -43,6 +44,7 @@ import type {
   PrReviewModuleInfo,
   PrReviewSessionStatus
 } from "./types";
+import { PrReviewAnalysisJobPublisherService } from "./pr-review-analysis-job-publisher.service";
 
 interface PullRequestRow extends QueryResultRow {
   id: string;
@@ -62,6 +64,8 @@ interface PrReviewSessionRow extends QueryResultRow {
   total_file_count: number | string;
   conflict_status: PrReviewConflictStatus;
   conflict_checked_at: Date | string | null;
+  analysis_error_code: PrReviewAnalysisErrorCode | null;
+  analysis_error_message: string | null;
   created_at: Date | string;
   updated_at: Date | string;
 }
@@ -300,9 +304,20 @@ export interface PrReviewSessionPayload {
   totalFileCount: number;
   conflictStatus: PrReviewConflictStatus;
   conflictCheckedAt: string | null;
+  analysisError: PrReviewAnalysisErrorPayload | null;
   createdByUserId: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface PrReviewAnalysisErrorPayload {
+  code: PrReviewAnalysisErrorCode;
+  message: string;
+}
+
+export interface PrReviewSessionCreateResult {
+  session: PrReviewSessionPayload;
+  created: boolean;
 }
 
 export interface PrReviewSummaryPayload {
@@ -695,13 +710,13 @@ const CONFLICT_MARKER_PATTERN = /(^|\n)(<<<<<<<|=======|>>>>>>>)(?:\s|$)/;
 @Injectable()
 export class PrReviewService {
   private readonly logger = new Logger(PrReviewService.name);
-  private readonly inFlightSessionCreations = new Set<string>();
 
   constructor(
     private readonly database: DatabaseService,
     private readonly workspaceService: WorkspaceService,
     private readonly githubDependency: PrReviewGithubDependencyService,
-    private readonly analysisService: PrReviewAnalysisService
+    private readonly analysisService: PrReviewAnalysisService,
+    private readonly analysisJobPublisher: PrReviewAnalysisJobPublisherService
   ) {}
 
   getModuleInfo(): PrReviewModuleInfo {
@@ -715,7 +730,7 @@ export class PrReviewService {
     currentUserId: string,
     workspaceId: string,
     pullRequestId: string
-  ): Promise<PrReviewSessionPayload> {
+  ): Promise<PrReviewSessionCreateResult> {
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
 
     const pullRequest = await this.findSyncedPullRequest(workspaceId, pullRequestId);
@@ -723,21 +738,21 @@ export class PrReviewService {
       throw notFound("Pull request not found in workspace");
     }
 
-    const inFlightKey = `${currentUserId}:${workspaceId}:${pullRequestId}`;
-    if (this.inFlightSessionCreations.has(inFlightKey)) {
-      throw badRequest("Review session creation is already in progress");
+    const existing = await this.findActiveAnalyzingReviewSession(
+      workspaceId,
+      pullRequestId,
+      currentUserId
+    );
+    if (existing) {
+      return {
+        session: this.mapSession(existing),
+        created: false
+      };
     }
 
-    this.inFlightSessionCreations.add(inFlightKey);
-
     try {
-      const [detail, files, conflict] = await Promise.all([
+      const [detail, conflict] = await Promise.all([
         this.githubDependency.getPullRequestDetail(
-          currentUserId,
-          workspaceId,
-          pullRequestId
-        ),
-        this.githubDependency.getPullRequestChangedFiles(
           currentUserId,
           workspaceId,
           pullRequestId
@@ -748,27 +763,46 @@ export class PrReviewService {
           pullRequestId
         )
       ]);
-      const analysis = await this.analysisService.analyzePullRequest(detail, files);
-
-      return this.database.transaction(async (transaction) => {
-        const session = await this.insertReviewSession(transaction, {
+      const created = await this.database.transaction(async (transaction) => {
+        const session = await this.insertAnalyzingReviewSession(transaction, {
           currentUserId,
           pullRequestId,
           detail,
-          files,
           conflictStatus: conflict.conflictStatus,
-          conflictCheckedAt: conflict.checkedAt,
-          analysis
+          conflictCheckedAt: conflict.checkedAt
+        });
+        const job = await this.insertReviewAnalysisJob(transaction, {
+          reviewSessionId: session.id,
+          workspaceId,
+          headSha: detail.headSha
         });
 
-        if (files.length > 0) {
-          await this.insertReviewFlow(transaction, session.id, files, analysis);
-        }
-
-        return this.mapSession(session);
+        return { session, jobId: job.id };
       });
-    } finally {
-      this.inFlightSessionCreations.delete(inFlightKey);
+
+      await this.analysisJobPublisher.publishCreatedJob(created.jobId);
+      return {
+        session: this.mapSession(created.session),
+        created: true
+      };
+    } catch (error) {
+      if (!this.isUniqueConstraintViolation(error)) {
+        throw error;
+      }
+
+      const concurrent = await this.findActiveAnalyzingReviewSession(
+        workspaceId,
+        pullRequestId,
+        currentUserId
+      );
+      if (!concurrent) {
+        throw error;
+      }
+
+      return {
+        session: this.mapSession(concurrent),
+        created: false
+      };
     }
   }
 
@@ -1781,7 +1815,15 @@ export class PrReviewService {
     const session = await this.database.queryOne<PrReviewSessionRow>(
       `
         UPDATE pr_review_sessions AS review_session
-        SET status = $3
+        SET status = $3,
+            analysis_error_code = CASE
+              WHEN $3 = 'failed' THEN review_session.analysis_error_code
+              ELSE NULL
+            END,
+            analysis_error_message = CASE
+              WHEN $3 = 'failed' THEN review_session.analysis_error_message
+              ELSE NULL
+            END
         FROM github_pull_requests AS pull_request
         WHERE review_session.pull_request_id = pull_request.id
           AND pull_request.workspace_id = $1
@@ -1800,6 +1842,8 @@ export class PrReviewService {
           review_session.total_file_count,
           review_session.conflict_status,
           review_session.conflict_checked_at,
+          review_session.analysis_error_code,
+          review_session.analysis_error_message,
           review_session.created_at,
           review_session.updated_at
       `,
@@ -1998,6 +2042,42 @@ export class PrReviewService {
     );
   }
 
+  private async findActiveAnalyzingReviewSession(
+    workspaceId: string,
+    pullRequestId: string,
+    currentUserId: string
+  ): Promise<PrReviewSessionRow | null> {
+    const active = await this.database.queryOne<{ id: string }>(
+      `
+        SELECT review_session.id
+        FROM pr_review_sessions AS review_session
+        JOIN github_pull_requests AS pull_request
+          ON pull_request.id = review_session.pull_request_id
+        WHERE pull_request.workspace_id = $1
+          AND review_session.pull_request_id = $2
+          AND review_session.created_by_user_id = $3
+          AND review_session.status = 'analyzing'
+        ORDER BY review_session.created_at DESC
+        LIMIT 1
+      `,
+      [workspaceId, pullRequestId, currentUserId]
+    );
+
+    if (!active) {
+      return null;
+    }
+
+    return this.findReviewSession(workspaceId, active.id);
+  }
+
+  private isUniqueConstraintViolation(error: unknown): boolean {
+    if (typeof error !== "object" || error === null) {
+      return false;
+    }
+
+    return (error as { code?: unknown }).code === "23505";
+  }
+
   private async findReviewSession(
     workspaceId: string,
     reviewSessionId: string
@@ -2022,6 +2102,8 @@ export class PrReviewService {
           review_session.total_file_count,
           review_session.conflict_status,
           review_session.conflict_checked_at,
+          review_session.analysis_error_code,
+          review_session.analysis_error_message,
           review_session.created_at,
           review_session.updated_at
         FROM pr_review_sessions AS review_session
@@ -2058,6 +2140,8 @@ export class PrReviewService {
           review_session.total_file_count,
           review_session.conflict_status,
           review_session.conflict_checked_at,
+          review_session.analysis_error_code,
+          review_session.analysis_error_message,
           review_session.created_at,
           review_session.updated_at,
           pull_request.pr_number,
@@ -2820,16 +2904,14 @@ export class PrReviewService {
     }
   }
 
-  private async insertReviewSession(
+  private async insertAnalyzingReviewSession(
     transaction: DatabaseTransaction,
     input: {
       currentUserId: string;
       pullRequestId: string;
       detail: PrReviewGithubPullRequestDetail;
-      files: PrReviewGithubChangedFile[];
       conflictStatus: PrReviewConflictStatus;
       conflictCheckedAt: string | null;
-      analysis: PrReviewAnalysisResult;
     }
   ): Promise<PrReviewSessionRow> {
     const session = await transaction.queryOne<PrReviewSessionRow>(
@@ -2852,15 +2934,15 @@ export class PrReviewService {
           $1,
           $2,
           $3,
-          'reviewing',
-          $4,
-          $5::jsonb,
-          $6,
-          $7::jsonb,
+          'analyzing',
+          NULL,
+          '[]'::jsonb,
+          NULL,
+          '[]'::jsonb,
           0,
-          $8,
-          $9,
-          $10
+          0,
+          $4,
+          $5
         )
         RETURNING
           id,
@@ -2876,6 +2958,8 @@ export class PrReviewService {
           total_file_count,
           conflict_status,
           conflict_checked_at,
+          analysis_error_code,
+          analysis_error_message,
           created_at,
           updated_at
       `,
@@ -2883,11 +2967,6 @@ export class PrReviewService {
         input.pullRequestId,
         input.currentUserId,
         input.detail.headSha,
-        input.analysis.prPurpose,
-        JSON.stringify(input.analysis.changeSummary),
-        input.analysis.recommendedReviewOrder,
-        JSON.stringify(input.analysis.cautionPoints),
-        input.files.length,
         input.conflictStatus,
         input.conflictCheckedAt
       ]
@@ -2898,6 +2977,34 @@ export class PrReviewService {
     }
 
     return session;
+  }
+
+  private async insertReviewAnalysisJob(
+    transaction: DatabaseTransaction,
+    input: {
+      reviewSessionId: string;
+      workspaceId: string;
+      headSha: string;
+    }
+  ): Promise<{ id: string }> {
+    const job = await transaction.queryOne<{ id: string }>(
+      `
+        INSERT INTO pr_review_analysis_jobs (
+          review_session_id,
+          workspace_id,
+          head_sha
+        )
+        VALUES ($1, $2, $3)
+        RETURNING id
+      `,
+      [input.reviewSessionId, input.workspaceId, input.headSha]
+    );
+
+    if (!job) {
+      throw badRequest("PR Review analysis job could not be created");
+    }
+
+    return job;
   }
 
   private async insertReviewFlow(
@@ -3673,6 +3780,13 @@ export class PrReviewService {
       totalFileCount: Number(session.total_file_count),
       conflictStatus: session.conflict_status,
       conflictCheckedAt: this.toNullableIsoString(session.conflict_checked_at),
+      analysisError:
+        session.analysis_error_code && session.analysis_error_message
+          ? {
+              code: session.analysis_error_code,
+              message: session.analysis_error_message
+            }
+          : null,
       createdByUserId: session.created_by_user_id,
       createdAt: this.toIsoString(session.created_at),
       updatedAt: this.toIsoString(session.updated_at)

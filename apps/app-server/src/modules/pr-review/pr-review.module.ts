@@ -4,6 +4,8 @@ import { DatabaseModule } from "../../database/database.module";
 import { GithubIntegrationModule } from "../github-integration/github-integration.module";
 import { WorkspaceModule } from "../workspace/workspace.module";
 import { PrReviewAnalysisService } from "./pr-review-analysis.service";
+import { PrReviewAnalysisJobPublisherService } from "./pr-review-analysis-job-publisher.service";
+import { PrReviewAnalysisJobService } from "./pr-review-analysis-job.service";
 import { PrReviewGithubDependencyService } from "./pr-review-github-dependency.service";
 import { PrReviewController } from "./pr-review.controller";
 import { PrReviewService } from "./pr-review.service";
@@ -14,12 +16,16 @@ import { PrReviewService } from "./pr-review.service";
   providers: [
     PrReviewService,
     PrReviewGithubDependencyService,
-    PrReviewAnalysisService
+    PrReviewAnalysisService,
+    PrReviewAnalysisJobService,
+    PrReviewAnalysisJobPublisherService
   ],
   exports: [
     PrReviewService,
     PrReviewGithubDependencyService,
-    PrReviewAnalysisService
+    PrReviewAnalysisService,
+    PrReviewAnalysisJobService,
+    PrReviewAnalysisJobPublisherService
   ]
 })
 export class PrReviewModule {}

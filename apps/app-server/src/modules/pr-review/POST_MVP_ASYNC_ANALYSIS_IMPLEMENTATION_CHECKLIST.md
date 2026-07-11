@@ -38,8 +38,8 @@
 
 | Phase | 목적 | Issue | PR | 상태 |
 | --- | --- | --- | --- | --- |
-| 2-A | Scope, API, 상태 전이와 Worker 경계 확정 | #652 | TBD | 완료 |
-| 2-B | `analyzing` 세션 생성과 durable Job enqueue | TBD | TBD | 대기 |
+| 2-A | Scope, API, 상태 전이와 Worker 경계 확정 | #652 | #658 | 완료 |
+| 2-B | `analyzing` 세션 생성과 durable Job enqueue | #659 | #664 | 완료 |
 | 2-C | AI Worker PR 분석 processor | TBD | TBD | 대기 |
 | 2-D | 분석 결과 원자 저장과 stale/idempotency guard | TBD | TBD | 대기 |
 | 2-E | Review room 분석 진행/실패/retry UX | TBD | TBD | 대기 |
@@ -138,24 +138,26 @@
 
 작업 체크리스트:
 
-- [ ] PR Review 분석 Job/outbox schema를 migration으로 추가한다.
-- [ ] Job identity와 중복 방지 key를 정의하고 DB unique constraint로 보강한다.
-- [ ] 세션 row와 pending outbox intent를 같은 transaction에서 생성한다.
-- [ ] 세션 생성 시 분석 결과/flow/file이 아직 없을 수 있는 상태를 repository가 허용하게 한다.
-- [ ] outbox publisher가 claim token과 `FOR UPDATE SKIP LOCKED`로 중복 발행을 방지한다.
-- [ ] publisher 재시도 간격, 최대 시도 횟수와 terminal publish failure 처리를 구현한다.
-- [ ] 발행 성공 후 outbox 상태를 원자적으로 갱신한다.
-- [ ] 서버 재시작 후 pending/publishing Job을 회수하는 sweep을 구현한다.
-- [ ] 같은 사용자 요청의 중복 클릭/동시 요청 정책을 DB 기준으로 보강한다.
-- [ ] SQS payload를 versioned schema로 정의하고 민감 정보가 포함되지 않게 한다.
-- [ ] enqueue 실패가 HTTP 요청 이후 발생해도 session에서 진행/실패 상태를 확인할 수 있게 한다.
+- [x] `pr_review_analysis_jobs` migration을 추가한다. 이 단일 table은 job identity와 durable
+  outbox 발행 상태를 함께 보관한다.
+- [x] session당 job 하나의 unique constraint와 같은 사용자·PR의 `analyzing` session partial
+  unique index로 중복을 막는다.
+- [x] `analyzing` session row와 `pending` job row를 같은 transaction에서 생성한다.
+- [x] 분석 결과/flow/file이 없는 `analyzing` session을 repository와 API payload가 허용한다.
+- [x] job publisher가 claim token과 `FOR UPDATE SKIP LOCKED`로 중복 발행을 방지한다.
+- [x] 1, 2, 4, 8, 16분 간격의 5회 재시도와 terminal publish failure 처리를 구현한다.
+- [x] SQS 발행 성공 뒤 job 상태를 `queued`로 원자 갱신한다.
+- [x] 서버 시작과 60초 sweep에서 `pending`/stale `publishing` job을 회수한다.
+- [x] 같은 사용자·PR의 중복 요청은 기존 `analyzing` session을 `200 OK`로 반환한다.
+- [x] `pr_review_analysis_requested` / `pr-review-analysis:v1` 식별자 payload만 SQS에 보낸다.
+- [x] publish 재시도 소진 시 job과 session을 `ANALYSIS_ENQUEUE_FAILED`로 terminal 처리한다.
 
 완료 기준:
 
-- [ ] OpenAI 호출 지연과 무관하게 세션 생성 응답이 반환된다.
-- [ ] DB commit 직후 App Server가 종료돼도 Job intent가 남아 다시 발행된다.
-- [ ] publisher가 같은 outbox row를 동시에 처리해도 SQS 발행 상태가 일관된다.
-- [ ] token, secret, 전체 patch가 payload나 로그에 노출되지 않는다.
+- [x] OpenAI 호출 지연과 무관하게 세션 생성 응답이 반환된다.
+- [x] DB commit 직후 App Server가 종료돼도 Job intent가 남아 다시 발행된다.
+- [x] publisher가 같은 outbox row를 동시에 처리해도 SQS 발행 상태가 일관된다.
+- [x] token, secret, 전체 patch가 payload나 로그에 노출되지 않는다.
 
 ## 2-C AI Worker PR Analysis Processor
 
