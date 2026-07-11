@@ -22,6 +22,7 @@ import {
 
 import {
   getSqlErdRelationCurveGeometryPoints,
+  getSqlErdRelationCurveMidpoint,
   getSqlErdRelationCurvePathData,
   type RelationPortSide,
   type SqlErdRelationRoutePoint
@@ -108,16 +109,6 @@ function emitAnnotationSelect(annotationId: string) {
   );
 }
 
-function getAnnotationLabelPoint(points: SqlErdRelationRoutePoint[]) {
-  const startPoint = points[0] ?? { x: 0, y: 0 };
-  const endPoint = points.at(-1) ?? startPoint;
-
-  return {
-    x: (startPoint.x + endPoint.x) / 2,
-    y: (startPoint.y + endPoint.y) / 2
-  };
-}
-
 function SqlErdAnnotationLine({ shape }: { shape: SqlErdAnnotationShape }) {
   const editor = useEditor();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -129,7 +120,11 @@ function SqlErdAnnotationLine({ shape }: { shape: SqlErdAnnotationShape }) {
     shape.props.startSide,
     shape.props.endSide
   );
-  const labelPoint = getAnnotationLabelPoint(shape.props.points);
+  const labelPoint = getSqlErdRelationCurveMidpoint(
+    shape.props.points,
+    shape.props.startSide,
+    shape.props.endSide
+  );
 
   function selectAnnotationShape() {
     emitAnnotationSelect(shape.props.annotationId);

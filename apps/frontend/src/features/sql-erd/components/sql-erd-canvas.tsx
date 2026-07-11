@@ -68,6 +68,7 @@ import {
   areSqltoerdLayoutsEqual,
   addSqltoerdColumnAnnotation,
   createSqltoerdModelIndex,
+  getSqltoerdRenderableAnnotations,
   getTableLayout,
   inferSqlErdRelationCardinality,
   removeSqltoerdAnnotation,
@@ -221,6 +222,7 @@ export function createSqltoerdRelationShapes(
 }
 
 export function createSqltoerdAnnotationShapes(
+  modelJson: SqltoerdModelJsonV1,
   layoutJson: SqltoerdLayoutJsonV1,
   tableShapes: TLShapePartial<SqlErdTableShape>[]
 ): TLShapePartial<SqlErdAnnotationShape>[] {
@@ -228,7 +230,12 @@ export function createSqltoerdAnnotationShapes(
     tableShapes.map((shape) => [shape.props?.tableId, shape])
   );
 
-  return (layoutJson.annotations?.links ?? []).flatMap((annotation) => {
+  const annotations = getSqltoerdRenderableAnnotations(
+    modelJson,
+    layoutJson.annotations
+  );
+
+  return (annotations?.links ?? []).flatMap((annotation) => {
     if (annotation.kind !== "column_link") {
       return [];
     }
@@ -277,6 +284,7 @@ export function createSqltoerdCanvasShapes(
   const tableShapes = createSqltoerdTableShapes(modelJson, layoutJson);
   const relationShapes = createSqltoerdRelationShapes(modelJson, tableShapes);
   const annotationShapes = createSqltoerdAnnotationShapes(
+    modelJson,
     layoutJson,
     tableShapes
   );
@@ -1592,6 +1600,7 @@ function SqlErdColumnAnnotationInteractionSync({
         .getCurrentPageShapes()
         .filter(isSqlErdTableShape);
       const annotationShape = createSqltoerdAnnotationShapes(
+        modelJsonRef.current,
         result.layoutJson,
         tableShapes
       ).find((shape) => shape.props?.annotationId === annotation.id);
@@ -1622,9 +1631,45 @@ function SqlErdColumnAnnotationInteractionSync({
       }
     }
 
+    function deleteAnnotation(annotationId: string) {
+      const shapeId = getSqlErdAnnotationShapeId(annotationId);
+
+      if (editor.getShape(shapeId)) {
+        editor.run(() => editor.deleteShapes([shapeId]), { history: "ignore" });
+      }
+
+      publishLayout(
+        removeSqltoerdAnnotation(layoutJsonRef.current, annotationId)
+      );
+    }
+
+    function isEditableKeyboardTarget(target: EventTarget | null) {
+      return (
+        target instanceof HTMLElement &&
+        (target.isContentEditable ||
+          target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.tagName === "SELECT")
+      );
+    }
+
     function handleKeyDown(event: globalThis.KeyboardEvent) {
       if (event.key === "Escape" && dragRef.current) {
         clearDrag();
+        return;
+      }
+
+      if (
+        (event.key === "Delete" || event.key === "Backspace") &&
+        !isEditableKeyboardTarget(event.target)
+      ) {
+        const selectedShape = editor.getOnlySelectedShape();
+
+        if (isSqlErdAnnotationShape(selectedShape)) {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          deleteAnnotation(selectedShape.props.annotationId);
+        }
       }
     }
 
@@ -1657,15 +1702,7 @@ function SqlErdColumnAnnotationInteractionSync({
         return;
       }
 
-      const shapeId = getSqlErdAnnotationShapeId(detail.annotationId);
-
-      if (editor.getShape(shapeId)) {
-        editor.run(() => editor.deleteShapes([shapeId]), { history: "ignore" });
-      }
-
-      publishLayout(
-        removeSqltoerdAnnotation(layoutJsonRef.current, detail.annotationId)
-      );
+      deleteAnnotation(detail.annotationId);
     }
 
     function handleAnnotationSelect(event: Event) {
@@ -1704,7 +1741,7 @@ function SqlErdColumnAnnotationInteractionSync({
     window.addEventListener("pointermove", handlePointerMove);
     window.addEventListener("pointerup", handlePointerUp);
     window.addEventListener("pointercancel", handlePointerCancel);
-    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keydown", handleKeyDown, true);
     window.addEventListener(
       SQLTOERD_ANNOTATION_LABEL_CHANGE_EVENT,
       handleLabelChange
@@ -1721,7 +1758,7 @@ function SqlErdColumnAnnotationInteractionSync({
       window.removeEventListener("pointermove", handlePointerMove);
       window.removeEventListener("pointerup", handlePointerUp);
       window.removeEventListener("pointercancel", handlePointerCancel);
-      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keydown", handleKeyDown, true);
       window.removeEventListener(
         SQLTOERD_ANNOTATION_LABEL_CHANGE_EVENT,
         handleLabelChange

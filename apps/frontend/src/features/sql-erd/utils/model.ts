@@ -217,24 +217,7 @@ export function addSqltoerdColumnAnnotation(
     toEndpoint
   );
 
-  if (
-    modelJson.schema.relations.some((relation) =>
-      relation.fromColumnIds.some((fromColumnId, index) => {
-        const toColumnId = relation.toColumnIds[index];
-
-        return (
-          typeof toColumnId === "string" &&
-          getSqltoerdUndirectedEndpointKey(
-            getSqltoerdColumnAnnotationEndpoint(
-              relation.fromTableId,
-              fromColumnId
-            ),
-            getSqltoerdColumnAnnotationEndpoint(relation.toTableId, toColumnId)
-          ) === annotationKey
-        );
-      })
-    )
-  ) {
+  if (hasSqltoerdColumnAnnotationForeignKeyConflict(modelJson, annotation)) {
     return { ok: false, reason: "foreign_key_exists" };
   }
 
@@ -264,6 +247,57 @@ export function addSqltoerdColumnAnnotation(
       }
     }
   };
+}
+
+export function getSqltoerdRenderableAnnotations(
+  modelJson: SqltoerdModelJsonV1,
+  annotations: SqltoerdAnnotationsV1 | undefined
+): SqltoerdAnnotationsV1 | undefined {
+  if (!annotations) {
+    return undefined;
+  }
+
+  return {
+    ...annotations,
+    links: annotations.links.filter(
+      (annotation) =>
+        annotation.kind !== "column_link" ||
+        !hasSqltoerdColumnAnnotationForeignKeyConflict(modelJson, annotation)
+    )
+  };
+}
+
+function hasSqltoerdColumnAnnotationForeignKeyConflict(
+  modelJson: SqltoerdModelJsonV1,
+  annotation: SqltoerdColumnAnnotationLink
+) {
+  const annotationKey = getSqltoerdUndirectedEndpointKey(
+    getSqltoerdColumnAnnotationEndpoint(
+      annotation.fromTableId,
+      annotation.fromColumnId
+    ),
+    getSqltoerdColumnAnnotationEndpoint(
+      annotation.toTableId,
+      annotation.toColumnId
+    )
+  );
+
+  return modelJson.schema.relations.some((relation) =>
+    relation.fromColumnIds.some((fromColumnId, index) => {
+      const toColumnId = relation.toColumnIds[index];
+
+      return (
+        typeof toColumnId === "string" &&
+        getSqltoerdUndirectedEndpointKey(
+          getSqltoerdColumnAnnotationEndpoint(
+            relation.fromTableId,
+            fromColumnId
+          ),
+          getSqltoerdColumnAnnotationEndpoint(relation.toTableId, toColumnId)
+        ) === annotationKey
+      );
+    })
+  );
 }
 
 export function updateSqltoerdAnnotationLabel(

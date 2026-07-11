@@ -520,6 +520,39 @@ export function getSqlErdRelationCurvePathData(
   return `M ${startPoint.x} ${startPoint.y} C ${controlPointOne.x} ${controlPointOne.y}, ${controlPointTwo.x} ${controlPointTwo.y}, ${endPoint.x} ${endPoint.y}`;
 }
 
+export function getSqlErdRelationCurveMidpoint(
+  points: SqlErdRelationRoutePoint[],
+  startSide: RelationPortSide,
+  endSide: RelationPortSide
+): SqlErdRelationRoutePoint {
+  const startPoint = points[0] ?? { x: 0, y: 0 };
+  const endPoint = points.at(-1) ?? startPoint;
+  const [controlPointOne, controlPointTwo] =
+    getRelationCurveControlPoints(points, startSide, endSide);
+
+  if (!controlPointOne || !controlPointTwo) {
+    return {
+      x: (startPoint.x + endPoint.x) / 2,
+      y: (startPoint.y + endPoint.y) / 2
+    };
+  }
+
+  return {
+    x:
+      (startPoint.x +
+        3 * controlPointOne.x +
+        3 * controlPointTwo.x +
+        endPoint.x) /
+      8,
+    y:
+      (startPoint.y +
+        3 * controlPointOne.y +
+        3 * controlPointTwo.y +
+        endPoint.y) /
+      8
+  };
+}
+
 function getRelationCurveControlPoints(
   points: SqlErdRelationRoutePoint[],
   startSide: RelationPortSide,
