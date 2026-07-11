@@ -89,6 +89,11 @@ async function assertFullSyncOnlyDetailsSelectedProjects(
   const database = {
     async query(text, values) {
       assert.match(text, /FROM github_project_v2_selections/i);
+      if (repository) {
+        assert.match(text, /gps\.repository_id = \$3/);
+      } else {
+        assert.doesNotMatch(text, /gps\.repository_id = \$3/);
+      }
       assert.deepEqual(
         values,
         repository
