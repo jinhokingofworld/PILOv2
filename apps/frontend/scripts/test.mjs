@@ -686,6 +686,7 @@ assert.match(canvasShapeSync, /DEFAULT_CANVAS_SHAPE_SYNC_QUEUE_DEBOUNCE_MS = 500
 assert.match(canvasShapeSync, /DEFAULT_CANVAS_SHAPE_SYNC_RETRY_ATTEMPTS = 3/);
 assert.match(canvasShapeSync, /DEFAULT_CANVAS_SHAPE_SYNC_BATCH_SIZE = 100/);
 assert.match(canvasShapeSync, /NON_RETRYABLE_CANVAS_API_STATUSES/);
+assert.match(canvasShapeSync, /new Set\(\[400, 401, 403, 404, 409\]\)/);
 assert.match(canvasShapeSync, /isStaleMissingShapeOperation/);
 assert.match(canvasShapeSync, /CanvasShapeSyncFailure/);
 assert.match(canvasShapeSync, /isNonRetryableCanvasShapeSyncError/);
@@ -708,7 +709,8 @@ assert.match(canvasShapeSync, /operations\.slice\(\s*index,\s*index \+ DEFAULT_C
 assert.match(canvasShapeSync, /createShape\(\s*boardId,/);
 assert.match(canvasShapeSync, /updateShape\(\s*operation\.shapeId,/);
 assert.match(canvasShapeSync, /clientOperationId: operation\.clientOperationId/);
-assert.match(canvasShapeSync, /deleteShape\(operation.shapeId/);
+assert.match(canvasShapeSync, /deleteShape\(\s*operation\.shapeId,/);
+assert.match(canvasShapeSync, /baseRevision: operation\.baseRevision/);
 assert.match(canvasShapeSync, /id: typeof shape.id === "string" \? shape.id : ""/);
 assert.match(canvasShapeSync, /function resolveParentShapeId/);
 assert.match(canvasShapeSync, /parentId\.startsWith\("shape:"\)/);

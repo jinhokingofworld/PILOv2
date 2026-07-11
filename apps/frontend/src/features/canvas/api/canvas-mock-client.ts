@@ -267,7 +267,7 @@ export function createMockCanvasClient() {
       };
     },
 
-    async deleteShape(shapeId: string) {
+    async deleteShape(shapeId: string, _body?: unknown) {
       return {
         id: shapeId,
         deleted: true,

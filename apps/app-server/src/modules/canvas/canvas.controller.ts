@@ -38,6 +38,7 @@ import {
   CanvasViewSettingPayload,
   CreateCanvasRequest,
   CreateCanvasShapeRequest,
+  DeleteCanvasShapeRequest,
   ListCanvasOperationsQuery,
   ListCanvasShapesQuery,
   SyncCanvasShapesBatchRequest,
@@ -318,12 +319,14 @@ export class CanvasController {
   async deleteShape(
     @CurrentUserId() currentUserId: string,
     @Param("workspaceId") workspaceId: string,
-    @Param("shapeId") shapeId: string
+    @Param("shapeId") shapeId: string,
+    @Body() body: DeleteCanvasShapeRequest | undefined
   ): Promise<ApiSuccessResponse<CanvasShapeDeletePayload>> {
     const result = await this.canvasService.deleteShape(
       currentUserId,
       workspaceId,
-      shapeId
+      shapeId,
+      body
     );
 
     return apiResponse(result);

@@ -97,6 +97,11 @@ export interface CreateCanvasShapeRequest {
 
 export type UpdateCanvasShapeRequest = Partial<CreateCanvasShapeRequest>;
 
+export interface DeleteCanvasShapeRequest {
+  clientOperationId?: unknown;
+  baseRevision?: unknown;
+}
+
 export interface UpdateCanvasViewSettingRequest {
   zoom?: unknown;
   viewportX?: unknown;
