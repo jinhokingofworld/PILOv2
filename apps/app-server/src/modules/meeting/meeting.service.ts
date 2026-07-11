@@ -639,20 +639,7 @@ export class MeetingService {
       }
     );
 
-    try {
-      await this.enqueueMeetingReportJob(result.job);
-    } catch (error) {
-      if (result.job !== null) {
-        await this.restoreLeaveMeetingAfterReportEnqueueFailure({
-          workspaceId,
-          meetingId,
-          currentUserId,
-          reportId: result.job.reportId
-        });
-      }
-
-      throw error;
-    }
+    await this.publishMeetingReportOutbox(result.job);
 
     return result.payload;
   }
@@ -727,15 +714,7 @@ export class MeetingService {
   async enqueueReconciledMeetingReportJob(
     job: MeetingReportJobPayload | null
   ): Promise<void> {
-    if (job === null) {
-      return;
-    }
-
-    try {
-      await this.enqueueMeetingReportJob(job);
-    } catch {
-      await this.markMeetingReportEnqueueFailed(job.reportId);
-    }
+    await this.publishMeetingReportOutbox(job);
   }
 
   async startRecording(
@@ -907,7 +886,7 @@ export class MeetingService {
       }
     );
 
-    await this.enqueueMeetingReportJob(result.job);
+    await this.publishMeetingReportOutbox(result.job);
     return result.payload;
   }
 
@@ -1777,12 +1756,18 @@ export class MeetingService {
     }
 
     const result = await this.insertProcessingMeetingReport(executor, recording);
+    const job =
+      result.inserted && recording.audio_file_key !== null
+        ? this.buildMeetingReportJobPayload(result.report, recording)
+        : null;
+
+    if (job !== null) {
+      await this.insertMeetingReportOutbox(executor, job);
+    }
+
     return {
       report: result.report,
-      job:
-        result.inserted && recording.audio_file_key !== null
-          ? this.buildMeetingReportJobPayload(result.report, recording)
-          : null
+      job
     };
   }
 
@@ -1893,28 +1878,68 @@ export class MeetingService {
     await this.meetingReportJobService.enqueueMeetingReportJob(job);
   }
 
-  private async markMeetingReportEnqueueFailed(reportId: string): Promise<void> {
-    await this.database.transaction(async (transaction) => {
-      await transaction.queryOne<MeetingReportRow>(
+  private async insertMeetingReportOutbox(
+    executor: QueryOneExecutor,
+    job: MeetingReportJobPayload
+  ): Promise<void> {
+    const outbox = await executor.queryOne<{ id: string }>(
+      `
+        INSERT INTO meeting_report_outbox (
+          report_id,
+          meeting_id,
+          recording_id,
+          audio_file_key
+        )
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT (report_id) DO NOTHING
+        RETURNING id
+      `,
+      [job.reportId, job.meetingId, job.recordingId, job.audioFileKey]
+    );
+
+    if (outbox === null) {
+      const existing = await executor.queryOne<{ id: string }>(
         `
-          UPDATE meeting_reports
-          SET
-            status = 'FAILED',
-            failed_step = 'STT',
-            error_message = 'Meeting report job could not be enqueued',
-            transcript_text = NULL,
-            summary = NULL,
-            discussion_points = NULL,
-            decisions = NULL,
-            action_item_candidates = '[]'::jsonb,
-            updated_at = now()
-          WHERE id = $1
-            AND status = 'PROCESSING'
-          RETURNING id
+          SELECT id
+          FROM meeting_report_outbox
+          WHERE report_id = $1
+          LIMIT 1
         `,
-        [reportId]
+        [job.reportId]
       );
-    });
+
+      if (existing === null) {
+        throw badRequest("Meeting report outbox could not be saved");
+      }
+    }
+  }
+
+  private async publishMeetingReportOutbox(
+    job: MeetingReportJobPayload | null
+  ): Promise<void> {
+    if (job === null) {
+      return;
+    }
+
+    try {
+      await this.enqueueMeetingReportJob(job);
+      await this.database.execute(
+        `
+          UPDATE meeting_report_outbox
+          SET
+            status = 'delivered',
+            delivered_at = now(),
+            error_code = NULL,
+            error_message = NULL,
+            updated_at = now()
+          WHERE report_id = $1
+            AND status = 'pending'
+        `,
+        [job.reportId]
+      );
+    } catch {
+      // Keep the committed pending intent for MP-05 dispatcher retry.
+    }
   }
 
   private async restoreLeaveMeetingAfterReportEnqueueFailure(input: {
