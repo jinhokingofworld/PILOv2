@@ -646,18 +646,19 @@ async function assertError(action, messagePattern) {
 }
 
 {
-  const { service } = createSubject(
-    new FakeDatabase({
-      queryOneRows: [
-        currentMeetingRow(),
-        participantRow(),
-        activeParticipantCountRow(2),
-        participantRow({
-          left_at: leftAt
-        })
-      ]
-    })
-  );
+  const { database, service, liveKitEgressService, meetingReportJobService } =
+    createSubject(
+      new FakeDatabase({
+        queryOneRows: [
+          currentMeetingRow(),
+          participantRow(),
+          activeParticipantCountRow(2),
+          participantRow({
+            left_at: leftAt
+          })
+        ]
+      })
+    );
 
   const left = await service.leaveMeeting(currentUserId, workspaceId, meetingId);
 
@@ -666,6 +667,20 @@ async function assertError(action, messagePattern) {
   assert.equal(left.participant.leftAt, "2026-07-05T00:10:00.000Z");
   assert.equal(left.meetingEnded, false);
   assert.equal(left.meeting.endedAt, null);
+  assert.deepEqual(liveKitEgressService.stopCalls, []);
+  assert.deepEqual(meetingReportJobService.calls, []);
+  assert.equal(
+    database.queries.some(({ text }) => text.includes("UPDATE meeting_recordings")),
+    false
+  );
+  assert.equal(
+    database.queries.some(({ text }) => text.includes("INSERT INTO meeting_reports")),
+    false
+  );
+  assert.equal(
+    database.queries.some(({ text }) => text.includes("UPDATE meetings")),
+    false
+  );
 }
 
 {
@@ -758,26 +773,87 @@ async function assertError(action, messagePattern) {
 }
 
 {
-  const { database, service } = createSubject(
+  const liveKitEgressService = new FakeLiveKitEgressService();
+  liveKitEgressService.stopResult = {
+    ...liveKitEgressService.stopResult,
+    durationSec: 60
+  };
+  const { database, service, meetingReportJobService } = createSubject(
     new FakeDatabase({
       queryOneRows: [
         currentMeetingRow(),
+        participantRow(),
+        activeParticipantCountRow(1),
+        recordingRow(),
+        (text, values) => {
+          assert.match(text, /UPDATE meeting_recordings/);
+          assert.match(text, /status = 'COMPLETED'/);
+          assert.deepEqual(values, [
+            recordingId,
+            `recordings/meetings/workspaces/${workspaceId}/meetings/${meetingId}/recordings/${recordingId}.mp3`,
+            60,
+            8192
+          ]);
+          return recordingRow({
+            status: "COMPLETED",
+            audio_file_key: values[1],
+            duration_sec: values[2],
+            file_size_bytes: values[3],
+            ended_at: endedAt
+          });
+        },
         participantRow({
           left_at: leftAt
         }),
-        activeParticipantCountRow(0),
-        participantRow({
-          left_at: leftAt
+        currentMeetingRow({
+          ended_at: endedAt
         })
       ]
-    })
+    }),
+    new FakeLiveKitTokenService(),
+    liveKitEgressService
   );
+
+  const left = await service.leaveMeeting(currentUserId, workspaceId, meetingId);
+
+  assert.equal(left.meetingEnded, true);
+  assert.equal(left.currentRecording, null);
+  assert.deepEqual(liveKitEgressService.stopCalls, [
+    {
+      livekitEgressId: "egress-1"
+    }
+  ]);
+  assert.deepEqual(meetingReportJobService.calls, []);
+  assert.equal(
+    database.queries.some(({ text }) => text.includes("meeting_reports")),
+    false
+  );
+}
+
+{
+  const { database, service, liveKitEgressService, meetingReportJobService } =
+    createSubject(
+      new FakeDatabase({
+        queryOneRows: [
+          currentMeetingRow(),
+          participantRow({
+            left_at: leftAt
+          }),
+          activeParticipantCountRow(0),
+          participantRow({
+            left_at: leftAt
+          })
+        ]
+      })
+    );
 
   const left = await service.leaveMeeting(currentUserId, workspaceId, meetingId);
 
   assert.equal(left.meetingEnded, false);
   assert.equal(left.participant.leftAt, "2026-07-05T00:10:00.000Z");
   assert.equal(database.queries.length, 4);
+  assert.deepEqual(liveKitEgressService.stopCalls, []);
+  assert.deepEqual(meetingReportJobService.calls, []);
 }
 
 {
