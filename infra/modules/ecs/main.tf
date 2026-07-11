@@ -30,6 +30,7 @@ resource "aws_ecs_task_definition" "service" {
       name      = each.key
       image     = each.value.image
       essential = true
+      command   = each.value.command
 
       portMappings = each.value.container_port == null ? [] : [
         {

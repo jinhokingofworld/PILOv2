@@ -126,6 +126,8 @@ module "iam" {
   ecr_repository_arns     = module.ecr.repository_arns
   s3_bucket_arns          = [module.s3.frontend_bucket_arn, module.s3.uploads_bucket_arn]
   sqs_queue_arns          = module.sqs.queue_arns
+  github_sync_worker_queue_arns = module.sqs.github_sync_worker_queue_arns
+  github_webhooks_queue_arn     = module.sqs.github_webhooks_queue_arn
   secrets_manager_arns    = concat(module.secrets.secret_arns, [module.rds.master_user_secret_arn])
   cloudfront_distribution = module.cloudfront.distribution_arn
 }
@@ -193,6 +195,7 @@ module "ecs" {
         S3_UPLOADS_BUCKET             = module.s3.uploads_bucket_name
         SQS_AI_JOBS_QUEUE_URL         = module.sqs.ai_jobs_queue_url
         SQS_GITHUB_WEBHOOKS_QUEUE_URL = module.sqs.github_webhooks_queue_url
+        SQS_GITHUB_SYNC_JOBS_QUEUE_URL = module.sqs.github_sync_jobs_queue_url
         FRONTEND_URL                  = local.frontend_domain == "" ? "" : "https://${local.frontend_domain}"
         API_PUBLIC_ORIGIN             = local.api_domain == "" ? "http://${module.alb.alb_dns_name}" : "https://${local.api_domain}"
         API_BASE_PATH                 = "/api/v1"
@@ -246,6 +249,26 @@ module "ecs" {
         OPENAI_MEETING_REPORT_MODEL             = "gpt-5.4-mini"
       }
       secrets = module.secrets.ai_worker_ecs_secrets
+    }
+
+    github-sync-worker = {
+      image              = "${module.ecr.repository_urls["pilo-app-server"]}:latest"
+      cpu                = var.app_server_cpu
+      memory             = var.app_server_memory
+      desired_count      = var.github_sync_worker_desired_count
+      container_port     = null
+      command            = ["node", "dist/github-sync-worker-main.js"]
+      security_group_ids = [module.security_groups.app_server_security_group_id]
+      task_role_arn      = module.iam.github_sync_worker_task_role_arn
+      target_group_arn   = null
+      environment = {
+        APP_ENV                        = var.environment
+        AWS_REGION                     = var.aws_region
+        DATABASE_SSL                   = "true"
+        SQS_GITHUB_WEBHOOKS_QUEUE_URL  = module.sqs.github_webhooks_queue_url
+        SQS_GITHUB_SYNC_JOBS_QUEUE_URL = module.sqs.github_sync_jobs_queue_url
+      }
+      secrets = module.secrets.app_server_ecs_secrets
     }
   }
 }

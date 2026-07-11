@@ -27,3 +27,18 @@ resource "aws_sqs_queue" "github_webhooks" {
     maxReceiveCount     = 3
   })
 }
+
+resource "aws_sqs_queue" "github_sync_jobs_dlq" {
+  name                      = "${var.name_prefix}-github-sync-jobs-dlq"
+  message_retention_seconds = 1209600
+}
+
+resource "aws_sqs_queue" "github_sync_jobs" {
+  name                       = "${var.name_prefix}-github-sync-jobs"
+  visibility_timeout_seconds = 900
+
+  redrive_policy = jsonencode({
+    deadLetterTargetArn = aws_sqs_queue.github_sync_jobs_dlq.arn
+    maxReceiveCount     = 3
+  })
+}
