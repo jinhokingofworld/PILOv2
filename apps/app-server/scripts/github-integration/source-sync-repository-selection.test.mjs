@@ -6,14 +6,14 @@ const require = createRequire(import.meta.url);
 const { GithubSyncExecutorService } = require("../../dist/modules/github-integration/github-sync-executor.service.js");
 
 const migrationPath = new URL(
-  "../../../../db/migrations/033_repository_scope_github_project_v2_selections.sql",
+  "../../../../db/migrations/034_repository_scope_github_project_v2_selections.sql",
   import.meta.url
 );
 
 assert.equal(
   existsSync(migrationPath),
   true,
-  "migration 033 must make ProjectV2 selection repository-scoped"
+  "migration 034 must make ProjectV2 selection repository-scoped"
 );
 
 const migration = readFileSync(migrationPath, "utf8");
