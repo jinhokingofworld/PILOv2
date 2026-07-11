@@ -96,16 +96,16 @@ def create_pr_review_worker(
         resolved_settings.openai_model,
         resolved_settings.openai_timeout_seconds,
     )
-    dispatcher = JobDispatcher(
-        pr_review_analysis_processor=PrReviewAnalysisProcessor(
-            handoff_client,
-            analysis_client,
-        )
+    processor = PrReviewAnalysisProcessor(
+        handoff_client,
+        analysis_client,
     )
+    dispatcher = JobDispatcher(pr_review_analysis_processor=processor)
     return SqsAiJobWorker(
         resolved_settings,
         dispatcher,
         boto3.client("sqs", **boto_kwargs),
+        pr_review_retry_exhaustion_recovery=processor,
     )
 
 

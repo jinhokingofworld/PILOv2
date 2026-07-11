@@ -1,6 +1,7 @@
-import { Controller, Get, Param, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, UseGuards } from "@nestjs/common";
 import { apiResponse, type ApiSuccessResponse } from "../../common/api-response";
 import {
+  PrReviewAnalysisJobCompletionPayload,
   PrReviewAnalysisInputPayload,
   PrReviewService
 } from "./pr-review.service";
@@ -16,5 +17,21 @@ export class PrReviewAnalysisInternalController {
     @Param("jobId") jobId: string
   ): Promise<ApiSuccessResponse<PrReviewAnalysisInputPayload>> {
     return apiResponse(await this.prReviewService.getAnalysisJobInput(jobId));
+  }
+
+  @Post("analysis-jobs/:jobId/result")
+  async storeAnalysisResult(
+    @Param("jobId") jobId: string,
+    @Body() body: unknown
+  ): Promise<ApiSuccessResponse<PrReviewAnalysisJobCompletionPayload>> {
+    return apiResponse(await this.prReviewService.storeAnalysisJobResult(jobId, body));
+  }
+
+  @Post("analysis-jobs/:jobId/failure")
+  async storeAnalysisFailure(
+    @Param("jobId") jobId: string,
+    @Body() body: unknown
+  ): Promise<ApiSuccessResponse<PrReviewAnalysisJobCompletionPayload>> {
+    return apiResponse(await this.prReviewService.storeAnalysisJobFailure(jobId, body));
   }
 }

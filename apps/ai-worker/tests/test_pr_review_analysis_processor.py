@@ -8,6 +8,7 @@ from app.pr_review_analysis_processor import (
     PrReviewAnalysisInputError,
     PrReviewAnalysisOutputError,
     PrReviewAnalysisProcessor,
+    PrReviewAnalysisProviderError,
     PrReviewAnalysisResult,
     _build_prompt_input,
     _pr_review_analysis_schema,
@@ -120,6 +121,7 @@ class FakeHandoffClient:
         self.error = error
         self.requested_jobs = []
         self.submitted_results = []
+        self.submitted_failures = []
 
     def get_input(self, job):
         self.requested_jobs.append(job)
@@ -129,6 +131,11 @@ class FakeHandoffClient:
 
     def submit_result(self, job, analysis) -> None:
         self.submitted_results.append((job, analysis))
+        if self.error:
+            raise self.error
+
+    def submit_failure(self, job, code) -> None:
+        self.submitted_failures.append((job, code))
         if self.error:
             raise self.error
 
@@ -229,6 +236,51 @@ def test_processor_deletes_invalid_payload_and_terminal_input_or_output_errors()
     assert invalid_input.delete_message is True
     assert invalid_output.reason == "pr_review_analysis_output_invalid"
     assert invalid_output.delete_message is True
+
+
+def test_processor_reports_safe_terminal_failure_codes() -> None:
+    input_handoff = FakeHandoffClient(error=PrReviewAnalysisInputError())
+    input_result = PrReviewAnalysisProcessor(
+        input_handoff,
+        FakeAnalysisClient(),
+    ).process_payload(job_payload())
+    provider_handoff = FakeHandoffClient(input_value=parsed_input())
+    provider_result = PrReviewAnalysisProcessor(
+        provider_handoff,
+        FakeAnalysisClient(error=PrReviewAnalysisProviderError()),
+    ).process_payload(job_payload())
+
+    assert input_result.delete_message is True
+    assert input_handoff.submitted_failures == [
+        (input_handoff.requested_jobs[0], "ANALYSIS_INPUT_INVALID")
+    ]
+    assert provider_result.delete_message is True
+    assert provider_handoff.submitted_failures == [
+        (provider_handoff.requested_jobs[0], "ANALYSIS_PROVIDER_FAILED")
+    ]
+
+
+def test_retry_exhaustion_reports_provider_failure_before_deleting_message() -> None:
+    handoff = FakeHandoffClient(input_value=parsed_input())
+    processor = PrReviewAnalysisProcessor(handoff, FakeAnalysisClient())
+
+    assert processor.terminalize_retry_exhaustion(json.dumps(job_payload())) is True
+    assert handoff.submitted_failures == [
+        (
+            parse_pr_review_analysis_job_payload(job_payload()),
+            "ANALYSIS_PROVIDER_FAILED",
+        )
+    ]
+
+
+def test_retry_exhaustion_keeps_message_when_failure_handoff_is_unavailable() -> None:
+    handoff = FakeHandoffClient(
+        input_value=parsed_input(),
+        error=InfrastructureError("handoff unavailable"),
+    )
+    processor = PrReviewAnalysisProcessor(handoff, FakeAnalysisClient())
+
+    assert processor.terminalize_retry_exhaustion(json.dumps(job_payload())) is False
 
 
 def test_processor_keeps_infrastructure_failures_for_sqs_retry() -> None:
