@@ -382,7 +382,7 @@ Sync run 목록:
 | Query | 설명 |
 | --- | --- |
 | `target` | `repositories`, `issues`, `pull_requests`, `project_v2`, `project_v2_fields`, `project_v2_items`, `full` |
-| `status` | `running`, `success`, `failed` |
+| `status` | `queued`, `running`, `success`, `failed` |
 | `repositoryId` | 특정 repository 관련 run만 조회 |
 | `projectV2Id` | 특정 ProjectV2 관련 run만 조회 |
 | `page`, `limit` | 기본 `1`, `20`; 최대 limit `100` |
@@ -403,13 +403,14 @@ Workspace 안에 존재하고 같은 installation에 속해야 한다. `full` ta
 `issues`와 `pull_requests`는 `repositoryId`가 있으면 해당 repository만, 없으면
 installation에 연결된 repository 전체를 동기화한다.
 
-수동 sync API는 `github_sync_runs` row를 `running`으로 만든 뒤 executor를 실행하고,
-완료된 `success` 또는 `failed` payload를 반환한다. Provider 처리 중 발생한 오류는
-가능한 경우 API 예외 대신 `status="failed"`와 `errorMessage`로 기록해 반환한다.
-요청 validation, Workspace 범위, installation/repository/project lookup 실패는 일반
-API error로 반환한다.
+수동 sync API는 `github_sync_runs` row를 `queued`로 만들고 `github-sync-jobs`에
+durable job을 발행한 뒤 `202 Accepted`를 즉시 반환한다. worker가
+`queued → running → success|failed`를 갱신하며, 클라이언트는 sync run 조회 API로
+진행 상황과 결과를 확인한다. Queue 발행 실패는 run을 `failed`로 기록하고 API error로
+반환한다. 요청 validation, Workspace 범위, installation/repository/project lookup 실패도
+일반 API error로 반환한다.
 
-응답 예시:
+`202 Accepted` 응답 예시:
 
 ```json
 {
@@ -417,18 +418,18 @@ API error로 반환한다.
   "data": {
     "id": "sync_run_uuid",
     "target": "full",
-    "status": "success",
+    "status": "queued",
     "installationId": "installation_uuid",
     "repositoryId": "repository_uuid",
     "projectV2Id": "project_v2_uuid",
     "startedAt": "2026-07-07T12:00:00.000Z",
-    "finishedAt": "2026-07-07T12:01:00.000Z",
-    "fetchedCount": 5,
-    "createdCount": 2,
-    "updatedCount": 2,
-    "skippedCount": 1,
-    "progressPercent": 100,
-    "progressStage": "completed",
+    "finishedAt": null,
+    "fetchedCount": 0,
+    "createdCount": 0,
+    "updatedCount": 0,
+    "skippedCount": 0,
+    "progressPercent": 0,
+    "progressStage": "initializing",
     "errorMessage": null
   }
 }
@@ -724,7 +725,9 @@ DELETE /api/v1/workspaces/{workspaceId}/github/installations/{installationId}
 - Missing cookies, expired rows, already-consumed rows, or nonce/binding
   mismatches are rejected as invalid callback state. Callback state is one-time
   use and MUST NOT be accepted on replay.
-- On callback success, app-server redirects to `returnUrl` with `302`.
+- On callback success, app-server enqueues an initial `full` sync, then redirects to
+  `returnUrl` with `302` and appends `syncRunId` as a query parameter. The run starts
+  in `queued` state; clients query the sync-run endpoint for completion.
 - If `returnUrl` is omitted, the callback returns the JSON payload for
   diagnostic/API-client use.
 - If `GET /github/oauth/callback` cannot save the GitHub account because
@@ -763,4 +766,11 @@ DELETE /api/v1/workspaces/{workspaceId}/github/installations/{installationId}
     GitHub App installation.
   - `github_callback_error=callback_failed` or
     `github_callback_error=connection_failed`: generic safe fallback for
-    callback validation or connection failures.
+  callback validation or connection failures.
+
+## Asynchronous sync execution
+
+Manual `POST /workspaces/{workspaceId}/github/sync-runs` returns `202 Accepted`.
+It creates a `queued` run and publishes a durable `github-sync-jobs` message; a worker
+performs the transition `queued → running → success|failed`. A queue-publish failure
+marks the run failed and returns an API error instead of leaving a stranded queued run.
