@@ -41,7 +41,7 @@
 | 2-A | Scope, API, 상태 전이와 Worker 경계 확정 | #652 | #658 | 완료 |
 | 2-B | `analyzing` 세션 생성과 durable Job enqueue | #659 | #664 | 완료 |
 | 2-C | AI Worker PR 분석 processor | #666 | #668 | 완료 |
-| 2-D | 분석 결과 원자 저장과 stale/idempotency guard | TBD | TBD | 대기 |
+| 2-D | 분석 결과 원자 저장과 stale/idempotency guard | #670 | #699 | 진행 |
 | 2-E | Review room 분석 진행/실패/retry UX | TBD | TBD | 대기 |
 | 2-F | 운영 복구, 관측성, 배포 검증 | TBD | TBD | 대기 |
 
@@ -189,29 +189,31 @@
 
 ## 2-D Atomic Result Persistence and Guards
 
+> Tracking: Issue #670, PR #699. Result/failure handoff, stale head terminalization, atomic graph persistence, and duplicate delivery handling are implemented in this slice.
+
 목표:
 
 - 분석 결과를 session, flow, file 관계에 한 번만 원자적으로 반영한다.
 
 작업 체크리스트:
 
-- [ ] 결과 저장 전에 session 상태가 여전히 `analyzing`인지 확인한다.
-- [ ] Job head SHA, session head SHA와 현재 GitHub PR head SHA를 비교한다.
-- [ ] stale Job은 flow/file을 쓰지 않고 확정된 실패 또는 재생성 안내 상태로 끝낸다.
-- [ ] session summary, review flow, review files, flow-file 관계를 한 transaction에 저장한다.
-- [ ] 모든 결과 저장이 끝난 뒤 마지막에 session을 `reviewing`으로 전환한다.
-- [ ] 중간 실패 시 일부 flow/file만 남지 않도록 rollback을 검증한다.
-- [ ] 같은 Job 재전달 시 기존 완료 결과를 그대로 인정하고 중복 row를 만들지 않는다.
-- [ ] 재시도 횟수 소진 시 session을 `failed`로 전환하고 안전한 reason code를 저장한다.
-- [ ] 사용자 노출 메시지와 운영 로그용 상세 오류를 분리한다.
-- [ ] 완료/실패 처리 후 outbox 또는 Job execution 상태를 terminal로 갱신한다.
+- [x] 결과 저장 전에 session 상태가 여전히 `analyzing`인지 확인한다.
+- [x] Job head SHA, session head SHA와 현재 GitHub PR head SHA를 비교한다.
+- [x] stale Job은 flow/file을 쓰지 않고 확정된 실패 또는 재생성 안내 상태로 끝낸다.
+- [x] session summary, review flow, review files, flow-file 관계를 한 transaction에 저장한다.
+- [x] 모든 결과 저장이 끝난 뒤 마지막에 session을 `reviewing`으로 전환한다.
+- [x] 중간 실패 시 일부 flow/file만 남지 않도록 rollback을 검증한다.
+- [x] 같은 Job 재전달 시 기존 완료 결과를 그대로 인정하고 중복 row를 만들지 않는다.
+- [x] 재시도 횟수 소진 시 session을 `failed`로 전환하고 안전한 reason code를 저장한다.
+- [x] 사용자 노출 메시지와 운영 로그용 상세 오류를 분리한다.
+- [x] 완료/실패 처리 후 outbox 또는 Job execution 상태를 terminal로 갱신한다.
 
 완료 기준:
 
-- [ ] `reviewing` session에는 완전한 graph/file 데이터만 존재한다.
-- [ ] `failed` session에는 부분 graph가 사용자에게 노출되지 않는다.
-- [ ] stale 분석 결과가 새 head SHA 세션을 덮어쓰지 않는다.
-- [ ] SQS at-least-once 전달에서도 결과가 한 번만 확정된다.
+- [x] `reviewing` session에는 완전한 graph/file 데이터만 존재한다.
+- [x] `failed` session에는 부분 graph가 사용자에게 노출되지 않는다.
+- [x] stale 분석 결과가 새 head SHA 세션을 덮어쓰지 않는다.
+- [x] SQS at-least-once 전달에서도 결과가 한 번만 확정된다.
 
 ## 2-E Frontend Analysis Status UX
 

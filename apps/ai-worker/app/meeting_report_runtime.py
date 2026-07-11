@@ -51,6 +51,7 @@ DEFAULT_AGENT_STALE_EXECUTION_SWEEP_INTERVAL_SECONDS = 60
 DEFAULT_CANVAS_EMBEDDING_JOBS_PER_TICK = 10
 AGENT_RETRY_TERMINAL_RECEIVE_COUNT = 3
 AGENT_RETRY_EXHAUSTED_ERROR_CODE = "AGENT_PLANNER_RETRY_EXHAUSTED"
+PR_REVIEW_ANALYSIS_RETRY_TERMINAL_RECEIVE_COUNT = 3
 AGENT_RETRY_EXHAUSTED_ERROR_MESSAGE = "요청을 분석하지 못했습니다. 잠시 후 다시 시도해주세요."
 LOCAL_APP_ENVS = {"local", "test", "development"}
 
@@ -635,6 +636,7 @@ class SqsAiJobWorker:
         canvas_embedding_processor: Any | None = None,
         stale_execution_recovery: Any | None = None,
         agent_retry_exhaustion_recovery: Any | None = None,
+        pr_review_retry_exhaustion_recovery: Any | None = None,
         monotonic_time: Callable[[], float] = time.monotonic,
     ) -> None:
         self.settings = settings
@@ -643,6 +645,7 @@ class SqsAiJobWorker:
         self.canvas_embedding_processor = canvas_embedding_processor
         self.stale_execution_recovery = stale_execution_recovery
         self.agent_retry_exhaustion_recovery = agent_retry_exhaustion_recovery
+        self.pr_review_retry_exhaustion_recovery = pr_review_retry_exhaustion_recovery
         self.monotonic_time = monotonic_time
         self.last_stale_execution_sweep_at: float | None = None
 
@@ -675,9 +678,10 @@ class SqsAiJobWorker:
                 result.resource_id,
                 message.get("MessageId"),
             )
-            should_delete = result.delete_message or self._terminalize_agent_retry(
-                result,
-                message,
+            should_delete = (
+                result.delete_message
+                or self._terminalize_agent_retry(result, message)
+                or self._terminalize_pr_review_analysis_retry(result, message, body)
             )
             if should_delete and receipt_handle:
                 self.sqs_client.delete_message(
@@ -729,6 +733,29 @@ class SqsAiJobWorker:
             LOGGER.exception(
                 "Agent retry terminalization failed run_id=%s message_id=%s",
                 result.resource_id,
+                message.get("MessageId"),
+            )
+            return False
+
+    def _terminalize_pr_review_analysis_retry(
+        self,
+        result: Any,
+        message: dict[str, Any],
+        body: str,
+    ) -> bool:
+        if (
+            self.pr_review_retry_exhaustion_recovery is None
+            or result.job_type != "pr_review_analysis_requested"
+            or result.reason != "infrastructure_failure"
+            or self._receive_count(message) < PR_REVIEW_ANALYSIS_RETRY_TERMINAL_RECEIVE_COUNT
+        ):
+            return False
+
+        try:
+            return bool(self.pr_review_retry_exhaustion_recovery.terminalize_retry_exhaustion(body))
+        except Exception:
+            LOGGER.exception(
+                "PR Review analysis retry terminalization failed message_id=%s",
                 message.get("MessageId"),
             )
             return False

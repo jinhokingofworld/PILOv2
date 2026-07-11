@@ -63,6 +63,19 @@ class FakeAgentRetryExhaustionRecovery:
         return self.result
 
 
+class FakePrReviewRetryExhaustionRecovery:
+    def __init__(self, result: bool = True, error: Exception | None = None) -> None:
+        self.result = result
+        self.error = error
+        self.calls: list[str] = []
+
+    def terminalize_retry_exhaustion(self, message_body: str) -> bool:
+        self.calls.append(message_body)
+        if self.error:
+            raise self.error
+        return self.result
+
+
 class FakeCanvasEmbeddingProcessor:
     def __init__(self, results: list[str | None]) -> None:
         self.results = results
@@ -291,6 +304,83 @@ def test_sqs_worker_preserves_agent_message_when_terminalization_errors() -> Non
     worker.run_once()
 
     assert recovery.calls == ["run-1"]
+    assert sqs_client.deleted == []
+
+
+def test_sqs_worker_terminalizes_third_pr_review_analysis_infrastructure_failure() -> None:
+    dispatcher = FakeDispatcher(
+        [
+            JobProcessResult(
+                delete_message=False,
+                reason="infrastructure_failure",
+                job_type="pr_review_analysis_requested",
+                resource_id="analysis-job-1",
+            )
+        ]
+    )
+    sqs_client = FakeSqsClient()
+    sqs_client.receive_message = lambda **kwargs: {
+        "Messages": [
+            {
+                "Body": '{"jobType":"pr_review_analysis_requested"}',
+                "ReceiptHandle": "receipt-pr-review-terminal",
+                "MessageId": "message-pr-review-terminal",
+                "Attributes": {"ApproximateReceiveCount": "3"},
+            }
+        ]
+    }
+    recovery = FakePrReviewRetryExhaustionRecovery()
+    worker = SqsAiJobWorker(
+        runtime_settings(),
+        dispatcher,
+        sqs_client,
+        pr_review_retry_exhaustion_recovery=recovery,
+    )
+
+    worker.run_once()
+
+    assert recovery.calls == ['{"jobType":"pr_review_analysis_requested"}']
+    assert sqs_client.deleted == [
+        {
+            "QueueUrl": "https://sqs.example.com/jobs",
+            "ReceiptHandle": "receipt-pr-review-terminal",
+        }
+    ]
+
+
+def test_sqs_worker_preserves_pr_review_message_when_terminalization_fails() -> None:
+    dispatcher = FakeDispatcher(
+        [
+            JobProcessResult(
+                delete_message=False,
+                reason="infrastructure_failure",
+                job_type="pr_review_analysis_requested",
+                resource_id="analysis-job-1",
+            )
+        ]
+    )
+    sqs_client = FakeSqsClient()
+    sqs_client.receive_message = lambda **kwargs: {
+        "Messages": [
+            {
+                "Body": '{"jobType":"pr_review_analysis_requested"}',
+                "ReceiptHandle": "receipt-pr-review-dlq",
+                "MessageId": "message-pr-review-dlq",
+                "Attributes": {"ApproximateReceiveCount": "3"},
+            }
+        ]
+    }
+    recovery = FakePrReviewRetryExhaustionRecovery(result=False)
+    worker = SqsAiJobWorker(
+        runtime_settings(),
+        dispatcher,
+        sqs_client,
+        pr_review_retry_exhaustion_recovery=recovery,
+    )
+
+    worker.run_once()
+
+    assert recovery.calls == ['{"jobType":"pr_review_analysis_requested"}']
     assert sqs_client.deleted == []
 
 

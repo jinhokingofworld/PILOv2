@@ -135,6 +135,14 @@ assert.match(
   prReviewAnalysisInternalController,
   /@Get\("analysis-jobs\/:jobId\/input"\)/
 );
+assert.match(
+  prReviewAnalysisInternalController,
+  /@Post\("analysis-jobs\/:jobId\/result"\)/
+);
+assert.match(
+  prReviewAnalysisInternalController,
+  /@Post\("analysis-jobs\/:jobId\/failure"\)/
+);
 assert.match(prReviewAnalysisInternalController, /PrReviewAnalysisHandoffGuard/);
 assert.match(
   prReviewAnalysisHandoffGuard,
@@ -195,6 +203,12 @@ assert.match(prReviewService, /findActiveAnalyzingReviewSession/);
 assert.match(prReviewService, /analysisJobPublisher\.publishCreatedJob/);
 assert.match(prReviewService, /analysisError/);
 assert.match(prReviewService, /getAnalysisJobInput/);
+assert.match(prReviewService, /storeAnalysisJobResult/);
+assert.match(prReviewService, /storeAnalysisJobFailure/);
+assert.match(prReviewService, /PR_HEAD_CHANGED/);
+assert.match(prReviewService, /FOR UPDATE OF job, review_session/);
+assert.match(prReviewService, /markAnalysisJobSucceeded/);
+assert.match(prReviewService, /failAnalysisJobInTransaction/);
 assert.match(prReviewService, /isAnalysisJobInputAvailable/);
 assert.match(prReviewAnalysisJobService, /SQS_PR_REVIEW_ANALYSIS_QUEUE_URL/);
 assert.match(prReviewAnalysisJobService, /pr_review_analysis_requested/);
@@ -372,3 +386,4 @@ await import("./conflict-status-refresh.test.mjs");
 await import("./submission.test.mjs");
 await import("./async-analysis-enqueue.test.mjs");
 await import("./analysis-input-handoff.test.mjs");
+await import("./analysis-result-handoff.test.mjs");

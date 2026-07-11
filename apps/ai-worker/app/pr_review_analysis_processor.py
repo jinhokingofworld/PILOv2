@@ -39,6 +39,14 @@ class PrReviewAnalysisOutputError(Exception):
     pass
 
 
+class PrReviewAnalysisProviderError(Exception):
+    pass
+
+
+class PrReviewAnalysisStaleError(Exception):
+    pass
+
+
 @dataclass(frozen=True)
 class PrReviewAnalysisJob:
     job_id: str
@@ -122,6 +130,8 @@ class PrReviewAnalysisHandoffClient(Protocol):
         analysis: PrReviewAnalysisResult,
     ) -> None: ...
 
+    def submit_failure(self, job: PrReviewAnalysisJob, code: str) -> None: ...
+
 
 class PrReviewAnalysisClient(Protocol):
     def analyze(self, input_value: PrReviewAnalysisInput) -> PrReviewAnalysisResult: ...
@@ -164,15 +174,72 @@ class PrReviewAnalysisProcessor:
             analysis = self.analysis_client.analyze(input_value)
             self.handoff_client.submit_result(job, analysis)
         except PrReviewAnalysisInputError:
-            return self._result(job, delete_message=True, reason="pr_review_analysis_input_invalid")
+            return self._submit_terminal_failure(
+                job,
+                code="ANALYSIS_INPUT_INVALID",
+                reason="pr_review_analysis_input_invalid",
+            )
         except PrReviewAnalysisOutputError:
-            return self._result(
-                job, delete_message=True, reason="pr_review_analysis_output_invalid"
+            return self._submit_terminal_failure(
+                job,
+                code="ANALYSIS_INPUT_INVALID",
+                reason="pr_review_analysis_output_invalid",
+            )
+        except PrReviewAnalysisProviderError:
+            return self._submit_terminal_failure(
+                job,
+                code="ANALYSIS_PROVIDER_FAILED",
+                reason="pr_review_analysis_provider_failed",
+            )
+        except PrReviewAnalysisStaleError:
+            return self._submit_terminal_failure(
+                job,
+                code="PR_HEAD_CHANGED",
+                reason="pr_review_analysis_head_changed",
             )
         except InfrastructureError:
             return self._result(job, delete_message=False, reason="infrastructure_failure")
 
         return self._result(job, delete_message=True, reason="pr_review_analysis_completed")
+
+    def terminalize_retry_exhaustion(self, message_body: str) -> bool:
+        try:
+            payload = json.loads(message_body)
+        except json.JSONDecodeError:
+            return True
+
+        if not isinstance(payload, dict):
+            return True
+
+        try:
+            job = parse_pr_review_analysis_job_payload(payload)
+        except ValueError:
+            return True
+
+        try:
+            self.handoff_client.submit_failure(job, "ANALYSIS_PROVIDER_FAILED")
+        except PrReviewAnalysisInputError:
+            return True
+        except InfrastructureError:
+            return False
+
+        return True
+
+    def _submit_terminal_failure(
+        self,
+        job: PrReviewAnalysisJob,
+        *,
+        code: str,
+        reason: str,
+    ) -> PrReviewAnalysisProcessResult:
+        try:
+            self.handoff_client.submit_failure(job, code)
+        except PrReviewAnalysisInputError:
+            return self._result(job, delete_message=True, reason=reason)
+        except InfrastructureError:
+            return self._result(job, delete_message=False, reason="infrastructure_failure")
+
+        return self._result(job, delete_message=True, reason=reason)
 
     @staticmethod
     def _result(
@@ -218,6 +285,19 @@ class HttpPrReviewAnalysisHandoffClient:
             payload,
         )
 
+    def submit_failure(self, job: PrReviewAnalysisJob, code: str) -> None:
+        payload = {
+            "jobId": job.job_id,
+            "reviewSessionId": job.review_session_id,
+            "workspaceId": job.workspace_id,
+            "headSha": job.head_sha,
+            "code": code,
+        }
+        self._request_json(
+            f"/api/v1/internal/pr-review/analysis-jobs/{job.job_id}/failure",
+            payload,
+        )
+
     def _request_json(self, path: str, payload: dict[str, object] | None = None) -> object:
         request = Request(
             f"{self.base_url}{path}",
@@ -232,9 +312,11 @@ class HttpPrReviewAnalysisHandoffClient:
             with urlopen(request, timeout=self.timeout_seconds) as response:
                 raw_body = response.read().decode("utf-8")
         except HTTPError as error:
-            if payload is None and error.code in {400, 404, 409}:
+            if payload is None and error.code == 409:
+                raise PrReviewAnalysisStaleError("PR Review analysis input is stale") from error
+            if error.code in {400, 404, 409}:
                 raise PrReviewAnalysisInputError(
-                    "PR Review analysis input is unavailable"
+                    "PR Review analysis handoff rejected the request"
                 ) from error
             raise InfrastructureError("PR Review analysis handoff failed") from error
         except (OSError, TimeoutError, URLError) as error:
@@ -281,7 +363,7 @@ class OpenAiPrReviewAnalysisClient:
         except _openai_retryable_errors() as error:
             raise InfrastructureError("OpenAI PR Review analysis retryable failure") from error
         except Exception as error:
-            raise PrReviewAnalysisOutputError("OpenAI PR Review analysis failed") from error
+            raise PrReviewAnalysisProviderError("OpenAI PR Review analysis failed") from error
 
         output_text = _extract_response_text(response)
         try:
