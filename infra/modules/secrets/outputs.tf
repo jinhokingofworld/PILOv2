@@ -18,6 +18,19 @@ output "app_server_ecs_secrets" {
   )
 }
 
+output "github_sync_worker_ecs_secrets" {
+  value = merge(
+    {
+      for name in local.app_server_ecs_secret_names :
+      name => aws_secretsmanager_secret.this["app-server/${name}"].arn
+    },
+    {
+      for name in local.shared_ecs_secret_names :
+      name => aws_secretsmanager_secret.this["shared/${name}"].arn
+    },
+  )
+}
+
 output "realtime_server_ecs_secrets" {
   value = {
     for name in local.realtime_server_ecs_secret_names :

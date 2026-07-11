@@ -293,7 +293,7 @@ module "ecs" {
         SQS_GITHUB_WEBHOOKS_QUEUE_URL  = module.sqs.github_webhooks_queue_url
         SQS_GITHUB_SYNC_JOBS_QUEUE_URL = module.sqs.github_sync_jobs_queue_url
       }
-      secrets = module.secrets.app_server_ecs_secrets
+      secrets = module.secrets.github_sync_worker_ecs_secrets
     }
   }
 }
