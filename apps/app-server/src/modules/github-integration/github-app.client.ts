@@ -113,6 +113,12 @@ export interface GithubProjectV2LookupRequest
   projectNodeId: string;
 }
 
+export interface GithubProjectV2ItemLookupRequest
+  extends GithubAppInstallationTokenRequest,
+    GithubProjectV2UserAccessTokenRequest {
+  projectItemNodeId: string;
+}
+
 export type GithubProjectV2PermissionLevel = "ADMIN" | "WRITE" | "READ";
 
 export interface GithubProjectV2PermissionLookupRequest {
@@ -355,6 +361,13 @@ export interface GithubProjectV2ItemApiItem {
   updatedAt: string | null;
   fieldValues: GithubProjectV2ItemFieldValueApiItem[];
   raw: Record<string, unknown>;
+}
+
+export interface GithubProjectV2ItemReconcileApiItem {
+  item: GithubProjectV2ItemApiItem;
+  issue: GithubIssueApiItem | null;
+  pullRequest: GithubPullRequestApiItem | null;
+  repositoryNodeId: string | null;
 }
 
 interface GithubInstallationApiPayload {
@@ -803,6 +816,123 @@ const GITHUB_PROJECT_V2_ITEMS_QUERY = `
                 endCursor
               }
             }
+          }
+          pageInfo {
+            hasNextPage
+            endCursor
+          }
+        }
+      }
+    }
+  }
+`;
+const GITHUB_PROJECT_V2_ITEM_LOOKUP_QUERY = `
+  query PiloProjectV2Item($itemId: ID!) {
+    node(id: $itemId) {
+      ... on ProjectV2Item {
+        id
+        databaseId
+        type
+        isArchived
+        createdAt
+        updatedAt
+        content {
+          __typename
+          ... on Issue {
+            id
+            databaseId
+            number
+            title
+            body
+            state
+            stateReason
+            url
+            author {
+              login
+              avatarUrl
+            }
+            labels(first: 100) {
+              nodes {
+                id
+                name
+                color
+                description
+              }
+            }
+            assignees(first: 100) {
+              nodes {
+                login
+                avatarUrl
+              }
+            }
+            milestone {
+              id
+              title
+              description
+              dueOn
+              createdAt
+              updatedAt
+            }
+            createdAt
+            updatedAt
+            closedAt
+            repository {
+              id
+            }
+          }
+          ... on PullRequest {
+            id
+            databaseId
+            number
+            title
+            body
+            state
+            url
+            author {
+              login
+              avatarUrl
+            }
+            headRefName
+            headRefOid
+            headRepository {
+              name
+              nameWithOwner
+              owner {
+                login
+              }
+            }
+            baseRefName
+            baseRefOid
+            changedFiles
+            additions
+            deletions
+            commits {
+              totalCount
+            }
+            comments {
+              totalCount
+            }
+            reviews {
+              totalCount
+            }
+            isDraft
+            mergeable
+            createdAt
+            updatedAt
+            closedAt
+            mergedAt
+            repository {
+              id
+            }
+          }
+          ... on DraftIssue {
+            title
+            body
+          }
+        }
+        fieldValues(first: 100) {
+          nodes {
+            ${GITHUB_PROJECT_V2_ITEM_FIELD_VALUE_SELECTION}
           }
           pageInfo {
             hasNextPage
@@ -1442,6 +1572,41 @@ export class GithubAppClient {
     return items;
   }
 
+  async getProjectV2Item(
+    input: GithubProjectV2ItemLookupRequest
+  ): Promise<GithubProjectV2ItemReconcileApiItem | null> {
+    const graphqlAuth = await this.getProjectV2GraphqlAuth(input);
+    const errorMessage = "GitHub ProjectV2 item lookup failed";
+    const data = await this.fetchGraphqlWithToken(
+      graphqlAuth.token,
+      GITHUB_PROJECT_V2_ITEM_LOOKUP_QUERY,
+      { itemId: input.projectItemNodeId },
+      errorMessage,
+      {
+        tokenSource: graphqlAuth.source,
+        accountType: graphqlAuth.accountType
+      }
+    );
+    if (this.toObject(data).node === null) {
+      return null;
+    }
+
+    const node = this.readProjectV2ItemNode(data, errorMessage);
+    const itemId = this.readString(node.id, errorMessage);
+    const fieldValuePage = this.readProjectV2ItemFieldValuePage(node, errorMessage);
+    const remainingFieldValues = await this.listRemainingProjectV2ItemFieldValues(
+      graphqlAuth,
+      itemId,
+      fieldValuePage.endCursor,
+      fieldValuePage.hasNextPage
+    );
+
+    return this.mapProjectV2ItemReconcile(
+      node,
+      [...fieldValuePage.nodes, ...remainingFieldValues]
+    );
+  }
+
   async updateProjectV2ItemStatus(
     input: GithubProjectV2ItemStatusUpdateRequest
   ): Promise<void> {
@@ -1823,7 +1988,10 @@ export class GithubAppClient {
   }
 
   private async getProjectV2GraphqlAuth(
-    input: GithubProjectV2LookupRequest | GithubProjectV2DiscoveryRequest
+    input:
+      | GithubProjectV2LookupRequest
+      | GithubProjectV2ItemLookupRequest
+      | GithubProjectV2DiscoveryRequest
   ): Promise<GithubProjectV2GraphqlAuth> {
     if (input.userAccessToken) {
       return {
@@ -2438,6 +2606,153 @@ export class GithubAppClient {
       fieldValues,
       raw: item
     };
+  }
+
+  private mapProjectV2ItemReconcile(
+    item: Record<string, unknown>,
+    fieldValues: GithubProjectV2ItemFieldValueApiItem[]
+  ): GithubProjectV2ItemReconcileApiItem {
+    const content = this.toObject(item.content);
+
+    return {
+      item: this.mapProjectV2Item(item, fieldValues),
+      issue:
+        content.__typename === "Issue"
+          ? this.mapProjectV2ItemIssue(content)
+          : null,
+      pullRequest:
+        content.__typename === "PullRequest"
+          ? this.mapProjectV2ItemPullRequest(content)
+          : null,
+      repositoryNodeId: this.toNullableString(this.toObject(content.repository).id)
+    };
+  }
+
+  private mapProjectV2ItemIssue(
+    content: Record<string, unknown>
+  ): GithubIssueApiItem | null {
+    const id = this.toNullableNumber(content.databaseId);
+    const nodeId = this.toNullableString(content.id);
+    const number = this.toNullableNumber(content.number);
+    const title = this.toNullableString(content.title);
+    const state = this.mapProjectV2ItemIssueState(content.state);
+    const htmlUrl = this.toNullableString(content.url);
+    if (id === null || !nodeId || number === null || !title || !state || !htmlUrl) {
+      return null;
+    }
+
+    const author = this.toObject(content.author);
+    return {
+      id,
+      node_id: nodeId,
+      number,
+      title,
+      body: this.toNullableString(content.body),
+      state,
+      state_reason: this.toNullableString(content.stateReason),
+      user: {
+        login: this.toNullableString(author.login),
+        avatar_url: this.toNullableString(author.avatarUrl)
+      },
+      html_url: htmlUrl,
+      labels: this.readProjectV2ItemSourceNodes(content.labels),
+      assignees: this.readProjectV2ItemSourceNodes(content.assignees),
+      milestone: this.isRecord(content.milestone) ? content.milestone : null,
+      created_at: this.toNullableString(content.createdAt),
+      updated_at: this.toNullableString(content.updatedAt),
+      closed_at: this.toNullableString(content.closedAt)
+    };
+  }
+
+  private mapProjectV2ItemPullRequest(
+    content: Record<string, unknown>
+  ): GithubPullRequestApiItem | null {
+    const id = this.toNullableNumber(content.databaseId);
+    const nodeId = this.toNullableString(content.id);
+    const number = this.toNullableNumber(content.number);
+    const title = this.toNullableString(content.title);
+    const htmlUrl = this.toNullableString(content.url);
+    if (id === null || !nodeId || number === null || !title || !htmlUrl) {
+      return null;
+    }
+
+    const author = this.toObject(content.author);
+    const headRepository = this.toObject(content.headRepository);
+    const headRepositoryOwner = this.toObject(headRepository.owner);
+    return {
+      id,
+      node_id: nodeId,
+      number,
+      title,
+      body: this.toNullableString(content.body),
+      user: {
+        login: this.toNullableString(author.login),
+        avatar_url: this.toNullableString(author.avatarUrl)
+      },
+      head: {
+        ref: this.toNullableString(content.headRefName),
+        sha: this.toNullableString(content.headRefOid),
+        repo: {
+          name: this.toNullableString(headRepository.name),
+          full_name: this.toNullableString(headRepository.nameWithOwner),
+          owner: {
+            login: this.toNullableString(headRepositoryOwner.login)
+          }
+        }
+      },
+      base: {
+        ref: this.toNullableString(content.baseRefName),
+        sha: this.toNullableString(content.baseRefOid)
+      },
+      changed_files: this.toNullableNumber(content.changedFiles) ?? 0,
+      additions: this.toNullableNumber(content.additions) ?? 0,
+      deletions: this.toNullableNumber(content.deletions) ?? 0,
+      commits: this.toNullableNumber(this.toObject(content.commits).totalCount) ?? 0,
+      comments: this.toNullableNumber(this.toObject(content.comments).totalCount) ?? 0,
+      review_comments:
+        this.toNullableNumber(this.toObject(content.reviews).totalCount) ?? 0,
+      html_url: htmlUrl,
+      created_at: this.toNullableString(content.createdAt),
+      updated_at: this.toNullableString(content.updatedAt),
+      closed_at: this.toNullableString(content.closedAt),
+      merged_at: this.toNullableString(content.mergedAt),
+      draft: this.toBoolean(content.isDraft),
+      mergeable: this.mapProjectV2ItemPullRequestMergeable(content.mergeable),
+      state: this.toNullableString(content.state)?.toLowerCase()
+    };
+  }
+
+  private readProjectV2ItemSourceNodes(value: unknown): Record<string, unknown>[] {
+    const nodes = this.toObject(value).nodes;
+    return Array.isArray(nodes)
+      ? nodes.filter((node): node is Record<string, unknown> => this.isRecord(node))
+      : [];
+  }
+
+  private mapProjectV2ItemIssueState(
+    value: unknown
+  ): GithubIssueApiItem["state"] | null {
+    if (value === "OPEN") {
+      return "open";
+    }
+
+    if (value === "CLOSED") {
+      return "closed";
+    }
+
+    return null;
+  }
+
+  private mapProjectV2ItemPullRequestMergeable(value: unknown): boolean | null {
+    if (value === "MERGEABLE") {
+      return true;
+    }
+
+    if (value === "CONFLICTING") {
+      return false;
+    }
+
+    return null;
   }
 
   private readProjectV2ItemFieldValues(

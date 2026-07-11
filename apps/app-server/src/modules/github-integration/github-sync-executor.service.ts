@@ -12,6 +12,7 @@ import {
   type GithubProjectV2FieldOptionApiItem,
   type GithubProjectV2ItemApiItem,
   type GithubProjectV2ItemFieldValueApiItem,
+  type GithubProjectV2ItemReconcileApiItem,
   type GithubPullRequestApiItem
 } from "./github-app.client";
 import type { GithubAppRuntimeConfig } from "./github-integration-config.service";
@@ -69,6 +70,10 @@ interface GithubProjectV2FieldOptionSyncRow extends QueryResultRow {
 interface GithubProjectV2ContentSyncRow extends QueryResultRow {
   id: string;
   repository_id: string;
+}
+
+interface GithubRepositoryNodeSyncRow extends QueryResultRow {
+  id: string;
 }
 
 interface GithubProjectV2ItemSyncRow extends QueryResultRow {
@@ -186,6 +191,59 @@ export class GithubSyncExecutorService {
     context: GithubSyncRunContext
   ): Promise<GithubSyncRunSummary> {
     return (await this.syncGithubProjectV2Discovery(context)).summary;
+  }
+
+  async reconcileGithubProjectV2WebhookItem(
+    context: GithubSyncRunContext,
+    item: GithubProjectV2ItemReconcileApiItem
+  ): Promise<void> {
+    const repository = item.repositoryNodeId
+      ? await this.findGithubRepositoryByNodeId(context.workspaceId, item.repositoryNodeId)
+      : null;
+    if (repository && item.issue) {
+      await this.upsertGithubIssue(context.workspaceId, repository.id, item.issue);
+    }
+    if (repository && item.pullRequest) {
+      await this.upsertGithubPullRequest(
+        context.workspaceId,
+        repository.id,
+        item.pullRequest
+      );
+    }
+
+    const row = await this.upsertGithubProjectV2Item(context, item.item);
+    if (row) {
+      const projectV2 = this.requireGithubSyncProjectV2(context);
+      for (const fieldValue of item.item.fieldValues) {
+        await this.upsertGithubProjectV2ItemFieldValue(
+          projectV2.id,
+          row.id,
+          fieldValue
+        );
+      }
+    }
+
+    await this.hydrateExistingBoardsForGithubProjectV2(context);
+  }
+
+  async archiveGithubProjectV2WebhookItem(
+    context: GithubSyncRunContext,
+    itemNodeId: string
+  ): Promise<void> {
+    const projectV2 = this.requireGithubSyncProjectV2(context);
+    await this.database.execute(
+      `
+        UPDATE github_project_v2_items
+        SET is_archived = true,
+            last_synced_at = now(),
+            updated_at = now()
+        WHERE workspace_id = $1
+          AND project_v2_id = $2
+          AND github_project_item_node_id = $3
+      `,
+      [context.workspaceId, projectV2.id, itemNodeId]
+    );
+    await this.hydrateExistingBoardsForGithubProjectV2(context);
   }
 
   private async syncGithubFull(
@@ -1138,6 +1196,21 @@ export class GithubSyncExecutorService {
       `
         SELECT id, repository_id
         FROM github_issues
+        WHERE workspace_id = $1
+          AND github_node_id = $2
+      `,
+      [workspaceId, githubNodeId]
+    );
+  }
+
+  private async findGithubRepositoryByNodeId(
+    workspaceId: string,
+    githubNodeId: string
+  ): Promise<GithubRepositoryNodeSyncRow | null> {
+    return this.database.queryOne<GithubRepositoryNodeSyncRow>(
+      `
+        SELECT id
+        FROM github_repositories
         WHERE workspace_id = $1
           AND github_node_id = $2
       `,

@@ -3,6 +3,8 @@ import { createHmac } from "node:crypto";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
+const { GithubAppClient } = require("../../dist/modules/github-integration/github-app.client.js");
+const { GithubSyncExecutorService } = require("../../dist/modules/github-integration/github-sync-executor.service.js");
 const { GithubWebhookService } = require("../../dist/modules/github-integration/github-webhook.service.js");
 
 const webhookSecret = "test-webhook-secret";
@@ -175,6 +177,266 @@ async function receive(service, deliveryId, body) {
     rawBody,
     body
   });
+}
+
+function projectV2ItemNode() {
+  return {
+    __typename: "ProjectV2Item",
+    id: context.projectItemNodeId,
+    databaseId: 9001,
+    type: "ISSUE",
+    isArchived: false,
+    createdAt: "2026-07-11T09:00:00.000Z",
+    updatedAt: "2026-07-11T09:00:00.000Z",
+    content: {
+      __typename: "Issue",
+      id: "I_kwDOExample",
+      databaseId: 609,
+      number: 24,
+      title: "Targeted webhook reconcile",
+      body: "Keep this cache fresh",
+      state: "OPEN",
+      stateReason: null,
+      url: "https://github.com/example/repo/issues/24",
+      author: {
+        login: "octocat",
+        avatarUrl: "https://avatars.example.test/octocat"
+      },
+      labels: { nodes: [] },
+      assignees: { nodes: [] },
+      milestone: null,
+      createdAt: "2026-07-10T09:00:00.000Z",
+      updatedAt: "2026-07-11T09:00:00.000Z",
+      closedAt: null,
+      repository: { id: "R_kgDOExample" }
+    },
+    fieldValues: {
+      nodes: [],
+      pageInfo: {
+        hasNextPage: true,
+        endCursor: "field-value-cursor-1"
+      }
+    }
+  };
+}
+
+class ReconcileFakeDatabase {
+  constructor() {
+    this.queries = [];
+  }
+
+  async queryOne(text, values = []) {
+    this.queries.push({ method: "queryOne", text, values });
+
+    if (/FROM github_repositories/i.test(text)) {
+      assert.deepEqual(values, ["workspace-1", "R_kgDOExample"]);
+      return { id: "repository-1" };
+    }
+
+    if (/INSERT INTO github_issues/i.test(text)) {
+      assert.deepEqual(values.slice(0, 5), ["workspace-1", "repository-1", 609, "I_kwDOExample", 24]);
+      return { id: "issue-1", created: false };
+    }
+
+    if (/FROM github_issues/i.test(text)) {
+      assert.deepEqual(values, ["workspace-1", "I_kwDOExample"]);
+      return { id: "issue-1", repository_id: "repository-1" };
+    }
+
+    if (/INSERT INTO github_project_v2_items/i.test(text)) {
+      assert.deepEqual(values.slice(0, 8), [
+        "workspace-1",
+        "project-1",
+        context.projectItemNodeId,
+        9001,
+        "ISSUE",
+        "issue-1",
+        null,
+        false
+      ]);
+      return { id: "project-item-1", created: false };
+    }
+
+    if (/hydrate_pilo_board_from_github/i.test(text)) {
+      assert.deepEqual(values, ["project-1", "repository-1"]);
+      return { board_id: "board-1" };
+    }
+
+    throw new Error(`Unexpected query: ${text}`);
+  }
+
+  async query(text, values = []) {
+    this.queries.push({ method: "query", text, values });
+    assert.match(text, /FROM boards/i);
+    assert.deepEqual(values, ["workspace-1", "project-1"]);
+    return [{ project_v2_id: "project-1", repository_id: "repository-1" }];
+  }
+
+  async execute(text, values = []) {
+    this.queries.push({ method: "execute", text, values });
+    if (/INSERT INTO github_project_v2_repositories/i.test(text)) {
+      assert.deepEqual(values, ["project-1", "repository-1"]);
+      return { rowCount: 1 };
+    }
+
+    if (/UPDATE github_project_v2_items/i.test(text)) {
+      assert.deepEqual(values, ["workspace-1", "project-1", context.projectItemNodeId]);
+      return { rowCount: 1 };
+    }
+
+    throw new Error(`Unexpected execute: ${text}`);
+  }
+}
+
+function reconcileContext() {
+  return {
+    currentUserId: "user-1",
+    workspaceId: "workspace-1",
+    installation: {
+      id: "installation-1",
+      workspace_id: "workspace-1",
+      github_installation_id: 123,
+      account_login: "example",
+      account_type: "Organization"
+    },
+    repository: null,
+    projectV2: {
+      id: "project-1",
+      workspace_id: "workspace-1",
+      installation_id: "installation-1",
+      github_project_node_id: context.projectV2NodeId
+    },
+    githubUserAccessToken: null,
+    config: {
+      appId: "12345",
+      privateKey: "unused",
+      now: () => new Date("2026-07-11T09:00:00.000Z")
+    }
+  };
+}
+
+let fetchedTargetItem;
+{
+  const originalFetch = globalThis.fetch;
+  const graphqlCalls = [];
+  globalThis.fetch = async (url, options = {}) => {
+    assert.equal(url.toString(), "https://api.github.com/graphql");
+    assert.equal(options.headers?.Authorization, "Bearer user-oauth-token");
+    const body = JSON.parse(options.body);
+    graphqlCalls.push(body);
+    if (body.query.includes("query PiloProjectV2ItemFieldValues(")) {
+      assert.deepEqual(body.variables, {
+        itemId: context.projectItemNodeId,
+        cursor: "field-value-cursor-1"
+      });
+      return {
+        ok: true,
+        async json() {
+          return {
+            data: {
+              node: {
+                __typename: "ProjectV2Item",
+                fieldValues: {
+                  nodes: [],
+                  pageInfo: {
+                    hasNextPage: false,
+                    endCursor: null
+                  }
+                }
+              }
+            }
+          };
+        }
+      };
+    }
+
+    return {
+      ok: true,
+      async json() {
+        return { data: { node: projectV2ItemNode() } };
+      }
+    };
+  };
+
+  try {
+    fetchedTargetItem = await new GithubAppClient().getProjectV2Item({
+      installationId: 123,
+      appId: "12345",
+      privateKey: "unused",
+      projectItemNodeId: context.projectItemNodeId,
+      userAccessToken: "user-oauth-token",
+      accountType: "Organization"
+    });
+
+    assert.equal(graphqlCalls[0].variables.itemId, context.projectItemNodeId);
+    assert.match(graphqlCalls[0].query, /on ProjectV2Item/);
+    assert.doesNotMatch(graphqlCalls[0].query, /items\(first: 100/);
+    assert.deepEqual(graphqlCalls[1].variables, {
+      itemId: context.projectItemNodeId,
+      cursor: "field-value-cursor-1"
+    });
+    assert.equal(fetchedTargetItem.item.id, context.projectItemNodeId);
+    assert.equal(fetchedTargetItem.repositoryNodeId, "R_kgDOExample");
+    assert.equal(fetchedTargetItem.issue.id, 609);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
+{
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({
+    ok: true,
+    async json() {
+      return { data: { node: null } };
+    }
+  });
+
+  try {
+    const item = await new GithubAppClient().getProjectV2Item({
+      installationId: 123,
+      appId: "12345",
+      privateKey: "unused",
+      projectItemNodeId: context.projectItemNodeId,
+      userAccessToken: "user-oauth-token",
+      accountType: "Organization"
+    });
+    assert.equal(item, null, "a missing GitHub node must not become a provider error");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
+{
+  const database = new ReconcileFakeDatabase();
+  const executor = new GithubSyncExecutorService(database, {});
+
+  await executor.reconcileGithubProjectV2WebhookItem(reconcileContext(), fetchedTargetItem);
+
+  const sql = database.queries;
+  assert.ok(sql.some(({ text }) => /INSERT INTO github_issues/i.test(text)));
+  assert.ok(sql.some(({ text }) => /INSERT INTO github_project_v2_items/i.test(text)));
+  assert.ok(sql.some(({ text }) => /hydrate_pilo_board_from_github/i.test(text)));
+}
+
+{
+  const database = new ReconcileFakeDatabase();
+  const executor = new GithubSyncExecutorService(database, {});
+
+  await executor.archiveGithubProjectV2WebhookItem(
+    reconcileContext(),
+    context.projectItemNodeId
+  );
+
+  const sql = database.queries;
+  const archiveIndex = sql.findIndex(({ text }) =>
+    /UPDATE github_project_v2_items\s+SET is_archived\s*=\s*true/i.test(text)
+  );
+  const hydrationIndex = sql.findIndex(({ text }) =>
+    /hydrate_pilo_board_from_github/i.test(text)
+  );
+  assert.ok(archiveIndex >= 0, "missing target must archive only the matching item row");
+  assert.ok(archiveIndex < hydrationIndex, "archive must happen before Board hydration");
 }
 
 {
