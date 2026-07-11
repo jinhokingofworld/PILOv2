@@ -9,8 +9,8 @@ CANVAS_AGENT_ACTIONS = {
     "find_shapes",
     "select_shapes",
     "focus_viewport",
+    "connect_shapes",
     "create_draft",
-    "create_code_block",
     "finish",
 }
 TERMINAL_RUN_STATUSES = {"completed", "failed", "cancelled", "expired", "draft_ready"}

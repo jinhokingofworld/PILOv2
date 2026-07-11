@@ -17,7 +17,6 @@ import type {
   CanvasAgentDraftApplyPayload,
   CanvasAgentDraftPayload,
   CanvasAgentDraftRow,
-  CanvasAgentActionName,
   CanvasAgentPlannedAction,
   CanvasAgentProgressPayload,
   CanvasAgentRunDetailPayload,
@@ -31,123 +30,6 @@ import { validateApplyClientOperationId, validateCanvasAgentRunRequest } from ".
 
 const ACTION_POLL_INTERVAL_MS = 400;
 const MAX_CANVAS_AGENT_STEPS = 3;
-const EXTERNAL_DOMAIN_TERMS = [
-  "calendar",
-  "github",
-  "issue",
-  "meeting",
-  "pr",
-  "pull request",
-  "pull-request",
-  "repo",
-  "repository",
-  "미팅",
-  "보드",
-  "이슈",
-  "일정",
-  "캘린더",
-  "풀리퀘스트",
-  "회의",
-  "회의록"
-];
-const EXTERNAL_DOMAIN_ACTION_TERMS = [
-  "가져와",
-  "가져오기",
-  "긁어와",
-  "등록",
-  "목록",
-  "불러와",
-  "불러오기",
-  "생성",
-  "수정",
-  "연동",
-  "예약",
-  "조회",
-  "추가",
-  "호출"
-];
-const FIND_KEYWORDS = [
-  "검색",
-  "강조",
-  "보여줘",
-  "보여",
-  "어딨어",
-  "어디",
-  "위치",
-  "찾아줘",
-  "찾아",
-  "찾",
-  "하이라이트"
-];
-const FOCUS_KEYWORDS = [
-  "가운데로",
-  "가줘",
-  "보여줘",
-  "보여",
-  "어딨어",
-  "어디",
-  "위치",
-  "이동",
-  "줌인",
-  "포커스",
-  "확대"
-];
-const SELECT_KEYWORDS = [
-  "골라줘",
-  "선택",
-  "잡아줘",
-  "체크",
-  "하이라이트",
-  "강조"
-];
-const ORGANIZE_KEYWORDS = [
-  "그룹",
-  "구조",
-  "깔끔",
-  "묶어",
-  "배열",
-  "보기 좋게",
-  "정돈",
-  "정렬",
-  "정리",
-  "프레임"
-];
-const DRAFT_HINT_KEYWORDS = [
-  "구조도",
-  "그려",
-  "다이어그램",
-  "리디자인",
-  "만들어",
-  "사용자 여정",
-  "설계",
-  "와이어프레임",
-  "초안",
-  "플로우",
-  "흐름"
-];
-const CODE_HINT_KEYWORDS = [
-  "api 예시",
-  "component",
-  "interface",
-  "jwt",
-  "react",
-  "type",
-  "구현 예시",
-  "샘플 코드",
-  "예시 코드",
-  "인터페이스",
-  "코드",
-  "컴포넌트",
-  "타입",
-  "함수"
-];
-const SEARCH_QUERY_SUFFIX_PATTERN =
-  /(?:\s*(?:관련|있는\s*곳|있는\s*곳으로|쪽으로|메모들|도형들?|내용|카드들?|노트들|프레임|그룹|블록|툴|도구|기능|위치)\s*)+$/;
-const SEARCH_QUERY_CANVAS_EXISTING_PREFIX_PATTERN =
-  /^(?:캔버스(?:에|에서|위에|위)?\s*)?(?:생성된|있는|이미\s*만든|만들어둔|만든|배치된|작성한|올려둔|그려둔|추가한)\s+/;
-const SEARCH_QUERY_PARTICLE_PATTERN = /\s*(?:을|를|이|가|은|는|좀|한번|으로|로)\s*$/;
-const CANVAS_ONLY_REFUSAL_MESSAGE =
-  "Canvas AI는 캔버스 안의 도형 찾기, 선택, 화면 이동, 정리 초안, 코드 블록 초안만 도와줄 수 있습니다. Calendar, Issue, PR, Meeting 같은 외부 도메인 데이터는 조회하거나 캔버스에 표현하지 않습니다.";
 
 @Injectable()
 export class CanvasAgentService implements OnModuleDestroy, OnModuleInit {
@@ -354,7 +236,20 @@ export class CanvasAgentService implements OnModuleDestroy, OnModuleInit {
           });
           resourceRefs = [...resourceRefs, draft.id];
         }
-        const output = { progress: result.progress, summary: result.summary };
+        let createdShapeIds: string[] = [];
+        let latestOpSeq: number | null = null;
+        if (result.shapeBatch) {
+          const batch = await this.canvasService.syncShapesBatch(
+            claimed.run.requested_by_user_id,
+            claimed.run.workspace_id,
+            claimed.run.canvas_id,
+            result.shapeBatch
+          );
+          createdShapeIds = batch.shapes.map((shape) => shape.id);
+          latestOpSeq = Math.max(0, ...batch.shapes.map((shape) => shape.opSeq ?? 0));
+          resourceRefs = [...resourceRefs, ...createdShapeIds];
+        }
+        const output = { progress: result.progress, summary: result.summary, createdShapeIds, latestOpSeq };
         await this.repository.completeStep(claimed.step.id, output, resourceRefs);
 
         if (result.draftSpec) {
@@ -400,7 +295,6 @@ export class CanvasAgentService implements OnModuleDestroy, OnModuleInit {
     toolHelpMode = false
   ): CanvasAgentPlannedAction | null {
     const normalized = prompt.trim();
-    const selectedIds = selectedShapeIds.filter((id) => Boolean(id.trim())).slice(0, 40);
     const toolResolution = toolHelpMode ? resolveCanvasAgentToolTarget(normalized) : null;
     if (toolHelpMode && !toolResolution) {
       const message = "아직 알고 있는 Canvas 기능과 맞지 않습니다. 메모, 도형, 색상, 휴지통처럼 툴바에 있는 기능 이름으로 물어봐 주세요.";
@@ -426,110 +320,31 @@ export class CanvasAgentService implements OnModuleDestroy, OnModuleInit {
         message: toolResolution.tool.message
       };
     }
-
-    if (this.isExternalDomainRequest(normalized)) {
+    if (!toolHelpMode && selectedShapeIds.length === 2 && this.isConnectPrompt(normalized)) {
+      const connectionKind = this.isLineConnectPrompt(normalized) ? "line" : "arrow";
+      const message = connectionKind === "line"
+        ? "선택한 두 도형을 선으로 연결할게요."
+        : "선택한 두 도형을 화살표로 연결할게요.";
       return {
-        actionName: "finish",
-        input: { summary: CANVAS_ONLY_REFUSAL_MESSAGE },
-        message: CANVAS_ONLY_REFUSAL_MESSAGE
+        actionName: "connect_shapes",
+        input: {
+          fromShapeId: selectedShapeIds[0],
+          toShapeId: selectedShapeIds[1],
+          connectionKind
+        },
+        message
       };
-    }
-
-    if (selectedIds.length && this.hasAnyKeyword(normalized, ORGANIZE_KEYWORDS)) {
-      return {
-        actionName: "create_draft",
-        input: { kind: "organize", sourceShapeIds: selectedIds },
-        message: "선택한 도형을 정리하는 Canvas AI 초안을 준비하고 있습니다."
-      };
-    }
-
-    if (selectedIds.length && this.hasAnyKeyword(normalized, FOCUS_KEYWORDS)) {
-      return {
-        actionName: "focus_viewport",
-        input: { shapeIds: selectedIds },
-        message: "선택한 도형 위치로 이동하고 있습니다."
-      };
-    }
-
-    if (selectedIds.length && this.hasAnyKeyword(normalized, SELECT_KEYWORDS)) {
-      return {
-        actionName: "select_shapes",
-        input: { shapeIds: selectedIds },
-        message: "선택한 도형을 강조하고 있습니다."
-      };
-    }
-
-    const query = this.findSearchQuery(normalized);
-    if (query) {
-      const select = this.hasAnyKeyword(normalized, SELECT_KEYWORDS);
-      const focus = this.hasAnyKeyword(normalized, FOCUS_KEYWORDS);
-      if (select && !focus) {
-        return {
-          actionName: "select_shapes",
-          input: { query },
-          message: `“${query}” 관련 도형을 선택하고 있습니다.`
-        };
-      }
-
-      return {
-        actionName: "find_shapes",
-        input: { query, continuePlanning: true, focusResult: focus },
-        message: `“${query}” 관련 도형을 찾고 있습니다.`
-      };
-    }
-
-    if (this.hasAnyKeyword(normalized, DRAFT_HINT_KEYWORDS)
-      || this.hasAnyKeyword(normalized, CODE_HINT_KEYWORDS)) {
-      return null;
     }
 
     return null;
   }
 
-  private isExternalDomainRequest(prompt: string): boolean {
-    const lowerPrompt = prompt.toLowerCase();
-    return this.hasAnyKeyword(lowerPrompt, EXTERNAL_DOMAIN_TERMS)
-      && this.hasAnyKeyword(lowerPrompt, EXTERNAL_DOMAIN_ACTION_TERMS);
+  private isConnectPrompt(value: string): boolean {
+    return /(연결|이어|이어서|화살표|커넥터|선으로|선으?로\s*이어)/.test(value);
   }
 
-  private hasAnyKeyword(prompt: string, keywords: string[]): boolean {
-    return keywords.some((keyword) => prompt.includes(keyword));
-  }
-
-  private findSearchQuery(prompt: string): string | null {
-    if (!this.hasAnyKeyword(prompt, [...FIND_KEYWORDS, ...FOCUS_KEYWORDS, ...SELECT_KEYWORDS])) return null;
-    const hit = this.firstKeywordIndex(prompt, [...FIND_KEYWORDS, ...FOCUS_KEYWORDS, ...SELECT_KEYWORDS]);
-    if (!hit || hit.index <= 0) return null;
-
-    let query = prompt.slice(0, hit.index).trim();
-    for (let guard = 0; guard < 4; guard += 1) {
-      const withoutExistingPrefix = query
-        .replace(SEARCH_QUERY_CANVAS_EXISTING_PREFIX_PATTERN, "")
-        .trim();
-      const withoutSuffix = withoutExistingPrefix
-        .replace(SEARCH_QUERY_SUFFIX_PATTERN, "")
-        .replace(SEARCH_QUERY_PARTICLE_PATTERN, "")
-        .trim();
-      const next = withoutSuffix || withoutExistingPrefix;
-      if (!next) break;
-      if (next === query) break;
-      query = next;
-    }
-    return query && query.length <= 120 ? query : null;
-  }
-
-  private firstKeywordIndex(
-    prompt: string,
-    keywords: string[]
-  ): { index: number; keyword: string } | null {
-    return keywords.reduce<{ index: number; keyword: string } | null>((best, keyword) => {
-      const index = prompt.indexOf(keyword);
-      if (index < 0) return best;
-      if (!best || index < best.index || (index === best.index && keyword.length > best.keyword.length)) {
-        return { index, keyword };
-      }
-      return best;
-    }, null);
+  private isLineConnectPrompt(value: string): boolean {
+    return /(선으로|선으?로\s*이어|연결선)/.test(value) && !/(화살표)/.test(value);
   }
 
   private async assertDraftSourcesCurrent(canvasId: string, draft: CanvasAgentDraftRow): Promise<void> {

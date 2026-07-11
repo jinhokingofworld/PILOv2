@@ -4,10 +4,17 @@ import { useValue } from "@tldraw/state-react";
 import type { Editor, TLShapeId } from "tldraw";
 import { Bot } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { dispatchCanvasAgentToolTarget } from "@/features/canvas/agent/canvas-agent-tool-targets";
 import type {
   CanvasAgentDraft,
   CanvasAgentProgress,
 } from "@/features/canvas/api/canvas-agent-types";
+import {
+  getCanvasAgentDraftNodePagePosition,
+  getCanvasAgentDraftStepMessage,
+  getCanvasAgentDraftStepPointerScreenPoint,
+  useCanvasAgentToolStepPlayback,
+} from "./canvas-agent-tool-step-playback";
 
 export function CanvasAgentVisualOverlay({
   draft,
@@ -23,31 +30,56 @@ export function CanvasAgentVisualOverlay({
     () => editor?.getCamera() ?? { x: 0, y: 0, z: 1 },
     [editor],
   );
-  const toolRect = useToolTargetRect(progress?.toolTarget ?? null);
-  const targetPointer = editor ? getPointerScreenPoint(editor, progress, toolRect) : null;
+  const playback = useCanvasAgentToolStepPlayback(draft);
+  const activeToolTarget = playback.activeStep
+    ? playback.activeStep.kind === "tool"
+      ? playback.activeStep.toolTarget ?? null
+      : null
+    : progress?.toolTarget ?? null;
+  const activeToolTargetLabel = playback.activeStep
+    ? playback.activeStep.kind === "tool"
+      ? playback.activeStep.toolTargetLabel ?? null
+      : null
+    : progress?.toolTargetLabel ?? null;
+  const toolRect = useToolTargetRect(activeToolTarget);
+
+  useEffect(() => {
+    if (playback.activeStep?.kind === "tool" && playback.activeStep.toolTarget) {
+      dispatchCanvasAgentToolTarget(playback.activeStep.toolTarget);
+    }
+  }, [playback.activeStep]);
+
+  const nodeMap = new Map(draft?.spec.nodes.map((node) => [node.id, node]) ?? []);
+  const targetPointer = editor
+    ? getCanvasAgentDraftStepPointerScreenPoint(editor, playback.activeStep, nodeMap, toolRect)
+      ?? getPointerScreenPoint(editor, progress, toolRect)
+    : null;
   const pointer = useAnimatedPointerPoint(targetPointer);
+  const visibleNodeIds = playback.visibleNodeIds;
+  const message = getCanvasAgentDraftStepMessage(playback.activeStep) ?? progress?.message ?? null;
 
   if (!editor) return null;
-
-  const frame = draft?.spec.nodes.find((node) => node.kind === "frame") ?? null;
 
   return (
     <div className="pointer-events-none fixed inset-0 z-[65] overflow-hidden">
       {draft
-        ? draft.spec.nodes.map((node) => {
-            const pageX = node.kind === "frame" || !frame ? node.x : frame.x + node.x;
-            const pageY = node.kind === "frame" || !frame ? node.y : frame.y + node.y;
+        ? draft.spec.nodes.filter((node) => !visibleNodeIds || visibleNodeIds.has(node.id)).map((node) => {
+            const pagePosition = getCanvasAgentDraftNodePagePosition(node, nodeMap);
+            const pageX = pagePosition.x;
+            const pageY = pagePosition.y;
             const screen = editor.pageToScreen({ x: pageX, y: pageY });
             const width = node.width * camera.z;
             const height = node.height * camera.z;
             const isFrame = node.kind === "frame";
+            const isCircle = node.kind === "circle";
+            const isTriangle = node.kind === "triangle";
 
             return (
               <div
                 className={
                   isFrame
                     ? "absolute rounded-xl border-2 border-dashed border-cyan-500/80 bg-cyan-100/15"
-                    : "absolute overflow-hidden rounded-xl border border-cyan-400/80 bg-cyan-50/90 px-3 py-2 text-slate-800 shadow-lg shadow-cyan-950/10"
+                    : "absolute overflow-hidden border border-cyan-400/80 bg-cyan-50/90 px-3 py-2 text-slate-800 shadow-lg shadow-cyan-950/10"
                 }
                 key={node.id}
                 style={{
@@ -55,12 +87,16 @@ export function CanvasAgentVisualOverlay({
                   top: screen.y,
                   width,
                   height,
+                  borderRadius: isCircle ? "9999px" : isTriangle ? "0.75rem" : "0.75rem",
+                  clipPath: isTriangle ? "polygon(50% 0%, 100% 100%, 0% 100%)" : undefined,
                 }}
               >
                 {isFrame ? (
                   <span className="absolute -top-7 left-0 rounded-full bg-cyan-600 px-2 py-0.5 text-xs font-semibold text-white">
                     AI 초안 · {node.title}
                   </span>
+                ) : node.kind === "text" ? (
+                  <span className="block text-sm font-semibold leading-snug">{node.text ?? node.title}</span>
                 ) : (
                   <>
                     <strong className="block truncate text-sm">{node.title}</strong>
@@ -68,7 +104,7 @@ export function CanvasAgentVisualOverlay({
                       <pre className="mt-1 max-h-32 overflow-hidden whitespace-pre-wrap text-[11px] leading-4 text-slate-600">
                         {node.code}
                       </pre>
-                    ) : node.text ? (
+                    ) : node.text && !isTriangle ? (
                       <span className="mt-1 block line-clamp-3 text-xs text-slate-600">{node.text}</span>
                     ) : null}
                   </>
@@ -87,9 +123,9 @@ export function CanvasAgentVisualOverlay({
             width: toolRect.width + 14,
           }}
         >
-          {progress?.toolTargetLabel ? (
+          {activeToolTargetLabel ? (
             <span className="absolute -top-7 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-cyan-600 px-2 py-0.5 text-xs font-semibold text-white">
-              {progress.toolTargetLabel}
+              {activeToolTargetLabel}
             </span>
           ) : null}
         </div>
@@ -102,9 +138,9 @@ export function CanvasAgentVisualOverlay({
           <Bot className="size-4" />
         </div>
       ) : null}
-      {progress?.message ? (
+      {message ? (
         <div className="absolute left-1/2 top-5 -translate-x-1/2 rounded-full bg-slate-950/90 px-3 py-1.5 text-xs font-medium text-white shadow-lg">
-          {progress.message}
+          {message}
         </div>
       ) : null}
     </div>

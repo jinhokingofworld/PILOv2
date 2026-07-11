@@ -182,6 +182,33 @@ export class CanvasAgentRepository {
     );
   }
 
+  async listShapesForPlacement(
+    canvasId: string,
+    viewport: CanvasAgentRequestContext["viewport"] | null,
+    limit = 400
+  ): Promise<CanvasAgentShapeRow[]> {
+    const centerX = viewport ? viewport.x + viewport.width / 2 : 0;
+    const centerY = viewport ? viewport.y + viewport.height / 2 : 0;
+
+    return this.database.query<CanvasAgentShapeRow>(
+      `
+        SELECT id, title, text_content, shape_type, x, y, width, height, revision, raw_shape
+        FROM canvas_freeform_shapes
+        WHERE canvas_id = $1
+          AND deleted_at IS NULL
+        ORDER BY
+          (
+            ABS((x + COALESCE(width, 180) / 2) - $2)
+            + ABS((y + COALESCE(height, 100) / 2) - $3)
+          ) ASC,
+          updated_at DESC,
+          id ASC
+        LIMIT $4
+      `,
+      [canvasId, centerX, centerY, limit]
+    );
+  }
+
   async createPlannedStep(
     runId: string,
     actionName: CanvasAgentActionName,

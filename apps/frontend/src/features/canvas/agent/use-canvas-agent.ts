@@ -15,7 +15,7 @@ import {
 } from "./canvas-agent-tool-targets";
 
 const ACTIVE_STATUSES = new Set(["queued", "planning", "executing"]);
-const COMPLETED_PROGRESS_HIDE_DELAY_MS = 5000;
+const COMPLETED_PROGRESS_HIDE_DELAY_MS = 8000;
 
 export function useCanvasAgent({
   canvasId,
@@ -74,7 +74,7 @@ export function useCanvasAgent({
             w: progress.targetViewport.width,
             h: progress.targetViewport.height,
           },
-          { animation: { duration: 250 } },
+          { animation: { duration: 500 } },
         );
       }
     },

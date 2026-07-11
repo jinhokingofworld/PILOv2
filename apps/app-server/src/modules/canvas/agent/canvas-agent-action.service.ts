@@ -1,5 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { badRequest } from "../../../common/api-error";
+import type { SyncCanvasShapesBatchRequest } from "../canvas.types";
 import { CanvasAgentDraftService } from "./canvas-agent-draft.service";
 import { CanvasAgentRepository } from "./canvas-agent.repository";
 import { findCanvasAgentToolTarget } from "./canvas-agent-tool-targets";
@@ -16,6 +17,7 @@ export type CanvasAgentActionResult = {
   draftSpec?: CanvasDraftSpec;
   progress: CanvasAgentProgressPayload | null;
   resourceRefs: string[];
+  shapeBatch?: SyncCanvasShapesBatchRequest;
   shouldContinue: boolean;
   summary: string;
 };
@@ -40,10 +42,10 @@ export class CanvasAgentActionService {
         return this.selectShapes(run, step.input_json);
       case "focus_viewport":
         return this.focusViewport(run, step.input_json);
+      case "connect_shapes":
+        return this.connectShapes(run, step);
       case "create_draft":
         return this.createDraft(run, step.input_json, "diagram");
-      case "create_code_block":
-        return this.createDraft(run, step.input_json, "code");
       case "finish":
         const summary = this.readText(step.input_json.summary) || "Canvas AI 작업을 완료했습니다.";
         return {
@@ -143,13 +145,19 @@ export class CanvasAgentActionService {
       run.canvas_id,
       requestedIds.length ? requestedIds : contextShapeIds
     );
-    const kind = input.kind === "organize" ? "organize" : defaultKind;
+    const kind = input.kind === "code" ? "code" : defaultKind;
     const viewport = this.readViewport(run.context_json.viewport);
+    const occupiedShapes = await this.repository.listShapesForPlacement(run.canvas_id, viewport);
     const spec = this.drafts.createDraftSpec({
       kind,
       prompt: run.prompt,
       sourceShapes,
+      occupiedShapes,
       viewport,
+      connections: input.connections,
+      nodes: input.nodes,
+      recommendedColors: input.recommendedColors,
+      summary: this.readText(input.summary) || undefined,
       style: this.readText(input.style) || undefined,
       title: this.readText(input.title) || undefined,
       code: this.readText(input.code) || undefined
@@ -162,6 +170,45 @@ export class CanvasAgentActionService {
       resourceRefs: spec.sourceShapeIds,
       shouldContinue: false,
       progress: this.progress(summary, spec.sourceShapeIds, this.viewportForSpec(spec))
+    };
+  }
+
+  private async connectShapes(
+    run: CanvasAgentRunRow,
+    step: CanvasAgentStepRow
+  ): Promise<CanvasAgentActionResult> {
+    const selectedIds = this.readStringArray(run.context_json.selectedShapeIds);
+    const fromShapeId = this.readText(step.input_json.fromShapeId) || selectedIds[0] || "";
+    const toShapeId = this.readText(step.input_json.toShapeId) || selectedIds[1] || "";
+    if (!fromShapeId || !toShapeId || fromShapeId === toShapeId) {
+      throw badRequest("Canvas Agent connect_shapes requires two different shape ids");
+    }
+
+    const shapes = await this.repository.findShapesByIds(run.canvas_id, [fromShapeId, toShapeId]);
+    if (shapes.length !== 2) throw badRequest("Canvas Agent connect_shapes target shapes were not found");
+    const connectionKind = step.input_json.connectionKind === "line" ? "line" : "arrow";
+    const label = this.readText(step.input_json.label) || null;
+    const summary = connectionKind === "line"
+      ? "요청한 두 도형을 선으로 연결했습니다."
+      : "요청한 두 도형을 화살표로 연결했습니다.";
+    const shapeBatch = this.drafts.createConnectionBatch({
+      clientOperationId: `canvas-agent:${step.id}:connect`,
+      connectionKind,
+      from: shapes[0],
+      label,
+      to: shapes[1]
+    });
+    const connectionShapeIds = (shapeBatch.operations as Array<{ shapeId?: unknown }>)
+      .map((operation) => operation.shapeId)
+      .filter((shapeId): shapeId is string => typeof shapeId === "string");
+    const highlightedShapeIds = [fromShapeId, toShapeId, ...connectionShapeIds];
+
+    return {
+      progress: this.progress(summary, highlightedShapeIds, this.viewportForShapes(shapes)),
+      resourceRefs: highlightedShapeIds,
+      shapeBatch,
+      shouldContinue: false,
+      summary
     };
   }
 

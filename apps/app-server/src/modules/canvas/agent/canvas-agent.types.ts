@@ -6,8 +6,8 @@ export const CANVAS_AGENT_ACTION_NAMES = [
   "find_shapes",
   "select_shapes",
   "focus_viewport",
+  "connect_shapes",
   "create_draft",
-  "create_code_block",
   "finish"
 ] as const;
 
@@ -132,9 +132,18 @@ export interface CanvasAgentProgressPayload {
   toolTargetLabel: string | null;
 }
 
+export type CanvasAgentDraftNodeKind =
+  | "frame"
+  | "note"
+  | "text"
+  | "rectangle"
+  | "circle"
+  | "triangle"
+  | "code";
+
 export interface CanvasAgentDraftNode {
   id: string;
-  kind: "frame" | "note" | "code";
+  kind: CanvasAgentDraftNodeKind;
   title: string;
   text: string | null;
   x: number;
@@ -144,21 +153,54 @@ export interface CanvasAgentDraftNode {
   color: string;
   code?: string;
   language?: string;
+  parentId?: string | null;
 }
 
 export interface CanvasAgentDraftConnection {
+  id?: string;
   from: string;
   to: string;
+  kind?: "arrow" | "line";
+  text?: string | null;
+  color?: string;
+}
+
+export interface CanvasAgentDraftToolStep {
+  kind: "tool" | "place" | "connect";
+  toolTarget?: string;
+  toolTargetLabel?: string;
+  nodeId?: string;
+  connectionId?: string;
+  from?: string;
+  to?: string;
+  x?: number;
+  y?: number;
+}
+
+export interface CanvasAgentDraftColorOption {
+  name: string;
+  label: string;
+  hex: string;
+  bestFor: string;
+}
+
+export interface CanvasAgentDraftRecommendedColor {
+  name: string;
+  label: string;
+  usage: string;
 }
 
 export interface CanvasDraftSpec {
-  kind: "diagram" | "organize" | "code";
+  kind: "diagram" | "code";
   title: string;
   summary: string;
   sourceShapeIds: string[];
   sourceRevisions: Record<string, number>;
+  availableColors: CanvasAgentDraftColorOption[];
+  recommendedColors: CanvasAgentDraftRecommendedColor[];
   nodes: CanvasAgentDraftNode[];
   connections: CanvasAgentDraftConnection[];
+  toolSteps: CanvasAgentDraftToolStep[];
 }
 
 export interface CanvasAgentRunPayload {

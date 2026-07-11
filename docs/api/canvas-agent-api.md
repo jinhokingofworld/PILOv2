@@ -52,47 +52,245 @@ Frontend -> App Server Canvas Agent API -> Canvas Agent run + SQS job
 For a shape-finding request, Canvas Agent uses this bounded cost-saving route:
 
 ```text
-exact title/text ILIKE match
-  -> local multilingual embedding + Canvas-only pgvector search when ILIKE has no match
-  -> GPT Planner only when retrieval is absent or ambiguous
+local shape-search prototype embedding classifier
+  -> Canvas-only pgvector shape search when the prompt is clearly looking for an existing shape
+  -> Canvas-only pgvector search for each side when the prompt clearly connects two existing shapes
+  -> GPT Planner when the prompt is not a shape search, retrieval is absent, or the result is ambiguous
 ```
 
 - The embedding Worker indexes only `shape_type`, `title`, and `text_content`.
   It never embeds full `raw_shape`, layout, bindings, styles, or provider data.
 - The configured local model is `intfloat/multilingual-e5-small` (384
   dimensions). Queries use `query: ` and indexed Canvas text uses `passage: `.
-- The default local-route thresholds are shape similarity `0.78` and winner
-  margin `0.08`. A missing or ambiguous local match falls through to GPT
-  Planner.
+- The first-pass shape-search classifier uses fixed local prototype examples.
+  The default pgvector shape-result thresholds are shape similarity `0.78` and
+  winner margin `0.08`. A missing or ambiguous local match falls through to
+  GPT Planner.
+- Direct shape-search matches are returned as `find_shapes` with
+  `focusResult: true`, so the client can move the requester-only Canvas AI
+  pointer, zoom to the matching shape area, and highlight the result. Separate
+  local `select_shapes` or `focus_viewport` intent classification is not used
+  for first-pass routing.
+- Direct existing-shape connection requests such as `A랑 B 연결해줘` may be
+  split into two semantic shape queries. If both sides have confident,
+  different matches, AI Worker returns `connect_shapes`; if either side is
+  ambiguous, the request falls through to GPT Planner.
 
 - Each AI Worker decision can choose exactly one action.
 - App Server limits a run to its configured maximum number of steps.
-- Deterministic actions such as selecting known shape ids or moving a viewport
-  can skip AI Worker planning.
+- Deterministic toolbar-help actions can skip AI Worker planning only when the
+  request explicitly uses tool-help mode.
 - A draft is generated from `CanvasDraftSpec`; the AI Worker must not generate
   raw Tldraw shapes.
 
-## Deterministic keyword route
+## Canvas generation plan contract
 
-Before AI Worker planning, App Server may route clear Canvas-only requests by
-keyword. This route is intentionally limited to actions that are cheap and
-safe to infer without provider reasoning.
+For generation requests, AI Worker receives the bounded list of Canvas tools
+that PILO can create. It should compose only with these tools:
+
+| Tool | Source | Draft node/connection kind | Persisted shape |
+| --- | --- | --- | --- |
+| Frame | `tldraw_builtin` | `frame` | `frame` |
+| Memo/card | `tldraw_builtin` | `note` | `note` |
+| Text | `tldraw_builtin` | `text` | `text` |
+| Rectangle | `tldraw_builtin` | `rectangle` | `geo` with `geo=rectangle` |
+| Circle | `tldraw_builtin` | `circle` | `geo` with `geo=ellipse` |
+| Triangle | `tldraw_builtin` | `triangle` | `geo` with `geo=triangle` |
+| Arrow | `tldraw_builtin` | `arrow` connection | `arrow` |
+| Line | `tldraw_builtin` | `line` connection | `arrow` with no arrow head |
+| Code block | `pilo_custom` | `code` | `pilo-code-block` |
+
+Before returning a generation action, AI Worker classifies the user request as
+exactly one of:
+
+| Draft decision | Result | Use when |
+| --- | --- | --- |
+| `diagram` | `create_draft.inputJson.kind = "diagram"` | the user asks for a design draft, flowchart, wireframe, user journey, structure diagram, screen layout, process map, or visual explanation |
+| `code` | `create_draft.inputJson.kind = "code"` | the user asks for code, files, components, hooks, APIs, types, snippets, implementation examples, or asks to include code |
+| `chat` | `finish` | the user is only asking a conversational question or discussing direction, not asking Canvas AI to find, connect, or create Canvas content |
+
+Tie-breaker: code/file requests win over diagram requests, even if the draft
+also benefits from notes, labels, and connectors. Visual draft requests without
+code use `diagram`. Questions about what is possible or how the feature works
+use `finish`.
+
+### Draft templates
+
+`create_draft` has two generation templates.
+
+```text
+create_draft
+├─ kind: "diagram"
+│  └─ design drafts, flowcharts, wireframes, user journeys, structure diagrams
+└─ kind: "code"
+   └─ single or multi-file code blocks, explanation notes, file-to-file connectors
+```
+
+For `kind = "diagram"`, AI Worker should:
+
+- create one `frame` that contains the generated draft;
+- use only tldraw built-in nodes: `text`, `note`, `rectangle`, `circle`,
+  and `triangle`;
+- use `arrow` for directed flow and `line` for non-directional relationships;
+- keep visible text short enough to fit the generated shape;
+- return `recommendedColors` explaining the small palette used by the draft.
+
+For `kind = "code"`, AI Worker should:
+
+- create one `frame` that contains all generated code and notes;
+- create one `pilo-code-block` node per generated file or snippet;
+- split into multiple code nodes when the request asks for files or naturally
+  separates into responsibilities such as component, hook, API client, type, or
+  utility;
+- add short tldraw built-in `note` or `text` nodes only when they help explain
+  the code;
+- connect related files or explanation nodes with `arrow` or `line`;
+- return `title` as a file name and `language` when those are known.
+
+AI Worker also receives the bounded Canvas color palette:
+
+| Color name | Label | Intended use |
+| --- | --- | --- |
+| `default` | 기본 | neutral/default text and ordinary elements |
+| `black` | 검정 | strong titles and high-contrast connectors |
+| `blue` | 파랑 | primary flow, default action, trustworthy UI structure |
+| `violet` | 보라 | AI, insight, or supporting flow |
+| `green` | 초록 | success, completion, approved state |
+| `yellow` | 노랑 | warning, waiting, review, highlight |
+| `red` | 빨강 | error, danger, failure, deletion warning |
+
+`create_draft.inputJson` may include a generated layout plan:
+
+```json
+{
+  "kind": "diagram",
+  "title": "로그인 흐름",
+  "summary": "로그인 과정을 Canvas 도구로 배치했습니다.",
+  "recommendedColors": [
+    {
+      "name": "blue",
+      "label": "파랑",
+      "usage": "핵심 화면과 주요 흐름을 표현합니다."
+    },
+    {
+      "name": "green",
+      "label": "초록",
+      "usage": "성공 상태를 표현합니다."
+    }
+  ],
+  "nodes": [
+    {
+      "id": "frame-1",
+      "kind": "frame",
+      "x": 100,
+      "y": 100,
+      "width": 720,
+      "height": 360,
+      "title": "로그인 흐름",
+      "color": "blue"
+    },
+    {
+      "id": "step-1",
+      "kind": "rectangle",
+      "x": 48,
+      "y": 120,
+      "width": 180,
+      "height": 88,
+      "title": "로그인 페이지",
+      "parentId": "frame-1",
+      "color": "blue"
+    }
+  ],
+  "connections": [
+    { "id": "arrow-1", "kind": "arrow", "from": "step-1", "to": "step-2" }
+  ]
+}
+```
+
+App Server validates this plan before storing it as `CanvasDraftSpec`:
+
+- maximum 16 nodes and 24 connections;
+- only the listed node/connection kinds are accepted;
+- `x`, `y`, `width`, and `height` are bounded numbers;
+- `parentId` can only reference a generated frame;
+- connections must reference generated node ids;
+- colors are normalized to the allowed PILO/Tldraw palette;
+- `availableColors` is attached to the stored `CanvasDraftSpec`;
+- `recommendedColors` is accepted only when each item references an allowed
+  color name, otherwise App Server falls back to colors used by the generated
+  nodes;
+- raw Tldraw shape JSON from AI Worker is ignored and never persisted.
+
+After validation, App Server may translate the whole draft to a nearby empty
+Canvas area. It checks existing Canvas shape bounding boxes around the current
+viewport and tries candidate positions in this order: visible viewport area,
+right/bottom outside the viewport, then nearby grid positions. If no empty
+candidate is found, it falls back to the stable viewport-relative default
+position instead of changing zoom or sending the draft far away.
+
+App Server converts the validated draft plan into `CanvasService.syncShapesBatch`
+operations when the requester applies the draft. The AI Worker decides layout
+intent and bounded coordinates; App Server owns raw shape creation and Canvas
+validation. `toolSteps` are derived from the validated draft so the frontend can
+show the requester-only Canvas AI pointer moving through the corresponding
+Canvas tools and placement targets.
+
+The client consumes `toolSteps` in order:
+
+```text
+tool step    -> move the private pointer to the toolbar tool
+place step   -> move the private pointer to the generated Canvas position
+connect step -> move the private pointer to the generated relationship area
+```
+
+This animation is local preview/progress only. The actual Canvas mutation still
+happens only when the requester applies the draft.
+
+## Existing shape connection contract
+
+`connect_shapes` is for connecting two shapes that already exist on the Canvas.
+Embedding is used only to identify the two shape ids. The App Server owns the
+write operation, endpoint authorization, coordinate calculation, raw Tldraw
+arrow payload, and `CanvasService.syncShapesBatch` call.
+
+```json
+{
+  "actionName": "connect_shapes",
+  "inputJson": {
+    "fromShapeId": "shape:login",
+    "toShapeId": "shape:auth",
+    "connectionKind": "arrow",
+    "label": null
+  }
+}
+```
+
+- `connectionKind` is `arrow` by default and `line` when the user asks for a
+  plain line.
+- When exactly two shapes are selected and the prompt says to connect them,
+  App Server can create this action without AI Worker planning.
+- The action creates one new connection shape. It does not modify or delete the
+  two existing target shapes.
+- If the target shapes are not found, are the same shape, or semantic matching
+  is ambiguous, the action is not executed automatically.
+
+## Deterministic toolbar-help route
+
+Before AI Worker planning, App Server may route built-in Canvas toolbar/help
+requests by keyword only when `toolHelpMode` is `true`. Normal Canvas AI chat
+does not use App Server keyword matching for shape search, selection,
+organization, drafts, or code generation.
 
 | Intent | Keywords and examples | Action |
 | --- | --- | --- |
 | Find a Canvas toolbar tool | `도구`, `툴`, `툴바`, `기능`, `버튼`, `아이콘`, `어디`, `위치`, `찾아줘`, `보여줘`, `알려줘`, `사용법`, `어떻게` plus a known tool name<br>`메모 도구 어디 있어?`, `색상 변경 기능 알려줘`, `프레임은 어떻게 써?` | `find_canvas_tool` with `progress.toolTarget` |
-| Find Canvas shapes | `찾아줘`, `찾아`, `검색`, `어디`, `위치`, `어딨어`, `보여줘`, `보여`, `하이라이트`, `강조`<br>`ERD 찾아줘`, `JWT 관련 메모 보여줘`, `온보딩 화면 강조해줘` | `find_shapes` |
-| Move to a shape area | `이동`, `가줘`, `줌인`, `확대`, `가운데로`, `포커스`<br>`ERD 쪽으로 가줘`, `로그인 플로우 가운데로 보여줘` | `find_shapes` with `focusResult: true`, or `focus_viewport` for selected shapes |
-| Select or highlight shapes | `선택`, `잡아줘`, `골라줘`, `체크`, `하이라이트`, `강조`<br>`JWT 관련 도형 선택해줘`, `와이어프레임 카드들 골라줘` | `select_shapes` |
-| Organize selected shapes | `정리`, `묶어`, `그룹`, `프레임`, `보기 좋게`, `정돈`, `배열`, `정렬`, `구조`, `깔끔`<br>`선택한 메모들 정리해줘`, `이 카드들 프레임으로 묶어줘` | `create_draft` with `kind: organize` |
-| Design or diagram draft | `초안`, `만들어`, `그려`, `다이어그램`, `플로우`, `흐름`, `구조도`, `관계도`, `사용자 여정`, `와이어프레임`, `화면 설계`<br>`로그인 흐름 다이어그램 만들어줘`, `대시보드 와이어프레임 초안 만들어줘` | AI Worker planner chooses a Canvas draft action |
-| Code block draft | `코드`, `예시 코드`, `샘플 코드`, `구현 예시`, `함수`, `컴포넌트`, `API 예시`, `타입`, `인터페이스`<br>`JWT 검증 예시 코드 만들어줘`, `React 버튼 컴포넌트 코드 블록으로 만들어줘` | AI Worker planner chooses `create_code_block` |
 
 External-domain words can still appear as ordinary Canvas text search terms.
-For example, `이슈 메모 찾아줘` may search Canvas shape text. Requests that
-ask Canvas AI to fetch, list, create, update, or represent external-domain data
-are rejected in the deterministic route. Examples: `캘린더 일정 불러와`,
-`PR 목록 가져와`, `회의록 조회해서 캔버스에 보여줘`.
+For example, `이슈 메모 찾아줘` may search Canvas shape text through the
+AI Worker shape-search classifier. App Server does not reject external-domain
+phrases by keyword before planning; requests outside the Canvas action schema
+fall through the normal AI Worker route and must still resolve to bounded
+Canvas-only actions or a `finish` response.
 
 Basic Canvas tool discovery uses `progress.toolTarget` so the client can move
 the requester-only Canvas AI pointer to the matching toolbar button and draw a
@@ -380,6 +578,9 @@ non-terminal. A response may include `progress` with a message, highlighted
 shape ids, and an optional target viewport. The client renders any virtual
 pointer, selection highlight, and preview locally; it does not publish those
 values through shared Canvas presence or store pointer coordinates in the DB.
+For generated drafts, the response may also include `draft.spec.toolSteps`;
+those steps are derived from validated Canvas nodes/connections and can be used
+only for requester-local creation animation.
 
 ## Initial action set
 
@@ -387,8 +588,8 @@ values through shared Canvas presence or store pointer coordinates in the DB.
 find_shapes
 select_shapes
 focus_viewport
+connect_shapes
 create_draft
-create_code_block
 find_canvas_tool
 finish
 ```
