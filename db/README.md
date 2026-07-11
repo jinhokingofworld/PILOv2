@@ -48,3 +48,4 @@ The database schema source of truth is the migration history in `db/migrations/`
 - `migrations/029_create_github_sync_jobs.sql` adds durable GitHub worker job lease state and queued sync-run indexes for asynchronous GitHub synchronization.
 - `migrations/030_enable_github_sync_jobs_rls.sql` enables all-deny RLS for durable GitHub sync worker jobs.
 - `migrations/031_create_pr_review_analysis_jobs.sql` adds asynchronous PR Review analysis jobs, durable SQS publish state, analysis failure fields, and duplicate-analyzing-session protection.
+- `migrations/033_repository_scope_github_project_v2_selections.sql` adds the `source` GitHub sync target and scopes ProjectV2 selections to repositories while preserving cache tables and all-deny RLS.

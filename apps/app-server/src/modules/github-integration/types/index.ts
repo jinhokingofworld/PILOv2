@@ -454,6 +454,7 @@ export interface GithubPullRequestMergePayload {
 }
 
 export type GithubSyncTarget =
+  | "source"
   | "repositories"
   | "issues"
   | "pull_requests"

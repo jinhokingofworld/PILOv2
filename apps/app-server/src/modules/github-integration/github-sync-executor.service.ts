@@ -135,6 +135,10 @@ export class GithubSyncExecutorService {
     target: GithubSyncTarget,
     context: GithubSyncRunContext
   ): Promise<GithubSyncRunSummary> {
+    if (target === "source") {
+      return this.syncGithubSource(context);
+    }
+
     if (target === "full") {
       return this.syncGithubFull(context);
     }
@@ -255,6 +259,29 @@ export class GithubSyncExecutorService {
 
     await this.reportGithubSyncProgress(context, 95, "finalizing", summary);
 
+    return summary;
+  }
+
+  private async syncGithubSource(
+    context: GithubSyncRunContext
+  ): Promise<GithubSyncRunSummary> {
+    let summary = this.createGithubSyncSummary();
+    await this.reportGithubSyncProgress(context, 5, "repositories", summary);
+    summary = this.mergeGithubSyncSummaries(
+      summary,
+      await this.syncGithubRepositories(context)
+    );
+    await this.reportGithubSyncProgress(context, 35, "issues", summary);
+    summary = this.mergeGithubSyncSummaries(
+      summary,
+      await this.syncGithubIssues(context)
+    );
+    await this.reportGithubSyncProgress(context, 70, "pull_requests", summary);
+    summary = this.mergeGithubSyncSummaries(
+      summary,
+      await this.syncGithubPullRequests(context)
+    );
+    await this.reportGithubSyncProgress(context, 95, "finalizing", summary);
     return summary;
   }
 

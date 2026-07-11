@@ -170,6 +170,7 @@ await import("./review-submission.test.mjs");
 await import("./conflict-merge.test.mjs");
 await import("./sync-progress.test.mjs");
 await import("./sync-runs.test.mjs");
+await import("./source-sync-repository-selection.test.mjs");
 await import("./async-sync-worker.test.mjs");
 await import("./project-v2-setup.test.mjs");
 await import("./project-v2-write.test.mjs");

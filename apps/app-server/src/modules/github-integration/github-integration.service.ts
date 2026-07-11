@@ -209,7 +209,8 @@ export class GithubIntegrationService {
         workspaceService,
         installationStateService,
         callbackStateService,
-        githubAppClient
+        githubAppClient,
+        syncRunService
       );
     this.githubSourceReadService =
       githubSourceReadService ??
