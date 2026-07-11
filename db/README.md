@@ -54,3 +54,4 @@ The database schema source of truth is the migration history in `db/migrations/`
 - `migrations/035_remove_owner_workspace_unique_limit.sql` removes the one-owner-Workspace-per-user unique index and restores a non-unique owner lookup index for multi-Workspace ownership.
 - `migrations/036_add_workspace_icon.sql` adds an optional Workspace icon with a bounded text length for navigation and onboarding display.
 - `migrations/037_add_github_project_v2_webhook_reconcile_context.sql` adds ProjectV2 webhook delivery context, processing leases, retry attempts, and a runnable-delivery index. It is recorded in Supabase migration history as `20260711230721_037_add_github_project_v2_webhook_reconcile_context`.
+- `migrations/038_create_github_project_v2_polling_schedules.sql` adds repository-scoped personal ProjectV2 polling schedules, due-row leases, and active sync-run tracking with all-deny RLS.
