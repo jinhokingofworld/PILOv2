@@ -1584,6 +1584,69 @@ assert.equal(
 );
 assert.equal(loadedSqlEditState.parse.status, "idle");
 
+const invalidReloadDraftState = sqlEditStateRuntime.reduceSqlErdEditState(
+  loadedSqlEditState,
+  {
+    type: "draft_source_changed",
+    sourceText: "CREATE TABLE broken ("
+  }
+);
+const invalidReloadParseStart =
+  sqlEditStateRuntime.beginSqlErdParse(invalidReloadDraftState);
+const invalidReloadParseFailureState =
+  sqlEditStateRuntime.reduceSqlErdEditState(invalidReloadParseStart.state, {
+    type: "parse_failed",
+    requestSequence: invalidReloadParseStart.requestSequence,
+    error: {
+      code: "PARSE_FAILED",
+      message: "Expected a column definition."
+    }
+  });
+const refreshedAfterParseErrorSnapshot = {
+  ...loadedSnapshot,
+  revision: 14,
+  sourceText: "CREATE TABLE server_refresh (id BIGINT PRIMARY KEY);"
+};
+const refreshedAfterParseErrorState =
+  sqlEditStateRuntime.reduceSqlErdEditState(
+    invalidReloadParseFailureState,
+    {
+      type: "session_loaded",
+      snapshot: refreshedAfterParseErrorSnapshot
+    }
+  );
+
+assert.equal(
+  refreshedAfterParseErrorState.draftSourceText,
+  invalidReloadParseFailureState.draftSourceText
+);
+assert.deepEqual(
+  refreshedAfterParseErrorState.lastSuccessfulSnapshot,
+  refreshedAfterParseErrorSnapshot
+);
+assert.deepEqual(
+  refreshedAfterParseErrorState.parse,
+  invalidReloadParseFailureState.parse
+);
+assert.equal(
+  sqlEditStateRuntime.shouldScheduleSqlErdAutoParse(
+    refreshedAfterParseErrorState
+  ),
+  false
+);
+
+const refreshedCleanSameSessionState =
+  sqlEditStateRuntime.reduceSqlErdEditState(loadedSqlEditState, {
+    type: "session_loaded",
+    snapshot: refreshedAfterParseErrorSnapshot
+  });
+
+assert.equal(refreshedCleanSameSessionState.parse.status, "idle");
+assert.equal(
+  refreshedCleanSameSessionState.draftSourceText,
+  refreshedAfterParseErrorSnapshot.sourceText
+);
+
 const dirtyLoadedSqlEditState = sqlEditStateRuntime.reduceSqlErdEditState(
   sqlEditStateRuntime.reduceSqlErdEditState(loadedSqlEditState, {
     type: "draft_source_changed",
@@ -3320,6 +3383,17 @@ assert.equal(
   statusCopyRuntime.getSqlErdGenerateErrorMessage("SOURCE_TOO_LARGE"),
   "SQL source is too large. Keep it at or below 1 MiB and try again."
 );
+
+const exactLimitSourceParseResult =
+  ddlParserRuntime.parseSqlDdlToErdModel({
+    dialect: "postgresql",
+    sourceText: " ".repeat(
+      ddlParserRuntime.SQL_ERD_SOURCE_TEXT_MAX_BYTES
+    )
+  });
+
+assert.equal(exactLimitSourceParseResult.ok, false);
+assert.equal(exactLimitSourceParseResult.error.code, "EMPTY_SOURCE");
 
 for (const typeName of [
   "SqltoerdModelJsonV1",

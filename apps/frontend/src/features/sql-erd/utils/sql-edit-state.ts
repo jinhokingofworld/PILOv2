@@ -144,7 +144,10 @@ export function reduceSqlErdEditState(
         ? state.draftSourceText
         : action.snapshot.sourceText,
       lastSuccessfulSnapshot: action.snapshot,
-      parse: createIdleParseState(state.parse.requestSequence + 1)
+      parse:
+        shouldPreserveDraft && state.parse.status === "error"
+          ? state.parse
+          : createIdleParseState(state.parse.requestSequence + 1)
     };
   }
 
