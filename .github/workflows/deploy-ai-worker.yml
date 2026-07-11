@@ -5,6 +5,7 @@ on:
     branches: ["main"]
     paths:
       - "apps/ai-worker/**"
+      - ".github/workflows/deploy-ai-worker.yml"
   workflow_dispatch:
 
 permissions:
@@ -47,10 +48,37 @@ jobs:
             ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
 
       - name: Deploy ECS services
+        env:
+          ECS_CLUSTER_NAME: ${{ vars.ECS_CLUSTER_NAME }}
+          ECS_AI_WORKER_SERVICE: ${{ vars.ECS_AI_WORKER_SERVICE }}
+          ECS_AI_AGENT_WORKER_SERVICE: ${{ vars.ECS_AI_AGENT_WORKER_SERVICE }}
         run: |
-          for service in "${{ vars.ECS_AI_WORKER_SERVICE }}" "${{ vars.ECS_AI_AGENT_WORKER_SERVICE }}"; do
+          test -n "$ECS_CLUSTER_NAME"
+          test -n "$ECS_AI_WORKER_SERVICE"
+          test -n "$ECS_AI_AGENT_WORKER_SERVICE"
+
+          for service in "$ECS_AI_WORKER_SERVICE" "$ECS_AI_AGENT_WORKER_SERVICE"; do
+            task_definition=$(aws ecs describe-services \
+              --cluster "$ECS_CLUSTER_NAME" \
+              --services "$service" \
+              --query 'services[0].taskDefinition' \
+              --output text)
+            test -n "$task_definition"
+            test "$task_definition" != "None"
+
+            queue_url=$(aws ecs describe-task-definition \
+              --task-definition "$task_definition" \
+              --query 'taskDefinition.containerDefinitions[0].environment[?name==`SQS_AI_JOBS_QUEUE_URL`].value | [0]' \
+              --output text)
+            test -n "$queue_url"
+            test "$queue_url" != "None"
+
             aws ecs update-service \
-              --cluster "${{ vars.ECS_CLUSTER_NAME }}" \
+              --cluster "$ECS_CLUSTER_NAME" \
               --service "$service" \
               --force-new-deployment
           done
+
+          aws ecs wait services-stable \
+            --cluster "$ECS_CLUSTER_NAME" \
+            --services "$ECS_AI_WORKER_SERVICE" "$ECS_AI_AGENT_WORKER_SERVICE"

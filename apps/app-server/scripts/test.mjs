@@ -380,7 +380,7 @@ assert.match(meetingReportJobService, /jobType: "meeting_report"/);
 assert.match(meetingReportJobService, /@aws-sdk\/client-sqs/);
 assert.match(meetingReportJobService, /SQSClient/);
 assert.match(meetingReportJobService, /SendMessageCommand/);
-assert.match(meetingReportJobService, /SQS_MEETING_REPORT_JOBS_QUEUE_URL/);
+assert.match(meetingReportJobService, /SQS_AI_JOBS_QUEUE_URL/);
 assert.match(meetingReportJobService, /SQS_ENDPOINT/);
 assert.match(meetingReportJobService, /Meeting report job queue is not configured/);
 assert.match(meetingReportJobService, /Meeting report job could not be enqueued/);
