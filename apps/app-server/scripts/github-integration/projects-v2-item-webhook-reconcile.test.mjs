@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
@@ -488,6 +489,17 @@ function createDeliveryReconcileService(database, { getProjectV2Item, reconcile,
 }
 
 {
+  const [workerSource, reconcileSource] = await Promise.all([
+    readFile(new URL("../../src/modules/github-integration/github-sync-job.service.ts", import.meta.url), "utf8"),
+    readFile(new URL("../../src/modules/github-integration/github-project-v2-webhook-reconcile.service.ts", import.meta.url), "utf8")
+  ]);
+
+  assert.doesNotMatch(workerSource, /FROM github_webhook_deliveries/i);
+  assert.match(reconcileSource, /SELECT delivery_id FROM github_webhook_deliveries/i);
+  assert.match(reconcileSource, /status\s*=\s*'processing'\s+AND lease_expires_at < now\(\)/i);
+}
+
+{
   const deliveryId = "projects-v2-item-delivery-success";
   const database = new DeliveryLeaseFakeDatabase({ deliveryId });
   const graphqlCalls = [];
@@ -597,7 +609,12 @@ function createDeliveryReconcileService(database, { getProjectV2Item, reconcile,
   assert.equal(database.delivery.status, "processing");
 
   database.expireLease();
-  const worker = new GithubSyncJobService(database, {}, {}, {}, {});
+  await retryingService.recoverDeliveries(async () => {
+    throw new Error("SQS unavailable");
+  });
+  assert.equal(database.delivery.status, "processing", "failed publish must not reset the delivery");
+
+  const worker = new GithubSyncJobService(database, {}, {}, {}, retryingService);
   const republished = [];
   worker.client = () => ({
     send: async (command) => {

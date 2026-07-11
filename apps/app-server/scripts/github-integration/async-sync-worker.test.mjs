@@ -146,14 +146,19 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
     {
       query: async () => [{ delivery_id: "persisted-delivery" }],
       execute: async (text, values) => { writes.push({ text, values }); return { rowCount: 1 }; }
-    }, {}, {}, {}
+    }, {}, {}, {}, {
+      recoverDeliveries: async (enqueueDelivery) => {
+        await enqueueDelivery("persisted-delivery");
+        return [];
+      }
+    }
   );
   const commands = [];
   worker.client = () => ({ send: async (command) => { commands.push(command.constructor.name); return {}; } });
   process.env.SQS_GITHUB_WEBHOOKS_QUEUE_URL = "queue-url";
   await worker.recoverWebhookOutbox();
   assert.deepEqual(commands, ["SendMessageCommand"]);
-  assert.match(writes[0].text, /status='received'/);
+  assert.equal(writes.length, 0, "worker recovery must not update webhook delivery lifecycle state");
 }
 
 console.log("GitHub async sync worker behavioral tests passed");

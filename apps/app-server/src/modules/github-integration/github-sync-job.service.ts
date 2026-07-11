@@ -35,10 +35,6 @@ interface SyncJobRow extends QueryResultRow {
   attempt_count: number;
 }
 
-interface DeliveryIdRow extends QueryResultRow {
-  delivery_id: string;
-}
-
 class TerminalSyncJobError extends Error {}
 
 export class GithubSyncJobEnqueueError extends ApiError {
@@ -158,32 +154,13 @@ export class GithubSyncJobService implements OnModuleDestroy {
   }
 
   private async recoverWebhookOutbox(): Promise<void> {
-    const rows = await this.database.query<DeliveryIdRow>(
-      `SELECT delivery_id FROM github_webhook_deliveries
-       WHERE (
-         status = 'failed'
-         AND error_message = 'GitHub webhook could not be enqueued'
-       ) OR (
-         status = 'processing'
-         AND lease_expires_at < now()
-       )
-       ORDER BY received_at ASC LIMIT 10`
+    const failures = await this.webhookReconcileService.recoverDeliveries(
+      (deliveryId) => this.enqueueWebhookDelivery(deliveryId)
     );
-    for (const row of rows) {
-      try {
-        await this.enqueueWebhookDelivery(row.delivery_id);
-        await this.database.execute(
-          `UPDATE github_webhook_deliveries
-           SET status='received', processed_at=NULL, error_message=NULL, lease_owner=NULL, lease_expires_at=NULL
-           WHERE delivery_id=$1 AND (
-             (status='failed' AND error_message='GitHub webhook could not be enqueued')
-             OR (status='processing' AND lease_expires_at < now())
-           )`,
-          [row.delivery_id]
-        );
-      } catch (error) {
-        this.logger.warn(`GitHub webhook delivery ${row.delivery_id} remains queued for recovery: ${this.errorMessage(error)}`);
-      }
+    for (const failure of failures) {
+      this.logger.warn(
+        `GitHub webhook delivery ${failure.deliveryId} remains queued for recovery: ${this.errorMessage(failure.error)}`
+      );
     }
   }
 

@@ -25,6 +25,15 @@ interface GithubProjectV2WebhookDeliveryClaim extends QueryResultRow {
   github_project_node_id: string;
 }
 
+interface DeliveryIdRow extends QueryResultRow {
+  delivery_id: string;
+}
+
+export interface GithubWebhookDeliveryRecoveryFailure {
+  deliveryId: string;
+  error: unknown;
+}
+
 const WEBHOOK_RECONCILE_ERROR_MESSAGE =
   "GitHub ProjectV2 webhook reconcile failed";
 
@@ -88,6 +97,34 @@ export class GithubProjectV2WebhookReconcileService {
       }
       return "retry";
     }
+  }
+
+  async recoverDeliveries(
+    enqueueDelivery: (deliveryId: string) => Promise<void>
+  ): Promise<GithubWebhookDeliveryRecoveryFailure[]> {
+    const rows = await this.database.query<DeliveryIdRow>(
+      `SELECT delivery_id FROM github_webhook_deliveries
+       WHERE (
+         status = 'failed'
+         AND error_message = 'GitHub webhook could not be enqueued'
+       ) OR (
+         status = 'processing'
+         AND lease_expires_at < now()
+       )
+       ORDER BY received_at ASC LIMIT 10`
+    );
+    const failures: GithubWebhookDeliveryRecoveryFailure[] = [];
+
+    for (const row of rows) {
+      try {
+        await enqueueDelivery(row.delivery_id);
+        await this.resetRecoveredDelivery(row.delivery_id);
+      } catch (error) {
+        failures.push({ deliveryId: row.delivery_id, error });
+      }
+    }
+
+    return failures;
   }
 
   private async claimDelivery(
@@ -213,6 +250,25 @@ export class GithubProjectV2WebhookReconcileService {
           AND lease_owner=$2
       `,
       [claim.delivery_id, this.workerId, WEBHOOK_RECONCILE_ERROR_MESSAGE]
+    );
+  }
+
+  private async resetRecoveredDelivery(deliveryId: string): Promise<void> {
+    await this.database.execute(
+      `
+        UPDATE github_webhook_deliveries
+        SET
+          status='received',
+          processed_at=NULL,
+          error_message=NULL,
+          lease_owner=NULL,
+          lease_expires_at=NULL
+        WHERE delivery_id=$1 AND (
+          (status='failed' AND error_message='GitHub webhook could not be enqueued')
+          OR (status='processing' AND lease_expires_at < now())
+        )
+      `,
+      [deliveryId]
     );
   }
 
