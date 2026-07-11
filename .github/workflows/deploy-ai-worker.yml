@@ -5,6 +5,7 @@ on:
     branches: ["main"]
     paths:
       - "apps/ai-worker/**"
+      - ".github/workflows/deploy-ai-worker.yml"
   workflow_dispatch:
 
 permissions:
@@ -47,10 +48,18 @@ jobs:
             ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
 
       - name: Deploy ECS services
+        env:
+          ECS_CLUSTER_NAME: ${{ vars.ECS_CLUSTER_NAME }}
+          ECS_AI_WORKER_SERVICE: ${{ vars.ECS_AI_WORKER_SERVICE }}
+          ECS_AI_AGENT_WORKER_SERVICE: ${{ vars.ECS_AI_AGENT_WORKER_SERVICE }}
         run: |
-          for service in "${{ vars.ECS_AI_WORKER_SERVICE }}" "${{ vars.ECS_AI_AGENT_WORKER_SERVICE }}"; do
+          test -n "$ECS_CLUSTER_NAME"
+          test -n "$ECS_AI_WORKER_SERVICE"
+          test -n "$ECS_AI_AGENT_WORKER_SERVICE"
+
+          for service in "$ECS_AI_WORKER_SERVICE" "$ECS_AI_AGENT_WORKER_SERVICE"; do
             aws ecs update-service \
-              --cluster "${{ vars.ECS_CLUSTER_NAME }}" \
+              --cluster "$ECS_CLUSTER_NAME" \
               --service "$service" \
               --force-new-deployment
           done
