@@ -86,7 +86,7 @@ assert.match(githubApiClient, /\/me\/github\/project-oauth/);
 assert.match(githubApiClient, /deleteGithubAppInstallation/);
 assert.match(
   githubApiClient,
-  /workspaceGithubPath\(workspaceId, `\/installations\/\$\{encodeURIComponent\(installationId\)\}`\)/
+  /workspaceGithubPath\([\s\S]{0,120}`\/installations\/\$\{encodeURIComponent\(installationId\)\}`/
 );
 assert.match(githubApiClient, /startGithubAppInstallation/);
 assert.match(githubApiClient, /listGithubAppInstallations/);

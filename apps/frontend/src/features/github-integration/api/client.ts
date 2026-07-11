@@ -26,7 +26,7 @@ import type {
   ReplaceGithubProjectV2SelectionsInput,
   StartGithubAppInstallationInput,
   StartGithubOAuthInput,
-  StartGithubSyncRunInput
+  StartGithubSyncRunInput,
 } from "@/features/github-integration/types";
 
 const API_BASE_PATH = "/api/v1";
@@ -109,10 +109,8 @@ function readApiErrorMessage(payload: unknown) {
   ) {
     return {
       code:
-        typeof payload.error.code === "string"
-          ? payload.error.code
-          : undefined,
-      message: payload.error.message
+        typeof payload.error.code === "string" ? payload.error.code : undefined,
+      message: payload.error.message,
     };
   }
 
@@ -127,7 +125,7 @@ async function readGithubIntegrationJson(response: Response, path: string) {
       "GitHub Integration API returned invalid JSON",
       {
         status: response.status,
-        path
+        path,
       }
     );
   }
@@ -137,7 +135,7 @@ function unwrapGithubIntegrationPayload<T>(
   payload: unknown,
   {
     path,
-    status
+    status,
   }: {
     path: string;
     status: number;
@@ -166,7 +164,7 @@ function unwrapGithubIntegrationPayload<T>(
             ? payload.error.code
             : undefined,
         path,
-        status
+        status,
       }
     );
   }
@@ -175,7 +173,7 @@ function unwrapGithubIntegrationPayload<T>(
     "GitHub Integration API returned an unexpected response",
     {
       path,
-      status
+      status,
     }
   );
 }
@@ -183,7 +181,7 @@ function unwrapGithubIntegrationPayload<T>(
 function withJsonBody(body: unknown, init: RequestInit = {}) {
   return {
     ...init,
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
   };
 }
 
@@ -199,10 +197,7 @@ function appendSearchParam(
   params.set(key, String(value));
 }
 
-function withQueryParams(
-  path: `/${string}`,
-  query: object = {}
-) {
+function withQueryParams(path: `/${string}`, query: object = {}) {
   const params = new URLSearchParams();
 
   for (const [key, value] of Object.entries(query)) {
@@ -227,7 +222,7 @@ async function requestGithubIntegrationPayload<T>(
   {
     accessToken,
     baseUrl,
-    fetcher
+    fetcher,
   }: {
     accessToken: string | null;
     baseUrl: string;
@@ -248,7 +243,7 @@ async function requestGithubIntegrationPayload<T>(
   const response = await fetcher(buildGithubIntegrationApiUrl(path, baseUrl), {
     credentials: "include",
     ...init,
-    headers
+    headers,
   });
   const payload = await readGithubIntegrationJson(response, path);
 
@@ -259,14 +254,14 @@ async function requestGithubIntegrationPayload<T>(
       {
         code: apiError?.code,
         path,
-        status: response.status
+        status: response.status,
       }
     );
   }
 
   return unwrapGithubIntegrationPayload<T>(payload, {
     path,
-    status: response.status
+    status: response.status,
   });
 }
 
@@ -307,19 +302,21 @@ async function requestGithubIntegrationPage<T>(
     throw new GithubIntegrationApiError(
       "GitHub Integration API returned a paginated response without meta",
       {
-        path
+        path,
       }
     );
   }
 
   return {
     data: payload.data,
-    meta: payload.meta
+    meta: payload.meta,
   };
 }
 
 function workspaceGithubPath(workspaceId: string, path: string) {
-  return `/workspaces/${encodeURIComponent(workspaceId)}/github${path}` as const;
+  return `/workspaces/${encodeURIComponent(
+    workspaceId
+  )}/github${path}` as const;
 }
 
 function repositoryGithubPath(workspaceId: string, repositoryId: string) {
@@ -339,12 +336,12 @@ function projectV2GithubPath(workspaceId: string, projectV2Id: string) {
 export function createGithubIntegrationApiClient({
   accessToken = null,
   baseUrl = defaultGithubIntegrationApiBaseUrl(),
-  fetcher = fetch
+  fetcher = fetch,
 }: GithubIntegrationClientOptions = {}) {
   const requestOptions = {
     accessToken: accessToken?.trim() || null,
     baseUrl,
-    fetcher
+    fetcher,
   };
 
   return {
@@ -415,9 +412,15 @@ export function createGithubIntegrationApiClient({
       );
     },
 
-    async deleteGithubAppInstallation(workspaceId: string, installationId: string) {
+    async deleteGithubAppInstallation(
+      workspaceId: string,
+      installationId: string
+    ) {
       return requestGithubIntegrationData<GithubAppInstallationDelete>(
-        workspaceGithubPath(workspaceId, `/installations/${encodeURIComponent(installationId)}`),
+        workspaceGithubPath(
+          workspaceId,
+          `/installations/${encodeURIComponent(installationId)}`
+        ),
         { method: "DELETE" },
         requestOptions
       );
@@ -428,7 +431,10 @@ export function createGithubIntegrationApiClient({
       query: ListGithubRepositoriesQuery = {}
     ) {
       return requestGithubIntegrationPage<GithubRepository>(
-        withQueryParams(workspaceGithubPath(workspaceId, "/repositories"), query),
+        withQueryParams(
+          workspaceGithubPath(workspaceId, "/repositories"),
+          query
+        ),
         undefined,
         requestOptions
       );
@@ -447,7 +453,10 @@ export function createGithubIntegrationApiClient({
       repositoryId: string
     ) {
       return requestGithubIntegrationData<GithubRepositoryCollaboratorStatus>(
-        `${repositoryGithubPath(workspaceId, repositoryId)}/collaborator-status`,
+        `${repositoryGithubPath(
+          workspaceId,
+          repositoryId
+        )}/collaborator-status`,
         undefined,
         requestOptions
       );
@@ -470,19 +479,31 @@ export function createGithubIntegrationApiClient({
 
     async listGithubProjectsV2(
       workspaceId: string,
-      query: ListGithubProjectsV2Query = {}
+      query: ListGithubProjectsV2Query
     ) {
       return requestGithubIntegrationPage<GithubProjectV2>(
-        withQueryParams(workspaceGithubPath(workspaceId, "/projects-v2"), query),
+        withQueryParams(
+          workspaceGithubPath(workspaceId, "/projects-v2"),
+          query
+        ),
         undefined,
         requestOptions
       );
     },
 
-    async discoverGithubProjectV2(workspaceId: string, installationId: string) {
+    async discoverGithubProjectV2(
+      workspaceId: string,
+      installationId: string,
+      body: { repositoryId: string }
+    ) {
       return requestGithubIntegrationData<GithubProjectV2Discovery>(
-        workspaceGithubPath(workspaceId, `/installations/${encodeURIComponent(installationId)}/projects-v2/discovery`),
-        { method: "POST" },
+        workspaceGithubPath(
+          workspaceId,
+          `/installations/${encodeURIComponent(
+            installationId
+          )}/projects-v2/discovery`
+        ),
+        withJsonBody(body, { method: "POST" }),
         requestOptions
       );
     },
@@ -537,6 +558,6 @@ export function createGithubIntegrationApiClient({
         undefined,
         requestOptions
       );
-    }
+    },
   };
 }
