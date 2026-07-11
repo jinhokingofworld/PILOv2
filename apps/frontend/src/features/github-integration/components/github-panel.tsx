@@ -176,6 +176,7 @@ export function GithubPanel() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [syncPollingError, setSyncPollingError] = useState<string | null>(null);
   const [redirectAction, setRedirectAction] = useState<RedirectAction>(null);
+  const discoveredInstallationIdRef = useRef<string | null>(null);
   const [isDisconnecting, setIsDisconnecting] = useState(false);
   const [isDisconnectingProjectOAuth, setIsDisconnectingProjectOAuth] =
     useState(false);
@@ -286,6 +287,7 @@ export function GithubPanel() {
       apiClient.listGithubProjectsV2(workspaceId, {
         closed: true,
         limit: 100,
+        management: true,
         page
       })
     );
@@ -487,6 +489,15 @@ export function GithubPanel() {
     removeGithubCallbackErrorFromUrl();
   }, [searchParams]);
 
+  useEffect(() => {
+    const installationId = searchParams.get("github_installation_id");
+    if (!workspaceId || !installationId || discoveredInstallationIdRef.current === installationId) {
+      return;
+    }
+    discoveredInstallationIdRef.current = installationId;
+    void handleDiscoverGithubProjectV2(installationId);
+  }, [workspaceId, searchParams]);
+
   async function handleStartGithubOAuth() {
     setRedirectAction("oauth");
     setActionError(null);
@@ -531,6 +542,24 @@ export function GithubPanel() {
       window.location.assign(result.authorizeUrl);
     } catch (error) {
       setRedirectAction(null);
+      setActionError(getErrorMessage(error));
+    }
+  }
+
+  async function handleDiscoverGithubProjectV2(installationId: string) {
+    if (!workspaceId) return;
+    setActionError(null);
+    try {
+      const discovery = await apiClient.discoverGithubProjectV2(workspaceId, installationId);
+      if (discovery.connectionRequired) {
+        discoveredInstallationIdRef.current = null;
+        await handleStartGithubProjectOAuth();
+        return;
+      }
+      setSelectedInstallationId(installationId);
+      setSelectedProjectV2Ids(new Set(discovery.projects.filter((project) => project.selected).map((project) => project.id)));
+      await loadGithubIntegrationSnapshot(undefined, undefined);
+    } catch (error) {
       setActionError(getErrorMessage(error));
     }
   }
@@ -679,7 +708,7 @@ export function GithubPanel() {
     setActionMessage(null);
 
     try {
-      await Promise.all(
+      const selections = await Promise.all(
         [...projectIdsByInstallation].map(
           ([installationId, projectV2Ids]) =>
             apiClient.replaceGithubProjectV2Selections(workspaceId, {
@@ -689,6 +718,25 @@ export function GithubPanel() {
         )
       );
       setActionMessage("ProjectV2 상세 동기화 선택을 저장했습니다.");
+      const failedSelection = selections.find(
+        (selection) => selection.syncStatus === "failed"
+      );
+      const hasQueuedSelection = selections.some(
+        (selection) => selection.syncStatus === "queued"
+      );
+      if (failedSelection) {
+        setActionError(
+          `ProjectV2 선택은 저장됐지만 동기화를 시작하지 못했습니다. ${failedSelection.syncError ?? "다시 시도하세요."}`
+        );
+      }
+      if (hasQueuedSelection) {
+        setActionMessage("선택한 ProjectV2 동기화를 시작했습니다.");
+        setHasRunningSyncRun(true);
+      } else if (!failedSelection) {
+        setActionMessage(
+          "선택된 프로젝트가 없어 보드에 표시할 내용이 없습니다. 프로젝트 선택 관리에서 동기화할 ProjectV2를 선택할 수 있습니다."
+        );
+      }
       await loadGithubIntegrationSnapshot(
         selectedRepositoryId,
         selectedProjectV2Id

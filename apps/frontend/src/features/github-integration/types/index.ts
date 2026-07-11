@@ -112,6 +112,18 @@ export type ReplaceGithubProjectV2SelectionsInput = {
 
 export type GithubProjectV2Selection = ReplaceGithubProjectV2SelectionsInput;
 
+export type GithubProjectV2SelectionResult = GithubProjectV2Selection & {
+  syncRunId: string | null;
+  syncStatus: "queued" | "failed" | null;
+  syncError: string | null;
+};
+
+export type GithubProjectV2Discovery = {
+  connectionRequired: boolean;
+  installationId: string;
+  projects: GithubProjectV2[];
+};
+
 export type GithubProjectV2AccessPermission = "ADMIN" | "WRITE" | "READ";
 
 export type GithubProjectV2AccessStatus = {
@@ -217,6 +229,7 @@ export type ListGithubProjectsV2Query = {
   ownerLogin?: string;
   closed?: boolean;
   q?: string;
+  management?: boolean;
   page?: number;
   limit?: number;
 };

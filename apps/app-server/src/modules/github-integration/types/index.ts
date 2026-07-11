@@ -68,6 +68,7 @@ export interface GithubAppInstallationStartPayload {
 export interface GithubAppInstallationCallbackPayload
   extends Omit<GithubAppInstallationPayload, "id"> {
   installationId: string;
+  syncRunId: string | null;
   returnUrl: string | null;
 }
 
@@ -155,6 +156,15 @@ export interface GithubProjectV2ListItemPayload {
 export interface GithubProjectV2SelectionPayload {
   installationId: string;
   projectV2Ids: string[];
+  syncRunId: string | null;
+  syncStatus: "queued" | "failed" | null;
+  syncError: string | null;
+}
+
+export interface GithubProjectV2DiscoveryPayload {
+  connectionRequired: boolean;
+  installationId: string;
+  projects: GithubProjectV2ListItemPayload[];
 }
 
 export interface GithubProjectV2DetailPayload
@@ -452,7 +462,7 @@ export type GithubSyncTarget =
   | "project_v2_items"
   | "full";
 
-export type GithubSyncStatus = "running" | "success" | "failed";
+export type GithubSyncStatus = "queued" | "running" | "success" | "failed";
 
 export type GithubSyncProgressStage =
   | "initializing"

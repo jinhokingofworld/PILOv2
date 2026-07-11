@@ -46,7 +46,7 @@ const prReviewService = await readSource(
 const prReviewTypes = await readSource("../../src/modules/pr-review/types/index.ts");
 const prReviewApi = await readSource("../../../../docs/api/pr-review-api.md");
 const prReviewAnalysisJobMigration = await readSource(
-  "../../../../db/migrations/028_create_pr_review_analysis_jobs.sql"
+  "../../../../db/migrations/031_create_pr_review_analysis_jobs.sql"
 );
 const databaseReadme = await readSource("../../../../db/README.md");
 
@@ -210,7 +210,7 @@ assert.match(
 );
 assert.match(prReviewAnalysisJobMigration, /FOR EACH ROW/);
 assert.match(prReviewAnalysisJobMigration, /ENABLE ROW LEVEL SECURITY/);
-assert.match(databaseReadme, /028_create_pr_review_analysis_jobs\.sql/);
+assert.match(databaseReadme, /031_create_pr_review_analysis_jobs\.sql/);
 assert.match(prReviewAnalysisService, /PR 변경 파일 리뷰/);
 assert.match(prReviewService, /getReviewSessionSummary/);
 assert.match(prReviewService, /getReviewSessionResult/);

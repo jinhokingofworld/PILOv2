@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
 const { GithubProjectV2Service } = require("../../dist/modules/github-integration/github-project-v2.service.js");
+const { GithubSyncJobEnqueueError } = require("../../dist/modules/github-integration/github-sync-job.service.js");
 
 const currentUserId = "22222222-2222-4222-8222-222222222222";
 const workspaceId = "11111111-1111-4111-8111-111111111111";
@@ -101,13 +102,46 @@ class ConcurrentSelectionDatabase {
   }
 }
 
-function createService(database) {
+function createService(database, syncRunService) {
   const workspaceService = new FakeWorkspaceService();
   return {
     database,
     workspaceService,
-    service: new GithubProjectV2Service(database, workspaceService, {}, {})
+    service: new GithubProjectV2Service(
+      database,
+      workspaceService,
+      {},
+      {},
+      undefined,
+      syncRunService
+    )
   };
+}
+
+{
+  const database = new FakeDatabase({
+    queryOneRows: [{ id: installationId }],
+    queryRows: [[{ id: firstProjectId, installation_id: installationId }]]
+  });
+  const { service } = createService(database, {
+    async startGithubSyncRun() {
+      throw new GithubSyncJobEnqueueError("77777777-7777-4777-8777-777777777777");
+    }
+  });
+
+  const result = await service.replaceGithubProjectV2Selections(
+    currentUserId,
+    workspaceId,
+    { installationId, projectV2Ids: [firstProjectId] }
+  );
+
+  assert.deepEqual(result, {
+    installationId,
+    projectV2Ids: [firstProjectId],
+    syncRunId: "77777777-7777-4777-8777-777777777777",
+    syncStatus: "failed",
+    syncError: "GitHub sync job could not be enqueued"
+  });
 }
 
 function projectRow(id, overrides = {}) {
@@ -152,7 +186,10 @@ function projectRow(id, overrides = {}) {
 
   assert.deepEqual(result, {
     installationId,
-    projectV2Ids: [firstProjectId, secondProjectId]
+    projectV2Ids: [firstProjectId, secondProjectId],
+    syncRunId: null,
+    syncStatus: null,
+    syncError: null
   });
   assert.deepEqual(workspaceService.accessChecks, [{ userId: currentUserId, workspaceId }]);
   assert.equal(database.transactionCalls, 1);
@@ -209,7 +246,13 @@ for (const input of [
     { installationId, projectV2Ids: [] }
   );
 
-  assert.deepEqual(result, { installationId, projectV2Ids: [] });
+  assert.deepEqual(result, {
+    installationId,
+    projectV2Ids: [],
+    syncRunId: null,
+    syncStatus: null,
+    syncError: null
+  });
   assert.equal(database.queries.filter(({ method }) => method === "execute").length, 1);
   assert.match(database.queries[1].text, /DELETE FROM github_project_v2_selections/i);
 }

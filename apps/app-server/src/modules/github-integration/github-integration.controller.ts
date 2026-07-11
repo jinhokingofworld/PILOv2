@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  HttpCode,
   Delete,
   Get,
   Headers,
@@ -54,6 +55,7 @@ import type {
   GithubProjectOAuthStatusPayload,
   GithubProjectV2AccessStatusPayload,
   GithubProjectV2DetailPayload,
+  GithubProjectV2DiscoveryPayload,
   GithubProjectV2FieldPayload,
   GithubProjectV2ItemPayload,
   GithubProjectV2KanbanPayload,
@@ -366,6 +368,7 @@ export class GithubIntegrationController {
   }
 
   @Post("workspaces/:workspaceId/github/sync-runs")
+  @HttpCode(202)
   @UseGuards(AuthGuard)
   async startGithubSyncRun(
     @CurrentUserId() currentUserId: string,
@@ -484,6 +487,18 @@ export class GithubIntegrationController {
       body
     );
     return apiResponse(result);
+  }
+
+  @Post("workspaces/:workspaceId/github/installations/:installationId/projects-v2/discovery")
+  @UseGuards(AuthGuard)
+  async discoverGithubProjectV2(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("installationId") installationId: string
+  ): Promise<ApiSuccessResponse<GithubProjectV2DiscoveryPayload>> {
+    return apiResponse(await this.githubIntegrationService.discoverGithubProjectV2(
+      currentUserId, workspaceId, installationId
+    ));
   }
 
   @Get("workspaces/:workspaceId/github/projects-v2/:projectV2Id/access-status")

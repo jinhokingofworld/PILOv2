@@ -112,6 +112,12 @@ variable "ai_worker_desired_count" {
   default     = 1
 }
 
+variable "github_sync_worker_desired_count" {
+  description = "Dev GitHub sync worker task count."
+  type        = number
+  default     = 1
+}
+
 variable "app_server_cpu" {
   type    = number
   default = 256

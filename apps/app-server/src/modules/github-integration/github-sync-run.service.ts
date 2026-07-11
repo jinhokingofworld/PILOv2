@@ -5,8 +5,8 @@ import { DatabaseService } from "../../database/database.service";
 import { WorkspaceService } from "../workspace/workspace.service";
 import { ListGithubSyncRunsQuery, StartGithubSyncRunRequest } from "./dto";
 import { GithubIntegrationConfigService } from "./github-integration-config.service";
+import { GithubSyncJobService } from "./github-sync-job.service";
 import { serializeGithubJsonb } from "./github-jsonb";
-import { GithubProjectV2SyncTokenService } from "./github-project-v2-sync-token.service";
 import {
   createGithubSyncProgressCursor,
   readGithubSyncProgress
@@ -17,8 +17,9 @@ import {
   type GithubSyncProjectV2ContextRow,
   type GithubSyncRepositoryContextRow,
   type GithubSyncRunProgress,
-  type GithubSyncRunSummary
+  type GithubSyncRunSummary,
 } from "./github-sync-executor.service";
+import { GithubProjectV2SyncTokenService } from "./github-project-v2-sync-token.service";
 import type {
   GithubPaginatedPayload,
   GithubSyncRunDetailPayload,
@@ -71,6 +72,7 @@ const GITHUB_SYNC_TARGETS: readonly GithubSyncTarget[] = [
   "full"
 ];
 const GITHUB_SYNC_STATUSES: readonly GithubSyncStatus[] = [
+  "queued",
   "running",
   "success",
   "failed"
@@ -83,7 +85,8 @@ export class GithubSyncRunService {
     private readonly configService: GithubIntegrationConfigService,
     private readonly workspaceService: WorkspaceService,
     private readonly syncExecutorService: GithubSyncExecutorService,
-    private readonly projectV2SyncTokenService: GithubProjectV2SyncTokenService
+    private readonly projectV2SyncTokenService: GithubProjectV2SyncTokenService,
+    private readonly syncJobService?: GithubSyncJobService
   ) {}
 
   async startGithubSyncRun(
@@ -142,35 +145,25 @@ export class GithubSyncRunService {
       target
     });
 
+    if (this.syncJobService) {
+      await this.syncJobService.enqueueSyncJob(syncRun.id, currentUserId);
+      return this.mapGithubSyncRun(syncRun);
+    }
+
+    // Direct unit tests construct this service without Nest's queue provider. Production
+    // always supplies the job service above; retain the executor path for those isolated tests.
     try {
-      const config = this.configService.getGithubAppConfig();
-      const githubUserAccessToken =
-        await this.projectV2SyncTokenService.resolvePersonalProjectV2UserAccessToken(
-          {
-            currentUserId,
-            installation,
-            requiresProjectV2Access: this.requiresProjectV2Access(target)
-          }
-        );
-      const summary = await this.syncExecutorService.runGithubSyncTarget(target, {
-        currentUserId,
-        workspaceId,
-        installation,
-        repository,
-        projectV2,
-        githubUserAccessToken,
-        config,
-        reportProgress: (progress) =>
-          this.updateGithubSyncRunProgress(syncRun.id, progress)
+      const githubUserAccessToken = await this.projectV2SyncTokenService.resolvePersonalProjectV2UserAccessToken({
+        currentUserId, installation, requiresProjectV2Access: this.requiresProjectV2Access(target)
       });
-      const completed = await this.completeGithubSyncRunSuccess(syncRun.id, summary);
-      return this.mapGithubSyncRun(completed);
+      const summary = await this.syncExecutorService.runGithubSyncTarget(target, {
+        currentUserId, workspaceId, installation, repository, projectV2, githubUserAccessToken,
+        config: this.configService.getGithubAppConfig(),
+        reportProgress: (progress) => this.updateGithubSyncRunProgress(syncRun.id, progress)
+      });
+      return this.mapGithubSyncRun(await this.completeGithubSyncRunSuccess(syncRun.id, summary));
     } catch (error) {
-      const failed = await this.completeGithubSyncRunFailure(
-        syncRun.id,
-        this.getGithubSyncErrorMessage(error)
-      );
-      return this.mapGithubSyncRun(failed);
+      return this.mapGithubSyncRun(await this.completeGithubSyncRunFailure(syncRun.id, this.getGithubSyncErrorMessage(error)));
     }
   }
 
@@ -290,9 +283,10 @@ export class GithubSyncRunService {
           installation_id,
           repository_id,
           project_v2_id,
-          target
+          target,
+          status
         )
-        VALUES ($1, $2, $3, $4, $5)
+        VALUES ($1, $2, $3, $4, $5, 'queued')
         RETURNING
           id,
           workspace_id,

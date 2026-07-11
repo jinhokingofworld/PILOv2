@@ -28,6 +28,14 @@ variable "sqs_queue_arns" {
   type = list(string)
 }
 
+variable "github_sync_worker_queue_arns" {
+  type = list(string)
+}
+
+variable "github_webhooks_queue_arn" {
+  type = string
+}
+
 variable "secrets_manager_arns" {
   type = list(string)
 }
