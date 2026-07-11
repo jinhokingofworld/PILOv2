@@ -31,6 +31,12 @@ const prReviewAnalysisJobService = await readSource(
 const prReviewAnalysisJobPublisher = await readSource(
   "../../src/modules/pr-review/pr-review-analysis-job-publisher.service.ts"
 );
+const prReviewAnalysisHandoffGuard = await readSource(
+  "../../src/modules/pr-review/pr-review-analysis-handoff.guard.ts"
+);
+const prReviewAnalysisInternalController = await readSource(
+  "../../src/modules/pr-review/pr-review-analysis-internal.controller.ts"
+);
 const prReviewModule = await readSource(
   "../../src/modules/pr-review/pr-review.module.ts"
 );
@@ -55,6 +61,8 @@ assert.match(prReviewModule, /PrReviewGithubDependencyService/);
 assert.match(prReviewModule, /PrReviewAnalysisService/);
 assert.match(prReviewModule, /PrReviewAnalysisJobService/);
 assert.match(prReviewModule, /PrReviewAnalysisJobPublisherService/);
+assert.match(prReviewModule, /PrReviewAnalysisHandoffGuard/);
+assert.match(prReviewModule, /PrReviewAnalysisInternalController/);
 
 assert.match(prReviewController, /@Controller\("workspaces\/:workspaceId\/github"\)/);
 assert.match(prReviewController, /@UseGuards\(AuthGuard\)/);
@@ -119,6 +127,20 @@ assert.match(prReviewController, /@Get\("review-submissions\/:submissionId"\)/);
 assert.match(prReviewController, /@Patch\("review-sessions\/:reviewSessionId"\)/);
 assert.match(prReviewController, /@Delete\("review-sessions\/:reviewSessionId"\)/);
 assert.match(prReviewController, /apiResponse/);
+assert.match(
+  prReviewAnalysisInternalController,
+  /@Controller\("internal\/pr-review"\)/
+);
+assert.match(
+  prReviewAnalysisInternalController,
+  /@Get\("analysis-jobs\/:jobId\/input"\)/
+);
+assert.match(prReviewAnalysisInternalController, /PrReviewAnalysisHandoffGuard/);
+assert.match(
+  prReviewAnalysisHandoffGuard,
+  /x-pr-review-analysis-worker-token/
+);
+assert.match(prReviewAnalysisHandoffGuard, /PR_REVIEW_ANALYSIS_WORKER_TOKEN/);
 
 assert.match(prReviewGithubDependencyService, /GithubIntegrationService/);
 assert.match(
@@ -172,6 +194,8 @@ assert.match(prReviewService, /insertReviewAnalysisJob/);
 assert.match(prReviewService, /findActiveAnalyzingReviewSession/);
 assert.match(prReviewService, /analysisJobPublisher\.publishCreatedJob/);
 assert.match(prReviewService, /analysisError/);
+assert.match(prReviewService, /getAnalysisJobInput/);
+assert.match(prReviewService, /isAnalysisJobInputAvailable/);
 assert.match(prReviewAnalysisJobService, /SQS_PR_REVIEW_ANALYSIS_QUEUE_URL/);
 assert.match(prReviewAnalysisJobService, /pr_review_analysis_requested/);
 assert.match(prReviewAnalysisJobService, /pr-review-analysis:v1/);
@@ -347,3 +371,4 @@ await import("./conflict-apply.test.mjs");
 await import("./conflict-status-refresh.test.mjs");
 await import("./submission.test.mjs");
 await import("./async-analysis-enqueue.test.mjs");
+await import("./analysis-input-handoff.test.mjs");
