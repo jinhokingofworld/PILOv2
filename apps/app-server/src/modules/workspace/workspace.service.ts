@@ -10,6 +10,7 @@ type WorkspaceInvitationStatus = "pending" | "accepted" | "revoked" | "expired";
 interface WorkspaceRow extends QueryResultRow {
   id: string;
   name: string;
+  icon: string | null;
   owner_user_id: string | null;
   role: WorkspaceRole | null;
   created_at: Date | string;
@@ -69,6 +70,7 @@ interface CountRow extends QueryResultRow {
 export interface WorkspacePayload {
   id: string;
   name: string;
+  icon: string | null;
   ownerUserId: string | null;
   role: WorkspaceRole;
   isOwner: boolean;
@@ -116,6 +118,11 @@ export interface CreateWorkspaceInvitationRequest {
   role?: unknown;
 }
 
+export interface CreateWorkspaceRequest {
+  icon?: unknown;
+  name?: unknown;
+}
+
 export interface CreateWorkspaceInvitationPayload {
   invitation: WorkspaceInvitationPayload;
   invitationToken: string;
@@ -155,7 +162,6 @@ export interface RemoveWorkspaceMemberPayload {
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const DEFAULT_WORKSPACE_NAME_BYTE_LENGTH = 4;
 const INVITATION_TOKEN_BYTE_LENGTH = 32;
 const DEFAULT_INVITATION_TTL_DAYS = 7;
 const FRONTEND_DEFAULT_ORIGIN = "http://localhost:3000";
@@ -164,47 +170,43 @@ const FRONTEND_DEFAULT_ORIGIN = "http://localhost:3000";
 export class WorkspaceService {
   constructor(private readonly database: DatabaseService) {}
 
-  async ensureDefaultWorkspaceForUser(userId: string): Promise<void> {
-    const workspaceName = `PILO-${randomBytes(DEFAULT_WORKSPACE_NAME_BYTE_LENGTH).toString("hex")}`;
+  async createWorkspace(
+    currentUserId: string,
+    request: CreateWorkspaceRequest
+  ): Promise<WorkspacePayload> {
+    const name = this.readWorkspaceName(request.name);
+    const icon = this.readWorkspaceIcon(request.icon);
 
-    await this.database.transaction(async (transaction) => {
-      const existingWorkspace = await transaction.queryOne<WorkspaceIdRow>(
+    return this.database.transaction(async (transaction) => {
+      const workspace = await transaction.queryOne<WorkspaceRow>(
         `
-          SELECT id
-          FROM workspaces
-          WHERE owner_user_id = $1
-          ORDER BY created_at ASC
-          LIMIT 1
+          INSERT INTO workspaces (name, icon, owner_user_id)
+          VALUES ($1, $2, $3)
+          RETURNING
+            id,
+            name,
+            icon,
+            owner_user_id,
+            'owner'::text AS role,
+            created_at,
+            updated_at
         `,
-        [userId]
+        [name, icon, currentUserId]
       );
 
-      const workspace =
-        existingWorkspace ??
-        (await transaction.queryOne<WorkspaceIdRow>(
-          `
-            INSERT INTO workspaces (name, owner_user_id)
-            VALUES ($1, $2)
-            ON CONFLICT (owner_user_id) WHERE owner_user_id IS NOT NULL
-            DO UPDATE SET owner_user_id = EXCLUDED.owner_user_id
-            RETURNING id
-          `,
-          [workspaceName, userId]
-        ));
-
       if (!workspace) {
-        throw new Error("Default workspace could not be initialized");
+        throw new Error("Workspace could not be created");
       }
 
       await transaction.execute(
         `
           INSERT INTO workspace_members (workspace_id, user_id, role, joined_at)
           VALUES ($1, $2, 'owner', now())
-          ON CONFLICT (workspace_id, user_id)
-          DO UPDATE SET role = 'owner', invited_by_user_id = NULL
         `,
-        [workspace.id, userId]
+        [workspace.id, currentUserId]
       );
+
+      return this.mapWorkspace(workspace, currentUserId);
     });
   }
 
@@ -214,6 +216,7 @@ export class WorkspaceService {
         SELECT
           w.id,
           w.name,
+          w.icon,
           w.owner_user_id,
           wm.role,
           w.created_at,
@@ -393,8 +396,6 @@ export class WorkspaceService {
       `,
       [workspaceId, currentUserId]
     );
-
-    await this.ensureDefaultWorkspaceForUser(currentUserId);
 
     return {
       removed: true
@@ -907,6 +908,7 @@ export class WorkspaceService {
         SELECT
           w.id,
           w.name,
+          w.icon,
           w.owner_user_id,
           wm.role,
           w.created_at,
@@ -943,6 +945,7 @@ export class WorkspaceService {
         SELECT
           w.id,
           w.name,
+          w.icon,
           w.owner_user_id,
           wm.role,
           w.created_at,
@@ -1089,6 +1092,7 @@ export class WorkspaceService {
     return {
       id: workspace.id,
       name: workspace.name,
+      icon: workspace.icon,
       ownerUserId: workspace.owner_user_id,
       role: workspace.role,
       isOwner: workspace.role === "owner" || workspace.owner_user_id === currentUserId,
@@ -1166,6 +1170,36 @@ export class WorkspaceService {
     }
 
     return email;
+  }
+
+  private readWorkspaceName(value: unknown): string {
+    if (typeof value !== "string") {
+      throw badRequest("Workspace name is required");
+    }
+
+    const name = value.trim();
+    if (!name || name.length > 100) {
+      throw badRequest("Workspace name must be between 1 and 100 characters");
+    }
+
+    return name;
+  }
+
+  private readWorkspaceIcon(value: unknown): string | null {
+    if (value === undefined || value === null) {
+      return null;
+    }
+
+    if (typeof value !== "string") {
+      throw badRequest("Workspace icon must be a string");
+    }
+
+    const icon = value.trim();
+    if (!icon || icon.length > 32) {
+      throw badRequest("Workspace icon must be between 1 and 32 characters");
+    }
+
+    return icon;
   }
 
   private readInvitationRole(value: unknown): WorkspaceRole {

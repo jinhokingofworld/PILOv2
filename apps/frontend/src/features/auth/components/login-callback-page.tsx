@@ -5,7 +5,10 @@ import { useRouter } from "next/navigation";
 import { AlertCircle, CheckCircle2, Loader2 } from "lucide-react";
 
 import { Card } from "@/components/ui/card";
-import { loadAuthSessionEntry } from "@/features/auth/auth-session";
+import {
+  loadAuthSessionEntry,
+  WorkspaceOnboardingRequiredError
+} from "@/features/auth/auth-session";
 import { saveAuthSession } from "@/features/auth/session-storage";
 
 type CallbackStatus = {
@@ -62,10 +65,16 @@ export function LoginCallbackPage() {
         if (isActive) {
           router.replace(returnTo?.startsWith("/") ? returnTo : "/home");
         }
-      } catch {
+      } catch (error) {
         if (!isActive) {
           return;
         }
+
+        if (error instanceof WorkspaceOnboardingRequiredError) {
+          router.replace("/workspace/new?onboarding=1");
+          return;
+        }
+
         setIsPending(false);
         setStatus({
           message: "로그인을 완료하지 못했습니다.",

@@ -11,8 +11,9 @@ Workspace Membership API는 PILO의 Workspace 접근 권한, owner/member 역할
 - member 제거
 - Workspace 접근 기준을 `workspace_members` membership으로 판단
 
-Workspace 생성, 삭제, 이름 수정, owner transfer, admin/viewer/read-only role,
-실제 email 발송 인프라는 이 문서의 범위가 아니다.
+Workspace 생성 계약은 [workspace-api.md](workspace-api.md)를 따른다. Workspace 삭제,
+이름 수정, owner transfer, admin/viewer/read-only role, 실제 email 발송 인프라는 이
+문서의 범위가 아니다.
 
 ## 핵심 정책
 
@@ -20,6 +21,7 @@ Workspace 생성, 삭제, 이름 수정, owner transfer, admin/viewer/read-only 
 - `admin`, `viewer`, `read-only` role은 만들지 않는다.
 - `workspaces.owner_user_id`는 제거하지 않고 기존 호환과 owner 표시용으로 유지한다.
 - 실제 Workspace 접근 기준은 `workspace_members` membership이다.
+- 한 user는 여러 Workspace에서 `owner` membership을 가질 수 있다.
 - owner는 Workspace 관리, member 초대/제거, GitHub installation 연결/해제 같은
   관리 작업을 수행할 수 있다.
 - member는 Workspace 내부 데이터 read/write와 Workspace member 목록 조회가
@@ -118,6 +120,7 @@ Workspace 조회 API의 payload에는 현재 사용자의 role이 포함된다.
 {
   "id": "workspace_uuid",
   "name": "PILO-a1b2c3d4",
+  "icon": "🚀",
   "ownerUserId": "user_uuid",
   "role": "owner",
   "isOwner": true,
@@ -267,7 +270,8 @@ DELETE /api/v1/workspaces/{workspaceId}/members/me
 - 현재 사용자가 해당 Workspace의 member가 아니면 `403 FORBIDDEN`을 반환한다.
 - 현재 사용자가 해당 Workspace의 owner이면 `400 BAD_REQUEST`를 반환한다.
 - 나가기는 현재 bearer session user의 `workspace_members` row delete로 처리한다.
-- 나가기 후 현재 user의 기본 owner Workspace가 없으면 기본 Workspace를 보장한다.
+- 나가기 후 접근 가능한 Workspace가 없으면 사용자는 onboarding 필요 상태가 될 수
+  있다. 서버가 기본 Workspace를 자동 생성하지 않는다.
 
 ## 초대 목록 조회
 
@@ -499,6 +503,7 @@ POST /api/v1/workspace-invitations/{invitationToken}/accept
     "workspace": {
       "id": "workspace_uuid",
       "name": "PILO-a1b2c3d4",
+      "icon": "🚀",
       "ownerUserId": "owner_user_uuid",
       "role": "member",
       "isOwner": false,
@@ -557,17 +562,21 @@ member self-service 기능:
 
 - Workspace 나가기
 
-## 로그인 후 기본 Workspace 보장
+## 로그인 후 Workspace onboarding
 
-OAuth login callback은 user row를 생성하거나 갱신한 뒤 WorkspaceService를 통해
-기본 Workspace와 owner membership을 함께 보장한다.
+OAuth login callback은 user row와 bearer session을 생성하거나 갱신하지만 Workspace를
+자동 생성하지 않는다.
 
 처리 규칙:
 
-- `workspaces.owner_user_id = currentUserId`인 기본 Workspace가 없으면 생성한다.
-- 해당 Workspace의 `workspace_members(owner)` row가 없으면 생성한다.
-- 기존 Workspace가 있는 user는 새 Workspace를 만들지 않고 owner membership만 보강한다.
-- 이 보장 흐름은 transaction으로 처리한다.
+- 로그인 후 `GET /workspaces`가 빈 배열을 반환하는 것은 정상 상태다.
+- Frontend는 빈 배열을 onboarding 필요 상태로 처리한다.
+- 사용자가 이름을 입력해 `POST /workspaces`를 호출하면 Workspace와 현재 user의
+  `workspace_members(owner)` row를 transaction으로 생성한다.
+- 기존 Workspace가 있는 user도 `POST /workspaces`로 추가 owner Workspace를 생성할 수
+  있다.
+- GitHub Integration 연결 여부는 Workspace 및 owner membership 생성의 선행 조건이
+  아니다.
 
 ## 에러 규칙
 
@@ -589,7 +598,7 @@ OAuth login callback은 user row를 생성하거나 갱신한 뒤 WorkspaceServi
 - viewer/read-only role
 - owner transfer
 - 여러 owner 정책
-- Workspace 생성/삭제/이름 수정
+- Workspace 삭제/이름 수정
 - 실제 email 발송 인프라
 - public link share
 - realtime 협업 권한 모델

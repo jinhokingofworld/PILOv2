@@ -34,6 +34,7 @@ export interface ListGithubRepositoriesQuery {
 }
 
 export interface ListGithubProjectsV2Query {
+  repositoryId: unknown;
   ownerLogin?: unknown;
   closed?: unknown;
   q?: unknown;
@@ -44,7 +45,12 @@ export interface ListGithubProjectsV2Query {
 
 export interface ReplaceGithubProjectV2SelectionsRequest {
   installationId?: unknown;
+  repositoryId?: unknown;
   projectV2Ids?: unknown;
+}
+
+export interface DiscoverGithubProjectV2Request {
+  repositoryId?: unknown;
 }
 
 export interface ListGithubPullRequestsQuery {

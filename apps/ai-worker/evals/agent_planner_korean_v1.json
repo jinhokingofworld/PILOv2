@@ -67,21 +67,27 @@
     }
   ],
   "cases": [
-    {"id": "calendar_today", "prompt": "오늘 일정 보여줘", "expected": {"status": "tool_candidate", "toolName": "list_calendar_events", "inputContains": {"start": "2026-07-11", "end": "2026-07-11"}, "requiresConfirmation": false}},
-    {"id": "calendar_tomorrow", "prompt": "내일 일정 알려줘", "expected": {"status": "tool_candidate", "toolName": "list_calendar_events", "inputContains": {"start": "2026-07-12", "end": "2026-07-12"}, "requiresConfirmation": false}},
+    {"id": "calendar_today", "prompt": "오늘 일정 보여줘", "expected": {"status": "tool_candidate", "toolName": "list_calendar_events", "inputContains": {"start": "2026-07-08", "end": "2026-07-08"}, "requiresConfirmation": false}},
+    {"id": "calendar_tomorrow", "prompt": "내일 일정 알려줘", "expected": {"status": "tool_candidate", "toolName": "list_calendar_events", "inputContains": {"start": "2026-07-09", "end": "2026-07-09"}, "requiresConfirmation": false}},
     {"id": "calendar_this_week", "prompt": "이번 주 일정 보여줘", "expected": {"status": "tool_candidate", "toolName": "list_calendar_events", "inputContains": {"start": "2026-07-06", "end": "2026-07-12"}, "requiresConfirmation": false}},
     {"id": "calendar_next_monday", "prompt": "다음 주 월요일 일정 보여줘", "expected": {"status": "tool_candidate", "toolName": "list_calendar_events", "inputContains": {"start": "2026-07-13", "end": "2026-07-13"}, "requiresConfirmation": false}},
+    {"id": "calendar_this_sunday", "prompt": "이번 주 일요일 일정 보여줘", "expected": {"status": "tool_candidate", "toolName": "list_calendar_events", "inputContains": {"start": "2026-07-12", "end": "2026-07-12"}, "requiresConfirmation": false}},
+    {"id": "calendar_next_week", "prompt": "다음 주 일정 보여줘", "expected": {"status": "tool_candidate", "toolName": "list_calendar_events", "inputContains": {"start": "2026-07-13", "end": "2026-07-19"}, "requiresConfirmation": false}},
     {"id": "calendar_explicit_range", "prompt": "2026년 7월 20일부터 22일까지 일정 보여줘", "expected": {"status": "tool_candidate", "toolName": "list_calendar_events", "inputContains": {"start": "2026-07-20", "end": "2026-07-22"}, "requiresConfirmation": false}},
     {"id": "calendar_create_timed", "prompt": "7월 14일 오후 3시에 디자인 리뷰 일정 만들어줘", "expected": {"status": "tool_candidate", "toolName": "create_calendar_event", "inputContains": {"title": "디자인 리뷰", "startDate": "2026-07-14", "endDate": "2026-07-14", "startTime": "15:00"}, "requiresConfirmation": true}},
     {"id": "calendar_create_all_day", "prompt": "7월 18일 워크숍 일정 만들어줘", "expected": {"status": "tool_candidate", "toolName": "create_calendar_event", "inputContains": {"title": "워크숍", "startDate": "2026-07-18", "endDate": "2026-07-18"}, "requiresConfirmation": true}},
+    {"id": "calendar_create_duration", "prompt": "7월 14일 오전 9시부터 10시 30분까지 스프린트 회고 일정 만들어줘", "expected": {"status": "tool_candidate", "toolName": "create_calendar_event", "inputContains": {"title": "스프린트 회고", "startDate": "2026-07-14", "endDate": "2026-07-14", "startTime": "09:00", "endTime": "10:30"}, "requiresConfirmation": true}},
+    {"id": "calendar_create_multi_day", "prompt": "7월 20일부터 22일까지 워크숍 일정 만들어줘", "expected": {"status": "tool_candidate", "toolName": "create_calendar_event", "inputContains": {"title": "워크숍", "startDate": "2026-07-20", "endDate": "2026-07-22"}, "requiresConfirmation": true}},
     {"id": "calendar_create_missing_date", "prompt": "디자인 리뷰 일정 만들어줘", "expected": {"status": "needs_clarification", "missingFields": ["startDate", "endDate"]}},
     {"id": "calendar_create_missing_title", "prompt": "내일 오후 3시에 일정 만들어줘", "expected": {"status": "needs_clarification", "missingFields": ["title"]}},
     {"id": "calendar_update", "prompt": "일정 42번을 내일 오후 4시로 바꿔줘", "expected": {"status": "tool_candidate", "toolName": "update_calendar_event", "inputContains": {"eventId": "42"}, "requiresConfirmation": true}},
     {"id": "calendar_update_missing_id", "prompt": "내일 오후 4시로 일정 바꿔줘", "expected": {"status": "needs_clarification", "missingFields": ["eventId"]}},
+    {"id": "calendar_update_invalid_id", "prompt": "일정 0번을 내일 오후 4시로 바꿔줘", "expected": {"status": "needs_clarification", "missingFields": ["eventId"]}},
     {"id": "meeting_latest", "prompt": "가장 최신 회의록을 보여줘", "expected": {"status": "tool_candidate", "toolName": "list_meeting_reports", "inputContains": {"limit": 1}, "requiresConfirmation": false}},
     {"id": "meeting_recent", "prompt": "최근 회의록 목록 보여줘", "expected": {"status": "tool_candidate", "toolName": "list_meeting_reports", "requiresConfirmation": false}},
     {"id": "meeting_completed", "prompt": "완료된 회의록만 보여줘", "expected": {"status": "tool_candidate", "toolName": "list_meeting_reports", "inputContains": {"status": "COMPLETED"}, "requiresConfirmation": false}},
     {"id": "meeting_processing", "prompt": "처리 중인 회의록 보여줘", "expected": {"status": "tool_candidate", "toolName": "list_meeting_reports", "inputContains": {"status": "PROCESSING"}, "requiresConfirmation": false}},
+    {"id": "meeting_failed", "prompt": "실패한 회의록 보여줘", "expected": {"status": "tool_candidate", "toolName": "list_meeting_reports", "inputContains": {"status": "FAILED"}, "requiresConfirmation": false}},
     {"id": "meeting_detail_without_id", "prompt": "지난 회의록 상세를 보여줘", "expected": {"status": "unsupported"}},
     {"id": "meeting_summary_without_id", "prompt": "지난 회의록 요약해줘", "expected": {"status": "unsupported"}},
     {"id": "meeting_detail_with_id", "prompt": "회의록 123e4567-e89b-12d3-a456-426614174000 상세 보여줘", "expected": {"status": "tool_candidate", "toolName": "get_meeting_report", "inputContains": {"reportId": "123e4567-e89b-12d3-a456-426614174000"}, "requiresConfirmation": false}},
@@ -89,5 +95,7 @@
     {"id": "unsupported_board", "prompt": "Board에서 내 이슈 검색해줘", "expected": {"status": "unsupported"}},
     {"id": "unsupported_pr_review", "prompt": "이 PR을 리뷰해줘", "expected": {"status": "unsupported"}},
     {"id": "unsupported_delete", "prompt": "내일 일정을 삭제해줘", "expected": {"status": "unsupported"}}
+    ,{"id": "unsupported_recording_control", "prompt": "회의 녹음을 시작해줘", "expected": {"status": "unsupported"}}
+    ,{"id": "unsupported_calendar_delete", "prompt": "일정 42번을 삭제해줘", "expected": {"status": "unsupported"}}
   ]
 }

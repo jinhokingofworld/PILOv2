@@ -18,6 +18,7 @@ export type UserProfile = {
 export type Workspace = {
   id: string;
   name: string;
+  icon: string | null;
   ownerUserId: string | null;
   role: WorkspaceRole;
   isOwner: boolean;
@@ -212,6 +213,20 @@ export async function updateCurrentUserPresence(
 export async function listWorkspaces(accessToken: string) {
   return requestJson<Workspace[]>("/workspaces", {
     accessToken
+  });
+}
+
+export async function createWorkspace(
+  accessToken: string,
+  input: {
+    icon: string | null;
+    name: string;
+  }
+) {
+  return requestJson<Workspace>("/workspaces", {
+    accessToken,
+    body: input,
+    method: "POST"
   });
 }
 

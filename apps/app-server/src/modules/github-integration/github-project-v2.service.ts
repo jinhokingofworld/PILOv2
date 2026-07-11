@@ -11,6 +11,7 @@ import { GithubProjectV2SyncTokenService } from "./github-project-v2-sync-token.
 import { GithubSyncExecutorService, type GithubSyncInstallationRow } from "./github-sync-executor.service";
 import { GithubSyncJobEnqueueError } from "./github-sync-job.service";
 import { GithubSyncRunService } from "./github-sync-run.service";
+import { githubProjectV2RepositoryLinkSql } from "./queries";
 import type {
   GithubPaginatedPayload,
   GithubProjectV2AccessStatusPayload,
@@ -58,6 +59,20 @@ interface GithubProjectV2SelectionProjectRow extends QueryResultRow {
 }
 
 interface GithubProjectV2InstallationRow extends GithubSyncInstallationRow {}
+
+interface GithubProjectV2RepositoryRow extends QueryResultRow {
+  id: string;
+  installation_id: string | null;
+  workspace_id: string;
+  github_node_id: string | null;
+  owner_login: string;
+  name: string;
+  full_name: string;
+}
+
+interface GithubProjectV2RepositoryLinkRow extends QueryResultRow {
+  project_v2_id: string;
+}
 
 interface GithubProjectV2FieldRow extends QueryResultRow {
   id: string;
@@ -158,12 +173,14 @@ export class GithubProjectV2Service {
       this.readOptionalBoolean(query.closed, "closed") ?? false;
     const management =
       this.readOptionalBoolean(query.management, "management") ?? false;
+    const repositoryId = this.readUuid(query.repositoryId, "repositoryId");
     const { whereSql, values } = this.buildGithubProjectV2Filters(
       workspaceId,
       ownerLogin,
       includeClosed,
       search,
-      management
+      management,
+      repositoryId
     );
     const count = await this.countRows(
       `SELECT COUNT(*)::int AS total FROM github_projects_v2 WHERE ${whereSql}`,
@@ -171,7 +188,7 @@ export class GithubProjectV2Service {
     );
     const rows = await this.database.query<GithubProjectV2Row>(
       `
-        ${this.githubProjectV2SelectSql()}
+        ${this.githubProjectV2SelectSql(values.length)}
         WHERE ${whereSql}
         ORDER BY owner_login ASC, project_number ASC, id ASC
         LIMIT $${values.length + 1} OFFSET $${values.length + 2}
@@ -194,6 +211,7 @@ export class GithubProjectV2Service {
     workspaceId: string,
     input: {
       installationId?: unknown;
+      repositoryId?: unknown;
       projectV2Ids?: unknown;
     } | undefined
   ): Promise<GithubProjectV2SelectionPayload> {
@@ -203,6 +221,7 @@ export class GithubProjectV2Service {
       input?.installationId,
       "installationId"
     );
+    const repositoryId = this.readUuid(input?.repositoryId, "repositoryId");
     const projectV2Ids = this.readProjectV2SelectionIds(input?.projectV2Ids);
 
     const selection = await this.database.transaction(async (transaction) => {
@@ -218,6 +237,21 @@ export class GithubProjectV2Service {
       );
       if (!installation) {
         throw notFound("GitHub App installation not found");
+      }
+
+      const repository = await transaction.queryOne<GithubProjectV2RepositoryRow>(
+        `
+          SELECT id, workspace_id, installation_id, github_node_id, owner_login, name, full_name
+          FROM github_repositories
+          WHERE workspace_id = $1
+            AND id = $2
+            AND installation_id = $3
+          FOR UPDATE
+        `,
+        [workspaceId, repositoryId, installationId]
+      );
+      if (!repository) {
+        throw badRequest("GitHub repository does not belong to the installation");
       }
 
       if (projectV2Ids.length > 0) {
@@ -241,14 +275,26 @@ export class GithubProjectV2Service {
             throw badRequest("GitHub ProjectV2 does not belong to the installation");
           }
         }
+
+        const links = await transaction.query<GithubProjectV2RepositoryLinkRow>(
+          githubProjectV2RepositoryLinkSql,
+          [repositoryId, projectV2Ids]
+        );
+        const linkedProjectV2Ids = new Set(links.map((link) => link.project_v2_id));
+        for (const projectV2Id of projectV2Ids) {
+          if (!linkedProjectV2Ids.has(projectV2Id)) {
+            throw badRequest("GitHub ProjectV2 is not linked to the repository");
+          }
+        }
       }
 
       await transaction.execute(
         `
           DELETE FROM github_project_v2_selections
           WHERE installation_id = $1
+            AND repository_id = $2
         `,
-        [installationId]
+        [installationId, repositoryId]
       );
 
       if (projectV2Ids.length > 0) {
@@ -256,15 +302,16 @@ export class GithubProjectV2Service {
           `
             INSERT INTO github_project_v2_selections (
               installation_id,
+              repository_id,
               project_v2_id
             )
-            SELECT $1, UNNEST($2::uuid[])
+            SELECT $1, $2, UNNEST($3::uuid[])
           `,
-          [installationId, projectV2Ids]
+          [installationId, repositoryId, projectV2Ids]
         );
       }
 
-      return { installationId, projectV2Ids };
+      return { installationId, repositoryId, projectV2Ids };
     });
 
     if (!selection.projectV2Ids.length || !this.syncRunService) {
@@ -273,6 +320,7 @@ export class GithubProjectV2Service {
     try {
       const syncRun = await this.syncRunService.startGithubSyncRun(currentUserId, workspaceId, {
         installationId,
+        repositoryId,
         target: "full"
       });
       return { ...selection, syncRunId: syncRun.id, syncStatus: "queued", syncError: null };
@@ -287,15 +335,30 @@ export class GithubProjectV2Service {
   async discoverGithubProjectV2(
     currentUserId: string,
     workspaceId: string,
-    installationId: string
+    installationId: string,
+    input: { repositoryId?: unknown } | undefined
   ): Promise<GithubProjectV2DiscoveryPayload> {
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+    const repositoryId = this.readUuid(input?.repositoryId, "repositoryId");
     const installation = await this.database.queryOne<GithubProjectV2InstallationRow>(
       `SELECT id, workspace_id, github_installation_id, account_login, account_type
        FROM github_installations WHERE workspace_id=$1 AND id=$2`,
       [workspaceId, installationId]
     );
     if (!installation) throw notFound("GitHub App installation not found");
+    const repository = await this.database.queryOne<GithubProjectV2RepositoryRow>(
+      `
+        SELECT id, workspace_id, installation_id, github_node_id, owner_login, name, full_name
+        FROM github_repositories
+        WHERE workspace_id = $1
+          AND id = $2
+          AND installation_id = $3
+      `,
+      [workspaceId, repositoryId, installationId]
+    );
+    if (!repository) {
+      throw badRequest("GitHub repository does not belong to the installation");
+    }
     if (!this.syncExecutor || !this.tokenService || !this.configService) {
       throw badRequest("GitHub ProjectV2 discovery is unavailable");
     }
@@ -307,20 +370,21 @@ export class GithubProjectV2Service {
       });
     } catch {
       if (installation.account_type === "User") {
-        return { connectionRequired: true, installationId, projects: [] };
+        return { connectionRequired: true, installationId, repositoryId, projects: [] };
       }
       throw badRequest("GitHub ProjectV2 discovery could not be authorized");
     }
     await this.syncExecutor.discoverGithubProjectV2Metadata({
-      currentUserId, workspaceId, installation, repository: null, projectV2: null,
+      currentUserId, workspaceId, installation, repository, projectV2: null,
       githubUserAccessToken, config: this.configService.getGithubAppConfig()
     });
     const projects = await this.listGithubProjectsV2(currentUserId, workspaceId, {
-      management: true, limit: 100
+      repositoryId, management: true, limit: 100
     });
     return {
       connectionRequired: false,
       installationId,
+      repositoryId,
       projects: projects.data.filter((project) => project.installationId === installationId)
     };
   }
@@ -599,7 +663,8 @@ export class GithubProjectV2Service {
     ownerLogin: string | null,
     includeClosed: boolean,
     search: string | null,
-    management: boolean
+    management: boolean,
+    repositoryId: string | null
   ): { whereSql: string; values: unknown[] } {
     const values: unknown[] = [workspaceId];
     const filters = ["workspace_id = $1"];
@@ -620,11 +685,20 @@ export class GithubProjectV2Service {
       );
     }
 
+    values.push(repositoryId);
+    filters.push(`EXISTS (
+      SELECT 1
+      FROM github_project_v2_repositories gpr
+      WHERE gpr.project_v2_id = id
+        AND gpr.repository_id = $${values.length}
+    )`);
+
     if (!management) {
       filters.push(`EXISTS (
         SELECT 1 FROM github_project_v2_selections gps
-        WHERE gps.installation_id = installation_id
-          AND gps.project_v2_id = id
+          WHERE gps.installation_id = installation_id
+            AND gps.project_v2_id = id
+            AND gps.repository_id = $${values.length}
       )`);
     }
 
@@ -634,7 +708,7 @@ export class GithubProjectV2Service {
     };
   }
 
-  private githubProjectV2SelectSql(): string {
+  private githubProjectV2SelectSql(selectionRepositoryValueIndex: number | null = null): string {
     return `
       SELECT
         gp.id,
@@ -661,6 +735,7 @@ export class GithubProjectV2Service {
           FROM github_project_v2_selections gps
           WHERE gps.installation_id = gp.installation_id
             AND gps.project_v2_id = gp.id
+            ${selectionRepositoryValueIndex ? `AND gps.repository_id = $${selectionRepositoryValueIndex}` : ""}
         ) AS selected,
         (
           SELECT COALESCE(
@@ -807,6 +882,14 @@ export class GithubProjectV2Service {
     }
 
     return parsed;
+  }
+
+  private readOptionalUuid(value: unknown, field: string): string | null {
+    if (value === undefined || value === null || value === "") {
+      return null;
+    }
+
+    return this.readUuid(value, field);
   }
 
   private readOptionalSearch(value: unknown, field: string): string | null {

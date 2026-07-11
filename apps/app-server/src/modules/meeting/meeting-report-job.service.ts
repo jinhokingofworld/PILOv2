@@ -1,5 +1,5 @@
 import { SendMessageCommand, SQSClient } from "@aws-sdk/client-sqs";
-import { Injectable, OnModuleDestroy } from "@nestjs/common";
+import { Injectable, Logger, OnModuleDestroy } from "@nestjs/common";
 import { badRequest } from "../../common/api-error";
 
 export interface MeetingReportJobPayload {
@@ -22,6 +22,7 @@ type MeetingReportSqsClient = Pick<SQSClient, "send"> &
 
 @Injectable()
 export class MeetingReportJobService implements OnModuleDestroy {
+  private readonly logger = new Logger(MeetingReportJobService.name);
   private sqsClient: MeetingReportSqsClient | null = null;
   private sqsClientConfigKey: string | null = null;
 
@@ -30,13 +31,22 @@ export class MeetingReportJobService implements OnModuleDestroy {
     const client = this.getSqsClient(config);
 
     try {
-      await client.send(
+      this.logger.log(
+        `MeetingReport job event=enqueue_requested report_id=${payload.reportId} meeting_id=${payload.meetingId} recording_id=${payload.recordingId} retry_count=${payload.retryCount}`
+      );
+      const result = await client.send(
         new SendMessageCommand({
           QueueUrl: config.queueUrl,
           MessageBody: JSON.stringify(payload)
         })
       );
+      this.logger.log(
+        `MeetingReport job event=enqueued report_id=${payload.reportId} meeting_id=${payload.meetingId} recording_id=${payload.recordingId} retry_count=${payload.retryCount} sqs_message_id=${result.MessageId ?? "unknown"}`
+      );
     } catch {
+      this.logger.warn(
+        `MeetingReport job event=enqueue_failed report_id=${payload.reportId} meeting_id=${payload.meetingId} recording_id=${payload.recordingId} retry_count=${payload.retryCount}`
+      );
       throw badRequest("Meeting report job could not be enqueued");
     }
   }

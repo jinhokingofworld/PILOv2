@@ -63,6 +63,7 @@ interface NormalizedPagination {
 
 const MAX_PAGE_LIMIT = 100;
 const GITHUB_SYNC_TARGETS: readonly GithubSyncTarget[] = [
+  "source",
   "repositories",
   "issues",
   "pull_requests",

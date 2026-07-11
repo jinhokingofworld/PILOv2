@@ -36,6 +36,9 @@ class FakeRepository:
     ) -> None:
         self.planned = (action_name, action_input, message, model_name)
 
+    def update_progress(self, _run_id: str, _message: str) -> None:
+        return None
+
     def mark_failed(self, _run_id: str, _error_message: str) -> None:
         raise AssertionError("planner should not fail")
 
@@ -70,7 +73,7 @@ def test_canvas_agent_processor_plans_one_action() -> None:
     assert result.reason == "canvas_agent_action_planned"
     assert repository.planned == (
         "find_shapes",
-        {"query": "회의"},
+        {"query": "회의", "routingSource": "llm_planner"},
         "회의 관련 도형을 찾고 있습니다.",
         "test-model",
     )

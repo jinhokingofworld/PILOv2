@@ -4,7 +4,6 @@ import { QueryResultRow } from "pg";
 import { badRequest } from "../../common/api-error";
 import { SessionService } from "../../common/session.service";
 import { DatabaseService } from "../../database/database.service";
-import { WorkspaceService } from "../workspace/workspace.service";
 import { AuthConfigService } from "./auth-config.service";
 import { GithubLoginOAuthClient, GithubLoginUserProfile } from "./github-login-oauth.client";
 import { GoogleOAuthClient, GoogleUserProfile } from "./google-oauth.client";
@@ -42,8 +41,7 @@ export class AuthService {
     private readonly configService: AuthConfigService,
     private readonly stateService: OAuthStateService,
     private readonly googleOAuthClient: GoogleOAuthClient,
-    private readonly githubOAuthClient: GithubLoginOAuthClient,
-    private readonly workspaceService: WorkspaceService
+    private readonly githubOAuthClient: GithubLoginOAuthClient
   ) {}
 
   startLogin(
@@ -86,7 +84,6 @@ export class AuthService {
       provider === "google"
         ? await this.completeGoogleLogin(code, config)
         : await this.completeGithubLogin(code, config);
-    await this.workspaceService.ensureDefaultWorkspaceForUser(userId);
     const session = await this.createSession(userId, config.sessionTtlSeconds);
 
     return this.buildCallbackRedirect({

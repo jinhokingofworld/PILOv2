@@ -48,6 +48,7 @@ const currentUserId = "22222222-2222-4222-8222-222222222222";
 const workspaceId = "11111111-1111-4111-8111-111111111111";
 const projectV2Id = "66666666-6666-4666-8666-666666666666";
 const installationId = "33333333-3333-4333-8333-333333333333";
+const repositoryId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 const statusFieldId = "77777777-7777-4777-8777-777777777777";
 const backlogOptionId = "88888888-8888-4888-8888-888888888888";
 const doneOptionId = "99999999-9999-4999-8999-999999999999";
@@ -181,7 +182,7 @@ function assertNoSecretLookup(database) {
         assert.match(text, /owner_login = \$2/i);
         assert.match(text, /closed = false/i);
         assert.match(text, /title ILIKE/i);
-        assert.deepEqual(values, [workspaceId, "my-team", "%MVP%"]);
+        assert.deepEqual(values, [workspaceId, "my-team", "%MVP%", repositoryId]);
         return { total: "1" };
       }
     ],
@@ -189,7 +190,7 @@ function assertNoSecretLookup(database) {
       (text, values) => {
         assert.match(text, /FROM github_projects_v2/i);
         assert.match(text, /ORDER BY owner_login ASC, project_number ASC/i);
-        assert.deepEqual(values, [workspaceId, "my-team", "%MVP%", 20, 0]);
+        assert.deepEqual(values, [workspaceId, "my-team", "%MVP%", repositoryId, 20, 0]);
         return [projectRow()];
       }
     ]
@@ -200,6 +201,7 @@ function assertNoSecretLookup(database) {
 
   const projects = await service.listGithubProjectsV2(currentUserId, workspaceId, {
     ownerLogin: "my-team",
+    repositoryId,
     closed: "false",
     q: " MVP ",
     page: "1",

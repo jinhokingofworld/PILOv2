@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/card";
 import {
   loadAuthSessionEntry,
+  WorkspaceOnboardingRequiredError,
   type AuthSessionData
 } from "@/features/auth/auth-session";
 import { startProviderLogin, type LoginProvider } from "@/features/auth/api/client";
@@ -78,7 +79,11 @@ export function LoginPage() {
       .then((session) => {
         routeToEntry(router, session, readReturnUrl());
       })
-      .catch(() => undefined);
+      .catch((error) => {
+        if (error instanceof WorkspaceOnboardingRequiredError) {
+          router.replace("/workspace/new?onboarding=1");
+        }
+      });
   }, [router]);
 
   const handleStartLogin = async (provider: LoginProvider) => {

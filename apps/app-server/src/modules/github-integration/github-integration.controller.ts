@@ -19,6 +19,7 @@ import { AuthGuard } from "../../common/auth.guard";
 import { CurrentUserId } from "../../common/current-user.decorator";
 import type {
   GithubAppInstallationCallbackQuery,
+  DiscoverGithubProjectV2Request,
   GithubWebhookRequest,
   GithubOAuthCallbackQuery,
   ListGithubSyncRunsQuery,
@@ -494,10 +495,11 @@ export class GithubIntegrationController {
   async discoverGithubProjectV2(
     @CurrentUserId() currentUserId: string,
     @Param("workspaceId") workspaceId: string,
-    @Param("installationId") installationId: string
+    @Param("installationId") installationId: string,
+    @Body() body: DiscoverGithubProjectV2Request | undefined
   ): Promise<ApiSuccessResponse<GithubProjectV2DiscoveryPayload>> {
     return apiResponse(await this.githubIntegrationService.discoverGithubProjectV2(
-      currentUserId, workspaceId, installationId
+      currentUserId, workspaceId, installationId, body
     ));
   }
 

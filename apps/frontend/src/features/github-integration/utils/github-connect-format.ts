@@ -49,6 +49,7 @@ export function getGithubConnectSyncStatusLabel(status: GithubSyncStatus) {
 
 export function getGithubConnectSyncTargetLabel(target: GithubSyncTarget) {
   const labels: Record<GithubSyncTarget, string> = {
+    source: "소스",
     full: "전체",
     issues: "Issue",
     project_v2: "ProjectV2",

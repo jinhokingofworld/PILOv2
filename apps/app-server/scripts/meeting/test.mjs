@@ -50,6 +50,10 @@ class FakeDatabase {
       return { id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" };
     }
 
+    if (/UPDATE meeting_report_outbox/.test(text)) {
+      return { id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" };
+    }
+
     const next = this.queryOneRows.shift();
     if (typeof next === "function") {
       return next(text, values);

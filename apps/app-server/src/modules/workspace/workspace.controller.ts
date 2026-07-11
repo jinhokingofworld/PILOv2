@@ -12,6 +12,7 @@ import { AuthGuard } from "../../common/auth.guard";
 import { CurrentUserId } from "../../common/current-user.decorator";
 import {
   AcceptWorkspaceInvitationPayload,
+  CreateWorkspaceRequest,
   CreateWorkspaceInvitationPayload,
   CreateWorkspaceInvitationRequest,
   CurrentUserWorkspaceInvitationPayload,
@@ -34,6 +35,18 @@ export class WorkspaceController {
   ): Promise<ApiSuccessResponse<WorkspacePayload[]>> {
     const workspaces = await this.workspaceService.listWorkspaces(currentUserId);
     return apiResponse(workspaces);
+  }
+
+  @Post()
+  async createWorkspace(
+    @CurrentUserId() currentUserId: string,
+    @Body() request: CreateWorkspaceRequest
+  ): Promise<ApiSuccessResponse<WorkspacePayload>> {
+    const workspace = await this.workspaceService.createWorkspace(
+      currentUserId,
+      request
+    );
+    return apiResponse(workspace);
   }
 
   @Get(":workspaceId/members")

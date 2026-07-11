@@ -8,6 +8,7 @@ const { GithubSyncJobEnqueueError } = require("../../dist/modules/github-integra
 const currentUserId = "22222222-2222-4222-8222-222222222222";
 const workspaceId = "11111111-1111-4111-8111-111111111111";
 const installationId = "33333333-3333-4333-8333-333333333333";
+const repositoryId = "99999999-9999-4999-8999-999999999999";
 const firstProjectId = "44444444-4444-4444-8444-444444444444";
 const secondProjectId = "55555555-5555-4555-8555-555555555555";
 const otherInstallationId = "66666666-6666-4666-8666-666666666666";
@@ -22,11 +23,17 @@ class FakeDatabase {
 
   async queryOne(text, values = []) {
     this.queries.push({ method: "queryOne", text, values });
+    if (/FROM github_repositories/i.test(text)) {
+      return { id: repositoryId, installation_id: installationId };
+    }
     return this.queryOneRows.shift() ?? null;
   }
 
   async query(text, values = []) {
     this.queries.push({ method: "query", text, values });
+    if (/^\s*SELECT project_v2_id\s+FROM github_project_v2_repositories/i.test(text)) {
+      return values[1].map((project_v2_id) => ({ project_v2_id }));
+    }
     return this.queryRows.shift() ?? [];
   }
 
@@ -75,10 +82,15 @@ class ConcurrentSelectionDatabase {
           }
           return { id: installationId };
         }
+        if (/FROM github_repositories/i.test(text)) {
+          return { id: repositoryId, installation_id: installationId };
+        }
         return null;
       },
       query: async (_text, values) =>
-        values[1].map((id) => ({ id, installation_id: installationId })),
+        /github_project_v2_repositories/i.test(_text)
+          ? values[1].map((project_v2_id) => ({ project_v2_id }))
+          : values[1].map((id) => ({ id, installation_id: installationId })),
       execute: async (text, values) => {
         if (/DELETE FROM github_project_v2_selections/i.test(text)) {
           this.selections.clear();
@@ -86,7 +98,7 @@ class ConcurrentSelectionDatabase {
           return { rows: [] };
         }
         if (/INSERT INTO github_project_v2_selections/i.test(text)) {
-          for (const projectV2Id of values[1]) {
+          for (const projectV2Id of values[2]) {
             this.selections.add(projectV2Id);
           }
         }
@@ -132,11 +144,12 @@ function createService(database, syncRunService) {
   const result = await service.replaceGithubProjectV2Selections(
     currentUserId,
     workspaceId,
-    { installationId, projectV2Ids: [firstProjectId] }
+    { installationId, repositoryId, projectV2Ids: [firstProjectId] }
   );
 
   assert.deepEqual(result, {
     installationId,
+    repositoryId,
     projectV2Ids: [firstProjectId],
     syncRunId: "77777777-7777-4777-8777-777777777777",
     syncStatus: "failed",
@@ -181,11 +194,12 @@ function projectRow(id, overrides = {}) {
   const result = await service.replaceGithubProjectV2Selections(
     currentUserId,
     workspaceId,
-    { installationId, projectV2Ids: [firstProjectId, secondProjectId, firstProjectId] }
+    { installationId, repositoryId, projectV2Ids: [firstProjectId, secondProjectId, firstProjectId] }
   );
 
   assert.deepEqual(result, {
     installationId,
+    repositoryId,
     projectV2Ids: [firstProjectId, secondProjectId],
     syncRunId: null,
     syncStatus: null,
@@ -195,9 +209,9 @@ function projectRow(id, overrides = {}) {
   assert.equal(database.transactionCalls, 1);
   assert.match(database.queries[0].text, /FOR UPDATE/i);
   assert.equal(database.queries.filter(({ method }) => method === "execute").length, 2);
-  assert.match(database.queries[2].text, /DELETE FROM github_project_v2_selections/i);
-  assert.match(database.queries[3].text, /INSERT INTO github_project_v2_selections/i);
-  assert.deepEqual(database.queries[3].values, [installationId, [firstProjectId, secondProjectId]]);
+  assert.match(database.queries[4].text, /DELETE FROM github_project_v2_selections/i);
+  assert.match(database.queries[5].text, /INSERT INTO github_project_v2_selections/i);
+  assert.deepEqual(database.queries[5].values, [installationId, repositoryId, [firstProjectId, secondProjectId]]);
 }
 
 {
@@ -207,10 +221,12 @@ function projectRow(id, overrides = {}) {
   await Promise.all([
     service.replaceGithubProjectV2Selections(currentUserId, workspaceId, {
       installationId,
+      repositoryId,
       projectV2Ids: [firstProjectId]
     }),
     service.replaceGithubProjectV2Selections(currentUserId, workspaceId, {
       installationId,
+      repositoryId,
       projectV2Ids: [secondProjectId]
     })
   ]);
@@ -223,8 +239,8 @@ function projectRow(id, overrides = {}) {
 }
 
 for (const input of [
-  { installationId: "not-a-uuid", projectV2Ids: [] },
-  { installationId, projectV2Ids: ["not-a-uuid"] }
+  { installationId: "not-a-uuid", repositoryId, projectV2Ids: [] },
+  { installationId, repositoryId, projectV2Ids: ["not-a-uuid"] }
 ]) {
   const database = new FakeDatabase();
   const { service } = createService(database);
@@ -243,18 +259,19 @@ for (const input of [
   const result = await service.replaceGithubProjectV2Selections(
     currentUserId,
     workspaceId,
-    { installationId, projectV2Ids: [] }
+    { installationId, repositoryId, projectV2Ids: [] }
   );
 
   assert.deepEqual(result, {
     installationId,
+    repositoryId,
     projectV2Ids: [],
     syncRunId: null,
     syncStatus: null,
     syncError: null
   });
   assert.equal(database.queries.filter(({ method }) => method === "execute").length, 1);
-  assert.match(database.queries[1].text, /DELETE FROM github_project_v2_selections/i);
+  assert.match(database.queries[2].text, /DELETE FROM github_project_v2_selections/i);
 }
 
 {
@@ -268,7 +285,7 @@ for (const input of [
     () => service.replaceGithubProjectV2Selections(
       currentUserId,
       workspaceId,
-      { installationId, projectV2Ids: [firstProjectId] }
+      { installationId, repositoryId, projectV2Ids: [firstProjectId] }
     ),
     (error) => error.getStatus() === 400
   );
@@ -282,7 +299,7 @@ for (const input of [
   });
   const { service } = createService(database);
 
-  const result = await service.listGithubProjectsV2(currentUserId, workspaceId, {});
+  const result = await service.listGithubProjectsV2(currentUserId, workspaceId, { repositoryId });
 
   assert.equal(result.data[0].selected, true);
   assert.match(database.queries[1].text, /EXISTS\s*\(\s*SELECT 1\s*FROM github_project_v2_selections/i);

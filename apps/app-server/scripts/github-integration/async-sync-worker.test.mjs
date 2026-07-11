@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
@@ -13,6 +13,38 @@ const workspaceId = "11111111-1111-4111-8111-111111111111";
 const userId = "22222222-2222-4222-8222-222222222222";
 const installationId = "33333333-3333-4333-8333-333333333333";
 const syncRunId = "44444444-4444-4444-8444-444444444444";
+
+{
+  const workerModulePath = `${root}/apps/app-server/src/modules/github-integration/github-sync-worker.module.ts`;
+  assert.ok(existsSync(workerModulePath), "GitHub Sync Worker module must exist");
+
+  const workerMain = readFileSync(`${root}/apps/app-server/src/github-sync-worker-main.ts`, "utf8");
+  const workerModule = readFileSync(workerModulePath, "utf8");
+
+  assert.match(workerMain, /import \{ GithubSyncWorkerModule \} from "\.\/modules\/github-integration\/github-sync-worker\.module";/);
+  assert.match(workerMain, /createApplicationContext\(GithubSyncWorkerModule/);
+  assert.doesNotMatch(workerMain, /AppModule/);
+  assert.match(workerModule, /imports: \[DatabaseModule\]/);
+  for (const provider of [
+    "GithubSyncJobService",
+    "GithubIntegrationConfigService",
+    "GithubSyncExecutorService",
+    "GithubAppClient",
+    "GithubProjectV2SyncTokenService",
+    "GithubTokenEncryptionService"
+  ]) {
+    assert.match(workerModule, new RegExp(provider));
+  }
+  for (const excludedModule of [
+    "PrReviewModule",
+    "AgentModule",
+    "MeetingModule",
+    "CanvasModule",
+    "GithubIntegrationModule"
+  ]) {
+    assert.doesNotMatch(workerModule, new RegExp(excludedModule));
+  }
+}
 
 {
   const iam = readFileSync(`${root}/infra/modules/iam/main.tf`, "utf8");

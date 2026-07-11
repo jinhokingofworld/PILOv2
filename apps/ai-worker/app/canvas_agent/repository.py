@@ -135,6 +135,33 @@ class PgCanvasAgentRepository:
             ),
         )
 
+    def update_progress(self, run_id: str, message: str) -> None:
+        self.connection.execute(
+            """
+            UPDATE canvas_agent_runs
+            SET result_summary = %s,
+                result_json = %s::jsonb,
+                error_code = NULL,
+                error_message = NULL
+            WHERE id = %s
+              AND status = 'planning'
+            """,
+            (
+                message,
+                json.dumps(
+                    {
+                        "progress": {
+                            "message": message,
+                            "highlightedShapeIds": [],
+                            "targetViewport": None,
+                        }
+                    },
+                    ensure_ascii=False,
+                ),
+                run_id,
+            ),
+        )
+
     def mark_failed(self, run_id: str, error_message: str) -> None:
         self.connection.execute(
             """

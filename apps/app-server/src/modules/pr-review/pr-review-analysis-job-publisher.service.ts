@@ -44,13 +44,13 @@ export class PrReviewAnalysisJobPublisherService
 
   onModuleInit(): void {
     this.sweepInterval = setInterval(() => {
-      void this.publishDueJobs().catch(() => {
-        this.logger.error("PR Review analysis publish recovery sweep failed");
+      void this.publishDueJobs().catch((error: unknown) => {
+        this.logger.error("PR Review analysis publish recovery sweep failed", error);
       });
     }, PUBLISH_SWEEP_INTERVAL_MS);
 
-    void this.publishDueJobs().catch(() => {
-      this.logger.error("Initial PR Review analysis publish recovery sweep failed");
+    void this.publishDueJobs().catch((error: unknown) => {
+      this.logger.error("Initial PR Review analysis publish recovery sweep failed", error);
     });
   }
 
@@ -64,8 +64,8 @@ export class PrReviewAnalysisJobPublisherService
   async publishCreatedJob(jobId: string): Promise<void> {
     try {
       await this.publishOne(jobId);
-    } catch {
-      this.logger.error(`Immediate PR Review analysis publish failed job_id=${jobId}`);
+    } catch (error: unknown) {
+      this.logger.error(`Immediate PR Review analysis publish failed job_id=${jobId}`, error);
     }
   }
 
@@ -114,7 +114,11 @@ export class PrReviewAnalysisJobPublisherService
       this.logger.log(
         `PR Review analysis published job_id=${claim.id} session_id=${claim.review_session_id}`
       );
-    } catch {
+    } catch (error: unknown) {
+      this.logger.error(
+        `PR Review analysis publish enqueue failed job_id=${claim.id} session_id=${claim.review_session_id}`,
+        error
+      );
       await this.markPublishFailure(claim);
     }
   }
