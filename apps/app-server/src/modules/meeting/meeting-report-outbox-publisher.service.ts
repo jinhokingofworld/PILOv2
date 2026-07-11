@@ -57,15 +57,23 @@ export class MeetingReportOutboxPublisherService implements OnModuleInit, OnModu
     const claim = await this.claim(id);
     if (!claim) return;
     try {
+      this.logger.log(
+        `MeetingReport outbox event=claimed outbox_id=${claim.id} report_id=${claim.report_id} meeting_id=${claim.meeting_id} recording_id=${claim.recording_id} attempt_count=${claim.attempt_count}`
+      );
       const payload: MeetingReportJobPayload = {
         jobType: "meeting_report", reportId: claim.report_id, meetingId: claim.meeting_id,
         recordingId: claim.recording_id, audioFileKey: claim.audio_file_key, retryCount: 0
       };
       await this.meetingReportJobService.enqueueMeetingReportJob(payload);
-      await this.database.execute(
+      const delivered = await this.database.execute(
         `UPDATE meeting_report_outbox SET status = 'delivered', delivered_at = now(), claim_token = NULL, claimed_at = NULL, error_code = NULL, error_message = NULL
          WHERE id = $1 AND status = 'publishing' AND claim_token = $2`, [claim.id, claim.claim_token]
       );
+      if (delivered.rowCount) {
+        this.logger.log(
+          `MeetingReport outbox event=delivered outbox_id=${claim.id} report_id=${claim.report_id} meeting_id=${claim.meeting_id} recording_id=${claim.recording_id} attempt_count=${claim.attempt_count}`
+        );
+      }
     } catch {
       await this.failOrRetry(claim);
     }
@@ -89,21 +97,32 @@ export class MeetingReportOutboxPublisherService implements OnModuleInit, OnModu
   private async failOrRetry(claim: Claim): Promise<void> {
     const attempts = Number(claim.attempt_count);
     if (attempts <= MAX_RETRIES) {
-      await this.database.execute(
+      const retried = await this.database.execute(
         `UPDATE meeting_report_outbox SET status = 'pending', next_attempt_at = $2, claim_token = NULL, claimed_at = NULL, error_code = 'MEETING_REPORT_ENQUEUE_FAILED', error_message = 'Meeting report job could not be enqueued'
          WHERE id = $1 AND status = 'publishing' AND claim_token = $3`,
         [claim.id, new Date(Date.now() + RETRY_DELAYS_MS[attempts - 1]), claim.claim_token]
       );
+      if (retried.rowCount) {
+        this.logger.warn(
+          `MeetingReport outbox event=retry_scheduled outbox_id=${claim.id} report_id=${claim.report_id} meeting_id=${claim.meeting_id} recording_id=${claim.recording_id} attempt_count=${attempts} failure_step=STT`
+        );
+      }
       return;
     }
-    await this.database.transaction(async transaction => {
+    const failed = await this.database.transaction(async transaction => {
       const outbox = await transaction.queryOne<{ report_id: string }>(
         `UPDATE meeting_report_outbox SET status = 'failed', claim_token = NULL, claimed_at = NULL, error_code = 'MEETING_REPORT_ENQUEUE_FAILED', error_message = 'Meeting report job could not be enqueued'
          WHERE id = $1 AND status = 'publishing' AND claim_token = $2 RETURNING report_id`, [claim.id, claim.claim_token]);
-      if (!outbox) return;
+      if (!outbox) return false;
       await transaction.execute(
         `UPDATE meeting_reports SET status = 'FAILED', failed_step = 'STT', error_message = 'Meeting report job could not be enqueued', updated_at = now()
          WHERE id = $1 AND status = 'PROCESSING'`, [outbox.report_id]);
+      return true;
     });
+    if (failed) {
+      this.logger.warn(
+        `MeetingReport outbox event=retry_exhausted outbox_id=${claim.id} report_id=${claim.report_id} meeting_id=${claim.meeting_id} recording_id=${claim.recording_id} attempt_count=${attempts} failure_step=STT`
+      );
+    }
   }
 }
