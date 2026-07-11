@@ -33,6 +33,7 @@ export type CanvasAgentDraftStatus =
   | "applied"
   | "discarded"
   | "expired";
+export type CanvasAgentPresentationMode = "interactive" | "background";
 
 export interface CanvasAgentRunRow extends QueryResultRow {
   id: string;
@@ -110,6 +111,7 @@ export interface CanvasAgentViewport {
 export interface CreateCanvasAgentRunRequest {
   prompt?: unknown;
   selectedShapeIds?: unknown;
+  presentationMode?: unknown;
   toolHelpMode?: unknown;
   viewport?: unknown;
   clientRequestId?: unknown;
@@ -120,6 +122,7 @@ export interface ApplyCanvasAgentDraftRequest {
 }
 
 export interface CanvasAgentRequestContext {
+  presentationMode: CanvasAgentPresentationMode;
   selectedShapeIds: string[];
   viewport: CanvasAgentViewport | null;
 }
@@ -207,6 +210,7 @@ export interface CanvasAgentRunPayload {
   id: string;
   workspaceId: string;
   canvasId: string;
+  presentationMode: CanvasAgentPresentationMode;
   status: CanvasAgentRunStatus;
   prompt: string;
   message: string | null;

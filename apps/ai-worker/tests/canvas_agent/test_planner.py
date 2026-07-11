@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from app.canvas_agent.planner import CanvasAgentPlannerError, parse_canvas_agent_plan
+from app.canvas_agent.planning.planner import CanvasAgentPlannerError, parse_canvas_agent_plan
 
 
 def test_parse_canvas_agent_plan_accepts_bounded_action() -> None:

@@ -3,6 +3,7 @@
 import {
   ArrowRight,
   Bookmark,
+  Bot,
   Circle,
   Code2,
   Eraser,
@@ -31,6 +32,7 @@ import {
   useRef,
   useState,
   type FormEvent,
+  type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
@@ -81,7 +83,7 @@ type ToolButtonProps = {
   agentTarget?: string;
   children: ReactNode;
   disabled?: boolean;
-  onClick: () => void;
+  onClick: (event: ReactMouseEvent<HTMLButtonElement>) => void;
 };
 
 type CanvasUrlInsertTool = Extract<PiloInsertableTool, "bookmark" | "embed">;
@@ -448,6 +450,20 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
     canvasActions?.groupSelection();
   }, [canvasActions]);
 
+  const openCanvasAiChat = useCallback(
+    (event: ReactMouseEvent<HTMLButtonElement>) => {
+      const buttonBounds = event.currentTarget.getBoundingClientRect();
+
+      closePopover();
+      setActiveCanvasTool("select");
+      canvasActions?.openCanvasAiChat({
+        x: buttonBounds.left + buttonBounds.width / 2,
+        y: buttonBounds.top + buttonBounds.height,
+      });
+    },
+    [canvasActions, closePopover],
+  );
+
   const markCanvasUiEvent = useCallback(
     (event: ReactPointerEvent<HTMLElement>) => {
       canvasActions?.markUiEventAsHandled(event);
@@ -720,6 +736,13 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
               className="canvas-tool-popover canvas-draw-popover"
               aria-label="더보기 도구"
             >
+              <ToolButton
+                label="Canvas AI"
+                agentTarget="toolbar.canvas_ai"
+                onClick={openCanvasAiChat}
+              >
+                <Bot />
+              </ToolButton>
               <ToolButton label="이미지" agentTarget="toolbar.more.image" onClick={() => openMediaFilePicker("image")}>
                 <Image />
               </ToolButton>

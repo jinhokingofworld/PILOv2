@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.canvas_agent.semantic_router import (
+from app.canvas_agent.routing.semantic_router import (
     NON_SHAPE_SEARCH_PROTOTYPES,
     SHAPE_SEARCH_PROTOTYPES,
     CanvasSemanticRouter,
