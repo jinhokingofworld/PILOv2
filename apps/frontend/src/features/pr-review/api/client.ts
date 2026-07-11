@@ -1,6 +1,7 @@
 import type {
   ApplyPrReviewConflictResolutionInput,
   ApplyPrReviewConflictsInput,
+  CreatePrReviewConflictSuggestionInput,
   ListPrReviewPullRequestsQuery,
   ListPrReviewRepositoriesQuery,
   MergePrReviewSessionInput,
@@ -460,11 +461,15 @@ export function createPrReviewApiClient({
 
     async createReviewFileConflictSuggestion(
       workspaceId: string,
-      reviewFileId: string
+      reviewFileId: string,
+      input?: CreatePrReviewConflictSuggestionInput
     ) {
       return requestPrReviewData<PrReviewConflictSuggestion>(
         `${reviewFileGithubPath(workspaceId, reviewFileId)}/conflict-suggestion`,
-        { method: "POST" },
+        {
+          body: input ? JSON.stringify(input) : undefined,
+          method: "POST"
+        },
         requestOptions
       );
     },

@@ -70,4 +70,30 @@ assert.equal(
   "Bearer pilo-access-token"
 );
 
+const suggestionInput = {
+  currentDraft: {
+    resolvedContent: "const first = true;\n",
+    hunks: [
+      {
+        hunkId: "hunk-1",
+        source: "manual",
+        resolvedText: "const first = true;"
+      }
+    ]
+  }
+};
+await client.createReviewFileConflictSuggestion(
+  "workspace-id",
+  "first-file",
+  suggestionInput
+);
+
+assert.equal(requests.length, 2);
+assert.equal(
+  requests[1].url,
+  "https://api.example.test/api/v1/workspaces/workspace-id/github/review-files/first-file/conflict-suggestion"
+);
+assert.equal(requests[1].init.method, "POST");
+assert.deepEqual(JSON.parse(requests[1].init.body), suggestionInput);
+
 console.log("PR Review multi-file conflict client tests passed");

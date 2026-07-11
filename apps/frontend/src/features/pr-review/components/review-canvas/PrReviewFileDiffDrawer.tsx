@@ -33,8 +33,12 @@ import type { createPrReviewApiClient } from "@/features/pr-review/api/client";
 import { PrReviewResolvedCodeEditor } from "./PrReviewResolvedCodeEditor";
 import type { PrReviewConflictDraft } from "./pr-review-conflict-drafts";
 import {
+  applyAllPrReviewConflictSuggestion,
+  buildPrReviewConflictSuggestionInput,
   buildConflictResolutionDraft,
+  getConflictResolutionText,
   isConflictResolutionComplete,
+  updatePrReviewConflictSuggestion,
   type PrReviewConflictResolutionChoice
 } from "./pr-review-conflict-resolution";
 import {
@@ -298,6 +302,9 @@ export function PrReviewFileDiffDrawer({
   const conflictSuggestion = conflictDraft?.suggestion ?? null;
   const resolvedContentDraft = conflictDraft?.resolvedContent ?? "";
   const resolutionChoices = conflictDraft?.resolutionChoices ?? {};
+  const acceptedAiResolvedTexts =
+    conflictDraft?.acceptedAiResolvedTexts ?? {};
+  const manualResolvedTexts = conflictDraft?.manualResolvedTexts ?? {};
   const isResolvedDraftCustomized = conflictDraft?.isCustomized ?? false;
   const commentSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
@@ -436,7 +443,10 @@ export function PrReviewFileDiffDrawer({
   const decisionDisabled = decisionDisabledReason !== null;
   const selectedConflictHunk =
     conflictFile?.hunks[selectedConflictHunkIndex] ?? null;
-  const aiResolvedHunks = conflictSuggestion?.resolvedHunks ?? [];
+  const aiResolvedHunks =
+    conflictSuggestion?.status === "suggested"
+      ? conflictSuggestion.resolvedHunks
+      : [];
   const resolvedHunkCount = conflictFile
     ? conflictFile.hunks.filter((hunk) => Boolean(resolutionChoices[hunk.id])).length
     : 0;
@@ -444,7 +454,8 @@ export function PrReviewFileDiffDrawer({
     ? isConflictResolutionComplete({
         hunks: conflictFile.hunks,
         choices: resolutionChoices,
-        aiResolvedHunks
+        acceptedAiResolvedTexts,
+        manualResolvedTexts
       })
     : false;
   const drawerModeLabel = decisionDisabled
@@ -454,7 +465,8 @@ export function PrReviewFileDiffDrawer({
   const rebuildResolvedDraft = useCallback(
     (
       nextChoices: Record<string, PrReviewConflictResolutionChoice>,
-      nextAiResolvedHunks = aiResolvedHunks
+      nextAcceptedAiResolvedTexts = acceptedAiResolvedTexts,
+      nextManualResolvedTexts = manualResolvedTexts
     ) => {
       if (!conflictFile || !conflictDraft) {
         return;
@@ -463,19 +475,23 @@ export function PrReviewFileDiffDrawer({
       onConflictDraftChange(conflictFile.reviewFileId, {
         ...conflictDraft,
         resolutionChoices: nextChoices,
+        acceptedAiResolvedTexts: nextAcceptedAiResolvedTexts,
+        manualResolvedTexts: nextManualResolvedTexts,
         resolvedContent: buildConflictResolutionDraft({
           headContent: conflictFile.headContent,
           hunks: conflictFile.hunks,
           choices: nextChoices,
-          aiResolvedHunks: nextAiResolvedHunks
+          acceptedAiResolvedTexts: nextAcceptedAiResolvedTexts,
+          manualResolvedTexts: nextManualResolvedTexts
         }),
         isCustomized: false
       });
     },
     [
-      aiResolvedHunks,
+      acceptedAiResolvedTexts,
       conflictDraft,
       conflictFile,
+      manualResolvedTexts,
       onConflictDraftChange
     ]
   );
@@ -486,15 +502,57 @@ export function PrReviewFileDiffDrawer({
         return;
       }
 
+      const hunk = conflictFile.hunks.find((candidate) => candidate.id === hunkId);
+      if (!hunk) {
+        return;
+      }
+
+      let nextAcceptedAiResolvedTexts = acceptedAiResolvedTexts;
+      let nextManualResolvedTexts = manualResolvedTexts;
+      if (choice === "ai") {
+        const suggestionText = aiResolvedHunks.find(
+          (candidate) => candidate.hunkId === hunkId
+        )?.resolvedText;
+        if (suggestionText === undefined) {
+          return;
+        }
+        nextAcceptedAiResolvedTexts = {
+          ...acceptedAiResolvedTexts,
+          [hunkId]: suggestionText
+        };
+      }
+      if (choice === "manual" && !Object.hasOwn(manualResolvedTexts, hunkId)) {
+        const currentChoice = resolutionChoices[hunkId];
+        const initialText = currentChoice
+          ? getConflictResolutionText({
+              hunk,
+              choice: currentChoice,
+              acceptedAiResolvedTexts,
+              manualResolvedTexts
+            })
+          : null;
+        nextManualResolvedTexts = {
+          ...manualResolvedTexts,
+          [hunkId]: initialText ?? hunk.incomingText
+        };
+      }
+
       const nextChoices = {
         ...resolutionChoices,
         [hunkId]: choice
       };
-      rebuildResolvedDraft(nextChoices);
+      rebuildResolvedDraft(
+        nextChoices,
+        nextAcceptedAiResolvedTexts,
+        nextManualResolvedTexts
+      );
     },
     [
+      acceptedAiResolvedTexts,
+      aiResolvedHunks,
       conflictFile,
       isResolvedDraftCustomized,
+      manualResolvedTexts,
       rebuildResolvedDraft,
       resolutionChoices
     ]
@@ -503,6 +561,31 @@ export function PrReviewFileDiffDrawer({
   const handleResetCustomizedDraft = useCallback(() => {
     rebuildResolvedDraft(resolutionChoices);
   }, [rebuildResolvedDraft, resolutionChoices]);
+
+  const handleManualResolutionChange = useCallback(
+    (hunkId: string, resolvedText: string) => {
+      if (!conflictFile || isResolvedDraftCustomized) {
+        return;
+      }
+
+      const nextChoices = {
+        ...resolutionChoices,
+        [hunkId]: "manual" as const
+      };
+      rebuildResolvedDraft(nextChoices, acceptedAiResolvedTexts, {
+        ...manualResolvedTexts,
+        [hunkId]: resolvedText
+      });
+    },
+    [
+      acceptedAiResolvedTexts,
+      conflictFile,
+      isResolvedDraftCustomized,
+      manualResolvedTexts,
+      rebuildResolvedDraft,
+      resolutionChoices
+    ]
+  );
 
   const handleCreateConflictSuggestion = useCallback(async () => {
     if (!conflictFile || conflictSuggestionStatus === "loading") {
@@ -515,21 +598,17 @@ export function PrReviewFileDiffDrawer({
     try {
       const suggestion = await apiClient.createReviewFileConflictSuggestion(
         workspaceId,
-        conflictFile.reviewFileId
+        conflictFile.reviewFileId,
+        conflictDraft
+          ? buildPrReviewConflictSuggestionInput(conflictFile, conflictDraft)
+          : undefined
       );
       if (!conflictDraft) {
         throw new Error("Conflict draft is not ready");
       }
       onConflictDraftChange(conflictFile.reviewFileId, {
-        ...conflictDraft,
-        suggestion,
-        resolutionChoices: Object.fromEntries(
-          conflictFile.hunks.map((hunk) => [hunk.id, "ai"])
-        ) as Record<string, PrReviewConflictResolutionChoice>,
-        resolvedContent: suggestion.resolvedContent,
-        isCustomized: false
+        ...updatePrReviewConflictSuggestion(conflictDraft, suggestion)
       });
-      setConflictWorkspaceView("resolved");
       setConflictSuggestionStatus("ready");
     } catch (error) {
       setConflictSuggestionStatus("error");
@@ -542,6 +621,36 @@ export function PrReviewFileDiffDrawer({
     conflictSuggestionStatus,
     onConflictDraftChange,
     workspaceId
+  ]);
+
+  const handleApplyAllAiSuggestions = useCallback(() => {
+    if (
+      !conflictFile ||
+      !conflictSuggestion ||
+      conflictSuggestion.status === "invalid" ||
+      isResolvedDraftCustomized
+    ) {
+      return;
+    }
+
+    if (!conflictDraft) {
+      return;
+    }
+    onConflictDraftChange(
+      conflictFile.reviewFileId,
+      applyAllPrReviewConflictSuggestion(
+        conflictFile,
+        conflictDraft,
+        conflictSuggestion
+      )
+    );
+    setConflictWorkspaceView("resolved");
+  }, [
+    conflictDraft,
+    conflictFile,
+    conflictSuggestion,
+    isResolvedDraftCustomized,
+    onConflictDraftChange
   ]);
 
   useEffect(() => {
@@ -636,16 +745,23 @@ export function PrReviewFileDiffDrawer({
                     }
                     baseBranch={baseBranch}
                     choice={resolutionChoices[selectedConflictHunk.id] ?? null}
+                    filePath={file.filePath}
                     headBranch={headBranch}
                     hunk={selectedConflictHunk}
                     hunkCount={conflictFile.hunks.length}
                     hunkIndex={selectedConflictHunkIndex}
                     isBaseComparisonOpen={isBaseComparisonOpen}
                     isChoiceDisabled={isResolvedDraftCustomized}
+                    manualResolvedText={
+                      manualResolvedTexts[selectedConflictHunk.id] ?? ""
+                    }
                     onChoiceChange={(choice) =>
                       handleResolutionChoiceChange(selectedConflictHunk.id, choice)
                     }
                     onHunkIndexChange={setSelectedConflictHunkIndex}
+                    onManualResolvedTextChange={(value) =>
+                      handleManualResolutionChange(selectedConflictHunk.id, value)
+                    }
                     onResetCustomizedDraft={handleResetCustomizedDraft}
                     onToggleBaseComparison={() =>
                       setIsBaseComparisonOpen((current) => !current)
@@ -695,6 +811,7 @@ export function PrReviewFileDiffDrawer({
                 scheduleCommentSave(value);
               }}
               onCommentBlur={flushCommentSave}
+              onApplyAllAiSuggestions={handleApplyAllAiSuggestions}
               onCreateConflictSuggestion={handleCreateConflictSuggestion}
               onDecisionStatusChange={handleDecisionStatusChange}
               onOpenResolvedDraft={() => setConflictWorkspaceView("resolved")}
@@ -817,6 +934,7 @@ function ReviewNodePanel({
   isResolvedDraftCustomized,
   onCommentBlur,
   onCommentChange,
+  onApplyAllAiSuggestions,
   onCreateConflictSuggestion,
   onDecisionStatusChange,
   onOpenResolvedDraft,
@@ -838,6 +956,7 @@ function ReviewNodePanel({
   isResolvedDraftCustomized: boolean;
   onCommentBlur: () => void;
   onCommentChange: (value: string) => void;
+  onApplyAllAiSuggestions: () => void;
   onCreateConflictSuggestion: () => void;
   onDecisionStatusChange: (status: PrReviewFileDecisionStatus) => void;
   onOpenResolvedDraft: () => void;
@@ -887,6 +1006,7 @@ function ReviewNodePanel({
             conflictSuggestionErrorMessage={conflictSuggestionErrorMessage}
             conflictSuggestionStatus={conflictSuggestionStatus}
             isResolvedDraftCustomized={isResolvedDraftCustomized}
+            onApplyAllAiSuggestions={onApplyAllAiSuggestions}
             onCreateConflictSuggestion={onCreateConflictSuggestion}
             onOpenResolvedDraft={onOpenResolvedDraft}
             reason={decisionDisabledReason}
@@ -1023,6 +1143,7 @@ function ConflictResolutionPanel({
   conflictSuggestionErrorMessage,
   conflictSuggestionStatus,
   isResolvedDraftCustomized,
+  onApplyAllAiSuggestions,
   onCreateConflictSuggestion,
   onOpenResolvedDraft,
   reason,
@@ -1035,6 +1156,7 @@ function ConflictResolutionPanel({
   conflictSuggestionErrorMessage: string | null;
   conflictSuggestionStatus: ConflictSuggestionLoadStatus;
   isResolvedDraftCustomized: boolean;
+  onApplyAllAiSuggestions: () => void;
   onCreateConflictSuggestion: () => void;
   onOpenResolvedDraft: () => void;
   reason: string;
@@ -1072,26 +1194,36 @@ function ConflictResolutionPanel({
                     : "초안 없음"}
                 </p>
               </div>
-              <Button
-                disabled={isSuggestionLoading || isResolvedDraftCustomized}
-                onClick={onCreateConflictSuggestion}
-                size="sm"
-                type="button"
-                variant="outline"
-              >
-                {isSuggestionLoading ? (
-                  <Loader2 className="size-3.5 animate-spin" />
-                ) : (
-                  <Sparkles className="size-3.5" />
-                )}
-                AI 해결안 생성
-              </Button>
+              <div className="flex flex-wrap gap-2">
+                {conflictSuggestion ? (
+                  <Button
+                    disabled={
+                      conflictSuggestion.status === "invalid" ||
+                      isResolvedDraftCustomized
+                    }
+                    onClick={onApplyAllAiSuggestions}
+                    size="sm"
+                    type="button"
+                  >
+                    AI 제안 전체 적용
+                  </Button>
+                ) : null}
+                <Button
+                  disabled={isSuggestionLoading}
+                  onClick={onCreateConflictSuggestion}
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                >
+                  {isSuggestionLoading ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : (
+                    <Sparkles className="size-3.5" />
+                  )}
+                  {conflictSuggestion ? "AI 제안 갱신" : "AI 해결안 생성"}
+                </Button>
+              </div>
             </div>
-            {isResolvedDraftCustomized ? (
-              <p className="mt-3 text-xs leading-5 text-blue-700">
-                직접 편집 내용을 보호하기 위해 AI 재생성을 잠갔습니다. Conflict 비교에서 선택 기반 코드로 복원하면 다시 생성할 수 있습니다.
-              </p>
-            ) : null}
             {conflictSuggestionErrorMessage ? (
               <p className="mt-3 text-xs leading-5 text-rose-600">
                 {conflictSuggestionErrorMessage}
@@ -1459,28 +1591,34 @@ function ConflictHunkComparison({
   aiResolvedText,
   baseBranch,
   choice,
+  filePath,
   headBranch,
   hunk,
   hunkCount,
   hunkIndex,
   isBaseComparisonOpen,
   isChoiceDisabled,
+  manualResolvedText,
   onChoiceChange,
   onHunkIndexChange,
+  onManualResolvedTextChange,
   onResetCustomizedDraft,
   onToggleBaseComparison
 }: {
   aiResolvedText: string | null;
   baseBranch: string | null;
   choice: PrReviewConflictResolutionChoice | null;
+  filePath: string;
   headBranch: string | null;
   hunk: PrReviewConflictHunk;
   hunkCount: number;
   hunkIndex: number;
   isBaseComparisonOpen: boolean;
   isChoiceDisabled: boolean;
+  manualResolvedText: string;
   onChoiceChange: (choice: PrReviewConflictResolutionChoice) => void;
   onHunkIndexChange: (index: number) => void;
+  onManualResolvedTextChange: (value: string) => void;
   onResetCustomizedDraft: () => void;
   onToggleBaseComparison: () => void;
 }) {
@@ -1494,7 +1632,8 @@ function ConflictHunkComparison({
     { label: "AI 사용", value: "ai", disabled: aiResolvedText === null },
     { label: "PR 브랜치 선택", value: "pr" },
     { label: "대상 브랜치 선택", value: "target" },
-    { label: "둘 다 선택", value: "both" }
+    { label: "둘 다 선택", value: "both" },
+    { label: "직접 편집", value: "manual" }
   ];
 
   return (
@@ -1560,10 +1699,10 @@ function ConflictHunkComparison({
       {isChoiceDisabled ? (
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3">
           <p className="text-sm leading-6 text-blue-900">
-            최종 코드를 직접 편집했습니다. 구간 선택을 바꾸려면 직접 편집 내용을 초기화해야 합니다.
+            최종 파일 전체를 직접 편집했습니다. hunk 해결 방식을 바꾸려면 전체 편집 내용을 초기화해야 합니다.
           </p>
           <Button onClick={onResetCustomizedDraft} size="sm" type="button" variant="outline">
-            선택 기반 코드로 복원
+            hunk 결과로 복원
           </Button>
         </div>
       ) : null}
@@ -1579,10 +1718,32 @@ function ConflictHunkComparison({
             variant={choice === option.value ? "default" : "outline"}
           >
             {option.value === "ai" ? <Sparkles className="size-3.5" /> : null}
+            {option.value === "manual" ? <Pencil className="size-3.5" /> : null}
             {option.label}
           </Button>
         ))}
       </div>
+
+      {choice === "manual" ? (
+        <div className="mt-4">
+          <p className="flex items-center gap-2 text-sm font-semibold text-slate-950">
+            <Pencil className="size-4" />
+            이 hunk 직접 편집
+          </p>
+          <div className="mt-2 h-64 overflow-hidden rounded-md border border-slate-200 bg-white">
+            <PrReviewResolvedCodeEditor
+              changedLineNumbers={[]}
+              filePath={filePath}
+              key={hunk.id}
+              onChange={onManualResolvedTextChange}
+              readOnly={isChoiceDisabled}
+              revealLine={null}
+              revealRequestId={0}
+              value={manualResolvedText}
+            />
+          </div>
+        </div>
+      ) : null}
 
       <ConflictUnifiedCodePane
         aiResolvedText={aiResolvedText}

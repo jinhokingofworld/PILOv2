@@ -364,6 +364,24 @@ export type PrReviewConflictResolvedHunk = {
   resolvedText: string;
 };
 
+export type PrReviewConflictDraftSource =
+  | "ai"
+  | "pr"
+  | "target"
+  | "both"
+  | "manual";
+
+export type CreatePrReviewConflictSuggestionInput = {
+  currentDraft?: {
+    resolvedContent: string;
+    hunks: Array<{
+      hunkId: string;
+      source: PrReviewConflictDraftSource;
+      resolvedText: string;
+    }>;
+  };
+};
+
 export type ApplyPrReviewConflictResolutionInput = {
   resolvedContent: string;
   expectedHeadSha: string;
