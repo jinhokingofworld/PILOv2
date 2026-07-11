@@ -46,10 +46,55 @@ jobs:
     permissions:
       contents: read
       id-token: write
+    env:
+      TF_VAR_project_name: ${{ vars.TF_PLAN_PROJECT_NAME }}
+      TF_VAR_environment: ${{ vars.TF_PLAN_ENVIRONMENT }}
+      TF_VAR_aws_region: ${{ vars.TF_PLAN_AWS_REGION }}
+      TF_VAR_domain_name: ${{ vars.TF_PLAN_DOMAIN_NAME }}
+      TF_VAR_frontend_domain_name: ${{ vars.TF_PLAN_FRONTEND_DOMAIN_NAME }}
+      TF_VAR_api_domain_name: ${{ vars.TF_PLAN_API_DOMAIN_NAME }}
+      TF_VAR_hosted_zone_id: ${{ vars.TF_PLAN_HOSTED_ZONE_ID }}
+      TF_VAR_create_dns_records: ${{ vars.TF_PLAN_CREATE_DNS_RECORDS }}
+      TF_VAR_enable_nat_gateway: ${{ vars.TF_PLAN_ENABLE_NAT_GATEWAY }}
+      TF_VAR_ecs_assign_public_ip: ${{ vars.TF_PLAN_ECS_ASSIGN_PUBLIC_IP }}
+      TF_VAR_app_server_desired_count: ${{ vars.TF_PLAN_APP_SERVER_DESIRED_COUNT }}
+      TF_VAR_realtime_server_desired_count: ${{ vars.TF_PLAN_REALTIME_SERVER_DESIRED_COUNT }}
+      TF_VAR_ai_worker_desired_count: ${{ vars.TF_PLAN_AI_WORKER_DESIRED_COUNT }}
+      TF_VAR_github_owner: ${{ vars.TF_PLAN_GITHUB_OWNER }}
+      TF_VAR_github_repo: ${{ vars.TF_PLAN_GITHUB_REPO }}
+      TF_VAR_livekit_ami_id: ${{ vars.LIVEKIT_AMI_ID }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Check required Terraform inputs
+        run: |
+          required_inputs=(
+            TF_VAR_project_name
+            TF_VAR_environment
+            TF_VAR_aws_region
+            TF_VAR_domain_name
+            TF_VAR_frontend_domain_name
+            TF_VAR_api_domain_name
+            TF_VAR_hosted_zone_id
+            TF_VAR_create_dns_records
+            TF_VAR_enable_nat_gateway
+            TF_VAR_ecs_assign_public_ip
+            TF_VAR_app_server_desired_count
+            TF_VAR_realtime_server_desired_count
+            TF_VAR_ai_worker_desired_count
+            TF_VAR_github_owner
+            TF_VAR_github_repo
+            TF_VAR_livekit_ami_id
+          )
+
+          for input in "${required_inputs[@]}"; do
+            if [ -z "${!input}" ]; then
+              echo "Missing required Terraform input: $input" >&2
+              exit 1
+            fi
+          done
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
