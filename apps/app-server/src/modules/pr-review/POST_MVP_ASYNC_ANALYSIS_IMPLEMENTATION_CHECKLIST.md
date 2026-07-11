@@ -42,7 +42,7 @@
 | 2-B | `analyzing` 세션 생성과 durable Job enqueue | #659 | #664 | 완료 |
 | 2-C | AI Worker PR 분석 processor | #666 | #668 | 완료 |
 | 2-D | 분석 결과 원자 저장과 stale/idempotency guard | #670 | #699 | 진행 |
-| 2-E | Review room 분석 진행/실패/retry UX | TBD | TBD | 대기 |
+| 2-E | Review room 분석 진행/실패/retry UX | #703 | TBD | 진행 |
 | 2-F | 운영 복구, 관측성, 배포 검증 | TBD | TBD | 대기 |
 
 ## 공통 Stop Gate
@@ -217,30 +217,32 @@
 
 ## 2-E Frontend Analysis Status UX
 
+> Tracking: Issue #703. 2초 polling, 5분 분석 지연 안내, 완료/실패 전환과 retry UX를 이 slice에서 구현한다.
+
 목표:
 
 - 사용자가 분석 진행, 완료, 실패와 다음 행동을 Review room에서 알 수 있다.
 
 작업 체크리스트:
 
-- [ ] 세션 생성 응답이 `analyzing`이면 분석 대기 화면으로 진입한다.
-- [ ] 대기 화면에서 PR 제목/브랜치와 분석 중 상태를 보여준다.
-- [ ] 확정된 간격과 최대 시간으로 session 상태를 polling한다.
-- [ ] `reviewing` 전환 후 summary/canvas를 한 번만 불러와 Review room을 연다.
-- [ ] `failed` 상태에서 안전한 오류 메시지와 재시도 action을 제공한다.
-- [ ] stale head 실패는 GitHub 동기화/새 세션 생성 등 실제 다음 행동을 안내한다.
-- [ ] polling 네트워크 오류와 분석 자체 실패를 구분한다.
-- [ ] 화면 이탈/unmount 시 polling과 진행 중 요청을 취소한다.
-- [ ] 중복 탭/중복 클릭이 새 Job을 불필요하게 만들지 않게 한다.
-- [ ] 새로고침 후에도 session 상태 조회로 진행 화면을 복구한다.
-- [ ] 로딩 UI가 빈 canvas 또는 일반 Internal server error로 보이지 않게 한다.
+- [x] 세션 생성 응답이 `analyzing`이면 분석 대기 화면으로 진입한다.
+- [x] 대기 화면에서 PR 제목/브랜치와 분석 중 상태를 보여준다.
+- [x] 확정된 간격과 최대 시간으로 session 상태를 polling한다.
+- [x] `reviewing` 전환 후 summary/canvas를 한 번만 불러와 Review room을 연다.
+- [x] `failed` 상태에서 안전한 오류 메시지와 재시도 action을 제공한다.
+- [x] stale head 실패는 GitHub 동기화/새 세션 생성 등 실제 다음 행동을 안내한다.
+- [x] polling 네트워크 오류와 분석 자체 실패를 구분한다.
+- [x] 화면 이탈/unmount 시 polling과 진행 중 요청을 취소한다.
+- [x] 중복 탭/중복 클릭이 새 Job을 불필요하게 만들지 않게 한다.
+- [x] 새로고침 후에도 session 상태 조회로 진행 화면을 복구한다.
+- [x] 로딩 UI가 빈 canvas 또는 일반 Internal server error로 보이지 않게 한다.
 
 완료 기준:
 
-- [ ] 사용자는 세션 생성 직후 request timeout 없이 분석 진행 상태를 본다.
-- [ ] 분석 완료 시 별도 수동 새로고침 없이 Review room이 열린다.
-- [ ] 실패 시 원인 범주와 가능한 다음 행동을 확인할 수 있다.
-- [ ] polling이 완료/실패/화면 이탈 후 남지 않는다.
+- [x] 사용자는 세션 생성 직후 request timeout 없이 분석 진행 상태를 본다.
+- [x] 분석 완료 시 별도 수동 새로고침 없이 Review room이 열린다.
+- [x] 실패 시 원인 범주와 가능한 다음 행동을 확인할 수 있다.
+- [x] polling이 완료/실패/화면 이탈 후 남지 않는다.
 
 ## 2-F Recovery, Observability, and Deployment
 

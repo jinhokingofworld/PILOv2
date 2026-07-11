@@ -137,9 +137,10 @@ comment, PR merge/close, ProjectV2 write는 이 문서의 범위가 아니다.
 ### 분석 상태와 조회 규칙
 
 `GET /workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}`는 모든 session
-상태에서 `200 OK`로 아래 필드를 포함한다. Frontend는 이 endpoint를 polling해 분석 상태를
-갱신한다. 초기 polling 간격과 최대 대기 시간은 Frontend 구현 PR에서 정하며, realtime은
-후속 범위다.
+상태에서 `200 OK`로 아래 필드를 포함한다. Frontend는 `analyzing` 상태에서 이 endpoint를
+2초 간격으로 polling한다. 5분이 지나도 `analyzing`이면 실패로 바꾸지 않고 분석 지연 안내를
+표시한 채 polling을 유지하며, `reviewing` 또는 `failed`가 되면 polling을 중지한다.
+realtime은 후속 범위다.
 
 ```json
 {

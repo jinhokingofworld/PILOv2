@@ -21,6 +21,17 @@ const prReviewApiClient = await readFile(
   new URL("../../src/features/pr-review/api/client.ts", import.meta.url),
   "utf8"
 );
+const prReviewAnalysisStatus = await readFile(
+  new URL("../../src/features/pr-review/analysis-status.ts", import.meta.url),
+  "utf8"
+);
+const prReviewAnalysisStatusComponent = await readFile(
+  new URL(
+    "../../src/features/pr-review/components/pr-review-analysis-status.tsx",
+    import.meta.url
+  ),
+  "utf8"
+);
 const prReviewPanel = await readFile(
   new URL(
     "../../src/features/pr-review/components/pr-review-panel.tsx",
@@ -102,6 +113,8 @@ const prReviewShapeUtils = await readFile(
 assert.match(prReviewTypes, /export type PrReviewRepository/);
 assert.match(prReviewTypes, /export type PrReviewPullRequest/);
 assert.match(prReviewTypes, /export type PrReviewSession/);
+assert.match(prReviewTypes, /export type PrReviewAnalysisErrorCode/);
+assert.match(prReviewTypes, /analysisError: PrReviewAnalysisError \| null/);
 assert.match(prReviewTypes, /export type PrReviewSummary/);
 assert.match(prReviewTypes, /export type PrReviewCanvas/);
 assert.match(prReviewTypes, /export type PrReviewFileNodeData/);
@@ -146,6 +159,8 @@ assert.match(prReviewApiClient, /state: "open"/);
 assert.match(prReviewApiClient, /getPullRequest/);
 assert.match(prReviewApiClient, /listPullRequestFiles/);
 assert.match(prReviewApiClient, /createReviewSession/);
+assert.match(prReviewApiClient, /getReviewSession/);
+assert.match(prReviewApiClient, /retryReviewSession/);
 assert.match(prReviewApiClient, /getReviewSessionSummary/);
 assert.match(prReviewApiClient, /getReviewSessionCanvas/);
 assert.match(prReviewApiClient, /getReviewSessionConflicts/);
@@ -167,6 +182,7 @@ assert.match(prReviewApiClient, /method: "POST"/);
 assert.match(prReviewApiClient, /\/review-files/);
 assert.match(prReviewApiClient, /method: "PATCH"/);
 assert.match(prReviewApiClient, /\/review-sessions/);
+assert.match(prReviewApiClient, /\/retry/);
 assert.doesNotMatch(prReviewApiClient, /features\/github-integration/);
 assert.match(prReviewPanel, /useAuthSession/);
 assert.match(prReviewPanel, /PR_PAGE_SIZE/);
@@ -179,10 +195,25 @@ assert.match(prReviewPanel, /workspaceId=\{workspaceId\}/);
 assert.match(prReviewPanel, /onGoToGithub=\{goToGithubPage\}/);
 assert.match(prReviewPanel, /onReviewSessionCreated/);
 assert.match(prReviewPanel, /activeReviewSession/);
+assert.match(prReviewPanel, /PrReviewAnalysisStatus/);
+assert.match(prReviewPanel, /AbortController/);
+assert.match(prReviewPanel, /replaceReviewSessionRoute/);
+assert.match(prReviewPanel, /retryReviewSession/);
+assert.match(prReviewPanel, /window\.clearTimeout/);
+assert.match(prReviewPanel, /shouldPollPrReviewAnalysis/);
 assert.match(prReviewPanel, /role="dialog"/);
 assert.match(prReviewPanel, /Skeleton/);
 assert.match(prReviewPanel, /isStartingReview/);
 assert.doesNotMatch(prReviewPanel, /features\/github-integration/);
+assert.match(prReviewAnalysisStatus, /PR_REVIEW_ANALYSIS_POLL_INTERVAL_MS = 2_000/);
+assert.match(prReviewAnalysisStatus, /PR_REVIEW_ANALYSIS_DELAY_NOTICE_MS = 5 \* 60 \* 1_000/);
+assert.match(prReviewAnalysisStatus, /shouldPollPrReviewAnalysis/);
+assert.match(prReviewAnalysisStatus, /isPrReviewAnalysisDelayed/);
+assert.match(prReviewAnalysisStatusComponent, /PR 분석 중/);
+assert.match(prReviewAnalysisStatusComponent, /분석 시간이 예상보다 길어지고 있습니다/);
+assert.match(prReviewAnalysisStatusComponent, /pollingError/);
+assert.match(prReviewAnalysisStatusComponent, /getPrReviewAnalysisRetryLabel/);
+assert.match(prReviewPanel, /분석 상태를 확인하지 못했습니다/);
 assert.match(prReviewCanvasShell, /getReviewSessionSummary/);
 assert.match(prReviewCanvasShell, /getReviewSessionCanvas/);
 assert.match(prReviewCanvasShell, /getReviewSessionConflicts/);
