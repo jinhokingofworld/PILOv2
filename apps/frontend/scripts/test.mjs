@@ -82,9 +82,13 @@ const appSettingsDialog = await readFile(
 );
 const workspaceCreationPage = await readFile(
   new URL(
-    "../src/features/auth/components/workspace-creation-page.tsx",
+    "../src/features/workspace-onboarding/page.tsx",
     import.meta.url
   ),
+  "utf8"
+);
+const workspaceOnboardingMockData = await readFile(
+  new URL("../src/features/workspace-onboarding/mock-data.ts", import.meta.url),
   "utf8"
 );
 const workspaceCreationRoute = await readFile(
@@ -452,7 +456,9 @@ assert.match(appSidebar, /handleSelectWorkspace/);
 assert.match(appSidebar, /내가 만든 워크스페이스/);
 assert.match(appSidebar, /참여 중인 워크스페이스/);
 assert.match(appSidebar, /새 워크스페이스 만들기/);
-assert.match(appSidebar, /previewWorkspaces/);
+assert.doesNotMatch(appSidebar, /previewWorkspaces/);
+assert.doesNotMatch(appSidebar, /Design Team/);
+assert.doesNotMatch(appSidebar, /Review Lab/);
 assert.match(appSidebar, /router\.push\("\/workspace\/new"\)/);
 assert.match(appSidebar, /canManageWorkspace=\{activeWorkspace\.role === "owner"\}/);
 assert.match(appSettingsDialog, /id: "workspace"/);
@@ -463,10 +469,10 @@ assert.match(appSettingsDialog, /MOCK_GITHUB_CONNECTIONS/);
 assert.match(appSettingsDialog, /disabled=\{!canManageWorkspace\}/);
 assert.match(appSettingsDialog, /canManageWorkspace \? "연결 관리" : "조회 전용"/);
 assert.match(workspaceCreationRoute, /WorkspaceCreationPage/);
-assert.match(workspaceCreationPage, /const STEPS = \[/);
-assert.match(workspaceCreationPage, /GitHub 연결 여부 선택/);
-assert.match(workspaceCreationPage, /MOCK_REPOSITORIES/);
-assert.match(workspaceCreationPage, /MOCK_PROJECTS/);
+assert.match(workspaceCreationPage, /WORKSPACE_ONBOARDING_STEPS/);
+assert.match(workspaceOnboardingMockData, /GitHub 연결 여부 선택/);
+assert.match(workspaceOnboardingMockData, /MOCK_REPOSITORIES/);
+assert.match(workspaceOnboardingMockData, /MOCK_PROJECTS/);
 assert.match(workspaceCreationPage, /createWorkspace\(/);
 assert.match(workspaceCreationPage, /saveSelectedWorkspaceId/);
 assert.match(workspaceCreationPage, /beforeunload/);

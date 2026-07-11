@@ -12,7 +12,6 @@ import {
   LogOut,
   Plus,
   Settings,
-  Sparkles,
   UserRound
 } from "lucide-react";
 
@@ -68,57 +67,6 @@ type AppSidebarProps = {
   onSelectItem?: (itemId: string) => void;
 };
 
-const workspaces = [
-  {
-    name: "PILO",
-    description: "AI Project OS",
-    icon: GalleryVerticalEnd,
-    iconText: "P",
-    role: "owner" as const
-  },
-  {
-    name: "Frontend",
-    description: "Main page sprint",
-    icon: Sparkles,
-    iconText: "F",
-    role: "member" as const
-  },
-  {
-    name: "Review Lab",
-    description: "PR review flow",
-    icon: BadgeCheck,
-    iconText: "R",
-    role: "member" as const
-  }
-];
-
-const previewWorkspaces = [
-  {
-    id: "preview-owner-design-team",
-    name: "Design Team",
-    description: "Owner 워크스페이스",
-    icon: Sparkles,
-    iconText: "D",
-    role: "owner" as const
-  },
-  {
-    id: "preview-member-frontend",
-    name: "Frontend",
-    description: "Member 워크스페이스",
-    icon: BadgeCheck,
-    iconText: "F",
-    role: "member" as const
-  },
-  {
-    id: "preview-member-review-lab",
-    name: "Review Lab",
-    description: "Member 워크스페이스",
-    icon: BadgeCheck,
-    iconText: "R",
-    role: "member" as const
-  }
-];
-
 const currentUser = {
   name: "동현",
   email: "donghyun@pilo.local",
@@ -166,13 +114,11 @@ export function AppSidebar({
       icon: GalleryVerticalEnd,
       iconText: workspace.icon ?? getWorkspaceInitial(workspace.name),
       role: workspace.role
-    })) ?? workspaces.map((workspace) => ({ ...workspace, id: workspace.name }));
+    })) ?? [];
   const isDevPreviewSession = Boolean(
     authSession && isDevPreviewAccessToken(authSession.accessToken)
   );
-  const workspaceOptions = isDevPreviewSession
-    ? [...sessionWorkspaceOptions, ...previewWorkspaces]
-    : sessionWorkspaceOptions;
+  const workspaceOptions = sessionWorkspaceOptions;
   const ownedWorkspaceOptions = workspaceOptions.filter(
     (workspace) => workspace.role === "owner"
   );

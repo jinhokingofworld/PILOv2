@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   ArrowRight,
-  Check,
   GitBranch,
   Loader2,
   Package,
@@ -42,27 +41,18 @@ import {
   isDevPreviewAccessToken,
   saveSelectedWorkspaceId
 } from "@/features/auth/session-storage";
-import { cn } from "@/lib/utils";
-
-const STEPS = [
-  { title: "이름", description: "워크스페이스 이름 설정" },
-  { title: "아이콘", description: "워크스페이스 아이콘 설정" },
-  { title: "GitHub", description: "GitHub 연결 여부 선택" },
-  { title: "저장소", description: "기본 저장소 선택" },
-  { title: "프로젝트", description: "기본 프로젝트 선택" }
-] as const;
-
-const ICON_OPTIONS = ["🚀", "✨", "🎯", "🧩", "🌱", "💻"];
-const MOCK_REPOSITORIES = [
-  { id: "pilo-web", name: "PILO/pilo-web", description: "PILO web application" },
-  { id: "pilo-api", name: "PILO/pilo-api", description: "PILO API server" },
-  { id: "design-system", name: "PILO/design-system", description: "Shared UI system" }
-] as const;
-const MOCK_PROJECTS = [
-  { id: "product-roadmap", name: "Product Roadmap", description: "분기별 제품 로드맵" },
-  { id: "engineering", name: "Engineering", description: "개발 작업과 이슈 관리" },
-  { id: "launch", name: "Launch Checklist", description: "출시 준비 체크리스트" }
-] as const;
+import {
+  WorkspaceCenteredStatus,
+  WorkspaceSelectionCard,
+  WorkspaceSkippedStep,
+  WorkspaceStepIndicator
+} from "@/features/workspace-onboarding/components/workspace-onboarding-primitives";
+import {
+  ICON_OPTIONS,
+  MOCK_PROJECTS,
+  MOCK_REPOSITORIES,
+  WORKSPACE_ONBOARDING_STEPS
+} from "@/features/workspace-onboarding/mock-data";
 
 type PageStatus = "checking" | "ready" | "submitting" | "error";
 
@@ -165,7 +155,7 @@ export function WorkspaceCreationPage() {
 
   function handleNext() {
     if (!canContinue) return;
-    if (step < STEPS.length - 1) {
+    if (step < WORKSPACE_ONBOARDING_STEPS.length - 1) {
       setStep((currentStep) => currentStep + 1);
       return;
     }
@@ -211,12 +201,12 @@ export function WorkspaceCreationPage() {
   }
 
   if (status === "checking") {
-    return <CenteredStatus icon={<Loader2 className="animate-spin" />} text="세션과 워크스페이스를 확인하는 중입니다." />;
+    return <WorkspaceCenteredStatus icon={<Loader2 className="animate-spin" />} text="세션과 워크스페이스를 확인하는 중입니다." />;
   }
 
   if (status === "error") {
     return (
-      <CenteredStatus
+      <WorkspaceCenteredStatus
         icon={<TriangleAlert />}
         text={errorMessage ?? "워크스페이스 정보를 확인하지 못했습니다."}
         action={<Button onClick={() => router.replace("/login")}>로그인으로 이동</Button>}
@@ -242,29 +232,16 @@ export function WorkspaceCreationPage() {
           </Button>
         </header>
 
-        <nav aria-label="워크스페이스 생성 단계" className="grid grid-cols-5 gap-2">
-          {STEPS.map((item, index) => (
-            <div className="grid gap-2" key={item.title}>
-              <div
-                className={cn(
-                  "h-1.5 rounded-full bg-border transition-colors",
-                  index <= step && "bg-primary"
-                )}
-              />
-              <div className="hidden sm:block">
-                <p className={cn("text-xs font-medium", index === step ? "text-foreground" : "text-muted-foreground")}>
-                  {index + 1}. {item.title}
-                </p>
-              </div>
-            </div>
-          ))}
-        </nav>
+        <WorkspaceStepIndicator
+          currentStep={step}
+          steps={WORKSPACE_ONBOARDING_STEPS}
+        />
 
         <Card className="mx-auto w-full max-w-3xl shadow-sm">
           <CardHeader className="border-b px-6 py-6 sm:px-8">
-            <p className="text-sm font-medium text-primary">{step + 1} / {STEPS.length}</p>
-            <CardTitle className="text-2xl">{STEPS[step].title}</CardTitle>
-            <CardDescription>{STEPS[step].description}</CardDescription>
+            <p className="text-sm font-medium text-primary">{step + 1} / {WORKSPACE_ONBOARDING_STEPS.length}</p>
+            <CardTitle className="text-2xl">{WORKSPACE_ONBOARDING_STEPS[step].title}</CardTitle>
+            <CardDescription>{WORKSPACE_ONBOARDING_STEPS[step].description}</CardDescription>
           </CardHeader>
           <CardContent className="min-h-80 px-6 py-8 sm:px-8">
             {step === 0 ? (
@@ -317,14 +294,14 @@ export function WorkspaceCreationPage() {
 
             {step === 2 ? (
               <div className="grid gap-3 sm:grid-cols-2">
-                <SelectionCard
+                <WorkspaceSelectionCard
                   description="저장소와 ProjectV2를 선택하는 목업 단계를 진행합니다."
                   icon={<GitBranch />}
                   onClick={() => setConnectGithub(true)}
                   selected={connectGithub === true}
                   title="GitHub 연결 설정"
                 />
-                <SelectionCard
+                <WorkspaceSelectionCard
                   description="지금은 건너뛰고 설정의 GitHub 연결 탭에서 다시 시작합니다."
                   icon={<ArrowRight />}
                   onClick={() => {
@@ -343,7 +320,7 @@ export function WorkspaceCreationPage() {
                 <div className="grid gap-3">
                   <p className="text-sm text-muted-foreground">목업 저장소입니다. 실제 GitHub API에는 연결하지 않습니다.</p>
                   {MOCK_REPOSITORIES.map((repository) => (
-                    <SelectionCard
+                    <WorkspaceSelectionCard
                       description={repository.description}
                       icon={<Package />}
                       key={repository.id}
@@ -353,7 +330,7 @@ export function WorkspaceCreationPage() {
                     />
                   ))}
                 </div>
-              ) : <SkippedStep icon={<GitBranch />} text="GitHub 연결을 건너뛰었습니다. 설정에서 언제든 다시 시작할 수 있습니다." />
+              ) : <WorkspaceSkippedStep icon={<GitBranch />} text="GitHub 연결을 건너뛰었습니다. 설정에서 언제든 다시 시작할 수 있습니다." />
             ) : null}
 
             {step === 4 ? (
@@ -361,7 +338,7 @@ export function WorkspaceCreationPage() {
                 <div className="grid gap-3">
                   <p className="text-sm text-muted-foreground">목업 프로젝트입니다. 선택값은 서버에 저장되지 않습니다.</p>
                   {MOCK_PROJECTS.map((project) => (
-                    <SelectionCard
+                    <WorkspaceSelectionCard
                       description={project.description}
                       icon={<PanelsTopLeft />}
                       key={project.id}
@@ -375,7 +352,7 @@ export function WorkspaceCreationPage() {
                     <p className="mt-1 text-muted-foreground">{displayIcon} {normalizedName} · {selectedRepository?.name} · {selectedProject?.name ?? "프로젝트 선택 전"}</p>
                   </div>
                 </div>
-              ) : <SkippedStep icon={<Sparkles />} text="GitHub 단계 없이 워크스페이스를 생성할 준비가 되었습니다." />
+              ) : <WorkspaceSkippedStep icon={<Sparkles />} text="GitHub 단계 없이 워크스페이스를 생성할 준비가 되었습니다." />
             ) : null}
 
             {errorMessage ? <p className="mt-5 text-sm text-destructive">{errorMessage}</p> : null}
@@ -385,9 +362,9 @@ export function WorkspaceCreationPage() {
               <ArrowLeft /> 이전
             </Button>
             <Button disabled={!canContinue || status === "submitting"} onClick={handleNext}>
-              {status === "submitting" ? <Loader2 className="animate-spin" /> : step === STEPS.length - 1 ? <Check /> : null}
-              {status === "submitting" ? "생성 중" : step === STEPS.length - 1 ? "워크스페이스 생성" : "다음"}
-              {status !== "submitting" && step < STEPS.length - 1 ? <ArrowRight /> : null}
+              {status === "submitting" ? <Loader2 className="animate-spin" /> : null}
+              {status === "submitting" ? "생성 중" : step === WORKSPACE_ONBOARDING_STEPS.length - 1 ? "워크스페이스 생성" : "다음"}
+              {status !== "submitting" && step < WORKSPACE_ONBOARDING_STEPS.length - 1 ? <ArrowRight /> : null}
             </Button>
           </CardFooter>
         </Card>
@@ -406,47 +383,6 @@ export function WorkspaceCreationPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </main>
-  );
-}
-
-function SelectionCard({ description, icon, onClick, selected, title }: { description: string; icon: React.ReactNode; onClick: () => void; selected: boolean; title: string }) {
-  return (
-    <Button
-      aria-pressed={selected}
-      className="h-auto min-h-20 justify-start gap-3 whitespace-normal px-4 py-3 text-left"
-      onClick={onClick}
-      variant={selected ? "secondary" : "outline"}
-    >
-      <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-background ring-1 ring-border">{icon}</span>
-      <span className="grid flex-1 gap-1">
-        <span className="font-medium">{title}</span>
-        <span className="text-xs font-normal text-muted-foreground">{description}</span>
-      </span>
-      {selected ? <Check className="text-primary" /> : null}
-    </Button>
-  );
-}
-
-function SkippedStep({ icon, text }: { icon: React.ReactNode; text: string }) {
-  return (
-    <div className="flex min-h-52 flex-col items-center justify-center gap-3 rounded-xl border border-dashed bg-muted/20 p-8 text-center">
-      <div className="flex size-12 items-center justify-center rounded-xl bg-muted">{icon}</div>
-      <p className="max-w-md text-sm text-muted-foreground">{text}</p>
-    </div>
-  );
-}
-
-function CenteredStatus({ action, icon, text }: { action?: React.ReactNode; icon: React.ReactNode; text: string }) {
-  return (
-    <main className="flex min-h-screen items-center justify-center bg-muted/30 px-6">
-      <Card className="w-full max-w-md">
-        <CardContent className="flex flex-col items-center gap-4 py-10 text-center">
-          <div className="flex size-12 items-center justify-center rounded-xl bg-muted">{icon}</div>
-          <p className="text-sm text-muted-foreground">{text}</p>
-          {action}
-        </CardContent>
-      </Card>
     </main>
   );
 }

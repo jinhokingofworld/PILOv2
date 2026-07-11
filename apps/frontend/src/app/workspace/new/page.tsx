@@ -1,1 +1,1 @@
-export { WorkspaceCreationPage as default } from "@/features/auth";
+export { WorkspaceCreationPage as default } from "@/features/workspace-onboarding/page";
