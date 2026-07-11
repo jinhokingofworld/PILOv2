@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import type { PointerEvent } from "react";
 import { useValue } from "@tldraw/state-react";
 import { HTMLContainer, useEditor } from "tldraw";
+import { useCanvasRemoteShapePresence } from "@/features/canvas/realtime/CanvasRemotePresenceContext";
 import {
   piloCodeLanguages,
   type PiloCodeBlockShape,
@@ -42,6 +43,13 @@ export function PiloCodeBlockComponent({
   const isCollapsed = isPiloCodeBlockCollapsed(shape);
   const lineCount = getCodeLineCount(shape.props.code);
   const preview = getCodePreview(shape.props.code);
+  const remoteShapePresence = useCanvasRemoteShapePresence(String(shape.id));
+  const remoteShapePresenceLabel =
+    remoteShapePresence.length > 1
+      ? `${remoteShapePresence.length}명 선택 중`
+      : remoteShapePresence[0]
+        ? `${remoteShapePresence[0].displayName || "다른 사용자"} 선택 중`
+        : null;
   const isEditing = useValue(
     "pilo-code-block-editing",
     () => editor.getEditingShapeId() === shape.id,
@@ -160,7 +168,7 @@ export function PiloCodeBlockComponent({
 
   return (
     <HTMLContainer
-      className={`pilo-code-block-shape${isEditing ? " is-editing" : ""}${isCollapsed ? " is-collapsed" : ""}`}
+      className={`pilo-code-block-shape${isEditing ? " is-editing" : ""}${isCollapsed ? " is-collapsed" : ""}${remoteShapePresenceLabel ? " is-remotely-selected" : ""}`}
       style={{
         width: shape.props.w,
         height: shape.props.h,
@@ -177,6 +185,14 @@ export function PiloCodeBlockComponent({
           <span className="pilo-code-dot is-red" />
           <span className="pilo-code-dot is-yellow" />
           <span className="pilo-code-dot is-green" />
+          {remoteShapePresenceLabel ? (
+            <span
+              className="pilo-code-remote-presence-badge"
+              title="현재 realtime 계약은 선택 상태만 전달하므로 실제 텍스트 편집 여부는 표시하지 않습니다."
+            >
+              {remoteShapePresenceLabel}
+            </span>
+          ) : null}
           {isEditing ? (
             <>
               <input
