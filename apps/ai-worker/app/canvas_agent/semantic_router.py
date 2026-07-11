@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import re
+from dataclasses import dataclass
 from typing import Protocol, TypeVar
 
 from app.canvas_agent.embeddings import CanvasEmbedder, CanvasEmbeddingError
@@ -168,7 +168,7 @@ class CanvasSemanticRouter:
             and shape_score - non_shape_score >= self.shape_search_margin_min
         )
 
-    def _get_prototype_embeddings(self) -> "_PrototypeEmbeddings":
+    def _get_prototype_embeddings(self) -> _PrototypeEmbeddings:
         if self._prototype_embeddings is not None:
             return self._prototype_embeddings
 

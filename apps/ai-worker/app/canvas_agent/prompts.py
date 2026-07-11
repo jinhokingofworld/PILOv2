@@ -9,21 +9,31 @@ def system_prompt() -> str:
     return (
         "You are the PILO Canvas AI planner. Return only JSON matching the schema. "
         "Choose exactly one allowed Canvas action. You never create raw tldraw shapes, "
-        "never apply or discard drafts, and never access Calendar, Issue, PR, Meeting, or any external-domain resource. "
-        "For generation, you are not drawing freely: compose the Canvas only with the listed availableCanvasTools. "
-        "When using create_draft, prefer returning exact nodes and connections with x, y, width, height, text, color, and parentId. "
+        "never apply or discard drafts, and never access Calendar, Issue, PR, Meeting, "
+        "or any external-domain resource. "
+        "For generation, you are not drawing freely: compose the Canvas only with the "
+        "listed availableCanvasTools. "
+        "When using create_draft, prefer returning exact nodes and connections with x, y, "
+        "width, height, text, color, and parentId. "
         "Also return recommendedColors that explain the small palette you chose for the draft. "
-        "Use find_canvas_tool when the user asks where a built-in Canvas toolbar button or tool is. "
-        "Use find_shapes for semantic search. Use focus_viewport or select_shapes only with shapeIds "
+        "Use find_canvas_tool when the user asks where a built-in Canvas toolbar button "
+        "or tool is. "
+        "Use find_shapes for semantic search. Use focus_viewport or select_shapes only "
+        "with shapeIds "
         "provided by the previous action result or request selection. "
-        "Use connect_shapes only when two existing Canvas shape ids are known and the user explicitly asks to connect them. "
+        "Use connect_shapes only when two existing Canvas shape ids are known and the user "
+        "explicitly asks to connect them. "
         "Before choosing a generation action, classify the request as diagram, code, or chat. "
-        "Prefer create_draft with kind=diagram for visual drafts, flowcharts, wireframes, user journeys, and structure diagrams. "
-        "Prefer create_draft with kind=code when the user asks for code, files, components, hooks, APIs, types, snippets, or asks to include code. "
-        "Use finish for chat when the request is not Canvas generation, shape search, shape connection, or toolbar help. "
+        "Prefer create_draft with kind=diagram for visual drafts, flowcharts, wireframes, "
+        "user journeys, and structure diagrams. "
+        "Prefer create_draft with kind=code when the user asks for code, files, components, "
+        "hooks, APIs, types, snippets, or asks to include code. "
+        "Use finish for chat when the request is not Canvas generation, shape search, "
+        "shape connection, or toolbar help. "
         "All code generation, including a single code block, must use create_draft with kind=code. "
         "Use finish when the previous action already completed the requested outcome. "
-        "Never include raw provider data, full Canvas snapshots, tokens, credentials, secrets, or lengthy text."
+        "Never include raw provider data, full Canvas snapshots, tokens, credentials, "
+        "secrets, or lengthy text."
     )
 
 
@@ -40,7 +50,10 @@ def user_prompt(context: CanvasAgentRunContext) -> str:
                     "source": "tldraw_builtin",
                     "nodeKind": "frame",
                     "shapeType": "frame",
-                    "description": "Use the tldraw built-in frame tool to group generated content into one visual area.",
+                    "description": (
+                        "Use the tldraw built-in frame tool to group generated content "
+                        "into one visual area."
+                    ),
                     "supportsText": True,
                     "supportsParenting": False,
                 },
@@ -49,7 +62,9 @@ def user_prompt(context: CanvasAgentRunContext) -> str:
                     "source": "tldraw_builtin",
                     "nodeKind": "note",
                     "shapeType": "note",
-                    "description": "Use the tldraw built-in note tool for short ideas, steps, and labels.",
+                    "description": (
+                        "Use the tldraw built-in note tool for short ideas, steps, " "and labels."
+                    ),
                     "supportsText": True,
                     "supportsParenting": True,
                 },
@@ -58,7 +73,9 @@ def user_prompt(context: CanvasAgentRunContext) -> str:
                     "source": "tldraw_builtin",
                     "nodeKind": "text",
                     "shapeType": "text",
-                    "description": "Use the tldraw built-in text tool for plain titles and annotations.",
+                    "description": (
+                        "Use the tldraw built-in text tool for plain titles and annotations."
+                    ),
                     "supportsText": True,
                     "supportsParenting": True,
                 },
@@ -68,7 +85,10 @@ def user_prompt(context: CanvasAgentRunContext) -> str:
                     "nodeKind": "rectangle",
                     "shapeType": "geo",
                     "geo": "rectangle",
-                    "description": "Use the tldraw built-in rectangle tool for screens, cards, states, and process steps.",
+                    "description": (
+                        "Use the tldraw built-in rectangle tool for screens, cards, "
+                        "states, and process steps."
+                    ),
                     "supportsText": True,
                     "supportsParenting": True,
                 },
@@ -78,7 +98,10 @@ def user_prompt(context: CanvasAgentRunContext) -> str:
                     "nodeKind": "circle",
                     "shapeType": "geo",
                     "geo": "ellipse",
-                    "description": "Use the tldraw built-in ellipse tool for start/end states, status, or emphasis.",
+                    "description": (
+                        "Use the tldraw built-in ellipse tool for start/end states, "
+                        "status, or emphasis."
+                    ),
                     "supportsText": True,
                     "supportsParenting": True,
                 },
@@ -88,7 +111,10 @@ def user_prompt(context: CanvasAgentRunContext) -> str:
                     "nodeKind": "triangle",
                     "shapeType": "geo",
                     "geo": "triangle",
-                    "description": "Use the tldraw built-in triangle geo tool for branches, warnings, or decision markers.",
+                    "description": (
+                        "Use the tldraw built-in triangle geo tool for branches, warnings, "
+                        "or decision markers."
+                    ),
                     "supportsText": True,
                     "supportsParenting": True,
                 },
@@ -97,7 +123,10 @@ def user_prompt(context: CanvasAgentRunContext) -> str:
                     "source": "tldraw_builtin",
                     "connectionKind": "arrow",
                     "shapeType": "arrow",
-                    "description": "Use the tldraw built-in arrow tool for directed relationships between nodes.",
+                    "description": (
+                        "Use the tldraw built-in arrow tool for directed relationships "
+                        "between nodes."
+                    ),
                     "supportsText": True,
                     "supportsParenting": True,
                 },
@@ -106,7 +135,10 @@ def user_prompt(context: CanvasAgentRunContext) -> str:
                     "source": "tldraw_builtin",
                     "connectionKind": "line",
                     "shapeType": "arrow",
-                    "description": "Use the tldraw built-in line-style connector for undirected visual connections.",
+                    "description": (
+                        "Use the tldraw built-in line-style connector for undirected "
+                        "visual connections."
+                    ),
                     "supportsText": True,
                     "supportsParenting": True,
                 },
@@ -115,7 +147,9 @@ def user_prompt(context: CanvasAgentRunContext) -> str:
                     "source": "pilo_custom",
                     "nodeKind": "code",
                     "shapeType": "pilo-code-block",
-                    "description": "Use PILO custom code block shape for concise implementation examples.",
+                    "description": (
+                        "Use PILO custom code block shape for concise implementation examples."
+                    ),
                     "supportsText": True,
                     "supportsParenting": True,
                 },
@@ -182,7 +216,10 @@ def user_prompt(context: CanvasAgentRunContext) -> str:
                         }
                     ],
                 },
-                "coordinateSystem": "Canvas page coordinates. If parentId references a frame, child x/y are frame-local coordinates.",
+                "coordinateSystem": (
+                    "Canvas page coordinates. If parentId references a frame, child x/y "
+                    "are frame-local coordinates."
+                ),
                 "preferFrameForGeneratedDraft": True,
                 "requiredCreateDraftInput": {
                     "kind": "diagram|code",
@@ -226,27 +263,39 @@ def user_prompt(context: CanvasAgentRunContext) -> str:
                 "priority": ["code", "diagram", "chat"],
                 "diagram": (
                     "Choose create_draft kind=diagram for design drafts, flowcharts, wireframes, "
-                    "user journeys, structure diagrams, screen layouts, process maps, and visual explanations."
+                    "user journeys, structure diagrams, screen layouts, process maps, "
+                    "and visual explanations."
                 ),
                 "code": (
-                    "Choose create_draft kind=code for code generation, multi-file examples, components, hooks, "
-                    "APIs, types, snippets, implementation examples, or any request that asks to include code."
+                    "Choose create_draft kind=code for code generation, multi-file examples, "
+                    "components, hooks, APIs, types, snippets, implementation examples, "
+                    "or any request that asks to include code."
                 ),
                 "chat": (
-                    "Choose finish when the user is asking a conversational question, discussing direction, "
+                    "Choose finish when the user is asking a conversational question, "
+                    "discussing direction, "
                     "or not asking Canvas AI to find, connect, or create Canvas content."
                 ),
                 "tieBreakers": [
-                    "If the prompt asks for code or files, choose code even when notes, labels, or connectors are also useful.",
+                    (
+                        "If the prompt asks for code or files, choose code even when notes, "
+                        "labels, or connectors are also useful."
+                    ),
                     "If the prompt asks for a visual draft without code, choose diagram.",
-                    "If the prompt only asks what is possible or asks for an explanation, choose chat and answer with finish.",
+                    (
+                        "If the prompt only asks what is possible or asks for an explanation, "
+                        "choose chat and answer with finish."
+                    ),
                 ],
             },
             "draftTemplates": {
                 "diagram": {
                     "kind": "diagram",
                     "purpose": "디자인, 흐름도, 와이어프레임, 사용자 여정, 구조도",
-                    "layout": "Create one frame as the container, add a clear title, then place tldraw built-in text/note/rectangle/circle/triangle nodes inside it.",
+                    "layout": (
+                        "Create one frame as the container, add a clear title, then place "
+                        "tldraw built-in text/note/rectangle/circle/triangle nodes inside it."
+                    ),
                     "expectedNodes": [
                         "frame: one container frame sized to fit the whole draft",
                         "text: short title or section labels",
@@ -255,7 +304,10 @@ def user_prompt(context: CanvasAgentRunContext) -> str:
                         "triangle: branches, warnings, or decision markers",
                         "note: short ideas, annotations, or supporting context",
                     ],
-                    "expectedConnections": "Use arrow for directed flow and line for undirected relationships when relationships matter.",
+                    "expectedConnections": (
+                        "Use arrow for directed flow and line for undirected relationships "
+                        "when relationships matter."
+                    ),
                     "styleGuidance": [
                         "Prefer a clean left-to-right or top-to-bottom layout.",
                         "Keep text short enough to fit inside each shape.",
@@ -270,23 +322,42 @@ def user_prompt(context: CanvasAgentRunContext) -> str:
                 "code": {
                     "kind": "code",
                     "purpose": "코드블럭 단일/복수 파일, 설명 노트, 파일 간 연결선",
-                    "layout": "Create one frame as the container, then create one PILO code block per file or snippet. Add optional tldraw built-in note/text nodes for short explanations.",
+                    "layout": (
+                        "Create one frame as the container, then create one PILO code block "
+                        "per file or snippet. Add optional tldraw built-in note/text nodes "
+                        "for short explanations."
+                    ),
                     "expectedNodes": [
                         "frame: one container frame sized to fit all files and notes",
                         "code: one pilo_custom code block for each generated file or snippet",
                         "note: short explanation, setup note, or caveat when useful",
                         "text: section title or file group label when useful",
                     ],
-                    "expectedConnections": "Use arrow or line between related code files, for example component -> hook -> api client, or explanation note -> code block.",
+                    "expectedConnections": (
+                        "Use arrow or line between related code files, for example component "
+                        "-> hook -> api client, or explanation note -> code block."
+                    ),
                     "fileSplitting": [
-                        "If the user asks for multiple files or the implementation naturally has separate responsibilities, split into multiple code nodes.",
-                        "If the request is small or explicitly asks for one snippet, use one code node inside the frame.",
-                        "Each code node should include title as a file name when possible and language when known.",
+                        (
+                            "If the user asks for multiple files or the implementation naturally "
+                            "has separate responsibilities, split into multiple code nodes."
+                        ),
+                        (
+                            "If the request is small or explicitly asks for one snippet, use one "
+                            "code node inside the frame."
+                        ),
+                        (
+                            "Each code node should include title as a file name when possible "
+                            "and language when known."
+                        ),
                     ],
                     "styleGuidance": [
                         "Keep each code block concise enough to be readable on Canvas.",
                         "Prefer practical, copyable examples over long prose.",
-                        "Use recommendedColors to separate main code, helper code, and notes when useful.",
+                        (
+                            "Use recommendedColors to separate main code, helper code, "
+                            "and notes when useful."
+                        ),
                     ],
                     "exampleRequests": [
                         "JWT 인증 예시 코드 만들어줘",

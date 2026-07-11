@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
-
 EMBEDDING_DIMENSIONS = 384
 DEFAULT_CANVAS_EMBEDDING_MODEL = "intfloat/multilingual-e5-small"
 DEFAULT_CANVAS_EMBEDDING_REVISION = "main"
