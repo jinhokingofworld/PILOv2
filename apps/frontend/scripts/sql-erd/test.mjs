@@ -36,6 +36,7 @@ async function compileSqlErdRuntimeModules() {
     "session-list-state.mjs"
   );
   const sessionStateOutputPath = join(outputDir, "session-state.mjs");
+  const sqlEditStateOutputPath = join(outputDir, "sql-edit-state.mjs");
   const statusCopyOutputPath = join(outputDir, "status-copy.mjs");
   const sqlEditorDialectOutputPath = join(outputDir, "sql-editor-dialect.mjs");
   const relationShapeOutputPath = join(outputDir, "relation-shape.mjs");
@@ -101,6 +102,16 @@ async function compileSqlErdRuntimeModules() {
     await compileTypeScriptModule(
       "../../src/features/sql-erd/utils/session-state.ts",
       sessionStateOutputPath
+    );
+    await compileTypeScriptModule(
+      "../../src/features/sql-erd/utils/sql-edit-state.ts",
+      sqlEditStateOutputPath,
+      [
+        [
+          /from "@\/features\/sql-erd\/utils\/model"/g,
+          'from "./model.mjs"'
+        ]
+      ]
     );
     await compileTypeScriptModule(
       "../../src/features/sql-erd/utils/status-copy.ts",
@@ -190,6 +201,7 @@ async function compileSqlErdRuntimeModules() {
       sessionNavigationRuntime,
       sessionListStateRuntime,
       sessionStateRuntime,
+      sqlEditStateRuntime,
       sqlEditorDialectRuntime,
       statusCopyRuntime,
       relationShapeRuntime,
@@ -207,6 +219,7 @@ async function compileSqlErdRuntimeModules() {
       import(pathToFileHref(sessionNavigationOutputPath)),
       import(pathToFileHref(sessionListStateOutputPath)),
       import(pathToFileHref(sessionStateOutputPath)),
+      import(pathToFileHref(sqlEditStateOutputPath)),
       import(pathToFileHref(sqlEditorDialectOutputPath)),
       import(pathToFileHref(statusCopyOutputPath)),
       import(pathToFileHref(relationShapeOutputPath)),
@@ -228,6 +241,7 @@ async function compileSqlErdRuntimeModules() {
       sessionListStateRuntime,
       sessionNavigationRuntime,
       sessionStateRuntime,
+      sqlEditStateRuntime,
       sqlEditorDialectRuntime,
       statusCopyRuntime,
       tableShapeRuntime
@@ -578,6 +592,7 @@ const {
   modelRuntime,
   relationShapeRuntime,
   sessionStateRuntime,
+  sqlEditStateRuntime,
   sqlEditorDialectRuntime,
   statusCopyRuntime,
   tableShapeRuntime
@@ -1274,6 +1289,252 @@ const generateSmokeBaseSession = {
   },
   settingsJson: { sourcePanelOpen: true }
 };
+const initialSqlEditState =
+  sqlEditStateRuntime.createSqlErdEditState(generateSmokeBaseSession);
+
+assert.equal(initialSqlEditState.draftSourceText, generateSmokeSource);
+assert.equal(initialSqlEditState.draftDialect, "postgresql");
+assert.deepEqual(
+  initialSqlEditState.lastSuccessfulSnapshot,
+  generateSmokeBaseSession
+);
+assert.deepEqual(initialSqlEditState.parse, {
+  error: null,
+  requestSequence: 0,
+  status: "idle"
+});
+
+const dirtySqlEditState = sqlEditStateRuntime.reduceSqlErdEditState(
+  initialSqlEditState,
+  {
+    type: "draft_source_changed",
+    sourceText: "SELECT 1;"
+  }
+);
+
+assert.equal(dirtySqlEditState.draftSourceText, "SELECT 1;");
+assert.equal(
+  dirtySqlEditState.lastSuccessfulSnapshot.sourceText,
+  generateSmokeSource
+);
+assert.deepEqual(
+  dirtySqlEditState.lastSuccessfulSnapshot.modelJson,
+  generateSmokeBaseSession.modelJson
+);
+assert.equal(dirtySqlEditState.parse.requestSequence, 1);
+assert.equal(dirtySqlEditState.parse.status, "idle");
+
+const mysqlDraftState = sqlEditStateRuntime.reduceSqlErdEditState(
+  dirtySqlEditState,
+  {
+    type: "draft_dialect_changed",
+    dialect: "mysql"
+  }
+);
+
+assert.equal(mysqlDraftState.draftDialect, "mysql");
+assert.equal(mysqlDraftState.lastSuccessfulSnapshot.dialect, "postgresql");
+
+const staleParseStart =
+  sqlEditStateRuntime.beginSqlErdParse(mysqlDraftState);
+
+assert.equal(staleParseStart.requestSequence, 3);
+assert.equal(staleParseStart.state.parse.status, "parsing");
+assert.equal(staleParseStart.session.sourceText, "SELECT 1;");
+assert.equal(staleParseStart.session.dialect, "mysql");
+
+const latestDraftState = sqlEditStateRuntime.reduceSqlErdEditState(
+  staleParseStart.state,
+  {
+    type: "draft_source_changed",
+    sourceText: "CREATE TABLE latest (id BIGINT PRIMARY KEY);"
+  }
+);
+const staleSuccessSnapshot = {
+  ...generateSmokeBaseSession,
+  dialect: "mysql",
+  sourceText: "CREATE TABLE stale (id BIGINT PRIMARY KEY);"
+};
+const staleSuccessState = sqlEditStateRuntime.reduceSqlErdEditState(
+  latestDraftState,
+  {
+    type: "parse_succeeded",
+    requestSequence: staleParseStart.requestSequence,
+    snapshot: staleSuccessSnapshot
+  }
+);
+const parseError = {
+  code: "NO_CREATE_TABLE",
+  message: "No CREATE TABLE statement found"
+};
+const staleFailureState = sqlEditStateRuntime.reduceSqlErdEditState(
+  latestDraftState,
+  {
+    type: "parse_failed",
+    error: parseError,
+    requestSequence: staleParseStart.requestSequence
+  }
+);
+
+assert.strictEqual(staleSuccessState, latestDraftState);
+assert.strictEqual(staleFailureState, latestDraftState);
+
+const latestParseStart =
+  sqlEditStateRuntime.beginSqlErdParse(latestDraftState);
+const latestParseFailureState = sqlEditStateRuntime.reduceSqlErdEditState(
+  latestParseStart.state,
+  {
+    type: "parse_failed",
+    error: parseError,
+    requestSequence: latestParseStart.requestSequence
+  }
+);
+
+assert.equal(latestParseFailureState.parse.status, "error");
+assert.deepEqual(latestParseFailureState.parse.error, parseError);
+assert.equal(
+  latestParseFailureState.draftSourceText,
+  "CREATE TABLE latest (id BIGINT PRIMARY KEY);"
+);
+assert.equal(
+  latestParseFailureState.lastSuccessfulSnapshot.sourceText,
+  generateSmokeSource
+);
+
+const successfulParseStart =
+  sqlEditStateRuntime.beginSqlErdParse(latestParseFailureState);
+const successfulSnapshot = {
+  ...successfulParseStart.session,
+  id: "session-success",
+  revision: 8
+};
+const successfulSqlEditState = sqlEditStateRuntime.reduceSqlErdEditState(
+  successfulParseStart.state,
+  {
+    type: "parse_succeeded",
+    requestSequence: successfulParseStart.requestSequence,
+    snapshot: successfulSnapshot
+  }
+);
+
+assert.equal(successfulSqlEditState.parse.status, "idle");
+assert.equal(successfulSqlEditState.parse.error, null);
+assert.equal(
+  successfulSqlEditState.draftSourceText,
+  successfulSnapshot.sourceText
+);
+assert.equal(successfulSqlEditState.draftDialect, successfulSnapshot.dialect);
+assert.deepEqual(
+  successfulSqlEditState.lastSuccessfulSnapshot,
+  successfulSnapshot
+);
+
+const locallyChangedLayout = {
+  version: 1,
+  tableLayouts: [{ tableId: "table.users", x: 800, y: 400 }]
+};
+const layoutChangedSqlEditState = sqlEditStateRuntime.reduceSqlErdEditState(
+  latestParseFailureState,
+  {
+    type: "layout_changed",
+    layoutJson: locallyChangedLayout
+  }
+);
+
+assert.equal(
+  layoutChangedSqlEditState.draftSourceText,
+  latestParseFailureState.draftSourceText
+);
+assert.equal(
+  layoutChangedSqlEditState.lastSuccessfulSnapshot.sourceText,
+  generateSmokeSource
+);
+assert.deepEqual(
+  layoutChangedSqlEditState.lastSuccessfulSnapshot.layoutJson,
+  locallyChangedLayout
+);
+
+const loadedSnapshot = {
+  ...generateSmokeBaseSession,
+  id: "session-loaded",
+  revision: 13,
+  sourceText: "CREATE TABLE loaded (id BIGINT PRIMARY KEY);"
+};
+const loadedSqlEditState = sqlEditStateRuntime.reduceSqlErdEditState(
+  latestParseFailureState,
+  {
+    type: "session_loaded",
+    snapshot: loadedSnapshot
+  }
+);
+
+assert.equal(loadedSqlEditState.draftSourceText, loadedSnapshot.sourceText);
+assert.equal(loadedSqlEditState.draftDialect, loadedSnapshot.dialect);
+assert.deepEqual(loadedSqlEditState.lastSuccessfulSnapshot, loadedSnapshot);
+assert.equal(
+  loadedSqlEditState.parse.requestSequence,
+  latestParseFailureState.parse.requestSequence + 1
+);
+assert.equal(loadedSqlEditState.parse.status, "idle");
+
+const pendingLayoutSnapshot = {
+  ...loadedSnapshot,
+  layoutJson: locallyChangedLayout
+};
+const pendingLayoutState = {
+  ...loadedSqlEditState,
+  draftSourceText: "SELECT broken draft;",
+  lastSuccessfulSnapshot: pendingLayoutSnapshot
+};
+const savedLayoutSnapshot = {
+  ...pendingLayoutSnapshot,
+  revision: 14,
+  layoutJson: {
+    ...locallyChangedLayout,
+    viewport: { x: 10, y: 20, zoom: 1.5 }
+  }
+};
+const savedLayoutState = sqlEditStateRuntime.reduceSqlErdEditState(
+  pendingLayoutState,
+  {
+    type: "layout_saved",
+    requestLayoutJson: locallyChangedLayout,
+    snapshot: savedLayoutSnapshot
+  }
+);
+
+assert.equal(savedLayoutState.draftSourceText, "SELECT broken draft;");
+assert.equal(savedLayoutState.lastSuccessfulSnapshot.revision, 14);
+assert.deepEqual(
+  savedLayoutState.lastSuccessfulSnapshot.layoutJson,
+  savedLayoutSnapshot.layoutJson
+);
+
+const newerLayout = {
+  version: 1,
+  tableLayouts: [{ tableId: "table.users", x: 900, y: 450 }]
+};
+const newerLayoutState = {
+  ...pendingLayoutState,
+  lastSuccessfulSnapshot: {
+    ...pendingLayoutSnapshot,
+    layoutJson: newerLayout
+  }
+};
+const preservedNewerLayoutState = sqlEditStateRuntime.reduceSqlErdEditState(
+  newerLayoutState,
+  {
+    type: "layout_saved",
+    requestLayoutJson: locallyChangedLayout,
+    snapshot: savedLayoutSnapshot
+  }
+);
+
+assert.equal(preservedNewerLayoutState.lastSuccessfulSnapshot.revision, 14);
+assert.deepEqual(
+  preservedNewerLayoutState.lastSuccessfulSnapshot.layoutJson,
+  newerLayout
+);
 const createGenerateRequest =
   generateSessionRuntime.createSqlErdGenerateWorkspaceRequest(
     generateSmokeBaseSession
