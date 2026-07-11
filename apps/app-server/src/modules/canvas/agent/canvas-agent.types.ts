@@ -124,6 +124,7 @@ export interface ApplyCanvasAgentDraftRequest {
 export interface CanvasAgentRequestContext {
   presentationMode: CanvasAgentPresentationMode;
   selectedShapeIds: string[];
+  toolHelpMode: boolean;
   viewport: CanvasAgentViewport | null;
 }
 

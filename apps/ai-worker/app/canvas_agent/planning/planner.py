@@ -4,6 +4,7 @@ import json
 from typing import Any
 
 from app.canvas_agent.planning.prompts import system_prompt, user_prompt
+from app.canvas_agent.planning.tool_catalog import allowed_action_names_for_context
 from app.canvas_agent.types import CANVAS_AGENT_ACTIONS, CanvasAgentPlan, CanvasAgentRunContext
 from app.meeting_report_processor import InfrastructureError
 
@@ -20,6 +21,7 @@ class OpenAiCanvasAgentPlanner:
         self.model = model
 
     def plan(self, context: CanvasAgentRunContext) -> CanvasAgentPlan:
+        allowed_actions = allowed_action_names_for_context(context)
         try:
             response = self.client.responses.create(
                 model=self.model,
@@ -32,7 +34,7 @@ class OpenAiCanvasAgentPlanner:
                         "type": "json_schema",
                         "name": "canvas_agent_plan",
                         "strict": True,
-                        "schema": _schema(),
+                        "schema": _schema(allowed_actions),
                     }
                 },
             )
@@ -45,10 +47,13 @@ class OpenAiCanvasAgentPlanner:
         if not isinstance(output_text, str) or not output_text.strip():
             output_text = _extract_response_text(response)
 
-        return parse_canvas_agent_plan(output_text)
+        return parse_canvas_agent_plan(output_text, allowed_actions)
 
 
-def parse_canvas_agent_plan(output_text: str) -> CanvasAgentPlan:
+def parse_canvas_agent_plan(
+    output_text: str,
+    allowed_actions: set[str] | None = None,
+) -> CanvasAgentPlan:
     if not isinstance(output_text, str) or not output_text.strip():
         raise CanvasAgentPlannerError("Canvas Agent planner returned no output")
 
@@ -63,7 +68,8 @@ def parse_canvas_agent_plan(output_text: str) -> CanvasAgentPlan:
     action_name = payload.get("actionName")
     message = payload.get("message")
     input_json = payload.get("inputJson")
-    if not isinstance(action_name, str) or action_name not in CANVAS_AGENT_ACTIONS:
+    valid_actions = allowed_actions or CANVAS_AGENT_ACTIONS
+    if not isinstance(action_name, str) or action_name not in valid_actions:
         raise CanvasAgentPlannerError("Canvas Agent planner action is invalid")
     if not isinstance(message, str) or not message.strip():
         raise CanvasAgentPlannerError("Canvas Agent planner message is invalid")
@@ -84,13 +90,14 @@ def parse_canvas_agent_plan(output_text: str) -> CanvasAgentPlan:
     )
 
 
-def _schema() -> dict[str, object]:
+def _schema(allowed_actions: set[str] | None = None) -> dict[str, object]:
+    valid_actions = allowed_actions or CANVAS_AGENT_ACTIONS
     return {
         "type": "object",
         "additionalProperties": False,
         "required": ["actionName", "message", "inputJson"],
         "properties": {
-            "actionName": {"type": "string", "enum": sorted(CANVAS_AGENT_ACTIONS)},
+            "actionName": {"type": "string", "enum": sorted(valid_actions)},
             "message": {"type": "string"},
             "inputJson": {"type": "string"},
         },

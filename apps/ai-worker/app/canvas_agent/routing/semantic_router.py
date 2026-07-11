@@ -112,8 +112,9 @@ class CanvasSemanticRouter:
                         "fromShapeId": left_match.shape_id,
                         "toShapeId": right_match.shape_id,
                         "connectionKind": connection_kind,
+                        "routingSource": "shape_embedding",
                     },
-                    message="두 도형을 찾았어요. 바로 연결할게요.",
+                    message="임베딩 검색으로 두 도형을 찾았어요. 바로 연결할게요.",
                 )
 
         request = _semantic_request(context)
@@ -153,8 +154,9 @@ class CanvasSemanticRouter:
                     "shapeIds": shape_ids,
                     "continuePlanning": False,
                     "focusResult": True,
+                    "routingSource": "shape_embedding",
                 },
-                message="찾았어요. 여기 있는 내용이 가장 가까워요.",
+                message="임베딩 검색으로 찾았어요. 여기 있는 내용이 가장 가까워요.",
             )
 
         return None

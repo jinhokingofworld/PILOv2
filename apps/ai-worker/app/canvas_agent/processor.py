@@ -31,6 +31,8 @@ class CanvasAgentRepository(Protocol):
         model_name: str,
     ) -> None: ...
 
+    def update_progress(self, run_id: str, message: str) -> None: ...
+
     def mark_failed(self, run_id: str, error_message: str) -> None: ...
 
 
@@ -108,6 +110,11 @@ class CanvasAgentProcessor:
                 )
 
             try:
+                if self.semantic_router is not None:
+                    self.repository.update_progress(
+                        context.run_id,
+                        "먼저 캔버스 위 도형 임베딩에서 관련 내용을 찾아보고 있어요.",
+                    )
                 local_plan = self._semantic_plan(context)
                 if local_plan is not None:
                     self.repository.create_planned_action(
@@ -127,11 +134,17 @@ class CanvasAgentProcessor:
                         job.run_id,
                     )
 
+                self.repository.update_progress(
+                    context.run_id,
+                    "임베딩으로 확실한 도형을 찾지 못해서 Canvas Planner로 이어서 판단하고 있어요.",
+                )
                 plan = self.planner.plan(context)
+                action_input = dict(plan.input)
+                action_input.setdefault("routingSource", "llm_planner")
                 self.repository.create_planned_action(
                     context,
                     plan.action_name,
-                    plan.input,
+                    action_input,
                     plan.message,
                     self.planner.model,
                 )

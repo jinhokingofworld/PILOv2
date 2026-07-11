@@ -28,6 +28,7 @@ export function validateCanvasAgentRunRequest(
     context: {
       presentationMode: validatePresentationMode(input.presentationMode),
       selectedShapeIds: validateSelectedShapeIds(input.selectedShapeIds),
+      toolHelpMode: input.toolHelpMode === true,
       viewport: validateViewport(input.viewport)
     }
   };

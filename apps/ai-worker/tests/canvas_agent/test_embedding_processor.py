@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.canvas_agent.embedding_processor import CanvasEmbeddingProcessor
+from app.canvas_agent.embeddings import build_shape_passage
 
 
 class FakeEmbedder:
@@ -63,3 +64,11 @@ def test_embedding_processor_indexes_shape_job() -> None:
 
     assert processor.process_next() == "canvas_shape_embedding_completed"
     assert repository.completed_jobs == ["job-1"]
+
+
+def test_shape_passage_includes_canvas_shape_aliases() -> None:
+    note_passage = build_shape_passage("note", "회의 메모", "")
+    frame_passage = build_shape_passage("frame", "프레임 1", "")
+
+    assert "shape aliases: 메모" in note_passage
+    assert "shape aliases: 프레임" in frame_passage
