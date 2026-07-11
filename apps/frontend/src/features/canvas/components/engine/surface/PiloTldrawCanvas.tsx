@@ -59,6 +59,7 @@ import {
 import type {
   PiloCanvasShapeDetailRequest,
   PiloCanvasFreeformShape,
+  PiloCanvasLocalInteractionState,
   PiloCanvasViewportBounds,
   PiloCanvasViewSetting,
 } from "../types";
@@ -170,6 +171,9 @@ type PiloTldrawCanvasProps = {
   onViewportBoundsChange: (bounds: PiloCanvasViewportBounds) => void;
   onShapeDetailRequest: (request: PiloCanvasShapeDetailRequest) => void;
   onHistoryStateChange: (state: PiloCanvasHistoryState) => void;
+  onLocalInteractionStateChange: (
+    state: PiloCanvasLocalInteractionState,
+  ) => void;
   presence?: CanvasPresenceController;
   onSnapStateChange: (state: PiloCanvasSnapState) => void;
   onOneShotToolCreated?: () => void;
@@ -187,6 +191,46 @@ const PILO_FRAME_EXPANDED_FALLBACK_SIZE = {
   h: 180,
   w: 320,
 };
+
+const localInteractionStateIdle: PiloCanvasLocalInteractionState = {
+  currentToolId: "select.idle",
+  editingShapeId: null,
+  focusedGroupId: null,
+  isFocused: false,
+  protectedShapeIds: [],
+  selectedShapeIds: [],
+};
+
+function getRestorableToolId(toolId: string) {
+  if (!toolId || toolId.startsWith("select.")) {
+    return "select.idle";
+  }
+
+  return toolId;
+}
+
+function getProtectedLocalShapeIds(
+  selectedShapeIds: TLShapeId[],
+  editingShapeId: TLShapeId | null,
+  currentToolId: string,
+) {
+  const protectedShapeIds = new Set<string>();
+
+  if (editingShapeId) {
+    protectedShapeIds.add(String(editingShapeId));
+  }
+
+  if (
+    currentToolId.startsWith("select.") &&
+    currentToolId !== "select.idle"
+  ) {
+    selectedShapeIds.forEach((shapeId) => {
+      protectedShapeIds.add(String(shapeId));
+    });
+  }
+
+  return Array.from(protectedShapeIds);
+}
 
 function collectSerializedArrowBindings(shapes: PiloCanvasFreeformShape[]) {
   return shapes.flatMap(readSerializedArrowBindings);
@@ -278,7 +322,17 @@ function resetFreeformShapes(
   shapes: PiloCanvasFreeformShape[],
   pendingArrowBindingsRef: MutableRefObject<PiloArrowBindingSnapshot[]>,
   piloDefaultArrowKindHydrationGuardRef: MutableRefObject<boolean>,
+  { preserveLocalState = false }: { preserveLocalState?: boolean } = {},
 ) {
+  const selectedShapeIds = preserveLocalState ? editor.getSelectedShapeIds() : [];
+  const editingShapeId = preserveLocalState ? editor.getEditingShapeId() : null;
+  const currentPageState = preserveLocalState
+    ? editor.getCurrentPageState()
+    : null;
+  const focusedGroupId = currentPageState?.focusedGroupId ?? null;
+  const currentToolId = preserveLocalState ? editor.getCurrentToolId() : null;
+  const isFocused = preserveLocalState ? editor.getIsFocused() : false;
+
   editor.run(
     () => {
       pendingArrowBindingsRef.current = [];
@@ -296,9 +350,35 @@ function resetFreeformShapes(
         pendingArrowBindingsRef,
         piloDefaultArrowKindHydrationGuardRef,
       );
+
+      if (preserveLocalState) {
+        const nextSelectedShapeIds = selectedShapeIds.filter((shapeId) =>
+          editor.getShape(shapeId),
+        );
+
+        if (nextSelectedShapeIds.length) {
+          editor.setSelectedShapes(nextSelectedShapeIds);
+        }
+
+        if (focusedGroupId && editor.getShape(focusedGroupId)) {
+          editor.setFocusedGroup(focusedGroupId);
+        }
+
+        if (editingShapeId && editor.getShape(editingShapeId)) {
+          editor.setEditingShape(editingShapeId);
+        }
+
+        if (currentToolId) {
+          editor.setCurrentTool(getRestorableToolId(currentToolId));
+        }
+      }
     },
     { history: "ignore" },
   );
+
+  if (isFocused) {
+    editor.focus({ focusContainer: false });
+  }
 }
 
 function collectFrameDescendantShapes(editor: Editor, frameId: TLShapeId) {
@@ -450,6 +530,7 @@ export function PiloTldrawCanvas({
   onViewportBoundsChange,
   onShapeDetailRequest,
   onHistoryStateChange,
+  onLocalInteractionStateChange,
   presence,
   onSnapStateChange,
   onOneShotToolCreated,
@@ -469,6 +550,7 @@ export function PiloTldrawCanvas({
   const createdLocalCardsRef = useRef(0);
   const freeformShapesRef = useRef(freeformShapes);
   const canvasWheelCleanupRef = useRef<(() => void) | null>(null);
+  const lastHydratedSeedKeyRef = useRef<string | null>(null);
   const frameChildrenRequestTimerRef =
     useRef<ReturnType<typeof setTimeout> | null>(null);
   const initialViewSettingRef = useRef(initialViewSetting);
@@ -530,12 +612,17 @@ export function PiloTldrawCanvas({
 
     if (!editor) return;
 
+    const shouldPreserveLocalState =
+      lastHydratedSeedKeyRef.current === seedKey;
+
     resetFreeformShapes(
       editor,
       freeformShapesRef.current,
       pendingArrowBindingsRef,
       piloDefaultArrowKindHydrationGuardRef,
+      { preserveLocalState: shouldPreserveLocalState },
     );
+    lastHydratedSeedKeyRef.current = seedKey;
   }, [hydrationVersion, seedKey]);
 
   useEffect(() => {
@@ -1219,6 +1306,9 @@ export function PiloTldrawCanvas({
         components={tldrawComponents}
         onMount={mountEditor}
       >
+        <CanvasLocalInteractionReporter
+          onChange={onLocalInteractionStateChange}
+        />
         <CanvasStateReporter
           onFreeformShapesDraftChange={onFreeformShapesDraftChange}
           onFreeformShapesChange={onFreeformShapesChange}
@@ -1266,6 +1356,52 @@ export function PiloTldrawCanvas({
       />
     </div>
   );
+}
+
+function CanvasLocalInteractionReporter({
+  onChange,
+}: {
+  onChange: (state: PiloCanvasLocalInteractionState) => void;
+}) {
+  const editor = useEditor();
+  const localInteractionState = useValue(
+    "pilo-local-interaction-state",
+    () => {
+      const selectedShapeIds = editor.getSelectedShapeIds();
+      const editingShapeId = editor.getEditingShapeId();
+      const currentToolId = editor.getCurrentToolId();
+      const pageState = editor.getCurrentPageState();
+
+      return {
+        currentToolId,
+        editingShapeId: editingShapeId ? String(editingShapeId) : null,
+        focusedGroupId: pageState.focusedGroupId
+          ? String(pageState.focusedGroupId)
+          : null,
+        isFocused: editor.getIsFocused(),
+        protectedShapeIds: getProtectedLocalShapeIds(
+          selectedShapeIds,
+          editingShapeId,
+          currentToolId,
+        ),
+        selectedShapeIds: selectedShapeIds.map(String),
+      };
+    },
+    [editor],
+  );
+
+  useEffect(() => {
+    onChange(localInteractionState);
+  }, [localInteractionState, onChange]);
+
+  useEffect(
+    () => () => {
+      onChange(localInteractionStateIdle);
+    },
+    [onChange],
+  );
+
+  return null;
 }
 
 const PILO_CODE_IMPORT_GRID_GAP_X = 56;

@@ -18,6 +18,7 @@ import {
 } from "../surface/PiloTldrawCanvas";
 import type {
   PiloCanvasFreeformShape,
+  PiloCanvasLocalInteractionState,
   PiloCanvasViewportBounds,
 } from "../types";
 import { CanvasZoomControls } from "./CanvasZoomControls";
@@ -56,6 +57,24 @@ const INITIAL_CANVAS_VIEW_SETTING: CanvasViewSetting = {
 const initialCanvasSnapState: PiloCanvasSnapState = {
   isSmartGuideEnabled: false,
 };
+const initialLocalInteractionState: PiloCanvasLocalInteractionState = {
+  currentToolId: "select.idle",
+  editingShapeId: null,
+  focusedGroupId: null,
+  isFocused: false,
+  protectedShapeIds: [],
+  selectedShapeIds: [],
+};
+
+function isRemoteOperationProtectedByLocalInteraction({
+  localInteractionState,
+  operation,
+}: {
+  localInteractionState: PiloCanvasLocalInteractionState;
+  operation: CanvasShapeOperationPayload;
+}) {
+  return localInteractionState.protectedShapeIds.includes(operation.shapeId);
+}
 
 export function PiloCanvasRuntime({
   ...props
@@ -123,6 +142,9 @@ function PiloCanvasRuntimeInner({
   const deferredRemoteOperationsRef = useRef(
     new Map<number, CanvasShapeOperationPayload>(),
   );
+  const localInteractionStateRef = useRef<PiloCanvasLocalInteractionState>(
+    initialLocalInteractionState,
+  );
   const remoteShapeRevisionRef = useRef(new Map<string, number>());
   const localShapeVersionRef = useRef(0);
   const [canvasHydrationVersion, setCanvasHydrationVersion] = useState(0);
@@ -166,9 +188,7 @@ function PiloCanvasRuntimeInner({
       sortedOperations.forEach((operation) => {
         deferredRemoteOperationsRef.current.delete(operation.opSeq);
 
-        if (operation.operationType === "delete") {
-          markShapeDeleted(operation.shapeId);
-        } else if (deletedShapeIdsRef.current.has(operation.shapeId)) {
+        if (operation.actorUserId === currentRealtimeUserId) {
           remoteShapeRevisionRef.current.set(
             operation.shapeId,
             Math.max(
@@ -179,7 +199,19 @@ function PiloCanvasRuntimeInner({
           return;
         }
 
-        if (operation.actorUserId === currentRealtimeUserId) {
+        if (
+          isRemoteOperationProtectedByLocalInteraction({
+            localInteractionState: localInteractionStateRef.current,
+            operation,
+          })
+        ) {
+          deferredRemoteOperationsRef.current.set(operation.opSeq, operation);
+          return;
+        }
+
+        if (operation.operationType === "delete") {
+          markShapeDeleted(operation.shapeId);
+        } else if (deletedShapeIdsRef.current.has(operation.shapeId)) {
           remoteShapeRevisionRef.current.set(
             operation.shapeId,
             Math.max(
@@ -251,6 +283,16 @@ function PiloCanvasRuntimeInner({
       Array.from(deferredRemoteOperationsRef.current.values()),
     );
   }, [applyRemoteCanvasOperations]);
+  const handleLocalInteractionStateChange = useCallback(
+    (state: PiloCanvasLocalInteractionState) => {
+      localInteractionStateRef.current = state;
+
+      if (!state.protectedShapeIds.length) {
+        flushDeferredRemoteOperations();
+      }
+    },
+    [flushDeferredRemoteOperations],
+  );
   const canvasPresence = useCanvasPresence(realtime, {
     applyOperations: applyRemoteCanvasOperations,
     catchUpOperations: catchUpCanvasOperations,
@@ -418,6 +460,7 @@ function PiloCanvasRuntimeInner({
           onHistoryStateChange={
             onHistoryStateChange ?? noopCanvasHistoryStateChange
           }
+          onLocalInteractionStateChange={handleLocalInteractionStateChange}
           presence={canvasPresence}
           onSnapStateChange={handleSnapStateChange}
           onOneShotToolCreated={onOneShotToolCreated}
