@@ -18,6 +18,7 @@ const MAX_CANVAS_TITLE_LENGTH = 120;
 export const MAX_CANVAS_SHAPE_BATCH_OPERATIONS = 100;
 const ALLOWED_SHAPE_TYPES = new Set([
   "sticky-note",
+  "note",
   "text",
   "frame",
   "draw",
@@ -29,7 +30,6 @@ const ALLOWED_SHAPE_TYPES = new Set([
   "video",
   "bookmark",
   "embed",
-  "pilo-sticky-note",
   "pilo-code-block",
   "file_node",
   "group"

@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { usePathname } from "next/navigation";
 import { LayoutDashboard } from "lucide-react";
 
@@ -23,7 +23,13 @@ type MainShellProps = {
 export function MainShell({ children }: MainShellProps) {
   const pathname = usePathname();
   const activeFeature = getFeatureNavigationItemForPathname(pathname);
+  const isCanvasRoute = pathname.startsWith("/canvas");
   const isSqlErdImmersiveRoute = pathname.startsWith("/sql-erd");
+  const [sidebarOpen, setSidebarOpen] = useState(() => !isCanvasRoute);
+
+  useEffect(() => {
+    if (isCanvasRoute) setSidebarOpen(false);
+  }, [isCanvasRoute]);
 
   if (isSqlErdImmersiveRoute) {
     return (
@@ -34,7 +40,7 @@ export function MainShell({ children }: MainShellProps) {
   }
 
   return (
-    <SidebarProvider>
+    <SidebarProvider open={sidebarOpen} onOpenChange={setSidebarOpen}>
       <AppSidebar
         items={featureNavigationItems}
         selectedItemId={activeFeature.id}

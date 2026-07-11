@@ -698,7 +698,9 @@ Status code: `200 OK`
 - PR Review 자동 제출
 - GitHub issue label/assignee/milestone/due date 변경
 - Board due date 자동 변경
-- Canvas 자유 편집 자동 생성/수정
+- Canvas 자유 편집 자동 생성/수정 (일반 Agent 범위). Canvas 전용 요청은
+  `docs/api/canvas-agent-api.md`의 별도 Canvas Agent 계약만 사용하며, Calendar,
+  Issue, PR, Meeting 등 외부 도메인 도구에는 접근하지 않는다.
 - Meeting 녹음 시작/종료
 - MeetingReport 재생성 요청
 - Calendar 일정 삭제

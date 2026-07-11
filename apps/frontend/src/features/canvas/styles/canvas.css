@@ -93,7 +93,9 @@
   display: grid;
   width: 52px;
   height: 52px;
+  cursor: pointer;
   place-items: center;
+  border: 0;
   border-radius: 999px;
   background: linear-gradient(145deg, #c45cff 0%, #6d5bd6 58%, #3858f6 100%);
   color: #ffffff;
@@ -237,27 +239,13 @@
     inset 0 0 0 1px rgba(15, 23, 42, 0.08);
 }
 
-.canvas-draw-color-picker {
-  position: relative;
-}
-
-.canvas-draw-color-menu {
-  position: absolute;
+.canvas-color-popover {
   top: 50%;
-  right: calc(100% + 10px);
-  z-index: 32;
-  display: grid;
   grid-template-columns: repeat(2, 40px);
-  gap: 6px;
-  border: 1px solid #e2e5ec;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.98);
-  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.12);
-  padding: 8px;
   transform: translateY(-50%);
 }
 
-.canvas-draw-color-menu button {
+.canvas-color-popover button {
   width: 40px;
   height: 40px;
   border-radius: 8px;
@@ -265,6 +253,19 @@
 
 .canvas-color-swatch.is-black {
   background: #171717;
+}
+
+.canvas-color-swatch.is-default {
+  background: conic-gradient(
+    from 45deg,
+    #171717,
+    #3858f6,
+    #34c675,
+    #ffd44d,
+    #ef5b68,
+    #7c5cff,
+    #171717
+  );
 }
 
 .canvas-color-swatch.is-red {
@@ -1154,11 +1155,6 @@
 
 /* PILO custom shape containers */
 
-.pilo-sticky-note-shape {
-  contain: layout paint;
-  pointer-events: all;
-}
-
 .pilo-code-block-shape {
   contain: layout paint;
   pointer-events: none;
@@ -1217,60 +1213,6 @@
 
 .pilo-code-block-shape:not(.is-editing) .pilo-code-block header:active {
   cursor: grabbing;
-}
-
-/* Sticky note shape */
-
-.pilo-sticky-note {
-  width: 100%;
-  height: 100%;
-  overflow: hidden;
-  border: 1px solid var(--pilo-sticky-border);
-  background: var(--pilo-sticky-fill);
-  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.16);
-  color: #202733;
-  font-family:
-    Pretendard,
-    Inter,
-    system-ui,
-    -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    sans-serif;
-}
-
-.pilo-sticky-note p,
-.pilo-sticky-note textarea {
-  box-sizing: border-box;
-  display: block;
-  width: 100%;
-  height: 100%;
-  margin: 0;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  font-size: 15px;
-  font-weight: 750;
-  line-height: 1.42;
-  outline: 0;
-  padding: 16px;
-  resize: none;
-  overflow-x: hidden;
-  overflow-y: auto;
-  overflow-wrap: anywhere;
-  overscroll-behavior: contain;
-  scrollbar-width: none;
-  white-space: pre-wrap;
-}
-
-.pilo-sticky-note p::-webkit-scrollbar,
-.pilo-sticky-note textarea::-webkit-scrollbar {
-  display: none;
-}
-
-.pilo-sticky-note p:empty::before {
-  content: "";
 }
 
 /* Code block shape */

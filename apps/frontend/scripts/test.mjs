@@ -146,6 +146,13 @@ const canvasWorkspace = await readFile(
   new URL("../src/features/canvas/components/workspace-canvas.tsx", import.meta.url),
   "utf8"
 );
+const canvasAiChatOverlay = await readFile(
+  new URL(
+    "../src/features/canvas/components/engine/surface/CanvasAiChatOverlay.tsx",
+    import.meta.url
+  ),
+  "utf8"
+);
 const canvasShapeSync = await readFile(
   new URL("../src/features/canvas/utils/canvas-shape-sync.ts", import.meta.url),
   "utf8"
@@ -266,13 +273,6 @@ const piloCodeMirrorEditor = await readFile(
 const piloCodeBlockShapeTypes = await readFile(
   new URL(
     "../src/features/canvas/components/engine/shapes/code-block/PiloCodeBlockShapeTypes.ts",
-    import.meta.url
-  ),
-  "utf8"
-);
-const piloStickyNoteShapeUtil = await readFile(
-  new URL(
-    "../src/features/canvas/components/engine/shapes/sticky-note/PiloStickyNoteShapeUtil.tsx",
     import.meta.url
   ),
   "utf8"
@@ -564,6 +564,16 @@ assert.match(canvasWorkspace, /realtime=\{canvasRealtimeConfig\}/);
 assert.match(canvasWorkspace, /canvasHistoryState\.canUndo/);
 assert.match(canvasWorkspace, /canvasHistoryState\.canRedo/);
 assert.match(canvasWorkspace, /onHistoryStateChange=\{setCanvasHistoryState\}/);
+assert.match(canvasWorkspace, /canvasActions\?\.createNote\(\)/);
+assert.doesNotMatch(canvasWorkspace, /createStickyNote/);
+assert.match(canvasWorkspace, /canvasActions\?\.setColor\(color\)/);
+assert.match(canvasWorkspace, /openPopover === "color"/);
+assert.match(canvasWorkspace, /<Dialog/);
+assert.match(canvasWorkspace, /<DialogTitle>/);
+assert.match(canvasWorkspace, /<Input/);
+assert.doesNotMatch(canvasWorkspace, /window\.prompt/);
+assert.match(canvasWorkspace, /label="더보기"/);
+assert.match(canvasWorkspace, /label="사각형"[\s\S]*label="원"[\s\S]*label="삼각형"/);
 assert.match(canvasWorkspace, /label="더보기"/);
 assert.match(canvasWorkspace, /aria-label="더보기 도구"/);
 assert.doesNotMatch(canvasWorkspace, /label="삽입"/);
@@ -759,7 +769,6 @@ assert.match(piloCanvasAssets, /withPiloMediaAsset/);
 assert.match(piloCanvasAssets, /editor\.getAsset\(assetId\)/);
 assert.match(piloCanvasAssets, /piloAsset/);
 assert.doesNotMatch(piloCanvasAssets, /surface\/pilo-canvas-state-reporter/);
-assert.match(piloCanvasShapeFactory, /createStickyNoteShape/);
 assert.match(piloCanvasShapeFactory, /createCodeBlockShape/);
 assert.match(piloCanvasShapeFactory, /createInsertableShape/);
 assert.doesNotMatch(
@@ -800,8 +809,6 @@ assert.match(piloCodeBlockComponent, /pilo-code-preview/);
 assert.match(piloCodeBlockComponent, /isPiloCodeBlockShape/);
 assert.match(piloCodeBlockComponent, /editor\.getShape\(shape\.id\)/);
 assert.match(piloCodeBlockComponent, /if \(!isPiloCodeBlockShape\(currentShape\)\) return/);
-assert.match(piloStickyNoteShapeUtil, /editor\.getShape\(shape\.id\)/);
-assert.match(piloStickyNoteShapeUtil, /currentShape\.type !== shape\.type/);
 assert.match(piloCodeMirrorEditor, /@codemirror\/view/);
 assert.match(piloCodeBlockShapeTypes, /export type PiloCodeBlockShape/);
 assert.match(piloCodeBlockShapeTypes, /isCollapsed\?: boolean/);
@@ -828,6 +835,53 @@ assert.match(piloCanvasFileImport, /isProbablyBinary/);
 assert.match(piloCanvasFileImport, /바이너리 파일은 제외했습니다/);
 assert.match(piloCanvasFileImport, /제외 폴더입니다/);
 assert.match(piloTldrawCanvas, /CanvasFileDropImporter/);
+assert.match(piloTldrawCanvas, /createNote: \(\) => void/);
+assert.match(piloTldrawCanvas, /editor\.setCurrentTool\("note"\)/);
+assert.match(canvasWorkspace, /setActiveCanvasTool\("note"\)/);
+assert.match(canvasWorkspace, /active=\{isCanvasToolActive\("note"\)\}/);
+assert.match(piloTldrawCanvas, /setColor: \(color: PiloCanvasColor\) => void/);
+assert.match(piloTldrawCanvas, /editor\.setStyleForNextShapes\(DefaultColorStyle, color\)/);
+assert.match(piloTldrawCanvas, /editor\.setStyleForSelectedShapes\(DefaultColorStyle, color\)/);
+assert.match(piloTldrawCanvas, /color === "default"/);
+assert.match(piloTldrawCanvas, /stylesForNextShape/);
+assert.match(canvasWorkspace, /value: "default", className: "is-default"/);
+assert.match(canvasWorkspace, /color\.value === "default"/);
+assert.match(canvasWorkspace, /<RotateCcw/);
+assert.match(canvasWorkspace, /useState<PiloCanvasColor>\("default"\)/);
+assert.doesNotMatch(piloTldrawCanvas, /pilo-sticky-note/);
+assert.doesNotMatch(piloCanvasShapeUtils, /PiloStickyNoteShapeUtil/);
+assert.match(piloTldrawCanvas, /event\.key\.toLowerCase\(\) !== "c"/);
+assert.match(piloTldrawCanvas, /CANVAS_AI_CHAT_HOLD_MS = 500/);
+assert.match(piloTldrawCanvas, /window\.addEventListener\("keydown", startCanvasAiChatWithShortcut, true\)/);
+assert.match(piloTldrawCanvas, /window\.addEventListener\("keyup", cancelCanvasAiChatWithShortcut, true\)/);
+assert.match(piloTldrawCanvas, /window\.requestAnimationFrame\(\s*updateHoldProgress/);
+assert.match(piloTldrawCanvas, /canvasAiChatPointerRef\.current/);
+assert.match(piloTldrawCanvas, /onPointerMoveCapture=\{trackCanvasAiChatPointer\}/);
+assert.match(piloTldrawCanvas, /function openCanvasAiChatFromButton/);
+assert.match(piloTldrawCanvas, /className="canvas-ai-tool absolute right-4 top-4 z-50"/);
+assert.match(piloTldrawCanvas, /aria-label="Canvas AI 채팅 열기"/);
+assert.match(piloTldrawCanvas, /if \(currentAnchor\) return null/);
+assert.doesNotMatch(piloTldrawCanvas, /onContextMenuCapture/);
+assert.doesNotMatch(piloTldrawCanvas, /event\.button === 2/);
+assert.match(piloTldrawCanvas, /editor\.updateInstanceState\(\{ isToolLocked: false \}\)/);
+assert.match(piloTldrawCanvas, /preset === "pen" \|\| preset === "highlight"/);
+assert.match(piloTldrawCanvas, /isToolLocked: shouldKeepDrawing/);
+assert.match(piloTldrawCanvas, /function placePendingShapeAt/);
+assert.match(piloTldrawCanvas, /onOneShotToolCreatedRef\.current\?\.\(\)/);
+assert.match(piloTldrawCanvas, /const connectionTools = new Set<PiloCanvasTool>\(\["arrow", "line"\]\)/);
+assert.match(piloTldrawCanvas, /!connectionTools\.has\(tool\)/);
+assert.match(piloTldrawCanvas, /function getArrowAtPoint/);
+assert.match(piloTldrawCanvas, /getShapesAtPoint\(pagePoint/);
+assert.match(piloTldrawCanvas, /getArrowAtPoint\(editor, pagePoint\) \?\? directShape/);
+assert.match(piloTldrawCanvas, /editor\.getCurrentToolId\(\) !== "select"/);
+assert.match(piloTldrawCanvas, /editor\.setCurrentTool\("select\.idle"\)/);
+assert.match(canvasAiChatOverlay, /Canvas AI 열기 진행 중/);
+assert.match(canvasAiChatOverlay, /conic-gradient/);
+assert.match(canvasAiChatOverlay, /aria-label="Canvas AI 채팅"/);
+assert.match(canvasAiChatOverlay, /setMessages/);
+assert.match(canvasAiChatOverlay, /max-h-64/);
+assert.match(canvasAiChatOverlay, /overflow-y-auto/);
+assert.match(canvasAiChatOverlay, /scrollbar-width:none/);
 assert.match(piloCanvasShapeFactory, /createImportedCodeFolderShapes/);
 assert.match(piloCanvasShapeFactory, /createImportedCodeFolderLayout/);
 assert.match(piloCanvasShapeFactory, /createFrameTree/);

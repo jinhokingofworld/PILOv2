@@ -41,6 +41,7 @@ type PiloCanvasRuntimeProps = {
   canvasClient?: CanvasViewSettingApiClient | null;
   onHistoryStateChange?: (state: PiloCanvasHistoryState) => void;
   onSnapStateChange?: (state: PiloCanvasSnapState) => void;
+  onOneShotToolCreated?: () => void;
   onReady: (actions: PiloCanvasActions | null) => void;
   realtime?: CanvasRealtimeConfig | null;
   storageMode?: CanvasRuntimeStorageMode;
@@ -83,6 +84,7 @@ function PiloCanvasRuntimeInner({
   canvasClient = null,
   onHistoryStateChange,
   onSnapStateChange,
+  onOneShotToolCreated,
   onReady,
   realtime = null,
   storageMode = "local",
@@ -418,6 +420,8 @@ function PiloCanvasRuntimeInner({
           }
           presence={canvasPresence}
           onSnapStateChange={handleSnapStateChange}
+          onOneShotToolCreated={onOneShotToolCreated}
+          canvasAgentEnabled={storageMode === "api"}
         />
       </section>
 

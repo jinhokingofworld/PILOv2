@@ -7,7 +7,6 @@ import type {
   TLShapePartial,
 } from "tldraw";
 import type { PiloCodeBlockShape } from "./code-block/PiloCodeBlockShapeTypes";
-import type { PiloStickyNoteShape } from "./sticky-note/PiloStickyNoteShapeUtil";
 
 export type PiloFrameShape = Extract<TLShape, { type: "frame" }>;
 export type PiloFramePartial = TLShapePartial<PiloFrameShape> & {
@@ -15,7 +14,6 @@ export type PiloFramePartial = TLShapePartial<PiloFrameShape> & {
 };
 export type PiloSnapShape =
   | PiloFrameShape
-  | PiloStickyNoteShape
   | PiloCodeBlockShape;
 
 export function isPiloFrameShape(
@@ -36,7 +34,6 @@ export function isPiloSnapShape(
   return Boolean(
     shape &&
       (isPiloFrameShape(shape) ||
-        shape.type === "pilo-sticky-note" ||
         isPiloCodeBlockShape(shape)),
   );
 }

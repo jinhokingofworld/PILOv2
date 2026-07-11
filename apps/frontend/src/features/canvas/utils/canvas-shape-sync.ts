@@ -165,6 +165,20 @@ function cloneRawShape(shape: CanvasFreeformShapeSnapshot) {
   return JSON.parse(JSON.stringify(shape)) as Record<string, unknown>;
 }
 
+function readRichTextPlainText(value: unknown): string | null {
+  if (!isRecord(value) || !Array.isArray(value.content)) return null;
+
+  const paragraphs = value.content.flatMap((block) => {
+    if (!isRecord(block) || !Array.isArray(block.content)) return [];
+
+    return block.content.flatMap((node) =>
+      isRecord(node) && typeof node.text === "string" ? [node.text] : [],
+    );
+  });
+
+  return paragraphs.length ? paragraphs.join("\n") : null;
+}
+
 function resolveParentShapeId(parentId: unknown) {
   return typeof parentId === "string" && parentId.startsWith("shape:")
     ? parentId
@@ -237,7 +251,7 @@ export function toCanvasShapePayload(
       ? props.text
       : typeof props.code === "string"
         ? props.code
-        : null;
+        : readRichTextPlainText(props.richText);
 
   return {
     id: typeof shape.id === "string" ? shape.id : "",

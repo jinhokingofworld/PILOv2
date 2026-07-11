@@ -12,6 +12,7 @@ function isFiniteNumber(value: unknown): value is number {
 
 const persistableShapeTypes = new Set([
   "sticky-note",
+  "note",
   "text",
   "frame",
   "draw",
@@ -24,7 +25,6 @@ const persistableShapeTypes = new Set([
   "bookmark",
   "embed",
   "group",
-  "pilo-sticky-note",
   "pilo-code-block",
   // TODO(file_node): add PILO_FILE_NODE_SHAPE_TYPE after the ShapeUtil is
   // registered and the local/mock restore path can render it safely.

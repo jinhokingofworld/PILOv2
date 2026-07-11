@@ -7,10 +7,6 @@ import {
   type TLShape,
   type TLShapeId,
 } from "tldraw";
-import type {
-  PiloStickyNoteColor,
-  PiloStickyNoteShape,
-} from "./sticky-note/PiloStickyNoteShapeUtil";
 import {
   DEFAULT_PILO_CODE_BLOCK_PROPS,
   type PiloCodeLanguage,
@@ -24,9 +20,6 @@ import type { PiloCanvasFreeformShape } from "../types";
 
 export type PiloInsertableTool = "image" | "video" | "bookmark" | "embed";
 
-type PiloStickyNotePartial = TLCreateShapePartial<PiloStickyNoteShape> & {
-  id: TLShapeId;
-};
 type PiloCodeBlockPartial = TLCreateShapePartial<PiloCodeBlockShape> & {
   id: TLShapeId;
 };
@@ -77,29 +70,6 @@ type ImportedCodeFolderLayout = {
   frameSize: { h: number; w: number };
   items: ImportedCodeFolderLayoutItem[];
 };
-
-export function createStickyNoteShape(
-  index: number,
-  position: { x: number; y: number },
-  color: PiloStickyNoteColor = "butter",
-): PiloStickyNotePartial {
-  const width = 156;
-  const height = 148;
-  const offset = index * 10;
-
-  return {
-    id: createShapeId(`pilo-sticky-${Date.now()}-${index}`),
-    type: "pilo-sticky-note",
-    x: position.x - width / 2 + offset,
-    y: position.y - height / 2 + offset,
-    props: {
-      w: width,
-      h: height,
-      color,
-      text: "",
-    },
-  };
-}
 
 export function createCodeBlockShape(
   index: number,
