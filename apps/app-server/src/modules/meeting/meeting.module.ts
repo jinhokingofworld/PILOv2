@@ -7,6 +7,8 @@ import { LiveKitTokenService } from "./livekit-token.service";
 import { LiveKitWebhookController } from "./livekit-webhook.controller";
 import { LiveKitWebhookService } from "./livekit-webhook.service";
 import { MeetingController } from "./meeting.controller";
+import { MeetingReportOutboxPublisherService } from "./meeting-report-outbox-publisher.service";
+import { MeetingReportOutboxRecoveryService } from "./meeting-report-outbox-recovery.service";
 import { MeetingReportJobService } from "./meeting-report-job.service";
 import { MeetingService } from "./meeting.service";
 
@@ -18,7 +20,9 @@ import { MeetingService } from "./meeting.service";
     LiveKitEgressService,
     LiveKitTokenService,
     LiveKitWebhookService,
-    MeetingReportJobService
+    MeetingReportJobService,
+    MeetingReportOutboxPublisherService,
+    MeetingReportOutboxRecoveryService
   ],
   exports: [MeetingService]
 })
