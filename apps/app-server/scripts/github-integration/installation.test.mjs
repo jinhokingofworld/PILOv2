@@ -389,7 +389,8 @@ function createService({
     installedAt: "2026-07-04T12:30:00.000Z",
     suspendedAt: "2026-07-04T12:45:00.000Z",
     lastSyncedAt: null,
-    returnUrl: "https://pilo.test/workspaces/11111111-1111-4111-8111-111111111111/github"
+    syncRunId: "77777777-7777-4777-8777-777777777777",
+    returnUrl: "https://pilo.test/workspaces/11111111-1111-4111-8111-111111111111/github?syncRunId=77777777-7777-4777-8777-777777777777"
   });
 
   const upsert = database.queries.at(-1);
@@ -605,16 +606,17 @@ function createService({
     githubSyncRunService
   });
 
-  const callback = await service.completeGithubAppInstallationCallback(
-    {
-      installation_id: "12345678",
-      setup_action: "install",
-      state
-    },
-    "pilo_github_app_installation_state=installation-binding-token"
+  await assert.rejects(
+    () => service.completeGithubAppInstallationCallback(
+      {
+        installation_id: "12345678",
+        setup_action: "install",
+        state
+      },
+      "pilo_github_app_installation_state=installation-binding-token"
+    ),
+    (error) => error?.callbackError === "callback_failed"
   );
-
-  assert.equal(callback.installationId, "33333333-3333-4333-8333-333333333333");
   assert.deepEqual(githubSyncRunService.calls, [
     {
       currentUserId,

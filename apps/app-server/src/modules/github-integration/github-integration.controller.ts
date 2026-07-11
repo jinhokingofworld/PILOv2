@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  HttpCode,
   Delete,
   Get,
   Headers,
@@ -366,6 +367,7 @@ export class GithubIntegrationController {
   }
 
   @Post("workspaces/:workspaceId/github/sync-runs")
+  @HttpCode(202)
   @UseGuards(AuthGuard)
   async startGithubSyncRun(
     @CurrentUserId() currentUserId: string,

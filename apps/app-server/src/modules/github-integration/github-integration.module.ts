@@ -25,6 +25,7 @@ import { GithubPullRequestRemoteService } from "./github-pull-request-remote.ser
 import { GithubReviewSubmissionService } from "./github-review-submission.service";
 import { GithubSourceReadService } from "./github-source-read.service";
 import { GithubSyncExecutorService } from "./github-sync-executor.service";
+import { GithubSyncJobService } from "./github-sync-job.service";
 import { GithubSyncRunService } from "./github-sync-run.service";
 import { GithubTokenEncryptionService } from "./github-token-encryption.service";
 import { GithubWebhookService } from "./github-webhook.service";
@@ -55,6 +56,7 @@ import { GithubWebhookService } from "./github-webhook.service";
     GithubReviewSubmissionService,
     GithubSourceReadService,
     GithubSyncExecutorService,
+    GithubSyncJobService,
     GithubSyncRunService,
     GithubTokenEncryptionService,
     GithubWebhookService

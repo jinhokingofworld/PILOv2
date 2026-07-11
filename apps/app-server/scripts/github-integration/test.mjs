@@ -168,5 +168,6 @@ await import("./review-submission.test.mjs");
 await import("./conflict-merge.test.mjs");
 await import("./sync-progress.test.mjs");
 await import("./sync-runs.test.mjs");
+await import("./async-sync-worker.test.mjs");
 await import("./project-v2-write.test.mjs");
 await import("./webhook.test.mjs");

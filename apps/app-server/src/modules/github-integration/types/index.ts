@@ -68,6 +68,7 @@ export interface GithubAppInstallationStartPayload {
 export interface GithubAppInstallationCallbackPayload
   extends Omit<GithubAppInstallationPayload, "id"> {
   installationId: string;
+  syncRunId: string | null;
   returnUrl: string | null;
 }
 
@@ -452,7 +453,7 @@ export type GithubSyncTarget =
   | "project_v2_items"
   | "full";
 
-export type GithubSyncStatus = "running" | "success" | "failed";
+export type GithubSyncStatus = "queued" | "running" | "success" | "failed";
 
 export type GithubSyncProgressStage =
   | "initializing"

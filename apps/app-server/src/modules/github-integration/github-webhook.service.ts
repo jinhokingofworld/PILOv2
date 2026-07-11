@@ -5,6 +5,7 @@ import { badRequest } from "../../common/api-error";
 import { DatabaseService } from "../../database/database.service";
 import { GithubWebhookRequest } from "./dto";
 import { GithubIntegrationConfigService } from "./github-integration-config.service";
+import { GithubSyncJobService } from "./github-sync-job.service";
 import type {
   GithubWebhookDeliveryPayload,
   GithubWebhookDeliveryStatus
@@ -44,7 +45,8 @@ const INVALID_GITHUB_WEBHOOK_SIGNATURE_MESSAGE =
 export class GithubWebhookService {
   constructor(
     private readonly database: DatabaseService,
-    private readonly configService: GithubIntegrationConfigService
+    private readonly configService: GithubIntegrationConfigService,
+    private readonly syncJobService?: GithubSyncJobService
   ) {}
 
   async receiveGithubWebhook(
@@ -83,6 +85,12 @@ export class GithubWebhookService {
 
     const existing = await this.findGithubWebhookDelivery(deliveryId);
     if (existing) {
+      if (this.syncJobService && (this.isRecoverableWebhookEnqueueFailure(existing) || existing.status === "received")) {
+        await this.enqueueWebhookDeliveryAndMarkReceived(deliveryId);
+        const recovered = await this.findGithubWebhookDelivery(deliveryId);
+        if (!recovered) throw badRequest("GitHub webhook delivery could not be recorded");
+        return this.mapGithubWebhookDelivery(recovered);
+      }
       return this.mapGithubWebhookDelivery(existing);
     }
 
@@ -98,7 +106,32 @@ export class GithubWebhookService {
         status === "ignored" ? UNSUPPORTED_GITHUB_WEBHOOK_MESSAGE : null
     });
 
+    if (status === "received") await this.enqueueWebhookDeliveryAndMarkReceived(deliveryId);
+
     return this.mapGithubWebhookDelivery(row);
+  }
+
+  private async enqueueWebhookDeliveryAndMarkReceived(deliveryId: string): Promise<void> {
+    if (!this.syncJobService) return;
+    try {
+      await this.syncJobService.enqueueWebhookDelivery(deliveryId);
+      await this.database.execute(
+        `UPDATE github_webhook_deliveries
+         SET status='received', processed_at=NULL, error_message=NULL
+         WHERE delivery_id=$1`,
+        [deliveryId]
+      );
+    } catch (error) {
+      await this.database.execute(
+        `UPDATE github_webhook_deliveries SET status='failed', processed_at=now(), error_message=$2 WHERE delivery_id=$1`,
+        [deliveryId, "GitHub webhook could not be enqueued"]
+      );
+      throw error;
+    }
+  }
+
+  private isRecoverableWebhookEnqueueFailure(row: GithubWebhookDeliveryRow): boolean {
+    return row.status === "failed" && row.error_message === "GitHub webhook could not be enqueued";
   }
 
   private mapGithubWebhookDelivery(
