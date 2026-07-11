@@ -258,6 +258,10 @@ secret name, version stage, last changed metadata만 확인한다.
 `ecs_service_names["pr-review-ai-worker"]` 값으로 등록한다. 등록 전에도 기존
 `ai-worker` 배포 workflow는 전용 Worker 단계를 건너뛰고 정상 동작한다.
 
+`PR_REVIEW_ANALYSIS_WORKER_TOKEN`은 App Server와 PR Review AI Worker에만 주입한다.
+GitHub Sync Worker는 기존 App Server 계열 secret 구성을 사용하되 이 PR Review 전용
+환경변수 alias는 받지 않는다.
+
 ## 6. 절대 커밋하면 안 되는 값
 
 - `.env`
