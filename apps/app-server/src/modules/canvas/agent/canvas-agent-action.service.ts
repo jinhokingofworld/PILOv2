@@ -147,12 +147,10 @@ export class CanvasAgentActionService {
     );
     const kind = input.kind === "code" ? "code" : defaultKind;
     const viewport = this.readViewport(run.context_json.viewport);
-    const occupiedShapes = await this.repository.listShapesForPlacement(run.canvas_id, viewport);
     const spec = this.drafts.createDraftSpec({
       kind,
       prompt: run.prompt,
       sourceShapes,
-      occupiedShapes,
       viewport,
       connections: input.connections,
       nodes: input.nodes,

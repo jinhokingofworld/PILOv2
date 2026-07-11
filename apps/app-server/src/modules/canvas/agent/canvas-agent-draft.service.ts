@@ -45,7 +45,6 @@ export class CanvasAgentDraftService {
     connections?: unknown;
     kind: "diagram" | "code";
     nodes?: unknown;
-    occupiedShapes?: CanvasAgentShapeRow[];
     prompt: string;
     recommendedColors?: unknown;
     sourceShapes: CanvasAgentShapeRow[];
@@ -58,7 +57,6 @@ export class CanvasAgentDraftService {
       x: input.viewport ? input.viewport.x + 80 : 80,
       y: input.viewport ? input.viewport.y + 80 : 80
     };
-    const occupiedShapes = input.occupiedShapes ?? [];
     const sourceShapeIds = input.sourceShapes.map((shape) => shape.id);
     const sourceRevisions = Object.fromEntries(
       input.sourceShapes.map((shape) => [shape.id, Number(shape.revision)])
@@ -76,7 +74,7 @@ export class CanvasAgentDraftService {
       summary: input.summary,
       title
     });
-    if (generated) return this.placeDraftSpec(generated, input.viewport, occupiedShapes);
+    if (generated) return this.placeDraftSpec(generated, input.viewport);
 
     if (input.kind === "code") {
       const code = this.cleanText(input.code) || this.defaultCode(input.prompt);
@@ -117,7 +115,7 @@ export class CanvasAgentDraftService {
         nodes: [frame, codeNode],
         connections: [],
         toolSteps: this.createToolSteps([frame, codeNode], [])
-      }, input.viewport, occupiedShapes);
+      }, input.viewport);
     }
 
     const labels = input.sourceShapes.length
@@ -169,7 +167,7 @@ export class CanvasAgentDraftService {
       nodes: [frame, ...cards],
       connections,
       toolSteps: this.createToolSteps([frame, ...cards], connections)
-    }, input.viewport, occupiedShapes);
+    }, input.viewport);
   }
 
   private createGeneratedDraftSpec(input: {
@@ -363,12 +361,10 @@ export class CanvasAgentDraftService {
 
   private placeDraftSpec(
     spec: CanvasDraftSpec,
-    viewport: CanvasAgentRequestContext["viewport"],
-    occupiedShapes: CanvasAgentShapeRow[]
+    viewport: CanvasAgentRequestContext["viewport"]
   ): CanvasDraftSpec {
     const nodes = placeCanvasAgentDraftNodes({
       nodes: spec.nodes,
-      occupiedShapes,
       viewport
     });
 
