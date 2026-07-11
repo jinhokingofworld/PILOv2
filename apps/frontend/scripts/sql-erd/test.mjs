@@ -3172,6 +3172,25 @@ assert.match(panel, /useAuthSession/);
 assert.match(panel, /createSqlErdApiClient/);
 assert.match(panel, /getSession/);
 assert.match(panel, /sessionId: string/);
+assert.match(panel, /createSqlErdEditState/);
+assert.match(panel, /beginSqlErdParse/);
+assert.match(panel, /reduceSqlErdEditState/);
+assert.match(
+  panel,
+  /const \[sqlErdEditState, setSqlErdEditState\] = useState/
+);
+assert.match(
+  panel,
+  /const sqlErdViewSession =\s*sqlErdEditState\.lastSuccessfulSnapshot/
+);
+assert.match(panel, /type: "draft_source_changed"/);
+assert.match(panel, /type: "draft_dialect_changed"/);
+assert.match(panel, /type: "session_loaded"/);
+assert.match(panel, /type: "layout_changed"/);
+assert.match(panel, /type: "layout_saved"/);
+assert.match(panel, /type: "parse_failed"/);
+assert.match(panel, /type: "parse_finished"/);
+assert.match(panel, /type: "parse_succeeded"/);
 assert.match(panel, /createSqlErdGenerateWorkspaceRequest/);
 assert.match(panel, /getSqlErdGenerateErrorMessage/);
 assert.match(panel, /getSqlErdSignInRequiredState/);
@@ -3287,9 +3306,8 @@ assert.match(panel, /EditorState\.readOnly\.of\(readOnly\)/);
 assert.match(panel, /EditorView\.editable\.of\(!readOnly\)/);
 assert.doesNotMatch(panel, /\bsql\(\)/);
 assert.doesNotMatch(panel, /<textarea/);
-assert.match(panel, /setSqlErdViewSession\(\(currentSession\) =>/);
+assert.doesNotMatch(panel, /setSqlErdViewSession/);
 assert.match(panel, /sessionLoadState/);
-assert.match(panel, /setSqlErdViewSession/);
 assert.match(panel, /selectedSqlErdObject/);
 assert.match(panel, /setSelectedSqlErdObject/);
 assert.match(panel, /createSqlErdInspectorViewModel/);
@@ -3336,7 +3354,12 @@ assert.match(panel, /text-lg/);
 assert.match(panel, /text-base/);
 assert.doesNotMatch(panel, />Inspector</);
 assert.match(panel, /features\/sql-erd\/utils\/inspector/);
-assert.match(panel, /sourceText=\{sqlErdViewSession\.sourceText\}/);
+assert.match(panel, /sourceText=\{sqlErdEditState\.draftSourceText\}/);
+assert.match(panel, /dialect=\{sqlErdEditState\.draftDialect\}/);
+assert.match(
+  panel,
+  /sourceText: sqlErdEditState\.draftSourceText/
+);
 assert.match(panel, /modelJson=\{sqlErdViewSession\.modelJson\}/);
 assert.match(panel, /layoutJson=\{sqlErdViewSession\.layoutJson\}/);
 assert.match(panel, /label=\{sessionLoadState\.label\}/);

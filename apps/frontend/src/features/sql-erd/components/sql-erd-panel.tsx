@@ -88,6 +88,11 @@ import {
 import { createSqlErdGenerateWorkspaceRequest } from "@/features/sql-erd/utils/generate-session";
 import { createSqlErdLayoutAutosaveRequest } from "@/features/sql-erd/utils/layout-autosave";
 import {
+  beginSqlErdParse,
+  createSqlErdEditState,
+  reduceSqlErdEditState
+} from "@/features/sql-erd/utils/sql-edit-state";
+import {
   getSqlErdGenerateErrorMessage,
   getSqlErdSignInRequiredState,
   getSqlErdWorkspaceSaveErrorState
@@ -221,9 +226,11 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
   const [inspectorPanelWidth, setInspectorPanelWidth] = useState(
     INSPECTOR_PANEL_DEFAULT_WIDTH
   );
-  const [sqlErdViewSession, setSqlErdViewSession] = useState<SqlErdViewSession>(
-    emptySqlErdViewSession
+  const [sqlErdEditState, setSqlErdEditState] = useState(() =>
+    createSqlErdEditState(emptySqlErdViewSession)
   );
+  const sqlErdViewSession =
+    sqlErdEditState.lastSuccessfulSnapshot;
   const [sessionLoadState, setSessionLoadState] =
     useState<SqlErdSessionLoadState>({
       label: "Loading",
@@ -247,7 +254,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
     sqlErdViewSession.id === sessionId &&
     sqlErdViewSession.revision !== null;
   const sourceEditorDialect = resolveSqlSourceEditorDialect(
-    sqlErdViewSession.dialect,
+    sqlErdEditState.draftDialect,
     lastResolvedDialect
   );
   const selectedRelationSourceRanges = useMemo(
@@ -255,9 +262,9 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
       getSelectedSqlErdRelationSourceRanges({
         selection: selectedSqlErdObject,
         sourceMap: sqlSourceMap,
-        sourceText: sqlErdViewSession.sourceText
+        sourceText: sqlErdEditState.draftSourceText
       }),
-    [selectedSqlErdObject, sqlErdViewSession.sourceText, sqlSourceMap]
+    [selectedSqlErdObject, sqlErdEditState.draftSourceText, sqlSourceMap]
   );
   const modelIndex = useMemo(
     () => createSqltoerdModelIndex(sqlErdViewSession.modelJson),
@@ -273,30 +280,30 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
   );
   const handleSourceTextChange = useCallback((sourceText: string) => {
     setSqlSourceMap(null);
-    setSqlErdViewSession((currentSession) => ({
-      ...currentSession,
-      sourceText
-    }));
+    setSqlErdEditState((currentState) =>
+      reduceSqlErdEditState(currentState, {
+        sourceText,
+        type: "draft_source_changed"
+      })
+    );
   }, []);
   const handleDialectChange = useCallback((dialect: SqltoerdDialect) => {
     setSqlSourceMap(null);
-    setSqlErdViewSession((currentSession) => ({
-      ...currentSession,
-      dialect
-    }));
+    setSqlErdEditState((currentState) =>
+      reduceSqlErdEditState(currentState, {
+        dialect,
+        type: "draft_dialect_changed"
+      })
+    );
   }, []);
   const handleLayoutChange = useCallback(
     (layoutJson: SqltoerdLayoutJsonV1) => {
-      setSqlErdViewSession((currentSession) => {
-        if (areSqltoerdLayoutsEqual(currentSession.layoutJson, layoutJson)) {
-          return currentSession;
-        }
-
-        return {
-          ...currentSession,
-          layoutJson
-        };
-      });
+      setSqlErdEditState((currentState) =>
+        reduceSqlErdEditState(currentState, {
+          layoutJson,
+          type: "layout_changed"
+        })
+      );
 
       if (
         !accessToken ||
@@ -405,7 +412,12 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           sourceText: activeViewSession.sourceText
         });
 
-        setSqlErdViewSession(activeViewSession);
+        setSqlErdEditState((currentState) =>
+          reduceSqlErdEditState(currentState, {
+            snapshot: activeViewSession,
+            type: "session_loaded"
+          })
+        );
         setLastResolvedDialect(
           activeParseResult.ok
             ? activeParseResult.resolvedDialect
@@ -453,10 +465,20 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
       tone: "neutral"
     });
 
+    const parseStart = beginSqlErdParse(sqlErdEditState);
+    setSqlErdEditState(parseStart.state);
+
     const generateRequest =
-      createSqlErdGenerateWorkspaceRequest(sqlErdViewSession);
+      createSqlErdGenerateWorkspaceRequest(parseStart.session);
 
     if (!generateRequest.ok) {
+      setSqlErdEditState((currentState) =>
+        reduceSqlErdEditState(currentState, {
+          error: generateRequest.error,
+          requestSequence: parseStart.requestSequence,
+          type: "parse_failed"
+        })
+      );
       setSqlSourceMap(null);
       setSessionLoadState({
         label: "Parse error",
@@ -468,6 +490,12 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
     }
 
     if (generateRequest.kind !== "update") {
+      setSqlErdEditState((currentState) =>
+        reduceSqlErdEditState(currentState, {
+          requestSequence: parseStart.requestSequence,
+          type: "parse_finished"
+        })
+      );
       setSessionLoadState({
         label: "Session unavailable",
         message: "Return to the session list and open this session again.",
@@ -496,7 +524,13 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
         generateRequest.payload
       );
 
-      setSqlErdViewSession(createWorkspaceSqlErdViewSession(savedSession));
+      setSqlErdEditState((currentState) =>
+        reduceSqlErdEditState(currentState, {
+          requestSequence: parseStart.requestSequence,
+          snapshot: createWorkspaceSqlErdViewSession(savedSession),
+          type: "parse_succeeded"
+        })
+      );
       setSqlSourceMap(generateRequest.sourceMap);
       setPendingLayoutAutosaveJson(null);
       setLayoutAutosaveRetryAttempt(0);
@@ -508,6 +542,13 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
       });
       setSelectedSqlErdObject({ type: "none" });
     } catch (error) {
+      setSqlErdEditState((currentState) =>
+        reduceSqlErdEditState(currentState, {
+          requestSequence: parseStart.requestSequence,
+          type: "parse_finished"
+        })
+      );
+
       if (isSqlErdApiConflictError(error)) {
         setLayoutAutosaveBlockReason("conflict");
         setSessionLoadState({
@@ -521,7 +562,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
     } finally {
       setIsGenerating(false);
     }
-  }, [authSession, isGenerating, sqlErdViewSession]);
+  }, [authSession, isGenerating, sqlErdEditState]);
 
   useEffect(() => {
     if (
@@ -567,22 +608,13 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           layoutAutosaveRequest.payload
         );
 
-        setSqlErdViewSession((currentSession) => {
-          if (currentSession.id !== savedSession.id) {
-            return currentSession;
-          }
-
-          return {
-            ...currentSession,
-            layoutJson: areSqltoerdLayoutsEqual(
-              currentSession.layoutJson,
-              requestLayoutJson
-            )
-              ? savedSession.layoutJson
-              : currentSession.layoutJson,
-            revision: savedSession.revision
-          };
-        });
+        setSqlErdEditState((currentState) =>
+          reduceSqlErdEditState(currentState, {
+            requestLayoutJson,
+            snapshot: createWorkspaceSqlErdViewSession(savedSession),
+            type: "layout_saved"
+          })
+        );
         setPendingLayoutAutosaveJson((currentLayoutJson) =>
           currentLayoutJson &&
           areSqltoerdLayoutsEqual(currentLayoutJson, requestLayoutJson)
@@ -769,7 +801,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
     >
       <SourcePanel
         counts={sessionCounts}
-        dialect={sqlErdViewSession.dialect}
+        dialect={sqlErdEditState.draftDialect}
         isOpen={isSourceOpen}
         isDialectSelectDisabled={
           isGenerating || !isSessionReady
@@ -786,7 +818,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
         isSourceTextReadOnly={
           isGenerating || !isSessionReady
         }
-        sourceText={sqlErdViewSession.sourceText}
+        sourceText={sqlErdEditState.draftSourceText}
         resolvedDialect={sourceEditorDialect}
         relationSourceRanges={selectedRelationSourceRanges}
         width={clampedSourcePanelWidth}
