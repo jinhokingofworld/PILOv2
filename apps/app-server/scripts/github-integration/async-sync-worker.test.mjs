@@ -123,8 +123,12 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
       return null;
     },
     async execute(text, values) {
-      if (/status='failed'/.test(text)) delivery = { ...delivery, status: "failed", error_message: values[1] };
-      if (/status='received'/.test(text)) delivery = { ...delivery, status: "received", error_message: null, processed_at: null };
+      if (/SET\s+status='failed'/.test(text)) {
+        delivery = { ...delivery, status: "failed", error_message: values[1] };
+      }
+      if (/SET\s+status='received'/.test(text)) {
+        delivery = { ...delivery, status: "received", error_message: null, processed_at: null };
+      }
       return { rowCount: 1 };
     }
   };

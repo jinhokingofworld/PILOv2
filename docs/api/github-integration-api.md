@@ -636,7 +636,8 @@ github_app_authorization
 - signature가 유효하지 않으면 delivery를 `failed`로 기록하고 `400 BAD_REQUEST`를 반환한다.
 - 이미 같은 `delivery_id` row가 있고 상태가 `received` 또는 `ignored`이면 신규 insert나 overwrite 없이 기존 row를 반환한다.
 - `projects_v2_item`은 `action`, `githubInstallationId`, `projectV2NodeId`, `projectItemNodeId`를 정규화해 delivery row에 함께 보관한다. 필수 context가 없거나 선택된 organization ProjectV2가 아니면 queue publication 전에 `ignored`로 기록하고 `processedAt`을 기록한다. `ignored` delivery는 SQS 또는 GitHub GraphQL 작업을 예약하지 않는다.
-- A selected `projects_v2_item` delivery는 `received`로 기록한 뒤 `SQS_GITHUB_WEBHOOKS_QUEUE_URL`에 `deliveryId`를 queue한다. 이때 `received`는 선택된 delivery가 비동기 reconcile에 수락되었다는 의미이며, source table 동기화 완료를 의미하지 않는다. queue publication 실패 시 delivery는 `failed`로 기록한다.
+- A selected `projects_v2_item` delivery는 먼저 내부 pending publication marker를 가진 `received`로 기록한 뒤 `SQS_GITHUB_WEBHOOKS_QUEUE_URL`에 `deliveryId`를 queue한다. 이때 `received`는 선택된 delivery가 비동기 reconcile에 수락되었다는 의미이며, source table 동기화 완료를 의미하지 않는다. pending/publishing marker는 receiver 응답의 `received` message를 바꾸지 않으며 raw payload나 token을 포함하지 않는다.
+- Publication은 delivery별 publishing lease를 원자적으로 claim한 publisher만 수행한다. SQS send가 성공한 뒤 그 publisher의 guarded acknowledgement가 marker와 lease를 해제한다. send, acknowledgement, 또는 release가 실패하면 pending marker 또는 만료 가능한 publishing lease가 남아 recovery 대상이 되므로 `received` delivery가 unqueued 상태로 고립되지 않는다. Lease 만료 뒤의 duplicate publication은 worker delivery claim/idempotency로 안전하게 처리된다.
 - worker는 선택 상태를 다시 확인한 뒤 `processing` lease와 함께 delivery를 claim하고, `attempt_count`를 증가시킨다. 성공하면 lease를 해제하고 내부 완료 상태인 `processed`로 기록한다. An unselected queued delivery is internally processed without GitHub GraphQL.
 - claim된 worker는 `projectItemNodeId` 하나를 GitHub GraphQL source of truth로 조회한다. The worker performs a projectItemNodeId-only GitHub GraphQL source-of-truth fetch. target item이 있으면 해당 item cache를 reconcile한다. For a missing target, the worker archives the matching local item before it hydrates the existing Board cache.
 - 처리 실패 시 worker는 lease를 해제해 `received`로 되돌리고 SQS `retry`를 요청한다. lease 해제도 실패하면 lease 만료 뒤 recovery가 다시 queue할 수 있다.
@@ -846,6 +847,11 @@ service, then register the Terraform output in that GitHub Actions variable. Lat
 deployments force both services and wait for both to become stable.
 
 Webhook outbox recovery republishes deliveries with status `failed` and the
-`GitHub webhook could not be enqueued` marker, plus `processing` deliveries whose
-lease has expired. A normally received delivery is never republished by recovery or
-by a duplicate webhook request. An expired `processing` lease is eligible for recovery and requeue.
+`GitHub webhook could not be enqueued` marker, `received` deliveries with the
+internal pending-publication marker, `received` publishing claims whose lease
+has expired, and `processing` deliveries whose lease has expired. Recovery first
+claims a delivery-specific publishing lease, so concurrent recovery attempts do
+not publish the same pending delivery at the same time. A normally received
+delivery without the pending marker is never republished by recovery or by a
+duplicate webhook request. An expired publishing or `processing` lease is
+eligible for recovery and requeue.

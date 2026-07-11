@@ -57,9 +57,13 @@ const INVALID_PROJECT_V2_ITEM_WEBHOOK_CONTEXT_MESSAGE =
   "GitHub ProjectV2 webhook context is invalid";
 const UNSELECTED_PROJECT_V2_ITEM_WEBHOOK_MESSAGE =
   "GitHub ProjectV2 webhook project is not selected";
+const GITHUB_WEBHOOK_ENQUEUE_PENDING_MESSAGE =
+  "GitHub webhook enqueue is pending";
 
 @Injectable()
 export class GithubWebhookService {
+  private publicationAttempt = 0;
+
   constructor(
     private readonly database: DatabaseService,
     private readonly configService: GithubIntegrationConfigService,
@@ -103,10 +107,19 @@ export class GithubWebhookService {
     const existing = await this.findGithubWebhookDelivery(deliveryId);
     if (existing) {
       if (this.syncJobService && this.isRecoverableWebhookEnqueueFailure(existing)) {
-        await this.enqueueWebhookDeliveryAndMarkReceived(deliveryId);
-        const recovered = await this.findGithubWebhookDelivery(deliveryId);
-        if (!recovered) throw badRequest("GitHub webhook delivery could not be recorded");
-        return this.mapGithubWebhookDelivery(recovered);
+        const recovered = await this.prepareFailedWebhookDeliveryForEnqueue(deliveryId);
+        if (recovered) {
+          const response = await this.findGithubWebhookDelivery(deliveryId);
+          if (!response) throw badRequest("GitHub webhook delivery could not be recorded");
+          const payload = this.mapGithubWebhookDelivery(response);
+          const publicationOwner = await this.claimPendingWebhookDeliveryForPublication(
+            deliveryId
+          );
+          if (publicationOwner) {
+            await this.enqueueWebhookDelivery(deliveryId, publicationOwner);
+          }
+          return payload;
+        }
       }
       return this.mapGithubWebhookDelivery(existing);
     }
@@ -128,7 +141,7 @@ export class GithubWebhookService {
     });
 
     if (status === "received" && delivery.inserted) {
-      await this.enqueueWebhookDeliveryAndMarkReceived(deliveryId);
+      await this.enqueueWebhookDelivery(deliveryId);
     }
 
     return this.mapGithubWebhookDelivery(delivery.row);
@@ -156,34 +169,144 @@ export class GithubWebhookService {
       deliveryId,
       eventName,
       status,
-      errorMessage: selected ? null : UNSELECTED_PROJECT_V2_ITEM_WEBHOOK_MESSAGE,
+      errorMessage: selected
+        ? GITHUB_WEBHOOK_ENQUEUE_PENDING_MESSAGE
+        : UNSELECTED_PROJECT_V2_ITEM_WEBHOOK_MESSAGE,
       context
     });
 
     if (status === "received" && delivery.inserted) {
-      await this.enqueueWebhookDeliveryAndMarkReceived(deliveryId);
+      const publicationOwner = await this.claimPendingWebhookDeliveryForPublication(
+        deliveryId
+      );
+      if (publicationOwner) {
+        await this.enqueueWebhookDelivery(deliveryId, publicationOwner);
+      }
     }
 
     return this.mapGithubWebhookDelivery(delivery.row);
   }
 
-  private async enqueueWebhookDeliveryAndMarkReceived(deliveryId: string): Promise<void> {
+  private async enqueueWebhookDelivery(
+    deliveryId: string,
+    publicationOwner?: string
+  ): Promise<void> {
     if (!this.syncJobService) return;
     try {
       await this.syncJobService.enqueueWebhookDelivery(deliveryId);
-      await this.database.execute(
-        `UPDATE github_webhook_deliveries
-         SET status='received', processed_at=NULL, error_message=NULL
-         WHERE delivery_id=$1`,
-        [deliveryId]
-      );
     } catch (error) {
-      await this.database.execute(
-        `UPDATE github_webhook_deliveries SET status='failed', processed_at=now(), error_message=$2 WHERE delivery_id=$1`,
-        [deliveryId, "GitHub webhook could not be enqueued"]
-      );
+      if (publicationOwner) {
+        try {
+          await this.releaseWebhookDeliveryForPublication(deliveryId, publicationOwner);
+        } catch {
+          // The publishing lease expires into a recoverable state when release fails.
+        }
+      } else {
+        await this.database.execute(
+          `UPDATE github_webhook_deliveries
+           SET status='failed', processed_at=now(), error_message=$2
+           WHERE delivery_id=$1
+             AND status='received'
+             AND error_message IS NULL
+             AND lease_owner IS NULL
+             AND lease_expires_at IS NULL`,
+          [deliveryId, "GitHub webhook could not be enqueued"]
+        );
+      }
       throw error;
     }
+
+    if (publicationOwner) {
+      await this.markWebhookDeliveryPublished(deliveryId, publicationOwner);
+    }
+  }
+
+  private async prepareFailedWebhookDeliveryForEnqueue(
+    deliveryId: string
+  ): Promise<boolean> {
+    const result = await this.database.execute(
+      `
+        UPDATE github_webhook_deliveries
+        SET
+          status='received',
+          processed_at=NULL,
+          error_message=$2,
+          lease_owner=NULL,
+          lease_expires_at=NULL
+        WHERE delivery_id=$1
+          AND status='failed'
+          AND error_message='GitHub webhook could not be enqueued'
+      `,
+      [deliveryId, GITHUB_WEBHOOK_ENQUEUE_PENDING_MESSAGE]
+    );
+
+    return result.rowCount === 1;
+  }
+
+  private async claimPendingWebhookDeliveryForPublication(
+    deliveryId: string
+  ): Promise<string | null> {
+    const publicationOwner = this.nextPublicationOwner();
+    const result = await this.database.execute(
+      `
+        UPDATE github_webhook_deliveries
+        SET
+          error_message='GitHub webhook enqueue is publishing',
+          lease_owner=$2,
+          lease_expires_at=now() + interval '10 minutes'
+        WHERE delivery_id=$1
+          AND status='received'
+          AND error_message=$3
+      `,
+      [deliveryId, publicationOwner, GITHUB_WEBHOOK_ENQUEUE_PENDING_MESSAGE]
+    );
+
+    return result.rowCount === 1 ? publicationOwner : null;
+  }
+
+  private async markWebhookDeliveryPublished(
+    deliveryId: string,
+    publicationOwner: string
+  ): Promise<void> {
+    await this.database.execute(
+      `
+        UPDATE github_webhook_deliveries
+        SET
+          error_message=NULL,
+          lease_owner=NULL,
+          lease_expires_at=NULL
+        WHERE delivery_id=$1
+          AND status='received'
+          AND error_message='GitHub webhook enqueue is publishing'
+          AND lease_owner=$2
+      `,
+      [deliveryId, publicationOwner]
+    );
+  }
+
+  private async releaseWebhookDeliveryForPublication(
+    deliveryId: string,
+    publicationOwner: string
+  ): Promise<void> {
+    await this.database.execute(
+      `
+        UPDATE github_webhook_deliveries
+        SET
+          error_message=$3,
+          lease_owner=NULL,
+          lease_expires_at=NULL
+        WHERE delivery_id=$1
+          AND status='received'
+          AND error_message='GitHub webhook enqueue is publishing'
+          AND lease_owner=$2
+      `,
+      [deliveryId, publicationOwner, GITHUB_WEBHOOK_ENQUEUE_PENDING_MESSAGE]
+    );
+  }
+
+  private nextPublicationOwner(): string {
+    this.publicationAttempt += 1;
+    return `${process.env.HOSTNAME ?? "github-webhook"}-${process.pid}-publish-${this.publicationAttempt}`;
   }
 
   private isRecoverableWebhookEnqueueFailure(row: GithubWebhookDeliveryRow): boolean {

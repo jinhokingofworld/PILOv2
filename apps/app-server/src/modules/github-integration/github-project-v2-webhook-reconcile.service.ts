@@ -41,6 +41,7 @@ const WEBHOOK_RECONCILE_ERROR_MESSAGE =
 export class GithubProjectV2WebhookReconcileService {
   private readonly workerId =
     `${process.env.HOSTNAME ?? "github-sync-worker"}-${process.pid}`;
+  private publicationAttempt = 0;
 
   constructor(
     private readonly database: DatabaseService,
@@ -108,6 +109,13 @@ export class GithubProjectV2WebhookReconcileService {
          status = 'failed'
          AND error_message = 'GitHub webhook could not be enqueued'
        ) OR (
+         status = 'received'
+         AND error_message = 'GitHub webhook enqueue is pending'
+       ) OR (
+         status = 'received'
+         AND error_message = 'GitHub webhook enqueue is publishing'
+         AND lease_expires_at < now()
+       ) OR (
          status = 'processing'
          AND lease_expires_at < now()
        )
@@ -116,9 +124,24 @@ export class GithubProjectV2WebhookReconcileService {
     const failures: GithubWebhookDeliveryRecoveryFailure[] = [];
 
     for (const row of rows) {
+      const publicationOwner = this.nextPublicationOwner();
       try {
+        if (!await this.claimRecoveredDeliveryForPublication(row.delivery_id, publicationOwner)) {
+          continue;
+        }
         await enqueueDelivery(row.delivery_id);
-        await this.resetRecoveredDelivery(row.delivery_id);
+      } catch (error) {
+        try {
+          await this.releaseRecoveredDeliveryForPublication(row.delivery_id, publicationOwner);
+        } catch {
+          // The lease expires into a recoverable publishing state when release fails.
+        }
+        failures.push({ deliveryId: row.delivery_id, error });
+        continue;
+      }
+
+      try {
+        await this.markRecoveredDeliveryPublished(row.delivery_id, publicationOwner);
       } catch (error) {
         failures.push({ deliveryId: row.delivery_id, error });
       }
@@ -253,23 +276,79 @@ export class GithubProjectV2WebhookReconcileService {
     );
   }
 
-  private async resetRecoveredDelivery(deliveryId: string): Promise<void> {
-    await this.database.execute(
+  private async claimRecoveredDeliveryForPublication(
+    deliveryId: string,
+    publicationOwner: string
+  ): Promise<boolean> {
+    const result = await this.database.execute(
       `
         UPDATE github_webhook_deliveries
         SET
           status='received',
           processed_at=NULL,
-          error_message=NULL,
-          lease_owner=NULL,
-          lease_expires_at=NULL
+          error_message='GitHub webhook enqueue is publishing',
+          lease_owner=$2,
+          lease_expires_at=now() + interval '10 minutes'
         WHERE delivery_id=$1 AND (
           (status='failed' AND error_message='GitHub webhook could not be enqueued')
+          OR (status='received' AND error_message='GitHub webhook enqueue is pending')
+          OR (
+            status='received'
+            AND error_message='GitHub webhook enqueue is publishing'
+            AND lease_expires_at < now()
+          )
           OR (status='processing' AND lease_expires_at < now())
         )
       `,
-      [deliveryId]
+      [deliveryId, publicationOwner]
     );
+
+    return result.rowCount === 1;
+  }
+
+  private async markRecoveredDeliveryPublished(
+    deliveryId: string,
+    publicationOwner: string
+  ): Promise<void> {
+    await this.database.execute(
+      `
+        UPDATE github_webhook_deliveries
+        SET
+          error_message=NULL,
+          lease_owner=NULL,
+          lease_expires_at=NULL
+        WHERE delivery_id=$1
+          AND status='received'
+          AND error_message='GitHub webhook enqueue is publishing'
+          AND lease_owner=$2
+      `,
+      [deliveryId, publicationOwner]
+    );
+  }
+
+  private async releaseRecoveredDeliveryForPublication(
+    deliveryId: string,
+    publicationOwner: string
+  ): Promise<void> {
+    await this.database.execute(
+      `
+        UPDATE github_webhook_deliveries
+        SET
+          error_message='GitHub webhook enqueue is pending',
+          lease_owner=NULL,
+          lease_expires_at=NULL
+        WHERE delivery_id=$1
+          AND status='received'
+          AND error_message='GitHub webhook enqueue is publishing'
+          AND lease_owner=$2
+      `,
+      [deliveryId, publicationOwner]
+    );
+  }
+
+  private nextPublicationOwner(): string {
+    this.publicationAttempt += 1;
+    return `${this.workerId}-publish-${this.publicationAttempt}`;
   }
 
   private toSyncContext(
