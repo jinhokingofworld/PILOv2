@@ -11,6 +11,12 @@ export type PrReviewSessionStatus =
   | "failed"
   | "archived";
 
+export type PrReviewAnalysisErrorCode =
+  | "ANALYSIS_ENQUEUE_FAILED"
+  | "ANALYSIS_PROVIDER_FAILED"
+  | "ANALYSIS_INPUT_INVALID"
+  | "PR_HEAD_CHANGED";
+
 export type PrReviewConflictStatus =
   | "checking"
   | "clean"
