@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.canvas_agent.types import CanvasAgentRunContext
+
 AVAILABLE_CANVAS_TOOLS: list[dict[str, object]] = [
     {
         "tool": "frame",
@@ -186,3 +188,18 @@ ALLOWED_ACTIONS: list[dict[str, object]] = [
     },
     {"name": "finish", "input": {"summary": "short result"}},
 ]
+
+
+def allowed_actions_for_context(context: CanvasAgentRunContext) -> list[dict[str, object]]:
+    if context.request_context.get("toolHelpMode") is True:
+        return ALLOWED_ACTIONS
+
+    return [action for action in ALLOWED_ACTIONS if action.get("name") != "find_canvas_tool"]
+
+
+def allowed_action_names_for_context(context: CanvasAgentRunContext) -> set[str]:
+    return {
+        str(action["name"])
+        for action in allowed_actions_for_context(context)
+        if isinstance(action.get("name"), str)
+    }

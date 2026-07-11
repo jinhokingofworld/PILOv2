@@ -8,6 +8,20 @@ DEFAULT_CANVAS_EMBEDDING_MODEL = "intfloat/multilingual-e5-small"
 DEFAULT_CANVAS_EMBEDDING_REVISION = "main"
 DEFAULT_MAX_SEQUENCE_LENGTH = 256
 
+SHAPE_TYPE_ALIASES = {
+    "arrow": ("화살표", "연결선", "커넥터"),
+    "draw": ("펜", "자유 그리기", "드로잉"),
+    "embed": ("임베드", "웹사이트", "외부 링크"),
+    "frame": ("프레임", "영역", "그룹 영역"),
+    "geo": ("도형", "사각형", "원", "삼각형", "카드"),
+    "group": ("그룹", "묶음"),
+    "highlight": ("형광펜", "하이라이트"),
+    "line": ("선", "연결선"),
+    "note": ("메모", "노트", "스티키 노트"),
+    "pilo-code-block": ("코드 블록", "코드", "파일"),
+    "text": ("텍스트", "글자", "문구"),
+}
+
 
 class CanvasEmbeddingError(Exception):
     pass
@@ -85,7 +99,11 @@ class LocalSentenceTransformerCanvasEmbedder:
 
 
 def build_shape_passage(shape_type: str, title: str | None, text_content: str | None) -> str:
-    parts = [f"shape type: {shape_type.strip()}"]
+    normalized_shape_type = shape_type.strip()
+    parts = [f"shape type: {normalized_shape_type}"]
+    aliases = SHAPE_TYPE_ALIASES.get(normalized_shape_type)
+    if aliases:
+        parts.append(f"shape aliases: {', '.join(aliases)}")
     if title and title.strip():
         parts.append(f"title: {title.strip()}")
     if text_content and text_content.strip():
