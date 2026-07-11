@@ -82,6 +82,17 @@ export type PrReviewSessionStatus =
   | "failed"
   | "archived";
 
+export type PrReviewAnalysisErrorCode =
+  | "ANALYSIS_ENQUEUE_FAILED"
+  | "ANALYSIS_PROVIDER_FAILED"
+  | "ANALYSIS_INPUT_INVALID"
+  | "PR_HEAD_CHANGED";
+
+export type PrReviewAnalysisError = {
+  code: PrReviewAnalysisErrorCode;
+  message: string;
+};
+
 export type PrReviewConflictStatus =
   | "checking"
   | "clean"
@@ -121,6 +132,7 @@ export type PrReviewSession = {
   reviewedCount: number;
   totalFileCount: number;
   conflictStatus: PrReviewConflictStatus;
+  analysisError: PrReviewAnalysisError | null;
   createdByUserId: string | null;
   createdAt: string;
   updatedAt: string;

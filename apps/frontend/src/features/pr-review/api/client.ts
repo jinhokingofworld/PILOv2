@@ -402,10 +402,14 @@ export function createPrReviewApiClient({
       );
     },
 
-    async getPullRequest(workspaceId: string, pullRequestId: string) {
+    async getPullRequest(
+      workspaceId: string,
+      pullRequestId: string,
+      init?: Pick<RequestInit, "signal">
+    ) {
       return requestPrReviewData<PrReviewPullRequestDetail>(
         pullRequestGithubPath(workspaceId, pullRequestId),
-        undefined,
+        init,
         requestOptions
       );
     },
@@ -422,6 +426,30 @@ export function createPrReviewApiClient({
       return requestPrReviewData<PrReviewSession>(
         `${pullRequestGithubPath(workspaceId, pullRequestId)}/review-sessions`,
         { method: "POST" },
+        requestOptions
+      );
+    },
+
+    async getReviewSession(
+      workspaceId: string,
+      reviewSessionId: string,
+      init?: Pick<RequestInit, "signal">
+    ) {
+      return requestPrReviewData<PrReviewSession>(
+        reviewSessionGithubPath(workspaceId, reviewSessionId),
+        init,
+        requestOptions
+      );
+    },
+
+    async retryReviewSession(
+      workspaceId: string,
+      reviewSessionId: string,
+      init?: Pick<RequestInit, "signal">
+    ) {
+      return requestPrReviewData<PrReviewSession>(
+        `${reviewSessionGithubPath(workspaceId, reviewSessionId)}/retry`,
+        { ...init, method: "POST" },
         requestOptions
       );
     },

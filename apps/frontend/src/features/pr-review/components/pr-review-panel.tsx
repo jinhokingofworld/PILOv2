@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   AlertCircle,
@@ -33,9 +33,16 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuthSession } from "@/features/auth";
 import {
+  isPrReviewAnalysisDelayed,
+  PR_REVIEW_ANALYSIS_DELAY_NOTICE_MS,
+  PR_REVIEW_ANALYSIS_POLL_INTERVAL_MS,
+  shouldPollPrReviewAnalysis
+} from "@/features/pr-review/analysis-status";
+import {
   createPrReviewApiClient,
   PrReviewApiError
 } from "@/features/pr-review/api/client";
+import { PrReviewAnalysisStatus } from "@/features/pr-review/components/pr-review-analysis-status";
 import { PrReviewCanvasShell } from "@/features/pr-review/components/review-canvas/PrReviewCanvasShell";
 import type {
   PrReviewPaginationMeta,
@@ -55,6 +62,7 @@ const FILE_PREVIEW_LIMIT = 6;
 type PrReviewRouteSelection = {
   pullRequestId: string | null;
   repositoryId: string | null;
+  reviewSessionId: string | null;
 };
 
 const emptyPagination: PrReviewPaginationMeta = {
@@ -67,7 +75,8 @@ function readInitialPrReviewRouteSelection(): PrReviewRouteSelection {
   if (typeof window === "undefined") {
     return {
       pullRequestId: null,
-      repositoryId: null
+      repositoryId: null,
+      reviewSessionId: null
     };
   }
 
@@ -75,8 +84,32 @@ function readInitialPrReviewRouteSelection(): PrReviewRouteSelection {
 
   return {
     pullRequestId: searchParams.get("pullRequestId")?.trim() || null,
-    repositoryId: searchParams.get("repositoryId")?.trim() || null
+    repositoryId: searchParams.get("repositoryId")?.trim() || null,
+    reviewSessionId: searchParams.get("reviewSessionId")?.trim() || null
   };
+}
+
+function replaceReviewSessionRoute(reviewSessionId: string | null) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const url = new URL(window.location.href);
+  if (reviewSessionId) {
+    url.searchParams.set("reviewSessionId", reviewSessionId);
+  } else {
+    url.searchParams.delete("reviewSessionId");
+  }
+
+  window.history.replaceState(
+    window.history.state,
+    "",
+    `${url.pathname}${url.search}${url.hash}`
+  );
+}
+
+function isAbortError(error: unknown) {
+  return error instanceof Error && error.name === "AbortError";
 }
 
 function getErrorMessage(error: unknown) {
@@ -167,6 +200,16 @@ export function PrReviewPanel() {
   const [pullRequestError, setPullRequestError] = useState<string | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [sessionError, setSessionError] = useState<string | null>(null);
+  const [analysisPollingError, setAnalysisPollingError] = useState<string | null>(
+    null
+  );
+  const [isAnalysisDelayed, setIsAnalysisDelayed] = useState(false);
+  const [isRetryingReview, setIsRetryingReview] = useState(false);
+  const [retryReviewError, setRetryReviewError] = useState<string | null>(null);
+  const [reviewSessionLoadError, setReviewSessionLoadError] = useState<
+    string | null
+  >(null);
+  const retryAbortControllerRef = useRef<AbortController | null>(null);
   const [repository, setRepository] = useState<PrReviewRepository | null>(null);
   const [pullRequests, setPullRequests] = useState<PrReviewPullRequest[]>([]);
   const [pagination, setPagination] =
@@ -220,6 +263,10 @@ export function PrReviewPanel() {
   }, [query]);
 
   useEffect(() => {
+    return () => retryAbortControllerRef.current?.abort();
+  }, []);
+
+  useEffect(() => {
     void loadConnectedRepository();
     // Repository state reloads when workspace or token changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -238,8 +285,63 @@ export function PrReviewPanel() {
   }, [repositoryConnected, repository?.id, page, debouncedQuery]);
 
   useEffect(() => {
+    const reviewSessionId = routeSelection.reviewSessionId;
+    if (!reviewSessionId || !workspaceId || activeReviewSession) {
+      return;
+    }
+
+    const abortController = new AbortController();
+    setReviewSessionLoadError(null);
+
+    void (async () => {
+      try {
+        const session = await apiClient.getReviewSession(
+          workspaceId,
+          reviewSessionId,
+          { signal: abortController.signal }
+        );
+        if (abortController.signal.aborted) {
+          return;
+        }
+
+        let pullRequest: PrReviewPullRequestDetail | null = null;
+
+        try {
+          pullRequest = await apiClient.getPullRequest(
+            workspaceId,
+            session.pullRequestId,
+            { signal: abortController.signal }
+          );
+        } catch (error) {
+          if (isAbortError(error)) {
+            return;
+          }
+        }
+
+        if (abortController.signal.aborted) {
+          return;
+        }
+
+        setActiveReviewSession(session);
+        setActiveReviewPullRequest(pullRequest);
+        setAnalysisPollingError(null);
+        setRetryReviewError(null);
+      } catch (error) {
+        if (!isAbortError(error)) {
+          setReviewSessionLoadError(
+            "Review session 상태를 불러오지 못했습니다. PR 목록에서 다시 시작해주세요."
+          );
+        }
+      }
+    })();
+
+    return () => abortController.abort();
+  }, [activeReviewSession, apiClient, routeSelection.reviewSessionId, workspaceId]);
+
+  useEffect(() => {
     if (
       !routeSelection.pullRequestId ||
+      routeSelection.reviewSessionId ||
       !repositoryConnected ||
       !workspaceId ||
       selectedPullRequest ||
@@ -269,6 +371,87 @@ export function PrReviewPanel() {
     repositoryConnected,
     routeSelection.pullRequestId,
     selectedPullRequest,
+    workspaceId
+  ]);
+
+  useEffect(() => {
+    const session = activeReviewSession;
+    if (!session || !workspaceId || !shouldPollPrReviewAnalysis(session.status)) {
+      return;
+    }
+
+    const abortController = new AbortController();
+    let pollTimeoutId: number | null = null;
+    let delayTimeoutId: number | null = null;
+
+    setAnalysisPollingError(null);
+    setIsAnalysisDelayed(isPrReviewAnalysisDelayed(session));
+
+    const startedAtMs = Date.parse(session.createdAt);
+    if (Number.isFinite(startedAtMs)) {
+      const delayRemainingMs = Math.max(
+        0,
+        PR_REVIEW_ANALYSIS_DELAY_NOTICE_MS - (Date.now() - startedAtMs)
+      );
+      delayTimeoutId = window.setTimeout(
+        () => setIsAnalysisDelayed(true),
+        delayRemainingMs
+      );
+    }
+
+    const scheduleNextPoll = () => {
+      pollTimeoutId = window.setTimeout(() => {
+        void pollReviewSession();
+      }, PR_REVIEW_ANALYSIS_POLL_INTERVAL_MS);
+    };
+
+    const pollReviewSession = async () => {
+      try {
+        const nextSession = await apiClient.getReviewSession(
+          workspaceId,
+          session.id,
+          { signal: abortController.signal }
+        );
+        if (abortController.signal.aborted) {
+          return;
+        }
+
+        setActiveReviewSession((currentSession) =>
+          currentSession?.id === nextSession.id ? nextSession : currentSession
+        );
+        setAnalysisPollingError(null);
+
+        if (shouldPollPrReviewAnalysis(nextSession.status)) {
+          scheduleNextPoll();
+        }
+      } catch (error) {
+        if (abortController.signal.aborted || isAbortError(error)) {
+          return;
+        }
+
+        setAnalysisPollingError(
+          "분석 상태를 확인하지 못했습니다. 분석은 계속 진행될 수 있으며 자동으로 다시 확인합니다."
+        );
+        scheduleNextPoll();
+      }
+    };
+
+    scheduleNextPoll();
+
+    return () => {
+      abortController.abort();
+      if (pollTimeoutId !== null) {
+        window.clearTimeout(pollTimeoutId);
+      }
+      if (delayTimeoutId !== null) {
+        window.clearTimeout(delayTimeoutId);
+      }
+    };
+  }, [
+    activeReviewSession?.createdAt,
+    activeReviewSession?.id,
+    activeReviewSession?.status,
+    apiClient,
     workspaceId
   ]);
 
@@ -405,6 +588,36 @@ export function PrReviewPanel() {
     setDescriptionExpanded(false);
   }
 
+  function activateReviewSession(
+    session: PrReviewSession,
+    pullRequest: PrReviewPullRequest | PrReviewPullRequestDetail | null
+  ) {
+    setActiveReviewSession(session);
+    setActiveReviewPullRequest(pullRequest);
+    setAnalysisPollingError(null);
+    setIsAnalysisDelayed(isPrReviewAnalysisDelayed(session));
+    setRetryReviewError(null);
+    setReviewSessionLoadError(null);
+    setSelectedPullRequest(null);
+    setPullRequestDetail(null);
+    setPullRequestFiles([]);
+    setDetailError(null);
+    setSessionError(null);
+    setDetailStatus("idle");
+    setDescriptionExpanded(false);
+    replaceReviewSessionRoute(session.id);
+  }
+
+  function leaveReviewSession() {
+    retryAbortControllerRef.current?.abort();
+    setActiveReviewSession(null);
+    setActiveReviewPullRequest(null);
+    setAnalysisPollingError(null);
+    setIsAnalysisDelayed(false);
+    setRetryReviewError(null);
+    replaceReviewSessionRoute(null);
+  }
+
   async function startReviewSession() {
     const pullRequestId = activeDetail?.id;
     const reviewPullRequest = activeDetail;
@@ -420,19 +633,48 @@ export function PrReviewPanel() {
         workspaceId,
         pullRequestId
       );
-      setActiveReviewSession(session);
-      setActiveReviewPullRequest(reviewPullRequest);
-      setSelectedPullRequest(null);
-      setPullRequestDetail(null);
-      setPullRequestFiles([]);
-      setDetailError(null);
-      setSessionError(null);
-      setDetailStatus("idle");
-      setDescriptionExpanded(false);
+      activateReviewSession(session, reviewPullRequest);
     } catch (error) {
       setSessionError(getErrorMessage(error));
     } finally {
       setIsStartingReview(false);
+    }
+  }
+
+  async function retryReviewSession() {
+    const session = activeReviewSession;
+    if (!session || session.status !== "failed") {
+      return;
+    }
+
+    setIsRetryingReview(true);
+    setRetryReviewError(null);
+    const abortController = new AbortController();
+    retryAbortControllerRef.current = abortController;
+
+    try {
+      const nextSession = await apiClient.retryReviewSession(
+        workspaceId,
+        session.id,
+        { signal: abortController.signal }
+      );
+      if (abortController.signal.aborted) {
+        return;
+      }
+      activateReviewSession(nextSession, activeReviewPullRequest);
+    } catch (error) {
+      if (!isAbortError(error)) {
+        setRetryReviewError(
+          error instanceof PrReviewApiError
+            ? error.message
+            : "새 분석을 시작하지 못했습니다. 다시 시도해주세요."
+        );
+      }
+    } finally {
+      if (retryAbortControllerRef.current === abortController) {
+        retryAbortControllerRef.current = null;
+        setIsRetryingReview(false);
+      }
     }
   }
 
@@ -442,21 +684,33 @@ export function PrReviewPanel() {
 
   return (
     <>
-      {activeReviewSession ? (
+      {activeReviewSession?.status === "analyzing" ||
+      activeReviewSession?.status === "failed" ? (
+        <PrReviewAnalysisStatus
+          isDelayed={isAnalysisDelayed}
+          isRetrying={isRetryingReview}
+          onBackToSelection={leaveReviewSession}
+          onRetry={() => void retryReviewSession()}
+          pollingError={analysisPollingError}
+          pullRequest={activeReviewPullRequest}
+          retryError={retryReviewError}
+          session={activeReviewSession}
+        />
+      ) : activeReviewSession ? (
         <PrReviewCanvasShell
           apiClient={apiClient}
-          onBackToSelection={() => setActiveReviewSession(null)}
+          onBackToSelection={leaveReviewSession}
           onGoToGithub={goToGithubPage}
-          onReviewSessionCreated={(session) => {
-            setActiveReviewSession(session);
-            setActiveReviewPullRequest(null);
-          }}
+          onReviewSessionCreated={(session) =>
+            activateReviewSession(session, activeReviewPullRequest)
+          }
           pullRequest={activeReviewPullRequest}
           session={activeReviewSession}
           workspaceId={workspaceId}
         />
       ) : null}
 
+      {!activeReviewSession ? (
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-5">
       <section className="flex flex-col items-center gap-2 text-center">
         <p className="text-sm font-medium text-primary">PR Review</p>
@@ -464,6 +718,13 @@ export function PrReviewPanel() {
           리뷰할 PR을 선택하세요
         </h1>
       </section>
+
+      {reviewSessionLoadError ? (
+        <InlineErrorState
+          message={reviewSessionLoadError}
+          onRetry={() => window.location.reload()}
+        />
+      ) : null}
 
       {isRepositoryLoading ? (
         <RepositoryLoadingState />
@@ -580,6 +841,7 @@ export function PrReviewPanel() {
         />
       ) : null}
       </div>
+      ) : null}
     </>
   );
 }
