@@ -62,6 +62,13 @@
 
 ## 2. 사전 준비
 
+PR Review 전용 Worker는 기존 AWS 서비스에 영향을 주지 않도록 다음 순서로 활성화한다.
+
+1. `pr_review_ai_worker_desired_count = 0` 상태로 전용 SQS/DLQ와 ECS service 정의를 먼저 적용한다.
+2. App Server와 Worker task definition에 기존 shared handoff secret이 주입됐는지 확인한다.
+3. repository variable `ECS_PR_REVIEW_AI_WORKER_SERVICE`를 등록한다.
+4. `pr_review_ai_worker_desired_count = 1`로 적용하고 AI Worker workflow를 수동 실행한다.
+
 ### AWS 계정 준비
 
 - AWS account id 확인
@@ -198,6 +205,7 @@ terraform apply
 - App Server CloudWatch log stream 생성 확인
 - Realtime Server CloudWatch log stream 생성 확인
 - AI Worker CloudWatch log stream 생성 확인
+- PR Review AI Worker CloudWatch log stream 생성 확인
 - task startup error 확인
 
 ### 데이터 연결
@@ -205,6 +213,7 @@ terraform apply
 - App Server에서 RDS 연결 확인
 - App Server에서 Redis 연결 확인
 - AI Worker에서 SQS consume 가능 여부 확인
+- PR Review AI Worker에서 전용 SQS consume 가능 여부 확인
 - AI Worker에서 S3 read/write 가능 여부 확인
 
 ### 외부 연동
@@ -246,6 +255,7 @@ terraform apply
 - ECR push 성공
 - ECS service deployment 시작 확인
 - SQS consume log 확인
+- `ai-worker`, `pr-review-ai-worker` 두 ECS service가 같은 새 image로 안정화되는지 확인
 
 ### Frontend workflow
 

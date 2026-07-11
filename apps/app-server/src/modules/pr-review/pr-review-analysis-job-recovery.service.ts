@@ -20,6 +20,11 @@ interface RecoveredAnalysisJobRow {
   review_session_id: string;
 }
 
+interface AnalysisJobStatusCountRow {
+  status: string;
+  count: number | string;
+}
+
 @Injectable()
 export class PrReviewAnalysisJobRecoveryService
   implements OnModuleInit, OnModuleDestroy
@@ -31,14 +36,10 @@ export class PrReviewAnalysisJobRecoveryService
 
   onModuleInit(): void {
     this.sweepInterval = setInterval(() => {
-      void this.recoverStaleJobs().catch(() => {
-        this.logger.error("PR Review stale analysis recovery sweep failed");
-      });
+      void this.runSweep();
     }, RECOVERY_SWEEP_INTERVAL_MS);
 
-    void this.recoverStaleJobs().catch(() => {
-      this.logger.error("Initial PR Review stale analysis recovery sweep failed");
-    });
+    void this.runSweep();
   }
 
   onModuleDestroy(): void {
@@ -104,11 +105,46 @@ export class PrReviewAnalysisJobRecoveryService
     );
 
     if (recovered.length > 0) {
-      this.logger.warn(
-        `Recovered ${recovered.length} stale PR Review analysis job(s)`
-      );
+      for (const job of recovered) {
+        this.logger.warn(
+          `Recovered stale PR Review analysis job_id=${job.job_id} session_id=${job.review_session_id}`
+        );
+      }
     }
 
     return recovered.length;
+  }
+
+  async logStatusCounts(): Promise<void> {
+    const rows = await this.database.query<AnalysisJobStatusCountRow>(
+      `
+        SELECT status, COUNT(*)::integer AS count
+        FROM pr_review_analysis_jobs
+        WHERE created_at >= now() - INTERVAL '24 hours'
+        GROUP BY status
+        ORDER BY status
+      `
+    );
+    const counts = Object.fromEntries(
+      rows.map((row) => [row.status, Number(row.count)])
+    );
+
+    this.logger.log(
+      `PR Review analysis status counts_24h=${JSON.stringify(counts)}`
+    );
+  }
+
+  private async runSweep(): Promise<void> {
+    try {
+      await this.recoverStaleJobs();
+    } catch {
+      this.logger.error("PR Review stale analysis recovery sweep failed");
+    }
+
+    try {
+      await this.logStatusCounts();
+    } catch {
+      this.logger.error("PR Review analysis status count logging failed");
+    }
   }
 }

@@ -1,3 +1,6 @@
+import pytest
+
+import app.pr_review_analysis_runtime as runtime
 from app.pr_review_analysis_runtime import PrReviewWorkerSettings
 
 
@@ -18,3 +21,24 @@ def test_pr_review_worker_settings_use_dedicated_queue_and_contract_env(monkeypa
     assert settings.openai_timeout_seconds == 45
     assert settings.wait_time_seconds == 20
     assert settings.visibility_timeout_seconds == 900
+
+
+def test_pr_review_worker_fails_fast_when_processor_initialization_fails(monkeypatch) -> None:
+    def fail_initialization():
+        raise RuntimeError("missing worker configuration")
+
+    monkeypatch.setattr(runtime, "create_pr_review_worker", fail_initialization)
+
+    with pytest.raises(RuntimeError, match="missing worker configuration"):
+        runtime.run_pr_review_worker()
+
+
+def test_pr_review_worker_propagates_consumer_runtime_failure(monkeypatch) -> None:
+    class FailingWorker:
+        def run_forever(self):
+            raise RuntimeError("SQS receive failed")
+
+    monkeypatch.setattr(runtime, "create_pr_review_worker", FailingWorker)
+
+    with pytest.raises(RuntimeError, match="SQS receive failed"):
+        runtime.run_pr_review_worker()

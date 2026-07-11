@@ -47,3 +47,22 @@ class FakeDatabase {
   const recovery = new PrReviewAnalysisJobRecoveryService(new FakeDatabase());
   assert.equal(await recovery.recoverStaleJobs(), 0);
 }
+
+{
+  const database = new FakeDatabase([
+    { status: "queued", count: 2 },
+    { status: "processing", count: "1" },
+    { status: "failed", count: 3 }
+  ]);
+  const messages = [];
+  const recovery = new PrReviewAnalysisJobRecoveryService(database);
+  recovery.logger = { log: (message) => messages.push(message) };
+
+  await recovery.logStatusCounts();
+
+  assert.match(database.calls[0].text, /GROUP BY status/);
+  assert.match(database.calls[0].text, /INTERVAL '24 hours'/);
+  assert.deepEqual(messages, [
+    'PR Review analysis status counts_24h={"queued":2,"processing":1,"failed":3}'
+  ]);
+}

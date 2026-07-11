@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Protocol
@@ -9,6 +10,8 @@ from urllib.request import Request, urlopen
 from uuid import UUID
 
 from app.meeting_report_processor import InfrastructureError
+
+LOGGER = logging.getLogger(__name__)
 
 PR_REVIEW_ANALYSIS_JOB_TYPE = "pr_review_analysis_requested"
 PR_REVIEW_ANALYSIS_SCHEMA_VERSION = "pr-review-analysis:v1"
@@ -169,6 +172,12 @@ class PrReviewAnalysisProcessor:
                 reason="invalid_pr_review_analysis_job",
             )
 
+        LOGGER.info(
+            "pr_review_analysis_started job_id=%s review_session_id=%s",
+            job.job_id,
+            job.review_session_id,
+        )
+
         try:
             input_value = self.handoff_client.get_input(job)
             analysis = self.analysis_client.analyze(input_value)
@@ -248,6 +257,14 @@ class PrReviewAnalysisProcessor:
         delete_message: bool,
         reason: str,
     ) -> PrReviewAnalysisProcessResult:
+        LOGGER.info(
+            "pr_review_analysis_finished job_id=%s review_session_id=%s "
+            "reason=%s delete_message=%s",
+            job.job_id,
+            job.review_session_id,
+            reason,
+            delete_message,
+        )
         return PrReviewAnalysisProcessResult(
             delete_message=delete_message,
             reason=reason,

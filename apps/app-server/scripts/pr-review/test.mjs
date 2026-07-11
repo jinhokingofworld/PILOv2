@@ -223,6 +223,7 @@ assert.match(prReviewAnalysisJobPublisher, /publishDueJobs/);
 assert.match(prReviewAnalysisJobRecovery, /PROCESSING_STALE_TIMEOUT_SECONDS/);
 assert.match(prReviewAnalysisJobRecovery, /QUEUED_STALE_TIMEOUT_SECONDS/);
 assert.match(prReviewAnalysisJobRecovery, /recoverStaleJobs/);
+assert.match(prReviewAnalysisJobRecovery, /logStatusCounts/);
 assert.match(
   prReviewAnalysisJobPublisher,
   /publishDueJobs\(\)\.catch\(\(error: unknown\) => \{\s*this\.logger\.error\("PR Review analysis publish recovery sweep failed", error\);/
@@ -237,7 +238,7 @@ assert.match(
 );
 assert.match(
   prReviewAnalysisJobPublisher,
-  /catch \(error: unknown\) \{\s*this\.logger\.error\(\s*`PR Review analysis publish enqueue failed job_id=\$\{claim\.id\}`,\s*error\s*\);\s*await this\.markPublishFailure\(claim\);/
+  /catch \(error: unknown\) \{\s*this\.logger\.error\(\s*`PR Review analysis publish enqueue failed job_id=\$\{claim\.id\} session_id=\$\{claim\.review_session_id\}`,\s*error\s*\);\s*await this\.markPublishFailure\(claim\);/
 );
 assert.match(prReviewAnalysisJobMigration, /CREATE TABLE public\.pr_review_analysis_jobs/);
 assert.match(prReviewAnalysisJobMigration, /UNIQUE \(review_session_id\)/);

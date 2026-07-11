@@ -111,17 +111,9 @@ def create_pr_review_worker(
 
 def run_pr_review_worker() -> None:
     logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
-
-    while True:
-        try:
-            create_pr_review_worker().run_forever()
-        except KeyboardInterrupt:
-            raise
-        except Exception:
-            LOGGER.exception("pr-review ai-worker crashed; restarting after backoff")
-            import time
-
-            time.sleep(5)
+    worker = create_pr_review_worker()
+    LOGGER.info("pr-review ai-worker initialized")
+    worker.run_forever()
 
 
 def _env(key: str, default: str) -> str:
@@ -158,3 +150,7 @@ def _positive_int_env(key: str, default: int) -> int:
 def _positive_ms_env(key: str, default: int) -> float:
     value = _positive_int_env(key, default)
     return value / 1_000
+
+
+if __name__ == "__main__":
+    run_pr_review_worker()
