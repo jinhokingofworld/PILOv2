@@ -168,6 +168,11 @@ variable "livekit_instance_type" {
   default     = "t3.small"
 }
 
+variable "livekit_ami_id" {
+  description = "Pinned AMI ID for the LiveKit host. Change only for a planned host rotation."
+  type        = string
+}
+
 variable "livekit_root_volume_size" {
   description = "Root EBS volume size in GiB for the self-hosted LiveKit MVP host."
   type        = number

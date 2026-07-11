@@ -62,6 +62,7 @@ module "livekit_host" {
   subnet_id             = module.network.public_subnet_ids[0]
   recordings_bucket_arn = module.s3.uploads_bucket_arn
   livekit_secret_arns   = values(module.secrets.livekit_host_secret_arns)
+  ami_id                = var.livekit_ami_id
   instance_type         = var.livekit_instance_type
   root_volume_size      = var.livekit_root_volume_size
   allowed_cidr_blocks   = var.livekit_allowed_cidr_blocks
