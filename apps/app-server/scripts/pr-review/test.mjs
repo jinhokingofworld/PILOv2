@@ -22,6 +22,9 @@ const prReviewConflictAnalyzer = await readSource(
 const prReviewConflictResolution = await readSource(
   "../../src/modules/pr-review/pr-review-conflict-resolution.ts"
 );
+const prReviewSemanticGraph = await readSource(
+  "../../src/modules/pr-review/pr-review-semantic-graph.ts"
+);
 const prReviewAnalysisService = await readSource(
   "../../src/modules/pr-review/pr-review-analysis.service.ts"
 );
@@ -378,6 +381,8 @@ assert.match(prReviewConflictAnalyzer, /currentText/);
 assert.match(prReviewConflictAnalyzer, /incomingText/);
 assert.match(prReviewConflictResolution, /buildResolvedFileContent/);
 assert.match(prReviewConflictResolution, /resolvedTextByHunkId/);
+assert.match(prReviewSemanticGraph, /buildDeterministicSemanticGraphCandidates/);
+assert.match(prReviewSemanticGraph, /relative_import/);
 assert.match(prReviewService, /headContent/);
 assert.match(prReviewService, /resolvedHunks/);
 assert.match(prReviewTypes, /PrReviewFileReviewStatus/);
@@ -448,3 +453,4 @@ await import("./analysis-result-handoff.test.mjs");
 await import("./analysis-job-recovery.test.mjs");
 await import("./analysis-retry.test.mjs");
 await import("./semantic-graph-contract.test.mjs");
+await import("./semantic-graph-candidates.test.mjs");
