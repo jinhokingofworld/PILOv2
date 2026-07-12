@@ -5,6 +5,7 @@ import { WorkspaceModule } from "../workspace/workspace.module";
 import { GithubAppClient } from "./github-app.client";
 import { GithubAppInstallationService } from "./github-app-installation.service";
 import { GithubAppInstallationStateService } from "./github-app-installation-state.service";
+import { GithubBoardInvalidationPublisherService } from "./github-board-invalidation-publisher.service";
 import { GithubCallbackStateService } from "./github-callback-state.service";
 import { GithubConflictMergeService } from "./github-conflict-merge.service";
 import { GithubGitCommandRunner } from "./github-git-command-runner";
@@ -17,6 +18,8 @@ import { GithubOAuthIntegrationService } from "./github-oauth-integration.servic
 import { GithubOAuthStateService } from "./github-oauth-state.service";
 import { GithubProjectOAuthIntegrationService } from "./github-project-oauth-integration.service";
 import { GithubProjectV2SyncTokenService } from "./github-project-v2-sync-token.service";
+import { GithubProjectV2PollingService } from "./github-project-v2-polling.service";
+import { GithubProjectV2WebhookReconcileService } from "./github-project-v2-webhook-reconcile.service";
 import { GithubProjectV2Service } from "./github-project-v2.service";
 import { GithubProjectV2WriteService } from "./github-project-v2-write.service";
 import { GithubPullRequestFileWriteService } from "./github-pull-request-file-write.service";
@@ -39,6 +42,7 @@ import { GithubWebhookService } from "./github-webhook.service";
     GithubAppClient,
     GithubAppInstallationService,
     GithubAppInstallationStateService,
+    GithubBoardInvalidationPublisherService,
     GithubCallbackStateService,
     GithubConflictMergeService,
     GithubGitCommandRunner,
@@ -47,6 +51,7 @@ import { GithubWebhookService } from "./github-webhook.service";
     GithubOAuthIntegrationService,
     GithubOAuthStateService,
     GithubProjectOAuthIntegrationService,
+    GithubProjectV2PollingService,
     GithubProjectV2SyncTokenService,
     GithubProjectV2Service,
     GithubProjectV2WriteService,
@@ -57,6 +62,7 @@ import { GithubWebhookService } from "./github-webhook.service";
     GithubSourceReadService,
     GithubSyncExecutorService,
     GithubSyncJobService,
+    GithubProjectV2WebhookReconcileService,
     GithubSyncRunService,
     GithubTokenEncryptionService,
     GithubWebhookService

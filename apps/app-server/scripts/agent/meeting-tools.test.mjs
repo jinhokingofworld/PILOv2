@@ -14,6 +14,7 @@ const WORKSPACE_ID = "22222222-2222-2222-2222-222222222222";
 const RUN_ID = "33333333-3333-3333-3333-333333333333";
 const REPORT_ID = "44444444-4444-4444-8444-444444444444";
 const SECOND_REPORT_ID = "77777777-7777-4777-8777-777777777777";
+const THIRD_REPORT_ID = "88888888-8888-4888-8888-888888888888";
 const MEETING_ID = "55555555-5555-5555-8555-555555555555";
 const RECORDING_ID = "66666666-6666-6666-8666-666666666666";
 
@@ -173,6 +174,33 @@ function errorCode(error) {
     status: undefined,
     limit: 1
   });
+}
+
+{
+  const { meetingService, registry } = createRegistry();
+  meetingService.reports = [
+    createReport(),
+    createReport({
+      id: SECOND_REPORT_ID,
+      createdAt: "2026-07-07T00:00:00.000Z"
+    }),
+    createReport({
+      id: THIRD_REPORT_ID,
+      createdAt: "2026-07-06T00:00:00.000Z"
+    })
+  ];
+  const tool = registry.getDefinition("list_meeting_reports");
+  const result = await tool.execute(context, tool.validateInput({ limit: 2 }));
+
+  assert.equal(result.outputSummary.count, 2);
+  assert.deepEqual(
+    result.outputSummary.reports.map((report) => report.reportId),
+    [REPORT_ID, SECOND_REPORT_ID]
+  );
+  assert.deepEqual(
+    result.resourceRefs.map((ref) => ref.resourceId),
+    [REPORT_ID, SECOND_REPORT_ID]
+  );
 }
 
 {

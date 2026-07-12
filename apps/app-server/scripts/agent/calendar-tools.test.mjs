@@ -256,6 +256,29 @@ function errorCode(error) {
   assert.throws(
     () =>
       tool.validateInput({
+        title: "가족 일정",
+        isAllDay: false,
+        startDate: "2026-07-12",
+        endDate: "2026-07-12",
+        startTime: "19:00",
+        endTime: "19:00"
+      }),
+    (error) => {
+      assert.equal(error.getStatus(), 400);
+      assert.equal(errorCode(error), "BAD_REQUEST");
+      assert.match(error.getResponse().error.message, /endTime/);
+      return true;
+    }
+  );
+}
+
+{
+  const { registry } = createRegistry();
+  const tool = registry.getDefinition("create_calendar_event");
+
+  assert.throws(
+    () =>
+      tool.validateInput({
         title: "주간 회의",
         isAllDay: false,
         startDate: "2026-07-08",

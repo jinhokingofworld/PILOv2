@@ -407,6 +407,7 @@ await import("./conflict-resolution.test.mjs");
 await import("./conflict-suggestion-context.test.mjs");
 await import("./conflict-apply.test.mjs");
 await import("./conflict-status-refresh.test.mjs");
+await import("./decision-progress.test.mjs");
 await import("./submission.test.mjs");
 await import("./async-analysis-enqueue.test.mjs");
 await import("./analysis-input-handoff.test.mjs");

@@ -15,6 +15,7 @@ import { BoardIssueCreateDialog } from "@/features/board/components/board-issue-
 import { BoardIssueSheet } from "@/features/board/components/board-issue-sheet";
 import { BoardKanban } from "@/features/board/components/board-kanban";
 import { useBoardWorkspaceData } from "@/features/board/hooks/use-board-workspace-data";
+import { useBoardRealtime } from "@/features/board/realtime/use-board-realtime";
 import type {
   BoardIssueCardPayload,
   BoardIssueState,
@@ -87,6 +88,12 @@ export function BoardPanel() {
     accessToken,
     boardId: selectedBoardId,
     issueQuery,
+    workspaceId
+  });
+  useBoardRealtime({
+    accessToken,
+    boardId: selectedBoardId,
+    reloadBoard: boardData.reloadBoard,
     workspaceId
   });
   const targetBoard = useMemo(() => {

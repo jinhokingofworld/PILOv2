@@ -7,6 +7,7 @@ from app.agent_processor import (
     AgentRunContext,
     AgentRunProcessor,
     _agent_planner_schema,
+    _agent_planner_system_prompt,
     normalize_agent_planner_decision,
     parse_agent_planner_output,
     parse_agent_run_job_payload,
@@ -480,6 +481,46 @@ def test_normalizer_blocks_calendar_update_without_event_id() -> None:
     assert "수정할 일정" in normalized.final_answer
 
 
+def test_normalizer_asks_for_calendar_time_when_end_time_is_not_after_start_time() -> None:
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=[
+                tool_snapshot(
+                    name="create_calendar_event",
+                    description="Calendar 일정 생성",
+                    riskLevel="medium",
+                    executionMode="confirmation_required",
+                    inputSchema={
+                        "type": "object",
+                        "required": ["title", "startDate", "endDate"],
+                        "additionalProperties": False,
+                        "properties": {},
+                    },
+                )
+            ]
+        )
+    )
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="create_calendar_event",
+            tool_input={
+                "title": "가족 일정",
+                "startDate": "2026-07-12",
+                "endDate": "2026-07-12",
+                "startTime": "19:00",
+                "endTime": "19:00",
+            },
+            requires_confirmation=True,
+        ),
+        job,
+    )
+
+    assert normalized.status == "needs_clarification"
+    assert normalized.risk_level is None
+    assert normalized.output_summary["missingFields"] == ["calendar_event_end_time"]
+    assert "종료 시각" in normalized.final_answer
+
+
 def test_normalizer_blocks_meeting_detail_without_report_id() -> None:
     job = parse_agent_run_job_payload(
         agent_payload(
@@ -536,6 +577,15 @@ def test_normalizer_keeps_latest_meeting_report_list_candidate() -> None:
 
     assert normalized.status == "tool_candidate"
     assert normalized.output_summary["input"] == {"limit": 1}
+
+
+def test_planner_prompt_preserves_calendar_tool_boundaries() -> None:
+    prompt = _agent_planner_system_prompt()
+
+    assert "title, keyword, participant, or current-time filters" in prompt
+    assert "never set endTime equal to startTime" in prompt
+    assert "positive integer Calendar event ID" in prompt
+    assert "Korean" in prompt
 
 
 def test_processor_marks_planning_failed_for_invalid_planner_output() -> None:

@@ -156,6 +156,7 @@ execFileSync(process.execPath, [tscScript, "-p", "tsconfig.build.json"], {
   stdio: "inherit"
 });
 
+await import("./board-invalidation.test.mjs");
 await import("./oauth.test.mjs");
 await import("./installation.test.mjs");
 await import("./github-app-client.test.mjs");
@@ -176,3 +177,5 @@ await import("./async-sync-worker.test.mjs");
 await import("./project-v2-setup.test.mjs");
 await import("./project-v2-write.test.mjs");
 await import("./webhook.test.mjs");
+await import("./projects-v2-item-webhook-reconcile.test.mjs");
+await import("./project-v2-polling.test.mjs");
