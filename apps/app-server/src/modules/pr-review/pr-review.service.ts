@@ -3571,15 +3571,16 @@ export class PrReviewService {
 
     const reviewedCount = Number(progress.reviewed_count);
     const totalFileCount = Number(progress.total_file_count);
+    const allFilesReviewed = reviewedCount === totalFileCount;
     const updated = await transaction.queryOne<{ id: string }>(
       `
         UPDATE pr_review_sessions AS review_session
-        SET reviewed_count = $2,
-            total_file_count = $3,
+        SET reviewed_count = $2::integer,
+            total_file_count = $3::integer,
             status = CASE
               WHEN review_session.status IN ('submitted', 'archived')
                 THEN review_session.status
-              WHEN $2 = $3
+              WHEN $4::boolean
                 THEN 'ready_to_submit'
               WHEN review_session.status = 'ready_to_submit'
                 THEN 'reviewing'
@@ -3588,7 +3589,7 @@ export class PrReviewService {
         WHERE review_session.id = $1
         RETURNING review_session.id
       `,
-      [reviewSessionId, reviewedCount, totalFileCount]
+      [reviewSessionId, reviewedCount, totalFileCount, allFilesReviewed]
     );
 
     if (!updated) {
