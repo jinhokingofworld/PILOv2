@@ -5,6 +5,7 @@ import { WorkspaceModule } from "../workspace/workspace.module";
 import { GithubAppClient } from "./github-app.client";
 import { GithubAppInstallationService } from "./github-app-installation.service";
 import { GithubAppInstallationStateService } from "./github-app-installation-state.service";
+import { GithubBoardInvalidationPublisherService } from "./github-board-invalidation-publisher.service";
 import { GithubCallbackStateService } from "./github-callback-state.service";
 import { GithubConflictMergeService } from "./github-conflict-merge.service";
 import { GithubGitCommandRunner } from "./github-git-command-runner";
@@ -41,6 +42,7 @@ import { GithubWebhookService } from "./github-webhook.service";
     GithubAppClient,
     GithubAppInstallationService,
     GithubAppInstallationStateService,
+    GithubBoardInvalidationPublisherService,
     GithubCallbackStateService,
     GithubConflictMergeService,
     GithubGitCommandRunner,

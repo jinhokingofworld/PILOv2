@@ -16,6 +16,7 @@ import {
   type GithubPullRequestApiItem
 } from "./github-app.client";
 import type { GithubAppRuntimeConfig } from "./github-integration-config.service";
+import { GithubBoardInvalidationPublisherService } from "./github-board-invalidation-publisher.service";
 import { serializeGithubJsonb } from "./github-jsonb";
 import { getGithubFullSyncProjectProgressPercent } from "./github-sync-progress";
 import type {
@@ -126,6 +127,10 @@ interface HydratedBoardRow extends QueryResultRow {
   board_id: string | number | null;
 }
 
+interface HydratedBoardUpdatedAtRow extends QueryResultRow {
+  updated_at: Date | string | null;
+}
+
 interface GithubProjectV2SelectionRow extends QueryResultRow {
   project_v2_id: string;
 }
@@ -134,7 +139,8 @@ interface GithubProjectV2SelectionRow extends QueryResultRow {
 export class GithubSyncExecutorService {
   constructor(
     private readonly database: DatabaseService,
-    private readonly githubAppClient: GithubAppClient
+    private readonly githubAppClient: GithubAppClient,
+    private readonly boardInvalidationPublisher: GithubBoardInvalidationPublisherService
   ) {}
 
   async runGithubSyncTarget(
@@ -1784,13 +1790,45 @@ export class GithubSyncExecutorService {
 
     for (const board of boards) {
       await this.assertGithubSyncLease(context);
-      await this.database.queryOne<HydratedBoardRow>(
+      const hydrated = await this.database.queryOne<HydratedBoardRow>(
         `
           SELECT hydrate_pilo_board_from_github($1::uuid, $2::uuid)::text AS board_id
         `,
         [board.project_v2_id, board.repository_id]
       );
+
+      if (!hydrated?.board_id) {
+        continue;
+      }
+
+      try {
+        const hydratedBoard = await this.database.queryOne<HydratedBoardUpdatedAtRow>(
+          `
+            SELECT updated_at
+            FROM boards
+            WHERE workspace_id = $1
+              AND id = $2::bigint
+          `,
+          [context.workspaceId, String(hydrated.board_id)]
+        );
+
+        if (!hydratedBoard?.updated_at) {
+          continue;
+        }
+
+        await this.boardInvalidationPublisher.publishInvalidation({
+          workspaceId: context.workspaceId,
+          boardId: String(hydrated.board_id),
+          updatedAt: this.toIsoString(hydratedBoard.updated_at)
+        });
+      } catch (error) {
+        console.error("Board invalidation publish failed", error);
+      }
     }
+  }
+
+  private toIsoString(value: Date | string): string {
+    return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
   }
 
   private getProjectV2UserAccessToken(

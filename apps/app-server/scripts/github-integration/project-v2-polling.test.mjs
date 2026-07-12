@@ -420,6 +420,11 @@ class ProjectV2ItemSnapshotDatabase {
       return { board_id: "board-1" };
     }
 
+    if (/SELECT updated_at\s+FROM boards/i.test(text)) {
+      assert.deepEqual(values, [workspaceId, "board-1"]);
+      return { updated_at: "2026-07-12T00:00:00.000Z" };
+    }
+
     throw new Error(`Unexpected queryOne: ${text}`);
   }
 
@@ -496,13 +501,26 @@ function projectV2ItemSnapshotContext() {
   };
 }
 
+function createBoardInvalidationPublisher(publishedInvalidations = []) {
+  return {
+    async publishInvalidation(payload) {
+      publishedInvalidations.push(payload);
+    }
+  };
+}
+
 {
   const database = new ProjectV2ItemSnapshotDatabase();
-  const executor = new GithubSyncExecutorService(database, {
-    async listProjectV2Items() {
-      return [projectV2ItemSnapshotApiItem()];
-    }
-  });
+  const publishedInvalidations = [];
+  const executor = new GithubSyncExecutorService(
+    database,
+    {
+      async listProjectV2Items() {
+        return [projectV2ItemSnapshotApiItem()];
+      }
+    },
+    createBoardInvalidationPublisher(publishedInvalidations)
+  );
 
   await executor.runGithubSyncTarget("project_v2_items", projectV2ItemSnapshotContext());
 
@@ -529,15 +547,26 @@ function projectV2ItemSnapshotContext() {
     projectV2Id,
     ["PVTI_remote-current"]
   ]);
+  assert.deepEqual(publishedInvalidations, [
+    {
+      workspaceId,
+      boardId: "board-1",
+      updatedAt: "2026-07-12T00:00:00.000Z"
+    }
+  ]);
 }
 
 {
   const database = new ProjectV2ItemSnapshotDatabase();
-  const executor = new GithubSyncExecutorService(database, {
-    async listProjectV2Items() {
-      return [projectV2ItemSnapshotApiItem()];
-    }
-  });
+  const executor = new GithubSyncExecutorService(
+    database,
+    {
+      async listProjectV2Items() {
+        return [projectV2ItemSnapshotApiItem()];
+      }
+    },
+    createBoardInvalidationPublisher()
+  );
   let leaseChecks = 0;
   const context = {
     ...projectV2ItemSnapshotContext(),

@@ -364,6 +364,11 @@ class ReconcileFakeDatabase {
       return { board_id: "board-1" };
     }
 
+    if (/SELECT updated_at\s+FROM boards/i.test(text)) {
+      assert.deepEqual(values, ["workspace-1", "board-1"]);
+      return { updated_at: "2026-07-11T09:00:00.000Z" };
+    }
+
     throw new Error(`Unexpected query: ${text}`);
   }
 
@@ -444,6 +449,14 @@ function reconcileContext(repository = null) {
       appId: "12345",
       privateKey: "unused",
       now: () => new Date("2026-07-11T09:00:00.000Z")
+    }
+  };
+}
+
+function createBoardInvalidationPublisher(publishedInvalidations = []) {
+  return {
+    async publishInvalidation(payload) {
+      publishedInvalidations.push(payload);
     }
   };
 }
@@ -1741,7 +1754,12 @@ let fetchedTargetItem;
 
 {
   const database = new ReconcileFakeDatabase();
-  const executor = new GithubSyncExecutorService(database, {});
+  const publishedInvalidations = [];
+  const executor = new GithubSyncExecutorService(
+    database,
+    {},
+    createBoardInvalidationPublisher(publishedInvalidations)
+  );
 
   await executor.reconcileGithubProjectV2WebhookItem(reconcileContext(), fetchedTargetItem);
 
@@ -1750,11 +1768,22 @@ let fetchedTargetItem;
   assert.ok(sql.some(({ text }) => /INSERT INTO github_project_v2_items/i.test(text)));
   assert.ok(sql.some(({ text }) => /INSERT INTO github_project_v2_item_field_values/i.test(text)));
   assert.ok(sql.some(({ text }) => /hydrate_pilo_board_from_github/i.test(text)));
+  assert.deepEqual(publishedInvalidations, [
+    {
+      workspaceId: "workspace-1",
+      boardId: "board-1",
+      updatedAt: "2026-07-11T09:00:00.000Z"
+    }
+  ]);
 }
 
 {
   const database = new ReconcileFakeDatabase();
-  const executor = new GithubSyncExecutorService(database, {});
+  const executor = new GithubSyncExecutorService(
+    database,
+    {},
+    createBoardInvalidationPublisher()
+  );
 
   await executor.reconcileGithubProjectV2WebhookItem(
     reconcileContext({
@@ -1781,7 +1810,11 @@ let fetchedTargetItem;
 
 {
   const database = new ReconcileFakeDatabase({ fieldValueNames: ["Status"] });
-  const executor = new GithubSyncExecutorService(database, {});
+  const executor = new GithubSyncExecutorService(
+    database,
+    {},
+    createBoardInvalidationPublisher()
+  );
 
   await executor.reconcileGithubProjectV2WebhookItem(reconcileContext(), fetchedTargetItem);
 
@@ -1805,7 +1838,11 @@ let fetchedTargetItem;
 
 {
   const database = new ReconcileFakeDatabase();
-  const executor = new GithubSyncExecutorService(database, {});
+  const executor = new GithubSyncExecutorService(
+    database,
+    {},
+    createBoardInvalidationPublisher()
+  );
 
   await executor.reconcileGithubProjectV2WebhookItem(
     reconcileContext(),
@@ -1820,7 +1857,11 @@ let fetchedTargetItem;
 
 {
   const database = new ReconcileFakeDatabase();
-  const executor = new GithubSyncExecutorService(database, {});
+  const executor = new GithubSyncExecutorService(
+    database,
+    {},
+    createBoardInvalidationPublisher()
+  );
 
   await executor.archiveGithubProjectV2WebhookItem(
     reconcileContext(),
