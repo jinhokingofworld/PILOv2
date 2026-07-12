@@ -23,6 +23,13 @@ const liveKitHook = await readFile(
   ),
   "utf8"
 );
+const meetingReportRealtimeHook = await readFile(
+  new URL(
+    "../../src/features/meeting/hooks/use-meeting-report-realtime.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
 const meetingRuntimeProvider = await readFile(
   new URL(
     "../../src/features/meeting/runtime/meeting-runtime-provider.tsx",
@@ -244,6 +251,9 @@ assert.match(headerMeetingStatusStore, /connectionStatus: "idle"/);
 assert.match(meetingReportSection, /MeetingReportSection/);
 assert.match(meetingReportSection, /MeetingReportStatusFilter/);
 assert.match(meetingReportSection, /REPORT_POLL_INTERVAL_MS = 10000/);
+assert.match(meetingReportSection, /useMeetingReportRealtime/);
+assert.match(meetingReportSection, /selectedReportId === event\.reportId/);
+assert.doesNotMatch(meetingReportSection, /from "socket\.io-client"/);
 assert.match(meetingReportSection, /useRouter/);
 assert.match(meetingReportSection, /buildCalendarDraftHref/);
 assert.match(meetingReportSection, /calendarAction: "create"/);
@@ -271,3 +281,12 @@ assert.doesNotMatch(meetingReportSection, /@\/components\/ui\/badge/);
 assert.doesNotMatch(meetingReportSection, /@\/components\/ui\/tabs/);
 assert.doesNotMatch(meetingReportSection, /@\/components\/ui\/dialog/);
 assert.doesNotMatch(meetingReportSection, /일정 생성 액션을 선택했습니다/);
+
+assert.match(meetingReportRealtimeHook, /useMeetingReportRealtime/);
+assert.match(meetingReportRealtimeHook, /meeting:subscribe/);
+assert.match(meetingReportRealtimeHook, /meeting:unsubscribe/);
+assert.match(meetingReportRealtimeHook, /meeting:report:updated/);
+assert.match(meetingReportRealtimeHook, /workspaceId: normalizedWorkspaceId/);
+assert.match(meetingReportRealtimeHook, /socket\.on\("connect", subscribe\)/);
+assert.match(meetingReportRealtimeHook, /socket\.disconnect\(\)/);
+assert.match(meetingReportRealtimeHook, /isMeetingReportRealtimeEvent/);
