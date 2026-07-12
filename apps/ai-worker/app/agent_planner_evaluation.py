@@ -129,7 +129,7 @@ def evaluate_case(
             tools=job.tools,
         )
     )
-    actual = normalize_agent_planner_decision(decision, job)
+    actual = normalize_agent_planner_decision(decision, job, prompt=case.prompt)
     failures = _compare(case.expectation, actual)
     return CaseEvaluationResult(
         case_id=case.case_id,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -265,7 +266,11 @@ class AgentRunProcessor:
                     tools=job.tools,
                 )
             )
-            normalized = normalize_agent_planner_decision(decision, job)
+            normalized = normalize_agent_planner_decision(
+                decision,
+                job,
+                prompt=context.prompt,
+            )
             planner_step_completed = self.repository.complete_planner_step(
                 job.run_id,
                 step_id,
@@ -428,6 +433,7 @@ def _read_tool_string(item: dict[object, object], key: str) -> str:
 def normalize_agent_planner_decision(
     decision: AgentPlannerDecision,
     job: AgentRunJob,
+    prompt: str = "",
 ) -> NormalizedPlannerDecision:
     status = decision.status
     if status not in PLANNER_STATUSES:
@@ -457,6 +463,23 @@ def normalize_agent_planner_decision(
         ):
             missing_fields = tuple(sorted({*missing_fields, "calendar_event_end_time"}))
 
+        if tool.name == "create_calendar_event" and _is_calendar_recurrence_request(
+            prompt
+        ):
+            status = "unsupported"
+            message = "반복 일정 생성은 현재 지원하지 않습니다."
+            final_answer = (
+                "현재는 반복 일정을 만들 수 없습니다. "
+                "한 번만 생성할 날짜와 시간을 알려주세요."
+            )
+            unsupported_reason = "calendar_recurrence_unsupported"
+        elif tool.name == "create_calendar_event" and _requires_calendar_time_or_all_day(
+            decision.tool_input
+        ):
+            missing_fields = tuple(
+                sorted({*missing_fields, "calendar_event_time_or_all_day"})
+            )
+
         if tool.name in MEETING_REPORT_ID_TOOLS and not _has_valid_uuid(
             decision.tool_input.get("reportId")
         ):
@@ -467,7 +490,7 @@ def normalize_agent_planner_decision(
                 "최신 회의록의 결과가 필요하면 최신 회의록을 요청해주세요."
             )
             unsupported_reason = "meeting_report_id_required"
-        elif missing_fields:
+        elif status == "tool_candidate" and missing_fields:
             status = "needs_clarification"
             message = "요청을 처리할 정보가 부족합니다."
             final_answer = _clarification_answer(missing_fields)
@@ -577,6 +600,31 @@ def _has_invalid_calendar_create_time_order(input_value: dict[str, object]) -> b
     )
 
 
+def _is_calendar_recurrence_request(prompt: str) -> bool:
+    return bool(
+        re.search(
+            r"(?:매일|매주|매월|매년|평일마다|주말마다|반복|[가-힣]+마다)",
+            prompt,
+        )
+    )
+
+
+def _requires_calendar_time_or_all_day(input_value: dict[str, object]) -> bool:
+    start_date = input_value.get("startDate")
+    end_date = input_value.get("endDate")
+    is_all_day = input_value.get("isAllDay")
+    start_time = input_value.get("startTime")
+    end_time = input_value.get("endTime")
+    return (
+        isinstance(start_date, str)
+        and isinstance(end_date, str)
+        and start_date != end_date
+        and not isinstance(is_all_day, bool)
+        and start_time is None
+        and end_time is None
+    )
+
+
 def _clarification_answer(missing_fields: tuple[str, ...]) -> str:
     labels = {
         "eventId": "수정할 일정",
@@ -587,6 +635,7 @@ def _clarification_answer(missing_fields: tuple[str, ...]) -> str:
         "start": "조회 시작일",
         "end": "조회 종료일",
         "calendar_event_end_time": "시작 시각보다 늦은 종료 시각",
+        "calendar_event_time_or_all_day": "종일 여부 또는 시작 시각",
     }
     fields = [labels.get(field, field) for field in missing_fields]
     if not fields:
@@ -687,6 +736,9 @@ def _agent_planner_system_prompt() -> str:
         "summary request without a valid report ID must be unsupported. "
         "Calendar list_calendar_events supports only a date range; title, keyword, participant, "
         "or current-time filters are not supported and must be unsupported rather than ignored. "
+        "Calendar recurrence is not supported and must be unsupported rather than converted to a "
+        "single event. For multi-day Calendar creation without times, require an explicit "
+        "all-day choice rather than inferring isAllDay. "
         "For timed Calendar creation, omit endTime when the user gives only a start time so the "
         "Calendar default can apply; never set endTime equal to startTime. "
         "When the user supplies a positive integer Calendar event ID with changes, use it and let "
