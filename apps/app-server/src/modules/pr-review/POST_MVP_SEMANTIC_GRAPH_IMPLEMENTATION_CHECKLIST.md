@@ -173,7 +173,7 @@ DB migration과 schema 검증을 같은 PR에 포함한다.
 - [x] 순환 relation을 허용할 type과 리뷰 순서 cycle을 구분한다.
 - [x] 검증 결과를 session, Flow, file membership, relation과 함께 원자 저장한다.
 - [x] 동일 Job 재전달과 result 재전송에도 relation이 중복 생성되지 않게 한다.
-- [x] invalid AI output은 안전한 실패로 처리하고 부분 graph를 저장하지 않는다.
+- [x] invalid AI Graph output은 기본 분석을 유지하고 deterministic graph로 fallback한다.
 
 완료 기준:
 

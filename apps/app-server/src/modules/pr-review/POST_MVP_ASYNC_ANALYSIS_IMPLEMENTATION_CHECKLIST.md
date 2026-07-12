@@ -105,7 +105,8 @@
 | `analyzing` | outbox 발행 재시도 소진 | `failed` | `ANALYSIS_ENQUEUE_FAILED` 저장 |
 | `analyzing` | Worker provider/handoff 일시 실패 | `analyzing` | SQS receive count 3회까지 재시도 |
 | `analyzing` | Worker 재시도 소진 | `failed` | `ANALYSIS_PROVIDER_FAILED` 저장 |
-| `analyzing` | invalid input/output | `failed` | `ANALYSIS_INPUT_INVALID` 저장, 메시지 terminal 처리 |
+| `analyzing` | invalid 기본 input/output | `failed` | `ANALYSIS_INPUT_INVALID` 저장, 메시지 terminal 처리 |
+| `analyzing` | invalid Semantic Graph 보강 | `reviewing` | Graph 보강만 폐기하고 deterministic Graph 원자 저장 |
 | `analyzing` | current GitHub head SHA 불일치 | `failed` | `PR_HEAD_CHANGED` 저장, graph/file 저장 금지 |
 | `analyzing` | 유효한 분석 결과 원자 저장 | `reviewing` | graph/file 저장 후 마지막에 status 전환 |
 | `failed` | 사용자 retry | 새 `analyzing` session | 기존 session 보존, 새 job/outbox 생성 |

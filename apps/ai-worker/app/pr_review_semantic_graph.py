@@ -135,6 +135,21 @@ def parse_semantic_graph_output(
     return SemanticGraphOutput(files=files, relations=relations, flows=flows)
 
 
+def semantic_graph_output_error_category(error: ValueError) -> str:
+    message = str(error).lower()
+    if "version" in message:
+        return "version"
+    if "role" in message:
+        return "role_policy"
+    if "file" in message:
+        return "file_membership"
+    if "relation" in message:
+        return "relation"
+    if "flow" in message:
+        return "flow"
+    return "invalid_graph"
+
+
 def semantic_graph_prompt_input(graph: SemanticGraphInput) -> dict[str, object]:
     return {
         "schemaVersion": PR_REVIEW_SEMANTIC_GRAPH_SCHEMA_VERSION,
