@@ -894,6 +894,29 @@ export class PrReviewService {
     }
   }
 
+  async retryReviewSession(
+    currentUserId: string,
+    workspaceId: string,
+    reviewSessionId: string
+  ): Promise<PrReviewSessionPayload> {
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+
+    const failedSession = await this.findReviewSession(workspaceId, reviewSessionId);
+    if (!failedSession) {
+      throw notFound("Review session not found");
+    }
+    if (failedSession.status !== "failed") {
+      throw conflictError("Only failed review sessions can be retried");
+    }
+
+    const retried = await this.createReviewSession(
+      currentUserId,
+      workspaceId,
+      failedSession.pull_request_id
+    );
+    return retried.session;
+  }
+
   async getAnalysisJobInput(jobId: string): Promise<PrReviewAnalysisInputPayload> {
     if (!UUID_PATTERN.test(jobId)) {
       throw notFound("PR Review analysis job not found");
