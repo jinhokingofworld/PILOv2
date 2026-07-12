@@ -5,7 +5,7 @@
 PR Review API는 다음 기능을 담당한다.
 
 - Review session 생성, 조회, 상태 수정, 삭제
-- AI가 생성한 PR 목적, 변경 요약, 주의점, flow, file review order 저장과 조회
+- AI가 생성한 PR 목적, 변경 요약, 주의점, flow, file review order와 검증된 semantic relation 저장과 조회
 - Review file metadata와 파일별 review decision
 - PR 리뷰 화면용 canvas view model
 - Side-by-side diff view model
@@ -30,12 +30,13 @@ comment, PR merge/close, ProjectV2 write는 이 문서의 범위가 아니다.
 
 - Review session은 PR 리뷰 화면에 머무는 동안 사용하는 MVP 임시 작업 데이터다.
 - 사용자가 PR 리뷰 화면을 나가면 review session 삭제 API를 호출한다.
-- 세션 삭제 시 flow, file, file decision, submission history는 FK cascade로 함께 삭제된다.
+- 세션 삭제 시 flow, file, semantic relation, file decision, submission history는 FK cascade로 함께 삭제된다.
 - `review_submissions`는 화면 안에서 제출 결과와 실패 원인을 확인하기 위한 세션 내부 이력이다.
 - `review_files`는 file metadata와 review state를 저장한다.
 - Diff 응답은 GitHub Integration을 통해 PR 변경 파일과 patch 정보를 조회해 만든다.
-- PR 리뷰 canvas는 `review_flows`, `review_files`, `review_flow_files`에서 생성하는 view model이다. 자유형 `canvas` 테이블에 저장하지 않는다.
+- PR 리뷰 canvas는 `review_flows`, `review_files`, `review_flow_files`, `review_flow_relations`에서 생성하는 view model이다. 자유형 `canvas` 테이블에 저장하지 않는다.
 - `review_flow_files`는 같은 review session에 속한 `review_flows`와 `review_files`만 연결한다.
+- `review_flow_relations`는 같은 review session과 Flow에 속한 두 `review_flow_files` membership만 연결한다.
 - GitHub Review 제출은 GitHub Integration에서 연결한 현재 사용자의 GitHub App user OAuth token으로 수행하며 review body만 제출한다.
 - 현재 GitHub PR head SHA가 session의 `headSha`와 다르면 제출을 막는다.
 - Conflict resolution apply는 현재 사용자의 GitHub App user OAuth token으로 PR head branch에
@@ -52,6 +53,9 @@ comment, PR merge/close, ProjectV2 write는 이 문서의 범위가 아니다.
 | `prReviewSession.status` | `analyzing`, `reviewing`, `ready_to_submit`, `submitted`, `failed`, `archived` |
 | `reviewFile.currentStatus` | `not_reviewed`, `approved`, `discussion_needed`, `unknown` |
 | `reviewFile.riskLevel` | `high`, `medium`, `low`, `unknown` |
+| `reviewFile.roleType` | `entry`, `core_logic`, `api_contract`, `ui_state`, `verification`, `support`, `unknown` |
+| `reviewFlowRelation.relationType` | `depends_on`, `tests`, `uses_api`, `passes_data_to`, `supports` |
+| `reviewFlowRelation.source` | `rule`, `ai`, `hybrid` |
 | `fileReviewDecision.status` | `approved`, `discussion_needed`, `unknown` |
 | `reviewSubmission.submitType` | `COMMENT`, `APPROVE`, `REQUEST_CHANGES` |
 | `reviewSubmission.githubSubmitStatus` | `not_submitted`, `submitting`, `submitted`, `failed` |
@@ -409,7 +413,7 @@ DELETE /api/v1/workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}
 
 삭제 규칙:
 
-- `review_flows`, `review_files`, `review_flow_files`는 session 삭제와 함께 삭제된다.
+- `review_flows`, `review_files`, `review_flow_files`, `review_flow_relations`는 session 삭제와 함께 삭제된다.
 - `file_review_decisions`는 `review_files` 삭제에 의해 함께 삭제된다.
 - `review_submissions`는 session 삭제와 함께 삭제된다.
 - PR Review canvas는 자유형 `canvas` 테이블에 저장하지 않으므로 별도 canvas 삭제 작업은 없다.
@@ -532,6 +536,7 @@ GitHub Review 제출 가능 여부를 막는 hard guard가 아니다. `not_revie
           "fileName": "page.tsx",
           "fileStatus": "modified",
           "fileRole": "프론트엔드",
+          "roleType": "ui_state",
           "riskLevel": "medium",
           "workflowOrder": 1,
           "currentStatus": "not_reviewed",
@@ -544,6 +549,7 @@ GitHub Review 제출 가능 여부를 막는 hard guard가 아니다. `not_revie
             "fileName": "page.tsx",
             "filePath": "apps/frontend/page.tsx",
             "roleSummary": "프론트엔드",
+            "roleType": "ui_state",
             "riskLevel": "medium",
             "reviewStatus": "not_reviewed"
           }
@@ -553,14 +559,35 @@ GitHub Review 제출 가능 여부를 막는 hard guard가 아니다. `not_revie
   ],
   "edges": [
     {
+      "id": "relation_uuid",
       "fromReviewFileId": "review_file_uuid_1",
       "toReviewFileId": "review_file_uuid_2",
+      "fromReviewFlowFileId": "review_flow_file_uuid_1",
+      "toReviewFlowFileId": "review_flow_file_uuid_2",
       "flowId": "flow_uuid",
-      "reason": "리뷰 순서"
+      "relationType": "depends_on",
+      "reason": "Controller가 Service의 변경된 기능을 호출합니다.",
+      "source": "hybrid",
+      "confidence": 88
     }
   ]
 }
 ```
+
+`roleType`은 graph layout과 검증에 사용하는 정규화된 역할이다. 허용값은
+`entry`, `core_logic`, `api_contract`, `ui_state`, `verification`, `support`,
+`unknown`이다. 기존 `fileRole`과 `roleSummary`는 사람이 읽는 설명으로 유지한다.
+
+semantic edge의 `relationType`은 `depends_on`, `tests`, `uses_api`,
+`passes_data_to`, `supports` 중 하나다. `source`는 `rule`, `ai`, `hybrid` 중 하나이며,
+`confidence`는 `0`부터 `100`까지의 정수다. Canvas 응답에는 서버 검증을 통과하고
+`confidence >= 60`인 관계만 포함한다. 관계는 같은 review session과 Flow에 속한 두
+file membership만 연결하고 self edge와 같은 type의 중복 관계를 허용하지 않는다.
+
+한 Flow에 semantic edge가 하나라도 있으면 해당 Flow에는 semantic edge만 반환한다.
+semantic edge가 없는 기존 session 또는 Flow는 기존 `workflowOrder` 인접 파일을
+`relationType: review_order`, `source: fallback`, `confidence: 100`으로 연결한다.
+semantic relation은 새 분석 session부터 저장하며 기존 완료 session을 backfill하지 않는다.
 
 PR Review schema에는 `canvas_id`, `canvas_shape_id`,
 `canvas_freeform_shapes` 관계가 없다.
@@ -605,6 +632,7 @@ PR Review schema에는 `canvas_id`, `canvas_shape_id`,
         "fileName": "VoiceMeetingPage.tsx",
         "fileStatus": "modified",
         "fileRole": "프론트엔드",
+        "roleType": "ui_state",
         "riskLevel": "medium",
         "currentStatus": "not_reviewed",
         "fileNodeData": {
@@ -616,6 +644,7 @@ PR Review schema에는 `canvas_id`, `canvas_shape_id`,
           "fileName": "VoiceMeetingPage.tsx",
           "filePath": "apps/frontend/VoiceMeetingPage.tsx",
           "roleSummary": "프론트엔드",
+          "roleType": "ui_state",
           "riskLevel": "medium",
           "reviewStatus": "not_reviewed"
         }
@@ -643,6 +672,7 @@ PR Review schema에는 `canvas_id`, `canvas_shape_id`,
     "isLargeDiff": false,
     "githubFileUrl": "https://github.com/my-team/pilo/pull/24/files#diff-abc",
     "fileRole": "프론트엔드",
+    "roleType": "ui_state",
     "riskLevel": "medium",
     "changeReason": "수정된 파일이다.",
     "changeSummary": "84줄 추가, 12줄 삭제",
