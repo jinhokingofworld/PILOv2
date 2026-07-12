@@ -226,7 +226,7 @@ resource "aws_cloudwatch_metric_alarm" "worker_running_task_count" {
   comparison_operator = "LessThanThreshold"
   evaluation_periods  = each.value.evaluation_periods
   metric_name         = "RunningTaskCount"
-  namespace           = "AWS/ECS"
+  namespace           = "ECS/ContainerInsights"
   period              = 60
   statistic           = "Minimum"
   threshold           = 1
