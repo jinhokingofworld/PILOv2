@@ -13,10 +13,12 @@ from app.pr_review_analysis_processor import (
     PrReviewAnalysisResult,
     _build_prompt_input,
     _pr_review_analysis_schema,
+    _serialize_analysis_result,
     parse_pr_review_analysis_input_payload,
     parse_pr_review_analysis_job_payload,
     parse_pr_review_analysis_output,
 )
+from app.pr_review_semantic_graph import PR_REVIEW_SEMANTIC_GRAPH_SCHEMA_VERSION
 
 JOB_ID = "11111111-1111-1111-1111-111111111111"
 SESSION_ID = "22222222-2222-2222-2222-222222222222"
@@ -116,6 +118,92 @@ def analysis_result() -> PrReviewAnalysisResult:
     )
 
 
+def semantic_graph_payload() -> dict[str, object]:
+    relation_key = "supports:docs/api/pr-review-api.md->apps/app-server/src/pr-review.ts"
+    return {
+        "files": [
+            {
+                "filePath": "apps/app-server/src/pr-review.ts",
+                "roleType": "core_logic",
+                "confidence": 65,
+                "evidence": "code_file_fallback",
+                "roleOverrideAllowed": True,
+            },
+            {
+                "filePath": "docs/api/pr-review-api.md",
+                "roleType": "support",
+                "confidence": 90,
+                "evidence": "support_path",
+                "roleOverrideAllowed": False,
+            },
+        ],
+        "relations": [
+            {
+                "key": relation_key,
+                "fromFilePath": "docs/api/pr-review-api.md",
+                "toFilePath": "apps/app-server/src/pr-review.ts",
+                "relationType": "supports",
+                "source": "rule",
+                "confidence": 75,
+                "evidence": "explicit_file_reference",
+            }
+        ],
+        "flows": [
+            {
+                "key": "candidate-flow-1",
+                "title": "핵심 로직 변경",
+                "filePaths": [
+                    "apps/app-server/src/pr-review.ts",
+                    "docs/api/pr-review-api.md",
+                ],
+                "relationKeys": [relation_key],
+                "fallback": False,
+            }
+        ],
+    }
+
+
+def semantic_graph_output() -> dict[str, object]:
+    relation_key = "supports:docs/api/pr-review-api.md->apps/app-server/src/pr-review.ts"
+    return {
+        "graphSchemaVersion": PR_REVIEW_SEMANTIC_GRAPH_SCHEMA_VERSION,
+        "semanticGraph": {
+            "files": [
+                {
+                    "filePath": "apps/app-server/src/pr-review.ts",
+                    "roleType": "entry",
+                    "roleReason": "분석 Job 진입점을 제공합니다.",
+                },
+                {
+                    "filePath": "docs/api/pr-review-api.md",
+                    "roleType": "support",
+                    "roleReason": "내부 handoff 계약을 설명합니다.",
+                },
+            ],
+            "relations": [
+                {
+                    "candidateKey": relation_key,
+                    "fromFilePath": "docs/api/pr-review-api.md",
+                    "toFilePath": "apps/app-server/src/pr-review.ts",
+                    "relationType": "supports",
+                    "reason": "문서가 구현 계약을 설명합니다.",
+                }
+            ],
+            "flows": [
+                {
+                    "candidateKey": "candidate-flow-1",
+                    "title": "PR Review 분석 계약",
+                    "description": "분석 handoff 변경을 함께 검토합니다.",
+                    "reviewOrder": [
+                        "docs/api/pr-review-api.md",
+                        "apps/app-server/src/pr-review.ts",
+                    ],
+                }
+            ],
+        },
+    }
+
+
 class FakeHandoffClient:
     def __init__(self, input_value=None, error: Exception | None = None) -> None:
         self.input_value = input_value
@@ -189,6 +277,7 @@ def test_input_handoff_requires_matching_identity_and_unique_paths() -> None:
         "apps/app-server/src/pr-review.ts",
         "docs/api/pr-review-api.md",
     ]
+    assert input_value.semantic_graph is None
 
     mismatched = input_payload(headSha="different-head")
     duplicate = input_payload(
@@ -361,6 +450,7 @@ def test_prompt_enforces_patch_budget_and_schema_is_strict() -> None:
     files = prompt["files"]
     assert len(files[0]["patchSnippet"]) == 4_000
     assert len(files[1]["patchSnippet"]) == 4_000
+    assert "semanticGraph" not in prompt
 
     def assert_closed_objects(value: object) -> None:
         if isinstance(value, dict):
@@ -373,3 +463,113 @@ def test_prompt_enforces_patch_budget_and_schema_is_strict() -> None:
                 assert_closed_objects(nested)
 
     assert_closed_objects(_pr_review_analysis_schema())
+
+
+def test_versioned_semantic_graph_contract_round_trip_and_role_policy() -> None:
+    data = input_payload(
+        graphSchemaVersion=PR_REVIEW_SEMANTIC_GRAPH_SCHEMA_VERSION,
+        semanticGraph=semantic_graph_payload(),
+    )
+    input_value = parse_pr_review_analysis_input_payload(
+        data,
+        parse_pr_review_analysis_job_payload(job_payload()),
+    )
+
+    assert input_value.semantic_graph is not None
+    assert input_value.semantic_graph.files[0].role_override_allowed is True
+    assert input_value.semantic_graph.files[1].role_override_allowed is False
+    assert _build_prompt_input(input_value)["semanticGraph"]["rolePolicy"] == {
+        "overrideConfidenceThreshold": 85,
+        "rule": (
+            "Preserve roleType when roleOverrideAllowed is false. Roles with lower "
+            "confidence or unknown may be corrected with a concise roleReason."
+        ),
+    }
+
+    schema = _pr_review_analysis_schema(include_semantic_graph=True)
+    assert "semanticGraph" in schema["required"]
+    assert "graphSchemaVersion" in schema["required"]
+
+    legacy_output = {
+        "prPurpose": "비동기 분석",
+        "changeSummary": ["Worker 추가"],
+        "recommendedReviewOrder": "Worker부터 확인",
+        "cautionPoints": ["head SHA 확인"],
+        "flowTitle": "PR 변경 파일 리뷰",
+        "flowDescription": "분석 경계 확인",
+        "files": [
+            {
+                "filePath": "apps/app-server/src/pr-review.ts",
+                "fileRole": "서버",
+                "riskLevel": "medium",
+                "changeReason": "비동기 Job 생성",
+                "changeSummary": "enqueue 처리",
+                "reviewPoints": ["중복 처리"],
+            },
+            {
+                "filePath": "docs/api/pr-review-api.md",
+                "fileRole": "문서",
+                "riskLevel": "low",
+                "changeReason": "계약 갱신",
+                "changeSummary": "handoff 문서",
+                "reviewPoints": ["token 노출"],
+            },
+        ],
+    }
+    parsed = parse_pr_review_analysis_output(
+        json.dumps({**legacy_output, **semantic_graph_output()}),
+        input_value.files,
+        input_value.semantic_graph,
+    )
+
+    assert parsed.semantic_graph is not None
+    assert parsed.semantic_graph.files[0].role_type == "entry"
+    serialized = _serialize_analysis_result(parsed)
+    assert serialized["graphSchemaVersion"] == PR_REVIEW_SEMANTIC_GRAPH_SCHEMA_VERSION
+    assert serialized["semanticGraph"]["flows"][0]["candidateKey"] == "candidate-flow-1"
+
+    locked_role_changed = semantic_graph_output()
+    locked_role_changed["semanticGraph"]["files"][1]["roleType"] = "api_contract"
+    try:
+        parse_pr_review_analysis_output(
+            json.dumps({**legacy_output, **locked_role_changed}),
+            input_value.files,
+            input_value.semantic_graph,
+        )
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("AI must not change a locked semantic graph role")
+
+
+def test_semantic_graph_input_rejects_partial_or_unknown_contract_data() -> None:
+    valid_graph = semantic_graph_payload()
+    invalid_graph = {
+        **valid_graph,
+        "relations": [
+            {
+                **valid_graph["relations"][0],
+                "toFilePath": "missing.ts",
+            }
+        ],
+    }
+    for payload in (
+        input_payload(semanticGraph=valid_graph),
+        input_payload(
+            graphSchemaVersion="pr-review-semantic-graph:v2",
+            semanticGraph=valid_graph,
+        ),
+        input_payload(
+            graphSchemaVersion=PR_REVIEW_SEMANTIC_GRAPH_SCHEMA_VERSION,
+            semanticGraph=invalid_graph,
+        ),
+    ):
+        try:
+            parse_pr_review_analysis_input_payload(
+                payload,
+                parse_pr_review_analysis_job_payload(job_payload()),
+            )
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("invalid semantic graph input must be rejected")
