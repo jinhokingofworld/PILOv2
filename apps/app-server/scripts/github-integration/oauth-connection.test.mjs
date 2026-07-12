@@ -8,7 +8,7 @@ const { GithubOAuthConnectionService } = require(
 );
 
 const migration = await readFile(
-  new URL("../../../../db/migrations/043_create_github_oauth_connections.sql", import.meta.url),
+  new URL("../../../../db/migrations/044_create_github_oauth_connections.sql", import.meta.url),
   "utf8"
 );
 const service = await readFile(
