@@ -254,6 +254,7 @@ module "ecs" {
         MEETING_REPORT_EVENT_MAX_ATTEMPTS       = "3"
         OPENAI_STT_MODEL                        = "gpt-4o-mini-transcribe"
         OPENAI_MEETING_REPORT_MODEL             = "gpt-5.4-mini"
+        OPENAI_AGENT_PLANNER_TIMEOUT_MS         = "60000"
       }
       secrets = module.secrets.ai_worker_ecs_secrets
     }
