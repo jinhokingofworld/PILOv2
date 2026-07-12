@@ -71,10 +71,19 @@ export class GithubSyncJobService implements OnModuleDestroy {
     private readonly pollingService?: GithubProjectV2PollingService
   ) {}
 
-  async enqueueSyncJob(syncRunId: string, requestedByUserId: string): Promise<void> {
+  async enqueueSyncJob(
+    syncRunId: string,
+    requestedByUserId: string,
+    options?: { skipIfRunIsNoLongerQueued?: boolean }
+  ): Promise<boolean> {
     const job = await this.database.queryOne<{ id: string; lease_generation: string }>(
-      `INSERT INTO github_sync_jobs (sync_run_id, requested_by_user_id)
-        VALUES ($1, $2)
+      `WITH queued_run AS (
+        SELECT run.id
+        FROM github_sync_runs AS run
+        WHERE run.id=$1 AND run.status='queued'
+      )
+      INSERT INTO github_sync_jobs (sync_run_id, requested_by_user_id)
+        SELECT queued_run.id, $2 FROM queued_run
         ON CONFLICT (sync_run_id) DO UPDATE
         SET status='queued', lease_owner=NULL, lease_expires_at=NULL, finished_at=NULL, last_error=NULL,
           lease_generation=github_sync_jobs.lease_generation+1
@@ -83,7 +92,10 @@ export class GithubSyncJobService implements OnModuleDestroy {
        RETURNING id, lease_generation`,
       [syncRunId, requestedByUserId]
     );
-    if (!job) throw badRequest("GitHub sync job could not be created");
+    if (!job) {
+      if (options?.skipIfRunIsNoLongerQueued) return false;
+      throw badRequest("GitHub sync job could not be created");
+    }
     try {
       await this.client().send(new SendMessageCommand({
         QueueUrl: this.requireEnv("SQS_GITHUB_SYNC_JOBS_QUEUE_URL"),
@@ -93,6 +105,7 @@ export class GithubSyncJobService implements OnModuleDestroy {
       await this.failEnqueue(syncRunId, job.id, job.lease_generation);
       throw new GithubSyncJobEnqueueError(syncRunId);
     }
+    return true;
   }
 
   async enqueueWebhookDelivery(deliveryId: string): Promise<void> {
@@ -194,7 +207,9 @@ export class GithubSyncJobService implements OnModuleDestroy {
     const claims = await this.pollingService.claimDueSchedules(10);
     for (const claim of claims) {
       try {
-        await this.enqueueSyncJob(claim.syncRunId, claim.requestedByUserId);
+        await this.enqueueSyncJob(claim.syncRunId, claim.requestedByUserId, {
+          skipIfRunIsNoLongerQueued: true
+        });
       } catch (error) {
         this.logger.warn(
           `GitHub ProjectV2 polling run ${claim.syncRunId} could not be enqueued: ${this.errorMessage(error)}`

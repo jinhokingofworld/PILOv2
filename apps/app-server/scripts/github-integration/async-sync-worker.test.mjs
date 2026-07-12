@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 const require = createRequire(import.meta.url);
 const { GithubSyncRunService } = require("../../dist/modules/github-integration/github-sync-run.service.js");
 const { GithubSyncJobService } = require("../../dist/modules/github-integration/github-sync-job.service.js");
+const { GithubProjectV2PollingService } = require("../../dist/modules/github-integration/github-project-v2-polling.service.js");
 const { GithubGraphqlRateLimitError } = require("../../dist/modules/github-integration/github-app.client.js");
 const { GithubWebhookService } = require("../../dist/modules/github-integration/github-webhook.service.js");
 const root = fileURLToPath(new URL("../../../..", import.meta.url));
@@ -118,6 +119,63 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
     "queue:sync-queue",
     "queue:webhook-queue"
   ]);
+}
+
+{
+  const claimedPollingRunId = "55555555-5555-4555-8555-555555555555";
+  const state = { runStatus: "queued", createdJobId: null, cancellationSql: "", enqueueSql: "" };
+  const database = {
+    async query() {
+      return [{
+        sync_run_id: claimedPollingRunId,
+        repository_id: "66666666-6666-4666-8666-666666666666",
+        project_v2_id: "77777777-7777-4777-8777-777777777777",
+        requested_by_user_id: userId
+      }];
+    },
+    async execute(text) {
+      state.cancellationSql = text;
+      state.runStatus = "failed";
+      return { rowCount: 1 };
+    },
+    async queryOne(text) {
+      if (/INSERT INTO github_sync_jobs/i.test(text)) {
+        state.enqueueSql = text;
+        if (state.runStatus !== "queued") return null;
+        state.createdJobId = "job-created-after-deselect";
+        return { id: state.createdJobId, lease_generation: "0" };
+      }
+      return null;
+    }
+  };
+  const polling = new GithubProjectV2PollingService(database);
+  let executorCalls = 0;
+  const worker = new GithubSyncJobService(
+    database,
+    {},
+    { runGithubSyncTarget: async () => { executorCalls += 1; } },
+    {}
+  );
+  let sentMessages = 0;
+  worker.client = () => ({ send: async () => { sentMessages += 1; } });
+
+  const [claim] = await polling.claimDueSchedules(1);
+  await polling.terminateDeselectedQueuedRuns({ repositoryId: claim.repositoryId, retainedProjectV2Ids: [] });
+  const enqueued = await worker.enqueueSyncJob(claim.syncRunId, claim.requestedByUserId, {
+    skipIfRunIsNoLongerQueued: true
+  });
+
+  assert.equal(state.runStatus, "failed", "deselecting after a claim must terminalize the still-queued run");
+  assert.match(
+    state.cancellationSql,
+    /terminal_runs AS \([\s\S]*?FROM deselected_schedules AS schedule[\s\S]*?run\.status = 'queued'/i
+  );
+  assert.equal(enqueued, false, "late polling enqueue must be skipped after the claimed run was terminalized");
+  assert.match(state.enqueueSql, /WITH queued_run AS \([\s\S]*?github_sync_runs AS run[\s\S]*?run\.status='queued'/i);
+  assert.equal(state.createdJobId, null, "late enqueue must not create an orphan sync job");
+  assert.equal(sentMessages, 0, "late enqueue must not publish an orphan job message");
+  assert.equal(await worker.processSyncJob("job-created-after-deselect"), "terminal");
+  assert.equal(executorCalls, 0, "late enqueue must not reach the sync executor");
 }
 
 {

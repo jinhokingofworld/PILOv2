@@ -71,8 +71,8 @@ export class GithubProjectV2PollingService {
           UPDATE github_sync_runs AS run
           SET status = 'failed', finished_at = now(),
             error_message = 'GitHub ProjectV2 polling selection was removed'
-          FROM terminal_jobs
-          WHERE run.id = terminal_jobs.sync_run_id
+          FROM deselected_schedules AS schedule
+          WHERE run.id = schedule.active_sync_run_id
             AND run.status = 'queued'
           RETURNING run.id
         )

@@ -107,7 +107,11 @@ class FakeDatabase {
   assert.match(cancellation.text, /job\.lease_expires_at IS NULL/i);
   assert.match(cancellation.text, /FOR UPDATE OF job/i);
   assert.match(cancellation.text, /terminal_jobs AS \([\s\S]*?lease_generation = locked_jobs\.lease_generation/i);
-  assert.match(cancellation.text, /terminal_runs AS \([\s\S]*?run\.status = 'queued'/i);
+  assert.match(
+    cancellation.text,
+    /terminal_runs AS \([\s\S]*?FROM deselected_schedules AS schedule[\s\S]*?run\.id = schedule\.active_sync_run_id[\s\S]*?run\.status = 'queued'/i,
+    "a claimed run without a job must be terminalized before its deselected schedule is deleted"
+  );
   assert.doesNotMatch(cancellation.text, /job\.status = 'running'/i);
   assert.deepEqual(cancellation.values, [repositoryId, []]);
 }
