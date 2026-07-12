@@ -155,8 +155,17 @@ interface QueryOneExecutor {
 }
 
 interface MeetingReportListQuery {
+  cursor?: unknown;
+  from?: unknown;
   status?: unknown;
+  q?: unknown;
+  to?: unknown;
   limit?: unknown;
+}
+
+interface MeetingReportCursor {
+  createdAt: string;
+  id: string;
 }
 
 interface MeetingReportInsertResult {
@@ -321,6 +330,7 @@ export interface ParticipantListPayload {
 }
 
 export interface MeetingReportListPayload {
+  nextCursor: string | null;
   reports: MeetingReportSummaryPayload[];
 }
 
@@ -959,16 +969,25 @@ export class MeetingService {
     query: MeetingReportListQuery
   ): Promise<MeetingReportListPayload> {
     await this.assertWorkspaceAccess(currentUserId, workspaceId);
+    const cursor = this.normalizeMeetingReportCursor(query.cursor);
+    const from = this.normalizeMeetingReportDate(query.from, "from");
+    const to = this.normalizeMeetingReportDate(query.to, "to");
+    const searchQuery = this.normalizeMeetingReportSearchQuery(query.q);
     const status = this.normalizeMeetingReportStatus(query.status);
     const limit = this.normalizeMeetingReportLimit(query.limit);
-    const reports = await this.listWorkspaceMeetingReportRows(
+    if (from !== null && to !== null && from >= to) {
+      throw badRequest("from must be before to");
+    }
+    const page = await this.listWorkspaceMeetingReportRows(
       workspaceId,
       status,
-      limit
+      limit,
+      { cursor, from, searchQuery, to }
     );
 
     return {
-      reports: reports.map((report) => this.mapMeetingReportSummary(report))
+      nextCursor: page.nextCursor,
+      reports: page.reports.map((report) => this.mapMeetingReportSummary(report))
     };
   }
 
@@ -999,6 +1018,7 @@ export class MeetingService {
     const reports = await this.listMeetingReportRows(meetingId);
 
     return {
+      nextCursor: null,
       reports: reports.map((report) => this.mapMeetingReportSummary(report))
     };
   }
@@ -2097,16 +2117,42 @@ export class MeetingService {
   private async listWorkspaceMeetingReportRows(
     workspaceId: string,
     status: MeetingReportStatus | null,
-    limit: number
-  ): Promise<MeetingReportRow[]> {
+    limit: number,
+    filters: {
+      cursor: MeetingReportCursor | null;
+      from: string | null;
+      searchQuery: string | null;
+      to: string | null;
+    }
+  ): Promise<{ nextCursor: string | null; reports: MeetingReportRow[] }> {
     const values: unknown[] = [workspaceId];
     const statusCondition =
       status === null
         ? ""
         : `AND meeting_reports.status = $${values.push(status)}`;
-    const limitParameter = `$${values.push(limit)}`;
+    const searchCondition =
+      filters.searchQuery === null
+        ? ""
+        : `AND to_tsvector('simple', concat_ws(' ', COALESCE(meeting_reports.summary, ''), COALESCE(meeting_reports.discussion_points, ''), COALESCE(meeting_reports.decisions, ''), COALESCE(meeting_reports.action_item_candidates::text, ''), COALESCE(meeting_reports.error_message, ''))) @@ websearch_to_tsquery('simple', $${values.push(filters.searchQuery)})`;
+    const fromCondition =
+      filters.from === null
+        ? ""
+        : `AND meeting_reports.created_at >= $${values.push(filters.from)}::timestamptz`;
+    const toCondition =
+      filters.to === null
+        ? ""
+        : `AND meeting_reports.created_at < $${values.push(filters.to)}::timestamptz`;
+    const cursorCondition =
+      filters.cursor === null
+        ? ""
+        : (() => {
+            const createdAtParameter = `$${values.push(filters.cursor.createdAt)}`;
+            const idParameter = `$${values.push(filters.cursor.id)}`;
+            return `AND (meeting_reports.created_at < ${createdAtParameter}::timestamptz OR (meeting_reports.created_at = ${createdAtParameter}::timestamptz AND meeting_reports.id > ${idParameter}::uuid))`;
+          })();
+    const limitParameter = `$${values.push(limit + 1)}`;
 
-    return this.database.query<MeetingReportRow>(
+    const rows = await this.database.query<MeetingReportRow>(
       `
         SELECT
           meeting_reports.id,
@@ -2127,11 +2173,28 @@ export class MeetingService {
           ON meetings.id = meeting_reports.meeting_id
         WHERE meetings.workspace_id = $1
           ${statusCondition}
+          ${searchCondition}
+          ${fromCondition}
+          ${toCondition}
+          ${cursorCondition}
         ORDER BY meeting_reports.created_at DESC, meeting_reports.id ASC
         LIMIT ${limitParameter}
       `,
       values
     );
+    const reports = rows.slice(0, limit);
+    const lastReport = reports.at(-1);
+
+    return {
+      nextCursor:
+        rows.length > limit && lastReport
+          ? this.encodeMeetingReportCursor({
+              createdAt: this.toIsoString(lastReport.created_at),
+              id: lastReport.id
+            })
+          : null,
+      reports
+    };
   }
 
   private async findMeetingReportDetailById(
@@ -2687,6 +2750,80 @@ export class MeetingService {
     }
 
     throw badRequest("Invalid meeting report status");
+  }
+
+  private normalizeMeetingReportSearchQuery(value: unknown): string | null {
+    if (value === undefined || value === null || value === "") {
+      return null;
+    }
+
+    if (typeof value !== "string" || Array.isArray(value)) {
+      throw badRequest("Invalid meeting report search query");
+    }
+
+    const query = value.trim();
+    if (!query || query.length > 200) {
+      throw badRequest("Invalid meeting report search query");
+    }
+
+    return query;
+  }
+
+  private normalizeMeetingReportDate(
+    value: unknown,
+    name: "from" | "to"
+  ): string | null {
+    if (value === undefined || value === null || value === "") {
+      return null;
+    }
+
+    if (typeof value !== "string" || Array.isArray(value)) {
+      throw badRequest(`Invalid meeting report ${name}`);
+    }
+
+    const date = new Date(value);
+    if (!Number.isFinite(date.getTime())) {
+      throw badRequest(`Invalid meeting report ${name}`);
+    }
+
+    return date.toISOString();
+  }
+
+  private normalizeMeetingReportCursor(value: unknown): MeetingReportCursor | null {
+    if (value === undefined || value === null || value === "") {
+      return null;
+    }
+
+    if (typeof value !== "string" || Array.isArray(value) || value.length > 512) {
+      throw badRequest("Invalid meeting report cursor");
+    }
+
+    try {
+      const parsed = JSON.parse(
+        Buffer.from(value, "base64url").toString("utf8")
+      ) as Partial<MeetingReportCursor>;
+      const id = parsed.id;
+      if (
+        typeof parsed.createdAt !== "string" ||
+        typeof id !== "string" ||
+        !UUID_PATTERN.test(id)
+      ) {
+        throw new Error("Invalid cursor payload");
+      }
+
+      const createdAt = new Date(parsed.createdAt);
+      if (!Number.isFinite(createdAt.getTime())) {
+        throw new Error("Invalid cursor timestamp");
+      }
+
+      return { createdAt: createdAt.toISOString(), id };
+    } catch {
+      throw badRequest("Invalid meeting report cursor");
+    }
+  }
+
+  private encodeMeetingReportCursor(cursor: MeetingReportCursor): string {
+    return Buffer.from(JSON.stringify(cursor)).toString("base64url");
   }
 
   private isMeetingReportInProgress(status: MeetingReportStatus): boolean {

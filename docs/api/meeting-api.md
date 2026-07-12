@@ -527,26 +527,34 @@ Response `data`:
 ### MeetingReport 목록 조회
 
 ```http
-GET /api/v1/workspaces/{workspaceId}/meeting-reports?status=FAILED&limit=20
+GET /api/v1/workspaces/{workspaceId}/meeting-reports?status=FAILED&q=녹음&from=2026-07-01T00:00:00.000Z&to=2026-08-01T00:00:00.000Z&limit=20
 ```
 
 Query:
 
 | Name | Required | 설명 |
 | --- | --- | --- |
+| `cursor` | No | 이전 응답의 `nextCursor`. 다음 페이지를 같은 정렬 기준으로 조회한다. 임의 값은 `400` |
+| `from` | No | `createdAt` 하한 ISO 8601 시각(포함) |
+| `to` | No | `createdAt` 상한 ISO 8601 시각(미포함) |
+| `q` | No | 요약, 논의, 결정, 액션 아이템 후보, 실패 사유를 대상으로 하는 서버 측 키워드 검색. raw `transcriptText`는 포함하지 않음 |
 | `status` | No | `QUEUED`, `TRANSCRIBING`, `SUMMARIZING`, `COMPLETED`, `FAILED`, legacy `PROCESSING` |
 | `limit` | No | 반환 개수. 기본값 20, 최대 100 |
 
-`status`가 허용값이 아니면 `400 BAD_REQUEST`를 반환한다. `limit`이 숫자가
-아니거나 20 미만이면 20으로, 100 초과면 100으로 보정한다.
+`status`가 허용값이 아니거나 `cursor`, `from`, `to`가 올바른 형식이 아니면
+`400 BAD_REQUEST`를 반환한다. `from`은 `to`보다 앞서야 한다. `q`는 공백 제거 후
+최대 200자다. `limit`이 숫자가 아니거나 20 미만이면 20으로, 100 초과면 100으로
+보정한다.
 
-기본 정렬은 `createdAt DESC`다. `recording.durationSec`이 60 이하인 녹음은
-MeetingReport가 없으므로 목록에 나오지 않는다. 실패한 MeetingReport도 목록에 나온다.
+기본 정렬은 `createdAt DESC, id ASC`다. `nextCursor`가 `null`이면 다음 페이지가 없다.
+`recording.durationSec`이 60 이하인 녹음은 MeetingReport가 없으므로 목록에 나오지 않는다.
+실패한 MeetingReport도 목록에 나온다.
 
 Response `data`:
 
 | Field | Type | 설명 |
 | --- | --- | --- |
+| `nextCursor` | string \| null | 다음 페이지 cursor. 다음 요청에 그대로 전달한다. |
 | `reports` | MeetingReport[] | 회의록 목록. `transcriptText` 제외 |
 
 주요 오류: `400`, `401`, `403`

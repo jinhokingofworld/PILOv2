@@ -147,11 +147,16 @@ export type ParticipantListPayload = {
 };
 
 export type MeetingReportListQuery = {
+  cursor?: string;
+  from?: string;
   status?: MeetingReportStatus;
+  q?: string;
+  to?: string;
   limit?: number;
 };
 
 export type MeetingReportListPayload = {
+  nextCursor: string | null;
   reports: MeetingReportSummary[];
 };
 
