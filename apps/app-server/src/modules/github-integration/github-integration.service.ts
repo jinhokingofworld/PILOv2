@@ -6,6 +6,7 @@ import { WorkspaceService } from "../workspace/workspace.service";
 import { GithubAppClient } from "./github-app.client";
 import { GithubAppInstallationService } from "./github-app-installation.service";
 import { GithubAppInstallationStateService } from "./github-app-installation-state.service";
+import { GithubBoardInvalidationPublisherService } from "./github-board-invalidation-publisher.service";
 import { GithubCallbackStateService } from "./github-callback-state.service";
 import { GithubConflictMergeService } from "./github-conflict-merge.service";
 import { GithubGitCommandRunner } from "./github-git-command-runner";
@@ -155,7 +156,9 @@ export class GithubIntegrationService {
     @Optional()
     githubPullRequestMergeService?: GithubPullRequestMergeService,
     @Optional()
-    githubSyncJobService?: GithubSyncJobService
+    githubSyncJobService?: GithubSyncJobService,
+    @Optional()
+    githubBoardInvalidationPublisher?: GithubBoardInvalidationPublisherService
   ) {
     const callbackStateService =
       githubCallbackStateService ?? new GithubCallbackStateService(database);
@@ -181,7 +184,12 @@ export class GithubIntegrationService {
       );
     const syncExecutorService =
       githubSyncExecutorService ??
-      new GithubSyncExecutorService(database, githubAppClient);
+      new GithubSyncExecutorService(
+        database,
+        githubAppClient,
+        githubBoardInvalidationPublisher ??
+          new GithubBoardInvalidationPublisherService()
+      );
     const projectV2SyncTokenService =
       githubProjectV2SyncTokenService ??
       new GithubProjectV2SyncTokenService(

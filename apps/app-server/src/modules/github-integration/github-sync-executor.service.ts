@@ -140,8 +140,7 @@ export class GithubSyncExecutorService {
   constructor(
     private readonly database: DatabaseService,
     private readonly githubAppClient: GithubAppClient,
-    private readonly boardInvalidationPublisher =
-      new GithubBoardInvalidationPublisherService()
+    private readonly boardInvalidationPublisher: GithubBoardInvalidationPublisherService
   ) {}
 
   async runGithubSyncTarget(
