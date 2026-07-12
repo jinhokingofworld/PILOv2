@@ -17,6 +17,7 @@ from app.pr_review_semantic_graph import (
     parse_semantic_graph_input,
     parse_semantic_graph_output,
     semantic_graph_output_error_category,
+    semantic_graph_output_error_reason,
     semantic_graph_output_schema,
     semantic_graph_prompt_input,
     serialize_semantic_graph_output,
@@ -386,9 +387,7 @@ class OpenAiPrReviewAnalysisClient:
                         "type": "json_schema",
                         "name": "pr_review_analysis",
                         "strict": True,
-                        "schema": _pr_review_analysis_schema(
-                            include_semantic_graph=input_value.semantic_graph is not None
-                        ),
+                        "schema": _pr_review_analysis_schema(input_value.semantic_graph),
                     }
                 },
             )
@@ -492,8 +491,9 @@ def parse_pr_review_analysis_output(
         semantic_graph = parse_semantic_graph_output(value, semantic_graph_input)
     except ValueError as error:
         LOGGER.warning(
-            "pr_review_semantic_graph_fallback category=%s",
+            "pr_review_semantic_graph_fallback category=%s reason=%s",
             semantic_graph_output_error_category(error),
+            semantic_graph_output_error_reason(error),
         )
         semantic_graph = None
 
@@ -608,7 +608,9 @@ def _build_prompt_input(input_value: PrReviewAnalysisInput) -> dict[str, object]
     return prompt
 
 
-def _pr_review_analysis_schema(*, include_semantic_graph: bool = False) -> dict[str, object]:
+def _pr_review_analysis_schema(
+    semantic_graph_input: SemanticGraphInput | None = None,
+) -> dict[str, object]:
     required = [
         "prPurpose",
         "changeSummary",
@@ -655,13 +657,13 @@ def _pr_review_analysis_schema(*, include_semantic_graph: bool = False) -> dict[
             },
         },
     }
-    if include_semantic_graph:
+    if semantic_graph_input is not None:
         required.extend(["graphSchemaVersion", "semanticGraph"])
         properties["graphSchemaVersion"] = {
             "type": "string",
             "enum": [PR_REVIEW_SEMANTIC_GRAPH_SCHEMA_VERSION],
         }
-        properties["semanticGraph"] = semantic_graph_output_schema()
+        properties["semanticGraph"] = semantic_graph_output_schema(semantic_graph_input)
 
     return {
         "type": "object",

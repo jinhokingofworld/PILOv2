@@ -43,6 +43,8 @@ jobs:
         with:
           context: ${{ env.APP_PATH }}
           push: true
+          cache-from: type=gha,scope=ai-worker
+          cache-to: type=gha,mode=max,scope=ai-worker
           tags: |
             ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
             ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
@@ -71,14 +73,7 @@ jobs:
           test -n "$queue_url"
           test "$queue_url" != "None"
 
-          aws ecs update-service \
-            --cluster "$ECS_CLUSTER_NAME" \
-            --service "$ECS_AI_WORKER_SERVICE" \
-            --force-new-deployment
-
-          aws ecs wait services-stable \
-            --cluster "$ECS_CLUSTER_NAME" \
-            --services "$ECS_AI_WORKER_SERVICE"
+          services=("$ECS_AI_WORKER_SERVICE")
 
           if [ -n "$ECS_PR_REVIEW_AI_WORKER_SERVICE" ]; then
             pr_review_task_definition=$(aws ecs describe-services \
@@ -96,12 +91,16 @@ jobs:
             test -n "$pr_review_queue_url"
             test "$pr_review_queue_url" != "None"
 
+            services+=("$ECS_PR_REVIEW_AI_WORKER_SERVICE")
+          fi
+
+          for service in "${services[@]}"; do
             aws ecs update-service \
               --cluster "$ECS_CLUSTER_NAME" \
-              --service "$ECS_PR_REVIEW_AI_WORKER_SERVICE" \
+              --service "$service" \
               --force-new-deployment
+          done
 
-            aws ecs wait services-stable \
-              --cluster "$ECS_CLUSTER_NAME" \
-              --services "$ECS_PR_REVIEW_AI_WORKER_SERVICE"
-          fi
+          aws ecs wait services-stable \
+            --cluster "$ECS_CLUSTER_NAME" \
+            --services "${services[@]}"

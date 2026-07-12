@@ -150,6 +150,35 @@ def semantic_graph_output_error_category(error: ValueError) -> str:
     return "invalid_graph"
 
 
+def semantic_graph_output_error_reason(error: ValueError) -> str:
+    message = str(error).lower()
+    if "unknown semantic graph relation candidate key" in message:
+        return "unknown_candidate_key"
+    if "unknown semantic graph output relation endpoint" in message:
+        return "unknown_endpoint"
+    if "self relation" in message:
+        return "self_relation"
+    if "duplicate relation" in message:
+        return "duplicate_relation"
+    if "semantic graph output relations" in message:
+        return "invalid_collection"
+    if "semantic graph output relation" in message:
+        return "invalid_relation"
+    if "role override" in message or "locked semantic graph file role" in message:
+        return "locked_role_changed"
+    if "omitted an input file" in message:
+        return "file_omitted"
+    if "omitted an input flow" in message:
+        return "flow_omitted"
+    if "output flow" in message:
+        return "invalid_flow"
+    if "output file" in message or "filepath" in message:
+        return "invalid_file"
+    if "version" in message:
+        return "invalid_version"
+    return "invalid_output"
+
+
 def semantic_graph_prompt_input(graph: SemanticGraphInput) -> dict[str, object]:
     return {
         "schemaVersion": PR_REVIEW_SEMANTIC_GRAPH_SCHEMA_VERSION,
@@ -158,6 +187,20 @@ def semantic_graph_prompt_input(graph: SemanticGraphInput) -> dict[str, object]:
             "rule": (
                 "Preserve roleType when roleOverrideAllowed is false. Roles with lower "
                 "confidence or unknown may be corrected with a concise roleReason."
+            ),
+        },
+        "outputPolicy": {
+            "files": ("Return every input filePath exactly once. Never invent or omit a filePath."),
+            "relations": (
+                "For an input candidate relation, copy its exact key into candidateKey. "
+                "For a genuinely new relation, use null. Use only input file paths, never "
+                "connect a file to itself, and never duplicate the same fromFilePath, "
+                "toFilePath, and relationType."
+            ),
+            "flows": (
+                "Return every input flow exactly once with its exact key in candidateKey. "
+                "reviewOrder must contain every filePath from that flow exactly once and no "
+                "filePath from another flow."
             ),
         },
         "files": [
@@ -195,7 +238,16 @@ def semantic_graph_prompt_input(graph: SemanticGraphInput) -> dict[str, object]:
     }
 
 
-def semantic_graph_output_schema() -> dict[str, object]:
+def semantic_graph_output_schema(graph: SemanticGraphInput) -> dict[str, object]:
+    file_paths = sorted(file.file_path for file in graph.files)
+    relation_candidate_keys = sorted(relation.key for relation in graph.relations)
+    flow_candidate_keys = sorted(flow.key for flow in graph.flows)
+    file_path_schema: dict[str, object] = {"type": "string"}
+    if file_paths:
+        file_path_schema["enum"] = file_paths
+    relation_candidate_schema: dict[str, object] = {"type": ["string", "null"]}
+    relation_candidate_schema["enum"] = [None, *relation_candidate_keys]
+
     return {
         "type": "object",
         "additionalProperties": False,
@@ -206,7 +258,7 @@ def semantic_graph_output_schema() -> dict[str, object]:
                 "items": _closed_object(
                     ["filePath", "roleType", "roleReason"],
                     {
-                        "filePath": {"type": "string"},
+                        "filePath": file_path_schema,
                         "roleType": {
                             "type": "string",
                             "enum": sorted(PR_REVIEW_FILE_ROLES),
@@ -226,9 +278,9 @@ def semantic_graph_output_schema() -> dict[str, object]:
                         "reason",
                     ],
                     {
-                        "candidateKey": {"type": ["string", "null"]},
-                        "fromFilePath": {"type": "string"},
-                        "toFilePath": {"type": "string"},
+                        "candidateKey": relation_candidate_schema,
+                        "fromFilePath": file_path_schema,
+                        "toFilePath": file_path_schema,
                         "relationType": {
                             "type": "string",
                             "enum": sorted(PR_REVIEW_RELATION_TYPES),
@@ -242,12 +294,15 @@ def semantic_graph_output_schema() -> dict[str, object]:
                 "items": _closed_object(
                     ["candidateKey", "title", "description", "reviewOrder"],
                     {
-                        "candidateKey": {"type": "string"},
+                        "candidateKey": {
+                            "type": "string",
+                            "enum": flow_candidate_keys,
+                        },
                         "title": {"type": "string"},
                         "description": {"type": "string"},
                         "reviewOrder": {
                             "type": "array",
-                            "items": {"type": "string"},
+                            "items": file_path_schema,
                         },
                     },
                 ),
@@ -431,13 +486,12 @@ def _parse_output_relations(
         to_path = _require_string(record, "toFilePath")
         relation_type = _require_one_of(record, "relationType", PR_REVIEW_RELATION_TYPES)
         identity = (from_path, to_path, relation_type)
-        if (
-            from_path not in known_paths
-            or to_path not in known_paths
-            or from_path == to_path
-            or identity in seen_identities
-        ):
-            raise ValueError("Invalid semantic graph output relation")
+        if from_path not in known_paths or to_path not in known_paths:
+            raise ValueError("Unknown semantic graph output relation endpoint")
+        if from_path == to_path:
+            raise ValueError("Semantic graph output self relation")
+        if identity in seen_identities:
+            raise ValueError("Semantic graph output duplicate relation")
         candidate_key = _read_optional_string(record, "candidateKey")
         if candidate_key is not None and candidate_key not in candidate_keys:
             raise ValueError("Unknown semantic graph relation candidate key")

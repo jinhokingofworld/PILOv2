@@ -485,10 +485,39 @@ def test_versioned_semantic_graph_contract_round_trip_and_role_policy(caplog) ->
             "confidence or unknown may be corrected with a concise roleReason."
         ),
     }
+    assert _build_prompt_input(input_value)["semanticGraph"]["outputPolicy"] == {
+        "files": "Return every input filePath exactly once. Never invent or omit a filePath.",
+        "relations": (
+            "For an input candidate relation, copy its exact key into candidateKey. "
+            "For a genuinely new relation, use null. Use only input file paths, never "
+            "connect a file to itself, and never duplicate the same fromFilePath, "
+            "toFilePath, and relationType."
+        ),
+        "flows": (
+            "Return every input flow exactly once with its exact key in candidateKey. "
+            "reviewOrder must contain every filePath from that flow exactly once and no "
+            "filePath from another flow."
+        ),
+    }
 
-    schema = _pr_review_analysis_schema(include_semantic_graph=True)
+    schema = _pr_review_analysis_schema(input_value.semantic_graph)
     assert "semanticGraph" in schema["required"]
     assert "graphSchemaVersion" in schema["required"]
+    graph_schema = schema["properties"]["semanticGraph"]
+    relation_schema = graph_schema["properties"]["relations"]["items"]["properties"]
+    flow_schema = graph_schema["properties"]["flows"]["items"]["properties"]
+    expected_paths = [
+        "apps/app-server/src/pr-review.ts",
+        "docs/api/pr-review-api.md",
+    ]
+    assert relation_schema["fromFilePath"]["enum"] == expected_paths
+    assert relation_schema["toFilePath"]["enum"] == expected_paths
+    assert relation_schema["candidateKey"]["enum"] == [
+        None,
+        "supports:docs/api/pr-review-api.md->apps/app-server/src/pr-review.ts",
+    ]
+    assert flow_schema["candidateKey"]["enum"] == ["candidate-flow-1"]
+    assert flow_schema["reviewOrder"]["items"]["enum"] == expected_paths
 
     legacy_output = {
         "prPurpose": "비동기 분석",
@@ -532,21 +561,37 @@ def test_versioned_semantic_graph_contract_round_trip_and_role_policy(caplog) ->
 
     locked_role_changed = semantic_graph_output()
     locked_role_changed["semanticGraph"]["files"][1]["roleType"] = "api_contract"
-    invalid_outputs.append((locked_role_changed, "role_policy"))
+    invalid_outputs.append((locked_role_changed, "role_policy", "locked_role_changed"))
 
     unknown_file = semantic_graph_output()
     unknown_file["semanticGraph"]["files"][0]["filePath"] = "missing.ts"
-    invalid_outputs.append((unknown_file, "file_membership"))
+    invalid_outputs.append((unknown_file, "file_membership", "invalid_file"))
 
     unknown_relation_endpoint = semantic_graph_output()
     unknown_relation_endpoint["semanticGraph"]["relations"][0]["toFilePath"] = "missing.ts"
-    invalid_outputs.append((unknown_relation_endpoint, "relation"))
+    invalid_outputs.append((unknown_relation_endpoint, "relation", "unknown_endpoint"))
+
+    self_relation = semantic_graph_output()
+    self_relation["semanticGraph"]["relations"][0]["toFilePath"] = self_relation["semanticGraph"][
+        "relations"
+    ][0]["fromFilePath"]
+    invalid_outputs.append((self_relation, "relation", "self_relation"))
+
+    duplicate_relation = semantic_graph_output()
+    duplicate_relation["semanticGraph"]["relations"].append(
+        dict(duplicate_relation["semanticGraph"]["relations"][0])
+    )
+    invalid_outputs.append((duplicate_relation, "relation", "duplicate_relation"))
+
+    unknown_relation_candidate = semantic_graph_output()
+    unknown_relation_candidate["semanticGraph"]["relations"][0]["candidateKey"] = "missing-relation"
+    invalid_outputs.append((unknown_relation_candidate, "relation", "unknown_candidate_key"))
 
     unknown_flow = semantic_graph_output()
     unknown_flow["semanticGraph"]["flows"][0]["candidateKey"] = "missing-flow"
-    invalid_outputs.append((unknown_flow, "flow"))
+    invalid_outputs.append((unknown_flow, "flow", "invalid_flow"))
 
-    for invalid_output, category in invalid_outputs:
+    for invalid_output, category, reason in invalid_outputs:
         caplog.clear()
         fallback = parse_pr_review_analysis_output(
             json.dumps({**legacy_output, **invalid_output}),
@@ -557,7 +602,9 @@ def test_versioned_semantic_graph_contract_round_trip_and_role_policy(caplog) ->
         fallback_payload = _serialize_analysis_result(fallback)
         assert "graphSchemaVersion" not in fallback_payload
         assert "semanticGraph" not in fallback_payload
-        assert f"pr_review_semantic_graph_fallback category={category}" in caplog.text
+        assert (
+            f"pr_review_semantic_graph_fallback category={category} reason={reason}" in caplog.text
+        )
 
 
 def test_semantic_graph_input_rejects_partial_or_unknown_contract_data() -> None:

@@ -4,7 +4,10 @@ import { useEffect, useSyncExternalStore } from "react";
 import { usePathname } from "next/navigation";
 
 import { useAuthSession } from "@/features/auth";
-import type { LiveKitMeetingRoomStatus } from "@/features/meeting/hooks/use-livekit-meeting-room";
+import type {
+  LiveKitConnectionQuality,
+  LiveKitMeetingRoomStatus
+} from "@/features/meeting/hooks/use-livekit-meeting-room";
 import { useMeetingWorkspaceData } from "@/features/meeting/hooks/use-meeting-workspace-data";
 import {
   getHeaderMeetingStatusServerSnapshot,
@@ -16,16 +19,25 @@ import { cn } from "@/lib/utils";
 
 const HEADER_MEETING_STATUS_POLL_INTERVAL_MS = 5000;
 
-function getConnectionStatusLabel(status: LiveKitMeetingRoomStatus) {
+function getConnectionStatusLabel(
+  status: LiveKitMeetingRoomStatus,
+  quality: LiveKitConnectionQuality
+) {
   switch (status) {
     case "connected":
-      return "음성 연결중";
+      if (quality === "poor") {
+        return "음성 품질 낮음";
+      }
+      if (quality === "lost") {
+        return "음성 연결 불안정";
+      }
+      return "음성 연결됨";
     case "connecting":
-      return "연결중";
+      return "음성 연결 중";
     case "reconnecting":
-      return "재연결중";
+      return "재연결 중";
     case "disconnected":
-      return "연결 끊김";
+      return "음성 연결 끊김";
     case "error":
       return "연결 실패";
     case "idle":
@@ -46,7 +58,18 @@ function getRecordingStatusLabel(status: RecordingStatus | null | undefined) {
   }
 }
 
-function getConnectionTone(status: LiveKitMeetingRoomStatus) {
+function getConnectionTone(
+  status: LiveKitMeetingRoomStatus,
+  quality: LiveKitConnectionQuality
+) {
+  if (status === "connected" && quality === "lost") {
+    return "danger";
+  }
+
+  if (status === "connected" && quality === "poor") {
+    return "warning";
+  }
+
   if (status === "connected") {
     return "success";
   }
@@ -124,6 +147,7 @@ export function HeaderMeetingStatus() {
       workspaceId
     });
   const connectionStatus = headerMeetingStatus.connectionStatus;
+  const connectionQuality = headerMeetingStatus.connectionQuality;
   const recordingStatus = isMeetingRoute
     ? headerMeetingStatus.recordingStatus
     : currentRecording?.status;
@@ -145,10 +169,12 @@ export function HeaderMeetingStatus() {
       aria-label="회의 상태"
       className="flex min-w-0 shrink-0 flex-nowrap items-center justify-end gap-2"
     >
-      <StatusIndicator
-        label={getConnectionStatusLabel(connectionStatus)}
-        tone={getConnectionTone(connectionStatus)}
-      />
+      {headerMeetingStatus.hasConnectionSession ? (
+        <StatusIndicator
+          label={getConnectionStatusLabel(connectionStatus, connectionQuality)}
+          tone={getConnectionTone(connectionStatus, connectionQuality)}
+        />
+      ) : null}
       <StatusIndicator
         label={getRecordingStatusLabel(recordingStatus)}
         tone={getRecordingTone(recordingStatus)}

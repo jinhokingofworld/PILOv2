@@ -221,7 +221,9 @@ DB migration과 schema 검증을 같은 PR에 포함한다.
 
 - [x] strict schema validation과 serializer 테스트가 통과한다.
 - [x] 후보 graph 보강 성공과 invalid output 테스트가 통과한다.
-- [ ] 없는 파일, 중복 relation, 과도한 edge output을 거부한다.
+- [x] 없는 파일, self/중복 relation과 존재하지 않는 candidate key output을 거부한다.
+- [ ] 과도한 edge output을 App Server 제한으로 정규화한다.
+- [x] Graph fallback 로그가 raw path 없이 category와 세부 reason code를 기록한다.
 - [ ] Python format/lint/test와 image build가 통과한다.
 
 ### Frontend

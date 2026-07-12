@@ -1,7 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ConnectionState, Room, RoomEvent, Track } from "livekit-client";
+import {
+  ConnectionQuality,
+  ConnectionState,
+  Room,
+  RoomEvent,
+  Track
+} from "livekit-client";
 import type {
   Participant as LiveKitParticipant,
   RemoteParticipant,
@@ -18,6 +24,13 @@ export type LiveKitMeetingRoomStatus =
   | "reconnecting"
   | "disconnected"
   | "error";
+
+export type LiveKitConnectionQuality =
+  | "excellent"
+  | "good"
+  | "poor"
+  | "lost"
+  | "unknown";
 
 type AttachedRemoteAudio = {
   element: HTMLMediaElement;
@@ -46,6 +59,23 @@ function mapConnectionState(state: ConnectionState): LiveKitMeetingRoomStatus {
   }
 }
 
+function mapConnectionQuality(
+  quality: ConnectionQuality
+): LiveKitConnectionQuality {
+  switch (quality) {
+    case ConnectionQuality.Excellent:
+      return "excellent";
+    case ConnectionQuality.Good:
+      return "good";
+    case ConnectionQuality.Poor:
+      return "poor";
+    case ConnectionQuality.Lost:
+      return "lost";
+    case ConnectionQuality.Unknown:
+      return "unknown";
+  }
+}
+
 export function useLiveKitMeetingRoom() {
   const roomRef = useRef<Room | null>(null);
   const attachedRemoteAudioRef = useRef<Map<string, AttachedRemoteAudio>>(
@@ -55,6 +85,8 @@ export function useLiveKitMeetingRoom() {
   const [activeSpeakerIdentities, setActiveSpeakerIdentities] = useState<
     Set<string>
   >(new Set());
+  const [connectionQuality, setConnectionQuality] =
+    useState<LiveKitConnectionQuality>("unknown");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isMicrophoneEnabled, setIsMicrophoneEnabled] = useState(false);
   const [roomName, setRoomName] = useState<string | null>(null);
@@ -127,6 +159,7 @@ export function useLiveKitMeetingRoom() {
     setErrorMessage(null);
     setIsMicrophoneEnabled(false);
     setRoomName(null);
+    setConnectionQuality("unknown");
     setStatus("idle");
   }, [detachAllRemoteAudio]);
 
@@ -138,15 +171,23 @@ export function useLiveKitMeetingRoom() {
       roomRef.current = room;
       setErrorMessage(null);
       setRoomName(livekit.livekitRoomName);
+      setConnectionQuality("unknown");
       setStatus("connecting");
 
       const handleConnectionStateChanged = (nextState: ConnectionState) => {
+        if (roomRef.current !== room) {
+          return;
+        }
         setStatus(mapConnectionState(nextState));
       };
       const handleDisconnected = () => {
+        if (roomRef.current !== room) {
+          return;
+        }
         detachAllRemoteAudio();
         setActiveSpeakerIdentities(new Set());
         setIsMicrophoneEnabled(false);
+        setConnectionQuality("unknown");
         setStatus("disconnected");
       };
       const handleActiveSpeakersChanged = (
@@ -170,15 +211,37 @@ export function useLiveKitMeetingRoom() {
       ) => {
         detachRemoteAudio(track);
       };
+      const handleConnectionQualityChanged = (
+        quality: ConnectionQuality,
+        participant: LiveKitParticipant
+      ) => {
+        if (
+          roomRef.current !== room ||
+          participant.identity !== room.localParticipant.identity
+        ) {
+          return;
+        }
+        setConnectionQuality(mapConnectionQuality(quality));
+      };
 
       room
         .on(RoomEvent.ConnectionStateChanged, handleConnectionStateChanged)
         .on(RoomEvent.Disconnected, handleDisconnected)
-        .on(RoomEvent.Reconnecting, () => setStatus("reconnecting"))
-        .on(RoomEvent.Reconnected, () => setStatus("connected"))
+        .on(RoomEvent.Reconnecting, () => {
+          if (roomRef.current === room) {
+            setConnectionQuality("unknown");
+            setStatus("reconnecting");
+          }
+        })
+        .on(RoomEvent.Reconnected, () => {
+          if (roomRef.current === room) {
+            setStatus("connected");
+          }
+        })
         .on(RoomEvent.ActiveSpeakersChanged, handleActiveSpeakersChanged)
         .on(RoomEvent.TrackSubscribed, handleTrackSubscribed)
-        .on(RoomEvent.TrackUnsubscribed, handleTrackUnsubscribed);
+        .on(RoomEvent.TrackUnsubscribed, handleTrackUnsubscribed)
+        .on(RoomEvent.ConnectionQualityChanged, handleConnectionQualityChanged);
 
       try {
         await room.connect(livekit.livekitUrl, livekit.livekitToken);
@@ -197,6 +260,7 @@ export function useLiveKitMeetingRoom() {
         setErrorMessage(getSafeLiveKitErrorMessage());
         setIsMicrophoneEnabled(false);
         setRoomName(null);
+        setConnectionQuality("unknown");
         setStatus("error");
         throw error;
       }
@@ -232,8 +296,10 @@ export function useLiveKitMeetingRoom() {
   return {
     activeSpeakerIdentities,
     connect,
+    connectionQuality,
     disconnect,
     errorMessage,
+    hasActiveSession: roomName !== null,
     isConnected: status === "connected",
     isConnecting: status === "connecting" || status === "reconnecting",
     isMicrophoneEnabled,
