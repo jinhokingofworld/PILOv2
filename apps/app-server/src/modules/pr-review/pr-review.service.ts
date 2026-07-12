@@ -1181,7 +1181,7 @@ export class PrReviewService {
         };
       }
 
-      await this.insertReviewFlow(
+      await this.insertReviewGraph(
         transaction,
         lockedJob.review_session_id,
         files,
@@ -3830,52 +3830,151 @@ export class PrReviewService {
     return job;
   }
 
-  private async insertReviewFlow(
+  private async insertReviewGraph(
     transaction: DatabaseTransaction,
     sessionId: string,
     files: PrReviewGithubChangedFile[],
     analysis: PrReviewAnalysisResult
   ): Promise<void> {
-    const flow = await transaction.queryOne<ReviewFlowRow>(
-      `
-        INSERT INTO review_flows (
-          session_id,
-          title,
-          description,
-          sort_order
-        )
-        VALUES ($1, $2, $3, 1)
-        RETURNING id
-      `,
-      [sessionId, analysis.flowTitle, analysis.flowDescription]
-    );
-
-    if (!flow) {
-      throw badRequest("Review flow could not be created");
+    const semanticGraph = analysis.semanticGraph;
+    if (!semanticGraph) {
+      throw badRequest("Validated semantic graph is required");
     }
+    const graphFileByPath = new Map(
+      semanticGraph.files.map((file) => [file.filePath, file])
+    );
+    const metadataByPath = new Map(
+      analysis.files.map((file) => [file.filePath, file])
+    );
+    const reviewFileByPath = new Map<string, ReviewFileRow>();
 
-    for (const [index, file] of files.entries()) {
-      const metadata = analysis.files[index];
+    for (const file of files) {
+      const metadata = metadataByPath.get(file.filePath);
+      const graphFile = graphFileByPath.get(file.filePath);
+      if (!metadata || !graphFile) {
+        throw badRequest("Validated semantic graph files must match changed files");
+      }
       const reviewFile = await this.insertReviewFile(
         transaction,
         sessionId,
         file,
-        metadata
+        metadata,
+        graphFile.roleType
       );
+      reviewFileByPath.set(file.filePath, reviewFile);
+    }
 
-      await transaction.queryOne<{ id: string }>(
+    const graphFlows =
+      semanticGraph.flows.length > 0
+        ? semanticGraph.flows
+        : [
+            {
+              candidateKey: "empty-pr-fallback",
+              title: analysis.flowTitle,
+              description: "변경 파일이 없어 리뷰할 파일이 없습니다.",
+              reviewOrder: []
+            }
+          ];
+    const flowByKey = new Map<string, ReviewFlowRow>();
+    const membershipIdByFlowAndPath = new Map<string, string>();
+
+    for (const [flowIndex, graphFlow] of graphFlows.entries()) {
+      const flow = await transaction.queryOne<ReviewFlowRow>(
         `
-          INSERT INTO review_flow_files (
+          INSERT INTO review_flows (
             session_id,
-            flow_id,
-            review_file_id,
-            workflow_order
+            title,
+            description,
+            sort_order
           )
           VALUES ($1, $2, $3, $4)
           RETURNING id
         `,
-        [sessionId, flow.id, reviewFile.id, index + 1]
+        [
+          sessionId,
+          graphFlow.title,
+          graphFlow.description,
+          flowIndex + 1
+        ]
       );
+
+      if (!flow) {
+        throw badRequest("Review flow could not be created");
+      }
+      flowByKey.set(graphFlow.candidateKey, flow);
+
+      for (const [fileIndex, filePath] of graphFlow.reviewOrder.entries()) {
+        const reviewFile = reviewFileByPath.get(filePath);
+        if (!reviewFile) {
+          throw badRequest("Review flow file must match a changed file");
+        }
+        const membership = await transaction.queryOne<{ id: string }>(
+          `
+            INSERT INTO review_flow_files (
+              session_id,
+              flow_id,
+              review_file_id,
+              workflow_order
+            )
+            VALUES ($1, $2, $3, $4)
+            RETURNING id
+          `,
+          [sessionId, flow.id, reviewFile.id, fileIndex + 1]
+        );
+        if (!membership) {
+          throw badRequest("Review flow file could not be created");
+        }
+        membershipIdByFlowAndPath.set(
+          this.semanticGraphMembershipKey(graphFlow.candidateKey, filePath),
+          membership.id
+        );
+      }
+    }
+
+    for (const relation of semanticGraph.relations) {
+      const flow = flowByKey.get(relation.flowKey);
+      const fromMembershipId = membershipIdByFlowAndPath.get(
+        this.semanticGraphMembershipKey(
+          relation.flowKey,
+          relation.fromFilePath
+        )
+      );
+      const toMembershipId = membershipIdByFlowAndPath.get(
+        this.semanticGraphMembershipKey(relation.flowKey, relation.toFilePath)
+      );
+      if (!flow || !fromMembershipId || !toMembershipId) {
+        throw badRequest("Review flow relation must use files from the same flow");
+      }
+
+      const created = await transaction.queryOne<{ id: string }>(
+        `
+          INSERT INTO review_flow_relations (
+            session_id,
+            flow_id,
+            from_review_flow_file_id,
+            to_review_flow_file_id,
+            relation_type,
+            source,
+            confidence,
+            reason
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+          RETURNING id
+        `,
+        [
+          sessionId,
+          flow.id,
+          fromMembershipId,
+          toMembershipId,
+          relation.relationType,
+          relation.source,
+          relation.confidence,
+          relation.reason
+        ]
+      );
+      if (!created) {
+        throw badRequest("Review flow relation could not be created");
+      }
     }
   }
 
@@ -3883,7 +3982,8 @@ export class PrReviewService {
     transaction: DatabaseTransaction,
     sessionId: string,
     file: PrReviewGithubChangedFile,
-    metadata: ReviewFileMetadata
+    metadata: ReviewFileMetadata,
+    roleType: PrReviewFileRoleType
   ): Promise<ReviewFileRow> {
     const reviewFile = await transaction.queryOne<ReviewFileRow>(
       `
@@ -3899,6 +3999,7 @@ export class PrReviewService {
           is_large_diff,
           github_file_url,
           file_role,
+          role_type,
           risk_level,
           change_reason,
           change_summary,
@@ -3919,7 +4020,8 @@ export class PrReviewService {
           $12,
           $13,
           $14,
-          $15::jsonb
+          $15,
+          $16::jsonb
         )
         RETURNING id
       `,
@@ -3935,6 +4037,7 @@ export class PrReviewService {
         file.isLargeDiff,
         file.githubFileUrl,
         metadata.fileRole,
+        roleType,
         metadata.riskLevel,
         metadata.changeReason,
         metadata.changeSummary,
@@ -3947,6 +4050,10 @@ export class PrReviewService {
     }
 
     return reviewFile;
+  }
+
+  private semanticGraphMembershipKey(flowKey: string, filePath: string): string {
+    return `${flowKey}\u0000${filePath}`;
   }
 
   private findChangedFileForReviewFile(

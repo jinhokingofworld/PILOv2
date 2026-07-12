@@ -171,15 +171,15 @@ DB migration과 schema 검증을 같은 PR에 포함한다.
 - [x] relation/Flow별 최대 edge 수와 전체 edge 수를 제한한다.
 - [x] confidence가 기준보다 낮은 relation을 제거한다.
 - [x] 순환 relation을 허용할 type과 리뷰 순서 cycle을 구분한다.
-- [ ] 검증 결과를 session, Flow, file membership, relation과 함께 원자 저장한다.
-- [ ] 동일 Job 재전달과 result 재전송에도 relation이 중복 생성되지 않게 한다.
+- [x] 검증 결과를 session, Flow, file membership, relation과 함께 원자 저장한다.
+- [x] 동일 Job 재전달과 result 재전송에도 relation이 중복 생성되지 않게 한다.
 - [x] invalid AI output은 안전한 실패로 처리하고 부분 graph를 저장하지 않는다.
 
 완료 기준:
 
 - [x] Worker와 App Server가 같은 versioned graph schema를 사용한다.
-- [ ] AI가 잘못된 edge를 반환해도 저장 graph는 서버 제약을 만족한다.
-- [ ] stale head SHA 결과가 Flow/file/relation을 저장하지 않는다.
+- [x] AI가 잘못된 edge를 반환해도 저장 graph는 서버 제약을 만족한다.
+- [x] stale head SHA 결과가 Flow/file/relation을 저장하지 않는다.
 
 ## 3-D Lane/Cluster Layout and Edge UX
 
@@ -213,7 +213,7 @@ DB migration과 schema 검증을 같은 PR에 포함한다.
 - [ ] migration apply와 rollback 검토를 완료한다.
 - [ ] 같은 session/Flow에 속하지 않은 relation insert를 거부한다.
 - [x] duplicate, self edge와 invalid type을 거부한다.
-- [ ] semantic graph 원자 저장과 idempotency 테스트가 통과한다.
+- [x] semantic graph 원자 저장과 idempotency 테스트가 통과한다.
 - [ ] 기존 session 순차 edge fallback 테스트가 통과한다.
 - [ ] `format:check`, `lint`, `build`, PR Review focused test가 통과한다.
 

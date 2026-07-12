@@ -57,23 +57,38 @@ function resultBody(overrides = {}) {
 }
 
 class FakeTransaction {
-  constructor(job, { throwOnReviewFile = false } = {}) {
+  constructor(job, { throwOnReviewFile = false, throwOnRelation = false } = {}) {
     this.job = job;
     this.throwOnReviewFile = throwOnReviewFile;
+    this.throwOnRelation = throwOnRelation;
     this.calls = [];
+    this.flowCount = 0;
     this.reviewFileCount = 0;
+    this.membershipCount = 0;
+    this.relationCount = 0;
   }
 
   async queryOne(text, values = []) {
     this.calls.push({ text, values });
     if (text.includes("FROM pr_review_analysis_jobs")) return this.job;
-    if (text.includes("INSERT INTO review_flows")) return { id: "flow-id" };
+    if (text.includes("INSERT INTO review_flows")) {
+      this.flowCount += 1;
+      return { id: `flow-${this.flowCount}` };
+    }
     if (text.includes("INSERT INTO review_files")) {
       this.reviewFileCount += 1;
       if (this.throwOnReviewFile) throw new Error("review file insert failed");
       return { id: `file-${this.reviewFileCount}` };
     }
-    if (text.includes("INSERT INTO review_flow_files")) return { id: "flow-file-id" };
+    if (text.includes("INSERT INTO review_flow_files")) {
+      this.membershipCount += 1;
+      return { id: `membership-${this.membershipCount}` };
+    }
+    if (text.includes("INSERT INTO review_flow_relations")) {
+      if (this.throwOnRelation) throw new Error("relation insert failed");
+      this.relationCount += 1;
+      return { id: `relation-${this.relationCount}` };
+    }
     if (text.includes("SET status = 'succeeded'")) return { id: JOB_ID };
     if (text.includes("SET status = 'failed'")) return { id: JOB_ID };
     if (text.includes("SET status = 'reviewing'")) return { id: SESSION_ID };
@@ -116,8 +131,9 @@ class FakeDatabase {
 }
 
 class FakeGithubDependency {
-  constructor({ headSha = HEAD_SHA } = {}) {
+  constructor({ headSha = HEAD_SHA, files = null } = {}) {
     this.headSha = headSha;
+    this.files = files ?? defaultChangedFiles();
     this.detailCalls = [];
     this.fileCalls = [];
   }
@@ -139,9 +155,9 @@ class FakeGithubDependency {
       baseBranch: "dev",
       headSha: this.headSha,
       baseSha: "base-sha",
-      changedFilesCount: 1,
-      additions: 12,
-      deletions: 3,
+      changedFilesCount: this.files.length,
+      additions: this.files.reduce((sum, file) => sum + file.additions, 0),
+      deletions: this.files.reduce((sum, file) => sum + file.deletions, 0),
       commitsCount: 2,
       htmlUrl: "https://github.com/Developer-EJ/PILO/pull/24"
     };
@@ -149,26 +165,249 @@ class FakeGithubDependency {
 
   async getPullRequestChangedFiles(...args) {
     this.fileCalls.push(args);
-    return [
-      {
-        filePath: "apps/app-server/src/pr-review.ts",
-        previousFilePath: null,
-        fileName: "pr-review.ts",
-        fileStatus: "modified",
-        additions: 12,
-        deletions: 3,
-        isBinary: false,
-        isLargeDiff: false,
-        githubFileUrl: "https://github.com/Developer-EJ/PILO",
-        patch: "+export const asyncReview = true;",
-        patchSizeBytes: 34
-      }
-    ];
+    return this.files;
   }
+}
+
+function defaultChangedFiles() {
+  return [
+    {
+      filePath: "apps/app-server/src/pr-review.ts",
+      previousFilePath: null,
+      fileName: "pr-review.ts",
+      fileStatus: "modified",
+      additions: 12,
+      deletions: 3,
+      isBinary: false,
+      isLargeDiff: false,
+      githubFileUrl: "https://github.com/Developer-EJ/PILO",
+      patch: "+export const asyncReview = true;",
+      patchSizeBytes: 34
+    }
+  ];
+}
+
+function semanticChangedFiles() {
+  return [
+    {
+      filePath: "src/user.controller.ts",
+      previousFilePath: null,
+      fileName: "user.controller.ts",
+      fileStatus: "modified",
+      additions: 2,
+      deletions: 0,
+      isBinary: false,
+      isLargeDiff: false,
+      githubFileUrl: "https://github.com/Developer-EJ/PILO/user.controller.ts",
+      patch: '+import { UserService } from "./user.service";',
+      patchSizeBytes: 52
+    },
+    {
+      filePath: "src/user.service.ts",
+      previousFilePath: null,
+      fileName: "user.service.ts",
+      fileStatus: "modified",
+      additions: 3,
+      deletions: 1,
+      isBinary: false,
+      isLargeDiff: false,
+      githubFileUrl: "https://github.com/Developer-EJ/PILO/user.service.ts",
+      patch: "+export class UserService {}",
+      patchSizeBytes: 28
+    },
+    {
+      filePath: "docs/users.md",
+      previousFilePath: null,
+      fileName: "users.md",
+      fileStatus: "modified",
+      additions: 1,
+      deletions: 0,
+      isBinary: false,
+      isLargeDiff: false,
+      githubFileUrl: "https://github.com/Developer-EJ/PILO/users.md",
+      patch: null,
+      patchSizeBytes: 0
+    }
+  ];
+}
+
+function semanticResultBody() {
+  const body = resultBody();
+  body.analysis.files = semanticChangedFiles().map((file) => ({
+    filePath: file.filePath,
+    fileRole: "AI 분석 역할",
+    riskLevel: "medium",
+    changeReason: "Semantic Graph 저장 fixture입니다.",
+    changeSummary: `${file.additions}줄 추가`,
+    reviewPoints: ["Flow와 relation 저장을 확인합니다."]
+  }));
+  body.analysis.graphSchemaVersion = "pr-review-semantic-graph:v1";
+  body.analysis.semanticGraph = {
+    files: [
+      {
+        filePath: "src/user.controller.ts",
+        roleType: "entry",
+        roleReason: "HTTP 진입점입니다."
+      },
+      {
+        filePath: "src/user.service.ts",
+        roleType: "core_logic",
+        roleReason: "핵심 사용자 로직입니다."
+      },
+      {
+        filePath: "docs/users.md",
+        roleType: "support",
+        roleReason: "사용자 기능 문서입니다."
+      }
+    ],
+    relations: [
+      {
+        candidateKey:
+          "depends_on:src/user.controller.ts->src/user.service.ts",
+        fromFilePath: "src/user.controller.ts",
+        toFilePath: "src/user.service.ts",
+        relationType: "depends_on",
+        reason: "Controller가 UserService를 사용합니다."
+      }
+    ],
+    flows: [
+      {
+        candidateKey: "candidate-flow-1",
+        title: "사용자 API 변경",
+        description: "Controller에서 service 순서로 검토합니다.",
+        reviewOrder: ["src/user.controller.ts", "src/user.service.ts"]
+      },
+      {
+        candidateKey: "candidate-flow-fallback",
+        title: "사용자 문서 변경",
+        description: "독립 문서를 확인합니다.",
+        reviewOrder: ["docs/users.md"]
+      }
+    ]
+  };
+  return body;
 }
 
 function createService(database, github) {
   return new PrReviewService(database, {}, github, {}, {});
+}
+
+{
+  const database = new FakeDatabase(jobRow());
+  const result = await createService(
+    database,
+    new FakeGithubDependency({ files: semanticChangedFiles() })
+  ).storeAnalysisJobResult(JOB_ID, semanticResultBody());
+
+  assert.equal(result.status, "reviewing");
+  assert.equal(result.persisted, true);
+  const calls = database.transactionState.calls;
+  const flowCalls = calls.filter((call) =>
+    call.text.includes("INSERT INTO review_flows")
+  );
+  const fileCalls = calls.filter((call) =>
+    call.text.includes("INSERT INTO review_files")
+  );
+  const membershipCalls = calls.filter((call) =>
+    call.text.includes("INSERT INTO review_flow_files")
+  );
+  const relationCalls = calls.filter((call) =>
+    call.text.includes("INSERT INTO review_flow_relations")
+  );
+
+  assert.deepEqual(
+    flowCalls.map((call) => call.values),
+    [
+      [SESSION_ID, "사용자 API 변경", "Controller에서 service 순서로 검토합니다.", 1],
+      [SESSION_ID, "사용자 문서 변경", "독립 문서를 확인합니다.", 2]
+    ]
+  );
+  assert.equal(fileCalls.length, 3);
+  assert.deepEqual(
+    fileCalls.map((call) => call.values[11]),
+    ["entry", "core_logic", "support"]
+  );
+  assert.deepEqual(
+    membershipCalls.map((call) => call.values),
+    [
+      [SESSION_ID, "flow-1", "file-1", 1],
+      [SESSION_ID, "flow-1", "file-2", 2],
+      [SESSION_ID, "flow-2", "file-3", 1]
+    ]
+  );
+  assert.deepEqual(relationCalls.map((call) => call.values), [
+    [
+      SESSION_ID,
+      "flow-1",
+      "membership-1",
+      "membership-2",
+      "depends_on",
+      "hybrid",
+      90,
+      "Controller가 UserService를 사용합니다."
+    ]
+  ]);
+}
+
+{
+  const database = new FakeDatabase(jobRow(), { throwOnRelation: true });
+  await assert.rejects(
+    () =>
+      createService(
+        database,
+        new FakeGithubDependency({ files: semanticChangedFiles() })
+      ).storeAnalysisJobResult(JOB_ID, semanticResultBody()),
+    /relation insert failed/
+  );
+  assert.equal(database.rolledBack, true);
+  assert.equal(
+    database.transactionState.calls.some((call) =>
+      call.text.includes("SET status = 'succeeded'")
+    ),
+    false
+  );
+  assert.equal(
+    database.transactionState.calls.some((call) =>
+      call.text.includes("SET status = 'reviewing'")
+    ),
+    false
+  );
+}
+
+{
+  const database = new FakeDatabase(jobRow());
+  const body = resultBody();
+  body.analysis.files = [];
+  const result = await createService(
+    database,
+    new FakeGithubDependency({ files: [] })
+  ).storeAnalysisJobResult(JOB_ID, body);
+
+  assert.equal(result.status, "reviewing");
+  const calls = database.transactionState.calls;
+  const flowCalls = calls.filter((call) =>
+    call.text.includes("INSERT INTO review_flows")
+  );
+  assert.deepEqual(flowCalls.map((call) => call.values), [
+    [
+      SESSION_ID,
+      "PR 변경 파일 리뷰",
+      "변경 파일이 없어 리뷰할 파일이 없습니다.",
+      1
+    ]
+  ]);
+  assert.equal(
+    calls.some((call) => call.text.includes("INSERT INTO review_files")),
+    false
+  );
+  assert.equal(
+    calls.some((call) => call.text.includes("INSERT INTO review_flow_files")),
+    false
+  );
+  assert.equal(
+    calls.some((call) => call.text.includes("INSERT INTO review_flow_relations")),
+    false
+  );
 }
 
 {
@@ -250,7 +489,7 @@ function createService(database, github) {
   const github = new FakeGithubDependency();
   const result = await createService(database, github).storeAnalysisJobResult(
     JOB_ID,
-    resultBody()
+    semanticResultBody()
   );
 
   assert.equal(result.persisted, false);
