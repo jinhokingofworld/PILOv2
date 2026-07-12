@@ -1,4 +1,5 @@
 import type { RealtimeDatabase } from "../database/database";
+import { parseBoardRoomRef } from "./board-payload.parser";
 import type { BoardRoomRef } from "./board-types";
 
 export type BoardAccessContext = {
@@ -18,7 +19,9 @@ export function createBoardAccessService(
 ): BoardAccessService {
   return {
     async canJoinBoard(context, room) {
-      if (!context.userId || !room.workspaceId || !room.boardId) {
+      const canonicalRoom = parseBoardRoomRef(room);
+
+      if (!context.userId || !canonicalRoom) {
         return false;
       }
 
@@ -37,7 +40,7 @@ export function createBoardAccessService(
             AND b.id = $2::bigint
           LIMIT 1
         `,
-        [room.workspaceId, room.boardId, context.userId],
+        [canonicalRoom.workspaceId, canonicalRoom.boardId, context.userId],
       );
 
       return Boolean(access);

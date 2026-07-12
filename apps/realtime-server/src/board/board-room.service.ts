@@ -3,6 +3,7 @@ import type {
   BoardAccessContext,
   BoardAccessService,
 } from "./board-access.service";
+import { parseBoardRoomRef } from "./board-payload.parser";
 import type { BoardJoinedPayload, BoardJoinPayload } from "./board-types";
 
 export type BoardRoomJoinResult =
@@ -30,7 +31,13 @@ export function createBoardRoomService({
 }): BoardRoomService {
   return {
     async joinBoardRoom(context, payload) {
-      const canJoin = await accessService.canJoinBoard(context, payload);
+      const room = parseBoardRoomRef(payload);
+
+      if (!room) {
+        return { joined: false, reason: "forbidden" };
+      }
+
+      const canJoin = await accessService.canJoinBoard(context, room);
 
       if (!canJoin) {
         return { joined: false, reason: "forbidden" };
@@ -39,10 +46,10 @@ export function createBoardRoomService({
       return {
         joined: true,
         payload: {
-          boardId: payload.boardId,
-          workspaceId: payload.workspaceId,
+          boardId: room.boardId,
+          workspaceId: room.workspaceId,
         },
-        roomName: createBoardRoomName(payload),
+        roomName: createBoardRoomName(room),
       };
     },
   };
