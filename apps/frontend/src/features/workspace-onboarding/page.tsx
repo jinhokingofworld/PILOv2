@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { GitBranch, Loader2, PanelsTopLeft, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -15,6 +15,10 @@ import { createGithubOnboardingReturnUrl, getGithubCallbackErrorMessage, readGit
 type Stage = "create" | "github" | "installation" | "syncing" | "repositories" | "projects";
 
 export function WorkspaceCreationPage() {
+  return <Suspense fallback={<WorkspaceCenteredStatus icon={<Loader2 className="animate-spin" />} text="workspace를 준비하는 중입니다." />}><WorkspaceCreationPageContent /></Suspense>;
+}
+
+function WorkspaceCreationPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const callback = useMemo(() => readGithubOnboardingCallback(new URLSearchParams(searchParams.toString())), [searchParams]);
