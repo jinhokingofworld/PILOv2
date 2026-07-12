@@ -48,6 +48,11 @@ import type {
   PrReviewSessionStatus
 } from "./types";
 import { PrReviewAnalysisJobPublisherService } from "./pr-review-analysis-job-publisher.service";
+import {
+  buildPrReviewSemanticGraphHandoff,
+  PR_REVIEW_SEMANTIC_GRAPH_SCHEMA_VERSION,
+  type PrReviewSemanticGraphHandoffPayload
+} from "./pr-review-semantic-contract";
 
 interface PullRequestRow extends QueryResultRow {
   id: string;
@@ -366,6 +371,7 @@ export interface PrReviewAnalysisInputPayload {
   reviewSessionId: string;
   workspaceId: string;
   headSha: string;
+  graphSchemaVersion: typeof PR_REVIEW_SEMANTIC_GRAPH_SCHEMA_VERSION;
   pullRequest: {
     prNumber: number;
     title: string;
@@ -393,6 +399,7 @@ export interface PrReviewAnalysisInputPayload {
     isLargeDiff: boolean;
     patch: string | null;
   }>;
+  semanticGraph: PrReviewSemanticGraphHandoffPayload;
 }
 
 export interface PrReviewAnalysisJobCompletionPayload {
@@ -1029,11 +1036,24 @@ export class PrReviewService {
       throw conflictError("PR Review analysis job head SHA is stale");
     }
 
+    const changedFiles = files.map((file) => ({
+      filePath: file.filePath,
+      previousFilePath: file.previousFilePath,
+      fileName: file.fileName,
+      fileStatus: file.fileStatus,
+      additions: file.additions,
+      deletions: file.deletions,
+      isBinary: file.isBinary,
+      isLargeDiff: file.isLargeDiff,
+      patch: file.patch
+    }));
+
     return {
       jobId: job.id,
       reviewSessionId: job.review_session_id,
       workspaceId: job.workspace_id,
       headSha: job.head_sha,
+      graphSchemaVersion: PR_REVIEW_SEMANTIC_GRAPH_SCHEMA_VERSION,
       pullRequest: {
         prNumber: detail.prNumber,
         title: detail.title,
@@ -1050,17 +1070,8 @@ export class PrReviewService {
         deletions: detail.deletions,
         commitsCount: detail.commitsCount
       },
-      files: files.map((file) => ({
-        filePath: file.filePath,
-        previousFilePath: file.previousFilePath,
-        fileName: file.fileName,
-        fileStatus: file.fileStatus,
-        additions: file.additions,
-        deletions: file.deletions,
-        isBinary: file.isBinary,
-        isLargeDiff: file.isLargeDiff,
-        patch: file.patch
-      }))
+      files: changedFiles,
+      semanticGraph: buildPrReviewSemanticGraphHandoff(changedFiles)
     };
   }
 

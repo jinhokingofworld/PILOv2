@@ -10,6 +10,16 @@ from urllib.request import Request, urlopen
 from uuid import UUID
 
 from app.meeting_report_processor import InfrastructureError
+from app.pr_review_semantic_graph import (
+    PR_REVIEW_SEMANTIC_GRAPH_SCHEMA_VERSION,
+    SemanticGraphInput,
+    SemanticGraphOutput,
+    parse_semantic_graph_input,
+    parse_semantic_graph_output,
+    semantic_graph_output_schema,
+    semantic_graph_prompt_input,
+    serialize_semantic_graph_output,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -94,6 +104,7 @@ class PrReviewAnalysisInput:
     job: PrReviewAnalysisJob
     pull_request: PrReviewPullRequestInput
     files: tuple[PrReviewChangedFileInput, ...]
+    semantic_graph: SemanticGraphInput | None = None
 
 
 @dataclass(frozen=True)
@@ -115,6 +126,7 @@ class PrReviewAnalysisResult:
     flow_title: str
     flow_description: str
     files: tuple[PrReviewAnalysisFileResult, ...]
+    semantic_graph: SemanticGraphOutput | None = None
 
 
 @dataclass(frozen=True)
@@ -373,7 +385,9 @@ class OpenAiPrReviewAnalysisClient:
                         "type": "json_schema",
                         "name": "pr_review_analysis",
                         "strict": True,
-                        "schema": _pr_review_analysis_schema(),
+                        "schema": _pr_review_analysis_schema(
+                            include_semantic_graph=input_value.semantic_graph is not None
+                        ),
                     }
                 },
             )
@@ -384,7 +398,11 @@ class OpenAiPrReviewAnalysisClient:
 
         output_text = _extract_response_text(response)
         try:
-            return parse_pr_review_analysis_output(output_text, input_value.files)
+            return parse_pr_review_analysis_output(
+                output_text,
+                input_value.files,
+                input_value.semantic_graph,
+            )
         except ValueError as error:
             raise PrReviewAnalysisOutputError(
                 "OpenAI PR Review analysis output is invalid"
@@ -416,17 +434,20 @@ def parse_pr_review_analysis_input_payload(
     paths = [file.file_path for file in files]
     if len(paths) != len(set(paths)):
         raise ValueError("Duplicate input file path")
+    semantic_graph = parse_semantic_graph_input(data, set(paths))
 
     return PrReviewAnalysisInput(
         job=expected_job,
         pull_request=pull_request,
         files=files,
+        semantic_graph=semantic_graph,
     )
 
 
 def parse_pr_review_analysis_output(
     output_text: str,
     input_files: Iterable[PrReviewChangedFileInput],
+    semantic_graph_input: SemanticGraphInput | None = None,
 ) -> PrReviewAnalysisResult:
     try:
         value = json.loads(output_text)
@@ -466,6 +487,8 @@ def parse_pr_review_analysis_output(
     if seen_paths != set(files_by_path):
         raise ValueError("Analysis output omitted an input file")
 
+    semantic_graph = parse_semantic_graph_output(value, semantic_graph_input)
+
     return PrReviewAnalysisResult(
         pr_purpose=_require_non_empty_string(value, "prPurpose"),
         change_summary=_require_string_list(value, "changeSummary", allow_empty=False),
@@ -474,6 +497,7 @@ def parse_pr_review_analysis_output(
         flow_title=_require_non_empty_string(value, "flowTitle"),
         flow_description=_require_non_empty_string(value, "flowDescription"),
         files=tuple(normalized_files),
+        semantic_graph=semantic_graph,
     )
 
 
@@ -546,7 +570,7 @@ def _build_prompt_input(input_value: PrReviewAnalysisInput) -> dict[str, object]
         )
 
     pull_request = input_value.pull_request
-    return {
+    prompt: dict[str, object] = {
         "task": (
             "Analyze this pull request for an MVP PR review workflow. Keep every file in the "
             "response and match each file by filePath."
@@ -571,60 +595,76 @@ def _build_prompt_input(input_value: PrReviewAnalysisInput) -> dict[str, object]
         },
         "files": files,
     }
+    if input_value.semantic_graph is not None:
+        prompt["semanticGraph"] = semantic_graph_prompt_input(input_value.semantic_graph)
+    return prompt
 
 
-def _pr_review_analysis_schema() -> dict[str, object]:
-    return {
-        "type": "object",
-        "additionalProperties": False,
-        "required": [
-            "prPurpose",
-            "changeSummary",
-            "recommendedReviewOrder",
-            "cautionPoints",
-            "flowTitle",
-            "flowDescription",
-            "files",
-        ],
-        "properties": {
-            "prPurpose": {"type": "string"},
-            "changeSummary": {"type": "array", "items": {"type": "string"}},
-            "recommendedReviewOrder": {"type": "string"},
-            "cautionPoints": {"type": "array", "items": {"type": "string"}},
-            "flowTitle": {"type": "string"},
-            "flowDescription": {"type": "string"},
-            "files": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": [
-                        "filePath",
-                        "fileRole",
-                        "riskLevel",
-                        "changeReason",
-                        "changeSummary",
-                        "reviewPoints",
-                    ],
-                    "properties": {
-                        "filePath": {"type": "string"},
-                        "fileRole": {"type": "string"},
-                        "riskLevel": {
-                            "type": "string",
-                            "enum": ["high", "medium", "low", "unknown"],
-                        },
-                        "changeReason": {"type": "string"},
-                        "changeSummary": {"type": "string"},
-                        "reviewPoints": {"type": "array", "items": {"type": "string"}},
+def _pr_review_analysis_schema(*, include_semantic_graph: bool = False) -> dict[str, object]:
+    required = [
+        "prPurpose",
+        "changeSummary",
+        "recommendedReviewOrder",
+        "cautionPoints",
+        "flowTitle",
+        "flowDescription",
+        "files",
+    ]
+    properties: dict[str, object] = {
+        "prPurpose": {"type": "string"},
+        "changeSummary": {"type": "array", "items": {"type": "string"}},
+        "recommendedReviewOrder": {"type": "string"},
+        "cautionPoints": {"type": "array", "items": {"type": "string"}},
+        "flowTitle": {"type": "string"},
+        "flowDescription": {"type": "string"},
+        "files": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": [
+                    "filePath",
+                    "fileRole",
+                    "riskLevel",
+                    "changeReason",
+                    "changeSummary",
+                    "reviewPoints",
+                ],
+                "properties": {
+                    "filePath": {"type": "string"},
+                    "fileRole": {"type": "string"},
+                    "riskLevel": {
+                        "type": "string",
+                        "enum": ["high", "medium", "low", "unknown"],
+                    },
+                    "changeReason": {"type": "string"},
+                    "changeSummary": {"type": "string"},
+                    "reviewPoints": {
+                        "type": "array",
+                        "items": {"type": "string"},
                     },
                 },
             },
         },
     }
+    if include_semantic_graph:
+        required.extend(["graphSchemaVersion", "semanticGraph"])
+        properties["graphSchemaVersion"] = {
+            "type": "string",
+            "enum": [PR_REVIEW_SEMANTIC_GRAPH_SCHEMA_VERSION],
+        }
+        properties["semanticGraph"] = semantic_graph_output_schema()
+
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": required,
+        "properties": properties,
+    }
 
 
 def _serialize_analysis_result(analysis: PrReviewAnalysisResult) -> dict[str, object]:
-    return {
+    result: dict[str, object] = {
         "prPurpose": analysis.pr_purpose,
         "changeSummary": list(analysis.change_summary),
         "recommendedReviewOrder": analysis.recommended_review_order,
@@ -643,6 +683,10 @@ def _serialize_analysis_result(analysis: PrReviewAnalysisResult) -> dict[str, ob
             for file in analysis.files
         ],
     }
+    if analysis.semantic_graph is not None:
+        result["graphSchemaVersion"] = PR_REVIEW_SEMANTIC_GRAPH_SCHEMA_VERSION
+        result["semanticGraph"] = serialize_semantic_graph_output(analysis.semantic_graph)
+    return result
 
 
 def _read_success_data(payload: object) -> object:

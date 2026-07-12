@@ -163,10 +163,10 @@ DB migration과 schema 검증을 같은 PR에 포함한다.
 
 작업 체크리스트:
 
-- [ ] PR Review analysis strict JSON schema를 복수 Flow와 relation output으로 확장한다.
-- [ ] AI에는 deterministic 후보와 제한된 patch context만 전달한다.
-- [ ] AI가 새 file path를 발명하지 못하도록 입력 file path 집합으로 검증한다.
-- [ ] AI가 Flow 제목, 설명, relation reason과 리뷰 순서를 보강한다.
+- [x] PR Review analysis strict JSON schema를 복수 Flow와 relation output으로 확장한다.
+- [x] AI에는 deterministic 후보와 제한된 patch context만 전달한다.
+- [x] AI가 새 file path를 발명하지 못하도록 입력 file path 집합으로 검증한다.
+- [x] AI가 Flow 제목, 설명, relation reason과 리뷰 순서를 보강한다.
 - [ ] App Server validator가 self edge, 없는 파일, 중복 edge를 제거한다.
 - [ ] relation/Flow별 최대 edge 수와 전체 edge 수를 제한한다.
 - [ ] confidence가 기준보다 낮은 relation을 제거한다.
@@ -177,7 +177,7 @@ DB migration과 schema 검증을 같은 PR에 포함한다.
 
 완료 기준:
 
-- [ ] Worker와 App Server가 같은 versioned graph schema를 사용한다.
+- [x] Worker와 App Server가 같은 versioned graph schema를 사용한다.
 - [ ] AI가 잘못된 edge를 반환해도 저장 graph는 서버 제약을 만족한다.
 - [ ] stale head SHA 결과가 Flow/file/relation을 저장하지 않는다.
 
@@ -219,8 +219,8 @@ DB migration과 schema 검증을 같은 PR에 포함한다.
 
 ### AI Worker
 
-- [ ] strict schema validation과 serializer 테스트가 통과한다.
-- [ ] 후보 graph 보강 성공과 invalid output 테스트가 통과한다.
+- [x] strict schema validation과 serializer 테스트가 통과한다.
+- [x] 후보 graph 보강 성공과 invalid output 테스트가 통과한다.
 - [ ] 없는 파일, 중복 relation, 과도한 edge output을 거부한다.
 - [ ] Python format/lint/test와 image build가 통과한다.
 
