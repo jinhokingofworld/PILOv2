@@ -16,6 +16,7 @@ from app.meeting_report_processor import (
     serialize_action_items,
 )
 from app.meeting_report_runtime import (
+    HttpMeetingReportEventPublisher,
     OpenAiMeetingReportClient,
     RuntimeSettings,
     S3RecordingStorage,
@@ -156,6 +157,25 @@ class FakeAiClient:
         )
 
 
+class FakeEventPublisher:
+    def __init__(self, should_fail: bool = False) -> None:
+        self.should_fail = should_fail
+        self.report_ids: list[str] = []
+
+    def publish(self, report_id: str) -> None:
+        self.report_ids.append(report_id)
+        if self.should_fail:
+            raise RuntimeError("event unavailable")
+
+
+class FakeHttpResponse:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, _exc_type, _exc_value, _traceback) -> None:
+        return None
+
+
 def test_parse_meeting_report_job_validates_required_payload() -> None:
     job = parse_meeting_report_job(meeting_report_job_payload())
 
@@ -212,11 +232,90 @@ def test_processor_completes_processing_report() -> None:
     assert repository.release_calls == [REPORT_ID]
 
 
+def test_processor_publishes_each_progress_and_completed_state_without_affecting_result() -> None:
+    publisher = FakeEventPublisher()
+    processor = MeetingReportProcessor(FakeRepository(), FakeStorage(), FakeAiClient(), publisher)
+
+    result = processor.process_message(meeting_report_job_payload())
+
+    assert result.reason == "completed"
+    assert publisher.report_ids == [REPORT_ID, REPORT_ID, REPORT_ID]
+
+
+def test_processor_keeps_terminal_result_when_event_publish_fails() -> None:
+    publisher = FakeEventPublisher(should_fail=True)
+    processor = MeetingReportProcessor(FakeRepository(), FakeStorage(), FakeAiClient(), publisher)
+
+    result = processor.process_message(meeting_report_job_payload())
+
+    assert result.delete_message is True
+    assert result.reason == "completed"
+
+
+def test_processor_publishes_stt_failure_state_after_storage_failure() -> None:
+    publisher = FakeEventPublisher()
+    processor = MeetingReportProcessor(
+        FakeRepository(),
+        FakeStorage(permanent_head_failure=True),
+        FakeAiClient(),
+        publisher,
+    )
+
+    result = processor.process_message(meeting_report_job_payload())
+
+    assert result.reason == "audio_unavailable"
+    assert publisher.report_ids == [REPORT_ID, REPORT_ID]
+
+
+def test_processor_publishes_llm_failure_state() -> None:
+    publisher = FakeEventPublisher()
+    processor = MeetingReportProcessor(
+        FakeRepository(),
+        FakeStorage(),
+        FakeAiClient(llm_failure=ProviderBusinessError("invalid schema")),
+        publisher,
+    )
+
+    result = processor.process_message(meeting_report_job_payload())
+
+    assert result.reason == "llm_failed"
+    assert publisher.report_ids == [REPORT_ID, REPORT_ID, REPORT_ID]
+
+
+def test_http_event_publisher_posts_callback_with_token_and_retries(monkeypatch) -> None:
+    calls = []
+
+    def fake_urlopen(request, timeout):
+        calls.append((request, timeout))
+        if len(calls) < 3:
+            raise OSError("temporary network failure")
+        return FakeHttpResponse()
+
+    monkeypatch.setattr("app.meeting_report_runtime.urlopen", fake_urlopen)
+    monkeypatch.setattr("app.meeting_report_runtime.time.sleep", lambda _delay: None)
+    publisher = HttpMeetingReportEventPublisher(
+        "https://api.example.test/",
+        "event-token",
+        timeout_seconds=7,
+        max_attempts=3,
+    )
+
+    publisher.publish(REPORT_ID)
+
+    assert len(calls) == 3
+    request, timeout = calls[0]
+    assert request.full_url == "https://api.example.test/api/v1/internal/meeting-reports/events"
+    assert request.get_header("X-meeting-report-event-token") == "event-token"
+    assert request.data == json.dumps({"reportId": REPORT_ID}).encode("utf-8")
+    assert timeout == 7
+
+
 def test_processor_deletes_terminal_report_without_processing() -> None:
     repository = FakeRepository(context=report_context(report_status="COMPLETED"))
     storage = FakeStorage()
     ai_client = FakeAiClient()
-    processor = MeetingReportProcessor(repository, storage, ai_client)
+    publisher = FakeEventPublisher()
+    processor = MeetingReportProcessor(repository, storage, ai_client, publisher)
 
     result = processor.process_message(meeting_report_job_payload())
 
@@ -225,6 +324,7 @@ def test_processor_deletes_terminal_report_without_processing() -> None:
     assert storage.head_calls == []
     assert ai_client.transcribe_calls == []
     assert repository.completed_updates == []
+    assert publisher.report_ids == []
 
 
 def test_processor_marks_large_audio_as_stt_failure() -> None:
@@ -250,10 +350,12 @@ def test_processor_marks_large_audio_as_stt_failure() -> None:
 
 def test_processor_marks_stt_business_failure_and_deletes_message() -> None:
     repository = FakeRepository()
+    publisher = FakeEventPublisher()
     processor = MeetingReportProcessor(
         repository,
         FakeStorage(),
         FakeAiClient(stt_failure=ProviderBusinessError("invalid audio")),
+        publisher,
     )
 
     result = processor.process_message(meeting_report_job_payload())
@@ -263,6 +365,7 @@ def test_processor_marks_stt_business_failure_and_deletes_message() -> None:
     assert repository.failed_updates == [
         (REPORT_ID, "STT", "Meeting recording could not be transcribed.")
     ]
+    assert publisher.report_ids == [REPORT_ID, REPORT_ID]
 
 
 def test_processor_marks_llm_business_failure_and_deletes_message() -> None:

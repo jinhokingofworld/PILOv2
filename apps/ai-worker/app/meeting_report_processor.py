@@ -192,6 +192,7 @@ class MeetingReportProcessor:
                 return self._result(job, delete_message=True, reason="unsupported_report_status")
 
             self.repository.mark_progress(job.report_id, "TRANSCRIBING")
+            self._publish_report_updated(job.report_id)
 
             if context.recording_status != "COMPLETED":
                 self.repository.mark_failed(
@@ -199,6 +200,7 @@ class MeetingReportProcessor:
                     REPORT_FAILED_STEP_STT,
                     SAFE_AUDIO_MISSING_ERROR,
                 )
+                self._publish_report_updated(job.report_id)
                 return self._result(job, delete_message=True, reason="recording_not_completed")
 
             if context.recording_audio_file_key != job.audio_file_key:
@@ -207,6 +209,7 @@ class MeetingReportProcessor:
                     REPORT_FAILED_STEP_STT,
                     SAFE_AUDIO_MISSING_ERROR,
                 )
+                self._publish_report_updated(job.report_id)
                 return self._result(job, delete_message=True, reason="audio_key_mismatch")
 
             try:
@@ -217,6 +220,7 @@ class MeetingReportProcessor:
                     REPORT_FAILED_STEP_STT,
                     SAFE_AUDIO_MISSING_ERROR,
                 )
+                self._publish_report_updated(job.report_id)
                 return self._result(job, delete_message=True, reason="audio_unavailable")
 
             if metadata.file_size_bytes > MAX_TRANSCRIPTION_FILE_BYTES:
@@ -225,6 +229,7 @@ class MeetingReportProcessor:
                     REPORT_FAILED_STEP_STT,
                     SAFE_AUDIO_TOO_LARGE_ERROR,
                 )
+                self._publish_report_updated(job.report_id)
                 return self._result(job, delete_message=True, reason="audio_too_large")
 
             try:
@@ -235,6 +240,7 @@ class MeetingReportProcessor:
                     REPORT_FAILED_STEP_STT,
                     SAFE_AUDIO_MISSING_ERROR,
                 )
+                self._publish_report_updated(job.report_id)
                 return self._result(job, delete_message=True, reason="audio_unavailable")
 
             try:
@@ -245,9 +251,11 @@ class MeetingReportProcessor:
                     REPORT_FAILED_STEP_STT,
                     SAFE_STT_ERROR,
                 )
+                self._publish_report_updated(job.report_id)
                 return self._result(job, delete_message=True, reason="stt_failed")
 
             self.repository.mark_progress(job.report_id, "SUMMARIZING")
+            self._publish_report_updated(job.report_id)
 
             try:
                 report = self.ai_client.generate_report(transcript_text)
@@ -257,9 +265,11 @@ class MeetingReportProcessor:
                     REPORT_FAILED_STEP_LLM,
                     SAFE_LLM_ERROR,
                 )
+                self._publish_report_updated(job.report_id)
                 return self._result(job, delete_message=True, reason="llm_failed")
 
             self.repository.mark_completed(job.report_id, report)
+            self._publish_report_updated(job.report_id)
             return self._result(job, delete_message=True, reason="completed")
         except InfrastructureError:
             return self._result(job, delete_message=False, reason="infrastructure_failure")
@@ -267,14 +277,14 @@ class MeetingReportProcessor:
             if downloaded_path is not None:
                 _unlink_if_exists(downloaded_path)
             self.repository.release_report_lock(job.report_id)
-            if self.event_publisher is not None:
-                try:
-                    self.event_publisher.publish(job.report_id)
-                except Exception:
-                    LOGGER.warning(
-                        "MeetingReport realtime event delivery failed report_id=%s",
-                        job.report_id,
-                    )
+
+    def _publish_report_updated(self, report_id: str) -> None:
+        if self.event_publisher is None:
+            return
+        try:
+            self.event_publisher.publish(report_id)
+        except Exception:
+            LOGGER.warning("MeetingReport realtime event delivery failed report_id=%s", report_id)
 
     def _result(self, job: MeetingReportJob, delete_message: bool, reason: str) -> ProcessResult:
         return ProcessResult(

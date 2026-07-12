@@ -101,6 +101,12 @@ fallback으로만 사용한다.
 | `S3_RECORDINGS_BUCKET` | 회의 음성 녹음 파일 bucket |
 | `PR_REVIEW_ANALYSIS_WORKER_TOKEN` | App Server와 PR Review 전용 Worker 사이 internal handoff 인증 token. dev에서는 기존 shared `AGENT_EXECUTION_HANDOFF_TOKEN` secret value를 새 환경변수 이름으로 함께 주입 |
 
+### Shared internal callback
+
+| Secret key | 공급 대상 | 설명 |
+| --- | --- | --- |
+| `MEETING_REPORT_EVENT_TOKEN` | App Server, AI Worker | AI Worker가 `POST /api/v1/internal/meeting-reports/events`를 호출할 때 쓰는 shared token. Secrets Manager의 `pilo-dev/shared/MEETING_REPORT_EVENT_TOKEN` 하나를 두 task에 같은 환경변수 이름으로 주입한다. |
+
 ## 4. ECS 환경 변수
 
 Secret이 아닌 값은 ECS task definition의 environment로 주입할 수 있다.
@@ -171,6 +177,9 @@ UI Preview는 local 개발 편의 기능이며 실제 bearer session이나 Works
 | `S3_RECORDINGS_BUCKET` | STT 입력 오디오 파일 bucket |
 | `OPENAI_STT_MODEL` | STT 모델. local 기본값: `gpt-4o-mini-transcribe` |
 | `OPENAI_MEETING_REPORT_MODEL` | 회의록 생성 모델. local 기본값: `gpt-5.4-mini` |
+| `MEETING_REPORT_EVENT_BASE_URL` | MeetingReport 상태 변경 뒤 internal callback을 보낼 App Server origin. dev Terraform은 ALB/API domain을 주입한다. |
+| `MEETING_REPORT_EVENT_TIMEOUT_SECONDS` | callback HTTP 요청 timeout. dev 기본값: `10` |
+| `MEETING_REPORT_EVENT_MAX_ATTEMPTS` | callback의 bounded retry 횟수. dev 기본값: `3` |
 
 ### PR Review AI Worker
 

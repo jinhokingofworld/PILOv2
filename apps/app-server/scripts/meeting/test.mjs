@@ -3,6 +3,12 @@ import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
 const { MeetingService } = require("../../dist/modules/meeting/meeting.service.js");
+const {
+  MeetingReportEventGuard
+} = require("../../dist/modules/meeting/meeting-report-event.guard.js");
+const {
+  MeetingReportInternalController
+} = require("../../dist/modules/meeting/meeting-report-internal.controller.js");
 const { badRequest } = require("../../dist/common/api-error.js");
 
 const currentUserId = "11111111-1111-1111-1111-111111111111";
@@ -19,6 +25,55 @@ const createdAt = new Date("2026-07-05T00:00:01.000Z");
 const updatedAt = new Date("2026-07-05T00:00:02.000Z");
 const leftAt = new Date("2026-07-05T00:10:00.000Z");
 const endedAt = new Date("2026-07-05T00:10:01.000Z");
+
+function meetingReportEventContext(token) {
+  return {
+    switchToHttp: () => ({
+      getRequest: () => ({
+        headers: token === undefined ? {} : { "x-meeting-report-event-token": token }
+      })
+    })
+  };
+}
+
+{
+  const originalToken = process.env.MEETING_REPORT_EVENT_TOKEN;
+  const guard = new MeetingReportEventGuard();
+
+  delete process.env.MEETING_REPORT_EVENT_TOKEN;
+  assert.throws(
+    () => guard.canActivate(meetingReportEventContext("configured")),
+    error => error.getStatus() === 503
+  );
+
+  process.env.MEETING_REPORT_EVENT_TOKEN = "configured";
+  assert.equal(guard.canActivate(meetingReportEventContext("configured")), true);
+  assert.throws(
+    () => guard.canActivate(meetingReportEventContext("wrong")),
+    error => error.getStatus() === 401
+  );
+  assert.throws(
+    () => guard.canActivate(meetingReportEventContext()),
+    error => error.getStatus() === 401
+  );
+
+  if (originalToken === undefined) delete process.env.MEETING_REPORT_EVENT_TOKEN;
+  else process.env.MEETING_REPORT_EVENT_TOKEN = originalToken;
+}
+
+{
+  const publishedReportIds = [];
+  const controller = new MeetingReportInternalController({
+    publishReportUpdatedSafely: async reportId => publishedReportIds.push(reportId)
+  });
+
+  await controller.publish({ reportId: ` ${reportId} ` });
+  assert.deepEqual(publishedReportIds, [reportId]);
+  await assert.rejects(
+    () => controller.publish({ reportId: "" }),
+    error => error.getStatus() === 400
+  );
+}
 
 class FakeDatabase {
   constructor({ queryOneRows = [], queryRows = [] } = {}) {
