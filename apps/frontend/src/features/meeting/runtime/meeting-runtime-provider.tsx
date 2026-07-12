@@ -35,6 +35,7 @@ type MeetingRuntimeContextValue = {
   activeWorkspaceId: string | null;
   clearActiveMeeting: () => void;
   connectToMeeting: (input: {
+    audioDeviceId: string | null;
     livekit: LiveKitJoin;
     meeting: Meeting;
   }) => Promise<void>;
@@ -77,7 +78,15 @@ export function MeetingRuntimeProvider({ children }: { children: ReactNode }) {
   }, [disconnectLiveKitRoom, setActiveSession]);
 
   const connectToMeeting = useCallback(
-    async ({ livekit, meeting }: { livekit: LiveKitJoin; meeting: Meeting }) => {
+    async ({
+      audioDeviceId,
+      livekit,
+      meeting
+    }: {
+      audioDeviceId: string | null;
+      livekit: LiveKitJoin;
+      meeting: Meeting;
+    }) => {
       const accessToken = authSession?.accessToken.trim() ?? "";
       const workspaceId = authSession?.activeWorkspaceId ?? meeting.workspaceId;
 
@@ -85,7 +94,7 @@ export function MeetingRuntimeProvider({ children }: { children: ReactNode }) {
         throw new Error("Meeting runtime requires an authenticated workspace");
       }
 
-      await connectLiveKitRoom(livekit);
+      await connectLiveKitRoom(livekit, audioDeviceId);
       setActiveSession({
         accessToken,
         meetingId: meeting.id,

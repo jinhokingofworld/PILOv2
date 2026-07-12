@@ -131,7 +131,7 @@ export function useLiveKitMeetingRoom() {
   }, [detachAllRemoteAudio]);
 
   const connect = useCallback(
-    async (livekit: LiveKitJoin) => {
+    async (livekit: LiveKitJoin, audioDeviceId: string | null = null) => {
       await disconnect();
 
       const room = new Room();
@@ -183,7 +183,10 @@ export function useLiveKitMeetingRoom() {
       try {
         await room.connect(livekit.livekitUrl, livekit.livekitToken);
         await room.startAudio();
-        await room.localParticipant.setMicrophoneEnabled(true);
+        await room.localParticipant.setMicrophoneEnabled(
+          true,
+          audioDeviceId ? { deviceId: audioDeviceId } : undefined
+        );
         attachExistingRemoteAudio(room);
         setIsMicrophoneEnabled(true);
         setStatus("connected");

@@ -30,6 +30,20 @@ const meetingReportRealtimeHook = await readFile(
   ),
   "utf8"
 );
+const meetingAudioPreflightHook = await readFile(
+  new URL(
+    "../../src/features/meeting/hooks/use-meeting-audio-preflight.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
+const meetingAudioPreflightDialog = await readFile(
+  new URL(
+    "../../src/features/meeting/components/meeting-audio-preflight-dialog.tsx",
+    import.meta.url
+  ),
+  "utf8"
+);
 const meetingRuntimeProvider = await readFile(
   new URL(
     "../../src/features/meeting/runtime/meeting-runtime-provider.tsx",
@@ -151,7 +165,7 @@ assert.match(liveKitHook, /useLiveKitMeetingRoom/);
 assert.match(liveKitHook, /new Room\(/);
 assert.match(liveKitHook, /RoomEvent\.TrackSubscribed/);
 assert.match(liveKitHook, /RoomEvent\.TrackUnsubscribed/);
-assert.match(liveKitHook, /setMicrophoneEnabled\(true\)/);
+assert.match(liveKitHook, /setMicrophoneEnabled\(\s*true,/);
 assert.match(liveKitHook, /remoteAudioContainerRef/);
 assert.match(liveKitHook, /track\.attach\(\)/);
 assert.doesNotMatch(liveKitHook, /@livekit\/components-react/);
@@ -197,7 +211,7 @@ assert.match(meetingPanel, /currentStatus === "loading"/);
 assert.match(meetingPanel, /recordingConsentAccepted/);
 assert.match(meetingPanel, /RECORDING_CONSENT_STORAGE_KEY/);
 assert.match(meetingPanel, /localStorage\.setItem/);
-assert.match(meetingPanel, /getUserMedia/);
+assert.doesNotMatch(meetingPanel, /getUserMedia/);
 assert.match(meetingPanel, /회의 참여/);
 assert.match(meetingPanel, /회의 나가기/);
 assert.match(meetingPanel, /shouldLeaveMeeting = isCurrentUserActive/);
@@ -290,3 +304,18 @@ assert.match(meetingReportRealtimeHook, /workspaceId: normalizedWorkspaceId/);
 assert.match(meetingReportRealtimeHook, /socket\.on\("connect", subscribe\)/);
 assert.match(meetingReportRealtimeHook, /socket\.disconnect\(\)/);
 assert.match(meetingReportRealtimeHook, /isMeetingReportRealtimeEvent/);
+
+assert.match(meetingAudioPreflightHook, /useMeetingAudioPreflight/);
+assert.match(meetingAudioPreflightHook, /getUserMedia/);
+assert.match(meetingAudioPreflightHook, /enumerateDevices/);
+assert.match(meetingAudioPreflightHook, /AudioContext/);
+assert.match(meetingAudioPreflightHook, /requestAnimationFrame/);
+assert.match(meetingAudioPreflightHook, /getTracks\(\)\.forEach/);
+assert.match(meetingAudioPreflightDialog, /MeetingAudioPreflightDialog/);
+assert.match(meetingAudioPreflightDialog, /입력 장치/);
+assert.match(meetingAudioPreflightDialog, /입력 감도/);
+assert.match(meetingAudioPreflightDialog, /이 장치로 참여/);
+assert.match(meetingPanel, /MeetingAudioPreflightDialog/);
+assert.match(meetingPanel, /prejoinAction/);
+assert.match(meetingRuntimeProvider, /audioDeviceId/);
+assert.match(liveKitHook, /audioDeviceId \? \{ deviceId: audioDeviceId \} : undefined/);

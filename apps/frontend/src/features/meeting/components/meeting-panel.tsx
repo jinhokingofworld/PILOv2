@@ -35,6 +35,9 @@ import {
 import { useAuthSession } from "@/features/auth";
 import { MeetingApiError } from "@/features/meeting/api/client";
 import {
+  MeetingAudioPreflightDialog
+} from "@/features/meeting/components/meeting-audio-preflight-dialog";
+import {
   MeetingReportSection,
   type MeetingReportStatusFilter
 } from "@/features/meeting/components/meeting-report-section";
@@ -59,8 +62,6 @@ type MeetingSection = "room" | "report";
 
 const MEETING_STATUS_POLL_INTERVAL_MS = 5000;
 const RECORDING_CONSENT_STORAGE_KEY = "recordingConsentAccepted";
-const MIC_PERMISSION_ERROR_MESSAGE =
-  "마이크 권한이 필요합니다. 브라우저 설정에서 마이크 접근을 허용한 뒤 다시 참여해주세요.";
 const LIVEKIT_CONNECTION_ERROR_MESSAGE =
   "음성 회의 연결에 실패했습니다. 마이크 권한과 네트워크 상태를 확인해주세요.";
 const LEAVE_FAILED_MESSAGE =
@@ -138,7 +139,6 @@ function getErrorMessage(error: unknown) {
 
   if (error instanceof Error) {
     if (
-      error.message === MIC_PERMISSION_ERROR_MESSAGE ||
       error.message === LIVEKIT_CONNECTION_ERROR_MESSAGE ||
       error.message === LEAVE_FAILED_MESSAGE ||
       error.message === CURRENT_MEETING_RELOAD_FAILED_MESSAGE
@@ -156,22 +156,6 @@ function isActiveMeetingInProgressError(error: unknown) {
     error.status === 400 &&
     error.code === ACTIVE_MEETING_IN_PROGRESS_ERROR_CODE
   );
-}
-
-async function requestMicrophonePermission() {
-  if (!navigator.mediaDevices?.getUserMedia) {
-    throw new Error(MIC_PERMISSION_ERROR_MESSAGE);
-  }
-
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: true,
-      video: false
-    });
-    stream.getTracks().forEach((track) => track.stop());
-  } catch {
-    throw new Error(MIC_PERMISSION_ERROR_MESSAGE);
-  }
 }
 
 function formatDateTime(value: string | null | undefined) {
@@ -323,6 +307,7 @@ export function MeetingPanel() {
     useState<"idle" | "loading" | "ready" | "error">("idle");
   const [pendingConsentAction, setPendingConsentAction] =
     useState<EntryAction | null>(null);
+  const [prejoinAction, setPrejoinAction] = useState<EntryAction | null>(null);
   const [recordingConsentAccepted, setRecordingConsentAccepted] =
     useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -414,7 +399,10 @@ export function MeetingPanel() {
     return () => window.clearTimeout(timeoutId);
   }, [toastMessage]);
 
-  async function runEntryAction(action: EntryAction) {
+  async function runEntryAction(
+    action: EntryAction,
+    audioDeviceId: string | null
+  ) {
     const targetMeetingId = meeting?.id ?? null;
 
     setActionStatus("joining");
@@ -422,12 +410,9 @@ export function MeetingPanel() {
     setToastMessage(null);
 
     let createdOrJoinedMeetingId: string | null = null;
-    let failedStage: "permission" | "api" | "livekit" = "permission";
+    let failedStage: "api" | "livekit" = "api";
 
     try {
-      await requestMicrophonePermission();
-
-      failedStage = "api";
       const joinCurrentMeeting = async (meetingId: string | null) => {
         const currentMeetingId =
           meetingId ?? (await reloadCurrentMeeting()).meeting?.id ?? null;
@@ -452,6 +437,7 @@ export function MeetingPanel() {
 
       failedStage = "livekit";
       await connectToMeeting({
+        audioDeviceId,
         livekit: result.livekit,
         meeting: result.meeting
       });
@@ -469,11 +455,9 @@ export function MeetingPanel() {
       }
 
       const message =
-        failedStage === "permission"
-          ? MIC_PERMISSION_ERROR_MESSAGE
-          : failedStage === "livekit"
-            ? LIVEKIT_CONNECTION_ERROR_MESSAGE
-            : getErrorMessage(error);
+        failedStage === "livekit"
+          ? LIVEKIT_CONNECTION_ERROR_MESSAGE
+          : getErrorMessage(error);
       setActionError(message);
       setToastMessage(message);
     } finally {
@@ -489,7 +473,7 @@ export function MeetingPanel() {
       return;
     }
 
-    void runEntryAction(action);
+    setPrejoinAction(action);
   }
 
   function handleAcceptConsent() {
@@ -497,7 +481,13 @@ export function MeetingPanel() {
     window.localStorage.setItem(RECORDING_CONSENT_STORAGE_KEY, "true");
     setRecordingConsentAccepted(true);
     setPendingConsentAction(null);
-    void runEntryAction(action);
+    setPrejoinAction(action);
+  }
+
+  function handlePrejoinConfirm(audioDeviceId: string | null) {
+    const action = prejoinAction ?? (meeting ? "join" : "start");
+    setPrejoinAction(null);
+    void runEntryAction(action, audioDeviceId);
   }
 
   async function handleLeaveMeeting() {
@@ -617,6 +607,13 @@ export function MeetingPanel() {
           <ConsentOverlay
             onAccept={handleAcceptConsent}
             onClose={() => setPendingConsentAction(null)}
+          />
+        )}
+
+        {prejoinAction && (
+          <MeetingAudioPreflightDialog
+            onClose={() => setPrejoinAction(null)}
+            onConfirm={handlePrejoinConfirm}
           />
         )}
 
