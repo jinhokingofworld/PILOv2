@@ -22,6 +22,9 @@ const prReviewConflictAnalyzer = await readSource(
 const prReviewConflictResolution = await readSource(
   "../../src/modules/pr-review/pr-review-conflict-resolution.ts"
 );
+const prReviewSemanticGraph = await readSource(
+  "../../src/modules/pr-review/pr-review-semantic-graph.ts"
+);
 const prReviewAnalysisService = await readSource(
   "../../src/modules/pr-review/pr-review-analysis.service.ts"
 );
@@ -50,6 +53,9 @@ const prReviewTypes = await readSource("../../src/modules/pr-review/types/index.
 const prReviewApi = await readSource("../../../../docs/api/pr-review-api.md");
 const prReviewAnalysisJobMigration = await readSource(
   "../../../../db/migrations/031_create_pr_review_analysis_jobs.sql"
+);
+const prReviewSemanticGraphMigration = await readSource(
+  "../../../../db/migrations/040_create_pr_review_semantic_graph_relations.sql"
 );
 const databaseReadme = await readSource("../../../../db/README.md");
 
@@ -202,6 +208,7 @@ assert.match(prReviewService, /pr_review_sessions/);
 assert.match(prReviewService, /review_files/);
 assert.match(prReviewService, /review_flows/);
 assert.match(prReviewService, /review_flow_files/);
+assert.match(prReviewService, /review_flow_relations/);
 assert.match(prReviewService, /transaction/);
 assert.match(prReviewService, /Pull request not found in workspace/);
 assert.doesNotMatch(prReviewService, /analysisService\.analyzePullRequest/);
@@ -325,6 +332,9 @@ assert.match(prReviewService, /readyToSubmit/);
 assert.match(prReviewService, /ready_to_submit/);
 assert.match(prReviewService, /fileNodeData/);
 assert.match(prReviewService, /리뷰 순서/);
+assert.match(prReviewService, /relation\.confidence >= 60/);
+assert.match(prReviewService, /relationType: "review_order"/);
+assert.match(prReviewService, /source: "fallback"/);
 assert.match(prReviewService, /리뷰 흐름 연결 정보를 사용할 수 없어/);
 assert.match(prReviewService, /mode: "side_by_side"/);
 assert.match(prReviewService, /mode === "binary"/);
@@ -371,6 +381,8 @@ assert.match(prReviewConflictAnalyzer, /currentText/);
 assert.match(prReviewConflictAnalyzer, /incomingText/);
 assert.match(prReviewConflictResolution, /buildResolvedFileContent/);
 assert.match(prReviewConflictResolution, /resolvedTextByHunkId/);
+assert.match(prReviewSemanticGraph, /buildDeterministicSemanticGraphCandidates/);
+assert.match(prReviewSemanticGraph, /relative_import/);
 assert.match(prReviewService, /headContent/);
 assert.match(prReviewService, /resolvedHunks/);
 assert.match(prReviewTypes, /PrReviewFileReviewStatus/);
@@ -398,6 +410,28 @@ assert.match(prReviewApi, /stored": false/);
 assert.match(prReviewApi, /githubCreatedAt/);
 assert.match(prReviewApi, /fileNodeData/);
 assert.match(prReviewApi, /riskLevel/);
+assert.match(prReviewApi, /roleType/);
+assert.match(prReviewApi, /depends_on/);
+assert.match(prReviewApi, /confidence >= 60/);
+
+assert.match(
+  prReviewSemanticGraphMigration,
+  /CREATE TABLE public\.review_flow_relations/
+);
+assert.match(
+  prReviewSemanticGraphMigration,
+  /CHECK \(from_review_flow_file_id <> to_review_flow_file_id\)/
+);
+assert.match(
+  prReviewSemanticGraphMigration,
+  /UNIQUE \(\s*flow_id,\s*from_review_flow_file_id,\s*to_review_flow_file_id,\s*relation_type\s*\)/
+);
+assert.match(prReviewSemanticGraphMigration, /confidence BETWEEN 0 AND 100/);
+assert.match(prReviewSemanticGraphMigration, /ENABLE ROW LEVEL SECURITY/);
+assert.match(
+  databaseReadme,
+  /040_create_pr_review_semantic_graph_relations\.sql/
+);
 
 assert.match(databaseService, /DatabaseTransaction/);
 assert.match(databaseService, /async transaction/);
@@ -418,3 +452,5 @@ await import("./analysis-input-handoff.test.mjs");
 await import("./analysis-result-handoff.test.mjs");
 await import("./analysis-job-recovery.test.mjs");
 await import("./analysis-retry.test.mjs");
+await import("./semantic-graph-contract.test.mjs");
+await import("./semantic-graph-candidates.test.mjs");

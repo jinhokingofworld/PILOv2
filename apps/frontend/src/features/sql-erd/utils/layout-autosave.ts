@@ -13,6 +13,20 @@ export type SqlErdLayoutAutosaveRequest =
       reason: "missing_workspace_session";
     };
 
+export type SqlErdSourceAutosaveRequest =
+  | {
+      ok: true;
+      payload: Pick<
+        UpdateSqlErdSessionRequest,
+        "baseRevision" | "dialect" | "layoutJson" | "modelJson" | "sourceText"
+      >;
+      sessionId: string;
+    }
+  | {
+      ok: false;
+      reason: "missing_workspace_session" | "session_mismatch";
+    };
+
 export function createSqlErdLayoutAutosaveRequest(
   session: SqlErdViewSession,
   layoutJson: SqltoerdLayoutJsonV1
@@ -31,5 +45,41 @@ export function createSqlErdLayoutAutosaveRequest(
       layoutJson
     },
     sessionId: session.id
+  };
+}
+
+export function createSqlErdSourceAutosaveRequest(
+  parsedSnapshot: SqlErdViewSession,
+  currentSession: SqlErdViewSession
+): SqlErdSourceAutosaveRequest {
+  if (
+    !parsedSnapshot.id ||
+    parsedSnapshot.revision === null ||
+    !currentSession.id ||
+    currentSession.revision === null
+  ) {
+    return {
+      ok: false,
+      reason: "missing_workspace_session"
+    };
+  }
+
+  if (parsedSnapshot.id !== currentSession.id) {
+    return {
+      ok: false,
+      reason: "session_mismatch"
+    };
+  }
+
+  return {
+    ok: true,
+    payload: {
+      baseRevision: currentSession.revision,
+      dialect: parsedSnapshot.dialect,
+      layoutJson: currentSession.layoutJson,
+      modelJson: parsedSnapshot.modelJson,
+      sourceText: parsedSnapshot.sourceText
+    },
+    sessionId: currentSession.id
   };
 }

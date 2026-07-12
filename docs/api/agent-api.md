@@ -645,6 +645,12 @@ Status code: `200 OK`
   해당 조건을 무시하고 조회하지 않으며, 현재 Agent 범위에서 지원하지 않는다고 안내한다.
 - 시간 지정 일정의 `endTime`이 `startTime`과 같거나 같은 날짜에서 더 이르면 confirmation을 만들지 않고
   추가 정보를 요청한다.
+- `매일`, `평일마다`, `매주`처럼 반복을 의미하는 Calendar 생성 요청은 1차 Agent 범위에서
+  지원하지 않는다. 해당 run은 `unsupported`으로 완료하고, 단일 일정으로 축소하거나 confirmation을
+  만들지 않는다.
+- 시작일과 종료일이 다른 Calendar 생성 요청에서 `isAllDay`, `startTime`, `endTime`이 모두 없으면
+  종일 여부 또는 시간 정보가 필요하다. 해당 run은 `needs_clarification`으로 완료하고 confirmation을
+  만들지 않는다. 명시적 `isAllDay: true` 또는 시간 입력이 있으면 기존 생성 후보 규칙을 따른다.
 - 일정 삭제는 1차 Agent tool이 아니다.
 
 ### MeetingReport

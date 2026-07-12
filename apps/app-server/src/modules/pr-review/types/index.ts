@@ -33,6 +33,24 @@ export type PrReviewFileReviewStatus =
 
 export type PrReviewFileRiskLevel = "high" | "medium" | "low" | "unknown";
 
+export type PrReviewFileRoleType =
+  | "entry"
+  | "core_logic"
+  | "api_contract"
+  | "ui_state"
+  | "verification"
+  | "support"
+  | "unknown";
+
+export type PrReviewRelationType =
+  | "depends_on"
+  | "tests"
+  | "uses_api"
+  | "passes_data_to"
+  | "supports";
+
+export type PrReviewRelationSource = "rule" | "ai" | "hybrid";
+
 export interface PrReviewGithubOAuthStatus {
   connected: boolean;
   githubUserId: number | null;

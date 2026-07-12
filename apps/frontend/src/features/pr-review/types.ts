@@ -107,6 +107,24 @@ export type PrReviewFileReviewStatus =
 
 export type PrReviewFileRiskLevel = "high" | "medium" | "low" | "unknown";
 
+export type PrReviewFileRoleType =
+  | "entry"
+  | "core_logic"
+  | "api_contract"
+  | "ui_state"
+  | "verification"
+  | "support"
+  | "unknown";
+
+export type PrReviewRelationType =
+  | "depends_on"
+  | "tests"
+  | "uses_api"
+  | "passes_data_to"
+  | "supports";
+
+export type PrReviewRelationSource = "rule" | "ai" | "hybrid";
+
 export type PrReviewFileDecisionStatus = Exclude<
   PrReviewFileReviewStatus,
   "not_reviewed"
@@ -188,6 +206,7 @@ export type PrReviewFileNodeData = {
   fileName: string;
   filePath: string;
   roleSummary: string | null;
+  roleType: PrReviewFileRoleType;
   riskLevel: PrReviewFileRiskLevel;
   reviewStatus: PrReviewFileReviewStatus;
 };
@@ -202,6 +221,7 @@ export type PrReviewFlowFile = {
   fileName: string;
   fileStatus: PrReviewFileStatus;
   fileRole: string | null;
+  roleType: PrReviewFileRoleType;
   riskLevel: PrReviewFileRiskLevel;
   currentStatus: PrReviewFileReviewStatus;
   fileNodeData: PrReviewFileNodeData;
@@ -212,10 +232,16 @@ export type PrReviewCanvasFlow = PrReviewFlow & {
 };
 
 export type PrReviewCanvasEdge = {
+  id: string;
   fromReviewFileId: string;
   toReviewFileId: string;
+  fromReviewFlowFileId: string;
+  toReviewFlowFileId: string;
   flowId: string;
+  relationType: PrReviewRelationType | "review_order";
   reason: string;
+  source: PrReviewRelationSource | "fallback";
+  confidence: number;
 };
 
 export type PrReviewCanvas = {
@@ -257,6 +283,7 @@ export type PrReviewFile = {
   isLargeDiff: boolean;
   githubFileUrl: string | null;
   fileRole: string | null;
+  roleType: PrReviewFileRoleType;
   riskLevel: PrReviewFileRiskLevel;
   changeReason: string | null;
   changeSummary: string | null;

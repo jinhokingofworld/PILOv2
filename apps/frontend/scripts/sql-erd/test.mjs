@@ -25,6 +25,10 @@ async function compileSqlErdRuntimeModules() {
     "sql-source-decoration.mjs"
   );
   const generateSessionOutputPath = join(outputDir, "generate-session.mjs");
+  const parseWorkerProtocolOutputPath = join(
+    outputDir,
+    "parse-worker-protocol.mjs"
+  );
   const layoutAutosaveOutputPath = join(outputDir, "layout-autosave.mjs");
   const apiClientOutputPath = join(outputDir, "api-client.mjs");
   const sessionNavigationOutputPath = join(
@@ -75,6 +79,17 @@ async function compileSqlErdRuntimeModules() {
     await compileTypeScriptModule(
       "../../src/features/sql-erd/utils/generate-session.ts",
       generateSessionOutputPath,
+      [
+        [
+          /from "@\/features\/sql-erd\/utils\/ddl-parser"/g,
+          'from "./ddl-parser.mjs"'
+        ],
+        [/from "@\/features\/sql-erd\/utils\/model"/g, 'from "./model.mjs"']
+      ]
+    );
+    await compileTypeScriptModule(
+      "../../src/features/sql-erd/utils/parse-worker-protocol.ts",
+      parseWorkerProtocolOutputPath,
       [
         [
           /from "@\/features\/sql-erd\/utils\/ddl-parser"/g,
@@ -196,6 +211,7 @@ async function compileSqlErdRuntimeModules() {
       sqlSourceMapRuntime,
       sqlSourceDecorationRuntime,
       generateSessionRuntime,
+      parseWorkerProtocolRuntime,
       layoutAutosaveRuntime,
       apiClientRuntime,
       sessionNavigationRuntime,
@@ -214,6 +230,7 @@ async function compileSqlErdRuntimeModules() {
       import(pathToFileHref(sqlSourceMapOutputPath)),
       import(pathToFileHref(sqlSourceDecorationOutputPath)),
       import(pathToFileHref(generateSessionOutputPath)),
+      import(pathToFileHref(parseWorkerProtocolOutputPath)),
       import(pathToFileHref(layoutAutosaveOutputPath)),
       import(pathToFileHref(apiClientOutputPath)),
       import(pathToFileHref(sessionNavigationOutputPath)),
@@ -234,6 +251,7 @@ async function compileSqlErdRuntimeModules() {
       sqlSourceMapRuntime,
       sqlSourceDecorationRuntime,
       generateSessionRuntime,
+      parseWorkerProtocolRuntime,
       layoutAutosaveRuntime,
       inspectorRuntime,
       modelRuntime,
@@ -587,6 +605,7 @@ const {
   sqlSourceMapRuntime,
   sqlSourceDecorationRuntime,
   generateSessionRuntime,
+  parseWorkerProtocolRuntime,
   layoutAutosaveRuntime,
   inspectorRuntime,
   modelRuntime,
@@ -1117,6 +1136,82 @@ assert.equal(
   false
 );
 assert.equal(
+  sessionStateRuntime.isSqlErdAutosaveRequestCurrent({
+    currentGeneration: 4,
+    currentSessionId: "session-1",
+    currentSnapshotSessionId: "session-1",
+    requestGeneration: 4,
+    requestSessionId: "session-1"
+  }),
+  true
+);
+assert.equal(
+  sessionStateRuntime.isSqlErdAutosaveRequestCurrent({
+    currentGeneration: 5,
+    currentSessionId: "session-1",
+    currentSnapshotSessionId: "session-1",
+    requestGeneration: 4,
+    requestSessionId: "session-1"
+  }),
+  false
+);
+assert.equal(
+  sessionStateRuntime.isSqlErdAutosaveRequestCurrent({
+    currentGeneration: 4,
+    currentSessionId: "session-2",
+    currentSnapshotSessionId: "session-1",
+    requestGeneration: 4,
+    requestSessionId: "session-1"
+  }),
+  false
+);
+let autosaveGateState = {
+  activeGeneration: null,
+  completionEpoch: 0
+};
+let autosaveGateTransition = sessionStateRuntime.tryBeginSqlErdAutosave({
+  requestGeneration: 1,
+  state: autosaveGateState
+});
+assert.equal(autosaveGateTransition.accepted, true);
+autosaveGateState = autosaveGateTransition.state;
+
+autosaveGateTransition = sessionStateRuntime.tryBeginSqlErdAutosave({
+  requestGeneration: 1,
+  state: autosaveGateState
+});
+assert.equal(autosaveGateTransition.accepted, false);
+autosaveGateState = autosaveGateTransition.state;
+
+autosaveGateTransition = sessionStateRuntime.tryBeginSqlErdAutosave({
+  requestGeneration: 2,
+  state: autosaveGateState
+});
+assert.equal(autosaveGateTransition.accepted, true);
+autosaveGateState = autosaveGateTransition.state;
+
+let autosaveCompletionTransition =
+  sessionStateRuntime.completeSqlErdAutosave({
+    requestGeneration: 1,
+    state: autosaveGateState
+  });
+assert.equal(autosaveCompletionTransition.completed, false);
+assert.deepEqual(autosaveCompletionTransition.state, {
+  activeGeneration: 2,
+  completionEpoch: 0
+});
+autosaveGateState = autosaveCompletionTransition.state;
+
+autosaveCompletionTransition = sessionStateRuntime.completeSqlErdAutosave({
+  requestGeneration: 2,
+  state: autosaveGateState
+});
+assert.equal(autosaveCompletionTransition.completed, true);
+assert.deepEqual(autosaveCompletionTransition.state, {
+  activeGeneration: null,
+  completionEpoch: 1
+});
+assert.equal(
   sessionStateRuntime.getLayoutAutosaveBlockReasonForStatus(409),
   "conflict"
 );
@@ -1228,9 +1323,279 @@ assert.deepEqual(statusCopyRuntime.getSqlErdSignInRequiredState(), {
 });
 assert.deepEqual(statusCopyRuntime.getSqlErdWorkspaceSaveErrorState(), {
   label: "Save error",
-  message: "Workspace session could not be saved. Check your connection and try Generate again.",
+  message:
+    "Workspace session could not be autosaved. Check your connection; SQL changes will retry automatically.",
   tone: "error"
 });
+const fallbackSourceStatus = {
+  label: "Workspace",
+  message: "Workspace session revision 7",
+  tone: "success"
+};
+assert.deepEqual(
+  statusCopyRuntime.getSqlErdSourceStatus({
+    fallbackState: fallbackSourceStatus,
+    isDraftDirty: false,
+    parse: {
+      error: null,
+      requestSequence: 0,
+      status: "idle"
+    },
+    sourceAutosaveState: "idle"
+  }),
+  fallbackSourceStatus
+);
+assert.deepEqual(
+  statusCopyRuntime.getSqlErdSourceStatus({
+    fallbackState: fallbackSourceStatus,
+    isDraftDirty: true,
+    parse: {
+      error: null,
+      requestSequence: 1,
+      status: "idle"
+    },
+    sourceAutosaveState: "saving"
+  }),
+  {
+    label: "Waiting",
+    message: "Waiting to parse SQL changes",
+    tone: "neutral"
+  }
+);
+const pausedSourceStatus = {
+  label: "Autosave paused",
+  message: "Reload before saving pending changes.",
+  tone: "error"
+};
+assert.deepEqual(
+  statusCopyRuntime.getSqlErdSourceStatus({
+    autosaveBlockReason: "invalid_payload",
+    fallbackState: pausedSourceStatus,
+    isDraftDirty: false,
+    parse: {
+      error: null,
+      requestSequence: 6,
+      status: "idle"
+    },
+    sourceAutosaveState: "pending"
+  }),
+  pausedSourceStatus
+);
+const conflictSourceStatus = {
+  label: "Save conflict",
+  message: "Reload the latest Workspace session.",
+  tone: "error"
+};
+assert.deepEqual(
+  statusCopyRuntime.getSqlErdSourceStatus({
+    autosaveBlockReason: "conflict",
+    fallbackState: conflictSourceStatus,
+    isDraftDirty: false,
+    parse: {
+      error: null,
+      requestSequence: 7,
+      status: "idle"
+    },
+    sourceAutosaveState: "pending"
+  }),
+  conflictSourceStatus
+);
+assert.deepEqual(
+  statusCopyRuntime.getSqlErdSourceStatus({
+    autosaveBlockReason: "conflict",
+    fallbackState: conflictSourceStatus,
+    isDraftDirty: false,
+    parse: {
+      error: {
+        code: "PARSE_FAILED",
+        message: "parser detail"
+      },
+      requestSequence: 8,
+      status: "error"
+    },
+    sourceAutosaveState: "pending"
+  }),
+  {
+    label: "Parse error",
+    message:
+      "SQL DDL could not be parsed. Check the CREATE TABLE syntax and try again.",
+    tone: "error"
+  }
+);
+assert.deepEqual(
+  statusCopyRuntime.getSqlErdSourceStatus({
+    fallbackState: fallbackSourceStatus,
+    isDraftDirty: false,
+    parse: {
+      error: null,
+      requestSequence: 11,
+      status: "idle"
+    },
+    sourceAutosaveState: "retrying"
+  }),
+  {
+    label: "Save error",
+    message:
+      "Workspace session could not be autosaved. Retrying parsed SQL changes automatically.",
+    tone: "error"
+  }
+);
+assert.deepEqual(
+  statusCopyRuntime.getSqlErdSourceStatus({
+    autosaveBlockReason: "conflict",
+    fallbackState: conflictSourceStatus,
+    isDraftDirty: false,
+    parse: {
+      error: null,
+      requestSequence: 9,
+      status: "parsing"
+    },
+    sourceAutosaveState: "pending"
+  }),
+  {
+    label: "Parsing",
+    message: "Parsing SQL DDL",
+    tone: "neutral"
+  }
+);
+
+const parseWorkerRequest = {
+  dialect: "postgresql",
+  previousLayoutJson: {
+    annotations: {
+      links: [],
+      version: 1
+    },
+    tableLayouts: [
+      {
+        tableId: "table.users",
+        width: 320,
+        x: 912,
+        y: 416
+      }
+    ],
+    version: 1
+  },
+  sourceMapModelJson: createRuntimeTestModel(),
+  requestSequence: 12,
+  sessionId: "session-worker-12",
+  sourceText: "CREATE TABLE users (id BIGINT PRIMARY KEY);"
+};
+const parseWorkerResponse =
+  parseWorkerProtocolRuntime.executeSqlErdParseWorkerRequest(
+    parseWorkerRequest
+  );
+assert.equal(parseWorkerResponse.ok, true);
+assert.equal(parseWorkerResponse.sessionId, parseWorkerRequest.sessionId);
+assert.equal(
+  parseWorkerResponse.requestSequence,
+  parseWorkerRequest.requestSequence
+);
+assert.equal(parseWorkerResponse.layoutJson.tableLayouts[0].x, 912);
+assert.equal(parseWorkerResponse.layoutJson.tableLayouts[0].y, 416);
+assert.equal(parseWorkerResponse.sourceMap.dialect, "postgresql");
+assert.equal(parseWorkerResponse.sourceMap.columnRangesByTableId["table.users"] !== undefined, true);
+assert.deepEqual(
+  parseWorkerProtocolRuntime.createSqlErdParseWorkerCancellation(
+    parseWorkerRequest
+  ),
+  {
+    cancelled: true,
+    ok: false,
+    requestSequence: parseWorkerRequest.requestSequence,
+    sessionId: parseWorkerRequest.sessionId
+  }
+);
+assert.deepEqual(
+  statusCopyRuntime.getSqlErdSourceStatus({
+    autosaveBlockReason: "conflict",
+    fallbackState: conflictSourceStatus,
+    isDraftDirty: true,
+    parse: {
+      error: null,
+      requestSequence: 10,
+      status: "idle"
+    },
+    sourceAutosaveState: "pending"
+  }),
+  {
+    label: "Waiting",
+    message: "Waiting to parse SQL changes",
+    tone: "neutral"
+  }
+);
+assert.deepEqual(
+  statusCopyRuntime.getSqlErdSourceStatus({
+    fallbackState: fallbackSourceStatus,
+    isDraftDirty: false,
+    parse: {
+      error: null,
+      requestSequence: 2,
+      status: "parsing"
+    },
+    sourceAutosaveState: "pending"
+  }),
+  {
+    label: "Parsing",
+    message: "Parsing SQL DDL",
+    tone: "neutral"
+  }
+);
+assert.deepEqual(
+  statusCopyRuntime.getSqlErdSourceStatus({
+    fallbackState: fallbackSourceStatus,
+    isDraftDirty: false,
+    parse: {
+      error: {
+        code: "PARSE_FAILED",
+        message: "parser detail"
+      },
+      requestSequence: 3,
+      status: "error"
+    },
+    sourceAutosaveState: "saving"
+  }),
+  {
+    label: "Parse error",
+    message:
+      "SQL DDL could not be parsed. Check the CREATE TABLE syntax and try again.",
+    tone: "error"
+  }
+);
+assert.deepEqual(
+  statusCopyRuntime.getSqlErdSourceStatus({
+    fallbackState: fallbackSourceStatus,
+    isDraftDirty: false,
+    parse: {
+      error: null,
+      requestSequence: 4,
+      status: "idle"
+    },
+    sourceAutosaveState: "pending"
+  }),
+  {
+    label: "Unsaved",
+    message: "Parsed SQL changes will autosave",
+    tone: "neutral"
+  }
+);
+assert.deepEqual(
+  statusCopyRuntime.getSqlErdSourceStatus({
+    fallbackState: fallbackSourceStatus,
+    isDraftDirty: false,
+    parse: {
+      error: null,
+      requestSequence: 5,
+      status: "idle"
+    },
+    sourceAutosaveState: "saving"
+  }),
+  {
+    label: "Saving",
+    message: "Autosaving parsed SQL changes",
+    tone: "neutral"
+  }
+);
 
 const generateSmokeSource = `
 CREATE TABLE users (
@@ -1303,6 +1668,15 @@ assert.deepEqual(initialSqlEditState.parse, {
   requestSequence: 0,
   status: "idle"
 });
+assert.equal(sqlEditStateRuntime.SQL_ERD_AUTO_PARSE_DEBOUNCE_MS, 500);
+assert.equal(
+  sqlEditStateRuntime.isSqlErdDraftDirty(initialSqlEditState),
+  false
+);
+assert.equal(
+  sqlEditStateRuntime.shouldScheduleSqlErdAutoParse(initialSqlEditState),
+  false
+);
 
 const dirtySqlEditState = sqlEditStateRuntime.reduceSqlErdEditState(
   initialSqlEditState,
@@ -1323,6 +1697,11 @@ assert.deepEqual(
 );
 assert.equal(dirtySqlEditState.parse.requestSequence, 1);
 assert.equal(dirtySqlEditState.parse.status, "idle");
+assert.equal(sqlEditStateRuntime.isSqlErdDraftDirty(dirtySqlEditState), true);
+assert.equal(
+  sqlEditStateRuntime.shouldScheduleSqlErdAutoParse(dirtySqlEditState),
+  true
+);
 
 const mysqlDraftState = sqlEditStateRuntime.reduceSqlErdEditState(
   dirtySqlEditState,
@@ -1340,6 +1719,10 @@ const staleParseStart =
 
 assert.equal(staleParseStart.requestSequence, 3);
 assert.equal(staleParseStart.state.parse.status, "parsing");
+assert.equal(
+  sqlEditStateRuntime.shouldScheduleSqlErdAutoParse(staleParseStart.state),
+  false
+);
 assert.equal(staleParseStart.session.sourceText, "SELECT 1;");
 assert.equal(staleParseStart.session.dialect, "mysql");
 assert.equal(
@@ -1347,6 +1730,41 @@ assert.equal(
     staleParseStart.state,
     staleParseStart.requestSequence
   ),
+  true
+);
+
+const cancelledParseState = sqlEditStateRuntime.reduceSqlErdEditState(
+  staleParseStart.state,
+  {
+    type: "parse_cancelled"
+  }
+);
+
+assert.equal(cancelledParseState.parse.status, "cancelled");
+assert.equal(cancelledParseState.parse.error, null);
+assert.equal(
+  cancelledParseState.parse.requestSequence,
+  staleParseStart.requestSequence + 1
+);
+assert.equal(
+  sqlEditStateRuntime.shouldScheduleSqlErdAutoParse(cancelledParseState),
+  false
+);
+const resumedParseState = sqlEditStateRuntime.reduceSqlErdEditState(
+  cancelledParseState,
+  {
+    type: "parse_resume_after_cancel"
+  }
+);
+
+assert.equal(resumedParseState.parse.status, "idle");
+assert.equal(resumedParseState.parse.error, null);
+assert.equal(
+  resumedParseState.parse.requestSequence,
+  cancelledParseState.parse.requestSequence + 1
+);
+assert.equal(
+  sqlEditStateRuntime.shouldScheduleSqlErdAutoParse(resumedParseState),
   true
 );
 
@@ -1414,6 +1832,45 @@ assert.equal(
 assert.equal(
   latestParseFailureState.lastSuccessfulSnapshot.sourceText,
   generateSmokeSource
+);
+assert.equal(
+  sqlEditStateRuntime.shouldScheduleSqlErdAutoParse(
+    latestParseFailureState
+  ),
+  false
+);
+
+const layoutChangedAfterParseError = sqlEditStateRuntime.reduceSqlErdEditState(
+  latestParseFailureState,
+  {
+    type: "layout_changed",
+    layoutJson: {
+      version: 1,
+      tableLayouts: [{ tableId: "table.users", x: 640, y: 320 }]
+    }
+  }
+);
+
+assert.equal(layoutChangedAfterParseError.parse.status, "error");
+assert.equal(
+  sqlEditStateRuntime.shouldScheduleSqlErdAutoParse(
+    layoutChangedAfterParseError
+  ),
+  false
+);
+
+const dialectChangedAfterParseError =
+  sqlEditStateRuntime.reduceSqlErdEditState(layoutChangedAfterParseError, {
+    type: "draft_dialect_changed",
+    dialect: "postgresql"
+  });
+
+assert.equal(dialectChangedAfterParseError.parse.status, "idle");
+assert.equal(
+  sqlEditStateRuntime.shouldScheduleSqlErdAutoParse(
+    dialectChangedAfterParseError
+  ),
+  true
 );
 
 const successfulParseStart =
@@ -1527,6 +1984,69 @@ assert.equal(
 );
 assert.equal(loadedSqlEditState.parse.status, "idle");
 
+const invalidReloadDraftState = sqlEditStateRuntime.reduceSqlErdEditState(
+  loadedSqlEditState,
+  {
+    type: "draft_source_changed",
+    sourceText: "CREATE TABLE broken ("
+  }
+);
+const invalidReloadParseStart =
+  sqlEditStateRuntime.beginSqlErdParse(invalidReloadDraftState);
+const invalidReloadParseFailureState =
+  sqlEditStateRuntime.reduceSqlErdEditState(invalidReloadParseStart.state, {
+    type: "parse_failed",
+    requestSequence: invalidReloadParseStart.requestSequence,
+    error: {
+      code: "PARSE_FAILED",
+      message: "Expected a column definition."
+    }
+  });
+const refreshedAfterParseErrorSnapshot = {
+  ...loadedSnapshot,
+  revision: 14,
+  sourceText: "CREATE TABLE server_refresh (id BIGINT PRIMARY KEY);"
+};
+const refreshedAfterParseErrorState =
+  sqlEditStateRuntime.reduceSqlErdEditState(
+    invalidReloadParseFailureState,
+    {
+      type: "session_loaded",
+      snapshot: refreshedAfterParseErrorSnapshot
+    }
+  );
+
+assert.equal(
+  refreshedAfterParseErrorState.draftSourceText,
+  invalidReloadParseFailureState.draftSourceText
+);
+assert.deepEqual(
+  refreshedAfterParseErrorState.lastSuccessfulSnapshot,
+  refreshedAfterParseErrorSnapshot
+);
+assert.deepEqual(
+  refreshedAfterParseErrorState.parse,
+  invalidReloadParseFailureState.parse
+);
+assert.equal(
+  sqlEditStateRuntime.shouldScheduleSqlErdAutoParse(
+    refreshedAfterParseErrorState
+  ),
+  false
+);
+
+const refreshedCleanSameSessionState =
+  sqlEditStateRuntime.reduceSqlErdEditState(loadedSqlEditState, {
+    type: "session_loaded",
+    snapshot: refreshedAfterParseErrorSnapshot
+  });
+
+assert.equal(refreshedCleanSameSessionState.parse.status, "idle");
+assert.equal(
+  refreshedCleanSameSessionState.draftSourceText,
+  refreshedAfterParseErrorSnapshot.sourceText
+);
+
 const dirtyLoadedSqlEditState = sqlEditStateRuntime.reduceSqlErdEditState(
   sqlEditStateRuntime.reduceSqlErdEditState(loadedSqlEditState, {
     type: "draft_source_changed",
@@ -1621,6 +2141,96 @@ assert.deepEqual(
   preservedNewerLayoutState.lastSuccessfulSnapshot.layoutJson,
   newerLayout
 );
+
+const monotonicLayoutState = {
+  ...newerLayoutState,
+  lastSuccessfulSnapshot: {
+    ...newerLayoutState.lastSuccessfulSnapshot,
+    revision: 20
+  }
+};
+for (const staleRevision of [null, 19, 20]) {
+  const ignoredStaleLayoutState =
+    sqlEditStateRuntime.reduceSqlErdEditState(monotonicLayoutState, {
+      requestLayoutJson: newerLayout,
+      snapshot: {
+        ...monotonicLayoutState.lastSuccessfulSnapshot,
+        layoutJson: locallyChangedLayout,
+        revision: staleRevision
+      },
+      type: "layout_saved"
+    });
+
+  assert.strictEqual(ignoredStaleLayoutState, monotonicLayoutState);
+  assert.equal(
+    ignoredStaleLayoutState.lastSuccessfulSnapshot.revision,
+    20
+  );
+  assert.deepEqual(
+    ignoredStaleLayoutState.lastSuccessfulSnapshot.layoutJson,
+    newerLayout
+  );
+}
+
+const newestParsedModel = createRuntimeTestModel();
+const staleSourceSaveCurrentState = {
+  ...newerLayoutState,
+  draftDialect: "postgresql",
+  draftSourceText: "CREATE TABLE newest_draft (id BIGINT PRIMARY KEY);",
+  lastSuccessfulSnapshot: {
+    ...newerLayoutState.lastSuccessfulSnapshot,
+    dialect: "postgresql",
+    modelJson: newestParsedModel,
+    revision: 14,
+    sourceText: "CREATE TABLE newest_parsed (id BIGINT PRIMARY KEY);"
+  }
+};
+const staleSourceSavedSnapshot = {
+  ...savedLayoutSnapshot,
+  dialect: "mysql",
+  modelJson: generateSmokeBaseSession.modelJson,
+  revision: 15,
+  sourceText: "CREATE TABLE stale_saved (id BIGINT PRIMARY KEY);"
+};
+const revisionAdvancedAfterStaleSourceSave =
+  sqlEditStateRuntime.reduceSqlErdEditState(staleSourceSaveCurrentState, {
+    type: "source_autosave_saved",
+    snapshot: staleSourceSavedSnapshot
+  });
+
+assert.deepEqual(revisionAdvancedAfterStaleSourceSave, {
+  ...staleSourceSaveCurrentState,
+  lastSuccessfulSnapshot: {
+    ...staleSourceSaveCurrentState.lastSuccessfulSnapshot,
+    revision: 15
+  }
+});
+
+const mismatchedSourceSaveState = sqlEditStateRuntime.reduceSqlErdEditState(
+  staleSourceSaveCurrentState,
+  {
+    type: "source_autosave_saved",
+    snapshot: {
+      ...staleSourceSavedSnapshot,
+      id: "another-session"
+    }
+  }
+);
+
+assert.strictEqual(mismatchedSourceSaveState, staleSourceSaveCurrentState);
+
+const nonAdvancingSourceSaveState = sqlEditStateRuntime.reduceSqlErdEditState(
+  staleSourceSaveCurrentState,
+  {
+    type: "source_autosave_saved",
+    snapshot: {
+      ...staleSourceSavedSnapshot,
+      revision: 14
+    }
+  }
+);
+
+assert.strictEqual(nonAdvancingSourceSaveState, staleSourceSaveCurrentState);
 const createGenerateRequest =
   generateSessionRuntime.createSqlErdGenerateWorkspaceRequest(
     generateSmokeBaseSession
@@ -1729,6 +2339,72 @@ const missingRevisionLayoutAutosaveRequest =
 assert.equal(missingRevisionLayoutAutosaveRequest.ok, false);
 assert.equal(
   missingRevisionLayoutAutosaveRequest.reason,
+  "missing_workspace_session"
+);
+
+const parsedSourceSnapshot = {
+  ...generateSmokeBaseSession,
+  dialect: "mysql",
+  id: "session-source-autosave",
+  layoutJson: {
+    version: 1,
+    tableLayouts: [{ tableId: "table.users", x: 120, y: 60 }]
+  },
+  modelJson: createRuntimeTestModel(),
+  revision: 20,
+  sourceText: "CREATE TABLE parsed_source (id BIGINT PRIMARY KEY);"
+};
+const currentSourceAutosaveSession = {
+  ...parsedSourceSnapshot,
+  layoutJson: autosaveLayoutJson,
+  revision: 21
+};
+const sourceAutosaveRequest =
+  layoutAutosaveRuntime.createSqlErdSourceAutosaveRequest(
+    parsedSourceSnapshot,
+    currentSourceAutosaveSession
+  );
+
+assert.equal(sourceAutosaveRequest.ok, true);
+assert.equal(sourceAutosaveRequest.sessionId, "session-source-autosave");
+assert.deepEqual(sourceAutosaveRequest.payload, {
+  baseRevision: 21,
+  dialect: "mysql",
+  layoutJson: autosaveLayoutJson,
+  modelJson: parsedSourceSnapshot.modelJson,
+  sourceText: parsedSourceSnapshot.sourceText
+});
+assert.equal(Object.hasOwn(sourceAutosaveRequest.payload, "title"), false);
+assert.equal(
+  Object.hasOwn(sourceAutosaveRequest.payload, "settingsJson"),
+  false
+);
+
+const mismatchedSourceAutosaveRequest =
+  layoutAutosaveRuntime.createSqlErdSourceAutosaveRequest(
+    parsedSourceSnapshot,
+    {
+      ...currentSourceAutosaveSession,
+      id: "another-session"
+    }
+  );
+
+assert.equal(mismatchedSourceAutosaveRequest.ok, false);
+assert.equal(mismatchedSourceAutosaveRequest.reason, "session_mismatch");
+
+const sampleSourceAutosaveRequest =
+  layoutAutosaveRuntime.createSqlErdSourceAutosaveRequest(
+    parsedSourceSnapshot,
+    {
+      ...currentSourceAutosaveSession,
+      id: null,
+      revision: null
+    }
+  );
+
+assert.equal(sampleSourceAutosaveRequest.ok, false);
+assert.equal(
+  sampleSourceAutosaveRequest.reason,
   "missing_workspace_session"
 );
 
@@ -3101,6 +3777,54 @@ const invalidParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
 assert.equal(invalidParseResult.ok, false);
 assert.match(invalidParseResult.error.message, /CREATE TABLE/);
 
+assert.equal(
+  ddlParserRuntime.SQL_ERD_SOURCE_TEXT_MAX_BYTES,
+  1024 * 1024
+);
+const oversizedUtf8Source = "한".repeat(
+  Math.floor(ddlParserRuntime.SQL_ERD_SOURCE_TEXT_MAX_BYTES / 3) + 1
+);
+
+assert.equal(
+  oversizedUtf8Source.length <
+    ddlParserRuntime.SQL_ERD_SOURCE_TEXT_MAX_BYTES,
+  true
+);
+assert.equal(
+  new TextEncoder().encode(oversizedUtf8Source).byteLength >
+    ddlParserRuntime.SQL_ERD_SOURCE_TEXT_MAX_BYTES,
+  true
+);
+
+const oversizedSourceParseResult =
+  ddlParserRuntime.parseSqlDdlToErdModel({
+    dialect: "postgresql",
+    sourceText: oversizedUtf8Source
+  });
+
+assert.deepEqual(oversizedSourceParseResult, {
+  ok: false,
+  error: {
+    code: "SOURCE_TOO_LARGE",
+    message: "SQL DDL source exceeds the 1 MiB UTF-8 limit."
+  }
+});
+assert.equal(
+  statusCopyRuntime.getSqlErdGenerateErrorMessage("SOURCE_TOO_LARGE"),
+  "SQL source is too large. Keep it at or below 1 MiB and try again."
+);
+
+const exactLimitSourceParseResult =
+  ddlParserRuntime.parseSqlDdlToErdModel({
+    dialect: "postgresql",
+    sourceText: " ".repeat(
+      ddlParserRuntime.SQL_ERD_SOURCE_TEXT_MAX_BYTES
+    )
+  });
+
+assert.equal(exactLimitSourceParseResult.ok, false);
+assert.equal(exactLimitSourceParseResult.error.code, "EMPTY_SOURCE");
+
 for (const typeName of [
   "SqltoerdModelJsonV1",
   "ErdTable",
@@ -3112,6 +3836,18 @@ for (const typeName of [
   assert.match(apiSpec, new RegExp(`type ${typeName}`));
   assert.match(types, new RegExp(`export type ${typeName}`));
 }
+
+assert.doesNotMatch(apiSpec, /SQL 직접 편집과 Generate로/);
+assert.doesNotMatch(apiSpec, /Generate 성공 결과를 기준으로 보낸다/);
+assert.doesNotMatch(apiSpec, /Generate 성공, table 위치 변경/);
+assert.match(
+  apiSpec,
+  /sourceText.*,.*modelJson.*,.*layoutJson.*자동 parsing에 성공한 동일 snapshot/
+);
+assert.match(
+  apiSpec,
+  /자동 parsing 성공, table 위치 변경, 저장 대상 설정 변경 시 client가 이 API로 자동/
+);
 
 assert.match(types, /export const SQLTOERD_MODEL_JSON_VERSION = 1/);
 assert.match(types, /export const SQLTOERD_LAYOUT_JSON_VERSION = 1/);
@@ -3213,6 +3949,9 @@ assert.match(sessionStateUtils, /getSqlErdSessionLoadFailureState/);
 assert.match(sessionStateUtils, /kind: "preserve_current"/);
 assert.match(sessionStateUtils, /kind: "fallback_to_sample"/);
 assert.match(sessionStateUtils, /shouldApplySqlErdSessionLoadResult/);
+assert.match(sessionStateUtils, /isSqlErdAutosaveRequestCurrent/);
+assert.match(sessionStateUtils, /tryBeginSqlErdAutosave/);
+assert.match(sessionStateUtils, /completeSqlErdAutosave/);
 assert.match(sessionStateUtils, /SQL_ERD_LAYOUT_AUTOSAVE_DEBOUNCE_MS = 2000/);
 assert.match(
   sessionStateUtils,
@@ -3250,8 +3989,12 @@ assert.match(layoutAutosaveUtils, /missing_workspace_session/);
 assert.match(statusCopyUtils, /getSqlErdGenerateErrorMessage/);
 assert.match(statusCopyUtils, /getSqlErdSignInRequiredState/);
 assert.match(statusCopyUtils, /getSqlErdWorkspaceSaveErrorState/);
+assert.match(statusCopyUtils, /getSqlErdSourceStatus/);
 assert.match(statusCopyUtils, /CREATE TABLE statement/);
-assert.match(statusCopyUtils, /Check your connection and try Generate again/);
+assert.doesNotMatch(statusCopyUtils, /try Generate again/);
+assert.match(statusCopyUtils, /retry automatically/);
+assert.match(statusCopyUtils, /"retrying"/);
+assert.match(statusCopyUtils, /Retrying parsed SQL changes automatically/);
 
 assert.match(panel, /SqlErdCanvas/);
 assert.match(panel, /useAuthSession/);
@@ -3261,6 +4004,14 @@ assert.match(panel, /sessionId: string/);
 assert.match(panel, /createSqlErdEditState/);
 assert.match(panel, /beginSqlErdParse/);
 assert.match(panel, /isSqlErdParseRequestCurrent/);
+assert.match(panel, /shouldScheduleSqlErdAutoParse/);
+assert.match(panel, /SQL_ERD_AUTO_PARSE_DEBOUNCE_MS/);
+assert.match(panel, /SQL_ERD_PARSE_TIMEOUT_MS = 5000/);
+assert.match(panel, /new Worker\(/);
+assert.match(panel, /worker\.terminate\(\)/);
+assert.match(panel, /ParseWorkerRequest/);
+assert.match(panel, /autoParseDraftSourceText/);
+assert.match(panel, /autoParseDraftDialect/);
 assert.match(panel, /reduceSqlErdEditState/);
 assert.match(panel, /sqlErdEditStateRef/);
 assert.match(
@@ -3277,40 +4028,72 @@ assert.match(panel, /type: "session_loaded"/);
 assert.match(panel, /type: "layout_changed"/);
 assert.match(panel, /type: "layout_saved"/);
 assert.match(panel, /type: "parse_failed"/);
-assert.match(panel, /type: "parse_finished"/);
+assert.match(panel, /type: "parse_cancelled"/);
+assert.match(panel, /type: "parse_resume_after_cancel"/);
 assert.match(panel, /type: "parse_succeeded"/);
-assert.match(panel, /createSqlErdGenerateWorkspaceRequest/);
-assert.match(panel, /getSqlErdGenerateErrorMessage/);
-assert.match(panel, /getSqlErdSignInRequiredState/);
+assert.match(panel, /runSqlErdParseWorker/);
+assert.match(panel, /createSqlErdSourceAutosaveRequest/);
 assert.match(panel, /getSqlErdWorkspaceSaveErrorState/);
-assert.match(panel, /handleGenerate/);
 assert.match(panel, /updateSession/);
-const generateHandlerSource = panel.slice(
-  panel.indexOf("const handleGenerate"),
-  panel.indexOf("useEffect", panel.indexOf("const handleGenerate"))
+assert.doesNotMatch(panel, /\bPlay\b/);
+assert.doesNotMatch(panel, /handleGenerate/);
+assert.doesNotMatch(panel, /isGenerating/);
+assert.doesNotMatch(panel, /isGenerateDisabled/);
+assert.doesNotMatch(panel, /onGenerate/);
+assert.doesNotMatch(panel, />Generate</);
+assert.match(
+  panel,
+  /window\.setTimeout\([\s\S]*?SQL_ERD_AUTO_PARSE_DEBOUNCE_MS/
 );
+assert.match(panel, /runSqlErdParseWorker\(\{/);
+assert.doesNotMatch(panel, /parseExecutionTimeoutId/);
+assert.match(
+  panel,
+  /const activeParseResult = await runSqlErdParseWorker\([\s\S]*?activeParseResult\.requestSequence !== requestId[\s\S]*?activeParseResult\.sessionId !== activeSession\.id[\s\S]*?type: "session_loaded"/
+);
+assert.match(panel, /parseResult\.requestSequence !== parseStart\.requestSequence/);
+assert.match(panel, /parseResult\.sessionId !== parseStart\.session\.id/);
+assert.match(
+  panel,
+  /shouldScheduleSqlErdAutoParse\(sqlErdEditStateRef\.current\)/
+);
+const autoParseEffectSource = panel.slice(
+  panel.indexOf("shouldScheduleSqlErdAutoParse(sqlErdEditStateRef.current)"),
+  panel.indexOf(
+    "useEffect(() => {",
+    panel.indexOf("shouldScheduleSqlErdAutoParse(sqlErdEditStateRef.current)")
+  )
+);
+assert.match(autoParseEffectSource, /autoParseDraftSourceText/);
+assert.match(autoParseEffectSource, /autoParseDraftDialect/);
+assert.match(autoParseEffectSource, /autoParseRequestSequence/);
+assert.match(autoParseEffectSource, /activeWorkspaceId/);
+assert.match(autoParseEffectSource, /sessionId/);
+assert.doesNotMatch(autoParseEffectSource, /sqlErdViewSession\.layoutJson/);
+assert.doesNotMatch(autoParseEffectSource, /sqlErdViewSession\.revision/);
+assert.match(panel, /setPendingSourceAutosaveSnapshot/);
+assert.match(panel, /type: "source_autosave_saved"/);
+assert.match(panel, /sourceAutosaveRetryAttempt/);
+assert.match(panel, /autosaveGateRef/);
+assert.match(panel, /autosaveCompletionEpoch/);
+assert.match(panel, /autosaveLifecycleGenerationRef/);
+assert.match(panel, /requestLifecycleGeneration/);
+assert.match(panel, /isSqlErdAutosaveRequestCurrent/);
 assert.equal(
-  [
-    ...generateHandlerSource.matchAll(
-      /isSqlErdParseRequestCurrent\(/g
-    )
-  ].length,
+  [...panel.matchAll(/tryBeginAutosave\(requestLifecycleGeneration\)/g)]
+    .length,
   2
 );
-assert.doesNotMatch(
-  generateHandlerSource,
-  /setPendingLayoutAutosaveJson\(null\)/
+assert.equal(
+  [...panel.matchAll(/completeAutosave\(requestLifecycleGeneration\)/g)]
+    .length,
+  2
 );
-assert.match(
-  generateHandlerSource,
-  /setPendingLayoutAutosaveJson\(\(currentLayoutJson\) =>/
-);
-assert.match(
-  generateHandlerSource,
-  /areSqltoerdLayoutsEqual\(\s*currentLayoutJson,\s*parseStart\.session\.layoutJson\s*\)/
-);
+assert.match(panel, /getSqlErdSourceStatus/);
+assert.match(panel, /autosaveBlockReason: layoutAutosaveBlockReason/);
+assert.match(panel, /aria-live="polite"/);
 assert.doesNotMatch(panel, /sqlErdApiClient\.createSession/);
-assert.match(panel, /label: "Save conflict"/);
+assert.match(panel, /"Save conflict"/);
 assert.match(panel, /pendingLayoutAutosaveJson/);
 assert.match(panel, /layoutAutosaveRetryAttempt/);
 assert.match(panel, /type LayoutAutosaveBlockReason/);
@@ -3391,11 +4174,12 @@ assert.match(panel, /sqlSourceEditorTheme/);
 assert.match(panel, /lastResolvedDialect/);
 assert.match(panel, /sqlSourceMap/);
 assert.match(panel, /setSqlSourceMap\(null\)/);
-assert.match(panel, /setSqlSourceMap\(generateRequest\.sourceMap\)/);
+assert.match(panel, /setSqlSourceMap\(parseResult\.sourceMap\)/);
 assert.match(
   panel,
   /sourceMapModelJson: activeViewSession\.modelJson/
 );
+assert.doesNotMatch(panel, /previousModelJson: parseStart\.session\.modelJson/);
 assert.match(panel, /relationSourceCompartmentRef/);
 assert.match(panel, /getSelectedSqlErdRelationSourceRanges/);
 assert.match(panel, /import Link from "next\/link"/);
@@ -3409,13 +4193,15 @@ assert.match(panel, /aria-label="홈으로 이동"/);
 assert.match(panel, /<CollapsedSourcePanel onToggle=\{onToggle\} \/>/);
 assert.doesNotMatch(panel, /scrollIntoView/);
 assert.match(panel, /resolveSqlSourceEditorDialect/);
-assert.match(panel, /setLastResolvedDialect\(generateRequest\.resolvedDialect\)/);
+assert.match(panel, /setLastResolvedDialect\(parseResult\.resolvedDialect\)/);
 assert.match(panel, /languageCompartmentRef/);
 assert.match(panel, /getSqlSourceEditorLanguageExtension/);
 assert.match(panel, /languageCompartment\.of/);
 assert.match(panel, /createSqlSourceEditorDialectReconfigureEffect/);
 assert.match(panel, /EditorState\.readOnly\.of\(readOnly\)/);
 assert.match(panel, /EditorView\.editable\.of\(!readOnly\)/);
+assert.match(panel, /isDialectSelectDisabled=\{!isSessionReady\}/);
+assert.match(panel, /isSourceTextReadOnly=\{!isSessionReady\}/);
 assert.doesNotMatch(panel, /\bsql\(\)/);
 assert.doesNotMatch(panel, /<textarea/);
 assert.doesNotMatch(panel, /setSqlErdViewSession/);

@@ -33,6 +33,7 @@ import type {
   PrReviewConflictStatus,
   PrReviewAnalysisErrorCode,
   PrReviewFileRiskLevel,
+  PrReviewFileRoleType,
   PrReviewFileReviewStatus,
   PrReviewFileStatus,
   PrReviewGithubChangedFile,
@@ -42,6 +43,8 @@ import type {
   PrReviewGithubReviewSubmissionPayload,
   PrReviewGithubReviewSubmitType,
   PrReviewModuleInfo,
+  PrReviewRelationSource,
+  PrReviewRelationType,
   PrReviewSessionStatus
 } from "./types";
 import { PrReviewAnalysisJobPublisherService } from "./pr-review-analysis-job-publisher.service";
@@ -133,8 +136,23 @@ interface ReviewFlowFileRow extends QueryResultRow {
   file_name: string;
   file_status: PrReviewFileStatus;
   file_role: string | null;
+  role_type: PrReviewFileRoleType;
   risk_level: PrReviewFileRiskLevel;
   current_status: PrReviewFileReviewStatus;
+}
+
+interface ReviewFlowRelationRow extends QueryResultRow {
+  id: string;
+  session_id: string;
+  flow_id: string;
+  from_review_flow_file_id: string;
+  to_review_flow_file_id: string;
+  from_review_file_id: string;
+  to_review_file_id: string;
+  relation_type: PrReviewRelationType;
+  source: PrReviewRelationSource;
+  confidence: number | string;
+  reason: string;
 }
 
 interface ReviewFileRow extends QueryResultRow {
@@ -159,6 +177,7 @@ interface ReviewCanvasFallbackFileRow extends QueryResultRow {
   file_name: string;
   file_status: PrReviewFileStatus;
   file_role: string | null;
+  role_type: PrReviewFileRoleType;
   risk_level: PrReviewFileRiskLevel | null;
   current_status: PrReviewFileReviewStatus;
   workflow_order: number | string;
@@ -178,6 +197,7 @@ interface ReviewFileDetailRow extends QueryResultRow {
   is_large_diff: boolean;
   github_file_url: string | null;
   file_role: string | null;
+  role_type: PrReviewFileRoleType;
   risk_level: PrReviewFileRiskLevel;
   change_reason: string | null;
   change_summary: string | null;
@@ -479,6 +499,7 @@ export interface PrReviewFileNodeDataPayload {
   fileName: string;
   filePath: string;
   roleSummary: string | null;
+  roleType: PrReviewFileRoleType;
   riskLevel: PrReviewFileRiskLevel;
   reviewStatus: PrReviewFileReviewStatus;
 }
@@ -493,6 +514,7 @@ export interface PrReviewFlowFilePayload {
   fileName: string;
   fileStatus: PrReviewFileStatus;
   fileRole: string | null;
+  roleType: PrReviewFileRoleType;
   riskLevel: PrReviewFileRiskLevel;
   currentStatus: PrReviewFileReviewStatus;
   fileNodeData: PrReviewFileNodeDataPayload;
@@ -509,10 +531,16 @@ export interface PrReviewCanvasFlowPayload extends PrReviewFlowPayload {
 }
 
 export interface PrReviewCanvasEdgePayload {
+  id: string;
   fromReviewFileId: string;
   toReviewFileId: string;
+  fromReviewFlowFileId: string;
+  toReviewFlowFileId: string;
   flowId: string;
+  relationType: PrReviewRelationType | "review_order";
   reason: string;
+  source: PrReviewRelationSource | "fallback";
+  confidence: number;
 }
 
 export interface PrReviewCanvasPayload {
@@ -568,6 +596,7 @@ export interface PrReviewFilePayload {
   isLargeDiff: boolean;
   githubFileUrl: string | null;
   fileRole: string | null;
+  roleType: PrReviewFileRoleType;
   riskLevel: PrReviewFileRiskLevel;
   changeReason: string | null;
   changeSummary: string | null;
@@ -1453,9 +1482,10 @@ export class PrReviewService {
     }
 
     try {
-      const [flows, flowFiles] = await Promise.all([
+      const [flows, flowFiles, flowRelations] = await Promise.all([
         this.listReviewFlowsForSession(workspaceId, reviewSessionId),
-        this.listReviewFlowFilesForSession(workspaceId, reviewSessionId)
+        this.listReviewFlowFilesForSession(workspaceId, reviewSessionId),
+        this.listReviewFlowRelationsForSession(workspaceId, reviewSessionId)
       ]);
       const canvasFlows = this.buildCanvasFlows(flows, flowFiles);
 
@@ -1468,7 +1498,11 @@ export class PrReviewService {
         );
       }
 
-      return this.buildReviewSessionCanvasPayload(summary, canvasFlows);
+      return this.buildReviewSessionCanvasPayload(
+        summary,
+        canvasFlows,
+        flowRelations.map((relation) => this.mapFlowRelation(relation))
+      );
     } catch {
       return this.buildFallbackReviewSessionCanvas(
         workspaceId,
@@ -2976,6 +3010,7 @@ export class PrReviewService {
           review_file.file_name,
           review_file.file_status,
           review_file.file_role,
+          review_file.role_type,
           review_file.risk_level,
           review_file.current_status,
           ROW_NUMBER() OVER (ORDER BY review_file.file_path ASC) AS workflow_order
@@ -3114,6 +3149,7 @@ export class PrReviewService {
           review_file.file_name,
           review_file.file_status,
           review_file.file_role,
+          review_file.role_type,
           review_file.risk_level,
           review_file.current_status
         FROM review_flow_files AS flow_file
@@ -3151,6 +3187,7 @@ export class PrReviewService {
           review_file.file_name,
           review_file.file_status,
           review_file.file_role,
+          review_file.role_type,
           review_file.risk_level,
           review_file.current_status
         FROM review_flow_files AS flow_file
@@ -3169,6 +3206,46 @@ export class PrReviewService {
         ORDER BY flow_file.workflow_order ASC, review_file.file_path ASC
       `,
       [workspaceId, this.requireUuid(flowId, "flowId")]
+    );
+  }
+
+  private async listReviewFlowRelationsForSession(
+    workspaceId: string,
+    reviewSessionId: string
+  ): Promise<ReviewFlowRelationRow[]> {
+    return this.database.query<ReviewFlowRelationRow>(
+      `
+        SELECT
+          relation.id,
+          relation.session_id,
+          relation.flow_id,
+          relation.from_review_flow_file_id,
+          relation.to_review_flow_file_id,
+          from_flow_file.review_file_id AS from_review_file_id,
+          to_flow_file.review_file_id AS to_review_file_id,
+          relation.relation_type,
+          relation.source,
+          relation.confidence,
+          relation.reason
+        FROM review_flow_relations AS relation
+        JOIN review_flow_files AS from_flow_file
+          ON from_flow_file.session_id = relation.session_id
+         AND from_flow_file.flow_id = relation.flow_id
+         AND from_flow_file.id = relation.from_review_flow_file_id
+        JOIN review_flow_files AS to_flow_file
+          ON to_flow_file.session_id = relation.session_id
+         AND to_flow_file.flow_id = relation.flow_id
+         AND to_flow_file.id = relation.to_review_flow_file_id
+        JOIN pr_review_sessions AS review_session
+          ON review_session.id = relation.session_id
+        JOIN github_pull_requests AS pull_request
+          ON pull_request.id = review_session.pull_request_id
+        WHERE pull_request.workspace_id = $1
+          AND relation.session_id = $2
+          AND relation.confidence >= 60
+        ORDER BY relation.flow_id ASC, relation.confidence DESC, relation.id ASC
+      `,
+      [workspaceId, this.requireUuid(reviewSessionId, "reviewSessionId")]
     );
   }
 
@@ -3196,6 +3273,7 @@ export class PrReviewService {
           review_file.is_large_diff,
           review_file.github_file_url,
           review_file.file_role,
+          review_file.role_type,
           review_file.risk_level,
           review_file.change_reason,
           review_file.change_summary,
@@ -4468,7 +4546,8 @@ export class PrReviewService {
 
   private buildReviewSessionCanvasPayload(
     summary: PrReviewSummaryRow,
-    flows: PrReviewCanvasFlowPayload[]
+    flows: PrReviewCanvasFlowPayload[],
+    semanticEdges: PrReviewCanvasEdgePayload[] = []
   ): PrReviewCanvasPayload {
     return {
       reviewSessionId: summary.id,
@@ -4478,7 +4557,7 @@ export class PrReviewService {
       totalFileCount: Number(summary.total_file_count),
       conflictStatus: summary.conflict_status,
       flows,
-      edges: this.buildCanvasEdges(flows)
+      edges: this.buildCanvasEdges(flows, semanticEdges)
     };
   }
 
@@ -4574,6 +4653,7 @@ export class PrReviewService {
       fileName: file.file_name,
       fileStatus: file.file_status,
       fileRole: file.file_role,
+      roleType: file.role_type,
       riskLevel,
       currentStatus: file.current_status,
       fileNodeData: {
@@ -4585,6 +4665,7 @@ export class PrReviewService {
         fileName: file.file_name,
         filePath: file.file_path,
         roleSummary: file.file_role,
+        roleType: file.role_type,
         riskLevel,
         reviewStatus: file.current_status
       }
@@ -4609,6 +4690,7 @@ export class PrReviewService {
       fileName: file.file_name,
       fileStatus: file.file_status,
       fileRole: file.file_role,
+      roleType: file.role_type,
       riskLevel,
       currentStatus: file.current_status,
       fileNodeData: {
@@ -4620,6 +4702,7 @@ export class PrReviewService {
         fileName: file.file_name,
         filePath: file.file_path,
         roleSummary: file.file_role,
+        roleType: file.role_type,
         riskLevel,
         reviewStatus: file.current_status
       }
@@ -4643,6 +4726,7 @@ export class PrReviewService {
       isLargeDiff: file.is_large_diff,
       githubFileUrl: file.github_file_url,
       fileRole: file.file_role,
+      roleType: file.role_type,
       riskLevel: this.normalizeRiskLevel(file.risk_level),
       changeReason: file.change_reason,
       changeSummary: file.change_summary,
@@ -4768,11 +4852,20 @@ export class PrReviewService {
   }
 
   private buildCanvasEdges(
-    flows: PrReviewCanvasFlowPayload[]
+    flows: PrReviewCanvasFlowPayload[],
+    semanticEdges: PrReviewCanvasEdgePayload[] = []
   ): PrReviewCanvasEdgePayload[] {
     const edges: PrReviewCanvasEdgePayload[] = [];
 
     for (const flow of flows) {
+      const flowSemanticEdges = semanticEdges.filter(
+        (edge) => edge.flowId === flow.id
+      );
+      if (flowSemanticEdges.length > 0) {
+        edges.push(...flowSemanticEdges);
+        continue;
+      }
+
       const files = [...flow.files].sort(
         (left, right) =>
           left.workflowOrder - right.workflowOrder ||
@@ -4781,15 +4874,38 @@ export class PrReviewService {
 
       for (let index = 1; index < files.length; index += 1) {
         edges.push({
+          id: `review-order:${flow.id}:${files[index - 1].id}:${files[index].id}`,
           fromReviewFileId: files[index - 1].reviewFileId,
           toReviewFileId: files[index].reviewFileId,
+          fromReviewFlowFileId: files[index - 1].id,
+          toReviewFlowFileId: files[index].id,
           flowId: flow.id,
-          reason: "리뷰 순서"
+          relationType: "review_order",
+          reason: "리뷰 순서",
+          source: "fallback",
+          confidence: 100
         });
       }
     }
 
     return edges;
+  }
+
+  private mapFlowRelation(
+    relation: ReviewFlowRelationRow
+  ): PrReviewCanvasEdgePayload {
+    return {
+      id: relation.id,
+      fromReviewFileId: relation.from_review_file_id,
+      toReviewFileId: relation.to_review_file_id,
+      fromReviewFlowFileId: relation.from_review_flow_file_id,
+      toReviewFlowFileId: relation.to_review_flow_file_id,
+      flowId: relation.flow_id,
+      relationType: relation.relation_type,
+      reason: relation.reason,
+      source: relation.source,
+      confidence: Number(relation.confidence)
+    };
   }
 
   private getSafeSubmissionErrorMessage(error: unknown): string {

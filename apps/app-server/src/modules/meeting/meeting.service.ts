@@ -25,7 +25,13 @@ import {
 } from "./meeting-report-job.service";
 
 type RecordingStatus = "RUNNING" | "COMPLETED" | "FAILED";
-type MeetingReportStatus = "PROCESSING" | "COMPLETED" | "FAILED";
+type MeetingReportStatus =
+  | "PROCESSING"
+  | "QUEUED"
+  | "TRANSCRIBING"
+  | "SUMMARIZING"
+  | "COMPLETED"
+  | "FAILED";
 type MeetingReportFailedStep = "RECORDING" | "STT" | "LLM";
 
 interface MeetingRow extends QueryResultRow {
@@ -337,6 +343,9 @@ const DEFAULT_MEETING_REPORT_LIMIT = 20;
 const MAX_MEETING_REPORT_LIMIT = 100;
 const MEETING_REPORT_STATUSES: readonly MeetingReportStatus[] = [
   "PROCESSING",
+  "QUEUED",
+  "TRANSCRIBING",
+  "SUMMARIZING",
   "COMPLETED",
   "FAILED"
 ];
@@ -1043,7 +1052,7 @@ export class MeetingService {
   private assertReportCanBeRegenerated(
     report: MeetingReportRegenerationRow
   ): string {
-    if (report.status === "PROCESSING") {
+    if (this.isMeetingReportInProgress(report.status)) {
       throw badRequest("Meeting report is already processing");
     }
 
@@ -1116,7 +1125,7 @@ export class MeetingService {
       `
         UPDATE meeting_reports
         SET
-          status = 'PROCESSING',
+          status = 'QUEUED',
           failed_step = NULL,
           error_message = NULL,
           transcript_text = NULL,
@@ -1172,7 +1181,7 @@ export class MeetingService {
             retry_count = $10,
             updated_at = now()
           WHERE id = $1
-            AND status = 'PROCESSING'
+            AND status IN ('PROCESSING', 'QUEUED', 'TRANSCRIBING', 'SUMMARIZING')
           RETURNING
             id,
             meeting_id,
@@ -1814,7 +1823,7 @@ export class MeetingService {
           recording_id,
           status
         )
-        VALUES ($1, $2, 'PROCESSING')
+        VALUES ($1, $2, 'QUEUED')
         ON CONFLICT (recording_id) DO NOTHING
         RETURNING
           id,
@@ -1974,7 +1983,7 @@ export class MeetingService {
             action_item_candidates = '[]'::jsonb,
             updated_at = now()
           WHERE id = $1
-            AND status = 'PROCESSING'
+            AND status IN ('PROCESSING', 'QUEUED', 'TRANSCRIBING', 'SUMMARIZING')
           RETURNING id
         `,
         [input.reportId]
@@ -2668,6 +2677,15 @@ export class MeetingService {
     }
 
     throw badRequest("Invalid meeting report status");
+  }
+
+  private isMeetingReportInProgress(status: MeetingReportStatus): boolean {
+    return (
+      status === "PROCESSING" ||
+      status === "QUEUED" ||
+      status === "TRANSCRIBING" ||
+      status === "SUMMARIZING"
+    );
   }
 
   private normalizeMeetingReportLimit(limit: unknown): number {

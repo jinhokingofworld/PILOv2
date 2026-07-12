@@ -31,6 +31,7 @@ from app.meeting_report_processor import (
     GeneratedMeetingReport,
     InfrastructureError,
     MeetingReportContext,
+    MeetingReportEventPublisher,
     MeetingReportJob,
     MeetingReportProcessor,
     PermanentStorageError,
@@ -187,6 +188,19 @@ class PgMeetingReportRepository:
             recording_audio_file_key=row["recording_audio_file_key"],
         )
 
+    def mark_progress(self, report_id: str, status: str) -> None:
+        if status not in {"TRANSCRIBING", "SUMMARIZING"}:
+            raise ValueError("Unsupported MeetingReport progress status")
+        self.connection.execute(
+            """
+            UPDATE meeting_reports
+            SET status = %s::meeting_report_status, updated_at = now()
+            WHERE id = %s
+              AND status IN ('PROCESSING', 'QUEUED', 'TRANSCRIBING', 'SUMMARIZING')
+            """,
+            (status, report_id),
+        )
+
     def mark_failed(self, report_id: str, failed_step: str, error_message: str) -> None:
         self.connection.execute(
             """
@@ -202,7 +216,7 @@ class PgMeetingReportRepository:
               action_item_candidates = '[]'::jsonb,
               updated_at = now()
             WHERE id = %s
-              AND status = 'PROCESSING'
+              AND status IN ('PROCESSING', 'QUEUED', 'TRANSCRIBING', 'SUMMARIZING')
             """,
             (failed_step, error_message, report_id),
         )
@@ -222,7 +236,7 @@ class PgMeetingReportRepository:
               action_item_candidates = %s::jsonb,
               updated_at = now()
             WHERE id = %s
-              AND status = 'PROCESSING'
+              AND status IN ('PROCESSING', 'QUEUED', 'TRANSCRIBING', 'SUMMARIZING')
             """,
             (
                 report.transcript_text,
@@ -859,6 +873,29 @@ class HttpAgentExecutionHandoffClient(AgentExecutionHandoffClient):
             raise InfrastructureError("Agent execution handoff is unavailable") from error
 
 
+class HttpMeetingReportEventPublisher(MeetingReportEventPublisher):
+    def __init__(self, base_url: str, token: str, timeout_seconds: int) -> None:
+        self.base_url = base_url.rstrip("/")
+        self.token = token
+        self.timeout_seconds = timeout_seconds
+
+    def publish(self, report_id: str) -> None:
+        request = Request(
+            f"{self.base_url}/api/v1/internal/meeting-reports/events",
+            data=json.dumps({"reportId": report_id}).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "X-Meeting-Report-Event-Token": self.token,
+            },
+            method="POST",
+        )
+        try:
+            with urlopen(request, timeout=self.timeout_seconds):
+                return
+        except (HTTPError, OSError, TimeoutError, URLError) as error:
+            raise InfrastructureError("MeetingReport event delivery is unavailable") from error
+
+
 def create_worker(settings: RuntimeSettings | None = None) -> SqsAiJobWorker:
     import boto3
 
@@ -896,10 +933,16 @@ def create_worker(settings: RuntimeSettings | None = None) -> SqsAiJobWorker:
         resolved_settings.openai_agent_planner_model,
     )
     canvas_embedder = LocalSentenceTransformerCanvasEmbedder()
+    meeting_report_event_publisher = HttpMeetingReportEventPublisher(
+        _require_env("MEETING_REPORT_EVENT_BASE_URL"),
+        _require_env("MEETING_REPORT_EVENT_TOKEN"),
+        _positive_int_env("MEETING_REPORT_EVENT_TIMEOUT_SECONDS", 10),
+    )
     meeting_report_processor = MeetingReportProcessor(
         meeting_report_repository,
         storage,
         ai_client,
+        meeting_report_event_publisher,
     )
     agent_execution_handoff_client = HttpAgentExecutionHandoffClient(
         resolved_settings.agent_execution_handoff_base_url,

@@ -14,6 +14,12 @@ import {
 } from "../canvas/canvas-access.service";
 import { createCanvasPresenceService } from "../canvas/canvas-presence.service";
 import { createCanvasRoomService } from "../canvas/canvas-room.service";
+import { createMeetingAccessService } from "../meeting/meeting-access.service";
+import {
+  isMeetingReportRedisEvent,
+  meetingClientEvents,
+  meetingServerEvents
+} from "../meeting/meeting-socket-events";
 import type {
   CanvasJoinPayload,
   CanvasPresenceEditingMode,
@@ -24,7 +30,7 @@ import type {
 } from "../canvas/canvas-types";
 import { createRealtimeDatabase } from "../database/database";
 import { createSocketIoRedisAdapter } from "../redis/redis-pubsub";
-import { createCanvasRoomName } from "./room-names";
+import { createCanvasRoomName, createMeetingRoomName } from "./room-names";
 import { createSocketAuthContext } from "./socket-auth";
 import { createSocketErrorPayload } from "./socket-errors";
 
@@ -46,6 +52,7 @@ type AuthedSocket = Socket & {
 };
 
 const CANVAS_OPERATION_REDIS_CHANNEL = "canvas:operations";
+const MEETING_REPORT_REDIS_CHANNEL = "meeting:report-events";
 const BOARD_INVALIDATION_REDIS_CHANNEL = "board:invalidations";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -229,6 +236,15 @@ function emitCanvasError(socket: Socket, message: string) {
   );
 }
 
+function readMeetingWorkspaceId(payload: unknown): string | null {
+  if (!isRecord(payload)) return null;
+  return readRequiredString(payload, "workspaceId");
+}
+
+function emitMeetingError(socket: Socket, message: string) {
+  socket.emit(meetingServerEvents.error, createSocketErrorPayload("invalid_payload", message));
+}
+
 export async function createRealtimeSocketServer({
   config,
   httpServer,
@@ -260,6 +276,7 @@ export async function createRealtimeSocketServer({
     accessService,
     presenceService,
   });
+  const meetingAccessService = createMeetingAccessService(database);
   const boardRoomService = createBoardRoomService({
     accessService: boardAccessService,
   });
@@ -279,6 +296,17 @@ export async function createRealtimeSocketServer({
           canvasServerEvents.operation,
           payload,
         );
+      })
+    : null;
+  const unsubscribeMeetingReports = redisAdapter
+    ? await redisAdapter.subscribe(MEETING_REPORT_REDIS_CHANNEL, payload => {
+        if (!isMeetingReportRedisEvent(payload)) {
+          console.error("MeetingReport Redis payload is invalid", payload);
+          return;
+        }
+
+        const { workspaceId, ...event } = payload;
+        io.to(createMeetingRoomName(workspaceId)).emit(meetingServerEvents.reportUpdated, event);
       })
     : null;
   const unsubscribeBoardInvalidations = redisAdapter
@@ -343,6 +371,38 @@ export async function createRealtimeSocketServer({
 
       await socket.join(result.roomName);
       socket.emit(canvasServerEvents.joined, result.payload);
+    });
+
+    socket.on(meetingClientEvents.subscribe, async payload => {
+      const workspaceId = readMeetingWorkspaceId(payload);
+      if (!workspaceId) {
+        emitMeetingError(socket, "meeting:subscribe payload is invalid");
+        return;
+      }
+
+      const allowed = await meetingAccessService.canJoinWorkspace(
+        { userId: authedSocket.data.auth.userId },
+        workspaceId
+      );
+      if (!allowed) {
+        socket.emit(
+          meetingServerEvents.error,
+          createSocketErrorPayload("forbidden", "meeting room access denied")
+        );
+        return;
+      }
+
+      await socket.join(createMeetingRoomName(workspaceId));
+      socket.emit(meetingServerEvents.subscribed, { workspaceId });
+    });
+
+    socket.on(meetingClientEvents.unsubscribe, async payload => {
+      const workspaceId = readMeetingWorkspaceId(payload);
+      if (!workspaceId) {
+        emitMeetingError(socket, "meeting:unsubscribe payload is invalid");
+        return;
+      }
+      await socket.leave(createMeetingRoomName(workspaceId));
     });
 
     socket.on(canvasClientEvents.leave, async (payload) => {
@@ -416,6 +476,7 @@ export async function createRealtimeSocketServer({
   return {
     async close() {
       await unsubscribeCanvasOperations?.();
+      await unsubscribeMeetingReports?.();
       await unsubscribeBoardInvalidations?.();
       await io.close();
       await redisAdapter?.close();

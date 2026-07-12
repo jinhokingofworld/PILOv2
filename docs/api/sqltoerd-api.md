@@ -279,7 +279,7 @@ type SqltoerdColumnAnnotationLink = {
 - annotation의 table/column endpoint는 `modelJson`에 존재하는 id를 참조해야 한다.
 - annotation endpoint는 방향이 없는 관계로 취급하며 정방향과 역방향을 중복으로
   저장할 수 없다.
-- SQL 직접 편집과 Generate로 기존 Column annotation endpoint에 실제 FK가 생긴 경우,
+- SQL 직접 편집의 자동 parsing 결과로 기존 Column annotation endpoint에 실제 FK가 생긴 경우,
   API는 annotation을 자동 삭제하지 않고 일시적인 충돌 상태를 저장할 수 있다.
 - 신규 Column annotation 생성 UI는 실제 FK와 같은 endpoint를 선택하지 못하게 한다.
 - FK와 annotation이 충돌하면 실제 FK를 우선 표시하고, 후속 UI에서 사용자가 설명선
@@ -531,7 +531,7 @@ Request:
 - `dialect`가 없으면 `auto`를 사용한다.
 - `sourceText`가 없으면 빈 문자열 `""`을 사용한다.
 - `modelJson`과 `layoutJson`은 필수다.
-- `sourceText`, `modelJson`, `layoutJson`은 Generate 성공 결과를 기준으로 보낸다.
+- `sourceText`, `modelJson`, `layoutJson`은 자동 parsing에 성공한 동일 snapshot을 기준으로 보낸다.
 - `settingsJson`이 없으면 `{}`를 사용한다.
 - 서버는 `modelJson`에서 `tableCount`, `relationCount`를 계산한다.
 - 서버는 `revision = 1`로 생성한다.
@@ -544,7 +544,7 @@ Request:
 PATCH /api/v1/workspaces/{workspaceId}/sql-erd-sessions/{sessionId}
 ```
 
-Generate 성공, table 위치 변경, 저장 대상 설정 변경 시 client가 이 API로 자동
+자동 parsing 성공, table 위치 변경, 저장 대상 설정 변경 시 client가 이 API로 자동
 저장한다.
 
 Request:

@@ -37,9 +37,16 @@ export type SqltoerdDdlParseResult =
     };
 
 export type SqltoerdDdlParseError = {
-  code: "EMPTY_SOURCE" | "UNSUPPORTED_DIALECT" | "PARSE_FAILED" | "NO_CREATE_TABLE";
+  code:
+    | "EMPTY_SOURCE"
+    | "UNSUPPORTED_DIALECT"
+    | "PARSE_FAILED"
+    | "NO_CREATE_TABLE"
+    | "SOURCE_TOO_LARGE";
   message: string;
 };
+
+export const SQL_ERD_SOURCE_TEXT_MAX_BYTES = 1024 * 1024;
 
 type SqlParserAstNode = Record<string, unknown>;
 
@@ -57,6 +64,13 @@ const parser = new Parser();
 export function parseSqlDdlToErdModel(
   input: SqltoerdDdlParseInput
 ): SqltoerdDdlParseResult {
+  if (isSqlErdSourceTextTooLarge(input.sourceText)) {
+    return createParseFailure(
+      "SOURCE_TOO_LARGE",
+      "SQL DDL source exceeds the 1 MiB UTF-8 limit."
+    );
+  }
+
   const sourceText = input.sourceText.trim();
 
   if (!sourceText) {
@@ -147,6 +161,13 @@ export function parseSqlDdlToErdModel(
       sourceText: input.sourceText
     })
   };
+}
+
+export function isSqlErdSourceTextTooLarge(sourceText: string) {
+  return (
+    new TextEncoder().encode(sourceText).byteLength >
+    SQL_ERD_SOURCE_TEXT_MAX_BYTES
+  );
 }
 
 function preparePostgreSqlParserSource(sourceText: string) {

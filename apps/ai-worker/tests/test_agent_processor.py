@@ -521,6 +521,130 @@ def test_normalizer_asks_for_calendar_time_when_end_time_is_not_after_start_time
     assert "종료 시각" in normalized.final_answer
 
 
+def test_normalizer_blocks_calendar_recurrence_request() -> None:
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=[
+                tool_snapshot(
+                    name="create_calendar_event",
+                    description="Calendar 일정 생성",
+                    riskLevel="medium",
+                    executionMode="confirmation_required",
+                    inputSchema={
+                        "type": "object",
+                        "required": ["title", "startDate", "endDate"],
+                        "additionalProperties": False,
+                        "properties": {},
+                    },
+                )
+            ]
+        )
+    )
+
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="create_calendar_event",
+            tool_input={
+                "title": "스탠드업",
+                "startDate": "2026-07-13",
+                "endDate": "2026-07-13",
+                "startTime": "10:00",
+            },
+            requires_confirmation=True,
+        ),
+        job,
+        prompt="다음 주 평일마다 오전 10시에 스탠드업 일정 만들어줘",
+    )
+
+    assert normalized.status == "unsupported"
+    assert normalized.risk_level is None
+    assert normalized.output_summary["unsupportedReason"] == "calendar_recurrence_unsupported"
+    assert "반복 일정" in normalized.final_answer
+
+
+def test_normalizer_requires_time_or_all_day_for_multi_day_calendar_create() -> None:
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=[
+                tool_snapshot(
+                    name="create_calendar_event",
+                    description="Calendar 일정 생성",
+                    riskLevel="medium",
+                    executionMode="confirmation_required",
+                    inputSchema={
+                        "type": "object",
+                        "required": ["title", "startDate", "endDate"],
+                        "additionalProperties": False,
+                        "properties": {},
+                    },
+                )
+            ]
+        )
+    )
+
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="create_calendar_event",
+            tool_input={
+                "title": "제주 워크숍",
+                "startDate": "2026-07-20",
+                "endDate": "2026-07-22",
+            },
+            requires_confirmation=True,
+        ),
+        job,
+    )
+
+    assert normalized.status == "needs_clarification"
+    assert normalized.risk_level is None
+    assert normalized.output_summary["missingFields"] == ["calendar_event_time_or_all_day"]
+    assert "종일 여부 또는 시작 시각" in normalized.final_answer
+
+
+def test_normalizer_keeps_explicit_all_day_multi_day_calendar_create() -> None:
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=[
+                tool_snapshot(
+                    name="create_calendar_event",
+                    description="Calendar 일정 생성",
+                    riskLevel="medium",
+                    executionMode="confirmation_required",
+                    inputSchema={
+                        "type": "object",
+                        "required": ["title", "startDate", "endDate"],
+                        "additionalProperties": False,
+                        "properties": {},
+                    },
+                )
+            ]
+        )
+    )
+
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="create_calendar_event",
+            tool_input={
+                "title": "제주 워크숍",
+                "startDate": "2026-07-20",
+                "endDate": "2026-07-22",
+                "isAllDay": True,
+            },
+            requires_confirmation=True,
+        ),
+        job,
+    )
+
+    assert normalized.status == "tool_candidate"
+    assert normalized.risk_level == "medium"
+    assert normalized.output_summary["input"] == {
+        "title": "제주 워크숍",
+        "startDate": "2026-07-20",
+        "endDate": "2026-07-22",
+        "isAllDay": True,
+    }
+
+
 def test_normalizer_blocks_meeting_detail_without_report_id() -> None:
     job = parse_agent_run_job_payload(
         agent_payload(
@@ -583,6 +707,8 @@ def test_planner_prompt_preserves_calendar_tool_boundaries() -> None:
     prompt = _agent_planner_system_prompt()
 
     assert "title, keyword, participant, or current-time filters" in prompt
+    assert "Calendar recurrence is not supported" in prompt
+    assert "require an explicit all-day choice" in prompt
     assert "never set endTime equal to startTime" in prompt
     assert "positive integer Calendar event ID" in prompt
     assert "Korean" in prompt
