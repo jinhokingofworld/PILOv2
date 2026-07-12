@@ -22,6 +22,7 @@ const [
     ),
     readFile(new URL("github-sync-executor.service.ts", moduleDirectory), "utf8")
   ]);
+const domainRunnerSource = await readFile(new URL("test.mjs", import.meta.url), "utf8");
 
 const require = createRequire(import.meta.url);
 const {
@@ -158,5 +159,18 @@ assert.match(syncExecutorSource, /updatedAt/);
 assert.doesNotMatch(publisherSource, /raw/);
 assert.match(integrationModuleSource, /GithubBoardInvalidationPublisherService/);
 assert.match(workerModuleSource, /GithubBoardInvalidationPublisherService/);
+
+const tscBuildCallIndex = domainRunnerSource.indexOf(
+  "execFileSync(process.execPath"
+);
+const boardInvalidationImportIndex = domainRunnerSource.indexOf(
+  'await import("./board-invalidation.test.mjs");'
+);
+
+assert.ok(tscBuildCallIndex >= 0, "The GitHub Integration runner must build dist.");
+assert.ok(
+  boardInvalidationImportIndex > tscBuildCallIndex,
+  "The Board invalidation test must run after the GitHub Integration dist build."
+);
 
 console.log("board invalidation tests passed");
