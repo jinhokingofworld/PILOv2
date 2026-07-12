@@ -2,7 +2,13 @@ export const MAIN_MEETING_ROOM = "MAIN_MEETING_ROOM" as const;
 
 export type MeetingRoomKey = typeof MAIN_MEETING_ROOM;
 export type RecordingStatus = "RUNNING" | "COMPLETED" | "FAILED";
-export type MeetingReportStatus = "PROCESSING" | "COMPLETED" | "FAILED";
+export type MeetingReportStatus =
+  | "PROCESSING"
+  | "QUEUED"
+  | "TRANSCRIBING"
+  | "SUMMARIZING"
+  | "COMPLETED"
+  | "FAILED";
 export type MeetingReportFailedStep = "RECORDING" | "STT" | "LLM";
 
 export type Meeting = {

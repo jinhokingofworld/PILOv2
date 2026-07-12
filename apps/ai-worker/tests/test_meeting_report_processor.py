@@ -67,6 +67,7 @@ class FakeRepository:
         self.release_calls: list[str] = []
         self.failed_updates: list[tuple[str, str, str]] = []
         self.completed_updates: list[tuple[str, GeneratedMeetingReport]] = []
+        self.progress_updates: list[tuple[str, str]] = []
 
     def try_acquire_report_lock(self, report_id: str) -> bool:
         self.lock_calls.append(report_id)
@@ -80,6 +81,9 @@ class FakeRepository:
 
     def mark_failed(self, report_id: str, failed_step: str, error_message: str) -> None:
         self.failed_updates.append((report_id, failed_step, error_message))
+
+    def mark_progress(self, report_id: str, status: str) -> None:
+        self.progress_updates.append((report_id, status))
 
     def mark_completed(self, report_id: str, report: GeneratedMeetingReport) -> None:
         self.completed_updates.append((report_id, report))
@@ -196,6 +200,10 @@ def test_processor_completes_processing_report() -> None:
     assert result.delete_message is True
     assert result.reason == "completed"
     assert repository.failed_updates == []
+    assert repository.progress_updates == [
+        (REPORT_ID, "TRANSCRIBING"),
+        (REPORT_ID, "SUMMARIZING"),
+    ]
     assert len(repository.completed_updates) == 1
     completed_report_id, completed = repository.completed_updates[0]
     assert completed_report_id == REPORT_ID

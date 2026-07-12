@@ -23,6 +23,14 @@ const canvasPresence = await readFile(
   new URL("../src/canvas/canvas-presence.service.ts", import.meta.url),
   "utf8"
 );
+const meetingAccess = await readFile(
+  new URL("../src/meeting/meeting-access.service.ts", import.meta.url),
+  "utf8"
+);
+const meetingEvents = await readFile(
+  new URL("../src/meeting/meeting-socket-events.ts", import.meta.url),
+  "utf8"
+);
 const redisPubSub = await readFile(
   new URL("../src/redis/redis-pubsub.ts", import.meta.url),
   "utf8"
@@ -70,6 +78,14 @@ assert.match(socketServer, /CANVAS_OPERATION_REDIS_CHANNEL = "canvas:operations"
 assert.match(socketServer, /isCanvasShapeOperationPayload/);
 assert.match(socketServer, /canvasServerEvents\.operation/);
 assert.match(socketServer, /redisAdapter\.subscribe/);
+assert.match(socketServer, /MEETING_REPORT_REDIS_CHANNEL = "meeting:report-events"/);
+assert.match(socketServer, /meetingClientEvents\.subscribe/);
+assert.match(socketServer, /meetingServerEvents\.reportUpdated/);
+assert.match(socketServer, /createMeetingRoomName/);
+assert.match(meetingAccess, /FROM workspace_members/);
+assert.match(meetingAccess, /workspace_id = \$1/);
+assert.match(meetingEvents, /meeting:subscribe/);
+assert.match(meetingEvents, /meeting:report:updated/);
 
 assert.match(canvasPresence, /clearRoomPresence/);
 assert.match(canvasPresence, /clearSocket/);

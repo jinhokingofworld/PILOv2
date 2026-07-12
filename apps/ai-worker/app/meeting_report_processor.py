@@ -9,6 +9,7 @@ from uuid import UUID
 MAX_TRANSCRIPTION_FILE_BYTES = 25_000_000
 
 TERMINAL_REPORT_STATUSES = {"COMPLETED", "FAILED"}
+REPORT_IN_PROGRESS_STATUSES = {"PROCESSING", "QUEUED", "TRANSCRIBING", "SUMMARIZING"}
 REPORT_FAILED_STEP_STT = "STT"
 REPORT_FAILED_STEP_LLM = "LLM"
 
@@ -84,6 +85,8 @@ class MeetingReportRepository(Protocol):
     def release_report_lock(self, report_id: str) -> None: ...
 
     def get_report_context(self, job: MeetingReportJob) -> MeetingReportContext | None: ...
+
+    def mark_progress(self, report_id: str, status: str) -> None: ...
 
     def mark_failed(self, report_id: str, failed_step: str, error_message: str) -> None: ...
 
@@ -177,8 +180,10 @@ class MeetingReportProcessor:
             if context.report_status in TERMINAL_REPORT_STATUSES:
                 return self._result(job, delete_message=True, reason="terminal_report")
 
-            if context.report_status != "PROCESSING":
+            if context.report_status not in {"PROCESSING", "QUEUED"}:
                 return self._result(job, delete_message=True, reason="unsupported_report_status")
+
+            self.repository.mark_progress(job.report_id, "TRANSCRIBING")
 
             if context.recording_status != "COMPLETED":
                 self.repository.mark_failed(
@@ -233,6 +238,8 @@ class MeetingReportProcessor:
                     SAFE_STT_ERROR,
                 )
                 return self._result(job, delete_message=True, reason="stt_failed")
+
+            self.repository.mark_progress(job.report_id, "SUMMARIZING")
 
             try:
                 report = self.ai_client.generate_report(transcript_text)

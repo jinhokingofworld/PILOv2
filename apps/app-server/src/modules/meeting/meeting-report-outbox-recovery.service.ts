@@ -37,7 +37,7 @@ export class MeetingReportOutboxRecoveryService implements OnModuleInit, OnModul
         `SELECT report.id, report.meeting_id, report.recording_id, outbox.id AS outbox_id
          FROM meeting_reports AS report
          JOIN meeting_report_outbox AS outbox ON outbox.report_id = report.id
-         WHERE report.status = 'PROCESSING'
+         WHERE report.status IN ('PROCESSING', 'QUEUED', 'TRANSCRIBING', 'SUMMARIZING')
            AND outbox.status = 'delivered'
            AND report.updated_at <= now() - ($1 * INTERVAL '1 second')
          ORDER BY report.updated_at ASC
@@ -55,7 +55,7 @@ export class MeetingReportOutboxRecoveryService implements OnModuleInit, OnModul
         try {
           const report = await transaction.queryOne<{ id: string }>(
             `UPDATE meeting_reports SET status = 'FAILED', failed_step = 'STT', error_message = 'Meeting report processing timed out', updated_at = now()
-             WHERE id = $1 AND status = 'PROCESSING' RETURNING id`, [candidate.id]
+             WHERE id = $1 AND status IN ('PROCESSING', 'QUEUED', 'TRANSCRIBING', 'SUMMARIZING') RETURNING id`, [candidate.id]
           );
           if (report) {
             count += 1;

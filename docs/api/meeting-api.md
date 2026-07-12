@@ -104,7 +104,10 @@ POST /api/v1/livekit/webhooks
 | Recording | `RUNNING` | 녹음 진행 중 |
 | Recording | `COMPLETED` | 녹음 완료 |
 | Recording | `FAILED` | 녹음 실패 |
-| MeetingReport | `PROCESSING` | 회의록 작업 대기 또는 생성 중 |
+| MeetingReport | `QUEUED` | 회의록 작업 대기 또는 outbox/SQS 재발행 대기 |
+| MeetingReport | `TRANSCRIBING` | Worker가 녹음 음성을 텍스트로 변환 중 |
+| MeetingReport | `SUMMARIZING` | Worker가 transcript에서 회의록·결정·후속 작업을 정리 중 |
+| MeetingReport | `PROCESSING` | 이전 버전에서 생성된 legacy 진행 상태 |
 | MeetingReport | `COMPLETED` | 회의록 생성 완료 |
 | MeetingReport | `FAILED` | 회의록 생성 실패 |
 | MeetingReport failedStep | `RECORDING` | 녹음 단계 실패 |
@@ -178,7 +181,7 @@ Meeting 하나에는 여러 Recording이 있을 수 있다. API에서 `currentRe
 | `id` | string | 회의록 id |
 | `meetingId` | string | 회의 id |
 | `recordingId` | string | 녹음 id |
-| `status` | `PROCESSING` \| `COMPLETED` \| `FAILED` | 회의록 상태 |
+| `status` | `QUEUED` \| `TRANSCRIBING` \| `SUMMARIZING` \| `COMPLETED` \| `FAILED` \| `PROCESSING` | 회의록 상태. `PROCESSING`은 legacy 진행 상태 |
 | `failedStep` | `RECORDING` \| `STT` \| `LLM` \| null | 실패 단계 |
 | `errorMessage` | string \| null | 실패 메시지 |
 | `transcriptText` | string \| null | 상세 조회에서만 반환 |
@@ -390,15 +393,17 @@ Request body 없음.
 보고서 생성 요청 side effect는 서버에서 한 번만 수행되어야 한다.
 
 `recording.durationSec`이 60을 초과하면 App Server는 `MeetingReport.status =
-PROCESSING`과 durable outbox intent를 같은 transaction으로 생성하고 AI job 발행을
+QUEUED`와 durable outbox intent를 같은 transaction으로 생성하고 AI job 발행을
 시도한다. SQS 일시 실패는 outbox에 `pending`으로 남고, dispatcher가 시작 직후와
 60초마다 다시 발행한다. 각 발행은 60초 claim lease와 `FOR UPDATE SKIP LOCKED`를
 사용하며, 실패 시 1·2·4·8·16분 뒤 재시도한다. 5회 재시도 뒤에도 실패하면 outbox와
 Report를 `FAILED`로 전환한다. SQS 발행은 at-least-once이므로, 발행 성공 뒤
 delivery 기록이 유실된 경우 같은 report job이 다시 전달될 수 있다.
 
-MVP에서는 `PROCESSING`을 queued와 running을 모두 포함하는 상태로 사용한다. AI
-Worker가 이미 delivery된 job을 처리하지 못해 Report가 20분 넘게 `PROCESSING`이면,
+AI Worker는 job lock을 획득하면 `TRANSCRIBING`, STT 원문을 확보하면 `SUMMARIZING`으로
+상태를 갱신하고, 결과 저장 시 `COMPLETED` 또는 `FAILED`로 끝낸다. 이전 버전의
+`PROCESSING`은 legacy 진행 상태로 조회만 지원한다. Worker가 이미 delivery된 job을 처리하지 못해
+Report가 20분 넘게 진행 상태이면,
 dispatcher는 Worker가 보유한 report advisory lock이 없는 경우에만 해당 Report를
 `FAILED`로 전환한다. AI Worker가 job을 consume해 OpenAI STT API로 transcript를 만들고, OpenAI LLM API로 보고서를 생성한 뒤 DB의
 MeetingReport를 `COMPLETED` 또는 `FAILED`로 갱신한다. Frontend는 App Server API로
@@ -477,7 +482,7 @@ Query:
 
 | Name | Required | 설명 |
 | --- | --- | --- |
-| `status` | No | `PROCESSING`, `COMPLETED`, `FAILED` |
+| `status` | No | `QUEUED`, `TRANSCRIBING`, `SUMMARIZING`, `COMPLETED`, `FAILED`, legacy `PROCESSING` |
 | `limit` | No | 반환 개수. 기본값 20, 최대 100 |
 
 `status`가 허용값이 아니면 `400 BAD_REQUEST`를 반환한다. `limit`이 숫자가
@@ -538,7 +543,7 @@ Request body 없음.
 
 `FAILED` 상태의 MeetingReport만 재생성을 요청할 수 있다. 단, 연결된 Recording이
 `COMPLETED` 상태이고 `audioFileKey`가 있어 AI Worker가 다시 처리할 수 있는 경우만
-허용한다. 요청이 성공하면 MeetingReport는 다시 `PROCESSING` 상태가 되고
+허용한다. 요청이 성공하면 MeetingReport는 다시 `QUEUED` 상태가 되고
 `retryCount`가 증가한다. 기존 실패 정보와 이전 산출물은 초기화한다. MVP 응답에는
 별도 `jobId`를 포함하지 않고, 긴 `transcriptText`도 포함하지 않는다.
 
@@ -552,7 +557,7 @@ Response `data`:
 
 | HTTP | Code | 상황 |
 | --- | --- | --- |
-| `400` | `BAD_REQUEST` | `PROCESSING` 또는 `COMPLETED` 상태의 MeetingReport 재생성 요청 |
+| `400` | `BAD_REQUEST` | 진행 중 상태 또는 `COMPLETED` 상태의 MeetingReport 재생성 요청 |
 | `400` | `BAD_REQUEST` | Recording이 완료되지 않았거나 `audioFileKey`가 없어 재생성할 수 없음 |
 | `401` | `UNAUTHORIZED` | 인증 없음 |
 | `403` | `FORBIDDEN` | Workspace 접근 불가 |

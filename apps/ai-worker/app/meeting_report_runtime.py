@@ -187,6 +187,19 @@ class PgMeetingReportRepository:
             recording_audio_file_key=row["recording_audio_file_key"],
         )
 
+    def mark_progress(self, report_id: str, status: str) -> None:
+        if status not in {"TRANSCRIBING", "SUMMARIZING"}:
+            raise ValueError("Unsupported MeetingReport progress status")
+        self.connection.execute(
+            """
+            UPDATE meeting_reports
+            SET status = %s::meeting_report_status, updated_at = now()
+            WHERE id = %s
+              AND status IN ('PROCESSING', 'QUEUED', 'TRANSCRIBING', 'SUMMARIZING')
+            """,
+            (status, report_id),
+        )
+
     def mark_failed(self, report_id: str, failed_step: str, error_message: str) -> None:
         self.connection.execute(
             """
@@ -202,7 +215,7 @@ class PgMeetingReportRepository:
               action_item_candidates = '[]'::jsonb,
               updated_at = now()
             WHERE id = %s
-              AND status = 'PROCESSING'
+              AND status IN ('PROCESSING', 'QUEUED', 'TRANSCRIBING', 'SUMMARIZING')
             """,
             (failed_step, error_message, report_id),
         )
@@ -222,7 +235,7 @@ class PgMeetingReportRepository:
               action_item_candidates = %s::jsonb,
               updated_at = now()
             WHERE id = %s
-              AND status = 'PROCESSING'
+              AND status IN ('PROCESSING', 'QUEUED', 'TRANSCRIBING', 'SUMMARIZING')
             """,
             (
                 report.transcript_text,
