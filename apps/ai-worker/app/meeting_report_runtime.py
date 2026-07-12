@@ -50,6 +50,7 @@ DEFAULT_VISIBILITY_TIMEOUT_SECONDS = 900
 DEFAULT_AGENT_EXECUTION_HANDOFF_TIMEOUT_SECONDS = 10
 DEFAULT_AGENT_STALE_EXECUTION_SWEEP_INTERVAL_SECONDS = 60
 DEFAULT_CANVAS_EMBEDDING_JOBS_PER_TICK = 10
+DEFAULT_MEETING_REPORT_EVENT_MAX_ATTEMPTS = 3
 AGENT_RETRY_TERMINAL_RECEIVE_COUNT = 3
 AGENT_RETRY_EXHAUSTED_ERROR_CODE = "AGENT_PLANNER_RETRY_EXHAUSTED"
 PR_REVIEW_ANALYSIS_RETRY_TERMINAL_RECEIVE_COUNT = 3
@@ -874,10 +875,17 @@ class HttpAgentExecutionHandoffClient(AgentExecutionHandoffClient):
 
 
 class HttpMeetingReportEventPublisher(MeetingReportEventPublisher):
-    def __init__(self, base_url: str, token: str, timeout_seconds: int) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        token: str,
+        timeout_seconds: int,
+        max_attempts: int = DEFAULT_MEETING_REPORT_EVENT_MAX_ATTEMPTS,
+    ) -> None:
         self.base_url = base_url.rstrip("/")
         self.token = token
         self.timeout_seconds = timeout_seconds
+        self.max_attempts = max_attempts
 
     def publish(self, report_id: str) -> None:
         request = Request(
@@ -889,11 +897,24 @@ class HttpMeetingReportEventPublisher(MeetingReportEventPublisher):
             },
             method="POST",
         )
-        try:
-            with urlopen(request, timeout=self.timeout_seconds):
-                return
-        except (HTTPError, OSError, TimeoutError, URLError) as error:
-            raise InfrastructureError("MeetingReport event delivery is unavailable") from error
+        last_error: HTTPError | OSError | TimeoutError | URLError | None = None
+        for attempt in range(self.max_attempts):
+            try:
+                with urlopen(request, timeout=self.timeout_seconds):
+                    return
+            except HTTPError as error:
+                if 400 <= error.code < 500:
+                    raise InfrastructureError(
+                        f"MeetingReport event delivery returned HTTP {error.code}"
+                    ) from error
+                last_error = error
+            except (OSError, TimeoutError, URLError) as error:
+                last_error = error
+
+            if attempt < self.max_attempts - 1:
+                time.sleep(0.25 * (2**attempt))
+
+        raise InfrastructureError("MeetingReport event delivery is unavailable") from last_error
 
 
 def create_worker(settings: RuntimeSettings | None = None) -> SqsAiJobWorker:
@@ -937,6 +958,10 @@ def create_worker(settings: RuntimeSettings | None = None) -> SqsAiJobWorker:
         _require_env("MEETING_REPORT_EVENT_BASE_URL"),
         _require_env("MEETING_REPORT_EVENT_TOKEN"),
         _positive_int_env("MEETING_REPORT_EVENT_TIMEOUT_SECONDS", 10),
+        _positive_int_env(
+            "MEETING_REPORT_EVENT_MAX_ATTEMPTS",
+            DEFAULT_MEETING_REPORT_EVENT_MAX_ATTEMPTS,
+        ),
     )
     meeting_report_processor = MeetingReportProcessor(
         meeting_report_repository,

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
 import { DatabaseService } from "../../database/database.service";
 import { MeetingReportJobPayload, MeetingReportJobService } from "./meeting-report-job.service";
+import { MeetingReportRealtimePublisherService } from "./meeting-report-realtime-publisher.service";
 
 const SWEEP_INTERVAL_MS = 60_000;
 const CLAIM_TIMEOUT_SECONDS = 60;
@@ -26,7 +27,8 @@ export class MeetingReportOutboxPublisherService implements OnModuleInit, OnModu
 
   constructor(
     private readonly database: DatabaseService,
-    private readonly meetingReportJobService: MeetingReportJobService
+    private readonly meetingReportJobService: MeetingReportJobService,
+    private readonly meetingReportRealtimePublisher?: MeetingReportRealtimePublisherService
   ) {}
 
   onModuleInit(): void {
@@ -114,12 +116,15 @@ export class MeetingReportOutboxPublisherService implements OnModuleInit, OnModu
         `UPDATE meeting_report_outbox SET status = 'failed', claim_token = NULL, claimed_at = NULL, error_code = 'MEETING_REPORT_ENQUEUE_FAILED', error_message = 'Meeting report job could not be enqueued'
          WHERE id = $1 AND status = 'publishing' AND claim_token = $2 RETURNING report_id`, [claim.id, claim.claim_token]);
       if (!outbox) return false;
-      await transaction.execute(
+      const report = await transaction.queryOne<{ id: string }>(
         `UPDATE meeting_reports SET status = 'FAILED', failed_step = 'STT', error_message = 'Meeting report job could not be enqueued', updated_at = now()
-         WHERE id = $1 AND status IN ('PROCESSING', 'QUEUED', 'TRANSCRIBING', 'SUMMARIZING')`, [outbox.report_id]);
-      return true;
+         WHERE id = $1 AND status IN ('PROCESSING', 'QUEUED', 'TRANSCRIBING', 'SUMMARIZING') RETURNING id`,
+        [outbox.report_id]
+      );
+      return Boolean(report);
     });
     if (failed) {
+      await this.meetingReportRealtimePublisher?.publishReportUpdatedSafely(claim.report_id);
       this.logger.warn(
         `MeetingReport outbox event=retry_exhausted outbox_id=${claim.id} report_id=${claim.report_id} meeting_id=${claim.meeting_id} recording_id=${claim.recording_id} attempt_count=${attempts} failure_step=STT`
       );

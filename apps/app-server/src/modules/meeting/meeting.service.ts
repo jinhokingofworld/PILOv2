@@ -23,6 +23,7 @@ import {
   MeetingReportJobPayload,
   MeetingReportJobService
 } from "./meeting-report-job.service";
+import { MeetingReportRealtimePublisherService } from "./meeting-report-realtime-publisher.service";
 
 type RecordingStatus = "RUNNING" | "COMPLETED" | "FAILED";
 type MeetingReportStatus =
@@ -361,7 +362,8 @@ export class MeetingService {
     private readonly workspaceService: WorkspaceService,
     private readonly liveKitTokenService: LiveKitTokenService,
     private readonly liveKitEgressService: LiveKitEgressService,
-    private readonly meetingReportJobService: MeetingReportJobService
+    private readonly meetingReportJobService: MeetingReportJobService,
+    private readonly meetingReportRealtimePublisher?: MeetingReportRealtimePublisherService
   ) {}
 
   getModuleInfo() {
@@ -651,6 +653,7 @@ export class MeetingService {
     );
 
     await this.publishMeetingReportOutbox(result.job);
+    await this.publishMeetingReportEvent(result.job?.reportId);
 
     return result.payload;
   }
@@ -898,6 +901,8 @@ export class MeetingService {
     );
 
     await this.publishMeetingReportOutbox(result.job);
+    await this.publishMeetingReportEvent(result.job?.reportId);
+    await this.publishMeetingReportEvent(result.payload.report?.id);
     return result.payload;
   }
 
@@ -1960,6 +1965,11 @@ export class MeetingService {
         `MeetingReport outbox event=fast_path_pending report_id=${job.reportId} meeting_id=${job.meetingId} recording_id=${job.recordingId} failure_step=none`
       );
     }
+  }
+
+  private async publishMeetingReportEvent(reportId: string | undefined): Promise<void> {
+    if (!reportId) return;
+    await this.meetingReportRealtimePublisher?.publishReportUpdatedSafely(reportId);
   }
 
   private async restoreLeaveMeetingAfterReportEnqueueFailure(input: {

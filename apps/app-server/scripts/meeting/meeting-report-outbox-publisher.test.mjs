@@ -75,6 +75,18 @@ class FakeMeetingReportJobService {
   }
 }
 
+class FakeMeetingReportRealtimePublisher {
+  constructor({ shouldFail = false } = {}) {
+    this.shouldFail = shouldFail;
+    this.reportIds = [];
+  }
+
+  async publishReportUpdatedSafely(reportId) {
+    this.reportIds.push(reportId);
+    if (this.shouldFail) throw new Error("Redis unavailable");
+  }
+}
+
 {
   const database = new FakeOutboxDatabase({
     dueRows: [{ id: claim.id }],
@@ -130,9 +142,11 @@ class FakeMeetingReportJobService {
     dueRows: [{ id: claim.id }],
     claimRow: { ...claim, attempt_count: 6 }
   });
+  const realtimePublisher = new FakeMeetingReportRealtimePublisher();
   const publisher = new MeetingReportOutboxPublisherService(
     database,
-    new FakeMeetingReportJobService({ shouldFail: true })
+    new FakeMeetingReportJobService({ shouldFail: true }),
+    realtimePublisher
   );
 
   await publisher.publishDue();
@@ -144,9 +158,12 @@ class FakeMeetingReportJobService {
     /SET status = 'failed'/
   );
   assert.match(
-    database.calls.find((call) => call.method === "transaction.execute").text,
+    database.calls.find(
+      (call) => call.method === "queryOne" && call.text.includes("SET status = 'FAILED'")
+    ).text,
     /SET status = 'FAILED'/
   );
+  assert.deepEqual(realtimePublisher.reportIds, [claim.report_id]);
 }
 
 {
@@ -158,9 +175,11 @@ class FakeMeetingReportJobService {
       outbox_id: claim.id
     }]
   });
-  const recovery = new MeetingReportOutboxRecoveryService(database);
+  const realtimePublisher = new FakeMeetingReportRealtimePublisher();
+  const recovery = new MeetingReportOutboxRecoveryService(database, realtimePublisher);
 
   assert.equal(await recovery.recoverStaleReports(), 1);
+  assert.deepEqual(realtimePublisher.reportIds, [claim.report_id]);
   const query = database.calls.find((call) => call.method === "transaction.query");
   assert.match(query.text, /outbox.status = 'delivered'/);
   assert.match(query.text, /FOR UPDATE OF report, outbox SKIP LOCKED/);

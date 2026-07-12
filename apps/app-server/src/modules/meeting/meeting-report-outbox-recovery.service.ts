@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
 import { DatabaseService } from "../../database/database.service";
+import { MeetingReportRealtimePublisherService } from "./meeting-report-realtime-publisher.service";
 
 const SWEEP_INTERVAL_MS = 60_000;
 const PROCESSING_STALE_TIMEOUT_SECONDS = 20 * 60;
@@ -11,7 +12,10 @@ export class MeetingReportOutboxRecoveryService implements OnModuleInit, OnModul
   private readonly logger = new Logger(MeetingReportOutboxRecoveryService.name);
   private interval: ReturnType<typeof setInterval> | null = null;
 
-  constructor(private readonly database: DatabaseService) {}
+  constructor(
+    private readonly database: DatabaseService,
+    private readonly meetingReportRealtimePublisher?: MeetingReportRealtimePublisherService
+  ) {}
 
   onModuleInit(): void {
     if (process.env.APP_SERVER_RUNTIME === "github-sync-worker") return;
@@ -27,7 +31,7 @@ export class MeetingReportOutboxRecoveryService implements OnModuleInit, OnModul
   }
 
   async recoverStaleReports(): Promise<number> {
-    const recovered = await this.database.transaction(async transaction => {
+    const recoveredReportIds = await this.database.transaction(async transaction => {
       const candidates = await transaction.query<{
         id: string;
         meeting_id: string;
@@ -45,7 +49,7 @@ export class MeetingReportOutboxRecoveryService implements OnModuleInit, OnModul
          FOR UPDATE OF report, outbox SKIP LOCKED`,
         [PROCESSING_STALE_TIMEOUT_SECONDS, BATCH_SIZE]
       );
-      let count = 0;
+      const reportIds: string[] = [];
       for (const candidate of candidates) {
         const lockKey = createHash("sha256").update(candidate.id).digest().readBigInt64BE(0);
         const lock = await transaction.queryOne<{ acquired: boolean }>(
@@ -58,7 +62,7 @@ export class MeetingReportOutboxRecoveryService implements OnModuleInit, OnModul
              WHERE id = $1 AND status IN ('PROCESSING', 'QUEUED', 'TRANSCRIBING', 'SUMMARIZING') RETURNING id`, [candidate.id]
           );
           if (report) {
-            count += 1;
+            reportIds.push(report.id);
             this.logger.warn(
               `MeetingReport outbox event=stale_report_failed outbox_id=${candidate.outbox_id} report_id=${candidate.id} meeting_id=${candidate.meeting_id} recording_id=${candidate.recording_id} failure_step=STT`
             );
@@ -67,9 +71,16 @@ export class MeetingReportOutboxRecoveryService implements OnModuleInit, OnModul
           await transaction.execute("SELECT pg_advisory_unlock($1::bigint)", [lockKey]);
         }
       }
-      return count;
+      return reportIds;
     });
-    if (recovered) this.logger.warn(`Recovered ${recovered} stale MeetingReport(s)`);
-    return recovered;
+    await Promise.all(
+      recoveredReportIds.map(reportId =>
+        this.meetingReportRealtimePublisher?.publishReportUpdatedSafely(reportId)
+      )
+    );
+    if (recoveredReportIds.length) {
+      this.logger.warn(`Recovered ${recoveredReportIds.length} stale MeetingReport(s)`);
+    }
+    return recoveredReportIds.length;
   }
 }

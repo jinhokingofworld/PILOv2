@@ -114,6 +114,60 @@ POST /api/v1/livekit/webhooks
 | MeetingReport failedStep | `STT` | 음성 텍스트 변환 단계 실패 |
 | MeetingReport failedStep | `LLM` | 회의록 생성 단계 실패 |
 
+## Realtime 회의록 상태 이벤트
+
+MeetingReport의 상태가 생성·재생성·Worker 처리·outbox 재시도 소진·stale recovery로
+변경되면 App Server는 Redis `meeting:report-events` 채널에 상태를 발행한다.
+Realtime Server는 workspace membership을 확인한 socket만 해당 workspace room에
+가입시키고, 아래 이벤트를 전달한다. 이벤트는 화면의 DB 조회를 대체하지 않는다.
+클라이언트는 이벤트를 받으면 MeetingReport 목록 또는 상세를 다시 조회해야 하며,
+중복·순서 지연 이벤트도 허용해야 한다.
+
+### Socket.IO client → server
+
+```ts
+socket.emit("meeting:subscribe", { workspaceId });
+socket.emit("meeting:unsubscribe", { workspaceId });
+```
+
+- socket 인증은 기존 Realtime bearer access token을 사용한다.
+- 가입 권한이 없거나 payload가 잘못되면 `meeting:error`를 받는다.
+- 가입 성공 시 `meeting:subscribed`를 받는다.
+
+### Socket.IO server → client
+
+```ts
+socket.on("meeting:report:updated", event => {
+  // event: MeetingReportRealtimeEvent
+});
+```
+
+| Field | Type | 설명 |
+| --- | --- | --- |
+| `event` | `meeting:report:updated` | 이벤트 이름 |
+| `reportId` | string | 갱신된 회의록 id |
+| `meetingId` | string | 회의 id |
+| `recordingId` | string | 녹음 id |
+| `status` | MeetingReport status | DB에서 다시 조회할 최신 상태 힌트 |
+| `failedStep` | `RECORDING` \| `STT` \| `LLM` \| null | 실패 단계 |
+| `updatedAt` | string | ISO datetime |
+
+### AI Worker → App Server 내부 callback
+
+```http
+POST /api/v1/internal/meeting-reports/events
+X-Meeting-Report-Event-Token: {MEETING_REPORT_EVENT_TOKEN}
+Content-Type: application/json
+
+{ "reportId": "uuid" }
+```
+
+AI Worker는 DB 상태를 저장한 뒤 이 callback을 호출한다. App Server는 `reportId`로
+DB의 현재 MeetingReport를 재조회해서 Redis 이벤트를 구성한다. 따라서 Worker는
+workspace 정보나 상태값을 신뢰 경계 밖으로 전달하지 않는다. 성공 응답은
+`204 No Content`이며, token 누락·불일치는 `401`, `reportId` 형식 오류는 `400`,
+서버 token 설정 누락은 `503`이다.
+
 ## Payload 요약
 
 ### Meeting
@@ -325,7 +379,7 @@ participant는 나갈 수 있다. 단, 마지막 active participant가 나가는
 trigger를 수행한 뒤 participant를 나가게 하고 회의를 자동 종료한다. 녹음 종료가
 정상 완료되지 않으면 나가기 요청은 실패하고 participant는 active 상태로 남는다.
 MeetingReport SQS 발행이 일시 실패해도 요청은 성공한다. 생성된 MeetingReport는
-`PROCESSING`으로 남고, 서버는 durable outbox에 재발행 의도를 보존한다. 이후
+`QUEUED`로 남고, 서버는 durable outbox에 재발행 의도를 보존한다. 이후
 dispatcher가 해당 job을 다시 발행한다.
 이미 나간 상태에서 다시 호출해도 같은 결과를 반환한다.
 
@@ -401,14 +455,12 @@ Report를 `FAILED`로 전환한다. SQS 발행은 at-least-once이므로, 발행
 delivery 기록이 유실된 경우 같은 report job이 다시 전달될 수 있다.
 
 AI Worker는 job lock을 획득하면 `TRANSCRIBING`, STT 원문을 확보하면 `SUMMARIZING`으로
-상태를 갱신하고, 결과 저장 시 `COMPLETED` 또는 `FAILED`로 끝낸다. 이전 버전의
-`PROCESSING`은 legacy 진행 상태로 조회만 지원한다. Worker가 이미 delivery된 job을 처리하지 못해
-Report가 20분 넘게 진행 상태이면,
+상태를 갱신하고, 결과 저장 시 `COMPLETED` 또는 `FAILED`로 끝낸 뒤 internal callback으로
+Realtime 이벤트 발행을 요청한다. 이전 버전의 `PROCESSING`은 legacy 진행 상태로 조회만
+지원한다. Worker가 이미 delivery된 job을 처리하지 못해 Report가 20분 넘게 진행 상태이면,
 dispatcher는 Worker가 보유한 report advisory lock이 없는 경우에만 해당 Report를
-`FAILED`로 전환한다. AI Worker가 job을 consume해 OpenAI STT API로 transcript를 만들고, OpenAI LLM API로 보고서를 생성한 뒤 DB의
-MeetingReport를 `COMPLETED` 또는 `FAILED`로 갱신한다. Frontend는 App Server API로
-MeetingReport 상태를 조회한다. API 응답과 화면 조회의 source of truth는 DB의
-MeetingReport다.
+`FAILED`로 전환하고 동일한 Realtime 이벤트를 발행한다. API 응답과 화면 조회의 source of
+truth는 DB의 MeetingReport다.
 
 Response `data`:
 
