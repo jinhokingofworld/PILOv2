@@ -4000,7 +4000,8 @@ assert.doesNotMatch(page, /-m-6/);
 assert.doesNotMatch(page, /h-\[calc\(100vh-3\.5rem\)\]/);
 
 assert.match(mainShell, /isSqlErdImmersiveRoute/);
-assert.match(mainShell, /pathname\.startsWith\("\/sql-erd"\)/);
+assert.match(mainShell, /pathname\.startsWith\("\/sql-erd\/session"\)/);
+assert.doesNotMatch(mainShell, /pathname\.startsWith\("\/sql-erd"\);/);
 
 assert.match(navigation, /SQLtoERD/);
 assert.match(navigation, /href: "\/sql-erd"/);

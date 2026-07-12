@@ -25,7 +25,7 @@ export function MainShell({ children }: MainShellProps) {
   const pathname = usePathname();
   const activeFeature = getFeatureNavigationItemForPathname(pathname);
   const isCanvasRoute = pathname.startsWith("/canvas");
-  const isSqlErdImmersiveRoute = pathname.startsWith("/sql-erd");
+  const isSqlErdImmersiveRoute = pathname.startsWith("/sql-erd/session");
   const [sidebarOpen, setSidebarOpen] = useState(() => !isCanvasRoute);
 
   useEffect(() => {
