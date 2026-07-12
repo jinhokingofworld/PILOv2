@@ -149,7 +149,7 @@ export class MeetingAgentToolsService {
       input
     );
     const selectedReports =
-      input.limit === 1 ? result.reports.slice(0, 1) : result.reports;
+      input.limit === undefined ? result.reports : result.reports.slice(0, input.limit);
     const reports = selectedReports.map((report) =>
       this.normalizeMeetingReportForAgent(report, {
         sectionTextLimit: LIST_SECTION_TEXT_LIMIT

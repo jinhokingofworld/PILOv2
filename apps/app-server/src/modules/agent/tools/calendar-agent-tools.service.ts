@@ -74,7 +74,8 @@ export class CalendarAgentToolsService {
   private listCalendarEventsDefinition(): AgentToolDefinition<unknown> {
     return {
       name: "list_calendar_events",
-      description: "Calendar 일정 목록을 날짜 범위 기준으로 조회합니다.",
+      description:
+        "Calendar 일정 목록을 날짜 범위 기준으로 조회합니다. 제목·키워드·참석자·현재 시각 필터는 지원하지 않습니다.",
       riskLevel: "low",
       executionMode: "auto",
       inputSchema: {
@@ -103,7 +104,8 @@ export class CalendarAgentToolsService {
   private createCalendarEventDefinition(): AgentToolDefinition<unknown> {
     return {
       name: "create_calendar_event",
-      description: "Calendar 일정을 생성합니다. 실행 전 confirmation이 필요합니다.",
+      description:
+        "Calendar 일정을 생성합니다. 실행 전 confirmation이 필요합니다. 종료 시각이 없으면 생략하고, 시작·종료 시각이 같거나 역전되면 추가 정보를 요청합니다.",
       riskLevel: "medium",
       executionMode: "confirmation_required",
       inputSchema: {
@@ -155,7 +157,7 @@ export class CalendarAgentToolsService {
     return {
       name: "update_calendar_event",
       description:
-        "Calendar 일정을 eventId와 변경값으로 수정합니다. 현재값은 서버가 조회하며 실행 전 confirmation이 필요합니다.",
+        "Calendar 일정을 사용자가 제공한 양의 정수 eventId와 변경값으로 수정합니다. 현재값과 Workspace 접근은 서버가 조회하며 실행 전 confirmation이 필요합니다.",
       riskLevel: "medium",
       executionMode: "confirmation_required",
       inputSchema: {
@@ -331,6 +333,13 @@ export class CalendarAgentToolsService {
     this.assertDateOrder(startDate, endDate);
     this.assertScheduleTimeFields({
       isAllDay,
+      startTime,
+      endTime,
+      label: "Calendar create input"
+    });
+    this.assertTimedScheduleOrder({
+      startDate,
+      endDate,
       startTime,
       endTime,
       label: "Calendar create input"
@@ -621,6 +630,23 @@ export class CalendarAgentToolsService {
 
     if (!input.startTime) {
       throw badRequest(`${input.label}.startTime is required for timed events`);
+    }
+  }
+
+  private assertTimedScheduleOrder(input: {
+    startDate: string;
+    endDate: string;
+    startTime: string | null;
+    endTime: string | null;
+    label: string;
+  }): void {
+    if (
+      input.startDate === input.endDate &&
+      input.startTime !== null &&
+      input.endTime !== null &&
+      input.endTime <= input.startTime
+    ) {
+      throw badRequest(`${input.label}.endTime must be later than startTime`);
     }
   }
 

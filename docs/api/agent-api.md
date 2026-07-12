@@ -641,6 +641,10 @@ Status code: `200 OK`
 - `eventId` 또는 `changes`가 없으면 현재 run은 `needs_clarification`으로 완료하며, 다른 event를
   자동 선택하지 않는다.
 - 시간 지정 일정에서 `endTime`이 없으면 Calendar API의 `startTime + 1시간` 정규화를 따른다.
+- `list_calendar_events`는 날짜 범위만 지원한다. 제목·키워드·참석자·현재 시각 조건을 요청하면
+  해당 조건을 무시하고 조회하지 않으며, 현재 Agent 범위에서 지원하지 않는다고 안내한다.
+- 시간 지정 일정의 `endTime`이 `startTime`과 같거나 같은 날짜에서 더 이르면 confirmation을 만들지 않고
+  추가 정보를 요청한다.
 - 일정 삭제는 1차 Agent tool이 아니다.
 
 ### MeetingReport

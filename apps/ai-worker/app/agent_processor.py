@@ -452,6 +452,10 @@ def normalize_agent_planner_decision(
                 decision.tool_input,
                 missing_fields,
             )
+        if tool.name == "create_calendar_event" and _has_invalid_calendar_create_time_order(
+            decision.tool_input
+        ):
+            missing_fields = tuple(sorted({*missing_fields, "calendar_event_end_time"}))
 
         if tool.name in MEETING_REPORT_ID_TOOLS and not _has_valid_uuid(
             decision.tool_input.get("reportId")
@@ -558,6 +562,21 @@ def _has_valid_uuid(value: object) -> bool:
     return str(parsed) == value.lower()
 
 
+def _has_invalid_calendar_create_time_order(input_value: dict[str, object]) -> bool:
+    start_date = input_value.get("startDate")
+    end_date = input_value.get("endDate")
+    start_time = input_value.get("startTime")
+    end_time = input_value.get("endTime")
+    return (
+        isinstance(start_date, str)
+        and isinstance(end_date, str)
+        and start_date == end_date
+        and isinstance(start_time, str)
+        and isinstance(end_time, str)
+        and end_time <= start_time
+    )
+
+
 def _clarification_answer(missing_fields: tuple[str, ...]) -> str:
     labels = {
         "eventId": "수정할 일정",
@@ -567,6 +586,7 @@ def _clarification_answer(missing_fields: tuple[str, ...]) -> str:
         "endDate": "종료 날짜",
         "start": "조회 시작일",
         "end": "조회 종료일",
+        "calendar_event_end_time": "시작 시각보다 늦은 종료 시각",
     }
     fields = [labels.get(field, field) for field in missing_fields]
     if not fields:
@@ -665,8 +685,15 @@ def _agent_planner_system_prompt() -> str:
         "For a broad MeetingReport request without a report ID, use list_meeting_reports "
         "with limit 1 to return the latest report. A specific MeetingReport detail or "
         "summary request without a valid report ID must be unsupported. "
+        "Calendar list_calendar_events supports only a date range; title, keyword, participant, "
+        "or current-time filters are not supported and must be unsupported rather than ignored. "
+        "For timed Calendar creation, omit endTime when the user gives only a start time so the "
+        "Calendar default can apply; never set endTime equal to startTime. "
+        "When the user supplies a positive integer Calendar event ID with changes, use it and let "
+        "the App Server verify that the event exists in the Workspace. "
         "Normalize relative dates using the provided timezone and current date. "
         "Use YYYY-MM-DD dates and HH:mm 24-hour times in tool inputs. "
+        "Write message and finalAnswerDraft in Korean. "
         "Put the selected tool input object into inputJson as a compact JSON string. "
         "Use null inputJson when there is no tool input. "
         "Never include provider raw responses, tokens, secrets, credentials, cookies, "
