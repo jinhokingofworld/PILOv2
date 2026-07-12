@@ -115,6 +115,7 @@ function createService(database, github) {
   assert.equal(input.reviewSessionId, SESSION_ID);
   assert.equal(input.workspaceId, WORKSPACE_ID);
   assert.equal(input.headSha, HEAD_SHA);
+  assert.equal(input.graphSchemaVersion, "pr-review-semantic-graph:v1");
   assert.equal(input.pullRequest.prNumber, 24);
   assert.deepEqual(input.files, [
     {
@@ -129,6 +130,27 @@ function createService(database, github) {
       patch: "+export const asyncReview = true;"
     }
   ]);
+  assert.deepEqual(input.semanticGraph, {
+    files: [
+      {
+        filePath: "apps/app-server/src/pr-review.ts",
+        roleType: "core_logic",
+        confidence: 65,
+        evidence: "code_file_fallback",
+        roleOverrideAllowed: true
+      }
+    ],
+    relations: [],
+    flows: [
+      {
+        key: "candidate-flow-fallback",
+        title: "기타 변경",
+        filePaths: ["apps/app-server/src/pr-review.ts"],
+        relationKeys: [],
+        fallback: true
+      }
+    ]
+  });
   assert.deepEqual(github.detailCalls, [[USER_ID, WORKSPACE_ID, PULL_REQUEST_ID]]);
   assert.deepEqual(github.fileCalls, [[USER_ID, WORKSPACE_ID, PULL_REQUEST_ID]]);
   assert.match(database.calls[0].text, /pr_review_analysis_jobs/);
