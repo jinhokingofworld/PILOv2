@@ -105,7 +105,7 @@ export class CalendarAgentToolsService {
     return {
       name: "create_calendar_event",
       description:
-        "Calendar 일정을 생성합니다. 실행 전 confirmation이 필요합니다. 종료 시각이 없으면 생략하고, 시작·종료 시각이 같거나 역전되면 추가 정보를 요청합니다.",
+        "Calendar 일정을 생성합니다. 실행 전 confirmation이 필요합니다. 반복 일정은 지원하지 않습니다. 여러 날짜 일정은 종일 여부를 명시하거나 시간을 제공해야 합니다. 종료 시각이 없으면 생략하고, 시작·종료 시각이 같거나 역전되면 추가 정보를 요청합니다.",
       riskLevel: "medium",
       executionMode: "confirmation_required",
       inputSchema: {

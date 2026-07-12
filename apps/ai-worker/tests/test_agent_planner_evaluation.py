@@ -189,7 +189,7 @@ def test_fixed_korean_suite_loads() -> None:
     suite = load_evaluation_suite(suite_path)
 
     assert suite.version == "agent-planner-korean:v1"
-    assert len(suite.cases) == 30
+    assert len(suite.cases) == 31
     assert {tool.name for tool in suite.job.tools} == {
         "list_calendar_events",
         "create_calendar_event",
@@ -211,3 +211,7 @@ def test_fixed_korean_suite_loads() -> None:
         "start": "2026-07-12",
         "end": "2026-07-12",
     }
+    assert expectations["calendar_create_multi_day"].missing_fields == (
+        "calendar_event_time_or_all_day",
+    )
+    assert expectations["calendar_create_recurrence"].status == "unsupported"

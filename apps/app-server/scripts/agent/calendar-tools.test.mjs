@@ -107,13 +107,19 @@ function errorCode(error) {
 
 {
   const { registry } = createRegistry();
-  const names = registry.listDefinitions().map((definition) => definition.name);
+  const definitions = registry.listDefinitions();
+  const names = definitions.map((definition) => definition.name);
 
   assert.deepEqual(names, [
     "list_calendar_events",
     "create_calendar_event",
     "update_calendar_event"
   ]);
+  assert.match(
+    definitions.find((definition) => definition.name === "create_calendar_event")
+      .description,
+    /반복 일정은 지원하지 않습니다/
+  );
 }
 
 {
