@@ -1,388 +1,153 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
-import {
-  ArrowLeft,
-  ArrowRight,
-  GitBranch,
-  Loader2,
-  Package,
-  PanelsTopLeft,
-  Sparkles,
-  TriangleAlert
-} from "lucide-react";
-
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogMedia,
-  AlertDialogTitle
-} from "@/components/ui/alert-dialog";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { GitBranch, Loader2, PanelsTopLeft, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle
-} from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { createWorkspace, listWorkspaces } from "@/features/auth/api/client";
-import {
-  clearStoredAuthSession,
-  getStoredAuthSession,
-  isDevPreviewAccessToken,
-  saveSelectedWorkspaceId
-} from "@/features/auth/session-storage";
-import {
-  WorkspaceCenteredStatus,
-  WorkspaceSelectionCard,
-  WorkspaceSkippedStep,
-  WorkspaceStepIndicator
-} from "@/features/workspace-onboarding/components/workspace-onboarding-primitives";
-import {
-  ICON_OPTIONS,
-  MOCK_PROJECTS,
-  MOCK_REPOSITORIES,
-  WORKSPACE_ONBOARDING_STEPS
-} from "@/features/workspace-onboarding/mock-data";
+import { createWorkspace } from "@/features/auth/api/client";
+import { getStoredAuthSession, saveSelectedWorkspaceId } from "@/features/auth/session-storage";
+import { createGithubIntegrationApiClient } from "@/features/github-integration/api/client";
+import { WorkspaceCenteredStatus, WorkspaceSelectionCard } from "@/features/workspace-onboarding/components/workspace-onboarding-primitives";
+import { createGithubOnboardingReturnUrl, getGithubCallbackErrorMessage, readGithubOnboardingCallback } from "@/features/workspace-onboarding/github-onboarding";
+import { ICON_OPTIONS } from "@/features/workspace-onboarding/mock-data";
 
-type PageStatus = "checking" | "ready" | "submitting" | "error";
+type Stage = "create" | "github" | "installation" | "syncing" | "project-oauth" | "repositories" | "projects";
 
 export function WorkspaceCreationPage() {
+  return <Suspense fallback={<WorkspaceCenteredStatus icon={<Loader2 className="animate-spin" />} text="workspace를 준비하는 중입니다." />}><WorkspaceCreationPageContent /></Suspense>;
+}
+
+function WorkspaceCreationPageContent() {
   const router = useRouter();
-  const [status, setStatus] = useState<PageStatus>("checking");
-  const [step, setStep] = useState(0);
+  const searchParams = useSearchParams();
+  const callback = useMemo(() => readGithubOnboardingCallback(new URLSearchParams(searchParams.toString())), [searchParams]);
+  const session = getStoredAuthSession();
+  const api = useMemo(() => createGithubIntegrationApiClient({ accessToken: session?.accessToken }), [session?.accessToken]);
   const [workspaceName, setWorkspaceName] = useState("");
   const [workspaceIcon, setWorkspaceIcon] = useState<string | null>(null);
-  const [connectGithub, setConnectGithub] = useState<boolean | null>(null);
-  const [repositoryId, setRepositoryId] = useState<string | null>(null);
-  const [projectId, setProjectId] = useState<string | null>(null);
-  const [hasExistingWorkspace, setHasExistingWorkspace] = useState(false);
-  const [showExitWarning, setShowExitWarning] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-
-  const normalizedName = workspaceName.trim();
-  const fallbackIcon = normalizedName.slice(0, 1).toUpperCase() || "W";
-  const displayIcon = workspaceIcon ?? fallbackIcon;
-  const selectedRepository = MOCK_REPOSITORIES.find(
-    (repository) => repository.id === repositoryId
-  );
-  const selectedProject = MOCK_PROJECTS.find(
-    (project) => project.id === projectId
-  );
-  const canContinue = useMemo(() => {
-    if (step === 0) return normalizedName.length > 0 && normalizedName.length <= 100;
-    if (step === 2) return connectGithub !== null;
-    if (step === 3) return connectGithub === false || repositoryId !== null;
-    if (step === 4) return connectGithub === false || projectId !== null;
-    return true;
-  }, [connectGithub, normalizedName, projectId, repositoryId, step]);
+  const [workspaceId, setWorkspaceId] = useState<string | null>(callback.workspaceId);
+  const [installationId, setInstallationId] = useState<string | null>(callback.installationId);
+  const [stage, setStage] = useState<Stage>(callback.workspaceId ? callback.step === "project-oauth" ? callback.callbackError ? "project-oauth" : callback.repositoryId ? "projects" : "repositories" : "installation" : "create");
+  const [repositories, setRepositories] = useState<Awaited<ReturnType<typeof api.listGithubRepositories>>["data"]>([]);
+  const [projects, setProjects] = useState<Awaited<ReturnType<typeof api.discoverGithubProjectV2>>["projects"]>([]);
+  const [repositoryId, setRepositoryId] = useState<string | null>(callback.repositoryId);
+  const [projectIds, setProjectIds] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(getGithubCallbackErrorMessage(callback.callbackError));
 
   useEffect(() => {
-    const storedSession = getStoredAuthSession();
-    if (!storedSession) {
-      router.replace("/login");
-      return;
-    }
-
-    if (isDevPreviewAccessToken(storedSession.accessToken)) {
-      setHasExistingWorkspace(true);
-      setStatus("ready");
-      return;
-    }
-
-    let cancelled = false;
-    void listWorkspaces(storedSession.accessToken)
-      .then((workspaces) => {
-        if (!cancelled) {
-          setHasExistingWorkspace(workspaces.length > 0);
-          setStatus("ready");
-        }
-      })
-      .catch((error) => {
-        if (!cancelled) {
-          setErrorMessage(
-            error instanceof Error
-              ? error.message
-              : "워크스페이스 정보를 확인하지 못했습니다."
-          );
-          setStatus("error");
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [router]);
+    if (!session) router.replace("/login");
+  }, [router, session]);
 
   useEffect(() => {
-    if (status !== "ready" && status !== "submitting") return;
+    if (!workspaceId || callback.callbackError || callback.step !== "oauth") return;
+    void resumeGithub(workspaceId);
+  // The callback query is intentionally consumed only through github-onboarding.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspaceId, callback.callbackError, callback.step]);
 
-    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-      event.preventDefault();
-      event.returnValue = "";
+  useEffect(() => {
+    if (!workspaceId || !installationId || !repositoryId || callback.callbackError || callback.step !== "project-oauth") return;
+    void chooseRepository(repositoryId);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspaceId, installationId, repositoryId, callback.callbackError, callback.step]);
+
+  useEffect(() => {
+    if (!workspaceId || !installationId || stage !== "installation") return;
+    setStage("syncing");
+  }, [installationId, stage, workspaceId]);
+
+  useEffect(() => {
+    if (!workspaceId || !installationId || stage !== "syncing") return;
+    let stopped = false;
+    const check = async () => {
+      try {
+        const runs = await api.listGithubSyncRuns(workspaceId, { target: "source", limit: 20 });
+        const run = runs.data.find((item) => item.installationId === installationId);
+        if (!run || run.status === "queued" || run.status === "running") return;
+        if (run.status === "failed") {
+          if (!stopped) setMessage(run.errorMessage ?? "GitHub source sync에 실패했습니다. 설치를 다시 연결해 주세요.");
+          return;
+        }
+        if (!stopped) setStage("project-oauth");
+      } catch (error) { if (!stopped) setMessage(error instanceof Error ? error.message : "GitHub 상태를 확인하지 못했습니다."); }
     };
-    const handlePopState = () => {
-      window.history.pushState({ piloWorkspaceWizard: true }, "", window.location.href);
-      setShowExitWarning(true);
-    };
+    void check();
+    const timer = window.setInterval(() => void check(), 3000);
+    return () => { stopped = true; window.clearInterval(timer); };
+  }, [api, installationId, stage, workspaceId]);
 
-    window.history.pushState({ piloWorkspaceWizard: true }, "", window.location.href);
-    window.addEventListener("beforeunload", handleBeforeUnload);
-    window.addEventListener("popstate", handlePopState);
+  useEffect(() => {
+    if (!workspaceId || stage !== "repositories") return;
+    void api.listGithubRepositories(workspaceId, { limit: 100 }).then((result) => setRepositories(result.data)).catch((error) => setMessage(error instanceof Error ? error.message : "repository를 조회하지 못했습니다."));
+  }, [api, stage, workspaceId]);
 
-    return () => {
-      window.removeEventListener("beforeunload", handleBeforeUnload);
-      window.removeEventListener("popstate", handlePopState);
-    };
-  }, [status]);
-
-  function handleBack() {
-    if (step > 0) {
-      setStep((currentStep) => currentStep - 1);
-      return;
-    }
-    setShowExitWarning(true);
-  }
-
-  function handleNext() {
-    if (!canContinue) return;
-    if (step < WORKSPACE_ONBOARDING_STEPS.length - 1) {
-      setStep((currentStep) => currentStep + 1);
-      return;
-    }
-    void handleCreateWorkspace();
-  }
-
-  async function handleCreateWorkspace() {
-    const storedSession = getStoredAuthSession();
-    if (!storedSession) {
-      router.replace("/login");
-      return;
-    }
-
-    setStatus("submitting");
-    setErrorMessage(null);
-
+  async function resumeGithub(existingWorkspaceId: string) {
+    setBusy(true); setMessage(null);
     try {
-      if (!isDevPreviewAccessToken(storedSession.accessToken)) {
-        const workspace = await createWorkspace(storedSession.accessToken, {
-          icon: workspaceIcon,
-          name: normalizedName
-        });
-        saveSelectedWorkspaceId(workspace.id);
+      const oauth = await api.getGithubOAuthStatus();
+      if (!oauth.connected) {
+        const start = await api.startGithubOAuth({ returnUrl: createGithubOnboardingReturnUrl(existingWorkspaceId, "oauth") });
+        window.location.assign(start.authorizeUrl); return;
       }
-
-      router.replace("/home");
-    } catch (error) {
-      setErrorMessage(
-        error instanceof Error ? error.message : "워크스페이스를 만들지 못했습니다."
-      );
-      setStatus("ready");
-    }
+      const install = await api.startGithubAppInstallation(existingWorkspaceId, { returnUrl: createGithubOnboardingReturnUrl(existingWorkspaceId, "installation") });
+      window.location.assign(install.installUrl);
+    } catch (error) { setMessage(error instanceof Error ? error.message : "GitHub 연결을 시작하지 못했습니다."); setStage("installation"); }
+    finally { setBusy(false); }
   }
 
-  function handleConfirmExit() {
-    setShowExitWarning(false);
-    if (!hasExistingWorkspace) {
-      clearStoredAuthSession();
-      router.replace("/login");
-      return;
-    }
-    router.replace("/home");
+  async function createAndConnect(connect: boolean) {
+    if (!session) return;
+    if (workspaceId) { await resumeGithub(workspaceId); return; }
+    if (!workspaceName.trim()) return;
+    setBusy(true); setMessage(null);
+    try {
+      const workspace = await createWorkspace(session.accessToken, { name: workspaceName.trim(), icon: workspaceIcon });
+      saveSelectedWorkspaceId(workspace.id); setWorkspaceId(workspace.id);
+      if (!connect) { router.replace("/home"); return; }
+      router.replace(createGithubOnboardingReturnUrl(workspace.id, "oauth"));
+    } catch (error) { setMessage(error instanceof Error ? error.message : "workspace를 만들지 못했습니다."); }
+    finally { setBusy(false); }
   }
 
-  if (status === "checking") {
-    return <WorkspaceCenteredStatus icon={<Loader2 className="animate-spin" />} text="세션과 워크스페이스를 확인하는 중입니다." />;
+  async function chooseRepository(id: string) {
+    if (!workspaceId || !installationId) return;
+    setRepositoryId(id); setBusy(true); setMessage(null);
+    try {
+      const discovery = await api.discoverGithubProjectV2(workspaceId, installationId, { repositoryId: id });
+      if (discovery.connectionRequired) {
+        const start = await api.startGithubProjectOAuth({ returnUrl: createGithubOnboardingReturnUrl(workspaceId, "project-oauth", installationId, id) });
+        window.location.assign(start.authorizeUrl); return;
+      }
+      setProjects(discovery.projects); setStage("projects");
+    } catch (error) { setMessage(error instanceof Error ? error.message : "ProjectV2를 조회하지 못했습니다."); }
+    finally { setBusy(false); }
   }
 
-  if (status === "error") {
-    return (
-      <WorkspaceCenteredStatus
-        icon={<TriangleAlert />}
-        text={errorMessage ?? "워크스페이스 정보를 확인하지 못했습니다."}
-        action={<Button onClick={() => router.replace("/login")}>로그인으로 이동</Button>}
-      />
-    );
+  async function startProjectOAuth() {
+    if (!workspaceId || !installationId) return;
+    setBusy(true);
+    try {
+      const start = await api.startGithubProjectOAuth({ returnUrl: createGithubOnboardingReturnUrl(workspaceId, "project-oauth", installationId) });
+      window.location.assign(start.authorizeUrl);
+    } catch (error) { setMessage(error instanceof Error ? error.message : "ProjectV2 권한 동의를 시작하지 못했습니다."); }
+    finally { setBusy(false); }
   }
 
-  return (
-    <main className="min-h-screen bg-muted/30 px-4 py-8 sm:px-6 lg:py-12">
-      <div className="mx-auto grid w-full max-w-5xl gap-6">
-        <header className="flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="flex size-10 items-center justify-center rounded-xl bg-primary text-lg font-semibold text-primary-foreground">
-              {displayIcon}
-            </div>
-            <div>
-              <p className="font-semibold">PILO</p>
-              <p className="text-sm text-muted-foreground">새 워크스페이스 만들기</p>
-            </div>
-          </div>
-          <Button onClick={() => setShowExitWarning(true)} variant="ghost">
-            나가기
-          </Button>
-        </header>
+  async function saveProjects() {
+    if (!workspaceId || !installationId || !repositoryId) return;
+    setBusy(true); setMessage(null);
+    try { await api.replaceGithubProjectV2Selections(workspaceId, { installationId, repositoryId, projectV2Ids: projectIds }); router.replace("/home"); }
+    catch (error) { setMessage(error instanceof Error ? error.message : "ProjectV2 선택을 저장하지 못했습니다."); }
+    finally { setBusy(false); }
+  }
 
-        <WorkspaceStepIndicator
-          currentStep={step}
-          steps={WORKSPACE_ONBOARDING_STEPS}
-        />
-
-        <Card className="mx-auto w-full max-w-3xl shadow-sm">
-          <CardHeader className="border-b px-6 py-6 sm:px-8">
-            <p className="text-sm font-medium text-primary">{step + 1} / {WORKSPACE_ONBOARDING_STEPS.length}</p>
-            <CardTitle className="text-2xl">{WORKSPACE_ONBOARDING_STEPS[step].title}</CardTitle>
-            <CardDescription>{WORKSPACE_ONBOARDING_STEPS[step].description}</CardDescription>
-          </CardHeader>
-          <CardContent className="min-h-80 px-6 py-8 sm:px-8">
-            {step === 0 ? (
-              <div className="grid gap-3">
-                <label className="text-sm font-medium" htmlFor="workspace-name">워크스페이스 이름</label>
-                <Input
-                  autoFocus
-                  id="workspace-name"
-                  maxLength={100}
-                  onChange={(event) => setWorkspaceName(event.target.value)}
-                  placeholder="예: PILO Product Team"
-                  value={workspaceName}
-                />
-                <p className="text-sm text-muted-foreground">팀이나 프로젝트를 알아보기 쉬운 이름을 입력해주세요.</p>
-              </div>
-            ) : null}
-
-            {step === 1 ? (
-              <div className="grid gap-5">
-                <div className="flex items-center gap-4 rounded-xl border bg-muted/30 p-4">
-                  <div className="flex size-14 items-center justify-center rounded-xl bg-primary text-2xl font-semibold text-primary-foreground">{displayIcon}</div>
-                  <div>
-                    <p className="font-medium">{normalizedName}</p>
-                    <p className="text-sm text-muted-foreground">선택하지 않으면 이름의 첫 글자를 사용합니다.</p>
-                  </div>
-                </div>
-                <div className="grid grid-cols-4 gap-3 sm:grid-cols-7">
-                  <Button
-                    aria-label="이름 첫 글자 사용"
-                    className="h-12 text-lg"
-                    onClick={() => setWorkspaceIcon(null)}
-                    variant={workspaceIcon === null ? "default" : "outline"}
-                  >
-                    {fallbackIcon}
-                  </Button>
-                  {ICON_OPTIONS.map((icon) => (
-                    <Button
-                      aria-label={`${icon} 아이콘 사용`}
-                      className="h-12 text-lg"
-                      key={icon}
-                      onClick={() => setWorkspaceIcon(icon)}
-                      variant={workspaceIcon === icon ? "default" : "outline"}
-                    >
-                      {icon}
-                    </Button>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-
-            {step === 2 ? (
-              <div className="grid gap-3 sm:grid-cols-2">
-                <WorkspaceSelectionCard
-                  description="저장소와 ProjectV2를 선택하는 목업 단계를 진행합니다."
-                  icon={<GitBranch />}
-                  onClick={() => setConnectGithub(true)}
-                  selected={connectGithub === true}
-                  title="GitHub 연결 설정"
-                />
-                <WorkspaceSelectionCard
-                  description="지금은 건너뛰고 설정의 GitHub 연결 탭에서 다시 시작합니다."
-                  icon={<ArrowRight />}
-                  onClick={() => {
-                    setConnectGithub(false);
-                    setRepositoryId(null);
-                    setProjectId(null);
-                  }}
-                  selected={connectGithub === false}
-                  title="나중에 연결"
-                />
-              </div>
-            ) : null}
-
-            {step === 3 ? (
-              connectGithub ? (
-                <div className="grid gap-3">
-                  <p className="text-sm text-muted-foreground">목업 저장소입니다. 실제 GitHub API에는 연결하지 않습니다.</p>
-                  {MOCK_REPOSITORIES.map((repository) => (
-                    <WorkspaceSelectionCard
-                      description={repository.description}
-                      icon={<Package />}
-                      key={repository.id}
-                      onClick={() => setRepositoryId(repository.id)}
-                      selected={repositoryId === repository.id}
-                      title={repository.name}
-                    />
-                  ))}
-                </div>
-              ) : <WorkspaceSkippedStep icon={<GitBranch />} text="GitHub 연결을 건너뛰었습니다. 설정에서 언제든 다시 시작할 수 있습니다." />
-            ) : null}
-
-            {step === 4 ? (
-              connectGithub ? (
-                <div className="grid gap-3">
-                  <p className="text-sm text-muted-foreground">목업 프로젝트입니다. 선택값은 서버에 저장되지 않습니다.</p>
-                  {MOCK_PROJECTS.map((project) => (
-                    <WorkspaceSelectionCard
-                      description={project.description}
-                      icon={<PanelsTopLeft />}
-                      key={project.id}
-                      onClick={() => setProjectId(project.id)}
-                      selected={projectId === project.id}
-                      title={project.name}
-                    />
-                  ))}
-                  <div className="mt-3 rounded-xl border bg-muted/30 p-4 text-sm">
-                    <p className="font-medium">생성 요약</p>
-                    <p className="mt-1 text-muted-foreground">{displayIcon} {normalizedName} · {selectedRepository?.name} · {selectedProject?.name ?? "프로젝트 선택 전"}</p>
-                  </div>
-                </div>
-              ) : <WorkspaceSkippedStep icon={<Sparkles />} text="GitHub 단계 없이 워크스페이스를 생성할 준비가 되었습니다." />
-            ) : null}
-
-            {errorMessage ? <p className="mt-5 text-sm text-destructive">{errorMessage}</p> : null}
-          </CardContent>
-          <CardFooter className="justify-between gap-3 px-6 py-4 sm:px-8">
-            <Button disabled={status === "submitting"} onClick={handleBack} variant="outline">
-              <ArrowLeft /> 이전
-            </Button>
-            <Button disabled={!canContinue || status === "submitting"} onClick={handleNext}>
-              {status === "submitting" ? <Loader2 className="animate-spin" /> : null}
-              {status === "submitting" ? "생성 중" : step === WORKSPACE_ONBOARDING_STEPS.length - 1 ? "워크스페이스 생성" : "다음"}
-              {status !== "submitting" && step < WORKSPACE_ONBOARDING_STEPS.length - 1 ? <ArrowRight /> : null}
-            </Button>
-          </CardFooter>
-        </Card>
-      </div>
-
-      <AlertDialog onOpenChange={setShowExitWarning} open={showExitWarning}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogMedia><TriangleAlert /></AlertDialogMedia>
-            <AlertDialogTitle>워크스페이스 만들기를 종료할까요?</AlertDialogTitle>
-            <AlertDialogDescription>입력한 이름과 GitHub 선택 내용이 저장되지 않고 사라질 수 있습니다.</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>계속 만들기</AlertDialogCancel>
-            <AlertDialogAction onClick={handleConfirmExit} variant="destructive">나가기</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </main>
-  );
+  if (!session) return <WorkspaceCenteredStatus icon={<Loader2 className="animate-spin" />} text="세션을 확인하는 중입니다." />;
+  if (stage === "create") return <main className="mx-auto grid min-h-screen max-w-xl place-items-center p-6"><Card className="w-full"><CardHeader><CardTitle>workspace 만들기</CardTitle><CardDescription>workspace를 만든 뒤 GitHub 연결을 이어갑니다.</CardDescription></CardHeader><CardContent className="grid gap-4"><Input value={workspaceName} onChange={(event) => setWorkspaceName(event.target.value)} placeholder="PILO Product Team" /><div className="flex gap-2">{ICON_OPTIONS.map((icon) => <Button key={icon} type="button" variant={workspaceIcon === icon ? "default" : "outline"} onClick={() => setWorkspaceIcon(icon)}>{icon}</Button>)}</div><Button disabled={busy || !workspaceName.trim()} onClick={() => void createAndConnect(true)}>GitHub 연결 후 계속</Button><Button disabled={busy || !workspaceName.trim()} variant="outline" onClick={() => void createAndConnect(false)}>GitHub 없이 workspace 만들기</Button>{message ? <p className="text-sm text-destructive">{message}</p> : null}</CardContent></Card></main>;
+  if (stage === "installation" || stage === "syncing") return <WorkspaceCenteredStatus icon={message ? <TriangleAlert /> : <Loader2 className="animate-spin" />} text={message ?? "GitHub App 설치와 source sync를 기다리는 중입니다. 취소했다면 이 화면에서 다시 연결할 수 있습니다."} action={workspaceId ? <div className="flex gap-2"><Button onClick={() => void resumeGithub(workspaceId)}>GitHub 다시 연결</Button><Button variant="outline" onClick={() => router.replace("/home")}>나중에 연결</Button></div> : undefined} />;
+  if (stage === "project-oauth") return <WorkspaceCenteredStatus icon={<PanelsTopLeft />} text="repository를 선택하기 전에 ProjectV2 권한 동의가 필요합니다." action={<div className="flex gap-2"><Button disabled={busy} onClick={() => void startProjectOAuth()}>ProjectV2 권한 동의</Button><Button variant="outline" onClick={() => router.replace("/home")}>나중에 연결</Button></div>} />;
+  if (stage === "repositories") return <main className="mx-auto grid max-w-2xl gap-4 p-6"><h1 className="text-2xl font-semibold">repository 선택</h1>{repositories.length === 0 ? <p>동기화된 repository가 없습니다. source sync가 끝난 뒤 다시 시도해 주세요.</p> : repositories.map((repository) => <WorkspaceSelectionCard key={repository.id} title={repository.fullName} description={repository.archived ? "Archived" : repository.private ? "Private" : "Public"} icon={<GitBranch />} selected={repositoryId === repository.id} onClick={() => void chooseRepository(repository.id)} />)}{message ? <p className="text-sm text-destructive">{message}</p> : null}</main>;
+  return <main className="mx-auto grid max-w-2xl gap-4 p-6"><h1 className="text-2xl font-semibold">ProjectV2 선택</h1>{projects.length === 0 ? <p>이 repository에서 선택할 ProjectV2가 없습니다.</p> : projects.map((project) => <WorkspaceSelectionCard key={project.id} title={project.title} description={`${project.ownerLogin} · #${project.projectNumber}`} icon={<PanelsTopLeft />} selected={projectIds.includes(project.id)} onClick={() => setProjectIds((ids) => ids.includes(project.id) ? ids.filter((id) => id !== project.id) : [...ids, project.id])} />)}<Button disabled={busy || projectIds.length === 0} onClick={() => void saveProjects()}>선택 저장 후 home으로</Button>{message ? <p className="text-sm text-destructive">{message}</p> : null}</main>;
 }

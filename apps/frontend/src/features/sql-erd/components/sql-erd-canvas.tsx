@@ -76,6 +76,7 @@ import {
   updateSqltoerdLayoutWithTablePositions,
   type SqltoerdTablePosition
 } from "@/features/sql-erd/utils/model";
+import { getSqlErdPinnedTableCenter } from "@/features/sql-erd/utils/table-pin";
 import { getSqlErdSelectionFromSelectedShapes } from "@/features/sql-erd/utils/canvas-selection";
 import { cn } from "@/lib/utils";
 import { TldrawSurface } from "@/shared/tldraw/TldrawSurface";
@@ -86,6 +87,8 @@ type SqlErdCanvasProps = {
   modelJson?: SqltoerdModelJsonV1;
   onLayoutChange?: (layoutJson: SqltoerdLayoutJsonV1) => void;
   onSelectionChange?: (selection: SqlErdSelection) => void;
+  pinNavigationRequestId?: number;
+  pinnedTableId?: string | null;
   selectedSqlErdObject?: SqlErdSelection;
 };
 
@@ -1147,6 +1150,35 @@ function SqlErdSelectedColumnSync({
   return null;
 }
 
+function SqlErdPinnedTableNavigationSync({
+  pinNavigationRequestId,
+  pinnedTableId
+}: {
+  pinNavigationRequestId: number;
+  pinnedTableId: string | null;
+}) {
+  const editor = useEditor();
+
+  useEffect(() => {
+    if (!pinnedTableId || pinNavigationRequestId === 0) {
+      return;
+    }
+
+    const tableCenter = getSqlErdPinnedTableCenter(
+      editor.getCurrentPageShapes().filter(isSqlErdTableShape),
+      pinnedTableId
+    );
+
+    if (!tableCenter) {
+      return;
+    }
+
+    editor.centerOnPoint(tableCenter, { animation: { duration: 180 } });
+  }, [editor, pinNavigationRequestId, pinnedTableId]);
+
+  return null;
+}
+
 function syncSqlErdHighlightedColumnShapes(
   editor: Editor,
   detail: SqlErdRelationHighlightDetail | null
@@ -1916,6 +1948,8 @@ export function SqlErdCanvas({
   modelJson = commerceSqltoerdFixture.modelJson,
   onLayoutChange,
   onSelectionChange,
+  pinNavigationRequestId = 0,
+  pinnedTableId = null,
   selectedSqlErdObject = { type: "none" }
 }: SqlErdCanvasProps) {
   const shapes = useMemo(
@@ -2007,6 +2041,10 @@ export function SqlErdCanvas({
       <SqlErdRelationHighlightSync
         modelJson={modelJson}
         selectedSqlErdObject={selectedSqlErdObject}
+      />
+      <SqlErdPinnedTableNavigationSync
+        pinNavigationRequestId={pinNavigationRequestId}
+        pinnedTableId={pinnedTableId}
       />
       <SqlErdSelectedColumnSync selectedSqlErdObject={selectedSqlErdObject} />
       {onLayoutChange ? (

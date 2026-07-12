@@ -16,6 +16,7 @@ from app.pr_review_semantic_graph import (
     SemanticGraphOutput,
     parse_semantic_graph_input,
     parse_semantic_graph_output,
+    semantic_graph_output_error_category,
     semantic_graph_output_schema,
     semantic_graph_prompt_input,
     serialize_semantic_graph_output,
@@ -487,7 +488,14 @@ def parse_pr_review_analysis_output(
     if seen_paths != set(files_by_path):
         raise ValueError("Analysis output omitted an input file")
 
-    semantic_graph = parse_semantic_graph_output(value, semantic_graph_input)
+    try:
+        semantic_graph = parse_semantic_graph_output(value, semantic_graph_input)
+    except ValueError as error:
+        LOGGER.warning(
+            "pr_review_semantic_graph_fallback category=%s",
+            semantic_graph_output_error_category(error),
+        )
+        semantic_graph = None
 
     return PrReviewAnalysisResult(
         pr_purpose=_require_non_empty_string(value, "prPurpose"),

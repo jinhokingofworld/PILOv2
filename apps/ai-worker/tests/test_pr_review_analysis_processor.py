@@ -465,7 +465,7 @@ def test_prompt_enforces_patch_budget_and_schema_is_strict() -> None:
     assert_closed_objects(_pr_review_analysis_schema())
 
 
-def test_versioned_semantic_graph_contract_round_trip_and_role_policy() -> None:
+def test_versioned_semantic_graph_contract_round_trip_and_role_policy(caplog) -> None:
     data = input_payload(
         graphSchemaVersion=PR_REVIEW_SEMANTIC_GRAPH_SCHEMA_VERSION,
         semanticGraph=semantic_graph_payload(),
@@ -528,18 +528,36 @@ def test_versioned_semantic_graph_contract_round_trip_and_role_policy() -> None:
     assert serialized["graphSchemaVersion"] == PR_REVIEW_SEMANTIC_GRAPH_SCHEMA_VERSION
     assert serialized["semanticGraph"]["flows"][0]["candidateKey"] == "candidate-flow-1"
 
+    invalid_outputs = []
+
     locked_role_changed = semantic_graph_output()
     locked_role_changed["semanticGraph"]["files"][1]["roleType"] = "api_contract"
-    try:
-        parse_pr_review_analysis_output(
-            json.dumps({**legacy_output, **locked_role_changed}),
+    invalid_outputs.append((locked_role_changed, "role_policy"))
+
+    unknown_file = semantic_graph_output()
+    unknown_file["semanticGraph"]["files"][0]["filePath"] = "missing.ts"
+    invalid_outputs.append((unknown_file, "file_membership"))
+
+    unknown_relation_endpoint = semantic_graph_output()
+    unknown_relation_endpoint["semanticGraph"]["relations"][0]["toFilePath"] = "missing.ts"
+    invalid_outputs.append((unknown_relation_endpoint, "relation"))
+
+    unknown_flow = semantic_graph_output()
+    unknown_flow["semanticGraph"]["flows"][0]["candidateKey"] = "missing-flow"
+    invalid_outputs.append((unknown_flow, "flow"))
+
+    for invalid_output, category in invalid_outputs:
+        caplog.clear()
+        fallback = parse_pr_review_analysis_output(
+            json.dumps({**legacy_output, **invalid_output}),
             input_value.files,
             input_value.semantic_graph,
         )
-    except ValueError:
-        pass
-    else:
-        raise AssertionError("AI must not change a locked semantic graph role")
+        assert fallback.semantic_graph is None
+        fallback_payload = _serialize_analysis_result(fallback)
+        assert "graphSchemaVersion" not in fallback_payload
+        assert "semanticGraph" not in fallback_payload
+        assert f"pr_review_semantic_graph_fallback category={category}" in caplog.text
 
 
 def test_semantic_graph_input_rejects_partial_or_unknown_contract_data() -> None:

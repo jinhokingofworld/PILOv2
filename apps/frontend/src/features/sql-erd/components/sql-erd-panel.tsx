@@ -32,10 +32,13 @@ import {
   Database,
   Home,
   List as ListIcon,
+  LocateFixed,
+  MapPin,
   PanelLeftClose,
   PanelLeftOpen,
   PanelRightClose,
-  PanelRightOpen
+  PanelRightOpen,
+  PinOff
 } from "lucide-react";
 
 import {
@@ -88,6 +91,11 @@ import {
   type SqlErdRelationCardinality,
   type SqlErdRelationCardinalityEndpoints
 } from "@/features/sql-erd/utils/model";
+import {
+  clearSqlErdTablePin,
+  createSqlErdTablePinState,
+  pinSqlErdTable
+} from "@/features/sql-erd/utils/table-pin";
 import {
   createSqlErdParseWorkerCancellation,
   ParseWorkerRequest,
@@ -411,6 +419,9 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
     });
   const [selectedSqlErdObject, setSelectedSqlErdObject] =
     useState<SqlErdSelection>({ type: "none" });
+  const [tablePinState, setTablePinState] = useState(() =>
+    createSqlErdTablePinState()
+  );
   const [pendingSourceAutosaveSnapshot, setPendingSourceAutosaveSnapshotState] =
     useState<SqlErdViewSession | null>(null);
   const [sourceAutosaveState, setSourceAutosaveState] =
@@ -466,6 +477,47 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
     () => createSqlErdInspectorViewModel(selectedSqlErdObject, modelIndex),
     [modelIndex, selectedSqlErdObject]
   );
+  const pinnedTableTitle = useMemo(() => {
+    if (!tablePinState.pinnedTableId) {
+      return null;
+    }
+
+    const table = modelIndex.tablesById.get(tablePinState.pinnedTableId);
+
+    return table ? getTableDisplayName(table) : null;
+  }, [modelIndex, tablePinState.pinnedTableId]);
+  const handlePinTable = useCallback(() => {
+    if (inspectorViewModel.type !== "table") {
+      return;
+    }
+
+    setTablePinState((current) =>
+      pinSqlErdTable(current, inspectorViewModel.table.id)
+    );
+  }, [inspectorViewModel]);
+  const handleNavigateToPinnedTable = useCallback(() => {
+    setTablePinState((current) =>
+      current.pinnedTableId
+        ? pinSqlErdTable(current, current.pinnedTableId)
+        : current
+    );
+  }, []);
+  const handleClearTablePin = useCallback(() => {
+    setTablePinState(clearSqlErdTablePin());
+  }, []);
+
+  useEffect(() => {
+    setTablePinState(createSqlErdTablePinState());
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (
+      tablePinState.pinnedTableId &&
+      !modelIndex.tablesById.has(tablePinState.pinnedTableId)
+    ) {
+      setTablePinState(clearSqlErdTablePin());
+    }
+  }, [modelIndex, tablePinState.pinnedTableId]);
   const handleSourceTextChange = useCallback((sourceText: string) => {
     setSqlSourceMap(null);
     applySqlErdEditAction({
@@ -1207,6 +1259,8 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           onReloadSession={handleReloadPausedSession}
           onRetryLayoutAutosaveOnce={handleRetryLayoutAutosaveOnce}
           onSelectionChange={setSelectedSqlErdObject}
+          pinNavigationRequestId={tablePinState.navigationRequestId}
+          pinnedTableId={tablePinState.pinnedTableId}
           selectedSqlErdObject={selectedSqlErdObject}
         />
       ) : (
@@ -1231,7 +1285,12 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           title: sqlErdViewSession.title
         }}
         isOpen={isInspectorOpen}
+        onClearTablePin={handleClearTablePin}
+        onNavigateToPinnedTable={handleNavigateToPinnedTable}
+        onPinTable={handlePinTable}
         onToggle={() => setIsInspectorOpen((current) => !current)}
+        pinnedTableId={tablePinState.pinnedTableId}
+        pinnedTableTitle={pinnedTableTitle}
         viewModel={inspectorViewModel}
         width={clampedInspectorPanelWidth}
       />
@@ -1762,6 +1821,8 @@ type CanvasShellProps = {
   onReloadSession: () => void;
   onRetryLayoutAutosaveOnce: () => void;
   onSelectionChange: (selection: SqlErdSelection) => void;
+  pinNavigationRequestId: number;
+  pinnedTableId: string | null;
   selectedSqlErdObject: SqlErdSelection;
 };
 
@@ -1773,6 +1834,8 @@ function CanvasShell({
   onReloadSession,
   onRetryLayoutAutosaveOnce,
   onSelectionChange,
+  pinNavigationRequestId,
+  pinnedTableId,
   selectedSqlErdObject
 }: CanvasShellProps) {
   return (
@@ -1783,6 +1846,8 @@ function CanvasShell({
         modelJson={modelJson}
         onLayoutChange={onLayoutChange}
         onSelectionChange={onSelectionChange}
+        pinNavigationRequestId={pinNavigationRequestId}
+        pinnedTableId={pinnedTableId}
         selectedSqlErdObject={selectedSqlErdObject}
       />
       {autosavePausedBanner ? (
@@ -1846,6 +1911,11 @@ type InspectorEmptyState = {
 
 type InspectorPanelProps = PanelToggleProps & {
   emptyState: InspectorEmptyState;
+  onClearTablePin: () => void;
+  onNavigateToPinnedTable: () => void;
+  onPinTable: () => void;
+  pinnedTableId: string | null;
+  pinnedTableTitle: string | null;
   viewModel: SqlErdInspectorViewModel;
   width: number;
 };
@@ -1853,7 +1923,12 @@ type InspectorPanelProps = PanelToggleProps & {
 function InspectorPanel({
   emptyState,
   isOpen,
+  onClearTablePin,
+  onNavigateToPinnedTable,
+  onPinTable,
   onToggle,
+  pinnedTableId,
+  pinnedTableTitle,
   viewModel,
   width
 }: InspectorPanelProps) {
@@ -1908,16 +1983,110 @@ function InspectorPanel({
           >
             Add column
           </button>
-          <button
-            className="inline-flex h-11 cursor-not-allowed items-center justify-center rounded-md border bg-background px-3 text-lg font-medium text-muted-foreground opacity-70"
-            disabled
-            type="button"
-          >
-            Pin
-          </button>
+          <InspectorPinControl
+            onClear={onClearTablePin}
+            onNavigate={onNavigateToPinnedTable}
+            onPin={onPinTable}
+            pinnedTableId={pinnedTableId}
+            pinnedTableTitle={pinnedTableTitle}
+            viewModel={viewModel}
+          />
         </div>
       </div>
     </aside>
+  );
+}
+
+function InspectorPinControl({
+  onClear,
+  onNavigate,
+  onPin,
+  pinnedTableId,
+  pinnedTableTitle,
+  viewModel
+}: {
+  onClear: () => void;
+  onNavigate: () => void;
+  onPin: () => void;
+  pinnedTableId: string | null;
+  pinnedTableTitle: string | null;
+  viewModel: SqlErdInspectorViewModel;
+}) {
+  const selectedTableId = viewModel.type === "table" ? viewModel.table.id : null;
+  const isSelectedTablePinned = selectedTableId === pinnedTableId;
+
+  if (selectedTableId) {
+    return (
+      <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
+        <button
+          className="inline-flex h-11 min-w-0 items-center justify-center gap-2 rounded-md border bg-background px-3 text-lg font-medium text-foreground transition-colors hover:bg-muted"
+          onClick={onPin}
+          type="button"
+        >
+          {isSelectedTablePinned ? (
+            <LocateFixed className="size-4 shrink-0" />
+          ) : (
+            <MapPin className="size-4 shrink-0" />
+          )}
+          <span className="truncate">
+            {isSelectedTablePinned
+              ? "핀 위치로 이동"
+              : pinnedTableId
+                ? "이 테이블로 Pin 변경"
+                : "Pin"}
+          </span>
+        </button>
+        {isSelectedTablePinned ? (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  aria-label="Pin 해제"
+                  className="inline-flex size-11 shrink-0 items-center justify-center rounded-md border bg-background text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  onClick={onClear}
+                  type="button"
+                >
+                  <PinOff className="size-4" />
+                </button>
+              }
+            />
+            <TooltipContent>Pin 해제</TooltipContent>
+          </Tooltip>
+        ) : null}
+      </div>
+    );
+  }
+
+  if (!pinnedTableId || !pinnedTableTitle) {
+    return null;
+  }
+
+  return (
+    <div className="flex items-center gap-2 rounded-md border bg-muted/30 p-2">
+      <MapPin className="size-4 shrink-0 text-primary" />
+      <button
+        className="min-w-0 flex-1 truncate text-left text-sm font-medium text-foreground hover:underline"
+        onClick={onNavigate}
+        type="button"
+      >
+        {pinnedTableTitle}
+      </button>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <button
+              aria-label="Pin 해제"
+              className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
+              onClick={onClear}
+              type="button"
+            >
+              <PinOff className="size-4" />
+            </button>
+          }
+        />
+        <TooltipContent>Pin 해제</TooltipContent>
+      </Tooltip>
+    </div>
   );
 }
 

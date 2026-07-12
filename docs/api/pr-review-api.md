@@ -362,6 +362,12 @@ Graph 입력을 받은 Worker는 결과에도 같은 `graphSchemaVersion`과 `se
 
 Worker parser는 Graph 결과의 file path가 입력 변경 파일 집합과 일치하는지, 잠긴 역할이
 유지되는지, Flow가 입력 후보와 대응하는지, relation endpoint와 type이 유효한지 확인한다.
+기존 PR 요약·파일 분석은 유효하지만 Graph 의미 검증만 실패하면 Worker는 raw AI 값이나
+파일 경로를 로그에 남기지 않고 `version`, `role_policy`, `file_membership`, `relation`,
+`flow`, `invalid_graph` 중 하나의 category만 기록한다. 이 경우 Graph 필드를 제외한 기존
+분석 결과를 App Server에 전달하며 Job을 `ANALYSIS_INPUT_INVALID`로 종료하지 않는다.
+기존 PR 요약 또는 파일 분석 자체가 유효하지 않은 경우에는 기존처럼
+`ANALYSIS_INPUT_INVALID` terminal failure로 처리한다.
 
 App Server Validator는 Worker 검증을 통과한 결과도 다시 검사한다. 기존 relation 후보를
 AI가 보강하면 기존 confidence와 `source = hybrid`를 사용하고, AI가 새로 제안한 relation은

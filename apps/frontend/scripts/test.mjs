@@ -80,17 +80,6 @@ const appSettingsDialog = await readFile(
   new URL("../src/components/app-settings-dialog.tsx", import.meta.url),
   "utf8"
 );
-const workspaceCreationPage = await readFile(
-  new URL(
-    "../src/features/workspace-onboarding/page.tsx",
-    import.meta.url
-  ),
-  "utf8"
-);
-const workspaceOnboardingMockData = await readFile(
-  new URL("../src/features/workspace-onboarding/mock-data.ts", import.meta.url),
-  "utf8"
-);
 const workspaceCreationRoute = await readFile(
   new URL("../src/app/workspace/new/page.tsx", import.meta.url),
   "utf8"
@@ -469,16 +458,6 @@ assert.match(appSettingsDialog, /MOCK_GITHUB_CONNECTIONS/);
 assert.match(appSettingsDialog, /disabled=\{!canManageWorkspace\}/);
 assert.match(appSettingsDialog, /canManageWorkspace \? "연결 관리" : "조회 전용"/);
 assert.match(workspaceCreationRoute, /WorkspaceCreationPage/);
-assert.match(workspaceCreationPage, /WORKSPACE_ONBOARDING_STEPS/);
-assert.match(workspaceOnboardingMockData, /GitHub 연결 여부 선택/);
-assert.match(workspaceOnboardingMockData, /MOCK_REPOSITORIES/);
-assert.match(workspaceOnboardingMockData, /MOCK_PROJECTS/);
-assert.match(workspaceCreationPage, /createWorkspace\(/);
-assert.match(workspaceCreationPage, /saveSelectedWorkspaceId/);
-assert.match(workspaceCreationPage, /beforeunload/);
-assert.match(workspaceCreationPage, /popstate/);
-assert.match(workspaceCreationPage, /입력한 이름과 GitHub 선택 내용/);
-assert.match(workspaceCreationPage, /clearStoredAuthSession/);
 assert.match(
   headerNotificationDropdown,
   /authSession\.refreshSession\(result\.workspace\.id\)/
@@ -1378,3 +1357,4 @@ await import("../src/features/board/board-load.test.mjs");
 await import("./meeting/test.mjs");
 await import("./pr-review/test.mjs");
 await import("./sql-erd/test.mjs");
+await import("../src/features/workspace-onboarding/github-onboarding.test.mjs");
