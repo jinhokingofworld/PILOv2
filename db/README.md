@@ -58,3 +58,4 @@ The database schema source of truth is the migration history in `db/migrations/`
 - `migrations/039_add_github_sync_job_lease_generation.sql` adds a monotonic worker lease generation to durable GitHub sync jobs so stale workers cannot complete a reclaimed job. It is recorded in Supabase migration history as `20260712023819_add_github_sync_job_lease_generation`.
 - `migrations/040_create_pr_review_semantic_graph_relations.sql` adds normalized PR Review file roles and validated Flow-scoped semantic relations with all-deny RLS.
 - `migrations/041_add_meeting_report_progress_statuses.sql` adds user-visible MeetingReport queued, transcribing, and summarizing statuses.
+- `migrations/042_set_meeting_report_queued_default.sql` sets the MeetingReport status default to queued after the new enum values are committed.
