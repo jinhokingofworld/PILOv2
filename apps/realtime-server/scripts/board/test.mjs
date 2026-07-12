@@ -3,13 +3,22 @@ import { readFile } from "node:fs/promises";
 
 const readSource = (path) => readFile(new URL(path, import.meta.url), "utf8");
 
-const [socketServer, boardAccess, boardEvents, boardRoom, boardRoomNames] =
-  await Promise.all([
+const [
+  socketServer,
+  boardAccess,
+  boardEvents,
+  boardRoom,
+  boardRoomNames,
+  boardApiContract,
+  realtimeReadme
+] = await Promise.all([
     readSource("../../src/socket/socket-server.ts"),
     readSource("../../src/board/board-access.service.ts"),
     readSource("../../src/board/board-socket-events.ts"),
     readSource("../../src/board/board-room.service.ts"),
-    readSource("../../src/socket/board/board-room-names.ts")
+    readSource("../../src/socket/board/board-room-names.ts"),
+    readSource("../../../../docs/api/board-api.md"),
+    readSource("../../README.md")
   ]);
 
 assert.match(socketServer, /boardClientEvents\.join/);
@@ -33,5 +42,18 @@ assert.match(
   socketServer,
   /return \{ boardId, workspaceId: workspaceId\.toLowerCase\(\) \};/
 );
+
+assert.match(boardApiContract, /board:invalidated/);
+assert.match(boardApiContract, /updatedAt/);
+assert.match(boardApiContract, /Raw GitHub payload/);
+assert.match(boardApiContract, /board:join/);
+assert.match(boardApiContract, /board:leave/);
+assert.match(boardApiContract, /board:joined/);
+assert.match(boardApiContract, /board:error/);
+assert.match(boardApiContract, /workspace_members/);
+assert.match(boardApiContract, /hydrate_pilo_board_from_github[\s\S]*board:invalidations/);
+assert.match(boardApiContract, /reconnect[\s\S]*snapshot/i);
+assert.match(realtimeReadme, /Board realtime events: `docs\/api\/board-api\.md`/);
+assert.match(realtimeReadme, /board\//);
 
 console.log("board realtime tests passed");

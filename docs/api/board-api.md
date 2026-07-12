@@ -139,6 +139,48 @@ Request:
 }
 ```
 
+## Board Realtime
+
+Board 화면은 카드 단위 변경사항을 Socket으로 직접 패치하지 않는다. GitHub 이슈를
+hydrate한 뒤 보드 스냅샷이 바뀌었다는 신호만 전달하고, 클라이언트는 기존 Board API를
+다시 호출해 최신 스냅샷을 표시한다.
+
+### 방 참여와 접근 제어
+
+- 클라이언트는 인증된 Socket 연결에서 `board:join` 이벤트로 `{ workspaceId, boardId }`를
+  전송한다.
+- Realtime Server는 `boards.workspace_id`와 요청한 `workspaceId`가 일치하고,
+  현재 사용자가 `workspace_members`에 속하는지 확인한 경우에만
+  `workspace:{workspaceId}:board:{boardId}` 방에 입장시킨다.
+- 입장 성공 시 `board:joined`, 방을 나갈 때는 `board:leave`를 사용한다. 인증 또는
+  멤버십·보드 검증에 실패하면 `board:error`를 보낸다.
+
+### 무효화 이벤트
+
+App Server는 GitHub webhook 또는 polling으로
+`hydrate_pilo_board_from_github`가 성공한 뒤 Redis `board:invalidations` 채널에
+무효화 메시지를 발행한다. Realtime Server는 메시지를 검증한 뒤 해당 Board 방에만
+`board:invalidated`를 전송한다.
+
+`board:invalidated`의 payload는 다음 최소 필드만 포함한다.
+
+```json
+{
+  "workspaceId": "workspace UUID",
+  "boardId": "board UUID",
+  "updatedAt": "2026-07-12T00:00:00.000Z"
+}
+```
+
+Raw GitHub payload는 Redis 메시지 또는 Socket 이벤트에 포함하지 않는다. GitHub 응답
+원문, 이슈 상세, 카드 목록은 Board API 스냅샷으로만 조회한다.
+
+### 클라이언트 동작
+
+프론트엔드는 초기 `connect`와 reconnect마다 Board 방에 다시 참여한 후 Board API
+snapshot을 다시 불러온다. 현재 방과 일치하는 `board:invalidated`를 받았을 때도 같은
+snapshot reload를 수행하며, 이벤트 payload로 카드 상태를 부분 수정하지 않는다.
+
 ## Board 목록
 
 ```http
