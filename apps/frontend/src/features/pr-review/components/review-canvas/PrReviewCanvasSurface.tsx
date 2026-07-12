@@ -23,13 +23,21 @@ import {
   PR_REVIEW_FLOW_EDGE_SHAPE_TYPE,
   PR_REVIEW_FLOW_LABEL_SHAPE_TYPE,
   PR_REVIEW_FLOW_MILESTONE_SHAPE_TYPE,
+  PR_REVIEW_ROLE_LANE_SHAPE_TYPE,
   isPrReviewFileNodeShape,
   type PrReviewFileNodeShape,
   type PrReviewFlowEdgeShape,
   type PrReviewFlowLabelShape,
-  type PrReviewFlowMilestoneShape
+  type PrReviewFlowMilestoneShape,
+  type PrReviewRoleLaneShape
 } from "@/features/pr-review/components/review-canvas/PrReviewFileNodeShapeUtil";
 import { prReviewShapeUtils } from "@/features/pr-review/components/review-canvas/pr-review-shape-utils";
+import {
+  buildPrReviewFileColumnMap,
+  buildPrReviewRoleLanes,
+  sortPrReviewFlowFiles,
+  type PrReviewRoleLane
+} from "@/features/pr-review/components/review-canvas/pr-review-flow-layout";
 
 type PrReviewCanvasSurfaceProps = {
   canvas: PrReviewCanvas;
@@ -49,20 +57,13 @@ type NodePlacement = {
   h: number;
 };
 
-type ReviewStage = "entry" | "logic" | "data" | "verification" | "support";
-
-type ReviewLayer = {
-  id: string;
-  stage: ReviewStage;
-  files: PrReviewFlowFile[];
-};
-
 type Connector = {
   id: string;
   flowId: string;
   fromId: string;
   toId: string;
   reason: string;
+  kind: "review_order" | "semantic";
 };
 
 type FileConflictNodeMetadata = {
@@ -72,19 +73,23 @@ type FileConflictNodeMetadata = {
 
 const START_NODE_ID = "__start";
 const END_NODE_ID = "__end";
-const NODE_WIDTH = 292;
-const NODE_HEIGHT = 124;
-const MILESTONE_WIDTH = 176;
-const MILESTONE_HEIGHT = 72;
+const NODE_WIDTH = 272;
+const NODE_HEIGHT = 116;
+const MILESTONE_WIDTH = 164;
+const MILESTONE_HEIGHT = 68;
 const FLOW_LABEL_MIN_WIDTH = 720;
 const FLOW_LABEL_HEIGHT = 112;
 const CANVAS_PADDING_X = 72;
 const CANVAS_PADDING_Y = 56;
-const COLUMN_GAP = 132;
-const NODE_ROW_GAP = 54;
-const FLOW_HEADER_GAP = 56;
-const FLOW_GAP = 148;
-const MAX_FILES_PER_LAYER = 3;
+const MILESTONE_GAP = 52;
+const LANE_LABEL_WIDTH = 148;
+const LANE_LABEL_GAP = 28;
+const FILE_COLUMN_GAP = 72;
+const END_MILESTONE_GAP = 56;
+const ROLE_LANE_HEIGHT = 156;
+const ROLE_LANE_GAP = 18;
+const FLOW_HEADER_GAP = 28;
+const FLOW_GAP = 112;
 
 const prReviewTldrawComponents = {
   Background: PrReviewCanvasBackground
@@ -94,7 +99,8 @@ const prReviewShapeTypes = new Set<string>([
   PR_REVIEW_FILE_NODE_SHAPE_TYPE,
   PR_REVIEW_FLOW_EDGE_SHAPE_TYPE,
   PR_REVIEW_FLOW_LABEL_SHAPE_TYPE,
-  PR_REVIEW_FLOW_MILESTONE_SHAPE_TYPE
+  PR_REVIEW_FLOW_MILESTONE_SHAPE_TYPE,
+  PR_REVIEW_ROLE_LANE_SHAPE_TYPE
 ]);
 
 function shapeIdSuffix(value: string) {
@@ -108,115 +114,6 @@ function sortFlows(flows: PrReviewCanvas["flows"]) {
     (left, right) =>
       left.sortOrder - right.sortOrder || left.id.localeCompare(right.id)
   );
-}
-
-function sortFlowFiles(files: PrReviewCanvasFlow["files"]) {
-  return [...files].sort(
-    (left, right) =>
-      left.workflowOrder - right.workflowOrder ||
-      left.reviewFileId.localeCompare(right.reviewFileId)
-  );
-}
-
-function inferReviewStage(file: PrReviewFlowFile): ReviewStage {
-  const filePath = file.filePath.toLowerCase().replace(/\\/g, "/");
-  const role = (file.fileRole ?? file.fileNodeData.roleSummary ?? "").toLowerCase();
-  const reviewText = `${filePath} ${role}`;
-
-  if (
-    filePath.includes("/test") ||
-    filePath.includes("/__tests__/") ||
-    filePath.includes(".test.") ||
-    filePath.includes(".spec.")
-  ) {
-    return "verification";
-  }
-
-  if (
-    filePath.endsWith(".md") ||
-    filePath.includes("/docs/") ||
-    filePath.endsWith("package-lock.json") ||
-    filePath.endsWith("pnpm-lock.yaml") ||
-    filePath.endsWith("yarn.lock") ||
-    filePath.endsWith(".config.js") ||
-    filePath.endsWith(".config.ts") ||
-    filePath.includes("/scripts/")
-  ) {
-    return "support";
-  }
-
-  if (
-    filePath.includes("/db/") ||
-    filePath.includes("/migrations/") ||
-    filePath.includes("/dto") ||
-    filePath.includes("/api/") ||
-    filePath.includes("/queries/") ||
-    filePath.includes("/repositories/") ||
-    filePath.includes("/types/") ||
-    reviewText.includes("dto") ||
-    reviewText.includes("api") ||
-    reviewText.includes("데이터")
-  ) {
-    return "data";
-  }
-
-  if (
-    filePath.includes("/page.") ||
-    filePath.includes("/components/") ||
-    filePath.includes("/app/") ||
-    filePath.endsWith(".css") ||
-    reviewText.includes("화면") ||
-    reviewText.includes("ui") ||
-    reviewText.includes("프론트")
-  ) {
-    return "entry";
-  }
-
-  return "logic";
-}
-
-function buildReviewLayers(files: PrReviewFlowFile[]): ReviewLayer[] {
-  const layers: ReviewLayer[] = [];
-
-  for (const file of files) {
-    const stage = inferReviewStage(file);
-    const lastLayer = layers[layers.length - 1];
-
-    if (lastLayer?.stage === stage && lastLayer.files.length < MAX_FILES_PER_LAYER) {
-      lastLayer.files.push(file);
-      continue;
-    }
-
-    layers.push({
-      id: `${stage}-${layers.length + 1}`,
-      stage,
-      files: [file]
-    });
-  }
-
-  return layers;
-}
-
-function getLayerHeight(fileCount: number) {
-  return (
-    fileCount * NODE_HEIGHT +
-    Math.max(0, fileCount - 1) * NODE_ROW_GAP
-  );
-}
-
-function getFlowContentHeight(layers: ReviewLayer[]) {
-  return Math.max(
-    MILESTONE_HEIGHT,
-    ...layers.map((layer) => getLayerHeight(layer.files.length))
-  );
-}
-
-function getFlowContentWidth(layers: ReviewLayer[]) {
-  const layerCount = layers.length;
-  const fileLayerWidth =
-    layerCount > 0 ? layerCount * NODE_WIDTH + layerCount * COLUMN_GAP : 0;
-
-  return MILESTONE_WIDTH + COLUMN_GAP + fileLayerWidth + MILESTONE_WIDTH;
 }
 
 function getPlacementKey(flowId: string, nodeId: string) {
@@ -319,6 +216,33 @@ function createFlowLabelShape(
   };
 }
 
+function createRoleLaneShape(
+  flowId: string,
+  lane: PrReviewRoleLane,
+  x: number,
+  y: number,
+  width: number
+): TLShapePartial<PrReviewRoleLaneShape> {
+  return {
+    id: createShapeId(
+      `pr-review-lane-${shapeIdSuffix(flowId)}-${lane.roleType}`
+    ),
+    type: PR_REVIEW_ROLE_LANE_SHAPE_TYPE,
+    x,
+    y,
+    props: {
+      w: width,
+      h: ROLE_LANE_HEIGHT,
+      flowId,
+      roleType: lane.roleType,
+      label: lane.label,
+      description: lane.description,
+      fileCount: lane.files.length,
+      labelWidth: LANE_LABEL_WIDTH
+    }
+  };
+}
+
 function createMilestoneShape(
   flow: PrReviewCanvasFlow,
   placement: NodePlacement,
@@ -407,7 +331,8 @@ function createConnectorShape(
       fromReviewFileId: connector.fromId,
       toReviewFileId: connector.toId,
       flowId: connector.flowId,
-      reason: connector.reason
+      reason: connector.reason,
+      kind: connector.kind
     }
   };
 }
@@ -424,7 +349,8 @@ function buildFlowConnectors(
         flowId: flow.id,
         fromId: START_NODE_ID,
         toId: END_NODE_ID,
-        reason: "리뷰 흐름"
+        reason: "리뷰 흐름",
+        kind: "review_order"
       }
     ];
   }
@@ -435,39 +361,45 @@ function buildFlowConnectors(
       flowId: flow.id,
       fromId: START_NODE_ID,
       toId: files[0].reviewFileId,
-      reason: "리뷰 시작"
+      reason: "리뷰 시작",
+      kind: "review_order"
     }
   ];
-  const semanticEdges = canvasEdges.filter((edge) => edge.flowId === flow.id);
 
-  if (semanticEdges.length > 0) {
-    connectors.push(
-      ...semanticEdges.map((edge) => ({
-        id: `${edge.fromReviewFileId}-${edge.toReviewFileId}`,
+  for (let index = 0; index < files.length - 1; index += 1) {
+    connectors.push({
+      id: `order-${files[index].reviewFileId}-${files[index + 1].reviewFileId}`,
+      flowId: flow.id,
+      fromId: files[index].reviewFileId,
+      toId: files[index + 1].reviewFileId,
+      reason: "추천 리뷰 경로",
+      kind: "review_order"
+    });
+  }
+
+  connectors.push(
+    ...canvasEdges
+      .filter(
+        (edge) =>
+          edge.flowId === flow.id && edge.relationType !== "review_order"
+      )
+      .map((edge) => ({
+        id: `semantic-${edge.id}`,
         flowId: flow.id,
         fromId: edge.fromReviewFileId,
         toId: edge.toReviewFileId,
-        reason: edge.reason
+        reason: edge.reason,
+        kind: "semantic" as const
       }))
-    );
-  } else {
-    for (let index = 0; index < files.length - 1; index += 1) {
-      connectors.push({
-        id: `${files[index].reviewFileId}-${files[index + 1].reviewFileId}`,
-        flowId: flow.id,
-        fromId: files[index].reviewFileId,
-        toId: files[index + 1].reviewFileId,
-        reason: "리뷰 순서"
-      });
-    }
-  }
+  );
 
   connectors.push({
     id: `${files[files.length - 1].reviewFileId}-end`,
     flowId: flow.id,
     fromId: files[files.length - 1].reviewFileId,
     toId: END_NODE_ID,
-    reason: "최종 판단"
+    reason: "최종 판단",
+    kind: "review_order"
   });
 
   return connectors;
@@ -478,7 +410,8 @@ function buildPrReviewCanvasShapes(
   conflictAnalysis: PrReviewConflictAnalysis | null | undefined,
   preparedConflictFileIds: Set<string>
 ): TLShapePartial[] {
-  const shapes: TLShapePartial[] = [];
+  const backgroundShapes: TLShapePartial[] = [];
+  const foregroundShapes: TLShapePartial[] = [];
   const placementByKey = new Map<string, NodePlacement>();
   const getConflictMetadata = createConflictMetadataResolver(
     conflictAnalysis,
@@ -488,16 +421,30 @@ function buildPrReviewCanvasShapes(
   let nextFlowY = CANVAS_PADDING_Y;
 
   for (const flow of sortFlows(canvas.flows)) {
-    const files = sortFlowFiles(flow.files);
-    const layers = buildReviewLayers(files);
-    const contentHeight = getFlowContentHeight(layers);
-    const contentWidth = getFlowContentWidth(layers);
-    const flowWidth = Math.max(FLOW_LABEL_MIN_WIDTH, contentWidth);
+    const files = sortPrReviewFlowFiles(flow.files);
+    const lanes = buildPrReviewRoleLanes(files);
+    const fileColumnById = buildPrReviewFileColumnMap(files);
+    const contentHeight = Math.max(
+      MILESTONE_HEIGHT,
+      lanes.length * ROLE_LANE_HEIGHT +
+        Math.max(0, lanes.length - 1) * ROLE_LANE_GAP
+    );
     const contentTop = nextFlowY + FLOW_LABEL_HEIGHT + FLOW_HEADER_GAP;
     const contentCenterY = contentTop + contentHeight / 2;
+    const laneX = CANVAS_PADDING_X + MILESTONE_WIDTH + MILESTONE_GAP;
+    const firstFileX = laneX + LANE_LABEL_WIDTH + LANE_LABEL_GAP;
+    const fileColumnStep = NODE_WIDTH + FILE_COLUMN_GAP;
+    const endX =
+      files.length > 0
+        ? firstFileX + files.length * fileColumnStep + END_MILESTONE_GAP
+        : laneX + LANE_LABEL_WIDTH + LANE_LABEL_GAP;
+    const flowWidth = Math.max(
+      FLOW_LABEL_MIN_WIDTH,
+      endX + MILESTONE_WIDTH - CANVAS_PADDING_X
+    );
+    const laneWidth = endX + MILESTONE_WIDTH - laneX;
 
-    shapes.push(createFlowLabelShape(flow, nextFlowY, flowWidth));
-
+    foregroundShapes.push(createFlowLabelShape(flow, nextFlowY, flowWidth));
     const startPlacement: NodePlacement = {
       flowId: flow.id,
       reviewFileId: START_NODE_ID,
@@ -506,22 +453,23 @@ function buildPrReviewCanvasShapes(
       w: MILESTONE_WIDTH,
       h: MILESTONE_HEIGHT
     };
-    const firstLayerX = startPlacement.x + MILESTONE_WIDTH + COLUMN_GAP;
 
     placementByKey.set(getPlacementKey(flow.id, START_NODE_ID), startPlacement);
-    shapes.push(createMilestoneShape(flow, startPlacement, "start"));
+    foregroundShapes.push(createMilestoneShape(flow, startPlacement, "start"));
 
-    layers.forEach((layer, layerIndex) => {
-      const layerHeight = getLayerHeight(layer.files.length);
-      const layerTop = contentTop + (contentHeight - layerHeight) / 2;
-      const layerX = firstLayerX + layerIndex * (NODE_WIDTH + COLUMN_GAP);
+    lanes.forEach((lane, laneIndex) => {
+      const laneY = contentTop + laneIndex * (ROLE_LANE_HEIGHT + ROLE_LANE_GAP);
+      backgroundShapes.push(
+        createRoleLaneShape(flow.id, lane, laneX, laneY, laneWidth)
+      );
 
-      layer.files.forEach((file, fileIndex) => {
+      lane.files.forEach((file) => {
+        const columnIndex = fileColumnById.get(file.reviewFileId) ?? 0;
         const placement: NodePlacement = {
           flowId: flow.id,
           reviewFileId: file.reviewFileId,
-          x: layerX,
-          y: layerTop + fileIndex * (NODE_HEIGHT + NODE_ROW_GAP),
+          x: firstFileX + columnIndex * fileColumnStep,
+          y: laneY + (ROLE_LANE_HEIGHT - NODE_HEIGHT) / 2,
           w: NODE_WIDTH,
           h: NODE_HEIGHT
         };
@@ -530,7 +478,7 @@ function buildPrReviewCanvasShapes(
           getPlacementKey(flow.id, file.reviewFileId),
           placement
         );
-        shapes.push(
+        foregroundShapes.push(
           createFileNodeShape(
             file,
             placement,
@@ -540,10 +488,6 @@ function buildPrReviewCanvasShapes(
       });
     });
 
-    const endX =
-      layers.length > 0
-        ? firstLayerX + layers.length * (NODE_WIDTH + COLUMN_GAP)
-        : firstLayerX;
     const endPlacement: NodePlacement = {
       flowId: flow.id,
       reviewFileId: END_NODE_ID,
@@ -554,7 +498,7 @@ function buildPrReviewCanvasShapes(
     };
 
     placementByKey.set(getPlacementKey(flow.id, END_NODE_ID), endPlacement);
-    shapes.push(createMilestoneShape(flow, endPlacement, "end"));
+    foregroundShapes.push(createMilestoneShape(flow, endPlacement, "end"));
     connectors.push(...buildFlowConnectors(flow, files, canvas.edges));
 
     nextFlowY +=
@@ -567,7 +511,7 @@ function buildPrReviewCanvasShapes(
       Boolean(shape)
     );
 
-  return [...edgeShapes, ...shapes];
+  return [...backgroundShapes, ...edgeShapes, ...foregroundShapes];
 }
 
 function selectReviewFileNode(
@@ -616,7 +560,30 @@ function resetPrReviewCanvas(
   editor.createShapes(shapes);
   selectReviewFileNode(editor, selectedReviewFileId);
   window.requestAnimationFrame(() => {
-    editor.zoomToFit({ animation: { duration: 160 } });
+    const viewportBounds = editor.getViewportScreenBounds();
+    if (viewportBounds.width >= 640) {
+      editor.zoomToFit({ animation: { duration: 160 } });
+      return;
+    }
+
+    editor.zoomToFit();
+
+    const pageBounds = editor.getCurrentPageBounds();
+    const minimumReadableZoom = 0.45;
+
+    if (
+      !pageBounds ||
+      editor.getZoomLevel() >= minimumReadableZoom
+    ) {
+      return;
+    }
+
+    const viewportInset = 24;
+    editor.setCamera({
+      x: viewportInset / minimumReadableZoom - pageBounds.x,
+      y: viewportInset / minimumReadableZoom - pageBounds.y,
+      z: minimumReadableZoom
+    });
   });
 }
 

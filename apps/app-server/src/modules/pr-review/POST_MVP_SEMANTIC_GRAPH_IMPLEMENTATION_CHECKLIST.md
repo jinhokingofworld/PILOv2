@@ -189,16 +189,16 @@ DB migration과 schema 검증을 같은 PR에 포함한다.
 
 작업 체크리스트:
 
-- [ ] 서버가 제공한 Flow와 file role을 lane/cluster 배치 입력으로 사용한다.
-- [ ] `workflowOrder`를 node 번호와 주요 리뷰 경로로 표시한다.
+- [x] 서버가 제공한 Flow와 file role을 lane/cluster 배치 입력으로 사용한다.
+- [x] `workflowOrder`를 node 번호와 주요 리뷰 경로로 표시한다.
 - [ ] relation type별 edge style을 과도하지 않게 구분한다.
 - [ ] edge hover 또는 선택 시 relation reason을 표시한다.
-- [ ] semantic relation이 없는 기존 session은 현재 순차 layout을 유지한다.
-- [ ] 독립 node와 fallback Flow가 화면 밖이나 다른 node와 겹치지 않게 한다.
-- [ ] Conflict, 위험도와 review status badge를 기존과 동일하게 유지한다.
+- [x] semantic relation이 없는 기존 session은 현재 순차 layout을 유지한다.
+- [x] 독립 node와 fallback Flow가 화면 밖이나 다른 node와 겹치지 않게 한다.
+- [x] Conflict, 위험도와 review status badge를 기존과 동일하게 유지한다.
 - [ ] 여러 Flow에 속한 파일의 중복 node 또는 membership badge 정책을 적용한다.
 - [ ] 큰 PR에서 edge 수를 제한하고 canvas fit/zoom 성능을 확인한다.
-- [ ] file node 선택과 diff drawer 진입 동작을 유지한다.
+- [x] file node 선택과 diff drawer 진입 동작을 유지한다.
 
 완료 기준:
 
@@ -228,11 +228,11 @@ DB migration과 schema 검증을 같은 PR에 포함한다.
 
 ### Frontend
 
-- [ ] 복수 Flow, 독립 node, relation 없는 fallback fixture를 렌더링한다.
+- [x] 복수 Flow, 독립 node, relation 없는 fallback fixture를 렌더링한다.
 - [ ] edge reason과 relation type 표시 테스트가 통과한다.
-- [ ] Conflict와 file decision 상태 회귀 테스트가 통과한다.
-- [ ] `format:check`, `lint`, `build`, PR Review focused test가 통과한다.
-- [ ] desktop/mobile screenshot으로 겹침과 canvas framing을 확인한다.
+- [x] Conflict와 file decision 상태 회귀 테스트가 통과한다.
+- [x] `format:check`, `lint`, `build`, PR Review focused test가 통과한다.
+- [x] desktop/mobile screenshot으로 겹침과 canvas framing을 확인한다.
 
 ### Dev E2E
 
