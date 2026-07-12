@@ -3235,6 +3235,27 @@ const generatedMySqlParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
 });
 assert.equal(generatedMySqlParseResult.ok, true);
 assert.equal(generatedMySqlParseResult.modelJson.schema.relations.length, 1);
+const childFirstMySql = modelToSqlRuntime.generateSqlDdlFromErdModel({
+  dialect: "mysql",
+  modelJson: {
+    ...mysqlParseResult.modelJson,
+    schema: {
+      ...mysqlParseResult.modelJson.schema,
+      tables: [...mysqlParseResult.modelJson.schema.tables].reverse()
+    }
+  }
+});
+assert.match(
+  childFirstMySql.sql,
+  /CREATE TABLE `orders`[\s\S]*?\);\n\nCREATE TABLE `users`[\s\S]*?\);\n\nALTER TABLE `orders` ADD CONSTRAINT `fk_orders_user`/
+);
+assert.equal(
+  ddlParserRuntime.parseSqlDdlToErdModel({
+    dialect: "mysql",
+    sourceText: childFirstMySql.sql
+  }).modelJson.schema.relations.length,
+  1
+);
 const generatedPostgreSql = modelToSqlRuntime.generateSqlDdlFromErdModel({
   dialect: "postgresql",
   modelJson: mysqlParseResult.modelJson
@@ -3250,6 +3271,57 @@ assert.equal(
     sourceText: generatedPostgreSql.sql
   }).ok,
   true
+);
+const semanticRoundTripModel = structuredClone(mysqlParseResult.modelJson);
+semanticRoundTripModel.schema.tables[1].columns[2].defaultValue = "'new'";
+semanticRoundTripModel.schema.tables[1].constraints.push({
+  id: "constraint.orders.id_status.unique",
+  kind: "unique",
+  columnIds: ["column.orders.id", "column.orders.status"],
+  name: "uq_orders_id_status"
+});
+const semanticRoundTripSql = modelToSqlRuntime.generateSqlDdlFromErdModel({
+  dialect: "postgresql",
+  modelJson: semanticRoundTripModel
+}).sql;
+const semanticRoundTripParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
+  dialect: "postgresql",
+  sourceText: semanticRoundTripSql
+});
+assert.equal(semanticRoundTripParseResult.ok, true);
+assert.deepEqual(
+  semanticRoundTripParseResult.modelJson.schema.tables.map((table) => ({
+    name: table.name,
+    columns: table.columns.map((column) => ({
+      name: column.name,
+      nullable: column.nullable,
+      primaryKey: column.primaryKey,
+      unique: column.unique,
+      defaultValue: column.defaultValue
+    })),
+    constraints: table.constraints.map((constraint) => ({
+      kind: constraint.kind,
+      columnIds: constraint.columnIds.map(
+        (columnId) => table.columns.find((column) => column.id === columnId)?.name
+      )
+    }))
+  })),
+  semanticRoundTripModel.schema.tables.map((table) => ({
+    name: table.name,
+    columns: table.columns.map((column) => ({
+      name: column.name,
+      nullable: column.nullable,
+      primaryKey: column.primaryKey,
+      unique: column.unique,
+      defaultValue: column.defaultValue
+    })),
+    constraints: table.constraints.map((constraint) => ({
+      kind: constraint.kind,
+      columnIds: constraint.columnIds.map(
+        (columnId) => table.columns.find((column) => column.id === columnId)?.name
+      )
+    }))
+  }))
 );
 
 const cyclicModel = {
@@ -3297,6 +3369,18 @@ const generatedCyclicMySqlParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
 });
 assert.equal(generatedCyclicMySqlParseResult.ok, true);
 assert.equal(generatedCyclicMySqlParseResult.modelJson.schema.relations.length, 2);
+const generatedCyclicPostgreSql = modelToSqlRuntime.generateSqlDdlFromErdModel({
+  dialect: "postgresql",
+  modelJson: cyclicModel
+});
+assert.match(generatedCyclicPostgreSql.sql, /ALTER TABLE "a" ADD CONSTRAINT "fk_a_b"/);
+assert.equal(
+  ddlParserRuntime.parseSqlDdlToErdModel({
+    dialect: "postgresql",
+    sourceText: generatedCyclicPostgreSql.sql
+  }).modelJson.schema.relations.length,
+  2
+);
 
 const mysqlTypeParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
   dialect: "mysql",

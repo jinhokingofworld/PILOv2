@@ -20,9 +20,16 @@ export function generateSqlDdlFromErdModel(
   input: SqltoerdModelToSqlInput
 ): SqltoerdModelToSqlResult {
   const tablesById = new Map(input.modelJson.schema.tables.map((table) => [table.id, table]));
+  const tableIndexById = new Map(
+    input.modelJson.schema.tables.map((table, index) => [table.id, index])
+  );
   const deferredRelationIds = new Set(
     input.modelJson.schema.relations
-      .filter((relation) => isCyclicRelation(relation, input.modelJson.schema.relations))
+      .filter(
+        (relation) =>
+          isCyclicRelation(relation, input.modelJson.schema.relations) ||
+          isForwardReference(relation, tableIndexById)
+      )
       .map((relation) => relation.id)
   );
   const relationsByTableId = groupRelationsByTableId(input.modelJson.schema.relations);
@@ -45,6 +52,20 @@ export function generateSqlDdlFromErdModel(
       "The generator emits normalized CREATE TABLE and FOREIGN KEY statements; source formatting, comments, and unsupported statements are not preserved."
     ]
   };
+}
+
+function isForwardReference(
+  relation: ErdRelation,
+  tableIndexById: Map<string, number>
+) {
+  const fromTableIndex = tableIndexById.get(relation.fromTableId);
+  const toTableIndex = tableIndexById.get(relation.toTableId);
+
+  return (
+    typeof fromTableIndex === "number" &&
+    typeof toTableIndex === "number" &&
+    toTableIndex > fromTableIndex
+  );
 }
 
 function renderCreateTable(
