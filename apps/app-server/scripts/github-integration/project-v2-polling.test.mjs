@@ -87,7 +87,7 @@ class FakeDatabase {
   assert.match(claim.text, /FOR UPDATE OF schedule SKIP LOCKED/i);
   assert.match(claim.text, /INSERT INTO github_sync_runs/i);
   assert.match(claim.text, /'project_v2_items'/i);
-  assert.match(claim.text, /active_sync_run_id = created_run\.id/i);
+  assert.match(claim.text, /active_sync_run_id = claimed_run\.sync_run_id/i);
   assert.match(
     claim.text,
     /schedule\.active_sync_run_id IS NULL[\s\S]*?schedule\.lease_expires_at < now\(\)/i,
@@ -95,13 +95,28 @@ class FakeDatabase {
   );
   assert.match(
     claim.text,
-    /NOT EXISTS\s*\(\s*SELECT 1\s+FROM github_sync_runs AS active_run[\s\S]*?active_run\.status NOT IN \('success', 'failed'\)/i,
-    "a running active sync run must prevent schedule reclamation"
+    /active_run\.status IN \('queued', 'running'\)/i,
+    "a stale queued or running active sync run must be eligible for re-enqueue"
   );
   assert.match(
     claim.text,
-    /NOT EXISTS\s*\(\s*SELECT 1\s+FROM github_sync_jobs AS active_job[\s\S]*?active_job\.status NOT IN \('success', 'failed'\)/i,
-    "a running active sync job must prevent schedule reclamation"
+    /NOT EXISTS\s*\(\s*SELECT 1\s+FROM github_sync_jobs AS active_job[\s\S]*?active_job\.sync_run_id = schedule\.active_sync_run_id/i,
+    "a missing durable job must allow the existing active run to be republished"
+  );
+  assert.match(
+    claim.text,
+    /active_job\.status IN \('queued', 'running'\)[\s\S]*?active_job\.lease_expires_at < now\(\)/i,
+    "an expired job lease must allow the existing active run to be republished"
+  );
+  assert.match(
+    claim.text,
+    /active_job\.lease_expires_at >= now\(\)/i,
+    "a live active job lease must prevent schedule reclamation"
+  );
+  assert.match(
+    claim.text,
+    /THEN schedule\.active_sync_run_id[\s\S]*?schedule\.reusable_sync_run_id AS sync_run_id/i,
+    "a reclaimed schedule must return the original sync run instead of creating a duplicate"
   );
   assert.match(claim.text, /lease_owner = \$2/i);
   assert.match(claim.text, /lease_expires_at = now\(\) \+ interval '10 minutes'/i);

@@ -81,13 +81,38 @@ export class GithubProjectV2PollingService {
 
     const rows = await this.database.query<GithubProjectV2PollingClaimRow>(
       `
-        WITH due_schedules AS (
+        WITH candidate_schedules AS (
           SELECT
             schedule.repository_id,
             schedule.project_v2_id,
             schedule.requested_by_user_id,
             repository.workspace_id,
-            repository.installation_id
+            repository.installation_id,
+            CASE
+              WHEN schedule.active_sync_run_id IS NOT NULL
+                AND schedule.lease_expires_at < now()
+                AND EXISTS (
+                  SELECT 1
+                  FROM github_sync_runs AS active_run
+                  WHERE active_run.id = schedule.active_sync_run_id
+                    AND active_run.status IN ('queued', 'running')
+                )
+                AND (
+                  NOT EXISTS (
+                    SELECT 1
+                    FROM github_sync_jobs AS active_job
+                    WHERE active_job.sync_run_id = schedule.active_sync_run_id
+                  )
+                  OR EXISTS (
+                    SELECT 1
+                    FROM github_sync_jobs AS active_job
+                    WHERE active_job.sync_run_id = schedule.active_sync_run_id
+                      AND active_job.status IN ('queued', 'running')
+                  )
+                )
+              THEN schedule.active_sync_run_id
+              ELSE NULL
+            END AS reusable_sync_run_id
           FROM github_project_v2_polling_schedules AS schedule
           INNER JOIN github_repositories AS repository
             ON repository.id = schedule.repository_id
@@ -100,15 +125,46 @@ export class GithubProjectV2PollingService {
                 schedule.lease_expires_at < now()
                 AND NOT EXISTS (
                   SELECT 1
-                  FROM github_sync_runs AS active_run
-                  WHERE active_run.id = schedule.active_sync_run_id
-                    AND active_run.status NOT IN ('success', 'failed')
-                )
-                AND NOT EXISTS (
-                  SELECT 1
                   FROM github_sync_jobs AS active_job
                   WHERE active_job.sync_run_id = schedule.active_sync_run_id
-                    AND active_job.status NOT IN ('success', 'failed')
+                    AND active_job.status IN ('queued', 'running')
+                    AND active_job.lease_expires_at >= now()
+                )
+                AND (
+                  (
+                    EXISTS (
+                      SELECT 1
+                      FROM github_sync_runs AS active_run
+                      WHERE active_run.id = schedule.active_sync_run_id
+                        AND active_run.status IN ('queued', 'running')
+                    )
+                    AND (
+                      NOT EXISTS (
+                        SELECT 1
+                        FROM github_sync_jobs AS active_job
+                        WHERE active_job.sync_run_id = schedule.active_sync_run_id
+                      )
+                      OR EXISTS (
+                        SELECT 1
+                        FROM github_sync_jobs AS active_job
+                        WHERE active_job.sync_run_id = schedule.active_sync_run_id
+                          AND active_job.status IN ('queued', 'running')
+                          AND (active_job.lease_expires_at IS NULL OR active_job.lease_expires_at < now())
+                      )
+                    )
+                  )
+                  OR NOT EXISTS (
+                    SELECT 1
+                    FROM github_sync_runs AS active_run
+                    WHERE active_run.id = schedule.active_sync_run_id
+                      AND active_run.status IN ('queued', 'running')
+                  )
+                  OR EXISTS (
+                    SELECT 1
+                    FROM github_sync_jobs AS active_job
+                    WHERE active_job.sync_run_id = schedule.active_sync_run_id
+                      AND active_job.status IN ('success', 'failed')
+                  )
                 )
               )
             )
@@ -127,26 +183,48 @@ export class GithubProjectV2PollingService {
             status
           )
           SELECT
-            due_schedule.workspace_id,
-            due_schedule.installation_id,
-            due_schedule.repository_id,
-            due_schedule.project_v2_id,
+            schedule.workspace_id,
+            schedule.installation_id,
+            schedule.repository_id,
+            schedule.project_v2_id,
             'project_v2_items',
             'queued'
-          FROM due_schedules AS due_schedule
+          FROM candidate_schedules AS schedule
+          WHERE schedule.reusable_sync_run_id IS NULL
           RETURNING id, repository_id, project_v2_id
+        ),
+        claimed_runs AS (
+          SELECT
+            schedule.reusable_sync_run_id AS sync_run_id,
+            schedule.repository_id,
+            schedule.project_v2_id,
+            schedule.requested_by_user_id
+          FROM candidate_schedules AS schedule
+          WHERE schedule.reusable_sync_run_id IS NOT NULL
+
+          UNION ALL
+
+          SELECT
+            created_run.id AS sync_run_id,
+            schedule.repository_id,
+            schedule.project_v2_id,
+            schedule.requested_by_user_id
+          FROM created_runs AS created_run
+          INNER JOIN candidate_schedules AS schedule
+            ON schedule.repository_id = created_run.repository_id
+            AND schedule.project_v2_id = created_run.project_v2_id
         )
         UPDATE github_project_v2_polling_schedules AS schedule
         SET
-          active_sync_run_id = created_run.id,
+          active_sync_run_id = claimed_run.sync_run_id,
           lease_owner = $2,
           lease_expires_at = now() + interval '10 minutes',
           updated_at = now()
-        FROM created_runs AS created_run
-        WHERE schedule.repository_id = created_run.repository_id
-          AND schedule.project_v2_id = created_run.project_v2_id
+        FROM claimed_runs AS claimed_run
+        WHERE schedule.repository_id = claimed_run.repository_id
+          AND schedule.project_v2_id = claimed_run.project_v2_id
         RETURNING
-          created_run.id AS sync_run_id,
+          claimed_run.sync_run_id,
           schedule.repository_id,
           schedule.project_v2_id,
           schedule.requested_by_user_id

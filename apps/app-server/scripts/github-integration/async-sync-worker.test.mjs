@@ -91,6 +91,7 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
 
 {
   const events = [];
+  const recoveredSyncRunId = "55555555-5555-4555-8555-555555555555";
   const worker = new GithubSyncJobService(
     { query: async () => [] },
     {},
@@ -98,7 +99,7 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
     {},
     {},
     {
-      claimDueSchedules: async () => [{ syncRunId, requestedByUserId: userId }]
+      claimDueSchedules: async () => [{ syncRunId: recoveredSyncRunId, requestedByUserId: userId }]
     }
   );
   worker.recoverWebhookOutbox = async () => { events.push("recover-webhooks"); };
@@ -113,7 +114,7 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
 
   assert.deepEqual(events, [
     "recover-webhooks",
-    `enqueue:${syncRunId}:${userId}`,
+    `enqueue:${recoveredSyncRunId}:${userId}`,
     "queue:sync-queue",
     "queue:webhook-queue"
   ]);
