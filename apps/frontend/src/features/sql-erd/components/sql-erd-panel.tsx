@@ -88,7 +88,8 @@ import {
   type SqlErdRelationCardinality,
   type SqlErdRelationCardinalityEndpoints
 } from "@/features/sql-erd/utils/model";
-import type {
+import {
+  createSqlErdParseWorkerCancellation,
   ParseWorkerRequest,
   ParseWorkerResponse
 } from "@/features/sql-erd/utils/parse-worker-protocol";
@@ -285,6 +286,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
     (request: ParseWorkerRequest): Promise<ParseWorkerResponse> => {
       if (isSqlErdSourceTextTooLarge(request.sourceText)) {
         return Promise.resolve({
+          cancelled: false,
           error: {
             code: "SOURCE_TOO_LARGE",
             message: "SQL DDL source exceeds the 1 MiB UTF-8 limit."
@@ -321,20 +323,13 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
         };
         const controller: SqlErdParseWorkerController = {
           terminate: () => {
-            finish({
-              error: {
-                code: "PARSE_FAILED",
-                message: "SQL parsing was cancelled."
-              },
-              ok: false,
-              requestSequence: request.requestSequence,
-              sessionId: request.sessionId
-            });
+            finish(createSqlErdParseWorkerCancellation(request));
           }
         };
         parseWorkerRef.current = controller;
         timeoutId = window.setTimeout(() => {
           finish({
+            cancelled: false,
             error: {
               code: "PARSE_FAILED",
               message: "SQL parsing timed out after 5 seconds."
@@ -350,6 +345,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
         });
         worker.addEventListener("error", () => {
           finish({
+            cancelled: false,
             error: {
               code: "PARSE_FAILED",
               message: "SQL parsing worker could not complete."
@@ -547,6 +543,8 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
   }, [pendingLayoutAutosaveJson, pendingSourceAutosaveSnapshot]);
   const handleReloadSession = useCallback(
     async () => {
+      applySqlErdEditAction({ type: "parse_cancelled" });
+      terminateParseWorker();
       autosaveLifecycleGenerationRef.current += 1;
       const requestId = sessionLoadRequestIdRef.current + 1;
       sessionLoadRequestIdRef.current = requestId;
@@ -600,9 +598,9 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
         const activeParseResult = await runSqlErdParseWorker({
           dialect: activeViewSession.dialect,
           previousLayoutJson: activeViewSession.layoutJson,
-          previousModelJson: activeViewSession.modelJson,
           requestSequence: requestId,
           sessionId: activeSession.id,
+          sourceMapModelJson: activeViewSession.modelJson,
           sourceText: activeViewSession.sourceText
         });
 
@@ -651,7 +649,8 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
       applySqlErdEditAction,
       runSqlErdParseWorker,
       sessionId,
-      setPendingSourceAutosaveSnapshot
+      setPendingSourceAutosaveSnapshot,
+      terminateParseWorker
     ]
   );
   const handleReloadPausedSession = useCallback(() => {
@@ -673,7 +672,6 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
       void runSqlErdParseWorker({
         dialect: parseStart.session.dialect,
         previousLayoutJson: parseStart.session.layoutJson,
-        previousModelJson: parseStart.session.modelJson,
         requestSequence: parseStart.requestSequence,
         sessionId: parseStart.session.id!,
         sourceText: parseStart.session.sourceText
@@ -687,6 +685,10 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           parseResult.requestSequence !== parseStart.requestSequence ||
           parseResult.sessionId !== parseStart.session.id
         ) {
+          return;
+        }
+
+        if (parseResult.cancelled) {
           return;
         }
 

@@ -1476,7 +1476,7 @@ const parseWorkerRequest = {
     ],
     version: 1
   },
-  previousModelJson: createRuntimeTestModel(),
+  sourceMapModelJson: createRuntimeTestModel(),
   requestSequence: 12,
   sessionId: "session-worker-12",
   sourceText: "CREATE TABLE users (id BIGINT PRIMARY KEY);"
@@ -1494,6 +1494,18 @@ assert.equal(
 assert.equal(parseWorkerResponse.layoutJson.tableLayouts[0].x, 912);
 assert.equal(parseWorkerResponse.layoutJson.tableLayouts[0].y, 416);
 assert.equal(parseWorkerResponse.sourceMap.dialect, "postgresql");
+assert.equal(parseWorkerResponse.sourceMap.columnRangesByTableId["table.users"] !== undefined, true);
+assert.deepEqual(
+  parseWorkerProtocolRuntime.createSqlErdParseWorkerCancellation(
+    parseWorkerRequest
+  ),
+  {
+    cancelled: true,
+    ok: false,
+    requestSequence: parseWorkerRequest.requestSequence,
+    sessionId: parseWorkerRequest.sessionId
+  }
+);
 assert.deepEqual(
   statusCopyRuntime.getSqlErdSourceStatus({
     autosaveBlockReason: "conflict",
@@ -1719,6 +1731,24 @@ assert.equal(
     staleParseStart.requestSequence
   ),
   true
+);
+
+const cancelledParseState = sqlEditStateRuntime.reduceSqlErdEditState(
+  staleParseStart.state,
+  {
+    type: "parse_cancelled"
+  }
+);
+
+assert.equal(cancelledParseState.parse.status, "cancelled");
+assert.equal(cancelledParseState.parse.error, null);
+assert.equal(
+  cancelledParseState.parse.requestSequence,
+  staleParseStart.requestSequence + 1
+);
+assert.equal(
+  sqlEditStateRuntime.shouldScheduleSqlErdAutoParse(cancelledParseState),
+  false
 );
 
 const latestDraftState = sqlEditStateRuntime.reduceSqlErdEditState(
@@ -3981,6 +4011,7 @@ assert.match(panel, /type: "session_loaded"/);
 assert.match(panel, /type: "layout_changed"/);
 assert.match(panel, /type: "layout_saved"/);
 assert.match(panel, /type: "parse_failed"/);
+assert.match(panel, /type: "parse_cancelled"/);
 assert.match(panel, /type: "parse_succeeded"/);
 assert.match(panel, /runSqlErdParseWorker/);
 assert.match(panel, /createSqlErdSourceAutosaveRequest/);
@@ -4127,8 +4158,9 @@ assert.match(panel, /setSqlSourceMap\(null\)/);
 assert.match(panel, /setSqlSourceMap\(parseResult\.sourceMap\)/);
 assert.match(
   panel,
-  /previousModelJson: activeViewSession\.modelJson/
+  /sourceMapModelJson: activeViewSession\.modelJson/
 );
+assert.doesNotMatch(panel, /previousModelJson: parseStart\.session\.modelJson/);
 assert.match(panel, /relationSourceCompartmentRef/);
 assert.match(panel, /getSelectedSqlErdRelationSourceRanges/);
 assert.match(panel, /import Link from "next\/link"/);

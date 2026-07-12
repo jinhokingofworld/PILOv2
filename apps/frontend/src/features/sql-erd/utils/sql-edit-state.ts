@@ -9,7 +9,7 @@ import type { SqlErdViewSession } from "@/features/sql-erd/utils/session-state";
 export type SqlErdParseState = {
   error: SqltoerdDdlParseError | null;
   requestSequence: number;
-  status: "error" | "idle" | "parsing";
+  status: "cancelled" | "error" | "idle" | "parsing";
 };
 
 export const SQL_ERD_AUTO_PARSE_DEBOUNCE_MS = 500;
@@ -34,6 +34,9 @@ export type SqlErdEditAction =
       error: SqltoerdDdlParseError;
       requestSequence: number;
       type: "parse_failed";
+    }
+  | {
+      type: "parse_cancelled";
     }
   | {
       requestSequence: number;
@@ -214,6 +217,21 @@ export function reduceSqlErdEditState(
       lastSuccessfulSnapshot: {
         ...state.lastSuccessfulSnapshot,
         revision: action.snapshot.revision
+      }
+    };
+  }
+
+  if (action.type === "parse_cancelled") {
+    if (state.parse.status !== "parsing") {
+      return state;
+    }
+
+    return {
+      ...state,
+      parse: {
+        error: null,
+        requestSequence: state.parse.requestSequence + 1,
+        status: "cancelled"
       }
     };
   }

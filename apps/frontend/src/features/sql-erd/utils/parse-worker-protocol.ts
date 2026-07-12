@@ -14,14 +14,15 @@ import type { SqltoerdSourceMap } from "@/features/sql-erd/utils/sql-source-map"
 export type ParseWorkerRequest = {
   dialect: SqltoerdDialect;
   previousLayoutJson: SqltoerdLayoutJsonV1;
-  previousModelJson: SqltoerdModelJsonV1;
   requestSequence: number;
   sessionId: string;
+  sourceMapModelJson?: SqltoerdModelJsonV1;
   sourceText: string;
 };
 
 export type ParseWorkerResponse =
   | {
+      cancelled: false;
       layoutJson: SqltoerdLayoutJsonV1;
       modelJson: SqltoerdModelJsonV1;
       ok: true;
@@ -31,6 +32,13 @@ export type ParseWorkerResponse =
       sourceMap: SqltoerdSourceMap;
     }
   | {
+      cancelled: true;
+      ok: false;
+      requestSequence: number;
+      sessionId: string;
+    }
+  | {
+      cancelled: false;
       error: SqltoerdDdlParseError;
       ok: false;
       requestSequence: number;
@@ -42,11 +50,13 @@ export function executeSqlErdParseWorkerRequest(
 ): ParseWorkerResponse {
   const parseResult = parseSqlDdlToErdModel({
     dialect: request.dialect,
+    sourceMapModelJson: request.sourceMapModelJson,
     sourceText: request.sourceText
   });
 
   if (!parseResult.ok) {
     return {
+      cancelled: false,
       error: parseResult.error,
       ok: false,
       requestSequence: request.requestSequence,
@@ -55,6 +65,7 @@ export function executeSqlErdParseWorkerRequest(
   }
 
   return {
+    cancelled: false,
     layoutJson: createSqltoerdLayoutForModel(
       parseResult.modelJson,
       request.previousLayoutJson
@@ -65,5 +76,16 @@ export function executeSqlErdParseWorkerRequest(
     resolvedDialect: parseResult.resolvedDialect,
     sessionId: request.sessionId,
     sourceMap: parseResult.sourceMap
+  };
+}
+
+export function createSqlErdParseWorkerCancellation(
+  request: Pick<ParseWorkerRequest, "requestSequence" | "sessionId">
+): ParseWorkerResponse {
+  return {
+    cancelled: true,
+    ok: false,
+    requestSequence: request.requestSequence,
+    sessionId: request.sessionId
   };
 }
