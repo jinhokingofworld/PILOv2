@@ -143,17 +143,17 @@ DB migration과 schema 검증을 같은 PR에 포함한다.
 
 ### 3-B2 Support Relations and Flow Grouping (#777)
 
-- [ ] migration/config/docs 파일의 support 관계 후보를 만든다.
-- [ ] 같은 기능 경로와 관계 연결성을 기준으로 Flow 후보를 만든다.
-- [ ] 어떤 Flow에도 묶이지 않은 파일을 fallback Flow에 보존한다.
-- [ ] package manifest/lockfile의 명시적 support 관계를 만든다.
-- [ ] 모든 변경 파일이 정확히 하나 이상의 Flow에 포함되도록 한다.
+- [x] migration/config/docs 파일의 support 관계 후보를 만든다.
+- [x] 같은 기능 경로와 관계 연결성을 기준으로 Flow 후보를 만든다.
+- [x] 어떤 Flow에도 묶이지 않은 파일을 fallback Flow에 보존한다.
+- [x] package manifest/lockfile의 명시적 support 관계를 만든다.
+- [x] 모든 변경 파일이 정확히 하나 이상의 Flow에 포함되도록 한다.
 
 완료 기준:
 
 - [x] OpenAI 호출 없이 고정 fixture에서 동일한 role/core relation 후보를 만든다.
 - [x] 존재하지 않는 file path와 self edge를 생성하지 않는다.
-- [ ] 모든 변경 파일이 정확히 하나 이상의 Flow에 포함된다.
+- [x] 모든 변경 파일이 정확히 하나 이상의 Flow에 포함된다.
 
 ## 3-C AI Enrichment and Graph Validator
 
