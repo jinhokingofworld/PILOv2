@@ -454,3 +454,4 @@ await import("./analysis-job-recovery.test.mjs");
 await import("./analysis-retry.test.mjs");
 await import("./semantic-graph-contract.test.mjs");
 await import("./semantic-graph-candidates.test.mjs");
+await import("./semantic-graph-validator.test.mjs");

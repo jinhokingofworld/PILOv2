@@ -199,6 +199,51 @@ function createService(database, github) {
 }
 
 {
+  const database = new FakeDatabase(jobRow());
+  const body = resultBody();
+  body.analysis.graphSchemaVersion = "pr-review-semantic-graph:v1";
+  body.analysis.semanticGraph = {
+    files: [
+      {
+        filePath: "apps/app-server/src/pr-review.ts",
+        roleType: "entry",
+        roleReason: "낮은 confidence 역할을 보정합니다."
+      }
+    ],
+    relations: [
+      {
+        candidateKey: null,
+        fromFilePath: "apps/app-server/src/pr-review.ts",
+        toFilePath: "apps/app-server/src/pr-review.ts",
+        relationType: "depends_on",
+        reason: "invalid self edge"
+      }
+    ],
+    flows: [
+      {
+        candidateKey: "candidate-flow-fallback",
+        title: "PR 분석 변경",
+        description: "잘못된 Graph는 전체 fallback합니다.",
+        reviewOrder: ["apps/app-server/src/pr-review.ts"]
+      }
+    ]
+  };
+
+  const result = await createService(
+    database,
+    new FakeGithubDependency()
+  ).storeAnalysisJobResult(JOB_ID, body);
+
+  assert.equal(result.status, "reviewing");
+  assert.equal(result.persisted, true);
+  assert.ok(
+    database.transactionState.calls.some((call) =>
+      call.text.includes("INSERT INTO review_flows")
+    )
+  );
+}
+
+{
   const database = new FakeDatabase(
     jobRow({ status: "succeeded", session_status: "reviewing" })
   );
