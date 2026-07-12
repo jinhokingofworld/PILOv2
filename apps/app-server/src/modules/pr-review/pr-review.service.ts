@@ -53,6 +53,7 @@ import {
   PR_REVIEW_SEMANTIC_GRAPH_SCHEMA_VERSION,
   type PrReviewSemanticGraphHandoffPayload
 } from "./pr-review-semantic-contract";
+import { resolvePrReviewSemanticGraph } from "./pr-review-semantic-validator";
 
 interface PullRequestRow extends QueryResultRow {
   id: string;
@@ -2757,6 +2758,22 @@ export class PrReviewService {
       }
       return metadata;
     });
+    const semanticGraphCandidates = buildPrReviewSemanticGraphHandoff(
+      files.map((file) => ({
+        filePath: file.filePath,
+        previousFilePath: file.previousFilePath,
+        fileStatus: file.fileStatus,
+        isBinary: file.isBinary,
+        patch: file.patch
+      }))
+    );
+    const semanticGraph = resolvePrReviewSemanticGraph(
+      analysis,
+      semanticGraphCandidates
+    );
+    if (semanticGraph.fallbackReason === "invalid_ai_graph") {
+      this.logger.warn("Invalid PR Review AI semantic graph used deterministic fallback");
+    }
 
     return {
       prPurpose: this.requireHandoffText(analysis, "prPurpose", 10000),
@@ -2769,7 +2786,8 @@ export class PrReviewService {
       cautionPoints: this.requireHandoffTextList(analysis, "cautionPoints", 100, 4000),
       flowTitle: this.requireHandoffText(analysis, "flowTitle", 255),
       flowDescription: this.requireHandoffText(analysis, "flowDescription", 10000),
-      files: normalizedFiles
+      files: normalizedFiles,
+      semanticGraph
     };
   }
 

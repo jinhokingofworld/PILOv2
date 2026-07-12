@@ -10,6 +10,7 @@ import type {
   PrReviewGithubPullRequestDetail,
   PrReviewFileRiskLevel
 } from "./types";
+import type { PrReviewValidatedSemanticGraph } from "./pr-review-semantic-validator";
 
 const DEFAULT_OPENAI_MODEL = "gpt-5.1-mini";
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
@@ -39,6 +40,7 @@ export interface PrReviewAnalysisResult {
   flowTitle: string;
   flowDescription: string;
   files: ReviewFileMetadata[];
+  semanticGraph?: PrReviewValidatedSemanticGraph;
 }
 
 export interface PrReviewConflictSuggestionInput {
