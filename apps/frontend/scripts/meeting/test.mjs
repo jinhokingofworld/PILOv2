@@ -93,6 +93,7 @@ assert.match(meetingTypes, /export type MeetingParticipant =/);
 assert.match(meetingTypes, /export type LiveKitJoin =/);
 assert.match(meetingTypes, /export type MeetingRecording =/);
 assert.match(meetingTypes, /export type MeetingReportSummary =/);
+assert.match(meetingTypes, /participantSummary\?:/);
 assert.match(meetingTypes, /export type MeetingReportDetail =/);
 assert.match(meetingTypes, /export type RecordingStatus = "RUNNING"/);
 assert.match(meetingTypes, /"COMPLETED" \| "FAILED"/);
@@ -297,6 +298,7 @@ assert.match(meetingPanel, /action !== "reconnect"/);
 assert.match(meetingPanel, /다시 연결/);
 
 assert.match(meetingReportSection, /MeetingReportSection/);
+assert.match(meetingReportSection, /if \(!summary \|\| summary\.totalCount === 0\) return null/);
 assert.match(meetingReportSection, /MeetingReportStatusFilter/);
 assert.match(meetingReportSection, /REPORT_POLL_INTERVAL_MS = 10000/);
 assert.match(meetingReportSection, /useMeetingReportRealtime/);

@@ -123,6 +123,8 @@ interface MeetingReportRow extends QueryResultRow {
   retry_count: number | string;
   created_at: Date | string;
   updated_at: Date | string;
+  participant_count?: number | string;
+  participant_preview?: unknown;
 }
 
 interface MeetingReportDetailRow extends MeetingReportRow {
@@ -251,8 +253,19 @@ export interface MeetingReportSummaryPayload {
   decisions: string | null;
   actionItemCandidates: unknown[];
   retryCount: number;
+  participantSummary: MeetingReportParticipantSummaryPayload;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface MeetingReportParticipantSummaryPayload {
+  totalCount: number;
+  participants: Array<{
+    userId: string;
+    name: string | null;
+    avatarUrl: string | null;
+  }>;
+  hasMore: boolean;
 }
 
 export interface MeetingReportDetailPayload extends MeetingReportSummaryPayload {
@@ -2093,22 +2106,16 @@ export class MeetingService {
     return this.database.query<MeetingReportRow>(
       `
         SELECT
-          id,
-          meeting_id,
-          recording_id,
-          status,
-          failed_step,
-          error_message,
-          summary,
-          discussion_points,
-          decisions,
-          action_item_candidates,
-          retry_count,
-          created_at,
-          updated_at
+          meeting_reports.id, meeting_reports.meeting_id, meeting_reports.recording_id,
+          meeting_reports.status, meeting_reports.failed_step, meeting_reports.error_message,
+          meeting_reports.summary, meeting_reports.discussion_points, meeting_reports.decisions,
+          meeting_reports.action_item_candidates, meeting_reports.retry_count,
+          meeting_reports.created_at, meeting_reports.updated_at,
+          ${this.meetingReportParticipantSummaryColumns()}
         FROM meeting_reports
-        WHERE meeting_id = $1
-        ORDER BY created_at DESC, id ASC
+        ${this.meetingReportParticipantSummaryJoin("meeting_reports")}
+        WHERE meeting_reports.meeting_id = $1
+        ORDER BY meeting_reports.created_at DESC, meeting_reports.id ASC
       `,
       [meetingId]
     );
@@ -2167,10 +2174,12 @@ export class MeetingService {
           meeting_reports.action_item_candidates,
           meeting_reports.retry_count,
           meeting_reports.created_at,
-          meeting_reports.updated_at
+          meeting_reports.updated_at,
+          ${this.meetingReportParticipantSummaryColumns()}
         FROM meeting_reports
         JOIN meetings
           ON meetings.id = meeting_reports.meeting_id
+        ${this.meetingReportParticipantSummaryJoin("meeting_reports")}
         WHERE meetings.workspace_id = $1
           ${statusCondition}
           ${searchCondition}
@@ -2221,10 +2230,12 @@ export class MeetingService {
           meeting_reports.action_item_candidates,
           meeting_reports.retry_count,
           meeting_reports.created_at,
-          meeting_reports.updated_at
+          meeting_reports.updated_at,
+          ${this.meetingReportParticipantSummaryColumns()}
         FROM meeting_reports
         JOIN meetings
           ON meetings.id = meeting_reports.meeting_id
+        ${this.meetingReportParticipantSummaryJoin("meeting_reports")}
         WHERE meetings.workspace_id = $1
           AND meeting_reports.id = $2
         LIMIT 1
@@ -2720,9 +2731,45 @@ export class MeetingService {
       decisions: report.decisions,
       actionItemCandidates: this.toJsonArray(report.action_item_candidates),
       retryCount: Number(report.retry_count),
+      participantSummary: this.mapMeetingReportParticipantSummary(report),
       createdAt: this.toIsoString(report.created_at),
       updatedAt: this.toIsoString(report.updated_at)
     };
+  }
+
+  private mapMeetingReportParticipantSummary(report: MeetingReportRow) {
+    const participants = this.toJsonArray(report.participant_preview).flatMap((value) => {
+      if (typeof value !== "object" || value === null || Array.isArray(value)) return [];
+      const participant = value as Record<string, unknown>;
+      if (typeof participant.userId !== "string") return [];
+      return [{
+        userId: participant.userId,
+        name: typeof participant.name === "string" ? participant.name : null,
+        avatarUrl: typeof participant.avatarUrl === "string" ? participant.avatarUrl : null
+      }];
+    });
+    const totalCount = Number(report.participant_count ?? 0);
+    return { totalCount, participants, hasMore: totalCount > participants.length };
+  }
+
+  private meetingReportParticipantSummaryColumns(): string {
+    return "COALESCE(participant_summary.participant_count, 0)::int AS participant_count, COALESCE(participant_summary.participant_preview, '[]'::jsonb) AS participant_preview";
+  }
+
+  private meetingReportParticipantSummaryJoin(reportAlias: string): string {
+    return `LEFT JOIN LATERAL (
+      SELECT
+        (SELECT COUNT(*)::int FROM meeting_participants WHERE meeting_id = ${reportAlias}.meeting_id) AS participant_count,
+        (SELECT COALESCE(jsonb_agg(jsonb_build_object('userId', preview.user_id, 'name', preview.name, 'avatarUrl', preview.avatar_url) ORDER BY preview.joined_at ASC, preview.id ASC), '[]'::jsonb)
+         FROM (
+           SELECT meeting_participants.id, meeting_participants.user_id, meeting_participants.joined_at, users.name, users.avatar_url
+           FROM meeting_participants
+           JOIN users ON users.id = meeting_participants.user_id
+           WHERE meeting_participants.meeting_id = ${reportAlias}.meeting_id
+           ORDER BY meeting_participants.joined_at ASC, meeting_participants.id ASC
+           LIMIT 3
+         ) AS preview) AS participant_preview
+    ) AS participant_summary ON true`;
   }
 
   private mapMeetingReportDetail(

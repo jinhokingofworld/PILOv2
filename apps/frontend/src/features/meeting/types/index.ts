@@ -74,6 +74,11 @@ export type MeetingReportSummary = {
   decisions: string | null;
   actionItemCandidates: unknown[];
   retryCount: number;
+  participantSummary?: {
+    totalCount: number;
+    participants: Array<{ userId: string; name: string | null; avatarUrl: string | null }>;
+    hasMore: boolean;
+  };
   createdAt: string;
   updatedAt: string;
 };

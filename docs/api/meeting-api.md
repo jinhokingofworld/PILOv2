@@ -244,6 +244,7 @@ Meeting 하나에는 여러 Recording이 있을 수 있다. API에서 `currentRe
 | `decisions` | string \| null | 결정사항 |
 | `actionItemCandidates` | array | 후속 작업 후보 |
 | `retryCount` | number | 재시도 횟수 |
+| `participantSummary` | object | 참석자 요약. `totalCount`, 대표 참석자 최대 3명의 `participants`, 추가 참석자 여부 `hasMore`를 포함한다. 대표 참석자는 참여 시각 순서다. |
 | `createdAt` | string | ISO datetime |
 | `updatedAt` | string | ISO datetime |
 

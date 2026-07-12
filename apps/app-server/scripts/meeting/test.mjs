@@ -1964,8 +1964,8 @@ async function assertError(action, messagePattern) {
       queryRows: [
         (text, values) => {
           assert.match(text, /FROM meeting_reports/);
-          assert.match(text, /WHERE meeting_id = \$1/);
-          assert.match(text, /ORDER BY created_at DESC, id ASC/);
+          assert.match(text, /WHERE meeting_reports\.meeting_id = \$1/);
+          assert.match(text, /ORDER BY meeting_reports\.created_at DESC, meeting_reports\.id ASC/);
           assert.doesNotMatch(text, /transcript_text/);
           assert.deepEqual(values, [meetingId]);
           return [meetingReportRow()];

@@ -169,6 +169,20 @@ function formatReportTitle(report: Pick<MeetingReportSummary, "createdAt">) {
   return `${formatReportDateTime(report.createdAt)} 회의록`;
 }
 
+function ReportParticipantSummary({ report }: { report: MeetingReportSummary }) {
+  const summary = report.participantSummary;
+  if (!summary || summary.totalCount === 0) return null;
+  const names = summary.participants
+    .map((participant) => participant.name?.trim() || "이름 없음")
+    .join(", ");
+  return (
+    <span className="text-xs text-muted-foreground">
+      참석 {summary.totalCount}명{names ? ` · ${names}` : ""}
+      {summary.hasMore ? " 외" : ""}
+    </span>
+  );
+}
+
 function getReportStatusLabel(status: MeetingReportStatus) {
   switch (status) {
     case "PROCESSING":
@@ -482,6 +496,12 @@ function MeetingReportDetailModal({
                       </dt>
                       <dd className="mt-1">
                         {formatReportDateTime(report.createdAt)}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="font-medium text-muted-foreground">참석자</dt>
+                      <dd className="mt-1">
+                        <ReportParticipantSummary report={report} />
                       </dd>
                     </div>
                     <div>
@@ -963,6 +983,7 @@ export function MeetingReportSection({
                     <span className="rounded-full border bg-muted/40 px-2.5 py-1 text-xs font-medium text-muted-foreground">
                       {formatReportDateTime(report.createdAt)}
                     </span>
+                    <ReportParticipantSummary report={report} />
                     {report.retryCount > 0 ? (
                       <span className="rounded-full border bg-muted/40 px-2.5 py-1 text-xs font-medium text-muted-foreground">
                         재생성 {report.retryCount}회
