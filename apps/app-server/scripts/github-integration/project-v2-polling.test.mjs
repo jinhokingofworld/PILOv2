@@ -131,6 +131,7 @@ class FakeDatabase {
   const responses = [
     new Response(null, { status: 429 }),
     new Response(null, { status: 403, headers: { "x-ratelimit-remaining": "0" } }),
+    new Response(null, { status: 403, headers: { "retry-after": "60" } }),
     new Response(JSON.stringify({ errors: [{ message: "API rate limit exceeded" }] }), {
       status: 200,
       headers: { "content-type": "application/json" }
@@ -139,7 +140,7 @@ class FakeDatabase {
   globalThis.fetch = async () => responses.shift();
 
   try {
-    for (let index = 0; index < 3; index += 1) {
+    for (let index = 0; index < 4; index += 1) {
       await assert.rejects(
         () => new GithubAppClient().getProjectV2Item({
           installationId: 1,

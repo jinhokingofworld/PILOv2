@@ -221,6 +221,86 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
 {
   const job = { id: "job-1", sync_run_id: syncRunId, requested_by_user_id: userId, workspace_id: workspaceId, installation_id: installationId, repository_id: null, project_v2_id: null, target: "full", attempt_count: 1 };
   const writes = [];
+  let heartbeat;
+  let completeSync;
+  const originalSetInterval = globalThis.setInterval;
+  const originalClearInterval = globalThis.clearInterval;
+  globalThis.setInterval = (callback, delay) => {
+    heartbeat = callback;
+    assert.equal(delay, 5 * 60 * 1000, "the heartbeat must renew before the ten-minute lease expires");
+    return "heartbeat";
+  };
+  globalThis.clearInterval = (timer) => assert.equal(timer, "heartbeat");
+
+  try {
+    const worker = new GithubSyncJobService(
+      {
+        execute: async (text, values) => { writes.push({ text, values }); return { rowCount: 1 }; },
+        transaction: async (callback) => callback({ execute: async () => ({ rowCount: 1 }) })
+      },
+      { getGithubAppConfig: () => ({}) },
+      { runGithubSyncTarget: async () => new Promise((resolve) => { completeSync = resolve; }) },
+      { resolvePersonalProjectV2UserAccessToken: async () => null }
+    );
+    worker.acquireLease = async () => job;
+    worker.installation = async () => ({ id: installationId });
+
+    const processing = worker.processSyncJob("job-1");
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(typeof heartbeat, "function", "a leased job must start a heartbeat");
+    await heartbeat();
+
+    assert.equal(writes.length, 1);
+    assert.match(writes[0].text, /UPDATE github_sync_jobs/i);
+    assert.match(writes[0].text, /lease_owner=\$2/i);
+    assert.match(writes[0].text, /lease_expires_at=now\(\) \+ interval '10 minutes'/i);
+    assert.match(writes[0].text, /UPDATE github_project_v2_polling_schedules/i);
+    assert.match(writes[0].text, /active_sync_run_id=renewed_job\.sync_run_id/i);
+    assert.match(writes[0].text, /schedule\.lease_owner=\$2/i);
+    assert.deepEqual(writes[0].values, [job.id, worker.workerId]);
+
+    completeSync({ fetchedCount: 0, createdCount: 0, updatedCount: 0, skippedCount: 0, cursor: {} });
+    assert.equal(await processing, "terminal");
+  } finally {
+    globalThis.setInterval = originalSetInterval;
+    globalThis.clearInterval = originalClearInterval;
+  }
+}
+
+{
+  const job = { id: "job-lease-renewal", sync_run_id: syncRunId, requested_by_user_id: userId, workspace_id: workspaceId, installation_id: installationId, repository_id: null, project_v2_id: null, target: "full", attempt_count: 1 };
+  const warnings = [];
+  let heartbeat;
+  const originalSetInterval = globalThis.setInterval;
+  const originalClearInterval = globalThis.clearInterval;
+  globalThis.setInterval = (callback) => {
+    heartbeat = callback;
+    return "heartbeat";
+  };
+  globalThis.clearInterval = () => {};
+
+  try {
+    const worker = new GithubSyncJobService(
+      { execute: async () => { throw new Error("token=not-safe-to-log"); } },
+      {},
+      {},
+      {}
+    );
+    worker.logger = { warn: (message) => warnings.push(message) };
+    const timer = worker.startLeaseHeartbeat(job);
+    await heartbeat();
+    clearInterval(timer);
+
+    assert.deepEqual(warnings, [`GitHub sync job ${job.id} lease renewal failed`]);
+  } finally {
+    globalThis.setInterval = originalSetInterval;
+    globalThis.clearInterval = originalClearInterval;
+  }
+}
+
+{
+  const job = { id: "job-1", sync_run_id: syncRunId, requested_by_user_id: userId, workspace_id: workspaceId, installation_id: installationId, repository_id: null, project_v2_id: null, target: "full", attempt_count: 1 };
+  const writes = [];
   const worker = new GithubSyncJobService(
     {
       transaction: async (callback) => callback({

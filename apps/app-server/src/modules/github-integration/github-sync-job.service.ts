@@ -91,6 +91,7 @@ export class GithubSyncJobService implements OnModuleDestroy {
   async processSyncJob(jobId: string): Promise<"terminal" | "retry"> {
     const job = await this.acquireLease(jobId);
     if (!job) return "terminal";
+    const heartbeat = this.startLeaseHeartbeat(job);
     try {
       const [installation, repository, projectV2] = await Promise.all([
         this.installation(job.workspace_id, job.installation_id),
@@ -130,6 +131,8 @@ export class GithubSyncJobService implements OnModuleDestroy {
       }
       this.logger.warn(`GitHub sync job ${job.id} will be retried: ${this.errorMessage(error)}`);
       return "retry";
+    } finally {
+      clearInterval(heartbeat);
     }
   }
 
@@ -194,6 +197,33 @@ export class GithubSyncJobService implements OnModuleDestroy {
        FROM leased, github_sync_jobs job WHERE run.id=leased.sync_run_id AND job.id=leased.id
        RETURNING leased.id, leased.sync_run_id, leased.requested_by_user_id, leased.attempt_count, run.workspace_id, run.installation_id,
          run.repository_id, run.project_v2_id, run.target`, [jobId, this.workerId]
+    );
+  }
+
+  private startLeaseHeartbeat(job: SyncJobRow): ReturnType<typeof setInterval> {
+    return setInterval(async () => {
+      try {
+        await this.renewLease(job);
+      } catch {
+        this.logger.warn(`GitHub sync job ${job.id} lease renewal failed`);
+      }
+    }, 5 * 60 * 1000);
+  }
+
+  private async renewLease(job: SyncJobRow): Promise<void> {
+    await this.database.execute(
+      `WITH renewed_job AS (
+         UPDATE github_sync_jobs
+         SET lease_expires_at=now() + interval '10 minutes'
+         WHERE id=$1 AND status='running' AND lease_owner=$2
+         RETURNING sync_run_id
+       )
+       UPDATE github_project_v2_polling_schedules AS schedule
+       SET lease_expires_at=now() + interval '10 minutes', updated_at=now()
+       FROM renewed_job
+       WHERE schedule.active_sync_run_id=renewed_job.sync_run_id
+         AND schedule.lease_owner=$2`,
+      [job.id, this.workerId]
     );
   }
 
