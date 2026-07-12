@@ -14,6 +14,7 @@ import {
 
 import { cn } from "@/lib/utils";
 import type {
+  PrReviewFileRoleType,
   PrReviewFileRiskLevel,
   PrReviewFileReviewStatus,
   PrReviewFileStatus
@@ -23,6 +24,7 @@ export const PR_REVIEW_FILE_NODE_SHAPE_TYPE = "pr_review_file_node";
 export const PR_REVIEW_FLOW_EDGE_SHAPE_TYPE = "pr_review_flow_edge";
 export const PR_REVIEW_FLOW_LABEL_SHAPE_TYPE = "pr_review_flow_label";
 export const PR_REVIEW_FLOW_MILESTONE_SHAPE_TYPE = "pr_review_flow_milestone";
+export const PR_REVIEW_ROLE_LANE_SHAPE_TYPE = "pr_review_role_lane";
 
 export type PrReviewFileNodeShapeProps = {
   w: number;
@@ -53,6 +55,18 @@ export type PrReviewFlowEdgeShapeProps = {
   toReviewFileId: string;
   flowId: string;
   reason: string;
+  kind: "review_order" | "semantic";
+};
+
+export type PrReviewRoleLaneShapeProps = {
+  w: number;
+  h: number;
+  flowId: string;
+  roleType: PrReviewFileRoleType;
+  label: string;
+  description: string;
+  fileCount: number;
+  labelWidth: number;
 };
 
 export type PrReviewFlowLabelShapeProps = {
@@ -94,12 +108,40 @@ export type PrReviewFlowMilestoneShape = TLBaseShape<
   PrReviewFlowMilestoneShapeProps
 >;
 
+export type PrReviewRoleLaneShape = TLBaseShape<
+  typeof PR_REVIEW_ROLE_LANE_SHAPE_TYPE,
+  PrReviewRoleLaneShapeProps
+>;
+
 declare module "@tldraw/tlschema" {
   interface TLGlobalShapePropsMap {
     [PR_REVIEW_FILE_NODE_SHAPE_TYPE]: PrReviewFileNodeShapeProps;
     [PR_REVIEW_FLOW_EDGE_SHAPE_TYPE]: PrReviewFlowEdgeShapeProps;
     [PR_REVIEW_FLOW_LABEL_SHAPE_TYPE]: PrReviewFlowLabelShapeProps;
     [PR_REVIEW_FLOW_MILESTONE_SHAPE_TYPE]: PrReviewFlowMilestoneShapeProps;
+    [PR_REVIEW_ROLE_LANE_SHAPE_TYPE]: PrReviewRoleLaneShapeProps;
+  }
+}
+
+const contractRoleLaneClass =
+  "border-cyan-200 bg-cyan-50/55 text-cyan-800";
+
+function getRoleLaneClass(roleType: PrReviewFileRoleType) {
+  switch (roleType) {
+    case "entry":
+      return "border-blue-200 bg-blue-50/55 text-blue-800";
+    case "api_contract":
+      return contractRoleLaneClass;
+    case "core_logic":
+      return "border-rose-200 bg-rose-50/45 text-rose-800";
+    case "ui_state":
+      return "border-violet-200 bg-violet-50/45 text-violet-800";
+    case "verification":
+      return "border-emerald-200 bg-emerald-50/50 text-emerald-800";
+    case "support":
+      return "border-amber-200 bg-amber-50/50 text-amber-800";
+    case "unknown":
+      return "border-slate-200 bg-slate-50/70 text-slate-700";
   }
 }
 
@@ -274,13 +316,60 @@ function PrReviewFlowEdge({ shape }: { shape: PrReviewFlowEdgeShape }) {
       <path
         d={path}
         fill="none"
-        stroke="rgba(37, 99, 235, 0.68)"
+        stroke={
+          shape.props.kind === "review_order"
+            ? "rgba(37, 99, 235, 0.78)"
+            : "rgba(71, 85, 105, 0.52)"
+        }
+        strokeDasharray={shape.props.kind === "semantic" ? "8 7" : undefined}
         strokeLinecap="round"
         strokeLinejoin="round"
-        strokeWidth="3"
+        strokeWidth={shape.props.kind === "review_order" ? "3" : "2"}
       />
-      <polygon fill="rgba(37, 99, 235, 0.72)" points={arrowPoints} />
+      <polygon
+        fill={
+          shape.props.kind === "review_order"
+            ? "rgba(37, 99, 235, 0.78)"
+            : "rgba(71, 85, 105, 0.58)"
+        }
+        points={arrowPoints}
+      />
     </SVGContainer>
+  );
+}
+
+function PrReviewRoleLane({ shape }: { shape: PrReviewRoleLaneShape }) {
+  return (
+    <HTMLContainer
+      className="overflow-visible"
+      style={{
+        height: shape.props.h,
+        pointerEvents: "none",
+        width: shape.props.w
+      }}
+    >
+      <div
+        className={cn(
+          "flex h-full w-full border-y bg-white/55",
+          getRoleLaneClass(shape.props.roleType)
+        )}
+      >
+        <div
+          className="flex shrink-0 flex-col justify-center border-r border-current/15 px-4"
+          style={{ width: shape.props.labelWidth }}
+        >
+          <div className="flex items-center gap-2">
+            <p className="text-sm font-semibold leading-5">{shape.props.label}</p>
+            <span className="text-xs font-medium opacity-70">
+              {shape.props.fileCount}
+            </span>
+          </div>
+          <p className="mt-1 line-clamp-2 text-xs leading-4 opacity-70">
+            {shape.props.description}
+          </p>
+        </div>
+      </div>
+    </HTMLContainer>
   );
 }
 
@@ -289,7 +378,7 @@ function PrReviewFlowLabel({ shape }: { shape: PrReviewFlowLabelShape }) {
     <HTMLContainer style={{ width: shape.props.w, height: shape.props.h }}>
       <div className="flex h-full min-w-0 flex-col justify-center overflow-hidden">
         <p className="text-xs font-semibold uppercase text-blue-600">
-          Flow {shape.props.sortOrder}
+          Flow {shape.props.sortOrder} · {shape.props.fileCount}개 파일
         </p>
         <h2 className="mt-1 line-clamp-2 break-words text-lg font-semibold leading-6 text-slate-950">
           {shape.props.title}
@@ -425,7 +514,8 @@ export class PrReviewFlowEdgeShapeUtil extends ShapeUtil<PrReviewFlowEdgeShape> 
     fromReviewFileId: T.string,
     toReviewFileId: T.string,
     flowId: T.string,
-    reason: T.string
+    reason: T.string,
+    kind: T.literalEnum("review_order", "semantic")
   };
 
   override canBind() {
@@ -455,7 +545,8 @@ export class PrReviewFlowEdgeShapeUtil extends ShapeUtil<PrReviewFlowEdgeShape> 
       fromReviewFileId: "",
       toReviewFileId: "",
       flowId: "",
-      reason: ""
+      reason: "",
+      kind: "review_order"
     };
   }
 
@@ -485,6 +576,77 @@ export class PrReviewFlowEdgeShapeUtil extends ShapeUtil<PrReviewFlowEdgeShape> 
 
   override getIndicatorPath(shape: PrReviewFlowEdgeShape) {
     const path = new Path2D(getEdgePathData(shape));
+
+    return path;
+  }
+}
+
+export class PrReviewRoleLaneShapeUtil extends ShapeUtil<PrReviewRoleLaneShape> {
+  static override type = PR_REVIEW_ROLE_LANE_SHAPE_TYPE;
+
+  static override props = {
+    w: T.number,
+    h: T.number,
+    flowId: T.string,
+    roleType: T.literalEnum(
+      "entry",
+      "core_logic",
+      "api_contract",
+      "ui_state",
+      "verification",
+      "support",
+      "unknown"
+    ),
+    label: T.string,
+    description: T.string,
+    fileCount: T.number,
+    labelWidth: T.number
+  };
+
+  override canBind() {
+    return false;
+  }
+
+  override canResize() {
+    return false;
+  }
+
+  override hideSelectionBoundsBg() {
+    return true;
+  }
+
+  override hideSelectionBoundsFg() {
+    return true;
+  }
+
+  override getDefaultProps(): PrReviewRoleLaneShape["props"] {
+    return {
+      w: 640,
+      h: 152,
+      flowId: "",
+      roleType: "unknown",
+      label: "",
+      description: "",
+      fileCount: 0,
+      labelWidth: 152
+    };
+  }
+
+  override getGeometry(shape: PrReviewRoleLaneShape) {
+    return new Rectangle2d({
+      width: shape.props.w,
+      height: shape.props.h,
+      isFilled: false
+    });
+  }
+
+  override component(shape: PrReviewRoleLaneShape) {
+    return <PrReviewRoleLane shape={shape} />;
+  }
+
+  override getIndicatorPath(shape: PrReviewRoleLaneShape) {
+    const path = new Path2D();
+    path.rect(0, 0, shape.props.w, shape.props.h);
 
     return path;
   }
