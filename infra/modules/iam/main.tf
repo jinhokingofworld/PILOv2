@@ -220,6 +220,61 @@ resource "aws_iam_user_policy_attachment" "github_sync_operator" {
   policy_arn = aws_iam_policy.github_sync_operator[0].arn
 }
 
+resource "aws_iam_user_policy_attachment" "github_sync_operator_change_password" {
+  count = var.github_sync_operator_user_name == "" ? 0 : 1
+
+  user       = aws_iam_user.github_sync_operator[0].name
+  policy_arn = "arn:aws:iam::aws:policy/IAMUserChangePassword"
+}
+
+resource "aws_iam_user_policy" "github_sync_operator_self_mfa" {
+  count = var.github_sync_operator_user_name == "" ? 0 : 1
+
+  name = "${var.name_prefix}-github-sync-operator-self-mfa"
+  user = aws_iam_user.github_sync_operator[0].name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "ListVirtualMfaDevices"
+        Effect   = "Allow"
+        Action   = ["iam:ListVirtualMFADevices"]
+        Resource = "*"
+      },
+      {
+        Sid      = "CreateVirtualMfaDevice"
+        Effect   = "Allow"
+        Action   = ["iam:CreateVirtualMFADevice"]
+        Resource = "arn:aws:iam::*:mfa/*"
+      },
+      {
+        Sid    = "ManageOwnMfaDevice"
+        Effect = "Allow"
+        Action = [
+          "iam:EnableMFADevice",
+          "iam:GetMFADevice",
+          "iam:GetUser",
+          "iam:ListMFADevices",
+          "iam:ResyncMFADevice",
+        ]
+        Resource = "arn:aws:iam::*:user/$${aws:username}"
+      },
+      {
+        Sid      = "DeactivateOwnMfaWithMfaSession"
+        Effect   = "Allow"
+        Action   = ["iam:DeactivateMFADevice"]
+        Resource = "arn:aws:iam::*:user/$${aws:username}"
+        Condition = {
+          Bool = {
+            "aws:MultiFactorAuthPresent" = "true"
+          }
+        }
+      },
+    ]
+  })
+}
+
 resource "aws_iam_openid_connect_provider" "github" {
   count = local.github_oidc_enabled ? 1 : 0
 
