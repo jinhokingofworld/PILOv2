@@ -254,11 +254,11 @@ function githubOAuthConnectionRow(overrides = {}) {
 
 function githubProjectOAuthConnectionRow(overrides = {}) {
   return {
-    github_project_login: "Developer-EJ",
-    github_project_access_token_encrypted: "encrypted-project-oauth-token",
-    github_project_token_scope: "read:user,user:email,project",
-    github_project_connected_at: "2026-07-05T09:00:00.000Z",
-    github_project_revoked_at: null,
+    github_login: "Developer-EJ",
+    access_token_encrypted: "encrypted-project-oauth-token",
+    token_scope: "read:user,user:email,project",
+    connected_at: "2026-07-05T09:00:00.000Z",
+    revoked_at: null,
     ...overrides
   };
 }
@@ -1083,9 +1083,9 @@ function projectV2ItemApiItem(overrides = {}) {
         cursor: {}
       }),
       (text, values) => {
-        assert.match(text, /github_project_access_token_encrypted/i);
-        assert.match(text, /FROM users/i);
-        assert.deepEqual(values, [currentUserId]);
+        assert.match(text, /access_token_encrypted/i);
+        assert.match(text, /FROM github_oauth_connections/i);
+        assert.deepEqual(values, [currentUserId, "project_v2"]);
         return githubProjectOAuthConnectionRow();
       },
       (text, values) => {
@@ -1167,9 +1167,9 @@ function projectV2ItemApiItem(overrides = {}) {
         cursor: {}
       }),
       githubProjectOAuthConnectionRow({
-        github_project_login: null,
-        github_project_access_token_encrypted: null,
-        github_project_connected_at: null
+        github_login: null,
+        access_token_encrypted: null,
+        connected_at: null
       }),
       (text, values) => {
         assert.match(text, /UPDATE github_sync_runs/i);
@@ -1230,11 +1230,11 @@ function projectV2ItemApiItem(overrides = {}) {
         cursor: {}
       }),
       (text, values) => {
-        assert.match(text, /github_project_access_token_encrypted/i);
-        assert.match(text, /FROM users/i);
-        assert.deepEqual(values, [currentUserId]);
+        assert.match(text, /access_token_encrypted/i);
+        assert.match(text, /FROM github_oauth_connections/i);
+        assert.deepEqual(values, [currentUserId, "project_v2"]);
         return githubProjectOAuthConnectionRow({
-          github_project_token_scope: null
+          token_scope: null
         });
       },
       (text, values) => {
@@ -1297,7 +1297,7 @@ function projectV2ItemApiItem(overrides = {}) {
         cursor: {}
       }),
       githubProjectOAuthConnectionRow({
-        github_project_login: "other-user"
+        github_login: "other-user"
       }),
       (text, values) => {
         assert.match(text, /UPDATE github_sync_runs/i);

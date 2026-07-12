@@ -127,9 +127,9 @@ const configService = {
 const tokenEncryption = new GithubTokenEncryptionService();
 const encryptedUserToken = tokenEncryption.encryptToken("plain-user-token", baseConfig);
 const connectedGithubOAuthRow = {
-  github_access_token_encrypted: encryptedUserToken,
-  github_connected_at: fixedNow,
-  github_revoked_at: null
+  access_token_encrypted: encryptedUserToken,
+  connected_at: fixedNow,
+  revoked_at: null
 };
 
 function createService({
@@ -178,8 +178,8 @@ function createService({
   });
 
   assert.deepEqual(workspaceService.accessChecks, [{ currentUserId, workspaceId }]);
-  assert.match(database.queries[0].text, /github_access_token_encrypted/i);
-  assert.deepEqual(database.queries[0].values, [currentUserId]);
+  assert.match(database.queries[0].text, /access_token_encrypted/i);
+  assert.deepEqual(database.queries[0].values, [currentUserId, "app_user"]);
 
   const installUrl = new URL(start.installUrl);
   assert.equal(
@@ -232,9 +232,9 @@ function createService({
     database: new FakeDatabase({
       oneRows: [
         {
-          github_access_token_encrypted: null,
-          github_connected_at: null,
-          github_revoked_at: null
+          access_token_encrypted: null,
+          connected_at: null,
+          revoked_at: null
         }
       ]
     })
@@ -303,7 +303,7 @@ function createService({
           };
         }
 
-        if (/SELECT[\s\S]*github_access_token_encrypted[\s\S]*FROM users/i.test(text)) {
+        if (/FROM github_oauth_connections/i.test(text)) {
           return connectedGithubOAuthRow;
         }
 
@@ -454,7 +454,7 @@ function createService({
           };
         }
 
-        if (/SELECT[\s\S]*github_access_token_encrypted[\s\S]*FROM users/i.test(text)) {
+        if (/FROM github_oauth_connections/i.test(text)) {
           return connectedGithubOAuthRow;
         }
 
@@ -551,7 +551,7 @@ function createService({
           };
         }
 
-        if (/SELECT[\s\S]*github_access_token_encrypted[\s\S]*FROM users/i.test(text)) {
+        if (/FROM github_oauth_connections/i.test(text)) {
           return connectedGithubOAuthRow;
         }
 
@@ -687,7 +687,7 @@ function createService({
           };
         }
 
-        if (/SELECT[\s\S]*github_access_token_encrypted[\s\S]*FROM users/i.test(text)) {
+        if (/FROM github_oauth_connections/i.test(text)) {
           return connectedGithubOAuthRow;
         }
 
@@ -753,7 +753,7 @@ function createService({
           };
         }
 
-        if (/SELECT[\s\S]*github_access_token_encrypted[\s\S]*FROM users/i.test(text)) {
+        if (/FROM github_oauth_connections/i.test(text)) {
           return connectedGithubOAuthRow;
         }
 

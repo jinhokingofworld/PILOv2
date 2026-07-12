@@ -19,6 +19,7 @@ import { GithubOAuthClient } from "./github-oauth.client";
 import { githubCallbackBadRequest } from "./github-oauth-callback-error";
 import { validateGithubCallbackReturnUrl } from "./github-return-url";
 import { GithubTokenEncryptionService } from "./github-token-encryption.service";
+import { GithubOAuthConnectionService } from "./github-oauth-connection.service";
 import { GithubSyncJobEnqueueError } from "./github-sync-job.service";
 import { GithubSyncRunService } from "./github-sync-run.service";
 import type {
@@ -42,12 +43,6 @@ interface GithubInstallationRow extends QueryResultRow {
   last_synced_at: Date | string | null;
 }
 
-interface GithubOAuthConnectionRow extends QueryResultRow {
-  github_access_token_encrypted: string | null;
-  github_connected_at: Date | string | null;
-  github_revoked_at: Date | string | null;
-}
-
 type GithubAppInstallationStartResult = GithubAppInstallationStartPayload & {
   stateCookie: string;
 };
@@ -63,7 +58,8 @@ export class GithubAppInstallationService {
     private readonly installationStateService: GithubAppInstallationStateService,
     private readonly callbackStateService: GithubCallbackStateService,
     private readonly githubAppClient: GithubAppClient,
-    private readonly syncRunService: GithubSyncRunService
+    private readonly syncRunService: GithubSyncRunService,
+    private readonly connectionService: GithubOAuthConnectionService = new GithubOAuthConnectionService(database, tokenEncryptionService, configService)
   ) {}
 
   async startGithubAppInstallation(
@@ -447,47 +443,7 @@ export class GithubAppInstallationService {
     currentUserId: string,
     config: GithubOAuthRuntimeConfig
   ): Promise<string> {
-    const row = await this.getGithubOAuthConnectionRow(currentUserId);
-    if (!this.isActiveGithubOAuthConnection(row)) {
-      throw badRequest("GitHub OAuth connection is required");
-    }
-
-    return this.tokenEncryptionService.decryptToken(
-      row.github_access_token_encrypted,
-      config
-    );
-  }
-
-  private async getGithubOAuthConnectionRow(
-    currentUserId: string
-  ): Promise<GithubOAuthConnectionRow> {
-    const row = await this.database.queryOne<GithubOAuthConnectionRow>(
-      `
-        SELECT
-          github_access_token_encrypted,
-          github_connected_at,
-          github_revoked_at
-        FROM users
-        WHERE id = $1
-      `,
-      [currentUserId]
-    );
-
-    if (!row) {
-      throw unauthorized("Current user not found");
-    }
-
-    return row;
-  }
-
-  private isActiveGithubOAuthConnection(
-    row: GithubOAuthConnectionRow
-  ): row is GithubOAuthConnectionRow & { github_access_token_encrypted: string } {
-    return Boolean(
-      row.github_access_token_encrypted &&
-        row.github_connected_at &&
-        !row.github_revoked_at
-    );
+    return (await this.connectionService.getActiveConnection(currentUserId, "app_user")).accessToken;
   }
 
   private validateRequiredString(value: unknown, message: string): string {

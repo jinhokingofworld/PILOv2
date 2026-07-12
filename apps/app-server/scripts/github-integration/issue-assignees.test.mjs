@@ -12,9 +12,11 @@ class FakeDatabase {
   async queryOne() {
     return {
       github_login: "juhyeong",
-      github_access_token_encrypted: "encrypted-token",
-      github_connected_at: "2026-07-10T00:00:00.000Z",
-      github_revoked_at: null
+      github_user_id: "12345678",
+      access_token_encrypted: "encrypted-token",
+      token_scope: "",
+      connected_at: "2026-07-10T00:00:00.000Z",
+      revoked_at: null
     };
   }
 }

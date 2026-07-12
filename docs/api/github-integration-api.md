@@ -1,5 +1,11 @@
 # GitHub Integration API
 
+## OAuth connection ownership
+
+GitHub App user OAuth (`app_user`) and Personal ProjectV2 OAuth (`project_v2`) are independent, purpose-specific connections. Disconnecting a connection revokes that purpose's credential and releases the GitHub account for a new connection by another PILO user. PR Review, merge, conflict resolution, installation access checks, and collaborator checks use only `app_user`; personal ProjectV2 operations use only `project_v2`.
+
+GitHub Integration OAuth credentials are stored only in `github_oauth_connections`, separated by `purpose` (`app_user` or `project_v2`). The dev cutover is intentionally incompatible: while all GitHub execution paths are stopped, apply the connection-table migration, invalidate legacy OAuth tokens, and remove legacy OAuth columns from `users` before deploying the new App Server and sync worker. `users.github_user_id` and `users.github_login` remain GitHub login identities. The dev rollout has four App OAuth reconnection targets, including three ProjectV2 OAuth reconnection targets.
+
 External callback, setup, and webhook URLs MUST include the `/api/v1` base path. For example:
 `/api/v1/github/oauth/callback`, `/api/v1/github/project-oauth/callback`,
 `/api/v1/github/installations/callback`, and `/api/v1/github/webhooks`.
@@ -40,10 +46,10 @@ PR 리뷰 세션, 파일별 리뷰 판단, Kanban board cache hydrate, GitHub is
 | 용도 | 인증 주체 | 저장 위치 |
 | --- | --- | --- |
 | Repository/Issue/PR와 organization ProjectV2 조회와 동기화 | GitHub App installation token | `github_installations` |
-| personal ProjectV2 read/write and sync | regular GitHub OAuth App token with `project` scope | `users.github_project_access_token_encrypted` |
-| GitHub Review 제출 | 현재 사용자의 GitHub App user OAuth token | `users.github_access_token_encrypted` |
-| PR Review conflict resolution apply commit | 현재 사용자의 GitHub App user OAuth token | `users.github_access_token_encrypted` |
-| PR Review merge action | 현재 사용자의 GitHub App user OAuth token | `users.github_access_token_encrypted` |
+| personal ProjectV2 read/write and sync | regular GitHub OAuth App token with `project` scope | `github_oauth_connections` (`purpose=project_v2`) |
+| GitHub Review 제출 | 현재 사용자의 GitHub App user OAuth token | `github_oauth_connections` (`purpose=app_user`) |
+| PR Review conflict resolution apply commit | 현재 사용자의 GitHub App user OAuth token | `github_oauth_connections` (`purpose=app_user`) |
+| PR Review merge action | 현재 사용자의 GitHub App user OAuth token | `github_oauth_connections` (`purpose=app_user`) |
 | PILO API 호출 | PILO access token | application auth/session layer |
 
 GitHub token은 복호화된 상태로 응답하거나 로그에 남기지 않는다.
@@ -53,7 +59,7 @@ ProjectV2 OAuth is intentionally separate from `/me/github/oauth/start`.
 installation lookup and PR review submission. Personal ProjectV2 discovery and
 ProjectV2 item status writes use `/me/github/project-oauth/start`, which
 requests `read:user user:email project` and stores the encrypted token in
-`users.github_project_access_token_encrypted`. The callback rejects tokens whose
+`github_oauth_connections` (`purpose=project_v2`). The callback rejects tokens whose
 scope does not include `project`. If the user already has an active
 `/me/github/oauth/start` connection, the ProjectV2 OAuth callback also rejects a
 different GitHub login with
@@ -99,7 +105,7 @@ OAuth App token만으로는 이 조회를 통과할 수 없다.
 않는다. 따라서 GitHub로 로그인한 사용자도 `/me/github/oauth/start` 연결을
 완료하기 전까지 `/me/github`에서는 GitHub App user OAuth 미연결 상태로 보인다.
 
-기존 dev 데이터처럼 GitHub 로그인 OAuth token이 `users.github_access_token_encrypted`에
+기존 dev 데이터처럼 GitHub 로그인 OAuth token이 `github_oauth_connections` (`purpose=app_user`)에
 저장된 row는 GitHub App installation lookup을 통과하지 못할 수 있다. 이 경우
 `DELETE /me/github`로 기존 GitHub Integration 연결 상태를 해제한 뒤
 `POST /me/github/oauth/start`로 다시 연결한다.
@@ -152,7 +158,7 @@ callback 성공 redirect를 실패로 바꾸지 않는다.
   있어야 한다. 권한이 없으면 GitHub GraphQL provider 오류로 sync run이 실패한다.
 - personal ProjectV2 discovery and sync require an active ProjectV2 OAuth
   connection from `/me/github/project-oauth/start`. The ProjectV2 OAuth account
-  must match the personal ProjectV2 owner and `users.github_project_token_scope`
+  must match the personal ProjectV2 owner and `github_oauth_connections.token_scope` (`purpose=project_v2`)
   must include `project`. Missing connection fails the sync run with
   `GitHub ProjectV2 OAuth connection is required for personal ProjectV2 sync`.
   Owner mismatch fails with
@@ -726,11 +732,11 @@ DELETE /api/v1/workspaces/{workspaceId}/github/installations/{installationId}
   `returnUrl` in signed state.
 - `POST /me/github/oauth/start` creates a GitHub App user authorization URL.
   GitHub App user access tokens do not use traditional OAuth scopes, so
-  `users.github_token_scope` is stored for diagnostics/display only and is not a
+  `github_oauth_connections.token_scope` (`purpose=app_user`) is stored for diagnostics/display only and is not a
   mandatory ProjectV2 access precondition.
 - `POST /me/github/project-oauth/start` creates a regular GitHub OAuth App
   authorization URL with `read:user user:email project`. Its callback stores
-  `users.github_project_access_token_encrypted` and requires the returned scope
+  `github_oauth_connections` (`purpose=project_v2`) and requires the returned scope
   to include `project`.
 - All start endpoints also create a server-side callback state row and set an
   HttpOnly `SameSite=Lax` binding cookie scoped to `{API_BASE_PATH}/github`.

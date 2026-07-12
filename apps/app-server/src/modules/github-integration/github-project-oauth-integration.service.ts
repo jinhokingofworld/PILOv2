@@ -1,11 +1,11 @@
 import { Injectable } from "@nestjs/common";
-import { QueryResultRow } from "pg";
 import { badRequest, unauthorized } from "../../common/api-error";
 import { DatabaseService } from "../../database/database.service";
 import { GithubOAuthCallbackQuery, StartGithubOAuthRequest } from "./dto";
 import { GithubCallbackStateService } from "./github-callback-state.service";
 import { GithubIntegrationConfigService } from "./github-integration-config.service";
 import { GithubOAuthClient } from "./github-oauth.client";
+import { GithubOAuthConnectionService } from "./github-oauth-connection.service";
 import { githubCallbackBadRequest } from "./github-oauth-callback-error";
 import { GithubOAuthStateService } from "./github-oauth-state.service";
 import { validateGithubCallbackReturnUrl } from "./github-return-url";
@@ -16,20 +16,6 @@ import type {
   GithubProjectOAuthStartPayload,
   GithubProjectOAuthStatusPayload
 } from "./types";
-
-interface GithubProjectOAuthStatusRow extends QueryResultRow {
-  github_project_user_id: string | number | null;
-  github_project_login: string | null;
-  github_project_token_scope: string | null;
-  github_project_connected_at: Date | string | null;
-  github_project_revoked_at: Date | string | null;
-}
-
-interface GithubPrimaryOAuthAccountRow extends QueryResultRow {
-  github_login: string | null;
-  github_connected_at: Date | string | null;
-  github_revoked_at: Date | string | null;
-}
 
 type GithubProjectOAuthStartResult = GithubProjectOAuthStartPayload & {
   stateCookie: string;
@@ -47,31 +33,26 @@ export class GithubProjectOAuthIntegrationService {
     private readonly stateService: GithubOAuthStateService,
     private readonly callbackStateService: GithubCallbackStateService,
     private readonly tokenEncryptionService: GithubTokenEncryptionService,
-    private readonly configService: GithubIntegrationConfigService
+    private readonly configService: GithubIntegrationConfigService,
+    private readonly connectionService: GithubOAuthConnectionService = new GithubOAuthConnectionService(database, tokenEncryptionService, configService)
   ) {}
 
   async getGithubProjectOAuthStatus(
     currentUserId: string
   ): Promise<GithubProjectOAuthStatusPayload> {
-    const row = await this.database.queryOne<GithubProjectOAuthStatusRow>(
-      `
-        SELECT
-          github_project_user_id,
-          github_project_login,
-          github_project_token_scope,
-          github_project_connected_at,
-          github_project_revoked_at
-        FROM users
-        WHERE id = $1
-      `,
-      [currentUserId]
-    );
-
-    if (!row) {
-      throw unauthorized("Current user not found");
+    const connection = await this.connectionService.getOptionalActiveConnection(currentUserId, "project_v2");
+    if (!connection) {
+      const status = await this.connectionService.getStatus(currentUserId, "project_v2");
+      return {
+        connected: false,
+        githubUserId: status ? this.toNullableNumber(status.github_user_id) : null,
+        githubLogin: status?.github_login ?? null,
+        tokenScope: null,
+        githubConnectedAt: status ? this.toNullableIsoString(status.connected_at) : null,
+        githubRevokedAt: status ? this.toNullableIsoString(status.revoked_at) : null
+      };
     }
-
-    return this.mapGithubProjectOAuthStatus(row);
+    return { connected: true, githubUserId: connection.githubUserId, githubLogin: connection.githubLogin, tokenScope: connection.tokenScope, githubConnectedAt: connection.connectedAt, githubRevokedAt: null };
   }
 
   async startGithubProjectOAuth(
@@ -156,7 +137,7 @@ export class GithubProjectOAuthIntegrationService {
     );
     await this.assertMatchesPrimaryGithubAccountForCallback(
       storedState.userId,
-      githubUser.login,
+      githubUser.id,
       storedState.returnUrl
     );
 
@@ -164,34 +145,11 @@ export class GithubProjectOAuthIntegrationService {
       token.accessToken,
       config
     );
-    let row: GithubProjectOAuthStatusRow | null;
     try {
-      row = await this.database.queryOne<GithubProjectOAuthStatusRow>(
-        `
-          UPDATE users
-          SET
-            github_project_user_id = $2,
-            github_project_login = $3,
-            github_project_access_token_encrypted = $4,
-            github_project_token_scope = $5,
-            github_project_connected_at = now(),
-            github_project_revoked_at = NULL
-          WHERE id = $1
-          RETURNING
-            github_project_user_id,
-            github_project_login,
-            github_project_token_scope,
-            github_project_connected_at,
-            github_project_revoked_at
-        `,
-        [
-          storedState.userId,
-          githubUser.id,
-          githubUser.login,
-          encryptedToken,
-          token.scope
-        ]
-      );
+      const row = await this.connectionService.saveConnection({ userId: storedState.userId, purpose: "project_v2", githubUserId: githubUser.id, githubLogin: githubUser.login, encryptedToken, tokenScope: token.scope });
+      const githubConnectedAt = this.toNullableIsoString(row.connected_at);
+      if (!githubConnectedAt) throw new Error("missing connection time");
+      return { connected: true, githubUserId: githubUser.id, githubLogin: githubUser.login, tokenScope: row.token_scope, githubConnectedAt, returnUrl: storedState.returnUrl };
     } catch {
       throw githubCallbackBadRequest(
         "GitHub ProjectV2 OAuth callback failed",
@@ -200,55 +158,12 @@ export class GithubProjectOAuthIntegrationService {
       );
     }
 
-    if (!row) {
-      throw githubCallbackBadRequest(
-        "Invalid ProjectV2 OAuth state",
-        storedState.returnUrl,
-        "invalid_state"
-      );
-    }
-
-    const githubConnectedAt = this.toNullableIsoString(
-      row.github_project_connected_at
-    );
-    if (!githubConnectedAt) {
-      throw githubCallbackBadRequest(
-        "GitHub ProjectV2 OAuth callback failed",
-        storedState.returnUrl,
-        "connection_failed"
-      );
-    }
-
-    return {
-      connected: true,
-      githubUserId:
-        this.toNullableNumber(row.github_project_user_id) ?? githubUser.id,
-      githubLogin: row.github_project_login ?? githubUser.login,
-      tokenScope: row.github_project_token_scope,
-      githubConnectedAt,
-      returnUrl: storedState.returnUrl
-    };
   }
 
   async disconnectGithubProjectOAuth(
     currentUserId: string
   ): Promise<GithubProjectOAuthDisconnectPayload> {
-    const row = await this.database.queryOne<QueryResultRow>(
-      `
-        UPDATE users
-        SET
-          github_project_access_token_encrypted = NULL,
-          github_project_token_scope = NULL,
-          github_project_revoked_at = now()
-        WHERE id = $1
-        RETURNING id
-      `,
-      [currentUserId]
-    );
-
-    if (!row) {
-      throw unauthorized("Current user not found");
-    }
+    await this.connectionService.disconnectConnection(currentUserId, "project_v2");
 
     return {
       disconnected: true
@@ -257,30 +172,10 @@ export class GithubProjectOAuthIntegrationService {
 
   private async assertMatchesPrimaryGithubAccount(
     currentUserId: string,
-    projectGithubLogin: string
+    projectGithubUserId: number
   ): Promise<void> {
-    const row = await this.database.queryOne<GithubPrimaryOAuthAccountRow>(
-      `
-        SELECT
-          github_login,
-          github_connected_at,
-          github_revoked_at
-        FROM users
-        WHERE id = $1
-      `,
-      [currentUserId]
-    );
-
-    if (!row) {
-      throw unauthorized("Current user not found");
-    }
-
-    if (
-      row.github_login &&
-      row.github_connected_at &&
-      !row.github_revoked_at &&
-      row.github_login.toLowerCase() !== projectGithubLogin.toLowerCase()
-    ) {
+    const primary = await this.connectionService.getOptionalActiveConnection(currentUserId, "app_user");
+    if (primary && primary.githubUserId !== projectGithubUserId) {
       throw badRequest(
         "GitHub ProjectV2 OAuth account must match GitHub OAuth account"
       );
@@ -289,13 +184,13 @@ export class GithubProjectOAuthIntegrationService {
 
   private async assertMatchesPrimaryGithubAccountForCallback(
     currentUserId: string,
-    projectGithubLogin: string,
+    projectGithubUserId: number,
     returnUrl: string | null
   ): Promise<void> {
     try {
       await this.assertMatchesPrimaryGithubAccount(
         currentUserId,
-        projectGithubLogin
+        projectGithubUserId
       );
     } catch (error) {
       if (
@@ -315,25 +210,6 @@ export class GithubProjectOAuthIntegrationService {
         "connection_failed"
       );
     }
-  }
-
-  private mapGithubProjectOAuthStatus(
-    row: GithubProjectOAuthStatusRow
-  ): GithubProjectOAuthStatusPayload {
-    const connected = Boolean(
-      row.github_project_connected_at && !row.github_project_revoked_at
-    );
-
-    return {
-      connected,
-      githubUserId: this.toNullableNumber(row.github_project_user_id),
-      githubLogin: row.github_project_login,
-      tokenScope: connected ? row.github_project_token_scope : null,
-      githubConnectedAt: this.toNullableIsoString(
-        row.github_project_connected_at
-      ),
-      githubRevokedAt: this.toNullableIsoString(row.github_project_revoked_at)
-    };
   }
 
   private getCallbackUrl(config: {

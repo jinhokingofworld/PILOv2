@@ -8,14 +8,7 @@ import {
   type GithubOAuthRuntimeConfig
 } from "./github-integration-config.service";
 import { GithubTokenEncryptionService } from "./github-token-encryption.service";
-
-interface GithubProjectOAuthConnectionRow extends QueryResultRow {
-  github_project_login: string | null;
-  github_project_access_token_encrypted: string | null;
-  github_project_token_scope: string | null;
-  github_project_connected_at: Date | string | null;
-  github_project_revoked_at: Date | string | null;
-}
+import { GithubOAuthConnectionService } from "./github-oauth-connection.service";
 
 export interface UpdateGithubProjectV2ItemStatusInput {
   currentUserId: string;
@@ -51,49 +44,32 @@ export class GithubProjectV2WriteService {
     private readonly database: DatabaseService,
     private readonly githubAppClient: GithubAppClient,
     private readonly tokenEncryptionService: GithubTokenEncryptionService,
-    private readonly configService: GithubIntegrationConfigService
+    private readonly configService: GithubIntegrationConfigService,
+    private readonly connectionService: GithubOAuthConnectionService = new GithubOAuthConnectionService(database, tokenEncryptionService, configService)
   ) {}
 
   async assertProjectV2WriteAccess(currentUserId: string): Promise<void> {
-    const oauthConfig = this.configService.getGithubProjectOAuthConfig();
-    const connection = await this.getGithubProjectOAuthConnectionRow(currentUserId);
-    this.getConnectedGithubProjectOAuthAccess(connection, oauthConfig);
+    await this.getConnection(currentUserId);
   }
 
   async getConnectedProjectV2OAuthAccess(
     currentUserId: string
   ): Promise<GithubProjectV2OAuthAccess> {
-    const oauthConfig = this.configService.getGithubProjectOAuthConfig();
-    const connection = await this.getGithubProjectOAuthConnectionRow(currentUserId);
-    const accessToken = this.getConnectedGithubProjectOAuthAccess(
-      connection,
-      oauthConfig
-    );
-    const githubLogin = connection.github_project_login;
-    if (!githubLogin) {
-      throw badRequest(GITHUB_PROJECT_OAUTH_REQUIRED_MESSAGE);
-    }
+    const connection = await this.getConnection(currentUserId);
 
     return {
-      accessToken,
-      githubLogin
+      accessToken: connection.accessToken,
+      githubLogin: connection.githubLogin
     };
   }
 
   async updateProjectV2ItemStatus(
     input: UpdateGithubProjectV2ItemStatusInput
   ): Promise<void> {
-    const oauthConfig = this.configService.getGithubProjectOAuthConfig();
-    const connection = await this.getGithubProjectOAuthConnectionRow(
-      input.currentUserId
-    );
-    const accessToken = this.getConnectedGithubProjectOAuthAccess(
-      connection,
-      oauthConfig
-    );
+    const connection = await this.getConnection(input.currentUserId);
 
     await this.githubAppClient.updateProjectV2ItemStatus({
-      userAccessToken: accessToken,
+      userAccessToken: connection.accessToken,
       projectNodeId: input.projectNodeId,
       itemNodeId: input.itemNodeId,
       fieldNodeId: input.fieldNodeId,
@@ -104,76 +80,23 @@ export class GithubProjectV2WriteService {
   async addProjectV2ItemByContentId(
     input: AddGithubProjectV2ItemInput
   ): Promise<AddGithubProjectV2ItemResult> {
-    const oauthConfig = this.configService.getGithubProjectOAuthConfig();
-    const connection = await this.getGithubProjectOAuthConnectionRow(
-      input.currentUserId
-    );
-    const accessToken = this.getConnectedGithubProjectOAuthAccess(
-      connection,
-      oauthConfig
-    );
+    const connection = await this.getConnection(input.currentUserId);
 
     return this.githubAppClient.addProjectV2ItemByContentId({
       contentNodeId: input.contentNodeId,
       projectNodeId: input.projectNodeId,
-      userAccessToken: accessToken
+      userAccessToken: connection.accessToken
     });
   }
 
-  private async getGithubProjectOAuthConnectionRow(
-    currentUserId: string
-  ): Promise<GithubProjectOAuthConnectionRow> {
-    const row = await this.database.queryOne<GithubProjectOAuthConnectionRow>(
-      `
-        SELECT
-          github_project_login,
-          github_project_access_token_encrypted,
-          github_project_token_scope,
-          github_project_connected_at,
-          github_project_revoked_at
-        FROM users
-        WHERE id = $1
-      `,
-      [currentUserId]
-    );
-
-    if (!row) {
-      throw unauthorized("Current user not found");
-    }
-
-    return row;
-  }
-
-  private getConnectedGithubProjectOAuthAccess(
-    row: GithubProjectOAuthConnectionRow,
-    config: GithubOAuthRuntimeConfig
-  ): string {
-    if (!this.isActiveGithubProjectOAuthConnection(row)) {
-      throw badRequest(GITHUB_PROJECT_OAUTH_REQUIRED_MESSAGE);
-    }
-
-    if (!this.hasProjectScope(row.github_project_token_scope)) {
+  private async getConnection(currentUserId: string) {
+    let connection;
+    try { connection = await this.connectionService.getActiveConnection(currentUserId, "project_v2"); }
+    catch { throw badRequest(GITHUB_PROJECT_OAUTH_REQUIRED_MESSAGE); }
+    if (!this.hasProjectScope(connection.tokenScope)) {
       throw badRequest(GITHUB_PROJECT_OAUTH_SCOPE_ERROR_MESSAGE);
     }
-
-    return this.tokenEncryptionService.decryptToken(
-      row.github_project_access_token_encrypted,
-      config
-    );
-  }
-
-  private isActiveGithubProjectOAuthConnection(
-    row: GithubProjectOAuthConnectionRow
-  ): row is GithubProjectOAuthConnectionRow & {
-    github_project_access_token_encrypted: string;
-    github_project_login: string;
-  } {
-    return Boolean(
-      row.github_project_login &&
-        row.github_project_access_token_encrypted &&
-        row.github_project_connected_at &&
-        !row.github_project_revoked_at
-    );
+    return connection;
   }
 
   private hasProjectScope(scope: string | null): boolean {

@@ -16,6 +16,10 @@ class FakeDatabase {
     this.queries.push({ text, values });
     return this.rows.shift() ?? null;
   }
+
+  async transaction(callback) {
+    return callback(this);
+  }
 }
 
 const fixedNow = new Date("2026-07-04T12:00:00.000Z");
@@ -32,7 +36,7 @@ const providerConfig = {
   now: () => fixedNow
 };
 
-function createAuthService(database) {
+function createAuthService(database, options = {}) {
   const stateService = new OAuthStateService();
   const configService = {
     getProviderConfig(provider) {
@@ -68,7 +72,7 @@ function createAuthService(database) {
     },
     async getUserProfile(accessToken) {
       assert.equal(accessToken, "login-oauth-access-token");
-      return {
+      return options.githubProfile ?? {
         id: 12345678,
         login: "juhyeong",
         name: "Juhyeong",
@@ -87,6 +91,24 @@ function createAuthService(database) {
       {},
       githubClient,
       {
+        async disconnectMismatchedConnections(userId, githubUserId) {
+          if (options.onDisconnectMismatchedConnections) {
+            await options.onDisconnectMismatchedConnections(userId, githubUserId);
+            return;
+          }
+          assert.equal(userId, "user-existing");
+          assert.ok([12345678, 87654321].includes(githubUserId));
+        },
+        async disconnectMismatchedConnectionsInTransaction(_transaction, userId, githubUserId) {
+          if (options.onDisconnectMismatchedConnections) {
+            await options.onDisconnectMismatchedConnections(userId, githubUserId);
+            return;
+          }
+          assert.equal(userId, "user-existing");
+          assert.ok([12345678, 87654321].includes(githubUserId));
+        }
+      },
+      {
         async ensureDefaultWorkspaceForUser(userId) {
           assert.match(userId, /^user-/);
         }
@@ -94,6 +116,45 @@ function createAuthService(database) {
     ),
     stateService
   };
+}
+
+{
+  const disconnectedConnections = [];
+  const database = new FakeDatabase([
+    { id: "user-existing" },
+    { id: "user-existing" },
+    { expires_at: sessionExpiresAt }
+  ]);
+  const { service, stateService } = createAuthService(database, {
+    githubProfile: {
+      id: 87654321,
+      login: "account-b",
+      name: "Account B",
+      email: "juhyeong@example.com",
+      avatarUrl: "https://github.com/account-b.png"
+    },
+    onDisconnectMismatchedConnections(userId, githubUserId) {
+      disconnectedConnections.push({ userId, githubUserId });
+    }
+  });
+
+  await service.completeLoginCallback("github", {
+    code: "oauth-code",
+    state: createGithubState(stateService)
+  });
+
+  assert.deepEqual(disconnectedConnections, [
+    { userId: "user-existing", githubUserId: 87654321 }
+  ]);
+  const update = database.queries.find((query) => /UPDATE users/i.test(query.text));
+  assert.deepEqual(update.values, [
+    "user-existing",
+    87654321,
+    "account-b",
+    "Account B",
+    "juhyeong@example.com",
+    "https://github.com/account-b.png"
+  ]);
 }
 
 function createGithubState(stateService) {

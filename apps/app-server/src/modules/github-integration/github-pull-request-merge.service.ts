@@ -18,17 +18,11 @@ import {
 } from "./github-integration-config.service";
 import { GithubOAuthClient } from "./github-oauth.client";
 import { GithubTokenEncryptionService } from "./github-token-encryption.service";
+import { GithubOAuthConnectionService } from "./github-oauth-connection.service";
 import type {
   GithubPullRequestMergePayload,
   MergeGithubPullRequestInput
 } from "./types";
-
-interface GithubOAuthConnectionRow extends QueryResultRow {
-  github_login: string | null;
-  github_access_token_encrypted: string | null;
-  github_connected_at: Date | string | null;
-  github_revoked_at: Date | string | null;
-}
 
 interface GithubPullRequestMergeTargetRow extends QueryResultRow {
   id: string;
@@ -46,7 +40,8 @@ export class GithubPullRequestMergeService {
     private readonly githubOAuthClient: GithubOAuthClient,
     private readonly tokenEncryptionService: GithubTokenEncryptionService,
     private readonly configService: GithubIntegrationConfigService,
-    private readonly workspaceService: WorkspaceService
+    private readonly workspaceService: WorkspaceService,
+    private readonly connectionService: GithubOAuthConnectionService = new GithubOAuthConnectionService(database, tokenEncryptionService, configService)
   ) {}
 
   async mergeGithubPullRequest(
@@ -60,11 +55,7 @@ export class GithubPullRequestMergeService {
     const expectedHeadSha = this.normalizeExpectedHeadSha(input.expectedHeadSha);
     const oauthConfig = this.configService.getGithubOAuthConfig();
     const appConfig = this.configService.getGithubAppConfig();
-    const connection = await this.getGithubOAuthConnectionRow(currentUserId);
-    const connectedOAuth = this.getConnectedGithubOAuthAccess(
-      connection,
-      oauthConfig
-    );
+    const connectedOAuth = await this.connectionService.getActiveConnection(currentUserId, "app_user");
     const target = await this.findGithubPullRequestMergeTarget(
       workspaceId,
       pullRequestId
@@ -132,60 +123,6 @@ export class GithubPullRequestMergeService {
       mergedAt,
       headSha: nextPullRequest.headSha
     };
-  }
-
-  private async getGithubOAuthConnectionRow(
-    currentUserId: string
-  ): Promise<GithubOAuthConnectionRow> {
-    const row = await this.database.queryOne<GithubOAuthConnectionRow>(
-      `
-        SELECT
-          github_login,
-          github_access_token_encrypted,
-          github_connected_at,
-          github_revoked_at
-        FROM users
-        WHERE id = $1
-      `,
-      [currentUserId]
-    );
-
-    if (!row) {
-      throw unauthorized("Current user not found");
-    }
-
-    return row;
-  }
-
-  private getConnectedGithubOAuthAccess(
-    row: GithubOAuthConnectionRow,
-    config: GithubOAuthRuntimeConfig
-  ): { accessToken: string; githubLogin: string } {
-    if (!this.isActiveGithubOAuthConnection(row)) {
-      throw badRequest("GitHub OAuth connection is required");
-    }
-
-    return {
-      accessToken: this.tokenEncryptionService.decryptToken(
-        row.github_access_token_encrypted,
-        config
-      ),
-      githubLogin: row.github_login
-    };
-  }
-
-  private isActiveGithubOAuthConnection(
-    row: GithubOAuthConnectionRow
-  ): row is GithubOAuthConnectionRow & {
-    github_access_token_encrypted: string;
-    github_login: string;
-  } {
-    return Boolean(
-      row.github_login &&
-        row.github_access_token_encrypted &&
-        row.github_connected_at &&
-        !row.github_revoked_at
-    );
   }
 
   private async findGithubPullRequestMergeTarget(
