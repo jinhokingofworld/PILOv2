@@ -1,15 +1,22 @@
 "use client";
 
-import type { LiveKitMeetingRoomStatus } from "@/features/meeting/hooks/use-livekit-meeting-room";
+import type {
+  LiveKitConnectionQuality,
+  LiveKitMeetingRoomStatus
+} from "@/features/meeting/hooks/use-livekit-meeting-room";
 import type { RecordingStatus } from "@/features/meeting/types";
 
 export type HeaderMeetingStatusSnapshot = {
+  connectionQuality: LiveKitConnectionQuality;
   connectionStatus: LiveKitMeetingRoomStatus;
+  hasConnectionSession: boolean;
   recordingStatus: RecordingStatus | null;
 };
 
 const emptyHeaderMeetingStatus: HeaderMeetingStatusSnapshot = {
+  connectionQuality: "unknown",
   connectionStatus: "idle",
+  hasConnectionSession: false,
   recordingStatus: null
 };
 
@@ -25,8 +32,12 @@ function updateHeaderMeetingStatus(
   };
 
   if (
+    updatedSnapshot.connectionQuality ===
+      headerMeetingStatusSnapshot.connectionQuality &&
     updatedSnapshot.connectionStatus ===
       headerMeetingStatusSnapshot.connectionStatus &&
+    updatedSnapshot.hasConnectionSession ===
+      headerMeetingStatusSnapshot.hasConnectionSession &&
     updatedSnapshot.recordingStatus === headerMeetingStatusSnapshot.recordingStatus
   ) {
     return;
@@ -53,6 +64,14 @@ export function setHeaderMeetingConnectionStatus(
   connectionStatus: LiveKitMeetingRoomStatus
 ) {
   updateHeaderMeetingStatus({ connectionStatus });
+}
+
+export function setHeaderMeetingConnectionState(input: {
+  connectionQuality: LiveKitConnectionQuality;
+  connectionStatus: LiveKitMeetingRoomStatus;
+  hasConnectionSession: boolean;
+}) {
+  updateHeaderMeetingStatus(input);
 }
 
 export function setHeaderMeetingRecordingStatus(

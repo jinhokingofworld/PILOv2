@@ -51,7 +51,7 @@ import type {
 } from "@/features/meeting/types";
 import { cn } from "@/lib/utils";
 
-type EntryAction = "start" | "join";
+type EntryAction = "start" | "join" | "reconnect";
 type ActionStatus =
   | "idle"
   | "joining"
@@ -321,6 +321,9 @@ export function MeetingPanel() {
   );
   const isCurrentUserActive = Boolean(currentUserActiveParticipant);
   const shouldLeaveMeeting = isCurrentUserActive;
+  const canReconnect =
+    isCurrentUserActive &&
+    (liveKitRoom.status === "disconnected" || liveKitRoom.status === "error");
   const isActionPending = actionStatus !== "idle";
   const isInitialLoading = currentStatus === "loading" && meeting === null;
   const hasRunningRecording = currentRecording?.status === "RUNNING";
@@ -447,7 +450,7 @@ export function MeetingPanel() {
         reloadParticipants(result.meeting.id)
       ]);
     } catch (error) {
-      if (createdOrJoinedMeetingId) {
+      if (createdOrJoinedMeetingId && action !== "reconnect") {
         await leaveMeeting(createdOrJoinedMeetingId).catch(() => undefined);
         await disconnectFromMeeting();
         await reloadCurrentMeeting();
@@ -474,6 +477,19 @@ export function MeetingPanel() {
     }
 
     setPrejoinAction(action);
+  }
+
+  function handleReconnect() {
+    if (!meeting || !canReconnect) {
+      return;
+    }
+
+    if (!recordingConsentAccepted) {
+      setPendingConsentAction("reconnect");
+      return;
+    }
+
+    setPrejoinAction("reconnect");
   }
 
   function handleAcceptConsent() {
@@ -744,6 +760,18 @@ export function MeetingPanel() {
                 )}
 
                 <div className="grid w-full max-w-2xl gap-3">
+                  {canReconnect ? (
+                    <Button
+                      className="h-14 text-base"
+                      disabled={isActionPending}
+                      size="lg"
+                      onClick={handleReconnect}
+                    >
+                      <RefreshCw className="size-4" />
+                      다시 연결
+                    </Button>
+                  ) : null}
+
                   <Button
                     className="h-14 text-base"
                     disabled={isEntryButtonDisabled}
@@ -772,7 +800,7 @@ export function MeetingPanel() {
                       !meeting ||
                       !isCurrentUserActive ||
                       isActionPending ||
-                      liveKitRoom.isConnecting
+                      liveKitRoom.status !== "connected"
                     }
                     size="lg"
                     variant={hasRunningRecording ? "destructive" : "secondary"}

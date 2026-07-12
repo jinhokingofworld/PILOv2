@@ -15,7 +15,7 @@ import { useAuthSession } from "@/features/auth";
 import { createMeetingApiClient } from "@/features/meeting/api/client";
 import { useLiveKitMeetingRoom } from "@/features/meeting/hooks/use-livekit-meeting-room";
 import {
-  setHeaderMeetingConnectionStatus,
+  setHeaderMeetingConnectionState,
   setHeaderMeetingRecordingStatus
 } from "@/features/meeting/stores/header-meeting-status-store";
 import type {
@@ -52,7 +52,9 @@ export function MeetingRuntimeProvider({ children }: { children: ReactNode }) {
   const liveKitRoom = useLiveKitMeetingRoom();
   const {
     connect: connectLiveKitRoom,
+    connectionQuality,
     disconnect: disconnectLiveKitRoom,
+    hasActiveSession,
     status: liveKitRoomStatus
   } = liveKitRoom;
   const activeSessionRef = useRef<MeetingRuntimeActiveSession | null>(null);
@@ -133,12 +135,20 @@ export function MeetingRuntimeProvider({ children }: { children: ReactNode }) {
   }, [disconnectFromMeeting, disconnectLiveKitRoom, setActiveSession]);
 
   useEffect(() => {
-    setHeaderMeetingConnectionStatus(liveKitRoomStatus);
-  }, [liveKitRoomStatus]);
+    setHeaderMeetingConnectionState({
+      connectionQuality,
+      connectionStatus: liveKitRoomStatus,
+      hasConnectionSession: hasActiveSession
+    });
+  }, [connectionQuality, hasActiveSession, liveKitRoomStatus]);
 
   useEffect(() => {
     return () => {
-      setHeaderMeetingConnectionStatus("idle");
+      setHeaderMeetingConnectionState({
+        connectionQuality: "unknown",
+        connectionStatus: "idle",
+        hasConnectionSession: false
+      });
       setHeaderMeetingRecordingStatus(null);
     };
   }, []);
