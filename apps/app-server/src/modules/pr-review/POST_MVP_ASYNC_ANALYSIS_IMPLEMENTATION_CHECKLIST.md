@@ -44,8 +44,8 @@
 | 2-D | 분석 결과 원자 저장과 stale/idempotency guard | #670 | #699 | 완료 |
 | 2-E | Review room 분석 진행/실패/retry UX | #703 | #704 | 완료 |
 | 2-F1 | stale 분석 복구와 retry/DLQ 정합성 | #709 | #715 | 완료 |
-| 2-F2 | 관측성, health와 배포 설정 | #710 | #736 | 진행 |
-| 2-F3 | dev E2E와 운영 재처리 절차 | #711 | TBD | 대기 |
+| 2-F2 | 관측성, health와 배포 설정 | #710 | #736 | 완료 |
+| 2-F3 | dev E2E와 운영 재처리 절차 | #711 | TBD | 진행 |
 
 ## 공통 Stop Gate
 
@@ -279,15 +279,16 @@
 
 ### 2-F3 Dev E2E and Operations Runbook (#711)
 
-- [ ] dev 배포에서 enqueue, consume, DB 반영, Frontend 전환을 end-to-end로 확인한다.
-- [ ] DLQ 또는 terminal failure session을 운영자가 재처리하는 절차를 문서화한다.
+- [x] dev 배포에서 enqueue, consume, DB 반영, Frontend 전환을 end-to-end로 확인한다.
+- [x] DLQ 또는 terminal failure session을 운영자가 재처리하는 절차를 문서화한다.
+- [x] 문서·Frontend에만 존재하던 failed session retry endpoint를 App Server에 구현한다.
 
 완료 기준:
 
-- [ ] App Server/AI Worker 재시작 중에도 Job이 유실되지 않는다.
-- [ ] retry 소진 Job이 무한 처리되지 않고 사용자 session도 terminal 상태가 된다.
-- [ ] 운영자가 session ID로 enqueue부터 완료/실패까지 추적할 수 있다.
-- [ ] 배포 환경에서 대용량 PR이 HTTP timeout 없이 분석된다.
+- [x] App Server/AI Worker 재시작 중에도 Job이 유실되지 않는다.
+- [x] retry 소진 Job이 무한 처리되지 않고 사용자 session도 terminal 상태가 된다.
+- [x] 운영자가 session ID로 enqueue부터 완료/실패까지 추적할 수 있다.
+- [x] 배포 환경에서 7 files, `+621/-30` PR이 HTTP timeout 없이 분석된다.
 
 ## 권장 PR 분할
 
@@ -328,11 +329,11 @@ API 계약과 DB schema가 동시에 확정되어야 하는 경우에도 구현 
 
 ### 통합
 
-- [ ] 동일 Job 중복 전달에도 flow/file이 중복 생성되지 않는다.
-- [ ] 분석 중 head SHA 변경 시 오래된 결과가 저장되지 않는다.
-- [ ] App Server와 Worker 재시작 뒤 pending Job이 완료된다.
+- [x] 동일 Job 중복 전달에도 flow/file이 중복 생성되지 않는다.
+- [x] 분석 중 head SHA 변경 시 오래된 결과가 저장되지 않는다.
+- [x] App Server와 Worker 재시작 뒤 pending Job이 완료된다.
 - [ ] DLQ/terminal failure와 사용자 `failed` 상태가 일치한다.
-- [ ] secret, token, 전체 patch, provider raw error가 응답/로그에 노출되지 않는다.
+- [x] secret, token, 전체 patch, provider raw error가 응답/로그에 노출되지 않는다.
 
 ## PR 생성 전 확인
 
