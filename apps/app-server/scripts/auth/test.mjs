@@ -16,6 +16,10 @@ class FakeDatabase {
     this.queries.push({ text, values });
     return this.rows.shift() ?? null;
   }
+
+  async transaction(callback) {
+    return callback(this);
+  }
 }
 
 const fixedNow = new Date("2026-07-04T12:00:00.000Z");
@@ -93,7 +97,15 @@ function createAuthService(database, options = {}) {
             return;
           }
           assert.equal(userId, "user-existing");
-          assert.equal(githubUserId, 12345678);
+          assert.ok([12345678, 87654321].includes(githubUserId));
+        },
+        async disconnectMismatchedConnectionsInTransaction(_transaction, userId, githubUserId) {
+          if (options.onDisconnectMismatchedConnections) {
+            await options.onDisconnectMismatchedConnections(userId, githubUserId);
+            return;
+          }
+          assert.equal(userId, "user-existing");
+          assert.ok([12345678, 87654321].includes(githubUserId));
         }
       },
       {

@@ -4,7 +4,7 @@
 
 GitHub App user OAuth (`app_user`) and Personal ProjectV2 OAuth (`project_v2`) are independent, purpose-specific connections. Disconnecting a connection revokes that purpose's credential and releases the GitHub account for a new connection by another PILO user. PR Review, merge, conflict resolution, installation access checks, and collaborator checks use only `app_user`; personal ProjectV2 operations use only `project_v2`.
 
-Legacy OAuth columns remain on `users` during this rollout for backward-compatible deployment. A later, separately deployed migration may remove them only after all application versions use `github_oauth_connections`.
+Legacy OAuth columns remain on `users` during this rollout for backward-compatible deployment. The rollout order is: (1) create `github_oauth_connections` only, (2) deploy an App Server that reads a connection row first and falls back to the legacy columns when no row exists, (3) after every old App Server instance is gone and the new server is stable, invalidate legacy tokens and request reconnection, and (4) remove legacy columns in a later migration after reconnection is confirmed. The dev rollout has four App OAuth reconnection targets, including three ProjectV2 OAuth reconnection targets; notification is owned by GitHub Integration after phase 3.
 
 External callback, setup, and webhook URLs MUST include the `/api/v1` base path. For example:
 `/api/v1/github/oauth/callback`, `/api/v1/github/project-oauth/callback`,

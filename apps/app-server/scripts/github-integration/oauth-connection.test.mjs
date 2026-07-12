@@ -26,7 +26,7 @@ assert.match(migration, /uq_github_oauth_connections_active_user_purpose/i);
 assert.match(migration, /uq_github_oauth_connections_active_github_account_purpose/i);
 assert.match(migration, /ENABLE ROW LEVEL SECURITY/i);
 assert.match(service, /disconnectMismatchedConnections/);
-assert.match(service, /github_user_id <> \$2/);
+assert.match(service, /github_user_id IS DISTINCT FROM \$2/);
 assert.match(reviewService, /getActiveConnection\(currentUserId, "app_user"\)/);
 assert.doesNotMatch(reviewService, /FROM users[\s\S]*github_access_token_encrypted/i);
 
@@ -66,5 +66,5 @@ assert.doesNotMatch(reviewService, /FROM users[\s\S]*github_access_token_encrypt
       "GitHub account is already connected to another PILO account"
   );
   assert.equal(database.calls.length, 1);
-  assert.match(database.calls[0].text, /INSERT INTO github_oauth_connections/i);
+  assert.match(database.calls[0].text, /SELECT id FROM users WHERE id <> \$1 AND github_user_id = \$2/i);
 }

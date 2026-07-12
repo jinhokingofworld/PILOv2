@@ -2,7 +2,7 @@
 
 ## GitHub login identity and OAuth connections
 
-`users.github_user_id` and `users.github_login` are GitHub login identities only. GitHub App user OAuth and ProjectV2 OAuth credentials are stored as purpose-specific connections. When a GitHub login callback updates an existing PILO user's GitHub identity to a different GitHub user id, active `app_user` and `project_v2` connections for the previous account are revoked before the profile is updated. The user must explicitly reconnect GitHub features with the new account.
+`users.github_user_id` and `users.github_login` are GitHub login identities only. GitHub App user OAuth and ProjectV2 OAuth credentials are stored as purpose-specific connections. When a GitHub login callback updates an existing PILO user's GitHub identity to a different GitHub user id, active `app_user` and `project_v2` connections for the previous account are revoked together with the profile update in one transaction. The user must explicitly reconnect GitHub features with the new account.
 
 PILO 로그인과 bearer session 발급 API를 정의한다.
 

@@ -4,6 +4,9 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 
 const { GithubIntegrationService } = require("../../dist/modules/github-integration/github-integration.service.js");
+const { GithubOAuthIntegrationService } = require("../../dist/modules/github-integration/github-oauth-integration.service.js");
+const { GithubProjectOAuthIntegrationService } = require("../../dist/modules/github-integration/github-project-oauth-integration.service.js");
+const { GithubOAuthConnectionService } = require("../../dist/modules/github-integration/github-oauth-connection.service.js");
 const { GithubOAuthStateService } = require("../../dist/modules/github-integration/github-oauth-state.service.js");
 const { GithubTokenEncryptionService } = require("../../dist/modules/github-integration/github-token-encryption.service.js");
 
@@ -134,6 +137,38 @@ const projectOAuthConnectedRow = {
 }
 
 {
+  const service = new GithubOAuthIntegrationService(
+    {}, {}, {}, {}, {}, {},
+    {
+      async getOptionalActiveConnection() {
+        return null;
+      },
+      async getStatus() {
+        return {
+          github_user_id: "12345678",
+          github_login: "juhyeong",
+          access_token_encrypted: null,
+          token_scope: null,
+          connected_at: fixedNow,
+          revoked_at: fixedNow
+        };
+      }
+    }
+  );
+
+  const status = await service.getGithubOAuthStatus("user-1");
+
+  assert.deepEqual(status, {
+    connected: false,
+    githubUserId: 12345678,
+    githubLogin: "juhyeong",
+    tokenScope: null,
+    githubConnectedAt: "2026-07-04T12:00:00.000Z",
+    githubRevokedAt: "2026-07-04T12:00:00.000Z"
+  });
+}
+
+{
   const database = new FakeDatabase();
   const service = new GithubIntegrationService(
     database,
@@ -202,6 +237,38 @@ const projectOAuthConnectedRow = {
     database.queries[0].text,
     /github_project_access_token_encrypted/i
   );
+}
+
+{
+  const service = new GithubProjectOAuthIntegrationService(
+    {}, {}, {}, {}, {}, {},
+    {
+      async getOptionalActiveConnection() {
+        return null;
+      },
+      async getStatus() {
+        return {
+          github_user_id: "12345678",
+          github_login: "juhyeong",
+          access_token_encrypted: null,
+          token_scope: "read:user,user:email,project",
+          connected_at: fixedNow,
+          revoked_at: fixedNow
+        };
+      }
+    }
+  );
+
+  const status = await service.getGithubProjectOAuthStatus("user-1");
+
+  assert.deepEqual(status, {
+    connected: false,
+    githubUserId: 12345678,
+    githubLogin: "juhyeong",
+    tokenScope: null,
+    githubConnectedAt: "2026-07-04T12:00:00.000Z",
+    githubRevokedAt: "2026-07-04T12:00:00.000Z"
+  });
 }
 
 {
@@ -437,6 +504,43 @@ const projectOAuthConnectedRow = {
       error?.response?.error?.message ===
         "GitHub ProjectV2 OAuth connection must be reconnected with project scope"
   );
+}
+
+{
+  const database = new FakeDatabase([], {
+    queryOne(text) {
+      if (/SELECT id FROM users WHERE id <> \$1 AND github_user_id = \$2/i.test(text)) {
+        return { id: "another-user" };
+      }
+      return undefined;
+    }
+  });
+  const service = new GithubOAuthConnectionService(database, tokenEncryption, configService);
+
+  await assert.rejects(
+    () => service.saveConnection({
+      userId: "user-1",
+      purpose: "app_user",
+      githubUserId: 12345678,
+      githubLogin: "juhyeong",
+      encryptedToken: connectedRow.access_token_encrypted,
+      tokenScope: null
+    }),
+    (error) => error?.response?.error?.message === "GitHub account is already connected to another PILO account"
+  );
+  assert.equal(database.queries.some(({ text }) => /INSERT INTO github_oauth_connections/i.test(text)), false);
+}
+
+{
+  const database = new FakeDatabase();
+  const service = new GithubOAuthConnectionService(database, tokenEncryption, configService);
+
+  await service.disconnectMismatchedConnectionsInTransaction(database, "user-1", 87654321);
+
+  assert.match(database.queries[0].text, /UPDATE github_oauth_connections/i);
+  assert.match(database.queries[1].text, /UPDATE users SET/i);
+  assert.match(database.queries[1].text, /github_user_id IS DISTINCT FROM \$2/i);
+  assert.match(database.queries[1].text, /github_project_access_token_encrypted = CASE/i);
 }
 
 {
@@ -840,4 +944,5 @@ const projectOAuthConnectedRow = {
   assert.match(database.queries[1].text, /UPDATE github_oauth_connections/i);
   assert.match(database.queries[1].text, /access_token_encrypted = NULL/i);
   assert.deepEqual(database.queries[1].values, ["user-1", "app_user"]);
+  assert.match(database.queries[2].text, /UPDATE users SET github_access_token_encrypted = NULL/i);
 }

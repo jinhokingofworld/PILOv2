@@ -256,11 +256,11 @@ export class AuthService {
       );
 
       if (existingUser) {
-        await this.githubOAuthConnectionService.disconnectMismatchedConnections(
-          existingUser.id,
-          profile.id
-        );
-        const updatedUser = await this.database.queryOne<UserIdRow>(
+        const updatedUser = await this.database.transaction(async (transaction) => {
+          await this.githubOAuthConnectionService.disconnectMismatchedConnectionsInTransaction(
+            transaction, existingUser.id, profile.id
+          );
+          return transaction.queryOne<UserIdRow>(
           `
             UPDATE users
             SET
@@ -280,7 +280,8 @@ export class AuthService {
             profile.email,
             profile.avatarUrl
           ]
-        );
+          );
+        });
 
         if (!updatedUser) {
           throw badRequest("OAuth user could not be saved");

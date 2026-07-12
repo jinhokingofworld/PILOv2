@@ -32,21 +32,4 @@ EXECUTE FUNCTION update_updated_at_column();
 
 ALTER TABLE github_oauth_connections ENABLE ROW LEVEL SECURITY;
 
--- The legacy columns cannot prove which GitHub account issued a stored token.
--- Invalidate them rather than copying potentially mismatched credentials.
-UPDATE users
-SET
-  github_access_token_encrypted = NULL,
-  github_token_scope = NULL,
-  github_revoked_at = CASE
-    WHEN github_connected_at IS NOT NULL AND github_revoked_at IS NULL THEN now()
-    ELSE github_revoked_at
-  END,
-  github_project_access_token_encrypted = NULL,
-  github_project_token_scope = NULL,
-  github_project_revoked_at = CASE
-    WHEN github_project_connected_at IS NOT NULL AND github_project_revoked_at IS NULL THEN now()
-    ELSE github_project_revoked_at
-  END;
-
 COMMIT;

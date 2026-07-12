@@ -51,8 +51,15 @@ export class GithubOAuthIntegrationService {
   ): Promise<GithubOAuthStatusPayload> {
     const connection = await this.connectionService.getOptionalActiveConnection(currentUserId, "app_user");
     if (!connection) {
-      await this.connectionService.getStatus(currentUserId, "app_user");
-      return { connected: false, githubUserId: null, githubLogin: null, tokenScope: null, githubConnectedAt: null, githubRevokedAt: null };
+      const status = await this.connectionService.getStatus(currentUserId, "app_user");
+      return {
+        connected: false,
+        githubUserId: status ? this.toNullableNumber(status.github_user_id) : null,
+        githubLogin: status?.github_login ?? null,
+        tokenScope: null,
+        githubConnectedAt: status ? this.toNullableIsoString(status.connected_at) : null,
+        githubRevokedAt: status ? this.toNullableIsoString(status.revoked_at) : null
+      };
     }
     return { connected: true, githubUserId: connection.githubUserId, githubLogin: connection.githubLogin, tokenScope: connection.tokenScope, githubConnectedAt: connection.connectedAt, githubRevokedAt: null };
   }
