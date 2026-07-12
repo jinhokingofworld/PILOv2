@@ -8,6 +8,7 @@ import { AuthConfigService } from "./auth-config.service";
 import { GithubLoginOAuthClient, GithubLoginUserProfile } from "./github-login-oauth.client";
 import { GoogleOAuthClient, GoogleUserProfile } from "./google-oauth.client";
 import { OAuthStateService } from "./oauth-state.service";
+import { GithubOAuthConnectionService } from "../github-integration/github-oauth-connection.service";
 import type {
   LoginCallbackQuery,
   LoginProvider,
@@ -41,7 +42,8 @@ export class AuthService {
     private readonly configService: AuthConfigService,
     private readonly stateService: OAuthStateService,
     private readonly googleOAuthClient: GoogleOAuthClient,
-    private readonly githubOAuthClient: GithubLoginOAuthClient
+    private readonly githubOAuthClient: GithubLoginOAuthClient,
+    private readonly githubOAuthConnectionService: GithubOAuthConnectionService
   ) {}
 
   startLogin(
@@ -254,6 +256,10 @@ export class AuthService {
       );
 
       if (existingUser) {
+        await this.githubOAuthConnectionService.disconnectMismatchedConnections(
+          existingUser.id,
+          profile.id
+        );
         const updatedUser = await this.database.queryOne<UserIdRow>(
           `
             UPDATE users

@@ -1,5 +1,9 @@
 # Auth API
 
+## GitHub login identity and OAuth connections
+
+`users.github_user_id` and `users.github_login` are GitHub login identities only. GitHub App user OAuth and ProjectV2 OAuth credentials are stored as purpose-specific connections. When a GitHub login callback updates an existing PILO user's GitHub identity to a different GitHub user id, active `app_user` and `project_v2` connections for the previous account are revoked before the profile is updated. The user must explicitly reconnect GitHub features with the new account.
+
 PILO 로그인과 bearer session 발급 API를 정의한다.
 
 이 문서의 GitHub OAuth는 PILO 로그인용이다. GitHub 로그인 callback은 사용자
@@ -152,8 +156,8 @@ callback 성공 조건이 아니다.
 
 GitHub login OAuth scope는 `read:user user:email`을 요청한다.
 `users.github_user_id`, `github_login`, 이름, 이메일, avatar만 로그인 profile
-동기화 대상으로 사용한다. `github_access_token_encrypted`, `github_token_scope`,
-`github_connected_at`, `github_revoked_at`은 GitHub Integration API의 GitHub
+동기화 대상으로 사용한다. `github_oauth_connections` purpose-specific credential rows,
+connection `connected_at` and `revoked_at`은 GitHub Integration API의 GitHub
 App user OAuth 연결 상태로만 갱신한다.
 
 ```text
