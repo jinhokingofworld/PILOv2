@@ -2097,7 +2097,8 @@ export class GithubAppClient {
 
   private isGraphqlRateLimitedResponse(response: Response): boolean {
     return response.status === 429 || (
-      response.status === 403 && response.headers.get("x-ratelimit-remaining") === "0"
+      response.status === 403 &&
+      response.headers?.get?.("x-ratelimit-remaining") === "0"
     );
   }
 
