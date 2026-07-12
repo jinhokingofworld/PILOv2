@@ -63,11 +63,6 @@ resource "aws_iam_role_policy" "app_server_task" {
         Effect   = "Allow"
         Action   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
         Resource = local.s3_object_arns
-      },
-      {
-        Effect   = "Allow"
-        Action   = ["secretsmanager:GetSecretValue"]
-        Resource = var.secrets_manager_arns
       }
     ]
   })
@@ -89,11 +84,6 @@ resource "aws_iam_role_policy" "realtime_server_task" {
         Effect   = "Allow"
         Action   = ["s3:GetObject", "s3:PutObject"]
         Resource = local.s3_object_arns
-      },
-      {
-        Effect   = "Allow"
-        Action   = ["secretsmanager:GetSecretValue"]
-        Resource = var.secrets_manager_arns
       }
     ]
   })
@@ -126,11 +116,6 @@ resource "aws_iam_role_policy" "ai_worker_task" {
         Effect   = "Allow"
         Action   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
         Resource = local.s3_object_arns
-      },
-      {
-        Effect   = "Allow"
-        Action   = ["secretsmanager:GetSecretValue"]
-        Resource = var.secrets_manager_arns
       }
     ]
   })
@@ -152,10 +137,6 @@ resource "aws_iam_role_policy" "github_sync_worker_task" {
     Effect   = "Allow"
     Action   = ["sqs:SendMessage"]
     Resource = var.github_webhooks_queue_arn
-    }, {
-    Effect   = "Allow"
-    Action   = ["secretsmanager:GetSecretValue"]
-    Resource = var.secrets_manager_arns
   }] })
 }
 
