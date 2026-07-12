@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
@@ -106,6 +106,16 @@ const canvasShapeParentMigration = await readSource(
 const devTerraformMain = await readSource("../../../infra/envs/dev/main.tf");
 const terraformSecretsModule = await readSource(
   "../../../infra/modules/secrets/main.tf"
+);
+const migrationFilenames = (await readdir(
+  new URL("../../../db/migrations/", import.meta.url)
+)).filter((filename) => filename.endsWith(".sql"));
+const migrationNumbers = migrationFilenames.map((filename) => filename.split("_", 1)[0]);
+
+assert.equal(
+  new Set(migrationNumbers).size,
+  migrationNumbers.length,
+  "migration file numbers must be unique"
 );
 
 assert.equal(
