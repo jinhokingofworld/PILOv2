@@ -167,6 +167,13 @@ callback 성공 redirect를 실패로 바꾸지 않는다.
   `GitHub App installation token cannot access personal ProjectV2`; organization
   ProjectV2 installation-token permission failure remains
   `GitHub App installation token cannot access organization ProjectV2`.
+- Selected personal ProjectV2s are refreshed by an internal server-side polling
+  schedule. The schedule and its lease, retry, and error state are internal
+  worker implementation details and are not exposed by any public endpoint.
+  Only stored selections for personal ProjectV2s are eligible for this polling;
+  deselecting a ProjectV2 removes it from the polling scope. Organization
+  ProjectV2s remain webhook-driven and are not added to personal polling
+  schedules.
 - GitHub webhook receiver는 delivery 수신과 검증 결과를 `github_webhook_deliveries`에 기록한다. 실제 GitHub source table 동기화는 sync run 또는 별도 background worker가 담당한다.
 - GitHub App installation 삭제는 GitHub 원격 `DELETE /app/installations/{installation_id}`를
   App JWT로 호출한 뒤 local `github_installations` row를 삭제한다. GitHub가 `404`를
@@ -832,6 +839,11 @@ If queue publication fails after selection persistence, it returns the failed ru
 selection from failed sync. With an empty array it clears the selection, creates no sync
 job, and returns `syncRunId: null`, `syncStatus: null`, and `syncError: null`.
 Existing ProjectV2, field, item, and Board cache rows are not deleted by deselection.
+For selected personal ProjectV2s, the server also maintains an internal polling
+schedule after the selection is saved. This schedule does not change the
+selection endpoint's request or response schema and is not returned by a public
+API. Organization ProjectV2s continue to refresh through webhook processing
+rather than this polling schedule.
 
 `GET /workspaces/{workspaceId}/github/projects-v2` requires `repositoryId`. Normal
 responses contain only that repository's selected ProjectV2 rows; the selection-management

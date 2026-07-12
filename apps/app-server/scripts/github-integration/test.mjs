@@ -177,3 +177,4 @@ await import("./project-v2-setup.test.mjs");
 await import("./project-v2-write.test.mjs");
 await import("./webhook.test.mjs");
 await import("./projects-v2-item-webhook-reconcile.test.mjs");
+await import("./project-v2-polling.test.mjs");

@@ -7,6 +7,7 @@ import { ListGithubProjectsV2Query } from "./dto";
 import { GithubAppClient } from "./github-app.client";
 import { GithubIntegrationConfigService } from "./github-integration-config.service";
 import { GithubProjectV2WriteService } from "./github-project-v2-write.service";
+import { GithubProjectV2PollingService } from "./github-project-v2-polling.service";
 import { GithubProjectV2SyncTokenService } from "./github-project-v2-sync-token.service";
 import { GithubSyncExecutorService, type GithubSyncInstallationRow } from "./github-sync-executor.service";
 import { GithubSyncJobEnqueueError } from "./github-sync-job.service";
@@ -156,7 +157,8 @@ export class GithubProjectV2Service {
     @Optional() private readonly syncExecutor?: GithubSyncExecutorService,
     @Optional() private readonly syncRunService?: GithubSyncRunService,
     @Optional() private readonly tokenService?: GithubProjectV2SyncTokenService,
-    @Optional() private readonly configService?: GithubIntegrationConfigService
+    @Optional() private readonly configService?: GithubIntegrationConfigService,
+    @Optional() private readonly pollingService?: GithubProjectV2PollingService
   ) {}
 
   async listGithubProjectsV2(
@@ -288,6 +290,11 @@ export class GithubProjectV2Service {
         }
       }
 
+      await this.pollingService?.terminateDeselectedQueuedRuns(
+        { repositoryId, retainedProjectV2Ids: projectV2Ids },
+        transaction
+      );
+
       await transaction.execute(
         `
           DELETE FROM github_project_v2_selections
@@ -310,6 +317,11 @@ export class GithubProjectV2Service {
           [installationId, repositoryId, projectV2Ids]
         );
       }
+
+      await this.pollingService?.syncSelectionSchedules(
+        { repositoryId, requestedByUserId: currentUserId },
+        transaction
+      );
 
       return { installationId, repositoryId, projectV2Ids };
     });

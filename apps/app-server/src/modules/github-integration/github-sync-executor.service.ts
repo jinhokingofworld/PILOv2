@@ -97,6 +97,7 @@ export interface GithubSyncRunContext {
   projectV2: GithubSyncProjectV2ContextRow | null;
   githubUserAccessToken: string | null;
   config: GithubAppRuntimeConfig;
+  assertLease?: () => Promise<void>;
   reportProgress?: (progress: GithubSyncRunProgress) => Promise<void>;
 }
 
@@ -140,6 +141,7 @@ export class GithubSyncExecutorService {
     target: GithubSyncTarget,
     context: GithubSyncRunContext
   ): Promise<GithubSyncRunSummary> {
+    await this.assertGithubSyncLease(context);
     if (target === "source") {
       return this.syncGithubSource(context);
     }
@@ -149,6 +151,7 @@ export class GithubSyncExecutorService {
     }
 
     const stage = target satisfies GithubSyncProgressStage;
+    await this.assertGithubSyncLease(context);
     await this.reportGithubSyncProgress(
       context,
       5,
@@ -178,6 +181,7 @@ export class GithubSyncExecutorService {
         break;
     }
 
+    await this.assertGithubSyncLease(context);
     await this.reportGithubSyncProgress(context, 95, stage, summary);
     return summary;
   }
@@ -214,13 +218,9 @@ export class GithubSyncExecutorService {
     const row = await this.upsertGithubProjectV2Item(context, item.item);
     if (row) {
       const projectV2 = this.requireGithubSyncProjectV2(context);
-      await this.database.execute(
-        `
-          DELETE FROM github_project_v2_item_field_values
-          WHERE project_item_id = $1
-            AND NOT (field_name = ANY($2::text[]))
-        `,
-        [row.id, item.item.fieldValues.map((fieldValue) => fieldValue.fieldName)]
+      await this.deleteGithubProjectV2ItemFieldValuesNotInSnapshot(
+        row.id,
+        item.item.fieldValues.map((fieldValue) => fieldValue.fieldName)
       );
       for (const fieldValue of item.item.fieldValues) {
         await this.upsertGithubProjectV2ItemFieldValue(
@@ -258,11 +258,13 @@ export class GithubSyncExecutorService {
     context: GithubSyncRunContext
   ): Promise<GithubSyncRunSummary> {
     let summary = this.createGithubSyncSummary();
+    await this.assertGithubSyncLease(context);
     await this.reportGithubSyncProgress(context, 5, "repositories", summary);
     summary = this.mergeGithubSyncSummaries(
       summary,
       await this.syncGithubRepositories(context)
     );
+    await this.assertGithubSyncLease(context);
     await this.reportGithubSyncProgress(
       context,
       15,
@@ -271,11 +273,13 @@ export class GithubSyncExecutorService {
     );
     const discovery = await this.syncGithubProjectV2Discovery(context);
     summary = this.mergeGithubSyncSummaries(summary, discovery.summary);
+    await this.assertGithubSyncLease(context);
     await this.reportGithubSyncProgress(context, 25, "issues", summary);
     summary = this.mergeGithubSyncSummaries(
       summary,
       await this.syncGithubIssues(context)
     );
+    await this.assertGithubSyncLease(context);
     await this.reportGithubSyncProgress(context, 45, "pull_requests", summary);
     summary = this.mergeGithubSyncSummaries(
       summary,
@@ -306,6 +310,7 @@ export class GithubSyncExecutorService {
     };
 
     for (const projectV2 of projectV2Contexts) {
+      await this.assertGithubSyncLease(context);
       const projectContext = this.withGithubSyncProjectV2(context, projectV2);
       await startProjectStep("project_v2_fields");
       summary = this.mergeGithubSyncSummaries(
@@ -324,6 +329,7 @@ export class GithubSyncExecutorService {
       completedProjectSteps += 1;
     }
 
+    await this.assertGithubSyncLease(context);
     await this.reportGithubSyncProgress(context, 95, "finalizing", summary);
 
     return summary;
@@ -602,6 +608,7 @@ export class GithubSyncExecutorService {
     let skippedCount = 0;
 
     for (const item of items) {
+      await this.assertGithubSyncLease(context);
       const row = await this.upsertGithubProjectV2Item(context, item);
       if (!row) {
         skippedCount += 1;
@@ -614,6 +621,10 @@ export class GithubSyncExecutorService {
         updatedCount += 1;
       }
 
+      await this.deleteGithubProjectV2ItemFieldValuesNotInSnapshot(
+        row.id,
+        item.fieldValues.map((fieldValue) => fieldValue.fieldName)
+      );
       for (const fieldValue of item.fieldValues) {
         await this.upsertGithubProjectV2ItemFieldValue(
           projectV2.id,
@@ -623,12 +634,52 @@ export class GithubSyncExecutorService {
       }
     }
 
+    await this.assertGithubSyncLease(context);
+    await this.archiveGithubProjectV2ItemsNotInSnapshot(
+      context,
+      items.map((item) => item.id)
+    );
+
     return this.createGithubSyncSummary({
       fetchedCount: items.length,
       createdCount,
       updatedCount,
       skippedCount
     });
+  }
+
+  private async deleteGithubProjectV2ItemFieldValuesNotInSnapshot(
+    projectItemId: string,
+    fieldNames: string[]
+  ): Promise<void> {
+    await this.database.execute(
+      `
+        DELETE FROM github_project_v2_item_field_values
+        WHERE project_item_id = $1
+          AND NOT (field_name = ANY($2::text[]))
+      `,
+      [projectItemId, fieldNames]
+    );
+  }
+
+  private async archiveGithubProjectV2ItemsNotInSnapshot(
+    context: GithubSyncRunContext,
+    itemNodeIds: string[]
+  ): Promise<void> {
+    const projectV2 = this.requireGithubSyncProjectV2(context);
+    await this.database.execute(
+      `
+        UPDATE github_project_v2_items
+        SET is_archived = true,
+            last_synced_at = now(),
+            updated_at = now()
+        WHERE workspace_id = $1
+          AND project_v2_id = $2
+          AND is_archived = false
+          AND NOT (github_project_item_node_id = ANY($3::text[]))
+      `,
+      [context.workspaceId, projectV2.id, itemNodeIds]
+    );
   }
 
   private async syncGithubProjectV2FieldsAndHydrate(
@@ -643,6 +694,7 @@ export class GithubSyncExecutorService {
     context: GithubSyncRunContext
   ): Promise<GithubSyncRunSummary> {
     const summary = await this.syncGithubProjectV2Items(context);
+    await this.assertGithubSyncLease(context);
     await this.hydrateExistingBoardsForGithubProjectV2(context);
     return summary;
   }
@@ -1731,6 +1783,7 @@ export class GithubSyncExecutorService {
     );
 
     for (const board of boards) {
+      await this.assertGithubSyncLease(context);
       await this.database.queryOne<HydratedBoardRow>(
         `
           SELECT hydrate_pilo_board_from_github($1::uuid, $2::uuid)::text AS board_id
@@ -1808,6 +1861,10 @@ export class GithubSyncExecutorService {
     }
 
     return parsed;
+  }
+
+  private async assertGithubSyncLease(context: GithubSyncRunContext): Promise<void> {
+    await context.assertLease?.();
   }
 
   private toNumber(value: string | number): number {
