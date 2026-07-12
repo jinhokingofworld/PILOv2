@@ -88,38 +88,39 @@ DB migration과 schema 검증을 같은 PR에 포함한다.
 
 작업 체크리스트:
 
-- [ ] 파일 역할 enum 후보와 기존 자유 문자열 `fileRole` 호환 방식을 확정한다.
-- [ ] relation type 후보를 확정한다.
-  - `import_or_call`
-  - `test_target`
-  - `api_usage`
-  - `data_flow`
-  - `support`
-- [ ] relation source 후보 `rule`, `ai`, `hybrid`의 의미를 확정한다.
-- [ ] confidence 표현 방식과 저장 범위, 최소 노출 기준을 확정한다.
-- [ ] `review_file_relations` table의 column, FK, unique constraint와 index를 확정한다.
-- [ ] relation이 같은 session과 Flow에 속한 두 review file만 연결하도록 DB 제약을 둔다.
-- [ ] session 삭제 시 relation이 cascade 삭제되도록 한다.
-- [ ] Canvas API의 semantic edge response에 type, reason, source, confidence를 정의한다.
-- [ ] semantic relation이 없는 기존 session의 순차 edge fallback을 유지한다.
-- [ ] 기존 session backfill을 하지 않고 새 분석 session부터 적용하는 정책을 문서화한다.
-- [ ] migration, API 문서, repository query와 contract 테스트를 함께 반영한다.
+- [x] 정규화 역할은 `entry`, `core_logic`, `api_contract`, `ui_state`, `verification`,
+  `support`, `unknown`으로 두고 기존 자유 문자열 `fileRole` 설명을 유지한다.
+- [x] relation type을 `depends_on`, `tests`, `uses_api`, `passes_data_to`, `supports`로
+  확정한다.
+- [x] relation source를 `rule`, `ai`, `hybrid`로 확정한다. 1차 AI는 rule 후보 밖의
+  relation endpoint와 type을 새로 만들 수 없다.
+- [x] confidence는 `0..100` 정수로 저장하고 Canvas에는 `60` 이상만 노출한다. 숫자는
+  사용자 UI에 직접 표시하지 않는다.
+- [x] Flow-scoped `review_flow_relations` table의 column, FK, unique constraint와 index를
+  확정한다. raw patch와 code evidence는 저장하지 않는다.
+- [x] relation이 같은 session과 Flow에 속한 두 review file만 연결하도록 DB 제약을 둔다.
+- [x] session 삭제 시 relation이 cascade 삭제되도록 한다.
+- [x] Canvas API의 semantic edge response에 type, reason, source, confidence를 정의한다.
+- [x] semantic relation이 없는 기존 session의 순차 edge fallback을 유지한다.
+- [x] 기존 session backfill을 하지 않고 새 분석 session부터 적용하는 정책을 문서화한다.
+- [x] migration, API 문서, repository query와 contract 테스트를 함께 반영한다.
 
 ### 3-A 구현 전 승인 항목
 
 아래 값은 임의로 확정하지 않고 구현 직전에 사용자 확인을 받는다.
 
-- [ ] relation type 최종 목록과 사용자 표시 문구
-- [ ] confidence 저장 형식과 최소 허용값
-- [ ] relation을 Flow에 종속시킬지 session 전역으로 둘지
-- [ ] 동일 파일 쌍에 여러 relation type을 허용할지
-- [ ] 기존 순차 edge와 semantic edge를 동시에 보여줄지 fallback으로만 사용할지
+- [x] relation type 최종 목록과 사용자 표시 문구
+- [x] confidence 저장 형식과 최소 허용값
+- [x] relation은 1차에서 같은 session의 Flow 내부 membership에 종속시킨다.
+- [x] 동일 파일 쌍의 여러 relation type은 허용하고 같은 type 중복만 금지한다.
+- [x] semantic edge가 있는 Flow는 semantic edge만 사용하고 순차 edge는 fallback으로만
+  사용한다.
 
 완료 기준:
 
-- [ ] 후속 PR이 schema를 다시 해석하지 않고 relation을 생성·검증·렌더링할 수 있다.
-- [ ] API와 DB가 같은 session/Flow/file 관계 무결성을 보장한다.
-- [ ] 기존 session canvas 응답과 화면이 깨지지 않는다.
+- [x] 후속 PR이 schema를 다시 해석하지 않고 relation을 생성·검증·렌더링할 수 있다.
+- [x] API와 DB가 같은 session/Flow/file 관계 무결성을 보장한다.
+- [x] 기존 session canvas 응답과 화면이 깨지지 않는다.
 
 ## 3-B Deterministic Candidates and Flow Grouping
 
