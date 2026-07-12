@@ -285,4 +285,10 @@ GitHub Sync Worker는 기존 App Server 계열 secret 구성을 사용하되 이
 - AWS access key
 - AWS secret access key
 
+### GitHub Sync Worker Shared Token 제외
+
+GitHub Sync Worker에는 GitHub Integration에 필요한 app-server secret만 주입한다.
+`AGENT_EXECUTION_HANDOFF_TOKEN`, `MEETING_REPORT_EVENT_TOKEN`,
+`PR_REVIEW_ANALYSIS_WORKER_TOKEN`은 ECS 환경변수로 주입하지 않는다.
+
 `terraform.tfvars.example`만 커밋하고, 실제 `terraform.tfvars`는 `.gitignore`에 추가하는 것을 권장한다.
