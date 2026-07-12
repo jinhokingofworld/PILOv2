@@ -1,11 +1,17 @@
 import json
+import sys
 from datetime import date
+from types import SimpleNamespace
+
+import pytest
 
 from app.agent_processor import (
     AGENT_TOOL_SCHEMA_VERSION,
     AgentPlannerDecision,
+    AgentPlanningRequest,
     AgentRunContext,
     AgentRunProcessor,
+    OpenAiAgentPlannerClient,
     _agent_planner_schema,
     _agent_planner_system_prompt,
     normalize_agent_planner_decision,
@@ -751,6 +757,49 @@ def test_processor_retries_planner_infrastructure_failure() -> None:
     assert result.delete_message is False
     assert result.reason == "infrastructure_failure"
     assert repository.release_calls == [RUN_ID]
+
+
+def test_openai_agent_planner_uses_timeout_and_retries_timeout_failure(monkeypatch) -> None:
+    class FakeTimeoutError(Exception):
+        pass
+
+    class FakeResponses:
+        def create(self, **_kwargs):
+            raise FakeTimeoutError("timed out")
+
+    class FakeOpenAI:
+        initialized_with: tuple[str, float] | None = None
+
+        def __init__(self, *, api_key: str, timeout: float) -> None:
+            FakeOpenAI.initialized_with = (api_key, timeout)
+            self.responses = FakeResponses()
+
+    monkeypatch.setitem(
+        sys.modules,
+        "openai",
+        SimpleNamespace(
+            OpenAI=FakeOpenAI,
+            APIConnectionError=FakeTimeoutError,
+            APITimeoutError=FakeTimeoutError,
+            InternalServerError=FakeTimeoutError,
+            RateLimitError=FakeTimeoutError,
+        ),
+    )
+    client = OpenAiAgentPlannerClient("test-key", "gpt-test", 45)
+
+    with pytest.raises(InfrastructureError, match="retryable failure"):
+        client.plan(
+            AgentPlanningRequest(
+                run_id=RUN_ID,
+                prompt="이번 주 일정 알려줘",
+                timezone="Asia/Seoul",
+                current_date="2026-07-12",
+                tool_schema_version=AGENT_TOOL_SCHEMA_VERSION,
+                tools=(),
+            )
+        )
+
+    assert FakeOpenAI.initialized_with == ("test-key", 45)
 
 
 def test_parse_agent_planner_output_sanitizes_sensitive_fields() -> None:

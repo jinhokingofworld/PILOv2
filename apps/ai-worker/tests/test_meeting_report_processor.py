@@ -450,6 +450,17 @@ def test_runtime_settings_reads_agent_planner_model(monkeypatch) -> None:
     assert settings.openai_agent_planner_model == "gpt-agent-planner"
 
 
+def test_runtime_settings_reads_agent_planner_timeout(monkeypatch) -> None:
+    monkeypatch.setenv("SQS_AI_JOBS_QUEUE_URL", "https://sqs.example.com/jobs")
+    monkeypatch.setenv("S3_RECORDINGS_BUCKET", "recordings")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("OPENAI_AGENT_PLANNER_TIMEOUT_MS", "45000")
+
+    settings = RuntimeSettings.from_env()
+
+    assert settings.openai_agent_planner_timeout_seconds == 45
+
+
 def test_runtime_settings_reads_database_ssl(monkeypatch) -> None:
     monkeypatch.setenv("SQS_AI_JOBS_QUEUE_URL", "https://sqs.example.com/jobs")
     monkeypatch.setenv("S3_RECORDINGS_BUCKET", "recordings")

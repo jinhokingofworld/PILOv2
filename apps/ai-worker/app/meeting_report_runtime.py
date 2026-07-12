@@ -49,6 +49,7 @@ DEFAULT_WAIT_TIME_SECONDS = 20
 DEFAULT_VISIBILITY_TIMEOUT_SECONDS = 900
 DEFAULT_AGENT_EXECUTION_HANDOFF_TIMEOUT_SECONDS = 10
 DEFAULT_AGENT_STALE_EXECUTION_SWEEP_INTERVAL_SECONDS = 60
+DEFAULT_OPENAI_AGENT_PLANNER_TIMEOUT_MS = 60_000
 DEFAULT_CANVAS_EMBEDDING_JOBS_PER_TICK = 10
 DEFAULT_MEETING_REPORT_EVENT_MAX_ATTEMPTS = 3
 AGENT_RETRY_TERMINAL_RECEIVE_COUNT = 3
@@ -78,6 +79,7 @@ class RuntimeSettings:
     openai_stt_model: str
     openai_meeting_report_model: str
     openai_agent_planner_model: str
+    openai_agent_planner_timeout_seconds: float
     agent_execution_handoff_base_url: str
     agent_execution_handoff_token: str
     agent_execution_handoff_timeout_seconds: int
@@ -104,6 +106,10 @@ class RuntimeSettings:
             openai_agent_planner_model=_env(
                 "OPENAI_AGENT_PLANNER_MODEL",
                 _env("OPENAI_MEETING_REPORT_MODEL", DEFAULT_MEETING_REPORT_MODEL),
+            ),
+            openai_agent_planner_timeout_seconds=_positive_ms_env(
+                "OPENAI_AGENT_PLANNER_TIMEOUT_MS",
+                DEFAULT_OPENAI_AGENT_PLANNER_TIMEOUT_MS,
             ),
             agent_execution_handoff_base_url=_require_env("AGENT_EXECUTION_HANDOFF_BASE_URL"),
             agent_execution_handoff_token=_require_env("AGENT_EXECUTION_HANDOFF_TOKEN"),
@@ -948,6 +954,7 @@ def create_worker(settings: RuntimeSettings | None = None) -> SqsAiJobWorker:
     agent_planner_client = OpenAiAgentPlannerClient(
         resolved_settings.openai_api_key,
         resolved_settings.openai_agent_planner_model,
+        resolved_settings.openai_agent_planner_timeout_seconds,
     )
     canvas_agent_planner = OpenAiCanvasAgentPlanner(
         resolved_settings.openai_api_key,
@@ -1103,6 +1110,10 @@ def _positive_int_env(key: str, default: int) -> int:
         return default
 
     return max(parsed, 1)
+
+
+def _positive_ms_env(key: str, default: int) -> float:
+    return _positive_int_env(key, default) / 1_000
 
 
 def _openai_retryable_errors() -> tuple[type[BaseException], ...]:

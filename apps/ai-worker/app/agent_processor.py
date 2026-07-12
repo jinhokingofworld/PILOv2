@@ -639,10 +639,10 @@ def _clarification_answer(missing_fields: tuple[str, ...]) -> str:
 
 
 class OpenAiAgentPlannerClient:
-    def __init__(self, api_key: str, model: str) -> None:
+    def __init__(self, api_key: str, model: str, timeout_seconds: float) -> None:
         from openai import OpenAI
 
-        self.client = OpenAI(api_key=api_key)
+        self.client = OpenAI(api_key=api_key, timeout=timeout_seconds)
         self.model = model
 
     def plan(self, request: AgentPlanningRequest) -> AgentPlannerDecision:
