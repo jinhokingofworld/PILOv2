@@ -18,6 +18,7 @@ import {
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { io } from "socket.io-client";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -619,6 +620,7 @@ export function MeetingReportSection({
 }: MeetingReportSectionProps) {
   const router = useRouter();
   const {
+    accessToken,
     canLoad,
     getMeetingReport,
     regenerateMeetingReport,
@@ -789,6 +791,35 @@ export function MeetingReportSection({
     loadReportDetail,
     reloadReports,
     selectedReport?.status,
+    selectedReportId
+  ]);
+
+  useEffect(() => {
+    const realtimeUrl = process.env.NEXT_PUBLIC_PILO_REALTIME_SERVER_URL;
+    if (!canLoad || !accessToken || !realtimeUrl) return;
+
+    const socket = io(realtimeUrl, { auth: { token: accessToken } });
+    const workspaceId = meetingData.workspaceId;
+    socket.on("connect", () => {
+      socket.emit("meeting:subscribe", { workspaceId });
+    });
+    socket.on("meeting:report:updated", () => {
+      void reloadReports();
+      if (selectedReportId) {
+        void loadReportDetail(selectedReportId, { silent: true });
+      }
+    });
+
+    return () => {
+      socket.emit("meeting:unsubscribe", { workspaceId });
+      socket.disconnect();
+    };
+  }, [
+    accessToken,
+    canLoad,
+    loadReportDetail,
+    meetingData.workspaceId,
+    reloadReports,
     selectedReportId
   ]);
 
