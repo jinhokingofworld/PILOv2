@@ -16,13 +16,6 @@ import type {
   SubmitGithubPullRequestReviewInput
 } from "./types";
 
-interface GithubOAuthConnectionRow extends QueryResultRow {
-  github_login: string | null;
-  github_access_token_encrypted: string | null;
-  github_connected_at: Date | string | null;
-  github_revoked_at: Date | string | null;
-}
-
 interface GithubReviewTargetRow extends QueryResultRow {
   pr_number: string | number;
   owner_login: string;

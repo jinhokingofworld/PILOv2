@@ -1,5 +1,4 @@
 import { Injectable } from "@nestjs/common";
-import { QueryResultRow } from "pg";
 import { badRequest, unauthorized } from "../../common/api-error";
 import { DatabaseService } from "../../database/database.service";
 import { GithubOAuthCallbackQuery, StartGithubOAuthRequest } from "./dto";
@@ -21,14 +20,6 @@ import type {
   GithubOAuthStartPayload,
   GithubOAuthStatusPayload
 } from "./types";
-
-interface GithubOAuthStatusRow extends QueryResultRow {
-  github_user_id: string | number | null;
-  github_login: string | null;
-  github_token_scope: string | null;
-  github_connected_at: Date | string | null;
-  github_revoked_at: Date | string | null;
-}
 
 type GithubOAuthStartResult = GithubOAuthStartPayload & {
   stateCookie: string;
@@ -164,21 +155,6 @@ export class GithubOAuthIntegrationService {
 
     return {
       disconnected: true
-    };
-  }
-
-  private mapGithubOAuthStatus(
-    row: GithubOAuthStatusRow
-  ): GithubOAuthStatusPayload {
-    const connected = Boolean(row.github_connected_at && !row.github_revoked_at);
-
-    return {
-      connected,
-      githubUserId: this.toNullableNumber(row.github_user_id),
-      githubLogin: row.github_login,
-      tokenScope: connected ? row.github_token_scope : null,
-      githubConnectedAt: this.toNullableIsoString(row.github_connected_at),
-      githubRevokedAt: this.toNullableIsoString(row.github_revoked_at)
     };
   }
 

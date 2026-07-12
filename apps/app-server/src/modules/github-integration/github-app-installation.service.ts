@@ -43,12 +43,6 @@ interface GithubInstallationRow extends QueryResultRow {
   last_synced_at: Date | string | null;
 }
 
-interface GithubOAuthConnectionRow extends QueryResultRow {
-  github_access_token_encrypted: string | null;
-  github_connected_at: Date | string | null;
-  github_revoked_at: Date | string | null;
-}
-
 type GithubAppInstallationStartResult = GithubAppInstallationStartPayload & {
   stateCookie: string;
 };

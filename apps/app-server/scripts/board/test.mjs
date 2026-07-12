@@ -203,7 +203,8 @@ assert.match(
 );
 
 assert.match(githubIssueWriteServiceFile, /class GithubIssueWriteService/);
-assert.match(githubIssueWriteServiceFile, /github_access_token_encrypted/);
+assert.match(githubIssueWriteServiceFile, /getActiveConnection\(input\.currentUserId, "app_user"\)/);
+assert.doesNotMatch(githubIssueWriteServiceFile, /github_access_token_encrypted/);
 assert.match(githubIssueWriteServiceFile, /updateRepositoryIssue/);
 assert.match(githubIssueWriteServiceFile, /createRepositoryIssue/);
 assert.match(githubProjectV2WriteServiceFile, /class GithubProjectV2WriteService/);

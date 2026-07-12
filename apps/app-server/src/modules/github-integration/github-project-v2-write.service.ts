@@ -10,14 +10,6 @@ import {
 import { GithubTokenEncryptionService } from "./github-token-encryption.service";
 import { GithubOAuthConnectionService } from "./github-oauth-connection.service";
 
-interface GithubProjectOAuthConnectionRow extends QueryResultRow {
-  github_project_login: string | null;
-  github_project_access_token_encrypted: string | null;
-  github_project_token_scope: string | null;
-  github_project_connected_at: Date | string | null;
-  github_project_revoked_at: Date | string | null;
-}
-
 export interface UpdateGithubProjectV2ItemStatusInput {
   currentUserId: string;
   projectNodeId: string;

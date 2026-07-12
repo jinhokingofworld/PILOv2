@@ -11,14 +11,6 @@ interface GithubProjectV2SyncInstallation {
   account_type: "User" | "Organization";
 }
 
-interface GithubProjectOAuthConnectionRow extends QueryResultRow {
-  github_project_login: string | null;
-  github_project_access_token_encrypted: string | null;
-  github_project_token_scope: string | null;
-  github_project_connected_at: Date | string | null;
-  github_project_revoked_at: Date | string | null;
-}
-
 const GITHUB_PROJECT_OAUTH_REQUIRED_MESSAGE =
   "GitHub ProjectV2 OAuth connection is required for personal ProjectV2 sync";
 const GITHUB_PROJECT_OAUTH_SCOPE_ERROR_MESSAGE =

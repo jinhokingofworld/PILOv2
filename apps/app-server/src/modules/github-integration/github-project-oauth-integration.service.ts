@@ -1,5 +1,4 @@
 import { Injectable } from "@nestjs/common";
-import { QueryResultRow } from "pg";
 import { badRequest, unauthorized } from "../../common/api-error";
 import { DatabaseService } from "../../database/database.service";
 import { GithubOAuthCallbackQuery, StartGithubOAuthRequest } from "./dto";
@@ -17,20 +16,6 @@ import type {
   GithubProjectOAuthStartPayload,
   GithubProjectOAuthStatusPayload
 } from "./types";
-
-interface GithubProjectOAuthStatusRow extends QueryResultRow {
-  github_project_user_id: string | number | null;
-  github_project_login: string | null;
-  github_project_token_scope: string | null;
-  github_project_connected_at: Date | string | null;
-  github_project_revoked_at: Date | string | null;
-}
-
-interface GithubPrimaryOAuthAccountRow extends QueryResultRow {
-  github_login: string | null;
-  github_connected_at: Date | string | null;
-  github_revoked_at: Date | string | null;
-}
 
 type GithubProjectOAuthStartResult = GithubProjectOAuthStartPayload & {
   stateCookie: string;
@@ -225,25 +210,6 @@ export class GithubProjectOAuthIntegrationService {
         "connection_failed"
       );
     }
-  }
-
-  private mapGithubProjectOAuthStatus(
-    row: GithubProjectOAuthStatusRow
-  ): GithubProjectOAuthStatusPayload {
-    const connected = Boolean(
-      row.github_project_connected_at && !row.github_project_revoked_at
-    );
-
-    return {
-      connected,
-      githubUserId: this.toNullableNumber(row.github_project_user_id),
-      githubLogin: row.github_project_login,
-      tokenScope: connected ? row.github_project_token_scope : null,
-      githubConnectedAt: this.toNullableIsoString(
-        row.github_project_connected_at
-      ),
-      githubRevokedAt: this.toNullableIsoString(row.github_project_revoked_at)
-    };
   }
 
   private getCallbackUrl(config: {

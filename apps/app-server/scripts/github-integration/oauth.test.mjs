@@ -508,11 +508,10 @@ const projectOAuthConnectedRow = {
 
 {
   const database = new FakeDatabase([], {
-    queryOne(text) {
-      if (/SELECT id FROM users WHERE id <> \$1 AND github_user_id = \$2/i.test(text)) {
-        return { id: "another-user" };
-      }
-      return undefined;
+    queryOne() {
+      const error = new Error("duplicate GitHub account");
+      error.code = "23505";
+      throw error;
     }
   });
   const service = new GithubOAuthConnectionService(database, tokenEncryption, configService);
@@ -528,7 +527,7 @@ const projectOAuthConnectedRow = {
     }),
     (error) => error?.response?.error?.message === "GitHub account is already connected to another PILO account"
   );
-  assert.equal(database.queries.some(({ text }) => /INSERT INTO github_oauth_connections/i.test(text)), false);
+  assert.equal(database.queries.some(({ text }) => /INSERT INTO github_oauth_connections/i.test(text)), true);
 }
 
 {
@@ -538,9 +537,7 @@ const projectOAuthConnectedRow = {
   await service.disconnectMismatchedConnectionsInTransaction(database, "user-1", 87654321);
 
   assert.match(database.queries[0].text, /UPDATE github_oauth_connections/i);
-  assert.match(database.queries[1].text, /UPDATE users SET/i);
-  assert.match(database.queries[1].text, /github_user_id IS DISTINCT FROM \$2/i);
-  assert.match(database.queries[1].text, /github_project_access_token_encrypted = CASE/i);
+  assert.equal(database.queries.length, 1);
 }
 
 {
@@ -557,11 +554,11 @@ const projectOAuthConnectedRow = {
 
   assert.deepEqual(result, { disconnected: true });
   assert.match(
-    database.queries[1].text,
+    database.queries[0].text,
     /UPDATE github_oauth_connections/i
   );
-  assert.match(database.queries[1].text, /access_token_encrypted = NULL/i);
-  assert.deepEqual(database.queries[1].values, ["user-1", "project_v2"]);
+  assert.match(database.queries[0].text, /access_token_encrypted = NULL/i);
+  assert.deepEqual(database.queries[0].values, ["user-1", "project_v2"]);
 }
 
 {
@@ -941,8 +938,7 @@ const projectOAuthConnectedRow = {
   const result = await service.disconnectGithubOAuth("user-1");
 
   assert.deepEqual(result, { disconnected: true });
-  assert.match(database.queries[1].text, /UPDATE github_oauth_connections/i);
-  assert.match(database.queries[1].text, /access_token_encrypted = NULL/i);
-  assert.deepEqual(database.queries[1].values, ["user-1", "app_user"]);
-  assert.match(database.queries[2].text, /UPDATE users SET github_access_token_encrypted = NULL/i);
+  assert.match(database.queries[0].text, /UPDATE github_oauth_connections/i);
+  assert.match(database.queries[0].text, /access_token_encrypted = NULL/i);
+  assert.deepEqual(database.queries[0].values, ["user-1", "app_user"]);
 }

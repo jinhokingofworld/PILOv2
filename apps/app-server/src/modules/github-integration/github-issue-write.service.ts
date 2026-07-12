@@ -15,13 +15,6 @@ import { GithubTokenEncryptionService } from "./github-token-encryption.service"
 import { GithubOAuthConnectionService } from "./github-oauth-connection.service";
 import { GithubIssueAssigneeValidationError } from "./github-issue-assignee.error";
 
-interface GithubOAuthConnectionRow extends QueryResultRow {
-  github_login: string | null;
-  github_access_token_encrypted: string | null;
-  github_connected_at: Date | string | null;
-  github_revoked_at: Date | string | null;
-}
-
 export interface UpdateGithubIssueInput {
   currentUserId: string;
   owner: string;

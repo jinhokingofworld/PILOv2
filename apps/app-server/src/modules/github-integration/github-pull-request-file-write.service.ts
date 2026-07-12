@@ -23,13 +23,6 @@ import type {
   GithubPullRequestFileResolutionPayload
 } from "./types";
 
-interface GithubOAuthConnectionRow extends QueryResultRow {
-  github_login: string | null;
-  github_access_token_encrypted: string | null;
-  github_connected_at: Date | string | null;
-  github_revoked_at: Date | string | null;
-}
-
 interface GithubPullRequestFileWriteTargetRow extends QueryResultRow {
   id: string;
   pr_number: string | number;
