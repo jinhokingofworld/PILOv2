@@ -73,6 +73,10 @@ function meetingReportEventContext(token) {
     () => controller.publish({ reportId: "" }),
     error => error.getStatus() === 400
   );
+  await assert.rejects(
+    () => controller.publish({ reportId: "not-a-uuid" }),
+    error => error.getStatus() === 400
+  );
 }
 
 class FakeDatabase {
