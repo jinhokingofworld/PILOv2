@@ -463,22 +463,17 @@ def normalize_agent_planner_decision(
         ):
             missing_fields = tuple(sorted({*missing_fields, "calendar_event_end_time"}))
 
-        if tool.name == "create_calendar_event" and _is_calendar_recurrence_request(
-            prompt
-        ):
+        if tool.name == "create_calendar_event" and _is_calendar_recurrence_request(prompt):
             status = "unsupported"
             message = "반복 일정 생성은 현재 지원하지 않습니다."
             final_answer = (
-                "현재는 반복 일정을 만들 수 없습니다. "
-                "한 번만 생성할 날짜와 시간을 알려주세요."
+                "현재는 반복 일정을 만들 수 없습니다. " "한 번만 생성할 날짜와 시간을 알려주세요."
             )
             unsupported_reason = "calendar_recurrence_unsupported"
         elif tool.name == "create_calendar_event" and _requires_calendar_time_or_all_day(
             decision.tool_input
         ):
-            missing_fields = tuple(
-                sorted({*missing_fields, "calendar_event_time_or_all_day"})
-            )
+            missing_fields = tuple(sorted({*missing_fields, "calendar_event_time_or_all_day"}))
 
         if tool.name in MEETING_REPORT_ID_TOOLS and not _has_valid_uuid(
             decision.tool_input.get("reportId")

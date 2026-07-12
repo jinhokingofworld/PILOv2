@@ -597,9 +597,7 @@ def test_normalizer_requires_time_or_all_day_for_multi_day_calendar_create() -> 
 
     assert normalized.status == "needs_clarification"
     assert normalized.risk_level is None
-    assert normalized.output_summary["missingFields"] == [
-        "calendar_event_time_or_all_day"
-    ]
+    assert normalized.output_summary["missingFields"] == ["calendar_event_time_or_all_day"]
     assert "종일 여부 또는 시작 시각" in normalized.final_answer
 
 
