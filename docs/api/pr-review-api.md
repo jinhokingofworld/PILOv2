@@ -298,6 +298,14 @@ version이면 입력을 거부한다.
 AI는 값이 `false`인 파일의 `roleType`을 변경할 수 없다. `evidence`에는 raw patch나 전체
 code를 넣지 않고 규칙 이름 또는 제한된 식별자만 전달한다.
 
+Worker의 strict output schema는 요청마다 Graph 입력을 기준으로 동적으로 생성한다. Graph
+file path와 relation endpoint는 입력 변경 파일 집합으로, relation `candidateKey`는 입력
+relation key 또는 `null`로, Flow `candidateKey`는 입력 Flow key로 제한한다. AI가 기존
+relation을 보강할 때는 입력 key를 그대로 사용하고 새 relation을 제안할 때만
+`candidateKey = null`을 사용한다. self relation과 동일 endpoint/type 중복 relation은
+허용하지 않으며 각 Flow의 `reviewOrder`는 해당 Flow의 모든 file path를 정확히 한 번씩
+포함해야 한다.
+
 `POST /api/v1/internal/pr-review/analysis-jobs/{jobId}/result`는 Worker가 검증한 분석
 결과를 아래 형식으로 전달한다. path의 `jobId`와 body의 네 식별자(`jobId`,
 `reviewSessionId`, `workspaceId`, `headSha`)는 모두 Job row와 일치해야 한다.
@@ -364,8 +372,12 @@ Worker parser는 Graph 결과의 file path가 입력 변경 파일 집합과 일
 유지되는지, Flow가 입력 후보와 대응하는지, relation endpoint와 type이 유효한지 확인한다.
 기존 PR 요약·파일 분석은 유효하지만 Graph 의미 검증만 실패하면 Worker는 raw AI 값이나
 파일 경로를 로그에 남기지 않고 `version`, `role_policy`, `file_membership`, `relation`,
-`flow`, `invalid_graph` 중 하나의 category만 기록한다. 이 경우 Graph 필드를 제외한 기존
-분석 결과를 App Server에 전달하며 Job을 `ANALYSIS_INPUT_INVALID`로 종료하지 않는다.
+`flow`, `invalid_graph` 중 하나의 category와 안전한 reason code를 기록한다. reason은
+`unknown_candidate_key`, `unknown_endpoint`, `self_relation`, `duplicate_relation`,
+`invalid_collection`, `invalid_relation`, `locked_role_changed`, `file_omitted`,
+`flow_omitted`, `invalid_flow`, `invalid_file`, `invalid_version`, `invalid_output` 중 하나다.
+이 경우 Graph 필드를 제외한 기존 분석 결과를 App Server에 전달하며 Job을
+`ANALYSIS_INPUT_INVALID`로 종료하지 않는다.
 기존 PR 요약 또는 파일 분석 자체가 유효하지 않은 경우에는 기존처럼
 `ANALYSIS_INPUT_INVALID` terminal failure로 처리한다.
 
