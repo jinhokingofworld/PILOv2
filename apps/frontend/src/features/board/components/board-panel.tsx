@@ -88,6 +88,7 @@ export function BoardPanel() {
     accessToken,
     boardId: selectedBoardId,
     issueQuery,
+    repositoryId: githubBoardSelection?.repositoryId,
     workspaceId
   });
   useBoardRealtime({

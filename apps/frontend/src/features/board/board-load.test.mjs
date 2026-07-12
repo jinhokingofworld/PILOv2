@@ -13,6 +13,7 @@ function readFeatureFile(path) {
 
 const [
   boardDataHook,
+  boardPanel,
   githubPanel,
   githubBoardSelection,
   githubProjectSelection,
@@ -20,6 +21,7 @@ const [
 ] =
   await Promise.all([
   readFeatureFile("./hooks/use-board-workspace-data.ts"),
+  readFeatureFile("./components/board-panel.tsx"),
   readFile(
     new URL("../github-integration/components/github-panel.tsx", import.meta.url),
     "utf8"
@@ -47,8 +49,13 @@ assert.doesNotMatch(
 
 assert.match(
   boardDataHook,
-  /const\s+selectedRepositoryId\s*=\s*repositories\[0\]\?\.id;/,
-  "Board catalog should select a repository before requesting ProjectV2 data"
+  /selectBoardProjectRepositoryId\(\s*repositories,\s*normalizedProjectRepositoryId\s*\)/,
+  "Board catalog should prefer the persisted Board selection over the first repository"
+);
+assert.match(
+  boardPanel,
+  /repositoryId:\s*githubBoardSelection\?\.repositoryId/,
+  "Board panel should provide the persisted Board repository to the catalog"
 );
 assert.match(
   boardDataHook,
