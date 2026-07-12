@@ -130,21 +130,29 @@ DB migration과 schema 검증을 같은 PR에 포함한다.
 
 작업 체크리스트:
 
-- [ ] file role inference를 App Server 또는 Worker의 독립 모듈로 분리한다.
-- [ ] test 파일과 대상 파일의 경로·이름 관계를 추론한다.
-- [ ] patch에 명시된 import/call 관계만 후보로 인정한다.
-- [ ] DTO/API와 client/UI 사용 관계 후보를 만든다.
+### 3-B1 File Roles and Core Relations (#776)
+
+- [x] file role inference를 App Server PR Review 독립 모듈로 분리한다.
+- [x] test 파일과 대상 파일의 경로·이름 관계를 추론한다.
+- [x] patch의 추가·문맥 줄에 명시된 상대 import 관계만 후보로 인정한다.
+- [x] API contract와 client/UI 사용 관계 후보를 만든다.
+- [x] 삭제된 import, path alias와 해석할 수 없는 경로는 관계로 만들지 않는다.
+- [x] 각 후보에 안전한 evidence, `rule` source와 confidence를 부여한다.
+- [x] 관계를 deduplicate하고 같은 입력에서 같은 순서로 반환한다.
+- [x] Python/Java 등 TypeScript 외 테스트 파일명 규칙도 최소 지원한다.
+
+### 3-B2 Support Relations and Flow Grouping (#777)
+
 - [ ] migration/config/docs 파일의 support 관계 후보를 만든다.
-- [ ] 각 후보에 evidence, source와 confidence를 부여한다.
 - [ ] 같은 기능 경로와 관계 연결성을 기준으로 Flow 후보를 만든다.
 - [ ] 어떤 Flow에도 묶이지 않은 파일을 fallback Flow에 보존한다.
-- [ ] 언어 또는 framework를 특정할 수 없을 때 안전하게 관계 생성을 생략한다.
-- [ ] TypeScript 외 파일도 최소 경로 규칙과 fallback으로 처리한다.
+- [ ] package manifest/lockfile의 명시적 support 관계를 만든다.
+- [ ] 모든 변경 파일이 정확히 하나 이상의 Flow에 포함되도록 한다.
 
 완료 기준:
 
-- [ ] OpenAI 호출 없이 고정 fixture에서 동일한 후보 graph를 만든다.
-- [ ] 존재하지 않는 file path와 self edge를 생성하지 않는다.
+- [x] OpenAI 호출 없이 고정 fixture에서 동일한 role/core relation 후보를 만든다.
+- [x] 존재하지 않는 file path와 self edge를 생성하지 않는다.
 - [ ] 모든 변경 파일이 정확히 하나 이상의 Flow에 포함된다.
 
 ## 3-C AI Enrichment and Graph Validator
