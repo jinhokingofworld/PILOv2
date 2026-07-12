@@ -75,10 +75,12 @@ const encryptedUserToken = tokenEncryption.encryptToken(
 
 function connectedGithubOAuthRow(overrides = {}) {
   return {
+    github_user_id: "12345678",
     github_login: "octocat",
-    github_access_token_encrypted: encryptedUserToken,
-    github_connected_at: fixedNow,
-    github_revoked_at: null,
+    access_token_encrypted: encryptedUserToken,
+    token_scope: "",
+    connected_at: fixedNow,
+    revoked_at: null,
     ...overrides
   };
 }
@@ -137,9 +139,9 @@ function createService({ database, githubOAuthClient, workspaceService } = {}) {
   );
 
   assert.deepEqual(workspaceService.accessChecks, [{ currentUserId, workspaceId }]);
-  assert.match(database.queries[0].text, /FROM users/i);
-  assert.match(database.queries[0].text, /github_access_token_encrypted/i);
-  assert.deepEqual(database.queries[0].values, [currentUserId]);
+  assert.match(database.queries[0].text, /FROM github_oauth_connections/i);
+  assert.match(database.queries[0].text, /access_token_encrypted/i);
+  assert.deepEqual(database.queries[0].values, [currentUserId, "app_user"]);
   assert.match(database.queries[1].text, /FROM github_pull_requests/i);
   assert.match(database.queries[1].text, /JOIN github_repositories/i);
   assert.deepEqual(database.queries[1].values, [workspaceId, pullRequestId]);
@@ -169,8 +171,8 @@ function createService({ database, githubOAuthClient, workspaceService } = {}) {
     database: new FakeDatabase({
       oneRows: [
         connectedGithubOAuthRow({
-          github_access_token_encrypted: null,
-          github_connected_at: null
+          access_token_encrypted: null,
+          connected_at: null
         })
       ]
     }),

@@ -12,6 +12,7 @@ import {
   type GithubOAuthRuntimeConfig
 } from "./github-integration-config.service";
 import { GithubTokenEncryptionService } from "./github-token-encryption.service";
+import { GithubOAuthConnectionService } from "./github-oauth-connection.service";
 import { GithubIssueAssigneeValidationError } from "./github-issue-assignee.error";
 
 interface GithubOAuthConnectionRow extends QueryResultRow {
@@ -57,13 +58,13 @@ export class GithubIssueWriteService {
     private readonly database: DatabaseService,
     private readonly githubAppClient: GithubAppClient,
     private readonly tokenEncryptionService: GithubTokenEncryptionService,
-    private readonly configService: GithubIntegrationConfigService
+    private readonly configService: GithubIntegrationConfigService,
+    private readonly connectionService: GithubOAuthConnectionService = new GithubOAuthConnectionService(database, tokenEncryptionService, configService)
   ) {}
 
   async updateIssue(input: UpdateGithubIssueInput): Promise<UpdateGithubIssueResult> {
-    const oauthConfig = this.configService.getGithubOAuthConfig();
-    const connection = await this.getGithubOAuthConnectionRow(input.currentUserId);
-    const accessToken = this.getConnectedGithubOAuthAccess(connection, oauthConfig);
+    const connection = await this.connectionService.getActiveConnection(input.currentUserId, "app_user");
+    const accessToken = connection.accessToken;
 
     if (input.assignees !== undefined) {
       const assignableUsers = await this.githubAppClient.listRepositoryAssignees({
@@ -103,9 +104,8 @@ export class GithubIssueWriteService {
   async listAssignableUsers(
     input: ListGithubIssueAssigneesInput
   ): Promise<GithubIssueAssigneeApiItem[]> {
-    const oauthConfig = this.configService.getGithubOAuthConfig();
-    const connection = await this.getGithubOAuthConnectionRow(input.currentUserId);
-    const accessToken = this.getConnectedGithubOAuthAccess(connection, oauthConfig);
+    const connection = await this.connectionService.getActiveConnection(input.currentUserId, "app_user");
+    const accessToken = connection.accessToken;
 
     return this.githubAppClient.listRepositoryAssignees({
       owner: input.owner,
@@ -115,9 +115,8 @@ export class GithubIssueWriteService {
   }
 
   async createIssue(input: CreateGithubIssueInput): Promise<GithubIssueApiItem> {
-    const oauthConfig = this.configService.getGithubOAuthConfig();
-    const connection = await this.getGithubOAuthConnectionRow(input.currentUserId);
-    const accessToken = this.getConnectedGithubOAuthAccess(connection, oauthConfig);
+    const connection = await this.connectionService.getActiveConnection(input.currentUserId, "app_user");
+    const accessToken = connection.accessToken;
 
     return this.githubAppClient.createRepositoryIssue({
       body: input.body,
@@ -126,56 +125,6 @@ export class GithubIssueWriteService {
       title: input.title,
       userAccessToken: accessToken
     });
-  }
-
-  private async getGithubOAuthConnectionRow(
-    currentUserId: string
-  ): Promise<GithubOAuthConnectionRow> {
-    const row = await this.database.queryOne<GithubOAuthConnectionRow>(
-      `
-        SELECT
-          github_login,
-          github_access_token_encrypted,
-          github_connected_at,
-          github_revoked_at
-        FROM users
-        WHERE id = $1
-      `,
-      [currentUserId]
-    );
-
-    if (!row) {
-      throw unauthorized("Current user not found");
-    }
-
-    return row;
-  }
-
-  private getConnectedGithubOAuthAccess(
-    row: GithubOAuthConnectionRow,
-    config: GithubOAuthRuntimeConfig
-  ): string {
-    if (!this.isActiveGithubOAuthConnection(row)) {
-      throw badRequest("GitHub OAuth connection is required");
-    }
-
-    return this.tokenEncryptionService.decryptToken(
-      row.github_access_token_encrypted,
-      config
-    );
-  }
-
-  private isActiveGithubOAuthConnection(
-    row: GithubOAuthConnectionRow
-  ): row is GithubOAuthConnectionRow & {
-    github_access_token_encrypted: string;
-  } {
-    return Boolean(
-      row.github_login &&
-        row.github_access_token_encrypted &&
-        row.github_connected_at &&
-        !row.github_revoked_at
-    );
   }
 
   private haveSameAssignees(

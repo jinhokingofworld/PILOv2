@@ -467,12 +467,14 @@ class FakeDatabase {
   async queryOne(text, values = []) {
     this.queries.push({ text, values });
 
-    if (text.includes("FROM users")) {
+    if (text.includes("FROM github_oauth_connections")) {
       return {
+        github_user_id: "12345678",
         github_login: "Developer-EJ",
-        github_access_token_encrypted: "encrypted-token",
-        github_connected_at: "2026-07-10T00:00:00.000Z",
-        github_revoked_at: null
+        access_token_encrypted: "encrypted-token",
+        token_scope: "",
+        connected_at: "2026-07-10T00:00:00.000Z",
+        revoked_at: null
       };
     }
 

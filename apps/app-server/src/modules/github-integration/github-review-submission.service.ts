@@ -9,6 +9,7 @@ import {
 } from "./github-integration-config.service";
 import { GithubOAuthClient } from "./github-oauth.client";
 import { GithubTokenEncryptionService } from "./github-token-encryption.service";
+import { GithubOAuthConnectionService } from "./github-oauth-connection.service";
 import type {
   GithubPullRequestReviewSubmissionPayload,
   GithubPullRequestReviewSubmitType,
@@ -35,7 +36,8 @@ export class GithubReviewSubmissionService {
     private readonly githubOAuthClient: GithubOAuthClient,
     private readonly tokenEncryptionService: GithubTokenEncryptionService,
     private readonly configService: GithubIntegrationConfigService,
-    private readonly workspaceService: WorkspaceService
+    private readonly workspaceService: WorkspaceService,
+    private readonly connectionService: GithubOAuthConnectionService = new GithubOAuthConnectionService(database, tokenEncryptionService, configService)
   ) {}
 
   async submitGithubPullRequestReview(
@@ -49,11 +51,7 @@ export class GithubReviewSubmissionService {
     const submitType = this.normalizeSubmitType(input.submitType);
     const reviewBody = this.normalizeReviewBody(input.reviewBody);
     const oauthConfig = this.configService.getGithubOAuthConfig();
-    const connection = await this.getGithubOAuthConnectionRow(currentUserId);
-    const connectedOAuth = this.getConnectedGithubOAuthAccess(
-      connection,
-      oauthConfig
-    );
+    const connectedOAuth = await this.connectionService.getActiveConnection(currentUserId, "app_user");
     const target = await this.findGithubReviewTarget(workspaceId, pullRequestId);
 
     try {
@@ -82,60 +80,6 @@ export class GithubReviewSubmissionService {
 
       throw badRequest("GitHub Review submission failed");
     }
-  }
-
-  private async getGithubOAuthConnectionRow(
-    currentUserId: string
-  ): Promise<GithubOAuthConnectionRow> {
-    const row = await this.database.queryOne<GithubOAuthConnectionRow>(
-      `
-        SELECT
-          github_login,
-          github_access_token_encrypted,
-          github_connected_at,
-          github_revoked_at
-        FROM users
-        WHERE id = $1
-      `,
-      [currentUserId]
-    );
-
-    if (!row) {
-      throw unauthorized("Current user not found");
-    }
-
-    return row;
-  }
-
-  private getConnectedGithubOAuthAccess(
-    row: GithubOAuthConnectionRow,
-    config: GithubOAuthRuntimeConfig
-  ): { accessToken: string; githubLogin: string } {
-    if (!this.isActiveGithubOAuthConnection(row)) {
-      throw badRequest("GitHub OAuth connection is required");
-    }
-
-    return {
-      accessToken: this.tokenEncryptionService.decryptToken(
-        row.github_access_token_encrypted,
-        config
-      ),
-      githubLogin: row.github_login
-    };
-  }
-
-  private isActiveGithubOAuthConnection(
-    row: GithubOAuthConnectionRow
-  ): row is GithubOAuthConnectionRow & {
-    github_access_token_encrypted: string;
-    github_login: string;
-  } {
-    return Boolean(
-      row.github_login &&
-        row.github_access_token_encrypted &&
-        row.github_connected_at &&
-        !row.github_revoked_at
-    );
   }
 
   private async findGithubReviewTarget(
