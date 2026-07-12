@@ -177,26 +177,40 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
 }
 
 {
-  const failedRuns = [];
+  const queries = [];
+  const writes = [];
   const worker = new GithubSyncJobService(
     {
-      queryOne: async () => ({ id: "job-1" }),
-      transaction: async (callback) => callback({ execute: async () => ({ rowCount: 1 }) })
+      queryOne: async (text) => {
+        queries.push(text);
+        return { id: "job-1", lease_generation: "7" };
+      },
+      transaction: async (callback) => callback({
+        execute: async (text, values) => {
+          writes.push({ text, values });
+          return { rowCount: 1 };
+        }
+      })
     },
     {},
     {},
     {},
-    {},
-    { markRunFailed: async (...args) => failedRuns.push(args) }
+    {}
   );
   worker.client = () => ({ send: async () => { throw new Error("SQS unavailable"); } });
   process.env.SQS_GITHUB_SYNC_JOBS_QUEUE_URL = "sync-queue";
 
   await assert.rejects(() => worker.enqueueSyncJob(syncRunId, userId));
-  assert.equal(failedRuns[0][0], syncRunId);
-  assert.equal(failedRuns[0][1], "GitHub sync job could not be enqueued");
-  assert.equal(failedRuns[0][2], false);
-  assert.ok(failedRuns[0][3], "enqueue failure must share the terminal database transaction");
+  assert.match(queries[0], /ON CONFLICT \(sync_run_id\) DO UPDATE/i);
+  assert.match(queries[0], /SET status='queued', lease_owner=NULL, lease_expires_at=NULL/i);
+  assert.match(queries[0], /RETURNING id, lease_generation/i);
+  assert.equal(writes.length, 1, "enqueue failure must transition job, run, and schedule in one transaction");
+  assert.match(
+    writes[0].text,
+    /terminal_job AS \([\s\S]*status='queued'[\s\S]*lease_owner IS NULL[\s\S]*lease_expires_at IS NULL[\s\S]*lease_generation=\$3[\s\S]*terminal_run AS \([\s\S]*FROM terminal_job[\s\S]*terminal_schedule AS \([\s\S]*FROM terminal_run/i,
+    "a delayed publisher cannot fail a job that has already been leased by a newer generation"
+  );
+  assert.deepEqual(writes[0].values, ["job-1", syncRunId, "7"]);
 }
 
 {
@@ -207,6 +221,56 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
   assert.match(queries[0], /status IN \('queued', 'running'\)/);
   assert.match(queries[0], /lease_generation=lease_generation\+1/i);
   assert.match(queries[0], /RETURNING id, sync_run_id, requested_by_user_id, attempt_count, lease_generation/i);
+  assert.match(queries[0], /leased_schedule AS/i);
+  assert.match(queries[0], /SET lease_owner=\$2, lease_expires_at=now\(\) \+ interval '10 minutes'/i);
+  assert.match(queries[0], /AS is_polling/i);
+}
+
+{
+  const job = { id: "job-polling-lease", sync_run_id: syncRunId, requested_by_user_id: userId, workspace_id: workspaceId, installation_id: installationId, repository_id: null, project_v2_id: null, target: "project_v2_items", attempt_count: 1, lease_generation: 4, is_polling: true };
+  const writes = [];
+  const worker = new GithubSyncJobService(
+    { execute: async (text, values) => { writes.push({ text, values }); return { rowCount: 0 }; } },
+    {}, {}, {}
+  );
+
+  await assert.rejects(() => worker.renewLease(job), /lease ownership was lost/i);
+  assert.match(writes[0].text, /owned_schedule AS \([\s\S]*active_sync_run_id=\$1[\s\S]*schedule\.lease_owner=\$2[\s\S]*FOR UPDATE/i);
+  assert.match(writes[0].text, /AND EXISTS \(SELECT 1 FROM owned_schedule\)/i);
+  assert.match(writes[0].text, /SELECT 1 FROM renewed_schedule/i);
+  assert.deepEqual(writes[0].values, [syncRunId, worker.workerId, job.id, job.lease_generation]);
+}
+
+{
+  const job = { id: "job-polling-assert", sync_run_id: syncRunId, requested_by_user_id: userId, workspace_id: workspaceId, installation_id: installationId, repository_id: null, project_v2_id: null, target: "project_v2_items", attempt_count: 1, lease_generation: 5, is_polling: true };
+  const queries = [];
+  const worker = new GithubSyncJobService(
+    { queryOne: async (text, values) => { queries.push({ text, values }); return null; } },
+    {}, {}, {}
+  );
+
+  const heartbeat = worker.startLeaseHeartbeat(job);
+  await assert.rejects(() => heartbeat.assertLease(), /lease ownership was lost/i);
+  clearInterval(heartbeat.timer);
+  assert.match(queries[0].text, /INNER JOIN github_project_v2_polling_schedules AS schedule/i);
+  assert.match(queries[0].text, /schedule\.active_sync_run_id=job\.sync_run_id/i);
+  assert.match(queries[0].text, /schedule\.lease_owner=\$2/i);
+  assert.match(queries[0].text, /schedule\.lease_expires_at >= now\(\)/i);
+  assert.deepEqual(queries[0].values, [job.id, worker.workerId, job.lease_generation]);
+}
+
+{
+  const job = { id: "job-manual-assert", sync_run_id: syncRunId, requested_by_user_id: userId, workspace_id: workspaceId, installation_id: installationId, repository_id: null, project_v2_id: null, target: "project_v2_items", attempt_count: 1, lease_generation: 6, is_polling: false };
+  const queries = [];
+  const worker = new GithubSyncJobService(
+    { queryOne: async (text, values) => { queries.push({ text, values }); return { ok: 1 }; } },
+    {}, {}, {}
+  );
+
+  const heartbeat = worker.startLeaseHeartbeat(job);
+  await heartbeat.assertLease();
+  clearInterval(heartbeat.timer);
+  assert.doesNotMatch(queries[0].text, /github_project_v2_polling_schedules/i);
 }
 
 {

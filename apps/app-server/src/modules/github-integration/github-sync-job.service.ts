@@ -36,6 +36,7 @@ interface SyncJobRow extends QueryResultRow {
   target: GithubSyncTarget;
   attempt_count: number;
   lease_generation: string;
+  is_polling: boolean;
 }
 
 class TerminalSyncJobError extends Error {}
@@ -71,11 +72,14 @@ export class GithubSyncJobService implements OnModuleDestroy {
   ) {}
 
   async enqueueSyncJob(syncRunId: string, requestedByUserId: string): Promise<void> {
-    const job = await this.database.queryOne<{ id: string }>(
+    const job = await this.database.queryOne<{ id: string; lease_generation: string }>(
       `INSERT INTO github_sync_jobs (sync_run_id, requested_by_user_id)
        VALUES ($1, $2)
-       ON CONFLICT (sync_run_id) DO UPDATE SET sync_run_id = EXCLUDED.sync_run_id
-       RETURNING id`,
+       ON CONFLICT (sync_run_id) DO UPDATE
+       SET status='queued', lease_owner=NULL, lease_expires_at=NULL, finished_at=NULL, last_error=NULL
+       WHERE github_sync_jobs.status='queued'
+          OR (github_sync_jobs.status='running' AND github_sync_jobs.lease_expires_at < now())
+       RETURNING id, lease_generation`,
       [syncRunId, requestedByUserId]
     );
     if (!job) throw badRequest("GitHub sync job could not be created");
@@ -85,7 +89,7 @@ export class GithubSyncJobService implements OnModuleDestroy {
         MessageBody: JSON.stringify({ jobId: job.id })
       }));
     } catch {
-      await this.failEnqueue(syncRunId, job.id);
+      await this.failEnqueue(syncRunId, job.id, job.lease_generation);
       throw new GithubSyncJobEnqueueError(syncRunId);
     }
   }
@@ -205,11 +209,23 @@ export class GithubSyncJobService implements OnModuleDestroy {
           lease_generation=lease_generation+1,
           lease_expires_at=now() + interval '10 minutes', started_at=COALESCE(started_at, now())
         WHERE id=$1 AND status IN ('queued', 'running') AND (lease_expires_at IS NULL OR lease_expires_at < now())
-        RETURNING id, sync_run_id, requested_by_user_id, attempt_count, lease_generation)
-       UPDATE github_sync_runs run SET status='running', started_at=now()
-       FROM leased, github_sync_jobs job WHERE run.id=leased.sync_run_id AND job.id=leased.id
-        RETURNING leased.id, leased.sync_run_id, leased.requested_by_user_id, leased.attempt_count, leased.lease_generation, run.workspace_id, run.installation_id,
-         run.repository_id, run.project_v2_id, run.target`, [jobId, this.workerId]
+        RETURNING id, sync_run_id, requested_by_user_id, attempt_count, lease_generation
+      ), leased_schedule AS (
+        UPDATE github_project_v2_polling_schedules AS schedule
+        SET lease_owner=$2, lease_expires_at=now() + interval '10 minutes', updated_at=now()
+        FROM leased
+        WHERE schedule.active_sync_run_id=leased.sync_run_id
+        RETURNING schedule.active_sync_run_id
+      ), started_run AS (
+        UPDATE github_sync_runs AS run SET status='running', started_at=now()
+        FROM leased WHERE run.id=leased.sync_run_id
+        RETURNING run.workspace_id, run.installation_id, run.repository_id, run.project_v2_id, run.target, run.id
+      )
+      SELECT leased.id, leased.sync_run_id, leased.requested_by_user_id, leased.attempt_count, leased.lease_generation,
+        started_run.workspace_id, started_run.installation_id, started_run.repository_id, started_run.project_v2_id, started_run.target,
+        EXISTS (SELECT 1 FROM leased_schedule WHERE leased_schedule.active_sync_run_id=leased.sync_run_id) AS is_polling
+      FROM leased
+      INNER JOIN started_run ON started_run.id=leased.sync_run_id`, [jobId, this.workerId]
     );
   }
 
@@ -233,6 +249,32 @@ export class GithubSyncJobService implements OnModuleDestroy {
   }
 
   private async renewLease(job: SyncJobRow): Promise<void> {
+    if (job.is_polling) {
+      const result = await this.database.execute(
+        `WITH owned_schedule AS (
+           SELECT schedule.active_sync_run_id
+           FROM github_project_v2_polling_schedules AS schedule
+           WHERE schedule.active_sync_run_id=$1 AND schedule.lease_owner=$2
+           FOR UPDATE
+         ), renewed_job AS (
+           UPDATE github_sync_jobs
+           SET lease_expires_at=now() + interval '10 minutes'
+           WHERE id=$3 AND status='running' AND lease_owner=$2 AND lease_generation=$4
+             AND EXISTS (SELECT 1 FROM owned_schedule)
+           RETURNING sync_run_id
+         ), renewed_schedule AS (
+           UPDATE github_project_v2_polling_schedules AS schedule
+           SET lease_expires_at=now() + interval '10 minutes', updated_at=now()
+           FROM renewed_job
+           WHERE schedule.active_sync_run_id=renewed_job.sync_run_id AND schedule.lease_owner=$2
+           RETURNING schedule.active_sync_run_id
+         )
+         SELECT 1 FROM renewed_schedule`,
+        [job.sync_run_id, this.workerId, job.id, job.lease_generation]
+      );
+      if (result.rowCount === 0) throw new LostSyncJobLeaseError();
+      return;
+    }
     const result = await this.database.execute(
       `WITH renewed_job AS (
          UPDATE github_sync_jobs
@@ -253,6 +295,18 @@ export class GithubSyncJobService implements OnModuleDestroy {
   }
 
   private async hasLease(job: SyncJobRow): Promise<boolean> {
+    if (job.is_polling) {
+      return Boolean(await this.database.queryOne(
+        `SELECT 1
+         FROM github_sync_jobs AS job
+         INNER JOIN github_project_v2_polling_schedules AS schedule
+           ON schedule.active_sync_run_id=job.sync_run_id
+         WHERE job.id=$1 AND job.status='running' AND job.lease_owner=$2 AND job.lease_generation=$3
+           AND job.lease_expires_at >= now()
+           AND schedule.lease_owner=$2 AND schedule.lease_expires_at >= now()`,
+        [job.id, this.workerId, job.lease_generation]
+      ));
+    }
     return Boolean(await this.database.queryOne(
       `SELECT 1 FROM github_sync_jobs
        WHERE id=$1 AND status='running' AND lease_owner=$2 AND lease_generation=$3
@@ -304,7 +358,30 @@ export class GithubSyncJobService implements OnModuleDestroy {
       SELECT 1 FROM terminal_run`, [job.id, this.workerId, job.lease_generation, message.slice(0, 1000)]);
     });
   }
-  private async failEnqueue(runId: string, jobId: string): Promise<void> { await this.database.transaction(async (transaction) => { await transaction.execute(`UPDATE github_sync_runs SET status='failed', finished_at=now(), error_message='GitHub sync job could not be enqueued' WHERE id=$1`, [runId]); await transaction.execute(`UPDATE github_sync_jobs SET status='failed', finished_at=now(), last_error='GitHub sync job could not be enqueued' WHERE id=$1`, [jobId]); await this.pollingService?.markRunFailed(runId, "GitHub sync job could not be enqueued", false, transaction); }); }
+  private async failEnqueue(runId: string, jobId: string, leaseGeneration: string): Promise<void> {
+    await this.database.transaction(async (transaction) => {
+      await transaction.execute(`WITH terminal_job AS (
+        UPDATE github_sync_jobs
+        SET status='failed', finished_at=now(), last_error='GitHub sync job could not be enqueued'
+        WHERE id=$1 AND sync_run_id=$2 AND status='queued' AND lease_owner IS NULL
+          AND lease_expires_at IS NULL AND lease_generation=$3
+        RETURNING sync_run_id
+      ), terminal_run AS (
+        UPDATE github_sync_runs AS run
+        SET status='failed', finished_at=now(), error_message='GitHub sync job could not be enqueued'
+        FROM terminal_job WHERE run.id=terminal_job.sync_run_id
+        RETURNING run.id
+      ), terminal_schedule AS (
+        UPDATE github_project_v2_polling_schedules AS schedule
+        SET active_sync_run_id=NULL, lease_owner=NULL, lease_expires_at=NULL,
+          next_poll_at=now() + interval '5 minutes', failure_count=failure_count + 1,
+          last_error='GitHub sync job could not be enqueued', updated_at=now()
+        FROM terminal_run
+        WHERE schedule.active_sync_run_id=terminal_run.id
+      )
+      SELECT 1 FROM terminal_run`, [jobId, runId, leaseGeneration]);
+    });
+  }
   private installation(workspaceId: string, id: string): Promise<GithubSyncInstallationRow | null> { return this.database.queryOne(`SELECT id, workspace_id, github_installation_id, account_login, account_type FROM github_installations WHERE workspace_id=$1 AND id=$2`, [workspaceId, id]); }
   private repository(workspaceId: string, id: string): Promise<GithubSyncRepositoryContextRow | null> { return this.database.queryOne(`SELECT id, workspace_id, installation_id, github_node_id, owner_login, name, full_name FROM github_repositories WHERE workspace_id=$1 AND id=$2`, [workspaceId, id]); }
   private project(workspaceId: string, id: string): Promise<GithubSyncProjectV2ContextRow | null> { return this.database.queryOne(`SELECT id, workspace_id, installation_id, github_project_node_id FROM github_projects_v2 WHERE workspace_id=$1 AND id=$2`, [workspaceId, id]); }
