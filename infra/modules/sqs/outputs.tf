@@ -26,6 +26,10 @@ output "github_sync_worker_queue_arns" {
   value = [aws_sqs_queue.github_webhooks.arn, aws_sqs_queue.github_sync_jobs.arn]
 }
 
+output "github_sync_worker_dlq_arns" {
+  value = [aws_sqs_queue.github_webhooks_dlq.arn, aws_sqs_queue.github_sync_jobs_dlq.arn]
+}
+
 output "queue_arns" {
   value = [
     aws_sqs_queue.ai_jobs.arn,

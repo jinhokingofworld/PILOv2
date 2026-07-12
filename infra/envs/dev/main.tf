@@ -119,17 +119,20 @@ module "secrets" {
 module "iam" {
   source = "../../modules/iam"
 
-  name_prefix                   = local.name_prefix
-  aws_region                    = var.aws_region
-  github_owner                  = var.github_owner
-  github_repo                   = var.github_repo
-  ecr_repository_arns           = module.ecr.repository_arns
-  s3_bucket_arns                = [module.s3.frontend_bucket_arn, module.s3.uploads_bucket_arn]
-  sqs_queue_arns                = module.sqs.queue_arns
-  github_sync_worker_queue_arns = module.sqs.github_sync_worker_queue_arns
-  github_webhooks_queue_arn     = module.sqs.github_webhooks_queue_arn
-  secrets_manager_arns          = concat(module.secrets.secret_arns, [module.rds.master_user_secret_arn])
-  cloudfront_distribution       = module.cloudfront.distribution_arn
+  name_prefix                        = local.name_prefix
+  aws_region                         = var.aws_region
+  github_owner                       = var.github_owner
+  github_repo                        = var.github_repo
+  ecr_repository_arns                = module.ecr.repository_arns
+  s3_bucket_arns                     = [module.s3.frontend_bucket_arn, module.s3.uploads_bucket_arn]
+  sqs_queue_arns                     = module.sqs.queue_arns
+  github_sync_worker_queue_arns      = module.sqs.github_sync_worker_queue_arns
+  github_webhooks_queue_arn          = module.sqs.github_webhooks_queue_arn
+  github_sync_operator_user_name     = "pilo-juhyung-github-ops"
+  github_sync_operator_dlq_arns      = module.sqs.github_sync_worker_dlq_arns
+  github_sync_operator_log_group_arn = "arn:aws:logs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:log-group:/ecs/${local.name_prefix}/github-sync-worker"
+  secrets_manager_arns               = concat(module.secrets.secret_arns, [module.rds.master_user_secret_arn])
+  cloudfront_distribution            = module.cloudfront.distribution_arn
 }
 
 module "rds" {
