@@ -56,6 +56,23 @@ export class PrReviewController {
     return apiResponse(result.session);
   }
 
+  @Post("review-sessions/:reviewSessionId/retry")
+  async retryReviewSession(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("reviewSessionId") reviewSessionId: string,
+    @Res({ passthrough: true }) reply: FastifyReply
+  ): Promise<ApiSuccessResponse<PrReviewSessionPayload>> {
+    const session = await this.prReviewService.retryReviewSession(
+      currentUserId,
+      workspaceId,
+      reviewSessionId
+    );
+
+    reply.status(201);
+    return apiResponse(session);
+  }
+
   @Get("review-sessions/:reviewSessionId")
   async getReviewSession(
     @CurrentUserId() currentUserId: string,

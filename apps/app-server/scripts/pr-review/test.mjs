@@ -76,6 +76,10 @@ assert.match(
 );
 assert.match(prReviewController, /@Res\(\{ passthrough: true \}\)/);
 assert.match(prReviewController, /reply\.status\(result\.created \? 201 : 200\)/);
+assert.match(
+  prReviewController,
+  /@Post\("review-sessions\/:reviewSessionId\/retry"\)/
+);
 assert.match(prReviewController, /@Get\("review-sessions\/:reviewSessionId"\)/);
 assert.match(
   prReviewController,
@@ -413,3 +417,4 @@ await import("./async-analysis-enqueue.test.mjs");
 await import("./analysis-input-handoff.test.mjs");
 await import("./analysis-result-handoff.test.mjs");
 await import("./analysis-job-recovery.test.mjs");
+await import("./analysis-retry.test.mjs");
