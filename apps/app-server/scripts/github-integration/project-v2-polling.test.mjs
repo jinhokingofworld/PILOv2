@@ -72,6 +72,29 @@ class FakeDatabase {
 }
 
 {
+  const database = new FakeDatabase();
+  const service = new GithubProjectV2PollingService(database);
+
+  await service.terminateDeselectedQueuedRuns({
+    repositoryId,
+    retainedProjectV2Ids: []
+  });
+
+  const [cancellation] = database.queries;
+  assert.match(cancellation.text, /deselected_schedules AS MATERIALIZED/i);
+  assert.match(cancellation.text, /NOT \(schedule\.project_v2_id = ANY\(\$2::uuid\[\]\)\)/i);
+  assert.match(cancellation.text, /locked_jobs AS MATERIALIZED/i);
+  assert.match(cancellation.text, /job\.status = 'queued'/i);
+  assert.match(cancellation.text, /job\.lease_owner IS NULL/i);
+  assert.match(cancellation.text, /job\.lease_expires_at IS NULL/i);
+  assert.match(cancellation.text, /FOR UPDATE OF job/i);
+  assert.match(cancellation.text, /terminal_jobs AS \([\s\S]*?lease_generation = locked_jobs\.lease_generation/i);
+  assert.match(cancellation.text, /terminal_runs AS \([\s\S]*?run\.status = 'queued'/i);
+  assert.doesNotMatch(cancellation.text, /job\.status = 'running'/i);
+  assert.deepEqual(cancellation.values, [repositoryId, []]);
+}
+
+{
   const syncRunId = "44444444-4444-4444-8444-444444444444";
   const database = new FakeDatabase({
     claimedRows: [{
@@ -222,6 +245,8 @@ class FakeDatabase {
 
 {
   const pollingCalls = [];
+  const selectionQueries = [];
+  const selectionEvents = [];
   const database = {
     async transaction(callback) {
       return callback({
@@ -241,7 +266,11 @@ class FakeDatabase {
           }
           return [];
         },
-        execute: async () => ({ rows: [] })
+        execute: async (text, values) => {
+          selectionQueries.push({ text, values });
+          if (/DELETE FROM github_project_v2_selections/i.test(text)) selectionEvents.push("delete-selections");
+          return { rows: [] };
+        }
       });
     }
   };
@@ -254,7 +283,16 @@ class FakeDatabase {
     undefined,
     undefined,
     undefined,
-    { syncSelectionSchedules: async (input) => pollingCalls.push(input) }
+    {
+      terminateDeselectedQueuedRuns: async (input, transaction) => {
+        pollingCalls.push({ type: "cancel", input, transaction });
+        selectionEvents.push("cancel-queued-polling");
+      },
+      syncSelectionSchedules: async (input) => {
+        pollingCalls.push({ type: "sync", input });
+        selectionEvents.push("sync-schedules");
+      }
+    }
   );
 
   await service.replaceGithubProjectV2Selections(requestedByUserId, workspaceId, {
@@ -263,7 +301,19 @@ class FakeDatabase {
     projectV2Ids: [projectV2Id]
   });
 
-  assert.deepEqual(pollingCalls, [{ repositoryId, requestedByUserId }]);
+  assert.equal(pollingCalls[0].type, "cancel");
+  assert.deepEqual(pollingCalls[0].input, {
+    repositoryId,
+    retainedProjectV2Ids: [projectV2Id]
+  });
+  const deleteSelectionIndex = selectionQueries.findIndex(({ text }) => /DELETE FROM github_project_v2_selections/i.test(text));
+  assert.ok(deleteSelectionIndex >= 0, "selection replacement must still delete old selection rows");
+  assert.ok(
+    selectionEvents.indexOf("cancel-queued-polling") < selectionEvents.indexOf("delete-selections"),
+    "queued polling jobs must be terminalized while their selection-backed schedules still exist"
+  );
+  assert.equal(pollingCalls[1].type, "sync");
+  assert.deepEqual(pollingCalls[1].input, { repositoryId, requestedByUserId });
 }
 
 {

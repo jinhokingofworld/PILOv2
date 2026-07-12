@@ -74,9 +74,10 @@ export class GithubSyncJobService implements OnModuleDestroy {
   async enqueueSyncJob(syncRunId: string, requestedByUserId: string): Promise<void> {
     const job = await this.database.queryOne<{ id: string; lease_generation: string }>(
       `INSERT INTO github_sync_jobs (sync_run_id, requested_by_user_id)
-       VALUES ($1, $2)
-       ON CONFLICT (sync_run_id) DO UPDATE
-       SET status='queued', lease_owner=NULL, lease_expires_at=NULL, finished_at=NULL, last_error=NULL
+        VALUES ($1, $2)
+        ON CONFLICT (sync_run_id) DO UPDATE
+        SET status='queued', lease_owner=NULL, lease_expires_at=NULL, finished_at=NULL, last_error=NULL,
+          lease_generation=github_sync_jobs.lease_generation+1
        WHERE github_sync_jobs.status='queued'
           OR (github_sync_jobs.status='running' AND github_sync_jobs.lease_expires_at < now())
        RETURNING id, lease_generation`,
@@ -251,26 +252,33 @@ export class GithubSyncJobService implements OnModuleDestroy {
   private async renewLease(job: SyncJobRow): Promise<void> {
     if (job.is_polling) {
       const result = await this.database.execute(
-        `WITH owned_schedule AS (
-           SELECT schedule.active_sync_run_id
-           FROM github_project_v2_polling_schedules AS schedule
-           WHERE schedule.active_sync_run_id=$1 AND schedule.lease_owner=$2
+        `WITH locked_job AS MATERIALIZED (
+           SELECT job.id, job.sync_run_id
+           FROM github_sync_jobs AS job
+           WHERE job.id=$1 AND job.status='running' AND job.lease_owner=$2 AND job.lease_generation=$3
            FOR UPDATE
-         ), renewed_job AS (
-           UPDATE github_sync_jobs
-           SET lease_expires_at=now() + interval '10 minutes'
-           WHERE id=$3 AND status='running' AND lease_owner=$2 AND lease_generation=$4
-             AND EXISTS (SELECT 1 FROM owned_schedule)
-           RETURNING sync_run_id
+         ), owned_schedule AS (
+           SELECT schedule.active_sync_run_id
+            FROM github_project_v2_polling_schedules AS schedule
+            INNER JOIN locked_job ON locked_job.sync_run_id=schedule.active_sync_run_id
+            WHERE schedule.lease_owner=$2
+            FOR UPDATE OF schedule
+          ), renewed_job AS (
+            UPDATE github_sync_jobs
+            SET lease_expires_at=now() + interval '10 minutes'
+            FROM locked_job
+            WHERE github_sync_jobs.id=locked_job.id
+              AND EXISTS (SELECT 1 FROM owned_schedule)
+            RETURNING sync_run_id
          ), renewed_schedule AS (
            UPDATE github_project_v2_polling_schedules AS schedule
            SET lease_expires_at=now() + interval '10 minutes', updated_at=now()
            FROM renewed_job
            WHERE schedule.active_sync_run_id=renewed_job.sync_run_id AND schedule.lease_owner=$2
            RETURNING schedule.active_sync_run_id
-         )
-         SELECT 1 FROM renewed_schedule`,
-        [job.sync_run_id, this.workerId, job.id, job.lease_generation]
+          )
+          SELECT 1 FROM renewed_schedule`,
+         [job.id, this.workerId, job.lease_generation]
       );
       if (result.rowCount === 0) throw new LostSyncJobLeaseError();
       return;

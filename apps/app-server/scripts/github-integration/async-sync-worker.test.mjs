@@ -203,6 +203,7 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
   await assert.rejects(() => worker.enqueueSyncJob(syncRunId, userId));
   assert.match(queries[0], /ON CONFLICT \(sync_run_id\) DO UPDATE/i);
   assert.match(queries[0], /SET status='queued', lease_owner=NULL, lease_expires_at=NULL/i);
+  assert.match(queries[0], /lease_generation=github_sync_jobs\.lease_generation\+1/i);
   assert.match(queries[0], /RETURNING id, lease_generation/i);
   assert.equal(writes.length, 1, "enqueue failure must transition job, run, and schedule in one transaction");
   assert.match(
@@ -211,6 +212,53 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
     "a delayed publisher cannot fail a job that has already been leased by a newer generation"
   );
   assert.deepEqual(writes[0].values, ["job-1", syncRunId, "7"]);
+}
+
+{
+  const queries = [];
+  const writes = [];
+  let sendCount = 0;
+  let rejectFirstSend;
+  const worker = new GithubSyncJobService(
+    {
+      queryOne: async (text) => {
+        queries.push(text);
+        return { id: "job-reenqueue-fence", lease_generation: sendCount === 0 ? "7" : "8" };
+      },
+      transaction: async (callback) => callback({
+        execute: async (text, values) => {
+          writes.push({ text, values, rowCount: 0 });
+          return { rowCount: 0 };
+        }
+      })
+    },
+    {},
+    {},
+    {},
+    {}
+  );
+  worker.client = () => ({
+    send: async () => {
+      sendCount += 1;
+      if (sendCount === 1) {
+        return new Promise((resolve, reject) => { rejectFirstSend = reject; });
+      }
+    }
+  });
+  process.env.SQS_GITHUB_SYNC_JOBS_QUEUE_URL = "sync-queue";
+
+  const publisherA = worker.enqueueSyncJob(syncRunId, userId);
+  await new Promise((resolve) => setImmediate(resolve));
+  await worker.enqueueSyncJob(syncRunId, userId);
+  rejectFirstSend(new Error("publisher A timed out"));
+  await assert.rejects(() => publisherA);
+
+  assert.equal(queries.length, 2, "publisher B must reserve a newer queue fence before it sends");
+  assert.match(queries[1], /lease_generation=github_sync_jobs\.lease_generation\+1/i);
+  assert.equal(writes.length, 1, "only the delayed publisher A attempts its fenced failure transition");
+  assert.deepEqual(writes[0].values, ["job-reenqueue-fence", syncRunId, "7"]);
+  assert.match(writes[0].text, /lease_generation=\$3/i);
+  assert.equal(writes[0].rowCount, 0, "the stale A generation must affect zero terminal rows after B has published generation 8");
 }
 
 {
@@ -235,10 +283,15 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
   );
 
   await assert.rejects(() => worker.renewLease(job), /lease ownership was lost/i);
-  assert.match(writes[0].text, /owned_schedule AS \([\s\S]*active_sync_run_id=\$1[\s\S]*schedule\.lease_owner=\$2[\s\S]*FOR UPDATE/i);
+  assert.match(
+    writes[0].text,
+    /locked_job AS MATERIALIZED \([\s\S]*FROM github_sync_jobs AS job[\s\S]*FOR UPDATE[\s\S]*\), owned_schedule AS \([\s\S]*INNER JOIN locked_job[\s\S]*FOR UPDATE OF schedule/i,
+    "polling renewal must lock the job before its schedule to match acquisition order"
+  );
+  assert.match(writes[0].text, /locked_job\.sync_run_id=schedule\.active_sync_run_id/i);
   assert.match(writes[0].text, /AND EXISTS \(SELECT 1 FROM owned_schedule\)/i);
   assert.match(writes[0].text, /SELECT 1 FROM renewed_schedule/i);
-  assert.deepEqual(writes[0].values, [syncRunId, worker.workerId, job.id, job.lease_generation]);
+  assert.deepEqual(writes[0].values, [job.id, worker.workerId, job.lease_generation]);
 }
 
 {
@@ -257,6 +310,23 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
   assert.match(queries[0].text, /schedule\.lease_owner=\$2/i);
   assert.match(queries[0].text, /schedule\.lease_expires_at >= now\(\)/i);
   assert.deepEqual(queries[0].values, [job.id, worker.workerId, job.lease_generation]);
+}
+
+{
+  let executorCalls = 0;
+  const worker = new GithubSyncJobService(
+    { queryOne: async () => null },
+    {},
+    { runGithubSyncTarget: async () => { executorCalls += 1; } },
+    {}
+  );
+
+  assert.equal(
+    await worker.processSyncJob("job-deselected-before-acquire"),
+    "terminal",
+    "a message for a selection-cancelled queued polling job must be acknowledged without retry"
+  );
+  assert.equal(executorCalls, 0, "a deselected queued polling job must never enter the executor");
 }
 
 {

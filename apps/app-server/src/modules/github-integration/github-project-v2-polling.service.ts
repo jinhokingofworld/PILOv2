@@ -30,6 +30,58 @@ export class GithubProjectV2PollingService {
 
   constructor(private readonly database: DatabaseService) {}
 
+  async terminateDeselectedQueuedRuns(
+    input: {
+      repositoryId: string;
+      retainedProjectV2Ids: string[];
+    },
+    executor: GithubProjectV2PollingQueryExecutor = this.database
+  ): Promise<void> {
+    await executor.execute(
+      `
+        WITH deselected_schedules AS MATERIALIZED (
+          SELECT schedule.active_sync_run_id
+          FROM github_project_v2_polling_schedules AS schedule
+          INNER JOIN github_projects_v2 AS project
+            ON project.id = schedule.project_v2_id
+          WHERE schedule.repository_id = $1
+            AND project.owner_type = 'User'
+            AND NOT (schedule.project_v2_id = ANY($2::uuid[]))
+        ), locked_jobs AS MATERIALIZED (
+          SELECT job.id, job.sync_run_id, job.lease_generation
+          FROM github_sync_jobs AS job
+          INNER JOIN deselected_schedules AS schedule
+            ON schedule.active_sync_run_id = job.sync_run_id
+          WHERE job.status = 'queued'
+            AND job.lease_owner IS NULL
+            AND job.lease_expires_at IS NULL
+          FOR UPDATE OF job
+        ), terminal_jobs AS (
+          UPDATE github_sync_jobs AS job
+          SET status = 'failed', finished_at = now(),
+            last_error = 'GitHub ProjectV2 polling selection was removed'
+          FROM locked_jobs
+          WHERE job.id = locked_jobs.id
+            AND job.status = 'queued'
+            AND job.lease_owner IS NULL
+            AND job.lease_expires_at IS NULL
+            AND job.lease_generation = locked_jobs.lease_generation
+          RETURNING job.sync_run_id
+        ), terminal_runs AS (
+          UPDATE github_sync_runs AS run
+          SET status = 'failed', finished_at = now(),
+            error_message = 'GitHub ProjectV2 polling selection was removed'
+          FROM terminal_jobs
+          WHERE run.id = terminal_jobs.sync_run_id
+            AND run.status = 'queued'
+          RETURNING run.id
+        )
+        SELECT 1 FROM terminal_runs
+      `,
+      [input.repositoryId, input.retainedProjectV2Ids]
+    );
+  }
+
   async syncSelectionSchedules(input: {
     repositoryId: string;
     requestedByUserId: string;

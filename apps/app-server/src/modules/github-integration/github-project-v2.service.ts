@@ -290,6 +290,11 @@ export class GithubProjectV2Service {
         }
       }
 
+      await this.pollingService?.terminateDeselectedQueuedRuns(
+        { repositoryId, retainedProjectV2Ids: projectV2Ids },
+        transaction
+      );
+
       await transaction.execute(
         `
           DELETE FROM github_project_v2_selections
