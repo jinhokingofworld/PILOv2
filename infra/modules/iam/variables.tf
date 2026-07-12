@@ -36,6 +36,24 @@ variable "github_webhooks_queue_arn" {
   type = string
 }
 
+variable "github_sync_operator_user_name" {
+  description = "Optional IAM user name for GitHub Sync queue and log operations."
+  type        = string
+  default     = ""
+}
+
+variable "github_sync_operator_dlq_arns" {
+  description = "GitHub Sync dead-letter queue ARNs available to the operator."
+  type        = list(string)
+  default     = []
+}
+
+variable "github_sync_operator_log_group_arn" {
+  description = "CloudWatch log group ARN available to the GitHub Sync operator."
+  type        = string
+  default     = ""
+}
+
 variable "secrets_manager_arns" {
   type = list(string)
 }
