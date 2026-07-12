@@ -46,6 +46,7 @@ async function compileSqlErdRuntimeModules() {
   const relationShapeOutputPath = join(outputDir, "relation-shape.mjs");
   const tableShapeOutputPath = join(outputDir, "table-shape.mjs");
   const canvasSelectionOutputPath = join(outputDir, "canvas-selection.mjs");
+  const tablePinOutputPath = join(outputDir, "table-pin.mjs");
 
   try {
     await compileTypeScriptModule(
@@ -172,6 +173,10 @@ async function compileSqlErdRuntimeModules() {
         ]
       ]
     );
+    await compileTypeScriptModule(
+      "../../src/features/sql-erd/utils/table-pin.ts",
+      tablePinOutputPath
+    );
 
     await writeFile(
       join(outputDir, "types-stub.mjs"),
@@ -222,7 +227,8 @@ async function compileSqlErdRuntimeModules() {
       statusCopyRuntime,
       relationShapeRuntime,
       tableShapeRuntime,
-      canvasSelectionRuntime
+      canvasSelectionRuntime,
+      tablePinRuntime
     ] = await Promise.all([
       import(pathToFileHref(modelOutputPath)),
       import(pathToFileHref(inspectorOutputPath)),
@@ -241,7 +247,8 @@ async function compileSqlErdRuntimeModules() {
       import(pathToFileHref(statusCopyOutputPath)),
       import(pathToFileHref(relationShapeOutputPath)),
       import(pathToFileHref(tableShapeOutputPath)),
-      import(pathToFileHref(canvasSelectionOutputPath))
+      import(pathToFileHref(canvasSelectionOutputPath)),
+      import(pathToFileHref(tablePinOutputPath))
     ]);
 
     return {
@@ -262,7 +269,8 @@ async function compileSqlErdRuntimeModules() {
       sqlEditStateRuntime,
       sqlEditorDialectRuntime,
       statusCopyRuntime,
-      tableShapeRuntime
+      tableShapeRuntime,
+      tablePinRuntime
     };
   } finally {
     await rm(outputDir, { force: true, recursive: true });
@@ -551,6 +559,7 @@ const [
   sessionStateUtils,
   generateSessionUtils,
   layoutAutosaveUtils,
+  tablePinUtils,
   statusCopyUtils,
   canvasSurface,
   mainShell,
@@ -583,6 +592,7 @@ const [
     readSqlErdFile("../../src/features/sql-erd/utils/session-state.ts"),
     readSqlErdFile("../../src/features/sql-erd/utils/generate-session.ts"),
     readSqlErdFile("../../src/features/sql-erd/utils/layout-autosave.ts"),
+    readSqlErdFile("../../src/features/sql-erd/utils/table-pin.ts"),
     readSqlErdFile("../../src/features/sql-erd/utils/status-copy.ts"),
     readSqlErdFile("../../src/features/sql-erd/components/sql-erd-canvas.tsx"),
     readSqlErdFile("../../src/components/main-shell.tsx"),
@@ -614,8 +624,64 @@ const {
   sqlEditStateRuntime,
   sqlEditorDialectRuntime,
   statusCopyRuntime,
-  tableShapeRuntime
+  tableShapeRuntime,
+  tablePinRuntime
 } = await compileSqlErdRuntimeModules();
+
+const initialTablePinState = tablePinRuntime.createSqlErdTablePinState();
+const pinnedOrdersTable = tablePinRuntime.pinSqlErdTable(
+  initialTablePinState,
+  "table.orders"
+);
+
+assert.deepEqual(pinnedOrdersTable, {
+  pinnedTableId: "table.orders",
+  navigationRequestId: 0
+});
+assert.deepEqual(
+  tablePinRuntime.pinSqlErdTable(pinnedOrdersTable, "table.orders"),
+  {
+    pinnedTableId: "table.orders",
+    navigationRequestId: 1
+  }
+);
+const navigatedOrdersTable = tablePinRuntime.pinSqlErdTable(
+  pinnedOrdersTable,
+  "table.orders"
+);
+assert.deepEqual(
+  tablePinRuntime.pinSqlErdTable(navigatedOrdersTable, "table.users"),
+  {
+    pinnedTableId: "table.users",
+    navigationRequestId: 0
+  }
+);
+assert.deepEqual(
+  tablePinRuntime.clearSqlErdTablePin(),
+  initialTablePinState
+);
+assert.deepEqual(
+  tablePinRuntime.getSqlErdPinnedTableCenter(
+    [
+      {
+        x: 100,
+        y: 200,
+        props: { h: 80, tableId: "table.orders", w: 340 }
+      },
+      {
+        x: 560,
+        y: 100,
+        props: { h: 120, tableId: "table.users", w: 280 }
+      }
+    ],
+    "table.orders"
+  ),
+  { x: 270, y: 240 }
+);
+assert.equal(
+  tablePinRuntime.getSqlErdPinnedTableCenter([], "table.orders"),
+  null
+);
 const runtimeModel = createRuntimeTestModel();
 
 assert.equal(
@@ -4271,6 +4337,9 @@ assert.match(panel, /text-lg/);
 assert.match(panel, /text-base/);
 assert.doesNotMatch(panel, />Inspector</);
 assert.match(panel, /features\/sql-erd\/utils\/inspector/);
+assert.match(panel, /features\/sql-erd\/utils\/table-pin/);
+assert.match(panel, /핀 위치로 이동/);
+assert.match(panel, /Pin 해제/);
 assert.match(panel, /sourceText=\{sqlErdEditState\.draftSourceText\}/);
 assert.match(panel, /dialect=\{sqlErdEditState\.draftDialect\}/);
 assert.match(
@@ -4286,6 +4355,9 @@ assert.match(inspectorUtils, /createSqlErdInspectorViewModel/);
 assert.match(inspectorUtils, /isColumnConnectedToRelation/);
 assert.match(inspectorUtils, /relation\.fromTableId === tableId/);
 assert.match(inspectorUtils, /relation\.toTableId === tableId/);
+assert.match(tablePinUtils, /getSqlErdPinnedTableCenter/);
+assert.doesNotMatch(layoutAutosaveUtils, /pinnedTableId/);
+assert.doesNotMatch(apiClient, /pinnedTableId/);
 
 assert.match(canvasSurface, /TldrawSurface/);
 assert.match(canvasSurface, /commerceSqltoerdFixture/);
@@ -4309,6 +4381,8 @@ assert.match(canvasSurface, /event\.key === "Backspace"/);
 assert.match(canvasSurface, /window\.addEventListener\("keydown", handleKeyDown, true\)/);
 assert.match(canvasSurface, /getSqltoerdRenderableAnnotations/);
 assert.match(canvasSurface, /SqlErdRelationHighlightSync/);
+assert.match(canvasSurface, /SqlErdPinnedTableNavigationSync/);
+assert.match(canvasSurface, /editor\.centerOnPoint\(tableCenter/);
 assert.match(canvasSurface, /resolveSqlErdRelationHighlightFromIds/);
 assert.match(canvasSurface, /hoveredRelationIdRef/);
 assert.match(canvasSurface, /selectedRelationIdRef/);
