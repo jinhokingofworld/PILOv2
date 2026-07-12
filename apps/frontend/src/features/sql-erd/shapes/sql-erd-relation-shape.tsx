@@ -27,6 +27,7 @@ const TABLE_HEADER_HEIGHT = 54;
 const TABLE_ROW_HEIGHT = 42;
 const TABLE_BORDER_WIDTH = 1;
 const RELATION_CURVE_MIN_CONTROL_OFFSET = 80;
+const RELATION_CURVE_GEOMETRY_SEGMENT_COUNT = 16;
 const CARDINALITY_MARKER_HALF_HEIGHT = 6;
 const CARDINALITY_MARKER_NEAR_OFFSET = 5;
 const CARDINALITY_MARKER_FAR_OFFSET = 12;
@@ -609,12 +610,26 @@ export function getSqlErdRelationCurveGeometryPoints(
     return points;
   }
 
-  return [
-    startPoint,
-    controlPointOne,
-    controlPointTwo,
-    endPoint
-  ];
+  return Array.from(
+    { length: RELATION_CURVE_GEOMETRY_SEGMENT_COUNT + 1 },
+    (_, index) => {
+      const t = index / RELATION_CURVE_GEOMETRY_SEGMENT_COUNT;
+      const inverseT = 1 - t;
+
+      return {
+        x:
+          inverseT ** 3 * startPoint.x +
+          3 * inverseT ** 2 * t * controlPointOne.x +
+          3 * inverseT * t ** 2 * controlPointTwo.x +
+          t ** 3 * endPoint.x,
+        y:
+          inverseT ** 3 * startPoint.y +
+          3 * inverseT ** 2 * t * controlPointOne.y +
+          3 * inverseT * t ** 2 * controlPointTwo.y +
+          t ** 3 * endPoint.y
+      };
+    }
+  );
 }
 
 function getPointListData(points: SqlErdRelationRoutePoint[]) {

@@ -1925,8 +1925,9 @@ export function SqlErdCanvas({
   const handleMount = useCallback(
     (editor: Editor) => {
       editor.setCurrentTool("select.idle");
+      resetSqlErdCanvas(editor, shapes);
     },
-    []
+    [shapes]
   );
   const handlePointerDownCapture = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {

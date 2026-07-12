@@ -3664,6 +3664,25 @@ const runtimeRelationSelectionEditor = {
   }
 };
 
+const runtimeRelationCurveGeometryPoints =
+  relationShapeRuntime.getSqlErdRelationCurveGeometryPoints(
+    [
+      { x: 0, y: 0 },
+      { x: 80, y: 0 },
+      { x: 80, y: 100 },
+      { x: 160, y: 100 }
+    ],
+    "right",
+    "left"
+  );
+
+assert.equal(runtimeRelationCurveGeometryPoints.length, 17);
+assert.deepEqual(runtimeRelationCurveGeometryPoints[0], { x: 0, y: 0 });
+assert.deepEqual(runtimeRelationCurveGeometryPoints.at(-1), {
+  x: 160,
+  y: 100
+});
+
 relationShapeRuntime.selectSqlErdRelationShape(
   runtimeRelationSelectionEditor,
   {
@@ -4317,6 +4336,10 @@ assert.match(canvasSurface, /getSqlErdTableShapeId/);
 assert.match(canvasSurface, /hashSqlErdShapeSourceId/);
 assert.match(canvasSurface, /zoomToFit/);
 assert.match(canvasSurface, /resetSqlErdCanvas\(editor, shapes\)/);
+assert.match(
+  canvasSurface,
+  /const handleMount = useCallback\([\s\S]*?editor\.setCurrentTool\("select\.idle"\);[\s\S]*?resetSqlErdCanvas\(editor, shapes\);/
+);
 assert.match(canvasSurface, /selectedColumnId/);
 assert.match(canvasSurface, /selectedState/);
 assert.match(canvasSurface, /highlightedColumnIds/);
