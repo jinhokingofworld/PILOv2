@@ -93,6 +93,10 @@ class FakeCanvasEmbeddingProcessor:
         return self.results.pop(0)
 
 
+class FakeMeetingTranscriptEmbeddingProcessor(FakeCanvasEmbeddingProcessor):
+    pass
+
+
 class FakeLockRow:
     def __init__(self, acquired: bool) -> None:
         self.acquired = acquired
@@ -143,6 +147,7 @@ def runtime_settings() -> RuntimeSettings:
         wait_time_seconds=1,
         visibility_timeout_seconds=30,
         canvas_embedding_jobs_per_tick=10,
+        meeting_transcript_embedding_jobs_per_tick=10,
     )
 
 
@@ -244,6 +249,25 @@ def test_sqs_worker_processes_canvas_embedding_jobs_before_sqs_poll() -> None:
         dispatcher,
         sqs_client,
         canvas_embedding_processor=embedding_processor,
+    )
+
+    count = worker.run_once()
+
+    assert count == 0
+    assert embedding_processor.calls == 3
+    assert sqs_client.receive_calls == []
+
+
+def test_sqs_worker_processes_meeting_transcript_embedding_jobs_before_sqs_poll() -> None:
+    dispatcher = FakeDispatcher([])
+    sqs_client = FakeSqsClient()
+    sqs_client.receive_message = lambda **_kwargs: {"Messages": []}
+    embedding_processor = FakeMeetingTranscriptEmbeddingProcessor(["completed", "completed", None])
+    worker = SqsAiJobWorker(
+        runtime_settings(),
+        dispatcher,
+        sqs_client,
+        meeting_transcript_embedding_processor=embedding_processor,
     )
 
     count = worker.run_once()

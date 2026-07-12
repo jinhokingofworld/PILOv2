@@ -40,6 +40,11 @@ from app.meeting_report_processor import (
     parse_generated_report_json,
     serialize_action_items,
 )
+from app.meeting_transcript_embedding_processor import (
+    MeetingTranscriptEmbeddingProcessor,
+    TranscriptChunk,
+    transcript_hash,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -52,6 +57,7 @@ DEFAULT_AGENT_EXECUTION_HANDOFF_TIMEOUT_SECONDS = 10
 DEFAULT_AGENT_STALE_EXECUTION_SWEEP_INTERVAL_SECONDS = 60
 DEFAULT_OPENAI_AGENT_PLANNER_TIMEOUT_MS = 60_000
 DEFAULT_CANVAS_EMBEDDING_JOBS_PER_TICK = 10
+DEFAULT_MEETING_TRANSCRIPT_EMBEDDING_JOBS_PER_TICK = 10
 DEFAULT_MEETING_REPORT_EVENT_MAX_ATTEMPTS = 3
 AGENT_RETRY_TERMINAL_RECEIVE_COUNT = 3
 AGENT_RETRY_EXHAUSTED_ERROR_CODE = "AGENT_PLANNER_RETRY_EXHAUSTED"
@@ -89,6 +95,7 @@ class RuntimeSettings:
     wait_time_seconds: int
     visibility_timeout_seconds: int
     canvas_embedding_jobs_per_tick: int
+    meeting_transcript_embedding_jobs_per_tick: int
 
     @classmethod
     def from_env(cls) -> RuntimeSettings:
@@ -134,6 +141,10 @@ class RuntimeSettings:
             canvas_embedding_jobs_per_tick=_positive_int_env(
                 "CANVAS_EMBEDDING_JOBS_PER_TICK",
                 DEFAULT_CANVAS_EMBEDDING_JOBS_PER_TICK,
+            ),
+            meeting_transcript_embedding_jobs_per_tick=_positive_int_env(
+                "MEETING_TRANSCRIPT_EMBEDDING_JOBS_PER_TICK",
+                DEFAULT_MEETING_TRANSCRIPT_EMBEDDING_JOBS_PER_TICK,
             ),
         )
 
@@ -315,6 +326,177 @@ class PgMeetingReportRepository:
                             segment_ids[segment_index],
                         ),
                     )
+            self.connection.execute(
+                """
+                INSERT INTO meeting_report_transcript_embedding_jobs (
+                  meeting_report_id,
+                  transcript_hash
+                )
+                VALUES (%s, %s)
+                ON CONFLICT (meeting_report_id, transcript_hash) DO NOTHING
+                """,
+                (report_id, transcript_hash(report.transcript_text)),
+            )
+
+
+class PgMeetingTranscriptEmbeddingRepository:
+    def __init__(self, database_url: str, database_ssl: bool) -> None:
+        import psycopg
+        from psycopg.rows import dict_row
+
+        kwargs: dict[str, Any] = {"autocommit": True, "row_factory": dict_row}
+        if database_ssl:
+            kwargs["sslmode"] = "require"
+        self.connection = psycopg.connect(database_url, **kwargs)
+
+    def close(self) -> None:
+        self.connection.close()
+
+    def claim_transcript_embedding_job(self) -> dict[str, object] | None:
+        with self.connection.transaction():
+            return self.connection.execute(
+                """
+                WITH candidate AS (
+                  SELECT id
+                  FROM meeting_report_transcript_embedding_jobs
+                  WHERE status = 'pending'
+                     OR (
+                       status = 'processing'
+                       AND locked_at < now() - INTERVAL '10 minutes'
+                     )
+                  ORDER BY created_at ASC
+                  FOR UPDATE SKIP LOCKED
+                  LIMIT 1
+                )
+                UPDATE meeting_report_transcript_embedding_jobs job
+                SET
+                  status = 'processing',
+                  attempt_count = attempt_count + 1,
+                  locked_at = now(),
+                  completed_at = NULL,
+                  error_message = NULL
+                FROM candidate
+                WHERE job.id = candidate.id
+                RETURNING job.*
+                """
+            ).fetchone()
+
+    def get_transcript_embedding_source(self, job: dict[str, object]) -> dict[str, object] | None:
+        row = self.connection.execute(
+            """
+            SELECT id, transcript_text
+            FROM meeting_reports
+            WHERE id = %s
+              AND status = 'COMPLETED'
+              AND transcript_text IS NOT NULL
+            LIMIT 1
+            """,
+            (job["meeting_report_id"],),
+        ).fetchone()
+        if row is None:
+            return None
+
+        source = dict(row)
+        source["transcript_hash"] = transcript_hash(str(source["transcript_text"]))
+        return source
+
+    def replace_transcript_chunks(
+        self,
+        job: dict[str, object],
+        chunks: list[TranscriptChunk],
+        embeddings: list[list[float]],
+        model_name: str,
+        model_version: str,
+    ) -> bool:
+        if len(chunks) != len(embeddings) or not chunks:
+            return False
+
+        report_id = str(job["meeting_report_id"])
+        expected_hash = str(job["transcript_hash"])
+        with self.connection.transaction():
+            row = self.connection.execute(
+                """
+                SELECT transcript_text
+                FROM meeting_reports
+                WHERE id = %s
+                  AND status = 'COMPLETED'
+                  AND transcript_text IS NOT NULL
+                FOR SHARE
+                """,
+                (report_id,),
+            ).fetchone()
+            if row is None or transcript_hash(str(row["transcript_text"])) != expected_hash:
+                return False
+
+            self.connection.execute(
+                "DELETE FROM meeting_report_transcript_chunks WHERE meeting_report_id = %s",
+                (report_id,),
+            )
+            for chunk, embedding in zip(chunks, embeddings, strict=True):
+                self.connection.execute(
+                    """
+                    INSERT INTO meeting_report_transcript_chunks (
+                      meeting_report_id,
+                      chunk_index,
+                      content,
+                      content_hash,
+                      transcript_hash,
+                      embedding,
+                      embedding_model,
+                      embedding_version,
+                      indexed_at
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s::extensions.vector, %s, %s, now())
+                    """,
+                    (
+                        report_id,
+                        chunk.chunk_index,
+                        chunk.content,
+                        chunk.content_hash,
+                        expected_hash,
+                        _vector_literal(embedding),
+                        model_name,
+                        model_version,
+                    ),
+                )
+        return True
+
+    def complete_transcript_embedding_job(self, job_id: str) -> None:
+        self.connection.execute(
+            """
+            UPDATE meeting_report_transcript_embedding_jobs
+            SET status = 'completed', completed_at = now(), locked_at = NULL
+            WHERE id = %s
+              AND status = 'processing'
+            """,
+            (job_id,),
+        )
+
+    def supersede_transcript_embedding_job(self, job_id: str) -> None:
+        self.connection.execute(
+            """
+            UPDATE meeting_report_transcript_embedding_jobs
+            SET status = 'superseded', completed_at = now(), locked_at = NULL
+            WHERE id = %s
+              AND status = 'processing'
+            """,
+            (job_id,),
+        )
+
+    def fail_transcript_embedding_job(self, job_id: str, message: str) -> None:
+        self.connection.execute(
+            """
+            UPDATE meeting_report_transcript_embedding_jobs
+            SET
+              status = 'failed',
+              error_message = %s,
+              completed_at = now(),
+              locked_at = NULL
+            WHERE id = %s
+              AND status = 'processing'
+            """,
+            (message[:4096], job_id),
+        )
 
 
 class PgAgentRunRepository:
@@ -744,6 +926,7 @@ class SqsAiJobWorker:
         dispatcher: JobDispatcher,
         sqs_client: Any,
         canvas_embedding_processor: Any | None = None,
+        meeting_transcript_embedding_processor: Any | None = None,
         stale_execution_recovery: Any | None = None,
         agent_retry_exhaustion_recovery: Any | None = None,
         canvas_agent_retry_exhaustion_recovery: Any | None = None,
@@ -754,6 +937,7 @@ class SqsAiJobWorker:
         self.dispatcher = dispatcher
         self.sqs_client = sqs_client
         self.canvas_embedding_processor = canvas_embedding_processor
+        self.meeting_transcript_embedding_processor = meeting_transcript_embedding_processor
         self.stale_execution_recovery = stale_execution_recovery
         self.agent_retry_exhaustion_recovery = agent_retry_exhaustion_recovery
         self.canvas_agent_retry_exhaustion_recovery = canvas_agent_retry_exhaustion_recovery
@@ -769,6 +953,7 @@ class SqsAiJobWorker:
     def run_once(self) -> int:
         self.recover_stale_executions_if_due()
         self.process_canvas_embedding_jobs()
+        self.process_meeting_transcript_embedding_jobs()
         response = self.sqs_client.receive_message(
             QueueUrl=self.settings.sqs_queue_url,
             MaxNumberOfMessages=1,
@@ -851,6 +1036,28 @@ class SqsAiJobWorker:
 
             processed += 1
             LOGGER.info("canvas embedding job result reason=%s", result)
+
+        return processed
+
+    def process_meeting_transcript_embedding_jobs(self) -> int:
+        if self.meeting_transcript_embedding_processor is None:
+            return 0
+
+        processed = 0
+        for _ in range(self.settings.meeting_transcript_embedding_jobs_per_tick):
+            try:
+                result = self.meeting_transcript_embedding_processor.process_next()
+            except InfrastructureError:
+                LOGGER.exception("Meeting transcript embedding job processing failed")
+                break
+            except Exception:
+                LOGGER.exception("Unexpected Meeting transcript embedding job failure")
+                break
+            if result is None:
+                break
+
+            processed += 1
+            LOGGER.info("meeting transcript embedding job result reason=%s", result)
 
         return processed
 
@@ -1053,6 +1260,10 @@ def create_worker(settings: RuntimeSettings | None = None) -> SqsAiJobWorker:
         resolved_settings.database_url,
         resolved_settings.database_ssl,
     )
+    meeting_transcript_embedding_repository = PgMeetingTranscriptEmbeddingRepository(
+        resolved_settings.database_url,
+        resolved_settings.database_ssl,
+    )
     storage = S3RecordingStorage(s3_client, resolved_settings.recordings_bucket)
     ai_client = OpenAiMeetingReportClient(
         resolved_settings.openai_api_key,
@@ -1100,6 +1311,10 @@ def create_worker(settings: RuntimeSettings | None = None) -> SqsAiJobWorker:
         CanvasSemanticRouter(canvas_agent_repository, canvas_embedder),
     )
     canvas_embedding_processor = CanvasEmbeddingProcessor(canvas_agent_repository, canvas_embedder)
+    meeting_transcript_embedding_processor = MeetingTranscriptEmbeddingProcessor(
+        meeting_transcript_embedding_repository,
+        canvas_embedder,
+    )
     dispatcher = JobDispatcher(
         meeting_report_processor,
         agent_run_processor,
@@ -1110,6 +1325,7 @@ def create_worker(settings: RuntimeSettings | None = None) -> SqsAiJobWorker:
         dispatcher,
         sqs_client,
         canvas_embedding_processor=canvas_embedding_processor,
+        meeting_transcript_embedding_processor=meeting_transcript_embedding_processor,
         stale_execution_recovery=agent_execution_handoff_client,
         agent_retry_exhaustion_recovery=agent_run_repository,
     )
@@ -1132,6 +1348,10 @@ def run_worker() -> None:
 def _advisory_lock_key(value: str) -> int:
     digest = hashlib.sha256(value.encode("utf-8")).digest()
     return int.from_bytes(digest[:8], byteorder="big", signed=True)
+
+
+def _vector_literal(values: list[float]) -> str:
+    return "[" + ",".join(format(value, ".9g") for value in values) + "]"
 
 
 def _meeting_report_correlation(message_body: object) -> dict[str, str | int] | None:
