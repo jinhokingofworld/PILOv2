@@ -171,7 +171,7 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
     /terminal_runs AS \([\s\S]*?FROM deselected_schedules AS schedule[\s\S]*?run\.status = 'queued'/i
   );
   assert.equal(enqueued, false, "late polling enqueue must be skipped after the claimed run was terminalized");
-  assert.match(state.enqueueSql, /WITH queued_run AS \([\s\S]*?github_sync_runs AS run[\s\S]*?run\.status='queued'/i);
+  assert.match(state.enqueueSql, /locked_polling_schedule AS MATERIALIZED[\s\S]*?FOR UPDATE OF schedule[\s\S]*?queued_run AS \([\s\S]*?github_sync_runs AS run[\s\S]*?run\.status='queued'/i);
   assert.equal(state.createdJobId, null, "late enqueue must not create an orphan sync job");
   assert.equal(sentMessages, 0, "late enqueue must not publish an orphan job message");
   assert.equal(await worker.processSyncJob("job-created-after-deselect"), "terminal");
@@ -260,13 +260,14 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
 
   await assert.rejects(() => worker.enqueueSyncJob(syncRunId, userId));
   assert.match(queries[0], /ON CONFLICT \(sync_run_id\) DO UPDATE/i);
+  assert.match(queries[0], /locked_polling_schedule AS MATERIALIZED[\s\S]*?FOR UPDATE OF schedule[\s\S]*?queued_run AS/i);
   assert.match(queries[0], /SET status='queued', lease_owner=NULL, lease_expires_at=NULL/i);
   assert.match(queries[0], /lease_generation=github_sync_jobs\.lease_generation\+1/i);
   assert.match(queries[0], /RETURNING id, lease_generation/i);
   assert.equal(writes.length, 1, "enqueue failure must transition job, run, and schedule in one transaction");
   assert.match(
     writes[0].text,
-    /terminal_job AS \([\s\S]*status='queued'[\s\S]*lease_owner IS NULL[\s\S]*lease_expires_at IS NULL[\s\S]*lease_generation=\$3[\s\S]*terminal_run AS \([\s\S]*FROM terminal_job[\s\S]*terminal_schedule AS \([\s\S]*FROM terminal_run/i,
+    /locked_polling_schedule AS MATERIALIZED[\s\S]*?FOR UPDATE OF schedule[\s\S]*?terminal_job AS \([\s\S]*status='queued'[\s\S]*lease_owner IS NULL[\s\S]*lease_expires_at IS NULL[\s\S]*lease_generation=\$3[\s\S]*terminal_run AS \([\s\S]*FROM terminal_job[\s\S]*terminal_schedule AS \([\s\S]*FROM terminal_run/i,
     "a delayed publisher cannot fail a job that has already been leased by a newer generation"
   );
   assert.deepEqual(writes[0].values, ["job-1", syncRunId, "7"]);
@@ -321,12 +322,34 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
 
 {
   const queries = [];
+  const worker = new GithubSyncJobService(
+    { queryOne: async (text) => { queries.push(text); return { id: "job-expired-recovery", lease_generation: "9" }; } },
+    {}, {}, {}, {}
+  );
+  worker.client = () => ({ send: async () => {} });
+  process.env.SQS_GITHUB_SYNC_JOBS_QUEUE_URL = "sync-queue";
+
+  await worker.enqueueSyncJob(syncRunId, userId, { skipIfRunIsNoLongerQueued: true });
+
+  assert.match(
+    queries[0],
+    /run\.status='queued'[\s\S]*?OR \([\s\S]*?run\.status='running'[\s\S]*?FROM github_sync_jobs AS existing_job[\s\S]*?existing_job\.sync_run_id=run\.id[\s\S]*?existing_job\.status IN \('queued', 'running'\)[\s\S]*?existing_job\.lease_expires_at IS NULL OR existing_job\.lease_expires_at < now\(\)/i,
+    "only a running run with its own expired, requeueable job may be republished"
+  );
+  assert.match(queries[0], /locked_polling_schedule AS MATERIALIZED[\s\S]*?FOR UPDATE OF schedule[\s\S]*?queued_run AS/i);
+  assert.doesNotMatch(queries[0], /run\.status IN \('queued', 'running'\)/i, "terminal runs must not be accepted as recovery candidates");
+}
+
+{
+  const queries = [];
   const worker = new GithubSyncJobService({ queryOne: async (text) => { queries.push(text); return null; } }, {}, {}, {});
   assert.equal(await worker.acquireLease("job-1"), null);
   assert.match(queries[0], /lease_expires_at < now\(\)/);
   assert.match(queries[0], /status IN \('queued', 'running'\)/);
   assert.match(queries[0], /lease_generation=lease_generation\+1/i);
-  assert.match(queries[0], /RETURNING id, sync_run_id, requested_by_user_id, attempt_count, lease_generation/i);
+  assert.match(queries[0], /locked_polling_schedule AS MATERIALIZED[\s\S]*?FOR UPDATE OF schedule[\s\S]*?leased AS \([\s\S]*?UPDATE github_sync_jobs AS job/i);
+  assert.match(queries[0], /run\.status IN \('queued', 'running'\)/i, "a terminal run must not be revived by a stale queue message");
+  assert.match(queries[0], /RETURNING job\.id, job\.sync_run_id, job\.requested_by_user_id, job\.attempt_count, job\.lease_generation/i);
   assert.match(queries[0], /leased_schedule AS/i);
   assert.match(queries[0], /SET lease_owner=\$2, lease_expires_at=now\(\) \+ interval '10 minutes'/i);
   assert.match(queries[0], /AS is_polling/i);
@@ -343,13 +366,31 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
   await assert.rejects(() => worker.renewLease(job), /lease ownership was lost/i);
   assert.match(
     writes[0].text,
-    /locked_job AS MATERIALIZED \([\s\S]*FROM github_sync_jobs AS job[\s\S]*FOR UPDATE[\s\S]*\), owned_schedule AS \([\s\S]*INNER JOIN locked_job[\s\S]*FOR UPDATE OF schedule/i,
-    "polling renewal must lock the job before its schedule to match acquisition order"
+    /owned_schedule AS MATERIALIZED \([\s\S]*FROM github_project_v2_polling_schedules AS schedule[\s\S]*INNER JOIN github_sync_jobs AS job[\s\S]*FOR UPDATE OF schedule[\s\S]*\), renewed_job AS \([\s\S]*UPDATE github_sync_jobs/i,
+    "polling renewal must lock the schedule before its job to match selection cancellation"
   );
-  assert.match(writes[0].text, /locked_job\.sync_run_id=schedule\.active_sync_run_id/i);
-  assert.match(writes[0].text, /AND EXISTS \(SELECT 1 FROM owned_schedule\)/i);
+  assert.match(writes[0].text, /job\.sync_run_id=schedule\.active_sync_run_id/i);
+  assert.match(writes[0].text, /FROM owned_schedule AS schedule/i);
   assert.match(writes[0].text, /SELECT 1 FROM renewed_schedule/i);
   assert.deepEqual(writes[0].values, [job.id, worker.workerId, job.lease_generation]);
+}
+
+{
+  const job = { id: "job-polling-terminal", sync_run_id: syncRunId, requested_by_user_id: userId, workspace_id: workspaceId, installation_id: installationId, repository_id: null, project_v2_id: null, target: "project_v2_items", attempt_count: 1, lease_generation: 7, is_polling: true };
+  const writes = [];
+  const worker = new GithubSyncJobService(
+    { transaction: async (callback) => callback({ execute: async (text, values) => { writes.push({ text, values }); return { rowCount: 1 }; } }) },
+    {}, {}, {}
+  );
+
+  await worker.completeSuccess(job, { fetchedCount: 0, createdCount: 0, updatedCount: 0, skippedCount: 0, cursor: {} });
+
+  assert.match(
+    writes[0].text,
+    /locked_schedule AS MATERIALIZED \([\s\S]*?FROM github_project_v2_polling_schedules AS schedule[\s\S]*?FOR UPDATE OF schedule[\s\S]*?\), terminal_job AS \([\s\S]*?UPDATE github_sync_jobs/i,
+    "polling completion must lock the schedule before terminalizing its job"
+  );
+  assert.deepEqual(writes[0].values.slice(0, 4), [job.id, worker.workerId, job.lease_generation, job.sync_run_id]);
 }
 
 {

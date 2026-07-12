@@ -77,10 +77,36 @@ export class GithubSyncJobService implements OnModuleDestroy {
     options?: { skipIfRunIsNoLongerQueued?: boolean }
   ): Promise<boolean> {
     const job = await this.database.queryOne<{ id: string; lease_generation: string }>(
-      `WITH queued_run AS (
+      `WITH locked_polling_schedule AS MATERIALIZED (
+        SELECT schedule.active_sync_run_id
+        FROM github_project_v2_polling_schedules AS schedule
+        WHERE schedule.active_sync_run_id=$1
+        FOR UPDATE OF schedule
+      ), queued_run AS (
         SELECT run.id
         FROM github_sync_runs AS run
-        WHERE run.id=$1 AND run.status='queued'
+        WHERE run.id=$1
+          AND (
+            run.status='queued'
+            OR (
+              run.status='running'
+              AND EXISTS (
+                SELECT 1
+                FROM github_sync_jobs AS existing_job
+                WHERE existing_job.sync_run_id=run.id
+                  AND existing_job.status IN ('queued', 'running')
+                  AND (existing_job.lease_expires_at IS NULL OR existing_job.lease_expires_at < now())
+              )
+            )
+          )
+          AND (
+            EXISTS (SELECT 1 FROM locked_polling_schedule)
+            OR NOT EXISTS (
+              SELECT 1
+              FROM github_project_v2_polling_schedules AS schedule
+              WHERE schedule.active_sync_run_id=run.id
+            )
+          )
       )
       INSERT INTO github_sync_jobs (sync_run_id, requested_by_user_id)
         SELECT queued_run.id, $2 FROM queued_run
@@ -220,12 +246,36 @@ export class GithubSyncJobService implements OnModuleDestroy {
 
   private async acquireLease(jobId: string): Promise<SyncJobRow | null> {
     return this.database.queryOne<SyncJobRow>(
-      `WITH leased AS (
-        UPDATE github_sync_jobs SET status='running', attempt_count=attempt_count+1, lease_owner=$2,
+      `WITH locked_polling_schedule AS MATERIALIZED (
+        SELECT schedule.active_sync_run_id
+        FROM github_project_v2_polling_schedules AS schedule
+        INNER JOIN github_sync_jobs AS job ON job.sync_run_id=schedule.active_sync_run_id
+        WHERE job.id=$1
+          AND job.status IN ('queued', 'running')
+          AND (job.lease_expires_at IS NULL OR job.lease_expires_at < now())
+        FOR UPDATE OF schedule
+      ), leased AS (
+        UPDATE github_sync_jobs AS job
+        SET status='running', attempt_count=job.attempt_count+1, lease_owner=$2,
           lease_generation=lease_generation+1,
-          lease_expires_at=now() + interval '10 minutes', started_at=COALESCE(started_at, now())
-        WHERE id=$1 AND status IN ('queued', 'running') AND (lease_expires_at IS NULL OR lease_expires_at < now())
-        RETURNING id, sync_run_id, requested_by_user_id, attempt_count, lease_generation
+          lease_expires_at=now() + interval '10 minutes', started_at=COALESCE(job.started_at, now())
+        FROM github_sync_runs AS run
+        WHERE job.id=$1 AND job.status IN ('queued', 'running')
+          AND (job.lease_expires_at IS NULL OR job.lease_expires_at < now())
+          AND run.id=job.sync_run_id AND run.status IN ('queued', 'running')
+          AND (
+            EXISTS (
+              SELECT 1
+              FROM locked_polling_schedule AS schedule
+              WHERE schedule.active_sync_run_id=job.sync_run_id
+            )
+            OR NOT EXISTS (
+              SELECT 1
+              FROM github_project_v2_polling_schedules AS schedule
+              WHERE schedule.active_sync_run_id=job.sync_run_id
+            )
+          )
+        RETURNING job.id, job.sync_run_id, job.requested_by_user_id, job.attempt_count, job.lease_generation
       ), leased_schedule AS (
         UPDATE github_project_v2_polling_schedules AS schedule
         SET lease_owner=$2, lease_expires_at=now() + interval '10 minutes', updated_at=now()
@@ -267,24 +317,21 @@ export class GithubSyncJobService implements OnModuleDestroy {
   private async renewLease(job: SyncJobRow): Promise<void> {
     if (job.is_polling) {
       const result = await this.database.execute(
-        `WITH locked_job AS MATERIALIZED (
-           SELECT job.id, job.sync_run_id
-           FROM github_sync_jobs AS job
-           WHERE job.id=$1 AND job.status='running' AND job.lease_owner=$2 AND job.lease_generation=$3
-           FOR UPDATE
-         ), owned_schedule AS (
+        `WITH owned_schedule AS MATERIALIZED (
            SELECT schedule.active_sync_run_id
-            FROM github_project_v2_polling_schedules AS schedule
-            INNER JOIN locked_job ON locked_job.sync_run_id=schedule.active_sync_run_id
-            WHERE schedule.lease_owner=$2
-            FOR UPDATE OF schedule
-          ), renewed_job AS (
-            UPDATE github_sync_jobs
-            SET lease_expires_at=now() + interval '10 minutes'
-            FROM locked_job
-            WHERE github_sync_jobs.id=locked_job.id
-              AND EXISTS (SELECT 1 FROM owned_schedule)
-            RETURNING sync_run_id
+           FROM github_project_v2_polling_schedules AS schedule
+           INNER JOIN github_sync_jobs AS job ON job.sync_run_id=schedule.active_sync_run_id
+           WHERE job.id=$1 AND job.status='running' AND job.lease_owner=$2 AND job.lease_generation=$3
+             AND schedule.lease_owner=$2
+             FOR UPDATE OF schedule
+           ), renewed_job AS (
+             UPDATE github_sync_jobs
+             SET lease_expires_at=now() + interval '10 minutes'
+             FROM owned_schedule AS schedule
+             WHERE github_sync_jobs.id=$1 AND github_sync_jobs.sync_run_id=schedule.active_sync_run_id
+               AND github_sync_jobs.status='running' AND github_sync_jobs.lease_owner=$2
+               AND github_sync_jobs.lease_generation=$3
+             RETURNING sync_run_id
          ), renewed_schedule AS (
            UPDATE github_project_v2_polling_schedules AS schedule
            SET lease_expires_at=now() + interval '10 minutes', updated_at=now()
@@ -340,6 +387,33 @@ export class GithubSyncJobService implements OnModuleDestroy {
 
   private async completeSuccess(job: SyncJobRow, summary: GithubSyncRunSummary): Promise<void> {
     await this.database.transaction(async (transaction) => {
+      if (job.is_polling) {
+        await transaction.execute(`WITH locked_schedule AS MATERIALIZED (
+          SELECT schedule.active_sync_run_id
+          FROM github_project_v2_polling_schedules AS schedule
+          WHERE schedule.active_sync_run_id=$4
+          FOR UPDATE OF schedule
+        ), terminal_job AS (
+          UPDATE github_sync_jobs AS job SET status='success', finished_at=now(), lease_owner=NULL, lease_expires_at=NULL, last_error=NULL
+          FROM locked_schedule AS schedule
+          WHERE job.id=$1 AND job.sync_run_id=schedule.active_sync_run_id
+            AND job.status='running' AND job.lease_owner=$2 AND job.lease_generation=$3
+          RETURNING job.sync_run_id
+        ), terminal_run AS (
+          UPDATE github_sync_runs AS run SET status='success', finished_at=now(), fetched_count=$5, created_count=$6,
+            updated_count=$7, skipped_count=$8, error_message=NULL, cursor=$9::jsonb
+          FROM terminal_job WHERE run.id=terminal_job.sync_run_id
+          RETURNING run.id
+        ), terminal_schedule AS (
+          UPDATE github_project_v2_polling_schedules AS schedule
+          SET active_sync_run_id=NULL, lease_owner=NULL, lease_expires_at=NULL,
+            next_poll_at=now() + interval '1 minute', failure_count=0, last_error=NULL, updated_at=now()
+          FROM terminal_run
+          WHERE schedule.active_sync_run_id=terminal_run.id
+        )
+        SELECT 1 FROM terminal_run`, [job.id, this.workerId, job.lease_generation, job.sync_run_id, summary.fetchedCount, summary.createdCount, summary.updatedCount, summary.skippedCount, JSON.stringify(summary.cursor)]);
+        return;
+      }
       await transaction.execute(`WITH terminal_job AS (
         UPDATE github_sync_jobs SET status='success', finished_at=now(), lease_owner=NULL, lease_expires_at=NULL, last_error=NULL
         WHERE id=$1 AND status='running' AND lease_owner=$2 AND lease_generation=$3
@@ -362,6 +436,33 @@ export class GithubSyncJobService implements OnModuleDestroy {
   private async completeFailure(job: SyncJobRow, message: string, isRateLimited = false): Promise<void> {
     const retryInterval = isRateLimited ? "30 minutes" : "5 minutes";
     await this.database.transaction(async (transaction) => {
+      if (job.is_polling) {
+        await transaction.execute(`WITH locked_schedule AS MATERIALIZED (
+          SELECT schedule.active_sync_run_id
+          FROM github_project_v2_polling_schedules AS schedule
+          WHERE schedule.active_sync_run_id=$4
+          FOR UPDATE OF schedule
+        ), terminal_job AS (
+          UPDATE github_sync_jobs AS job SET status='failed', finished_at=now(), lease_owner=NULL, lease_expires_at=NULL, last_error=$5
+          FROM locked_schedule AS schedule
+          WHERE job.id=$1 AND job.sync_run_id=schedule.active_sync_run_id
+            AND job.status='running' AND job.lease_owner=$2 AND job.lease_generation=$3
+          RETURNING job.sync_run_id
+        ), terminal_run AS (
+          UPDATE github_sync_runs AS run SET status='failed', finished_at=now(), error_message=$5
+          FROM terminal_job WHERE run.id=terminal_job.sync_run_id
+          RETURNING run.id
+        ), terminal_schedule AS (
+          UPDATE github_project_v2_polling_schedules AS schedule
+          SET active_sync_run_id=NULL, lease_owner=NULL, lease_expires_at=NULL,
+            next_poll_at=now() + interval '${retryInterval}', failure_count=failure_count + 1,
+            last_error=$5, updated_at=now()
+          FROM terminal_run
+          WHERE schedule.active_sync_run_id=terminal_run.id
+        )
+        SELECT 1 FROM terminal_run`, [job.id, this.workerId, job.lease_generation, job.sync_run_id, message.slice(0, 1000)]);
+        return;
+      }
       await transaction.execute(`WITH terminal_job AS (
         UPDATE github_sync_jobs SET status='failed', finished_at=now(), lease_owner=NULL, lease_expires_at=NULL, last_error=$4
         WHERE id=$1 AND status='running' AND lease_owner=$2 AND lease_generation=$3
@@ -383,12 +484,31 @@ export class GithubSyncJobService implements OnModuleDestroy {
   }
   private async failEnqueue(runId: string, jobId: string, leaseGeneration: string): Promise<void> {
     await this.database.transaction(async (transaction) => {
-      await transaction.execute(`WITH terminal_job AS (
-        UPDATE github_sync_jobs
+      await transaction.execute(`WITH locked_polling_schedule AS MATERIALIZED (
+        SELECT schedule.active_sync_run_id
+        FROM github_project_v2_polling_schedules AS schedule
+        WHERE schedule.active_sync_run_id=$2
+        FOR UPDATE OF schedule
+      ), terminal_job AS (
+        UPDATE github_sync_jobs AS job
         SET status='failed', finished_at=now(), last_error='GitHub sync job could not be enqueued'
-        WHERE id=$1 AND sync_run_id=$2 AND status='queued' AND lease_owner IS NULL
-          AND lease_expires_at IS NULL AND lease_generation=$3
-        RETURNING sync_run_id
+        FROM github_sync_runs AS run
+        WHERE job.id=$1 AND job.sync_run_id=$2 AND job.status='queued' AND job.lease_owner IS NULL
+          AND job.lease_expires_at IS NULL AND job.lease_generation=$3
+          AND run.id=job.sync_run_id AND run.status='queued'
+          AND (
+            EXISTS (
+              SELECT 1
+              FROM locked_polling_schedule AS schedule
+              WHERE schedule.active_sync_run_id=job.sync_run_id
+            )
+            OR NOT EXISTS (
+              SELECT 1
+              FROM github_project_v2_polling_schedules AS schedule
+              WHERE schedule.active_sync_run_id=job.sync_run_id
+            )
+          )
+        RETURNING job.sync_run_id
       ), terminal_run AS (
         UPDATE github_sync_runs AS run
         SET status='failed', finished_at=now(), error_message='GitHub sync job could not be enqueued'
