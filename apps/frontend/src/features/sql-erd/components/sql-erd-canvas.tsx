@@ -48,13 +48,16 @@ import {
   getSqlErdTableShapeSize,
   SQLTOERD_COLUMN_CONNECT_START_EVENT,
   SQLTOERD_COLUMN_SELECT_EVENT,
+  SQLTOERD_TABLE_CONNECT_START_EVENT,
   SQLTOERD_TABLE_SELECT_EVENT,
   SQLTOERD_TABLE_SHAPE_TYPE,
   SqlErdTableShapeUtil,
   startSqlErdColumnConnection,
+  startSqlErdTableConnection,
   toSqlErdTableShapeColumns,
   isSqlErdTableShape,
   type SqlErdColumnConnectStartEventDetail,
+  type SqlErdTableConnectStartEventDetail,
   type SqlErdTableShape,
   type SqlErdTableSelectionState
 } from "@/features/sql-erd/shapes/sql-erd-table-shape";
@@ -62,11 +65,13 @@ import type {
   SqlErdSelection,
   SqltoerdColumnAnnotationLink,
   SqltoerdLayoutJsonV1,
-  SqltoerdModelJsonV1
+  SqltoerdModelJsonV1,
+  SqltoerdTableAnnotationLink
 } from "@/features/sql-erd/types";
 import {
   areSqltoerdLayoutsEqual,
   addSqltoerdColumnAnnotation,
+  addSqltoerdTableAnnotation,
   createSqltoerdModelIndex,
   getSqltoerdRenderableAnnotations,
   getTableLayout,
@@ -77,7 +82,10 @@ import {
   type SqltoerdTablePosition
 } from "@/features/sql-erd/utils/model";
 import { getSqlErdPinnedTableCenter } from "@/features/sql-erd/utils/table-pin";
-import { getSqlErdSelectionFromSelectedShapes } from "@/features/sql-erd/utils/canvas-selection";
+import {
+  areSqlErdSelectionsEqual,
+  getSqlErdSelectionFromSelectedShapes
+} from "@/features/sql-erd/utils/canvas-selection";
 import { cn } from "@/lib/utils";
 import { TldrawSurface } from "@/shared/tldraw/TldrawSurface";
 
@@ -239,17 +247,17 @@ export function createSqltoerdAnnotationShapes(
   );
 
   return (annotations?.links ?? []).flatMap((annotation) => {
-    if (annotation.kind !== "column_link") {
-      return [];
-    }
-
     const layout =
       getSqlErdRelationShapeLayoutFromTablePartials(
         tableShapeById.get(annotation.fromTableId),
         tableShapeById.get(annotation.toTableId),
         {
-          fromColumnIds: [annotation.fromColumnId],
-          toColumnIds: [annotation.toColumnId]
+          fromColumnIds:
+            annotation.kind === "column_link"
+              ? [annotation.fromColumnId]
+              : [],
+          toColumnIds:
+            annotation.kind === "column_link" ? [annotation.toColumnId] : []
         }
       ) ?? getFallbackSqlErdRelationShapeLayout();
 
@@ -263,10 +271,15 @@ export function createSqltoerdAnnotationShapes(
           w: layout.w,
           h: layout.h,
           annotationId: annotation.id,
+          kind: annotation.kind,
           fromTableId: annotation.fromTableId,
-          fromColumnId: annotation.fromColumnId,
+          fromColumnId:
+            annotation.kind === "column_link"
+              ? annotation.fromColumnId
+              : null,
           toTableId: annotation.toTableId,
-          toColumnId: annotation.toColumnId,
+          toColumnId:
+            annotation.kind === "column_link" ? annotation.toColumnId : null,
           fromTableShapeId: getSqlErdTableShapeId(annotation.fromTableId),
           toTableShapeId: getSqlErdTableShapeId(annotation.toTableId),
           label: annotation.label,
@@ -490,8 +503,14 @@ function getSqlErdAnnotationShapeLayoutFromEditor(
   }
 
   return getSqlErdRelationShapeLayout(fromTable, toTable, {
-    fromColumnIds: [shape.props.fromColumnId],
-    toColumnIds: [shape.props.toColumnId]
+    fromColumnIds:
+      shape.props.kind === "column_link" && shape.props.fromColumnId
+        ? [shape.props.fromColumnId]
+        : [],
+    toColumnIds:
+      shape.props.kind === "column_link" && shape.props.toColumnId
+        ? [shape.props.toColumnId]
+        : []
   });
 }
 
@@ -560,29 +579,6 @@ export function syncSqlErdAnnotationShapes(editor: Editor) {
   );
 
   return updates.length;
-}
-
-function areSqlErdSelectionsEqual(
-  left: SqlErdSelection,
-  right: SqlErdSelection
-) {
-  if (left.type !== right.type) {
-    return false;
-  }
-
-  if (left.type === "table" && right.type === "table") {
-    return left.tableId === right.tableId;
-  }
-
-  if (left.type === "column" && right.type === "column") {
-    return left.tableId === right.tableId && left.columnId === right.columnId;
-  }
-
-  if (left.type === "relation" && right.type === "relation") {
-    return left.relationId === right.relationId;
-  }
-
-  return true;
 }
 
 function getSqlErdSelectionFromEditor(editor: Editor): SqlErdSelection {
@@ -1344,9 +1340,20 @@ function SqlErdRelationHighlightSync({
 }
 
 type SqlErdColumnConnectorDrag = SqlErdColumnConnectStartEventDetail & {
+  kind: "column";
   currentClientX: number;
   currentClientY: number;
 };
+
+type SqlErdTableConnectorDrag = SqlErdTableConnectStartEventDetail & {
+  kind: "table";
+  currentClientX: number;
+  currentClientY: number;
+};
+
+type SqlErdAnnotationConnectorDrag =
+  | SqlErdColumnConnectorDrag
+  | SqlErdTableConnectorDrag;
 
 type SqlErdColumnAnnotationInteractionSyncProps = {
   layoutJson: SqltoerdLayoutJsonV1;
@@ -1456,6 +1463,34 @@ function parseColumnConnectStartDetail(
   };
 }
 
+function parseTableConnectStartDetail(
+  detail: unknown
+): SqlErdTableConnectStartEventDetail | null {
+  if (!detail || typeof detail !== "object") {
+    return null;
+  }
+
+  const value = detail as Partial<SqlErdTableConnectStartEventDetail>;
+
+  if (
+    typeof value.clientX !== "number" ||
+    typeof value.clientY !== "number" ||
+    typeof value.pointerId !== "number" ||
+    (value.side !== "left" && value.side !== "right") ||
+    typeof value.tableId !== "string"
+  ) {
+    return null;
+  }
+
+  return {
+    clientX: value.clientX,
+    clientY: value.clientY,
+    pointerId: value.pointerId,
+    side: value.side,
+    tableId: value.tableId
+  };
+}
+
 function getColumnConnectorTargetAtPoint(clientX: number, clientY: number) {
   const target = document
     .elementFromPoint(clientX, clientY)
@@ -1466,6 +1501,17 @@ function getColumnConnectorTargetAtPoint(clientX: number, clientY: number) {
   const columnId = target?.dataset.sqltoerdColumnId;
 
   return tableId && columnId ? { tableId, columnId } : null;
+}
+
+function getTableConnectorTargetAtPoint(clientX: number, clientY: number) {
+  const target = document
+    .elementFromPoint(clientX, clientY)
+    ?.closest<HTMLElement>(
+      "[data-sqltoerd-table-port-hit], [data-sqltoerd-table-header][data-sqltoerd-table-id]"
+    );
+  const tableId = target?.dataset.sqltoerdTableId;
+
+  return tableId ? { tableId } : null;
 }
 
 function createSqlErdColumnAnnotationId() {
@@ -1499,15 +1545,17 @@ function getColumnAnnotationBlockMessage(
   }
 }
 
-function SqlErdColumnAnnotationInteractionSync({
+function SqlErdAnnotationInteractionSync({
   layoutJson,
   modelJson,
   onLayoutChange
 }: SqlErdColumnAnnotationInteractionSyncProps) {
   const editor = useEditor();
-  const [drag, setDrag] = useState<SqlErdColumnConnectorDrag | null>(null);
+  const [drag, setDrag] = useState<SqlErdAnnotationConnectorDrag | null>(
+    null
+  );
   const [message, setMessage] = useState<string | null>(null);
-  const dragRef = useRef<SqlErdColumnConnectorDrag | null>(null);
+  const dragRef = useRef<SqlErdAnnotationConnectorDrag | null>(null);
   const layoutJsonRef = useRef(layoutJson);
   const messageTimeoutRef = useRef<number | null>(null);
   const modelJsonRef = useRef(modelJson);
@@ -1549,7 +1597,23 @@ function SqlErdColumnAnnotationInteractionSync({
       onLayoutChangeRef.current(nextLayoutJson);
     }
 
-    function handleConnectStart(event: Event) {
+    function startAnnotationDrag(
+      detail: SqlErdColumnConnectStartEventDetail | SqlErdTableConnectStartEventDetail,
+      kind: SqlErdAnnotationConnectorDrag["kind"]
+    ) {
+      const nextDrag = {
+        ...detail,
+        kind,
+        currentClientX: detail.clientX,
+        currentClientY: detail.clientY
+      } as SqlErdAnnotationConnectorDrag;
+
+      dragRef.current = nextDrag;
+      setDrag(nextDrag);
+      setMessage(null);
+    }
+
+    function handleColumnConnectStart(event: Event) {
       const detail = parseColumnConnectStartDetail(
         (event as CustomEvent).detail
       );
@@ -1558,15 +1622,19 @@ function SqlErdColumnAnnotationInteractionSync({
         return;
       }
 
-      const nextDrag = {
-        ...detail,
-        currentClientX: detail.clientX,
-        currentClientY: detail.clientY
-      };
+      startAnnotationDrag(detail, "column");
+    }
 
-      dragRef.current = nextDrag;
-      setDrag(nextDrag);
-      setMessage(null);
+    function handleTableConnectStart(event: Event) {
+      const detail = parseTableConnectStartDetail(
+        (event as CustomEvent).detail
+      );
+
+      if (!detail) {
+        return;
+      }
+
+      startAnnotationDrag(detail, "table");
     }
 
     function handlePointerMove(event: globalThis.PointerEvent) {
@@ -1598,30 +1666,61 @@ function SqlErdColumnAnnotationInteractionSync({
         return;
       }
 
-      const target = getColumnConnectorTargetAtPoint(
-        event.clientX,
-        event.clientY
-      );
       clearDrag();
 
-      if (!target) {
-        return;
-      }
+      const annotationId = createSqlErdColumnAnnotationId();
+      let annotation: SqltoerdColumnAnnotationLink | SqltoerdTableAnnotationLink;
+      let result:
+        | ReturnType<typeof addSqltoerdColumnAnnotation>
+        | ReturnType<typeof addSqltoerdTableAnnotation>;
 
-      const annotation: SqltoerdColumnAnnotationLink = {
-        id: createSqlErdColumnAnnotationId(),
-        kind: "column_link",
-        fromTableId: currentDrag.tableId,
-        fromColumnId: currentDrag.columnId,
-        toTableId: target.tableId,
-        toColumnId: target.columnId,
-        label: ""
-      };
-      const result = addSqltoerdColumnAnnotation(
-        modelJsonRef.current,
-        layoutJsonRef.current,
-        annotation
-      );
+      if (currentDrag.kind === "column") {
+        const target = getColumnConnectorTargetAtPoint(
+          event.clientX,
+          event.clientY
+        );
+
+        if (!target) {
+          return;
+        }
+
+        annotation = {
+          id: annotationId,
+          kind: "column_link",
+          fromTableId: currentDrag.tableId,
+          fromColumnId: currentDrag.columnId,
+          toTableId: target.tableId,
+          toColumnId: target.columnId,
+          label: ""
+        };
+        result = addSqltoerdColumnAnnotation(
+          modelJsonRef.current,
+          layoutJsonRef.current,
+          annotation
+        );
+      } else {
+        const target = getTableConnectorTargetAtPoint(
+          event.clientX,
+          event.clientY
+        );
+
+        if (!target) {
+          return;
+        }
+
+        annotation = {
+          id: annotationId,
+          kind: "table_link",
+          fromTableId: currentDrag.tableId,
+          toTableId: target.tableId,
+          label: ""
+        };
+        result = addSqltoerdTableAnnotation(
+          modelJsonRef.current,
+          layoutJsonRef.current,
+          annotation
+        );
+      }
 
       if (!result.ok) {
         showMessage(getColumnAnnotationBlockMessage(result.reason));
@@ -1768,7 +1867,11 @@ function SqlErdColumnAnnotationInteractionSync({
 
     window.addEventListener(
       SQLTOERD_COLUMN_CONNECT_START_EVENT,
-      handleConnectStart
+      handleColumnConnectStart
+    );
+    window.addEventListener(
+      SQLTOERD_TABLE_CONNECT_START_EVENT,
+      handleTableConnectStart
     );
     window.addEventListener("pointermove", handlePointerMove);
     window.addEventListener("pointerup", handlePointerUp);
@@ -1785,7 +1888,11 @@ function SqlErdColumnAnnotationInteractionSync({
       removeAnnotationSelectionListener();
       window.removeEventListener(
         SQLTOERD_COLUMN_CONNECT_START_EVENT,
-        handleConnectStart
+        handleColumnConnectStart
+      );
+      window.removeEventListener(
+        SQLTOERD_TABLE_CONNECT_START_EVENT,
+        handleTableConnectStart
       );
       window.removeEventListener("pointermove", handlePointerMove);
       window.removeEventListener("pointerup", handlePointerUp);
@@ -2049,7 +2156,7 @@ export function SqlErdCanvas({
       <SqlErdSelectedColumnSync selectedSqlErdObject={selectedSqlErdObject} />
       {onLayoutChange ? (
         <>
-          <SqlErdColumnAnnotationInteractionSync
+          <SqlErdAnnotationInteractionSync
             layoutJson={layoutJson}
             modelJson={modelJson}
             onLayoutChange={onLayoutChange}

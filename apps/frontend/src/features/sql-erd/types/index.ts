@@ -10,7 +10,8 @@ export type SqlErdSelection =
   | { type: "none" }
   | { type: "table"; tableId: string }
   | { type: "column"; tableId: string; columnId: string }
-  | { type: "relation"; relationId: string };
+  | { type: "relation"; relationId: string }
+  | { type: "annotation"; annotationId: string };
 
 export type SqltoerdModelJsonV1 = {
   version: typeof SQLTOERD_MODEL_JSON_VERSION;
