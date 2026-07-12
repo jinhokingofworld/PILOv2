@@ -55,3 +55,4 @@ The database schema source of truth is the migration history in `db/migrations/`
 - `migrations/036_add_workspace_icon.sql` adds an optional Workspace icon with a bounded text length for navigation and onboarding display.
 - `migrations/037_add_github_project_v2_webhook_reconcile_context.sql` adds ProjectV2 webhook delivery context, processing leases, retry attempts, and a runnable-delivery index. It is recorded in Supabase migration history as `20260711230721_037_add_github_project_v2_webhook_reconcile_context`.
 - `migrations/038_create_github_project_v2_polling_schedules.sql` adds repository-scoped personal ProjectV2 polling schedules, due-row leases, and active sync-run tracking with all-deny RLS.
+- `migrations/039_add_github_sync_job_lease_generation.sql` adds a monotonic worker lease generation to durable GitHub sync jobs so stale workers cannot complete a reclaimed job.

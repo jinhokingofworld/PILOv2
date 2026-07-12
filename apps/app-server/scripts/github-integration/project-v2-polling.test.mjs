@@ -62,6 +62,11 @@ class FakeDatabase {
 
   assert.match(insertPersonalSchedules.text, /INSERT INTO github_project_v2_polling_schedules/i);
   assert.match(insertPersonalSchedules.text, /owner_type = 'User'/i);
+  assert.match(
+    insertPersonalSchedules.text,
+    /now\(\) \+ interval '1 minute'/i,
+    "a newly selected personal project must wait for the initial full sync"
+  );
   assert.match(insertPersonalSchedules.text, /ON CONFLICT \(repository_id, project_v2_id\)/i);
   assert.deepEqual(insertPersonalSchedules.values, [repositoryId, requestedByUserId]);
 }
@@ -123,6 +128,11 @@ class FakeDatabase {
   );
   assert.match(claim.text, /lease_owner = \$2/i);
   assert.match(claim.text, /lease_expires_at = now\(\) \+ interval '10 minutes'/i);
+  assert.match(
+    claim.text,
+    /NOT EXISTS\s*\(\s*SELECT 1\s+FROM github_sync_runs AS full_sync[\s\S]*?full_sync\.repository_id = schedule\.repository_id[\s\S]*?full_sync\.target = 'full'[\s\S]*?full_sync\.status IN \('queued', 'running'\)/i,
+    "polling must not claim a project while its repository full sync is queued or running"
+  );
   assert.equal(claim.values[0], 3);
 }
 
@@ -272,6 +282,13 @@ class FakeDatabase {
   assert.match(migration, /FOREIGN KEY \(repository_id, project_v2_id\)[\s\S]*github_project_v2_selections[\s\S]*ON DELETE CASCADE/i);
   assert.match(migration, /ALTER TABLE github_project_v2_polling_schedules ENABLE ROW LEVEL SECURITY/i);
   assert.match(migration, /idx_github_project_v2_polling_schedules_due/i);
+
+  const fenceMigration = await readFile(
+    resolve(appServerRoot, "..", "..", "db/migrations/039_add_github_sync_job_lease_generation.sql"),
+    "utf8"
+  );
+  assert.match(fenceMigration, /ADD COLUMN lease_generation BIGINT NOT NULL DEFAULT 0/i);
+  assert.match(fenceMigration, /CHECK \(lease_generation >= 0\)/i);
 }
 
 class ProjectV2ItemSnapshotDatabase {
@@ -407,6 +424,33 @@ function projectV2ItemSnapshotContext() {
     projectV2Id,
     ["PVTI_remote-current"]
   ]);
+}
+
+{
+  const database = new ProjectV2ItemSnapshotDatabase();
+  const executor = new GithubSyncExecutorService(database, {
+    async listProjectV2Items() {
+      return [projectV2ItemSnapshotApiItem()];
+    }
+  });
+  let leaseChecks = 0;
+  const context = {
+    ...projectV2ItemSnapshotContext(),
+    assertLease: async () => {
+      leaseChecks += 1;
+      if (leaseChecks === 3) throw new Error("lease lost");
+    }
+  };
+
+  await assert.rejects(
+    () => executor.runGithubSyncTarget("project_v2_items", context),
+    /lease lost/
+  );
+  assert.equal(
+    database.queries.some(({ text }) => /INSERT INTO github_project_v2_items/i.test(text)),
+    false,
+    "a worker that loses its lease must stop before the next item cache write"
+  );
 }
 
 console.log("project-v2 polling tests passed");

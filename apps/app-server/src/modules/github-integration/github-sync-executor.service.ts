@@ -97,6 +97,7 @@ export interface GithubSyncRunContext {
   projectV2: GithubSyncProjectV2ContextRow | null;
   githubUserAccessToken: string | null;
   config: GithubAppRuntimeConfig;
+  assertLease?: () => Promise<void>;
   reportProgress?: (progress: GithubSyncRunProgress) => Promise<void>;
 }
 
@@ -140,6 +141,7 @@ export class GithubSyncExecutorService {
     target: GithubSyncTarget,
     context: GithubSyncRunContext
   ): Promise<GithubSyncRunSummary> {
+    await this.assertGithubSyncLease(context);
     if (target === "source") {
       return this.syncGithubSource(context);
     }
@@ -149,6 +151,7 @@ export class GithubSyncExecutorService {
     }
 
     const stage = target satisfies GithubSyncProgressStage;
+    await this.assertGithubSyncLease(context);
     await this.reportGithubSyncProgress(
       context,
       5,
@@ -178,6 +181,7 @@ export class GithubSyncExecutorService {
         break;
     }
 
+    await this.assertGithubSyncLease(context);
     await this.reportGithubSyncProgress(context, 95, stage, summary);
     return summary;
   }
@@ -254,11 +258,13 @@ export class GithubSyncExecutorService {
     context: GithubSyncRunContext
   ): Promise<GithubSyncRunSummary> {
     let summary = this.createGithubSyncSummary();
+    await this.assertGithubSyncLease(context);
     await this.reportGithubSyncProgress(context, 5, "repositories", summary);
     summary = this.mergeGithubSyncSummaries(
       summary,
       await this.syncGithubRepositories(context)
     );
+    await this.assertGithubSyncLease(context);
     await this.reportGithubSyncProgress(
       context,
       15,
@@ -267,11 +273,13 @@ export class GithubSyncExecutorService {
     );
     const discovery = await this.syncGithubProjectV2Discovery(context);
     summary = this.mergeGithubSyncSummaries(summary, discovery.summary);
+    await this.assertGithubSyncLease(context);
     await this.reportGithubSyncProgress(context, 25, "issues", summary);
     summary = this.mergeGithubSyncSummaries(
       summary,
       await this.syncGithubIssues(context)
     );
+    await this.assertGithubSyncLease(context);
     await this.reportGithubSyncProgress(context, 45, "pull_requests", summary);
     summary = this.mergeGithubSyncSummaries(
       summary,
@@ -302,6 +310,7 @@ export class GithubSyncExecutorService {
     };
 
     for (const projectV2 of projectV2Contexts) {
+      await this.assertGithubSyncLease(context);
       const projectContext = this.withGithubSyncProjectV2(context, projectV2);
       await startProjectStep("project_v2_fields");
       summary = this.mergeGithubSyncSummaries(
@@ -320,6 +329,7 @@ export class GithubSyncExecutorService {
       completedProjectSteps += 1;
     }
 
+    await this.assertGithubSyncLease(context);
     await this.reportGithubSyncProgress(context, 95, "finalizing", summary);
 
     return summary;
@@ -598,6 +608,7 @@ export class GithubSyncExecutorService {
     let skippedCount = 0;
 
     for (const item of items) {
+      await this.assertGithubSyncLease(context);
       const row = await this.upsertGithubProjectV2Item(context, item);
       if (!row) {
         skippedCount += 1;
@@ -623,6 +634,7 @@ export class GithubSyncExecutorService {
       }
     }
 
+    await this.assertGithubSyncLease(context);
     await this.archiveGithubProjectV2ItemsNotInSnapshot(
       context,
       items.map((item) => item.id)
@@ -682,6 +694,7 @@ export class GithubSyncExecutorService {
     context: GithubSyncRunContext
   ): Promise<GithubSyncRunSummary> {
     const summary = await this.syncGithubProjectV2Items(context);
+    await this.assertGithubSyncLease(context);
     await this.hydrateExistingBoardsForGithubProjectV2(context);
     return summary;
   }
@@ -1770,6 +1783,7 @@ export class GithubSyncExecutorService {
     );
 
     for (const board of boards) {
+      await this.assertGithubSyncLease(context);
       await this.database.queryOne<HydratedBoardRow>(
         `
           SELECT hydrate_pilo_board_from_github($1::uuid, $2::uuid)::text AS board_id
@@ -1847,6 +1861,10 @@ export class GithubSyncExecutorService {
     }
 
     return parsed;
+  }
+
+  private async assertGithubSyncLease(context: GithubSyncRunContext): Promise<void> {
+    await context.assertLease?.();
   }
 
   private toNumber(value: string | number): number {

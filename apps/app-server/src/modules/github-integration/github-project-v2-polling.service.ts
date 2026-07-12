@@ -18,6 +18,12 @@ export interface GithubProjectV2PollingClaim {
 
 type GithubProjectV2PollingQueryExecutor = Pick<DatabaseService | DatabaseTransaction, "execute">;
 
+export interface GithubProjectV2PollingJobLease {
+  jobId: string;
+  leaseOwner: string;
+  leaseGeneration: string | number;
+}
+
 @Injectable()
 export class GithubProjectV2PollingService {
   private readonly leaseOwner = `${process.env.HOSTNAME ?? "github-sync-worker"}-${process.pid}`;
@@ -58,7 +64,7 @@ export class GithubProjectV2PollingService {
             selection.repository_id,
             selection.project_v2_id,
             $2,
-            now()
+            now() + interval '1 minute'
           FROM github_project_v2_selections AS selection
           INNER JOIN github_projects_v2 AS project
             ON project.id = selection.project_v2_id
@@ -119,6 +125,13 @@ export class GithubProjectV2PollingService {
           INNER JOIN github_projects_v2 AS project
             ON project.id = schedule.project_v2_id
           WHERE schedule.next_poll_at <= now()
+            AND NOT EXISTS (
+              SELECT 1
+              FROM github_sync_runs AS full_sync
+              WHERE full_sync.repository_id = schedule.repository_id
+                AND full_sync.target = 'full'
+                AND full_sync.status IN ('queued', 'running')
+            )
             AND (
               schedule.active_sync_run_id IS NULL
               OR (
@@ -242,8 +255,22 @@ export class GithubProjectV2PollingService {
 
   async markRunSucceeded(
     syncRunId: string,
-    executor: GithubProjectV2PollingQueryExecutor = this.database
+    executor: GithubProjectV2PollingQueryExecutor = this.database,
+    lease?: GithubProjectV2PollingJobLease
   ): Promise<void> {
+    const ownershipClause = lease
+      ? `
+            AND schedule.lease_owner = $2
+            AND EXISTS (
+              SELECT 1
+              FROM github_sync_jobs AS job
+              WHERE job.id = $3
+                AND job.sync_run_id = schedule.active_sync_run_id
+                AND job.status = 'running'
+                AND job.lease_owner = $2
+                AND job.lease_generation = $4
+            )`
+      : "";
     await executor.execute(
       `
         UPDATE github_project_v2_polling_schedules
@@ -255,9 +282,11 @@ export class GithubProjectV2PollingService {
           failure_count = 0,
           last_error = NULL,
           updated_at = now()
-        WHERE active_sync_run_id = $1
+        WHERE active_sync_run_id = $1${ownershipClause}
       `,
-      [syncRunId]
+      lease
+        ? [syncRunId, lease.leaseOwner, lease.jobId, lease.leaseGeneration]
+        : [syncRunId]
     );
   }
 
@@ -265,9 +294,23 @@ export class GithubProjectV2PollingService {
     syncRunId: string,
     message: string,
     isRateLimited: boolean,
-    executor: GithubProjectV2PollingQueryExecutor = this.database
+    executor: GithubProjectV2PollingQueryExecutor = this.database,
+    lease?: GithubProjectV2PollingJobLease
   ): Promise<void> {
     const retryInterval = isRateLimited ? "30 minutes" : "5 minutes";
+    const ownershipClause = lease
+      ? `
+            AND schedule.lease_owner = $3
+            AND EXISTS (
+              SELECT 1
+              FROM github_sync_jobs AS job
+              WHERE job.id = $4
+                AND job.sync_run_id = schedule.active_sync_run_id
+                AND job.status = 'running'
+                AND job.lease_owner = $3
+                AND job.lease_generation = $5
+            )`
+      : "";
     await executor.execute(
       `
         UPDATE github_project_v2_polling_schedules
@@ -279,9 +322,11 @@ export class GithubProjectV2PollingService {
           failure_count = failure_count + 1,
           last_error = $2,
           updated_at = now()
-        WHERE active_sync_run_id = $1
+        WHERE active_sync_run_id = $1${ownershipClause}
       `,
-      [syncRunId, message.slice(0, 1000)]
+      lease
+        ? [syncRunId, message.slice(0, 1000), lease.leaseOwner, lease.jobId, lease.leaseGeneration]
+        : [syncRunId, message.slice(0, 1000)]
     );
   }
 }
