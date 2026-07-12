@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from dataclasses import dataclass
 from typing import Protocol
 from uuid import UUID
 
 MAX_TRANSCRIPTION_FILE_BYTES = 25_000_000
+LOGGER = logging.getLogger(__name__)
 
 TERMINAL_REPORT_STATUSES = {"COMPLETED", "FAILED"}
+REPORT_IN_PROGRESS_STATUSES = {"PROCESSING", "QUEUED", "TRANSCRIBING", "SUMMARIZING"}
 REPORT_FAILED_STEP_STT = "STT"
 REPORT_FAILED_STEP_LLM = "LLM"
 
@@ -85,6 +88,8 @@ class MeetingReportRepository(Protocol):
 
     def get_report_context(self, job: MeetingReportJob) -> MeetingReportContext | None: ...
 
+    def mark_progress(self, report_id: str, status: str) -> None: ...
+
     def mark_failed(self, report_id: str, failed_step: str, error_message: str) -> None: ...
 
     def mark_completed(self, report_id: str, report: GeneratedMeetingReport) -> None: ...
@@ -100,6 +105,10 @@ class MeetingReportAiClient(Protocol):
     def transcribe(self, audio_file_path: str) -> str: ...
 
     def generate_report(self, transcript_text: str) -> GeneratedMeetingReport: ...
+
+
+class MeetingReportEventPublisher(Protocol):
+    def publish(self, report_id: str) -> None: ...
 
 
 def parse_meeting_report_job(message_body: str) -> MeetingReportJob:
@@ -142,10 +151,12 @@ class MeetingReportProcessor:
         repository: MeetingReportRepository,
         storage: RecordingStorage,
         ai_client: MeetingReportAiClient,
+        event_publisher: MeetingReportEventPublisher | None = None,
     ) -> None:
         self.repository = repository
         self.storage = storage
         self.ai_client = ai_client
+        self.event_publisher = event_publisher
 
     def process_message(self, message_body: str) -> ProcessResult:
         try:
@@ -177,8 +188,10 @@ class MeetingReportProcessor:
             if context.report_status in TERMINAL_REPORT_STATUSES:
                 return self._result(job, delete_message=True, reason="terminal_report")
 
-            if context.report_status != "PROCESSING":
+            if context.report_status not in {"PROCESSING", "QUEUED"}:
                 return self._result(job, delete_message=True, reason="unsupported_report_status")
+
+            self.repository.mark_progress(job.report_id, "TRANSCRIBING")
 
             if context.recording_status != "COMPLETED":
                 self.repository.mark_failed(
@@ -234,6 +247,8 @@ class MeetingReportProcessor:
                 )
                 return self._result(job, delete_message=True, reason="stt_failed")
 
+            self.repository.mark_progress(job.report_id, "SUMMARIZING")
+
             try:
                 report = self.ai_client.generate_report(transcript_text)
             except ProviderBusinessError:
@@ -252,6 +267,14 @@ class MeetingReportProcessor:
             if downloaded_path is not None:
                 _unlink_if_exists(downloaded_path)
             self.repository.release_report_lock(job.report_id)
+            if self.event_publisher is not None:
+                try:
+                    self.event_publisher.publish(job.report_id)
+                except Exception:
+                    LOGGER.warning(
+                        "MeetingReport realtime event delivery failed report_id=%s",
+                        job.report_id,
+                    )
 
     def _result(self, job: MeetingReportJob, delete_message: bool, reason: str) -> ProcessResult:
         return ProcessResult(

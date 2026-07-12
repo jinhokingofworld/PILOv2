@@ -741,10 +741,10 @@ async function assertError(action, messagePattern) {
           },
           (text, values) => {
             assert.match(text, /INSERT INTO meeting_reports/);
-            assert.match(text, /'PROCESSING'/);
+            assert.match(text, /'QUEUED'/);
             assert.deepEqual(values, [meetingId, recordingId]);
             return meetingReportRow({
-              status: "PROCESSING",
+              status: "QUEUED",
               summary: null,
               discussion_points: null,
               decisions: null,
@@ -953,7 +953,7 @@ async function assertError(action, messagePattern) {
         },
         null,
         meetingReportRow({
-          status: "PROCESSING",
+          status: "QUEUED",
           summary: null,
           discussion_points: null,
           decisions: null,
@@ -1290,10 +1290,10 @@ async function assertError(action, messagePattern) {
         },
         (text, values) => {
           assert.match(text, /INSERT INTO meeting_reports/);
-          assert.match(text, /'PROCESSING'/);
+          assert.match(text, /'QUEUED'/);
           assert.deepEqual(values, [meetingId, recordingId]);
           return meetingReportRow({
-            status: "PROCESSING"
+            status: "QUEUED"
           });
         }
       ]
@@ -1313,7 +1313,7 @@ async function assertError(action, messagePattern) {
   assert.equal(result.recording.durationSec, 180);
   assert.equal(result.recording.fileSizeBytes, 8192);
   assert.equal(result.report.id, reportId);
-  assert.equal(result.report.status, "PROCESSING");
+  assert.equal(result.report.status, "QUEUED");
   assert.deepEqual(liveKitEgressService.stopCalls, [
     {
       livekitEgressId: "egress-1"
@@ -1440,7 +1440,7 @@ async function assertError(action, messagePattern) {
           ended_at: endedAt
         }),
         meetingReportRow({
-          status: "PROCESSING"
+          status: "QUEUED"
         })
       ]
     })
@@ -1891,7 +1891,7 @@ async function assertError(action, messagePattern) {
         },
         (text, values) => {
           assert.match(text, /UPDATE meeting_reports/);
-          assert.match(text, /status = 'PROCESSING'/);
+          assert.match(text, /status = 'QUEUED'/);
           assert.match(text, /failed_step = NULL/);
           assert.match(text, /error_message = NULL/);
           assert.match(text, /transcript_text = NULL/);
@@ -1899,7 +1899,7 @@ async function assertError(action, messagePattern) {
           assert.match(text, /retry_count = retry_count \+ 1/);
           assert.deepEqual(values, [reportId]);
           return meetingReportRow({
-            status: "PROCESSING",
+            status: "QUEUED",
             failed_step: null,
             error_message: null,
             summary: null,
@@ -1923,7 +1923,7 @@ async function assertError(action, messagePattern) {
   );
 
   assert.equal(database.transactionCommitted, true);
-  assert.equal(result.report.status, "PROCESSING");
+  assert.equal(result.report.status, "QUEUED");
   assert.equal(result.report.retryCount, 2);
   assert.equal(result.report.failedStep, null);
   assert.equal(result.report.summary, null);
@@ -1946,7 +1946,7 @@ async function assertError(action, messagePattern) {
     new FakeDatabase({
       queryOneRows: [
         meetingReportRegenerationRow({
-          status: "PROCESSING",
+          status: "QUEUED",
           failed_step: null,
           error_message: null
         })
@@ -2046,7 +2046,7 @@ async function assertError(action, messagePattern) {
       queryOneRows: [
         previousReport,
         meetingReportRow({
-          status: "PROCESSING",
+          status: "QUEUED",
           failed_step: null,
           error_message: null,
           summary: null,
@@ -2061,7 +2061,7 @@ async function assertError(action, messagePattern) {
           assert.match(text, /failed_step = \$3::meeting_report_failed_step/);
           assert.match(text, /action_item_candidates = \$9::jsonb/);
           assert.match(text, /retry_count = \$10/);
-          assert.match(text, /AND status = 'PROCESSING'/);
+          assert.match(text, /AND status IN/);
           assert.deepEqual(values, [
             reportId,
             "FAILED",
@@ -2344,7 +2344,7 @@ async function assertError(action, messagePattern) {
         (text, values) => {
           assert.match(text, /UPDATE meeting_reports/);
           assert.match(text, /status = 'FAILED'/);
-          assert.match(text, /AND status = 'PROCESSING'/);
+          assert.match(text, /AND status IN/);
           assert.deepEqual(values, [reportId]);
           return { id: reportId };
         }

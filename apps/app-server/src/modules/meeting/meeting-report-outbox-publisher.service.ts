@@ -116,7 +116,7 @@ export class MeetingReportOutboxPublisherService implements OnModuleInit, OnModu
       if (!outbox) return false;
       await transaction.execute(
         `UPDATE meeting_reports SET status = 'FAILED', failed_step = 'STT', error_message = 'Meeting report job could not be enqueued', updated_at = now()
-         WHERE id = $1 AND status = 'PROCESSING'`, [outbox.report_id]);
+         WHERE id = $1 AND status IN ('PROCESSING', 'QUEUED', 'TRANSCRIBING', 'SUMMARIZING')`, [outbox.report_id]);
       return true;
     });
     if (failed) {

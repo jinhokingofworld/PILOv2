@@ -348,6 +348,7 @@ export function useMeetingWorkspaceData({
   }, [canLoad, loadReports, reportsEnabled]);
 
   return {
+    accessToken: normalizedAccessToken,
     activeParticipantCount: currentState.activeParticipantCount,
     canLoad,
     currentError,
@@ -370,7 +371,8 @@ export function useMeetingWorkspaceData({
     reportsError,
     reportsStatus,
     startMeeting,
-    startRecording
+    startRecording,
+    workspaceId: normalizedWorkspaceId
   };
 }
 

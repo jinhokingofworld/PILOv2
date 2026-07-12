@@ -18,6 +18,7 @@ import {
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { io } from "socket.io-client";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -153,7 +154,12 @@ function formatReportTitle(report: Pick<MeetingReportSummary, "createdAt">) {
 function getReportStatusLabel(status: MeetingReportStatus) {
   switch (status) {
     case "PROCESSING":
-      return "생성 중";
+    case "QUEUED":
+      return "생성 대기";
+    case "TRANSCRIBING":
+      return "음성 변환 중";
+    case "SUMMARIZING":
+      return "회의록 정리 중";
     case "COMPLETED":
       return "완료";
     case "FAILED":
@@ -179,6 +185,9 @@ function getReportFailedStepLabel(
 function getReportStatusTone(status: MeetingReportStatus) {
   switch (status) {
     case "PROCESSING":
+    case "QUEUED":
+    case "TRANSCRIBING":
+    case "SUMMARIZING":
       return "border-amber-200 bg-amber-50 text-amber-700";
     case "COMPLETED":
       return "border-emerald-200 bg-emerald-50 text-emerald-700";
@@ -190,11 +199,39 @@ function getReportStatusTone(status: MeetingReportStatus) {
 function getReportStatusIcon(status: MeetingReportStatus) {
   switch (status) {
     case "PROCESSING":
+    case "QUEUED":
+    case "TRANSCRIBING":
+    case "SUMMARIZING":
       return Clock3;
     case "COMPLETED":
       return CheckCircle2;
     case "FAILED":
       return XCircle;
+  }
+}
+
+function isReportInProgress(status: MeetingReportStatus) {
+  return (
+    status === "PROCESSING" ||
+    status === "QUEUED" ||
+    status === "TRANSCRIBING" ||
+    status === "SUMMARIZING"
+  );
+}
+
+function getReportProgress(status: MeetingReportStatus) {
+  switch (status) {
+    case "PROCESSING":
+    case "QUEUED":
+      return 20;
+    case "TRANSCRIBING":
+      return 55;
+    case "SUMMARIZING":
+      return 85;
+    case "COMPLETED":
+      return 100;
+    case "FAILED":
+      return 0;
   }
 }
 
@@ -275,6 +312,27 @@ function ReportStatusPill({ status }: { status: MeetingReportStatus }) {
       <StatusIcon className="size-3.5" />
       {getReportStatusLabel(status)}
     </span>
+  );
+}
+
+function ReportProgress({ status }: { status: MeetingReportStatus }) {
+  if (!isReportInProgress(status)) return null;
+
+  const progress = getReportProgress(status);
+
+  return (
+    <div aria-label={getReportStatusLabel(status)} className="grid gap-1.5">
+      <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
+        <span>{getReportStatusLabel(status)}</span>
+        <span>{progress}%</span>
+      </div>
+      <div className="h-2 overflow-hidden rounded-full bg-amber-100">
+        <div
+          className="h-full rounded-full bg-amber-500 transition-[width] duration-300"
+          style={{ width: `${progress}%` }}
+        />
+      </div>
+    </div>
   );
 }
 
@@ -442,7 +500,7 @@ function MeetingReportDetailModal({
 
                 <ReportTextBlock
                   emptyLabel={
-                    report.status === "PROCESSING"
+                    isReportInProgress(report.status)
                       ? "회의록을 생성하는 중입니다."
                       : "등록된 요약이 없습니다."
                   }
@@ -452,7 +510,7 @@ function MeetingReportDetailModal({
 
                 <ReportTextBlock
                   emptyLabel={
-                    report.status === "PROCESSING"
+                    isReportInProgress(report.status)
                       ? "논의사항을 정리하는 중입니다."
                       : "등록된 논의사항이 없습니다."
                   }
@@ -462,7 +520,7 @@ function MeetingReportDetailModal({
 
                 <ReportTextBlock
                   emptyLabel={
-                    report.status === "PROCESSING"
+                    isReportInProgress(report.status)
                       ? "결정사항을 정리하는 중입니다."
                       : "등록된 결정사항이 없습니다."
                   }
@@ -520,7 +578,7 @@ function MeetingReportDetailModal({
 
                 <ReportTextBlock
                   emptyLabel={
-                    report.status === "PROCESSING"
+                    isReportInProgress(report.status)
                       ? "음성 텍스트를 정리하는 중입니다."
                       : "등록된 transcript가 없습니다."
                   }
@@ -562,6 +620,7 @@ export function MeetingReportSection({
 }: MeetingReportSectionProps) {
   const router = useRouter();
   const {
+    accessToken,
     canLoad,
     getMeetingReport,
     regenerateMeetingReport,
@@ -596,8 +655,8 @@ export function MeetingReportSection({
     );
   }, [reports, searchQuery]);
 
-  const hasProcessingReport = reports.some(
-    (report) => report.status === "PROCESSING"
+  const hasProcessingReport = reports.some((report) =>
+    isReportInProgress(report.status)
   );
   const isInitialLoading = reportsStatus === "loading" && reports.length === 0;
   const showError = reportsStatus === "error" && reports.length === 0;
@@ -712,7 +771,7 @@ export function MeetingReportSection({
   useEffect(() => {
     if (
       !canLoad ||
-      (!hasProcessingReport && selectedReport?.status !== "PROCESSING")
+      (!hasProcessingReport || !selectedReport || !isReportInProgress(selectedReport.status))
     ) {
       return;
     }
@@ -720,7 +779,7 @@ export function MeetingReportSection({
     const intervalId = window.setInterval(() => {
       void reloadReports();
 
-      if (selectedReportId && selectedReport?.status === "PROCESSING") {
+      if (selectedReportId && selectedReport && isReportInProgress(selectedReport.status)) {
         void loadReportDetail(selectedReportId, { silent: true });
       }
     }, REPORT_POLL_INTERVAL_MS);
@@ -732,6 +791,35 @@ export function MeetingReportSection({
     loadReportDetail,
     reloadReports,
     selectedReport?.status,
+    selectedReportId
+  ]);
+
+  useEffect(() => {
+    const realtimeUrl = process.env.NEXT_PUBLIC_PILO_REALTIME_SERVER_URL;
+    if (!canLoad || !accessToken || !realtimeUrl) return;
+
+    const socket = io(realtimeUrl, { auth: { token: accessToken } });
+    const workspaceId = meetingData.workspaceId;
+    socket.on("connect", () => {
+      socket.emit("meeting:subscribe", { workspaceId });
+    });
+    socket.on("meeting:report:updated", () => {
+      void reloadReports();
+      if (selectedReportId) {
+        void loadReportDetail(selectedReportId, { silent: true });
+      }
+    });
+
+    return () => {
+      socket.emit("meeting:unsubscribe", { workspaceId });
+      socket.disconnect();
+    };
+  }, [
+    accessToken,
+    canLoad,
+    loadReportDetail,
+    meetingData.workspaceId,
+    reloadReports,
     selectedReportId
   ]);
 
@@ -853,7 +941,7 @@ export function MeetingReportSection({
                   <p className="mt-2 line-clamp-2 text-sm leading-6 text-muted-foreground">
                     {report.summary?.trim() ||
                       report.errorMessage?.trim() ||
-                      (report.status === "PROCESSING"
+                      (isReportInProgress(report.status)
                         ? "회의록을 생성하는 중입니다."
                         : "등록된 요약이 없습니다.")}
                   </p>
@@ -872,6 +960,9 @@ export function MeetingReportSection({
                         {getReportFailedStepLabel(report.failedStep)}
                       </span>
                     ) : null}
+                  </div>
+                  <div className="mt-3">
+                    <ReportProgress status={report.status} />
                   </div>
                 </button>
 

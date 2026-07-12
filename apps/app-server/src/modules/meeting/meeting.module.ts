@@ -10,17 +10,22 @@ import { MeetingController } from "./meeting.controller";
 import { MeetingReportOutboxPublisherService } from "./meeting-report-outbox-publisher.service";
 import { MeetingReportOutboxRecoveryService } from "./meeting-report-outbox-recovery.service";
 import { MeetingReportJobService } from "./meeting-report-job.service";
+import { MeetingReportInternalController } from "./meeting-report-internal.controller";
+import { MeetingReportEventGuard } from "./meeting-report-event.guard";
+import { MeetingReportRealtimePublisherService } from "./meeting-report-realtime-publisher.service";
 import { MeetingService } from "./meeting.service";
 
 @Module({
   imports: [CommonModule, DatabaseModule, WorkspaceModule],
-  controllers: [MeetingController, LiveKitWebhookController],
+  controllers: [MeetingController, LiveKitWebhookController, MeetingReportInternalController],
   providers: [
     MeetingService,
     LiveKitEgressService,
     LiveKitTokenService,
     LiveKitWebhookService,
     MeetingReportJobService,
+    MeetingReportEventGuard,
+    MeetingReportRealtimePublisherService,
     MeetingReportOutboxPublisherService,
     MeetingReportOutboxRecoveryService
   ],

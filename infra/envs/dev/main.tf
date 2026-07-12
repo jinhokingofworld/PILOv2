@@ -246,6 +246,8 @@ module "ecs" {
         SQS_GITHUB_WEBHOOKS_QUEUE_URL           = module.sqs.github_webhooks_queue_url
         AGENT_EXECUTION_HANDOFF_BASE_URL        = local.api_domain == "" ? "http://${module.alb.alb_dns_name}" : "https://${local.api_domain}"
         AGENT_EXECUTION_HANDOFF_TIMEOUT_SECONDS = "10"
+        MEETING_REPORT_EVENT_BASE_URL           = local.api_domain == "" ? "http://${module.alb.alb_dns_name}" : "https://${local.api_domain}"
+        MEETING_REPORT_EVENT_TIMEOUT_SECONDS    = "10"
         OPENAI_STT_MODEL                        = "gpt-4o-mini-transcribe"
         OPENAI_MEETING_REPORT_MODEL             = "gpt-5.4-mini"
       }
