@@ -155,7 +155,94 @@ export class GithubProjectV2PollingService {
 
     const rows = await this.database.query<GithubProjectV2PollingClaimRow>(
       `
-        WITH candidate_schedules AS (
+        WITH eligible_schedules AS MATERIALIZED (
+          SELECT
+            schedule.repository_id,
+            schedule.project_v2_id,
+            schedule.next_poll_at
+          FROM github_project_v2_polling_schedules AS schedule
+          INNER JOIN github_projects_v2 AS project
+            ON project.id = schedule.project_v2_id
+          WHERE schedule.next_poll_at <= now()
+            AND NOT EXISTS (
+              SELECT 1
+              FROM github_sync_runs AS full_sync
+              WHERE full_sync.repository_id = schedule.repository_id
+                AND full_sync.target = 'full'
+                AND full_sync.status IN ('queued', 'running')
+            )
+            AND (
+              schedule.active_sync_run_id IS NULL
+              OR (
+                schedule.lease_expires_at < now()
+                AND NOT EXISTS (
+                  SELECT 1
+                  FROM github_sync_jobs AS active_job
+                  WHERE active_job.sync_run_id = schedule.active_sync_run_id
+                    AND active_job.status IN ('queued', 'running')
+                    AND active_job.lease_expires_at >= now()
+                )
+                AND (
+                  (
+                    EXISTS (
+                      SELECT 1
+                      FROM github_sync_runs AS active_run
+                      WHERE active_run.id = schedule.active_sync_run_id
+                        AND active_run.status IN ('queued', 'running')
+                    )
+                    AND (
+                      NOT EXISTS (
+                        SELECT 1
+                        FROM github_sync_jobs AS active_job
+                        WHERE active_job.sync_run_id = schedule.active_sync_run_id
+                      )
+                      OR EXISTS (
+                        SELECT 1
+                        FROM github_sync_jobs AS active_job
+                        WHERE active_job.sync_run_id = schedule.active_sync_run_id
+                          AND active_job.status IN ('queued', 'running')
+                          AND (active_job.lease_expires_at IS NULL OR active_job.lease_expires_at < now())
+                      )
+                    )
+                  )
+                  OR NOT EXISTS (
+                    SELECT 1
+                    FROM github_sync_runs AS active_run
+                    WHERE active_run.id = schedule.active_sync_run_id
+                      AND active_run.status IN ('queued', 'running')
+                  )
+                  OR EXISTS (
+                    SELECT 1
+                    FROM github_sync_jobs AS active_job
+                    WHERE active_job.sync_run_id = schedule.active_sync_run_id
+                      AND active_job.status IN ('success', 'failed')
+                  )
+                )
+              )
+            )
+            AND project.owner_type = 'User'
+          ORDER BY schedule.next_poll_at ASC, schedule.repository_id ASC, schedule.project_v2_id ASC
+          LIMIT $1
+        ),
+        due_repositories AS MATERIALIZED (
+          SELECT
+            eligible.repository_id,
+            MIN(eligible.next_poll_at) AS next_poll_at
+          FROM eligible_schedules AS eligible
+          GROUP BY eligible.repository_id
+        ),
+        locked_repositories AS MATERIALIZED (
+          SELECT
+            repository.id,
+            repository.workspace_id,
+            repository.installation_id
+          FROM github_repositories AS repository
+          INNER JOIN due_repositories AS due_repository
+            ON due_repository.repository_id = repository.id
+          ORDER BY due_repository.next_poll_at ASC, repository.id ASC
+          FOR UPDATE OF repository SKIP LOCKED
+        ),
+        candidate_schedules AS (
           SELECT
             schedule.repository_id,
             schedule.project_v2_id,
@@ -188,7 +275,7 @@ export class GithubProjectV2PollingService {
               ELSE NULL
             END AS reusable_sync_run_id
           FROM github_project_v2_polling_schedules AS schedule
-          INNER JOIN github_repositories AS repository
+          INNER JOIN locked_repositories AS repository
             ON repository.id = schedule.repository_id
           INNER JOIN github_projects_v2 AS project
             ON project.id = schedule.project_v2_id
@@ -252,7 +339,7 @@ export class GithubProjectV2PollingService {
             AND project.owner_type = 'User'
           ORDER BY schedule.next_poll_at ASC, schedule.repository_id ASC, schedule.project_v2_id ASC
           LIMIT $1
-          FOR UPDATE OF repository, schedule SKIP LOCKED
+          FOR UPDATE OF schedule SKIP LOCKED
         ),
         created_runs AS (
           INSERT INTO github_sync_runs (

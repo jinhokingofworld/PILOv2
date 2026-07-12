@@ -144,8 +144,18 @@ class FakeDatabase {
   const [claim] = database.queries;
   assert.match(
     claim.text,
-    /FOR UPDATE OF repository, schedule SKIP LOCKED/i,
-    "due polling claims must lock the repository before its schedule so the run FK cannot deadlock with selection changes"
+    /eligible_schedules AS MATERIALIZED/i,
+    "due polling claims must first identify the bounded eligible schedule batch without taking a schedule lock"
+  );
+  assert.match(
+    claim.text,
+    /locked_repositories AS MATERIALIZED \([\s\S]*?FROM github_repositories AS repository[\s\S]*?FOR UPDATE OF repository SKIP LOCKED/i,
+    "due polling claims must lock repositories before any schedule locks so the run FK cannot deadlock with selection changes"
+  );
+  assert.match(
+    claim.text,
+    /candidate_schedules AS \([\s\S]*?INNER JOIN locked_repositories AS repository[\s\S]*?FOR UPDATE OF schedule SKIP LOCKED/i,
+    "due polling claims must only lock schedules after joining the repository rows already locked by this claim"
   );
   assert.match(claim.text, /INSERT INTO github_sync_runs/i);
   assert.match(claim.text, /'project_v2_items'/i);
