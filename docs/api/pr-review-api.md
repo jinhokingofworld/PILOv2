@@ -362,7 +362,6 @@ Graph 입력을 받은 Worker는 결과에도 같은 `graphSchemaVersion`과 `se
 
 Worker parser는 Graph 결과의 file path가 입력 변경 파일 집합과 일치하는지, 잠긴 역할이
 유지되는지, Flow가 입력 후보와 대응하는지, relation endpoint와 type이 유효한지 확인한다.
-App Server의 최종 저장 Validator와 원자 저장은 후속 Semantic Graph 단계에서 적용한다.
 
 App Server Validator는 Worker 검증을 통과한 결과도 다시 검사한다. 기존 relation 후보를
 AI가 보강하면 기존 confidence와 `source = hybrid`를 사용하고, AI가 새로 제안한 relation은
@@ -374,11 +373,18 @@ Flow별 relation은 `min(file count * 2, 40)`, PR 전체 relation은 `100`개로
 AI Graph의 version, file/Flow membership, 잠긴 role, relation endpoint/type/candidate key 중
 하나라도 유효하지 않으면 AI Graph 전체를 폐기하고 같은 입력에서 생성한 deterministic
 Graph 전체를 사용한다. 일부 AI relation이나 Flow만 선택적으로 저장하지 않는다. 검증된
-복수 Flow와 relation의 DB 원자 저장은 후속 단계에서 적용한다.
+복수 Flow와 relation만 DB 저장 대상으로 사용한다.
+
+검증 결과는 review file을 session에 한 번 저장한 뒤 복수 Flow와 Flow별 membership을 만들고,
+relation endpoint를 같은 Flow의 membership ID로 변환해 저장한다. `review_files.role_type`에는
+검증된 정규화 역할을, 기존 `file_role`에는 기존 AI 설명 문자열을 유지한다. Flow의
+`sort_order`와 membership의 `workflow_order`는 검증된 Flow·review order 순서를 사용한다.
+변경 파일이 0개면 기존 화면 호환을 위해 membership과 relation이 없는 빈 fallback Flow
+하나를 저장한다.
 
 App Server는 현재 GitHub head SHA, Job head SHA, session head SHA를 다시 비교한다.
 셋 중 하나라도 다르면 flow/file을 만들지 않고 Job과 session을
-`failed(PR_HEAD_CHANGED)`로 끝낸다. 일치하면 summary, flow, file, flow-file 관계와
+`failed(PR_HEAD_CHANGED)`로 끝낸다. 일치하면 summary, flow, file, flow-file, relation과
 Job terminal 상태를 하나의 transaction으로 저장하고, 마지막에만 session을
 `reviewing`으로 전환한다. 같은 Job의 재전달은 이미 저장된 terminal 결과를 반환하며
 새 row를 만들지 않는다.
