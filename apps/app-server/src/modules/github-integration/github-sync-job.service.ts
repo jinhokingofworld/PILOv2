@@ -10,7 +10,7 @@ import { ApiError, badRequest } from "../../common/api-error";
 import { DatabaseService } from "../../database/database.service";
 import { GithubIntegrationConfigService } from "./github-integration-config.service";
 import { isGithubGraphqlRateLimitError } from "./github-app.client";
-import { GithubProjectV2PollingService, type GithubProjectV2PollingJobLease } from "./github-project-v2-polling.service";
+import { GithubProjectV2PollingService } from "./github-project-v2-polling.service";
 import { GithubProjectV2SyncTokenService } from "./github-project-v2-sync-token.service";
 import { GithubProjectV2WebhookReconcileService } from "./github-project-v2-webhook-reconcile.service";
 import {
@@ -239,8 +239,7 @@ export class GithubSyncJobService implements OnModuleDestroy {
          SET lease_expires_at=now() + interval '10 minutes'
           WHERE id=$1 AND status='running' AND lease_owner=$2 AND lease_generation=$3
          RETURNING sync_run_id
-       )
-        renewed_schedule AS (
+        ), renewed_schedule AS (
           UPDATE github_project_v2_polling_schedules AS schedule
           SET lease_expires_at=now() + interval '10 minutes', updated_at=now()
           FROM renewed_job
@@ -264,29 +263,47 @@ export class GithubSyncJobService implements OnModuleDestroy {
 
   private async completeSuccess(job: SyncJobRow, summary: GithubSyncRunSummary): Promise<void> {
     await this.database.transaction(async (transaction) => {
-      await this.pollingService?.markRunSucceeded(job.sync_run_id, transaction, this.pollingLease(job));
       await transaction.execute(`WITH terminal_job AS (
         UPDATE github_sync_jobs SET status='success', finished_at=now(), lease_owner=NULL, lease_expires_at=NULL, last_error=NULL
         WHERE id=$1 AND status='running' AND lease_owner=$2 AND lease_generation=$3
         RETURNING sync_run_id
+      ), terminal_run AS (
+        UPDATE github_sync_runs AS run SET status='success', finished_at=now(), fetched_count=$4, created_count=$5,
+          updated_count=$6, skipped_count=$7, error_message=NULL, cursor=$8::jsonb
+        FROM terminal_job WHERE run.id=terminal_job.sync_run_id
+        RETURNING run.id
+      ), terminal_schedule AS (
+        UPDATE github_project_v2_polling_schedules AS schedule
+        SET active_sync_run_id=NULL, lease_owner=NULL, lease_expires_at=NULL,
+          next_poll_at=now() + interval '1 minute', failure_count=0, last_error=NULL, updated_at=now()
+        FROM terminal_run
+        WHERE schedule.active_sync_run_id=terminal_run.id
       )
-      UPDATE github_sync_runs AS run SET status='success', finished_at=now(), fetched_count=$4, created_count=$5, updated_count=$6, skipped_count=$7, error_message=NULL, cursor=$8::jsonb
-      FROM terminal_job WHERE run.id=terminal_job.sync_run_id`, [job.id, this.workerId, job.lease_generation, summary.fetchedCount, summary.createdCount, summary.updatedCount, summary.skippedCount, JSON.stringify(summary.cursor)]);
+      SELECT 1 FROM terminal_run`, [job.id, this.workerId, job.lease_generation, summary.fetchedCount, summary.createdCount, summary.updatedCount, summary.skippedCount, JSON.stringify(summary.cursor)]);
     });
   }
   private async completeFailure(job: SyncJobRow, message: string, isRateLimited = false): Promise<void> {
+    const retryInterval = isRateLimited ? "30 minutes" : "5 minutes";
     await this.database.transaction(async (transaction) => {
-      await this.pollingService?.markRunFailed(job.sync_run_id, message, isRateLimited, transaction, this.pollingLease(job));
       await transaction.execute(`WITH terminal_job AS (
         UPDATE github_sync_jobs SET status='failed', finished_at=now(), lease_owner=NULL, lease_expires_at=NULL, last_error=$4
         WHERE id=$1 AND status='running' AND lease_owner=$2 AND lease_generation=$3
         RETURNING sync_run_id
+      ), terminal_run AS (
+        UPDATE github_sync_runs AS run SET status='failed', finished_at=now(), error_message=$4
+        FROM terminal_job WHERE run.id=terminal_job.sync_run_id
+        RETURNING run.id
+      ), terminal_schedule AS (
+        UPDATE github_project_v2_polling_schedules AS schedule
+        SET active_sync_run_id=NULL, lease_owner=NULL, lease_expires_at=NULL,
+          next_poll_at=now() + interval '${retryInterval}', failure_count=failure_count + 1,
+          last_error=$4, updated_at=now()
+        FROM terminal_run
+        WHERE schedule.active_sync_run_id=terminal_run.id
       )
-      UPDATE github_sync_runs AS run SET status='failed', finished_at=now(), error_message=$4
-      FROM terminal_job WHERE run.id=terminal_job.sync_run_id`, [job.id, this.workerId, job.lease_generation, message]);
+      SELECT 1 FROM terminal_run`, [job.id, this.workerId, job.lease_generation, message.slice(0, 1000)]);
     });
   }
-  private pollingLease(job: SyncJobRow): GithubProjectV2PollingJobLease { return { jobId: job.id, leaseOwner: this.workerId, leaseGeneration: job.lease_generation }; }
   private async failEnqueue(runId: string, jobId: string): Promise<void> { await this.database.transaction(async (transaction) => { await transaction.execute(`UPDATE github_sync_runs SET status='failed', finished_at=now(), error_message='GitHub sync job could not be enqueued' WHERE id=$1`, [runId]); await transaction.execute(`UPDATE github_sync_jobs SET status='failed', finished_at=now(), last_error='GitHub sync job could not be enqueued' WHERE id=$1`, [jobId]); await this.pollingService?.markRunFailed(runId, "GitHub sync job could not be enqueued", false, transaction); }); }
   private installation(workspaceId: string, id: string): Promise<GithubSyncInstallationRow | null> { return this.database.queryOne(`SELECT id, workspace_id, github_installation_id, account_login, account_type FROM github_installations WHERE workspace_id=$1 AND id=$2`, [workspaceId, id]); }
   private repository(workspaceId: string, id: string): Promise<GithubSyncRepositoryContextRow | null> { return this.database.queryOne(`SELECT id, workspace_id, installation_id, github_node_id, owner_login, name, full_name FROM github_repositories WHERE workspace_id=$1 AND id=$2`, [workspaceId, id]); }

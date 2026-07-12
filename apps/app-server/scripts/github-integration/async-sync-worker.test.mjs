@@ -122,69 +122,58 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
 
 {
   const job = { id: "job-1", sync_run_id: syncRunId, requested_by_user_id: userId, workspace_id: workspaceId, installation_id: installationId, repository_id: null, project_v2_id: null, target: "full", attempt_count: 1, lease_generation: 1 };
-  const terminalCalls = [];
+  const writes = [];
   const worker = new GithubSyncJobService(
-    { transaction: async (callback) => callback({ execute: async () => ({ rowCount: 1 }) }) },
+    { transaction: async (callback) => callback({ execute: async (text, values) => { writes.push({ text, values }); return { rowCount: 1 }; } }) },
     { getGithubAppConfig: () => ({}) },
     { runGithubSyncTarget: async () => ({ fetchedCount: 1, createdCount: 0, updatedCount: 0, skippedCount: 0, cursor: {} }) },
     { resolvePersonalProjectV2UserAccessToken: async () => null },
-    {},
-    {
-      markRunSucceeded: async (runId, transaction) => terminalCalls.push(["success", runId, transaction]),
-      markRunFailed: async (...args) => terminalCalls.push(["failed", ...args])
-    }
+    {}
   );
   worker.acquireLease = async () => job;
   worker.installation = async () => ({ id: installationId });
 
   assert.equal(await worker.processSyncJob("job-1"), "terminal");
-  assert.equal(terminalCalls[0][0], "success");
-  assert.equal(terminalCalls[0][1], syncRunId);
-  assert.ok(terminalCalls[0][2], "schedule success must share the terminal database transaction");
+  assert.match(writes[0].text, /terminal_job AS \([\s\S]*lease_generation=\$3[\s\S]*terminal_run AS \([\s\S]*FROM terminal_job[\s\S]*terminal_schedule AS \([\s\S]*FROM terminal_run/i);
+  assert.match(writes[0].text, /next_poll_at=now\(\) \+ interval '1 minute'/i);
+  assert.deepEqual(writes[0].values.slice(0, 3), [job.id, worker.workerId, job.lease_generation]);
 }
 
 {
   const job = { id: "job-1", sync_run_id: syncRunId, requested_by_user_id: userId, workspace_id: workspaceId, installation_id: installationId, repository_id: null, project_v2_id: null, target: "full", attempt_count: 3, lease_generation: 1 };
-  const terminalCalls = [];
+  const writes = [];
   const worker = new GithubSyncJobService(
-    { transaction: async (callback) => callback({ execute: async () => ({ rowCount: 1 }) }) },
+    { transaction: async (callback) => callback({ execute: async (text, values) => { writes.push({ text, values }); return { rowCount: 1 }; } }) },
     { getGithubAppConfig: () => ({}) },
     { runGithubSyncTarget: async () => { throw new Error("provider unavailable"); } },
     { resolvePersonalProjectV2UserAccessToken: async () => null },
-    {},
-    {
-      markRunFailed: async (...args) => terminalCalls.push(args)
-    }
+    {}
   );
   worker.acquireLease = async () => job;
   worker.installation = async () => ({ id: installationId });
 
   assert.equal(await worker.processSyncJob("job-1"), "terminal");
-  assert.equal(terminalCalls[0][0], syncRunId);
-  assert.equal(terminalCalls[0][1], "provider unavailable");
-  assert.equal(terminalCalls[0][2], false);
-  assert.ok(terminalCalls[0][3], "schedule failure must share the terminal database transaction");
+  assert.match(writes[0].text, /terminal_run AS \([\s\S]*FROM terminal_job[\s\S]*terminal_schedule AS \([\s\S]*FROM terminal_run/i);
+  assert.match(writes[0].text, /next_poll_at=now\(\) \+ interval '5 minutes'/i);
+  assert.equal(writes[0].values[3], "provider unavailable");
 }
 
 {
   const job = { id: "job-1", sync_run_id: syncRunId, requested_by_user_id: userId, workspace_id: workspaceId, installation_id: installationId, repository_id: null, project_v2_id: null, target: "full", attempt_count: 1, lease_generation: 1 };
-  const terminalCalls = [];
+  const writes = [];
   const worker = new GithubSyncJobService(
-    { transaction: async (callback) => callback({ execute: async () => ({ rowCount: 1 }) }) },
+    { transaction: async (callback) => callback({ execute: async (text, values) => { writes.push({ text, values }); return { rowCount: 1 }; } }) },
     { getGithubAppConfig: () => ({}) },
     { runGithubSyncTarget: async () => { throw new GithubGraphqlRateLimitError("GitHub API rate limit exceeded"); } },
     { resolvePersonalProjectV2UserAccessToken: async () => null },
-    {},
-    { markRunFailed: async (...args) => terminalCalls.push(args) }
+    {}
   );
   worker.acquireLease = async () => job;
   worker.installation = async () => ({ id: installationId });
 
   assert.equal(await worker.processSyncJob("job-1"), "terminal");
-  assert.equal(terminalCalls[0][0], syncRunId);
-  assert.equal(terminalCalls[0][1], "GitHub API rate limit exceeded");
-  assert.equal(terminalCalls[0][2], true);
-  assert.ok(terminalCalls[0][3], "rate-limit failure must share the terminal database transaction");
+  assert.match(writes[0].text, /next_poll_at=now\(\) \+ interval '30 minutes'/i);
+  assert.match(writes[0].text, /terminal_schedule AS \([\s\S]*FROM terminal_run/i);
 }
 
 {
@@ -229,6 +218,11 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
   );
 
   await assert.rejects(() => worker.renewLease(job), /lease ownership was lost/i);
+  assert.match(
+    writes[0].text,
+    /RETURNING sync_run_id\s*\)\s*,\s*renewed_schedule AS \(/i,
+    "renewed_schedule must be separated from renewed_job by a CTE comma"
+  );
   assert.match(writes[0].text, /lease_owner=\$2/i);
   assert.match(writes[0].text, /lease_generation=\$3/i);
   assert.deepEqual(writes[0].values, [job.id, worker.workerId, job.lease_generation]);
@@ -247,6 +241,12 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
   assert.match(writes[0].text, /lease_generation=\$3/i);
   assert.match(writes[0].text, /UPDATE github_sync_runs/i);
   assert.match(writes[0].text, /UPDATE github_sync_jobs/i);
+  assert.match(
+    writes[0].text,
+    /terminal_job AS \([\s\S]*lease_generation=\$3[\s\S]*terminal_run AS \([\s\S]*FROM terminal_job[\s\S]*terminal_schedule AS \([\s\S]*FROM terminal_run/i,
+    "a stale generation cannot transition the run or its polling schedule"
+  );
+  assert.match(writes[0].text, /WHERE schedule\.active_sync_run_id=terminal_run\.id/i);
   assert.deepEqual(writes[0].values.slice(0, 3), [job.id, worker.workerId, job.lease_generation]);
 }
 
