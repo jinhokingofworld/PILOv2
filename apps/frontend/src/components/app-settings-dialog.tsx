@@ -3,9 +3,7 @@
 import { useState, type ReactNode } from "react";
 import {
   Building2,
-  CheckCircle2,
   GitBranch,
-  KeyRound,
   Laptop,
   ShieldCheck,
   UserRound,
@@ -28,6 +26,7 @@ type AppSettingsDialogProps = {
   activeWorkspaceName: string;
   canManageWorkspace: boolean;
   email: string;
+  githubContent: ReactNode;
   name: string;
   onOpenChange: (open: boolean) => void;
   open: boolean;
@@ -67,33 +66,6 @@ const SETTINGS_TABS: Array<{
   }
 ];
 
-const MOCK_GITHUB_CONNECTIONS = [
-  {
-    id: "github-user",
-    name: "GitHub 사용자 연결",
-    account: "donghyun-pilo",
-    description: "PR Review와 GitHub App 사용자 인증",
-    connectedAt: "2026. 7. 2.",
-    icon: GitBranch
-  },
-  {
-    id: "github-app",
-    name: "GitHub App 설치",
-    account: "pilo-team · selected repositories",
-    description: "Repository, Issue, PR 원본 동기화",
-    connectedAt: "2026. 7. 4.",
-    icon: GitBranch
-  },
-  {
-    id: "github-project",
-    name: "GitHub Project OAuth",
-    account: "project scope 연결됨",
-    description: "개인 ProjectV2 조회와 상태 변경",
-    connectedAt: "2026. 7. 8.",
-    icon: KeyRound
-  }
-];
-
 const MOCK_SESSIONS = [
   {
     id: "current-session",
@@ -117,6 +89,7 @@ export function AppSettingsDialog({
   activeWorkspaceName,
   canManageWorkspace,
   email,
+  githubContent,
   name,
   onOpenChange,
   open
@@ -244,48 +217,7 @@ export function AppSettingsDialog({
                   }
                   title={`${activeWorkspaceName} GitHub 연결`}
                 >
-                  <div className="grid gap-2">
-                    {MOCK_GITHUB_CONNECTIONS.map((connection) => {
-                      const Icon = connection.icon;
-
-                      return (
-                        <div
-                          className="flex items-center gap-3 rounded-lg border p-3"
-                          key={connection.id}
-                        >
-                          <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted">
-                            <Icon className="size-4" />
-                          </span>
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-2">
-                              <p className="truncate text-sm font-medium">
-                                {connection.name}
-                              </p>
-                              <span className="inline-flex items-center gap-1 text-[11px] text-emerald-600">
-                                <CheckCircle2 className="size-3" /> 연결됨
-                              </span>
-                            </div>
-                            <p className="truncate text-xs text-muted-foreground">
-                              {connection.account}
-                            </p>
-                            <p className="mt-1 text-[11px] text-muted-foreground">
-                              {connection.description} · {connection.connectedAt}
-                            </p>
-                          </div>
-                          <Button
-                            disabled={!canManageWorkspace}
-                            onClick={() =>
-                              showMockNotice(`${connection.name} 관리를 선택했습니다.`)
-                            }
-                            size="sm"
-                            variant="outline"
-                          >
-                            {canManageWorkspace ? "연결 관리" : "조회 전용"}
-                          </Button>
-                        </div>
-                      );
-                    })}
-                  </div>
+                  {githubContent}
                 </SettingsPage>
               ) : null}
 
