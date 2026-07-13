@@ -4,7 +4,7 @@ import json
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Protocol
 from uuid import UUID
 from zoneinfo import ZoneInfo
@@ -256,12 +256,13 @@ class AgentRunProcessor:
         step_id: str | None = None
         try:
             step_id = self.repository.start_planner_step(job, context)
+            current_date = self.current_date_provider(context.timezone).isoformat()
             decision = self.planner_client.plan(
                 AgentPlanningRequest(
                     run_id=job.run_id,
                     prompt=context.prompt,
                     timezone=context.timezone,
-                    current_date=self.current_date_provider(context.timezone).isoformat(),
+                    current_date=current_date,
                     tool_schema_version=job.tool_schema_version,
                     tools=job.tools,
                 )
@@ -270,6 +271,7 @@ class AgentRunProcessor:
                 decision,
                 job,
                 prompt=context.prompt,
+                current_date=current_date,
             )
             planner_step_completed = self.repository.complete_planner_step(
                 job.run_id,
@@ -434,7 +436,14 @@ def normalize_agent_planner_decision(
     decision: AgentPlannerDecision,
     job: AgentRunJob,
     prompt: str = "",
+    current_date: str | None = None,
 ) -> NormalizedPlannerDecision:
+    decision = _normalize_calendar_relative_date_query(
+        decision,
+        job,
+        prompt=prompt,
+        current_date=current_date,
+    )
     status = decision.status
     if status not in PLANNER_STATUSES:
         raise AgentPlannerOutputError("Agent planner returned an invalid status")
@@ -620,6 +629,71 @@ def _requires_calendar_time_or_all_day(input_value: dict[str, object]) -> bool:
     )
 
 
+def _normalize_calendar_relative_date_query(
+    decision: AgentPlannerDecision,
+    job: AgentRunJob,
+    *,
+    prompt: str,
+    current_date: str | None,
+) -> AgentPlannerDecision:
+    if current_date is None or not any(tool.name == "list_calendar_events" for tool in job.tools):
+        return decision
+
+    date_range = _supported_calendar_relative_date_range(prompt, current_date)
+    if date_range is None:
+        return decision
+
+    start_date, end_date = date_range
+    return AgentPlannerDecision(
+        status="tool_candidate",
+        message="Calendar 상대 날짜 조회 후보입니다.",
+        final_answer_draft="해당 날짜의 일정을 조회합니다.",
+        tool_name="list_calendar_events",
+        tool_input={"start": start_date.isoformat(), "end": end_date.isoformat()},
+        requires_confirmation=False,
+        missing_fields=(),
+        unsupported_reason=None,
+    )
+
+
+def _supported_calendar_relative_date_range(
+    prompt: str,
+    current_date: str,
+) -> tuple[date, date] | None:
+    normalized_prompt = re.sub(r"\s+", " ", prompt).strip()
+    try:
+        base_date = date.fromisoformat(current_date)
+    except ValueError:
+        return None
+
+    read_suffix = r"일정(?:을|만)?\s*(?:보여\s*줘|알려\s*줘|조회해\s*줘)[.!?]?"
+    if re.fullmatch(rf"이번\s*주말\s*{read_suffix}", normalized_prompt):
+        saturday_offset = 6 if base_date.weekday() == 6 else (5 - base_date.weekday()) % 7
+        saturday = base_date + timedelta(days=saturday_offset)
+        return saturday, saturday + timedelta(days=1)
+
+    if re.fullmatch(
+        rf"다음\s*주\s*월요일(?:\s*(?:오전|오후))?\s*{read_suffix}",
+        normalized_prompt,
+    ):
+        monday = _next_weekday(base_date, 0)
+        return monday, monday
+
+    if re.fullmatch(
+        rf"다다음\s*주\s*화요일(?:\s*(?:오전|오후))?\s*{read_suffix}",
+        normalized_prompt,
+    ):
+        tuesday = _next_weekday(base_date, 1) + timedelta(days=7)
+        return tuesday, tuesday
+
+    return None
+
+
+def _next_weekday(base_date: date, weekday: int) -> date:
+    offset = (weekday - base_date.weekday()) % 7
+    return base_date + timedelta(days=offset or 7)
+
+
 def _clarification_answer(missing_fields: tuple[str, ...]) -> str:
     labels = {
         "eventId": "수정할 일정",
@@ -738,7 +812,13 @@ def _agent_planner_system_prompt() -> str:
         "Calendar default can apply; never set endTime equal to startTime. "
         "When the user supplies a positive integer Calendar event ID with changes, use it and let "
         "the App Server verify that the event exists in the Workspace. "
-        "Normalize relative dates using the provided timezone and current date. "
+        "Normalize relative dates using the provided timezone and currentDate. For Korean week "
+        "phrases, '이번 주말' means the nearest Saturday-Sunday that is not fully past: include "
+        "the current Saturday, but on Sunday use the following weekend. '다음 주 월요일' means "
+        "the immediately upcoming Monday, using the Monday seven days later when currentDate is "
+        "Monday. '다다음 주 화요일' means one week after the immediately upcoming Tuesday. For "
+        "currentDate 2026-07-12, use 2026-07-18 through 2026-07-19 for '이번 주말', 2026-07-13 "
+        "for '다음 주 월요일', and 2026-07-21 for '다다음 주 화요일'. "
         "Use YYYY-MM-DD dates and HH:mm 24-hour times in tool inputs. "
         "Write message and finalAnswerDraft in Korean. "
         "Put the selected tool input object into inputJson as a compact JSON string. "

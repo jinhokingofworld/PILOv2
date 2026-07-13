@@ -166,6 +166,51 @@ def test_evaluate_suite_repetitions_reports_flaky_cases(tmp_path) -> None:
     assert report["caseSummaries"][0]["exactRate"] == 0.5
 
 
+def test_evaluate_suite_applies_relative_date_guard(tmp_path) -> None:
+    suite = load_evaluation_suite(
+        write_suite(
+            tmp_path,
+            [
+                {
+                    "id": "this_weekend",
+                    "prompt": "이번 주말 일정 보여줘",
+                    "expected": {
+                        "status": "tool_candidate",
+                        "toolName": "list_calendar_events",
+                        "inputContains": {"start": "2026-07-18", "end": "2026-07-19"},
+                        "requiresConfirmation": False,
+                    },
+                },
+                {
+                    "id": "next_monday",
+                    "prompt": "다음 주 월요일 오전 일정 보여줘",
+                    "expected": {
+                        "status": "tool_candidate",
+                        "toolName": "list_calendar_events",
+                        "inputContains": {"start": "2026-07-13", "end": "2026-07-13"},
+                        "requiresConfirmation": False,
+                    },
+                },
+            ],
+        )
+    )
+    planner = FakePlanner(
+        [
+            decision(
+                status="needs_clarification",
+                tool_name=None,
+                tool_input={},
+                missing_fields=("start", "end"),
+            ),
+            decision(tool_input={"start": "2026-07-20", "end": "2026-07-20"}),
+        ]
+    )
+
+    results = evaluate_suite(planner, suite, current_date="2026-07-12")
+
+    assert [result.passed for result in results] == [True, True]
+
+
 def test_load_evaluation_suite_rejects_duplicate_case_ids(tmp_path) -> None:
     path = write_suite(
         tmp_path,
@@ -189,7 +234,7 @@ def test_fixed_korean_suite_loads() -> None:
     suite = load_evaluation_suite(suite_path)
 
     assert suite.version == "agent-planner-korean:v1"
-    assert len(suite.cases) == 31
+    assert len(suite.cases) == 33
     assert {tool.name for tool in suite.job.tools} == {
         "list_calendar_events",
         "create_calendar_event",
@@ -206,6 +251,14 @@ def test_fixed_korean_suite_loads() -> None:
     assert expectations["calendar_next_monday"].input_contains == {
         "start": "2026-07-13",
         "end": "2026-07-13",
+    }
+    assert expectations["calendar_this_weekend"].input_contains == {
+        "start": "2026-07-11",
+        "end": "2026-07-12",
+    }
+    assert expectations["calendar_week_after_next_tuesday"].input_contains == {
+        "start": "2026-07-21",
+        "end": "2026-07-21",
     }
     assert expectations["calendar_this_sunday"].input_contains == {
         "start": "2026-07-12",
