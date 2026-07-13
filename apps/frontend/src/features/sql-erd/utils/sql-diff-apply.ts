@@ -1,8 +1,11 @@
 import type {
+  SqltoerdLayoutJsonV1,
   SqltoerdModelJsonV1,
-  SqltoerdResolvedDialect
+  SqltoerdResolvedDialect,
+  SqltoerdSettingsJson
 } from "@/features/sql-erd/types";
 import { parseSqlDdlToErdModel } from "@/features/sql-erd/utils/ddl-parser";
+import { retainSqltoerdRelationNotesForModel } from "@/features/sql-erd/utils/foreign-key-add";
 import { createSqltoerdLayoutForModel } from "@/features/sql-erd/utils/model";
 import { generateSqlDdlFromErdModel } from "@/features/sql-erd/utils/model-to-sql";
 import type { SqlErdViewSession } from "@/features/sql-erd/utils/session-state";
@@ -13,8 +16,10 @@ export type SqlErdNormalizedSqlPreview = {
   baseSnapshot: SqlErdViewSession;
   generatedSourceText: string;
   hasChanges: boolean;
+  layoutJson: SqltoerdLayoutJsonV1;
   modelJson: SqltoerdModelJsonV1;
   resolvedDialect: SqltoerdResolvedDialect;
+  settingsJson: SqltoerdSettingsJson;
   warnings: string[];
 };
 
@@ -44,13 +49,17 @@ export type SqlErdSqlDiffLine = {
 };
 
 export function createSqlErdNormalizedSqlPreview({
+  layoutJson,
   modelJson,
   resolvedDialect,
-  session
+  session,
+  settingsJson
 }: {
+  layoutJson?: SqltoerdLayoutJsonV1;
   modelJson: SqltoerdModelJsonV1;
   resolvedDialect: SqltoerdResolvedDialect;
   session: SqlErdViewSession;
+  settingsJson?: SqltoerdSettingsJson;
 }): SqlErdNormalizedSqlPreview {
   const generated = generateSqlDdlFromErdModel({
     dialect: resolvedDialect,
@@ -61,8 +70,13 @@ export function createSqlErdNormalizedSqlPreview({
     baseSnapshot: session,
     generatedSourceText: generated.sql,
     hasChanges: generated.sql !== session.sourceText,
+    layoutJson: layoutJson ?? session.layoutJson,
     modelJson,
     resolvedDialect,
+    settingsJson: retainSqltoerdRelationNotesForModel(
+      settingsJson ?? session.settingsJson,
+      modelJson
+    ),
     warnings: generated.warnings
   };
 }
@@ -134,9 +148,10 @@ export function applySqlErdNormalizedSqlPreview(
       dialect: preview.resolvedDialect,
       layoutJson: createSqltoerdLayoutForModel(
         parseResult.modelJson,
-        preview.baseSnapshot.layoutJson
+        preview.layoutJson
       ),
       modelJson: parseResult.modelJson,
+      settingsJson: preview.settingsJson,
       sourceText: preview.generatedSourceText
     }
   };
@@ -159,7 +174,8 @@ export function isSqlErdViewSessionCurrent(
     base.dialect === session.dialect &&
     base.sourceText === session.sourceText &&
     JSON.stringify(base.modelJson) === JSON.stringify(session.modelJson) &&
-    JSON.stringify(base.layoutJson) === JSON.stringify(session.layoutJson)
+    JSON.stringify(base.layoutJson) === JSON.stringify(session.layoutJson) &&
+    JSON.stringify(base.settingsJson) === JSON.stringify(session.settingsJson)
   );
 }
 

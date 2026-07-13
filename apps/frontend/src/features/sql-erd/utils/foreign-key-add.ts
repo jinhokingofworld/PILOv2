@@ -2,13 +2,41 @@ import type {
   ErdColumn,
   ErdRelation,
   ErdTable,
+  SqltoerdColumnAnnotationLink,
+  SqltoerdLayoutJsonV1,
   SqltoerdModelJsonV1,
-  SqltoerdResolvedDialect
+  SqltoerdResolvedDialect,
+  SqltoerdSettingsJson
 } from "@/features/sql-erd/types";
+import { removeSqltoerdAnnotation } from "@/features/sql-erd/utils/model";
 import {
   createSqltoerdForeignKeyRelationId,
   normalizeSqltoerdForeignKeyRelationIds
 } from "@/features/sql-erd/utils/relation-id";
+
+export const SQLTOERD_RELATION_NOTES_SETTINGS_KEY = "sqltoerdRelationNotes";
+
+export type SqltoerdAnnotationLabelDisposition =
+  | "discard"
+  | "preserve_as_relation_note";
+
+export type SqltoerdAnnotationForeignKeyConversionFailureReason =
+  | SqltoerdForeignKeyAddFailureReason
+  | "annotation_not_column_link"
+  | "annotation_not_found";
+
+export type SqltoerdAnnotationForeignKeyConversionResult =
+  | {
+      layoutJson: SqltoerdLayoutJsonV1;
+      modelJson: SqltoerdModelJsonV1;
+      ok: true;
+      relation: ErdRelation;
+      settingsJson: SqltoerdSettingsJson;
+    }
+  | {
+      ok: false;
+      reason: SqltoerdAnnotationForeignKeyConversionFailureReason;
+    };
 
 export type SqltoerdForeignKeyAddFailureReason =
   | "duplicate_relation"
@@ -45,6 +73,102 @@ export type SqltoerdForeignKeyEditResult =
       ok: false;
       reason: SqltoerdForeignKeyEditFailureReason;
     };
+
+export function createSqlErdAnnotationForeignKeyConversionCandidate({
+  annotationId,
+  dialect = "postgresql",
+  labelDisposition,
+  layoutJson,
+  modelJson,
+  settingsJson
+}: {
+  annotationId: string;
+  dialect?: SqltoerdResolvedDialect;
+  labelDisposition: SqltoerdAnnotationLabelDisposition;
+  layoutJson: SqltoerdLayoutJsonV1;
+  modelJson: SqltoerdModelJsonV1;
+  settingsJson: SqltoerdSettingsJson;
+}): SqltoerdAnnotationForeignKeyConversionResult {
+  const annotation = layoutJson.annotations?.links.find(
+    (link) => link.id === annotationId
+  );
+
+  if (!annotation) {
+    return { ok: false, reason: "annotation_not_found" };
+  }
+
+  if (annotation.kind !== "column_link") {
+    return { ok: false, reason: "annotation_not_column_link" };
+  }
+
+  const candidate = createSqlErdForeignKeyAddCandidate({
+    dialect,
+    fromColumnId: annotation.fromColumnId,
+    fromTableId: annotation.fromTableId,
+    modelJson,
+    toColumnId: annotation.toColumnId,
+    toTableId: annotation.toTableId
+  });
+
+  if (!candidate.ok) {
+    return candidate;
+  }
+
+  return {
+    layoutJson: removeSqltoerdAnnotation(layoutJson, annotation.id),
+    modelJson: candidate.modelJson,
+    ok: true,
+    relation: candidate.relation,
+    settingsJson: createSqltoerdConversionSettingsJson(
+      settingsJson,
+      annotation,
+      candidate.relation,
+      labelDisposition
+    )
+  };
+}
+
+export function getSqltoerdRelationNote(
+  settingsJson: SqltoerdSettingsJson,
+  relationId: string
+) {
+  const relationNotes = settingsJson[SQLTOERD_RELATION_NOTES_SETTINGS_KEY];
+
+  if (!isSqltoerdRelationNotes(relationNotes)) {
+    return null;
+  }
+
+  return relationNotes[relationId] ?? null;
+}
+
+export function retainSqltoerdRelationNotesForModel(
+  settingsJson: SqltoerdSettingsJson,
+  modelJson: SqltoerdModelJsonV1
+) {
+  const relationNotes = getSqltoerdRelationNotes(settingsJson);
+  const currentRelationIds = new Set(
+    modelJson.schema.relations.map((relation) => relation.id)
+  );
+  const retainedNotes = Object.entries(relationNotes).filter(([relationId]) =>
+    currentRelationIds.has(relationId)
+  );
+
+  if (retainedNotes.length === Object.keys(relationNotes).length) {
+    return settingsJson;
+  }
+
+  const { [SQLTOERD_RELATION_NOTES_SETTINGS_KEY]: _relationNotes, ...rest } =
+    settingsJson;
+
+  if (retainedNotes.length === 0) {
+    return rest;
+  }
+
+  return {
+    ...rest,
+    [SQLTOERD_RELATION_NOTES_SETTINGS_KEY]: Object.fromEntries(retainedNotes)
+  };
+}
 
 export function createSqlErdForeignKeyAddCandidate({
   dialect = "postgresql",
@@ -270,6 +394,46 @@ export function createSqlErdForeignKeyDeleteCandidate({
 
 export function getSqltoerdForeignKeyTargetColumns(table: ErdTable) {
   return table.columns.filter((column) => isSqltoerdForeignKeyTarget(table, column));
+}
+
+function createSqltoerdConversionSettingsJson(
+  settingsJson: SqltoerdSettingsJson,
+  annotation: SqltoerdColumnAnnotationLink,
+  relation: ErdRelation,
+  labelDisposition: SqltoerdAnnotationLabelDisposition
+) {
+  const label = annotation.label.trim();
+
+  if (labelDisposition !== "preserve_as_relation_note" || !label) {
+    return settingsJson;
+  }
+
+  const relationNotes = getSqltoerdRelationNotes(settingsJson);
+
+  return {
+    ...settingsJson,
+    [SQLTOERD_RELATION_NOTES_SETTINGS_KEY]: {
+      ...relationNotes,
+      [relation.id]: label
+    }
+  };
+}
+
+function getSqltoerdRelationNotes(settingsJson: SqltoerdSettingsJson) {
+  const relationNotes = settingsJson[SQLTOERD_RELATION_NOTES_SETTINGS_KEY];
+
+  return isSqltoerdRelationNotes(relationNotes) ? relationNotes : {};
+}
+
+function isSqltoerdRelationNotes(
+  value: unknown
+): value is Record<string, string> {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    Object.values(value).every((note) => typeof note === "string")
+  );
 }
 
 function isSqltoerdForeignKeyTarget(table: ErdTable, column: ErdColumn) {

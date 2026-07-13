@@ -94,10 +94,14 @@ import {
 } from "@/features/sql-erd/utils/inspector";
 import { isSqlErdSourceTextTooLarge } from "@/features/sql-erd/utils/ddl-parser";
 import {
+  createSqlErdAnnotationForeignKeyConversionCandidate,
   createSqlErdForeignKeyAddCandidate,
   createSqlErdForeignKeyDeleteCandidate,
   createSqlErdForeignKeyUpdateCandidate,
   getSqltoerdForeignKeyTargetColumns,
+  type SqltoerdAnnotationForeignKeyConversionFailureReason,
+  type SqltoerdAnnotationForeignKeyConversionResult,
+  type SqltoerdAnnotationLabelDisposition,
   type SqltoerdForeignKeyAddResult,
   type SqltoerdForeignKeyAddFailureReason,
   type SqltoerdForeignKeyEditFailureReason,
@@ -519,9 +523,15 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
       createSqlErdInspectorViewModel(
         selectedSqlErdObject,
         modelIndex,
-        sqlErdViewSession.layoutJson.annotations
+        sqlErdViewSession.layoutJson.annotations,
+        sqlErdViewSession.settingsJson
       ),
-    [modelIndex, selectedSqlErdObject, sqlErdViewSession.layoutJson.annotations]
+    [
+      modelIndex,
+      selectedSqlErdObject,
+      sqlErdViewSession.layoutJson.annotations,
+      sqlErdViewSession.settingsJson
+    ]
   );
   const pinnedTableTitle = useMemo(() => {
     if (!tablePinState.pinnedTableId) {
@@ -607,7 +617,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
 
       void runSqlErdParseWorker({
         dialect: targetSnapshot.dialect,
-        previousLayoutJson: baseSnapshot.layoutJson,
+        previousLayoutJson: targetSnapshot.layoutJson,
         requestSequence,
         sessionId: baseSnapshot.id,
         sourceMapModelJson,
@@ -640,6 +650,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           ...baseSnapshot,
           layoutJson: parseResult.layoutJson,
           modelJson: parseResult.modelJson,
+          settingsJson: targetSnapshot.settingsJson,
           sourceText: targetSnapshot.sourceText
         };
 
@@ -830,6 +841,56 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
     },
     [isNormalizedSqlApplying, lastResolvedDialect]
   );
+  const handlePreviewAnnotationForeignKeyConversion = useCallback(
+    ({
+      annotationId,
+      labelDisposition
+    }: {
+      annotationId: string;
+      labelDisposition: SqltoerdAnnotationLabelDisposition;
+    }): SqltoerdAnnotationForeignKeyConversionResult | null => {
+      const currentSnapshot =
+        sqlErdEditStateRef.current.lastSuccessfulSnapshot;
+      const resolvedDialect =
+        lastResolvedDialect ??
+        (currentSnapshot.dialect === "auto" ? null : currentSnapshot.dialect);
+
+      if (
+        !resolvedDialect ||
+        isNormalizedSqlApplying ||
+        isSqlErdDraftDirty(sqlErdEditStateRef.current)
+      ) {
+        return null;
+      }
+
+      const candidate = createSqlErdAnnotationForeignKeyConversionCandidate({
+        annotationId,
+        dialect: resolvedDialect,
+        labelDisposition,
+        layoutJson: currentSnapshot.layoutJson,
+        modelJson: currentSnapshot.modelJson,
+        settingsJson: currentSnapshot.settingsJson
+      });
+
+      if (!candidate.ok) {
+        return candidate;
+      }
+
+      setNormalizedSqlApplyError(null);
+      setNormalizedSqlPreview(
+        createSqlErdNormalizedSqlPreview({
+          layoutJson: candidate.layoutJson,
+          modelJson: candidate.modelJson,
+          resolvedDialect,
+          session: currentSnapshot,
+          settingsJson: candidate.settingsJson
+        })
+      );
+
+      return candidate;
+    },
+    [isNormalizedSqlApplying, lastResolvedDialect]
+  );
   const handleApplyNormalizedSql = useCallback(() => {
     if (
       !normalizedSqlPreview ||
@@ -863,6 +924,8 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
       sourceMapModelJson: normalizedSqlPreview.modelJson,
       targetSnapshot: {
         ...baseSnapshot,
+        layoutJson: normalizedSqlPreview.layoutJson,
+        settingsJson: normalizedSqlPreview.settingsJson,
         sourceText: normalizedSqlPreview.generatedSourceText
       }
     });
@@ -1701,6 +1764,9 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
         isOpen={isInspectorOpen}
         modelJson={sqlErdViewSession.modelJson}
         onAddForeignKey={handlePreviewForeignKeyAdd}
+        onConvertAnnotationToForeignKey={
+          handlePreviewAnnotationForeignKeyConversion
+        }
         onDeleteForeignKey={handlePreviewForeignKeyDelete}
         onClearTablePin={handleClearTablePin}
         onNavigateToPinnedTable={handleNavigateToPinnedTable}
@@ -2511,6 +2577,10 @@ type InspectorPanelProps = PanelToggleProps & {
     toColumnId: string;
     toTableId: string;
   }) => SqltoerdForeignKeyAddResult | null;
+  onConvertAnnotationToForeignKey: (input: {
+    annotationId: string;
+    labelDisposition: SqltoerdAnnotationLabelDisposition;
+  }) => SqltoerdAnnotationForeignKeyConversionResult | null;
   onDeleteForeignKey: (input: {
     relationId: string;
   }) => SqltoerdForeignKeyEditResult | null;
@@ -2534,6 +2604,7 @@ function InspectorPanel({
   isOpen,
   modelJson,
   onAddForeignKey,
+  onConvertAnnotationToForeignKey,
   onDeleteForeignKey,
   onClearTablePin,
   onNavigateToPinnedTable,
@@ -2591,6 +2662,7 @@ function InspectorPanel({
           emptyState={emptyState}
           modelJson={modelJson}
           onAddForeignKey={onAddForeignKey}
+          onConvertAnnotationToForeignKey={onConvertAnnotationToForeignKey}
           onDeleteForeignKey={onDeleteForeignKey}
           onUpdateForeignKey={onUpdateForeignKey}
           viewModel={viewModel}
@@ -2756,6 +2828,7 @@ function InspectorContent({
   emptyState,
   modelJson,
   onAddForeignKey,
+  onConvertAnnotationToForeignKey,
   onDeleteForeignKey,
   onUpdateForeignKey,
   viewModel
@@ -2769,6 +2842,10 @@ function InspectorContent({
     toColumnId: string;
     toTableId: string;
   }) => SqltoerdForeignKeyAddResult | null;
+  onConvertAnnotationToForeignKey: (input: {
+    annotationId: string;
+    labelDisposition: SqltoerdAnnotationLabelDisposition;
+  }) => SqltoerdAnnotationForeignKeyConversionResult | null;
   onDeleteForeignKey: (input: {
     relationId: string;
   }) => SqltoerdForeignKeyEditResult | null;
@@ -2807,7 +2884,13 @@ function InspectorContent({
   }
 
   if (viewModel.type === "annotation") {
-    return <AnnotationInspector viewModel={viewModel} />;
+    return (
+      <AnnotationInspector
+        canConvertAnnotationToForeignKey={canAddForeignKey}
+        onConvertAnnotationToForeignKey={onConvertAnnotationToForeignKey}
+        viewModel={viewModel}
+      />
+    );
   }
 
   return (
@@ -3067,6 +3150,20 @@ function getForeignKeyAddFailureMessage(
   return "선택한 FK 관계를 만들 수 없습니다.";
 }
 
+function getAnnotationForeignKeyConversionFailureMessage(
+  reason: SqltoerdAnnotationForeignKeyConversionFailureReason
+) {
+  if (reason === "annotation_not_found") {
+    return "선택한 설명 관계를 찾을 수 없습니다. Canvas를 다시 확인하세요.";
+  }
+
+  if (reason === "annotation_not_column_link") {
+    return "컬럼 설명 관계만 FK로 전환할 수 있습니다.";
+  }
+
+  return getForeignKeyAddFailureMessage(reason);
+}
+
 function getForeignKeyEditFailureMessage(
   reason: SqltoerdForeignKeyEditFailureReason
 ) {
@@ -3104,7 +3201,7 @@ function RelationInspector({
   }) => SqltoerdForeignKeyEditResult | null;
   viewModel: Extract<SqlErdInspectorViewModel, { type: "relation" }>;
 }) {
-  const { cardinality, endpoints, relation } = viewModel;
+  const { cardinality, endpoints, relation, relationNote } = viewModel;
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [foreignKeyEditError, setForeignKeyEditError] = useState<string | null>(
@@ -3213,6 +3310,7 @@ function RelationInspector({
             value={formatSqlErdRelationCardinalityMeaning(cardinality)}
           />
         ) : null}
+        {relationNote ? <InspectorRow label="메모" value={relationNote} /> : null}
       </div>
       <div className="space-y-3 rounded-md border p-3">
         <div className="flex items-center justify-between gap-3">
@@ -3351,11 +3449,50 @@ function RelationInspector({
 }
 
 function AnnotationInspector({
+  canConvertAnnotationToForeignKey,
+  onConvertAnnotationToForeignKey,
   viewModel
 }: {
+  canConvertAnnotationToForeignKey: boolean;
+  onConvertAnnotationToForeignKey: (input: {
+    annotationId: string;
+    labelDisposition: SqltoerdAnnotationLabelDisposition;
+  }) => SqltoerdAnnotationForeignKeyConversionResult | null;
   viewModel: Extract<SqlErdInspectorViewModel, { type: "annotation" }>;
 }) {
   const isTableLink = viewModel.annotation.kind === "table_link";
+  const [isConversionDialogOpen, setIsConversionDialogOpen] = useState(false);
+  const [conversionError, setConversionError] = useState<string | null>(null);
+  const [labelDisposition, setLabelDisposition] =
+    useState<SqltoerdAnnotationLabelDisposition>("preserve_as_relation_note");
+
+  useEffect(() => {
+    setConversionError(null);
+    setIsConversionDialogOpen(false);
+    setLabelDisposition("preserve_as_relation_note");
+  }, [viewModel.annotation.id]);
+
+  const handleConvertToForeignKey = () => {
+    const result = onConvertAnnotationToForeignKey({
+      annotationId: viewModel.annotation.id,
+      labelDisposition
+    });
+
+    if (!result) {
+      setConversionError("현재 SQL을 Generate한 뒤 FK로 전환하세요.");
+      return;
+    }
+
+    if (!result.ok) {
+      setConversionError(
+        getAnnotationForeignKeyConversionFailureMessage(result.reason)
+      );
+      return;
+    }
+
+    setConversionError(null);
+    setIsConversionDialogOpen(false);
+  };
 
   return (
     <>
@@ -3372,6 +3509,95 @@ function AnnotationInspector({
       <p className="rounded-md border border-dashed p-4 text-base leading-7 text-muted-foreground">
         SQL에 반영되지 않는 사용자 설명 관계입니다.
       </p>
+      {!isTableLink ? (
+        <div className="space-y-2 rounded-md border p-3">
+          <p className="text-base font-medium">FK 전환</p>
+          <p className="text-sm leading-6 text-muted-foreground">
+            endpoint 유효성을 확인한 뒤 SQL diff에서 승인하면 실제 FK로 바뀝니다.
+          </p>
+          {conversionError ? (
+            <p className="rounded-md border border-destructive/30 bg-destructive/5 p-2 text-sm text-destructive">
+              {conversionError}
+            </p>
+          ) : null}
+          <button
+            className="inline-flex h-9 w-full items-center justify-center rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
+            disabled={!canConvertAnnotationToForeignKey}
+            onClick={() => {
+              setConversionError(null);
+              setIsConversionDialogOpen(true);
+            }}
+            type="button"
+          >
+            FK로 전환
+          </button>
+        </div>
+      ) : null}
+      <Dialog
+        open={isConversionDialogOpen}
+        onOpenChange={setIsConversionDialogOpen}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>FK로 전환할까요?</DialogTitle>
+            <DialogDescription>
+              설명 관계는 Apply 전까지 유지됩니다. SQL diff를 승인하면 설명선이 실제 FK로 교체됩니다.
+            </DialogDescription>
+          </DialogHeader>
+          <fieldset className="space-y-2">
+            <legend className="text-sm font-medium">설명 label 처리</legend>
+            <label className="flex items-start gap-2 rounded-md border p-3 text-sm">
+              <input
+                checked={labelDisposition === "preserve_as_relation_note"}
+                name={`annotation-label-${viewModel.annotation.id}`}
+                onChange={() => setLabelDisposition("preserve_as_relation_note")}
+                type="radio"
+              />
+              <span>
+                <span className="block font-medium">관계 메모로 보관</span>
+                <span className="block text-muted-foreground">
+                  label을 새 FK의 상세보기 메모로 보관합니다.
+                </span>
+              </span>
+            </label>
+            <label className="flex items-start gap-2 rounded-md border p-3 text-sm">
+              <input
+                checked={labelDisposition === "discard"}
+                name={`annotation-label-${viewModel.annotation.id}`}
+                onChange={() => setLabelDisposition("discard")}
+                type="radio"
+              />
+              <span>
+                <span className="block font-medium">설명 삭제</span>
+                <span className="block text-muted-foreground">
+                  기존 label을 보관하지 않습니다.
+                </span>
+              </span>
+            </label>
+          </fieldset>
+          {conversionError ? (
+            <p className="rounded-md border border-destructive/30 bg-destructive/5 p-2 text-sm text-destructive">
+              {conversionError}
+            </p>
+          ) : null}
+          <div className="flex justify-end gap-2">
+            <button
+              className="inline-flex h-9 items-center rounded-md border px-3 text-sm font-medium"
+              onClick={() => setIsConversionDialogOpen(false)}
+              type="button"
+            >
+              취소
+            </button>
+            <button
+              className="inline-flex h-9 items-center rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground"
+              onClick={handleConvertToForeignKey}
+              type="button"
+            >
+              SQL diff 보기
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

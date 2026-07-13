@@ -363,6 +363,28 @@ type SqltoerdWorkspaceSessionSummary = {
 `settingsJson`은 선택값으로 받을 수 있으나, theme 전환이나 panel preference
 저장은 이번 multi-session 계약의 수용 기준으로 삼지 않는다.
 
+### `settingsJson.sqltoerdRelationNotes`
+
+설명 관계(`column_link`)를 실제 FK로 전환할 때 사용자가 기존 label 보관을
+선택하면, label은 SQL 문이나 FK constraint name이 아니라 아래 relation note map에
+저장한다.
+
+```ts
+type SqltoerdRelationNotes = Record<string, string>;
+
+type SqltoerdSettingsJson = {
+  sqltoerdRelationNotes?: SqltoerdRelationNotes;
+  [key: string]: unknown;
+};
+```
+
+- key는 현재 `modelJson.schema.relations`에 존재하는 stable FK relation id다.
+- value는 전환 전 설명 관계 label이며, 기존 annotation label 제한(최대 200자)을
+  따른다.
+- relation note는 FK SQL, relation count, FK cardinality를 변경하지 않는다.
+- 사용자가 label 폐기를 선택하거나 대상 FK가 없어지면 relation note를 저장하거나
+  표시하지 않는다.
+
 ## Session 목록 조회
 
 ```http
