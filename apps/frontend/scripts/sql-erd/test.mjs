@@ -6055,8 +6055,9 @@ assert.match(canvasSurface, /syncSqlErdAnnotationShapes/);
 assert.match(canvasSurface, /addSqltoerdColumnAnnotation/);
 assert.match(canvasSurface, /addSqltoerdTableAnnotation/);
 assert.match(canvasSurface, /SQLTOERD_TABLE_CONNECT_START_EVENT/);
-assert.match(canvasSurface, /updateSqltoerdAnnotationLabel/);
-assert.match(canvasSurface, /removeSqltoerdAnnotation/);
+assert.match(canvasSurface, /linksToAdd/);
+assert.match(canvasSurface, /linksById/);
+assert.match(canvasSurface, /deleteLinkIds/);
 assert.match(canvasSurface, /event\.key === "Delete"/);
 assert.match(canvasSurface, /event\.key === "Backspace"/);
 assert.match(canvasSurface, /window\.addEventListener\("keydown", handleKeyDown, true\)/);
@@ -6076,7 +6077,8 @@ assert.match(canvasSurface, /history: "ignore"/);
 assert.match(canvasSurface, /SqlErdSelectionSync/);
 assert.match(canvasSurface, /SqlErdSelectedColumnSync/);
 assert.match(canvasSurface, /SqlErdLayoutSync/);
-assert.match(canvasSurface, /onLayoutChange/);
+assert.match(canvasSurface, /onLayoutPatch/);
+assert.doesNotMatch(canvasSurface, /onLayoutChange/);
 assert.match(canvasSurface, /updateSqltoerdLayoutWithTablePositions/);
 assert.match(canvasSurface, /onSelectionChange/);
 assert.match(canvasSurface, /getSqlErdSelectionFromSelectedShapes/);
@@ -6314,6 +6316,24 @@ const layoutWithCreatedFrame = modelRuntime.applySqltoerdLayoutPatch(
 );
 assert.equal(layoutWithCreatedFrame.annotations.frames[0].title, "Billing");
 assert.equal(
+  modelRuntime.areSqltoerdLayoutsEqual(
+    layoutWithCreatedFrame,
+    modelRuntime.applySqltoerdLayoutPatch(layoutWithCreatedFrame, {
+      notesById: { "note.users": { text: "after" } }
+    })
+  ),
+  false
+);
+assert.equal(
+  modelRuntime.areSqltoerdLayoutsEqual(
+    layoutWithCreatedFrame,
+    modelRuntime.applySqltoerdLayoutPatch(layoutWithCreatedFrame, {
+      framesById: { "frame.billing": { isLocked: false } }
+    })
+  ),
+  false
+);
+assert.equal(
   modelRuntime.applySqltoerdLayoutPatch(layoutWithCreatedFrame, {
     linksToAdd: [{ id: "link.users.orders", kind: "table_link", fromTableId: "table.users", toTableId: "table.orders", label: "owns" }],
     linksById: { "link.users.orders": { label: "ignored-before-add" } }
@@ -6331,3 +6351,5 @@ assert.match(canvasSurface, /SqlErdNoteShapeUtil/);
 assert.match(canvasSurface, /SqlErdFrameShapeUtil/);
 assert.match(canvasSurface, /data-sqltoerd-add-note/);
 assert.match(canvasSurface, /data-sqltoerd-add-frame/);
+assert.match(canvasSurface, /onLayoutPatch\(\{ tablePositions: nextLayoutJson\.tableLayouts \}\)/);
+assert.doesNotMatch(canvasSurface, /onLayoutChange/);

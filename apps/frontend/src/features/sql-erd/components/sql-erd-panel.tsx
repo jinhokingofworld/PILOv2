@@ -1735,7 +1735,6 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           autosavePausedBanner={layoutAutosavePausedBanner}
           layoutJson={sqlErdViewSession.layoutJson}
           modelJson={sqlErdViewSession.modelJson}
-          onLayoutChange={handleLayoutChange}
           onLayoutPatch={handleLayoutPatch}
           onReloadSession={handleReloadPausedSession}
           onRetryLayoutAutosaveOnce={handleRetryLayoutAutosaveOnce}
@@ -2498,7 +2497,6 @@ type CanvasShellProps = {
   autosavePausedBanner: LayoutAutosavePausedBannerViewModel | null;
   layoutJson: SqltoerdSessionPayload["layoutJson"];
   modelJson: SqltoerdSessionPayload["modelJson"];
-  onLayoutChange: (layoutJson: SqltoerdLayoutJsonV1) => void;
   onLayoutPatch: (patch: SqltoerdLayoutPatch) => void;
   onReloadSession: () => void;
   onRetryLayoutAutosaveOnce: () => void;
@@ -2512,7 +2510,6 @@ function CanvasShell({
   autosavePausedBanner,
   layoutJson,
   modelJson,
-  onLayoutChange,
   onLayoutPatch,
   onReloadSession,
   onRetryLayoutAutosaveOnce,
@@ -2527,7 +2524,6 @@ function CanvasShell({
         className="absolute inset-0"
         layoutJson={layoutJson}
         modelJson={modelJson}
-        onLayoutChange={onLayoutChange}
         onLayoutPatch={onLayoutPatch}
         onSelectionChange={onSelectionChange}
         pinNavigationRequestId={pinNavigationRequestId}

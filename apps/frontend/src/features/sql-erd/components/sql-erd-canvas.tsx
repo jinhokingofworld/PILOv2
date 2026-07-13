@@ -100,8 +100,6 @@ import {
   getSqltoerdRenderableAnnotations,
   getTableLayout,
   inferSqlErdRelationCardinality,
-  removeSqltoerdAnnotation,
-  updateSqltoerdAnnotationLabel,
   updateSqltoerdLayoutWithTablePositions,
   type SqltoerdTablePosition
 } from "@/features/sql-erd/utils/model";
@@ -122,7 +120,6 @@ type SqlErdCanvasProps = {
   className?: string;
   layoutJson?: SqltoerdLayoutJsonV1;
   modelJson?: SqltoerdModelJsonV1;
-  onLayoutChange?: (layoutJson: SqltoerdLayoutJsonV1) => void;
   onLayoutPatch?: (patch: SqltoerdLayoutPatch) => void;
   onSelectionChange?: (selection: SqlErdSelection) => void;
   pinNavigationRequestId?: number;
@@ -2292,7 +2289,6 @@ export function SqlErdCanvas({
   className,
   layoutJson = commerceSqltoerdFixture.layoutJson,
   modelJson = commerceSqltoerdFixture.modelJson,
-  onLayoutChange,
   onLayoutPatch,
   onSelectionChange,
   pinNavigationRequestId = 0,
@@ -2375,7 +2371,7 @@ export function SqlErdCanvas({
   const handleAutoLayout = useCallback(() => {
     const editor = editorRef.current;
 
-    if (!editor || !onLayoutChange) {
+    if (!editor || !onLayoutPatch) {
       return;
     }
 
@@ -2386,9 +2382,9 @@ export function SqlErdCanvas({
     });
 
     if (nextLayoutJson) {
-      onLayoutChange(nextLayoutJson);
+      onLayoutPatch({ tablePositions: nextLayoutJson.tableLayouts });
     }
-  }, [layoutJson, modelJson, onLayoutChange]);
+  }, [layoutJson, modelJson, onLayoutPatch]);
 
   const handleAddNote = useCallback(() => {
     if (!onLayoutPatch || (layoutJson.annotations?.notes?.length ?? 0) >= 100) return;
@@ -2424,22 +2420,22 @@ export function SqlErdCanvas({
           pinnedTableId={pinnedTableId}
         />
         <SqlErdSelectedColumnSync selectedSqlErdObject={selectedSqlErdObject} />
-        {onLayoutChange || onLayoutPatch ? (
+        {onLayoutPatch ? (
           <>
-            {onLayoutPatch ? <SqlErdAnnotationInteractionSync
+            <SqlErdAnnotationInteractionSync
               layoutJson={layoutJson}
               modelJson={modelJson}
               onLayoutPatch={onLayoutPatch}
-            /> : null}
-            {onLayoutPatch ? <SqlErdLayoutSync
+            />
+            <SqlErdLayoutSync
               layoutJson={layoutJson}
               modelJson={modelJson}
               onLayoutPatch={onLayoutPatch}
-            /> : null}
-            {onLayoutPatch ? <SqlErdCanvasAnnotationSync
+            />
+            <SqlErdCanvasAnnotationSync
               layoutJson={layoutJson}
               onLayoutPatch={onLayoutPatch}
-            /> : null}
+            />
           </>
         ) : null}
         {onSelectionChange ? (
@@ -2449,14 +2445,13 @@ export function SqlErdCanvas({
           />
         ) : null}
       </TldrawSurface>
-      {onLayoutChange || onLayoutPatch ? (
+      {onLayoutPatch ? (
         <div className="absolute right-4 top-4 z-20 flex gap-2">
-          {onLayoutPatch ? <>
+          <>
             <button aria-label="메모 추가" className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm" data-sqltoerd-add-note disabled={(layoutJson.annotations?.notes?.length ?? 0) >= 100} onClick={handleAddNote} type="button">메모</button>
             <button aria-label="프레임 추가" className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm" data-sqltoerd-add-frame disabled={(layoutJson.annotations?.frames?.length ?? 0) >= 100} onClick={handleAddFrame} type="button">프레임</button>
-          </> : null}
-        {onLayoutChange ? (
-        <button
+          </>
+          <button
           aria-label="자동 정렬"
           className="absolute right-4 top-4 z-20 inline-flex h-9 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
           data-sqltoerd-auto-layout
@@ -2467,7 +2462,6 @@ export function SqlErdCanvas({
           <Workflow aria-hidden="true" className="size-4" />
           자동 정렬
         </button>
-        ) : null}
         </div>
       ) : null}
     </div>

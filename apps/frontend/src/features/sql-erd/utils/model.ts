@@ -4,6 +4,8 @@ import type {
   ErdTable,
   SqltoerdAnnotationLink,
   SqltoerdAnnotationsV1,
+  SqltoerdCanvasFrame,
+  SqltoerdCanvasNote,
   SqltoerdLayoutPatch,
   SqltoerdColumnAnnotationLink,
   SqltoerdLayoutJsonV1,
@@ -704,13 +706,61 @@ function areSqltoerdAnnotationsEqual(
 ) {
   const leftLinks = leftAnnotations?.links ?? [];
   const rightLinks = rightAnnotations?.links ?? [];
+  const leftNotes = leftAnnotations?.notes ?? [];
+  const rightNotes = rightAnnotations?.notes ?? [];
+  const leftFrames = leftAnnotations?.frames ?? [];
+  const rightFrames = rightAnnotations?.frames ?? [];
 
-  if (leftLinks.length !== rightLinks.length) {
+  if (
+    leftLinks.length !== rightLinks.length ||
+    leftNotes.length !== rightNotes.length ||
+    leftFrames.length !== rightFrames.length
+  ) {
     return false;
   }
 
-  return leftLinks.every((leftLink, index) =>
-    areSqltoerdAnnotationLinksEqual(leftLink, rightLinks[index])
+  return (
+    leftLinks.every((leftLink, index) =>
+      areSqltoerdAnnotationLinksEqual(leftLink, rightLinks[index])
+    ) &&
+    leftNotes.every((leftNote, index) =>
+      areSqltoerdCanvasNotesEqual(leftNote, rightNotes[index])
+    ) &&
+    leftFrames.every((leftFrame, index) =>
+      areSqltoerdCanvasFramesEqual(leftFrame, rightFrames[index])
+    )
+  );
+}
+
+function areSqltoerdCanvasNotesEqual(
+  leftNote: SqltoerdCanvasNote,
+  rightNote: SqltoerdCanvasNote | undefined
+) {
+  return (
+    rightNote !== undefined &&
+    leftNote.id === rightNote.id &&
+    leftNote.x === rightNote.x &&
+    leftNote.y === rightNote.y &&
+    leftNote.width === rightNote.width &&
+    leftNote.height === rightNote.height &&
+    leftNote.text === rightNote.text
+  );
+}
+
+function areSqltoerdCanvasFramesEqual(
+  leftFrame: SqltoerdCanvasFrame,
+  rightFrame: SqltoerdCanvasFrame | undefined
+) {
+  return (
+    rightFrame !== undefined &&
+    leftFrame.id === rightFrame.id &&
+    leftFrame.x === rightFrame.x &&
+    leftFrame.y === rightFrame.y &&
+    leftFrame.width === rightFrame.width &&
+    leftFrame.height === rightFrame.height &&
+    leftFrame.title === rightFrame.title &&
+    leftFrame.color === rightFrame.color &&
+    leftFrame.isLocked === rightFrame.isLocked
   );
 }
 
