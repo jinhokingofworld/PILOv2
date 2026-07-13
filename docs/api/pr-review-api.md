@@ -130,6 +130,10 @@ POST /api/v1/workspaces/{workspaceId}/github/pull-requests/{pullRequestId}/revie
 `201 Created`를 반환한다. room이나 같은 head revision이 이미 있으면 재사용하며, 새 revision을
 만들지 않은 경우 `200 OK`를 반환한다.
 
+GitHub Integration이 동기화한 PR 상태가 `closed`이거나 `merged_at`, `github_closed_at`이
+기록된 경우 새 room 또는 revision을 만들지 않고 `409 Conflict`를 반환한다. 이 endpoint는
+GitHub에 PR 상태를 직접 재조회하지 않고 동기화된 `github_pull_requests` read model을 사용한다.
+
 ```json
 {
   "room": {
@@ -160,7 +164,8 @@ POST /api/v1/workspaces/{workspaceId}/github/pull-requests/{pullRequestId}/revie
 - `GET /review-rooms/{reviewRoomId}`는 현재 성공 revision과 분석 중 revision ID를 함께 반환한다.
 - `GET /review-rooms/{reviewRoomId}/revisions`는 최신 생성 순 revision 이력을 반환한다.
 - `POST /review-rooms/{reviewRoomId}/revisions`는 현재 GitHub head를 분석한 revision을 생성하거나
-  이미 존재하는 `failed`가 아닌 revision을 반환한다. 완료 room에서는 `409`를 반환한다.
+  이미 존재하는 `failed`가 아닌 revision을 반환한다. 완료 room 또는 동기화된 PR이 종료된
+  상태에서는 `409`를 반환한다.
 
 ## Review Session 생성 호환 endpoint
 

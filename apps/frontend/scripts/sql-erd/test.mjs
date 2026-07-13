@@ -41,6 +41,7 @@ async function compileSqlErdRuntimeModules() {
     outputDir,
     "session-list-state.mjs"
   );
+  const sessionTitleOutputPath = join(outputDir, "session-title.mjs");
   const sessionStateOutputPath = join(outputDir, "session-state.mjs");
   const sqlEditStateOutputPath = join(outputDir, "sql-edit-state.mjs");
   const statusCopyOutputPath = join(outputDir, "status-copy.mjs");
@@ -185,6 +186,10 @@ async function compileSqlErdRuntimeModules() {
       sessionListStateOutputPath
     );
     await compileTypeScriptModule(
+      "../../src/features/sql-erd/utils/session-title.ts",
+      sessionTitleOutputPath
+    );
+    await compileTypeScriptModule(
       "../../src/features/sql-erd/utils/session-state.ts",
       sessionStateOutputPath
     );
@@ -319,6 +324,7 @@ async function compileSqlErdRuntimeModules() {
       apiClientRuntime,
       sessionNavigationRuntime,
       sessionListStateRuntime,
+      sessionTitleRuntime,
       sessionStateRuntime,
       sqlEditStateRuntime,
       sqlEditorDialectRuntime,
@@ -343,6 +349,7 @@ async function compileSqlErdRuntimeModules() {
       import(pathToFileHref(apiClientOutputPath)),
       import(pathToFileHref(sessionNavigationOutputPath)),
       import(pathToFileHref(sessionListStateOutputPath)),
+      import(pathToFileHref(sessionTitleOutputPath)),
       import(pathToFileHref(sessionStateOutputPath)),
       import(pathToFileHref(sqlEditStateOutputPath)),
       import(pathToFileHref(sqlEditorDialectOutputPath)),
@@ -371,6 +378,7 @@ async function compileSqlErdRuntimeModules() {
       relationShapeRuntime,
       sessionListStateRuntime,
       sessionNavigationRuntime,
+      sessionTitleRuntime,
       sessionStateRuntime,
       sqlEditStateRuntime,
       sqlEditorDialectRuntime,
@@ -722,6 +730,7 @@ const {
   apiClientRuntime,
   sessionListStateRuntime,
   sessionNavigationRuntime,
+  sessionTitleRuntime,
   canvasSelectionRuntime,
   ddlParserRuntime,
   sqlSourceMapRuntime,
@@ -3498,6 +3507,96 @@ assert.deepEqual(
   [{ id: "session-2" }]
 );
 
+assert.equal(
+  sessionTitleRuntime.getSqlErdCreateSessionTitle("  주문 도메인 ERD  "),
+  "주문 도메인 ERD"
+);
+assert.equal(
+  sessionTitleRuntime.getSqlErdCreateSessionTitle("   "),
+  undefined
+);
+assert.equal(
+  sessionTitleRuntime.getSqlErdSessionTitleUpdate("  주문 도메인 ERD  "),
+  "주문 도메인 ERD"
+);
+assert.equal(sessionTitleRuntime.getSqlErdSessionTitleUpdate("   "), null);
+assert.deepEqual(
+  sessionTitleRuntime.updateSqlErdSessionSummaryTitle(
+    [
+      {
+        id: "session-1",
+        revision: 3,
+        title: "기존 제목",
+        updatedAt: "2026-07-14T10:00:00.000Z"
+      },
+      {
+        id: "session-2",
+        revision: 2,
+        title: "다른 제목",
+        updatedAt: "2026-07-13T10:00:00.000Z"
+      }
+    ],
+    {
+      id: "session-1",
+      revision: 4,
+      title: "변경된 제목",
+      updatedAt: "2026-07-14T11:00:00.000Z"
+    }
+  ),
+  [
+    {
+      id: "session-1",
+      revision: 4,
+      title: "변경된 제목",
+      updatedAt: "2026-07-14T11:00:00.000Z"
+    },
+    {
+      id: "session-2",
+      revision: 2,
+      title: "다른 제목",
+      updatedAt: "2026-07-13T10:00:00.000Z"
+    }
+  ]
+);
+assert.deepEqual(
+  sessionTitleRuntime.updateSqlErdSessionSummaryTitle(
+    [
+      {
+        id: "session-1",
+        revision: 3,
+        title: "기존 제목",
+        updatedAt: "2026-07-14T10:00:00.000Z"
+      },
+      {
+        id: "session-2",
+        revision: 2,
+        title: "다른 제목",
+        updatedAt: "2026-07-13T10:00:00.000Z"
+      }
+    ],
+    {
+      id: "session-2",
+      revision: 3,
+      title: "수정된 제목",
+      updatedAt: "2026-07-14T11:00:00.000Z"
+    }
+  ),
+  [
+    {
+      id: "session-2",
+      revision: 3,
+      title: "수정된 제목",
+      updatedAt: "2026-07-14T11:00:00.000Z"
+    },
+    {
+      id: "session-1",
+      revision: 3,
+      title: "기존 제목",
+      updatedAt: "2026-07-14T10:00:00.000Z"
+    }
+  ]
+);
+
 const listSqlErdSessionRequests = [];
 const listSqlErdSessionClient = apiClientRuntime.createSqlErdApiClient({
   accessToken: "token-1",
@@ -5547,6 +5646,13 @@ assert.doesNotMatch(homeDashboardData, /getActiveSession/);
 assert.match(sessionList, /listSessions/);
 assert.match(sessionList, /buildSqlErdSessionHref/);
 assert.match(sessionList, /createSession/);
+assert.match(sessionList, /getSqlErdCreateSessionTitle/);
+assert.match(sessionList, /getSqlErdSessionTitleUpdate/);
+assert.match(sessionList, /updateSqlErdSessionSummaryTitle/);
+assert.match(sessionList, /updateSession/);
+assert.match(sessionList, /baseRevision: session\.revision/);
+assert.match(sessionList, /DialogTitle>새 ERD 만들기/);
+assert.match(sessionList, /제목 수정/);
 assert.match(sessionList, /deleteSession/);
 assert.match(sessionList, /nextCursor/);
 assert.match(sessionList, /더 보기/);

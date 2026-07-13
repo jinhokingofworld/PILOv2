@@ -241,8 +241,19 @@ terraform apply
 
 - pull request에서 `terraform fmt` 실행
 - pull request에서 `terraform validate` 실행
-- pull request에서 `terraform plan` 실행
-- OIDC assume role 성공 확인
+- `AWS_TERRAFORM_PLAN_ROLE_ARN`이 설정된 동일 저장소 PR에서만 전용 read-only role로 remote backend `terraform plan`을 실행한다. 외부 fork PR은 role을 assume하지 못하고 fmt/validate만 실행한다.
+- main push와 main branch의 `workflow_dispatch`도 같은 전용 plan role로 `terraform plan`을 실행한다.
+- 기존 `AWS_GITHUB_ACTIONS_ROLE_ARN`은 배포 전용 고권한 role이며, PR plan에 사용하거나 OIDC trust를 PR까지 확장하지 않는다.
+- plan 실행에서 OIDC assume role 성공과 remote backend 연결을 확인한다.
+
+### PR Terraform plan 최초 활성화
+
+1. main에서 Terraform 변경을 승인·apply한다.
+2. `terraform -chdir=infra/envs/dev output -raw terraform_plan_role_arn`으로 전용 role ARN을 확인한다.
+3. GitHub repository variable `AWS_TERRAFORM_PLAN_ROLE_ARN`에 위 ARN을 등록한다.
+4. 동일 저장소에서 `infra/**` 또는 Terraform workflow를 변경한 PR을 열어 `Terraform Validate / plan`이 remote state 기준으로 성공하는지 확인한다.
+
+role에는 state object read와 lockfile 생성·해제, 현재 Terraform state refresh에 필요한 명시적 읽기 권한만 부여한다. secret value read, 리소스 변경, IAM 변경은 허용하지 않는다.
 
 ### App Server workflow
 

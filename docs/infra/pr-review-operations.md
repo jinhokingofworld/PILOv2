@@ -5,6 +5,7 @@
 PR Review session 생성부터 전용 Worker 분석 완료 또는 실패까지를 `session_id`와
 `job_id`로 추적하고, terminal failure가 발생했을 때 원본 기록을 훼손하지 않고 새 분석을
 시작한다. PR patch, OAuth token, OpenAI 원문 오류와 secret은 로그나 운영 기록에 남기지 않는다.
+대신 단계, 안전한 오류 타입, HTTP 상태, provider request ID와 소요 시간을 기록한다.
 
 ## Correlation 키
 
@@ -33,6 +34,31 @@ App Server log group은 `/ecs/pilo-dev/app-server`, 전용 Worker log group은
 `PR Review analysis published`, `publish retry scheduled`, `publish retries exhausted`,
 `Recovered stale PR Review analysis`와 24시간 상태 집계 로그를 확인한다. Worker에서는
 `pr_review_analysis_started`와 `pr_review_analysis_finished`를 확인한다.
+
+### Worker 관측 이벤트
+
+| 이벤트 | 주요 필드 | 의미 |
+| --- | --- | --- |
+| `pr_review_analysis_stage` | `job_id`, `review_session_id`, `stage`, `outcome`, `elapsed_ms` | `input_handoff`, `provider`, `result_handoff`, `failure_handoff` 단계의 시작·완료·실패 |
+| `pr_review_analysis_provider_started` | `model`, `file_count`, `patch_chars`, `relation_count`, `flow_count` | OpenAI에 전달한 분석 규모. 원문은 기록하지 않는다. |
+| `pr_review_analysis_provider_succeeded` | `request_id`, `elapsed_ms`, `output_chars` | OpenAI 응답과 schema 검증이 완료됨 |
+| `pr_review_analysis_provider_failed` | `category`, `error_type`, `status_code`, `request_id`, `elapsed_ms` | OpenAI 호출 자체의 retryable 또는 terminal 실패 |
+| `pr_review_analysis_provider_output_invalid` | `error_type`, `request_id`, `elapsed_ms` | OpenAI 호출은 성공했지만 응답 schema 검증에 실패함 |
+
+`pr_review_analysis_provider_failed`의 `error_type`은 예를 들어 `APITimeoutError`,
+`APIConnectionError`, `RateLimitError`, `InternalServerError`처럼 원인 분류에 필요한 class 이름만
+기록한다. provider 예외 메시지, 응답 body, prompt, patch, 생성 결과와 stack trace는 기록하지
+않는다. `request_id`는 OpenAI 지원 또는 provider 로그와 대조할 때만 사용한다.
+
+분석 지연은 다음 순서로 확인한다.
+
+1. DB에서 `job_id`, `session_id`, Job 상태와 마지막 갱신 시각을 찾는다.
+2. 같은 ID의 마지막 `pr_review_analysis_stage`를 찾는다.
+3. `input_handoff` 실패면 App Server 또는 GitHub 입력 조회를 확인한다.
+4. `provider` 실패면 `pr_review_analysis_provider_failed`의 `error_type`, `status_code`,
+   `request_id`, `elapsed_ms`를 확인한다.
+5. provider가 성공하고 `result_handoff`가 실패했다면 App Server 결과 저장과 DB 상태를
+   확인한다.
 
 ## DB 확인
 
@@ -105,6 +131,21 @@ POST /api/v1/workspaces/{workspaceId}/github/review-sessions/{failedSessionId}/r
 반환한다. failed가 아닌 session은 `409 Conflict`, 존재하지 않으면 `404 Not Found`다.
 
 ## Dev E2E 기록
+
+### 2026-07-14 대형 PR 분석 관측 공백 발견
+
+| 항목 | 결과 |
+| --- | --- |
+| PR | `#903`, 15 files, `+807/-44` |
+| Session | `26396b3c-fd12-4c8c-9d25-e862cd6d0b50` |
+| Job | `4939fdc1-5467-4b88-87c4-ca54a5f6ab93` |
+| DB 상태 | session `analyzing`, job `processing` |
+| 첫 재수신 | 최초 처리 시작 900초 뒤 Job `updated_at` 갱신 |
+| 비교 결과 | 3 files PR은 21~32초에 완료됐고, 다른 15 files PR `#884`는 961초 뒤 완료 |
+| 확인 한계 | 기존 Worker가 timeout, connection, rate limit, provider 5xx를 모두 `infrastructure_failure`로 축약해 최초 원인 확정 불가 |
+
+이 사례를 계기로 위 provider·stage 관측 이벤트를 추가했다. 재현 후 오류 타입과 provider
+소요 시간을 확인하기 전에는 timeout 또는 payload 규모를 확정 원인으로 기록하지 않는다.
 
 ### 2026-07-12 정상 분석
 

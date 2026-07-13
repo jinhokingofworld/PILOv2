@@ -26,6 +26,6 @@ AI 분석 환경 변수:
 - `OPENAI_PR_REVIEW_MODEL`: 선택값. local 기본값은 `gpt-5.1-mini`이고, dev ECS 배포 환경은
   `infra/envs/dev/main.tf`에서 `gpt-5.5`를 주입한다.
 - `OPENAI_PR_REVIEW_TIMEOUT_MS`: 선택값. local 기본값은 `15000`이고, dev ECS 배포 환경은
-  `45000`을 주입한다.
+  App Server에 `45000`, PR Review 전용 Worker에 `60000`을 주입한다.
 - API key가 없거나 호출/검증에 실패하면 PR 분석은 deterministic fallback 분석을 저장하고,
   conflict suggestion은 저장 없이 deterministic fallback 초안을 반환한다.

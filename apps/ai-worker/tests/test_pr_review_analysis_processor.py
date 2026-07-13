@@ -1,10 +1,13 @@
 import json
 import logging
+from types import SimpleNamespace
 
+import app.pr_review_analysis_processor as processor_module
 from app.meeting_report_processor import InfrastructureError
 from app.pr_review_analysis_processor import (
     PR_REVIEW_ANALYSIS_JOB_TYPE,
     PR_REVIEW_ANALYSIS_SCHEMA_VERSION,
+    OpenAiPrReviewAnalysisClient,
     PrReviewAnalysisFileResult,
     PrReviewAnalysisInputError,
     PrReviewAnalysisOutputError,
@@ -308,6 +311,9 @@ def test_processor_forwards_normalized_analysis_to_next_handoff(caplog) -> None:
     assert handoff.submitted_results == [(handoff.requested_jobs[0], analysis_result())]
     assert JOB_ID in caplog.text
     assert SESSION_ID in caplog.text
+    assert "stage=input_handoff outcome=completed" in caplog.text
+    assert "stage=provider outcome=completed" in caplog.text
+    assert "stage=result_handoff outcome=completed" in caplog.text
 
 
 def test_processor_deletes_invalid_payload_and_terminal_input_or_output_errors() -> None:
@@ -376,15 +382,117 @@ def test_retry_exhaustion_keeps_message_when_failure_handoff_is_unavailable() ->
     assert processor.terminalize_retry_exhaustion(json.dumps(job_payload())) is False
 
 
-def test_processor_keeps_infrastructure_failures_for_sqs_retry() -> None:
+def test_processor_keeps_infrastructure_failures_for_sqs_retry(caplog) -> None:
+    caplog.set_level(logging.INFO)
     result = PrReviewAnalysisProcessor(
         FakeHandoffClient(input_value=parsed_input()),
-        FakeAnalysisClient(error=InfrastructureError("OpenAI unavailable")),
+        FakeAnalysisClient(error=InfrastructureError("sensitive provider response")),
     ).process_payload(job_payload())
 
     assert result.delete_message is False
     assert result.reason == "infrastructure_failure"
     assert result.job_id == JOB_ID
+    assert "stage=provider outcome=failed error_type=InfrastructureError" in caplog.text
+    assert "sensitive provider response" not in caplog.text
+
+
+def test_openai_provider_logs_safe_success_metrics(caplog) -> None:
+    input_value = parsed_input()
+    response = SimpleNamespace(
+        output_text=json.dumps(_serialize_analysis_result(analysis_result())),
+        _request_id="req_success_123",
+    )
+    fake_responses = SimpleNamespace(create=lambda **_kwargs: response)
+    client = object.__new__(OpenAiPrReviewAnalysisClient)
+    client.client = SimpleNamespace(responses=fake_responses)
+    client.model = "gpt-observability"
+    timestamps = iter([10.0, 10.25])
+    client.monotonic_time = lambda: next(timestamps)
+
+    caplog.set_level(logging.INFO)
+    result = client.analyze(input_value)
+
+    assert result == analysis_result()
+    assert "pr_review_analysis_provider_started" in caplog.text
+    assert "pr_review_analysis_provider_succeeded" in caplog.text
+    assert f"job_id={JOB_ID}" in caplog.text
+    assert f"review_session_id={SESSION_ID}" in caplog.text
+    assert "model=gpt-observability" in caplog.text
+    assert "file_count=2" in caplog.text
+    assert "request_id=req_success_123" in caplog.text
+    assert "elapsed_ms=250" in caplog.text
+    assert "+export const asyncReview = true;" not in caplog.text
+
+
+def test_openai_provider_logs_safe_retryable_error_metadata(monkeypatch, caplog) -> None:
+    class FakeRetryableError(Exception):
+        status_code = 429
+        request_id = "req_retry_456"
+
+    secret_error_text = "secret provider response body"
+
+    def raise_retryable(**_kwargs):
+        raise FakeRetryableError(secret_error_text)
+
+    monkeypatch.setattr(
+        processor_module,
+        "_openai_retryable_errors",
+        lambda: (FakeRetryableError,),
+    )
+    client = object.__new__(OpenAiPrReviewAnalysisClient)
+    client.client = SimpleNamespace(responses=SimpleNamespace(create=raise_retryable))
+    client.model = "gpt-observability"
+    timestamps = iter([20.0, 81.5])
+    client.monotonic_time = lambda: next(timestamps)
+
+    caplog.set_level(logging.INFO)
+    try:
+        client.analyze(parsed_input())
+    except InfrastructureError:
+        pass
+    else:
+        raise AssertionError("retryable provider error must be retried by SQS")
+
+    assert "pr_review_analysis_provider_failed" in caplog.text
+    assert "category=retryable" in caplog.text
+    assert "error_type=FakeRetryableError" in caplog.text
+    assert "status_code=429" in caplog.text
+    assert "request_id=req_retry_456" in caplog.text
+    assert "elapsed_ms=61500" in caplog.text
+    assert secret_error_text not in caplog.text
+
+
+def test_openai_provider_logs_safe_terminal_error_metadata(caplog) -> None:
+    class FakeTerminalError(Exception):
+        status_code = 400
+        request_id = "req_terminal_789"
+
+    secret_error_text = "secret invalid request body"
+
+    def raise_terminal(**_kwargs):
+        raise FakeTerminalError(secret_error_text)
+
+    client = object.__new__(OpenAiPrReviewAnalysisClient)
+    client.client = SimpleNamespace(responses=SimpleNamespace(create=raise_terminal))
+    client.model = "gpt-observability"
+    timestamps = iter([30.0, 30.1])
+    client.monotonic_time = lambda: next(timestamps)
+
+    caplog.set_level(logging.INFO)
+    try:
+        client.analyze(parsed_input())
+    except PrReviewAnalysisProviderError:
+        pass
+    else:
+        raise AssertionError("terminal provider error must fail the analysis")
+
+    assert "pr_review_analysis_provider_failed" in caplog.text
+    assert "category=terminal" in caplog.text
+    assert "error_type=FakeTerminalError" in caplog.text
+    assert "status_code=400" in caplog.text
+    assert "request_id=req_terminal_789" in caplog.text
+    assert "elapsed_ms=100" in caplog.text
+    assert secret_error_text not in caplog.text
 
 
 def test_output_validator_rejects_file_mismatch_and_invalid_risk_level() -> None:

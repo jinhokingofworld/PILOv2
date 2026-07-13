@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Iterable
+import time
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, TypeVar
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 from uuid import UUID
@@ -24,6 +25,7 @@ from app.pr_review_semantic_graph import (
 )
 
 LOGGER = logging.getLogger(__name__)
+T = TypeVar("T")
 
 PR_REVIEW_ANALYSIS_JOB_TYPE = "pr_review_analysis_requested"
 PR_REVIEW_ANALYSIS_SCHEMA_VERSION = "pr-review-analysis:v1"
@@ -173,9 +175,11 @@ class PrReviewAnalysisProcessor:
         self,
         handoff_client: PrReviewAnalysisHandoffClient,
         analysis_client: PrReviewAnalysisClient,
+        monotonic_time: Callable[[], float] = time.monotonic,
     ) -> None:
         self.handoff_client = handoff_client
         self.analysis_client = analysis_client
+        self.monotonic_time = monotonic_time
 
     def process_payload(self, payload: dict[str, object]) -> PrReviewAnalysisProcessResult:
         try:
@@ -193,9 +197,21 @@ class PrReviewAnalysisProcessor:
         )
 
         try:
-            input_value = self.handoff_client.get_input(job)
-            analysis = self.analysis_client.analyze(input_value)
-            self.handoff_client.submit_result(job, analysis)
+            input_value = self._run_stage(
+                job,
+                "input_handoff",
+                lambda: self.handoff_client.get_input(job),
+            )
+            analysis = self._run_stage(
+                job,
+                "provider",
+                lambda: self.analysis_client.analyze(input_value),
+            )
+            self._run_stage(
+                job,
+                "result_handoff",
+                lambda: self.handoff_client.submit_result(job, analysis),
+            )
         except PrReviewAnalysisInputError:
             return self._submit_terminal_failure(
                 job,
@@ -240,7 +256,14 @@ class PrReviewAnalysisProcessor:
             return True
 
         try:
-            self.handoff_client.submit_failure(job, "ANALYSIS_PROVIDER_FAILED")
+            self._run_stage(
+                job,
+                "failure_handoff",
+                lambda: self.handoff_client.submit_failure(
+                    job,
+                    "ANALYSIS_PROVIDER_FAILED",
+                ),
+            )
         except PrReviewAnalysisInputError:
             return True
         except InfrastructureError:
@@ -256,13 +279,54 @@ class PrReviewAnalysisProcessor:
         reason: str,
     ) -> PrReviewAnalysisProcessResult:
         try:
-            self.handoff_client.submit_failure(job, code)
+            self._run_stage(
+                job,
+                "failure_handoff",
+                lambda: self.handoff_client.submit_failure(job, code),
+            )
         except PrReviewAnalysisInputError:
             return self._result(job, delete_message=True, reason=reason)
         except InfrastructureError:
             return self._result(job, delete_message=False, reason="infrastructure_failure")
 
         return self._result(job, delete_message=True, reason=reason)
+
+    def _run_stage(
+        self,
+        job: PrReviewAnalysisJob,
+        stage: str,
+        operation: Callable[[], T],
+    ) -> T:
+        started_at = self.monotonic_time()
+        LOGGER.info(
+            "pr_review_analysis_stage job_id=%s review_session_id=%s " "stage=%s outcome=started",
+            job.job_id,
+            job.review_session_id,
+            stage,
+        )
+        try:
+            result = operation()
+        except Exception as error:
+            LOGGER.warning(
+                "pr_review_analysis_stage job_id=%s review_session_id=%s "
+                "stage=%s outcome=failed error_type=%s elapsed_ms=%s",
+                job.job_id,
+                job.review_session_id,
+                stage,
+                type(error).__name__,
+                _elapsed_ms(started_at, self.monotonic_time()),
+            )
+            raise
+
+        LOGGER.info(
+            "pr_review_analysis_stage job_id=%s review_session_id=%s "
+            "stage=%s outcome=completed elapsed_ms=%s",
+            job.job_id,
+            job.review_session_id,
+            stage,
+            _elapsed_ms(started_at, self.monotonic_time()),
+        )
+        return result
 
     @staticmethod
     def _result(
@@ -362,13 +426,35 @@ class HttpPrReviewAnalysisHandoffClient:
 
 
 class OpenAiPrReviewAnalysisClient:
-    def __init__(self, api_key: str, model: str, timeout_seconds: float) -> None:
+    def __init__(
+        self,
+        api_key: str,
+        model: str,
+        timeout_seconds: float,
+        monotonic_time: Callable[[], float] = time.monotonic,
+    ) -> None:
         from openai import OpenAI
 
         self.client = OpenAI(api_key=api_key, timeout=timeout_seconds)
         self.model = model
+        self.monotonic_time = monotonic_time
 
     def analyze(self, input_value: PrReviewAnalysisInput) -> PrReviewAnalysisResult:
+        prompt_input = _build_prompt_input(input_value)
+        prompt_json = json.dumps(prompt_input)
+        started_at = self.monotonic_time()
+        graph = input_value.semantic_graph
+        LOGGER.info(
+            "pr_review_analysis_provider_started job_id=%s review_session_id=%s "
+            "model=%s file_count=%s patch_chars=%s relation_count=%s flow_count=%s",
+            input_value.job.job_id,
+            input_value.job.review_session_id,
+            _safe_log_identifier(self.model),
+            len(input_value.files),
+            _prompt_patch_char_count(prompt_input),
+            len(graph.relations) if graph is not None else 0,
+            len(graph.flows) if graph is not None else 0,
+        )
         try:
             response = self.client.responses.create(
                 model=self.model,
@@ -379,7 +465,7 @@ class OpenAiPrReviewAnalysisClient:
                     },
                     {
                         "role": "user",
-                        "content": json.dumps(_build_prompt_input(input_value)),
+                        "content": prompt_json,
                     },
                 ],
                 text={
@@ -392,21 +478,63 @@ class OpenAiPrReviewAnalysisClient:
                 },
             )
         except _openai_retryable_errors() as error:
+            _log_provider_failure(
+                input_value,
+                self.model,
+                error,
+                category="retryable",
+                elapsed_ms=_elapsed_ms(started_at, self.monotonic_time()),
+            )
             raise InfrastructureError("OpenAI PR Review analysis retryable failure") from error
         except Exception as error:
+            _log_provider_failure(
+                input_value,
+                self.model,
+                error,
+                category="terminal",
+                elapsed_ms=_elapsed_ms(started_at, self.monotonic_time()),
+            )
             raise PrReviewAnalysisProviderError("OpenAI PR Review analysis failed") from error
 
-        output_text = _extract_response_text(response)
         try:
-            return parse_pr_review_analysis_output(
+            output_text = _extract_response_text(response)
+            analysis = parse_pr_review_analysis_output(
                 output_text,
                 input_value.files,
                 input_value.semantic_graph,
             )
+        except PrReviewAnalysisOutputError as error:
+            _log_provider_output_invalid(
+                input_value,
+                self.model,
+                response,
+                error,
+                _elapsed_ms(started_at, self.monotonic_time()),
+            )
+            raise
         except ValueError as error:
+            _log_provider_output_invalid(
+                input_value,
+                self.model,
+                response,
+                error,
+                _elapsed_ms(started_at, self.monotonic_time()),
+            )
             raise PrReviewAnalysisOutputError(
                 "OpenAI PR Review analysis output is invalid"
             ) from error
+
+        LOGGER.info(
+            "pr_review_analysis_provider_succeeded job_id=%s review_session_id=%s "
+            "model=%s request_id=%s elapsed_ms=%s output_chars=%s",
+            input_value.job.job_id,
+            input_value.job.review_session_id,
+            _safe_log_identifier(self.model),
+            _provider_request_id(response),
+            _elapsed_ms(started_at, self.monotonic_time()),
+            len(output_text),
+        )
+        return analysis
 
 
 def parse_pr_review_analysis_input_payload(
@@ -794,6 +922,89 @@ def _take_patch_snippet(patch: str | None, remaining_chars: int) -> str | None:
     if patch is None or remaining_chars <= 0:
         return None
     return patch[: min(MAX_PATCH_CHARS_PER_FILE, remaining_chars)]
+
+
+def _elapsed_ms(started_at: float, finished_at: float) -> int:
+    return max(round((finished_at - started_at) * 1_000), 0)
+
+
+def _prompt_patch_char_count(prompt_input: dict[str, object]) -> int:
+    files = prompt_input.get("files")
+    if not isinstance(files, list):
+        return 0
+
+    total = 0
+    for file_value in files:
+        if not isinstance(file_value, dict):
+            continue
+        patch = file_value.get("patchSnippet")
+        if isinstance(patch, str):
+            total += len(patch)
+    return total
+
+
+def _safe_log_identifier(value: object, *, max_length: int = 128) -> str:
+    if not isinstance(value, str):
+        return "none"
+    safe_value = "".join(
+        character for character in value if character.isalnum() or character in {"-", "_", ".", "/"}
+    )
+    return safe_value[:max_length] or "none"
+
+
+def _provider_request_id(value: object) -> str:
+    request_id = getattr(value, "request_id", None)
+    if request_id is None:
+        request_id = getattr(value, "_request_id", None)
+    return _safe_log_identifier(request_id)
+
+
+def _provider_status_code(error: BaseException) -> str:
+    status_code = getattr(error, "status_code", None)
+    if isinstance(status_code, int) and 100 <= status_code <= 599:
+        return str(status_code)
+    return "none"
+
+
+def _log_provider_failure(
+    input_value: PrReviewAnalysisInput,
+    model: str,
+    error: BaseException,
+    *,
+    category: str,
+    elapsed_ms: int,
+) -> None:
+    LOGGER.warning(
+        "pr_review_analysis_provider_failed job_id=%s review_session_id=%s "
+        "model=%s category=%s error_type=%s status_code=%s request_id=%s elapsed_ms=%s",
+        input_value.job.job_id,
+        input_value.job.review_session_id,
+        _safe_log_identifier(model),
+        category,
+        _safe_log_identifier(type(error).__name__),
+        _provider_status_code(error),
+        _provider_request_id(error),
+        elapsed_ms,
+    )
+
+
+def _log_provider_output_invalid(
+    input_value: PrReviewAnalysisInput,
+    model: str,
+    response: object,
+    error: BaseException,
+    elapsed_ms: int,
+) -> None:
+    LOGGER.warning(
+        "pr_review_analysis_provider_output_invalid job_id=%s review_session_id=%s "
+        "model=%s error_type=%s request_id=%s elapsed_ms=%s",
+        input_value.job.job_id,
+        input_value.job.review_session_id,
+        _safe_log_identifier(model),
+        _safe_log_identifier(type(error).__name__),
+        _provider_request_id(response),
+        elapsed_ms,
+    )
 
 
 def _extract_response_text(response: object) -> str:

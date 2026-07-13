@@ -113,15 +113,22 @@ class FakePublisherJobService {
 }
 
 class FakeReviewDatabase {
-  constructor() {
+  constructor(
+    pullRequest = {
+      state: "open",
+      github_closed_at: null,
+      merged_at: null
+    }
+  ) {
     this.session = null;
     this.room = null;
     this.jobs = [];
+    this.pullRequest = pullRequest;
   }
 
   async queryOne(text, values = []) {
-    if (text.includes("SELECT id") && text.includes("FROM github_pull_requests")) {
-      return { id: values[1] };
+    if (text.includes("FROM github_pull_requests")) {
+      return { id: values[1], ...this.pullRequest };
     }
     if (text.includes("review_session.status = 'analyzing'")) {
       return this.session ? { id: this.session.id } : null;
@@ -144,6 +151,9 @@ class FakeReviewDatabase {
   async transaction(callback) {
     return callback({
       queryOne: async (text, values = []) => {
+        if (text.includes("FROM github_pull_requests")) {
+          return { id: values[1], ...this.pullRequest };
+        }
         if (text.includes("FROM pr_review_rooms")) {
           return this.room;
         }
@@ -395,6 +405,38 @@ try {
     assert.deepEqual(publisher.calls, [payload.jobId]);
     assert.equal(github.detailCalls, 1);
     assert.equal(github.conflictCalls, 1);
+  }
+
+  {
+    const database = new FakeReviewDatabase({
+      state: "closed",
+      github_closed_at: "2026-07-11T00:00:00.000Z",
+      merged_at: "2026-07-11T00:00:00.000Z"
+    });
+    const github = new FakeGithubDependency();
+    const publisher = new FakeReviewPublisher();
+    const service = new PrReviewService(
+      database,
+      new FakeWorkspaceService(),
+      github,
+      new FakeAnalysisService(),
+      publisher
+    );
+
+    await assert.rejects(
+      () =>
+        service.createReviewSession(
+          "11111111-1111-1111-1111-111111111111",
+          payload.workspaceId,
+          "66666666-6666-6666-6666-666666666666"
+        ),
+      (error) =>
+        error.getStatus() === 409 &&
+        error.getResponse().error.message === "Pull request is closed or merged"
+    );
+    assert.equal(github.detailCalls, 0);
+    assert.equal(github.conflictCalls, 0);
+    assert.deepEqual(publisher.calls, []);
   }
 } finally {
   for (const [key, value] of Object.entries(originalEnv)) {

@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import type { createPrReviewApiClient } from "@/features/pr-review/api/client";
+import { getPrReviewErrorMessage } from "@/features/pr-review/pr-review-error-message";
 import type {
   PrReviewPullRequest,
   PrReviewPullRequestDetail,
@@ -82,11 +83,7 @@ function formatNumber(value: number) {
 }
 
 function getErrorMessage(error: unknown) {
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  return "Review를 제출하지 못했습니다.";
+  return getPrReviewErrorMessage(error, "Review를 제출하지 못했습니다.");
 }
 
 function getGuardKind(message: string): GuardKind {

@@ -54,6 +54,10 @@ output "github_actions_role_arn" {
   value = module.iam.github_actions_role_arn
 }
 
+output "terraform_plan_role_arn" {
+  value = module.iam.github_actions_terraform_plan_role_arn
+}
+
 output "livekit_instance_id" {
   value = module.livekit_host.instance_id
 }

@@ -310,7 +310,15 @@ dev 설정:
 - app task role: S3, SQS send, Secrets read, LiveKit/OpenAI secret read
 - realtime task role: Redis pub/sub과 socket 인증에 필요한 Secrets read만 최소화
 - ai worker task role: SQS consume, S3 read/write, Secrets read
-- GitHub role: ECR push, ECS deploy, CloudFront invalidation, S3 sync, Terraform plan/apply에 필요한 권한
+- GitHub deployment role: ECR push, ECS deploy, CloudFront invalidation, S3 sync 같은 배포 권한. OIDC trust는 main branch로 제한한다.
+- GitHub Terraform plan role: remote state read와 lockfile 처리, Terraform refresh에 필요한 명시적 read 권한만 가진다. 동일 저장소 PR과 main branch에서만 assume하며 secret value read, resource/IAM 변경 권한은 부여하지 않는다.
+
+### Terraform plan CI 정책
+
+- 모든 PR은 credentials 없이 `terraform fmt`와 `terraform validate`를 실행한다.
+- `AWS_TERRAFORM_PLAN_ROLE_ARN`이 등록된 동일 저장소 PR만 전용 plan role로 remote-state `terraform plan -input=false`를 실행한다.
+- 외부 fork PR은 role을 assume하지 못한다.
+- main push와 main branch의 수동 실행도 같은 plan role을 사용한다. 고권한 deployment role의 OIDC trust는 PR까지 넓히지 않는다.
 
 ## 4. 구현 단계
 

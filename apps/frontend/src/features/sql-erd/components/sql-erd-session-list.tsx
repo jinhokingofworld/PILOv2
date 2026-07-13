@@ -5,12 +5,22 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
+  Check,
   Database,
   LoaderCircle,
+  Pencil,
   Plus,
-  Trash2
+  Trash2,
+  X
 } from "lucide-react";
 
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle
+} from "@/components/ui/dialog";
 import { useAuthSession } from "@/features/auth/auth-session";
 import {
   createSqlErdApiClient,
@@ -22,6 +32,11 @@ import {
   removeSqlErdSession
 } from "@/features/sql-erd/utils/session-list-state";
 import { buildSqlErdSessionHref } from "@/features/sql-erd/utils/session-navigation";
+import {
+  getSqlErdCreateSessionTitle,
+  getSqlErdSessionTitleUpdate,
+  updateSqlErdSessionSummaryTitle
+} from "@/features/sql-erd/utils/session-title";
 
 const SQL_ERD_SESSION_PAGE_LIMIT = 20;
 
@@ -67,7 +82,14 @@ export function SqlErdSessionList() {
   const [hasLoadedSessions, setHasLoadedSessions] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
+  const [createTitle, setCreateTitle] = useState("");
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(
+    null
+  );
+  const [editingTitle, setEditingTitle] = useState("");
+  const [savingSessionId, setSavingSessionId] = useState<string | null>(null);
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(
     null
   );
@@ -157,17 +179,86 @@ export function SqlErdSessionList() {
     setIsCreating(true);
     setErrorMessage(null);
 
+    const title = getSqlErdCreateSessionTitle(createTitle);
+
     try {
       const session = await apiClient.createSession(
         authSession.activeWorkspaceId,
-        emptySqlErdSessionPayload
+        {
+          ...emptySqlErdSessionPayload,
+          ...(title ? { title } : {})
+        }
       );
+      setIsCreateDialogOpen(false);
+      setCreateTitle("");
       router.push(buildSqlErdSessionHref(session.id));
     } catch {
       setErrorMessage("새 session을 만들지 못했습니다. 다시 시도해 주세요.");
       setIsCreating(false);
     }
-  }, [apiClient, authSession, isCreating, router]);
+  }, [apiClient, authSession, createTitle, isCreating, router]);
+
+  const handleStartSessionTitleEdit = useCallback(
+    (session: SqltoerdSessionSummary) => {
+      setEditingSessionId(session.id);
+      setEditingTitle(session.title);
+      setErrorMessage(null);
+    },
+    []
+  );
+
+  const handleCancelSessionTitleEdit = useCallback(() => {
+    if (savingSessionId) {
+      return;
+    }
+
+    setEditingSessionId(null);
+    setEditingTitle("");
+  }, [savingSessionId]);
+
+  const handleSaveSessionTitle = useCallback(
+    async (session: SqltoerdSessionSummary) => {
+      if (!apiClient || !authSession || savingSessionId) {
+        return;
+      }
+
+      const title = getSqlErdSessionTitleUpdate(editingTitle);
+
+      if (!title) {
+        setErrorMessage("Session 제목을 입력해 주세요.");
+        return;
+      }
+
+      setSavingSessionId(session.id);
+      setErrorMessage(null);
+
+      try {
+        const updatedSession = await apiClient.updateSession(
+          authSession.activeWorkspaceId,
+          session.id,
+          {
+            baseRevision: session.revision,
+            title
+          }
+        );
+
+        setSessions((currentSessions) =>
+          updateSqlErdSessionSummaryTitle(currentSessions, updatedSession)
+        );
+        setEditingSessionId(null);
+        setEditingTitle("");
+      } catch (error) {
+        setErrorMessage(
+          error instanceof SqlErdApiError && error.status === 409
+            ? "Session이 다른 곳에서 변경됐습니다. 목록을 새로고침한 뒤 다시 시도해 주세요."
+            : "Session 제목을 변경하지 못했습니다. 다시 시도해 주세요."
+        );
+      } finally {
+        setSavingSessionId(null);
+      }
+    },
+    [apiClient, authSession, editingTitle, savingSessionId]
+  );
 
   const handleDeleteSession = useCallback(
     async (session: SqltoerdSessionSummary) => {
@@ -244,7 +335,7 @@ export function SqlErdSessionList() {
           <button
             className="inline-flex h-10 shrink-0 items-center gap-2 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
             disabled={!authSession || isCreating}
-            onClick={() => void handleCreateSession()}
+            onClick={() => setIsCreateDialogOpen(true)}
             type="button"
           >
             {isCreating ? (
@@ -314,8 +405,72 @@ export function SqlErdSessionList() {
                 />
                 <div className="pointer-events-none relative">
                   <div className="flex items-start justify-between gap-3 pr-9">
-                    <div className="min-w-0">
-                      <h2 className="truncate font-semibold">{session.title}</h2>
+                    <div className="pointer-events-auto relative z-10 min-w-0">
+                      {editingSessionId === session.id ? (
+                        <form
+                          className="flex min-w-0 items-center gap-1"
+                          onSubmit={(event) => {
+                            event.preventDefault();
+                            void handleSaveSessionTitle(session);
+                          }}
+                        >
+                          <input
+                            aria-label="Session 제목"
+                            autoFocus
+                            className="h-8 min-w-0 rounded-md border bg-background px-2 text-sm font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            disabled={savingSessionId === session.id}
+                            maxLength={120}
+                            onChange={(event) => setEditingTitle(event.target.value)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Escape") {
+                                event.preventDefault();
+                                handleCancelSessionTitleEdit();
+                              }
+                            }}
+                            value={editingTitle}
+                          />
+                          <button
+                            aria-label="제목 저장"
+                            className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+                            disabled={savingSessionId === session.id}
+                            title="제목 저장"
+                            type="submit"
+                          >
+                            {savingSessionId === session.id ? (
+                              <LoaderCircle className="size-4 animate-spin" />
+                            ) : (
+                              <Check className="size-4" />
+                            )}
+                          </button>
+                          <button
+                            aria-label="제목 수정 취소"
+                            className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+                            disabled={savingSessionId === session.id}
+                            onClick={handleCancelSessionTitleEdit}
+                            title="제목 수정 취소"
+                            type="button"
+                          >
+                            <X className="size-4" />
+                          </button>
+                        </form>
+                      ) : (
+                        <div className="flex min-w-0 items-center gap-1">
+                          <h2 className="truncate font-semibold">{session.title}</h2>
+                          <button
+                            aria-label={`${session.title} 제목 수정`}
+                            className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100"
+                            onClick={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              handleStartSessionTitleEdit(session);
+                            }}
+                            title="제목 수정"
+                            type="button"
+                          >
+                            <Pencil className="size-3.5" />
+                          </button>
+                        </div>
+                      )}
                       <p className="mt-1 text-xs text-muted-foreground">
                         {formatUpdatedAt(session.updatedAt)}
                       </p>
@@ -376,6 +531,66 @@ export function SqlErdSessionList() {
             </button>
           </div>
         ) : null}
+
+      <Dialog
+        onOpenChange={(open) => {
+          if (!isCreating) {
+            setIsCreateDialogOpen(open);
+
+            if (!open) {
+              setCreateTitle("");
+            }
+          }
+        }}
+        open={isCreateDialogOpen}
+      >
+        <DialogContent className="max-w-md" showCloseButton={!isCreating}>
+          <DialogHeader>
+            <DialogTitle>새 ERD 만들기</DialogTitle>
+            <DialogDescription>
+              제목을 비워 두면 기본 제목으로 생성합니다.
+            </DialogDescription>
+          </DialogHeader>
+          <form
+            className="space-y-4"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void handleCreateSession();
+            }}
+          >
+            <label className="block space-y-2 text-sm font-medium">
+              제목
+              <input
+                autoFocus
+                className="h-10 w-full rounded-md border bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                disabled={isCreating}
+                maxLength={120}
+                onChange={(event) => setCreateTitle(event.target.value)}
+                placeholder="예: 주문 도메인 ERD"
+                value={createTitle}
+              />
+            </label>
+            <div className="flex justify-end gap-2">
+              <button
+                className="inline-flex h-9 items-center rounded-md border px-3 text-sm font-medium disabled:opacity-50"
+                disabled={isCreating}
+                onClick={() => setIsCreateDialogOpen(false)}
+                type="button"
+              >
+                취소
+              </button>
+              <button
+                className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground disabled:opacity-50"
+                disabled={isCreating}
+                type="submit"
+              >
+                {isCreating ? <LoaderCircle className="size-4 animate-spin" /> : null}
+                생성
+              </button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
       </div>
     </main>
   );

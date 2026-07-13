@@ -1,0 +1,42 @@
+name: Infra LocalStack Integration
+
+on:
+  pull_request:
+    paths:
+      - "infra/tests/github-sync-localstack-config.test.mjs"
+      - "infra/scripts/create-local-sqs-queues.ps1"
+      - "localstack/init/ready.d/01-create-sqs.sh"
+      - "docs/infra/github-sync-operations.md"
+      - ".github/workflows/infra-localstack-integration.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  github-sync-localstack:
+    name: GitHub sync LocalStack configuration
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify Linux runner prerequisites
+        shell: bash
+        run: |
+          docker version
+          server_os_type="$(docker version --format '{{.Server.Os}}')"
+          if [ "$server_os_type" != "linux" ]; then
+            echo "LocalStack requires a Docker Linux daemon, but the Docker server reports '$server_os_type'." >&2
+            exit 1
+          fi
+          docker info
+          command -v aws
+          command -v pwsh
+
+      - name: Verify GitHub sync LocalStack queues
+        env:
+          RUN_LOCALSTACK_INTEGRATION: "1"
+        run: node infra/tests/github-sync-localstack-config.test.mjs

@@ -34,6 +34,10 @@ output "github_actions_role_arn" {
   value = try(aws_iam_role.github_actions[0].arn, "")
 }
 
+output "github_actions_terraform_plan_role_arn" {
+  value = try(aws_iam_role.github_actions_terraform_plan[0].arn, "")
+}
+
 output "github_sync_operator_user_name" {
   value = try(aws_iam_user.github_sync_operator[0].name, "")
 }

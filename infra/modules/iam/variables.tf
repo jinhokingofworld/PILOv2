@@ -81,6 +81,16 @@ variable "cloudfront_distribution" {
   type = string
 }
 
+variable "terraform_plan_state_bucket_arn" {
+  description = "S3 bucket ARN for the remote Terraform state that GitHub Actions plan jobs may read."
+  type        = string
+}
+
+variable "terraform_plan_state_key" {
+  description = "Remote Terraform state object key used by GitHub Actions plan jobs."
+  type        = string
+}
+
 variable "github_oidc_thumbprints" {
   description = "GitHub Actions OIDC thumbprint list. Verify before production use."
   type        = list(string)
