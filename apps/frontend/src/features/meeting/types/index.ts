@@ -85,6 +85,8 @@ export type MeetingReportSummary = {
 
 export type MeetingReportDetail = MeetingReportSummary & {
   transcriptText: string | null;
+  transcriptSegments?: Array<{ id: string; segmentIndex: number; startedAtMs: number; endedAtMs: number; text: string }>;
+  evidence?: Array<{ sourceType: string; sourceIndex: number; transcriptSegmentId: string }>;
 };
 
 export type CurrentMeetingPayload = {

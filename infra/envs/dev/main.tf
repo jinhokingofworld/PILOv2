@@ -252,7 +252,7 @@ module "ecs" {
         MEETING_REPORT_EVENT_BASE_URL           = local.api_domain == "" ? "http://${module.alb.alb_dns_name}" : "https://${local.api_domain}"
         MEETING_REPORT_EVENT_TIMEOUT_SECONDS    = "10"
         MEETING_REPORT_EVENT_MAX_ATTEMPTS       = "3"
-        OPENAI_STT_MODEL                        = "gpt-4o-mini-transcribe"
+        OPENAI_STT_MODEL                        = "whisper-1"
         OPENAI_MEETING_REPORT_MODEL             = "gpt-5.4-mini"
         OPENAI_AGENT_PLANNER_TIMEOUT_MS         = "60000"
       }

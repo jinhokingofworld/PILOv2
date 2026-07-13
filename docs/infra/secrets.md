@@ -175,7 +175,7 @@ UI Preview는 local 개발 편의 기능이며 실제 bearer session이나 Works
 | `SQS_AI_JOBS_QUEUE_URL` | 현재 `ai-worker`가 MeetingReport와 Agent를 함께 소비하는 AI jobs queue URL. 실제 병렬성은 ECS service의 desired count로 관리한다. |
 | `DATABASE_SSL` | Set to `true` when `DATABASE_URL` points to Supabase/Postgres that requires SSL. |
 | `S3_RECORDINGS_BUCKET` | STT 입력 오디오 파일 bucket |
-| `OPENAI_STT_MODEL` | STT 모델. local 기본값: `gpt-4o-mini-transcribe` |
+| `OPENAI_STT_MODEL` | 시간대 근거용 segment timestamp를 지원하는 STT 모델. local 기본값: `whisper-1` |
 | `OPENAI_MEETING_REPORT_MODEL` | 회의록 생성 모델. local 기본값: `gpt-5.4-mini` |
 | `MEETING_REPORT_EVENT_BASE_URL` | MeetingReport 상태 변경 뒤 internal callback을 보낼 App Server origin. dev Terraform은 ALB/API domain을 주입한다. |
 | `MEETING_REPORT_EVENT_TIMEOUT_SECONDS` | callback HTTP 요청 timeout. dev 기본값: `10` |

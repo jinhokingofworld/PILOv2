@@ -1928,6 +1928,8 @@ async function assertError(action, messagePattern) {
   assert.deepEqual(workspaceService.calls, [{ userId: currentUserId, workspaceId }]);
   assert.equal(result.report.id, reportId);
   assert.equal(result.report.transcriptText, "회의 원문");
+  assert.deepEqual(result.report.transcriptSegments, []);
+  assert.deepEqual(result.report.evidence, []);
   assert.deepEqual(result.report.actionItemCandidates, [{ title: "후속 작업" }]);
 }
 
