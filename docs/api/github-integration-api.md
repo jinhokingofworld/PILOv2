@@ -126,6 +126,13 @@ callback 성공 redirect를 실패로 바꾸지 않는다.
 - ProjectV2 list, discovery, and selection requests require `repositoryId`. Discovery and list results include only ProjectV2 records linked to that repository.
 - ProjectV2 selection replacement is scoped to one `{ installationId, repositoryId }` pair and returns `installationId`, `repositoryId`, `projectV2Ids`, `syncRunId`, `syncStatus`, and `syncError`.
 
+### Legacy ProjectV2 selection reset policy
+
+- 저장소 스코프 전환 과정에서 기존 레거시 ProjectV2 선택은 의도적으로 리셋한다.
+- 서비스는 기존 ProjectV2 선택을 repository 링크로 추론하거나 backfill(복구)하지 않는다.
+- GitHub installation 동기화가 끝난 뒤 사용자는 필요한 repository별로 ProjectV2를 다시 선택한다.
+- 선택 저장은 해당 `{ installationId, repositoryId }`의 selection을 새로 만들고, personal ProjectV2는 polling schedule도 재생성한다.
+
 - ProjectV2 상세 동기화 선택은 workspace, installation, repository 단위로 저장한다.
   `full` sync request body는 `projectV2Id`를 허용하지 않는다. `full` sync는 선택한
   repository의 선택된 ProjectV2에만 fields, items, Board hydration을 수행한다. 선택이
