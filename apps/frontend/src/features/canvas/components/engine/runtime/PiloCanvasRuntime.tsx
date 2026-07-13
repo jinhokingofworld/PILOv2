@@ -11,7 +11,7 @@ import {
   isRecord,
   normalizeCanvasShape,
 } from "@/features/canvas/api/canvas-normalizers";
-import type { CanvasRealtimeConfig } from "@/features/canvas/realtime/canvas-realtime-types";
+import type { CanvasRealtimeConfig } from "@/shared/canvas-realtime/canvas-realtime-types";
 import { useCanvasPresence } from "@/features/canvas/realtime/useCanvasPresence";
 import { normalizeCanvasFreeformShapes } from "../../../utils/canvas-storage";
 import type {

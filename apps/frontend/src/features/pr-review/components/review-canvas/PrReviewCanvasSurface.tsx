@@ -20,17 +20,24 @@ import {
 
 import { TldrawSurface } from "@/shared/tldraw/TldrawSurface";
 import type {
+  CanvasRealtimeConfig,
+  CanvasRealtimeIdentity
+} from "@/shared/canvas-realtime/canvas-realtime-types";
+import type {
   PrReviewCanvas,
   PrReviewCanvasShape,
   PrReviewCanvasFlow,
   PrReviewConflictAnalysis,
-  PrReviewFlowFile
+  PrReviewFlowFile,
+  PrReviewRoomCanvas
 } from "@/features/pr-review/types";
 import {
   PrReviewApiError,
   type createPrReviewApiClient
 } from "@/features/pr-review/api/client";
 import { PrReviewCanvasBackground } from "@/features/pr-review/components/review-canvas/PrReviewCanvasBackground";
+import { PrReviewCanvasRealtimeBridge } from "@/features/pr-review/components/review-canvas/PrReviewCanvasRealtimeBridge";
+import { usePrReviewCanvasPresence } from "@/features/pr-review/realtime/usePrReviewCanvasPresence";
 import {
   PR_REVIEW_FILE_NODE_SHAPE_TYPE,
   PR_REVIEW_FLOW_EDGE_SHAPE_TYPE,
@@ -79,6 +86,7 @@ type PrReviewCanvasSurfaceProps = {
   conflictAnalysis?: PrReviewConflictAnalysis | null;
   onFileSelect?: (reviewFileId: string | null) => void;
   preparedConflictFileIds?: Set<string>;
+  realtimeIdentity: CanvasRealtimeIdentity;
   reviewRoomId: string;
   selectedReviewFileId?: string | null;
   workspaceId: string;
@@ -1197,6 +1205,7 @@ export function PrReviewCanvasSurface({
   conflictAnalysis,
   onFileSelect,
   preparedConflictFileIds = new Set<string>(),
+  realtimeIdentity,
   reviewRoomId,
   selectedReviewFileId,
   workspaceId
@@ -1212,6 +1221,7 @@ export function PrReviewCanvasSurface({
   const [storedShapes, setStoredShapes] = useState<
     PrReviewCanvasShape[] | null
   >(null);
+  const [reviewRoom, setReviewRoom] = useState<PrReviewRoomCanvas | null>(null);
   const [persistenceNotice, setPersistenceNotice] =
     useState<PrReviewCanvasPersistenceNotice>(null);
   const persistedFileShapeEnabled = Boolean(
@@ -1235,6 +1245,23 @@ export function PrReviewCanvasSurface({
     : storedShapes === null
       ? []
       : fallbackShapes;
+  const realtimeConfig = useMemo<CanvasRealtimeConfig>(
+    () => ({
+      ...realtimeIdentity,
+      canvasId: reviewRoom?.canvasId ?? "",
+      enabled: Boolean(
+        reviewRoom &&
+          realtimeIdentity.authToken &&
+          realtimeIdentity.currentUser?.userId &&
+          workspaceId
+      ),
+      workspaceId
+    }),
+    [realtimeIdentity, reviewRoom, workspaceId]
+  );
+  const canvasPresence = usePrReviewCanvasPresence(realtimeConfig);
+  const readOnly =
+    reviewRoom?.status === "completed" || canvasPresence.readOnly;
   const handlePersistenceNotice = useCallback(
     (notice: PrReviewCanvasPersistenceNotice) => {
       setPersistenceNotice(notice);
@@ -1247,25 +1274,28 @@ export function PrReviewCanvasSurface({
   useEffect(() => {
     const abortController = new AbortController();
     setStoredShapes(null);
+    setReviewRoom(null);
     setPersistenceNotice(null);
 
     void apiClient
       .getReviewRoom(workspaceId, reviewRoomId, {
         signal: abortController.signal
       })
-      .then((room) =>
-        apiClient.listReviewCanvasShapes(
+      .then(async (room) => ({
+        loadedShapes: await apiClient.listReviewCanvasShapes(
           workspaceId,
           room.canvasId,
           PR_REVIEW_CANVAS_LOAD_QUERY,
           { signal: abortController.signal }
-        )
-      )
-      .then((loadedShapes) => {
+        ),
+        room
+      }))
+      .then(({ loadedShapes, room }) => {
         if (abortController.signal.aborted) {
           return;
         }
 
+        setReviewRoom(room);
         setStoredShapes(loadedShapes.filter(isPrReviewCanvasSystemShape));
       })
       .catch((error: unknown) => {
@@ -1273,6 +1303,7 @@ export function PrReviewCanvasSurface({
           return;
         }
 
+        setReviewRoom(null);
         setStoredShapes([]);
         setPersistenceNotice({
           message: "저장된 노드 배치를 불러오지 못해 기본 배치를 표시합니다.",
@@ -1399,10 +1430,14 @@ export function PrReviewCanvasSurface({
         onMount={handleMount}
         shapeUtils={prReviewShapeUtils}
       >
+        <PrReviewCanvasRealtimeBridge
+          presence={canvasPresence}
+          readOnly={readOnly}
+        />
         <PrReviewFileNodeActivationBridge onFileSelect={onFileSelect} />
         <PrReviewCanvasPersistenceBridge
           apiClient={apiClient}
-          enabled={persistedFileShapeEnabled}
+          enabled={persistedFileShapeEnabled && !readOnly}
           hydratingRef={hydratingRef}
           internalShapeUpdateRef={internalShapeUpdateRef}
           lastSyncedGeometryRef={lastSyncedGeometryRef}

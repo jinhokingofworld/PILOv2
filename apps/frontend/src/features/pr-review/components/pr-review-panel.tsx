@@ -52,6 +52,7 @@ import type {
   PrReviewRepository,
   PrReviewSession
 } from "@/features/pr-review/types";
+import type { CanvasRealtimeIdentity } from "@/shared/canvas-realtime/canvas-realtime-types";
 
 type LoadStatus = "idle" | "loading" | "ready" | "error";
 type DetailStatus = "idle" | "loading" | "ready" | "error";
@@ -189,6 +190,26 @@ export function PrReviewPanel() {
         accessToken
       }),
     [accessToken]
+  );
+  const realtimeIdentity = useMemo<CanvasRealtimeIdentity>(
+    () => ({
+      authToken: accessToken,
+      currentUser: authSession
+        ? {
+            userId: authSession.user.id,
+            displayName:
+              authSession.user.name ?? authSession.user.email ?? "PILO",
+            avatarUrl: authSession.user.avatarUrl
+          }
+        : null
+    }),
+    [
+      accessToken,
+      authSession?.user.avatarUrl,
+      authSession?.user.email,
+      authSession?.user.id,
+      authSession?.user.name
+    ]
   );
 
   const [repositoryStatus, setRepositoryStatus] =
@@ -705,6 +726,7 @@ export function PrReviewPanel() {
             activateReviewSession(session, activeReviewPullRequest)
           }
           pullRequest={activeReviewPullRequest}
+          realtimeIdentity={realtimeIdentity}
           session={activeReviewSession}
           workspaceId={workspaceId}
         />

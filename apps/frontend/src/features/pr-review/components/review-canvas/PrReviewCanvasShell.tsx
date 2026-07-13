@@ -70,6 +70,7 @@ import type {
   PrReviewSummary,
   PrReviewUnsupportedConflictFile
 } from "@/features/pr-review/types";
+import type { CanvasRealtimeIdentity } from "@/shared/canvas-realtime/canvas-realtime-types";
 
 type PrReviewApiClient = ReturnType<typeof createPrReviewApiClient>;
 
@@ -79,6 +80,7 @@ type PrReviewCanvasShellProps = {
   onGoToGithub: () => void;
   onReviewSessionCreated: (session: PrReviewSession) => void;
   pullRequest: PrReviewPullRequest | PrReviewPullRequestDetail | null;
+  realtimeIdentity: CanvasRealtimeIdentity;
   session: PrReviewSession;
   workspaceId: string;
 };
@@ -294,6 +296,7 @@ export function PrReviewCanvasShell({
   onGoToGithub,
   onReviewSessionCreated,
   pullRequest,
+  realtimeIdentity,
   session,
   workspaceId
 }: PrReviewCanvasShellProps) {
@@ -949,6 +952,7 @@ export function PrReviewCanvasShell({
                 conflictAnalysis={conflictAnalysis}
                 onFileSelect={setSelectedReviewFileId}
                 preparedConflictFileIds={preparedConflictFileIds}
+                realtimeIdentity={realtimeIdentity}
                 reviewRoomId={session.reviewRoomId}
                 selectedReviewFileId={selectedReviewFileId}
                 workspaceId={workspaceId}

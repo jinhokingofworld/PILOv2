@@ -61,7 +61,7 @@ import {
   canvasAgentToolTargetEventName,
   getCanvasAgentToolTargetPopover,
 } from "@/features/canvas/agent/canvas-agent-tool-targets";
-import type { CanvasRealtimeConfig } from "@/features/canvas/realtime/canvas-realtime-types";
+import type { CanvasRealtimeConfig } from "@/shared/canvas-realtime/canvas-realtime-types";
 import {
   type PiloCanvasActions,
   type PiloCanvasColor,
