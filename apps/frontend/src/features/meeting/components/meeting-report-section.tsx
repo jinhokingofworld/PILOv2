@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -64,6 +64,10 @@ type ParsedActionItemCandidate = {
   priority: string | null;
   title: string;
 };
+
+type MeetingReportTranscriptSegment = NonNullable<
+  MeetingReportDetail["transcriptSegments"]
+>[number];
 
 const REPORT_POLL_INTERVAL_MS = 10000;
 const CALENDAR_DRAFT_TITLE_MAX_LENGTH = 255;
@@ -370,12 +374,134 @@ function ReportListSkeleton() {
   );
 }
 
+function formatTranscriptTimestamp(value: number) {
+  const totalSeconds = Math.max(0, Math.floor(value / 1_000));
+  const hours = Math.floor(totalSeconds / 3_600);
+  const minutes = Math.floor((totalSeconds % 3_600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (hours) {
+    return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+  }
+
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
+function getEvidenceSegments(
+  report: MeetingReportDetail,
+  sourceType: string,
+  sourceIndex?: number
+) {
+  const segmentsById = new Map<string, MeetingReportTranscriptSegment>();
+  const seenSegmentIds = new Set<string>();
+  const segments: MeetingReportTranscriptSegment[] = [];
+
+  for (const segment of report.transcriptSegments ?? []) {
+    segmentsById.set(segment.id, segment);
+  }
+
+  for (const evidence of report.evidence ?? []) {
+    if (
+      evidence.sourceType !== sourceType ||
+      (sourceIndex !== undefined && evidence.sourceIndex !== sourceIndex)
+    ) {
+      continue;
+    }
+
+    const segment = segmentsById.get(evidence.transcriptSegmentId);
+    if (!segment || seenSegmentIds.has(segment.id)) continue;
+
+    seenSegmentIds.add(segment.id);
+    segments.push(segment);
+  }
+
+  return segments.sort((left, right) => left.segmentIndex - right.segmentIndex);
+}
+
+function EvidenceTimeButtons({
+  onSelect,
+  segments
+}: {
+  onSelect: (segment: MeetingReportTranscriptSegment) => void;
+  segments: MeetingReportTranscriptSegment[];
+}) {
+  if (!segments.length) return null;
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 text-xs">
+      <span className="font-medium text-muted-foreground">근거</span>
+      {segments.map((segment) => {
+        const timestamp = formatTranscriptTimestamp(segment.startedAtMs);
+        return (
+          <button
+            key={segment.id}
+            type="button"
+            className="inline-flex h-7 items-center gap-1 rounded-full border bg-muted/40 px-2 font-medium text-muted-foreground transition hover:border-primary/40 hover:bg-primary/10 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            aria-label={`${timestamp} transcript 근거로 이동`}
+            onClick={() => onSelect(segment)}
+          >
+            <Clock3 className="size-3" />
+            {timestamp}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function TranscriptSegmentViewer({
+  activeSegmentId,
+  onSelect,
+  registerSegment,
+  segments
+}: {
+  activeSegmentId: string | null;
+  onSelect: (segment: MeetingReportTranscriptSegment) => void;
+  registerSegment: (id: string, element: HTMLButtonElement | null) => void;
+  segments: MeetingReportTranscriptSegment[];
+}) {
+  return (
+    <section className="grid gap-2">
+      <h3 className="font-heading text-base font-semibold">Transcript</h3>
+      <ul className="grid gap-2">
+        {segments.map((segment) => {
+          const isActive = segment.id === activeSegmentId;
+          const timestamp = formatTranscriptTimestamp(segment.startedAtMs);
+          return (
+            <li key={segment.id}>
+              <button
+                ref={(element) => registerSegment(segment.id, element)}
+                type="button"
+                aria-current={isActive ? "true" : undefined}
+                className={cn(
+                  "w-full scroll-mt-6 rounded-lg border bg-background p-3 text-left text-sm leading-6 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  isActive && "border-primary bg-primary/10 ring-1 ring-primary/30"
+                )}
+                onClick={() => onSelect(segment)}
+              >
+                <span className="mb-1 block text-xs font-semibold text-muted-foreground">
+                  {timestamp} - {formatTranscriptTimestamp(segment.endedAtMs)}
+                </span>
+                <span className="whitespace-pre-wrap break-words">{segment.text}</span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
 function ReportTextBlock({
   emptyLabel,
+  evidenceSegments = [],
+  onEvidenceSelect,
   title,
   value
 }: {
   emptyLabel: string;
+  evidenceSegments?: MeetingReportTranscriptSegment[];
+  onEvidenceSelect?: (segment: MeetingReportTranscriptSegment) => void;
   title: string;
   value: string | null;
 }) {
@@ -387,6 +513,12 @@ function ReportTextBlock({
           <span className="text-muted-foreground">{emptyLabel}</span>
         )}
       </div>
+      {onEvidenceSelect ? (
+        <EvidenceTimeButtons
+          segments={evidenceSegments}
+          onSelect={onEvidenceSelect}
+        />
+      ) : null}
     </section>
   );
 }
@@ -416,6 +548,50 @@ function MeetingReportDetailModal({
   const actionItems = parseActionItemCandidates(
     report?.actionItemCandidates ?? []
   );
+  const transcriptSegmentRefs = useRef(
+    new Map<string, HTMLButtonElement>()
+  );
+  const [activeTranscriptSegmentId, setActiveTranscriptSegmentId] = useState<
+    string | null
+  >(null);
+  const transcriptSegments = report?.transcriptSegments ?? [];
+  const actionItemsWithEvidence = report
+    ? actionItems.map((item, index) => ({
+        item,
+        index,
+        evidenceSegments: getEvidenceSegments(report, "action_item", index)
+      }))
+    : [];
+
+  useEffect(() => {
+    setActiveTranscriptSegmentId(null);
+  }, [report?.id, report?.transcriptSegments]);
+
+  function registerTranscriptSegment(
+    segmentId: string,
+    element: HTMLButtonElement | null
+  ) {
+    if (element) {
+      transcriptSegmentRefs.current.set(segmentId, element);
+    } else {
+      transcriptSegmentRefs.current.delete(segmentId);
+    }
+  }
+
+  function selectTranscriptSegment(segment: MeetingReportTranscriptSegment) {
+    setActiveTranscriptSegmentId(segment.id);
+    const element = transcriptSegmentRefs.current.get(segment.id);
+    if (!element) return;
+
+    element.scrollIntoView({ behavior: "smooth", block: "center" });
+    element.focus({ preventScroll: true });
+  }
+
+  const summaryEvidence = report ? getEvidenceSegments(report, "summary") : [];
+  const discussionEvidence = report
+    ? getEvidenceSegments(report, "discussion")
+    : [];
+  const decisionEvidence = report ? getEvidenceSegments(report, "decision") : [];
 
   return (
     <DialogPrimitive.Root
@@ -527,6 +703,8 @@ function MeetingReportDetailModal({
                       ? "회의록을 생성하는 중입니다."
                       : "등록된 요약이 없습니다."
                   }
+                  evidenceSegments={summaryEvidence}
+                  onEvidenceSelect={selectTranscriptSegment}
                   title="요약"
                   value={report.summary}
                 />
@@ -537,6 +715,8 @@ function MeetingReportDetailModal({
                       ? "논의사항을 정리하는 중입니다."
                       : "등록된 논의사항이 없습니다."
                   }
+                  evidenceSegments={discussionEvidence}
+                  onEvidenceSelect={selectTranscriptSegment}
                   title="논의사항"
                   value={report.discussionPoints}
                 />
@@ -547,6 +727,8 @@ function MeetingReportDetailModal({
                       ? "결정사항을 정리하는 중입니다."
                       : "등록된 결정사항이 없습니다."
                   }
+                  evidenceSegments={decisionEvidence}
+                  onEvidenceSelect={selectTranscriptSegment}
                   title="결정사항"
                   value={report.decisions}
                 />
@@ -557,40 +739,50 @@ function MeetingReportDetailModal({
                   </h3>
                   {actionItems.length ? (
                     <ul className="grid gap-2">
-                      {actionItems.map((item, index) => (
-                        <li
-                          key={`${item.title}-${index}`}
-                          className="grid gap-3 rounded-lg border bg-background p-3 text-sm sm:grid-cols-[minmax(0,1fr)_auto]"
-                        >
-                          <div className="min-w-0">
-                            <p className="break-words font-medium text-foreground">
-                              {item.title}
-                            </p>
-                            {item.description ? (
-                              <p className="mt-2 whitespace-pre-wrap break-words text-muted-foreground">
-                                {item.description}
+                      {actionItemsWithEvidence.map(
+                        ({ evidenceSegments, index, item }) => (
+                          <li
+                            key={`${item.title}-${index}`}
+                            className="grid gap-3 rounded-lg border bg-background p-3 text-sm sm:grid-cols-[minmax(0,1fr)_auto]"
+                          >
+                            <div className="min-w-0">
+                              <p className="break-words font-medium text-foreground">
+                                {item.title}
                               </p>
-                            ) : null}
-                          </div>
+                              {item.description ? (
+                                <p className="mt-2 whitespace-pre-wrap break-words text-muted-foreground">
+                                  {item.description}
+                                </p>
+                              ) : null}
+                              {evidenceSegments.length ? (
+                                <div className="mt-3">
+                                  <EvidenceTimeButtons
+                                    segments={evidenceSegments}
+                                    onSelect={selectTranscriptSegment}
+                                  />
+                                </div>
+                              ) : null}
+                            </div>
 
-                          <div className="flex shrink-0 flex-col items-start gap-2 sm:items-end">
-                            {item.priority ? (
-                              <span className="rounded-full border bg-muted/40 px-2 py-0.5 text-xs font-medium text-muted-foreground">
-                                {getActionPriorityLabel(item.priority)}
-                              </span>
-                            ) : null}
-                            <Button
-                              type="button"
-                              size="sm"
-                              className="bg-emerald-600 text-white hover:bg-emerald-700 focus-visible:border-emerald-500 focus-visible:ring-emerald-500/30"
-                              onClick={() => onCreateSchedule(item, report)}
-                            >
-                              <CalendarPlus className="size-3.5" />
-                              일정 생성
-                            </Button>
-                          </div>
-                        </li>
-                      ))}
+                            <div className="flex shrink-0 flex-col items-start gap-2 sm:items-end">
+                              {item.priority ? (
+                                <span className="rounded-full border bg-muted/40 px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                                  {getActionPriorityLabel(item.priority)}
+                                </span>
+                              ) : null}
+                              <Button
+                                type="button"
+                                size="sm"
+                                className="bg-emerald-600 text-white hover:bg-emerald-700 focus-visible:border-emerald-500 focus-visible:ring-emerald-500/30"
+                                onClick={() => onCreateSchedule(item, report)}
+                              >
+                                <CalendarPlus className="size-3.5" />
+                                일정 생성
+                              </Button>
+                            </div>
+                          </li>
+                        )
+                      )}
                     </ul>
                   ) : (
                     <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
@@ -599,15 +791,24 @@ function MeetingReportDetailModal({
                   )}
                 </section>
 
-                <ReportTextBlock
-                  emptyLabel={
-                    isReportInProgress(report.status)
-                      ? "음성 텍스트를 정리하는 중입니다."
-                      : "등록된 transcript가 없습니다."
-                  }
-                  title="Transcript"
-                  value={report.transcriptText}
-                />
+                {transcriptSegments.length ? (
+                  <TranscriptSegmentViewer
+                    activeSegmentId={activeTranscriptSegmentId}
+                    registerSegment={registerTranscriptSegment}
+                    segments={transcriptSegments}
+                    onSelect={selectTranscriptSegment}
+                  />
+                ) : (
+                  <ReportTextBlock
+                    emptyLabel={
+                      isReportInProgress(report.status)
+                        ? "음성 텍스트를 정리하는 중입니다."
+                        : "등록된 transcript가 없습니다."
+                    }
+                    title="Transcript"
+                    value={report.transcriptText}
+                  />
+                )}
               </div>
             ) : null}
           </div>

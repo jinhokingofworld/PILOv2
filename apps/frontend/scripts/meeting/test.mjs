@@ -330,6 +330,26 @@ assert.match(meetingReportSection, /getMeetingReport/);
 assert.match(meetingReportSection, /regenerateMeetingReport/);
 assert.match(meetingReportSection, /window\.confirm/);
 assert.match(meetingReportSection, /actionItemCandidates/);
+assert.match(meetingReportSection, /getEvidenceSegments/);
+assert.match(meetingReportSection, /sourceIndex\?: number/);
+assert.match(
+  meetingReportSection,
+  /sourceIndex !== undefined && evidence\.sourceIndex !== sourceIndex/
+);
+assert.match(meetingReportSection, /getEvidenceSegments\(report, "summary"\)/);
+assert.match(meetingReportSection, /getEvidenceSegments\(report, "discussion"\)/);
+assert.match(meetingReportSection, /getEvidenceSegments\(report, "decision"\)/);
+assert.doesNotMatch(
+  meetingReportSection,
+  /getEvidenceSegments\(report, "(?:summary|discussion|decision)", 0\)/
+);
+assert.match(meetingReportSection, /formatTranscriptTimestamp/);
+assert.match(meetingReportSection, /EvidenceTimeButtons/);
+assert.match(meetingReportSection, /TranscriptSegmentViewer/);
+assert.match(meetingReportSection, /scrollIntoView\(\{ behavior: "smooth", block: "center" \}\)/);
+assert.match(meetingReportSection, /focus\(\{ preventScroll: true \}\)/);
+assert.match(meetingReportSection, /transcriptSegments\.length/);
+assert.match(meetingReportSection, /transcriptText/);
 assert.match(meetingReportSection, /60초 이하 녹음은 회의록이 생성되지 않습니다/);
 assert.doesNotMatch(meetingReportSection, /@\/components\/ui\/sheet/);
 assert.doesNotMatch(meetingReportSection, /MeetingReportDetailSheet/);
