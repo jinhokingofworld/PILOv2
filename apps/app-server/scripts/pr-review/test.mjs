@@ -49,6 +49,9 @@ const prReviewModule = await readSource(
 const prReviewService = await readSource(
   "../../src/modules/pr-review/pr-review.service.ts"
 );
+const prReviewCanvasMaterializer = await readSource(
+  "../../src/modules/pr-review/pr-review-canvas-materializer.ts"
+);
 const prReviewTypes = await readSource("../../src/modules/pr-review/types/index.ts");
 const prReviewApi = await readSource("../../../../docs/api/pr-review-api.md");
 const prReviewAnalysisJobMigration = await readSource(
@@ -360,7 +363,10 @@ assert.match(prReviewService, /리뷰 흐름 연결 정보를 사용할 수 없�
 assert.match(prReviewService, /mode: "side_by_side"/);
 assert.match(prReviewService, /mode === "binary"/);
 assert.match(prReviewService, /mode === "large"/);
-assert.doesNotMatch(prReviewService, /canvas_freeform_shapes/);
+assert.match(prReviewService, /canvas_freeform_shapes/);
+assert.match(prReviewService, /buildPrReviewCanvasMaterialization/);
+assert.match(prReviewCanvasMaterializer, /shape:pr-review-file:/);
+assert.match(prReviewCanvasMaterializer, /shape:pr-review-relation:/);
 assert.doesNotMatch(prReviewService, /canvas_shape_id/);
 assert.match(prReviewAnalysisService, /PrReviewAnalysisService/);
 assert.match(prReviewAnalysisService, /OPENAI_API_KEY/);
@@ -490,3 +496,4 @@ await import("./github-file-pagination.test.mjs");
 await import("./semantic-graph-contract.test.mjs");
 await import("./semantic-graph-candidates.test.mjs");
 await import("./semantic-graph-validator.test.mjs");
+await import("./canvas-materializer.test.mjs");

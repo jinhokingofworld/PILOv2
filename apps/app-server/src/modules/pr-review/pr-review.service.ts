@@ -53,7 +53,22 @@ import {
   PR_REVIEW_SEMANTIC_GRAPH_SCHEMA_VERSION,
   type PrReviewSemanticGraphHandoffPayload
 } from "./pr-review-semantic-contract";
-import { resolvePrReviewSemanticGraph } from "./pr-review-semantic-validator";
+import {
+  resolvePrReviewSemanticGraph,
+  type PrReviewValidatedGraphFlow,
+  type PrReviewValidatedSemanticGraph
+} from "./pr-review-semantic-validator";
+import { computeShapeContentHash } from "../canvas/canvas-shape-hash";
+import {
+  PR_REVIEW_FILE_NODE_SHAPE_TYPE,
+  PR_REVIEW_RELATION_EDGE_SHAPE_TYPE
+} from "../canvas/canvas-review-shape-policy";
+import type { CanvasShapeRow } from "../canvas/canvas.types";
+import {
+  buildPrReviewCanvasMaterialization,
+  type PrReviewCanvasMaterializationFile,
+  type PrReviewCanvasMaterializationRelation
+} from "./pr-review-canvas-materializer";
 
 interface PullRequestRow extends QueryResultRow {
   id: string;
@@ -197,6 +212,8 @@ interface ReviewFlowRelationRow extends QueryResultRow {
 
 interface ReviewFileRow extends QueryResultRow {
   id: string;
+  room_file_id: string;
+  current_status: PrReviewFileReviewStatus;
 }
 
 interface ReviewFileCarryOverRow extends QueryResultRow {
@@ -4426,6 +4443,15 @@ export class PrReviewService {
           ];
     const flowByKey = new Map<string, ReviewFlowRow>();
     const membershipIdByFlowAndPath = new Map<string, string>();
+    const primaryMembershipByPath = new Map<
+      string,
+      {
+        flowId: string;
+        reviewFlowFileId: string;
+        flowSortOrder: number;
+        workflowOrder: number;
+      }
+    >();
 
     for (const [flowIndex, graphFlow] of graphFlows.entries()) {
       const flow = await transaction.queryOne<ReviewFlowRow>(
@@ -4477,6 +4503,14 @@ export class PrReviewService {
           this.semanticGraphMembershipKey(graphFlow.candidateKey, filePath),
           membership.id
         );
+        if (!primaryMembershipByPath.has(filePath)) {
+          primaryMembershipByPath.set(filePath, {
+            flowId: flow.id,
+            reviewFlowFileId: membership.id,
+            flowSortOrder: flowIndex + 1,
+            workflowOrder: fileIndex + 1
+          });
+        }
       }
     }
 
@@ -4525,6 +4559,277 @@ export class PrReviewService {
         throw badRequest("Review flow relation could not be created");
       }
     }
+
+    const materializationFiles: PrReviewCanvasMaterializationFile[] = files.map(
+      (file, index) => {
+        const reviewFile = reviewFileByPath.get(file.filePath);
+        const metadata = metadataByPath.get(file.filePath);
+        const membership = primaryMembershipByPath.get(file.filePath);
+        if (!reviewFile || !metadata) {
+          throw badRequest("Review canvas file must match a changed file");
+        }
+
+        return {
+          reviewFileId: reviewFile.id,
+          roomFileId: reviewFile.room_file_id,
+          reviewFlowFileId: membership?.reviewFlowFileId ?? null,
+          flowId: membership?.flowId ?? null,
+          flowSortOrder: membership?.flowSortOrder ?? graphFlows.length + 1,
+          workflowOrder: membership?.workflowOrder ?? index + 1,
+          fileName: file.fileName,
+          filePath: file.filePath,
+          fileStatus: file.fileStatus,
+          roleSummary: metadata.fileRole,
+          riskLevel: metadata.riskLevel,
+          reviewStatus: reviewFile.current_status
+        };
+      }
+    );
+    const materializationRelations = this.buildCanvasMaterializationRelations(
+      semanticGraph,
+      graphFlows,
+      flowByKey,
+      reviewFileByPath
+    );
+
+    await this.materializeReviewCanvas(
+      transaction,
+      roomId,
+      sessionId,
+      materializationFiles,
+      materializationRelations
+    );
+  }
+
+  private buildCanvasMaterializationRelations(
+    semanticGraph: PrReviewValidatedSemanticGraph,
+    graphFlows: PrReviewValidatedGraphFlow[],
+    flowByKey: Map<string, ReviewFlowRow>,
+    reviewFileByPath: Map<string, ReviewFileRow>
+  ): PrReviewCanvasMaterializationRelation[] {
+    const relations: PrReviewCanvasMaterializationRelation[] = [];
+    const appendRelation = (input: {
+      flowKey: string;
+      fromFilePath: string;
+      toFilePath: string;
+      relationType: PrReviewCanvasMaterializationRelation["relationType"];
+      source: PrReviewCanvasMaterializationRelation["source"];
+      confidence: number;
+      reason: string;
+    }) => {
+      const flow = flowByKey.get(input.flowKey);
+      const fromFile = reviewFileByPath.get(input.fromFilePath);
+      const toFile = reviewFileByPath.get(input.toFilePath);
+      if (!flow || !fromFile || !toFile) {
+        throw badRequest("Review canvas relation must match the review graph");
+      }
+
+      relations.push({
+        fromReviewFileId: fromFile.id,
+        toReviewFileId: toFile.id,
+        fromRoomFileId: fromFile.room_file_id,
+        toRoomFileId: toFile.room_file_id,
+        flowId: flow.id,
+        relationType: input.relationType,
+        source: input.source,
+        confidence: input.confidence,
+        reason: input.reason
+      });
+    };
+
+    for (const relation of semanticGraph.relations) {
+      appendRelation(relation);
+    }
+
+    for (const graphFlow of graphFlows) {
+      for (let index = 1; index < graphFlow.reviewOrder.length; index += 1) {
+        appendRelation({
+          flowKey: graphFlow.candidateKey,
+          fromFilePath: graphFlow.reviewOrder[index - 1],
+          toFilePath: graphFlow.reviewOrder[index],
+          relationType: "review_order",
+          source: "fallback",
+          confidence: 100,
+          reason: "추천 리뷰 경로"
+        });
+      }
+    }
+
+    return relations;
+  }
+
+  private async materializeReviewCanvas(
+    transaction: DatabaseTransaction,
+    roomId: string,
+    sessionId: string,
+    files: PrReviewCanvasMaterializationFile[],
+    relations: PrReviewCanvasMaterializationRelation[]
+  ): Promise<void> {
+    const room = await transaction.queryOne<{ canvas_id: string }>(
+      `
+        SELECT canvas_id
+        FROM pr_review_rooms
+        WHERE id = $1
+        FOR UPDATE
+      `,
+      [roomId]
+    );
+    if (!room) {
+      throw conflictError("PR Review room is no longer active");
+    }
+
+    const existingShapes = await transaction.query<CanvasShapeRow>(
+      `
+        SELECT
+          id,
+          canvas_id,
+          parent_shape_id,
+          shape_type,
+          title,
+          text_content,
+          x,
+          y,
+          width,
+          height,
+          rotation,
+          z_index,
+          raw_shape,
+          content_hash,
+          revision,
+          created_at,
+          updated_at,
+          deleted_at
+        FROM canvas_freeform_shapes
+        WHERE canvas_id = $1
+          AND shape_type = ANY($2::text[])
+        ORDER BY id
+        FOR UPDATE
+      `,
+      [
+        room.canvas_id,
+        [
+          PR_REVIEW_FILE_NODE_SHAPE_TYPE,
+          PR_REVIEW_RELATION_EDGE_SHAPE_TYPE
+        ]
+      ]
+    );
+    const materialization = buildPrReviewCanvasMaterialization({
+      reviewRoomId: roomId,
+      reviewSessionId: sessionId,
+      files,
+      relations,
+      existingShapes
+    });
+
+    for (const shape of materialization.shapes) {
+      const values = shape.values;
+      const contentHash = computeShapeContentHash(values);
+      await transaction.execute(
+        `
+          INSERT INTO canvas_freeform_shapes (
+            id,
+            canvas_id,
+            parent_shape_id,
+            shape_type,
+            title,
+            text_content,
+            x,
+            y,
+            width,
+            height,
+            rotation,
+            z_index,
+            raw_shape,
+            content_hash,
+            deleted_at
+          )
+          VALUES (
+            $1,
+            $2,
+            $3,
+            $4,
+            $5,
+            $6,
+            $7,
+            $8,
+            $9,
+            $10,
+            $11,
+            $12,
+            $13::jsonb,
+            $14,
+            NULL
+          )
+          ON CONFLICT (id) DO UPDATE
+          SET
+            parent_shape_id = EXCLUDED.parent_shape_id,
+            shape_type = EXCLUDED.shape_type,
+            title = EXCLUDED.title,
+            text_content = EXCLUDED.text_content,
+            x = EXCLUDED.x,
+            y = EXCLUDED.y,
+            width = EXCLUDED.width,
+            height = EXCLUDED.height,
+            rotation = EXCLUDED.rotation,
+            z_index = EXCLUDED.z_index,
+            raw_shape = EXCLUDED.raw_shape,
+            content_hash = EXCLUDED.content_hash,
+            revision = canvas_freeform_shapes.revision + 1,
+            updated_at = NOW(),
+            deleted_at = NULL
+          WHERE canvas_freeform_shapes.canvas_id = EXCLUDED.canvas_id
+            AND (
+              canvas_freeform_shapes.deleted_at IS NOT NULL
+              OR canvas_freeform_shapes.content_hash <> EXCLUDED.content_hash
+            )
+        `,
+        [
+          shape.id,
+          room.canvas_id,
+          values.parentShapeId,
+          values.shapeType,
+          values.title,
+          values.textContent,
+          values.x,
+          values.y,
+          values.width,
+          values.height,
+          values.rotation,
+          values.zIndex,
+          JSON.stringify(values.rawShape),
+          contentHash
+        ]
+      );
+    }
+
+    await transaction.execute(
+      `
+        UPDATE canvas_freeform_shapes
+        SET deleted_at = NOW(),
+            revision = revision + 1,
+            updated_at = NOW()
+        WHERE canvas_id = $1
+          AND shape_type = ANY($2::text[])
+          AND deleted_at IS NULL
+          AND NOT (id = ANY($3::text[]))
+      `,
+      [
+        room.canvas_id,
+        [
+          PR_REVIEW_FILE_NODE_SHAPE_TYPE,
+          PR_REVIEW_RELATION_EDGE_SHAPE_TYPE
+        ],
+        materialization.activeShapeIds
+      ]
+    );
+    await transaction.execute(
+      `
+        UPDATE canvas
+        SET updated_at = NOW()
+        WHERE id = $1
+      `,
+      [room.canvas_id]
+    );
   }
 
   private async insertReviewFile(
@@ -4623,7 +4928,7 @@ export class PrReviewService {
           $23,
           $24
         )
-        RETURNING id
+        RETURNING id, room_file_id, current_status
       `,
       [
         sessionId,
