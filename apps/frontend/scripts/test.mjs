@@ -222,11 +222,11 @@ const piloCanvasTypes = await readFile(
   "utf8"
 );
 const canvasRealtimeTypes = await readFile(
-  new URL("../src/features/canvas/realtime/canvas-realtime-types.ts", import.meta.url),
+  new URL("../src/shared/canvas-realtime/canvas-realtime-types.ts", import.meta.url),
   "utf8"
 );
 const canvasRealtimeClient = await readFile(
-  new URL("../src/features/canvas/realtime/canvas-realtime-client.ts", import.meta.url),
+  new URL("../src/shared/canvas-realtime/canvas-realtime-client.ts", import.meta.url),
   "utf8"
 );
 const canvasPresenceHook = await readFile(
@@ -234,7 +234,11 @@ const canvasPresenceHook = await readFile(
   "utf8"
 );
 const canvasRemoteCursorOverlay = await readFile(
-  new URL("../src/features/canvas/realtime/RemoteCursorOverlay.tsx", import.meta.url),
+  new URL("../src/shared/canvas-realtime/RemoteCursorOverlay.tsx", import.meta.url),
+  "utf8"
+);
+const canvasRealtimeCss = await readFile(
+  new URL("../src/shared/canvas-realtime/canvas-realtime.css", import.meta.url),
   "utf8"
 );
 const canvasRemotePresenceContext = await readFile(
@@ -820,6 +824,8 @@ assert.match(canvasRemoteCursorOverlay, /getShapePageBounds/);
 assert.match(canvasRemoteCursorOverlay, /canvas-remote-selection-outline/);
 assert.match(canvasRemoteCursorOverlay, /getStableCursorColor/);
 assert.match(canvasRemoteCursorOverlay, /entry\.cursor === null/);
+assert.match(canvasRealtimeCss, /canvas-remote-cursor-layer/);
+assert.match(canvasRealtimeCss, /canvas-remote-selection-outline/);
 assert.match(canvasRemotePresenceContext, /CanvasRemotePresenceProvider/);
 assert.match(canvasRemotePresenceContext, /useCanvasRemoteShapePresence/);
 assert.match(canvasRemotePresenceContext, /useCanvasRemoteShapeEditingPresence/);

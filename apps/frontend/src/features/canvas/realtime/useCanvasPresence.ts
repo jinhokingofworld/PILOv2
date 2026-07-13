@@ -6,23 +6,21 @@ import {
   createCanvasRealtimeSocket,
   getCanvasRealtimeServerUrl,
   type CanvasRealtimeSocket,
-} from "./canvas-realtime-client";
+} from "@/shared/canvas-realtime/canvas-realtime-client";
 import type {
   CanvasOperationsCatchupPayload,
-  CanvasShapeOperationPayload,
-} from "../api/canvas-types";
-import type {
   CanvasJoinedPayload,
   CanvasPresenceEditingMode,
   CanvasPresencePoint,
   CanvasPresenceViewport,
   CanvasRealtimeConfig,
   CanvasRemotePresenceState,
+  CanvasShapeOperationPayload,
   CanvasShapeLockState,
   CanvasShapePreviewEventPayload,
   CanvasShapePreviewPhase,
   CanvasSyncRequiredPayload,
-} from "./canvas-realtime-types";
+} from "@/shared/canvas-realtime/canvas-realtime-types";
 
 const STALE_PRESENCE_TIMEOUT_MS = 15_000;
 const STALE_PRESENCE_SWEEP_MS = 2_000;

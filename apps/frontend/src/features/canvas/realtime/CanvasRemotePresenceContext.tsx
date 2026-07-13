@@ -6,7 +6,7 @@ import {
   useMemo,
   type ReactNode,
 } from "react";
-import type { CanvasRemotePresenceState } from "./canvas-realtime-types";
+import type { CanvasRemotePresenceState } from "@/shared/canvas-realtime/canvas-realtime-types";
 
 const CanvasRemotePresenceContext = createContext<CanvasRemotePresenceState[]>(
   [],

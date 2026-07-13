@@ -24,7 +24,7 @@ import { useValue } from "@tldraw/state-react";
 import { useCanvasAgent } from "@/features/canvas/agent/use-canvas-agent";
 import { TldrawSurface } from "@/shared/tldraw";
 import type { CanvasPresenceController } from "@/features/canvas/realtime/useCanvasPresence";
-import { RemoteCursorOverlay } from "@/features/canvas/realtime/RemoteCursorOverlay";
+import { RemoteCursorOverlay } from "@/shared/canvas-realtime/RemoteCursorOverlay";
 import { CanvasRemotePresenceProvider } from "@/features/canvas/realtime/CanvasRemotePresenceContext";
 import type {
   CanvasPresenceEditingMode,
@@ -32,7 +32,7 @@ import type {
   CanvasPresenceViewport,
   CanvasShapePreviewEventPayload,
   CanvasShapePreviewPhase,
-} from "@/features/canvas/realtime/canvas-realtime-types";
+} from "@/shared/canvas-realtime/canvas-realtime-types";
 import { PiloCanvasBackground } from "./PiloCanvasBackground";
 import {
   CanvasAiChatOverlay,
