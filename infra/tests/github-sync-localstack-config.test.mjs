@@ -14,6 +14,7 @@ const deployChecklist = await readFile(path.join(repoRoot, 'docs/infra/deploy-ch
 const architecture = await readFile(path.join(repoRoot, 'docs/infra/dev-architecture.md'), 'utf8');
 const observabilityModule = await readFile(path.join(repoRoot, 'infra/modules/github-sync-observability/main.tf'), 'utf8');
 const localStackWorkflow = await readFile(path.join(repoRoot, '.github/workflows/infra-localstack-integration.yml'), 'utf8');
+const powershellCommand = process.platform === 'win32' ? 'powershell.exe' : 'pwsh';
 
 assert.match(operationsRunbook, /RUN_LOCALSTACK_INTEGRATION=1/);
 assert.match(operationsRunbook, /Docker/);
@@ -26,12 +27,12 @@ assert.match(architecture, /AWS_TERRAFORM_PLAN_ROLE_ARN/);
 assert.match(architecture, /동일 저장소 PR/);
 assert.match(architecture, /pilo-dev-github-sync-jobs/);
 assert.match(architecture, /pilo-dev-github-sync-jobs-dlq/);
-assert.match(localStackWorkflow, /runs-on:\s*windows-2025/);
+assert.match(localStackWorkflow, /runs-on:\s*ubuntu-latest/);
 assert.match(localStackWorkflow, /RUN_LOCALSTACK_INTEGRATION:\s*"1"/);
 assert.match(localStackWorkflow, /docker version/);
 assert.match(localStackWorkflow, /\.Server\.OsType/);
-assert.match(localStackWorkflow, /Get-Command aws/);
-assert.match(localStackWorkflow, /Get-Command powershell\.exe/);
+assert.match(localStackWorkflow, /command -v aws/);
+assert.match(localStackWorkflow, /command -v pwsh/);
 
 for (const [alarm, queueName, threshold] of [
   ['webhook_warning', 'github-webhooks', '60'],
@@ -76,14 +77,11 @@ if (process.env.RUN_LOCALSTACK_INTEGRATION !== '1') {
   process.exit(0);
 }
 
-if (process.platform !== 'win32') {
-  throw new Error('This manual test exercises the repository PowerShell setup path and must run on Windows.');
-}
-
 try {
-  await run('where.exe', ['aws']);
+  await run('aws', ['--version']);
+  await run(powershellCommand, ['-NoProfile', '-Command', 'Get-Command aws -ErrorAction Stop | Out-Null']);
 } catch {
-  throw new Error('AWS CLI is required to run the PowerShell setup path. Install it and run the manual test again.');
+  throw new Error(`AWS CLI and ${powershellCommand} are required to run the PowerShell setup path.`);
 }
 
 const region = 'ap-northeast-2';
@@ -172,7 +170,7 @@ async function runShellSetup() {
 async function runPowerShellSetup() {
   const localstack = await startLocalStack('powershell');
   await precreateGithubSourceQueues(localstack.name);
-  await run('powershell.exe', [
+  await run(powershellCommand, [
     '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', powershellSetupScript,
   ], {
     env: {

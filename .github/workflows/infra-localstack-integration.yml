@@ -16,27 +16,27 @@ permissions:
 jobs:
   github-sync-localstack:
     name: GitHub sync LocalStack configuration
-    runs-on: windows-2025
+    runs-on: ubuntu-latest
     timeout-minutes: 15
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Verify Windows runner prerequisites
-        shell: pwsh
+      - name: Verify Linux runner prerequisites
+        shell: bash
         run: |
           docker version
-          $serverOsType = docker version --format '{{.Server.OsType}}'
-          if ($serverOsType.Trim() -ne 'linux') {
-            throw "LocalStack requires Docker Linux container mode, but the Docker server reports '$serverOsType'."
-          }
+          server_os_type="$(docker version --format '{{.Server.OsType}}')"
+          if [ "$server_os_type" != "linux" ]; then
+            echo "LocalStack requires a Docker Linux daemon, but the Docker server reports '$server_os_type'." >&2
+            exit 1
+          fi
           docker info
-          Get-Command aws -ErrorAction Stop | Out-Null
-          Get-Command powershell.exe -ErrorAction Stop | Out-Null
+          command -v aws
+          command -v pwsh
 
       - name: Verify GitHub sync LocalStack queues
-        shell: pwsh
         env:
           RUN_LOCALSTACK_INTEGRATION: "1"
         run: node infra/tests/github-sync-localstack-config.test.mjs

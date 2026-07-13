@@ -117,9 +117,9 @@ For a PowerShell-created LocalStack instance, replace `awslocal sqs` with `aws -
 
 ### Isolated LocalStack integration test
 
-`Infra LocalStack Integration` workflow runs `infra/tests/github-sync-localstack-config.test.mjs` on the GitHub-hosted `windows-2025` runner when the GitHub queue setup paths, this runbook, or the workflow changes. Before the test, it verifies Docker availability, Docker Linux container mode, AWS CLI, and Windows PowerShell. It starts separate disposable `localstack/localstack:3` containers with anonymous port mappings, runs the shell and PowerShell setup paths independently, and removes the containers afterward. It never uses the `pilo_localstack_data` Docker volume or an AWS account.
+`Infra LocalStack Integration` workflow runs `infra/tests/github-sync-localstack-config.test.mjs` on the GitHub-hosted `ubuntu-latest` runner when the GitHub queue setup paths, this runbook, or the workflow changes. GitHub-hosted Windows runners do not provide a Docker daemon for LocalStack containers, so CI uses Docker Linux container mode and `pwsh` (PowerShell 7) to execute the same PowerShell queue setup script. Before the test, it verifies Docker availability, Docker Linux mode, AWS CLI, and `pwsh`. It starts separate disposable `localstack/localstack:3` containers with anonymous port mappings, runs the shell and PowerShell setup paths independently, and removes the containers afterward. It never uses the `pilo_localstack_data` Docker volume or an AWS account.
 
-For manual execution, Docker Desktop must be running and able to pull `localstack/localstack:3`; Node.js, Windows PowerShell, and AWS CLI must be available. The test supplies only a LocalStack endpoint and test credentials to the PowerShell setup path; it does not use AWS account credentials or an AWS endpoint.
+For manual Windows execution, Docker Desktop must be running and able to pull `localstack/localstack:3`; Node.js, Windows PowerShell, and AWS CLI must be available. On Linux/macOS, the same test uses `pwsh`. The test supplies only a LocalStack endpoint and test credentials to the PowerShell setup path; it does not use AWS account credentials or an AWS endpoint.
 
 Run it manually from the repository root:
 
