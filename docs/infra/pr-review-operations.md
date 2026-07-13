@@ -75,6 +75,12 @@ dev queue 이름은 `pilo-dev-pr-review-analysis`, DLQ는
 `pilo-dev-pr-review-analysis-dlq`다. 두 queue의 visible/in-flight 메시지 수와 oldest message
 age를 먼저 확인한다. 원본 queue의 `maxReceiveCount`는 3이고 visibility timeout은 900초다.
 
+CloudWatch에서는 원본 queue backlog와 oldest message age, DLQ backlog, PR Review Worker
+running task count alarm을 함께 확인한다. retryable infrastructure failure는 세 번째 receive에서
+`ANALYSIS_PROVIDER_FAILED` internal failure handoff를 시도한다. handoff가 성공하면 Job/session을
+terminal 처리한 뒤 source message를 삭제하고, handoff가 실패해 삭제하지 못한 message만 재시도 후
+DLQ에 보존한다.
+
 DLQ 메시지는 patch나 token을 출력하지 않고 `jobId`, `reviewSessionId`, `schemaVersion`만
 확인한다. 메시지를 수동으로 원본 queue에 재전송하지 않는다. application terminalization과
 DLQ redrive가 어긋나면 먼저 session/job 상태와 원인을 확인하고, 사용자 retry API로 새

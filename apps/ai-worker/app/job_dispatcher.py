@@ -128,7 +128,7 @@ class JobDispatcher:
     def _process_canvas_agent(self, payload: dict[str, object]) -> JobProcessResult:
         if self.canvas_agent_processor is None:
             return JobProcessResult(
-                delete_message=True,
+                delete_message=False,
                 reason="canvas_agent_processor_unavailable",
                 job_type=CANVAS_AGENT_JOB_TYPE,
             )
@@ -144,7 +144,7 @@ class JobDispatcher:
     def _process_pr_review_analysis(self, payload: dict[str, object]) -> JobProcessResult:
         if self.pr_review_analysis_processor is None:
             return JobProcessResult(
-                delete_message=True,
+                delete_message=False,
                 reason="pr_review_analysis_processor_unavailable",
                 job_type=PR_REVIEW_ANALYSIS_JOB_TYPE,
             )

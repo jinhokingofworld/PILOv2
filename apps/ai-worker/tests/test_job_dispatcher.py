@@ -138,6 +138,24 @@ def test_dispatcher_keeps_agent_job_when_processor_is_unavailable() -> None:
     assert result.reason == "agent_run_processor_unavailable"
 
 
+def test_dispatcher_keeps_canvas_job_when_processor_is_unavailable() -> None:
+    result = JobDispatcher().process_message(
+        json.dumps({"jobType": "canvas_agent_step_requested", "runId": RUN_ID})
+    )
+
+    assert result.delete_message is False
+    assert result.reason == "canvas_agent_processor_unavailable"
+
+
+def test_dispatcher_keeps_pr_review_job_when_processor_is_unavailable() -> None:
+    result = JobDispatcher().process_message(
+        json.dumps({"jobType": "pr_review_analysis_requested"})
+    )
+
+    assert result.delete_message is False
+    assert result.reason == "pr_review_analysis_processor_unavailable"
+
+
 def test_dispatcher_deletes_invalid_json_without_processor_calls() -> None:
     meeting_processor = FakeMeetingReportProcessor()
     agent_processor = FakeAgentRunProcessor()

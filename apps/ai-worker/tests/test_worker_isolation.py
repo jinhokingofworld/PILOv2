@@ -7,6 +7,10 @@ from app.meeting_worker_runtime import (
     MeetingWorkerSettings,
     create_meeting_dispatcher,
 )
+from app.pr_review_analysis_runtime import (
+    PrReviewWorkerSettings,
+    create_pr_review_dispatcher,
+)
 from app.shared_ai_worker_runtime import (
     SharedAiWorkerSettings,
     create_shared_dispatcher,
@@ -78,6 +82,31 @@ def test_agent_worker_dispatcher_has_no_meeting_or_pr_review_processor() -> None
     assert dispatcher.meeting_report_processor is None
     assert dispatcher.canvas_agent_processor is None
     assert dispatcher.pr_review_analysis_processor is None
+
+
+def test_pr_review_worker_uses_only_dedicated_queue_environment(monkeypatch) -> None:
+    monkeypatch.setenv(
+        "SQS_PR_REVIEW_ANALYSIS_QUEUE_URL",
+        "https://sqs.example.com/pr-review-analysis",
+    )
+    monkeypatch.setenv("PR_REVIEW_ANALYSIS_HANDOFF_BASE_URL", "http://localhost:4000")
+    monkeypatch.setenv("PR_REVIEW_ANALYSIS_WORKER_TOKEN", "pr-review-token")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.delenv("SQS_AI_JOBS_QUEUE_URL", raising=False)
+    monkeypatch.delenv("SQS_AGENT_JOBS_QUEUE_URL", raising=False)
+    monkeypatch.delenv("SQS_MEETING_JOBS_QUEUE_URL", raising=False)
+
+    settings = PrReviewWorkerSettings.from_env()
+
+    assert settings.sqs_queue_url == "https://sqs.example.com/pr-review-analysis"
+
+
+def test_pr_review_dispatcher_has_no_meeting_agent_or_canvas_processor() -> None:
+    dispatcher = create_pr_review_dispatcher(object())
+
+    assert dispatcher.meeting_report_processor is None
+    assert dispatcher.agent_run_processor is None
+    assert dispatcher.canvas_agent_processor is None
 
 
 def test_shared_ai_worker_keeps_legacy_meeting_processor_during_drain(monkeypatch) -> None:

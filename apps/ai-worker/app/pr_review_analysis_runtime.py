@@ -100,13 +100,16 @@ def create_pr_review_worker(
         handoff_client,
         analysis_client,
     )
-    dispatcher = JobDispatcher(pr_review_analysis_processor=processor)
     return SqsAiJobWorker(
         resolved_settings,
-        dispatcher,
+        create_pr_review_dispatcher(processor),
         boto3.client("sqs", **boto_kwargs),
         pr_review_retry_exhaustion_recovery=processor,
     )
+
+
+def create_pr_review_dispatcher(processor: PrReviewAnalysisProcessor) -> JobDispatcher:
+    return JobDispatcher(pr_review_analysis_processor=processor)
 
 
 def run_pr_review_worker() -> None:

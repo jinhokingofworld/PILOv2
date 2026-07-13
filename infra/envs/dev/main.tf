@@ -392,6 +392,14 @@ module "agent_observability" {
   name_prefix = local.name_prefix
 }
 
+module "pr_review_observability" {
+  source = "../../modules/pr-review-observability"
+
+  depends_on = [module.ecs, module.sqs]
+
+  name_prefix = local.name_prefix
+}
+
 resource "aws_route53_record" "frontend" {
   count = var.create_dns_records ? 1 : 0
 
