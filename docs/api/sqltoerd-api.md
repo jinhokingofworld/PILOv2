@@ -2,14 +2,13 @@
 
 ## 상태
 
+- 구현 상태 기준: `origin/dev`의 `c67b4d8`(2026-07-13)
 - 대상 단계: Post-MVP Phase 1 Workspace multi-session
-- 현재 구현: singular MVP API
-- canonical API: 이 문서의 plural endpoint
-- 전환기 API: plural 구현 이후 singular endpoint를 compatibility API로 유지
-- 적용 순서: API 계약 확정, DB migration, app-server 구현, frontend 전환
-
-plural endpoint가 app-server에 구현되기 전까지 현재 singular endpoint가 실제 API다.
-구현 이후 신규 consumer는 plural endpoint만 사용한다.
+- DB migration와 app-server: plural canonical API 구현 완료
+- frontend: `origin/dev`의 session 목록·편집 화면은 plural API를 사용
+- singular API: 기존 consumer를 위한 compatibility API로 유지
+- 신규 consumer: plural endpoint만 사용
+- rollout: 인증된 배포 환경의 plural CRUD/E2E 및 기존 singular consumer 전환 확인 후 singular deprecation을 별도 진행
 
 ## 범위
 
@@ -629,15 +628,15 @@ DELETE /api/v1/workspaces/{workspaceId}/sql-erd-sessions/{sessionId}?baseRevisio
 
 ## Singular compatibility 정책
 
-기존 frontend가 plural API로 전환될 때까지 singular endpoint를 유지한다.
+기존 singular consumer의 전환과 rollout 검증이 끝날 때까지 singular endpoint를 유지한다.
 
-- plural API가 배포되고 singular endpoint의 deprecation이 시작되면 singular 응답에
+- singular endpoint의 deprecation을 시작하면 singular 응답에
   [RFC 9745](https://www.rfc-editor.org/rfc/rfc9745.html#section-2.1)의 Structured
   Field Date 형식인 `Deprecation` header를 포함한다.
 - `Deprecation`에는 boolean value를 사용하지 않는다. 형식 예시는
   `Deprecation: @1688169599`다.
-- 실제 `Deprecation` timestamp는 plural API 운영 배포 시각을 기준으로 구현 PR에서
-  확정한다. deprecation 시작 전에는 이 header를 보내지 않는다.
+- 실제 `Deprecation` timestamp는 deprecation 시작 시각을 기준으로 구현 PR에서
+  확정한다. 현재는 deprecation을 시작하지 않았으므로 이 header를 보내지 않는다.
 - `GET /sql-erd-session`은 `updatedAt DESC, id DESC` 기준 첫 번째 활성 session
   detail 또는 `data: null`을 반환한다.
 - `POST /sql-erd-session`은 활성 session이 하나라도 있으면 기존 동작대로
@@ -653,13 +652,12 @@ DELETE /api/v1/workspaces/{workspaceId}/sql-erd-sessions/{sessionId}?baseRevisio
 
 1. 이 API 계약을 확정한다.
 2. `sql_erd_sessions`의 active Workspace unique index를 제거하는 DB migration을
-   별도 Issue에서 추가한다.
-3. app-server에 plural endpoint와 singular compatibility 동작을 함께 구현한다.
-4. frontend 목록/상세 route를 plural API로 전환한다.
+   별도 Issue에서 추가한다. (완료)
+3. app-server에 plural endpoint와 singular compatibility 동작을 함께 구현한다. (완료)
+4. frontend 목록/상세 route를 plural API로 전환한다. (`origin/dev` 완료, 배포 E2E 확인 필요)
 5. 운영 consumer 전환을 확인한 뒤 singular endpoint 제거 여부를 결정한다.
 
-DB migration과 app-server/frontend 구현이 완료되기 전에는 plural endpoint를 사용할
-수 없다.
+plural endpoint는 현재 사용할 수 있으며, 신규 consumer는 plural endpoint만 사용한다.
 
 ## Validation
 
