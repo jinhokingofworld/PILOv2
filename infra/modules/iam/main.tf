@@ -144,6 +144,11 @@ resource "aws_iam_user" "github_sync_operator" {
   count = var.github_sync_operator_user_name == "" ? 0 : 1
 
   name = var.github_sync_operator_user_name
+
+  # Preserve operational tags managed outside Terraform without exposing them in source control.
+  lifecycle {
+    ignore_changes = [tags]
+  }
 }
 
 resource "aws_iam_policy" "github_sync_operator" {
@@ -263,6 +268,18 @@ resource "aws_iam_user_policy" "github_sync_operator_self_mfa" {
           "iam:GetUser",
           "iam:ListMFADevices",
           "iam:ResyncMFADevice",
+        ]
+        Resource = "arn:aws:iam::*:user/$${aws:username}"
+      },
+      {
+        Sid    = "ReadOwnSecurityCredentials"
+        Effect = "Allow"
+        Action = [
+          "iam:GetLoginProfile",
+          "iam:ListAccessKeys",
+          "iam:ListServiceSpecificCredentials",
+          "iam:ListSigningCertificates",
+          "iam:ListSSHPublicKeys",
         ]
         Resource = "arn:aws:iam::*:user/$${aws:username}"
       },
