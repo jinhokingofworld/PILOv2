@@ -225,7 +225,11 @@ function routeToEntry(
   returnUrl: string
 ) {
   saveSelectedWorkspaceId(session.activeWorkspaceId);
-  router.replace(returnUrl || "/home");
+  router.replace(
+    returnUrl && returnUrl !== "/home"
+      ? returnUrl
+      : `/${session.settings.defaultLandingPage}`
+  );
 }
 
 function getErrorMessage(error: string) {

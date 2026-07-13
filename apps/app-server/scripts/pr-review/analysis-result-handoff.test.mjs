@@ -12,6 +12,7 @@ const WORKSPACE_ID = "33333333-3333-3333-3333-333333333333";
 const PULL_REQUEST_ID = "44444444-4444-4444-4444-444444444444";
 const USER_ID = "55555555-5555-5555-5555-555555555555";
 const HEAD_SHA = "abcdef123456";
+const ROOM_ID = "66666666-6666-4666-8666-666666666666";
 
 function jobRow(overrides = {}) {
   return {
@@ -20,6 +21,7 @@ function jobRow(overrides = {}) {
     workspace_id: WORKSPACE_ID,
     head_sha: HEAD_SHA,
     status: "queued",
+    room_id: ROOM_ID,
     pull_request_id: PULL_REQUEST_ID,
     created_by_user_id: USER_ID,
     session_head_sha: HEAD_SHA,
@@ -57,10 +59,20 @@ function resultBody(overrides = {}) {
 }
 
 class FakeTransaction {
-  constructor(job, { throwOnReviewFile = false, throwOnRelation = false } = {}) {
+  constructor(
+    job,
+    {
+      carryOverByHeadBlobSha = new Map(),
+      throwOnReviewFile = false,
+      throwOnRelation = false,
+      throwOnShapeMaterialization = false
+    } = {}
+  ) {
     this.job = job;
+    this.carryOverByHeadBlobSha = carryOverByHeadBlobSha;
     this.throwOnReviewFile = throwOnReviewFile;
     this.throwOnRelation = throwOnRelation;
+    this.throwOnShapeMaterialization = throwOnShapeMaterialization;
     this.calls = [];
     this.flowCount = 0;
     this.reviewFileCount = 0;
@@ -71,14 +83,27 @@ class FakeTransaction {
   async queryOne(text, values = []) {
     this.calls.push({ text, values });
     if (text.includes("FROM pr_review_analysis_jobs")) return this.job;
+    if (text.includes("SELECT canvas_id") && text.includes("FROM pr_review_rooms")) {
+      return { canvas_id: "canvas-1" };
+    }
     if (text.includes("INSERT INTO review_flows")) {
       this.flowCount += 1;
       return { id: `flow-${this.flowCount}` };
     }
+    if (text.includes("INSERT INTO pr_review_room_files")) {
+      return { id: `room-file-${this.reviewFileCount + 1}` };
+    }
+    if (text.includes("FROM pr_review_rooms AS review_room")) {
+      return this.carryOverByHeadBlobSha.get(values[2]) ?? null;
+    }
     if (text.includes("INSERT INTO review_files")) {
       this.reviewFileCount += 1;
       if (this.throwOnReviewFile) throw new Error("review file insert failed");
-      return { id: `file-${this.reviewFileCount}` };
+      return {
+        id: `file-${this.reviewFileCount}`,
+        room_file_id: `room-file-${this.reviewFileCount}`,
+        current_status: values[20]
+      };
     }
     if (text.includes("INSERT INTO review_flow_files")) {
       this.membershipCount += 1;
@@ -92,12 +117,25 @@ class FakeTransaction {
     if (text.includes("SET status = 'succeeded'")) return { id: JOB_ID };
     if (text.includes("SET status = 'failed'")) return { id: JOB_ID };
     if (text.includes("SET status = 'reviewing'")) return { id: SESSION_ID };
+    if (text.includes("UPDATE pr_review_rooms")) return { id: ROOM_ID };
     if (text.includes("analysis_error_code")) return { id: SESSION_ID };
+    throw new Error(`Unhandled query: ${text}`);
+  }
+
+  async query(text, values = []) {
+    this.calls.push({ text, values });
+    if (text.includes("FROM canvas_freeform_shapes")) return [];
     throw new Error(`Unhandled query: ${text}`);
   }
 
   async execute(text, values = []) {
     this.calls.push({ text, values });
+    if (
+      this.throwOnShapeMaterialization &&
+      text.includes("INSERT INTO canvas_freeform_shapes")
+    ) {
+      throw new Error("canvas shape materialization failed");
+    }
     return { rows: [] };
   }
 }
@@ -175,6 +213,7 @@ function defaultChangedFiles() {
       filePath: "apps/app-server/src/pr-review.ts",
       previousFilePath: null,
       fileName: "pr-review.ts",
+      headBlobSha: "blob-pr-review-v1",
       fileStatus: "modified",
       additions: 12,
       deletions: 3,
@@ -193,6 +232,7 @@ function semanticChangedFiles() {
       filePath: "src/user.controller.ts",
       previousFilePath: null,
       fileName: "user.controller.ts",
+      headBlobSha: "blob-user-controller-v1",
       fileStatus: "modified",
       additions: 2,
       deletions: 0,
@@ -206,6 +246,7 @@ function semanticChangedFiles() {
       filePath: "src/user.service.ts",
       previousFilePath: null,
       fileName: "user.service.ts",
+      headBlobSha: "blob-user-service-v1",
       fileStatus: "modified",
       additions: 3,
       deletions: 1,
@@ -219,6 +260,7 @@ function semanticChangedFiles() {
       filePath: "docs/users.md",
       previousFilePath: null,
       fileName: "users.md",
+      headBlobSha: "blob-users-doc-v1",
       fileStatus: "modified",
       additions: 1,
       deletions: 0,
@@ -323,9 +365,22 @@ function createService(database, github) {
     ]
   );
   assert.equal(fileCalls.length, 3);
+  assert.match(fileCalls[0].text, /RETURNING id, room_file_id, current_status/);
+  const roomFileCalls = calls.filter((call) =>
+    call.text.includes("INSERT INTO pr_review_room_files")
+  );
+  assert.ok(roomFileCalls.every((call) => /RETURNING id\s*$/.test(call.text)));
   assert.deepEqual(
-    fileCalls.map((call) => call.values[11]),
+    fileCalls.map((call) => call.values[13]),
     ["entry", "core_logic", "support"]
+  );
+  assert.deepEqual(
+    fileCalls.map((call) => call.values[18]),
+    [
+      "blob-user-controller-v1",
+      "blob-user-service-v1",
+      "blob-users-doc-v1"
+    ]
   );
   assert.deepEqual(
     membershipCalls.map((call) => call.values),
@@ -347,6 +402,71 @@ function createService(database, github) {
       "Controller가 UserService를 사용합니다."
     ]
   ]);
+  const shapeCalls = calls.filter((call) =>
+    call.text.includes("INSERT INTO canvas_freeform_shapes")
+  );
+  assert.equal(shapeCalls.length, 5);
+  const existingShapeRead = calls.find((call) =>
+    call.text.includes("FROM canvas_freeform_shapes")
+  );
+  assert.match(existingShapeRead.text, /FOR UPDATE/);
+  const lastShapeCallIndex = calls.lastIndexOf(shapeCalls.at(-1));
+  const jobSuccessCallIndex = calls.findIndex((call) =>
+    call.text.includes("SET status = 'succeeded'")
+  );
+  assert.ok(lastShapeCallIndex < jobSuccessCallIndex);
+}
+
+{
+  const reviewedAt = new Date("2026-07-12T12:00:00.000Z");
+  const database = new FakeDatabase(jobRow(), {
+    carryOverByHeadBlobSha: new Map([
+      [
+        "blob-pr-review-v1",
+        {
+          source_decision_id: "decision-1",
+          current_status: "approved",
+          comment: "이전 버전 판단",
+          reviewed_by_user_id: USER_ID,
+          reviewed_at: reviewedAt
+        }
+      ]
+    ])
+  });
+
+  await createService(
+    database,
+    new FakeGithubDependency()
+  ).storeAnalysisJobResult(JOB_ID, resultBody());
+
+  const carryOverQuery = database.transactionState.calls.find((call) =>
+    call.text.includes("FROM pr_review_rooms AS review_room")
+  );
+  assert.deepEqual(carryOverQuery.values, [
+    ROOM_ID,
+    "room-file-1",
+    "blob-pr-review-v1"
+  ]);
+
+  const reviewFileInsert = database.transactionState.calls.find((call) =>
+    call.text.includes("INSERT INTO review_files")
+  );
+  assert.deepEqual(reviewFileInsert.values.slice(18), [
+    "blob-pr-review-v1",
+    "decision-1",
+    "approved",
+    "이전 버전 판단",
+    USER_ID,
+    reviewedAt
+  ]);
+
+  const sessionUpdate = database.transactionState.calls.find((call) =>
+    call.text.includes("SET status = 'reviewing'")
+  );
+  assert.match(
+    sessionUpdate.text,
+    /COUNT\(\*\)::integer[\s\S]*current_status <> 'not_reviewed'/
+  );
 }
 
 {
@@ -369,6 +489,33 @@ function createService(database, github) {
   assert.equal(
     database.transactionState.calls.some((call) =>
       call.text.includes("SET status = 'reviewing'")
+    ),
+    false
+  );
+}
+
+{
+  const database = new FakeDatabase(jobRow(), {
+    throwOnShapeMaterialization: true
+  });
+  await assert.rejects(
+    () =>
+      createService(database, new FakeGithubDependency()).storeAnalysisJobResult(
+        JOB_ID,
+        resultBody()
+      ),
+    /canvas shape materialization failed/
+  );
+  assert.equal(database.rolledBack, true);
+  assert.equal(
+    database.transactionState.calls.some((call) =>
+      call.text.includes("SET status = 'succeeded'")
+    ),
+    false
+  );
+  assert.equal(
+    database.transactionState.calls.some((call) =>
+      call.text.includes("SET current_session_id")
     ),
     false
   );
@@ -435,6 +582,17 @@ function createService(database, github) {
     calls.findIndex((text) => text.includes("SET status = 'succeeded'")) <
       calls.findIndex((text) => text.includes("SET status = 'reviewing'"))
   );
+  const reviewFileInsert = database.transactionState.calls.find((call) =>
+    call.text.includes("INSERT INTO review_files")
+  );
+  assert.deepEqual(reviewFileInsert.values.slice(18), [
+    "blob-pr-review-v1",
+    null,
+    "not_reviewed",
+    null,
+    null,
+    null
+  ]);
 }
 
 {

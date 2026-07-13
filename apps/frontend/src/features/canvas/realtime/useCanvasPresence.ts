@@ -18,11 +18,15 @@ import type {
   CanvasPresenceViewport,
   CanvasRealtimeConfig,
   CanvasRemotePresenceState,
+  CanvasShapeLockState,
+  CanvasShapePreviewEventPayload,
+  CanvasShapePreviewPhase,
   CanvasSyncRequiredPayload,
 } from "./canvas-realtime-types";
 
 const STALE_PRESENCE_TIMEOUT_MS = 15_000;
 const STALE_PRESENCE_SWEEP_MS = 2_000;
+const STALE_SHAPE_PREVIEW_TIMEOUT_MS = 5_000;
 
 export type CanvasOperationCatchupState = {
   lastSeenOpSeq: number;
@@ -37,12 +41,21 @@ export type CanvasPresenceController = {
   currentUserId: string | null;
   operationSync: CanvasOperationCatchupState;
   remotePresence: CanvasRemotePresenceState[];
+  remoteShapeLocks: CanvasShapeLockState[];
+  remoteShapePreviews: CanvasShapePreviewEventPayload[];
+  claimShapeLocks: (shapeIds: string[]) => void;
+  releaseShapeLocks: (shapeIds?: string[]) => void;
+  clearShapePreview: (shapeIds: string[]) => void;
   sendPresenceUpdate: (
     cursor: CanvasPresencePoint | null,
     selectedShapeIds: string[],
     viewport: CanvasPresenceViewport,
     editingShapeId?: string | null,
     editingMode?: CanvasPresenceEditingMode | null,
+  ) => void;
+  sendShapePreview: (
+    shapes: Record<string, unknown>[],
+    phase?: CanvasShapePreviewPhase,
   ) => void;
 };
 
@@ -236,12 +249,78 @@ function upsertPresence(
   );
 }
 
+function isSameCanvasRoom(
+  payload: { canvasId: string; workspaceId: string },
+  room: { canvasId: string; workspaceId: string },
+) {
+  return (
+    payload.workspaceId === room.workspaceId && payload.canvasId === room.canvasId
+  );
+}
+
+function isShapeLockFresh(lock: CanvasShapeLockState) {
+  return Date.parse(lock.expiresAt) > Date.now();
+}
+
+function upsertShapeLocks(
+  locks: CanvasShapeLockState[],
+  nextLocks: CanvasShapeLockState[],
+) {
+  const lockMap = new Map<string, CanvasShapeLockState>();
+
+  locks.filter(isShapeLockFresh).forEach((lock) => {
+    lockMap.set(lock.shapeId, lock);
+  });
+  nextLocks.filter(isShapeLockFresh).forEach((lock) => {
+    lockMap.set(lock.shapeId, lock);
+  });
+
+  return Array.from(lockMap.values()).sort((a, b) =>
+    a.shapeId.localeCompare(b.shapeId),
+  );
+}
+
+function removeShapeLocks({
+  locks,
+  ownerUserId,
+  shapeIds,
+}: {
+  locks: CanvasShapeLockState[];
+  ownerUserId: string;
+  shapeIds: string[];
+}) {
+  const releasedShapeIds = new Set(shapeIds);
+
+  return locks.filter(
+    (lock) =>
+      lock.ownerUserId !== ownerUserId || !releasedShapeIds.has(lock.shapeId),
+  );
+}
+
+function upsertShapePreview(
+  previews: CanvasShapePreviewEventPayload[],
+  nextPreview: CanvasShapePreviewEventPayload,
+) {
+  return [
+    ...previews.filter(
+      (preview) => preview.actorUserId !== nextPreview.actorUserId,
+    ),
+    nextPreview,
+  ];
+}
+
 export function useCanvasPresence(
   config: CanvasRealtimeConfig | null | undefined,
   options: CanvasPresenceOptions = {},
 ): CanvasPresenceController {
   const [remotePresence, setRemotePresence] = useState<
     CanvasRemotePresenceState[]
+  >([]);
+  const [remoteShapeLocks, setRemoteShapeLocks] = useState<
+    CanvasShapeLockState[]
+  >([]);
+  const [remoteShapePreviews, setRemoteShapePreviews] = useState<
+    CanvasShapePreviewEventPayload[]
   >([]);
   const [operationSync, setOperationSync] = useState<CanvasOperationCatchupState>(
     initialOperationSyncState,
@@ -492,6 +571,8 @@ export function useCanvasPresence(
       activeCatchUpAbortRef.current = null;
       liveOperationBufferRef.current = [];
       setRemotePresence([]);
+      setRemoteShapeLocks([]);
+      setRemoteShapePreviews([]);
       setOperationSync(initialOperationSyncState);
       return;
     }
@@ -504,6 +585,8 @@ export function useCanvasPresence(
     if (!socket) {
       joinedRef.current = false;
       setRemotePresence([]);
+      setRemoteShapeLocks([]);
+      setRemoteShapePreviews([]);
       return;
     }
 
@@ -544,6 +627,8 @@ export function useCanvasPresence(
     realtimeSocket.on("disconnect", () => {
       joinedRef.current = false;
       setRemotePresence([]);
+      setRemoteShapeLocks([]);
+      setRemoteShapePreviews([]);
     });
     realtimeSocket.on("canvas:joined", (payload) => {
       if (
@@ -561,6 +646,8 @@ export function useCanvasPresence(
           currentUserId,
         ),
       );
+      setRemoteShapeLocks([]);
+      setRemoteShapePreviews([]);
     });
     realtimeSocket.on("canvas:operation", (payload) => {
       if (
@@ -602,15 +689,75 @@ export function useCanvasPresence(
       );
     });
     realtimeSocket.on("canvas:presence:leave", (payload) => {
-      if (
-        payload.workspaceId !== room.workspaceId ||
-        payload.canvasId !== room.canvasId
-      ) {
+      if (!isSameCanvasRoom(payload, room)) {
         return;
       }
 
       setRemotePresence((currentPresence) =>
         currentPresence.filter((entry) => entry.userId !== payload.userId),
+      );
+    });
+    realtimeSocket.on("canvas:shape:lock:accepted", (payload) => {
+      if (!isSameCanvasRoom(payload, room)) {
+        return;
+      }
+
+      setRemoteShapeLocks((currentLocks) =>
+        upsertShapeLocks(currentLocks, payload.locks),
+      );
+    });
+    realtimeSocket.on("canvas:shape:lock:rejected", (payload) => {
+      if (!isSameCanvasRoom(payload, room)) {
+        return;
+      }
+
+      setRemoteShapeLocks((currentLocks) =>
+        upsertShapeLocks(currentLocks, payload.locks),
+      );
+    });
+    realtimeSocket.on("canvas:shape:lock:update", (payload) => {
+      if (!isSameCanvasRoom(payload, room)) {
+        return;
+      }
+
+      setRemoteShapeLocks((currentLocks) =>
+        upsertShapeLocks(currentLocks, payload.locks),
+      );
+    });
+    realtimeSocket.on("canvas:shape:lock:release", (payload) => {
+      if (!isSameCanvasRoom(payload, room)) {
+        return;
+      }
+
+      setRemoteShapeLocks((currentLocks) =>
+        removeShapeLocks({
+          locks: currentLocks,
+          ownerUserId: payload.ownerUserId,
+          shapeIds: payload.shapeIds,
+        }),
+      );
+    });
+    realtimeSocket.on("canvas:shape:preview", (payload) => {
+      if (
+        !isSameCanvasRoom(payload, room) ||
+        payload.actorUserId === currentUserId
+      ) {
+        return;
+      }
+
+      setRemoteShapePreviews((currentPreviews) =>
+        upsertShapePreview(currentPreviews, payload),
+      );
+    });
+    realtimeSocket.on("canvas:shape:preview:clear", (payload) => {
+      if (!isSameCanvasRoom(payload, room)) {
+        return;
+      }
+
+      setRemoteShapePreviews((currentPreviews) =>
+        currentPreviews.filter(
+          (preview) => preview.actorUserId !== payload.actorUserId,
+        ),
       );
     });
     realtimeSocket.on("canvas:error", (payload) => {
@@ -633,6 +780,8 @@ export function useCanvasPresence(
         socketRef.current = null;
       }
       setRemotePresence([]);
+      setRemoteShapeLocks([]);
+      setRemoteShapePreviews([]);
     };
   }, [
     reconcileJoinState,
@@ -648,6 +797,16 @@ export function useCanvasPresence(
       setRemotePresence((currentPresence) =>
         currentPresence.filter(
           (entry) => parsePresenceTimestamp(entry.updatedAt) >= staleBefore,
+        ),
+      );
+      setRemoteShapeLocks((currentLocks) =>
+        currentLocks.filter(isShapeLockFresh),
+      );
+      setRemoteShapePreviews((currentPreviews) =>
+        currentPreviews.filter(
+          (preview) =>
+            parsePresenceTimestamp(preview.sentAt) >=
+            Date.now() - STALE_SHAPE_PREVIEW_TIMEOUT_MS,
         ),
       );
     }, STALE_PRESENCE_SWEEP_MS);
@@ -683,17 +842,114 @@ export function useCanvasPresence(
     [],
   );
 
+  const claimShapeLocks = useCallback((shapeIds: string[]) => {
+    const socket = socketRef.current;
+    const room = roomRef.current;
+    const uniqueShapeIds = Array.from(
+      new Set(shapeIds.map((shapeId) => shapeId.trim()).filter(Boolean)),
+    );
+
+    if (!socket?.connected || !joinedRef.current || !uniqueShapeIds.length) {
+      return;
+    }
+
+    socket.emit("canvas:shape:lock:claim", {
+      ...room,
+      shapeIds: uniqueShapeIds,
+    });
+  }, []);
+
+  const releaseShapeLocks = useCallback((shapeIds?: string[]) => {
+    const socket = socketRef.current;
+    const room = roomRef.current;
+    const uniqueShapeIds = shapeIds
+      ? Array.from(
+          new Set(shapeIds.map((shapeId) => shapeId.trim()).filter(Boolean)),
+        )
+      : undefined;
+
+    if (!socket?.connected || !joinedRef.current) {
+      return;
+    }
+
+    socket.emit("canvas:shape:lock:release", {
+      ...room,
+      ...(uniqueShapeIds?.length ? { shapeIds: uniqueShapeIds } : {}),
+    });
+  }, []);
+
+  const clearShapePreview = useCallback((shapeIds: string[]) => {
+    const socket = socketRef.current;
+    const room = roomRef.current;
+    const uniqueShapeIds = Array.from(
+      new Set(shapeIds.map((shapeId) => shapeId.trim()).filter(Boolean)),
+    );
+
+    if (!socket?.connected || !joinedRef.current || !uniqueShapeIds.length) {
+      return;
+    }
+
+    socket.emit("canvas:shape:preview:clear", {
+      ...room,
+      shapeIds: uniqueShapeIds,
+    });
+  }, []);
+
+  const sendShapePreview = useCallback(
+    (
+      shapes: Record<string, unknown>[],
+      phase: CanvasShapePreviewPhase = "unknown",
+    ) => {
+      const socket = socketRef.current;
+      const room = roomRef.current;
+
+      if (!socket?.connected || !joinedRef.current || !shapes.length) {
+        return;
+      }
+
+      socket.emit("canvas:shape:preview", {
+        ...room,
+        phase,
+        shapes,
+      });
+    },
+    [],
+  );
+
   return useMemo(
     () => ({
+      claimShapeLocks,
+      clearShapePreview,
       enabled,
       currentUserId,
       operationSync,
+      releaseShapeLocks,
       remotePresence:
         currentUserId === null
           ? remotePresence
           : filterOwnPresence(remotePresence, currentUserId),
+      remoteShapeLocks:
+        currentUserId === null
+          ? remoteShapeLocks
+          : remoteShapeLocks.filter(
+              (lock) => lock.ownerUserId !== currentUserId,
+            ),
+      remoteShapePreviews,
       sendPresenceUpdate,
+      sendShapePreview,
     }),
-    [currentUserId, enabled, operationSync, remotePresence, sendPresenceUpdate],
+    [
+      claimShapeLocks,
+      clearShapePreview,
+      currentUserId,
+      enabled,
+      operationSync,
+      releaseShapeLocks,
+      remotePresence,
+      remoteShapeLocks,
+      remoteShapePreviews,
+      sendPresenceUpdate,
+      sendShapePreview,
+    ],
   );
 }

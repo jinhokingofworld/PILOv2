@@ -337,6 +337,7 @@ export interface GithubPullRequestFilePayload {
   filePath: string;
   previousFilePath: string | null;
   fileName: string;
+  headBlobSha: string | null;
   fileStatus: string;
   additions: number;
   deletions: number;

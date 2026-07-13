@@ -64,6 +64,24 @@
       "riskLevel": "low",
       "executionMode": "auto",
       "inputSchema": {"type": "object", "required": ["reportId"], "additionalProperties": false, "properties": {"reportId": {"type": "string", "format": "uuid"}}}
+    },
+    {
+      "name": "search_board_issues",
+      "description": "Workspace Board 이슈를 조회합니다. Board가 하나이면 자동 선택하고, 여러 Board에서는 boardName을 정확히 지정해야 합니다. 상태·검색어·label·assignee 필터만 지원하며 Board 변경은 하지 않습니다.",
+      "riskLevel": "low",
+      "executionMode": "auto",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "boardName": {"type": "string", "minLength": 1, "maxLength": 120},
+          "search": {"type": "string", "minLength": 1, "maxLength": 200},
+          "state": {"type": "string", "enum": ["open", "closed"]},
+          "label": {"type": "string", "minLength": 1, "maxLength": 120},
+          "assignee": {"type": "string", "minLength": 1, "maxLength": 120},
+          "limit": {"type": "integer", "minimum": 1, "maximum": 20}
+        }
+      }
     }
   ],
   "cases": [
@@ -95,7 +113,7 @@
     {"id": "meeting_summary_without_id", "prompt": "지난 회의록 요약해줘", "expected": {"status": "unsupported"}},
     {"id": "meeting_detail_with_id", "prompt": "회의록 123e4567-e89b-12d3-a456-426614174000 상세 보여줘", "expected": {"status": "tool_candidate", "toolName": "get_meeting_report", "inputContains": {"reportId": "123e4567-e89b-12d3-a456-426614174000"}, "requiresConfirmation": false}},
     {"id": "meeting_summary_with_id", "prompt": "회의록 123e4567-e89b-12d3-a456-426614174000 요약해줘", "expected": {"status": "tool_candidate", "toolName": "summarize_meeting_report", "inputContains": {"reportId": "123e4567-e89b-12d3-a456-426614174000"}, "requiresConfirmation": false}},
-    {"id": "unsupported_board", "prompt": "Board에서 내 이슈 검색해줘", "expected": {"status": "unsupported"}},
+    {"id": "board_search", "prompt": "Board에서 내 이슈 검색해줘", "expected": {"status": "tool_candidate", "toolName": "search_board_issues", "requiresConfirmation": false}},
     {"id": "unsupported_pr_review", "prompt": "이 PR을 리뷰해줘", "expected": {"status": "unsupported"}},
     {"id": "unsupported_delete", "prompt": "내일 일정을 삭제해줘", "expected": {"status": "unsupported"}}
     ,{"id": "unsupported_recording_control", "prompt": "회의 녹음을 시작해줘", "expected": {"status": "unsupported"}}

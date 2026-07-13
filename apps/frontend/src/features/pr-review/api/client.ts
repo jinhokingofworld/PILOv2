@@ -8,6 +8,8 @@ import type {
   PrReviewConflictApplyResult,
   PrReviewConflictsApplyResult,
   PrReviewCanvas,
+  PrReviewCanvasShape,
+  PrReviewCanvasViewportQuery,
   PrReviewConflictAnalysis,
   PrReviewConflictSuggestion,
   PrReviewFile,
@@ -18,11 +20,13 @@ import type {
   PrReviewPullRequestFile,
   PrReviewMergeResult,
   PrReviewRepository,
+  PrReviewRoomCanvas,
   PrReviewSession,
   PrReviewSessionResult,
   PrReviewSubmission,
   PrReviewSummary,
   SubmitPrReviewSessionInput,
+  UpdatePrReviewCanvasFileShapeInput,
   UpdatePrReviewFileDecisionInput
 } from "@/features/pr-review/types";
 
@@ -342,6 +346,21 @@ function reviewSessionGithubPath(workspaceId: string, reviewSessionId: string) {
   );
 }
 
+function reviewRoomGithubPath(workspaceId: string, reviewRoomId: string) {
+  return workspaceGithubPath(
+    workspaceId,
+    `/review-rooms/${encodeURIComponent(reviewRoomId)}`
+  );
+}
+
+function reviewCanvasPath(workspaceId: string, canvasId: string) {
+  return `/workspaces/${encodeURIComponent(workspaceId)}/canvases/${encodeURIComponent(canvasId)}` as const;
+}
+
+function reviewCanvasShapePath(workspaceId: string, shapeId: string) {
+  return `/workspaces/${encodeURIComponent(workspaceId)}/canvas-shapes/${encodeURIComponent(shapeId)}` as const;
+}
+
 function reviewFileGithubPath(workspaceId: string, reviewFileId: string) {
   return workspaceGithubPath(
     workspaceId,
@@ -438,6 +457,58 @@ export function createPrReviewApiClient({
       return requestPrReviewData<PrReviewSession>(
         reviewSessionGithubPath(workspaceId, reviewSessionId),
         init,
+        requestOptions
+      );
+    },
+
+    async getReviewRoom(
+      workspaceId: string,
+      reviewRoomId: string,
+      init?: Pick<RequestInit, "signal">
+    ) {
+      return requestPrReviewData<PrReviewRoomCanvas>(
+        reviewRoomGithubPath(workspaceId, reviewRoomId),
+        init,
+        requestOptions
+      );
+    },
+
+    async listReviewCanvasShapes(
+      workspaceId: string,
+      canvasId: string,
+      query: PrReviewCanvasViewportQuery,
+      init?: Pick<RequestInit, "signal">
+    ) {
+      return requestPrReviewData<PrReviewCanvasShape[]>(
+        withQueryParams(`${reviewCanvasPath(workspaceId, canvasId)}/shapes`, query),
+        init,
+        requestOptions
+      );
+    },
+
+    async getReviewCanvasShape(
+      workspaceId: string,
+      shapeId: string,
+      init?: Pick<RequestInit, "signal">
+    ) {
+      return requestPrReviewData<PrReviewCanvasShape>(
+        reviewCanvasShapePath(workspaceId, shapeId),
+        init,
+        requestOptions
+      );
+    },
+
+    async updateReviewCanvasFileShape(
+      workspaceId: string,
+      shapeId: string,
+      input: UpdatePrReviewCanvasFileShapeInput
+    ) {
+      return requestPrReviewData<PrReviewCanvasShape>(
+        reviewCanvasShapePath(workspaceId, shapeId),
+        {
+          body: JSON.stringify(input),
+          method: "PATCH"
+        },
         requestOptions
       );
     },

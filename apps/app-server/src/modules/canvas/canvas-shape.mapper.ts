@@ -128,7 +128,10 @@ export function mergeShapeWriteValues(
   values: ShapeWriteValues
 ): CompleteShapeWriteValues {
   return {
-    parentShapeId: values.parentShapeId ?? currentShape.parent_shape_id,
+    parentShapeId:
+      values.parentShapeId === undefined
+        ? currentShape.parent_shape_id
+        : values.parentShapeId,
     shapeType: values.shapeType ?? currentShape.shape_type,
     title: values.title === undefined ? currentShape.title : values.title,
     textContent:

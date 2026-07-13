@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   Param,
+  Patch,
   Post,
   UseGuards
 } from "@nestjs/common";
@@ -16,7 +17,10 @@ import {
   CreateWorkspaceInvitationPayload,
   CreateWorkspaceInvitationRequest,
   CurrentUserWorkspaceInvitationPayload,
+  DeleteWorkspacePayload,
+  DeleteWorkspaceRequest,
   RemoveWorkspaceMemberPayload,
+  UpdateWorkspaceRequest,
   WorkspaceInvitationPayload,
   WorkspaceInvitationTokenPayload,
   WorkspaceMemberPayload,
@@ -47,6 +51,36 @@ export class WorkspaceController {
       request
     );
     return apiResponse(workspace);
+  }
+
+  @Patch(":workspaceId")
+  async updateWorkspace(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Body() request: UpdateWorkspaceRequest | undefined
+  ): Promise<ApiSuccessResponse<WorkspacePayload>> {
+    return apiResponse(
+      await this.workspaceService.updateWorkspace(
+        currentUserId,
+        workspaceId,
+        request
+      )
+    );
+  }
+
+  @Delete(":workspaceId")
+  async deleteWorkspace(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Body() request: DeleteWorkspaceRequest | undefined
+  ): Promise<ApiSuccessResponse<DeleteWorkspacePayload>> {
+    return apiResponse(
+      await this.workspaceService.deleteWorkspace(
+        currentUserId,
+        workspaceId,
+        request
+      )
+    );
   }
 
   @Get(":workspaceId/members")

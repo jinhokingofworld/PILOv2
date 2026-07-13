@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { Injectable } from "@nestjs/common";
 import { QueryResultRow } from "pg";
-import { badRequest, forbidden, notFound } from "../../common/api-error";
+import { badRequest, conflict, forbidden, notFound } from "../../common/api-error";
 import { DatabaseService } from "../../database/database.service";
 
 export type WorkspaceRole = "owner" | "member";
@@ -32,6 +32,8 @@ interface WorkspaceMemberRow extends QueryResultRow {
   updated_at: Date | string;
   user_name: string | null;
   user_email: string | null;
+  user_job_title: string | null;
+  user_bio: string | null;
   user_avatar_url: string | null;
   user_active_workspace_id: string | null;
   user_last_seen_at: Date | string | null;
@@ -67,6 +69,13 @@ interface CountRow extends QueryResultRow {
   count: string;
 }
 
+interface WorkspaceDeletionBlockerRow extends QueryResultRow {
+  other_member_exists: boolean;
+  github_installation_exists: boolean;
+  active_meeting_exists: boolean;
+  active_sync_exists: boolean;
+}
+
 export interface WorkspacePayload {
   id: string;
   name: string;
@@ -91,6 +100,8 @@ export interface WorkspaceMemberPayload {
     id: string;
     name: string | null;
     email: string | null;
+    jobTitle: string | null;
+    bio: string | null;
     avatarUrl: string | null;
     activeWorkspaceId: string | null;
     lastSeenAt: string | null;
@@ -121,6 +132,20 @@ export interface CreateWorkspaceInvitationRequest {
 export interface CreateWorkspaceRequest {
   icon?: unknown;
   name?: unknown;
+}
+
+export interface UpdateWorkspaceRequest {
+  icon?: unknown;
+  name?: unknown;
+}
+
+export interface DeleteWorkspaceRequest {
+  confirmationName?: unknown;
+}
+
+export interface DeleteWorkspacePayload {
+  deleted: true;
+  workspaceId: string;
 }
 
 export interface CreateWorkspaceInvitationPayload {
@@ -235,6 +260,98 @@ export class WorkspaceService {
     );
   }
 
+  async updateWorkspace(
+    currentUserId: string,
+    workspaceId: string,
+    request: UpdateWorkspaceRequest | undefined
+  ): Promise<WorkspacePayload> {
+    await this.assertWorkspaceOwnerAccess(currentUserId, workspaceId);
+    if (!request || typeof request !== "object" || Array.isArray(request)) {
+      throw badRequest("Workspace request body is required");
+    }
+    const keys = Object.keys(request);
+    if (keys.length === 0 || keys.some((key) => key !== "name" && key !== "icon")) {
+      throw badRequest("Workspace name or icon is required");
+    }
+
+    const hasName = Object.prototype.hasOwnProperty.call(request, "name");
+    const hasIcon = Object.prototype.hasOwnProperty.call(request, "icon");
+    const name = hasName ? this.readWorkspaceName(request.name) : null;
+    const icon = hasIcon ? this.readWorkspaceIcon(request.icon) : null;
+
+    await this.database.execute(
+      `
+        UPDATE workspaces
+        SET
+          name = CASE WHEN $2::boolean THEN $3 ELSE name END,
+          icon = CASE WHEN $4::boolean THEN $5 ELSE icon END
+        WHERE id = $1
+      `,
+      [workspaceId, hasName, name, hasIcon, icon]
+    );
+
+    return this.getWorkspace(currentUserId, workspaceId);
+  }
+
+  async deleteWorkspace(
+    currentUserId: string,
+    workspaceId: string,
+    request: DeleteWorkspaceRequest | undefined
+  ): Promise<DeleteWorkspacePayload> {
+    const workspace = await this.assertWorkspaceOwnerAccess(
+      currentUserId,
+      workspaceId
+    );
+    if (!request || request.confirmationName !== workspace.name) {
+      throw badRequest("confirmationName must match the current Workspace name");
+    }
+
+    const blockers = await this.database.queryOne<WorkspaceDeletionBlockerRow>(
+      `
+        SELECT
+          EXISTS (
+            SELECT 1
+            FROM workspace_members
+            WHERE workspace_id = $1 AND user_id <> $2
+          ) AS other_member_exists,
+          EXISTS (
+            SELECT 1 FROM github_installations WHERE workspace_id = $1
+          ) AS github_installation_exists,
+          EXISTS (
+            SELECT 1 FROM meetings WHERE workspace_id = $1 AND ended_at IS NULL
+          ) AS active_meeting_exists,
+          EXISTS (
+            SELECT 1
+            FROM github_sync_runs
+            WHERE workspace_id = $1 AND status IN ('queued', 'running')
+          ) AS active_sync_exists
+      `,
+      [workspaceId, currentUserId]
+    );
+
+    const messages: string[] = [];
+    if (blockers?.other_member_exists) {
+      messages.push(
+        "Workspace에 다른 멤버가 남아 있습니다. 멤버를 모두 제거한 뒤 삭제해주세요."
+      );
+    }
+    if (blockers?.github_installation_exists) {
+      messages.push("GitHub App 연결을 먼저 해제해주세요.");
+    }
+    if (blockers?.active_meeting_exists) {
+      messages.push("진행 중인 회의를 먼저 종료해주세요.");
+    }
+    if (blockers?.active_sync_exists) {
+      messages.push("진행 중인 동기화 작업이 끝난 뒤 다시 시도해주세요.");
+    }
+    if (messages.length > 0) {
+      throw conflict(messages.join(" "));
+    }
+
+    await this.database.execute(`DELETE FROM workspaces WHERE id = $1`, [workspaceId]);
+    return { deleted: true, workspaceId };
+  }
+
   async getWorkspace(
     currentUserId: string,
     workspaceId: string
@@ -289,14 +406,27 @@ export class WorkspaceService {
           wm.joined_at,
           wm.created_at,
           wm.updated_at,
-          u.name AS user_name,
+          COALESCE(
+            NULLIF(BTRIM(us.display_name), ''),
+            NULLIF(BTRIM(u.name), ''),
+            NULLIF(split_part(u.email, '@', 1), ''),
+            'PILO 사용자'
+          ) AS user_name,
           u.email AS user_email,
-          u.avatar_url AS user_avatar_url,
+          us.job_title AS user_job_title,
+          us.bio AS user_bio,
+          CASE COALESCE(us.avatar_mode, 'provider')
+            WHEN 'custom' THEN us.custom_avatar_url
+            WHEN 'initials' THEN NULL
+            ELSE u.avatar_url
+          END AS user_avatar_url,
           u.active_workspace_id AS user_active_workspace_id,
           u.last_seen_at AS user_last_seen_at
         FROM workspace_members wm
         JOIN users u
           ON u.id = wm.user_id
+        LEFT JOIN user_settings us
+          ON us.user_id = u.id
         WHERE wm.workspace_id = $1
         ORDER BY
           CASE wm.role WHEN 'owner' THEN 0 ELSE 1 END,
@@ -328,14 +458,27 @@ export class WorkspaceService {
             wm.joined_at,
             wm.created_at,
             wm.updated_at,
-            u.name AS user_name,
+            COALESCE(
+              NULLIF(BTRIM(us.display_name), ''),
+              NULLIF(BTRIM(u.name), ''),
+              NULLIF(split_part(u.email, '@', 1), ''),
+              'PILO 사용자'
+            ) AS user_name,
             u.email AS user_email,
-            u.avatar_url AS user_avatar_url,
+            us.job_title AS user_job_title,
+            us.bio AS user_bio,
+            CASE COALESCE(us.avatar_mode, 'provider')
+              WHEN 'custom' THEN us.custom_avatar_url
+              WHEN 'initials' THEN NULL
+              ELSE u.avatar_url
+            END AS user_avatar_url,
             u.active_workspace_id AS user_active_workspace_id,
             u.last_seen_at AS user_last_seen_at
           FROM workspace_members wm
           JOIN users u
             ON u.id = wm.user_id
+          LEFT JOIN user_settings us
+            ON us.user_id = u.id
           WHERE wm.workspace_id = $1
             AND wm.user_id = $2
           FOR UPDATE OF wm
@@ -875,6 +1018,8 @@ export class WorkspaceService {
           updated_at,
           NULL::text AS user_name,
           $4::text AS user_email,
+          NULL::text AS user_job_title,
+          NULL::text AS user_bio,
           NULL::text AS user_avatar_url,
           NULL::uuid AS user_active_workspace_id,
           NULL::timestamptz AS user_last_seen_at
@@ -1115,6 +1260,8 @@ export class WorkspaceService {
         id: member.user_id,
         name: member.user_name,
         email: member.user_email,
+        jobTitle: member.user_job_title,
+        bio: member.user_bio,
         avatarUrl: member.user_avatar_url,
         activeWorkspaceId: member.user_active_workspace_id,
         lastSeenAt: this.toNullableIsoString(member.user_last_seen_at)

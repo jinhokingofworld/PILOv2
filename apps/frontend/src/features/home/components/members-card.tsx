@@ -1,13 +1,7 @@
 "use client";
 
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
-import {
-  ChevronRight,
-  LogOut,
-  Send,
-  UserPlus,
-  Users
-} from "lucide-react";
+import { ChevronRight, LogOut, Send, UserPlus, Users } from "lucide-react";
 
 import {
   AlertDialog,
@@ -21,20 +15,12 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import {
   Popover,
   PopoverContent,
   PopoverTrigger
 } from "@/components/ui/popover";
-import { Separator } from "@/components/ui/separator";
 import {
   createWorkspaceInvitation,
   leaveWorkspace,
@@ -46,6 +32,7 @@ import {
 } from "@/features/auth/api/client";
 import { useAuthSession } from "@/features/auth/auth-session";
 import { DashboardCard } from "./dashboard-card";
+import { MemberProfileDialog } from "./member-profile-dialog";
 
 export function MembersCard() {
   const authSession = useAuthSession();
@@ -403,6 +390,7 @@ export function MembersCard() {
       </DashboardCard>
 
       <MemberProfileDialog
+        activeWorkspaceId={activeWorkspace?.id ?? null}
         canRemoveMember={canManageWorkspace}
         currentUserId={currentUserId}
         error={removeMemberError}
@@ -410,6 +398,7 @@ export function MembersCard() {
         member={selectedMember}
         onClose={() => setSelectedMember(null)}
         onRemoveMember={handleRemoveMember}
+        workspaceName={activeWorkspace?.name ?? "Workspace"}
       />
       <AlertDialog
         open={isLeaveDialogOpen}
@@ -620,135 +609,10 @@ function MemberPresenceList({
   );
 }
 
-function MemberProfileDialog({
-  canRemoveMember,
-  currentUserId,
-  error,
-  isRemoving,
-  member,
-  onClose,
-  onRemoveMember
-}: {
-  canRemoveMember: boolean;
-  currentUserId: string | null;
-  error: string | null;
-  isRemoving: boolean;
-  member: WorkspaceMember | null;
-  onClose: () => void;
-  onRemoveMember: (member: WorkspaceMember) => void;
-}) {
-  const isActive = Boolean(member);
-  const canRemoveSelectedMember =
-    Boolean(member) &&
-    canRemoveMember &&
-    member?.userId !== currentUserId &&
-    member?.role !== "owner";
-  const showRemoveAction = member?.role !== "owner";
-
-  return (
-    <Dialog open={Boolean(member)} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-sm">
-        {member ? (
-          <>
-            <DialogHeader>
-              <DialogTitle>Profile</DialogTitle>
-              <DialogDescription>Workspace member profile</DialogDescription>
-            </DialogHeader>
-
-            <div className="flex items-center gap-3">
-              <Avatar>
-                {member.user.avatarUrl ? (
-                  <AvatarImage
-                    alt={member.user.name ?? "Workspace member"}
-                    src={member.user.avatarUrl}
-                  />
-                ) : null}
-                <AvatarFallback>{getInitial(member.user.name)}</AvatarFallback>
-              </Avatar>
-              <div className="min-w-0">
-                <p className="truncate text-sm font-medium">
-                  {member.user.name ?? "Unknown"}
-                </p>
-                <p className="truncate text-xs text-muted-foreground">
-                  {member.user.email ?? "No email"}
-                </p>
-              </div>
-            </div>
-
-            <Separator />
-
-            <dl className="grid gap-3 text-sm">
-              <div className="flex items-center justify-between gap-4">
-                <dt className="text-muted-foreground">Role</dt>
-                <dd className="font-medium">{formatWorkspaceRole(member.role)}</dd>
-              </div>
-              <div className="flex items-center justify-between gap-4">
-                <dt className="text-muted-foreground">Status</dt>
-                <dd className="flex items-center gap-2 font-medium">
-                  <WorkspacePresenceIndicator active={isActive} />
-                  {isActive ? "In workspace" : "Away"}
-                </dd>
-              </div>
-              <div className="flex items-center justify-between gap-4">
-                <dt className="text-muted-foreground">Joined</dt>
-                <dd className="font-medium">{formatProfileDate(member.joinedAt)}</dd>
-              </div>
-            </dl>
-
-            {error ? <p className="text-xs text-destructive">{error}</p> : null}
-
-            {showRemoveAction ? (
-              <div className="flex justify-end">
-                <Button
-                  disabled={!canRemoveSelectedMember || isRemoving}
-                  onClick={() => onRemoveMember(member)}
-                  variant="destructive"
-                >
-                  {isRemoving ? "추방 중" : "추방"}
-                </Button>
-              </div>
-            ) : null}
-          </>
-        ) : null}
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-
-
-function WorkspacePresenceIndicator({ active }: { active: boolean }) {
-  const label = active ? "In workspace" : "Away";
-
-  return (
-    <span
-      aria-label={label}
-      className="inline-flex size-7 shrink-0 items-center justify-center rounded-full border bg-background"
-      title={label}
-    >
-      <span
-        className={`size-2.5 rounded-full ${
-          active
-            ? "bg-emerald-500 ring-4 ring-emerald-500/15"
-            : "bg-muted-foreground/35 ring-4 ring-muted"
-        }`}
-      />
-    </span>
-  );
-}
-
 function getInitial(name: string | null) {
   return name?.trim().slice(0, 1) || "?";
 }
 
 function formatWorkspaceRole(role: WorkspaceMember["role"]) {
-  return role;
-}
-
-function formatProfileDate(value: string) {
-  return new Intl.DateTimeFormat("en-US", {
-    day: "numeric",
-    month: "short",
-    year: "numeric"
-  }).format(new Date(value));
+  return role === "owner" ? "Owner" : "Member";
 }

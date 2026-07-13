@@ -1,8 +1,11 @@
-import { Body, Controller, Get, Post, UseGuards } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Patch, Post, UseGuards } from "@nestjs/common";
 import { apiResponse, ApiSuccessResponse } from "../../common/api-response";
 import { AuthGuard } from "../../common/auth.guard";
 import { CurrentUserId } from "../../common/current-user.decorator";
 import {
+  DeleteCurrentUserPayload,
+  DeleteCurrentUserRequest,
+  UpdateCurrentUserProfileRequest,
   UpdateCurrentUserPresenceRequest,
   UserPresencePayload,
   UserProfile,
@@ -20,6 +23,28 @@ export class UserController {
   ): Promise<ApiSuccessResponse<UserProfile>> {
     const user = await this.userService.getCurrentUser(currentUserId);
     return apiResponse(user);
+  }
+
+  @Patch("profile")
+  async updateProfile(
+    @CurrentUserId() currentUserId: string,
+    @Body() request: UpdateCurrentUserProfileRequest | undefined
+  ): Promise<ApiSuccessResponse<UserProfile>> {
+    const user = await this.userService.updateCurrentUserProfile(
+      currentUserId,
+      request
+    );
+    return apiResponse(user);
+  }
+
+  @Delete()
+  async deleteMe(
+    @CurrentUserId() currentUserId: string,
+    @Body() request: DeleteCurrentUserRequest | undefined
+  ): Promise<ApiSuccessResponse<DeleteCurrentUserPayload>> {
+    return apiResponse(
+      await this.userService.deleteCurrentUser(currentUserId, request)
+    );
   }
 
   @Post("presence")

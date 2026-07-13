@@ -12,13 +12,13 @@ import type { FeatureNavigationItem } from "@/features/navigation-types";
 export const featureNavigationItems: FeatureNavigationItem[] = [
   homeNavigation,
   calendarNavigation,
-  driveNavigation,
   githubIntegrationNavigation,
   boardNavigation,
   sqlErdNavigation,
   prReviewNavigation,
   meetingNavigation,
-  canvasNavigation
+  canvasNavigation,
+  driveNavigation
 ];
 
 export function getFeatureNavigationItem(featureId: string) {

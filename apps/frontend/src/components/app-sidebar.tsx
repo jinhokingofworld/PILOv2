@@ -4,19 +4,16 @@ import { useEffect, useState } from "react";
 import type { MouseEvent } from "react";
 import { useRouter } from "next/navigation";
 import {
-  BadgeCheck,
   ChevronsUpDown,
   ChevronRight,
   GalleryVerticalEnd,
   Loader2,
   LogOut,
   Plus,
-  Settings,
-  UserRound
+  Settings
 } from "lucide-react";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { AppSettingsDialog } from "@/components/app-settings-dialog";
 import {
   Collapsible,
   CollapsibleContent,
@@ -51,9 +48,11 @@ import {
   useSidebar
 } from "@/components/ui/sidebar";
 import { useAuthSession } from "@/features/auth";
+import { GithubSettingsStatus } from "@/features/github-integration/components/github-settings-status";
 import { isDevPreviewAccessToken } from "@/features/auth/session-storage";
 import { useMeetingRuntime } from "@/features/meeting/runtime/meeting-runtime-provider";
 import type { FeatureNavigationItem } from "@/features/navigation-types";
+import { SettingsDialog } from "@/features/settings/components/user-settings-dialog";
 import { cn } from "@/lib/utils";
 
 export type AppSidebarItem = Pick<
@@ -68,10 +67,12 @@ type AppSidebarProps = {
 };
 
 const currentUser = {
+  id: "00000000-0000-4000-8000-000000000137",
   name: "동현",
   email: "donghyun@pilo.local",
   initials: "DH",
-  avatarUrl: null
+  avatarUrl: null,
+  createdAt: "2026-06-12T00:00:00.000Z"
 };
 const ACTIVE_MEETING_LEAVE_FAILED_MESSAGE =
   "진행 중인 회의에서 나가지 못했습니다. 회의 상태를 확인한 뒤 다시 시도해주세요.";
@@ -143,10 +144,12 @@ export function AppSidebar({
     };
   const displayUser = authSession
     ? {
-        name: authSession.user.name ?? "PILO 사용자",
+        name: authSession.user.displayName,
         email: authSession.user.email ?? "이메일 없음",
         initials: getUserInitials(authSession.user.name, authSession.user.email),
-        avatarUrl: authSession.user.avatarUrl
+        avatarUrl: authSession.user.avatarUrl,
+        id: authSession.user.id,
+        createdAt: authSession.user.createdAt
       }
     : currentUser;
   const selectedItem = items.find((item) => item.id === selectedItemId);
@@ -240,6 +243,10 @@ export function AppSidebar({
     setIsSettingsDialogOpen(true);
   };
 
+  const handleManageGithub = () => {
+    setIsSettingsDialogOpen(false);
+    router.push("/github");
+  };
   return (
     <>
       <Sidebar collapsible="icon" variant="inset">
@@ -340,7 +347,7 @@ export function AppSidebar({
         </SidebarMenu>
       </SidebarHeader>
 
-      <SidebarSeparator />
+      <SidebarSeparator className="group-data-[collapsible=icon]:mx-auto group-data-[collapsible=icon]:w-8" />
 
       <SidebarContent>
         <SidebarGroup>
@@ -498,14 +505,6 @@ export function AppSidebar({
                 </DropdownMenuGroup>
                 <DropdownMenuSeparator />
                 <DropdownMenuGroup>
-                  <DropdownMenuItem className="gap-2">
-                    <BadgeCheck />
-                    계정
-                  </DropdownMenuItem>
-                  <DropdownMenuItem className="gap-2">
-                    <UserRound />
-                    프로필
-                  </DropdownMenuItem>
                   <DropdownMenuItem
                     className="gap-2"
                     onClick={openSettings}
@@ -539,10 +538,18 @@ export function AppSidebar({
 
       <SidebarRail />
       </Sidebar>
-      <AppSettingsDialog
+      <SettingsDialog
         activeWorkspaceName={activeWorkspace.name}
+        avatarUrl={displayUser.avatarUrl}
         canManageWorkspace={activeWorkspace.role === "owner"}
         email={displayUser.email}
+        joinedAt={displayUser.createdAt}
+        githubContent={
+          <GithubSettingsStatus
+            canManageWorkspace={activeWorkspace.role === "owner"}
+            onManage={handleManageGithub}
+          />
+        }
         name={displayUser.name}
         onOpenChange={setIsSettingsDialogOpen}
         open={isSettingsDialogOpen}

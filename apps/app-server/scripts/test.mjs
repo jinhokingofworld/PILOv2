@@ -37,6 +37,13 @@ const calendarController = await readSource(
 const calendarModule = await readSource("../src/modules/calendar/calendar.module.ts");
 const calendarService = await readSource("../src/modules/calendar/calendar.service.ts");
 const userController = await readSource("../src/modules/user/user.controller.ts");
+const userService = await readSource("../src/modules/user/user.service.ts");
+const settingsController = await readSource(
+  "../src/modules/settings/settings.controller.ts"
+);
+const settingsService = await readSource(
+  "../src/modules/settings/settings.service.ts"
+);
 const workspaceController = await readSource(
   "../src/modules/workspace/workspace.controller.ts"
 );
@@ -93,6 +100,9 @@ const multiWorkspaceMigration = await readSource(
 );
 const workspaceIconMigration = await readSource(
   "../../../db/migrations/036_add_workspace_icon.sql"
+);
+const userSettingsMigration = await readSource(
+  "../../../db/migrations/052_create_user_settings_and_account_lifecycle.sql"
 );
 const canvasShapeHashMigration = await readSource(
   "../../../db/migrations/009_canvas_shape_hash_revision_viewport_index.sql"
@@ -158,6 +168,7 @@ assert.match(service, /pilo-app-server/);
 assert.match(service, /status: "ok"/);
 assert.match(appModule, /AuthModule/);
 assert.match(appModule, /UserModule/);
+assert.match(appModule, /SettingsModule/);
 assert.match(appModule, /WorkspaceModule/);
 assert.match(appModule, /CalendarModule/);
 assert.match(appModule, /CanvasModule/);
@@ -256,6 +267,29 @@ assert.match(workspaceService, /accepted_by_user_id/);
 assert.match(workspaceService, /listCurrentUserInvitations/);
 assert.match(workspaceService, /acceptCurrentUserInvitation/);
 assert.match(workspaceService, /lower\(wi\.email\) = \$1/);
+assert.match(userController, /@Patch\("profile"\)/);
+assert.match(userController, /@Delete\(\)/);
+assert.match(userService, /INSERT INTO user_settings/);
+assert.match(userService, /DELETE FROM user_settings/);
+assert.match(userService, /avatar_mode/);
+assert.match(settingsController, /@Controller\("me\/settings"\)/);
+assert.match(settingsController, /@Get\(\)/);
+assert.match(settingsController, /@Patch\(\)/);
+assert.match(settingsService, /default_workspace_id/);
+assert.match(settingsService, /ON CONFLICT \(user_id\) DO UPDATE/);
+assert.match(workspaceController, /@Patch\(":workspaceId"\)/);
+assert.match(workspaceController, /@Delete\(":workspaceId"\)/);
+assert.match(workspaceService, /us\.job_title AS user_job_title/);
+assert.match(workspaceService, /us\.bio AS user_bio/);
+assert.match(workspaceService, /DELETE FROM workspaces WHERE id = \$1/);
+assert.match(workspaceService, /other_member_exists/);
+assert.match(workspaceService, /user_id <> \$2/);
+assert.match(userSettingsMigration, /CREATE TABLE public\.user_settings/);
+assert.match(userSettingsMigration, /ADD COLUMN deleted_at TIMESTAMPTZ/);
+assert.match(
+  userSettingsMigration,
+  /default_landing_page IN \([\s\S]*'home'[\s\S]*'calendar'[\s\S]*'board'[\s\S]*'canvas'/
+);
 assert.match(workspaceMeetingConstraintMigration, /unique_workspace_per_owner_user_id/);
 assert.match(workspaceMeetingConstraintMigration, /WHERE owner_user_id IS NOT NULL/);
 assert.match(multiWorkspaceMigration, /DROP INDEX IF EXISTS public\.unique_workspace_per_owner_user_id/);
@@ -464,6 +498,7 @@ await import("./meeting/livekit-token.test.mjs");
 await import("./meeting/livekit-webhook.test.mjs");
 await import("./meeting/meeting-report-job.test.mjs");
 await import("./calendar/test.mjs");
+await import("./canvas/review-canvas-access.test.mjs");
 await import("./meeting/test.mjs");
 await import("./github-integration/test.mjs");
 await import("./pr-review/test.mjs");

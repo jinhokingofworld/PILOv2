@@ -53,7 +53,22 @@ import {
   PR_REVIEW_SEMANTIC_GRAPH_SCHEMA_VERSION,
   type PrReviewSemanticGraphHandoffPayload
 } from "./pr-review-semantic-contract";
-import { resolvePrReviewSemanticGraph } from "./pr-review-semantic-validator";
+import {
+  resolvePrReviewSemanticGraph,
+  type PrReviewValidatedGraphFlow,
+  type PrReviewValidatedSemanticGraph
+} from "./pr-review-semantic-validator";
+import { computeShapeContentHash } from "../canvas/canvas-shape-hash";
+import {
+  PR_REVIEW_FILE_NODE_SHAPE_TYPE,
+  PR_REVIEW_RELATION_EDGE_SHAPE_TYPE
+} from "../canvas/canvas-review-shape-policy";
+import type { CanvasShapeRow } from "../canvas/canvas.types";
+import {
+  buildPrReviewCanvasMaterialization,
+  type PrReviewCanvasMaterializationFile,
+  type PrReviewCanvasMaterializationRelation
+} from "./pr-review-canvas-materializer";
 
 interface PullRequestRow extends QueryResultRow {
   id: string;
@@ -61,6 +76,7 @@ interface PullRequestRow extends QueryResultRow {
 
 interface PrReviewSessionRow extends QueryResultRow {
   id: string;
+  room_id: string;
   pull_request_id: string;
   created_by_user_id: string | null;
   head_sha: string;
@@ -79,12 +95,45 @@ interface PrReviewSessionRow extends QueryResultRow {
   updated_at: Date | string;
 }
 
+type PrReviewRoomStatus = "active" | "completed";
+type PrReviewRoomCompletionReason = "merged" | "closed";
+
+interface PrReviewRoomIdentityRow extends QueryResultRow {
+  id: string;
+  workspace_id: string;
+  pull_request_id: string;
+  canvas_id: string;
+  status: PrReviewRoomStatus;
+}
+
+interface PrReviewRoomRow extends PrReviewRoomIdentityRow {
+  current_session_id: string | null;
+  analyzing_session_id: string | null;
+  status: PrReviewRoomStatus;
+  completion_reason: PrReviewRoomCompletionReason | null;
+  created_by_user_id: string | null;
+  completed_at: Date | string | null;
+  created_at: Date | string;
+  updated_at: Date | string;
+  pr_number: number | string;
+  title: string;
+  head_branch: string | null;
+  base_branch: string | null;
+  html_url: string;
+  pull_request_state: string;
+  pull_request_merged_at: Date | string | null;
+  current_head_sha: string | null;
+  current_session_status: PrReviewSessionStatus | null;
+  revision_count: number | string;
+}
+
 interface PrReviewAnalysisJobInputRow extends QueryResultRow {
   id: string;
   review_session_id: string;
   workspace_id: string;
   head_sha: string;
   status: string;
+  room_id: string;
   pull_request_id: string;
   created_by_user_id: string | null;
   session_head_sha: string;
@@ -163,6 +212,16 @@ interface ReviewFlowRelationRow extends QueryResultRow {
 
 interface ReviewFileRow extends QueryResultRow {
   id: string;
+  room_file_id: string;
+  current_status: PrReviewFileReviewStatus;
+}
+
+interface ReviewFileCarryOverRow extends QueryResultRow {
+  source_decision_id: string;
+  current_status: PrReviewFileReviewStatus;
+  comment: string | null;
+  reviewed_by_user_id: string;
+  reviewed_at: Date | string;
 }
 
 interface ReviewFileResultRow extends QueryResultRow {
@@ -212,6 +271,7 @@ interface ReviewFileDetailRow extends QueryResultRow {
   comment: string | null;
   reviewed_by_user_id: string | null;
   reviewed_at: Date | string | null;
+  carried_from_decision_id: string | null;
   latest_decision_id: string | null;
   latest_decision_status: PrReviewFileReviewStatus | null;
   latest_decision_comment: string | null;
@@ -340,6 +400,7 @@ interface ReviewProgressRow extends QueryResultRow {
 
 export interface PrReviewSessionPayload {
   id: string;
+  reviewRoomId: string;
   pullRequestId: string;
   headSha: string;
   status: PrReviewSessionStatus;
@@ -365,6 +426,54 @@ export interface PrReviewAnalysisErrorPayload {
 export interface PrReviewSessionCreateResult {
   session: PrReviewSessionPayload;
   created: boolean;
+  roomCreated: boolean;
+}
+
+export interface PrReviewRoomPayload {
+  id: string;
+  workspaceId: string;
+  pullRequestId: string;
+  canvasId: string;
+  currentReviewSessionId: string | null;
+  analyzingReviewSessionId: string | null;
+  status: PrReviewRoomStatus;
+  completionReason: PrReviewRoomCompletionReason | null;
+  completedAt: string | null;
+  createdByUserId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  pullRequest: {
+    githubNumber: number;
+    title: string;
+    headBranch: string | null;
+    baseBranch: string | null;
+    githubUrl: string;
+    state: "open" | "closed";
+    mergedAt: string | null;
+  };
+  currentRevision: {
+    reviewSessionId: string;
+    headSha: string;
+    status: PrReviewSessionStatus;
+  } | null;
+  revisionCount: number;
+}
+
+export interface PrReviewRoomStartPayload {
+  room: PrReviewRoomPayload;
+  revision: PrReviewSessionPayload;
+  roomCreated: boolean;
+  revisionCreated: boolean;
+}
+
+export interface PrReviewRoomListPayload {
+  rooms: PrReviewRoomPayload[];
+}
+
+export interface PrReviewRoomRevisionListPayload {
+  reviewRoomId: string;
+  currentReviewSessionId: string | null;
+  revisions: PrReviewSessionPayload[];
 }
 
 export interface PrReviewAnalysisInputPayload {
@@ -613,6 +722,7 @@ export interface PrReviewFilePayload {
   comment: string | null;
   reviewedByUserId: string | null;
   reviewedAt: string | null;
+  decisionCarriedOver: boolean;
   flowMemberships: PrReviewFileFlowMembershipPayload[];
   latestDecision: PrReviewLatestDecisionPayload | null;
 }
@@ -784,6 +894,10 @@ export interface DeletePrReviewSessionPayload {
   deleted: true;
 }
 
+export interface DeletePrReviewRoomPayload {
+  deleted: true;
+}
+
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -865,34 +979,65 @@ export class PrReviewService {
 
     const existing = await this.findActiveAnalyzingReviewSession(
       workspaceId,
-      pullRequestId,
-      currentUserId
+      pullRequestId
     );
     if (existing) {
       return {
         session: this.mapSession(existing),
-        created: false
+        created: false,
+        roomCreated: false
+      };
+    }
+
+    const detail = await this.githubDependency.getPullRequestDetail(
+      currentUserId,
+      workspaceId,
+      pullRequestId
+    );
+    const reusable = await this.findReusableReviewSession(
+      workspaceId,
+      pullRequestId,
+      detail.headSha
+    );
+    if (reusable) {
+      return {
+        session: this.mapSession(reusable),
+        created: false,
+        roomCreated: false
       };
     }
 
     try {
-      const [detail, conflict] = await Promise.all([
-        this.githubDependency.getPullRequestDetail(
-          currentUserId,
-          workspaceId,
-          pullRequestId
-        ),
-        this.githubDependency.getPullRequestConflictStatus(
-          currentUserId,
-          workspaceId,
-          pullRequestId
-        )
-      ]);
+      const conflict = await this.githubDependency.getPullRequestConflictStatus(
+        currentUserId,
+        workspaceId,
+        pullRequestId
+      );
       const created = await this.database.transaction(async (transaction) => {
+        let room = await this.findReviewRoomIdentity(
+          workspaceId,
+          pullRequestId,
+          transaction
+        );
+        let roomCreated = false;
+        if (!room) {
+          room = await this.insertReviewRoom(transaction, {
+            currentUserId,
+            workspaceId,
+            pullRequestId,
+            title: `PR Review #${detail.prNumber} ${detail.title}`
+          });
+          roomCreated = true;
+        }
+        if (room.status === "completed") {
+          throw conflictError("Completed PR Review room is read-only");
+        }
+
         const session = await this.insertAnalyzingReviewSession(transaction, {
+          roomId: room.id,
           currentUserId,
           pullRequestId,
-          detail,
+          headSha: detail.headSha,
           conflictStatus: conflict.conflictStatus,
           conflictCheckedAt: conflict.checkedAt
         });
@@ -902,13 +1047,14 @@ export class PrReviewService {
           headSha: detail.headSha
         });
 
-        return { session, jobId: job.id };
+        return { session, jobId: job.id, roomCreated };
       });
 
       await this.analysisJobPublisher.publishCreatedJob(created.jobId);
       return {
         session: this.mapSession(created.session),
-        created: true
+        created: true,
+        roomCreated: created.roomCreated
       };
     } catch (error) {
       if (!this.isUniqueConstraintViolation(error)) {
@@ -917,18 +1063,152 @@ export class PrReviewService {
 
       const concurrent = await this.findActiveAnalyzingReviewSession(
         workspaceId,
-        pullRequestId,
-        currentUserId
+        pullRequestId
       );
-      if (!concurrent) {
+      const reused =
+        concurrent ??
+        (await this.findReusableReviewSession(
+          workspaceId,
+          pullRequestId,
+          detail.headSha
+        ));
+      if (!reused) {
         throw error;
       }
 
       return {
-        session: this.mapSession(concurrent),
-        created: false
+        session: this.mapSession(reused),
+        created: false,
+        roomCreated: false
       };
     }
+  }
+
+  async createOrJoinReviewRoom(
+    currentUserId: string,
+    workspaceId: string,
+    pullRequestId: string
+  ): Promise<PrReviewRoomStartPayload> {
+    const created = await this.createReviewSession(
+      currentUserId,
+      workspaceId,
+      pullRequestId
+    );
+    const room = await this.findReviewRoom(workspaceId, created.session.reviewRoomId);
+    if (!room) {
+      throw badRequest("PR Review room could not be loaded");
+    }
+
+    return {
+      room: this.mapReviewRoom(room),
+      revision: created.session,
+      roomCreated: created.roomCreated,
+      revisionCreated: created.created
+    };
+  }
+
+  async getReviewRoomForPullRequest(
+    currentUserId: string,
+    workspaceId: string,
+    pullRequestId: string
+  ): Promise<PrReviewRoomPayload> {
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+    const room = await this.findReviewRoomByPullRequest(workspaceId, pullRequestId);
+    if (!room) {
+      throw notFound("PR Review room not found");
+    }
+    return this.mapReviewRoom(room);
+  }
+
+  async listReviewRooms(
+    currentUserId: string,
+    workspaceId: string
+  ): Promise<PrReviewRoomListPayload> {
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+    const rooms = await this.database.query<PrReviewRoomRow>(
+      `${this.reviewRoomSelectSql()}
+       WHERE review_room.workspace_id = $1
+       ORDER BY
+         CASE review_room.status WHEN 'active' THEN 0 ELSE 1 END,
+         review_room.updated_at DESC`,
+      [workspaceId]
+    );
+    return { rooms: rooms.map((room) => this.mapReviewRoom(room)) };
+  }
+
+  async getReviewRoom(
+    currentUserId: string,
+    workspaceId: string,
+    reviewRoomId: string
+  ): Promise<PrReviewRoomPayload> {
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+    const room = await this.findReviewRoom(workspaceId, reviewRoomId);
+    if (!room) {
+      throw notFound("PR Review room not found");
+    }
+    return this.mapReviewRoom(room);
+  }
+
+  async listReviewRoomRevisions(
+    currentUserId: string,
+    workspaceId: string,
+    reviewRoomId: string
+  ): Promise<PrReviewRoomRevisionListPayload> {
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+    const room = await this.findReviewRoom(workspaceId, reviewRoomId);
+    if (!room) {
+      throw notFound("PR Review room not found");
+    }
+    const revisions = await this.listReviewSessionsForRoom(room.id);
+    return {
+      reviewRoomId: room.id,
+      currentReviewSessionId: room.current_session_id,
+      revisions: revisions.map((revision) => this.mapSession(revision))
+    };
+  }
+
+  async createReviewRoomRevision(
+    currentUserId: string,
+    workspaceId: string,
+    reviewRoomId: string
+  ): Promise<PrReviewRoomStartPayload> {
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+    const room = await this.findReviewRoom(workspaceId, reviewRoomId);
+    if (!room) {
+      throw notFound("PR Review room not found");
+    }
+    if (room.status !== "active") {
+      throw conflictError("Completed PR Review room is read-only");
+    }
+    return this.createOrJoinReviewRoom(
+      currentUserId,
+      workspaceId,
+      room.pull_request_id
+    );
+  }
+
+  async deleteReviewRoom(
+    currentUserId: string,
+    workspaceId: string,
+    reviewRoomId: string
+  ): Promise<DeletePrReviewRoomPayload> {
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+    const roomId = this.requireUuid(reviewRoomId, "reviewRoomId");
+    const deleted = await this.database.queryOne<{ id: string }>(
+      `
+        DELETE FROM canvas AS review_canvas
+        USING pr_review_rooms AS review_room
+        WHERE review_room.workspace_id = $1
+          AND review_room.id = $2
+          AND review_room.canvas_id = review_canvas.id
+        RETURNING review_canvas.id
+      `,
+      [workspaceId, roomId]
+    );
+    if (!deleted) {
+      throw notFound("PR Review room not found");
+    }
+    return { deleted: true };
   }
 
   async retryReviewSession(
@@ -967,6 +1247,7 @@ export class PrReviewService {
           job.workspace_id,
           job.head_sha,
           job.status,
+          review_session.room_id,
           review_session.pull_request_id,
           review_session.created_by_user_id,
           review_session.head_sha AS session_head_sha,
@@ -1184,6 +1465,7 @@ export class PrReviewService {
       await this.insertReviewGraph(
         transaction,
         lockedJob.review_session_id,
+        lockedJob.room_id,
         files,
         analysis
       );
@@ -1196,7 +1478,12 @@ export class PrReviewService {
               change_summary = $3::jsonb,
               recommended_review_order = $4,
               caution_points = $5::jsonb,
-              reviewed_count = 0,
+              reviewed_count = (
+                SELECT COUNT(*)::integer
+                FROM review_files AS review_file
+                WHERE review_file.session_id = $1
+                  AND review_file.current_status <> 'not_reviewed'
+              ),
               total_file_count = $6,
               analysis_error_code = NULL,
               analysis_error_message = NULL
@@ -1215,6 +1502,19 @@ export class PrReviewService {
       );
       if (!session) {
         throw conflictError("PR Review analysis session is no longer active");
+      }
+
+      const room = await transaction.queryOne<{ id: string }>(
+        `
+          UPDATE pr_review_rooms
+          SET current_session_id = $2
+          WHERE id = $1
+          RETURNING id
+        `,
+        [lockedJob.room_id, lockedJob.review_session_id]
+      );
+      if (!room) {
+        throw conflictError("PR Review room is no longer active");
       }
 
       return {
@@ -1902,18 +2202,20 @@ export class PrReviewService {
       );
     }
 
-    let reviewSessionUpdated = true;
+    let successorRevisionCreated = true;
     try {
-      await this.updateReviewSessionAfterConflictApply({
-        reviewSessionId: session.id,
-        headSha: applyResult.headShaAfter,
+      await this.createSuccessorReviewRevisionAfterConflictApply({
+        currentUserId,
+        workspaceId,
+        previousSession: session,
+        headShaAfter: applyResult.headShaAfter,
         conflictStatus: refreshedConflict.conflictStatus,
         conflictCheckedAt: refreshedConflict.checkedAt
       });
     } catch {
-      reviewSessionUpdated = false;
+      successorRevisionCreated = false;
       this.logger.warn(
-        `GitHub conflict merge commit ${applyResult.commitSha} succeeded but review session update failed for ${session.id}`
+        `GitHub conflict merge commit ${applyResult.commitSha} succeeded but successor review revision creation failed for ${session.id}`
       );
     }
 
@@ -1948,7 +2250,7 @@ export class PrReviewService {
       localStateStatus:
         applyResult.localCacheUpdated &&
         conflictStatusRefreshed &&
-        reviewSessionUpdated
+        successorRevisionCreated
           ? "updated"
           : "sync_required"
     };
@@ -2033,18 +2335,27 @@ export class PrReviewService {
       );
     }
 
-    let reviewSessionUpdated = true;
+    let successorRevisionCreated = true;
     try {
-      await this.updateReviewSessionAfterConflictApply({
-        reviewSessionId: file.session_id,
-        headSha: applyResult.headShaAfter,
+      const previousSession = await this.findReviewSession(
+        workspaceId,
+        file.session_id
+      );
+      if (!previousSession) {
+        throw notFound("Review session not found");
+      }
+      await this.createSuccessorReviewRevisionAfterConflictApply({
+        currentUserId,
+        workspaceId,
+        previousSession,
+        headShaAfter: applyResult.headShaAfter,
         conflictStatus: refreshedConflict.conflictStatus,
         conflictCheckedAt: refreshedConflict.checkedAt
       });
     } catch {
-      reviewSessionUpdated = false;
+      successorRevisionCreated = false;
       this.logger.warn(
-        `GitHub conflict merge commit ${applyResult.commitSha} succeeded but review session update failed for ${file.session_id}`
+        `GitHub conflict merge commit ${applyResult.commitSha} succeeded but successor review revision creation failed for ${file.session_id}`
       );
     }
 
@@ -2065,7 +2376,7 @@ export class PrReviewService {
       localStateStatus:
         applyResult.localCacheUpdated &&
         conflictStatusRefreshed &&
-        reviewSessionUpdated
+        successorRevisionCreated
           ? "updated"
           : "sync_required"
     };
@@ -2130,6 +2441,23 @@ export class PrReviewService {
           expectedHeadSha: input.expectedHeadSha
         }
       );
+
+    try {
+      await this.database.execute(
+        `
+          UPDATE pr_review_rooms
+          SET status = 'completed',
+              completion_reason = 'merged',
+              completed_at = COALESCE($2::timestamptz, now())
+          WHERE id = $1
+        `,
+        [session.room_id, mergeResult.mergedAt]
+      );
+    } catch {
+      this.logger.warn(
+        `GitHub pull request was merged but review room completion failed for ${session.room_id}`
+      );
+    }
 
     return {
       reviewSessionId: session.id,
@@ -2297,6 +2625,7 @@ export class PrReviewService {
           AND review_session.id = $2
         RETURNING
           review_session.id,
+          review_session.room_id,
           review_session.pull_request_id,
           review_session.created_by_user_id,
           review_session.head_sha,
@@ -2324,33 +2653,62 @@ export class PrReviewService {
     return this.mapSession(session);
   }
 
-  private async updateReviewSessionAfterConflictApply(input: {
-    reviewSessionId: string;
-    headSha: string;
+  private async createSuccessorReviewRevisionAfterConflictApply(input: {
+    currentUserId: string;
+    workspaceId: string;
+    previousSession: PrReviewSessionRow;
+    headShaAfter: string;
     conflictStatus: PrReviewConflictStatus;
     conflictCheckedAt: string | null;
   }): Promise<void> {
-    const updated = await this.database.queryOne<{ id: string }>(
-      `
-        UPDATE pr_review_sessions
-        SET
-          head_sha = $2,
-          conflict_status = $3,
-          conflict_checked_at = $4,
-          updated_at = now()
-        WHERE id = $1
-        RETURNING id
-      `,
-      [
-        input.reviewSessionId,
-        input.headSha,
-        input.conflictStatus,
-        input.conflictCheckedAt
-      ]
-    );
+    if (input.previousSession.head_sha === input.headShaAfter) {
+      throw conflictError("Successor review revision head SHA is stale");
+    }
 
-    if (!updated) {
-      throw badRequest("Review session could not be updated");
+    const existing = await this.findReusableReviewSession(
+      input.workspaceId,
+      input.previousSession.pull_request_id,
+      input.headShaAfter
+    );
+    if (existing) {
+      if (existing.room_id !== input.previousSession.room_id) {
+        throw conflictError("Successor review revision room does not match");
+      }
+      return;
+    }
+
+    try {
+      const created = await this.database.transaction(async (transaction) => {
+        const session = await this.insertAnalyzingReviewSession(transaction, {
+          roomId: input.previousSession.room_id,
+          currentUserId: input.currentUserId,
+          pullRequestId: input.previousSession.pull_request_id,
+          headSha: input.headShaAfter,
+          conflictStatus: input.conflictStatus,
+          conflictCheckedAt: input.conflictCheckedAt
+        });
+        const job = await this.insertReviewAnalysisJob(transaction, {
+          reviewSessionId: session.id,
+          workspaceId: input.workspaceId,
+          headSha: input.headShaAfter
+        });
+        return { session, jobId: job.id };
+      });
+      await this.analysisJobPublisher.publishCreatedJob(created.jobId);
+      return;
+    } catch (error) {
+      if (!this.isUniqueConstraintViolation(error)) {
+        throw error;
+      }
+    }
+
+    const concurrent = await this.findReusableReviewSession(
+      input.workspaceId,
+      input.previousSession.pull_request_id,
+      input.headShaAfter
+    );
+    if (!concurrent || concurrent.room_id !== input.previousSession.room_id) {
+      throw conflictError("Successor review revision head SHA is stale");
     }
   }
 
@@ -2468,26 +2826,21 @@ export class PrReviewService {
     reviewSessionId: string
   ): Promise<DeletePrReviewSessionPayload> {
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
-
-    const deleted = await this.database.queryOne<{ id: string }>(
+    const session = await this.database.queryOne<{ room_id: string }>(
       `
-        DELETE FROM pr_review_sessions AS review_session
-        USING github_pull_requests AS pull_request
-        WHERE review_session.pull_request_id = pull_request.id
-          AND pull_request.workspace_id = $1
+        SELECT review_session.room_id
+        FROM pr_review_sessions AS review_session
+        JOIN pr_review_rooms AS review_room
+          ON review_room.id = review_session.room_id
+        WHERE review_room.workspace_id = $1
           AND review_session.id = $2
-        RETURNING review_session.id
       `,
       [workspaceId, this.requireUuid(reviewSessionId, "reviewSessionId")]
     );
-
-    if (!deleted) {
+    if (!session) {
       throw notFound("Review session not found");
     }
-
-    return {
-      deleted: true
-    };
+    return this.deleteReviewRoom(currentUserId, workspaceId, session.room_id);
   }
 
   private async findSyncedPullRequest(
@@ -2509,25 +2862,168 @@ export class PrReviewService {
     );
   }
 
-  private async findActiveAnalyzingReviewSession(
+  private async findReviewRoomIdentity(
     workspaceId: string,
     pullRequestId: string,
-    currentUserId: string
+    runner: PrReviewAnalysisJobQueryRunner = this.database
+  ): Promise<PrReviewRoomIdentityRow | null> {
+    return runner.queryOne<PrReviewRoomIdentityRow>(
+      `
+        SELECT id, workspace_id, pull_request_id, canvas_id, status
+        FROM pr_review_rooms
+        WHERE workspace_id = $1
+          AND pull_request_id = $2
+      `,
+      [workspaceId, pullRequestId]
+    );
+  }
+
+  private async insertReviewRoom(
+    transaction: DatabaseTransaction,
+    input: {
+      currentUserId: string;
+      workspaceId: string;
+      pullRequestId: string;
+      title: string;
+    }
+  ): Promise<PrReviewRoomIdentityRow> {
+    const canvas = await transaction.queryOne<{ id: string }>(
+      `
+        INSERT INTO canvas (workspace_id, title, board_type, created_by)
+        VALUES ($1, $2, 'review', $3)
+        RETURNING id
+      `,
+      [input.workspaceId, input.title, input.currentUserId]
+    );
+    if (!canvas) {
+      throw badRequest("PR Review canvas could not be created");
+    }
+
+    const room = await transaction.queryOne<PrReviewRoomIdentityRow>(
+      `
+        INSERT INTO pr_review_rooms (
+          workspace_id,
+          pull_request_id,
+          canvas_id,
+          created_by_user_id
+        )
+        VALUES ($1, $2, $3, $4)
+        RETURNING id, workspace_id, pull_request_id, canvas_id, status
+      `,
+      [
+        input.workspaceId,
+        input.pullRequestId,
+        canvas.id,
+        input.currentUserId
+      ]
+    );
+    if (!room) {
+      throw badRequest("PR Review room could not be created");
+    }
+    return room;
+  }
+
+  private reviewRoomSelectSql(): string {
+    return `
+      SELECT
+        review_room.id,
+        review_room.workspace_id,
+        review_room.pull_request_id,
+        review_room.canvas_id,
+        review_room.current_session_id,
+        analyzing_session.id AS analyzing_session_id,
+        review_room.status,
+        review_room.completion_reason,
+        review_room.created_by_user_id,
+        review_room.completed_at,
+        review_room.created_at,
+        review_room.updated_at,
+        pull_request.pr_number,
+        pull_request.title,
+        pull_request.head_branch,
+        pull_request.base_branch,
+        pull_request.html_url,
+        COALESCE(
+          NULLIF(pull_request.raw->>'state', ''),
+          CASE
+            WHEN pull_request.merged_at IS NOT NULL
+              OR pull_request.github_closed_at IS NOT NULL
+              THEN 'closed'
+            ELSE 'open'
+          END
+        ) AS pull_request_state,
+        pull_request.merged_at AS pull_request_merged_at,
+        current_session.head_sha AS current_head_sha,
+        current_session.status AS current_session_status,
+        (
+          SELECT COUNT(*)
+          FROM pr_review_sessions AS revision
+          WHERE revision.room_id = review_room.id
+        ) AS revision_count
+      FROM pr_review_rooms AS review_room
+      JOIN github_pull_requests AS pull_request
+        ON pull_request.id = review_room.pull_request_id
+       AND pull_request.workspace_id = review_room.workspace_id
+      LEFT JOIN pr_review_sessions AS current_session
+        ON current_session.id = review_room.current_session_id
+      LEFT JOIN LATERAL (
+        SELECT revision.id
+        FROM pr_review_sessions AS revision
+        WHERE revision.room_id = review_room.id
+          AND revision.status = 'analyzing'
+        ORDER BY revision.created_at DESC
+        LIMIT 1
+      ) AS analyzing_session ON true
+    `;
+  }
+
+  private async findReviewRoom(
+    workspaceId: string,
+    reviewRoomId: string
+  ): Promise<PrReviewRoomRow | null> {
+    if (!UUID_PATTERN.test(reviewRoomId)) {
+      return null;
+    }
+    return this.database.queryOne<PrReviewRoomRow>(
+      `${this.reviewRoomSelectSql()}
+       WHERE review_room.workspace_id = $1
+         AND review_room.id = $2`,
+      [workspaceId, reviewRoomId]
+    );
+  }
+
+  private async findReviewRoomByPullRequest(
+    workspaceId: string,
+    pullRequestId: string
+  ): Promise<PrReviewRoomRow | null> {
+    if (!UUID_PATTERN.test(pullRequestId)) {
+      return null;
+    }
+    return this.database.queryOne<PrReviewRoomRow>(
+      `${this.reviewRoomSelectSql()}
+       WHERE review_room.workspace_id = $1
+         AND review_room.pull_request_id = $2`,
+      [workspaceId, pullRequestId]
+    );
+  }
+
+  private async findActiveAnalyzingReviewSession(
+    workspaceId: string,
+    pullRequestId: string
   ): Promise<PrReviewSessionRow | null> {
     const active = await this.database.queryOne<{ id: string }>(
       `
         SELECT review_session.id
         FROM pr_review_sessions AS review_session
-        JOIN github_pull_requests AS pull_request
-          ON pull_request.id = review_session.pull_request_id
-        WHERE pull_request.workspace_id = $1
-          AND review_session.pull_request_id = $2
-          AND review_session.created_by_user_id = $3
+        JOIN pr_review_rooms AS review_room
+          ON review_room.id = review_session.room_id
+        WHERE review_room.workspace_id = $1
+          AND review_room.pull_request_id = $2
           AND review_session.status = 'analyzing'
         ORDER BY review_session.created_at DESC
         LIMIT 1
       `,
-      [workspaceId, pullRequestId, currentUserId]
+      [workspaceId, pullRequestId]
     );
 
     if (!active) {
@@ -2535,6 +3031,32 @@ export class PrReviewService {
     }
 
     return this.findReviewSession(workspaceId, active.id);
+  }
+
+  private async findReusableReviewSession(
+    workspaceId: string,
+    pullRequestId: string,
+    headSha: string
+  ): Promise<PrReviewSessionRow | null> {
+    const reusable = await this.database.queryOne<{ id: string }>(
+      `
+        SELECT review_session.id
+        FROM pr_review_sessions AS review_session
+        JOIN pr_review_rooms AS review_room
+          ON review_room.id = review_session.room_id
+        WHERE review_room.workspace_id = $1
+          AND review_room.pull_request_id = $2
+          AND review_session.head_sha = $3
+          AND review_session.status <> 'failed'
+        ORDER BY review_session.created_at DESC
+        LIMIT 1
+      `,
+      [workspaceId, pullRequestId, headSha]
+    );
+    if (!reusable) {
+      return null;
+    }
+    return this.findReviewSession(workspaceId, reusable.id);
   }
 
   private isUniqueConstraintViolation(error: unknown): boolean {
@@ -2558,6 +3080,7 @@ export class PrReviewService {
           job.workspace_id,
           job.head_sha,
           job.status,
+          review_session.room_id,
           review_session.pull_request_id,
           review_session.created_by_user_id,
           review_session.head_sha AS session_head_sha,
@@ -2868,6 +3391,7 @@ export class PrReviewService {
       `
         SELECT
           review_session.id,
+          review_session.room_id,
           review_session.pull_request_id,
           review_session.created_by_user_id,
           review_session.head_sha,
@@ -2894,6 +3418,38 @@ export class PrReviewService {
     );
   }
 
+  private async listReviewSessionsForRoom(
+    reviewRoomId: string
+  ): Promise<PrReviewSessionRow[]> {
+    return this.database.query<PrReviewSessionRow>(
+      `
+        SELECT
+          review_session.id,
+          review_session.room_id,
+          review_session.pull_request_id,
+          review_session.created_by_user_id,
+          review_session.head_sha,
+          review_session.status,
+          review_session.pr_purpose,
+          review_session.change_summary,
+          review_session.recommended_review_order,
+          review_session.caution_points,
+          review_session.reviewed_count,
+          review_session.total_file_count,
+          review_session.conflict_status,
+          review_session.conflict_checked_at,
+          review_session.analysis_error_code,
+          review_session.analysis_error_message,
+          review_session.created_at,
+          review_session.updated_at
+        FROM pr_review_sessions AS review_session
+        WHERE review_session.room_id = $1
+        ORDER BY review_session.created_at DESC
+      `,
+      [reviewRoomId]
+    );
+  }
+
   private async findReviewSessionSummary(
     workspaceId: string,
     reviewSessionId: string
@@ -2906,6 +3462,7 @@ export class PrReviewService {
       `
         SELECT
           review_session.id,
+          review_session.room_id,
           review_session.pull_request_id,
           review_session.created_by_user_id,
           review_session.head_sha,
@@ -3311,6 +3868,7 @@ export class PrReviewService {
           review_file.comment,
           review_file.reviewed_by_user_id,
           review_file.reviewed_at,
+          review_file.carried_from_decision_id,
           latest_decision.id AS latest_decision_id,
           latest_decision.status AS latest_decision_status,
           latest_decision.comment AS latest_decision_comment,
@@ -3633,7 +4191,8 @@ export class PrReviewService {
         SET current_status = $3,
             comment = $4,
             reviewed_by_user_id = $5,
-            reviewed_at = now()
+            reviewed_at = now(),
+            carried_from_decision_id = NULL
         FROM pr_review_sessions AS review_session
         JOIN github_pull_requests AS pull_request
           ON pull_request.id = review_session.pull_request_id
@@ -3730,9 +4289,10 @@ export class PrReviewService {
   private async insertAnalyzingReviewSession(
     transaction: DatabaseTransaction,
     input: {
+      roomId: string;
       currentUserId: string;
       pullRequestId: string;
-      detail: PrReviewGithubPullRequestDetail;
+      headSha: string;
       conflictStatus: PrReviewConflictStatus;
       conflictCheckedAt: string | null;
     }
@@ -3740,6 +4300,7 @@ export class PrReviewService {
     const session = await transaction.queryOne<PrReviewSessionRow>(
       `
         INSERT INTO pr_review_sessions (
+          room_id,
           pull_request_id,
           created_by_user_id,
           head_sha,
@@ -3757,6 +4318,7 @@ export class PrReviewService {
           $1,
           $2,
           $3,
+          $4,
           'analyzing',
           NULL,
           '[]'::jsonb,
@@ -3764,11 +4326,12 @@ export class PrReviewService {
           '[]'::jsonb,
           0,
           0,
-          $4,
-          $5
+          $5,
+          $6
         )
         RETURNING
           id,
+          room_id,
           pull_request_id,
           created_by_user_id,
           head_sha,
@@ -3787,9 +4350,10 @@ export class PrReviewService {
           updated_at
       `,
       [
+        input.roomId,
         input.pullRequestId,
         input.currentUserId,
-        input.detail.headSha,
+        input.headSha,
         input.conflictStatus,
         input.conflictCheckedAt
       ]
@@ -3833,6 +4397,7 @@ export class PrReviewService {
   private async insertReviewGraph(
     transaction: DatabaseTransaction,
     sessionId: string,
+    roomId: string,
     files: PrReviewGithubChangedFile[],
     analysis: PrReviewAnalysisResult
   ): Promise<void> {
@@ -3857,6 +4422,7 @@ export class PrReviewService {
       const reviewFile = await this.insertReviewFile(
         transaction,
         sessionId,
+        roomId,
         file,
         metadata,
         graphFile.roleType
@@ -3877,6 +4443,15 @@ export class PrReviewService {
           ];
     const flowByKey = new Map<string, ReviewFlowRow>();
     const membershipIdByFlowAndPath = new Map<string, string>();
+    const primaryMembershipByPath = new Map<
+      string,
+      {
+        flowId: string;
+        reviewFlowFileId: string;
+        flowSortOrder: number;
+        workflowOrder: number;
+      }
+    >();
 
     for (const [flowIndex, graphFlow] of graphFlows.entries()) {
       const flow = await transaction.queryOne<ReviewFlowRow>(
@@ -3928,6 +4503,14 @@ export class PrReviewService {
           this.semanticGraphMembershipKey(graphFlow.candidateKey, filePath),
           membership.id
         );
+        if (!primaryMembershipByPath.has(filePath)) {
+          primaryMembershipByPath.set(filePath, {
+            flowId: flow.id,
+            reviewFlowFileId: membership.id,
+            flowSortOrder: flowIndex + 1,
+            workflowOrder: fileIndex + 1
+          });
+        }
       }
     }
 
@@ -3976,19 +4559,327 @@ export class PrReviewService {
         throw badRequest("Review flow relation could not be created");
       }
     }
+
+    const materializationFiles: PrReviewCanvasMaterializationFile[] = files.map(
+      (file, index) => {
+        const reviewFile = reviewFileByPath.get(file.filePath);
+        const metadata = metadataByPath.get(file.filePath);
+        const membership = primaryMembershipByPath.get(file.filePath);
+        if (!reviewFile || !metadata) {
+          throw badRequest("Review canvas file must match a changed file");
+        }
+
+        return {
+          reviewFileId: reviewFile.id,
+          roomFileId: reviewFile.room_file_id,
+          reviewFlowFileId: membership?.reviewFlowFileId ?? null,
+          flowId: membership?.flowId ?? null,
+          flowSortOrder: membership?.flowSortOrder ?? graphFlows.length + 1,
+          workflowOrder: membership?.workflowOrder ?? index + 1,
+          fileName: file.fileName,
+          filePath: file.filePath,
+          fileStatus: file.fileStatus,
+          roleSummary: metadata.fileRole,
+          riskLevel: metadata.riskLevel,
+          reviewStatus: reviewFile.current_status
+        };
+      }
+    );
+    const materializationRelations = this.buildCanvasMaterializationRelations(
+      semanticGraph,
+      graphFlows,
+      flowByKey,
+      reviewFileByPath
+    );
+
+    await this.materializeReviewCanvas(
+      transaction,
+      roomId,
+      sessionId,
+      materializationFiles,
+      materializationRelations
+    );
+  }
+
+  private buildCanvasMaterializationRelations(
+    semanticGraph: PrReviewValidatedSemanticGraph,
+    graphFlows: PrReviewValidatedGraphFlow[],
+    flowByKey: Map<string, ReviewFlowRow>,
+    reviewFileByPath: Map<string, ReviewFileRow>
+  ): PrReviewCanvasMaterializationRelation[] {
+    const relations: PrReviewCanvasMaterializationRelation[] = [];
+    const appendRelation = (input: {
+      flowKey: string;
+      fromFilePath: string;
+      toFilePath: string;
+      relationType: PrReviewCanvasMaterializationRelation["relationType"];
+      source: PrReviewCanvasMaterializationRelation["source"];
+      confidence: number;
+      reason: string;
+    }) => {
+      const flow = flowByKey.get(input.flowKey);
+      const fromFile = reviewFileByPath.get(input.fromFilePath);
+      const toFile = reviewFileByPath.get(input.toFilePath);
+      if (!flow || !fromFile || !toFile) {
+        throw badRequest("Review canvas relation must match the review graph");
+      }
+
+      relations.push({
+        fromReviewFileId: fromFile.id,
+        toReviewFileId: toFile.id,
+        fromRoomFileId: fromFile.room_file_id,
+        toRoomFileId: toFile.room_file_id,
+        flowId: flow.id,
+        relationType: input.relationType,
+        source: input.source,
+        confidence: input.confidence,
+        reason: input.reason
+      });
+    };
+
+    for (const relation of semanticGraph.relations) {
+      appendRelation(relation);
+    }
+
+    for (const graphFlow of graphFlows) {
+      for (let index = 1; index < graphFlow.reviewOrder.length; index += 1) {
+        appendRelation({
+          flowKey: graphFlow.candidateKey,
+          fromFilePath: graphFlow.reviewOrder[index - 1],
+          toFilePath: graphFlow.reviewOrder[index],
+          relationType: "review_order",
+          source: "fallback",
+          confidence: 100,
+          reason: "추천 리뷰 경로"
+        });
+      }
+    }
+
+    return relations;
+  }
+
+  private async materializeReviewCanvas(
+    transaction: DatabaseTransaction,
+    roomId: string,
+    sessionId: string,
+    files: PrReviewCanvasMaterializationFile[],
+    relations: PrReviewCanvasMaterializationRelation[]
+  ): Promise<void> {
+    const room = await transaction.queryOne<{ canvas_id: string }>(
+      `
+        SELECT canvas_id
+        FROM pr_review_rooms
+        WHERE id = $1
+        FOR UPDATE
+      `,
+      [roomId]
+    );
+    if (!room) {
+      throw conflictError("PR Review room is no longer active");
+    }
+
+    const existingShapes = await transaction.query<CanvasShapeRow>(
+      `
+        SELECT
+          id,
+          canvas_id,
+          parent_shape_id,
+          shape_type,
+          title,
+          text_content,
+          x,
+          y,
+          width,
+          height,
+          rotation,
+          z_index,
+          raw_shape,
+          content_hash,
+          revision,
+          created_at,
+          updated_at,
+          deleted_at
+        FROM canvas_freeform_shapes
+        WHERE canvas_id = $1
+          AND shape_type = ANY($2::text[])
+        ORDER BY id
+        FOR UPDATE
+      `,
+      [
+        room.canvas_id,
+        [
+          PR_REVIEW_FILE_NODE_SHAPE_TYPE,
+          PR_REVIEW_RELATION_EDGE_SHAPE_TYPE
+        ]
+      ]
+    );
+    const materialization = buildPrReviewCanvasMaterialization({
+      reviewRoomId: roomId,
+      reviewSessionId: sessionId,
+      files,
+      relations,
+      existingShapes
+    });
+
+    for (const shape of materialization.shapes) {
+      const values = shape.values;
+      const contentHash = computeShapeContentHash(values);
+      await transaction.execute(
+        `
+          INSERT INTO canvas_freeform_shapes (
+            id,
+            canvas_id,
+            parent_shape_id,
+            shape_type,
+            title,
+            text_content,
+            x,
+            y,
+            width,
+            height,
+            rotation,
+            z_index,
+            raw_shape,
+            content_hash,
+            deleted_at
+          )
+          VALUES (
+            $1,
+            $2,
+            $3,
+            $4,
+            $5,
+            $6,
+            $7,
+            $8,
+            $9,
+            $10,
+            $11,
+            $12,
+            $13::jsonb,
+            $14,
+            NULL
+          )
+          ON CONFLICT (id) DO UPDATE
+          SET
+            parent_shape_id = EXCLUDED.parent_shape_id,
+            shape_type = EXCLUDED.shape_type,
+            title = EXCLUDED.title,
+            text_content = EXCLUDED.text_content,
+            x = EXCLUDED.x,
+            y = EXCLUDED.y,
+            width = EXCLUDED.width,
+            height = EXCLUDED.height,
+            rotation = EXCLUDED.rotation,
+            z_index = EXCLUDED.z_index,
+            raw_shape = EXCLUDED.raw_shape,
+            content_hash = EXCLUDED.content_hash,
+            revision = canvas_freeform_shapes.revision + 1,
+            updated_at = NOW(),
+            deleted_at = NULL
+          WHERE canvas_freeform_shapes.canvas_id = EXCLUDED.canvas_id
+            AND (
+              canvas_freeform_shapes.deleted_at IS NOT NULL
+              OR canvas_freeform_shapes.content_hash <> EXCLUDED.content_hash
+            )
+        `,
+        [
+          shape.id,
+          room.canvas_id,
+          values.parentShapeId,
+          values.shapeType,
+          values.title,
+          values.textContent,
+          values.x,
+          values.y,
+          values.width,
+          values.height,
+          values.rotation,
+          values.zIndex,
+          JSON.stringify(values.rawShape),
+          contentHash
+        ]
+      );
+    }
+
+    await transaction.execute(
+      `
+        UPDATE canvas_freeform_shapes
+        SET deleted_at = NOW(),
+            revision = revision + 1,
+            updated_at = NOW()
+        WHERE canvas_id = $1
+          AND shape_type = ANY($2::text[])
+          AND deleted_at IS NULL
+          AND NOT (id = ANY($3::text[]))
+      `,
+      [
+        room.canvas_id,
+        [
+          PR_REVIEW_FILE_NODE_SHAPE_TYPE,
+          PR_REVIEW_RELATION_EDGE_SHAPE_TYPE
+        ],
+        materialization.activeShapeIds
+      ]
+    );
+    await transaction.execute(
+      `
+        UPDATE canvas
+        SET updated_at = NOW()
+        WHERE id = $1
+      `,
+      [room.canvas_id]
+    );
   }
 
   private async insertReviewFile(
     transaction: DatabaseTransaction,
     sessionId: string,
+    roomId: string,
     file: PrReviewGithubChangedFile,
     metadata: ReviewFileMetadata,
     roleType: PrReviewFileRoleType
   ): Promise<ReviewFileRow> {
+    let roomFile: { id: string } | null = null;
+    if (file.previousFilePath) {
+      roomFile = await transaction.queryOne<{ id: string }>(
+        `
+          UPDATE pr_review_room_files
+          SET current_file_path = $3
+          WHERE room_id = $1
+            AND current_file_path = $2
+          RETURNING id
+        `,
+        [roomId, file.previousFilePath, file.filePath]
+      );
+    }
+    roomFile ??= await transaction.queryOne<{ id: string }>(
+      `
+        INSERT INTO pr_review_room_files (room_id, current_file_path)
+        VALUES ($1, $2)
+        ON CONFLICT (room_id, current_file_path)
+        DO UPDATE SET current_file_path = EXCLUDED.current_file_path
+        RETURNING id
+      `,
+      [roomId, file.filePath]
+    );
+    if (!roomFile) {
+      throw badRequest("PR Review room file could not be created");
+    }
+
+    const carryOver = await this.findReviewFileCarryOver(
+      transaction,
+      roomId,
+      roomFile.id,
+      file.headBlobSha
+    );
+
     const reviewFile = await transaction.queryOne<ReviewFileRow>(
       `
         INSERT INTO review_files (
           session_id,
+          room_id,
+          room_file_id,
           file_path,
           previous_file_path,
           file_name,
@@ -4003,7 +4894,13 @@ export class PrReviewService {
           risk_level,
           change_reason,
           change_summary,
-          review_points
+          review_points,
+          head_blob_sha,
+          carried_from_decision_id,
+          current_status,
+          comment,
+          reviewed_by_user_id,
+          reviewed_at
         )
         VALUES (
           $1,
@@ -4021,12 +4918,22 @@ export class PrReviewService {
           $13,
           $14,
           $15,
-          $16::jsonb
+          $16,
+          $17,
+          $18::jsonb,
+          $19,
+          $20,
+          $21,
+          $22,
+          $23,
+          $24
         )
-        RETURNING id
+        RETURNING id, room_file_id, current_status
       `,
       [
         sessionId,
+        roomId,
+        roomFile.id,
         file.filePath,
         file.previousFilePath,
         file.fileName,
@@ -4041,7 +4948,13 @@ export class PrReviewService {
         metadata.riskLevel,
         metadata.changeReason,
         metadata.changeSummary,
-        JSON.stringify(metadata.reviewPoints)
+        JSON.stringify(metadata.reviewPoints),
+        file.headBlobSha,
+        carryOver?.source_decision_id ?? null,
+        carryOver?.current_status ?? "not_reviewed",
+        carryOver?.comment ?? null,
+        carryOver?.reviewed_by_user_id ?? null,
+        carryOver?.reviewed_at ?? null
       ]
     );
 
@@ -4050,6 +4963,53 @@ export class PrReviewService {
     }
 
     return reviewFile;
+  }
+
+  private async findReviewFileCarryOver(
+    transaction: DatabaseTransaction,
+    roomId: string,
+    roomFileId: string,
+    headBlobSha: string | null
+  ): Promise<ReviewFileCarryOverRow | null> {
+    if (!headBlobSha) {
+      return null;
+    }
+
+    return transaction.queryOne<ReviewFileCarryOverRow>(
+      `
+        SELECT
+          COALESCE(
+            latest_decision.id,
+            previous_file.carried_from_decision_id
+          ) AS source_decision_id,
+          previous_file.current_status,
+          previous_file.comment,
+          previous_file.reviewed_by_user_id,
+          previous_file.reviewed_at
+        FROM pr_review_rooms AS review_room
+        JOIN review_files AS previous_file
+          ON previous_file.session_id = review_room.current_session_id
+         AND previous_file.room_id = review_room.id
+         AND previous_file.room_file_id = $2
+        LEFT JOIN LATERAL (
+          SELECT decision.id
+          FROM file_review_decisions AS decision
+          WHERE decision.review_file_id = previous_file.id
+          ORDER BY decision.reviewed_at DESC, decision.id DESC
+          LIMIT 1
+        ) AS latest_decision ON true
+        WHERE review_room.id = $1
+          AND previous_file.head_blob_sha = $3
+          AND previous_file.current_status <> 'not_reviewed'
+          AND previous_file.reviewed_by_user_id IS NOT NULL
+          AND previous_file.reviewed_at IS NOT NULL
+          AND COALESCE(
+            latest_decision.id,
+            previous_file.carried_from_decision_id
+          ) IS NOT NULL
+      `,
+      [roomId, roomFileId, headBlobSha]
+    );
   }
 
   private semanticGraphMembershipKey(flowKey: string, filePath: string): string {
@@ -4700,6 +5660,7 @@ export class PrReviewService {
   private mapSession(session: PrReviewSessionRow): PrReviewSessionPayload {
     return {
       id: session.id,
+      reviewRoomId: session.room_id,
       pullRequestId: session.pull_request_id,
       headSha: session.head_sha,
       status: session.status,
@@ -4721,6 +5682,43 @@ export class PrReviewService {
       createdByUserId: session.created_by_user_id,
       createdAt: this.toIsoString(session.created_at),
       updatedAt: this.toIsoString(session.updated_at)
+    };
+  }
+
+  private mapReviewRoom(room: PrReviewRoomRow): PrReviewRoomPayload {
+    return {
+      id: room.id,
+      workspaceId: room.workspace_id,
+      pullRequestId: room.pull_request_id,
+      canvasId: room.canvas_id,
+      currentReviewSessionId: room.current_session_id,
+      analyzingReviewSessionId: room.analyzing_session_id,
+      status: room.status,
+      completionReason: room.completion_reason,
+      completedAt: this.toNullableIsoString(room.completed_at),
+      createdByUserId: room.created_by_user_id,
+      createdAt: this.toIsoString(room.created_at),
+      updatedAt: this.toIsoString(room.updated_at),
+      pullRequest: {
+        githubNumber: Number(room.pr_number),
+        title: room.title,
+        headBranch: room.head_branch,
+        baseBranch: room.base_branch,
+        githubUrl: room.html_url,
+        state: room.pull_request_state === "closed" ? "closed" : "open",
+        mergedAt: this.toNullableIsoString(room.pull_request_merged_at)
+      },
+      currentRevision:
+        room.current_session_id &&
+        room.current_head_sha &&
+        room.current_session_status
+          ? {
+              reviewSessionId: room.current_session_id,
+              headSha: room.current_head_sha,
+              status: room.current_session_status
+            }
+          : null,
+      revisionCount: Number(room.revision_count)
     };
   }
 
@@ -4871,6 +5869,7 @@ export class PrReviewService {
       comment: file.comment,
       reviewedByUserId: file.reviewed_by_user_id,
       reviewedAt: this.toNullableIsoString(file.reviewed_at),
+      decisionCarriedOver: file.carried_from_decision_id !== null,
       flowMemberships: memberships.map((membership) => ({
         reviewFlowFileId: membership.review_flow_file_id,
         flowId: membership.flow_id,

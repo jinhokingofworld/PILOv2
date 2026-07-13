@@ -72,6 +72,10 @@ async function compileSqlErdRuntimeModules() {
           'from "./ddl-parser.mjs"'
         ],
         [
+          /from "@\/features\/sql-erd\/utils\/foreign-key-add"/g,
+          'from "./foreign-key-add.mjs"'
+        ],
+        [
           /from "@\/features\/sql-erd\/utils\/model"/g,
           'from "./model.mjs"'
         ],
@@ -84,7 +88,10 @@ async function compileSqlErdRuntimeModules() {
     await compileTypeScriptModule(
       "../../src/features/sql-erd/utils/inspector.ts",
       inspectorOutputPath,
-      [[/from "\.\/model"/g, 'from "./model.mjs"']]
+      [
+        [/from "\.\/foreign-key-add"/g, 'from "./foreign-key-add.mjs"'],
+        [/from "\.\/model"/g, 'from "./model.mjs"']
+      ]
     );
     await compileTypeScriptModule(
       "../../src/features/sql-erd/utils/sql-source-map.ts",
@@ -223,6 +230,10 @@ async function compileSqlErdRuntimeModules() {
       foreignKeyAddOutputPath,
       [
         [/from "@\/features\/sql-erd\/types"/g, 'from "./types-stub.mjs"'],
+        [
+          /from "@\/features\/sql-erd\/utils\/model"/g,
+          'from "./model.mjs"'
+        ],
         [
           /from "@\/features\/sql-erd\/utils\/relation-id"/g,
           'from "./relation-id.mjs"'
@@ -3140,6 +3151,11 @@ const parsedSourceSnapshot = {
   },
   modelJson: createRuntimeTestModel(),
   revision: 20,
+  settingsJson: {
+    sqltoerdRelationNotes: {
+      "relation.orders.user_id.users.id": "order owner"
+    }
+  },
   sourceText: "CREATE TABLE parsed_source (id BIGINT PRIMARY KEY);"
 };
 const currentSourceAutosaveSession = {
@@ -3160,13 +3176,10 @@ assert.deepEqual(sourceAutosaveRequest.payload, {
   dialect: "mysql",
   layoutJson: autosaveLayoutJson,
   modelJson: parsedSourceSnapshot.modelJson,
+  settingsJson: parsedSourceSnapshot.settingsJson,
   sourceText: parsedSourceSnapshot.sourceText
 });
 assert.equal(Object.hasOwn(sourceAutosaveRequest.payload, "title"), false);
-assert.equal(
-  Object.hasOwn(sourceAutosaveRequest.payload, "settingsJson"),
-  false
-);
 
 const mismatchedSourceAutosaveRequest =
   layoutAutosaveRuntime.createSqlErdSourceAutosaveRequest(
@@ -3977,6 +3990,58 @@ assert.equal(
   }),
   false
 );
+assert.equal(
+  sqlDiffApplyRuntime.isSqlErdNormalizedSqlPreviewCurrent(modelSqlPreview, {
+    ...modelSqlPreviewSession,
+    settingsJson: { sqltoerdRelationNotes: { "relation.orders.user_id.users.id": "owner" } }
+  }),
+  false
+);
+const modelSqlPreviewTargetLayout = {
+  ...modelSqlPreviewSession.layoutJson,
+  annotations: { version: 1, links: [] }
+};
+const modelSqlPreviewTargetSettings = {
+  sqltoerdRelationNotes: {
+    "relation.orders.user_id.users.id": "order owner"
+  }
+};
+const modelSqlPreviewWithTargetState =
+  sqlDiffApplyRuntime.createSqlErdNormalizedSqlPreview({
+    layoutJson: modelSqlPreviewTargetLayout,
+    modelJson: modelSqlPreviewSession.modelJson,
+    resolvedDialect: "mysql",
+    session: modelSqlPreviewSession,
+    settingsJson: modelSqlPreviewTargetSettings
+  });
+assert.deepEqual(
+  modelSqlPreviewWithTargetState.layoutJson,
+  modelSqlPreviewTargetLayout
+);
+assert.deepEqual(
+  modelSqlPreviewWithTargetState.settingsJson,
+  modelSqlPreviewTargetSettings
+);
+assert.deepEqual(
+  sqlDiffApplyRuntime.applySqlErdNormalizedSqlPreview(
+    modelSqlPreviewWithTargetState
+  ).snapshot.settingsJson,
+  modelSqlPreviewTargetSettings
+);
+const modelSqlPreviewWithoutRelationNote =
+  sqlDiffApplyRuntime.createSqlErdNormalizedSqlPreview({
+    modelJson: {
+      ...modelSqlPreviewSession.modelJson,
+      schema: {
+        ...modelSqlPreviewSession.modelJson.schema,
+        relations: []
+      }
+    },
+    resolvedDialect: "mysql",
+    session: modelSqlPreviewSession,
+    settingsJson: modelSqlPreviewTargetSettings
+  });
+assert.deepEqual(modelSqlPreviewWithoutRelationNote.settingsJson, {});
 const failedModelSqlPreview = sqlDiffApplyRuntime.applySqlErdNormalizedSqlPreview({
   ...modelSqlPreview,
   generatedSourceText: "CREATE TABLE users ("
@@ -4521,6 +4586,66 @@ assert.deepEqual(
   []
 );
 
+assert.equal(
+  typeof foreignKeyAddRuntime.createSqlErdAnnotationForeignKeyConversionCandidate,
+  "function"
+);
+const annotationForeignKeyConversion =
+  foreignKeyAddRuntime.createSqlErdAnnotationForeignKeyConversionCandidate({
+    annotationId: validColumnAnnotation.id,
+    dialect: "postgresql",
+    layoutJson: validColumnAnnotationResult.layoutJson,
+    modelJson: runtimeModel,
+    settingsJson: {},
+    labelDisposition: "preserve_as_relation_note"
+  });
+assert.equal(annotationForeignKeyConversion.ok, true);
+assert.deepEqual(
+  annotationForeignKeyConversion.layoutJson.annotations.links,
+  []
+);
+assert.equal(
+  annotationForeignKeyConversion.modelJson.schema.relations.some(
+    (relation) =>
+      relation.fromTableId === validColumnAnnotation.fromTableId &&
+      relation.fromColumnIds[0] === validColumnAnnotation.fromColumnId &&
+      relation.toTableId === validColumnAnnotation.toTableId &&
+      relation.toColumnIds[0] === validColumnAnnotation.toColumnId
+  ),
+  true
+);
+assert.deepEqual(annotationForeignKeyConversion.settingsJson, {
+  sqltoerdRelationNotes: {
+    [annotationForeignKeyConversion.relation.id]: "same business key"
+  }
+});
+assert.deepEqual(
+  foreignKeyAddRuntime.createSqlErdAnnotationForeignKeyConversionCandidate({
+    annotationId: validTableAnnotation.id,
+    dialect: "postgresql",
+    layoutJson: validTableAnnotationResult.layoutJson,
+    modelJson: runtimeModel,
+    settingsJson: {},
+    labelDisposition: "discard"
+  }),
+  { ok: false, reason: "annotation_not_column_link" }
+);
+assert.deepEqual(
+  foreignKeyAddRuntime.createSqlErdAnnotationForeignKeyConversionCandidate({
+    annotationId: fkConflictAnnotation.id,
+    dialect: "postgresql",
+    layoutJson: {
+      version: 1,
+      tableLayouts: annotationBaseLayout.tableLayouts,
+      annotations: { version: 1, links: [fkConflictAnnotation] }
+    },
+    modelJson: runtimeModel,
+    settingsJson: {},
+    labelDisposition: "discard"
+  }),
+  { ok: false, reason: "duplicate_relation" }
+);
+
 const stackedRelationLayout = relationShapeRuntime.getSqlErdRelationShapeLayout(
   {
     columns: [
@@ -5038,6 +5163,7 @@ assert.match(sessionPage, /window\.location\.search/);
 assert.match(sessionPage, /sql-erd-full-bleed/);
 assert.match(sessionPage, /h-screen/);
 assert.match(sessionRouteBridge, /SqlErdSessionPage as default/);
+assert.match(sessionRouteBridge, /import "tldraw\/tldraw\.css"/);
 assert.doesNotMatch(page, /-m-6/);
 assert.doesNotMatch(page, /h-\[calc\(100vh-3\.5rem\)\]/);
 
@@ -5087,9 +5213,15 @@ assert.match(sqlDiffApplyUtils, /applySqlErdNormalizedSqlPreview/);
 assert.match(sqlDiffApplyUtils, /recordSqlErdModelSqlHistory/);
 assert.match(sqlDiffApplyUtils, /undoSqlErdModelSqlHistory/);
 assert.match(sqlDiffApplyUtils, /redoSqlErdModelSqlHistory/);
+assert.match(sqlDiffApplyUtils, /layoutJson: layoutJson \?\? session\.layoutJson/);
+assert.match(sqlDiffApplyUtils, /retainSqltoerdRelationNotesForModel/);
 assert.match(panel, /NormalizedSqlPreviewDialog/);
 assert.match(panel, /normalized_sql_applied/);
 assert.match(panel, /Regenerate SQL/);
+assert.match(panel, /handlePreviewAnnotationForeignKeyConversion/);
+assert.match(panel, /onConvertAnnotationToForeignKey/);
+assert.match(inspectorUtils, /relationNote/);
+assert.match(inspectorUtils, /getSqltoerdRelationNote/);
 assert.match(
   sessionStateUtils,
   /SQL_ERD_LAYOUT_AUTOSAVE_MAX_RETRY_DELAY_MS = 30000/

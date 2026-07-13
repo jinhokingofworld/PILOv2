@@ -18,6 +18,9 @@ const { CalendarAgentToolsService } = require(
 const { MeetingAgentToolsService } = require(
   "../../dist/modules/agent/tools/meeting-agent-tools.service.js"
 );
+const { BoardAgentToolsService } = require(
+  "../../dist/modules/agent/tools/board-agent-tools.service.js"
+);
 
 const originalEnv = {
   AWS_REGION: process.env.AWS_REGION,
@@ -64,7 +67,8 @@ const payload = {
   );
   const registry = new AgentToolRegistryService(
     new CalendarAgentToolsService({}),
-    new MeetingAgentToolsService({})
+    new MeetingAgentToolsService({}),
+    new BoardAgentToolsService({})
   );
   const actualSnapshot = registry.listDefinitions().map((definition) => ({
     name: definition.name,

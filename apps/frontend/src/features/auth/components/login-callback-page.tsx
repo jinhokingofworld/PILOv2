@@ -6,6 +6,7 @@ import { AlertCircle, CheckCircle2, Loader2 } from "lucide-react";
 
 import { Card } from "@/components/ui/card";
 import {
+  getDefaultLandingPath,
   loadAuthSessionEntry,
   WorkspaceOnboardingRequiredError
 } from "@/features/auth/auth-session";
@@ -63,7 +64,11 @@ export function LoginCallbackPage() {
         });
         await waitForMotion(ENTRY_MOTION_MS);
         if (isActive) {
-          router.replace(returnTo?.startsWith("/") ? returnTo : "/home");
+          router.replace(
+            returnTo?.startsWith("/") && returnTo !== "/home"
+              ? returnTo
+              : getDefaultLandingPath(session.settings)
+          );
         }
       } catch (error) {
         if (!isActive) {

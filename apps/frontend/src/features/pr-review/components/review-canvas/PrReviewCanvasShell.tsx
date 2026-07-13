@@ -943,12 +943,15 @@ export function PrReviewCanvasShell({
                 status={conflictAnalysisStatus}
               />
               <PrReviewCanvasSurface
+                apiClient={apiClient}
                 canvas={canvas}
                 className="h-full w-full"
                 conflictAnalysis={conflictAnalysis}
                 onFileSelect={setSelectedReviewFileId}
                 preparedConflictFileIds={preparedConflictFileIds}
+                reviewRoomId={session.reviewRoomId}
                 selectedReviewFileId={selectedReviewFileId}
+                workspaceId={workspaceId}
               />
             </>
           ) : (

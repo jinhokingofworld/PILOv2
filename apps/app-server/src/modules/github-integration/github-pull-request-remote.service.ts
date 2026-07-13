@@ -289,6 +289,7 @@ export class GithubPullRequestRemoteService {
       filePath: file.filename,
       previousFilePath: file.previous_filename ?? null,
       fileName: this.getFileName(file.filename),
+      headBlobSha: file.sha ?? null,
       fileStatus: file.status,
       additions,
       deletions,

@@ -10,9 +10,5 @@ export const canvasNavigation: FeatureNavigationItem = {
   action: "캔버스 열기",
   href: "/canvas",
   icon: PanelsTopLeft,
-  items: [
-    { title: "최근 캔버스", href: "/canvas#recent" },
-    { title: "새 캔버스", href: "/canvas#new" },
-    { title: "도형 보드", href: "/canvas#board" }
-  ]
+  items: []
 };

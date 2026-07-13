@@ -91,11 +91,22 @@ export type CanvasShapeSyncQueue = {
   whenIdle: () => Promise<void>;
 };
 
+export type CanvasShapeSyncConflict = {
+  baseRevision: number | null;
+  currentRevision: number | null;
+  failedOperations: CanvasShapeSyncOperation[];
+  latestOperation: unknown;
+  latestShape: unknown;
+  operation: CanvasShapeSyncOperation;
+  shapeId: string;
+};
+
 type CanvasShapeSyncQueueOptions = {
   boardId: string;
   canvasClient: CanvasShapeApiClient;
   debounceMs?: number;
   getBaseRevision?: (shapeId: string) => number | null;
+  onConflict?: (conflict: CanvasShapeSyncConflict) => void;
   onError?: (error: unknown) => void;
   onSynced?: (operations: CanvasShapeSyncOperation[]) => void;
   workspaceId: string;
@@ -127,6 +138,10 @@ function readCanvasApiErrorStatus(error: unknown) {
   return isRecord(error) && typeof error.status === "number"
     ? error.status
     : null;
+}
+
+function readCanvasApiErrorBody(error: unknown) {
+  return isRecord(error) ? error.body : null;
 }
 
 function isNonRetryableCanvasApiError(error: unknown) {
@@ -175,6 +190,54 @@ function isNonRetryableCanvasShapeSyncError(error: unknown) {
     error instanceof CanvasShapeSyncFailure &&
     isNonRetryableCanvasApiError(error.cause)
   );
+}
+
+function readCanvasConflictDetails(error: unknown) {
+  if (readCanvasApiErrorStatus(error) !== 409) return null;
+
+  const body = readCanvasApiErrorBody(error);
+  const nestedError = isRecord(body) ? body.error : null;
+  const details = isRecord(nestedError)
+    ? nestedError.details
+    : isRecord(body)
+      ? body.details
+      : null;
+
+  return isRecord(details) ? details : null;
+}
+
+function readInteger(value: unknown) {
+  return typeof value === "number" && Number.isInteger(value) ? value : null;
+}
+
+export function readCanvasShapeSyncConflict(
+  error: unknown,
+): CanvasShapeSyncConflict | null {
+  const cause =
+    error instanceof CanvasShapeSyncFailure ? error.cause : error;
+  const failedOperations =
+    error instanceof CanvasShapeSyncFailure ? error.failedOperations : [];
+  const details = readCanvasConflictDetails(cause);
+  const operation = failedOperations[0];
+
+  if (!details || !operation) return null;
+
+  return {
+    baseRevision: readInteger(details.baseRevision),
+    currentRevision: readInteger(details.currentRevision),
+    failedOperations,
+    latestOperation: details.latestOperation ?? null,
+    latestShape: details.latestShape ?? null,
+    operation,
+    shapeId:
+      typeof details.shapeId === "string" && details.shapeId
+        ? details.shapeId
+        : operation.shapeId,
+  };
+}
+
+export function isCanvasShapeSyncConflictError(error: unknown) {
+  return readCanvasShapeSyncConflict(error) !== null;
 }
 
 function readFiniteNumber(value: unknown, fallback: number) {
@@ -596,6 +659,7 @@ export function createCanvasShapeSyncQueue({
   canvasClient,
   debounceMs = DEFAULT_CANVAS_SHAPE_SYNC_QUEUE_DEBOUNCE_MS,
   getBaseRevision,
+  onConflict,
   onError,
   onSynced,
   workspaceId,
@@ -656,6 +720,12 @@ export function createCanvasShapeSyncQueue({
       });
       onSynced?.(operations);
     } catch (error) {
+      const conflict = readCanvasShapeSyncConflict(error);
+
+      if (conflict) {
+        onConflict?.(conflict);
+      }
+
       if (isNonRetryableCanvasShapeSyncError(error)) {
         pendingOperations.clear();
         throw error;
@@ -757,6 +827,7 @@ export async function syncCanvasFreeformShapes({
   canvasClient,
   getBaseRevision,
   nextShapes,
+  onConflict,
   previousShapes,
   workspaceId,
 }: {
@@ -764,6 +835,7 @@ export async function syncCanvasFreeformShapes({
   canvasClient: CanvasShapeApiClient;
   getBaseRevision?: (shapeId: string) => number | null;
   nextShapes: CanvasFreeformShapeSnapshot[];
+  onConflict?: (conflict: CanvasShapeSyncConflict) => void;
   previousShapes: CanvasFreeformShapeSnapshot[];
   workspaceId: string;
 }) {
@@ -771,10 +843,20 @@ export async function syncCanvasFreeformShapes({
     getBaseRevision,
   });
 
-  await runCanvasShapeSyncOperations({
-    boardId,
-    canvasClient,
-    operations,
-    workspaceId,
-  });
+  try {
+    await runCanvasShapeSyncOperations({
+      boardId,
+      canvasClient,
+      operations,
+      workspaceId,
+    });
+  } catch (error) {
+    const conflict = readCanvasShapeSyncConflict(error);
+
+    if (conflict) {
+      onConflict?.(conflict);
+    }
+
+    throw error;
+  }
 }

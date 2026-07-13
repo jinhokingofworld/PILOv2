@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 import { CommonModule } from "../../common/common.module";
 import { DatabaseModule } from "../../database/database.module";
+import { BoardModule } from "../board/board.module";
 import { CalendarModule } from "../calendar/calendar.module";
 import { MeetingModule } from "../meeting/meeting.module";
 import { WorkspaceModule } from "../workspace/workspace.module";
@@ -15,6 +16,7 @@ import { AgentOutboxPublisherService } from "./agent-outbox-publisher.service";
 import { AgentPlannerService } from "./agent-planner.service";
 import { AgentService } from "./agent.service";
 import { AgentToolRegistryService } from "./agent-tool-registry.service";
+import { BoardAgentToolsService } from "./tools/board-agent-tools.service";
 import { CalendarAgentToolsService } from "./tools/calendar-agent-tools.service";
 import { MeetingAgentToolsService } from "./tools/meeting-agent-tools.service";
 
@@ -24,7 +26,8 @@ import { MeetingAgentToolsService } from "./tools/meeting-agent-tools.service";
     DatabaseModule,
     WorkspaceModule,
     CalendarModule,
-    MeetingModule
+    MeetingModule,
+    BoardModule
   ],
   controllers: [AgentController, AgentInternalController],
   providers: [
@@ -37,6 +40,7 @@ import { MeetingAgentToolsService } from "./tools/meeting-agent-tools.service";
     AgentOutboxPublisherService,
     AgentPlannerService,
     AgentToolRegistryService,
+    BoardAgentToolsService,
     CalendarAgentToolsService,
     MeetingAgentToolsService
   ]

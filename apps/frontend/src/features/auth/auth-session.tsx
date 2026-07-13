@@ -28,6 +28,10 @@ import {
   getStoredAuthSession,
   saveSelectedWorkspaceId
 } from "@/features/auth/session-storage";
+import {
+  getCurrentSettings,
+  type SettingsPayload
+} from "@/features/settings/api/client";
 
 export type AuthSessionData = {
   accessToken: string;
@@ -35,6 +39,7 @@ export type AuthSessionData = {
   workspaces: Workspace[];
   activeWorkspaceId: string;
   activeWorkspace: Workspace;
+  settings: SettingsPayload;
 };
 
 type AuthSessionContextValue = AuthSessionData & {
@@ -68,10 +73,28 @@ const DEV_PREVIEW_TIMESTAMP = "2026-07-06T00:00:00.000Z";
 const devPreviewUser: UserProfile = {
   id: DEV_PREVIEW_USER_ID,
   name: "PILO UI Preview",
+  displayName: "PILO UI Preview",
+  jobTitle: "Product Engineer",
+  bio: "PILO에서 팀의 개발 흐름과 AI 협업 경험을 설계하고 있습니다.",
   email: "preview@pilo.local",
   avatarUrl: null,
+  providerAvatarUrl: null,
+  customAvatarUrl: null,
+  avatarMode: "initials",
+  avatarColor: "#8B5CF6",
+  loginProviders: ["github"],
   createdAt: DEV_PREVIEW_TIMESTAMP,
   updatedAt: DEV_PREVIEW_TIMESTAMP
+};
+
+const devPreviewSettings: SettingsPayload = {
+  theme: "system",
+  density: "comfortable",
+  defaultWorkspaceId: null,
+  defaultLandingPage: "home",
+  restoreLastWorkspace: true,
+  createdAt: null,
+  updatedAt: null
 };
 
 const devPreviewWorkspace: Workspace = {
@@ -95,6 +118,13 @@ export function AuthGate({ children }: { children: ReactNode }) {
   });
   const readySession = state.status === "ready" ? state.session : null;
   const currentAccessToken = readySession?.accessToken ?? null;
+
+  useEffect(() => {
+    if (!readySession) {
+      return;
+    }
+    return applyAppearanceSettings(readySession.settings);
+  }, [readySession?.settings.density, readySession?.settings.theme]);
 
   useEffect(() => {
     let cancelled = false;
@@ -293,20 +323,31 @@ export async function loadAuthSessionEntry(
       user: devPreviewUser,
       workspaces: [devPreviewWorkspace],
       activeWorkspaceId: devPreviewWorkspace.id,
-      activeWorkspace: devPreviewWorkspace
+      activeWorkspace: devPreviewWorkspace,
+      settings: devPreviewSettings
     };
   }
 
-  const user = await getCurrentUser(accessToken);
-  const workspaces = await listWorkspaces(accessToken);
+  const [user, workspaces, settings] = await Promise.all([
+    getCurrentUser(accessToken),
+    listWorkspaces(accessToken),
+    getCurrentSettings(accessToken)
+  ]);
 
   if (workspaces.length === 0) {
     throw new WorkspaceOnboardingRequiredError();
   }
 
   const storedWorkspaceId = getSelectedWorkspaceId();
+  const storedWorkspace = workspaces.find(
+    (workspace) => workspace.id === storedWorkspaceId
+  );
+  const defaultWorkspace = workspaces.find(
+    (workspace) => workspace.id === settings.defaultWorkspaceId
+  );
   const activeWorkspace =
-    workspaces.find((workspace) => workspace.id === storedWorkspaceId) ??
+    (settings.restoreLastWorkspace ? storedWorkspace : null) ??
+    defaultWorkspace ??
     workspaces[0];
 
   saveSelectedWorkspaceId(activeWorkspace.id);
@@ -316,7 +357,33 @@ export async function loadAuthSessionEntry(
     user,
     workspaces,
     activeWorkspaceId: activeWorkspace.id,
-    activeWorkspace
+    activeWorkspace,
+    settings
+  };
+}
+
+export function getDefaultLandingPath(settings: SettingsPayload) {
+  return `/${settings.defaultLandingPage}`;
+}
+
+function applyAppearanceSettings(settings: SettingsPayload) {
+  const root = document.documentElement;
+  const media = window.matchMedia("(prefers-color-scheme: dark)");
+  const applyTheme = () => {
+    const isDark =
+      settings.theme === "dark" ||
+      (settings.theme === "system" && media.matches);
+    root.classList.toggle("dark", isDark);
+  };
+
+  applyTheme();
+  root.dataset.density = settings.density;
+  if (settings.theme === "system") {
+    media.addEventListener("change", applyTheme);
+  }
+
+  return () => {
+    media.removeEventListener("change", applyTheme);
   };
 }
 

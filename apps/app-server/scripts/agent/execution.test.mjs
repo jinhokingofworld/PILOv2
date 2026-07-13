@@ -20,6 +20,9 @@ const { CalendarAgentToolsService } = require(
 const { MeetingAgentToolsService } = require(
   "../../dist/modules/agent/tools/meeting-agent-tools.service.js"
 );
+const { BoardAgentToolsService } = require(
+  "../../dist/modules/agent/tools/board-agent-tools.service.js"
+);
 const { badRequest } = require("../../dist/common/api-error.js");
 
 const USER_ID = "11111111-1111-1111-1111-111111111111";
@@ -441,17 +444,66 @@ class SmokeMeetingService {
   }
 }
 
+class SmokeBoardService {
+  constructor() {
+    this.calls = [];
+    this.boards = [
+      {
+        id: "99999999-9999-4999-8999-999999999999",
+        name: "제품 개발",
+        repository: { fullName: "Developer-EJ/PILO" }
+      }
+    ];
+    this.issues = [
+      {
+        id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        issueNumber: "#729",
+        title: "Board read/search tool adapter",
+        state: "open",
+        labels: [{ name: "agent" }],
+        assignees: [{ login: "jinhokingofworld" }],
+        htmlUrl: "https://github.com/Developer-EJ/PILO/issues/729"
+      }
+    ];
+  }
+
+  async listBoards(currentUserId, workspaceId, query) {
+    this.calls.push({ method: "listBoards", currentUserId, workspaceId, query });
+    return {
+      data: this.boards,
+      meta: { page: 1, limit: 100, total: this.boards.length }
+    };
+  }
+
+  async listBoardIssues(currentUserId, workspaceId, boardId, query) {
+    this.calls.push({
+      method: "listBoardIssues",
+      currentUserId,
+      workspaceId,
+      boardId,
+      query
+    });
+    return {
+      data: this.issues,
+      meta: { page: 1, limit: query.limit, total: this.issues.length }
+    };
+  }
+}
+
 function createSmokeRegistry() {
   const calendarService = new SmokeCalendarService();
   const meetingService = new SmokeMeetingService();
+  const boardService = new SmokeBoardService();
   const registry = new AgentToolRegistryService(
     new CalendarAgentToolsService(calendarService),
-    new MeetingAgentToolsService(meetingService)
+    new MeetingAgentToolsService(meetingService),
+    new BoardAgentToolsService(boardService)
   );
 
   return {
     calendarService,
     meetingService,
+    boardService,
     registry
   };
 }
@@ -1019,10 +1071,72 @@ function formatterMeetingReport(index, overrides = {}) {
     "update_calendar_event",
     "list_meeting_reports",
     "get_meeting_report",
-    "summarize_meeting_report"
+    "summarize_meeting_report",
+    "search_board_issues"
   ]);
-  assert.equal(registry.getDefinition("search_board_issues"), null);
   assert.equal(registry.getDefinition("move_board_issue_status"), null);
+}
+
+{
+  const { registry } = createSmokeRegistry();
+  const tool = registry.getDefinition("search_board_issues");
+
+  assert.throws(
+    () => tool.validateInput({ workspaceId: "other-workspace" }),
+    (error) => {
+      assert.equal(error.getStatus(), 400);
+      assert.equal(error.getResponse().error.code, "BAD_REQUEST");
+      assert.match(error.getResponse().error.message, /workspaceId/);
+      return true;
+    }
+  );
+}
+
+{
+  const { boardService, registry } = createSmokeRegistry();
+  const { service } = createExecutionServiceWithRegistry(
+    plannerOutput({
+      toolName: "search_board_issues",
+      riskLevel: "low",
+      executionMode: "auto",
+      requiresConfirmation: false,
+      input: {}
+    }),
+    registry
+  );
+
+  const result = await service.executeLatestPlannedTool(
+    USER_ID,
+    WORKSPACE_ID,
+    RUN_ID
+  );
+
+  assert.equal(result.status, "completed");
+  assert.deepEqual(boardService.calls[1], {
+    method: "listBoardIssues",
+    currentUserId: USER_ID,
+    workspaceId: WORKSPACE_ID,
+    boardId: "99999999-9999-4999-8999-999999999999",
+    query: { page: 1, limit: 20 }
+  });
+}
+
+{
+  const { boardService, registry } = createSmokeRegistry();
+  boardService.boards.push({
+    id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    name: "운영",
+    repository: { fullName: "Developer-EJ/PILO" }
+  });
+  const tool = registry.getDefinition("search_board_issues");
+  const result = await tool.execute(
+    { currentUserId: USER_ID, workspaceId: WORKSPACE_ID, runId: RUN_ID },
+    tool.validateInput({})
+  );
+
+  assert.equal(result.status, "needs_clarification");
+  assert.equal(result.outputSummary.selection, "required");
+  assert.equal(boardService.calls.length, 1);
 }
 
 {
@@ -1135,7 +1249,7 @@ function formatterMeetingReport(index, overrides = {}) {
 }
 
 {
-  const { registry } = createSmokeRegistry();
+  const { boardService, registry } = createSmokeRegistry();
   const { loggingService, service } = createExecutionServiceWithRegistry(
     plannerOutput({
       toolName: "search_board_issues",
@@ -1143,7 +1257,7 @@ function formatterMeetingReport(index, overrides = {}) {
       executionMode: "auto",
       requiresConfirmation: false,
       input: {
-        query: "Agent"
+        search: "Agent"
       }
     }),
     registry
@@ -1155,10 +1269,10 @@ function formatterMeetingReport(index, overrides = {}) {
     RUN_ID
   );
 
-  assert.equal(result.status, "failed");
-  assert.equal(loggingService.calls[0].input.errorCode, "AGENT_TOOL_NOT_EXECUTABLE");
-  assert.equal(
-    loggingService.calls[0].input.message,
-    "요청을 처리할 수 있는 Agent 도구가 없습니다."
-  );
+  assert.equal(result.status, "completed");
+  assert.equal(boardService.calls[0].method, "listBoards");
+  assert.equal(boardService.calls[1].method, "listBoardIssues");
+  assert.match(result.run.finalAnswer, /제품 개발 Board 이슈 1개/);
+  assert.match(result.run.finalAnswer, /#729/);
+  assert.equal(loggingService.calls[1].input.outputSummary.issues[0].title, "Board read/search tool adapter");
 }

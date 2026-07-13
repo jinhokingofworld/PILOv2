@@ -154,6 +154,18 @@ body {
   }
 }
 
+html[data-density="compact"] [data-slot="card"] {
+  --card-spacing: calc(var(--spacing) * 3);
+}
+
+html[data-density="compact"] [data-slot="sidebar-menu-button"][data-size="default"] {
+  height: calc(var(--spacing) * 7);
+}
+
+html[data-density="compact"] [data-slot="sidebar-menu-button"][data-size="lg"] {
+  height: calc(var(--spacing) * 10);
+}
+
 .login-backdrop-preview {
   filter: blur(6px);
   opacity: 0.74;

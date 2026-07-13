@@ -140,6 +140,7 @@ export type PrReviewGithubSubmitStatus =
 
 export type PrReviewSession = {
   id: string;
+  reviewRoomId: string;
   pullRequestId: string;
   headSha: string;
   status: PrReviewSessionStatus;
@@ -154,6 +155,51 @@ export type PrReviewSession = {
   createdByUserId: string | null;
   createdAt: string;
   updatedAt: string;
+};
+
+export type PrReviewRoomCanvas = {
+  id: string;
+  canvasId: string;
+  currentReviewSessionId: string | null;
+  status: "active" | "completed";
+};
+
+export type PrReviewCanvasShape = {
+  id: string;
+  canvasId: string;
+  parentShapeId: string | null;
+  shapeType: string;
+  title: string | null;
+  textContent: string | null;
+  x: number;
+  y: number;
+  width: number | null;
+  height: number | null;
+  rotation: number;
+  zIndex: number;
+  rawShape: Record<string, unknown>;
+  contentHash: string;
+  revision: number;
+};
+
+export type PrReviewCanvasViewportQuery = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  margin?: number;
+};
+
+export type UpdatePrReviewCanvasFileShapeInput = {
+  parentShapeId: string | null;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  zIndex: number;
+  rawShape: Record<string, unknown>;
+  baseRevision: number;
+  clientOperationId: string;
 };
 
 export type PrReviewSummary = {
@@ -292,6 +338,7 @@ export type PrReviewFile = {
   comment: string | null;
   reviewedByUserId: string | null;
   reviewedAt: string | null;
+  decisionCarriedOver: boolean;
   flowMemberships: PrReviewFileFlowMembership[];
   latestDecision: PrReviewLatestDecision | null;
 };

@@ -6,15 +6,18 @@ API contract: `docs/api/pr-review-api.md`
 
 범위:
 
-- review session 생성, 조회, 삭제
+- PR별 공유 review room 생성, 합류, 조회, 영구 삭제
+- head SHA별 review session(revision) 생성과 조회
 - review flow, review file, diff view model
 - file review decision 저장
 - GitHub Review submission
 
 주의:
 
-- Review session은 MVP에서 리뷰 화면 동안만 유지하는 임시 작업 데이터다.
-- 사용자가 PR 리뷰 화면을 나가면 delete API로 session을 삭제한다.
+- 같은 Workspace/PR에는 공유 review room과 `board_type=review` Canvas가 하나씩 존재한다.
+- Review session은 room 안의 불변 head SHA revision이며, 분석 성공 후에만 room의 현재
+  revision으로 선택된다.
+- room 삭제는 모든 revision, 판단·제출 이력과 연결 Canvas를 함께 영구 삭제한다.
 - GitHub Review 제출은 현재 사용자의 OAuth token을 사용한다.
 
 AI 분석 환경 변수:

@@ -4,15 +4,16 @@
 
 PR Review API는 다음 기능을 담당한다.
 
-- Review session 생성, 조회, 상태 수정, 삭제
+- PR별 공유 리뷰 공간 생성, 합류, 조회, 영구 삭제
+- head SHA별 Review session(revision) 생성과 조회
 - AI가 생성한 PR 목적, 변경 요약, 주의점, flow, file review order와 검증된 semantic relation 저장과 조회
 - Review file metadata와 파일별 review decision
 - PR 리뷰 화면용 canvas view model
 - Side-by-side diff view model
 - GitHub Review 제출과 제출 이력
 
-GitHub 원본 동기화, GitHub PR 원본 조회, 자유형 캔버스 저장, GitHub inline
-comment, PR merge/close, ProjectV2 write는 이 문서의 범위가 아니다.
+GitHub 원본 동기화, GitHub PR 원본 조회, GitHub inline comment, ProjectV2 write는 이
+문서의 범위가 아니다.
 
 ## GitHub Integration과의 경계
 
@@ -24,25 +25,33 @@ comment, PR merge/close, ProjectV2 write는 이 문서의 범위가 아니다.
 | PR conflict 상태 | GitHub Integration |
 | PR conflict resolution apply commit | PR Review + GitHub Integration 내부 dependency |
 | 사용자 GitHub OAuth 연결 상태 | GitHub Integration |
-| Review session, flow, file decision, submission | PR Review |
+| Review room, revision, flow, file decision, submission | PR Review |
+| `board_type=review` Canvas와 사용자 배치 데이터 | Canvas |
 
 ## 데이터 규칙
 
-- Review session은 PR 리뷰 화면에 머무는 동안 사용하는 MVP 임시 작업 데이터다.
-- 사용자가 PR 리뷰 화면을 나가면 review session 삭제 API를 호출한다.
-- 세션 삭제 시 flow, file, semantic relation, file decision, submission history는 FK cascade로 함께 삭제된다.
+- 같은 Workspace의 같은 PR에는 공유 Review room과 `board_type=review` Canvas가 하나씩 존재한다.
+- Review session은 room 안에서 특정 PR head SHA를 분석한 불변 revision이다.
+- 분석 중 새 revision은 마지막 성공 revision을 대체하지 않는다. 분석 결과 저장이 모두 성공한 뒤에만
+  room의 `currentReviewSessionId`를 새 revision으로 교체한다.
+- 같은 room/head SHA의 `failed`가 아닌 revision은 하나만 존재하고, room당 `analyzing` revision도
+  하나만 존재한다.
+- room 삭제 시 모든 revision, flow, file, semantic relation, file decision, submission history와
+  연결된 Review Canvas가 FK cascade로 함께 영구 삭제된다.
 - `review_submissions`는 화면 안에서 제출 결과와 실패 원인을 확인하기 위한 세션 내부 이력이다.
 - `review_files`는 file metadata와 review state를 저장한다.
 - Diff 응답은 GitHub Integration을 통해 PR 변경 파일과 patch 정보를 조회해 만든다.
-- PR 리뷰 canvas는 `review_flows`, `review_files`, `review_flow_files`, `review_flow_relations`에서 생성하는 view model이다. 자유형 `canvas` 테이블에 저장하지 않는다.
+- PR 리뷰 graph view model의 원본은 `review_flows`, `review_files`, `review_flow_files`,
+  `review_flow_relations`이며, 사용자 배치와 annotation을 저장할 Review Canvas는 `canvas`에
+  `board_type=review`로 연결한다.
 - `review_flow_files`는 같은 review session에 속한 `review_flows`와 `review_files`만 연결한다.
 - `review_flow_relations`는 같은 review session과 Flow에 속한 두 `review_flow_files` membership만 연결한다.
 - GitHub Review 제출은 GitHub Integration에서 연결한 현재 사용자의 GitHub App user OAuth token으로 수행하며 review body만 제출한다.
 - 현재 GitHub PR head SHA가 session의 `headSha`와 다르면 제출을 막는다.
 - Conflict resolution apply는 현재 사용자의 GitHub App user OAuth token으로 PR head branch에
   하나 이상의 content conflict 파일을 해결한 단일 merge commit을 만든다.
-- PILO가 만든 conflict resolution apply commit에 한해서 review session의 `headSha`와
-  `conflictStatus`를 새 PR head 기준으로 갱신할 수 있다.
+- Conflict resolution apply로 새 PR head가 생겨도 기존 revision의 `headSha`는 바꾸지 않는다.
+  같은 room에 새 head SHA의 successor revision과 분석 Job을 생성한다.
 - Conflict resolution apply는 file review decision, review submission history, PR merge 상태를
   변경하지 않는다.
 
@@ -50,6 +59,8 @@ comment, PR merge/close, ProjectV2 write는 이 문서의 범위가 아니다.
 
 | Field | Values |
 | --- | --- |
+| `reviewRoom.status` | `active`, `completed` |
+| `reviewRoom.completionReason` | `merged`, `closed`, `null` |
 | `prReviewSession.status` | `analyzing`, `reviewing`, `ready_to_submit`, `submitted`, `failed`, `archived` |
 | `reviewFile.currentStatus` | `not_reviewed`, `approved`, `discussion_needed`, `unknown` |
 | `reviewFile.riskLevel` | `high`, `medium`, `low`, `unknown` |
@@ -69,11 +80,18 @@ comment, PR merge/close, ProjectV2 write는 이 문서의 범위가 아니다.
 
 | Method | Endpoint | 설명 |
 | --- | --- | --- |
-| `POST` | `/workspaces/{workspaceId}/github/pull-requests/{pullRequestId}/review-sessions` | Review session 생성 |
+| `GET` | `/workspaces/{workspaceId}/github/pull-requests/{pullRequestId}/review-room` | PR의 공유 Review room 조회 |
+| `POST` | `/workspaces/{workspaceId}/github/pull-requests/{pullRequestId}/review-room` | 공유 room 생성 또는 합류와 최신 revision 시작 |
+| `GET` | `/workspaces/{workspaceId}/github/review-rooms` | Workspace의 Review room 목록 조회 |
+| `GET` | `/workspaces/{workspaceId}/github/review-rooms/{reviewRoomId}` | Review room 상세 조회 |
+| `GET` | `/workspaces/{workspaceId}/github/review-rooms/{reviewRoomId}/revisions` | room의 revision 목록 조회 |
+| `POST` | `/workspaces/{workspaceId}/github/review-rooms/{reviewRoomId}/revisions` | 최신 PR head revision 생성 또는 재사용 |
+| `DELETE` | `/workspaces/{workspaceId}/github/review-rooms/{reviewRoomId}` | Review room과 연결 Canvas 영구 삭제 |
+| `POST` | `/workspaces/{workspaceId}/github/pull-requests/{pullRequestId}/review-sessions` | 최신 revision 생성 호환 endpoint |
 | `POST` | `/workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}/retry` | Post-MVP 실패한 비동기 분석을 새 session으로 재시도 |
 | `GET` | `/workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}` | Review session 상세 조회 |
 | `PATCH` | `/workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}` | Review session 상태 수정 |
-| `DELETE` | `/workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}` | Review session 삭제 |
+| `DELETE` | `/workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}` | 해당 revision이 속한 Review room 영구 삭제 호환 endpoint |
 | `GET` | `/workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}/summary` | PR 요약 패널 조회 |
 | `GET` | `/workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}/result` | 전체 리뷰 결과 조회 |
 | `GET` | `/workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}/canvas` | 리뷰 canvas view model 조회 |
@@ -92,7 +110,59 @@ comment, PR merge/close, ProjectV2 write는 이 문서의 범위가 아니다.
 | `GET` | `/workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}/submissions` | 제출 이력 조회 |
 | `GET` | `/workspaces/{workspaceId}/github/review-submissions/{submissionId}` | 제출 상세 조회 |
 
-## Review Session 생성
+## 공유 Review Room
+
+### PR 기준 room 조회
+
+```http
+GET /api/v1/workspaces/{workspaceId}/github/pull-requests/{pullRequestId}/review-room
+```
+
+room이 없으면 `404`를 반환한다.
+
+### room 생성 또는 합류
+
+```http
+POST /api/v1/workspaces/{workspaceId}/github/pull-requests/{pullRequestId}/review-room
+```
+
+같은 Workspace/PR room이 없으면 Review Canvas, room, 첫 revision과 분석 Job을 생성해
+`201 Created`를 반환한다. room이나 같은 head revision이 이미 있으면 재사용하며, 새 revision을
+만들지 않은 경우 `200 OK`를 반환한다.
+
+```json
+{
+  "room": {
+    "id": "review_room_uuid",
+    "workspaceId": "workspace_uuid",
+    "pullRequestId": "pull_request_uuid",
+    "canvasId": "review_canvas_uuid",
+    "currentReviewSessionId": null,
+    "analyzingReviewSessionId": "review_session_uuid",
+    "status": "active",
+    "completionReason": null,
+    "revisionCount": 1
+  },
+  "revision": {
+    "id": "review_session_uuid",
+    "reviewRoomId": "review_room_uuid",
+    "headSha": "abc123",
+    "status": "analyzing"
+  },
+  "roomCreated": true,
+  "revisionCreated": true
+}
+```
+
+### room 목록, 상세와 revision
+
+- `GET /review-rooms`는 active room을 먼저, 같은 상태에서는 최근 갱신 순으로 반환한다.
+- `GET /review-rooms/{reviewRoomId}`는 현재 성공 revision과 분석 중 revision ID를 함께 반환한다.
+- `GET /review-rooms/{reviewRoomId}/revisions`는 최신 생성 순 revision 이력을 반환한다.
+- `POST /review-rooms/{reviewRoomId}/revisions`는 현재 GitHub head를 분석한 revision을 생성하거나
+  이미 존재하는 `failed`가 아닌 revision을 반환한다. 완료 room에서는 `409`를 반환한다.
+
+## Review Session 생성 호환 endpoint
 
 ```json
 {}
@@ -104,6 +174,7 @@ comment, PR merge/close, ProjectV2 write는 이 문서의 범위가 아니다.
 ```json
 {
   "id": "review_session_uuid",
+  "reviewRoomId": "review_room_uuid",
   "pullRequestId": "pull_request_uuid",
   "headSha": "abc123",
   "status": "analyzing",
@@ -124,15 +195,16 @@ comment, PR merge/close, ProjectV2 write는 이 문서의 범위가 아니다.
 - 생성 시 GitHub Integration API로 PR 상세와 conflict 상태를 조회한다. 변경 파일과
   patch 조회, OpenAI 분석은 HTTP 요청 경로에서 수행하지 않는다.
 - 생성 시점의 `headSha`를 저장한다.
-- session row와 `pr_review_analysis_jobs` row는 하나의 DB transaction으로 저장한다.
+- 첫 요청이면 `board_type=review` Canvas와 room, session, `pr_review_analysis_jobs` row를 하나의
+  DB transaction으로 저장한다.
   `pr_review_analysis_jobs`는 job 자체와 durable outbox 발행 상태를 함께 보관하므로 별도
   outbox table을 만들지 않는다.
 - transaction이 끝난 뒤 outbox publisher가 전용 SQS에 job을 발행한다. 발행 실패는 HTTP
   응답을 실패로 바꾸지 않으며, session은 `analyzing`으로 남아 발행 재시도 또는 terminal
   failure를 기다린다.
-- 같은 사용자와 PR 조합에 이미 `analyzing` session이 있으면 새 job을 만들지 않는다.
-  기존 session을 `200 OK`로 반환한다. `reviewing`, `failed` 등 terminal session은 이 규칙의
-  대상이 아니므로 새 session 생성이 가능하다.
+- 같은 room에 `analyzing` session이 있거나 같은 head SHA의 `failed`가 아닌 session이 있으면
+  새 job을 만들지 않고 기존 session을 `200 OK`로 반환한다. 이 규칙은 사용자별이 아니라
+  Workspace의 공유 room 기준이다.
 - `OPENAI_API_KEY` 누락, provider 오류, output 검증 오류를 deterministic fallback으로
   숨기지 않는다. 정해진 재시도 횟수가 소진되면 session을 `failed`로 전환한다.
 - Diff 생성에 필요한 patch는 Worker가 인증된 내부 handoff로 App Server에서 받아오며 SQS
@@ -494,12 +566,12 @@ prompt, 동기 호출 방식은 변경하지 않는다.
 `ANALYSIS_INPUT_INVALID`로 terminal 처리한다. 비동기 PR 분석에는 deterministic fallback을
 사용하지 않는다.
 
-## Review Session 삭제
+## Review Room 영구 삭제
 
-사용자가 PR 리뷰 화면을 나갈 때 호출한다.
+모든 Workspace 구성원이 공유 리뷰 공간을 영구 삭제할 때 호출한다.
 
 ```http
-DELETE /api/v1/workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}
+DELETE /api/v1/workspaces/{workspaceId}/github/review-rooms/{reviewRoomId}
 ```
 
 응답:
@@ -515,10 +587,13 @@ DELETE /api/v1/workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}
 
 삭제 규칙:
 
-- `review_flows`, `review_files`, `review_flow_files`, `review_flow_relations`는 session 삭제와 함께 삭제된다.
+- room의 모든 revision과 `review_flows`, `review_files`, `review_flow_files`,
+  `review_flow_relations`가 함께 삭제된다.
 - `file_review_decisions`는 `review_files` 삭제에 의해 함께 삭제된다.
-- `review_submissions`는 session 삭제와 함께 삭제된다.
-- PR Review canvas는 자유형 `canvas` 테이블에 저장하지 않으므로 별도 canvas 삭제 작업은 없다.
+- `review_submissions`는 revision 삭제와 함께 삭제된다.
+- 연결된 Review Canvas와 shape, operation, user state도 함께 삭제된다.
+- `DELETE /review-sessions/{reviewSessionId}`는 전환 기간의 호환 endpoint이며 해당 revision 하나가
+  아니라 그 revision이 속한 room 전체를 같은 방식으로 삭제한다.
 
 ## PR 요약 패널 조회
 
@@ -612,6 +687,41 @@ GitHub Review 제출 가능 여부를 막는 hard guard가 아니다. `not_revie
 리뷰 canvas endpoint는 PR 리뷰 화면용 graph를 반환한다. 자유형 Canvas API와
 분리된 view model이다.
 
+Review room의 Canvas에는 다음 시스템 shape 계약을 사용한다.
+
+### `pr_review_file_node`
+
+- stable shape ID: `shape:pr-review-file:{roomFileId}`
+- identity: `reviewRoomId`, `roomFileId`
+- 현재 버전 참조: `currentReviewSessionId`, `reviewFileId`
+- PR Review 소유 metadata: file path/status, role, risk, review status, Conflict 상태
+- Canvas 소유 geometry: 위치, 크기, parent/group, 표시 순서
+
+기존 session graph 호환 필드인 `reviewSessionId`, `reviewFlowFileId`, `flowId`,
+`workflowOrder`는 Materialization 전환 기간에 유지한다. 새 버전에서 같은 room file은
+같은 stable shape ID와 저장된 geometry를 재사용한다.
+
+### `pr_review_relation_edge`
+
+- stable shape ID는 room file pair와 relation type으로 결정한다.
+- identity: `reviewRoomId`, `currentReviewSessionId`, `fromRoomFileId`, `toRoomFileId`
+- relation metadata: `relationType`, `source`, `confidence`, `reason`
+- endpoint와 relation metadata, edge geometry는 PR Review가 소유한다.
+
+일반 사용자는 시스템 shape를 생성·삭제할 수 없다. File node의 geometry만 변경할 수
+있고 relation edge는 수정할 수 없다. 분석 성공 시 PR Review가 graph와 같은 transaction
+안에서 시스템 shape를 생성·갱신한다. 같은 room file은 기존 위치·크기·parent·표시 순서를
+유지하고 새 file node만 deterministic grid 초기 위치를 받는다. 현재 버전에서 사라진
+시스템 shape는 soft delete로 숨기며, 이후 다시 나타나면 마지막 geometry로 복원한다.
+
+Review Canvas frontend는 room 상세의 `canvasId`로 Canvas viewport Shape API를 호출한다.
+저장된 `pr_review_file_node`가 있으면 시스템 Shape를 우선 렌더링하고, Materialization 전
+기존 session처럼 저장 Shape가 없거나 조회에 실패하면 이 endpoint의 graph로 read-only
+layout을 구성한다. File node 이동은 Canvas 단일 Shape 수정 API에 `baseRevision`을 포함해
+저장하며, relation edge geometry는 저장 요청을 만들지 않고 이동한 node 위치를 따라
+클라이언트에서 다시 계산한다. `409 CONFLICT` 응답 시 최신 Shape를 다시 조회해 화면을
+저장 상태로 복구한다.
+
 ```json
 {
   "reviewSessionId": "review_session_uuid",
@@ -691,8 +801,12 @@ semantic edge가 없는 기존 session 또는 Flow는 기존 `workflowOrder` 인
 `relationType: review_order`, `source: fallback`, `confidence: 100`으로 연결한다.
 semantic relation은 새 분석 session부터 저장하며 기존 완료 session을 backfill하지 않는다.
 
-PR Review schema에는 `canvas_id`, `canvas_shape_id`,
-`canvas_freeform_shapes` 관계가 없다.
+Review room은 `pr_review_rooms.canvas_id`로 `board_type=review` Canvas와 연결된다.
+session graph row에는 Canvas shape ID나 geometry를 저장하지 않는다. 시스템 shape ID는
+room file identity와 relation identity에서 계산하고 geometry는 `canvas_freeform_shapes`가
+소유한다. graph 저장, 시스템 shape materialization, 분석 성공 처리와
+`room.current_session_id` 교체는 하나의 DB transaction이다. materialization이 실패하면
+전체 transaction을 rollback해 기존 current session과 Canvas를 유지한다.
 
 ## Flow 목록 조회
 
@@ -783,6 +897,7 @@ PR Review schema에는 `canvas_id`, `canvas_shape_id`,
     "comment": null,
     "reviewedByUserId": null,
     "reviewedAt": null,
+    "decisionCarriedOver": false,
     "flowMemberships": [
       {
         "reviewFlowFileId": "review_flow_file_uuid",
@@ -795,6 +910,12 @@ PR Review schema에는 `canvas_id`, `canvas_shape_id`,
   }
 }
 ```
+
+새 head 분석에서 같은 room file의 `headBlobSha`가 이전 current session과 같고 원본 판단
+이력이 있으면 상태, comment, 판단자와 판단 시각을 계승한다. 이때
+`decisionCarriedOver=true`이며 새 `file_review_decisions` 행은 만들지 않는다. 사용자가 새
+버전에서 판단을 저장하면 `decisionCarriedOver=false`로 바뀐다. SHA가 다르거나 `null`이면
+`not_reviewed`로 시작한다.
 
 ## Diff View Model
 

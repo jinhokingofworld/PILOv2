@@ -30,6 +30,7 @@ const MAX_MEETING_LIST_TEXT_LENGTH = 240;
 const MAX_MEETING_DETAIL_TEXT_LENGTH = 800;
 const MAX_ACTION_ITEMS = 5;
 const MAX_ACTION_ITEM_TEXT_LENGTH = 240;
+const MAX_BOARD_TITLE_LENGTH = 160;
 
 const MEETING_SECTIONS: readonly MeetingSectionDefinition[] = [
   {
@@ -76,9 +77,78 @@ export function buildAgentReadResultAnswer(
     case "get_meeting_report":
     case "summarize_meeting_report":
       return formatMeetingReportDetail(input) ?? buildGenericAnswer(input);
+    case "search_board_issues":
+      return formatBoardIssues(input) ?? buildGenericAnswer(input);
     default:
       return buildGenericAnswer(input);
   }
+}
+
+function formatBoardIssues(input: AgentReadResultFormatterInput): string | null {
+  const selection = readString(input.outputSummary.selection);
+  const boardsValue = input.outputSummary.boards;
+  const boards = Array.isArray(boardsValue)
+    ? boardsValue.filter(isPlainObject)
+    : [];
+
+  if (selection === "none") {
+    return "조회할 Board가 없습니다.";
+  }
+
+  if (selection === "required") {
+    const candidates = boards
+      .map((board) => {
+        const name = boundText(board.name, 120);
+        const repository = boundText(board.repository, 160);
+        return name ? (repository ? `${name} · ${repository}` : name) : null;
+      })
+      .filter((value): value is string => value !== null)
+      .slice(0, MAX_LIST_ITEMS);
+    const answer = ["조회할 Board를 정확히 지정해 주세요."];
+    if (candidates.length > 0) {
+      answer.push(...candidates.map((candidate) => `- ${candidate}`));
+    }
+    return answer.join("\n");
+  }
+
+  if (selection !== "selected") {
+    return null;
+  }
+
+  const board = isPlainObject(input.outputSummary.board)
+    ? input.outputSummary.board
+    : null;
+  const boardName = board ? boundText(board.name, 120) : null;
+  const issuesValue = input.outputSummary.issues;
+  if (!Array.isArray(issuesValue)) {
+    return null;
+  }
+  const issues = issuesValue.filter(isPlainObject);
+  const total = Math.max(readCount(input.outputSummary.count) ?? 0, issues.length);
+  const prefix = boardName ? `${boardName} Board` : "Board";
+  if (total === 0) {
+    return `${prefix}에서 조건에 맞는 이슈가 없습니다.`;
+  }
+  const lines = issues
+    .map((issue) => formatBoardIssue(issue))
+    .filter((line): line is string => line !== null)
+    .slice(0, MAX_LIST_ITEMS);
+  if (lines.length === 0) {
+    return null;
+  }
+  const answer = [`${prefix} 이슈 ${total}개입니다.`, ...lines.map((line) => `- ${line}`)];
+  appendOmittedCount(answer, total, lines.length, "이슈");
+  return answer.join("\n");
+}
+
+function formatBoardIssue(issue: AgentJsonObject): string | null {
+  const issueNumber = boundText(issue.issueNumber, 40);
+  const title = boundText(issue.title, MAX_BOARD_TITLE_LENGTH);
+  if (!issueNumber || !title) {
+    return null;
+  }
+  const state = readString(issue.state);
+  return `${issueNumber} · ${title}${state ? ` · ${state}` : ""}`;
 }
 
 function formatCalendarEvents(

@@ -147,6 +147,8 @@ Workspace 조회 API의 payload에는 현재 사용자의 role이 포함된다.
   "user": {
     "id": "user_uuid",
     "name": "PILO User",
+    "jobTitle": "Frontend Developer",
+    "bio": "PILO 프로젝트를 개발하고 있습니다.",
     "email": "member@example.com",
     "avatarUrl": null,
     "activeWorkspaceId": "workspace_uuid",
@@ -155,7 +157,10 @@ Workspace 조회 API의 payload에는 현재 사용자의 role이 포함된다.
 }
 ```
 
-`activeWorkspaceId`와 `lastSeenAt`은 Home 멤버 presence 표시용 필드다. 같은 Workspace를 보고 있는지 판단하기 위해 사용하며, 실시간 접속 보장값은 아니다.
+`name`, `jobTitle`, `bio`, `avatarUrl`은 User API와 같은 profile override 및 fallback
+규칙을 사용한다. `activeWorkspaceId`와 `lastSeenAt`은 Home 멤버 presence 표시용
+필드다. 같은 Workspace를 보고 있는지 판단하기 위해 사용하며, 실시간 접속
+보장값은 아니다.
 
 ### Invitation Payload
 
@@ -203,6 +208,8 @@ GET /api/v1/workspaces/{workspaceId}/members
       "user": {
         "id": "owner_user_uuid",
         "name": "Owner",
+        "jobTitle": "Product Owner",
+        "bio": "Workspace를 운영하고 있습니다.",
         "email": "owner@example.com",
         "avatarUrl": null,
         "activeWorkspaceId": "workspace_uuid",

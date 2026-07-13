@@ -8,6 +8,8 @@ Workspace API는 PILO 도메인 API가 공유하는 Workspace 경계와 Workspac
 - 현재 사용자의 owner Workspace 생성
 - 현재 사용자가 접근 가능한 Workspace 목록 조회
 - Workspace 상세 조회와 접근 확인
+- Workspace owner의 이름·아이콘 수정
+- Workspace owner의 Workspace 삭제
 
 Workspace 역할/멤버십과 email 초대 모델은
 [workspace-membership-api.md](workspace-membership-api.md)를 따른다.
@@ -29,6 +31,9 @@ Workspace 역할/멤버십과 email 초대 모델은
   `workspaceId`로 사용한다.
 - 도메인 API는 request body의 `workspaceId`, `userId`를 신뢰하지 않는다.
 - Workspace 접근 확인은 각 도메인에서 임시로 구현하지 않고 공통 layer를 사용한다.
+- Workspace 이름·아이콘 수정과 삭제는 owner membership만 허용한다.
+- Workspace 삭제는 DB의 Workspace FK cascade뿐 아니라 GitHub installation, object
+  storage, 실행 중인 background job 같은 외부 lifecycle을 함께 확인해야 한다.
 
 ## API 목록
 
@@ -37,6 +42,8 @@ Workspace 역할/멤버십과 email 초대 모델은
 | `POST` | `/workspaces` | 현재 사용자의 owner Workspace 생성 |
 | `GET` | `/workspaces` | 현재 사용자가 접근 가능한 Workspace 목록 조회 |
 | `GET` | `/workspaces/{workspaceId}` | Workspace 상세 조회와 접근 확인 |
+| `PATCH` | `/workspaces/{workspaceId}` | Owner의 Workspace 이름·아이콘 수정 |
+| `DELETE` | `/workspaces/{workspaceId}` | Owner의 Workspace 삭제 |
 
 ## Workspace Payload
 
@@ -170,6 +177,97 @@ GET /api/v1/workspaces/{workspaceId}
 - 현재 사용자가 접근할 수 없는 Workspace면 `403 FORBIDDEN`을 반환한다.
 - 이 endpoint는 프론트와 도메인 API가 Workspace 접근 가능 여부를 확인하는 기준으로 사용할 수 있다.
 
+## Workspace 수정
+
+```http
+PATCH /api/v1/workspaces/{workspaceId}
+Content-Type: application/json
+```
+
+Request Body:
+
+```json
+{
+  "name": "PILO Core Team",
+  "icon": "🚀"
+}
+```
+
+`name`, `icon`은 optional이며 지원 필드가 하나 이상 있어야 한다.
+`icon: null`은 저장된 아이콘을 비운다.
+
+응답:
+
+```json
+{
+  "success": true,
+  "data": {
+    "id": "workspace_uuid",
+    "name": "PILO Core Team",
+    "icon": "🚀",
+    "ownerUserId": "user_uuid",
+    "role": "owner",
+    "isOwner": true,
+    "createdAt": "2026-07-04T00:00:00.000Z",
+    "updatedAt": "2026-07-13T00:00:00.000Z"
+  }
+}
+```
+
+서버 규칙:
+
+- 현재 사용자가 해당 Workspace owner가 아니면 `403 FORBIDDEN`을 반환한다.
+- `name`은 trim 후 1자 이상 100자 이하여야 한다.
+- `icon`은 `null` 또는 trim 후 1자 이상 32자 이하여야 한다.
+- 성공 시 갱신된 Workspace payload를 반환한다.
+
+## Workspace 삭제
+
+```http
+DELETE /api/v1/workspaces/{workspaceId}
+Content-Type: application/json
+```
+
+Request Body:
+
+```json
+{
+  "confirmationName": "PILO Team"
+}
+```
+
+응답:
+
+```json
+{
+  "success": true,
+  "data": {
+    "deleted": true,
+    "workspaceId": "workspace_uuid"
+  }
+}
+```
+
+서버 규칙:
+
+- 현재 사용자가 해당 Workspace owner가 아니면 `403 FORBIDDEN`을 반환한다.
+- `confirmationName`이 현재 Workspace 이름과 정확히 일치하지 않으면
+  `400 BAD_REQUEST`를 반환한다.
+- Owner 본인 외의 member가 한 명이라도 남아 있으면 `409 CONFLICT`를 반환한다.
+  Frontend는 삭제 확인창에 멤버를 먼저 제거하라는 경고를 표시한다.
+- active GitHub App installation, 진행 중인 Meeting, `queued` 또는 `running` GitHub
+  sync run이 있으면 `409 CONFLICT`를 반환하고 Workspace를 삭제하지 않는다.
+- 삭제 transaction은 `workspaces` row를 삭제하고 Workspace FK의
+  `ON DELETE CASCADE`에 따라 membership, invitation과 domain row를 함께 삭제한다.
+- `users.active_workspace_id`와 `user_settings.default_workspace_id`는
+  `ON DELETE SET NULL`로 비워진다.
+- DB 밖의 object가 있으면 삭제 성공 전에 cleanup 또는 durable cleanup enqueue가
+  완료되어야 한다. cleanup 준비에 실패하면 Workspace DB row를 삭제하지 않는다.
+- 응답이나 로그에 provider token, secret, object storage credential을 노출하지 않는다.
+- 삭제 성공 뒤 Frontend는 AuthSession의 Workspace 목록을 새로고침한다. 다른 접근
+  가능 Workspace가 있으면 그 Workspace로 이동하고, 없으면 Workspace 생성
+  onboarding으로 이동한다.
+
 ## 도메인 API 사용 규칙
 
 모든 `/workspaces/{workspaceId}/...` 도메인 API는 요청 처리 전에 공통
@@ -193,11 +291,11 @@ WHERE id = :resourceId
 | name | trim 후 1자 이상 100자 이하 |
 | icon | optional, `null` 또는 trim 후 1자 이상 32자 이하 |
 | 접근 확인 | 모든 Workspace path API에서 필수 |
+| 수정·삭제 | owner membership 필수 |
+| 삭제 확인 | `confirmationName`이 현재 Workspace 이름과 일치 |
 
 ## MVP 제외
 
-- Workspace 삭제
-- Workspace 이름 수정
 - Workspace 소유권 이전
 - admin role
 - read-only role 판정

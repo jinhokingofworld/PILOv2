@@ -9,8 +9,16 @@ export type WorkspaceInvitationStatus =
 export type UserProfile = {
   id: string;
   name: string | null;
+  displayName: string;
+  jobTitle: string | null;
+  bio: string | null;
   email: string | null;
   avatarUrl: string | null;
+  providerAvatarUrl: string | null;
+  customAvatarUrl: string | null;
+  avatarMode: "provider" | "custom" | "initials";
+  avatarColor: string;
+  loginProviders: LoginProvider[];
   createdAt: string;
   updatedAt: string;
 };
@@ -39,6 +47,8 @@ export type WorkspaceMember = {
     id: string;
     name: string | null;
     email: string | null;
+    jobTitle: string | null;
+    bio: string | null;
     avatarUrl: string | null;
     activeWorkspaceId: string | null;
     lastSeenAt: string | null;
@@ -228,6 +238,32 @@ export async function createWorkspace(
     body: input,
     method: "POST"
   });
+}
+
+export async function updateWorkspace(
+  accessToken: string,
+  workspaceId: string,
+  input: { icon: string | null; name: string }
+) {
+  return requestJson<Workspace>(
+    `/workspaces/${encodeURIComponent(workspaceId)}`,
+    { accessToken, body: input, method: "PATCH" }
+  );
+}
+
+export async function deleteWorkspace(
+  accessToken: string,
+  workspaceId: string,
+  confirmationName: string
+) {
+  return requestJson<{ deleted: true; workspaceId: string }>(
+    `/workspaces/${encodeURIComponent(workspaceId)}`,
+    {
+      accessToken,
+      body: { confirmationName },
+      method: "DELETE"
+    }
+  );
 }
 
 export async function listWorkspaceMembers(

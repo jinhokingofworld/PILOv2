@@ -10,6 +10,7 @@ const currentUserId = "11111111-1111-4111-8111-111111111111";
 const workspaceId = "22222222-2222-4222-8222-222222222222";
 const reviewSessionId = "33333333-3333-4333-8333-333333333333";
 const pullRequestId = "44444444-4444-4444-8444-444444444444";
+const reviewRoomId = "55555555-5555-4555-8555-555555555555";
 
 class FakeDatabase {
   constructor(queryOneRows) {
@@ -20,6 +21,11 @@ class FakeDatabase {
   async queryOne(text, values = []) {
     this.queries.push({ text, values });
     return this.queryOneRows.shift() ?? null;
+  }
+
+  async execute(text, values = []) {
+    this.queries.push({ text, values });
+    return { rows: [] };
   }
 }
 
@@ -78,6 +84,7 @@ class FakeGithubDependency {
 function sessionRow(overrides = {}) {
   return {
     id: reviewSessionId,
+    room_id: reviewRoomId,
     pull_request_id: pullRequestId,
     created_by_user_id: currentUserId,
     head_sha: "head-sha",

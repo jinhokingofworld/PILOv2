@@ -77,7 +77,21 @@ const appSidebar = await readFile(
   "utf8"
 );
 const appSettingsDialog = await readFile(
-  new URL("../src/components/app-settings-dialog.tsx", import.meta.url),
+  new URL(
+    "../src/features/settings/components/user-settings-dialog.tsx",
+    import.meta.url
+  ),
+  "utf8"
+);
+const settingsApiClient = await readFile(
+  new URL("../src/features/settings/api/client.ts", import.meta.url),
+  "utf8"
+);
+const memberProfileDialog = await readFile(
+  new URL(
+    "../src/features/home/components/member-profile-dialog.tsx",
+    import.meta.url
+  ),
   "utf8"
 );
 const workspaceCreationRoute = await readFile(
@@ -344,6 +358,14 @@ const featurePages = await Promise.all(
   ].map((path) => readFile(new URL(path, import.meta.url), "utf8"))
 );
 const navigation = navigationFiles.join("\n");
+const featureNavigation = await readFile(
+  new URL("../src/features/navigation.ts", import.meta.url),
+  "utf8"
+);
+const canvasNavigationSource = await readFile(
+  new URL("../src/features/canvas/navigation.ts", import.meta.url),
+  "utf8"
+);
 const routes = routePages.join("\n");
 const pages = featurePages.join("\n");
 const deprecatedCanvasTokenEnv = "NEXT_PUBLIC_PILO_" + "ACCESS_TOKEN";
@@ -355,6 +377,9 @@ assert.match(navigation, /Board/);
 assert.match(navigation, /PR review/);
 assert.match(navigation, /Voice meeting/);
 assert.match(navigation, /Canvas/);
+assert.match(featureNavigation, /meetingNavigation,[\s\S]*canvasNavigation,[\s\S]*driveNavigation/);
+assert.match(canvasNavigationSource, /items:\s*\[\]/);
+assert.doesNotMatch(canvasNavigationSource, /최근 캔버스|새 캔버스|도형 보드/);
 assert.match(githubApiClient, /\/api\/v1/);
 assert.match(githubApiClient, /NEXT_PUBLIC_PILO_APP_SERVER_URL/);
 assert.match(authApiClient, /\/auth\/\$\{provider\}\/start/);
@@ -450,13 +475,16 @@ assert.doesNotMatch(appSidebar, /Design Team/);
 assert.doesNotMatch(appSidebar, /Review Lab/);
 assert.match(appSidebar, /router\.push\("\/workspace\/new"\)/);
 assert.match(appSidebar, /canManageWorkspace=\{activeWorkspace\.role === "owner"\}/);
-assert.match(appSettingsDialog, /id: "workspace"/);
-assert.match(appSettingsDialog, /canManageWorkspace \?/);
-assert.match(appSettingsDialog, /Owner 전용 설정입니다/);
-assert.match(appSettingsDialog, /id: "github"/);
-assert.match(appSettingsDialog, /MOCK_GITHUB_CONNECTIONS/);
+assert.match(appSettingsDialog, /value="workspace"/);
 assert.match(appSettingsDialog, /disabled=\{!canManageWorkspace\}/);
-assert.match(appSettingsDialog, /canManageWorkspace \? "연결 관리" : "조회 전용"/);
+assert.match(appSettingsDialog, /Workspace 삭제/);
+assert.match(appSettingsDialog, /Member는 Workspace 정보를 조회만 할 수 있습니다/);
+assert.doesNotMatch(appSettingsDialog, /MOCK_GITHUB_CONNECTIONS/);
+assert.match(settingsApiClient, /\/me\/settings/);
+assert.match(settingsApiClient, /\/me\/profile/);
+assert.match(settingsApiClient, /deleteCurrentAccount/);
+assert.match(appSettingsDialog, /githubContent: ReactNode/);
+assert.match(appSettingsDialog, /\{githubContent\}/);
 assert.match(workspaceCreationRoute, /WorkspaceCreationPage/);
 assert.match(
   headerNotificationDropdown,
@@ -478,14 +506,48 @@ assert.match(appSidebar, /avatarUrl: authSession\.user\.avatarUrl/);
 assert.match(appSidebar, /src=\{displayUser\.avatarUrl \|\| undefined\}/);
 assert.match(appSidebar, /group-data-\[collapsible=icon\]:justify-center/);
 assert.match(appSidebar, /group-data-\[collapsible=icon\]:hidden/);
+assert.match(appSidebar, /group-data-\[collapsible=icon\]:mx-auto/);
+assert.match(appSidebar, /group-data-\[collapsible=icon\]:w-8/);
 assert.doesNotMatch(appSidebar, /\{item\.description\}/);
-assert.match(appSidebar, /AppSettingsDialog/);
+assert.doesNotMatch(appSidebar, /ProfileDialog/);
+assert.doesNotMatch(appSidebar, /AccountDialog/);
+assert.match(appSidebar, /SettingsDialog/);
+assert.doesNotMatch(appSidebar, /openUserDialog/);
 assert.match(appSidebar, /setIsSettingsDialogOpen\(true\)/);
+assert.match(appSidebar, /open=\{isSettingsDialogOpen\}/);
 assert.match(appSettingsDialog, /DialogContent/);
-assert.match(appSettingsDialog, /SETTINGS_TABS/);
-assert.match(appSettingsDialog, /aria-label="설정 메뉴"/);
-assert.match(appSettingsDialog, /MOCK_SESSIONS/);
-assert.match(appSettingsDialog, /현재 설정 데이터와 동작은 목업입니다/);
+assert.doesNotMatch(appSettingsDialog, /export function ProfileDialog/);
+assert.doesNotMatch(appSettingsDialog, /export function AccountDialog/);
+assert.match(appSettingsDialog, /export function SettingsDialog/);
+assert.match(appSettingsDialog, /<TabsContent value="profile">/);
+assert.match(appSettingsDialog, /<TabsContent value="account">/);
+assert.match(appSettingsDialog, /<TabsContent value="github">/);
+assert.match(appSettingsDialog, /max-h-\[44rem\]/);
+assert.doesNotMatch(appSettingsDialog, /DIALOG_VIEWS/);
+assert.doesNotMatch(appSettingsDialog, /aria-label="사용자 메뉴"/);
+assert.doesNotMatch(appSettingsDialog, /MOCK_CURRENT_SESSION/);
+assert.doesNotMatch(appSettingsDialog, /value="security"/);
+assert.match(appSettingsDialog, /API 연결됨/);
+assert.match(appSettingsDialog, /updateCurrentSettings/);
+assert.match(appSettingsDialog, /updateCurrentProfile/);
+assert.match(appSettingsDialog, /deleteCurrentAccount/);
+assert.match(appSettingsDialog, /updateWorkspace/);
+assert.match(appSettingsDialog, /deleteWorkspace/);
+assert.match(appSettingsDialog, /workspaceDeleteError/);
+assert.match(appSettingsDialog, /role="alert"/);
+assert.match(appSettingsDialog, /계정 탈퇴/);
+assert.doesNotMatch(appSettingsDialog, /프로필 편집/);
+assert.doesNotMatch(appSettingsDialog, /파일 업로드 없이/);
+assert.match(appSettingsDialog, /URL 이미지/);
+assert.match(appSettingsDialog, /setCustomAvatarUrl/);
+assert.match(memberProfileDialog, /export function MemberProfileDialog/);
+assert.match(memberProfileDialog, /member\.user\.name/);
+assert.match(memberProfileDialog, /member\.user\.lastSeenAt/);
+assert.match(memberProfileDialog, /member\.user\.jobTitle/);
+assert.match(memberProfileDialog, /member\.user\.bio/);
+assert.match(memberProfileDialog, /canRemoveSelectedMember/);
+assert.match(memberProfileDialog, /member\.role !== "owner"/);
+assert.match(memberProfileDialog, /max-w-4xl/);
 assert.match(canvasClientFacade, /const DEFAULT_CANVAS_MODE = "api"/);
 assert.match(canvasClientFacade, /createCanvasApiClient\(options\)/);
 assert.match(canvasClientFacade, /createMockCanvasClient\(\)/);
@@ -590,7 +652,21 @@ assert.match(canvasViewportQueries, /isPiloFrameCollapsed/);
 assert.match(canvasViewportQueries, /mergeFrameChildren/);
 assert.match(canvasViewportQueries, /getShapeDetail/);
 assert.match(canvasViewportQueries, /CANVAS_SHAPE_DETAIL_MIN_ZOOM/);
+assert.match(canvasViewportQueries, /createViewportShapeLoadBounds/);
+assert.match(canvasViewportQueries, /doesLoadedViewportCoverBounds/);
+assert.match(canvasViewportQueries, /MAX_LOADED_VIEWPORT_BOUNDS = 24/);
+assert.match(canvasViewportQueries, /loadedViewportBoundsRef/);
+assert.match(canvasViewportQueries, /currentLoadedViewport\.bounds\.some/);
 assert.match(canvasRuntimeUtils, /DEFAULT_VIEWPORT_SHAPE_LOAD_MARGIN/);
+assert.match(canvasRuntimeUtils, /DEFAULT_VIEW_SETTING_SYNC_DEBOUNCE_MS = 3_000/);
+assert.match(
+  canvasRuntimeUtils,
+  /DEFAULT_VIEWPORT_SHAPE_LOAD_DEBOUNCE_MS = 700/,
+);
+assert.match(canvasRuntimeUtils, /CANVAS_VIEWPORT_SHAPE_QUERY_GRID_SIZE = 1_000/);
+assert.match(canvasRuntimeUtils, /Math\.floor\(value \/ CANVAS_VIEWPORT_SHAPE_QUERY_GRID_SIZE\)/);
+assert.match(canvasRuntimeUtils, /Math\.round\(bounds\.zoom \* 4\) \/ 4/);
+assert.doesNotMatch(canvasRuntimeUtils, /round\(bounds\.x\)/);
 assert.match(canvasViewSettingPersistence, /storageMode === "api"/);
 assert.match(canvasViewSettingPersistence, /updateViewSetting/);
 assert.match(canvasShapePersistence, /writeCanvasStorage\([\s\S]*"freeform-shapes"/);
@@ -684,6 +760,14 @@ assert.match(piloTldrawCanvas, /editingShapeId/);
 assert.match(piloTldrawCanvas, /editingMode/);
 assert.match(piloTldrawCanvas, /RemoteCursorOverlay/);
 assert.match(piloTldrawCanvas, /CanvasRemotePresenceProvider/);
+assert.match(piloTldrawCanvas, /CanvasRealtimePreviewApplier/);
+assert.match(piloTldrawCanvas, /handleRealtimePreviewDraftChange/);
+assert.match(piloTldrawCanvas, /claimShapeLocks/);
+assert.match(piloTldrawCanvas, /releaseShapeLocks/);
+assert.match(piloTldrawCanvas, /clearShapePreview/);
+assert.match(piloTldrawCanvas, /remoteShapeLocks/);
+assert.match(piloTldrawCanvas, /remoteShapePreviews/);
+assert.match(piloTldrawCanvas, /resolveRealtimePreviewSnapshot/);
 assert.match(piloTldrawCanvas, /syncFreeformShapesIncrementally/);
 assert.match(piloTldrawCanvas, /editor\.updateShapes\(shapesToUpdate/);
 assert.match(piloTldrawCanvas, /removeStaleSerializedArrowBindings/);
@@ -697,6 +781,17 @@ assert.match(canvasRealtimeTypes, /CanvasPresenceViewport/);
 assert.match(canvasRealtimeTypes, /"canvas:operation"/);
 assert.match(canvasRealtimeTypes, /"canvas:sync:required"/);
 assert.match(canvasRealtimeTypes, /"canvas:presence:update"/);
+assert.match(canvasRealtimeTypes, /"canvas:shape:lock:claim"/);
+assert.match(canvasRealtimeTypes, /"canvas:shape:lock:accepted"/);
+assert.match(canvasRealtimeTypes, /"canvas:shape:lock:rejected"/);
+assert.match(canvasRealtimeTypes, /"canvas:shape:lock:update"/);
+assert.match(canvasRealtimeTypes, /"canvas:shape:preview"/);
+assert.match(canvasRealtimeTypes, /"canvas:shape:preview:clear"/);
+assert.match(canvasPresenceHook, /remoteShapeLocks/);
+assert.match(canvasPresenceHook, /remoteShapePreviews/);
+assert.match(canvasPresenceHook, /sendShapePreview/);
+assert.match(canvasPresenceHook, /clearShapePreview/);
+assert.match(canvasPresenceHook, /STALE_SHAPE_PREVIEW_TIMEOUT_MS = 5_000/);
 assert.match(canvasRealtimeClient, /NEXT_PUBLIC_PILO_REALTIME_SERVER_URL/);
 assert.match(canvasRealtimeClient, /http:\/\/localhost:3001/);
 assert.match(canvasRealtimeClient, /transports: \["websocket"\]/);
@@ -744,6 +839,11 @@ assert.match(canvasShapeSync, /new Set\(\[400, 401, 403, 404, 409\]\)/);
 assert.match(canvasShapeSync, /isStaleMissingShapeOperation/);
 assert.match(canvasShapeSync, /CanvasShapeSyncFailure/);
 assert.match(canvasShapeSync, /isNonRetryableCanvasShapeSyncError/);
+assert.match(canvasShapeSync, /CanvasShapeSyncConflict/);
+assert.match(canvasShapeSync, /readCanvasShapeSyncConflict/);
+assert.match(canvasShapeSync, /latestShape/);
+assert.match(canvasShapeSync, /latestOperation/);
+assert.match(canvasShapeSync, /onConflict\?\.\(conflict\)/);
 assert.match(canvasShapeSync, /shouldRetry\(\{ error \}\)/);
 assert.match(canvasShapeSync, /runWithRetry/);
 assert.match(canvasShapeSync, /import diff from "microdiff"/);
@@ -808,7 +908,21 @@ assert.match(piloTldrawCanvas, /window\.addEventListener\("pointermove"/);
 assert.match(piloTldrawCanvas, /closest\("\.canvas-trash-drop-zone"\)/);
 assert.match(piloTldrawCanvas, /window\.addEventListener\("pointerup"/);
 assert.match(piloTldrawCanvas, /window\.requestAnimationFrame\(\(\) => \{/);
-assert.match(piloTldrawCanvas, /editor\.deleteShapes\(selectedShapeIds\)/);
+assert.match(piloTldrawCanvas, /collectRemoteLockedShapeIds/);
+assert.match(piloTldrawCanvas, /filterUnlockedShapeIds/);
+assert.match(piloTldrawCanvas, /remoteLockedShapeIdsRef/);
+assert.match(piloTldrawCanvas, /deleteSelectedShapes\(editor, remoteLockedShapeIdsRef\.current\)/);
+assert.match(piloTldrawCanvas, /isPiloErasableShape/);
+assert.match(piloTldrawCanvas, /shape\.type === "draw" \|\| shape\.type === "highlight"/);
+assert.match(piloTldrawCanvas, /activatePiloEraserWithShortcut/);
+assert.match(piloTldrawCanvas, /event\.key\.toLowerCase\(\) !== "e"/);
+assert.match(piloTldrawCanvas, /cancelPiloEraserWithEscape/);
+assert.match(piloTldrawCanvas, /event\.key !== "Escape"/);
+assert.match(piloTldrawCanvas, /deactivatePiloEraser\(\)/);
+assert.match(piloTldrawCanvas, /erasePiloDrawShapeAtScreenPoint/);
+assert.match(piloTldrawCanvas, /isPiloEraserActive/);
+assert.match(piloTldrawCanvas, /is-pilo-eraser-active/);
+assert.doesNotMatch(piloTldrawCanvas, /editor\.setCurrentTool\("eraser"\)/);
 assert.match(piloTldrawCanvas, /history: "ignore"/);
 assert.match(piloTldrawCanvas, /SelectedGroupToolbar/);
 assert.doesNotMatch(piloTldrawCanvas, /PiloCanvasSmartGuides/);
@@ -848,6 +962,7 @@ assert.match(piloCanvasStateReporter, /onViewChange/);
 assert.match(piloCanvasStateReporter, /getViewportPageBounds/);
 assert.match(piloCanvasStateReporter, /withSerializedArrowBindings/);
 assert.match(piloCanvasStateReporter, /withPiloMediaAsset/);
+assert.match(piloCanvasStateReporter, /onResolveFreeformShapeSnapshot/);
 assert.match(piloCanvasArrowBindings, /piloArrowBindingsV1/);
 assert.match(piloCanvasArrowBindings, /getBindingsInvolvingShape\(shape\.id, "arrow"\)/);
 assert.match(piloCanvasArrowBindings, /editor\.createBindings/);
@@ -865,6 +980,9 @@ assert.match(piloCanvasTypes, /export type PiloCanvasShapeDetailRequest/);
 assert.match(canvasRuntime, /localInteractionStateRef/);
 assert.match(canvasRuntime, /isRemoteOperationProtectedByLocalInteraction/);
 assert.match(canvasRuntime, /queueDeferredRemoteOperation\(/);
+assert.match(canvasRuntime, /handleShapeSyncConflict/);
+assert.match(canvasRuntime, /readConflictLatestFreeformShape/);
+assert.match(canvasRuntime, /onShapeSyncConflict: handleShapeSyncConflict/);
 assert.match(canvasRuntime, /onLocalInteractionStateChange=\{handleLocalInteractionStateChange\}/);
 assert.match(canvasRuntimeHydration, /normalizeCanvasFreeformShapes/);
 assert.match(canvasRemoteOperations, /normalizeCanvasFreeformShapes/);
@@ -923,6 +1041,9 @@ assert.match(canvasCss, /pilo-code-remote-presence-badge/);
 assert.match(canvasCss, /pilo-code-remote-edit-badge/);
 assert.match(canvasCss, /is-remotely-selected/);
 assert.match(canvasCss, /is-remotely-edit-locked/);
+assert.match(canvasCss, /is-pilo-eraser-active/);
+assert.match(canvasCss, /pilo-tldraw-canvas \.tl-canvas/);
+assert.match(canvasCss, /crosshair !important/);
 assert.match(piloCodeMirrorEditor, /@codemirror\/view/);
 assert.match(piloCodeBlockShapeTypes, /export type PiloCodeBlockShape/);
 assert.match(piloCodeBlockShapeTypes, /isCollapsed\?: boolean/);
@@ -970,7 +1091,9 @@ assert.match(piloTldrawCanvas, /window\.addEventListener\("keydown", startCanvas
 assert.match(piloTldrawCanvas, /window\.addEventListener\("keyup", cancelCanvasAiChatWithShortcut, true\)/);
 assert.match(piloTldrawCanvas, /window\.requestAnimationFrame\(\s*updateHoldProgress/);
 assert.match(piloTldrawCanvas, /canvasAiChatPointerRef\.current/);
-assert.match(piloTldrawCanvas, /onPointerMoveCapture=\{trackCanvasAiChatPointer\}/);
+assert.match(piloTldrawCanvas, /function trackCanvasAiChatPointer/);
+assert.match(piloTldrawCanvas, /onPointerMoveCapture=\{handleCanvasPointerMoveCapture\}/);
+assert.match(piloTldrawCanvas, /onPointerUpCapture=\{handleCanvasPointerUpCapture\}/);
 assert.match(piloTldrawCanvas, /openCanvasAiChat: \(anchor: CanvasAiChatAnchor\) => void/);
 assert.match(piloTldrawCanvas, /function openCanvasAiChatAt\(anchor: CanvasAiChatAnchor\)/);
 assert.match(canvasWorkspace, /agentTarget="toolbar\.canvas_ai"/);

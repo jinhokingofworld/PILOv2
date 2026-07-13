@@ -82,6 +82,74 @@ export type CanvasPresenceLeavePayload = {
   userId: string;
 };
 
+export type CanvasShapeLockState = {
+  workspaceId: string;
+  canvasId: string;
+  shapeId: string;
+  ownerUserId: string;
+  lockedAt: string;
+  expiresAt: string;
+};
+
+export type CanvasShapeLockClaimPayload = {
+  workspaceId: string;
+  canvasId: string;
+  shapeIds: string[];
+};
+
+export type CanvasShapeLockAcceptedPayload = {
+  workspaceId: string;
+  canvasId: string;
+  locks: CanvasShapeLockState[];
+};
+
+export type CanvasShapeLockRejectedPayload = {
+  workspaceId: string;
+  canvasId: string;
+  shapeIds: string[];
+  locks: CanvasShapeLockState[];
+};
+
+export type CanvasShapeLockReleasePayload = {
+  workspaceId: string;
+  canvasId: string;
+  shapeIds?: string[];
+};
+
+export type CanvasShapeLockReleaseEventPayload = {
+  workspaceId: string;
+  canvasId: string;
+  ownerUserId: string;
+  shapeIds: string[];
+};
+
+export type CanvasShapePreviewPhase = "move" | "resize" | "unknown";
+
+export type CanvasShapePreviewPayload = {
+  workspaceId: string;
+  canvasId: string;
+  phase: CanvasShapePreviewPhase;
+  shapes: Record<string, unknown>[];
+};
+
+export type CanvasShapePreviewEventPayload = CanvasShapePreviewPayload & {
+  actorUserId: string;
+  sentAt: string;
+};
+
+export type CanvasShapePreviewClearPayload = {
+  workspaceId: string;
+  canvasId: string;
+  actorUserId: string;
+  shapeIds: string[];
+};
+
+export type CanvasShapePreviewClearRequestPayload = {
+  workspaceId: string;
+  canvasId: string;
+  shapeIds: string[];
+};
+
 export type CanvasRealtimeErrorPayload = {
   code: string;
   message: string;
@@ -100,6 +168,22 @@ export type CanvasServerToClientEvents = {
   "canvas:sync:required": (payload: CanvasSyncRequiredPayload) => void;
   "canvas:presence:update": (payload: CanvasRemotePresenceState) => void;
   "canvas:presence:leave": (payload: CanvasPresenceLeavePayload) => void;
+  "canvas:shape:lock:accepted": (
+    payload: CanvasShapeLockAcceptedPayload,
+  ) => void;
+  "canvas:shape:lock:rejected": (
+    payload: CanvasShapeLockRejectedPayload,
+  ) => void;
+  "canvas:shape:lock:release": (
+    payload: CanvasShapeLockReleaseEventPayload,
+  ) => void;
+  "canvas:shape:lock:update": (
+    payload: CanvasShapeLockAcceptedPayload,
+  ) => void;
+  "canvas:shape:preview": (payload: CanvasShapePreviewEventPayload) => void;
+  "canvas:shape:preview:clear": (
+    payload: CanvasShapePreviewClearPayload,
+  ) => void;
   "canvas:error": (payload: CanvasRealtimeErrorPayload) => void;
 };
 
@@ -107,4 +191,12 @@ export type CanvasClientToServerEvents = {
   "canvas:join": (payload: CanvasJoinPayload) => void;
   "canvas:leave": (payload: CanvasJoinPayload) => void;
   "canvas:presence:update": (payload: CanvasPresenceUpdatePayload) => void;
+  "canvas:shape:lock:claim": (payload: CanvasShapeLockClaimPayload) => void;
+  "canvas:shape:lock:release": (
+    payload: CanvasShapeLockReleasePayload,
+  ) => void;
+  "canvas:shape:preview": (payload: CanvasShapePreviewPayload) => void;
+  "canvas:shape:preview:clear": (
+    payload: CanvasShapePreviewClearRequestPayload,
+  ) => void;
 };

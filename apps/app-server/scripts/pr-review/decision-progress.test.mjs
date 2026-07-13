@@ -44,3 +44,24 @@ async function captureProgressUpdate(reviewedCount, totalFileCount) {
 
   assert.deepEqual(update.values, [reviewSessionId, 3, 3, true]);
 }
+
+{
+  let updateQuery = null;
+  const transaction = {
+    async queryOne(text, values = []) {
+      updateQuery = { text, values };
+      return { id: "review-file-id", session_id: reviewSessionId };
+    }
+  };
+  const service = new PrReviewService({}, {}, {}, {});
+
+  await service.updateReviewFileDecisionState(transaction, {
+    workspaceId: "workspace-id",
+    reviewFileId: "review-file-id",
+    currentUserId: "user-id",
+    status: "approved",
+    comment: null
+  });
+
+  assert.match(updateQuery.text, /carried_from_decision_id = NULL/);
+}

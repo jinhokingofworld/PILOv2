@@ -63,6 +63,11 @@ src/features/<domain>/
 | `canvas` | `docs/api/canvas-api.md` |
 | `board` | `docs/api/board-api.md` |
 | `sql-erd` | `docs/api/sqltoerd-api.md` |
+| `settings` | `docs/api/settings-api.md` |
+
+`src/features/settings/`는 개인 환경설정 UI와 상태를 소유한다. Settings 화면에서
+GitHub, Workspace, User panel을 함께 보여줄 수는 있지만 각 도메인의 API 호출과
+비즈니스 로직은 해당 feature가 소유하며 Settings feature에 복제하지 않는다.
 
 ## Shared API Layer
 

@@ -1,4 +1,5 @@
 import { Injectable } from "@nestjs/common";
+import { BoardAgentToolsService } from "./tools/board-agent-tools.service";
 import { CalendarAgentToolsService } from "./tools/calendar-agent-tools.service";
 import { MeetingAgentToolsService } from "./tools/meeting-agent-tools.service";
 import type { AgentToolDefinition } from "./types/agent-tool.types";
@@ -9,7 +10,8 @@ export class AgentToolRegistryService {
 
   constructor(
     calendarAgentToolsService?: CalendarAgentToolsService,
-    meetingAgentToolsService?: MeetingAgentToolsService
+    meetingAgentToolsService?: MeetingAgentToolsService,
+    boardAgentToolsService?: BoardAgentToolsService
   ) {
     if (calendarAgentToolsService) {
       this.registerMany(calendarAgentToolsService.listDefinitions());
@@ -17,6 +19,10 @@ export class AgentToolRegistryService {
 
     if (meetingAgentToolsService) {
       this.registerMany(meetingAgentToolsService.listDefinitions());
+    }
+
+    if (boardAgentToolsService) {
+      this.registerMany(boardAgentToolsService.listDefinitions());
     }
   }
 

@@ -178,7 +178,6 @@ export function GithubPanel() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [syncPollingError, setSyncPollingError] = useState<string | null>(null);
   const [redirectAction, setRedirectAction] = useState<RedirectAction>(null);
-  const discoveredInstallationIdRef = useRef<string | null>(null);
   const [isDisconnecting, setIsDisconnecting] = useState(false);
   const [isDisconnectingProjectOAuth, setIsDisconnectingProjectOAuth] =
     useState(false);
@@ -534,19 +533,6 @@ export function GithubPanel() {
     removeGithubCallbackErrorFromUrl();
   }, [searchParams]);
 
-  useEffect(() => {
-    const installationId = searchParams.get("github_installation_id");
-    if (
-      !workspaceId ||
-      !installationId ||
-      discoveredInstallationIdRef.current === installationId
-    ) {
-      return;
-    }
-    discoveredInstallationIdRef.current = installationId;
-    void handleDiscoverGithubProjectV2(installationId);
-  }, [workspaceId, searchParams]);
-
   async function handleStartGithubOAuth() {
     setRedirectAction("oauth");
     setActionError(null);
@@ -618,7 +604,6 @@ export function GithubPanel() {
         return;
       }
       if (discovery.connectionRequired) {
-        discoveredInstallationIdRef.current = null;
         await handleStartGithubProjectOAuth();
         return;
       }

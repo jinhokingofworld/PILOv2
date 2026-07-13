@@ -18,7 +18,6 @@ import {
   buildViewportShapeQueryKey,
   CANVAS_SHAPE_DETAIL_MIN_ZOOM,
   CANVAS_SHAPE_DETAIL_STALE_TIME_MS,
-  CANVAS_VIEWPORT_SHAPE_STALE_TIME_MS,
   DEFAULT_VIEWPORT_SHAPE_LOAD_DEBOUNCE_MS,
   DEFAULT_VIEWPORT_SHAPE_LOAD_MARGIN,
 } from "./canvas-runtime-utils";
@@ -26,6 +25,15 @@ import {
 type RuntimeRef<T> = {
   current: T;
 };
+
+type LoadedViewportShapeBounds = {
+  bottom: number;
+  left: number;
+  right: number;
+  top: number;
+};
+
+const MAX_LOADED_VIEWPORT_BOUNDS = 24;
 
 type UseCanvasViewportQueriesOptions = {
   board: CanvasBoardDetail;
@@ -53,6 +61,29 @@ function shouldLoadExpandedFrameChildren(
   );
 }
 
+function createViewportShapeLoadBounds(
+  bounds: PiloCanvasViewportBounds,
+): LoadedViewportShapeBounds {
+  return {
+    bottom: bounds.y + bounds.height + DEFAULT_VIEWPORT_SHAPE_LOAD_MARGIN,
+    left: bounds.x - DEFAULT_VIEWPORT_SHAPE_LOAD_MARGIN,
+    right: bounds.x + bounds.width + DEFAULT_VIEWPORT_SHAPE_LOAD_MARGIN,
+    top: bounds.y - DEFAULT_VIEWPORT_SHAPE_LOAD_MARGIN,
+  };
+}
+
+function doesLoadedViewportCoverBounds(
+  loadedBounds: LoadedViewportShapeBounds,
+  viewportBounds: PiloCanvasViewportBounds,
+) {
+  return (
+    loadedBounds.left <= viewportBounds.x &&
+    loadedBounds.top <= viewportBounds.y &&
+    loadedBounds.right >= viewportBounds.x + viewportBounds.width &&
+    loadedBounds.bottom >= viewportBounds.y + viewportBounds.height
+  );
+}
+
 export function useCanvasViewportQueries({
   board,
   canvasClient,
@@ -69,6 +100,10 @@ export function useCanvasViewportQueries({
   viewportShapeLoadTimerRef,
 }: UseCanvasViewportQueriesOptions) {
   const loadingFrameChildrenRef = useRef(new Set<string>());
+  const loadedViewportBoundsRef = useRef<{
+    boardId: string;
+    bounds: LoadedViewportShapeBounds[];
+  } | null>(null);
   const loadFrameChildren = useCallback(
     (frameId: string, visitedFrameIds = new Set<string>()) => {
       if (
@@ -191,6 +226,16 @@ export function useCanvasViewportQueries({
       }
 
       const listShapesInViewport = canvasClient.listShapesInViewport;
+      const loadedViewport = loadedViewportBoundsRef.current;
+
+      if (
+        loadedViewport?.boardId === board.id &&
+        loadedViewport.bounds.some((loadedBounds) =>
+          doesLoadedViewportCoverBounds(loadedBounds, bounds),
+        )
+      ) {
+        return;
+      }
 
       if (viewportShapeLoadTimerRef.current) {
         clearTimeout(viewportShapeLoadTimerRef.current);
@@ -203,6 +248,18 @@ export function useCanvasViewportQueries({
 
         if (!latestBounds) return;
 
+        const currentLoadedViewport = loadedViewportBoundsRef.current;
+
+        if (
+          currentLoadedViewport?.boardId === board.id &&
+          currentLoadedViewport.bounds.some((loadedBounds) =>
+            doesLoadedViewportCoverBounds(loadedBounds, latestBounds),
+          )
+        ) {
+          return;
+        }
+
+        const requestBounds = createViewportShapeLoadBounds(latestBounds);
         const requestSeq = viewportShapeLoadRequestSeqRef.current + 1;
         viewportShapeLoadRequestSeqRef.current = requestSeq;
         const queryKey = buildViewportShapeQueryKey({
@@ -224,7 +281,7 @@ export function useCanvasViewportQueries({
           .then(() =>
             queryClient.fetchQuery({
               queryKey,
-              staleTime: CANVAS_VIEWPORT_SHAPE_STALE_TIME_MS,
+              staleTime: 0,
               queryFn: ({ signal }) =>
                 listShapesInViewport(
                   board.id,
@@ -255,6 +312,17 @@ export function useCanvasViewportQueries({
                 typeof shape.id !== "string" ||
                 !deletedShapeIdsRef.current.has(shape.id),
             );
+            const currentLoadedBounds =
+              loadedViewportBoundsRef.current?.boardId === board.id
+                ? loadedViewportBoundsRef.current.bounds
+                : [];
+
+            loadedViewportBoundsRef.current = {
+              boardId: board.id,
+              bounds: [...currentLoadedBounds, requestBounds].slice(
+                -MAX_LOADED_VIEWPORT_BOUNDS,
+              ),
+            };
 
             mergeLoadedFreeformShapes(nextLoadedShapes);
             nextLoadedShapes.forEach((shape) => {

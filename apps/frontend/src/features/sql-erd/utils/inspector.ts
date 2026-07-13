@@ -4,8 +4,10 @@ import type {
   ErdTable,
   SqlErdSelection,
   SqltoerdAnnotationLink,
-  SqltoerdAnnotationsV1
+  SqltoerdAnnotationsV1,
+  SqltoerdSettingsJson
 } from "../types";
+import { getSqltoerdRelationNote } from "./foreign-key-add";
 import {
   getRelationEndpoints,
   getTableDisplayName,
@@ -44,6 +46,7 @@ export type SqlErdInspectorViewModel =
       cardinality: SqlErdRelationCardinalityEndpoints | null;
       endpoints: SqltoerdRelationEndpoints | null;
       relation: ErdRelation;
+      relationNote: string | null;
       title: string;
     }
   | {
@@ -57,7 +60,8 @@ export type SqlErdInspectorViewModel =
 export function createSqlErdInspectorViewModel(
   selection: SqlErdSelection,
   modelIndex: SqltoerdModelIndex,
-  annotations?: SqltoerdAnnotationsV1
+  annotations?: SqltoerdAnnotationsV1,
+  settingsJson: SqltoerdSettingsJson = {}
 ): SqlErdInspectorViewModel {
   if (selection.type === "table") {
     const table = modelIndex.tablesById.get(selection.tableId);
@@ -113,6 +117,7 @@ export function createSqlErdInspectorViewModel(
       cardinality: inferSqlErdRelationCardinality(relation, modelIndex),
       endpoints: getRelationEndpoints(relation, modelIndex),
       relation,
+      relationNote: getSqltoerdRelationNote(settingsJson, relation.id),
       title: relation.constraintName ?? relation.id
     };
   }

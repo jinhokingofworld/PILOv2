@@ -2,9 +2,10 @@ import { hasCanvasFreeformShapeChanged } from "../../../utils/canvas-shape-sync"
 import type { PiloCanvasFreeformShape, PiloCanvasViewportBounds } from "../types";
 import type { CanvasViewSetting } from "./canvas-runtime-types";
 
-export const DEFAULT_VIEW_SETTING_SYNC_DEBOUNCE_MS = 360;
-export const DEFAULT_VIEWPORT_SHAPE_LOAD_DEBOUNCE_MS = 280;
+export const DEFAULT_VIEW_SETTING_SYNC_DEBOUNCE_MS = 3_000;
+export const DEFAULT_VIEWPORT_SHAPE_LOAD_DEBOUNCE_MS = 700;
 export const DEFAULT_VIEWPORT_SHAPE_LOAD_MARGIN = 320;
+export const CANVAS_VIEWPORT_SHAPE_QUERY_GRID_SIZE = 1_000;
 export const CANVAS_SHAPE_DETAIL_MIN_ZOOM = 0.75;
 export const CANVAS_VIEWPORT_SHAPE_STALE_TIME_MS = 5_000;
 export const CANVAS_SHAPE_DETAIL_STALE_TIME_MS = 30_000;
@@ -138,18 +139,26 @@ export function buildViewportShapeQueryKey({
   bounds: PiloCanvasViewportBounds;
   workspaceId: string;
 }) {
-  const round = (value: number) => Math.round(value * 100) / 100;
+  const toGrid = (value: number) =>
+    Math.floor(value / CANVAS_VIEWPORT_SHAPE_QUERY_GRID_SIZE);
+  const zoomBucket = Math.round(bounds.zoom * 4) / 4;
+  const queryLeft = bounds.x - DEFAULT_VIEWPORT_SHAPE_LOAD_MARGIN;
+  const queryTop = bounds.y - DEFAULT_VIEWPORT_SHAPE_LOAD_MARGIN;
+  const queryRight =
+    bounds.x + bounds.width + DEFAULT_VIEWPORT_SHAPE_LOAD_MARGIN;
+  const queryBottom =
+    bounds.y + bounds.height + DEFAULT_VIEWPORT_SHAPE_LOAD_MARGIN;
 
   return [
     "canvas",
     workspaceId,
     boardId,
     "viewport-shapes",
-    round(bounds.x),
-    round(bounds.y),
-    round(bounds.width),
-    round(bounds.height),
-    round(bounds.zoom),
+    toGrid(queryLeft),
+    toGrid(queryTop),
+    toGrid(queryRight),
+    toGrid(queryBottom),
+    zoomBucket,
     DEFAULT_VIEWPORT_SHAPE_LOAD_MARGIN,
   ] as const;
 }

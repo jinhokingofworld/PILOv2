@@ -13,6 +13,10 @@ import {
   ViewportBoundsValues,
   CanvasViewSettingPayload
 } from "./canvas.types";
+import {
+  PR_REVIEW_FILE_NODE_SHAPE_TYPE,
+  PR_REVIEW_RELATION_EDGE_SHAPE_TYPE
+} from "./canvas-review-shape-policy";
 
 const MAX_CANVAS_TITLE_LENGTH = 120;
 export const MAX_CANVAS_SHAPE_BATCH_OPERATIONS = 100;
@@ -32,6 +36,8 @@ const ALLOWED_SHAPE_TYPES = new Set([
   "embed",
   "pilo-code-block",
   "file_node",
+  PR_REVIEW_FILE_NODE_SHAPE_TYPE,
+  PR_REVIEW_RELATION_EDGE_SHAPE_TYPE,
   "group"
 ]);
 

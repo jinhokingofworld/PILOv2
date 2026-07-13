@@ -11,6 +11,7 @@ import { AuthModule } from "./modules/auth/auth.module";
 import { MeetingModule } from "./modules/meeting/meeting.module";
 import { PrReviewModule } from "./modules/pr-review/pr-review.module";
 import { SqlErdModule } from "./modules/sql-erd/sql-erd.module";
+import { SettingsModule } from "./modules/settings/settings.module";
 import { DatabaseModule } from "./database/database.module";
 import { UserModule } from "./modules/user/user.module";
 import { WorkspaceModule } from "./modules/workspace/workspace.module";
@@ -20,6 +21,7 @@ import { WorkspaceModule } from "./modules/workspace/workspace.module";
     DatabaseModule,
     AuthModule,
     UserModule,
+    SettingsModule,
     WorkspaceModule,
     AgentModule,
     GithubIntegrationModule,
