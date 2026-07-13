@@ -7,9 +7,17 @@ import {
 } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CanvasShapeOperationPayload } from "@/features/canvas/api/canvas-types";
+import {
+  isRecord,
+  normalizeCanvasShape,
+} from "@/features/canvas/api/canvas-normalizers";
 import type { CanvasRealtimeConfig } from "@/features/canvas/realtime/canvas-realtime-types";
 import { useCanvasPresence } from "@/features/canvas/realtime/useCanvasPresence";
-import type { CanvasShapeSyncQueue } from "../../../utils/canvas-shape-sync";
+import { normalizeCanvasFreeformShapes } from "../../../utils/canvas-storage";
+import type {
+  CanvasShapeSyncConflict,
+  CanvasShapeSyncQueue,
+} from "../../../utils/canvas-shape-sync";
 import {
   PiloTldrawCanvas,
   type PiloCanvasActions,
@@ -34,6 +42,7 @@ import { useCanvasRuntimeHydration } from "./useCanvasRuntimeHydration";
 import { useCanvasShapePersistence } from "./useCanvasShapePersistence";
 import { useCanvasViewSettingPersistence } from "./useCanvasViewSettingPersistence";
 import { useCanvasViewportQueries } from "./useCanvasViewportQueries";
+import { mergeFreeformShapesById } from "./canvas-runtime-utils";
 
 export type { CanvasBoardDetail, CanvasViewSetting } from "./canvas-runtime-types";
 
@@ -146,6 +155,60 @@ function readDeferredRemoteOperations(
   return Array.from(queue.values())
     .sort((left, right) => left.operation.opSeq - right.operation.opSeq)
     .map(({ operation }) => operation);
+}
+
+function isCanvasShapeOperationPayload(
+  value: unknown,
+): value is CanvasShapeOperationPayload {
+  if (!isRecord(value)) return false;
+
+  return (
+    typeof value.shapeId === "string" &&
+    (value.operationType === "create" ||
+      value.operationType === "update" ||
+      value.operationType === "delete") &&
+    typeof value.opSeq === "number" &&
+    Number.isInteger(value.opSeq) &&
+    typeof value.actorUserId === "string" &&
+    typeof value.resultRevision === "number" &&
+    Number.isInteger(value.resultRevision)
+  );
+}
+
+function readConflictRevision(conflict: CanvasShapeSyncConflict) {
+  if (typeof conflict.currentRevision === "number") {
+    return conflict.currentRevision;
+  }
+
+  const latestOperation = conflict.latestOperation;
+
+  if (
+    isRecord(latestOperation) &&
+    typeof latestOperation.resultRevision === "number" &&
+    Number.isInteger(latestOperation.resultRevision)
+  ) {
+    return latestOperation.resultRevision;
+  }
+
+  const latestShape = conflict.latestShape;
+
+  if (
+    isRecord(latestShape) &&
+    typeof latestShape.revision === "number" &&
+    Number.isInteger(latestShape.revision)
+  ) {
+    return latestShape.revision;
+  }
+
+  return null;
+}
+
+function readConflictLatestFreeformShape(conflict: CanvasShapeSyncConflict) {
+  const [shape] = normalizeCanvasFreeformShapes([
+    normalizeCanvasShape(conflict.latestShape),
+  ]) as PiloCanvasFreeformShape[];
+
+  return shape && typeof shape.id === "string" ? shape : null;
 }
 
 export function PiloCanvasRuntime({
@@ -373,6 +436,60 @@ function PiloCanvasRuntimeInner({
     },
     [flushDeferredRemoteOperations],
   );
+  const handleShapeSyncConflict = useCallback(
+    (conflict: CanvasShapeSyncConflict) => {
+      const conflictRevision = readConflictRevision(conflict);
+      const latestOperation = isCanvasShapeOperationPayload(
+        conflict.latestOperation,
+      )
+        ? conflict.latestOperation
+        : null;
+
+      pendingLocalShapeVersionsRef.current.delete(conflict.shapeId);
+
+      if (
+        latestOperation &&
+        latestOperation.actorUserId !== currentRealtimeUserId
+      ) {
+        applyRemoteCanvasOperations([latestOperation]);
+      } else {
+        if (conflictRevision !== null) {
+          remoteShapeRevisionRef.current.set(
+            conflict.shapeId,
+            Math.max(
+              remoteShapeRevisionRef.current.get(conflict.shapeId) ?? 0,
+              conflictRevision,
+            ),
+          );
+        }
+
+        const latestShape = readConflictLatestFreeformShape(conflict);
+
+        if (latestShape) {
+          deletedShapeIdsRef.current.delete(conflict.shapeId);
+          unloadedShapeIdsRef.current.delete(conflict.shapeId);
+          shapeDetailCacheRef.current.set(conflict.shapeId, latestShape);
+
+          setFreeformShapes((currentShapes) => {
+            const nextShapes = mergeFreeformShapesById(currentShapes, [
+              latestShape,
+            ]);
+
+            freeformShapesRef.current = nextShapes;
+            return nextShapes;
+          });
+          setCanvasHydrationVersion((version) => version + 1);
+        }
+      }
+
+      flushDeferredRemoteOperations();
+    },
+    [
+      applyRemoteCanvasOperations,
+      currentRealtimeUserId,
+      flushDeferredRemoteOperations,
+    ],
+  );
   const canvasPresence = useCanvasPresence(realtime, {
     applyOperations: applyRemoteCanvasOperations,
     catchUpOperations: catchUpCanvasOperations,
@@ -417,6 +534,7 @@ function PiloCanvasRuntimeInner({
     pendingViewSettingRef,
     queryClient,
     remoteShapeRevisionRef,
+    onShapeSyncConflict: handleShapeSyncConflict,
     shapeSyncQueueRef,
     storageMode,
     viewSettingSyncTimerRef,
@@ -433,6 +551,7 @@ function PiloCanvasRuntimeInner({
     freeformShapesRef,
     localShapeVersionRef,
     onLocalShapeSyncIdle: flushDeferredRemoteOperations,
+    onShapeSyncConflict: handleShapeSyncConflict,
     pendingLocalShapeVersionsRef,
     remoteShapeRevisionRef,
     setCanvasHydrationVersion,
