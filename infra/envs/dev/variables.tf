@@ -112,6 +112,12 @@ variable "ai_worker_desired_count" {
   default     = 1
 }
 
+variable "legacy_meeting_drain_enabled" {
+  description = "Keep the shared AI worker's MeetingReport processor enabled until the legacy ai-jobs queue is drained."
+  type        = bool
+  default     = true
+}
+
 variable "meeting_worker_desired_count" {
   description = "Dev MeetingReport-only worker task count."
   type        = number

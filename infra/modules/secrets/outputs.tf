@@ -44,6 +44,19 @@ output "ai_worker_ecs_secrets" {
   )
 }
 
+output "ai_worker_legacy_meeting_drain_ecs_secrets" {
+  value = merge(
+    {
+      for name in local.ai_worker_ecs_secret_names :
+      name => aws_secretsmanager_secret.this["ai-worker/${name}"].arn
+    },
+    {
+      AGENT_EXECUTION_HANDOFF_TOKEN = aws_secretsmanager_secret.this["shared/AGENT_EXECUTION_HANDOFF_TOKEN"].arn
+      MEETING_REPORT_EVENT_TOKEN    = aws_secretsmanager_secret.this["shared/MEETING_REPORT_EVENT_TOKEN"].arn
+    },
+  )
+}
+
 output "meeting_worker_ecs_secrets" {
   value = merge(
     {

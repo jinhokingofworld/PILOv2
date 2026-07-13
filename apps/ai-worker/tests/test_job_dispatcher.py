@@ -92,6 +92,21 @@ def test_dispatcher_routes_meeting_report_jobs() -> None:
     assert agent_processor.payloads == []
 
 
+def test_dispatcher_keeps_meeting_report_when_processor_is_unavailable() -> None:
+    result = JobDispatcher().process_message(
+        json.dumps(
+            {
+                "jobType": "meeting_report",
+                "reportId": REPORT_ID,
+            }
+        )
+    )
+
+    assert result.delete_message is False
+    assert result.reason == "meeting_report_processor_unavailable"
+    assert result.job_type == "meeting_report"
+
+
 def test_dispatcher_routes_agent_run_jobs() -> None:
     meeting_processor = FakeMeetingReportProcessor()
     agent_processor = FakeAgentRunProcessor()

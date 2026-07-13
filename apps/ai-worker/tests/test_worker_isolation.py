@@ -1,14 +1,24 @@
+import json
+
 from app.job_dispatcher import JobDispatcher
+from app.meeting_report_processor import ProcessResult
 from app.meeting_worker_runtime import (
     MeetingWorkerSettings,
     create_meeting_dispatcher,
 )
-from app.shared_ai_worker_runtime import SharedAiWorkerSettings
+from app.shared_ai_worker_runtime import (
+    SharedAiWorkerSettings,
+    create_shared_dispatcher,
+)
 
 
 class FakeMeetingReportProcessor:
-    def process_payload(self, _payload: dict[str, object]):
-        raise AssertionError("This test does not dispatch a MeetingReport job")
+    def process_payload(self, _payload: dict[str, object]) -> ProcessResult:
+        return ProcessResult(
+            delete_message=True,
+            reason="completed",
+            report_id="report-1",
+        )
 
 
 def test_meeting_worker_uses_only_dedicated_queue_environment(monkeypatch) -> None:
@@ -44,3 +54,23 @@ def test_shared_ai_worker_does_not_require_meeting_queue_environment(monkeypatch
     settings = SharedAiWorkerSettings.from_env()
 
     assert settings.sqs_queue_url == "https://sqs.example.com/ai-jobs"
+    assert settings.legacy_meeting_drain_enabled is False
+
+
+def test_shared_ai_worker_keeps_legacy_meeting_processor_during_drain(monkeypatch) -> None:
+    monkeypatch.setenv("SQS_AI_JOBS_QUEUE_URL", "https://sqs.example.com/ai-jobs")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("AGENT_EXECUTION_HANDOFF_BASE_URL", "http://localhost:4000")
+    monkeypatch.setenv("AGENT_EXECUTION_HANDOFF_TOKEN", "agent-token")
+    monkeypatch.setenv("LEGACY_MEETING_DRAIN_ENABLED", "true")
+    monkeypatch.setenv("S3_RECORDINGS_BUCKET", "recordings")
+    monkeypatch.setenv("MEETING_REPORT_EVENT_BASE_URL", "http://localhost:4000")
+    monkeypatch.setenv("MEETING_REPORT_EVENT_TOKEN", "meeting-token")
+
+    settings = SharedAiWorkerSettings.from_env()
+    dispatcher = create_shared_dispatcher(object(), object(), FakeMeetingReportProcessor())
+    result = dispatcher.process_message(json.dumps({"jobType": "meeting_report"}))
+
+    assert settings.legacy_meeting_drain_enabled is True
+    assert result.delete_message is True
+    assert result.reason == "completed"

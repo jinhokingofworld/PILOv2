@@ -22,6 +22,8 @@ realtime_server_desired_count       = 1
 ai_worker_desired_count             = 1
 meeting_worker_desired_count        = 1
 pr_review_ai_worker_desired_count   = 1
+# Keep true during AP-19 cutover. Set false only after legacy ai-jobs MeetingReport jobs are drained.
+legacy_meeting_drain_enabled        = true
 
 # Self-hosted LiveKit MVP host. Keep public CIDRs open for WebRTC unless a
 # stricter access policy is ready.

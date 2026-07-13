@@ -244,7 +244,7 @@ module "ecs" {
       security_group_ids = [module.security_groups.ai_worker_security_group_id]
       task_role_arn      = module.iam.ai_worker_task_role_arn
       target_group_arn   = null
-      environment = {
+      environment = merge({
         APP_ENV                                 = var.environment
         AWS_REGION                              = var.aws_region
         DATABASE_SSL                            = "true"
@@ -254,8 +254,16 @@ module "ecs" {
         AGENT_EXECUTION_HANDOFF_BASE_URL        = local.api_domain == "" ? "http://${module.alb.alb_dns_name}" : "https://${local.api_domain}"
         AGENT_EXECUTION_HANDOFF_TIMEOUT_SECONDS = "10"
         OPENAI_AGENT_PLANNER_TIMEOUT_MS         = "60000"
-      }
-      secrets = module.secrets.ai_worker_ecs_secrets
+        LEGACY_MEETING_DRAIN_ENABLED            = tostring(var.legacy_meeting_drain_enabled)
+        }, var.legacy_meeting_drain_enabled ? {
+        S3_RECORDINGS_BUCKET                 = module.s3.uploads_bucket_name
+        MEETING_REPORT_EVENT_BASE_URL        = local.api_domain == "" ? "http://${module.alb.alb_dns_name}" : "https://${local.api_domain}"
+        MEETING_REPORT_EVENT_TIMEOUT_SECONDS = "10"
+        MEETING_REPORT_EVENT_MAX_ATTEMPTS    = "3"
+        OPENAI_STT_MODEL                     = "whisper-1"
+        OPENAI_MEETING_REPORT_MODEL          = "gpt-5.4-mini"
+      } : {})
+      secrets = var.legacy_meeting_drain_enabled ? module.secrets.ai_worker_legacy_meeting_drain_ecs_secrets : module.secrets.ai_worker_ecs_secrets
     }
 
     meeting-worker = {
@@ -269,16 +277,16 @@ module "ecs" {
       task_role_arn      = module.iam.meeting_worker_task_role_arn
       target_group_arn   = null
       environment = {
-        APP_ENV                                    = var.environment
-        AWS_REGION                                 = var.aws_region
-        DATABASE_SSL                               = "true"
-        S3_RECORDINGS_BUCKET                       = module.s3.uploads_bucket_name
-        SQS_MEETING_JOBS_QUEUE_URL                 = module.sqs.meeting_jobs_queue_url
-        MEETING_REPORT_EVENT_BASE_URL              = local.api_domain == "" ? "http://${module.alb.alb_dns_name}" : "https://${local.api_domain}"
-        MEETING_REPORT_EVENT_TIMEOUT_SECONDS       = "10"
-        MEETING_REPORT_EVENT_MAX_ATTEMPTS          = "3"
-        OPENAI_STT_MODEL                           = "whisper-1"
-        OPENAI_MEETING_REPORT_MODEL                = "gpt-5.4-mini"
+        APP_ENV                                  = var.environment
+        AWS_REGION                               = var.aws_region
+        DATABASE_SSL                             = "true"
+        S3_RECORDINGS_BUCKET                     = module.s3.uploads_bucket_name
+        SQS_MEETING_JOBS_QUEUE_URL               = module.sqs.meeting_jobs_queue_url
+        MEETING_REPORT_EVENT_BASE_URL            = local.api_domain == "" ? "http://${module.alb.alb_dns_name}" : "https://${local.api_domain}"
+        MEETING_REPORT_EVENT_TIMEOUT_SECONDS     = "10"
+        MEETING_REPORT_EVENT_MAX_ATTEMPTS        = "3"
+        OPENAI_STT_MODEL                         = "whisper-1"
+        OPENAI_MEETING_REPORT_MODEL              = "gpt-5.4-mini"
         AI_WORKER_SQS_VISIBILITY_TIMEOUT_SECONDS = "900"
       }
       secrets = module.secrets.meeting_worker_ecs_secrets

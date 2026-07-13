@@ -73,12 +73,26 @@ CloudWatch에서는 다음 alarm을 확인한다.
 
 ## 배포·롤백 순서
 
-1. Terraform apply로 queue/DLQ, `meeting-worker` ECS service, IAM role, alarm을 먼저
-   생성하고 service의 desired/running count가 `1/1`인지 확인한다.
-2. `meeting-worker` task definition에 `SQS_MEETING_JOBS_QUEUE_URL`만 있고
+1. 첫 Terraform apply는 `legacy_meeting_drain_enabled=true`로 수행한다. 이 단계에서
+   shared `ai-worker`는 기존 `ai-jobs`의 Agent/Canvas와 MeetingReport를 모두 계속
+   처리하고, `meeting-worker` ECS service·전용 queue/DLQ·alarm을 생성한다. shared
+   Worker에서 Meeting processor를 제거한 상태로 이 단계를 적용하면 안 된다.
+2. `meeting-worker`의 desired/running count가 `1/1`인지 확인하고, task definition에
+   `SQS_MEETING_JOBS_QUEUE_URL`만 있으며
    `SQS_AI_JOBS_QUEUE_URL`, `SQS_PR_REVIEW_ANALYSIS_QUEUE_URL`가 없는지 확인한다.
 3. App Server를 배포해 MeetingReport publisher를 전용 queue로 전환한다. 전환 직후
    App Server enqueue log와 Meeting Worker receive log의 `sqs_message_id`를 대조한다.
-4. 롤백이 필요하면 App Server만 직전 task definition으로 되돌려 publisher를 기존
-   shared queue로 복구한다. 새 queue의 in-flight/visible 메시지는 유실시키지 않고
-   Meeting Worker가 drain한 뒤 service를 중지한다.
+4. 기존 `ai-jobs`의 모든 MeetingReport 메시지가 shared Worker에서 처리된 것을
+   `event=received`/`event=processed` 로그와 queue in-flight/visible count로 확인한다.
+   publisher 전환 뒤 새 `meeting_report` enqueue가 기존 queue에 없고, 최소 한 번의
+   visibility timeout 동안 legacy MeetingReport 수신이 없을 때만 drain 완료로 본다.
+5. drain 완료 후에만 `legacy_meeting_drain_enabled=false`로 Terraform apply를 수행한다.
+   이 apply가 shared Worker의 Meeting processor 설정과 callback secret을 제거하는
+   최종 격리 단계다.
+
+rollback은 publisher를 먼저 되돌리지 않는다. 먼저
+`legacy_meeting_drain_enabled=true`로 Terraform apply하여 shared Worker의
+Meeting processor·recording bucket·callback token을 복구하고 task가 안정화된 것을
+확인한다. 그 다음에만 App Server publisher를 기존 shared queue로 되돌린다. 새
+`meeting-jobs`의 in-flight/visible 메시지는 유실시키지 않고 Meeting Worker가 drain한
+뒤 service를 중지한다.

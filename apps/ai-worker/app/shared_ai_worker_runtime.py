@@ -15,6 +15,7 @@ from app.canvas_agent.processor import CanvasAgentProcessor
 from app.canvas_agent.repository import PgCanvasAgentRepository
 from app.canvas_agent.routing.semantic_router import CanvasSemanticRouter
 from app.job_dispatcher import JobDispatcher
+from app.meeting_report_processor import MeetingReportProcessor
 from app.meeting_report_runtime import (
     DEFAULT_AGENT_EXECUTION_HANDOFF_TIMEOUT_SECONDS,
     DEFAULT_AGENT_STALE_EXECUTION_SWEEP_INTERVAL_SECONDS,
@@ -23,7 +24,11 @@ from app.meeting_report_runtime import (
     DEFAULT_VISIBILITY_TIMEOUT_SECONDS,
     DEFAULT_WAIT_TIME_SECONDS,
     HttpAgentExecutionHandoffClient,
+    HttpMeetingReportEventPublisher,
+    OpenAiMeetingReportClient,
     PgAgentRunRepository,
+    PgMeetingReportRepository,
+    S3RecordingStorage,
     SqsAiJobWorker,
     _database_url,
     _env,
@@ -53,9 +58,24 @@ class SharedAiWorkerSettings:
     wait_time_seconds: int
     visibility_timeout_seconds: int
     canvas_embedding_jobs_per_tick: int
+    legacy_meeting_drain_enabled: bool
+    legacy_meeting_recordings_bucket: str | None
+    legacy_meeting_stt_model: str | None
+    legacy_meeting_report_model: str | None
+    legacy_meeting_event_base_url: str | None
+    legacy_meeting_event_token: str | None
+    legacy_meeting_event_timeout_seconds: int
+    legacy_meeting_event_max_attempts: int
 
     @classmethod
     def from_env(cls) -> SharedAiWorkerSettings:
+        legacy_meeting_drain_enabled = (
+            _env(
+                "LEGACY_MEETING_DRAIN_ENABLED",
+                "false",
+            ).lower()
+            == "true"
+        )
         return cls(
             aws_region=_env("AWS_REGION", "ap-northeast-2"),
             sqs_queue_url=_require_env("SQS_AI_JOBS_QUEUE_URL"),
@@ -89,6 +109,34 @@ class SharedAiWorkerSettings:
             canvas_embedding_jobs_per_tick=_positive_int_env(
                 "CANVAS_EMBEDDING_JOBS_PER_TICK",
                 DEFAULT_CANVAS_EMBEDDING_JOBS_PER_TICK,
+            ),
+            legacy_meeting_drain_enabled=legacy_meeting_drain_enabled,
+            legacy_meeting_recordings_bucket=(
+                _require_env("S3_RECORDINGS_BUCKET") if legacy_meeting_drain_enabled else None
+            ),
+            legacy_meeting_stt_model=(
+                _env("OPENAI_STT_MODEL", "whisper-1") if legacy_meeting_drain_enabled else None
+            ),
+            legacy_meeting_report_model=(
+                _env("OPENAI_MEETING_REPORT_MODEL", "gpt-5.4-mini")
+                if legacy_meeting_drain_enabled
+                else None
+            ),
+            legacy_meeting_event_base_url=(
+                _require_env("MEETING_REPORT_EVENT_BASE_URL")
+                if legacy_meeting_drain_enabled
+                else None
+            ),
+            legacy_meeting_event_token=(
+                _require_env("MEETING_REPORT_EVENT_TOKEN") if legacy_meeting_drain_enabled else None
+            ),
+            legacy_meeting_event_timeout_seconds=_positive_int_env(
+                "MEETING_REPORT_EVENT_TIMEOUT_SECONDS",
+                10,
+            ),
+            legacy_meeting_event_max_attempts=_positive_int_env(
+                "MEETING_REPORT_EVENT_MAX_ATTEMPTS",
+                3,
             ),
         )
 
@@ -140,9 +188,17 @@ def create_shared_ai_worker(
         canvas_agent_repository,
         canvas_embedder,
     )
-    dispatcher = JobDispatcher(
-        agent_run_processor=agent_run_processor,
-        canvas_agent_processor=canvas_agent_processor,
+    legacy_meeting_report_processor = None
+    if resolved_settings.legacy_meeting_drain_enabled:
+        legacy_meeting_report_processor = _create_legacy_meeting_report_processor(
+            resolved_settings,
+            boto3.client("s3", **boto_kwargs),
+        )
+
+    dispatcher = create_shared_dispatcher(
+        agent_run_processor,
+        canvas_agent_processor,
+        legacy_meeting_report_processor,
     )
     return SqsAiJobWorker(
         resolved_settings,
@@ -151,6 +207,47 @@ def create_shared_ai_worker(
         canvas_embedding_processor=canvas_embedding_processor,
         stale_execution_recovery=agent_execution_handoff_client,
         agent_retry_exhaustion_recovery=agent_run_repository,
+    )
+
+
+def _create_legacy_meeting_report_processor(
+    settings: SharedAiWorkerSettings,
+    s3_client: object,
+) -> MeetingReportProcessor:
+    if (
+        settings.legacy_meeting_recordings_bucket is None
+        or settings.legacy_meeting_stt_model is None
+        or settings.legacy_meeting_report_model is None
+        or settings.legacy_meeting_event_base_url is None
+        or settings.legacy_meeting_event_token is None
+    ):
+        raise RuntimeError("Legacy MeetingReport drain configuration is incomplete")
+
+    repository = PgMeetingReportRepository(settings.database_url, settings.database_ssl)
+    storage = S3RecordingStorage(s3_client, settings.legacy_meeting_recordings_bucket)
+    ai_client = OpenAiMeetingReportClient(
+        settings.openai_api_key,
+        settings.legacy_meeting_stt_model,
+        settings.legacy_meeting_report_model,
+    )
+    event_publisher = HttpMeetingReportEventPublisher(
+        settings.legacy_meeting_event_base_url,
+        settings.legacy_meeting_event_token,
+        settings.legacy_meeting_event_timeout_seconds,
+        settings.legacy_meeting_event_max_attempts,
+    )
+    return MeetingReportProcessor(repository, storage, ai_client, event_publisher)
+
+
+def create_shared_dispatcher(
+    agent_run_processor: AgentRunProcessor,
+    canvas_agent_processor: CanvasAgentProcessor,
+    legacy_meeting_report_processor: MeetingReportProcessor | None,
+) -> JobDispatcher:
+    return JobDispatcher(
+        meeting_report_processor=legacy_meeting_report_processor,
+        agent_run_processor=agent_run_processor,
+        canvas_agent_processor=canvas_agent_processor,
     )
 
 

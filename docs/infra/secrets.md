@@ -176,6 +176,12 @@ UI Preview는 local 개발 편의 기능이며 실제 bearer session이나 Works
 | `SQS_AI_JOBS_QUEUE_URL` | Agent와 Canvas를 소비하는 shared AI jobs queue URL. 실제 병렬성은 ECS service의 desired count로 관리한다. |
 | `DATABASE_SSL` | Set to `true` when `DATABASE_URL` points to Supabase/Postgres that requires SSL. |
 | `AGENT_EXECUTION_HANDOFF_BASE_URL` | Agent 실행 handoff를 보낼 App Server origin |
+| `LEGACY_MEETING_DRAIN_ENABLED` | AP-19 cutover 동안 기존 `ai-jobs`의 MeetingReport를 처리하도록 Meeting processor를 임시로 유지한다. 기존 MeetingReport job drain 확인 뒤에만 `false`로 전환한다. |
+
+`LEGACY_MEETING_DRAIN_ENABLED=true`일 때만 `S3_RECORDINGS_BUCKET`,
+`MEETING_REPORT_EVENT_*`, `OPENAI_STT_MODEL`, `OPENAI_MEETING_REPORT_MODEL`,
+`MEETING_REPORT_EVENT_TOKEN`을 shared AI Worker에 임시 주입한다. `false` 전환 Terraform
+apply는 이 환경변수와 callback secret을 shared AI Worker에서 제거한다.
 
 ### Meeting Worker
 
