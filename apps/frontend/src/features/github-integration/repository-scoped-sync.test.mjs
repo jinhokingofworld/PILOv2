@@ -71,6 +71,23 @@ assert.match(
   /ReplaceGithubProjectV2SelectionsInput = \{[\s\S]*repositoryId: string;/
 );
 assert.match(
+  types,
+  /GithubRepository = \{[\s\S]*installationId: string;/
+);
+const repositorySelectionHandler =
+  panel.match(
+    /async function handleSelectRepository\(repositoryId: string\) \{[\s\S]*?\n  \}\n\n  function handleSelectProjectV2/
+  )?.[0] ?? "";
+assert.match(repositorySelectionHandler, /snapshot\.repositories\.find\(/);
+assert.match(
+  repositorySelectionHandler,
+  /setSelectedInstallationId\(repository\.installationId\)/
+);
+assert.match(
+  repositorySelectionHandler,
+  /handleDiscoverGithubProjectV2\(repository\.installationId, repositoryId\)/
+);
+assert.match(
   tables,
   /저장소를 선택하면 PR 및 ProjectV2 동기화 범위를 관리할 수 있습니다/
 );

@@ -96,6 +96,7 @@ export interface GithubPaginatedPayload<T> {
 
 export interface GithubRepositoryListItemPayload {
   id: string;
+  installationId: string;
   githubRepositoryId: number | null;
   githubNodeId: string | null;
   ownerLogin: string;

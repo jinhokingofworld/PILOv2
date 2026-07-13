@@ -363,7 +363,9 @@ GET /api/v1/workspaces/{workspaceId}/github/repositories?q=pilo&includeArchived=
 | `page`, `limit` | 기본 `1`, `20`; 최대 limit `100` |
 
 Repository 목록은 `installation_id IS NOT NULL`인 현재 active installation cache만
-반환하며 `fullName ASC, id ASC`로 정렬한다.
+반환하며 `fullName ASC, id ASC`로 정렬한다. 각 항목의 `installationId`는 repository가
+연결된 GitHub App installation UUID이며, repository 범위 ProjectV2 조회와 동기화 요청에
+사용한다.
 
 ProjectV2 목록:
 

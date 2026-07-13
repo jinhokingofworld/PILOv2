@@ -722,8 +722,14 @@ export function GithubPanel() {
 
   async function handleSelectRepository(repositoryId: string) {
     if (!workspaceId) return;
+    const repository = snapshot.repositories.find(
+      (candidate) => candidate.id === repositoryId
+    );
+    if (!repository) return;
+
     setSelectedRepositoryId(repositoryId);
     selectedRepositoryIdRef.current = repositoryId;
+    setSelectedInstallationId(repository.installationId);
     setSnapshot((current) => ({ ...current, projects: [], projectsTotal: 0 }));
     setSelectedProjectV2Ids(new Set());
     setSelectedProjectV2Id("");
@@ -733,7 +739,7 @@ export function GithubPanel() {
     });
     await Promise.all([
       loadGithubPullRequests(repositoryId),
-      handleDiscoverGithubProjectV2(selectedInstallationId, repositoryId)
+      handleDiscoverGithubProjectV2(repository.installationId, repositoryId)
     ]);
   }
 

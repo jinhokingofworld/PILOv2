@@ -18,6 +18,7 @@ import type {
 
 interface GithubRepositoryRow extends QueryResultRow {
   id: string;
+  installation_id: string;
   github_repository_id: string | number | null;
   github_node_id: string | null;
   owner_login: string;
@@ -132,6 +133,7 @@ export class GithubSourceReadService {
       `
         SELECT
           id,
+          installation_id,
           github_repository_id,
           github_node_id,
           owner_login,
@@ -294,6 +296,7 @@ export class GithubSourceReadService {
       `
         SELECT
           id,
+          installation_id,
           github_repository_id,
           github_node_id,
           owner_login,
@@ -541,6 +544,7 @@ export class GithubSourceReadService {
   ): GithubRepositoryListItemPayload {
     return {
       id: row.id,
+      installationId: row.installation_id,
       githubRepositoryId: this.toNullableNumber(row.github_repository_id),
       githubNodeId: row.github_node_id,
       ownerLogin: row.owner_login,
