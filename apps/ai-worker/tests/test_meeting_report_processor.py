@@ -419,6 +419,86 @@ def test_processor_marks_llm_business_failure_and_deletes_message() -> None:
     ]
 
 
+@pytest.mark.parametrize(
+    ("title", "description"),
+    [
+        ("   ", "유효한 설명"),
+        ("a" * 501, "유효한 설명"),
+        ("유효한 제목", "a" * 5_001),
+    ],
+)
+def test_parse_generated_report_rejects_action_items_that_violate_db_text_constraints(
+    title: str, description: str
+) -> None:
+    with pytest.raises(ProviderBusinessError, match="Invalid action item"):
+        parse_generated_report_json(
+            json.dumps(
+                {
+                    "summary": "요약",
+                    "discussionPoints": "논의",
+                    "decisions": "결정",
+                    "actionItemCandidates": [
+                        {
+                            "title": title,
+                            "description": description,
+                            "assigneeUserId": None,
+                            "priority": "MEDIUM",
+                        }
+                    ],
+                    "evidence": [
+                        {"sourceType": "decision", "sourceIndex": 0, "segmentIndexes": [0]},
+                        {"sourceType": "action_item", "sourceIndex": 0, "segmentIndexes": [0]},
+                    ],
+                }
+            ),
+            "원문",
+            [TranscriptSegment(0, 0, 1_000, "원문")],
+        )
+
+
+def test_processor_marks_invalid_action_item_payload_as_llm_failure() -> None:
+    class InvalidActionItemAiClient(FakeAiClient):
+        def generate_report(
+            self, transcript_text: str, transcript_segments: list[TranscriptSegment]
+        ) -> GeneratedMeetingReport:
+            self.generate_calls.append(transcript_text)
+            return parse_generated_report_json(
+                json.dumps(
+                    {
+                        "summary": "요약",
+                        "discussionPoints": "논의",
+                        "decisions": "결정",
+                        "actionItemCandidates": [
+                            {
+                                "title": " ",
+                                "description": "설명",
+                                "assigneeUserId": None,
+                                "priority": "MEDIUM",
+                            }
+                        ],
+                        "evidence": [
+                            {"sourceType": "decision", "sourceIndex": 0, "segmentIndexes": [0]},
+                            {"sourceType": "action_item", "sourceIndex": 0, "segmentIndexes": [0]},
+                        ],
+                    }
+                ),
+                transcript_text,
+                transcript_segments,
+            )
+
+    repository = FakeRepository()
+    processor = MeetingReportProcessor(repository, FakeStorage(), InvalidActionItemAiClient())
+
+    result = processor.process_message(meeting_report_job_payload())
+
+    assert result.delete_message is True
+    assert result.reason == "llm_failed"
+    assert repository.completed_updates == []
+    assert repository.failed_updates == [
+        (REPORT_ID, "LLM", "Meeting report could not be generated.")
+    ]
+
+
 def test_processor_leaves_infrastructure_failure_for_sqs_retry() -> None:
     repository = FakeRepository()
     processor = MeetingReportProcessor(repository, FakeStorage(fail_head=True), FakeAiClient())

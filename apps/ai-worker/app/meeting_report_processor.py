@@ -8,6 +8,8 @@ from typing import Protocol
 from uuid import UUID
 
 MAX_TRANSCRIPTION_FILE_BYTES = 25_000_000
+MAX_ACTION_ITEM_TITLE_BYTES = 500
+MAX_ACTION_ITEM_DESCRIPTION_BYTES = 5_000
 LOGGER = logging.getLogger(__name__)
 
 TERMINAL_REPORT_STATUSES = {"COMPLETED", "FAILED"}
@@ -366,8 +368,8 @@ def _parse_action_item(value: object) -> ActionItemCandidate:
     if not isinstance(value, dict):
         raise ProviderBusinessError("Invalid action item")
 
-    title = _require_payload_string(value, "title")
-    description = _require_payload_string(value, "description")
+    title = _require_action_item_text(value, "title", MAX_ACTION_ITEM_TITLE_BYTES)
+    description = _require_action_item_text(value, "description", MAX_ACTION_ITEM_DESCRIPTION_BYTES)
     priority = _require_payload_string(value, "priority")
     if "assigneeUserId" not in value:
         raise ProviderBusinessError("Invalid action item assignee")
@@ -450,6 +452,13 @@ def _require_payload_string(payload: dict[str, object], key: str) -> str:
     value = payload.get(key)
     if not isinstance(value, str):
         raise ProviderBusinessError(f"Invalid {key}")
+    return value
+
+
+def _require_action_item_text(payload: dict[str, object], key: str, max_bytes: int) -> str:
+    value = _require_payload_string(payload, key).strip()
+    if not value or len(value.encode("utf-8")) > max_bytes:
+        raise ProviderBusinessError(f"Invalid action item {key}")
     return value
 
 
