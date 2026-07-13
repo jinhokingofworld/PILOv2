@@ -154,6 +154,15 @@ export function createSqlErdSqlLineDiff(
 export function applySqlErdNormalizedSqlPreview(
   preview: SqlErdNormalizedSqlPreview
 ): SqlErdModelSqlApplyResult {
+  if (preview.generationBlocked) {
+    return {
+      error:
+        preview.warnings[0] ??
+        "SQL regeneration is unavailable for the current ERD model.",
+      ok: false
+    };
+  }
+
   const parseResult = parseSqlDdlToErdModel({
     dialect: preview.resolvedDialect,
     sourceMapModelJson: preview.modelJson,

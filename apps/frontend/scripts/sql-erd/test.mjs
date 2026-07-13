@@ -4554,7 +4554,8 @@ const blockedSqlitePreview = sqlDiffApplyRuntime.createSqlErdNormalizedSqlPrevie
   session: {
     ...modelSqlPreviewSession,
     dialect: "sqlite",
-    modelJson: cyclicModel
+    modelJson: cyclicModel,
+    sourceText: "CREATE TABLE current_snapshot (id INTEGER PRIMARY KEY);"
   }
 });
 assert.equal(blockedSqlitePreview.generationBlocked, true);
@@ -4562,6 +4563,13 @@ assert.equal(blockedSqlitePreview.hasChanges, false);
 assert.match(
   blockedSqlitePreview.warnings.join(" "),
   /SQLite cannot regenerate FOREIGN KEY relations that require ALTER TABLE/
+);
+assert.deepEqual(
+  sqlDiffApplyRuntime.applySqlErdNormalizedSqlPreview(blockedSqlitePreview),
+  {
+    error: blockedSqlitePreview.warnings[0],
+    ok: false
+  }
 );
 
 const mysqlTypeParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
