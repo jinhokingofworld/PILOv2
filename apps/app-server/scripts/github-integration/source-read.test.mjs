@@ -80,6 +80,7 @@ function createService(database = new FakeDatabase()) {
 function repositoryRow(overrides = {}) {
   return {
     id: repositoryId,
+    installation_id: "66666666-6666-4666-8666-666666666666",
     github_repository_id: "987654321",
     github_node_id: "R_kgDOExample",
     owner_login: "my-team",
@@ -185,6 +186,7 @@ function assertNoSecretLookup(database) {
     queryRows: [
       (text, values) => {
         assert.match(text, /FROM github_repositories/i);
+        assert.match(text, /installation_id/i);
         assert.match(text, /installation_id IS NOT NULL/i);
         assert.match(text, /ORDER BY full_name ASC/i);
         assert.deepEqual(values, [workspaceId, "%pilo%", 20, 0]);
@@ -208,6 +210,7 @@ function assertNoSecretLookup(database) {
     data: [
       {
         id: repositoryId,
+        installationId: "66666666-6666-4666-8666-666666666666",
         githubRepositoryId: 987654321,
         githubNodeId: "R_kgDOExample",
         ownerLogin: "my-team",
@@ -254,6 +257,7 @@ function assertNoSecretLookup(database) {
 
   assert.deepEqual(repository, {
     id: repositoryId,
+    installationId: "66666666-6666-4666-8666-666666666666",
     githubRepositoryId: 987654321,
     githubNodeId: "R_kgDOExample",
     ownerLogin: "my-team",
