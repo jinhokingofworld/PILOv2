@@ -31,6 +31,7 @@ PR_REVIEW_ANALYSIS_JOB_TYPE = "pr_review_analysis_requested"
 PR_REVIEW_ANALYSIS_SCHEMA_VERSION = "pr-review-analysis:v1"
 PR_REVIEW_RISK_LEVELS = {"high", "medium", "low", "unknown"}
 DEFAULT_PR_REVIEW_MODEL = "gpt-5.1-mini"
+OPENAI_PR_REVIEW_MAX_RETRIES = 0
 MAX_PR_BODY_CHARS = 4_000
 MAX_PATCH_CHARS_PER_FILE = 4_000
 MAX_TOTAL_PATCH_CHARS = 32_000
@@ -435,7 +436,11 @@ class OpenAiPrReviewAnalysisClient:
     ) -> None:
         from openai import OpenAI
 
-        self.client = OpenAI(api_key=api_key, timeout=timeout_seconds)
+        self.client = OpenAI(
+            api_key=api_key,
+            timeout=timeout_seconds,
+            max_retries=OPENAI_PR_REVIEW_MAX_RETRIES,
+        )
         self.model = model
         self.monotonic_time = monotonic_time
 

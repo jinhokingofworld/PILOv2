@@ -50,6 +50,11 @@ App Server log group은 `/ecs/pilo-dev/app-server`, 전용 Worker log group은
 기록한다. provider 예외 메시지, 응답 body, prompt, patch, 생성 결과와 stack trace는 기록하지
 않는다. `request_id`는 OpenAI 지원 또는 provider 로그와 대조할 때만 사용한다.
 
+PR Review 전용 Worker의 OpenAI timeout은 180초다. OpenAI SDK 내부 재시도는 비활성화하며,
+일시적 provider 실패는 900초 visibility timeout과 receive count 3회인 SQS 경계에서만
+재시도한다. 따라서 한 번의 `pr_review_analysis_provider_failed`가 약 180초를 넘기지 않는지
+확인하고, 같은 message의 다음 시도는 약 900초 뒤 시작되는지 확인한다.
+
 분석 지연은 다음 순서로 확인한다.
 
 1. DB에서 `job_id`, `session_id`, Job 상태와 마지막 갱신 시각을 찾는다.

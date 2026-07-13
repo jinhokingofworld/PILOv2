@@ -215,7 +215,7 @@ apply는 이 환경변수와 callback secret을 shared AI Worker에서 제거한
 | `PR_REVIEW_ANALYSIS_HANDOFF_TIMEOUT_SECONDS` | internal handoff HTTP timeout. dev 기본값: `10` |
 | `PR_REVIEW_ANALYSIS_WORKER_TOKEN` | internal handoff 인증 shared secret |
 | `OPENAI_PR_REVIEW_MODEL` | PR Review 분석 모델. dev 값: `gpt-5.5` |
-| `OPENAI_PR_REVIEW_TIMEOUT_MS` | OpenAI 분석 timeout. dev 값: `60000` |
+| `OPENAI_PR_REVIEW_TIMEOUT_MS` | OpenAI 분석 timeout. dev 값: `180000` |
 | `AI_WORKER_SQS_VISIBILITY_TIMEOUT_SECONDS` | receive visibility timeout. dev 값: `900` |
 
 ### LiveKit Server / Egress

@@ -1,5 +1,6 @@
 import json
 import logging
+import sys
 from types import SimpleNamespace
 
 import app.pr_review_analysis_processor as processor_module
@@ -394,6 +395,20 @@ def test_processor_keeps_infrastructure_failures_for_sqs_retry(caplog) -> None:
     assert result.job_id == JOB_ID
     assert "stage=provider outcome=failed error_type=InfrastructureError" in caplog.text
     assert "sensitive provider response" not in caplog.text
+
+
+def test_openai_provider_disables_sdk_retries(monkeypatch) -> None:
+    class FakeOpenAI:
+        initialized_with: tuple[str, float, int] | None = None
+
+        def __init__(self, *, api_key: str, timeout: float, max_retries: int) -> None:
+            FakeOpenAI.initialized_with = (api_key, timeout, max_retries)
+
+    monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=FakeOpenAI))
+
+    OpenAiPrReviewAnalysisClient("test-key", "gpt-test", 180)
+
+    assert FakeOpenAI.initialized_with == ("test-key", 180, 0)
 
 
 def test_openai_provider_logs_safe_success_metrics(caplog) -> None:

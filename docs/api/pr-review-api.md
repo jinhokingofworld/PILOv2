@@ -537,9 +537,10 @@ App Server가 session을 해당 안전한 `failed` reason code로 전환한 뒤 
 
 PR Review 전용 Worker는 Responses API의 strict JSON schema `pr_review_analysis`를 사용한다.
 모델은 `OPENAI_PR_REVIEW_MODEL`을 사용하고, 값이 없으면 `gpt-5.1-mini`를 사용한다. Worker의
-provider timeout은 `OPENAI_PR_REVIEW_TIMEOUT_MS`로 설정하며 기본값은 60초다. PR Review 전용
-worker runtime은 `SQS_PR_REVIEW_ANALYSIS_QUEUE_URL`, `PR_REVIEW_ANALYSIS_HANDOFF_BASE_URL`,
-`PR_REVIEW_ANALYSIS_WORKER_TOKEN`을 별도로 사용한다. 이 분석 계약은
+provider timeout은 `OPENAI_PR_REVIEW_TIMEOUT_MS`로 설정하며 기본값은 180초다. OpenAI SDK의
+내부 재시도는 사용하지 않고, timeout·rate limit·provider 5xx 재시도는 SQS receive 경계에서만
+수행한다. PR Review 전용 worker runtime은 `SQS_PR_REVIEW_ANALYSIS_QUEUE_URL`,
+`PR_REVIEW_ANALYSIS_HANDOFF_BASE_URL`, `PR_REVIEW_ANALYSIS_WORKER_TOKEN`을 별도로 사용한다. 이 분석 계약은
 기존 동기 PR 분석의 모델·prompt 목적·출력 구조를 유지한 것이며, conflict suggestion의 모델,
 prompt, 동기 호출 방식은 변경하지 않는다.
 

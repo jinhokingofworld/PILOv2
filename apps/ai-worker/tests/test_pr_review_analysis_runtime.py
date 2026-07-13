@@ -23,6 +23,20 @@ def test_pr_review_worker_settings_use_dedicated_queue_and_contract_env(monkeypa
     assert settings.visibility_timeout_seconds == 900
 
 
+def test_pr_review_worker_settings_use_180_second_openai_timeout_by_default(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("SQS_PR_REVIEW_ANALYSIS_QUEUE_URL", "http://localhost:4566/pr-review")
+    monkeypatch.setenv("PR_REVIEW_ANALYSIS_HANDOFF_BASE_URL", "http://localhost:3000")
+    monkeypatch.setenv("PR_REVIEW_ANALYSIS_WORKER_TOKEN", "worker-token")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.delenv("OPENAI_PR_REVIEW_TIMEOUT_MS", raising=False)
+
+    settings = PrReviewWorkerSettings.from_env()
+
+    assert settings.openai_timeout_seconds == 180
+
+
 def test_pr_review_worker_fails_fast_when_processor_initialization_fails(monkeypatch) -> None:
     def fail_initialization():
         raise RuntimeError("missing worker configuration")

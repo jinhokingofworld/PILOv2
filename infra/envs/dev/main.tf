@@ -349,7 +349,7 @@ module "ecs" {
         PR_REVIEW_ANALYSIS_HANDOFF_BASE_URL        = local.api_domain == "" ? "http://${module.alb.alb_dns_name}" : "https://${local.api_domain}"
         PR_REVIEW_ANALYSIS_HANDOFF_TIMEOUT_SECONDS = "10"
         OPENAI_PR_REVIEW_MODEL                     = "gpt-5.5"
-        OPENAI_PR_REVIEW_TIMEOUT_MS                = "60000"
+        OPENAI_PR_REVIEW_TIMEOUT_MS                = "180000"
         AI_WORKER_SQS_VISIBILITY_TIMEOUT_SECONDS   = "900"
       }
       secrets = module.secrets.pr_review_ai_worker_ecs_secrets
