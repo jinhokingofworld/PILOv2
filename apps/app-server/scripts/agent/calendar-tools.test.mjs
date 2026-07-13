@@ -59,7 +59,7 @@ class FakeCalendarService {
       workspaceId,
       eventId
     });
-    return this.events.find((event) => event.id === Number(eventId));
+    return this.refreshedEvent ?? this.events.find((event) => event.id === Number(eventId));
   }
 
   async createEvent(currentUserId, workspaceId, body) {
@@ -204,14 +204,25 @@ function errorCode(error) {
   const { calendarService, registry } = createRegistry();
   const tool = registry.getDefinition("update_calendar_event");
   const input = tool.validateInput({
-    eventId: "1",
+    target: {
+      title: " 주간   회의 ",
+      startDate: "2026-07-08",
+      endDate: "2026-07-08",
+      startTime: "15:00"
+    },
     changes: {
       startTime: "16:00",
       endTime: "17:00"
     }
   });
   const plan = await tool.buildConfirmation(context, input);
-  const result = await tool.execute(context, input);
+  const result = await tool.execute(
+    context,
+    tool.validateConfirmationInput({
+      eventId: plan.target.resourceId,
+      changes: plan.after
+    })
+  );
 
   assert.equal(plan.toolName, "update_calendar_event");
   assert.equal(plan.target.resourceId, "1");
@@ -223,15 +234,132 @@ function errorCode(error) {
   });
   assert.equal(result.status, "updated");
   assert.deepEqual(calendarService.calls[0], {
+    method: "listEvents",
+    currentUserId: USER_ID,
+    workspaceId: WORKSPACE_ID,
+    query: {
+      start: "2026-07-08",
+      end: "2026-07-08"
+    }
+  });
+  assert.deepEqual(calendarService.calls[1], {
     method: "getEvent",
     currentUserId: USER_ID,
     workspaceId: WORKSPACE_ID,
     eventId: "1"
   });
-  assert.deepEqual(calendarService.calls[1].body, {
+  assert.deepEqual(calendarService.calls[2].body, {
     startTime: "16:00",
     endTime: "17:00"
   });
+}
+
+{
+  const { calendarService, registry } = createRegistry();
+  const tool = registry.getDefinition("update_calendar_event");
+  calendarService.events = [];
+  const result = await tool.buildConfirmation(
+    context,
+    tool.validateInput({
+      target: {
+        title: "주간 회의",
+        startDate: "2026-07-08",
+        endDate: "2026-07-08"
+      },
+      changes: { title: "주간 회의 수정" }
+    })
+  );
+
+  assert.equal(result.kind, "needs_clarification");
+  assert.equal(result.outputSummary.selection, "none");
+  assert.equal(calendarService.calls.length, 1);
+}
+
+{
+  const { calendarService, registry } = createRegistry();
+  const tool = registry.getDefinition("update_calendar_event");
+  calendarService.refreshedEvent = createEvent({ title: "변경된 제목" });
+  const result = await tool.buildConfirmation(
+    context,
+    tool.validateInput({
+      target: {
+        title: "주간 회의",
+        startDate: "2026-07-08",
+        endDate: "2026-07-08"
+      },
+      changes: { title: "주간 회의 수정" }
+    })
+  );
+
+  assert.equal(result.kind, "needs_clarification");
+  assert.equal(result.outputSummary.selection, "none");
+  assert.deepEqual(
+    calendarService.calls.map((call) => call.method),
+    ["listEvents", "getEvent"]
+  );
+}
+
+{
+  const { calendarService, registry } = createRegistry();
+  const tool = registry.getDefinition("update_calendar_event");
+  calendarService.events = [createEvent(), createEvent({ id: 2 })];
+  const result = await tool.buildConfirmation(
+    context,
+    tool.validateInput({
+      target: {
+        title: "주간 회의",
+        startDate: "2026-07-08",
+        endDate: "2026-07-08"
+      },
+      changes: { title: "주간 회의 수정" }
+    })
+  );
+
+  assert.equal(result.kind, "needs_clarification");
+  assert.equal(result.outputSummary.selection, "multiple");
+  assert.equal(result.resourceRefs.length, 2);
+  assert.equal(calendarService.calls.length, 1);
+}
+
+{
+  const { registry } = createRegistry();
+  const tool = registry.getDefinition("update_calendar_event");
+
+  assert.throws(
+    () =>
+      tool.validateInput({
+        eventId: "1",
+        changes: { title: "주간 회의 수정" }
+      }),
+    (error) => {
+      assert.equal(error.getStatus(), 400);
+      assert.match(error.getResponse().error.message, /target/);
+      return true;
+    }
+  );
+}
+
+{
+  const { registry } = createRegistry();
+  const tool = registry.getDefinition("update_calendar_event");
+
+  assert.throws(
+    () =>
+      tool.validateInput({
+        workspaceId: WORKSPACE_ID,
+        target: {
+          title: "주간 회의",
+          startDate: "2026-07-08",
+          endDate: "2026-07-08"
+        },
+        changes: { title: "주간 회의 수정" }
+      }),
+    (error) => {
+      assert.equal(error.getStatus(), 400);
+      assert.match(error.getResponse().error.message, /workspaceId/);
+      return true;
+    }
+  );
 }
 
 {
@@ -328,7 +456,11 @@ function errorCode(error) {
   assert.throws(
     () =>
       tool.validateInput({
-        eventId: "1",
+        target: {
+          title: "주간 회의",
+          startDate: "2026-07-08",
+          endDate: "2026-07-08"
+        },
         before: { title: "LLM이 만든 현재값" },
         changes: { startTime: "16:00" }
       }),
@@ -348,7 +480,11 @@ function errorCode(error) {
   assert.throws(
     () =>
       tool.validateInput({
-        eventId: "1",
+        target: {
+          title: "주간 회의",
+          startDate: "2026-07-08",
+          endDate: "2026-07-08"
+        },
         changes: {
           unsupported: "value"
         }

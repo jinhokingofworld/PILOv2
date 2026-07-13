@@ -44,6 +44,12 @@ export interface AgentConfirmationPlan {
   call: AgentJsonObject;
 }
 
+export interface AgentToolClarificationResult {
+  kind: "needs_clarification";
+  outputSummary: AgentToolOutputSummary;
+  resourceRefs: AgentResourceRef[];
+}
+
 export interface AgentToolExecutionResult {
   outputSummary: AgentToolOutputSummary;
   resourceRefs: AgentResourceRef[];
@@ -60,7 +66,11 @@ export interface AgentToolDefinition<TInput> {
   buildConfirmation?: (
     context: AgentToolContext,
     input: TInput
-  ) => AgentConfirmationPlan | Promise<AgentConfirmationPlan>;
+  ) =>
+    | AgentConfirmationPlan
+    | AgentToolClarificationResult
+    | Promise<AgentConfirmationPlan | AgentToolClarificationResult>;
+  validateConfirmationInput?: (input: unknown) => unknown;
   execute: (
     context: AgentToolContext,
     input: TInput

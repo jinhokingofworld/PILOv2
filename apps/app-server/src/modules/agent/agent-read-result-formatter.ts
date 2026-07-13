@@ -72,6 +72,8 @@ export function buildAgentReadResultAnswer(
   switch (input.toolName) {
     case "list_calendar_events":
       return formatCalendarEvents(input) ?? buildGenericAnswer(input);
+    case "update_calendar_event":
+      return formatCalendarUpdateClarification(input) ?? buildGenericAnswer(input);
     case "list_meeting_reports":
       return formatMeetingReportList(input) ?? buildGenericAnswer(input);
     case "get_meeting_report":
@@ -82,6 +84,25 @@ export function buildAgentReadResultAnswer(
     default:
       return buildGenericAnswer(input);
   }
+}
+
+function formatCalendarUpdateClarification(
+  input: AgentReadResultFormatterInput
+): string | null {
+  if (input.outputSummary.status !== "needs_clarification") {
+    return null;
+  }
+
+  const selection = readString(input.outputSummary.selection);
+  if (selection === "multiple") {
+    return "조건에 맞는 일정이 여러 개라 수정하지 않았습니다. 대상 일정의 날짜와 시간을 더 구체적으로 알려주세요.";
+  }
+
+  if (selection === "none") {
+    return "조건에 맞는 일정을 찾지 못해 수정하지 않았습니다. 대상 일정의 제목, 날짜, 시간을 더 구체적으로 알려주세요.";
+  }
+
+  return null;
 }
 
 function formatBoardIssues(input: AgentReadResultFormatterInput): string | null {
