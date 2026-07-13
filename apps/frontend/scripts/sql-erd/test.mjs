@@ -870,6 +870,50 @@ assert.equal(
   true
 );
 
+const multipleForeignKeysUpdateModel = structuredClone(runtimeModel);
+const archivedUsersTable = structuredClone(
+  multipleForeignKeysUpdateModel.schema.tables.find(
+    (table) => table.id === "table.users"
+  )
+);
+
+archivedUsersTable.id = "table.archived_users";
+archivedUsersTable.name = "archived_users";
+archivedUsersTable.constraints[0].id = "constraint.archived_users.pk";
+multipleForeignKeysUpdateModel.schema.tables.push(archivedUsersTable);
+multipleForeignKeysUpdateModel.schema.relations.push({
+  constraintName: null,
+  fromColumnIds: ["user_id"],
+  fromTableId: "table.orders",
+  id: "relation.orders.user_id.archived_users.id",
+  kind: "foreign_key",
+  toColumnIds: ["id"],
+  toTableId: "table.archived_users"
+});
+
+const multipleForeignKeysUpdateCandidate =
+  foreignKeyAddRuntime.createSqlErdForeignKeyUpdateCandidate({
+    dialect: "postgresql",
+    modelJson: multipleForeignKeysUpdateModel,
+    relationId: "relation.orders.user_id.users.id",
+    toColumnId: "id",
+    toTableId: "table.orders"
+  });
+
+assert.equal(multipleForeignKeysUpdateCandidate.ok, true);
+assert.equal(
+  multipleForeignKeysUpdateCandidate.modelJson.schema.relations.some(
+    (relation) => relation.id === "relation.orders.user_id.archived_users.id"
+  ),
+  true
+);
+assert.equal(
+  multipleForeignKeysUpdateCandidate.modelJson.schema.relations.some(
+    (relation) => relation.id === "relation.orders.user_id.orders.id"
+  ),
+  true
+);
+
 const foreignKeyDeleteCandidate =
   foreignKeyAddRuntime.createSqlErdForeignKeyDeleteCandidate({
     modelJson: runtimeModel,

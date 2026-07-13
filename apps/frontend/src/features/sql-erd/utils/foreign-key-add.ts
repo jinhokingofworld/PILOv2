@@ -61,6 +61,41 @@ export function createSqlErdForeignKeyAddCandidate({
   toColumnId: string;
   toTableId: string;
 }): SqltoerdForeignKeyAddResult {
+  return createSqlErdForeignKeyCandidate(
+    {
+      dialect,
+      fromColumnId,
+      fromTableId,
+      modelJson,
+      toColumnId,
+      toTableId
+    },
+    { rejectExistingSourceColumnForeignKey: true }
+  );
+}
+
+function createSqlErdForeignKeyCandidate(
+  {
+    dialect,
+    fromColumnId,
+    fromTableId,
+    modelJson,
+    toColumnId,
+    toTableId
+  }: {
+    dialect: SqltoerdResolvedDialect;
+    fromColumnId: string;
+    fromTableId: string;
+    modelJson: SqltoerdModelJsonV1;
+    toColumnId: string;
+    toTableId: string;
+  },
+  {
+    rejectExistingSourceColumnForeignKey
+  }: {
+    rejectExistingSourceColumnForeignKey: boolean;
+  }
+): SqltoerdForeignKeyAddResult {
   const fromTable = modelJson.schema.tables.find(
     (table) => table.id === fromTableId
   );
@@ -117,6 +152,7 @@ export function createSqlErdForeignKeyAddCandidate({
   }
 
   if (
+    rejectExistingSourceColumnForeignKey &&
     modelJson.schema.relations.some(
       (existingRelation) =>
         existingRelation.fromTableId === fromTable.id &&
@@ -185,14 +221,17 @@ export function createSqlErdForeignKeyUpdateCandidate({
     modelJson,
     relation
   );
-  const candidate = createSqlErdForeignKeyAddCandidate({
-    dialect,
-    fromColumnId: relation.fromColumnIds[0],
-    fromTableId: relation.fromTableId,
-    modelJson: modelWithoutRelation,
-    toColumnId,
-    toTableId
-  });
+  const candidate = createSqlErdForeignKeyCandidate(
+    {
+      dialect,
+      fromColumnId: relation.fromColumnIds[0],
+      fromTableId: relation.fromTableId,
+      modelJson: modelWithoutRelation,
+      toColumnId,
+      toTableId
+    },
+    { rejectExistingSourceColumnForeignKey: false }
+  );
 
   if (!candidate.ok) {
     return candidate;
