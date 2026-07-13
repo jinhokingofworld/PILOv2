@@ -95,9 +95,13 @@ import {
 import { isSqlErdSourceTextTooLarge } from "@/features/sql-erd/utils/ddl-parser";
 import {
   createSqlErdForeignKeyAddCandidate,
+  createSqlErdForeignKeyDeleteCandidate,
+  createSqlErdForeignKeyUpdateCandidate,
   getSqltoerdForeignKeyTargetColumns,
   type SqltoerdForeignKeyAddResult,
-  type SqltoerdForeignKeyAddFailureReason
+  type SqltoerdForeignKeyAddFailureReason,
+  type SqltoerdForeignKeyEditFailureReason,
+  type SqltoerdForeignKeyEditResult
 } from "@/features/sql-erd/utils/foreign-key-add";
 import {
   areSqltoerdLayoutsEqual,
@@ -720,6 +724,93 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
         modelJson: currentSnapshot.modelJson,
         toColumnId,
         toTableId
+      });
+
+      if (!candidate.ok) {
+        return candidate;
+      }
+
+      setNormalizedSqlApplyError(null);
+      setNormalizedSqlPreview(
+        createSqlErdNormalizedSqlPreview({
+          modelJson: candidate.modelJson,
+          resolvedDialect,
+          session: currentSnapshot
+        })
+      );
+
+      return candidate;
+    },
+    [isNormalizedSqlApplying, lastResolvedDialect]
+  );
+  const handlePreviewForeignKeyUpdate = useCallback(
+    ({
+      relationId,
+      toColumnId,
+      toTableId
+    }: {
+      relationId: string;
+      toColumnId: string;
+      toTableId: string;
+    }): SqltoerdForeignKeyEditResult | null => {
+      const currentSnapshot =
+        sqlErdEditStateRef.current.lastSuccessfulSnapshot;
+      const resolvedDialect =
+        lastResolvedDialect ??
+        (currentSnapshot.dialect === "auto" ? null : currentSnapshot.dialect);
+
+      if (
+        !resolvedDialect ||
+        isNormalizedSqlApplying ||
+        isSqlErdDraftDirty(sqlErdEditStateRef.current)
+      ) {
+        return null;
+      }
+
+      const candidate = createSqlErdForeignKeyUpdateCandidate({
+        dialect: resolvedDialect,
+        modelJson: currentSnapshot.modelJson,
+        relationId,
+        toColumnId,
+        toTableId
+      });
+
+      if (!candidate.ok) {
+        return candidate;
+      }
+
+      setNormalizedSqlApplyError(null);
+      setNormalizedSqlPreview(
+        createSqlErdNormalizedSqlPreview({
+          modelJson: candidate.modelJson,
+          resolvedDialect,
+          session: currentSnapshot
+        })
+      );
+
+      return candidate;
+    },
+    [isNormalizedSqlApplying, lastResolvedDialect]
+  );
+  const handlePreviewForeignKeyDelete = useCallback(
+    ({ relationId }: { relationId: string }): SqltoerdForeignKeyEditResult | null => {
+      const currentSnapshot =
+        sqlErdEditStateRef.current.lastSuccessfulSnapshot;
+      const resolvedDialect =
+        lastResolvedDialect ??
+        (currentSnapshot.dialect === "auto" ? null : currentSnapshot.dialect);
+
+      if (
+        !resolvedDialect ||
+        isNormalizedSqlApplying ||
+        isSqlErdDraftDirty(sqlErdEditStateRef.current)
+      ) {
+        return null;
+      }
+
+      const candidate = createSqlErdForeignKeyDeleteCandidate({
+        modelJson: currentSnapshot.modelJson,
+        relationId
       });
 
       if (!candidate.ok) {
@@ -1610,9 +1701,11 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
         isOpen={isInspectorOpen}
         modelJson={sqlErdViewSession.modelJson}
         onAddForeignKey={handlePreviewForeignKeyAdd}
+        onDeleteForeignKey={handlePreviewForeignKeyDelete}
         onClearTablePin={handleClearTablePin}
         onNavigateToPinnedTable={handleNavigateToPinnedTable}
         onPinTable={handlePinTable}
+        onUpdateForeignKey={handlePreviewForeignKeyUpdate}
         onToggle={() => setIsInspectorOpen((current) => !current)}
         pinnedTableId={tablePinState.pinnedTableId}
         pinnedTableTitle={pinnedTableTitle}
@@ -2418,9 +2511,17 @@ type InspectorPanelProps = PanelToggleProps & {
     toColumnId: string;
     toTableId: string;
   }) => SqltoerdForeignKeyAddResult | null;
+  onDeleteForeignKey: (input: {
+    relationId: string;
+  }) => SqltoerdForeignKeyEditResult | null;
   onClearTablePin: () => void;
   onNavigateToPinnedTable: () => void;
   onPinTable: () => void;
+  onUpdateForeignKey: (input: {
+    relationId: string;
+    toColumnId: string;
+    toTableId: string;
+  }) => SqltoerdForeignKeyEditResult | null;
   pinnedTableId: string | null;
   pinnedTableTitle: string | null;
   viewModel: SqlErdInspectorViewModel;
@@ -2433,9 +2534,11 @@ function InspectorPanel({
   isOpen,
   modelJson,
   onAddForeignKey,
+  onDeleteForeignKey,
   onClearTablePin,
   onNavigateToPinnedTable,
   onPinTable,
+  onUpdateForeignKey,
   onToggle,
   pinnedTableId,
   pinnedTableTitle,
@@ -2488,6 +2591,8 @@ function InspectorPanel({
           emptyState={emptyState}
           modelJson={modelJson}
           onAddForeignKey={onAddForeignKey}
+          onDeleteForeignKey={onDeleteForeignKey}
+          onUpdateForeignKey={onUpdateForeignKey}
           viewModel={viewModel}
         />
 
@@ -2651,6 +2756,8 @@ function InspectorContent({
   emptyState,
   modelJson,
   onAddForeignKey,
+  onDeleteForeignKey,
+  onUpdateForeignKey,
   viewModel
 }: {
   canAddForeignKey: boolean;
@@ -2662,6 +2769,14 @@ function InspectorContent({
     toColumnId: string;
     toTableId: string;
   }) => SqltoerdForeignKeyAddResult | null;
+  onDeleteForeignKey: (input: {
+    relationId: string;
+  }) => SqltoerdForeignKeyEditResult | null;
+  onUpdateForeignKey: (input: {
+    relationId: string;
+    toColumnId: string;
+    toTableId: string;
+  }) => SqltoerdForeignKeyEditResult | null;
   viewModel: SqlErdInspectorViewModel;
 }) {
   if (viewModel.type === "table") {
@@ -2680,7 +2795,15 @@ function InspectorContent({
   }
 
   if (viewModel.type === "relation") {
-    return <RelationInspector viewModel={viewModel} />;
+    return (
+      <RelationInspector
+        canEditForeignKey={canAddForeignKey}
+        modelJson={modelJson}
+        onDeleteForeignKey={onDeleteForeignKey}
+        onUpdateForeignKey={onUpdateForeignKey}
+        viewModel={viewModel}
+      />
+    );
   }
 
   if (viewModel.type === "annotation") {
@@ -2944,12 +3067,117 @@ function getForeignKeyAddFailureMessage(
   return "선택한 FK 관계를 만들 수 없습니다.";
 }
 
+function getForeignKeyEditFailureMessage(
+  reason: SqltoerdForeignKeyEditFailureReason
+) {
+  if (reason === "relation_not_found") {
+    return "선택한 FK 관계를 찾을 수 없습니다. Canvas를 다시 확인하세요.";
+  }
+
+  if (reason === "unchanged_relation") {
+    return "현재 참조 대상과 다른 PK 또는 UQ 컬럼을 선택하세요.";
+  }
+
+  if (reason === "unsupported_composite_relation") {
+    return "복합 FK의 수정과 삭제는 아직 지원하지 않습니다.";
+  }
+
+  return getForeignKeyAddFailureMessage(reason);
+}
+
 function RelationInspector({
+  canEditForeignKey,
+  modelJson,
+  onDeleteForeignKey,
+  onUpdateForeignKey,
   viewModel
 }: {
+  canEditForeignKey: boolean;
+  modelJson: SqltoerdModelJsonV1;
+  onDeleteForeignKey: (input: {
+    relationId: string;
+  }) => SqltoerdForeignKeyEditResult | null;
+  onUpdateForeignKey: (input: {
+    relationId: string;
+    toColumnId: string;
+    toTableId: string;
+  }) => SqltoerdForeignKeyEditResult | null;
   viewModel: Extract<SqlErdInspectorViewModel, { type: "relation" }>;
 }) {
   const { cardinality, endpoints, relation } = viewModel;
+  const [isEditOpen, setIsEditOpen] = useState(false);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [foreignKeyEditError, setForeignKeyEditError] = useState<string | null>(
+    null
+  );
+  const [targetTableId, setTargetTableId] = useState("");
+  const [targetColumnId, setTargetColumnId] = useState("");
+  const supportsSingleColumnEdit =
+    relation.fromColumnIds.length === 1 && relation.toColumnIds.length === 1;
+  const targetTables = modelJson.schema.tables.filter((candidateTable) =>
+    getSqltoerdForeignKeyTargetColumns(candidateTable).length > 0
+  );
+  const targetTable =
+    targetTables.find((candidateTable) => candidateTable.id === targetTableId) ??
+    null;
+  const targetColumns = targetTable
+    ? getSqltoerdForeignKeyTargetColumns(targetTable)
+    : [];
+
+  useEffect(() => {
+    setForeignKeyEditError(null);
+    setIsDeleteDialogOpen(false);
+    setIsEditOpen(false);
+    setTargetColumnId("");
+    setTargetTableId("");
+  }, [relation.id]);
+
+  const handleTargetTableChange = (nextTargetTableId: string) => {
+    setForeignKeyEditError(null);
+    setTargetColumnId("");
+    setTargetTableId(nextTargetTableId);
+  };
+  const handleForeignKeyUpdate = () => {
+    if (!targetTable || !targetColumnId) {
+      setForeignKeyEditError("참조 테이블과 PK 또는 UQ 컬럼을 선택하세요.");
+      return;
+    }
+
+    const result = onUpdateForeignKey({
+      relationId: relation.id,
+      toColumnId: targetColumnId,
+      toTableId: targetTable.id
+    });
+
+    if (!result) {
+      setForeignKeyEditError("현재 SQL을 Generate한 뒤 FK 관계를 수정하세요.");
+      return;
+    }
+
+    if (!result.ok) {
+      setForeignKeyEditError(getForeignKeyEditFailureMessage(result.reason));
+      return;
+    }
+
+    setForeignKeyEditError(null);
+    setIsEditOpen(false);
+  };
+  const handleForeignKeyDelete = () => {
+    const result = onDeleteForeignKey({ relationId: relation.id });
+
+    if (!result) {
+      setForeignKeyEditError("현재 SQL을 Generate한 뒤 FK 관계를 삭제하세요.");
+      return;
+    }
+
+    if (!result.ok) {
+      setForeignKeyEditError(getForeignKeyEditFailureMessage(result.reason));
+      return;
+    }
+
+    setForeignKeyEditError(null);
+    setIsDeleteDialogOpen(false);
+  };
 
   return (
     <>
@@ -2986,6 +3214,138 @@ function RelationInspector({
           />
         ) : null}
       </div>
+      <div className="space-y-3 rounded-md border p-3">
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-base font-medium">FK 관계 관리</p>
+          <button
+            className="inline-flex h-8 items-center rounded-md border px-3 text-sm font-medium transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-50"
+            disabled={!canEditForeignKey || !supportsSingleColumnEdit}
+            onClick={() => {
+              setForeignKeyEditError(null);
+              setIsEditOpen((current) => !current);
+            }}
+            type="button"
+          >
+            참조 대상 변경
+          </button>
+        </div>
+        {!supportsSingleColumnEdit ? (
+          <p className="text-sm leading-6 text-muted-foreground">
+            복합 FK의 수정과 삭제는 후속 기능에서 지원합니다.
+          </p>
+        ) : null}
+        {isEditOpen ? (
+          <div className="space-y-3 border-t pt-3">
+            <p className="text-sm text-muted-foreground">
+              참조 대상 PK 또는 UQ 컬럼을 변경한 뒤 SQL diff를 검토하세요.
+            </p>
+            <label className="grid gap-1.5 text-sm font-medium">
+              참조 테이블
+              <select
+                className="h-9 rounded-md border bg-background px-2 text-sm"
+                onChange={(event) => handleTargetTableChange(event.target.value)}
+                value={targetTableId}
+              >
+                <option value="">선택하세요</option>
+                {targetTables.map((candidateTable) => (
+                  <option key={candidateTable.id} value={candidateTable.id}>
+                    {getTableDisplayName(candidateTable)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="grid gap-1.5 text-sm font-medium">
+              참조 PK / UQ 컬럼
+              <select
+                className="h-9 rounded-md border bg-background px-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={!targetTable}
+                onChange={(event) => {
+                  setForeignKeyEditError(null);
+                  setTargetColumnId(event.target.value);
+                }}
+                value={targetColumnId}
+              >
+                <option value="">선택하세요</option>
+                {targetColumns.map((candidateColumn) => (
+                  <option key={candidateColumn.id} value={candidateColumn.id}>
+                    {candidateColumn.name} ({candidateColumn.dataType})
+                  </option>
+                ))}
+              </select>
+            </label>
+            {foreignKeyEditError ? (
+              <p className="rounded-md border border-destructive/30 bg-destructive/5 p-2 text-sm text-destructive">
+                {foreignKeyEditError}
+              </p>
+            ) : null}
+            <button
+              className="inline-flex h-9 w-full items-center justify-center rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
+              disabled={!canEditForeignKey}
+              onClick={handleForeignKeyUpdate}
+              type="button"
+            >
+              SQL diff 보기
+            </button>
+          </div>
+        ) : null}
+      </div>
+      <div className="space-y-2 rounded-md border border-destructive/30 p-3">
+        <p className="text-base font-medium text-destructive">FK 삭제</p>
+        <p className="text-sm leading-6 text-muted-foreground">
+          참조 제약 조건을 제거하고 SQL source와 Canvas를 다시 생성합니다.
+        </p>
+        {foreignKeyEditError && !isEditOpen ? (
+          <p className="rounded-md border border-destructive/30 bg-destructive/5 p-2 text-sm text-destructive">
+            {foreignKeyEditError}
+          </p>
+        ) : null}
+        <button
+          className="inline-flex h-9 w-full items-center justify-center rounded-md border border-destructive/40 px-3 text-sm font-medium text-destructive transition-colors hover:bg-destructive/5 disabled:pointer-events-none disabled:opacity-50"
+          disabled={!canEditForeignKey || !supportsSingleColumnEdit}
+          onClick={() => {
+            setForeignKeyEditError(null);
+            setIsDeleteDialogOpen(true);
+          }}
+          type="button"
+        >
+          FK 삭제
+        </button>
+      </div>
+      <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>FK 관계를 삭제할까요?</DialogTitle>
+            <DialogDescription>
+              {endpoints
+                ? `${formatSqlErdRelationEndpoint(
+                    endpoints.from.table,
+                    endpoints.from.columns
+                  )} -> ${formatSqlErdRelationEndpoint(
+                    endpoints.to.table,
+                    endpoints.to.columns
+                  )}`
+                : relation.id}
+              의 참조 제약 조건이 SQL source에서 제거됩니다.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end gap-2">
+            <button
+              className="inline-flex h-9 items-center rounded-md border px-3 text-sm font-medium"
+              onClick={() => setIsDeleteDialogOpen(false)}
+              type="button"
+            >
+              취소
+            </button>
+            <button
+              className="inline-flex h-9 items-center rounded-md bg-destructive px-3 text-sm font-medium text-destructive-foreground"
+              onClick={handleForeignKeyDelete}
+              type="button"
+            >
+              삭제 후 SQL diff 보기
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

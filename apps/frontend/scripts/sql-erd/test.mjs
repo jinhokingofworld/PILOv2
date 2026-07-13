@@ -825,6 +825,130 @@ assert.deepEqual(
   { ok: false, reason: "target_column_not_key" }
 );
 
+const foreignKeyUpdateCandidate =
+  foreignKeyAddRuntime.createSqlErdForeignKeyUpdateCandidate({
+    dialect: "postgresql",
+    modelJson: runtimeModel,
+    relationId: "relation.orders.user_id.users.id",
+    toColumnId: "id",
+    toTableId: "table.orders"
+  });
+
+assert.equal(foreignKeyUpdateCandidate.ok, true);
+assert.equal(
+  foreignKeyUpdateCandidate.relation.fromTableId,
+  "table.orders"
+);
+assert.deepEqual(foreignKeyUpdateCandidate.relation.fromColumnIds, ["user_id"]);
+assert.equal(foreignKeyUpdateCandidate.relation.toTableId, "table.orders");
+assert.deepEqual(foreignKeyUpdateCandidate.relation.toColumnIds, ["id"]);
+assert.equal(
+  foreignKeyUpdateCandidate.modelJson.schema.relations.some(
+    (relation) => relation.id === "relation.orders.user_id.users.id"
+  ),
+  false
+);
+assert.equal(
+  foreignKeyUpdateCandidate.modelJson.schema.tables
+    .find((table) => table.id === "table.orders")
+    .columns.find((column) => column.id === "user_id").foreignKey,
+  true
+);
+const reparsedForeignKeyUpdateCandidate = ddlParserRuntime.parseSqlDdlToErdModel({
+  dialect: "postgresql",
+  sourceText: modelToSqlRuntime.generateSqlDdlFromErdModel({
+    dialect: "postgresql",
+    modelJson: foreignKeyUpdateCandidate.modelJson
+  }).sql
+});
+
+assert.equal(reparsedForeignKeyUpdateCandidate.ok, true);
+assert.equal(
+  reparsedForeignKeyUpdateCandidate.modelJson.schema.relations.some(
+    (relation) => relation.id === "relation.orders.user_id.orders.id"
+  ),
+  true
+);
+
+const multipleForeignKeysUpdateModel = structuredClone(runtimeModel);
+const archivedUsersTable = structuredClone(
+  multipleForeignKeysUpdateModel.schema.tables.find(
+    (table) => table.id === "table.users"
+  )
+);
+
+archivedUsersTable.id = "table.archived_users";
+archivedUsersTable.name = "archived_users";
+archivedUsersTable.constraints[0].id = "constraint.archived_users.pk";
+multipleForeignKeysUpdateModel.schema.tables.push(archivedUsersTable);
+multipleForeignKeysUpdateModel.schema.relations.push({
+  constraintName: null,
+  fromColumnIds: ["user_id"],
+  fromTableId: "table.orders",
+  id: "relation.orders.user_id.archived_users.id",
+  kind: "foreign_key",
+  toColumnIds: ["id"],
+  toTableId: "table.archived_users"
+});
+
+const multipleForeignKeysUpdateCandidate =
+  foreignKeyAddRuntime.createSqlErdForeignKeyUpdateCandidate({
+    dialect: "postgresql",
+    modelJson: multipleForeignKeysUpdateModel,
+    relationId: "relation.orders.user_id.users.id",
+    toColumnId: "id",
+    toTableId: "table.orders"
+  });
+
+assert.equal(multipleForeignKeysUpdateCandidate.ok, true);
+assert.equal(
+  multipleForeignKeysUpdateCandidate.modelJson.schema.relations.some(
+    (relation) => relation.id === "relation.orders.user_id.archived_users.id"
+  ),
+  true
+);
+assert.equal(
+  multipleForeignKeysUpdateCandidate.modelJson.schema.relations.some(
+    (relation) => relation.id === "relation.orders.user_id.orders.id"
+  ),
+  true
+);
+
+const foreignKeyDeleteCandidate =
+  foreignKeyAddRuntime.createSqlErdForeignKeyDeleteCandidate({
+    modelJson: runtimeModel,
+    relationId: "relation.orders.user_id.users.id"
+  });
+
+assert.equal(foreignKeyDeleteCandidate.ok, true);
+assert.equal(
+  foreignKeyDeleteCandidate.modelJson.schema.relations.some(
+    (relation) => relation.id === "relation.orders.user_id.users.id"
+  ),
+  false
+);
+assert.equal(
+  foreignKeyDeleteCandidate.modelJson.schema.tables
+    .find((table) => table.id === "table.orders")
+    .columns.find((column) => column.id === "user_id").foreignKey,
+  false
+);
+const reparsedForeignKeyDeleteCandidate = ddlParserRuntime.parseSqlDdlToErdModel({
+  dialect: "postgresql",
+  sourceText: modelToSqlRuntime.generateSqlDdlFromErdModel({
+    dialect: "postgresql",
+    modelJson: foreignKeyDeleteCandidate.modelJson
+  }).sql
+});
+
+assert.equal(reparsedForeignKeyDeleteCandidate.ok, true);
+assert.equal(
+  reparsedForeignKeyDeleteCandidate.modelJson.schema.relations.some(
+    (relation) => relation.id === "relation.orders.user_id.users.id"
+  ),
+  false
+);
+
 const incompatibleForeignKeyModel = structuredClone(runtimeModel);
 incompatibleForeignKeyModel.schema.tables
   .find((table) => table.id === "table.orders")

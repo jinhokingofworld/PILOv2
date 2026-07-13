@@ -29,6 +29,23 @@ export type SqltoerdForeignKeyAddResult =
       reason: SqltoerdForeignKeyAddFailureReason;
     };
 
+export type SqltoerdForeignKeyEditFailureReason =
+  | SqltoerdForeignKeyAddFailureReason
+  | "relation_not_found"
+  | "unchanged_relation"
+  | "unsupported_composite_relation";
+
+export type SqltoerdForeignKeyEditResult =
+  | {
+      modelJson: SqltoerdModelJsonV1;
+      ok: true;
+      relation: ErdRelation;
+    }
+  | {
+      ok: false;
+      reason: SqltoerdForeignKeyEditFailureReason;
+    };
+
 export function createSqlErdForeignKeyAddCandidate({
   dialect = "postgresql",
   fromColumnId,
@@ -44,6 +61,41 @@ export function createSqlErdForeignKeyAddCandidate({
   toColumnId: string;
   toTableId: string;
 }): SqltoerdForeignKeyAddResult {
+  return createSqlErdForeignKeyCandidate(
+    {
+      dialect,
+      fromColumnId,
+      fromTableId,
+      modelJson,
+      toColumnId,
+      toTableId
+    },
+    { rejectExistingSourceColumnForeignKey: true }
+  );
+}
+
+function createSqlErdForeignKeyCandidate(
+  {
+    dialect,
+    fromColumnId,
+    fromTableId,
+    modelJson,
+    toColumnId,
+    toTableId
+  }: {
+    dialect: SqltoerdResolvedDialect;
+    fromColumnId: string;
+    fromTableId: string;
+    modelJson: SqltoerdModelJsonV1;
+    toColumnId: string;
+    toTableId: string;
+  },
+  {
+    rejectExistingSourceColumnForeignKey
+  }: {
+    rejectExistingSourceColumnForeignKey: boolean;
+  }
+): SqltoerdForeignKeyAddResult {
   const fromTable = modelJson.schema.tables.find(
     (table) => table.id === fromTableId
   );
@@ -100,6 +152,7 @@ export function createSqlErdForeignKeyAddCandidate({
   }
 
   if (
+    rejectExistingSourceColumnForeignKey &&
     modelJson.schema.relations.some(
       (existingRelation) =>
         existingRelation.fromTableId === fromTable.id &&
@@ -127,6 +180,89 @@ export function createSqlErdForeignKeyAddCandidate({
 
   return {
     modelJson: nextModelJson,
+    ok: true,
+    relation
+  };
+}
+
+export function createSqlErdForeignKeyUpdateCandidate({
+  dialect = "postgresql",
+  modelJson,
+  relationId,
+  toColumnId,
+  toTableId
+}: {
+  dialect?: SqltoerdResolvedDialect;
+  modelJson: SqltoerdModelJsonV1;
+  relationId: string;
+  toColumnId: string;
+  toTableId: string;
+}): SqltoerdForeignKeyEditResult {
+  const relation = modelJson.schema.relations.find(
+    (candidate) => candidate.id === relationId
+  );
+
+  if (!relation) {
+    return { ok: false, reason: "relation_not_found" };
+  }
+
+  if (!isSingleColumnForeignKeyRelation(relation)) {
+    return { ok: false, reason: "unsupported_composite_relation" };
+  }
+
+  if (
+    relation.toTableId === toTableId &&
+    relation.toColumnIds[0] === toColumnId
+  ) {
+    return { ok: false, reason: "unchanged_relation" };
+  }
+
+  const modelWithoutRelation = removeForeignKeyRelation(
+    modelJson,
+    relation
+  );
+  const candidate = createSqlErdForeignKeyCandidate(
+    {
+      dialect,
+      fromColumnId: relation.fromColumnIds[0],
+      fromTableId: relation.fromTableId,
+      modelJson: modelWithoutRelation,
+      toColumnId,
+      toTableId
+    },
+    { rejectExistingSourceColumnForeignKey: false }
+  );
+
+  if (!candidate.ok) {
+    return candidate;
+  }
+
+  candidate.relation.constraintName = relation.constraintName;
+
+  return candidate;
+}
+
+export function createSqlErdForeignKeyDeleteCandidate({
+  modelJson,
+  relationId
+}: {
+  modelJson: SqltoerdModelJsonV1;
+  relationId: string;
+}): SqltoerdForeignKeyEditResult {
+  const relation = modelJson.schema.relations.find(
+    (candidate) => candidate.id === relationId
+  );
+
+  if (!relation) {
+    return { ok: false, reason: "relation_not_found" };
+  }
+
+  if (!isSingleColumnForeignKeyRelation(relation)) {
+    return { ok: false, reason: "unsupported_composite_relation" };
+  }
+
+  return {
+    modelJson: removeForeignKeyRelation(modelJson, relation),
     ok: true,
     relation
   };
@@ -245,4 +381,38 @@ function createSqltoerdForeignKeyRelation(
     toColumnIds: [toColumn.id],
     toTableId: toTable.id
   };
+}
+
+function isSingleColumnForeignKeyRelation(relation: ErdRelation) {
+  return relation.fromColumnIds.length === 1 && relation.toColumnIds.length === 1;
+}
+
+function removeForeignKeyRelation(
+  modelJson: SqltoerdModelJsonV1,
+  relation: ErdRelation
+) {
+  const nextModelJson = structuredClone(modelJson);
+  const relationIndex = nextModelJson.schema.relations.findIndex(
+    (candidate) => candidate.id === relation.id
+  );
+
+  if (relationIndex < 0) {
+    return nextModelJson;
+  }
+
+  nextModelJson.schema.relations.splice(relationIndex, 1);
+
+  const fromColumn = nextModelJson.schema.tables
+    .find((table) => table.id === relation.fromTableId)
+    ?.columns.find((column) => column.id === relation.fromColumnIds[0]);
+
+  if (fromColumn) {
+    fromColumn.foreignKey = nextModelJson.schema.relations.some(
+      (candidate) =>
+        candidate.fromTableId === relation.fromTableId &&
+        candidate.fromColumnIds.includes(fromColumn.id)
+    );
+  }
+
+  return nextModelJson;
 }
