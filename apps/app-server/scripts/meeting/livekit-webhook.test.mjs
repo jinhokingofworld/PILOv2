@@ -47,7 +47,7 @@ class FakeMeetingService {
 
   async reconcileLiveKitParticipantDeparture(_transaction, input) {
     this.reconciliationCalls.push(input);
-    return { job: null };
+    return { job: null, stateEvents: [] };
   }
 
   async enqueueReconciledMeetingReportJob(job) {
