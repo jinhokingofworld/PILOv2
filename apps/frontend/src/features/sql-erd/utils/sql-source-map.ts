@@ -1,4 +1,4 @@
-import { MySQL, PostgreSQL } from "@codemirror/lang-sql";
+import { MySQL, PostgreSQL, SQLite } from "@codemirror/lang-sql";
 
 import type {
   ErdColumn,
@@ -52,7 +52,12 @@ export function createSqltoerdSourceMap(input: {
   modelJson: SqltoerdModelJsonV1;
   sourceText: string;
 }): SqltoerdSourceMap {
-  const language = input.dialect === "mysql" ? MySQL.language : PostgreSQL.language;
+  const language =
+    input.dialect === "mysql"
+      ? MySQL.language
+      : input.dialect === "sqlite"
+        ? SQLite.language
+        : PostgreSQL.language;
   const tree = language.parser.parse(input.sourceText);
   const columnRangesByTableId: Record<
     string,

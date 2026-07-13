@@ -1,6 +1,7 @@
 import {
   MySQL,
   PostgreSQL,
+  SQLite,
   sql,
   type SQLDialect
 } from "@codemirror/lang-sql";
@@ -28,7 +29,15 @@ export function resolveSqlSourceEditorDialect(
 export function getSqlSourceEditorCodeMirrorDialect(
   dialect: SqltoerdResolvedDialect
 ): SQLDialect {
-  return dialect === "mysql" ? MySQL : PostgreSQL;
+  if (dialect === "mysql") {
+    return MySQL;
+  }
+
+  if (dialect === "sqlite") {
+    return SQLite;
+  }
+
+  return PostgreSQL;
 }
 
 export function getSqlSourceEditorLanguageExtension(

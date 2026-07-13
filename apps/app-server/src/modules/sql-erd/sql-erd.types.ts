@@ -3,7 +3,7 @@ import { QueryResultRow } from "pg";
 export const SQL_ERD_REQUEST_BODY_LIMIT_BYTES = 2 * 1024 * 1024;
 
 export type SqlErdSourceFormat = "sql";
-export type SqlErdDialect = "auto" | "postgresql" | "mysql";
+export type SqlErdDialect = "auto" | "postgresql" | "mysql" | "sqlite";
 export type SqlErdJsonObject = Record<string, unknown>;
 
 export interface NormalizedCreateSqlErdSessionInput {

@@ -334,6 +334,10 @@ function resolveParserDatabases(
     return ["mysql"];
   }
 
+  if (dialect === "sqlite") {
+    return ["sqlite"];
+  }
+
   return [];
 }
 
@@ -348,6 +352,14 @@ function getAutoParserDatabases(
     /\b(?:BIGSERIAL|SMALLSERIAL|SERIAL|TIMESTAMPTZ|JSONB|BYTEA)\b|::/i.test(
       sourceText
     );
+  const hasSqliteMarker =
+    /\b(?:AUTOINCREMENT|WITHOUT\s+ROWID|STRICT)\b|\bON\s+CONFLICT\b/i.test(
+      sourceText
+    );
+
+  if (hasSqliteMarker && !hasMySqlMarker && !hasPostgreSqlMarker) {
+    return ["sqlite", "postgresql", "mysql"];
+  }
 
   if (hasMySqlMarker && !hasPostgreSqlMarker) {
     return ["mysql", "postgresql"];
