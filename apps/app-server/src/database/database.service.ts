@@ -60,6 +60,41 @@ export class DatabaseService implements OnModuleDestroy {
     return this.pool.query<T>(text, [...values]);
   }
 
+  async withAdvisoryLock<T>(
+    lockKey: bigint,
+    callback: (connection: DatabaseTransaction) => Promise<T>
+  ): Promise<T> {
+    const client = await this.pool.connect();
+    const connection = this.createTransaction(client);
+    let lockAcquired = false;
+    let operationError: unknown;
+
+    try {
+      await connection.execute("SELECT pg_advisory_lock($1::bigint)", [lockKey]);
+      lockAcquired = true;
+      return await callback(connection);
+    } catch (error) {
+      operationError = error;
+      throw error;
+    } finally {
+      let unlockError: Error | null = null;
+
+      if (lockAcquired) {
+        try {
+          await connection.execute("SELECT pg_advisory_unlock($1::bigint)", [lockKey]);
+        } catch (error) {
+          unlockError = error instanceof Error ? error : new Error(String(error));
+        }
+      }
+
+      client.release(unlockError ?? undefined);
+
+      if (unlockError && operationError === undefined) {
+        throw unlockError;
+      }
+    }
+  }
+
   async transaction<T>(
     callback: (transaction: DatabaseTransaction) => Promise<T>
   ): Promise<T> {

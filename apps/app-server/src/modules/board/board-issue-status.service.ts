@@ -1,6 +1,10 @@
+import { createHash } from "node:crypto";
 import { Injectable } from "@nestjs/common";
 import { badRequest, notFound } from "../../common/api-error";
-import type { DatabaseTransaction } from "../../database/database.service";
+import {
+  DatabaseService,
+  type DatabaseTransaction
+} from "../../database/database.service";
 import { WorkspaceService } from "../workspace/workspace.service";
 import { GithubProjectV2WriteService } from "../github-integration/github-project-v2-write.service";
 import { boardConflict } from "./board-api-error";
@@ -36,7 +40,8 @@ export class BoardIssueStatusService {
   constructor(
     private readonly boardIssueStatusQueries: BoardIssueStatusQueries,
     private readonly workspaceService: WorkspaceService,
-    private readonly githubProjectV2WriteService: GithubProjectV2WriteService
+    private readonly githubProjectV2WriteService: GithubProjectV2WriteService,
+    private readonly database: DatabaseService
   ) {}
 
   async updateBoardIssueStatus(
@@ -51,10 +56,11 @@ export class BoardIssueStatusService {
     const normalizedBoardId = this.readBoardId(boardId);
     const normalizedIssueId = this.readIssueId(issueId);
     const input = this.normalizeStatusInput(body);
-    const previousColumnId = await this.boardIssueStatusQueries.transaction(
-      async (transaction) => {
+    const previousColumnId = await this.database.withAdvisoryLock(
+      this.boardIssueStatusLockKey(workspaceId, normalizedBoardId, normalizedIssueId),
+      async (connection) => {
         const target = await this.boardIssueStatusQueries.findStatusMoveTarget(
-          transaction,
+          connection,
           workspaceId,
           normalizedBoardId,
           normalizedIssueId,
@@ -71,12 +77,14 @@ export class BoardIssueStatusService {
 
         this.assertGithubStatusTarget(target);
         await this.updateGithubStatus(currentUserId, target);
-        await this.updateStatusCache(
-          transaction,
-          target,
-          normalizedBoardId,
-          normalizedIssueId,
-          input.columnId
+        await this.boardIssueStatusQueries.transaction((transaction) =>
+          this.updateStatusCache(
+            transaction,
+            target,
+            normalizedBoardId,
+            normalizedIssueId,
+            input.columnId
+          )
         );
 
         return target.column_id;
@@ -154,6 +162,17 @@ export class BoardIssueStatusService {
     }
 
     return this.requirePositiveInteger(value, field);
+  }
+
+  private boardIssueStatusLockKey(
+    workspaceId: string,
+    boardId: string,
+    issueId: string
+  ): bigint {
+    return createHash("sha256")
+      .update(`${workspaceId.toLowerCase()}:${boardId}:${issueId}`)
+      .digest()
+      .readBigInt64BE(0);
   }
 
   private assertGithubStatusTarget(

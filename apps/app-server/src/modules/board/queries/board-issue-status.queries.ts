@@ -90,13 +90,13 @@ export class BoardIssueStatusQueries {
   }
 
   async findStatusMoveTarget(
-    transaction: DatabaseTransaction,
+    connection: DatabaseTransaction,
     workspaceId: string,
     boardId: string,
     issueId: string,
     targetColumnId: string
   ): Promise<BoardIssueStatusTargetRow | null> {
-    return transaction.queryOne<BoardIssueStatusTargetRow>(
+    return connection.queryOne<BoardIssueStatusTargetRow>(
       `
         SELECT
           pi.id::text AS id,
@@ -151,7 +151,6 @@ export class BoardIssueStatusQueries {
         WHERE pi.workspace_id = $1
           AND pi.board_id = $2::bigint
           AND pi.id = $3::bigint
-        FOR UPDATE OF pi
       `,
       [workspaceId, boardId, issueId, targetColumnId]
     );
