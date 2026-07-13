@@ -1,4 +1,8 @@
-import type { ErdColumn, ErdTable } from "@/features/sql-erd/types";
+import type {
+  ErdColumn,
+  ErdTable,
+  SqltoerdModelJsonV1
+} from "@/features/sql-erd/types";
 
 const MAX_SQLTOERD_RELATION_ID_LENGTH = 256;
 const FNV64_MASK = (1n << 64n) - 1n;
@@ -25,6 +29,44 @@ export function createSqltoerdForeignKeyRelationId(input: {
   }
 
   return `relation.v2.${hashRelationIdentity(input)}`;
+}
+
+export function normalizeSqltoerdForeignKeyRelationIds(
+  modelJson: SqltoerdModelJsonV1
+) {
+  const tablesById = new Map(
+    modelJson.schema.tables.map((table) => [table.id, table])
+  );
+
+  for (const relation of modelJson.schema.relations) {
+    const fromTable = tablesById.get(relation.fromTableId);
+    const toTable = tablesById.get(relation.toTableId);
+
+    if (!fromTable || !toTable) {
+      continue;
+    }
+
+    const fromColumns = relation.fromColumnIds
+      .map((columnId) => fromTable.columns.find((column) => column.id === columnId))
+      .filter((column): column is ErdColumn => Boolean(column));
+    const toColumns = relation.toColumnIds
+      .map((columnId) => toTable.columns.find((column) => column.id === columnId))
+      .filter((column): column is ErdColumn => Boolean(column));
+
+    if (
+      fromColumns.length !== relation.fromColumnIds.length ||
+      toColumns.length !== relation.toColumnIds.length
+    ) {
+      continue;
+    }
+
+    relation.id = createSqltoerdForeignKeyRelationId({
+      fromColumns,
+      fromTable,
+      toColumns,
+      toTable
+    });
+  }
 }
 
 function isSafeLegacyRelationId(

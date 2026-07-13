@@ -945,7 +945,7 @@ const relationIdCollisionCandidate =
   });
 
 assert.equal(relationIdCollisionCandidate.ok, true);
-assert.notEqual(
+assert.equal(
   relationIdCollisionCandidate.relation.id,
   "relation.orders.a_b.users.c_d"
 );
@@ -954,6 +954,16 @@ assert.equal(
     relationIdCollisionCandidate.modelJson.schema.relations.map((relation) => relation.id)
   ).size,
   relationIdCollisionCandidate.modelJson.schema.relations.length
+);
+assert.notEqual(
+  relationIdCollisionCandidate.relation.id,
+  relationIdCollisionCandidate.modelJson.schema.relations.find(
+    (relation) =>
+      relation.fromTableId === "table.orders" &&
+      relation.fromColumnIds.length === 2 &&
+      relation.fromColumnIds.includes("a") &&
+      relation.fromColumnIds.includes("b")
+  ).id
 );
 
 const reparsedRelationIdCollision = ddlParserRuntime.parseSqlDdlToErdModel({
@@ -970,6 +980,65 @@ assert.equal(
   new Set(reparsedRelationIdCollision.modelJson.schema.relations.map((relation) => relation.id))
     .size,
   4
+);
+
+const reparsedRelationIdCollisionWithSourceMap =
+  ddlParserRuntime.parseSqlDdlToErdModel({
+    dialect: "postgresql",
+    sourceMapModelJson: relationIdCollisionCandidate.modelJson,
+    sourceText: modelToSqlRuntime.generateSqlDdlFromErdModel({
+      dialect: "postgresql",
+      modelJson: relationIdCollisionCandidate.modelJson
+    }).sql
+  });
+
+assert.equal(reparsedRelationIdCollisionWithSourceMap.ok, true);
+const isRelationIdCollisionPair = (modelJson, relation) => {
+  const fromTable = modelJson.schema.tables.find(
+    (table) => table.id === relation.fromTableId
+  );
+  const toTable = modelJson.schema.tables.find(
+    (table) => table.id === relation.toTableId
+  );
+  const fromColumnNames = relation.fromColumnIds
+    .map((columnId) => fromTable?.columns.find((column) => column.id === columnId)?.name)
+    .filter(Boolean);
+  const toColumnNames = relation.toColumnIds
+    .map((columnId) => toTable?.columns.find((column) => column.id === columnId)?.name)
+    .filter(Boolean);
+
+  return (
+    fromTable?.name === "orders" &&
+    toTable?.name === "users" &&
+    ((fromColumnNames.length === 2 &&
+      fromColumnNames.includes("a") &&
+      fromColumnNames.includes("b") &&
+      toColumnNames.includes("c") &&
+      toColumnNames.includes("d")) ||
+      (fromColumnNames.length === 1 &&
+        fromColumnNames[0] === "a_b" &&
+        toColumnNames.length === 1 &&
+        toColumnNames[0] === "c_d"))
+  );
+};
+const collisionRelationIds = relationIdCollisionCandidate.modelJson.schema.relations
+  .filter((relation) =>
+    isRelationIdCollisionPair(relationIdCollisionCandidate.modelJson, relation)
+  )
+  .map((relation) => relation.id);
+assert.deepEqual(
+  Object.keys(reparsedRelationIdCollisionWithSourceMap.sourceMap.relationsById)
+    .filter((relationId) => collisionRelationIds.includes(relationId))
+    .sort(),
+  reparsedRelationIdCollisionWithSourceMap.modelJson.schema.relations
+    .filter((relation) =>
+      isRelationIdCollisionPair(
+        reparsedRelationIdCollisionWithSourceMap.modelJson,
+        relation
+      )
+    )
+    .map((relation) => relation.id)
+    .sort()
 );
 
 const longRelationIdentifierModel = structuredClone(runtimeModel);

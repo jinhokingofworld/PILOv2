@@ -5,7 +5,10 @@ import type {
   SqltoerdModelJsonV1,
   SqltoerdResolvedDialect
 } from "@/features/sql-erd/types";
-import { createSqltoerdForeignKeyRelationId } from "@/features/sql-erd/utils/relation-id";
+import {
+  createSqltoerdForeignKeyRelationId,
+  normalizeSqltoerdForeignKeyRelationIds
+} from "@/features/sql-erd/utils/relation-id";
 
 export type SqltoerdForeignKeyAddFailureReason =
   | "duplicate_relation"
@@ -120,6 +123,7 @@ export function createSqlErdForeignKeyAddCandidate({
 
   nextFromColumn.foreignKey = true;
   nextModelJson.schema.relations.push(relation);
+  normalizeSqltoerdForeignKeyRelationIds(nextModelJson);
 
   return {
     modelJson: nextModelJson,
