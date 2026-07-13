@@ -82,6 +82,32 @@ After deployment or worker changes, collect evidence for both dev flows:
 
 Do not use a real credential revoke, actual rate-limit exhaustion, or a bulk dev/production DLQ redrive as a smoke test. In both flows, retain logs, CloudWatch observations, and DB-state evidence without access tokens, webhook payloads, provider raw errors, or secrets.
 
+## LocalStack queue configuration verification
+
+After starting LocalStack through Docker Compose or running `infra/scripts/create-local-sqs-queues.ps1`, verify both GitHub queues before testing a worker flow. `pilo-dev-github-webhooks` must have `VisibilityTimeout` `120` and `pilo-dev-github-sync-jobs` must have `VisibilityTimeout` `900`. Both queues must have a `RedrivePolicy` that targets their matching `-dlq` queue with `maxReceiveCount` `3`.
+
+```bash
+awslocal sqs get-queue-attributes --queue-url "$(awslocal sqs get-queue-url --queue-name pilo-dev-github-webhooks --query QueueUrl --output text)" --attribute-names VisibilityTimeout RedrivePolicy
+awslocal sqs get-queue-attributes --queue-url "$(awslocal sqs get-queue-url --queue-name pilo-dev-github-sync-jobs --query QueueUrl --output text)" --attribute-names VisibilityTimeout RedrivePolicy
+```
+
+For a PowerShell-created LocalStack instance, replace `awslocal sqs` with `aws --endpoint-url $env:SQS_ENDPOINT sqs` and use the same queue names and attributes. Do not change these attributes while redriving a DLQ.
+
+### Manual isolated integration test
+
+`infra/tests/github-sync-localstack-config.test.mjs` is intentionally not wired into a common test runner or CI. It starts separate disposable `localstack/localstack:3` containers with anonymous port mappings, runs the shell and PowerShell setup paths independently, and removes the containers afterward. It never uses the `pilo_localstack_data` Docker volume or an AWS account.
+
+Prerequisites: Docker Desktop must be running and able to pull `localstack/localstack:3`; Node.js, Windows PowerShell, and AWS CLI must be available. The test supplies only a LocalStack endpoint and test credentials to the PowerShell setup path; it does not use AWS account credentials or an AWS endpoint.
+
+Run it manually from the repository root:
+
+```powershell
+$env:RUN_LOCALSTACK_INTEGRATION=1
+node infra/tests/github-sync-localstack-config.test.mjs
+```
+
+The test verifies `VisibilityTimeout`, `RedrivePolicy`, matching DLQ ARN, and `maxReceiveCount` `3` for both `pilo-dev-github-webhooks` and `pilo-dev-github-sync-jobs` after each setup path.
+
 ## Cost scope
 
 This work includes only these cost categories: worker count, public IPv4, CloudWatch logs/metrics/alarms, and SQS requests. It explicitly excludes scale-out and NAT. The single `github-sync-worker` remains in place until the future event-worker/autoscaling decision rule is met.

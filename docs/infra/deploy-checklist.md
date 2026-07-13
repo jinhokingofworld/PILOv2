@@ -241,8 +241,9 @@ terraform apply
 
 - pull request에서 `terraform fmt` 실행
 - pull request에서 `terraform validate` 실행
-- pull request에서 `terraform plan` 실행
-- OIDC assume role 성공 확인
+- pull request에서는 remote backend와 AWS credentials를 사용하지 않는다.
+- `terraform plan`은 `AWS_GITHUB_ACTIONS_ROLE_ARN`이 설정되고 workflow path filter(`infra/**` 또는 `.github/workflows/terraform-validate.yml`)에 일치하는 qualifying main push, 또는 main branch의 `workflow_dispatch` 수동 실행에서만 실행된다.
+- plan 실행에서 OIDC assume role 성공과 remote backend 연결을 확인한다.
 
 ### App Server workflow
 
