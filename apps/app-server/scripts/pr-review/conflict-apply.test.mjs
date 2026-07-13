@@ -11,6 +11,8 @@ const reviewSessionId = "22222222-2222-4222-8222-222222222222";
 const reviewFileId = "33333333-3333-4333-8333-333333333333";
 const secondReviewFileId = "44444444-4444-4444-8444-444444444444";
 const pullRequestId = "55555555-5555-4555-8555-555555555555";
+const reviewRoomId = "66666666-6666-4666-8666-666666666666";
+const successorSessionId = "77777777-7777-4777-8777-777777777777";
 
 function reviewFile(id, filePath) {
   return {
@@ -27,9 +29,10 @@ class FakeDatabase {
   constructor(files) {
     this.files = files;
     this.failSessionUpdate = false;
+    this.successorSession = null;
   }
 
-  async queryOne(text) {
+  async queryOne(text, values = []) {
     if (text.includes("FROM review_files AS review_file")) {
       return {
         ...reviewFile(reviewFileId, "src/conflicted.ts"),
@@ -40,21 +43,26 @@ class FakeDatabase {
       };
     }
 
-    if (text.includes("FROM pr_review_sessions AS review_session")) {
-      return {
-        id: reviewSessionId,
-        pull_request_id: pullRequestId,
-        head_sha: "head-sha",
-        conflict_status: "conflicted"
-      };
+    if (
+      text.includes("review_session.head_sha = $3") &&
+      text.includes("review_session.status <> 'failed'")
+    ) {
+      return this.successorSession ? { id: this.successorSession.id } : null;
     }
 
-    if (text.includes("UPDATE pr_review_sessions")) {
-      if (this.failSessionUpdate) {
-        throw new Error("database unavailable");
+    if (text.includes("FROM pr_review_sessions AS review_session")) {
+      if (values[1] === successorSessionId) {
+        return this.successorSession;
       }
-
-      return { id: reviewSessionId };
+      return {
+        id: reviewSessionId,
+        room_id: reviewRoomId,
+        pull_request_id: pullRequestId,
+        created_by_user_id: "user-id",
+        head_sha: "head-sha",
+        status: "reviewing",
+        conflict_status: "conflicted"
+      };
     }
 
     return null;
@@ -66,6 +74,33 @@ class FakeDatabase {
     }
 
     return [];
+  }
+
+  async transaction(callback) {
+    if (this.failSessionUpdate) {
+      throw new Error("database unavailable");
+    }
+    return callback({
+      queryOne: async (text, values = []) => {
+        if (text.includes("INSERT INTO pr_review_sessions")) {
+          this.successorSession = {
+            id: successorSessionId,
+            room_id: values[0],
+            pull_request_id: values[1],
+            created_by_user_id: values[2],
+            head_sha: values[3],
+            status: "analyzing",
+            conflict_status: values[4],
+            conflict_checked_at: values[5]
+          };
+          return this.successorSession;
+        }
+        if (text.includes("INSERT INTO pr_review_analysis_jobs")) {
+          return { id: "88888888-8888-4888-8888-888888888888" };
+        }
+        throw new Error(`Unhandled conflict transaction query: ${text}`);
+      }
+    });
   }
 }
 
@@ -361,7 +396,10 @@ function createService(database, githubDependency) {
       async assertWorkspaceAccess() {}
     },
     githubDependency,
-    {}
+    {},
+    {
+      async publishCreatedJob() {}
+    }
   );
 }
 

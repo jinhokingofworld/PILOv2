@@ -57,6 +57,9 @@ const prReviewAnalysisJobMigration = await readSource(
 const prReviewSemanticGraphMigration = await readSource(
   "../../../../db/migrations/040_create_pr_review_semantic_graph_relations.sql"
 );
+const sharedReviewRoomMigration = await readSource(
+  "../../../../db/migrations/050_create_shared_pr_review_rooms.sql"
+);
 const databaseReadme = await readSource("../../../../db/README.md");
 
 assert.match(appModule, /PrReviewModule/);
@@ -81,6 +84,21 @@ assert.match(
   /@Post\("pull-requests\/:pullRequestId\/review-sessions"\)/
 );
 assert.match(prReviewController, /@Res\(\{ passthrough: true \}\)/);
+assert.match(
+  prReviewController,
+  /@Post\("pull-requests\/:pullRequestId\/review-room"\)/
+);
+assert.match(prReviewController, /@Get\("review-rooms"\)/);
+assert.match(prReviewController, /@Get\("review-rooms\/:reviewRoomId"\)/);
+assert.match(
+  prReviewController,
+  /@Get\("review-rooms\/:reviewRoomId\/revisions"\)/
+);
+assert.match(
+  prReviewController,
+  /@Post\("review-rooms\/:reviewRoomId\/revisions"\)/
+);
+assert.match(prReviewController, /@Delete\("review-rooms\/:reviewRoomId"\)/);
 assert.match(prReviewController, /reply\.status\(result\.created \? 201 : 200\)/);
 assert.match(
   prReviewController,
@@ -205,6 +223,9 @@ assert.match(prReviewService, /apiContract: "docs\/api\/pr-review-api.md"/);
 assert.match(prReviewService, /assertWorkspaceAccess/);
 assert.match(prReviewService, /github_pull_requests/);
 assert.match(prReviewService, /pr_review_sessions/);
+assert.match(prReviewService, /pr_review_rooms/);
+assert.match(prReviewService, /pr_review_room_files/);
+assert.match(prReviewService, /createSuccessorReviewRevisionAfterConflictApply/);
 assert.match(prReviewService, /review_files/);
 assert.match(prReviewService, /review_flows/);
 assert.match(prReviewService, /review_flow_files/);
@@ -432,6 +453,19 @@ assert.match(
   databaseReadme,
   /040_create_pr_review_semantic_graph_relations\.sql/
 );
+assert.match(sharedReviewRoomMigration, /DELETE FROM public\.pr_review_sessions/);
+assert.match(sharedReviewRoomMigration, /CREATE TABLE public\.pr_review_rooms/);
+assert.match(
+  sharedReviewRoomMigration,
+  /CREATE TABLE public\.pr_review_room_files/
+);
+assert.match(sharedReviewRoomMigration, /idx_pr_review_sessions_room_head_active/);
+assert.match(sharedReviewRoomMigration, /idx_pr_review_sessions_room_analyzing/);
+assert.match(sharedReviewRoomMigration, /ENABLE ROW LEVEL SECURITY/);
+assert.match(sharedReviewRoomMigration, /validate_pr_review_room_canvas/);
+assert.match(databaseReadme, /050_create_shared_pr_review_rooms\.sql/);
+assert.match(prReviewApi, /공유 Review Room/);
+assert.match(prReviewApi, /review-rooms\/\{reviewRoomId\}\/revisions/);
 
 assert.match(databaseService, /DatabaseTransaction/);
 assert.match(databaseService, /async transaction/);

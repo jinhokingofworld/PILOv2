@@ -12,6 +12,7 @@ const WORKSPACE_ID = "33333333-3333-3333-3333-333333333333";
 const PULL_REQUEST_ID = "44444444-4444-4444-4444-444444444444";
 const USER_ID = "55555555-5555-5555-5555-555555555555";
 const HEAD_SHA = "abcdef123456";
+const ROOM_ID = "66666666-6666-4666-8666-666666666666";
 
 function jobRow(overrides = {}) {
   return {
@@ -20,6 +21,7 @@ function jobRow(overrides = {}) {
     workspace_id: WORKSPACE_ID,
     head_sha: HEAD_SHA,
     status: "queued",
+    room_id: ROOM_ID,
     pull_request_id: PULL_REQUEST_ID,
     created_by_user_id: USER_ID,
     session_head_sha: HEAD_SHA,
@@ -75,6 +77,9 @@ class FakeTransaction {
       this.flowCount += 1;
       return { id: `flow-${this.flowCount}` };
     }
+    if (text.includes("INSERT INTO pr_review_room_files")) {
+      return { id: `room-file-${this.reviewFileCount + 1}` };
+    }
     if (text.includes("INSERT INTO review_files")) {
       this.reviewFileCount += 1;
       if (this.throwOnReviewFile) throw new Error("review file insert failed");
@@ -92,6 +97,7 @@ class FakeTransaction {
     if (text.includes("SET status = 'succeeded'")) return { id: JOB_ID };
     if (text.includes("SET status = 'failed'")) return { id: JOB_ID };
     if (text.includes("SET status = 'reviewing'")) return { id: SESSION_ID };
+    if (text.includes("UPDATE pr_review_rooms")) return { id: ROOM_ID };
     if (text.includes("analysis_error_code")) return { id: SESSION_ID };
     throw new Error(`Unhandled query: ${text}`);
   }
@@ -324,7 +330,7 @@ function createService(database, github) {
   );
   assert.equal(fileCalls.length, 3);
   assert.deepEqual(
-    fileCalls.map((call) => call.values[11]),
+    fileCalls.map((call) => call.values[13]),
     ["entry", "core_logic", "support"]
   );
   assert.deepEqual(
