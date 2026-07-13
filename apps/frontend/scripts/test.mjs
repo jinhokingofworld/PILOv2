@@ -652,7 +652,21 @@ assert.match(canvasViewportQueries, /isPiloFrameCollapsed/);
 assert.match(canvasViewportQueries, /mergeFrameChildren/);
 assert.match(canvasViewportQueries, /getShapeDetail/);
 assert.match(canvasViewportQueries, /CANVAS_SHAPE_DETAIL_MIN_ZOOM/);
+assert.match(canvasViewportQueries, /createViewportShapeLoadBounds/);
+assert.match(canvasViewportQueries, /doesLoadedViewportCoverBounds/);
+assert.match(canvasViewportQueries, /MAX_LOADED_VIEWPORT_BOUNDS = 24/);
+assert.match(canvasViewportQueries, /loadedViewportBoundsRef/);
+assert.match(canvasViewportQueries, /currentLoadedViewport\.bounds\.some/);
 assert.match(canvasRuntimeUtils, /DEFAULT_VIEWPORT_SHAPE_LOAD_MARGIN/);
+assert.match(canvasRuntimeUtils, /DEFAULT_VIEW_SETTING_SYNC_DEBOUNCE_MS = 3_000/);
+assert.match(
+  canvasRuntimeUtils,
+  /DEFAULT_VIEWPORT_SHAPE_LOAD_DEBOUNCE_MS = 700/,
+);
+assert.match(canvasRuntimeUtils, /CANVAS_VIEWPORT_SHAPE_QUERY_GRID_SIZE = 1_000/);
+assert.match(canvasRuntimeUtils, /Math\.floor\(value \/ CANVAS_VIEWPORT_SHAPE_QUERY_GRID_SIZE\)/);
+assert.match(canvasRuntimeUtils, /Math\.round\(bounds\.zoom \* 4\) \/ 4/);
+assert.doesNotMatch(canvasRuntimeUtils, /round\(bounds\.x\)/);
 assert.match(canvasViewSettingPersistence, /storageMode === "api"/);
 assert.match(canvasViewSettingPersistence, /updateViewSetting/);
 assert.match(canvasShapePersistence, /writeCanvasStorage\([\s\S]*"freeform-shapes"/);
