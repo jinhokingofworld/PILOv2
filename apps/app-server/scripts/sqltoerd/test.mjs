@@ -1648,6 +1648,22 @@ await assertRouteBodyLimit(
     },
     {
       layout: layoutJson({
+        annotations: annotations([], {
+          notes: [canvasNote("note_too_long", { text: oversizedText(2001) })]
+        })
+      }),
+      message: /layoutJson\.annotations\.notes\[0\]\.text length limit exceeded/
+    },
+    {
+      layout: layoutJson({
+        annotations: annotations([], {
+          frames: [canvasFrame("frame_too_long", { title: oversizedText(201) })]
+        })
+      }),
+      message: /layoutJson\.annotations\.frames\[0\]\.title length limit exceeded/
+    },
+    {
+      layout: layoutJson({
         annotations: annotations([
           tableAnnotation("annotation_duplicate_note", "table_users", "table_orders")
         ], { notes: [canvasNote("annotation_duplicate_note")] })

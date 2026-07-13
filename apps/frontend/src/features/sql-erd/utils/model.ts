@@ -175,7 +175,15 @@ export function applySqltoerdLayoutPatch(
   const positionsByTableId = new Map(
     (patch.tablePositions ?? []).map((position) => [position.tableId, position])
   );
-  const annotations = currentLayoutJson.annotations ?? { version: 1, links: [] };
+  const hasAnnotationPatch =
+    Object.keys(notesById).length > 0 ||
+    Object.keys(framesById).length > 0 ||
+    deletedNoteIds.size > 0 ||
+    deletedFrameIds.size > 0 ||
+    (patch.notesToAdd?.length ?? 0) > 0 ||
+    (patch.framesToAdd?.length ?? 0) > 0;
+  const annotations = currentLayoutJson.annotations ??
+    (hasAnnotationPatch ? { version: 1, links: [] } : null);
 
   return {
     ...currentLayoutJson,
@@ -183,7 +191,7 @@ export function applySqltoerdLayoutPatch(
       const position = positionsByTableId.get(layout.tableId);
       return position ? { ...layout, ...position } : layout;
     }),
-    annotations: {
+    ...(annotations ? { annotations: {
             ...annotations,
             notes: (annotations.notes ?? [])
               .filter((note) => !deletedNoteIds.has(note.id))
@@ -193,7 +201,7 @@ export function applySqltoerdLayoutPatch(
               .filter((frame) => !deletedFrameIds.has(frame.id))
               .map((frame) => ({ ...frame, ...framesById[frame.id] }))
               .concat(patch.framesToAdd ?? [])
-          }
+          } } : {})
   };
 }
 
@@ -649,7 +657,7 @@ function filterSqltoerdAnnotationsForModel(
 
   const modelIndex = createSqltoerdModelIndex(modelJson);
   return {
-    version: annotations.version,
+    ...annotations,
     links: annotations.links.filter((annotation) =>
       isSqltoerdAnnotationEndpointPresent(annotation, modelIndex)
     )

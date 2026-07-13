@@ -892,7 +892,9 @@ const runtimeAutoLayoutInput = {
           toTableId: "table.removed",
           label: "legacy note"
         }
-      ]
+      ],
+      notes: [{ id: "note.orders", x: 30, y: 40, width: 240, height: 160, text: "keep" }],
+      frames: [{ id: "frame.orders", x: 10, y: 20, width: 640, height: 420, title: "Orders", color: "blue", isLocked: false }]
     }
   },
   modelJson: runtimeModel,
@@ -969,7 +971,9 @@ assert.deepEqual(
   runtimeIncrementalAutoLayout.annotations,
   {
     version: 1,
-    links: [runtimeAutoLayoutInput.layoutJson.annotations.links[0]]
+    links: [runtimeAutoLayoutInput.layoutJson.annotations.links[0]],
+    notes: runtimeAutoLayoutInput.layoutJson.annotations.notes,
+    frames: runtimeAutoLayoutInput.layoutJson.annotations.frames
   }
 );
 
@@ -6286,6 +6290,13 @@ assert.deepEqual(patchedLayout.tableLayouts, [
   { tableId: "table.users", x: 100, y: 200 }
 ]);
 assert.equal(patchedLayout.annotations.notes[0].text, "");
+assert.equal(
+  "annotations" in modelRuntime.applySqltoerdLayoutPatch(
+    { version: 1, tableLayouts: [{ tableId: "table.users", x: 0, y: 0 }] },
+    { tablePositions: [{ tableId: "table.users", x: 5, y: 6 }] }
+  ),
+  false
+);
 const layoutWithCreatedFrame = modelRuntime.applySqltoerdLayoutPatch(
   patchedLayout,
   {
