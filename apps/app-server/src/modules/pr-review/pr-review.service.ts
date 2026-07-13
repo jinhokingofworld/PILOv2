@@ -53,7 +53,22 @@ import {
   PR_REVIEW_SEMANTIC_GRAPH_SCHEMA_VERSION,
   type PrReviewSemanticGraphHandoffPayload
 } from "./pr-review-semantic-contract";
-import { resolvePrReviewSemanticGraph } from "./pr-review-semantic-validator";
+import {
+  resolvePrReviewSemanticGraph,
+  type PrReviewValidatedGraphFlow,
+  type PrReviewValidatedSemanticGraph
+} from "./pr-review-semantic-validator";
+import { computeShapeContentHash } from "../canvas/canvas-shape-hash";
+import {
+  PR_REVIEW_FILE_NODE_SHAPE_TYPE,
+  PR_REVIEW_RELATION_EDGE_SHAPE_TYPE
+} from "../canvas/canvas-review-shape-policy";
+import type { CanvasShapeRow } from "../canvas/canvas.types";
+import {
+  buildPrReviewCanvasMaterialization,
+  type PrReviewCanvasMaterializationFile,
+  type PrReviewCanvasMaterializationRelation
+} from "./pr-review-canvas-materializer";
 
 interface PullRequestRow extends QueryResultRow {
   id: string;
@@ -197,6 +212,16 @@ interface ReviewFlowRelationRow extends QueryResultRow {
 
 interface ReviewFileRow extends QueryResultRow {
   id: string;
+  room_file_id: string;
+  current_status: PrReviewFileReviewStatus;
+}
+
+interface ReviewFileCarryOverRow extends QueryResultRow {
+  source_decision_id: string;
+  current_status: PrReviewFileReviewStatus;
+  comment: string | null;
+  reviewed_by_user_id: string;
+  reviewed_at: Date | string;
 }
 
 interface ReviewFileResultRow extends QueryResultRow {
@@ -246,6 +271,7 @@ interface ReviewFileDetailRow extends QueryResultRow {
   comment: string | null;
   reviewed_by_user_id: string | null;
   reviewed_at: Date | string | null;
+  carried_from_decision_id: string | null;
   latest_decision_id: string | null;
   latest_decision_status: PrReviewFileReviewStatus | null;
   latest_decision_comment: string | null;
@@ -696,6 +722,7 @@ export interface PrReviewFilePayload {
   comment: string | null;
   reviewedByUserId: string | null;
   reviewedAt: string | null;
+  decisionCarriedOver: boolean;
   flowMemberships: PrReviewFileFlowMembershipPayload[];
   latestDecision: PrReviewLatestDecisionPayload | null;
 }
@@ -1451,7 +1478,12 @@ export class PrReviewService {
               change_summary = $3::jsonb,
               recommended_review_order = $4,
               caution_points = $5::jsonb,
-              reviewed_count = 0,
+              reviewed_count = (
+                SELECT COUNT(*)::integer
+                FROM review_files AS review_file
+                WHERE review_file.session_id = $1
+                  AND review_file.current_status <> 'not_reviewed'
+              ),
               total_file_count = $6,
               analysis_error_code = NULL,
               analysis_error_message = NULL
@@ -3836,6 +3868,7 @@ export class PrReviewService {
           review_file.comment,
           review_file.reviewed_by_user_id,
           review_file.reviewed_at,
+          review_file.carried_from_decision_id,
           latest_decision.id AS latest_decision_id,
           latest_decision.status AS latest_decision_status,
           latest_decision.comment AS latest_decision_comment,
@@ -4158,7 +4191,8 @@ export class PrReviewService {
         SET current_status = $3,
             comment = $4,
             reviewed_by_user_id = $5,
-            reviewed_at = now()
+            reviewed_at = now(),
+            carried_from_decision_id = NULL
         FROM pr_review_sessions AS review_session
         JOIN github_pull_requests AS pull_request
           ON pull_request.id = review_session.pull_request_id
@@ -4409,6 +4443,15 @@ export class PrReviewService {
           ];
     const flowByKey = new Map<string, ReviewFlowRow>();
     const membershipIdByFlowAndPath = new Map<string, string>();
+    const primaryMembershipByPath = new Map<
+      string,
+      {
+        flowId: string;
+        reviewFlowFileId: string;
+        flowSortOrder: number;
+        workflowOrder: number;
+      }
+    >();
 
     for (const [flowIndex, graphFlow] of graphFlows.entries()) {
       const flow = await transaction.queryOne<ReviewFlowRow>(
@@ -4460,6 +4503,14 @@ export class PrReviewService {
           this.semanticGraphMembershipKey(graphFlow.candidateKey, filePath),
           membership.id
         );
+        if (!primaryMembershipByPath.has(filePath)) {
+          primaryMembershipByPath.set(filePath, {
+            flowId: flow.id,
+            reviewFlowFileId: membership.id,
+            flowSortOrder: flowIndex + 1,
+            workflowOrder: fileIndex + 1
+          });
+        }
       }
     }
 
@@ -4508,6 +4559,277 @@ export class PrReviewService {
         throw badRequest("Review flow relation could not be created");
       }
     }
+
+    const materializationFiles: PrReviewCanvasMaterializationFile[] = files.map(
+      (file, index) => {
+        const reviewFile = reviewFileByPath.get(file.filePath);
+        const metadata = metadataByPath.get(file.filePath);
+        const membership = primaryMembershipByPath.get(file.filePath);
+        if (!reviewFile || !metadata) {
+          throw badRequest("Review canvas file must match a changed file");
+        }
+
+        return {
+          reviewFileId: reviewFile.id,
+          roomFileId: reviewFile.room_file_id,
+          reviewFlowFileId: membership?.reviewFlowFileId ?? null,
+          flowId: membership?.flowId ?? null,
+          flowSortOrder: membership?.flowSortOrder ?? graphFlows.length + 1,
+          workflowOrder: membership?.workflowOrder ?? index + 1,
+          fileName: file.fileName,
+          filePath: file.filePath,
+          fileStatus: file.fileStatus,
+          roleSummary: metadata.fileRole,
+          riskLevel: metadata.riskLevel,
+          reviewStatus: reviewFile.current_status
+        };
+      }
+    );
+    const materializationRelations = this.buildCanvasMaterializationRelations(
+      semanticGraph,
+      graphFlows,
+      flowByKey,
+      reviewFileByPath
+    );
+
+    await this.materializeReviewCanvas(
+      transaction,
+      roomId,
+      sessionId,
+      materializationFiles,
+      materializationRelations
+    );
+  }
+
+  private buildCanvasMaterializationRelations(
+    semanticGraph: PrReviewValidatedSemanticGraph,
+    graphFlows: PrReviewValidatedGraphFlow[],
+    flowByKey: Map<string, ReviewFlowRow>,
+    reviewFileByPath: Map<string, ReviewFileRow>
+  ): PrReviewCanvasMaterializationRelation[] {
+    const relations: PrReviewCanvasMaterializationRelation[] = [];
+    const appendRelation = (input: {
+      flowKey: string;
+      fromFilePath: string;
+      toFilePath: string;
+      relationType: PrReviewCanvasMaterializationRelation["relationType"];
+      source: PrReviewCanvasMaterializationRelation["source"];
+      confidence: number;
+      reason: string;
+    }) => {
+      const flow = flowByKey.get(input.flowKey);
+      const fromFile = reviewFileByPath.get(input.fromFilePath);
+      const toFile = reviewFileByPath.get(input.toFilePath);
+      if (!flow || !fromFile || !toFile) {
+        throw badRequest("Review canvas relation must match the review graph");
+      }
+
+      relations.push({
+        fromReviewFileId: fromFile.id,
+        toReviewFileId: toFile.id,
+        fromRoomFileId: fromFile.room_file_id,
+        toRoomFileId: toFile.room_file_id,
+        flowId: flow.id,
+        relationType: input.relationType,
+        source: input.source,
+        confidence: input.confidence,
+        reason: input.reason
+      });
+    };
+
+    for (const relation of semanticGraph.relations) {
+      appendRelation(relation);
+    }
+
+    for (const graphFlow of graphFlows) {
+      for (let index = 1; index < graphFlow.reviewOrder.length; index += 1) {
+        appendRelation({
+          flowKey: graphFlow.candidateKey,
+          fromFilePath: graphFlow.reviewOrder[index - 1],
+          toFilePath: graphFlow.reviewOrder[index],
+          relationType: "review_order",
+          source: "fallback",
+          confidence: 100,
+          reason: "추천 리뷰 경로"
+        });
+      }
+    }
+
+    return relations;
+  }
+
+  private async materializeReviewCanvas(
+    transaction: DatabaseTransaction,
+    roomId: string,
+    sessionId: string,
+    files: PrReviewCanvasMaterializationFile[],
+    relations: PrReviewCanvasMaterializationRelation[]
+  ): Promise<void> {
+    const room = await transaction.queryOne<{ canvas_id: string }>(
+      `
+        SELECT canvas_id
+        FROM pr_review_rooms
+        WHERE id = $1
+        FOR UPDATE
+      `,
+      [roomId]
+    );
+    if (!room) {
+      throw conflictError("PR Review room is no longer active");
+    }
+
+    const existingShapes = await transaction.query<CanvasShapeRow>(
+      `
+        SELECT
+          id,
+          canvas_id,
+          parent_shape_id,
+          shape_type,
+          title,
+          text_content,
+          x,
+          y,
+          width,
+          height,
+          rotation,
+          z_index,
+          raw_shape,
+          content_hash,
+          revision,
+          created_at,
+          updated_at,
+          deleted_at
+        FROM canvas_freeform_shapes
+        WHERE canvas_id = $1
+          AND shape_type = ANY($2::text[])
+        ORDER BY id
+        FOR UPDATE
+      `,
+      [
+        room.canvas_id,
+        [
+          PR_REVIEW_FILE_NODE_SHAPE_TYPE,
+          PR_REVIEW_RELATION_EDGE_SHAPE_TYPE
+        ]
+      ]
+    );
+    const materialization = buildPrReviewCanvasMaterialization({
+      reviewRoomId: roomId,
+      reviewSessionId: sessionId,
+      files,
+      relations,
+      existingShapes
+    });
+
+    for (const shape of materialization.shapes) {
+      const values = shape.values;
+      const contentHash = computeShapeContentHash(values);
+      await transaction.execute(
+        `
+          INSERT INTO canvas_freeform_shapes (
+            id,
+            canvas_id,
+            parent_shape_id,
+            shape_type,
+            title,
+            text_content,
+            x,
+            y,
+            width,
+            height,
+            rotation,
+            z_index,
+            raw_shape,
+            content_hash,
+            deleted_at
+          )
+          VALUES (
+            $1,
+            $2,
+            $3,
+            $4,
+            $5,
+            $6,
+            $7,
+            $8,
+            $9,
+            $10,
+            $11,
+            $12,
+            $13::jsonb,
+            $14,
+            NULL
+          )
+          ON CONFLICT (id) DO UPDATE
+          SET
+            parent_shape_id = EXCLUDED.parent_shape_id,
+            shape_type = EXCLUDED.shape_type,
+            title = EXCLUDED.title,
+            text_content = EXCLUDED.text_content,
+            x = EXCLUDED.x,
+            y = EXCLUDED.y,
+            width = EXCLUDED.width,
+            height = EXCLUDED.height,
+            rotation = EXCLUDED.rotation,
+            z_index = EXCLUDED.z_index,
+            raw_shape = EXCLUDED.raw_shape,
+            content_hash = EXCLUDED.content_hash,
+            revision = canvas_freeform_shapes.revision + 1,
+            updated_at = NOW(),
+            deleted_at = NULL
+          WHERE canvas_freeform_shapes.canvas_id = EXCLUDED.canvas_id
+            AND (
+              canvas_freeform_shapes.deleted_at IS NOT NULL
+              OR canvas_freeform_shapes.content_hash <> EXCLUDED.content_hash
+            )
+        `,
+        [
+          shape.id,
+          room.canvas_id,
+          values.parentShapeId,
+          values.shapeType,
+          values.title,
+          values.textContent,
+          values.x,
+          values.y,
+          values.width,
+          values.height,
+          values.rotation,
+          values.zIndex,
+          JSON.stringify(values.rawShape),
+          contentHash
+        ]
+      );
+    }
+
+    await transaction.execute(
+      `
+        UPDATE canvas_freeform_shapes
+        SET deleted_at = NOW(),
+            revision = revision + 1,
+            updated_at = NOW()
+        WHERE canvas_id = $1
+          AND shape_type = ANY($2::text[])
+          AND deleted_at IS NULL
+          AND NOT (id = ANY($3::text[]))
+      `,
+      [
+        room.canvas_id,
+        [
+          PR_REVIEW_FILE_NODE_SHAPE_TYPE,
+          PR_REVIEW_RELATION_EDGE_SHAPE_TYPE
+        ],
+        materialization.activeShapeIds
+      ]
+    );
+    await transaction.execute(
+      `
+        UPDATE canvas
+        SET updated_at = NOW()
+        WHERE id = $1
+      `,
+      [room.canvas_id]
+    );
   }
 
   private async insertReviewFile(
@@ -4545,6 +4867,13 @@ export class PrReviewService {
       throw badRequest("PR Review room file could not be created");
     }
 
+    const carryOver = await this.findReviewFileCarryOver(
+      transaction,
+      roomId,
+      roomFile.id,
+      file.headBlobSha
+    );
+
     const reviewFile = await transaction.queryOne<ReviewFileRow>(
       `
         INSERT INTO review_files (
@@ -4565,7 +4894,13 @@ export class PrReviewService {
           risk_level,
           change_reason,
           change_summary,
-          review_points
+          review_points,
+          head_blob_sha,
+          carried_from_decision_id,
+          current_status,
+          comment,
+          reviewed_by_user_id,
+          reviewed_at
         )
         VALUES (
           $1,
@@ -4585,9 +4920,15 @@ export class PrReviewService {
           $15,
           $16,
           $17,
-          $18::jsonb
+          $18::jsonb,
+          $19,
+          $20,
+          $21,
+          $22,
+          $23,
+          $24
         )
-        RETURNING id
+        RETURNING id, room_file_id, current_status
       `,
       [
         sessionId,
@@ -4607,7 +4948,13 @@ export class PrReviewService {
         metadata.riskLevel,
         metadata.changeReason,
         metadata.changeSummary,
-        JSON.stringify(metadata.reviewPoints)
+        JSON.stringify(metadata.reviewPoints),
+        file.headBlobSha,
+        carryOver?.source_decision_id ?? null,
+        carryOver?.current_status ?? "not_reviewed",
+        carryOver?.comment ?? null,
+        carryOver?.reviewed_by_user_id ?? null,
+        carryOver?.reviewed_at ?? null
       ]
     );
 
@@ -4616,6 +4963,53 @@ export class PrReviewService {
     }
 
     return reviewFile;
+  }
+
+  private async findReviewFileCarryOver(
+    transaction: DatabaseTransaction,
+    roomId: string,
+    roomFileId: string,
+    headBlobSha: string | null
+  ): Promise<ReviewFileCarryOverRow | null> {
+    if (!headBlobSha) {
+      return null;
+    }
+
+    return transaction.queryOne<ReviewFileCarryOverRow>(
+      `
+        SELECT
+          COALESCE(
+            latest_decision.id,
+            previous_file.carried_from_decision_id
+          ) AS source_decision_id,
+          previous_file.current_status,
+          previous_file.comment,
+          previous_file.reviewed_by_user_id,
+          previous_file.reviewed_at
+        FROM pr_review_rooms AS review_room
+        JOIN review_files AS previous_file
+          ON previous_file.session_id = review_room.current_session_id
+         AND previous_file.room_id = review_room.id
+         AND previous_file.room_file_id = $2
+        LEFT JOIN LATERAL (
+          SELECT decision.id
+          FROM file_review_decisions AS decision
+          WHERE decision.review_file_id = previous_file.id
+          ORDER BY decision.reviewed_at DESC, decision.id DESC
+          LIMIT 1
+        ) AS latest_decision ON true
+        WHERE review_room.id = $1
+          AND previous_file.head_blob_sha = $3
+          AND previous_file.current_status <> 'not_reviewed'
+          AND previous_file.reviewed_by_user_id IS NOT NULL
+          AND previous_file.reviewed_at IS NOT NULL
+          AND COALESCE(
+            latest_decision.id,
+            previous_file.carried_from_decision_id
+          ) IS NOT NULL
+      `,
+      [roomId, roomFileId, headBlobSha]
+    );
   }
 
   private semanticGraphMembershipKey(flowKey: string, filePath: string): string {
@@ -5475,6 +5869,7 @@ export class PrReviewService {
       comment: file.comment,
       reviewedByUserId: file.reviewed_by_user_id,
       reviewedAt: this.toNullableIsoString(file.reviewed_at),
+      decisionCarriedOver: file.carried_from_decision_id !== null,
       flowMemberships: memberships.map((membership) => ({
         reviewFlowFileId: membership.review_flow_file_id,
         flowId: membership.flow_id,

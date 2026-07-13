@@ -24,6 +24,7 @@ import {
   PR_REVIEW_FLOW_LABEL_SHAPE_TYPE,
   PR_REVIEW_FLOW_MILESTONE_SHAPE_TYPE,
   PR_REVIEW_ROLE_LANE_SHAPE_TYPE,
+  PR_REVIEW_RELATION_EDGE_SHAPE_TYPE,
   isPrReviewFileNodeShape,
   type PrReviewFileNodeShape,
   type PrReviewFlowEdgeShape,
@@ -98,6 +99,7 @@ const prReviewTldrawComponents = {
 const prReviewShapeTypes = new Set<string>([
   PR_REVIEW_FILE_NODE_SHAPE_TYPE,
   PR_REVIEW_FLOW_EDGE_SHAPE_TYPE,
+  PR_REVIEW_RELATION_EDGE_SHAPE_TYPE,
   PR_REVIEW_FLOW_LABEL_SHAPE_TYPE,
   PR_REVIEW_FLOW_MILESTONE_SHAPE_TYPE,
   PR_REVIEW_ROLE_LANE_SHAPE_TYPE
@@ -139,6 +141,9 @@ function createFileNodeShape(
     props: {
       w: placement.w,
       h: placement.h,
+      reviewRoomId: null,
+      roomFileId: null,
+      currentReviewSessionId: null,
       reviewFileId: fileNodeData.reviewFileId,
       reviewSessionId: fileNodeData.reviewSessionId,
       reviewFlowFileId: fileNodeData.reviewFlowFileId,

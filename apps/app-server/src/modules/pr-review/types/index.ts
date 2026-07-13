@@ -86,6 +86,7 @@ export interface PrReviewGithubChangedFile {
   filePath: string;
   previousFilePath: string | null;
   fileName: string;
+  headBlobSha: string | null;
   fileStatus: PrReviewFileStatus;
   additions: number;
   deletions: number;

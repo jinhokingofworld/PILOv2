@@ -71,7 +71,6 @@ import {
 import { useAuthSession } from "@/features/auth/auth-session";
 import { isDevPreviewAccessToken } from "@/features/auth/session-storage";
 import { cn } from "@/lib/utils";
-import { GitHubSettingsPlaceholder } from "@/features/settings/components/github-settings-placeholder";
 import {
   deleteCurrentAccount,
   updateCurrentProfile,
@@ -87,6 +86,7 @@ export type UserDialogProps = {
   avatarUrl: string | null;
   canManageWorkspace: boolean;
   email: string;
+  githubContent: ReactNode;
   joinedAt: string | null;
   name: string;
   onOpenChange: (open: boolean) => void;
@@ -527,6 +527,7 @@ function SettingsView(props: UserDialogProps) {
     avatarUrl,
     canManageWorkspace,
     email,
+    githubContent,
     name,
     onOpenChange,
     open
@@ -962,7 +963,7 @@ function SettingsView(props: UserDialogProps) {
         </TabsContent>
 
         <TabsContent value="github">
-          <GitHubSettingsPlaceholder canManageWorkspace={canManageWorkspace} />
+          {githubContent}
         </TabsContent>
 
         <TabsContent value="workspace">

@@ -5038,6 +5038,7 @@ assert.match(sessionPage, /window\.location\.search/);
 assert.match(sessionPage, /sql-erd-full-bleed/);
 assert.match(sessionPage, /h-screen/);
 assert.match(sessionRouteBridge, /SqlErdSessionPage as default/);
+assert.match(sessionRouteBridge, /import "tldraw\/tldraw\.css"/);
 assert.doesNotMatch(page, /-m-6/);
 assert.doesNotMatch(page, /h-\[calc\(100vh-3\.5rem\)\]/);
 

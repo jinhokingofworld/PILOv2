@@ -48,6 +48,7 @@ import {
   useSidebar
 } from "@/components/ui/sidebar";
 import { useAuthSession } from "@/features/auth";
+import { GithubSettingsStatus } from "@/features/github-integration/components/github-settings-status";
 import { isDevPreviewAccessToken } from "@/features/auth/session-storage";
 import { useMeetingRuntime } from "@/features/meeting/runtime/meeting-runtime-provider";
 import type { FeatureNavigationItem } from "@/features/navigation-types";
@@ -238,6 +239,14 @@ export function AppSidebar({
       });
   };
 
+  const openSettings = () => {
+    setIsSettingsDialogOpen(true);
+  };
+
+  const handleManageGithub = () => {
+    setIsSettingsDialogOpen(false);
+    router.push("/github");
+  };
   return (
     <>
       <Sidebar collapsible="icon" variant="inset">
@@ -498,7 +507,7 @@ export function AppSidebar({
                 <DropdownMenuGroup>
                   <DropdownMenuItem
                     className="gap-2"
-                    onClick={() => setIsSettingsDialogOpen(true)}
+                    onClick={openSettings}
                   >
                     <Settings />
                     설정
@@ -535,6 +544,12 @@ export function AppSidebar({
         canManageWorkspace={activeWorkspace.role === "owner"}
         email={displayUser.email}
         joinedAt={displayUser.createdAt}
+        githubContent={
+          <GithubSettingsStatus
+            canManageWorkspace={activeWorkspace.role === "owner"}
+            onManage={handleManageGithub}
+          />
+        }
         name={displayUser.name}
         onOpenChange={setIsSettingsDialogOpen}
         open={isSettingsDialogOpen}

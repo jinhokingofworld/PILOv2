@@ -225,6 +225,7 @@ export class PrReviewGithubDependencyService implements PrReviewGithubDependency
       filePath: file.filePath,
       previousFilePath: file.previousFilePath,
       fileName: file.fileName,
+      headBlobSha: file.headBlobSha,
       fileStatus: this.normalizeFileStatus(file.fileStatus),
       additions: file.additions,
       deletions: file.deletions,

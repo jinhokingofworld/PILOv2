@@ -94,13 +94,6 @@ const memberProfileDialog = await readFile(
   ),
   "utf8"
 );
-const githubSettingsPlaceholder = await readFile(
-  new URL(
-    "../src/features/settings/components/github-settings-placeholder.tsx",
-    import.meta.url
-  ),
-  "utf8"
-);
 const workspaceCreationRoute = await readFile(
   new URL("../src/app/workspace/new/page.tsx", import.meta.url),
   "utf8"
@@ -490,6 +483,8 @@ assert.doesNotMatch(appSettingsDialog, /MOCK_GITHUB_CONNECTIONS/);
 assert.match(settingsApiClient, /\/me\/settings/);
 assert.match(settingsApiClient, /\/me\/profile/);
 assert.match(settingsApiClient, /deleteCurrentAccount/);
+assert.match(appSettingsDialog, /githubContent: ReactNode/);
+assert.match(appSettingsDialog, /\{githubContent\}/);
 assert.match(workspaceCreationRoute, /WorkspaceCreationPage/);
 assert.match(
   headerNotificationDropdown,
@@ -553,9 +548,6 @@ assert.match(memberProfileDialog, /member\.user\.bio/);
 assert.match(memberProfileDialog, /canRemoveSelectedMember/);
 assert.match(memberProfileDialog, /member\.role !== "owner"/);
 assert.match(memberProfileDialog, /max-w-4xl/);
-assert.match(githubSettingsPlaceholder, /\/me\/github/);
-assert.match(githubSettingsPlaceholder, /GitHub Integration API/);
-assert.doesNotMatch(githubSettingsPlaceholder, /api\/client/);
 assert.match(canvasClientFacade, /const DEFAULT_CANVAS_MODE = "api"/);
 assert.match(canvasClientFacade, /createCanvasApiClient\(options\)/);
 assert.match(canvasClientFacade, /createMockCanvasClient\(\)/);

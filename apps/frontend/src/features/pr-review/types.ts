@@ -292,6 +292,7 @@ export type PrReviewFile = {
   comment: string | null;
   reviewedByUserId: string | null;
   reviewedAt: string | null;
+  decisionCarriedOver: boolean;
   flowMemberships: PrReviewFileFlowMembership[];
   latestDecision: PrReviewLatestDecision | null;
 };
