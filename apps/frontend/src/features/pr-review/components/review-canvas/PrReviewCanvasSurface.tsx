@@ -10,6 +10,8 @@ import {
 } from "react";
 import {
   createShapeId,
+  getIndexAbove,
+  getIndicesAbove,
   useEditor,
   type Editor,
   type TLEventInfo,
@@ -54,6 +56,7 @@ import {
   type PrReviewRoleLaneShape
 } from "@/features/pr-review/components/review-canvas/PrReviewFileNodeShapeUtil";
 import { prReviewShapeUtils } from "@/features/pr-review/components/review-canvas/pr-review-shape-utils";
+import { resolvePrReviewCanvasShapeIndexes } from "@/features/pr-review/components/review-canvas/pr-review-canvas-index";
 import {
   buildPrReviewFileColumnMap,
   buildPrReviewRoleLanes,
@@ -566,10 +569,26 @@ function buildPrReviewCanvasShapes(
 function buildStoredPrReviewCanvasShapes(
   storedShapes: PrReviewCanvasShape[]
 ): TLShapePartial[] {
-  return storedShapes.flatMap((shape) => {
-    if (!isPrReviewCanvasSystemShape(shape) || !isRecord(shape.rawShape.props)) {
-      return [];
+  const systemShapes = storedShapes.filter(
+    (shape) =>
+      isPrReviewCanvasSystemShape(shape) && isRecord(shape.rawShape.props)
+  );
+  const indexes = resolvePrReviewCanvasShapeIndexes(
+    systemShapes.map((shape) => shape.rawShape.index),
+    {
+      createIndexes: (count) => getIndicesAbove(null, count),
+      isValidIndex: (index) => {
+        try {
+          getIndexAbove(index as TLShape["index"]);
+          return true;
+        } catch {
+          return false;
+        }
+      }
     }
+  );
+
+  return systemShapes.map((shape, shapeIndex) => {
 
     const partial: TLShapePartial = {
       id: shape.id as TLShapeId,
@@ -577,18 +596,15 @@ function buildStoredPrReviewCanvasShapes(
       x: shape.x,
       y: shape.y,
       rotation: shape.rotation,
-      props: { ...shape.rawShape.props }
+      index: indexes[shapeIndex] as TLShape["index"],
+      props: { ...(shape.rawShape.props as Record<string, unknown>) }
     } as TLShapePartial;
-
-    if (typeof shape.rawShape.index === "string") {
-      partial.index = shape.rawShape.index as TLShape["index"];
-    }
 
     if (shape.parentShapeId?.startsWith("shape:")) {
       partial.parentId = shape.parentShapeId as TLShapeId;
     }
 
-    return [partial];
+    return partial;
   });
 }
 

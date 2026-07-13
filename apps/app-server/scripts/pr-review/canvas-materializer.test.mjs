@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const {
   buildPrReviewCanvasMaterialization,
+  getPrReviewCanvasShapeIndex,
   getPrReviewFileShapeId,
   getPrReviewRelationShapeId
 } = require("../../dist/modules/pr-review/pr-review-canvas-materializer.js");
@@ -86,6 +87,8 @@ assert.ok(first.activeShapeIds.includes(getPrReviewFileShapeId("room-file-1")));
 assert.ok(
   first.activeShapeIds.includes(getPrReviewRelationShapeId(ROOM_ID, relation()))
 );
+assert.equal(getPrReviewCanvasShapeIndex(9), "a000000000091");
+assert.equal(getPrReviewCanvasShapeIndex(109), "a0000000001l1");
 
 const firstFileShape = first.shapes.find(
   (shape) => shape.id === getPrReviewFileShapeId("room-file-1")
@@ -189,5 +192,19 @@ assert.equal(
 );
 assert.equal(nextRelationShape.values.rawShape.props.fromRoomFileId, "room-file-1");
 assert.equal(nextRelationShape.values.rawShape.props.toRoomFileId, "room-file-2");
+
+const invalidLegacyIndex = asStoredShape(nextRelationShape, {
+  raw_shape: {
+    ...nextRelationShape.values.rawShape,
+    index: "a10"
+  }
+});
+const repaired = buildPrReviewCanvasMaterialization({
+  ...firstInput,
+  existingShapes: [invalidLegacyIndex]
+}).shapes.find((shape) => shape.id === invalidLegacyIndex.id);
+assert.ok(repaired);
+assert.notEqual(repaired.values.rawShape.index, "a10");
+assert.equal(repaired.values.rawShape.index, getPrReviewCanvasShapeIndex(0));
 
 console.log("PR Review canvas materializer tests passed");
