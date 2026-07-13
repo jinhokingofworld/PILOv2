@@ -137,6 +137,8 @@ module "iam" {
   github_sync_operator_log_group_arn = "arn:aws:logs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:log-group:/ecs/${local.name_prefix}/github-sync-worker"
   secrets_manager_arns               = concat(module.secrets.secret_arns, [module.rds.master_user_secret_arn])
   cloudfront_distribution            = module.cloudfront.distribution_arn
+  terraform_plan_state_bucket_arn    = "arn:aws:s3:::${module.terraform_state.state_bucket_name}"
+  terraform_plan_state_key           = "infra/dev/terraform.tfstate"
 }
 
 module "rds" {

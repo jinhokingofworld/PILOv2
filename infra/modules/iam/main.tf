@@ -1,6 +1,9 @@
 locals {
-  github_oidc_enabled = var.github_owner != "" && var.github_repo != ""
-  s3_object_arns      = [for arn in var.s3_bucket_arns : "${arn}/*"]
+  github_oidc_enabled                      = var.github_owner != "" && var.github_repo != ""
+  s3_object_arns                           = [for arn in var.s3_bucket_arns : "${arn}/*"]
+  terraform_plan_state_object_arn          = "${var.terraform_plan_state_bucket_arn}/${var.terraform_plan_state_key}"
+  terraform_plan_state_lockfile_object_arn = "${local.terraform_plan_state_object_arn}.tflock"
+  terraform_plan_bucket_arns               = concat(var.s3_bucket_arns, [var.terraform_plan_state_bucket_arn])
 }
 
 data "aws_caller_identity" "current" {}
@@ -453,6 +456,194 @@ resource "aws_iam_role_policy" "github_actions_pass_roles" {
           aws_iam_role.github_sync_worker_task.arn,
         ]
       }
+    ]
+  })
+}
+
+data "aws_iam_policy_document" "github_actions_terraform_plan_assume_role" {
+  count = local.github_oidc_enabled ? 1 : 0
+
+  statement {
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+
+    principals {
+      type        = "Federated"
+      identifiers = [aws_iam_openid_connect_provider.github[0].arn]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:sub"
+      values = [
+        "repo:${var.github_owner}/${var.github_repo}:pull_request",
+        "repo:${var.github_owner}/${var.github_repo}:ref:refs/heads/main",
+      ]
+    }
+  }
+}
+
+resource "aws_iam_role" "github_actions_terraform_plan" {
+  count = local.github_oidc_enabled ? 1 : 0
+
+  name               = "${var.name_prefix}-github-actions-terraform-plan-role"
+  assume_role_policy = data.aws_iam_policy_document.github_actions_terraform_plan_assume_role[0].json
+}
+
+resource "aws_iam_role_policy" "github_actions_terraform_plan" {
+  count = local.github_oidc_enabled ? 1 : 0
+
+  name = "${var.name_prefix}-github-actions-terraform-plan-read"
+  role = aws_iam_role.github_actions_terraform_plan[0].id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "ReadTerraformState"
+        Effect = "Allow"
+        Action = ["s3:GetObject"]
+        Resource = [
+          local.terraform_plan_state_object_arn,
+          local.terraform_plan_state_lockfile_object_arn,
+        ]
+      },
+      {
+        Sid      = "ListTerraformStatePrefix"
+        Effect   = "Allow"
+        Action   = ["s3:ListBucket"]
+        Resource = var.terraform_plan_state_bucket_arn
+        Condition = {
+          StringLike = {
+            "s3:prefix" = [
+              var.terraform_plan_state_key,
+              "${var.terraform_plan_state_key}*",
+            ]
+          }
+        }
+      },
+      {
+        Sid    = "ManageTerraformPlanLockfile"
+        Effect = "Allow"
+        Action = [
+          "s3:PutObject",
+          "s3:DeleteObject",
+        ]
+        Resource = local.terraform_plan_state_lockfile_object_arn
+      },
+      {
+        Sid    = "ReadTerraformManagedResources"
+        Effect = "Allow"
+        Action = [
+          "acm:DescribeCertificate",
+          "acm:ListTagsForCertificate",
+          "cloudfront:DescribeFunction",
+          "cloudfront:GetDistribution",
+          "cloudfront:GetDistributionConfig",
+          "cloudfront:GetOriginAccessControl",
+          "cloudfront:ListTagsForResource",
+          "cloudwatch:DescribeAlarms",
+          "cloudwatch:ListTagsForResource",
+          "dynamodb:DescribeTable",
+          "dynamodb:ListTagsOfResource",
+          "ec2:DescribeAddresses",
+          "ec2:DescribeAvailabilityZones",
+          "ec2:DescribeImages",
+          "ec2:DescribeInstanceAttribute",
+          "ec2:DescribeInstances",
+          "ec2:DescribeInternetGateways",
+          "ec2:DescribeNetworkInterfaces",
+          "ec2:DescribeRouteTables",
+          "ec2:DescribeSecurityGroupRules",
+          "ec2:DescribeSecurityGroups",
+          "ec2:DescribeSubnets",
+          "ec2:DescribeTags",
+          "ec2:DescribeVolumes",
+          "ec2:DescribeVpcs",
+          "ecr:DescribeRepositories",
+          "ecr:GetLifecyclePolicy",
+          "ecr:ListTagsForResource",
+          "ecs:DescribeClusters",
+          "ecs:DescribeServices",
+          "ecs:DescribeTaskDefinition",
+          "ecs:ListTagsForResource",
+          "elasticache:DescribeCacheClusters",
+          "elasticache:DescribeCacheSubnetGroups",
+          "elasticache:ListTagsForResource",
+          "elasticloadbalancing:DescribeListeners",
+          "elasticloadbalancing:DescribeLoadBalancerAttributes",
+          "elasticloadbalancing:DescribeLoadBalancers",
+          "elasticloadbalancing:DescribeRules",
+          "elasticloadbalancing:DescribeTags",
+          "elasticloadbalancing:DescribeTargetGroupAttributes",
+          "elasticloadbalancing:DescribeTargetGroups",
+          "iam:GetInstanceProfile",
+          "iam:GetOpenIDConnectProvider",
+          "iam:GetPolicy",
+          "iam:GetPolicyVersion",
+          "iam:GetRole",
+          "iam:GetRolePolicy",
+          "iam:GetUser",
+          "iam:GetUserPolicy",
+          "iam:ListAttachedRolePolicies",
+          "iam:ListAttachedUserPolicies",
+          "iam:ListInstanceProfileTags",
+          "iam:ListOpenIDConnectProviderTags",
+          "iam:ListPolicyTags",
+          "iam:ListPolicyVersions",
+          "iam:ListRolePolicies",
+          "iam:ListRoleTags",
+          "iam:ListUserPolicies",
+          "iam:ListUserTags",
+          "logs:DescribeLogGroups",
+          "logs:DescribeMetricFilters",
+          "logs:ListTagsLogGroup",
+          "logs:ListTagsForResource",
+          "rds:DescribeDBInstances",
+          "rds:DescribeDBSubnetGroups",
+          "rds:ListTagsForResource",
+          "route53:GetHostedZone",
+          "route53:ListResourceRecordSets",
+          "route53:ListTagsForResource",
+          "secretsmanager:DescribeSecret",
+          "secretsmanager:ListTagsForResource",
+          "sqs:GetQueueAttributes",
+          "sqs:GetQueueUrl",
+          "sqs:ListQueueTags",
+          "sts:GetCallerIdentity",
+          "tag:GetResources",
+        ]
+        Resource = "*"
+      },
+      {
+        Sid    = "ReadTerraformManagedS3Configuration"
+        Effect = "Allow"
+        Action = [
+          "s3:GetAccelerateConfiguration",
+          "s3:GetBucketAcl",
+          "s3:GetBucketCors",
+          "s3:GetBucketEncryption",
+          "s3:GetBucketLifecycleConfiguration",
+          "s3:GetBucketLocation",
+          "s3:GetBucketLogging",
+          "s3:GetBucketOwnershipControls",
+          "s3:GetBucketPolicy",
+          "s3:GetBucketPolicyStatus",
+          "s3:GetBucketPublicAccessBlock",
+          "s3:GetBucketRequestPayment",
+          "s3:GetBucketTagging",
+          "s3:GetBucketVersioning",
+          "s3:GetBucketWebsite",
+          "s3:GetReplicationConfiguration",
+          "s3:ListBucket",
+        ]
+        Resource = local.terraform_plan_bucket_arns
+      },
     ]
   })
 }

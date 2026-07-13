@@ -349,8 +349,11 @@ GitHub Actions는 OIDC 기반으로 AWS IAM Role을 assume한다. 장기 AWS acc
 - Terraform validation
   - `terraform fmt`
   - `terraform validate`
-  - pull request에서는 `terraform fmt`와 `terraform validate`만 실행
-  - `AWS_GITHUB_ACTIONS_ROLE_ARN`이 설정되고 workflow path filter(`infra/**` 또는 `.github/workflows/terraform-validate.yml`)에 일치하는 qualifying main push, 또는 main branch의 `workflow_dispatch` 수동 실행에서만 실행되는 `terraform plan`
+  - 모든 pull request에서는 `terraform fmt`와 `terraform validate` 실행
+  - `AWS_TERRAFORM_PLAN_ROLE_ARN`이 등록된 동일 저장소 PR에서만 전용 read-only role로 remote backend `terraform plan` 실행
+  - 외부 fork PR은 AWS role을 assume하지 않고 fmt/validate만 실행
+  - main push와 main branch의 `workflow_dispatch`도 동일 전용 plan role로 `terraform plan` 실행
+  - 기존 `AWS_GITHUB_ACTIONS_ROLE_ARN`은 deployment role로 유지하며 PR plan trust에 사용하지 않음
 - App Server image build/push/deploy
 - Realtime Server image build/push/deploy
 - AI Worker image build/push/deploy
