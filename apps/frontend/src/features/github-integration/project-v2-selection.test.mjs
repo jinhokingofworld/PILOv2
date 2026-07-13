@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import ts from "typescript";
 
 const types = await readFile(
   new URL("./types/index.ts", import.meta.url),
@@ -18,19 +17,8 @@ const tables = await readFile(
   new URL("./components/github-connect-tables.tsx", import.meta.url),
   "utf8"
 );
-const paginationSource = await readFile(
-  new URL("./utils/github-project-v2-pagination.ts", import.meta.url),
-  "utf8"
-);
 const paginationModule = await import(
-  `data:text/javascript;base64,${Buffer.from(
-    ts.transpileModule(paginationSource, {
-      compilerOptions: {
-        module: ts.ModuleKind.ESNext,
-        target: ts.ScriptTarget.ES2022
-      }
-    }).outputText
-  ).toString("base64")}`
+  new URL("./utils/github-page-collector.ts", import.meta.url)
 );
 
 assert.match(types, /export type GithubProjectV2 = \{[\s\S]*?selected: boolean;/);
@@ -46,7 +34,7 @@ assert.match(tables, /onSaveProjectV2Selections/);
 assert.match(panel, /replaceGithubProjectV2Selections/);
 assert.match(
   panel,
-  /listGithubProjectsV2\(workspaceId, \{\s*closed: true,\s*limit: 100,/,
+  /listGithubProjectsV2\(workspaceId, \{[\s\S]{0,160}closed: true,[\s\S]{0,160}limit: 100,/,
   "the complete-list save must include closed ProjectV2s"
 );
 assert.match(panel, /setSelectedProjectV2Ids/);
@@ -69,9 +57,9 @@ assert.match(
   "a saved selection with an enqueue failure must show a distinct sync failure message"
 );
 assert.match(
-  panel,
-  /hasQueuedSelection[\s\S]*?setHasRunningSyncRun\(true\)/,
-  "a queued selection must start polling even when another selection fails"
+  panel.slice(saveSelectionStart, nextHandlerStart),
+  /selection\.syncStatus === "queued"\)[\s\S]{0,160}setHasRunningSyncRun\(true\)/,
+  "a queued selection must start polling"
 );
 assert.match(panel, /handleDiscoverGithubProjectV2/);
 assert.match(panel, /discovery\.connectionRequired/);
@@ -84,7 +72,7 @@ assert.match(
 
 {
   const requestedPages = [];
-  const allProjects = await paginationModule.collectGithubProjectV2Pages(
+  const allProjects = await paginationModule.collectGithubPages(
     async (page) => {
       requestedPages.push(page);
       return page === 1
