@@ -253,7 +253,7 @@ terraform apply
 3. GitHub repository variable `AWS_TERRAFORM_PLAN_ROLE_ARN`에 위 ARN을 등록한다.
 4. 동일 저장소에서 `infra/**` 또는 Terraform workflow를 변경한 PR을 열어 `Terraform Validate / plan`이 remote state 기준으로 성공하는지 확인한다.
 
-role에는 state object read와 lockfile 생성·해제, 현재 Terraform state refresh에 필요한 명시적 읽기 권한만 부여한다. secret value read, 리소스 변경, IAM 변경은 허용하지 않는다.
+role에는 state object read와 lockfile 생성·해제, 현재 Terraform state refresh에 필요한 명시적 읽기 권한만 부여한다. 여기에는 S3 lifecycle 설정, DynamoDB 연속 백업 상태, Secrets Manager resource policy 조회가 포함되며, secret value read, 리소스 변경, IAM 변경은 허용하지 않는다.
 
 ### App Server workflow
 
