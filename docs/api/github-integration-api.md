@@ -577,6 +577,7 @@ PR 변경 파일은 DB에 캐시하지 않고 요청 시 GitHub App installation
       "filePath": "apps/frontend/page.tsx",
       "previousFilePath": null,
       "fileName": "page.tsx",
+      "headBlobSha": "abc123",
       "fileStatus": "modified",
       "additions": 84,
       "deletions": 12,
@@ -601,6 +602,10 @@ PR 변경 파일은 DB에 캐시하지 않고 요청 시 GitHub App installation
 `patch`는 GitHub API 응답값이며 DB 저장 컬럼이 아니다. Binary 파일이거나 큰 diff이면
 `patch=null`로 반환한다. 큰 diff 기준은 `additions + deletions >= 1000`,
 patch 누락, 또는 UTF-8 patch byte length `>= 200KB` 중 하나다.
+
+`headBlobSha`는 GitHub PR file 응답의 file `sha`이며 값이 없으면 `null`이다. PR Review는
+새 head 분석에서 같은 room file의 내용이 실제로 동일한지 비교할 때 이 값을 사용한다.
+이 필드는 기존 동기화 DB에 파일 내용을 추가로 저장하지 않는다.
 
 Conflict 상태 응답:
 
