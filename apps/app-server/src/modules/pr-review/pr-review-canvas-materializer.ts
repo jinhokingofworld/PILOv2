@@ -60,6 +60,9 @@ const GRID_START_Y = 120;
 const GRID_GAP_X = 72;
 const GRID_GAP_Y = 64;
 const COLLISION_MARGIN = 24;
+const INDEX_DIGITS =
+  "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+const INDEX_DIGIT_WIDTH = 10;
 
 export function buildPrReviewCanvasMaterialization(input: {
   reviewRoomId: string;
@@ -292,10 +295,12 @@ function buildRawShape(input: {
   values: { x: number; y: number; rotation: number; zIndex: number };
 }): Record<string, unknown> {
   const existingRaw = input.existing?.raw_shape ?? {};
+  const generatedIndex = getPrReviewCanvasShapeIndex(input.values.zIndex);
   const index =
-    typeof existingRaw.index === "string"
+    typeof existingRaw.index === "string" &&
+    !isInvalidLegacyPrReviewCanvasIndex(existingRaw.index)
       ? existingRaw.index
-      : `a${input.values.zIndex + 1}`;
+      : generatedIndex;
 
   return {
     ...existingRaw,
@@ -316,6 +321,25 @@ function buildRawShape(input: {
     meta: isRecord(existingRaw.meta) ? existingRaw.meta : {},
     props: input.props
   };
+}
+
+export function getPrReviewCanvasShapeIndex(zIndex: number): string {
+  if (!Number.isSafeInteger(zIndex) || zIndex < 0) {
+    throw new Error("PR Review Canvas zIndex must be a non-negative safe integer");
+  }
+
+  let remaining = zIndex;
+  let encoded = "";
+  do {
+    encoded = INDEX_DIGITS[remaining % INDEX_DIGITS.length] + encoded;
+    remaining = Math.floor(remaining / INDEX_DIGITS.length);
+  } while (remaining > 0);
+
+  return `a0${encoded.padStart(INDEX_DIGIT_WIDTH, "0")}1`;
+}
+
+function isInvalidLegacyPrReviewCanvasIndex(index: string): boolean {
+  return index.length > 2 && /^a\d+0$/.test(index);
 }
 
 function allocateInitialGeometry(

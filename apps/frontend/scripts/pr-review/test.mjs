@@ -519,4 +519,5 @@ await import("./multi-file-conflict-client.test.mjs");
 await import("./oauth-reconnect-client.test.mjs");
 await import("./canvas-shape-client.test.mjs");
 await import("./canvas-shape-persistence.test.mjs");
+await import("./canvas-shape-index.test.mjs");
 await import("./node-activation.test.mjs");
