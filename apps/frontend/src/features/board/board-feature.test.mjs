@@ -87,7 +87,7 @@ assert.match(
 );
 assert.match(
   boardDataHook,
-  /listGithubProjectsV2\(normalizedWorkspaceId, \{\s*closed: false,\s*limit: 100\s*\}\)/
+  /listGithubProjectsV2\(normalizedWorkspaceId, \{\s*closed: false,\s*limit: 100,\s*repositoryId: selectedRepositoryId\s*\}\)/
 );
 assert.match(boardDataHook, /listBoards/);
 assert.match(boardDataHook, /listBoardColumns/);

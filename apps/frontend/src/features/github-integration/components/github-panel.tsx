@@ -269,9 +269,13 @@ export function GithubPanel() {
     }
 
     const requestGeneration = syncRunsRequestGateRef.current.begin();
-    const [syncRuns, runningSyncRuns] = await Promise.all([
+    const [syncRuns, queuedSyncRuns, runningSyncRuns] = await Promise.all([
       apiClient.listGithubSyncRuns(workspaceId, {
         limit: 8
+      }),
+      apiClient.listGithubSyncRuns(workspaceId, {
+        status: "queued",
+        limit: 1
       }),
       apiClient.listGithubSyncRuns(workspaceId, {
         status: "running",
@@ -282,7 +286,8 @@ export function GithubPanel() {
       return null;
     }
 
-    const hasRunningRun = runningSyncRuns.meta.total > 0;
+    const hasRunningRun =
+      queuedSyncRuns.meta.total > 0 || runningSyncRuns.meta.total > 0;
     setSnapshot((current) => ({
       ...current,
       syncRuns: syncRuns.data,
@@ -384,6 +389,7 @@ export function GithubPanel() {
         installations,
         repositories,
         syncRuns,
+        queuedSyncRuns,
         runningSyncRuns
       ] = await Promise.all([
         apiClient.getGithubOAuthStatus(),
@@ -395,6 +401,10 @@ export function GithubPanel() {
         }),
         apiClient.listGithubSyncRuns(workspaceId, {
           limit: 8
+        }),
+        apiClient.listGithubSyncRuns(workspaceId, {
+          status: "queued",
+          limit: 1
         }),
         apiClient.listGithubSyncRuns(workspaceId, {
           status: "running",
@@ -438,7 +448,9 @@ export function GithubPanel() {
           : current.syncRunsTotal
       }));
       if (canApplySyncRuns) {
-        setHasRunningSyncRun(runningSyncRuns.meta.total > 0);
+        setHasRunningSyncRun(
+          queuedSyncRuns.meta.total > 0 || runningSyncRuns.meta.total > 0
+        );
       }
       setSelectedRepositoryId(nextRepositoryId);
       selectedRepositoryIdRef.current = nextRepositoryId;
@@ -710,8 +722,14 @@ export function GithubPanel() {
 
   async function handleSelectRepository(repositoryId: string) {
     if (!workspaceId) return;
+    const repository = snapshot.repositories.find(
+      (candidate) => candidate.id === repositoryId
+    );
+    if (!repository) return;
+
     setSelectedRepositoryId(repositoryId);
     selectedRepositoryIdRef.current = repositoryId;
+    setSelectedInstallationId(repository.installationId);
     setSnapshot((current) => ({ ...current, projects: [], projectsTotal: 0 }));
     setSelectedProjectV2Ids(new Set());
     setSelectedProjectV2Id("");
@@ -721,7 +739,7 @@ export function GithubPanel() {
     });
     await Promise.all([
       loadGithubPullRequests(repositoryId),
-      handleDiscoverGithubProjectV2(selectedInstallationId, repositoryId)
+      handleDiscoverGithubProjectV2(repository.installationId, repositoryId)
     ]);
   }
 
@@ -750,49 +768,47 @@ export function GithubPanel() {
       setActionError("활성 워크스페이스를 확인할 수 없습니다.");
       return;
     }
-
-    const projectIdsByInstallation = new Map<string, string[]>();
-    for (const project of snapshot.projects) {
-      const selectedProjectIds =
-        projectIdsByInstallation.get(project.installationId) ?? [];
-      if (selectedProjectV2Ids.has(project.id)) {
-        selectedProjectIds.push(project.id);
-      }
-      projectIdsByInstallation.set(project.installationId, selectedProjectIds);
+    const repository = snapshot.repositories.find(
+      (candidate) => candidate.id === selectedRepositoryId
+    );
+    if (!repository) {
+      setActionError("선택한 저장소를 확인할 수 없습니다.");
+      return;
     }
+
+    const projectV2Ids = snapshot.projects
+      .filter(
+        (project) =>
+          project.installationId === repository.installationId &&
+          selectedProjectV2Ids.has(project.id)
+      )
+      .map((project) => project.id);
 
     setIsSavingProjectV2Selections(true);
     setActionError(null);
     setActionMessage(null);
 
     try {
-      const selections = await Promise.all(
-        [...projectIdsByInstallation].map(([installationId, projectV2Ids]) =>
-          apiClient.replaceGithubProjectV2Selections(workspaceId, {
-            installationId,
-            repositoryId: selectedRepositoryId,
-            projectV2Ids
-          })
-        )
+      const selection = await apiClient.replaceGithubProjectV2Selections(
+        workspaceId,
+        {
+          installationId: repository.installationId,
+          repositoryId: selectedRepositoryId,
+          projectV2Ids
+        }
       );
       setActionMessage("ProjectV2 상세 동기화 선택을 저장했습니다.");
-      const failedSelection = selections.find(
-        (selection) => selection.syncStatus === "failed"
-      );
-      const hasQueuedSelection = selections.some(
-        (selection) => selection.syncStatus === "queued"
-      );
-      if (failedSelection) {
+      if (selection.syncStatus === "failed") {
         setActionError(
           `ProjectV2 선택은 저장됐지만 동기화를 시작하지 못했습니다. ${
-            failedSelection.syncError ?? "다시 시도하세요."
+            selection.syncError ?? "다시 시도하세요."
           }`
         );
       }
-      if (hasQueuedSelection) {
+      if (selection.syncStatus === "queued") {
         setActionMessage("선택한 ProjectV2 동기화를 시작했습니다.");
         setHasRunningSyncRun(true);
-      } else if (!failedSelection) {
+      } else if (selection.syncStatus !== "failed") {
         setActionMessage(
           "선택된 프로젝트가 없어 보드에 표시할 내용이 없습니다. 프로젝트 선택 관리에서 동기화할 ProjectV2를 선택할 수 있습니다."
         );

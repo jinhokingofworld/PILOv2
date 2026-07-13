@@ -127,9 +127,9 @@ const configService = {
 const tokenEncryption = new GithubTokenEncryptionService();
 const encryptedUserToken = tokenEncryption.encryptToken("plain-user-token", baseConfig);
 const connectedGithubOAuthRow = {
-  github_access_token_encrypted: encryptedUserToken,
-  github_connected_at: fixedNow,
-  github_revoked_at: null
+  access_token_encrypted: encryptedUserToken,
+  connected_at: fixedNow,
+  revoked_at: null
 };
 
 function createService({
@@ -178,8 +178,8 @@ function createService({
   });
 
   assert.deepEqual(workspaceService.accessChecks, [{ currentUserId, workspaceId }]);
-  assert.match(database.queries[0].text, /github_access_token_encrypted/i);
-  assert.deepEqual(database.queries[0].values, [currentUserId]);
+  assert.match(database.queries[0].text, /access_token_encrypted/i);
+  assert.deepEqual(database.queries[0].values, [currentUserId, "app_user"]);
 
   const installUrl = new URL(start.installUrl);
   assert.equal(
@@ -232,9 +232,9 @@ function createService({
     database: new FakeDatabase({
       oneRows: [
         {
-          github_access_token_encrypted: null,
-          github_connected_at: null,
-          github_revoked_at: null
+          access_token_encrypted: null,
+          connected_at: null,
+          revoked_at: null
         }
       ]
     })
@@ -303,7 +303,7 @@ function createService({
           };
         }
 
-        if (/SELECT[\s\S]*github_access_token_encrypted[\s\S]*FROM users/i.test(text)) {
+        if (/FROM github_oauth_connections/i.test(text)) {
           return connectedGithubOAuthRow;
         }
 
@@ -454,7 +454,7 @@ function createService({
           };
         }
 
-        if (/SELECT[\s\S]*github_access_token_encrypted[\s\S]*FROM users/i.test(text)) {
+        if (/FROM github_oauth_connections/i.test(text)) {
           return connectedGithubOAuthRow;
         }
 
@@ -528,6 +528,120 @@ function createService({
   );
 }
 
+for (const {
+  description,
+  query,
+  expectedMessage
+} of [
+  {
+    description: "an invalid installation id",
+    query: {
+      installation_id: "invalid-installation-id",
+      setup_action: "install"
+    },
+    expectedMessage: "GitHub installation id must be a positive integer"
+  },
+  {
+    description: "a blank setup action",
+    query: {
+      installation_id: "12345678",
+      setup_action: " "
+    },
+    expectedMessage: "GitHub App setup action is required"
+  }
+]) {
+  const returnUrl =
+    "https://pilo.test/workspaces/11111111-1111-4111-8111-111111111111/github";
+  const stateService = new GithubAppInstallationStateService();
+  const state = stateService.createState(
+    {
+      userId: currentUserId,
+      workspaceId,
+      returnUrl
+    },
+    baseConfig
+  );
+  const statePayload = stateService.verifyState(state, baseConfig);
+  let stateConsumeCount = 0;
+  let installationAccessChecked = false;
+  let appInstallationLookedUp = false;
+  const database = new FakeDatabase({
+    handlers: {
+      queryOne(text) {
+        if (/UPDATE github_callback_states/i.test(text)) {
+          stateConsumeCount += 1;
+          if (stateConsumeCount > 1) {
+            return null;
+          }
+
+          return {
+            user_id: currentUserId,
+            workspace_id: workspaceId,
+            return_url: returnUrl,
+            expires_at: new Date(statePayload.expiresAt)
+          };
+        }
+
+        return undefined;
+      }
+    }
+  });
+  const service = createService({
+    database,
+    githubOAuthClient: {
+      async hasUserInstallationAccess() {
+        installationAccessChecked = true;
+        throw new Error("installation access lookup must not run");
+      }
+    },
+    githubAppClient: {
+      async getInstallation() {
+        appInstallationLookedUp = true;
+        throw new Error("GitHub App lookup must not run");
+      }
+    }
+  });
+  const cookieHeader =
+    "pilo_github_app_installation_state=installation-binding-token";
+
+  await assert.rejects(
+    () =>
+      service.completeGithubAppInstallationCallback(
+        {
+          ...query,
+          state
+        },
+        cookieHeader
+      ),
+    (error) =>
+      error?.returnUrl === returnUrl &&
+      error?.callbackError === "callback_failed" &&
+      error?.response?.error?.message === expectedMessage,
+    `must consume state before rejecting ${description}`
+  );
+  assert.equal(stateConsumeCount, 1);
+  assert.equal(installationAccessChecked, false);
+  assert.equal(appInstallationLookedUp, false);
+
+  await assert.rejects(
+    () =>
+      service.completeGithubAppInstallationCallback(
+        {
+          installation_id: "12345678",
+          setup_action: "install",
+          state
+        },
+        cookieHeader
+      ),
+    (error) =>
+      error?.response?.error?.message === "Invalid GitHub App installation state",
+    `must reject replay after ${description}`
+  );
+  assert.equal(stateConsumeCount, 2);
+  assert.equal(installationAccessChecked, false);
+  assert.equal(appInstallationLookedUp, false);
+}
+
 {
   const stateService = new GithubAppInstallationStateService();
   const state = stateService.createState(
@@ -551,7 +665,7 @@ function createService({
           };
         }
 
-        if (/SELECT[\s\S]*github_access_token_encrypted[\s\S]*FROM users/i.test(text)) {
+        if (/FROM github_oauth_connections/i.test(text)) {
           return connectedGithubOAuthRow;
         }
 
@@ -687,7 +801,7 @@ function createService({
           };
         }
 
-        if (/SELECT[\s\S]*github_access_token_encrypted[\s\S]*FROM users/i.test(text)) {
+        if (/FROM github_oauth_connections/i.test(text)) {
           return connectedGithubOAuthRow;
         }
 
@@ -753,7 +867,7 @@ function createService({
           };
         }
 
-        if (/SELECT[\s\S]*github_access_token_encrypted[\s\S]*FROM users/i.test(text)) {
+        if (/FROM github_oauth_connections/i.test(text)) {
           return connectedGithubOAuthRow;
         }
 

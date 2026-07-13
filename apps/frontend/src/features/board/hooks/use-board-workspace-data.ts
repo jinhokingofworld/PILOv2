@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { createBoardApiClient } from "@/features/board/api/client";
+import { selectBoardProjectRepositoryId } from "@/features/board/utils/board-project-repository";
 import type {
   BoardColumnPayload,
   BoardDetailPayload,
@@ -40,6 +41,7 @@ type UseBoardWorkspaceDataOptions = {
   boardId?: string;
   enabled?: boolean;
   issueQuery?: ListBoardIssuesQuery;
+  repositoryId?: string | null;
   workspaceId: string;
 };
 
@@ -70,11 +72,13 @@ export function useBoardWorkspaceData({
   boardId = "",
   enabled = true,
   issueQuery = {},
+  repositoryId = null,
   workspaceId
 }: UseBoardWorkspaceDataOptions) {
   const normalizedAccessToken = accessToken?.trim() || null;
   const normalizedWorkspaceId = workspaceId.trim();
   const normalizedBoardId = boardId.trim();
+  const normalizedProjectRepositoryId = repositoryId?.trim() || null;
   const canLoad = Boolean(enabled && normalizedWorkspaceId && normalizedAccessToken);
   const issueQueryKey = JSON.stringify(issueQuery);
   const [catalog, setCatalog] = useState<BoardWorkspaceCatalog>(emptyCatalog);
@@ -95,19 +99,26 @@ export function useBoardWorkspaceData({
       return emptyCatalog;
     }
 
-    const [repositories, projects, boards] = await Promise.all([
+    const [repositories, boards] = await Promise.all([
       boardClient.listGithubRepositories(normalizedWorkspaceId, {
         includeArchived: false,
-        limit: 100
-      }),
-      boardClient.listGithubProjectsV2(normalizedWorkspaceId, {
-        closed: false,
         limit: 100
       }),
       boardClient.listBoards(normalizedWorkspaceId, {
         limit: 50
       })
     ]);
+    const selectedRepositoryId = selectBoardProjectRepositoryId(
+      repositories,
+      normalizedProjectRepositoryId
+    );
+    const projects = selectedRepositoryId
+      ? await boardClient.listGithubProjectsV2(normalizedWorkspaceId, {
+          closed: false,
+          limit: 100,
+          repositoryId: selectedRepositoryId
+        })
+      : [];
 
     return {
       repositories,
@@ -115,7 +126,12 @@ export function useBoardWorkspaceData({
       boards: boards.data,
       boardsMeta: boards.meta
     };
-  }, [boardClient, canLoad, normalizedWorkspaceId]);
+  }, [
+    boardClient,
+    canLoad,
+    normalizedProjectRepositoryId,
+    normalizedWorkspaceId
+  ]);
 
   const loadBoardData = useCallback(async () => {
     if (!canLoad || !normalizedBoardId) {

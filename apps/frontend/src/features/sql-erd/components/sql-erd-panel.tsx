@@ -474,8 +474,13 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
     [sqlErdViewSession.modelJson]
   );
   const inspectorViewModel = useMemo(
-    () => createSqlErdInspectorViewModel(selectedSqlErdObject, modelIndex),
-    [modelIndex, selectedSqlErdObject]
+    () =>
+      createSqlErdInspectorViewModel(
+        selectedSqlErdObject,
+        modelIndex,
+        sqlErdViewSession.layoutJson.annotations
+      ),
+    [modelIndex, selectedSqlErdObject, sqlErdViewSession.layoutJson.annotations]
   );
   const pinnedTableTitle = useMemo(() => {
     if (!tablePinState.pinnedTableId) {
@@ -2103,6 +2108,10 @@ function getInspectorTitle(viewModel: SqlErdInspectorViewModel) {
     return "관계 정보";
   }
 
+  if (viewModel.type === "annotation") {
+    return "설명 관계";
+  }
+
   return "상세 정보";
 }
 
@@ -2117,6 +2126,10 @@ function getInspectorSubtitle(viewModel: SqlErdInspectorViewModel) {
 
   if (viewModel.type === "relation") {
     return "외래 키 관계";
+  }
+
+  if (viewModel.type === "annotation") {
+    return "SQL에 반영되지 않음";
   }
 
   return "선택 없음";
@@ -2139,6 +2152,10 @@ function InspectorContent({
 
   if (viewModel.type === "relation") {
     return <RelationInspector viewModel={viewModel} />;
+  }
+
+  if (viewModel.type === "annotation") {
+    return <AnnotationInspector viewModel={viewModel} />;
   }
 
   return (
@@ -2257,6 +2274,32 @@ function RelationInspector({
           />
         ) : null}
       </div>
+    </>
+  );
+}
+
+function AnnotationInspector({
+  viewModel
+}: {
+  viewModel: Extract<SqlErdInspectorViewModel, { type: "annotation" }>;
+}) {
+  const isTableLink = viewModel.annotation.kind === "table_link";
+
+  return (
+    <>
+      <InspectorSectionTitle>설명 관계</InspectorSectionTitle>
+      <div className="space-y-2">
+        <InspectorRow
+          label="종류"
+          value={isTableLink ? "테이블 설명 관계" : "컬럼 설명 관계"}
+        />
+        <InspectorRow label="설명" value={viewModel.annotation.label || "-"} />
+        <InspectorRow label="시작" value={viewModel.fromLabel} />
+        <InspectorRow label="끝" value={viewModel.toLabel} />
+      </div>
+      <p className="rounded-md border border-dashed p-4 text-base leading-7 text-muted-foreground">
+        SQL에 반영되지 않는 사용자 설명 관계입니다.
+      </p>
     </>
   );
 }

@@ -14,6 +14,7 @@ import { GithubIntegrationController } from "./github-integration.controller";
 import { GithubIntegrationService } from "./github-integration.service";
 import { GithubIssueWriteService } from "./github-issue-write.service";
 import { GithubOAuthClient } from "./github-oauth.client";
+import { GithubOAuthConnectionService } from "./github-oauth-connection.service";
 import { GithubOAuthIntegrationService } from "./github-oauth-integration.service";
 import { GithubOAuthStateService } from "./github-oauth-state.service";
 import { GithubProjectOAuthIntegrationService } from "./github-project-oauth-integration.service";
@@ -48,6 +49,7 @@ import { GithubWebhookService } from "./github-webhook.service";
     GithubGitCommandRunner,
     GithubIssueWriteService,
     GithubOAuthClient,
+    GithubOAuthConnectionService,
     GithubOAuthIntegrationService,
     GithubOAuthStateService,
     GithubProjectOAuthIntegrationService,
@@ -69,6 +71,7 @@ import { GithubWebhookService } from "./github-webhook.service";
   ],
   exports: [
     GithubIntegrationService,
+    GithubOAuthConnectionService,
     GithubIssueWriteService,
     GithubProjectV2WriteService
   ]

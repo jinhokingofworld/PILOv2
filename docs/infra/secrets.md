@@ -57,7 +57,7 @@
 | `GITHUB_APP_ID` | GitHub App id |
 | `GITHUB_APP_PRIVATE_KEY` | GitHub App private key |
 | `GITHUB_WEBHOOK_SECRET` | GitHub webhook 검증 secret |
-| `GITHUB_TOKEN_ENCRYPTION_KEY` | `users.github_access_token_encrypted` and `users.github_project_access_token_encrypted` 암복호화 키 |
+| `GITHUB_TOKEN_ENCRYPTION_KEY` | `github_oauth_connections.access_token_encrypted` 암복호화 키 |
 | `LIVEKIT_API_KEY` | self-hosted LiveKit API key |
 | `LIVEKIT_API_SECRET` | self-hosted LiveKit API secret |
 | `LIVEKIT_URL` | frontend/client가 접속할 LiveKit URL |

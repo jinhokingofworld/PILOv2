@@ -12,6 +12,7 @@ import { GithubConflictMergeService } from "./github-conflict-merge.service";
 import { GithubGitCommandRunner } from "./github-git-command-runner";
 import { GithubIntegrationConfigService } from "./github-integration-config.service";
 import { GithubOAuthClient } from "./github-oauth.client";
+import { GithubOAuthConnectionService } from "./github-oauth-connection.service";
 import { GithubOAuthIntegrationService } from "./github-oauth-integration.service";
 import { GithubOAuthStateService } from "./github-oauth-state.service";
 import { GithubProjectOAuthIntegrationService } from "./github-project-oauth-integration.service";
@@ -87,13 +88,6 @@ import type {
   GithubSyncRunDetailPayload,
   GithubSyncRunPayload
 } from "./types";
-
-interface GithubRepositoryAccessOAuthRow extends QueryResultRow {
-  github_login: string | null;
-  github_access_token_encrypted: string | null;
-  github_connected_at: Date | string | null;
-  github_revoked_at: Date | string | null;
-}
 
 interface GithubRepositoryAccessRow extends QueryResultRow {
   id: string;
@@ -441,18 +435,7 @@ export class GithubIntegrationService {
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
 
     const [oauthRow, repository] = await Promise.all([
-      this.database.queryOne<GithubRepositoryAccessOAuthRow>(
-        `
-          SELECT
-            github_login,
-            github_access_token_encrypted,
-            github_connected_at,
-            github_revoked_at
-          FROM users
-          WHERE id = $1
-        `,
-        [currentUserId]
-      ),
+      new GithubOAuthConnectionService(this.database, this.tokenEncryptionService, this.configService).getOptionalActiveConnection(currentUserId, "app_user"),
       this.database.queryOne<GithubRepositoryAccessRow>(
         `
           SELECT
@@ -468,33 +451,23 @@ export class GithubIntegrationService {
       )
     ]);
 
-    if (!oauthRow) {
-      throw unauthorized("Current user not found");
-    }
-
     if (!repository) {
       throw notFound("GitHub repository not found");
     }
 
     if (
-      !oauthRow.github_access_token_encrypted ||
-      !oauthRow.github_login ||
-      !oauthRow.github_connected_at ||
-      oauthRow.github_revoked_at
+      !oauthRow
     ) {
       throw badRequest("GitHub OAuth connection is required");
     }
 
-    const accessToken = this.tokenEncryptionService.decryptToken(
-      oauthRow.github_access_token_encrypted,
-      this.configService.getGithubOAuthConfig()
-    );
+    const accessToken = oauthRow.accessToken;
     const { permission } =
       await this.githubOAuthClient.getRepositoryCollaboratorPermission({
         accessToken,
         owner: repository.owner_login,
         repo: repository.name,
-        username: oauthRow.github_login
+        username: oauthRow.githubLogin
       });
 
     return {
@@ -502,7 +475,7 @@ export class GithubIntegrationService {
         id: repository.id,
         fullName: repository.full_name
       },
-      githubLogin: oauthRow.github_login,
+      githubLogin: oauthRow.githubLogin,
       permission,
       hasAccess: Boolean(permission && permission !== "none"),
       checkedAt: new Date().toISOString()

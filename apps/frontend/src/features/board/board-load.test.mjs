@@ -13,6 +13,7 @@ function readFeatureFile(path) {
 
 const [
   boardDataHook,
+  boardPanel,
   githubPanel,
   githubBoardSelection,
   githubProjectSelection,
@@ -20,6 +21,7 @@ const [
 ] =
   await Promise.all([
   readFeatureFile("./hooks/use-board-workspace-data.ts"),
+  readFeatureFile("./components/board-panel.tsx"),
   readFile(
     new URL("../github-integration/components/github-panel.tsx", import.meta.url),
     "utf8"
@@ -43,6 +45,27 @@ assert.doesNotMatch(
   boardDataHook,
   /limit:\s*parsedIssueQuery\.limit\s*\?\?\s*200/,
   "Board issue list should not request more than the Board API max page limit"
+);
+
+assert.match(
+  boardDataHook,
+  /selectBoardProjectRepositoryId\(\s*repositories,\s*normalizedProjectRepositoryId\s*\)/,
+  "Board catalog should prefer the persisted Board selection over the first repository"
+);
+assert.match(
+  boardPanel,
+  /repositoryId:\s*githubBoardSelection\?\.repositoryId/,
+  "Board panel should provide the persisted Board repository to the catalog"
+);
+assert.match(
+  boardDataHook,
+  /selectedRepositoryId\s*\?\s*await\s+boardClient\.listGithubProjectsV2\(\s*normalizedWorkspaceId,\s*\{[\s\S]*repositoryId:\s*selectedRepositoryId/,
+  "Board ProjectV2 request should include the selected repositoryId"
+);
+assert.match(
+  boardDataHook,
+  /selectedRepositoryId\s*\?\s*await\s+boardClient\.listGithubProjectsV2[\s\S]*:\s*\[\]/,
+  "Board catalog should keep ProjectV2 data empty when no repository is selectable"
 );
 
 assert.match(

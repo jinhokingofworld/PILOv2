@@ -295,7 +295,7 @@ export function createBoardApiClient({
 
     async listGithubProjectsV2(
       workspaceId: string,
-      query: ListBoardGithubProjectsV2Query = {}
+      query: ListBoardGithubProjectsV2Query
     ) {
       return requestBoardData<BoardGithubProjectV2Payload[]>(
         withQueryParams(

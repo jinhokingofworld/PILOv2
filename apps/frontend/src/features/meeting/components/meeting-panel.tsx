@@ -64,6 +64,7 @@ type ActionStatus =
 type MeetingSection = "room" | "report";
 
 const MEETING_STATUS_POLL_INTERVAL_MS = 5000;
+const MEETING_REPORT_PAGE_SIZE = 20;
 const RECORDING_CONSENT_STORAGE_KEY = "recordingConsentAccepted";
 const LIVEKIT_CONNECTION_ERROR_MESSAGE =
   "음성 회의 연결에 실패했습니다. 마이크 권한과 네트워크 상태를 확인해주세요.";
@@ -308,12 +309,35 @@ export function MeetingPanel() {
   );
   const [reportStatusFilter, setReportStatusFilter] =
     useState<MeetingReportStatusFilter>("ALL");
+  const [reportSearchQuery, setReportSearchQuery] = useState("");
+  const [reportDateRange, setReportDateRange] = useState({
+    from: "",
+    to: ""
+  });
+  const [reportCursorHistory, setReportCursorHistory] = useState<string[]>([]);
+  const reportCursor = reportCursorHistory.at(-1);
   const reportsQuery = useMemo<MeetingReportListQuery>(
     () => ({
-      limit: 100,
+      limit: MEETING_REPORT_PAGE_SIZE,
+      ...(reportCursor ? { cursor: reportCursor } : {}),
+      ...(reportDateRange.from ? { from: reportDateRange.from } : {}),
+      ...(reportDateRange.to ? { to: reportDateRange.to } : {}),
+      ...(reportSearchQuery ? { q: reportSearchQuery } : {}),
       ...(reportStatusFilter === "ALL" ? {} : { status: reportStatusFilter })
     }),
-    [reportStatusFilter]
+    [reportCursor, reportDateRange.from, reportDateRange.to, reportSearchQuery, reportStatusFilter]
+  );
+  const handleReportListFiltersChange = useCallback(
+    (filters: { from: string; q: string; to: string }) => {
+      setReportSearchQuery((current) => (current === filters.q ? current : filters.q));
+      setReportDateRange((current) =>
+        current.from === filters.from && current.to === filters.to
+          ? current
+          : { from: filters.from, to: filters.to }
+      );
+      setReportCursorHistory([]);
+    },
+    []
   );
   const meetingData = useMeetingWorkspaceData({
     accessToken,
@@ -954,8 +978,25 @@ export function MeetingPanel() {
           <MeetingReportSection
             meetingData={meetingData}
             statusFilter={reportStatusFilter}
-            onStatusFilterChange={setReportStatusFilter}
+            onStatusFilterChange={(status) => {
+              setReportStatusFilter(status);
+              setReportCursorHistory([]);
+            }}
+            onListFiltersChange={handleReportListFiltersChange}
+            onNextPage={() => {
+              if (meetingData.nextReportCursor) {
+                setReportCursorHistory((history) => [
+                  ...history,
+                  meetingData.nextReportCursor as string
+                ]);
+              }
+            }}
+            onPreviousPage={() => {
+              setReportCursorHistory((history) => history.slice(0, -1));
+            }}
             onToastMessage={setToastMessage}
+            hasPreviousPage={reportCursorHistory.length > 0}
+            nextCursor={meetingData.nextReportCursor}
           />
         )}
 

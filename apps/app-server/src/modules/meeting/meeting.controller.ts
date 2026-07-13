@@ -177,11 +177,19 @@ export class MeetingController {
   async listReports(
     @CurrentUserId() currentUserId: string,
     @Param("workspaceId") workspaceId: string,
+    @Query("cursor") cursor: unknown,
+    @Query("from") from: unknown,
+    @Query("q") q: unknown,
     @Query("status") status: unknown,
+    @Query("to") to: unknown,
     @Query("limit") limit: unknown
   ): Promise<ApiSuccessResponse<MeetingReportListPayload>> {
     const result = await this.meetingService.listReports(currentUserId, workspaceId, {
+      cursor,
+      from,
+      q,
       status,
+      to,
       limit
     });
     return apiResponse(result);

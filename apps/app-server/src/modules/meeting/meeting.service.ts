@@ -123,6 +123,8 @@ interface MeetingReportRow extends QueryResultRow {
   retry_count: number | string;
   created_at: Date | string;
   updated_at: Date | string;
+  participant_count?: number | string;
+  participant_preview?: unknown;
 }
 
 interface MeetingReportDetailRow extends MeetingReportRow {
@@ -155,8 +157,17 @@ interface QueryOneExecutor {
 }
 
 interface MeetingReportListQuery {
+  cursor?: unknown;
+  from?: unknown;
   status?: unknown;
+  q?: unknown;
+  to?: unknown;
   limit?: unknown;
+}
+
+interface MeetingReportCursor {
+  createdAt: string;
+  id: string;
 }
 
 interface MeetingReportInsertResult {
@@ -242,8 +253,19 @@ export interface MeetingReportSummaryPayload {
   decisions: string | null;
   actionItemCandidates: unknown[];
   retryCount: number;
+  participantSummary: MeetingReportParticipantSummaryPayload;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface MeetingReportParticipantSummaryPayload {
+  totalCount: number;
+  participants: Array<{
+    userId: string;
+    name: string | null;
+    avatarUrl: string | null;
+  }>;
+  hasMore: boolean;
 }
 
 export interface MeetingReportDetailPayload extends MeetingReportSummaryPayload {
@@ -321,6 +343,7 @@ export interface ParticipantListPayload {
 }
 
 export interface MeetingReportListPayload {
+  nextCursor: string | null;
   reports: MeetingReportSummaryPayload[];
 }
 
@@ -959,16 +982,25 @@ export class MeetingService {
     query: MeetingReportListQuery
   ): Promise<MeetingReportListPayload> {
     await this.assertWorkspaceAccess(currentUserId, workspaceId);
+    const cursor = this.normalizeMeetingReportCursor(query.cursor);
+    const from = this.normalizeMeetingReportDate(query.from, "from");
+    const to = this.normalizeMeetingReportDate(query.to, "to");
+    const searchQuery = this.normalizeMeetingReportSearchQuery(query.q);
     const status = this.normalizeMeetingReportStatus(query.status);
     const limit = this.normalizeMeetingReportLimit(query.limit);
-    const reports = await this.listWorkspaceMeetingReportRows(
+    if (from !== null && to !== null && from >= to) {
+      throw badRequest("from must be before to");
+    }
+    const page = await this.listWorkspaceMeetingReportRows(
       workspaceId,
       status,
-      limit
+      limit,
+      { cursor, from, searchQuery, to }
     );
 
     return {
-      reports: reports.map((report) => this.mapMeetingReportSummary(report))
+      nextCursor: page.nextCursor,
+      reports: page.reports.map((report) => this.mapMeetingReportSummary(report))
     };
   }
 
@@ -999,6 +1031,7 @@ export class MeetingService {
     const reports = await this.listMeetingReportRows(meetingId);
 
     return {
+      nextCursor: null,
       reports: reports.map((report) => this.mapMeetingReportSummary(report))
     };
   }
@@ -2073,22 +2106,16 @@ export class MeetingService {
     return this.database.query<MeetingReportRow>(
       `
         SELECT
-          id,
-          meeting_id,
-          recording_id,
-          status,
-          failed_step,
-          error_message,
-          summary,
-          discussion_points,
-          decisions,
-          action_item_candidates,
-          retry_count,
-          created_at,
-          updated_at
+          meeting_reports.id, meeting_reports.meeting_id, meeting_reports.recording_id,
+          meeting_reports.status, meeting_reports.failed_step, meeting_reports.error_message,
+          meeting_reports.summary, meeting_reports.discussion_points, meeting_reports.decisions,
+          meeting_reports.action_item_candidates, meeting_reports.retry_count,
+          meeting_reports.created_at, meeting_reports.updated_at,
+          ${this.meetingReportParticipantSummaryColumns()}
         FROM meeting_reports
-        WHERE meeting_id = $1
-        ORDER BY created_at DESC, id ASC
+        ${this.meetingReportParticipantSummaryJoin("meeting_reports")}
+        WHERE meeting_reports.meeting_id = $1
+        ORDER BY meeting_reports.created_at DESC, meeting_reports.id ASC
       `,
       [meetingId]
     );
@@ -2097,16 +2124,42 @@ export class MeetingService {
   private async listWorkspaceMeetingReportRows(
     workspaceId: string,
     status: MeetingReportStatus | null,
-    limit: number
-  ): Promise<MeetingReportRow[]> {
+    limit: number,
+    filters: {
+      cursor: MeetingReportCursor | null;
+      from: string | null;
+      searchQuery: string | null;
+      to: string | null;
+    }
+  ): Promise<{ nextCursor: string | null; reports: MeetingReportRow[] }> {
     const values: unknown[] = [workspaceId];
     const statusCondition =
       status === null
         ? ""
         : `AND meeting_reports.status = $${values.push(status)}`;
-    const limitParameter = `$${values.push(limit)}`;
+    const searchCondition =
+      filters.searchQuery === null
+        ? ""
+        : `AND to_tsvector('simple', concat_ws(' ', COALESCE(meeting_reports.summary, ''), COALESCE(meeting_reports.discussion_points, ''), COALESCE(meeting_reports.decisions, ''), COALESCE(meeting_reports.action_item_candidates::text, ''), COALESCE(meeting_reports.error_message, ''))) @@ websearch_to_tsquery('simple', $${values.push(filters.searchQuery)})`;
+    const fromCondition =
+      filters.from === null
+        ? ""
+        : `AND meeting_reports.created_at >= $${values.push(filters.from)}::timestamptz`;
+    const toCondition =
+      filters.to === null
+        ? ""
+        : `AND meeting_reports.created_at < $${values.push(filters.to)}::timestamptz`;
+    const cursorCondition =
+      filters.cursor === null
+        ? ""
+        : (() => {
+            const createdAtParameter = `$${values.push(filters.cursor.createdAt)}`;
+            const idParameter = `$${values.push(filters.cursor.id)}`;
+            return `AND (meeting_reports.created_at < ${createdAtParameter}::timestamptz OR (meeting_reports.created_at = ${createdAtParameter}::timestamptz AND meeting_reports.id > ${idParameter}::uuid))`;
+          })();
+    const limitParameter = `$${values.push(limit + 1)}`;
 
-    return this.database.query<MeetingReportRow>(
+    const rows = await this.database.query<MeetingReportRow>(
       `
         SELECT
           meeting_reports.id,
@@ -2121,17 +2174,36 @@ export class MeetingService {
           meeting_reports.action_item_candidates,
           meeting_reports.retry_count,
           meeting_reports.created_at,
-          meeting_reports.updated_at
+          meeting_reports.updated_at,
+          ${this.meetingReportParticipantSummaryColumns()}
         FROM meeting_reports
         JOIN meetings
           ON meetings.id = meeting_reports.meeting_id
+        ${this.meetingReportParticipantSummaryJoin("meeting_reports")}
         WHERE meetings.workspace_id = $1
           ${statusCondition}
+          ${searchCondition}
+          ${fromCondition}
+          ${toCondition}
+          ${cursorCondition}
         ORDER BY meeting_reports.created_at DESC, meeting_reports.id ASC
         LIMIT ${limitParameter}
       `,
       values
     );
+    const reports = rows.slice(0, limit);
+    const lastReport = reports.at(-1);
+
+    return {
+      nextCursor:
+        rows.length > limit && lastReport
+          ? this.encodeMeetingReportCursor({
+              createdAt: this.toIsoString(lastReport.created_at),
+              id: lastReport.id
+            })
+          : null,
+      reports
+    };
   }
 
   private async findMeetingReportDetailById(
@@ -2158,10 +2230,12 @@ export class MeetingService {
           meeting_reports.action_item_candidates,
           meeting_reports.retry_count,
           meeting_reports.created_at,
-          meeting_reports.updated_at
+          meeting_reports.updated_at,
+          ${this.meetingReportParticipantSummaryColumns()}
         FROM meeting_reports
         JOIN meetings
           ON meetings.id = meeting_reports.meeting_id
+        ${this.meetingReportParticipantSummaryJoin("meeting_reports")}
         WHERE meetings.workspace_id = $1
           AND meeting_reports.id = $2
         LIMIT 1
@@ -2657,9 +2731,45 @@ export class MeetingService {
       decisions: report.decisions,
       actionItemCandidates: this.toJsonArray(report.action_item_candidates),
       retryCount: Number(report.retry_count),
+      participantSummary: this.mapMeetingReportParticipantSummary(report),
       createdAt: this.toIsoString(report.created_at),
       updatedAt: this.toIsoString(report.updated_at)
     };
+  }
+
+  private mapMeetingReportParticipantSummary(report: MeetingReportRow) {
+    const participants = this.toJsonArray(report.participant_preview).flatMap((value) => {
+      if (typeof value !== "object" || value === null || Array.isArray(value)) return [];
+      const participant = value as Record<string, unknown>;
+      if (typeof participant.userId !== "string") return [];
+      return [{
+        userId: participant.userId,
+        name: typeof participant.name === "string" ? participant.name : null,
+        avatarUrl: typeof participant.avatarUrl === "string" ? participant.avatarUrl : null
+      }];
+    });
+    const totalCount = Number(report.participant_count ?? 0);
+    return { totalCount, participants, hasMore: totalCount > participants.length };
+  }
+
+  private meetingReportParticipantSummaryColumns(): string {
+    return "COALESCE(participant_summary.participant_count, 0)::int AS participant_count, COALESCE(participant_summary.participant_preview, '[]'::jsonb) AS participant_preview";
+  }
+
+  private meetingReportParticipantSummaryJoin(reportAlias: string): string {
+    return `LEFT JOIN LATERAL (
+      SELECT
+        (SELECT COUNT(*)::int FROM meeting_participants WHERE meeting_id = ${reportAlias}.meeting_id) AS participant_count,
+        (SELECT COALESCE(jsonb_agg(jsonb_build_object('userId', preview.user_id, 'name', preview.name, 'avatarUrl', preview.avatar_url) ORDER BY preview.joined_at ASC, preview.id ASC), '[]'::jsonb)
+         FROM (
+           SELECT meeting_participants.id, meeting_participants.user_id, meeting_participants.joined_at, users.name, users.avatar_url
+           FROM meeting_participants
+           JOIN users ON users.id = meeting_participants.user_id
+           WHERE meeting_participants.meeting_id = ${reportAlias}.meeting_id
+           ORDER BY meeting_participants.joined_at ASC, meeting_participants.id ASC
+           LIMIT 3
+         ) AS preview) AS participant_preview
+    ) AS participant_summary ON true`;
   }
 
   private mapMeetingReportDetail(
@@ -2687,6 +2797,80 @@ export class MeetingService {
     }
 
     throw badRequest("Invalid meeting report status");
+  }
+
+  private normalizeMeetingReportSearchQuery(value: unknown): string | null {
+    if (value === undefined || value === null || value === "") {
+      return null;
+    }
+
+    if (typeof value !== "string" || Array.isArray(value)) {
+      throw badRequest("Invalid meeting report search query");
+    }
+
+    const query = value.trim();
+    if (!query || query.length > 200) {
+      throw badRequest("Invalid meeting report search query");
+    }
+
+    return query;
+  }
+
+  private normalizeMeetingReportDate(
+    value: unknown,
+    name: "from" | "to"
+  ): string | null {
+    if (value === undefined || value === null || value === "") {
+      return null;
+    }
+
+    if (typeof value !== "string" || Array.isArray(value)) {
+      throw badRequest(`Invalid meeting report ${name}`);
+    }
+
+    const date = new Date(value);
+    if (!Number.isFinite(date.getTime())) {
+      throw badRequest(`Invalid meeting report ${name}`);
+    }
+
+    return date.toISOString();
+  }
+
+  private normalizeMeetingReportCursor(value: unknown): MeetingReportCursor | null {
+    if (value === undefined || value === null || value === "") {
+      return null;
+    }
+
+    if (typeof value !== "string" || Array.isArray(value) || value.length > 512) {
+      throw badRequest("Invalid meeting report cursor");
+    }
+
+    try {
+      const parsed = JSON.parse(
+        Buffer.from(value, "base64url").toString("utf8")
+      ) as Partial<MeetingReportCursor>;
+      const id = parsed.id;
+      if (
+        typeof parsed.createdAt !== "string" ||
+        typeof id !== "string" ||
+        !UUID_PATTERN.test(id)
+      ) {
+        throw new Error("Invalid cursor payload");
+      }
+
+      const createdAt = new Date(parsed.createdAt);
+      if (!Number.isFinite(createdAt.getTime())) {
+        throw new Error("Invalid cursor timestamp");
+      }
+
+      return { createdAt: createdAt.toISOString(), id };
+    } catch {
+      throw badRequest("Invalid meeting report cursor");
+    }
+  }
+
+  private encodeMeetingReportCursor(cursor: MeetingReportCursor): string {
+    return Buffer.from(JSON.stringify(cursor)).toString("base64url");
   }
 
   private isMeetingReportInProgress(status: MeetingReportStatus): boolean {

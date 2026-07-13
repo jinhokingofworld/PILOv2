@@ -17,6 +17,7 @@ async function compileSqlErdRuntimeModules() {
     fileURLToPath(new URL("../../.pilo-sqltoerd-runtime-", import.meta.url))
   );
   const modelOutputPath = join(outputDir, "model.mjs");
+  const modelToSqlOutputPath = join(outputDir, "model-to-sql.mjs");
   const inspectorOutputPath = join(outputDir, "inspector.mjs");
   const ddlParserOutputPath = join(outputDir, "ddl-parser.mjs");
   const sqlSourceMapOutputPath = join(outputDir, "sql-source-map.mjs");
@@ -52,6 +53,11 @@ async function compileSqlErdRuntimeModules() {
     await compileTypeScriptModule(
       "../../src/features/sql-erd/utils/model.ts",
       modelOutputPath
+    );
+    await compileTypeScriptModule(
+      "../../src/features/sql-erd/utils/model-to-sql.ts",
+      modelToSqlOutputPath,
+      [[/from "@\/features\/sql-erd\/types"/g, 'from "./types-stub.mjs"']]
     );
     await compileTypeScriptModule(
       "../../src/features/sql-erd/utils/inspector.ts",
@@ -164,6 +170,10 @@ async function compileSqlErdRuntimeModules() {
       canvasSelectionOutputPath,
       [
         [
+          /from "@\/features\/sql-erd\/shapes\/sql-erd-annotation-shape"/g,
+          'from "./annotation-shape-stub.mjs"'
+        ],
+        [
           /from "@\/features\/sql-erd\/shapes\/sql-erd-relation-shape"/g,
           'from "./relation-shape-stub.mjs"'
         ],
@@ -197,6 +207,10 @@ async function compileSqlErdRuntimeModules() {
       ].join("\n")
     );
     await writeFile(
+      join(outputDir, "annotation-shape-stub.mjs"),
+      "export function isSqlErdAnnotationShape(shape) { return shape?.type === 'sqltoerd_annotation'; }\n"
+    );
+    await writeFile(
       join(outputDir, "table-shape-stub.mjs"),
       "export function isSqlErdTableShape(shape) { return shape?.type === 'sqltoerd_table'; }\n"
     );
@@ -211,6 +225,7 @@ async function compileSqlErdRuntimeModules() {
 
     const [
       modelRuntime,
+      modelToSqlRuntime,
       inspectorRuntime,
       ddlParserRuntime,
       sqlSourceMapRuntime,
@@ -231,6 +246,7 @@ async function compileSqlErdRuntimeModules() {
       tablePinRuntime
     ] = await Promise.all([
       import(pathToFileHref(modelOutputPath)),
+      import(pathToFileHref(modelToSqlOutputPath)),
       import(pathToFileHref(inspectorOutputPath)),
       import(pathToFileHref(ddlParserOutputPath)),
       import(pathToFileHref(sqlSourceMapOutputPath)),
@@ -262,6 +278,7 @@ async function compileSqlErdRuntimeModules() {
       layoutAutosaveRuntime,
       inspectorRuntime,
       modelRuntime,
+      modelToSqlRuntime,
       relationShapeRuntime,
       sessionListStateRuntime,
       sessionNavigationRuntime,
@@ -619,6 +636,7 @@ const {
   layoutAutosaveRuntime,
   inspectorRuntime,
   modelRuntime,
+  modelToSqlRuntime,
   relationShapeRuntime,
   sessionStateRuntime,
   sqlEditStateRuntime,
@@ -1123,6 +1141,29 @@ assert.deepEqual(selectedRelationFromCanvas, {
   type: "relation",
   relationId: "relation.orders.user_id.users.id"
 });
+assert.deepEqual(
+  canvasSelectionRuntime.getSqlErdSelectionFromSelectedShapes([
+    {
+      type: "sqltoerd_annotation",
+      props: { annotationId: "annotation.users.orders" }
+    }
+  ]),
+  { type: "annotation", annotationId: "annotation.users.orders" }
+);
+assert.equal(
+  canvasSelectionRuntime.areSqlErdSelectionsEqual(
+    { type: "annotation", annotationId: "annotation.users.orders" },
+    { type: "annotation", annotationId: "annotation.orders.products" }
+  ),
+  false
+);
+assert.equal(
+  canvasSelectionRuntime.areSqlErdSelectionsEqual(
+    { type: "annotation", annotationId: "annotation.users.orders" },
+    { type: "annotation", annotationId: "annotation.users.orders" }
+  ),
+  true
+);
 const selectedRelationInspectorView =
   inspectorRuntime.createSqlErdInspectorViewModel(
     selectedRelationFromCanvas,
@@ -3177,6 +3218,170 @@ assert.equal(
   "CONSTRAINT fk_orders_user FOREIGN KEY (user_id) REFERENCES users(id)"
 );
 
+const generatedMySql = modelToSqlRuntime.generateSqlDdlFromErdModel({
+  dialect: "mysql",
+  modelJson: mysqlParseResult.modelJson
+});
+assert.match(generatedMySql.sql, /CREATE TABLE `users`/);
+assert.match(generatedMySql.sql, /`email` VARCHAR\(255\) NOT NULL/);
+assert.match(generatedMySql.sql, /UNIQUE \(`email`\)/);
+assert.match(
+  generatedMySql.sql,
+  /CONSTRAINT `fk_orders_user` FOREIGN KEY \(`user_id`\) REFERENCES `users` \(`id`\)/
+);
+const generatedMySqlParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
+  dialect: "mysql",
+  sourceText: generatedMySql.sql
+});
+assert.equal(generatedMySqlParseResult.ok, true);
+assert.equal(generatedMySqlParseResult.modelJson.schema.relations.length, 1);
+const childFirstMySql = modelToSqlRuntime.generateSqlDdlFromErdModel({
+  dialect: "mysql",
+  modelJson: {
+    ...mysqlParseResult.modelJson,
+    schema: {
+      ...mysqlParseResult.modelJson.schema,
+      tables: [...mysqlParseResult.modelJson.schema.tables].reverse()
+    }
+  }
+});
+assert.match(
+  childFirstMySql.sql,
+  /CREATE TABLE `orders`[\s\S]*?\);\n\nCREATE TABLE `users`[\s\S]*?\);\n\nALTER TABLE `orders` ADD CONSTRAINT `fk_orders_user`/
+);
+assert.equal(
+  ddlParserRuntime.parseSqlDdlToErdModel({
+    dialect: "mysql",
+    sourceText: childFirstMySql.sql
+  }).modelJson.schema.relations.length,
+  1
+);
+const generatedPostgreSql = modelToSqlRuntime.generateSqlDdlFromErdModel({
+  dialect: "postgresql",
+  modelJson: mysqlParseResult.modelJson
+});
+assert.match(generatedPostgreSql.sql, /CREATE TABLE "users"/);
+assert.match(
+  generatedPostgreSql.sql,
+  /CONSTRAINT "fk_orders_user" FOREIGN KEY \("user_id"\) REFERENCES "users" \("id"\)/
+);
+assert.equal(
+  ddlParserRuntime.parseSqlDdlToErdModel({
+    dialect: "postgresql",
+    sourceText: generatedPostgreSql.sql
+  }).ok,
+  true
+);
+const semanticRoundTripModel = structuredClone(mysqlParseResult.modelJson);
+semanticRoundTripModel.schema.tables[1].columns[2].defaultValue = "'new'";
+semanticRoundTripModel.schema.tables[1].constraints.push({
+  id: "constraint.orders.id_status.unique",
+  kind: "unique",
+  columnIds: ["column.orders.id", "column.orders.status"],
+  name: "uq_orders_id_status"
+});
+const semanticRoundTripSql = modelToSqlRuntime.generateSqlDdlFromErdModel({
+  dialect: "postgresql",
+  modelJson: semanticRoundTripModel
+}).sql;
+const semanticRoundTripParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
+  dialect: "postgresql",
+  sourceText: semanticRoundTripSql
+});
+assert.equal(semanticRoundTripParseResult.ok, true);
+assert.deepEqual(
+  semanticRoundTripParseResult.modelJson.schema.tables.map((table) => ({
+    name: table.name,
+    columns: table.columns.map((column) => ({
+      name: column.name,
+      nullable: column.nullable,
+      primaryKey: column.primaryKey,
+      unique: column.unique,
+      defaultValue: column.defaultValue
+    })),
+    constraints: table.constraints.map((constraint) => ({
+      kind: constraint.kind,
+      columnIds: constraint.columnIds.map(
+        (columnId) => table.columns.find((column) => column.id === columnId)?.name
+      )
+    }))
+  })),
+  semanticRoundTripModel.schema.tables.map((table) => ({
+    name: table.name,
+    columns: table.columns.map((column) => ({
+      name: column.name,
+      nullable: column.nullable,
+      primaryKey: column.primaryKey,
+      unique: column.unique,
+      defaultValue: column.defaultValue
+    })),
+    constraints: table.constraints.map((constraint) => ({
+      kind: constraint.kind,
+      columnIds: constraint.columnIds.map(
+        (columnId) => table.columns.find((column) => column.id === columnId)?.name
+      )
+    }))
+  }))
+);
+
+const cyclicModel = {
+  version: 1,
+  schema: {
+    tables: [
+      {
+        id: "table.a",
+        name: "a",
+        schemaName: null,
+        columns: [
+          { id: "column.a.id", name: "id", dataType: "BIGINT", nullable: false, primaryKey: true, foreignKey: false, unique: false, defaultValue: null, comment: null },
+          { id: "column.a.b_id", name: "b_id", dataType: "BIGINT", nullable: true, primaryKey: false, foreignKey: true, unique: false, defaultValue: null, comment: null }
+        ],
+        constraints: [{ id: "constraint.a.pk", kind: "primary_key", columnIds: ["column.a.id"], name: null }],
+        comment: null
+      },
+      {
+        id: "table.b",
+        name: "b",
+        schemaName: null,
+        columns: [
+          { id: "column.b.id", name: "id", dataType: "BIGINT", nullable: false, primaryKey: true, foreignKey: false, unique: false, defaultValue: null, comment: null },
+          { id: "column.b.a_id", name: "a_id", dataType: "BIGINT", nullable: true, primaryKey: false, foreignKey: true, unique: false, defaultValue: null, comment: null }
+        ],
+        constraints: [{ id: "constraint.b.pk", kind: "primary_key", columnIds: ["column.b.id"], name: null }],
+        comment: null
+      }
+    ],
+    relations: [
+      { id: "relation.a.b_id.b.id", kind: "foreign_key", fromTableId: "table.a", fromColumnIds: ["column.a.b_id"], toTableId: "table.b", toColumnIds: ["column.b.id"], constraintName: "fk_a_b" },
+      { id: "relation.b.a_id.a.id", kind: "foreign_key", fromTableId: "table.b", fromColumnIds: ["column.b.a_id"], toTableId: "table.a", toColumnIds: ["column.a.id"], constraintName: "fk_b_a" }
+    ]
+  }
+};
+const generatedCyclicMySql = modelToSqlRuntime.generateSqlDdlFromErdModel({
+  dialect: "mysql",
+  modelJson: cyclicModel
+});
+assert.match(generatedCyclicMySql.sql, /ALTER TABLE `a` ADD CONSTRAINT `fk_a_b`/);
+assert.match(generatedCyclicMySql.sql, /ALTER TABLE `b` ADD CONSTRAINT `fk_b_a`/);
+const generatedCyclicMySqlParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
+  dialect: "mysql",
+  sourceText: generatedCyclicMySql.sql
+});
+assert.equal(generatedCyclicMySqlParseResult.ok, true);
+assert.equal(generatedCyclicMySqlParseResult.modelJson.schema.relations.length, 2);
+const generatedCyclicPostgreSql = modelToSqlRuntime.generateSqlDdlFromErdModel({
+  dialect: "postgresql",
+  modelJson: cyclicModel
+});
+assert.match(generatedCyclicPostgreSql.sql, /ALTER TABLE "a" ADD CONSTRAINT "fk_a_b"/);
+assert.equal(
+  ddlParserRuntime.parseSqlDdlToErdModel({
+    dialect: "postgresql",
+    sourceText: generatedCyclicPostgreSql.sql
+  }).modelJson.schema.relations.length,
+  2
+);
+
 const mysqlTypeParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
   dialect: "mysql",
   sourceText: `CREATE TABLE metrics (
@@ -3321,6 +3526,7 @@ assert.equal(
 );
 
 assert.equal(typeof modelRuntime.addSqltoerdColumnAnnotation, "function");
+assert.equal(typeof modelRuntime.addSqltoerdTableAnnotation, "function");
 assert.equal(
   typeof modelRuntime.getSqltoerdRenderableAnnotations,
   "function"
@@ -3352,6 +3558,72 @@ assert.deepEqual(
   [validColumnAnnotation]
 );
 assert.deepEqual(annotationBaseLayout.annotations.links, []);
+
+const validTableAnnotation = {
+  id: "annotation.users.orders",
+  kind: "table_link",
+  fromTableId: "table.users",
+  toTableId: "table.orders",
+  label: "owns"
+};
+const validTableAnnotationResult = modelRuntime.addSqltoerdTableAnnotation(
+  runtimeModel,
+  annotationBaseLayout,
+  validTableAnnotation
+);
+
+assert.equal(validTableAnnotationResult.ok, true);
+assert.deepEqual(
+  validTableAnnotationResult.layoutJson.annotations.links,
+  [validTableAnnotation]
+);
+const tableAnnotationInspectorView =
+  inspectorRuntime.createSqlErdInspectorViewModel(
+    { type: "annotation", annotationId: validTableAnnotation.id },
+    runtimeModelIndex,
+    validTableAnnotationResult.layoutJson.annotations
+  );
+assert.equal(tableAnnotationInspectorView.type, "annotation");
+assert.equal(tableAnnotationInspectorView.fromLabel, "users");
+assert.equal(tableAnnotationInspectorView.toLabel, "orders");
+assert.equal(
+  modelRuntime.addSqltoerdTableAnnotation(
+    runtimeModel,
+    validTableAnnotationResult.layoutJson,
+    { ...validTableAnnotation, id: "annotation.users.orders.duplicate" }
+  ).reason,
+  "annotation_exists"
+);
+assert.equal(
+  modelRuntime.addSqltoerdTableAnnotation(
+    runtimeModel,
+    validTableAnnotationResult.layoutJson,
+    {
+      ...validTableAnnotation,
+      id: "annotation.orders.users.reverse",
+      fromTableId: validTableAnnotation.toTableId,
+      toTableId: validTableAnnotation.fromTableId
+    }
+  ).reason,
+  "annotation_exists"
+);
+assert.equal(
+  modelRuntime.addSqltoerdTableAnnotation(runtimeModel, annotationBaseLayout, {
+    ...validTableAnnotation,
+    id: "annotation.same-table",
+    toTableId: "table.users"
+  }).reason,
+  "same_endpoint"
+);
+assert.equal(
+  modelRuntime.addSqltoerdTableAnnotation(runtimeModel, annotationBaseLayout, {
+    ...validTableAnnotation,
+    id: "annotation.invalid-table",
+    toTableId: "table.missing"
+  }).reason,
+  "invalid_endpoint"
+);
+
 assert.equal(
   modelRuntime.addSqltoerdColumnAnnotation(
     runtimeModel,
@@ -3399,11 +3671,18 @@ const renderableAnnotations = modelRuntime.getSqltoerdRenderableAnnotations(
   runtimeModel,
   {
     version: 1,
-    links: [validColumnAnnotation, fkConflictAnnotation]
+    links: [
+      validColumnAnnotation,
+      fkConflictAnnotation,
+      validTableAnnotation
+    ]
   }
 );
 
-assert.deepEqual(renderableAnnotations.links, [validColumnAnnotation]);
+assert.deepEqual(renderableAnnotations.links, [
+  validColumnAnnotation,
+  validTableAnnotation
+]);
 assert.equal(
   modelRuntime.getSqltoerdRenderableAnnotations(runtimeModel, {
     version: 1,
@@ -4353,6 +4632,8 @@ assert.match(panel, /label=\{sessionLoadState\.label\}/);
 assert.doesNotMatch(panel, /PreviewTableCard/);
 
 assert.match(inspectorUtils, /createSqlErdInspectorViewModel/);
+assert.match(inspectorUtils, /type: "annotation"/);
+assert.match(inspectorUtils, /formatSqlErdAnnotationEndpoint/);
 assert.match(inspectorUtils, /isColumnConnectedToRelation/);
 assert.match(inspectorUtils, /relation\.fromTableId === tableId/);
 assert.match(inspectorUtils, /relation\.toTableId === tableId/);
@@ -4372,9 +4653,11 @@ assert.match(canvasSurface, /createSqltoerdRelationShapes/);
 assert.match(canvasSurface, /createSqltoerdAnnotationShapes/);
 assert.match(canvasSurface, /createSqltoerdCanvasShapes/);
 assert.match(canvasSurface, /SqlErdRelationLayoutSync/);
-assert.match(canvasSurface, /SqlErdColumnAnnotationInteractionSync/);
+assert.match(canvasSurface, /SqlErdAnnotationInteractionSync/);
 assert.match(canvasSurface, /syncSqlErdAnnotationShapes/);
 assert.match(canvasSurface, /addSqltoerdColumnAnnotation/);
+assert.match(canvasSurface, /addSqltoerdTableAnnotation/);
+assert.match(canvasSurface, /SQLTOERD_TABLE_CONNECT_START_EVENT/);
 assert.match(canvasSurface, /updateSqltoerdAnnotationLabel/);
 assert.match(canvasSurface, /removeSqltoerdAnnotation/);
 assert.match(canvasSurface, /event\.key === "Delete"/);
@@ -4442,7 +4725,9 @@ assert.match(tableShape, /data-sqltoerd-table-header/);
 assert.match(tableShape, /data-sqltoerd-column-id/);
 assert.match(tableShape, /data-sqltoerd-column-port/);
 assert.match(tableShape, /SQLTOERD_COLUMN_CONNECT_START_EVENT/);
+assert.match(tableShape, /SQLTOERD_TABLE_CONNECT_START_EVENT/);
 assert.match(tableShape, /data-sqltoerd-column-port-hit/);
+assert.match(tableShape, /data-sqltoerd-table-port-hit/);
 assert.match(tableShape, /size-5/);
 assert.match(tableShape, /size-2/);
 assert.match(tableShape, /selectedColumnId/);
@@ -4521,6 +4806,8 @@ assert.match(relationShape, /SQLTOERD_RELATION_HIT_STROKE_WIDTH/);
 assert.doesNotMatch(relationShape, /canCull\(\)/);
 
 assert.match(annotationShape, /SQLTOERD_ANNOTATION_SHAPE_TYPE/);
+assert.match(annotationShape, /kind: "table_link" \| "column_link"/);
+assert.match(annotationShape, /fromColumnId: T\.nullable\(T\.string\)/);
 assert.match(annotationShape, /class SqlErdAnnotationShapeUtil extends ShapeUtil/);
 assert.match(annotationShape, /data-sqltoerd-annotation-hit-target/);
 assert.match(annotationShape, /SQLTOERD_ANNOTATION_HIT_STROKE_WIDTH = 16/);

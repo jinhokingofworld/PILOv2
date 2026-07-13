@@ -452,6 +452,7 @@ await import("./analysis-input-handoff.test.mjs");
 await import("./analysis-result-handoff.test.mjs");
 await import("./analysis-job-recovery.test.mjs");
 await import("./analysis-retry.test.mjs");
+await import("./github-file-pagination.test.mjs");
 await import("./semantic-graph-contract.test.mjs");
 await import("./semantic-graph-candidates.test.mjs");
 await import("./semantic-graph-validator.test.mjs");

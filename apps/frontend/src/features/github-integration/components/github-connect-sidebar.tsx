@@ -15,7 +15,8 @@ import {
 } from "@/features/github-integration/utils/github-connect-format";
 import {
   getGithubSyncProgress,
-  getGithubSyncProgressStageLabel
+  getGithubSyncProgressStageLabel,
+  isGithubSyncActiveStatus
 } from "@/features/github-integration/utils/github-sync-progress";
 
 import {
@@ -158,7 +159,7 @@ export function GithubConnectSidebar({
                     tone={
                       syncRun.status === "success"
                         ? "success"
-                        : syncRun.status === "running"
+                        : isGithubSyncActiveStatus(syncRun.status)
                           ? "info"
                           : "danger"
                     }

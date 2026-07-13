@@ -8,6 +8,7 @@ import type {
   SqltoerdLayoutJsonV1,
   SqltoerdModelCounts,
   SqltoerdModelJsonV1,
+  SqltoerdTableAnnotationLink,
   SqltoerdTableLayout
 } from "@/features/sql-erd/types";
 
@@ -58,6 +59,21 @@ export type SqltoerdColumnAnnotationAddResult =
   | {
       ok: false;
       reason: SqltoerdColumnAnnotationAddFailureReason;
+    };
+
+export type SqltoerdTableAnnotationAddFailureReason = Exclude<
+  SqltoerdColumnAnnotationAddFailureReason,
+  "foreign_key_exists"
+>;
+
+export type SqltoerdTableAnnotationAddResult =
+  | {
+      ok: true;
+      layoutJson: SqltoerdLayoutJsonV1;
+    }
+  | {
+      ok: false;
+      reason: SqltoerdTableAnnotationAddFailureReason;
     };
 
 export function getSqltoerdModelCounts(
@@ -231,6 +247,58 @@ export function addSqltoerdColumnAnnotation(
             link.fromColumnId
           ),
           getSqltoerdColumnAnnotationEndpoint(link.toTableId, link.toColumnId)
+        ) === annotationKey
+    )
+  ) {
+    return { ok: false, reason: "annotation_exists" };
+  }
+
+  return {
+    ok: true,
+    layoutJson: {
+      ...layoutJson,
+      annotations: {
+        version: 1,
+        links: [...(layoutJson.annotations?.links ?? []), annotation]
+      }
+    }
+  };
+}
+
+export function addSqltoerdTableAnnotation(
+  modelJson: SqltoerdModelJsonV1,
+  layoutJson: SqltoerdLayoutJsonV1,
+  annotation: SqltoerdTableAnnotationLink
+): SqltoerdTableAnnotationAddResult {
+  if ((layoutJson.annotations?.links.length ?? 0) >= 300) {
+    return { ok: false, reason: "annotation_limit" };
+  }
+
+  const modelIndex = createSqltoerdModelIndex(modelJson);
+
+  if (
+    !modelIndex.tablesById.has(annotation.fromTableId) ||
+    !modelIndex.tablesById.has(annotation.toTableId)
+  ) {
+    return { ok: false, reason: "invalid_endpoint" };
+  }
+
+  if (annotation.fromTableId === annotation.toTableId) {
+    return { ok: false, reason: "same_endpoint" };
+  }
+
+  const annotationKey = getSqltoerdUndirectedEndpointKey(
+    annotation.fromTableId,
+    annotation.toTableId
+  );
+
+  if (
+    layoutJson.annotations?.links.some(
+      (link) =>
+        link.kind === "table_link" &&
+        getSqltoerdUndirectedEndpointKey(
+          link.fromTableId,
+          link.toTableId
         ) === annotationKey
     )
   ) {

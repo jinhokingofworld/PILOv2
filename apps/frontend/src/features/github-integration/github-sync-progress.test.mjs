@@ -40,6 +40,15 @@ assert.equal(progressModule.hasRunningGithubSyncRun([runningSyncRun]), true);
 assert.equal(
   progressModule.hasRunningGithubSyncRun([
     {
+      status: "queued"
+    }
+  ]),
+  true,
+  "a queued sync run must keep polling active"
+);
+assert.equal(
+  progressModule.hasRunningGithubSyncRun([
+    {
       status: "success",
       progressPercent: 100
     }

@@ -248,6 +248,7 @@ export type ListBoardGithubRepositoriesQuery = {
 };
 
 export type ListBoardGithubProjectsV2Query = {
+  repositoryId: string;
   closed?: boolean;
   limit?: number;
 };

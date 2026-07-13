@@ -21,6 +21,7 @@ export type MeetingWorkspaceDataStatus =
 type MeetingWorkspaceCurrentState = CurrentMeetingPayload;
 
 type MeetingWorkspaceReportsState = {
+  nextCursor: string | null;
   reports: MeetingReportSummary[];
 };
 
@@ -39,6 +40,7 @@ const emptyCurrentState: MeetingWorkspaceCurrentState = {
 };
 
 const emptyReportsState: MeetingWorkspaceReportsState = {
+  nextCursor: null,
   reports: []
 };
 
@@ -364,6 +366,7 @@ export function useMeetingWorkspaceData({
     listParticipants,
     listRecordings,
     meeting: currentState.meeting,
+    nextReportCursor: reportsState.nextCursor,
     regenerateMeetingReport,
     reloadCurrentMeeting,
     reloadReports,

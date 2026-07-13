@@ -39,10 +39,11 @@ export type SqlErdAnnotationShapeProps = {
   w: number;
   h: number;
   annotationId: string;
+  kind: "table_link" | "column_link";
   fromTableId: string;
-  fromColumnId: string;
+  fromColumnId: string | null;
   toTableId: string;
-  toColumnId: string;
+  toColumnId: string | null;
   fromTableShapeId: string;
   toTableShapeId: string;
   label: string;
@@ -294,10 +295,11 @@ export class SqlErdAnnotationShapeUtil extends ShapeUtil<SqlErdAnnotationShape> 
     w: T.number,
     h: T.number,
     annotationId: T.string,
+    kind: T.string,
     fromTableId: T.string,
-    fromColumnId: T.string,
+    fromColumnId: T.nullable(T.string),
     toTableId: T.string,
-    toColumnId: T.string,
+    toColumnId: T.nullable(T.string),
     fromTableShapeId: T.string,
     toTableShapeId: T.string,
     label: T.string,
@@ -325,10 +327,11 @@ export class SqlErdAnnotationShapeUtil extends ShapeUtil<SqlErdAnnotationShape> 
       w: 1,
       h: 1,
       annotationId: "",
+      kind: "column_link",
       fromTableId: "",
-      fromColumnId: "",
+      fromColumnId: null,
       toTableId: "",
-      toColumnId: "",
+      toColumnId: null,
       fromTableShapeId: "",
       toTableShapeId: "",
       label: "",

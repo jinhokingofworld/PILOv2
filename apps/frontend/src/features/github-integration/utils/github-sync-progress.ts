@@ -34,10 +34,14 @@ export function getGithubSyncProgress(syncRun: GithubSyncProgressLike) {
   return Math.max(0, Math.min(100, Math.round(percent)));
 }
 
+export function isGithubSyncActiveStatus(status: GithubSyncStatus) {
+  return status === "queued" || status === "running";
+}
+
 export function hasRunningGithubSyncRun(
   syncRuns: ReadonlyArray<Pick<GithubSyncRun, "status">>
 ) {
-  return syncRuns.some((syncRun) => syncRun.status === "running");
+  return syncRuns.some((syncRun) => isGithubSyncActiveStatus(syncRun.status));
 }
 
 export function shouldPollGithubSyncRuns(

@@ -120,6 +120,32 @@ async function flushPromises() {
 
 {
   const scheduler = createManualScheduler();
+  const syncRunPages = [[{ status: "queued" }], [{ status: "success" }]];
+  const loop = pollUtility.createGithubSyncPollLoop({
+    intervalMs: 1500,
+    poll: async () =>
+      pollUtility.hasRunningGithubSyncRun(syncRunPages.shift()),
+    shouldContinue: (hasActiveRun) => hasActiveRun === true,
+    onError: () => assert.fail("poll should not fail"),
+    schedule: (callback) => scheduler.schedule(callback),
+    clear: (callback) => scheduler.clear(callback)
+  });
+
+  loop.start();
+  scheduler.runNext();
+  await flushPromises();
+  assert.equal(
+    scheduler.size,
+    1,
+    "a queued sync run must schedule another poll before it reaches a terminal state"
+  );
+  scheduler.runNext();
+  await flushPromises();
+  assert.equal(scheduler.size, 0, "a terminal sync run must stop polling");
+}
+
+{
+  const scheduler = createManualScheduler();
   const errors = [];
   let attempts = 0;
   const loop = pollUtility.createGithubSyncPollLoop({
@@ -167,6 +193,7 @@ assert.match(githubPanel, /schedule:\s*\(callback, delayMs\) => setTimeout/);
 assert.match(githubPanel, /clear:\s*\(timer\) => clearTimeout/);
 assert.match(githubPanel, /apiClient\.listGithubSyncRuns/);
 assert.match(githubPanel, /status:\s*"running"/);
+assert.match(githubPanel, /status:\s*"queued"/);
 assert.match(githubPanel, /createGithubSyncRequestGate/);
 assert.match(githubPanel, /createGithubSyncPollLoop/);
 assert.match(githubPanel, /syncPollingError/);

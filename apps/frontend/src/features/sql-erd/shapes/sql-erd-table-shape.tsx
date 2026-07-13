@@ -25,6 +25,8 @@ export const SQLTOERD_TABLE_SHAPE_TYPE = "sqltoerd_table";
 export const SQLTOERD_COLUMN_SELECT_EVENT = "sqltoerd:column-select";
 export const SQLTOERD_COLUMN_CONNECT_START_EVENT =
   "sqltoerd:column-connect-start";
+export const SQLTOERD_TABLE_CONNECT_START_EVENT =
+  "sqltoerd:table-connect-start";
 export const SQLTOERD_TABLE_SELECT_EVENT = "sqltoerd:table-select";
 
 const TABLE_MIN_WIDTH = 260;
@@ -107,6 +109,11 @@ export type SqlErdColumnConnectStartEventDetail = {
   tableId: string;
 };
 
+export type SqlErdTableConnectStartEventDetail = Omit<
+  SqlErdColumnConnectStartEventDetail,
+  "columnId"
+>;
+
 export function getSqlErdTableSelectionAtLocalPoint(
   shape: SqlErdTableShape,
   point: { x: number; y: number }
@@ -166,6 +173,16 @@ export function startSqlErdColumnConnection(
 ) {
   window.dispatchEvent(
     new CustomEvent(SQLTOERD_COLUMN_CONNECT_START_EVENT, {
+      detail
+    })
+  );
+}
+
+export function startSqlErdTableConnection(
+  detail: SqlErdTableConnectStartEventDetail
+) {
+  window.dispatchEvent(
+    new CustomEvent(SQLTOERD_TABLE_CONNECT_START_EVENT, {
       detail
     })
   );
@@ -504,8 +521,9 @@ function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
         }}
       >
         <header
-          className="flex h-[54px] cursor-grab items-center rounded-t-md border-b border-slate-200 bg-slate-100 px-6 outline-none transition-colors active:cursor-grabbing focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-inset"
+          className="group relative flex h-[54px] cursor-grab items-center rounded-t-md border-b border-slate-200 bg-slate-100 px-6 outline-none transition-colors active:cursor-grabbing focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-inset"
           data-sqltoerd-table-header
+          data-sqltoerd-table-id={shape.props.tableId}
           onClick={(event) => {
             event.stopPropagation();
             handleTableClick();
@@ -514,6 +532,49 @@ function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
           role="button"
           tabIndex={0}
         >
+          {(["left", "right"] as const).map((side) => (
+            <button
+              aria-label={`테이블 설명 관계 ${side === "left" ? "시작" : "끝"}`}
+              className={`absolute top-1/2 z-10 flex size-5 -translate-y-1/2 items-center justify-center rounded-full transition-opacity ${
+                side === "left" ? "left-[-10px]" : "right-[-10px]"
+              } ${
+                selectedState === "table"
+                  ? "pointer-events-auto opacity-45 hover:opacity-100"
+                  : "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-visible:pointer-events-auto group-focus-visible:opacity-100"
+              }`}
+              data-sqltoerd-table-port={side}
+              data-sqltoerd-table-port-hit
+              data-sqltoerd-table-id={shape.props.tableId}
+              key={side}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+              }}
+              onPointerDown={(event) => {
+                if (event.button !== 0 || !event.isPrimary) {
+                  return;
+                }
+
+                event.preventDefault();
+                event.stopPropagation();
+                startSqlErdTableConnection({
+                  clientX: event.clientX,
+                  clientY: event.clientY,
+                  pointerId: event.pointerId,
+                  side,
+                  tableId: shape.props.tableId
+                });
+              }}
+              title="드래그하여 SQL에 반영되지 않는 테이블 설명 관계 추가"
+              tabIndex={-1}
+              type="button"
+            >
+              <span
+                aria-hidden="true"
+                className="size-2 rounded-full border border-slate-500 bg-white shadow-sm"
+              />
+            </button>
+          ))}
           <h3 className="whitespace-nowrap text-[22px] font-semibold leading-none text-slate-950">
             {displayName}
           </h3>

@@ -143,6 +143,10 @@ export function parseSqlDdlToErdModel(
     );
   }
 
+  for (const alterTableNode of astNodes.filter(isAlterTableNode)) {
+    applyAlterTableConstraints(alterTableNode, tableStatesByDisplayName, relations);
+  }
+
   const modelJson: SqltoerdModelJsonV1 = {
     version: SQLTOERD_MODEL_JSON_VERSION,
     schema: {
@@ -435,9 +439,45 @@ function createColumnFromDefinition(
     primaryKey,
     foreignKey: Boolean(readObject(definition.reference_definition)),
     unique,
-    defaultValue: null,
+    defaultValue: formatDefaultValue(readObject(definition.default_val)),
     comment: null
   };
+}
+
+function applyAlterTableConstraints(
+  definition: SqlParserAstNode,
+  tableStatesByDisplayName: Map<string, MutableTableParseState>,
+  relations: ErdRelation[]
+) {
+  const tableRef = readFirstObject(definition.table);
+  const tableName = readString(tableRef?.table);
+
+  if (!tableName) {
+    return;
+  }
+
+  const schemaName = readString(tableRef?.db) ?? readString(tableRef?.schema);
+  const tableState =
+    tableStatesByDisplayName.get(getTableQualifiedName(schemaName, tableName)) ??
+    tableStatesByDisplayName.get(tableName);
+
+  if (!tableState) {
+    return;
+  }
+
+  for (const expression of Array.isArray(definition.expr)
+    ? definition.expr.map(readObject).filter((value): value is SqlParserAstNode => value !== null)
+    : []) {
+    if (readString(expression.action)?.toLowerCase() !== "add") {
+      continue;
+    }
+
+    const constraint = readObject(expression.create_definitions);
+
+    if (constraint && isConstraintDefinition(constraint)) {
+      applyTableConstraint(tableState, constraint, tableStatesByDisplayName, relations);
+    }
+  }
 }
 
 function applyInlineColumnConstraints(
@@ -617,12 +657,48 @@ function isCreateTableNode(value: SqlParserAstNode) {
   );
 }
 
+function isAlterTableNode(value: SqlParserAstNode) {
+  return (
+    readString(value.type)?.toLowerCase() === "alter" &&
+    readFirstObject(value.table) !== null
+  );
+}
+
 function isColumnDefinition(value: SqlParserAstNode): value is SqlParserAstNode {
   return readString(value.resource)?.toLowerCase() === "column";
 }
 
 function isConstraintDefinition(value: SqlParserAstNode): value is SqlParserAstNode {
   return readString(value.resource)?.toLowerCase() === "constraint";
+}
+
+function formatDefaultValue(defaultDefinition: SqlParserAstNode | null) {
+  const value = readObject(defaultDefinition?.value);
+
+  if (!value) {
+    return null;
+  }
+
+  if (typeof value.value === "number") {
+    return String(value.value);
+  }
+
+  if (readString(value.type)?.toLowerCase() === "single_quote_string") {
+    const stringValue = readString(value.value);
+
+    return stringValue === null ? null : `'${stringValue.replaceAll("'", "''")}'`;
+  }
+
+  if (readString(value.type)?.toLowerCase() === "function") {
+    const name = readFirstObject(value.name)?.name;
+    const functionName = Array.isArray(name)
+      ? name.map((part) => readString(part)).filter(Boolean).join(".")
+      : null;
+
+    return functionName ? `${functionName}()` : null;
+  }
+
+  return readString(value.value);
 }
 
 function formatColumnDataType(definition: SqlParserAstNode | null) {

@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -37,7 +37,12 @@ import { cn } from "@/lib/utils";
 export type MeetingReportStatusFilter = "ALL" | MeetingReportStatus;
 
 type MeetingReportSectionProps = {
+  hasPreviousPage: boolean;
   meetingData: MeetingWorkspaceData;
+  nextCursor: string | null;
+  onListFiltersChange: (filters: { from: string; q: string; to: string }) => void;
+  onNextPage: () => void;
+  onPreviousPage: () => void;
   onStatusFilterChange: (status: MeetingReportStatusFilter) => void;
   onToastMessage: (message: string) => void;
   statusFilter: MeetingReportStatusFilter;
@@ -85,6 +90,16 @@ function getReportRequestErrorMessage(error: unknown) {
   return error instanceof Error
     ? error.message
     : "회의록 요청을 처리하지 못했습니다. 잠시 후 다시 시도해주세요.";
+}
+
+function toDayBoundary(value: string, boundary: "start" | "end") {
+  if (!value) return "";
+
+  const date = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return "";
+  if (boundary === "end") date.setDate(date.getDate() + 1);
+
+  return date.toISOString();
 }
 
 function formatReportDateTime(value: string | null | undefined) {
@@ -152,6 +167,20 @@ function buildCalendarDraftHref(
 
 function formatReportTitle(report: Pick<MeetingReportSummary, "createdAt">) {
   return `${formatReportDateTime(report.createdAt)} 회의록`;
+}
+
+function ReportParticipantSummary({ report }: { report: MeetingReportSummary }) {
+  const summary = report.participantSummary;
+  if (!summary || summary.totalCount === 0) return null;
+  const names = summary.participants
+    .map((participant) => participant.name?.trim() || "이름 없음")
+    .join(", ");
+  return (
+    <span className="text-xs text-muted-foreground">
+      참석 {summary.totalCount}명{names ? ` · ${names}` : ""}
+      {summary.hasMore ? " 외" : ""}
+    </span>
+  );
 }
 
 function getReportStatusLabel(status: MeetingReportStatus) {
@@ -285,21 +314,6 @@ function parseActionItemCandidates(
     .filter((candidate): candidate is ParsedActionItemCandidate =>
       Boolean(candidate)
     );
-}
-
-function buildReportSearchText(report: MeetingReportSummary) {
-  return [
-    formatReportTitle(report),
-    getReportStatusLabel(report.status),
-    getReportFailedStepLabel(report.failedStep),
-    report.summary,
-    report.discussionPoints,
-    report.decisions,
-    report.errorMessage
-  ]
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
 }
 
 function ReportStatusPill({ status }: { status: MeetingReportStatus }) {
@@ -485,6 +499,12 @@ function MeetingReportDetailModal({
                       </dd>
                     </div>
                     <div>
+                      <dt className="font-medium text-muted-foreground">참석자</dt>
+                      <dd className="mt-1">
+                        <ReportParticipantSummary report={report} />
+                      </dd>
+                    </div>
+                    <div>
                       <dt className="font-medium text-muted-foreground">
                         수정일
                       </dt>
@@ -616,7 +636,12 @@ function MeetingReportDetailModal({
 }
 
 export function MeetingReportSection({
+  hasPreviousPage,
   meetingData,
+  nextCursor,
+  onListFiltersChange,
+  onNextPage,
+  onPreviousPage,
   onStatusFilterChange,
   onToastMessage,
   statusFilter
@@ -633,6 +658,8 @@ export function MeetingReportSection({
     reportsStatus
   } = meetingData;
   const [searchQuery, setSearchQuery] = useState("");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
   const [selectedReport, setSelectedReport] =
     useState<MeetingReportDetail | null>(null);
   const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
@@ -646,23 +673,23 @@ export function MeetingReportSection({
     string | null
   >(null);
 
-  const filteredReports = useMemo(() => {
-    const query = searchQuery.trim().toLowerCase();
-
-    if (!query) {
-      return reports;
-    }
-
-    return reports.filter((report) =>
-      buildReportSearchText(report).includes(query)
-    );
-  }, [reports, searchQuery]);
-
   const hasProcessingReport = reports.some((report) =>
     isReportInProgress(report.status)
   );
   const isInitialLoading = reportsStatus === "loading" && reports.length === 0;
   const showError = reportsStatus === "error" && reports.length === 0;
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      onListFiltersChange({
+        from: toDayBoundary(fromDate, "start"),
+        q: searchQuery.trim(),
+        to: toDayBoundary(toDate, "end")
+      });
+    }, 300);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [fromDate, onListFiltersChange, searchQuery, toDate]);
 
   const loadReportDetail = useCallback(
     async (
@@ -852,6 +879,21 @@ export function MeetingReportSection({
           />
         </div>
 
+        <Input
+          aria-label="회의록 시작일"
+          className="h-9 sm:w-36"
+          type="date"
+          value={fromDate}
+          onChange={(event) => setFromDate(event.target.value)}
+        />
+        <Input
+          aria-label="회의록 종료일"
+          className="h-9 sm:w-36"
+          type="date"
+          value={toDate}
+          onChange={(event) => setToDate(event.target.value)}
+        />
+
         <div className="hidden h-6 w-px bg-border sm:block" />
 
         <div className="flex shrink-0 flex-wrap items-center gap-2 sm:flex-nowrap">
@@ -911,9 +953,9 @@ export function MeetingReportSection({
               </Button>
             </div>
           </div>
-        ) : filteredReports.length ? (
+        ) : reports.length ? (
           <ul className="mx-auto grid w-full max-w-4xl gap-3">
-            {filteredReports.map((report) => (
+            {reports.map((report) => (
               <li
                 key={report.id}
                 className="grid gap-3 rounded-lg border bg-background p-4 transition hover:border-primary/30 hover:bg-muted/30 sm:grid-cols-[minmax(0,1fr)_auto]"
@@ -941,6 +983,7 @@ export function MeetingReportSection({
                     <span className="rounded-full border bg-muted/40 px-2.5 py-1 text-xs font-medium text-muted-foreground">
                       {formatReportDateTime(report.createdAt)}
                     </span>
+                    <ReportParticipantSummary report={report} />
                     {report.retryCount > 0 ? (
                       <span className="rounded-full border bg-muted/40 px-2.5 py-1 text-xs font-medium text-muted-foreground">
                         재생성 {report.retryCount}회
@@ -989,7 +1032,7 @@ export function MeetingReportSection({
             <div className="max-w-sm">
               <FileText className="mx-auto size-8 text-muted-foreground" />
               <p className="mt-3 text-sm font-medium">
-                {searchQuery.trim() || statusFilter !== "ALL"
+                {searchQuery.trim() || fromDate || toDate || statusFilter !== "ALL"
                   ? "조건에 맞는 회의록이 없습니다."
                   : "아직 회의록이 없습니다."}
               </p>
@@ -999,6 +1042,25 @@ export function MeetingReportSection({
             </div>
           </div>
         )}
+      </div>
+
+      <div className="mx-auto flex w-full max-w-5xl justify-end gap-2">
+        <Button
+          disabled={reportsStatus === "loading" || !hasPreviousPage}
+          type="button"
+          variant="outline"
+          onClick={onPreviousPage}
+        >
+          이전
+        </Button>
+        <Button
+          disabled={reportsStatus === "loading" || !nextCursor}
+          type="button"
+          variant="outline"
+          onClick={onNextPage}
+        >
+          다음
+        </Button>
       </div>
 
       <MeetingReportDetailModal

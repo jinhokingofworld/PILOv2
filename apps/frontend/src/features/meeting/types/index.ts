@@ -74,6 +74,11 @@ export type MeetingReportSummary = {
   decisions: string | null;
   actionItemCandidates: unknown[];
   retryCount: number;
+  participantSummary?: {
+    totalCount: number;
+    participants: Array<{ userId: string; name: string | null; avatarUrl: string | null }>;
+    hasMore: boolean;
+  };
   createdAt: string;
   updatedAt: string;
 };
@@ -147,11 +152,16 @@ export type ParticipantListPayload = {
 };
 
 export type MeetingReportListQuery = {
+  cursor?: string;
+  from?: string;
   status?: MeetingReportStatus;
+  q?: string;
+  to?: string;
   limit?: number;
 };
 
 export type MeetingReportListPayload = {
+  nextCursor: string | null;
   reports: MeetingReportSummary[];
 };
 

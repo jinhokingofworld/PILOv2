@@ -33,11 +33,11 @@ class FakeGithubAppClient {
 }
 
 const projectOAuthRow = {
-  github_project_login: "Developer-EJ",
-  github_project_access_token_encrypted: "encrypted-project-oauth-token",
-  github_project_token_scope: "read:user,user:email,project",
-  github_project_connected_at: "2026-07-05T09:00:00.000Z",
-  github_project_revoked_at: null
+  github_login: "Developer-EJ",
+  access_token_encrypted: "encrypted-project-oauth-token",
+  token_scope: "read:user,user:email,project",
+  connected_at: "2026-07-05T09:00:00.000Z",
+  revoked_at: null
 };
 
 function createService(database, githubAppClient = new FakeGithubAppClient()) {
@@ -66,10 +66,10 @@ function createService(database, githubAppClient = new FakeGithubAppClient()) {
 {
   const database = new FakeDatabase([
     (text, values) => {
-      assert.match(text, /github_project_access_token_encrypted/i);
+      assert.match(text, /access_token_encrypted/i);
       assert.doesNotMatch(text, /github_access_token_encrypted/i);
-      assert.match(text, /FROM users/i);
-      assert.deepEqual(values, ["user-1"]);
+      assert.match(text, /FROM github_oauth_connections/i);
+      assert.deepEqual(values, ["user-1", "project_v2"]);
       return projectOAuthRow;
     }
   ]);
@@ -98,7 +98,7 @@ function createService(database, githubAppClient = new FakeGithubAppClient()) {
   const database = new FakeDatabase([
     {
       ...projectOAuthRow,
-      github_project_token_scope: "read:user,user:email"
+      token_scope: "read:user,user:email"
     }
   ]);
   const { githubAppClient, service } = createService(database);
@@ -122,8 +122,8 @@ function createService(database, githubAppClient = new FakeGithubAppClient()) {
 {
   const database = new FakeDatabase([
     (text, values) => {
-      assert.match(text, /github_project_access_token_encrypted/i);
-      assert.deepEqual(values, ["user-1"]);
+      assert.match(text, /access_token_encrypted/i);
+      assert.deepEqual(values, ["user-1", "project_v2"]);
       return projectOAuthRow;
     }
   ]);

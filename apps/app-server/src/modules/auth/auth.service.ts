@@ -8,6 +8,7 @@ import { AuthConfigService } from "./auth-config.service";
 import { GithubLoginOAuthClient, GithubLoginUserProfile } from "./github-login-oauth.client";
 import { GoogleOAuthClient, GoogleUserProfile } from "./google-oauth.client";
 import { OAuthStateService } from "./oauth-state.service";
+import { GithubOAuthConnectionService } from "../github-integration/github-oauth-connection.service";
 import type {
   LoginCallbackQuery,
   LoginProvider,
@@ -41,7 +42,8 @@ export class AuthService {
     private readonly configService: AuthConfigService,
     private readonly stateService: OAuthStateService,
     private readonly googleOAuthClient: GoogleOAuthClient,
-    private readonly githubOAuthClient: GithubLoginOAuthClient
+    private readonly githubOAuthClient: GithubLoginOAuthClient,
+    private readonly githubOAuthConnectionService: GithubOAuthConnectionService
   ) {}
 
   startLogin(
@@ -254,7 +256,11 @@ export class AuthService {
       );
 
       if (existingUser) {
-        const updatedUser = await this.database.queryOne<UserIdRow>(
+        const updatedUser = await this.database.transaction(async (transaction) => {
+          await this.githubOAuthConnectionService.disconnectMismatchedConnectionsInTransaction(
+            transaction, existingUser.id, profile.id
+          );
+          return transaction.queryOne<UserIdRow>(
           `
             UPDATE users
             SET
@@ -274,7 +280,8 @@ export class AuthService {
             profile.email,
             profile.avatarUrl
           ]
-        );
+          );
+        });
 
         if (!updatedUser) {
           throw badRequest("OAuth user could not be saved");

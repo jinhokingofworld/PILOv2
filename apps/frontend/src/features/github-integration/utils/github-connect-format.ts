@@ -2,6 +2,7 @@ import type {
   GithubSyncStatus,
   GithubSyncTarget
 } from "@/features/github-integration/types";
+import { isGithubSyncActiveStatus } from "@/features/github-integration/utils/github-sync-progress";
 
 export function formatGithubConnectNumber(value: number) {
   return new Intl.NumberFormat("ko-KR").format(value);
@@ -36,7 +37,7 @@ export function formatGithubConnectShortDate(value: string | null) {
 }
 
 export function getGithubConnectSyncStatusLabel(status: GithubSyncStatus) {
-  if (status === "running") {
+  if (isGithubSyncActiveStatus(status)) {
     return "진행 중";
   }
 

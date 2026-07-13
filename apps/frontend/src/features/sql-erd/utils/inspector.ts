@@ -2,7 +2,9 @@ import type {
   ErdColumn,
   ErdRelation,
   ErdTable,
-  SqlErdSelection
+  SqlErdSelection,
+  SqltoerdAnnotationLink,
+  SqltoerdAnnotationsV1
 } from "../types";
 import {
   getRelationEndpoints,
@@ -43,11 +45,19 @@ export type SqlErdInspectorViewModel =
       endpoints: SqltoerdRelationEndpoints | null;
       relation: ErdRelation;
       title: string;
+    }
+  | {
+      annotation: SqltoerdAnnotationLink;
+      fromLabel: string;
+      toLabel: string;
+      type: "annotation";
+      title: string;
     };
 
 export function createSqlErdInspectorViewModel(
   selection: SqlErdSelection,
-  modelIndex: SqltoerdModelIndex
+  modelIndex: SqltoerdModelIndex,
+  annotations?: SqltoerdAnnotationsV1
 ): SqlErdInspectorViewModel {
   if (selection.type === "table") {
     const table = modelIndex.tablesById.get(selection.tableId);
@@ -107,7 +117,52 @@ export function createSqlErdInspectorViewModel(
     };
   }
 
+  if (selection.type === "annotation") {
+    const annotation = annotations?.links.find(
+      (link) => link.id === selection.annotationId
+    );
+
+    if (!annotation) {
+      return { type: "empty" };
+    }
+
+    const fromTable = modelIndex.tablesById.get(annotation.fromTableId);
+    const toTable = modelIndex.tablesById.get(annotation.toTableId);
+
+    if (!fromTable || !toTable) {
+      return { type: "empty" };
+    }
+
+    return {
+      annotation,
+      fromLabel: formatSqlErdAnnotationEndpoint(annotation, fromTable, modelIndex),
+      toLabel: formatSqlErdAnnotationEndpoint(annotation, toTable, modelIndex),
+      type: "annotation",
+      title: annotation.label || "설명 관계"
+    };
+  }
+
   return { type: "empty" };
+}
+
+function formatSqlErdAnnotationEndpoint(
+  annotation: SqltoerdAnnotationLink,
+  table: ErdTable,
+  modelIndex: SqltoerdModelIndex
+) {
+  if (annotation.kind === "table_link") {
+    return getTableDisplayName(table);
+  }
+
+  const columnId =
+    annotation.fromTableId === table.id
+      ? annotation.fromColumnId
+      : annotation.toColumnId;
+  const column = modelIndex.columnsByTableId.get(table.id)?.get(columnId);
+
+  return column
+    ? `${getTableDisplayName(table)}.${column.name}`
+    : getTableDisplayName(table);
 }
 
 export function isColumnConnectedToRelation(

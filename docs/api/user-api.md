@@ -108,7 +108,7 @@ Request Body:
 | Meeting | `meeting_participants.user_id`, `ended_by_id` |
 | Calendar | `calendar_events.created_by` |
 | Canvas | `canvas_user_states.user_id` |
-| GitHub Integration | `users.github_access_token_encrypted` GitHub App user OAuth 연결 상태 |
+| GitHub Integration | `github_oauth_connections` (`purpose=app_user`) GitHub App user OAuth 연결 상태 |
 
 ## MVP 제외
 

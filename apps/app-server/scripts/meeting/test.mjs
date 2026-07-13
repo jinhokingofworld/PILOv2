@@ -1670,7 +1670,7 @@ async function assertError(action, messagePattern) {
           assert.match(text, /ORDER BY meeting_reports\.created_at DESC/);
           assert.match(text, /LIMIT \$2/);
           assert.doesNotMatch(text, /transcript_text/);
-          assert.deepEqual(values, [workspaceId, 20]);
+          assert.deepEqual(values, [workspaceId, 21]);
           return [
             meetingReportRow({
               status: "FAILED",
@@ -1702,7 +1702,7 @@ async function assertError(action, messagePattern) {
         (text, values) => {
           assert.match(text, /meeting_reports\.status = \$2/);
           assert.match(text, /LIMIT \$3/);
-          assert.deepEqual(values, [workspaceId, "FAILED", 100]);
+          assert.deepEqual(values, [workspaceId, "FAILED", 101]);
           return [];
         }
       ]
@@ -1723,7 +1723,7 @@ async function assertError(action, messagePattern) {
       queryRows: [
         (text, values) => {
           assert.match(text, /LIMIT \$2/);
-          assert.deepEqual(values, [workspaceId, 20]);
+          assert.deepEqual(values, [workspaceId, 21]);
           return [];
         }
       ]
@@ -1743,7 +1743,7 @@ async function assertError(action, messagePattern) {
       queryRows: [
         (text, values) => {
           assert.match(text, /LIMIT \$2/);
-          assert.deepEqual(values, [workspaceId, 100]);
+          assert.deepEqual(values, [workspaceId, 101]);
           return [];
         }
       ]
@@ -1763,7 +1763,7 @@ async function assertError(action, messagePattern) {
       queryRows: [
         (text, values) => {
           assert.match(text, /LIMIT \$2/);
-          assert.deepEqual(values, [workspaceId, 20]);
+          assert.deepEqual(values, [workspaceId, 21]);
           return [];
         }
       ]
@@ -1783,7 +1783,7 @@ async function assertError(action, messagePattern) {
       queryRows: [
         (text, values) => {
           assert.match(text, /LIMIT \$2/);
-          assert.deepEqual(values, [workspaceId, 20]);
+          assert.deepEqual(values, [workspaceId, 21]);
           return [];
         }
       ]
@@ -1798,6 +1798,68 @@ async function assertError(action, messagePattern) {
 }
 
 {
+  const cursorCreatedAt = "2026-07-05T00:00:01.000Z";
+  const cursorId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+  const cursor = Buffer.from(
+    JSON.stringify({ createdAt: cursorCreatedAt, id: cursorId })
+  ).toString("base64url");
+  const { database, service } = createSubject(
+    new FakeDatabase({
+      queryRows: [
+        (text, values) => {
+          assert.match(text, /to_tsvector\('simple'/);
+          assert.match(text, /websearch_to_tsquery\('simple', \$2\)/);
+          assert.match(text, /meeting_reports\.created_at >= \$3::timestamptz/);
+          assert.match(text, /meeting_reports\.created_at < \$4::timestamptz/);
+          assert.match(text, /meeting_reports\.id > \$6::uuid/);
+          assert.match(text, /LIMIT \$7/);
+          assert.deepEqual(values, [
+            workspaceId,
+            "회의록 검색",
+            "2026-07-01T00:00:00.000Z",
+            "2026-08-01T00:00:00.000Z",
+            cursorCreatedAt,
+            cursorId,
+            21
+          ]);
+          return [];
+        }
+      ]
+    })
+  );
+
+  const result = await service.listReports(currentUserId, workspaceId, {
+    cursor,
+    from: "2026-07-01T00:00:00.000Z",
+    q: " 회의록 검색 ",
+    to: "2026-08-01T00:00:00.000Z"
+  });
+
+  assert.equal(database.queries.length, 1);
+  assert.deepEqual(result, { nextCursor: null, reports: [] });
+}
+
+{
+  const rows = Array.from({ length: 21 }, (_, index) =>
+    meetingReportRow({
+      id: `00000000-0000-0000-0000-${String(index + 1).padStart(12, "0")}`
+    })
+  );
+  const { service } = createSubject(new FakeDatabase({ queryRows: [rows] }));
+
+  const result = await service.listReports(currentUserId, workspaceId, {});
+
+  assert.equal(result.reports.length, 20);
+  assert.deepEqual(
+    JSON.parse(Buffer.from(result.nextCursor, "base64url").toString("utf8")),
+    {
+      createdAt: "2026-07-05T00:00:01.000Z",
+      id: "00000000-0000-0000-0000-000000000020"
+    }
+  );
+}
+
+{
   const { service } = createSubject();
 
   await assertBadRequest(
@@ -1806,6 +1868,27 @@ async function assertError(action, messagePattern) {
         status: "DONE"
       }),
     /Invalid meeting report status/
+  );
+}
+
+{
+  const { service } = createSubject();
+
+  await assertBadRequest(
+    () => service.listReports(currentUserId, workspaceId, { cursor: "not-a-cursor" }),
+    /Invalid meeting report cursor/
+  );
+  await assertBadRequest(
+    () => service.listReports(currentUserId, workspaceId, { from: "not-a-date" }),
+    /Invalid meeting report from/
+  );
+  await assertBadRequest(
+    () =>
+      service.listReports(currentUserId, workspaceId, {
+        from: "2026-08-01T00:00:00.000Z",
+        to: "2026-08-01T00:00:00.000Z"
+      }),
+    /from must be before to/
   );
 }
 
@@ -1881,8 +1964,8 @@ async function assertError(action, messagePattern) {
       queryRows: [
         (text, values) => {
           assert.match(text, /FROM meeting_reports/);
-          assert.match(text, /WHERE meeting_id = \$1/);
-          assert.match(text, /ORDER BY created_at DESC, id ASC/);
+          assert.match(text, /WHERE meeting_reports\.meeting_id = \$1/);
+          assert.match(text, /ORDER BY meeting_reports\.created_at DESC, meeting_reports\.id ASC/);
           assert.doesNotMatch(text, /transcript_text/);
           assert.deepEqual(values, [meetingId]);
           return [meetingReportRow()];

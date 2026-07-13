@@ -62,6 +62,7 @@ export type GithubPaginatedPayload<T> = {
 
 export type GithubRepository = {
   id: string;
+  installationId: string;
   githubRepositoryId: number | null;
   githubNodeId: string | null;
   ownerLogin: string;
