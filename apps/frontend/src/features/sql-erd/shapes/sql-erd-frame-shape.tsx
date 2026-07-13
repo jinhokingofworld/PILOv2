@@ -68,9 +68,11 @@ function SqlErdFrameBox({ shape }: { shape: SqlErdFrameShape }) {
         <button aria-label={shape.props.isLocked ? "프레임 잠금 해제" : "프레임 잠금"} className="rounded p-1 hover:bg-white/60" onClick={() => emit({ isLocked: !shape.props.isLocked })} type="button">
           {shape.props.isLocked ? <Lock aria-hidden="true" className="size-3.5" /> : <LockOpen aria-hidden="true" className="size-3.5" />}
         </button>
-        <button aria-label="프레임 삭제" className="rounded p-1 hover:bg-white/60" onClick={() => window.dispatchEvent(new CustomEvent<SqlErdFrameDeleteEventDetail>(SQLTOERD_FRAME_DELETE_EVENT, { detail: { frameId: shape.props.frameId } }))} type="button">
-          <Trash2 aria-hidden="true" className="size-3.5" />
-        </button>
+        {!shape.props.isLocked ? (
+          <button aria-label="프레임 삭제" className="rounded p-1 hover:bg-white/60" onClick={() => window.dispatchEvent(new CustomEvent<SqlErdFrameDeleteEventDetail>(SQLTOERD_FRAME_DELETE_EVENT, { detail: { frameId: shape.props.frameId } }))} type="button">
+            <Trash2 aria-hidden="true" className="size-3.5" />
+          </button>
+        ) : null}
       </div>
     </div>
   </HTMLContainer>;

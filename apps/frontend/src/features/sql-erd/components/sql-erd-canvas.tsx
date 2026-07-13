@@ -2152,19 +2152,68 @@ function SqlErdCanvasAnnotationSync({
       const { frameId, patch } = (event as CustomEvent<SqlErdFrameChangeEventDetail>).detail;
       onLayoutPatchRef.current({ framesById: { [frameId]: patch } });
     }
+    function deleteFrame(frameId: string) {
+      const frame = layoutJsonRef.current.annotations?.frames?.find(
+        (item) => item.id === frameId
+      );
+
+      if (!frame || frame.isLocked) {
+        return;
+      }
+
+      const shapeId = getSqlErdFrameShapeId(frameId);
+
+      if (editor.getShape(shapeId)) {
+        editor.run(() => editor.deleteShapes([shapeId]), { history: "ignore" });
+      }
+
+      onLayoutPatchRef.current({ deleteFrameIds: [frameId] });
+    }
     function handleFrameDelete(event: Event) {
       const { frameId } = (event as CustomEvent<SqlErdFrameDeleteEventDetail>).detail;
-      onLayoutPatchRef.current({ deleteFrameIds: [frameId] });
+      deleteFrame(frameId);
+    }
+    function isEditableKeyboardTarget(target: EventTarget | null) {
+      return (
+        target instanceof HTMLElement &&
+        (target.isContentEditable ||
+          target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.tagName === "SELECT")
+      );
+    }
+    function handleKeyDown(event: globalThis.KeyboardEvent) {
+      if (
+        (event.key !== "Delete" && event.key !== "Backspace") ||
+        isEditableKeyboardTarget(event.target)
+      ) {
+        return;
+      }
+
+      const selectedShape = editor.getOnlySelectedShape();
+
+      if (!isSqlErdFrameShape(selectedShape)) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopImmediatePropagation();
+
+      if (!selectedShape.props.isLocked) {
+        deleteFrame(selectedShape.props.frameId);
+      }
     }
     window.addEventListener(SQLTOERD_NOTE_CHANGE_EVENT, handleNoteChange);
     window.addEventListener(SQLTOERD_NOTE_DELETE_EVENT, handleNoteDelete);
     window.addEventListener(SQLTOERD_FRAME_CHANGE_EVENT, handleFrameChange);
     window.addEventListener(SQLTOERD_FRAME_DELETE_EVENT, handleFrameDelete);
+    window.addEventListener("keydown", handleKeyDown, true);
     return () => {
       window.removeEventListener(SQLTOERD_NOTE_CHANGE_EVENT, handleNoteChange);
       window.removeEventListener(SQLTOERD_NOTE_DELETE_EVENT, handleNoteDelete);
       window.removeEventListener(SQLTOERD_FRAME_CHANGE_EVENT, handleFrameChange);
       window.removeEventListener(SQLTOERD_FRAME_DELETE_EVENT, handleFrameDelete);
+      window.removeEventListener("keydown", handleKeyDown, true);
     };
   }, []);
 

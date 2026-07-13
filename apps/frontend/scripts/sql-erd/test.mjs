@@ -700,6 +700,7 @@ const [
   tableShape,
   relationShape,
   annotationShape,
+  frameShape,
   ddlParserUtils,
   sqlEditorDialectUtils,
   sqlSourceDecorationUtils,
@@ -735,6 +736,7 @@ const [
     readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-table-shape.tsx"),
     readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-relation-shape.tsx"),
     readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-annotation-shape.tsx"),
+    readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-frame-shape.tsx"),
     readSqlErdFile("../../src/features/sql-erd/utils/ddl-parser.ts"),
     readSqlErdFile("../../src/features/sql-erd/utils/sql-editor-dialect.ts"),
     readSqlErdFile("../../src/features/sql-erd/utils/sql-source-decoration.ts"),
@@ -6226,6 +6228,15 @@ assert.doesNotMatch(
   /\(startPoint\.x \+ endPoint\.x\) \/ 2/
 );
 assert.doesNotMatch(annotationShape, /Cardinality/);
+assert.match(frameShape, /\{!shape\.props\.isLocked \? \(/);
+assert.match(
+  canvasSurface,
+  /const frame = layoutJsonRef\.current\.annotations\?\.frames\?\.find\([\s\S]*?if \(!frame \|\| frame\.isLocked\) \{[\s\S]*?return;/
+);
+assert.match(
+  canvasSurface,
+  /isSqlErdFrameShape\(selectedShape\)[\s\S]*?selectedShape\.props\.isLocked/
+);
 assert.match(relationShape, /hideSelectionBoundsBg/);
 assert.match(relationShape, /hideSelectionBoundsFg/);
 assert.match(canvasSurface, /fromColumnIds: relation\.fromColumnIds/);
@@ -6261,6 +6272,10 @@ assert.match(apiClient, /sql-erd-sessions/);
 assert.doesNotMatch(apiClient, /sql-erd-session`/);
 assert.match(apiClient, /Authorization: `Bearer \$\{accessToken\}`/);
 assert.match(apiClient, /credentials: "same-origin"/);
+assert.doesNotMatch(apiSpec, /^- Sticky note$/m);
+assert.doesNotMatch(apiSpec, /^- Group box$/m);
+assert.match(apiSpec, /`notes`는 Sticky note, `frames`는 Group box/);
+assert.match(apiSpec, /`links`, `notes`, `frames` 전체에서 중복될 수 없다/);
 
 assert.equal(typeof modelRuntime.applySqltoerdLayoutPatch, "function");
 const patchedLayout = modelRuntime.applySqltoerdLayoutPatch(

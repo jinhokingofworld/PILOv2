@@ -43,8 +43,6 @@ API가 담당하는 범위:
 - model-to-SQL 재생성
 - BigQuery CTE lineage
 - Prisma/DBML/Mermaid/PlantUML/SQLAlchemy/Sequelize source 저장
-- Sticky note
-- Group box
 - Manual arrow
 - URL 공유
 - 실시간 협업
@@ -250,9 +248,9 @@ type SqltoerdColumnAnnotationLink = {
 };
 ```
 
-`annotations`는 SQL에 반영되지 않는 Canvas 설명 관계 전용 영역이다. 실제 FK는
+`annotations`는 SQL에 반영되지 않는 Canvas annotation 영역이다. 실제 FK는
 `modelJson.schema.relations`에만 저장하고 annotation link를 `ErdRelation`으로
-취급하지 않는다.
+취급하지 않는다. `notes`는 Sticky note, `frames`는 Group box 용도의 시각 요소다.
 
 `annotations.notes`와 `annotations.frames`는 SQL, FK, table/relation count를 바꾸지
 않는 독립적인 시각 annotation이다. 각각 최대 100개이며 id는 `links`, `notes`,
@@ -303,7 +301,7 @@ type SqltoerdColumnAnnotationLink = {
 - `viewport.zoom`은 0보다 커야 한다.
 - `layoutJson.annotations.version`은 `1`만 허용한다.
 - `layoutJson.annotations.links`는 최대 300개다.
-- annotation `id`는 전체 link 배열에서 중복될 수 없다.
+- annotation `id`는 `links`, `notes`, `frames` 전체에서 중복될 수 없다.
 - annotation의 table/column endpoint는 `modelJson`에 존재하는 id를 참조해야 한다.
 - annotation endpoint는 방향이 없는 관계로 취급하며 정방향과 역방향을 중복으로
   저장할 수 없다.
