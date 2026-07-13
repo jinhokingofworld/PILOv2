@@ -82,3 +82,51 @@ export type CanvasShapeOperationPayload = CanvasRoomRef & {
   resultRevision: number;
   shapeId: string;
 };
+
+export type CanvasShapeLockState = CanvasRoomRef & {
+  expiresAt: string;
+  lockedAt: string;
+  ownerUserId: string;
+  shapeId: string;
+};
+
+export type CanvasShapeLockClaimPayload = CanvasRoomRef & {
+  shapeIds: string[];
+};
+
+export type CanvasShapeLockAcceptedPayload = CanvasRoomRef & {
+  locks: CanvasShapeLockState[];
+};
+
+export type CanvasShapeLockRejectedPayload = CanvasRoomRef & {
+  locks: CanvasShapeLockState[];
+  shapeIds: string[];
+};
+
+export type CanvasShapeLockReleasePayload = CanvasRoomRef & {
+  shapeIds?: string[];
+};
+
+export type CanvasShapeLockReleaseEventPayload = CanvasRoomRef & {
+  ownerUserId: string;
+  shapeIds: string[];
+};
+
+export type CanvasShapePreviewPayload = CanvasRoomRef & {
+  phase: "move" | "resize" | "unknown";
+  shapes: Record<string, unknown>[];
+};
+
+export type CanvasShapePreviewEventPayload = CanvasShapePreviewPayload & {
+  actorUserId: string;
+  sentAt: string;
+};
+
+export type CanvasShapePreviewClearPayload = CanvasRoomRef & {
+  actorUserId: string;
+  shapeIds: string[];
+};
+
+export type CanvasShapePreviewClearRequestPayload = CanvasRoomRef & {
+  shapeIds: string[];
+};

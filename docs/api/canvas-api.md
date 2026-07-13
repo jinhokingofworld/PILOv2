@@ -53,7 +53,7 @@ PR Review의 분석 결과, file decision, 위험도, Flow와 relation 원본, G
 - room에 연결되지 않은 `board_type=review` Canvas는 Canvas API로 접근할 수 없다.
 - Canvas Agent는 `freeform` 전용이다. Review Canvas Agent 실행은 지원하지 않는다.
 - Review Canvas realtime join/presence는 아직 지원하지 않으며 별도 계약 변경에서 추가한다.
-- MVP에는 tldraw sync, Yjs/CRDT, shape lock, viewer-only role, 복잡한 conflict UI가 없다.
+- MVP에는 tldraw sync, Yjs/CRDT, DB 기반 hard lock, viewer-only role, 복잡한 conflict UI가 없다. Shape 조작 중 사용자 경험을 위한 realtime-only soft lock/preview는 Socket.IO 레이어에서 처리하며 DB schema에는 저장하지 않는다.
 
 ## Canvas 접근 정책
 
@@ -570,6 +570,10 @@ Client -> Server:
 canvas:join
 canvas:leave
 canvas:presence:update
+canvas:shape:lock:claim
+canvas:shape:lock:release
+canvas:shape:preview
+canvas:shape:preview:clear
 ```
 
 Server -> Client:
@@ -580,6 +584,12 @@ canvas:operation
 canvas:sync:required
 canvas:presence:update
 canvas:presence:leave
+canvas:shape:lock:accepted
+canvas:shape:lock:rejected
+canvas:shape:lock:update
+canvas:shape:lock:release
+canvas:shape:preview
+canvas:shape:preview:clear
 canvas:error
 ```
 
@@ -659,7 +669,7 @@ PATCH /workspaces/{workspaceId}/canvases/{canvasId}/leave
 
 - tldraw sync, Yjs/CRDT
 - 복잡한 conflict UI
-- shape lock
+- DB 기반 hard shape lock
 - public link 공유
 - viewer-only role
 - 대용량 media storage 연동
