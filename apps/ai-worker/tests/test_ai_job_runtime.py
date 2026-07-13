@@ -128,7 +128,7 @@ def runtime_settings() -> RuntimeSettings:
         database_ssl=False,
         recordings_bucket="recordings",
         openai_api_key="test-key",
-        openai_stt_model="gpt-4o-mini-transcribe",
+        openai_stt_model="whisper-1",
         openai_meeting_report_model="gpt-5.4-mini",
         openai_agent_planner_model="gpt-5.4-mini",
         openai_agent_planner_timeout_seconds=60,

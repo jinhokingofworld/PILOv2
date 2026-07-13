@@ -312,6 +312,34 @@ def test_processor_uses_run_timezone_for_current_date() -> None:
     assert planner_client.requests[0].timezone == "America/Los_Angeles"
 
 
+def test_processor_repairs_relative_date_before_execution_handoff() -> None:
+    repository = FakeAgentRunRepository(context=run_context(prompt="이번 주말 일정 보여줘"))
+    planner_client = FakePlannerClient(
+        decision=planner_decision(
+            status="needs_clarification",
+            tool_name=None,
+            tool_input={},
+            missing_fields=("start", "end"),
+        )
+    )
+    handoff_client = FakeExecutionHandoffClient()
+    processor = AgentRunProcessor(
+        repository,
+        planner_client,
+        handoff_client,
+        current_date_provider=lambda _timezone: date(2026, 7, 12),
+    )
+
+    result = processor.process_payload(agent_payload())
+
+    assert result.reason == "agent_execution_handoff_completed"
+    assert repository.completed_steps[0][2]["input"] == {
+        "start": "2026-07-18",
+        "end": "2026-07-19",
+    }
+    assert handoff_client.calls == [RUN_ID]
+
+
 def test_processor_deletes_invalid_agent_payload_without_repository_calls() -> None:
     repository = FakeAgentRunRepository()
     processor = create_processor(repository)
@@ -709,6 +737,91 @@ def test_normalizer_keeps_latest_meeting_report_list_candidate() -> None:
     assert normalized.output_summary["input"] == {"limit": 1}
 
 
+@pytest.mark.parametrize(
+    ("prompt", "current_date", "decision", "expected_input"),
+    [
+        (
+            "이번 주말 일정 보여줘",
+            "2026-07-12",
+            planner_decision(
+                status="needs_clarification",
+                tool_name=None,
+                tool_input={},
+                missing_fields=("start", "end"),
+            ),
+            {"start": "2026-07-18", "end": "2026-07-19"},
+        ),
+        (
+            "이번 주말 일정 보여줘",
+            "2026-07-11",
+            planner_decision(
+                status="needs_clarification",
+                tool_name=None,
+                tool_input={},
+                missing_fields=("start", "end"),
+            ),
+            {"start": "2026-07-11", "end": "2026-07-12"},
+        ),
+        (
+            "다음 주 월요일 오전 일정 보여줘",
+            "2026-07-12",
+            planner_decision(tool_input={"start": "2026-07-20", "end": "2026-07-20"}),
+            {"start": "2026-07-13", "end": "2026-07-13"},
+        ),
+        (
+            "다다음 주 화요일 일정 보여줘",
+            "2026-07-12",
+            planner_decision(tool_input={"start": "2026-07-28", "end": "2026-07-28"}),
+            {"start": "2026-07-21", "end": "2026-07-21"},
+        ),
+    ],
+)
+def test_normalizer_repairs_supported_calendar_relative_date_queries(
+    prompt: str,
+    current_date: str,
+    decision: AgentPlannerDecision,
+    expected_input: dict[str, str],
+) -> None:
+    normalized = normalize_agent_planner_decision(
+        decision,
+        parse_agent_run_job_payload(agent_payload()),
+        prompt=prompt,
+        current_date=current_date,
+    )
+
+    assert normalized.status == "tool_candidate"
+    assert normalized.risk_level == "low"
+    assert normalized.output_summary["toolName"] == "list_calendar_events"
+    assert normalized.output_summary["requiresConfirmation"] is False
+    assert normalized.output_summary["input"] == expected_input
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "이번 주말 디자인 관련 일정 보여줘",
+        "다음 주 월요일 일정 만들어줘",
+    ],
+)
+def test_normalizer_does_not_expand_relative_date_guard_beyond_plain_read_queries(
+    prompt: str,
+) -> None:
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            status="unsupported",
+            tool_name=None,
+            tool_input={},
+            unsupported_reason="unsupported_filter_or_write",
+        ),
+        parse_agent_run_job_payload(agent_payload()),
+        prompt=prompt,
+        current_date="2026-07-12",
+    )
+
+    assert normalized.status == "unsupported"
+    assert normalized.output_summary["unsupportedReason"] == "unsupported_filter_or_write"
+
+
 def test_planner_prompt_preserves_calendar_tool_boundaries() -> None:
     prompt = _agent_planner_system_prompt()
 
@@ -717,6 +830,9 @@ def test_planner_prompt_preserves_calendar_tool_boundaries() -> None:
     assert "require an explicit all-day choice" in prompt
     assert "never set endTime equal to startTime" in prompt
     assert "positive integer Calendar event ID" in prompt
+    assert "이번 주말" in prompt
+    assert "다음 주 월요일" in prompt
+    assert "다다음 주 화요일" in prompt
     assert "Korean" in prompt
 
 

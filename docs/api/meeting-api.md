@@ -239,6 +239,8 @@ Meeting 하나에는 여러 Recording이 있을 수 있다. API에서 `currentRe
 | `failedStep` | `RECORDING` \| `STT` \| `LLM` \| null | 실패 단계 |
 | `errorMessage` | string \| null | 실패 메시지 |
 | `transcriptText` | string \| null | 상세 조회에서만 반환 |
+| `transcriptSegments` | array | 상세 조회에서만 반환. `id`, `segmentIndex`, `startedAtMs`, `endedAtMs`, `text`를 가진 timestamped transcript segment |
+| `evidence` | array | 상세 조회에서만 반환. `sourceType`, `sourceIndex`, `transcriptSegmentId`로 요약 산출물과 transcript segment를 연결 |
 | `summary` | string \| null | 요약 |
 | `discussionPoints` | string \| null | 논의사항 |
 | `decisions` | string \| null | 결정사항 |

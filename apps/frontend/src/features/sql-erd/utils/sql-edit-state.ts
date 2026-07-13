@@ -67,6 +67,11 @@ export type SqlErdEditAction =
   | {
       snapshot: SqlErdViewSession;
       type: "source_autosave_saved";
+    }
+  | {
+      baseSnapshot: SqlErdViewSession;
+      snapshot: SqlErdViewSession;
+      type: "normalized_sql_applied";
     };
 
 export type SqlErdParseStart = {
@@ -224,6 +229,19 @@ export function reduceSqlErdEditState(
     };
   }
 
+  if (action.type === "normalized_sql_applied") {
+    if (!isSameSqlErdSnapshot(state.lastSuccessfulSnapshot, action.baseSnapshot)) {
+      return state;
+    }
+
+    return {
+      draftDialect: action.snapshot.dialect,
+      draftSourceText: action.snapshot.sourceText,
+      lastSuccessfulSnapshot: action.snapshot,
+      parse: createIdleParseState(state.parse.requestSequence + 1)
+    };
+  }
+
   if (action.type === "parse_cancelled") {
     if (state.parse.status !== "parsing") {
       return state;
@@ -296,6 +314,19 @@ function createIdleParseState(requestSequence: number): SqlErdParseState {
     requestSequence,
     status: "idle"
   };
+}
+
+function isSameSqlErdSnapshot(
+  current: SqlErdViewSession,
+  candidate: SqlErdViewSession
+) {
+  return (
+    current.id === candidate.id &&
+    current.revision === candidate.revision &&
+    current.dialect === candidate.dialect &&
+    current.sourceText === candidate.sourceText &&
+    JSON.stringify(current.modelJson) === JSON.stringify(candidate.modelJson)
+  );
 }
 
 export function isSqlErdParseRequestCurrent(

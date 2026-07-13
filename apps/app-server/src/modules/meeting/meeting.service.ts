@@ -270,6 +270,8 @@ export interface MeetingReportParticipantSummaryPayload {
 
 export interface MeetingReportDetailPayload extends MeetingReportSummaryPayload {
   transcriptText: string | null;
+  transcriptSegments: Array<{ id: string; segmentIndex: number; startedAtMs: number; endedAtMs: number; text: string }>;
+  evidence: Array<{ sourceType: string; sourceIndex: number; transcriptSegmentId: string }>;
 }
 
 export interface CurrentMeetingPayload {
@@ -1015,9 +1017,10 @@ export class MeetingService {
     if (report === null) {
       throw notFound("Meeting report not found");
     }
+    const evidence = await this.listMeetingReportEvidence(report.id);
 
     return {
-      report: this.mapMeetingReportDetail(report)
+      report: this.mapMeetingReportDetail(report, evidence)
     };
   }
 
@@ -2772,13 +2775,30 @@ export class MeetingService {
     ) AS participant_summary ON true`;
   }
 
-  private mapMeetingReportDetail(
-    report: MeetingReportDetailRow
-  ): MeetingReportDetailPayload {
+  private mapMeetingReportDetail(report: MeetingReportDetailRow, evidence: { transcriptSegments: MeetingReportDetailPayload["transcriptSegments"]; evidence: MeetingReportDetailPayload["evidence"] }): MeetingReportDetailPayload {
     return {
       ...this.mapMeetingReportSummary(report),
-      transcriptText: report.transcript_text
+      transcriptText: report.transcript_text,
+      ...evidence
     };
+  }
+
+  private async listMeetingReportEvidence(reportId: string): Promise<{ transcriptSegments: MeetingReportDetailPayload["transcriptSegments"]; evidence: MeetingReportDetailPayload["evidence"] }> {
+    const rows = await this.database.query<{ id: string; segment_index: number; started_at_ms: number; ended_at_ms: number; text: string; source_type: string | null; source_index: number | null; transcript_segment_id: string | null }>(`
+      SELECT segments.id, segments.segment_index, segments.started_at_ms, segments.ended_at_ms, segments.text,
+        evidence.source_type, evidence.source_index, evidence.transcript_segment_id
+      FROM meeting_report_transcript_segments segments
+      LEFT JOIN meeting_report_evidence evidence ON evidence.transcript_segment_id = segments.id
+      WHERE segments.meeting_report_id = $1
+      ORDER BY segments.segment_index ASC, evidence.source_type ASC, evidence.source_index ASC
+    `, [reportId]);
+    const segmentMap = new Map<string, MeetingReportDetailPayload["transcriptSegments"][number]>();
+    const references: MeetingReportDetailPayload["evidence"] = [];
+    for (const row of rows) {
+      segmentMap.set(row.id, { id: row.id, segmentIndex: Number(row.segment_index), startedAtMs: Number(row.started_at_ms), endedAtMs: Number(row.ended_at_ms), text: row.text });
+      if (row.source_type !== null && row.source_index !== null && row.transcript_segment_id !== null) references.push({ sourceType: row.source_type, sourceIndex: Number(row.source_index), transcriptSegmentId: row.transcript_segment_id });
+    }
+    return { transcriptSegments: [...segmentMap.values()], evidence: references };
   }
 
   private normalizeMeetingReportStatus(

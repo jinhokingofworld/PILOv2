@@ -3,6 +3,7 @@ import { DatabaseModule } from "../../database/database.module";
 import { GithubAppClient } from "./github-app.client";
 import { GithubBoardInvalidationPublisherService } from "./github-board-invalidation-publisher.service";
 import { GithubIntegrationConfigService } from "./github-integration-config.service";
+import { GithubOAuthConnectionService } from "./github-oauth-connection.service";
 import { GithubProjectV2SyncTokenService } from "./github-project-v2-sync-token.service";
 import { GithubProjectV2PollingService } from "./github-project-v2-polling.service";
 import { GithubProjectV2WebhookReconcileService } from "./github-project-v2-webhook-reconcile.service";
@@ -23,6 +24,7 @@ import { GithubTokenEncryptionService } from "./github-token-encryption.service"
     GithubAppClient,
     GithubProjectV2PollingService,
     GithubProjectV2SyncTokenService,
+    GithubOAuthConnectionService,
     GithubTokenEncryptionService
   ]
 })

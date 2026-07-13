@@ -23,8 +23,9 @@ import {
 type SourceTablesProps = {
   repositories: GithubRepository[];
   repositoriesTotal: number;
-  filteredRepositories: GithubRepository[];
   repositoryQuery: string;
+  repositoryPage: number;
+  hasNextRepositoryPage: boolean;
   selectedRepositoryId: string;
   selectedRepository: GithubRepository | undefined;
   pullRequests: GithubPullRequest[];
@@ -37,6 +38,7 @@ type SourceTablesProps = {
   isSavingProjectV2Selections: boolean;
   isLoading: boolean;
   onRepositoryQueryChange: (value: string) => void;
+  onRepositoryPageChange: (page: number) => void;
   onSelectRepository: (id: string) => void;
   onSelectProjectV2: (id: string) => void;
   onToggleProjectV2Selection: (id: string) => void;
@@ -46,8 +48,9 @@ type SourceTablesProps = {
 export function GithubConnectSourceTables({
   repositories,
   repositoriesTotal,
-  filteredRepositories,
   repositoryQuery,
+  repositoryPage,
+  hasNextRepositoryPage,
   selectedRepositoryId,
   selectedRepository,
   pullRequests,
@@ -60,6 +63,7 @@ export function GithubConnectSourceTables({
   isSavingProjectV2Selections,
   isLoading,
   onRepositoryQueryChange,
+  onRepositoryPageChange,
   onSelectRepository,
   onSelectProjectV2,
   onToggleProjectV2Selection,
@@ -90,12 +94,12 @@ export function GithubConnectSourceTables({
 
         {isLoading ? (
           <LoadingTable rows={4} />
-        ) : repositories.length === 0 ? (
+        ) : repositories.length === 0 && !repositoryQuery.trim() ? (
           <GithubConnectEmptyState>
             GitHub 설치가 끝나면 백엔드가 검증한 저장소 목록이 여기에
             표시됩니다.
           </GithubConnectEmptyState>
-        ) : filteredRepositories.length === 0 ? (
+        ) : repositories.length === 0 ? (
           <GithubConnectEmptyState>
             검색 조건과 일치하는 저장소가 없습니다.
           </GithubConnectEmptyState>
@@ -104,12 +108,12 @@ export function GithubConnectSourceTables({
             <div className="repo-row header grid grid-cols-[minmax(180px,1.7fr)_90px_90px_108px_86px] gap-3 bg-[#f5f7fb] px-3 py-2 text-[12px] font-semibold uppercase tracking-[0.06em] text-[#7a8497] max-[760px]:hidden">
               <span>Repository</span>
               <span>Visibility</span>
-              <span>권한</span>
-              <span>동기화</span>
-              <span>상태</span>
+              <span>보관 상태</span>
+              <span>마지막 동기화</span>
+              <span>선택</span>
             </div>
             <div className="divide-y divide-[#eef1f6]">
-              {filteredRepositories.map((repository) => (
+              {repositories.map((repository) => (
                 <RepositoryRow
                   isSelected={repository.id === selectedRepositoryId}
                   key={repository.id}
@@ -120,6 +124,32 @@ export function GithubConnectSourceTables({
             </div>
           </div>
         )}
+
+        {repositoriesTotal > 0 ? (
+          <div className="mt-3 flex items-center justify-end gap-2">
+            <Button
+              disabled={isLoading || repositoryPage === 1}
+              onClick={() => onRepositoryPageChange(repositoryPage - 1)}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              이전
+            </Button>
+            <span className="text-[12px] text-[#7a8497]">
+              {repositoryPage}페이지
+            </span>
+            <Button
+              disabled={isLoading || !hasNextRepositoryPage}
+              onClick={() => onRepositoryPageChange(repositoryPage + 1)}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              다음
+            </Button>
+          </div>
+        ) : null}
 
         <p className="mt-3 text-[12px] leading-5 text-[#7a8497]">
           저장소 접근 범위는 GitHub 설치 화면에서 결정됩니다. PILO는 허용된

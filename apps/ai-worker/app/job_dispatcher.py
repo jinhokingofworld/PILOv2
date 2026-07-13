@@ -98,7 +98,7 @@ class JobDispatcher:
     def _process_meeting_report(self, payload: dict[str, object]) -> JobProcessResult:
         if self.meeting_report_processor is None:
             return JobProcessResult(
-                delete_message=True,
+                delete_message=False,
                 reason="meeting_report_processor_unavailable",
                 job_type=MEETING_REPORT_JOB_TYPE,
             )
@@ -113,7 +113,7 @@ class JobDispatcher:
     def _process_agent_run(self, payload: dict[str, object]) -> JobProcessResult:
         if self.agent_run_processor is None:
             return JobProcessResult(
-                delete_message=True,
+                delete_message=False,
                 reason="agent_run_processor_unavailable",
                 job_type=AGENT_RUN_REQUESTED_JOB_TYPE,
             )

@@ -31,8 +31,9 @@ export type GithubConnectLayoutProps = {
   connected: boolean;
   repositories: GithubRepository[];
   repositoriesTotal: number;
-  filteredRepositories: GithubRepository[];
   repositoryQuery: string;
+  repositoryPage: number;
+  hasNextRepositoryPage: boolean;
   selectedRepositoryId: string;
   selectedRepository: GithubRepository | undefined;
   projects: GithubProjectV2[];
@@ -64,6 +65,7 @@ export type GithubConnectLayoutProps = {
   onCancelDeleteInstallation: () => void;
   onConfirmDeleteInstallation: () => void;
   onRepositoryQueryChange: (value: string) => void;
+  onRepositoryPageChange: (page: number) => void;
   onSelectRepository: (id: string) => void;
   onSelectProjectV2: (id: string) => void;
   onToggleProjectV2Selection: (id: string) => void;
@@ -85,8 +87,9 @@ export function GithubConnectLayout({
   connected,
   repositories,
   repositoriesTotal,
-  filteredRepositories,
   repositoryQuery,
+  repositoryPage,
+  hasNextRepositoryPage,
   selectedRepositoryId,
   selectedRepository,
   projects,
@@ -118,6 +121,7 @@ export function GithubConnectLayout({
   onCancelDeleteInstallation,
   onConfirmDeleteInstallation,
   onRepositoryQueryChange,
+  onRepositoryPageChange,
   onSelectRepository,
   onSelectProjectV2,
   onToggleProjectV2Selection,
@@ -183,9 +187,10 @@ export function GithubConnectLayout({
 
         <div className="main-grid grid items-start gap-[15px] xl:grid-cols-[minmax(0,1.55fr)_minmax(320px,1fr)]">
           <GithubConnectSourceTables
-            filteredRepositories={filteredRepositories}
+            hasNextRepositoryPage={hasNextRepositoryPage}
             isLoading={isLoading}
             onRepositoryQueryChange={onRepositoryQueryChange}
+            onRepositoryPageChange={onRepositoryPageChange}
             onSelectProjectV2={onSelectProjectV2}
             onToggleProjectV2Selection={onToggleProjectV2Selection}
             onSaveProjectV2Selections={onSaveProjectV2Selections}
@@ -197,6 +202,7 @@ export function GithubConnectLayout({
             repositories={repositories}
             repositoriesTotal={repositoriesTotal}
             repositoryQuery={repositoryQuery}
+            repositoryPage={repositoryPage}
             selectedRepository={selectedRepository}
             selectedProjectV2Id={selectedProjectV2Id}
             selectedProjectV2Ids={selectedProjectV2Ids}

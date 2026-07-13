@@ -110,7 +110,7 @@ resource "aws_iam_role_policy" "ai_worker_task" {
           "sqs:GetQueueUrl",
           "sqs:ChangeMessageVisibility"
         ]
-        Resource = var.sqs_queue_arns
+        Resource = var.ai_worker_queue_arns
       },
       {
         Effect   = "Allow"
@@ -118,6 +118,85 @@ resource "aws_iam_role_policy" "ai_worker_task" {
         Resource = local.s3_object_arns
       }
     ]
+  })
+}
+
+resource "aws_iam_role" "meeting_worker_task" {
+  name               = "${var.name_prefix}-meeting-worker-task-role"
+  assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume_role.json
+}
+
+resource "aws_iam_role" "agent_worker_task" {
+  name               = "${var.name_prefix}-agent-worker-task-role"
+  assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume_role.json
+}
+
+resource "aws_iam_role_policy" "agent_worker_task" {
+  name = "${var.name_prefix}-agent-worker-task-policy"
+  role = aws_iam_role.agent_worker_task.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "sqs:ReceiveMessage", "sqs:DeleteMessage", "sqs:GetQueueAttributes",
+        "sqs:GetQueueUrl", "sqs:ChangeMessageVisibility"
+      ]
+      Resource = var.agent_worker_queue_arns
+    }]
+  })
+}
+
+resource "aws_iam_role_policy" "meeting_worker_task" {
+  name = "${var.name_prefix}-meeting-worker-task-policy"
+  role = aws_iam_role.meeting_worker_task.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "sqs:ReceiveMessage",
+          "sqs:DeleteMessage",
+          "sqs:GetQueueAttributes",
+          "sqs:GetQueueUrl",
+          "sqs:ChangeMessageVisibility"
+        ]
+        Resource = var.meeting_worker_queue_arns
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["s3:GetObject"]
+        Resource = local.s3_object_arns
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role" "pr_review_ai_worker_task" {
+  name               = "${var.name_prefix}-pr-review-ai-worker-task-role"
+  assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume_role.json
+}
+
+resource "aws_iam_role_policy" "pr_review_ai_worker_task" {
+  name = "${var.name_prefix}-pr-review-ai-worker-task-policy"
+  role = aws_iam_role.pr_review_ai_worker_task.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "sqs:ReceiveMessage",
+        "sqs:DeleteMessage",
+        "sqs:GetQueueAttributes",
+        "sqs:GetQueueUrl",
+        "sqs:ChangeMessageVisibility"
+      ]
+      Resource = var.pr_review_ai_worker_queue_arns
+    }]
   })
 }
 
@@ -144,6 +223,11 @@ resource "aws_iam_user" "github_sync_operator" {
   count = var.github_sync_operator_user_name == "" ? 0 : 1
 
   name = var.github_sync_operator_user_name
+
+  # Preserve operational tags managed outside Terraform without exposing them in source control.
+  lifecycle {
+    ignore_changes = [tags]
+  }
 }
 
 resource "aws_iam_policy" "github_sync_operator" {
@@ -263,6 +347,18 @@ resource "aws_iam_user_policy" "github_sync_operator_self_mfa" {
           "iam:GetUser",
           "iam:ListMFADevices",
           "iam:ResyncMFADevice",
+        ]
+        Resource = "arn:aws:iam::*:user/$${aws:username}"
+      },
+      {
+        Sid    = "ReadOwnSecurityCredentials"
+        Effect = "Allow"
+        Action = [
+          "iam:GetLoginProfile",
+          "iam:ListAccessKeys",
+          "iam:ListServiceSpecificCredentials",
+          "iam:ListSigningCertificates",
+          "iam:ListSSHPublicKeys",
         ]
         Resource = "arn:aws:iam::*:user/$${aws:username}"
       },

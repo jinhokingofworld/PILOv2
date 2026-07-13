@@ -112,6 +112,30 @@ variable "ai_worker_desired_count" {
   default     = 1
 }
 
+variable "legacy_meeting_drain_enabled" {
+  description = "Keep the shared AI worker's MeetingReport processor enabled until the legacy ai-jobs queue is drained."
+  type        = bool
+  default     = true
+}
+
+variable "legacy_agent_drain_enabled" {
+  description = "Keep Agent processing in shared ai-worker until legacy ai-jobs messages are drained."
+  type        = bool
+  default     = true
+}
+
+variable "agent_worker_desired_count" {
+  description = "Dev Agent worker task count."
+  type        = number
+  default     = 1
+}
+
+variable "meeting_worker_desired_count" {
+  description = "Dev MeetingReport-only worker task count."
+  type        = number
+  default     = 1
+}
+
 variable "pr_review_ai_worker_desired_count" {
   description = "Dev PR Review AI worker task count. Keep one worker running while PR Review analysis is enabled."
   type        = number

@@ -36,6 +36,7 @@ from app.meeting_report_processor import (
     MeetingReportProcessor,
     PermanentStorageError,
     ProviderBusinessError,
+    TranscriptSegment,
     parse_generated_report_json,
     serialize_action_items,
 )
@@ -43,7 +44,7 @@ from app.meeting_report_processor import (
 LOGGER = logging.getLogger(__name__)
 
 DEFAULT_DATABASE_URL = "postgresql://pilo:pilo@localhost:5432/pilo"
-DEFAULT_STT_MODEL = "gpt-4o-mini-transcribe"
+DEFAULT_STT_MODEL = "whisper-1"
 DEFAULT_MEETING_REPORT_MODEL = "gpt-5.4-mini"
 DEFAULT_WAIT_TIME_SECONDS = 20
 DEFAULT_VISIBILITY_TIMEOUT_SECONDS = 900
@@ -229,8 +230,9 @@ class PgMeetingReportRepository:
         )
 
     def mark_completed(self, report_id: str, report: GeneratedMeetingReport) -> None:
-        self.connection.execute(
-            """
+        with self.connection.transaction():
+            updated = self.connection.execute(
+                """
             UPDATE meeting_reports
             SET
               status = 'COMPLETED',
@@ -245,15 +247,57 @@ class PgMeetingReportRepository:
             WHERE id = %s
               AND status IN ('PROCESSING', 'QUEUED', 'TRANSCRIBING', 'SUMMARIZING')
             """,
-            (
-                report.transcript_text,
-                report.summary,
-                report.discussion_points,
-                report.decisions,
-                serialize_action_items(report.action_item_candidates),
-                report_id,
-            ),
-        )
+                (
+                    report.transcript_text,
+                    report.summary,
+                    report.discussion_points,
+                    report.decisions,
+                    serialize_action_items(report.action_item_candidates),
+                    report_id,
+                ),
+            )
+            if updated.rowcount != 1:
+                return
+            self.connection.execute(
+                "DELETE FROM meeting_report_transcript_segments WHERE meeting_report_id = %s",
+                (report_id,),
+            )
+            segment_ids: dict[int, str] = {}
+            for segment in report.transcript_segments:
+                row = self.connection.execute(
+                    """
+                    INSERT INTO meeting_report_transcript_segments
+                      (meeting_report_id, segment_index, started_at_ms, ended_at_ms, text)
+                    VALUES (%s, %s, %s, %s, %s)
+                    RETURNING id
+                    """,
+                    (
+                        report_id,
+                        segment.segment_index,
+                        segment.started_at_ms,
+                        segment.ended_at_ms,
+                        segment.text,
+                    ),
+                ).fetchone()
+                segment_ids[segment.segment_index] = str(row["id"])
+            for evidence in report.evidence:
+                for segment_index in evidence.segment_indexes:
+                    self.connection.execute(
+                        """
+                        INSERT INTO meeting_report_evidence
+                          (meeting_report_id, source_type, source_index, transcript_segment_id)
+                        VALUES (%s, %s, %s, %s)
+                        ON CONFLICT (
+                          meeting_report_id, source_type, source_index, transcript_segment_id
+                        ) DO NOTHING
+                        """,
+                        (
+                            report_id,
+                            evidence.source_type,
+                            evidence.source_index,
+                            segment_ids[segment_index],
+                        ),
+                    )
 
 
 class PgAgentRunRepository:
@@ -592,33 +636,50 @@ class OpenAiMeetingReportClient:
     def __init__(self, api_key: str, stt_model: str, meeting_report_model: str) -> None:
         from openai import OpenAI
 
+        if stt_model != "whisper-1":
+            raise RuntimeError(
+                "OPENAI_STT_MODEL must be whisper-1 for timestamped MeetingReport evidence"
+            )
         self.client = OpenAI(api_key=api_key)
         self.stt_model = stt_model
         self.meeting_report_model = meeting_report_model
 
-    def transcribe(self, audio_file_path: str) -> str:
+    def transcribe(self, audio_file_path: str) -> list[TranscriptSegment]:
         try:
             with open(audio_file_path, "rb") as audio_file:
                 transcription = self.client.audio.transcriptions.create(
                     model=self.stt_model,
                     file=audio_file,
-                    response_format="json",
+                    response_format="verbose_json",
+                    timestamp_granularities=["segment"],
                 )
         except _openai_retryable_errors() as error:
             raise InfrastructureError("OpenAI STT retryable failure") from error
         except Exception as error:
             raise ProviderBusinessError("OpenAI STT business failure") from error
 
-        if isinstance(transcription, str):
-            return transcription
+        raw_segments = getattr(transcription, "segments", None)
+        if not isinstance(raw_segments, list) or not raw_segments:
+            raise ProviderBusinessError("OpenAI STT returned no timestamped segments")
+        segments: list[TranscriptSegment] = []
+        for index, segment in enumerate(raw_segments):
+            text = getattr(segment, "text", None)
+            start = getattr(segment, "start", None)
+            end = getattr(segment, "end", None)
+            if (
+                not isinstance(text, str)
+                or not isinstance(start, int | float)
+                or not isinstance(end, int | float)
+            ):
+                raise ProviderBusinessError("OpenAI STT returned invalid segment")
+            segments.append(
+                TranscriptSegment(index, round(start * 1000), round(end * 1000), text.strip())
+            )
+        return segments
 
-        text = getattr(transcription, "text", None)
-        if isinstance(text, str):
-            return text
-
-        raise ProviderBusinessError("OpenAI STT returned no text")
-
-    def generate_report(self, transcript_text: str) -> GeneratedMeetingReport:
+    def generate_report(
+        self, transcript_text: str, transcript_segments: list[TranscriptSegment]
+    ) -> GeneratedMeetingReport:
         try:
             response = self.client.responses.create(
                 model=self.meeting_report_model,
@@ -629,7 +690,10 @@ class OpenAiMeetingReportClient:
                     },
                     {
                         "role": "user",
-                        "content": transcript_text,
+                        "content": "\n".join(
+                            f"[{segment.segment_index}] {segment.text}"
+                            for segment in transcript_segments
+                        ),
                     },
                 ],
                 text={
@@ -653,7 +717,7 @@ class OpenAiMeetingReportClient:
         if not output_text:
             raise ProviderBusinessError("OpenAI LLM returned no text")
 
-        return parse_generated_report_json(output_text, transcript_text)
+        return parse_generated_report_json(output_text, transcript_text, transcript_segments)
 
 
 class SqsAiJobWorker:
@@ -1160,6 +1224,7 @@ def _meeting_report_schema() -> dict[str, object]:
             "discussionPoints",
             "decisions",
             "actionItemCandidates",
+            "evidence",
         ],
         "properties": {
             "summary": {"type": "string"},
@@ -1183,6 +1248,25 @@ def _meeting_report_schema() -> dict[str, object]:
                         "priority": {
                             "type": "string",
                             "enum": ["LOW", "MEDIUM", "HIGH"],
+                        },
+                    },
+                },
+            },
+            "evidence": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["sourceType", "sourceIndex", "segmentIndexes"],
+                    "properties": {
+                        "sourceType": {
+                            "type": "string",
+                            "enum": ["summary", "discussion", "decision", "action_item"],
+                        },
+                        "sourceIndex": {"type": "integer", "minimum": 0},
+                        "segmentIndexes": {
+                            "type": "array",
+                            "items": {"type": "integer", "minimum": 0},
                         },
                     },
                 },

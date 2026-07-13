@@ -28,6 +28,25 @@ variable "sqs_queue_arns" {
   type = list(string)
 }
 
+variable "ai_worker_queue_arns" {
+  description = "Queues consumed by the shared Agent and Canvas AI worker."
+  type        = list(string)
+}
+
+variable "agent_worker_queue_arns" {
+  type = list(string)
+}
+
+variable "meeting_worker_queue_arns" {
+  description = "Queues consumed by the MeetingReport-only worker."
+  type        = list(string)
+}
+
+variable "pr_review_ai_worker_queue_arns" {
+  description = "Queues consumed by the PR Review-only worker."
+  type        = list(string)
+}
+
 variable "github_sync_worker_queue_arns" {
   type = list(string)
 }

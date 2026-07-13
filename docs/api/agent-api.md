@@ -640,6 +640,10 @@ Status code: `200 OK`
   App Server가 같은 Workspace의 현재 event를 조회해 만든다. planner가 작성한 현재값은 신뢰하지 않는다.
 - `eventId` 또는 `changes`가 없으면 현재 run은 `needs_clarification`으로 완료하며, 다른 event를
   자동 선택하지 않는다.
+- Calendar 상대 날짜 조회는 run의 `currentDate`와 사용자 timezone을 기준으로 계산한다.
+  `이번 주말`은 현재 날짜에서 아직 완전히 지나지 않은 가장 가까운 토요일·일요일이며, 토요일에는
+  당일을 포함하고 일요일에는 다음 주말을 사용한다. `다음 주 월요일`은 바로 다가오는 월요일,
+  `다다음 주 화요일`은 바로 다가오는 화요일보다 한 주 뒤의 화요일로 해석한다.
 - 시간 지정 일정에서 `endTime`이 없으면 Calendar API의 `startTime + 1시간` 정규화를 따른다.
 - `list_calendar_events`는 날짜 범위만 지원한다. 제목·키워드·참석자·현재 시각 조건을 요청하면
   해당 조건을 무시하고 조회하지 않으며, 현재 Agent 범위에서 지원하지 않는다고 안내한다.

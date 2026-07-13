@@ -4,8 +4,10 @@ import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
+const { NestFactory } = require("@nestjs/core");
 const { GithubSyncRunService } = require("../../dist/modules/github-integration/github-sync-run.service.js");
 const { GithubSyncJobService } = require("../../dist/modules/github-integration/github-sync-job.service.js");
+const { GithubSyncWorkerModule } = require("../../dist/modules/github-integration/github-sync-worker.module.js");
 const { GithubSyncObservabilityService } = require("../../dist/modules/github-integration/github-sync-observability.service.js");
 const { GithubProjectV2PollingService } = require("../../dist/modules/github-integration/github-project-v2-polling.service.js");
 const { GithubAppClient, GithubGraphqlRateLimitError } = require("../../dist/modules/github-integration/github-app.client.js");
@@ -143,6 +145,7 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
     "GithubAppClient",
     "GithubProjectV2PollingService",
     "GithubProjectV2SyncTokenService",
+    "GithubOAuthConnectionService",
     "GithubTokenEncryptionService"
   ]) {
     assert.match(workerModule, new RegExp(provider));
@@ -160,6 +163,22 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
     "GithubIntegrationModule"
   ]) {
     assert.doesNotMatch(workerModule, new RegExp(excludedModule));
+  }
+}
+
+{
+  const previousAppEnv = process.env.APP_ENV;
+  process.env.APP_ENV = "test";
+  const app = await NestFactory.createApplicationContext(GithubSyncWorkerModule, { logger: false });
+  try {
+    assert.ok(app.get(GithubSyncJobService), "GitHub sync worker must bootstrap its job service");
+  } finally {
+    await app.close();
+    if (previousAppEnv === undefined) {
+      delete process.env.APP_ENV;
+    } else {
+      process.env.APP_ENV = previousAppEnv;
+    }
   }
 }
 

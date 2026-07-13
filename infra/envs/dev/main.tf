@@ -126,6 +126,10 @@ module "iam" {
   ecr_repository_arns                = module.ecr.repository_arns
   s3_bucket_arns                     = [module.s3.frontend_bucket_arn, module.s3.uploads_bucket_arn]
   sqs_queue_arns                     = module.sqs.queue_arns
+  ai_worker_queue_arns               = [module.sqs.ai_jobs_queue_arn]
+  agent_worker_queue_arns            = [module.sqs.agent_jobs_queue_arn]
+  meeting_worker_queue_arns          = [module.sqs.meeting_jobs_queue_arn]
+  pr_review_ai_worker_queue_arns     = [module.sqs.pr_review_analysis_queue_arn]
   github_sync_worker_queue_arns      = module.sqs.github_sync_worker_queue_arns
   github_webhooks_queue_arn          = module.sqs.github_webhooks_queue_arn
   github_sync_operator_user_name     = "pilo-juhyung-github-ops"
@@ -197,6 +201,8 @@ module "ecs" {
         DATABASE_SSL                     = "true"
         S3_UPLOADS_BUCKET                = module.s3.uploads_bucket_name
         SQS_AI_JOBS_QUEUE_URL            = module.sqs.ai_jobs_queue_url
+        SQS_AGENT_JOBS_QUEUE_URL         = module.sqs.agent_jobs_queue_url
+        SQS_MEETING_JOBS_QUEUE_URL       = module.sqs.meeting_jobs_queue_url
         SQS_PR_REVIEW_ANALYSIS_QUEUE_URL = module.sqs.pr_review_analysis_queue_url
         SQS_GITHUB_WEBHOOKS_QUEUE_URL    = module.sqs.github_webhooks_queue_url
         SQS_GITHUB_SYNC_JOBS_QUEUE_URL   = module.sqs.github_sync_jobs_queue_url
@@ -236,27 +242,84 @@ module "ecs" {
       memory             = var.ai_worker_memory
       desired_count      = var.ai_worker_desired_count
       container_port     = null
+      command            = ["python", "-m", "app.shared_ai_worker_runtime"]
       security_group_ids = [module.security_groups.ai_worker_security_group_id]
       task_role_arn      = module.iam.ai_worker_task_role_arn
       target_group_arn   = null
-      environment = {
-        APP_ENV                                 = var.environment
-        AWS_REGION                              = var.aws_region
-        DATABASE_SSL                            = "true"
-        S3_UPLOADS_BUCKET                       = module.s3.uploads_bucket_name
-        S3_RECORDINGS_BUCKET                    = module.s3.uploads_bucket_name
-        SQS_AI_JOBS_QUEUE_URL                   = module.sqs.ai_jobs_queue_url
-        SQS_GITHUB_WEBHOOKS_QUEUE_URL           = module.sqs.github_webhooks_queue_url
+      environment = merge({
+        APP_ENV                         = var.environment
+        AWS_REGION                      = var.aws_region
+        DATABASE_SSL                    = "true"
+        S3_UPLOADS_BUCKET               = module.s3.uploads_bucket_name
+        SQS_AI_JOBS_QUEUE_URL           = module.sqs.ai_jobs_queue_url
+        SQS_GITHUB_WEBHOOKS_QUEUE_URL   = module.sqs.github_webhooks_queue_url
+        OPENAI_AGENT_PLANNER_TIMEOUT_MS = "60000"
+        LEGACY_MEETING_DRAIN_ENABLED    = tostring(var.legacy_meeting_drain_enabled)
+        LEGACY_AGENT_DRAIN_ENABLED      = tostring(var.legacy_agent_drain_enabled)
+        }, var.legacy_meeting_drain_enabled ? {
+        S3_RECORDINGS_BUCKET                 = module.s3.uploads_bucket_name
+        MEETING_REPORT_EVENT_BASE_URL        = local.api_domain == "" ? "http://${module.alb.alb_dns_name}" : "https://${local.api_domain}"
+        MEETING_REPORT_EVENT_TIMEOUT_SECONDS = "10"
+        MEETING_REPORT_EVENT_MAX_ATTEMPTS    = "3"
+        OPENAI_STT_MODEL                     = "whisper-1"
+        OPENAI_MEETING_REPORT_MODEL          = "gpt-5.4-mini"
+        } : {}, var.legacy_agent_drain_enabled ? {
         AGENT_EXECUTION_HANDOFF_BASE_URL        = local.api_domain == "" ? "http://${module.alb.alb_dns_name}" : "https://${local.api_domain}"
         AGENT_EXECUTION_HANDOFF_TIMEOUT_SECONDS = "10"
-        MEETING_REPORT_EVENT_BASE_URL           = local.api_domain == "" ? "http://${module.alb.alb_dns_name}" : "https://${local.api_domain}"
-        MEETING_REPORT_EVENT_TIMEOUT_SECONDS    = "10"
-        MEETING_REPORT_EVENT_MAX_ATTEMPTS       = "3"
-        OPENAI_STT_MODEL                        = "gpt-4o-mini-transcribe"
-        OPENAI_MEETING_REPORT_MODEL             = "gpt-5.4-mini"
-        OPENAI_AGENT_PLANNER_TIMEOUT_MS         = "60000"
+      } : {})
+      secrets = merge(
+        var.legacy_meeting_drain_enabled ? module.secrets.ai_worker_legacy_meeting_drain_ecs_secrets : module.secrets.ai_worker_ecs_secrets,
+        var.legacy_agent_drain_enabled ? { AGENT_EXECUTION_HANDOFF_TOKEN = module.secrets.agent_worker_ecs_secrets["AGENT_EXECUTION_HANDOFF_TOKEN"] } : {},
+      )
+    }
+
+    agent-worker = {
+      image              = "${module.ecr.repository_urls["pilo-ai-worker"]}:latest"
+      cpu                = var.ai_worker_cpu
+      memory             = var.ai_worker_memory
+      desired_count      = var.agent_worker_desired_count
+      container_port     = null
+      command            = ["python", "-m", "app.agent_worker_runtime"]
+      security_group_ids = [module.security_groups.ai_worker_security_group_id]
+      task_role_arn      = module.iam.agent_worker_task_role_arn
+      target_group_arn   = null
+      environment = {
+        APP_ENV                                  = var.environment
+        AWS_REGION                               = var.aws_region
+        DATABASE_SSL                             = "true"
+        SQS_AGENT_JOBS_QUEUE_URL                 = module.sqs.agent_jobs_queue_url
+        AGENT_EXECUTION_HANDOFF_BASE_URL         = local.api_domain == "" ? "http://${module.alb.alb_dns_name}" : "https://${local.api_domain}"
+        AGENT_EXECUTION_HANDOFF_TIMEOUT_SECONDS  = "10"
+        OPENAI_AGENT_PLANNER_TIMEOUT_MS          = "60000"
+        AI_WORKER_SQS_VISIBILITY_TIMEOUT_SECONDS = "900"
       }
-      secrets = module.secrets.ai_worker_ecs_secrets
+      secrets = module.secrets.agent_worker_ecs_secrets
+    }
+
+    meeting-worker = {
+      image              = "${module.ecr.repository_urls["pilo-ai-worker"]}:latest"
+      cpu                = var.ai_worker_cpu
+      memory             = var.ai_worker_memory
+      desired_count      = var.meeting_worker_desired_count
+      container_port     = null
+      command            = ["python", "-m", "app.meeting_worker_runtime"]
+      security_group_ids = [module.security_groups.ai_worker_security_group_id]
+      task_role_arn      = module.iam.meeting_worker_task_role_arn
+      target_group_arn   = null
+      environment = {
+        APP_ENV                                  = var.environment
+        AWS_REGION                               = var.aws_region
+        DATABASE_SSL                             = "true"
+        S3_RECORDINGS_BUCKET                     = module.s3.uploads_bucket_name
+        SQS_MEETING_JOBS_QUEUE_URL               = module.sqs.meeting_jobs_queue_url
+        MEETING_REPORT_EVENT_BASE_URL            = local.api_domain == "" ? "http://${module.alb.alb_dns_name}" : "https://${local.api_domain}"
+        MEETING_REPORT_EVENT_TIMEOUT_SECONDS     = "10"
+        MEETING_REPORT_EVENT_MAX_ATTEMPTS        = "3"
+        OPENAI_STT_MODEL                         = "whisper-1"
+        OPENAI_MEETING_REPORT_MODEL              = "gpt-5.4-mini"
+        AI_WORKER_SQS_VISIBILITY_TIMEOUT_SECONDS = "900"
+      }
+      secrets = module.secrets.meeting_worker_ecs_secrets
     }
 
     pr-review-ai-worker = {
@@ -267,7 +330,7 @@ module "ecs" {
       container_port     = null
       command            = ["python", "-m", "app.pr_review_analysis_runtime"]
       security_group_ids = [module.security_groups.ai_worker_security_group_id]
-      task_role_arn      = module.iam.ai_worker_task_role_arn
+      task_role_arn      = module.iam.pr_review_ai_worker_task_role_arn
       target_group_arn   = null
       environment = {
         APP_ENV                                    = var.environment
@@ -309,6 +372,22 @@ module "github_sync_observability" {
   source = "../../modules/github-sync-observability"
 
   depends_on = [module.ecs]
+
+  name_prefix = local.name_prefix
+}
+
+module "meeting_observability" {
+  source = "../../modules/meeting-observability"
+
+  depends_on = [module.ecs, module.sqs]
+
+  name_prefix = local.name_prefix
+}
+
+module "agent_observability" {
+  source = "../../modules/agent-observability"
+
+  depends_on = [module.ecs, module.sqs]
 
   name_prefix = local.name_prefix
 }

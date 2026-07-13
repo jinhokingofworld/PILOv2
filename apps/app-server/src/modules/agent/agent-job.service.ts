@@ -86,7 +86,7 @@ export class AgentJobService implements OnModuleDestroy {
   private getConfig(): AgentJobConfig {
     return {
       awsRegion: this.requireConfig(process.env.AWS_REGION),
-      queueUrl: this.requireConfig(process.env.SQS_AI_JOBS_QUEUE_URL),
+      queueUrl: this.requireConfig(process.env.SQS_AGENT_JOBS_QUEUE_URL),
       endpoint: this.optionalConfig(process.env.SQS_ENDPOINT)
     };
   }

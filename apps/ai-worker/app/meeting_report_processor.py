@@ -54,12 +54,29 @@ class ActionItemCandidate:
 
 
 @dataclass(frozen=True)
+class TranscriptSegment:
+    segment_index: int
+    started_at_ms: int
+    ended_at_ms: int
+    text: str
+
+
+@dataclass(frozen=True)
+class EvidenceReference:
+    source_type: str
+    source_index: int
+    segment_indexes: list[int]
+
+
+@dataclass(frozen=True)
 class GeneratedMeetingReport:
     transcript_text: str
     summary: str
     discussion_points: str
     decisions: str
     action_item_candidates: list[ActionItemCandidate]
+    transcript_segments: list[TranscriptSegment]
+    evidence: list[EvidenceReference]
 
 
 @dataclass(frozen=True)
@@ -102,9 +119,11 @@ class RecordingStorage(Protocol):
 
 
 class MeetingReportAiClient(Protocol):
-    def transcribe(self, audio_file_path: str) -> str: ...
+    def transcribe(self, audio_file_path: str) -> list[TranscriptSegment]: ...
 
-    def generate_report(self, transcript_text: str) -> GeneratedMeetingReport: ...
+    def generate_report(
+        self, transcript_text: str, transcript_segments: list[TranscriptSegment]
+    ) -> GeneratedMeetingReport: ...
 
 
 class MeetingReportEventPublisher(Protocol):
@@ -244,7 +263,7 @@ class MeetingReportProcessor:
                 return self._result(job, delete_message=True, reason="audio_unavailable")
 
             try:
-                transcript_text = self.ai_client.transcribe(downloaded_path)
+                transcript_segments = self.ai_client.transcribe(downloaded_path)
             except ProviderBusinessError:
                 self.repository.mark_failed(
                     job.report_id,
@@ -258,7 +277,8 @@ class MeetingReportProcessor:
             self._publish_report_updated(job.report_id)
 
             try:
-                report = self.ai_client.generate_report(transcript_text)
+                transcript_text = "\n".join(segment.text for segment in transcript_segments)
+                report = self.ai_client.generate_report(transcript_text, transcript_segments)
             except ProviderBusinessError:
                 self.repository.mark_failed(
                     job.report_id,
@@ -294,7 +314,9 @@ class MeetingReportProcessor:
         )
 
 
-def parse_generated_report_json(raw_text: str, transcript_text: str) -> GeneratedMeetingReport:
+def parse_generated_report_json(
+    raw_text: str, transcript_text: str, transcript_segments: list[TranscriptSegment]
+) -> GeneratedMeetingReport:
     try:
         payload = json.loads(raw_text)
     except json.JSONDecodeError as error:
@@ -312,6 +334,7 @@ def parse_generated_report_json(raw_text: str, transcript_text: str) -> Generate
         raise ProviderBusinessError("Invalid action item candidates")
 
     action_items = [_parse_action_item(item) for item in raw_action_items]
+    evidence = _parse_evidence(payload.get("evidence"), transcript_segments, len(action_items))
 
     return GeneratedMeetingReport(
         transcript_text=transcript_text,
@@ -319,6 +342,8 @@ def parse_generated_report_json(raw_text: str, transcript_text: str) -> Generate
         discussion_points=discussion_points,
         decisions=decisions,
         action_item_candidates=action_items,
+        transcript_segments=transcript_segments,
+        evidence=evidence,
     )
 
 
@@ -356,6 +381,53 @@ def _parse_action_item(value: object) -> ActionItemCandidate:
         assignee_user_id=None,
         priority=priority,
     )
+
+
+def _parse_evidence(
+    value: object, segments: list[TranscriptSegment], action_item_count: int
+) -> list[EvidenceReference]:
+    if not isinstance(value, list):
+        raise ProviderBusinessError("Invalid evidence")
+    valid_indexes = {segment.segment_index for segment in segments}
+    segment_indexes_by_source: dict[tuple[str, int], list[int]] = {}
+    for item in value:
+        if not isinstance(item, dict):
+            raise ProviderBusinessError("Invalid evidence reference")
+        source_type = _require_payload_string(item, "sourceType")
+        source_index = item.get("sourceIndex")
+        segment_indexes = item.get("segmentIndexes")
+        if (
+            source_type not in {"summary", "discussion", "decision", "action_item"}
+            or not isinstance(source_index, int)
+            or not isinstance(segment_indexes, list)
+        ):
+            raise ProviderBusinessError("Invalid evidence reference")
+        if source_type == "action_item" and not 0 <= source_index < action_item_count:
+            raise ProviderBusinessError("Invalid action item evidence")
+        if not all(isinstance(index, int) and index in valid_indexes for index in segment_indexes):
+            raise ProviderBusinessError("Invalid evidence segment")
+        if source_type in {"decision", "action_item"} and not segment_indexes:
+            raise ProviderBusinessError("Missing required evidence")
+        source = (source_type, source_index)
+        unique_segment_indexes = segment_indexes_by_source.setdefault(source, [])
+        for segment_index in segment_indexes:
+            if segment_index not in unique_segment_indexes:
+                unique_segment_indexes.append(segment_index)
+    references = [
+        EvidenceReference(source_type, source_index, segment_indexes)
+        for (source_type, source_index), segment_indexes in segment_indexes_by_source.items()
+    ]
+    required_sources = {("decision", 0)} | {
+        ("action_item", index) for index in range(action_item_count)
+    }
+    provided_sources = {
+        (reference.source_type, reference.source_index)
+        for reference in references
+        if reference.segment_indexes
+    }
+    if not required_sources.issubset(provided_sources):
+        raise ProviderBusinessError("Missing required evidence")
+    return references
 
 
 def _require_string(payload: dict[str, object], key: str) -> str:

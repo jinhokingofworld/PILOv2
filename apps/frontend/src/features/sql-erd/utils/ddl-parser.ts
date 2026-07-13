@@ -15,6 +15,7 @@ import {
   createSqltoerdSourceMap,
   type SqltoerdSourceMap
 } from "@/features/sql-erd/utils/sql-source-map";
+import { createSqltoerdForeignKeyRelationId } from "@/features/sql-erd/utils/relation-id";
 
 const { Parser } = sqlParser;
 
@@ -799,13 +800,12 @@ function createRelationId(
   toTable: ErdTable,
   toColumns: ErdColumn[]
 ) {
-  return [
-    "relation",
-    getTableIdPart(fromTable),
-    fromColumns.map((column) => column.name).join("_"),
-    getTableIdPart(toTable),
-    toColumns.map((column) => column.name).join("_")
-  ].join(".");
+  return createSqltoerdForeignKeyRelationId({
+    fromColumns,
+    fromTable,
+    toColumns,
+    toTable
+  });
 }
 
 function createUniqueConstraintId(table: ErdTable, columns: ErdColumn[]) {

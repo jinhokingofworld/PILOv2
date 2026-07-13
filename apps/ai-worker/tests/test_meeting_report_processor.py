@@ -11,6 +11,7 @@ from app.meeting_report_processor import (
     MeetingReportProcessor,
     PermanentStorageError,
     ProviderBusinessError,
+    TranscriptSegment,
     parse_generated_report_json,
     parse_meeting_report_job,
     serialize_action_items,
@@ -127,13 +128,13 @@ class FakeAiClient:
         self.transcribe_calls: list[str] = []
         self.generate_calls: list[str] = []
 
-    def transcribe(self, audio_file_path: str) -> str:
+    def transcribe(self, audio_file_path: str) -> list[TranscriptSegment]:
         self.transcribe_calls.append(audio_file_path)
         if self.stt_failure:
             raise self.stt_failure
-        return "진호: 회의록 조회 API와 worker 처리를 정리합니다."
+        return [TranscriptSegment(0, 0, 1_000, "진호: 회의록 조회 API와 worker 처리를 정리합니다.")]
 
-    def generate_report(self, transcript_text: str) -> GeneratedMeetingReport:
+    def generate_report(self, transcript_text: str, transcript_segments) -> GeneratedMeetingReport:
         self.generate_calls.append(transcript_text)
         if self.llm_failure:
             raise self.llm_failure
@@ -151,9 +152,14 @@ class FakeAiClient:
                             "priority": "HIGH",
                         }
                     ],
+                    "evidence": [
+                        {"sourceType": "decision", "sourceIndex": 0, "segmentIndexes": [0]},
+                        {"sourceType": "action_item", "sourceIndex": 0, "segmentIndexes": [0]},
+                    ],
                 }
             ),
             transcript_text,
+            transcript_segments,
         )
 
 
@@ -431,10 +437,12 @@ def test_runtime_settings_default_meeting_report_model(monkeypatch) -> None:
     monkeypatch.setenv("SQS_AI_JOBS_QUEUE_URL", "https://sqs.example.com/jobs")
     monkeypatch.setenv("S3_RECORDINGS_BUCKET", "recordings")
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.delenv("OPENAI_STT_MODEL", raising=False)
     monkeypatch.delenv("OPENAI_MEETING_REPORT_MODEL", raising=False)
 
     settings = RuntimeSettings.from_env()
 
+    assert settings.openai_stt_model == "whisper-1"
     assert settings.openai_meeting_report_model == "gpt-5.4-mini"
     assert settings.openai_agent_planner_model == "gpt-5.4-mini"
 
@@ -498,20 +506,21 @@ def test_runtime_settings_requires_database_url_in_deployed_env(monkeypatch) -> 
         RuntimeSettings.from_env()
 
 
-def test_openai_transcribe_uses_json_response_format(tmp_path) -> None:
+def test_openai_transcribe_uses_timestamped_segment_format(tmp_path) -> None:
     audio_path = tmp_path / "recording.m4a"
     audio_path.write_bytes(b"audio")
     transcriptions = FakeOpenAiTranscriptions()
     ai_client = OpenAiMeetingReportClient.__new__(OpenAiMeetingReportClient)
     ai_client.client = SimpleNamespace(audio=SimpleNamespace(transcriptions=transcriptions))
-    ai_client.stt_model = "gpt-4o-mini-transcribe"
+    ai_client.stt_model = "whisper-1"
     ai_client.meeting_report_model = "gpt-5.4-mini"
 
     transcript = ai_client.transcribe(str(audio_path))
 
-    assert transcript == "회의 내용을 정리합니다."
-    assert transcriptions.kwargs["model"] == "gpt-4o-mini-transcribe"
-    assert transcriptions.kwargs["response_format"] == "json"
+    assert transcript == [TranscriptSegment(0, 0, 1_000, "회의 내용을 정리합니다.")]
+    assert transcriptions.kwargs["model"] == "whisper-1"
+    assert transcriptions.kwargs["response_format"] == "verbose_json"
+    assert transcriptions.kwargs["timestamp_granularities"] == ["segment"]
 
 
 class FakeOpenAiTranscriptions:
@@ -520,7 +529,9 @@ class FakeOpenAiTranscriptions:
 
     def create(self, **kwargs):
         self.kwargs = kwargs
-        return SimpleNamespace(text="회의 내용을 정리합니다.")
+        return SimpleNamespace(
+            segments=[SimpleNamespace(start=0, end=1, text="회의 내용을 정리합니다.")]
+        )
 
 
 class FakeS3Client:
@@ -578,9 +589,14 @@ def test_serialize_action_items_uses_api_shape() -> None:
                         "priority": "MEDIUM",
                     }
                 ],
+                "evidence": [
+                    {"sourceType": "decision", "sourceIndex": 0, "segmentIndexes": [0]},
+                    {"sourceType": "action_item", "sourceIndex": 0, "segmentIndexes": [0]},
+                ],
             }
         ),
         "원문",
+        [TranscriptSegment(0, 0, 1_000, "원문")],
     )
 
     assert json.loads(serialize_action_items(report.action_item_candidates)) == [
@@ -590,4 +606,38 @@ def test_serialize_action_items_uses_api_shape() -> None:
             "assigneeUserId": None,
             "priority": "MEDIUM",
         }
+    ]
+
+
+def test_parse_generated_report_json_deduplicates_evidence_segments() -> None:
+    report = parse_generated_report_json(
+        json.dumps(
+            {
+                "summary": "요약",
+                "discussionPoints": "논의",
+                "decisions": "결정",
+                "actionItemCandidates": [
+                    {
+                        "title": "작업",
+                        "description": "설명",
+                        "assigneeUserId": None,
+                        "priority": "MEDIUM",
+                    }
+                ],
+                "evidence": [
+                    {"sourceType": "decision", "sourceIndex": 0, "segmentIndexes": [0, 0]},
+                    {"sourceType": "action_item", "sourceIndex": 0, "segmentIndexes": [0]},
+                    {"sourceType": "action_item", "sourceIndex": 0, "segmentIndexes": [0]},
+                ],
+            }
+        ),
+        "원문",
+        [TranscriptSegment(0, 0, 1_000, "원문")],
+    )
+
+    assert [
+        (item.source_type, item.source_index, item.segment_indexes) for item in report.evidence
+    ] == [
+        ("decision", 0, [0]),
+        ("action_item", 0, [0]),
     ]
