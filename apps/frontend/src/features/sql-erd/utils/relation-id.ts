@@ -85,7 +85,9 @@ function isSafeLegacyRelationId(
     input.fromColumns.length === 1 &&
     input.toColumns.length === 1 &&
     !input.fromTable.name.includes(".") &&
-    !input.toTable.name.includes(".")
+    !input.toTable.name.includes(".") &&
+    !input.fromColumns[0].name.includes(".") &&
+    !input.toColumns[0].name.includes(".")
   );
 }
 

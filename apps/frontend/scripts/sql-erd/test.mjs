@@ -1041,6 +1041,92 @@ assert.deepEqual(
     .sort()
 );
 
+const dottedColumnRelationIdCollisionModel = {
+  version: 1,
+  schema: {
+    tables: [
+      {
+        id: "table.orders",
+        name: "orders",
+        schemaName: null,
+        columns: [
+          createRuntimeTestColumn("user.id", "user.id"),
+          createRuntimeTestColumn("user", "user")
+        ],
+        constraints: [],
+        comment: null
+      },
+      {
+        id: "table.users",
+        name: "users",
+        schemaName: null,
+        columns: [
+          createRuntimeTestColumn("id", "id", { primaryKey: true })
+        ],
+        constraints: [
+          {
+            id: "constraint.users.pk",
+            kind: "primary_key",
+            columnIds: ["id"],
+            name: null
+          }
+        ],
+        comment: null
+      },
+      {
+        id: "table.id",
+        name: "id",
+        schemaName: null,
+        columns: [
+          createRuntimeTestColumn("users.id", "users.id", {
+            primaryKey: true
+          })
+        ],
+        constraints: [
+          {
+            id: "constraint.id.users.id.pk",
+            kind: "primary_key",
+            columnIds: ["users.id"],
+            name: null
+          }
+        ],
+        comment: null
+      }
+    ],
+    relations: [
+      {
+        constraintName: null,
+        fromColumnIds: ["user.id"],
+        fromTableId: "table.orders",
+        id: "relation.orders.user.id.users.id",
+        kind: "foreign_key",
+        toColumnIds: ["id"],
+        toTableId: "table.users"
+      }
+    ]
+  }
+};
+const dottedColumnRelationIdCandidate =
+  foreignKeyAddRuntime.createSqlErdForeignKeyAddCandidate({
+    dialect: "postgresql",
+    fromColumnId: "user",
+    fromTableId: "table.orders",
+    modelJson: dottedColumnRelationIdCollisionModel,
+    toColumnId: "users.id",
+    toTableId: "table.id"
+  });
+
+assert.equal(dottedColumnRelationIdCandidate.ok, true);
+assert.equal(
+  new Set(
+    dottedColumnRelationIdCandidate.modelJson.schema.relations.map(
+      (relation) => relation.id
+    )
+  ).size,
+  dottedColumnRelationIdCandidate.modelJson.schema.relations.length
+);
+assert.match(dottedColumnRelationIdCandidate.relation.id, /^relation\.v2\./);
+
 const longRelationIdentifierModel = structuredClone(runtimeModel);
 const longTableName = "t".repeat(62);
 const longColumnName = "c".repeat(62);
