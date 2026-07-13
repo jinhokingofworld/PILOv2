@@ -1,8 +1,10 @@
 # Agent queue 운영
 
 Agent job은 `agent-jobs`와 `agent-worker`에서만 처리한다. 전용 queue의 visibility
-timeout은 900초이고, 3회 실패한 message는 `agent-jobs-dlq`로 보낸다. worker는 한 번에
-하나의 SQS message만 받아 처리한다.
+timeout은 900초이고 worker는 한 번에 하나의 SQS message만 받아 처리한다. retryable
+planner infrastructure failure는 세 번째 receive에서 Agent run을 safe failed로
+terminalize한 뒤 source message를 삭제한다. 이 terminalization 자체가 실패하거나 Agent
+processor가 없어서 삭제하지 못한 message만 재시도 뒤 `agent-jobs-dlq`로 보존한다.
 
 ## Cutover
 
