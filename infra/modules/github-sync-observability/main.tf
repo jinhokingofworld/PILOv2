@@ -71,43 +71,43 @@ locals {
   }
 
   operation_alarms = {
-    retry_warning                     = {
+    retry_warning = {
       metric_name         = "RetryCount"
       statistic           = "Sum"
       comparison_operator = "GreaterThanOrEqualToThreshold"
       threshold           = 5
     }
-    retry_critical                    = {
+    retry_critical = {
       metric_name         = "RetryCount"
       statistic           = "Sum"
       comparison_operator = "GreaterThanOrEqualToThreshold"
       threshold           = 20
     }
-    terminal_failure_warning          = {
+    terminal_failure_warning = {
       metric_name         = "TerminalFailureCount"
       statistic           = "Sum"
       comparison_operator = "GreaterThanOrEqualToThreshold"
       threshold           = 1
     }
-    terminal_failure_critical         = {
+    terminal_failure_critical = {
       metric_name         = "TerminalFailureCount"
       statistic           = "Sum"
       comparison_operator = "GreaterThanOrEqualToThreshold"
       threshold           = 5
     }
-    rate_limit_remaining_warning      = {
+    rate_limit_remaining_warning = {
       metric_name         = "RateLimitRemaining"
       statistic           = "Minimum"
       comparison_operator = "LessThanOrEqualToThreshold"
       threshold           = 100
     }
-    rate_limit_remaining_critical     = {
+    rate_limit_remaining_critical = {
       metric_name         = "RateLimitRemaining"
       statistic           = "Minimum"
       comparison_operator = "LessThanOrEqualToThreshold"
       threshold           = 0
     }
-    database_pool_exhausted_warning   = {
+    database_pool_exhausted_warning = {
       metric_name         = "DatabasePoolExhaustedCount"
       statistic           = "Sum"
       comparison_operator = "GreaterThanOrEqualToThreshold"
