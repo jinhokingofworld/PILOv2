@@ -10,6 +10,7 @@ Canvas Agent contract: `docs/api/canvas-agent-api.md`
 
 - 자유형 Workspace canvas
 - PR Review room에 연결된 Review Canvas의 제한적 HTTP 조회·shape operation
+- PR Review 시스템 shape type과 사용자 mutation 보호
 - shape 생성, 이동, 수정, 삭제
 - viewport 상태
 - shape `contentHash`, `revision`, viewport bounds 기반 조회
@@ -35,5 +36,8 @@ Canvas Agent contract: `docs/api/canvas-agent-api.md`
 - Canvas 목록·생성·Agent는 계속 `freeform` 전용이다.
 - 연결된 Review Canvas는 active room에서만 수정할 수 있고 completed room에서는 읽기만 가능하다.
 - PR Review 화면용 graph와 시스템 node metadata의 source of truth는 PR Review 모듈이다.
-- Review Canvas realtime과 전용 Custom Shape는 아직 이 모듈 범위에 포함하지 않는다.
+- Review Canvas realtime join/presence는 아직 이 모듈 범위에 포함하지 않는다.
+- `pr_review_file_node`는 geometry만 사용자 변경을 허용하고,
+  `pr_review_relation_edge`는 사용자 mutation을 허용하지 않는다.
+- 시스템 shape 생성과 도메인 metadata 갱신은 PR Review materialization이 담당한다.
 - `contentHash`는 서버가 canonical shape content 기준으로 계산한다.

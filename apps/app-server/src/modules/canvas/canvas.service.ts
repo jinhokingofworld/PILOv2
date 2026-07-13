@@ -11,6 +11,11 @@ import { badRequest, notFound } from "../../common/api-error";
 import { DatabaseService } from "../../database/database.service";
 import { WorkspaceService } from "../workspace/workspace.service";
 import { CanvasOperationPublisherService } from "./canvas-operation-publisher.service";
+import {
+  assertUserCanCreateCanvasShape,
+  assertUserCanDeleteCanvasShape,
+  prepareUserCanvasShapeUpdate
+} from "./canvas-review-shape-policy";
 import { computeShapeContentHash } from "./canvas-shape-hash";
 import {
   attachShapeOperationMeta,
@@ -464,6 +469,7 @@ export class CanvasService implements OnModuleDestroy, OnModuleInit {
 
     const id = validateShapeId(input.id);
     const values = validateShapeCreate(input);
+    assertUserCanCreateCanvasShape(values.shapeType);
     const clientOperationId = validateOptionalClientOperationId(
       input.clientOperationId
     );
@@ -624,6 +630,7 @@ export class CanvasService implements OnModuleDestroy, OnModuleInit {
       for (const operation of operations) {
         if (operation.type === "create") {
           const values = validateShapeCreate(operation.payload);
+          assertUserCanCreateCanvasShape(values.shapeType);
           const writeResult = await this.writeShapeOperation<CanvasShapePayload>(
             transaction,
             {
@@ -775,6 +782,11 @@ export class CanvasService implements OnModuleDestroy, OnModuleInit {
                 throw notFound("Canvas shape not found");
               }
 
+              const permittedValues = prepareUserCanvasShapeUpdate(
+                currentShape,
+                values
+              );
+
               await this.assertFreshShapeBaseRevision(transaction, {
                 baseRevision: operation.baseRevision,
                 currentShape,
@@ -782,7 +794,10 @@ export class CanvasService implements OnModuleDestroy, OnModuleInit {
                 workspaceId
               });
 
-              const mergedValues = mergeShapeWriteValues(currentShape, values);
+              const mergedValues = mergeShapeWriteValues(
+                currentShape,
+                permittedValues
+              );
               const contentHash = computeShapeContentHash(mergedValues);
               const shape = await transaction.queryOne<CanvasShapeRow>(
                 `
@@ -886,6 +901,8 @@ export class CanvasService implements OnModuleDestroy, OnModuleInit {
               if (!currentShape) {
                 throw notFound("Canvas shape not found");
               }
+
+              assertUserCanDeleteCanvasShape(currentShape);
 
               await this.assertFreshShapeBaseRevision(transaction, {
                 baseRevision: operation.baseRevision,
@@ -1199,6 +1216,11 @@ export class CanvasService implements OnModuleDestroy, OnModuleInit {
             throw notFound("Canvas shape not found");
           }
 
+          const permittedValues = prepareUserCanvasShapeUpdate(
+            currentShape,
+            values
+          );
+
           await this.assertFreshShapeBaseRevision(transaction, {
             baseRevision,
             currentShape,
@@ -1206,7 +1228,10 @@ export class CanvasService implements OnModuleDestroy, OnModuleInit {
             workspaceId
           });
 
-          const mergedValues = mergeShapeWriteValues(currentShape, values);
+          const mergedValues = mergeShapeWriteValues(
+            currentShape,
+            permittedValues
+          );
           const contentHash = computeShapeContentHash(mergedValues);
 
           const shape = await transaction.queryOne<CanvasShapeRow>(
@@ -1359,6 +1384,8 @@ export class CanvasService implements OnModuleDestroy, OnModuleInit {
           if (!currentShape) {
             throw notFound("Canvas shape not found");
           }
+
+          assertUserCanDeleteCanvasShape(currentShape);
 
           await this.assertFreshShapeBaseRevision(transaction, {
             baseRevision,

@@ -193,12 +193,28 @@ MVP `shapeType`은 DB check constraint 기준으로 아래 값을 지원한다.
 
 ```text
 sticky-note, note, text, frame, draw, highlight, geo, arrow, line, image, video,
-bookmark, embed, pilo-code-block, file_node, group
+bookmark, embed, pilo-code-block, file_node, pr_review_file_node,
+pr_review_relation_edge, group
 ```
 
-`file_node`는 여기서는 일반 자유형 shape type이다. PR Review 시스템 node와 relation은
-아직 `canvas_freeform_shapes`에 저장하지 않는다. 전용 `pr_review_file_node`,
-`pr_review_relation_edge` shape와 필드별 mutation 정책은 별도 계약 변경에서 추가한다.
+`file_node`는 일반 자유형 shape type이다. `pr_review_file_node`와
+`pr_review_relation_edge`는 Review Canvas 전용 시스템 shape다. 일반 Canvas mutation
+API로 두 시스템 shape를 생성하거나 삭제할 수 없으며, PR Review materialization만 생성과
+도메인 metadata 갱신을 담당한다.
+
+`pr_review_file_node`의 사용자 mutation은 아래 geometry 필드만 허용한다.
+
+- `parentShapeId`
+- `x`, `y`
+- `width`, `height`
+- `zIndex`
+- 위 geometry와 일치하는 `rawShape.x`, `rawShape.y`, `rawShape.parentId`,
+  `rawShape.index`, `rawShape.props.w`, `rawShape.props.h`
+
+`shapeType`, `title`, `textContent`, `rotation`과 `rawShape.props`의 PR Review 도메인
+metadata는 기존 값과 같아야 한다. `pr_review_relation_edge`는 endpoint와 relation
+metadata뿐 아니라 geometry도 사용자가 수정할 수 없다. 일반 shape를 시스템 shape로
+변경하는 것도 허용하지 않는다. 위반 요청은 `403 FORBIDDEN`이다.
 
 ## Canvas 상세 조회
 

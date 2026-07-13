@@ -687,6 +687,31 @@ GitHub Review 제출 가능 여부를 막는 hard guard가 아니다. `not_revie
 리뷰 canvas endpoint는 PR 리뷰 화면용 graph를 반환한다. 자유형 Canvas API와
 분리된 view model이다.
 
+Review room의 Canvas에는 다음 시스템 shape 계약을 사용한다.
+
+### `pr_review_file_node`
+
+- stable shape ID: `pr-review-file:{roomFileId}`
+- identity: `reviewRoomId`, `roomFileId`
+- 현재 버전 참조: `currentReviewSessionId`, `reviewFileId`
+- PR Review 소유 metadata: file path/status, role, risk, review status, Conflict 상태
+- Canvas 소유 geometry: 위치, 크기, parent/group, 표시 순서
+
+기존 session graph 호환 필드인 `reviewSessionId`, `reviewFlowFileId`, `flowId`,
+`workflowOrder`는 Materialization 전환 기간에 유지한다. 새 버전에서 같은 room file은
+같은 stable shape ID와 저장된 geometry를 재사용한다.
+
+### `pr_review_relation_edge`
+
+- stable shape ID는 room file pair와 relation type으로 결정한다.
+- identity: `reviewRoomId`, `currentReviewSessionId`, `fromRoomFileId`, `toRoomFileId`
+- relation metadata: `relationType`, `source`, `confidence`, `reason`
+- endpoint와 relation metadata, edge geometry는 PR Review가 소유한다.
+
+일반 사용자는 시스템 shape를 생성·삭제할 수 없다. File node의 geometry만 변경할 수
+있고 relation edge는 수정할 수 없다. 분석 결과를 실제 shape row로 생성·갱신하는
+Materialization은 별도 단계에서 수행한다.
+
 ```json
 {
   "reviewSessionId": "review_session_uuid",

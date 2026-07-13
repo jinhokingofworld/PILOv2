@@ -22,6 +22,7 @@ import type {
 
 export const PR_REVIEW_FILE_NODE_SHAPE_TYPE = "pr_review_file_node";
 export const PR_REVIEW_FLOW_EDGE_SHAPE_TYPE = "pr_review_flow_edge";
+export const PR_REVIEW_RELATION_EDGE_SHAPE_TYPE = "pr_review_relation_edge";
 export const PR_REVIEW_FLOW_LABEL_SHAPE_TYPE = "pr_review_flow_label";
 export const PR_REVIEW_FLOW_MILESTONE_SHAPE_TYPE = "pr_review_flow_milestone";
 export const PR_REVIEW_ROLE_LANE_SHAPE_TYPE = "pr_review_role_lane";
@@ -29,6 +30,9 @@ export const PR_REVIEW_ROLE_LANE_SHAPE_TYPE = "pr_review_role_lane";
 export type PrReviewFileNodeShapeProps = {
   w: number;
   h: number;
+  reviewRoomId: string | null;
+  roomFileId: string | null;
+  currentReviewSessionId: string | null;
   reviewFileId: string;
   reviewSessionId: string;
   reviewFlowFileId: string;
@@ -56,6 +60,22 @@ export type PrReviewFlowEdgeShapeProps = {
   flowId: string;
   reason: string;
   kind: "review_order" | "semantic";
+};
+
+export type PrReviewRelationEdgeShapeProps = PrReviewFlowEdgeShapeProps & {
+  reviewRoomId: string;
+  currentReviewSessionId: string;
+  fromRoomFileId: string;
+  toRoomFileId: string;
+  relationType:
+    | "review_order"
+    | "depends_on"
+    | "tests"
+    | "uses_api"
+    | "passes_data_to"
+    | "supports";
+  source: "rule" | "ai" | "hybrid" | "fallback";
+  confidence: number;
 };
 
 export type PrReviewRoleLaneShapeProps = {
@@ -98,6 +118,11 @@ export type PrReviewFlowEdgeShape = TLBaseShape<
   PrReviewFlowEdgeShapeProps
 >;
 
+export type PrReviewRelationEdgeShape = TLBaseShape<
+  typeof PR_REVIEW_RELATION_EDGE_SHAPE_TYPE,
+  PrReviewRelationEdgeShapeProps
+>;
+
 export type PrReviewFlowLabelShape = TLBaseShape<
   typeof PR_REVIEW_FLOW_LABEL_SHAPE_TYPE,
   PrReviewFlowLabelShapeProps
@@ -117,6 +142,7 @@ declare module "@tldraw/tlschema" {
   interface TLGlobalShapePropsMap {
     [PR_REVIEW_FILE_NODE_SHAPE_TYPE]: PrReviewFileNodeShapeProps;
     [PR_REVIEW_FLOW_EDGE_SHAPE_TYPE]: PrReviewFlowEdgeShapeProps;
+    [PR_REVIEW_RELATION_EDGE_SHAPE_TYPE]: PrReviewRelationEdgeShapeProps;
     [PR_REVIEW_FLOW_LABEL_SHAPE_TYPE]: PrReviewFlowLabelShapeProps;
     [PR_REVIEW_FLOW_MILESTONE_SHAPE_TYPE]: PrReviewFlowMilestoneShapeProps;
     [PR_REVIEW_ROLE_LANE_SHAPE_TYPE]: PrReviewRoleLaneShapeProps;
@@ -214,7 +240,9 @@ const conflictBadgeClasses: Record<
   unsupported: "border-amber-200 bg-white text-amber-700"
 };
 
-function getEdgePathData(shape: PrReviewFlowEdgeShape) {
+function getEdgePathData(
+  shape: PrReviewFlowEdgeShape | PrReviewRelationEdgeShape
+) {
   const { startX, startY, endX, endY } = shape.props;
   if (startX === endX || startY === endY) {
     return `M ${startX} ${startY} L ${endX} ${endY}`;
@@ -300,7 +328,11 @@ function PrReviewFileNode({ shape }: { shape: PrReviewFileNodeShape }) {
   );
 }
 
-function PrReviewFlowEdge({ shape }: { shape: PrReviewFlowEdgeShape }) {
+function PrReviewFlowEdge({
+  shape
+}: {
+  shape: PrReviewFlowEdgeShape | PrReviewRelationEdgeShape;
+}) {
   const path = getEdgePathData(shape);
   const arrowSize = 7;
   const { endX, endY, startX, startY } = shape.props;
@@ -428,6 +460,9 @@ export class PrReviewFileNodeShapeUtil extends ShapeUtil<PrReviewFileNodeShape> 
   static override props = {
     w: T.number,
     h: T.number,
+    reviewRoomId: T.nullable(T.string),
+    roomFileId: T.nullable(T.string),
+    currentReviewSessionId: T.nullable(T.string),
     reviewFileId: T.string,
     reviewSessionId: T.string,
     reviewFlowFileId: T.string,
@@ -465,6 +500,9 @@ export class PrReviewFileNodeShapeUtil extends ShapeUtil<PrReviewFileNodeShape> 
     return {
       w: 260,
       h: 96,
+      reviewRoomId: null,
+      roomFileId: null,
+      currentReviewSessionId: null,
       reviewFileId: "",
       reviewSessionId: "",
       reviewFlowFileId: "",
@@ -578,6 +616,105 @@ export class PrReviewFlowEdgeShapeUtil extends ShapeUtil<PrReviewFlowEdgeShape> 
     const path = new Path2D(getEdgePathData(shape));
 
     return path;
+  }
+}
+
+export class PrReviewRelationEdgeShapeUtil extends ShapeUtil<PrReviewRelationEdgeShape> {
+  static override type = PR_REVIEW_RELATION_EDGE_SHAPE_TYPE;
+
+  static override props = {
+    w: T.number,
+    h: T.number,
+    startX: T.number,
+    startY: T.number,
+    endX: T.number,
+    endY: T.number,
+    fromReviewFileId: T.string,
+    toReviewFileId: T.string,
+    flowId: T.string,
+    reason: T.string,
+    kind: T.literalEnum("review_order", "semantic"),
+    reviewRoomId: T.string,
+    currentReviewSessionId: T.string,
+    fromRoomFileId: T.string,
+    toRoomFileId: T.string,
+    relationType: T.literalEnum(
+      "review_order",
+      "depends_on",
+      "tests",
+      "uses_api",
+      "passes_data_to",
+      "supports"
+    ),
+    source: T.literalEnum("rule", "ai", "hybrid", "fallback"),
+    confidence: T.number
+  };
+
+  override canBind() {
+    return false;
+  }
+
+  override canResize() {
+    return false;
+  }
+
+  override hideSelectionBoundsBg() {
+    return true;
+  }
+
+  override hideSelectionBoundsFg() {
+    return true;
+  }
+
+  override getDefaultProps(): PrReviewRelationEdgeShape["props"] {
+    return {
+      w: 1,
+      h: 1,
+      startX: 0,
+      startY: 0,
+      endX: 1,
+      endY: 1,
+      fromReviewFileId: "",
+      toReviewFileId: "",
+      flowId: "",
+      reason: "",
+      kind: "semantic",
+      reviewRoomId: "",
+      currentReviewSessionId: "",
+      fromRoomFileId: "",
+      toRoomFileId: "",
+      relationType: "depends_on",
+      source: "hybrid",
+      confidence: 0
+    };
+  }
+
+  override getGeometry(shape: PrReviewRelationEdgeShape) {
+    const { startX, startY, endX, endY } = shape.props;
+    if (startX === endX || startY === endY) {
+      return new Polyline2d({
+        points: [new Vec(startX, startY), new Vec(endX, endY)]
+      });
+    }
+
+    const midX = startX + (endX - startX) / 2;
+
+    return new Polyline2d({
+      points: [
+        new Vec(startX, startY),
+        new Vec(midX, startY),
+        new Vec(midX, endY),
+        new Vec(endX, endY)
+      ]
+    });
+  }
+
+  override component(shape: PrReviewRelationEdgeShape) {
+    return <PrReviewFlowEdge shape={shape} />;
+  }
+
+  override getIndicatorPath(shape: PrReviewRelationEdgeShape) {
+    return new Path2D(getEdgePathData(shape));
   }
 }
 
