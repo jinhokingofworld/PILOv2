@@ -9,7 +9,10 @@ import {
   parseSqlDdlToErdModel,
   type SqltoerdDdlParseError
 } from "@/features/sql-erd/utils/ddl-parser";
-import { createSqltoerdLayoutForModel } from "@/features/sql-erd/utils/model";
+import {
+  createSqltoerdAutoLayoutTableSizes,
+  createSqltoerdIncrementalLayout
+} from "@/features/sql-erd/utils/auto-layout";
 
 export type SqlErdGenerateWorkspaceRequest =
   | {
@@ -53,10 +56,14 @@ export function createSqlErdGenerateWorkspaceRequest(
     dialect: session.dialect,
     sourceText: session.sourceText,
     modelJson: parseResult.modelJson,
-    layoutJson: createSqltoerdLayoutForModel(
-      parseResult.modelJson,
-      session.layoutJson
-    ),
+    layoutJson: createSqltoerdIncrementalLayout({
+      layoutJson: session.layoutJson,
+      modelJson: parseResult.modelJson,
+      tableSizes: createSqltoerdAutoLayoutTableSizes(
+        parseResult.modelJson,
+        session.layoutJson
+      )
+    }),
     settingsJson: session.settingsJson
   };
 

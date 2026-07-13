@@ -631,10 +631,15 @@ Status code: `200 OK`
 
 - Agent는 Calendar event 생성/수정 시 `workspaceId`, `createdBy`를 body로 보내지 않는다.
 - `workspaceId`는 path에서 오고, `createdBy`는 현재 로그인 사용자에서 온다.
-- `update_calendar_event` planner input은 `eventId`와 `changes`만 받는다. confirmation의 `before`는
-  App Server가 같은 Workspace의 현재 event를 조회해 만든다. planner가 작성한 현재값은 신뢰하지 않는다.
-- `eventId` 또는 `changes`가 없으면 현재 run은 `needs_clarification`으로 완료하며, 다른 event를
-  자동 선택하지 않는다.
+- `update_calendar_event` planner input은 `target`과 `changes`만 받는다. `target`에는 제목과
+  명시적 대상 날짜 범위가 필요하며, 시간·종일 여부는 선택적 exact filter다. `eventId`는 planner
+  input과 사용자 답변에 포함하지 않는다.
+- App Server는 현재 사용자·Workspace의 대상 날짜 범위에서 제목(공백 정리·대소문자 무시)과 날짜,
+  선택 시간·종일 여부가 모두 일치하는 후보만 만든다. fuzzy matching이나 LLM 추측으로 event를
+  선택하지 않는다.
+- 후보가 정확히 하나일 때에만 App Server가 내부 eventId로 현재 event를 다시 조회해 confirmation의
+  `before`를 만든다. 후보가 없거나 여러 개이면 confirmation과 write 없이 run을 완료하고, 제목·대상
+  날짜·시간을 더 구체적으로 적어 다시 요청하도록 안내한다.
 - Calendar 상대 날짜 조회는 run의 `currentDate`와 사용자 timezone을 기준으로 계산한다.
   `이번 주말`은 현재 날짜에서 아직 완전히 지나지 않은 가장 가까운 토요일·일요일이며, 토요일에는
   당일을 포함하고 일요일에는 다음 주말을 사용한다. `다음 주 월요일`은 바로 다가오는 월요일,

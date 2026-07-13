@@ -34,7 +34,12 @@ const MAX_COLUMN_TYPE_LENGTH = 512;
 const MAX_ANNOTATION_LABEL_LENGTH = 200;
 const MAX_JSON_DEPTH = 20;
 const SOURCE_FORMATS = new Set<SqlErdSourceFormat>(["sql"]);
-const DIALECTS = new Set<SqlErdDialect>(["auto", "postgresql", "mysql"]);
+const DIALECTS = new Set<SqlErdDialect>([
+  "auto",
+  "postgresql",
+  "mysql",
+  "sqlite"
+]);
 const FORBIDDEN_JSON_KEYS = new Set(["__proto__", "prototype", "constructor"]);
 const CREATE_REQUEST_FIELDS = new Set([
   "title",

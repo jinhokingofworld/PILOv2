@@ -632,7 +632,9 @@ export class AgentConfirmationService {
     const toolInput = this.buildToolInputFromPlan(plan, definition);
     return {
       definition,
-      toolInput: definition.validateInput(toolInput)
+      toolInput: definition.validateConfirmationInput
+        ? definition.validateConfirmationInput(toolInput)
+        : definition.validateInput(toolInput)
     };
   }
 

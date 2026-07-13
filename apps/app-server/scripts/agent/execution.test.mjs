@@ -378,6 +378,7 @@ function createSmokeReport(overrides = {}) {
 class SmokeCalendarService {
   constructor() {
     this.calls = [];
+    this.events = [createSmokeEvent()];
   }
 
   async listEvents(currentUserId, workspaceId, query) {
@@ -387,7 +388,17 @@ class SmokeCalendarService {
       workspaceId,
       query
     });
-    return [createSmokeEvent()];
+    return this.events;
+  }
+
+  async getEvent(currentUserId, workspaceId, eventId) {
+    this.calls.push({
+      method: "getEvent",
+      currentUserId,
+      workspaceId,
+      eventId
+    });
+    return this.events.find((event) => event.id === Number(eventId));
   }
 
   async createEvent(currentUserId, workspaceId, body) {
@@ -410,6 +421,28 @@ class SmokeCalendarService {
     });
     return createSmokeEvent({ id: Number(eventId), ...body });
   }
+}
+
+{
+  const answer = buildAgentReadResultAnswer({
+    toolName: "update_calendar_event",
+    outputSummary: {
+      status: "needs_clarification",
+      selection: "multiple",
+      candidateCount: 2
+    },
+    resourceRefs: [
+      {
+        domain: "calendar",
+        resourceType: "event",
+        resourceId: "1",
+        label: "주간 회의"
+      }
+    ]
+  });
+
+  assert.match(answer, /여러 개/);
+  assert.doesNotMatch(answer, /주간 회의|resourceId|1/);
 }
 
 class SmokeMeetingService {
@@ -1075,6 +1108,83 @@ function formatterMeetingReport(index, overrides = {}) {
     "search_board_issues"
   ]);
   assert.equal(registry.getDefinition("move_board_issue_status"), null);
+}
+
+{
+  const { calendarService, registry } = createSmokeRegistry();
+  const { confirmationService, loggingService, service } =
+    createExecutionServiceWithRegistry(
+      plannerOutput({
+        toolName: "update_calendar_event",
+        riskLevel: "medium",
+        executionMode: "confirmation_required",
+        requiresConfirmation: true,
+        input: {
+          target: {
+            title: "주간 회의",
+            startDate: "2026-07-10",
+            endDate: "2026-07-10",
+            startTime: "15:00"
+          },
+          changes: {
+            startTime: "16:00"
+          }
+        }
+      }),
+      registry
+    );
+
+  const result = await service.executeLatestPlannedTool(
+    USER_ID,
+    WORKSPACE_ID,
+    RUN_ID
+  );
+
+  assert.equal(result.status, "waiting_confirmation");
+  assert.equal(confirmationService.calls[0].input.plan.target.resourceId, "1");
+  assert.equal(confirmationService.calls[0].input.plan.call.eventId, "1");
+  assert.equal(calendarService.calls[0].method, "listEvents");
+  assert.equal(calendarService.calls[1].method, "getEvent");
+  assert.deepEqual(loggingService.calls, []);
+}
+
+{
+  const { calendarService, registry } = createSmokeRegistry();
+  calendarService.events = [createSmokeEvent(), createSmokeEvent({ id: 2 })];
+  const { confirmationService, loggingService, service } =
+    createExecutionServiceWithRegistry(
+      plannerOutput({
+        toolName: "update_calendar_event",
+        riskLevel: "medium",
+        executionMode: "confirmation_required",
+        requiresConfirmation: true,
+        input: {
+          target: {
+            title: "주간 회의",
+            startDate: "2026-07-10",
+            endDate: "2026-07-10"
+          },
+          changes: { startTime: "16:00" }
+        }
+      }),
+      registry
+    );
+
+  const result = await service.executeLatestPlannedTool(
+    USER_ID,
+    WORKSPACE_ID,
+    RUN_ID
+  );
+
+  assert.equal(result.status, "completed");
+  assert.equal(result.run.status, "completed");
+  assert.match(result.run.finalAnswer, /여러 개/);
+  assert.equal(confirmationService.calls.length, 0);
+  assert.deepEqual(
+    loggingService.calls.map((call) => call.method),
+    ["startNextToolStepIfAbsent", "completeStep", "completeRun"]
+  );
+  assert.equal(loggingService.calls[1].input.outputSummary.selection, "multiple");
 }
 
 {

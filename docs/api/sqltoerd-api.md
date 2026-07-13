@@ -119,6 +119,7 @@ sql
 auto
 postgresql
 mysql
+sqlite
 ```
 
 서버는 dialect 자동 감지를 수행하지 않는다. client가 감지한 값 또는 사용자가 선택한
@@ -309,7 +310,7 @@ type SqltoerdWorkspaceSessionSummary = {
   workspaceId: string;
   title: string;
   sourceFormat: "sql";
-  dialect: "auto" | "postgresql" | "mysql";
+  dialect: "auto" | "postgresql" | "mysql" | "sqlite";
   tableCount: number;
   relationCount: number;
   revision: number;
@@ -690,7 +691,7 @@ plural endpoint는 현재 사용할 수 있으며, 신규 consumer는 plural end
 | request body | UTF-8 기준 2 MiB | 초과 시 `413 Payload Too Large` |
 | `title` | 1자 이상 120자 이하 | 위반 시 `400 Bad Request` |
 | `sourceFormat` | `sql` | 위반 시 `400 Bad Request` |
-| `dialect` | `auto`, `postgresql`, `mysql` | 위반 시 `400 Bad Request` |
+| `dialect` | `auto`, `postgresql`, `mysql`, `sqlite` | 위반 시 `400 Bad Request` |
 | `sourceText` | UTF-8 기준 1 MiB | 초과 시 `413 Payload Too Large` |
 | `modelJson` | JSON object | 위반 시 `400 Bad Request` |
 | `layoutJson` | JSON object | 위반 시 `400 Bad Request` |

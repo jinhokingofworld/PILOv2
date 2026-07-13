@@ -60,6 +60,13 @@ const prReviewCanvasPersistence = await readFile(
   ),
   "utf8"
 );
+const prReviewNodeActivation = await readFile(
+  new URL(
+    "../../src/features/pr-review/components/review-canvas/pr-review-node-activation.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
 const prReviewFileDiffDrawer = await readFile(
   new URL(
     "../../src/features/pr-review/components/review-canvas/PrReviewFileDiffDrawer.tsx",
@@ -327,6 +334,9 @@ assert.doesNotMatch(prReviewCanvasSurface, /canvas_freeform_shapes/);
 assert.match(prReviewCanvasPersistence, /PR_REVIEW_CANVAS_LOAD_QUERY/);
 assert.match(prReviewCanvasPersistence, /buildPrReviewFileShapeUpdateInput/);
 assert.match(prReviewCanvasPersistence, /buildPrReviewRelationEdgeGeometry/);
+assert.match(prReviewCanvasSurface, /PrReviewFileNodeActivationBridge/);
+assert.doesNotMatch(prReviewCanvasSurface, /PrReviewSelectionBridge/);
+assert.match(prReviewNodeActivation, /shouldActivatePrReviewFileNode/);
 assert.doesNotMatch(prReviewCanvasPersistence, /features\/canvas/);
 assert.match(prReviewFileDiffDrawer, /getReviewFileDiff/);
 assert.match(prReviewFileDiffDrawer, /updateReviewFileDecision/);
@@ -451,3 +461,4 @@ await import("./multi-file-conflict-client.test.mjs");
 await import("./oauth-reconnect-client.test.mjs");
 await import("./canvas-shape-client.test.mjs");
 await import("./canvas-shape-persistence.test.mjs");
+await import("./node-activation.test.mjs");

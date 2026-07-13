@@ -16,6 +16,7 @@ import {
   type TLShapePartial,
   useEditor
 } from "tldraw";
+import { Workflow } from "lucide-react";
 
 import { commerceSqltoerdFixture } from "@/features/sql-erd/fixtures/commerce";
 import {
@@ -81,6 +82,11 @@ import {
   updateSqltoerdLayoutWithTablePositions,
   type SqltoerdTablePosition
 } from "@/features/sql-erd/utils/model";
+import {
+  createSqltoerdAutoLayout,
+  getSqltoerdMinimumZoomCamera,
+  type SqltoerdAutoLayoutTableSize
+} from "@/features/sql-erd/utils/auto-layout";
 import { getSqlErdPinnedTableCenter } from "@/features/sql-erd/utils/table-pin";
 import {
   areSqlErdSelectionsEqual,
@@ -106,6 +112,7 @@ const sqlErdShapeUtils = [
   SqlErdTableShapeUtil
 ];
 const SQLTOERD_LAYOUT_SYNC_DELAY_MS = 250;
+const SQLTOERD_MINIMUM_READABLE_ZOOM = 0.45;
 
 const sqlErdTldrawComponents = {
   Background: null
@@ -629,9 +636,27 @@ function resetSqlErdCanvas(
 
   if (zoomToFit) {
     window.requestAnimationFrame(() => {
-      editor.zoomToFit({ animation: { duration: 160 } });
+      fitSqlErdCanvas(editor);
     });
   }
+}
+
+function fitSqlErdCanvas(editor: Editor) {
+  editor.zoomToFit();
+
+  const pageBounds = editor.getCurrentPageBounds();
+
+  if (!pageBounds || editor.getZoomLevel() >= SQLTOERD_MINIMUM_READABLE_ZOOM) {
+    return;
+  }
+
+  editor.setCamera(
+    getSqltoerdMinimumZoomCamera(
+      pageBounds,
+      editor.getViewportScreenBounds(),
+      SQLTOERD_MINIMUM_READABLE_ZOOM
+    )
+  );
 }
 
 function shouldResetSqlErdCanvas(editor: Editor, shapes: TLShapePartial[]) {
@@ -1970,6 +1995,81 @@ function getSqlErdTablePositionsFromEditor(
     }));
 }
 
+function getSqlErdTableSizesFromEditor(
+  editor: Editor
+): SqltoerdAutoLayoutTableSize[] {
+  return editor
+    .getCurrentPageShapes()
+    .filter(isSqlErdTableShape)
+    .map((shape) => ({
+      height: shape.props.h,
+      tableId: shape.props.tableId,
+      width: shape.props.w
+    }));
+}
+
+function applySqlErdAutoLayout({
+  editor,
+  layoutJson,
+  modelJson
+}: {
+  editor: Editor;
+  layoutJson: SqltoerdLayoutJsonV1;
+  modelJson: SqltoerdModelJsonV1;
+}) {
+  const nextLayoutJson = createSqltoerdAutoLayout({
+    layoutJson,
+    modelJson,
+    tableSizes: getSqlErdTableSizesFromEditor(editor)
+  });
+
+  if (areSqltoerdLayoutsEqual(layoutJson, nextLayoutJson)) {
+    return null;
+  }
+
+  const nextTableLayoutsById = new Map(
+    nextLayoutJson.tableLayouts.map((tableLayout) => [
+      tableLayout.tableId,
+      tableLayout
+    ])
+  );
+  const updates = editor
+    .getCurrentPageShapes()
+    .filter(isSqlErdTableShape)
+    .flatMap((shape) => {
+      const tableLayout = nextTableLayoutsById.get(shape.props.tableId);
+
+      if (!tableLayout) {
+        return [];
+      }
+
+      return [
+        {
+          id: shape.id,
+          type: SQLTOERD_TABLE_SHAPE_TYPE,
+          x: tableLayout.x,
+          y: tableLayout.y
+        } satisfies TLShapePartial<SqlErdTableShape>
+      ];
+    });
+
+  if (!updates.length) {
+    return null;
+  }
+
+  editor.markHistoryStoppingPoint("sqltoerd auto layout");
+  editor.run(() => {
+    editor.updateShapes(updates);
+  });
+  editor.markHistoryStoppingPoint("sqltoerd auto layout");
+
+  window.requestAnimationFrame(() => {
+    fitSqlErdCanvas(editor);
+  });
+
+  return nextLayoutJson;
+}
+
 type SqlErdLayoutSyncProps = {
   layoutJson: SqltoerdLayoutJsonV1;
   modelJson: SqltoerdModelJsonV1;
@@ -2059,12 +2159,14 @@ export function SqlErdCanvas({
   pinnedTableId = null,
   selectedSqlErdObject = { type: "none" }
 }: SqlErdCanvasProps) {
+  const editorRef = useRef<Editor | null>(null);
   const shapes = useMemo(
     () => createSqltoerdCanvasShapes(modelJson, layoutJson),
     [layoutJson, modelJson]
   );
   const handleMount = useCallback(
     (editor: Editor) => {
+      editorRef.current = editor;
       editor.setCurrentTool("select.idle");
       resetSqlErdCanvas(editor, shapes);
     },
@@ -2130,50 +2232,82 @@ export function SqlErdCanvas({
     },
     []
   );
+  const handleAutoLayout = useCallback(() => {
+    const editor = editorRef.current;
+
+    if (!editor || !onLayoutChange) {
+      return;
+    }
+
+    const nextLayoutJson = applySqlErdAutoLayout({
+      editor,
+      layoutJson,
+      modelJson
+    });
+
+    if (nextLayoutJson) {
+      onLayoutChange(nextLayoutJson);
+    }
+  }, [layoutJson, modelJson, onLayoutChange]);
 
   return (
-    <TldrawSurface
-      className={cn(
-        "h-full w-full bg-slate-50 bg-[radial-gradient(circle_at_1px_1px,rgba(15,23,42,0.12)_1px,transparent_0)] [background-size:24px_24px]",
-        className
-      )}
-      components={sqlErdTldrawComponents}
-      hideUi
-      onMount={handleMount}
-      onPointerDownCapture={handlePointerDownCapture}
-      shapeUtils={sqlErdShapeUtils}
-    >
-      <SqlErdCanvasShapeSync shapes={shapes} />
-      <SqlErdRelationLayoutSync />
-      <SqlErdRelationHighlightSync
-        modelJson={modelJson}
-        selectedSqlErdObject={selectedSqlErdObject}
-      />
-      <SqlErdPinnedTableNavigationSync
-        pinNavigationRequestId={pinNavigationRequestId}
-        pinnedTableId={pinnedTableId}
-      />
-      <SqlErdSelectedColumnSync selectedSqlErdObject={selectedSqlErdObject} />
-      {onLayoutChange ? (
-        <>
-          <SqlErdAnnotationInteractionSync
-            layoutJson={layoutJson}
-            modelJson={modelJson}
-            onLayoutChange={onLayoutChange}
-          />
-          <SqlErdLayoutSync
-            layoutJson={layoutJson}
-            modelJson={modelJson}
-            onLayoutChange={onLayoutChange}
-          />
-        </>
-      ) : null}
-      {onSelectionChange ? (
-        <SqlErdSelectionSync
-          onSelectionChange={onSelectionChange}
+    <div className="relative h-full w-full">
+      <TldrawSurface
+        className={cn(
+          "h-full w-full bg-slate-50 bg-[radial-gradient(circle_at_1px_1px,rgba(15,23,42,0.12)_1px,transparent_0)] [background-size:24px_24px]",
+          className
+        )}
+        components={sqlErdTldrawComponents}
+        hideUi
+        onMount={handleMount}
+        onPointerDownCapture={handlePointerDownCapture}
+        shapeUtils={sqlErdShapeUtils}
+      >
+        <SqlErdCanvasShapeSync shapes={shapes} />
+        <SqlErdRelationLayoutSync />
+        <SqlErdRelationHighlightSync
+          modelJson={modelJson}
           selectedSqlErdObject={selectedSqlErdObject}
         />
+        <SqlErdPinnedTableNavigationSync
+          pinNavigationRequestId={pinNavigationRequestId}
+          pinnedTableId={pinnedTableId}
+        />
+        <SqlErdSelectedColumnSync selectedSqlErdObject={selectedSqlErdObject} />
+        {onLayoutChange ? (
+          <>
+            <SqlErdAnnotationInteractionSync
+              layoutJson={layoutJson}
+              modelJson={modelJson}
+              onLayoutChange={onLayoutChange}
+            />
+            <SqlErdLayoutSync
+              layoutJson={layoutJson}
+              modelJson={modelJson}
+              onLayoutChange={onLayoutChange}
+            />
+          </>
+        ) : null}
+        {onSelectionChange ? (
+          <SqlErdSelectionSync
+            onSelectionChange={onSelectionChange}
+            selectedSqlErdObject={selectedSqlErdObject}
+          />
+        ) : null}
+      </TldrawSurface>
+      {onLayoutChange ? (
+        <button
+          aria-label="자동 정렬"
+          className="absolute right-4 top-4 z-20 inline-flex h-9 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+          data-sqltoerd-auto-layout
+          onClick={handleAutoLayout}
+          title="FK 관계를 기준으로 테이블 자동 정렬"
+          type="button"
+        >
+          <Workflow aria-hidden="true" className="size-4" />
+          자동 정렬
+        </button>
       ) : null}
-    </TldrawSurface>
+    </div>
   );
 }

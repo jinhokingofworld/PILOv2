@@ -30,14 +30,14 @@
     },
     {
       "name": "update_calendar_event",
-      "description": "Calendar 일정을 사용자가 제공한 양의 정수 eventId와 변경값으로 수정합니다. 현재값과 Workspace 접근은 서버가 조회하며 실행 전 confirmation이 필요합니다.",
+      "description": "Calendar 일정을 제목과 명시적 대상 날짜로 정확히 찾아 변경값으로 수정합니다. eventId를 입력하거나 노출하지 않습니다. 후보가 정확히 하나일 때만 현재값을 확인해 confirmation을 만들며, 후보가 없거나 여러 개면 수정하지 않고 더 구체적인 정보를 요청합니다.",
       "riskLevel": "medium",
       "executionMode": "confirmation_required",
       "inputSchema": {
         "type": "object",
-        "required": ["eventId", "changes"],
+        "required": ["target", "changes"],
         "additionalProperties": false,
-        "properties": {"eventId": {"type": "string", "pattern": "^[1-9][0-9]*$"}, "changes": {"type": "object", "minProperties": 1}}
+        "properties": {"target": {"type": "object", "required": ["title", "startDate", "endDate"], "additionalProperties": false, "properties": {"title": {"type": "string", "minLength": 1, "maxLength": 255}, "startDate": {"type": "string", "format": "date"}, "endDate": {"type": "string", "format": "date"}, "isAllDay": {"type": "boolean"}, "startTime": {"type": "string", "pattern": "^([01]\\d|2[0-3]):([0-5]\\d)$"}, "endTime": {"type": "string", "pattern": "^([01]\\d|2[0-3]):([0-5]\\d)$"}}}, "changes": {"type": "object", "minProperties": 1}}
       }
     },
     {
@@ -101,9 +101,9 @@
     {"id": "calendar_create_recurrence", "prompt": "다음 주 평일마다 오전 10시에 스탠드업 일정 만들어줘", "expected": {"status": "unsupported"}},
     {"id": "calendar_create_missing_date", "prompt": "디자인 리뷰 일정 만들어줘", "expected": {"status": "needs_clarification", "missingFields": ["startDate", "endDate"]}},
     {"id": "calendar_create_missing_title", "prompt": "내일 오후 3시에 일정 만들어줘", "expected": {"status": "needs_clarification", "missingFields": ["title"]}},
-    {"id": "calendar_update", "prompt": "일정 42번을 내일 오후 4시로 바꿔줘", "expected": {"status": "tool_candidate", "toolName": "update_calendar_event", "inputContains": {"eventId": "42"}, "requiresConfirmation": true}},
-    {"id": "calendar_update_missing_id", "prompt": "내일 오후 4시로 일정 바꿔줘", "expected": {"status": "needs_clarification", "missingFields": ["eventId"]}},
-    {"id": "calendar_update_invalid_id", "prompt": "일정 0번을 내일 오후 4시로 바꿔줘", "expected": {"status": "needs_clarification", "missingFields": ["eventId"]}},
+    {"id": "calendar_update", "prompt": "7월 10일 오후 3시 주간 회의 일정을 내일 오후 4시로 바꿔줘", "expected": {"status": "tool_candidate", "toolName": "update_calendar_event", "inputContains": {"target": {"title": "주간 회의", "startDate": "2026-07-10", "endDate": "2026-07-10", "startTime": "15:00"}, "changes": {"startDate": "2026-07-09", "endDate": "2026-07-09", "startTime": "16:00"}}, "requiresConfirmation": true}},
+    {"id": "calendar_update_missing_target", "prompt": "내일 오후 4시로 일정 바꿔줘", "expected": {"status": "needs_clarification", "missingFields": ["calendar_event_target"]}},
+    {"id": "calendar_update_missing_target_date", "prompt": "주간 회의 일정을 내일 오후 4시로 바꿔줘", "expected": {"status": "needs_clarification", "missingFields": ["calendar_event_target"]}},
     {"id": "meeting_latest", "prompt": "가장 최신 회의록을 보여줘", "expected": {"status": "tool_candidate", "toolName": "list_meeting_reports", "inputContains": {"limit": 1}, "requiresConfirmation": false}},
     {"id": "meeting_recent", "prompt": "최근 회의록 목록 보여줘", "expected": {"status": "tool_candidate", "toolName": "list_meeting_reports", "requiresConfirmation": false}},
     {"id": "meeting_completed", "prompt": "완료된 회의록만 보여줘", "expected": {"status": "tool_candidate", "toolName": "list_meeting_reports", "inputContains": {"status": "COMPLETED"}, "requiresConfirmation": false}},

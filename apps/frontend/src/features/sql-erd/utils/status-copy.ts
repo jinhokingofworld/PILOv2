@@ -19,7 +19,7 @@ export function getSqlErdGenerateErrorMessage(
   }
 
   if (errorCode === "UNSUPPORTED_DIALECT") {
-    return "This SQL dialect is not supported yet. Choose PostgreSQL or MySQL.";
+    return "This SQL dialect is not supported yet. Choose PostgreSQL, MySQL, or SQLite.";
   }
 
   if (errorCode === "NO_CREATE_TABLE") {

@@ -17,9 +17,11 @@ import type {
   AgentJsonObject,
   AgentJsonPrimitive,
   AgentJsonValue,
+  AgentConfirmationPlan,
   AgentResourceRef,
   AgentRiskLevel,
   AgentToolDefinition,
+  AgentToolClarificationResult,
   AgentToolExecutionMode,
   AgentToolExecutionResult
 } from "./types/agent-tool.types";
@@ -206,7 +208,10 @@ export class AgentExecutionService {
         workspaceId,
         runId,
         definition,
-        validatedInput.input
+        validatedInput.input,
+        candidate.input,
+        input.prompt,
+        input.timezone
       );
     }
 
@@ -380,7 +385,10 @@ export class AgentExecutionService {
     workspaceId: string,
     runId: string,
     definition: AgentToolDefinition<unknown>,
-    input: unknown
+    input: unknown,
+    plannerInput: AgentJsonObject,
+    prompt?: string,
+    timezone?: string
   ): Promise<AgentExecutionResult> {
     if (!definition.buildConfirmation) {
       return this.failRun(currentUserId, workspaceId, runId, {
@@ -391,7 +399,7 @@ export class AgentExecutionService {
     }
 
     try {
-      const plan = await definition.buildConfirmation(
+      const planOrClarification = await definition.buildConfirmation(
         {
           currentUserId,
           workspaceId,
@@ -399,6 +407,19 @@ export class AgentExecutionService {
         },
         input
       );
+      if (this.isClarificationResult(planOrClarification)) {
+        return this.completeClarification(
+          currentUserId,
+          workspaceId,
+          runId,
+          definition,
+          plannerInput,
+          planOrClarification,
+          prompt,
+          timezone
+        );
+      }
+      const plan = planOrClarification;
       const confirmation = await this.agentConfirmationService.createConfirmation(
         currentUserId,
         workspaceId,
@@ -432,6 +453,69 @@ export class AgentExecutionService {
         message: "승인이 필요한 작업 계획을 만들지 못했습니다."
       });
     }
+  }
+
+  private async completeClarification(
+    currentUserId: string,
+    workspaceId: string,
+    runId: string,
+    definition: AgentToolDefinition<unknown>,
+    plannerInput: AgentJsonObject,
+    clarification: AgentToolClarificationResult,
+    prompt?: string,
+    timezone?: string
+  ): Promise<AgentExecutionResult> {
+    const step = await this.agentLoggingService.startNextToolStepIfAbsent(
+      currentUserId,
+      workspaceId,
+      {
+        runId,
+        toolName: definition.name,
+        riskLevel: definition.riskLevel,
+        inputSummary: {
+          toolName: definition.name,
+          riskLevel: definition.riskLevel,
+          executionMode: definition.executionMode,
+          input: this.sanitizeJsonObject(plannerInput)
+        }
+      }
+    );
+    if (!step) {
+      return {
+        status: "skipped",
+        reason: "already_started"
+      };
+    }
+
+    const outputSummary = this.sanitizeJsonObject(clarification.outputSummary);
+    const resourceRefs = this.sanitizeResourceRefs(clarification.resourceRefs);
+    await this.agentLoggingService.completeStep(currentUserId, workspaceId, {
+      runId,
+      stepId: step.id,
+      outputSummary,
+      resourceRefs
+    });
+    const run = await this.agentLoggingService.completeRun(
+      currentUserId,
+      workspaceId,
+      {
+        runId,
+        riskLevel: definition.riskLevel,
+        finalAnswer: buildAgentReadResultAnswer({
+          toolName: definition.name,
+          outputSummary,
+          resourceRefs,
+          prompt,
+          timezone
+        }),
+        message: "수정할 일정을 특정할 정보가 더 필요합니다."
+      }
+    );
+
+    return {
+      status: "completed",
+      run
+    };
   }
 
   private async executeAutoTool(
@@ -546,6 +630,12 @@ export class AgentExecutionService {
     }
 
     return outputSummary;
+  }
+
+  private isClarificationResult(
+    input: AgentToolClarificationResult | AgentConfirmationPlan
+  ): input is AgentToolClarificationResult {
+    return "kind" in input && input.kind === "needs_clarification";
   }
 
   private async failRun(
