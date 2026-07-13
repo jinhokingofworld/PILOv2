@@ -18,7 +18,12 @@ export type SqlErdSourceAutosaveRequest =
       ok: true;
       payload: Pick<
         UpdateSqlErdSessionRequest,
-        "baseRevision" | "dialect" | "layoutJson" | "modelJson" | "sourceText"
+        | "baseRevision"
+        | "dialect"
+        | "layoutJson"
+        | "modelJson"
+        | "settingsJson"
+        | "sourceText"
       >;
       sessionId: string;
     }
@@ -78,6 +83,7 @@ export function createSqlErdSourceAutosaveRequest(
       dialect: parsedSnapshot.dialect,
       layoutJson: currentSession.layoutJson,
       modelJson: parsedSnapshot.modelJson,
+      settingsJson: parsedSnapshot.settingsJson,
       sourceText: parsedSnapshot.sourceText
     },
     sessionId: currentSession.id

@@ -3151,6 +3151,11 @@ const parsedSourceSnapshot = {
   },
   modelJson: createRuntimeTestModel(),
   revision: 20,
+  settingsJson: {
+    sqltoerdRelationNotes: {
+      "relation.orders.user_id.users.id": "order owner"
+    }
+  },
   sourceText: "CREATE TABLE parsed_source (id BIGINT PRIMARY KEY);"
 };
 const currentSourceAutosaveSession = {
@@ -3171,13 +3176,10 @@ assert.deepEqual(sourceAutosaveRequest.payload, {
   dialect: "mysql",
   layoutJson: autosaveLayoutJson,
   modelJson: parsedSourceSnapshot.modelJson,
+  settingsJson: parsedSourceSnapshot.settingsJson,
   sourceText: parsedSourceSnapshot.sourceText
 });
 assert.equal(Object.hasOwn(sourceAutosaveRequest.payload, "title"), false);
-assert.equal(
-  Object.hasOwn(sourceAutosaveRequest.payload, "settingsJson"),
-  false
-);
 
 const mismatchedSourceAutosaveRequest =
   layoutAutosaveRuntime.createSqlErdSourceAutosaveRequest(
