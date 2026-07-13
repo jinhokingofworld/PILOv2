@@ -46,6 +46,20 @@ const prReviewCanvasShell = await readFile(
   ),
   "utf8"
 );
+const prReviewCanvasErrorBoundary = await readFile(
+  new URL(
+    "../../src/features/pr-review/components/review-canvas/PrReviewCanvasErrorBoundary.tsx",
+    import.meta.url
+  ),
+  "utf8"
+);
+const prReviewErrorMessage = await readFile(
+  new URL(
+    "../../src/features/pr-review/pr-review-error-message.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
 const prReviewCanvasSurface = await readFile(
   new URL(
     "../../src/features/pr-review/components/review-canvas/PrReviewCanvasSurface.tsx",
@@ -178,6 +192,15 @@ assert.match(
   /shared\/canvas-realtime\/canvas-realtime\.css/
 );
 assert.match(prReviewApiClient, /createPrReviewApiClient/);
+assert.match(prReviewPanel, /PrReviewCanvasErrorBoundary/);
+assert.match(prReviewCanvasErrorBoundary, /getDerivedStateFromError/);
+assert.match(prReviewCanvasErrorBoundary, /리뷰 Canvas를 열지 못했습니다/);
+assert.match(prReviewCanvasErrorBoundary, /PR 목록으로/);
+assert.match(prReviewErrorMessage, /Pull request is closed or merged/);
+assert.match(
+  prReviewErrorMessage,
+  /이미 종료된 PR이라 리뷰를 시작할 수 없습니다/
+);
 assert.match(prReviewApiClient, /startGithubOAuth/);
 assert.match(prReviewApiClient, /\/me\/github\/oauth\/start/);
 assert.match(prReviewApiClient, /credentials: "include"/);

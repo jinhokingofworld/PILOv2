@@ -72,6 +72,9 @@ import {
 
 interface PullRequestRow extends QueryResultRow {
   id: string;
+  state: string;
+  github_closed_at: Date | string | null;
+  merged_at: Date | string | null;
 }
 
 interface PrReviewSessionRow extends QueryResultRow {
@@ -976,6 +979,7 @@ export class PrReviewService {
     if (!pullRequest) {
       throw notFound("Pull request not found in workspace");
     }
+    this.assertPullRequestReviewable(pullRequest);
 
     const existing = await this.findActiveAnalyzingReviewSession(
       workspaceId,
@@ -1014,6 +1018,17 @@ export class PrReviewService {
         pullRequestId
       );
       const created = await this.database.transaction(async (transaction) => {
+        const currentPullRequest = await this.findSyncedPullRequest(
+          workspaceId,
+          pullRequestId,
+          transaction,
+          true
+        );
+        if (!currentPullRequest) {
+          throw notFound("Pull request not found in workspace");
+        }
+        this.assertPullRequestReviewable(currentPullRequest);
+
         let room = await this.findReviewRoomIdentity(
           workspaceId,
           pullRequestId,
@@ -2845,21 +2860,38 @@ export class PrReviewService {
 
   private async findSyncedPullRequest(
     workspaceId: string,
-    pullRequestId: string
+    pullRequestId: string,
+    runner: PrReviewAnalysisJobQueryRunner = this.database,
+    lockForShare = false
   ): Promise<PullRequestRow | null> {
     if (!UUID_PATTERN.test(pullRequestId)) {
       return null;
     }
 
-    return this.database.queryOne<PullRequestRow>(
+    return runner.queryOne<PullRequestRow>(
       `
-        SELECT id
+        SELECT
+          id,
+          COALESCE(NULLIF(raw->>'state', ''), 'open') AS state,
+          github_closed_at,
+          merged_at
         FROM github_pull_requests
         WHERE workspace_id = $1
           AND id = $2
+        ${lockForShare ? "FOR SHARE" : ""}
       `,
       [workspaceId, pullRequestId]
     );
+  }
+
+  private assertPullRequestReviewable(pullRequest: PullRequestRow): void {
+    if (
+      pullRequest.state !== "open" ||
+      pullRequest.github_closed_at !== null ||
+      pullRequest.merged_at !== null
+    ) {
+      throw conflictError("Pull request is closed or merged");
+    }
   }
 
   private async findReviewRoomIdentity(

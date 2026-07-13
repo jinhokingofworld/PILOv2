@@ -103,6 +103,15 @@ assert.match(
 );
 assert.match(prReviewController, /@Delete\("review-rooms\/:reviewRoomId"\)/);
 assert.match(prReviewController, /reply\.status\(result\.created \? 201 : 200\)/);
+assert.match(prReviewService, /assertPullRequestReviewable\(pullRequest\)/);
+assert.match(prReviewService, /github_closed_at/);
+assert.match(prReviewService, /merged_at/);
+assert.match(prReviewService, /Pull request is closed or merged/);
+assert.match(prReviewService, /lockForShare \? "FOR SHARE" : ""/);
+assert.match(
+  prReviewApi,
+  /동기화된 `github_pull_requests` read model을 사용한다/
+);
 assert.match(
   prReviewController,
   /@Post\("review-sessions\/:reviewSessionId\/retry"\)/

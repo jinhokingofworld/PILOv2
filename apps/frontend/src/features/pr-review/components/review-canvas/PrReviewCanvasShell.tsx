@@ -47,6 +47,7 @@ import {
 import { PrReviewCanvasSurface } from "@/features/pr-review/components/review-canvas/PrReviewCanvasSurface";
 import { PrReviewFileDiffDrawer } from "@/features/pr-review/components/review-canvas/PrReviewFileDiffDrawer";
 import { PrReviewSubmitReviewModal } from "@/features/pr-review/components/review-canvas/PrReviewSubmitReviewModal";
+import { getPrReviewErrorMessage } from "@/features/pr-review/pr-review-error-message";
 import {
   buildPrReviewConflictsApplyInput,
   createPrReviewConflictDraft,
@@ -110,16 +111,10 @@ function clamp(value: number, min: number, max: number) {
 }
 
 function getErrorMessage(error: unknown) {
-  if (error instanceof PrReviewApiError) {
-    const detail = [error.status, error.path].filter(Boolean).join(" ");
-    return detail ? `${error.message} (${detail})` : error.message;
-  }
-
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  return "리뷰 캔버스를 불러오지 못했습니다.";
+  return getPrReviewErrorMessage(
+    error,
+    "리뷰 Canvas를 불러오지 못했습니다."
+  );
 }
 
 function getConflictAnalysisErrorState(error: unknown): {
