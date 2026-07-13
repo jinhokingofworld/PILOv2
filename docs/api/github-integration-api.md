@@ -236,6 +236,7 @@ callback 성공 redirect를 실패로 바꾸지 않는다.
 | `GET` | `/workspaces/{workspaceId}/github/repositories/{repositoryId}` | Repository 상세 조회 |
 | `GET` | `/workspaces/{workspaceId}/github/repositories/{repositoryId}/collaborator-status` | 현재 사용자의 Repository collaborator 권한 조회 |
 | `GET` | `/workspaces/{workspaceId}/github/projects-v2` | 동기화된 ProjectV2 목록 조회 |
+| `POST` | `/workspaces/{workspaceId}/github/installations/{installationId}/projects-v2/discovery` | 선택한 repository 범위의 ProjectV2 탐색 |
 | `PUT` | `/workspaces/{workspaceId}/github/project-v2-selections` | installation별 ProjectV2 상세 동기화 선택 목록 교체 |
 | `GET` | `/workspaces/{workspaceId}/github/projects-v2/{projectV2Id}/access-status` | 현재 사용자의 ProjectV2 접근 권한 조회 |
 | `GET` | `/workspaces/{workspaceId}/github/projects-v2/{projectV2Id}` | ProjectV2 상세 조회 |
@@ -520,6 +521,74 @@ payload는 board 구성을 위해 연결된 repository id 목록을 포함한다
 
 `selected`: boolean은 해당 ProjectV2가 workspace 및 installation별로 저장된 상세 동기화
 선택 목록에 포함되었는지를 나타낸다.
+
+### ProjectV2 탐색
+
+```http
+POST /api/v1/workspaces/{workspaceId}/github/installations/{installationId}/projects-v2/discovery
+Authorization: Bearer <pilo_access_token>
+Content-Type: application/json
+```
+
+```json
+{
+  "repositoryId": "repository_uuid"
+}
+```
+
+`repositoryId`는 필수이며, 요청 workspace의 `installationId`에 속한 repository여야 한다.
+서버는 해당 repository와 연결된 ProjectV2 metadata와 repository link를 탐색해 저장한 뒤,
+그 repository 범위의 ProjectV2만 반환한다. Organization installation은 GitHub App
+installation token을 사용한다. Personal installation은 현재 사용자의 ProjectV2 OAuth
+connection(`purpose=project_v2`)과 `project` scope가 필요하다.
+이 endpoint는 인증된 PILO 사용자의 workspace 접근 권한이 필요하다.
+
+성공 응답:
+
+```json
+{
+  "success": true,
+  "data": {
+    "connectionRequired": false,
+    "installationId": "installation_uuid",
+    "repositoryId": "repository_uuid",
+    "projects": [
+      {
+        "id": "project_v2_uuid",
+        "installationId": "installation_uuid",
+        "title": "PILO MVP"
+      }
+    ]
+  }
+}
+```
+
+`projects`의 각 항목은 ProjectV2 목록 payload를 따른다. Personal installation에 필요한
+ProjectV2 OAuth connection이 없으면 서버는 `200 OK`로 아래 응답을 반환한다. 클라이언트는
+`/me/github/project-oauth/start`를 시작하고 callback 뒤 같은 discovery 요청을 재시도한다.
+
+```json
+{
+  "success": true,
+  "data": {
+    "connectionRequired": true,
+    "installationId": "installation_uuid",
+    "repositoryId": "repository_uuid",
+    "projects": []
+  }
+}
+```
+
+오류 응답:
+
+| Status | `error.code` | `error.message` | 조건 |
+| --- | --- | --- | --- |
+| `400 Bad Request` | `BAD_REQUEST` | `repositoryId is required` 또는 `repositoryId must be a UUID` | `repositoryId`가 없거나 UUID 형식이 아님 |
+| `400 Bad Request` | `BAD_REQUEST` | `GitHub repository does not belong to the installation` | repository가 요청 installation에 속하지 않음 |
+| `400 Bad Request` | `BAD_REQUEST` | `GitHub ProjectV2 discovery is unavailable` | 서버의 discovery 의존성이 준비되지 않음 |
+| `400 Bad Request` | `BAD_REQUEST` | `GitHub ProjectV2 discovery could not be authorized` | Organization installation의 GitHub App discovery authorization에 실패함 |
+| `404 Not Found` | `NOT_FOUND` | `Workspace not found` | 요청 workspace가 존재하지 않음 |
+| `404 Not Found` | `NOT_FOUND` | `GitHub App installation not found` | 요청 workspace에 해당 installation이 없음 |
 
 ### ProjectV2 상세 동기화 선택 저장
 
