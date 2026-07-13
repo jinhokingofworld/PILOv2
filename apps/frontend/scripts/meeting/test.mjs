@@ -331,6 +331,18 @@ assert.match(meetingReportSection, /regenerateMeetingReport/);
 assert.match(meetingReportSection, /window\.confirm/);
 assert.match(meetingReportSection, /actionItemCandidates/);
 assert.match(meetingReportSection, /getEvidenceSegments/);
+assert.match(meetingReportSection, /sourceIndex\?: number/);
+assert.match(
+  meetingReportSection,
+  /sourceIndex !== undefined && evidence\.sourceIndex !== sourceIndex/
+);
+assert.match(meetingReportSection, /getEvidenceSegments\(report, "summary"\)/);
+assert.match(meetingReportSection, /getEvidenceSegments\(report, "discussion"\)/);
+assert.match(meetingReportSection, /getEvidenceSegments\(report, "decision"\)/);
+assert.doesNotMatch(
+  meetingReportSection,
+  /getEvidenceSegments\(report, "(?:summary|discussion|decision)", 0\)/
+);
 assert.match(meetingReportSection, /formatTranscriptTimestamp/);
 assert.match(meetingReportSection, /EvidenceTimeButtons/);
 assert.match(meetingReportSection, /TranscriptSegmentViewer/);

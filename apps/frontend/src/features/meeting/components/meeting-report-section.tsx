@@ -390,7 +390,7 @@ function formatTranscriptTimestamp(value: number) {
 function getEvidenceSegments(
   report: MeetingReportDetail,
   sourceType: string,
-  sourceIndex: number
+  sourceIndex?: number
 ) {
   const segmentsById = new Map<string, MeetingReportTranscriptSegment>();
   const seenSegmentIds = new Set<string>();
@@ -401,7 +401,10 @@ function getEvidenceSegments(
   }
 
   for (const evidence of report.evidence ?? []) {
-    if (evidence.sourceType !== sourceType || evidence.sourceIndex !== sourceIndex) {
+    if (
+      evidence.sourceType !== sourceType ||
+      (sourceIndex !== undefined && evidence.sourceIndex !== sourceIndex)
+    ) {
       continue;
     }
 
@@ -584,11 +587,11 @@ function MeetingReportDetailModal({
     element.focus({ preventScroll: true });
   }
 
-  const summaryEvidence = report ? getEvidenceSegments(report, "summary", 0) : [];
+  const summaryEvidence = report ? getEvidenceSegments(report, "summary") : [];
   const discussionEvidence = report
-    ? getEvidenceSegments(report, "discussion", 0)
+    ? getEvidenceSegments(report, "discussion")
     : [];
-  const decisionEvidence = report ? getEvidenceSegments(report, "decision", 0) : [];
+  const decisionEvidence = report ? getEvidenceSegments(report, "decision") : [];
 
   return (
     <DialogPrimitive.Root
