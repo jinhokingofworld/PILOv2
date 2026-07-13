@@ -61,6 +61,7 @@ export type CanvasJoinedPayload = {
   workspaceId: string;
   canvasId: string;
   latestOpSeq: number;
+  readOnly: boolean;
   syncRequired: boolean;
   presence: CanvasRemotePresenceState[];
 };

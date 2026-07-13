@@ -19,6 +19,10 @@ const canvasAccess = await readFile(
   new URL("../src/canvas/canvas-access.service.ts", import.meta.url),
   "utf8"
 );
+const canvasRoom = await readFile(
+  new URL("../src/canvas/canvas-room.service.ts", import.meta.url),
+  "utf8"
+);
 const canvasPresence = await readFile(
   new URL("../src/canvas/canvas-presence.service.ts", import.meta.url),
   "utf8"
@@ -64,7 +68,11 @@ assert.match(sessionService, /revoked_at IS NULL/);
 
 assert.match(canvasAccess, /JOIN workspace_members wm/);
 assert.match(canvasAccess, /c\.board_type = 'freeform'/);
+assert.match(canvasAccess, /c\.board_type = 'review'/);
+assert.match(canvasAccess, /review_room\.status IN \('active', 'completed'\)/);
 assert.match(canvasAccess, /wm\.user_id = \$3/);
+assert.match(canvasRoom, /getCanvasRoomAccess/);
+assert.match(canvasRoom, /readOnly: access\.readOnly/);
 
 assert.match(socketServer, /validateSessionToken/);
 assert.match(socketServer, /canvasClientEvents\.join/);
@@ -90,6 +98,8 @@ assert.match(socketServer, /canvasServerEvents\.shapeLockRejected/);
 assert.match(socketServer, /canvasServerEvents\.shapeLockUpdate/);
 assert.match(socketServer, /canvasServerEvents\.shapePreview/);
 assert.match(socketServer, /canvasServerEvents\.shapePreviewClear/);
+assert.match(socketServer, /assertCanvasRoomWritable/);
+assert.match(socketServer, /canvas room is read-only/);
 assert.match(socketServer, /redisAdapter\.subscribe/);
 assert.match(socketServer, /MEETING_REPORT_REDIS_CHANNEL = "meeting:report-events"/);
 assert.match(socketServer, /meetingClientEvents\.subscribe/);
@@ -116,3 +126,5 @@ assert.match(canvasShapeLock, /ownerSocketId/);
 assert.match(canvasShapeLock, /expiresAt/);
 assert.match(redisPubSub, /createAdapter/);
 assert.match(redisPubSub, /subscribe\(channel/);
+
+await import("./canvas-access.test.mjs");

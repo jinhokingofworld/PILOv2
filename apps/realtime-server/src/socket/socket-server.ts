@@ -11,6 +11,7 @@ import { canvasClientEvents, canvasServerEvents } from "../canvas/canvas-socket-
 import {
   createCanvasAccessService,
   type CanvasAccessContext,
+  type CanvasRoomAccess,
 } from "../canvas/canvas-access.service";
 import { createCanvasPresenceService } from "../canvas/canvas-presence.service";
 import { createCanvasRoomService } from "../canvas/canvas-room.service";
@@ -53,6 +54,7 @@ type AuthedSocket = Socket & {
     auth: CanvasAccessContext & {
       displayName?: string;
     };
+    canvasRoomAccess: Map<string, CanvasRoomAccess>;
   };
 };
 
@@ -332,6 +334,23 @@ function emitCanvasError(socket: Socket, message: string) {
   );
 }
 
+function assertCanvasRoomWritable(
+  socket: AuthedSocket,
+  roomName: string,
+): boolean {
+  const access = socket.data.canvasRoomAccess.get(roomName);
+
+  if (access && !access.readOnly) {
+    return true;
+  }
+
+  socket.emit(
+    canvasServerEvents.error,
+    createSocketErrorPayload("forbidden", "canvas room is read-only"),
+  );
+  return false;
+}
+
 function readMeetingWorkspaceId(payload: unknown): string | null {
   if (!isRecord(payload)) return null;
   return readRequiredString(payload, "workspaceId");
@@ -437,6 +456,7 @@ export async function createRealtimeSocketServer({
           ...authContext,
           userId: session.userId,
         };
+        (socket as AuthedSocket).data.canvasRoomAccess = new Map();
         next();
       })
       .catch(next);
@@ -467,6 +487,7 @@ export async function createRealtimeSocketServer({
       }
 
       await socket.join(result.roomName);
+      authedSocket.data.canvasRoomAccess.set(result.roomName, result.access);
       socket.emit(canvasServerEvents.joined, result.payload);
     });
 
@@ -519,6 +540,7 @@ export async function createRealtimeSocketServer({
       );
 
       await socket.leave(roomName);
+      authedSocket.data.canvasRoomAccess.delete(roomName);
 
       if (leavePayload) {
         socket.to(roomName).emit(canvasServerEvents.presenceLeave, leavePayload);
@@ -597,6 +619,10 @@ export async function createRealtimeSocketServer({
         return;
       }
 
+      if (!assertCanvasRoomWritable(authedSocket, roomName)) {
+        return;
+      }
+
       const result = shapeLockService.claimLocks(
         socket.id,
         authedSocket.data.auth.userId ?? socket.id,
@@ -634,6 +660,10 @@ export async function createRealtimeSocketServer({
             "join canvas room before releasing shape locks",
           ),
         );
+        return;
+      }
+
+      if (!assertCanvasRoomWritable(authedSocket, roomName)) {
         return;
       }
 
@@ -676,6 +706,10 @@ export async function createRealtimeSocketServer({
         return;
       }
 
+      if (!assertCanvasRoomWritable(authedSocket, roomName)) {
+        return;
+      }
+
       socket.to(roomName).emit(canvasServerEvents.shapePreview, {
         ...previewPayload,
         actorUserId: authedSocket.data.auth.userId ?? socket.id,
@@ -701,6 +735,10 @@ export async function createRealtimeSocketServer({
             "join canvas room before clearing shape previews",
           ),
         );
+        return;
+      }
+
+      if (!assertCanvasRoomWritable(authedSocket, roomName)) {
         return;
       }
 

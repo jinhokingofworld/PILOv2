@@ -53,6 +53,7 @@ export type CanvasJoinPayload = CanvasRoomRef & {
 export type CanvasJoinedPayload = CanvasRoomRef & {
   latestOpSeq: number;
   presence: CanvasPresenceState[];
+  readOnly: boolean;
   syncRequired: boolean;
 };
 

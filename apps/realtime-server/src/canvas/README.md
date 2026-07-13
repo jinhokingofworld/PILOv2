@@ -10,6 +10,7 @@ This module owns Canvas Socket.IO rooms and presence delivery.
 
 - Validate Canvas room join payloads.
 - Check workspace/canvas access before joining a room.
+- Return whether the joined Canvas room is read-only.
 - Broadcast cursor, selection, and edit-intent presence to other sockets in the
   room.
 - Emit leave events when a socket leaves or disconnects.
@@ -49,7 +50,11 @@ Realtime Canvas access follows App Server semantics:
 
 1. Bearer token is validated against `user_sessions`.
 2. `workspace_members` must contain the authenticated user.
-3. `canvas` must belong to the workspace and have `board_type = 'freeform'`.
+3. `canvas` must belong to the workspace and be either `board_type = 'freeform'`
+   or a `board_type = 'review'` Canvas connected to a PR Review room.
+4. Active Review Canvas rooms are read-write. Completed Review Canvas rooms are
+   read-only: presence is allowed, while shape lock and preview events are
+   rejected.
 
-PR Review canvas surfaces should opt in explicitly later instead of receiving
-Canvas presence automatically through the shared tldraw surface.
+PR Review canvas surfaces opt in explicitly instead of receiving Canvas
+presence automatically through the shared tldraw surface.
