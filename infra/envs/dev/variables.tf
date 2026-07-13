@@ -112,6 +112,12 @@ variable "ai_worker_desired_count" {
   default     = 1
 }
 
+variable "meeting_worker_desired_count" {
+  description = "Dev MeetingReport-only worker task count."
+  type        = number
+  default     = 1
+}
+
 variable "pr_review_ai_worker_desired_count" {
   description = "Dev PR Review AI worker task count. Keep one worker running while PR Review analysis is enabled."
   type        = number

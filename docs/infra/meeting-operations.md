@@ -22,13 +22,14 @@ Meeting 녹음 종료부터 AI 회의록 처리까지의 전달 경로와 실패
 ## 로그 흐름
 
 CloudWatch log group은 ECS service 기준 `/ecs/<환경-prefix>/app-server`와
-`/ecs/<환경-prefix>/ai-worker`다. 기본 조사 순서는 `report_id`다.
+`/ecs/<환경-prefix>/meeting-worker`다. 기본 조사 순서는 `report_id`다. Agent와
+PR Review job은 이 Worker가 아닌 각각의 전용 queue/Worker에서 처리한다.
 
 1. App Server에서 `MeetingReport job event=enqueue_requested`와
    `event=enqueued`를 찾는다. 후자에는 `sqs_message_id`가 포함된다.
 2. durable outbox를 사용한 흐름이면 `MeetingReport outbox` 로그에서
    `outbox_id`, claim/delivered/retry 이벤트를 확인한다.
-3. AI Worker에서 같은 `report_id`의 `event=received`와 `event=processed`를 찾는다.
+3. Meeting Worker에서 같은 `report_id`의 `event=received`와 `event=processed`를 찾는다.
    `sqs_message_id`와 `receive_count`로 해당 broker 전달을 확인한다.
 4. 최종 상태는 MeetingReport의 `COMPLETED` 또는 `FAILED`를 기준으로 확인한다.
 
@@ -41,7 +42,7 @@ CloudWatch log group은 ECS service 기준 `/ecs/<환경-prefix>/app-server`와
 | `claimed` / `delivered` | App Server | dispatcher outbox claim 및 SQS 발행 후 delivered 기록 |
 | `retry_scheduled` / `retry_exhausted` | App Server | backoff 재시도 예정 또는 한도 소진 |
 | `stale_report_failed` | App Server | Worker advisory lock이 없는 오래된 처리 건을 실패 처리 |
-| `received` / `processed` | AI Worker | SQS 수신 및 processor 결과 |
+| `received` / `processed` | Meeting Worker | SQS 수신 및 processor 결과 |
 
 ## 실패 단계 판단
 
@@ -55,3 +56,29 @@ outbox가 `pending` 또는 lease가 만료된 `publishing`이면 App Server disp
 재발행한다. `failed`면 재시도 한도가 소진된 상태다. `delivered`인데 Report가
 `PROCESSING`이면 AI Worker 로그와 advisory lock 보유 여부를 먼저 확인한다. stale
 recovery는 Worker lock을 보유한 Report를 실패 처리하지 않는다.
+
+## 전용 queue 운영
+
+MeetingReport는 `${prefix}-meeting-jobs`만 사용한다. queue visibility timeout은
+`900`초이고, infrastructure failure로 메시지를 삭제하지 못한 경우 최대 3회 수신 뒤
+`${prefix}-meeting-jobs-dlq`로 이동한다. DLQ 메시지는 원인을 수정하기 전 재전송하지
+않는다.
+
+CloudWatch에서는 다음 alarm을 확인한다.
+
+- `${prefix}-meeting-jobs-oldest-age`: 가장 오래된 메시지 600초 이상
+- `${prefix}-meeting-jobs-backlog`: visible 메시지 10개 이상
+- `${prefix}-meeting-jobs-dlq-backlog`: DLQ visible 메시지 1개 이상
+- `${prefix}-meeting-worker-running-tasks`: 2분 연속 running task 0개
+
+## 배포·롤백 순서
+
+1. Terraform apply로 queue/DLQ, `meeting-worker` ECS service, IAM role, alarm을 먼저
+   생성하고 service의 desired/running count가 `1/1`인지 확인한다.
+2. `meeting-worker` task definition에 `SQS_MEETING_JOBS_QUEUE_URL`만 있고
+   `SQS_AI_JOBS_QUEUE_URL`, `SQS_PR_REVIEW_ANALYSIS_QUEUE_URL`가 없는지 확인한다.
+3. App Server를 배포해 MeetingReport publisher를 전용 queue로 전환한다. 전환 직후
+   App Server enqueue log와 Meeting Worker receive log의 `sqs_message_id`를 대조한다.
+4. 롤백이 필요하면 App Server만 직전 task definition으로 되돌려 publisher를 기존
+   shared queue로 복구한다. 새 queue의 in-flight/visible 메시지는 유실시키지 않고
+   Meeting Worker가 drain한 뒤 service를 중지한다.

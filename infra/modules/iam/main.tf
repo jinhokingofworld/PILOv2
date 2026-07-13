@@ -110,7 +110,7 @@ resource "aws_iam_role_policy" "ai_worker_task" {
           "sqs:GetQueueUrl",
           "sqs:ChangeMessageVisibility"
         ]
-        Resource = var.sqs_queue_arns
+        Resource = var.ai_worker_queue_arns
       },
       {
         Effect   = "Allow"
@@ -118,6 +118,63 @@ resource "aws_iam_role_policy" "ai_worker_task" {
         Resource = local.s3_object_arns
       }
     ]
+  })
+}
+
+resource "aws_iam_role" "meeting_worker_task" {
+  name               = "${var.name_prefix}-meeting-worker-task-role"
+  assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume_role.json
+}
+
+resource "aws_iam_role_policy" "meeting_worker_task" {
+  name = "${var.name_prefix}-meeting-worker-task-policy"
+  role = aws_iam_role.meeting_worker_task.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "sqs:ReceiveMessage",
+          "sqs:DeleteMessage",
+          "sqs:GetQueueAttributes",
+          "sqs:GetQueueUrl",
+          "sqs:ChangeMessageVisibility"
+        ]
+        Resource = var.meeting_worker_queue_arns
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["s3:GetObject"]
+        Resource = local.s3_object_arns
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role" "pr_review_ai_worker_task" {
+  name               = "${var.name_prefix}-pr-review-ai-worker-task-role"
+  assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume_role.json
+}
+
+resource "aws_iam_role_policy" "pr_review_ai_worker_task" {
+  name = "${var.name_prefix}-pr-review-ai-worker-task-policy"
+  role = aws_iam_role.pr_review_ai_worker_task.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "sqs:ReceiveMessage",
+        "sqs:DeleteMessage",
+        "sqs:GetQueueAttributes",
+        "sqs:GetQueueUrl",
+        "sqs:ChangeMessageVisibility"
+      ]
+      Resource = var.pr_review_ai_worker_queue_arns
+    }]
   })
 }
 

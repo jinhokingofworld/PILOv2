@@ -205,6 +205,7 @@ terraform apply
 - App Server CloudWatch log stream 생성 확인
 - Realtime Server CloudWatch log stream 생성 확인
 - AI Worker CloudWatch log stream 생성 확인
+- Meeting Worker CloudWatch log stream 생성 확인
 - PR Review AI Worker CloudWatch log stream 생성 확인
 - task startup error 확인
 
@@ -213,6 +214,7 @@ terraform apply
 - App Server에서 RDS 연결 확인
 - App Server에서 Redis 연결 확인
 - AI Worker에서 SQS consume 가능 여부 확인
+- Meeting Worker에서 MeetingReport 전용 SQS consume 가능 여부 확인
 - PR Review AI Worker에서 전용 SQS consume 가능 여부 확인
 - AI Worker에서 S3 read/write 가능 여부 확인
 
@@ -224,7 +226,7 @@ terraform apply
 - LiveKit room token 발급 가능 여부 확인
 - LiveKit Egress가 같은 Redis와 LiveKit Server에 연결되는지 확인
 - audio-only Egress 녹음 파일이 S3에 저장되는지 확인
-- 저장된 오디오 파일로 AI Worker STT job 생성이 가능한지 확인
+- 저장된 오디오 파일로 Meeting Worker STT job 생성이 가능한지 확인
 
 ## 6. GitHub Actions 검증
 
@@ -255,7 +257,7 @@ terraform apply
 - ECR push 성공
 - ECS service deployment 시작 확인
 - SQS consume log 확인
-- `ai-worker`, `pr-review-ai-worker` 두 ECS service가 같은 새 image로 안정화되는지 확인
+- `ai-worker`, `meeting-worker`, `pr-review-ai-worker` ECS service가 같은 새 image로 안정화되는지 확인
 
 ### Frontend workflow
 

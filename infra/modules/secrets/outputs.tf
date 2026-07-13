@@ -39,8 +39,19 @@ output "ai_worker_ecs_secrets" {
       name => aws_secretsmanager_secret.this["ai-worker/${name}"].arn
     },
     {
-      for name in local.shared_ecs_secret_names :
-      name => aws_secretsmanager_secret.this["shared/${name}"].arn
+      AGENT_EXECUTION_HANDOFF_TOKEN = aws_secretsmanager_secret.this["shared/AGENT_EXECUTION_HANDOFF_TOKEN"].arn
+    },
+  )
+}
+
+output "meeting_worker_ecs_secrets" {
+  value = merge(
+    {
+      for name in ["DATABASE_URL", "OPENAI_API_KEY"] :
+      name => aws_secretsmanager_secret.this["ai-worker/${name}"].arn
+    },
+    {
+      MEETING_REPORT_EVENT_TOKEN = aws_secretsmanager_secret.this["shared/MEETING_REPORT_EVENT_TOKEN"].arn
     },
   )
 }

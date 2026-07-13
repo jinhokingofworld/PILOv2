@@ -14,6 +14,14 @@ output "ai_worker_task_role_arn" {
   value = aws_iam_role.ai_worker_task.arn
 }
 
+output "meeting_worker_task_role_arn" {
+  value = aws_iam_role.meeting_worker_task.arn
+}
+
+output "pr_review_ai_worker_task_role_arn" {
+  value = aws_iam_role.pr_review_ai_worker_task.arn
+}
+
 output "github_sync_worker_task_role_arn" {
   value = aws_iam_role.github_sync_worker_task.arn
 }

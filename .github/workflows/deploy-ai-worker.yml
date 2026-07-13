@@ -53,6 +53,7 @@ jobs:
         env:
           ECS_CLUSTER_NAME: ${{ vars.ECS_CLUSTER_NAME }}
           ECS_AI_WORKER_SERVICE: ${{ vars.ECS_AI_WORKER_SERVICE }}
+          ECS_MEETING_WORKER_SERVICE: ${{ vars.ECS_MEETING_WORKER_SERVICE }}
           ECS_PR_REVIEW_AI_WORKER_SERVICE: ${{ vars.ECS_PR_REVIEW_AI_WORKER_SERVICE }}
         run: |
           test -n "$ECS_CLUSTER_NAME"
@@ -74,6 +75,25 @@ jobs:
           test "$queue_url" != "None"
 
           services=("$ECS_AI_WORKER_SERVICE")
+
+          if [ -n "$ECS_MEETING_WORKER_SERVICE" ]; then
+            meeting_task_definition=$(aws ecs describe-services \
+              --cluster "$ECS_CLUSTER_NAME" \
+              --services "$ECS_MEETING_WORKER_SERVICE" \
+              --query 'services[0].taskDefinition' \
+              --output text)
+            test -n "$meeting_task_definition"
+            test "$meeting_task_definition" != "None"
+
+            meeting_queue_url=$(aws ecs describe-task-definition \
+              --task-definition "$meeting_task_definition" \
+              --query 'taskDefinition.containerDefinitions[0].environment[?name==`SQS_MEETING_JOBS_QUEUE_URL`].value | [0]' \
+              --output text)
+            test -n "$meeting_queue_url"
+            test "$meeting_queue_url" != "None"
+
+            services+=("$ECS_MEETING_WORKER_SERVICE")
+          fi
 
           if [ -n "$ECS_PR_REVIEW_AI_WORKER_SERVICE" ]; then
             pr_review_task_definition=$(aws ecs describe-services \

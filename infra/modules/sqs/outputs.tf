@@ -2,6 +2,22 @@ output "ai_jobs_queue_url" {
   value = aws_sqs_queue.ai_jobs.url
 }
 
+output "ai_jobs_queue_arn" {
+  value = aws_sqs_queue.ai_jobs.arn
+}
+
+output "meeting_jobs_queue_url" {
+  value = aws_sqs_queue.meeting_jobs.url
+}
+
+output "meeting_jobs_queue_arn" {
+  value = aws_sqs_queue.meeting_jobs.arn
+}
+
+output "meeting_jobs_dlq_arn" {
+  value = aws_sqs_queue.meeting_jobs_dlq.arn
+}
+
 output "pr_review_analysis_queue_url" {
   value = aws_sqs_queue.pr_review_analysis.url
 }
@@ -34,6 +50,8 @@ output "queue_arns" {
   value = [
     aws_sqs_queue.ai_jobs.arn,
     aws_sqs_queue.ai_jobs_dlq.arn,
+    aws_sqs_queue.meeting_jobs.arn,
+    aws_sqs_queue.meeting_jobs_dlq.arn,
     aws_sqs_queue.pr_review_analysis.arn,
     aws_sqs_queue.pr_review_analysis_dlq.arn,
     aws_sqs_queue.github_webhooks.arn,

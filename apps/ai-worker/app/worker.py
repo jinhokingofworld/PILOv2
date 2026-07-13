@@ -1,7 +1,7 @@
 import os
 from dataclasses import dataclass
 
-from app.meeting_report_runtime import run_worker
+from app.shared_ai_worker_runtime import run_shared_ai_worker
 
 
 @dataclass(frozen=True)
@@ -30,7 +30,7 @@ def supported_jobs() -> list[str]:
 
 
 def main() -> None:
-    run_worker()
+    run_shared_ai_worker()
 
 
 if __name__ == "__main__":

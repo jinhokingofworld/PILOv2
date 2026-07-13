@@ -20,6 +20,7 @@ github_repo  = "PILO"
 app_server_desired_count            = 1
 realtime_server_desired_count       = 1
 ai_worker_desired_count             = 1
+meeting_worker_desired_count        = 1
 pr_review_ai_worker_desired_count   = 1
 
 # Self-hosted LiveKit MVP host. Keep public CIDRs open for WebRTC unless a
