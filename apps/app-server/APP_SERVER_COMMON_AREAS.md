@@ -44,6 +44,10 @@ src/modules/<domain>/
 | `canvas` | `docs/api/canvas-api.md` |
 | `board` | `docs/api/board-api.md` |
 | `sql-erd` | `docs/api/sqltoerd-api.md` |
+| `settings` | `docs/api/settings-api.md` |
+
+Settings module은 현재 사용자 개인 환경설정만 소유한다. User profile/계정 탈퇴,
+Workspace 수정·삭제, GitHub 연결 lifecycle은 각 소유 module에 남긴다.
 
 도메인 전용 테스트 스크립트는 `scripts/<domain>/` 아래에 둔다.
 

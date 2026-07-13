@@ -77,7 +77,28 @@ const appSidebar = await readFile(
   "utf8"
 );
 const appSettingsDialog = await readFile(
-  new URL("../src/components/app-settings-dialog.tsx", import.meta.url),
+  new URL(
+    "../src/features/settings/components/user-settings-dialog.tsx",
+    import.meta.url
+  ),
+  "utf8"
+);
+const settingsMockData = await readFile(
+  new URL("../src/features/settings/mock-data.ts", import.meta.url),
+  "utf8"
+);
+const memberProfileDialog = await readFile(
+  new URL(
+    "../src/features/home/components/member-profile-dialog.tsx",
+    import.meta.url
+  ),
+  "utf8"
+);
+const githubSettingsPlaceholder = await readFile(
+  new URL(
+    "../src/features/settings/components/github-settings-placeholder.tsx",
+    import.meta.url
+  ),
   "utf8"
 );
 const workspaceCreationRoute = await readFile(
@@ -450,13 +471,13 @@ assert.doesNotMatch(appSidebar, /Design Team/);
 assert.doesNotMatch(appSidebar, /Review Lab/);
 assert.match(appSidebar, /router\.push\("\/workspace\/new"\)/);
 assert.match(appSidebar, /canManageWorkspace=\{activeWorkspace\.role === "owner"\}/);
-assert.match(appSettingsDialog, /id: "workspace"/);
-assert.match(appSettingsDialog, /canManageWorkspace \?/);
-assert.match(appSettingsDialog, /Owner 전용 설정입니다/);
-assert.match(appSettingsDialog, /id: "github"/);
-assert.match(appSettingsDialog, /MOCK_GITHUB_CONNECTIONS/);
+assert.match(appSettingsDialog, /value="workspace"/);
 assert.match(appSettingsDialog, /disabled=\{!canManageWorkspace\}/);
-assert.match(appSettingsDialog, /canManageWorkspace \? "연결 관리" : "조회 전용"/);
+assert.match(appSettingsDialog, /Workspace 삭제/);
+assert.match(appSettingsDialog, /Member는 Workspace 정보를 조회만 할 수 있습니다/);
+assert.doesNotMatch(appSettingsDialog, /MOCK_GITHUB_CONNECTIONS/);
+assert.match(settingsMockData, /MOCK_PROFILE/);
+assert.match(settingsMockData, /MOCK_SETTINGS_FORM/);
 assert.match(workspaceCreationRoute, /WorkspaceCreationPage/);
 assert.match(
   headerNotificationDropdown,
@@ -478,14 +499,42 @@ assert.match(appSidebar, /avatarUrl: authSession\.user\.avatarUrl/);
 assert.match(appSidebar, /src=\{displayUser\.avatarUrl \|\| undefined\}/);
 assert.match(appSidebar, /group-data-\[collapsible=icon\]:justify-center/);
 assert.match(appSidebar, /group-data-\[collapsible=icon\]:hidden/);
+assert.match(appSidebar, /group-data-\[collapsible=icon\]:mx-auto/);
+assert.match(appSidebar, /group-data-\[collapsible=icon\]:w-8/);
 assert.doesNotMatch(appSidebar, /\{item\.description\}/);
-assert.match(appSidebar, /AppSettingsDialog/);
+assert.doesNotMatch(appSidebar, /ProfileDialog/);
+assert.doesNotMatch(appSidebar, /AccountDialog/);
+assert.match(appSidebar, /SettingsDialog/);
+assert.doesNotMatch(appSidebar, /openUserDialog/);
 assert.match(appSidebar, /setIsSettingsDialogOpen\(true\)/);
+assert.match(appSidebar, /open=\{isSettingsDialogOpen\}/);
 assert.match(appSettingsDialog, /DialogContent/);
-assert.match(appSettingsDialog, /SETTINGS_TABS/);
-assert.match(appSettingsDialog, /aria-label="설정 메뉴"/);
-assert.match(appSettingsDialog, /MOCK_SESSIONS/);
-assert.match(appSettingsDialog, /현재 설정 데이터와 동작은 목업입니다/);
+assert.doesNotMatch(appSettingsDialog, /export function ProfileDialog/);
+assert.doesNotMatch(appSettingsDialog, /export function AccountDialog/);
+assert.match(appSettingsDialog, /export function SettingsDialog/);
+assert.match(appSettingsDialog, /<TabsContent value="profile">/);
+assert.match(appSettingsDialog, /<TabsContent value="account">/);
+assert.match(appSettingsDialog, /<TabsContent value="github">/);
+assert.match(appSettingsDialog, /max-h-\[44rem\]/);
+assert.doesNotMatch(appSettingsDialog, /DIALOG_VIEWS/);
+assert.doesNotMatch(appSettingsDialog, /aria-label="사용자 메뉴"/);
+assert.doesNotMatch(appSettingsDialog, /MOCK_CURRENT_SESSION/);
+assert.doesNotMatch(appSettingsDialog, /value="security"/);
+assert.match(appSettingsDialog, /목업 데이터/);
+assert.match(appSettingsDialog, /계정 탈퇴/);
+assert.doesNotMatch(appSettingsDialog, /프로필 편집/);
+assert.doesNotMatch(appSettingsDialog, /파일 업로드 없이/);
+assert.match(appSettingsDialog, /URL 이미지/);
+assert.match(appSettingsDialog, /setCustomAvatarUrl/);
+assert.match(memberProfileDialog, /export function MemberProfileDialog/);
+assert.match(memberProfileDialog, /member\.user\.name/);
+assert.match(memberProfileDialog, /member\.user\.lastSeenAt/);
+assert.match(memberProfileDialog, /canRemoveSelectedMember/);
+assert.match(memberProfileDialog, /member\.role !== "owner"/);
+assert.match(memberProfileDialog, /max-w-4xl/);
+assert.match(githubSettingsPlaceholder, /\/me\/github/);
+assert.match(githubSettingsPlaceholder, /GitHub Integration API/);
+assert.doesNotMatch(githubSettingsPlaceholder, /api\/client/);
 assert.match(canvasClientFacade, /const DEFAULT_CANVAS_MODE = "api"/);
 assert.match(canvasClientFacade, /createCanvasApiClient\(options\)/);
 assert.match(canvasClientFacade, /createMockCanvasClient\(\)/);
