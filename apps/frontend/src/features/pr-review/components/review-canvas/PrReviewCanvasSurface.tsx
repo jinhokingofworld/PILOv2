@@ -12,11 +12,11 @@ import {
   createShapeId,
   useEditor,
   type Editor,
+  type TLEventInfo,
   type TLShape,
   type TLShapeId,
   type TLShapePartial
 } from "tldraw";
-import { useValue } from "@tldraw/state-react";
 
 import { TldrawSurface } from "@/shared/tldraw/TldrawSurface";
 import type {
@@ -63,6 +63,12 @@ import {
   isPrReviewCanvasSystemShape,
   type PrReviewCanvasFileShapeSnapshot
 } from "@/features/pr-review/components/review-canvas/pr-review-canvas-persistence";
+import {
+  createPrReviewFileNodeActivationGesture,
+  shouldActivatePrReviewFileNode,
+  updatePrReviewFileNodeActivationGesture,
+  type PrReviewFileNodeActivationGesture
+} from "@/features/pr-review/components/review-canvas/pr-review-node-activation";
 
 type PrReviewApiClient = ReturnType<typeof createPrReviewApiClient>;
 
@@ -871,27 +877,78 @@ function registerReviewShapePolicy(
   });
 }
 
-function PrReviewSelectionBridge({
+function PrReviewFileNodeActivationBridge({
   onFileSelect
 }: {
   onFileSelect?: (reviewFileId: string | null) => void;
 }) {
   const editor = useEditor();
-  const selectedReviewFileId = useValue(
-    "pr-review-selected-shape",
-    () => {
-      const selectedShape = editor.getOnlySelectedShape();
-
-      return isPrReviewFileNodeShape(selectedShape)
-        ? selectedShape.props.reviewFileId
-        : null;
-    },
-    [editor]
-  );
+  const gestureRef = useRef<PrReviewFileNodeActivationGesture | null>(null);
 
   useEffect(() => {
-    onFileSelect?.(selectedReviewFileId);
-  }, [onFileSelect, selectedReviewFileId]);
+    const handleEditorEvent = (event: TLEventInfo) => {
+      if (event.name === "cancel" || event.name === "interrupt") {
+        gestureRef.current = null;
+        return;
+      }
+
+      if (event.type !== "pointer") {
+        return;
+      }
+
+      if (event.name === "pointer_down") {
+        if (event.target === "shape" && isPrReviewFileNodeShape(event.shape)) {
+          gestureRef.current = createPrReviewFileNodeActivationGesture({
+            pointer: event.point,
+            reviewFileId: event.shape.props.reviewFileId,
+            shapeId: event.shape.id,
+            shapePosition: event.shape
+          });
+          return;
+        }
+
+        gestureRef.current = null;
+        onFileSelect?.(null);
+        return;
+      }
+
+      const gesture = gestureRef.current;
+      if (!gesture) {
+        return;
+      }
+
+      if (event.name === "pointer_move") {
+        gestureRef.current = updatePrReviewFileNodeActivationGesture(
+          gesture,
+          event.point
+        );
+        return;
+      }
+
+      if (event.name !== "pointer_up") {
+        return;
+      }
+
+      const completedGesture = updatePrReviewFileNodeActivationGesture(
+        gesture,
+        event.point
+      );
+      const currentShape = editor.getShape(completedGesture.shapeId as TLShapeId);
+      gestureRef.current = null;
+
+      if (
+        isPrReviewFileNodeShape(currentShape) &&
+        shouldActivatePrReviewFileNode(completedGesture, currentShape)
+      ) {
+        onFileSelect?.(completedGesture.reviewFileId);
+      }
+    };
+
+    editor.on("event", handleEditorEvent);
+    return () => {
+      editor.off("event", handleEditorEvent);
+    };
+  }, [editor, onFileSelect]);
 
   return null;
 }
@@ -1342,7 +1399,7 @@ export function PrReviewCanvasSurface({
         onMount={handleMount}
         shapeUtils={prReviewShapeUtils}
       >
-        <PrReviewSelectionBridge onFileSelect={onFileSelect} />
+        <PrReviewFileNodeActivationBridge onFileSelect={onFileSelect} />
         <PrReviewCanvasPersistenceBridge
           apiClient={apiClient}
           enabled={persistedFileShapeEnabled}
