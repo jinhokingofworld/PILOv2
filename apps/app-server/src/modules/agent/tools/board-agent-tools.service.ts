@@ -263,7 +263,7 @@ export class BoardAgentToolsService {
     maxLength: number
   ): string | null {
     const value = input[field];
-    if (value === undefined) {
+    if (value === undefined || value === null) {
       return null;
     }
     if (typeof value !== "string" || !value.trim()) {

@@ -1094,6 +1094,35 @@ function formatterMeetingReport(index, overrides = {}) {
 
 {
   const { boardService, registry } = createSmokeRegistry();
+  const { service } = createExecutionServiceWithRegistry(
+    plannerOutput({
+      toolName: "search_board_issues",
+      riskLevel: "low",
+      executionMode: "auto",
+      requiresConfirmation: false,
+      input: {}
+    }),
+    registry
+  );
+
+  const result = await service.executeLatestPlannedTool(
+    USER_ID,
+    WORKSPACE_ID,
+    RUN_ID
+  );
+
+  assert.equal(result.status, "completed");
+  assert.deepEqual(boardService.calls[1], {
+    method: "listBoardIssues",
+    currentUserId: USER_ID,
+    workspaceId: WORKSPACE_ID,
+    boardId: "99999999-9999-4999-8999-999999999999",
+    query: { page: 1, limit: 20 }
+  });
+}
+
+{
+  const { boardService, registry } = createSmokeRegistry();
   boardService.boards.push({
     id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
     name: "운영",
