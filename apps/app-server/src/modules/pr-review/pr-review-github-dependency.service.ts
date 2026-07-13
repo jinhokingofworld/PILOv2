@@ -55,9 +55,8 @@ export class PrReviewGithubDependencyService implements PrReviewGithubDependency
     const files: GithubPullRequestFilePayload[] = [];
     const limit = 100;
     let page = 1;
-    let total = Number.POSITIVE_INFINITY;
 
-    while (files.length < total) {
+    while (true) {
       const result = await this.githubIntegrationService.listGithubPullRequestFiles(
         currentUserId,
         workspaceId,
@@ -66,7 +65,6 @@ export class PrReviewGithubDependencyService implements PrReviewGithubDependency
       );
 
       files.push(...result.data);
-      total = result.meta.total;
 
       if (result.data.length === 0 || result.data.length < limit) {
         break;
