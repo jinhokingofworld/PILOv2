@@ -156,6 +156,12 @@ resource "aws_iam_policy" "github_sync_operator" {
     Version = "2012-10-17"
     Statement = [
       {
+        Sid      = "ListQueues"
+        Effect   = "Allow"
+        Action   = ["sqs:ListQueues"]
+        Resource = "*"
+      },
+      {
         Sid    = "InspectGithubSyncQueues"
         Effect = "Allow"
         Action = [
