@@ -7,13 +7,17 @@ import type {
 import { parseSqlDdlToErdModel } from "@/features/sql-erd/utils/ddl-parser";
 import { retainSqltoerdRelationNotesForModel } from "@/features/sql-erd/utils/foreign-key-add";
 import { createSqltoerdLayoutForModel } from "@/features/sql-erd/utils/model";
-import { generateSqlDdlFromErdModel } from "@/features/sql-erd/utils/model-to-sql";
+import {
+  generateSqlDdlFromErdModel,
+  SqltoerdModelToSqlGenerationError
+} from "@/features/sql-erd/utils/model-to-sql";
 import type { SqlErdViewSession } from "@/features/sql-erd/utils/session-state";
 
 const SQL_ERD_MODEL_SQL_HISTORY_LIMIT = 20;
 
 export type SqlErdNormalizedSqlPreview = {
   baseSnapshot: SqlErdViewSession;
+  generationBlocked: boolean;
   generatedSourceText: string;
   hasChanges: boolean;
   layoutJson: SqltoerdLayoutJsonV1;
@@ -61,24 +65,46 @@ export function createSqlErdNormalizedSqlPreview({
   session: SqlErdViewSession;
   settingsJson?: SqltoerdSettingsJson;
 }): SqlErdNormalizedSqlPreview {
-  const generated = generateSqlDdlFromErdModel({
-    dialect: resolvedDialect,
-    modelJson
-  });
-
-  return {
-    baseSnapshot: session,
-    generatedSourceText: generated.sql,
-    hasChanges: generated.sql !== session.sourceText,
-    layoutJson: layoutJson ?? session.layoutJson,
-    modelJson,
-    resolvedDialect,
-    settingsJson: retainSqltoerdRelationNotesForModel(
-      settingsJson ?? session.settingsJson,
+  try {
+    const generated = generateSqlDdlFromErdModel({
+      dialect: resolvedDialect,
       modelJson
-    ),
-    warnings: generated.warnings
-  };
+    });
+
+    return {
+      baseSnapshot: session,
+      generationBlocked: false,
+      generatedSourceText: generated.sql,
+      hasChanges: generated.sql !== session.sourceText,
+      layoutJson: layoutJson ?? session.layoutJson,
+      modelJson,
+      resolvedDialect,
+      settingsJson: retainSqltoerdRelationNotesForModel(
+        settingsJson ?? session.settingsJson,
+        modelJson
+      ),
+      warnings: generated.warnings
+    };
+  } catch (error) {
+    if (!(error instanceof SqltoerdModelToSqlGenerationError)) {
+      throw error;
+    }
+
+    return {
+      baseSnapshot: session,
+      generationBlocked: true,
+      generatedSourceText: session.sourceText,
+      hasChanges: false,
+      layoutJson: layoutJson ?? session.layoutJson,
+      modelJson,
+      resolvedDialect,
+      settingsJson: retainSqltoerdRelationNotesForModel(
+        settingsJson ?? session.settingsJson,
+        modelJson
+      ),
+      warnings: [error.message]
+    };
+  }
 }
 
 export function createSqlErdSqlLineDiff(

@@ -16,6 +16,17 @@ export type SqltoerdModelToSqlResult = {
   warnings: string[];
 };
 
+export class SqltoerdModelToSqlGenerationError extends Error {
+  readonly code = "SQLITE_DEFERRED_FOREIGN_KEY";
+
+  constructor(readonly relationIds: string[]) {
+    super(
+      "SQLite cannot regenerate FOREIGN KEY relations that require ALTER TABLE. Reorder the tables or edit the SQL source directly."
+    );
+    this.name = "SqltoerdModelToSqlGenerationError";
+  }
+}
+
 export function generateSqlDdlFromErdModel(
   input: SqltoerdModelToSqlInput
 ): SqltoerdModelToSqlResult {
@@ -32,6 +43,10 @@ export function generateSqlDdlFromErdModel(
       )
       .map((relation) => relation.id)
   );
+
+  if (input.dialect === "sqlite" && deferredRelationIds.size > 0) {
+    throw new SqltoerdModelToSqlGenerationError([...deferredRelationIds]);
+  }
   const relationsByTableId = groupRelationsByTableId(input.modelJson.schema.relations);
   const createStatements = input.modelJson.schema.tables.map((table) =>
     renderCreateTable(
@@ -221,6 +236,10 @@ function groupRelationsByTableId(relations: ErdRelation[]) {
 }
 
 function isCyclicRelation(relation: ErdRelation, relations: ErdRelation[]) {
+  if (relation.fromTableId === relation.toTableId) {
+    return false;
+  }
+
   return canReachTable(relation.toTableId, relation.fromTableId, relations, new Set());
 }
 

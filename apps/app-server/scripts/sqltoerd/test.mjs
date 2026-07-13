@@ -563,6 +563,18 @@ await assertRouteBodyLimit(
 );
 
 {
+  const normalized = validateCreateSqlErdSessionRequest({
+    dialect: "sqlite",
+    sourceFormat: "sql",
+    sourceText: "CREATE TABLE users (id INTEGER PRIMARY KEY);",
+    modelJson: modelJson(),
+    layoutJson: layoutJson()
+  });
+
+  assert.equal(normalized.dialect, "sqlite");
+}
+
+{
   const database = new FakeDatabase({
     queryOneRows: [
       (text, values) => {

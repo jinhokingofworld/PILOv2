@@ -1812,12 +1812,18 @@ function NormalizedSqlPreviewDialog({
     <Dialog open={preview !== null} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-5xl" showCloseButton={!isApplying}>
         <DialogHeader>
-          <DialogTitle>Apply SQL changes</DialogTitle>
+          <DialogTitle>
+            {preview?.generationBlocked
+              ? "SQL regeneration unavailable"
+              : "Apply SQL changes"}
+          </DialogTitle>
           <DialogDescription>
-            Review the generated SQL before replacing the current source.
+            {preview?.generationBlocked
+              ? "This ERD cannot be regenerated as SQLite DDL without an unsupported ALTER TABLE FOREIGN KEY statement."
+              : "Review the generated SQL before replacing the current source."}
           </DialogDescription>
         </DialogHeader>
-        {preview ? (
+        {preview && !preview.generationBlocked ? (
           <SqlPreviewDiff
             beforeSourceText={preview.baseSnapshot.sourceText}
             afterSourceText={preview.generatedSourceText}
@@ -2314,7 +2320,12 @@ function SqlSourceEditor({
 }
 
 function isSqltoerdDialect(value: string): value is SqltoerdDialect {
-  return value === "auto" || value === "postgresql" || value === "mysql";
+  return (
+    value === "auto" ||
+    value === "postgresql" ||
+    value === "mysql" ||
+    value === "sqlite"
+  );
 }
 
 type DialectSelectProps = {
@@ -2341,6 +2352,7 @@ function DialectSelect({ disabled, onChange, value }: DialectSelectProps) {
         <option value="auto">Auto</option>
         <option value="postgresql">PostgreSQL</option>
         <option value="mysql">MySQL</option>
+        <option value="sqlite">SQLite</option>
       </select>
     </label>
   );

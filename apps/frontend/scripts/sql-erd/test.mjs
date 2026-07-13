@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { history, undoDepth } from "@codemirror/commands";
-import { MySQL, PostgreSQL } from "@codemirror/lang-sql";
+import { MySQL, PostgreSQL, SQLite } from "@codemirror/lang-sql";
 import { Compartment, EditorState } from "@codemirror/state";
 import ts from "typescript";
 
@@ -1610,6 +1610,10 @@ assert.equal(
   sqlEditorDialectRuntime.getSqlSourceEditorCodeMirrorDialect("mysql"),
   MySQL
 );
+assert.equal(
+  sqlEditorDialectRuntime.getSqlSourceEditorCodeMirrorDialect("sqlite"),
+  SQLite
+);
 const runtimeDialectCompartment = new Compartment();
 let runtimeDialectEditorState = EditorState.create({
   doc: "CREATE TABLE users (id BIGINT);",
@@ -2297,7 +2301,7 @@ assert.equal(
 );
 assert.equal(
   statusCopyRuntime.getSqlErdGenerateErrorMessage("UNSUPPORTED_DIALECT"),
-  "This SQL dialect is not supported yet. Choose PostgreSQL or MySQL."
+  "This SQL dialect is not supported yet. Choose PostgreSQL, MySQL, or SQLite."
 );
 assert.equal(
   statusCopyRuntime.getSqlErdGenerateErrorMessage("NO_CREATE_TABLE"),
@@ -4134,6 +4138,80 @@ assert.equal(
   "CONSTRAINT fk_orders_user FOREIGN KEY (user_id) REFERENCES users(id)"
 );
 
+const sqliteSourceText = `CREATE TABLE users (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  email TEXT NOT NULL UNIQUE
+);
+
+CREATE TABLE posts (
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER NOT NULL,
+  owner_id INTEGER REFERENCES users(id),
+  title TEXT,
+  status TEXT DEFAULT 'draft',
+  CONSTRAINT fk_posts_user FOREIGN KEY (user_id) REFERENCES users(id)
+) STRICT;`;
+const sqliteParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
+  dialect: "sqlite",
+  sourceText: sqliteSourceText
+});
+
+assert.equal(sqliteParseResult.ok, true);
+assert.equal(sqliteParseResult.resolvedDialect, "sqlite");
+assert.deepEqual(
+  sqliteParseResult.modelJson.schema.tables.map((table) => table.id),
+  ["table.users", "table.posts"]
+);
+assert.equal(sqliteParseResult.modelJson.schema.tables[0].columns[0].primaryKey, true);
+assert.equal(sqliteParseResult.modelJson.schema.tables[0].columns[0].nullable, false);
+assert.equal(sqliteParseResult.modelJson.schema.tables[0].columns[1].unique, true);
+assert.equal(sqliteParseResult.modelJson.schema.tables[1].columns[1].foreignKey, true);
+assert.equal(sqliteParseResult.modelJson.schema.tables[1].columns[2].foreignKey, true);
+assert.equal(
+  sqliteParseResult.modelJson.schema.tables[1].columns[4].defaultValue,
+  "'draft'"
+);
+assert.deepEqual(sqliteParseResult.modelJson.schema.relations, [
+  {
+    id: "relation.posts.owner_id.users.id",
+    kind: "foreign_key",
+    fromTableId: "table.posts",
+    fromColumnIds: ["column.posts.owner_id"],
+    toTableId: "table.users",
+    toColumnIds: ["column.users.id"],
+    constraintName: null
+  },
+  {
+    id: "relation.posts.user_id.users.id",
+    kind: "foreign_key",
+    fromTableId: "table.posts",
+    fromColumnIds: ["column.posts.user_id"],
+    toTableId: "table.users",
+    toColumnIds: ["column.users.id"],
+    constraintName: "fk_posts_user"
+  }
+]);
+assert.equal(sqliteParseResult.sourceMap.dialect, "sqlite");
+assert.equal(
+  sqliteSourceText.slice(
+    sqliteParseResult.sourceMap.relationsById[
+      "relation.posts.user_id.users.id"
+    ].constraintRange.from,
+    sqliteParseResult.sourceMap.relationsById[
+      "relation.posts.user_id.users.id"
+    ].constraintRange.to
+  ),
+  "CONSTRAINT fk_posts_user FOREIGN KEY (user_id) REFERENCES users(id)"
+);
+
+const autoSqliteParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
+  dialect: "auto",
+  sourceText: sqliteSourceText
+});
+
+assert.equal(autoSqliteParseResult.ok, true);
+assert.equal(autoSqliteParseResult.resolvedDialect, "sqlite");
+
 const generatedMySql = modelToSqlRuntime.generateSqlDdlFromErdModel({
   dialect: "mysql",
   modelJson: mysqlParseResult.modelJson
@@ -4151,6 +4229,23 @@ const generatedMySqlParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
 });
 assert.equal(generatedMySqlParseResult.ok, true);
 assert.equal(generatedMySqlParseResult.modelJson.schema.relations.length, 1);
+const generatedSqlite = modelToSqlRuntime.generateSqlDdlFromErdModel({
+  dialect: "sqlite",
+  modelJson: sqliteParseResult.modelJson
+});
+assert.match(generatedSqlite.sql, /CREATE TABLE "users"/);
+assert.match(
+  generatedSqlite.sql,
+  /CONSTRAINT "fk_posts_user" FOREIGN KEY \("user_id"\) REFERENCES "users" \("id"\)/
+);
+assert.doesNotMatch(generatedSqlite.sql, /ALTER TABLE/);
+assert.equal(
+  ddlParserRuntime.parseSqlDdlToErdModel({
+    dialect: "sqlite",
+    sourceText: generatedSqlite.sql
+  }).ok,
+  true
+);
 const modelSqlPreviewSession = {
   id: "session.model-sql-preview",
   revision: 7,
@@ -4306,6 +4401,20 @@ assert.equal(
   }).modelJson.schema.relations.length,
   1
 );
+assert.throws(
+  () =>
+    modelToSqlRuntime.generateSqlDdlFromErdModel({
+      dialect: "sqlite",
+      modelJson: {
+        ...mysqlParseResult.modelJson,
+        schema: {
+          ...mysqlParseResult.modelJson.schema,
+          tables: [...mysqlParseResult.modelJson.schema.tables].reverse()
+        }
+      }
+    }),
+  /SQLite cannot regenerate FOREIGN KEY relations that require ALTER TABLE/
+);
 const generatedPostgreSql = modelToSqlRuntime.generateSqlDdlFromErdModel({
   dialect: "postgresql",
   modelJson: mysqlParseResult.modelJson
@@ -4430,6 +4539,29 @@ assert.equal(
     sourceText: generatedCyclicPostgreSql.sql
   }).modelJson.schema.relations.length,
   2
+);
+assert.throws(
+  () =>
+    modelToSqlRuntime.generateSqlDdlFromErdModel({
+      dialect: "sqlite",
+      modelJson: cyclicModel
+    }),
+  /SQLite cannot regenerate FOREIGN KEY relations that require ALTER TABLE/
+);
+const blockedSqlitePreview = sqlDiffApplyRuntime.createSqlErdNormalizedSqlPreview({
+  modelJson: cyclicModel,
+  resolvedDialect: "sqlite",
+  session: {
+    ...modelSqlPreviewSession,
+    dialect: "sqlite",
+    modelJson: cyclicModel
+  }
+});
+assert.equal(blockedSqlitePreview.generationBlocked, true);
+assert.equal(blockedSqlitePreview.hasChanges, false);
+assert.match(
+  blockedSqlitePreview.warnings.join(" "),
+  /SQLite cannot regenerate FOREIGN KEY relations that require ALTER TABLE/
 );
 
 const mysqlTypeParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
@@ -5326,7 +5458,10 @@ assert.match(
 assert.match(types, /export const SQLTOERD_MODEL_JSON_VERSION = 1/);
 assert.match(types, /export const SQLTOERD_LAYOUT_JSON_VERSION = 1/);
 assert.match(types, /export type SqltoerdSourceFormat = "sql"/);
-assert.match(types, /export type SqltoerdDialect = "auto" \| "postgresql" \| "mysql"/);
+assert.match(
+  types,
+  /export type SqltoerdDialect = "auto" \| "postgresql" \| "mysql" \| "sqlite"/
+);
 assert.match(types, /kind: "foreign_key"/);
 assert.match(types, /kind: "primary_key" \| "unique"/);
 assert.match(types, /export type SqlErdSelection/);

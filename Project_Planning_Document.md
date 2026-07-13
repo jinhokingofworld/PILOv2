@@ -1302,7 +1302,7 @@ PILO Sidebar | Left Source Panel | Center ERD Canvas | Right Inspector Panel
 ### 10.3 입력과 파싱
 
 - MVP source format은 `sql`만 지원한다.
-- MVP dialect는 `auto`, `postgresql`, `mysql`을 지원한다.
+- MVP dialect는 `auto`, `postgresql`, `mysql`, `sqlite`을 지원한다.
 - 사용자는 Source Panel에 SQL DDL을 입력한다.
 - Generate 실행 시 client가 SQL DDL을 parsing하고 ERD semantic model을 만든다.
 - app-server는 SQL을 실행하거나 parsing하지 않는다.
