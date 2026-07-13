@@ -854,6 +854,21 @@ assert.equal(
     .columns.find((column) => column.id === "user_id").foreignKey,
   true
 );
+const reparsedForeignKeyUpdateCandidate = ddlParserRuntime.parseSqlDdlToErdModel({
+  dialect: "postgresql",
+  sourceText: modelToSqlRuntime.generateSqlDdlFromErdModel({
+    dialect: "postgresql",
+    modelJson: foreignKeyUpdateCandidate.modelJson
+  }).sql
+});
+
+assert.equal(reparsedForeignKeyUpdateCandidate.ok, true);
+assert.equal(
+  reparsedForeignKeyUpdateCandidate.modelJson.schema.relations.some(
+    (relation) => relation.id === "relation.orders.user_id.orders.id"
+  ),
+  true
+);
 
 const foreignKeyDeleteCandidate =
   foreignKeyAddRuntime.createSqlErdForeignKeyDeleteCandidate({
@@ -872,6 +887,21 @@ assert.equal(
   foreignKeyDeleteCandidate.modelJson.schema.tables
     .find((table) => table.id === "table.orders")
     .columns.find((column) => column.id === "user_id").foreignKey,
+  false
+);
+const reparsedForeignKeyDeleteCandidate = ddlParserRuntime.parseSqlDdlToErdModel({
+  dialect: "postgresql",
+  sourceText: modelToSqlRuntime.generateSqlDdlFromErdModel({
+    dialect: "postgresql",
+    modelJson: foreignKeyDeleteCandidate.modelJson
+  }).sql
+});
+
+assert.equal(reparsedForeignKeyDeleteCandidate.ok, true);
+assert.equal(
+  reparsedForeignKeyDeleteCandidate.modelJson.schema.relations.some(
+    (relation) => relation.id === "relation.orders.user_id.users.id"
+  ),
   false
 );
 
