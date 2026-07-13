@@ -25,11 +25,16 @@ function toFreeformSnapshot(
 export function CanvasStateReporter({
   onFreeformShapesDraftChange,
   onFreeformShapesChange,
+  onResolveFreeformShapeSnapshot,
   onViewChange,
   onViewportBoundsChange,
 }: {
   onFreeformShapesDraftChange: (shapes: PiloCanvasFreeformShape[]) => void;
   onFreeformShapesChange: (shapes: PiloCanvasFreeformShape[]) => void;
+  onResolveFreeformShapeSnapshot?: (
+    shape: TLShape,
+    snapshot: PiloCanvasFreeformShape,
+  ) => PiloCanvasFreeformShape;
   onViewChange: (viewSetting: PiloCanvasViewSetting) => void;
   onViewportBoundsChange: (bounds: PiloCanvasViewportBounds) => void;
 }) {
@@ -89,7 +94,13 @@ export function CanvasStateReporter({
       return editor
         .getCurrentPageShapes()
         .filter(isPersistableFreeformShape)
-        .map((shape) => toFreeformSnapshot(editor, shape));
+        .map((shape) => {
+          const snapshot = toFreeformSnapshot(editor, shape);
+
+          return onResolveFreeformShapeSnapshot
+            ? onResolveFreeformShapeSnapshot(shape, snapshot)
+            : snapshot;
+        });
     }
 
     function scheduleFreeformSync() {
@@ -118,7 +129,12 @@ export function CanvasStateReporter({
       }
       removeListener();
     };
-  }, [editor, onFreeformShapesChange, onFreeformShapesDraftChange]);
+  }, [
+    editor,
+    onFreeformShapesChange,
+    onFreeformShapesDraftChange,
+    onResolveFreeformShapeSnapshot,
+  ]);
 
   return null;
 }

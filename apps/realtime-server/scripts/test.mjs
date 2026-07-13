@@ -23,6 +23,10 @@ const canvasPresence = await readFile(
   new URL("../src/canvas/canvas-presence.service.ts", import.meta.url),
   "utf8"
 );
+const canvasShapeLock = await readFile(
+  new URL("../src/canvas/canvas-shape-lock.service.ts", import.meta.url),
+  "utf8"
+);
 const meetingAccess = await readFile(
   new URL("../src/meeting/meeting-access.service.ts", import.meta.url),
   "utf8"
@@ -77,6 +81,15 @@ assert.match(socketServer, /createSocketIoRedisAdapter/);
 assert.match(socketServer, /CANVAS_OPERATION_REDIS_CHANNEL = "canvas:operations"/);
 assert.match(socketServer, /isCanvasShapeOperationPayload/);
 assert.match(socketServer, /canvasServerEvents\.operation/);
+assert.match(socketServer, /canvasClientEvents\.shapeLockClaim/);
+assert.match(socketServer, /canvasClientEvents\.shapeLockRelease/);
+assert.match(socketServer, /canvasClientEvents\.shapePreview/);
+assert.match(socketServer, /canvasClientEvents\.shapePreviewClear/);
+assert.match(socketServer, /canvasServerEvents\.shapeLockAccepted/);
+assert.match(socketServer, /canvasServerEvents\.shapeLockRejected/);
+assert.match(socketServer, /canvasServerEvents\.shapeLockUpdate/);
+assert.match(socketServer, /canvasServerEvents\.shapePreview/);
+assert.match(socketServer, /canvasServerEvents\.shapePreviewClear/);
 assert.match(socketServer, /redisAdapter\.subscribe/);
 assert.match(socketServer, /MEETING_REPORT_REDIS_CHANNEL = "meeting:report-events"/);
 assert.match(socketServer, /meetingClientEvents\.subscribe/);
@@ -95,5 +108,11 @@ assert.match(canvasPresence, /payload\.editingShapeId/);
 assert.match(canvasPresence, /payload\.editingMode/);
 assert.match(canvasPresence, /userId: user\.userId/);
 assert.match(canvasPresence, /workspaceId: payload\.workspaceId/);
+assert.match(canvasShapeLock, /CANVAS_SHAPE_LOCK_TTL_MS = 8_000/);
+assert.match(canvasShapeLock, /claimLocks/);
+assert.match(canvasShapeLock, /clearRoomLocks/);
+assert.match(canvasShapeLock, /clearSocket/);
+assert.match(canvasShapeLock, /ownerSocketId/);
+assert.match(canvasShapeLock, /expiresAt/);
 assert.match(redisPubSub, /createAdapter/);
 assert.match(redisPubSub, /subscribe\(channel/);
