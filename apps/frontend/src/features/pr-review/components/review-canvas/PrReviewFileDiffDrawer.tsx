@@ -1111,6 +1111,11 @@ function ReviewNodePanel({
           <p className="mt-1 text-sm font-semibold text-slate-950">
             {selectedDecisionLabel}
           </p>
+          {file.decisionCarriedOver ? (
+            <p className="mt-1 text-xs font-medium text-blue-700">
+              이전 버전에서 유지된 판단입니다.
+            </p>
+          ) : null}
           <p className="mt-2 flex items-center gap-2 text-xs font-medium text-slate-500">
             {saveStatus === "saving" ? (
               <Loader2 className="size-4 animate-spin" />
