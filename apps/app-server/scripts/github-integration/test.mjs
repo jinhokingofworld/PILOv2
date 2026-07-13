@@ -167,6 +167,7 @@ await import("./source-read.test.mjs");
 await import("./project-v2.test.mjs");
 await import("./project-v2-selection.service.test.mjs");
 await import("./project-v2-selection-full-sync.test.mjs");
+await import("./project-v2-selection-reset-policy.test.mjs");
 await import("./pr-files.test.mjs");
 await import("./review-submission.test.mjs");
 await import("./conflict-merge.test.mjs");
