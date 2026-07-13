@@ -27,7 +27,7 @@ jobs:
         shell: bash
         run: |
           docker version
-          server_os_type="$(docker version --format '{{.Server.OsType}}')"
+          server_os_type="$(docker version --format '{{.Server.Os}}')"
           if [ "$server_os_type" != "linux" ]; then
             echo "LocalStack requires a Docker Linux daemon, but the Docker server reports '$server_os_type'." >&2
             exit 1

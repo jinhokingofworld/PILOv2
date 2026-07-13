@@ -30,7 +30,7 @@ assert.match(architecture, /pilo-dev-github-sync-jobs-dlq/);
 assert.match(localStackWorkflow, /runs-on:\s*ubuntu-latest/);
 assert.match(localStackWorkflow, /RUN_LOCALSTACK_INTEGRATION:\s*"1"/);
 assert.match(localStackWorkflow, /docker version/);
-assert.match(localStackWorkflow, /\.Server\.OsType/);
+assert.match(localStackWorkflow, /\.Server\.Os/);
 assert.match(localStackWorkflow, /command -v aws/);
 assert.match(localStackWorkflow, /command -v pwsh/);
 
