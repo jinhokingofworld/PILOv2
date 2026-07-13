@@ -2,8 +2,10 @@ import type {
   ErdColumn,
   ErdRelation,
   ErdTable,
-  SqltoerdModelJsonV1
+  SqltoerdModelJsonV1,
+  SqltoerdResolvedDialect
 } from "@/features/sql-erd/types";
+import { createSqltoerdForeignKeyRelationId } from "@/features/sql-erd/utils/relation-id";
 
 export type SqltoerdForeignKeyAddFailureReason =
   | "duplicate_relation"
@@ -25,12 +27,14 @@ export type SqltoerdForeignKeyAddResult =
     };
 
 export function createSqlErdForeignKeyAddCandidate({
+  dialect = "postgresql",
   fromColumnId,
   fromTableId,
   modelJson,
   toColumnId,
   toTableId
 }: {
+  dialect?: SqltoerdResolvedDialect;
   fromColumnId: string;
   fromTableId: string;
   modelJson: SqltoerdModelJsonV1;
@@ -58,16 +62,26 @@ export function createSqlErdForeignKeyAddCandidate({
     return { ok: false, reason: "target_column_not_key" };
   }
 
-  if (!areSqltoerdForeignKeyColumnTypesCompatible(fromColumn, toColumn)) {
+  if (!areSqltoerdForeignKeyColumnTypesCompatible(fromColumn, toColumn, dialect)) {
     return { ok: false, reason: "incompatible_column_type" };
   }
 
-  const relation = createSqltoerdForeignKeyRelation(
+  let relation = createSqltoerdForeignKeyRelation(
     fromTable,
     fromColumn,
     toTable,
     toColumn
   );
+
+  if (modelJson.schema.relations.some((existingRelation) => existingRelation.id === relation.id)) {
+    relation = createSqltoerdForeignKeyRelation(
+      fromTable,
+      fromColumn,
+      toTable,
+      toColumn,
+      true
+    );
+  }
   const hasDuplicateRelation = modelJson.schema.relations.some(
     (existingRelation) =>
       existingRelation.fromTableId === relation.fromTableId &&
@@ -134,67 +148,97 @@ function isSqltoerdForeignKeyTarget(table: ErdTable, column: ErdColumn) {
 
 function areSqltoerdForeignKeyColumnTypesCompatible(
   fromColumn: ErdColumn,
-  toColumn: ErdColumn
+  toColumn: ErdColumn,
+  dialect: SqltoerdResolvedDialect
 ) {
+  const fromType = parseSqltoerdForeignKeyColumnType(fromColumn.dataType);
+  const toType = parseSqltoerdForeignKeyColumnType(toColumn.dataType);
+
+  if (fromType.family !== toType.family) {
+    return false;
+  }
+
+  if (dialect !== "mysql" || !isMySqlFixedPrecisionType(fromType.family)) {
+    return true;
+  }
+
   return (
-    getSqltoerdForeignKeyTypeFamily(fromColumn.dataType) ===
-    getSqltoerdForeignKeyTypeFamily(toColumn.dataType)
+    fromType.parameters === toType.parameters &&
+    fromType.unsigned === toType.unsigned
   );
 }
 
-function getSqltoerdForeignKeyTypeFamily(dataType: string) {
+function parseSqltoerdForeignKeyColumnType(dataType: string) {
   const normalizedDataType = dataType
     .trim()
     .toLowerCase()
-    .replace(/\([^)]*\)/g, "")
-    .replace(/\s+/g, " ")
-    .replace(/ unsigned$/, "");
+    .replace(/\s+/g, " ");
+  const unsigned = /\bunsigned\b/.test(normalizedDataType);
+  const typeWithoutUnsigned = normalizedDataType.replace(/\s+unsigned\b/g, "").trim();
+  const parameters = typeWithoutUnsigned.match(/\(([^()]*)\)/)?.[1]?.replace(/\s+/g, "") ?? null;
+  const baseType = typeWithoutUnsigned.replace(/\([^()]*\)/g, "").trim();
 
-  if (normalizedDataType === "int" || normalizedDataType === "integer") {
+  return {
+    family: getSqltoerdForeignKeyTypeFamily(baseType),
+    parameters,
+    unsigned
+  };
+}
+
+function getSqltoerdForeignKeyTypeFamily(baseType: string) {
+  if (baseType === "int" || baseType === "integer") {
     return "integer";
   }
 
-  if (normalizedDataType === "decimal" || normalizedDataType === "numeric") {
+  if (baseType === "decimal" || baseType === "numeric") {
     return "numeric";
   }
 
   if (
-    normalizedDataType === "varchar" ||
-    normalizedDataType === "character varying"
+    baseType === "varchar" ||
+    baseType === "character varying"
   ) {
     return "varchar";
   }
 
-  if (normalizedDataType === "char" || normalizedDataType === "character") {
+  if (baseType === "char" || baseType === "character") {
     return "char";
   }
 
-  return normalizedDataType;
+  return baseType;
+}
+
+function isMySqlFixedPrecisionType(typeFamily: string) {
+  return new Set([
+    "tinyint",
+    "smallint",
+    "mediumint",
+    "integer",
+    "bigint",
+    "numeric"
+  ]).has(typeFamily);
 }
 
 function createSqltoerdForeignKeyRelation(
   fromTable: ErdTable,
   fromColumn: ErdColumn,
   toTable: ErdTable,
-  toColumn: ErdColumn
+  toColumn: ErdColumn,
+  forceHashed = false
 ): ErdRelation {
   return {
     constraintName: null,
     fromColumnIds: [fromColumn.id],
     fromTableId: fromTable.id,
-    id: [
-      "relation",
-      getSqltoerdTableIdPart(fromTable),
-      fromColumn.name,
-      getSqltoerdTableIdPart(toTable),
-      toColumn.name
-    ].join("."),
+    id: createSqltoerdForeignKeyRelationId({
+      forceHashed,
+      fromColumns: [fromColumn],
+      fromTable,
+      toColumns: [toColumn],
+      toTable
+    }),
     kind: "foreign_key",
     toColumnIds: [toColumn.id],
     toTableId: toTable.id
   };
-}
-
-function getSqltoerdTableIdPart(table: ErdTable) {
-  return table.schemaName ? `${table.schemaName}.${table.name}` : table.name;
 }

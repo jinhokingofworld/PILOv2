@@ -714,6 +714,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
       }
 
       const candidate = createSqlErdForeignKeyAddCandidate({
+        dialect: resolvedDialect,
         fromColumnId,
         fromTableId,
         modelJson: currentSnapshot.modelJson,
