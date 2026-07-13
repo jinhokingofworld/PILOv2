@@ -766,8 +766,10 @@ semantic edge가 없는 기존 session 또는 Flow는 기존 `workflowOrder` 인
 `relationType: review_order`, `source: fallback`, `confidence: 100`으로 연결한다.
 semantic relation은 새 분석 session부터 저장하며 기존 완료 session을 backfill하지 않는다.
 
-PR Review schema에는 `canvas_id`, `canvas_shape_id`,
-`canvas_freeform_shapes` 관계가 없다.
+Review room은 `pr_review_rooms.canvas_id`로 `board_type=review` Canvas와 연결된다.
+session graph row에는 Canvas shape ID나 geometry를 저장하지 않는다. 현재 Canvas API는
+연결된 Review Canvas의 metadata와 사용자 shape operation만 담당하며, PR Review 시스템
+node와 relation materialization은 아직 수행하지 않는다.
 
 ## Flow 목록 조회
 

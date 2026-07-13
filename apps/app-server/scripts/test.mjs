@@ -464,6 +464,7 @@ await import("./meeting/livekit-token.test.mjs");
 await import("./meeting/livekit-webhook.test.mjs");
 await import("./meeting/meeting-report-job.test.mjs");
 await import("./calendar/test.mjs");
+await import("./canvas/review-canvas-access.test.mjs");
 await import("./meeting/test.mjs");
 await import("./github-integration/test.mjs");
 await import("./pr-review/test.mjs");
