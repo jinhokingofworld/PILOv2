@@ -62,7 +62,7 @@ export class LiveKitWebhookService {
     const result = await this.database.transaction(async (transaction) => {
       const existing = await this.findDelivery(transaction, deliveryId);
       if (existing !== null) {
-        return { delivery: existing, job: null };
+        return { delivery: existing, job: null, stateEvents: [] };
       }
 
       const inserted = await this.insertDelivery(transaction, {
@@ -79,7 +79,7 @@ export class LiveKitWebhookService {
           throw badRequest("LiveKit webhook delivery could not be recorded");
         }
 
-        return { delivery: recovered, job: null };
+        return { delivery: recovered, job: null, stateEvents: [] };
       }
 
       const reconciliation =
@@ -92,12 +92,19 @@ export class LiveKitWebhookService {
                 eventCreatedAt: this.toEventCreatedAt(event.createdAt)
               }
             )
-          : { job: null };
+          : { job: null, stateEvents: [] };
 
-      return { delivery: inserted, job: reconciliation.job };
+      return {
+        delivery: inserted,
+        job: reconciliation.job,
+        stateEvents: reconciliation.stateEvents
+      };
     });
 
     await this.meetingService.enqueueReconciledMeetingReportJob(result.job);
+    await this.meetingService.publishReconciledMeetingStateEvents(
+      result.stateEvents
+    );
     return this.mapDelivery(result.delivery);
   }
 

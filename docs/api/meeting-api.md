@@ -152,6 +152,41 @@ socket.on("meeting:report:updated", event => {
 | `failedStep` | `RECORDING` \| `STT` \| `LLM` \| null | 실패 단계 |
 | `updatedAt` | string | ISO datetime |
 
+## Realtime 음성회의 상태 이벤트
+
+음성회의의 시작·참여·퇴장·종료·녹음 상태가 commit되면 App Server는 Redis
+`meeting:state-events`에 상태 무효화 event를 발행한다. Realtime Server는 위의
+`meeting:subscribe` membership 검사를 통과한 socket에만 같은 workspace room으로
+전달한다. 이 event는 Meeting DB 조회를 대체하지 않는다.
+
+- client → server 구독, 인증, `meeting:error`, `meeting:subscribed` 계약은
+  [Realtime 회의록 상태 이벤트](#realtime-회의록-상태-이벤트)와 동일하다.
+- client는 `meeting:subscribed` 수신 직후와 socket reconnect 뒤 구독 성공 시
+  `GET /workspaces/{workspaceId}/meetings/current`을 한 번 다시 조회한다.
+- `meeting:state:updated` 수신 뒤에는 current meeting을 다시 조회하고, active
+  meeting이 있으면 participant 목록도 다시 조회한다.
+- Redis Pub/Sub은 at-most-once이므로 event 중복·순서 지연·유실을 허용한다. 화면은
+  event payload를 직접 merge하지 않고 REST snapshot으로 수렴한다.
+
+### Socket.IO server → client
+
+```ts
+socket.on("meeting:state:updated", event => {
+  // event: MeetingStateRealtimeEvent
+});
+```
+
+| Field | Type | 설명 |
+| --- | --- | --- |
+| `event` | `meeting:state:updated` | 이벤트 이름 |
+| `meetingId` | string | 상태가 바뀐 회의 id |
+| `change` | `started` \| `participant_joined` \| `participant_left` \| `ended` \| `recording_started` \| `recording_ended` \| `recording_failed` | 상태 변경 이유. 화면 state merge 용도가 아닌 재조회 힌트 |
+| `updatedAt` | string | event 생성 ISO datetime |
+
+Redis 내부 payload는 fan-out workspace room을 결정하기 위해 `workspaceId`를 포함한다.
+browser에 전달하는 event에는 `workspaceId`, participant 목록, LiveKit token, 녹음 URL,
+transcript를 포함하지 않는다.
+
 ### AI Worker → App Server 내부 callback
 
 ```http

@@ -6,7 +6,8 @@ export const meetingClientEvents = {
 export const meetingServerEvents = {
   error: "meeting:error",
   subscribed: "meeting:subscribed",
-  reportUpdated: "meeting:report:updated"
+  reportUpdated: "meeting:report:updated",
+  stateUpdated: "meeting:state:updated"
 } as const;
 
 export type MeetingReportRealtimeStatus =
@@ -28,6 +29,30 @@ export type MeetingReportRedisEvent = {
   updatedAt: string;
 };
 
+export type MeetingStateChange =
+  | "started"
+  | "participant_joined"
+  | "participant_left"
+  | "ended"
+  | "recording_started"
+  | "recording_ended"
+  | "recording_failed";
+
+export type MeetingStateRedisEvent = {
+  event: "meeting:state:updated";
+  workspaceId: string;
+  meetingId: string;
+  change: MeetingStateChange;
+  updatedAt: string;
+};
+
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function isUuid(value: unknown): value is string {
+  return typeof value === "string" && UUID_PATTERN.test(value);
+}
+
 export function isMeetingReportRedisEvent(
   value: unknown
 ): value is MeetingReportRedisEvent {
@@ -43,6 +68,29 @@ export function isMeetingReportRedisEvent(
       String(event.status)
     ) &&
     (event.failedStep === null || ["RECORDING", "STT", "LLM"].includes(String(event.failedStep))) &&
+    typeof event.updatedAt === "string" &&
+    Number.isFinite(Date.parse(event.updatedAt))
+  );
+}
+
+export function isMeetingStateRedisEvent(
+  value: unknown
+): value is MeetingStateRedisEvent {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const event = value as Record<string, unknown>;
+  return (
+    event.event === "meeting:state:updated" &&
+    isUuid(event.workspaceId) &&
+    isUuid(event.meetingId) &&
+    [
+      "started",
+      "participant_joined",
+      "participant_left",
+      "ended",
+      "recording_started",
+      "recording_ended",
+      "recording_failed"
+    ].includes(String(event.change)) &&
     typeof event.updatedAt === "string" &&
     Number.isFinite(Date.parse(event.updatedAt))
   );

@@ -30,6 +30,20 @@ const meetingReportRealtimeHook = await readFile(
   ),
   "utf8"
 );
+const meetingStateRealtimeHook = await readFile(
+  new URL(
+    "../../src/features/meeting/hooks/use-meeting-state-realtime.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
+const meetingStateInvalidationStore = await readFile(
+  new URL(
+    "../../src/features/meeting/stores/meeting-state-invalidation-store.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
 const meetingAudioPreflightHook = await readFile(
   new URL(
     "../../src/features/meeting/hooks/use-meeting-audio-preflight.ts",
@@ -187,6 +201,8 @@ assert.match(meetingRuntimeProvider, /setHeaderMeetingConnectionState/);
 assert.match(meetingRuntimeProvider, /hasConnectionSession: hasActiveSession/);
 assert.match(meetingRuntimeProvider, /connectionStatus: liveKitRoomStatus/);
 assert.match(meetingRuntimeProvider, /setHeaderMeetingRecordingStatus\(null\)/);
+assert.match(meetingRuntimeProvider, /useMeetingStateRealtime/);
+assert.match(meetingRuntimeProvider, /notifyMeetingStateInvalidated/);
 assert.match(meetingRuntimeProvider, /remoteAudioContainerRef/);
 assert.match(meetingRuntimeProvider, /data-livekit-audio-sink="true"/);
 
@@ -247,6 +263,8 @@ assert.match(meetingPanel, /onListFiltersChange/);
 assert.match(meetingPanel, /60초 이하 녹음은 회의록이 생성되지 않습니다/);
 assert.match(meetingPanel, /useRecordingElapsedSeconds/);
 assert.match(meetingPanel, /setInterval/);
+assert.match(meetingPanel, /useMeetingStateInvalidation/);
+assert.doesNotMatch(meetingPanel, /MEETING_STATUS_POLL_INTERVAL_MS/);
 assert.match(meetingPanel, /Math\.max\(0, Math\.floor/);
 assert.match(meetingPanel, /녹음 진행 중/);
 assert.match(meetingPanel, /녹음을 종료할까요\?/);
@@ -254,6 +272,15 @@ assert.match(meetingPanel, /녹음만 종료하며 회의와 참여자는 계속
 assert.match(meetingPanel, /targetRecording\.id !== targetRecordingId/);
 assert.match(meetingPanel, /result\.recording\.durationSec/);
 assert.match(meetingPanel, /result\.recording\.status === "FAILED"/);
+
+assert.match(meetingStateRealtimeHook, /meeting:state:updated/);
+assert.match(meetingStateRealtimeHook, /meeting:subscribed/);
+assert.match(meetingStateRealtimeHook, /isMeetingStateRealtimeEvent/);
+assert.match(meetingStateRealtimeHook, /socket\.emit\("meeting:subscribe"/);
+assert.match(meetingStateInvalidationStore, /useMeetingStateInvalidation/);
+assert.match(meetingStateInvalidationStore, /reloadQueued/);
+assert.match(headerMeetingStatus, /useMeetingStateInvalidation/);
+assert.doesNotMatch(headerMeetingStatus, /HEADER_MEETING_STATUS_POLL_INTERVAL_MS/);
 assert.match(meetingPanel, /result\.recording\.durationSec <= 60/);
 assert.doesNotMatch(meetingPanel, /window\.confirm/);
 assert.doesNotMatch(meetingPanel, /AvatarImage/);
@@ -268,7 +295,7 @@ assert.match(headerMeetingStatus, /usePathname/);
 assert.match(headerMeetingStatus, /isMeetingRoute/);
 assert.match(headerMeetingStatus, /reportsEnabled: false/);
 assert.match(headerMeetingStatus, /enabled: Boolean\(workspaceId && accessToken && !isMeetingRoute\)/);
-assert.match(headerMeetingStatus, /HEADER_MEETING_STATUS_POLL_INTERVAL_MS = 5000/);
+assert.doesNotMatch(headerMeetingStatus, /HEADER_MEETING_STATUS_POLL_INTERVAL_MS/);
 assert.match(headerMeetingStatus, /reloadCurrentMeeting/);
 assert.match(headerMeetingStatus, /음성 미연결/);
 assert.match(headerMeetingStatus, /음성 품질 낮음/);

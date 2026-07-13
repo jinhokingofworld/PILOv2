@@ -13,6 +13,7 @@ import { MeetingReportJobService } from "./meeting-report-job.service";
 import { MeetingReportInternalController } from "./meeting-report-internal.controller";
 import { MeetingReportEventGuard } from "./meeting-report-event.guard";
 import { MeetingReportRealtimePublisherService } from "./meeting-report-realtime-publisher.service";
+import { MeetingStateRealtimePublisherService } from "./meeting-state-realtime-publisher.service";
 import { MeetingService } from "./meeting.service";
 
 @Module({
@@ -26,6 +27,7 @@ import { MeetingService } from "./meeting.service";
     MeetingReportJobService,
     MeetingReportEventGuard,
     MeetingReportRealtimePublisherService,
+    MeetingStateRealtimePublisherService,
     MeetingReportOutboxPublisherService,
     MeetingReportOutboxRecoveryService
   ],
