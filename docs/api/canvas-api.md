@@ -200,7 +200,9 @@ pr_review_relation_edge, group
 `file_node`는 일반 자유형 shape type이다. `pr_review_file_node`와
 `pr_review_relation_edge`는 Review Canvas 전용 시스템 shape다. 일반 Canvas mutation
 API로 두 시스템 shape를 생성하거나 삭제할 수 없으며, PR Review materialization만 생성과
-도메인 metadata 갱신을 담당한다.
+도메인 metadata 갱신을 담당한다. 새 분석 버전을 materialize할 때 기존 file node의
+geometry는 유지하고 relation geometry는 현재 node 위치에서 다시 계산한다. 현재 버전에서
+제외된 PR Review 시스템 shape는 soft delete하며 사용자 shape에는 영향을 주지 않는다.
 
 `pr_review_file_node`의 사용자 mutation은 아래 geometry 필드만 허용한다.
 

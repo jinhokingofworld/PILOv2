@@ -64,13 +64,15 @@ class FakeTransaction {
     {
       carryOverByHeadBlobSha = new Map(),
       throwOnReviewFile = false,
-      throwOnRelation = false
+      throwOnRelation = false,
+      throwOnShapeMaterialization = false
     } = {}
   ) {
     this.job = job;
     this.carryOverByHeadBlobSha = carryOverByHeadBlobSha;
     this.throwOnReviewFile = throwOnReviewFile;
     this.throwOnRelation = throwOnRelation;
+    this.throwOnShapeMaterialization = throwOnShapeMaterialization;
     this.calls = [];
     this.flowCount = 0;
     this.reviewFileCount = 0;
@@ -81,6 +83,9 @@ class FakeTransaction {
   async queryOne(text, values = []) {
     this.calls.push({ text, values });
     if (text.includes("FROM pr_review_analysis_jobs")) return this.job;
+    if (text.includes("SELECT canvas_id") && text.includes("FROM pr_review_rooms")) {
+      return { canvas_id: "canvas-1" };
+    }
     if (text.includes("INSERT INTO review_flows")) {
       this.flowCount += 1;
       return { id: `flow-${this.flowCount}` };
@@ -94,7 +99,11 @@ class FakeTransaction {
     if (text.includes("INSERT INTO review_files")) {
       this.reviewFileCount += 1;
       if (this.throwOnReviewFile) throw new Error("review file insert failed");
-      return { id: `file-${this.reviewFileCount}` };
+      return {
+        id: `file-${this.reviewFileCount}`,
+        room_file_id: `room-file-${this.reviewFileCount}`,
+        current_status: values[20]
+      };
     }
     if (text.includes("INSERT INTO review_flow_files")) {
       this.membershipCount += 1;
@@ -113,8 +122,20 @@ class FakeTransaction {
     throw new Error(`Unhandled query: ${text}`);
   }
 
+  async query(text, values = []) {
+    this.calls.push({ text, values });
+    if (text.includes("FROM canvas_freeform_shapes")) return [];
+    throw new Error(`Unhandled query: ${text}`);
+  }
+
   async execute(text, values = []) {
     this.calls.push({ text, values });
+    if (
+      this.throwOnShapeMaterialization &&
+      text.includes("INSERT INTO canvas_freeform_shapes")
+    ) {
+      throw new Error("canvas shape materialization failed");
+    }
     return { rows: [] };
   }
 }
@@ -344,6 +365,11 @@ function createService(database, github) {
     ]
   );
   assert.equal(fileCalls.length, 3);
+  assert.match(fileCalls[0].text, /RETURNING id, room_file_id, current_status/);
+  const roomFileCalls = calls.filter((call) =>
+    call.text.includes("INSERT INTO pr_review_room_files")
+  );
+  assert.ok(roomFileCalls.every((call) => /RETURNING id\s*$/.test(call.text)));
   assert.deepEqual(
     fileCalls.map((call) => call.values[13]),
     ["entry", "core_logic", "support"]
@@ -376,6 +402,19 @@ function createService(database, github) {
       "Controller가 UserService를 사용합니다."
     ]
   ]);
+  const shapeCalls = calls.filter((call) =>
+    call.text.includes("INSERT INTO canvas_freeform_shapes")
+  );
+  assert.equal(shapeCalls.length, 5);
+  const existingShapeRead = calls.find((call) =>
+    call.text.includes("FROM canvas_freeform_shapes")
+  );
+  assert.match(existingShapeRead.text, /FOR UPDATE/);
+  const lastShapeCallIndex = calls.lastIndexOf(shapeCalls.at(-1));
+  const jobSuccessCallIndex = calls.findIndex((call) =>
+    call.text.includes("SET status = 'succeeded'")
+  );
+  assert.ok(lastShapeCallIndex < jobSuccessCallIndex);
 }
 
 {
@@ -450,6 +489,33 @@ function createService(database, github) {
   assert.equal(
     database.transactionState.calls.some((call) =>
       call.text.includes("SET status = 'reviewing'")
+    ),
+    false
+  );
+}
+
+{
+  const database = new FakeDatabase(jobRow(), {
+    throwOnShapeMaterialization: true
+  });
+  await assert.rejects(
+    () =>
+      createService(database, new FakeGithubDependency()).storeAnalysisJobResult(
+        JOB_ID,
+        resultBody()
+      ),
+    /canvas shape materialization failed/
+  );
+  assert.equal(database.rolledBack, true);
+  assert.equal(
+    database.transactionState.calls.some((call) =>
+      call.text.includes("SET status = 'succeeded'")
+    ),
+    false
+  );
+  assert.equal(
+    database.transactionState.calls.some((call) =>
+      call.text.includes("SET current_session_id")
     ),
     false
   );
