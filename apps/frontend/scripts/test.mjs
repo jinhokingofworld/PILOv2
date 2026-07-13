@@ -454,9 +454,9 @@ assert.match(appSettingsDialog, /id: "workspace"/);
 assert.match(appSettingsDialog, /canManageWorkspace \?/);
 assert.match(appSettingsDialog, /Owner 전용 설정입니다/);
 assert.match(appSettingsDialog, /id: "github"/);
-assert.match(appSettingsDialog, /MOCK_GITHUB_CONNECTIONS/);
-assert.match(appSettingsDialog, /disabled=\{!canManageWorkspace\}/);
-assert.match(appSettingsDialog, /canManageWorkspace \? "연결 관리" : "조회 전용"/);
+assert.match(appSettingsDialog, /githubContent: ReactNode/);
+assert.match(appSettingsDialog, /\{githubContent\}/);
+assert.doesNotMatch(appSettingsDialog, /MOCK_GITHUB_CONNECTIONS/);
 assert.match(workspaceCreationRoute, /WorkspaceCreationPage/);
 assert.match(
   headerNotificationDropdown,
