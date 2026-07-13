@@ -66,6 +66,37 @@ import {
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const CANVAS_SHAPE_CLEANUP_INTERVAL_MS = 10 * 60 * 1000;
+const CANVAS_READ_ACCESS_SQL = `
+  (
+    c.board_type = 'freeform'
+    OR (
+      c.board_type = 'review'
+      AND EXISTS (
+        SELECT 1
+        FROM pr_review_rooms AS review_room
+        WHERE review_room.workspace_id = c.workspace_id
+          AND review_room.canvas_id = c.id
+      )
+    )
+  )
+`;
+const CANVAS_WRITE_ACCESS_SQL = `
+  (
+    c.board_type = 'freeform'
+    OR (
+      c.board_type = 'review'
+      AND EXISTS (
+        SELECT 1
+        FROM pr_review_rooms AS review_room
+        WHERE review_room.workspace_id = c.workspace_id
+          AND review_room.canvas_id = c.id
+          AND review_room.status = 'active'
+      )
+    )
+  )
+`;
+
+type CanvasAccessMode = "read" | "write";
 
 type CanvasShapeOperationWriteInput = {
   actorUserId: string;
@@ -342,10 +373,10 @@ export class CanvasService implements OnModuleDestroy, OnModuleInit {
     const latestSeqRow = await this.database.queryOne<CanvasLatestOperationSeqRow>(
       `
         SELECT latest_op_seq
-        FROM canvas
-        WHERE id = $1
-          AND workspace_id = $2
-          AND board_type = 'freeform'
+        FROM canvas AS c
+        WHERE c.id = $1
+          AND c.workspace_id = $2
+          AND ${CANVAS_READ_ACCESS_SQL}
       `,
       [canvas.id, workspaceId]
     );
@@ -426,7 +457,7 @@ export class CanvasService implements OnModuleDestroy, OnModuleInit {
   ): Promise<CanvasShapePayload> {
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
 
-    const canvas = await this.findCanvas(workspaceId, canvasId);
+    const canvas = await this.findCanvas(workspaceId, canvasId, "write");
     if (!canvas) {
       throw notFound("Canvas not found");
     }
@@ -573,7 +604,7 @@ export class CanvasService implements OnModuleDestroy, OnModuleInit {
   ): Promise<CanvasShapeBatchPayload> {
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
 
-    const canvas = await this.findCanvas(workspaceId, canvasId);
+    const canvas = await this.findCanvas(workspaceId, canvasId, "write");
     if (!canvas) {
       throw notFound("Canvas not found");
     }
@@ -946,7 +977,7 @@ export class CanvasService implements OnModuleDestroy, OnModuleInit {
         ) child_counts ON TRUE
         WHERE s.id = $1
           AND c.workspace_id = $2
-          AND c.board_type = 'freeform'
+          AND ${CANVAS_READ_ACCESS_SQL}
           AND s.deleted_at IS NULL
       `,
       [id, workspaceId]
@@ -1053,7 +1084,7 @@ export class CanvasService implements OnModuleDestroy, OnModuleInit {
   ): Promise<CanvasViewSettingPayload> {
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
 
-    const canvas = await this.findCanvas(workspaceId, canvasId);
+    const canvas = await this.findCanvas(workspaceId, canvasId, "write");
     if (!canvas) {
       throw notFound("Canvas not found");
     }
@@ -1061,14 +1092,14 @@ export class CanvasService implements OnModuleDestroy, OnModuleInit {
     const values = validateViewSetting(input);
     const updatedCanvas = await this.database.queryOne<CanvasRow>(
       `
-        UPDATE canvas
+        UPDATE canvas AS c
         SET
           zoom = $3,
           viewport_x = $4,
           viewport_y = $5
-        WHERE id = $1
-          AND workspace_id = $2
-          AND board_type = 'freeform'
+        WHERE c.id = $1
+          AND c.workspace_id = $2
+          AND ${CANVAS_WRITE_ACCESS_SQL}
         RETURNING
           id,
           workspace_id,
@@ -1135,7 +1166,7 @@ export class CanvasService implements OnModuleDestroy, OnModuleInit {
         INNER JOIN canvas c ON c.id = s.canvas_id
         WHERE s.id = $1
           AND c.workspace_id = $2
-          AND c.board_type = 'freeform'
+          AND ${CANVAS_WRITE_ACCESS_SQL}
           AND s.deleted_at IS NULL
       `,
       [id, workspaceId]
@@ -1296,7 +1327,7 @@ export class CanvasService implements OnModuleDestroy, OnModuleInit {
         INNER JOIN canvas c ON c.id = s.canvas_id
         WHERE s.id = $1
           AND c.workspace_id = $2
-          AND c.board_type = 'freeform'
+          AND ${CANVAS_WRITE_ACCESS_SQL}
           AND s.deleted_at IS NULL
       `,
       [id, workspaceId]
@@ -1380,10 +1411,10 @@ export class CanvasService implements OnModuleDestroy, OnModuleInit {
     const lockedCanvas = await transaction.queryOne<CanvasLatestOperationSeqRow>(
       `
         SELECT latest_op_seq
-        FROM canvas
-        WHERE id = $1
-          AND workspace_id = $2
-          AND board_type = 'freeform'
+        FROM canvas AS c
+        WHERE c.id = $1
+          AND c.workspace_id = $2
+          AND ${CANVAS_WRITE_ACCESS_SQL}
         FOR UPDATE
       `,
       [input.canvasId, input.workspaceId]
@@ -1424,11 +1455,11 @@ export class CanvasService implements OnModuleDestroy, OnModuleInit {
 
     await transaction.execute(
       `
-        UPDATE canvas
+        UPDATE canvas AS c
         SET latest_op_seq = $3
-        WHERE id = $1
-          AND workspace_id = $2
-          AND board_type = 'freeform'
+        WHERE c.id = $1
+          AND c.workspace_id = $2
+          AND ${CANVAS_WRITE_ACCESS_SQL}
       `,
       [input.canvasId, input.workspaceId, nextOpSeq]
     );
@@ -1713,11 +1744,17 @@ export class CanvasService implements OnModuleDestroy, OnModuleInit {
 
   private async findCanvas(
     workspaceId: string,
-    canvasId: string
+    canvasId: string,
+    accessMode: CanvasAccessMode = "read"
   ): Promise<CanvasRow | null> {
     if (!UUID_PATTERN.test(canvasId)) {
       return null;
     }
+
+    const accessSql =
+      accessMode === "write"
+        ? CANVAS_WRITE_ACCESS_SQL
+        : CANVAS_READ_ACCESS_SQL;
 
     return this.database.queryOne<CanvasRow>(
       `
@@ -1737,7 +1774,7 @@ export class CanvasService implements OnModuleDestroy, OnModuleInit {
          AND s.deleted_at IS NULL
         WHERE c.id = $1
           AND c.workspace_id = $2
-          AND c.board_type = 'freeform'
+          AND ${accessSql}
         GROUP BY c.id
       `,
       [canvasId, workspaceId]
