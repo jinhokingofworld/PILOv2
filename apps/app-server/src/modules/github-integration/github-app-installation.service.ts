@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { QueryResultRow } from "pg";
-import { badRequest, notFound, unauthorized } from "../../common/api-error";
+import { ApiError, badRequest, notFound, unauthorized } from "../../common/api-error";
 import { DatabaseService } from "../../database/database.service";
 import { WorkspaceService } from "../workspace/workspace.service";
 import {
@@ -123,13 +123,6 @@ export class GithubAppInstallationService {
     cookieHeader?: string | null
   ): Promise<GithubAppInstallationCallbackPayload> {
     const config = this.configService.getGithubAppConfig();
-    const githubInstallationId = this.parseGithubInstallationId(
-      query.installation_id
-    );
-    this.validateRequiredString(
-      query.setup_action,
-      "GitHub App setup action is required"
-    );
     const state = this.validateRequiredString(
       query.state,
       "GitHub App installation state is required"
@@ -143,6 +136,10 @@ export class GithubAppInstallationService {
     if (!storedState.workspaceId) {
       throw badRequest("Invalid GitHub App installation state");
     }
+    const githubInstallationId = this.validateCallbackProviderParameters(
+      query,
+      storedState.returnUrl
+    );
 
     const oauthConfig = this.configService.getGithubOAuthConfig();
     const accessToken = await this.getConnectedGithubOAuthAccessTokenForCallback(
@@ -473,6 +470,47 @@ export class GithubAppInstallationService {
     }
 
     return parsed;
+  }
+
+  private validateCallbackProviderParameters(
+    query: GithubAppInstallationCallbackQuery,
+    returnUrl: string | null
+  ): number {
+    try {
+      const githubInstallationId = this.parseGithubInstallationId(
+        query.installation_id
+      );
+      this.validateRequiredString(
+        query.setup_action,
+        "GitHub App setup action is required"
+      );
+      return githubInstallationId;
+    } catch (error) {
+      throw githubCallbackBadRequest(
+        this.getApiErrorMessage(error),
+        returnUrl,
+        "callback_failed"
+      );
+    }
+  }
+
+  private getApiErrorMessage(error: unknown): string {
+    if (error instanceof ApiError) {
+      const response = error.getResponse();
+      if (
+        typeof response === "object" &&
+        response !== null &&
+        "error" in response &&
+        typeof response.error === "object" &&
+        response.error !== null &&
+        "message" in response.error &&
+        typeof response.error.message === "string"
+      ) {
+        return response.error.message;
+      }
+    }
+
+    return "GitHub App installation callback is invalid";
   }
 
   private toNumber(value: string | number): number {
