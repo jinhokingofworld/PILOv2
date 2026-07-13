@@ -34,13 +34,22 @@ import {
   List as ListIcon,
   LocateFixed,
   MapPin,
+  Redo2,
   PanelLeftClose,
   PanelLeftOpen,
   PanelRightClose,
   PanelRightOpen,
-  PinOff
+  PinOff,
+  Undo2
 } from "lucide-react";
 
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle
+} from "@/components/ui/dialog";
 import {
   Tooltip,
   TooltipContent,
@@ -131,6 +140,18 @@ import {
   type SqltoerdSourceMap,
   type SqltoerdSourceRange
 } from "@/features/sql-erd/utils/sql-source-map";
+import {
+  createSqlErdModelSqlHistory,
+  createSqlErdNormalizedSqlPreview,
+  createSqlErdSqlLineDiff,
+  isSqlErdNormalizedSqlPreviewCurrent,
+  isSqlErdViewSessionCurrent,
+  recordSqlErdModelSqlHistory,
+  redoSqlErdModelSqlHistory,
+  undoSqlErdModelSqlHistory,
+  type SqlErdModelSqlHistory,
+  type SqlErdNormalizedSqlPreview
+} from "@/features/sql-erd/utils/sql-diff-apply";
 import { cn } from "@/lib/utils";
 
 const emptySqlErdViewSession: SqlErdViewSession = {
@@ -438,6 +459,15 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
     useState<SqltoerdResolvedDialect | null>(null);
   const [sqlSourceMap, setSqlSourceMap] =
     useState<SqltoerdSourceMap | null>(null);
+  const [normalizedSqlPreview, setNormalizedSqlPreview] =
+    useState<SqlErdNormalizedSqlPreview | null>(null);
+  const [normalizedSqlApplyError, setNormalizedSqlApplyError] = useState<
+    string | null
+  >(null);
+  const [isNormalizedSqlApplying, setIsNormalizedSqlApplying] =
+    useState(false);
+  const [modelSqlHistory, setModelSqlHistory] =
+    useState<SqlErdModelSqlHistory>(() => createSqlErdModelSqlHistory());
   const [autosaveCompletionEpoch, setAutosaveCompletionEpoch] = useState(0);
   const isSessionReady =
     sqlErdViewSession.id === sessionId &&
@@ -525,6 +555,9 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
   }, [modelIndex, tablePinState.pinnedTableId]);
   const handleSourceTextChange = useCallback((sourceText: string) => {
     setSqlSourceMap(null);
+    setNormalizedSqlPreview(null);
+    setNormalizedSqlApplyError(null);
+    setModelSqlHistory(createSqlErdModelSqlHistory());
     applySqlErdEditAction({
       sourceText,
       type: "draft_source_changed"
@@ -532,11 +565,206 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
   }, [applySqlErdEditAction]);
   const handleDialectChange = useCallback((dialect: SqltoerdDialect) => {
     setSqlSourceMap(null);
+    setNormalizedSqlPreview(null);
+    setNormalizedSqlApplyError(null);
+    setModelSqlHistory(createSqlErdModelSqlHistory());
     applySqlErdEditAction({
       dialect,
       type: "draft_dialect_changed"
     });
   }, [applySqlErdEditAction]);
+  const applyNormalizedSqlSnapshot = useCallback(
+    ({
+      baseSnapshot,
+      onApplied,
+      sourceMapModelJson,
+      targetSnapshot
+    }: {
+      baseSnapshot: SqlErdViewSession;
+      onApplied: (snapshot: SqlErdViewSession) => void;
+      sourceMapModelJson: SqlErdViewSession["modelJson"];
+      targetSnapshot: SqlErdViewSession;
+    }) => {
+      if (!baseSnapshot.id || isNormalizedSqlApplying) {
+        return;
+      }
+
+      const requestSequence =
+        sqlErdEditStateRef.current.parse.requestSequence + 1;
+      setIsNormalizedSqlApplying(true);
+      setNormalizedSqlApplyError(null);
+
+      void runSqlErdParseWorker({
+        dialect: targetSnapshot.dialect,
+        previousLayoutJson: baseSnapshot.layoutJson,
+        requestSequence,
+        sessionId: baseSnapshot.id,
+        sourceMapModelJson,
+        sourceText: targetSnapshot.sourceText
+      }).then((parseResult) => {
+        const currentSnapshot =
+          sqlErdEditStateRef.current.lastSuccessfulSnapshot;
+        const isCurrent =
+          isSqlErdViewSessionCurrent(baseSnapshot, currentSnapshot) &&
+          parseResult.requestSequence === requestSequence &&
+          parseResult.sessionId === baseSnapshot.id;
+
+        if (!isCurrent || parseResult.cancelled) {
+          if (!parseResult.cancelled) {
+            setNormalizedSqlApplyError(
+              "The session changed while SQL was being applied. Create a new preview and try again."
+            );
+          }
+          setIsNormalizedSqlApplying(false);
+          return;
+        }
+
+        if (!parseResult.ok) {
+          setNormalizedSqlApplyError(parseResult.error.message);
+          setIsNormalizedSqlApplying(false);
+          return;
+        }
+
+        const parsedSnapshot: SqlErdViewSession = {
+          ...baseSnapshot,
+          layoutJson: parseResult.layoutJson,
+          modelJson: parseResult.modelJson,
+          sourceText: targetSnapshot.sourceText
+        };
+
+        applySqlErdEditAction({
+          baseSnapshot,
+          snapshot: parsedSnapshot,
+          type: "normalized_sql_applied"
+        });
+        setLastResolvedDialect(parseResult.resolvedDialect);
+        setSqlSourceMap(parseResult.sourceMap);
+        setPendingSourceAutosaveSnapshot(parsedSnapshot);
+        setSourceAutosaveRetryAttempt(0);
+        setSelectedSqlErdObject({ type: "none" });
+        setSessionLoadState({
+          label: "Unsaved",
+          message: "Normalized SQL changes will autosave",
+          tone: "neutral"
+        });
+        onApplied(parsedSnapshot);
+        setIsNormalizedSqlApplying(false);
+      });
+    },
+    [
+      applySqlErdEditAction,
+      isNormalizedSqlApplying,
+      runSqlErdParseWorker,
+      setPendingSourceAutosaveSnapshot
+    ]
+  );
+  const handlePreviewNormalizedSql = useCallback(() => {
+    const currentSnapshot = sqlErdEditStateRef.current.lastSuccessfulSnapshot;
+    const resolvedDialect =
+      lastResolvedDialect ??
+      (currentSnapshot.dialect === "auto" ? null : currentSnapshot.dialect);
+
+    if (!resolvedDialect || isSqlErdDraftDirty(sqlErdEditStateRef.current)) {
+      setNormalizedSqlApplyError(
+        "Generate the current SQL successfully before creating a normalized SQL preview."
+      );
+      return;
+    }
+
+    setNormalizedSqlApplyError(null);
+    setNormalizedSqlPreview(
+      createSqlErdNormalizedSqlPreview({
+        modelJson: currentSnapshot.modelJson,
+        resolvedDialect,
+        session: currentSnapshot
+      })
+    );
+  }, [lastResolvedDialect]);
+  const handleApplyNormalizedSql = useCallback(() => {
+    if (
+      !normalizedSqlPreview ||
+      !normalizedSqlPreview.hasChanges ||
+      isNormalizedSqlApplying
+    ) {
+      return;
+    }
+
+    const baseSnapshot = sqlErdEditStateRef.current.lastSuccessfulSnapshot;
+    if (
+      !isSqlErdNormalizedSqlPreviewCurrent(
+        normalizedSqlPreview,
+        baseSnapshot
+      )
+    ) {
+      setNormalizedSqlApplyError(
+        "The session changed while the preview was open. Create a new preview before applying it."
+      );
+      return;
+    }
+
+    applyNormalizedSqlSnapshot({
+      baseSnapshot,
+      onApplied: () => {
+        setModelSqlHistory((currentHistory) =>
+          recordSqlErdModelSqlHistory(currentHistory, baseSnapshot)
+        );
+        setNormalizedSqlPreview(null);
+      },
+      sourceMapModelJson: normalizedSqlPreview.modelJson,
+      targetSnapshot: {
+        ...baseSnapshot,
+        sourceText: normalizedSqlPreview.generatedSourceText
+      }
+    });
+  }, [
+    applyNormalizedSqlSnapshot,
+    isNormalizedSqlApplying,
+    normalizedSqlPreview
+  ]);
+  const handleUndoNormalizedSql = useCallback(() => {
+    if (isNormalizedSqlApplying) {
+      return;
+    }
+
+    const baseSnapshot = sqlErdEditStateRef.current.lastSuccessfulSnapshot;
+    const transition = undoSqlErdModelSqlHistory(modelSqlHistory, baseSnapshot);
+    if (!transition.snapshot) {
+      return;
+    }
+
+    applyNormalizedSqlSnapshot({
+      baseSnapshot,
+      onApplied: () => setModelSqlHistory(transition.history),
+      sourceMapModelJson: transition.snapshot.modelJson,
+      targetSnapshot: {
+        ...transition.snapshot,
+        id: baseSnapshot.id,
+        revision: baseSnapshot.revision
+      }
+    });
+  }, [applyNormalizedSqlSnapshot, isNormalizedSqlApplying, modelSqlHistory]);
+  const handleRedoNormalizedSql = useCallback(() => {
+    if (isNormalizedSqlApplying) {
+      return;
+    }
+
+    const baseSnapshot = sqlErdEditStateRef.current.lastSuccessfulSnapshot;
+    const transition = redoSqlErdModelSqlHistory(modelSqlHistory, baseSnapshot);
+    if (!transition.snapshot) {
+      return;
+    }
+
+    applyNormalizedSqlSnapshot({
+      baseSnapshot,
+      onApplied: () => setModelSqlHistory(transition.history),
+      sourceMapModelJson: transition.snapshot.modelJson,
+      targetSnapshot: {
+        ...transition.snapshot,
+        id: baseSnapshot.id,
+        revision: baseSnapshot.revision
+      }
+    });
+  }, [applyNormalizedSqlSnapshot, isNormalizedSqlApplying, modelSqlHistory]);
   const handleLayoutChange = useCallback(
     (layoutJson: SqltoerdLayoutJsonV1) => {
       applySqlErdEditAction({
@@ -697,6 +925,9 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
         setPendingLayoutAutosaveJson(null);
         setLayoutAutosaveRetryAttempt(0);
         setLayoutAutosaveBlockReason(null);
+        setNormalizedSqlPreview(null);
+        setNormalizedSqlApplyError(null);
+        setModelSqlHistory(createSqlErdModelSqlHistory());
         setSelectedSqlErdObject({ type: "none" });
       } catch {
         applyReloadFailure();
@@ -1133,6 +1364,10 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
     setPendingLayoutAutosaveJson(null);
     setLayoutAutosaveRetryAttempt(0);
     setLayoutAutosaveBlockReason(null);
+    setNormalizedSqlPreview(null);
+    setNormalizedSqlApplyError(null);
+    setIsNormalizedSqlApplying(false);
+    setModelSqlHistory(createSqlErdModelSqlHistory());
   }, [
     activeWorkspaceId,
     sessionId,
@@ -1226,18 +1461,35 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
   }, [inspectorPanelMaxWidth]);
 
   return (
-    <section
-      className="flex h-full min-h-0 overflow-hidden bg-background"
-      ref={panelContainerRef}
-    >
+    <>
+      <section
+        className="flex h-full min-h-0 overflow-hidden bg-background"
+        ref={panelContainerRef}
+      >
       <SourcePanel
+        canPreviewNormalizedSql={
+          isSessionReady &&
+          !isNormalizedSqlApplying &&
+          !isSqlErdDraftDirty(sqlErdEditState) &&
+          (lastResolvedDialect !== null ||
+            sqlErdEditState.draftDialect !== "auto")
+        }
+        canRedoNormalizedSql={
+          !isNormalizedSqlApplying && modelSqlHistory.future.length > 0
+        }
+        canUndoNormalizedSql={
+          !isNormalizedSqlApplying && modelSqlHistory.past.length > 0
+        }
         counts={sessionCounts}
         dialect={sqlErdEditState.draftDialect}
         isOpen={isSourceOpen}
         isDialectSelectDisabled={!isSessionReady}
         onDialectChange={handleDialectChange}
+        onPreviewNormalizedSql={handlePreviewNormalizedSql}
+        onRedoNormalizedSql={handleRedoNormalizedSql}
         onSourceTextChange={handleSourceTextChange}
         onToggle={() => setIsSourceOpen((current) => !current)}
+        onUndoNormalizedSql={handleUndoNormalizedSql}
         sessionLoadState={sourceStatus}
         isSourceTextReadOnly={!isSessionReady}
         sourceText={sqlErdEditState.draftSourceText}
@@ -1299,7 +1551,127 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
         viewModel={inspectorViewModel}
         width={clampedInspectorPanelWidth}
       />
-    </section>
+      </section>
+      <NormalizedSqlPreviewDialog
+        error={normalizedSqlApplyError}
+        isApplying={isNormalizedSqlApplying}
+        onApply={handleApplyNormalizedSql}
+        onOpenChange={(open) => {
+          if (!open && !isNormalizedSqlApplying) {
+            setNormalizedSqlPreview(null);
+            setNormalizedSqlApplyError(null);
+          }
+        }}
+        preview={normalizedSqlPreview}
+      />
+    </>
+  );
+}
+
+function NormalizedSqlPreviewDialog({
+  error,
+  isApplying,
+  onApply,
+  onOpenChange,
+  preview
+}: {
+  error: string | null;
+  isApplying: boolean;
+  onApply: () => void;
+  onOpenChange: (open: boolean) => void;
+  preview: SqlErdNormalizedSqlPreview | null;
+}) {
+  return (
+    <Dialog open={preview !== null} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-5xl" showCloseButton={!isApplying}>
+        <DialogHeader>
+          <DialogTitle>Regenerate SQL</DialogTitle>
+          <DialogDescription>
+            Review the normalized SQL before replacing the current source.
+          </DialogDescription>
+        </DialogHeader>
+        {preview ? (
+          <SqlPreviewDiff
+            beforeSourceText={preview.baseSnapshot.sourceText}
+            afterSourceText={preview.generatedSourceText}
+          />
+        ) : null}
+        {preview?.warnings.length ? (
+          <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm leading-6 text-amber-900">
+            {preview.warnings.map((warning) => (
+              <p key={warning}>{warning}</p>
+            ))}
+          </div>
+        ) : null}
+        {preview && !preview.hasChanges ? (
+          <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+            The generated SQL matches the current source.
+          </p>
+        ) : null}
+        {error ? (
+          <p className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+            {error}
+          </p>
+        ) : null}
+        <div className="flex justify-end gap-2">
+          <button
+            className="inline-flex h-9 items-center rounded-md border px-3 text-sm font-medium disabled:pointer-events-none disabled:opacity-50"
+            disabled={isApplying}
+            onClick={() => onOpenChange(false)}
+            type="button"
+          >
+            Cancel
+          </button>
+          <button
+            className="inline-flex h-9 items-center rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground disabled:pointer-events-none disabled:opacity-50"
+            disabled={!preview || !preview.hasChanges || isApplying}
+            onClick={onApply}
+            type="button"
+          >
+            {isApplying ? "Applying" : "Apply SQL"}
+          </button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function SqlPreviewDiff({
+  afterSourceText,
+  beforeSourceText
+}: {
+  afterSourceText: string;
+  beforeSourceText: string;
+}) {
+  const lines = createSqlErdSqlLineDiff(beforeSourceText, afterSourceText);
+  const visibleLines = lines.slice(0, 1200);
+
+  return (
+    <div className="min-h-0 overflow-hidden rounded-md border">
+      <p className="border-b bg-muted/30 px-3 py-2 text-sm font-medium">
+        SQL diff
+      </p>
+      <pre className="max-h-72 overflow-auto bg-slate-950 py-3 font-mono text-xs leading-5 text-slate-100">
+        {visibleLines.map((line, index) => (
+          <span
+            className={cn(
+              "block min-h-5 whitespace-pre-wrap break-words px-3",
+              line.kind === "added" && "bg-emerald-500/20 text-emerald-100",
+              line.kind === "removed" && "bg-rose-500/20 text-rose-100"
+            )}
+            key={`${line.kind}-${index}-${line.value}`}
+          >
+            {line.kind === "added" ? "+ " : line.kind === "removed" ? "- " : "  "}
+            {line.value}
+          </span>
+        ))}
+      </pre>
+      {lines.length > visibleLines.length ? (
+        <p className="border-t px-3 py-2 text-xs text-muted-foreground">
+          Showing the first {visibleLines.length.toLocaleString()} changed lines.
+        </p>
+      ) : null}
+    </div>
   );
 }
 
@@ -1350,12 +1722,18 @@ type PanelToggleProps = {
 };
 
 type SourcePanelProps = PanelToggleProps & {
+  canPreviewNormalizedSql: boolean;
+  canRedoNormalizedSql: boolean;
+  canUndoNormalizedSql: boolean;
   counts: ReturnType<typeof getSqltoerdModelCounts>;
   dialect: SqlErdViewSession["dialect"];
   isDialectSelectDisabled: boolean;
   isSourceTextReadOnly: boolean;
   onDialectChange: (dialect: SqltoerdDialect) => void;
+  onPreviewNormalizedSql: () => void;
+  onRedoNormalizedSql: () => void;
   onSourceTextChange: (sourceText: string) => void;
+  onUndoNormalizedSql: () => void;
   sessionLoadState: SqlErdSessionLoadState;
   sourceText: string;
   resolvedDialect: SqltoerdResolvedDialect;
@@ -1364,14 +1742,20 @@ type SourcePanelProps = PanelToggleProps & {
 };
 
 function SourcePanel({
+  canPreviewNormalizedSql,
+  canRedoNormalizedSql,
+  canUndoNormalizedSql,
   counts,
   dialect,
   isOpen,
   isDialectSelectDisabled,
   isSourceTextReadOnly,
   onDialectChange,
+  onPreviewNormalizedSql,
+  onRedoNormalizedSql,
   onSourceTextChange,
   onToggle,
+  onUndoNormalizedSql,
   sessionLoadState,
   sourceText,
   resolvedDialect,
@@ -1428,10 +1812,52 @@ function SourcePanel({
       </div>
 
       <div className="flex flex-1 flex-col overflow-hidden">
-        <div className="flex items-center border-b px-4 py-2">
+        <div className="flex items-center justify-between gap-2 border-b px-4 py-2">
           <span className="text-xs font-medium text-muted-foreground">
             Source text
           </span>
+          <div className="flex items-center gap-1">
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <button
+                    aria-label="Undo normalized SQL change"
+                    className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+                    disabled={!canUndoNormalizedSql}
+                    onClick={onUndoNormalizedSql}
+                    type="button"
+                  >
+                    <Undo2 className="size-3.5" />
+                  </button>
+                }
+              />
+              <TooltipContent>Undo SQL regeneration</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <button
+                    aria-label="Redo normalized SQL change"
+                    className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+                    disabled={!canRedoNormalizedSql}
+                    onClick={onRedoNormalizedSql}
+                    type="button"
+                  >
+                    <Redo2 className="size-3.5" />
+                  </button>
+                }
+              />
+              <TooltipContent>Redo SQL regeneration</TooltipContent>
+            </Tooltip>
+            <button
+              className="inline-flex h-7 items-center rounded-md border px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+              disabled={!canPreviewNormalizedSql}
+              onClick={onPreviewNormalizedSql}
+              type="button"
+            >
+              Regenerate SQL
+            </button>
+          </div>
         </div>
         <p
           aria-live="polite"

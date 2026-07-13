@@ -18,6 +18,7 @@ async function compileSqlErdRuntimeModules() {
   );
   const modelOutputPath = join(outputDir, "model.mjs");
   const modelToSqlOutputPath = join(outputDir, "model-to-sql.mjs");
+  const sqlDiffApplyOutputPath = join(outputDir, "sql-diff-apply.mjs");
   const inspectorOutputPath = join(outputDir, "inspector.mjs");
   const ddlParserOutputPath = join(outputDir, "ddl-parser.mjs");
   const sqlSourceMapOutputPath = join(outputDir, "sql-source-map.mjs");
@@ -58,6 +59,25 @@ async function compileSqlErdRuntimeModules() {
       "../../src/features/sql-erd/utils/model-to-sql.ts",
       modelToSqlOutputPath,
       [[/from "@\/features\/sql-erd\/types"/g, 'from "./types-stub.mjs"']]
+    );
+    await compileTypeScriptModule(
+      "../../src/features/sql-erd/utils/sql-diff-apply.ts",
+      sqlDiffApplyOutputPath,
+      [
+        [/from "@\/features\/sql-erd\/types"/g, 'from "./types-stub.mjs"'],
+        [
+          /from "@\/features\/sql-erd\/utils\/ddl-parser"/g,
+          'from "./ddl-parser.mjs"'
+        ],
+        [
+          /from "@\/features\/sql-erd\/utils\/model"/g,
+          'from "./model.mjs"'
+        ],
+        [
+          /from "@\/features\/sql-erd\/utils\/model-to-sql"/g,
+          'from "./model-to-sql.mjs"'
+        ]
+      ]
     );
     await compileTypeScriptModule(
       "../../src/features/sql-erd/utils/inspector.ts",
@@ -226,6 +246,7 @@ async function compileSqlErdRuntimeModules() {
     const [
       modelRuntime,
       modelToSqlRuntime,
+      sqlDiffApplyRuntime,
       inspectorRuntime,
       ddlParserRuntime,
       sqlSourceMapRuntime,
@@ -247,6 +268,7 @@ async function compileSqlErdRuntimeModules() {
     ] = await Promise.all([
       import(pathToFileHref(modelOutputPath)),
       import(pathToFileHref(modelToSqlOutputPath)),
+      import(pathToFileHref(sqlDiffApplyOutputPath)),
       import(pathToFileHref(inspectorOutputPath)),
       import(pathToFileHref(ddlParserOutputPath)),
       import(pathToFileHref(sqlSourceMapOutputPath)),
@@ -279,6 +301,7 @@ async function compileSqlErdRuntimeModules() {
       inspectorRuntime,
       modelRuntime,
       modelToSqlRuntime,
+      sqlDiffApplyRuntime,
       relationShapeRuntime,
       sessionListStateRuntime,
       sessionNavigationRuntime,
@@ -578,6 +601,7 @@ const [
   layoutAutosaveUtils,
   tablePinUtils,
   statusCopyUtils,
+  sqlDiffApplyUtils,
   canvasSurface,
   mainShell,
   tableShape,
@@ -611,6 +635,7 @@ const [
     readSqlErdFile("../../src/features/sql-erd/utils/layout-autosave.ts"),
     readSqlErdFile("../../src/features/sql-erd/utils/table-pin.ts"),
     readSqlErdFile("../../src/features/sql-erd/utils/status-copy.ts"),
+    readSqlErdFile("../../src/features/sql-erd/utils/sql-diff-apply.ts"),
     readSqlErdFile("../../src/features/sql-erd/components/sql-erd-canvas.tsx"),
     readSqlErdFile("../../src/components/main-shell.tsx"),
     readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-table-shape.tsx"),
@@ -637,6 +662,7 @@ const {
   inspectorRuntime,
   modelRuntime,
   modelToSqlRuntime,
+  sqlDiffApplyRuntime,
   relationShapeRuntime,
   sessionStateRuntime,
   sqlEditStateRuntime,
@@ -2008,6 +2034,36 @@ assert.deepEqual(
   successfulSqlEditState.lastSuccessfulSnapshot,
   successfulSnapshot
 );
+const normalizedSqlSnapshot = {
+  ...successfulSnapshot,
+  modelJson: structuredClone(successfulSnapshot.modelJson),
+  sourceText: "CREATE TABLE normalized_users (id BIGINT PRIMARY KEY);"
+};
+const normalizedSqlAppliedState = sqlEditStateRuntime.reduceSqlErdEditState(
+  successfulSqlEditState,
+  {
+    baseSnapshot: successfulSnapshot,
+    snapshot: normalizedSqlSnapshot,
+    type: "normalized_sql_applied"
+  }
+);
+assert.equal(
+  normalizedSqlAppliedState.lastSuccessfulSnapshot.sourceText,
+  normalizedSqlSnapshot.sourceText
+);
+assert.equal(
+  normalizedSqlAppliedState.draftSourceText,
+  normalizedSqlSnapshot.sourceText
+);
+assert.equal(normalizedSqlAppliedState.parse.status, "idle");
+assert.strictEqual(
+  sqlEditStateRuntime.reduceSqlErdEditState(successfulSqlEditState, {
+    baseSnapshot: { ...successfulSnapshot, revision: 7 },
+    snapshot: normalizedSqlSnapshot,
+    type: "normalized_sql_applied"
+  }),
+  successfulSqlEditState
+);
 
 const locallyChangedLayout = {
   version: 1,
@@ -3235,6 +3291,88 @@ const generatedMySqlParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
 });
 assert.equal(generatedMySqlParseResult.ok, true);
 assert.equal(generatedMySqlParseResult.modelJson.schema.relations.length, 1);
+const modelSqlPreviewSession = {
+  id: "session.model-sql-preview",
+  revision: 7,
+  title: "Model SQL preview",
+  sourceFormat: "sql",
+  dialect: "mysql",
+  sourceText: mysqlSourceText,
+  modelJson: mysqlParseResult.modelJson,
+  layoutJson: {
+    version: 1,
+    tableLayouts: [
+      { tableId: "table.users", x: 120, y: 80 },
+      { tableId: "table.orders", x: 520, y: 80 }
+    ]
+  },
+  settingsJson: {}
+};
+const modelSqlPreview = sqlDiffApplyRuntime.createSqlErdNormalizedSqlPreview({
+  modelJson: modelSqlPreviewSession.modelJson,
+  resolvedDialect: "mysql",
+  session: modelSqlPreviewSession
+});
+assert.equal(modelSqlPreview.baseSnapshot, modelSqlPreviewSession);
+assert.match(modelSqlPreview.generatedSourceText, /CREATE TABLE `users`/);
+assert.equal(modelSqlPreview.hasChanges, true);
+assert.ok(modelSqlPreview.warnings.length > 0);
+assert.deepEqual(
+  sqlDiffApplyRuntime.createSqlErdSqlLineDiff(
+    "CREATE TABLE users (\n  id BIGINT\n);",
+    "CREATE TABLE users (\n  id BIGINT NOT NULL\n);"
+  ),
+  [
+    { kind: "unchanged", value: "CREATE TABLE users (" },
+    { kind: "removed", value: "  id BIGINT" },
+    { kind: "added", value: "  id BIGINT NOT NULL" },
+    { kind: "unchanged", value: ");" }
+  ]
+);
+const appliedModelSqlPreview = sqlDiffApplyRuntime.applySqlErdNormalizedSqlPreview(
+  modelSqlPreview
+);
+assert.equal(appliedModelSqlPreview.ok, true);
+assert.equal(appliedModelSqlPreview.snapshot.sourceText, modelSqlPreview.generatedSourceText);
+assert.deepEqual(
+  appliedModelSqlPreview.snapshot.layoutJson.tableLayouts,
+  modelSqlPreviewSession.layoutJson.tableLayouts
+);
+assert.equal(
+  sqlDiffApplyRuntime.isSqlErdNormalizedSqlPreviewCurrent(
+    modelSqlPreview,
+    modelSqlPreviewSession
+  ),
+  true
+);
+assert.equal(
+  sqlDiffApplyRuntime.isSqlErdNormalizedSqlPreviewCurrent(modelSqlPreview, {
+    ...modelSqlPreviewSession,
+    revision: 8
+  }),
+  false
+);
+const failedModelSqlPreview = sqlDiffApplyRuntime.applySqlErdNormalizedSqlPreview({
+  ...modelSqlPreview,
+  generatedSourceText: "CREATE TABLE users ("
+});
+assert.equal(failedModelSqlPreview.ok, false);
+assert.equal(modelSqlPreviewSession.sourceText, mysqlSourceText);
+let modelSqlHistory = sqlDiffApplyRuntime.createSqlErdModelSqlHistory();
+modelSqlHistory = sqlDiffApplyRuntime.recordSqlErdModelSqlHistory(
+  modelSqlHistory,
+  modelSqlPreviewSession
+);
+const undoneModelSqlPreview = sqlDiffApplyRuntime.undoSqlErdModelSqlHistory(
+  modelSqlHistory,
+  appliedModelSqlPreview.snapshot
+);
+assert.equal(undoneModelSqlPreview.snapshot, modelSqlPreviewSession);
+const redoneModelSqlPreview = sqlDiffApplyRuntime.redoSqlErdModelSqlHistory(
+  undoneModelSqlPreview.history,
+  modelSqlPreviewSession
+);
+assert.equal(redoneModelSqlPreview.snapshot, appliedModelSqlPreview.snapshot);
 const childFirstMySql = modelToSqlRuntime.generateSqlDdlFromErdModel({
   dialect: "mysql",
   modelJson: {
@@ -4318,6 +4456,15 @@ assert.match(sessionStateUtils, /isSqlErdAutosaveRequestCurrent/);
 assert.match(sessionStateUtils, /tryBeginSqlErdAutosave/);
 assert.match(sessionStateUtils, /completeSqlErdAutosave/);
 assert.match(sessionStateUtils, /SQL_ERD_LAYOUT_AUTOSAVE_DEBOUNCE_MS = 2000/);
+assert.match(sqlDiffApplyUtils, /createSqlErdNormalizedSqlPreview/);
+assert.match(sqlDiffApplyUtils, /createSqlErdSqlLineDiff/);
+assert.match(sqlDiffApplyUtils, /applySqlErdNormalizedSqlPreview/);
+assert.match(sqlDiffApplyUtils, /recordSqlErdModelSqlHistory/);
+assert.match(sqlDiffApplyUtils, /undoSqlErdModelSqlHistory/);
+assert.match(sqlDiffApplyUtils, /redoSqlErdModelSqlHistory/);
+assert.match(panel, /NormalizedSqlPreviewDialog/);
+assert.match(panel, /normalized_sql_applied/);
+assert.match(panel, /Regenerate SQL/);
 assert.match(
   sessionStateUtils,
   /SQL_ERD_LAYOUT_AUTOSAVE_MAX_RETRY_DELAY_MS = 30000/
