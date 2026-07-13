@@ -71,41 +71,47 @@ locals {
   }
 
   operation_alarms = {
-    retry_warning = {
+    retry_warning                     = {
       metric_name         = "RetryCount"
       statistic           = "Sum"
       comparison_operator = "GreaterThanOrEqualToThreshold"
       threshold           = 5
     }
-    retry_critical = {
+    retry_critical                    = {
       metric_name         = "RetryCount"
       statistic           = "Sum"
       comparison_operator = "GreaterThanOrEqualToThreshold"
       threshold           = 20
     }
-    terminal_failure_warning = {
+    terminal_failure_warning          = {
       metric_name         = "TerminalFailureCount"
       statistic           = "Sum"
       comparison_operator = "GreaterThanOrEqualToThreshold"
       threshold           = 1
     }
-    terminal_failure_critical = {
+    terminal_failure_critical         = {
       metric_name         = "TerminalFailureCount"
       statistic           = "Sum"
       comparison_operator = "GreaterThanOrEqualToThreshold"
       threshold           = 5
     }
-    rate_limit_remaining_warning = {
+    rate_limit_remaining_warning      = {
       metric_name         = "RateLimitRemaining"
       statistic           = "Minimum"
       comparison_operator = "LessThanOrEqualToThreshold"
       threshold           = 100
     }
-    rate_limit_remaining_critical = {
+    rate_limit_remaining_critical     = {
       metric_name         = "RateLimitRemaining"
       statistic           = "Minimum"
       comparison_operator = "LessThanOrEqualToThreshold"
       threshold           = 0
+    }
+    database_pool_exhausted_warning = {
+      metric_name         = "DatabasePoolExhaustedCount"
+      statistic           = "Sum"
+      comparison_operator = "GreaterThanOrEqualToThreshold"
+      threshold           = 1
     }
   }
 }
@@ -158,6 +164,19 @@ resource "aws_cloudwatch_log_metric_filter" "rate_limit_remaining" {
     name      = "RateLimitRemaining"
     namespace = local.metric_namespace
     value     = "$.rateLimitRemaining"
+  }
+}
+
+resource "aws_cloudwatch_log_metric_filter" "database_pool_exhausted" {
+  name           = "${var.name_prefix}-github-sync-database-pool-exhausted"
+  log_group_name = local.github_sync_worker_log_group_name
+  pattern        = "{ $.event = \"github_sync_worker_poll_retry\" && $.failureKind = \"database_session_pool_exhausted\" }"
+
+  metric_transformation {
+    name      = "DatabasePoolExhaustedCount"
+    namespace = local.metric_namespace
+    value     = "1"
+    unit      = "Count"
   }
 }
 

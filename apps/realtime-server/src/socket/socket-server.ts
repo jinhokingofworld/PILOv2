@@ -356,6 +356,10 @@ export async function createRealtimeSocketServer({
     ? await createSocketIoRedisAdapter(config.redisUrl)
     : null;
   const database = createRealtimeDatabase({
+    databaseApplicationName: config.databaseApplicationName,
+    databasePoolConnectionTimeoutMs: config.databasePoolConnectionTimeoutMs,
+    databasePoolIdleTimeoutMs: config.databasePoolIdleTimeoutMs,
+    databasePoolMax: config.databasePoolMax,
     databaseSsl: config.databaseSsl,
     databaseUrl: config.databaseUrl,
   });

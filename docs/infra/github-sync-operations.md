@@ -18,8 +18,9 @@ CloudWatch uses `/ecs/${name_prefix}/github-sync-worker` and existing SQS/ECS me
 | operation logs | `RetryCount` | 5 | 20 | Retries are concentrated in five minutes. |
 | operation logs | `TerminalFailureCount` | 1 | 5 | Terminal failures occurred in five minutes. |
 | operation logs | `RateLimitRemaining` | 100 | 0 | GitHub GraphQL quota is low or exhausted. |
+| operation logs | `DatabasePoolExhaustedCount` | 1 | - | The worker could not acquire a Supabase session-pool connection. |
 
-`RetryCount` is produced by `github_sync_retry`. `TerminalFailureCount` is produced by `github_sync_terminal_failure` and `github_sync_rate_limit_terminal_failure`. `RateLimitRemaining` is produced by numeric `github_sync_rate_limit_observed` events from successful GraphQL responses, so it is a pre-exhaustion signal rather than only a terminal-failure signal. Critical requires immediate human investigation; Warning requires trend and worker-health confirmation.
+`RetryCount` is produced by `github_sync_retry`. `TerminalFailureCount` is produced by `github_sync_terminal_failure` and `github_sync_rate_limit_terminal_failure`. `RateLimitRemaining` is produced by numeric `github_sync_rate_limit_observed` events from successful GraphQL responses, so it is a pre-exhaustion signal rather than only a terminal-failure signal. `DatabasePoolExhaustedCount` is produced only when the worker classifies a database error as `EMAXCONNSESSION`. Critical requires immediate human investigation; Warning requires trend and worker-health confirmation.
 
 Consider a separate event worker or autoscaling only after worker health is confirmed and either of these is true:
 
@@ -34,8 +35,9 @@ The worker writes one raw JSON event per stdout line so CloudWatch JSON filters 
 - `github_sync_terminal_failure`
 - `github_sync_rate_limit_terminal_failure`
 - `github_sync_rate_limit_observed`
+- `github_sync_worker_poll_retry`
 
-Every event contains `event`, `jobId`, `syncRunId`, `deliveryId`, `target`, `attemptCount`, and nullable `rateLimitRemaining`. Job events retain `deliveryId: null`. Retry events include `retryAfterSeconds` when known: 900 seconds for a sync job and 120 seconds for a webhook delivery. A webhook retry records its `deliveryId` and can have null `jobId`, `syncRunId`, and `attemptCount`. A successful GraphQL response with a numeric `x-ratelimit-remaining` header emits `github_sync_rate_limit_observed`; its identifiers are null and its target is `graphql`.
+Every event contains `event`, `jobId`, `syncRunId`, `deliveryId`, `target`, `attemptCount`, and nullable `rateLimitRemaining`. Job events retain `deliveryId: null`. Retry events include `retryAfterSeconds` when known: 900 seconds for a sync job and 120 seconds for a webhook delivery. A webhook retry records its `deliveryId` and can have null `jobId`, `syncRunId`, and `attemptCount`. A successful GraphQL response with a numeric `x-ratelimit-remaining` header emits `github_sync_rate_limit_observed`; its identifiers are null and its target is `graphql`. A failed worker poll emits `github_sync_worker_poll_retry` with `target: "worker_poll"`, bounded backoff, and a safe `failureKind`; it never includes the underlying database error text.
 
 Never log access tokens, webhook payloads, provider raw errors, or secrets. Use event identifiers and DB state for investigation; do not add credentials or payloads to logs or incident evidence.
 
@@ -56,6 +58,26 @@ Do not change queue behavior during redrive: webhook visibility remains 120 seco
 ### Worker stopped
 
 For `RunningTaskCount` Warning or Critical, inspect ECS service events and task stopped reasons. Correct image, task-role, network, or secret injection issues, then confirm at least one worker task is running. Do not classify backlog as a scaling issue before worker health is confirmed.
+
+### Database pool exhausted
+
+At `DatabasePoolExhaustedCount` Warning, do not restart or scale the worker first. Confirm App Server, Realtime, and GitHub sync worker task counts; then inspect the Supabase session-pool count and safe connection metadata such as `application_name`. The worker retries the failed poll with bounded backoff, so wait for the metric to stop increasing before validating queue drain. Do not expose database URLs, passwords, or raw database errors in the incident record.
+
+## DB connection budget
+
+The dev Supabase session pool has 15 sessions. Reserve 3 sessions for operator access and transient platform activity; application services may use at most 12.
+
+| Service | task count | task connection cap | budgeted connections |
+| --- | ---: | ---: | ---: |
+| App Server | 1 | 2 | 2 |
+| GitHub sync worker | 1 | 1 | 1 |
+| Realtime | 1 | 1 | 1 |
+| Shared AI worker | 1 | 3 persistent connections | 3 |
+| Agent worker | 1 | 1 persistent connection | 1 |
+| Meeting worker | 1 | 1 persistent connection | 1 |
+| **Total** |  |  | **9** |
+
+The shared AI worker replacement is the largest single-service overlap: 9 + 3 = 12, which stays within the application budget. Deploy DB-using ECS services one at a time; concurrent replacements can exceed the 12-session budget even when each task follows its individual cap.
 
 ### Failed queue publish
 

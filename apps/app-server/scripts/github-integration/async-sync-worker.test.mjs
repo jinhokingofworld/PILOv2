@@ -5,10 +5,15 @@ import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
 const { NestFactory } = require("@nestjs/core");
+const { resolveDatabasePoolSettings } = require("../../dist/database/database.service.js");
 const { GithubSyncRunService } = require("../../dist/modules/github-integration/github-sync-run.service.js");
 const { GithubSyncJobService } = require("../../dist/modules/github-integration/github-sync-job.service.js");
 const { GithubSyncWorkerModule } = require("../../dist/modules/github-integration/github-sync-worker.module.js");
 const { GithubSyncObservabilityService } = require("../../dist/modules/github-integration/github-sync-observability.service.js");
+const {
+  classifyGithubSyncWorkerFailure,
+  runGithubSyncWorkerLoop
+} = require("../../dist/modules/github-integration/github-sync-worker-loop.js");
 const { GithubProjectV2PollingService } = require("../../dist/modules/github-integration/github-project-v2-polling.service.js");
 const { GithubAppClient, GithubGraphqlRateLimitError } = require("../../dist/modules/github-integration/github-app.client.js");
 const { GithubWebhookService } = require("../../dist/modules/github-integration/github-webhook.service.js");
@@ -27,11 +32,101 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
   assert.match(observabilitySource, /github_sync_retry/);
   assert.match(observabilitySource, /github_sync_terminal_failure/);
   assert.match(observabilitySource, /github_sync_rate_limit_terminal_failure/);
+  assert.match(observabilitySource, /github_sync_worker_poll_retry/);
   assert.match(observabilitySource, /JSON\.stringify/);
 
   const appClientSource = readFileSync(`${root}/apps/app-server/src/modules/github-integration/github-app.client.ts`, "utf8");
   assert.match(appClientSource, /rateLimitRemaining: number \| null/);
   assert.match(appClientSource, /headers\.get\("x-ratelimit-remaining"\)/);
+}
+
+{
+  const poolSettings = resolveDatabasePoolSettings({
+    DATABASE_APPLICATION_NAME: "pilo-dev-github-sync-worker",
+    DATABASE_POOL_CONNECTION_TIMEOUT_MS: "5000",
+    DATABASE_POOL_IDLE_TIMEOUT_MS: "10000",
+    DATABASE_POOL_MAX: "1"
+  });
+
+  assert.deepEqual(poolSettings, {
+    application_name: "pilo-dev-github-sync-worker",
+    connectionTimeoutMillis: 5000,
+    idleTimeoutMillis: 10000,
+    max: 1
+  });
+  assert.throws(
+    () => resolveDatabasePoolSettings({ DATABASE_POOL_MAX: "0" }),
+    /DATABASE_POOL_MAX must be a positive integer/
+  );
+}
+
+{
+  const output = [];
+  const originalWrite = process.stdout.write;
+  const observability = new GithubSyncObservabilityService();
+  process.stdout.write = (chunk, encoding, callback) => {
+    output.push(String(chunk));
+    const done = typeof encoding === "function" ? encoding : callback;
+    if (typeof done === "function") done();
+    return true;
+  };
+
+  try {
+    observability.emitWorkerPollRetry(1500, "database_session_pool_exhausted");
+  } finally {
+    process.stdout.write = originalWrite;
+  }
+
+  assert.deepEqual(output.map((line) => JSON.parse(line)), [{
+    event: "github_sync_worker_poll_retry",
+    jobId: null,
+    syncRunId: null,
+    deliveryId: null,
+    target: "worker_poll",
+    attemptCount: null,
+    failureKind: "database_session_pool_exhausted",
+    retryAfterSeconds: 2,
+    rateLimitRemaining: null
+  }]);
+}
+
+{
+  const observed = [];
+  const delays = [];
+  let calls = 0;
+  const worker = {
+    async pollOnce() {
+      calls += 1;
+      if (calls === 1) {
+        const error = new Error("connection pool exhausted");
+        error.code = "EMAXCONNSESSION";
+        throw error;
+      }
+      if (calls === 2) throw new Error("safe test failure");
+    }
+  };
+
+  await runGithubSyncWorkerLoop(
+    worker,
+    {
+      emitWorkerPollRetry: (retryAfterMilliseconds, failureKind) => {
+        observed.push({ retryAfterMilliseconds, failureKind });
+      }
+    },
+    () => calls >= 3,
+    async (milliseconds) => { delays.push(milliseconds); }
+  );
+
+  assert.equal(calls, 3, "the worker must retry a failed poll instead of exiting");
+  assert.deepEqual(delays, [1000, 2000]);
+  assert.deepEqual(observed, [
+    { retryAfterMilliseconds: 1000, failureKind: "database_session_pool_exhausted" },
+    { retryAfterMilliseconds: 2000, failureKind: "unknown" }
+  ]);
+  assert.equal(
+    classifyGithubSyncWorkerFailure(new Error("password=not-logged")),
+    "unknown"
+  );
 }
 
 {
@@ -136,6 +231,7 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
 
   assert.match(workerMain, /import \{ GithubSyncWorkerModule \} from "\.\/modules\/github-integration\/github-sync-worker\.module";/);
   assert.match(workerMain, /createApplicationContext\(GithubSyncWorkerModule/);
+  assert.match(workerMain, /runGithubSyncWorkerLoop\(worker, observability/);
   assert.doesNotMatch(workerMain, /AppModule/);
   assert.match(workerModule, /imports: \[DatabaseModule\]/);
   for (const provider of [
@@ -185,8 +281,26 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
 {
   const iam = readFileSync(`${root}/infra/modules/iam/main.tf`, "utf8");
   const env = readFileSync(`${root}/infra/envs/dev/main.tf`, "utf8");
+  const observabilityInfra = readFileSync(
+    `${root}/infra/modules/github-sync-observability/main.tf`,
+    "utf8"
+  );
   assert.match(iam, /Action\s*=\s*\["sqs:SendMessage"\][\s\S]*Resource\s*=\s*var\.github_webhooks_queue_arn/);
   assert.match(env, /github_webhooks_queue_arn\s+= module\.sqs\.github_webhooks_queue_arn/);
+  assert.match(
+    env,
+    /app-server\s*=\s*\{[\s\S]*?DATABASE_POOL_MAX\s+=\s+"2"[\s\S]*?DATABASE_APPLICATION_NAME\s+=\s+"pilo-dev-app-server"/
+  );
+  assert.match(
+    env,
+    /realtime-server\s*=\s*\{[\s\S]*?DATABASE_POOL_MAX\s+=\s+"1"[\s\S]*?DATABASE_APPLICATION_NAME\s+=\s+"pilo-dev-realtime-server"/
+  );
+  assert.match(
+    env,
+    /github-sync-worker\s*=\s*\{[\s\S]*?DATABASE_POOL_MAX\s+=\s+"1"[\s\S]*?DATABASE_APPLICATION_NAME\s+=\s+"pilo-dev-github-sync-worker"/
+  );
+  assert.match(observabilityInfra, /DatabasePoolExhaustedCount/);
+  assert.match(observabilityInfra, /database_session_pool_exhausted/);
 }
 
 {

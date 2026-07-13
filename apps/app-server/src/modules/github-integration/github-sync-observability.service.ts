@@ -5,15 +5,17 @@ type GithubSyncOperationEventName =
   | "github_sync_retry"
   | "github_sync_terminal_failure"
   | "github_sync_rate_limit_terminal_failure"
-  | "github_sync_rate_limit_observed";
+  | "github_sync_rate_limit_observed"
+  | "github_sync_worker_poll_retry";
 
 interface GithubSyncOperationEvent {
   event: GithubSyncOperationEventName;
   jobId: string | null;
   syncRunId: string | null;
   deliveryId: string | null;
-  target: GithubSyncTarget | "webhook_delivery" | "graphql";
+  target: GithubSyncTarget | "webhook_delivery" | "graphql" | "worker_poll";
   attemptCount: number | null;
+  failureKind?: "database_session_pool_exhausted" | "unknown";
   retryAfterSeconds?: number;
   rateLimitRemaining: number | null;
 }
@@ -69,6 +71,23 @@ export class GithubSyncObservabilityService {
       target: "graphql",
       attemptCount: null,
       rateLimitRemaining
+    });
+  }
+
+  emitWorkerPollRetry(
+    retryAfterMilliseconds: number,
+    failureKind: "database_session_pool_exhausted" | "unknown"
+  ): void {
+    this.emit({
+      event: "github_sync_worker_poll_retry",
+      jobId: null,
+      syncRunId: null,
+      deliveryId: null,
+      target: "worker_poll",
+      attemptCount: null,
+      failureKind,
+      retryAfterSeconds: Math.ceil(retryAfterMilliseconds / 1_000),
+      rateLimitRemaining: null
     });
   }
 

@@ -3,6 +3,17 @@ import { Pool, PoolClient, PoolConfig, QueryResult, QueryResultRow } from "pg";
 
 const DEFAULT_DATABASE_URL = "postgresql://pilo:pilo@localhost:5432/pilo";
 const LOCAL_APP_ENVS = new Set(["local", "test", "development"]);
+const DEFAULT_DATABASE_POOL_MAX = 2;
+const DEFAULT_DATABASE_POOL_IDLE_TIMEOUT_MS = 10_000;
+const DEFAULT_DATABASE_POOL_CONNECTION_TIMEOUT_MS = 5_000;
+const DEFAULT_DATABASE_APPLICATION_NAME = "pilo-app-server";
+
+export interface DatabasePoolSettings {
+  application_name: string;
+  connectionTimeoutMillis: number;
+  idleTimeoutMillis: number;
+  max: number;
+}
 
 export interface DatabaseTransaction {
   query<T extends QueryResultRow = QueryResultRow>(
@@ -25,7 +36,8 @@ export class DatabaseService implements OnModuleDestroy {
 
   constructor() {
     const config: PoolConfig = {
-      connectionString: resolveDatabaseUrl()
+      connectionString: resolveDatabaseUrl(),
+      ...resolveDatabasePoolSettings()
     };
 
     if (process.env.DATABASE_SSL === "true") {
@@ -170,4 +182,51 @@ export function shouldRequireDatabaseUrl(
   }
 
   return env.NODE_ENV?.trim().toLowerCase() === "production";
+}
+
+export function resolveDatabasePoolSettings(
+  env: NodeJS.ProcessEnv = process.env
+): DatabasePoolSettings {
+  return {
+    application_name: resolveApplicationName(
+      env.DATABASE_APPLICATION_NAME,
+      DEFAULT_DATABASE_APPLICATION_NAME
+    ),
+    connectionTimeoutMillis: resolvePositiveInteger(
+      env.DATABASE_POOL_CONNECTION_TIMEOUT_MS,
+      "DATABASE_POOL_CONNECTION_TIMEOUT_MS",
+      DEFAULT_DATABASE_POOL_CONNECTION_TIMEOUT_MS
+    ),
+    idleTimeoutMillis: resolvePositiveInteger(
+      env.DATABASE_POOL_IDLE_TIMEOUT_MS,
+      "DATABASE_POOL_IDLE_TIMEOUT_MS",
+      DEFAULT_DATABASE_POOL_IDLE_TIMEOUT_MS
+    ),
+    max: resolvePositiveInteger(
+      env.DATABASE_POOL_MAX,
+      "DATABASE_POOL_MAX",
+      DEFAULT_DATABASE_POOL_MAX
+    )
+  };
+}
+
+function resolveApplicationName(value: string | undefined, fallback: string): string {
+  return value?.trim() || fallback;
+}
+
+function resolvePositiveInteger(
+  value: string | undefined,
+  variableName: string,
+  fallback: number
+): number {
+  if (value === undefined || value.trim() === "") {
+    return fallback;
+  }
+
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error(`${variableName} must be a positive integer`);
+  }
+
+  return parsed;
 }

@@ -17,21 +17,28 @@ export type RealtimeDatabase = {
 };
 
 export function createRealtimeDatabase({
+  databaseApplicationName,
+  databasePoolConnectionTimeoutMs,
+  databasePoolIdleTimeoutMs,
+  databasePoolMax,
   databaseSsl,
   databaseUrl,
 }: {
+  databaseApplicationName: string;
+  databasePoolConnectionTimeoutMs: number;
+  databasePoolIdleTimeoutMs: number;
+  databasePoolMax: number;
   databaseSsl: boolean;
   databaseUrl: string;
 }): RealtimeDatabase {
-  const config: PoolConfig = {
-    connectionString: databaseUrl,
-  };
-
-  if (databaseSsl) {
-    config.ssl = {
-      rejectUnauthorized: false,
-    };
-  }
+  const config = createRealtimeDatabasePoolConfig({
+    databaseApplicationName,
+    databasePoolConnectionTimeoutMs,
+    databasePoolIdleTimeoutMs,
+    databasePoolMax,
+    databaseSsl,
+    databaseUrl,
+  });
 
   const pool = new Pool(config);
 
@@ -60,4 +67,36 @@ export function createRealtimeDatabase({
       return rows[0] ?? null;
     },
   };
+}
+
+export function createRealtimeDatabasePoolConfig({
+  databaseApplicationName,
+  databasePoolConnectionTimeoutMs,
+  databasePoolIdleTimeoutMs,
+  databasePoolMax,
+  databaseSsl,
+  databaseUrl,
+}: {
+  databaseApplicationName: string;
+  databasePoolConnectionTimeoutMs: number;
+  databasePoolIdleTimeoutMs: number;
+  databasePoolMax: number;
+  databaseSsl: boolean;
+  databaseUrl: string;
+}): PoolConfig {
+  const config: PoolConfig = {
+    application_name: databaseApplicationName,
+    connectionString: databaseUrl,
+    connectionTimeoutMillis: databasePoolConnectionTimeoutMs,
+    idleTimeoutMillis: databasePoolIdleTimeoutMs,
+    max: databasePoolMax,
+  };
+
+  if (databaseSsl) {
+    config.ssl = {
+      rejectUnauthorized: false,
+    };
+  }
+
+  return config;
 }
