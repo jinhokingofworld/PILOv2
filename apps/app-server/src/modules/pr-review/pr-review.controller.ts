@@ -15,6 +15,7 @@ import { AuthGuard } from "../../common/auth.guard";
 import { CurrentUserId } from "../../common/current-user.decorator";
 import {
   DeletePrReviewSessionPayload,
+  DeletePrReviewRoomPayload,
   PrReviewCanvasPayload,
   PrReviewConflictAnalysisPayload,
   PrReviewConflictApplyPayload,
@@ -27,6 +28,10 @@ import {
   PrReviewFlowListPayload,
   PrReviewMergePayload,
   PrReviewResultPayload,
+  PrReviewRoomListPayload,
+  PrReviewRoomPayload,
+  PrReviewRoomRevisionListPayload,
+  PrReviewRoomStartPayload,
   PrReviewService,
   PrReviewSubmissionListPayload,
   PrReviewSubmissionPayload,
@@ -38,6 +43,106 @@ import {
 @UseGuards(AuthGuard)
 export class PrReviewController {
   constructor(private readonly prReviewService: PrReviewService) {}
+
+  @Get("pull-requests/:pullRequestId/review-room")
+  async getReviewRoomForPullRequest(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("pullRequestId") pullRequestId: string
+  ): Promise<ApiSuccessResponse<PrReviewRoomPayload>> {
+    const room = await this.prReviewService.getReviewRoomForPullRequest(
+      currentUserId,
+      workspaceId,
+      pullRequestId
+    );
+    return apiResponse(room);
+  }
+
+  @Post("pull-requests/:pullRequestId/review-room")
+  async createOrJoinReviewRoom(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("pullRequestId") pullRequestId: string,
+    @Res({ passthrough: true }) reply: FastifyReply
+  ): Promise<ApiSuccessResponse<PrReviewRoomStartPayload>> {
+    const result = await this.prReviewService.createOrJoinReviewRoom(
+      currentUserId,
+      workspaceId,
+      pullRequestId
+    );
+    reply.status(result.roomCreated || result.revisionCreated ? 201 : 200);
+    return apiResponse(result);
+  }
+
+  @Get("review-rooms")
+  async listReviewRooms(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string
+  ): Promise<ApiSuccessResponse<PrReviewRoomListPayload>> {
+    const rooms = await this.prReviewService.listReviewRooms(
+      currentUserId,
+      workspaceId
+    );
+    return apiResponse(rooms);
+  }
+
+  @Get("review-rooms/:reviewRoomId")
+  async getReviewRoom(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("reviewRoomId") reviewRoomId: string
+  ): Promise<ApiSuccessResponse<PrReviewRoomPayload>> {
+    const room = await this.prReviewService.getReviewRoom(
+      currentUserId,
+      workspaceId,
+      reviewRoomId
+    );
+    return apiResponse(room);
+  }
+
+  @Get("review-rooms/:reviewRoomId/revisions")
+  async listReviewRoomRevisions(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("reviewRoomId") reviewRoomId: string
+  ): Promise<ApiSuccessResponse<PrReviewRoomRevisionListPayload>> {
+    const revisions = await this.prReviewService.listReviewRoomRevisions(
+      currentUserId,
+      workspaceId,
+      reviewRoomId
+    );
+    return apiResponse(revisions);
+  }
+
+  @Post("review-rooms/:reviewRoomId/revisions")
+  async createReviewRoomRevision(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("reviewRoomId") reviewRoomId: string,
+    @Res({ passthrough: true }) reply: FastifyReply
+  ): Promise<ApiSuccessResponse<PrReviewRoomStartPayload>> {
+    const result = await this.prReviewService.createReviewRoomRevision(
+      currentUserId,
+      workspaceId,
+      reviewRoomId
+    );
+    reply.status(result.revisionCreated ? 201 : 200);
+    return apiResponse(result);
+  }
+
+  @Delete("review-rooms/:reviewRoomId")
+  async deleteReviewRoom(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("reviewRoomId") reviewRoomId: string
+  ): Promise<ApiSuccessResponse<DeletePrReviewRoomPayload>> {
+    const result = await this.prReviewService.deleteReviewRoom(
+      currentUserId,
+      workspaceId,
+      reviewRoomId
+    );
+    return apiResponse(result);
+  }
 
   @Post("pull-requests/:pullRequestId/review-sessions")
   async createReviewSession(

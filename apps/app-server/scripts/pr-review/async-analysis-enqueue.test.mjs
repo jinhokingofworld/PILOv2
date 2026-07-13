@@ -115,6 +115,7 @@ class FakePublisherJobService {
 class FakeReviewDatabase {
   constructor() {
     this.session = null;
+    this.room = null;
     this.jobs = [];
   }
 
@@ -124,6 +125,12 @@ class FakeReviewDatabase {
     }
     if (text.includes("review_session.status = 'analyzing'")) {
       return this.session ? { id: this.session.id } : null;
+    }
+    if (
+      text.includes("review_session.head_sha = $3") &&
+      text.includes("review_session.status <> 'failed'")
+    ) {
+      return null;
     }
     if (
       text.includes("FROM pr_review_sessions AS review_session") &&
@@ -137,12 +144,28 @@ class FakeReviewDatabase {
   async transaction(callback) {
     return callback({
       queryOne: async (text, values = []) => {
+        if (text.includes("FROM pr_review_rooms")) {
+          return this.room;
+        }
+        if (text.includes("INSERT INTO canvas")) {
+          return { id: "77777777-7777-4777-8777-777777777777" };
+        }
+        if (text.includes("INSERT INTO pr_review_rooms")) {
+          this.room = {
+            id: "88888888-8888-4888-8888-888888888888",
+            workspace_id: values[0],
+            pull_request_id: values[1],
+            canvas_id: values[2]
+          };
+          return this.room;
+        }
         if (text.includes("INSERT INTO pr_review_sessions")) {
           this.session = {
             id: payload.reviewSessionId,
-            pull_request_id: values[0],
-            created_by_user_id: values[1],
-            head_sha: values[2],
+            room_id: values[0],
+            pull_request_id: values[1],
+            created_by_user_id: values[2],
+            head_sha: values[3],
             status: "analyzing",
             pr_purpose: null,
             change_summary: [],
@@ -150,8 +173,8 @@ class FakeReviewDatabase {
             caution_points: [],
             reviewed_count: 0,
             total_file_count: 0,
-            conflict_status: values[3],
-            conflict_checked_at: values[4],
+            conflict_status: values[4],
+            conflict_checked_at: values[5],
             analysis_error_code: null,
             analysis_error_message: null,
             created_at: "2026-07-11T00:00:00.000Z",
@@ -346,6 +369,8 @@ try {
     const first = await service.createReviewSession(userId, payload.workspaceId, pullRequestId);
     assert.equal(first.created, true);
     assert.equal(first.session.status, "analyzing");
+    assert.equal(first.session.reviewRoomId, database.room.id);
+    assert.equal(first.roomCreated, true);
     assert.equal(first.session.prPurpose, null);
     assert.deepEqual(first.session.changeSummary, []);
     assert.equal(first.session.totalFileCount, 0);
