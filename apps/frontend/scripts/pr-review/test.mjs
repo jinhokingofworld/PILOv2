@@ -53,6 +53,20 @@ const prReviewCanvasSurface = await readFile(
   ),
   "utf8"
 );
+const prReviewCanvasRealtimeBridge = await readFile(
+  new URL(
+    "../../src/features/pr-review/components/review-canvas/PrReviewCanvasRealtimeBridge.tsx",
+    import.meta.url
+  ),
+  "utf8"
+);
+const prReviewCanvasPresence = await readFile(
+  new URL(
+    "../../src/features/pr-review/realtime/usePrReviewCanvasPresence.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
 const prReviewCanvasPersistence = await readFile(
   new URL(
     "../../src/features/pr-review/components/review-canvas/pr-review-canvas-persistence.ts",
@@ -159,6 +173,10 @@ assert.match(prReviewNavigation, /title: "PR/);
 assert.doesNotMatch(prReviewNavigation, /\/pr-review#/);
 assert.match(prReviewPage, /<PrReviewPanel \/>/);
 assert.match(prReviewRoutePage, /import "tldraw\/tldraw\.css"/);
+assert.match(
+  prReviewRoutePage,
+  /shared\/canvas-realtime\/canvas-realtime\.css/
+);
 assert.match(prReviewApiClient, /createPrReviewApiClient/);
 assert.match(prReviewApiClient, /startGithubOAuth/);
 assert.match(prReviewApiClient, /\/me\/github\/oauth\/start/);
@@ -210,6 +228,7 @@ assert.match(prReviewPanel, /300/);
 assert.match(prReviewPanel, /router\.push\("\/github"\)/);
 assert.match(prReviewPanel, /PrReviewCanvasShell/);
 assert.match(prReviewPanel, /apiClient=\{apiClient\}/);
+assert.match(prReviewPanel, /realtimeIdentity=\{realtimeIdentity\}/);
 assert.match(prReviewPanel, /workspaceId=\{workspaceId\}/);
 assert.match(prReviewPanel, /onGoToGithub=\{goToGithubPage\}/);
 assert.match(prReviewPanel, /onReviewSessionCreated/);
@@ -242,6 +261,7 @@ assert.match(prReviewCanvasShell, /Conflict 파일 확인 중/);
 assert.match(prReviewCanvasShell, /Conflict 정보가 오래되었습니다/);
 assert.match(prReviewCanvasShell, /Conflict 정보 다시 불러오기/);
 assert.match(prReviewCanvasShell, /PrReviewCanvasSurface/);
+assert.match(prReviewCanvasShell, /realtimeIdentity=\{realtimeIdentity\}/);
 assert.match(prReviewCanvasShell, /setSelectedReviewFileId/);
 assert.match(prReviewCanvasShell, /PrReviewFileDiffDrawer/);
 assert.match(prReviewFileDiffDrawer, /file\.decisionCarriedOver/);
@@ -323,6 +343,10 @@ assert.match(prReviewCanvasSurface, /isPrReviewFileNodeShape/);
 assert.match(prReviewCanvasSurface, /selectReviewFileNode/);
 assert.match(prReviewCanvasSurface, /selectedReviewFileId/);
 assert.match(prReviewCanvasSurface, /PrReviewCanvasPersistenceBridge/);
+assert.match(prReviewCanvasSurface, /usePrReviewCanvasPresence/);
+assert.match(prReviewCanvasSurface, /PrReviewCanvasRealtimeBridge/);
+assert.match(prReviewCanvasSurface, /reviewRoom\?\.status === "completed"/);
+assert.match(prReviewCanvasSurface, /persistedFileShapeEnabled && !readOnly/);
 assert.match(prReviewCanvasSurface, /registerReviewShapePolicy/);
 assert.match(prReviewCanvasSurface, /updatePrReviewRelationGeometry/);
 assert.match(prReviewCanvasSurface, /buildPrReviewFileShapeUpdateInput/);
@@ -331,6 +355,17 @@ assert.match(prReviewCanvasSurface, /conflictReason: conflictMetadata\.conflictR
 assert.doesNotMatch(prReviewCanvasSurface, /features\/canvas/);
 assert.doesNotMatch(prReviewCanvasSurface, /PiloCanvasRuntime/);
 assert.doesNotMatch(prReviewCanvasSurface, /canvas_freeform_shapes/);
+assert.match(prReviewCanvasPresence, /canvas:join/);
+assert.match(prReviewCanvasPresence, /canvas:leave/);
+assert.match(prReviewCanvasPresence, /canvas:presence:update/);
+assert.match(prReviewCanvasPresence, /canvas:presence:leave/);
+assert.match(prReviewCanvasPresence, /setReadOnly\(payload\.readOnly\)/);
+assert.match(prReviewCanvasPresence, /STALE_PRESENCE_TIMEOUT_MS = 15_000/);
+assert.doesNotMatch(prReviewCanvasPresence, /canvas:shape:lock/);
+assert.doesNotMatch(prReviewCanvasPresence, /canvas:shape:preview/);
+assert.match(prReviewCanvasRealtimeBridge, /RemoteCursorOverlay/);
+assert.match(prReviewCanvasRealtimeBridge, /sendPresenceUpdate/);
+assert.match(prReviewCanvasRealtimeBridge, /editor\.updateInstanceState\(\{ isReadonly: readOnly \}\)/);
 assert.match(prReviewCanvasPersistence, /PR_REVIEW_CANVAS_LOAD_QUERY/);
 assert.match(prReviewCanvasPersistence, /buildPrReviewFileShapeUpdateInput/);
 assert.match(prReviewCanvasPersistence, /buildPrReviewRelationEdgeGeometry/);
