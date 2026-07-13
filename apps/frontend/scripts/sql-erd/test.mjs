@@ -51,11 +51,30 @@ async function compileSqlErdRuntimeModules() {
   const tablePinOutputPath = join(outputDir, "table-pin.mjs");
   const foreignKeyAddOutputPath = join(outputDir, "foreign-key-add.mjs");
   const relationIdOutputPath = join(outputDir, "relation-id.mjs");
+  const tableCardLayoutOutputPath = join(outputDir, "table-card-layout.mjs");
+  const autoLayoutOutputPath = join(outputDir, "auto-layout.mjs");
 
   try {
     await compileTypeScriptModule(
       "../../src/features/sql-erd/utils/model.ts",
       modelOutputPath
+    );
+    await compileTypeScriptModule(
+      "../../src/features/sql-erd/utils/table-card-layout.ts",
+      tableCardLayoutOutputPath,
+      [[/from "@\/features\/sql-erd\/types"/g, 'from "./types-stub.mjs"']]
+    );
+    await compileTypeScriptModule(
+      "../../src/features/sql-erd/utils/auto-layout.ts",
+      autoLayoutOutputPath,
+      [
+        [/from "@\/features\/sql-erd\/types"/g, 'from "./types-stub.mjs"'],
+        [/from "@\/features\/sql-erd\/utils\/model"/g, 'from "./model.mjs"'],
+        [
+          /from "@\/features\/sql-erd\/utils\/table-card-layout"/g,
+          'from "./table-card-layout.mjs"'
+        ]
+      ]
     );
     await compileTypeScriptModule(
       "../../src/features/sql-erd/utils/model-to-sql.ts",
@@ -129,7 +148,10 @@ async function compileSqlErdRuntimeModules() {
           /from "@\/features\/sql-erd\/utils\/ddl-parser"/g,
           'from "./ddl-parser.mjs"'
         ],
-        [/from "@\/features\/sql-erd\/utils\/model"/g, 'from "./model.mjs"']
+        [
+          /from "@\/features\/sql-erd\/utils\/auto-layout"/g,
+          'from "./auto-layout.mjs"'
+        ]
       ]
     );
     await compileTypeScriptModule(
@@ -140,7 +162,10 @@ async function compileSqlErdRuntimeModules() {
           /from "@\/features\/sql-erd\/utils\/ddl-parser"/g,
           'from "./ddl-parser.mjs"'
         ],
-        [/from "@\/features\/sql-erd\/utils\/model"/g, 'from "./model.mjs"']
+        [
+          /from "@\/features\/sql-erd\/utils\/auto-layout"/g,
+          'from "./auto-layout.mjs"'
+        ]
       ]
     );
     await compileTypeScriptModule(
@@ -200,6 +225,10 @@ async function compileSqlErdRuntimeModules() {
         [
           /from "@\/features\/sql-erd\/utils\/model"/g,
           'from "./model-stub.mjs"'
+        ],
+        [
+          /from "@\/features\/sql-erd\/utils\/table-card-layout"/g,
+          'from "./table-card-layout.mjs"'
         ]
       ]
     );
@@ -298,7 +327,8 @@ async function compileSqlErdRuntimeModules() {
       tableShapeRuntime,
       canvasSelectionRuntime,
       tablePinRuntime,
-      foreignKeyAddRuntime
+      foreignKeyAddRuntime,
+      autoLayoutRuntime
     ] = await Promise.all([
       import(pathToFileHref(modelOutputPath)),
       import(pathToFileHref(modelToSqlOutputPath)),
@@ -321,7 +351,8 @@ async function compileSqlErdRuntimeModules() {
       import(pathToFileHref(tableShapeOutputPath)),
       import(pathToFileHref(canvasSelectionOutputPath)),
       import(pathToFileHref(tablePinOutputPath)),
-      import(pathToFileHref(foreignKeyAddOutputPath))
+      import(pathToFileHref(foreignKeyAddOutputPath)),
+      import(pathToFileHref(autoLayoutOutputPath))
     ]);
 
     return {
@@ -346,7 +377,8 @@ async function compileSqlErdRuntimeModules() {
       statusCopyRuntime,
       tableShapeRuntime,
       tablePinRuntime,
-      foreignKeyAddRuntime
+      foreignKeyAddRuntime,
+      autoLayoutRuntime
     };
   } finally {
     await rm(outputDir, { force: true, recursive: true });
@@ -636,6 +668,7 @@ const [
   generateSessionUtils,
   layoutAutosaveUtils,
   tablePinUtils,
+  autoLayoutUtils,
   statusCopyUtils,
   sqlDiffApplyUtils,
   canvasSurface,
@@ -670,6 +703,7 @@ const [
     readSqlErdFile("../../src/features/sql-erd/utils/generate-session.ts"),
     readSqlErdFile("../../src/features/sql-erd/utils/layout-autosave.ts"),
     readSqlErdFile("../../src/features/sql-erd/utils/table-pin.ts"),
+    readSqlErdFile("../../src/features/sql-erd/utils/auto-layout.ts"),
     readSqlErdFile("../../src/features/sql-erd/utils/status-copy.ts"),
     readSqlErdFile("../../src/features/sql-erd/utils/sql-diff-apply.ts"),
     readSqlErdFile("../../src/features/sql-erd/components/sql-erd-canvas.tsx"),
@@ -706,7 +740,8 @@ const {
   statusCopyRuntime,
   tableShapeRuntime,
   tablePinRuntime,
-  foreignKeyAddRuntime
+  foreignKeyAddRuntime,
+  autoLayoutRuntime
 } = await compileSqlErdRuntimeModules();
 
 const initialTablePinState = tablePinRuntime.createSqlErdTablePinState();
@@ -764,6 +799,193 @@ assert.equal(
   null
 );
 const runtimeModel = createRuntimeTestModel();
+
+const runtimeDynamicBadgeWidthModel = structuredClone(runtimeModel);
+const runtimeDynamicBadgeColumn =
+  runtimeDynamicBadgeWidthModel.schema.tables[0].columns[0];
+runtimeDynamicBadgeColumn.foreignKey = true;
+runtimeDynamicBadgeColumn.unique = true;
+const runtimeDynamicBadgeTable =
+  runtimeDynamicBadgeWidthModel.schema.tables[0];
+const runtimeDynamicBadgeCardSize = tableShapeRuntime.getSqlErdTableShapeSize(
+  runtimeDynamicBadgeTable
+);
+const runtimeDynamicBadgeAutoLayoutSize =
+  autoLayoutRuntime
+    .createSqltoerdAutoLayoutTableSizes(runtimeDynamicBadgeWidthModel, {
+      version: 1,
+      tableLayouts: []
+    })
+    .find((tableSize) => tableSize.tableId === runtimeDynamicBadgeTable.id);
+
+assert.ok(runtimeDynamicBadgeAutoLayoutSize);
+assert.equal(
+  runtimeDynamicBadgeAutoLayoutSize.width,
+  runtimeDynamicBadgeCardSize.w
+);
+assert.equal(
+  runtimeDynamicBadgeAutoLayoutSize.height,
+  runtimeDynamicBadgeCardSize.h
+);
+
+const runtimeMinimumZoomCamera =
+  autoLayoutRuntime.getSqltoerdMinimumZoomCamera(
+    { x: 10, y: 20, w: 2000, h: 1000 },
+    { width: 1000, height: 700 },
+    0.45
+  );
+
+assert.deepEqual(runtimeMinimumZoomCamera, {
+  x: 101.11111111111111,
+  y: 257.77777777777777,
+  z: 0.45
+});
+
+const runtimeAutoLayoutInput = {
+  layoutJson: {
+    version: 1,
+    tableLayouts: [
+      { tableId: "table.users", x: 960, y: 640, width: 320 },
+      { tableId: "table.orders", x: 80, y: 40, width: 320 }
+    ],
+    annotations: {
+      version: 1,
+      links: [
+        {
+          id: "annotation.orders.users",
+          kind: "column_link",
+          fromTableId: "table.orders",
+          fromColumnId: "user_id",
+          toTableId: "table.users",
+          toColumnId: "id",
+          label: "owner"
+        },
+        {
+          id: "annotation.orders.removed",
+          kind: "table_link",
+          fromTableId: "table.orders",
+          toTableId: "table.removed",
+          label: "legacy note"
+        }
+      ]
+    }
+  },
+  modelJson: runtimeModel,
+  tableSizes: [
+    { tableId: "table.users", height: 160, width: 320 },
+    { tableId: "table.orders", height: 160, width: 320 }
+  ]
+};
+const runtimeAutoLayout = autoLayoutRuntime.createSqltoerdAutoLayout(
+  runtimeAutoLayoutInput
+);
+const runtimeRepeatedAutoLayout = autoLayoutRuntime.createSqltoerdAutoLayout(
+  runtimeAutoLayoutInput
+);
+
+assert.deepEqual(runtimeAutoLayout, runtimeRepeatedAutoLayout);
+assert.deepEqual(
+  runtimeAutoLayout.annotations,
+  runtimeAutoLayoutInput.layoutJson.annotations
+);
+assert.notDeepEqual(
+  runtimeAutoLayout.tableLayouts.map(({ tableId, x, y }) => ({ tableId, x, y })),
+  runtimeAutoLayoutInput.layoutJson.tableLayouts.map(({ tableId, x, y }) => ({
+    tableId,
+    x,
+    y
+  }))
+);
+
+const runtimeIncrementalAutoLayoutModel = structuredClone(runtimeModel);
+runtimeIncrementalAutoLayoutModel.schema.tables.push({
+  id: "table.order_items",
+  name: "order_items",
+  schemaName: null,
+  columns: [
+    createRuntimeTestColumn("id", "id", { primaryKey: true }),
+    createRuntimeTestColumn("order_id", "order_id", { foreignKey: true })
+  ],
+  constraints: [],
+  comment: null
+});
+runtimeIncrementalAutoLayoutModel.schema.relations.push({
+  id: "relation.order_items.order_id.orders.id",
+  kind: "foreign_key",
+  fromTableId: "table.order_items",
+  fromColumnIds: ["order_id"],
+  toTableId: "table.orders",
+  toColumnIds: ["id"],
+  constraintName: null
+});
+const runtimeIncrementalAutoLayout =
+  autoLayoutRuntime.createSqltoerdIncrementalLayout({
+    layoutJson: runtimeAutoLayoutInput.layoutJson,
+    modelJson: runtimeIncrementalAutoLayoutModel,
+    tableSizes: [
+      { tableId: "table.users", height: 160, width: 320 },
+      { tableId: "table.orders", height: 160, width: 320 },
+      { tableId: "table.order_items", height: 160, width: 320 }
+    ]
+  });
+
+assert.deepEqual(
+  runtimeIncrementalAutoLayout.tableLayouts.filter(
+    (tableLayout) => tableLayout.tableId !== "table.order_items"
+  ),
+  runtimeAutoLayoutInput.layoutJson.tableLayouts
+);
+assert.ok(
+  runtimeIncrementalAutoLayout.tableLayouts.some(
+    (tableLayout) => tableLayout.tableId === "table.order_items"
+  )
+);
+assert.deepEqual(
+  runtimeIncrementalAutoLayout.annotations,
+  {
+    version: 1,
+    links: [runtimeAutoLayoutInput.layoutJson.annotations.links[0]]
+  }
+);
+
+const runtimeIncrementalParentLayoutModel = structuredClone(runtimeModel);
+runtimeIncrementalParentLayoutModel.schema.tables.push({
+  id: "table.accounts",
+  name: "accounts",
+  schemaName: null,
+  columns: [createRuntimeTestColumn("id", "id", { primaryKey: true })],
+  constraints: [],
+  comment: null
+});
+runtimeIncrementalParentLayoutModel.schema.relations.push({
+  id: "relation.users.account_id.accounts.id",
+  kind: "foreign_key",
+  fromTableId: "table.users",
+  fromColumnIds: ["manager_id"],
+  toTableId: "table.accounts",
+  toColumnIds: ["id"],
+  constraintName: null
+});
+const runtimeIncrementalParentLayout =
+  autoLayoutRuntime.createSqltoerdIncrementalLayout({
+    layoutJson: runtimeAutoLayoutInput.layoutJson,
+    modelJson: runtimeIncrementalParentLayoutModel,
+    tableSizes: [
+      { tableId: "table.users", height: 160, width: 320 },
+      { tableId: "table.orders", height: 160, width: 320 },
+      { tableId: "table.accounts", height: 160, width: 320 }
+    ]
+  });
+const runtimeUsersLayout = runtimeIncrementalParentLayout.tableLayouts.find(
+  (tableLayout) => tableLayout.tableId === "table.users"
+);
+const runtimeAccountsLayout = runtimeIncrementalParentLayout.tableLayouts.find(
+  (tableLayout) => tableLayout.tableId === "table.accounts"
+);
+
+assert.ok(runtimeUsersLayout);
+assert.ok(runtimeAccountsLayout);
+assert.ok(runtimeAccountsLayout.x < runtimeUsersLayout.x);
 
 const foreignKeyAddCandidate = foreignKeyAddRuntime.createSqlErdForeignKeyAddCandidate({
   fromColumnId: "id",
@@ -5239,11 +5461,13 @@ assert.match(sessionStateUtils, /status === 400 \|\| status === 413/);
 
 assert.match(generateSessionUtils, /createSqlErdGenerateWorkspaceRequest/);
 assert.match(generateSessionUtils, /parseSqlDdlToErdModel/);
-assert.match(generateSessionUtils, /createSqltoerdLayoutForModel/);
+assert.match(generateSessionUtils, /createSqltoerdIncrementalLayout/);
 assert.match(generateSessionUtils, /kind: "create"/);
 assert.match(generateSessionUtils, /kind: "update"/);
 assert.match(generateSessionUtils, /baseRevision: session\.revision/);
 assert.match(generateSessionUtils, /sourceMap: parseResult\.sourceMap/);
+assert.match(autoLayoutUtils, /createSqltoerdAutoLayout/);
+assert.match(autoLayoutUtils, /createSqltoerdIncrementalLayout/);
 
 assert.match(sqlSourceDecorationUtils, /Decoration\.mark/);
 assert.match(sqlSourceDecorationUtils, /EditorView\.decorations\.of/);
@@ -5597,6 +5821,10 @@ assert.match(canvasSurface, /SqlErdAnnotationShapeUtil/);
 assert.match(canvasSurface, /getSqlErdTableShapeId/);
 assert.match(canvasSurface, /hashSqlErdShapeSourceId/);
 assert.match(canvasSurface, /zoomToFit/);
+assert.match(canvasSurface, /createSqltoerdAutoLayout/);
+assert.match(canvasSurface, /markHistoryStoppingPoint\("sqltoerd auto layout"\)/);
+assert.match(canvasSurface, /data-sqltoerd-auto-layout/);
+assert.match(canvasSurface, /SQLTOERD_MINIMUM_READABLE_ZOOM/);
 assert.match(canvasSurface, /resetSqlErdCanvas\(editor, shapes\)/);
 assert.match(
   canvasSurface,
@@ -5621,8 +5849,8 @@ assert.match(tableShape, /nullable/);
 assert.match(tableShape, /getSqlErdTableBadgeColumnWidth/);
 assert.match(tableShape, /badgeColumnWidth/);
 assert.match(tableShape, /minWidth/);
-assert.match(tableShape, /ROW_CONTENT_SAFETY_PADDING/);
-assert.match(tableShape, /ROW_COLUMN_GAP \* 2/);
+assert.match(tableShape, /getSqltoerdTableCardSize/);
+assert.match(tableShape, /SQLTOERD_ROW_COLUMN_GAP as ROW_COLUMN_GAP/);
 assert.match(tableShape, /SQLTOERD_COLUMN_SELECT_EVENT/);
 assert.match(tableShape, /selectSqlErdColumn/);
 assert.match(tableShape, /data-sqltoerd-table-header/);

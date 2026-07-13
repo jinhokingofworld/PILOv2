@@ -8,7 +8,10 @@ import {
   parseSqlDdlToErdModel,
   type SqltoerdDdlParseError
 } from "@/features/sql-erd/utils/ddl-parser";
-import { createSqltoerdLayoutForModel } from "@/features/sql-erd/utils/model";
+import {
+  createSqltoerdAutoLayoutTableSizes,
+  createSqltoerdIncrementalLayout
+} from "@/features/sql-erd/utils/auto-layout";
 import type { SqltoerdSourceMap } from "@/features/sql-erd/utils/sql-source-map";
 
 export type ParseWorkerRequest = {
@@ -66,10 +69,14 @@ export function executeSqlErdParseWorkerRequest(
 
   return {
     cancelled: false,
-    layoutJson: createSqltoerdLayoutForModel(
-      parseResult.modelJson,
-      request.previousLayoutJson
-    ),
+    layoutJson: createSqltoerdIncrementalLayout({
+      layoutJson: request.previousLayoutJson,
+      modelJson: parseResult.modelJson,
+      tableSizes: createSqltoerdAutoLayoutTableSizes(
+        parseResult.modelJson,
+        request.previousLayoutJson
+      )
+    }),
     modelJson: parseResult.modelJson,
     ok: true,
     requestSequence: request.requestSequence,
