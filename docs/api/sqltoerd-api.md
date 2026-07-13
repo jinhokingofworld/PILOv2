@@ -203,6 +203,28 @@ type SqltoerdLayoutJsonV1 = {
 type SqltoerdAnnotationsV1 = {
   version: 1;
   links: SqltoerdAnnotationLink[];
+  notes?: SqltoerdCanvasNote[];
+  frames?: SqltoerdCanvasFrame[];
+};
+
+type SqltoerdCanvasNote = {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  text: string;
+};
+
+type SqltoerdCanvasFrame = {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  title: string;
+  color: "slate" | "blue" | "green" | "amber" | "rose";
+  isLocked: boolean;
 };
 
 type SqltoerdAnnotationLink =
@@ -231,6 +253,12 @@ type SqltoerdColumnAnnotationLink = {
 `annotations`는 SQL에 반영되지 않는 Canvas 설명 관계 전용 영역이다. 실제 FK는
 `modelJson.schema.relations`에만 저장하고 annotation link를 `ErdRelation`으로
 취급하지 않는다.
+
+`annotations.notes`와 `annotations.frames`는 SQL, FK, table/relation count를 바꾸지
+않는 독립적인 시각 annotation이다. 각각 최대 100개이며 id는 `links`, `notes`,
+`frames` 전체에서 중복될 수 없다. 좌표와 크기는 finite number이고 크기는 0보다
+커야 한다. note text는 최대 2,000자, frame title은 최대 200자이며 frame color는
+`slate`, `blue`, `green`, `amber`, `rose`만 허용한다.
 
 #### Annotation Version과 하위 호환
 

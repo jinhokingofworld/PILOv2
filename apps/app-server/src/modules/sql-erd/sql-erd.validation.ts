@@ -27,11 +27,15 @@ const MAX_SETTINGS_JSON_BYTES = 64 * 1024;
 const MAX_TABLE_COUNT = 100;
 const MAX_RELATION_COUNT = 300;
 const MAX_ANNOTATION_COUNT = 300;
+const MAX_CANVAS_NOTE_COUNT = 100;
+const MAX_CANVAS_FRAME_COUNT = 100;
 const MAX_COLUMN_COUNT = 1000;
 const MAX_COLUMNS_PER_TABLE = 200;
 const MAX_IDENTIFIER_LENGTH = 256;
 const MAX_COLUMN_TYPE_LENGTH = 512;
 const MAX_ANNOTATION_LABEL_LENGTH = 200;
+const MAX_CANVAS_NOTE_TEXT_LENGTH = 2_000;
+const MAX_CANVAS_FRAME_TITLE_LENGTH = 200;
 const MAX_JSON_DEPTH = 20;
 const SOURCE_FORMATS = new Set<SqlErdSourceFormat>(["sql"]);
 const DIALECTS = new Set<SqlErdDialect>([
@@ -710,7 +714,7 @@ function validateAnnotations(value: unknown, metadata: ModelMetadata): void {
   const annotations = readPlainJsonObject(value, "layoutJson.annotations");
   assertAllowedFields(
     annotations,
-    new Set(["version", "links"]),
+    new Set(["version", "links", "notes", "frames"]),
     "layoutJson.annotations"
   );
 
@@ -809,6 +813,64 @@ function validateAnnotations(value: unknown, metadata: ModelMetadata): void {
     }
     endpointKeys.add(endpointKey);
   });
+
+  validateCanvasNotes(annotations.notes, annotationIds);
+  validateCanvasFrames(annotations.frames, annotationIds);
+}
+
+function validateCanvasNotes(value: unknown, annotationIds: Set<string>): void {
+  if (value === undefined) return;
+  if (!Array.isArray(value)) {
+    throw badRequest("layoutJson.annotations.notes must be an array");
+  }
+  if (value.length > MAX_CANVAS_NOTE_COUNT) {
+    throw badRequest("layoutJson.annotations.notes length limit exceeded");
+  }
+
+  value.forEach((note, index) => {
+    const path = `layoutJson.annotations.notes[${index}]`;
+    const noteObject = readPlainJsonObject(note, path);
+    assertAllowedFields(noteObject, new Set(["id", "x", "y", "width", "height", "text"]), path);
+    readUniqueAnnotationId(noteObject.id, `${path}.id`, annotationIds);
+    readFiniteNumber(noteObject.x, `${path}.x`);
+    readFiniteNumber(noteObject.y, `${path}.y`);
+    readPositiveFiniteNumber(noteObject.width, `${path}.width`);
+    readPositiveFiniteNumber(noteObject.height, `${path}.height`);
+    readBoundedString(noteObject.text, `${path}.text`, MAX_CANVAS_NOTE_TEXT_LENGTH);
+  });
+}
+
+function validateCanvasFrames(value: unknown, annotationIds: Set<string>): void {
+  if (value === undefined) return;
+  if (!Array.isArray(value)) {
+    throw badRequest("layoutJson.annotations.frames must be an array");
+  }
+  if (value.length > MAX_CANVAS_FRAME_COUNT) {
+    throw badRequest("layoutJson.annotations.frames length limit exceeded");
+  }
+
+  value.forEach((frame, index) => {
+    const path = `layoutJson.annotations.frames[${index}]`;
+    const frameObject = readPlainJsonObject(frame, path);
+    assertAllowedFields(frameObject, new Set(["id", "x", "y", "width", "height", "title", "color", "isLocked"]), path);
+    readUniqueAnnotationId(frameObject.id, `${path}.id`, annotationIds);
+    readFiniteNumber(frameObject.x, `${path}.x`);
+    readFiniteNumber(frameObject.y, `${path}.y`);
+    readPositiveFiniteNumber(frameObject.width, `${path}.width`);
+    readPositiveFiniteNumber(frameObject.height, `${path}.height`);
+    readBoundedString(frameObject.title, `${path}.title`, MAX_CANVAS_FRAME_TITLE_LENGTH);
+    if (!["slate", "blue", "green", "amber", "rose"].includes(frameObject.color as string)) {
+      throw badRequest(`${path}.color is invalid`);
+    }
+    readBoolean(frameObject.isLocked, `${path}.isLocked`);
+  });
+}
+
+function readUniqueAnnotationId(value: unknown, field: string, annotationIds: Set<string>): string {
+  const annotationId = readIdentifier(value, field);
+  if (annotationIds.has(annotationId)) throw badRequest("duplicate annotation id");
+  annotationIds.add(annotationId);
+  return annotationId;
 }
 
 function createUndirectedEndpointKey(
@@ -967,6 +1029,12 @@ function readAnnotationLabel(value: unknown, field: string): string {
   return value;
 }
 
+function readBoundedString(value: unknown, field: string, maximumLength: number): string {
+  if (typeof value !== "string") throw badRequest(`${field} must be a string`);
+  if (value.length > maximumLength) throw badRequest(`${field} length limit exceeded`);
+  return value;
+}
+
 function readBoolean(value: unknown, field: string): boolean {
   if (typeof value !== "boolean") {
     throw badRequest(`${field} must be a boolean`);
@@ -1005,6 +1073,12 @@ function readFiniteNumber(value: unknown, field: string): number {
   }
 
   return value;
+}
+
+function readPositiveFiniteNumber(value: unknown, field: string): number {
+  const number = readFiniteNumber(value, field);
+  if (number <= 0) throw badRequest(`${field} must be greater than 0`);
+  return number;
 }
 
 function isPlainJsonObject(value: unknown): value is SqlErdJsonObject {
