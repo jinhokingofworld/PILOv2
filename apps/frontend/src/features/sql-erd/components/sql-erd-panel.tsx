@@ -65,6 +65,7 @@ import type {
   SqlErdSelection,
   SqltoerdDialect,
   SqltoerdLayoutJsonV1,
+  SqltoerdModelJsonV1,
   SqltoerdResolvedDialect,
   SqltoerdSessionPayload
 } from "@/features/sql-erd/types";
@@ -92,6 +93,12 @@ import {
   type SqlErdInspectorViewModel
 } from "@/features/sql-erd/utils/inspector";
 import { isSqlErdSourceTextTooLarge } from "@/features/sql-erd/utils/ddl-parser";
+import {
+  createSqlErdForeignKeyAddCandidate,
+  getSqltoerdForeignKeyTargetColumns,
+  type SqltoerdForeignKeyAddResult,
+  type SqltoerdForeignKeyAddFailureReason
+} from "@/features/sql-erd/utils/foreign-key-add";
 import {
   areSqltoerdLayoutsEqual,
   createSqltoerdModelIndex,
@@ -680,6 +687,57 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
       })
     );
   }, [lastResolvedDialect]);
+  const handlePreviewForeignKeyAdd = useCallback(
+    ({
+      fromColumnId,
+      fromTableId,
+      toColumnId,
+      toTableId
+    }: {
+      fromColumnId: string;
+      fromTableId: string;
+      toColumnId: string;
+      toTableId: string;
+    }): SqltoerdForeignKeyAddResult | null => {
+      const currentSnapshot =
+        sqlErdEditStateRef.current.lastSuccessfulSnapshot;
+      const resolvedDialect =
+        lastResolvedDialect ??
+        (currentSnapshot.dialect === "auto" ? null : currentSnapshot.dialect);
+
+      if (
+        !resolvedDialect ||
+        isNormalizedSqlApplying ||
+        isSqlErdDraftDirty(sqlErdEditStateRef.current)
+      ) {
+        return null;
+      }
+
+      const candidate = createSqlErdForeignKeyAddCandidate({
+        fromColumnId,
+        fromTableId,
+        modelJson: currentSnapshot.modelJson,
+        toColumnId,
+        toTableId
+      });
+
+      if (!candidate.ok) {
+        return candidate;
+      }
+
+      setNormalizedSqlApplyError(null);
+      setNormalizedSqlPreview(
+        createSqlErdNormalizedSqlPreview({
+          modelJson: candidate.modelJson,
+          resolvedDialect,
+          session: currentSnapshot
+        })
+      );
+
+      return candidate;
+    },
+    [isNormalizedSqlApplying, lastResolvedDialect]
+  );
   const handleApplyNormalizedSql = useCallback(() => {
     if (
       !normalizedSqlPreview ||
@@ -1537,11 +1595,20 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
         />
       ) : null}
       <InspectorPanel
+        canAddForeignKey={
+          isSessionReady &&
+          !isNormalizedSqlApplying &&
+          !isSqlErdDraftDirty(sqlErdEditState) &&
+          (lastResolvedDialect !== null ||
+            sqlErdEditState.draftDialect !== "auto")
+        }
         emptyState={{
           sessionLoadState,
           title: sqlErdViewSession.title
         }}
         isOpen={isInspectorOpen}
+        modelJson={sqlErdViewSession.modelJson}
+        onAddForeignKey={handlePreviewForeignKeyAdd}
         onClearTablePin={handleClearTablePin}
         onNavigateToPinnedTable={handleNavigateToPinnedTable}
         onPinTable={handlePinTable}
@@ -1585,9 +1652,9 @@ function NormalizedSqlPreviewDialog({
     <Dialog open={preview !== null} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-5xl" showCloseButton={!isApplying}>
         <DialogHeader>
-          <DialogTitle>Regenerate SQL</DialogTitle>
+          <DialogTitle>Apply SQL changes</DialogTitle>
           <DialogDescription>
-            Review the normalized SQL before replacing the current source.
+            Review the generated SQL before replacing the current source.
           </DialogDescription>
         </DialogHeader>
         {preview ? (
@@ -1628,7 +1695,7 @@ function NormalizedSqlPreviewDialog({
             onClick={onApply}
             type="button"
           >
-            {isApplying ? "Applying" : "Apply SQL"}
+            {isApplying ? "Applying" : "Apply SQL changes"}
           </button>
         </div>
       </DialogContent>
@@ -2341,7 +2408,15 @@ type InspectorEmptyState = {
 };
 
 type InspectorPanelProps = PanelToggleProps & {
+  canAddForeignKey: boolean;
   emptyState: InspectorEmptyState;
+  modelJson: SqltoerdModelJsonV1;
+  onAddForeignKey: (input: {
+    fromColumnId: string;
+    fromTableId: string;
+    toColumnId: string;
+    toTableId: string;
+  }) => SqltoerdForeignKeyAddResult | null;
   onClearTablePin: () => void;
   onNavigateToPinnedTable: () => void;
   onPinTable: () => void;
@@ -2352,8 +2427,11 @@ type InspectorPanelProps = PanelToggleProps & {
 };
 
 function InspectorPanel({
+  canAddForeignKey,
   emptyState,
   isOpen,
+  modelJson,
+  onAddForeignKey,
   onClearTablePin,
   onNavigateToPinnedTable,
   onPinTable,
@@ -2404,7 +2482,13 @@ function InspectorPanel({
       </div>
 
       <div className="flex flex-1 flex-col gap-6 overflow-auto p-6">
-        <InspectorContent emptyState={emptyState} viewModel={viewModel} />
+        <InspectorContent
+          canAddForeignKey={canAddForeignKey}
+          emptyState={emptyState}
+          modelJson={modelJson}
+          onAddForeignKey={onAddForeignKey}
+          viewModel={viewModel}
+        />
 
         <div className="mt-auto grid gap-2">
           <button
@@ -2562,10 +2646,21 @@ function getInspectorSubtitle(viewModel: SqlErdInspectorViewModel) {
 }
 
 function InspectorContent({
+  canAddForeignKey,
   emptyState,
+  modelJson,
+  onAddForeignKey,
   viewModel
 }: {
+  canAddForeignKey: boolean;
   emptyState: InspectorEmptyState;
+  modelJson: SqltoerdModelJsonV1;
+  onAddForeignKey: (input: {
+    fromColumnId: string;
+    fromTableId: string;
+    toColumnId: string;
+    toTableId: string;
+  }) => SqltoerdForeignKeyAddResult | null;
   viewModel: SqlErdInspectorViewModel;
 }) {
   if (viewModel.type === "table") {
@@ -2573,7 +2668,14 @@ function InspectorContent({
   }
 
   if (viewModel.type === "column") {
-    return <ColumnInspector viewModel={viewModel} />;
+    return (
+      <ColumnInspector
+        canAddForeignKey={canAddForeignKey}
+        modelJson={modelJson}
+        onAddForeignKey={onAddForeignKey}
+        viewModel={viewModel}
+      />
+    );
   }
 
   if (viewModel.type === "relation") {
@@ -2632,11 +2734,84 @@ function TableInspector({
 }
 
 function ColumnInspector({
+  canAddForeignKey,
+  modelJson,
+  onAddForeignKey,
   viewModel
 }: {
+  canAddForeignKey: boolean;
+  modelJson: SqltoerdModelJsonV1;
+  onAddForeignKey: (input: {
+    fromColumnId: string;
+    fromTableId: string;
+    toColumnId: string;
+    toTableId: string;
+  }) => SqltoerdForeignKeyAddResult | null;
   viewModel: Extract<SqlErdInspectorViewModel, { type: "column" }>;
 }) {
   const { column, table } = viewModel;
+  const [isForeignKeyFormOpen, setIsForeignKeyFormOpen] = useState(false);
+  const [foreignKeyAddError, setForeignKeyAddError] = useState<string | null>(
+    null
+  );
+  const [targetTableId, setTargetTableId] = useState("");
+  const [targetColumnId, setTargetColumnId] = useState("");
+  const targetTables = modelJson.schema.tables.filter((candidateTable) =>
+    getSqltoerdForeignKeyTargetColumns(candidateTable).some(
+      (candidateColumn) =>
+        candidateTable.id !== table.id || candidateColumn.id !== column.id
+    )
+  );
+  const targetTable =
+    targetTables.find((candidateTable) => candidateTable.id === targetTableId) ??
+    null;
+  const targetColumns = targetTable
+    ? getSqltoerdForeignKeyTargetColumns(targetTable).filter(
+        (candidateColumn) =>
+          targetTable.id !== table.id || candidateColumn.id !== column.id
+      )
+    : [];
+
+  useEffect(() => {
+    setIsForeignKeyFormOpen(false);
+    setForeignKeyAddError(null);
+    setTargetTableId("");
+    setTargetColumnId("");
+  }, [column.id, table.id]);
+
+  const handleTargetTableChange = (nextTargetTableId: string) => {
+    setTargetTableId(nextTargetTableId);
+    setTargetColumnId("");
+    setForeignKeyAddError(null);
+  };
+  const handleForeignKeyAdd = () => {
+    if (!targetTable || !targetColumnId) {
+      setForeignKeyAddError("참조 테이블과 PK 또는 UQ 컬럼을 선택하세요.");
+      return;
+    }
+
+    const result = onAddForeignKey({
+      fromColumnId: column.id,
+      fromTableId: table.id,
+      toColumnId: targetColumnId,
+      toTableId: targetTable.id
+    });
+
+    if (!result) {
+      setForeignKeyAddError("현재 SQL을 Generate한 뒤 FK 관계를 추가하세요.");
+      return;
+    }
+
+    if (!result.ok) {
+      setForeignKeyAddError(
+        getForeignKeyAddFailureMessage(result.reason)
+      );
+      return;
+    }
+
+    setForeignKeyAddError(null);
+    setIsForeignKeyFormOpen(false);
+  };
 
   return (
     <>
@@ -2654,8 +2829,118 @@ function ColumnInspector({
         {!column.nullable ? <ConstraintPill label="NN" /> : null}
       </div>
       <RelationList relations={viewModel.relations} />
+      <div className="space-y-3 rounded-md border p-3">
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-base font-medium">FK 관계</p>
+          <button
+            className="inline-flex h-8 items-center rounded-md border px-3 text-sm font-medium transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-50"
+            disabled={!canAddForeignKey || targetTables.length === 0}
+            onClick={() => {
+              setForeignKeyAddError(null);
+              setIsForeignKeyFormOpen((current) => !current);
+            }}
+            type="button"
+          >
+            FK 관계 추가
+          </button>
+        </div>
+        {isForeignKeyFormOpen ? (
+          <div className="space-y-3 border-t pt-3">
+            <p className="text-sm text-muted-foreground">
+              {getTableDisplayName(table)}.{column.name}에서 참조할 단일 PK 또는 UQ 컬럼을 선택하세요.
+            </p>
+            <label className="grid gap-1.5 text-sm font-medium">
+              참조 테이블
+              <select
+                className="h-9 rounded-md border bg-background px-2 text-sm"
+                onChange={(event) => handleTargetTableChange(event.target.value)}
+                value={targetTableId}
+              >
+                <option value="">선택하세요</option>
+                {targetTables.map((candidateTable) => (
+                  <option key={candidateTable.id} value={candidateTable.id}>
+                    {getTableDisplayName(candidateTable)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="grid gap-1.5 text-sm font-medium">
+              참조 PK / UQ 컬럼
+              <select
+                className="h-9 rounded-md border bg-background px-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={!targetTable}
+                onChange={(event) => {
+                  setTargetColumnId(event.target.value);
+                  setForeignKeyAddError(null);
+                }}
+                value={targetColumnId}
+              >
+                <option value="">선택하세요</option>
+                {targetColumns.map((candidateColumn) => (
+                  <option key={candidateColumn.id} value={candidateColumn.id}>
+                    {candidateColumn.name} ({candidateColumn.dataType})
+                  </option>
+                ))}
+              </select>
+            </label>
+            {foreignKeyAddError ? (
+              <p className="text-sm leading-6 text-destructive">
+                {foreignKeyAddError}
+              </p>
+            ) : null}
+            {!canAddForeignKey ? (
+              <p className="text-sm leading-6 text-muted-foreground">
+                SQL을 Generate한 뒤 FK 관계를 추가할 수 있습니다.
+              </p>
+            ) : null}
+            <div className="flex justify-end gap-2">
+              <button
+                className="inline-flex h-8 items-center rounded-md border px-3 text-sm font-medium hover:bg-muted"
+                onClick={() => setIsForeignKeyFormOpen(false)}
+                type="button"
+              >
+                취소
+              </button>
+              <button
+                className="inline-flex h-8 items-center rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground disabled:pointer-events-none disabled:opacity-50"
+                disabled={!canAddForeignKey || !targetTable || !targetColumnId}
+                onClick={handleForeignKeyAdd}
+                type="button"
+              >
+                SQL 변경 미리 보기
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </div>
     </>
   );
+}
+
+function getForeignKeyAddFailureMessage(
+  reason: SqltoerdForeignKeyAddFailureReason
+) {
+  if (reason === "duplicate_relation") {
+    return "같은 방향의 FK 관계가 이미 있습니다.";
+  }
+
+  if (reason === "incompatible_column_type") {
+    return "두 컬럼의 타입이 호환되지 않습니다.";
+  }
+
+  if (reason === "same_endpoint") {
+    return "같은 컬럼을 참조 대상으로 선택할 수 없습니다.";
+  }
+
+  if (reason === "source_column_already_has_foreign_key") {
+    return "이 컬럼에는 이미 다른 FK 관계가 있습니다.";
+  }
+
+  if (reason === "target_column_not_key") {
+    return "참조 대상은 단일 PK 또는 UQ 컬럼이어야 합니다.";
+  }
+
+  return "선택한 FK 관계를 만들 수 없습니다.";
 }
 
 function RelationInspector({
