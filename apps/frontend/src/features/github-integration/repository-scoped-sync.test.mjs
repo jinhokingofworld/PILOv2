@@ -35,6 +35,10 @@ assert.match(
   panel,
   /apiClient\.discoverGithubProjectV2\([\s\S]{0,160}\{\s*repositoryId\s*\}/
 );
+assert.doesNotMatch(
+  panel,
+  /searchParams\.get\("github_installation_id"\)[\s\S]{0,400}handleDiscoverGithubProjectV2/
+);
 assert.match(panel, /repositoryId:\s*selectedRepositoryId/);
 assert.match(panel, /selectedRepositoryIdRef\.current = repositoryId/);
 assert.match(
