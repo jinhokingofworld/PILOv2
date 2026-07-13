@@ -118,6 +118,18 @@ variable "legacy_meeting_drain_enabled" {
   default     = true
 }
 
+variable "legacy_agent_drain_enabled" {
+  description = "Keep Agent processing in shared ai-worker until legacy ai-jobs messages are drained."
+  type        = bool
+  default     = true
+}
+
+variable "agent_worker_desired_count" {
+  description = "Dev Agent worker task count."
+  type        = number
+  default     = 1
+}
+
 variable "meeting_worker_desired_count" {
   description = "Dev MeetingReport-only worker task count."
   type        = number

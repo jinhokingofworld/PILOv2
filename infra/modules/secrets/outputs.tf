@@ -33,15 +33,10 @@ output "realtime_server_ecs_secrets" {
 }
 
 output "ai_worker_ecs_secrets" {
-  value = merge(
-    {
-      for name in local.ai_worker_ecs_secret_names :
-      name => aws_secretsmanager_secret.this["ai-worker/${name}"].arn
-    },
-    {
-      AGENT_EXECUTION_HANDOFF_TOKEN = aws_secretsmanager_secret.this["shared/AGENT_EXECUTION_HANDOFF_TOKEN"].arn
-    },
-  )
+  value = {
+    for name in local.ai_worker_ecs_secret_names :
+    name => aws_secretsmanager_secret.this["ai-worker/${name}"].arn
+  }
 }
 
 output "ai_worker_legacy_meeting_drain_ecs_secrets" {
@@ -51,10 +46,17 @@ output "ai_worker_legacy_meeting_drain_ecs_secrets" {
       name => aws_secretsmanager_secret.this["ai-worker/${name}"].arn
     },
     {
-      AGENT_EXECUTION_HANDOFF_TOKEN = aws_secretsmanager_secret.this["shared/AGENT_EXECUTION_HANDOFF_TOKEN"].arn
-      MEETING_REPORT_EVENT_TOKEN    = aws_secretsmanager_secret.this["shared/MEETING_REPORT_EVENT_TOKEN"].arn
+      MEETING_REPORT_EVENT_TOKEN = aws_secretsmanager_secret.this["shared/MEETING_REPORT_EVENT_TOKEN"].arn
     },
   )
+}
+
+output "agent_worker_ecs_secrets" {
+  value = {
+    DATABASE_URL                  = aws_secretsmanager_secret.this["ai-worker/DATABASE_URL"].arn
+    OPENAI_API_KEY                = aws_secretsmanager_secret.this["ai-worker/OPENAI_API_KEY"].arn
+    AGENT_EXECUTION_HANDOFF_TOKEN = aws_secretsmanager_secret.this["shared/AGENT_EXECUTION_HANDOFF_TOKEN"].arn
+  }
 }
 
 output "meeting_worker_ecs_secrets" {

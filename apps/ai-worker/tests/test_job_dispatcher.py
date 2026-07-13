@@ -129,6 +129,15 @@ def test_dispatcher_routes_agent_run_jobs() -> None:
     assert agent_processor.payloads == [{"jobType": "agent_run_requested", "runId": RUN_ID}]
 
 
+def test_dispatcher_keeps_agent_job_when_processor_is_unavailable() -> None:
+    result = JobDispatcher().process_message(
+        json.dumps({"jobType": "agent_run_requested", "runId": RUN_ID})
+    )
+
+    assert result.delete_message is False
+    assert result.reason == "agent_run_processor_unavailable"
+
+
 def test_dispatcher_deletes_invalid_json_without_processor_calls() -> None:
     meeting_processor = FakeMeetingReportProcessor()
     agent_processor = FakeAgentRunProcessor()

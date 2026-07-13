@@ -51,13 +51,14 @@ class SharedAiWorkerSettings:
     openai_api_key: str
     openai_agent_planner_model: str
     openai_agent_planner_timeout_seconds: float
-    agent_execution_handoff_base_url: str
-    agent_execution_handoff_token: str
+    agent_execution_handoff_base_url: str | None
+    agent_execution_handoff_token: str | None
     agent_execution_handoff_timeout_seconds: int
     agent_stale_execution_sweep_interval_seconds: int
     wait_time_seconds: int
     visibility_timeout_seconds: int
     canvas_embedding_jobs_per_tick: int
+    legacy_agent_drain_enabled: bool
     legacy_meeting_drain_enabled: bool
     legacy_meeting_recordings_bucket: str | None
     legacy_meeting_stt_model: str | None
@@ -69,6 +70,7 @@ class SharedAiWorkerSettings:
 
     @classmethod
     def from_env(cls) -> SharedAiWorkerSettings:
+        legacy_agent_drain_enabled = _env("LEGACY_AGENT_DRAIN_ENABLED", "false").lower() == "true"
         legacy_meeting_drain_enabled = (
             _env(
                 "LEGACY_MEETING_DRAIN_ENABLED",
@@ -88,8 +90,16 @@ class SharedAiWorkerSettings:
                 "OPENAI_AGENT_PLANNER_TIMEOUT_MS",
                 DEFAULT_OPENAI_AGENT_PLANNER_TIMEOUT_MS,
             ),
-            agent_execution_handoff_base_url=_require_env("AGENT_EXECUTION_HANDOFF_BASE_URL"),
-            agent_execution_handoff_token=_require_env("AGENT_EXECUTION_HANDOFF_TOKEN"),
+            agent_execution_handoff_base_url=(
+                _require_env("AGENT_EXECUTION_HANDOFF_BASE_URL")
+                if legacy_agent_drain_enabled
+                else None
+            ),
+            agent_execution_handoff_token=(
+                _require_env("AGENT_EXECUTION_HANDOFF_TOKEN")
+                if legacy_agent_drain_enabled
+                else None
+            ),
             agent_execution_handoff_timeout_seconds=_positive_int_env(
                 "AGENT_EXECUTION_HANDOFF_TIMEOUT_SECONDS",
                 DEFAULT_AGENT_EXECUTION_HANDOFF_TIMEOUT_SECONDS,
@@ -110,6 +120,7 @@ class SharedAiWorkerSettings:
                 "CANVAS_EMBEDDING_JOBS_PER_TICK",
                 DEFAULT_CANVAS_EMBEDDING_JOBS_PER_TICK,
             ),
+            legacy_agent_drain_enabled=legacy_agent_drain_enabled,
             legacy_meeting_drain_enabled=legacy_meeting_drain_enabled,
             legacy_meeting_recordings_bucket=(
                 _require_env("S3_RECORDINGS_BUCKET") if legacy_meeting_drain_enabled else None
@@ -151,10 +162,6 @@ def create_shared_ai_worker(
     if resolved_settings.sqs_endpoint:
         boto_kwargs["endpoint_url"] = resolved_settings.sqs_endpoint
 
-    agent_run_repository = PgAgentRunRepository(
-        resolved_settings.database_url,
-        resolved_settings.database_ssl,
-    )
     canvas_agent_repository = PgCanvasAgentRepository(
         resolved_settings.database_url,
         resolved_settings.database_ssl,
@@ -169,16 +176,29 @@ def create_shared_ai_worker(
         resolved_settings.openai_agent_planner_model,
     )
     canvas_embedder = LocalSentenceTransformerCanvasEmbedder()
-    agent_execution_handoff_client = HttpAgentExecutionHandoffClient(
-        resolved_settings.agent_execution_handoff_base_url,
-        resolved_settings.agent_execution_handoff_token,
-        resolved_settings.agent_execution_handoff_timeout_seconds,
-    )
-    agent_run_processor = AgentRunProcessor(
-        agent_run_repository,
-        agent_planner_client,
-        agent_execution_handoff_client,
-    )
+    agent_run_repository = None
+    agent_execution_handoff_client = None
+    agent_run_processor = None
+    if resolved_settings.legacy_agent_drain_enabled:
+        if (
+            resolved_settings.agent_execution_handoff_base_url is None
+            or resolved_settings.agent_execution_handoff_token is None
+        ):
+            raise RuntimeError("Legacy Agent drain configuration is incomplete")
+        agent_run_repository = PgAgentRunRepository(
+            resolved_settings.database_url,
+            resolved_settings.database_ssl,
+        )
+        agent_execution_handoff_client = HttpAgentExecutionHandoffClient(
+            resolved_settings.agent_execution_handoff_base_url,
+            resolved_settings.agent_execution_handoff_token,
+            resolved_settings.agent_execution_handoff_timeout_seconds,
+        )
+        agent_run_processor = AgentRunProcessor(
+            agent_run_repository,
+            agent_planner_client,
+            agent_execution_handoff_client,
+        )
     canvas_agent_processor = CanvasAgentProcessor(
         canvas_agent_repository,
         canvas_agent_planner,
@@ -240,7 +260,7 @@ def _create_legacy_meeting_report_processor(
 
 
 def create_shared_dispatcher(
-    agent_run_processor: AgentRunProcessor,
+    agent_run_processor: AgentRunProcessor | None,
     canvas_agent_processor: CanvasAgentProcessor,
     legacy_meeting_report_processor: MeetingReportProcessor | None,
 ) -> JobDispatcher:

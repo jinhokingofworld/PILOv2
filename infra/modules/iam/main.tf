@@ -126,6 +126,28 @@ resource "aws_iam_role" "meeting_worker_task" {
   assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume_role.json
 }
 
+resource "aws_iam_role" "agent_worker_task" {
+  name               = "${var.name_prefix}-agent-worker-task-role"
+  assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume_role.json
+}
+
+resource "aws_iam_role_policy" "agent_worker_task" {
+  name = "${var.name_prefix}-agent-worker-task-policy"
+  role = aws_iam_role.agent_worker_task.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "sqs:ReceiveMessage", "sqs:DeleteMessage", "sqs:GetQueueAttributes",
+        "sqs:GetQueueUrl", "sqs:ChangeMessageVisibility"
+      ]
+      Resource = var.agent_worker_queue_arns
+    }]
+  })
+}
+
 resource "aws_iam_role_policy" "meeting_worker_task" {
   name = "${var.name_prefix}-meeting-worker-task-policy"
   role = aws_iam_role.meeting_worker_task.id

@@ -21,7 +21,7 @@ const { MeetingAgentToolsService } = require(
 
 const originalEnv = {
   AWS_REGION: process.env.AWS_REGION,
-  SQS_AI_JOBS_QUEUE_URL: process.env.SQS_AI_JOBS_QUEUE_URL,
+  SQS_AGENT_JOBS_QUEUE_URL: process.env.SQS_AGENT_JOBS_QUEUE_URL,
   SQS_ENDPOINT: process.env.SQS_ENDPOINT
 };
 
@@ -210,8 +210,8 @@ function createOutboxClaim(overrides = {}) {
 
 try {
   process.env.AWS_REGION = "ap-northeast-2";
-  process.env.SQS_AI_JOBS_QUEUE_URL =
-    "http://localhost:4566/000000000000/pilo-dev-ai-jobs";
+  process.env.SQS_AGENT_JOBS_QUEUE_URL =
+    "http://localhost:4566/000000000000/pilo-dev-agent-jobs";
   process.env.SQS_ENDPOINT = "http://localhost:4566";
 
   {
@@ -227,7 +227,7 @@ try {
     assert.deepEqual(service.configs, [
       {
         awsRegion: "ap-northeast-2",
-        queueUrl: "http://localhost:4566/000000000000/pilo-dev-ai-jobs",
+        queueUrl: "http://localhost:4566/000000000000/pilo-dev-agent-jobs",
         endpoint: "http://localhost:4566"
       }
     ]);
@@ -235,7 +235,7 @@ try {
     assert.equal(client.commands[0].constructor.name, "SendMessageCommand");
     assert.equal(
       client.commands[0].input.QueueUrl,
-      "http://localhost:4566/000000000000/pilo-dev-ai-jobs"
+      "http://localhost:4566/000000000000/pilo-dev-agent-jobs"
     );
     assert.deepEqual(JSON.parse(client.commands[0].input.MessageBody), payload);
     assert.deepEqual(JSON.parse(client.commands[1].input.MessageBody), {
@@ -250,7 +250,7 @@ try {
   }
 
   {
-    delete process.env.SQS_AI_JOBS_QUEUE_URL;
+    delete process.env.SQS_AGENT_JOBS_QUEUE_URL;
     const client = new FakeSqsClient();
     const service = new TestAgentJobService(client);
 
@@ -272,8 +272,8 @@ try {
   }
 
   {
-    process.env.SQS_AI_JOBS_QUEUE_URL =
-      "http://localhost:4566/000000000000/pilo-dev-ai-jobs";
+    process.env.SQS_AGENT_JOBS_QUEUE_URL =
+      "http://localhost:4566/000000000000/pilo-dev-agent-jobs";
     const client = new FakeSqsClient({ shouldFail: true });
     const service = new TestAgentJobService(client);
 
@@ -291,7 +291,7 @@ try {
       });
       assert.doesNotMatch(
         JSON.stringify(error.getResponse()),
-        /raw AWS queue failure|pilo-dev-ai-jobs/
+        /raw AWS queue failure|pilo-dev-agent-jobs/
       );
     }
   }

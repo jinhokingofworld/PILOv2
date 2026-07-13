@@ -13,6 +13,21 @@ resource "aws_sqs_queue" "ai_jobs" {
   })
 }
 
+resource "aws_sqs_queue" "agent_jobs_dlq" {
+  name                      = "${var.name_prefix}-agent-jobs-dlq"
+  message_retention_seconds = 1209600
+}
+
+resource "aws_sqs_queue" "agent_jobs" {
+  name                       = "${var.name_prefix}-agent-jobs"
+  visibility_timeout_seconds = 900
+
+  redrive_policy = jsonencode({
+    deadLetterTargetArn = aws_sqs_queue.agent_jobs_dlq.arn
+    maxReceiveCount     = 3
+  })
+}
+
 resource "aws_sqs_queue" "meeting_jobs_dlq" {
   name                      = "${var.name_prefix}-meeting-jobs-dlq"
   message_retention_seconds = 1209600

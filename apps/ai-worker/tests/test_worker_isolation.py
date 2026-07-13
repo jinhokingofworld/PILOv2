@@ -1,5 +1,6 @@
 import json
 
+from app.agent_worker_runtime import AgentWorkerSettings, create_agent_dispatcher
 from app.job_dispatcher import JobDispatcher
 from app.meeting_report_processor import ProcessResult
 from app.meeting_worker_runtime import (
@@ -47,14 +48,36 @@ def test_meeting_dispatcher_has_no_agent_or_pr_review_processor() -> None:
 def test_shared_ai_worker_does_not_require_meeting_queue_environment(monkeypatch) -> None:
     monkeypatch.setenv("SQS_AI_JOBS_QUEUE_URL", "https://sqs.example.com/ai-jobs")
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-    monkeypatch.setenv("AGENT_EXECUTION_HANDOFF_BASE_URL", "http://localhost:4000")
-    monkeypatch.setenv("AGENT_EXECUTION_HANDOFF_TOKEN", "agent-token")
+    monkeypatch.delenv("AGENT_EXECUTION_HANDOFF_BASE_URL", raising=False)
+    monkeypatch.delenv("AGENT_EXECUTION_HANDOFF_TOKEN", raising=False)
     monkeypatch.delenv("SQS_MEETING_JOBS_QUEUE_URL", raising=False)
 
     settings = SharedAiWorkerSettings.from_env()
 
     assert settings.sqs_queue_url == "https://sqs.example.com/ai-jobs"
     assert settings.legacy_meeting_drain_enabled is False
+    assert settings.legacy_agent_drain_enabled is False
+
+
+def test_agent_worker_uses_only_dedicated_queue_environment(monkeypatch) -> None:
+    monkeypatch.setenv("SQS_AGENT_JOBS_QUEUE_URL", "https://sqs.example.com/agent-jobs")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("AGENT_EXECUTION_HANDOFF_BASE_URL", "http://localhost:4000")
+    monkeypatch.setenv("AGENT_EXECUTION_HANDOFF_TOKEN", "agent-token")
+    monkeypatch.delenv("SQS_AI_JOBS_QUEUE_URL", raising=False)
+    monkeypatch.delenv("SQS_MEETING_JOBS_QUEUE_URL", raising=False)
+
+    settings = AgentWorkerSettings.from_env()
+
+    assert settings.sqs_queue_url == "https://sqs.example.com/agent-jobs"
+
+
+def test_agent_worker_dispatcher_has_no_meeting_or_pr_review_processor() -> None:
+    dispatcher = create_agent_dispatcher(object())
+
+    assert dispatcher.meeting_report_processor is None
+    assert dispatcher.canvas_agent_processor is None
+    assert dispatcher.pr_review_analysis_processor is None
 
 
 def test_shared_ai_worker_keeps_legacy_meeting_processor_during_drain(monkeypatch) -> None:

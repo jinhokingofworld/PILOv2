@@ -18,6 +18,10 @@ output "meeting_worker_task_role_arn" {
   value = aws_iam_role.meeting_worker_task.arn
 }
 
+output "agent_worker_task_role_arn" {
+  value = aws_iam_role.agent_worker_task.arn
+}
+
 output "pr_review_ai_worker_task_role_arn" {
   value = aws_iam_role.pr_review_ai_worker_task.arn
 }

@@ -33,6 +33,10 @@ variable "ai_worker_queue_arns" {
   type        = list(string)
 }
 
+variable "agent_worker_queue_arns" {
+  type = list(string)
+}
+
 variable "meeting_worker_queue_arns" {
   description = "Queues consumed by the MeetingReport-only worker."
   type        = list(string)

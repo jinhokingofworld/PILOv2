@@ -144,6 +144,7 @@ VPC
 │     ├─ app-server
 │     ├─ realtime-server
 │     ├─ ai-worker
+│     ├─ agent-worker
 │     └─ pr-review-ai-worker
 │
 ├─ Public Subnet B
