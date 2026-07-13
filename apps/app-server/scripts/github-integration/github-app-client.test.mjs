@@ -294,6 +294,58 @@ function githubIssuePayload(overrides = {}) {
 
 {
   const originalFetch = globalThis.fetch;
+  const originalSetTimeout = globalThis.setTimeout;
+  const originalClearTimeout = globalThis.clearTimeout;
+  const timeoutHandle = Symbol("ProjectV2 status update timeout");
+  let timeoutCallback;
+  let clearedTimeoutHandle;
+  let requestSignal;
+
+  globalThis.setTimeout = (callback, delay) => {
+    timeoutCallback = callback;
+    assert.equal(delay, 30_000);
+    return timeoutHandle;
+  };
+  globalThis.clearTimeout = (handle) => {
+    clearedTimeoutHandle = handle;
+  };
+  globalThis.fetch = async (_url, options = {}) => {
+    requestSignal = options.signal;
+    timeoutCallback();
+    assert.equal(requestSignal.aborted, true);
+    throw new DOMException("The operation was aborted", "AbortError");
+  };
+
+  try {
+    await assert.rejects(
+      () =>
+        new GithubAppClient().updateProjectV2ItemStatus({
+          fieldNodeId: "PVTSSF_lADOExample",
+          itemNodeId: "PVTI_lADOExample",
+          projectNodeId: "PVT_kwDOExample",
+          singleSelectOptionId: "option-todo",
+          userAccessToken: "user-oauth-token"
+        }),
+      (error) => {
+        assert.equal(error?.getStatus?.(), 400);
+        assert.equal(
+          error?.response?.error?.message,
+          "GitHub ProjectV2 status update failed"
+        );
+        return true;
+      }
+    );
+    assert.ok(requestSignal instanceof AbortSignal);
+    assert.equal(clearedTimeoutHandle, timeoutHandle);
+  } finally {
+    globalThis.fetch = originalFetch;
+    globalThis.setTimeout = originalSetTimeout;
+    globalThis.clearTimeout = originalClearTimeout;
+  }
+}
+
+{
+  const originalFetch = globalThis.fetch;
   let requestBody;
   globalThis.fetch = async (_url, options = {}) => {
     requestBody = JSON.parse(options.body);

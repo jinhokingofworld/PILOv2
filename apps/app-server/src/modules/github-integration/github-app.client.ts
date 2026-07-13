@@ -441,6 +441,7 @@ interface GithubProjectV2GraphqlErrorContext {
 const GITHUB_SYNC_PER_PAGE = 100;
 const GITHUB_SYNC_MAX_PAGES = 100;
 const GITHUB_ASSIGNEE_LOOKUP_TIMEOUT_MS = 30_000;
+const GITHUB_PROJECT_V2_ITEM_STATUS_TIMEOUT_MS = 30_000;
 const GITHUB_PROJECT_V2_OAUTH_SCOPE_ERROR_MESSAGE =
   "GitHub ProjectV2 OAuth connection must be reconnected with project scope";
 const GITHUB_PROJECT_V2_OWNER_RESOLUTION_ERROR_MESSAGE =
@@ -1634,35 +1635,46 @@ export class GithubAppClient {
       throw badRequest("GitHub OAuth connection is required");
     }
 
-    const errorMessage = "GitHub ProjectV2 status update failed";
-    const mutation = input.singleSelectOptionId
-      ? GITHUB_PROJECT_V2_UPDATE_ITEM_STATUS_MUTATION
-      : GITHUB_PROJECT_V2_CLEAR_ITEM_STATUS_MUTATION;
-    const mutationName = input.singleSelectOptionId
-      ? "updateProjectV2ItemFieldValue"
-      : "clearProjectV2ItemFieldValue";
-    const variables: Record<string, unknown> = {
-      projectId: input.projectNodeId,
-      itemId: input.itemNodeId,
-      fieldId: input.fieldNodeId
-    };
-
-    if (input.singleSelectOptionId) {
-      variables.singleSelectOptionId = input.singleSelectOptionId;
-    }
-
-    const data = await this.fetchGraphqlWithToken(
-      input.userAccessToken,
-      mutation,
-      variables,
-      errorMessage,
-      {
-        tokenSource: "user",
-        writePermissionMessage: GITHUB_PROJECT_V2_WRITE_PERMISSION_ERROR_MESSAGE
-      }
+    const controller = new AbortController();
+    const timeout = setTimeout(
+      () => controller.abort(),
+      GITHUB_PROJECT_V2_ITEM_STATUS_TIMEOUT_MS
     );
 
-    this.readProjectV2ItemMutation(data, mutationName, errorMessage);
+    try {
+      const errorMessage = "GitHub ProjectV2 status update failed";
+      const mutation = input.singleSelectOptionId
+        ? GITHUB_PROJECT_V2_UPDATE_ITEM_STATUS_MUTATION
+        : GITHUB_PROJECT_V2_CLEAR_ITEM_STATUS_MUTATION;
+      const mutationName = input.singleSelectOptionId
+        ? "updateProjectV2ItemFieldValue"
+        : "clearProjectV2ItemFieldValue";
+      const variables: Record<string, unknown> = {
+        projectId: input.projectNodeId,
+        itemId: input.itemNodeId,
+        fieldId: input.fieldNodeId
+      };
+
+      if (input.singleSelectOptionId) {
+        variables.singleSelectOptionId = input.singleSelectOptionId;
+      }
+
+      const data = await this.fetchGraphqlWithToken(
+        input.userAccessToken,
+        mutation,
+        variables,
+        errorMessage,
+        {
+          tokenSource: "user",
+          writePermissionMessage: GITHUB_PROJECT_V2_WRITE_PERMISSION_ERROR_MESSAGE
+        },
+        controller.signal
+      );
+
+      this.readProjectV2ItemMutation(data, mutationName, errorMessage);
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
   async addProjectV2ItemByContentId(
@@ -2038,7 +2050,8 @@ export class GithubAppClient {
     query: string,
     variables: Record<string, unknown>,
     errorMessage: string,
-    context?: GithubProjectV2GraphqlErrorContext
+    context?: GithubProjectV2GraphqlErrorContext,
+    signal?: AbortSignal
   ): Promise<unknown> {
     let response: Response;
     try {
@@ -2053,7 +2066,8 @@ export class GithubAppClient {
         body: JSON.stringify({
           query,
           variables
-        })
+        }),
+        ...(signal ? { signal } : {})
       });
     } catch {
       throw badRequest(errorMessage);

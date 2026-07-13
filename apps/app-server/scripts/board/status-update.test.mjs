@@ -9,6 +9,7 @@ const {
 const {
   BoardIssueStatusService
 } = require("../../dist/modules/board/board-issue-status.service.js");
+const { DatabaseService } = require("../../dist/database/database.service.js");
 const { BoardService } = require("../../dist/modules/board/board.service.js");
 const { forbidden } = require("../../dist/common/api-error.js");
 
@@ -24,11 +25,21 @@ const githubIssueId = "44444444-4444-4444-8444-444444444444";
 const projectItemId = "55555555-5555-4555-8555-555555555555";
 const statusFieldId = "66666666-6666-4666-8666-666666666666";
 
+function createDeferred() {
+  let resolve;
+  const promise = new Promise((promiseResolve) => {
+    resolve = promiseResolve;
+  });
+
+  return { promise, resolve };
+}
+
 class FakeDatabase {
   constructor({ queryOneRows = [] } = {}) {
     this.queryOneRows = [...queryOneRows];
     this.queries = [];
     this.transactions = [];
+    this.activeTransactions = 0;
   }
 
   async queryOne(text, values = []) {
@@ -46,10 +57,44 @@ class FakeDatabase {
     return { rows: [], rowCount: 1 };
   }
 
+  async withAdvisoryLock(lockKey, callback) {
+    const connection = {
+      queryOne: (text, values = []) => this.queryOne(text, values),
+      execute: (text, values = []) => this.execute(text, values)
+    };
+    await this.acquireStatusUpdateAdvisoryLock(connection, lockKey);
+    try {
+      return await callback(connection);
+    } finally {
+      await this.releaseStatusUpdateAdvisoryLock(connection, lockKey);
+    }
+  }
+
+  async acquireStatusUpdateAdvisoryLock(_connection, lockKey) {
+    this.queries.push({
+      text: "SELECT pg_advisory_lock($1::bigint)",
+      values: [lockKey],
+      transaction: false
+    });
+  }
+
+  async releaseStatusUpdateAdvisoryLock(_connection, lockKey) {
+    this.queries.push({
+      text: "SELECT pg_advisory_unlock($1::bigint)",
+      values: [lockKey],
+      transaction: false
+    });
+  }
+
   async transaction(callback) {
     const transaction = new FakeTransaction(this);
     this.transactions.push(transaction);
-    return callback(transaction);
+    this.activeTransactions += 1;
+    try {
+      return await callback(transaction);
+    } finally {
+      this.activeTransactions -= 1;
+    }
   }
 }
 
@@ -75,6 +120,9 @@ class SerializedStatusDatabase {
     this.queries = [];
     this.transactions = [];
     this.transactionTail = Promise.resolve();
+    this.advisoryLockTails = new Map();
+    this.advisoryLockReleases = new Map();
+    this.lockQueries = [];
   }
 
   async queryOne(text, values = []) {
@@ -84,6 +132,38 @@ class SerializedStatusDatabase {
   async execute(text, values = []) {
     this.queries.push({ text, values, transaction: false });
     return { rows: [], rowCount: 1 };
+  }
+
+  async withAdvisoryLock(lockKey, callback) {
+    const connection = {
+      queryOne: (text, values = []) => this.queryOne(text, values),
+      execute: (text, values = []) => this.execute(text, values)
+    };
+    await this.acquireStatusUpdateAdvisoryLock(connection, lockKey);
+    try {
+      return await callback(connection);
+    } finally {
+      await this.releaseStatusUpdateAdvisoryLock(connection, lockKey);
+    }
+  }
+
+  async acquireStatusUpdateAdvisoryLock(_connection, lockKey) {
+    const key = lockKey.toString();
+    const previousLock = this.advisoryLockTails.get(key) ?? Promise.resolve();
+    let releaseLock;
+    this.advisoryLockTails.set(key, new Promise((resolve) => {
+      releaseLock = resolve;
+    }));
+    await previousLock;
+    this.advisoryLockReleases.set(key, releaseLock);
+    this.lockQueries.push({ action: "acquire", lockKey });
+  }
+
+  async releaseStatusUpdateAdvisoryLock(_connection, lockKey) {
+    const key = lockKey.toString();
+    this.lockQueries.push({ action: "release", lockKey });
+    this.advisoryLockReleases.get(key)?.();
+    this.advisoryLockReleases.delete(key);
   }
 
   async transaction(callback) {
@@ -155,14 +235,16 @@ class FakeWorkspaceService {
 }
 
 class FakeGithubProjectV2WriteService {
-  constructor({ error = null, fail = false } = {}) {
+  constructor({ error = null, fail = false, onCall } = {}) {
     this.error = error;
     this.fail = fail;
+    this.onCall = onCall;
     this.calls = [];
   }
 
   async updateProjectV2ItemStatus(input) {
     this.calls.push(input);
+    await this.onCall?.(input);
     if (this.error) {
       throw this.error;
     }
@@ -179,7 +261,8 @@ function createSubject(database, githubWriteService = new FakeGithubProjectV2Wri
   const statusService = new BoardIssueStatusService(
     statusQueries,
     workspaceService,
-    githubWriteService
+    githubWriteService,
+    database
   );
   const service = new BoardService(
     undefined,
@@ -241,6 +324,66 @@ function issueRow(overrides = {}) {
 }
 
 {
+  const unlockError = new Error("advisory unlock failed");
+  const releaseErrors = [];
+  const database = new DatabaseService();
+  database.pool = {
+    async connect() {
+      return {
+        async query(text) {
+          if (/pg_advisory_unlock/i.test(text)) {
+            throw unlockError;
+          }
+
+          return { rows: [], rowCount: 1 };
+        },
+        release(error) {
+          releaseErrors.push(error);
+        }
+      };
+    }
+  };
+
+  await assert.rejects(
+    () => database.withAdvisoryLock(1n, async () => "complete"),
+    (error) => error === unlockError
+  );
+  assert.deepEqual(releaseErrors, [unlockError]);
+}
+
+{
+  const callbackError = new Error("status update failed");
+  const unlockError = new Error("advisory unlock failed");
+  const releaseErrors = [];
+  const database = new DatabaseService();
+  database.pool = {
+    async connect() {
+      return {
+        async query(text) {
+          if (/pg_advisory_unlock/i.test(text)) {
+            throw unlockError;
+          }
+
+          return { rows: [], rowCount: 1 };
+        },
+        release(error) {
+          releaseErrors.push(error);
+        }
+      };
+    }
+  };
+
+  await assert.rejects(
+    () =>
+      database.withAdvisoryLock(1n, async () => {
+        throw callbackError;
+      }),
+    (error) => error === callbackError
+  );
+  assert.deepEqual(releaseErrors, [unlockError]);
+}
+
+{
   const database = new FakeDatabase({
     queryOneRows: [
       (text, values) => {
@@ -277,11 +420,19 @@ function issueRow(overrides = {}) {
     }
   ]);
   assert.equal(db.transactions.length, 1);
-  const lockedTargetQuery = db.queries.find(
-    (query) => query.transaction && /JOIN board_columns target_col/i.test(query.text)
+  const targetQuery = db.queries.find(
+    (query) => !query.transaction && /JOIN board_columns target_col/i.test(query.text)
   );
-  assert.ok(lockedTargetQuery);
-  assert.match(lockedTargetQuery.text, /FOR UPDATE OF pi/i);
+  assert.ok(targetQuery);
+  assert.doesNotMatch(targetQuery.text, /FOR UPDATE OF pi/i);
+  assert.equal(
+    db.queries.filter((query) => query.text === "SELECT pg_advisory_lock($1::bigint)").length,
+    1
+  );
+  assert.equal(
+    db.queries.filter((query) => query.text === "SELECT pg_advisory_unlock($1::bigint)").length,
+    1
+  );
   assert.ok(
     db.queries.some((query) =>
       /UPDATE github_project_v2_items[\s\S]*status_option_id/i.test(query.text)
@@ -307,6 +458,39 @@ function issueRow(overrides = {}) {
   assert.equal(result.previousColumnId, sourceColumnId);
   assert.equal(result.issue.id, issueId);
   assert.equal(result.issue.columnId, targetColumnId);
+}
+
+{
+  const providerStarted = createDeferred();
+  const providerRelease = createDeferred();
+  const database = new FakeDatabase({
+    queryOneRows: [statusTargetRow(), issueRow()]
+  });
+  const githubWriteService = new FakeGithubProjectV2WriteService({
+    onCall: async () => {
+      providerStarted.resolve();
+      await providerRelease.promise;
+    }
+  });
+  const { service } = createSubject(database, githubWriteService);
+
+  const update = service.updateBoardIssueStatus(
+    currentUserId,
+    workspaceId,
+    boardId,
+    issueId,
+    { columnId: targetColumnId, previousColumnId: sourceColumnId }
+  );
+
+  await providerStarted.promise;
+  assert.equal(database.activeTransactions, 0);
+  assert.equal(
+    database.queries.filter((query) => /FOR UPDATE OF pi/i.test(query.text)).length,
+    0
+  );
+
+  providerRelease.resolve();
+  await update;
 }
 
 {
@@ -371,7 +555,7 @@ function issueRow(overrides = {}) {
   );
 
   assert.equal(githubWriteService.calls.length, 0);
-  assert.equal(db.transactions.length, 1);
+  assert.equal(db.transactions.length, 0);
 }
 
 {
@@ -405,35 +589,49 @@ function issueRow(overrides = {}) {
     }
   );
 
-  assert.equal(db.transactions.length, 1);
+  assert.equal(db.transactions.length, 0);
 }
 
 {
   const database = new SerializedStatusDatabase();
-  const { githubWriteService, service } = createSubject(database);
+  const caseVariantWorkspaceId = "abcdefab-cdef-4abc-8def-abcdefabcdef";
+  const providerStarted = createDeferred();
+  const providerRelease = createDeferred();
+  const githubWriteService = new FakeGithubProjectV2WriteService({
+    onCall: async () => {
+      providerStarted.resolve();
+      await providerRelease.promise;
+    }
+  });
+  const { service } = createSubject(database, githubWriteService);
 
-  const results = await Promise.allSettled([
-    service.updateBoardIssueStatus(
-      currentUserId,
-      workspaceId,
-      boardId,
-      issueId,
-      {
-        columnId: targetColumnId,
-        previousColumnId: sourceColumnId
-      }
-    ),
-    service.updateBoardIssueStatus(
-      currentUserId,
-      workspaceId,
-      boardId,
-      issueId,
-      {
-        columnId: alternateTargetColumnId,
-        previousColumnId: sourceColumnId
-      }
-    )
-  ]);
+  const firstUpdate = service.updateBoardIssueStatus(
+    currentUserId,
+    caseVariantWorkspaceId.toUpperCase(),
+    boardId,
+    issueId,
+    {
+      columnId: targetColumnId,
+      previousColumnId: sourceColumnId
+    }
+  );
+  await providerStarted.promise;
+
+  const secondUpdate = service.updateBoardIssueStatus(
+    currentUserId,
+    caseVariantWorkspaceId,
+    boardId,
+    issueId,
+    {
+      columnId: alternateTargetColumnId,
+      previousColumnId: sourceColumnId
+    }
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(database.lockQueries.filter((lock) => lock.action === "acquire").length, 1);
+
+  providerRelease.resolve();
+  const results = await Promise.allSettled([firstUpdate, secondUpdate]);
 
   const fulfilled = results.filter((result) => result.status === "fulfilled");
   const rejected = results.filter((result) => result.status === "rejected");
@@ -452,13 +650,16 @@ function issueRow(overrides = {}) {
   );
   assert.equal(database.columnId, targetColumnId);
 
-  const lockedTargetQueries = database.queries.filter(
-    (query) => query.transaction && /JOIN board_columns target_col/i.test(query.text)
+  const targetQueries = database.queries.filter(
+    (query) => !query.transaction && /JOIN board_columns target_col/i.test(query.text)
   );
-  assert.equal(lockedTargetQueries.length, 2);
-  lockedTargetQueries.forEach((query) => {
-    assert.match(query.text, /FOR UPDATE OF pi/i);
-  });
+  assert.equal(targetQueries.length, 2);
+  assert.equal(database.lockQueries.filter((lock) => lock.action === "acquire").length, 2);
+  assert.equal(database.lockQueries.filter((lock) => lock.action === "release").length, 2);
+  assert.equal(
+    database.queries.filter((query) => /FOR UPDATE OF pi/i.test(query.text)).length,
+    0
+  );
 }
 
 {
@@ -495,5 +696,5 @@ function issueRow(overrides = {}) {
     }
   );
 
-  assert.equal(db.transactions.length, 1);
+  assert.equal(db.transactions.length, 0);
 }
