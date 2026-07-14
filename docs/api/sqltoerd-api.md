@@ -203,6 +203,7 @@ type SqltoerdAnnotationsV1 = {
   links: SqltoerdAnnotationLink[];
   notes?: SqltoerdCanvasNote[];
   frames?: SqltoerdCanvasFrame[];
+  texts?: SqltoerdCanvasText[];
 };
 
 type SqltoerdCanvasNote = {
@@ -212,6 +213,16 @@ type SqltoerdCanvasNote = {
   width: number;
   height: number;
   text: string;
+};
+
+type SqltoerdCanvasText = {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  text: string;
+  color: "slate" | "blue" | "green" | "amber" | "rose";
 };
 
 type SqltoerdCanvasFrame = {
@@ -250,13 +261,14 @@ type SqltoerdColumnAnnotationLink = {
 
 `annotations`는 SQL에 반영되지 않는 Canvas annotation 영역이다. 실제 FK는
 `modelJson.schema.relations`에만 저장하고 annotation link를 `ErdRelation`으로
-취급하지 않는다. `notes`는 Sticky note, `frames`는 Group box 용도의 시각 요소다.
+취급하지 않는다. `notes`는 Sticky note, `frames`는 Group box, `texts`는 독립 텍스트
+용도의 시각 요소다.
 
-`annotations.notes`와 `annotations.frames`는 SQL, FK, table/relation count를 바꾸지
-않는 독립적인 시각 annotation이다. 각각 최대 100개이며 id는 `links`, `notes`,
-`frames` 전체에서 중복될 수 없다. 좌표와 크기는 finite number이고 크기는 0보다
-커야 한다. note text는 최대 2,000자, frame title은 최대 200자이며 frame color는
-`slate`, `blue`, `green`, `amber`, `rose`만 허용한다.
+`annotations.notes`, `annotations.frames`, `annotations.texts`는 SQL, FK,
+table/relation count를 바꾸지 않는 독립적인 시각 annotation이다. 각각 최대 100개이며
+id는 `links`, `notes`, `frames`, `texts` 전체에서 중복될 수 없다. 좌표와 크기는 finite
+number이고 크기는 0보다 커야 한다. note/text 본문은 최대 2,000자, frame title은 최대
+200자이며 frame/text color는 `slate`, `blue`, `green`, `amber`, `rose`만 허용한다.
 
 #### Annotation Version과 하위 호환
 
@@ -301,7 +313,7 @@ type SqltoerdColumnAnnotationLink = {
 - `viewport.zoom`은 0보다 커야 한다.
 - `layoutJson.annotations.version`은 `1`만 허용한다.
 - `layoutJson.annotations.links`는 최대 300개다.
-- annotation `id`는 `links`, `notes`, `frames` 전체에서 중복될 수 없다.
+- annotation `id`는 `links`, `notes`, `frames`, `texts` 전체에서 중복될 수 없다.
 - annotation의 table/column endpoint는 `modelJson`에 존재하는 id를 참조해야 한다.
 - annotation endpoint는 방향이 없는 관계로 취급하며 정방향과 역방향을 중복으로
   저장할 수 없다.
@@ -727,7 +739,9 @@ plural endpoint는 현재 사용할 수 있으며, 신규 consumer는 plural end
 | Table당 column 개수 | 200개 | 초과 시 `400 Bad Request` |
 | Relation 개수 | 300개 | 초과 시 `400 Bad Request` |
 | Annotation link 개수 | 300개 | 초과 시 `400 Bad Request` |
+| Annotation note/frame/text 개수 | 종류별 100개 | 초과 시 `400 Bad Request` |
 | Annotation label | 200자 이하 | 초과 시 `400 Bad Request` |
+| Annotation note/text 본문 | 2,000자 이하 | 초과 시 `400 Bad Request` |
 | Identifier 길이 | 256자 | 초과 시 `400 Bad Request` |
 | Column type 길이 | 512자 | 초과 시 `400 Bad Request` |
 | JSON depth | 20단계 | 초과 시 `400 Bad Request` |
