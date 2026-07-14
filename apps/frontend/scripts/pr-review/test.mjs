@@ -610,6 +610,10 @@ assert.match(prReviewCanvasShell, /createReviewRoomRevision/);
 assert.match(prReviewCanvasShell, /PULL_REQUEST_HEAD_POLL_INTERVAL_MS/);
 assert.match(prReviewCanvasShell, /최신 버전 분석 시작/);
 assert.match(prReviewCanvasSurface, /registerAfterCreateHandler/);
+assert.match(
+  prReviewCanvasSurface,
+  /editor\.createShapes\(shapes\);\s+updatePrReviewRelationGeometry\(editor, internalShapeUpdateRef\);/
+);
 assert.match(prReviewFileNodeShapeUtil, /override onClick/);
 assert.match(prReviewFileNodeShapeUtil, /activatePrReviewFileNode/);
 
