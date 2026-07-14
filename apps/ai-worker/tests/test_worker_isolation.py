@@ -1,5 +1,8 @@
 import json
+import sys
+from types import SimpleNamespace
 
+import app.shared_ai_worker_runtime as shared_ai_worker_runtime
 from app.agent_worker_runtime import AgentWorkerSettings, create_agent_dispatcher
 from app.job_dispatcher import JobDispatcher
 from app.meeting_report_processor import ProcessResult
@@ -61,6 +64,67 @@ def test_shared_ai_worker_does_not_require_meeting_queue_environment(monkeypatch
     assert settings.sqs_queue_url == "https://sqs.example.com/ai-jobs"
     assert settings.legacy_meeting_drain_enabled is False
     assert settings.legacy_agent_drain_enabled is False
+
+
+def test_shared_ai_worker_wires_meeting_transcript_embedding_processor(monkeypatch) -> None:
+    monkeypatch.setenv("SQS_AI_JOBS_QUEUE_URL", "https://sqs.example.com/ai-jobs")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.delenv("AGENT_EXECUTION_HANDOFF_BASE_URL", raising=False)
+    monkeypatch.delenv("AGENT_EXECUTION_HANDOFF_TOKEN", raising=False)
+
+    monkeypatch.setitem(
+        sys.modules,
+        "boto3",
+        SimpleNamespace(client=lambda *_args, **_kwargs: object()),
+    )
+    monkeypatch.setattr(
+        shared_ai_worker_runtime, "PgCanvasAgentRepository", lambda *_args: object()
+    )
+    monkeypatch.setattr(
+        shared_ai_worker_runtime,
+        "PgMeetingTranscriptEmbeddingRepository",
+        lambda *_args: "meeting-transcript-repository",
+    )
+    monkeypatch.setattr(
+        shared_ai_worker_runtime,
+        "OpenAiAgentPlannerClient",
+        lambda *_args: object(),
+    )
+    monkeypatch.setattr(
+        shared_ai_worker_runtime,
+        "OpenAiCanvasAgentPlanner",
+        lambda *_args: object(),
+    )
+    monkeypatch.setattr(
+        shared_ai_worker_runtime,
+        "LocalSentenceTransformerCanvasEmbedder",
+        lambda: object(),
+    )
+    monkeypatch.setattr(shared_ai_worker_runtime, "CanvasSemanticRouter", lambda *_args: object())
+    monkeypatch.setattr(shared_ai_worker_runtime, "CanvasAgentProcessor", lambda *_args: object())
+    monkeypatch.setattr(
+        shared_ai_worker_runtime,
+        "CanvasEmbeddingProcessor",
+        lambda *_args: object(),
+    )
+    monkeypatch.setattr(
+        shared_ai_worker_runtime,
+        "OpenAiTranscriptEmbedder",
+        lambda api_key, model_name: (api_key, model_name),
+    )
+    monkeypatch.setattr(
+        shared_ai_worker_runtime,
+        "MeetingTranscriptEmbeddingProcessor",
+        lambda repository, embedder: (repository, embedder),
+    )
+
+    worker = shared_ai_worker_runtime.create_shared_ai_worker()
+
+    assert worker.meeting_transcript_embedding_processor == (
+        "meeting-transcript-repository",
+        ("test-key", "text-embedding-3-small"),
+    )
+    assert worker.settings.meeting_transcript_embedding_jobs_per_tick == 10
 
 
 def test_agent_worker_uses_only_dedicated_queue_environment(monkeypatch) -> None:

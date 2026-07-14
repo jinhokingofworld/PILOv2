@@ -17,6 +17,7 @@ import { MeetingReportEventGuard } from "./meeting-report-event.guard";
 import { MeetingReportRealtimePublisherService } from "./meeting-report-realtime-publisher.service";
 import { MeetingStateRealtimePublisherService } from "./meeting-state-realtime-publisher.service";
 import { MeetingService } from "./meeting.service";
+import { MeetingTranscriptRagService } from "./meeting-transcript-rag.service";
 
 @Module({
   imports: [CommonModule, DatabaseModule, WorkspaceModule],
@@ -28,6 +29,7 @@ import { MeetingService } from "./meeting.service";
   ],
   providers: [
     MeetingService,
+    MeetingTranscriptRagService,
     LiveKitEgressService,
     LiveKitTokenService,
     LiveKitWebhookService,
@@ -39,6 +41,6 @@ import { MeetingService } from "./meeting.service";
     MeetingReportOutboxRecoveryService,
     MeetingRecordingRetentionService
   ],
-  exports: [MeetingService]
+  exports: [MeetingService, MeetingTranscriptRagService]
 })
 export class MeetingModule {}

@@ -66,6 +66,19 @@ class FakeAgentRetryExhaustionRecovery:
         return self.result
 
 
+class FakeGroundedAnswerRetryExhaustionRecovery:
+    def __init__(self, result: bool = True, error: Exception | None = None) -> None:
+        self.result = result
+        self.error = error
+        self.calls: list[str] = []
+
+    def fail_grounded_answer_after_retry_exhaustion(self, run_id: str) -> bool:
+        self.calls.append(run_id)
+        if self.error:
+            raise self.error
+        return self.result
+
+
 class FakeCanvasAgentRetryExhaustionRecovery(FakeAgentRetryExhaustionRecovery):
     pass
 
@@ -125,6 +138,38 @@ class FakeLockConnection:
     def transaction(self):
         self.transaction_calls += 1
         raise AssertionError("terminal transaction must not run without the run lock")
+
+
+class FakeTransaction:
+    def __enter__(self) -> "FakeTransaction":
+        return self
+
+    def __exit__(self, _type, _value, _traceback) -> None:
+        return None
+
+
+class FakeRecoveryCursor:
+    def __init__(self, row: object | None = None) -> None:
+        self.row = row
+
+    def fetchone(self) -> object | None:
+        return self.row
+
+
+class FakeGroundedAnswerRecoveryConnection:
+    def __init__(self) -> None:
+        self.executed: list[tuple[str, tuple[object, ...]]] = []
+
+    def execute(self, query: str, values: tuple[object, ...]) -> FakeRecoveryCursor:
+        self.executed.append((query, values))
+        if "pg_try_advisory_lock" in query:
+            return FakeRecoveryCursor(FakeLockRow(True))
+        if "RETURNING workspace_id" in query:
+            return FakeRecoveryCursor({"workspace_id": "workspace-1"})
+        return FakeRecoveryCursor()
+
+    def transaction(self) -> FakeTransaction:
+        return FakeTransaction()
 
 
 def runtime_settings() -> RuntimeSettings:
@@ -391,6 +436,47 @@ def test_sqs_worker_preserves_agent_message_when_terminalization_errors() -> Non
     assert sqs_client.deleted == []
 
 
+def test_sqs_worker_terminalizes_third_grounded_answer_infrastructure_failure() -> None:
+    dispatcher = FakeDispatcher(
+        [
+            JobProcessResult(
+                delete_message=False,
+                reason="infrastructure_failure",
+                job_type="agent_grounded_answer_requested",
+                resource_id="run-1",
+            )
+        ]
+    )
+    sqs_client = FakeSqsClient()
+    sqs_client.receive_message = lambda **kwargs: {
+        "Messages": [
+            {
+                "Body": '{"jobType":"agent_grounded_answer_requested"}',
+                "ReceiptHandle": "receipt-grounded-answer-terminal",
+                "MessageId": "message-grounded-answer-terminal",
+                "Attributes": {"ApproximateReceiveCount": "3"},
+            }
+        ]
+    }
+    recovery = FakeGroundedAnswerRetryExhaustionRecovery()
+    worker = SqsAiJobWorker(
+        runtime_settings(),
+        dispatcher,
+        sqs_client,
+        agent_grounded_answer_retry_exhaustion_recovery=recovery,
+    )
+
+    worker.run_once()
+
+    assert recovery.calls == ["run-1"]
+    assert sqs_client.deleted == [
+        {
+            "QueueUrl": "https://sqs.example.com/jobs",
+            "ReceiptHandle": "receipt-grounded-answer-terminal",
+        }
+    ]
+
+
 def test_sqs_worker_terminalizes_third_canvas_agent_infrastructure_failure() -> None:
     dispatcher = FakeDispatcher(
         [
@@ -552,6 +638,32 @@ def test_retry_terminalizer_preserves_message_when_planner_lock_is_held() -> Non
 
     assert repository.fail_planning_after_retry_exhaustion("run-1") is False
     assert connection.transaction_calls == 0
+
+
+def test_retry_terminalizer_preserves_message_when_grounded_answer_lock_is_held() -> None:
+    repository = object.__new__(PgAgentRunRepository)
+    connection = FakeLockConnection(acquired=False)
+    repository.connection = connection
+
+    assert repository.fail_grounded_answer_after_retry_exhaustion("run-1") is False
+    assert connection.transaction_calls == 0
+
+
+def test_retry_terminalizer_fails_grounded_answer_run_and_outbox() -> None:
+    repository = object.__new__(PgAgentRunRepository)
+    connection = FakeGroundedAnswerRecoveryConnection()
+    repository.connection = connection
+
+    assert repository.fail_grounded_answer_after_retry_exhaustion("run-1") is True
+
+    executed_queries = "\n".join(query for query, _values in connection.executed)
+    assert "UPDATE agent_runs" in executed_queries
+    assert "UPDATE agent_steps" in executed_queries
+    assert "UPDATE agent_grounded_answer_outbox" in executed_queries
+    assert "INSERT INTO agent_logs" in executed_queries
+    assert any(
+        "AGENT_GROUNDED_ANSWER_RETRY_EXHAUSTED" in values for _query, values in connection.executed
+    )
 
 
 def test_sqs_worker_sweeps_stale_agent_executions_on_interval() -> None:

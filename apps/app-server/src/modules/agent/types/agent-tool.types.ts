@@ -61,6 +61,7 @@ export interface AgentToolDefinition<TInput> {
   description: string;
   riskLevel: AgentRiskLevel;
   executionMode: AgentToolExecutionMode;
+  requiresGroundedAnswer?: boolean;
   inputSchema: AgentToolInputSchema;
   validateInput: (input: unknown) => TInput;
   buildConfirmation?: (
