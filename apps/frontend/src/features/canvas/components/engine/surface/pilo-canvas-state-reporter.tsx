@@ -145,7 +145,7 @@ export function CanvasStateReporter({
     }
 
     const removeListener = editor.store.listen(scheduleFreeformSync, {
-      source: "all",
+      source: "user",
       scope: "document",
     });
 
