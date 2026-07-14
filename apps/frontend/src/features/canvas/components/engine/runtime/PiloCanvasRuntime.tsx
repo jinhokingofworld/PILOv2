@@ -42,7 +42,10 @@ import { useCanvasRuntimeHydration } from "./useCanvasRuntimeHydration";
 import { useCanvasShapePersistence } from "./useCanvasShapePersistence";
 import { useCanvasViewSettingPersistence } from "./useCanvasViewSettingPersistence";
 import { useCanvasViewportQueries } from "./useCanvasViewportQueries";
-import { mergeFreeformShapesById } from "./canvas-runtime-utils";
+import {
+  getFreeformShapeId,
+  mergeFreeformShapesById,
+} from "./canvas-runtime-utils";
 
 export type { CanvasBoardDetail, CanvasViewSetting } from "./canvas-runtime-types";
 
@@ -323,7 +326,14 @@ function PiloCanvasRuntimeInner({
       sortedOperations.forEach((operation) => {
         deferredRemoteOperationsRef.current.delete(operation.opSeq);
 
-        if (operation.actorUserId === currentRealtimeUserId) {
+        const isOwnOperation = operation.actorUserId === currentRealtimeUserId;
+        const hasLocalShape = nextFreeformShapes.some(
+          (shape) => getFreeformShapeId(shape) === operation.shapeId,
+        );
+        if (
+          isOwnOperation &&
+          (operation.operationType !== "create" || hasLocalShape)
+        ) {
           remoteShapeRevisionRef.current.set(
             operation.shapeId,
             Math.max(
