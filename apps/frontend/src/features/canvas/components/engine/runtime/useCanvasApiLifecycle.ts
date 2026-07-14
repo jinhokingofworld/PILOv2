@@ -66,7 +66,17 @@ export function useCanvasApiLifecycle({
 
         console.error("Canvas API shape sync failed", error);
       },
-      onSynced(operations) {
+      onSynced(operations, result) {
+        result.shapeRevisions.forEach((revision, shapeId) => {
+          remoteShapeRevisionRef.current.set(
+            shapeId,
+            Math.max(
+              remoteShapeRevisionRef.current.get(shapeId) ?? 0,
+              revision,
+            ),
+          );
+        });
+
         void queryClient.invalidateQueries({
           queryKey: ["canvas", board.workspaceId, board.id, "viewport-shapes"],
         });

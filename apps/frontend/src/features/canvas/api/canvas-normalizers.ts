@@ -67,6 +67,14 @@ export function normalizeCanvasShape(value: unknown) {
 
   rawShape.meta = meta;
 
+  if (typeof value.revision === "number" && Number.isInteger(value.revision)) {
+    rawShape.revision = value.revision;
+  }
+
+  if (typeof value.contentHash === "string") {
+    rawShape.contentHash = value.contentHash;
+  }
+
   return rawShape;
 }
 
