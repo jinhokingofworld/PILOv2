@@ -887,7 +887,7 @@ export function PrReviewCanvasShell({
                     type="button"
                   >
                     <GitMerge className="size-4" />
-                    GitHub에 전체 적용
+                    Conflict 해결안 적용
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>
@@ -1065,7 +1065,7 @@ export function PrReviewCanvasShell({
             <AlertDialogMedia className="bg-amber-50 text-amber-700">
               <GitMerge className="size-5" />
             </AlertDialogMedia>
-            <AlertDialogTitle>Conflict 해결안 전체 적용</AlertDialogTitle>
+            <AlertDialogTitle>Conflict 해결안 적용</AlertDialogTitle>
             <AlertDialogDescription>
               준비한 모든 파일을 PR head와 base를 부모로 갖는 merge commit
               하나로 적용합니다. 일부 파일만 적용되지는 않습니다.
@@ -1197,10 +1197,10 @@ export function PrReviewCanvasShell({
                     <GitMerge className="size-4" />
                   )}
                   {conflictApplyStatus === "applying"
-                    ? "전체 적용 중"
+                    ? "해결안 적용 중"
                     : conflictApplyRequiresGithubReconnect
-                      ? "GitHub에 다시 적용"
-                      : "GitHub에 전체 적용"}
+                      ? "Conflict 해결안 다시 적용"
+                      : "Conflict 해결안 적용"}
                 </AlertDialogAction>
               </>
             )}

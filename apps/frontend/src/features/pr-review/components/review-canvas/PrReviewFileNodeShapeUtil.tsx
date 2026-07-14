@@ -13,6 +13,7 @@ import {
 } from "tldraw";
 
 import { cn } from "@/lib/utils";
+import { activatePrReviewFileNode } from "@/features/pr-review/components/review-canvas/pr-review-node-activation";
 import type {
   PrReviewFileRoleType,
   PrReviewFileRiskLevel,
@@ -529,6 +530,10 @@ export class PrReviewFileNodeShapeUtil extends ShapeUtil<PrReviewFileNodeShape> 
 
   override component(shape: PrReviewFileNodeShape) {
     return <PrReviewFileNode shape={shape} />;
+  }
+
+  override onClick(shape: PrReviewFileNodeShape) {
+    activatePrReviewFileNode(this.editor, shape.props.reviewFileId);
   }
 
   override getIndicatorPath(shape: PrReviewFileNodeShape) {

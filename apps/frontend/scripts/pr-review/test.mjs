@@ -293,10 +293,9 @@ assert.match(prReviewFileDiffDrawer, /file\.decisionCarriedOver/);
 assert.match(prReviewFileDiffDrawer, /이전 버전에서 유지된 판단입니다/);
 assert.match(prReviewCanvasShell, /applyReviewSessionConflictResolutions/);
 assert.match(prReviewCanvasShell, /buildPrReviewConflictsApplyInput/);
-assert.match(prReviewCanvasShell, /GitHub에 전체 적용/);
+assert.match(prReviewCanvasShell, /Conflict 해결안 적용/);
 assert.match(prReviewCanvasShell, /해결 준비/);
 assert.match(prReviewCanvasShell, /pilo-github-oauth-reconnect/);
-assert.match(prReviewCanvasShell, /Conflict 해결안 전체 적용/);
 assert.match(prReviewCanvasShell, /PrReviewSubmitReviewModal/);
 assert.match(prReviewCanvasShell, /setIsSubmitReviewModalOpen/);
 assert.match(prReviewCanvasShell, /createNewReviewSession/);
@@ -401,7 +400,11 @@ assert.match(prReviewCanvasPersistence, /buildPrReviewFileShapeUpdateInput/);
 assert.match(prReviewCanvasPersistence, /buildPrReviewRelationEdgeGeometry/);
 assert.match(prReviewCanvasSurface, /PrReviewFileNodeActivationBridge/);
 assert.doesNotMatch(prReviewCanvasSurface, /PrReviewSelectionBridge/);
-assert.match(prReviewNodeActivation, /shouldActivatePrReviewFileNode/);
+assert.match(
+  prReviewNodeActivation,
+  /registerPrReviewFileNodeActivationHandler/
+);
+assert.match(prReviewNodeActivation, /activatePrReviewFileNode/);
 assert.doesNotMatch(prReviewCanvasPersistence, /features\/canvas/);
 assert.match(prReviewFileDiffDrawer, /getReviewFileDiff/);
 assert.match(prReviewFileDiffDrawer, /updateReviewFileDecision/);
@@ -525,6 +528,10 @@ assert.match(prReviewShapeUtils, /PrReviewRelationEdgeShapeUtil/);
 assert.match(prReviewShapeUtils, /PrReviewFlowLabelShapeUtil/);
 assert.match(prReviewShapeUtils, /PrReviewFlowMilestoneShapeUtil/);
 assert.match(prReviewShapeUtils, /PrReviewRoleLaneShapeUtil/);
+assert.match(prReviewCanvasSurface, /ContextMenu: null/);
+assert.match(prReviewCanvasSurface, /registerAfterCreateHandler/);
+assert.match(prReviewFileNodeShapeUtil, /override onClick/);
+assert.match(prReviewFileNodeShapeUtil, /activatePrReviewFileNode/);
 
 await import("./flow-layout.test.mjs");
 await import("./resolved-code-diff.test.mjs");
@@ -537,3 +544,4 @@ await import("./canvas-shape-persistence.test.mjs");
 await import("./canvas-shape-index.test.mjs");
 await import("./canvas-operation-sync.test.mjs");
 await import("./node-activation.test.mjs");
+await import("./system-shape-policy.test.mjs");
