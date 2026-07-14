@@ -19,6 +19,7 @@ import {
   PrReviewCanvasPayload,
   PrReviewConflictAnalysisPayload,
   PrReviewConflictApplyPayload,
+  PrReviewConflictDraftPayload,
   PrReviewConflictsApplyPayload,
   PrReviewConflictSuggestionPayload,
   PrReviewFileDecisionListPayload,
@@ -266,6 +267,36 @@ export class PrReviewController {
         body
       );
     return apiResponse(suggestion);
+  }
+
+  @Get("review-files/:reviewFileId/conflict-draft")
+  async getReviewFileConflictDraft(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("reviewFileId") reviewFileId: string
+  ): Promise<ApiSuccessResponse<PrReviewConflictDraftPayload | null>> {
+    const draft = await this.prReviewService.getReviewFileConflictDraft(
+      currentUserId,
+      workspaceId,
+      reviewFileId
+    );
+    return apiResponse(draft);
+  }
+
+  @Patch("review-files/:reviewFileId/conflict-draft")
+  async updateReviewFileConflictDraft(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("reviewFileId") reviewFileId: string,
+    @Body() body: unknown
+  ): Promise<ApiSuccessResponse<PrReviewConflictDraftPayload>> {
+    const draft = await this.prReviewService.updateReviewFileConflictDraft(
+      currentUserId,
+      workspaceId,
+      reviewFileId,
+      body
+    );
+    return apiResponse(draft);
   }
 
   @Post("review-files/:reviewFileId/conflict-apply")

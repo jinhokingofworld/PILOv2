@@ -1,5 +1,23 @@
 export const PR_REVIEW_DECISION_REDIS_CHANNEL = "pr-review:decision-events";
 export const PR_REVIEW_DECISION_UPDATED_EVENT = "pr-review:decision:updated";
+export const PR_REVIEW_CONFLICT_DRAFT_REDIS_CHANNEL =
+  "pr-review:conflict-draft-events";
+export const PR_REVIEW_CONFLICT_DRAFT_UPDATED_EVENT =
+  "pr-review:conflict-draft:updated";
+export const PR_REVIEW_CONFLICT_DRAFT_INVALIDATED_EVENT =
+  "pr-review:conflict-draft:invalidated";
+export const PR_REVIEW_CONFLICT_DRAFT_LOCK_CLAIM_EVENT =
+  "pr-review:conflict-draft:lock:claim";
+export const PR_REVIEW_CONFLICT_DRAFT_LOCK_RELEASE_EVENT =
+  "pr-review:conflict-draft:lock:release";
+export const PR_REVIEW_CONFLICT_DRAFT_LOCK_ACCEPTED_EVENT =
+  "pr-review:conflict-draft:lock:accepted";
+export const PR_REVIEW_CONFLICT_DRAFT_LOCK_REJECTED_EVENT =
+  "pr-review:conflict-draft:lock:rejected";
+export const PR_REVIEW_CONFLICT_DRAFT_LOCK_UPDATED_EVENT =
+  "pr-review:conflict-draft:lock:updated";
+export const PR_REVIEW_CONFLICT_DRAFT_LOCK_RELEASED_EVENT =
+  "pr-review:conflict-draft:lock:released";
 
 export type PrReviewDecisionUpdatedEvent = {
   event: typeof PR_REVIEW_DECISION_UPDATED_EVENT;
@@ -20,6 +38,42 @@ export type PrReviewDecisionUpdatedEvent = {
   readyToSubmit: boolean;
   reviewedByUserId: string | null;
   reviewedAt: string | null;
+};
+
+export type PrReviewConflictDraftUpdatedEvent = {
+  event: typeof PR_REVIEW_CONFLICT_DRAFT_UPDATED_EVENT;
+  workspaceId: string;
+  canvasId: string;
+  reviewRoomId: string;
+  reviewSessionId: string;
+  reviewFileId: string;
+  sourceHeadBlobSha: string;
+  resolvedContent: string;
+  draftVersion: number;
+  updatedByUserId: string;
+  updatedAt: string;
+};
+
+export type PrReviewConflictDraftInvalidatedEvent = {
+  event: typeof PR_REVIEW_CONFLICT_DRAFT_INVALIDATED_EVENT;
+  workspaceId: string;
+  canvasId: string;
+  reviewRoomId: string;
+  reviewSessionId: string;
+  reviewFileIds: string[];
+};
+
+export type PrReviewConflictDraftLockPayload = {
+  workspaceId: string;
+  canvasId: string;
+  reviewSessionId: string;
+  reviewFileId: string;
+};
+
+export type PrReviewConflictDraftLockState = PrReviewConflictDraftLockPayload & {
+  ownerUserId: string;
+  lockedAt: string;
+  expiresAt: string;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -69,5 +123,48 @@ export function isPrReviewDecisionUpdatedEvent(
     (value.reviewedAt === null ||
       (typeof value.reviewedAt === "string" &&
         Number.isFinite(Date.parse(value.reviewedAt))))
+  );
+}
+
+function isPositiveInteger(value: unknown): value is number {
+  return Number.isInteger(value) && Number(value) > 0;
+}
+
+function isStringList(value: unknown): value is string[] {
+  return Array.isArray(value) && value.length > 0 && value.every(isNonEmptyString);
+}
+
+export function isPrReviewConflictDraftRedisEvent(
+  value: unknown
+): value is PrReviewConflictDraftUpdatedEvent | PrReviewConflictDraftInvalidatedEvent {
+  if (!isRecord(value) || !isNonEmptyString(value.workspaceId) || !isNonEmptyString(value.canvasId) || !isNonEmptyString(value.reviewRoomId) || !isNonEmptyString(value.reviewSessionId)) {
+    return false;
+  }
+  if (value.event === PR_REVIEW_CONFLICT_DRAFT_UPDATED_EVENT) {
+    return (
+      isNonEmptyString(value.reviewFileId) &&
+      isNonEmptyString(value.sourceHeadBlobSha) &&
+      typeof value.resolvedContent === "string" &&
+      isPositiveInteger(value.draftVersion) &&
+      isNonEmptyString(value.updatedByUserId) &&
+      typeof value.updatedAt === "string" &&
+      Number.isFinite(Date.parse(value.updatedAt))
+    );
+  }
+  return (
+    value.event === PR_REVIEW_CONFLICT_DRAFT_INVALIDATED_EVENT &&
+    isStringList(value.reviewFileIds)
+  );
+}
+
+export function isPrReviewConflictDraftLockPayload(
+  value: unknown
+): value is PrReviewConflictDraftLockPayload {
+  return (
+    isRecord(value) &&
+    isNonEmptyString(value.workspaceId) &&
+    isNonEmptyString(value.canvasId) &&
+    isNonEmptyString(value.reviewSessionId) &&
+    isNonEmptyString(value.reviewFileId)
   );
 }

@@ -8,6 +8,9 @@ import type { PrReviewConflictResolutionChoice } from "./pr-review-conflict-reso
 
 export type PrReviewConflictDraft = {
   sourceHeadBlobSha: string;
+  draftVersion: number;
+  updatedByUserId: string | null;
+  updatedAt: string | null;
   resolutionChoices: Record<string, PrReviewConflictResolutionChoice>;
   acceptedAiResolvedTexts: Record<string, string>;
   manualResolvedTexts: Record<string, string>;
@@ -25,11 +28,14 @@ export function createPrReviewConflictDraft(
 ): PrReviewConflictDraft {
   return {
     sourceHeadBlobSha: file.headBlobSha,
+    draftVersion: 0,
+    updatedByUserId: null,
+    updatedAt: null,
     resolutionChoices: {},
     acceptedAiResolvedTexts: {},
     manualResolvedTexts: {},
     suggestion: null,
-    resolvedContent: file.headContent,
+    resolvedContent: buildPrReviewConflictMarkerDraft(file),
     isCustomized: false
   };
 }
@@ -70,17 +76,54 @@ export function isPrReviewConflictDraftReady(
     return false;
   }
 
-  return file.hunks.every((hunk) => {
-    const choice = draft.resolutionChoices[hunk.id];
-    if (!choice) {
-      return false;
-    }
-    return choice === "ai"
-      ? Object.hasOwn(draft.acceptedAiResolvedTexts, hunk.id)
-      : choice === "manual"
-        ? Object.hasOwn(draft.manualResolvedTexts, hunk.id)
-        : true;
-  });
+  return true;
+}
+
+export function buildPrReviewConflictMarkerDraft(file: PrReviewConflictFile): string {
+  const lines = file.headContent.replace(/\r\n/g, "\n").split("\n");
+  const hunks = [...file.hunks].sort(
+    (left, right) => right.incomingStartLine - left.incomingStartLine
+  );
+
+  for (const hunk of hunks) {
+    const start = Math.max(0, hunk.incomingStartLine - 1);
+    const end = start + hunk.incomingLineCount;
+    lines.splice(
+      start,
+      Math.max(0, hunk.incomingLineCount),
+      `<<<<<<< PR branch`,
+      ...hunk.incomingText.split("\n"),
+      "=======",
+      ...hunk.currentText.split("\n"),
+      ">>>>>>> target branch"
+    );
+  }
+
+  return lines.join("\n");
+}
+
+export function applyPrReviewConflictMarkerChoice(input: {
+  hunk: PrReviewConflictFile["hunks"][number];
+  choice: "pr" | "target" | "both";
+  value: string;
+}): string | null {
+  const markerBlock = [
+    "<<<<<<< PR branch",
+    input.hunk.incomingText,
+    "=======",
+    input.hunk.currentText,
+    ">>>>>>> target branch"
+  ].join("\n");
+  const replacement =
+    input.choice === "pr"
+      ? input.hunk.incomingText
+      : input.choice === "target"
+        ? input.hunk.currentText
+        : `${input.hunk.incomingText}\n${input.hunk.currentText}`;
+
+  return input.value.includes(markerBlock)
+    ? input.value.replace(markerBlock, replacement)
+    : null;
 }
 
 export function getPrReviewConflictDraftProgress(

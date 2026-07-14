@@ -34,7 +34,11 @@ import {
   type createPrReviewApiClient
 } from "@/features/pr-review/api/client";
 import { PrReviewResolvedCodeEditor } from "./PrReviewResolvedCodeEditor";
-import type { PrReviewConflictDraft } from "./pr-review-conflict-drafts";
+import { usePrReviewConflictDraftLock } from "@/features/pr-review/realtime/usePrReviewConflictDraftLock";
+import {
+  applyPrReviewConflictMarkerChoice,
+  type PrReviewConflictDraft
+} from "./pr-review-conflict-drafts";
 import {
   applyAllPrReviewConflictSuggestion,
   buildPrReviewConflictSuggestionInput,
@@ -63,6 +67,7 @@ import type {
   PrReviewFileReviewStatus,
   PrReviewUnsupportedConflictFile
 } from "@/features/pr-review/types";
+import type { CanvasRealtimeIdentity } from "@/shared/canvas-realtime/canvas-realtime-types";
 
 type PrReviewApiClient = ReturnType<typeof createPrReviewApiClient>;
 
@@ -94,12 +99,24 @@ type PrReviewFileDiffDrawerProps = {
     reviewFileId: string,
     draft: PrReviewConflictDraft
   ) => void;
+  onRemoteConflictDraftUpdated: (draft: {
+    reviewFileId: string;
+    sourceHeadBlobSha: string;
+    resolvedContent: string;
+    draftVersion: number;
+    updatedByUserId: string;
+    updatedAt: string;
+  }) => void;
+  onRemoteConflictDraftInvalidated: () => void;
   onDecisionSaved: (
     file: PrReviewFile,
     previousStatus: PrReviewFileReviewStatus
   ) => void;
   remoteDecisionUpdate: PrReviewDecisionUpdatedEvent | null;
+  realtimeIdentity: CanvasRealtimeIdentity;
   reviewFileId: string;
+  reviewRoomId: string;
+  reviewSessionId: string;
   unsupportedConflictFile: PrReviewUnsupportedConflictFile | null;
   workspaceId: string;
 };
@@ -292,9 +309,14 @@ export function PrReviewFileDiffDrawer({
   isReviewSessionConflicted,
   onClose,
   onConflictDraftChange,
+  onRemoteConflictDraftUpdated,
+  onRemoteConflictDraftInvalidated,
   onDecisionSaved,
   remoteDecisionUpdate,
+  realtimeIdentity,
   reviewFileId,
+  reviewRoomId,
+  reviewSessionId,
   unsupportedConflictFile,
   workspaceId
 }: PrReviewFileDiffDrawerProps) {
@@ -550,6 +572,22 @@ export function PrReviewFileDiffDrawer({
     unsupportedConflictFile
   });
   const isReviewReadOnly = isReviewVersionStale || isReviewRoomCompleted;
+  const {
+    canEdit: canEditConflictDraft,
+    editingOwnerUserId,
+    isEditing: isEditingConflictDraft,
+    releaseEdit: releaseConflictDraftEdit,
+    startEdit: startConflictDraftEdit
+  } = usePrReviewConflictDraftLock({
+    apiClient,
+    conflictFileId: conflictFile?.reviewFileId ?? null,
+    onDraftInvalidated: onRemoteConflictDraftInvalidated,
+    onDraftUpdated: onRemoteConflictDraftUpdated,
+    realtimeIdentity,
+    reviewRoomId,
+    reviewSessionId,
+    workspaceId
+  });
   const decisionDisabled = isReviewReadOnly || decisionDisabledReason !== null;
   const selectedConflictHunk =
     conflictFile?.hunks[selectedConflictHunkIndex] ?? null;
@@ -711,7 +749,8 @@ export function PrReviewFileDiffDrawer({
     if (
       !conflictFile ||
       conflictSuggestionStatus === "loading" ||
-      isReviewReadOnly
+      isReviewReadOnly ||
+      !isEditingConflictDraft
     ) {
       return;
     }
@@ -743,6 +782,7 @@ export function PrReviewFileDiffDrawer({
     conflictDraft,
     conflictFile,
     conflictSuggestionStatus,
+    isEditingConflictDraft,
     isReviewReadOnly,
     onConflictDraftChange,
     workspaceId
@@ -754,7 +794,8 @@ export function PrReviewFileDiffDrawer({
       !conflictSuggestion ||
       conflictSuggestion.status === "invalid" ||
       isResolvedDraftCustomized ||
-      isReviewReadOnly
+      isReviewReadOnly ||
+      !isEditingConflictDraft
     ) {
       return;
     }
@@ -776,6 +817,7 @@ export function PrReviewFileDiffDrawer({
     conflictFile,
     conflictSuggestion,
     isResolvedDraftCustomized,
+    isEditingConflictDraft,
     isReviewReadOnly,
     onConflictDraftChange
   ]);
@@ -857,68 +899,109 @@ export function PrReviewFileDiffDrawer({
             <Separator />
             {conflictFile && selectedConflictHunk ? (
               <>
-                <ConflictWorkspaceTabs
-                  onViewChange={setConflictWorkspaceView}
-                  resolvedHunkCount={resolvedHunkCount}
-                  totalHunkCount={conflictFile.hunks.length}
-                  view={conflictWorkspaceView}
+                <div className="flex items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-2">
+                  <div className="text-sm text-slate-600">
+                    {isEditingConflictDraft
+                      ? "해결 코드를 편집 중입니다. 다른 참여자는 변경 내용을 바로 확인할 수 있습니다."
+                      : editingOwnerUserId
+                        ? "다른 참여자가 해결 코드를 편집 중입니다. 저장된 변경 내용을 읽기 전용으로 표시합니다."
+                        : "한 명씩 해결 코드를 편집할 수 있습니다."}
+                  </div>
+                  {!isReviewReadOnly ? (
+                    isEditingConflictDraft ? (
+                      <Button onClick={releaseConflictDraftEdit} size="sm" type="button" variant="outline">
+                        편집 완료
+                      </Button>
+                    ) : (
+                      <Button disabled={!canEditConflictDraft} onClick={startConflictDraftEdit} size="sm" type="button">
+                        해결 코드 편집 시작
+                      </Button>
+                    )
+                  ) : null}
+                </div>
+                <div className="flex items-center gap-2 overflow-x-auto border-b border-slate-200 bg-slate-50 px-4 py-2">
+                  <Button
+                    aria-label="이전 충돌 구간"
+                    disabled={selectedConflictHunkIndex === 0}
+                    onClick={() =>
+                      setSelectedConflictHunkIndex(index => Math.max(0, index - 1))
+                    }
+                    size="icon-sm"
+                    type="button"
+                    variant="outline"
+                  >
+                    <ChevronLeft className="size-4" />
+                  </Button>
+                  <span className="shrink-0 text-sm font-medium text-slate-700">
+                    충돌 구간 {selectedConflictHunkIndex + 1} / {conflictFile.hunks.length}
+                  </span>
+                  <Button
+                    aria-label="다음 충돌 구간"
+                    disabled={selectedConflictHunkIndex >= conflictFile.hunks.length - 1}
+                    onClick={() =>
+                      setSelectedConflictHunkIndex(index =>
+                        Math.min(conflictFile.hunks.length - 1, index + 1)
+                      )
+                    }
+                    size="icon-sm"
+                    type="button"
+                    variant="outline"
+                  >
+                    <ChevronRight className="size-4" />
+                  </Button>
+                  <Separator className="mx-1 h-5" orientation="vertical" />
+                  {([
+                    ["pr", "PR 변경 선택"],
+                    ["target", "대상 변경 선택"],
+                    ["both", "둘 다 선택"]
+                  ] as const).map(([choice, label]) => (
+                    <Button
+                      disabled={!isEditingConflictDraft}
+                      key={choice}
+                      onClick={() => {
+                        if (!conflictDraft || !selectedConflictHunk) return;
+                        const nextContent = applyPrReviewConflictMarkerChoice({
+                          choice,
+                          hunk: selectedConflictHunk,
+                          value: conflictDraft.resolvedContent
+                        });
+                        if (!nextContent) return;
+                        onConflictDraftChange(conflictFile.reviewFileId, {
+                          ...conflictDraft,
+                          resolvedContent: nextContent,
+                          isCustomized: true
+                        });
+                      }}
+                      size="sm"
+                      type="button"
+                      variant="outline"
+                    >
+                      {label}
+                    </Button>
+                  ))}
+                </div>
+                <ResolvedDraftWorkspace
+                  filePath={file.filePath}
+                  isCustomized={isResolvedDraftCustomized}
+                  onChange={(value) => {
+                    if (
+                      isReviewReadOnly ||
+                      !isEditingConflictDraft ||
+                      !conflictDraft ||
+                      !conflictFile
+                    ) {
+                      return;
+                    }
+                    onConflictDraftChange(conflictFile.reviewFileId, {
+                      ...conflictDraft,
+                      resolvedContent: value,
+                      isCustomized: true
+                    });
+                  }}
+                  readOnly={isReviewReadOnly || !isEditingConflictDraft}
+                  originalValue={conflictFile.headContent}
+                  value={resolvedContentDraft}
                 />
-                {conflictWorkspaceView === "conflict" ? (
-                  <ConflictHunkComparison
-                    aiResolvedText={
-                      aiResolvedHunks.find(
-                        (hunk) => hunk.hunkId === selectedConflictHunk.id
-                      )?.resolvedText ?? null
-                    }
-                    baseBranch={baseBranch}
-                    choice={resolutionChoices[selectedConflictHunk.id] ?? null}
-                    filePath={file.filePath}
-                    headBranch={headBranch}
-                    hunk={selectedConflictHunk}
-                    hunkCount={conflictFile.hunks.length}
-                    hunkIndex={selectedConflictHunkIndex}
-                    isBaseComparisonOpen={isBaseComparisonOpen}
-                    isChoiceDisabled={
-                      isResolvedDraftCustomized || isReviewReadOnly
-                    }
-                    manualResolvedText={
-                      manualResolvedTexts[selectedConflictHunk.id] ?? ""
-                    }
-                    onChoiceChange={(choice) =>
-                      handleResolutionChoiceChange(selectedConflictHunk.id, choice)
-                    }
-                    onHunkIndexChange={setSelectedConflictHunkIndex}
-                    onManualResolvedTextChange={(value) =>
-                      handleManualResolutionChange(selectedConflictHunk.id, value)
-                    }
-                    onResetCustomizedDraft={handleResetCustomizedDraft}
-                    onToggleBaseComparison={() =>
-                      setIsBaseComparisonOpen((current) => !current)
-                    }
-                  />
-                ) : (
-                  <ResolvedDraftWorkspace
-                    filePath={file.filePath}
-                    isCustomized={isResolvedDraftCustomized}
-                    onChange={(value) => {
-                      if (
-                        isReviewReadOnly ||
-                        !conflictDraft ||
-                        !conflictFile
-                      ) {
-                        return;
-                      }
-                      onConflictDraftChange(conflictFile.reviewFileId, {
-                        ...conflictDraft,
-                        resolvedContent: value,
-                        isCustomized: true
-                      });
-                    }}
-                    readOnly={isReviewReadOnly}
-                    originalValue={conflictFile.headContent}
-                    value={resolvedContentDraft}
-                  />
-                )}
               </>
             ) : (
               <div className="min-h-0 flex-1 overflow-y-auto">
@@ -1555,7 +1638,7 @@ function ResolvedDraftWorkspace({
   readOnly: boolean;
   value: string;
 }) {
-  const [view, setView] = useState<ResolvedWorkspaceView>("changes");
+  const [view, setView] = useState<ResolvedWorkspaceView>("editor");
   const [selectedChangeIndex, setSelectedChangeIndex] = useState(0);
   const [revealRequestId, setRevealRequestId] = useState(0);
   const resolvedDiff = useMemo(

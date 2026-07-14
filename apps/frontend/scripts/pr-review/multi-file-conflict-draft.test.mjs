@@ -4,6 +4,7 @@ import {
   buildPrReviewConflictsApplyInput,
   createPrReviewConflictDraft,
   getPrReviewConflictDraftProgress,
+  applyPrReviewConflictMarkerChoice,
   reconcilePrReviewConflictDrafts
 } from "../../src/features/pr-review/components/review-canvas/pr-review-conflict-drafts.ts";
 
@@ -60,8 +61,17 @@ const initialDrafts = reconcilePrReviewConflictDrafts(
   {}
 );
 
-assert.equal(initialDrafts.first.resolvedContent, firstFile.headContent);
-assert.equal(initialDrafts.second.resolvedContent, secondFile.headContent);
+assert.match(initialDrafts.first.resolvedContent, /<<<<<<< PR branch/);
+assert.match(initialDrafts.first.resolvedContent, />>>>>>> target branch/);
+assert.match(initialDrafts.second.resolvedContent, /<<<<<<< PR branch/);
+assert.equal(
+  applyPrReviewConflictMarkerChoice({
+    hunk: firstFile.hunks[0],
+    choice: "both",
+    value: initialDrafts.first.resolvedContent
+  }),
+  "const value = 2;\nconst value = 1;\n"
+);
 
 const preparedDrafts = {
   ...initialDrafts,
@@ -122,7 +132,7 @@ const refreshedDrafts = reconcilePrReviewConflictDrafts(
   preparedDrafts
 );
 assert.notEqual(refreshedDrafts.first, preparedDrafts.first);
-assert.equal(refreshedDrafts.first.resolvedContent, changedFirstFile.headContent);
+assert.match(refreshedDrafts.first.resolvedContent, /<<<<<<< PR branch/);
 assert.equal(refreshedDrafts.second, preparedDrafts.second);
 
 const markerDrafts = {

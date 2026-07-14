@@ -11,6 +11,7 @@ import type {
   PrReviewCanvasShape,
   PrReviewCanvasViewportQuery,
   PrReviewConflictAnalysis,
+  PrReviewConflictDraft,
   PrReviewConflictSuggestion,
   PrReviewFile,
   PrReviewFileDiff,
@@ -29,6 +30,7 @@ import type {
   PrReviewSummary,
   SubmitPrReviewSessionInput,
   UpdatePrReviewCanvasFileShapeInput,
+  UpdatePrReviewConflictDraftInput,
   UpdatePrReviewFileDecisionInput
 } from "@/features/pr-review/types";
 import type { CanvasOperationsCatchupPayload } from "@/shared/canvas-realtime/canvas-realtime-types";
@@ -606,6 +608,26 @@ export function createPrReviewApiClient({
           body: input ? JSON.stringify(input) : undefined,
           method: "POST"
         },
+        requestOptions
+      );
+    },
+
+    async getReviewFileConflictDraft(workspaceId: string, reviewFileId: string) {
+      return requestPrReviewData<PrReviewConflictDraft | null>(
+        `${reviewFileGithubPath(workspaceId, reviewFileId)}/conflict-draft`,
+        undefined,
+        requestOptions
+      );
+    },
+
+    async updateReviewFileConflictDraft(
+      workspaceId: string,
+      reviewFileId: string,
+      input: UpdatePrReviewConflictDraftInput
+    ) {
+      return requestPrReviewData<PrReviewConflictDraft>(
+        `${reviewFileGithubPath(workspaceId, reviewFileId)}/conflict-draft`,
+        { body: JSON.stringify(input), method: "PATCH" },
         requestOptions
       );
     },

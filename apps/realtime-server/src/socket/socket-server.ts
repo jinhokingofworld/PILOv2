@@ -66,6 +66,17 @@ import {
 import { createSocketIoRedisAdapter } from "../redis/redis-pubsub";
 import {
   isPrReviewDecisionUpdatedEvent,
+  isPrReviewConflictDraftLockPayload,
+  isPrReviewConflictDraftRedisEvent,
+  PR_REVIEW_CONFLICT_DRAFT_INVALIDATED_EVENT,
+  PR_REVIEW_CONFLICT_DRAFT_LOCK_ACCEPTED_EVENT,
+  PR_REVIEW_CONFLICT_DRAFT_LOCK_CLAIM_EVENT,
+  PR_REVIEW_CONFLICT_DRAFT_LOCK_REJECTED_EVENT,
+  PR_REVIEW_CONFLICT_DRAFT_LOCK_RELEASED_EVENT,
+  PR_REVIEW_CONFLICT_DRAFT_LOCK_RELEASE_EVENT,
+  PR_REVIEW_CONFLICT_DRAFT_LOCK_UPDATED_EVENT,
+  PR_REVIEW_CONFLICT_DRAFT_REDIS_CHANNEL,
+  PR_REVIEW_CONFLICT_DRAFT_UPDATED_EVENT,
   PR_REVIEW_DECISION_REDIS_CHANNEL,
   PR_REVIEW_DECISION_UPDATED_EVENT,
 } from "../pr-review/pr-review-socket-events";
@@ -103,6 +114,39 @@ const MEETING_REPORT_REDIS_CHANNEL = "meeting:report-events";
 const MEETING_STATE_REDIS_CHANNEL = "meeting:state-events";
 const BOARD_INVALIDATION_REDIS_CHANNEL = "board:invalidations";
 const BOARD_SOURCE_REDIS_CHANNEL = "board:source-events";
+
+function createConflictDraftShapeLockId(
+  reviewSessionId: string,
+  reviewFileId: string
+) {
+  return `pr-review-conflict-draft:${reviewSessionId}:${reviewFileId}`;
+}
+
+function readConflictDraftLockId(shapeId: string): {
+  reviewSessionId: string;
+  reviewFileId: string;
+} | null {
+  const prefix = "pr-review-conflict-draft:";
+  if (!shapeId.startsWith(prefix)) return null;
+  const [reviewSessionId, reviewFileId] = shapeId.slice(prefix.length).split(":");
+  return reviewSessionId && reviewFileId ? { reviewSessionId, reviewFileId } : null;
+}
+
+function emitConflictDraftLockReleases(
+  io: Server,
+  payload: { canvasId: string; workspaceId: string; ownerUserId: string; shapeIds: string[] }
+) {
+  for (const shapeId of payload.shapeIds) {
+    const draft = readConflictDraftLockId(shapeId);
+    if (!draft) continue;
+    io.to(createCanvasRoomName(payload)).emit(PR_REVIEW_CONFLICT_DRAFT_LOCK_RELEASED_EVENT, {
+      ...draft,
+      canvasId: payload.canvasId,
+      workspaceId: payload.workspaceId,
+      ownerUserId: payload.ownerUserId
+    });
+  }
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -729,6 +773,16 @@ export async function createRealtimeSocketServer({
         );
       })
     : null;
+  const unsubscribePrReviewConflictDrafts = redisAdapter
+    ? await redisAdapter.subscribe(PR_REVIEW_CONFLICT_DRAFT_REDIS_CHANNEL, (payload) => {
+        if (!isPrReviewConflictDraftRedisEvent(payload)) {
+          console.error("PR Review Conflict draft Redis payload is invalid", payload);
+          return;
+        }
+
+        io.to(createCanvasRoomName(payload)).emit(payload.event, payload);
+      })
+    : null;
 
   io.use((socket, next) => {
     const authContext = createSocketAuthContext(
@@ -886,6 +940,7 @@ export async function createRealtimeSocketServer({
         socket
           .to(roomName)
           .emit(canvasServerEvents.shapeLockRelease, lockReleasePayload);
+        emitConflictDraftLockReleases(io, lockReleasePayload);
       }
 
       if (previewClearPayload) {
@@ -1148,6 +1203,69 @@ export async function createRealtimeSocketServer({
       socket.to(roomName).emit(canvasServerEvents.shapePreviewClear, clearEvent);
     });
 
+    socket.on(PR_REVIEW_CONFLICT_DRAFT_LOCK_CLAIM_EVENT, async payload => {
+      if (!isPrReviewConflictDraftLockPayload(payload)) {
+        emitCanvasError(socket, "pr-review:conflict-draft:lock:claim payload is invalid");
+        return;
+      }
+      const roomName = createCanvasRoomName(payload);
+      if (!socket.rooms.has(roomName) || !assertCanvasRoomWritable(authedSocket, roomName)) {
+        return;
+      }
+      const shapeId = createConflictDraftShapeLockId(
+        payload.reviewSessionId,
+        payload.reviewFileId
+      );
+      const result = await shapeLockService.claimLocks(
+        socket.id,
+        authedSocket.data.auth.userId ?? socket.id,
+        payload,
+        [shapeId]
+      );
+      if (result.accepted.locks.length) {
+        const lock = result.accepted.locks[0];
+        const event = {
+          ...payload,
+          ownerUserId: lock.ownerUserId,
+          lockedAt: lock.lockedAt,
+          expiresAt: lock.expiresAt
+        };
+        socket.emit(PR_REVIEW_CONFLICT_DRAFT_LOCK_ACCEPTED_EVENT, event);
+        socket.to(roomName).emit(PR_REVIEW_CONFLICT_DRAFT_LOCK_UPDATED_EVENT, event);
+      }
+      if (result.rejected.shapeIds.length) {
+        const lock = result.rejected.locks[0];
+        socket.emit(PR_REVIEW_CONFLICT_DRAFT_LOCK_REJECTED_EVENT, {
+          ...payload,
+          ownerUserId: lock?.ownerUserId ?? null,
+          lockedAt: lock?.lockedAt ?? null,
+          expiresAt: lock?.expiresAt ?? null
+        });
+      }
+    });
+
+    socket.on(PR_REVIEW_CONFLICT_DRAFT_LOCK_RELEASE_EVENT, async payload => {
+      if (!isPrReviewConflictDraftLockPayload(payload)) {
+        emitCanvasError(socket, "pr-review:conflict-draft:lock:release payload is invalid");
+        return;
+      }
+      const roomName = createCanvasRoomName(payload);
+      if (!socket.rooms.has(roomName) || !assertCanvasRoomWritable(authedSocket, roomName)) {
+        return;
+      }
+      const release = await shapeLockService.clearRoomLocks(
+        socket.id,
+        authedSocket.data.auth.userId ?? socket.id,
+        payload,
+        [createConflictDraftShapeLockId(payload.reviewSessionId, payload.reviewFileId)]
+      );
+      if (!release) return;
+      io.to(roomName).emit(PR_REVIEW_CONFLICT_DRAFT_LOCK_RELEASED_EVENT, {
+        ...payload,
+        ownerUserId: release.ownerUserId
+      });
+    });
+
     socket.on("disconnect", () => {
       void (async () => {
         const leaveEvents = presenceService.clearSocket(socket.id);
@@ -1171,6 +1289,7 @@ export async function createRealtimeSocketServer({
           socket
             .to(createCanvasRoomName(lockReleasePayload))
             .emit(canvasServerEvents.shapeLockRelease, lockReleasePayload);
+          emitConflictDraftLockReleases(io, lockReleasePayload);
         }
 
         for (const previewClearPayload of previewClearEvents) {
@@ -1193,6 +1312,7 @@ export async function createRealtimeSocketServer({
       await unsubscribeBoardInvalidations?.();
       await unsubscribeBoardSourceEvents?.();
       await unsubscribePrReviewDecisions?.();
+      await unsubscribePrReviewConflictDrafts?.();
       await io.close();
       await redisAdapter?.close();
       await database.close();
