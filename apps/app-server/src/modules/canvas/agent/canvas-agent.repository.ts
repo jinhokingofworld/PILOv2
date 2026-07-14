@@ -404,15 +404,41 @@ export class CanvasAgentRepository {
   }
 
   async failRun(runId: string, message: string): Promise<void> {
+    const userMessage = "디자인 초안을 만드는 중 오류가 났어요. 다시 시도해 주세요.";
     await this.database.execute(
       `
         UPDATE canvas_agent_runs
         SET status = 'failed', error_code = 'CANVAS_AGENT_FAILED', error_message = $2,
-          result_summary = 'Canvas AI 작업을 완료하지 못했습니다.', completed_at = now()
+          result_summary = CASE
+            WHEN prompt ~* $3 THEN $4
+            ELSE 'Canvas AI 작업을 완료하지 못했습니다.'
+          END,
+          result_json = jsonb_set(
+            COALESCE(result_json, '{}'::jsonb),
+            '{progress}',
+            jsonb_build_object(
+              'message',
+              CASE
+                WHEN prompt ~* $3 THEN $4
+                ELSE 'Canvas AI 작업을 완료하지 못했습니다.'
+              END,
+              'highlightedShapeIds', '[]'::jsonb,
+              'targetViewport', NULL,
+              'toolTarget', NULL,
+              'toolTargetLabel', NULL
+            ),
+            true
+          ),
+          completed_at = now()
         WHERE id = $1
           AND status NOT IN ('completed', 'cancelled', 'expired')
       `,
-      [runId, message.slice(0, 4096)]
+      [
+        runId,
+        message.slice(0, 4096),
+        "(디자인|와이어|페이지|화면|초안|그려|만들|생성)",
+        userMessage
+      ]
     );
   }
 
