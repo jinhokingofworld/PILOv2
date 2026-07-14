@@ -313,6 +313,14 @@ async function safelyBuildInitialGraphLayout(
   relations: PrReviewCanvasMaterializationRelation[]
 ) {
   try {
+    const reviewOrderRelations = relations.filter(
+      (relation) => relation.relationType === "review_order"
+    );
+    // Review order defines the primary reading flow. Semantic relations remain
+    // visible as supporting edges without rearranging the entire graph.
+    const layoutRelations =
+      reviewOrderRelations.length > 0 ? reviewOrderRelations : relations;
+
     return await buildPrReviewCanvasGraphLayout({
       files: files.map((file) => ({
         roomFileId: file.roomFileId,
@@ -322,7 +330,7 @@ async function safelyBuildInitialGraphLayout(
         workflowOrder: file.workflowOrder,
         filePath: file.filePath
       })),
-      relations: relations.map((relation) => ({
+      relations: layoutRelations.map((relation) => ({
         id: getPrReviewRelationShapeId(reviewRoomId, relation),
         fromRoomFileId: relation.fromRoomFileId,
         toRoomFileId: relation.toRoomFileId

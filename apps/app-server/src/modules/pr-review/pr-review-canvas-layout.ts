@@ -56,8 +56,8 @@ export async function buildPrReviewCanvasGraphLayout(input: {
       "elk.edgeRouting": "ORTHOGONAL",
       "elk.layered.considerModelOrder.strategy": "NODES_AND_EDGES",
       "elk.layered.nodePlacement.strategy": "NETWORK_SIMPLEX",
-      "elk.spacing.nodeNode": "64",
-      "elk.layered.spacing.nodeNodeBetweenLayers": "96",
+      "elk.spacing.nodeNode": "112",
+      "elk.layered.spacing.nodeNodeBetweenLayers": "160",
       "elk.padding": "[top=120,left=120,bottom=120,right=120]"
     },
     children: files.map((file) => ({

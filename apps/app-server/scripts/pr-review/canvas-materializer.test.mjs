@@ -108,6 +108,37 @@ const firstRelationShape = first.shapes.find(
 assert.ok(firstRelationShape);
 assert.ok(firstRelationShape.values.rawShape.props.routePoints.length >= 2);
 
+const reviewOrderRelation = relation({
+  relationType: "review_order",
+  source: "fallback",
+  reason: "Recommended review order"
+});
+const reviewOrderOnly = await buildPrReviewCanvasMaterialization({
+  ...firstInput,
+  relations: [reviewOrderRelation]
+});
+const reviewOrderWithSemanticSupport = await buildPrReviewCanvasMaterialization({
+  ...firstInput,
+  relations: [reviewOrderRelation, relation()]
+});
+const getFileGeometry = (result, roomFileId) => {
+  const shape = result.shapes.find(
+    (candidate) => candidate.id === getPrReviewFileShapeId(roomFileId)
+  );
+  return [shape.values.x, shape.values.y];
+};
+
+assert.deepEqual(
+  getFileGeometry(reviewOrderWithSemanticSupport, "room-file-1"),
+  getFileGeometry(reviewOrderOnly, "room-file-1"),
+  "semantic relations must not change the primary review-order layout"
+);
+assert.deepEqual(
+  getFileGeometry(reviewOrderWithSemanticSupport, "room-file-2"),
+  getFileGeometry(reviewOrderOnly, "room-file-2"),
+  "semantic relations must not change the primary review-order layout"
+);
+
 const movedRawShape = {
   ...firstFileShape.values.rawShape,
   x: 920,
