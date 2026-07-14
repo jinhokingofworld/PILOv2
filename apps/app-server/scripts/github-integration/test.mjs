@@ -165,6 +165,7 @@ await import("./issue-assignees.test.mjs");
 await import("./callback-redirect.test.mjs");
 await import("./source-read.test.mjs");
 await import("./project-v2.test.mjs");
+await import("./personal-project-v2-discovery-auth.test.mjs");
 await import("./project-v2-selection.service.test.mjs");
 await import("./project-v2-selection-contract.test.mjs");
 await import("./project-v2-selection-full-sync.test.mjs");

@@ -7,6 +7,7 @@ import {
   Rectangle2d,
   ShapeUtil,
   T,
+  useEditor,
   type TLBaseShape,
   type TLShape
 } from "tldraw";
@@ -51,6 +52,7 @@ export class SqlErdFrameShapeUtil extends ShapeUtil<SqlErdFrameShape> {
 }
 
 function SqlErdFrameBox({ shape }: { shape: SqlErdFrameShape }) {
+  const editor = useEditor();
   const [title, setTitle] = useState(shape.props.title);
   useEffect(() => setTitle(shape.props.title), [shape.props.title]);
   function emit(patch: SqlErdFrameChangeEventDetail["patch"]) {
@@ -63,6 +65,11 @@ function SqlErdFrameBox({ shape }: { shape: SqlErdFrameShape }) {
     event.stopPropagation();
   }
 
+  function handleLockToggle() {
+    editor.select(shape.id);
+    emit({ isLocked: !shape.props.isLocked });
+  }
+
   return <HTMLContainer style={{ height: shape.props.h, pointerEvents: "none", width: shape.props.w }}>
     <div className={`h-full w-full rounded-md border-2 ${frameClasses[shape.props.color]}`} data-sqltoerd-frame-id={shape.props.frameId}>
       <div className="flex items-center gap-1 px-3 py-2" style={{ pointerEvents: "auto" }}>
@@ -70,7 +77,7 @@ function SqlErdFrameBox({ shape }: { shape: SqlErdFrameShape }) {
         <select aria-label="프레임 색상" className="rounded border bg-white/80 text-xs" onChange={(event) => emit({ color: event.target.value as SqltoerdCanvasFrameColor })} onPointerDown={stopCanvasPointerHandling} value={shape.props.color}>
           <option value="slate">회색</option><option value="blue">파랑</option><option value="green">초록</option><option value="amber">노랑</option><option value="rose">분홍</option>
         </select>
-        <button aria-label={shape.props.isLocked ? "프레임 잠금 해제" : "프레임 잠금"} className="rounded p-1 hover:bg-white/60" onClick={() => emit({ isLocked: !shape.props.isLocked })} onPointerDown={stopCanvasPointerHandling} type="button">
+        <button aria-label={shape.props.isLocked ? "프레임 잠금 해제" : "프레임 잠금"} className="rounded p-1 hover:bg-white/60" onClick={handleLockToggle} onPointerDown={stopCanvasPointerHandling} type="button">
           {shape.props.isLocked ? <Lock aria-hidden="true" className="size-3.5" /> : <LockOpen aria-hidden="true" className="size-3.5" />}
         </button>
         {!shape.props.isLocked ? (

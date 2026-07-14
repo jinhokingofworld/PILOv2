@@ -82,6 +82,7 @@ type PrReviewApiClient = ReturnType<typeof createPrReviewApiClient>;
 
 type PrReviewCanvasShellProps = {
   apiClient: PrReviewApiClient;
+  backLabel: string;
   onBackToSelection: () => void;
   onGoToGithub: () => void;
   onReviewSessionCreated: (session: PrReviewSession) => void;
@@ -292,6 +293,7 @@ function getMergeDisabledReason(input: {
 
 export function PrReviewCanvasShell({
   apiClient,
+  backLabel,
   onBackToSelection,
   onGoToGithub,
   onReviewSessionCreated,
@@ -837,7 +839,7 @@ export function PrReviewCanvasShell({
       <header className="flex h-16 shrink-0 items-center gap-3 overflow-x-auto border-b border-slate-200 bg-white px-4">
         <Button onClick={onBackToSelection} type="button" variant="outline">
           <ArrowLeft className="size-4" />
-          PR 선택으로 돌아가기
+          {backLabel}
         </Button>
         <div className="flex h-10 min-w-0 items-center gap-2 rounded-lg border border-slate-200 px-3 text-sm font-medium">
           <GitBranch className="size-4 shrink-0 text-slate-500" />
@@ -887,7 +889,7 @@ export function PrReviewCanvasShell({
                     type="button"
                   >
                     <GitMerge className="size-4" />
-                    GitHub에 전체 적용
+                    Conflict 해결안 적용
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>
@@ -960,6 +962,7 @@ export function PrReviewCanvasShell({
             (conflictAnalysisStatus === "error" ||
               conflictAnalysisStatus === "stale") ? (
             <ConflictAnalysisFailureState
+              backLabel={backLabel}
               message={conflictAnalysisError}
               onBack={onBackToSelection}
               onRetry={() => void loadCanvasData()}
@@ -1065,7 +1068,7 @@ export function PrReviewCanvasShell({
             <AlertDialogMedia className="bg-amber-50 text-amber-700">
               <GitMerge className="size-5" />
             </AlertDialogMedia>
-            <AlertDialogTitle>Conflict 해결안 전체 적용</AlertDialogTitle>
+            <AlertDialogTitle>Conflict 해결안 적용</AlertDialogTitle>
             <AlertDialogDescription>
               준비한 모든 파일을 PR head와 base를 부모로 갖는 merge commit
               하나로 적용합니다. 일부 파일만 적용되지는 않습니다.
@@ -1197,10 +1200,10 @@ export function PrReviewCanvasShell({
                     <GitMerge className="size-4" />
                   )}
                   {conflictApplyStatus === "applying"
-                    ? "전체 적용 중"
+                    ? "해결안 적용 중"
                     : conflictApplyRequiresGithubReconnect
-                      ? "GitHub에 다시 적용"
-                      : "GitHub에 전체 적용"}
+                      ? "Conflict 해결안 다시 적용"
+                      : "Conflict 해결안 적용"}
                 </AlertDialogAction>
               </>
             )}
@@ -1316,11 +1319,13 @@ function ConflictAnalysisNotice({
 }
 
 function ConflictAnalysisFailureState({
+  backLabel,
   message,
   onBack,
   onRetry,
   stale
 }: {
+  backLabel: string;
   message: string | null;
   onBack: () => void;
   onRetry: () => void;
@@ -1342,7 +1347,7 @@ function ConflictAnalysisFailureState({
           {stale ? (
             <Button onClick={onBack} type="button" variant="outline">
               <ArrowLeft className="size-4" />
-              PR 목록으로 돌아가기
+              {backLabel}
             </Button>
           ) : (
             <Button onClick={onRetry} type="button" variant="outline">

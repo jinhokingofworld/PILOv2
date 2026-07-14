@@ -3,9 +3,11 @@
 import { useEffect, useState } from "react";
 import { useValue } from "@tldraw/state-react";
 import {
+  Eraser,
   Maximize,
   MousePointer2,
   Palette,
+  Pencil,
   Square,
   StickyNote,
   Type
@@ -16,28 +18,37 @@ import { isSqlErdFrameShape } from "@/features/sql-erd/shapes/sql-erd-frame-shap
 import { isSqlErdTextShape } from "@/features/sql-erd/shapes/sql-erd-text-shape";
 import type { SqltoerdCanvasFrameColor } from "@/features/sql-erd/types";
 
-export type SqlErdCanvasPlacementTool = "note" | "frame" | "text" | null;
+export type SqlErdCanvasTool =
+  | "note"
+  | "frame"
+  | "text"
+  | "draw"
+  | "eraser"
+  | null;
 
 type SqlErdCanvasToolbarProps = {
   editor: Editor;
   isFrameLimitReached: boolean;
   isNoteLimitReached: boolean;
+  isStrokeLimitReached: boolean;
   isTextLimitReached: boolean;
   nextFrameColor: SqltoerdCanvasFrameColor;
+  nextStrokeColor: SqltoerdCanvasFrameColor;
   nextTextColor: SqltoerdCanvasFrameColor;
-  placementTool: SqlErdCanvasPlacementTool;
+  tool: SqlErdCanvasTool;
   onFit: () => void;
   onFrameColorChange: (
     frameId: string,
     color: SqltoerdCanvasFrameColor
   ) => void;
   onSelectTool: () => void;
-  onStartPlacement: (tool: Exclude<SqlErdCanvasPlacementTool, null>) => void;
+  onStartTool: (tool: Exclude<SqlErdCanvasTool, null>) => void;
   onTextColorChange: (
     textId: string,
     color: SqltoerdCanvasFrameColor
   ) => void;
   onNextFrameColorChange: (color: SqltoerdCanvasFrameColor) => void;
+  onNextStrokeColorChange: (color: SqltoerdCanvasFrameColor) => void;
   onNextTextColorChange: (color: SqltoerdCanvasFrameColor) => void;
 };
 
@@ -61,16 +72,19 @@ export function SqlErdCanvasToolbar({
   editor,
   isFrameLimitReached,
   isNoteLimitReached,
+  isStrokeLimitReached,
   isTextLimitReached,
   nextFrameColor,
+  nextStrokeColor,
   nextTextColor,
-  placementTool,
+  tool,
   onFit,
   onFrameColorChange,
   onSelectTool,
-  onStartPlacement,
+  onStartTool,
   onTextColorChange,
   onNextFrameColorChange,
+  onNextStrokeColorChange,
   onNextTextColorChange
 }: SqlErdCanvasToolbarProps) {
   const [isColorMenuOpen, setIsColorMenuOpen] = useState(false);
@@ -81,18 +95,24 @@ export function SqlErdCanvasToolbar({
   );
   const selectedFrame = isSqlErdFrameShape(selectedShape) ? selectedShape : null;
   const selectedText = isSqlErdTextShape(selectedShape) ? selectedShape : null;
-  const canSetColor = Boolean(
-    selectedFrame || selectedText || placementTool === "frame" || placementTool === "text"
-  );
-  const activeColor = selectedFrame?.props.color ?? selectedText?.props.color ??
-    (placementTool === "frame" ? nextFrameColor : nextTextColor);
-  const colorTargetLabel = selectedFrame
-    ? "프레임 색상"
-    : selectedText
-      ? "텍스트 색상"
-      : placementTool === "frame"
-        ? "새 프레임 색상"
-        : "새 텍스트 색상";
+  const hasToolColor = tool === "frame" || tool === "text" || tool === "draw";
+  const canSetColor = hasToolColor || Boolean(selectedFrame || selectedText);
+  const activeColor = tool === "frame"
+    ? nextFrameColor
+    : tool === "text"
+      ? nextTextColor
+      : tool === "draw"
+        ? nextStrokeColor
+        : selectedFrame?.props.color ?? selectedText?.props.color ?? "slate";
+  const colorTargetLabel = tool === "frame"
+    ? "새 프레임 색상"
+    : tool === "text"
+      ? "새 텍스트 색상"
+      : tool === "draw"
+        ? "펜 색상"
+        : selectedFrame
+          ? "프레임 색상"
+          : "텍스트 색상";
 
   useEffect(() => {
     if (!canSetColor) {
@@ -101,14 +121,16 @@ export function SqlErdCanvasToolbar({
   }, [canSetColor]);
 
   function applyColor(color: SqltoerdCanvasFrameColor) {
-    if (selectedFrame) {
+    if (tool === "frame") {
+      onNextFrameColorChange(color);
+    } else if (tool === "text") {
+      onNextTextColorChange(color);
+    } else if (tool === "draw") {
+      onNextStrokeColorChange(color);
+    } else if (selectedFrame) {
       onFrameColorChange(selectedFrame.props.frameId, color);
     } else if (selectedText) {
       onTextColorChange(selectedText.props.textId, color);
-    } else if (placementTool === "frame") {
-      onNextFrameColorChange(color);
-    } else if (placementTool === "text") {
-      onNextTextColorChange(color);
     } else {
       return;
     }
@@ -124,7 +146,7 @@ export function SqlErdCanvasToolbar({
     >
       <button
         aria-label="선택/드래그"
-        className={`${toolbarButtonClassName} ${placementTool === null ? activeToolbarButtonClassName : ""}`}
+        className={`${toolbarButtonClassName} ${tool === null ? activeToolbarButtonClassName : ""}`}
         onClick={onSelectTool}
         title="선택/드래그"
         type="button"
@@ -133,9 +155,9 @@ export function SqlErdCanvasToolbar({
       </button>
       <button
         aria-label="메모 추가"
-        className={`${toolbarButtonClassName} ${placementTool === "note" ? activeToolbarButtonClassName : ""}`}
+        className={`${toolbarButtonClassName} ${tool === "note" ? activeToolbarButtonClassName : ""}`}
         disabled={isNoteLimitReached}
-        onClick={() => onStartPlacement("note")}
+        onClick={() => onStartTool("note")}
         title="메모 추가"
         type="button"
       >
@@ -143,9 +165,9 @@ export function SqlErdCanvasToolbar({
       </button>
       <button
         aria-label="프레임 추가"
-        className={`${toolbarButtonClassName} ${placementTool === "frame" ? activeToolbarButtonClassName : ""}`}
+        className={`${toolbarButtonClassName} ${tool === "frame" ? activeToolbarButtonClassName : ""}`}
         disabled={isFrameLimitReached}
-        onClick={() => onStartPlacement("frame")}
+        onClick={() => onStartTool("frame")}
         title="프레임 추가"
         type="button"
       >
@@ -153,13 +175,32 @@ export function SqlErdCanvasToolbar({
       </button>
       <button
         aria-label="텍스트 추가"
-        className={`${toolbarButtonClassName} ${placementTool === "text" ? activeToolbarButtonClassName : ""}`}
+        className={`${toolbarButtonClassName} ${tool === "text" ? activeToolbarButtonClassName : ""}`}
         disabled={isTextLimitReached}
-        onClick={() => onStartPlacement("text")}
+        onClick={() => onStartTool("text")}
         title="텍스트 추가"
         type="button"
       >
         <Type aria-hidden="true" className="size-5" />
+      </button>
+      <button
+        aria-label="펜"
+        className={`${toolbarButtonClassName} ${tool === "draw" ? activeToolbarButtonClassName : ""}`}
+        disabled={isStrokeLimitReached}
+        onClick={() => onStartTool("draw")}
+        title="펜"
+        type="button"
+      >
+        <Pencil aria-hidden="true" className="size-5" />
+      </button>
+      <button
+        aria-label="지우개"
+        className={`${toolbarButtonClassName} ${tool === "eraser" ? activeToolbarButtonClassName : ""}`}
+        onClick={() => onStartTool("eraser")}
+        title="지우개"
+        type="button"
+      >
+        <Eraser aria-hidden="true" className="size-5" />
       </button>
       <div aria-hidden="true" className="mx-1 h-8 w-px bg-slate-200" />
       <div className="relative">
@@ -194,10 +235,7 @@ export function SqlErdCanvasToolbar({
                 role="menuitem"
                 type="button"
               >
-                <span
-                  aria-hidden="true"
-                  className={`size-4 rounded-full ${swatchClassName}`}
-                />
+                <span aria-hidden="true" className={`size-4 rounded-full ${swatchClassName}`} />
               </button>
             ))}
           </div>

@@ -719,6 +719,7 @@ const [
   frameShape,
   noteShape,
   textShape,
+  strokeShape,
   annotationToolbar,
   ddlParserUtils,
   sqlEditorDialectUtils,
@@ -758,6 +759,7 @@ const [
     readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-frame-shape.tsx"),
     readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-note-shape.tsx"),
     readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-text-shape.tsx"),
+    readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-stroke-shape.tsx"),
     readSqlErdFile("../../src/features/sql-erd/components/sql-erd-canvas-toolbar.tsx"),
     readSqlErdFile("../../src/features/sql-erd/utils/ddl-parser.ts"),
     readSqlErdFile("../../src/features/sql-erd/utils/sql-editor-dialect.ts"),
@@ -3410,6 +3412,67 @@ assert.deepEqual(
   preservedNewerLayoutState.lastSuccessfulSnapshot.layoutJson,
   newerLayout
 );
+
+const layoutRequestBeforeTextOrStroke = locallyChangedLayout;
+const layoutWithTextAddedDuringAutosave = modelRuntime.applySqltoerdLayoutPatch(
+  layoutRequestBeforeTextOrStroke,
+  {
+    textsToAdd: [{
+      id: "text.autosave-race",
+      x: 24,
+      y: 48,
+      width: 240,
+      height: 72,
+      text: "Keep this text",
+      color: "blue"
+    }]
+  }
+);
+const layoutWithStrokeAddedDuringAutosave = modelRuntime.applySqltoerdLayoutPatch(
+  layoutRequestBeforeTextOrStroke,
+  {
+    strokesToAdd: [{
+      id: "stroke.autosave-race",
+      points: [{ x: 24, y: 48 }, { x: 48, y: 72 }],
+      color: "blue",
+      size: 4
+    }]
+  }
+);
+
+for (const layoutChangedDuringAutosave of [
+  layoutWithTextAddedDuringAutosave,
+  layoutWithStrokeAddedDuringAutosave
+]) {
+  assert.equal(
+    modelRuntime.areSqltoerdLayoutsEqual(
+      layoutChangedDuringAutosave,
+      layoutRequestBeforeTextOrStroke
+    ),
+    false
+  );
+
+  const stateWithPendingAnnotationChange = {
+    ...pendingLayoutState,
+    lastSuccessfulSnapshot: {
+      ...pendingLayoutSnapshot,
+      layoutJson: layoutChangedDuringAutosave
+    }
+  };
+  const stateAfterFirstAutosaveResponse = sqlEditStateRuntime.reduceSqlErdEditState(
+    stateWithPendingAnnotationChange,
+    {
+      type: "layout_saved",
+      requestLayoutJson: layoutRequestBeforeTextOrStroke,
+      snapshot: savedLayoutSnapshot
+    }
+  );
+
+  assert.deepEqual(
+    stateAfterFirstAutosaveResponse.lastSuccessfulSnapshot.layoutJson,
+    layoutChangedDuringAutosave
+  );
+}
 
 const monotonicLayoutState = {
   ...newerLayoutState,
@@ -6451,15 +6514,24 @@ assert.doesNotMatch(
 );
 assert.doesNotMatch(annotationShape, /Cardinality/);
 assert.match(frameShape, /\{!shape\.props\.isLocked \? \(/);
+assert.match(frameShape, /editor\.select\(shape\.id\)/);
 assert.doesNotMatch(noteShape, /SQLTOERD_NOTE_DELETE_EVENT/);
+assert.match(noteShape, /useEditor/);
+assert.match(noteShape, /data-sqltoerd-note-id/);
 assert.match(textShape, /SQLTOERD_TEXT_SHAPE_TYPE/);
 assert.match(textShape, /SQLTOERD_TEXT_CHANGE_EVENT/);
 assert.match(textShape, /maxLength=\{2000\}/);
+assert.match(textShape, /useEditor/);
+assert.match(strokeShape, /SQLTOERD_STROKE_SHAPE_TYPE/);
+assert.match(strokeShape, /stroke-linecap="round"/);
+assert.match(strokeShape, /canResize\(\)/);
 assert.match(annotationToolbar, /export function SqlErdCanvasToolbar/);
 assert.match(annotationToolbar, /aria-label="선택\/드래그"/);
 assert.match(annotationToolbar, /aria-label="메모 추가"/);
 assert.match(annotationToolbar, /aria-label="프레임 추가"/);
 assert.match(annotationToolbar, /aria-label="텍스트 추가"/);
+assert.match(annotationToolbar, /aria-label="펜"/);
+assert.match(annotationToolbar, /aria-label="지우개"/);
 assert.match(annotationToolbar, /aria-label="화면 맞춤"/);
 assert.match(annotationToolbar, /bottom-4 left-1\/2/);
 assert.match(annotationToolbar, /function applyColor/);
@@ -6470,10 +6542,16 @@ assert.match(
   /SQLTOERD_FRAME_CHANGE_EVENT[\s\S]*?SqlErdCanvasToolbar/
 );
 assert.match(canvasSurface, /pendingPlacementToolRef/);
+assert.match(canvasSurface, /event\.key !== "Escape"[\s\S]*?pendingPlacementToolRef\.current = null/);
 assert.match(canvasSurface, /editor\.screenToPage/);
 assert.match(canvasSurface, /notesToAdd/);
 assert.match(canvasSurface, /framesToAdd/);
 assert.match(canvasSurface, /textsToAdd/);
+assert.match(canvasSurface, /strokesToAdd/);
+assert.match(canvasSurface, /deleteStrokeIds/);
+assert.match(canvasSurface, /isSqlErdStrokeShape/);
+assert.match(canvasSurface, /isPointNearSqlErdStroke/);
+assert.match(canvasSurface, /getCurrentPageShapes\(\)/);
 assert.match(canvasSurface, /onDoubleClickCapture/);
 assert.match(canvasSurface, /onFit=\{handleFitCanvas\}/);
 assert.match(
@@ -6534,7 +6612,7 @@ assert.match(apiClient, /credentials: "same-origin"/);
 assert.doesNotMatch(apiSpec, /^- Sticky note$/m);
 assert.doesNotMatch(apiSpec, /^- Group box$/m);
 assert.match(apiSpec, /`notes`는 Sticky note, `frames`는 Group box/);
-assert.match(apiSpec, /`links`, `notes`, `frames`, `texts` 전체에서 중복될 수 없다/);
+assert.match(apiSpec, /`links`, `notes`, `frames`, `texts`, `strokes` 전체에서 중복될 수 없다/);
 
 assert.equal(typeof modelRuntime.applySqltoerdLayoutPatch, "function");
 const patchedLayout = modelRuntime.applySqltoerdLayoutPatch(
@@ -6614,6 +6692,29 @@ assert.deepEqual(
   modelRuntime.applySqltoerdLayoutPatch(layoutWithCreatedText, {
     deleteTextIds: ["text.billing"]
   }).annotations.texts,
+  []
+);
+const layoutWithCreatedStroke = modelRuntime.applySqltoerdLayoutPatch(
+  layoutWithCreatedText,
+  {
+    strokesToAdd: [
+      {
+        id: "stroke.billing",
+        points: [
+          { x: 24, y: 48 },
+          { x: 48, y: 72 }
+        ],
+        color: "blue",
+        size: 4
+      }
+    ]
+  }
+);
+assert.equal(layoutWithCreatedStroke.annotations.strokes[0].color, "blue");
+assert.deepEqual(
+  modelRuntime.applySqltoerdLayoutPatch(layoutWithCreatedStroke, {
+    deleteStrokeIds: ["stroke.billing"]
+  }).annotations.strokes,
   []
 );
 assert.equal(

@@ -407,6 +407,19 @@ function canvasText(id, overrides = {}) {
   };
 }
 
+function canvasStroke(id, overrides = {}) {
+  return {
+    id,
+    points: [
+      { x: 120, y: 160 },
+      { x: 180, y: 220 }
+    ],
+    color: "blue",
+    size: 4,
+    ...overrides
+  };
+}
+
 function oversizedText(size) {
   return "x".repeat(size);
 }
@@ -1625,7 +1638,8 @@ await assertRouteBodyLimit(
   ], {
     notes: [canvasNote("note_billing")],
     frames: [canvasFrame("frame_billing")],
-    texts: [canvasText("text_billing")]
+    texts: [canvasText("text_billing")],
+    strokes: [canvasStroke("stroke_billing")]
   });
   const normalizedLegacy = validateCreateSqlErdSessionRequest({
     sourceFormat: "sql",
@@ -1642,6 +1656,34 @@ await assertRouteBodyLimit(
   assert.deepEqual(normalizedWithAnnotations.layoutJson.annotations, validAnnotations);
 
   const invalidCases = [
+    {
+      layout: layoutJson({
+        annotations: annotations([], {
+          strokes: Array.from({ length: 101 }, (_, index) =>
+            canvasStroke(`stroke_${index}`)
+          )
+        })
+      }),
+      message: /layoutJson\.annotations\.strokes length limit exceeded/
+    },
+    {
+      layout: layoutJson({
+        annotations: annotations([], {
+          strokes: [canvasStroke("stroke_invalid_color", { color: "purple" })]
+        })
+      }),
+      message: /layoutJson\.annotations\.strokes\[0\]\.color is invalid/
+    },
+    {
+      layout: layoutJson({
+        annotations: annotations([], {
+          strokes: [canvasStroke("stroke_too_many_points", {
+            points: Array.from({ length: 501 }, (_, index) => ({ x: index, y: index }))
+          })]
+        })
+      }),
+      message: /layoutJson\.annotations\.strokes\[0\]\.points length limit exceeded/
+    },
     {
       layout: layoutJson({
         annotations: annotations([], {

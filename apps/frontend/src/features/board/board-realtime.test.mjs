@@ -75,18 +75,24 @@ const room = {
 };
 const socket = createFakeSocket();
 let reloadCalls = 0;
+let reloadActiveSourceCalls = 0;
 const lifecycle = createBoardRealtimeLifecycle({
+  reloadActiveSource() {
+    reloadActiveSourceCalls += 1;
+  },
   reloadBoard() {
     reloadCalls += 1;
   },
   room,
   socket,
+  workspaceId: room.workspaceId,
 });
 
 lifecycle.connect();
 assert.equal(socket.connectCalls, 1);
 assert.deepEqual(socket.emits[0], ["board:join", room]);
 assert.equal(reloadCalls, 1);
+assert.equal(reloadActiveSourceCalls, 1);
 
 socket.trigger("board:invalidated", {
   ...room,
@@ -101,8 +107,22 @@ socket.trigger("board:invalidated", {
 });
 assert.equal(reloadCalls, 2);
 
+socket.trigger("board:source:updated", {
+  workspaceId: room.workspaceId,
+  boardId: "44",
+  changedAt: "2026-07-12T00:00:00.000Z",
+});
+assert.equal(reloadCalls, 2);
+assert.equal(reloadActiveSourceCalls, 2);
+
+socket.trigger("connect");
+assert.deepEqual(socket.emits.at(-2), ["board:join", room]);
+assert.deepEqual(socket.emits.at(-1), ["board:source:join", { workspaceId: room.workspaceId }]);
+assert.equal(reloadActiveSourceCalls, 3);
+
 lifecycle.cleanup();
-assert.deepEqual(socket.emits.at(-1), ["board:leave", room]);
+assert.deepEqual(socket.emits.at(-2), ["board:leave", room]);
+assert.deepEqual(socket.emits.at(-1), ["board:source:leave", { workspaceId: room.workspaceId }]);
 assert.equal(socket.removeAllListenersCalls, 1);
 assert.equal(socket.disconnectCalls, 1);
 assert.equal(socket.listenerCount(), 0);

@@ -6,6 +6,7 @@ import { AlertTriangle, ArrowLeft, RefreshCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 type PrReviewCanvasErrorBoundaryProps = {
+  backLabel: string;
   children: ReactNode;
   onBackToSelection: () => void;
 };
@@ -47,7 +48,8 @@ export class PrReviewCanvasErrorBoundary extends Component<
           </div>
           <h1 className="text-xl font-semibold">리뷰 Canvas를 열지 못했습니다</h1>
           <p className="mt-2 text-sm leading-6 text-slate-600">
-            리뷰 데이터는 유지되어 있습니다. 다시 시도하거나 PR 목록으로
+            리뷰 데이터는 유지되어 있습니다. 다시 시도하거나{
+            ` ${this.props.backLabel} `}
             돌아가주세요.
           </p>
           <div className="mt-6 flex flex-wrap justify-end gap-2">
@@ -57,7 +59,7 @@ export class PrReviewCanvasErrorBoundary extends Component<
               variant="outline"
             >
               <ArrowLeft className="size-4" />
-              PR 목록으로
+              {this.props.backLabel}
             </Button>
             <Button onClick={this.handleRetry} type="button">
               <RefreshCcw className="size-4" />

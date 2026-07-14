@@ -39,7 +39,6 @@ export type GithubConnectLayoutProps = {
   projects: GithubProjectV2[];
   projectsTotal: number;
   selectedProjectV2Id: string;
-  selectedProjectV2Ids: ReadonlySet<string>;
   selectedProject: GithubProjectV2 | undefined;
   pullRequests: GithubPullRequest[];
   pullRequestsTotal: number;
@@ -51,6 +50,7 @@ export type GithubConnectLayoutProps = {
   isInstallationDeleteRequested: boolean;
   isSyncing: boolean;
   isSavingProjectV2Selections: boolean;
+  isWorkspaceOwner: boolean;
   redirectAction: "oauth" | "installation" | "project_oauth" | null;
   syncRuns: GithubSyncRun[];
   syncRunsTotal: number;
@@ -68,7 +68,6 @@ export type GithubConnectLayoutProps = {
   onRepositoryPageChange: (page: number) => void;
   onSelectRepository: (id: string) => void;
   onSelectProjectV2: (id: string) => void;
-  onToggleProjectV2Selection: (id: string) => void;
   onSaveProjectV2Selections: () => void;
   onSyncTargetChange: (target: GithubSyncTarget) => void;
   onStartSync: () => void;
@@ -95,7 +94,6 @@ export function GithubConnectLayout({
   projects,
   projectsTotal,
   selectedProjectV2Id,
-  selectedProjectV2Ids,
   selectedProject,
   pullRequests,
   pullRequestsTotal,
@@ -107,6 +105,7 @@ export function GithubConnectLayout({
   isInstallationDeleteRequested,
   isSyncing,
   isSavingProjectV2Selections,
+  isWorkspaceOwner,
   redirectAction,
   syncRuns,
   syncRunsTotal,
@@ -124,7 +123,6 @@ export function GithubConnectLayout({
   onRepositoryPageChange,
   onSelectRepository,
   onSelectProjectV2,
-  onToggleProjectV2Selection,
   onSaveProjectV2Selections,
   onSyncTargetChange,
   onStartSync
@@ -192,7 +190,6 @@ export function GithubConnectLayout({
             onRepositoryQueryChange={onRepositoryQueryChange}
             onRepositoryPageChange={onRepositoryPageChange}
             onSelectProjectV2={onSelectProjectV2}
-            onToggleProjectV2Selection={onToggleProjectV2Selection}
             onSaveProjectV2Selections={onSaveProjectV2Selections}
             onSelectRepository={onSelectRepository}
             projects={projects}
@@ -205,8 +202,8 @@ export function GithubConnectLayout({
             repositoryPage={repositoryPage}
             selectedRepository={selectedRepository}
             selectedProjectV2Id={selectedProjectV2Id}
-            selectedProjectV2Ids={selectedProjectV2Ids}
             isSavingProjectV2Selections={isSavingProjectV2Selections}
+            isWorkspaceOwner={isWorkspaceOwner}
             selectedRepositoryId={selectedRepositoryId}
             isPullRequestsLoading={isPullRequestsLoading}
           />

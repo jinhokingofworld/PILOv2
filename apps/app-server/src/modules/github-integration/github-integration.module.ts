@@ -71,6 +71,7 @@ import { GithubWebhookService } from "./github-webhook.service";
   ],
   exports: [
     GithubIntegrationService,
+    GithubProjectV2Service,
     GithubOAuthConnectionService,
     GithubIssueWriteService,
     GithubProjectV2WriteService

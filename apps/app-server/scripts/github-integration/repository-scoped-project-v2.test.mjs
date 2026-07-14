@@ -150,6 +150,12 @@ function selectionDatabase({ repository = { id: repositoryId }, links = ["555555
   assert.match(executor, /listRepositoryProjectV2s/);
   assert.match(executor, /replaceGithubRepositoryProjectV2Links/);
   assert.match(executor, /links\.repository_id = \$2/);
+  const repositoryLinkInsert = executor.match(
+    /INSERT INTO github_project_v2_repositories \([\s\S]*?\n\s*\);\n\s*}\n\s*\n\s*private async upsertGithubProjectV2/
+  )?.[0];
+  assert.ok(repositoryLinkInsert, "Repository ProjectV2 links must be inserted after discovery");
+  assert.match(repositoryLinkInsert, /SELECT project_v2_id, \$1[\s\S]*?unnest\(\$2::uuid\[\]\)/);
+  assert.match(repositoryLinkInsert, /\[repositoryId, uniqueProjectV2Ids\]/);
   assert.doesNotMatch(executor, /replaceGithubProjectV2RepositoryLinks/);
   assert.match(client, /repository\(owner: \$owner, name: \$name\)/);
   assert.doesNotMatch(source, /DELETE FROM github_projects_v2|DELETE FROM github_project_v2_fields|DELETE FROM github_project_v2_items|DELETE FROM github_issues|DELETE FROM github_pull_requests|DELETE FROM boards/i);
@@ -163,6 +169,25 @@ function selectionDatabase({ repository = { id: repositoryId }, links = ["555555
     source,
     /const repositoryId = this\.readUuid\(query\.repositoryId, "repositoryId"\)/,
     "ProjectV2 listing must require repositoryId"
+  );
+  assert.match(
+    source,
+    /SELECT COUNT\(\*\)::int AS total FROM github_projects_v2 gp WHERE/,
+    "The ProjectV2 count query must expose the same gp alias as the list query"
+  );
+  const listFilterBuilder = source.match(
+    /private buildGithubProjectV2Filters\([\s\S]*?\n  }\n\n  private githubProjectV2SelectSql/
+  )?.[0];
+  assert.ok(listFilterBuilder, "ProjectV2 list filters must remain locally testable");
+  assert.match(
+    listFilterBuilder,
+    /gpr\.project_v2_id = gp\.id/,
+    "The repository-link filter must correlate with the outer ProjectV2 row"
+  );
+  assert.match(
+    listFilterBuilder,
+    /gps\.installation_id = gp\.installation_id[\s\S]{0,120}gps\.project_v2_id = gp\.id/,
+    "The selection filter must correlate with the outer ProjectV2 row"
   );
 }
 

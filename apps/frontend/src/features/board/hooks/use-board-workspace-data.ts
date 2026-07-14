@@ -13,6 +13,7 @@ import type {
   BoardIssueCardPayload,
   BoardPaginatedPayload,
   BoardPayload,
+  ActiveBoardSourcePayload,
   CreateBoardInput,
   CreateBoardIssueCommand,
   ListBoardIssuesQuery,
@@ -26,6 +27,7 @@ type BoardWorkspaceCatalog = {
   projects: BoardGithubProjectV2Payload[];
   boards: BoardPayload[];
   boardsMeta: BoardPaginatedPayload<BoardPayload>["meta"] | null;
+  activeSource: ActiveBoardSourcePayload | null;
 };
 
 type BoardWorkspaceBoardState = {
@@ -49,7 +51,8 @@ const emptyCatalog: BoardWorkspaceCatalog = {
   repositories: [],
   projects: [],
   boards: [],
-  boardsMeta: null
+  boardsMeta: null,
+  activeSource: null
 };
 
 const emptyBoardState: BoardWorkspaceBoardState = {
@@ -99,14 +102,15 @@ export function useBoardWorkspaceData({
       return emptyCatalog;
     }
 
-    const [repositories, boards] = await Promise.all([
+    const [repositories, boards, activeSource] = await Promise.all([
       boardClient.listGithubRepositories(normalizedWorkspaceId, {
         includeArchived: false,
         limit: 100
       }),
       boardClient.listBoards(normalizedWorkspaceId, {
         limit: 50
-      })
+      }),
+      boardClient.getActiveBoardSource(normalizedWorkspaceId)
     ]);
     const selectedRepositoryId = selectBoardProjectRepositoryId(
       repositories,
@@ -124,7 +128,8 @@ export function useBoardWorkspaceData({
       repositories,
       projects,
       boards: boards.data,
-      boardsMeta: boards.meta
+      boardsMeta: boards.meta,
+      activeSource
     };
   }, [
     boardClient,

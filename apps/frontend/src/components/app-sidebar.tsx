@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { MouseEvent } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   ChevronsUpDown,
   ChevronRight,
@@ -84,6 +84,7 @@ export function AppSidebar({
 }: AppSidebarProps) {
   const { isMobile, setOpenMobile } = useSidebar();
   const router = useRouter();
+  const pathname = usePathname();
   const authSession = useAuthSession();
   const meetingRuntime = useMeetingRuntime();
   const [activeWorkspaceIndex, setActiveWorkspaceIndex] = useState(0);
@@ -159,8 +160,14 @@ export function AppSidebar({
       ...currentOpenMenuIds,
       [selectedItemId]: true
     }));
-    setActiveSubItemHref(selectedItem?.href);
-  }, [selectedItem?.href, selectedItemId]);
+    const matchingSubItem = [...(selectedItem?.items ?? [])]
+      .sort((first, second) => second.href.length - first.href.length)
+      .find(
+        (subItem) =>
+          pathname === subItem.href || pathname.startsWith(`${subItem.href}/`)
+      );
+    setActiveSubItemHref(matchingSubItem?.href ?? selectedItem?.href);
+  }, [pathname, selectedItem?.href, selectedItem?.items, selectedItemId]);
 
   const handleSelectItem = (
     itemId: string,

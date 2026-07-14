@@ -40,6 +40,7 @@ export interface GithubSyncRepositoryContextRow extends QueryResultRow {
   owner_login: string;
   name: string;
   full_name: string;
+  raw?: unknown;
 }
 
 export interface GithubSyncProjectV2ContextRow extends QueryResultRow {
@@ -875,12 +876,12 @@ export class GithubSyncExecutorService {
           project_v2_id,
           repository_id
         )
-        SELECT project_v2_id, $2
-        FROM unnest($3::uuid[]) AS project_v2_id
+        SELECT project_v2_id, $1
+        FROM unnest($2::uuid[]) AS project_v2_id
         ON CONFLICT (project_v2_id, repository_id)
         DO NOTHING
       `,
-      [workspaceId, repositoryId, uniqueProjectV2Ids]
+      [repositoryId, uniqueProjectV2Ids]
     );
   }
 
@@ -1879,9 +1880,7 @@ export class GithubSyncExecutorService {
   private getProjectV2UserAccessToken(
     context: GithubSyncRunContext
   ): string | undefined {
-    return context.installation.account_type === "User"
-      ? context.githubUserAccessToken ?? undefined
-      : undefined;
+    return context.githubUserAccessToken ?? undefined;
   }
 
   private async reportGithubSyncProgress(

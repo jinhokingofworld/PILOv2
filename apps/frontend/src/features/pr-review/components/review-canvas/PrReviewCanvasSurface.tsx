@@ -77,11 +77,9 @@ import {
   type PrReviewCanvasFileShapeSnapshot
 } from "@/features/pr-review/components/review-canvas/pr-review-canvas-persistence";
 import {
-  createPrReviewFileNodeActivationGesture,
-  shouldActivatePrReviewFileNode,
-  updatePrReviewFileNodeActivationGesture,
-  type PrReviewFileNodeActivationGesture
+  registerPrReviewFileNodeActivationHandler
 } from "@/features/pr-review/components/review-canvas/pr-review-node-activation";
+import { shouldRemoveCreatedPrReviewSystemShape } from "@/features/pr-review/components/review-canvas/pr-review-system-shape-policy";
 
 type PrReviewApiClient = ReturnType<typeof createPrReviewApiClient>;
 
@@ -147,7 +145,8 @@ const OPERATION_SYNC_ERROR_MESSAGE =
   "실시간 노드 동기화가 지연되고 있습니다. 재접속하면 최신 위치를 다시 불러옵니다.";
 
 const prReviewTldrawComponents = {
-  Background: PrReviewCanvasBackground
+  Background: PrReviewCanvasBackground,
+  ContextMenu: null
 };
 
 const prReviewShapeTypes = new Set<string>([
@@ -878,6 +877,29 @@ function registerReviewShapePolicy(
   hydratingRef: MutableRefObject<boolean>,
   internalShapeUpdateRef: MutableRefObject<boolean>
 ) {
+  editor.sideEffects.registerAfterCreateHandler(
+    "shape",
+    (shape, source) => {
+      if (
+        !shouldRemoveCreatedPrReviewSystemShape({
+          hydrating: hydratingRef.current,
+          internalShapeUpdate: internalShapeUpdateRef.current,
+          isSystemShape: prReviewShapeTypes.has(shape.type),
+          source
+        })
+      ) {
+        return;
+      }
+
+      hydratingRef.current = true;
+      try {
+        editor.deleteShape(shape.id);
+      } finally {
+        hydratingRef.current = false;
+      }
+    }
+  );
+
   editor.sideEffects.registerBeforeChangeHandler("shape", (prev, next) => {
     if (hydratingRef.current || internalShapeUpdateRef.current) {
       return next;
@@ -915,69 +937,26 @@ function PrReviewFileNodeActivationBridge({
   onFileSelect?: (reviewFileId: string | null) => void;
 }) {
   const editor = useEditor();
-  const gestureRef = useRef<PrReviewFileNodeActivationGesture | null>(null);
 
   useEffect(() => {
+    const unregisterActivationHandler =
+      registerPrReviewFileNodeActivationHandler(editor, (reviewFileId) => {
+        onFileSelect?.(reviewFileId);
+      });
     const handleEditorEvent = (event: TLEventInfo) => {
-      if (event.name === "cancel" || event.name === "interrupt") {
-        gestureRef.current = null;
-        return;
-      }
-
-      if (event.type !== "pointer") {
-        return;
-      }
-
-      if (event.name === "pointer_down") {
-        if (event.target === "shape" && isPrReviewFileNodeShape(event.shape)) {
-          gestureRef.current = createPrReviewFileNodeActivationGesture({
-            pointer: event.point,
-            reviewFileId: event.shape.props.reviewFileId,
-            shapeId: event.shape.id
-          });
-          return;
-        }
-
-        gestureRef.current = null;
-        onFileSelect?.(null);
-        return;
-      }
-
-      const gesture = gestureRef.current;
-      if (!gesture) {
-        return;
-      }
-
-      if (event.name === "pointer_move") {
-        gestureRef.current = updatePrReviewFileNodeActivationGesture(
-          gesture,
-          event.point
-        );
-        return;
-      }
-
-      if (event.name !== "pointer_up") {
-        return;
-      }
-
-      const completedGesture = updatePrReviewFileNodeActivationGesture(
-        gesture,
-        event.point
-      );
-      const currentShape = editor.getShape(completedGesture.shapeId as TLShapeId);
-      gestureRef.current = null;
-
       if (
-        isPrReviewFileNodeShape(currentShape) &&
-        shouldActivatePrReviewFileNode(completedGesture)
+        event.type === "pointer" &&
+        event.name === "pointer_down" &&
+        event.target === "canvas"
       ) {
-        onFileSelect?.(completedGesture.reviewFileId);
+        onFileSelect?.(null);
       }
     };
 
     editor.on("event", handleEditorEvent);
     return () => {
       editor.off("event", handleEditorEvent);
+      unregisterActivationHandler();
     };
   }, [editor, onFileSelect]);
 

@@ -17,6 +17,13 @@ const prReviewRoutePage = await readFile(
   new URL("../../src/app/(workspace)/pr-review/page.tsx", import.meta.url),
   "utf8"
 );
+const prReviewRoomsRoutePage = await readFile(
+  new URL(
+    "../../src/app/(workspace)/pr-review/rooms/page.tsx",
+    import.meta.url
+  ),
+  "utf8"
+);
 const prReviewApiClient = await readFile(
   new URL("../../src/features/pr-review/api/client.ts", import.meta.url),
   "utf8"
@@ -35,6 +42,20 @@ const prReviewAnalysisStatusComponent = await readFile(
 const prReviewPanel = await readFile(
   new URL(
     "../../src/features/pr-review/components/pr-review-panel.tsx",
+    import.meta.url
+  ),
+  "utf8"
+);
+const prReviewRoomsPanel = await readFile(
+  new URL(
+    "../../src/features/pr-review/components/pr-review-rooms-panel.tsx",
+    import.meta.url
+  ),
+  "utf8"
+);
+const prReviewRoomVisibility = await readFile(
+  new URL(
+    "../../src/features/pr-review/review-room-visibility.ts",
     import.meta.url
   ),
   "utf8"
@@ -155,6 +176,9 @@ const prReviewShapeUtils = await readFile(
 assert.match(prReviewTypes, /export type PrReviewRepository/);
 assert.match(prReviewTypes, /export type PrReviewPullRequest/);
 assert.match(prReviewTypes, /export type PrReviewSession/);
+assert.match(prReviewTypes, /export type PrReviewRoom =/);
+assert.match(prReviewTypes, /analyzingReviewSessionId: string \| null/);
+assert.match(prReviewTypes, /export type PrReviewRoomList =/);
 assert.match(prReviewTypes, /export type PrReviewAnalysisErrorCode/);
 assert.match(prReviewTypes, /analysisError: PrReviewAnalysisError \| null/);
 assert.match(prReviewTypes, /export type PrReviewSummary/);
@@ -185,10 +209,14 @@ assert.match(prReviewTypes, /export type MergePrReviewSessionInput =/);
 assert.match(prReviewTypes, /export type PrReviewMergeResult =/);
 assert.match(prReviewTypes, /pullRequestMergedAt/);
 assert.match(prReviewNavigation, /href: "\/pr-review"/);
+assert.match(prReviewNavigation, /title: "PR 선택"/);
+assert.match(prReviewNavigation, /title: "리뷰 공간", href: "\/pr-review\/rooms"/);
 assert.match(prReviewNavigation, /title: "PR/);
 assert.doesNotMatch(prReviewNavigation, /\/pr-review#/);
 assert.match(prReviewPage, /<PrReviewPanel \/>/);
 assert.match(prReviewRoutePage, /import "tldraw\/tldraw\.css"/);
+assert.match(prReviewRoomsRoutePage, /PrReviewRoomsPage as default/);
+assert.match(prReviewRoomsRoutePage, /import "tldraw\/tldraw\.css"/);
 assert.match(
   prReviewRoutePage,
   /shared\/canvas-realtime\/canvas-realtime\.css/
@@ -197,7 +225,7 @@ assert.match(prReviewApiClient, /createPrReviewApiClient/);
 assert.match(prReviewPanel, /PrReviewCanvasErrorBoundary/);
 assert.match(prReviewCanvasErrorBoundary, /getDerivedStateFromError/);
 assert.match(prReviewCanvasErrorBoundary, /리뷰 Canvas를 열지 못했습니다/);
-assert.match(prReviewCanvasErrorBoundary, /PR 목록으로/);
+assert.match(prReviewCanvasErrorBoundary, /backLabel/);
 assert.match(prReviewErrorMessage, /Pull request is closed or merged/);
 assert.match(
   prReviewErrorMessage,
@@ -222,6 +250,8 @@ assert.match(prReviewApiClient, /retryReviewSession/);
 assert.match(prReviewApiClient, /getReviewSessionSummary/);
 assert.match(prReviewApiClient, /getReviewSessionCanvas/);
 assert.match(prReviewApiClient, /getReviewRoom/);
+assert.match(prReviewApiClient, /listReviewRooms/);
+assert.match(prReviewApiClient, /workspaceGithubPath\(workspaceId, "\/review-rooms"\)/);
 assert.match(prReviewApiClient, /listReviewCanvasShapes/);
 assert.match(prReviewApiClient, /getReviewCanvasShape/);
 assert.match(prReviewApiClient, /updateReviewCanvasFileShape/);
@@ -258,6 +288,15 @@ assert.match(prReviewPanel, /workspaceId=\{workspaceId\}/);
 assert.match(prReviewPanel, /onGoToGithub=\{goToGithubPage\}/);
 assert.match(prReviewPanel, /onReviewSessionCreated/);
 assert.match(prReviewPanel, /activeReviewSession/);
+assert.match(prReviewPanel, /view\?: "pull-requests" \| "rooms"/);
+assert.match(prReviewPanel, /<PrReviewRoomsPanel onEnterReviewSession=\{enterReviewSession\} \/>/);
+assert.match(prReviewPanel, /<ReviewSessionLoadErrorState/);
+assert.match(prReviewPanel, /setRequestedReviewSessionId\(null\)/);
+assert.match(prReviewRoomsPanel, /payload\.rooms\.filter\(isVisibleReviewRoom\)/);
+assert.match(prReviewRoomsPanel, /새 버전 분석 중/);
+assert.match(prReviewRoomsPanel, /완료된 리뷰는 읽기 전용으로 열립니다/);
+assert.match(prReviewRoomVisibility, /room\.currentReviewSessionId \|\| room\.analyzingReviewSessionId/);
+assert.match(prReviewRoomVisibility, /room\.currentReviewSessionId \?\? room\.analyzingReviewSessionId/);
 assert.match(prReviewPanel, /PrReviewAnalysisStatus/);
 assert.match(prReviewPanel, /AbortController/);
 assert.match(prReviewPanel, /replaceReviewSessionRoute/);
@@ -293,10 +332,9 @@ assert.match(prReviewFileDiffDrawer, /file\.decisionCarriedOver/);
 assert.match(prReviewFileDiffDrawer, /이전 버전에서 유지된 판단입니다/);
 assert.match(prReviewCanvasShell, /applyReviewSessionConflictResolutions/);
 assert.match(prReviewCanvasShell, /buildPrReviewConflictsApplyInput/);
-assert.match(prReviewCanvasShell, /GitHub에 전체 적용/);
+assert.match(prReviewCanvasShell, /Conflict 해결안 적용/);
 assert.match(prReviewCanvasShell, /해결 준비/);
 assert.match(prReviewCanvasShell, /pilo-github-oauth-reconnect/);
-assert.match(prReviewCanvasShell, /Conflict 해결안 전체 적용/);
 assert.match(prReviewCanvasShell, /PrReviewSubmitReviewModal/);
 assert.match(prReviewCanvasShell, /setIsSubmitReviewModalOpen/);
 assert.match(prReviewCanvasShell, /createNewReviewSession/);
@@ -401,7 +439,11 @@ assert.match(prReviewCanvasPersistence, /buildPrReviewFileShapeUpdateInput/);
 assert.match(prReviewCanvasPersistence, /buildPrReviewRelationEdgeGeometry/);
 assert.match(prReviewCanvasSurface, /PrReviewFileNodeActivationBridge/);
 assert.doesNotMatch(prReviewCanvasSurface, /PrReviewSelectionBridge/);
-assert.match(prReviewNodeActivation, /shouldActivatePrReviewFileNode/);
+assert.match(
+  prReviewNodeActivation,
+  /registerPrReviewFileNodeActivationHandler/
+);
+assert.match(prReviewNodeActivation, /activatePrReviewFileNode/);
 assert.doesNotMatch(prReviewCanvasPersistence, /features\/canvas/);
 assert.match(prReviewFileDiffDrawer, /getReviewFileDiff/);
 assert.match(prReviewFileDiffDrawer, /updateReviewFileDecision/);
@@ -525,6 +567,10 @@ assert.match(prReviewShapeUtils, /PrReviewRelationEdgeShapeUtil/);
 assert.match(prReviewShapeUtils, /PrReviewFlowLabelShapeUtil/);
 assert.match(prReviewShapeUtils, /PrReviewFlowMilestoneShapeUtil/);
 assert.match(prReviewShapeUtils, /PrReviewRoleLaneShapeUtil/);
+assert.match(prReviewCanvasSurface, /ContextMenu: null/);
+assert.match(prReviewCanvasSurface, /registerAfterCreateHandler/);
+assert.match(prReviewFileNodeShapeUtil, /override onClick/);
+assert.match(prReviewFileNodeShapeUtil, /activatePrReviewFileNode/);
 
 await import("./flow-layout.test.mjs");
 await import("./resolved-code-diff.test.mjs");
@@ -537,3 +583,4 @@ await import("./canvas-shape-persistence.test.mjs");
 await import("./canvas-shape-index.test.mjs");
 await import("./canvas-operation-sync.test.mjs");
 await import("./node-activation.test.mjs");
+await import("./system-shape-policy.test.mjs");

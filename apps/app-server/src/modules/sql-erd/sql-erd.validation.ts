@@ -30,6 +30,9 @@ const MAX_ANNOTATION_COUNT = 300;
 const MAX_CANVAS_NOTE_COUNT = 100;
 const MAX_CANVAS_FRAME_COUNT = 100;
 const MAX_CANVAS_TEXT_COUNT = 100;
+const MAX_CANVAS_STROKE_COUNT = 100;
+const MAX_CANVAS_STROKE_POINT_COUNT = 500;
+const MAX_CANVAS_STROKE_SIZE = 32;
 const MAX_COLUMN_COUNT = 1000;
 const MAX_COLUMNS_PER_TABLE = 200;
 const MAX_IDENTIFIER_LENGTH = 256;
@@ -716,7 +719,7 @@ function validateAnnotations(value: unknown, metadata: ModelMetadata): void {
   const annotations = readPlainJsonObject(value, "layoutJson.annotations");
   assertAllowedFields(
     annotations,
-    new Set(["version", "links", "notes", "frames", "texts"]),
+    new Set(["version", "links", "notes", "frames", "texts", "strokes"]),
     "layoutJson.annotations"
   );
 
@@ -819,6 +822,7 @@ function validateAnnotations(value: unknown, metadata: ModelMetadata): void {
   validateCanvasNotes(annotations.notes, annotationIds);
   validateCanvasFrames(annotations.frames, annotationIds);
   validateCanvasTexts(annotations.texts, annotationIds);
+  validateCanvasStrokes(annotations.strokes, annotationIds);
 }
 
 function validateCanvasNotes(value: unknown, annotationIds: Set<string>): void {
@@ -896,6 +900,50 @@ function validateCanvasTexts(value: unknown, annotationIds: Set<string>): void {
       throw badRequest(`${path}.color is invalid`);
     }
   });
+}
+
+function validateCanvasStrokes(value: unknown, annotationIds: Set<string>): void {
+  if (value === undefined) return;
+  if (!Array.isArray(value)) {
+    throw badRequest("layoutJson.annotations.strokes must be an array");
+  }
+  if (value.length > MAX_CANVAS_STROKE_COUNT) {
+    throw badRequest("layoutJson.annotations.strokes length limit exceeded");
+  }
+
+  value.forEach((stroke, index) => {
+    const path = `layoutJson.annotations.strokes[${index}]`;
+    const strokeObject = readPlainJsonObject(stroke, path);
+    assertAllowedFields(strokeObject, new Set(["id", "points", "color", "size"]), path);
+    readUniqueAnnotationId(strokeObject.id, `${path}.id`, annotationIds);
+    if (!Array.isArray(strokeObject.points)) {
+      throw badRequest(`${path}.points must be an array`);
+    }
+    if (strokeObject.points.length < 2) {
+      throw badRequest(`${path}.points must contain at least two points`);
+    }
+    if (strokeObject.points.length > MAX_CANVAS_STROKE_POINT_COUNT) {
+      throw badRequest(`${path}.points length limit exceeded`);
+    }
+    strokeObject.points.forEach((point, pointIndex) => {
+      const pointPath = `${path}.points[${pointIndex}]`;
+      const pointObject = readPlainJsonObject(point, pointPath);
+      assertAllowedFields(pointObject, new Set(["x", "y"]), pointPath);
+      readFiniteNumber(pointObject.x, `${pointPath}.x`);
+      readFiniteNumber(pointObject.y, `${pointPath}.y`);
+    });
+    if (!isCanvasAnnotationColor(strokeObject.color)) {
+      throw badRequest(`${path}.color is invalid`);
+    }
+    const size = readPositiveFiniteNumber(strokeObject.size, `${path}.size`);
+    if (size > MAX_CANVAS_STROKE_SIZE) {
+      throw badRequest(`${path}.size must be ${MAX_CANVAS_STROKE_SIZE} or less`);
+    }
+  });
+}
+
+function isCanvasAnnotationColor(value: unknown): boolean {
+  return ["slate", "blue", "green", "amber", "rose"].includes(value as string);
 }
 
 function readUniqueAnnotationId(value: unknown, field: string, annotationIds: Set<string>): string {

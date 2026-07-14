@@ -191,6 +191,15 @@ export interface CreateBoardResult {
   statusCode: 200 | 201;
 }
 
+export interface ActiveBoardSourcePayload {
+  boardId: string;
+  workspaceId: string;
+  repository: BoardRepositoryPayload;
+  project: BoardProjectPayload;
+  updatedByUserId: string | null;
+  updatedAt: string;
+}
+
 export interface UpdateBoardIssueStatusPayload {
   issue: BoardIssueCardPayload;
   previousColumnId: string;

@@ -49,13 +49,13 @@ assert.doesNotMatch(
 
 assert.match(
   boardDataHook,
-  /selectBoardProjectRepositoryId\(\s*repositories,\s*normalizedProjectRepositoryId\s*\)/,
-  "Board catalog should prefer the persisted Board selection over the first repository"
+  /getActiveBoardSource\(normalizedWorkspaceId\)/,
+  "Board catalog should read the durable active source"
 );
 assert.match(
   boardPanel,
-  /repositoryId:\s*githubBoardSelection\?\.repositoryId/,
-  "Board panel should provide the persisted Board repository to the catalog"
+  /boardData\.activeSource\?\.boardId/,
+  "Board panel should use the durable active Board source"
 );
 assert.match(
   boardDataHook,
@@ -78,11 +78,7 @@ assert.doesNotMatch(
   /syncTarget\s*===\s*"full"\s*\|\|\s*projectScopedSyncTargets\.has\(syncTarget\)/,
   "Full sync should use the persisted server selection scope, not the local Board selection"
 );
-assert.match(
-  githubPanel,
-  /selectedProjectV2Ids/,
-  "The persisted detail-sync selection should remain independent from the Board navigation selection"
-);
+assert.doesNotMatch(githubPanel, /selectedProjectV2Ids|rememberGithubBoardSelection/);
 assert.match(
   githubTypes,
   /repositoryIds:\s*string\[\];/,
@@ -123,15 +119,10 @@ assert.match(
   /workspaceId/,
   "Persisted GitHub board selection should be scoped per workspace"
 );
-assert.match(
+assert.doesNotMatch(
   githubPanel,
-  /rememberGithubBoardSelection/,
-  "GitHub panel should remember the selected repository and ProjectV2 for Board configuration"
-);
-assert.match(
-  githubPanel,
-  /function handleSelectProjectV2\(projectV2Id: string\)/,
-  "ProjectV2 selection should go through a handler that persists the Board target"
+  /rememberGithubBoardSelection|selectedProjectV2Ids/,
+  "GitHub panel should use the workspace active-source API instead of local selection state"
 );
 assert.match(
   githubPanel,

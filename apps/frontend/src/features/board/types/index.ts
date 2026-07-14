@@ -43,6 +43,15 @@ export type BoardPayload = {
   updatedAt: string;
 };
 
+export type ActiveBoardSourcePayload = {
+  boardId: string;
+  workspaceId: string;
+  repository: BoardRepositoryPayload;
+  project: BoardProjectPayload;
+  updatedByUserId: string | null;
+  updatedAt: string;
+};
+
 export type BoardPaginatedPayload<T> = {
   data: T[];
   meta: {
