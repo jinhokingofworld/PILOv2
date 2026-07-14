@@ -6241,6 +6241,21 @@ assert.match(annotationToolbar, /aria-label="프레임 추가"/);
 assert.match(annotationToolbar, /aria-label="화면 맞춤"/);
 assert.match(annotationToolbar, /isSqlErdFrameShape\(selectedShape\)/);
 assert.match(annotationToolbar, /onFrameColorChange\(selectedShape\.props\.frameId, color\)/);
+assert.match(canvasSurface, /import \{ SqlErdCanvasToolbar \}/);
+assert.match(canvasSurface, /<SqlErdCanvasToolbar/);
+assert.match(
+  canvasSurface,
+  /SQLTOERD_FRAME_CHANGE_EVENT[\s\S]*?SqlErdCanvasToolbar/
+);
+assert.match(
+  canvasSurface,
+  /editor\.getViewportPageBounds\(\)[\s\S]*?notesToAdd/
+);
+assert.match(
+  canvasSurface,
+  /editor\.getViewportPageBounds\(\)[\s\S]*?framesToAdd/
+);
+assert.match(canvasSurface, /onFit=\{handleFitCanvas\}/);
 assert.match(
   canvasSurface,
   /function deleteNote\(noteId: string\)[\s\S]*?deleteNoteIds/
@@ -6388,7 +6403,7 @@ assert.deepEqual(
 
 assert.match(canvasSurface, /SqlErdNoteShapeUtil/);
 assert.match(canvasSurface, /SqlErdFrameShapeUtil/);
-assert.match(canvasSurface, /data-sqltoerd-add-note/);
-assert.match(canvasSurface, /data-sqltoerd-add-frame/);
+assert.match(annotationToolbar, /aria-label="메모 추가"/);
+assert.match(annotationToolbar, /aria-label="프레임 추가"/);
 assert.match(canvasSurface, /onLayoutPatch\(\{ tablePositions: nextLayoutJson\.tableLayouts \}\)/);
 assert.doesNotMatch(canvasSurface, /onLayoutChange/);
