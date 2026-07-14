@@ -875,12 +875,12 @@ export class GithubSyncExecutorService {
           project_v2_id,
           repository_id
         )
-        SELECT project_v2_id, $2
-        FROM unnest($3::uuid[]) AS project_v2_id
+        SELECT project_v2_id, $1
+        FROM unnest($2::uuid[]) AS project_v2_id
         ON CONFLICT (project_v2_id, repository_id)
         DO NOTHING
       `,
-      [workspaceId, repositoryId, uniqueProjectV2Ids]
+      [repositoryId, uniqueProjectV2Ids]
     );
   }
 
