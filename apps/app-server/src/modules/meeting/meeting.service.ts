@@ -5,7 +5,8 @@ import {
   badRequest,
   conflict,
   forbidden,
-  notFound
+  notFound,
+  workspaceRecordingConsentRequired
 } from "../../common/api-error";
 import {
   DatabaseService,
@@ -192,6 +193,17 @@ interface ParticipantCountRow extends QueryResultRow {
   active_participant_count: number | string;
 }
 
+interface WorkspaceRecordingConsentRow extends QueryResultRow {
+  workspace_id: string;
+  user_id: string;
+  policy_version: string;
+  accepted_at: Date | string;
+}
+
+interface MissingWorkspaceRecordingConsentRow extends QueryResultRow {
+  user_id: string;
+}
+
 interface QueryOneExecutor {
   queryOne<T extends QueryResultRow = QueryResultRow>(
     text: string,
@@ -243,6 +255,12 @@ interface MeetingReportRegenerationTransactionResult {
 
 interface StartMeetingDraft {
   roomKey?: unknown;
+  recordingConsent?: unknown;
+}
+
+interface RecordingConsentDraft {
+  accepted: true;
+  policyVersion: string;
 }
 
 interface MeetingRoomNameDraft {
@@ -388,6 +406,11 @@ export interface StartMeetingPayload {
   currentRecording: null;
 }
 
+export interface RecordingConsentInput {
+  accepted: true;
+  policyVersion: string;
+}
+
 export interface JoinMeetingPayload {
   meeting: MeetingPayload;
   participant: ParticipantPayload;
@@ -460,6 +483,7 @@ export interface MeetingReportRegenerationPayload {
 }
 
 const MAIN_MEETING_ROOM = "MAIN_MEETING_ROOM";
+const WORKSPACE_RECORDING_CONSENT_POLICY_VERSION = "v1";
 const UNIQUE_VIOLATION_CODE = "23505";
 const ACTIVE_MEETING_UNIQUE_INDEX = "unique_active_meeting_per_room";
 const MEETING_ALREADY_IN_PROGRESS_ERROR_CODE =
@@ -536,7 +560,7 @@ export class MeetingService {
     body: unknown
   ): Promise<StartMeetingPayload> {
     await this.assertWorkspaceAccess(currentUserId, workspaceId);
-    const roomKey = this.normalizeStartMeetingBody(body).roomKey;
+    const { roomKey, recordingConsent } = this.normalizeStartMeetingBody(body);
 
     const existingMeeting = await this.findCurrentMeeting(workspaceId, roomKey);
     if (existingMeeting) {
@@ -545,7 +569,13 @@ export class MeetingService {
 
     try {
       const result = await this.database.transaction((transaction) =>
-        this.createStartedMeeting(transaction, workspaceId, roomKey, currentUserId)
+        this.createStartedMeeting(
+          transaction,
+          workspaceId,
+          roomKey,
+          currentUserId,
+          recordingConsent
+        )
       );
       await this.publishMeetingStarted(workspaceId, result.meeting.id);
       return result;
@@ -738,9 +768,11 @@ export class MeetingService {
   async startMeetingInRoom(
     currentUserId: string,
     workspaceId: string,
-    meetingRoomId: string
+    meetingRoomId: string,
+    body: unknown
   ): Promise<StartMeetingPayload> {
     await this.assertWorkspaceAccess(currentUserId, workspaceId);
+    const { recordingConsent } = this.normalizeStartMeetingBody(body);
 
     try {
       const result = await this.database.transaction(async (transaction) => {
@@ -763,7 +795,8 @@ export class MeetingService {
           transaction,
           workspaceId,
           room.room_key,
-          currentUserId
+          currentUserId,
+          recordingConsent
         );
       });
       await this.publishMeetingStarted(workspaceId, result.meeting.id);
@@ -780,9 +813,11 @@ export class MeetingService {
   async joinMeeting(
     currentUserId: string,
     workspaceId: string,
-    meetingId: string
+    meetingId: string,
+    body: unknown
   ): Promise<JoinMeetingPayload> {
     await this.assertWorkspaceAccess(currentUserId, workspaceId);
+    const { recordingConsent } = this.normalizeStartMeetingBody(body);
     const result = await this.database.transaction(async (transaction) => {
       const meeting = await this.findMeetingById(transaction, workspaceId, meetingId, {
         lockMeeting: true
@@ -795,6 +830,13 @@ export class MeetingService {
       if (meeting.ended_at !== null) {
         throw badRequest("Meeting has already ended");
       }
+
+      await this.ensureWorkspaceRecordingConsent(
+        transaction,
+        workspaceId,
+        currentUserId,
+        recordingConsent
+      );
 
       const participant = await this.upsertParticipant(
         transaction,
@@ -1093,6 +1135,11 @@ export class MeetingService {
       }
 
       await this.assertActiveParticipant(transaction, meetingId, currentUserId);
+      await this.assertAllActiveParticipantsHaveRecordingConsent(
+        transaction,
+        workspaceId,
+        meetingId
+      );
 
       const runningRecording = await this.findRunningRecording(
         transaction,
@@ -1360,7 +1407,11 @@ export class MeetingService {
     reportId: string
   ): Promise<MeetingReportDetailResponsePayload> {
     await this.assertWorkspaceAccess(currentUserId, workspaceId);
-    const report = await this.findMeetingReportDetailById(workspaceId, reportId);
+    const report = await this.findMeetingReportDetailById(
+      workspaceId,
+      reportId,
+      currentUserId
+    );
 
     if (report === null) {
       throw notFound("Meeting report not found");
@@ -1701,8 +1752,16 @@ export class MeetingService {
     transaction: DatabaseTransaction,
     workspaceId: string,
     roomKey: string,
-    currentUserId: string
+    currentUserId: string,
+    recordingConsent: RecordingConsentDraft | null
   ): Promise<StartMeetingPayload> {
+    await this.ensureWorkspaceRecordingConsent(
+      transaction,
+      workspaceId,
+      currentUserId,
+      recordingConsent
+    );
+
     const startedMeeting = await transaction.queryOne<StartMeetingRow>(
       `
         WITH generated AS (
@@ -2817,7 +2876,8 @@ export class MeetingService {
 
   private async findMeetingReportDetailById(
     workspaceId: string,
-    reportId: string
+    reportId: string,
+    currentUserId: string
   ): Promise<MeetingReportDetailRow | null> {
     if (!UUID_PATTERN.test(reportId)) {
       return null;
@@ -2847,9 +2907,24 @@ export class MeetingService {
         ${this.meetingReportParticipantSummaryJoin("meeting_reports")}
         WHERE meetings.workspace_id = $1
           AND meeting_reports.id = $2
+          AND (
+            EXISTS (
+              SELECT 1
+              FROM workspace_members
+              WHERE workspace_members.workspace_id = meetings.workspace_id
+                AND workspace_members.user_id = $3::uuid
+                AND workspace_members.role = 'owner'
+            )
+            OR EXISTS (
+              SELECT 1
+              FROM meeting_participants
+              WHERE meeting_participants.meeting_id = meetings.id
+                AND meeting_participants.user_id = $3::uuid
+            )
+          )
         LIMIT 1
       `,
-      [workspaceId, reportId]
+      [workspaceId, reportId, currentUserId]
     );
   }
 
@@ -3013,6 +3088,96 @@ export class MeetingService {
 
     if (!participant || participant.left_at !== null) {
       throw forbidden("Current user is not an active meeting participant");
+    }
+  }
+
+  private async ensureWorkspaceRecordingConsent(
+    executor: QueryOneExecutor,
+    workspaceId: string,
+    currentUserId: string,
+    recordingConsent: RecordingConsentDraft | null
+  ): Promise<void> {
+    const existingConsent = await executor.queryOne<WorkspaceRecordingConsentRow>(
+      `
+        SELECT workspace_id, user_id, policy_version, accepted_at
+        FROM workspace_recording_consents
+        WHERE workspace_id = $1::uuid
+          AND user_id = $2::uuid
+          AND policy_version = $3
+        LIMIT 1
+      `,
+      [workspaceId, currentUserId, WORKSPACE_RECORDING_CONSENT_POLICY_VERSION]
+    );
+
+    if (existingConsent) {
+      return;
+    }
+
+    if (recordingConsent === null) {
+      throw workspaceRecordingConsentRequired();
+    }
+
+    const insertedConsent = await executor.queryOne<WorkspaceRecordingConsentRow>(
+      `
+        INSERT INTO workspace_recording_consents (
+          workspace_id,
+          user_id,
+          policy_version
+        )
+        VALUES ($1::uuid, $2::uuid, $3)
+        ON CONFLICT (workspace_id, user_id, policy_version) DO NOTHING
+        RETURNING workspace_id, user_id, policy_version, accepted_at
+      `,
+      [workspaceId, currentUserId, recordingConsent.policyVersion]
+    );
+
+    if (insertedConsent) {
+      return;
+    }
+
+    const concurrentConsent = await executor.queryOne<WorkspaceRecordingConsentRow>(
+      `
+        SELECT workspace_id, user_id, policy_version, accepted_at
+        FROM workspace_recording_consents
+        WHERE workspace_id = $1::uuid
+          AND user_id = $2::uuid
+          AND policy_version = $3
+        LIMIT 1
+      `,
+      [workspaceId, currentUserId, WORKSPACE_RECORDING_CONSENT_POLICY_VERSION]
+    );
+
+    if (!concurrentConsent) {
+      throw workspaceRecordingConsentRequired();
+    }
+  }
+
+  private async assertAllActiveParticipantsHaveRecordingConsent(
+    executor: QueryOneExecutor,
+    workspaceId: string,
+    meetingId: string
+  ): Promise<void> {
+    const participantWithoutConsent =
+      await executor.queryOne<MissingWorkspaceRecordingConsentRow>(
+        `
+          SELECT meeting_participants.user_id
+          FROM meeting_participants
+          WHERE meeting_participants.meeting_id = $1::uuid
+            AND meeting_participants.left_at IS NULL
+            AND NOT EXISTS (
+              SELECT 1
+              FROM workspace_recording_consents
+              WHERE workspace_recording_consents.workspace_id = $2::uuid
+                AND workspace_recording_consents.user_id = meeting_participants.user_id
+                AND workspace_recording_consents.policy_version = $3
+            )
+          LIMIT 1
+        `,
+        [meetingId, workspaceId, WORKSPACE_RECORDING_CONSENT_POLICY_VERSION]
+      );
+
+    if (participantWithoutConsent) {
+      throw workspaceRecordingConsentRequired();
     }
   }
 
@@ -3181,9 +3346,12 @@ export class MeetingService {
       .join("/");
   }
 
-  private normalizeStartMeetingBody(body: unknown): { roomKey: string } {
+  private normalizeStartMeetingBody(body: unknown): {
+    roomKey: string;
+    recordingConsent: RecordingConsentDraft | null;
+  } {
     if (body === undefined || body === null) {
-      return { roomKey: MAIN_MEETING_ROOM };
+      return { roomKey: MAIN_MEETING_ROOM, recordingConsent: null };
     }
 
     if (typeof body !== "object" || Array.isArray(body)) {
@@ -3191,8 +3359,11 @@ export class MeetingService {
     }
 
     const draft = body as StartMeetingDraft;
+    const recordingConsent = this.normalizeRecordingConsent(
+      draft.recordingConsent
+    );
     if (draft.roomKey === undefined || draft.roomKey === null) {
-      return { roomKey: MAIN_MEETING_ROOM };
+      return { roomKey: MAIN_MEETING_ROOM, recordingConsent };
     }
 
     if (typeof draft.roomKey !== "string") {
@@ -3204,7 +3375,34 @@ export class MeetingService {
       throw badRequest("roomKey must be MAIN_MEETING_ROOM");
     }
 
-    return { roomKey };
+    return { roomKey, recordingConsent };
+  }
+
+  private normalizeRecordingConsent(
+    value: unknown
+  ): RecordingConsentDraft | null {
+    if (value === undefined || value === null) {
+      return null;
+    }
+
+    if (typeof value !== "object" || Array.isArray(value)) {
+      throw badRequest("recordingConsent must be an object");
+    }
+
+    const draft = value as { accepted?: unknown; policyVersion?: unknown };
+    if (draft.accepted !== true) {
+      throw badRequest("recordingConsent.accepted must be true");
+    }
+    if (draft.policyVersion !== WORKSPACE_RECORDING_CONSENT_POLICY_VERSION) {
+      throw badRequest(
+        `recordingConsent.policyVersion must be ${WORKSPACE_RECORDING_CONSENT_POLICY_VERSION}`
+      );
+    }
+
+    return {
+      accepted: true,
+      policyVersion: WORKSPACE_RECORDING_CONSENT_POLICY_VERSION
+    };
   }
 
   private normalizeMeetingRoomName(body: unknown): string {

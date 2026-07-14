@@ -3,6 +3,7 @@ import { HttpException, HttpStatus } from "@nestjs/common";
 export type ApiErrorCode =
   | "BAD_REQUEST"
   | "MEETING_ALREADY_IN_PROGRESS"
+  | "WORKSPACE_RECORDING_CONSENT_REQUIRED"
   | "UNAUTHORIZED"
   | "FORBIDDEN"
   | "NOT_FOUND"
@@ -50,6 +51,14 @@ export function notFound(message: string): ApiError {
 
 export function conflict(message: string): ApiError {
   return new ApiError(HttpStatus.CONFLICT, "CONFLICT", message);
+}
+
+export function workspaceRecordingConsentRequired(): ApiError {
+  return new ApiError(
+    HttpStatus.CONFLICT,
+    "WORKSPACE_RECORDING_CONSENT_REQUIRED",
+    "Workspace recording consent is required"
+  );
 }
 
 export function payloadTooLarge(message: string): ApiError {

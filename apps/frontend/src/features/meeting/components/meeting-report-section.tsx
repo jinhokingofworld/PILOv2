@@ -20,6 +20,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { MeetingApiError } from "@/features/meeting/api/client";
 import {
   useMeetingReportRealtime,
   type MeetingReportRealtimeEvent
@@ -75,6 +76,10 @@ const REPORT_STATUS_FILTERS: Array<{
 ];
 
 function getReportRequestErrorMessage(error: unknown) {
+  if (error instanceof MeetingApiError && error.status === 404) {
+    return "이 회의록의 상세 transcript는 회의 참석자와 Workspace owner만 볼 수 있습니다.";
+  }
+
   return error instanceof Error
     ? error.message
     : "회의록 요청을 처리하지 못했습니다. 잠시 후 다시 시도해주세요.";

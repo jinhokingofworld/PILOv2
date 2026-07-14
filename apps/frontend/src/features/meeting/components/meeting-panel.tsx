@@ -52,7 +52,8 @@ import { useMeetingStateInvalidation } from "@/features/meeting/stores/meeting-s
 import type {
   MeetingParticipant,
   MeetingRecording,
-  MeetingReportListQuery
+  MeetingReportListQuery,
+  RecordingConsentInput
 } from "@/features/meeting/types";
 import { cn } from "@/lib/utils";
 
@@ -66,13 +67,15 @@ type ActionStatus =
 type MeetingSection = "room" | "report";
 
 const MEETING_REPORT_PAGE_SIZE = 20;
-const RECORDING_CONSENT_STORAGE_KEY = "recordingConsentAccepted";
+const WORKSPACE_RECORDING_CONSENT_POLICY_VERSION = "v1";
 const LIVEKIT_CONNECTION_ERROR_MESSAGE =
   "음성 회의 연결에 실패했습니다. 마이크 권한과 네트워크 상태를 확인해주세요.";
 const LEAVE_FAILED_MESSAGE =
   "회의 나가기에 실패했습니다. 문제가 반복되면 녹음을 종료한 뒤 다시 시도해주세요.";
 const ACTIVE_MEETING_IN_PROGRESS_ERROR_CODE =
   "MEETING_ALREADY_IN_PROGRESS";
+const WORKSPACE_RECORDING_CONSENT_REQUIRED_ERROR_CODE =
+  "WORKSPACE_RECORDING_CONSENT_REQUIRED";
 const CURRENT_MEETING_RELOAD_FAILED_MESSAGE =
   "진행 중인 회의를 다시 찾지 못했습니다. 새로고침 후 다시 시도해주세요.";
 
@@ -160,6 +163,14 @@ function isActiveMeetingInProgressError(error: unknown) {
     error instanceof MeetingApiError &&
     error.status === 400 &&
     error.code === ACTIVE_MEETING_IN_PROGRESS_ERROR_CODE
+  );
+}
+
+function isWorkspaceRecordingConsentRequiredError(error: unknown) {
+  return (
+    error instanceof MeetingApiError &&
+    error.status === 409 &&
+    error.code === WORKSPACE_RECORDING_CONSENT_REQUIRED_ERROR_CODE
   );
 }
 
@@ -252,8 +263,9 @@ function ConsentOverlay({
           <div className="min-w-0 space-y-2">
             <h2 className="text-base font-semibold">음성 녹음 동의</h2>
             <p className="text-sm leading-6 text-muted-foreground">
-              회의 녹음은 회의록 생성을 위해 사용됩니다. 동의하지 않으면 음성
-              회의에 참여할 수 없습니다.
+              이 Workspace의 회의 녹음은 회의록 생성을 위해 사용됩니다. 동의
+              기록은 Workspace와 정책 버전별로 저장되며, 동의하지 않으면 음성
+              회의를 시작하거나 참여할 수 없습니다.
             </p>
           </div>
         </div>
@@ -393,9 +405,9 @@ export function MeetingPanel() {
   const [pendingConsentAction, setPendingConsentAction] =
     useState<EntryAction | null>(null);
   const [prejoinAction, setPrejoinAction] = useState<EntryAction | null>(null);
+  const [consentSubmissionAction, setConsentSubmissionAction] =
+    useState<EntryAction | null>(null);
   const [pendingEndRecordingId, setPendingEndRecordingId] = useState<string | null>(null);
-  const [recordingConsentAccepted, setRecordingConsentAccepted] =
-    useState(false);
   const [isMeetingRoomSwitching, setIsMeetingRoomSwitching] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
@@ -460,13 +472,6 @@ export function MeetingPanel() {
   useMeetingStateInvalidation(canLoad, reloadMeetingState);
 
   useEffect(() => {
-    const storedValue = window.localStorage.getItem(
-      RECORDING_CONSENT_STORAGE_KEY
-    );
-    setRecordingConsentAccepted(storedValue === "true");
-  }, []);
-
-  useEffect(() => {
     void reloadParticipants(meeting?.id);
   }, [meeting?.id, reloadParticipants]);
 
@@ -524,7 +529,8 @@ export function MeetingPanel() {
 
   async function runEntryAction(
     action: EntryAction,
-    audioDeviceId: string | null
+    audioDeviceId: string | null,
+    shouldSubmitConsent: boolean
   ) {
     const targetMeetingId = meeting?.id ?? null;
 
@@ -534,6 +540,14 @@ export function MeetingPanel() {
 
     let createdOrJoinedMeetingId: string | null = null;
     let failedStage: "api" | "livekit" = "api";
+    const recordingConsent: RecordingConsentInput | undefined =
+      shouldSubmitConsent
+        ? {
+            accepted: true,
+            policyVersion: WORKSPACE_RECORDING_CONSENT_POLICY_VERSION
+          }
+        : undefined;
+    const entryInput = recordingConsent ? { recordingConsent } : {};
 
     try {
       const joinCurrentMeeting = async (meetingId: string | null) => {
@@ -544,11 +558,11 @@ export function MeetingPanel() {
           throw new Error(CURRENT_MEETING_RELOAD_FAILED_MESSAGE);
         }
 
-        return joinMeeting(currentMeetingId);
+        return joinMeeting(currentMeetingId, entryInput);
       };
       const result =
         action === "start"
-          ? await startMeeting().catch((error: unknown) => {
+          ? await startMeeting(entryInput).catch((error: unknown) => {
               if (!isActiveMeetingInProgressError(error)) {
                 throw error;
               }
@@ -577,6 +591,14 @@ export function MeetingPanel() {
         await reloadParticipants(createdOrJoinedMeetingId);
       }
 
+      if (
+        failedStage === "api" &&
+        isWorkspaceRecordingConsentRequiredError(error)
+      ) {
+        setPendingConsentAction(action);
+        return;
+      }
+
       const message =
         failedStage === "livekit"
           ? LIVEKIT_CONNECTION_ERROR_MESSAGE
@@ -590,12 +612,6 @@ export function MeetingPanel() {
 
   function handleEntryAction() {
     const action: EntryAction = meeting ? "join" : "start";
-
-    if (!recordingConsentAccepted) {
-      setPendingConsentAction(action);
-      return;
-    }
-
     setPrejoinAction(action);
   }
 
@@ -604,26 +620,22 @@ export function MeetingPanel() {
       return;
     }
 
-    if (!recordingConsentAccepted) {
-      setPendingConsentAction("reconnect");
-      return;
-    }
-
     setPrejoinAction("reconnect");
   }
 
   function handleAcceptConsent() {
     const action = pendingConsentAction ?? (meeting ? "join" : "start");
-    window.localStorage.setItem(RECORDING_CONSENT_STORAGE_KEY, "true");
-    setRecordingConsentAccepted(true);
     setPendingConsentAction(null);
+    setConsentSubmissionAction(action);
     setPrejoinAction(action);
   }
 
   function handlePrejoinConfirm(audioDeviceId: string | null) {
     const action = prejoinAction ?? (meeting ? "join" : "start");
+    const shouldSubmitConsent = consentSubmissionAction === action;
     setPrejoinAction(null);
-    void runEntryAction(action, audioDeviceId);
+    setConsentSubmissionAction(null);
+    void runEntryAction(action, audioDeviceId, shouldSubmitConsent);
   }
 
   async function handleLeaveMeeting() {
@@ -773,7 +785,10 @@ export function MeetingPanel() {
 
         {prejoinAction && (
           <MeetingAudioPreflightDialog
-            onClose={() => setPrejoinAction(null)}
+            onClose={() => {
+              setPrejoinAction(null);
+              setConsentSubmissionAction(null);
+            }}
             onConfirm={handlePrejoinConfirm}
           />
         )}

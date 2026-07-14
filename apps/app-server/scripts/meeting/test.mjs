@@ -95,12 +95,13 @@ function meetingReportEventContext(token) {
 }
 
 class FakeDatabase {
-  constructor({ queryOneRows = [], queryRows = [] } = {}) {
+  constructor({ queryOneRows = [], queryRows = [], hasWorkspaceRecordingConsent = true } = {}) {
     this.queryOneRows = [...queryOneRows];
     this.queryRows = [...queryRows];
     this.queries = [];
     this.transactionCommitted = false;
     this.transactionRolledBack = false;
+    this.hasWorkspaceRecordingConsent = hasWorkspaceRecordingConsent;
   }
 
   async query(text, values = []) {
@@ -115,6 +116,31 @@ class FakeDatabase {
 
   async queryOne(text, values = []) {
     this.queries.push({ text, values });
+
+    if (/SELECT meeting_participants\.user_id/.test(text)) {
+      return null;
+    }
+
+    if (/FROM workspace_recording_consents/.test(text)) {
+      return this.hasWorkspaceRecordingConsent
+        ? {
+            workspace_id: workspaceId,
+            user_id: values[1],
+            policy_version: "v1",
+            accepted_at: createdAt
+          }
+        : null;
+    }
+
+    if (/INSERT INTO workspace_recording_consents/.test(text)) {
+      this.hasWorkspaceRecordingConsent = true;
+      return {
+        workspace_id: workspaceId,
+        user_id: values[1],
+        policy_version: "v1",
+        accepted_at: createdAt
+      };
+    }
 
     if (/INSERT INTO meeting_report_outbox/.test(text)) {
       return { id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" };
@@ -479,11 +505,82 @@ async function assertConflict(action, messagePattern) {
   });
 }
 
+async function assertWorkspaceRecordingConsentRequired(action) {
+  await assert.rejects(action, (error) => {
+    assert.equal(error.getStatus(), 409);
+    assert.equal(
+      error.getResponse().error.code,
+      "WORKSPACE_RECORDING_CONSENT_REQUIRED"
+    );
+    return true;
+  });
+}
+
 async function assertError(action, messagePattern) {
   await assert.rejects(action, (error) => {
     assert.match(error.message, messagePattern);
     return true;
   });
+}
+
+{
+  const { service } = createSubject(
+    new FakeDatabase({
+      hasWorkspaceRecordingConsent: false,
+      queryOneRows: [null]
+    })
+  );
+
+  await assertWorkspaceRecordingConsentRequired(() =>
+    service.startMeeting(currentUserId, workspaceId, {})
+  );
+}
+
+{
+  const { service } = createSubject(
+    new FakeDatabase({
+      hasWorkspaceRecordingConsent: false,
+      queryOneRows: [null, startMeetingRow()]
+    })
+  );
+
+  const started = await service.startMeeting(currentUserId, workspaceId, {
+    recordingConsent: { accepted: true, policyVersion: "v1" }
+  });
+
+  assert.equal(started.meeting.id, meetingId);
+}
+
+{
+  const { service } = createSubject();
+
+  await assertBadRequest(
+    () =>
+      service.startMeeting(currentUserId, workspaceId, {
+        recordingConsent: { accepted: true, policyVersion: "v0" }
+      }),
+    /recordingConsent\.policyVersion/
+  );
+}
+
+{
+  const { service } = createSubject(
+    new FakeDatabase({
+      queryOneRows: [
+        (text, values) => {
+          assert.match(text, /workspace_members\.role = 'owner'/);
+          assert.match(text, /meeting_participants\.user_id = \$3::uuid/);
+          assert.deepEqual(values, [workspaceId, reportId, otherUserId]);
+          return null;
+        }
+      ]
+    })
+  );
+
+  await assertNotFound(
+    () => service.getReport(otherUserId, workspaceId, reportId),
+    /Meeting report not found/
+  );
 }
 
 {
@@ -2142,7 +2239,9 @@ async function assertError(action, messagePattern) {
           assert.match(text, /JOIN meetings/);
           assert.match(text, /meeting_reports\.transcript_text/);
           assert.match(text, /meeting_reports\.id = \$2/);
-          assert.deepEqual(values, [workspaceId, reportId]);
+          assert.match(text, /workspace_members\.role = 'owner'/);
+          assert.match(text, /meeting_participants\.user_id = \$3::uuid/);
+          assert.deepEqual(values, [workspaceId, reportId, currentUserId]);
           return meetingReportRow({
             transcript_text: "회의 원문",
             action_item_candidates: JSON.stringify([{ title: "후속 작업" }])

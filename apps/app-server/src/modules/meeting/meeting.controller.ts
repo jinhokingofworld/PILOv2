@@ -110,13 +110,15 @@ export class MeetingController {
   async startMeetingInRoom(
     @CurrentUserId() currentUserId: string,
     @Param("workspaceId") workspaceId: string,
-    @Param("meetingRoomId") meetingRoomId: string
+    @Param("meetingRoomId") meetingRoomId: string,
+    @Body() body: unknown
   ): Promise<ApiSuccessResponse<StartMeetingPayload>> {
     return apiResponse(
       await this.meetingService.startMeetingInRoom(
         currentUserId,
         workspaceId,
-        meetingRoomId
+        meetingRoomId,
+        body
       )
     );
   }
@@ -151,12 +153,14 @@ export class MeetingController {
   async joinMeeting(
     @CurrentUserId() currentUserId: string,
     @Param("workspaceId") workspaceId: string,
-    @Param("meetingId") meetingId: string
+    @Param("meetingId") meetingId: string,
+    @Body() body: unknown
   ): Promise<ApiSuccessResponse<JoinMeetingPayload>> {
     const result = await this.meetingService.joinMeeting(
       currentUserId,
       workspaceId,
-      meetingId
+      meetingId,
+      body
     );
     return apiResponse(result);
   }

@@ -107,6 +107,12 @@ const userSettingsMigration = await readSource(
 const meetingRoomsMigration = await readSource(
   "../../../db/migrations/053_create_meeting_rooms.sql"
 );
+const workspaceRecordingConsentsMigration = await readSource(
+  "../../../db/migrations/054_create_workspace_recording_consents.sql"
+);
+const workspaceRecordingConsentsDataApiMigration = await readSource(
+  "../../../db/migrations/055_revoke_workspace_recording_consents_data_api_access.sql"
+);
 const canvasShapeHashMigration = await readSource(
   "../../../db/migrations/009_canvas_shape_hash_revision_viewport_index.sql"
 );
@@ -177,6 +183,7 @@ assert.match(appModule, /CalendarModule/);
 assert.match(appModule, /CanvasModule/);
 assert.match(appModule, /MeetingModule/);
 assert.match(apiError, /"CONFLICT"/);
+assert.match(apiError, /"WORKSPACE_RECORDING_CONSENT_REQUIRED"/);
 assert.match(apiError, /"PAYLOAD_TOO_LARGE"/);
 assert.match(apiError, /export function conflict\(message: string\): ApiError/);
 assert.match(apiError, /HttpStatus\.CONFLICT/);
@@ -191,12 +198,37 @@ assert.match(meetingService, /async createMeetingRoom\(/);
 assert.match(meetingService, /async updateMeetingRoom\(/);
 assert.match(meetingService, /async deleteMeetingRoom\(/);
 assert.match(meetingService, /async startMeetingInRoom\(/);
+assert.match(meetingService, /ensureWorkspaceRecordingConsent/);
+assert.match(meetingService, /assertAllActiveParticipantsHaveRecordingConsent/);
+assert.match(meetingService, /workspace_recording_consents/);
+assert.match(meetingService, /workspace_members\.role = 'owner'/);
+assert.match(meetingService, /meeting_participants\.user_id = \$3::uuid/);
 assert.match(meetingService, /assertWorkspaceOwnerAccess/);
 assert.match(meetingRoomsMigration, /CREATE TABLE public\.meeting_rooms/);
 assert.match(meetingRoomsMigration, /unique_active_meeting_room_key/);
 assert.match(meetingRoomsMigration, /unique_active_meeting_room_name/);
 assert.match(meetingRoomsMigration, /ALTER TABLE public\.meeting_rooms ENABLE ROW LEVEL SECURITY/);
 assert.match(meetingRoomsMigration, /trg_workspaces_create_default_meeting_room/);
+assert.match(
+  workspaceRecordingConsentsMigration,
+  /CREATE TABLE public\.workspace_recording_consents/
+);
+assert.match(
+  workspaceRecordingConsentsMigration,
+  /unique_workspace_recording_consent_policy/
+);
+assert.match(
+  workspaceRecordingConsentsMigration,
+  /ALTER TABLE public\.workspace_recording_consents ENABLE ROW LEVEL SECURITY/
+);
+assert.match(
+  workspaceRecordingConsentsDataApiMigration,
+  /REVOKE ALL ON TABLE public\.workspace_recording_consents/
+);
+assert.match(
+  workspaceRecordingConsentsDataApiMigration,
+  /FROM anon, authenticated, service_role/
+);
 assert.match(
   apiError,
   /export function payloadTooLarge\(message: string\): ApiError/
