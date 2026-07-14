@@ -1050,7 +1050,9 @@ function projectV2ItemApiItem(overrides = {}) {
       /INSERT INTO github_project_v2_repositories/i.test(query.text)
   );
   assert.ok(projectRepositoryInsert);
-  assert.deepEqual(projectRepositoryInsert.values, [workspaceId, repositoryId, [projectV2Id]]);
+  assert.match(projectRepositoryInsert.text, /SELECT project_v2_id, \$1/i);
+  assert.match(projectRepositoryInsert.text, /unnest\(\$2::uuid\[\]\)/i);
+  assert.deepEqual(projectRepositoryInsert.values, [repositoryId, [projectV2Id]]);
 }
 
 {
