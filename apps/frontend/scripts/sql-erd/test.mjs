@@ -6534,7 +6534,7 @@ assert.match(apiClient, /credentials: "same-origin"/);
 assert.doesNotMatch(apiSpec, /^- Sticky note$/m);
 assert.doesNotMatch(apiSpec, /^- Group box$/m);
 assert.match(apiSpec, /`notes`는 Sticky note, `frames`는 Group box/);
-assert.match(apiSpec, /`links`, `notes`, `frames`, `texts` 전체에서 중복될 수 없다/);
+assert.match(apiSpec, /`links`, `notes`, `frames`, `texts`, `strokes` 전체에서 중복될 수 없다/);
 
 assert.equal(typeof modelRuntime.applySqltoerdLayoutPatch, "function");
 const patchedLayout = modelRuntime.applySqltoerdLayoutPatch(
@@ -6614,6 +6614,29 @@ assert.deepEqual(
   modelRuntime.applySqltoerdLayoutPatch(layoutWithCreatedText, {
     deleteTextIds: ["text.billing"]
   }).annotations.texts,
+  []
+);
+const layoutWithCreatedStroke = modelRuntime.applySqltoerdLayoutPatch(
+  layoutWithCreatedText,
+  {
+    strokesToAdd: [
+      {
+        id: "stroke.billing",
+        points: [
+          { x: 24, y: 48 },
+          { x: 48, y: 72 }
+        ],
+        color: "blue",
+        size: 4
+      }
+    ]
+  }
+);
+assert.equal(layoutWithCreatedStroke.annotations.strokes[0].color, "blue");
+assert.deepEqual(
+  modelRuntime.applySqltoerdLayoutPatch(layoutWithCreatedStroke, {
+    deleteStrokeIds: ["stroke.billing"]
+  }).annotations.strokes,
   []
 );
 assert.equal(

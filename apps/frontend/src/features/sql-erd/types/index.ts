@@ -75,6 +75,7 @@ export type SqltoerdAnnotationsV1 = {
   notes?: SqltoerdCanvasNote[];
   frames?: SqltoerdCanvasFrame[];
   texts?: SqltoerdCanvasText[];
+  strokes?: SqltoerdCanvasStroke[];
 };
 
 export type SqltoerdCanvasNote = {
@@ -114,6 +115,13 @@ export type SqltoerdCanvasText = {
   color: SqltoerdCanvasFrameColor;
 };
 
+export type SqltoerdCanvasStroke = {
+  id: string;
+  points: { x: number; y: number }[];
+  color: SqltoerdCanvasFrameColor;
+  size: number;
+};
+
 export type SqltoerdLayoutPatch = {
   tablePositions?: SqltoerdTableLayout[];
   linksToAdd?: SqltoerdAnnotationLink[];
@@ -122,12 +130,14 @@ export type SqltoerdLayoutPatch = {
   notesToAdd?: SqltoerdCanvasNote[];
   framesToAdd?: SqltoerdCanvasFrame[];
   textsToAdd?: SqltoerdCanvasText[];
+  strokesToAdd?: SqltoerdCanvasStroke[];
   notesById?: Record<string, Partial<Omit<SqltoerdCanvasNote, "id">>>;
   framesById?: Record<string, Partial<Omit<SqltoerdCanvasFrame, "id">>>;
   textsById?: Record<string, Partial<Omit<SqltoerdCanvasText, "id">>>;
   deleteNoteIds?: readonly string[];
   deleteFrameIds?: readonly string[];
   deleteTextIds?: readonly string[];
+  deleteStrokeIds?: readonly string[];
 };
 
 export type SqltoerdAnnotationLink =

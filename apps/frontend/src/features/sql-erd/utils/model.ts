@@ -178,6 +178,7 @@ export function applySqltoerdLayoutPatch(
   const deletedNoteIds = new Set(patch.deleteNoteIds ?? []);
   const deletedFrameIds = new Set(patch.deleteFrameIds ?? []);
   const deletedTextIds = new Set(patch.deleteTextIds ?? []);
+  const deletedStrokeIds = new Set(patch.deleteStrokeIds ?? []);
   const positionsByTableId = new Map(
     (patch.tablePositions ?? []).map((position) => [position.tableId, position])
   );
@@ -191,9 +192,11 @@ export function applySqltoerdLayoutPatch(
     deletedNoteIds.size > 0 ||
     deletedFrameIds.size > 0 ||
     deletedTextIds.size > 0 ||
+    deletedStrokeIds.size > 0 ||
     (patch.notesToAdd?.length ?? 0) > 0 ||
     (patch.framesToAdd?.length ?? 0) > 0 ||
-    (patch.textsToAdd?.length ?? 0) > 0;
+    (patch.textsToAdd?.length ?? 0) > 0 ||
+    (patch.strokesToAdd?.length ?? 0) > 0;
   const annotations = currentLayoutJson.annotations ??
     (hasAnnotationPatch ? { version: 1, links: [] } : null);
 
@@ -220,7 +223,10 @@ export function applySqltoerdLayoutPatch(
             texts: (annotations.texts ?? [])
               .filter((text) => !deletedTextIds.has(text.id))
               .map((text) => ({ ...text, ...textsById[text.id] }))
-              .concat(patch.textsToAdd ?? [])
+              .concat(patch.textsToAdd ?? []),
+            strokes: (annotations.strokes ?? [])
+              .filter((stroke) => !deletedStrokeIds.has(stroke.id))
+              .concat(patch.strokesToAdd ?? [])
           } } : {})
   };
 }
