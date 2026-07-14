@@ -1091,7 +1091,7 @@ export function MeetingPanel() {
                 <div className="flex items-center border-b px-4 py-3 sm:px-6">
                   <Button
                     aria-haspopup="dialog"
-                    className="h-9 rounded-none border-r pr-6 pl-0 text-base font-semibold"
+                    className="h-9 rounded-none border-r px-6 text-base font-semibold"
                     disabled={
                       meetingRoomsStatus !== "success" ||
                       isActionPending ||

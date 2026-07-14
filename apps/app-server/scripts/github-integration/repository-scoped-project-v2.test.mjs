@@ -150,6 +150,12 @@ function selectionDatabase({ repository = { id: repositoryId }, links = ["555555
   assert.match(executor, /listRepositoryProjectV2s/);
   assert.match(executor, /replaceGithubRepositoryProjectV2Links/);
   assert.match(executor, /links\.repository_id = \$2/);
+  const repositoryLinkInsert = executor.match(
+    /INSERT INTO github_project_v2_repositories \([\s\S]*?\n\s*\);\n\s*}\n\s*\n\s*private async upsertGithubProjectV2/
+  )?.[0];
+  assert.ok(repositoryLinkInsert, "Repository ProjectV2 links must be inserted after discovery");
+  assert.match(repositoryLinkInsert, /SELECT project_v2_id, \$1[\s\S]*?unnest\(\$2::uuid\[\]\)/);
+  assert.match(repositoryLinkInsert, /\[repositoryId, uniqueProjectV2Ids\]/);
   assert.doesNotMatch(executor, /replaceGithubProjectV2RepositoryLinks/);
   assert.match(client, /repository\(owner: \$owner, name: \$name\)/);
   assert.doesNotMatch(source, /DELETE FROM github_projects_v2|DELETE FROM github_project_v2_fields|DELETE FROM github_project_v2_items|DELETE FROM github_issues|DELETE FROM github_pull_requests|DELETE FROM boards/i);
