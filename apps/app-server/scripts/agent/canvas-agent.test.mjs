@@ -168,6 +168,24 @@ function deterministicPlan(prompt, selectedShapeIds = [], toolHelpMode = false) 
 }
 
 {
+  const plan = deterministicPlan("파일/폴더 드롭", [], true);
+
+  assert.equal(plan.actionName, "finish");
+  assert.match(plan.input.summary, /로컬의 코드 파일이나 폴더/);
+  assert.equal(plan.input.suppressProgress, true);
+  assert.equal(plan.showProgress, false);
+}
+
+{
+  const plan = deterministicPlan("31번", [], true);
+
+  assert.equal(plan.actionName, "finish");
+  assert.match(plan.input.summary, /로컬의 코드 파일이나 폴더/);
+  assert.equal(plan.input.suppressProgress, true);
+  assert.equal(plan.showProgress, false);
+}
+
+{
   const plan = deterministicPlan("펜 도구 알려줘", [], true);
 
   assert.equal(plan.actionName, "finish");
