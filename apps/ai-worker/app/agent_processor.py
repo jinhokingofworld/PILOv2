@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 from app.meeting_report_processor import InfrastructureError
 
 AGENT_RUN_REQUESTED_JOB_TYPE = "agent_run_requested"
+AGENT_GROUNDED_ANSWER_REQUESTED_JOB_TYPE = "agent_grounded_answer_requested"
 AGENT_TOOL_SCHEMA_VERSION = "agent-tools:v1"
 TERMINAL_AGENT_RUN_STATUSES = {"completed", "failed", "cancelled"}
 PLANNER_STATUSES = {"tool_candidate", "needs_clarification", "unsupported"}
@@ -96,6 +97,60 @@ class AgentProcessResult:
     delete_message: bool
     reason: str
     run_id: str | None = None
+
+
+class AgentGroundedAnswerProcessor:
+    """Keeps transcript text in-memory: only App Server internal HTTPS carries it."""
+    def __init__(self, handoff_client: object, api_key: str, model: str, timeout_seconds: float) -> None:
+        self.handoff_client = handoff_client
+        self.api_key = api_key
+        self.model = model
+        self.timeout_seconds = timeout_seconds
+
+    def process_payload(self, payload: dict[str, object]) -> AgentProcessResult:
+        if payload.get("jobType") != AGENT_GROUNDED_ANSWER_REQUESTED_JOB_TYPE:
+            return AgentProcessResult(True, "invalid_grounded_answer_job")
+        run_id = payload.get("runId")
+        if not isinstance(run_id, str):
+            return AgentProcessResult(True, "invalid_grounded_answer_job")
+        try:
+            context = self.handoff_client.get_grounding_context(run_id)
+            if not context:
+                return AgentProcessResult(True, "grounded_answer_not_ready", run_id)
+            sources = context.get("sources")
+            if not isinstance(sources, list) or not sources:
+                self.handoff_client.complete_grounded_answer_without_sources(run_id)
+                return AgentProcessResult(True, "grounded_answer_no_sources", run_id)
+            answer, citations = self._answer(str(context.get("prompt", "")), sources)
+            self.handoff_client.complete_grounded_answer(run_id, answer, citations)
+            return AgentProcessResult(True, "grounded_answer_completed", run_id)
+        except InfrastructureError:
+            return AgentProcessResult(False, "infrastructure_failure", run_id)
+
+    def _answer(self, prompt: str, sources: list[object]) -> tuple[str, list[str]]:
+        from openai import OpenAI
+        safe_sources = [source for source in sources if isinstance(source, dict)][:5]
+        source_text = json.dumps(safe_sources, ensure_ascii=False)
+        try:
+            response = OpenAI(api_key=self.api_key, timeout=self.timeout_seconds).responses.create(
+                model=self.model,
+                input=[{"role": "system", "content": "Answer in Korean using only supplied meeting transcript sources. Return JSON with answer and citations (sourceId array). Do not invent citations."}, {"role": "user", "content": json.dumps({"question": prompt, "sources": source_text}, ensure_ascii=False)}],
+                text={"format": {"type": "json_schema", "name": "grounded_meeting_answer", "strict": True, "schema": {"type": "object", "additionalProperties": False, "required": ["answer", "citations"], "properties": {"answer": {"type": "string"}, "citations": {"type": "array", "items": {"type": "string"}}}}}},
+            )
+        except _openai_retryable_errors() as error:
+            raise InfrastructureError("OpenAI grounded answer retryable failure") from error
+        except Exception as error:
+            raise InfrastructureError("OpenAI grounded answer failed") from error
+        text = getattr(response, "output_text", "") or _extract_response_text(response)
+        try:
+            parsed = json.loads(text)
+        except Exception as error:
+            raise InfrastructureError("OpenAI grounded answer returned invalid JSON") from error
+        answer = parsed.get("answer") if isinstance(parsed, dict) else None
+        citations = parsed.get("citations") if isinstance(parsed, dict) else None
+        if not isinstance(answer, str) or not answer.strip() or not isinstance(citations, list):
+            raise InfrastructureError("OpenAI grounded answer returned invalid payload")
+        return answer.strip()[:8000], [item for item in citations if isinstance(item, str)][:5]
 
 
 class AgentRunRepository(Protocol):

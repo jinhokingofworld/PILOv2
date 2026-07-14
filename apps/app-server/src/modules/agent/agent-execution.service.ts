@@ -13,6 +13,8 @@ import {
 } from "./agent-logging.service";
 import { buildAgentReadResultAnswer } from "./agent-read-result-formatter";
 import { AgentToolRegistryService } from "./agent-tool-registry.service";
+import { AgentGroundedAnswerService } from "./agent-grounded-answer.service";
+import { AgentGroundedAnswerOutboxPublisherService } from "./agent-grounded-answer-outbox-publisher.service";
 import type {
   AgentJsonObject,
   AgentJsonPrimitive,
@@ -91,7 +93,9 @@ export class AgentExecutionService {
     private readonly workspaceService: WorkspaceService,
     private readonly agentLoggingService: AgentLoggingService,
     private readonly agentConfirmationService: AgentConfirmationService,
-    private readonly agentToolRegistryService: AgentToolRegistryService
+    private readonly agentToolRegistryService: AgentToolRegistryService,
+    private readonly agentGroundedAnswerService: AgentGroundedAnswerService,
+    private readonly agentGroundedAnswerOutboxPublisherService: AgentGroundedAnswerOutboxPublisherService
   ) {}
 
   async executeReadyRun(runId: string): Promise<AgentExecutionResult> {
@@ -561,6 +565,12 @@ export class AgentExecutionService {
       );
       const outputSummary = this.buildOutputSummary(result);
       const resourceRefs = this.sanitizeResourceRefs(result.resourceRefs);
+
+      if (definition.requiresGroundedAnswer) {
+        await this.agentGroundedAnswerService.completeToolAndQueue({ currentUserId, workspaceId, runId, stepId: step.id, outputSummary, resourceRefs });
+        await this.agentGroundedAnswerOutboxPublisherService.publish(runId);
+        return { status: "skipped", reason: "already_started" };
+      }
 
       await this.agentLoggingService.completeStep(currentUserId, workspaceId, {
         runId,

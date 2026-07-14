@@ -5,6 +5,7 @@ import os
 from dataclasses import dataclass
 
 from app.agent_processor import (
+    AgentGroundedAnswerProcessor,
     AgentRunProcessor,
     OpenAiAgentPlannerClient,
 )
@@ -91,14 +92,10 @@ class SharedAiWorkerSettings:
                 DEFAULT_OPENAI_AGENT_PLANNER_TIMEOUT_MS,
             ),
             agent_execution_handoff_base_url=(
-                _require_env("AGENT_EXECUTION_HANDOFF_BASE_URL")
-                if legacy_agent_drain_enabled
-                else None
+                _optional_env("AGENT_EXECUTION_HANDOFF_BASE_URL")
             ),
             agent_execution_handoff_token=(
-                _require_env("AGENT_EXECUTION_HANDOFF_TOKEN")
-                if legacy_agent_drain_enabled
-                else None
+                _optional_env("AGENT_EXECUTION_HANDOFF_TOKEN")
             ),
             agent_execution_handoff_timeout_seconds=_positive_int_env(
                 "AGENT_EXECUTION_HANDOFF_TIMEOUT_SECONDS",
@@ -180,12 +177,12 @@ def create_shared_ai_worker(
     agent_run_repository = None
     agent_execution_handoff_client = None
     agent_run_processor = None
-    if resolved_settings.legacy_agent_drain_enabled:
-        if (
-            resolved_settings.agent_execution_handoff_base_url is None
-            or resolved_settings.agent_execution_handoff_token is None
-        ):
-            raise RuntimeError("Legacy Agent drain configuration is incomplete")
+    if (
+        resolved_settings.agent_execution_handoff_base_url is not None
+        or resolved_settings.agent_execution_handoff_token is not None
+    ):
+        if resolved_settings.agent_execution_handoff_base_url is None or resolved_settings.agent_execution_handoff_token is None:
+            raise RuntimeError("Agent execution handoff configuration is incomplete")
         agent_run_repository = PgAgentRunRepository(
             resolved_settings.database_url,
             resolved_settings.database_ssl,
@@ -216,10 +213,19 @@ def create_shared_ai_worker(
             boto3.client("s3", **boto_kwargs),
         )
 
+    grounded_answer_processor = None
+    if agent_execution_handoff_client is not None:
+        grounded_answer_processor = AgentGroundedAnswerProcessor(
+            agent_execution_handoff_client,
+            resolved_settings.openai_api_key,
+            resolved_settings.openai_agent_planner_model,
+            resolved_settings.openai_agent_planner_timeout_seconds,
+        )
     dispatcher = create_shared_dispatcher(
         agent_run_processor,
         canvas_agent_processor,
         legacy_meeting_report_processor,
+        grounded_answer_processor,
     )
     return SqsAiJobWorker(
         resolved_settings,
@@ -265,10 +271,12 @@ def create_shared_dispatcher(
     agent_run_processor: AgentRunProcessor | None,
     canvas_agent_processor: CanvasAgentProcessor,
     legacy_meeting_report_processor: MeetingReportProcessor | None,
+    grounded_answer_processor: AgentGroundedAnswerProcessor | None = None,
 ) -> JobDispatcher:
     return JobDispatcher(
         meeting_report_processor=legacy_meeting_report_processor,
         agent_run_processor=agent_run_processor,
+        grounded_answer_processor=grounded_answer_processor,
         canvas_agent_processor=canvas_agent_processor,
     )
 

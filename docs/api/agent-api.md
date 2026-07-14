@@ -74,11 +74,20 @@ AI Worker가 `tool_candidate` planner 결과를 저장하면 인증된 내부 ha
 confirmation을 중복 생성하지 않는다. 이 내부 endpoint는 public API가 아니며 사용자 bearer token을
 받지 않는다.
 
+`search_meeting_transcript`는 read-only tool이지만 일반 formatter로 즉시 완료하지 않는다. App Server가
+현재 사용자 권한으로 query embedding과 pgvector 검색을 수행하고, chunk ID만 가진
+`agent_grounded_answer_outbox`를 저장한다. AI Worker는 내부 인증 endpoint에서만 bounded transcript
+excerpt를 일회성으로 받아 두 번째 LLM 호출을 수행한다. excerpt와 embedding은 Agent run/step/log,
+outbox, SQS payload에 저장하지 않는다. final citation은 outbox의 source ID 부분집합만 허용한다.
+
 ## 실행 모델
 
 - 1차는 `one prompt = one agent run`으로 시작한다.
 - true multi-turn memory, 장기 thread, 예약 실행은 1차 범위가 아니다.
 - read-only 요청은 confirmation 없이 자동 실행할 수 있다.
+- `search_meeting_transcript`는 `query`와 선택 `reportId`만 받고, Workspace 전체의 owner 또는 해당
+  회의의 현재·과거 참여자가 접근 가능한 current transcript chunk만 상위 5개 검색한다. 결과가 없으면
+  LLM answer phase를 호출하지 않는다.
 - write 요청은 `waiting_confirmation` 상태의 run과 pending confirmation을 만든다.
 - 사용자가 승인하면 서버는 confirmation에 저장된 plan만 실행한다.
 - 승인 transaction은 `running` tool step을 execution claim으로 함께 만든다. 승인 직후 process가

@@ -1229,6 +1229,25 @@ class HttpAgentExecutionHandoffClient(AgentExecutionHandoffClient):
     def recover_stale_executions(self) -> None:
         self._post("/api/v1/internal/agent/stale-executions/recover")
 
+    def get_grounding_context(self, run_id: str) -> dict[str, object] | None:
+        request = Request(f"{self.base_url}/api/v1/internal/agent/runs/{run_id}/grounding-context", headers={"X-Agent-Execution-Handoff-Token": self.token}, method="GET")
+        try:
+            with urlopen(request, timeout=self.timeout_seconds) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+                return payload if isinstance(payload, dict) else None
+        except HTTPError as error:
+            if error.code == 404:
+                return None
+            raise InfrastructureError(f"Agent grounding context returned HTTP {error.code}") from error
+        except (OSError, TimeoutError, URLError) as error:
+            raise InfrastructureError("Agent grounding context is unavailable") from error
+
+    def complete_grounded_answer(self, run_id: str, answer: str, citations: list[str]) -> None:
+        self._post_json(f"/api/v1/internal/agent/runs/{run_id}/grounded-answer", {"answer": answer, "citations": citations})
+
+    def complete_grounded_answer_without_sources(self, run_id: str) -> None:
+        self._post(f"/api/v1/internal/agent/runs/{run_id}/grounded-answer/no-sources")
+
     def _post(self, path: str) -> None:
         request = Request(
             f"{self.base_url}{path}",
@@ -1245,6 +1264,16 @@ class HttpAgentExecutionHandoffClient(AgentExecutionHandoffClient):
             raise InfrastructureError(
                 f"Agent execution handoff returned HTTP {error.code}"
             ) from error
+        except (OSError, TimeoutError, URLError) as error:
+            raise InfrastructureError("Agent execution handoff is unavailable") from error
+
+    def _post_json(self, path: str, payload: dict[str, object]) -> None:
+        request = Request(f"{self.base_url}{path}", data=json.dumps(payload).encode("utf-8"), headers={"X-Agent-Execution-Handoff-Token": self.token, "Content-Type": "application/json"}, method="POST")
+        try:
+            with urlopen(request, timeout=self.timeout_seconds):
+                return
+        except HTTPError as error:
+            raise InfrastructureError(f"Agent execution handoff returned HTTP {error.code}") from error
         except (OSError, TimeoutError, URLError) as error:
             raise InfrastructureError("Agent execution handoff is unavailable") from error
 

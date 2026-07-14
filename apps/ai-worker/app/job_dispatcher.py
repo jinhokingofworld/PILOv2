@@ -6,6 +6,7 @@ from typing import Protocol
 
 from app.agent_processor import (
     AGENT_RUN_REQUESTED_JOB_TYPE,
+    AGENT_GROUNDED_ANSWER_REQUESTED_JOB_TYPE,
     AgentProcessResult,
 )
 from app.canvas_agent.types import CANVAS_AGENT_JOB_TYPE, CanvasAgentProcessResult
@@ -47,11 +48,13 @@ class JobDispatcher:
         self,
         meeting_report_processor: MeetingReportProcessorLike | None = None,
         agent_run_processor: AgentRunProcessorLike | None = None,
+        grounded_answer_processor: AgentRunProcessorLike | None = None,
         canvas_agent_processor: CanvasAgentProcessorLike | None = None,
         pr_review_analysis_processor: PrReviewAnalysisProcessorLike | None = None,
     ) -> None:
         self.meeting_report_processor = meeting_report_processor
         self.agent_run_processor = agent_run_processor
+        self.grounded_answer_processor = grounded_answer_processor
         self.canvas_agent_processor = canvas_agent_processor
         self.pr_review_analysis_processor = pr_review_analysis_processor
 
@@ -76,6 +79,9 @@ class JobDispatcher:
 
             if normalized_job_type == AGENT_RUN_REQUESTED_JOB_TYPE:
                 return self._process_agent_run(payload)
+
+            if normalized_job_type == AGENT_GROUNDED_ANSWER_REQUESTED_JOB_TYPE:
+                return self._process_grounded_answer(payload)
 
             if normalized_job_type == CANVAS_AGENT_JOB_TYPE:
                 return self._process_canvas_agent(payload)
@@ -124,6 +130,12 @@ class JobDispatcher:
             job_type=AGENT_RUN_REQUESTED_JOB_TYPE,
             resource_id=result.run_id,
         )
+
+    def _process_grounded_answer(self, payload: dict[str, object]) -> JobProcessResult:
+        if self.grounded_answer_processor is None:
+            return JobProcessResult(delete_message=False, reason="grounded_answer_processor_unavailable", job_type=AGENT_GROUNDED_ANSWER_REQUESTED_JOB_TYPE)
+        result = self.grounded_answer_processor.process_payload(payload)
+        return JobProcessResult(delete_message=result.delete_message, reason=result.reason, job_type=AGENT_GROUNDED_ANSWER_REQUESTED_JOB_TYPE, resource_id=result.run_id)
 
     def _process_canvas_agent(self, payload: dict[str, object]) -> JobProcessResult:
         if self.canvas_agent_processor is None:

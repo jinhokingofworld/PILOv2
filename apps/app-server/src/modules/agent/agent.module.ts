@@ -13,6 +13,8 @@ import { AgentInternalController } from "./agent-internal.controller";
 import { AgentJobService } from "./agent-job.service";
 import { AgentLoggingService } from "./agent-logging.service";
 import { AgentOutboxPublisherService } from "./agent-outbox-publisher.service";
+import { AgentGroundedAnswerService } from "./agent-grounded-answer.service";
+import { AgentGroundedAnswerOutboxPublisherService } from "./agent-grounded-answer-outbox-publisher.service";
 import { AgentPlannerService } from "./agent-planner.service";
 import { AgentService } from "./agent.service";
 import { AgentToolRegistryService } from "./agent-tool-registry.service";
@@ -38,6 +40,8 @@ import { MeetingAgentToolsService } from "./tools/meeting-agent-tools.service";
     AgentJobService,
     AgentLoggingService,
     AgentOutboxPublisherService,
+    AgentGroundedAnswerService,
+    AgentGroundedAnswerOutboxPublisherService,
     AgentPlannerService,
     AgentToolRegistryService,
     BoardAgentToolsService,

@@ -1105,6 +1105,7 @@ function formatterMeetingReport(index, overrides = {}) {
     "list_meeting_reports",
     "get_meeting_report",
     "summarize_meeting_report",
+    "search_meeting_transcript",
     "search_board_issues"
   ]);
   assert.equal(registry.getDefinition("move_board_issue_status"), null);
