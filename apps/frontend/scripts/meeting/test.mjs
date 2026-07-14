@@ -253,7 +253,7 @@ assert.match(meetingPanel, /useMeetingWorkspaceData/);
 assert.match(meetingPanel, /useMeetingRooms/);
 assert.match(meetingPanel, /meetingRoomId: selectedMeetingRoomId/);
 assert.match(meetingPanel, /회의방 목록/);
-assert.match(meetingPanel, /border-r pr-6 pl-0 text-base font-semibold/);
+assert.match(meetingPanel, /border-r px-6 text-base font-semibold/);
 assert.match(meetingPanel, /getCurrentUserActiveMeeting/);
 assert.match(meetingPanel, /createMeetingRoom/);
 assert.match(meetingPanel, /updateMeetingRoom/);
