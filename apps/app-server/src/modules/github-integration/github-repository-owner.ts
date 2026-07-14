@@ -13,6 +13,16 @@ export function readGithubRepositoryOwnerType(
     : null;
 }
 
+export function requiresPersonalProjectV2OAuth(
+  repositoryOwnerType: GithubRepositoryOwnerType | null,
+  installationAccountType: "User" | "Organization"
+): boolean {
+  return (
+    repositoryOwnerType === "User" ||
+    (repositoryOwnerType === null && installationAccountType === "User")
+  );
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }

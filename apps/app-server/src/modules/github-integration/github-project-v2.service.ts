@@ -9,7 +9,10 @@ import { GithubIntegrationConfigService } from "./github-integration-config.serv
 import { GithubProjectV2WriteService } from "./github-project-v2-write.service";
 import { GithubProjectV2PollingService } from "./github-project-v2-polling.service";
 import { GithubProjectV2SyncTokenService } from "./github-project-v2-sync-token.service";
-import { readGithubRepositoryOwnerType } from "./github-repository-owner";
+import {
+  readGithubRepositoryOwnerType,
+  requiresPersonalProjectV2OAuth
+} from "./github-repository-owner";
 import { GithubSyncExecutorService, type GithubSyncInstallationRow } from "./github-sync-executor.service";
 import { GithubSyncJobEnqueueError } from "./github-sync-job.service";
 import { GithubSyncRunService } from "./github-sync-run.service";
@@ -388,7 +391,7 @@ export class GithubProjectV2Service {
         requiresProjectV2Access: true
       });
     } catch {
-      if (repositoryOwnerType === "User") {
+      if (requiresPersonalProjectV2OAuth(repositoryOwnerType, installation.account_type)) {
         return { connectionRequired: true, installationId, repositoryId, projects: [] };
       }
       throw badRequest("GitHub ProjectV2 discovery could not be authorized");

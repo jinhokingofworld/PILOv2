@@ -5,7 +5,10 @@ import { DatabaseService } from "../../database/database.service";
 import { GithubIntegrationConfigService } from "./github-integration-config.service";
 import { GithubTokenEncryptionService } from "./github-token-encryption.service";
 import { GithubOAuthConnectionService } from "./github-oauth-connection.service";
-import type { GithubRepositoryOwnerType } from "./github-repository-owner";
+import {
+  requiresPersonalProjectV2OAuth,
+  type GithubRepositoryOwnerType
+} from "./github-repository-owner";
 
 interface GithubProjectV2SyncInstallation {
   account_login: string;
@@ -35,12 +38,10 @@ export class GithubProjectV2SyncTokenService {
     repositoryOwnerType: GithubRepositoryOwnerType | null;
     requiresProjectV2Access: boolean;
   }): Promise<string | null> {
-    const requiresPersonalProjectV2Token =
-      input.repositoryOwnerType === "User" ||
-      (
-        input.repositoryOwnerType === null &&
-        input.installation.account_type === "User"
-      );
+    const requiresPersonalProjectV2Token = requiresPersonalProjectV2OAuth(
+      input.repositoryOwnerType,
+      input.installation.account_type
+    );
     if (!input.requiresProjectV2Access || !requiresPersonalProjectV2Token) {
       return null;
     }

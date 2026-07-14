@@ -6,6 +6,9 @@ const require = createRequire(import.meta.url);
 const {
   GithubProjectV2SyncTokenService
 } = require("../../dist/modules/github-integration/github-project-v2-sync-token.service.js");
+const {
+  GithubProjectV2Service
+} = require("../../dist/modules/github-integration/github-project-v2.service.js");
 
 const userAccessToken = "user-project-v2-access-token";
 const ownerLogin = "juhyung";
@@ -86,6 +89,61 @@ for (const connectionService of [
     "a User repository owner must preserve personal ProjectV2 OAuth errors even when installation metadata is Organization"
   );
 }
+
+const legacyRepositoryId = "44444444-4444-4444-8444-444444444444";
+const legacyDiscoveryRows = [
+  {
+    id: "33333333-3333-4333-8333-333333333333",
+    workspace_id: "11111111-1111-4111-8111-111111111111",
+    github_installation_id: 12345,
+    account_login: ownerLogin,
+    account_type: "User"
+  },
+  {
+    id: legacyRepositoryId,
+    workspace_id: "11111111-1111-4111-8111-111111111111",
+    installation_id: "33333333-3333-4333-8333-333333333333",
+    github_node_id: "R_legacy",
+    owner_login: ownerLogin,
+    name: "legacy-repository",
+    full_name: `${ownerLogin}/legacy-repository`,
+    raw: null
+  }
+];
+const legacyDiscoveryService = new GithubProjectV2Service(
+  {
+    async queryOne() {
+      return legacyDiscoveryRows.shift() ?? null;
+    }
+  },
+  { assertWorkspaceAccess: async () => {} },
+  {},
+  {},
+  {},
+  undefined,
+  {
+    async resolvePersonalProjectV2UserAccessToken() {
+      throw new Error("ProjectV2 OAuth connection is missing");
+    }
+  },
+  { getGithubAppConfig: () => ({}) }
+);
+
+assert.deepEqual(
+  await legacyDiscoveryService.discoverGithubProjectV2(
+    "current-user-id",
+    "11111111-1111-4111-8111-111111111111",
+    "33333333-3333-4333-8333-333333333333",
+    { repositoryId: legacyRepositoryId }
+  ),
+  {
+    connectionRequired: true,
+    installationId: "33333333-3333-4333-8333-333333333333",
+    repositoryId: legacyRepositoryId,
+    projects: []
+  },
+  "a legacy repository with no raw owner type must use the same connection-required decision as the token resolver"
+);
 
 const root = new URL("../../../..", import.meta.url);
 const projectV2Service = readFileSync(
