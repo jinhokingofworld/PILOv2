@@ -101,13 +101,11 @@ assert.match(
 );
 assert.match(
   projectSelectionSaveHandler,
-  /project\.installationId === repository\.installationId/
-);
-assert.match(
-  projectSelectionSaveHandler,
-  /installationId: repository\.installationId/
+  /activateWorkspaceBoardSource\([\s\S]*?repositoryId: selectedRepositoryId[\s\S]*?projectV2Id: selectedProjectV2Id/,
+  "the selected repository and ProjectV2 must become the active Board source"
 );
 assert.doesNotMatch(projectSelectionSaveHandler, /projectIdsByInstallation/);
+assert.doesNotMatch(projectSelectionSaveHandler, /replaceGithubProjectV2Selections/);
 assert.match(
   tables,
   /저장소를 선택하면 PR 및 ProjectV2 동기화 범위를 관리할 수 있습니다/

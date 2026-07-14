@@ -1,7 +1,7 @@
 import { Injectable, Optional } from "@nestjs/common";
 import { QueryResultRow } from "pg";
 import { badRequest, notFound } from "../../common/api-error";
-import { DatabaseService } from "../../database/database.service";
+import { DatabaseService, type DatabaseTransaction } from "../../database/database.service";
 import { WorkspaceService } from "../workspace/workspace.service";
 import { ListGithubProjectsV2Query } from "./dto";
 import { GithubAppClient } from "./github-app.client";
@@ -346,6 +346,107 @@ export class GithubProjectV2Service {
         return { ...selection, syncRunId: error.syncRunId, syncStatus: "failed", syncError: error.message };
       }
       throw error;
+    }
+  }
+
+  async selectWorkspaceBoardProjectV2(
+    currentUserId: string,
+    workspaceId: string,
+    input: { repositoryId: string; projectV2Id: string },
+    transaction: DatabaseTransaction
+  ): Promise<{ installationId: string; repositoryId: string; projectV2Id: string }> {
+    const repository = await transaction.queryOne<GithubProjectV2RepositoryRow>(
+      `
+        SELECT id, workspace_id, installation_id, github_node_id, owner_login, name, full_name, raw
+        FROM github_repositories
+        WHERE workspace_id = $1::uuid AND id = $2::uuid
+        FOR UPDATE
+      `,
+      [workspaceId, input.repositoryId]
+    );
+    if (!repository?.installation_id) {
+      throw notFound("GitHub repository not found");
+    }
+
+    const project = await transaction.queryOne<GithubProjectV2SelectionProjectRow>(
+      `
+        SELECT id, installation_id
+        FROM github_projects_v2
+        WHERE workspace_id = $1::uuid AND id = $2::uuid
+        FOR UPDATE
+      `,
+      [workspaceId, input.projectV2Id]
+    );
+    if (!project) throw notFound("GitHub ProjectV2 not found");
+    if (project.installation_id !== repository.installation_id) {
+      throw badRequest("GitHub ProjectV2 does not belong to the installation");
+    }
+
+    const linked = await transaction.queryOne<GithubProjectV2RepositoryLinkRow>(
+      githubProjectV2RepositoryLinkSql,
+      [input.repositoryId, [input.projectV2Id]]
+    );
+    if (!linked) throw badRequest("GitHub ProjectV2 is not linked to the repository");
+
+    await this.pollingService?.terminateWorkspaceDeselectedQueuedRuns(
+      {
+        workspaceId,
+        retainedRepositoryId: input.repositoryId,
+        retainedProjectV2Id: input.projectV2Id
+      },
+      transaction
+    );
+    await transaction.execute(
+      `
+        DELETE FROM github_project_v2_polling_schedules AS schedule
+        USING github_repositories AS repository
+        WHERE schedule.repository_id = repository.id
+          AND repository.workspace_id = $1::uuid
+      `,
+      [workspaceId]
+    );
+    await transaction.execute(
+      `
+        DELETE FROM github_project_v2_selections AS selection
+        USING github_repositories AS repository
+        WHERE selection.repository_id = repository.id
+          AND repository.workspace_id = $1::uuid
+      `,
+      [workspaceId]
+    );
+    await transaction.execute(
+      `
+        INSERT INTO github_project_v2_selections (
+          installation_id, repository_id, project_v2_id
+        ) VALUES ($1::uuid, $2::uuid, $3::uuid)
+      `,
+      [repository.installation_id, input.repositoryId, input.projectV2Id]
+    );
+    await this.pollingService?.syncSelectionSchedules(
+      { repositoryId: input.repositoryId, requestedByUserId: currentUserId },
+      transaction
+    );
+
+    return {
+      installationId: repository.installation_id,
+      repositoryId: input.repositoryId,
+      projectV2Id: input.projectV2Id
+    };
+  }
+
+  async enqueueWorkspaceBoardProjectV2Sync(
+    currentUserId: string,
+    workspaceId: string,
+    source: { installationId: string; repositoryId: string; projectV2Id: string }
+  ): Promise<void> {
+    if (!this.syncRunService) return;
+    for (const target of ["project_v2_fields", "project_v2_items"] as const) {
+      await this.syncRunService.startGithubSyncRun(currentUserId, workspaceId, {
+        installationId: source.installationId,
+        repositoryId: source.repositoryId,
+        projectV2Id: source.projectV2Id,
+        target
+      });
     }
   }
 

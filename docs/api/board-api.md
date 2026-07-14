@@ -1,5 +1,46 @@
 # Board API
 
+## Active Board Source
+
+`boards` is the cached repository/ProjectV2 Board collection. The shared active
+Board is the durable `workspace_board_settings.active_board_id` pointer.
+
+```http
+GET /api/v1/workspaces/{workspaceId}/boards/active
+PUT /api/v1/workspaces/{workspaceId}/boards/active
+```
+
+`GET` is available to workspace members and returns `data: null` when the
+workspace has no active Board. `PUT` accepts `{ "repositoryId", "projectV2Id" }`
+and is restricted to `workspaces.owner_user_id`; other members receive `403
+FORBIDDEN`. The repository/ProjectV2 link is validated and the Board is hydrated
+before the pointer changes, so a hydration failure preserves the prior source.
+Within the same transition, PILO makes the selected repository/ProjectV2 the
+workspace's only ProjectV2 detail selection, removes prior polling schedules,
+and queues `project_v2_fields` and `project_v2_items` refreshes after the source
+pointer commits. Completed refreshes use the normal Board invalidation flow.
+
+Successful `PUT` returns `{ boardId, workspaceId, repository, project,
+updatedByUserId, updatedAt }` and publishes this Redis/socket payload:
+
+```json
+{
+  "workspaceId": "workspace_uuid",
+  "boardId": "42",
+  "changedAt": "2026-07-14T00:00:00.000Z"
+}
+```
+
+Clients join `board:source:join` with `{ workspaceId }` and leave with
+`board:source:leave`. Realtime sends `board:source:updated` only to that
+workspace source room. It is an invalidation signal: clients refetch `GET
+/boards/active`, then leave the former `board:{boardId}` room and join the new
+one. `board:invalidated` remains exclusively a Board-content event.
+
+Repository ProjectV2 discovery is metadata-only and happens after repository
+selection. Project OAuth must not bulk-fetch or display a personal Project
+catalogue or Project items before that selection.
+
 ## 범위
 
 Board API는 GitHub Project Kanban 화면을 위한 로컬 캐시 API와 제한된 issue write API를 제공한다.

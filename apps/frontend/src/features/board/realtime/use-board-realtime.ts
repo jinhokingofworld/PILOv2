@@ -15,36 +15,44 @@ function readUsableRoom({
   workspaceId
 }: BoardRealtimeConfig): {
   accessToken: string;
-  room: BoardRealtimeRoom;
+  room: BoardRealtimeRoom | null;
 } | null {
   const normalizedAccessToken = accessToken?.trim() ?? "";
   const normalizedBoardId = boardId.trim();
   const normalizedWorkspaceId = workspaceId.trim().toLowerCase();
 
-  if (!normalizedAccessToken || !normalizedBoardId || !normalizedWorkspaceId) {
+  if (!normalizedAccessToken || !normalizedWorkspaceId) {
     return null;
   }
 
   return {
     accessToken: normalizedAccessToken,
-    room: {
-      boardId: normalizedBoardId,
-      workspaceId: normalizedWorkspaceId
-    }
+    room: normalizedBoardId
+      ? { boardId: normalizedBoardId, workspaceId: normalizedWorkspaceId }
+      : null
   };
 }
 
 export function useBoardRealtime(config: BoardRealtimeConfig) {
   const reloadBoardRef = useRef(config.reloadBoard);
+  const reloadActiveSourceRef = useRef(config.reloadActiveSource ?? config.reloadBoard);
   const usableRoom = readUsableRoom(config);
 
   function reloadBoard() {
     void reloadBoardRef.current();
   }
 
+  function reloadActiveSource() {
+    void reloadActiveSourceRef.current();
+  }
+
   useEffect(() => {
     reloadBoardRef.current = config.reloadBoard;
   }, [config.reloadBoard]);
+
+  useEffect(() => {
+    reloadActiveSourceRef.current = config.reloadActiveSource ?? config.reloadBoard;
+  }, [config.reloadActiveSource, config.reloadBoard]);
 
   useEffect(() => {
     if (!usableRoom) {
@@ -64,8 +72,10 @@ export function useBoardRealtime(config: BoardRealtimeConfig) {
 
     const lifecycle = createBoardRealtimeLifecycle({
       reloadBoard,
+      reloadActiveSource,
       room,
-      socket: realtimeSocket
+      socket: realtimeSocket,
+      workspaceId: usableRoom.room?.workspaceId ?? config.workspaceId.trim().toLowerCase()
     });
 
     lifecycle.connect();
@@ -73,5 +83,5 @@ export function useBoardRealtime(config: BoardRealtimeConfig) {
     return () => {
       lifecycle.cleanup();
     };
-  }, [usableRoom?.accessToken, usableRoom?.room.boardId, usableRoom?.room.workspaceId]);
+  }, [usableRoom?.accessToken, usableRoom?.room?.boardId, usableRoom?.room?.workspaceId, config.workspaceId]);
 }

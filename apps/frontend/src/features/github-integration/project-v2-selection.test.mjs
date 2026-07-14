@@ -23,21 +23,19 @@ const paginationModule = await import(
 
 assert.match(types, /export type GithubProjectV2 = \{[\s\S]*?selected: boolean;/);
 assert.match(types, /export type ReplaceGithubProjectV2SelectionsInput = \{[\s\S]*?installationId: string;[\s\S]*?projectV2Ids: string\[\];/);
-assert.match(client, /replaceGithubProjectV2Selections\(/);
+assert.match(client, /activateWorkspaceBoardSource/);
 assert.match(client, /discoverGithubProjectV2/);
 assert.match(client, /projects-v2\/discovery/);
-assert.match(client, /project-v2-selections/);
 assert.match(client, /method: "PUT"/);
-assert.match(tables, /type="checkbox"/);
-assert.match(tables, /onToggleProjectV2Selection/);
+assert.doesNotMatch(tables, /type="checkbox"|onToggleProjectV2Selection|selectedProjectV2Ids/);
 assert.match(tables, /onSaveProjectV2Selections/);
-assert.match(panel, /replaceGithubProjectV2Selections/);
+assert.match(panel, /activateWorkspaceBoardSource/);
 assert.match(
   panel,
   /listGithubProjectsV2\(workspaceId, \{[\s\S]{0,160}closed: true,[\s\S]{0,160}limit: 100,/,
   "the complete-list save must include closed ProjectV2s"
 );
-assert.match(panel, /setSelectedProjectV2Ids/);
+assert.doesNotMatch(panel, /setSelectedProjectV2Ids|replaceGithubProjectV2Selections|rememberGithubBoardSelection/);
 assert.match(panel, /async function handleSaveProjectV2Selections/);
 const saveSelectionStart = panel.indexOf("async function handleSaveProjectV2Selections");
 const nextHandlerStart = panel.indexOf(
@@ -47,19 +45,18 @@ const nextHandlerStart = panel.indexOf(
 assert.ok(saveSelectionStart >= 0 && nextHandlerStart > saveSelectionStart);
 assert.match(
   panel.slice(saveSelectionStart, nextHandlerStart),
-  /selection\.syncStatus === "queued"/,
-  "saving a nonempty selection must begin sync polling"
+  /activateWorkspaceBoardSource/,
+  "saving a selected ProjectV2 must activate the shared Board"
 );
-assert.match(panel, /선택된 프로젝트가 없어 보드에 표시할 내용이 없습니다/);
 assert.match(
   panel,
-  /selection\.syncStatus === "failed"[\s\S]*?선택은 저장됐지만 동기화를 시작하지 못했습니다/,
-  "a saved selection with an enqueue failure must show a distinct sync failure message"
+  /Only the workspace owner can change the active Board source/,
+  "only the workspace owner may switch the shared Board source"
 );
 assert.match(
   panel.slice(saveSelectionStart, nextHandlerStart),
-  /selection\.syncStatus === "queued"\)[\s\S]{0,160}setHasRunningSyncRun\(true\)/,
-  "a queued selection must start polling"
+  /activateWorkspaceBoardSource\([\s\S]{0,240}projectV2Id: selectedProjectV2Id/,
+  "the selected ProjectV2 must be the only active Board source input"
 );
 assert.match(panel, /handleDiscoverGithubProjectV2/);
 assert.match(panel, /discovery\.connectionRequired/);

@@ -5,8 +5,11 @@ import type { RealtimeServerConfig } from "../config/realtime-config";
 import { createRealtimeSessionService } from "../auth/session.service";
 import { createBoardAccessService } from "../board/board-access.service";
 import { createBoardInvalidationFanOut } from "../board/board-invalidation-fan-out";
+import { createBoardSourceFanOut } from "../board/board-source-fan-out";
 import { createBoardRoomService } from "../board/board-room.service";
+import { createBoardSourceRoomService } from "../board/board-source-room.service";
 import { registerBoardSocketHandlers } from "../board/board-socket-handlers";
+import { registerBoardSourceSocketHandlers } from "../board/board-source-socket-handlers";
 import { canvasClientEvents, canvasServerEvents } from "../canvas/canvas-socket-events";
 import {
   createCanvasAccessService,
@@ -97,6 +100,7 @@ const CANVAS_OPERATION_REDIS_CHANNEL = "canvas:operations";
 const MEETING_REPORT_REDIS_CHANNEL = "meeting:report-events";
 const MEETING_STATE_REDIS_CHANNEL = "meeting:state-events";
 const BOARD_INVALIDATION_REDIS_CHANNEL = "board:invalidations";
+const BOARD_SOURCE_REDIS_CHANNEL = "board:source-events";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -641,6 +645,14 @@ export async function createRealtimeSocketServer({
       io.to(roomName).emit(event, payload);
     },
   });
+  const boardSourceRoomService = createBoardSourceRoomService({
+    accessService: boardAccessService,
+  });
+  const boardSourceFanOut = createBoardSourceFanOut({
+    emitToRoom(roomName, event, payload) {
+      io.to(roomName).emit(event, payload);
+    },
+  });
   const unsubscribeCanvasOperations = redisAdapter
     ? await redisAdapter.subscribe(CANVAS_OPERATION_REDIS_CHANNEL, (payload) => {
         if (!isCanvasShapeOperationPayload(payload)) {
@@ -683,6 +695,13 @@ export async function createRealtimeSocketServer({
     ? await redisAdapter.subscribe(BOARD_INVALIDATION_REDIS_CHANNEL, (payload) => {
         if (!boardInvalidationFanOut.fanOut(payload)) {
           console.error("Board invalidation Redis payload is invalid");
+        }
+      })
+    : null;
+  const unsubscribeBoardSourceEvents = redisAdapter
+    ? await redisAdapter.subscribe(BOARD_SOURCE_REDIS_CHANNEL, (payload) => {
+        if (!boardSourceFanOut.fanOut(payload)) {
+          console.error("Board source Redis payload is invalid");
         }
       })
     : null;
@@ -885,6 +904,11 @@ export async function createRealtimeSocketServer({
     registerBoardSocketHandlers({
       context: authedSocket.data.auth,
       roomService: boardRoomService,
+      socket,
+    });
+    registerBoardSourceSocketHandlers({
+      context: authedSocket.data.auth,
+      roomService: boardSourceRoomService,
       socket,
     });
 
@@ -1155,6 +1179,7 @@ export async function createRealtimeSocketServer({
       await unsubscribeMeetingReports?.();
       await unsubscribeMeetingStates?.();
       await unsubscribeBoardInvalidations?.();
+      await unsubscribeBoardSourceEvents?.();
       await unsubscribePrReviewDecisions?.();
       await io.close();
       await redisAdapter?.close();

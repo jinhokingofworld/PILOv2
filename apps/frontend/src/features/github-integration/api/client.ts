@@ -319,6 +319,10 @@ function workspaceGithubPath(workspaceId: string, path: string) {
   )}/github${path}` as const;
 }
 
+function workspaceActiveBoardPath(workspaceId: string) {
+  return `/workspaces/${encodeURIComponent(workspaceId)}/boards/active` as const;
+}
+
 function repositoryGithubPath(workspaceId: string, repositoryId: string) {
   return workspaceGithubPath(
     workspaceId,
@@ -522,6 +526,19 @@ export function createGithubIntegrationApiClient({
     ) {
       return requestGithubIntegrationData<GithubProjectV2SelectionResult>(
         workspaceGithubPath(workspaceId, "/project-v2-selections"),
+        withJsonBody(body, { method: "PUT" }),
+        requestOptions
+      );
+    },
+
+    async activateWorkspaceBoardSource(
+      workspaceId: string,
+      body: { repositoryId: string; projectV2Id: string }
+    ) {
+      return requestGithubIntegrationData<{
+        boardId: string;
+      }>(
+        workspaceActiveBoardPath(workspaceId),
         withJsonBody(body, { method: "PUT" }),
         requestOptions
       );

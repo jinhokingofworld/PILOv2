@@ -15,6 +15,7 @@ import {
 } from "./board-issue-create.service";
 import { BoardIssueAssigneeService } from "./board-issue-assignee.service";
 import { BoardReadService } from "./board-read.service";
+import { ActiveBoardSourceService } from "./active-board-source.service";
 import type { ListBoardIssuesQuery, ListBoardsQuery } from "./dto";
 import type {
   BoardColumnPayload,
@@ -26,7 +27,8 @@ import type {
   BoardPaginatedPayload,
   BoardPayload,
   BoardRelatedPullRequestPayload,
-  CreateBoardResult
+  CreateBoardResult,
+  ActiveBoardSourcePayload
 } from "./types";
 
 export interface BoardModuleInfo {
@@ -43,7 +45,8 @@ export class BoardService {
     private readonly boardIssueStatusService: BoardIssueStatusService,
     private readonly boardIssueUpdateService: BoardIssueUpdateService,
     private readonly boardIssueCreateService: BoardIssueCreateService,
-    private readonly boardIssueAssigneeService: BoardIssueAssigneeService
+    private readonly boardIssueAssigneeService: BoardIssueAssigneeService,
+    private readonly activeBoardSourceService: ActiveBoardSourceService
   ) {}
 
   getModuleInfo(): BoardModuleInfo {
@@ -51,6 +54,21 @@ export class BoardService {
       domain: "board",
       apiContract: "docs/api/board-api.md"
     };
+  }
+
+  async getActiveBoardSource(
+    currentUserId: string,
+    workspaceId: string
+  ): Promise<ActiveBoardSourcePayload | null> {
+    return this.activeBoardSourceService.getActiveBoardSource(currentUserId, workspaceId);
+  }
+
+  async setActiveBoardSource(
+    currentUserId: string,
+    workspaceId: string,
+    body: unknown
+  ): Promise<ActiveBoardSourcePayload> {
+    return this.activeBoardSourceService.setActiveBoardSource(currentUserId, workspaceId, body);
   }
 
   async createBoard(

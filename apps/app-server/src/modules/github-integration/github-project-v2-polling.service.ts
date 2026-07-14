@@ -83,6 +83,49 @@ export class GithubProjectV2PollingService {
     );
   }
 
+  async terminateWorkspaceDeselectedQueuedRuns(
+    input: {
+      workspaceId: string;
+      retainedRepositoryId: string;
+      retainedProjectV2Id: string;
+    },
+    executor: GithubProjectV2PollingQueryExecutor = this.database
+  ): Promise<void> {
+    await executor.execute(
+      `
+        WITH deselected_schedules AS MATERIALIZED (
+          SELECT schedule.active_sync_run_id
+          FROM github_project_v2_polling_schedules AS schedule
+          INNER JOIN github_repositories AS repository
+            ON repository.id = schedule.repository_id
+          WHERE repository.workspace_id = $1::uuid
+            AND NOT (
+              schedule.repository_id = $2::uuid
+              AND schedule.project_v2_id = $3::uuid
+            )
+          FOR UPDATE OF schedule
+        ), terminal_jobs AS (
+          UPDATE github_sync_jobs AS job
+          SET status = 'failed', finished_at = now(),
+            last_error = 'GitHub ProjectV2 Board source was replaced'
+          FROM deselected_schedules AS schedule
+          WHERE job.sync_run_id = schedule.active_sync_run_id
+            AND job.status = 'queued'
+            AND job.lease_owner IS NULL
+            AND job.lease_expires_at IS NULL
+          RETURNING job.sync_run_id
+        )
+        UPDATE github_sync_runs AS run
+        SET status = 'failed', finished_at = now(),
+          error_message = 'GitHub ProjectV2 Board source was replaced'
+        FROM deselected_schedules AS schedule
+        WHERE run.id = schedule.active_sync_run_id
+          AND run.status = 'queued'
+      `,
+      [input.workspaceId, input.retainedRepositoryId, input.retainedProjectV2Id]
+    );
+  }
+
   async syncSelectionSchedules(input: {
     repositoryId: string;
     requestedByUserId: string;
