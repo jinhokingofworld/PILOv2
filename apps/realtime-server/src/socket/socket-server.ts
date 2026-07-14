@@ -18,7 +18,10 @@ import { createCanvasRoomService } from "../canvas/canvas-room.service";
 import { createCanvasShapeLockService } from "../canvas/canvas-shape-lock.service";
 import { createCanvasShapePreviewService } from "../canvas/canvas-shape-preview.service";
 import { createSqlErdAccessService } from "../sql-erd/sql-erd-access.service";
-import { createSqlErdPresenceService } from "../sql-erd/sql-erd-presence.service";
+import {
+  createSqlErdPresenceService,
+  type SqlErdPresenceClearResult,
+} from "../sql-erd/sql-erd-presence.service";
 import { createSqlErdRoomService } from "../sql-erd/sql-erd-room.service";
 import {
   sqlErdClientEvents,
@@ -52,7 +55,10 @@ import type {
   SqlErdPresenceUpdatePayload,
   SqlErdRoomRef,
 } from "../sql-erd/sql-erd-types";
-import { createRealtimeDatabase } from "../database/database";
+import {
+  createRealtimeDatabase,
+  type RealtimeDatabase,
+} from "../database/database";
 import { createSocketIoRedisAdapter } from "../redis/redis-pubsub";
 import {
   isPrReviewDecisionUpdatedEvent,
@@ -73,6 +79,7 @@ export type RealtimeSocketServerHandle = {
 
 export type RealtimeSocketServerOptions = {
   config: RealtimeServerConfig;
+  database?: RealtimeDatabase;
   httpServer: HttpServer;
 };
 
@@ -487,6 +494,22 @@ function emitSqlErdError(socket: Socket, message: string) {
   );
 }
 
+function emitSqlErdPresenceClearResult(
+  socket: Socket,
+  clearResult: SqlErdPresenceClearResult,
+) {
+  if (clearResult.kind === "update") {
+    socket
+      .to(createSqlErdRoomName(clearResult.presence))
+      .emit(sqlErdServerEvents.presenceUpdate, clearResult.presence);
+    return;
+  }
+
+  socket
+    .to(createSqlErdRoomName(clearResult.payload))
+    .emit(sqlErdServerEvents.presenceLeave, clearResult.payload);
+}
+
 function isSqlErdPresenceState(
   value: unknown,
 ): value is SqlErdPresenceState {
@@ -559,6 +582,7 @@ function emitMeetingError(socket: Socket, message: string) {
 
 export async function createRealtimeSocketServer({
   config,
+  database: providedDatabase,
   httpServer,
 }: RealtimeSocketServerOptions): Promise<RealtimeSocketServerHandle> {
   const io = new Server(httpServer, {
@@ -571,14 +595,16 @@ export async function createRealtimeSocketServer({
   const redisAdapter = config.redisUrl
     ? await createSocketIoRedisAdapter(config.redisUrl)
     : null;
-  const database = createRealtimeDatabase({
-    databaseApplicationName: config.databaseApplicationName,
-    databasePoolConnectionTimeoutMs: config.databasePoolConnectionTimeoutMs,
-    databasePoolIdleTimeoutMs: config.databasePoolIdleTimeoutMs,
-    databasePoolMax: config.databasePoolMax,
-    databaseSsl: config.databaseSsl,
-    databaseUrl: config.databaseUrl,
-  });
+  const database =
+    providedDatabase ??
+    createRealtimeDatabase({
+      databaseApplicationName: config.databaseApplicationName,
+      databasePoolConnectionTimeoutMs: config.databasePoolConnectionTimeoutMs,
+      databasePoolIdleTimeoutMs: config.databasePoolIdleTimeoutMs,
+      databasePoolMax: config.databasePoolMax,
+      databaseSsl: config.databaseSsl,
+      databaseUrl: config.databaseUrl,
+    });
 
   if (redisAdapter) {
     io.adapter(redisAdapter.adapter);
@@ -848,14 +874,12 @@ export async function createRealtimeSocketServer({
       }
 
       const roomName = createSqlErdRoomName(room);
-      const leavePayload = sqlErdPresenceService.clearRoomPresence(socket.id, room);
+      const clearResult = sqlErdPresenceService.clearRoomPresence(socket.id, room);
 
       await socket.leave(roomName);
       delete authedSocket.data.sqlErdPresenceByRoom[roomName];
 
-      if (leavePayload) {
-        socket.to(roomName).emit(sqlErdServerEvents.presenceLeave, leavePayload);
-      }
+      if (clearResult) emitSqlErdPresenceClearResult(socket, clearResult);
     });
 
     registerBoardSocketHandlers({
@@ -1092,7 +1116,7 @@ export async function createRealtimeSocketServer({
     socket.on("disconnect", () => {
       void (async () => {
         const leaveEvents = presenceService.clearSocket(socket.id);
-        const sqlErdLeaveEvents = sqlErdPresenceService.clearSocket(socket.id);
+        const sqlErdClearResults = sqlErdPresenceService.clearSocket(socket.id);
         const [lockReleaseEvents, previewClearEvents] = await Promise.all([
           shapeLockService.clearSocket(socket.id),
           shapePreviewService.clearSocket(socket.id),
@@ -1104,10 +1128,8 @@ export async function createRealtimeSocketServer({
             .emit(canvasServerEvents.presenceLeave, leavePayload);
         }
 
-        for (const leavePayload of sqlErdLeaveEvents) {
-          socket
-            .to(createSqlErdRoomName(leavePayload))
-            .emit(sqlErdServerEvents.presenceLeave, leavePayload);
+        for (const clearResult of sqlErdClearResults) {
+          emitSqlErdPresenceClearResult(socket, clearResult);
         }
 
         for (const lockReleasePayload of lockReleaseEvents) {

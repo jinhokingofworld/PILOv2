@@ -11,12 +11,22 @@ type StoredPresence = SqlErdPresenceState & {
   socketId: string;
 };
 
+export type SqlErdPresenceClearResult =
+  | {
+      kind: "leave";
+      payload: SqlErdPresenceLeavePayload;
+    }
+  | {
+      kind: "update";
+      presence: SqlErdPresenceState;
+    };
+
 export type SqlErdPresenceService = {
   clearRoomPresence: (
     socketId: string,
     room: SqlErdRoomRef,
-  ) => SqlErdPresenceLeavePayload | null;
-  clearSocket: (socketId: string) => SqlErdPresenceLeavePayload[];
+  ) => SqlErdPresenceClearResult | null;
+  clearSocket: (socketId: string) => SqlErdPresenceClearResult[];
   getPresence: (room: SqlErdRoomRef) => SqlErdPresenceState[];
   updatePresence: (
     socketId: string,
@@ -40,6 +50,49 @@ export function createSqlErdPresenceService(): SqlErdPresenceService {
     return roomPresence;
   }
 
+  function toPresenceState({ socketId: _socketId, ...presence }: StoredPresence) {
+    return presence;
+  }
+
+  function getLatestUserPresence(
+    roomPresence: Map<string, StoredPresence>,
+    userId: string,
+  ) {
+    let latestPresence: StoredPresence | null = null;
+
+    for (const presence of roomPresence.values()) {
+      if (presence.userId === userId) latestPresence = presence;
+    }
+
+    return latestPresence;
+  }
+
+  function getClearResult(
+    room: SqlErdRoomRef,
+    roomPresence: Map<string, StoredPresence>,
+    removedPresence: StoredPresence,
+  ): SqlErdPresenceClearResult {
+    const replacementPresence = getLatestUserPresence(
+      roomPresence,
+      removedPresence.userId,
+    );
+
+    if (replacementPresence) {
+      return {
+        kind: "update",
+        presence: toPresenceState(replacementPresence),
+      };
+    }
+
+    return {
+      kind: "leave",
+      payload: {
+        ...room,
+        userId: removedPresence.userId,
+      },
+    };
+  }
+
   return {
     clearRoomPresence(socketId, room) {
       const roomName = createSqlErdRoomName(room);
@@ -49,41 +102,40 @@ export function createSqlErdPresenceService(): SqlErdPresenceService {
         return null;
       }
 
-      for (const [userId, presence] of roomPresence) {
-        if (presence.socketId !== socketId) continue;
+      const presence = roomPresence.get(socketId);
+      if (!presence) return null;
 
-        roomPresence.delete(userId);
-        if (roomPresence.size === 0) {
-          presenceByRoom.delete(roomName);
-        }
+      roomPresence.delete(socketId);
+      const clearResult = getClearResult(room, roomPresence, presence);
+      if (roomPresence.size === 0) presenceByRoom.delete(roomName);
 
-        return { ...room, userId };
-      }
-
-      return null;
+      return clearResult;
     },
     clearSocket(socketId) {
-      const leaveEvents: SqlErdPresenceLeavePayload[] = [];
+      const clearResults: SqlErdPresenceClearResult[] = [];
 
       for (const [roomName, roomPresence] of presenceByRoom) {
-        for (const [userId, presence] of roomPresence) {
-          if (presence.socketId !== socketId) continue;
+        const presence = roomPresence.get(socketId);
+        if (!presence) continue;
 
-          roomPresence.delete(userId);
-          const [, workspaceId, , sessionId] = roomName.split(":");
-          leaveEvents.push({
-            sessionId: sessionId ?? "",
-            userId,
-            workspaceId: workspaceId ?? "",
-          });
-        }
+        roomPresence.delete(socketId);
+        clearResults.push(
+          getClearResult(
+            {
+              sessionId: presence.sessionId,
+              workspaceId: presence.workspaceId,
+            },
+            roomPresence,
+            presence,
+          ),
+        );
 
         if (roomPresence.size === 0) {
           presenceByRoom.delete(roomName);
         }
       }
 
-      return leaveEvents;
+      return clearResults;
     },
     getPresence(room) {
       const roomPresence = presenceByRoom.get(createSqlErdRoomName(room));
@@ -92,9 +144,13 @@ export function createSqlErdPresenceService(): SqlErdPresenceService {
         return [];
       }
 
-      return [...roomPresence.values()].map(
-        ({ socketId: _socketId, ...presence }) => presence,
-      );
+      const presenceByUserId = new Map<string, SqlErdPresenceState>();
+
+      for (const presence of roomPresence.values()) {
+        presenceByUserId.set(presence.userId, toPresenceState(presence));
+      }
+
+      return [...presenceByUserId.values()];
     },
     updatePresence(socketId, user, payload) {
       const state: StoredPresence = {
@@ -111,10 +167,11 @@ export function createSqlErdPresenceService(): SqlErdPresenceService {
         workspaceId: payload.workspaceId,
       };
 
-      getOrCreateRoomPresence(payload).set(user.userId, state);
+      const roomPresence = getOrCreateRoomPresence(payload);
+      roomPresence.delete(socketId);
+      roomPresence.set(socketId, state);
 
-      const { socketId: _socketId, ...presence } = state;
-      return presence;
+      return toPresenceState(state);
     },
   };
 }

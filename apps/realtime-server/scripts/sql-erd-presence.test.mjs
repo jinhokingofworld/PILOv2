@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
+const { createSqlErdPresenceService } = await import(
+  "../dist/sql-erd/sql-erd-presence.service.js"
+);
+
 const access = await readFile(
   new URL("../src/sql-erd/sql-erd-access.service.ts", import.meta.url),
   "utf8",
@@ -70,5 +74,54 @@ assert.match(socketServer, /displayName: session\.displayName/);
 assert.match(types, /selectedObjects: SqlErdPresenceSelectedObject\[\]/);
 assert.match(types, /editingMode: SqlErdPresenceEditingMode/);
 assert.match(types, /sentAt: string/);
+
+const roomRef = {
+  sessionId: "session-1",
+  workspaceId: "workspace-1",
+};
+const user = {
+  displayName: "세인",
+  userId: "user-1",
+};
+const presencePayload = (cursor) => ({
+  ...roomRef,
+  cursor,
+  editingMode: null,
+  selectedObjects: [],
+  sentAt: "2026-07-14T00:00:00.000Z",
+  tool: "select",
+});
+
+const presenceService = createSqlErdPresenceService();
+const firstTabPresence = presenceService.updatePresence(
+  "socket-first-tab",
+  user,
+  presencePayload({ x: 10, y: 20 }),
+);
+const secondTabPresence = presenceService.updatePresence(
+  "socket-second-tab",
+  user,
+  presencePayload({ x: 30, y: 40 }),
+);
+
+assert.deepEqual(presenceService.getPresence(roomRef), [secondTabPresence]);
+assert.deepEqual(
+  presenceService.clearRoomPresence("socket-second-tab", roomRef),
+  {
+    kind: "update",
+    presence: firstTabPresence,
+  },
+  "closing the most recently updated tab restores the remaining tab instead of leaving",
+);
+assert.deepEqual(presenceService.getPresence(roomRef), [firstTabPresence]);
+assert.deepEqual(presenceService.clearSocket("socket-first-tab"), [
+  {
+    kind: "leave",
+    payload: {
+      ...roomRef,
+      userId: user.userId,
+    },
+  },
+]);
 
 console.log("SQLtoERD realtime presence tests passed");
