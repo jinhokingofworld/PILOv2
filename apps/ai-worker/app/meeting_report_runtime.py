@@ -348,7 +348,17 @@ class PgMeetingReportRepository:
                   transcript_hash
                 )
                 VALUES (%s, %s)
-                ON CONFLICT (meeting_report_id, transcript_hash) DO NOTHING
+                ON CONFLICT (meeting_report_id, transcript_hash) DO UPDATE
+                SET
+                  status = 'pending',
+                  attempt_count = 0,
+                  locked_at = NULL,
+                  completed_at = NULL,
+                  error_message = NULL,
+                  updated_at = now()
+                WHERE meeting_report_transcript_embedding_jobs.status IN (
+                  'completed', 'failed', 'superseded'
+                )
                 """,
                 (report_id, current_transcript_hash),
             )

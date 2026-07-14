@@ -717,7 +717,8 @@ def test_serialize_action_items_uses_api_shape() -> None:
     ]
 
 
-def test_completed_report_materializes_pending_action_items() -> None:
+def test_completed_report_materializes_pending_action_items_and_requeues_terminal_embedding_job(
+) -> None:
     report = FakeAiClient().generate_report(
         "진호: 회의록 조회 API와 worker 처리 방향을 정리합니다.",
         [TranscriptSegment(0, 0, 1_000, "진호: 회의록 조회 API와 worker 처리 방향을 정리합니다.")],
@@ -754,7 +755,9 @@ def test_completed_report_materializes_pending_action_items() -> None:
     )
     assert any(
         "INSERT INTO meeting_report_transcript_embedding_jobs" in query
-        and "ON CONFLICT (meeting_report_id, transcript_hash) DO NOTHING" in query
+        and "ON CONFLICT (meeting_report_id, transcript_hash) DO UPDATE" in query
+        and "status = 'pending'" in query
+        and "'completed', 'failed', 'superseded'" in query
         for query, _values in connection.calls
     )
 
