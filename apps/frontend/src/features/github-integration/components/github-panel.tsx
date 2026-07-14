@@ -23,7 +23,10 @@ import {
   getGithubConnectSyncTargetLabel
 } from "@/features/github-integration/utils/github-connect-format";
 import { getGithubManualSyncActionMessage } from "@/features/github-integration/utils/github-manual-sync-status";
-import { selectProjectV2IdForRepository } from "@/features/github-integration/utils/github-project-selection";
+import {
+  resolveGithubActiveBoardSelection,
+  selectProjectV2IdForRepository
+} from "@/features/github-integration/utils/github-project-selection";
 import { collectGithubPages } from "@/features/github-integration/utils/github-page-collector";
 import {
   createGithubSyncPollLoop,
@@ -201,6 +204,7 @@ export function GithubPanel() {
   const [repositoryPage, setRepositoryPage] = useState(1);
   const snapshotRequestGateRef = useRef(createGithubSyncRequestGate());
   const syncRunsRequestGateRef = useRef(createGithubSyncRequestGate());
+  const pullRequestsRequestGateRef = useRef(createGithubSyncRequestGate());
   const selectedRepositoryIdRef = useRef("");
 
   const isLoading = panelStatus === "loading" || panelStatus === "idle";
@@ -218,15 +222,27 @@ export function GithubPanel() {
   const hasNextRepositoryPage =
     snapshot.repositoriesTotal > repositoryPage * REPOSITORIES_PER_PAGE;
 
-  async function loadGithubPullRequests(repositoryId: string) {
+  async function loadGithubPullRequests(
+    repositoryId: string,
+    resetActionError = true
+  ) {
     if (!workspaceId || !repositoryId) {
+      pullRequestsRequestGateRef.current.invalidate();
       setPullRequests([]);
       setPullRequestsTotal(0);
+      setIsPullRequestsLoading(false);
       return;
     }
 
+    const requestGeneration = pullRequestsRequestGateRef.current.begin();
+    const isCurrentRequest = () =>
+      selectedRepositoryIdRef.current === repositoryId &&
+      pullRequestsRequestGateRef.current.isCurrent(requestGeneration);
+
     setIsPullRequestsLoading(true);
-    setActionError(null);
+    if (resetActionError) {
+      setActionError(null);
+    }
 
     try {
       const page = await apiClient.listGithubPullRequests(
@@ -236,20 +252,20 @@ export function GithubPanel() {
           limit: 8
         }
       );
-      if (selectedRepositoryIdRef.current !== repositoryId) {
+      if (!isCurrentRequest()) {
         return;
       }
       setPullRequests(page.data);
       setPullRequestsTotal(page.meta.total);
     } catch (error) {
-      if (selectedRepositoryIdRef.current !== repositoryId) {
+      if (!isCurrentRequest()) {
         return;
       }
       setPullRequests([]);
       setPullRequestsTotal(0);
       setActionError(getErrorMessage(error));
     } finally {
-      if (selectedRepositoryIdRef.current !== repositoryId) {
+      if (!isCurrentRequest()) {
         return;
       }
       setIsPullRequestsLoading(false);
@@ -336,12 +352,14 @@ export function GithubPanel() {
     if (!workspaceId) {
       snapshotRequestGateRef.current.invalidate();
       syncRunsRequestGateRef.current.invalidate();
+      pullRequestsRequestGateRef.current.invalidate();
       setPanelStatus("ready");
       setSnapshot(emptySnapshot);
       setHasRunningSyncRun(false);
       setSyncPollingError(null);
       setPullRequests([]);
       setPullRequestsTotal(0);
+      setIsPullRequestsLoading(false);
       setSelectedRepositoryId("");
       selectedRepositoryIdRef.current = "";
       setSelectedInstallationId("");
@@ -350,6 +368,8 @@ export function GithubPanel() {
       return;
     }
 
+    pullRequestsRequestGateRef.current.invalidate();
+    setIsPullRequestsLoading(false);
     if (!selectedRepositoryId) {
       setPullRequests([]);
       setPullRequestsTotal(0);
@@ -369,6 +389,7 @@ export function GithubPanel() {
         projectOAuth,
         installations,
         repositories,
+        activeBoardSource,
         syncRuns,
         queuedSyncRuns,
         runningSyncRuns
@@ -382,6 +403,7 @@ export function GithubPanel() {
           page: repositoryPage,
           q: repositoryQuery.trim() || undefined
         }),
+        apiClient.getWorkspaceActiveBoardSource(workspaceId),
         apiClient.listGithubSyncRuns(workspaceId, {
           limit: 8
         }),
@@ -401,16 +423,47 @@ export function GithubPanel() {
         return;
       }
 
+      const initialBoardSelection = resolveGithubActiveBoardSelection({
+        repositories: repositories.data,
+        projects: [],
+        activeBoardSource,
+        preferredRepositoryId,
+        preferredProjectV2Id
+      });
+      const nextRepository = repositories.data.find(
+        (repository) => repository.id === initialBoardSelection.repositoryId
+      );
+      let nextProjects: GithubProjectV2[] = [];
+      let repositoryDataError: string | null = null;
+
+      if (nextRepository) {
+        try {
+          nextProjects = await listAllGithubProjectsV2(nextRepository.id);
+        } catch (error) {
+          repositoryDataError = getErrorMessage(error);
+        }
+
+        if (
+          !snapshotRequestGateRef.current.isCurrent(snapshotRequestGeneration)
+        ) {
+          return;
+        }
+      }
+
+      const nextBoardSelection = resolveGithubActiveBoardSelection({
+        repositories: repositories.data,
+        projects: nextProjects,
+        activeBoardSource,
+        preferredRepositoryId,
+        preferredProjectV2Id
+      });
+      const nextRepositoryId = nextBoardSelection.repositoryId;
+      const nextProjectV2Id = nextBoardSelection.projectV2Id;
       const canApplySyncRuns = syncRunsRequestGateRef.current.isCurrent(
         syncRunsRequestGeneration
       );
-
-      const nextRepositoryId =
-        repositories.data.find(
-          (repository) => repository.id === preferredRepositoryId
-        )?.id ?? "";
-      const nextProjectV2Id = "";
       const nextInstallationId =
+        nextRepository?.installationId ??
         installations.find(
           (installation) => installation.id === selectedInstallationId
         )?.id ??
@@ -421,8 +474,8 @@ export function GithubPanel() {
         oauth,
         projectOAuth,
         installations,
-        projects: [],
-        projectsTotal: 0,
+        projects: nextProjects,
+        projectsTotal: nextProjects.length,
         repositories: repositories.data,
         repositoriesTotal: repositories.meta.total,
         syncRuns: canApplySyncRuns ? syncRuns.data : current.syncRuns,
@@ -441,9 +494,13 @@ export function GithubPanel() {
       setSelectedInstallationId(nextInstallationId);
       setIsInstallationDeleteRequested(false);
       setPanelStatus("ready");
+      setActionError(repositoryDataError);
 
       setPullRequests([]);
       setPullRequestsTotal(0);
+      if (nextRepositoryId) {
+        void loadGithubPullRequests(nextRepositoryId, false);
+      }
     } catch (error) {
       if (
         !snapshotRequestGateRef.current.isCurrent(snapshotRequestGeneration)
@@ -454,6 +511,12 @@ export function GithubPanel() {
       setPanelStatus("error");
       setErrorMessage(getErrorMessage(error));
       setSnapshot(emptySnapshot);
+      pullRequestsRequestGateRef.current.invalidate();
+      setSelectedRepositoryId("");
+      selectedRepositoryIdRef.current = "";
+      setSelectedInstallationId("");
+      setSelectedProjectV2Id("");
+      setIsPullRequestsLoading(false);
       if (syncRunsRequestGateRef.current.isCurrent(syncRunsRequestGeneration)) {
         setHasRunningSyncRun(false);
       }
@@ -470,6 +533,7 @@ export function GithubPanel() {
     return () => {
       snapshotRequestGateRef.current.invalidate();
       syncRunsRequestGateRef.current.invalidate();
+      pullRequestsRequestGateRef.current.invalidate();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceId, apiClient, repositoryPage, repositoryQuery]);
@@ -703,12 +767,14 @@ export function GithubPanel() {
   }
 
   function clearRepositorySelection() {
+    pullRequestsRequestGateRef.current.invalidate();
     setSelectedRepositoryId("");
     selectedRepositoryIdRef.current = "";
     setSelectedInstallationId("");
     setSelectedProjectV2Id("");
     setPullRequests([]);
     setPullRequestsTotal(0);
+    setIsPullRequestsLoading(false);
     setSnapshot((current) => ({ ...current, projects: [], projectsTotal: 0 }));
   }
 

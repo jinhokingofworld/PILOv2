@@ -87,6 +87,25 @@ export type GithubRepositoryCollaboratorStatus = {
   checkedAt: string;
 };
 
+export type GithubActiveBoardSource = {
+  boardId: string;
+  workspaceId: string;
+  repository: {
+    id: string;
+    fullName: string;
+    htmlUrl: string;
+  };
+  project: {
+    id: string;
+    githubProjectNodeId: string;
+    projectNumber: number;
+    title: string;
+    url: string;
+  };
+  updatedByUserId: string | null;
+  updatedAt: string;
+};
+
 export type GithubProjectV2 = {
   id: string;
   installationId: string;
