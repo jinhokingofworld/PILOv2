@@ -148,6 +148,13 @@ class FakeReviewDatabase {
     throw new Error(`Unhandled review query: ${text}`);
   }
 
+  async query(text) {
+    if (text.includes("UPDATE pr_review_rooms AS review_room")) {
+      return [];
+    }
+    throw new Error(`Unhandled review query list: ${text}`);
+  }
+
   async transaction(callback) {
     return callback({
       queryOne: async (text, values = []) => {

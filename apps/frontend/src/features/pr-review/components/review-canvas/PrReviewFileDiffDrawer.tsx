@@ -86,6 +86,7 @@ type PrReviewFileDiffDrawerProps = {
   conflictDraft: PrReviewConflictDraft | null;
   conflictFile: PrReviewConflictFile | null;
   headBranch: string | null;
+  isReviewRoomCompleted: boolean;
   isReviewVersionStale: boolean;
   isReviewSessionConflicted: boolean;
   onClose: () => void;
@@ -286,6 +287,7 @@ export function PrReviewFileDiffDrawer({
   conflictDraft,
   conflictFile,
   headBranch,
+  isReviewRoomCompleted,
   isReviewVersionStale,
   isReviewSessionConflicted,
   onClose,
@@ -547,8 +549,8 @@ export function PrReviewFileDiffDrawer({
     isReviewSessionConflicted,
     unsupportedConflictFile
   });
-  const decisionDisabled =
-    isReviewVersionStale || decisionDisabledReason !== null;
+  const isReviewReadOnly = isReviewVersionStale || isReviewRoomCompleted;
+  const decisionDisabled = isReviewReadOnly || decisionDisabledReason !== null;
   const selectedConflictHunk =
     conflictFile?.hunks[selectedConflictHunkIndex] ?? null;
   const aiResolvedHunks =
@@ -566,8 +568,10 @@ export function PrReviewFileDiffDrawer({
         manualResolvedTexts
       })
     : false;
-  const drawerModeLabel = isReviewVersionStale
-    ? "이전 버전"
+  const drawerModeLabel = isReviewRoomCompleted
+    ? "완료된 PR"
+    : isReviewVersionStale
+      ? "이전 버전"
     : decisionDisabled
       ? "Conflict 해결"
       : "파일 경로";
@@ -578,7 +582,7 @@ export function PrReviewFileDiffDrawer({
       nextAcceptedAiResolvedTexts = acceptedAiResolvedTexts,
       nextManualResolvedTexts = manualResolvedTexts
     ) => {
-      if (!conflictFile || !conflictDraft || isReviewVersionStale) {
+      if (!conflictFile || !conflictDraft || isReviewReadOnly) {
         return;
       }
 
@@ -601,7 +605,7 @@ export function PrReviewFileDiffDrawer({
       acceptedAiResolvedTexts,
       conflictDraft,
       conflictFile,
-      isReviewVersionStale,
+      isReviewReadOnly,
       manualResolvedTexts,
       onConflictDraftChange
     ]
@@ -609,7 +613,7 @@ export function PrReviewFileDiffDrawer({
 
   const handleResolutionChoiceChange = useCallback(
     (hunkId: string, choice: PrReviewConflictResolutionChoice) => {
-      if (!conflictFile || isResolvedDraftCustomized || isReviewVersionStale) {
+      if (!conflictFile || isResolvedDraftCustomized || isReviewReadOnly) {
         return;
       }
 
@@ -663,7 +667,7 @@ export function PrReviewFileDiffDrawer({
       aiResolvedHunks,
       conflictFile,
       isResolvedDraftCustomized,
-      isReviewVersionStale,
+      isReviewReadOnly,
       manualResolvedTexts,
       rebuildResolvedDraft,
       resolutionChoices
@@ -671,15 +675,15 @@ export function PrReviewFileDiffDrawer({
   );
 
   const handleResetCustomizedDraft = useCallback(() => {
-    if (isReviewVersionStale) {
+    if (isReviewReadOnly) {
       return;
     }
     rebuildResolvedDraft(resolutionChoices);
-  }, [isReviewVersionStale, rebuildResolvedDraft, resolutionChoices]);
+  }, [isReviewReadOnly, rebuildResolvedDraft, resolutionChoices]);
 
   const handleManualResolutionChange = useCallback(
     (hunkId: string, resolvedText: string) => {
-      if (!conflictFile || isResolvedDraftCustomized || isReviewVersionStale) {
+      if (!conflictFile || isResolvedDraftCustomized || isReviewReadOnly) {
         return;
       }
 
@@ -696,7 +700,7 @@ export function PrReviewFileDiffDrawer({
       acceptedAiResolvedTexts,
       conflictFile,
       isResolvedDraftCustomized,
-      isReviewVersionStale,
+      isReviewReadOnly,
       manualResolvedTexts,
       rebuildResolvedDraft,
       resolutionChoices
@@ -707,7 +711,7 @@ export function PrReviewFileDiffDrawer({
     if (
       !conflictFile ||
       conflictSuggestionStatus === "loading" ||
-      isReviewVersionStale
+      isReviewReadOnly
     ) {
       return;
     }
@@ -739,7 +743,7 @@ export function PrReviewFileDiffDrawer({
     conflictDraft,
     conflictFile,
     conflictSuggestionStatus,
-    isReviewVersionStale,
+    isReviewReadOnly,
     onConflictDraftChange,
     workspaceId
   ]);
@@ -750,7 +754,7 @@ export function PrReviewFileDiffDrawer({
       !conflictSuggestion ||
       conflictSuggestion.status === "invalid" ||
       isResolvedDraftCustomized ||
-      isReviewVersionStale
+      isReviewReadOnly
     ) {
       return;
     }
@@ -772,7 +776,7 @@ export function PrReviewFileDiffDrawer({
     conflictFile,
     conflictSuggestion,
     isResolvedDraftCustomized,
-    isReviewVersionStale,
+    isReviewReadOnly,
     onConflictDraftChange
   ]);
 
@@ -875,7 +879,7 @@ export function PrReviewFileDiffDrawer({
                     hunkIndex={selectedConflictHunkIndex}
                     isBaseComparisonOpen={isBaseComparisonOpen}
                     isChoiceDisabled={
-                      isResolvedDraftCustomized || isReviewVersionStale
+                      isResolvedDraftCustomized || isReviewReadOnly
                     }
                     manualResolvedText={
                       manualResolvedTexts[selectedConflictHunk.id] ?? ""
@@ -898,7 +902,7 @@ export function PrReviewFileDiffDrawer({
                     isCustomized={isResolvedDraftCustomized}
                     onChange={(value) => {
                       if (
-                        isReviewVersionStale ||
+                        isReviewReadOnly ||
                         !conflictDraft ||
                         !conflictFile
                       ) {
@@ -910,7 +914,7 @@ export function PrReviewFileDiffDrawer({
                         isCustomized: true
                       });
                     }}
-                    readOnly={isReviewVersionStale}
+                    readOnly={isReviewReadOnly}
                     originalValue={conflictFile.headContent}
                     value={resolvedContentDraft}
                   />
@@ -935,7 +939,8 @@ export function PrReviewFileDiffDrawer({
               decisionDisabledReason={decisionDisabledReason}
               file={file}
               isResolvedDraftCustomized={isResolvedDraftCustomized}
-              isReviewVersionStale={isReviewVersionStale}
+              isReviewReadOnly={isReviewReadOnly}
+              isReviewRoomCompleted={isReviewRoomCompleted}
               onCommentChange={(value) => {
                 setComment(value);
                 setSaveStatus("idle");
@@ -1064,7 +1069,8 @@ function ReviewNodePanel({
   decisionDisabledReason,
   file,
   isResolvedDraftCustomized,
-  isReviewVersionStale,
+  isReviewReadOnly,
+  isReviewRoomCompleted,
   onCommentBlur,
   onCommentChange,
   onApplyAllAiSuggestions,
@@ -1088,7 +1094,8 @@ function ReviewNodePanel({
   decisionDisabledReason: string | null;
   file: PrReviewFile;
   isResolvedDraftCustomized: boolean;
-  isReviewVersionStale: boolean;
+  isReviewReadOnly: boolean;
+  isReviewRoomCompleted: boolean;
   onCommentBlur: () => void;
   onCommentChange: (value: string) => void;
   onApplyAllAiSuggestions: () => void;
@@ -1102,8 +1109,7 @@ function ReviewNodePanel({
   selectedDecisionLabel: string;
   unsupportedConflictFile: PrReviewUnsupportedConflictFile | null;
 }) {
-  const decisionDisabled =
-    isReviewVersionStale || decisionDisabledReason !== null;
+  const decisionDisabled = isReviewReadOnly || decisionDisabledReason !== null;
 
   return (
     <div className="flex min-h-full flex-col">
@@ -1135,9 +1141,11 @@ function ReviewNodePanel({
           </div>
         </section>
 
-        {isReviewVersionStale ? (
+        {isReviewReadOnly ? (
           <section className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
-            새 커밋이 감지되어 이 파일은 이전 리뷰 버전으로 열렸습니다. 내용은 확인할 수 있지만 수정하거나 저장할 수 없습니다.
+            {isReviewRoomCompleted
+              ? "PR이 종료되어 이 파일은 읽기 전용입니다. 내용은 확인할 수 있지만 수정하거나 저장할 수 없습니다."
+              : "새 커밋이 감지되어 이 파일은 이전 리뷰 버전으로 열렸습니다. 내용은 확인할 수 있지만 수정하거나 저장할 수 없습니다."}
           </section>
         ) : null}
 
@@ -1148,7 +1156,7 @@ function ReviewNodePanel({
             conflictSuggestionErrorMessage={conflictSuggestionErrorMessage}
             conflictSuggestionStatus={conflictSuggestionStatus}
             isResolvedDraftCustomized={isResolvedDraftCustomized}
-            isReviewVersionStale={isReviewVersionStale}
+            isReviewReadOnly={isReviewReadOnly}
             onApplyAllAiSuggestions={onApplyAllAiSuggestions}
             onCreateConflictSuggestion={onCreateConflictSuggestion}
             onOpenResolvedDraft={onOpenResolvedDraft}
@@ -1264,16 +1272,20 @@ function ReviewNodePanel({
               <Loader2 className="size-4 animate-spin" />
             ) : null}
             {decisionDisabled
-              ? isReviewVersionStale
-                ? "새 버전 분석 필요"
+              ? isReviewReadOnly
+                ? isReviewRoomCompleted
+                  ? "PR 종료"
+                  : "새 버전 분석 필요"
                 : "Conflict 해결 필요"
               : getSaveStatusLabel(saveStatus)}
           </p>
         </div>
 
-        {isReviewVersionStale ? (
+        {isReviewReadOnly ? (
           <p className="mt-3 text-sm leading-6 text-amber-700">
-            새 커밋이 감지되어 이 리뷰 버전은 읽기 전용입니다.
+            {isReviewRoomCompleted
+              ? "PR이 종료되어 이 리뷰 공간은 읽기 전용입니다."
+              : "새 커밋이 감지되어 이 리뷰 버전은 읽기 전용입니다."}
           </p>
         ) : decisionDisabledReason ? (
           <p className="mt-3 text-sm leading-6 text-amber-700">
@@ -1303,7 +1315,7 @@ function ConflictResolutionPanel({
   conflictSuggestionErrorMessage,
   conflictSuggestionStatus,
   isResolvedDraftCustomized,
-  isReviewVersionStale,
+  isReviewReadOnly,
   onApplyAllAiSuggestions,
   onCreateConflictSuggestion,
   onOpenResolvedDraft,
@@ -1317,7 +1329,7 @@ function ConflictResolutionPanel({
   conflictSuggestionErrorMessage: string | null;
   conflictSuggestionStatus: ConflictSuggestionLoadStatus;
   isResolvedDraftCustomized: boolean;
-  isReviewVersionStale: boolean;
+  isReviewReadOnly: boolean;
   onApplyAllAiSuggestions: () => void;
   onCreateConflictSuggestion: () => void;
   onOpenResolvedDraft: () => void;
@@ -1362,7 +1374,7 @@ function ConflictResolutionPanel({
                     disabled={
                       conflictSuggestion.status === "invalid" ||
                       isResolvedDraftCustomized ||
-                      isReviewVersionStale
+                      isReviewReadOnly
                     }
                     onClick={onApplyAllAiSuggestions}
                     size="sm"
@@ -1372,7 +1384,7 @@ function ConflictResolutionPanel({
                   </Button>
                 ) : null}
                 <Button
-                  disabled={isSuggestionLoading || isReviewVersionStale}
+                  disabled={isSuggestionLoading || isReviewReadOnly}
                   onClick={onCreateConflictSuggestion}
                   size="sm"
                   type="button"

@@ -266,6 +266,7 @@ function isGithubOAuthReconnectError(error: unknown) {
 function getMergeDisabledReason(input: {
   conflictStatus: PrReviewConflictStatus;
   isPullRequestMerged: boolean;
+  isPullRequestClosed: boolean;
   isReviewVersionStale: boolean;
   loadStatus: CanvasLoadStatus;
   pullRequestState: "open" | "closed";
@@ -277,6 +278,10 @@ function getMergeDisabledReason(input: {
 
   if (input.isReviewVersionStale) {
     return "A newer commit was detected. Start the latest version analysis first.";
+  }
+
+  if (input.isPullRequestClosed) {
+    return "This pull request is closed and the review room is read-only.";
   }
 
   if (input.isPullRequestMerged) {
@@ -677,7 +682,9 @@ export function PrReviewCanvasShell({
     [preparedConflictFileIdKey]
   );
   const conflictApplyDisabledReason =
-    latestPullRequest?.headSha && latestPullRequest.headSha !== session.headSha
+    latestPullRequest?.state === "closed"
+      ? "닫힌 PR에는 Conflict 해결안을 적용할 수 없습니다."
+      : latestPullRequest?.headSha && latestPullRequest.headSha !== session.headSha
       ? "새 커밋이 감지되어 이전 버전에는 Conflict 해결안을 적용할 수 없습니다."
       : conflictStatus !== "conflicted"
       ? "적용할 Conflict가 없습니다."
@@ -696,7 +703,9 @@ export function PrReviewCanvasShell({
   const isReviewVersionStale = Boolean(
     latestPullRequest?.headSha && latestPullRequest.headSha !== session.headSha
   );
-  const pullRequestState = summary?.pullRequestState ?? latestPullRequest?.state ?? "open";
+  const isPullRequestClosed = latestPullRequest?.state === "closed";
+  const isReviewReadOnly = isReviewVersionStale || isPullRequestClosed;
+  const pullRequestState = latestPullRequest?.state ?? summary?.pullRequestState ?? "open";
   const pullRequestMergedAt =
     summary?.pullRequestMergedAt ?? getPullRequestMergedAt(latestPullRequest);
   const isPullRequestMerged =
@@ -705,6 +714,7 @@ export function PrReviewCanvasShell({
   const mergeDisabledReason = getMergeDisabledReason({
     conflictStatus,
     isPullRequestMerged,
+    isPullRequestClosed,
     isReviewVersionStale,
     loadStatus,
     pullRequestState,
@@ -800,7 +810,7 @@ export function PrReviewCanvasShell({
   }
 
   async function handleMergeReviewSession() {
-    if (isReviewVersionStale) {
+    if (isReviewReadOnly) {
       return;
     }
     setMergeStatus("merging");
@@ -834,7 +844,7 @@ export function PrReviewCanvasShell({
 
   async function handleApplyConflictResolutions() {
     if (
-      isReviewVersionStale ||
+      isReviewReadOnly ||
       !conflictAnalysis ||
       conflictApplyStatus === "applying"
     ) {
@@ -982,7 +992,7 @@ export function PrReviewCanvasShell({
           ) : null}
           <Button
             disabled={
-              loadStatus !== "ready" || reviewSubmitted || isReviewVersionStale
+              loadStatus !== "ready" || reviewSubmitted || isReviewReadOnly
             }
             onClick={() => setIsSubmitReviewModalOpen(true)}
             type="button"
@@ -1032,7 +1042,21 @@ export function PrReviewCanvasShell({
         </div>
       </header>
 
-      {isReviewVersionStale ? (
+      {isPullRequestClosed ? (
+        <section className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-100 px-4 py-3">
+          <div className="flex min-w-0 items-start gap-3 text-slate-900">
+            <AlertCircle className="mt-0.5 size-5 shrink-0 text-slate-600" />
+            <div>
+              <p className="text-sm font-semibold">
+                {isPullRequestMerged ? "PR이 병합되었습니다" : "PR이 닫혔습니다"}
+              </p>
+              <p className="mt-1 text-xs leading-5 text-slate-700">
+                이 리뷰 공간은 참고용 읽기 전용입니다. 파일 판단, Conflict 적용, Review 제출과 Merge를 할 수 없습니다.
+              </p>
+            </div>
+          </div>
+        </section>
+      ) : isReviewVersionStale ? (
         <section className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-amber-200 bg-amber-50 px-4 py-3">
           <div className="flex min-w-0 items-start gap-3 text-amber-950">
             <AlertCircle className="mt-0.5 size-5 shrink-0 text-amber-700" />
@@ -1103,7 +1127,7 @@ export function PrReviewCanvasShell({
                 onFileSelect={setSelectedReviewFileId}
                 onRealtimeRoomJoined={handleRealtimeRoomRejoined}
                 preparedConflictFileIds={preparedConflictFileIds}
-                readOnly={isReviewVersionStale}
+                readOnly={isReviewReadOnly}
                 realtimeIdentity={realtimeIdentity}
                 reviewRoomId={session.reviewRoomId}
                 selectedReviewFileId={selectedReviewFileId}
@@ -1127,6 +1151,7 @@ export function PrReviewCanvasShell({
               conflictDraft={selectedConflictDraft}
               conflictFile={selectedConflictFile}
               headBranch={summary?.headBranch ?? latestPullRequest?.headBranch ?? null}
+              isReviewRoomCompleted={isPullRequestClosed}
               isReviewVersionStale={isReviewVersionStale}
               isReviewSessionConflicted={conflictStatus === "conflicted"}
               onClose={() => setSelectedReviewFileId(null)}
@@ -1361,7 +1386,7 @@ export function PrReviewCanvasShell({
               Cancel
             </AlertDialogCancel>
             <AlertDialogAction
-              disabled={mergeStatus === "merging" || isReviewVersionStale}
+              disabled={mergeStatus === "merging" || isReviewReadOnly}
               onClick={(event) => {
                 event.preventDefault();
                 void handleMergeReviewSession();

@@ -111,6 +111,8 @@ assert.match(prReviewService, /assertPullRequestReviewable\(pullRequest\)/);
 assert.match(prReviewService, /github_closed_at/);
 assert.match(prReviewService, /merged_at/);
 assert.match(prReviewService, /Pull request is closed or merged/);
+assert.match(prReviewService, /syncReviewRoomLifecycle/);
+assert.match(prReviewService, /Completed PR Review room is read-only/);
 assert.match(prReviewService, /lockForShare \? "FOR SHARE" : ""/);
 assert.match(
   prReviewApi,
