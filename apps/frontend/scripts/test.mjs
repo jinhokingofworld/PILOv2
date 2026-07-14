@@ -892,8 +892,10 @@ assert.match(canvasShapeSync, /shapeType: typeof shape.type === "string" \? shap
 assert.match(canvasShapeSync, /x: readFiniteNumber\(shape.x, 0\)/);
 assert.match(canvasShapeSync, /y: readFiniteNumber\(shape.y, 0\)/);
 assert.match(canvasShapeSync, /rawShape: cloneRawShape\(shape\)/);
-assert.match(canvasNormalizers, /rawShape\.revision = value\.revision/);
-assert.match(canvasNormalizers, /rawShape\.contentHash = value\.contentHash/);
+assert.match(canvasNormalizers, /defineCanvasShapeMetadata/);
+assert.match(canvasNormalizers, /enumerable: false/);
+assert.match(canvasNormalizers, /defineCanvasShapeMetadata\(rawShape, "revision", value\.revision\)/);
+assert.match(canvasNormalizers, /defineCanvasShapeMetadata\(rawShape, "contentHash", value\.contentHash\)/);
 assert.match(canvasApiLifecycle, /result\.shapeRevisions\.forEach/);
 assert.match(canvasShapePersistence, /result\.shapeRevisions\.forEach/);
 assert.match(packageJson, /"@tanstack\/react-query"/);

@@ -30,6 +30,19 @@ export function unwrapCanvasApiData(value: unknown) {
   return value;
 }
 
+function defineCanvasShapeMetadata(
+  rawShape: Record<string, unknown>,
+  key: "contentHash" | "revision",
+  value: string | number,
+) {
+  Object.defineProperty(rawShape, key, {
+    configurable: true,
+    enumerable: false,
+    value,
+    writable: true,
+  });
+}
+
 export function normalizeCanvasShape(value: unknown) {
   if (!isRecord(value) || !isRecord(value.rawShape)) {
     return value;
@@ -68,11 +81,11 @@ export function normalizeCanvasShape(value: unknown) {
   rawShape.meta = meta;
 
   if (typeof value.revision === "number" && Number.isInteger(value.revision)) {
-    rawShape.revision = value.revision;
+    defineCanvasShapeMetadata(rawShape, "revision", value.revision);
   }
 
   if (typeof value.contentHash === "string") {
-    rawShape.contentHash = value.contentHash;
+    defineCanvasShapeMetadata(rawShape, "contentHash", value.contentHash);
   }
 
   return rawShape;
