@@ -19,6 +19,11 @@ import {
 const ACTIVE_STATUSES = new Set(["queued", "planning", "executing"]);
 const COMPLETED_PROGRESS_HIDE_DELAY_MS = 8000;
 const LONG_RUNNING_NOTICE_DELAY_MS = 25_000;
+const CANVAS_AGENT_DESIGN_DRAFT_ERROR_MESSAGE = "디자인 초안을 만드는 중 오류가 났어요. 다시 시도해 주세요.";
+
+function isDesignDraftPrompt(prompt: string) {
+  return /(디자인|와이어|페이지|화면|초안|그려|만들|생성)/.test(prompt);
+}
 
 export function useCanvasAgent({
   canvasId,
@@ -311,6 +316,13 @@ export function useCanvasAgent({
     clearLongRunningTimer();
   }, [clearLongRunningTimer, clearProgressHideTimer]);
 
+  const message = error
+    ?? (run?.status === "failed"
+      ? isDesignDraftPrompt(run.prompt)
+        ? CANVAS_AGENT_DESIGN_DRAFT_ERROR_MESSAGE
+        : run.message
+      : run?.progress?.message ?? run?.message ?? null);
+
   return {
     applyDraft,
     cancel,
@@ -318,7 +330,7 @@ export function useCanvasAgent({
     draft: draft?.status === "preview" ? draft : null,
     error,
     isRunning: run ? ACTIVE_STATUSES.has(run.status) : false,
-    message: error ?? run?.progress?.message ?? run?.message ?? null,
+    message,
     progress: visibleProgress,
     presentationMode: run?.presentationMode ?? "interactive",
     submit,
