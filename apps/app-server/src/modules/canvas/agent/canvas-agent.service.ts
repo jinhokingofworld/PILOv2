@@ -29,12 +29,16 @@ import type {
 import { validateApplyClientOperationId, validateCanvasAgentRunRequest } from "./canvas-agent.validation";
 
 const ACTION_POLL_INTERVAL_MS = 400;
+const ACTIVE_RUN_SWEEP_INTERVAL_MS = 60_000;
+const ACTIVE_RUN_TIMEOUT_MS = 10 * 60_000;
 const MAX_CANVAS_AGENT_STEPS = 3;
 
 @Injectable()
 export class CanvasAgentService implements OnModuleDestroy, OnModuleInit {
   private actionTimer: ReturnType<typeof setInterval> | null = null;
+  private activeRunSweepTimer: ReturnType<typeof setInterval> | null = null;
   private isProcessing = false;
+  private isSweepingActiveRuns = false;
 
   constructor(
     private readonly actions: CanvasAgentActionService,
@@ -47,11 +51,14 @@ export class CanvasAgentService implements OnModuleDestroy, OnModuleInit {
 
   onModuleInit(): void {
     this.actionTimer = setInterval(() => void this.processNextAction(), ACTION_POLL_INTERVAL_MS);
+    this.activeRunSweepTimer = setInterval(() => void this.expireStaleActiveRuns(), ACTIVE_RUN_SWEEP_INTERVAL_MS);
   }
 
   onModuleDestroy(): void {
     if (this.actionTimer) clearInterval(this.actionTimer);
+    if (this.activeRunSweepTimer) clearInterval(this.activeRunSweepTimer);
     this.actionTimer = null;
+    this.activeRunSweepTimer = null;
   }
 
   async createRun(
@@ -274,6 +281,18 @@ export class CanvasAgentService implements OnModuleDestroy, OnModuleInit {
       }
     } finally {
       this.isProcessing = false;
+    }
+  }
+
+  private async expireStaleActiveRuns(): Promise<void> {
+    if (this.isSweepingActiveRuns) return;
+    this.isSweepingActiveRuns = true;
+    try {
+      await this.repository.expireActiveRunsOlderThan(ACTIVE_RUN_TIMEOUT_MS);
+    } catch (error) {
+      console.error("Canvas Agent active run timeout sweep failed", error);
+    } finally {
+      this.isSweepingActiveRuns = false;
     }
   }
 

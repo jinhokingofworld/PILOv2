@@ -19,10 +19,21 @@ GENERATION_RULES: dict[str, object] = {
         ],
     },
     "coordinateSystem": (
-        "Canvas page coordinates. If parentId references a frame, child x/y are "
-        "frame-local coordinates."
+        "Use exactly one root frame for generated diagram/code drafts. The root "
+        "frame uses Canvas page coordinates. Every child node must set parentId "
+        "to that root frame id and must use frame-local x/y coordinates measured "
+        "from the root frame top-left."
     ),
     "preferFrameForGeneratedDraft": True,
+    "layoutQualityRules": [
+        "Use an 8px spacing grid.",
+        "Keep every generated child node inside the root frame.",
+        "Use consistent margins, padding, and gaps.",
+        "No two generated child nodes may overlap.",
+        "Give inputs, buttons, cards, and repeated controls consistent widths.",
+        "For UI wireframes, build controls from rectangle plus text nodes.",
+        "Keep text short enough to fit; increase shape height when text is longer.",
+    ],
     "requiredCreateDraftInput": {
         "kind": "diagram|code",
         "title": "short Korean title",
@@ -95,9 +106,31 @@ DRAFT_TEMPLATES: dict[str, object] = {
         "kind": "diagram",
         "purpose": "Design drafts, flows, wireframes, user journeys, and structure diagrams.",
         "layout": (
-            "Create one frame as the container, add a clear title, then place tldraw "
-            "built-in text/note/rectangle/circle/triangle nodes inside it."
+            "Create exactly one root frame as the container, add a clear title, "
+            "then place tldraw built-in text/note/rectangle/circle/triangle nodes "
+            "inside it using frame-local coordinates."
         ),
+        "wireframeLayout": {
+            "useFor": [
+                "wireframe",
+                "screen layout",
+                "page design",
+                "UI design",
+                "login/signup/settings/dashboard/landing screens",
+            ],
+            "rules": [
+                "Represent the screen as one root frame.",
+                "Represent cards, panels, inputs, and buttons with rectangle nodes.",
+                (
+                    "Represent labels, titles, helper text, and dividers with text "
+                    "or line-like rectangle nodes."
+                ),
+                "Start with large layout regions, then place controls inside them.",
+                "Use top-to-bottom or left-to-right visual hierarchy.",
+                "Align related controls to a shared x and width.",
+                "Use clear section gaps; do not stack text directly on control borders.",
+            ],
+        },
         "expectedNodes": [
             "frame: one container frame sized to fit the whole draft",
             "text: short title or section labels",

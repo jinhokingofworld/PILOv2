@@ -365,7 +365,7 @@ function deterministicPlan(prompt, selectedShapeIds = [], toolHelpMode = false) 
   assert.equal(result.draftSpec.nodes.length, 3);
   assert.equal(result.draftSpec.nodes[0].x, 180);
   assert.equal(result.draftSpec.nodes[0].y, 180);
-  assert.equal(result.draftSpec.nodes[1].kind, "rectangle");
+  assert.ok(result.draftSpec.nodes.some((node) => node.kind === "rectangle"));
   assert.equal(result.draftSpec.toolSteps.length, 8);
   assert.deepEqual(result.draftSpec.availableColors.map((color) => color.name), [
     "default",
@@ -380,7 +380,79 @@ function deterministicPlan(prompt, selectedShapeIds = [], toolHelpMode = false) 
 
   const batch = drafts.toShapeBatch(result.draftSpec, "client-op");
   assert.equal(batch.operations.length, 4);
-  assert.equal(batch.operations[1].payload.shapeType, "geo");
-  assert.equal(batch.operations[2].payload.shapeType, "text");
-  assert.equal(batch.operations[3].payload.shapeType, "arrow");
+  assert.deepEqual(
+    batch.operations.map((operation) => operation.payload.shapeType).sort(),
+    ["arrow", "frame", "geo", "text"]
+  );
+}
+
+{
+  const drafts = new CanvasAgentDraftService();
+  const spec = drafts.createDraftSpec({
+    kind: "diagram",
+    prompt: "로그인 페이지 디자인 와이어프레임 그려줘",
+    sourceShapes: [],
+    viewport: null,
+    title: "로그인 페이지",
+    summary: "로그인 화면 와이어프레임",
+    nodes: [
+      {
+        id: "screen",
+        kind: "frame",
+        title: "로그인 페이지",
+        x: 100,
+        y: 100,
+        width: 360,
+        height: 420,
+        color: "blue",
+      },
+      {
+        id: "email",
+        kind: "rectangle",
+        title: "이메일 입력",
+        x: 80,
+        y: 96,
+        width: 260,
+        height: 56,
+        parentId: "screen",
+      },
+      {
+        id: "password",
+        kind: "rectangle",
+        title: "비밀번호 입력",
+        x: 80,
+        y: 108,
+        width: 260,
+        height: 56,
+        parentId: "screen",
+      },
+      {
+        id: "login",
+        kind: "rectangle",
+        title: "로그인 버튼",
+        x: 80,
+        y: 120,
+        width: 260,
+        height: 56,
+        parentId: "screen",
+      },
+    ],
+    connections: [],
+    recommendedColors: [{ name: "blue", label: "파랑", usage: "주요 액션" }],
+  });
+  const frame = spec.nodes.find((node) => node.kind === "frame");
+  const children = spec.nodes.filter((node) => node.parentId === frame.id);
+
+  assert.equal(spec.nodes.length, 4);
+  assert.ok(frame.width >= 360);
+  assert.ok(frame.height >= 420);
+  assert.equal(children.length, 3);
+  assert.ok(children.every((node) => node.x >= 32 && node.y >= 32));
+  assert.ok(children.every((node) => node.x + node.width <= frame.width - 32));
+  for (let index = 1; index < children.length; index += 1) {
+    assert.ok(
+      children[index].y >= children[index - 1].y + children[index - 1].height + 16,
+      "layout repair must push overlapping wireframe controls apart"
+    );
+  }
 }

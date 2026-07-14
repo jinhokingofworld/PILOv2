@@ -66,6 +66,10 @@ class FakeAgentRetryExhaustionRecovery:
         return self.result
 
 
+class FakeCanvasAgentRetryExhaustionRecovery(FakeAgentRetryExhaustionRecovery):
+    pass
+
+
 class FakePrReviewRetryExhaustionRecovery:
     def __init__(self, result: bool = True, error: Exception | None = None) -> None:
         self.result = result
@@ -354,6 +358,83 @@ def test_sqs_worker_preserves_agent_message_when_terminalization_errors() -> Non
         dispatcher,
         sqs_client,
         agent_retry_exhaustion_recovery=recovery,
+    )
+
+    worker.run_once()
+
+    assert recovery.calls == ["run-1"]
+    assert sqs_client.deleted == []
+
+
+def test_sqs_worker_terminalizes_third_canvas_agent_infrastructure_failure() -> None:
+    dispatcher = FakeDispatcher(
+        [
+            JobProcessResult(
+                delete_message=False,
+                reason="infrastructure_failure",
+                job_type="canvas_agent_step_requested",
+                resource_id="run-1",
+            )
+        ]
+    )
+    sqs_client = FakeSqsClient()
+    sqs_client.receive_message = lambda **kwargs: {
+        "Messages": [
+            {
+                "Body": '{"jobType":"canvas_agent_step_requested"}',
+                "ReceiptHandle": "receipt-canvas-terminal",
+                "MessageId": "message-canvas-terminal",
+                "Attributes": {"ApproximateReceiveCount": "3"},
+            }
+        ]
+    }
+    recovery = FakeCanvasAgentRetryExhaustionRecovery()
+    worker = SqsAiJobWorker(
+        runtime_settings(),
+        dispatcher,
+        sqs_client,
+        canvas_agent_retry_exhaustion_recovery=recovery,
+    )
+
+    worker.run_once()
+
+    assert recovery.calls == ["run-1"]
+    assert sqs_client.deleted == [
+        {
+            "QueueUrl": "https://sqs.example.com/jobs",
+            "ReceiptHandle": "receipt-canvas-terminal",
+        }
+    ]
+
+
+def test_sqs_worker_preserves_canvas_agent_message_when_terminalization_fails() -> None:
+    dispatcher = FakeDispatcher(
+        [
+            JobProcessResult(
+                delete_message=False,
+                reason="infrastructure_failure",
+                job_type="canvas_agent_step_requested",
+                resource_id="run-1",
+            )
+        ]
+    )
+    sqs_client = FakeSqsClient()
+    sqs_client.receive_message = lambda **kwargs: {
+        "Messages": [
+            {
+                "Body": '{"jobType":"canvas_agent_step_requested"}',
+                "ReceiptHandle": "receipt-canvas-dlq",
+                "MessageId": "message-canvas-dlq",
+                "Attributes": {"ApproximateReceiveCount": "3"},
+            }
+        ]
+    }
+    recovery = FakeCanvasAgentRetryExhaustionRecovery(result=False)
+    worker = SqsAiJobWorker(
+        runtime_settings(),
+        dispatcher,
+        sqs_client,
+        canvas_agent_retry_exhaustion_recovery=recovery,
     )
 
     worker.run_once()
