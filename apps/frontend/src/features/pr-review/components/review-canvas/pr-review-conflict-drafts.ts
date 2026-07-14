@@ -22,6 +22,11 @@ export type PrReviewConflictDraft = {
 
 export type PrReviewConflictDraftMap = Record<string, PrReviewConflictDraft>;
 
+export type PrReviewConflictHunkLocation = {
+  startLine: number;
+  lineCount: number;
+};
+
 const CONFLICT_MARKER_PATTERN = /(^|\n)(<<<<<<<|=======|>>>>>>>)(?:\s|$)/;
 
 export function createPrReviewConflictDraft(
@@ -115,21 +120,10 @@ export function buildPrReviewConflictMarkerDraft(
 
   for (const hunk of hunks) {
     const start = Math.max(0, hunk.incomingStartLine - 1);
-    const resolvedText = resolvedHunkTexts[hunk.id] ?? "";
-    const normalizedResolvedText = resolvedText
-      .replace(/\r\n/g, "\n")
-      .replace(/\r/g, "\n");
-    const replacementLines = Object.hasOwn(resolvedHunkTexts, hunk.id)
-      ? normalizedResolvedText.length === 0
-        ? []
-        : normalizedResolvedText.split("\n")
-      : [
-          "<<<<<<< PR branch",
-          ...hunk.incomingText.split("\n"),
-          "=======",
-          ...hunk.currentText.split("\n"),
-          ">>>>>>> target branch"
-        ];
+    const replacementLines = getConflictHunkReplacementLines(
+      hunk,
+      resolvedHunkTexts
+    );
 
     lines.splice(
       start,
@@ -139,6 +133,59 @@ export function buildPrReviewConflictMarkerDraft(
   }
 
   return lines.join("\n");
+}
+
+export function getPrReviewConflictHunkLocations(
+  file: PrReviewConflictFile,
+  resolvedHunkTexts: Record<string, string> = {}
+): Record<string, PrReviewConflictHunkLocation> {
+  const locations: Record<string, PrReviewConflictHunkLocation> = {};
+  const hunks = [...file.hunks].sort(
+    (left, right) => right.incomingStartLine - left.incomingStartLine
+  );
+
+  for (const hunk of hunks) {
+    const start = Math.max(0, hunk.incomingStartLine - 1);
+    const replacementLines = getConflictHunkReplacementLines(
+      hunk,
+      resolvedHunkTexts
+    );
+    const lineDelta = replacementLines.length - Math.max(0, hunk.incomingLineCount);
+
+    for (const location of Object.values(locations)) {
+      if (location.startLine > start) {
+        location.startLine += lineDelta;
+      }
+    }
+
+    locations[hunk.id] = {
+      startLine: start + 1,
+      lineCount: replacementLines.length
+    };
+  }
+
+  return locations;
+}
+
+function getConflictHunkReplacementLines(
+  hunk: PrReviewConflictFile["hunks"][number],
+  resolvedHunkTexts: Record<string, string>
+) {
+  if (Object.hasOwn(resolvedHunkTexts, hunk.id)) {
+    const resolvedText = resolvedHunkTexts[hunk.id]
+      .replace(/\r\n/g, "\n")
+      .replace(/\r/g, "\n");
+
+    return resolvedText.length === 0 ? [] : resolvedText.split("\n");
+  }
+
+  return [
+    "<<<<<<< PR branch",
+    ...hunk.incomingText.split("\n"),
+    "=======",
+    ...hunk.currentText.split("\n"),
+    ">>>>>>> target branch"
+  ];
 }
 
 export function applyPrReviewConflictMarkerChoice(input: {

@@ -37,6 +37,7 @@ import { PrReviewResolvedCodeEditor } from "./PrReviewResolvedCodeEditor";
 import { usePrReviewConflictDraftLock } from "@/features/pr-review/realtime/usePrReviewConflictDraftLock";
 import {
   buildPrReviewConflictMarkerDraft,
+  getPrReviewConflictHunkLocations,
   type PrReviewConflictDraft
 } from "./pr-review-conflict-drafts";
 import {
@@ -301,6 +302,31 @@ function getDecisionDisabledReason(input: {
   return null;
 }
 
+function getResolvedHunkTexts(input: {
+  acceptedAiResolvedTexts: Record<string, string>;
+  choices: Record<string, PrReviewConflictResolutionChoice>;
+  file: PrReviewConflictFile;
+  manualResolvedTexts: Record<string, string>;
+}) {
+  return Object.fromEntries(
+    input.file.hunks.flatMap((hunk) => {
+      const choice = input.choices[hunk.id];
+      if (!choice) {
+        return [];
+      }
+
+      const resolvedText = getConflictResolutionText({
+        hunk,
+        choice,
+        acceptedAiResolvedTexts: input.acceptedAiResolvedTexts,
+        manualResolvedTexts: input.manualResolvedTexts
+      });
+
+      return resolvedText === null ? [] : [[hunk.id, resolvedText]];
+    })
+  );
+}
+
 export function PrReviewFileDiffDrawer({
   apiClient,
   baseBranch,
@@ -357,6 +383,30 @@ export function PrReviewFileDiffDrawer({
     conflictDraft?.acceptedAiResolvedTexts ?? {};
   const manualResolvedTexts = conflictDraft?.manualResolvedTexts ?? {};
   const isResolvedDraftCustomized = conflictDraft?.isCustomized ?? false;
+  const resolvedHunkTexts = useMemo(
+    () =>
+      conflictFile
+        ? getResolvedHunkTexts({
+            acceptedAiResolvedTexts,
+            choices: resolutionChoices,
+            file: conflictFile,
+            manualResolvedTexts
+          })
+        : {},
+    [
+      acceptedAiResolvedTexts,
+      conflictFile,
+      manualResolvedTexts,
+      resolutionChoices
+    ]
+  );
+  const conflictHunkLocations = useMemo(
+    () =>
+      conflictFile
+        ? getPrReviewConflictHunkLocations(conflictFile, resolvedHunkTexts)
+        : {},
+    [conflictFile, resolvedHunkTexts]
+  );
   const commentSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const decisionVersionRef = useRef<number | null>(null);
@@ -601,6 +651,9 @@ export function PrReviewFileDiffDrawer({
   const decisionDisabled = isReviewReadOnly || decisionDisabledReason !== null;
   const selectedConflictHunk =
     conflictFile?.hunks[selectedConflictHunkIndex] ?? null;
+  const selectedConflictHunkLocation = selectedConflictHunk
+    ? conflictHunkLocations[selectedConflictHunk.id] ?? null
+    : null;
   const aiResolvedHunks =
     conflictSuggestion?.status === "suggested"
       ? conflictSuggestion.resolvedHunks
@@ -641,23 +694,12 @@ export function PrReviewFileDiffDrawer({
         manualResolvedTexts: nextManualResolvedTexts,
         resolvedContent: buildPrReviewConflictMarkerDraft(
           conflictFile,
-          Object.fromEntries(
-            conflictFile.hunks.flatMap((hunk) => {
-              const choice = nextChoices[hunk.id];
-              if (!choice) {
-                return [];
-              }
-
-              const resolvedText = getConflictResolutionText({
-                hunk,
-                choice,
-                acceptedAiResolvedTexts: nextAcceptedAiResolvedTexts,
-                manualResolvedTexts: nextManualResolvedTexts
-              });
-
-              return resolvedText === null ? [] : [[hunk.id, resolvedText]];
-            })
-          )
+          getResolvedHunkTexts({
+            acceptedAiResolvedTexts: nextAcceptedAiResolvedTexts,
+            choices: nextChoices,
+            file: conflictFile,
+            manualResolvedTexts: nextManualResolvedTexts
+          })
         ),
         isCustomized: false
       });
@@ -995,9 +1037,12 @@ export function PrReviewFileDiffDrawer({
                   />
                 ) : (
                   <ResolvedDraftWorkspace
+                    activeHunkIndex={selectedConflictHunkIndex}
                     canStartEditing={canEditConflictDraft}
                     editingOwnerUserId={editingOwnerUserId}
                     filePath={file.filePath}
+                    hunkCount={conflictFile.hunks.length}
+                    hunkLocation={selectedConflictHunkLocation}
                     isCustomized={isResolvedDraftCustomized}
                     isEditClaimPending={isEditClaimPending}
                     isEditing={isEditingConflictDraft}
@@ -1019,6 +1064,7 @@ export function PrReviewFileDiffDrawer({
                       });
                     }}
                     onFinishEditing={releaseConflictDraftEdit}
+                    onHunkIndexChange={setSelectedConflictHunkIndex}
                     onStartEditing={startConflictDraftEdit}
                     value={resolvedContentDraft}
                   />
@@ -1711,9 +1757,12 @@ function ConflictWorkspaceTabs({
 }
 
 function ResolvedDraftWorkspace({
+  activeHunkIndex,
   canStartEditing,
   editingOwnerUserId,
   filePath,
+  hunkCount,
+  hunkLocation,
   isCustomized,
   isEditClaimPending,
   isEditing,
@@ -1721,12 +1770,16 @@ function ResolvedDraftWorkspace({
   isReviewReadOnly,
   onChange,
   onFinishEditing,
+  onHunkIndexChange,
   onStartEditing,
   value
 }: {
+  activeHunkIndex: number;
   canStartEditing: boolean;
   editingOwnerUserId: string | null;
   filePath: string;
+  hunkCount: number;
+  hunkLocation: { lineCount: number; startLine: number } | null;
   isCustomized: boolean;
   isEditClaimPending: boolean;
   isEditing: boolean;
@@ -1734,6 +1787,7 @@ function ResolvedDraftWorkspace({
   isReviewReadOnly: boolean;
   onChange: (value: string) => void;
   onFinishEditing: () => void;
+  onHunkIndexChange: (index: number) => void;
   onStartEditing: () => void;
   value: string;
 }) {
@@ -1751,6 +1805,45 @@ function ResolvedDraftWorkspace({
             <span className="rounded-md bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-700">
               직접 편집됨
             </span>
+          ) : null}
+          {hunkCount > 1 ? (
+            <div
+              aria-label="전체 코드 Conflict 구간 탐색"
+              className="flex items-center gap-1 rounded-md border border-slate-200 bg-white p-1"
+            >
+              <span className="px-1.5 text-xs font-semibold text-rose-700">
+                {hunkCount}개 Conflict
+              </span>
+              <Button
+                disabled={
+                  isCustomized || !hunkLocation || activeHunkIndex === 0
+                }
+                onClick={() => onHunkIndexChange(activeHunkIndex - 1)}
+                size="sm"
+                type="button"
+                variant="ghost"
+              >
+                <ChevronLeft className="size-3.5" />
+                이전
+              </Button>
+              <span className="min-w-10 text-center text-xs font-semibold text-slate-700">
+                {activeHunkIndex + 1} / {hunkCount}
+              </span>
+              <Button
+                disabled={
+                  isCustomized ||
+                  !hunkLocation ||
+                  activeHunkIndex === hunkCount - 1
+                }
+                onClick={() => onHunkIndexChange(activeHunkIndex + 1)}
+                size="sm"
+                type="button"
+                variant="ghost"
+              >
+                다음
+                <ChevronRight className="size-3.5" />
+              </Button>
+            </div>
           ) : null}
           {!isReviewReadOnly ? (
             isEditing ? (
@@ -1778,19 +1871,27 @@ function ResolvedDraftWorkspace({
         </div>
       </header>
       <div className="flex shrink-0 items-center border-b border-slate-200 bg-slate-50 px-4 py-2 text-xs text-slate-600">
-        {isEditing
-          ? "코드 편집 중입니다. 저장된 변경 내용은 다른 참여자에게 바로 반영됩니다."
-          : editingOwnerUserId
-            ? "다른 참여자가 코드 편집 중입니다. 현재 내용은 읽기 전용입니다."
-            : "전체 코드를 읽기 전용으로 보고 있습니다. 수정하려면 코드 편집을 시작하세요."}
+        {isCustomized
+          ? "직접 수정한 뒤에는 hunk 위치를 정확히 계산할 수 없어 구간 이동을 사용할 수 없습니다."
+          : isEditing
+            ? "코드 편집 중입니다. 저장된 변경 내용은 다른 참여자에게 바로 반영됩니다."
+            : editingOwnerUserId
+              ? "다른 참여자가 코드 편집 중입니다. 현재 내용은 읽기 전용입니다."
+              : "전체 코드를 읽기 전용으로 보고 있습니다. 수정하려면 코드 편집을 시작하세요."}
       </div>
       <PrReviewResolvedCodeEditor
-        changedLineNumbers={[]}
+        changedLineNumbers={
+          !isCustomized && hunkLocation?.lineCount
+            ? [hunkLocation.startLine]
+            : []
+        }
         filePath={filePath}
         onChange={onChange}
         readOnly={!isEditing}
-        revealLine={null}
-        revealRequestId={0}
+        revealLine={
+          isCustomized ? null : (hunkLocation?.startLine ?? null)
+        }
+        revealRequestId={activeHunkIndex}
         value={value}
       />
     </section>
