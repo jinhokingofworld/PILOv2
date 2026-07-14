@@ -1127,6 +1127,26 @@ PATCH /api/v1/workspaces/{workspaceId}/github/review-files/{reviewFileId}/confli
 - 초안 저장 중에는 Git marker를 허용한다. 그러나 GitHub 적용 endpoint는 marker가 하나라도 남아 있으면 거절한다.
 - App Server가 저장 성공 후 `pr-review:conflict-draft:updated` Realtime event를 같은 review Canvas room에 전달한다. 잠금/해제는 Realtime의 일시 상태이고, 코드 원본은 이 API와 DB다.
 
+### `resolutionState`
+
+Conflict 초안의 `resolvedContent`만으로는 hunk 선택 결과와 전체 코드 직접 편집을 구분할 수 없다. `GET`, `PATCH` 응답과 `pr-review:conflict-draft:updated` Realtime event는 아래 상태를 함께 제공한다. `PATCH` 요청도 같은 값을 포함해야 한다.
+
+```json
+{
+  "resolutionState": {
+    "resolutionChoices": { "hunk_1": "pr", "hunk_2": "ai" },
+    "acceptedAiResolvedTexts": { "hunk_2": "const timeout = 45;" },
+    "manualResolvedTexts": {},
+    "isCustomized": false
+  }
+}
+```
+
+- `resolutionChoices` 값은 `ai`, `pr`, `target`, `both`, `manual` 중 하나다.
+- `isCustomized`가 `true`일 때만 전체 코드 직접 편집 상태로 hunk 선택을 막는다.
+- migration 전 저장된 초안 또는 상태를 보내지 않는 이전 클라이언트의 저장은 기존 코드 보호를 위해 `isCustomized: true`로 처리한다.
+- 전체 Conflict 적용이 비활성화된 경우 클라이언트는 준비된 파일 수와 사유를 버튼 근처에 표시한다.
+
 ## AI Conflict Suggestion Draft 생성
 
 Post-MVP Phase 1-D에서 구현하는 사용자 요청 기반 AI suggestion 생성 계약이다.
