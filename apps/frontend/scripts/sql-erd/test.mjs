@@ -3413,6 +3413,67 @@ assert.deepEqual(
   newerLayout
 );
 
+const layoutRequestBeforeTextOrStroke = locallyChangedLayout;
+const layoutWithTextAddedDuringAutosave = modelRuntime.applySqltoerdLayoutPatch(
+  layoutRequestBeforeTextOrStroke,
+  {
+    textsToAdd: [{
+      id: "text.autosave-race",
+      x: 24,
+      y: 48,
+      width: 240,
+      height: 72,
+      text: "Keep this text",
+      color: "blue"
+    }]
+  }
+);
+const layoutWithStrokeAddedDuringAutosave = modelRuntime.applySqltoerdLayoutPatch(
+  layoutRequestBeforeTextOrStroke,
+  {
+    strokesToAdd: [{
+      id: "stroke.autosave-race",
+      points: [{ x: 24, y: 48 }, { x: 48, y: 72 }],
+      color: "blue",
+      size: 4
+    }]
+  }
+);
+
+for (const layoutChangedDuringAutosave of [
+  layoutWithTextAddedDuringAutosave,
+  layoutWithStrokeAddedDuringAutosave
+]) {
+  assert.equal(
+    modelRuntime.areSqltoerdLayoutsEqual(
+      layoutChangedDuringAutosave,
+      layoutRequestBeforeTextOrStroke
+    ),
+    false
+  );
+
+  const stateWithPendingAnnotationChange = {
+    ...pendingLayoutState,
+    lastSuccessfulSnapshot: {
+      ...pendingLayoutSnapshot,
+      layoutJson: layoutChangedDuringAutosave
+    }
+  };
+  const stateAfterFirstAutosaveResponse = sqlEditStateRuntime.reduceSqlErdEditState(
+    stateWithPendingAnnotationChange,
+    {
+      type: "layout_saved",
+      requestLayoutJson: layoutRequestBeforeTextOrStroke,
+      snapshot: savedLayoutSnapshot
+    }
+  );
+
+  assert.deepEqual(
+    stateAfterFirstAutosaveResponse.lastSuccessfulSnapshot.layoutJson,
+    layoutChangedDuringAutosave
+  );
+}
+
 const monotonicLayoutState = {
   ...newerLayoutState,
   lastSuccessfulSnapshot: {

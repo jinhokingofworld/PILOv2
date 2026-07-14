@@ -6,6 +6,8 @@ import type {
   SqltoerdAnnotationsV1,
   SqltoerdCanvasFrame,
   SqltoerdCanvasNote,
+  SqltoerdCanvasStroke,
+  SqltoerdCanvasText,
   SqltoerdLayoutPatch,
   SqltoerdColumnAnnotationLink,
   SqltoerdLayoutJsonV1,
@@ -725,11 +727,17 @@ function areSqltoerdAnnotationsEqual(
   const rightNotes = rightAnnotations?.notes ?? [];
   const leftFrames = leftAnnotations?.frames ?? [];
   const rightFrames = rightAnnotations?.frames ?? [];
+  const leftTexts = leftAnnotations?.texts ?? [];
+  const rightTexts = rightAnnotations?.texts ?? [];
+  const leftStrokes = leftAnnotations?.strokes ?? [];
+  const rightStrokes = rightAnnotations?.strokes ?? [];
 
   if (
     leftLinks.length !== rightLinks.length ||
     leftNotes.length !== rightNotes.length ||
-    leftFrames.length !== rightFrames.length
+    leftFrames.length !== rightFrames.length ||
+    leftTexts.length !== rightTexts.length ||
+    leftStrokes.length !== rightStrokes.length
   ) {
     return false;
   }
@@ -743,6 +751,12 @@ function areSqltoerdAnnotationsEqual(
     ) &&
     leftFrames.every((leftFrame, index) =>
       areSqltoerdCanvasFramesEqual(leftFrame, rightFrames[index])
+    ) &&
+    leftTexts.every((leftText, index) =>
+      areSqltoerdCanvasTextsEqual(leftText, rightTexts[index])
+    ) &&
+    leftStrokes.every((leftStroke, index) =>
+      areSqltoerdCanvasStrokesEqual(leftStroke, rightStrokes[index])
     )
   );
 }
@@ -776,6 +790,40 @@ function areSqltoerdCanvasFramesEqual(
     leftFrame.title === rightFrame.title &&
     leftFrame.color === rightFrame.color &&
     leftFrame.isLocked === rightFrame.isLocked
+  );
+}
+
+function areSqltoerdCanvasTextsEqual(
+  leftText: SqltoerdCanvasText,
+  rightText: SqltoerdCanvasText | undefined
+) {
+  return (
+    rightText !== undefined &&
+    leftText.id === rightText.id &&
+    leftText.x === rightText.x &&
+    leftText.y === rightText.y &&
+    leftText.width === rightText.width &&
+    leftText.height === rightText.height &&
+    leftText.text === rightText.text &&
+    leftText.color === rightText.color
+  );
+}
+
+function areSqltoerdCanvasStrokesEqual(
+  leftStroke: SqltoerdCanvasStroke,
+  rightStroke: SqltoerdCanvasStroke | undefined
+) {
+  return (
+    rightStroke !== undefined &&
+    leftStroke.id === rightStroke.id &&
+    leftStroke.color === rightStroke.color &&
+    leftStroke.size === rightStroke.size &&
+    leftStroke.points.length === rightStroke.points.length &&
+    leftStroke.points.every(
+      (leftPoint, index) =>
+        leftPoint.x === rightStroke.points[index]?.x &&
+        leftPoint.y === rightStroke.points[index]?.y
+    )
   );
 }
 
