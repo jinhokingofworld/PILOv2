@@ -234,19 +234,21 @@ function readPresenceUpdatePayload(
   };
 }
 
-function readShapeIds(payload: Record<string, unknown>): string[] | null {
-  const shapeIds = payload.shapeIds;
-
+function readShapeIdList(value: unknown): string[] | null {
   if (
-    !Array.isArray(shapeIds) ||
-    !shapeIds.every((shapeId) => typeof shapeId === "string")
+    !Array.isArray(value) ||
+    !value.every((shapeId) => typeof shapeId === "string")
   ) {
     return null;
   }
 
   return Array.from(
-    new Set(shapeIds.map((shapeId) => shapeId.trim()).filter(Boolean)),
+    new Set(value.map((shapeId) => shapeId.trim()).filter(Boolean)),
   );
+}
+
+function readShapeIds(payload: Record<string, unknown>): string[] | null {
+  return readShapeIdList(payload.shapeIds);
 }
 
 function readShapeLockClaimPayload(
@@ -287,7 +289,12 @@ function readShapeLockReleasePayload(
 function isShapePreviewPhase(
   value: unknown,
 ): value is CanvasShapePreviewPayload["phase"] {
-  return value === "move" || value === "resize" || value === "unknown";
+  return (
+    value === "delete" ||
+    value === "move" ||
+    value === "resize" ||
+    value === "unknown"
+  );
 }
 
 function readShapePreviewPayload(
@@ -298,11 +305,18 @@ function readShapePreviewPayload(
   if (!room || !isRecord(payload)) return null;
 
   const shapes = payload.shapes;
+  const deletedShapeIds =
+    payload.deletedShapeIds === undefined
+      ? undefined
+      : readShapeIdList(payload.deletedShapeIds);
 
   if (!Array.isArray(shapes) || !shapes.every(isRecord)) return null;
+  if (payload.deletedShapeIds !== undefined && !deletedShapeIds) return null;
+  if (!shapes.length && !deletedShapeIds?.length) return null;
 
   return {
     ...room,
+    ...(deletedShapeIds?.length ? { deletedShapeIds } : {}),
     phase: isShapePreviewPhase(payload.phase) ? payload.phase : "unknown",
     shapes,
   };
@@ -647,12 +661,6 @@ export async function createRealtimeSocketServer({
       if (!lockReleasePayload) return;
 
       io.to(roomName).emit(canvasServerEvents.shapeLockRelease, lockReleasePayload);
-      io.to(roomName).emit(canvasServerEvents.shapePreviewClear, {
-        canvasId: releasePayload.canvasId,
-        actorUserId: lockReleasePayload.ownerUserId,
-        shapeIds: lockReleasePayload.shapeIds,
-        workspaceId: releasePayload.workspaceId,
-      });
     });
 
     socket.on(canvasClientEvents.shapePreview, (payload) => {

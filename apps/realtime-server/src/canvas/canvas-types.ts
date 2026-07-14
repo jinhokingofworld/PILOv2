@@ -113,7 +113,8 @@ export type CanvasShapeLockReleaseEventPayload = CanvasRoomRef & {
 };
 
 export type CanvasShapePreviewPayload = CanvasRoomRef & {
-  phase: "move" | "resize" | "unknown";
+  deletedShapeIds?: string[];
+  phase: "delete" | "move" | "resize" | "unknown";
   shapes: Record<string, unknown>[];
 };
 

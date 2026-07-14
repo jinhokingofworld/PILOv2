@@ -56,6 +56,7 @@ export type CanvasPresenceController = {
   sendShapePreview: (
     shapes: Record<string, unknown>[],
     phase?: CanvasShapePreviewPhase,
+    deletedShapeIds?: string[],
   ) => void;
 };
 
@@ -307,6 +308,44 @@ function upsertShapePreview(
     ),
     nextPreview,
   ];
+}
+
+function hasShapePreviewPayload(preview: CanvasShapePreviewEventPayload) {
+  return Boolean(preview.shapes.length || preview.deletedShapeIds?.length);
+}
+
+function removeShapePreviewIds({
+  actorUserId,
+  previews,
+  shapeIds,
+}: {
+  actorUserId: string;
+  previews: CanvasShapePreviewEventPayload[];
+  shapeIds: string[];
+}) {
+  if (!shapeIds.length) return previews;
+
+  const shapeIdSet = new Set(shapeIds);
+
+  return previews.flatMap((preview) => {
+    if (preview.actorUserId !== actorUserId) {
+      return [preview];
+    }
+
+    const nextPreview = {
+      ...preview,
+      deletedShapeIds: preview.deletedShapeIds?.filter(
+        (shapeId) => !shapeIdSet.has(shapeId),
+      ),
+      shapes: preview.shapes.filter((shape) => {
+        const shapeId = isRecord(shape) ? shape.id : null;
+
+        return typeof shapeId === "string" ? !shapeIdSet.has(shapeId) : true;
+      }),
+    };
+
+    return hasShapePreviewPayload(nextPreview) ? [nextPreview] : [];
+  });
 }
 
 export function useCanvasPresence(
@@ -658,6 +697,13 @@ export function useCanvasPresence(
       }
 
       reconcileOperationSeq(payload);
+      setRemoteShapePreviews((currentPreviews) =>
+        removeShapePreviewIds({
+          actorUserId: payload.actorUserId,
+          previews: currentPreviews,
+          shapeIds: [payload.shapeId],
+        }),
+      );
     });
     realtimeSocket.on("canvas:sync:required", (payload) => {
       if (
@@ -899,16 +945,27 @@ export function useCanvasPresence(
     (
       shapes: Record<string, unknown>[],
       phase: CanvasShapePreviewPhase = "unknown",
+      deletedShapeIds: string[] = [],
     ) => {
       const socket = socketRef.current;
       const room = roomRef.current;
+      const uniqueDeletedShapeIds = Array.from(
+        new Set(deletedShapeIds.map((shapeId) => shapeId.trim()).filter(Boolean)),
+      );
 
-      if (!socket?.connected || !joinedRef.current || !shapes.length) {
+      if (
+        !socket?.connected ||
+        !joinedRef.current ||
+        (!shapes.length && !uniqueDeletedShapeIds.length)
+      ) {
         return;
       }
 
       socket.emit("canvas:shape:preview", {
         ...room,
+        ...(uniqueDeletedShapeIds.length
+          ? { deletedShapeIds: uniqueDeletedShapeIds }
+          : {}),
         phase,
         shapes,
       });

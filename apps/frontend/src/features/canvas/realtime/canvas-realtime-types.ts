@@ -123,12 +123,17 @@ export type CanvasShapeLockReleaseEventPayload = {
   shapeIds: string[];
 };
 
-export type CanvasShapePreviewPhase = "move" | "resize" | "unknown";
+export type CanvasShapePreviewPhase =
+  | "delete"
+  | "move"
+  | "resize"
+  | "unknown";
 
 export type CanvasShapePreviewPayload = {
   workspaceId: string;
   canvasId: string;
   phase: CanvasShapePreviewPhase;
+  deletedShapeIds?: string[];
   shapes: Record<string, unknown>[];
 };
 
