@@ -45,7 +45,6 @@ API가 담당하는 범위:
 - Prisma/DBML/Mermaid/PlantUML/SQLAlchemy/Sequelize source 저장
 - Manual arrow
 - URL 공유
-- 실시간 협업
 - 자유형 Canvas shape API와 sqltoerd object의 양방향 동기화
 - 최근 열람 시각 또는 최근 session pointer 저장
 - 삭제 session 복구와 version history
@@ -53,6 +52,79 @@ API가 담당하는 범위:
 sqltoerd는 자유형 Canvas의 하위 도구가 아니라 Workspace의 독립 기능이다. 화면은
 tldraw 기반 surface를 사용할 수 있지만, 저장 API는 `canvas-api.md`의 freeform
 canvas shape API를 재사용하지 않는다.
+
+## Realtime Presence (Phase 1)
+
+SQLtoERD 편집 화면은 REST session API와 별도로 Socket.IO presence room을 사용할 수
+있다. 이 단계는 다른 사용자의 현재 위치와 선택 상태만 보여 주며, session의
+`sourceText`, `modelJson`, `layoutJson`을 저장하거나 동기화하지 않는다.
+
+- room name: `workspace:{workspaceId}:sql-erd:{sessionId}`
+- 인증: REST API와 같은 bearer session token을 Socket.IO handshake에 전달한다.
+- 접근: `sql_erd_sessions.workspace_id`와 일치하고 `deleted_at IS NULL`인 session에
+  대해, 해당 Workspace의 활성 `workspace_members`만 room에 입장할 수 있다.
+- presence 상태는 연결된 socket의 메모리에만 유지한다. Redis Socket.IO adapter가
+  설정된 multi-instance 환경에서는 room socket snapshot을 adapter로 수집한다.
+  새로고침·재접속·server 재시작 뒤 복원하지 않으며 DB에 저장하지 않는다.
+- `latestOpSeq`는 후속 durable operation 단계의 예약 필드이며, Phase 1에서는 항상
+  `0`이다.
+
+### Client events
+
+```ts
+"sql-erd:join" = {
+  workspaceId: string;
+  sessionId: string;
+};
+
+"sql-erd:leave" = {
+  workspaceId: string;
+  sessionId: string;
+};
+
+"sql-erd:presence:update" = {
+  workspaceId: string;
+  sessionId: string;
+  cursor: { x: number; y: number } | null;
+  selectedShapeIds: string[]; // max 100
+  tool: "select" | "note" | "frame" | "text" | "draw" | "eraser";
+};
+```
+
+### Server events
+
+```ts
+"sql-erd:joined" = {
+  workspaceId: string;
+  sessionId: string;
+  latestOpSeq: 0;
+  presence: SqltoerdPresenceState[];
+};
+
+"sql-erd:presence:update" = SqltoerdPresenceState;
+
+"sql-erd:presence:leave" = {
+  workspaceId: string;
+  sessionId: string;
+  userId: string;
+};
+
+"sql-erd:error" = {
+  code: "invalid_payload" | "forbidden" | "room_not_joined";
+  message: string;
+};
+
+type SqltoerdPresenceState = {
+  workspaceId: string;
+  sessionId: string;
+  userId: string;
+  displayName?: string;
+  cursor: { x: number; y: number } | null;
+  selectedShapeIds: string[];
+  tool: "select" | "note" | "frame" | "text" | "draw" | "eraser";
+  updatedAt: string;
+};
+```
 
 ## 데이터 규칙
 
