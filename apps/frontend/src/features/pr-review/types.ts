@@ -506,6 +506,7 @@ export type PrReviewConflictDraft = {
   reviewFileId: string;
   sourceHeadBlobSha: string;
   resolvedContent: string;
+  resolutionState: PrReviewConflictDraftResolutionState;
   draftVersion: number;
   updatedByUserId: string;
   updatedAt: string;
@@ -514,6 +515,7 @@ export type PrReviewConflictDraft = {
 export type UpdatePrReviewConflictDraftInput = {
   sourceHeadBlobSha: string;
   resolvedContent: string;
+  resolutionState: PrReviewConflictDraftResolutionState;
   expectedDraftVersion: number;
 };
 
@@ -528,6 +530,13 @@ export type PrReviewConflictDraftSource =
   | "target"
   | "both"
   | "manual";
+
+export type PrReviewConflictDraftResolutionState = {
+  resolutionChoices: Record<string, PrReviewConflictDraftSource>;
+  acceptedAiResolvedTexts: Record<string, string>;
+  manualResolvedTexts: Record<string, string>;
+  isCustomized: boolean;
+};
 
 export type CreatePrReviewConflictSuggestionInput = {
   currentDraft?: {

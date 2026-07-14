@@ -1,6 +1,7 @@
 import type {
   ApplyPrReviewConflictsInput,
   PrReviewConflictAnalysis,
+  PrReviewConflictDraftResolutionState,
   PrReviewConflictFile,
   PrReviewConflictSuggestion
 } from "@/features/pr-review/types";
@@ -37,6 +38,30 @@ export function createPrReviewConflictDraft(
     suggestion: null,
     resolvedContent: buildPrReviewConflictMarkerDraft(file),
     isCustomized: false
+  };
+}
+
+export function toPrReviewConflictDraftResolutionState(
+  draft: PrReviewConflictDraft
+): PrReviewConflictDraftResolutionState {
+  return {
+    resolutionChoices: draft.resolutionChoices,
+    acceptedAiResolvedTexts: draft.acceptedAiResolvedTexts,
+    manualResolvedTexts: draft.manualResolvedTexts,
+    isCustomized: draft.isCustomized
+  };
+}
+
+export function applyPrReviewConflictDraftResolutionState(
+  draft: PrReviewConflictDraft,
+  resolutionState: PrReviewConflictDraftResolutionState
+): PrReviewConflictDraft {
+  return {
+    ...draft,
+    resolutionChoices: resolutionState.resolutionChoices,
+    acceptedAiResolvedTexts: resolutionState.acceptedAiResolvedTexts,
+    manualResolvedTexts: resolutionState.manualResolvedTexts,
+    isCustomized: resolutionState.isCustomized
   };
 }
 
