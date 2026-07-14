@@ -246,6 +246,14 @@ async function compileSqlErdRuntimeModules() {
           'from "./annotation-shape-stub.mjs"'
         ],
         [
+          /from "@\/features\/sql-erd\/shapes\/sql-erd-frame-shape"/g,
+          'from "./frame-shape-stub.mjs"'
+        ],
+        [
+          /from "@\/features\/sql-erd\/shapes\/sql-erd-note-shape"/g,
+          'from "./note-shape-stub.mjs"'
+        ],
+        [
           /from "@\/features\/sql-erd\/shapes\/sql-erd-relation-shape"/g,
           'from "./relation-shape-stub.mjs"'
         ],
@@ -296,6 +304,14 @@ async function compileSqlErdRuntimeModules() {
     await writeFile(
       join(outputDir, "annotation-shape-stub.mjs"),
       "export function isSqlErdAnnotationShape(shape) { return shape?.type === 'sqltoerd_annotation'; }\n"
+    );
+    await writeFile(
+      join(outputDir, "frame-shape-stub.mjs"),
+      "export function isSqlErdFrameShape(shape) { return shape?.type === 'sqltoerd_frame'; }\n"
+    );
+    await writeFile(
+      join(outputDir, "note-shape-stub.mjs"),
+      "export function isSqlErdNoteShape(shape) { return shape?.type === 'sqltoerd_note'; }\n"
     );
     await writeFile(
       join(outputDir, "table-shape-stub.mjs"),
@@ -684,6 +700,7 @@ const [
   tableShape,
   relationShape,
   annotationShape,
+  frameShape,
   ddlParserUtils,
   sqlEditorDialectUtils,
   sqlSourceDecorationUtils,
@@ -719,6 +736,7 @@ const [
     readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-table-shape.tsx"),
     readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-relation-shape.tsx"),
     readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-annotation-shape.tsx"),
+    readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-frame-shape.tsx"),
     readSqlErdFile("../../src/features/sql-erd/utils/ddl-parser.ts"),
     readSqlErdFile("../../src/features/sql-erd/utils/sql-editor-dialect.ts"),
     readSqlErdFile("../../src/features/sql-erd/utils/sql-source-decoration.ts"),
@@ -876,7 +894,9 @@ const runtimeAutoLayoutInput = {
           toTableId: "table.removed",
           label: "legacy note"
         }
-      ]
+      ],
+      notes: [{ id: "note.orders", x: 30, y: 40, width: 240, height: 160, text: "keep" }],
+      frames: [{ id: "frame.orders", x: 10, y: 20, width: 640, height: 420, title: "Orders", color: "blue", isLocked: false }]
     }
   },
   modelJson: runtimeModel,
@@ -953,7 +973,9 @@ assert.deepEqual(
   runtimeIncrementalAutoLayout.annotations,
   {
     version: 1,
-    links: [runtimeAutoLayoutInput.layoutJson.annotations.links[0]]
+    links: [runtimeAutoLayoutInput.layoutJson.annotations.links[0]],
+    notes: runtimeAutoLayoutInput.layoutJson.annotations.notes,
+    frames: runtimeAutoLayoutInput.layoutJson.annotations.frames
   }
 );
 
@@ -6035,8 +6057,9 @@ assert.match(canvasSurface, /syncSqlErdAnnotationShapes/);
 assert.match(canvasSurface, /addSqltoerdColumnAnnotation/);
 assert.match(canvasSurface, /addSqltoerdTableAnnotation/);
 assert.match(canvasSurface, /SQLTOERD_TABLE_CONNECT_START_EVENT/);
-assert.match(canvasSurface, /updateSqltoerdAnnotationLabel/);
-assert.match(canvasSurface, /removeSqltoerdAnnotation/);
+assert.match(canvasSurface, /linksToAdd/);
+assert.match(canvasSurface, /linksById/);
+assert.match(canvasSurface, /deleteLinkIds/);
 assert.match(canvasSurface, /event\.key === "Delete"/);
 assert.match(canvasSurface, /event\.key === "Backspace"/);
 assert.match(canvasSurface, /window\.addEventListener\("keydown", handleKeyDown, true\)/);
@@ -6056,7 +6079,8 @@ assert.match(canvasSurface, /history: "ignore"/);
 assert.match(canvasSurface, /SqlErdSelectionSync/);
 assert.match(canvasSurface, /SqlErdSelectedColumnSync/);
 assert.match(canvasSurface, /SqlErdLayoutSync/);
-assert.match(canvasSurface, /onLayoutChange/);
+assert.match(canvasSurface, /onLayoutPatch/);
+assert.doesNotMatch(canvasSurface, /onLayoutChange/);
 assert.match(canvasSurface, /updateSqltoerdLayoutWithTablePositions/);
 assert.match(canvasSurface, /onSelectionChange/);
 assert.match(canvasSurface, /getSqlErdSelectionFromSelectedShapes/);
@@ -6204,6 +6228,15 @@ assert.doesNotMatch(
   /\(startPoint\.x \+ endPoint\.x\) \/ 2/
 );
 assert.doesNotMatch(annotationShape, /Cardinality/);
+assert.match(frameShape, /\{!shape\.props\.isLocked \? \(/);
+assert.match(
+  canvasSurface,
+  /const frame = layoutJsonRef\.current\.annotations\?\.frames\?\.find\([\s\S]*?if \(!frame \|\| frame\.isLocked\) \{[\s\S]*?return;/
+);
+assert.match(
+  canvasSurface,
+  /isSqlErdFrameShape\(selectedShape\)[\s\S]*?selectedShape\.props\.isLocked/
+);
 assert.match(relationShape, /hideSelectionBoundsBg/);
 assert.match(relationShape, /hideSelectionBoundsFg/);
 assert.match(canvasSurface, /fromColumnIds: relation\.fromColumnIds/);
@@ -6239,3 +6272,99 @@ assert.match(apiClient, /sql-erd-sessions/);
 assert.doesNotMatch(apiClient, /sql-erd-session`/);
 assert.match(apiClient, /Authorization: `Bearer \$\{accessToken\}`/);
 assert.match(apiClient, /credentials: "same-origin"/);
+assert.doesNotMatch(apiSpec, /^- Sticky note$/m);
+assert.doesNotMatch(apiSpec, /^- Group box$/m);
+assert.match(apiSpec, /`notes`는 Sticky note, `frames`는 Group box/);
+assert.match(apiSpec, /`links`, `notes`, `frames` 전체에서 중복될 수 없다/);
+
+assert.equal(typeof modelRuntime.applySqltoerdLayoutPatch, "function");
+const patchedLayout = modelRuntime.applySqltoerdLayoutPatch(
+  {
+    version: 1,
+    tableLayouts: [{ tableId: "table.users", x: 10, y: 20 }],
+    annotations: {
+      version: 1,
+      links: [],
+      notes: [
+        {
+          id: "note.users",
+          x: 40,
+          y: 60,
+          width: 240,
+          height: 160,
+          text: "before"
+        }
+      ],
+      frames: []
+    }
+  },
+  {
+    tablePositions: [{ tableId: "table.users", x: 100, y: 200 }],
+    notesById: { "note.users": { text: "" } }
+  }
+);
+assert.deepEqual(patchedLayout.tableLayouts, [
+  { tableId: "table.users", x: 100, y: 200 }
+]);
+assert.equal(patchedLayout.annotations.notes[0].text, "");
+assert.equal(
+  "annotations" in modelRuntime.applySqltoerdLayoutPatch(
+    { version: 1, tableLayouts: [{ tableId: "table.users", x: 0, y: 0 }] },
+    { tablePositions: [{ tableId: "table.users", x: 5, y: 6 }] }
+  ),
+  false
+);
+const layoutWithCreatedFrame = modelRuntime.applySqltoerdLayoutPatch(
+  patchedLayout,
+  {
+    framesToAdd: [{
+      id: "frame.billing",
+      x: 10,
+      y: 20,
+      width: 640,
+      height: 420,
+      title: "Billing",
+      color: "blue",
+      isLocked: true
+    }]
+  }
+);
+assert.equal(layoutWithCreatedFrame.annotations.frames[0].title, "Billing");
+assert.equal(
+  modelRuntime.areSqltoerdLayoutsEqual(
+    layoutWithCreatedFrame,
+    modelRuntime.applySqltoerdLayoutPatch(layoutWithCreatedFrame, {
+      notesById: { "note.users": { text: "after" } }
+    })
+  ),
+  false
+);
+assert.equal(
+  modelRuntime.areSqltoerdLayoutsEqual(
+    layoutWithCreatedFrame,
+    modelRuntime.applySqltoerdLayoutPatch(layoutWithCreatedFrame, {
+      framesById: { "frame.billing": { isLocked: false } }
+    })
+  ),
+  false
+);
+assert.equal(
+  modelRuntime.applySqltoerdLayoutPatch(layoutWithCreatedFrame, {
+    linksToAdd: [{ id: "link.users.orders", kind: "table_link", fromTableId: "table.users", toTableId: "table.orders", label: "owns" }],
+    linksById: { "link.users.orders": { label: "ignored-before-add" } }
+  }).annotations.links[0].label,
+  "owns"
+);
+assert.deepEqual(
+  modelRuntime.applySqltoerdLayoutPatch(layoutWithCreatedFrame, {
+    deleteNoteIds: ["note.users"]
+  }).annotations.notes,
+  []
+);
+
+assert.match(canvasSurface, /SqlErdNoteShapeUtil/);
+assert.match(canvasSurface, /SqlErdFrameShapeUtil/);
+assert.match(canvasSurface, /data-sqltoerd-add-note/);
+assert.match(canvasSurface, /data-sqltoerd-add-frame/);
+assert.match(canvasSurface, /onLayoutPatch\(\{ tablePositions: nextLayoutJson\.tableLayouts \}\)/);
+assert.doesNotMatch(canvasSurface, /onLayoutChange/);

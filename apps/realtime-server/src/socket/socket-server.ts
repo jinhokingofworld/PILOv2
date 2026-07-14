@@ -19,6 +19,7 @@ import { createCanvasShapeLockService } from "../canvas/canvas-shape-lock.servic
 import { createMeetingAccessService } from "../meeting/meeting-access.service";
 import {
   isMeetingReportRedisEvent,
+  isMeetingStateRedisEvent,
   meetingClientEvents,
   meetingServerEvents
 } from "../meeting/meeting-socket-events";
@@ -60,6 +61,7 @@ type AuthedSocket = Socket & {
 
 const CANVAS_OPERATION_REDIS_CHANNEL = "canvas:operations";
 const MEETING_REPORT_REDIS_CHANNEL = "meeting:report-events";
+const MEETING_STATE_REDIS_CHANNEL = "meeting:state-events";
 const BOARD_INVALIDATION_REDIS_CHANNEL = "board:invalidations";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -429,6 +431,20 @@ export async function createRealtimeSocketServer({
         io.to(createMeetingRoomName(workspaceId)).emit(meetingServerEvents.reportUpdated, event);
       })
     : null;
+  const unsubscribeMeetingStates = redisAdapter
+    ? await redisAdapter.subscribe(MEETING_STATE_REDIS_CHANNEL, payload => {
+        if (!isMeetingStateRedisEvent(payload)) {
+          console.error("Meeting state Redis payload is invalid", payload);
+          return;
+        }
+
+        const { workspaceId, ...event } = payload;
+        io.to(createMeetingRoomName(workspaceId)).emit(
+          meetingServerEvents.stateUpdated,
+          event
+        );
+      })
+    : null;
   const unsubscribeBoardInvalidations = redisAdapter
     ? await redisAdapter.subscribe(BOARD_INVALIDATION_REDIS_CHANNEL, (payload) => {
         if (!boardInvalidationFanOut.fanOut(payload)) {
@@ -782,6 +798,7 @@ export async function createRealtimeSocketServer({
     async close() {
       await unsubscribeCanvasOperations?.();
       await unsubscribeMeetingReports?.();
+      await unsubscribeMeetingStates?.();
       await unsubscribeBoardInvalidations?.();
       await io.close();
       await redisAdapter?.close();

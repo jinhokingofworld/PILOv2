@@ -65,6 +65,7 @@ import type {
   SqlErdSelection,
   SqltoerdDialect,
   SqltoerdLayoutJsonV1,
+  SqltoerdLayoutPatch,
   SqltoerdModelJsonV1,
   SqltoerdResolvedDialect,
   SqltoerdSessionPayload
@@ -1022,6 +1023,15 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
       sqlErdViewSession.revision
     ]
   );
+  const handleLayoutPatch = useCallback(
+    (patch: SqltoerdLayoutPatch) => {
+      applySqlErdEditAction({ patch, type: "layout_patched" });
+      handleLayoutChange(
+        sqlErdEditStateRef.current.lastSuccessfulSnapshot.layoutJson
+      );
+    },
+    [applySqlErdEditAction, handleLayoutChange]
+  );
   const handleRetryLayoutAutosaveOnce = useCallback(() => {
     if (!pendingLayoutAutosaveJson && !pendingSourceAutosaveSnapshot) {
       return;
@@ -1725,7 +1735,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           autosavePausedBanner={layoutAutosavePausedBanner}
           layoutJson={sqlErdViewSession.layoutJson}
           modelJson={sqlErdViewSession.modelJson}
-          onLayoutChange={handleLayoutChange}
+          onLayoutPatch={handleLayoutPatch}
           onReloadSession={handleReloadPausedSession}
           onRetryLayoutAutosaveOnce={handleRetryLayoutAutosaveOnce}
           onSelectionChange={setSelectedSqlErdObject}
@@ -2487,7 +2497,7 @@ type CanvasShellProps = {
   autosavePausedBanner: LayoutAutosavePausedBannerViewModel | null;
   layoutJson: SqltoerdSessionPayload["layoutJson"];
   modelJson: SqltoerdSessionPayload["modelJson"];
-  onLayoutChange: (layoutJson: SqltoerdLayoutJsonV1) => void;
+  onLayoutPatch: (patch: SqltoerdLayoutPatch) => void;
   onReloadSession: () => void;
   onRetryLayoutAutosaveOnce: () => void;
   onSelectionChange: (selection: SqlErdSelection) => void;
@@ -2500,7 +2510,7 @@ function CanvasShell({
   autosavePausedBanner,
   layoutJson,
   modelJson,
-  onLayoutChange,
+  onLayoutPatch,
   onReloadSession,
   onRetryLayoutAutosaveOnce,
   onSelectionChange,
@@ -2514,7 +2524,7 @@ function CanvasShell({
         className="absolute inset-0"
         layoutJson={layoutJson}
         modelJson={modelJson}
-        onLayoutChange={onLayoutChange}
+        onLayoutPatch={onLayoutPatch}
         onSelectionChange={onSelectionChange}
         pinNavigationRequestId={pinNavigationRequestId}
         pinnedTableId={pinnedTableId}

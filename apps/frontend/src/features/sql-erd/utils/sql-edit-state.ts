@@ -1,9 +1,13 @@
 import type {
   SqltoerdDialect,
-  SqltoerdLayoutJsonV1
+  SqltoerdLayoutJsonV1,
+  SqltoerdLayoutPatch
 } from "@/features/sql-erd/types";
 import type { SqltoerdDdlParseError } from "@/features/sql-erd/utils/ddl-parser";
-import { areSqltoerdLayoutsEqual } from "@/features/sql-erd/utils/model";
+import {
+  applySqltoerdLayoutPatch,
+  areSqltoerdLayoutsEqual
+} from "@/features/sql-erd/utils/model";
 import type { SqlErdViewSession } from "@/features/sql-erd/utils/session-state";
 
 export type SqlErdParseState = {
@@ -58,6 +62,10 @@ export type SqlErdEditAction =
   | {
       layoutJson: SqltoerdLayoutJsonV1;
       type: "layout_changed";
+    }
+  | {
+      patch: SqltoerdLayoutPatch;
+      type: "layout_patched";
     }
   | {
       requestLayoutJson: SqltoerdLayoutJsonV1;
@@ -179,6 +187,16 @@ export function reduceSqlErdEditState(
         layoutJson: action.layoutJson
       }
     };
+  }
+
+  if (action.type === "layout_patched") {
+    return reduceSqlErdEditState(state, {
+      layoutJson: applySqltoerdLayoutPatch(
+        state.lastSuccessfulSnapshot.layoutJson,
+        action.patch
+      ),
+      type: "layout_changed"
+    });
   }
 
   if (action.type === "layout_saved") {

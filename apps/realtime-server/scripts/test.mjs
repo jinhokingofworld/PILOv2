@@ -102,13 +102,18 @@ assert.match(socketServer, /assertCanvasRoomWritable/);
 assert.match(socketServer, /canvas room is read-only/);
 assert.match(socketServer, /redisAdapter\.subscribe/);
 assert.match(socketServer, /MEETING_REPORT_REDIS_CHANNEL = "meeting:report-events"/);
+assert.match(socketServer, /MEETING_STATE_REDIS_CHANNEL = "meeting:state-events"/);
 assert.match(socketServer, /meetingClientEvents\.subscribe/);
 assert.match(socketServer, /meetingServerEvents\.reportUpdated/);
+assert.match(socketServer, /meetingServerEvents\.stateUpdated/);
 assert.match(socketServer, /createMeetingRoomName/);
 assert.match(meetingAccess, /FROM workspace_members/);
 assert.match(meetingAccess, /workspace_id = \$1/);
 assert.match(meetingEvents, /meeting:subscribe/);
 assert.match(meetingEvents, /meeting:report:updated/);
+assert.match(meetingEvents, /meeting:state:updated/);
+assert.match(meetingEvents, /isMeetingStateRedisEvent/);
+assert.match(meetingEvents, /recording_failed/);
 
 assert.match(canvasPresence, /clearRoomPresence/);
 assert.match(canvasPresence, /clearSocket/);

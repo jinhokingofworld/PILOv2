@@ -20,6 +20,26 @@ import { Workflow } from "lucide-react";
 
 import { commerceSqltoerdFixture } from "@/features/sql-erd/fixtures/commerce";
 import {
+  SQLTOERD_FRAME_SHAPE_TYPE,
+  SQLTOERD_FRAME_CHANGE_EVENT,
+  SQLTOERD_FRAME_DELETE_EVENT,
+  isSqlErdFrameShape,
+  SqlErdFrameShapeUtil,
+  type SqlErdFrameChangeEventDetail,
+  type SqlErdFrameDeleteEventDetail,
+  type SqlErdFrameShape
+} from "@/features/sql-erd/shapes/sql-erd-frame-shape";
+import {
+  SQLTOERD_NOTE_SHAPE_TYPE,
+  SQLTOERD_NOTE_CHANGE_EVENT,
+  SQLTOERD_NOTE_DELETE_EVENT,
+  isSqlErdNoteShape,
+  SqlErdNoteShapeUtil,
+  type SqlErdNoteChangeEventDetail,
+  type SqlErdNoteDeleteEventDetail,
+  type SqlErdNoteShape
+} from "@/features/sql-erd/shapes/sql-erd-note-shape";
+import {
   isSqlErdAnnotationShape,
   SQLTOERD_ANNOTATION_DELETE_EVENT,
   SQLTOERD_ANNOTATION_LABEL_CHANGE_EVENT,
@@ -64,8 +84,11 @@ import {
 } from "@/features/sql-erd/shapes/sql-erd-table-shape";
 import type {
   SqlErdSelection,
+  SqltoerdCanvasFrame,
+  SqltoerdCanvasNote,
   SqltoerdColumnAnnotationLink,
   SqltoerdLayoutJsonV1,
+  SqltoerdLayoutPatch,
   SqltoerdModelJsonV1,
   SqltoerdTableAnnotationLink
 } from "@/features/sql-erd/types";
@@ -77,8 +100,6 @@ import {
   getSqltoerdRenderableAnnotations,
   getTableLayout,
   inferSqlErdRelationCardinality,
-  removeSqltoerdAnnotation,
-  updateSqltoerdAnnotationLabel,
   updateSqltoerdLayoutWithTablePositions,
   type SqltoerdTablePosition
 } from "@/features/sql-erd/utils/model";
@@ -99,7 +120,7 @@ type SqlErdCanvasProps = {
   className?: string;
   layoutJson?: SqltoerdLayoutJsonV1;
   modelJson?: SqltoerdModelJsonV1;
-  onLayoutChange?: (layoutJson: SqltoerdLayoutJsonV1) => void;
+  onLayoutPatch?: (patch: SqltoerdLayoutPatch) => void;
   onSelectionChange?: (selection: SqlErdSelection) => void;
   pinNavigationRequestId?: number;
   pinnedTableId?: string | null;
@@ -108,6 +129,8 @@ type SqlErdCanvasProps = {
 
 const sqlErdShapeUtils = [
   SqlErdAnnotationShapeUtil,
+  SqlErdFrameShapeUtil,
+  SqlErdNoteShapeUtil,
   SqlErdRelationShapeUtil,
   SqlErdTableShapeUtil
 ];
@@ -153,6 +176,14 @@ export function getSqlErdAnnotationShapeId(annotationId: string) {
       annotationId
     )}`
   );
+}
+
+export function getSqlErdNoteShapeId(noteId: string) {
+  return createShapeId(`sqltoerd-note-${shapeIdSuffix(noteId)}-${hashSqlErdShapeSourceId(noteId)}`);
+}
+
+export function getSqlErdFrameShapeId(frameId: string) {
+  return createShapeId(`sqltoerd-frame-${shapeIdSuffix(frameId)}-${hashSqlErdShapeSourceId(frameId)}`);
 }
 
 export function createSqltoerdTableShapes(
@@ -311,11 +342,21 @@ export function createSqltoerdCanvasShapes(
     layoutJson,
     tableShapes
   );
+  const noteShapes: TLShapePartial<SqlErdNoteShape>[] = (layoutJson.annotations?.notes ?? []).map((note) => ({
+    id: getSqlErdNoteShapeId(note.id), type: SQLTOERD_NOTE_SHAPE_TYPE, x: note.x, y: note.y,
+    props: { w: note.width, h: note.height, noteId: note.id, text: note.text }
+  }));
+  const frameShapes: TLShapePartial<SqlErdFrameShape>[] = (layoutJson.annotations?.frames ?? []).map((frame) => ({
+    id: getSqlErdFrameShapeId(frame.id), type: SQLTOERD_FRAME_SHAPE_TYPE, x: frame.x, y: frame.y,
+    props: { w: frame.width, h: frame.height, frameId: frame.id, title: frame.title, color: frame.color, isLocked: frame.isLocked }
+  }));
 
   return [
+    ...frameShapes,
     ...relationShapes,
     ...tableShapes,
-    ...annotationShapes
+    ...annotationShapes,
+    ...noteShapes
   ];
 }
 
@@ -600,7 +641,9 @@ function isSqlErdCanvasShape(shape: TLShape) {
   return (
     isSqlErdTableShape(shape) ||
     isSqlErdRelationShape(shape) ||
-    isSqlErdAnnotationShape(shape)
+    isSqlErdAnnotationShape(shape) ||
+    shape.type === SQLTOERD_NOTE_SHAPE_TYPE ||
+    shape.type === SQLTOERD_FRAME_SHAPE_TYPE
   );
 }
 
@@ -937,6 +980,29 @@ function isSqlErdCanvasShapePartialApplied(
       currentShape,
       shape as TLShapePartial<SqlErdAnnotationShape>
     );
+  }
+
+  if (shape.type === SQLTOERD_NOTE_SHAPE_TYPE) {
+    const nextProps = (shape as TLShapePartial<SqlErdNoteShape>).props;
+    return isSqlErdNoteShape(currentShape) && !!nextProps &&
+      areShapeNumbersEqual(currentShape.x, shape.x) &&
+      areShapeNumbersEqual(currentShape.y, shape.y) &&
+      areShapeNumbersEqual(currentShape.props.w, nextProps.w) &&
+      areShapeNumbersEqual(currentShape.props.h, nextProps.h) &&
+      currentShape.props.noteId === nextProps.noteId && currentShape.props.text === nextProps.text;
+  }
+
+  if (shape.type === SQLTOERD_FRAME_SHAPE_TYPE) {
+    const nextProps = (shape as TLShapePartial<SqlErdFrameShape>).props;
+    return isSqlErdFrameShape(currentShape) && !!nextProps &&
+      areShapeNumbersEqual(currentShape.x, shape.x) &&
+      areShapeNumbersEqual(currentShape.y, shape.y) &&
+      areShapeNumbersEqual(currentShape.props.w, nextProps.w) &&
+      areShapeNumbersEqual(currentShape.props.h, nextProps.h) &&
+      currentShape.props.frameId === nextProps.frameId &&
+      currentShape.props.title === nextProps.title &&
+      currentShape.props.color === nextProps.color &&
+      currentShape.props.isLocked === nextProps.isLocked;
   }
 
   return false;
@@ -1383,7 +1449,7 @@ type SqlErdAnnotationConnectorDrag =
 type SqlErdColumnAnnotationInteractionSyncProps = {
   layoutJson: SqltoerdLayoutJsonV1;
   modelJson: SqltoerdModelJsonV1;
-  onLayoutChange: (layoutJson: SqltoerdLayoutJsonV1) => void;
+  onLayoutPatch: (patch: SqltoerdLayoutPatch) => void;
 };
 
 function getSqlErdAnnotationSelectionUpdates(
@@ -1573,7 +1639,7 @@ function getColumnAnnotationBlockMessage(
 function SqlErdAnnotationInteractionSync({
   layoutJson,
   modelJson,
-  onLayoutChange
+  onLayoutPatch
 }: SqlErdColumnAnnotationInteractionSyncProps) {
   const editor = useEditor();
   const [drag, setDrag] = useState<SqlErdAnnotationConnectorDrag | null>(
@@ -1584,7 +1650,7 @@ function SqlErdAnnotationInteractionSync({
   const layoutJsonRef = useRef(layoutJson);
   const messageTimeoutRef = useRef<number | null>(null);
   const modelJsonRef = useRef(modelJson);
-  const onLayoutChangeRef = useRef(onLayoutChange);
+  const onLayoutPatchRef = useRef(onLayoutPatch);
   const selectionSyncGuardRef = useRef(false);
 
   useEffect(() => {
@@ -1596,8 +1662,8 @@ function SqlErdAnnotationInteractionSync({
   }, [modelJson]);
 
   useEffect(() => {
-    onLayoutChangeRef.current = onLayoutChange;
-  }, [onLayoutChange]);
+    onLayoutPatchRef.current = onLayoutPatch;
+  }, [onLayoutPatch]);
 
   useEffect(() => {
     function showMessage(nextMessage: string) {
@@ -1613,13 +1679,8 @@ function SqlErdAnnotationInteractionSync({
       }, 2600);
     }
 
-    function publishLayout(nextLayoutJson: SqltoerdLayoutJsonV1) {
-      if (areSqltoerdLayoutsEqual(layoutJsonRef.current, nextLayoutJson)) {
-        return;
-      }
-
-      layoutJsonRef.current = nextLayoutJson;
-      onLayoutChangeRef.current(nextLayoutJson);
+    function publishPatch(patch: SqltoerdLayoutPatch) {
+      onLayoutPatchRef.current(patch);
     }
 
     function startAnnotationDrag(
@@ -1770,7 +1831,7 @@ function SqlErdAnnotationInteractionSync({
         );
       }
 
-      publishLayout(result.layoutJson);
+      publishPatch({ linksToAdd: [annotation] });
 
       window.requestAnimationFrame(() => {
         selectSqlErdAnnotationShape(
@@ -1794,9 +1855,7 @@ function SqlErdAnnotationInteractionSync({
         editor.run(() => editor.deleteShapes([shapeId]), { history: "ignore" });
       }
 
-      publishLayout(
-        removeSqltoerdAnnotation(layoutJsonRef.current, annotationId)
-      );
+      publishPatch({ deleteLinkIds: [annotationId] });
     }
 
     function isEditableKeyboardTarget(target: EventTarget | null) {
@@ -1841,13 +1900,7 @@ function SqlErdAnnotationInteractionSync({
         return;
       }
 
-      publishLayout(
-        updateSqltoerdAnnotationLabel(
-          layoutJsonRef.current,
-          detail.annotationId,
-          detail.label
-        )
-      );
+      publishPatch({ linksById: { [detail.annotationId]: { label: detail.label } } });
     }
 
     function handleDelete(event: Event) {
@@ -2070,21 +2123,151 @@ function applySqlErdAutoLayout({
   return nextLayoutJson;
 }
 
+type SqlErdCanvasAnnotationSyncProps = {
+  layoutJson: SqltoerdLayoutJsonV1;
+  onLayoutPatch: (patch: SqltoerdLayoutPatch) => void;
+};
+
+function SqlErdCanvasAnnotationSync({
+  layoutJson,
+  onLayoutPatch
+}: SqlErdCanvasAnnotationSyncProps) {
+  const editor = useEditor();
+  const layoutJsonRef = useRef(layoutJson);
+  const onLayoutPatchRef = useRef(onLayoutPatch);
+
+  useEffect(() => { layoutJsonRef.current = layoutJson; }, [layoutJson]);
+  useEffect(() => { onLayoutPatchRef.current = onLayoutPatch; }, [onLayoutPatch]);
+
+  useEffect(() => {
+    function handleNoteChange(event: Event) {
+      const { noteId, text } = (event as CustomEvent<SqlErdNoteChangeEventDetail>).detail;
+      onLayoutPatchRef.current({ notesById: { [noteId]: { text } } });
+    }
+    function handleNoteDelete(event: Event) {
+      const { noteId } = (event as CustomEvent<SqlErdNoteDeleteEventDetail>).detail;
+      onLayoutPatchRef.current({ deleteNoteIds: [noteId] });
+    }
+    function handleFrameChange(event: Event) {
+      const { frameId, patch } = (event as CustomEvent<SqlErdFrameChangeEventDetail>).detail;
+      onLayoutPatchRef.current({ framesById: { [frameId]: patch } });
+    }
+    function deleteFrame(frameId: string) {
+      const frame = layoutJsonRef.current.annotations?.frames?.find(
+        (item) => item.id === frameId
+      );
+
+      if (!frame || frame.isLocked) {
+        return;
+      }
+
+      const shapeId = getSqlErdFrameShapeId(frameId);
+
+      if (editor.getShape(shapeId)) {
+        editor.run(() => editor.deleteShapes([shapeId]), { history: "ignore" });
+      }
+
+      onLayoutPatchRef.current({ deleteFrameIds: [frameId] });
+    }
+    function handleFrameDelete(event: Event) {
+      const { frameId } = (event as CustomEvent<SqlErdFrameDeleteEventDetail>).detail;
+      deleteFrame(frameId);
+    }
+    function isEditableKeyboardTarget(target: EventTarget | null) {
+      return (
+        target instanceof HTMLElement &&
+        (target.isContentEditable ||
+          target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.tagName === "SELECT")
+      );
+    }
+    function handleKeyDown(event: globalThis.KeyboardEvent) {
+      if (
+        (event.key !== "Delete" && event.key !== "Backspace") ||
+        isEditableKeyboardTarget(event.target)
+      ) {
+        return;
+      }
+
+      const selectedShape = editor.getOnlySelectedShape();
+
+      if (!isSqlErdFrameShape(selectedShape)) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopImmediatePropagation();
+
+      if (!selectedShape.props.isLocked) {
+        deleteFrame(selectedShape.props.frameId);
+      }
+    }
+    window.addEventListener(SQLTOERD_NOTE_CHANGE_EVENT, handleNoteChange);
+    window.addEventListener(SQLTOERD_NOTE_DELETE_EVENT, handleNoteDelete);
+    window.addEventListener(SQLTOERD_FRAME_CHANGE_EVENT, handleFrameChange);
+    window.addEventListener(SQLTOERD_FRAME_DELETE_EVENT, handleFrameDelete);
+    window.addEventListener("keydown", handleKeyDown, true);
+    return () => {
+      window.removeEventListener(SQLTOERD_NOTE_CHANGE_EVENT, handleNoteChange);
+      window.removeEventListener(SQLTOERD_NOTE_DELETE_EVENT, handleNoteDelete);
+      window.removeEventListener(SQLTOERD_FRAME_CHANGE_EVENT, handleFrameChange);
+      window.removeEventListener(SQLTOERD_FRAME_DELETE_EVENT, handleFrameDelete);
+      window.removeEventListener("keydown", handleKeyDown, true);
+    };
+  }, []);
+
+  useEffect(() => {
+    let timeoutId: number | null = null;
+    function syncTransforms() {
+      timeoutId = null;
+      const notesById: NonNullable<SqltoerdLayoutPatch["notesById"]> = {};
+      const framesById: NonNullable<SqltoerdLayoutPatch["framesById"]> = {};
+      const notes = new Map((layoutJsonRef.current.annotations?.notes ?? []).map((note) => [note.id, note]));
+      const frames = new Map((layoutJsonRef.current.annotations?.frames ?? []).map((frame) => [frame.id, frame]));
+      editor.getCurrentPageShapes().forEach((shape) => {
+        if (isSqlErdNoteShape(shape)) {
+          const note = notes.get(shape.props.noteId);
+          if (note && (note.x !== shape.x || note.y !== shape.y || note.width !== shape.props.w || note.height !== shape.props.h)) {
+            notesById[note.id] = { x: shape.x, y: shape.y, width: shape.props.w, height: shape.props.h };
+          }
+        }
+        if (isSqlErdFrameShape(shape)) {
+          const frame = frames.get(shape.props.frameId);
+          if (frame && (frame.x !== shape.x || frame.y !== shape.y || frame.width !== shape.props.w || frame.height !== shape.props.h)) {
+            framesById[frame.id] = { x: shape.x, y: shape.y, width: shape.props.w, height: shape.props.h };
+          }
+        }
+      });
+      if (Object.keys(notesById).length || Object.keys(framesById).length) {
+        onLayoutPatchRef.current({ notesById, framesById });
+      }
+    }
+    const removeListener = editor.store.listen(() => {
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
+      timeoutId = window.setTimeout(syncTransforms, SQLTOERD_LAYOUT_SYNC_DELAY_MS);
+    }, { scope: "document", source: "user" });
+    return () => { if (timeoutId !== null) window.clearTimeout(timeoutId); removeListener(); };
+  }, [editor]);
+
+  return null;
+}
+
 type SqlErdLayoutSyncProps = {
   layoutJson: SqltoerdLayoutJsonV1;
   modelJson: SqltoerdModelJsonV1;
-  onLayoutChange: (layoutJson: SqltoerdLayoutJsonV1) => void;
+  onLayoutPatch: (patch: SqltoerdLayoutPatch) => void;
 };
 
 function SqlErdLayoutSync({
   layoutJson,
   modelJson,
-  onLayoutChange
+  onLayoutPatch
 }: SqlErdLayoutSyncProps) {
   const editor = useEditor();
   const layoutJsonRef = useRef(layoutJson);
   const modelJsonRef = useRef(modelJson);
-  const onLayoutChangeRef = useRef(onLayoutChange);
+  const onLayoutPatchRef = useRef(onLayoutPatch);
 
   useEffect(() => {
     layoutJsonRef.current = layoutJson;
@@ -2095,8 +2278,8 @@ function SqlErdLayoutSync({
   }, [modelJson]);
 
   useEffect(() => {
-    onLayoutChangeRef.current = onLayoutChange;
-  }, [onLayoutChange]);
+    onLayoutPatchRef.current = onLayoutPatch;
+  }, [onLayoutPatch]);
 
   useEffect(() => {
     let timeoutId: number | null = null;
@@ -2124,7 +2307,9 @@ function SqlErdLayoutSync({
       }
 
       layoutJsonRef.current = nextLayoutJson;
-      onLayoutChangeRef.current(nextLayoutJson);
+      onLayoutPatchRef.current({
+        tablePositions: getSqlErdTablePositionsFromEditor(editor)
+      });
     }
 
     function scheduleLayoutSync() {
@@ -2153,7 +2338,7 @@ export function SqlErdCanvas({
   className,
   layoutJson = commerceSqltoerdFixture.layoutJson,
   modelJson = commerceSqltoerdFixture.modelJson,
-  onLayoutChange,
+  onLayoutPatch,
   onSelectionChange,
   pinNavigationRequestId = 0,
   pinnedTableId = null,
@@ -2235,7 +2420,7 @@ export function SqlErdCanvas({
   const handleAutoLayout = useCallback(() => {
     const editor = editorRef.current;
 
-    if (!editor || !onLayoutChange) {
+    if (!editor || !onLayoutPatch) {
       return;
     }
 
@@ -2246,9 +2431,19 @@ export function SqlErdCanvas({
     });
 
     if (nextLayoutJson) {
-      onLayoutChange(nextLayoutJson);
+      onLayoutPatch({ tablePositions: nextLayoutJson.tableLayouts });
     }
-  }, [layoutJson, modelJson, onLayoutChange]);
+  }, [layoutJson, modelJson, onLayoutPatch]);
+
+  const handleAddNote = useCallback(() => {
+    if (!onLayoutPatch || (layoutJson.annotations?.notes?.length ?? 0) >= 100) return;
+    onLayoutPatch({ notesToAdd: [{ id: crypto.randomUUID(), x: 120, y: 120, width: 240, height: 160, text: "" }] });
+  }, [layoutJson.annotations?.notes?.length, onLayoutPatch]);
+
+  const handleAddFrame = useCallback(() => {
+    if (!onLayoutPatch || (layoutJson.annotations?.frames?.length ?? 0) >= 100) return;
+    onLayoutPatch({ framesToAdd: [{ id: crypto.randomUUID(), x: 80, y: 80, width: 640, height: 420, title: "프레임", color: "blue", isLocked: true }] });
+  }, [layoutJson.annotations?.frames?.length, onLayoutPatch]);
 
   return (
     <div className="relative h-full w-full">
@@ -2274,17 +2469,21 @@ export function SqlErdCanvas({
           pinnedTableId={pinnedTableId}
         />
         <SqlErdSelectedColumnSync selectedSqlErdObject={selectedSqlErdObject} />
-        {onLayoutChange ? (
+        {onLayoutPatch ? (
           <>
             <SqlErdAnnotationInteractionSync
               layoutJson={layoutJson}
               modelJson={modelJson}
-              onLayoutChange={onLayoutChange}
+              onLayoutPatch={onLayoutPatch}
             />
             <SqlErdLayoutSync
               layoutJson={layoutJson}
               modelJson={modelJson}
-              onLayoutChange={onLayoutChange}
+              onLayoutPatch={onLayoutPatch}
+            />
+            <SqlErdCanvasAnnotationSync
+              layoutJson={layoutJson}
+              onLayoutPatch={onLayoutPatch}
             />
           </>
         ) : null}
@@ -2295,8 +2494,13 @@ export function SqlErdCanvas({
           />
         ) : null}
       </TldrawSurface>
-      {onLayoutChange ? (
-        <button
+      {onLayoutPatch ? (
+        <div className="absolute right-4 top-4 z-20 flex gap-2">
+          <>
+            <button aria-label="메모 추가" className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm" data-sqltoerd-add-note disabled={(layoutJson.annotations?.notes?.length ?? 0) >= 100} onClick={handleAddNote} type="button">메모</button>
+            <button aria-label="프레임 추가" className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm" data-sqltoerd-add-frame disabled={(layoutJson.annotations?.frames?.length ?? 0) >= 100} onClick={handleAddFrame} type="button">프레임</button>
+          </>
+          <button
           aria-label="자동 정렬"
           className="absolute right-4 top-4 z-20 inline-flex h-9 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
           data-sqltoerd-auto-layout
@@ -2307,6 +2511,7 @@ export function SqlErdCanvas({
           <Workflow aria-hidden="true" className="size-4" />
           자동 정렬
         </button>
+        </div>
       ) : null}
     </div>
   );

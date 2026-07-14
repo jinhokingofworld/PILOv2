@@ -14,10 +14,12 @@ import {
 import { useAuthSession } from "@/features/auth";
 import { createMeetingApiClient } from "@/features/meeting/api/client";
 import { useLiveKitMeetingRoom } from "@/features/meeting/hooks/use-livekit-meeting-room";
+import { useMeetingStateRealtime } from "@/features/meeting/hooks/use-meeting-state-realtime";
 import {
   setHeaderMeetingConnectionState,
   setHeaderMeetingRecordingStatus
 } from "@/features/meeting/stores/header-meeting-status-store";
+import { notifyMeetingStateInvalidated } from "@/features/meeting/stores/meeting-state-invalidation-store";
 import type {
   LeaveMeetingPayload,
   LiveKitJoin,
@@ -60,6 +62,13 @@ export function MeetingRuntimeProvider({ children }: { children: ReactNode }) {
   const activeSessionRef = useRef<MeetingRuntimeActiveSession | null>(null);
   const [activeSession, setActiveSessionState] =
     useState<MeetingRuntimeActiveSession | null>(null);
+
+  useMeetingStateRealtime({
+    accessToken: authSession?.accessToken ?? null,
+    enabled: Boolean(authSession?.accessToken && authSession?.activeWorkspaceId),
+    onStateInvalidated: notifyMeetingStateInvalidated,
+    workspaceId: authSession?.activeWorkspaceId ?? ""
+  });
 
   const setActiveSession = useCallback(
     (nextSession: MeetingRuntimeActiveSession | null) => {

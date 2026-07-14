@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useSyncExternalStore } from "react";
+import { useSyncExternalStore } from "react";
 import { usePathname } from "next/navigation";
 
 import { useAuthSession } from "@/features/auth";
@@ -9,6 +9,7 @@ import type {
   LiveKitMeetingRoomStatus
 } from "@/features/meeting/hooks/use-livekit-meeting-room";
 import { useMeetingWorkspaceData } from "@/features/meeting/hooks/use-meeting-workspace-data";
+import { useMeetingStateInvalidation } from "@/features/meeting/stores/meeting-state-invalidation-store";
 import {
   getHeaderMeetingStatusServerSnapshot,
   getHeaderMeetingStatusSnapshot,
@@ -16,8 +17,6 @@ import {
 } from "@/features/meeting/stores/header-meeting-status-store";
 import type { RecordingStatus } from "@/features/meeting/types";
 import { cn } from "@/lib/utils";
-
-const HEADER_MEETING_STATUS_POLL_INTERVAL_MS = 5000;
 
 function getConnectionStatusLabel(
   status: LiveKitMeetingRoomStatus,
@@ -152,17 +151,7 @@ export function HeaderMeetingStatus() {
     ? headerMeetingStatus.recordingStatus
     : currentRecording?.status;
 
-  useEffect(() => {
-    if (!canLoad) {
-      return;
-    }
-
-    const intervalId = window.setInterval(() => {
-      void reloadCurrentMeeting();
-    }, HEADER_MEETING_STATUS_POLL_INTERVAL_MS);
-
-    return () => window.clearInterval(intervalId);
-  }, [canLoad, reloadCurrentMeeting]);
+  useMeetingStateInvalidation(canLoad, reloadCurrentMeeting);
 
   return (
     <div

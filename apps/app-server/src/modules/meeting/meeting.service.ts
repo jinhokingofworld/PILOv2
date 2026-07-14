@@ -24,6 +24,11 @@ import {
   MeetingReportJobService
 } from "./meeting-report-job.service";
 import { MeetingReportRealtimePublisherService } from "./meeting-report-realtime-publisher.service";
+import {
+  MeetingStateRealtimePublisherService,
+  type MeetingStateChange,
+  type MeetingStateRealtimeEventInput
+} from "./meeting-state-realtime-publisher.service";
 
 type RecordingStatus = "RUNNING" | "COMPLETED" | "FAILED";
 type MeetingReportStatus =
@@ -210,11 +215,13 @@ interface MeetingReportPreparation {
 interface EndRecordingTransactionResult {
   payload: EndRecordingPayload;
   job: MeetingReportJobPayload | null;
+  stateChange: MeetingStateChange | null;
 }
 
 interface LeaveMeetingTransactionResult {
   payload: LeaveMeetingPayload;
   job: MeetingReportJobPayload | null;
+  stateEvents: MeetingStateRealtimeEventInput[];
 }
 
 interface MeetingReportRegenerationTransactionResult {
@@ -376,6 +383,7 @@ export interface LiveKitParticipantDepartureInput {
 
 export interface LiveKitParticipantDepartureResult {
   job: MeetingReportJobPayload | null;
+  stateEvents: MeetingStateRealtimeEventInput[];
 }
 
 export interface MeetingDetailPayload {
@@ -444,7 +452,8 @@ export class MeetingService {
     private readonly liveKitTokenService: LiveKitTokenService,
     private readonly liveKitEgressService: LiveKitEgressService,
     private readonly meetingReportJobService: MeetingReportJobService,
-    private readonly meetingReportRealtimePublisher?: MeetingReportRealtimePublisherService
+    private readonly meetingReportRealtimePublisher?: MeetingReportRealtimePublisherService,
+    private readonly meetingStateRealtimePublisher?: MeetingStateRealtimePublisherService
   ) {}
 
   getModuleInfo() {
@@ -493,7 +502,7 @@ export class MeetingService {
     }
 
     try {
-      return await this.database.transaction(async (transaction) => {
+      const result = await this.database.transaction(async (transaction) => {
         const startedMeeting = await transaction.queryOne<StartMeetingRow>(
           `
             WITH generated AS (
@@ -569,6 +578,12 @@ export class MeetingService {
 
         return this.mapStartMeeting(startedMeeting, livekit);
       });
+      await this.publishMeetingStateEvent({
+        workspaceId,
+        meetingId: result.meeting.id,
+        change: "started"
+      });
+      return result;
     } catch (error) {
       if (this.isConstraintError(error, ACTIVE_MEETING_UNIQUE_INDEX)) {
         throw this.meetingAlreadyInProgress();
@@ -584,7 +599,7 @@ export class MeetingService {
     meetingId: string
   ): Promise<JoinMeetingPayload> {
     await this.assertWorkspaceAccess(currentUserId, workspaceId);
-    return this.database.transaction(async (transaction) => {
+    const result = await this.database.transaction(async (transaction) => {
       const meeting = await this.findMeetingById(transaction, workspaceId, meetingId, {
         lockMeeting: true
       });
@@ -615,6 +630,12 @@ export class MeetingService {
         currentRecording: this.mapNullableCurrentRecording(meeting)
       };
     });
+    await this.publishMeetingStateEvent({
+      workspaceId,
+      meetingId: result.meeting.id,
+      change: "participant_joined"
+    });
+    return result;
   }
 
   async getMeeting(
@@ -728,13 +749,38 @@ export class MeetingService {
                 ? this.mapNullableCurrentRecording(meeting)
                 : null
           },
-          job: reportPreparation.job
+          job: reportPreparation.job,
+          stateEvents: wasActive
+            ? [
+                {
+                  workspaceId,
+                  meetingId,
+                  change: "participant_left"
+                },
+                ...(endedMeeting === null
+                  ? []
+                  : [{ workspaceId, meetingId, change: "ended" as const }]),
+                ...(stoppedRecording === null
+                  ? []
+                  : [
+                      {
+                        workspaceId,
+                        meetingId,
+                        change:
+                          stoppedRecording.status === "FAILED"
+                            ? "recording_failed" as const
+                            : "recording_ended" as const
+                      }
+                    ])
+              ]
+            : []
         };
       }
     );
 
     await this.publishMeetingReportOutbox(result.job);
     await this.publishMeetingReportEvent(result.job?.reportId);
+    await this.publishMeetingStateEvents(result.stateEvents);
 
     return result.payload;
   }
@@ -748,7 +794,7 @@ export class MeetingService {
       input.participantIdentity === null ||
       input.eventCreatedAt === null
     ) {
-      return { job: null };
+      return { job: null, stateEvents: [] };
     }
 
     const meeting = await this.findActiveMeetingByLiveKitRoomName(
@@ -756,7 +802,7 @@ export class MeetingService {
       input.roomName
     );
     if (meeting === null) {
-      return { job: null };
+      return { job: null, stateEvents: [] };
     }
 
     const participant = await this.findParticipantByLiveKitIdentity(
@@ -770,7 +816,7 @@ export class MeetingService {
       participant.left_at !== null ||
       input.eventCreatedAt.getTime() <= this.toDate(participant.joined_at).getTime()
     ) {
-      return { job: null };
+      return { job: null, stateEvents: [] };
     }
 
     const activeParticipantCount = await this.countActiveParticipants(
@@ -803,13 +849,43 @@ export class MeetingService {
       );
     }
 
-    return { job: reportPreparation.job };
+    return {
+      job: reportPreparation.job,
+      stateEvents: [
+        {
+          workspaceId: meeting.workspace_id,
+          meetingId: meeting.id,
+          change: "participant_left"
+        },
+        ...(shouldEndMeeting
+          ? [{ workspaceId: meeting.workspace_id, meetingId: meeting.id, change: "ended" as const }]
+          : []),
+        ...(stoppedRecording === null
+          ? []
+          : [
+              {
+                workspaceId: meeting.workspace_id,
+                meetingId: meeting.id,
+                change:
+                  stoppedRecording.status === "FAILED"
+                    ? "recording_failed" as const
+                    : "recording_ended" as const
+              }
+            ])
+      ]
+    };
   }
 
   async enqueueReconciledMeetingReportJob(
     job: MeetingReportJobPayload | null
   ): Promise<void> {
     await this.publishMeetingReportOutbox(job);
+  }
+
+  async publishReconciledMeetingStateEvents(
+    stateEvents: MeetingStateRealtimeEventInput[]
+  ): Promise<void> {
+    await this.publishMeetingStateEvents(stateEvents);
   }
 
   async startRecording(
@@ -894,6 +970,11 @@ export class MeetingService {
           SAFE_EGRESS_START_ERROR
         )
       );
+      await this.publishMeetingStateEvent({
+        workspaceId,
+        meetingId,
+        change: "recording_failed"
+      });
 
       return {
         meeting: this.mapMeeting(prepared.meeting),
@@ -909,6 +990,11 @@ export class MeetingService {
           livekitEgressId
         )
       );
+      await this.publishMeetingStateEvent({
+        workspaceId,
+        meetingId,
+        change: "recording_started"
+      });
 
       return {
         meeting: this.mapMeeting(prepared.meeting),
@@ -916,7 +1002,16 @@ export class MeetingService {
       };
     } catch (error) {
       await this.stopStartedEgressAfterPersistenceFailure(livekitEgressId);
-      await this.markRecordingFailedAfterPersistenceFailure(prepared.recording);
+      const failedRecording = await this.markRecordingFailedAfterPersistenceFailure(
+        prepared.recording
+      );
+      if (failedRecording !== null) {
+        await this.publishMeetingStateEvent({
+          workspaceId,
+          meetingId,
+          change: "recording_failed"
+        });
+      }
       throw error;
     }
   }
@@ -976,7 +1071,13 @@ export class MeetingService {
                 ? null
                 : this.mapMeetingReportSummary(reportPreparation.report)
           },
-          job: reportPreparation.job
+          job: reportPreparation.job,
+          stateChange:
+            recording.status !== "RUNNING"
+              ? null
+              : stoppedRecording.status === "FAILED"
+                ? "recording_failed"
+                : "recording_ended"
         };
       }
     );
@@ -984,6 +1085,13 @@ export class MeetingService {
     await this.publishMeetingReportOutbox(result.job);
     await this.publishMeetingReportEvent(result.job?.reportId);
     await this.publishMeetingReportEvent(result.payload.report?.id);
+    if (result.stateChange !== null) {
+      await this.publishMeetingStateEvent({
+        workspaceId,
+        meetingId,
+        change: result.stateChange
+      });
+    }
     return result.payload;
   }
 
@@ -2141,6 +2249,20 @@ export class MeetingService {
     await this.meetingReportRealtimePublisher?.publishReportUpdatedSafely(reportId);
   }
 
+  private async publishMeetingStateEvent(
+    input: MeetingStateRealtimeEventInput
+  ): Promise<void> {
+    await this.meetingStateRealtimePublisher?.publishStateUpdatedSafely(input);
+  }
+
+  private async publishMeetingStateEvents(
+    events: MeetingStateRealtimeEventInput[]
+  ): Promise<void> {
+    for (const event of events) {
+      await this.publishMeetingStateEvent(event);
+    }
+  }
+
   private async restoreLeaveMeetingAfterReportEnqueueFailure(input: {
     workspaceId: string;
     meetingId: string;
@@ -2674,9 +2796,9 @@ export class MeetingService {
 
   private async markRecordingFailedAfterPersistenceFailure(
     recording: RecordingRow
-  ): Promise<void> {
+  ): Promise<RecordingRow | null> {
     try {
-      await this.database.transaction((transaction) =>
+      return await this.database.transaction((transaction) =>
         this.updateRecordingFailed(
           transaction,
           recording,
@@ -2685,6 +2807,7 @@ export class MeetingService {
       );
     } catch {
       // Best effort cleanup: the original persistence error remains the API result.
+      return null;
     }
   }
 

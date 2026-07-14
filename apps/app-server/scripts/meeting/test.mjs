@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
@@ -10,6 +11,19 @@ const {
   MeetingReportInternalController
 } = require("../../dist/modules/meeting/meeting-report-internal.controller.js");
 const { badRequest } = require("../../dist/common/api-error.js");
+const meetingStateRealtimePublisher = await readFile(
+  new URL(
+    "../../src/modules/meeting/meeting-state-realtime-publisher.service.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
+
+assert.match(meetingStateRealtimePublisher, /MEETING_STATE_REDIS_CHANNEL = "meeting:state-events"/);
+assert.match(meetingStateRealtimePublisher, /event: "meeting:state:updated"/);
+assert.match(meetingStateRealtimePublisher, /publishStateUpdatedSafely/);
+assert.match(meetingStateRealtimePublisher, /recording_started/);
+assert.match(meetingStateRealtimePublisher, /recording_failed/);
 
 const currentUserId = "11111111-1111-1111-1111-111111111111";
 const workspaceId = "22222222-2222-2222-2222-222222222222";

@@ -4,6 +4,9 @@ import type {
   ErdTable,
   SqltoerdAnnotationLink,
   SqltoerdAnnotationsV1,
+  SqltoerdCanvasFrame,
+  SqltoerdCanvasNote,
+  SqltoerdLayoutPatch,
   SqltoerdColumnAnnotationLink,
   SqltoerdLayoutJsonV1,
   SqltoerdModelCounts,
@@ -160,6 +163,56 @@ export function updateSqltoerdLayoutWithTablePositions(
     ...(previousLayoutJson.annotations
       ? { annotations: previousLayoutJson.annotations }
       : {})
+  };
+}
+
+export function applySqltoerdLayoutPatch(
+  currentLayoutJson: SqltoerdLayoutJsonV1,
+  patch: SqltoerdLayoutPatch
+): SqltoerdLayoutJsonV1 {
+  const notesById = patch.notesById ?? {};
+  const framesById = patch.framesById ?? {};
+  const linksById = patch.linksById ?? {};
+  const deletedLinkIds = new Set(patch.deleteLinkIds ?? []);
+  const deletedNoteIds = new Set(patch.deleteNoteIds ?? []);
+  const deletedFrameIds = new Set(patch.deleteFrameIds ?? []);
+  const positionsByTableId = new Map(
+    (patch.tablePositions ?? []).map((position) => [position.tableId, position])
+  );
+  const hasAnnotationPatch =
+    Object.keys(linksById).length > 0 ||
+    deletedLinkIds.size > 0 ||
+    (patch.linksToAdd?.length ?? 0) > 0 ||
+    Object.keys(notesById).length > 0 ||
+    Object.keys(framesById).length > 0 ||
+    deletedNoteIds.size > 0 ||
+    deletedFrameIds.size > 0 ||
+    (patch.notesToAdd?.length ?? 0) > 0 ||
+    (patch.framesToAdd?.length ?? 0) > 0;
+  const annotations = currentLayoutJson.annotations ??
+    (hasAnnotationPatch ? { version: 1, links: [] } : null);
+
+  return {
+    ...currentLayoutJson,
+    tableLayouts: currentLayoutJson.tableLayouts.map((layout) => {
+      const position = positionsByTableId.get(layout.tableId);
+      return position ? { ...layout, ...position } : layout;
+    }),
+    ...(annotations ? { annotations: {
+            ...annotations,
+            links: annotations.links
+              .filter((link) => !deletedLinkIds.has(link.id))
+              .map((link) => ({ ...link, ...linksById[link.id] }))
+              .concat(patch.linksToAdd ?? []),
+            notes: (annotations.notes ?? [])
+              .filter((note) => !deletedNoteIds.has(note.id))
+              .map((note) => ({ ...note, ...notesById[note.id] }))
+              .concat(patch.notesToAdd ?? []),
+            frames: (annotations.frames ?? [])
+              .filter((frame) => !deletedFrameIds.has(frame.id))
+              .map((frame) => ({ ...frame, ...framesById[frame.id] }))
+              .concat(patch.framesToAdd ?? [])
+          } } : {})
   };
 }
 
@@ -615,7 +668,7 @@ function filterSqltoerdAnnotationsForModel(
 
   const modelIndex = createSqltoerdModelIndex(modelJson);
   return {
-    version: annotations.version,
+    ...annotations,
     links: annotations.links.filter((annotation) =>
       isSqltoerdAnnotationEndpointPresent(annotation, modelIndex)
     )
@@ -653,13 +706,61 @@ function areSqltoerdAnnotationsEqual(
 ) {
   const leftLinks = leftAnnotations?.links ?? [];
   const rightLinks = rightAnnotations?.links ?? [];
+  const leftNotes = leftAnnotations?.notes ?? [];
+  const rightNotes = rightAnnotations?.notes ?? [];
+  const leftFrames = leftAnnotations?.frames ?? [];
+  const rightFrames = rightAnnotations?.frames ?? [];
 
-  if (leftLinks.length !== rightLinks.length) {
+  if (
+    leftLinks.length !== rightLinks.length ||
+    leftNotes.length !== rightNotes.length ||
+    leftFrames.length !== rightFrames.length
+  ) {
     return false;
   }
 
-  return leftLinks.every((leftLink, index) =>
-    areSqltoerdAnnotationLinksEqual(leftLink, rightLinks[index])
+  return (
+    leftLinks.every((leftLink, index) =>
+      areSqltoerdAnnotationLinksEqual(leftLink, rightLinks[index])
+    ) &&
+    leftNotes.every((leftNote, index) =>
+      areSqltoerdCanvasNotesEqual(leftNote, rightNotes[index])
+    ) &&
+    leftFrames.every((leftFrame, index) =>
+      areSqltoerdCanvasFramesEqual(leftFrame, rightFrames[index])
+    )
+  );
+}
+
+function areSqltoerdCanvasNotesEqual(
+  leftNote: SqltoerdCanvasNote,
+  rightNote: SqltoerdCanvasNote | undefined
+) {
+  return (
+    rightNote !== undefined &&
+    leftNote.id === rightNote.id &&
+    leftNote.x === rightNote.x &&
+    leftNote.y === rightNote.y &&
+    leftNote.width === rightNote.width &&
+    leftNote.height === rightNote.height &&
+    leftNote.text === rightNote.text
+  );
+}
+
+function areSqltoerdCanvasFramesEqual(
+  leftFrame: SqltoerdCanvasFrame,
+  rightFrame: SqltoerdCanvasFrame | undefined
+) {
+  return (
+    rightFrame !== undefined &&
+    leftFrame.id === rightFrame.id &&
+    leftFrame.x === rightFrame.x &&
+    leftFrame.y === rightFrame.y &&
+    leftFrame.width === rightFrame.width &&
+    leftFrame.height === rightFrame.height &&
+    leftFrame.title === rightFrame.title &&
+    leftFrame.color === rightFrame.color &&
+    leftFrame.isLocked === rightFrame.isLocked
   );
 }
 

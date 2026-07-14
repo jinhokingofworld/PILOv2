@@ -11,7 +11,9 @@ export type SqlErdSelection =
   | { type: "table"; tableId: string }
   | { type: "column"; tableId: string; columnId: string }
   | { type: "relation"; relationId: string }
-  | { type: "annotation"; annotationId: string };
+  | { type: "annotation"; annotationId: string }
+  | { type: "note"; noteId: string }
+  | { type: "frame"; frameId: string };
 
 export type SqltoerdModelJsonV1 = {
   version: typeof SQLTOERD_MODEL_JSON_VERSION;
@@ -69,6 +71,48 @@ export type SqltoerdLayoutJsonV1 = {
 export type SqltoerdAnnotationsV1 = {
   version: 1;
   links: SqltoerdAnnotationLink[];
+  notes?: SqltoerdCanvasNote[];
+  frames?: SqltoerdCanvasFrame[];
+};
+
+export type SqltoerdCanvasNote = {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  text: string;
+};
+
+export type SqltoerdCanvasFrameColor =
+  | "slate"
+  | "blue"
+  | "green"
+  | "amber"
+  | "rose";
+
+export type SqltoerdCanvasFrame = {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  title: string;
+  color: SqltoerdCanvasFrameColor;
+  isLocked: boolean;
+};
+
+export type SqltoerdLayoutPatch = {
+  tablePositions?: SqltoerdTableLayout[];
+  linksToAdd?: SqltoerdAnnotationLink[];
+  linksById?: Record<string, { label?: string }>;
+  deleteLinkIds?: readonly string[];
+  notesToAdd?: SqltoerdCanvasNote[];
+  framesToAdd?: SqltoerdCanvasFrame[];
+  notesById?: Record<string, Partial<Omit<SqltoerdCanvasNote, "id">>>;
+  framesById?: Record<string, Partial<Omit<SqltoerdCanvasFrame, "id">>>;
+  deleteNoteIds?: readonly string[];
+  deleteFrameIds?: readonly string[];
 };
 
 export type SqltoerdAnnotationLink =

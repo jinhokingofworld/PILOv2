@@ -47,6 +47,7 @@ import { useMeetingWorkspaceData } from "@/features/meeting/hooks/use-meeting-wo
 import { meetingNavigation } from "@/features/meeting/navigation";
 import { useMeetingRuntime } from "@/features/meeting/runtime/meeting-runtime-provider";
 import { setHeaderMeetingRecordingStatus } from "@/features/meeting/stores/header-meeting-status-store";
+import { useMeetingStateInvalidation } from "@/features/meeting/stores/meeting-state-invalidation-store";
 import type {
   MeetingParticipant,
   MeetingRecording,
@@ -63,7 +64,6 @@ type ActionStatus =
   | "ending-recording";
 type MeetingSection = "room" | "report";
 
-const MEETING_STATUS_POLL_INTERVAL_MS = 5000;
 const MEETING_REPORT_PAGE_SIZE = 20;
 const RECORDING_CONSENT_STORAGE_KEY = "recordingConsentAccepted";
 const LIVEKIT_CONNECTION_ERROR_MESSAGE =
@@ -429,6 +429,13 @@ export function MeetingPanel() {
     [listParticipants, meeting?.id]
   );
 
+  const reloadMeetingState = useCallback(async () => {
+    const currentMeeting = await reloadCurrentMeeting();
+    await reloadParticipants(currentMeeting.meeting?.id);
+  }, [reloadCurrentMeeting, reloadParticipants]);
+
+  useMeetingStateInvalidation(canLoad, reloadMeetingState);
+
   useEffect(() => {
     const storedValue = window.localStorage.getItem(
       RECORDING_CONSENT_STORAGE_KEY
@@ -439,19 +446,6 @@ export function MeetingPanel() {
   useEffect(() => {
     void reloadParticipants(meeting?.id);
   }, [meeting?.id, reloadParticipants]);
-
-  useEffect(() => {
-    if (!meeting?.id || !canLoad) {
-      return;
-    }
-
-    const intervalId = window.setInterval(() => {
-      void reloadCurrentMeeting();
-      void reloadParticipants(meeting.id);
-    }, MEETING_STATUS_POLL_INTERVAL_MS);
-
-    return () => window.clearInterval(intervalId);
-  }, [canLoad, meeting?.id, reloadCurrentMeeting, reloadParticipants]);
 
   useEffect(() => {
     if (

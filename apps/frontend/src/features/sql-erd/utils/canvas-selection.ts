@@ -1,6 +1,8 @@
 import type { TLShape } from "tldraw";
 
 import { isSqlErdAnnotationShape } from "@/features/sql-erd/shapes/sql-erd-annotation-shape";
+import { isSqlErdFrameShape } from "@/features/sql-erd/shapes/sql-erd-frame-shape";
+import { isSqlErdNoteShape } from "@/features/sql-erd/shapes/sql-erd-note-shape";
 import { isSqlErdRelationShape } from "@/features/sql-erd/shapes/sql-erd-relation-shape";
 import { isSqlErdTableShape } from "@/features/sql-erd/shapes/sql-erd-table-shape";
 import type { SqlErdSelection } from "@/features/sql-erd/types";
@@ -29,6 +31,9 @@ export function areSqlErdSelectionsEqual(
     return left.annotationId === right.annotationId;
   }
 
+  if (left.type === "note" && right.type === "note") return left.noteId === right.noteId;
+  if (left.type === "frame" && right.type === "frame") return left.frameId === right.frameId;
+
   return true;
 }
 
@@ -47,6 +52,9 @@ export function getSqlErdSelectionFromSelectedShapes(
       annotationId: selectedShape.props.annotationId
     };
   }
+
+  if (isSqlErdNoteShape(selectedShape)) return { type: "note", noteId: selectedShape.props.noteId };
+  if (isSqlErdFrameShape(selectedShape)) return { type: "frame", frameId: selectedShape.props.frameId };
 
   if (isSqlErdRelationShape(selectedShape)) {
     return {

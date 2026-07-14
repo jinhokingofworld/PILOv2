@@ -368,6 +368,32 @@ function annotations(links, overrides = {}) {
   };
 }
 
+function canvasNote(id, overrides = {}) {
+  return {
+    id,
+    x: 120,
+    y: 160,
+    width: 240,
+    height: 160,
+    text: "Schema decision",
+    ...overrides
+  };
+}
+
+function canvasFrame(id, overrides = {}) {
+  return {
+    id,
+    x: 80,
+    y: 100,
+    width: 640,
+    height: 360,
+    title: "Billing domain",
+    color: "blue",
+    isLocked: false,
+    ...overrides
+  };
+}
+
 function oversizedText(size) {
   return "x".repeat(size);
 }
@@ -1583,7 +1609,10 @@ await assertRouteBodyLimit(
       "column_orders_user_id",
       { label: "business owner" }
     )
-  ]);
+  ], {
+    notes: [canvasNote("note_billing")],
+    frames: [canvasFrame("frame_billing")]
+  });
   const normalizedLegacy = validateCreateSqlErdSessionRequest({
     sourceFormat: "sql",
     modelJson: modelJson(),
@@ -1599,6 +1628,48 @@ await assertRouteBodyLimit(
   assert.deepEqual(normalizedWithAnnotations.layoutJson.annotations, validAnnotations);
 
   const invalidCases = [
+    {
+      layout: layoutJson({
+        annotations: annotations([], {
+          notes: Array.from({ length: 101 }, (_, index) =>
+            canvasNote(`note_${index}`)
+          )
+        })
+      }),
+      message: /layoutJson\.annotations\.notes length limit exceeded/
+    },
+    {
+      layout: layoutJson({
+        annotations: annotations([], {
+          frames: [canvasFrame("frame_invalid", { color: "purple" })]
+        })
+      }),
+      message: /layoutJson\.annotations\.frames\[0\]\.color is invalid/
+    },
+    {
+      layout: layoutJson({
+        annotations: annotations([], {
+          notes: [canvasNote("note_too_long", { text: oversizedText(2001) })]
+        })
+      }),
+      message: /layoutJson\.annotations\.notes\[0\]\.text length limit exceeded/
+    },
+    {
+      layout: layoutJson({
+        annotations: annotations([], {
+          frames: [canvasFrame("frame_too_long", { title: oversizedText(201) })]
+        })
+      }),
+      message: /layoutJson\.annotations\.frames\[0\]\.title length limit exceeded/
+    },
+    {
+      layout: layoutJson({
+        annotations: annotations([
+          tableAnnotation("annotation_duplicate_note", "table_users", "table_orders")
+        ], { notes: [canvasNote("annotation_duplicate_note")] })
+      }),
+      message: /duplicate annotation id/
+    },
     {
       layout: layoutJson({
         annotations: annotations([], { version: 2 })
