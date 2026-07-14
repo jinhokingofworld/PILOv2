@@ -38,6 +38,11 @@ import type {
 } from "../canvas/canvas-types";
 import { createRealtimeDatabase } from "../database/database";
 import { createSocketIoRedisAdapter } from "../redis/redis-pubsub";
+import {
+  isPrReviewDecisionUpdatedEvent,
+  PR_REVIEW_DECISION_REDIS_CHANNEL,
+  PR_REVIEW_DECISION_UPDATED_EVENT,
+} from "../pr-review/pr-review-socket-events";
 import { createCanvasRoomName, createMeetingRoomName } from "./room-names";
 import { createSocketAuthContext } from "./socket-auth";
 import { createSocketErrorPayload } from "./socket-errors";
@@ -474,6 +479,19 @@ export async function createRealtimeSocketServer({
         }
       })
     : null;
+  const unsubscribePrReviewDecisions = redisAdapter
+    ? await redisAdapter.subscribe(PR_REVIEW_DECISION_REDIS_CHANNEL, (payload) => {
+        if (!isPrReviewDecisionUpdatedEvent(payload)) {
+          console.error("PR Review decision Redis payload is invalid", payload);
+          return;
+        }
+
+        io.to(createCanvasRoomName(payload)).emit(
+          PR_REVIEW_DECISION_UPDATED_EVENT,
+          payload,
+        );
+      })
+    : null;
 
   io.use((socket, next) => {
     const authContext = createSocketAuthContext(
@@ -840,6 +858,7 @@ export async function createRealtimeSocketServer({
       await unsubscribeMeetingReports?.();
       await unsubscribeMeetingStates?.();
       await unsubscribeBoardInvalidations?.();
+      await unsubscribePrReviewDecisions?.();
       await io.close();
       await redisAdapter?.close();
       await database.close();

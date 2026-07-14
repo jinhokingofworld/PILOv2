@@ -1362,6 +1362,35 @@ PATCH response는 Review File 상세 조회와 같은 payload를 반환한다.
 반영하되 사용자가 작성 중이던 status/comment 초안은 유지하고, 다른 리뷰어의 판단을
 불러왔다는 짧은 안내를 표시한다.
 
+저장이 실제 변경을 만든 경우 App Server는 DB commit이 끝난 뒤 Redis channel
+`pr-review:decision-events`로 다음 이벤트를 best-effort 발행한다. Redis 발행 실패는 이미
+완료된 decision 저장을 실패로 바꾸지 않는다. Realtime Server는 payload를 검증한 뒤 해당
+Canvas room에 `pr-review:decision:updated` 이벤트를 전달한다.
+
+```json
+{
+  "event": "pr-review:decision:updated",
+  "workspaceId": "workspace_1",
+  "canvasId": "canvas_1",
+  "reviewRoomId": "review_room_1",
+  "reviewSessionId": "review_session_1",
+  "reviewFileId": "review_file_1",
+  "roomFileId": "room_file_1",
+  "currentStatus": "approved",
+  "decisionVersion": 1,
+  "reviewedCount": 1,
+  "totalFileCount": 3,
+  "readyToSubmit": false,
+  "reviewedByUserId": "user_1",
+  "reviewedAt": "2026-01-01T00:00:00.000Z"
+}
+```
+
+클라이언트는 이벤트의 session/file 식별자가 현재 화면과 일치할 때 진행률과 파일 노드
+배지를 즉시 갱신한다. 열어 둔 파일이 갱신되었으면 최신 파일 정보를 다시 조회하되 작성 중인
+초안은 유지한다. Socket 재접속 시에는 summary와 Canvas API를 다시 조회해 유실된 이벤트를
+복구한다.
+
 Decision history response:
 
 ```json

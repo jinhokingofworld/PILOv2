@@ -49,6 +49,10 @@ import { PrReviewFileDiffDrawer } from "@/features/pr-review/components/review-c
 import { PrReviewSubmitReviewModal } from "@/features/pr-review/components/review-canvas/PrReviewSubmitReviewModal";
 import { getPrReviewErrorMessage } from "@/features/pr-review/pr-review-error-message";
 import {
+  applyDecisionUpdateToCanvas,
+  applyDecisionUpdateToSummary
+} from "@/features/pr-review/realtime/pr-review-decision-sync";
+import {
   buildPrReviewConflictsApplyInput,
   createPrReviewConflictDraft,
   getPrReviewConflictDraftProgress,
@@ -63,6 +67,7 @@ import type {
   PrReviewConflictsApplyResult,
   PrReviewConflictFile,
   PrReviewConflictStatus,
+  PrReviewDecisionUpdatedEvent,
   PrReviewFile,
   PrReviewFileReviewStatus,
   PrReviewPullRequest,
@@ -312,6 +317,8 @@ export function PrReviewCanvasShell({
   const [selectedReviewFileId, setSelectedReviewFileId] = useState<
     string | null
   >(null);
+  const [latestDecisionUpdate, setLatestDecisionUpdate] =
+    useState<PrReviewDecisionUpdatedEvent | null>(null);
   const [isSubmitReviewModalOpen, setIsSubmitReviewModalOpen] = useState(false);
   const [isMergeConfirmOpen, setIsMergeConfirmOpen] = useState(false);
   const [mergeStatus, setMergeStatus] = useState<MergeStatus>("idle");
@@ -516,6 +523,31 @@ export function PrReviewCanvasShell({
     },
     [loadCanvasData]
   );
+
+  const handleRealtimeDecisionUpdated = useCallback(
+    (update: PrReviewDecisionUpdatedEvent) => {
+      if (update.reviewSessionId !== session.id) {
+        return;
+      }
+
+      setCanvas(currentCanvas =>
+        currentCanvas
+          ? applyDecisionUpdateToCanvas(currentCanvas, update)
+          : currentCanvas
+      );
+      setSummary(currentSummary =>
+        currentSummary
+          ? applyDecisionUpdateToSummary(currentSummary, update)
+          : currentSummary
+      );
+      setLatestDecisionUpdate(update);
+    },
+    [session.id]
+  );
+
+  const handleRealtimeRoomRejoined = useCallback(() => {
+    void loadCanvasData({ quiet: true });
+  }, [loadCanvasData]);
 
   const handleConflictDraftChange = useCallback(
     (reviewFileId: string, draft: PrReviewConflictDraft) => {
@@ -945,7 +977,9 @@ export function PrReviewCanvasShell({
                 canvas={canvas}
                 className="h-full w-full"
                 conflictAnalysis={conflictAnalysis}
+                onDecisionUpdated={handleRealtimeDecisionUpdated}
                 onFileSelect={setSelectedReviewFileId}
+                onRealtimeRoomJoined={handleRealtimeRoomRejoined}
                 preparedConflictFileIds={preparedConflictFileIds}
                 realtimeIdentity={realtimeIdentity}
                 reviewRoomId={session.reviewRoomId}
@@ -974,6 +1008,7 @@ export function PrReviewCanvasShell({
               onClose={() => setSelectedReviewFileId(null)}
               onConflictDraftChange={handleConflictDraftChange}
               onDecisionSaved={handleDecisionSaved}
+              remoteDecisionUpdate={latestDecisionUpdate}
               reviewFileId={selectedReviewFileId}
               unsupportedConflictFile={selectedUnsupportedConflictFile}
               workspaceId={workspaceId}

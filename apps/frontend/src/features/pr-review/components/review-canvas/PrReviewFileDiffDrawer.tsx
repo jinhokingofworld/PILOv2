@@ -54,6 +54,7 @@ import type {
   PrReviewConflictFile,
   PrReviewConflictHunk,
   PrReviewConflictSuggestion,
+  PrReviewDecisionUpdatedEvent,
   PrReviewFile,
   PrReviewFileDecisionStatus,
   PrReviewFileDiff,
@@ -95,6 +96,7 @@ type PrReviewFileDiffDrawerProps = {
     file: PrReviewFile,
     previousStatus: PrReviewFileReviewStatus
   ) => void;
+  remoteDecisionUpdate: PrReviewDecisionUpdatedEvent | null;
   reviewFileId: string;
   unsupportedConflictFile: PrReviewUnsupportedConflictFile | null;
   workspaceId: string;
@@ -287,6 +289,7 @@ export function PrReviewFileDiffDrawer({
   onClose,
   onConflictDraftChange,
   onDecisionSaved,
+  remoteDecisionUpdate,
   reviewFileId,
   unsupportedConflictFile,
   workspaceId
@@ -470,6 +473,60 @@ export function PrReviewFileDiffDrawer({
       clearScheduledCommentSave();
     };
   }, [clearScheduledCommentSave]);
+
+  useEffect(() => {
+    if (
+      !file ||
+      !remoteDecisionUpdate ||
+      remoteDecisionUpdate.reviewFileId !== reviewFileId ||
+      remoteDecisionUpdate.decisionVersion <= file.decisionVersion ||
+      saveStatus === "saving"
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+    const hasLocalDraft =
+      decisionStatus !== getInitialDecisionStatus(file) ||
+      getStoredComment(comment) !== getStoredComment(file.comment ?? "");
+
+    void apiClient
+      .getReviewFile(workspaceId, reviewFileId)
+      .then(latestFile => {
+        if (cancelled) return;
+
+        setFile(latestFile);
+        decisionVersionRef.current = latestFile.decisionVersion;
+        if (!hasLocalDraft) {
+          setDecisionStatus(getInitialDecisionStatus(latestFile));
+          setComment(latestFile.comment ?? "");
+          setDecisionConflictMessage(null);
+          return;
+        }
+
+        setDecisionConflictMessage(
+          "다른 리뷰어의 판단이 업데이트되었습니다. 작성 중인 내용은 유지했습니다."
+        );
+      })
+      .catch(error => {
+        if (!cancelled) {
+          setSaveErrorMessage(getErrorMessage(error));
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    apiClient,
+    comment,
+    decisionStatus,
+    file,
+    remoteDecisionUpdate,
+    reviewFileId,
+    saveStatus,
+    workspaceId
+  ]);
 
   useEffect(() => {
     setSelectedConflictHunkIndex(0);

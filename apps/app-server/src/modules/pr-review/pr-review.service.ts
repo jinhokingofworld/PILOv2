@@ -48,6 +48,7 @@ import type {
   PrReviewSessionStatus
 } from "./types";
 import { PrReviewAnalysisJobPublisherService } from "./pr-review-analysis-job-publisher.service";
+import { PrReviewDecisionRealtimePublisherService } from "./pr-review-decision-realtime-publisher.service";
 import {
   buildPrReviewSemanticGraphHandoff,
   PR_REVIEW_SEMANTIC_GRAPH_SCHEMA_VERSION,
@@ -971,7 +972,8 @@ export class PrReviewService {
     private readonly workspaceService: WorkspaceService,
     private readonly githubDependency: PrReviewGithubDependencyService,
     private readonly analysisService: PrReviewAnalysisService,
-    private readonly analysisJobPublisher: PrReviewAnalysisJobPublisherService
+    private readonly analysisJobPublisher: PrReviewAnalysisJobPublisherService,
+    private readonly decisionRealtimePublisher?: PrReviewDecisionRealtimePublisherService
   ) {}
 
   getModuleInfo(): PrReviewModuleInfo {
@@ -1948,7 +1950,10 @@ export class PrReviewService {
         );
       }
 
-      return file.file;
+      return {
+        changed: file.changed,
+        file: file.file
+      };
     });
 
     if (!updatedFile) {
@@ -1956,12 +1961,16 @@ export class PrReviewService {
     }
 
     const [file, flowMemberships] = await Promise.all([
-      this.findReviewFile(workspaceId, updatedFile.id),
-      this.listReviewFileFlowMemberships(workspaceId, updatedFile.id)
+      this.findReviewFile(workspaceId, updatedFile.file.id),
+      this.listReviewFileFlowMemberships(workspaceId, updatedFile.file.id)
     ]);
 
     if (!file) {
       throw notFound("Review file not found");
+    }
+
+    if (updatedFile.changed) {
+      await this.decisionRealtimePublisher?.publishDecisionUpdatedSafely(file.id);
     }
 
     return this.mapReviewFile(file, flowMemberships);

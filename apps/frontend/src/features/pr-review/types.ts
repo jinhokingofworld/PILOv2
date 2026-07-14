@@ -130,6 +130,23 @@ export type PrReviewFileDecisionStatus = Exclude<
   "not_reviewed"
 >;
 
+export type PrReviewDecisionUpdatedEvent = {
+  event: "pr-review:decision:updated";
+  workspaceId: string;
+  canvasId: string;
+  reviewRoomId: string;
+  reviewSessionId: string;
+  reviewFileId: string;
+  roomFileId: string;
+  currentStatus: PrReviewFileReviewStatus;
+  decisionVersion: number;
+  reviewedCount: number;
+  totalFileCount: number;
+  readyToSubmit: boolean;
+  reviewedByUserId: string | null;
+  reviewedAt: string | null;
+};
+
 export type PrReviewSubmitType = "COMMENT" | "APPROVE" | "REQUEST_CHANGES";
 
 export type PrReviewGithubSubmitStatus =
