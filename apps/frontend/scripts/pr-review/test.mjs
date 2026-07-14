@@ -460,6 +460,18 @@ assert.match(prReviewFileDiffDrawer, /getReviewFileDiff/);
 assert.match(prReviewFileDiffDrawer, /updateReviewFileDecision/);
 assert.match(prReviewFileDiffDrawer, /Conflict 해결/);
 assert.match(prReviewFileDiffDrawer, /AI 해결안 생성/);
+assert.match(prReviewFileDiffDrawer, /AI 해결안 다시 생성/);
+assert.match(prReviewFileDiffDrawer, /AI 해결안 사용/);
+assert.match(prReviewFileDiffDrawer, /AI 해결안 전체 사용/);
+assert.match(prReviewFileDiffDrawer, /선택 취소/);
+assert.match(prReviewFileDiffDrawer, /handleResolutionChoiceReset/);
+assert.match(prReviewFileDiffDrawer, /ConflictAiResolutionPreview/);
+assert.match(prReviewFileDiffDrawer, /기존 선택과 코드는 자동으로 바뀌지 않습니다/);
+assert.match(prReviewFileDiffDrawer, /value === conflictDraft\.resolvedContent/);
+assert.ok(
+  prReviewFileDiffDrawer.indexOf("<ConflictAiResolutionPreview") <
+    prReviewFileDiffDrawer.indexOf("<ConflictUnifiedCodePane")
+);
 assert.match(prReviewFileDiffDrawer, /ConflictSuggestionPreview/);
 assert.match(prReviewFileDiffDrawer, /createReviewFileConflictSuggestion/);
 assert.doesNotMatch(prReviewFileDiffDrawer, /<AlertDialog/);

@@ -733,6 +733,34 @@ export function PrReviewFileDiffDrawer({
     rebuildResolvedDraft(resolutionChoices);
   }, [isReviewReadOnly, rebuildResolvedDraft, resolutionChoices]);
 
+  const handleResolutionChoiceReset = useCallback(
+    (hunkId: string) => {
+      if (isResolvedDraftCustomized || isReviewReadOnly) {
+        return;
+      }
+
+      const nextChoices = { ...resolutionChoices };
+      const nextAcceptedAiResolvedTexts = { ...acceptedAiResolvedTexts };
+      const nextManualResolvedTexts = { ...manualResolvedTexts };
+      delete nextChoices[hunkId];
+      delete nextAcceptedAiResolvedTexts[hunkId];
+      delete nextManualResolvedTexts[hunkId];
+      rebuildResolvedDraft(
+        nextChoices,
+        nextAcceptedAiResolvedTexts,
+        nextManualResolvedTexts
+      );
+    },
+    [
+      acceptedAiResolvedTexts,
+      isResolvedDraftCustomized,
+      isReviewReadOnly,
+      manualResolvedTexts,
+      rebuildResolvedDraft,
+      resolutionChoices
+    ]
+  );
+
   const handleManualResolutionChange = useCallback(
     (hunkId: string, resolvedText: string) => {
       if (!conflictFile || isResolvedDraftCustomized || isReviewReadOnly) {
@@ -944,6 +972,9 @@ export function PrReviewFileDiffDrawer({
                     onChoiceChange={choice =>
                       handleResolutionChoiceChange(selectedConflictHunk.id, choice)
                     }
+                    onChoiceReset={() =>
+                      handleResolutionChoiceReset(selectedConflictHunk.id)
+                    }
                     onHunkIndexChange={setSelectedConflictHunkIndex}
                     onManualResolvedTextChange={value =>
                       handleManualResolutionChange(selectedConflictHunk.id, value)
@@ -967,7 +998,8 @@ export function PrReviewFileDiffDrawer({
                       if (
                         isReviewReadOnly ||
                         !isEditingConflictDraft ||
-                        !conflictDraft
+                        !conflictDraft ||
+                        value === conflictDraft.resolvedContent
                       ) {
                         return;
                       }
@@ -1001,6 +1033,7 @@ export function PrReviewFileDiffDrawer({
               decisionStatus={decisionStatus}
               decisionDisabledReason={decisionDisabledReason}
               file={file}
+              isConflictDraftEditing={isEditingConflictDraft}
               isResolvedDraftCustomized={isResolvedDraftCustomized}
               isReviewReadOnly={isReviewReadOnly}
               isReviewRoomCompleted={isReviewRoomCompleted}
@@ -1131,6 +1164,7 @@ function ReviewNodePanel({
   decisionStatus,
   decisionDisabledReason,
   file,
+  isConflictDraftEditing,
   isResolvedDraftCustomized,
   isReviewReadOnly,
   isReviewRoomCompleted,
@@ -1156,6 +1190,7 @@ function ReviewNodePanel({
   decisionStatus: PrReviewFileDecisionStatus | null;
   decisionDisabledReason: string | null;
   file: PrReviewFile;
+  isConflictDraftEditing: boolean;
   isResolvedDraftCustomized: boolean;
   isReviewReadOnly: boolean;
   isReviewRoomCompleted: boolean;
@@ -1218,6 +1253,7 @@ function ReviewNodePanel({
             conflictSuggestion={conflictSuggestion}
             conflictSuggestionErrorMessage={conflictSuggestionErrorMessage}
             conflictSuggestionStatus={conflictSuggestionStatus}
+            isConflictDraftEditing={isConflictDraftEditing}
             isResolvedDraftCustomized={isResolvedDraftCustomized}
             isReviewReadOnly={isReviewReadOnly}
             onApplyAllAiSuggestions={onApplyAllAiSuggestions}
@@ -1377,6 +1413,7 @@ function ConflictResolutionPanel({
   conflictSuggestion,
   conflictSuggestionErrorMessage,
   conflictSuggestionStatus,
+  isConflictDraftEditing,
   isResolvedDraftCustomized,
   isReviewReadOnly,
   onApplyAllAiSuggestions,
@@ -1391,6 +1428,7 @@ function ConflictResolutionPanel({
   conflictSuggestion: PrReviewConflictSuggestion | null;
   conflictSuggestionErrorMessage: string | null;
   conflictSuggestionStatus: ConflictSuggestionLoadStatus;
+  isConflictDraftEditing: boolean;
   isResolvedDraftCustomized: boolean;
   isReviewReadOnly: boolean;
   onApplyAllAiSuggestions: () => void;
@@ -1437,17 +1475,22 @@ function ConflictResolutionPanel({
                     disabled={
                       conflictSuggestion.status === "invalid" ||
                       isResolvedDraftCustomized ||
-                      isReviewReadOnly
+                      isReviewReadOnly ||
+                      !isConflictDraftEditing
                     }
                     onClick={onApplyAllAiSuggestions}
                     size="sm"
                     type="button"
                   >
-                    AI 제안 전체 적용
+                    AI 해결안 전체 사용
                   </Button>
                 ) : null}
                 <Button
-                  disabled={isSuggestionLoading || isReviewReadOnly}
+                  disabled={
+                    isSuggestionLoading ||
+                    isReviewReadOnly ||
+                    !isConflictDraftEditing
+                  }
                   onClick={onCreateConflictSuggestion}
                   size="sm"
                   type="button"
@@ -1458,10 +1501,17 @@ function ConflictResolutionPanel({
                   ) : (
                     <Sparkles className="size-3.5" />
                   )}
-                  {conflictSuggestion ? "AI 제안 갱신" : "AI 해결안 생성"}
+                  {conflictSuggestion
+                    ? "AI 해결안 다시 생성"
+                    : "AI 해결안 생성"}
                 </Button>
               </div>
             </div>
+            <p className="mt-3 text-xs leading-5 text-slate-500">
+              {isConflictDraftEditing
+                ? "AI는 현재 hunk 선택과 직접 편집 내용을 참고해 새 해결안만 만듭니다. 기존 선택과 코드는 자동으로 바뀌지 않습니다."
+                : "AI 해결안을 만들거나 전체 사용하려면 전체 코드 보기에서 코드 편집을 시작해 편집 권한을 얻어야 합니다."}
+            </p>
             {conflictSuggestionErrorMessage ? (
               <p className="mt-3 text-xs leading-5 text-rose-600">
                 {conflictSuggestionErrorMessage}
@@ -1703,6 +1753,7 @@ function ConflictHunkComparison({
   isChoiceDisabled,
   manualResolvedText,
   onChoiceChange,
+  onChoiceReset,
   onHunkIndexChange,
   onManualResolvedTextChange,
   onResetCustomizedDraft,
@@ -1720,6 +1771,7 @@ function ConflictHunkComparison({
   isChoiceDisabled: boolean;
   manualResolvedText: string;
   onChoiceChange: (choice: PrReviewConflictResolutionChoice) => void;
+  onChoiceReset: () => void;
   onHunkIndexChange: (index: number) => void;
   onManualResolvedTextChange: (value: string) => void;
   onResetCustomizedDraft: () => void;
@@ -1732,7 +1784,11 @@ function ConflictHunkComparison({
     value: PrReviewConflictResolutionChoice;
     disabled?: boolean;
   }> = [
-    { label: "AI 사용", value: "ai", disabled: aiResolvedText === null },
+    {
+      label: "AI 해결안 사용",
+      value: "ai",
+      disabled: aiResolvedText === null
+    },
     { label: "PR 브랜치 선택", value: "pr" },
     { label: "대상 브랜치 선택", value: "target" },
     { label: "둘 다 선택", value: "both" }
@@ -1801,7 +1857,7 @@ function ConflictHunkComparison({
       {isChoiceDisabled ? (
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3">
           <p className="text-sm leading-6 text-blue-900">
-            최종 파일 전체를 직접 편집했습니다. hunk 해결 방식을 바꾸려면 전체 편집 내용을 초기화해야 합니다.
+            전체 코드에서 직접 수정한 내용이 있습니다. hunk 해결 방식을 다시 선택하려면 직접 수정한 내용을 버리고 hunk 결과로 복원해야 합니다.
           </p>
           <Button onClick={onResetCustomizedDraft} size="sm" type="button" variant="outline">
             hunk 결과로 복원
@@ -1823,7 +1879,22 @@ function ConflictHunkComparison({
             {option.label}
           </Button>
         ))}
+        {choice ? (
+          <Button
+            disabled={isChoiceDisabled}
+            onClick={onChoiceReset}
+            size="sm"
+            type="button"
+            variant="outline"
+          >
+            선택 취소
+          </Button>
+        ) : null}
       </div>
+
+      {aiResolvedText !== null ? (
+        <ConflictAiResolutionPreview value={aiResolvedText} />
+      ) : null}
 
       {choice === "manual" ? (
         <div className="mt-4">
@@ -1847,7 +1918,6 @@ function ConflictHunkComparison({
       ) : null}
 
       <ConflictUnifiedCodePane
-        aiResolvedText={aiResolvedText}
         headBranchLabel={headBranchLabel}
         hunk={hunk}
         isBaseComparisonOpen={isBaseComparisonOpen}
@@ -1857,14 +1927,28 @@ function ConflictHunkComparison({
   );
 }
 
+function ConflictAiResolutionPreview({ value }: { value: string }) {
+  return (
+    <section className="mt-4 overflow-hidden rounded-lg border border-violet-200 bg-white">
+      <div className="flex items-center gap-2 border-b border-violet-200 bg-violet-50 px-3 py-2 text-sm font-semibold text-violet-950">
+        <Sparkles className="size-4" />
+        AI 해결안
+      </div>
+      <div className="max-h-56 overflow-auto">
+        <div className="min-w-max text-xs leading-5">
+          <ConflictCodeRows lineStart={1} tone="ai" value={value} />
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function ConflictUnifiedCodePane({
-  aiResolvedText,
   headBranchLabel,
   hunk,
   isBaseComparisonOpen,
   targetBranchLabel
 }: {
-  aiResolvedText: string | null;
   headBranchLabel: string;
   hunk: PrReviewConflictHunk;
   isBaseComparisonOpen: boolean;
@@ -1887,12 +1971,6 @@ function ConflictUnifiedCodePane({
             value={hunk.currentText}
           />
           <ConflictMarkerRow label={`>>>>>>> 대상 브랜치: ${targetBranchLabel}`} />
-          {aiResolvedText !== null ? (
-            <>
-              <ConflictMarkerRow label="AI 해결안" tone="ai" />
-              <ConflictCodeRows lineStart={1} tone="ai" value={aiResolvedText} />
-            </>
-          ) : null}
           {isBaseComparisonOpen ? (
             <>
               <ConflictMarkerRow label="공통 원본(Base)" tone="base" />
