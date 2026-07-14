@@ -694,6 +694,30 @@ function getDeletedPreviewShapeIds({
   );
 }
 
+function getCreatedFreeformShapeIds({
+  nextShapes,
+  previousShapes,
+}: {
+  nextShapes: PiloCanvasFreeformShape[];
+  previousShapes: PiloCanvasFreeformShape[];
+}) {
+  const previousShapeIds = new Set<string>(
+    previousShapes.flatMap((shape) => {
+      const shapeId = getFreeformShapeId(shape);
+
+      return shapeId ? [String(shapeId)] : [];
+    }),
+  );
+
+  return nextShapes.flatMap((shape) => {
+    const shapeId = getFreeformShapeId(shape);
+
+    return shapeId && !previousShapeIds.has(String(shapeId))
+      ? [String(shapeId)]
+      : [];
+  });
+}
+
 function filterUnlockedShapeIds(
   shapeIds: TLShapeId[],
   remoteLockedShapeIds: Set<string>,
@@ -844,19 +868,26 @@ export function PiloTldrawCanvas({
         return snapshot;
       }
 
-      return remotePreviewOriginalShapesRef.current.get(shapeId) ?? snapshot;
+      return remotePreviewOriginalShapesRef.current.get(shapeId) ?? null;
     },
     [],
   );
 
   const handleRealtimePreviewDraftChange = useCallback(
     (shapes: PiloCanvasFreeformShape[]) => {
-      const previewShapeIds = new Set(localPreviewShapeIdsRef.current);
+      const previousShapes = freeformShapesRef.current;
+      const previewShapeIds = new Set([
+        ...localPreviewShapeIdsRef.current,
+        ...getCreatedFreeformShapeIds({
+          nextShapes: shapes,
+          previousShapes,
+        }),
+      ]);
       const phase = localPreviewPhaseRef.current;
       const deletedShapeIds = getDeletedPreviewShapeIds({
         nextShapes: shapes,
         previewShapeIds,
-        previousShapes: freeformShapesRef.current,
+        previousShapes,
       });
 
       if (!presence?.enabled || !previewShapeIds.size) {
@@ -2079,6 +2110,10 @@ function CanvasRealtimePreviewApplier({
     const shapeIdsToRestore = Array.from(previousPreviewShapeIds).filter(
       (shapeId) => !activePreviewShapeIds.has(shapeId),
     );
+    const shapeIdsToDelete = shapeIdsToRestore.filter(
+      (shapeId) =>
+        !committedShapesById.has(shapeId) && !originalShapesRef.current.has(shapeId),
+    );
     const shapesToRestore = shapeIdsToRestore.flatMap((shapeId) => {
       const committedShape = committedShapesById.get(shapeId);
 
@@ -2124,10 +2159,32 @@ function CanvasRealtimePreviewApplier({
         return true;
       },
     );
+    const shapesToCreate = Array.from(previewShapesById.values()).filter(
+      (shape) => {
+        const shapeId = getFreeformShapeId(shape);
+        const currentShape = shapeId
+          ? editor.getShape(shapeId as TLShapeId)
+          : null;
 
-    if (shapesToRestore.length || shapesToHide.length || shapesToPreview.length) {
+        return Boolean(shapeId && !currentShape);
+      },
+    );
+
+    if (
+      shapeIdsToDelete.length ||
+      shapesToRestore.length ||
+      shapesToHide.length ||
+      shapesToPreview.length ||
+      shapesToCreate.length
+    ) {
+      previewShapeIdsRef.current = activePreviewShapeIds;
+
       editor.run(
         () => {
+          if (shapeIdsToDelete.length) {
+            editor.deleteShapes(shapeIdsToDelete as TLShapeId[]);
+          }
+
           if (shapesToRestore.length) {
             restorePiloShapeAssets(editor, shapesToRestore);
             editor.updateShapes(shapesToRestore as TLShapePartial<TLShape>[]);
@@ -2141,6 +2198,11 @@ function CanvasRealtimePreviewApplier({
             restorePiloShapeAssets(editor, shapesToPreview);
             editor.updateShapes(shapesToPreview as TLShapePartial<TLShape>[]);
           }
+
+          if (shapesToCreate.length) {
+            restorePiloShapeAssets(editor, shapesToCreate);
+            editor.createShapes(sortFreeformShapesForCreate(shapesToCreate));
+          }
         },
         { history: "ignore" },
       );
@@ -2149,7 +2211,16 @@ function CanvasRealtimePreviewApplier({
     shapeIdsToRestore.forEach((shapeId) => {
       originalShapesRef.current.delete(shapeId);
     });
-    previewShapeIdsRef.current = activePreviewShapeIds;
+
+    if (
+      !shapeIdsToDelete.length &&
+      !shapesToRestore.length &&
+      !shapesToHide.length &&
+      !shapesToPreview.length &&
+      !shapesToCreate.length
+    ) {
+      previewShapeIdsRef.current = activePreviewShapeIds;
+    }
   }, [committedShapes, editor, originalShapesRef, previewShapeIdsRef, previews]);
 
   useEffect(

@@ -34,7 +34,7 @@ export function CanvasStateReporter({
   onResolveFreeformShapeSnapshot?: (
     shape: TLShape,
     snapshot: PiloCanvasFreeformShape,
-  ) => PiloCanvasFreeformShape;
+  ) => PiloCanvasFreeformShape | null;
   onViewChange: (viewSetting: PiloCanvasViewSetting) => void;
   onViewportBoundsChange: (bounds: PiloCanvasViewportBounds) => void;
 }) {
@@ -111,7 +111,8 @@ export function CanvasStateReporter({
           const resolveSnapshot = onResolveFreeformShapeSnapshotRef.current;
 
           return resolveSnapshot ? resolveSnapshot(shape, snapshot) : snapshot;
-        });
+        })
+        .filter((shape): shape is PiloCanvasFreeformShape => shape !== null);
     }
 
     function scheduleFreeformSync() {
