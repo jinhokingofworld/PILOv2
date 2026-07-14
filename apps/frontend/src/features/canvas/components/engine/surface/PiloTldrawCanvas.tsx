@@ -193,6 +193,9 @@ const tldrawComponents = {
 const PILO_COLLAPSED_FRAME_SIZE = 144;
 const CANVAS_AI_CHAT_HOLD_MS = 500;
 const CANVAS_SHAPE_LOCK_RELEASE_GRACE_MS = 1_500;
+const CANVAS_COLLABORATION_NOTICE_MS = 4_000;
+const CANVAS_COLLABORATION_GUARD_MESSAGE =
+  "다른 사용자가 이 shape를 조작 중이라 삭제/지우개 같은 위험한 작업은 잠시 막았어요.";
 const connectionTools = new Set<PiloCanvasTool>(["arrow", "line"]);
 const PILO_FRAME_EXPANDED_FALLBACK_SIZE = {
   h: 180,
@@ -647,13 +650,26 @@ function collectRemoteLockedShapeIds(
   });
 
   presence?.remotePresence.forEach((entry) => {
-    entry.selectedShapeIds.forEach((shapeId) => {
-      lockedShapeIds.add(shapeId);
-    });
-
     if (entry.editingShapeId) {
       lockedShapeIds.add(entry.editingShapeId);
     }
+  });
+
+  presence?.remoteShapePreviews.forEach((preview) => {
+    preview.shapes.forEach((shape) => {
+      if (
+        typeof shape === "object" &&
+        shape !== null &&
+        "id" in shape &&
+        typeof shape.id === "string"
+      ) {
+        lockedShapeIds.add(shape.id);
+      }
+    });
+
+    preview.deletedShapeIds?.forEach((shapeId) => {
+      lockedShapeIds.add(shapeId);
+    });
   });
 
   return lockedShapeIds;
@@ -779,6 +795,13 @@ function filterUnlockedShapeIds(
   return shapeIds.filter((shapeId) => !remoteLockedShapeIds.has(String(shapeId)));
 }
 
+function hasRemoteLockedShapeIds(
+  shapeIds: TLShapeId[],
+  remoteLockedShapeIds: Set<string>,
+) {
+  return shapeIds.some((shapeId) => remoteLockedShapeIds.has(String(shapeId)));
+}
+
 function isPointInsideRemoteLockedShape(
   editor: Editor,
   pagePoint: { x: number; y: number },
@@ -857,6 +880,7 @@ export function PiloTldrawCanvas({
   const createdLocalCardsRef = useRef(0);
   const freeformShapesRef = useRef(freeformShapes);
   const claimedShapeIdsRef = useRef<string[]>([]);
+  const requestedShapeLockIdsRef = useRef<string[]>([]);
   const pendingLockReleaseShapeIdsRef = useRef(new Set<string>());
   const lockReleaseTimersRef = useRef(
     new Map<string, ReturnType<typeof setTimeout>>(),
@@ -869,12 +893,27 @@ export function PiloTldrawCanvas({
   const remotePreviewShapeIdsRef = useRef(new Set<string>());
   const remoteLockedShapeIds = useMemo(
     () => collectRemoteLockedShapeIds(presence),
-    [presence?.remotePresence, presence?.remoteShapeLocks],
+    [
+      presence?.remotePresence,
+      presence?.remoteShapeLocks,
+      presence?.remoteShapePreviews,
+    ],
   );
+  const ownedShapeLockIds = useMemo(
+    () =>
+      new Set(
+        presence?.ownedShapeLocks.map((lock) => lock.shapeId).filter(Boolean) ??
+          [],
+      ),
+    [presence?.ownedShapeLocks],
+  );
+  const ownedShapeLockIdsRef = useRef(ownedShapeLockIds);
   const remoteLockedShapeIdsRef = useRef(remoteLockedShapeIds);
   const canvasWheelCleanupRef = useRef<(() => void) | null>(null);
   const lastHydratedSeedKeyRef = useRef<string | null>(null);
   const frameChildrenRequestTimerRef =
+    useRef<ReturnType<typeof setTimeout> | null>(null);
+  const collaborationNoticeTimerRef =
     useRef<ReturnType<typeof setTimeout> | null>(null);
   const initialViewSettingRef = useRef(initialViewSetting);
   const seedKey = board.id;
@@ -884,6 +923,9 @@ export function PiloTldrawCanvas({
     (CanvasAiChatAnchor & { progress: number }) | null
   >(null);
   const [isPiloEraserActive, setIsPiloEraserActive] = useState(false);
+  const [collaborationNotice, setCollaborationNotice] = useState<string | null>(
+    null,
+  );
   const isCanvasAiChatVisible = Boolean(canvasAiChatAnchor || canvasAiChatHoldProgress);
   const handleCanvasAgentApplied = useCallback(() => {
     const editor = editorRef.current;
@@ -906,6 +948,19 @@ export function PiloTldrawCanvas({
   });
   const presenceRef = useRef(presence);
 
+  const showCollaborationNotice = useCallback((message: string) => {
+    setCollaborationNotice(message);
+
+    if (collaborationNoticeTimerRef.current) {
+      clearTimeout(collaborationNoticeTimerRef.current);
+    }
+
+    collaborationNoticeTimerRef.current = setTimeout(() => {
+      collaborationNoticeTimerRef.current = null;
+      setCollaborationNotice(null);
+    }, CANVAS_COLLABORATION_NOTICE_MS);
+  }, []);
+
   useEffect(() => {
     onOneShotToolCreatedRef.current = onOneShotToolCreated;
   }, [onOneShotToolCreated]);
@@ -917,6 +972,27 @@ export function PiloTldrawCanvas({
   useEffect(() => {
     freeformShapesRef.current = freeformShapes;
   }, [freeformShapes]);
+
+  useEffect(() => {
+    ownedShapeLockIdsRef.current = ownedShapeLockIds;
+    claimedShapeIdsRef.current = Array.from(ownedShapeLockIds);
+
+    if (!presence?.enabled) return;
+
+    const requestedShapeIdSet = new Set(requestedShapeLockIdsRef.current);
+    const acceptedButNoLongerRequested = Array.from(ownedShapeLockIds).filter(
+      (shapeId) => !requestedShapeIdSet.has(shapeId),
+    );
+
+    if (!acceptedButNoLongerRequested.length) return;
+
+    scheduleShapeLockRelease({
+      pendingShapeIds: pendingLockReleaseShapeIdsRef,
+      presence,
+      releaseTimers: lockReleaseTimersRef,
+      shapeIds: acceptedButNoLongerRequested,
+    });
+  }, [ownedShapeLockIds, presence]);
 
   const resolveRealtimePreviewSnapshot = useCallback(
     (_shape: TLShape, snapshot: PiloCanvasFreeformShape) => {
@@ -974,25 +1050,36 @@ export function PiloTldrawCanvas({
       const nextShapeIds = Array.from(
         new Set(state.protectedShapeIds.filter(Boolean)),
       );
-      const previousShapeIds = claimedShapeIdsRef.current;
-      const previousShapeIdSet = new Set(previousShapeIds);
-      const nextShapeIdSet = new Set(nextShapeIds);
-      const shapeIdsToRelease = previousShapeIds.filter(
-        (shapeId) => !nextShapeIdSet.has(shapeId),
+      const previousRequestedShapeIds = requestedShapeLockIdsRef.current;
+      const previousRequestedShapeIdSet = new Set(previousRequestedShapeIds);
+      const nextLockShapeIds = state.editingShapeId
+        ? [state.editingShapeId]
+        : [];
+      const nextLockShapeIdSet = new Set(nextLockShapeIds);
+      const shapeIdsToRelease = claimedShapeIdsRef.current.filter(
+        (shapeId) => !nextLockShapeIdSet.has(shapeId),
       );
-      const shapeIdsToClaim = nextShapeIds.filter(
-        (shapeId) => !previousShapeIdSet.has(shapeId),
+      const shapeIdsToClaim = nextLockShapeIds.filter(
+        (shapeId) =>
+          !previousRequestedShapeIdSet.has(shapeId) &&
+          !ownedShapeLockIdsRef.current.has(shapeId),
       );
       const nextPreviewPhase = getShapePreviewPhase(
         state.currentToolId,
         state.selectedShapeIds,
       );
 
+      requestedShapeLockIdsRef.current = nextLockShapeIds;
       localPreviewShapeIdsRef.current = nextShapeIds;
       localPreviewPhaseRef.current = nextPreviewPhase;
-      claimedShapeIdsRef.current = nextShapeIds;
 
       if (presence?.enabled) {
+        cancelScheduledShapeLockRelease({
+          pendingShapeIds: pendingLockReleaseShapeIdsRef,
+          releaseTimers: lockReleaseTimersRef,
+          shapeIds: nextShapeIds,
+        });
+
         if (shapeIdsToRelease.length) {
           scheduleShapeLockRelease({
             pendingShapeIds: pendingLockReleaseShapeIdsRef,
@@ -1003,11 +1090,6 @@ export function PiloTldrawCanvas({
         }
 
         if (shapeIdsToClaim.length) {
-          cancelScheduledShapeLockRelease({
-            pendingShapeIds: pendingLockReleaseShapeIdsRef,
-            releaseTimers: lockReleaseTimersRef,
-            shapeIds: shapeIdsToClaim,
-          });
           presence.claimShapeLocks(shapeIdsToClaim);
         }
       }
@@ -1026,24 +1108,6 @@ export function PiloTldrawCanvas({
 
   useEffect(() => {
     remoteLockedShapeIdsRef.current = remoteLockedShapeIds;
-
-    const editor = editorRef.current;
-
-    if (!editor || !remoteLockedShapeIds.size) return;
-
-    const selectedShapeIds = editor.getSelectedShapeIds();
-    const unlockedSelectedShapeIds = filterUnlockedShapeIds(
-      selectedShapeIds,
-      remoteLockedShapeIds,
-    );
-
-    if (unlockedSelectedShapeIds.length === selectedShapeIds.length) return;
-
-    if (unlockedSelectedShapeIds.length) {
-      editor.select(...unlockedSelectedShapeIds);
-    } else {
-      editor.selectNone();
-    }
   }, [remoteLockedShapeIds]);
 
   useEffect(() => {
@@ -1076,6 +1140,11 @@ export function PiloTldrawCanvas({
       if (frameChildrenRequestTimerRef.current) {
         clearTimeout(frameChildrenRequestTimerRef.current);
         frameChildrenRequestTimerRef.current = null;
+      }
+
+      if (collaborationNoticeTimerRef.current) {
+        clearTimeout(collaborationNoticeTimerRef.current);
+        collaborationNoticeTimerRef.current = null;
       }
     },
     [],
@@ -1146,17 +1215,22 @@ export function PiloTldrawCanvas({
       y: event.clientY,
     });
     const hitMargin = editor.options.hitTestMargin / editor.getZoomLevel();
-    const erasableShapeIds = editor
+    const hitErasableShapes = editor
       .getShapesAtPoint(pagePoint, {
         hitInside: false,
         margin: hitMargin,
       })
-      .filter(
-        (shape) =>
-          isPiloErasableShape(shape) &&
-          !remoteLockedShapeIdsRef.current.has(String(shape.id)),
-      )
+      .filter(isPiloErasableShape);
+    const blockedShapeIds = hitErasableShapes.filter((shape) =>
+      remoteLockedShapeIdsRef.current.has(String(shape.id)),
+    );
+    const erasableShapeIds = hitErasableShapes
+      .filter((shape) => !remoteLockedShapeIdsRef.current.has(String(shape.id)))
       .map((shape) => shape.id as TLShapeId);
+
+    if (blockedShapeIds.length) {
+      showCollaborationNotice(CANVAS_COLLABORATION_GUARD_MESSAGE);
+    }
 
     if (!erasableShapeIds.length) return false;
 
@@ -1516,10 +1590,9 @@ export function PiloTldrawCanvas({
 
         if (selectedShapeIds.length < 2) return;
         if (
-          selectedShapeIds.some((shapeId) =>
-            remoteLockedShapeIdsRef.current.has(String(shapeId)),
-          )
+          hasRemoteLockedShapeIds(selectedShapeIds, remoteLockedShapeIdsRef.current)
         ) {
+          showCollaborationNotice(CANVAS_COLLABORATION_GUARD_MESSAGE);
           return;
         }
 
@@ -1536,6 +1609,14 @@ export function PiloTldrawCanvas({
         editor.selectNone();
       },
       deleteSelection() {
+        const selectedShapeIds = editor.getSelectedShapeIds();
+
+        if (
+          hasRemoteLockedShapeIds(selectedShapeIds, remoteLockedShapeIdsRef.current)
+        ) {
+          showCollaborationNotice(CANVAS_COLLABORATION_GUARD_MESSAGE);
+        }
+
         deleteSelectedShapes(editor, remoteLockedShapeIdsRef.current);
       },
       fit() {
@@ -1599,10 +1680,18 @@ export function PiloTldrawCanvas({
       if (!isPointerInsideTrashDropZone(event)) return;
 
       const selectedShapeIds = editor.getSelectedShapeIds();
+      const hasBlockedShape = hasRemoteLockedShapeIds(
+        selectedShapeIds,
+        remoteLockedShapeIdsRef.current,
+      );
       const deletableShapeIds = filterUnlockedShapeIds(
         selectedShapeIds,
         remoteLockedShapeIdsRef.current,
       );
+
+      if (hasBlockedShape) {
+        showCollaborationNotice(CANVAS_COLLABORATION_GUARD_MESSAGE);
+      }
 
       if (!deletableShapeIds.length) return;
 
@@ -1728,6 +1817,18 @@ export function PiloTldrawCanvas({
       const descendantShapes = nextCollapsed
         ? collectFrameDescendantShapes(editor, frameShape.id)
         : [];
+      const descendantShapeIds = descendantShapes.map(
+        (shape) => shape.id as TLShapeId,
+      );
+
+      if (
+        nextCollapsed &&
+        hasRemoteLockedShapeIds(descendantShapeIds, remoteLockedShapeIdsRef.current)
+      ) {
+        showCollaborationNotice(CANVAS_COLLABORATION_GUARD_MESSAGE);
+        return;
+      }
+
       const descendantSnapshots = descendantShapes.map((shape) =>
         withSerializedArrowBindings(editor, shape),
       );
@@ -1762,9 +1863,7 @@ export function PiloTldrawCanvas({
       editor.run(
         () => {
           if (nextCollapsed && descendantShapes.length) {
-            editor.deleteShapes(
-              descendantShapes.map((shape) => shape.id as TLShapeId),
-            );
+            editor.deleteShapes(descendantShapeIds);
           }
 
           editor.updateShapes([
@@ -1854,6 +1953,7 @@ export function PiloTldrawCanvas({
       if (isInsideRemoteLockedShape) {
         event.preventDefault();
         event.stopPropagation();
+        showCollaborationNotice(CANVAS_COLLABORATION_GUARD_MESSAGE);
         return;
       }
 
@@ -1871,6 +1971,7 @@ export function PiloTldrawCanvas({
       if (isInsideRemoteLockedShape) {
         event.preventDefault();
         event.stopPropagation();
+        showCollaborationNotice(CANVAS_COLLABORATION_GUARD_MESSAGE);
       }
 
       return;
@@ -1885,15 +1986,6 @@ export function PiloTldrawCanvas({
     // even when the pointer is directly on an arrow inside it. Prefer the
     // arrow here so a connector remains selectable.
     const pointedShape = getArrowAtPoint(editor, pagePoint) ?? directShape;
-
-    if (
-      pointedShape &&
-      remoteLockedShapeIdsRef.current.has(String(pointedShape.id))
-    ) {
-      event.preventDefault();
-      event.stopPropagation();
-      return;
-    }
 
     if (isPiloCodeBlockShape(pointedShape)) {
       if (!editor.getSelectedShapeIds().includes(pointedShape.id)) {
@@ -2027,6 +2119,14 @@ export function PiloTldrawCanvas({
       onPointerUpCapture={handleCanvasPointerUpCapture}
       onPointerCancelCapture={handleCanvasPointerCancelCapture}
     >
+      {collaborationNotice ? (
+        <div
+          className="pointer-events-none fixed top-5 left-1/2 z-50 max-w-sm -translate-x-1/2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-950 shadow-lg shadow-amber-950/10"
+          role="status"
+        >
+          {collaborationNotice}
+        </div>
+      ) : null}
       <CanvasRemotePresenceProvider presence={presence?.remotePresence ?? []}>
         <TldrawSurface
           className="pilo-tldraw-canvas"
