@@ -23,10 +23,12 @@ const snapshotLoader =
   panel.match(
     /async function loadGithubIntegrationSnapshot\([\s\S]*?\n  \}/
   )?.[0] ?? "";
-assert.doesNotMatch(
+assert.match(
   snapshotLoader,
-  /listAllGithubProjectsV2|discoverGithubProjectV2/
+  /if \(nextRepository\) \{[\s\S]*?listAllGithubProjectsV2\(nextRepository\.id\)/,
+  "snapshot loading may fetch ProjectV2s only after a preferred repository resolves in the current page"
 );
+assert.doesNotMatch(snapshotLoader, /discoverGithubProjectV2/);
 assert.match(
   panel,
   /listGithubProjectsV2\(workspaceId, \{[\s\S]{0,160}repositoryId/
@@ -47,7 +49,7 @@ assert.match(
 );
 assert.match(
   panel,
-  /async function loadGithubPullRequests[\s\S]{0,1800}catch \(error\) \{\s*if \(selectedRepositoryIdRef\.current !== repositoryId\) \{\s*return;/
+  /async function loadGithubPullRequests[\s\S]{0,1800}const isCurrentRequest = \(\) =>[\s\S]*?selectedRepositoryIdRef\.current === repositoryId[\s\S]*?pullRequestsRequestGateRef\.current\.isCurrent\(requestGeneration\)/
 );
 assert.match(
   panel,

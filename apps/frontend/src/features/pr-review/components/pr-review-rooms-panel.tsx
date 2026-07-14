@@ -8,7 +8,6 @@ import {
   ExternalLink,
   GitBranch,
   GitPullRequest,
-  History,
   Loader2,
   RefreshCcw
 } from "lucide-react";
@@ -167,6 +166,7 @@ function ReviewRoomCard({
   onEnter: () => void;
 }) {
   const isCompleted = room.status === "completed";
+  const completionLabel = room.completionReason === "merged" ? "병합 완료" : "닫힘";
   const isAnalyzingOnly = Boolean(
     room.analyzingReviewSessionId && !room.currentReviewSessionId
   );
@@ -187,7 +187,7 @@ function ReviewRoomCard({
             variant="outline"
           >
             {isCompleted
-              ? "완료"
+              ? completionLabel
               : isAnalyzingOnly
                 ? "분석 중"
                 : "진행 중"}
@@ -211,10 +211,6 @@ function ReviewRoomCard({
               <span className="break-all">
                 {room.pullRequest.headBranch ?? "-"} → {room.pullRequest.baseBranch ?? "-"}
               </span>
-            </span>
-            <span className="inline-flex items-center gap-1.5">
-              <History className="size-3.5" />
-              {room.revisionCount}개 버전
             </span>
           </CardDescription>
         </div>
@@ -240,7 +236,7 @@ function ReviewRoomCard({
       <CardContent className="flex flex-wrap items-center justify-between gap-2 border-t pt-4 text-sm text-muted-foreground">
         <span>
           {isCompleted
-            ? "완료된 리뷰는 읽기 전용으로 열립니다."
+            ? `${completionLabel}된 PR의 리뷰는 읽기 전용으로 열립니다.`
             : isAnalyzingOnly
               ? "분석이 끝나면 같은 공간에서 리뷰를 시작할 수 있습니다."
               : isAnalyzingNewRevision

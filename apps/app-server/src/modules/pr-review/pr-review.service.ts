@@ -96,6 +96,10 @@ interface PrReviewSessionRow extends QueryResultRow {
   conflict_checked_at: Date | string | null;
   analysis_error_code: PrReviewAnalysisErrorCode | null;
   analysis_error_message: string | null;
+  room_status?: PrReviewRoomStatus;
+  pull_request_state?: string;
+  pull_request_closed_at?: Date | string | null;
+  pull_request_merged_at?: Date | string | null;
   created_at: Date | string;
   updated_at: Date | string;
 }
@@ -996,6 +1000,7 @@ export class PrReviewService {
       throw notFound("Pull request not found in workspace");
     }
     this.assertPullRequestReviewable(pullRequest);
+    await this.syncReviewRoomLifecycle(workspaceId, { pullRequestId });
 
     const existing = await this.findActiveAnalyzingReviewSession(
       workspaceId,
@@ -1144,6 +1149,7 @@ export class PrReviewService {
     pullRequestId: string
   ): Promise<PrReviewRoomPayload> {
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+    await this.syncReviewRoomLifecycle(workspaceId, { pullRequestId });
     const room = await this.findReviewRoomByPullRequest(workspaceId, pullRequestId);
     if (!room) {
       throw notFound("PR Review room not found");
@@ -1156,6 +1162,7 @@ export class PrReviewService {
     workspaceId: string
   ): Promise<PrReviewRoomListPayload> {
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+    await this.syncReviewRoomLifecycle(workspaceId);
     const rooms = await this.database.query<PrReviewRoomRow>(
       `${this.reviewRoomSelectSql()}
        WHERE review_room.workspace_id = $1
@@ -1173,6 +1180,7 @@ export class PrReviewService {
     reviewRoomId: string
   ): Promise<PrReviewRoomPayload> {
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+    await this.syncReviewRoomLifecycle(workspaceId, { reviewRoomId });
     const room = await this.findReviewRoom(workspaceId, reviewRoomId);
     if (!room) {
       throw notFound("PR Review room not found");
@@ -1186,6 +1194,7 @@ export class PrReviewService {
     reviewRoomId: string
   ): Promise<PrReviewRoomRevisionListPayload> {
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+    await this.syncReviewRoomLifecycle(workspaceId, { reviewRoomId });
     const room = await this.findReviewRoom(workspaceId, reviewRoomId);
     if (!room) {
       throw notFound("PR Review room not found");
@@ -1204,6 +1213,7 @@ export class PrReviewService {
     reviewRoomId: string
   ): Promise<PrReviewRoomStartPayload> {
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+    await this.syncReviewRoomLifecycle(workspaceId, { reviewRoomId });
     const room = await this.findReviewRoom(workspaceId, reviewRoomId);
     if (!room) {
       throw notFound("PR Review room not found");
@@ -1959,6 +1969,18 @@ export class PrReviewService {
 
     const reviewFileUuid = this.requireUuid(reviewFileId, "reviewFileId");
     const input = this.normalizeReviewDecision(body);
+    const targetFile = await this.findReviewFile(workspaceId, reviewFileUuid);
+    if (!targetFile) {
+      throw notFound("Review file not found");
+    }
+    const targetSession = await this.findReviewSession(
+      workspaceId,
+      targetFile.session_id
+    );
+    if (!targetSession) {
+      throw notFound("Review session not found");
+    }
+    this.assertReviewSessionRoomWritable(targetSession);
     const updatedFile = await this.database.transaction(async (transaction) => {
       const file = await this.updateReviewFileDecisionState(transaction, {
         workspaceId,
@@ -2106,6 +2128,12 @@ export class PrReviewService {
       throw notFound("Review file not found");
     }
 
+    const session = await this.findReviewSession(workspaceId, file.session_id);
+    if (!session) {
+      throw notFound("Review session not found");
+    }
+    this.assertReviewSessionRoomWritable(session);
+
     if (file.conflict_status !== "conflicted") {
       throw badRequest("Review session is not conflicted");
     }
@@ -2200,6 +2228,7 @@ export class PrReviewService {
     if (!session) {
       throw notFound("Review session not found");
     }
+    this.assertReviewSessionRoomWritable(session);
 
     if (session.conflict_status !== "conflicted") {
       throw badRequest("Review session is not conflicted");
@@ -2352,6 +2381,12 @@ export class PrReviewService {
       throw notFound("Review file not found");
     }
 
+    const session = await this.findReviewSession(workspaceId, file.session_id);
+    if (!session) {
+      throw notFound("Review session not found");
+    }
+    this.assertReviewSessionRoomWritable(session);
+
     if (file.conflict_status !== "conflicted") {
       throw badRequest("Review session is not conflicted");
     }
@@ -2474,6 +2509,7 @@ export class PrReviewService {
     if (!session) {
       throw notFound("Review session not found");
     }
+    this.assertReviewSessionRoomWritable(session);
 
     this.assertReviewSessionSubmitted(session);
 
@@ -2564,6 +2600,7 @@ export class PrReviewService {
     if (!session) {
       throw notFound("Review session not found");
     }
+    this.assertReviewSessionRoomWritable(session);
 
     const input = this.normalizeReviewSubmission(body);
     const files = await this.listReviewFilesForSession(workspaceId, session.id);
@@ -2955,6 +2992,136 @@ export class PrReviewService {
       pullRequest.merged_at !== null
     ) {
       throw conflictError("Pull request is closed or merged");
+    }
+  }
+
+  private async syncReviewRoomLifecycle(
+    workspaceId: string,
+    input: {
+      pullRequestId?: string;
+      reviewRoomId?: string;
+    } = {}
+  ): Promise<void> {
+    await this.database.query(
+      `
+        UPDATE pr_review_rooms AS review_room
+        SET status = CASE
+              WHEN COALESCE(
+                NULLIF(pull_request.raw->>'state', ''),
+                CASE
+                  WHEN pull_request.merged_at IS NOT NULL
+                    OR pull_request.github_closed_at IS NOT NULL
+                    THEN 'closed'
+                  ELSE 'open'
+                END
+              ) = 'open'
+              AND pull_request.github_closed_at IS NULL
+              AND pull_request.merged_at IS NULL
+                THEN 'active'
+              ELSE 'completed'
+            END,
+            completion_reason = CASE
+              WHEN COALESCE(
+                NULLIF(pull_request.raw->>'state', ''),
+                CASE
+                  WHEN pull_request.merged_at IS NOT NULL
+                    OR pull_request.github_closed_at IS NOT NULL
+                    THEN 'closed'
+                  ELSE 'open'
+                END
+              ) = 'open'
+              AND pull_request.github_closed_at IS NULL
+              AND pull_request.merged_at IS NULL
+                THEN NULL
+              WHEN pull_request.merged_at IS NOT NULL THEN 'merged'
+              ELSE 'closed'
+            END,
+            completed_at = CASE
+              WHEN COALESCE(
+                NULLIF(pull_request.raw->>'state', ''),
+                CASE
+                  WHEN pull_request.merged_at IS NOT NULL
+                    OR pull_request.github_closed_at IS NOT NULL
+                    THEN 'closed'
+                  ELSE 'open'
+                END
+              ) = 'open'
+              AND pull_request.github_closed_at IS NULL
+              AND pull_request.merged_at IS NULL
+                THEN NULL
+              ELSE COALESCE(
+                review_room.completed_at,
+                pull_request.merged_at,
+                pull_request.github_closed_at,
+                now()
+              )
+            END
+        FROM github_pull_requests AS pull_request
+        WHERE review_room.workspace_id = $1
+          AND pull_request.id = review_room.pull_request_id
+          AND pull_request.workspace_id = review_room.workspace_id
+          AND ($2::uuid IS NULL OR review_room.id = $2::uuid)
+          AND ($3::uuid IS NULL OR review_room.pull_request_id = $3::uuid)
+          AND (
+            review_room.status IS DISTINCT FROM CASE
+              WHEN COALESCE(
+                NULLIF(pull_request.raw->>'state', ''),
+                CASE
+                  WHEN pull_request.merged_at IS NOT NULL
+                    OR pull_request.github_closed_at IS NOT NULL
+                    THEN 'closed'
+                  ELSE 'open'
+                END
+              ) = 'open'
+              AND pull_request.github_closed_at IS NULL
+              AND pull_request.merged_at IS NULL
+                THEN 'active'
+              ELSE 'completed'
+            END
+            OR review_room.completion_reason IS DISTINCT FROM CASE
+              WHEN COALESCE(
+                NULLIF(pull_request.raw->>'state', ''),
+                CASE
+                  WHEN pull_request.merged_at IS NOT NULL
+                    OR pull_request.github_closed_at IS NOT NULL
+                    THEN 'closed'
+                  ELSE 'open'
+                END
+              ) = 'open'
+              AND pull_request.github_closed_at IS NULL
+              AND pull_request.merged_at IS NULL
+                THEN NULL
+              WHEN pull_request.merged_at IS NOT NULL THEN 'merged'
+              ELSE 'closed'
+            END
+            OR (
+              COALESCE(
+                NULLIF(pull_request.raw->>'state', ''),
+                CASE
+                  WHEN pull_request.merged_at IS NOT NULL
+                    OR pull_request.github_closed_at IS NOT NULL
+                    THEN 'closed'
+                  ELSE 'open'
+                END
+              ) = 'open'
+              AND pull_request.github_closed_at IS NULL
+              AND pull_request.merged_at IS NULL
+              AND review_room.completed_at IS NOT NULL
+            )
+          )
+      `,
+      [workspaceId, input.reviewRoomId ?? null, input.pullRequestId ?? null]
+    );
+  }
+
+  private assertReviewSessionRoomWritable(session: PrReviewSessionRow): void {
+    if (
+      session.room_status === "completed" ||
+      session.pull_request_state === "closed" ||
+      Boolean(session.pull_request_closed_at) ||
+      Boolean(session.pull_request_merged_at)
+    ) {
+      throw conflictError("Completed PR Review room is read-only");
     }
   }
 
@@ -3502,9 +3669,15 @@ export class PrReviewService {
           review_session.conflict_checked_at,
           review_session.analysis_error_code,
           review_session.analysis_error_message,
+          review_room.status AS room_status,
+          COALESCE(NULLIF(pull_request.raw->>'state', ''), 'open') AS pull_request_state,
+          pull_request.github_closed_at AS pull_request_closed_at,
+          pull_request.merged_at AS pull_request_merged_at,
           review_session.created_at,
           review_session.updated_at
         FROM pr_review_sessions AS review_session
+        JOIN pr_review_rooms AS review_room
+          ON review_room.id = review_session.room_id
         JOIN github_pull_requests AS pull_request
           ON pull_request.id = review_session.pull_request_id
         WHERE pull_request.workspace_id = $1

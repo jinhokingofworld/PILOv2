@@ -2,6 +2,7 @@ import type {
   GithubAppInstallation,
   GithubAppInstallationDelete,
   GithubAppInstallationStart,
+  GithubActiveBoardSource,
   GithubOAuthDisconnect,
   GithubOAuthStart,
   GithubOAuthStatus,
@@ -527,6 +528,14 @@ export function createGithubIntegrationApiClient({
       return requestGithubIntegrationData<GithubProjectV2SelectionResult>(
         workspaceGithubPath(workspaceId, "/project-v2-selections"),
         withJsonBody(body, { method: "PUT" }),
+        requestOptions
+      );
+    },
+
+    async getWorkspaceActiveBoardSource(workspaceId: string) {
+      return requestGithubIntegrationData<GithubActiveBoardSource | null>(
+        workspaceActiveBoardPath(workspaceId),
+        undefined,
         requestOptions
       );
     },
