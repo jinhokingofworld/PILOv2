@@ -502,6 +502,21 @@ export type PrReviewConflictSuggestion = {
   stored: false;
 };
 
+export type PrReviewConflictDraft = {
+  reviewFileId: string;
+  sourceHeadBlobSha: string;
+  resolvedContent: string;
+  draftVersion: number;
+  updatedByUserId: string;
+  updatedAt: string;
+};
+
+export type UpdatePrReviewConflictDraftInput = {
+  sourceHeadBlobSha: string;
+  resolvedContent: string;
+  expectedDraftVersion: number;
+};
+
 export type PrReviewConflictResolvedHunk = {
   hunkId: string;
   resolvedText: string;

@@ -4,6 +4,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type PointerEvent as ReactPointerEvent
 } from "react";
@@ -363,6 +364,9 @@ export function PrReviewCanvasShell({
   const [revisionStartError, setRevisionStartError] = useState<string | null>(
     null
   );
+  const conflictDraftSaveTimersRef = useRef<
+    Record<string, number | undefined>
+  >({});
 
   useEffect(() => {
     setLatestPullRequest(pullRequest);
@@ -490,6 +494,52 @@ export function PrReviewCanvasShell({
     );
   }, [conflictAnalysis, session.id]);
 
+  useEffect(() => {
+    if (!conflictAnalysis || conflictAnalysis.reviewSessionId !== session.id) {
+      return;
+    }
+
+    let cancelled = false;
+    void Promise.all(
+      conflictAnalysis.files.map(async file => ({
+        file,
+        draft: await apiClient.getReviewFileConflictDraft(
+          workspaceId,
+          file.reviewFileId
+        )
+      }))
+    )
+      .then(entries => {
+        if (cancelled) return;
+        setConflictDrafts(currentDrafts => {
+          const nextDrafts = reconcilePrReviewConflictDrafts(
+            conflictAnalysis,
+            currentDrafts
+          );
+          for (const { file, draft } of entries) {
+            if (!draft || draft.sourceHeadBlobSha !== file.headBlobSha) continue;
+            nextDrafts[file.reviewFileId] = {
+              ...nextDrafts[file.reviewFileId],
+              sourceHeadBlobSha: draft.sourceHeadBlobSha,
+              resolvedContent: draft.resolvedContent,
+              draftVersion: draft.draftVersion,
+              updatedByUserId: draft.updatedByUserId,
+              updatedAt: draft.updatedAt,
+              isCustomized: true
+            };
+          }
+          return nextDrafts;
+        });
+      })
+      .catch(() => {
+        // The initial marker draft remains usable when a persisted draft is unavailable.
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [apiClient, conflictAnalysis, session.id, workspaceId]);
+
   const handleDecisionSaved = useCallback(
     (
       updatedFile: PrReviewFile,
@@ -613,9 +663,92 @@ export function PrReviewCanvasShell({
       setConflictApplyStatus("idle");
       setConflictApplyError(null);
       setConflictApplyResult(null);
+
+      const currentTimer = conflictDraftSaveTimersRef.current[reviewFileId];
+      if (currentTimer) {
+        window.clearTimeout(currentTimer);
+      }
+      conflictDraftSaveTimersRef.current[reviewFileId] = window.setTimeout(() => {
+        void apiClient
+          .updateReviewFileConflictDraft(workspaceId, reviewFileId, {
+            sourceHeadBlobSha: draft.sourceHeadBlobSha,
+            resolvedContent: draft.resolvedContent,
+            expectedDraftVersion: draft.draftVersion
+          })
+          .then(savedDraft => {
+            setConflictDrafts(currentDrafts => {
+              const currentDraft = currentDrafts[reviewFileId];
+              if (!currentDraft || currentDraft.resolvedContent !== draft.resolvedContent) {
+                return currentDrafts;
+              }
+              return {
+                ...currentDrafts,
+                [reviewFileId]: {
+                  ...currentDraft,
+                  draftVersion: savedDraft.draftVersion,
+                  updatedByUserId: savedDraft.updatedByUserId,
+                  updatedAt: savedDraft.updatedAt
+                }
+              };
+            });
+          })
+          .catch(error => {
+            setConflictApplyStatus("error");
+            setConflictApplyError(getConflictApplyErrorMessage(error));
+          });
+      }, 500);
     },
-    []
+    [apiClient, workspaceId]
   );
+
+  useEffect(() => () => {
+    for (const timer of Object.values(conflictDraftSaveTimersRef.current)) {
+      if (timer) window.clearTimeout(timer);
+    }
+  }, []);
+
+  const handleRemoteConflictDraftUpdated = useCallback(
+    (remoteDraft: {
+      reviewFileId: string;
+      sourceHeadBlobSha: string;
+      resolvedContent: string;
+      draftVersion: number;
+      updatedByUserId: string;
+      updatedAt: string;
+    }) => {
+      setConflictDrafts(currentDrafts => {
+        const currentDraft = currentDrafts[remoteDraft.reviewFileId];
+        if (
+          currentDraft &&
+          currentDraft.sourceHeadBlobSha === remoteDraft.sourceHeadBlobSha &&
+          currentDraft.draftVersion >= remoteDraft.draftVersion
+        ) {
+          return currentDrafts;
+        }
+        const file = conflictAnalysis?.files.find(
+          candidate => candidate.reviewFileId === remoteDraft.reviewFileId
+        );
+        if (!currentDraft && !file) return currentDrafts;
+        return {
+          ...currentDrafts,
+          [remoteDraft.reviewFileId]: {
+            ...(currentDraft ?? createPrReviewConflictDraft(file!)),
+            sourceHeadBlobSha: remoteDraft.sourceHeadBlobSha,
+            resolvedContent: remoteDraft.resolvedContent,
+            draftVersion: remoteDraft.draftVersion,
+            updatedByUserId: remoteDraft.updatedByUserId,
+            updatedAt: remoteDraft.updatedAt,
+            isCustomized: true
+          }
+        };
+      });
+    },
+    [conflictAnalysis]
+  );
+
+  const handleRemoteConflictDraftInvalidated = useCallback(() => {
+    void loadCanvasData({ quiet: true });
+  }, [loadCanvasData]);
 
   const headBranch =
     canvas?.headBranch ??
@@ -1156,9 +1289,14 @@ export function PrReviewCanvasShell({
               isReviewSessionConflicted={conflictStatus === "conflicted"}
               onClose={() => setSelectedReviewFileId(null)}
               onConflictDraftChange={handleConflictDraftChange}
+              onRemoteConflictDraftUpdated={handleRemoteConflictDraftUpdated}
+              onRemoteConflictDraftInvalidated={handleRemoteConflictDraftInvalidated}
               onDecisionSaved={handleDecisionSaved}
               remoteDecisionUpdate={latestDecisionUpdate}
+              realtimeIdentity={realtimeIdentity}
               reviewFileId={selectedReviewFileId}
+              reviewRoomId={session.reviewRoomId}
+              reviewSessionId={session.id}
               unsupportedConflictFile={selectedUnsupportedConflictFile}
               workspaceId={workspaceId}
             />

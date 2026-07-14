@@ -159,6 +159,14 @@ assert.match(
   prReviewController,
   /@Post\("review-files\/:reviewFileId\/conflict-suggestion"\)/
 );
+assert.match(
+  prReviewController,
+  /@Get\("review-files\/:reviewFileId\/conflict-draft"\)/
+);
+assert.match(
+  prReviewController,
+  /@Patch\("review-files\/:reviewFileId\/conflict-draft"\)/
+);
 assert.match(prReviewController, /@Body\(\) body: unknown/);
 assert.match(
   prReviewController,
@@ -206,6 +214,8 @@ assert.match(
   /applyGithubPullRequestConflictResolutions/
 );
 assert.match(prReviewService, /applyReviewSessionConflictResolutions/);
+assert.match(prReviewService, /updateReviewFileConflictDraft/);
+assert.match(prReviewService, /pr_review_conflict_drafts/);
 assert.match(prReviewService, /Review session conflict file set is stale/);
 assert.match(
   prReviewApi,

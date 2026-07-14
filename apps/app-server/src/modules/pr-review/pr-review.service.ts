@@ -50,6 +50,7 @@ import type {
 } from "./types";
 import { PrReviewAnalysisJobPublisherService } from "./pr-review-analysis-job-publisher.service";
 import { PrReviewDecisionRealtimePublisherService } from "./pr-review-decision-realtime-publisher.service";
+import { PrReviewConflictDraftRealtimePublisherService } from "./pr-review-conflict-draft-realtime-publisher.service";
 import {
   buildPrReviewSemanticGraphHandoff,
   PR_REVIEW_SEMANTIC_GRAPH_SCHEMA_VERSION,
@@ -113,6 +114,10 @@ interface PrReviewRoomIdentityRow extends QueryResultRow {
   pull_request_id: string;
   canvas_id: string;
   status: PrReviewRoomStatus;
+}
+
+interface ReviewRoomCanvasIdRow extends QueryResultRow {
+  canvas_id: string;
 }
 
 interface PrReviewRoomRow extends PrReviewRoomIdentityRow {
@@ -407,6 +412,21 @@ interface PrReviewConflictsApplyFileDraft {
 interface PrReviewConflictsApplyDraft {
   expectedHeadSha?: unknown;
   files?: unknown;
+}
+
+interface PrReviewConflictDraftUpdateInput {
+  sourceHeadBlobSha?: unknown;
+  resolvedContent?: unknown;
+  expectedDraftVersion?: unknown;
+}
+
+interface PrReviewConflictDraftRow extends QueryResultRow {
+  review_file_id: string;
+  source_head_blob_sha: string;
+  resolved_content: string;
+  draft_version: number | string;
+  updated_by_user_id: string;
+  updated_at: Date | string;
 }
 
 interface PrReviewMergeDraft {
@@ -809,6 +829,15 @@ export interface PrReviewConflictAnalysisPayload {
   unsupportedFiles: PrReviewUnsupportedConflictFilePayload[];
 }
 
+export interface PrReviewConflictDraftPayload {
+  reviewFileId: string;
+  sourceHeadBlobSha: string;
+  resolvedContent: string;
+  draftVersion: number;
+  updatedByUserId: string;
+  updatedAt: string;
+}
+
 export type PrReviewConflictSuggestionStatus = "suggested" | "invalid";
 
 export interface PrReviewConflictSuggestionPayload {
@@ -978,7 +1007,8 @@ export class PrReviewService {
     private readonly githubDependency: PrReviewGithubDependencyService,
     private readonly analysisService: PrReviewAnalysisService,
     private readonly analysisJobPublisher: PrReviewAnalysisJobPublisherService,
-    private readonly decisionRealtimePublisher?: PrReviewDecisionRealtimePublisherService
+    private readonly decisionRealtimePublisher?: PrReviewDecisionRealtimePublisherService,
+    private readonly conflictDraftRealtimePublisher?: PrReviewConflictDraftRealtimePublisherService
   ) {}
 
   getModuleInfo(): PrReviewModuleInfo {
@@ -2215,6 +2245,112 @@ export class PrReviewService {
     return this.mapConflictSuggestion(file, conflictInput.headBlobSha, suggestion);
   }
 
+  async getReviewFileConflictDraft(
+    currentUserId: string,
+    workspaceId: string,
+    reviewFileId: string
+  ): Promise<PrReviewConflictDraftPayload | null> {
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+
+    const file = await this.findReviewFileConflictSuggestionTarget(
+      workspaceId,
+      reviewFileId
+    );
+    if (!file) {
+      throw notFound("Review file not found");
+    }
+
+    const session = await this.findReviewSession(workspaceId, file.session_id);
+    if (!session) {
+      throw notFound("Review session not found");
+    }
+
+    return this.findConflictDraft(reviewFileId);
+  }
+
+  async updateReviewFileConflictDraft(
+    currentUserId: string,
+    workspaceId: string,
+    reviewFileId: string,
+    body: unknown
+  ): Promise<PrReviewConflictDraftPayload> {
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+
+    const input = this.normalizeConflictDraftUpdate(body);
+    const file = await this.findReviewFileConflictSuggestionTarget(
+      workspaceId,
+      reviewFileId
+    );
+    if (!file) {
+      throw notFound("Review file not found");
+    }
+    const session = await this.findReviewSession(workspaceId, file.session_id);
+    if (!session) {
+      throw notFound("Review session not found");
+    }
+    this.assertReviewSessionRoomWritable(session);
+
+    if (file.conflict_status !== "conflicted") {
+      throw conflictError("Review session is not conflicted");
+    }
+
+    const draft = await this.database.transaction(async transaction => {
+      const updated = await transaction.queryOne<PrReviewConflictDraftRow>(
+        `INSERT INTO pr_review_conflict_drafts (
+           review_file_id,
+           source_head_blob_sha,
+           resolved_content,
+           draft_version,
+           updated_by_user_id
+         )
+         VALUES ($1, $2, $3, 1, $4)
+         ON CONFLICT (review_file_id) DO UPDATE
+         SET source_head_blob_sha = EXCLUDED.source_head_blob_sha,
+             resolved_content = EXCLUDED.resolved_content,
+             draft_version = pr_review_conflict_drafts.draft_version + 1,
+             updated_by_user_id = EXCLUDED.updated_by_user_id
+         WHERE pr_review_conflict_drafts.draft_version = $5
+         RETURNING review_file_id,
+                   source_head_blob_sha,
+                   resolved_content,
+                   draft_version,
+                   updated_by_user_id,
+                   updated_at`,
+        [
+          reviewFileId,
+          input.sourceHeadBlobSha,
+          input.resolvedContent,
+          currentUserId,
+          input.expectedDraftVersion
+        ]
+      );
+
+      if (updated) return updated;
+
+      const existing = await transaction.queryOne<PrReviewConflictDraftRow>(
+        `SELECT review_file_id,
+                source_head_blob_sha,
+                resolved_content,
+                draft_version,
+                updated_by_user_id,
+                updated_at
+         FROM pr_review_conflict_drafts
+         WHERE review_file_id = $1`,
+        [reviewFileId]
+      );
+      if (existing) {
+        throw conflictError("Conflict draft was updated by another reviewer");
+      }
+      throw conflictError("Conflict draft version must start at 0");
+    });
+
+    const payload = this.mapConflictDraft(draft);
+    void this.conflictDraftRealtimePublisher?.publishDraftUpdatedSafely(
+      reviewFileId
+    );
+    return payload;
+  }
+
   async applyReviewSessionConflictResolutions(
     currentUserId: string,
     workspaceId: string,
@@ -2330,6 +2466,12 @@ export class PrReviewService {
     const appliedFileByPath = new Map(
       applyResult.files.map((file) => [file.filePath, file])
     );
+
+    void this.clearConflictDraftsAfterApply({
+      workspaceId,
+      session,
+      reviewFileIds: resolvedFiles.map(file => file.reviewFileId)
+    });
 
     return {
       reviewSessionId: session.id,
@@ -2472,6 +2614,12 @@ export class PrReviewService {
         `GitHub conflict merge commit ${applyResult.commitSha} succeeded but successor review revision creation failed for ${file.session_id}`
       );
     }
+
+    void this.clearConflictDraftsAfterApply({
+      workspaceId,
+      session,
+      reviewFileIds: [file.id]
+    });
 
     return {
       reviewFileId: file.id,
@@ -3684,6 +3832,19 @@ export class PrReviewService {
           AND review_session.id = $2
       `,
       [workspaceId, reviewSessionId]
+    );
+  }
+
+  private async findReviewRoomById(
+    workspaceId: string,
+    reviewRoomId: string
+  ): Promise<ReviewRoomCanvasIdRow | null> {
+    return this.database.queryOne<ReviewRoomCanvasIdRow>(
+      `SELECT review_room.canvas_id
+       FROM pr_review_rooms AS review_room
+       WHERE review_room.workspace_id = $1
+         AND review_room.id = $2`,
+      [workspaceId, reviewRoomId]
     );
   }
 
@@ -5498,6 +5659,71 @@ export class PrReviewService {
     };
   }
 
+  private mapConflictDraft(
+    draft: PrReviewConflictDraftRow
+  ): PrReviewConflictDraftPayload {
+    return {
+      reviewFileId: draft.review_file_id,
+      sourceHeadBlobSha: draft.source_head_blob_sha,
+      resolvedContent: draft.resolved_content,
+      draftVersion: Number(draft.draft_version),
+      updatedByUserId: draft.updated_by_user_id,
+      updatedAt: new Date(draft.updated_at).toISOString()
+    };
+  }
+
+  private async findConflictDraft(
+    reviewFileId: string
+  ): Promise<PrReviewConflictDraftPayload | null> {
+    const draft = await this.database.queryOne<PrReviewConflictDraftRow>(
+      `SELECT review_file_id,
+              source_head_blob_sha,
+              resolved_content,
+              draft_version,
+              updated_by_user_id,
+              updated_at
+       FROM pr_review_conflict_drafts
+       WHERE review_file_id = $1`,
+      [reviewFileId]
+    );
+    return draft ? this.mapConflictDraft(draft) : null;
+  }
+
+  private async deleteConflictDrafts(reviewFileIds: string[]): Promise<void> {
+    if (!reviewFileIds.length) return;
+    await this.database.query(
+      `DELETE FROM pr_review_conflict_drafts
+       WHERE review_file_id = ANY($1::uuid[])`,
+      [reviewFileIds]
+    );
+  }
+
+  private async clearConflictDraftsAfterApply(input: {
+    workspaceId: string;
+    session: PrReviewSessionRow;
+    reviewFileIds: string[];
+  }): Promise<void> {
+    try {
+      const room = await this.findReviewRoomById(
+        input.workspaceId,
+        input.session.room_id
+      );
+      await this.deleteConflictDrafts(input.reviewFileIds);
+      if (!room) return;
+      await this.conflictDraftRealtimePublisher?.publishDraftInvalidatedSafely({
+        workspaceId: input.workspaceId,
+        canvasId: room.canvas_id,
+        reviewRoomId: input.session.room_id,
+        reviewSessionId: input.session.id,
+        reviewFileIds: input.reviewFileIds
+      });
+    } catch {
+      this.logger.warn(
+        `PR Review Conflict draft cleanup failed after GitHub apply review_session_id=${input.session.id}`
+      );
+    }
+  }
+
   private getUnsupportedConflictFileReason(
     file: ReviewFileConflictTargetRow
   ): string | null {
@@ -5672,6 +5898,49 @@ export class PrReviewService {
       resolvedContent,
       expectedHeadSha: draft.expectedHeadSha.trim(),
       expectedHeadBlobSha: draft.expectedHeadBlobSha.trim()
+    };
+  }
+
+  private normalizeConflictDraftUpdate(body: unknown): {
+    sourceHeadBlobSha: string;
+    resolvedContent: string;
+    expectedDraftVersion: number;
+  } {
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      throw badRequest("Request body must be an object");
+    }
+    const draft = body as PrReviewConflictDraftUpdateInput;
+    if (
+      typeof draft.sourceHeadBlobSha !== "string" ||
+      !draft.sourceHeadBlobSha.trim() ||
+      draft.sourceHeadBlobSha.trim().length > 255
+    ) {
+      throw badRequest("sourceHeadBlobSha must be a non-empty string");
+    }
+    if (typeof draft.resolvedContent !== "string") {
+      throw badRequest("resolvedContent must be a string");
+    }
+    const resolvedContent = draft.resolvedContent
+      .replace(/\r\n/g, "\n")
+      .replace(/\r/g, "\n");
+    if (!resolvedContent.trim()) {
+      throw badRequest("resolvedContent must not be empty");
+    }
+    if (resolvedContent.length > MAX_CONFLICT_APPLY_CONTENT_CHARS) {
+      throw badRequest("resolvedContent is too large");
+    }
+    if (
+      typeof draft.expectedDraftVersion !== "number" ||
+      !Number.isInteger(draft.expectedDraftVersion) ||
+      draft.expectedDraftVersion < 0
+    ) {
+      throw badRequest("expectedDraftVersion must be a non-negative integer");
+    }
+
+    return {
+      sourceHeadBlobSha: draft.sourceHeadBlobSha.trim(),
+      resolvedContent,
+      expectedDraftVersion: draft.expectedDraftVersion
     };
   }
 

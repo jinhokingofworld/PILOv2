@@ -98,6 +98,8 @@ GitHub 원본 동기화, GitHub PR 원본 조회, GitHub inline comment, Project
 | `GET` | `/workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}/conflicts` | Post-MVP read-only conflict 분석 조회 |
 | `POST` | `/workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}/conflict-apply` | Post-MVP 다중 conflict 해결안을 하나의 merge commit으로 적용 |
 | `POST` | `/workspaces/{workspaceId}/github/review-files/{reviewFileId}/conflict-suggestion` | Post-MVP AI conflict 해결 초안 생성 |
+| `GET` | `/workspaces/{workspaceId}/github/review-files/{reviewFileId}/conflict-draft` | 공유 conflict 해결 코드 초안 조회 |
+| `PATCH` | `/workspaces/{workspaceId}/github/review-files/{reviewFileId}/conflict-draft` | 공유 conflict 해결 코드 초안 저장 |
 | `POST` | `/workspaces/{workspaceId}/github/review-files/{reviewFileId}/conflict-apply` | 단일 conflict 해결안 적용 호환 endpoint |
 | `GET` | `/workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}/flows` | Flow 목록 조회 |
 | `GET` | `/workspaces/{workspaceId}/github/review-flows/{flowId}/files` | Flow에 속한 file 목록 조회 |
@@ -1078,6 +1080,46 @@ GET /api/v1/workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}/co
   수행하며, GitHub token은 응답과 로그에 노출하지 않는다.
 - AI explanation, AI suggestion, Apply resolution, PR head branch commit, merge 실행은 이
   endpoint의 범위가 아니다.
+
+## 공유 Conflict 해결 코드 초안
+
+```http
+GET /api/v1/workspaces/{workspaceId}/github/review-files/{reviewFileId}/conflict-draft
+PATCH /api/v1/workspaces/{workspaceId}/github/review-files/{reviewFileId}/conflict-draft
+```
+
+`GET`은 아직 저장된 초안이 없으면 `data: null`을 반환한다. 클라이언트는 이 경우
+현재 PR head 파일을 기준으로 Git conflict marker가 포함된 초기 편집 문서를 만든다.
+
+`PATCH` body:
+
+```json
+{
+  "sourceHeadBlobSha": "file_blob_sha",
+  "resolvedContent": "<<<<<<< PR branch\nconst fromPr = true;\n=======\nconst fromTarget = true;\n>>>>>>> target branch",
+  "expectedDraftVersion": 3
+}
+```
+
+응답 `data`:
+
+```json
+{
+  "reviewFileId": "review_file_1",
+  "sourceHeadBlobSha": "file_blob_sha",
+  "resolvedContent": "...",
+  "draftVersion": 4,
+  "updatedByUserId": "user_1",
+  "updatedAt": "2026-07-15T01:00:00.000Z"
+}
+```
+
+규칙:
+
+- 초안은 review file 단위로 저장되며, 현재 PR Review room이 완료되었거나 PR이 닫히면 수정할 수 없다.
+- `expectedDraftVersion`이 현재 저장 버전과 다르면 `409 Conflict`를 반환한다. 저장된 코드를 다시 불러온 뒤 이어서 편집해야 한다.
+- 초안 저장 중에는 Git marker를 허용한다. 그러나 GitHub 적용 endpoint는 marker가 하나라도 남아 있으면 거절한다.
+- App Server가 저장 성공 후 `pr-review:conflict-draft:updated` Realtime event를 같은 review Canvas room에 전달한다. 잠금/해제는 Realtime의 일시 상태이고, 코드 원본은 이 API와 DB다.
 
 ## AI Conflict Suggestion Draft 생성
 
