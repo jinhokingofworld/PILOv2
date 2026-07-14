@@ -1,6 +1,6 @@
 # SQLtoERD Annotation Controls Verification Record
 
-**Issue:** #965  
+**Issue:** #965
 **Goal:** Remove the sticky-note card delete button and make frame unlock apply immediately while preserving the existing annotation autosave path.
 
 ## Scope and constraints
