@@ -12,6 +12,7 @@ import type {
 } from "../api/canvas-agent-types";
 import {
   dispatchCanvasAgentToolTarget,
+  readCanvasAgentToolHelpOverview,
   resolveCanvasAgentToolTarget,
 } from "./canvas-agent-tool-targets";
 
@@ -135,6 +136,27 @@ export function useCanvasAgent({
                   toolTargetLabel: toolResolution.tool.label,
                 }
               : null,
+            createdAt: now,
+            completedAt: now,
+            expiresAt: now,
+          });
+          return;
+        }
+
+        const overview = readCanvasAgentToolHelpOverview(prompt);
+        if (overview) {
+          const now = new Date().toISOString();
+          presentRun({
+            id: `local-canvas-agent-${crypto.randomUUID()}`,
+            workspaceId,
+            canvasId,
+            presentationMode: "interactive",
+            status: "completed",
+            prompt,
+            message: overview,
+            summary: overview,
+            canvasRevision: null,
+            progress: null,
             createdAt: now,
             completedAt: now,
             expiresAt: now,

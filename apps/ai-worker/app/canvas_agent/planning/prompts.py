@@ -39,6 +39,8 @@ def system_prompt() -> str:
         "action result or request selection. "
         "Use connect_shapes only when two existing Canvas shape ids are known and the "
         "user explicitly asks to connect them. "
+        "When using finish for chat, put the direct conversational answer in summary, "
+        "not a generic completion status. "
         "Before choosing a generation action, classify the request as diagram, code, or chat. "
         "Prefer create_draft with kind=diagram for visual drafts, flowcharts, wireframes, "
         "user journeys, and structure diagrams. "
