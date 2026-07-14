@@ -1,7 +1,10 @@
 import { HttpStatus, Injectable } from "@nestjs/common";
 import { QueryResultRow } from "pg";
 import { badRequest, notFound } from "../../common/api-error";
-import { DatabaseService } from "../../database/database.service";
+import {
+  DatabaseService,
+  type DatabaseTransaction
+} from "../../database/database.service";
 import { WorkspaceService } from "../workspace/workspace.service";
 import type { CreateBoardRequest } from "./dto";
 import type { BoardPayload, BoardSyncStatus, CreateBoardResult } from "./types";
@@ -45,6 +48,8 @@ interface NormalizedCreateBoardInput {
   projectV2Id: string;
 }
 
+type BoardHydrationQueryExecutor = Pick<DatabaseTransaction, "queryOne">;
+
 @Injectable()
 export class BoardHydrationService {
   constructor(
@@ -55,23 +60,33 @@ export class BoardHydrationService {
   async createBoard(
     currentUserId: string,
     workspaceId: string,
-    body: unknown
+    body: unknown,
+    transaction?: DatabaseTransaction
   ): Promise<CreateBoardResult> {
-    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+    if (!transaction) {
+      await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+    }
 
     const input = this.normalizeCreateInput(body);
+    const database: BoardHydrationQueryExecutor = transaction ?? this.database;
     await this.assertHydrationSource(
       workspaceId,
       input.repositoryId,
-      input.projectV2Id
+      input.projectV2Id,
+      database
     );
     const existingBoard = await this.findExistingBoard(
       workspaceId,
       input.projectV2Id,
-      input.repositoryId
+      input.repositoryId,
+      database
     );
-    const boardId = await this.hydrateBoard(input.projectV2Id, input.repositoryId);
-    const board = await this.getBoard(workspaceId, boardId);
+    const boardId = await this.hydrateBoard(
+      input.projectV2Id,
+      input.repositoryId,
+      database
+    );
+    const board = await this.getBoard(workspaceId, boardId, database);
 
     return {
       board,
@@ -112,9 +127,10 @@ export class BoardHydrationService {
   private async assertHydrationSource(
     workspaceId: string,
     repositoryId: string,
-    projectV2Id: string
+    projectV2Id: string,
+    database: BoardHydrationQueryExecutor
   ): Promise<void> {
-    const source = await this.database.queryOne<HydrationSourceRow>(
+    const source = await database.queryOne<HydrationSourceRow>(
       `
         SELECT
           gr.id AS repository_id,
@@ -140,9 +156,10 @@ export class BoardHydrationService {
   private async findExistingBoard(
     workspaceId: string,
     projectV2Id: string,
-    repositoryId: string
+    repositoryId: string,
+    database: BoardHydrationQueryExecutor
   ): Promise<ExistingBoardRow | null> {
-    return this.database.queryOne<ExistingBoardRow>(
+    return database.queryOne<ExistingBoardRow>(
       `
         SELECT id
         FROM boards
@@ -156,9 +173,10 @@ export class BoardHydrationService {
 
   private async hydrateBoard(
     projectV2Id: string,
-    repositoryId: string
+    repositoryId: string,
+    database: BoardHydrationQueryExecutor
   ): Promise<string> {
-    const hydrated = await this.database.queryOne<HydratedBoardRow>(
+    const hydrated = await database.queryOne<HydratedBoardRow>(
       `
         SELECT hydrate_pilo_board_from_github($1::uuid, $2::uuid)::text AS board_id
       `,
@@ -172,8 +190,12 @@ export class BoardHydrationService {
     return String(hydrated.board_id);
   }
 
-  private async getBoard(workspaceId: string, boardId: string): Promise<BoardPayload> {
-    const board = await this.database.queryOne<BoardRow>(
+  private async getBoard(
+    workspaceId: string,
+    boardId: string,
+    database: BoardHydrationQueryExecutor
+  ): Promise<BoardPayload> {
+    const board = await database.queryOne<BoardRow>(
       `
         SELECT
           b.id::text AS id,

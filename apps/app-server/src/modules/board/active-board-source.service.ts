@@ -52,7 +52,12 @@ export class ActiveBoardSourceService {
       );
       // Hydration is inside the transition boundary. A failure rolls back selection,
       // schedules, and the source pointer together.
-      const hydrated = await this.hydrationService.createBoard(currentUserId, workspaceId, input);
+      const hydrated = await this.hydrationService.createBoard(
+        currentUserId,
+        workspaceId,
+        input,
+        connection
+      );
       const result = await this.queries.upsert(
         connection,
         workspaceId,
