@@ -23,7 +23,8 @@ import {
 import { TldrawSurface } from "@/shared/tldraw/TldrawSurface";
 import type {
   CanvasRealtimeConfig,
-  CanvasRealtimeIdentity
+  CanvasRealtimeIdentity,
+  CanvasShapeOperationPayload
 } from "@/shared/canvas-realtime/canvas-realtime-types";
 import type {
   PrReviewCanvas,
@@ -71,6 +72,7 @@ import {
   getPrReviewFileShapeGeometryKey,
   isPrReviewCanvasFileShape,
   isPrReviewCanvasSystemShape,
+  readPrReviewCanvasOperationShape,
   type PrReviewCanvasFileShapeSnapshot
 } from "@/features/pr-review/components/review-canvas/pr-review-canvas-persistence";
 import {
@@ -138,6 +140,8 @@ const ROLE_LANE_GAP = 18;
 const FLOW_HEADER_GAP = 28;
 const FLOW_GAP = 112;
 const FILE_SHAPE_SAVE_DEBOUNCE_MS = 500;
+const OPERATION_SYNC_ERROR_MESSAGE =
+  "실시간 노드 동기화가 지연되고 있습니다. 재접속하면 최신 위치를 다시 불러옵니다.";
 
 const prReviewTldrawComponents = {
   Background: PrReviewCanvasBackground
@@ -577,19 +581,11 @@ function buildStoredPrReviewCanvasShapes(
     systemShapes.map((shape) => shape.rawShape.index),
     {
       createIndexes: (count) => getIndicesAbove(null, count),
-      isValidIndex: (index) => {
-        try {
-          getIndexAbove(index as TLShape["index"]);
-          return true;
-        } catch {
-          return false;
-        }
-      }
+      isValidIndex: isValidPrReviewCanvasIndex
     }
   );
 
   return systemShapes.map((shape, shapeIndex) => {
-
     const partial: TLShapePartial = {
       id: shape.id as TLShapeId,
       type: shape.shapeType,
@@ -606,6 +602,15 @@ function buildStoredPrReviewCanvasShapes(
 
     return partial;
   });
+}
+
+function isValidPrReviewCanvasIndex(index: string): boolean {
+  try {
+    getIndexAbove(index as TLShape["index"]);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function isPrReviewRelationEdgeShape(
@@ -989,6 +994,7 @@ function PrReviewCanvasPersistenceBridge({
   internalShapeUpdateRef,
   lastSyncedGeometryRef,
   onNotice,
+  storedShapeByIdRef,
   storedShapes,
   workspaceId
 }: {
@@ -998,11 +1004,11 @@ function PrReviewCanvasPersistenceBridge({
   internalShapeUpdateRef: MutableRefObject<boolean>;
   lastSyncedGeometryRef: MutableRefObject<Map<string, string>>;
   onNotice: (notice: PrReviewCanvasPersistenceNotice) => void;
+  storedShapeByIdRef: MutableRefObject<Map<string, PrReviewCanvasShape>>;
   storedShapes: PrReviewCanvasShape[];
   workspaceId: string;
 }) {
   const editor = useEditor();
-  const storedShapeByIdRef = useRef(new Map<string, PrReviewCanvasShape>());
   const operationSequenceRef = useRef(0);
 
   useEffect(() => {
@@ -1231,6 +1237,8 @@ export function PrReviewCanvasSurface({
   const hydratingRef = useRef(false);
   const internalShapeUpdateRef = useRef(false);
   const lastSyncedGeometryRef = useRef(new Map<string, string>());
+  const storedShapeByIdRef = useRef(new Map<string, PrReviewCanvasShape>());
+  const pendingRemoteOperationsRef = useRef<CanvasShapeOperationPayload[]>([]);
   const selectedReviewFileIdRef = useRef<string | null>(
     selectedReviewFileId ?? null
   );
@@ -1275,7 +1283,109 @@ export function PrReviewCanvasSurface({
     }),
     [realtimeIdentity, reviewRoom, workspaceId]
   );
-  const canvasPresence = usePrReviewCanvasPresence(realtimeConfig);
+  const catchUpCanvasOperations = useCallback(
+    (afterSeq: number, signal: AbortSignal) => {
+      if (!reviewRoom) {
+        return Promise.resolve({ latestOpSeq: afterSeq, operations: [] });
+      }
+
+      return apiClient.listReviewCanvasOperations(
+        workspaceId,
+        reviewRoom.canvasId,
+        afterSeq,
+        { signal }
+      );
+    },
+    [apiClient, reviewRoom, workspaceId]
+  );
+  const applyRemoteCanvasOperations = useCallback(
+    (operations: CanvasShapeOperationPayload[]) => {
+      const editor = editorRef.current;
+      if (!editor) {
+        pendingRemoteOperationsRef.current = [
+          ...pendingRemoteOperationsRef.current,
+          ...operations
+        ];
+        return;
+      }
+
+      const operationsToApply = [
+        ...pendingRemoteOperationsRef.current,
+        ...operations
+      ].sort((left, right) => left.opSeq - right.opSeq);
+      pendingRemoteOperationsRef.current = [];
+      let geometryChanged = false;
+
+      for (const operation of operationsToApply) {
+        if (operation.actorUserId === realtimeIdentity.currentUser?.userId) {
+          continue;
+        }
+
+        const latest = readPrReviewCanvasOperationShape(operation);
+        if (!latest) {
+          continue;
+        }
+
+        const stored = storedShapeByIdRef.current.get(latest.id);
+        if (stored && stored.revision >= latest.revision) {
+          continue;
+        }
+        storedShapeByIdRef.current.set(latest.id, latest);
+
+        const current = editor.getShape(latest.id as TLShapeId);
+        if (!isPrReviewFileNodeShape(current)) {
+          continue;
+        }
+
+        const remoteIndex =
+          typeof latest.rawShape.index === "string" &&
+          isValidPrReviewCanvasIndex(latest.rawShape.index)
+            ? (latest.rawShape.index as TLShape["index"])
+            : current.index;
+
+        hydratingRef.current = true;
+        try {
+          editor.updateShape({
+            id: current.id,
+            type: PR_REVIEW_FILE_NODE_SHAPE_TYPE,
+            index: remoteIndex,
+            parentId: latest.parentShapeId?.startsWith("shape:")
+              ? (latest.parentShapeId as TLShapeId)
+              : editor.getCurrentPageId(),
+            x: latest.x,
+            y: latest.y,
+            props: {
+              ...current.props,
+              w: latest.width ?? current.props.w,
+              h: latest.height ?? current.props.h
+            }
+          });
+        } finally {
+          hydratingRef.current = false;
+        }
+
+        const updated = editor.getShape(latest.id as TLShapeId);
+        if (isPrReviewFileNodeShape(updated)) {
+          lastSyncedGeometryRef.current.set(
+            latest.id,
+            getPrReviewFileShapeGeometryKey(
+              toPrReviewFileShapeSnapshot(updated)
+            )
+          );
+        }
+        geometryChanged = true;
+      }
+
+      if (geometryChanged) {
+        updatePrReviewRelationGeometry(editor, internalShapeUpdateRef);
+      }
+    },
+    [realtimeIdentity.currentUser?.userId]
+  );
+  const canvasPresence = usePrReviewCanvasPresence(realtimeConfig, {
+    applyOperations: applyRemoteCanvasOperations,
+    catchUpOperations: catchUpCanvasOperations
+  });
   const readOnly =
     reviewRoom?.status === "completed" || canvasPresence.readOnly;
   const handlePersistenceNotice = useCallback(
@@ -1292,6 +1402,8 @@ export function PrReviewCanvasSurface({
     setStoredShapes(null);
     setReviewRoom(null);
     setPersistenceNotice(null);
+    storedShapeByIdRef.current.clear();
+    pendingRemoteOperationsRef.current = [];
 
     void apiClient
       .getReviewRoom(workspaceId, reviewRoomId, {
@@ -1311,8 +1423,12 @@ export function PrReviewCanvasSurface({
           return;
         }
 
+        const systemShapes = loadedShapes.filter(isPrReviewCanvasSystemShape);
+        storedShapeByIdRef.current = new Map(
+          systemShapes.map((shape) => [shape.id, shape])
+        );
         setReviewRoom(room);
-        setStoredShapes(loadedShapes.filter(isPrReviewCanvasSystemShape));
+        setStoredShapes(systemShapes);
       })
       .catch((error: unknown) => {
         if (abortController.signal.aborted) {
@@ -1329,6 +1445,21 @@ export function PrReviewCanvasSurface({
 
     return () => abortController.abort();
   }, [apiClient, canvas.reviewSessionId, reviewRoomId, workspaceId]);
+
+  useEffect(() => {
+    setPersistenceNotice((currentNotice) => {
+      if (canvasPresence.operationSyncError) {
+        return {
+          message: OPERATION_SYNC_ERROR_MESSAGE,
+          tone: "error"
+        };
+      }
+
+      return currentNotice?.message === OPERATION_SYNC_ERROR_MESSAGE
+        ? null
+        : currentNotice;
+    });
+  }, [canvasPresence.operationSyncError]);
 
   const handleMount = useCallback(
     (editor: Editor) => {
@@ -1347,6 +1478,9 @@ export function PrReviewCanvasSurface({
         hydratingRef,
         lastSyncedGeometryRef
       );
+      if (pendingRemoteOperationsRef.current.length) {
+        applyRemoteCanvasOperations([]);
+      }
       if (persistedFileShapeEnabled) {
         syncPrReviewFileNodeMetadata(
           editor,
@@ -1359,6 +1493,7 @@ export function PrReviewCanvasSurface({
       }
     },
     [
+      applyRemoteCanvasOperations,
       canvas,
       conflictAnalysis,
       persistedFileShapeEnabled,
@@ -1458,6 +1593,7 @@ export function PrReviewCanvasSurface({
           internalShapeUpdateRef={internalShapeUpdateRef}
           lastSyncedGeometryRef={lastSyncedGeometryRef}
           onNotice={handlePersistenceNotice}
+          storedShapeByIdRef={storedShapeByIdRef}
           storedShapes={storedShapes ?? []}
           workspaceId={workspaceId}
         />

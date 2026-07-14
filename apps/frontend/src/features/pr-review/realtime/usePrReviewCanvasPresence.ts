@@ -8,12 +8,15 @@ import {
   type CanvasRealtimeSocket,
 } from "@/shared/canvas-realtime/canvas-realtime-client";
 import type {
+  CanvasOperationsCatchupPayload,
   CanvasPresenceEditingMode,
   CanvasPresencePoint,
   CanvasPresenceViewport,
   CanvasRealtimeConfig,
   CanvasRemotePresenceState,
+  CanvasShapeOperationPayload,
 } from "@/shared/canvas-realtime/canvas-realtime-types";
+import { reconcilePrReviewCanvasOperations } from "@/features/pr-review/realtime/pr-review-canvas-operation-sync";
 
 const STALE_PRESENCE_TIMEOUT_MS = 15_000;
 const STALE_PRESENCE_SWEEP_MS = 2_000;
@@ -22,6 +25,7 @@ export type PrReviewCanvasPresenceController = {
   currentUserId: string | null;
   enabled: boolean;
   joined: boolean;
+  operationSyncError: string | null;
   readOnly: boolean;
   remotePresence: CanvasRemotePresenceState[];
   sendPresenceUpdate: (
@@ -31,6 +35,14 @@ export type PrReviewCanvasPresenceController = {
     editingShapeId?: string | null,
     editingMode?: CanvasPresenceEditingMode | null,
   ) => void;
+};
+
+type PrReviewCanvasPresenceOptions = {
+  applyOperations?: (operations: CanvasShapeOperationPayload[]) => void;
+  catchUpOperations?: (
+    afterSeq: number,
+    signal: AbortSignal,
+  ) => Promise<CanvasOperationsCatchupPayload>;
 };
 
 function isUsableRealtimeConfig(
@@ -65,18 +77,116 @@ function upsertPresence(
 
 export function usePrReviewCanvasPresence(
   config: CanvasRealtimeConfig | null | undefined,
+  options: PrReviewCanvasPresenceOptions = {},
 ): PrReviewCanvasPresenceController {
   const [joined, setJoined] = useState(false);
   const [readOnly, setReadOnly] = useState(false);
+  const [operationSyncError, setOperationSyncError] = useState<string | null>(
+    null,
+  );
   const [remotePresence, setRemotePresence] = useState<
     CanvasRemotePresenceState[]
   >([]);
   const socketRef = useRef<CanvasRealtimeSocket | null>(null);
   const joinedRef = useRef(false);
   const roomRef = useRef({ workspaceId: "", canvasId: "" });
+  const applyOperationsRef = useRef(options.applyOperations);
+  const catchUpOperationsRef = useRef(options.catchUpOperations);
+  const lastSeenOpSeqRef = useRef(0);
+  const bufferedOperationsRef = useRef<CanvasShapeOperationPayload[]>([]);
+  const activeCatchUpAbortRef = useRef<AbortController | null>(null);
+  const runCatchUpRef = useRef<() => void>(() => {});
   const currentUserId = config?.currentUser?.userId ?? null;
   const usableConfig = isUsableRealtimeConfig(config) ? config : null;
   const enabled = Boolean(usableConfig && getCanvasRealtimeServerUrl());
+
+  useEffect(() => {
+    applyOperationsRef.current = options.applyOperations;
+    catchUpOperationsRef.current = options.catchUpOperations;
+  }, [options.applyOperations, options.catchUpOperations]);
+
+  const applyBufferedOperations = useCallback(
+    (operations: CanvasShapeOperationPayload[] = []) => {
+      const reconciliation = reconcilePrReviewCanvasOperations(
+        lastSeenOpSeqRef.current,
+        [...bufferedOperationsRef.current, ...operations],
+      );
+
+      bufferedOperationsRef.current = reconciliation.pendingOperations;
+      lastSeenOpSeqRef.current = reconciliation.lastSeenOpSeq;
+
+      if (reconciliation.contiguousOperations.length) {
+        applyOperationsRef.current?.(reconciliation.contiguousOperations);
+      }
+
+      return reconciliation;
+    },
+    [],
+  );
+
+  const runCatchUp = useCallback(() => {
+    const catchUpOperations = catchUpOperationsRef.current;
+    if (activeCatchUpAbortRef.current || !catchUpOperations) {
+      return;
+    }
+
+    const abortController = new AbortController();
+    activeCatchUpAbortRef.current = abortController;
+    let catchUpSucceeded = false;
+
+    void (async () => {
+      let latestOpSeq = lastSeenOpSeqRef.current;
+
+      do {
+        const previousLastSeenOpSeq = lastSeenOpSeqRef.current;
+        const result = await catchUpOperations(
+          previousLastSeenOpSeq,
+          abortController.signal,
+        );
+        if (abortController.signal.aborted) {
+          return;
+        }
+
+        latestOpSeq = Math.max(latestOpSeq, result.latestOpSeq);
+        const reconciliation = applyBufferedOperations(result.operations);
+        if (
+          reconciliation.lastSeenOpSeq === previousLastSeenOpSeq &&
+          latestOpSeq > reconciliation.lastSeenOpSeq
+        ) {
+          throw new Error("Canvas operation sequence gap could not be recovered");
+        }
+      } while (lastSeenOpSeqRef.current < latestOpSeq);
+
+      catchUpSucceeded = true;
+      setOperationSyncError(null);
+    })()
+      .catch((error: unknown) => {
+        if (abortController.signal.aborted) {
+          return;
+        }
+
+        console.warn("PR Review Canvas operation catch-up failed.", error);
+        setOperationSyncError(
+          error instanceof Error
+            ? error.message
+            : "Canvas operation catch-up failed.",
+        );
+      })
+      .finally(() => {
+        if (activeCatchUpAbortRef.current === abortController) {
+          activeCatchUpAbortRef.current = null;
+        }
+
+        const reconciliation = applyBufferedOperations();
+        if (catchUpSucceeded && reconciliation.pendingOperations.length) {
+          runCatchUpRef.current();
+        }
+      });
+  }, [applyBufferedOperations]);
+
+  useEffect(() => {
+    runCatchUpRef.current = runCatchUp;
+  }, [runCatchUp]);
 
   useEffect(() => {
     if (config?.enabled && !getCanvasRealtimeServerUrl()) {
@@ -91,8 +201,13 @@ export function usePrReviewCanvasPresence(
       joinedRef.current = false;
       socketRef.current = null;
       roomRef.current = { workspaceId: "", canvasId: "" };
+      lastSeenOpSeqRef.current = 0;
+      bufferedOperationsRef.current = [];
+      activeCatchUpAbortRef.current?.abort();
+      activeCatchUpAbortRef.current = null;
       setJoined(false);
       setReadOnly(false);
+      setOperationSyncError(null);
       setRemotePresence([]);
       return;
     }
@@ -106,6 +221,7 @@ export function usePrReviewCanvasPresence(
       joinedRef.current = false;
       setJoined(false);
       setReadOnly(false);
+      setOperationSyncError(null);
       setRemotePresence([]);
       return;
     }
@@ -116,6 +232,17 @@ export function usePrReviewCanvasPresence(
       canvasId: usableConfig.canvasId,
     };
     const ownUserId = usableConfig.currentUser.userId;
+    const isNewRoom =
+      roomRef.current.workspaceId !== room.workspaceId ||
+      roomRef.current.canvasId !== room.canvasId;
+
+    if (isNewRoom) {
+      lastSeenOpSeqRef.current = 0;
+      bufferedOperationsRef.current = [];
+      activeCatchUpAbortRef.current?.abort();
+      activeCatchUpAbortRef.current = null;
+      setOperationSyncError(null);
+    }
 
     socketRef.current = realtimeSocket;
     roomRef.current = room;
@@ -124,7 +251,10 @@ export function usePrReviewCanvasPresence(
     function joinCanvasRoom() {
       joinedRef.current = false;
       setJoined(false);
-      realtimeSocket.emit("canvas:join", room);
+      realtimeSocket.emit("canvas:join", {
+        ...room,
+        lastSeenOpSeq: lastSeenOpSeqRef.current,
+      });
     }
 
     realtimeSocket.on("connect", joinCanvasRoom);
@@ -153,6 +283,37 @@ export function usePrReviewCanvasPresence(
       setRemotePresence(
         payload.presence.filter((entry) => entry.userId !== ownUserId),
       );
+      if (
+        payload.syncRequired ||
+        payload.latestOpSeq > lastSeenOpSeqRef.current
+      ) {
+        runCatchUpRef.current();
+      }
+    });
+    realtimeSocket.on("canvas:operation", (operation) => {
+      if (
+        operation.workspaceId !== room.workspaceId ||
+        operation.canvasId !== room.canvasId ||
+        operation.opSeq <= lastSeenOpSeqRef.current
+      ) {
+        return;
+      }
+
+      const reconciliation = applyBufferedOperations([operation]);
+      if (reconciliation.pendingOperations.length) {
+        runCatchUpRef.current();
+      }
+    });
+    realtimeSocket.on("canvas:sync:required", (payload) => {
+      if (
+        payload.workspaceId !== room.workspaceId ||
+        payload.canvasId !== room.canvasId ||
+        payload.latestOpSeq <= lastSeenOpSeqRef.current
+      ) {
+        return;
+      }
+
+      runCatchUpRef.current();
     });
     realtimeSocket.on("canvas:presence:update", (presence) => {
       if (
@@ -187,8 +348,13 @@ export function usePrReviewCanvasPresence(
 
     return () => {
       joinedRef.current = false;
+      activeCatchUpAbortRef.current?.abort();
+      activeCatchUpAbortRef.current = null;
       if (realtimeSocket.connected) {
-        realtimeSocket.emit("canvas:leave", room);
+        realtimeSocket.emit("canvas:leave", {
+          ...room,
+          lastSeenOpSeq: lastSeenOpSeqRef.current,
+        });
       }
       realtimeSocket.removeAllListeners();
       realtimeSocket.disconnect();
@@ -199,7 +365,7 @@ export function usePrReviewCanvasPresence(
       setReadOnly(false);
       setRemotePresence([]);
     };
-  }, [usableConfig]);
+  }, [applyBufferedOperations, usableConfig]);
 
   useEffect(() => {
     const staleTimer = window.setInterval(() => {
@@ -248,6 +414,7 @@ export function usePrReviewCanvasPresence(
       currentUserId,
       enabled,
       joined,
+      operationSyncError,
       readOnly,
       remotePresence,
       sendPresenceUpdate,
@@ -256,6 +423,7 @@ export function usePrReviewCanvasPresence(
       currentUserId,
       enabled,
       joined,
+      operationSyncError,
       readOnly,
       remotePresence,
       sendPresenceUpdate,
