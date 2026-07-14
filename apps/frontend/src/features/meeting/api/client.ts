@@ -2,6 +2,7 @@ import type {
   CurrentMeetingPayload,
   CurrentRecordingPayload,
   EndRecordingPayload,
+  JoinMeetingInput,
   JoinMeetingPayload,
   LeaveMeetingPayload,
   MeetingDetailPayload,
@@ -320,10 +321,14 @@ export function createMeetingApiClient({
       );
     },
 
-    async startMeetingInRoom(workspaceId: string, meetingRoomId: string) {
+    async startMeetingInRoom(
+      workspaceId: string,
+      meetingRoomId: string,
+      body: StartMeetingInput = {}
+    ) {
       return requestMeetingData<StartMeetingPayload>(
         `${meetingRoomPath(workspaceId, meetingRoomId)}/meetings`,
-        { method: "POST" },
+        withJsonBody(body, { method: "POST" }),
         requestOptions
       );
     },
@@ -344,10 +349,14 @@ export function createMeetingApiClient({
       );
     },
 
-    async joinMeeting(workspaceId: string, meetingId: string) {
+    async joinMeeting(
+      workspaceId: string,
+      meetingId: string,
+      body: JoinMeetingInput = {}
+    ) {
       return requestMeetingData<JoinMeetingPayload>(
         `${meetingPath(workspaceId, meetingId)}/participants/me`,
-        { method: "POST" },
+        withJsonBody(body, { method: "POST" }),
         requestOptions
       );
     },

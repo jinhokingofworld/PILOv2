@@ -68,3 +68,4 @@ The database schema source of truth is the migration history in `db/migrations/`
 - `migrations/050_create_shared_pr_review_rooms.sql` resets test-only PR Review sessions and introduces one shared review room and review Canvas per PR, immutable head-SHA revisions, and stable room file identities with all-deny RLS.
 - `migrations/052_create_user_settings_and_account_lifecycle.sql` adds one settings row per user for PILO profile overrides and personal environment preferences, adds the account-deletion tombstone timestamp, and enables all-deny RLS for settings.
 - `migrations/053_create_meeting_rooms.sql` adds Workspace-scoped MeetingRoom resources, default-room backfill and new-Workspace trigger, active room name/key uniqueness, timestamp tracking, and all-deny RLS.
+- `migrations/054_create_workspace_recording_consents.sql` records immutable user consent per Workspace and policy version, with duplicate prevention, lookup indexing, and all-deny RLS.
