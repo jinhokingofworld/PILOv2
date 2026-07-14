@@ -9,6 +9,11 @@ const SWEEP_INTERVAL_MS = 1_000;
 const BATCH_SIZE = 50;
 const RETRY_DELAYS_MS = [1_000, 2_000, 4_000, 8_000, 16_000, 30_000];
 
+export function getSqlErdOperationRetryDelayMs(attemptCount: number): number {
+  const index = Math.max(0, Math.min(attemptCount - 1, RETRY_DELAYS_MS.length - 1));
+  return RETRY_DELAYS_MS[index];
+}
+
 interface OutboxClaim {
   claim_token: string;
   attempt_count: number | string;
@@ -66,7 +71,7 @@ export class SqlErdOperationPublisherService implements OnModuleInit, OnModuleDe
         [claim.id, claim.claim_token]
       );
     } catch (error) {
-      const delayMs = RETRY_DELAYS_MS[Math.min(Number(claim.attempt_count) - 1, RETRY_DELAYS_MS.length - 1)];
+      const delayMs = getSqlErdOperationRetryDelayMs(Number(claim.attempt_count));
       if (Number(claim.attempt_count) >= 5) {
         this.logger.warn(`SQLtoERD outbox publish remains unavailable operation_outbox_id=${claim.id} attempts=${claim.attempt_count}`);
       }

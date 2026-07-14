@@ -557,3 +557,4 @@ await import("./pr-review/test.mjs");
 await import("./board/test.mjs");
 await import("./sqltoerd/test.mjs");
 await import("./sqltoerd/operation-delivery.test.mjs");
+await import("./sqltoerd/operation-publisher.test.mjs");

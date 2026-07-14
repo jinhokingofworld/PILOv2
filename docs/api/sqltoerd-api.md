@@ -108,7 +108,7 @@ Client는 cursor를 tldraw page 좌표로 전송한다. pointer 이동은 `socke
 "sql-erd:joined" = {
   workspaceId: string;
   sessionId: string;
-  latestOpSeq: 0;
+  latestOpSeq: number;
   presence: SqltoerdPresenceState[];
 };
 
@@ -119,6 +119,8 @@ Client는 cursor를 tldraw page 좌표로 전송한다. pointer 이동은 `socke
   sessionId: string;
   userId: string;
 };
+
+"sql-erd:operation" = SqltoerdLayoutPatchOperation;
 
 "sql-erd:error" = {
   code: "invalid_payload" | "forbidden" | "room_not_joined";
@@ -136,6 +138,22 @@ type SqltoerdPresenceState = {
   editingMode: "draw" | "move" | "resize" | "relation" | "sql" | null;
   sentAt: string;
   updatedAt: string;
+};
+
+type SqltoerdLayoutPatchOperation = {
+  id: string;
+  workspaceId: string;
+  sessionId: string;
+  actorUserId: string;
+  type: "layout_patch";
+  opSeq: number;
+  clientOperationId: string;
+  baseRevision: number;
+  appliedOnRevision: number;
+  resultRevision: number;
+  rebased: boolean;
+  patch: SqltoerdLayoutPatch;
+  createdAt: string;
 };
 ```
 
@@ -180,6 +198,8 @@ SQL source panel이 열린 상태를 뜻한다.
 | `GET` | `/workspaces/{workspaceId}/sql-erd-sessions` | 활성 session 목록 조회 |
 | `POST` | `/workspaces/{workspaceId}/sql-erd-sessions` | session 생성 |
 | `GET` | `/workspaces/{workspaceId}/sql-erd-sessions/{sessionId}` | session 상세 조회 |
+| `GET` | `/workspaces/{workspaceId}/sql-erd-sessions/{sessionId}/operations` | 저장된 operation catch-up 조회 |
+| `POST` | `/workspaces/{workspaceId}/sql-erd-sessions/{sessionId}/operations` | layout patch operation 저장 |
 | `PATCH` | `/workspaces/{workspaceId}/sql-erd-sessions/{sessionId}` | session 자동 저장/수정 |
 | `DELETE` | `/workspaces/{workspaceId}/sql-erd-sessions/{sessionId}` | session soft delete |
 
@@ -937,13 +957,28 @@ type SqltoerdLayoutPatch = {
   viewport?: { action: "set"; value: { x: number; y: number; zoom: number } } | { action: "delete" };
 };
 type SqltoerdLayoutPatchOperationRequest = {
-  clientOperationId: string; // 1..128; unique per (sessionId, actorUserId)
+  clientOperationId: string; // 1..128; unique per (sessionId, actorUserId, clientOperationId)
   baseRevision: number; // positive integer
   type: "layout_patch";
   patch: SqltoerdLayoutPatch;
 };
+
+type SqltoerdOperationWriteResponse = {
+  operation: SqltoerdLayoutPatchOperation;
+  layoutJson: SqltoerdLayoutJsonV1;
+  revision: number;
+  latestOpSeq: number;
+};
+
+type SqltoerdOperationCatchupResponse = {
+  items: SqltoerdLayoutPatchOperation[];
+  latestOpSeq: number;
+  nextAfterSeq: number | null;
+};
 ```
 
-`POST` returns `{ operation, layoutJson, revision, latestOpSeq }`. `operation` contains `id`, `opSeq`, `rebased`, `appliedOnRevision`, `resultRevision`, actor/session fields, `patch`, and `createdAt`. `GET` accepts `afterSeq` (non-negative integer, default `0`) and `limit` (integer `1..100`, default `100`) and returns `{ items, latestOpSeq, nextAfterSeq }` in ascending sequence order.
+`POST` request body is `SqltoerdLayoutPatchOperationRequest` and returns `SqltoerdOperationWriteResponse`. Its idempotency key is the tuple `(sessionId, actorUserId, clientOperationId)`. `GET` accepts `afterSeq` (non-negative integer, default `0`) and `limit` (integer `1..100`, default `100`) and returns `SqltoerdOperationCatchupResponse` in ascending sequence order.
 
-An `operations_v1` session rejects legacy durable `PATCH` with `409` and `error.code: "SQL_ERD_WRITE_PROTOCOL_MISMATCH"`. A future `baseRevision` returns `409` with `error.code: "CONFLICT"`. `sql-erd:operation` is a server event carrying the operation response payload after the App Server commits it; delivery is at-least-once, so clients deduplicate by `id` or `opSeq` and use GET catch-up when a sequence gap is detected.
+An `operations_v1` session rejects legacy durable `PATCH` with `409` and `error.code: "SQL_ERD_WRITE_PROTOCOL_MISMATCH"`. A future `baseRevision` returns `409` with `error.code: "CONFLICT"`.
+
+`sql-erd:operation` carries the `operation` object itself, not the HTTP write-response envelope. The App Server commits the session, operation, and outbox record in one DB transaction; the outbox then broadcasts the saved operation through Redis/Socket.IO. Delivery is at-least-once, so clients deduplicate by `id` or `opSeq` and use GET catch-up when a sequence gap is detected.

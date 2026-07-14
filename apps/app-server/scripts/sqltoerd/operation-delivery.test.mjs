@@ -28,6 +28,10 @@ const migration = await readFile(
   ),
   "utf8"
 );
+const apiDocument = await readFile(
+  new URL("../../../../docs/api/sqltoerd-api.md", import.meta.url),
+  "utf8"
+);
 
 assert.match(migration, /ADD COLUMN write_protocol TEXT NOT NULL DEFAULT 'snapshot'/);
 assert.match(migration, /write_protocol IN \('snapshot', 'operations_v1'\)/);
@@ -52,15 +56,28 @@ assert.match(
   migration,
   /ALTER TABLE public\.sql_erd_session_operation_outbox ENABLE ROW LEVEL SECURITY/
 );
+assert.match(
+  apiDocument,
+  /GET` \| `\/workspaces\/\{workspaceId\}\/sql-erd-sessions\/\{sessionId\}\/operations/
+);
+assert.match(
+  apiDocument,
+  /POST` \| `\/workspaces\/\{workspaceId\}\/sql-erd-sessions\/\{sessionId\}\/operations/
+);
+assert.match(apiDocument, /latestOpSeq: number/);
+assert.match(apiDocument, /type PatchCollection<T>/);
+assert.match(apiDocument, /SQL_ERD_WRITE_PROTOCOL_MISMATCH/);
+assert.match(apiDocument, /"sql-erd:operation" = SqltoerdLayoutPatchOperation/);
 
 const currentUserId = "11111111-1111-4111-8111-111111111111";
 const workspaceId = "22222222-2222-4222-8222-222222222222";
 const sessionId = "33333333-3333-4333-8333-333333333333";
 
 class FakeDatabase {
-  constructor(session, existingOperation = null) {
+  constructor(session, existingOperation = null, operationRows = []) {
     this.existingOperation = existingOperation;
     this.operation = null;
+    this.operationRows = operationRows;
     this.outboxOperationId = null;
     this.queries = [];
     this.session = session;
@@ -69,8 +86,17 @@ class FakeDatabase {
   async transaction(callback) {
     return callback({
       execute: (text, values = []) => this.execute(text, values),
+      query: (text, values = []) => this.query(text, values),
       queryOne: (text, values = []) => this.queryOne(text, values)
     });
+  }
+
+  async query(text, values = []) {
+    this.queries.push({ text, values });
+    if (text.includes("FROM sql_erd_session_operations")) {
+      return this.operationRows;
+    }
+    return [];
   }
 
   async queryOne(text, values = []) {
@@ -271,5 +297,56 @@ assert.equal(
     (error) =>
       error.getStatus() === 409 &&
       error.getResponse().error.code === "SQL_ERD_WRITE_PROTOCOL_MISMATCH"
+  );
+}
+
+{
+  const database = new FakeDatabase(sessionRow(), null, [
+    {
+      id: "55555555-5555-4555-8555-555555555555",
+      workspace_id: workspaceId,
+      session_id: sessionId,
+      actor_user_id: currentUserId,
+      operation_type: "layout_patch",
+      op_seq: 4,
+      client_operation_id: "prior-operation",
+      base_revision: 1,
+      applied_on_revision: 2,
+      result_revision: 3,
+      payload: { viewport: { action: "delete" } },
+      created_at: new Date("2026-07-14T12:00:00.000Z")
+    }
+  ]);
+  const operationService = new SqlErdService(database, workspaceService);
+  const result = await operationService.listOperations(
+    currentUserId,
+    workspaceId,
+    sessionId,
+    { afterSeq: 0, limit: 100 }
+  );
+
+  assert.equal(result.latestOpSeq, 4);
+  assert.equal(result.items[0].opSeq, 4);
+  assert.equal(result.nextAfterSeq, null);
+  assert.match(
+    database.queries[0].text,
+    /FROM sql_erd_sessions[\s\S]*FOR UPDATE/,
+    "catch-up must lock the session watermark before reading operation rows"
+  );
+  assert.match(database.queries[1].text, /FROM sql_erd_session_operations/);
+}
+
+{
+  const database = new FakeDatabase(sessionRow());
+  const operationService = new SqlErdService(database, workspaceService);
+  await assert.rejects(
+    () =>
+      operationService.createOperation(currentUserId, workspaceId, sessionId, {
+        baseRevision: 3,
+        clientOperationId: "future-revision",
+        type: "layout_patch",
+        patch: { viewport: { action: "delete" } }
+      }),
+    (error) => error.getStatus() === 409 && error.getResponse().error.code === "CONFLICT"
   );
 }

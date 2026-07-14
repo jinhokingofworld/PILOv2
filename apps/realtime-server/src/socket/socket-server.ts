@@ -27,10 +27,10 @@ import {
 } from "../sql-erd/sql-erd-presence.service";
 import { createSqlErdRoomService } from "../sql-erd/sql-erd-room.service";
 import {
-  isSqlErdOperationPayload,
   sqlErdClientEvents,
   sqlErdServerEvents,
 } from "../sql-erd/sql-erd-socket-events";
+import { relaySqlErdOperation } from "../sql-erd/sql-erd-operation-relay";
 import { createMeetingAccessService } from "../meeting/meeting-access.service";
 import {
   isMeetingReportRedisEvent,
@@ -670,11 +670,11 @@ export async function createRealtimeSocketServer({
     : null;
   const unsubscribeSqlErdOperations = redisAdapter
     ? await redisAdapter.subscribe(SQL_ERD_OPERATION_REDIS_CHANNEL, (payload) => {
-        if (!isSqlErdOperationPayload(payload)) {
+        if (!relaySqlErdOperation(payload, (roomName, event, operation) => {
+          io.to(roomName).emit(event, operation);
+        })) {
           console.error("SQLtoERD operation Redis payload is invalid", payload);
-          return;
         }
-        io.to(createSqlErdRoomName(payload)).emit(sqlErdServerEvents.operation, payload);
       })
     : null;
   const unsubscribeMeetingReports = redisAdapter

@@ -19,12 +19,31 @@ export function isSqlErdOperationPayload(
   const payload = value as Record<string, unknown>;
   return payload.type === "layout_patch"
     && typeof payload.workspaceId === "string"
+    && payload.workspaceId.trim().length > 0
     && typeof payload.sessionId === "string"
+    && payload.sessionId.trim().length > 0
     && typeof payload.id === "string"
+    && payload.id.trim().length > 0
+    && typeof payload.actorUserId === "string"
+    && payload.actorUserId.trim().length > 0
     && typeof payload.opSeq === "number"
     && Number.isSafeInteger(payload.opSeq)
     && payload.opSeq > 0
+    && typeof payload.clientOperationId === "string"
+    && payload.clientOperationId.trim().length > 0
+    && typeof payload.baseRevision === "number"
+    && Number.isSafeInteger(payload.baseRevision)
+    && payload.baseRevision > 0
+    && typeof payload.appliedOnRevision === "number"
+    && Number.isSafeInteger(payload.appliedOnRevision)
+    && payload.appliedOnRevision > 0
+    && typeof payload.resultRevision === "number"
+    && Number.isSafeInteger(payload.resultRevision)
+    && payload.resultRevision > 0
+    && typeof payload.rebased === "boolean"
     && typeof payload.patch === "object"
-    && payload.patch !== null;
+    && payload.patch !== null
+    && typeof payload.createdAt === "string"
+    && !Number.isNaN(Date.parse(payload.createdAt));
 }
 import type { SqlErdOperationPayload } from "./sql-erd-types";
