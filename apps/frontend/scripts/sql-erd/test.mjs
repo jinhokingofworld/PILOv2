@@ -719,6 +719,7 @@ const [
   frameShape,
   noteShape,
   textShape,
+  strokeShape,
   annotationToolbar,
   ddlParserUtils,
   sqlEditorDialectUtils,
@@ -758,6 +759,7 @@ const [
     readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-frame-shape.tsx"),
     readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-note-shape.tsx"),
     readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-text-shape.tsx"),
+    readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-stroke-shape.tsx"),
     readSqlErdFile("../../src/features/sql-erd/components/sql-erd-canvas-toolbar.tsx"),
     readSqlErdFile("../../src/features/sql-erd/utils/ddl-parser.ts"),
     readSqlErdFile("../../src/features/sql-erd/utils/sql-editor-dialect.ts"),
@@ -6455,11 +6457,16 @@ assert.doesNotMatch(noteShape, /SQLTOERD_NOTE_DELETE_EVENT/);
 assert.match(textShape, /SQLTOERD_TEXT_SHAPE_TYPE/);
 assert.match(textShape, /SQLTOERD_TEXT_CHANGE_EVENT/);
 assert.match(textShape, /maxLength=\{2000\}/);
+assert.match(strokeShape, /SQLTOERD_STROKE_SHAPE_TYPE/);
+assert.match(strokeShape, /stroke-linecap="round"/);
+assert.match(strokeShape, /canResize\(\)/);
 assert.match(annotationToolbar, /export function SqlErdCanvasToolbar/);
 assert.match(annotationToolbar, /aria-label="선택\/드래그"/);
 assert.match(annotationToolbar, /aria-label="메모 추가"/);
 assert.match(annotationToolbar, /aria-label="프레임 추가"/);
 assert.match(annotationToolbar, /aria-label="텍스트 추가"/);
+assert.match(annotationToolbar, /aria-label="펜"/);
+assert.match(annotationToolbar, /aria-label="지우개"/);
 assert.match(annotationToolbar, /aria-label="화면 맞춤"/);
 assert.match(annotationToolbar, /bottom-4 left-1\/2/);
 assert.match(annotationToolbar, /function applyColor/);
@@ -6474,6 +6481,9 @@ assert.match(canvasSurface, /editor\.screenToPage/);
 assert.match(canvasSurface, /notesToAdd/);
 assert.match(canvasSurface, /framesToAdd/);
 assert.match(canvasSurface, /textsToAdd/);
+assert.match(canvasSurface, /strokesToAdd/);
+assert.match(canvasSurface, /deleteStrokeIds/);
+assert.match(canvasSurface, /isSqlErdStrokeShape/);
 assert.match(canvasSurface, /onDoubleClickCapture/);
 assert.match(canvasSurface, /onFit=\{handleFitCanvas\}/);
 assert.match(

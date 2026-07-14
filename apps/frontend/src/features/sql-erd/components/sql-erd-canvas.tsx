@@ -21,7 +21,7 @@ import { Workflow } from "lucide-react";
 
 import {
   SqlErdCanvasToolbar,
-  type SqlErdCanvasPlacementTool
+  type SqlErdCanvasTool
 } from "@/features/sql-erd/components/sql-erd-canvas-toolbar";
 import { commerceSqltoerdFixture } from "@/features/sql-erd/fixtures/commerce";
 import {
@@ -50,6 +50,14 @@ import {
   type SqlErdTextChangeEventDetail,
   type SqlErdTextShape
 } from "@/features/sql-erd/shapes/sql-erd-text-shape";
+import {
+  createSqlErdStrokeShape,
+  getSqlErdStrokeShapeId,
+  isSqlErdStrokeShape,
+  SQLTOERD_STROKE_SHAPE_TYPE,
+  SqlErdStrokeShapeUtil,
+  type SqlErdStrokeShape
+} from "@/features/sql-erd/shapes/sql-erd-stroke-shape";
 import {
   isSqlErdAnnotationShape,
   SQLTOERD_ANNOTATION_DELETE_EVENT,
@@ -98,6 +106,7 @@ import type {
   SqltoerdCanvasFrame,
   SqltoerdCanvasFrameColor,
   SqltoerdCanvasNote,
+  SqltoerdCanvasStroke,
   SqltoerdCanvasText,
   SqltoerdColumnAnnotationLink,
   SqltoerdLayoutJsonV1,
@@ -153,12 +162,20 @@ const sqlErdShapeUtils = [
   SqlErdAnnotationShapeUtil,
   SqlErdFrameShapeUtil,
   SqlErdNoteShapeUtil,
+  SqlErdStrokeShapeUtil,
   SqlErdTextShapeUtil,
   SqlErdRelationShapeUtil,
   SqlErdTableShapeUtil
 ];
 const SQLTOERD_LAYOUT_SYNC_DELAY_MS = 250;
 const SQLTOERD_MINIMUM_READABLE_ZOOM = 0.45;
+const SQLTOERD_STROKE_SIZE = 4;
+const SQLTOERD_MINIMUM_STROKE_POINT_DISTANCE = 1;
+
+type SqlErdOneShotPlacementTool = Exclude<
+  SqlErdCanvasTool,
+  "draw" | "eraser" | null
+>;
 
 const sqlErdTldrawComponents = {
   Background: null
@@ -381,6 +398,8 @@ export function createSqltoerdCanvasShapes(
     id: getSqlErdTextShapeId(text.id), type: SQLTOERD_TEXT_SHAPE_TYPE, x: text.x, y: text.y,
     props: { w: text.width, h: text.height, textId: text.id, text: text.text, color: text.color }
   }));
+  const strokeShapes: TLShapePartial<SqlErdStrokeShape>[] = (layoutJson.annotations?.strokes ?? [])
+    .map(createSqlErdStrokeShape);
 
   return [
     ...frameShapes,
@@ -388,7 +407,8 @@ export function createSqltoerdCanvasShapes(
     ...tableShapes,
     ...annotationShapes,
     ...noteShapes,
-    ...textShapes
+    ...textShapes,
+    ...strokeShapes
   ];
 }
 
@@ -692,7 +712,8 @@ function isSqlErdCanvasShape(shape: TLShape) {
     isSqlErdAnnotationShape(shape) ||
     shape.type === SQLTOERD_NOTE_SHAPE_TYPE ||
     shape.type === SQLTOERD_FRAME_SHAPE_TYPE ||
-    shape.type === SQLTOERD_TEXT_SHAPE_TYPE
+    shape.type === SQLTOERD_TEXT_SHAPE_TYPE ||
+    shape.type === SQLTOERD_STROKE_SHAPE_TYPE
   );
 }
 
@@ -1034,6 +1055,19 @@ function isSqlErdCanvasShapePartialApplied(
       currentShape.props.textId === nextProps.textId &&
       currentShape.props.text === nextProps.text &&
       currentShape.props.color === nextProps.color;
+  }
+
+  if (shape.type === SQLTOERD_STROKE_SHAPE_TYPE) {
+    const nextProps = (shape as TLShapePartial<SqlErdStrokeShape>).props;
+    return isSqlErdStrokeShape(currentShape) && !!nextProps && !!nextProps.points &&
+      areShapeNumbersEqual(currentShape.x, shape.x) &&
+      areShapeNumbersEqual(currentShape.y, shape.y) &&
+      areShapeNumbersEqual(currentShape.props.w, nextProps.w) &&
+      areShapeNumbersEqual(currentShape.props.h, nextProps.h) &&
+      currentShape.props.strokeId === nextProps.strokeId &&
+      currentShape.props.color === nextProps.color &&
+      currentShape.props.size === nextProps.size &&
+      areSqlErdRelationPointsEqual(currentShape.props.points, nextProps.points);
   }
 
   return false;
@@ -2470,11 +2504,20 @@ export function SqlErdCanvas({
 }: SqlErdCanvasProps) {
   const editorRef = useRef<Editor | null>(null);
   const [canvasEditor, setCanvasEditor] = useState<Editor | null>(null);
-  const [placementTool, setPlacementTool] = useState<SqlErdCanvasPlacementTool>(null);
+  const [tool, setTool] = useState<SqlErdCanvasTool>(null);
   const [nextFrameColor, setNextFrameColor] = useState<SqltoerdCanvasFrameColor>("blue");
+  const [nextStrokeColor, setNextStrokeColor] = useState<SqltoerdCanvasFrameColor>("blue");
   const [nextTextColor, setNextTextColor] = useState<SqltoerdCanvasFrameColor>("slate");
-  const pendingPlacementToolRef = useRef<SqlErdCanvasPlacementTool>(null);
+  const toolRef = useRef<SqlErdCanvasTool>(null);
+  const pendingPlacementToolRef = useRef<SqlErdOneShotPlacementTool | null>(null);
   const pendingTextFocusIdRef = useRef<string | null>(null);
+  const strokePointerIdRef = useRef<number | null>(null);
+  const activeStrokeRef = useRef<SqltoerdCanvasStroke | null>(null);
+  const eraserPointerIdRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    toolRef.current = tool;
+  }, [tool]);
   const shapes = useMemo(
     () => createSqltoerdCanvasShapes(modelJson, layoutJson),
     [layoutJson, modelJson]
@@ -2493,7 +2536,7 @@ export function SqlErdCanvas({
     [shapes]
   );
   const placeAnnotationAt = useCallback(
-    (tool: Exclude<SqlErdCanvasPlacementTool, null>, point: { x: number; y: number }) => {
+    (tool: SqlErdOneShotPlacementTool, point: { x: number; y: number }) => {
       const editor = editorRef.current;
 
       if (!editor || !onLayoutPatch) {
@@ -2544,7 +2587,7 @@ export function SqlErdCanvas({
       }
 
       pendingPlacementToolRef.current = null;
-      setPlacementTool(null);
+      setTool(null);
       editor.cancel();
       editor.updateInstanceState({ isToolLocked: false });
       editor.setCurrentTool("select.idle");
@@ -2583,17 +2626,21 @@ export function SqlErdCanvas({
       if (nextFrameId !== null) window.cancelAnimationFrame(nextFrameId);
     };
   }, [layoutJson.annotations?.texts]);
-  const handleStartPlacement = useCallback(
-    (tool: Exclude<SqlErdCanvasPlacementTool, null>) => {
+  const handleStartTool = useCallback(
+    (nextTool: Exclude<SqlErdCanvasTool, null>) => {
       const editor = editorRef.current;
 
       if (!editor) return;
 
-      pendingPlacementToolRef.current = tool;
-      setPlacementTool(tool);
+      pendingPlacementToolRef.current =
+        nextTool === "note" || nextTool === "frame" || nextTool === "text"
+          ? nextTool
+          : null;
+      setTool(nextTool);
       editor.cancel();
       editor.updateInstanceState({ isToolLocked: false });
       editor.setCurrentTool("select.idle");
+      editor.selectNone();
     },
     []
   );
@@ -2601,7 +2648,10 @@ export function SqlErdCanvas({
     const editor = editorRef.current;
 
     pendingPlacementToolRef.current = null;
-    setPlacementTool(null);
+    strokePointerIdRef.current = null;
+    activeStrokeRef.current = null;
+    eraserPointerIdRef.current = null;
+    setTool(null);
 
     if (!editor) return;
 
@@ -2609,6 +2659,127 @@ export function SqlErdCanvas({
     editor.updateInstanceState({ isToolLocked: false });
     editor.setCurrentTool("select.idle");
   }, []);
+  const updateStrokeShape = useCallback((editor: Editor, stroke: SqltoerdCanvasStroke) => {
+    const shape = createSqlErdStrokeShape(stroke);
+
+    editor.run(() => {
+      if (editor.getShape(shape.id as TLShapeId)) {
+        editor.updateShapes([shape]);
+      } else {
+        editor.createShape(shape);
+      }
+    }, { history: "ignore" });
+  }, []);
+  const deleteStrokeAt = useCallback(
+    (editor: Editor, point: { x: number; y: number }) => {
+      const margin = editor.options.hitTestMargin / editor.getZoomLevel();
+      const strokeShapes = editor
+        .getShapesAtPoint(point, { hitInside: false, margin })
+        .filter(isSqlErdStrokeShape);
+
+      if (!strokeShapes.length || !onLayoutPatch) {
+        return;
+      }
+
+      const strokeIds = Array.from(new Set(strokeShapes.map((shape) => shape.props.strokeId)));
+      editor.run(() => {
+        editor.deleteShapes(strokeShapes.map((shape) => shape.id));
+      }, { history: "ignore" });
+      onLayoutPatch({ deleteStrokeIds: strokeIds });
+    },
+    [onLayoutPatch]
+  );
+  const handlePointerMoveCapture = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      const editor = editorRef.current;
+
+      if (!editor || !event.isPrimary) {
+        return;
+      }
+
+      if (strokePointerIdRef.current === event.pointerId && activeStrokeRef.current) {
+        const stroke = activeStrokeRef.current;
+        const point = editor.screenToPage({ x: event.clientX, y: event.clientY });
+        const previousPoint = stroke.points[stroke.points.length - 1];
+        const distance = Math.hypot(point.x - previousPoint.x, point.y - previousPoint.y);
+
+        if (distance >= SQLTOERD_MINIMUM_STROKE_POINT_DISTANCE && stroke.points.length < 500) {
+          const nextStroke = { ...stroke, points: [...stroke.points, point] };
+          activeStrokeRef.current = nextStroke;
+          updateStrokeShape(editor, nextStroke);
+        }
+
+        event.preventDefault();
+        event.stopPropagation();
+        event.nativeEvent.stopImmediatePropagation();
+        return;
+      }
+
+      if (eraserPointerIdRef.current === event.pointerId) {
+        deleteStrokeAt(editor, editor.screenToPage({ x: event.clientX, y: event.clientY }));
+        event.preventDefault();
+        event.stopPropagation();
+        event.nativeEvent.stopImmediatePropagation();
+      }
+    },
+    [deleteStrokeAt, updateStrokeShape]
+  );
+  const handlePointerUpCapture = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      const editor = editorRef.current;
+
+      if (!editor || !event.isPrimary) {
+        return;
+      }
+
+      if (strokePointerIdRef.current === event.pointerId) {
+        const stroke = activeStrokeRef.current;
+        strokePointerIdRef.current = null;
+        activeStrokeRef.current = null;
+
+        if (stroke && stroke.points.length >= 2 && onLayoutPatch) {
+          onLayoutPatch({ strokesToAdd: [stroke] });
+        } else if (stroke) {
+          editor.run(() => editor.deleteShapes([getSqlErdStrokeShapeId(stroke.id)]), {
+            history: "ignore"
+          });
+        }
+
+        event.preventDefault();
+        event.stopPropagation();
+        event.nativeEvent.stopImmediatePropagation();
+        return;
+      }
+
+      if (eraserPointerIdRef.current === event.pointerId) {
+        eraserPointerIdRef.current = null;
+        event.preventDefault();
+        event.stopPropagation();
+        event.nativeEvent.stopImmediatePropagation();
+      }
+    },
+    [onLayoutPatch]
+  );
+  const handlePointerCancelCapture = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      if (strokePointerIdRef.current === event.pointerId) {
+        const stroke = activeStrokeRef.current;
+        strokePointerIdRef.current = null;
+        activeStrokeRef.current = null;
+
+        if (stroke) {
+          editorRef.current?.run(() => {
+            editorRef.current?.deleteShapes([getSqlErdStrokeShapeId(stroke.id)]);
+          }, { history: "ignore" });
+        }
+      }
+
+      if (eraserPointerIdRef.current === event.pointerId) {
+        eraserPointerIdRef.current = null;
+      }
+    },
+    []
+  );
   const handlePointerDownCapture = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
       const eventTarget = event.target as Element;
@@ -2624,6 +2795,37 @@ export function SqlErdCanvas({
 
       const pagePoint = editor.screenToPage({ x: event.clientX, y: event.clientY });
       const pendingPlacementTool = pendingPlacementToolRef.current;
+
+      if (toolRef.current === "draw") {
+        if ((layoutJson.annotations?.strokes?.length ?? 0) >= 100) {
+          return;
+        }
+
+        const stroke: SqltoerdCanvasStroke = {
+          id: crypto.randomUUID(),
+          points: [pagePoint],
+          color: nextStrokeColor,
+          size: SQLTOERD_STROKE_SIZE
+        };
+        strokePointerIdRef.current = event.pointerId;
+        activeStrokeRef.current = stroke;
+        event.currentTarget.setPointerCapture(event.pointerId);
+        updateStrokeShape(editor, stroke);
+        event.preventDefault();
+        event.stopPropagation();
+        event.nativeEvent.stopImmediatePropagation();
+        return;
+      }
+
+      if (toolRef.current === "eraser") {
+        eraserPointerIdRef.current = event.pointerId;
+        event.currentTarget.setPointerCapture(event.pointerId);
+        deleteStrokeAt(editor, pagePoint);
+        event.preventDefault();
+        event.stopPropagation();
+        event.nativeEvent.stopImmediatePropagation();
+        return;
+      }
 
       if (pendingPlacementTool && placeAnnotationAt(pendingPlacementTool, pagePoint)) {
         event.preventDefault();
@@ -2696,7 +2898,7 @@ export function SqlErdCanvas({
         tableId
       });
     },
-    [placeAnnotationAt]
+    [deleteStrokeAt, layoutJson.annotations?.strokes?.length, nextStrokeColor, placeAnnotationAt, updateStrokeShape]
   );
   const handleDoubleClickCapture = useCallback(
     (event: MouseEvent<HTMLDivElement>) => {
@@ -2761,7 +2963,13 @@ export function SqlErdCanvas({
   }, []);
 
   return (
-    <div className="relative h-full w-full" onDoubleClickCapture={handleDoubleClickCapture}>
+    <div
+      className="relative h-full w-full"
+      onDoubleClickCapture={handleDoubleClickCapture}
+      onPointerCancelCapture={handlePointerCancelCapture}
+      onPointerMoveCapture={handlePointerMoveCapture}
+      onPointerUpCapture={handlePointerUpCapture}
+    >
       <TldrawSurface
         className={cn(
           "h-full w-full bg-slate-50 bg-[radial-gradient(circle_at_1px_1px,rgba(15,23,42,0.12)_1px,transparent_0)] [background-size:24px_24px]",
@@ -2817,17 +3025,20 @@ export function SqlErdCanvas({
           editor={canvasEditor}
           isFrameLimitReached={(layoutJson.annotations?.frames?.length ?? 0) >= 100}
           isNoteLimitReached={(layoutJson.annotations?.notes?.length ?? 0) >= 100}
+          isStrokeLimitReached={(layoutJson.annotations?.strokes?.length ?? 0) >= 100}
           isTextLimitReached={(layoutJson.annotations?.texts?.length ?? 0) >= 100}
           nextFrameColor={nextFrameColor}
+          nextStrokeColor={nextStrokeColor}
           nextTextColor={nextTextColor}
           onFit={handleFitCanvas}
           onFrameColorChange={handleFrameColorChange}
           onNextFrameColorChange={setNextFrameColor}
+          onNextStrokeColorChange={setNextStrokeColor}
           onNextTextColorChange={setNextTextColor}
           onSelectTool={handleSelectTool}
-          onStartPlacement={handleStartPlacement}
+          onStartTool={handleStartTool}
           onTextColorChange={handleTextColorChange}
-          placementTool={placementTool}
+          tool={tool}
         />
       ) : null}
       {onLayoutPatch ? (
