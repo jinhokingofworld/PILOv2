@@ -441,6 +441,7 @@ interface GithubProjectV2GraphqlErrorContext {
 const GITHUB_SYNC_PER_PAGE = 100;
 const GITHUB_SYNC_MAX_PAGES = 100;
 const GITHUB_ASSIGNEE_LOOKUP_TIMEOUT_MS = 30_000;
+const GITHUB_PROJECT_V2_READ_TIMEOUT_MS = 30_000;
 const GITHUB_PROJECT_V2_ITEM_STATUS_TIMEOUT_MS = 30_000;
 const GITHUB_PROJECT_V2_OAUTH_SCOPE_ERROR_MESSAGE =
   "GitHub ProjectV2 OAuth connection must be reconnected with project scope";
@@ -1401,7 +1402,7 @@ export class GithubAppClient {
     let cursor: string | null = null;
 
     do {
-      const data = await this.fetchGraphqlWithToken(
+      const data = await this.fetchProjectV2ReadGraphqlWithToken(
         graphqlAuth.token,
         GITHUB_REPOSITORY_PROJECT_V2S_QUERY,
         {
@@ -1434,7 +1435,7 @@ export class GithubAppClient {
     input: GithubProjectV2LookupRequest
   ): Promise<GithubProjectV2ApiItem> {
     const graphqlAuth = await this.getProjectV2GraphqlAuth(input);
-    const data = await this.fetchGraphqlWithToken(
+    const data = await this.fetchProjectV2ReadGraphqlWithToken(
       graphqlAuth.token,
       GITHUB_PROJECT_V2_QUERY,
       {
@@ -1477,7 +1478,7 @@ export class GithubAppClient {
     let cursor: string | null = null;
 
     do {
-      const data = await this.fetchGraphqlWithToken(
+      const data = await this.fetchProjectV2ReadGraphqlWithToken(
         graphqlAuth.token,
         GITHUB_PROJECT_V2_FIELDS_QUERY,
         {
@@ -1510,7 +1511,7 @@ export class GithubAppClient {
     let cursor: string | null = null;
 
     do {
-      const data = await this.fetchGraphqlWithToken(
+      const data = await this.fetchProjectV2ReadGraphqlWithToken(
         graphqlAuth.token,
         GITHUB_PROJECT_V2_ITEMS_QUERY,
         {
@@ -1561,7 +1562,7 @@ export class GithubAppClient {
   ): Promise<GithubProjectV2ItemReconcileApiItem | null> {
     const graphqlAuth = await this.getProjectV2GraphqlAuth(input);
     const errorMessage = "GitHub ProjectV2 item lookup failed";
-    const data = await this.fetchGraphqlWithToken(
+    const data = await this.fetchProjectV2ReadGraphqlWithToken(
       graphqlAuth.token,
       GITHUB_PROJECT_V2_ITEM_LOOKUP_QUERY,
       { itemId: input.projectItemNodeId },
@@ -2008,6 +2009,47 @@ export class GithubAppClient {
     };
   }
 
+  private async fetchProjectV2ReadGraphqlWithToken(
+    token: string,
+    query: string,
+    variables: Record<string, unknown>,
+    errorMessage: string,
+    context?: GithubProjectV2GraphqlErrorContext
+  ): Promise<unknown> {
+    const controller = new AbortController();
+    const timeout = setTimeout(
+      () => controller.abort(),
+      GITHUB_PROJECT_V2_READ_TIMEOUT_MS
+    );
+
+    try {
+      return await this.fetchGraphqlWithToken(
+        token,
+        query,
+        variables,
+        errorMessage,
+        context,
+        controller.signal
+      );
+    } catch (error) {
+      if (controller.signal.aborted) {
+        throw badRequest(this.projectV2ReadTimeoutErrorMessage(errorMessage));
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  private projectV2ReadTimeoutErrorMessage(errorMessage: string): string {
+    const failedSuffix = " failed";
+    if (errorMessage.endsWith(failedSuffix)) {
+      return `${errorMessage.slice(0, -failedSuffix.length)} timed out`;
+    }
+
+    return "GitHub ProjectV2 read timed out";
+  }
+
   private async fetchGraphqlWithToken(
     token: string,
     query: string,
@@ -2113,7 +2155,7 @@ export class GithubAppClient {
     let nextCursor = hasNextPage ? cursor : null;
 
     while (nextCursor) {
-      const data = await this.fetchGraphqlWithToken(
+      const data = await this.fetchProjectV2ReadGraphqlWithToken(
         graphqlAuth.token,
         GITHUB_PROJECT_V2_REPOSITORIES_QUERY,
         {
@@ -2148,7 +2190,7 @@ export class GithubAppClient {
     let cursor: string | null = null;
 
     do {
-      const data = await this.fetchGraphqlWithToken(
+      const data = await this.fetchProjectV2ReadGraphqlWithToken(
         input.userAccessToken,
         query,
         {
@@ -2188,7 +2230,7 @@ export class GithubAppClient {
     let nextCursor = hasNextPage ? cursor : null;
 
     while (nextCursor) {
-      const data = await this.fetchGraphqlWithToken(
+      const data = await this.fetchProjectV2ReadGraphqlWithToken(
         graphqlAuth.token,
         GITHUB_PROJECT_V2_ITEM_FIELD_VALUES_QUERY,
         {
