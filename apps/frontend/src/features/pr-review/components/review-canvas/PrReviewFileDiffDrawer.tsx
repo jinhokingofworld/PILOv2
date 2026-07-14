@@ -86,6 +86,7 @@ type PrReviewFileDiffDrawerProps = {
   conflictDraft: PrReviewConflictDraft | null;
   conflictFile: PrReviewConflictFile | null;
   headBranch: string | null;
+  isReviewVersionStale: boolean;
   isReviewSessionConflicted: boolean;
   onClose: () => void;
   onConflictDraftChange: (
@@ -285,6 +286,7 @@ export function PrReviewFileDiffDrawer({
   conflictDraft,
   conflictFile,
   headBranch,
+  isReviewVersionStale,
   isReviewSessionConflicted,
   onClose,
   onConflictDraftChange,
@@ -545,7 +547,8 @@ export function PrReviewFileDiffDrawer({
     isReviewSessionConflicted,
     unsupportedConflictFile
   });
-  const decisionDisabled = decisionDisabledReason !== null;
+  const decisionDisabled =
+    isReviewVersionStale || decisionDisabledReason !== null;
   const selectedConflictHunk =
     conflictFile?.hunks[selectedConflictHunkIndex] ?? null;
   const aiResolvedHunks =
@@ -563,9 +566,11 @@ export function PrReviewFileDiffDrawer({
         manualResolvedTexts
       })
     : false;
-  const drawerModeLabel = decisionDisabled
-    ? "Conflict 해결"
-    : "파일 경로";
+  const drawerModeLabel = isReviewVersionStale
+    ? "이전 버전"
+    : decisionDisabled
+      ? "Conflict 해결"
+      : "파일 경로";
 
   const rebuildResolvedDraft = useCallback(
     (
@@ -573,7 +578,7 @@ export function PrReviewFileDiffDrawer({
       nextAcceptedAiResolvedTexts = acceptedAiResolvedTexts,
       nextManualResolvedTexts = manualResolvedTexts
     ) => {
-      if (!conflictFile || !conflictDraft) {
+      if (!conflictFile || !conflictDraft || isReviewVersionStale) {
         return;
       }
 
@@ -596,6 +601,7 @@ export function PrReviewFileDiffDrawer({
       acceptedAiResolvedTexts,
       conflictDraft,
       conflictFile,
+      isReviewVersionStale,
       manualResolvedTexts,
       onConflictDraftChange
     ]
@@ -603,7 +609,7 @@ export function PrReviewFileDiffDrawer({
 
   const handleResolutionChoiceChange = useCallback(
     (hunkId: string, choice: PrReviewConflictResolutionChoice) => {
-      if (!conflictFile || isResolvedDraftCustomized) {
+      if (!conflictFile || isResolvedDraftCustomized || isReviewVersionStale) {
         return;
       }
 
@@ -657,6 +663,7 @@ export function PrReviewFileDiffDrawer({
       aiResolvedHunks,
       conflictFile,
       isResolvedDraftCustomized,
+      isReviewVersionStale,
       manualResolvedTexts,
       rebuildResolvedDraft,
       resolutionChoices
@@ -664,12 +671,15 @@ export function PrReviewFileDiffDrawer({
   );
 
   const handleResetCustomizedDraft = useCallback(() => {
+    if (isReviewVersionStale) {
+      return;
+    }
     rebuildResolvedDraft(resolutionChoices);
-  }, [rebuildResolvedDraft, resolutionChoices]);
+  }, [isReviewVersionStale, rebuildResolvedDraft, resolutionChoices]);
 
   const handleManualResolutionChange = useCallback(
     (hunkId: string, resolvedText: string) => {
-      if (!conflictFile || isResolvedDraftCustomized) {
+      if (!conflictFile || isResolvedDraftCustomized || isReviewVersionStale) {
         return;
       }
 
@@ -686,6 +696,7 @@ export function PrReviewFileDiffDrawer({
       acceptedAiResolvedTexts,
       conflictFile,
       isResolvedDraftCustomized,
+      isReviewVersionStale,
       manualResolvedTexts,
       rebuildResolvedDraft,
       resolutionChoices
@@ -693,7 +704,11 @@ export function PrReviewFileDiffDrawer({
   );
 
   const handleCreateConflictSuggestion = useCallback(async () => {
-    if (!conflictFile || conflictSuggestionStatus === "loading") {
+    if (
+      !conflictFile ||
+      conflictSuggestionStatus === "loading" ||
+      isReviewVersionStale
+    ) {
       return;
     }
 
@@ -724,6 +739,7 @@ export function PrReviewFileDiffDrawer({
     conflictDraft,
     conflictFile,
     conflictSuggestionStatus,
+    isReviewVersionStale,
     onConflictDraftChange,
     workspaceId
   ]);
@@ -733,7 +749,8 @@ export function PrReviewFileDiffDrawer({
       !conflictFile ||
       !conflictSuggestion ||
       conflictSuggestion.status === "invalid" ||
-      isResolvedDraftCustomized
+      isResolvedDraftCustomized ||
+      isReviewVersionStale
     ) {
       return;
     }
@@ -755,6 +772,7 @@ export function PrReviewFileDiffDrawer({
     conflictFile,
     conflictSuggestion,
     isResolvedDraftCustomized,
+    isReviewVersionStale,
     onConflictDraftChange
   ]);
 
@@ -856,7 +874,9 @@ export function PrReviewFileDiffDrawer({
                     hunkCount={conflictFile.hunks.length}
                     hunkIndex={selectedConflictHunkIndex}
                     isBaseComparisonOpen={isBaseComparisonOpen}
-                    isChoiceDisabled={isResolvedDraftCustomized}
+                    isChoiceDisabled={
+                      isResolvedDraftCustomized || isReviewVersionStale
+                    }
                     manualResolvedText={
                       manualResolvedTexts[selectedConflictHunk.id] ?? ""
                     }
@@ -877,7 +897,11 @@ export function PrReviewFileDiffDrawer({
                     filePath={file.filePath}
                     isCustomized={isResolvedDraftCustomized}
                     onChange={(value) => {
-                      if (!conflictDraft || !conflictFile) {
+                      if (
+                        isReviewVersionStale ||
+                        !conflictDraft ||
+                        !conflictFile
+                      ) {
                         return;
                       }
                       onConflictDraftChange(conflictFile.reviewFileId, {
@@ -886,7 +910,7 @@ export function PrReviewFileDiffDrawer({
                         isCustomized: true
                       });
                     }}
-                    readOnly={false}
+                    readOnly={isReviewVersionStale}
                     originalValue={conflictFile.headContent}
                     value={resolvedContentDraft}
                   />
@@ -911,6 +935,7 @@ export function PrReviewFileDiffDrawer({
               decisionDisabledReason={decisionDisabledReason}
               file={file}
               isResolvedDraftCustomized={isResolvedDraftCustomized}
+              isReviewVersionStale={isReviewVersionStale}
               onCommentChange={(value) => {
                 setComment(value);
                 setSaveStatus("idle");
@@ -1039,6 +1064,7 @@ function ReviewNodePanel({
   decisionDisabledReason,
   file,
   isResolvedDraftCustomized,
+  isReviewVersionStale,
   onCommentBlur,
   onCommentChange,
   onApplyAllAiSuggestions,
@@ -1062,6 +1088,7 @@ function ReviewNodePanel({
   decisionDisabledReason: string | null;
   file: PrReviewFile;
   isResolvedDraftCustomized: boolean;
+  isReviewVersionStale: boolean;
   onCommentBlur: () => void;
   onCommentChange: (value: string) => void;
   onApplyAllAiSuggestions: () => void;
@@ -1075,7 +1102,8 @@ function ReviewNodePanel({
   selectedDecisionLabel: string;
   unsupportedConflictFile: PrReviewUnsupportedConflictFile | null;
 }) {
-  const decisionDisabled = decisionDisabledReason !== null;
+  const decisionDisabled =
+    isReviewVersionStale || decisionDisabledReason !== null;
 
   return (
     <div className="flex min-h-full flex-col">
@@ -1107,6 +1135,12 @@ function ReviewNodePanel({
           </div>
         </section>
 
+        {isReviewVersionStale ? (
+          <section className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
+            새 커밋이 감지되어 이 파일은 이전 리뷰 버전으로 열렸습니다. 내용은 확인할 수 있지만 수정하거나 저장할 수 없습니다.
+          </section>
+        ) : null}
+
         {decisionDisabledReason ? (
           <ConflictResolutionPanel
             conflictFile={conflictFile}
@@ -1114,6 +1148,7 @@ function ReviewNodePanel({
             conflictSuggestionErrorMessage={conflictSuggestionErrorMessage}
             conflictSuggestionStatus={conflictSuggestionStatus}
             isResolvedDraftCustomized={isResolvedDraftCustomized}
+            isReviewVersionStale={isReviewVersionStale}
             onApplyAllAiSuggestions={onApplyAllAiSuggestions}
             onCreateConflictSuggestion={onCreateConflictSuggestion}
             onOpenResolvedDraft={onOpenResolvedDraft}
@@ -1228,11 +1263,19 @@ function ReviewNodePanel({
             {saveStatus === "saving" ? (
               <Loader2 className="size-4 animate-spin" />
             ) : null}
-            {decisionDisabled ? "Conflict 해결 필요" : getSaveStatusLabel(saveStatus)}
+            {decisionDisabled
+              ? isReviewVersionStale
+                ? "새 버전 분석 필요"
+                : "Conflict 해결 필요"
+              : getSaveStatusLabel(saveStatus)}
           </p>
         </div>
 
-        {decisionDisabledReason ? (
+        {isReviewVersionStale ? (
+          <p className="mt-3 text-sm leading-6 text-amber-700">
+            새 커밋이 감지되어 이 리뷰 버전은 읽기 전용입니다.
+          </p>
+        ) : decisionDisabledReason ? (
           <p className="mt-3 text-sm leading-6 text-amber-700">
             {decisionDisabledReason}
           </p>
@@ -1260,6 +1303,7 @@ function ConflictResolutionPanel({
   conflictSuggestionErrorMessage,
   conflictSuggestionStatus,
   isResolvedDraftCustomized,
+  isReviewVersionStale,
   onApplyAllAiSuggestions,
   onCreateConflictSuggestion,
   onOpenResolvedDraft,
@@ -1273,6 +1317,7 @@ function ConflictResolutionPanel({
   conflictSuggestionErrorMessage: string | null;
   conflictSuggestionStatus: ConflictSuggestionLoadStatus;
   isResolvedDraftCustomized: boolean;
+  isReviewVersionStale: boolean;
   onApplyAllAiSuggestions: () => void;
   onCreateConflictSuggestion: () => void;
   onOpenResolvedDraft: () => void;
@@ -1316,7 +1361,8 @@ function ConflictResolutionPanel({
                   <Button
                     disabled={
                       conflictSuggestion.status === "invalid" ||
-                      isResolvedDraftCustomized
+                      isResolvedDraftCustomized ||
+                      isReviewVersionStale
                     }
                     onClick={onApplyAllAiSuggestions}
                     size="sm"
@@ -1326,7 +1372,7 @@ function ConflictResolutionPanel({
                   </Button>
                 ) : null}
                 <Button
-                  disabled={isSuggestionLoading}
+                  disabled={isSuggestionLoading || isReviewVersionStale}
                   onClick={onCreateConflictSuggestion}
                   size="sm"
                   type="button"

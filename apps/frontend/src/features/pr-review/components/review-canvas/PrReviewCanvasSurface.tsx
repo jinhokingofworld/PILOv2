@@ -92,6 +92,7 @@ type PrReviewCanvasSurfaceProps = {
   onFileSelect?: (reviewFileId: string | null) => void;
   onRealtimeRoomJoined?: () => void;
   preparedConflictFileIds?: Set<string>;
+  readOnly?: boolean;
   realtimeIdentity: CanvasRealtimeIdentity;
   reviewRoomId: string;
   selectedReviewFileId?: string | null;
@@ -1210,6 +1211,7 @@ export function PrReviewCanvasSurface({
   onFileSelect,
   onRealtimeRoomJoined,
   preparedConflictFileIds = new Set<string>(),
+  readOnly: isReviewVersionStale = false,
   realtimeIdentity,
   reviewRoomId,
   selectedReviewFileId,
@@ -1372,7 +1374,7 @@ export function PrReviewCanvasSurface({
     onRoomJoined: onRealtimeRoomJoined
   });
   const readOnly =
-    reviewRoom?.status === "completed" || canvasPresence.readOnly;
+    isReviewVersionStale || reviewRoom?.status === "completed" || canvasPresence.readOnly;
   const handlePersistenceNotice = useCallback(
     (notice: PrReviewCanvasPersistenceNotice) => {
       setPersistenceNotice(notice);

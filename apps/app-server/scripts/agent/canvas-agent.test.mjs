@@ -11,6 +11,9 @@ const { CanvasAgentDraftService } = require(
 const { CanvasAgentService } = require(
   "../../dist/modules/canvas/agent/canvas-agent.service.js"
 );
+const { buildCanvasAgentShapeSearchTerms } = require(
+  "../../dist/modules/canvas/agent/canvas-agent.repository.js"
+);
 
 function shape(id, overrides = {}) {
   return {
@@ -145,6 +148,26 @@ function deterministicPlan(prompt, selectedShapeIds = [], toolHelpMode = false) 
 }
 
 {
+  const plan = deterministicPlan("도형은?", [], true);
+
+  assert.equal(plan.actionName, "finish");
+  assert.match(plan.input.summary, /기본 모양/);
+  assert.match(plan.input.summary, /사각형은 R/);
+  assert.equal(plan.input.suppressProgress, true);
+  assert.equal(plan.showProgress, false);
+}
+
+{
+  const plan = deterministicPlan("기능", [], true);
+
+  assert.equal(plan.actionName, "finish");
+  assert.match(plan.input.summary, /기능 설명 모드/);
+  assert.match(plan.input.summary, /펜은 어디 있어/);
+  assert.equal(plan.input.suppressProgress, true);
+  assert.equal(plan.showProgress, false);
+}
+
+{
   const plan = deterministicPlan("펜 도구 알려줘", [], true);
 
   assert.equal(plan.actionName, "finish");
@@ -197,6 +220,35 @@ function deterministicPlan(prompt, selectedShapeIds = [], toolHelpMode = false) 
     toShapeId: "shape:auth",
     connectionKind: "arrow",
   });
+}
+
+{
+  const plan = deterministicPlan("회의 메모 찾아줘");
+
+  assert.equal(plan.actionName, "find_shapes");
+  assert.equal(plan.input.query, "회의 메모");
+  assert.equal(plan.input.focusResult, true);
+  assert.equal(plan.input.routingSource, "deterministic_search");
+}
+
+{
+  const plan = deterministicPlan("안녕 너는 누구야");
+
+  assert.equal(plan.actionName, "finish");
+  assert.match(plan.input.summary, /PILO Canvas AI/);
+  assert.match(plan.input.summary, /캔버스 위 도형/);
+  assert.equal(plan.input.suppressProgress, true);
+  assert.equal(plan.showProgress, false);
+}
+
+{
+  const terms = buildCanvasAgentShapeSearchTerms("회의 메모 위치 안내");
+
+  assert.ok(terms.includes("회의"));
+  assert.ok(terms.includes("메모"));
+  assert.ok(terms.includes("note"));
+  assert.ok(terms.includes("sticky-note"));
+  assert.equal(terms.includes("위치"), false);
 }
 
 {
@@ -292,6 +344,20 @@ function deterministicPlan(prompt, selectedShapeIds = [], toolHelpMode = false) 
   assert.equal(result.shouldContinue, false);
   assert.equal(result.shapeBatch.operations.length, 1);
   assert.equal(result.shapeBatch.operations[0].payload.shapeType, "arrow");
+  assert.equal(result.shapeBatch.operations[0].payload.x, 280);
+  assert.equal(result.shapeBatch.operations[0].payload.y, 170);
+  assert.equal(result.shapeBatch.operations[0].payload.width, 140);
+  assert.equal(result.shapeBatch.operations[0].payload.height, 1);
+  assert.deepEqual(result.shapeBatch.operations[0].payload.rawShape.props.start, {
+    type: "point",
+    x: 0,
+    y: 0,
+  });
+  assert.deepEqual(result.shapeBatch.operations[0].payload.rawShape.props.end, {
+    type: "point",
+    x: 140,
+    y: 0,
+  });
   assert.equal(result.shapeBatch.operations[0].payload.rawShape.props.arrowheadEnd, "arrow");
   assert.deepEqual(repository.findByIdCalls, [
     { canvasId: "canvas-1", shapeIds: ["shape:login", "shape:auth"] },

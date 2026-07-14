@@ -11,6 +11,7 @@ export const prReviewNavigation: FeatureNavigationItem = {
   href: "/pr-review",
   icon: GitPullRequestArrow,
   items: [
-    { title: "PR 선택", href: "/pr-review" }
+    { title: "PR 선택", href: "/pr-review" },
+    { title: "리뷰 공간", href: "/pr-review/rooms" }
   ]
 };

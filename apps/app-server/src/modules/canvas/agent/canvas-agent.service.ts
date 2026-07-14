@@ -11,7 +11,10 @@ import { CanvasAgentActionService } from "./canvas-agent-action.service";
 import { CanvasAgentDraftService } from "./canvas-agent-draft.service";
 import { CANVAS_AGENT_SCHEMA_VERSION, CanvasAgentJobService } from "./canvas-agent-job.service";
 import { CanvasAgentRepository } from "./canvas-agent.repository";
-import { resolveCanvasAgentToolTarget } from "./canvas-agent-tool-targets";
+import {
+  readCanvasAgentToolHelpOverview,
+  resolveCanvasAgentToolTarget
+} from "./canvas-agent-tool-targets";
 import type {
   ApplyCanvasAgentDraftRequest,
   CanvasAgentDraftApplyPayload,
@@ -316,7 +319,8 @@ export class CanvasAgentService implements OnModuleDestroy, OnModuleInit {
     const normalized = prompt.trim();
     const toolResolution = toolHelpMode ? resolveCanvasAgentToolTarget(normalized) : null;
     if (toolHelpMode && !toolResolution) {
-      const message = "아직 알고 있는 Canvas 기능과 맞지 않습니다. 메모, 도형, 색상, 휴지통처럼 툴바에 있는 기능 이름으로 물어봐 주세요.";
+      const message = readCanvasAgentToolHelpOverview(normalized)
+        ?? "아직 알고 있는 Canvas 기능과 맞지 않습니다. 메모, 도형, 색상, 휴지통처럼 툴바에 있는 기능 이름으로 물어봐 주세요.";
       return {
         actionName: "finish",
         input: { summary: message, suppressProgress: true },
@@ -355,7 +359,77 @@ export class CanvasAgentService implements OnModuleDestroy, OnModuleInit {
       };
     }
 
+    const searchQuery = !toolHelpMode
+      ? this.readDeterministicShapeSearchQuery(normalized)
+      : null;
+    if (searchQuery) {
+      return {
+        actionName: "find_shapes",
+        input: {
+          continuePlanning: false,
+          focusResult: true,
+          query: searchQuery,
+          routingSource: "deterministic_search"
+        },
+        message: `“${searchQuery}” 관련 도형을 찾아볼게요.`
+      };
+    }
+
+    const chatSummary = !toolHelpMode
+      ? this.readDeterministicChatSummary(normalized)
+      : null;
+    if (chatSummary) {
+      return {
+        actionName: "finish",
+        input: { summary: chatSummary, suppressProgress: true },
+        message: chatSummary,
+        showProgress: false
+      };
+    }
+
     return null;
+  }
+
+  private readDeterministicChatSummary(value: string): string | null {
+    const normalized = value.trim().split(/\s+/).join(" ");
+    if (!normalized) return null;
+    if (/(찾아|검색|어디|위치|보여|이동|가줘|가 줘|연결|이어|만들|생성|그려|작성|초안|디자인|와이어|코드|구현)/.test(normalized)) {
+      return null;
+    }
+
+    const greetingOnly = /^(안녕|안녕하세요|하이|hello|hi|hey)[!.?~\s]*(?:너는\s*누구야?|넌\s*누구야?|누구야?|뭐야?)?$/iu.test(normalized);
+    const identityQuestion = /(너는\s*누구|넌\s*누구|정체|소개해|뭐\s*하는|무엇을\s*할\s*수|뭘\s*할\s*수|할\s*수\s*있어|who\s+are\s+you|what\s+are\s+you)/iu.test(normalized);
+    if (!greetingOnly && !identityQuestion) {
+      return null;
+    }
+
+    return "안녕하세요. 저는 PILO Canvas AI예요. 캔버스 위 도형을 찾거나 화면을 이동하고, 선택한 도형을 연결하거나, 다이어그램/와이어프레임/코드 초안을 만드는 걸 도와드릴 수 있어요.";
+  }
+
+  private readDeterministicShapeSearchQuery(value: string): string | null {
+    const normalized = value.trim().split(/\s+/).join(" ");
+    if (!normalized) return null;
+    if (!/(찾아|검색|어디|위치|보여|이동|가줘|가 줘)/.test(normalized)) {
+      return null;
+    }
+    if (/(만들|생성|그려|작성|초안|디자인|와이어|코드|구현)/.test(normalized)) {
+      return null;
+    }
+    if (/(가져와|불러와|조회|일정|캘린더|calendar|회의록|리포트|github|깃허브|pr)/i.test(normalized)) {
+      return null;
+    }
+    if (/(도구|기능|버튼|설명|어떻게)/.test(normalized)) {
+      return null;
+    }
+
+    const query = normalized
+      .replace(/(?:을|를|이|가|은|는)?\s*(?:찾아줘|찾아 봐|찾아봐|찾아|검색해줘|검색해|검색|보여줘|보여 줘|보여|위치로 이동해줘|위치로 이동|위치 안내해줘|위치 안내|위치 알려줘|위치|어디 있어|어디있어|가줘|가 줘|이동해줘|이동해|이동)$/u, "")
+      .replace(/\b(?:canvas|shape)\b/giu, "")
+      .replace(/(?:캔버스|도형|쉐입|관련|있는|좀|바로|해줘)/gu, "")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    return query ? query.slice(0, 120) : null;
   }
 
   private isConnectPrompt(value: string): boolean {

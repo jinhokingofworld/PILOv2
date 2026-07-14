@@ -11,6 +11,43 @@ import type {
   CanvasAgentRunStatus
 } from "./canvas-agent.types";
 
+const CANVAS_AGENT_SHAPE_SEARCH_STOP_WORDS = new Set([
+  "canvas",
+  "shape",
+  "관련",
+  "검색",
+  "검색해",
+  "검색해줘",
+  "도형",
+  "보여",
+  "보여줘",
+  "쉐입",
+  "안내",
+  "어디",
+  "위치",
+  "이동",
+  "이동해",
+  "이동해줘",
+  "있는",
+  "찾아",
+  "찾아봐",
+  "찾아줘",
+  "캔버스",
+  "해줘"
+]);
+
+const CANVAS_AGENT_SHAPE_TYPE_SEARCH_ALIASES = new Map<string, string[]>([
+  ["메모", ["note", "sticky-note"]],
+  ["노트", ["note", "sticky-note"]],
+  ["스티키", ["note", "sticky-note"]],
+  ["텍스트", ["text"]],
+  ["글", ["text"]],
+  ["프레임", ["frame"]],
+  ["화살표", ["arrow"]],
+  ["선", ["line", "arrow"]],
+  ["코드", ["pilo-code-block"]]
+]);
+
 @Injectable()
 export class CanvasAgentRepository {
   constructor(private readonly database: DatabaseService) {}
@@ -163,6 +200,9 @@ export class CanvasAgentRepository {
   ): Promise<CanvasAgentShapeRow[]> {
     const normalized = query.trim();
     if (!normalized) return [];
+    const terms = buildCanvasAgentShapeSearchTerms(normalized);
+    const exactPattern = `%${escapeLikePattern(normalized)}%`;
+    const searchPatterns = terms.map((term) => `%${escapeLikePattern(term)}%`);
 
     return this.database.query<CanvasAgentShapeRow>(
       `
@@ -171,14 +211,36 @@ export class CanvasAgentRepository {
         WHERE canvas_id = $1
           AND deleted_at IS NULL
           AND (
-            COALESCE(title, '') ILIKE '%' || $2 || '%'
-            OR COALESCE(text_content, '') ILIKE '%' || $2 || '%'
-            OR shape_type ILIKE '%' || $2 || '%'
+            COALESCE(title, '') ILIKE $2 ESCAPE '\\'
+            OR COALESCE(text_content, '') ILIKE $2 ESCAPE '\\'
+            OR shape_type ILIKE $2 ESCAPE '\\'
+            OR EXISTS (
+              SELECT 1
+              FROM unnest($3::text[]) AS search_term(pattern)
+              WHERE COALESCE(title, '') ILIKE search_term.pattern ESCAPE '\\'
+                OR COALESCE(text_content, '') ILIKE search_term.pattern ESCAPE '\\'
+                OR shape_type ILIKE search_term.pattern ESCAPE '\\'
+            )
           )
-        ORDER BY updated_at DESC, id ASC
-        LIMIT $3
+        ORDER BY
+          CASE
+            WHEN COALESCE(title, '') ILIKE $2 ESCAPE '\\'
+              OR COALESCE(text_content, '') ILIKE $2 ESCAPE '\\'
+              THEN 0
+            WHEN EXISTS (
+              SELECT 1
+              FROM unnest($3::text[]) AS search_term(pattern)
+              WHERE COALESCE(title, '') ILIKE search_term.pattern ESCAPE '\\'
+                OR COALESCE(text_content, '') ILIKE search_term.pattern ESCAPE '\\'
+            )
+              THEN 1
+            ELSE 2
+          END ASC,
+          updated_at DESC,
+          id ASC
+        LIMIT $4
       `,
-      [canvasId, normalized, limit]
+      [canvasId, exactPattern, searchPatterns, limit]
     );
   }
 
@@ -342,15 +404,41 @@ export class CanvasAgentRepository {
   }
 
   async failRun(runId: string, message: string): Promise<void> {
+    const userMessage = "디자인 초안을 만드는 중 오류가 났어요. 다시 시도해 주세요.";
     await this.database.execute(
       `
         UPDATE canvas_agent_runs
         SET status = 'failed', error_code = 'CANVAS_AGENT_FAILED', error_message = $2,
-          result_summary = 'Canvas AI 작업을 완료하지 못했습니다.', completed_at = now()
+          result_summary = CASE
+            WHEN prompt ~* $3 THEN $4
+            ELSE 'Canvas AI 작업을 완료하지 못했습니다.'
+          END,
+          result_json = jsonb_set(
+            COALESCE(result_json, '{}'::jsonb),
+            '{progress}',
+            jsonb_build_object(
+              'message',
+              CASE
+                WHEN prompt ~* $3 THEN $4
+                ELSE 'Canvas AI 작업을 완료하지 못했습니다.'
+              END,
+              'highlightedShapeIds', '[]'::jsonb,
+              'targetViewport', NULL,
+              'toolTarget', NULL,
+              'toolTargetLabel', NULL
+            ),
+            true
+          ),
+          completed_at = now()
         WHERE id = $1
           AND status NOT IN ('completed', 'cancelled', 'expired')
       `,
-      [runId, message.slice(0, 4096)]
+      [
+        runId,
+        message.slice(0, 4096),
+        "(디자인|와이어|페이지|화면|초안|그려|만들|생성)",
+        userMessage
+      ]
     );
   }
 
@@ -468,4 +556,33 @@ export class CanvasAgentRepository {
     );
     return row?.status ?? null;
   }
+}
+
+export function buildCanvasAgentShapeSearchTerms(query: string): string[] {
+  const terms = new Set<string>();
+  const tokens =
+    query
+      .normalize("NFKC")
+      .toLowerCase()
+      .match(/[\p{L}\p{N}_-]+/gu) ?? [];
+
+  tokens.forEach((token) => {
+    if (token.length < 2) return;
+
+    const aliases = CANVAS_AGENT_SHAPE_TYPE_SEARCH_ALIASES.get(token);
+    if (!CANVAS_AGENT_SHAPE_SEARCH_STOP_WORDS.has(token)) {
+      terms.add(token);
+    }
+    aliases?.forEach((alias) => terms.add(alias));
+  });
+
+  if (!terms.size) {
+    terms.add(query.trim().toLowerCase());
+  }
+
+  return Array.from(terms).slice(0, 12);
+}
+
+function escapeLikePattern(value: string): string {
+  return value.replace(/[\\%_]/g, (match) => `\\${match}`);
 }

@@ -1,7 +1,7 @@
 import { Injectable, Optional } from "@nestjs/common";
 import { QueryResultRow } from "pg";
 import { badRequest, notFound } from "../../common/api-error";
-import { DatabaseService } from "../../database/database.service";
+import { DatabaseService, type DatabaseTransaction } from "../../database/database.service";
 import { WorkspaceService } from "../workspace/workspace.service";
 import { ListGithubProjectsV2Query } from "./dto";
 import { GithubAppClient } from "./github-app.client";
@@ -190,7 +190,7 @@ export class GithubProjectV2Service {
       repositoryId
     );
     const count = await this.countRows(
-      `SELECT COUNT(*)::int AS total FROM github_projects_v2 WHERE ${whereSql}`,
+      `SELECT COUNT(*)::int AS total FROM github_projects_v2 gp WHERE ${whereSql}`,
       values
     );
     const rows = await this.database.query<GithubProjectV2Row>(
@@ -346,6 +346,107 @@ export class GithubProjectV2Service {
         return { ...selection, syncRunId: error.syncRunId, syncStatus: "failed", syncError: error.message };
       }
       throw error;
+    }
+  }
+
+  async selectWorkspaceBoardProjectV2(
+    currentUserId: string,
+    workspaceId: string,
+    input: { repositoryId: string; projectV2Id: string },
+    transaction: DatabaseTransaction
+  ): Promise<{ installationId: string; repositoryId: string; projectV2Id: string }> {
+    const repository = await transaction.queryOne<GithubProjectV2RepositoryRow>(
+      `
+        SELECT id, workspace_id, installation_id, github_node_id, owner_login, name, full_name, raw
+        FROM github_repositories
+        WHERE workspace_id = $1::uuid AND id = $2::uuid
+        FOR UPDATE
+      `,
+      [workspaceId, input.repositoryId]
+    );
+    if (!repository?.installation_id) {
+      throw notFound("GitHub repository not found");
+    }
+
+    const project = await transaction.queryOne<GithubProjectV2SelectionProjectRow>(
+      `
+        SELECT id, installation_id
+        FROM github_projects_v2
+        WHERE workspace_id = $1::uuid AND id = $2::uuid
+        FOR UPDATE
+      `,
+      [workspaceId, input.projectV2Id]
+    );
+    if (!project) throw notFound("GitHub ProjectV2 not found");
+    if (project.installation_id !== repository.installation_id) {
+      throw badRequest("GitHub ProjectV2 does not belong to the installation");
+    }
+
+    const linked = await transaction.queryOne<GithubProjectV2RepositoryLinkRow>(
+      githubProjectV2RepositoryLinkSql,
+      [input.repositoryId, [input.projectV2Id]]
+    );
+    if (!linked) throw badRequest("GitHub ProjectV2 is not linked to the repository");
+
+    await this.pollingService?.terminateWorkspaceDeselectedQueuedRuns(
+      {
+        workspaceId,
+        retainedRepositoryId: input.repositoryId,
+        retainedProjectV2Id: input.projectV2Id
+      },
+      transaction
+    );
+    await transaction.execute(
+      `
+        DELETE FROM github_project_v2_polling_schedules AS schedule
+        USING github_repositories AS repository
+        WHERE schedule.repository_id = repository.id
+          AND repository.workspace_id = $1::uuid
+      `,
+      [workspaceId]
+    );
+    await transaction.execute(
+      `
+        DELETE FROM github_project_v2_selections AS selection
+        USING github_repositories AS repository
+        WHERE selection.repository_id = repository.id
+          AND repository.workspace_id = $1::uuid
+      `,
+      [workspaceId]
+    );
+    await transaction.execute(
+      `
+        INSERT INTO github_project_v2_selections (
+          installation_id, repository_id, project_v2_id
+        ) VALUES ($1::uuid, $2::uuid, $3::uuid)
+      `,
+      [repository.installation_id, input.repositoryId, input.projectV2Id]
+    );
+    await this.pollingService?.syncSelectionSchedules(
+      { repositoryId: input.repositoryId, requestedByUserId: currentUserId },
+      transaction
+    );
+
+    return {
+      installationId: repository.installation_id,
+      repositoryId: input.repositoryId,
+      projectV2Id: input.projectV2Id
+    };
+  }
+
+  async enqueueWorkspaceBoardProjectV2Sync(
+    currentUserId: string,
+    workspaceId: string,
+    source: { installationId: string; repositoryId: string; projectV2Id: string }
+  ): Promise<void> {
+    if (!this.syncRunService) return;
+    for (const target of ["project_v2_fields", "project_v2_items"] as const) {
+      await this.syncRunService.startGithubSyncRun(currentUserId, workspaceId, {
+        installationId: source.installationId,
+        repositoryId: source.repositoryId,
+        projectV2Id: source.projectV2Id,
+        target
+      });
     }
   }
 
@@ -689,21 +790,21 @@ export class GithubProjectV2Service {
     repositoryId: string | null
   ): { whereSql: string; values: unknown[] } {
     const values: unknown[] = [workspaceId];
-    const filters = ["workspace_id = $1"];
+    const filters = ["gp.workspace_id = $1"];
 
     if (ownerLogin) {
       values.push(ownerLogin);
-      filters.push(`owner_login = $${values.length}`);
+      filters.push(`gp.owner_login = $${values.length}`);
     }
 
     if (!includeClosed) {
-      filters.push("closed = false");
+      filters.push("gp.closed = false");
     }
 
     if (search) {
       values.push(`%${search}%`);
       filters.push(
-        `(title ILIKE $${values.length} OR short_description ILIKE $${values.length})`
+        `(gp.title ILIKE $${values.length} OR gp.short_description ILIKE $${values.length})`
       );
     }
 
@@ -711,15 +812,15 @@ export class GithubProjectV2Service {
     filters.push(`EXISTS (
       SELECT 1
       FROM github_project_v2_repositories gpr
-      WHERE gpr.project_v2_id = id
+      WHERE gpr.project_v2_id = gp.id
         AND gpr.repository_id = $${values.length}
     )`);
 
     if (!management) {
       filters.push(`EXISTS (
         SELECT 1 FROM github_project_v2_selections gps
-          WHERE gps.installation_id = installation_id
-            AND gps.project_v2_id = id
+          WHERE gps.installation_id = gp.installation_id
+            AND gps.project_v2_id = gp.id
             AND gps.repository_id = $${values.length}
       )`);
     }

@@ -43,6 +43,7 @@ import {
   PrReviewApiError
 } from "@/features/pr-review/api/client";
 import { PrReviewAnalysisStatus } from "@/features/pr-review/components/pr-review-analysis-status";
+import { PrReviewRoomsPanel } from "@/features/pr-review/components/pr-review-rooms-panel";
 import { PrReviewCanvasErrorBoundary } from "@/features/pr-review/components/review-canvas/PrReviewCanvasErrorBoundary";
 import { PrReviewCanvasShell } from "@/features/pr-review/components/review-canvas/PrReviewCanvasShell";
 import { getPrReviewErrorMessage } from "@/features/pr-review/pr-review-error-message";
@@ -176,7 +177,11 @@ function getFileStatusLabel(status: PrReviewPullRequestFile["fileStatus"]) {
   }
 }
 
-export function PrReviewPanel() {
+export function PrReviewPanel({
+  view = "pull-requests"
+}: {
+  view?: "pull-requests" | "rooms";
+}) {
   const router = useRouter();
   const authSession = useAuthSession();
   const workspaceId = authSession?.activeWorkspaceId ?? "";
@@ -250,6 +255,9 @@ export function PrReviewPanel() {
     PrReviewPullRequest | PrReviewPullRequestDetail | null
   >(null);
   const [routeSelection] = useState(readInitialPrReviewRouteSelection);
+  const [requestedReviewSessionId, setRequestedReviewSessionId] = useState(
+    routeSelection.reviewSessionId
+  );
   const [autoOpenedPullRequestId, setAutoOpenedPullRequestId] = useState<
     string | null
   >(null);
@@ -270,6 +278,8 @@ export function PrReviewPanel() {
     descriptionExpanded || !shouldClampDescription
       ? detailDescription
       : `${detailDescription.slice(0, 360).trimEnd()}...`;
+  const backToSelectionLabel =
+    view === "rooms" ? "리뷰 공간으로" : "PR 선택으로";
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -285,12 +295,20 @@ export function PrReviewPanel() {
   }, []);
 
   useEffect(() => {
+    if (view !== "pull-requests") {
+      return;
+    }
+
     void loadConnectedRepository();
     // Repository state reloads when workspace or token changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspaceId, apiClient]);
+  }, [workspaceId, apiClient, view]);
 
   useEffect(() => {
+    if (view !== "pull-requests") {
+      return;
+    }
+
     if (!repositoryConnected || !repository) {
       setPullRequests([]);
       setPagination(emptyPagination);
@@ -300,10 +318,10 @@ export function PrReviewPanel() {
 
     void loadPullRequests(repository.id, page, debouncedQuery);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [repositoryConnected, repository?.id, page, debouncedQuery]);
+  }, [repositoryConnected, repository?.id, page, debouncedQuery, view]);
 
   useEffect(() => {
-    const reviewSessionId = routeSelection.reviewSessionId;
+    const reviewSessionId = requestedReviewSessionId;
     if (!reviewSessionId || !workspaceId || activeReviewSession) {
       return;
     }
@@ -347,19 +365,22 @@ export function PrReviewPanel() {
       } catch (error) {
         if (!isAbortError(error)) {
           setReviewSessionLoadError(
-            "Review session 상태를 불러오지 못했습니다. PR 목록에서 다시 시작해주세요."
+            view === "rooms"
+              ? "Review session 상태를 불러오지 못했습니다. 리뷰 공간에서 다시 입장해주세요."
+              : "Review session 상태를 불러오지 못했습니다. PR 목록에서 다시 시작해주세요."
           );
         }
       }
     })();
 
     return () => abortController.abort();
-  }, [activeReviewSession, apiClient, routeSelection.reviewSessionId, workspaceId]);
+  }, [activeReviewSession, apiClient, requestedReviewSessionId, view, workspaceId]);
 
   useEffect(() => {
     if (
       !routeSelection.pullRequestId ||
-      routeSelection.reviewSessionId ||
+      requestedReviewSessionId ||
+      view !== "pull-requests" ||
       !repositoryConnected ||
       !workspaceId ||
       selectedPullRequest ||
@@ -387,8 +408,10 @@ export function PrReviewPanel() {
     autoOpenedPullRequestId,
     pullRequests,
     repositoryConnected,
+    requestedReviewSessionId,
     routeSelection.pullRequestId,
     selectedPullRequest,
+    view,
     workspaceId
   ]);
 
@@ -616,6 +639,7 @@ export function PrReviewPanel() {
     setIsAnalysisDelayed(isPrReviewAnalysisDelayed(session));
     setRetryReviewError(null);
     setReviewSessionLoadError(null);
+    setRequestedReviewSessionId(session.id);
     setSelectedPullRequest(null);
     setPullRequestDetail(null);
     setPullRequestFiles([]);
@@ -626,6 +650,13 @@ export function PrReviewPanel() {
     replaceReviewSessionRoute(session.id);
   }
 
+  function activateReviewSessionWithLatestPullRequest(session: PrReviewSession) {
+    void apiClient
+      .getPullRequest(workspaceId, session.pullRequestId)
+      .then((pullRequest) => activateReviewSession(session, pullRequest))
+      .catch(() => activateReviewSession(session, activeReviewPullRequest));
+  }
+
   function leaveReviewSession() {
     retryAbortControllerRef.current?.abort();
     setActiveReviewSession(null);
@@ -633,7 +664,15 @@ export function PrReviewPanel() {
     setAnalysisPollingError(null);
     setIsAnalysisDelayed(false);
     setRetryReviewError(null);
+    setReviewSessionLoadError(null);
+    setRequestedReviewSessionId(null);
     replaceReviewSessionRoute(null);
+  }
+
+  function enterReviewSession(reviewSessionId: string) {
+    setReviewSessionLoadError(null);
+    setRequestedReviewSessionId(reviewSessionId);
+    replaceReviewSessionRoute(reviewSessionId);
   }
 
   async function startReviewSession() {
@@ -705,6 +744,7 @@ export function PrReviewPanel() {
       {activeReviewSession?.status === "analyzing" ||
       activeReviewSession?.status === "failed" ? (
         <PrReviewAnalysisStatus
+          backLabel={backToSelectionLabel}
           isDelayed={isAnalysisDelayed}
           isRetrying={isRetryingReview}
           onBackToSelection={leaveReviewSession}
@@ -716,16 +756,16 @@ export function PrReviewPanel() {
         />
       ) : activeReviewSession ? (
         <PrReviewCanvasErrorBoundary
+          backLabel={backToSelectionLabel}
           key={activeReviewSession.id}
           onBackToSelection={leaveReviewSession}
         >
           <PrReviewCanvasShell
             apiClient={apiClient}
+            backLabel={backToSelectionLabel}
             onBackToSelection={leaveReviewSession}
             onGoToGithub={goToGithubPage}
-            onReviewSessionCreated={(session) =>
-              activateReviewSession(session, activeReviewPullRequest)
-            }
+            onReviewSessionCreated={activateReviewSessionWithLatestPullRequest}
             pullRequest={activeReviewPullRequest}
             realtimeIdentity={realtimeIdentity}
             session={activeReviewSession}
@@ -734,7 +774,30 @@ export function PrReviewPanel() {
         </PrReviewCanvasErrorBoundary>
       ) : null}
 
-      {!activeReviewSession ? (
+      {!activeReviewSession &&
+      requestedReviewSessionId &&
+      !reviewSessionLoadError ? (
+        <ReviewSessionLoadingState />
+      ) : null}
+
+      {!activeReviewSession && reviewSessionLoadError ? (
+        <ReviewSessionLoadErrorState
+          backLabel={backToSelectionLabel}
+          message={reviewSessionLoadError}
+          onBack={leaveReviewSession}
+          onRetry={() => window.location.reload()}
+        />
+      ) : null}
+
+      {!activeReviewSession &&
+      !requestedReviewSessionId &&
+      view === "rooms" ? (
+        <PrReviewRoomsPanel onEnterReviewSession={enterReviewSession} />
+      ) : null}
+
+      {!activeReviewSession &&
+      !requestedReviewSessionId &&
+      view === "pull-requests" ? (
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-5">
       <section className="flex flex-col items-center gap-2 text-center">
         <p className="text-sm font-medium text-primary">PR Review</p>
@@ -878,6 +941,53 @@ function RepositorySummary({ repository }: { repository: PrReviewRepository }) {
       <span className="text-muted-foreground">
         {repository.private ? "Private" : "Public"}
       </span>
+    </div>
+  );
+}
+
+function ReviewSessionLoadingState() {
+  return (
+    <div className="flex min-h-[50vh] items-center justify-center">
+      <div className="flex items-center gap-3 rounded-lg border bg-background px-4 py-3 text-sm text-muted-foreground shadow-sm">
+        <Loader2 className="size-4 animate-spin text-primary" />
+        리뷰 공간을 여는 중
+      </div>
+    </div>
+  );
+}
+
+function ReviewSessionLoadErrorState({
+  backLabel,
+  message,
+  onBack,
+  onRetry
+}: {
+  backLabel: string;
+  message: string;
+  onBack: () => void;
+  onRetry: () => void;
+}) {
+  return (
+    <div className="mx-auto flex min-h-[50vh] w-full max-w-xl items-center">
+      <Card className="w-full rounded-lg">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <AlertCircle className="size-5 text-destructive" />
+            리뷰 공간을 열지 못했습니다
+          </CardTitle>
+          <CardDescription>{message}</CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-wrap justify-end gap-2">
+          <Button onClick={onBack} type="button" variant="secondary">
+            <ArrowLeft className="size-4" />
+            {backLabel}
+          </Button>
+          <Button onClick={onRetry} type="button" variant="outline">
+            <RefreshCcw className="size-4" />
+            다시 시도
+          </Button>
+        </CardContent>
+      </Card>
     </div>
   );
 }

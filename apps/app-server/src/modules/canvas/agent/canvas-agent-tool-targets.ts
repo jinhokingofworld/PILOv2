@@ -310,6 +310,30 @@ const TOOL_EXPLAIN_TERMS = [
   "왜 써"
 ];
 
+const CANVAS_AGENT_TOOL_HELP_OVERVIEW =
+  "기능 설명 모드에서는 메모, 도형, 펜, 지우개, 색상, 휴지통처럼 캔버스 툴바에 있는 기능의 위치와 사용법을 물어볼 수 있어요. 예를 들면 “펜은 어디 있어?”, “도형은?”, “지우개 기능 설명해줘”처럼 물어보면 돼요.";
+
+function normalizeToolAliasFollowUp(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[?!?.~…\s]/g, "")
+    .replace(/(?:은요|는요|이요|가요|요|은|는|이|가|을|를|도)$/u, "");
+}
+
+function isToolAliasFollowUp(prompt: string, tool: CanvasAgentToolTarget) {
+  const normalizedPrompt = normalizeToolAliasFollowUp(prompt);
+  if (!normalizedPrompt) return false;
+  return tool.aliases.some((alias) => normalizedPrompt === normalizeToolAliasFollowUp(alias));
+}
+
+export function readCanvasAgentToolHelpOverview(prompt: string): string | null {
+  const normalized = normalizeToolAliasFollowUp(prompt);
+  if (!normalized) return null;
+  return ["기능", "도움", "도움말", "사용법"].includes(normalized)
+    ? CANVAS_AGENT_TOOL_HELP_OVERVIEW
+    : null;
+}
+
 export function resolveCanvasAgentToolTarget(prompt: string): CanvasAgentToolTargetResolution | null {
   const normalized = prompt.trim().toLowerCase();
   if (!normalized) return null;
@@ -323,7 +347,9 @@ export function resolveCanvasAgentToolTarget(prompt: string): CanvasAgentToolTar
   const looksLikeToolGuide = TOOL_GUIDE_TERMS.some((term) => normalized.includes(term));
   if (looksLikeToolGuide) return { mode: "guide", tool: match };
   const looksLikeExplanation = TOOL_EXPLAIN_TERMS.some((term) => normalized.includes(term));
-  return looksLikeExplanation ? { mode: "explain", tool: match } : null;
+  return looksLikeExplanation || isToolAliasFollowUp(normalized, match)
+    ? { mode: "explain", tool: match }
+    : null;
 }
 
 export function findCanvasAgentToolTarget(target: string): CanvasAgentToolTarget | null {

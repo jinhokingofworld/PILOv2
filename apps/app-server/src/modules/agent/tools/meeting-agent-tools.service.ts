@@ -5,6 +5,7 @@ import {
   MeetingReportSummaryPayload,
   MeetingService
 } from "../../meeting/meeting.service";
+import { MeetingTranscriptRagService } from "../../meeting/meeting-transcript-rag.service";
 import type {
   AgentJsonObject,
   AgentJsonValue,
@@ -25,6 +26,8 @@ interface ReportIdInput {
   reportId: string;
 }
 
+interface SearchMeetingTranscriptInput { query: string; reportId?: string }
+
 interface ProjectionOptions {
   sectionTextLimit: number;
 }
@@ -38,6 +41,7 @@ const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const LIST_INPUT_FIELDS = ["status", "limit"];
 const REPORT_ID_INPUT_FIELDS = ["reportId"];
+const SEARCH_TRANSCRIPT_INPUT_FIELDS = ["query", "reportId"];
 const FORBIDDEN_MEETING_TOOL_FIELDS = [
   "workspaceId",
   "userId",
@@ -51,14 +55,31 @@ const ACTION_ITEM_TEXT_LIMIT = 500;
 
 @Injectable()
 export class MeetingAgentToolsService {
-  constructor(private readonly meetingService: MeetingService) {}
+  constructor(private readonly meetingService: MeetingService, private readonly meetingTranscriptRagService: MeetingTranscriptRagService) {}
 
   listDefinitions(): AgentToolDefinition<unknown>[] {
     return [
       this.listMeetingReportsDefinition(),
       this.getMeetingReportDefinition(),
-      this.summarizeMeetingReportDefinition()
+      this.summarizeMeetingReportDefinition(),
+      this.searchMeetingTranscriptDefinition()
     ];
+  }
+
+  private searchMeetingTranscriptDefinition(): AgentToolDefinition<unknown> {
+    return {
+      name: "search_meeting_transcript",
+      description: "권한이 있는 MeetingReport transcript에서 질문과 의미적으로 관련된 발언을 검색하고 근거 기반 답변을 생성합니다.",
+      riskLevel: "low",
+      executionMode: "auto",
+      requiresGroundedAnswer: true,
+      inputSchema: { type: "object", required: ["query"], additionalProperties: false, properties: { query: { type: "string", minLength: 1, maxLength: 1000 }, reportId: { type: "string", format: "uuid" } } },
+      validateInput: (input) => this.validateSearchTranscriptInput(input),
+      execute: async (context, input) => {
+        const sources = await this.meetingTranscriptRagService.search(context.currentUserId, context.workspaceId, this.validateSearchTranscriptInput(input));
+        return { outputSummary: { status: "grounding_queued", sourceCount: sources.length, sourceIds: sources.map((source) => source.sourceId) }, resourceRefs: sources.map((source) => ({ domain: "meeting", resourceType: "meeting_report", resourceId: source.reportId })), status: "grounding_queued" };
+      }
+    };
   }
 
   private listMeetingReportsDefinition(): AgentToolDefinition<unknown> {
@@ -349,6 +370,15 @@ export class MeetingAgentToolsService {
     return {
       reportId: this.requireReportId(object.reportId)
     };
+  }
+
+  private validateSearchTranscriptInput(input: unknown): SearchMeetingTranscriptInput {
+    const object = this.requirePlainObject(input, "Meeting transcript search input");
+    this.rejectForbiddenMeetingToolFields(object);
+    this.assertOnlyAllowedFields(object, SEARCH_TRANSCRIPT_INPUT_FIELDS, "Meeting transcript search input");
+    const query = this.boundText(typeof object.query === "string" ? object.query : null, 1000);
+    if (query === null) throw badRequest("query must be a non-empty string");
+    return { query, reportId: object.reportId === undefined ? undefined : this.requireReportId(object.reportId) };
   }
 
   private readOptionalStatus(value: unknown): MeetingReportStatus | undefined {

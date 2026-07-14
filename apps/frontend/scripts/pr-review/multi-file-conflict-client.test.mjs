@@ -96,4 +96,13 @@ assert.equal(
 assert.equal(requests[1].init.method, "POST");
 assert.deepEqual(JSON.parse(requests[1].init.body), suggestionInput);
 
+await client.createReviewRoomRevision("workspace-id", "review-room-id");
+
+assert.equal(requests.length, 3);
+assert.equal(
+  requests[2].url,
+  "https://api.example.test/api/v1/workspaces/workspace-id/github/review-rooms/review-room-id/revisions"
+);
+assert.equal(requests[2].init.method, "POST");
+
 console.log("PR Review multi-file conflict client tests passed");

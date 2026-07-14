@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Query,
   Res,
   UseGuards
@@ -28,7 +29,8 @@ import type {
   UpdateBoardIssueStatusPayload,
   UpdateBoardIssuePayload,
   BoardRelatedPullRequestPayload,
-  CreateBoardIssuePayload
+  CreateBoardIssuePayload,
+  ActiveBoardSourcePayload
 } from "./types";
 
 @Controller("workspaces/:workspaceId/boards")
@@ -65,6 +67,27 @@ export class BoardController {
     );
     reply.status(result.statusCode);
     return apiResponse(result.board);
+  }
+
+  @Get("active")
+  async getActiveBoardSource(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string
+  ): Promise<ApiSuccessResponse<ActiveBoardSourcePayload | null>> {
+    return apiResponse(
+      await this.boardService.getActiveBoardSource(currentUserId, workspaceId)
+    );
+  }
+
+  @Put("active")
+  async setActiveBoardSource(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Body() body: unknown
+  ): Promise<ApiSuccessResponse<ActiveBoardSourcePayload>> {
+    return apiResponse(
+      await this.boardService.setActiveBoardSource(currentUserId, workspaceId, body)
+    );
   }
 
   @Get(":boardId")

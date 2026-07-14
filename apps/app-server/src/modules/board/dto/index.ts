@@ -37,3 +37,5 @@ export interface CreateBoardIssueRequest {
   body?: unknown;
   columnId?: unknown;
 }
+
+export * from "./active-board-source.dto";

@@ -87,9 +87,15 @@ class FakeMeetingService {
   }
 }
 
+class FakeMeetingTranscriptRagService {
+  async search() {
+    return [{ sourceId: "99999999-9999-4999-8999-999999999999", reportId: REPORT_ID, startedAtMs: 1000, endedAtMs: 2000, content: "원문은 output에 저장하지 않는다." }];
+  }
+}
+
 function createRegistry() {
   const meetingService = new FakeMeetingService();
-  const meetingTools = new MeetingAgentToolsService(meetingService);
+  const meetingTools = new MeetingAgentToolsService(meetingService, new FakeMeetingTranscriptRagService());
   const registry = new AgentToolRegistryService(undefined, meetingTools);
 
   return {
@@ -104,6 +110,16 @@ const context = {
   runId: RUN_ID
 };
 
+{
+  const { registry } = createRegistry();
+  const tool = registry.getDefinition("search_meeting_transcript");
+  const result = await tool.execute(context, tool.validateInput({ query: "일정 결론" }));
+  assert.equal(tool.requiresGroundedAnswer, true);
+  assert.equal(result.outputSummary.sourceCount, 1);
+  assert.deepEqual(result.outputSummary.sourceIds, ["99999999-9999-4999-8999-999999999999"]);
+  assert.doesNotMatch(JSON.stringify(result.outputSummary), /원문/);
+}
+
 function errorCode(error) {
   return error.getResponse().error.code;
 }
@@ -115,7 +131,8 @@ function errorCode(error) {
   assert.deepEqual(names, [
     "list_meeting_reports",
     "get_meeting_report",
-    "summarize_meeting_report"
+    "summarize_meeting_report",
+    "search_meeting_transcript"
   ]);
 }
 

@@ -10,6 +10,7 @@ import type {
   BoardPaginatedPayload,
   BoardPayload,
   BoardRelatedPullRequestPayload,
+  ActiveBoardSourcePayload,
   CreateBoardInput,
   CreateBoardIssueCommand,
   CreateBoardIssuePayload,
@@ -261,6 +262,10 @@ function boardPath(workspaceId: string, boardId: string) {
   return `${boardsPath(workspaceId)}/${encodeURIComponent(boardId)}` as const;
 }
 
+function activeBoardSourcePath(workspaceId: string) {
+  return `${boardsPath(workspaceId)}/active` as const;
+}
+
 function boardIssuePath(workspaceId: string, boardId: string, issueId: string) {
   return `${boardPath(workspaceId, boardId)}/issues/${encodeURIComponent(
     issueId
@@ -319,6 +324,22 @@ export function createBoardApiClient({
       return requestBoardData<BoardPayload>(
         boardsPath(workspaceId),
         withJsonBody(body, { method: "POST" }),
+        requestOptions
+      );
+    },
+
+    async getActiveBoardSource(workspaceId: string) {
+      return requestBoardData<ActiveBoardSourcePayload | null>(
+        activeBoardSourcePath(workspaceId),
+        undefined,
+        requestOptions
+      );
+    },
+
+    async setActiveBoardSource(workspaceId: string, body: CreateBoardInput) {
+      return requestBoardData<ActiveBoardSourcePayload>(
+        activeBoardSourcePath(workspaceId),
+        withJsonBody(body, { method: "PUT" }),
         requestOptions
       );
     },

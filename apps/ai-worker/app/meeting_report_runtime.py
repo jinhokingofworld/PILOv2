@@ -64,9 +64,14 @@ DEFAULT_MEETING_TRANSCRIPT_EMBEDDING_JOBS_PER_TICK = 10
 DEFAULT_MEETING_REPORT_EVENT_MAX_ATTEMPTS = 3
 AGENT_RETRY_TERMINAL_RECEIVE_COUNT = 3
 AGENT_RETRY_EXHAUSTED_ERROR_CODE = "AGENT_PLANNER_RETRY_EXHAUSTED"
+AGENT_GROUNDED_ANSWER_RETRY_TERMINAL_RECEIVE_COUNT = 3
+AGENT_GROUNDED_ANSWER_RETRY_EXHAUSTED_ERROR_CODE = "AGENT_GROUNDED_ANSWER_RETRY_EXHAUSTED"
 PR_REVIEW_ANALYSIS_RETRY_TERMINAL_RECEIVE_COUNT = 3
 CANVAS_AGENT_RETRY_TERMINAL_RECEIVE_COUNT = 3
 AGENT_RETRY_EXHAUSTED_ERROR_MESSAGE = "요청을 분석하지 못했습니다. 잠시 후 다시 시도해주세요."
+AGENT_GROUNDED_ANSWER_RETRY_EXHAUSTED_ERROR_MESSAGE = (
+    "회의록 근거 답변을 생성하지 못했습니다. 잠시 후 다시 시도해주세요."
+)
 LOCAL_APP_ENVS = {"local", "test", "development"}
 MEETING_REPORT_FAILURE_STEPS = {
     "recording_not_completed": "STT",
@@ -850,6 +855,113 @@ class PgAgentRunRepository:
         finally:
             self.release_run_lock(run_id)
 
+    def fail_grounded_answer_after_retry_exhaustion(self, run_id: str) -> bool:
+        if not self.try_acquire_run_lock(run_id):
+            return False
+
+        try:
+            with self.connection.transaction():
+                run = self.connection.execute(
+                    """
+                    UPDATE agent_runs
+                    SET
+                      status = 'failed',
+                      error_code = %s,
+                      error_message = %s,
+                      message = %s,
+                      completed_at = now(),
+                      updated_at = now()
+                    WHERE id = %s
+                      AND status = 'running'
+                    RETURNING workspace_id
+                    """,
+                    (
+                        AGENT_GROUNDED_ANSWER_RETRY_EXHAUSTED_ERROR_CODE,
+                        AGENT_GROUNDED_ANSWER_RETRY_EXHAUSTED_ERROR_MESSAGE,
+                        AGENT_GROUNDED_ANSWER_RETRY_EXHAUSTED_ERROR_MESSAGE,
+                        run_id,
+                    ),
+                ).fetchone()
+
+                if run is None:
+                    return False
+
+                self.connection.execute(
+                    """
+                    UPDATE agent_steps
+                    SET
+                      status = 'failed',
+                      error_code = %s,
+                      error_message = %s,
+                      completed_at = now(),
+                      updated_at = now()
+                    WHERE run_id = %s
+                      AND step_type = 'answer'
+                      AND status = 'pending'
+                    """,
+                    (
+                        AGENT_GROUNDED_ANSWER_RETRY_EXHAUSTED_ERROR_CODE,
+                        AGENT_GROUNDED_ANSWER_RETRY_EXHAUSTED_ERROR_MESSAGE,
+                        run_id,
+                    ),
+                )
+                self.connection.execute(
+                    """
+                    UPDATE agent_grounded_answer_outbox
+                    SET
+                      status = 'failed',
+                      error_code = %s,
+                      error_message = %s,
+                      updated_at = now()
+                    WHERE run_id = %s
+                      AND status IN ('pending', 'publishing', 'delivered')
+                    """,
+                    (
+                        AGENT_GROUNDED_ANSWER_RETRY_EXHAUSTED_ERROR_CODE,
+                        AGENT_GROUNDED_ANSWER_RETRY_EXHAUSTED_ERROR_MESSAGE,
+                        run_id,
+                    ),
+                )
+                self.connection.execute(
+                    """
+                    INSERT INTO agent_logs (
+                      workspace_id,
+                      run_id,
+                      actor_type,
+                      level,
+                      event_type,
+                      message,
+                      metadata_json,
+                      resource_refs
+                    )
+                    VALUES (
+                      %s,
+                      %s,
+                      'system',
+                      'error',
+                      'grounded_answer_retry_exhausted',
+                      %s,
+                      %s::jsonb,
+                      '[]'::jsonb
+                    )
+                    """,
+                    (
+                        str(run["workspace_id"]),
+                        run_id,
+                        "Agent grounded answer retries exhausted",
+                        json.dumps(
+                            {
+                                "maxReceiveCount": (
+                                    AGENT_GROUNDED_ANSWER_RETRY_TERMINAL_RECEIVE_COUNT
+                                )
+                            }
+                        ),
+                    ),
+                )
+                return True
+        finally:
+            self.release_run_lock(run_id)
+
 
 class S3RecordingStorage:
     def __init__(self, client: Any, bucket: str) -> None:
@@ -983,6 +1095,7 @@ class SqsAiJobWorker:
         meeting_transcript_embedding_processor: Any | None = None,
         stale_execution_recovery: Any | None = None,
         agent_retry_exhaustion_recovery: Any | None = None,
+        agent_grounded_answer_retry_exhaustion_recovery: Any | None = None,
         canvas_agent_retry_exhaustion_recovery: Any | None = None,
         pr_review_retry_exhaustion_recovery: Any | None = None,
         monotonic_time: Callable[[], float] = time.monotonic,
@@ -994,6 +1107,9 @@ class SqsAiJobWorker:
         self.meeting_transcript_embedding_processor = meeting_transcript_embedding_processor
         self.stale_execution_recovery = stale_execution_recovery
         self.agent_retry_exhaustion_recovery = agent_retry_exhaustion_recovery
+        self.agent_grounded_answer_retry_exhaustion_recovery = (
+            agent_grounded_answer_retry_exhaustion_recovery
+        )
         self.canvas_agent_retry_exhaustion_recovery = canvas_agent_retry_exhaustion_recovery
         self.pr_review_retry_exhaustion_recovery = pr_review_retry_exhaustion_recovery
         self.monotonic_time = monotonic_time
@@ -1060,6 +1176,7 @@ class SqsAiJobWorker:
             should_delete = (
                 result.delete_message
                 or self._terminalize_agent_retry(result, message)
+                or self._terminalize_grounded_answer_retry(result, message)
                 or self._terminalize_canvas_agent_retry(result, message)
                 or self._terminalize_pr_review_analysis_retry(result, message, body)
             )
@@ -1134,6 +1251,34 @@ class SqsAiJobWorker:
         except Exception:
             LOGGER.exception(
                 "Agent retry terminalization failed run_id=%s message_id=%s",
+                result.resource_id,
+                message.get("MessageId"),
+            )
+            return False
+
+    def _terminalize_grounded_answer_retry(
+        self,
+        result: Any,
+        message: dict[str, Any],
+    ) -> bool:
+        if (
+            self.agent_grounded_answer_retry_exhaustion_recovery is None
+            or result.job_type != "agent_grounded_answer_requested"
+            or result.reason != "infrastructure_failure"
+            or not result.resource_id
+            or self._receive_count(message) < AGENT_GROUNDED_ANSWER_RETRY_TERMINAL_RECEIVE_COUNT
+        ):
+            return False
+
+        try:
+            return bool(
+                self.agent_grounded_answer_retry_exhaustion_recovery.fail_grounded_answer_after_retry_exhaustion(
+                    result.resource_id
+                )
+            )
+        except Exception:
+            LOGGER.exception(
+                "Grounded answer retry terminalization failed run_id=%s message_id=%s",
                 result.resource_id,
                 message.get("MessageId"),
             )
@@ -1229,12 +1374,60 @@ class HttpAgentExecutionHandoffClient(AgentExecutionHandoffClient):
     def recover_stale_executions(self) -> None:
         self._post("/api/v1/internal/agent/stale-executions/recover")
 
+    def get_grounding_context(self, run_id: str) -> dict[str, object] | None:
+        request = Request(
+            f"{self.base_url}/api/v1/internal/agent/runs/{run_id}/grounding-context",
+            headers={"X-Agent-Execution-Handoff-Token": self.token},
+            method="GET",
+        )
+        try:
+            with urlopen(request, timeout=self.timeout_seconds) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+                return payload if isinstance(payload, dict) else None
+        except HTTPError as error:
+            if error.code == 404:
+                return None
+            raise InfrastructureError(
+                f"Agent grounding context returned HTTP {error.code}"
+            ) from error
+        except (OSError, TimeoutError, URLError) as error:
+            raise InfrastructureError("Agent grounding context is unavailable") from error
+
+    def complete_grounded_answer(self, run_id: str, answer: str, citations: list[str]) -> None:
+        self._post_json(
+            f"/api/v1/internal/agent/runs/{run_id}/grounded-answer",
+            {"answer": answer, "citations": citations},
+        )
+
+    def complete_grounded_answer_without_sources(self, run_id: str) -> None:
+        self._post(f"/api/v1/internal/agent/runs/{run_id}/grounded-answer/no-sources")
+
     def _post(self, path: str) -> None:
         request = Request(
             f"{self.base_url}{path}",
             data=b"",
             headers={
                 "X-Agent-Execution-Handoff-Token": self.token,
+            },
+            method="POST",
+        )
+        try:
+            with urlopen(request, timeout=self.timeout_seconds):
+                return
+        except HTTPError as error:
+            raise InfrastructureError(
+                f"Agent execution handoff returned HTTP {error.code}"
+            ) from error
+        except (OSError, TimeoutError, URLError) as error:
+            raise InfrastructureError("Agent execution handoff is unavailable") from error
+
+    def _post_json(self, path: str, payload: dict[str, object]) -> None:
+        request = Request(
+            f"{self.base_url}{path}",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "X-Agent-Execution-Handoff-Token": self.token,
+                "Content-Type": "application/json",
             },
             method="POST",
         )
@@ -1386,6 +1579,7 @@ def create_worker(settings: RuntimeSettings | None = None) -> SqsAiJobWorker:
         meeting_transcript_embedding_processor=meeting_transcript_embedding_processor,
         stale_execution_recovery=agent_execution_handoff_client,
         agent_retry_exhaustion_recovery=agent_run_repository,
+        agent_grounded_answer_retry_exhaustion_recovery=agent_run_repository,
     )
 
 

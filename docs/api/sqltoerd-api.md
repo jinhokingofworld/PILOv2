@@ -45,7 +45,6 @@ API가 담당하는 범위:
 - Prisma/DBML/Mermaid/PlantUML/SQLAlchemy/Sequelize source 저장
 - Manual arrow
 - URL 공유
-- 실시간 협업
 - 자유형 Canvas shape API와 sqltoerd object의 양방향 동기화
 - 최근 열람 시각 또는 최근 session pointer 저장
 - 삭제 session 복구와 version history
@@ -53,6 +52,103 @@ API가 담당하는 범위:
 sqltoerd는 자유형 Canvas의 하위 도구가 아니라 Workspace의 독립 기능이다. 화면은
 tldraw 기반 surface를 사용할 수 있지만, 저장 API는 `canvas-api.md`의 freeform
 canvas shape API를 재사용하지 않는다.
+
+## Realtime Presence (Phase 1)
+
+SQLtoERD 편집 화면은 REST session API와 별도로 Socket.IO presence room을 사용할 수
+있다. 이 단계는 다른 사용자의 현재 위치와 선택 상태만 보여 주며, session의
+`sourceText`, `modelJson`, `layoutJson`을 저장하거나 동기화하지 않는다.
+
+- room name: `workspace:{workspaceId}:sql-erd:{sessionId}`
+- 인증: REST API와 같은 bearer session token을 Socket.IO handshake에 전달한다.
+- 접근: `sql_erd_sessions.workspace_id`와 일치하고 `deleted_at IS NULL`인 session에
+  대해, 해당 Workspace의 활성 `workspace_members`만 room에 입장할 수 있다.
+- presence 상태는 연결된 socket의 메모리에만 유지한다. Redis Socket.IO adapter가
+  설정된 multi-instance 환경에서는 room socket snapshot을 adapter로 수집한다.
+  새로고침·재접속·server 재시작 뒤 복원하지 않으며 DB에 저장하지 않는다.
+- `latestOpSeq`는 후속 durable operation 단계의 예약 필드이며, Phase 1에서는 항상
+  `0`이다.
+
+### Client events
+
+```ts
+"sql-erd:join" = {
+  workspaceId: string;
+  sessionId: string;
+};
+
+"sql-erd:leave" = {
+  workspaceId: string;
+  sessionId: string;
+};
+
+"sql-erd:presence:update" = {
+  workspaceId: string;
+  sessionId: string;
+  cursor: { x: number; y: number } | null;
+  selectedObjects: SqltoerdPresenceSelectedObject[]; // max 100
+  tool: "select" | "note" | "frame" | "text" | "draw" | "eraser";
+  editingMode: "draw" | "move" | "resize" | "relation" | "sql" | null;
+  sentAt: string; // ISO 8601
+};
+
+type SqltoerdPresenceSelectedObject = {
+  type: "table" | "relation" | "annotation" | "note" | "frame" | "text" | "stroke";
+  id: string;
+};
+```
+
+Client는 cursor를 tldraw page 좌표로 전송한다. pointer 이동은 `socket.volatile.emit()`
+으로 최대 80ms마다 전송하며, 마지막 전송 좌표에서 1.5 page 단위 이상 움직였을 때만
+전송한다. 5초 heartbeat와 15초 stale timeout을 사용하며, canvas를 벗어나면
+`cursor: null`을 전송한다.
+
+### Server events
+
+```ts
+"sql-erd:joined" = {
+  workspaceId: string;
+  sessionId: string;
+  latestOpSeq: 0;
+  presence: SqltoerdPresenceState[];
+};
+
+"sql-erd:presence:update" = SqltoerdPresenceState;
+
+"sql-erd:presence:leave" = {
+  workspaceId: string;
+  sessionId: string;
+  userId: string;
+};
+
+"sql-erd:error" = {
+  code: "invalid_payload" | "forbidden" | "room_not_joined";
+  message: string;
+};
+
+type SqltoerdPresenceState = {
+  workspaceId: string;
+  sessionId: string;
+  userId: string;
+  displayName: string;
+  cursor: { x: number; y: number } | null;
+  selectedObjects: SqltoerdPresenceSelectedObject[];
+  tool: "select" | "note" | "frame" | "text" | "draw" | "eraser";
+  editingMode: "draw" | "move" | "resize" | "relation" | "sql" | null;
+  sentAt: string;
+  updatedAt: string;
+};
+```
+
+`userId`와 `displayName`은 Socket.IO handshake payload를 신뢰하지 않는다. realtime
+server는 bearer session 검증 뒤 `users`와 `user_settings`에서 읽은 사용자 정보를
+사용해 채운다. 수신자는 page 좌표를 자신의 viewport 기준 screen 좌표로 변환하며,
+cursor는 requestAnimationFrame 보간으로 표시할 수 있다. `editingMode: "sql"`은
+SQL source panel이 열린 상태를 뜻한다.
+
+같은 사용자가 같은 session을 여러 탭에서 열어도 room은 사용자당 하나의 presence만
+노출한다. 탭 하나가 leave·disconnect되면 남은 탭의 최신 presence를 `presence:update`
+로 전환 전송하며, 마지막 탭이 사라질 때만 `presence:leave`를 전송한다.
 
 ## 데이터 규칙
 

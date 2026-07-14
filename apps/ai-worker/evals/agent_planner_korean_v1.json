@@ -66,6 +66,13 @@
       "inputSchema": {"type": "object", "required": ["reportId"], "additionalProperties": false, "properties": {"reportId": {"type": "string", "format": "uuid"}}}
     },
     {
+      "name": "search_meeting_transcript",
+      "description": "권한이 있는 MeetingReport transcript에서 질문과 의미적으로 관련된 발언을 검색하고 근거 기반 답변을 생성합니다.",
+      "riskLevel": "low",
+      "executionMode": "auto",
+      "inputSchema": {"type": "object", "required": ["query"], "additionalProperties": false, "properties": {"query": {"type": "string", "minLength": 1, "maxLength": 1000}, "reportId": {"type": "string", "format": "uuid"}}}
+    },
+    {
       "name": "search_board_issues",
       "description": "Workspace Board 이슈를 조회합니다. Board가 하나이면 자동 선택하고, 여러 Board에서는 boardName을 정확히 지정해야 합니다. 상태·검색어·label·assignee 필터만 지원하며 Board 변경은 하지 않습니다.",
       "riskLevel": "low",

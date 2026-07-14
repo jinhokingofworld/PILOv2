@@ -113,20 +113,9 @@ assert.match(boardPanel, /moveIssueStatus/);
 assert.match(boardPanel, /statusMoveError/);
 assert.match(boardPanel, /issueCreateError/);
 assert.match(boardPanel, /isIssueCreateModalOpen/);
-assert.match(boardPanel, /readGithubBoardSelection/);
-assert.match(boardPanel, /githubBoardSelection/);
-assert.match(boardPanel, /targetBoard/);
-assert.match(boardPanel, /hydratingSelectionKey/);
-assert.match(
-  boardPanel,
-  /boardData\.hydrateBoard\(\{\s*projectV2Id: githubBoardSelection\.projectV2Id,\s*repositoryId: githubBoardSelection\.repositoryId\s*\}\)/,
-  "Board should hydrate with the repository and ProjectV2 selected in GitHub"
-);
-assert.match(
-  boardPanel,
-  /targetBoard = useMemo\([\s\S]*board\.repository\.id === githubBoardSelection\.repositoryId[\s\S]*board\.project\.id === githubBoardSelection\.projectV2Id/,
-  "Board should select an existing Board that matches the GitHub selection before hydrating"
-);
+assert.doesNotMatch(boardPanel, /readGithubBoardSelection|boardData\.hydrateBoard/);
+assert.match(boardPanel, /boardData\.activeSource\?\.boardId/);
+assert.doesNotMatch(boardPanel, /boardData\.boards\[0\]|readGithubBoardSelection/);
 assert.doesNotMatch(boardPanel, /BoardHydrationForm/);
 assert.doesNotMatch(boardPanel, /board-hydrate-dock/);
 assert.match(boardPanel, /query/);

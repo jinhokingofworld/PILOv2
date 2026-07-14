@@ -23,6 +23,9 @@ import {
   SqlErdCanvasToolbar,
   type SqlErdCanvasTool
 } from "@/features/sql-erd/components/sql-erd-canvas-toolbar";
+import { SqlErdRealtimeBridge } from "@/features/sql-erd/realtime/sql-erd-realtime-bridge";
+import type { SqlErdRealtimeConfig } from "@/features/sql-erd/realtime/sql-erd-realtime-types";
+import { useSqlErdPresence } from "@/features/sql-erd/realtime/use-sql-erd-presence";
 import { commerceSqltoerdFixture } from "@/features/sql-erd/fixtures/commerce";
 import {
   SQLTOERD_FRAME_SHAPE_TYPE,
@@ -154,6 +157,8 @@ type SqlErdCanvasProps = {
   onSelectionChange?: (selection: SqlErdSelection) => void;
   pinNavigationRequestId?: number;
   pinnedTableId?: string | null;
+  realtimeConfig?: SqlErdRealtimeConfig | null;
+  isSqlSourceOpen?: boolean;
   sessionId?: string | null;
   selectedSqlErdObject?: SqlErdSelection;
 };
@@ -2532,6 +2537,8 @@ export function SqlErdCanvas({
   onSelectionChange,
   pinNavigationRequestId = 0,
   pinnedTableId = null,
+  realtimeConfig = null,
+  isSqlSourceOpen = false,
   sessionId = null,
   selectedSqlErdObject = { type: "none" }
 }: SqlErdCanvasProps) {
@@ -2548,6 +2555,7 @@ export function SqlErdCanvas({
   const strokePointerIdRef = useRef<number | null>(null);
   const activeStrokeRef = useRef<SqltoerdCanvasStroke | null>(null);
   const eraserPointerIdRef = useRef<number | null>(null);
+  const sqlErdPresence = useSqlErdPresence(realtimeConfig);
 
   useEffect(() => {
     toolRef.current = tool;
@@ -2803,6 +2811,10 @@ export function SqlErdCanvas({
         return;
       }
 
+      sqlErdPresence.updatePresence({
+        cursor: editor.screenToPage({ x: event.clientX, y: event.clientY })
+      });
+
       if (strokePointerIdRef.current === event.pointerId && activeStrokeRef.current) {
         const stroke = activeStrokeRef.current;
         const point = editor.screenToPage({ x: event.clientX, y: event.clientY });
@@ -2828,8 +2840,11 @@ export function SqlErdCanvas({
         event.nativeEvent.stopImmediatePropagation();
       }
     },
-    [deleteStrokeAt, updateStrokeShape]
+    [deleteStrokeAt, sqlErdPresence, updateStrokeShape]
   );
+  const handlePointerLeaveCapture = useCallback(() => {
+    sqlErdPresence.updatePresence({ cursor: null });
+  }, [sqlErdPresence]);
   const handlePointerUpCapture = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
       const editor = editorRef.current;
@@ -3073,6 +3088,7 @@ export function SqlErdCanvas({
       className="relative h-full w-full"
       onDoubleClickCapture={handleDoubleClickCapture}
       onPointerCancelCapture={handlePointerCancelCapture}
+      onPointerLeave={handlePointerLeaveCapture}
       onPointerMoveCapture={handlePointerMoveCapture}
       onPointerUpCapture={handlePointerUpCapture}
     >
@@ -3101,6 +3117,15 @@ export function SqlErdCanvas({
           pinnedTableId={pinnedTableId}
         />
         <SqlErdSelectedColumnSync selectedSqlErdObject={selectedSqlErdObject} />
+        {sqlErdPresence.enabled ? (
+          <SqlErdRealtimeBridge
+            currentUserId={sqlErdPresence.currentUserId}
+            isSqlSourceOpen={isSqlSourceOpen}
+            remotePresence={sqlErdPresence.remotePresence}
+            tool={tool}
+            updatePresence={sqlErdPresence.updatePresence}
+          />
+        ) : null}
         {onLayoutPatch ? (
           <>
             <SqlErdAnnotationInteractionSync

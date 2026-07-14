@@ -26,6 +26,11 @@ export interface AgentRunRequestedJobPayload {
   tools: AgentToolSchemaSnapshotItem[];
 }
 
+export interface AgentGroundedAnswerRequestedJobPayload {
+  jobType: "agent_grounded_answer_requested";
+  runId: string;
+}
+
 interface AgentJobConfig {
   awsRegion: string;
   queueUrl: string;
@@ -56,6 +61,12 @@ export class AgentJobService implements OnModuleDestroy {
     } catch {
       throw agentJobUnavailable("Agent job could not be enqueued");
     }
+  }
+
+  async enqueueAgentGroundedAnswerRequestedJob(payload: AgentGroundedAnswerRequestedJobPayload): Promise<void> {
+    const config = this.getConfig();
+    try { await this.getSqsClient(config).send(new SendMessageCommand({ QueueUrl: config.queueUrl, MessageBody: JSON.stringify(payload) })); }
+    catch { throw agentJobUnavailable("Agent grounded answer job could not be enqueued"); }
   }
 
   onModuleDestroy(): void {

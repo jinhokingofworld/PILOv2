@@ -242,6 +242,7 @@ def test_fixed_korean_suite_loads() -> None:
         "list_meeting_reports",
         "get_meeting_report",
         "summarize_meeting_report",
+        "search_meeting_transcript",
         "search_board_issues",
     }
     expectations = {case.case_id: case.expectation for case in suite.cases}

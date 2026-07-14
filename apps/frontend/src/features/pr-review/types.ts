@@ -174,12 +174,51 @@ export type PrReviewSession = {
   updatedAt: string;
 };
 
-export type PrReviewRoomCanvas = {
+export type PrReviewRoom = {
   id: string;
+  workspaceId: string;
+  pullRequestId: string;
   canvasId: string;
   currentReviewSessionId: string | null;
+  analyzingReviewSessionId: string | null;
   status: "active" | "completed";
+  completionReason: "merged" | "closed" | null;
+  completedAt: string | null;
+  createdByUserId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  pullRequest: {
+    githubNumber: number;
+    title: string;
+    headBranch: string | null;
+    baseBranch: string | null;
+    githubUrl: string;
+    state: "open" | "closed";
+    mergedAt: string | null;
+  };
+  currentRevision: {
+    reviewSessionId: string;
+    headSha: string;
+    status: PrReviewSessionStatus;
+  } | null;
+  revisionCount: number;
 };
+
+export type PrReviewRoomList = {
+  rooms: PrReviewRoom[];
+};
+
+export type PrReviewRoomStart = {
+  room: PrReviewRoom;
+  revision: PrReviewSession;
+  roomCreated: boolean;
+  revisionCreated: boolean;
+};
+
+export type PrReviewRoomCanvas = Pick<
+  PrReviewRoom,
+  "id" | "canvasId" | "currentReviewSessionId" | "status"
+>;
 
 export type PrReviewCanvasShape = {
   id: string;

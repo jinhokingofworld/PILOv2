@@ -34,14 +34,13 @@ type SourceTablesProps = {
   projects: GithubProjectV2[];
   projectsTotal: number;
   selectedProjectV2Id: string;
-  selectedProjectV2Ids: ReadonlySet<string>;
   isSavingProjectV2Selections: boolean;
+  isWorkspaceOwner: boolean;
   isLoading: boolean;
   onRepositoryQueryChange: (value: string) => void;
   onRepositoryPageChange: (page: number) => void;
   onSelectRepository: (id: string) => void;
   onSelectProjectV2: (id: string) => void;
-  onToggleProjectV2Selection: (id: string) => void;
   onSaveProjectV2Selections: () => void;
 };
 
@@ -59,14 +58,13 @@ export function GithubConnectSourceTables({
   projects,
   projectsTotal,
   selectedProjectV2Id,
-  selectedProjectV2Ids,
   isSavingProjectV2Selections,
+  isWorkspaceOwner,
   isLoading,
   onRepositoryQueryChange,
   onRepositoryPageChange,
   onSelectRepository,
   onSelectProjectV2,
-  onToggleProjectV2Selection,
   onSaveProjectV2Selections,
 }: SourceTablesProps) {
   return (
@@ -218,13 +216,13 @@ export function GithubConnectSourceTables({
             </span>
             <Button
               className="h-8 rounded-[8px] px-3"
-              disabled={isLoading || isSavingProjectV2Selections}
+              disabled={isLoading || isSavingProjectV2Selections || !selectedProjectV2Id || !isWorkspaceOwner}
               onClick={onSaveProjectV2Selections}
               size="sm"
               type="button"
               variant="outline"
             >
-              {isSavingProjectV2Selections ? "Saving..." : "Save sync scope"}
+              {isSavingProjectV2Selections ? "Switching..." : "Switch Board"}
             </Button>
           </div>
         }
@@ -246,23 +244,18 @@ export function GithubConnectSourceTables({
           </GithubConnectEmptyState>
         ) : (
           <div className="project-table overflow-hidden rounded-[8px] border border-[#d9dee8]">
-            <div className="project-row header grid grid-cols-[minmax(180px,1.7fr)_120px_112px_86px_100px] gap-3 bg-[#f5f7fb] px-3 py-2 text-[12px] font-semibold uppercase tracking-[0.06em] text-[#7a8497] max-[760px]:hidden">
+            <div className="project-row header grid grid-cols-[minmax(180px,1.7fr)_120px_112px_100px] gap-3 bg-[#f5f7fb] px-3 py-2 text-[12px] font-semibold uppercase tracking-[0.06em] text-[#7a8497] max-[760px]:hidden">
               <span>Project</span>
               <span>Owner</span>
               <span>Updated</span>
-              <span>Detail sync</span>
               <span>상태</span>
             </div>
             <div className="divide-y divide-[#eef1f6]">
               {projects.map((project) => (
                 <ProjectRow
                   isSelected={project.id === selectedProjectV2Id}
-                  isSyncSelected={selectedProjectV2Ids.has(project.id)}
                   key={project.id}
                   onSelect={() => onSelectProjectV2(project.id)}
-                  onToggleSyncSelection={() =>
-                    onToggleProjectV2Selection(project.id)
-                  }
                   project={project}
                 />
               ))}
@@ -339,19 +332,15 @@ function RepositoryRow({
 function ProjectRow({
   project,
   isSelected,
-  isSyncSelected,
   onSelect,
-  onToggleSyncSelection,
 }: {
   project: GithubProjectV2;
   isSelected: boolean;
-  isSyncSelected: boolean;
   onSelect: () => void;
-  onToggleSyncSelection: () => void;
 }) {
   return (
     <div
-      className={`project-row grid grid-cols-[minmax(180px,1.7fr)_120px_112px_86px_100px] items-center gap-3 px-3 py-3 text-[13px] max-[760px]:grid-cols-1 max-[760px]:gap-2 ${
+      className={`project-row grid grid-cols-[minmax(180px,1.7fr)_120px_112px_100px] items-center gap-3 px-3 py-3 text-[13px] max-[760px]:grid-cols-1 max-[760px]:gap-2 ${
         isSelected ? "bg-[#f5f7ff]" : "bg-white"
       }`}
     >
@@ -378,15 +367,6 @@ function ProjectRow({
       <span className="text-[#4d586b]">
         {formatGithubConnectShortDate(project.lastSyncedAt)}
       </span>
-      <label className="flex items-center gap-2 text-[12px] font-medium text-[#4d586b]">
-        <input
-          checked={isSyncSelected}
-          className="size-4 accent-[#3157d5]"
-          onChange={onToggleSyncSelection}
-          type="checkbox"
-        />
-        Sync
-      </label>
       <div className="flex items-center gap-2">
         <GithubConnectPill tone={project.closed ? "danger" : "success"}>
           {project.closed ? "Closed" : "Open"}

@@ -232,6 +232,7 @@ execFileSync(process.execPath, [tscScript, "-p", "tsconfig.build.json"], {
 });
 
 await import("./create-hydrate.test.mjs");
+await import("./active-board-source-transaction.test.mjs");
 await import("./read.test.mjs");
 await import("./issues.test.mjs");
 await import("./issue-detail.test.mjs");
