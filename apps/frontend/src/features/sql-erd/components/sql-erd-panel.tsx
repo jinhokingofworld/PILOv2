@@ -56,11 +56,13 @@ import {
   TooltipTrigger
 } from "@/components/ui/tooltip";
 import { useAuthSession } from "@/features/auth/auth-session";
+import { isDevPreviewAccessToken } from "@/features/auth/session-storage";
 import {
   createSqlErdApiClient,
   SqlErdApiError
 } from "@/features/sql-erd/api/client";
 import { SqlErdCanvas } from "@/features/sql-erd/components/sql-erd-canvas";
+import type { SqlErdRealtimeConfig } from "@/features/sql-erd/realtime/sql-erd-realtime-types";
 import type {
   SqlErdSelection,
   SqltoerdDialect,
@@ -278,6 +280,26 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
   const authSession = useAuthSession();
   const activeWorkspaceId = authSession?.activeWorkspaceId ?? null;
   const accessToken = authSession?.accessToken ?? null;
+  const realtimeConfig = useMemo<SqlErdRealtimeConfig>(
+    () => ({
+      authToken: accessToken,
+      currentUser: authSession
+        ? {
+            displayName: authSession.user.displayName || authSession.user.name || "PILO",
+            userId: authSession.user.id
+          }
+        : null,
+      enabled: Boolean(
+        accessToken &&
+          activeWorkspaceId &&
+          authSession?.user.id &&
+          !isDevPreviewAccessToken(accessToken)
+      ),
+      sessionId,
+      workspaceId: activeWorkspaceId ?? ""
+    }),
+    [accessToken, activeWorkspaceId, authSession, sessionId]
+  );
   const panelContainerRef = useRef<HTMLElement | null>(null);
   const manualAutosaveRetryRef = useRef(false);
   const sessionLoadRequestIdRef = useRef(0);
@@ -1741,6 +1763,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           onSelectionChange={setSelectedSqlErdObject}
           pinNavigationRequestId={tablePinState.navigationRequestId}
           pinnedTableId={tablePinState.pinnedTableId}
+          realtimeConfig={realtimeConfig}
           selectedSqlErdObject={selectedSqlErdObject}
           sessionId={sessionId}
         />
@@ -2504,6 +2527,7 @@ type CanvasShellProps = {
   onSelectionChange: (selection: SqlErdSelection) => void;
   pinNavigationRequestId: number;
   pinnedTableId: string | null;
+  realtimeConfig: SqlErdRealtimeConfig;
   selectedSqlErdObject: SqlErdSelection;
   sessionId: string;
 };
@@ -2518,6 +2542,7 @@ function CanvasShell({
   onSelectionChange,
   pinNavigationRequestId,
   pinnedTableId,
+  realtimeConfig,
   selectedSqlErdObject,
   sessionId
 }: CanvasShellProps) {
@@ -2531,6 +2556,7 @@ function CanvasShell({
         onSelectionChange={onSelectionChange}
         pinNavigationRequestId={pinNavigationRequestId}
         pinnedTableId={pinnedTableId}
+        realtimeConfig={realtimeConfig}
         sessionId={sessionId}
         selectedSqlErdObject={selectedSqlErdObject}
       />
