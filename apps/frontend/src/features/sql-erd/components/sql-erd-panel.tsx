@@ -1742,6 +1742,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           pinNavigationRequestId={tablePinState.navigationRequestId}
           pinnedTableId={tablePinState.pinnedTableId}
           selectedSqlErdObject={selectedSqlErdObject}
+          sessionId={sessionId}
         />
       ) : (
         <SessionLoadPlaceholder
@@ -2504,6 +2505,7 @@ type CanvasShellProps = {
   pinNavigationRequestId: number;
   pinnedTableId: string | null;
   selectedSqlErdObject: SqlErdSelection;
+  sessionId: string;
 };
 
 function CanvasShell({
@@ -2516,7 +2518,8 @@ function CanvasShell({
   onSelectionChange,
   pinNavigationRequestId,
   pinnedTableId,
-  selectedSqlErdObject
+  selectedSqlErdObject,
+  sessionId
 }: CanvasShellProps) {
   return (
     <div className="relative min-w-0 flex-1 overflow-hidden" id="canvas">
@@ -2528,6 +2531,7 @@ function CanvasShell({
         onSelectionChange={onSelectionChange}
         pinNavigationRequestId={pinNavigationRequestId}
         pinnedTableId={pinnedTableId}
+        sessionId={sessionId}
         selectedSqlErdObject={selectedSqlErdObject}
       />
       {autosavePausedBanner ? (

@@ -54,6 +54,7 @@ async function compileSqlErdRuntimeModules() {
   const relationIdOutputPath = join(outputDir, "relation-id.mjs");
   const tableCardLayoutOutputPath = join(outputDir, "table-card-layout.mjs");
   const autoLayoutOutputPath = join(outputDir, "auto-layout.mjs");
+  const canvasShapeSyncOutputPath = join(outputDir, "canvas-shape-sync.mjs");
 
   try {
     await compileTypeScriptModule(
@@ -268,6 +269,10 @@ async function compileSqlErdRuntimeModules() {
       tablePinOutputPath
     );
     await compileTypeScriptModule(
+      "../../src/features/sql-erd/utils/canvas-shape-sync.ts",
+      canvasShapeSyncOutputPath
+    );
+    await compileTypeScriptModule(
       "../../src/features/sql-erd/utils/foreign-key-add.ts",
       foreignKeyAddOutputPath,
       [
@@ -350,7 +355,8 @@ async function compileSqlErdRuntimeModules() {
       canvasSelectionRuntime,
       tablePinRuntime,
       foreignKeyAddRuntime,
-      autoLayoutRuntime
+      autoLayoutRuntime,
+      canvasShapeSyncRuntime
     ] = await Promise.all([
       import(pathToFileHref(modelOutputPath)),
       import(pathToFileHref(modelToSqlOutputPath)),
@@ -375,7 +381,8 @@ async function compileSqlErdRuntimeModules() {
       import(pathToFileHref(canvasSelectionOutputPath)),
       import(pathToFileHref(tablePinOutputPath)),
       import(pathToFileHref(foreignKeyAddOutputPath)),
-      import(pathToFileHref(autoLayoutOutputPath))
+      import(pathToFileHref(autoLayoutOutputPath)),
+      import(pathToFileHref(canvasShapeSyncOutputPath))
     ]);
 
     return {
@@ -402,7 +409,8 @@ async function compileSqlErdRuntimeModules() {
       tableShapeRuntime,
       tablePinRuntime,
       foreignKeyAddRuntime,
-      autoLayoutRuntime
+      autoLayoutRuntime,
+      canvasShapeSyncRuntime
     };
   } finally {
     await rm(outputDir, { force: true, recursive: true });
@@ -702,6 +710,7 @@ const [
   annotationShape,
   frameShape,
   noteShape,
+  annotationToolbar,
   ddlParserUtils,
   sqlEditorDialectUtils,
   sqlSourceDecorationUtils,
@@ -739,6 +748,7 @@ const [
     readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-annotation-shape.tsx"),
     readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-frame-shape.tsx"),
     readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-note-shape.tsx"),
+    readSqlErdFile("../../src/features/sql-erd/components/sql-erd-canvas-toolbar.tsx"),
     readSqlErdFile("../../src/features/sql-erd/utils/ddl-parser.ts"),
     readSqlErdFile("../../src/features/sql-erd/utils/sql-editor-dialect.ts"),
     readSqlErdFile("../../src/features/sql-erd/utils/sql-source-decoration.ts"),
@@ -770,7 +780,8 @@ const {
   tableShapeRuntime,
   tablePinRuntime,
   foreignKeyAddRuntime,
-  autoLayoutRuntime
+  autoLayoutRuntime,
+  canvasShapeSyncRuntime
 } = await compileSqlErdRuntimeModules();
 
 const initialTablePinState = tablePinRuntime.createSqlErdTablePinState();
@@ -827,7 +838,197 @@ assert.equal(
   tablePinRuntime.getSqlErdPinnedTableCenter([], "table.orders"),
   null
 );
-const runtimeModel = createRuntimeTestModel();
+const cameraBeforeAnnotationAdd = { x: 320, y: -180, z: 1.25 };
+let cameraAfterAnnotationAdd = cameraBeforeAnnotationAdd;
+const incrementalSyncOperations = [];
+const currentCanvasShapes = [{ id: "shape:table.users", type: "sqltoerd_table" }];
+const nextCanvasShapes = [
+  ...currentCanvasShapes,
+  { id: "shape:note.users", type: "sqltoerd_note" }
+];
+const annotationAddPlan = canvasShapeSyncRuntime.applySqlErdCanvasIncrementalShapeSync({
+  currentShapes: currentCanvasShapes,
+  editor: {
+    createShapes: (shapes) => {
+      cameraAfterAnnotationAdd = { x: 0, y: 0, z: 0.5 };
+      incrementalSyncOperations.push(["create", shapes]);
+    },
+    deleteShapes: (shapeIds) => incrementalSyncOperations.push(["delete", shapeIds]),
+    getCamera: () => cameraAfterAnnotationAdd,
+    run: (callback, options) => {
+      incrementalSyncOperations.push(["run", options]);
+      callback();
+    },
+    setCamera: (camera) => {
+      cameraAfterAnnotationAdd = camera;
+      incrementalSyncOperations.push(["camera", camera]);
+    },
+    updateShapes: (shapes) => incrementalSyncOperations.push(["update", shapes])
+  },
+  nextShapes: nextCanvasShapes,
+  shapesToUpdate: []
+});
+
+assert.deepEqual(annotationAddPlan.shapeIdsToDelete, []);
+assert.deepEqual(annotationAddPlan.shapesToCreate, [nextCanvasShapes[1]]);
+assert.deepEqual(cameraAfterAnnotationAdd, cameraBeforeAnnotationAdd);
+  assert.deepEqual(incrementalSyncOperations, [
+    ["run", { history: "ignore" }],
+    ["create", [nextCanvasShapes[1]]],
+    ["camera", cameraBeforeAnnotationAdd]
+  ]);
+
+  const cameraBeforeAnnotationRemove = { x: -96, y: 240, z: 0.8 };
+  let cameraAfterAnnotationRemove = cameraBeforeAnnotationRemove;
+  const annotationRemoveOperations = [];
+  const annotationRemovePlan =
+    canvasShapeSyncRuntime.applySqlErdCanvasIncrementalShapeSync({
+      currentShapes: nextCanvasShapes,
+      editor: {
+        createShapes: (shapes) =>
+          annotationRemoveOperations.push(["create", shapes]),
+        deleteShapes: (shapeIds) => {
+          cameraAfterAnnotationRemove = { x: 0, y: 0, z: 0.5 };
+          annotationRemoveOperations.push(["delete", shapeIds]);
+        },
+        getCamera: () => cameraAfterAnnotationRemove,
+        run: (callback, options) => {
+          annotationRemoveOperations.push(["run", options]);
+          callback();
+        },
+        setCamera: (camera) => {
+          cameraAfterAnnotationRemove = camera;
+          annotationRemoveOperations.push(["camera", camera]);
+        },
+        updateShapes: (shapes) =>
+          annotationRemoveOperations.push(["update", shapes])
+      },
+      nextShapes: currentCanvasShapes,
+      shapesToUpdate: []
+    });
+
+  assert.deepEqual(annotationRemovePlan.shapeIdsToDelete, ["shape:note.users"]);
+  assert.deepEqual(annotationRemovePlan.shapesToCreate, []);
+  assert.deepEqual(cameraAfterAnnotationRemove, cameraBeforeAnnotationRemove);
+  assert.deepEqual(annotationRemoveOperations, [
+    ["run", { history: "ignore" }],
+    ["delete", ["shape:note.users"]],
+    ["camera", cameraBeforeAnnotationRemove]
+  ]);
+  const runtimeModel = createRuntimeTestModel();
+const currentCanvasContentKey =
+  canvasShapeSyncRuntime.createSqlErdCanvasContentKey({
+    modelJson: runtimeModel,
+    sessionId: "session-current"
+  });
+const regeneratedCanvasModel = structuredClone(runtimeModel);
+regeneratedCanvasModel.schema.relations.pop();
+
+assert.equal(
+  canvasShapeSyncRuntime.getSqlErdCanvasCameraSyncMode(
+    currentCanvasContentKey,
+    currentCanvasContentKey
+  ),
+  "preserve_camera"
+);
+assert.equal(
+  canvasShapeSyncRuntime.getSqlErdCanvasCameraSyncMode(
+    currentCanvasContentKey,
+    canvasShapeSyncRuntime.createSqlErdCanvasContentKey({
+      modelJson: runtimeModel,
+      sessionId: "session-next"
+    })
+  ),
+  "fit_canvas"
+);
+assert.equal(
+  canvasShapeSyncRuntime.getSqlErdCanvasCameraSyncMode(
+    currentCanvasContentKey,
+    canvasShapeSyncRuntime.createSqlErdCanvasContentKey({
+      modelJson: regeneratedCanvasModel,
+      sessionId: "session-current"
+    })
+  ),
+  "fit_canvas"
+);
+
+const canvasContentSyncState =
+  canvasShapeSyncRuntime.createSqlErdCanvasContentSyncState(
+    currentCanvasContentKey
+  );
+const scheduledCanvasFits = [];
+let canvasContentSyncCount = 0;
+let canvasFitCount = 0;
+const syncCanvasContent = (contentKey) =>
+  canvasShapeSyncRuntime.syncSqlErdCanvasContent({
+    contentKey,
+    onFit: () => {
+      canvasFitCount += 1;
+    },
+    scheduleFit: (callback) => {
+      scheduledCanvasFits.push(callback);
+    },
+    state: canvasContentSyncState,
+    syncShapes: () => {
+      canvasContentSyncCount += 1;
+    }
+  });
+
+assert.equal(
+  syncCanvasContent(currentCanvasContentKey),
+  "preserve_camera"
+);
+assert.equal(scheduledCanvasFits.length, 0);
+assert.equal(canvasFitCount, 0);
+assert.equal(
+  syncCanvasContent(
+    canvasShapeSyncRuntime.createSqlErdCanvasContentKey({
+      modelJson: runtimeModel,
+      sessionId: "session-next"
+    })
+  ),
+  "fit_canvas"
+);
+assert.equal(
+  syncCanvasContent(
+    canvasShapeSyncRuntime.createSqlErdCanvasContentKey({
+      modelJson: regeneratedCanvasModel,
+      sessionId: "session-next"
+    })
+  ),
+  "fit_canvas"
+);
+assert.equal(canvasContentSyncCount, 3);
+assert.equal(scheduledCanvasFits.length, 2);
+scheduledCanvasFits.forEach((callback) => callback());
+assert.equal(canvasFitCount, 1);
+
+const unmountedCanvasContentSyncState =
+  canvasShapeSyncRuntime.createSqlErdCanvasContentSyncState(
+    currentCanvasContentKey
+  );
+const unmountedCanvasFits = [];
+let unmountedCanvasFitCount = 0;
+
+canvasShapeSyncRuntime.syncSqlErdCanvasContent({
+  contentKey: canvasShapeSyncRuntime.createSqlErdCanvasContentKey({
+    modelJson: runtimeModel,
+    sessionId: "session-unmounted"
+  }),
+  onFit: () => {
+    unmountedCanvasFitCount += 1;
+  },
+  scheduleFit: (callback) => {
+    unmountedCanvasFits.push(callback);
+  },
+  state: unmountedCanvasContentSyncState,
+  syncShapes: () => {}
+});
+canvasShapeSyncRuntime.invalidateSqlErdCanvasContentSyncFits(
+  unmountedCanvasContentSyncState
+);
+unmountedCanvasFits.forEach((callback) => callback());
+assert.equal(unmountedCanvasFitCount, 0);
 
 const runtimeDynamicBadgeWidthModel = structuredClone(runtimeModel);
 const runtimeDynamicBadgeColumn =
@@ -5763,6 +5964,7 @@ assert.match(statusCopyUtils, /"retrying"/);
 assert.match(statusCopyUtils, /Retrying parsed SQL changes automatically/);
 
 assert.match(panel, /SqlErdCanvas/);
+assert.match(panel, /sessionId=\{sessionId\}/);
 assert.match(panel, /useAuthSession/);
 assert.match(panel, /createSqlErdApiClient/);
 assert.match(panel, /getSession/);
@@ -6047,7 +6249,15 @@ assert.match(canvasSurface, /commerceSqltoerdFixture/);
 assert.match(canvasSurface, /SqlErdCanvasShapeSync/);
 assert.match(canvasSurface, /areSqlErdCanvasShapesApplied/);
 assert.match(canvasSurface, /applySqlErdCanvasShapes/);
-assert.match(canvasSurface, /shouldResetSqlErdCanvas/);
+assert.match(canvasSurface, /applySqlErdCanvasIncrementalShapeSync/);
+assert.doesNotMatch(canvasSurface, /function shouldResetSqlErdCanvas/);
+assert.match(canvasSurface, /function sendSqlErdCanvasBackgroundShapesToBack/);
+assert.match(canvasSurface, /editor\.sendToBack\(frameShapeIds\)/);
+assert.match(canvasSurface, /editor\.sendToBack\(relationShapeIds\)/);
+assert.match(canvasSurface, /createSqlErdCanvasContentKey/);
+assert.match(canvasSurface, /createSqlErdCanvasContentSyncState/);
+assert.match(canvasSurface, /invalidateSqlErdCanvasContentSyncFits/);
+assert.match(canvasSurface, /syncSqlErdCanvasContent/);
 assert.match(canvasSurface, /editor\.updateShapes\(updates\)/);
 assert.match(canvasSurface, /createSqltoerdTableShapes/);
 assert.match(canvasSurface, /createSqltoerdRelationShapes/);
@@ -6232,6 +6442,28 @@ assert.doesNotMatch(
 assert.doesNotMatch(annotationShape, /Cardinality/);
 assert.match(frameShape, /\{!shape\.props\.isLocked \? \(/);
 assert.doesNotMatch(noteShape, /SQLTOERD_NOTE_DELETE_EVENT/);
+assert.match(annotationToolbar, /export function SqlErdCanvasToolbar/);
+assert.match(annotationToolbar, /aria-label="선택\/드래그"/);
+assert.match(annotationToolbar, /aria-label="메모 추가"/);
+assert.match(annotationToolbar, /aria-label="프레임 추가"/);
+assert.match(annotationToolbar, /aria-label="화면 맞춤"/);
+assert.match(annotationToolbar, /isSqlErdFrameShape\(selectedShape\)/);
+assert.match(annotationToolbar, /onFrameColorChange\(selectedShape\.props\.frameId, color\)/);
+assert.match(canvasSurface, /import \{ SqlErdCanvasToolbar \}/);
+assert.match(canvasSurface, /<SqlErdCanvasToolbar/);
+assert.match(
+  canvasSurface,
+  /SQLTOERD_FRAME_CHANGE_EVENT[\s\S]*?SqlErdCanvasToolbar/
+);
+assert.match(
+  canvasSurface,
+  /editor\.getViewportPageBounds\(\)[\s\S]*?notesToAdd/
+);
+assert.match(
+  canvasSurface,
+  /editor\.getViewportPageBounds\(\)[\s\S]*?framesToAdd/
+);
+assert.match(canvasSurface, /onFit=\{handleFitCanvas\}/);
 assert.match(
   canvasSurface,
   /function deleteNote\(noteId: string\)[\s\S]*?deleteNoteIds/
@@ -6379,7 +6611,7 @@ assert.deepEqual(
 
 assert.match(canvasSurface, /SqlErdNoteShapeUtil/);
 assert.match(canvasSurface, /SqlErdFrameShapeUtil/);
-assert.match(canvasSurface, /data-sqltoerd-add-note/);
-assert.match(canvasSurface, /data-sqltoerd-add-frame/);
+assert.match(annotationToolbar, /aria-label="메모 추가"/);
+assert.match(annotationToolbar, /aria-label="프레임 추가"/);
 assert.match(canvasSurface, /onLayoutPatch\(\{ tablePositions: nextLayoutJson\.tableLayouts \}\)/);
 assert.doesNotMatch(canvasSurface, /onLayoutChange/);

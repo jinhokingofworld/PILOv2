@@ -18,6 +18,7 @@ import {
 } from "tldraw";
 import { Workflow } from "lucide-react";
 
+import { SqlErdCanvasToolbar } from "@/features/sql-erd/components/sql-erd-canvas-toolbar";
 import { commerceSqltoerdFixture } from "@/features/sql-erd/fixtures/commerce";
 import {
   SQLTOERD_FRAME_SHAPE_TYPE,
@@ -83,6 +84,7 @@ import {
 import type {
   SqlErdSelection,
   SqltoerdCanvasFrame,
+  SqltoerdCanvasFrameColor,
   SqltoerdCanvasNote,
   SqltoerdColumnAnnotationLink,
   SqltoerdLayoutJsonV1,
@@ -106,6 +108,14 @@ import {
   getSqltoerdMinimumZoomCamera,
   type SqltoerdAutoLayoutTableSize
 } from "@/features/sql-erd/utils/auto-layout";
+import {
+  applySqlErdCanvasIncrementalShapeSync,
+  createSqlErdCanvasContentKey,
+  createSqlErdCanvasContentSyncState,
+  createSqlErdCanvasIncrementalShapeSyncPlan,
+  invalidateSqlErdCanvasContentSyncFits,
+  syncSqlErdCanvasContent
+} from "@/features/sql-erd/utils/canvas-shape-sync";
 import { getSqlErdPinnedTableCenter } from "@/features/sql-erd/utils/table-pin";
 import {
   areSqlErdSelectionsEqual,
@@ -122,6 +132,7 @@ type SqlErdCanvasProps = {
   onSelectionChange?: (selection: SqlErdSelection) => void;
   pinNavigationRequestId?: number;
   pinnedTableId?: string | null;
+  sessionId?: string | null;
   selectedSqlErdObject?: SqlErdSelection;
 };
 
@@ -631,8 +642,24 @@ function getSqlErdSelectionFromEditor(editor: Editor): SqlErdSelection {
   return getSqlErdSelectionFromSelectedShapes(editor.getSelectedShapes());
 }
 
-function isSqlErdBackgroundLineShapePartial(shape: TLShapePartial) {
-  return shape.type === SQLTOERD_RELATION_SHAPE_TYPE;
+function sendSqlErdCanvasBackgroundShapesToBack(
+  editor: Editor,
+  shapes: TLShapePartial[]
+) {
+  const frameShapeIds = shapes
+    .filter((shape) => shape.type === SQLTOERD_FRAME_SHAPE_TYPE)
+    .map((shape) => shape.id as TLShapeId);
+  const relationShapeIds = shapes
+    .filter((shape) => shape.type === SQLTOERD_RELATION_SHAPE_TYPE)
+    .map((shape) => shape.id as TLShapeId);
+
+  if (frameShapeIds.length) {
+    editor.sendToBack(frameShapeIds);
+  }
+
+  if (relationShapeIds.length) {
+    editor.sendToBack(relationShapeIds);
+  }
 }
 
 function isSqlErdCanvasShape(shape: TLShape) {
@@ -666,11 +693,7 @@ function resetSqlErdCanvas(
       }
 
       editor.createShapes(shapes);
-      editor.sendToBack(
-        shapes
-          .filter(isSqlErdBackgroundLineShapePartial)
-          .map((shape) => shape.id as TLShapeId)
-      );
+      sendSqlErdCanvasBackgroundShapesToBack(editor, shapes);
     },
     { history: "ignore" }
   );
@@ -697,28 +720,6 @@ function fitSqlErdCanvas(editor: Editor) {
       editor.getViewportScreenBounds(),
       SQLTOERD_MINIMUM_READABLE_ZOOM
     )
-  );
-}
-
-function shouldResetSqlErdCanvas(editor: Editor, shapes: TLShapePartial[]) {
-  const currentSqlErdShapes = editor
-    .getCurrentPageShapes()
-    .filter(isSqlErdCanvasShape);
-
-  if (!currentSqlErdShapes.length) {
-    return true;
-  }
-
-  if (currentSqlErdShapes.length !== shapes.length) {
-    return true;
-  }
-
-  const nextShapeTypesById = new Map(
-    shapes.map((shape) => [shape.id as TLShapeId, shape.type])
-  );
-
-  return currentSqlErdShapes.some(
-    (shape) => nextShapeTypesById.get(shape.id) !== shape.type
   );
 }
 
@@ -763,12 +764,14 @@ function preserveSqlErdAnnotationInteractionState(
 }
 
 function applySqlErdCanvasShapes(editor: Editor, shapes: TLShapePartial[]) {
-  if (shouldResetSqlErdCanvas(editor, shapes)) {
-    resetSqlErdCanvas(editor, shapes);
-    return;
-  }
-
-  const updates = shapes
+  const currentSqlErdShapes = editor
+    .getCurrentPageShapes()
+    .filter(isSqlErdCanvasShape);
+  const syncPlan = createSqlErdCanvasIncrementalShapeSyncPlan(
+    currentSqlErdShapes,
+    shapes
+  );
+  const updates = syncPlan.shapesToUpdate
     .filter((shape) => !isSqlErdCanvasShapePartialApplied(editor, shape))
     .map((shape) =>
       shape.type === SQLTOERD_TABLE_SHAPE_TYPE
@@ -784,21 +787,15 @@ function applySqlErdCanvasShapes(editor: Editor, shapes: TLShapePartial[]) {
         : shape
     );
 
-  if (!updates.length) {
-    return;
-  }
-
-  editor.run(
-    () => {
-      editor.updateShapes(updates);
-      editor.sendToBack(
-        shapes
-          .filter(isSqlErdBackgroundLineShapePartial)
-          .map((shape) => shape.id as TLShapeId)
-      );
+  applySqlErdCanvasIncrementalShapeSync({
+    currentShapes: currentSqlErdShapes,
+    editor,
+    nextShapes: shapes,
+    onAfterSync: () => {
+      sendSqlErdCanvasBackgroundShapesToBack(editor, shapes);
     },
-    { history: "ignore" }
-  );
+    shapesToUpdate: updates
+  });
 }
 
 function areShapeNumbersEqual(left?: number, right?: number) {
@@ -1020,16 +1017,39 @@ function areSqlErdCanvasShapesApplied(
   );
 }
 
-function SqlErdCanvasShapeSync({ shapes }: { shapes: TLShapePartial[] }) {
+function SqlErdCanvasShapeSync({
+  canvasContentKey,
+  shapes
+}: {
+  canvasContentKey: string;
+  shapes: TLShapePartial[];
+}) {
   const editor = useEditor();
+  const contentSyncStateRef = useRef(
+    createSqlErdCanvasContentSyncState(canvasContentKey)
+  );
 
   useEffect(() => {
-    if (areSqlErdCanvasShapesApplied(editor, shapes)) {
-      return;
-    }
+    return () => {
+      invalidateSqlErdCanvasContentSyncFits(contentSyncStateRef.current);
+    };
+  }, []);
 
-    applySqlErdCanvasShapes(editor, shapes);
-  }, [editor, shapes]);
+  useEffect(() => {
+    syncSqlErdCanvasContent({
+      contentKey: canvasContentKey,
+      onFit: () => {
+        fitSqlErdCanvas(editor);
+      },
+      scheduleFit: (callback) => window.requestAnimationFrame(callback),
+      state: contentSyncStateRef.current,
+      syncShapes: () => {
+        if (!areSqlErdCanvasShapesApplied(editor, shapes)) {
+          applySqlErdCanvasShapes(editor, shapes);
+        }
+      }
+    });
+  }, [canvasContentKey, editor, shapes]);
 
   return null;
 }
@@ -2365,16 +2385,23 @@ export function SqlErdCanvas({
   onSelectionChange,
   pinNavigationRequestId = 0,
   pinnedTableId = null,
+  sessionId = null,
   selectedSqlErdObject = { type: "none" }
 }: SqlErdCanvasProps) {
   const editorRef = useRef<Editor | null>(null);
+  const [canvasEditor, setCanvasEditor] = useState<Editor | null>(null);
   const shapes = useMemo(
     () => createSqltoerdCanvasShapes(modelJson, layoutJson),
     [layoutJson, modelJson]
   );
+  const canvasContentKey = useMemo(
+    () => createSqlErdCanvasContentKey({ modelJson, sessionId }),
+    [modelJson, sessionId]
+  );
   const handleMount = useCallback(
     (editor: Editor) => {
       editorRef.current = editor;
+      setCanvasEditor(editor);
       editor.setCurrentTool("select.idle");
       resetSqlErdCanvas(editor, shapes);
     },
@@ -2459,14 +2486,84 @@ export function SqlErdCanvas({
   }, [layoutJson, modelJson, onLayoutPatch]);
 
   const handleAddNote = useCallback(() => {
-    if (!onLayoutPatch || (layoutJson.annotations?.notes?.length ?? 0) >= 100) return;
-    onLayoutPatch({ notesToAdd: [{ id: crypto.randomUUID(), x: 120, y: 120, width: 240, height: 160, text: "" }] });
+    const editor = editorRef.current;
+
+    if (
+      !editor ||
+      !onLayoutPatch ||
+      (layoutJson.annotations?.notes?.length ?? 0) >= 100
+    ) {
+      return;
+    }
+
+    const viewportPageBounds = editor.getViewportPageBounds();
+    const width = 240;
+    const height = 160;
+
+    onLayoutPatch({
+      notesToAdd: [
+        {
+          id: crypto.randomUUID(),
+          x: viewportPageBounds.x + (viewportPageBounds.w - width) / 2,
+          y: viewportPageBounds.y + (viewportPageBounds.h - height) / 2,
+          width,
+          height,
+          text: ""
+        }
+      ]
+    });
   }, [layoutJson.annotations?.notes?.length, onLayoutPatch]);
 
   const handleAddFrame = useCallback(() => {
-    if (!onLayoutPatch || (layoutJson.annotations?.frames?.length ?? 0) >= 100) return;
-    onLayoutPatch({ framesToAdd: [{ id: crypto.randomUUID(), x: 80, y: 80, width: 640, height: 420, title: "프레임", color: "blue", isLocked: true }] });
+    const editor = editorRef.current;
+
+    if (
+      !editor ||
+      !onLayoutPatch ||
+      (layoutJson.annotations?.frames?.length ?? 0) >= 100
+    ) {
+      return;
+    }
+
+    const viewportPageBounds = editor.getViewportPageBounds();
+    const width = 640;
+    const height = 420;
+
+    onLayoutPatch({
+      framesToAdd: [
+        {
+          id: crypto.randomUUID(),
+          x: viewportPageBounds.x + (viewportPageBounds.w - width) / 2,
+          y: viewportPageBounds.y + (viewportPageBounds.h - height) / 2,
+          width,
+          height,
+          title: "프레임",
+          color: "blue",
+          isLocked: true
+        }
+      ]
+    });
   }, [layoutJson.annotations?.frames?.length, onLayoutPatch]);
+
+  const handleFrameColorChange = useCallback(
+    (frameId: string, color: SqltoerdCanvasFrameColor) => {
+      window.dispatchEvent(
+        new CustomEvent<SqlErdFrameChangeEventDetail>(
+          SQLTOERD_FRAME_CHANGE_EVENT,
+          { detail: { frameId, patch: { color } } }
+        )
+      );
+    },
+    []
+  );
+
+  const handleFitCanvas = useCallback(() => {
+    const editor = editorRef.current;
+
+    if (editor) {
+      fitSqlErdCanvas(editor);
+    }
+  }, []);
 
   return (
     <div className="relative h-full w-full">
@@ -2481,7 +2578,10 @@ export function SqlErdCanvas({
         onPointerDownCapture={handlePointerDownCapture}
         shapeUtils={sqlErdShapeUtils}
       >
-        <SqlErdCanvasShapeSync shapes={shapes} />
+        <SqlErdCanvasShapeSync
+          canvasContentKey={canvasContentKey}
+          shapes={shapes}
+        />
         <SqlErdRelationLayoutSync />
         <SqlErdRelationHighlightSync
           modelJson={modelJson}
@@ -2517,13 +2617,19 @@ export function SqlErdCanvas({
           />
         ) : null}
       </TldrawSurface>
+      {onLayoutPatch && canvasEditor ? (
+        <SqlErdCanvasToolbar
+          editor={canvasEditor}
+          isFrameLimitReached={(layoutJson.annotations?.frames?.length ?? 0) >= 100}
+          isNoteLimitReached={(layoutJson.annotations?.notes?.length ?? 0) >= 100}
+          onAddFrame={handleAddFrame}
+          onAddNote={handleAddNote}
+          onFit={handleFitCanvas}
+          onFrameColorChange={handleFrameColorChange}
+        />
+      ) : null}
       {onLayoutPatch ? (
-        <div className="absolute right-4 top-4 z-20 flex gap-2">
-          <>
-            <button aria-label="메모 추가" className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm" data-sqltoerd-add-note disabled={(layoutJson.annotations?.notes?.length ?? 0) >= 100} onClick={handleAddNote} type="button">메모</button>
-            <button aria-label="프레임 추가" className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm" data-sqltoerd-add-frame disabled={(layoutJson.annotations?.frames?.length ?? 0) >= 100} onClick={handleAddFrame} type="button">프레임</button>
-          </>
-          <button
+        <button
           aria-label="자동 정렬"
           className="absolute right-4 top-4 z-20 inline-flex h-9 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
           data-sqltoerd-auto-layout
@@ -2534,7 +2640,6 @@ export function SqlErdCanvas({
           <Workflow aria-hidden="true" className="size-4" />
           자동 정렬
         </button>
-        </div>
       ) : null}
     </div>
   );
