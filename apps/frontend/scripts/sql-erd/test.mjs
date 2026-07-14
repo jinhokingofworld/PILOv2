@@ -702,6 +702,7 @@ const [
   annotationShape,
   frameShape,
   noteShape,
+  annotationToolbar,
   ddlParserUtils,
   sqlEditorDialectUtils,
   sqlSourceDecorationUtils,
@@ -739,6 +740,7 @@ const [
     readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-annotation-shape.tsx"),
     readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-frame-shape.tsx"),
     readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-note-shape.tsx"),
+    readSqlErdFile("../../src/features/sql-erd/components/sql-erd-canvas-toolbar.tsx"),
     readSqlErdFile("../../src/features/sql-erd/utils/ddl-parser.ts"),
     readSqlErdFile("../../src/features/sql-erd/utils/sql-editor-dialect.ts"),
     readSqlErdFile("../../src/features/sql-erd/utils/sql-source-decoration.ts"),
@@ -6232,6 +6234,13 @@ assert.doesNotMatch(
 assert.doesNotMatch(annotationShape, /Cardinality/);
 assert.match(frameShape, /\{!shape\.props\.isLocked \? \(/);
 assert.doesNotMatch(noteShape, /SQLTOERD_NOTE_DELETE_EVENT/);
+assert.match(annotationToolbar, /export function SqlErdCanvasToolbar/);
+assert.match(annotationToolbar, /aria-label="선택\/드래그"/);
+assert.match(annotationToolbar, /aria-label="메모 추가"/);
+assert.match(annotationToolbar, /aria-label="프레임 추가"/);
+assert.match(annotationToolbar, /aria-label="화면 맞춤"/);
+assert.match(annotationToolbar, /isSqlErdFrameShape\(selectedShape\)/);
+assert.match(annotationToolbar, /onFrameColorChange\(selectedShape\.props\.frameId, color\)/);
 assert.match(
   canvasSurface,
   /function deleteNote\(noteId: string\)[\s\S]*?deleteNoteIds/
