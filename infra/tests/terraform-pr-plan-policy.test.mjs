@@ -26,6 +26,8 @@ assert.match(planJob, /vars\.AWS_TERRAFORM_PLAN_ROLE_ARN/);
 assert.match(planJob, /github\.event\.pull_request\.head\.repo\.full_name\s*==\s*github\.repository/);
 assert.match(planJob, /github\.event_name\s*==\s*'workflow_dispatch'/);
 assert.match(planJob, /github\.ref\s*==\s*'refs\/heads\/main'/);
+assert.match(planJob, /concurrency:\s*\n\s*group: terraform-dev-plan-state/);
+assert.match(planJob, /cancel-in-progress: false/);
 assert.match(planJob, /role-to-assume:\s*\$\{\{ vars\.AWS_TERRAFORM_PLAN_ROLE_ARN \}\}/);
 assert.doesNotMatch(planJob, /AWS_GITHUB_ACTIONS_ROLE_ARN/);
 assert.match(planJob, /terraform plan -input=false/);
