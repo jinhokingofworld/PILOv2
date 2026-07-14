@@ -110,6 +110,9 @@ const meetingRoomsMigration = await readSource(
 const workspaceRecordingConsentsMigration = await readSource(
   "../../../db/migrations/054_create_workspace_recording_consents.sql"
 );
+const workspaceRecordingConsentsDataApiMigration = await readSource(
+  "../../../db/migrations/055_revoke_workspace_recording_consents_data_api_access.sql"
+);
 const canvasShapeHashMigration = await readSource(
   "../../../db/migrations/009_canvas_shape_hash_revision_viewport_index.sql"
 );
@@ -217,6 +220,14 @@ assert.match(
 assert.match(
   workspaceRecordingConsentsMigration,
   /ALTER TABLE public\.workspace_recording_consents ENABLE ROW LEVEL SECURITY/
+);
+assert.match(
+  workspaceRecordingConsentsDataApiMigration,
+  /REVOKE ALL ON TABLE public\.workspace_recording_consents/
+);
+assert.match(
+  workspaceRecordingConsentsDataApiMigration,
+  /FROM anon, authenticated, service_role/
 );
 assert.match(
   apiError,
