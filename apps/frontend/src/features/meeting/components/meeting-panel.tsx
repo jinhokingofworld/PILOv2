@@ -2,7 +2,6 @@
 
 import {
   AlertCircle,
-  ChevronDown,
   CircleUserRound,
   Clock3,
   Loader2,
@@ -1088,46 +1087,49 @@ export function MeetingPanel() {
             {isInitialLoading ? (
               <MeetingPanelSkeleton />
             ) : (
-              <div className="flex flex-1 flex-col items-center justify-center gap-6 px-4 py-10">
-                <div className="w-full max-w-2xl text-center">
-                  <div className="mx-auto flex max-w-md flex-col gap-2 text-left text-sm font-medium">
-                    <span>회의방</span>
-                    <Button
-                      aria-haspopup="dialog"
-                      className="justify-between font-normal"
-                      disabled={
-                        meetingRoomsStatus !== "success" ||
-                        isActionPending ||
-                        isMeetingRoomSwitching
-                      }
-                      type="button"
-                      variant="outline"
-                      onClick={() => {
-                        setMeetingRoomManagementError(null);
-                        setIsMeetingRoomDialogOpen(true);
-                      }}
-                    >
-                      <span>{selectedMeetingRoom?.name ?? "회의방을 선택하세요"}</span>
-                      <ChevronDown className="size-4" />
-                    </Button>
-                  </div>
-                  {isMeetingRoomSwitching ? (
-                    <p className="mt-2 text-sm text-muted-foreground">
-                      기존 음성 연결을 종료하고 회의방을 전환하는 중입니다.
-                    </p>
-                  ) : selectedMeetingRoom ? (
-                    <p className="mt-2 text-sm text-muted-foreground">
-                      {selectedMeetingRoom.name}의 회의 상태입니다.
-                    </p>
-                  ) : null}
-                  <h2 className="text-2xl font-semibold">현재 참여 인원</h2>
-                  <p className="mt-2 text-sm text-muted-foreground">
-                    {displayedActiveCount}명 참여 중
-                    {meeting
-                      ? ` · 시작 ${formatDateTime(meeting.startedAt)}`
-                      : ""}
-                  </p>
+              <>
+                <div className="flex items-center border-b px-4 py-3 sm:px-6">
+                  <Button
+                    aria-haspopup="dialog"
+                    className="h-9 rounded-none border-r pr-6 pl-0 text-base font-semibold"
+                    disabled={
+                      meetingRoomsStatus !== "success" ||
+                      isActionPending ||
+                      isMeetingRoomSwitching
+                    }
+                    type="button"
+                    variant="ghost"
+                    onClick={() => {
+                      setMeetingRoomManagementError(null);
+                      setIsMeetingRoomDialogOpen(true);
+                    }}
+                  >
+                    회의방 목록
+                  </Button>
+                  <h2 className="min-w-0 truncate pl-6 text-2xl font-semibold">
+                    {selectedMeetingRoom?.name ?? "회의방을 선택하세요"}
+                  </h2>
                 </div>
+
+                <div className="flex flex-1 flex-col items-center gap-6 px-4 py-12 sm:px-8">
+                  <div className="w-full max-w-2xl text-center">
+                    {isMeetingRoomSwitching ? (
+                      <p className="text-sm text-muted-foreground">
+                        기존 음성 연결을 종료하고 회의방을 전환하는 중입니다.
+                      </p>
+                    ) : selectedMeetingRoom ? (
+                      <p className="text-sm text-muted-foreground">
+                        {selectedMeetingRoom.name}의 회의 상태입니다.
+                      </p>
+                    ) : null}
+                    <h3 className="mt-2 text-2xl font-semibold">현재 참여 인원</h3>
+                    <p className="mt-2 text-sm text-muted-foreground">
+                      {displayedActiveCount}명 참여 중
+                      {meeting
+                        ? ` · 시작 ${formatDateTime(meeting.startedAt)}`
+                        : ""}
+                    </p>
+                  </div>
 
                 <div className="w-full max-w-2xl space-y-3">
                   {hasRunningRecording ? (
@@ -1338,7 +1340,8 @@ export function MeetingPanel() {
                 >
                   <RefreshCw />
                 </Button>
-              </div>
+                </div>
+              </>
             )}
 
           </section>
