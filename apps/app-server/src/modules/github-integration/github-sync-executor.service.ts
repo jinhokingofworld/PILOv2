@@ -110,7 +110,7 @@ export interface GithubSyncRunProgress {
 
 interface GithubProjectV2DiscoveryContext
   extends GithubSyncProjectV2ContextRow {
-  repositoryNodeIds: string[];
+  repositoryIds: string[];
 }
 
 interface GithubProjectV2DiscoverySyncResult {
@@ -133,6 +133,12 @@ interface HydratedBoardUpdatedAtRow extends QueryResultRow {
 
 interface GithubProjectV2SelectionRow extends QueryResultRow {
   project_v2_id: string;
+  repository_id: string;
+}
+
+interface GithubFullSyncProjectV2Context {
+  projectV2: GithubSyncProjectV2ContextRow;
+  repositoryId: string;
 }
 
 @Injectable()
@@ -292,18 +298,23 @@ export class GithubSyncExecutorService {
       await this.syncGithubPullRequests(context)
     );
 
-    const selectedProjectV2Ids = await this.listSelectedGithubProjectV2Ids(
-      context.workspaceId,
-      context.installation.id,
-      context.repository?.id ?? null
-    );
+    const selectedProjectV2Selections =
+      await this.listSelectedGithubProjectV2Selections(
+        context.workspaceId,
+        context.installation.id,
+        context.repository?.id ?? null
+      );
     const projectV2Contexts = this.getGithubProjectV2ContextsForFullSync(
       context,
       discovery.projectV2s,
-      selectedProjectV2Ids
+      selectedProjectV2Selections
     );
-    const stepsPerProject = 3;
-    const totalProjectSteps = projectV2Contexts.length * stepsPerProject;
+    const uniqueProjectV2s = [
+      ...new Map(
+        projectV2Contexts.map(({ projectV2 }) => [projectV2.id, projectV2])
+      ).values()
+    ];
+    const totalProjectSteps = uniqueProjectV2s.length * 2 + projectV2Contexts.length;
     let completedProjectSteps = 0;
     const startProjectStep = async (
       stage: GithubSyncProgressStage
@@ -315,9 +326,12 @@ export class GithubSyncExecutorService {
       await this.reportGithubSyncProgress(context, percent, stage, summary);
     };
 
-    for (const projectV2 of projectV2Contexts) {
+    for (const projectV2 of uniqueProjectV2s) {
       await this.assertGithubSyncLease(context);
-      const projectContext = this.withGithubSyncProjectV2(context, projectV2);
+      const projectContext = this.withGithubSyncProjectV2(
+        context,
+        projectV2
+      );
       await startProjectStep("project_v2_fields");
       summary = this.mergeGithubSyncSummaries(
         summary,
@@ -330,8 +344,19 @@ export class GithubSyncExecutorService {
         await this.syncGithubProjectV2Items(projectContext)
       );
       completedProjectSteps += 1;
+    }
+
+    for (const projectV2Context of projectV2Contexts) {
+      await this.assertGithubSyncLease(context);
+      const projectContext = this.withGithubSyncProjectV2(
+        context,
+        projectV2Context.projectV2
+      );
       await startProjectStep("board_hydration");
-      await this.hydrateExistingBoardsForGithubProjectV2(projectContext);
+      await this.hydrateExistingBoardsForGithubProjectV2(
+        projectContext,
+        projectV2Context.repositoryId
+      );
       completedProjectSteps += 1;
     }
 
@@ -522,15 +547,15 @@ export class GithubSyncExecutorService {
         }
         projectIds.push(row.id);
         const existing = projectV2s.find((item) => item.id === row.id);
-        if (existing && repository.github_node_id) {
-          existing.repositoryNodeIds.push(repository.github_node_id);
+        if (existing) {
+          existing.repositoryIds.push(repository.id);
         } else if (!existing) {
           projectV2s.push({
             id: row.id,
             workspace_id: context.workspaceId,
             installation_id: context.installation.id,
             github_project_node_id: project.id,
-            repositoryNodeIds: repository.github_node_id ? [repository.github_node_id] : []
+            repositoryIds: [repository.id]
           });
         }
       }
@@ -1728,21 +1753,30 @@ export class GithubSyncExecutorService {
   private getGithubProjectV2ContextsForFullSync(
     context: GithubSyncRunContext,
     discoveredProjectV2s: GithubProjectV2DiscoveryContext[],
-    selectedProjectV2Ids: ReadonlySet<string>
-  ): GithubSyncProjectV2ContextRow[] {
-    const repositoryNodeId = context.repository?.github_node_id ?? null;
-    return discoveredProjectV2s.filter(
-      (projectV2) =>
-        selectedProjectV2Ids.has(projectV2.id) &&
-        (!repositoryNodeId || projectV2.repositoryNodeIds.includes(repositoryNodeId))
-    );
+    selectedProjectV2Selections: GithubProjectV2SelectionRow[]
+  ): GithubFullSyncProjectV2Context[] {
+    return selectedProjectV2Selections.flatMap((selection) => {
+      if (context.repository && context.repository.id !== selection.repository_id) {
+        return [];
+      }
+
+      const projectV2 = discoveredProjectV2s.find(
+        (candidate) =>
+          candidate.id === selection.project_v2_id &&
+          candidate.repositoryIds.includes(selection.repository_id)
+      );
+
+      return projectV2
+        ? [{ projectV2, repositoryId: selection.repository_id }]
+        : [];
+    });
   }
 
-  private async listSelectedGithubProjectV2Ids(
+  private async listSelectedGithubProjectV2Selections(
     workspaceId: string,
     installationId: string,
     repositoryId: string | null
-  ): Promise<Set<string>> {
+  ): Promise<GithubProjectV2SelectionRow[]> {
     const repositoryFilter = repositoryId
       ? "AND gps.repository_id = $3"
       : "";
@@ -1751,7 +1785,9 @@ export class GithubSyncExecutorService {
       : [workspaceId, installationId];
     const rows = await this.database.query<GithubProjectV2SelectionRow>(
       `
-        SELECT gps.project_v2_id
+        SELECT
+          gps.project_v2_id,
+          gps.repository_id
         FROM github_project_v2_selections gps
         INNER JOIN github_projects_v2 gp ON gp.id = gps.project_v2_id
         WHERE gp.workspace_id = $1
@@ -1761,7 +1797,7 @@ export class GithubSyncExecutorService {
       values
     );
 
-    return new Set(rows.map((row) => row.project_v2_id));
+    return rows;
   }
 
   private withGithubSyncProjectV2(
@@ -1775,12 +1811,13 @@ export class GithubSyncExecutorService {
   }
 
   private async hydrateExistingBoardsForGithubProjectV2(
-    context: GithubSyncRunContext
+    context: GithubSyncRunContext,
+    repositoryId = context.repository?.id
   ): Promise<void> {
     const projectV2 = this.requireGithubSyncProjectV2(context);
     const values: unknown[] = [context.workspaceId, projectV2.id];
-    const repositoryFilter = context.repository
-      ? `AND b.repository_id = $${values.push(context.repository.id)}`
+    const repositoryFilter = repositoryId
+      ? `AND b.repository_id = $${values.push(repositoryId)}`
       : "";
     const boards = await this.database.query<ExistingBoardHydrationRow>(
       `

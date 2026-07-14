@@ -20,9 +20,9 @@ import type {
   StartGithubSyncRunInput
 } from "@/features/github-integration/types";
 import {
-  getGithubConnectSyncStatusLabel,
   getGithubConnectSyncTargetLabel
 } from "@/features/github-integration/utils/github-connect-format";
+import { getGithubManualSyncActionMessage } from "@/features/github-integration/utils/github-manual-sync-status";
 import { selectProjectV2IdForRepository } from "@/features/github-integration/utils/github-project-selection";
 import { collectGithubPages } from "@/features/github-integration/utils/github-page-collector";
 import {
@@ -905,16 +905,15 @@ export function GithubPanel() {
     try {
       const syncRun = await apiClient.startGithubSyncRun(workspaceId, body);
       setActionMessage(
-        `${getGithubConnectSyncTargetLabel(
-          syncRun.target
-        )} 동기화가 ${getGithubConnectSyncStatusLabel(
+        getGithubManualSyncActionMessage(
+          getGithubConnectSyncTargetLabel(syncRun.target),
           syncRun.status
-        )} 상태로 종료되었습니다.`
+        )
       );
-      await loadGithubIntegrationSnapshot(
-        selectedRepositoryId,
-        selectedProjectV2Id
-      );
+      await refreshGithubSyncRuns();
+      if (syncRun.status === "queued" || syncRun.status === "running") {
+        setHasRunningSyncRun(true);
+      }
     } catch (error) {
       setActionError(getErrorMessage(error));
     } finally {
