@@ -72,10 +72,12 @@ assert.match(sqlErdController, /@Delete\("sql-erd-session\/:sessionId"\)/);
 assert.match(sqlErdController, /@Get\("sql-erd-sessions"\)/);
 assert.match(sqlErdController, /@Post\("sql-erd-sessions"\)/);
 assert.match(sqlErdController, /@Get\("sql-erd-sessions\/:sessionId"\)/);
+assert.match(sqlErdController, /@Get\("sql-erd-sessions\/:sessionId\/operations"\)/);
+assert.match(sqlErdController, /@Post\("sql-erd-sessions\/:sessionId\/operations"\)/);
 assert.match(sqlErdController, /@Patch\("sql-erd-sessions\/:sessionId"\)/);
 assert.match(sqlErdController, /@Delete\("sql-erd-sessions\/:sessionId"\)/);
-assert.equal(sqlErdController.match(/@RouteConfig/g)?.length, 4);
-assert.equal(sqlErdController.match(/bodyLimit/g)?.length, 4);
+assert.equal(sqlErdController.match(/@RouteConfig/g)?.length, 5);
+assert.equal(sqlErdController.match(/bodyLimit/g)?.length, 5);
 assert.match(sqlErdTypes, /SQL_ERD_REQUEST_BODY_LIMIT_BYTES = 2 \* 1024 \* 1024/);
 assert.match(sqlErdService, /domain: "sqltoerd"/);
 assert.match(sqlErdService, /apiContract: "docs\/api\/sqltoerd-api.md"/);
@@ -87,6 +89,10 @@ assert.match(sqlErdService, /FOR UPDATE/);
 assert.match(sqlErdService, /FROM sql_erd_sessions/);
 assert.match(sqlErdService, /INSERT INTO sql_erd_sessions/);
 assert.match(sqlErdService, /UPDATE sql_erd_sessions/);
+assert.match(sqlErdService, /INSERT INTO sql_erd_session_operations/);
+assert.match(sqlErdService, /sql_erd_session_operation_outbox/);
+assert.match(sqlErdService, /write_protocol = 'snapshot'/);
+assert.match(sqlErdService, /write_protocol = 'operations_v1'/);
 assert.match(sqlErdService, /revision = revision \+ 1/);
 assert.match(sqlErdService, /deleted_at = now\(\)/);
 assert.match(sqlErdService, /table_count/);
@@ -456,6 +462,8 @@ function sessionRow(overrides = {}) {
     table_count: 2,
     relation_count: 1,
     revision: 1,
+    write_protocol: "snapshot",
+    latest_op_seq: 0,
     created_by: currentUserId,
     updated_by: currentUserId,
     created_at: createdAt,

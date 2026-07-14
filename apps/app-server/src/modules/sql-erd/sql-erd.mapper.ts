@@ -22,6 +22,8 @@ export function mapSqlErdSession(
     tableCount: Number(session.table_count),
     relationCount: Number(session.relation_count),
     revision: Number(session.revision),
+    writeProtocol: session.write_protocol,
+    latestOpSeq: Number(session.latest_op_seq),
     createdBy: session.created_by,
     updatedBy: session.updated_by,
     createdAt: toIsoString(session.created_at),

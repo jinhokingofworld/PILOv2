@@ -8,6 +8,7 @@ export type ApiErrorCode =
   | "FORBIDDEN"
   | "NOT_FOUND"
   | "CONFLICT"
+  | "SQL_ERD_WRITE_PROTOCOL_MISMATCH"
   | "PAYLOAD_TOO_LARGE";
 
 export interface ApiErrorResponse {
@@ -51,6 +52,14 @@ export function notFound(message: string): ApiError {
 
 export function conflict(message: string): ApiError {
   return new ApiError(HttpStatus.CONFLICT, "CONFLICT", message);
+}
+
+export function sqlErdWriteProtocolMismatch(): ApiError {
+  return new ApiError(
+    HttpStatus.CONFLICT,
+    "SQL_ERD_WRITE_PROTOCOL_MISMATCH",
+    "SQLtoERD session write protocol does not allow this request"
+  );
 }
 
 export function workspaceRecordingConsentRequired(): ApiError {

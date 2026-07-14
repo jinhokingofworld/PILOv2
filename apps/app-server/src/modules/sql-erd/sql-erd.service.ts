@@ -3,7 +3,8 @@ import {
   badRequest,
   conflict,
   notFound,
-  payloadTooLarge
+  payloadTooLarge,
+  sqlErdWriteProtocolMismatch
 } from "../../common/api-error";
 import {
   DatabaseService,
@@ -16,13 +17,25 @@ import {
   mapSqlErdSession,
   mapSqlErdSessionSummary
 } from "./sql-erd.mapper";
+import { applySqlErdLayoutPatch } from "./sql-erd-layout-patch";
+import { mapSqlErdOperation } from "./sql-erd-operation.mapper";
 import {
+  validateCreateSqlErdOperationRequest,
+  validateListSqlErdOperationsQuery
+} from "./sql-erd-operation.validation";
+import {
+  CreateSqlErdOperationRequest,
   CreateSqlErdSessionRequest,
   DeleteSqlErdSessionQuery,
+  ListSqlErdOperationsQuery,
   ListSqlErdSessionsQuery,
   NormalizedCreateSqlErdSessionInput,
+  NormalizedSqlErdOperationInput,
   NormalizedUpdateSqlErdSessionInput,
   SqlErdDeletedSessionPayload,
+  SqlErdOperationListPayload,
+  SqlErdOperationRow,
+  SqlErdOperationWritePayload,
   SqlErdSessionListPayload,
   SqlErdSessionPayload,
   SqlErdSessionRow,
@@ -52,6 +65,8 @@ const SQL_ERD_SESSION_SELECT = `
     table_count,
     relation_count,
     revision,
+    write_protocol,
+    latest_op_seq,
     created_by,
     updated_by,
     created_at,
@@ -86,6 +101,22 @@ const JSON_SIZE_CONSTRAINTS = new Set([
   "sql_erd_sessions_layout_json_size_check",
   "sql_erd_sessions_settings_json_size_check"
 ]);
+const SQL_ERD_OPERATION_SELECT = `
+  SELECT
+    id,
+    workspace_id,
+    session_id,
+    actor_user_id,
+    operation_type,
+    op_seq,
+    client_operation_id,
+    base_revision,
+    applied_on_revision,
+    result_revision,
+    payload,
+    created_at
+  FROM sql_erd_session_operations
+`;
 
 @Injectable()
 export class SqlErdService {
@@ -168,6 +199,128 @@ export class SqlErdService {
     }
 
     return mapSqlErdSession(session);
+  }
+
+  async listOperations(
+    currentUserId: string,
+    workspaceId: string,
+    sessionId: string,
+    query: ListSqlErdOperationsQuery
+  ): Promise<SqlErdOperationListPayload> {
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+
+    const validSessionId = validateSqlErdSessionId(sessionId);
+    const input = validateListSqlErdOperationsQuery(query);
+    const session = await this.findActiveSessionById(workspaceId, validSessionId);
+    if (!session) {
+      throw notFound("sqltoerd session not found");
+    }
+
+    const rows = await this.database.query<SqlErdOperationRow>(
+      `
+        ${SQL_ERD_OPERATION_SELECT}
+        WHERE workspace_id = $1
+          AND session_id = $2
+          AND op_seq > $3
+        ORDER BY op_seq ASC
+        LIMIT $4
+      `,
+      [workspaceId, validSessionId, input.afterSeq, input.limit + 1]
+    );
+    const hasNextPage = rows.length > input.limit;
+    const pageRows = rows.slice(0, input.limit);
+    const lastRow = pageRows.at(-1);
+
+    return {
+      items: pageRows.map(mapSqlErdOperation),
+      latestOpSeq: Number(session.latest_op_seq),
+      nextAfterSeq:
+        hasNextPage && lastRow ? Number(lastRow.op_seq) : null
+    };
+  }
+
+  async createOperation(
+    currentUserId: string,
+    workspaceId: string,
+    sessionId: string,
+    body: CreateSqlErdOperationRequest
+  ): Promise<SqlErdOperationWritePayload> {
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+
+    const validSessionId = validateSqlErdSessionId(sessionId);
+    const input = validateCreateSqlErdOperationRequest(body);
+
+    try {
+      return await this.database.transaction(async (transaction) => {
+        const session = await this.findActiveSessionById(
+          workspaceId,
+          validSessionId,
+          transaction,
+          true
+        );
+        if (!session) {
+          throw notFound("sqltoerd session not found");
+        }
+        if (session.write_protocol !== "operations_v1") {
+          throw sqlErdWriteProtocolMismatch();
+        }
+
+        const existingOperation = await this.findOperationByClientOperationId(
+          transaction,
+          validSessionId,
+          currentUserId,
+          input.clientOperationId
+        );
+        if (existingOperation) {
+          return this.mapOperationWriteResult(session, existingOperation);
+        }
+
+        const currentRevision = Number(session.revision);
+        if (input.baseRevision > currentRevision) {
+          throw conflict("sqltoerd operation baseRevision is ahead of the session");
+        }
+
+        const layoutJson = applySqlErdLayoutPatch(session.layout_json, input.patch);
+        validateSqlErdLayoutJson(layoutJson, session.model_json);
+
+        const updatedSession = await this.applyOperationLayoutPatch(
+          transaction,
+          session,
+          currentUserId,
+          input,
+          layoutJson
+        );
+        if (!updatedSession) {
+          throw conflict("sqltoerd session revision conflict");
+        }
+
+        const operation = await this.insertOperation(
+          transaction,
+          updatedSession,
+          currentUserId,
+          input,
+          currentRevision
+        );
+        if (!operation) {
+          throw conflict("sqltoerd operation could not be recorded");
+        }
+
+        await transaction.execute(
+          `
+            INSERT INTO sql_erd_session_operation_outbox (operation_id)
+            VALUES ($1)
+          `,
+          [operation.id]
+        );
+
+        return this.mapOperationWriteResult(updatedSession, operation);
+      });
+    } catch (error) {
+      if (this.isJsonSizeConstraintViolation(error)) {
+        throw payloadTooLarge("sqltoerd JSON payload is too large");
+      }
+      throw error;
+    }
   }
 
   async createSession(
@@ -311,6 +464,8 @@ export class SqlErdService {
             table_count,
             relation_count,
             revision,
+            write_protocol,
+            latest_op_seq,
             created_by,
             updated_by,
             created_at,
@@ -349,6 +504,9 @@ export class SqlErdService {
     );
     if (!currentSession) {
       throw notFound("sqltoerd session not found");
+    }
+    if (currentSession.write_protocol !== "snapshot") {
+      throw sqlErdWriteProtocolMismatch();
     }
 
     this.assertRevision(currentSession, input.baseRevision);
@@ -417,6 +575,8 @@ export class SqlErdService {
           table_count,
           relation_count,
           revision,
+          write_protocol,
+          latest_op_seq,
           created_by,
           updated_by,
           created_at,
@@ -441,6 +601,137 @@ export class SqlErdService {
     );
   }
 
+  private async findOperationByClientOperationId(
+    transaction: DatabaseTransaction,
+    sessionId: string,
+    actorUserId: string,
+    clientOperationId: string
+  ): Promise<SqlErdOperationRow | null> {
+    return transaction.queryOne<SqlErdOperationRow>(
+      `
+        ${SQL_ERD_OPERATION_SELECT}
+        WHERE session_id = $1
+          AND actor_user_id = $2
+          AND client_operation_id = $3
+      `,
+      [sessionId, actorUserId, clientOperationId]
+    );
+  }
+
+  private async applyOperationLayoutPatch(
+    transaction: DatabaseTransaction,
+    session: SqlErdSessionRow,
+    currentUserId: string,
+    input: NormalizedSqlErdOperationInput,
+    layoutJson: SqlErdSessionRow["layout_json"]
+  ): Promise<SqlErdSessionRow | null> {
+    return transaction.queryOne<SqlErdSessionRow>(
+      `
+        UPDATE sql_erd_sessions
+        SET
+          layout_json = $3::jsonb,
+          revision = revision + 1,
+          latest_op_seq = latest_op_seq + 1,
+          updated_by = $4
+        WHERE id = $1
+          AND workspace_id = $2
+          AND deleted_at IS NULL
+          AND write_protocol = 'operations_v1'
+          AND revision = $5
+        RETURNING
+          id,
+          workspace_id,
+          title,
+          source_format,
+          dialect,
+          source_text,
+          model_json,
+          layout_json,
+          settings_json,
+          table_count,
+          relation_count,
+          revision,
+          write_protocol,
+          latest_op_seq,
+          created_by,
+          updated_by,
+          created_at,
+          updated_at,
+          deleted_at
+      `,
+      [
+        session.id,
+        session.workspace_id,
+        JSON.stringify(layoutJson),
+        currentUserId,
+        Number(session.revision)
+      ]
+    );
+  }
+
+  private insertOperation(
+    transaction: DatabaseTransaction,
+    session: SqlErdSessionRow,
+    currentUserId: string,
+    input: NormalizedSqlErdOperationInput,
+    appliedOnRevision: number
+  ): Promise<SqlErdOperationRow | null> {
+    return transaction.queryOne<SqlErdOperationRow>(
+      `
+        INSERT INTO sql_erd_session_operations (
+          workspace_id,
+          session_id,
+          actor_user_id,
+          operation_type,
+          op_seq,
+          client_operation_id,
+          base_revision,
+          applied_on_revision,
+          result_revision,
+          payload
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)
+        RETURNING
+          id,
+          workspace_id,
+          session_id,
+          actor_user_id,
+          operation_type,
+          op_seq,
+          client_operation_id,
+          base_revision,
+          applied_on_revision,
+          result_revision,
+          payload,
+          created_at
+      `,
+      [
+        session.workspace_id,
+        session.id,
+        currentUserId,
+        input.type,
+        Number(session.latest_op_seq),
+        input.clientOperationId,
+        input.baseRevision,
+        appliedOnRevision,
+        Number(session.revision),
+        JSON.stringify(input.patch)
+      ]
+    );
+  }
+
+  private mapOperationWriteResult(
+    session: SqlErdSessionRow,
+    operation: SqlErdOperationRow
+  ): SqlErdOperationWritePayload {
+    return {
+      operation: mapSqlErdOperation(operation),
+      layoutJson: session.layout_json,
+      revision: Number(session.revision),
+      latestOpSeq: Number(session.latest_op_seq)
+    };
+  }
+
   private findActiveSession(
     workspaceId: string,
     database: Pick<DatabaseTransaction, "queryOne"> = this.database
@@ -459,14 +750,17 @@ export class SqlErdService {
 
   private findActiveSessionById(
     workspaceId: string,
-    sessionId: string
+    sessionId: string,
+    database: Pick<DatabaseTransaction, "queryOne"> = this.database,
+    lock = false
   ): Promise<SqlErdSessionRow | null> {
-    return this.database.queryOne<SqlErdSessionRow>(
+    return database.queryOne<SqlErdSessionRow>(
       `
         ${SQL_ERD_SESSION_SELECT}
         WHERE workspace_id = $1
           AND id = $2
           AND deleted_at IS NULL
+        ${lock ? "FOR UPDATE" : ""}
       `,
       [workspaceId, sessionId]
     );
@@ -505,6 +799,7 @@ export class SqlErdService {
           AND id = $2
           AND deleted_at IS NULL
           AND revision = $13
+          AND write_protocol = 'snapshot'
         RETURNING
           id,
           workspace_id,
@@ -518,6 +813,8 @@ export class SqlErdService {
           table_count,
           relation_count,
           revision,
+          write_protocol,
+          latest_op_seq,
           created_by,
           updated_by,
           created_at,
@@ -557,6 +854,9 @@ export class SqlErdService {
   ): Promise<never> {
     const currentSession = await this.findActiveSessionById(workspaceId, sessionId);
     if (currentSession) {
+      if (currentSession.write_protocol !== "snapshot") {
+        throw sqlErdWriteProtocolMismatch();
+      }
       throw conflict("sqltoerd session revision conflict");
     }
 

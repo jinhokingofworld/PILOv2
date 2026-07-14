@@ -15,9 +15,13 @@ import { AuthGuard } from "../../common/auth.guard";
 import { CurrentUserId } from "../../common/current-user.decorator";
 import { SqlErdService } from "./sql-erd.service";
 import {
+  CreateSqlErdOperationRequest,
   CreateSqlErdSessionRequest,
   DeleteSqlErdSessionQuery,
+  ListSqlErdOperationsQuery,
   ListSqlErdSessionsQuery,
+  SqlErdOperationListPayload,
+  SqlErdOperationWritePayload,
   SQL_ERD_REQUEST_BODY_LIMIT_BYTES,
   SqlErdDeletedSessionPayload,
   SqlErdSessionListPayload,
@@ -73,6 +77,23 @@ export class SqlErdSessionController {
     return apiResponse(session);
   }
 
+  @Get("sql-erd-sessions/:sessionId/operations")
+  async listOperations(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("sessionId") sessionId: string,
+    @Query() query: ListSqlErdOperationsQuery
+  ): Promise<ApiSuccessResponse<SqlErdOperationListPayload>> {
+    const operations = await this.sqlErdService.listOperations(
+      currentUserId,
+      workspaceId,
+      sessionId,
+      query
+    );
+
+    return apiResponse(operations);
+  }
+
   @RouteConfig({ bodyLimit: SQL_ERD_REQUEST_BODY_LIMIT_BYTES })
   @Post("sql-erd-session")
   async createSession(
@@ -103,6 +124,24 @@ export class SqlErdSessionController {
     );
 
     return apiResponse(session);
+  }
+
+  @RouteConfig({ bodyLimit: SQL_ERD_REQUEST_BODY_LIMIT_BYTES })
+  @Post("sql-erd-sessions/:sessionId/operations")
+  async createOperation(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("sessionId") sessionId: string,
+    @Body() body: CreateSqlErdOperationRequest
+  ): Promise<ApiSuccessResponse<SqlErdOperationWritePayload>> {
+    const operation = await this.sqlErdService.createOperation(
+      currentUserId,
+      workspaceId,
+      sessionId,
+      body
+    );
+
+    return apiResponse(operation);
   }
 
   @RouteConfig({ bodyLimit: SQL_ERD_REQUEST_BODY_LIMIT_BYTES })
