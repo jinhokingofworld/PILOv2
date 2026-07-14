@@ -145,7 +145,8 @@ class CanvasSemanticRouter:
 
         text_matches = self.repository.search_text_shapes(context.canvas_id, query)
         if text_matches and (
-            not requires_shape_search_classification or _is_direct_text_search_prompt(context.prompt)
+            not requires_shape_search_classification
+            or _is_direct_text_search_prompt(context.prompt)
         ):
             return CanvasAgentPlan(
                 action_name="find_shapes",
@@ -215,11 +216,7 @@ class CanvasSemanticRouter:
             self.repository.search_text_shapes(context.canvas_id, right_query, limit=2)
         )
 
-        if (
-            left_match is None
-            or right_match is None
-            or left_match.shape_id == right_match.shape_id
-        ):
+        if left_match is None or right_match is None or left_match.shape_id == right_match.shape_id:
             return None
 
         return CanvasAgentPlan(
