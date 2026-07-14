@@ -101,6 +101,10 @@ export type CanvasShapeSyncConflict = {
   shapeId: string;
 };
 
+export type CanvasShapeSyncResult = {
+  shapeRevisions: Map<string, number>;
+};
+
 type CanvasShapeSyncQueueOptions = {
   boardId: string;
   canvasClient: CanvasShapeApiClient;
@@ -108,7 +112,10 @@ type CanvasShapeSyncQueueOptions = {
   getBaseRevision?: (shapeId: string) => number | null;
   onConflict?: (conflict: CanvasShapeSyncConflict) => void;
   onError?: (error: unknown) => void;
-  onSynced?: (operations: CanvasShapeSyncOperation[]) => void;
+  onSynced?: (
+    operations: CanvasShapeSyncOperation[],
+    result: CanvasShapeSyncResult,
+  ) => void;
   workspaceId: string;
 };
 
@@ -171,7 +178,13 @@ function resolveCanvasShapeBaseRevision({
   shape: CanvasFreeformShapeSnapshot | undefined;
   shapeId: string;
 }) {
-  return readCanvasShapeRevision(shape) ?? getBaseRevision?.(shapeId) ?? null;
+  const localRevision = readCanvasShapeRevision(shape);
+  const remoteRevision = getBaseRevision?.(shapeId) ?? null;
+
+  if (localRevision === null) return remoteRevision;
+  if (remoteRevision === null) return localRevision;
+
+  return Math.max(localRevision, remoteRevision);
 }
 
 function isStaleMissingShapeOperation(
@@ -208,6 +221,69 @@ function readCanvasConflictDetails(error: unknown) {
 
 function readInteger(value: unknown) {
   return typeof value === "number" && Number.isInteger(value) ? value : null;
+}
+
+function readShapeRevisionEntry(value: unknown) {
+  if (!isRecord(value) || typeof value.id !== "string") {
+    return null;
+  }
+
+  const revision = readInteger(value.revision);
+
+  if (revision === null || revision <= 0) {
+    return null;
+  }
+
+  return {
+    revision,
+    shapeId: value.id,
+  };
+}
+
+function mergeCanvasShapeSyncResults(
+  target: CanvasShapeSyncResult,
+  source: CanvasShapeSyncResult,
+) {
+  source.shapeRevisions.forEach((revision, shapeId) => {
+    target.shapeRevisions.set(
+      shapeId,
+      Math.max(target.shapeRevisions.get(shapeId) ?? 0, revision),
+    );
+  });
+
+  return target;
+}
+
+function readCanvasShapeSyncResult(value: unknown): CanvasShapeSyncResult {
+  const result: CanvasShapeSyncResult = {
+    shapeRevisions: new Map<string, number>(),
+  };
+
+  if (!isRecord(value)) {
+    return result;
+  }
+
+  const shapeEntries = [
+    ...(Array.isArray(value.shapes) ? value.shapes : []),
+    ...(Array.isArray(value.deletedShapes) ? value.deletedShapes : []),
+    value,
+  ];
+
+  shapeEntries.forEach((entry) => {
+    const revisionEntry = readShapeRevisionEntry(entry);
+
+    if (!revisionEntry) return;
+
+    result.shapeRevisions.set(
+      revisionEntry.shapeId,
+      Math.max(
+        result.shapeRevisions.get(revisionEntry.shapeId) ?? 0,
+        revisionEntry.revision,
+      ),
+    );
+  });
+
+  return result;
 }
 
 export function readCanvasShapeSyncConflict(
@@ -489,7 +565,7 @@ function runCanvasShapeSyncOperation({
   canvasClient: CanvasShapeApiClient;
   operation: CanvasShapeSyncOperation;
   workspaceId: string;
-}) {
+}): Promise<unknown> {
   if (operation.type === "create") {
     return canvasClient.createShape(
       boardId,
@@ -551,9 +627,13 @@ async function runCanvasShapeSyncOperations({
   canvasClient: CanvasShapeApiClient;
   operations: CanvasShapeSyncOperation[];
   workspaceId: string;
-}) {
+}): Promise<CanvasShapeSyncResult> {
+  const result: CanvasShapeSyncResult = {
+    shapeRevisions: new Map<string, number>(),
+  };
+
   if (!operations.length) {
-    return;
+    return result;
   }
 
   const syncShapesBatch = canvasClient.syncShapesBatch;
@@ -569,7 +649,7 @@ async function runCanvasShapeSyncOperations({
 
         try {
           await runWithRetry(async () => {
-            await runSyncShapesBatch(
+            const response = await runSyncShapesBatch(
               boardId,
               {
                 operations: [operation],
@@ -577,6 +657,11 @@ async function runCanvasShapeSyncOperations({
               {
                 workspaceId,
               },
+            );
+
+            mergeCanvasShapeSyncResults(
+              result,
+              readCanvasShapeSyncResult(response),
             );
           });
         } catch (error) {
@@ -604,7 +689,7 @@ async function runCanvasShapeSyncOperations({
 
       try {
         await runWithRetry(async () => {
-          await runSyncShapesBatch(
+          const response = await runSyncShapesBatch(
             boardId,
             {
               operations: batchOperations,
@@ -612,6 +697,11 @@ async function runCanvasShapeSyncOperations({
             {
               workspaceId,
             },
+          );
+
+          mergeCanvasShapeSyncResults(
+            result,
+            readCanvasShapeSyncResult(response),
           );
         });
       } catch (error) {
@@ -633,7 +723,7 @@ async function runCanvasShapeSyncOperations({
       }
     }
 
-    return;
+    return result;
   }
 
   for (let index = 0; index < operations.length; index += 1) {
@@ -641,17 +731,24 @@ async function runCanvasShapeSyncOperations({
 
     try {
       await runWithRetry(async () => {
-        await runCanvasShapeSyncOperation({
+        const response = await runCanvasShapeSyncOperation({
           boardId,
           canvasClient,
           operation,
           workspaceId,
         });
+
+        mergeCanvasShapeSyncResults(
+          result,
+          readCanvasShapeSyncResult(response),
+        );
       });
     } catch (error) {
       throw new CanvasShapeSyncFailure(error, operations.slice(index));
     }
   }
+
+  return result;
 }
 
 export function createCanvasShapeSyncQueue({
@@ -712,13 +809,13 @@ export function createCanvasShapeSyncQueue({
     if (!operations.length) return;
 
     try {
-      await runCanvasShapeSyncOperations({
+      const result = await runCanvasShapeSyncOperations({
         boardId,
         canvasClient,
         operations,
         workspaceId,
       });
-      onSynced?.(operations);
+      onSynced?.(operations, result);
     } catch (error) {
       const conflict = readCanvasShapeSyncConflict(error);
 
@@ -844,7 +941,7 @@ export async function syncCanvasFreeformShapes({
   });
 
   try {
-    await runCanvasShapeSyncOperations({
+    return await runCanvasShapeSyncOperations({
       boardId,
       canvasClient,
       operations,

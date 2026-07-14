@@ -235,9 +235,19 @@ export function useCanvasShapePersistence({
               onConflict: onShapeSyncConflict,
               workspaceId: board.workspaceId,
             })
-              .then(() =>
-                clearPendingLocalShapeChanges(pendingLocalShapeVersions),
-              )
+              .then((result) => {
+                result.shapeRevisions.forEach((revision, shapeId) => {
+                  remoteShapeRevisionRef.current.set(
+                    shapeId,
+                    Math.max(
+                      remoteShapeRevisionRef.current.get(shapeId) ?? 0,
+                      revision,
+                    ),
+                  );
+                });
+
+                clearPendingLocalShapeChanges(pendingLocalShapeVersions);
+              })
               .catch((error: unknown) => {
                 clearPendingLocalShapeChanges(pendingLocalShapeVersions);
                 if (isCanvasShapeSyncConflictError(error)) return;
