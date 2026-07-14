@@ -1,5 +1,6 @@
 import { buildCanvasApiUrl, CanvasApiError } from "./canvas-api-client";
 import type {
+  CanvasAgentConversationContext,
   CanvasAgentDraft,
   CanvasAgentDraftApplyResult,
   CanvasAgentPresentationMode,
@@ -62,6 +63,7 @@ export function createCanvasAgentClient() {
       canvasId: string,
       body: {
         prompt: string;
+        conversationContext?: CanvasAgentConversationContext;
         presentationMode?: CanvasAgentPresentationMode;
         selectedShapeIds: string[];
         toolHelpMode?: boolean;

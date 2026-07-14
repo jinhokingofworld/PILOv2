@@ -7,6 +7,22 @@ export type CanvasAgentViewport = {
 
 export type CanvasAgentPresentationMode = "interactive" | "background";
 
+export type CanvasAgentConversationMessage = {
+  role: "assistant" | "user";
+  content: string;
+};
+
+export type CanvasAgentConversationContext = {
+  messages: CanvasAgentConversationMessage[];
+  lastTask: {
+    draftId: string | null;
+    draftTitle: string | null;
+    prompt: string;
+    status: string;
+    summary: string | null;
+  } | null;
+};
+
 export type CanvasAgentProgress = {
   message: string;
   highlightedShapeIds: string[];

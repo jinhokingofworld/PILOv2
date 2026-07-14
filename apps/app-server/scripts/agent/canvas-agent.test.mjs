@@ -14,6 +14,9 @@ const { CanvasAgentService } = require(
 const { buildCanvasAgentShapeSearchTerms } = require(
   "../../dist/modules/canvas/agent/canvas-agent.repository.js"
 );
+const { validateCanvasAgentRunRequest } = require(
+  "../../dist/modules/canvas/agent/canvas-agent.validation.js"
+);
 
 function shape(id, overrides = {}) {
   return {
@@ -287,6 +290,29 @@ function deterministicPlan(prompt, selectedShapeIds = [], toolHelpMode = false) 
   assert.ok(terms.includes("note"));
   assert.ok(terms.includes("sticky-note"));
   assert.equal(terms.includes("위치"), false);
+}
+
+{
+  const values = validateCanvasAgentRunRequest({
+    prompt: "다시해",
+    conversationContext: {
+      messages: [
+        { role: "user", content: "모던한 로그인 페이지 초안 그려줘" },
+        { role: "assistant", content: "디자인 초안을 만들었어요." },
+      ],
+      lastTask: {
+        draftId: "draft-1",
+        draftTitle: "로그인 페이지 초안",
+        prompt: "모던한 로그인 페이지 초안 그려줘",
+        status: "draft_ready",
+        summary: "디자인 초안을 만들었어요.",
+      },
+    },
+  });
+
+  assert.equal(values.context.conversationContext.messages.length, 2);
+  assert.equal(values.context.conversationContext.lastTask.prompt, "모던한 로그인 페이지 초안 그려줘");
+  assert.equal(values.context.conversationContext.lastTask.draftId, "draft-1");
 }
 
 {

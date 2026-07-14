@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Editor, TLShapeId } from "tldraw";
 import { createCanvasAgentClient } from "../api/canvas-agent-client";
 import type {
+  CanvasAgentConversationContext,
   CanvasAgentDraft,
   CanvasAgentPresentationMode,
   CanvasAgentProgress,
@@ -23,6 +24,17 @@ const CANVAS_AGENT_DESIGN_DRAFT_ERROR_MESSAGE = "디자인 초안을 만드는 �
 
 function isDesignDraftPrompt(prompt: string) {
   return /(디자인|와이어|페이지|화면|초안|그려|만들|생성)/.test(prompt);
+}
+
+function buildLastTaskContext(run: CanvasAgentRun | null, draft: CanvasAgentDraft | null) {
+  if (!run) return null;
+  return {
+    draftId: draft?.id ?? null,
+    draftTitle: draft?.spec.title ?? null,
+    prompt: run.prompt,
+    status: run.status,
+    summary: run.summary ?? run.message ?? null,
+  };
 }
 
 export function useCanvasAgent({
@@ -102,7 +114,11 @@ export function useCanvasAgent({
   const submit = useCallback(
     async (
       prompt: string,
-      options?: { presentationMode?: CanvasAgentPresentationMode; toolHelpMode?: boolean },
+      options?: {
+        conversationContext?: Pick<CanvasAgentConversationContext, "messages">;
+        presentationMode?: CanvasAgentPresentationMode;
+        toolHelpMode?: boolean;
+      },
     ) => {
       if (!editor) {
         setError("Canvas API 연결 후 Canvas AI를 사용할 수 있습니다.");
@@ -202,9 +218,17 @@ export function useCanvasAgent({
         width: viewportBounds.w,
         height: viewportBounds.h,
       };
+      const conversationContext: CanvasAgentConversationContext | undefined =
+        (options?.conversationContext || run)
+          ? {
+              messages: options?.conversationContext?.messages ?? [],
+              lastTask: buildLastTaskContext(run, draft),
+            }
+          : undefined;
       try {
         const result = await client.createRun(workspaceId, canvasId, {
           prompt,
+          conversationContext,
           presentationMode: options?.presentationMode ?? "interactive",
           selectedShapeIds: editor.getSelectedShapeIds().map(String),
           viewport,
@@ -222,9 +246,11 @@ export function useCanvasAgent({
       clearLongRunningTimer,
       clearProgressHideTimer,
       client,
+      draft,
       editor,
       enabled,
       presentRun,
+      run,
       workspaceId,
     ],
   );

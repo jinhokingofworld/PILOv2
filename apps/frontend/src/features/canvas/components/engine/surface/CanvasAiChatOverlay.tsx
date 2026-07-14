@@ -3,7 +3,10 @@
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { Bot, SendHorizontal, X } from "lucide-react";
 import { canvasAgentToolTargets } from "@/features/canvas/agent/canvas-agent-tool-targets";
-import type { CanvasAgentDraft } from "@/features/canvas/api/canvas-agent-types";
+import type {
+  CanvasAgentConversationMessage,
+  CanvasAgentDraft,
+} from "@/features/canvas/api/canvas-agent-types";
 
 export type CanvasAiChatAnchor = {
   x: number;
@@ -19,7 +22,13 @@ type CanvasAiChatOverlayProps = {
   onApplyDraft: () => void;
   onClose: () => void;
   onDiscardDraft: () => void;
-  onSubmit: (message: string, options?: { toolHelpMode?: boolean }) => void;
+  onSubmit: (
+    message: string,
+    options?: {
+      conversationContext?: { messages: CanvasAgentConversationMessage[] };
+      toolHelpMode?: boolean;
+    },
+  ) => void;
   statusMessage: string | null;
 };
 
@@ -53,6 +62,20 @@ function replaceIntroMessage(
     },
     ...restMessages,
   ];
+}
+
+function toConversationMessages(messages: CanvasAiMessage[]): CanvasAgentConversationMessage[] {
+  return messages
+    .filter((message, index) => {
+      if (index !== 0 || message.role !== "assistant") return true;
+      return message.content !== defaultAssistantIntroMessage
+        && message.content !== toolHelpAssistantIntroMessage;
+    })
+    .map((message) => ({
+      role: message.role,
+      content: message.content,
+    }))
+    .slice(-10);
 }
 
 export function CanvasAiChatOverlay({
@@ -121,7 +144,10 @@ export function CanvasAiChatOverlay({
       { content: message, role: "user" },
     ]);
     lastAssistantFeedbackRef.current = null;
-    onSubmit(message, { toolHelpMode: isToolHelpMode });
+    onSubmit(message, {
+      conversationContext: { messages: toConversationMessages(messages) },
+      toolHelpMode: isToolHelpMode,
+    });
     setInput("");
   }
 

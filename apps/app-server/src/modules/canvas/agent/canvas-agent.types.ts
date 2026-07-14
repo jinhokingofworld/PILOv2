@@ -108,6 +108,24 @@ export interface CanvasAgentViewport {
   height: number;
 }
 
+export interface CanvasAgentConversationMessage {
+  role: "assistant" | "user";
+  content: string;
+}
+
+export interface CanvasAgentLastTaskContext {
+  draftId: string | null;
+  draftTitle: string | null;
+  prompt: string;
+  status: string;
+  summary: string | null;
+}
+
+export interface CanvasAgentConversationContext {
+  messages: CanvasAgentConversationMessage[];
+  lastTask: CanvasAgentLastTaskContext | null;
+}
+
 export interface CreateCanvasAgentRunRequest {
   prompt?: unknown;
   selectedShapeIds?: unknown;
@@ -115,6 +133,7 @@ export interface CreateCanvasAgentRunRequest {
   toolHelpMode?: unknown;
   viewport?: unknown;
   clientRequestId?: unknown;
+  conversationContext?: unknown;
 }
 
 export interface ApplyCanvasAgentDraftRequest {
@@ -122,6 +141,7 @@ export interface ApplyCanvasAgentDraftRequest {
 }
 
 export interface CanvasAgentRequestContext {
+  conversationContext: CanvasAgentConversationContext | null;
   presentationMode: CanvasAgentPresentationMode;
   selectedShapeIds: string[];
   toolHelpMode: boolean;

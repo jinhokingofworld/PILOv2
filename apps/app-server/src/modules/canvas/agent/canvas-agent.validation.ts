@@ -1,11 +1,18 @@
 import { badRequest } from "../../../common/api-error";
 import type {
+  CanvasAgentConversationContext,
+  CanvasAgentConversationMessage,
+  CanvasAgentLastTaskContext,
   CanvasAgentPresentationMode,
   CanvasAgentRequestContext,
   CanvasAgentViewport,
   CreateCanvasAgentRunRequest
 } from "./canvas-agent.types";
 
+const MAX_CONVERSATION_MESSAGES = 10;
+const MAX_CONVERSATION_MESSAGE_BYTES = 2_000;
+const MAX_LAST_TASK_PROMPT_BYTES = 4_000;
+const MAX_LAST_TASK_SUMMARY_BYTES = 2_000;
 const MAX_SELECTED_SHAPES = 40;
 const MAX_CLIENT_REQUEST_ID_BYTES = 128;
 
@@ -26,6 +33,7 @@ export function validateCanvasAgentRunRequest(
     clientRequestId: validateClientRequestId(input.clientRequestId),
     toolHelpMode: input.toolHelpMode === true,
     context: {
+      conversationContext: validateConversationContext(input.conversationContext),
       presentationMode: validatePresentationMode(input.presentationMode),
       selectedShapeIds: validateSelectedShapeIds(input.selectedShapeIds),
       toolHelpMode: input.toolHelpMode === true,
@@ -75,6 +83,78 @@ function validateSelectedShapeIds(value: unknown): string[] {
   });
 
   return Array.from(new Set(ids));
+}
+
+function validateConversationContext(value: unknown): CanvasAgentConversationContext | null {
+  if (value === undefined || value === null) return null;
+  if (!isRecord(value)) throw badRequest("Canvas Agent conversationContext is invalid");
+
+  const messages = validateConversationMessages(value.messages);
+  const lastTask = validateLastTaskContext(value.lastTask);
+  if (!messages.length && lastTask === null) return null;
+  return { messages, lastTask };
+}
+
+function validateConversationMessages(value: unknown): CanvasAgentConversationMessage[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) throw badRequest("Canvas Agent conversationContext.messages is invalid");
+  if (value.length > MAX_CONVERSATION_MESSAGES) {
+    throw badRequest(`Canvas Agent conversationContext.messages must contain ${MAX_CONVERSATION_MESSAGES} items or fewer`);
+  }
+
+  return value.map((item) => {
+    if (!isRecord(item)) throw badRequest("Canvas Agent conversationContext.messages item is invalid");
+    const role = item.role;
+    if (role !== "assistant" && role !== "user") {
+      throw badRequest("Canvas Agent conversationContext.messages role is invalid");
+    }
+    const content = readBoundedOptionalString(
+      item.content,
+      "Canvas Agent conversationContext.messages content",
+      MAX_CONVERSATION_MESSAGE_BYTES
+    );
+    if (content === null) {
+      throw badRequest("Canvas Agent conversationContext.messages content is required");
+    }
+    return { role, content };
+  });
+}
+
+function validateLastTaskContext(value: unknown): CanvasAgentLastTaskContext | null {
+  if (value === undefined || value === null) return null;
+  if (!isRecord(value)) throw badRequest("Canvas Agent conversationContext.lastTask is invalid");
+
+  const prompt = readBoundedOptionalString(
+    value.prompt,
+    "Canvas Agent conversationContext.lastTask.prompt",
+    MAX_LAST_TASK_PROMPT_BYTES
+  );
+  if (prompt === null) {
+    throw badRequest("Canvas Agent conversationContext.lastTask.prompt is required");
+  }
+
+  return {
+    draftId: readBoundedOptionalString(value.draftId, "Canvas Agent conversationContext.lastTask.draftId", 200),
+    draftTitle: readBoundedOptionalString(value.draftTitle, "Canvas Agent conversationContext.lastTask.draftTitle", 300),
+    prompt,
+    status: readBoundedOptionalString(value.status, "Canvas Agent conversationContext.lastTask.status", 80) ?? "unknown",
+    summary: readBoundedOptionalString(
+      value.summary,
+      "Canvas Agent conversationContext.lastTask.summary",
+      MAX_LAST_TASK_SUMMARY_BYTES
+    )
+  };
+}
+
+function readBoundedOptionalString(value: unknown, fieldName: string, maxBytes: number): string | null {
+  if (value === undefined || value === null || value === "") return null;
+  if (typeof value !== "string") throw badRequest(`${fieldName} must be a string`);
+  const normalized = value.trim();
+  if (!normalized) return null;
+  if (Buffer.byteLength(normalized, "utf8") > maxBytes) {
+    throw badRequest(`${fieldName} must be ${maxBytes} bytes or less`);
+  }
+  return normalized;
 }
 
 function validatePresentationMode(value: unknown): CanvasAgentPresentationMode {
