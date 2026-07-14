@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
+import { useValue } from "@tldraw/state-react";
 import {
   HTMLContainer,
   Rectangle2d,
   ShapeUtil,
   T,
+  useEditor,
   type TLBaseShape,
   type TLShape
 } from "tldraw";
@@ -68,8 +70,14 @@ export class SqlErdNoteShapeUtil extends ShapeUtil<SqlErdNoteShape> {
 }
 
 function SqlErdNoteCard({ shape }: { shape: SqlErdNoteShape }) {
+  const editor = useEditor();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [draft, setDraft] = useState(shape.props.text);
+  const isSelected = useValue(
+    `sqltoerd-note-selected-${shape.id}`,
+    () => editor.getOnlySelectedShape()?.id === shape.id,
+    [editor, shape.id]
+  );
 
   useEffect(() => setDraft(shape.props.text), [shape.props.text]);
 
@@ -89,9 +97,13 @@ function SqlErdNoteCard({ shape }: { shape: SqlErdNoteShape }) {
     }
   }
 
+  function handlePointerDown(event: PointerEvent<HTMLTextAreaElement>) {
+    event.stopPropagation();
+  }
+
   return <HTMLContainer style={{ height: shape.props.h, width: shape.props.w }}>
-    <div className="h-full w-full rounded-md border border-amber-300 bg-amber-100 p-3 text-sm text-slate-800 shadow-sm" data-sqltoerd-note-id={shape.props.noteId}>
-      <textarea className="h-full w-full resize-none bg-transparent outline-none" maxLength={2000} onBlur={commit} onChange={(event) => setDraft(event.target.value)} onKeyDown={handleKeyDown} ref={textareaRef} value={draft} />
+    <div className="h-full w-full rounded-md border border-amber-300 bg-amber-100 p-3 text-sm text-slate-800 shadow-sm">
+      <textarea className="h-full w-full resize-none bg-transparent outline-none" data-sqltoerd-note-id={shape.props.noteId} maxLength={2000} onBlur={commit} onChange={(event) => setDraft(event.target.value)} onKeyDown={handleKeyDown} onPointerDown={handlePointerDown} ref={textareaRef} style={{ pointerEvents: isSelected ? "auto" : "none" }} value={draft} />
     </div>
   </HTMLContainer>;
 }

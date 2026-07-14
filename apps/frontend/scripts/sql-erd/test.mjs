@@ -6453,10 +6453,14 @@ assert.doesNotMatch(
 );
 assert.doesNotMatch(annotationShape, /Cardinality/);
 assert.match(frameShape, /\{!shape\.props\.isLocked \? \(/);
+assert.match(frameShape, /editor\.select\(shape\.id\)/);
 assert.doesNotMatch(noteShape, /SQLTOERD_NOTE_DELETE_EVENT/);
+assert.match(noteShape, /useEditor/);
+assert.match(noteShape, /data-sqltoerd-note-id/);
 assert.match(textShape, /SQLTOERD_TEXT_SHAPE_TYPE/);
 assert.match(textShape, /SQLTOERD_TEXT_CHANGE_EVENT/);
 assert.match(textShape, /maxLength=\{2000\}/);
+assert.match(textShape, /useEditor/);
 assert.match(strokeShape, /SQLTOERD_STROKE_SHAPE_TYPE/);
 assert.match(strokeShape, /stroke-linecap="round"/);
 assert.match(strokeShape, /canResize\(\)/);
@@ -6477,6 +6481,7 @@ assert.match(
   /SQLTOERD_FRAME_CHANGE_EVENT[\s\S]*?SqlErdCanvasToolbar/
 );
 assert.match(canvasSurface, /pendingPlacementToolRef/);
+assert.match(canvasSurface, /event\.key !== "Escape"[\s\S]*?pendingPlacementToolRef\.current = null/);
 assert.match(canvasSurface, /editor\.screenToPage/);
 assert.match(canvasSurface, /notesToAdd/);
 assert.match(canvasSurface, /framesToAdd/);

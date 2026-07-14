@@ -2510,6 +2510,7 @@ export function SqlErdCanvas({
   const [nextTextColor, setNextTextColor] = useState<SqltoerdCanvasFrameColor>("slate");
   const toolRef = useRef<SqlErdCanvasTool>(null);
   const pendingPlacementToolRef = useRef<SqlErdOneShotPlacementTool | null>(null);
+  const pendingNoteFocusIdRef = useRef<string | null>(null);
   const pendingTextFocusIdRef = useRef<string | null>(null);
   const strokePointerIdRef = useRef<number | null>(null);
   const activeStrokeRef = useRef<SqltoerdCanvasStroke | null>(null);
@@ -2545,9 +2546,11 @@ export function SqlErdCanvas({
 
       if (tool === "note") {
         if ((layoutJson.annotations?.notes?.length ?? 0) >= 100) return false;
+        const noteId = crypto.randomUUID();
+        pendingNoteFocusIdRef.current = noteId;
         onLayoutPatch({
           notesToAdd: [{
-            id: crypto.randomUUID(),
+            id: noteId,
             x: point.x,
             y: point.y,
             width: 240,
@@ -2602,6 +2605,30 @@ export function SqlErdCanvas({
       onLayoutPatch
     ]
   );
+  useEffect(() => {
+    const noteId = pendingNoteFocusIdRef.current;
+
+    if (!noteId) return;
+
+    let nextFrameId: number | null = null;
+    const frameId = window.requestAnimationFrame(() => {
+      nextFrameId = window.requestAnimationFrame(() => {
+        const input = document.querySelector<HTMLTextAreaElement>(
+          `[data-sqltoerd-note-id="${noteId}"]`
+        );
+
+        if (!input) return;
+
+        pendingNoteFocusIdRef.current = null;
+        input.focus();
+      });
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      if (nextFrameId !== null) window.cancelAnimationFrame(nextFrameId);
+    };
+  }, [layoutJson.annotations?.notes]);
   useEffect(() => {
     const textId = pendingTextFocusIdRef.current;
 
@@ -2658,6 +2685,51 @@ export function SqlErdCanvas({
     editor.cancel();
     editor.updateInstanceState({ isToolLocked: false });
     editor.setCurrentTool("select.idle");
+  }, []);
+  useEffect(() => {
+    function isEditableTarget(target: EventTarget | null) {
+      return target instanceof HTMLElement &&
+        (target.isContentEditable ||
+          target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.tagName === "SELECT");
+    }
+
+    function cancelActiveToolWithEscape(event: globalThis.KeyboardEvent) {
+      if (
+        event.defaultPrevented ||
+        event.isComposing ||
+        event.key !== "Escape" ||
+        isEditableTarget(event.target) ||
+        (!pendingPlacementToolRef.current && toolRef.current === null)
+      ) {
+        return;
+      }
+
+      pendingPlacementToolRef.current = null;
+      const activeStroke = activeStrokeRef.current;
+      strokePointerIdRef.current = null;
+      activeStrokeRef.current = null;
+      eraserPointerIdRef.current = null;
+      toolRef.current = null;
+      setTool(null);
+      editorRef.current?.cancel();
+      if (activeStroke) {
+        editorRef.current?.run(() => {
+          editorRef.current?.deleteShapes([getSqlErdStrokeShapeId(activeStroke.id)]);
+        }, { history: "ignore" });
+      }
+      editorRef.current?.updateInstanceState({ isToolLocked: false });
+      editorRef.current?.setCurrentTool("select.idle");
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+    }
+
+    window.addEventListener("keydown", cancelActiveToolWithEscape, true);
+    return () => {
+      window.removeEventListener("keydown", cancelActiveToolWithEscape, true);
+    };
   }, []);
   const updateStrokeShape = useCallback((editor: Editor, stroke: SqltoerdCanvasStroke) => {
     const shape = createSqlErdStrokeShape(stroke);
