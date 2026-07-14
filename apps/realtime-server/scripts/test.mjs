@@ -31,6 +31,10 @@ const canvasShapeLock = await readFile(
   new URL("../src/canvas/canvas-shape-lock.service.ts", import.meta.url),
   "utf8"
 );
+const canvasShapePreview = await readFile(
+  new URL("../src/canvas/canvas-shape-preview.service.ts", import.meta.url),
+  "utf8"
+);
 const meetingAccess = await readFile(
   new URL("../src/meeting/meeting-access.service.ts", import.meta.url),
   "utf8"
@@ -98,6 +102,11 @@ assert.match(socketServer, /canvasServerEvents\.shapeLockRejected/);
 assert.match(socketServer, /canvasServerEvents\.shapeLockUpdate/);
 assert.match(socketServer, /canvasServerEvents\.shapePreview/);
 assert.match(socketServer, /canvasServerEvents\.shapePreviewClear/);
+assert.match(socketServer, /createCanvasShapePreviewService/);
+assert.match(socketServer, /redisAdapter\?\.stateClient/);
+assert.match(socketServer, /await shapePreviewService\.updatePreview/);
+assert.match(socketServer, /await shapePreviewService\.clearRoomPreview/);
+assert.match(socketServer, /shapePreviewService\.clearSocket/);
 assert.match(socketServer, /assertCanvasRoomWritable/);
 assert.match(socketServer, /canvas room is read-only/);
 assert.match(socketServer, /redisAdapter\.subscribe/);
@@ -127,9 +136,21 @@ assert.match(canvasShapeLock, /CANVAS_SHAPE_LOCK_TTL_MS = 8_000/);
 assert.match(canvasShapeLock, /claimLocks/);
 assert.match(canvasShapeLock, /clearRoomLocks/);
 assert.match(canvasShapeLock, /clearSocket/);
+assert.match(canvasShapeLock, /getRoomLocks/);
+assert.match(canvasShapeLock, /CANVAS_SHAPE_LOCK_REDIS_PREFIX/);
+assert.match(canvasShapeLock, /redisClient\.set/);
 assert.match(canvasShapeLock, /ownerSocketId/);
 assert.match(canvasShapeLock, /expiresAt/);
+assert.match(canvasShapePreview, /CANVAS_SHAPE_PREVIEW_TTL_MS = 5_000/);
+assert.match(canvasShapePreview, /CANVAS_SHAPE_PREVIEW_REDIS_PREFIX/);
+assert.match(canvasShapePreview, /getRoomPreviews/);
+assert.match(canvasShapePreview, /updatePreview/);
+assert.match(canvasShapePreview, /clearRoomPreview/);
+assert.match(canvasShapePreview, /clearSocket/);
 assert.match(redisPubSub, /createAdapter/);
+assert.match(redisPubSub, /stateClient/);
+assert.match(redisPubSub, /NX: true/);
+assert.match(redisPubSub, /PX: options\.px/);
 assert.match(redisPubSub, /subscribe\(channel/);
 
 await import("./canvas-access.test.mjs");
