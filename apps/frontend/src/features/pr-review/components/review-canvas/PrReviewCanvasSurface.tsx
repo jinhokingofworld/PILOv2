@@ -19,6 +19,7 @@ import {
   type TLShapeId,
   type TLShapePartial
 } from "tldraw";
+import { useValue } from "@tldraw/state-react";
 
 import { TldrawSurface } from "@/shared/tldraw/TldrawSurface";
 import type {
@@ -977,6 +978,68 @@ type PrReviewCanvasPersistenceNotice = {
   tone: "info" | "error";
 } | null;
 
+const relationTypeLabels: Record<
+  PrReviewRelationEdgeShape["props"]["relationType"],
+  string
+> = {
+  review_order: "추천 리뷰 경로",
+  depends_on: "의존 관계",
+  tests: "테스트 관계",
+  uses_api: "API 사용",
+  passes_data_to: "데이터 전달",
+  supports: "지원 변경"
+};
+
+const relationSourceLabels: Record<
+  PrReviewRelationEdgeShape["props"]["source"],
+  string
+> = {
+  rule: "규칙 기반",
+  ai: "AI 보강",
+  hybrid: "규칙·AI 보강",
+  fallback: "기본 경로"
+};
+
+function getRelationConfidenceLabel(confidence: number) {
+  if (confidence >= 85) return "근거 강함";
+  if (confidence >= 70) return "근거 보통";
+  return "근거 제한적";
+}
+
+function PrReviewRelationInspector({ editor }: { editor: Editor | null }) {
+  const selectedRelation = useValue(
+    "pr-review-relation-inspector-selection",
+    () => {
+      if (!editor) return null;
+      const selected = editor.getOnlySelectedShape();
+      return isPrReviewRelationEdgeShape(selected) ? selected : null;
+    },
+    [editor]
+  );
+
+  if (!editor || !selectedRelation) {
+    return null;
+  }
+
+  return (
+    <aside
+      aria-label="선택한 파일 관계"
+      className="absolute bottom-5 left-5 z-20 w-[min(28rem,calc(100%-2.5rem))] rounded-md border border-slate-200 bg-white/95 px-4 py-3 shadow-lg backdrop-blur"
+    >
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs font-semibold text-slate-700">
+        <span>{relationTypeLabels[selectedRelation.props.relationType]}</span>
+        <span className="text-slate-400">·</span>
+        <span>{relationSourceLabels[selectedRelation.props.source]}</span>
+        <span className="text-slate-400">·</span>
+        <span>{getRelationConfidenceLabel(selectedRelation.props.confidence)}</span>
+      </div>
+      <p className="mt-2 break-words text-sm leading-6 text-slate-700">
+        {selectedRelation.props.reason}
+      </p>
+    </aside>
+  );
+}
+
 function PrReviewCanvasPersistenceBridge({
   apiClient,
   enabled,
@@ -1226,6 +1289,7 @@ export function PrReviewCanvasSurface({
   workspaceId
 }: PrReviewCanvasSurfaceProps) {
   const editorRef = useRef<Editor | null>(null);
+  const [editor, setEditor] = useState<Editor | null>(null);
   const allowFileGeometryRef = useRef(false);
   const hydratingRef = useRef(false);
   const internalShapeUpdateRef = useRef(false);
@@ -1459,6 +1523,7 @@ export function PrReviewCanvasSurface({
   const handleMount = useCallback(
     (editor: Editor) => {
       editorRef.current = editor;
+      setEditor(editor);
       editor.setCurrentTool("select.idle");
       registerReviewShapePolicy(
         editor,
@@ -1484,7 +1549,6 @@ export function PrReviewCanvasSurface({
           preparedConflictFileIds,
           internalShapeUpdateRef
         );
-        updatePrReviewRelationGeometry(editor, internalShapeUpdateRef);
       }
     },
     [
@@ -1519,10 +1583,6 @@ export function PrReviewCanvasSurface({
         canvas,
         conflictAnalysis,
         preparedConflictFileIds,
-        internalShapeUpdateRef
-      );
-      updatePrReviewRelationGeometry(
-        editorRef.current,
         internalShapeUpdateRef
       );
     }
@@ -1593,6 +1653,7 @@ export function PrReviewCanvasSurface({
           workspaceId={workspaceId}
         />
       </TldrawSurface>
+      <PrReviewRelationInspector editor={editor} />
     </div>
   );
 }

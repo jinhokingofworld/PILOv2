@@ -327,24 +327,6 @@ function getRelationTypeLabel(
   return labels[relationType];
 }
 
-function getRelationSourceLabel(
-  source: PrReviewRelationEdgeShapeProps["source"]
-) {
-  const labels: Record<PrReviewRelationEdgeShapeProps["source"], string> = {
-    rule: "규칙 기반",
-    ai: "AI 보강",
-    hybrid: "규칙·AI 보강",
-    fallback: "기본 경로"
-  };
-  return labels[source];
-}
-
-function getConfidenceLabel(confidence: number) {
-  if (confidence >= 85) return "근거 강함";
-  if (confidence >= 70) return "근거 보통";
-  return "근거 제한적";
-}
-
 function getEdgeVisualStyle(
   shape: PrReviewFlowEdgeShape | PrReviewRelationEdgeShape,
   isHovered: boolean,
@@ -487,7 +469,6 @@ function PrReviewFlowEdge({
     verticalDirection === 0
       ? `${endpoint.x},${endpoint.y} ${endpoint.x - arrowSize * horizontalDirection},${endpoint.y - arrowSize} ${endpoint.x - arrowSize * horizontalDirection},${endpoint.y + arrowSize}`
       : `${endpoint.x},${endpoint.y} ${endpoint.x - arrowSize},${endpoint.y - arrowSize * verticalDirection} ${endpoint.x + arrowSize},${endpoint.y - arrowSize * verticalDirection}`;
-  const detailPoint = routePoints[Math.floor(routePoints.length / 2)];
   const hoverSummary = isRelation
     ? `${getRelationTypeLabel(shape.props.relationType)} · ${shape.props.reason}`
     : shape.props.reason;
@@ -537,24 +518,6 @@ function PrReviewFlowEdge({
         pointerEvents="none"
         points={arrowPoints}
       />
-      {isRelation && isSelected ? (
-        <foreignObject
-          height={72}
-          pointerEvents="none"
-          width={248}
-          x={detailPoint.x - 124}
-          y={detailPoint.y + 12}
-        >
-          <div className="rounded-md border border-slate-200 bg-white/95 px-3 py-2 text-xs shadow-sm">
-            <p className="font-semibold text-slate-900">
-              {getRelationTypeLabel(shape.props.relationType)} · {getRelationSourceLabel(shape.props.source)} · {getConfidenceLabel(shape.props.confidence)}
-            </p>
-            <p className="mt-1 line-clamp-2 leading-4 text-slate-600">
-              {shape.props.reason}
-            </p>
-          </div>
-        </foreignObject>
-      ) : null}
     </SVGContainer>
   );
 }
