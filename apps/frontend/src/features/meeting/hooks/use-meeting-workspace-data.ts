@@ -31,6 +31,7 @@ type UseMeetingWorkspaceDataOptions = {
   enabled?: boolean;
   reportsEnabled?: boolean;
   reportsQuery?: MeetingReportListQuery;
+  meetingRoomId?: string | null;
   workspaceId: string;
 };
 
@@ -54,13 +55,21 @@ function errorFromUnknown(error: unknown) {
 export function useMeetingWorkspaceData({
   accessToken = null,
   enabled = true,
+  meetingRoomId,
   reportsEnabled = true,
   reportsQuery = {},
   workspaceId
 }: UseMeetingWorkspaceDataOptions) {
   const normalizedAccessToken = accessToken?.trim() || null;
+  const normalizedMeetingRoomId = meetingRoomId?.trim() || null;
   const normalizedWorkspaceId = workspaceId.trim();
-  const canLoad = Boolean(enabled && normalizedWorkspaceId && normalizedAccessToken);
+  const usesRoomScopedApi = meetingRoomId !== undefined;
+  const canLoad = Boolean(
+    enabled &&
+      normalizedWorkspaceId &&
+      normalizedAccessToken &&
+      (!usesRoomScopedApi || normalizedMeetingRoomId)
+  );
   const reportsQueryKey = JSON.stringify(reportsQuery);
   const meetingClient = useMemo(
     () => createMeetingApiClient({ accessToken: normalizedAccessToken }),
@@ -90,8 +99,19 @@ export function useMeetingWorkspaceData({
       return emptyCurrentState;
     }
 
-    return meetingClient.getCurrentMeeting(normalizedWorkspaceId);
-  }, [canLoad, meetingClient, normalizedWorkspaceId]);
+    return usesRoomScopedApi && normalizedMeetingRoomId
+      ? meetingClient.getCurrentMeetingInRoom(
+          normalizedWorkspaceId,
+          normalizedMeetingRoomId
+        )
+      : meetingClient.getCurrentMeeting(normalizedWorkspaceId);
+  }, [
+    canLoad,
+    meetingClient,
+    normalizedMeetingRoomId,
+    normalizedWorkspaceId,
+    usesRoomScopedApi
+  ]);
 
   const loadReports = useCallback(async () => {
     if (!canLoad || !reportsEnabled) {
@@ -161,7 +181,13 @@ export function useMeetingWorkspaceData({
   const startMeeting = useCallback(
     async (input: StartMeetingInput = {}) => {
       const targetWorkspaceId = requireWorkspace();
-      const result = await meetingClient.startMeeting(targetWorkspaceId, input);
+      const result =
+        usesRoomScopedApi && normalizedMeetingRoomId
+          ? await meetingClient.startMeetingInRoom(
+              targetWorkspaceId,
+              normalizedMeetingRoomId
+            )
+          : await meetingClient.startMeeting(targetWorkspaceId, input);
       setCurrentState({
         activeParticipantCount: 1,
         currentRecording: result.currentRecording,
@@ -171,7 +197,12 @@ export function useMeetingWorkspaceData({
       setCurrentError(null);
       return result;
     },
-    [meetingClient, requireWorkspace]
+    [
+      meetingClient,
+      normalizedMeetingRoomId,
+      requireWorkspace,
+      usesRoomScopedApi
+    ]
   );
 
   const joinMeeting = useCallback(
@@ -329,6 +360,7 @@ export function useMeetingWorkspaceData({
 
       setCurrentStatus("loading");
       setCurrentError(null);
+      setCurrentState(emptyCurrentState);
 
       try {
         const nextCurrentState = await loadCurrentMeeting();
@@ -414,6 +446,7 @@ export function useMeetingWorkspaceData({
     reports: reportsState.reports,
     reportsError,
     reportsStatus,
+    meetingRoomId: normalizedMeetingRoomId,
     startMeeting,
     startRecording,
     updateMeetingReportActionItem,

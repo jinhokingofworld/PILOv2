@@ -16,6 +16,13 @@ const meetingHook = await readFile(
   ),
   "utf8"
 );
+const meetingRoomsHook = await readFile(
+  new URL(
+    "../../src/features/meeting/hooks/use-meeting-rooms.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
 const liveKitHook = await readFile(
   new URL(
     "../../src/features/meeting/hooks/use-livekit-meeting-room.ts",
@@ -103,6 +110,8 @@ const packageJson = await readFile(
 );
 
 assert.match(meetingTypes, /export type Meeting =/);
+assert.match(meetingTypes, /export type MeetingRoom =/);
+assert.match(meetingTypes, /export type MeetingRoomListPayload =/);
 assert.match(meetingTypes, /export type MeetingParticipant =/);
 assert.match(meetingTypes, /export type LiveKitJoin =/);
 assert.match(meetingTypes, /export type MeetingRecording =/);
@@ -133,6 +142,10 @@ assert.match(meetingApiClient, /credentials: "same-origin"/);
 assert.match(meetingApiClient, /success === true/);
 assert.match(meetingApiClient, /buildMeetingApiUrl/);
 assert.match(meetingApiClient, /getCurrentMeeting/);
+assert.match(meetingApiClient, /listMeetingRooms/);
+assert.match(meetingApiClient, /getCurrentMeetingInRoom/);
+assert.match(meetingApiClient, /startMeetingInRoom/);
+assert.match(meetingApiClient, /workspaceMeetingRoomsPath/);
 assert.match(meetingApiClient, /startMeeting/);
 assert.match(meetingApiClient, /joinMeeting/);
 assert.match(meetingApiClient, /getMeeting/);
@@ -164,6 +177,10 @@ assert.match(meetingHook, /createMeetingApiClient/);
 assert.match(meetingHook, /MeetingWorkspaceDataStatus/);
 assert.match(meetingHook, /reportsEnabled/);
 assert.match(meetingHook, /reloadCurrentMeeting/);
+assert.match(meetingHook, /meetingRoomId\?: string \| null/);
+assert.match(meetingHook, /usesRoomScopedApi/);
+assert.match(meetingHook, /getCurrentMeetingInRoom/);
+assert.match(meetingHook, /startMeetingInRoom/);
 assert.match(meetingHook, /reloadReports/);
 assert.match(meetingHook, /startMeeting/);
 assert.match(meetingHook, /joinMeeting/);
@@ -174,6 +191,12 @@ assert.match(meetingHook, /regenerateMeetingReport/);
 assert.match(meetingHook, /Meeting action requires an authenticated workspace/);
 assert.doesNotMatch(meetingHook, /livekit-client/);
 assert.doesNotMatch(meetingHook, /@livekit\/components-react/);
+
+assert.match(meetingRoomsHook, /useMeetingRooms/);
+assert.match(meetingRoomsHook, /listMeetingRooms/);
+assert.match(meetingRoomsHook, /selectedMeetingRoomId/);
+assert.match(meetingRoomsHook, /room\.isDefault/);
+assert.match(meetingRoomsHook, /reloadMeetingRooms/);
 
 assert.match(packageJson, /"livekit-client":/);
 assert.match(liveKitHook, /useLiveKitMeetingRoom/);
@@ -197,6 +220,9 @@ assert.match(meetingRuntimeProvider, /connectToMeeting/);
 assert.match(meetingRuntimeProvider, /disconnectFromMeeting/);
 assert.match(meetingRuntimeProvider, /leaveActiveMeeting/);
 assert.match(meetingRuntimeProvider, /activeSessionRef/);
+assert.match(meetingRuntimeProvider, /const leaveSession = useCallback/);
+assert.match(meetingRuntimeProvider, /previousSession\.meetingId !== meeting\.id/);
+assert.match(meetingRuntimeProvider, /await leaveSession\(previousSession\)/);
 assert.match(meetingRuntimeProvider, /setHeaderMeetingConnectionState/);
 assert.match(meetingRuntimeProvider, /hasConnectionSession: hasActiveSession/);
 assert.match(meetingRuntimeProvider, /connectionStatus: liveKitRoomStatus/);
@@ -216,6 +242,13 @@ assert.doesNotMatch(meetingNavigation, /\/meeting#recording/);
 assert.match(meetingPanel, /"use client"/);
 assert.match(meetingPanel, /useAuthSession/);
 assert.match(meetingPanel, /useMeetingWorkspaceData/);
+assert.match(meetingPanel, /useMeetingRooms/);
+assert.match(meetingPanel, /meetingRoomId: selectedMeetingRoomId/);
+assert.match(meetingPanel, /회의방 선택/);
+assert.match(meetingPanel, /function handleMeetingRoomChange/);
+assert.match(meetingPanel, /await leaveActiveMeeting\(\)/);
+assert.match(meetingPanel, /기존 음성 연결을 종료하고 회의방을 전환하는 중입니다/);
+assert.match(meetingPanel, /회의방 다시 불러오기/);
 assert.match(meetingPanel, /useMeetingRuntime/);
 assert.match(meetingPanel, /connectToMeeting/);
 assert.match(meetingPanel, /disconnectFromMeeting/);

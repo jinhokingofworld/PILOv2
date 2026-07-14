@@ -5,6 +5,7 @@ import type {
   JoinMeetingPayload,
   LeaveMeetingPayload,
   MeetingDetailPayload,
+  MeetingRoomListPayload,
   MeetingReportActionItemMutationPayload,
   MeetingReportDetailPayload,
   MeetingReportListPayload,
@@ -251,6 +252,16 @@ function workspaceMeetingsPath(workspaceId: string) {
   return `/workspaces/${encodeURIComponent(workspaceId)}/meetings` as const;
 }
 
+function workspaceMeetingRoomsPath(workspaceId: string) {
+  return `/workspaces/${encodeURIComponent(workspaceId)}/meeting-rooms` as const;
+}
+
+function meetingRoomPath(workspaceId: string, meetingRoomId: string) {
+  return `${workspaceMeetingRoomsPath(workspaceId)}/${encodeURIComponent(
+    meetingRoomId
+  )}` as const;
+}
+
 function meetingPath(workspaceId: string, meetingId: string) {
   return `${workspaceMeetingsPath(workspaceId)}/${encodeURIComponent(
     meetingId
@@ -293,6 +304,30 @@ export function createMeetingApiClient({
   };
 
   return {
+    async listMeetingRooms(workspaceId: string) {
+      return requestMeetingData<MeetingRoomListPayload>(
+        workspaceMeetingRoomsPath(workspaceId),
+        undefined,
+        requestOptions
+      );
+    },
+
+    async getCurrentMeetingInRoom(workspaceId: string, meetingRoomId: string) {
+      return requestMeetingData<CurrentMeetingPayload>(
+        `${meetingRoomPath(workspaceId, meetingRoomId)}/current`,
+        undefined,
+        requestOptions
+      );
+    },
+
+    async startMeetingInRoom(workspaceId: string, meetingRoomId: string) {
+      return requestMeetingData<StartMeetingPayload>(
+        `${meetingRoomPath(workspaceId, meetingRoomId)}/meetings`,
+        { method: "POST" },
+        requestOptions
+      );
+    },
+
     async getCurrentMeeting(workspaceId: string) {
       return requestMeetingData<CurrentMeetingPayload>(
         `${workspaceMeetingsPath(workspaceId)}/current`,

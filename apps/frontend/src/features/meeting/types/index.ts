@@ -24,6 +24,17 @@ export type Meeting = {
   updatedAt: string;
 };
 
+export type MeetingRoom = {
+  id: string;
+  workspaceId: string;
+  roomKey: string;
+  name: string;
+  isDefault: boolean;
+  createdById: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type MeetingParticipantUser = {
   id: string;
   name: string | null;
@@ -127,6 +138,10 @@ export type CurrentMeetingPayload = {
   meeting: Meeting | null;
   currentRecording: MeetingRecording | null;
   activeParticipantCount: number;
+};
+
+export type MeetingRoomListPayload = {
+  rooms: MeetingRoom[];
 };
 
 export type StartMeetingInput = {
