@@ -1065,6 +1065,11 @@ GET /api/v1/workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}/co
   선택 결과를 적용해 최종 `resolvedContent`를 조립한다.
 - `baseText`는 merge base의 원본 구간이고, `currentText`는 base branch 쪽 변경,
   `incomingText`는 PR head branch 쪽 변경이다.
+- 서버는 PR의 전체 변경 파일을 Conflict로 간주하지 않는다. merge base, base branch,
+  PR head branch 내용을 비교해 양쪽 변경이 실제로 충돌하는 파일만 `files` 또는
+  `unsupportedFiles`에 포함한다. 일반적인 added/deleted/renamed 변경 파일은 제외한다.
+- renamed 파일은 현재 경로와 `previousFilePath`를 함께 비교해 실제 rename/modify 충돌인지
+  판정한다.
 - `modify_delete`, `rename_modify`, `add_add`, `unsupported`는 후속 slice에서 처리하며,
   초기 구현에서는 `unsupportedFiles`에 안내용 metadata만 반환할 수 있다.
 - conflict 분석 결과는 초기 read-only slice에서 DB에 저장하지 않는다.

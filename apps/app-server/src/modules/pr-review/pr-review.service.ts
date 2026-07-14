@@ -20,6 +20,7 @@ import {
   type PrReviewConflictHunkPayload
 } from "./pr-review-conflict-analyzer";
 import type { PrReviewResolvedHunkPayload } from "./pr-review-conflict-resolution";
+import { classifyPrReviewConflictFile } from "./pr-review-conflict-file-classifier";
 import {
   PrReviewAnalysisService,
   type PrReviewConflictSuggestionCurrentDraft,
@@ -1706,22 +1707,18 @@ export class PrReviewService {
       workspaceId,
       session.id
     );
-    const contentCandidates: ReviewFileConflictTargetRow[] = [];
     const unsupportedFiles: PrReviewUnsupportedConflictFilePayload[] = [];
+    const requestedPaths = Array.from(
+      new Set(
+        reviewFiles.flatMap((file) =>
+          file.previous_file_path
+            ? [file.file_path, file.previous_file_path]
+            : [file.file_path]
+        )
+      )
+    );
 
-    for (const file of reviewFiles) {
-      const unsupportedReason = this.getUnsupportedConflictFileReason(file);
-      if (unsupportedReason) {
-        unsupportedFiles.push(
-          this.mapUnsupportedConflictFile(file, unsupportedReason)
-        );
-        continue;
-      }
-
-      contentCandidates.push(file);
-    }
-
-    if (contentCandidates.length === 0) {
+    if (requestedPaths.length === 0) {
       return this.buildConflictAnalysisPayload({
         session,
         baseSha: currentPullRequest.baseSha,
@@ -1737,7 +1734,7 @@ export class PrReviewService {
       {
         baseSha: currentPullRequest.baseSha,
         headSha: session.head_sha,
-        filePaths: contentCandidates.map((file) => file.file_path)
+        filePaths: requestedPaths
       }
     );
     const conflictInputByPath = new Map(
@@ -1745,14 +1742,33 @@ export class PrReviewService {
     );
     const files: PrReviewConflictFilePayload[] = [];
 
-    for (const file of contentCandidates) {
-      const conflictInput = conflictInputByPath.get(file.file_path);
-      if (!conflictInput || conflictInput.unsupportedReason) {
+    for (const file of reviewFiles) {
+      const classification = classifyPrReviewConflictFile({
+        fileStatus: file.file_status,
+        currentPathInput: conflictInputByPath.get(file.file_path) ?? null,
+        previousPathInput: file.previous_file_path
+          ? conflictInputByPath.get(file.previous_file_path) ?? null
+          : null
+      });
+
+      if (classification.kind === "none") {
+        continue;
+      }
+
+      if (classification.kind === "unsupported") {
+        unsupportedFiles.push(
+          this.mapUnsupportedConflictFile(file, classification.reason)
+        );
+        continue;
+      }
+
+      const conflictInput = classification.input;
+
+      if (conflictInput.unsupportedReason) {
         unsupportedFiles.push(
           this.mapUnsupportedConflictFile(
             file,
-            conflictInput?.unsupportedReason ??
-              "content conflict input is not available"
+            conflictInput.unsupportedReason
           )
         );
         continue;
@@ -1773,11 +1789,11 @@ export class PrReviewService {
         continue;
       }
 
-      if (conflictInput.headContent.length > MAX_CONFLICT_APPLY_CONTENT_CHARS) {
+      if (file.is_binary) {
         unsupportedFiles.push(
           this.mapUnsupportedConflictFile(
             file,
-            "file content is too large for conflict resolution apply"
+            "binary conflict is not supported in the initial read-only slice"
           )
         );
         continue;
@@ -1790,6 +1806,26 @@ export class PrReviewService {
       });
 
       if (hunks.length === 0) {
+        continue;
+      }
+
+      if (file.is_large_diff) {
+        unsupportedFiles.push(
+          this.mapUnsupportedConflictFile(
+            file,
+            "large diff conflict is not supported in the initial read-only slice"
+          )
+        );
+        continue;
+      }
+
+      if (conflictInput.headContent.length > MAX_CONFLICT_APPLY_CONTENT_CHARS) {
+        unsupportedFiles.push(
+          this.mapUnsupportedConflictFile(
+            file,
+            "file content is too large for conflict resolution apply"
+          )
+        );
         continue;
       }
 

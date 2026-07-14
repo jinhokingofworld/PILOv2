@@ -10,26 +10,22 @@ export type PrReviewFileNodeActivationGesture = {
   reviewFileId: string;
   shapeId: string;
   startPointer: Point;
-  startShapePosition: Point;
 };
 
 export function createPrReviewFileNodeActivationGesture({
   pointer,
   reviewFileId,
-  shapeId,
-  shapePosition
+  shapeId
 }: {
   pointer: Point;
   reviewFileId: string;
   shapeId: string;
-  shapePosition: Point;
 }): PrReviewFileNodeActivationGesture {
   return {
     moved: false,
     reviewFileId,
     shapeId,
-    startPointer: pointer,
-    startShapePosition: shapePosition
+    startPointer: pointer
   };
 }
 
@@ -58,12 +54,7 @@ export function updatePrReviewFileNodeActivationGesture(
 }
 
 export function shouldActivatePrReviewFileNode(
-  gesture: PrReviewFileNodeActivationGesture,
-  currentShapePosition: Point
+  gesture: PrReviewFileNodeActivationGesture
 ) {
-  return (
-    !gesture.moved &&
-    currentShapePosition.x === gesture.startShapePosition.x &&
-    currentShapePosition.y === gesture.startShapePosition.y
-  );
+  return !gesture.moved;
 }

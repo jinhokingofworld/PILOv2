@@ -501,6 +501,7 @@ assert.match(databaseService, /ROLLBACK/);
 
 await import("./diff-parser.test.mjs");
 await import("./conflict-analyzer.test.mjs");
+await import("./conflict-file-classifier.test.mjs");
 await import("./conflict-resolution.test.mjs");
 await import("./conflict-suggestion-context.test.mjs");
 await import("./conflict-apply.test.mjs");

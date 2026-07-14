@@ -933,8 +933,7 @@ function PrReviewFileNodeActivationBridge({
           gestureRef.current = createPrReviewFileNodeActivationGesture({
             pointer: event.point,
             reviewFileId: event.shape.props.reviewFileId,
-            shapeId: event.shape.id,
-            shapePosition: event.shape
+            shapeId: event.shape.id
           });
           return;
         }
@@ -970,7 +969,7 @@ function PrReviewFileNodeActivationBridge({
 
       if (
         isPrReviewFileNodeShape(currentShape) &&
-        shouldActivatePrReviewFileNode(completedGesture, currentShape)
+        shouldActivatePrReviewFileNode(completedGesture)
       ) {
         onFileSelect?.(completedGesture.reviewFileId);
       }
