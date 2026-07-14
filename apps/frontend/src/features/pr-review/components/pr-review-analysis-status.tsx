@@ -23,6 +23,7 @@ import type {
 } from "@/features/pr-review/types";
 
 type PrReviewAnalysisStatusProps = {
+  backLabel: string;
   isDelayed: boolean;
   isRetrying: boolean;
   onBackToSelection: () => void;
@@ -34,6 +35,7 @@ type PrReviewAnalysisStatusProps = {
 };
 
 export function PrReviewAnalysisStatus({
+  backLabel,
   isDelayed,
   isRetrying,
   onBackToSelection,
@@ -124,7 +126,7 @@ export function PrReviewAnalysisStatus({
               variant="secondary"
             >
               <ArrowLeft className="size-4" />
-              PR 목록으로
+              {backLabel}
             </Button>
             {!isAnalyzing ? (
               <Button disabled={isRetrying} onClick={onRetry} type="button">

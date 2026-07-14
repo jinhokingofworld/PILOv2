@@ -82,6 +82,7 @@ type PrReviewApiClient = ReturnType<typeof createPrReviewApiClient>;
 
 type PrReviewCanvasShellProps = {
   apiClient: PrReviewApiClient;
+  backLabel: string;
   onBackToSelection: () => void;
   onGoToGithub: () => void;
   onReviewSessionCreated: (session: PrReviewSession) => void;
@@ -292,6 +293,7 @@ function getMergeDisabledReason(input: {
 
 export function PrReviewCanvasShell({
   apiClient,
+  backLabel,
   onBackToSelection,
   onGoToGithub,
   onReviewSessionCreated,
@@ -837,7 +839,7 @@ export function PrReviewCanvasShell({
       <header className="flex h-16 shrink-0 items-center gap-3 overflow-x-auto border-b border-slate-200 bg-white px-4">
         <Button onClick={onBackToSelection} type="button" variant="outline">
           <ArrowLeft className="size-4" />
-          PR 선택으로 돌아가기
+          {backLabel}
         </Button>
         <div className="flex h-10 min-w-0 items-center gap-2 rounded-lg border border-slate-200 px-3 text-sm font-medium">
           <GitBranch className="size-4 shrink-0 text-slate-500" />
@@ -960,6 +962,7 @@ export function PrReviewCanvasShell({
             (conflictAnalysisStatus === "error" ||
               conflictAnalysisStatus === "stale") ? (
             <ConflictAnalysisFailureState
+              backLabel={backLabel}
               message={conflictAnalysisError}
               onBack={onBackToSelection}
               onRetry={() => void loadCanvasData()}
@@ -1316,11 +1319,13 @@ function ConflictAnalysisNotice({
 }
 
 function ConflictAnalysisFailureState({
+  backLabel,
   message,
   onBack,
   onRetry,
   stale
 }: {
+  backLabel: string;
   message: string | null;
   onBack: () => void;
   onRetry: () => void;
@@ -1342,7 +1347,7 @@ function ConflictAnalysisFailureState({
           {stale ? (
             <Button onClick={onBack} type="button" variant="outline">
               <ArrowLeft className="size-4" />
-              PR 목록으로 돌아가기
+              {backLabel}
             </Button>
           ) : (
             <Button onClick={onRetry} type="button" variant="outline">

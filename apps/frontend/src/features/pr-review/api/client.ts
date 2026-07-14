@@ -21,6 +21,7 @@ import type {
   PrReviewMergeResult,
   PrReviewRepository,
   PrReviewRoomCanvas,
+  PrReviewRoomList,
   PrReviewSession,
   PrReviewSessionResult,
   PrReviewSubmission,
@@ -469,6 +470,17 @@ export function createPrReviewApiClient({
     ) {
       return requestPrReviewData<PrReviewRoomCanvas>(
         reviewRoomGithubPath(workspaceId, reviewRoomId),
+        init,
+        requestOptions
+      );
+    },
+
+    async listReviewRooms(
+      workspaceId: string,
+      init?: Pick<RequestInit, "signal">
+    ) {
+      return requestPrReviewData<PrReviewRoomList>(
+        workspaceGithubPath(workspaceId, "/review-rooms"),
         init,
         requestOptions
       );
