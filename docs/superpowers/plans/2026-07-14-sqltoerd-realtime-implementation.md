@@ -98,18 +98,40 @@ it("Redis publish 실패 뒤에도 outbox와 operation은 남고 재시도한다
   await runOutboxSweep();
   expect(await readOutbox(operation.id)).toMatchObject({ status: "pending", attemptCount: 1 });
 });
+
+it("process 종료로 60초 넘게 publishing인 row를 새 token으로 reclaim한다", async () => {
+  const firstClaim = await claimOutbox(operation.id);
+  await advanceClockBySeconds(61);
+
+  await runOutboxSweep();
+  const reclaimed = await readOutbox(operation.id);
+  expect(reclaimed.status).toBe("publishing");
+  expect(reclaimed.claimToken).not.toBe(firstClaim.claimToken);
+  expect(reclaimed.attemptCount).toBe(2);
+});
+
+it("stale layout patch는 최신 layout에 rebase하고 서로 다른 entity를 보존한다", async () => {
+  await submitLayoutPatch({ baseRevision: 10, patch: { notesById: { noteA: { x: 80, y: 40 } } } });
+  const result = await submitLayoutPatch({ baseRevision: 9, patch: { tableLayoutsById: { users: { x: 320, y: 40 } } } });
+
+  expect(result).toMatchObject({ rebased: true, appliedOnRevision: 11, resultRevision: 12 });
+  expect(await readLayout(sessionId)).toMatchObject({
+    tableLayouts: { users: { x: 320, y: 40 } },
+    annotations: { notes: { noteA: { x: 80, y: 40 } } },
+  });
+});
 ```
 
 **구현 단계:**
 
 1. session별 `opSeq`, `(session_id, client_operation_id)` idempotency, catch-up index/RLS를 가진 operation table과 operation당 하나의 outbox row를 migration으로 추가한다.
-2. `POST .../operations`, `GET .../operations?afterSeq&limit`와 `SqlErdLayoutPatch` validation을 추가한다. update map과 delete ID list는 별도 필드로 검증한다.
+2. `POST .../operations`, `GET .../operations?afterSeq&limit`와 `SqlErdLayoutPatch` validation을 추가한다. update map과 delete ID list는 별도 필드로 검증한다. stale `layout_patch`는 최신 layout에 rebase하고, 미래 `baseRevision`은 `409 SQL_ERD_REVISION_AHEAD`로 거부한다.
 3. realtime 활성 session의 plural·singular 기존 full `PATCH`를 동일하게 `409 SQL_ERD_REALTIME_OPERATION_REQUIRED`로 거부한다. client flag로 우회할 수 없게 server 상태만 사용한다.
 4. session update, canonical patch apply, revision 증가, operation insert, outbox insert를 한 transaction으로 묶는다.
-5. outbox publisher는 commit 뒤 즉시 publish하고, 1초 sweep에서 `FOR UPDATE SKIP LOCKED`로 row를 claim한다. 1·2·4·8·16초, 이후 30초 간격으로 재시도하며 5회 실패부터 alert를 남긴다. 성공한 `PUBLISH`만 `delivered`로 바꾼다.
+5. outbox publisher는 commit 뒤 즉시 publish하고, 1초 sweep에서 `FOR UPDATE SKIP LOCKED`로 row를 claim한다. `pending` due row와 `claimed_at`이 60초를 넘긴 `publishing` row를 모두 새 token으로 claim한다. 1·2·4·8·16초, 이후 30초 간격으로 재시도하며 5회 실패부터 alert를 남긴다. 성공·실패 update는 claim token을 조건으로 하며, 성공한 `PUBLISH`만 `delivered`로 바꾼다.
 6. realtime-server subscriber와 client는 `operationId`·`opSeq`로 중복을 제거한다. Redis subscriber 부재나 socket 유실은 operation 실패가 아니며 REST catch-up으로 복구한다.
 
-**검증:** idempotency, 권한, invalid patch, full PATCH 차단, transaction 실패 시 outbox 미생성, 다중 publisher claim, Redis 실패 재시도, 중복 event 제거, GET catch-up 자동 테스트.
+**검증:** idempotency, 권한, invalid patch, stale/future `baseRevision`, full PATCH 차단, transaction 실패 시 outbox 미생성, 다중 publisher claim, 60초 stale `publishing` reclaim, Redis 실패 재시도, 중복 event 제거, GET catch-up 자동 테스트.
 
 ## 작업 3: layout·annotation operation 동기화
 
@@ -186,18 +208,27 @@ it("source snapshot은 최신 잠금 layout의 annotation과 기존 table 위치
   expect(result.layoutJson.annotations.notes.noteA).toBeDefined();
   expect(result.layoutJson.tableLayouts.users).toMatchObject({ x: 120, y: 48 });
 });
+
+it("source snapshot은 lock claim revision과 다른 baseRevision을 거부한다", async () => {
+  const lock = await claimSourceLock({ userId: ownerUserId, sessionId, baseRevision: 12 });
+
+  await expect(submitSourceSnapshot({ lock, baseRevision: 11 })).rejects.toMatchObject({
+    statusCode: 409,
+    code: "SQL_ERD_SOURCE_LOCK_BASE_REVISION_STALE",
+  });
+});
 ```
 
 **구현 단계:**
 
-1. `source_locks` table과 claim/renew/release endpoint를 구현한다. lease는 30초, client renew는 10초로 시작한다.
-2. claim transaction에서 session row를 직렬화하고 `lockedLayoutOpSeq`를 기록한다. lock 중 모든 layout/annotation operation을 server에서 `409 SQL_ERD_SOURCE_LOCK_ACTIVE`로 거부한다.
-3. source write, Regenerate SQL, SQL diff Apply가 유효 lease owner와 `lockedLayoutOpSeq`를 확인하게 한다. source snapshot은 source/model과 `newTableLayoutsById`만 받는다.
+1. `source_locks` table과 claim/renew/release endpoint를 구현한다. claim은 `baseRevision === currentRevision`만 허용하며, lease는 30초, client renew는 10초로 시작한다.
+2. claim transaction에서 session row를 직렬화하고 `lockedSessionRevision`과 `lockedLayoutOpSeq`를 기록한다. lock 중 모든 layout/annotation operation을 server에서 `409 SQL_ERD_SOURCE_LOCK_ACTIVE`로 거부한다.
+3. source write, Regenerate SQL, SQL diff Apply가 유효 lease owner와 `lockedSessionRevision`·`lockedLayoutOpSeq`를 확인하게 한다. source snapshot은 `baseRevision === lockedSessionRevision === currentRevision`일 때만 source/model과 `newTableLayoutsById`를 받는다.
 4. server는 lock 시점의 최신 layout에서 기존 table 위치·모든 annotation을 보존하고, model에서 제거된 table layout을 지우며 새 table layout만 추가한 canonical snapshot을 만든다.
 5. lock 변경과 만료를 realtime event로 broadcast하고 UI는 source·layout mutation을 read-only로 전환한다. snapshot 수신은 존재하지 않는 selection만 해제하고 camera는 유지한다.
 6. Workspace/session feature flag로 단계 배포한다. outbox lag, `sync:required`, 10초 poll recovery, lock contention, source snapshot reconcile을 관측하고 두 계정·두 브라우저 E2E를 실행한다.
 
-**검증:** claim 경쟁, renew, disconnect/timeout takeover, full PATCH 우회 불가, lock 중 layout patch 차단, snapshot annotation/table 위치 보존, Redis 누락 뒤 poll 복구, feature flag rollback을 확인한다.
+**검증:** stale source lock claim/source snapshot 409, claim 경쟁, renew, disconnect/timeout takeover, full PATCH 우회 불가, lock 중 layout patch 차단, snapshot annotation/table 위치 보존, Redis 누락 뒤 poll 복구, feature flag rollback을 확인한다.
 
 ---
 
