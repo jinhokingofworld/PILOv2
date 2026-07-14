@@ -175,6 +175,23 @@ class PgCanvasAgentRepository:
             (error_message[:4096], run_id),
         )
 
+    def has_semantic_shapes(self, workspace_id: str, canvas_id: str) -> bool:
+        row = self.connection.execute(
+            """
+            SELECT 1
+            FROM canvas_agent_shape_embeddings embedding
+            INNER JOIN canvas_freeform_shapes shape ON shape.id = embedding.shape_id
+            WHERE embedding.workspace_id = %s
+              AND embedding.canvas_id = %s
+              AND shape.canvas_id = embedding.canvas_id
+              AND shape.deleted_at IS NULL
+              AND shape.revision = embedding.shape_revision
+            LIMIT 1
+            """,
+            (workspace_id, canvas_id),
+        ).fetchone()
+        return row is not None
+
     def search_semantic_shapes(
         self,
         workspace_id: str,
@@ -184,35 +201,41 @@ class PgCanvasAgentRepository:
     ) -> list[CanvasSemanticShapeMatch]:
         rows = self.connection.execute(
             """
-            SELECT
-              embedding.shape_id,
-              1 - (embedding.embedding <=> %s::extensions.vector) AS similarity
-            FROM canvas_agent_shape_embeddings embedding
-            INNER JOIN canvas_freeform_shapes shape ON shape.id = embedding.shape_id
-            WHERE embedding.workspace_id = %s
-              AND embedding.canvas_id = %s
-              AND shape.canvas_id = embedding.canvas_id
-              AND shape.deleted_at IS NULL
-              AND shape.revision = embedding.shape_revision
-              AND encode(
-                digest(
-                  concat_ws(
-                    E'\\n',
-                    shape.shape_type,
-                    COALESCE(shape.title, ''),
-                    COALESCE(shape.text_content, '')
+            WITH canvas_embeddings AS MATERIALIZED (
+              SELECT
+                embedding.shape_id,
+                embedding.embedding
+              FROM canvas_agent_shape_embeddings embedding
+              INNER JOIN canvas_freeform_shapes shape ON shape.id = embedding.shape_id
+              WHERE embedding.workspace_id = %s
+                AND embedding.canvas_id = %s
+                AND shape.canvas_id = embedding.canvas_id
+                AND shape.deleted_at IS NULL
+                AND shape.revision = embedding.shape_revision
+                AND encode(
+                  digest(
+                    concat_ws(
+                      E'\\n',
+                      shape.shape_type,
+                      COALESCE(shape.title, ''),
+                      COALESCE(shape.text_content, '')
+                    ),
+                    'sha256'
                   ),
-                  'sha256'
-                ),
-                'hex'
-              ) = embedding.source_text_hash
-            ORDER BY embedding.embedding <=> %s::extensions.vector
+                  'hex'
+                ) = embedding.source_text_hash
+            )
+            SELECT
+              shape_id,
+              1 - (embedding <=> %s::extensions.vector) AS similarity
+            FROM canvas_embeddings
+            ORDER BY embedding <=> %s::extensions.vector
             LIMIT %s
             """,
             (
-                _vector_literal(query_embedding),
                 workspace_id,
                 canvas_id,
+                _vector_literal(query_embedding),
                 _vector_literal(query_embedding),
                 max(1, min(limit, 20)),
             ),

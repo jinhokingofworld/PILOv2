@@ -39,6 +39,8 @@ NON_SHAPE_SEARCH_PROTOTYPES = (
 
 
 class SemanticCanvasAgentRepository(Protocol):
+    def has_semantic_shapes(self, workspace_id: str, canvas_id: str) -> bool: ...
+
     def search_semantic_shapes(
         self,
         workspace_id: str,
@@ -72,6 +74,9 @@ class CanvasSemanticRouter:
         return f"local:{self.embedder.model_name}@{self.embedder.model_version}"
 
     def plan(self, context: CanvasAgentRunContext) -> CanvasAgentPlan | None:
+        if not self.repository.has_semantic_shapes(context.workspace_id, context.canvas_id):
+            return None
+
         connection_request = _connect_request(context)
         if connection_request is not None:
             left_query, right_query, connection_kind = connection_request
