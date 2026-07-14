@@ -42,13 +42,20 @@ class FailingEmbedder:
 
 
 class FakeRepository:
-    def __init__(self, *, has_shapes=True, shapes=None) -> None:
+    def __init__(self, *, has_shapes=True, shapes=None, text_shapes=None) -> None:
         self.has_shapes = has_shapes
         self.shapes = shapes or []
+        self.text_shapes = text_shapes or {}
         self.search_calls = 0
+        self.text_search_calls = 0
 
     def has_semantic_shapes(self, _workspace_id, _canvas_id):
         return self.has_shapes
+
+    def search_text_shapes(self, _canvas_id, query, limit=4):
+        self.text_search_calls += 1
+        matches = self.text_shapes.get(query, [])
+        return matches[:limit]
 
     def search_semantic_shapes(self, _workspace_id, _canvas_id, _embedding, limit=4):
         self.search_calls += 1
@@ -137,6 +144,69 @@ def test_semantic_router_skips_embedding_when_canvas_has_no_indexed_shapes() -> 
     plan = CanvasSemanticRouter(repository, FailingEmbedder()).plan(context)
 
     assert plan is None
+    assert repository.search_calls == 0
+
+
+def test_semantic_router_uses_text_search_without_embedding_index() -> None:
+    repository = FakeRepository(
+        has_shapes=False,
+        text_shapes={
+            "회의 메모 찾아줘": [
+                CanvasSemanticShapeMatch("shape:meeting", 1.0),
+            ],
+        },
+    )
+    context = CanvasAgentRunContext(
+        run_id="run-1",
+        workspace_id="workspace-1",
+        canvas_id="canvas-1",
+        requested_by_user_id="user-1",
+        status="planning",
+        prompt="회의 메모 찾아줘",
+        request_context={"selectedShapeIds": []},
+        previous_action=None,
+    )
+
+    plan = CanvasSemanticRouter(repository, FailingEmbedder()).plan(context)
+
+    assert plan is not None
+    assert plan.action_name == "find_shapes"
+    assert plan.input["shapeIds"] == ["shape:meeting"]
+    assert plan.input["routingSource"] == "deterministic_search"
+    assert repository.search_calls == 0
+    assert repository.text_search_calls == 1
+
+
+def test_semantic_router_uses_text_search_for_connection_before_embedding() -> None:
+    repository = FakeRepository(
+        has_shapes=False,
+        text_shapes={
+            "회의": [
+                CanvasSemanticShapeMatch("shape:meeting", 1.0),
+            ],
+            "이슈": [
+                CanvasSemanticShapeMatch("shape:issue", 1.0),
+            ],
+        },
+    )
+    context = CanvasAgentRunContext(
+        run_id="run-1",
+        workspace_id="workspace-1",
+        canvas_id="canvas-1",
+        requested_by_user_id="user-1",
+        status="planning",
+        prompt="회의랑 이슈 연결해줘",
+        request_context={"selectedShapeIds": []},
+        previous_action=None,
+    )
+
+    plan = CanvasSemanticRouter(repository, FailingEmbedder()).plan(context)
+
+    assert plan is not None
+    assert plan.action_name == "connect_shapes"
+    assert plan.input["fromShapeId"] == "shape:meeting"
+    assert plan.input["toShapeId"] == "shape:issue"
+    assert plan.input["routingSource"] == "deterministic_search"
     assert repository.search_calls == 0
 
 

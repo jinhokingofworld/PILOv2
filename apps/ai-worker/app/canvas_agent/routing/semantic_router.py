@@ -41,6 +41,13 @@ NON_SHAPE_SEARCH_PROTOTYPES = (
 class SemanticCanvasAgentRepository(Protocol):
     def has_semantic_shapes(self, workspace_id: str, canvas_id: str) -> bool: ...
 
+    def search_text_shapes(
+        self,
+        canvas_id: str,
+        query: str,
+        limit: int = 4,
+    ) -> list[CanvasSemanticShapeMatch]: ...
+
     def search_semantic_shapes(
         self,
         workspace_id: str,
@@ -74,12 +81,21 @@ class CanvasSemanticRouter:
         return f"local:{self.embedder.model_name}@{self.embedder.model_version}"
 
     def plan(self, context: CanvasAgentRunContext) -> CanvasAgentPlan | None:
-        if not self.repository.has_semantic_shapes(context.workspace_id, context.canvas_id):
-            return None
-
         connection_request = _connect_request(context)
         if connection_request is not None:
             left_query, right_query, connection_kind = connection_request
+            text_plan = self._plan_text_connection(
+                context,
+                left_query,
+                right_query,
+                connection_kind,
+            )
+            if text_plan is not None:
+                return text_plan
+
+            if not self.repository.has_semantic_shapes(context.workspace_id, context.canvas_id):
+                return None
+
             try:
                 left_embedding = self.embedder.embed_query(left_query)
                 right_embedding = self.embedder.embed_query(right_query)
@@ -127,6 +143,25 @@ class CanvasSemanticRouter:
             return None
         query, requires_shape_search_classification = request
 
+        text_matches = self.repository.search_text_shapes(context.canvas_id, query)
+        if text_matches and (
+            not requires_shape_search_classification or _is_direct_text_search_prompt(context.prompt)
+        ):
+            return CanvasAgentPlan(
+                action_name="find_shapes",
+                input={
+                    "query": query,
+                    "shapeIds": [match.shape_id for match in text_matches[:4]],
+                    "continuePlanning": False,
+                    "focusResult": True,
+                    "routingSource": "deterministic_search",
+                },
+                message="Canvas 검색으로 먼저 찾았어요. 여기 있는 내용이 가장 가까워요.",
+            )
+
+        if not self.repository.has_semantic_shapes(context.workspace_id, context.canvas_id):
+            return None
+
         try:
             query_embedding = self.embedder.embed_query(query)
         except CanvasEmbeddingError:
@@ -165,6 +200,38 @@ class CanvasSemanticRouter:
             )
 
         return None
+
+    def _plan_text_connection(
+        self,
+        context: CanvasAgentRunContext,
+        left_query: str,
+        right_query: str,
+        connection_kind: str,
+    ) -> CanvasAgentPlan | None:
+        left_match = _single_text_match(
+            self.repository.search_text_shapes(context.canvas_id, left_query, limit=2)
+        )
+        right_match = _single_text_match(
+            self.repository.search_text_shapes(context.canvas_id, right_query, limit=2)
+        )
+
+        if (
+            left_match is None
+            or right_match is None
+            or left_match.shape_id == right_match.shape_id
+        ):
+            return None
+
+        return CanvasAgentPlan(
+            action_name="connect_shapes",
+            input={
+                "fromShapeId": left_match.shape_id,
+                "toShapeId": right_match.shape_id,
+                "connectionKind": connection_kind,
+                "routingSource": "deterministic_search",
+            },
+            message="Canvas 검색으로 두 도형을 찾았어요. 바로 연결할게요.",
+        )
 
     def _is_shape_search(self, query_embedding: list[float]) -> bool:
         prototypes = self._get_prototype_embeddings()
@@ -256,6 +323,15 @@ def _is_line_connect_prompt(value: str) -> bool:
     return bool(re.search(r"(선으로|연결선)", value)) and "화살표" not in value
 
 
+def _is_direct_text_search_prompt(value: str) -> bool:
+    if not re.search(r"(찾아|찾기|검색|어디|위치|보여|이동|가줘|하이라이트)", value):
+        return False
+    return not re.search(
+        r"(만들|생성|그려|초안|디자인|와이어|다이어그램|코드|작성|추가|수정|바꿔)",
+        value,
+    )
+
+
 def _clean_query_part(value: str) -> str:
     return re.sub(r"^(?:이|그|저)\s+", "", value).strip(" \t\n\r\"'`“”‘’")
 
@@ -279,6 +355,13 @@ def _confident(
         if top_similarity - next_similarity < margin_min:
             return None
     return top
+
+
+def _single_text_match(matches: list[CanvasSemanticShapeMatch]) -> CanvasSemanticShapeMatch | None:
+    if len(matches) != 1:
+        return None
+    match = matches[0]
+    return match if match.similarity >= 0.9 else None
 
 
 def _max_similarity(query_embedding: list[float], prototype_embeddings: list[list[float]]) -> float:

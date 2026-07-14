@@ -52,7 +52,8 @@ Frontend -> App Server Canvas Agent API -> Canvas Agent run + SQS job
 For a shape-finding request, Canvas Agent uses this bounded cost-saving route:
 
 ```text
-local shape-search prototype embedding classifier
+Canvas-local text search over current shape title/text/type
+  -> local shape-search prototype embedding classifier
   -> Canvas-only pgvector shape search when the prompt is clearly looking for an existing shape
   -> Canvas-only pgvector search for each side when the prompt clearly connects two existing shapes
   -> GPT Planner when the prompt is not a shape search, retrieval is absent, or the result is ambiguous
@@ -60,6 +61,11 @@ local shape-search prototype embedding classifier
 
 - The embedding Worker indexes only `shape_type`, `title`, and `text_content`.
   It never embeds full `raw_shape`, layout, bindings, styles, or provider data.
+- Before embedding, explicit find/connect requests may use bounded DB text
+  search against the current canvas' non-deleted shapes. This lets newly
+  created or not-yet-embedded shapes be found without waiting for the embedding
+  worker, and avoids an LLM/embedding call when the current canvas text is
+  already an exact enough match.
 - The configured local model is `intfloat/multilingual-e5-small` (384
   dimensions). Queries use `query: ` and indexed Canvas text uses `passage: `.
 - The first-pass shape-search classifier uses fixed local prototype examples.

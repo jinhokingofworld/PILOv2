@@ -267,6 +267,79 @@ class PgCanvasAgentRepository:
         ).fetchone()
         return row is not None
 
+    def search_text_shapes(
+        self,
+        canvas_id: str,
+        query: str,
+        limit: int = 4,
+    ) -> list[CanvasSemanticShapeMatch]:
+        normalized = query.strip()
+        if not normalized:
+            return []
+
+        terms = _search_terms(normalized)
+        exact_pattern = f"%{_escape_like(normalized)}%"
+        term_patterns = [f"%{_escape_like(term)}%" for term in terms]
+        rows = self.connection.execute(
+            """
+            SELECT
+              id,
+              CASE
+                WHEN COALESCE(title, '') ILIKE %s ESCAPE '\\'
+                  OR COALESCE(text_content, '') ILIKE %s ESCAPE '\\'
+                  THEN 1.0
+                WHEN EXISTS (
+                  SELECT 1
+                  FROM unnest(%s::text[]) AS search_term(pattern)
+                  WHERE COALESCE(title, '') ILIKE search_term.pattern ESCAPE '\\'
+                    OR COALESCE(text_content, '') ILIKE search_term.pattern ESCAPE '\\'
+                )
+                  THEN 0.95
+                WHEN shape_type ILIKE %s ESCAPE '\\'
+                  THEN 0.9
+                ELSE 0.0
+              END AS similarity
+            FROM canvas_freeform_shapes
+            WHERE canvas_id = %s
+              AND deleted_at IS NULL
+              AND (
+                COALESCE(title, '') ILIKE %s ESCAPE '\\'
+                OR COALESCE(text_content, '') ILIKE %s ESCAPE '\\'
+                OR shape_type ILIKE %s ESCAPE '\\'
+                OR EXISTS (
+                  SELECT 1
+                  FROM unnest(%s::text[]) AS search_term(pattern)
+                  WHERE COALESCE(title, '') ILIKE search_term.pattern ESCAPE '\\'
+                    OR COALESCE(text_content, '') ILIKE search_term.pattern ESCAPE '\\'
+                    OR shape_type ILIKE search_term.pattern ESCAPE '\\'
+                )
+              )
+            ORDER BY similarity DESC, updated_at DESC, id ASC
+            LIMIT %s
+            """,
+            (
+                exact_pattern,
+                exact_pattern,
+                term_patterns,
+                exact_pattern,
+                canvas_id,
+                exact_pattern,
+                exact_pattern,
+                exact_pattern,
+                term_patterns,
+                max(1, min(limit, 20)),
+            ),
+        ).fetchall()
+
+        return [
+            CanvasSemanticShapeMatch(
+                shape_id=str(row["id"]),
+                similarity=float(row["similarity"]),
+            )
+            for row in rows
+            if float(row["similarity"]) > 0
+        ]
+
     def search_semantic_shapes(
         self,
         workspace_id: str,
@@ -536,6 +609,43 @@ def _shape_ids(action_input: dict[str, object]) -> list[str]:
         if isinstance(value, list):
             return [item for item in value if isinstance(item, str)][:40]
     return []
+
+
+def _search_terms(query: str) -> list[str]:
+    stop_words = {
+        "canvas",
+        "shape",
+        "캔버스",
+        "쉐입",
+        "도형",
+        "메모",
+        "노트",
+        "찾아",
+        "찾아줘",
+        "검색",
+        "검색해",
+        "검색해줘",
+        "보여",
+        "보여줘",
+        "어디",
+        "위치",
+        "이동",
+        "가줘",
+        "있는",
+        "관련",
+    }
+    terms: list[str] = []
+    for term in query.replace("/", " ").replace("_", " ").split():
+        normalized = term.strip(" \t\n\r\"'`“”‘’.,!?()[]{}")
+        if len(normalized) < 2 or normalized.lower() in stop_words:
+            continue
+        if normalized not in terms:
+            terms.append(normalized[:80])
+    return terms[:12]
+
+
+def _escape_like(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 def _advisory_lock_key(value: str) -> int:
