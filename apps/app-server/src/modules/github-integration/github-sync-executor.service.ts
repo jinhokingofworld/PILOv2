@@ -40,6 +40,7 @@ export interface GithubSyncRepositoryContextRow extends QueryResultRow {
   owner_login: string;
   name: string;
   full_name: string;
+  raw?: unknown;
 }
 
 export interface GithubSyncProjectV2ContextRow extends QueryResultRow {
@@ -1879,9 +1880,7 @@ export class GithubSyncExecutorService {
   private getProjectV2UserAccessToken(
     context: GithubSyncRunContext
   ): string | undefined {
-    return context.installation.account_type === "User"
-      ? context.githubUserAccessToken ?? undefined
-      : undefined;
+    return context.githubUserAccessToken ?? undefined;
   }
 
   private async reportGithubSyncProgress(

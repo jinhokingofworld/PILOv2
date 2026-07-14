@@ -20,6 +20,7 @@ import {
   type GithubSyncRunSummary,
 } from "./github-sync-executor.service";
 import { GithubProjectV2SyncTokenService } from "./github-project-v2-sync-token.service";
+import { readGithubRepositoryOwnerType } from "./github-repository-owner";
 import type {
   GithubPaginatedPayload,
   GithubSyncRunDetailPayload,
@@ -155,7 +156,11 @@ export class GithubSyncRunService {
     // always supplies the job service above; retain the executor path for those isolated tests.
     try {
       const githubUserAccessToken = await this.projectV2SyncTokenService.resolvePersonalProjectV2UserAccessToken({
-        currentUserId, installation, requiresProjectV2Access: this.requiresProjectV2Access(target)
+        currentUserId,
+        installation,
+        repositoryOwnerLogin: repository?.owner_login ?? null,
+        repositoryOwnerType: readGithubRepositoryOwnerType(repository?.raw),
+        requiresProjectV2Access: this.requiresProjectV2Access(target)
       });
       const summary = await this.syncExecutorService.runGithubSyncTarget(target, {
         currentUserId, workspaceId, installation, repository, projectV2, githubUserAccessToken,
@@ -507,7 +512,8 @@ export class GithubSyncRunService {
           github_node_id,
           owner_login,
           name,
-          full_name
+          full_name,
+          raw
         FROM github_repositories
         WHERE workspace_id = $1
           AND id = $2

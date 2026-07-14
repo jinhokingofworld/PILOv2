@@ -148,8 +148,11 @@ callback 성공 redirect를 실패로 바꾸지 않는다.
   충돌 처리하고 다른 Workspace의 row를 재할당하지 않는다.
 - `full` sync는 허용 저장소를 먼저 갱신한 뒤 각 저장소의 GitHub Projects 탭과 같은
   GitHub GraphQL `repository(owner, name).projectsV2`로 Projects v2를 발견한다.
-  organization ProjectV2는 GitHub App installation token을 사용하고, personal
-  ProjectV2는 현재 사용자의 ProjectV2 OAuth token을 사용한다. 발견한
+  이 repository Projects list는 same owner as that repository인 ProjectV2만 포함한다.
+  User repository owner가 active ProjectV2 OAuth GitHub login과 일치하면 installation
+  metadata is `Organization`이어도 user token을 사용한다. actual Organization repository
+  owner 또는 Organization installation의 legacy cache처럼 owner type을 알 수 없는
+  repository는 installation-token fallback을 유지한다. 발견한
   ProjectV2는 `github_projects_v2`에 upsert하고, GitHub repository node id와
   현재 처리 중인 저장소에 대해서만 `github_project_v2_repositories` 관계를 갱신한다.
   ProjectV2 item sync는 GitHub ProjectV2 repository 연결 목록이 불완전한 경우에도
@@ -538,9 +541,13 @@ Content-Type: application/json
 
 `repositoryId`는 필수이며, 요청 workspace의 `installationId`에 속한 repository여야 한다.
 서버는 해당 repository와 연결된 ProjectV2 metadata와 repository link를 탐색해 저장한 뒤,
-그 repository 범위의 ProjectV2만 반환한다. Organization installation은 GitHub App
-installation token을 사용한다. Personal installation은 현재 사용자의 ProjectV2 OAuth
-connection(`purpose=project_v2`)과 `project` scope가 필요하다.
+그 repository 범위의 ProjectV2만 반환한다. repository Projects list는 해당 repository와
+같은 owner의 ProjectV2만 포함한다. User repository owner가 active ProjectV2 OAuth GitHub
+login과 일치하면 installation metadata가 `Organization`이어도 user token을 사용하며, 실제
+Organization repository owner 또는 Organization installation의 owner type을 알 수 없는
+legacy cache는 installation-token fallback을 유지한다. Personal owner에
+user token을 사용할 때는 현재 사용자의 ProjectV2 OAuth connection(`purpose=project_v2`)과
+`project` scope가 필요하다.
 이 endpoint는 인증된 PILO 사용자의 workspace 접근 권한이 필요하다.
 
 성공 응답:
@@ -900,9 +907,11 @@ Issues, and pull requests, and redirects with the `github_installation_id` query
 The client does not request PRs or ProjectV2 data until a repository is selected. It must then
 call `POST /workspaces/{workspaceId}/github/installations/{installationId}/projects-v2/discovery`
 with `{ "repositoryId": "..." }`. Discovery stores ProjectV2 metadata and repository links;
-its result and subsequent ProjectV2 lists are limited to that repository. Organization
-installations use the installation token; a personal installation without a valid matching
-Project OAuth token with `project` scope returns:
+its result and subsequent ProjectV2 lists are limited to that repository and its owner. A
+User repository owner matching the active ProjectV2 OAuth GitHub login uses the user token even
+when installation metadata is `Organization`; an actual Organization repository owner or legacy
+Organization-installation cache without owner type retains installation-token fallback. A personal owner without a valid matching Project OAuth token with
+`project` scope returns:
 
 ```json
 {

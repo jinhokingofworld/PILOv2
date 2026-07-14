@@ -9,6 +9,7 @@ import { GithubIntegrationConfigService } from "./github-integration-config.serv
 import { GithubProjectV2WriteService } from "./github-project-v2-write.service";
 import { GithubProjectV2PollingService } from "./github-project-v2-polling.service";
 import { GithubProjectV2SyncTokenService } from "./github-project-v2-sync-token.service";
+import { readGithubRepositoryOwnerType } from "./github-repository-owner";
 import { GithubSyncExecutorService, type GithubSyncInstallationRow } from "./github-sync-executor.service";
 import { GithubSyncJobEnqueueError } from "./github-sync-job.service";
 import { GithubSyncRunService } from "./github-sync-run.service";
@@ -69,6 +70,7 @@ interface GithubProjectV2RepositoryRow extends QueryResultRow {
   owner_login: string;
   name: string;
   full_name: string;
+  raw: unknown;
 }
 
 interface GithubProjectV2RepositoryLinkRow extends QueryResultRow {
@@ -243,7 +245,7 @@ export class GithubProjectV2Service {
 
       const repository = await transaction.queryOne<GithubProjectV2RepositoryRow>(
         `
-          SELECT id, workspace_id, installation_id, github_node_id, owner_login, name, full_name
+          SELECT id, workspace_id, installation_id, github_node_id, owner_login, name, full_name, raw
           FROM github_repositories
           WHERE workspace_id = $1
             AND id = $2
@@ -360,7 +362,7 @@ export class GithubProjectV2Service {
     if (!installation) throw notFound("GitHub App installation not found");
     const repository = await this.database.queryOne<GithubProjectV2RepositoryRow>(
       `
-        SELECT id, workspace_id, installation_id, github_node_id, owner_login, name, full_name
+        SELECT id, workspace_id, installation_id, github_node_id, owner_login, name, full_name, raw
         FROM github_repositories
         WHERE workspace_id = $1
           AND id = $2
@@ -375,13 +377,18 @@ export class GithubProjectV2Service {
       throw badRequest("GitHub ProjectV2 discovery is unavailable");
     }
 
+    const repositoryOwnerType = readGithubRepositoryOwnerType(repository.raw);
     let githubUserAccessToken: string | null;
     try {
       githubUserAccessToken = await this.tokenService.resolvePersonalProjectV2UserAccessToken({
-        currentUserId, installation, requiresProjectV2Access: true
+        currentUserId,
+        installation,
+        repositoryOwnerLogin: repository.owner_login,
+        repositoryOwnerType,
+        requiresProjectV2Access: true
       });
     } catch {
-      if (installation.account_type === "User") {
+      if (repositoryOwnerType === "User") {
         return { connectionRequired: true, installationId, repositoryId, projects: [] };
       }
       throw badRequest("GitHub ProjectV2 discovery could not be authorized");
