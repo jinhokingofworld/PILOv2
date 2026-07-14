@@ -43,7 +43,7 @@ from app.meeting_report_processor import (
 from app.meeting_transcript_embedding_processor import (
     MeetingTranscriptEmbeddingProcessor,
     TranscriptChunk,
-    transcript_hash,
+    transcript_segments_hash,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -335,7 +335,7 @@ class PgMeetingReportRepository:
                 VALUES (%s, %s)
                 ON CONFLICT (meeting_report_id, transcript_hash) DO NOTHING
                 """,
-                (report_id, transcript_hash(report.transcript_text)),
+                (report_id, transcript_segments_hash(report.transcript_segments)),
             )
 
 
@@ -382,22 +382,33 @@ class PgMeetingTranscriptEmbeddingRepository:
             ).fetchone()
 
     def get_transcript_embedding_source(self, job: dict[str, object]) -> dict[str, object] | None:
-        row = self.connection.execute(
+        report = self.connection.execute(
             """
-            SELECT id, transcript_text
+            SELECT id
             FROM meeting_reports
             WHERE id = %s
               AND status = 'COMPLETED'
-              AND transcript_text IS NOT NULL
             LIMIT 1
             """,
             (job["meeting_report_id"],),
         ).fetchone()
-        if row is None:
+        if report is None:
             return None
 
-        source = dict(row)
-        source["transcript_hash"] = transcript_hash(str(source["transcript_text"]))
+        rows = self.connection.execute(
+            """
+            SELECT segment_index, started_at_ms, ended_at_ms, text
+            FROM meeting_report_transcript_segments
+            WHERE meeting_report_id = %s
+            ORDER BY segment_index ASC
+            """,
+            (job["meeting_report_id"],),
+        ).fetchall()
+        if not rows:
+            return None
+
+        source = {"segments": [dict(row) for row in rows]}
+        source["transcript_hash"] = transcript_segments_hash(source["segments"])
         return source
 
     def replace_transcript_chunks(
@@ -416,16 +427,15 @@ class PgMeetingTranscriptEmbeddingRepository:
         with self.connection.transaction():
             row = self.connection.execute(
                 """
-                SELECT transcript_text
-                FROM meeting_reports
-                WHERE id = %s
-                  AND status = 'COMPLETED'
-                  AND transcript_text IS NOT NULL
+                SELECT segment_index, started_at_ms, ended_at_ms, text
+                FROM meeting_report_transcript_segments
+                WHERE meeting_report_id = %s
+                ORDER BY segment_index ASC
                 FOR SHARE
                 """,
                 (report_id,),
-            ).fetchone()
-            if row is None or transcript_hash(str(row["transcript_text"])) != expected_hash:
+            ).fetchall()
+            if not rows or transcript_segments_hash([dict(row) for row in rows]) != expected_hash:
                 return False
 
             self.connection.execute(
@@ -438,6 +448,10 @@ class PgMeetingTranscriptEmbeddingRepository:
                     INSERT INTO meeting_report_transcript_chunks (
                       meeting_report_id,
                       chunk_index,
+                      start_segment_index,
+                      end_segment_index,
+                      started_at_ms,
+                      ended_at_ms,
                       content,
                       content_hash,
                       transcript_hash,
@@ -446,11 +460,18 @@ class PgMeetingTranscriptEmbeddingRepository:
                       embedding_version,
                       indexed_at
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s::extensions.vector, %s, %s, now())
+                    VALUES (
+                      %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                      %s::extensions.vector, %s, %s, now()
+                    )
                     """,
                     (
                         report_id,
                         chunk.chunk_index,
+                        chunk.start_segment_index,
+                        chunk.end_segment_index,
+                        chunk.started_at_ms,
+                        chunk.ended_at_ms,
                         chunk.content,
                         chunk.content_hash,
                         expected_hash,

@@ -2,18 +2,30 @@ from __future__ import annotations
 
 import hashlib
 import re
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
 from app.canvas_agent.embeddings import CanvasEmbedder, CanvasEmbeddingError
 
 TRANSCRIPT_CHUNK_MAX_CHARACTERS = 1_800
-TRANSCRIPT_CHUNK_OVERLAP_CHARACTERS = 240
+
+
+@dataclass(frozen=True)
+class TranscriptSourceSegment:
+    segment_index: int
+    started_at_ms: int
+    ended_at_ms: int
+    text: str
 
 
 @dataclass(frozen=True)
 class TranscriptChunk:
     chunk_index: int
+    start_segment_index: int
+    end_segment_index: int
+    started_at_ms: int
+    ended_at_ms: int
     content: str
     content_hash: str
 
@@ -62,7 +74,7 @@ class MeetingTranscriptEmbeddingProcessor:
                 self.repository.supersede_transcript_embedding_job(job_id)
                 return "meeting_transcript_embedding_superseded"
 
-            chunks = chunk_transcript(str(source["transcript_text"]))
+            chunks = chunk_transcript_segments(_source_segments(source))
             embeddings = [self.embedder.embed_passage(chunk.content) for chunk in chunks]
             if not self.repository.replace_transcript_chunks(
                 job,
@@ -87,45 +99,131 @@ class MeetingTranscriptEmbeddingProcessor:
             return "meeting_transcript_embedding_failed"
 
 
-def chunk_transcript(
-    transcript_text: str,
+def chunk_transcript_segments(
+    segments: Sequence[TranscriptSourceSegment],
     *,
     max_characters: int = TRANSCRIPT_CHUNK_MAX_CHARACTERS,
-    overlap_characters: int = TRANSCRIPT_CHUNK_OVERLAP_CHARACTERS,
 ) -> list[TranscriptChunk]:
-    normalized = " ".join(transcript_text.split())
-    if not normalized:
-        return []
-    if max_characters <= 0 or overlap_characters < 0 or overlap_characters >= max_characters:
+    if max_characters <= 0:
         raise ValueError("Invalid transcript chunking configuration")
 
     chunks: list[TranscriptChunk] = []
-    start = 0
-    while start < len(normalized):
-        end = min(start + max_characters, len(normalized))
-        if end < len(normalized):
-            boundary = _last_boundary(normalized, start, end)
-            if boundary > start:
-                end = boundary
+    pending: list[TranscriptSourceSegment] = []
+    pending_length = 0
 
-        content = normalized[start:end].strip()
+    def flush() -> None:
+        nonlocal pending, pending_length
+        if not pending:
+            return
+        content = "\n".join(segment.text.strip() for segment in pending).strip()
         if content:
             chunks.append(
                 TranscriptChunk(
                     chunk_index=len(chunks),
+                    start_segment_index=pending[0].segment_index,
+                    end_segment_index=pending[-1].segment_index,
+                    started_at_ms=pending[0].started_at_ms,
+                    ended_at_ms=pending[-1].ended_at_ms,
                     content=content,
-                    content_hash=hashlib.sha256(content.encode("utf-8")).hexdigest(),
+                    content_hash=transcript_hash(content),
                 )
             )
-        if end >= len(normalized):
-            break
-        start = max(end - overlap_characters, start + 1)
+        pending = []
+        pending_length = 0
 
+    for segment in sorted(segments, key=lambda value: value.segment_index):
+        text = " ".join(segment.text.split())
+        if not text:
+            continue
+        if len(text) > max_characters:
+            flush()
+            for part in _split_oversized_segment(text, max_characters):
+                chunks.append(
+                    TranscriptChunk(
+                        chunk_index=len(chunks),
+                        start_segment_index=segment.segment_index,
+                        end_segment_index=segment.segment_index,
+                        started_at_ms=segment.started_at_ms,
+                        ended_at_ms=segment.ended_at_ms,
+                        content=part,
+                        content_hash=transcript_hash(part),
+                    )
+                )
+            continue
+
+        additional_length = len(text) + (1 if pending else 0)
+        if pending and pending_length + additional_length > max_characters:
+            flush()
+        pending.append(
+            TranscriptSourceSegment(
+                segment.segment_index,
+                segment.started_at_ms,
+                segment.ended_at_ms,
+                text,
+            )
+        )
+        pending_length += len(text) + (1 if len(pending) > 1 else 0)
+
+    flush()
     return chunks
 
 
-def transcript_hash(transcript_text: str) -> str:
-    return hashlib.sha256(transcript_text.encode("utf-8")).hexdigest()
+def transcript_hash(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def transcript_segments_hash(segments: Sequence[object]) -> str:
+    canonical_segments = sorted(
+        (_segment_from_value(segment) for segment in segments),
+        key=lambda value: value.segment_index,
+    )
+    canonical = "\n".join(
+        (
+            f"{segment.segment_index}\x1f{segment.started_at_ms}\x1f"
+            f"{segment.ended_at_ms}\x1f{segment.text}"
+        )
+        for segment in canonical_segments
+    )
+    return transcript_hash(canonical)
+
+
+def _source_segments(source: Mapping[str, object]) -> list[TranscriptSourceSegment]:
+    values = source.get("segments")
+    if not isinstance(values, list):
+        raise ValueError("Transcript embedding source is missing segments")
+    return [_segment_from_value(value) for value in values]
+
+
+def _segment_from_value(value: object) -> TranscriptSourceSegment:
+    if isinstance(value, Mapping):
+        return TranscriptSourceSegment(
+            int(value["segment_index"]),
+            int(value["started_at_ms"]),
+            int(value["ended_at_ms"]),
+            str(value["text"]),
+        )
+    return TranscriptSourceSegment(
+        int(getattr(value, "segment_index")),
+        int(getattr(value, "started_at_ms")),
+        int(getattr(value, "ended_at_ms")),
+        str(getattr(value, "text")),
+    )
+
+
+def _split_oversized_segment(value: str, max_characters: int) -> list[str]:
+    parts: list[str] = []
+    start = 0
+    while start < len(value):
+        end = min(start + max_characters, len(value))
+        if end < len(value):
+            boundary = _last_boundary(value, start, end)
+            if boundary > start:
+                end = boundary
+        part = value[start:end].strip()
+        if part:
+            parts.append(part)
+        start = end
+    return parts
 
 
 def _last_boundary(value: str, start: int, end: int) -> int:
