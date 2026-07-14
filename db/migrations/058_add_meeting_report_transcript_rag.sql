@@ -48,7 +48,7 @@ CREATE TABLE public.meeting_report_transcript_chunks (
   content TEXT NOT NULL,
   content_hash TEXT NOT NULL,
   transcript_hash TEXT NOT NULL,
-  embedding extensions.vector(384),
+  embedding extensions.vector(1536),
   embedding_model TEXT,
   embedding_version TEXT,
   indexed_at TIMESTAMPTZ,
@@ -113,6 +113,6 @@ COMMENT ON TABLE public.meeting_report_transcript_embedding_jobs IS
   'Durable internal indexing jobs for MeetingReport transcript segment RAG. Public clients must not access this table.';
 
 COMMENT ON TABLE public.meeting_report_transcript_chunks IS
-  'Bounded transcript segment chunks and pgvector embeddings. Retrieval must join MeetingReport and Meeting to enforce Workspace access and match transcript_hash to the current transcript segments.';
+  'Bounded transcript segment chunks and OpenAI text-embedding-3-small (1536 dimensions) pgvector embeddings. Retrieval must join MeetingReport and Meeting to enforce Workspace access and match transcript_hash to the current transcript segments.';
 
 COMMIT;

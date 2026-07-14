@@ -41,7 +41,9 @@ from app.meeting_report_processor import (
     serialize_action_items,
 )
 from app.meeting_transcript_embedding_processor import (
+    OPENAI_TRANSCRIPT_EMBEDDING_MODEL,
     MeetingTranscriptEmbeddingProcessor,
+    OpenAiTranscriptEmbedder,
     TranscriptChunk,
     transcript_segments_hash,
 )
@@ -51,6 +53,7 @@ LOGGER = logging.getLogger(__name__)
 DEFAULT_DATABASE_URL = "postgresql://pilo:pilo@localhost:5432/pilo"
 DEFAULT_STT_MODEL = "whisper-1"
 DEFAULT_MEETING_REPORT_MODEL = "gpt-5.4-mini"
+DEFAULT_MEETING_TRANSCRIPT_EMBEDDING_MODEL = OPENAI_TRANSCRIPT_EMBEDDING_MODEL
 DEFAULT_WAIT_TIME_SECONDS = 20
 DEFAULT_VISIBILITY_TIMEOUT_SECONDS = 900
 DEFAULT_AGENT_EXECUTION_HANDOFF_TIMEOUT_SECONDS = 10
@@ -86,6 +89,7 @@ class RuntimeSettings:
     openai_api_key: str
     openai_stt_model: str
     openai_meeting_report_model: str
+    openai_meeting_transcript_embedding_model: str
     openai_agent_planner_model: str
     openai_agent_planner_timeout_seconds: float
     agent_execution_handoff_base_url: str
@@ -111,6 +115,10 @@ class RuntimeSettings:
             openai_meeting_report_model=_env(
                 "OPENAI_MEETING_REPORT_MODEL",
                 DEFAULT_MEETING_REPORT_MODEL,
+            ),
+            openai_meeting_transcript_embedding_model=_env(
+                "OPENAI_MEETING_TRANSCRIPT_EMBEDDING_MODEL",
+                DEFAULT_MEETING_TRANSCRIPT_EMBEDDING_MODEL,
             ),
             openai_agent_planner_model=_env(
                 "OPENAI_AGENT_PLANNER_MODEL",
@@ -1357,9 +1365,13 @@ def create_worker(settings: RuntimeSettings | None = None) -> SqsAiJobWorker:
         CanvasSemanticRouter(canvas_agent_repository, canvas_embedder),
     )
     canvas_embedding_processor = CanvasEmbeddingProcessor(canvas_agent_repository, canvas_embedder)
+    meeting_transcript_embedder = OpenAiTranscriptEmbedder(
+        resolved_settings.openai_api_key,
+        resolved_settings.openai_meeting_transcript_embedding_model,
+    )
     meeting_transcript_embedding_processor = MeetingTranscriptEmbeddingProcessor(
         meeting_transcript_embedding_repository,
-        canvas_embedder,
+        meeting_transcript_embedder,
     )
     dispatcher = JobDispatcher(
         meeting_report_processor,

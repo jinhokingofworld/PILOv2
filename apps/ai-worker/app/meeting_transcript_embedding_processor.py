@@ -6,9 +6,61 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
-from app.canvas_agent.embeddings import CanvasEmbedder, CanvasEmbeddingError
-
 TRANSCRIPT_CHUNK_MAX_CHARACTERS = 1_800
+OPENAI_TRANSCRIPT_EMBEDDING_MODEL = "text-embedding-3-small"
+OPENAI_TRANSCRIPT_EMBEDDING_DIMENSIONS = 1_536
+
+
+class TranscriptEmbeddingError(Exception):
+    pass
+
+
+class TranscriptEmbedder(Protocol):
+    @property
+    def model_name(self) -> str: ...
+
+    @property
+    def model_version(self) -> str: ...
+
+    def embed_passage(self, text: str) -> list[float]: ...
+
+
+class OpenAiTranscriptEmbedder:
+    model_version = "openai-api"
+
+    def __init__(
+        self,
+        api_key: str,
+        model_name: str = OPENAI_TRANSCRIPT_EMBEDDING_MODEL,
+    ) -> None:
+        from openai import OpenAI
+
+        self.client = OpenAI(api_key=api_key)
+        self.model_name = model_name
+
+    def embed_passage(self, text: str) -> list[float]:
+        normalized = " ".join(text.split())
+        if not normalized:
+            raise TranscriptEmbeddingError("Transcript embedding text is empty")
+
+        try:
+            response = self.client.embeddings.create(
+                input=normalized,
+                model=self.model_name,
+                dimensions=OPENAI_TRANSCRIPT_EMBEDDING_DIMENSIONS,
+                encoding_format="float",
+            )
+            vector = [float(value) for value in response.data[0].embedding]
+        except Exception as error:
+            raise TranscriptEmbeddingError("OpenAI transcript embedding failed") from error
+
+        if len(vector) != OPENAI_TRANSCRIPT_EMBEDDING_DIMENSIONS:
+            raise TranscriptEmbeddingError("OpenAI transcript embedding dimension is invalid")
+        if any(not _is_finite(value) for value in vector):
+            raise TranscriptEmbeddingError(
+                "OpenAI transcript embedding contains a non-finite value"
+            )
+        return vector
 
 
 @dataclass(frozen=True)
@@ -57,7 +109,7 @@ class MeetingTranscriptEmbeddingProcessor:
     def __init__(
         self,
         repository: MeetingTranscriptEmbeddingRepository,
-        embedder: CanvasEmbedder,
+        embedder: TranscriptEmbedder,
     ) -> None:
         self.repository = repository
         self.embedder = embedder
@@ -88,7 +140,7 @@ class MeetingTranscriptEmbeddingProcessor:
 
             self.repository.complete_transcript_embedding_job(job_id)
             return "meeting_transcript_embedding_completed"
-        except CanvasEmbeddingError as error:
+        except TranscriptEmbeddingError as error:
             self.repository.fail_transcript_embedding_job(job_id, str(error))
             return "meeting_transcript_embedding_failed"
         except Exception:
@@ -231,3 +283,7 @@ def _last_boundary(value: str, start: int, end: int) -> int:
     if not matches:
         return end
     return start + matches[-1].end()
+
+
+def _is_finite(value: float) -> bool:
+    return value == value and value not in (float("inf"), float("-inf"))

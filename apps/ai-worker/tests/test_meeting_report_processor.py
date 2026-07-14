@@ -547,11 +547,13 @@ def test_runtime_settings_default_meeting_report_model(monkeypatch) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.delenv("OPENAI_STT_MODEL", raising=False)
     monkeypatch.delenv("OPENAI_MEETING_REPORT_MODEL", raising=False)
+    monkeypatch.delenv("OPENAI_MEETING_TRANSCRIPT_EMBEDDING_MODEL", raising=False)
 
     settings = RuntimeSettings.from_env()
 
     assert settings.openai_stt_model == "whisper-1"
     assert settings.openai_meeting_report_model == "gpt-5.4-mini"
+    assert settings.openai_meeting_transcript_embedding_model == "text-embedding-3-small"
     assert settings.openai_agent_planner_model == "gpt-5.4-mini"
 
 

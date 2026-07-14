@@ -1,5 +1,9 @@
+from types import SimpleNamespace
+
 from app.meeting_transcript_embedding_processor import (
+    OPENAI_TRANSCRIPT_EMBEDDING_DIMENSIONS,
     MeetingTranscriptEmbeddingProcessor,
+    OpenAiTranscriptEmbedder,
     TranscriptSourceSegment,
     chunk_transcript_segments,
     transcript_hash,
@@ -13,10 +17,35 @@ class FakeEmbedder:
 
     def embed_passage(self, text: str) -> list[float]:
         assert text
-        return [0.1] * 384
+        return [0.1] * OPENAI_TRANSCRIPT_EMBEDDING_DIMENSIONS
 
     def embed_query(self, _text: str) -> list[float]:
         raise AssertionError("Transcript indexing must not use query embedding")
+
+
+def test_openai_transcript_embedder_requests_1536_dimension_float_embeddings() -> None:
+    created: dict[str, object] = {}
+
+    class FakeEmbeddings:
+        def create(self, **kwargs):
+            created.update(kwargs)
+            return SimpleNamespace(
+                data=[SimpleNamespace(embedding=[0.1] * OPENAI_TRANSCRIPT_EMBEDDING_DIMENSIONS)]
+            )
+
+    embedder = OpenAiTranscriptEmbedder.__new__(OpenAiTranscriptEmbedder)
+    embedder.client = SimpleNamespace(embeddings=FakeEmbeddings())
+    embedder.model_name = "text-embedding-3-small"
+
+    assert embedder.embed_passage("  회의록\n  근거  ") == [
+        0.1
+    ] * OPENAI_TRANSCRIPT_EMBEDDING_DIMENSIONS
+    assert created == {
+        "input": "회의록 근거",
+        "model": "text-embedding-3-small",
+        "dimensions": OPENAI_TRANSCRIPT_EMBEDDING_DIMENSIONS,
+        "encoding_format": "float",
+    }
 
 
 class FakeRepository:

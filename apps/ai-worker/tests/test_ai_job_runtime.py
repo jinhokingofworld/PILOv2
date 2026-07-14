@@ -138,6 +138,7 @@ def runtime_settings() -> RuntimeSettings:
         openai_api_key="test-key",
         openai_stt_model="whisper-1",
         openai_meeting_report_model="gpt-5.4-mini",
+        openai_meeting_transcript_embedding_model="text-embedding-3-small",
         openai_agent_planner_model="gpt-5.4-mini",
         openai_agent_planner_timeout_seconds=60,
         agent_execution_handoff_base_url="http://localhost:4000",
