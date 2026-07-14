@@ -547,11 +547,13 @@ def test_runtime_settings_default_meeting_report_model(monkeypatch) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.delenv("OPENAI_STT_MODEL", raising=False)
     monkeypatch.delenv("OPENAI_MEETING_REPORT_MODEL", raising=False)
+    monkeypatch.delenv("OPENAI_MEETING_TRANSCRIPT_EMBEDDING_MODEL", raising=False)
 
     settings = RuntimeSettings.from_env()
 
     assert settings.openai_stt_model == "whisper-1"
     assert settings.openai_meeting_report_model == "gpt-5.4-mini"
+    assert settings.openai_meeting_transcript_embedding_model == "text-embedding-3-small"
     assert settings.openai_agent_planner_model == "gpt-5.4-mini"
 
 
@@ -717,7 +719,7 @@ def test_serialize_action_items_uses_api_shape() -> None:
     ]
 
 
-def test_completed_report_materializes_pending_action_items() -> None:
+def test_completed_report_requeues_terminal_embedding_job() -> None:
     report = FakeAiClient().generate_report(
         "진호: 회의록 조회 API와 worker 처리 방향을 정리합니다.",
         [TranscriptSegment(0, 0, 1_000, "진호: 회의록 조회 API와 worker 처리 방향을 정리합니다.")],
@@ -742,6 +744,22 @@ def test_completed_report_materializes_pending_action_items() -> None:
         "Worker 구현",
         "meeting_report job processor를 구현한다.",
         "HIGH",
+    )
+    assert any(
+        "UPDATE meeting_report_transcript_embedding_jobs" in query
+        and "status = 'superseded'" in query
+        for query, _values in connection.calls
+    )
+    assert any(
+        "DELETE FROM meeting_report_transcript_chunks" in query
+        for query, _values in connection.calls
+    )
+    assert any(
+        "INSERT INTO meeting_report_transcript_embedding_jobs" in query
+        and "ON CONFLICT (meeting_report_id, transcript_hash) DO UPDATE" in query
+        and "status = 'pending'" in query
+        and "'completed', 'failed', 'superseded'" in query
+        for query, _values in connection.calls
     )
 
 
