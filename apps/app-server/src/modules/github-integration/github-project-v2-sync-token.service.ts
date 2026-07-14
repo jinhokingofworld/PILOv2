@@ -5,6 +5,7 @@ import { DatabaseService } from "../../database/database.service";
 import { GithubIntegrationConfigService } from "./github-integration-config.service";
 import { GithubTokenEncryptionService } from "./github-token-encryption.service";
 import { GithubOAuthConnectionService } from "./github-oauth-connection.service";
+import type { GithubRepositoryOwnerType } from "./github-repository-owner";
 
 interface GithubProjectV2SyncInstallation {
   account_login: string;
@@ -30,22 +31,28 @@ export class GithubProjectV2SyncTokenService {
   async resolvePersonalProjectV2UserAccessToken(input: {
     currentUserId: string;
     installation: GithubProjectV2SyncInstallation;
+    repositoryOwnerLogin: string | null;
+    repositoryOwnerType: GithubRepositoryOwnerType | null;
     requiresProjectV2Access: boolean;
   }): Promise<string | null> {
-    if (
-      !input.requiresProjectV2Access ||
-      input.installation.account_type !== "User"
-    ) {
+    const requiresPersonalProjectV2Token =
+      input.repositoryOwnerType === "User" ||
+      (
+        input.repositoryOwnerType === null &&
+        input.installation.account_type === "User"
+      );
+    if (!input.requiresProjectV2Access || !requiresPersonalProjectV2Token) {
       return null;
     }
 
+    const ownerLogin = input.repositoryOwnerLogin ?? input.installation.account_login;
     let connection;
     try { connection = await this.connectionService.getActiveConnection(input.currentUserId, "project_v2"); }
     catch { throw badRequest(GITHUB_PROJECT_OAUTH_REQUIRED_MESSAGE); }
 
     if (
       connection.githubLogin.toLowerCase() !==
-      input.installation.account_login.toLowerCase()
+      ownerLogin.toLowerCase()
     ) {
       throw badRequest(GITHUB_PROJECT_OAUTH_OWNER_MISMATCH_MESSAGE);
     }
