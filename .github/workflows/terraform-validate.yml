@@ -60,6 +60,9 @@ jobs:
         )
       }}
     runs-on: ubuntu-latest
+    concurrency:
+      group: terraform-dev-plan-state
+      cancel-in-progress: false
     permissions:
       contents: read
       id-token: write
