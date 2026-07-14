@@ -41,3 +41,29 @@ assert.equal(
   }),
   false
 );
+
+const sourceSnapshotPayload = {
+  ...validPayload,
+  id: "operation-2",
+  type: "source_snapshot",
+  sourceSnapshotId: "snapshot-1"
+};
+delete sourceSnapshotPayload.patch;
+
+assert.equal(
+  relaySqlErdOperation(sourceSnapshotPayload, (roomName, event, payload) => {
+    emitted.push({ event, payload, roomName });
+  }),
+  true
+);
+assert.deepEqual(emitted.at(-1), {
+  roomName: "workspace:workspace-1:sql-erd:session-1",
+  event: "sql-erd:operation",
+  payload: sourceSnapshotPayload
+});
+assert.equal(
+  relaySqlErdOperation({ ...sourceSnapshotPayload, sourceSnapshotId: "" }, () => {
+    throw new Error("invalid source snapshot payload must not emit");
+  }),
+  false
+);

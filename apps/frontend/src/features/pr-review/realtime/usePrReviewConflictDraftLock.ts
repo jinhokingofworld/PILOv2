@@ -59,11 +59,18 @@ export function usePrReviewConflictDraftLock({
 }) {
   const [canvasId, setCanvasId] = useState<string | null>(null);
   const [lock, setLock] = useState<LockState>(null);
+  const [isRealtimeReady, setIsRealtimeReady] = useState(false);
+  const [isEditClaimPending, setIsEditClaimPending] = useState(false);
   const socketRef = useRef<RealtimeSocket | null>(null);
   const heartbeatRef = useRef<number | null>(null);
 
   const currentUserId = realtimeIdentity.currentUser?.userId ?? null;
   const isEditing = Boolean(lock && lock.ownerUserId === currentUserId);
+
+  useEffect(() => {
+    setLock(null);
+    setIsEditClaimPending(false);
+  }, [conflictFileId]);
 
   const releaseEdit = useCallback(() => {
     const socket = socketRef.current;
@@ -74,18 +81,20 @@ export function usePrReviewConflictDraftLock({
       reviewSessionId,
       reviewFileId: conflictFileId
     });
+    setIsEditClaimPending(false);
   }, [canvasId, conflictFileId, isEditing, reviewSessionId, workspaceId]);
 
   const startEdit = useCallback(() => {
     const socket = socketRef.current;
-    if (!socket || !canvasId || !conflictFileId || !currentUserId) return;
+    if (!socket || !canvasId || !conflictFileId || !currentUserId || lock) return;
+    setIsEditClaimPending(true);
     socket.emit("pr-review:conflict-draft:lock:claim", {
       workspaceId,
       canvasId,
       reviewSessionId,
       reviewFileId: conflictFileId
     });
-  }, [canvasId, conflictFileId, currentUserId, reviewSessionId, workspaceId]);
+  }, [canvasId, conflictFileId, currentUserId, lock, reviewSessionId, workspaceId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -104,6 +113,7 @@ export function usePrReviewConflictDraftLock({
 
   useEffect(() => {
     if (!canvasId || !realtimeIdentity.authToken || !realtimeIdentity.currentUser) {
+      setIsRealtimeReady(false);
       return;
     }
 
@@ -129,6 +139,7 @@ export function usePrReviewConflictDraftLock({
       }>;
     }) => {
       if (!matches(payload) || !conflictFileId) return;
+      setIsRealtimeReady(true);
       const shapeId = `pr-review-conflict-draft:${reviewSessionId}:${conflictFileId}`;
       const existing = payload.shapeLocks?.find(lock => lock.shapeId === shapeId);
       if (existing) {
@@ -137,10 +148,13 @@ export function usePrReviewConflictDraftLock({
           lockedAt: existing.lockedAt,
           expiresAt: existing.expiresAt
         });
+      } else {
+        setLock(null);
       }
     };
     const handleLock = (payload: LockEvent) => {
       if (!matches(payload) || payload.reviewSessionId !== reviewSessionId || payload.reviewFileId !== conflictFileId) return;
+      setIsEditClaimPending(false);
       if (!payload.ownerUserId || !payload.lockedAt || !payload.expiresAt) {
         setLock(null);
         return;
@@ -153,6 +167,7 @@ export function usePrReviewConflictDraftLock({
     };
     const handleReleased = (payload: LockEvent) => {
       if (matches(payload) && payload.reviewSessionId === reviewSessionId && payload.reviewFileId === conflictFileId) {
+        setIsEditClaimPending(false);
         setLock(null);
       }
     };
@@ -191,6 +206,8 @@ export function usePrReviewConflictDraftLock({
       socket.emit("canvas:leave", room);
       socket.disconnect();
       socketRef.current = null;
+      setIsRealtimeReady(false);
+      setIsEditClaimPending(false);
     };
   }, [
     canvasId,
@@ -218,9 +235,11 @@ export function usePrReviewConflictDraftLock({
   useEffect(() => () => releaseEdit(), [releaseEdit]);
 
   return {
-    canEdit: !lock || isEditing,
+    canEdit: isRealtimeReady && !lock && !isEditClaimPending,
     editingOwnerUserId: lock?.ownerUserId ?? null,
+    isEditClaimPending,
     isEditing,
+    isRealtimeReady,
     releaseEdit,
     startEdit
   };

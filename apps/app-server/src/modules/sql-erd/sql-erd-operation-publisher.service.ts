@@ -100,9 +100,13 @@ export class SqlErdOperationPublisherService implements OnModuleInit, OnModuleDe
          'actorUserId', operation.actor_user_id, 'type', operation.operation_type, 'opSeq', operation.op_seq,
          'clientOperationId', operation.client_operation_id, 'baseRevision', operation.base_revision,
          'appliedOnRevision', operation.applied_on_revision, 'resultRevision', operation.result_revision,
-         'rebased', operation.base_revision <> operation.applied_on_revision, 'patch', operation.payload,
+         'rebased', operation.base_revision <> operation.applied_on_revision,
          'createdAt', to_char(operation.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
-       ) AS payload`,
+       ) || CASE
+         WHEN operation.operation_type = 'layout_patch'
+           THEN jsonb_build_object('patch', operation.payload)
+         ELSE jsonb_build_object('sourceSnapshotId', operation.source_snapshot_id)
+       END AS payload`,
       [id, CLAIM_TIMEOUT_SECONDS, claimToken]
     ));
   }

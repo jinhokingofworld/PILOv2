@@ -1195,8 +1195,10 @@ POST /api/v1/workspaces/{workspaceId}/github/review-files/{reviewFileId}/conflic
   hunk와 함께 검토한다. suggestion 생성만으로 현재 draft나 선택을 변경하지 않는다.
 - `currentDraft.hunks`는 현재 선택이 있는 hunk만 전달할 수 있다. `hunkId`는 요청 시점의
   Conflict hunk와 일치해야 하고 중복될 수 없다.
-- `currentDraft.resolvedContent`와 각 `resolvedText`는 conflict marker를 포함할 수 없으며
-  파일 적용 크기 제한을 넘을 수 없다. hunk 전체 삭제를 나타내는 빈 `resolvedText`는 허용한다.
+- `currentDraft.resolvedContent`에는 아직 선택하지 않은 hunk의 conflict marker가 포함될 수 있다.
+  AI는 이를 현재 해결 상태를 읽기 위한 문맥으로만 사용하고 marker를 결과에 복사하지 않는다.
+  각 `currentDraft.hunks[].resolvedText`와 AI가 반환하는 `resolvedHunks[].resolvedText`는 conflict marker를
+  포함할 수 없으며 파일 적용 크기 제한을 넘을 수 없다. hunk 전체 삭제를 나타내는 빈 `resolvedText`는 허용한다.
 - `resolvedHunks`는 요청 시점에 계산된 모든 conflict hunk를 `hunkId`로 식별하며, 각
   `resolvedText`는 해당 hunk만 대체할 코드다. 코드 전체를 Markdown fence로 감싸지 않는다.
 - 서버는 PR head 파일 원문에 `resolvedHunks`를 뒤쪽 hunk부터 적용해 `resolvedContent`를

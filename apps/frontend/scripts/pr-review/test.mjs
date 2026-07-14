@@ -280,7 +280,9 @@ assert.match(prReviewApiClient, /method: "POST"/);
 assert.match(prReviewApiClient, /\/review-files/);
 assert.match(prReviewApiClient, /method: "PATCH"/);
 assert.match(prReviewConflictDrafts, /buildPrReviewConflictMarkerDraft/);
-assert.match(prReviewFileDiffDrawer, /해결 코드 편집 시작/);
+assert.match(prReviewFileDiffDrawer, /코드 편집 시작/);
+assert.match(prReviewResolvedCodeEditor, /cm-conflictMarkerLine/);
+assert.match(prReviewResolvedCodeEditor, /<<<<<<<\|=======\|>>>>>>>/);
 assert.match(prReviewApiClient, /\/review-sessions/);
 assert.match(prReviewApiClient, /\/retry/);
 assert.doesNotMatch(prReviewApiClient, /features\/github-integration/);
@@ -476,9 +478,10 @@ assert.match(prReviewFileDiffDrawer, /ConflictUnifiedCodePane/);
 assert.match(prReviewFileDiffDrawer, /ConflictWorkspaceTabs/);
 assert.match(prReviewFileDiffDrawer, /ResolvedDraftWorkspace/);
 assert.match(prReviewFileDiffDrawer, /AI 해결안/);
-assert.match(prReviewFileDiffDrawer, /변경점 보기/);
-assert.match(prReviewFileDiffDrawer, /전체 코드 편집/);
-assert.match(prReviewFileDiffDrawer, /buildPrReviewResolvedCodeDiff/);
+assert.match(prReviewFileDiffDrawer, /전체 코드 보기/);
+assert.match(prReviewFileDiffDrawer, /코드 편집 시작/);
+assert.doesNotMatch(prReviewFileDiffDrawer, /변경점 보기/);
+assert.doesNotMatch(prReviewFileDiffDrawer, /전체 코드 편집/);
 assert.doesNotMatch(
   prReviewFileDiffDrawer,
   /Conflict Resolution|AI RESOLUTION|Resolution progress|Apply resolution/

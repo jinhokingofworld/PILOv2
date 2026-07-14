@@ -203,6 +203,12 @@ SQL source panel이 열린 상태를 뜻한다.
 | `PATCH` | `/workspaces/{workspaceId}/sql-erd-sessions/{sessionId}` | session 자동 저장/수정 |
 | `DELETE` | `/workspaces/{workspaceId}/sql-erd-sessions/{sessionId}` | session soft delete |
 
+| `GET` | `/workspaces/{workspaceId}/sql-erd-sessions/{sessionId}/source-snapshots` | immutable source snapshot batch read |
+| `POST` | `/workspaces/{workspaceId}/sql-erd-sessions/{sessionId}/source-snapshots` | source publish |
+| `POST` | `/workspaces/{workspaceId}/sql-erd-sessions/{sessionId}/source-lock` | acquire source writer lease |
+| `PATCH` | `/workspaces/{workspaceId}/sql-erd-sessions/{sessionId}/source-lock` | renew source writer lease |
+| `DELETE` | `/workspaces/{workspaceId}/sql-erd-sessions/{sessionId}/source-lock` | release source writer lease |
+
 ### Singular compatibility API
 
 | Method | Endpoint | 설명 |
@@ -982,3 +988,110 @@ type SqltoerdOperationCatchupResponse = {
 An `operations_v1` session rejects legacy durable `PATCH` with `409` and `error.code: "SQL_ERD_WRITE_PROTOCOL_MISMATCH"`. A future `baseRevision` returns `409` with `error.code: "CONFLICT"`.
 
 `sql-erd:operation` carries the `operation` object itself, not the HTTP write-response envelope. The App Server commits the session, operation, and outbox record in one DB transaction; the outbox then broadcasts the saved operation through Redis/Socket.IO. Delivery is at-least-once, so clients deduplicate by `id` or `opSeq` and use GET catch-up when a sequence gap is detected.
+
+## Source snapshot and source writer lease
+
+This phase does not activate `operations_v1`. Source-lock mutation and source
+publish endpoints reject a `snapshot` session with `409 SQL_ERD_WRITE_PROTOCOL_MISMATCH`;
+until activation, legacy PATCH remains its source writer. Source snapshot batch
+read is protocol-independent because it is a read-only catch-up endpoint. Once
+a session is `operations_v1`, every
+legacy durable session PATCH and DELETE is rejected with the same code, so a
+source lease cannot be bypassed.
+
+### Lease
+
+```http
+POST /api/v1/workspaces/{workspaceId}/sql-erd-sessions/{sessionId}/source-lock
+PATCH /api/v1/workspaces/{workspaceId}/sql-erd-sessions/{sessionId}/source-lock
+DELETE /api/v1/workspaces/{workspaceId}/sql-erd-sessions/{sessionId}/source-lock
+```
+
+Each request body is `{ "leaseId": "uuid" }`. Acquire locks the session row
+before inspecting the lease and grants a 30-second lease. Retrying acquire with
+the same authenticated user and `leaseId` returns the existing lease. Renew and
+publish require the same unexpired owner/lease pair. Release is idempotent only
+for a missing matching lease; any active mismatch returns generic `409 CONFLICT`
+without revealing the holder.
+
+```ts
+type SqltoerdSourceLock = {
+  leaseId: string;
+  sourceBaseRevision: number;
+  expiresAt: string;
+};
+```
+
+### Publish
+
+```http
+POST /api/v1/workspaces/{workspaceId}/sql-erd-sessions/{sessionId}/source-snapshots
+```
+
+The route accepts up to 4 MiB so the request envelope fits, while its persisted
+immutable snapshot remains constrained to 3 MiB total:
+
+```ts
+type SqltoerdSourcePublishRequest = {
+  baseRevision: number;
+  clientOperationId: string; // unique: (sessionId, actorUserId, clientOperationId)
+  leaseId: string;
+  sourceFormat: "sql";
+  dialect: "auto" | "postgresql" | "mysql" | "sqlite";
+  sourceText: string; // UTF-8 <= 1 MiB
+  modelJson: SqltoerdModelJsonV1; // serialized UTF-8 <= 1 MiB
+};
+```
+
+The client must send `modelJson` produced from the same parse result as
+`sourceText`. The server validates JSON schema, size and the rebased layout, but
+does not parse SQL or prove source/model semantic equivalence. It rebases the
+latest server layout under a session row lock, stores source/model/rebased-layout
+in an immutable row, updates the session, records a `source_snapshot` operation,
+and inserts its outbox row in one DB transaction. The snapshot's layout is the
+canonical replay result; the operation contains only `sourceSnapshotId` and no
+source/model/layout body.
+
+`clientOperationId` retries use a SHA-256 fingerprint of normalized source
+input. The same key and fingerprint returns the original operation, snapshot,
+revision and rebase summary. Reusing the key with a different source/model input
+returns `409 CONFLICT`.
+
+```ts
+type SqltoerdSourceSnapshotOperation = {
+  id: string;
+  workspaceId: string;
+  sessionId: string;
+  actorUserId: string;
+  type: "source_snapshot";
+  opSeq: number;
+  clientOperationId: string;
+  baseRevision: number;
+  appliedOnRevision: number;
+  resultRevision: number;
+  rebased: boolean;
+  sourceSnapshotId: string;
+  createdAt: string;
+};
+```
+
+`sql-erd:operation` is a union of the existing `layout_patch` event and this
+`source_snapshot` event. The latter carries exactly the type above.
+
+### Batch read and replay
+
+```http
+GET /api/v1/workspaces/{workspaceId}/sql-erd-sessions/{sessionId}/source-snapshots?ids={uuid},{uuid}
+```
+
+`ids` is required, deduplicated, limited to 1..3 UUIDs and a 2,048-character
+query. The response preserves normalized request order. Every ID must belong to
+the stated workspace/session; otherwise the request returns `404` rather than a
+partial response. Each snapshot has source/model/layout components of at most
+1 MiB and the persisted total is at most 3 MiB, so a maximum three-snapshot
+response is bounded below the 10 MiB batch-response limit.
+
+On catch-up, a client pauses at a `source_snapshot` operation, batch-loads its
+snapshot, applies that exact source/model/layout, then applies buffered later
+operations by `opSeq`. Duplicate IDs/sequences are ignored and a sequence gap
+uses the existing operations GET endpoint.

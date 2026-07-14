@@ -5969,7 +5969,7 @@ export class PrReviewService {
 
     const currentDraft =
       draftInput.currentDraft as PrReviewConflictSuggestionCurrentDraftInput;
-    const resolvedContent = this.normalizeResolvedConflictContent(
+    const resolvedContent = this.normalizeConflictSuggestionDraftContent(
       currentDraft.resolvedContent,
       "currentDraft.resolvedContent"
     );
@@ -6054,6 +6054,28 @@ export class PrReviewService {
     }
 
     return resolvedText;
+  }
+
+  private normalizeConflictSuggestionDraftContent(
+    value: unknown,
+    field: string
+  ): string {
+    if (typeof value !== "string") {
+      throw badRequest(`${field} must be a string`);
+    }
+
+    const resolvedContent = value
+      .replace(/\r\n/g, "\n")
+      .replace(/\r/g, "\n");
+    if (!resolvedContent.trim()) {
+      throw badRequest(`${field} must not be empty`);
+    }
+    if (resolvedContent.length > MAX_CONFLICT_APPLY_CONTENT_CHARS) {
+      throw badRequest(`${field} is too large`);
+    }
+
+    // AI receives unresolved markers as context, but final application still rejects them.
+    return resolvedContent;
   }
 
   private normalizeResolvedConflictContent(

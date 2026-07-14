@@ -75,7 +75,7 @@ export type SqlErdJoinedPayload = SqlErdRoomRef & {
   presence: SqlErdPresenceState[];
 };
 
-export type SqlErdOperationPayload = SqlErdRoomRef & {
+type SqlErdOperationBasePayload = SqlErdRoomRef & {
   actorUserId: string;
   appliedOnRevision: number;
   baseRevision: number;
@@ -83,8 +83,16 @@ export type SqlErdOperationPayload = SqlErdRoomRef & {
   createdAt: string;
   id: string;
   opSeq: number;
-  patch: Record<string, unknown>;
   rebased: boolean;
   resultRevision: number;
-  type: "layout_patch";
 };
+
+export type SqlErdOperationPayload =
+  | (SqlErdOperationBasePayload & {
+      patch: Record<string, unknown>;
+      type: "layout_patch";
+    })
+  | (SqlErdOperationBasePayload & {
+      sourceSnapshotId: string;
+      type: "source_snapshot";
+    });
