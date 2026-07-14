@@ -15,10 +15,13 @@ import { CurrentUserId } from "../../common/current-user.decorator";
 import {
   CurrentRecordingPayload,
   CurrentMeetingPayload,
+  DeleteMeetingRoomPayload,
   EndRecordingPayload,
   JoinMeetingPayload,
   LeaveMeetingPayload,
   MeetingDetailPayload,
+  MeetingRoomListPayload,
+  MeetingRoomMutationPayload,
   MeetingReportDetailResponsePayload,
   MeetingReportActionItemMutationPayload,
   MeetingReportListPayload,
@@ -34,6 +37,89 @@ import {
 @UseGuards(AuthGuard)
 export class MeetingController {
   constructor(private readonly meetingService: MeetingService) {}
+
+  @Get("meeting-rooms")
+  async listMeetingRooms(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string
+  ): Promise<ApiSuccessResponse<MeetingRoomListPayload>> {
+    return apiResponse(
+      await this.meetingService.listMeetingRooms(currentUserId, workspaceId)
+    );
+  }
+
+  @Post("meeting-rooms")
+  async createMeetingRoom(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Body() body: unknown
+  ): Promise<ApiSuccessResponse<MeetingRoomMutationPayload>> {
+    return apiResponse(
+      await this.meetingService.createMeetingRoom(currentUserId, workspaceId, body)
+    );
+  }
+
+  @Patch("meeting-rooms/:meetingRoomId")
+  async updateMeetingRoom(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("meetingRoomId") meetingRoomId: string,
+    @Body() body: unknown
+  ): Promise<ApiSuccessResponse<MeetingRoomMutationPayload>> {
+    return apiResponse(
+      await this.meetingService.updateMeetingRoom(
+        currentUserId,
+        workspaceId,
+        meetingRoomId,
+        body
+      )
+    );
+  }
+
+  @Delete("meeting-rooms/:meetingRoomId")
+  async deleteMeetingRoom(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("meetingRoomId") meetingRoomId: string
+  ): Promise<ApiSuccessResponse<DeleteMeetingRoomPayload>> {
+    return apiResponse(
+      await this.meetingService.deleteMeetingRoom(
+        currentUserId,
+        workspaceId,
+        meetingRoomId
+      )
+    );
+  }
+
+  @Get("meeting-rooms/:meetingRoomId/current")
+  async getCurrentMeetingForRoom(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("meetingRoomId") meetingRoomId: string
+  ): Promise<ApiSuccessResponse<CurrentMeetingPayload>> {
+    return apiResponse(
+      await this.meetingService.getCurrentMeetingForRoom(
+        currentUserId,
+        workspaceId,
+        meetingRoomId
+      )
+    );
+  }
+
+  @Post("meeting-rooms/:meetingRoomId/meetings")
+  async startMeetingInRoom(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("meetingRoomId") meetingRoomId: string
+  ): Promise<ApiSuccessResponse<StartMeetingPayload>> {
+    return apiResponse(
+      await this.meetingService.startMeetingInRoom(
+        currentUserId,
+        workspaceId,
+        meetingRoomId
+      )
+    );
+  }
 
   @Get("meetings/current")
   async getCurrentMeeting(
