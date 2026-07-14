@@ -29,7 +29,10 @@ import {
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
-import type { createPrReviewApiClient } from "@/features/pr-review/api/client";
+import {
+  PrReviewApiError,
+  type createPrReviewApiClient
+} from "@/features/pr-review/api/client";
 import { PrReviewResolvedCodeEditor } from "./PrReviewResolvedCodeEditor";
 import type { PrReviewConflictDraft } from "./pr-review-conflict-drafts";
 import {
@@ -51,6 +54,7 @@ import type {
   PrReviewConflictFile,
   PrReviewConflictHunk,
   PrReviewConflictSuggestion,
+  PrReviewDecisionUpdatedEvent,
   PrReviewFile,
   PrReviewFileDecisionStatus,
   PrReviewFileDiff,
@@ -92,6 +96,7 @@ type PrReviewFileDiffDrawerProps = {
     file: PrReviewFile,
     previousStatus: PrReviewFileReviewStatus
   ) => void;
+  remoteDecisionUpdate: PrReviewDecisionUpdatedEvent | null;
   reviewFileId: string;
   unsupportedConflictFile: PrReviewUnsupportedConflictFile | null;
   workspaceId: string;
@@ -133,6 +138,14 @@ function getErrorMessage(error: unknown) {
   }
 
   return "파일 리뷰 정보를 불러오지 못했습니다.";
+}
+
+function isReviewDecisionChangedError(error: unknown) {
+  return (
+    error instanceof PrReviewApiError &&
+    error.status === 409 &&
+    error.code === "REVIEW_DECISION_CHANGED"
+  );
 }
 
 function formatNumber(value: number) {
@@ -276,6 +289,7 @@ export function PrReviewFileDiffDrawer({
   onClose,
   onConflictDraftChange,
   onDecisionSaved,
+  remoteDecisionUpdate,
   reviewFileId,
   unsupportedConflictFile,
   workspaceId
@@ -289,6 +303,9 @@ export function PrReviewFileDiffDrawer({
   const [comment, setComment] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [saveErrorMessage, setSaveErrorMessage] = useState<string | null>(null);
+  const [decisionConflictMessage, setDecisionConflictMessage] = useState<
+    string | null
+  >(null);
   const [conflictSuggestionStatus, setConflictSuggestionStatus] =
     useState<ConflictSuggestionLoadStatus>("idle");
   const [conflictSuggestionError, setConflictSuggestionError] = useState<
@@ -308,6 +325,7 @@ export function PrReviewFileDiffDrawer({
   const isResolvedDraftCustomized = conflictDraft?.isCustomized ?? false;
   const commentSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const decisionVersionRef = useRef<number | null>(null);
 
   const clearScheduledCommentSave = useCallback(() => {
     if (commentSaveTimerRef.current) {
@@ -318,20 +336,27 @@ export function PrReviewFileDiffDrawer({
 
   const enqueueDecisionSave = useCallback(
     (nextStatus: PrReviewFileDecisionStatus, nextComment: string) => {
+      const previousStatus = file?.currentStatus ?? "not_reviewed";
       const saveTask = saveQueueRef.current
         .catch(() => undefined)
         .then(async () => {
           setSaveStatus("saving");
           setSaveErrorMessage(null);
+          setDecisionConflictMessage(null);
 
-          const previousStatus = file?.currentStatus ?? "not_reviewed";
+          const expectedDecisionVersion = decisionVersionRef.current;
+          if (expectedDecisionVersion === null) {
+            throw new Error("파일 판단 버전을 확인하지 못했습니다.");
+          }
+
           const storedComment = getStoredComment(nextComment);
           const updatedFile = await apiClient.updateReviewFileDecision(
             workspaceId,
             reviewFileId,
             {
               comment: storedComment,
-              status: nextStatus
+              status: nextStatus,
+              expectedDecisionVersion
             }
           );
           const savedFile: PrReviewFile = {
@@ -341,6 +366,7 @@ export function PrReviewFileDiffDrawer({
           };
 
           setFile(savedFile);
+          decisionVersionRef.current = savedFile.decisionVersion;
           setDecisionStatus((currentStatus) =>
             currentStatus === null || currentStatus === nextStatus
               ? getInitialDecisionStatus(savedFile)
@@ -352,7 +378,29 @@ export function PrReviewFileDiffDrawer({
           setSaveStatus("saved");
           onDecisionSaved(savedFile, previousStatus);
         })
-        .catch((error) => {
+        .catch(async (error) => {
+          if (isReviewDecisionChangedError(error)) {
+            try {
+              const latestFile = await apiClient.getReviewFile(
+                workspaceId,
+                reviewFileId
+              );
+              setFile(latestFile);
+              decisionVersionRef.current = latestFile.decisionVersion;
+              setSaveStatus("idle");
+              setSaveErrorMessage(null);
+              setDecisionConflictMessage(
+                "다른 리뷰어의 판단이 먼저 저장되어 최신 내용을 불러왔습니다."
+              );
+              onDecisionSaved(latestFile, previousStatus);
+              return;
+            } catch (refreshError) {
+              setSaveStatus("error");
+              setSaveErrorMessage(getErrorMessage(refreshError));
+              return;
+            }
+          }
+
           setSaveStatus("error");
           setSaveErrorMessage(getErrorMessage(error));
         });
@@ -373,11 +421,13 @@ export function PrReviewFileDiffDrawer({
       setSaveStatus("idle");
       setErrorMessage(null);
       setSaveErrorMessage(null);
+      setDecisionConflictMessage(null);
       setConflictSuggestionStatus("idle");
       setConflictSuggestionError(null);
       setConflictWorkspaceView("conflict");
       setFile(null);
       setDiff(null);
+      decisionVersionRef.current = null;
 
       try {
         const [nextFile, nextDiff] = await Promise.all([
@@ -390,6 +440,7 @@ export function PrReviewFileDiffDrawer({
         }
 
         setFile(nextFile);
+        decisionVersionRef.current = nextFile.decisionVersion;
         setDiff(nextDiff);
         setDecisionStatus(getInitialDecisionStatus(nextFile));
         setComment(nextFile.comment ?? "");
@@ -422,6 +473,60 @@ export function PrReviewFileDiffDrawer({
       clearScheduledCommentSave();
     };
   }, [clearScheduledCommentSave]);
+
+  useEffect(() => {
+    if (
+      !file ||
+      !remoteDecisionUpdate ||
+      remoteDecisionUpdate.reviewFileId !== reviewFileId ||
+      remoteDecisionUpdate.decisionVersion <= file.decisionVersion ||
+      saveStatus === "saving"
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+    const hasLocalDraft =
+      decisionStatus !== getInitialDecisionStatus(file) ||
+      getStoredComment(comment) !== getStoredComment(file.comment ?? "");
+
+    void apiClient
+      .getReviewFile(workspaceId, reviewFileId)
+      .then(latestFile => {
+        if (cancelled) return;
+
+        setFile(latestFile);
+        decisionVersionRef.current = latestFile.decisionVersion;
+        if (!hasLocalDraft) {
+          setDecisionStatus(getInitialDecisionStatus(latestFile));
+          setComment(latestFile.comment ?? "");
+          setDecisionConflictMessage(null);
+          return;
+        }
+
+        setDecisionConflictMessage(
+          "다른 리뷰어의 판단이 업데이트되었습니다. 작성 중인 내용은 유지했습니다."
+        );
+      })
+      .catch(error => {
+        if (!cancelled) {
+          setSaveErrorMessage(getErrorMessage(error));
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    apiClient,
+    comment,
+    decisionStatus,
+    file,
+    remoteDecisionUpdate,
+    reviewFileId,
+    saveStatus,
+    workspaceId
+  ]);
 
   useEffect(() => {
     setSelectedConflictHunkIndex(0);
@@ -801,6 +906,7 @@ export function PrReviewFileDiffDrawer({
               conflictSuggestion={conflictSuggestion}
               conflictSuggestionErrorMessage={conflictSuggestionError}
               conflictSuggestionStatus={conflictSuggestionStatus}
+              decisionConflictMessage={decisionConflictMessage}
               decisionStatus={decisionStatus}
               decisionDisabledReason={decisionDisabledReason}
               file={file}
@@ -928,6 +1034,7 @@ function ReviewNodePanel({
   conflictSuggestion,
   conflictSuggestionErrorMessage,
   conflictSuggestionStatus,
+  decisionConflictMessage,
   decisionStatus,
   decisionDisabledReason,
   file,
@@ -950,6 +1057,7 @@ function ReviewNodePanel({
   conflictSuggestion: PrReviewConflictSuggestion | null;
   conflictSuggestionErrorMessage: string | null;
   conflictSuggestionStatus: ConflictSuggestionLoadStatus;
+  decisionConflictMessage: string | null;
   decisionStatus: PrReviewFileDecisionStatus | null;
   decisionDisabledReason: string | null;
   file: PrReviewFile;
@@ -1127,6 +1235,10 @@ function ReviewNodePanel({
         {decisionDisabledReason ? (
           <p className="mt-3 text-sm leading-6 text-amber-700">
             {decisionDisabledReason}
+          </p>
+        ) : decisionConflictMessage ? (
+          <p className="mt-3 text-sm leading-6 text-blue-700">
+            {decisionConflictMessage}
           </p>
         ) : saveErrorMessage ? (
           <p className="mt-3 text-sm leading-6 text-rose-600">

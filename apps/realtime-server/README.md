@@ -24,6 +24,7 @@ src/
   redis/
   board/
   canvas/
+  pr-review/
 ```
 
 - `server.ts`: HTTP health endpoint, raw `/ws` compatibility scaffold, and
@@ -37,6 +38,7 @@ src/
   enabled when `REDIS_URL` exists.
 - `board/`: Board-specific room, access, event, and invalidation logic.
 - `canvas/`: Canvas-specific room, access, event, and presence logic.
+- `pr-review/`: PR Review decision event validation and delivery contracts.
 
 ## Boundaries
 

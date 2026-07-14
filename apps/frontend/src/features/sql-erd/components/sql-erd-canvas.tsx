@@ -6,6 +6,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type MouseEvent,
   type PointerEvent as ReactPointerEvent
 } from "react";
 import {
@@ -18,7 +19,10 @@ import {
 } from "tldraw";
 import { Workflow } from "lucide-react";
 
-import { SqlErdCanvasToolbar } from "@/features/sql-erd/components/sql-erd-canvas-toolbar";
+import {
+  SqlErdCanvasToolbar,
+  type SqlErdCanvasPlacementTool
+} from "@/features/sql-erd/components/sql-erd-canvas-toolbar";
 import { commerceSqltoerdFixture } from "@/features/sql-erd/fixtures/commerce";
 import {
   SQLTOERD_FRAME_SHAPE_TYPE,
@@ -38,6 +42,14 @@ import {
   type SqlErdNoteChangeEventDetail,
   type SqlErdNoteShape
 } from "@/features/sql-erd/shapes/sql-erd-note-shape";
+import {
+  SQLTOERD_TEXT_CHANGE_EVENT,
+  SQLTOERD_TEXT_SHAPE_TYPE,
+  isSqlErdTextShape,
+  SqlErdTextShapeUtil,
+  type SqlErdTextChangeEventDetail,
+  type SqlErdTextShape
+} from "@/features/sql-erd/shapes/sql-erd-text-shape";
 import {
   isSqlErdAnnotationShape,
   SQLTOERD_ANNOTATION_DELETE_EVENT,
@@ -86,6 +98,7 @@ import type {
   SqltoerdCanvasFrame,
   SqltoerdCanvasFrameColor,
   SqltoerdCanvasNote,
+  SqltoerdCanvasText,
   SqltoerdColumnAnnotationLink,
   SqltoerdLayoutJsonV1,
   SqltoerdLayoutPatch,
@@ -140,6 +153,7 @@ const sqlErdShapeUtils = [
   SqlErdAnnotationShapeUtil,
   SqlErdFrameShapeUtil,
   SqlErdNoteShapeUtil,
+  SqlErdTextShapeUtil,
   SqlErdRelationShapeUtil,
   SqlErdTableShapeUtil
 ];
@@ -193,6 +207,10 @@ export function getSqlErdNoteShapeId(noteId: string) {
 
 export function getSqlErdFrameShapeId(frameId: string) {
   return createShapeId(`sqltoerd-frame-${shapeIdSuffix(frameId)}-${hashSqlErdShapeSourceId(frameId)}`);
+}
+
+export function getSqlErdTextShapeId(textId: string) {
+  return createShapeId(`sqltoerd-text-${shapeIdSuffix(textId)}-${hashSqlErdShapeSourceId(textId)}`);
 }
 
 export function createSqltoerdTableShapes(
@@ -359,13 +377,18 @@ export function createSqltoerdCanvasShapes(
     id: getSqlErdFrameShapeId(frame.id), type: SQLTOERD_FRAME_SHAPE_TYPE, x: frame.x, y: frame.y,
     props: { w: frame.width, h: frame.height, frameId: frame.id, title: frame.title, color: frame.color, isLocked: frame.isLocked }
   }));
+  const textShapes: TLShapePartial<SqlErdTextShape>[] = (layoutJson.annotations?.texts ?? []).map((text) => ({
+    id: getSqlErdTextShapeId(text.id), type: SQLTOERD_TEXT_SHAPE_TYPE, x: text.x, y: text.y,
+    props: { w: text.width, h: text.height, textId: text.id, text: text.text, color: text.color }
+  }));
 
   return [
     ...frameShapes,
     ...relationShapes,
     ...tableShapes,
     ...annotationShapes,
-    ...noteShapes
+    ...noteShapes,
+    ...textShapes
   ];
 }
 
@@ -668,7 +691,8 @@ function isSqlErdCanvasShape(shape: TLShape) {
     isSqlErdRelationShape(shape) ||
     isSqlErdAnnotationShape(shape) ||
     shape.type === SQLTOERD_NOTE_SHAPE_TYPE ||
-    shape.type === SQLTOERD_FRAME_SHAPE_TYPE
+    shape.type === SQLTOERD_FRAME_SHAPE_TYPE ||
+    shape.type === SQLTOERD_TEXT_SHAPE_TYPE
   );
 }
 
@@ -998,6 +1022,18 @@ function isSqlErdCanvasShapePartialApplied(
       currentShape.props.title === nextProps.title &&
       currentShape.props.color === nextProps.color &&
       currentShape.props.isLocked === nextProps.isLocked;
+  }
+
+  if (shape.type === SQLTOERD_TEXT_SHAPE_TYPE) {
+    const nextProps = (shape as TLShapePartial<SqlErdTextShape>).props;
+    return isSqlErdTextShape(currentShape) && !!nextProps &&
+      areShapeNumbersEqual(currentShape.x, shape.x) &&
+      areShapeNumbersEqual(currentShape.y, shape.y) &&
+      areShapeNumbersEqual(currentShape.props.w, nextProps.w) &&
+      areShapeNumbersEqual(currentShape.props.h, nextProps.h) &&
+      currentShape.props.textId === nextProps.textId &&
+      currentShape.props.text === nextProps.text &&
+      currentShape.props.color === nextProps.color;
   }
 
   return false;
@@ -2162,6 +2198,24 @@ function SqlErdCanvasAnnotationSync({
       const { noteId, text } = (event as CustomEvent<SqlErdNoteChangeEventDetail>).detail;
       onLayoutPatchRef.current({ notesById: { [noteId]: { text } } });
     }
+    function handleTextChange(event: Event) {
+      const { textId, patch } = (event as CustomEvent<SqlErdTextChangeEventDetail>).detail;
+      const textShape = editor.getShape(getSqlErdTextShapeId(textId));
+
+      if (isSqlErdTextShape(textShape)) {
+        editor.run(() => {
+          editor.updateShapes([
+            {
+              id: textShape.id,
+              type: SQLTOERD_TEXT_SHAPE_TYPE,
+              props: { ...textShape.props, ...patch }
+            }
+          ]);
+        }, { history: "ignore" });
+      }
+
+      onLayoutPatchRef.current({ textsById: { [textId]: patch } });
+    }
     function deleteNote(noteId: string) {
       const shapeId = getSqlErdNoteShapeId(noteId);
 
@@ -2207,6 +2261,15 @@ function SqlErdCanvasAnnotationSync({
 
       onLayoutPatchRef.current({ deleteFrameIds: [frameId] });
     }
+    function deleteText(textId: string) {
+      const shapeId = getSqlErdTextShapeId(textId);
+
+      if (editor.getShape(shapeId)) {
+        editor.run(() => editor.deleteShapes([shapeId]), { history: "ignore" });
+      }
+
+      onLayoutPatchRef.current({ deleteTextIds: [textId] });
+    }
     function handleFrameDelete(event: Event) {
       const { frameId } = (event as CustomEvent<SqlErdFrameDeleteEventDetail>).detail;
       deleteFrame(frameId);
@@ -2237,6 +2300,13 @@ function SqlErdCanvasAnnotationSync({
         return;
       }
 
+      if (isSqlErdTextShape(selectedShape)) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        deleteText(selectedShape.props.textId);
+        return;
+      }
+
       if (!isSqlErdFrameShape(selectedShape)) {
         return;
       }
@@ -2249,11 +2319,13 @@ function SqlErdCanvasAnnotationSync({
       }
     }
     window.addEventListener(SQLTOERD_NOTE_CHANGE_EVENT, handleNoteChange);
+    window.addEventListener(SQLTOERD_TEXT_CHANGE_EVENT, handleTextChange);
     window.addEventListener(SQLTOERD_FRAME_CHANGE_EVENT, handleFrameChange);
     window.addEventListener(SQLTOERD_FRAME_DELETE_EVENT, handleFrameDelete);
     window.addEventListener("keydown", handleKeyDown, true);
     return () => {
       window.removeEventListener(SQLTOERD_NOTE_CHANGE_EVENT, handleNoteChange);
+      window.removeEventListener(SQLTOERD_TEXT_CHANGE_EVENT, handleTextChange);
       window.removeEventListener(SQLTOERD_FRAME_CHANGE_EVENT, handleFrameChange);
       window.removeEventListener(SQLTOERD_FRAME_DELETE_EVENT, handleFrameDelete);
       window.removeEventListener("keydown", handleKeyDown, true);
@@ -2266,8 +2338,10 @@ function SqlErdCanvasAnnotationSync({
       timeoutId = null;
       const notesById: NonNullable<SqltoerdLayoutPatch["notesById"]> = {};
       const framesById: NonNullable<SqltoerdLayoutPatch["framesById"]> = {};
+      const textsById: NonNullable<SqltoerdLayoutPatch["textsById"]> = {};
       const notes = new Map((layoutJsonRef.current.annotations?.notes ?? []).map((note) => [note.id, note]));
       const frames = new Map((layoutJsonRef.current.annotations?.frames ?? []).map((frame) => [frame.id, frame]));
+      const texts = new Map((layoutJsonRef.current.annotations?.texts ?? []).map((text) => [text.id, text]));
       editor.getCurrentPageShapes().forEach((shape) => {
         if (isSqlErdNoteShape(shape)) {
           const note = notes.get(shape.props.noteId);
@@ -2281,9 +2355,15 @@ function SqlErdCanvasAnnotationSync({
             framesById[frame.id] = { x: shape.x, y: shape.y, width: shape.props.w, height: shape.props.h };
           }
         }
+        if (isSqlErdTextShape(shape)) {
+          const text = texts.get(shape.props.textId);
+          if (text && (text.x !== shape.x || text.y !== shape.y || text.width !== shape.props.w || text.height !== shape.props.h)) {
+            textsById[text.id] = { x: shape.x, y: shape.y, width: shape.props.w, height: shape.props.h };
+          }
+        }
       });
-      if (Object.keys(notesById).length || Object.keys(framesById).length) {
-        onLayoutPatchRef.current({ notesById, framesById });
+      if (Object.keys(notesById).length || Object.keys(framesById).length || Object.keys(textsById).length) {
+        onLayoutPatchRef.current({ notesById, framesById, textsById });
       }
     }
     const removeListener = editor.store.listen(() => {
@@ -2390,6 +2470,11 @@ export function SqlErdCanvas({
 }: SqlErdCanvasProps) {
   const editorRef = useRef<Editor | null>(null);
   const [canvasEditor, setCanvasEditor] = useState<Editor | null>(null);
+  const [placementTool, setPlacementTool] = useState<SqlErdCanvasPlacementTool>(null);
+  const [nextFrameColor, setNextFrameColor] = useState<SqltoerdCanvasFrameColor>("blue");
+  const [nextTextColor, setNextTextColor] = useState<SqltoerdCanvasFrameColor>("slate");
+  const pendingPlacementToolRef = useRef<SqlErdCanvasPlacementTool>(null);
+  const pendingTextFocusIdRef = useRef<string | null>(null);
   const shapes = useMemo(
     () => createSqltoerdCanvasShapes(modelJson, layoutJson),
     [layoutJson, modelJson]
@@ -2407,9 +2492,155 @@ export function SqlErdCanvas({
     },
     [shapes]
   );
+  const placeAnnotationAt = useCallback(
+    (tool: Exclude<SqlErdCanvasPlacementTool, null>, point: { x: number; y: number }) => {
+      const editor = editorRef.current;
+
+      if (!editor || !onLayoutPatch) {
+        return false;
+      }
+
+      if (tool === "note") {
+        if ((layoutJson.annotations?.notes?.length ?? 0) >= 100) return false;
+        onLayoutPatch({
+          notesToAdd: [{
+            id: crypto.randomUUID(),
+            x: point.x,
+            y: point.y,
+            width: 240,
+            height: 160,
+            text: ""
+          }]
+        });
+      } else if (tool === "frame") {
+        if ((layoutJson.annotations?.frames?.length ?? 0) >= 100) return false;
+        onLayoutPatch({
+          framesToAdd: [{
+            id: crypto.randomUUID(),
+            x: point.x,
+            y: point.y,
+            width: 640,
+            height: 420,
+            title: "프레임",
+            color: nextFrameColor,
+            isLocked: true
+          }]
+        });
+      } else {
+        if ((layoutJson.annotations?.texts?.length ?? 0) >= 100) return false;
+        const textId = crypto.randomUUID();
+        pendingTextFocusIdRef.current = textId;
+        onLayoutPatch({
+          textsToAdd: [{
+            id: textId,
+            x: point.x,
+            y: point.y,
+            width: 240,
+            height: 72,
+            text: "",
+            color: nextTextColor
+          }]
+        });
+      }
+
+      pendingPlacementToolRef.current = null;
+      setPlacementTool(null);
+      editor.cancel();
+      editor.updateInstanceState({ isToolLocked: false });
+      editor.setCurrentTool("select.idle");
+      return true;
+    },
+    [
+      layoutJson.annotations?.frames?.length,
+      layoutJson.annotations?.notes?.length,
+      layoutJson.annotations?.texts?.length,
+      nextFrameColor,
+      nextTextColor,
+      onLayoutPatch
+    ]
+  );
+  useEffect(() => {
+    const textId = pendingTextFocusIdRef.current;
+
+    if (!textId) return;
+
+    let nextFrameId: number | null = null;
+    const frameId = window.requestAnimationFrame(() => {
+      nextFrameId = window.requestAnimationFrame(() => {
+        const input = document.querySelector<HTMLTextAreaElement>(
+          `[data-sqltoerd-text-id="${textId}"]`
+        );
+
+        if (!input) return;
+
+        pendingTextFocusIdRef.current = null;
+        input.focus();
+      });
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      if (nextFrameId !== null) window.cancelAnimationFrame(nextFrameId);
+    };
+  }, [layoutJson.annotations?.texts]);
+  const handleStartPlacement = useCallback(
+    (tool: Exclude<SqlErdCanvasPlacementTool, null>) => {
+      const editor = editorRef.current;
+
+      if (!editor) return;
+
+      pendingPlacementToolRef.current = tool;
+      setPlacementTool(tool);
+      editor.cancel();
+      editor.updateInstanceState({ isToolLocked: false });
+      editor.setCurrentTool("select.idle");
+    },
+    []
+  );
+  const handleSelectTool = useCallback(() => {
+    const editor = editorRef.current;
+
+    pendingPlacementToolRef.current = null;
+    setPlacementTool(null);
+
+    if (!editor) return;
+
+    editor.cancel();
+    editor.updateInstanceState({ isToolLocked: false });
+    editor.setCurrentTool("select.idle");
+  }, []);
   const handlePointerDownCapture = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
       const eventTarget = event.target as Element;
+      const editor = editorRef.current;
+
+      if (!editor || event.button !== 0 || !event.isPrimary) {
+        return;
+      }
+
+      if (eventTarget.closest("[data-sqltoerd-canvas-toolbar], input, textarea, select, button")) {
+        return;
+      }
+
+      const pagePoint = editor.screenToPage({ x: event.clientX, y: event.clientY });
+      const pendingPlacementTool = pendingPlacementToolRef.current;
+
+      if (pendingPlacementTool && placeAnnotationAt(pendingPlacementTool, pagePoint)) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+
+      if (event.detail === 2 && !editor.getShapeAtPoint(pagePoint, {
+        hitInside: true,
+        hitLabels: true,
+        hitLocked: true
+      }) && placeAnnotationAt("text", pagePoint)) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+
       const annotationTarget = eventTarget.closest<HTMLElement>(
         "[data-sqltoerd-annotation-id]"
       );
@@ -2465,6 +2696,19 @@ export function SqlErdCanvas({
         tableId
       });
     },
+    [placeAnnotationAt]
+  );
+  const handleDoubleClickCapture = useCallback(
+    (event: MouseEvent<HTMLDivElement>) => {
+      const eventTarget = event.target as Element;
+
+      if (eventTarget.closest("[data-sqltoerd-canvas-toolbar], input, textarea, select, button")) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+    },
     []
   );
   const handleAutoLayout = useCallback(() => {
@@ -2485,72 +2729,23 @@ export function SqlErdCanvas({
     }
   }, [layoutJson, modelJson, onLayoutPatch]);
 
-  const handleAddNote = useCallback(() => {
-    const editor = editorRef.current;
-
-    if (
-      !editor ||
-      !onLayoutPatch ||
-      (layoutJson.annotations?.notes?.length ?? 0) >= 100
-    ) {
-      return;
-    }
-
-    const viewportPageBounds = editor.getViewportPageBounds();
-    const width = 240;
-    const height = 160;
-
-    onLayoutPatch({
-      notesToAdd: [
-        {
-          id: crypto.randomUUID(),
-          x: viewportPageBounds.x + (viewportPageBounds.w - width) / 2,
-          y: viewportPageBounds.y + (viewportPageBounds.h - height) / 2,
-          width,
-          height,
-          text: ""
-        }
-      ]
-    });
-  }, [layoutJson.annotations?.notes?.length, onLayoutPatch]);
-
-  const handleAddFrame = useCallback(() => {
-    const editor = editorRef.current;
-
-    if (
-      !editor ||
-      !onLayoutPatch ||
-      (layoutJson.annotations?.frames?.length ?? 0) >= 100
-    ) {
-      return;
-    }
-
-    const viewportPageBounds = editor.getViewportPageBounds();
-    const width = 640;
-    const height = 420;
-
-    onLayoutPatch({
-      framesToAdd: [
-        {
-          id: crypto.randomUUID(),
-          x: viewportPageBounds.x + (viewportPageBounds.w - width) / 2,
-          y: viewportPageBounds.y + (viewportPageBounds.h - height) / 2,
-          width,
-          height,
-          title: "프레임",
-          color: "blue",
-          isLocked: true
-        }
-      ]
-    });
-  }, [layoutJson.annotations?.frames?.length, onLayoutPatch]);
-
   const handleFrameColorChange = useCallback(
     (frameId: string, color: SqltoerdCanvasFrameColor) => {
       window.dispatchEvent(
         new CustomEvent<SqlErdFrameChangeEventDetail>(
           SQLTOERD_FRAME_CHANGE_EVENT,
           { detail: { frameId, patch: { color } } }
+        )
+      );
+    },
+    []
+  );
+  const handleTextColorChange = useCallback(
+    (textId: string, color: SqltoerdCanvasFrameColor) => {
+      window.dispatchEvent(
+        new CustomEvent<SqlErdTextChangeEventDetail>(
+          SQLTOERD_TEXT_CHANGE_EVENT,
+          { detail: { textId, patch: { color } } }
         )
       );
     },
@@ -2566,7 +2761,7 @@ export function SqlErdCanvas({
   }, []);
 
   return (
-    <div className="relative h-full w-full">
+    <div className="relative h-full w-full" onDoubleClickCapture={handleDoubleClickCapture}>
       <TldrawSurface
         className={cn(
           "h-full w-full bg-slate-50 bg-[radial-gradient(circle_at_1px_1px,rgba(15,23,42,0.12)_1px,transparent_0)] [background-size:24px_24px]",
@@ -2622,10 +2817,17 @@ export function SqlErdCanvas({
           editor={canvasEditor}
           isFrameLimitReached={(layoutJson.annotations?.frames?.length ?? 0) >= 100}
           isNoteLimitReached={(layoutJson.annotations?.notes?.length ?? 0) >= 100}
-          onAddFrame={handleAddFrame}
-          onAddNote={handleAddNote}
+          isTextLimitReached={(layoutJson.annotations?.texts?.length ?? 0) >= 100}
+          nextFrameColor={nextFrameColor}
+          nextTextColor={nextTextColor}
           onFit={handleFitCanvas}
           onFrameColorChange={handleFrameColorChange}
+          onNextFrameColorChange={setNextFrameColor}
+          onNextTextColorChange={setNextTextColor}
+          onSelectTool={handleSelectTool}
+          onStartPlacement={handleStartPlacement}
+          onTextColorChange={handleTextColorChange}
+          placementTool={placementTool}
         />
       ) : null}
       {onLayoutPatch ? (

@@ -1,7 +1,7 @@
 "use client";
 
 import { Lock, LockOpen, Trash2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type PointerEvent } from "react";
 import {
   HTMLContainer,
   Rectangle2d,
@@ -58,18 +58,23 @@ function SqlErdFrameBox({ shape }: { shape: SqlErdFrameShape }) {
       detail: { frameId: shape.props.frameId, patch }
     }));
   }
+
+  function stopCanvasPointerHandling(event: PointerEvent<HTMLElement>) {
+    event.stopPropagation();
+  }
+
   return <HTMLContainer style={{ height: shape.props.h, pointerEvents: "none", width: shape.props.w }}>
     <div className={`h-full w-full rounded-md border-2 ${frameClasses[shape.props.color]}`} data-sqltoerd-frame-id={shape.props.frameId}>
       <div className="flex items-center gap-1 px-3 py-2" style={{ pointerEvents: "auto" }}>
-        <input aria-label="프레임 제목" className="min-w-0 flex-1 bg-transparent text-sm font-semibold outline-none" maxLength={200} onBlur={() => title !== shape.props.title && emit({ title })} onChange={(event) => setTitle(event.target.value)} value={title} />
-        <select aria-label="프레임 색상" className="rounded border bg-white/80 text-xs" onChange={(event) => emit({ color: event.target.value as SqltoerdCanvasFrameColor })} value={shape.props.color}>
+        <input aria-label="프레임 제목" className="min-w-0 flex-1 bg-transparent text-sm font-semibold outline-none" maxLength={200} onBlur={() => title !== shape.props.title && emit({ title })} onChange={(event) => setTitle(event.target.value)} onPointerDown={stopCanvasPointerHandling} value={title} />
+        <select aria-label="프레임 색상" className="rounded border bg-white/80 text-xs" onChange={(event) => emit({ color: event.target.value as SqltoerdCanvasFrameColor })} onPointerDown={stopCanvasPointerHandling} value={shape.props.color}>
           <option value="slate">회색</option><option value="blue">파랑</option><option value="green">초록</option><option value="amber">노랑</option><option value="rose">분홍</option>
         </select>
-        <button aria-label={shape.props.isLocked ? "프레임 잠금 해제" : "프레임 잠금"} className="rounded p-1 hover:bg-white/60" onClick={() => emit({ isLocked: !shape.props.isLocked })} type="button">
+        <button aria-label={shape.props.isLocked ? "프레임 잠금 해제" : "프레임 잠금"} className="rounded p-1 hover:bg-white/60" onClick={() => emit({ isLocked: !shape.props.isLocked })} onPointerDown={stopCanvasPointerHandling} type="button">
           {shape.props.isLocked ? <Lock aria-hidden="true" className="size-3.5" /> : <LockOpen aria-hidden="true" className="size-3.5" />}
         </button>
         {!shape.props.isLocked ? (
-          <button aria-label="프레임 삭제" className="rounded p-1 hover:bg-white/60" onClick={() => window.dispatchEvent(new CustomEvent<SqlErdFrameDeleteEventDetail>(SQLTOERD_FRAME_DELETE_EVENT, { detail: { frameId: shape.props.frameId } }))} type="button">
+          <button aria-label="프레임 삭제" className="rounded p-1 hover:bg-white/60" onClick={() => window.dispatchEvent(new CustomEvent<SqlErdFrameDeleteEventDetail>(SQLTOERD_FRAME_DELETE_EVENT, { detail: { frameId: shape.props.frameId } }))} onPointerDown={stopCanvasPointerHandling} type="button">
             <Trash2 aria-hidden="true" className="size-3.5" />
           </button>
         ) : null}

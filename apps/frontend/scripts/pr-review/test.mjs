@@ -162,6 +162,7 @@ assert.match(prReviewTypes, /export type PrReviewCanvas/);
 assert.match(prReviewTypes, /export type PrReviewFileNodeData/);
 assert.match(prReviewTypes, /export type PrReviewFileRiskLevel/);
 assert.match(prReviewTypes, /export type PrReviewFile =/);
+assert.match(prReviewTypes, /decisionVersion: number/);
 assert.match(prReviewTypes, /decisionCarriedOver: boolean/);
 assert.match(prReviewTypes, /export type PrReviewFileDiff =/);
 assert.match(prReviewTypes, /export type PrReviewConflictAnalysis =/);
@@ -175,6 +176,7 @@ assert.match(prReviewTypes, /resolvedHunks: PrReviewConflictResolvedHunk\[\]/);
 assert.match(prReviewTypes, /export type PrReviewUnsupportedConflictFile =/);
 assert.match(prReviewTypes, /export type PrReviewConflictHunk =/);
 assert.match(prReviewTypes, /export type UpdatePrReviewFileDecisionInput =/);
+assert.match(prReviewTypes, /expectedDecisionVersion: number/);
 assert.match(prReviewTypes, /export type PrReviewSubmitType =/);
 assert.match(prReviewTypes, /export type PrReviewSessionResult =/);
 assert.match(prReviewTypes, /export type PrReviewSubmission =/);
@@ -443,6 +445,14 @@ assert.match(prReviewFileDiffDrawer, /unsupportedConflictFile/);
 assert.match(prReviewFileDiffDrawer, /riskLevelLabels/);
 assert.match(prReviewFileDiffDrawer, /getSaveStatusLabel/);
 assert.match(prReviewFileDiffDrawer, /enqueueDecisionSave/);
+assert.match(prReviewFileDiffDrawer, /decisionVersionRef/);
+assert.match(prReviewFileDiffDrawer, /REVIEW_DECISION_CHANGED/);
+assert.match(prReviewFileDiffDrawer, /expectedDecisionVersion/);
+assert.match(prReviewFileDiffDrawer, /getReviewFile/);
+assert.match(
+  prReviewFileDiffDrawer,
+  /다른 리뷰어의 판단이 먼저 저장되어 최신 내용을 불러왔습니다/
+);
 assert.match(prReviewFileDiffDrawer, /setTimeout/);
 assert.match(prReviewFileDiffDrawer, /onCommentBlur/);
 assert.match(prReviewFileDiffDrawer, /const savedFile: PrReviewFile/);

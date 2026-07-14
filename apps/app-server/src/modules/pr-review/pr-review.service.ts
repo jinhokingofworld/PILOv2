@@ -1,4 +1,4 @@
-import { Injectable, Logger } from "@nestjs/common";
+import { HttpException, HttpStatus, Injectable, Logger } from "@nestjs/common";
 import { QueryResultRow } from "pg";
 import {
   ApiError,
@@ -48,6 +48,7 @@ import type {
   PrReviewSessionStatus
 } from "./types";
 import { PrReviewAnalysisJobPublisherService } from "./pr-review-analysis-job-publisher.service";
+import { PrReviewDecisionRealtimePublisherService } from "./pr-review-decision-realtime-publisher.service";
 import {
   buildPrReviewSemanticGraphHandoff,
   PR_REVIEW_SEMANTIC_GRAPH_SCHEMA_VERSION,
@@ -274,6 +275,7 @@ interface ReviewFileDetailRow extends QueryResultRow {
   comment: string | null;
   reviewed_by_user_id: string | null;
   reviewed_at: Date | string | null;
+  decision_version: number | string;
   carried_from_decision_id: string | null;
   latest_decision_id: string | null;
   latest_decision_status: PrReviewFileReviewStatus | null;
@@ -309,6 +311,16 @@ type PrReviewSubmissionStatus =
 interface ReviewFileDecisionTargetRow extends QueryResultRow {
   id: string;
   session_id: string;
+  current_status: PrReviewFileReviewStatus;
+  comment: string | null;
+  reviewed_by_user_id: string | null;
+  reviewed_at: Date | string | null;
+  decision_version: number | string;
+}
+
+interface ReviewFileDecisionUpdateResult {
+  file: ReviewFileDecisionTargetRow;
+  changed: boolean;
 }
 
 interface ReviewFileDecisionRow extends QueryResultRow {
@@ -352,6 +364,7 @@ interface PrReviewSessionUpdateDraft {
 interface PrReviewFileDecisionDraft {
   status?: unknown;
   comment?: unknown;
+  expectedDecisionVersion?: unknown;
 }
 
 interface PrReviewSubmissionDraft {
@@ -725,6 +738,7 @@ export interface PrReviewFilePayload {
   comment: string | null;
   reviewedByUserId: string | null;
   reviewedAt: string | null;
+  decisionVersion: number;
   decisionCarriedOver: boolean;
   flowMemberships: PrReviewFileFlowMembershipPayload[];
   latestDecision: PrReviewLatestDecisionPayload | null;
@@ -958,7 +972,8 @@ export class PrReviewService {
     private readonly workspaceService: WorkspaceService,
     private readonly githubDependency: PrReviewGithubDependencyService,
     private readonly analysisService: PrReviewAnalysisService,
-    private readonly analysisJobPublisher: PrReviewAnalysisJobPublisherService
+    private readonly analysisJobPublisher: PrReviewAnalysisJobPublisherService,
+    private readonly decisionRealtimePublisher?: PrReviewDecisionRealtimePublisherService
   ) {}
 
   getModuleInfo(): PrReviewModuleInfo {
@@ -1914,22 +1929,31 @@ export class PrReviewService {
         reviewFileId: reviewFileUuid,
         currentUserId,
         status: input.status,
-        comment: input.comment
+        comment: input.comment,
+        expectedDecisionVersion: input.expectedDecisionVersion
       });
 
       if (!file) {
         return null;
       }
 
-      await this.insertReviewFileDecision(transaction, {
-        reviewFileId: file.id,
-        currentUserId,
-        status: input.status,
-        comment: input.comment
-      });
-      await this.syncReviewSessionReviewProgress(transaction, file.session_id);
+      if (file.changed) {
+        await this.insertReviewFileDecision(transaction, {
+          reviewFileId: file.file.id,
+          currentUserId,
+          status: input.status,
+          comment: input.comment
+        });
+        await this.syncReviewSessionReviewProgress(
+          transaction,
+          file.file.session_id
+        );
+      }
 
-      return file;
+      return {
+        changed: file.changed,
+        file: file.file
+      };
     });
 
     if (!updatedFile) {
@@ -1937,12 +1961,16 @@ export class PrReviewService {
     }
 
     const [file, flowMemberships] = await Promise.all([
-      this.findReviewFile(workspaceId, updatedFile.id),
-      this.listReviewFileFlowMemberships(workspaceId, updatedFile.id)
+      this.findReviewFile(workspaceId, updatedFile.file.id),
+      this.listReviewFileFlowMemberships(workspaceId, updatedFile.file.id)
     ]);
 
     if (!file) {
       throw notFound("Review file not found");
+    }
+
+    if (updatedFile.changed) {
+      await this.decisionRealtimePublisher?.publishDecisionUpdatedSafely(file.id);
     }
 
     return this.mapReviewFile(file, flowMemberships);
@@ -3900,6 +3928,7 @@ export class PrReviewService {
           review_file.comment,
           review_file.reviewed_by_user_id,
           review_file.reviewed_at,
+          review_file.decision_version,
           review_file.carried_from_decision_id,
           latest_decision.id AS latest_decision_id,
           latest_decision.status AS latest_decision_status,
@@ -4215,15 +4244,17 @@ export class PrReviewService {
       currentUserId: string;
       status: PrReviewDecisionStatus;
       comment: string | null;
+      expectedDecisionVersion: number;
     }
-  ): Promise<ReviewFileDecisionTargetRow | null> {
-    return transaction.queryOne<ReviewFileDecisionTargetRow>(
+  ): Promise<ReviewFileDecisionUpdateResult | null> {
+    const updated = await transaction.queryOne<ReviewFileDecisionTargetRow>(
       `
         UPDATE review_files AS review_file
         SET current_status = $3,
             comment = $4,
             reviewed_by_user_id = $5,
             reviewed_at = now(),
+            decision_version = review_file.decision_version + 1,
             carried_from_decision_id = NULL
         FROM pr_review_sessions AS review_session
         JOIN github_pull_requests AS pull_request
@@ -4231,15 +4262,88 @@ export class PrReviewService {
         WHERE review_file.id = $2
           AND review_file.session_id = review_session.id
           AND pull_request.workspace_id = $1
-        RETURNING review_file.id, review_file.session_id
+          AND review_file.decision_version = $6
+          AND (
+            review_file.current_status IS DISTINCT FROM $3
+            OR review_file.comment IS DISTINCT FROM $4
+          )
+        RETURNING
+          review_file.id,
+          review_file.session_id,
+          review_file.current_status,
+          review_file.comment,
+          review_file.reviewed_by_user_id,
+          review_file.reviewed_at,
+          review_file.decision_version
       `,
       [
         input.workspaceId,
         input.reviewFileId,
         input.status,
         input.comment,
-        input.currentUserId
+        input.currentUserId,
+        input.expectedDecisionVersion
       ]
+    );
+
+    if (updated) {
+      return {
+        file: updated,
+        changed: true
+      };
+    }
+
+    const current = await transaction.queryOne<ReviewFileDecisionTargetRow>(
+      `
+        SELECT
+          review_file.id,
+          review_file.session_id,
+          review_file.current_status,
+          review_file.comment,
+          review_file.reviewed_by_user_id,
+          review_file.reviewed_at,
+          review_file.decision_version
+        FROM review_files AS review_file
+        JOIN pr_review_sessions AS review_session
+          ON review_session.id = review_file.session_id
+        JOIN github_pull_requests AS pull_request
+          ON pull_request.id = review_session.pull_request_id
+        WHERE pull_request.workspace_id = $1
+          AND review_file.id = $2
+      `,
+      [input.workspaceId, input.reviewFileId]
+    );
+
+    if (!current) {
+      return null;
+    }
+
+    if (
+      current.current_status === input.status &&
+      current.comment === input.comment
+    ) {
+      return {
+        file: current,
+        changed: false
+      };
+    }
+
+    throw new HttpException(
+      {
+        success: false,
+        error: {
+          code: "REVIEW_DECISION_CHANGED",
+          message: "Another reviewer saved a decision first",
+          latestDecision: {
+            decisionVersion: Number(current.decision_version),
+            currentStatus: current.current_status,
+            comment: current.comment,
+            reviewedByUserId: current.reviewed_by_user_id,
+            reviewedAt: this.toNullableIsoString(current.reviewed_at)
+          }
+        }
+      },
+      HttpStatus.CONFLICT
     );
   }
 
@@ -5226,12 +5330,21 @@ export class PrReviewService {
   private normalizeReviewDecision(body: unknown): {
     status: PrReviewDecisionStatus;
     comment: string | null;
+    expectedDecisionVersion: number;
   } {
     if (!body || typeof body !== "object" || Array.isArray(body)) {
       throw badRequest("Request body must be an object");
     }
 
     const draft = body as PrReviewFileDecisionDraft;
+    if (
+      typeof draft.expectedDecisionVersion !== "number" ||
+      !Number.isSafeInteger(draft.expectedDecisionVersion) ||
+      draft.expectedDecisionVersion < 0
+    ) {
+      throw badRequest("expectedDecisionVersion must be a non-negative integer");
+    }
+
     if (
       typeof draft.status !== "string" ||
       !this.isReviewDecisionStatus(draft.status)
@@ -5242,7 +5355,8 @@ export class PrReviewService {
     if (draft.comment === undefined || draft.comment === null) {
       return {
         status: draft.status,
-        comment: null
+        comment: null,
+        expectedDecisionVersion: draft.expectedDecisionVersion
       };
     }
 
@@ -5252,7 +5366,8 @@ export class PrReviewService {
 
     return {
       status: draft.status,
-      comment: draft.comment
+      comment: draft.comment,
+      expectedDecisionVersion: draft.expectedDecisionVersion
     };
   }
 
@@ -5901,6 +6016,7 @@ export class PrReviewService {
       comment: file.comment,
       reviewedByUserId: file.reviewed_by_user_id,
       reviewedAt: this.toNullableIsoString(file.reviewed_at),
+      decisionVersion: Number(file.decision_version),
       decisionCarriedOver: file.carried_from_decision_id !== null,
       flowMemberships: memberships.map((membership) => ({
         reviewFlowFileId: membership.review_flow_file_id,

@@ -903,6 +903,7 @@ room file identity와 relation identity에서 계산하고 geometry는 `canvas_f
     "comment": null,
     "reviewedByUserId": null,
     "reviewedAt": null,
+    "decisionVersion": 0,
     "decisionCarriedOver": false,
     "flowMemberships": [
       {
@@ -1325,14 +1326,70 @@ POST /api/v1/workspaces/{workspaceId}/github/review-files/{reviewFileId}/conflic
 ```json
 {
   "status": "discussion_needed",
-  "comment": "Need to confirm empty state behavior."
+  "comment": "Need to confirm empty state behavior.",
+  "expectedDecisionVersion": 0
 }
 ```
 
-서버는 `review_files.current_status/comment`를 갱신하고
-`file_review_decisions` row를 추가한다.
+서버는 `expectedDecisionVersion`이 현재 `review_files.decision_version`과 일치할 때만
+`review_files.current_status/comment`를 갱신하고 `decision_version`을 1 증가시킨 뒤
+`file_review_decisions` row를 추가한다. 현재 저장된 status/comment와 요청 내용이 완전히
+같으면 버전이 달라도 이미 반영된 요청으로 간주하고 새 history row를 만들지 않는다.
 
 PATCH response는 Review File 상세 조회와 같은 payload를 반환한다.
+
+다른 판단이 먼저 저장되어 버전이 달라졌다면 기존 판단을 덮어쓰지 않고 `409 Conflict`를
+반환한다.
+
+```json
+{
+  "success": false,
+  "error": {
+    "code": "REVIEW_DECISION_CHANGED",
+    "message": "Another reviewer saved a decision first",
+    "latestDecision": {
+      "decisionVersion": 1,
+      "currentStatus": "approved",
+      "comment": "문제 없음",
+      "reviewedByUserId": "user_2",
+      "reviewedAt": "2026-01-01T00:00:00.000Z"
+    }
+  }
+}
+```
+
+클라이언트는 이 응답을 받으면 최신 Review File을 다시 조회한다. 최신 저장값은 화면에
+반영하되 사용자가 작성 중이던 status/comment 초안은 유지하고, 다른 리뷰어의 판단을
+불러왔다는 짧은 안내를 표시한다.
+
+저장이 실제 변경을 만든 경우 App Server는 DB commit이 끝난 뒤 Redis channel
+`pr-review:decision-events`로 다음 이벤트를 best-effort 발행한다. Redis 발행 실패는 이미
+완료된 decision 저장을 실패로 바꾸지 않는다. Realtime Server는 payload를 검증한 뒤 해당
+Canvas room에 `pr-review:decision:updated` 이벤트를 전달한다.
+
+```json
+{
+  "event": "pr-review:decision:updated",
+  "workspaceId": "workspace_1",
+  "canvasId": "canvas_1",
+  "reviewRoomId": "review_room_1",
+  "reviewSessionId": "review_session_1",
+  "reviewFileId": "review_file_1",
+  "roomFileId": "room_file_1",
+  "currentStatus": "approved",
+  "decisionVersion": 1,
+  "reviewedCount": 1,
+  "totalFileCount": 3,
+  "readyToSubmit": false,
+  "reviewedByUserId": "user_1",
+  "reviewedAt": "2026-01-01T00:00:00.000Z"
+}
+```
+
+클라이언트는 이벤트의 session/file 식별자가 현재 화면과 일치할 때 진행률과 파일 노드
+배지를 즉시 갱신한다. 열어 둔 파일이 갱신되었으면 최신 파일 정보를 다시 조회하되 작성 중인
+초안은 유지한다. Socket 재접속 시에는 summary와 Canvas API를 다시 조회해 유실된 이벤트를
+복구한다.
 
 Decision history response:
 

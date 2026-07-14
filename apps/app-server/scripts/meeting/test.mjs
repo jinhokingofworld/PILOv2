@@ -98,13 +98,19 @@ function meetingReportEventContext(token) {
 }
 
 class FakeDatabase {
-  constructor({ queryOneRows = [], queryRows = [], hasWorkspaceRecordingConsent = true } = {}) {
+  constructor({
+    queryOneRows = [],
+    queryRows = [],
+    hasWorkspaceRecordingConsent = true,
+    activeMeetingParticipant = null
+  } = {}) {
     this.queryOneRows = [...queryOneRows];
     this.queryRows = [...queryRows];
     this.queries = [];
     this.transactionCommitted = false;
     this.transactionRolledBack = false;
     this.hasWorkspaceRecordingConsent = hasWorkspaceRecordingConsent;
+    this.activeMeetingParticipant = activeMeetingParticipant;
   }
 
   async query(text, values = []) {
@@ -122,6 +128,19 @@ class FakeDatabase {
 
     if (/SELECT meeting_participants\.user_id/.test(text)) {
       return null;
+    }
+
+    if (/SELECT meeting_participants\.meeting_id[\s\S]*JOIN meetings/.test(text)) {
+      return this.activeMeetingParticipant;
+    }
+
+    if (/SELECT id[\s\S]*FROM meeting_rooms[\s\S]*ORDER BY created_at ASC, id ASC/.test(text)) {
+      const next = this.queryOneRows.shift();
+      if (typeof next === "function") {
+        return next(text, values);
+      }
+
+      return next ?? { id: "00000000-0000-0000-0000-000000000000" };
     }
 
     if (/FROM workspace_recording_consents/.test(text)) {
@@ -542,6 +561,43 @@ async function assertError(action, messagePattern) {
 {
   const { service } = createSubject(
     new FakeDatabase({
+      activeMeetingParticipant: { meeting_id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" }
+    })
+  );
+
+  await assertConflict(
+    () => service.startMeeting(currentUserId, workspaceId, {}),
+    /already participating/
+  );
+}
+
+{
+  const activeRoomId = "abababab-abab-abab-abab-abababababab";
+  const { service } = createSubject(
+    new FakeDatabase({
+      queryOneRows: [
+        currentMeetingRow({
+          meeting_room_id: activeRoomId,
+          meeting_room_name: "기본 회의실",
+          meeting_room_created_by_id: currentUserId,
+          meeting_room_created_at: createdAt,
+          meeting_room_updated_at: updatedAt
+        }),
+        { id: activeRoomId }
+      ]
+    })
+  );
+
+  const active = await service.getCurrentUserActiveMeeting(currentUserId);
+
+  assert.equal(active.meeting.id, meetingId);
+  assert.equal(active.meetingRoom.id, activeRoomId);
+  assert.equal(active.meetingRoom.isDefault, true);
+}
+
+{
+  const { service } = createSubject(
+    new FakeDatabase({
       hasWorkspaceRecordingConsent: false,
       queryOneRows: [null, startMeetingRow()]
     })
@@ -816,7 +872,10 @@ async function assertError(action, messagePattern) {
   const roomId = "abababab-abab-abab-abab-abababababab";
   const { service } = createSubject(
     new FakeDatabase({
-      queryOneRows: [meetingRoomRow({ id: roomId, room_key: "MAIN_MEETING_ROOM" })]
+      queryOneRows: [
+        meetingRoomRow({ id: roomId, room_key: "MAIN_MEETING_ROOM" }),
+        { id: roomId }
+      ]
     })
   );
 
@@ -832,6 +891,7 @@ async function assertError(action, messagePattern) {
     new FakeDatabase({
       queryOneRows: [
         meetingRoomRow({ id: roomId }),
+        { id: "00000000-0000-0000-0000-000000000000" },
         currentMeetingRow({
           room_key: "ROOM_abababab-abab-abab-abab-abababababab"
         })

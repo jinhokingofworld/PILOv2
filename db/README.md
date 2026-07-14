@@ -70,3 +70,4 @@ The database schema source of truth is the migration history in `db/migrations/`
 - `migrations/053_create_meeting_rooms.sql` adds Workspace-scoped MeetingRoom resources, default-room backfill and new-Workspace trigger, active room name/key uniqueness, timestamp tracking, and all-deny RLS.
 - `migrations/054_create_workspace_recording_consents.sql` records immutable user consent per Workspace and policy version, with duplicate prevention, lookup indexing, and all-deny RLS.
 - `migrations/055_revoke_workspace_recording_consents_data_api_access.sql` revokes Data API table privileges from public API roles because this consent audit table is accessed only through the App Server's direct database connection.
+- `migrations/057_add_pr_review_decision_version.sql` adds a monotonic optimistic concurrency version to each PR Review file decision state so concurrent reviewers cannot silently overwrite one another.

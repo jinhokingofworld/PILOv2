@@ -1,12 +1,16 @@
 import type {
   CurrentMeetingPayload,
+  CurrentUserActiveMeetingPayload,
   CurrentRecordingPayload,
+  DeleteMeetingRoomPayload,
   EndRecordingPayload,
   JoinMeetingInput,
   JoinMeetingPayload,
   LeaveMeetingPayload,
   MeetingDetailPayload,
   MeetingRoomListPayload,
+  MeetingRoomMutationPayload,
+  MeetingRoomNameInput,
   MeetingReportActionItemMutationPayload,
   MeetingReportDetailPayload,
   MeetingReportListPayload,
@@ -308,6 +312,42 @@ export function createMeetingApiClient({
     async listMeetingRooms(workspaceId: string) {
       return requestMeetingData<MeetingRoomListPayload>(
         workspaceMeetingRoomsPath(workspaceId),
+        undefined,
+        requestOptions
+      );
+    },
+
+    async createMeetingRoom(workspaceId: string, body: MeetingRoomNameInput) {
+      return requestMeetingData<MeetingRoomMutationPayload>(
+        workspaceMeetingRoomsPath(workspaceId),
+        withJsonBody(body, { method: "POST" }),
+        requestOptions
+      );
+    },
+
+    async updateMeetingRoom(
+      workspaceId: string,
+      meetingRoomId: string,
+      body: MeetingRoomNameInput
+    ) {
+      return requestMeetingData<MeetingRoomMutationPayload>(
+        meetingRoomPath(workspaceId, meetingRoomId),
+        withJsonBody(body, { method: "PATCH" }),
+        requestOptions
+      );
+    },
+
+    async deleteMeetingRoom(workspaceId: string, meetingRoomId: string) {
+      return requestMeetingData<DeleteMeetingRoomPayload>(
+        meetingRoomPath(workspaceId, meetingRoomId),
+        { method: "DELETE" },
+        requestOptions
+      );
+    },
+
+    async getCurrentUserActiveMeeting() {
+      return requestMeetingData<CurrentUserActiveMeetingPayload>(
+        "/me/meetings/active",
         undefined,
         requestOptions
       );

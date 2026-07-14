@@ -172,10 +172,12 @@ export function applySqltoerdLayoutPatch(
 ): SqltoerdLayoutJsonV1 {
   const notesById = patch.notesById ?? {};
   const framesById = patch.framesById ?? {};
+  const textsById = patch.textsById ?? {};
   const linksById = patch.linksById ?? {};
   const deletedLinkIds = new Set(patch.deleteLinkIds ?? []);
   const deletedNoteIds = new Set(patch.deleteNoteIds ?? []);
   const deletedFrameIds = new Set(patch.deleteFrameIds ?? []);
+  const deletedTextIds = new Set(patch.deleteTextIds ?? []);
   const positionsByTableId = new Map(
     (patch.tablePositions ?? []).map((position) => [position.tableId, position])
   );
@@ -185,10 +187,13 @@ export function applySqltoerdLayoutPatch(
     (patch.linksToAdd?.length ?? 0) > 0 ||
     Object.keys(notesById).length > 0 ||
     Object.keys(framesById).length > 0 ||
+    Object.keys(textsById).length > 0 ||
     deletedNoteIds.size > 0 ||
     deletedFrameIds.size > 0 ||
+    deletedTextIds.size > 0 ||
     (patch.notesToAdd?.length ?? 0) > 0 ||
-    (patch.framesToAdd?.length ?? 0) > 0;
+    (patch.framesToAdd?.length ?? 0) > 0 ||
+    (patch.textsToAdd?.length ?? 0) > 0;
   const annotations = currentLayoutJson.annotations ??
     (hasAnnotationPatch ? { version: 1, links: [] } : null);
 
@@ -211,7 +216,11 @@ export function applySqltoerdLayoutPatch(
             frames: (annotations.frames ?? [])
               .filter((frame) => !deletedFrameIds.has(frame.id))
               .map((frame) => ({ ...frame, ...framesById[frame.id] }))
-              .concat(patch.framesToAdd ?? [])
+              .concat(patch.framesToAdd ?? []),
+            texts: (annotations.texts ?? [])
+              .filter((text) => !deletedTextIds.has(text.id))
+              .map((text) => ({ ...text, ...textsById[text.id] }))
+              .concat(patch.textsToAdd ?? [])
           } } : {})
   };
 }

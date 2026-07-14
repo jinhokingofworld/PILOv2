@@ -60,8 +60,10 @@ async function captureProgressUpdate(reviewedCount, totalFileCount) {
     reviewFileId: "review-file-id",
     currentUserId: "user-id",
     status: "approved",
-    comment: null
+    comment: null,
+    expectedDecisionVersion: 0
   });
 
   assert.match(updateQuery.text, /carried_from_decision_id = NULL/);
+  assert.match(updateQuery.text, /review_file\.decision_version = \$6/);
 }

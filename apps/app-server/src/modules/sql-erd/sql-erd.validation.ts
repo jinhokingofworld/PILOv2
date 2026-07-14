@@ -29,6 +29,7 @@ const MAX_RELATION_COUNT = 300;
 const MAX_ANNOTATION_COUNT = 300;
 const MAX_CANVAS_NOTE_COUNT = 100;
 const MAX_CANVAS_FRAME_COUNT = 100;
+const MAX_CANVAS_TEXT_COUNT = 100;
 const MAX_COLUMN_COUNT = 1000;
 const MAX_COLUMNS_PER_TABLE = 200;
 const MAX_IDENTIFIER_LENGTH = 256;
@@ -36,6 +37,7 @@ const MAX_COLUMN_TYPE_LENGTH = 512;
 const MAX_ANNOTATION_LABEL_LENGTH = 200;
 const MAX_CANVAS_NOTE_TEXT_LENGTH = 2_000;
 const MAX_CANVAS_FRAME_TITLE_LENGTH = 200;
+const MAX_CANVAS_TEXT_LENGTH = 2_000;
 const MAX_JSON_DEPTH = 20;
 const SOURCE_FORMATS = new Set<SqlErdSourceFormat>(["sql"]);
 const DIALECTS = new Set<SqlErdDialect>([
@@ -714,7 +716,7 @@ function validateAnnotations(value: unknown, metadata: ModelMetadata): void {
   const annotations = readPlainJsonObject(value, "layoutJson.annotations");
   assertAllowedFields(
     annotations,
-    new Set(["version", "links", "notes", "frames"]),
+    new Set(["version", "links", "notes", "frames", "texts"]),
     "layoutJson.annotations"
   );
 
@@ -816,6 +818,7 @@ function validateAnnotations(value: unknown, metadata: ModelMetadata): void {
 
   validateCanvasNotes(annotations.notes, annotationIds);
   validateCanvasFrames(annotations.frames, annotationIds);
+  validateCanvasTexts(annotations.texts, annotationIds);
 }
 
 function validateCanvasNotes(value: unknown, annotationIds: Set<string>): void {
@@ -863,6 +866,35 @@ function validateCanvasFrames(value: unknown, annotationIds: Set<string>): void 
       throw badRequest(`${path}.color is invalid`);
     }
     readBoolean(frameObject.isLocked, `${path}.isLocked`);
+  });
+}
+
+function validateCanvasTexts(value: unknown, annotationIds: Set<string>): void {
+  if (value === undefined) return;
+  if (!Array.isArray(value)) {
+    throw badRequest("layoutJson.annotations.texts must be an array");
+  }
+  if (value.length > MAX_CANVAS_TEXT_COUNT) {
+    throw badRequest("layoutJson.annotations.texts length limit exceeded");
+  }
+
+  value.forEach((text, index) => {
+    const path = `layoutJson.annotations.texts[${index}]`;
+    const textObject = readPlainJsonObject(text, path);
+    assertAllowedFields(
+      textObject,
+      new Set(["id", "x", "y", "width", "height", "text", "color"]),
+      path
+    );
+    readUniqueAnnotationId(textObject.id, `${path}.id`, annotationIds);
+    readFiniteNumber(textObject.x, `${path}.x`);
+    readFiniteNumber(textObject.y, `${path}.y`);
+    readPositiveFiniteNumber(textObject.width, `${path}.width`);
+    readPositiveFiniteNumber(textObject.height, `${path}.height`);
+    readBoundedString(textObject.text, `${path}.text`, MAX_CANVAS_TEXT_LENGTH);
+    if (!["slate", "blue", "green", "amber", "rose"].includes(textObject.color as string)) {
+      throw badRequest(`${path}.color is invalid`);
+    }
   });
 }
 

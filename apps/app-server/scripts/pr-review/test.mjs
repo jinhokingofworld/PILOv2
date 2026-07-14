@@ -63,6 +63,9 @@ const prReviewSemanticGraphMigration = await readSource(
 const sharedReviewRoomMigration = await readSource(
   "../../../../db/migrations/050_create_shared_pr_review_rooms.sql"
 );
+const reviewDecisionVersionMigration = await readSource(
+  "../../../../db/migrations/057_add_pr_review_decision_version.sql"
+);
 const databaseReadme = await readSource("../../../../db/README.md");
 
 assert.match(appModule, /PrReviewModule/);
@@ -77,6 +80,7 @@ assert.match(prReviewModule, /PrReviewAnalysisService/);
 assert.match(prReviewModule, /PrReviewAnalysisJobService/);
 assert.match(prReviewModule, /PrReviewAnalysisJobPublisherService/);
 assert.match(prReviewModule, /PrReviewAnalysisJobRecoveryService/);
+assert.match(prReviewModule, /PrReviewDecisionRealtimePublisherService/);
 assert.match(prReviewModule, /PrReviewAnalysisHandoffGuard/);
 assert.match(prReviewModule, /PrReviewAnalysisInternalController/);
 
@@ -332,8 +336,11 @@ assert.match(prReviewService, /shouldUseCanvasFallback/);
 assert.match(prReviewService, /listReviewFileFlowMemberships/);
 assert.match(prReviewService, /listReviewFileDecisionRows/);
 assert.match(prReviewService, /updateReviewFileDecisionState/);
+assert.match(prReviewService, /REVIEW_DECISION_CHANGED/);
+assert.match(prReviewService, /expectedDecisionVersion/);
 assert.match(prReviewService, /insertReviewFileDecision/);
 assert.match(prReviewService, /syncReviewSessionReviewProgress/);
+assert.match(prReviewService, /publishDecisionUpdatedSafely\(file\.id\)/);
 assert.match(prReviewService, /github_created_at/);
 assert.match(prReviewService, /changed_files_count/);
 assert.match(prReviewService, /file_review_decisions/);
@@ -479,8 +486,12 @@ assert.match(sharedReviewRoomMigration, /idx_pr_review_sessions_room_analyzing/)
 assert.match(sharedReviewRoomMigration, /ENABLE ROW LEVEL SECURITY/);
 assert.match(sharedReviewRoomMigration, /validate_pr_review_room_canvas/);
 assert.match(databaseReadme, /050_create_shared_pr_review_rooms\.sql/);
+assert.match(reviewDecisionVersionMigration, /ADD COLUMN decision_version INTEGER NOT NULL DEFAULT 0/);
+assert.match(reviewDecisionVersionMigration, /CHECK \(decision_version >= 0\)/);
+assert.match(databaseReadme, /057_add_pr_review_decision_version\.sql/);
 assert.match(prReviewApi, /공유 Review Room/);
 assert.match(prReviewApi, /review-rooms\/\{reviewRoomId\}\/revisions/);
+assert.match(prReviewApi, /pr-review:decision:updated/);
 
 assert.match(databaseService, /DatabaseTransaction/);
 assert.match(databaseService, /async transaction/);
@@ -495,6 +506,8 @@ await import("./conflict-suggestion-context.test.mjs");
 await import("./conflict-apply.test.mjs");
 await import("./conflict-status-refresh.test.mjs");
 await import("./decision-progress.test.mjs");
+await import("./decision-concurrency.test.mjs");
+await import("./decision-realtime-publisher.test.mjs");
 await import("./submission.test.mjs");
 await import("./async-analysis-enqueue.test.mjs");
 await import("./analysis-input-handoff.test.mjs");

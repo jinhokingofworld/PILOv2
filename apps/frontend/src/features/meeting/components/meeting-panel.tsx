@@ -2,6 +2,7 @@
 
 import {
   AlertCircle,
+  ChevronDown,
   CircleUserRound,
   Clock3,
   Loader2,
@@ -9,10 +10,13 @@ import {
   MicOff,
   Phone,
   PhoneOff,
+  Pencil,
+  Plus,
   Radio,
   RefreshCw,
   ShieldCheck,
   Square,
+  Trash2,
   Users,
   X
 } from "lucide-react";
@@ -35,7 +39,10 @@ import {
   TooltipTrigger
 } from "@/components/ui/tooltip";
 import { useAuthSession } from "@/features/auth";
-import { MeetingApiError } from "@/features/meeting/api/client";
+import {
+  createMeetingApiClient,
+  MeetingApiError
+} from "@/features/meeting/api/client";
 import {
   MeetingAudioPreflightDialog
 } from "@/features/meeting/components/meeting-audio-preflight-dialog";
@@ -315,6 +322,13 @@ export function MeetingPanel() {
   const workspaceId = authSession?.activeWorkspaceId ?? "";
   const accessToken = authSession?.accessToken.trim() ?? "";
   const currentUserId = authSession?.user.id ?? "";
+  const isWorkspaceOwner = Boolean(
+    authSession?.activeWorkspace.isOwner || authSession?.activeWorkspace.role === "owner"
+  );
+  const meetingClient = useMemo(
+    () => createMeetingApiClient({ accessToken }),
+    [accessToken]
+  );
   const activeSection = useSyncExternalStore(
     subscribeToMeetingSection,
     getMeetingSectionSnapshot,
@@ -409,6 +423,13 @@ export function MeetingPanel() {
     useState<EntryAction | null>(null);
   const [pendingEndRecordingId, setPendingEndRecordingId] = useState<string | null>(null);
   const [isMeetingRoomSwitching, setIsMeetingRoomSwitching] = useState(false);
+  const [isMeetingRoomDialogOpen, setIsMeetingRoomDialogOpen] = useState(false);
+  const [meetingRoomManagementError, setMeetingRoomManagementError] = useState<string | null>(null);
+  const [meetingRoomManagementPending, setMeetingRoomManagementPending] = useState(false);
+  const [newMeetingRoomName, setNewMeetingRoomName] = useState("");
+  const [editingMeetingRoomId, setEditingMeetingRoomId] = useState<string | null>(null);
+  const [editingMeetingRoomName, setEditingMeetingRoomName] = useState("");
+  const [restoredMeetingRoomId, setRestoredMeetingRoomId] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const activeParticipants = useMemo(
@@ -422,7 +443,9 @@ export function MeetingPanel() {
   const shouldLeaveMeeting = isCurrentUserActive;
   const canReconnect =
     isCurrentUserActive &&
-    (liveKitRoom.status === "disconnected" || liveKitRoom.status === "error");
+    (liveKitRoom.status === "idle" ||
+      liveKitRoom.status === "disconnected" ||
+      liveKitRoom.status === "error");
   const isActionPending = actionStatus !== "idle";
   const isInitialLoading =
     meetingRoomsStatus === "loading" ||
@@ -433,6 +456,40 @@ export function MeetingPanel() {
   const selectedMeetingRoom = meetingRooms.find(
     (room) => room.id === selectedMeetingRoomId
   );
+
+  useEffect(() => {
+    if (!accessToken) {
+      return;
+    }
+
+    let cancelled = false;
+    void meetingClient
+      .getCurrentUserActiveMeeting()
+      .then((result) => {
+        if (cancelled || !result.meeting || !result.meetingRoom) {
+          return;
+        }
+
+        setRestoredMeetingRoomId(result.meetingRoom.id);
+        if (result.meeting.workspaceId !== workspaceId) {
+          authSession?.setActiveWorkspaceId(result.meeting.workspaceId);
+        }
+      })
+      .catch(() => undefined);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken, authSession, meetingClient, workspaceId]);
+
+  useEffect(() => {
+    if (
+      restoredMeetingRoomId &&
+      meetingRooms.some((room) => room.id === restoredMeetingRoomId)
+    ) {
+      selectMeetingRoom(restoredMeetingRoomId);
+    }
+  }, [meetingRooms, restoredMeetingRoomId, selectMeetingRoom]);
 
   useEffect(() => {
     setHeaderMeetingRecordingStatus(currentRecording?.status ?? null);
@@ -517,6 +574,7 @@ export function MeetingPanel() {
       setParticipantError(null);
       setParticipantStatus("idle");
       selectMeetingRoom(nextMeetingRoomId);
+      setIsMeetingRoomDialogOpen(false);
     } catch (error) {
       const message = "회의방을 전환하지 못했습니다. 기존 회의 연결을 유지합니다.";
       setActionError(message);
@@ -524,6 +582,63 @@ export function MeetingPanel() {
       void error;
     } finally {
       setIsMeetingRoomSwitching(false);
+    }
+  }
+
+  async function handleCreateMeetingRoom() {
+    const name = newMeetingRoomName.trim();
+    if (!name) {
+      setMeetingRoomManagementError("회의방 이름을 입력해주세요.");
+      return;
+    }
+
+    setMeetingRoomManagementPending(true);
+    setMeetingRoomManagementError(null);
+    try {
+      await meetingClient.createMeetingRoom(workspaceId, { name });
+      setNewMeetingRoomName("");
+      await reloadMeetingRooms();
+    } catch (error) {
+      setMeetingRoomManagementError(getErrorMessage(error));
+    } finally {
+      setMeetingRoomManagementPending(false);
+    }
+  }
+
+  async function handleUpdateMeetingRoom(meetingRoomId: string) {
+    const name = editingMeetingRoomName.trim();
+    if (!name) {
+      setMeetingRoomManagementError("회의방 이름을 입력해주세요.");
+      return;
+    }
+
+    setMeetingRoomManagementPending(true);
+    setMeetingRoomManagementError(null);
+    try {
+      await meetingClient.updateMeetingRoom(workspaceId, meetingRoomId, { name });
+      setEditingMeetingRoomId(null);
+      setEditingMeetingRoomName("");
+      await reloadMeetingRooms();
+    } catch (error) {
+      setMeetingRoomManagementError(getErrorMessage(error));
+    } finally {
+      setMeetingRoomManagementPending(false);
+    }
+  }
+
+  async function handleDeleteMeetingRoom(meetingRoomId: string) {
+    setMeetingRoomManagementPending(true);
+    setMeetingRoomManagementError(null);
+    try {
+      await meetingClient.deleteMeetingRoom(workspaceId, meetingRoomId);
+      const nextRooms = await reloadMeetingRooms();
+      if (meetingRoomId === selectedMeetingRoomId) {
+        selectMeetingRoom(nextRooms[0]?.id ?? "");
+      }
+    } catch (error) {
+      setMeetingRoomManagementError(getErrorMessage(error));
+    } finally {
+      setMeetingRoomManagementPending(false);
     }
   }
 
@@ -794,6 +909,147 @@ export function MeetingPanel() {
         )}
 
         <DialogPrimitive.Root
+          open={isMeetingRoomDialogOpen}
+          onOpenChange={(nextOpen) => {
+            if (!meetingRoomManagementPending) {
+              setIsMeetingRoomDialogOpen(nextOpen);
+              if (!nextOpen) {
+                setEditingMeetingRoomId(null);
+                setMeetingRoomManagementError(null);
+              }
+            }
+          }}
+        >
+          <DialogPrimitive.Portal>
+            <DialogPrimitive.Backdrop className="fixed inset-0 z-50 bg-black/20 backdrop-blur-xs" />
+            <DialogPrimitive.Popup className="fixed top-1/2 left-1/2 z-50 max-h-[calc(100vh-2rem)] w-[calc(100vw-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border bg-popover p-5 text-popover-foreground shadow-2xl outline-none">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <DialogPrimitive.Title className="font-heading text-lg font-semibold">
+                    회의방 목록
+                  </DialogPrimitive.Title>
+                  <DialogPrimitive.Description className="mt-1 text-sm text-muted-foreground">
+                    회의방을 선택하면 현재 참여 중인 회의에서 먼저 나갑니다.
+                  </DialogPrimitive.Description>
+                </div>
+                <DialogPrimitive.Close render={<Button aria-label="회의방 목록 닫기" size="icon-sm" type="button" variant="ghost" />}>
+                  <X className="size-4" />
+                </DialogPrimitive.Close>
+              </div>
+
+              {meetingRoomManagementError ? (
+                <p className="mt-4 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+                  {meetingRoomManagementError}
+                </p>
+              ) : null}
+
+              <div className="mt-5 space-y-2">
+                {meetingRooms.map((room) => (
+                  <div key={room.id} className="rounded-lg border p-3">
+                    {editingMeetingRoomId === room.id ? (
+                      <div className="flex gap-2">
+                        <input
+                          aria-label={`${room.name} 회의방 이름`}
+                          className="h-9 min-w-0 flex-1 rounded-md border bg-background px-3 text-sm"
+                          disabled={meetingRoomManagementPending}
+                          value={editingMeetingRoomName}
+                          onChange={(event) => setEditingMeetingRoomName(event.target.value)}
+                        />
+                        <Button
+                          disabled={meetingRoomManagementPending}
+                          size="sm"
+                          type="button"
+                          onClick={() => void handleUpdateMeetingRoom(room.id)}
+                        >
+                          저장
+                        </Button>
+                        <Button
+                          disabled={meetingRoomManagementPending}
+                          size="sm"
+                          type="button"
+                          variant="outline"
+                          onClick={() => setEditingMeetingRoomId(null)}
+                        >
+                          취소
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <button
+                          className="min-w-0 flex-1 text-left text-sm font-medium"
+                          disabled={isMeetingRoomSwitching || meetingRoomManagementPending}
+                          type="button"
+                          onClick={() => void handleMeetingRoomChange(room.id)}
+                        >
+                          {room.name}
+                          {room.isDefault ? " · 기본 회의방" : ""}
+                        </button>
+                        {isWorkspaceOwner ? (
+                          <>
+                            <Button
+                              aria-label={`${room.name} 이름 변경`}
+                              disabled={isMeetingRoomSwitching || meetingRoomManagementPending}
+                              size="icon-sm"
+                              type="button"
+                              variant="ghost"
+                              onClick={() => {
+                                setEditingMeetingRoomId(room.id);
+                                setEditingMeetingRoomName(room.name);
+                              }}
+                            >
+                              <Pencil className="size-4" />
+                            </Button>
+                            <Button
+                              aria-label={`${room.name} 삭제`}
+                              disabled={
+                                room.isDefault ||
+                                isMeetingRoomSwitching ||
+                                meetingRoomManagementPending
+                              }
+                              size="icon-sm"
+                              type="button"
+                              variant="ghost"
+                              onClick={() => void handleDeleteMeetingRoom(room.id)}
+                            >
+                              <Trash2 className="size-4" />
+                            </Button>
+                          </>
+                        ) : null}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              {isWorkspaceOwner ? (
+                <div className="mt-5 border-t pt-4">
+                  <p className="text-sm font-medium">회의방 추가</p>
+                  <div className="mt-2 flex gap-2">
+                    <input
+                      aria-label="새 회의방 이름"
+                      className="h-9 min-w-0 flex-1 rounded-md border bg-background px-3 text-sm"
+                      disabled={meetingRoomManagementPending}
+                      placeholder="예: 디자인 검토"
+                      value={newMeetingRoomName}
+                      onChange={(event) => setNewMeetingRoomName(event.target.value)}
+                    />
+                    <Button
+                      disabled={meetingRoomManagementPending}
+                      size="sm"
+                      type="button"
+                      onClick={() => void handleCreateMeetingRoom()}
+                    >
+                      <Plus className="size-4" />
+                      추가
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
+            </DialogPrimitive.Popup>
+          </DialogPrimitive.Portal>
+        </DialogPrimitive.Root>
+
+        <DialogPrimitive.Root
           open={pendingEndRecordingId !== null}
           onOpenChange={(nextOpen) => {
             if (!nextOpen) {
@@ -834,33 +1090,27 @@ export function MeetingPanel() {
             ) : (
               <div className="flex flex-1 flex-col items-center justify-center gap-6 px-4 py-10">
                 <div className="w-full max-w-2xl text-center">
-                  <label className="mx-auto flex max-w-md flex-col gap-2 text-left text-sm font-medium">
-                    회의방
-                    <select
-                      aria-label="회의방 선택"
-                      className="h-10 rounded-md border bg-background px-3 text-sm font-normal outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                  <div className="mx-auto flex max-w-md flex-col gap-2 text-left text-sm font-medium">
+                    <span>회의방</span>
+                    <Button
+                      aria-haspopup="dialog"
+                      className="justify-between font-normal"
                       disabled={
                         meetingRoomsStatus !== "success" ||
                         isActionPending ||
                         isMeetingRoomSwitching
                       }
-                      value={selectedMeetingRoomId ?? ""}
-                      onChange={(event) => {
-                        void handleMeetingRoomChange(event.target.value);
+                      type="button"
+                      variant="outline"
+                      onClick={() => {
+                        setMeetingRoomManagementError(null);
+                        setIsMeetingRoomDialogOpen(true);
                       }}
                     >
-                      {meetingRooms.length === 0 ? (
-                        <option value="">사용 가능한 회의방이 없습니다.</option>
-                      ) : (
-                        meetingRooms.map((room) => (
-                          <option key={room.id} value={room.id}>
-                            {room.name}
-                            {room.isDefault ? " (기본)" : ""}
-                          </option>
-                        ))
-                      )}
-                    </select>
-                  </label>
+                      <span>{selectedMeetingRoom?.name ?? "회의방을 선택하세요"}</span>
+                      <ChevronDown className="size-4" />
+                    </Button>
+                  </div>
                   {isMeetingRoomSwitching ? (
                     <p className="mt-2 text-sm text-muted-foreground">
                       기존 음성 연결을 종료하고 회의방을 전환하는 중입니다.

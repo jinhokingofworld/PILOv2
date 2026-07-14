@@ -7,6 +7,7 @@ import { LiveKitTokenService } from "./livekit-token.service";
 import { LiveKitWebhookController } from "./livekit-webhook.controller";
 import { LiveKitWebhookService } from "./livekit-webhook.service";
 import { MeetingController } from "./meeting.controller";
+import { CurrentUserMeetingController } from "./current-user-meeting.controller";
 import { MeetingReportOutboxPublisherService } from "./meeting-report-outbox-publisher.service";
 import { MeetingReportOutboxRecoveryService } from "./meeting-report-outbox-recovery.service";
 import { MeetingRecordingRetentionService } from "./meeting-recording-retention.service";
@@ -19,7 +20,12 @@ import { MeetingService } from "./meeting.service";
 
 @Module({
   imports: [CommonModule, DatabaseModule, WorkspaceModule],
-  controllers: [MeetingController, LiveKitWebhookController, MeetingReportInternalController],
+  controllers: [
+    MeetingController,
+    CurrentUserMeetingController,
+    LiveKitWebhookController,
+    MeetingReportInternalController
+  ],
   providers: [
     MeetingService,
     LiveKitEgressService,

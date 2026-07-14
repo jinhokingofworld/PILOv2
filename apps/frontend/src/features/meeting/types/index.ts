@@ -144,6 +144,23 @@ export type MeetingRoomListPayload = {
   rooms: MeetingRoom[];
 };
 
+export type MeetingRoomNameInput = {
+  name: string;
+};
+
+export type MeetingRoomMutationPayload = {
+  room: MeetingRoom;
+};
+
+export type DeleteMeetingRoomPayload = {
+  deleted: true;
+};
+
+export type CurrentUserActiveMeetingPayload = {
+  meeting: Meeting | null;
+  meetingRoom: MeetingRoom | null;
+};
+
 export type StartMeetingInput = {
   roomKey?: MeetingRoomKey;
   recordingConsent?: RecordingConsentInput;

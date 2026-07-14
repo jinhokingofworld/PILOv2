@@ -303,6 +303,11 @@ export interface DeleteMeetingRoomPayload {
   deleted: true;
 }
 
+export interface CurrentUserActiveMeetingPayload {
+  meeting: MeetingPayload | null;
+  meetingRoom: MeetingRoomPayload | null;
+}
+
 export interface ParticipantPayload {
   id: string;
   meetingId: string;
@@ -489,6 +494,8 @@ const ACTIVE_MEETING_UNIQUE_INDEX = "unique_active_meeting_per_room";
 const MEETING_ALREADY_IN_PROGRESS_ERROR_CODE =
   "MEETING_ALREADY_IN_PROGRESS";
 const MEETING_ALREADY_IN_PROGRESS_MESSAGE = "A meeting is already in progress";
+const ACTIVE_MEETING_PARTICIPATION_EXISTS_MESSAGE =
+  "Current user is already participating in another active meeting";
 const DEFAULT_MEETING_ROOM_NAME = "기본 회의실";
 const MEETING_ROOM_NAME_MAX_LENGTH = 100;
 const ACTIVE_MEETING_ROOM_NAME_UNIQUE_INDEX =
@@ -554,6 +561,87 @@ export class MeetingService {
     };
   }
 
+  async getCurrentUserActiveMeeting(
+    currentUserId: string
+  ): Promise<CurrentUserActiveMeetingPayload> {
+    const activeMeeting = await this.database.queryOne<
+      CurrentMeetingRow & { meeting_room_id: string; meeting_room_name: string; meeting_room_created_by_id: string | null; meeting_room_created_at: Date | string; meeting_room_updated_at: Date | string }
+    >(
+      `
+        SELECT
+          meetings.id,
+          meetings.workspace_id,
+          meetings.room_key,
+          meetings.livekit_room_name,
+          meetings.created_by_id,
+          meetings.ended_by_id,
+          meetings.started_at,
+          meetings.ended_at,
+          meetings.created_at,
+          meetings.updated_at,
+          meeting_rooms.id AS meeting_room_id,
+          meeting_rooms.name AS meeting_room_name,
+          meeting_rooms.created_by_id AS meeting_room_created_by_id,
+          meeting_rooms.created_at AS meeting_room_created_at,
+          meeting_rooms.updated_at AS meeting_room_updated_at,
+          NULL::uuid AS recording_id,
+          NULL::uuid AS recording_meeting_id,
+          NULL::text AS recording_livekit_egress_id,
+          NULL::text AS recording_status,
+          NULL::text AS recording_audio_file_url,
+          NULL::text AS recording_audio_file_key,
+          NULL::int AS recording_duration_sec,
+          NULL::bigint AS recording_file_size_bytes,
+          NULL::timestamptz AS recording_started_at,
+          NULL::timestamptz AS recording_ended_at,
+          NULL::text AS recording_error_message,
+          0::int AS active_participant_count
+        FROM meeting_participants
+        JOIN meetings
+          ON meetings.id = meeting_participants.meeting_id
+        JOIN meeting_rooms
+          ON meeting_rooms.workspace_id = meetings.workspace_id
+          AND meeting_rooms.room_key = meetings.room_key
+          AND meeting_rooms.archived_at IS NULL
+        JOIN workspace_members
+          ON workspace_members.workspace_id = meetings.workspace_id
+          AND workspace_members.user_id = meeting_participants.user_id
+        WHERE meeting_participants.user_id = $1::uuid
+          AND meeting_participants.left_at IS NULL
+          AND meetings.ended_at IS NULL
+        ORDER BY meeting_participants.joined_at DESC, meetings.id ASC
+        LIMIT 1
+      `,
+      [currentUserId]
+    );
+
+    if (!activeMeeting) {
+      return { meeting: null, meetingRoom: null };
+    }
+
+    const isDefault = await this.isDefaultMeetingRoom(
+      this.database,
+      activeMeeting.workspace_id,
+      activeMeeting.meeting_room_id
+    );
+
+    return {
+      meeting: this.mapMeeting(activeMeeting),
+      meetingRoom: this.mapMeetingRoom(
+        {
+          id: activeMeeting.meeting_room_id,
+          workspace_id: activeMeeting.workspace_id,
+          room_key: activeMeeting.room_key,
+          name: activeMeeting.meeting_room_name,
+          created_by_id: activeMeeting.meeting_room_created_by_id,
+          created_at: activeMeeting.meeting_room_created_at,
+          updated_at: activeMeeting.meeting_room_updated_at
+        },
+        isDefault
+      )
+    };
+  }
+
   async startMeeting(
     currentUserId: string,
     workspaceId: string,
@@ -562,21 +650,29 @@ export class MeetingService {
     await this.assertWorkspaceAccess(currentUserId, workspaceId);
     const { roomKey, recordingConsent } = this.normalizeStartMeetingBody(body);
 
-    const existingMeeting = await this.findCurrentMeeting(workspaceId, roomKey);
-    if (existingMeeting) {
-      throw this.meetingAlreadyInProgress();
-    }
-
     try {
-      const result = await this.database.transaction((transaction) =>
-        this.createStartedMeeting(
+      const result = await this.database.transaction(async (transaction) => {
+        await this.assertNoOtherActiveMeetingParticipant(
+          transaction,
+          currentUserId
+        );
+        const existingMeeting = await this.findCurrentMeeting(
+          workspaceId,
+          roomKey,
+          transaction
+        );
+        if (existingMeeting) {
+          throw this.meetingAlreadyInProgress();
+        }
+
+        return this.createStartedMeeting(
           transaction,
           workspaceId,
           roomKey,
           currentUserId,
           recordingConsent
-        )
-      );
+        );
+      });
       await this.publishMeetingStarted(workspaceId, result.meeting.id);
       return result;
     } catch (error) {
@@ -599,12 +695,14 @@ export class MeetingService {
         FROM meeting_rooms
         WHERE workspace_id = $1
           AND archived_at IS NULL
-        ORDER BY CASE WHEN room_key = $2 THEN 0 ELSE 1 END, created_at ASC, id ASC
+        ORDER BY created_at ASC, id ASC
       `,
-      [workspaceId, MAIN_MEETING_ROOM]
+      [workspaceId]
     );
 
-    return { rooms: rooms.map((room) => this.mapMeetingRoom(room)) };
+    return {
+      rooms: rooms.map((room, index) => this.mapMeetingRoom(room, index === 0))
+    };
   }
 
   async createMeetingRoom(
@@ -644,7 +742,12 @@ export class MeetingService {
         throw badRequest("Meeting room could not be created");
       }
 
-      return { room: this.mapMeetingRoom(room) };
+      return {
+        room: this.mapMeetingRoom(
+          room,
+          await this.isDefaultMeetingRoom(this.database, workspaceId, room.id)
+        )
+      };
     } catch (error) {
       if (this.isConstraintError(error, ACTIVE_MEETING_ROOM_NAME_UNIQUE_INDEX)) {
         throw conflict("A meeting room with this name already exists");
@@ -674,10 +777,6 @@ export class MeetingService {
         if (!existing) {
           throw notFound("Meeting room not found");
         }
-        if (existing.room_key === MAIN_MEETING_ROOM) {
-          throw badRequest("Default meeting room cannot be renamed");
-        }
-
         return transaction.queryOne<MeetingRoomRow>(
           `
             UPDATE meeting_rooms
@@ -695,7 +794,12 @@ export class MeetingService {
         throw notFound("Meeting room not found");
       }
 
-      return { room: this.mapMeetingRoom(room) };
+      return {
+        room: this.mapMeetingRoom(
+          room,
+          await this.isDefaultMeetingRoom(this.database, workspaceId, room.id)
+        )
+      };
     } catch (error) {
       if (this.isConstraintError(error, ACTIVE_MEETING_ROOM_NAME_UNIQUE_INDEX)) {
         throw conflict("A meeting room with this name already exists");
@@ -722,7 +826,7 @@ export class MeetingService {
       if (!room) {
         throw notFound("Meeting room not found");
       }
-      if (room.room_key === MAIN_MEETING_ROOM) {
+      if (await this.isDefaultMeetingRoom(transaction, workspaceId, meetingRoomId)) {
         throw badRequest("Default meeting room cannot be deleted");
       }
 
@@ -791,6 +895,11 @@ export class MeetingService {
           throw this.meetingAlreadyInProgress();
         }
 
+        await this.assertNoOtherActiveMeetingParticipant(
+          transaction,
+          currentUserId
+        );
+
         return this.createStartedMeeting(
           transaction,
           workspaceId,
@@ -836,6 +945,12 @@ export class MeetingService {
         workspaceId,
         currentUserId,
         recordingConsent
+      );
+
+      await this.assertNoOtherActiveMeetingParticipant(
+        transaction,
+        currentUserId,
+        meetingId
       );
 
       const participant = await this.upsertParticipant(
@@ -1895,6 +2010,10 @@ export class MeetingService {
     );
   }
 
+  private activeMeetingParticipationExists() {
+    return conflict(ACTIVE_MEETING_PARTICIPATION_EXISTS_MESSAGE);
+  }
+
   private async assertMeetingExists(
     workspaceId: string,
     meetingId: string
@@ -1948,6 +2067,58 @@ export class MeetingService {
       `,
       [workspaceId, meetingRoomId]
     );
+  }
+
+  private async isDefaultMeetingRoom(
+    executor: QueryOneExecutor,
+    workspaceId: string,
+    meetingRoomId: string
+  ): Promise<boolean> {
+    const defaultRoom = await executor.queryOne<{ id: string }>(
+      `
+        SELECT id
+        FROM meeting_rooms
+        WHERE workspace_id = $1
+          AND archived_at IS NULL
+        ORDER BY created_at ASC, id ASC
+        LIMIT 1
+      `,
+      [workspaceId]
+    );
+
+    return defaultRoom?.id === meetingRoomId;
+  }
+
+  private async assertNoOtherActiveMeetingParticipant(
+    transaction: DatabaseTransaction,
+    currentUserId: string,
+    allowedMeetingId?: string
+  ): Promise<void> {
+    await transaction.execute(
+      "SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))",
+      [currentUserId]
+    );
+
+    const activeParticipant = await transaction.queryOne<{ meeting_id: string }>(
+      `
+        SELECT meeting_participants.meeting_id
+        FROM meeting_participants
+        JOIN meetings
+          ON meetings.id = meeting_participants.meeting_id
+        WHERE meeting_participants.user_id = $1::uuid
+          AND meeting_participants.left_at IS NULL
+          AND meetings.ended_at IS NULL
+          ${allowedMeetingId ? "AND meeting_participants.meeting_id <> $2::uuid" : ""}
+        ORDER BY meeting_participants.joined_at DESC, meeting_participants.meeting_id ASC
+        LIMIT 1
+        FOR UPDATE OF meeting_participants
+      `,
+      allowedMeetingId ? [currentUserId, allowedMeetingId] : [currentUserId]
+    );
+
+    if (activeParticipant) {
+      throw this.activeMeetingParticipationExists();
+    }
   }
 
   private async findCurrentMeeting(
@@ -3431,13 +3602,16 @@ export class MeetingService {
     return name;
   }
 
-  private mapMeetingRoom(room: MeetingRoomRow): MeetingRoomPayload {
+  private mapMeetingRoom(
+    room: MeetingRoomRow,
+    isDefault = room.room_key === MAIN_MEETING_ROOM
+  ): MeetingRoomPayload {
     return {
       id: room.id,
       workspaceId: room.workspace_id,
       roomKey: room.room_key,
       name: room.name,
-      isDefault: room.room_key === MAIN_MEETING_ROOM,
+      isDefault,
       createdById: room.created_by_id,
       createdAt: this.toIsoString(room.created_at),
       updatedAt: this.toIsoString(room.updated_at)

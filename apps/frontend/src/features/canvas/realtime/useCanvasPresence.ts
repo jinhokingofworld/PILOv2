@@ -38,6 +38,7 @@ export type CanvasPresenceController = {
   enabled: boolean;
   currentUserId: string | null;
   operationSync: CanvasOperationCatchupState;
+  ownedShapeLocks: CanvasShapeLockState[];
   remotePresence: CanvasRemotePresenceState[];
   remoteShapeLocks: CanvasShapeLockState[];
   remoteShapePreviews: CanvasShapePreviewEventPayload[];
@@ -356,6 +357,9 @@ export function useCanvasPresence(
   const [remoteShapeLocks, setRemoteShapeLocks] = useState<
     CanvasShapeLockState[]
   >([]);
+  const [ownedShapeLocks, setOwnedShapeLocks] = useState<
+    CanvasShapeLockState[]
+  >([]);
   const [remoteShapePreviews, setRemoteShapePreviews] = useState<
     CanvasShapePreviewEventPayload[]
   >([]);
@@ -665,6 +669,7 @@ export function useCanvasPresence(
       joinedRef.current = false;
       setRemotePresence([]);
       setRemoteShapeLocks([]);
+      setOwnedShapeLocks([]);
       setRemoteShapePreviews([]);
     });
     realtimeSocket.on("canvas:joined", (payload) => {
@@ -683,7 +688,16 @@ export function useCanvasPresence(
           currentUserId,
         ),
       );
-      setRemoteShapeLocks(upsertShapeLocks([], payload.shapeLocks));
+      const joinedShapeLocks = upsertShapeLocks([], payload.shapeLocks);
+
+      setRemoteShapeLocks(joinedShapeLocks);
+      setOwnedShapeLocks(
+        currentUserId === null
+          ? []
+          : joinedShapeLocks.filter(
+              (lock) => lock.ownerUserId === currentUserId,
+            ),
+      );
       setRemoteShapePreviews(
         payload.previews.filter(
           (preview) => preview.actorUserId !== currentUserId,
@@ -753,6 +767,9 @@ export function useCanvasPresence(
       setRemoteShapeLocks((currentLocks) =>
         upsertShapeLocks(currentLocks, payload.locks),
       );
+      setOwnedShapeLocks((currentLocks) =>
+        upsertShapeLocks(currentLocks, payload.locks),
+      );
     });
     realtimeSocket.on("canvas:shape:lock:rejected", (payload) => {
       if (!isSameCanvasRoom(payload, room)) {
@@ -761,6 +778,15 @@ export function useCanvasPresence(
 
       setRemoteShapeLocks((currentLocks) =>
         upsertShapeLocks(currentLocks, payload.locks),
+      );
+      setOwnedShapeLocks((currentLocks) =>
+        currentUserId === null
+          ? []
+          : removeShapeLocks({
+              locks: currentLocks,
+              ownerUserId: currentUserId,
+              shapeIds: payload.shapeIds,
+            }),
       );
     });
     realtimeSocket.on("canvas:shape:lock:update", (payload) => {
@@ -778,6 +804,13 @@ export function useCanvasPresence(
       }
 
       setRemoteShapeLocks((currentLocks) =>
+        removeShapeLocks({
+          locks: currentLocks,
+          ownerUserId: payload.ownerUserId,
+          shapeIds: payload.shapeIds,
+        }),
+      );
+      setOwnedShapeLocks((currentLocks) =>
         removeShapeLocks({
           locks: currentLocks,
           ownerUserId: payload.ownerUserId,
@@ -829,6 +862,7 @@ export function useCanvasPresence(
       }
       setRemotePresence([]);
       setRemoteShapeLocks([]);
+      setOwnedShapeLocks([]);
       setRemoteShapePreviews([]);
     };
   }, [
@@ -848,6 +882,9 @@ export function useCanvasPresence(
         ),
       );
       setRemoteShapeLocks((currentLocks) =>
+        currentLocks.filter(isShapeLockFresh),
+      );
+      setOwnedShapeLocks((currentLocks) =>
         currentLocks.filter(isShapeLockFresh),
       );
       setRemoteShapePreviews((currentPreviews) =>
@@ -982,6 +1019,12 @@ export function useCanvasPresence(
       enabled,
       currentUserId,
       operationSync,
+      ownedShapeLocks:
+        currentUserId === null
+          ? []
+          : ownedShapeLocks.filter(
+              (lock) => lock.ownerUserId === currentUserId,
+            ),
       releaseShapeLocks,
       remotePresence:
         currentUserId === null
@@ -1003,6 +1046,7 @@ export function useCanvasPresence(
       currentUserId,
       enabled,
       operationSync,
+      ownedShapeLocks,
       releaseShapeLocks,
       remotePresence,
       remoteShapeLocks,

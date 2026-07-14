@@ -255,6 +255,10 @@ async function compileSqlErdRuntimeModules() {
           'from "./note-shape-stub.mjs"'
         ],
         [
+          /from "@\/features\/sql-erd\/shapes\/sql-erd-text-shape"/g,
+          'from "./text-shape-stub.mjs"'
+        ],
+        [
           /from "@\/features\/sql-erd\/shapes\/sql-erd-relation-shape"/g,
           'from "./relation-shape-stub.mjs"'
         ],
@@ -317,6 +321,10 @@ async function compileSqlErdRuntimeModules() {
     await writeFile(
       join(outputDir, "note-shape-stub.mjs"),
       "export function isSqlErdNoteShape(shape) { return shape?.type === 'sqltoerd_note'; }\n"
+    );
+    await writeFile(
+      join(outputDir, "text-shape-stub.mjs"),
+      "export function isSqlErdTextShape(shape) { return shape?.type === 'sqltoerd_text'; }\n"
     );
     await writeFile(
       join(outputDir, "table-shape-stub.mjs"),
@@ -710,6 +718,7 @@ const [
   annotationShape,
   frameShape,
   noteShape,
+  textShape,
   annotationToolbar,
   ddlParserUtils,
   sqlEditorDialectUtils,
@@ -748,6 +757,7 @@ const [
     readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-annotation-shape.tsx"),
     readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-frame-shape.tsx"),
     readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-note-shape.tsx"),
+    readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-text-shape.tsx"),
     readSqlErdFile("../../src/features/sql-erd/components/sql-erd-canvas-toolbar.tsx"),
     readSqlErdFile("../../src/features/sql-erd/utils/ddl-parser.ts"),
     readSqlErdFile("../../src/features/sql-erd/utils/sql-editor-dialect.ts"),
@@ -6442,27 +6452,29 @@ assert.doesNotMatch(
 assert.doesNotMatch(annotationShape, /Cardinality/);
 assert.match(frameShape, /\{!shape\.props\.isLocked \? \(/);
 assert.doesNotMatch(noteShape, /SQLTOERD_NOTE_DELETE_EVENT/);
+assert.match(textShape, /SQLTOERD_TEXT_SHAPE_TYPE/);
+assert.match(textShape, /SQLTOERD_TEXT_CHANGE_EVENT/);
+assert.match(textShape, /maxLength=\{2000\}/);
 assert.match(annotationToolbar, /export function SqlErdCanvasToolbar/);
 assert.match(annotationToolbar, /aria-label="선택\/드래그"/);
 assert.match(annotationToolbar, /aria-label="메모 추가"/);
 assert.match(annotationToolbar, /aria-label="프레임 추가"/);
+assert.match(annotationToolbar, /aria-label="텍스트 추가"/);
 assert.match(annotationToolbar, /aria-label="화면 맞춤"/);
-assert.match(annotationToolbar, /isSqlErdFrameShape\(selectedShape\)/);
-assert.match(annotationToolbar, /onFrameColorChange\(selectedShape\.props\.frameId, color\)/);
-assert.match(canvasSurface, /import \{ SqlErdCanvasToolbar \}/);
+assert.match(annotationToolbar, /bottom-4 left-1\/2/);
+assert.match(annotationToolbar, /function applyColor/);
+assert.match(canvasSurface, /SqlErdCanvasToolbar/);
 assert.match(canvasSurface, /<SqlErdCanvasToolbar/);
 assert.match(
   canvasSurface,
   /SQLTOERD_FRAME_CHANGE_EVENT[\s\S]*?SqlErdCanvasToolbar/
 );
-assert.match(
-  canvasSurface,
-  /editor\.getViewportPageBounds\(\)[\s\S]*?notesToAdd/
-);
-assert.match(
-  canvasSurface,
-  /editor\.getViewportPageBounds\(\)[\s\S]*?framesToAdd/
-);
+assert.match(canvasSurface, /pendingPlacementToolRef/);
+assert.match(canvasSurface, /editor\.screenToPage/);
+assert.match(canvasSurface, /notesToAdd/);
+assert.match(canvasSurface, /framesToAdd/);
+assert.match(canvasSurface, /textsToAdd/);
+assert.match(canvasSurface, /onDoubleClickCapture/);
 assert.match(canvasSurface, /onFit=\{handleFitCanvas\}/);
 assert.match(
   canvasSurface,
@@ -6522,7 +6534,7 @@ assert.match(apiClient, /credentials: "same-origin"/);
 assert.doesNotMatch(apiSpec, /^- Sticky note$/m);
 assert.doesNotMatch(apiSpec, /^- Group box$/m);
 assert.match(apiSpec, /`notes`는 Sticky note, `frames`는 Group box/);
-assert.match(apiSpec, /`links`, `notes`, `frames` 전체에서 중복될 수 없다/);
+assert.match(apiSpec, /`links`, `notes`, `frames`, `texts` 전체에서 중복될 수 없다/);
 
 assert.equal(typeof modelRuntime.applySqltoerdLayoutPatch, "function");
 const patchedLayout = modelRuntime.applySqltoerdLayoutPatch(
@@ -6577,6 +6589,33 @@ const layoutWithCreatedFrame = modelRuntime.applySqltoerdLayoutPatch(
   }
 );
 assert.equal(layoutWithCreatedFrame.annotations.frames[0].title, "Billing");
+const layoutWithCreatedText = modelRuntime.applySqltoerdLayoutPatch(
+  layoutWithCreatedFrame,
+  {
+    textsToAdd: [{
+      id: "text.billing",
+      x: 24,
+      y: 48,
+      width: 240,
+      height: 72,
+      text: "Owner notes",
+      color: "green"
+    }]
+  }
+);
+assert.equal(layoutWithCreatedText.annotations.texts[0].color, "green");
+assert.equal(
+  modelRuntime.applySqltoerdLayoutPatch(layoutWithCreatedText, {
+    textsById: { "text.billing": { text: "Updated notes" } }
+  }).annotations.texts[0].text,
+  "Updated notes"
+);
+assert.deepEqual(
+  modelRuntime.applySqltoerdLayoutPatch(layoutWithCreatedText, {
+    deleteTextIds: ["text.billing"]
+  }).annotations.texts,
+  []
+);
 assert.equal(
   modelRuntime.areSqltoerdLayoutsEqual(
     layoutWithCreatedFrame,
@@ -6611,7 +6650,9 @@ assert.deepEqual(
 
 assert.match(canvasSurface, /SqlErdNoteShapeUtil/);
 assert.match(canvasSurface, /SqlErdFrameShapeUtil/);
+assert.match(canvasSurface, /SqlErdTextShapeUtil/);
 assert.match(annotationToolbar, /aria-label="메모 추가"/);
 assert.match(annotationToolbar, /aria-label="프레임 추가"/);
+assert.match(annotationToolbar, /aria-label="텍스트 추가"/);
 assert.match(canvasSurface, /onLayoutPatch\(\{ tablePositions: nextLayoutJson\.tableLayouts \}\)/);
 assert.doesNotMatch(canvasSurface, /onLayoutChange/);

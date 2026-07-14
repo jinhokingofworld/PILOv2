@@ -394,6 +394,19 @@ function canvasFrame(id, overrides = {}) {
   };
 }
 
+function canvasText(id, overrides = {}) {
+  return {
+    id,
+    x: 160,
+    y: 200,
+    width: 240,
+    height: 72,
+    text: "Schema note",
+    color: "slate",
+    ...overrides
+  };
+}
+
 function oversizedText(size) {
   return "x".repeat(size);
 }
@@ -1611,7 +1624,8 @@ await assertRouteBodyLimit(
     )
   ], {
     notes: [canvasNote("note_billing")],
-    frames: [canvasFrame("frame_billing")]
+    frames: [canvasFrame("frame_billing")],
+    texts: [canvasText("text_billing")]
   });
   const normalizedLegacy = validateCreateSqlErdSessionRequest({
     sourceFormat: "sql",
@@ -1641,6 +1655,16 @@ await assertRouteBodyLimit(
     {
       layout: layoutJson({
         annotations: annotations([], {
+          texts: Array.from({ length: 101 }, (_, index) =>
+            canvasText(`text_${index}`)
+          )
+        })
+      }),
+      message: /layoutJson\.annotations\.texts length limit exceeded/
+    },
+    {
+      layout: layoutJson({
+        annotations: annotations([], {
           frames: [canvasFrame("frame_invalid", { color: "purple" })]
         })
       }),
@@ -1657,6 +1681,22 @@ await assertRouteBodyLimit(
     {
       layout: layoutJson({
         annotations: annotations([], {
+          texts: [canvasText("text_too_long", { text: oversizedText(2001) })]
+        })
+      }),
+      message: /layoutJson\.annotations\.texts\[0\]\.text length limit exceeded/
+    },
+    {
+      layout: layoutJson({
+        annotations: annotations([], {
+          texts: [canvasText("text_invalid_color", { color: "purple" })]
+        })
+      }),
+      message: /layoutJson\.annotations\.texts\[0\]\.color is invalid/
+    },
+    {
+      layout: layoutJson({
+        annotations: annotations([], {
           frames: [canvasFrame("frame_too_long", { title: oversizedText(201) })]
         })
       }),
@@ -1667,6 +1707,15 @@ await assertRouteBodyLimit(
         annotations: annotations([
           tableAnnotation("annotation_duplicate_note", "table_users", "table_orders")
         ], { notes: [canvasNote("annotation_duplicate_note")] })
+      }),
+      message: /duplicate annotation id/
+    },
+    {
+      layout: layoutJson({
+        annotations: annotations([], {
+          notes: [canvasNote("annotation_duplicate_text")],
+          texts: [canvasText("annotation_duplicate_text")]
+        })
       }),
       message: /duplicate annotation id/
     },
