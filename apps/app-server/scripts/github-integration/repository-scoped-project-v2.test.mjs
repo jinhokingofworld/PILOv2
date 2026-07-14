@@ -170,6 +170,25 @@ function selectionDatabase({ repository = { id: repositoryId }, links = ["555555
     /const repositoryId = this\.readUuid\(query\.repositoryId, "repositoryId"\)/,
     "ProjectV2 listing must require repositoryId"
   );
+  assert.match(
+    source,
+    /SELECT COUNT\(\*\)::int AS total FROM github_projects_v2 gp WHERE/,
+    "The ProjectV2 count query must expose the same gp alias as the list query"
+  );
+  const listFilterBuilder = source.match(
+    /private buildGithubProjectV2Filters\([\s\S]*?\n  }\n\n  private githubProjectV2SelectSql/
+  )?.[0];
+  assert.ok(listFilterBuilder, "ProjectV2 list filters must remain locally testable");
+  assert.match(
+    listFilterBuilder,
+    /gpr\.project_v2_id = gp\.id/,
+    "The repository-link filter must correlate with the outer ProjectV2 row"
+  );
+  assert.match(
+    listFilterBuilder,
+    /gps\.installation_id = gp\.installation_id[\s\S]{0,120}gps\.project_v2_id = gp\.id/,
+    "The selection filter must correlate with the outer ProjectV2 row"
+  );
 }
 
 console.log("repository-scoped ProjectV2 tests passed");

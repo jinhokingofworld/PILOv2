@@ -190,7 +190,7 @@ export class GithubProjectV2Service {
       repositoryId
     );
     const count = await this.countRows(
-      `SELECT COUNT(*)::int AS total FROM github_projects_v2 WHERE ${whereSql}`,
+      `SELECT COUNT(*)::int AS total FROM github_projects_v2 gp WHERE ${whereSql}`,
       values
     );
     const rows = await this.database.query<GithubProjectV2Row>(
@@ -689,21 +689,21 @@ export class GithubProjectV2Service {
     repositoryId: string | null
   ): { whereSql: string; values: unknown[] } {
     const values: unknown[] = [workspaceId];
-    const filters = ["workspace_id = $1"];
+    const filters = ["gp.workspace_id = $1"];
 
     if (ownerLogin) {
       values.push(ownerLogin);
-      filters.push(`owner_login = $${values.length}`);
+      filters.push(`gp.owner_login = $${values.length}`);
     }
 
     if (!includeClosed) {
-      filters.push("closed = false");
+      filters.push("gp.closed = false");
     }
 
     if (search) {
       values.push(`%${search}%`);
       filters.push(
-        `(title ILIKE $${values.length} OR short_description ILIKE $${values.length})`
+        `(gp.title ILIKE $${values.length} OR gp.short_description ILIKE $${values.length})`
       );
     }
 
@@ -711,15 +711,15 @@ export class GithubProjectV2Service {
     filters.push(`EXISTS (
       SELECT 1
       FROM github_project_v2_repositories gpr
-      WHERE gpr.project_v2_id = id
+      WHERE gpr.project_v2_id = gp.id
         AND gpr.repository_id = $${values.length}
     )`);
 
     if (!management) {
       filters.push(`EXISTS (
         SELECT 1 FROM github_project_v2_selections gps
-          WHERE gps.installation_id = installation_id
-            AND gps.project_v2_id = id
+          WHERE gps.installation_id = gp.installation_id
+            AND gps.project_v2_id = gp.id
             AND gps.repository_id = $${values.length}
       )`);
     }
