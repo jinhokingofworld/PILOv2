@@ -7,6 +7,10 @@ require("reflect-metadata");
 const { SqlErdService } = require(
   "../../dist/modules/sql-erd/sql-erd.service.js"
 );
+const {
+  validateCreateSqlErdOperationRequest,
+  validateListSqlErdOperationsQuery
+} = require("../../dist/modules/sql-erd/sql-erd-operation.validation.js");
 
 const migrationFilenames = await readdir(
   new URL("../../../../db/migrations/", import.meta.url)
@@ -149,6 +153,38 @@ function sessionRow(overrides = {}) {
 
 const service = new SqlErdService(new FakeDatabase(sessionRow()), workspaceService);
 
+const operationRequestFixture = {
+  baseRevision: 1,
+  clientOperationId: "note-create-1",
+  type: "layout_patch",
+  patch: {
+    annotations: {
+      notes: {
+        upsert: [
+          {
+            id: "note-1",
+            x: 120,
+            y: 160,
+            width: 240,
+            height: 160,
+            text: "Remote schema decision"
+          }
+        ]
+      }
+    }
+  }
+};
+
+const normalizedOperationFixture = validateCreateSqlErdOperationRequest(
+  operationRequestFixture
+);
+assert.equal(normalizedOperationFixture.clientOperationId, "note-create-1");
+assert.deepEqual(normalizedOperationFixture.patch.annotations.notes.upsert, operationRequestFixture.patch.annotations.notes.upsert);
+assert.deepEqual(validateListSqlErdOperationsQuery({ afterSeq: "0", limit: "100" }), {
+  afterSeq: 0,
+  limit: 100
+});
+
 assert.equal(
   typeof service.createOperation,
   "function",
@@ -162,27 +198,7 @@ assert.equal(
     currentUserId,
     workspaceId,
     sessionId,
-    {
-      baseRevision: 1,
-      clientOperationId: "note-create-1",
-      type: "layout_patch",
-      patch: {
-        annotations: {
-          notes: {
-            upsert: [
-              {
-                id: "note-1",
-                x: 120,
-                y: 160,
-                width: 240,
-                height: 160,
-                text: "Remote schema decision"
-              }
-            ]
-          }
-        }
-      }
-    }
+    operationRequestFixture
   );
 
   assert.equal(result.revision, 3);
