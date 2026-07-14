@@ -154,4 +154,5 @@ assert.match(redisPubSub, /PX: options\.px/);
 assert.match(redisPubSub, /subscribe\(channel/);
 
 await import("./canvas-access.test.mjs");
+await import("./sql-erd-presence.test.mjs");
 await import("./pr-review-decision-events.test.mjs");

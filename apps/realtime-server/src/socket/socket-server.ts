@@ -17,6 +17,13 @@ import { createCanvasPresenceService } from "../canvas/canvas-presence.service";
 import { createCanvasRoomService } from "../canvas/canvas-room.service";
 import { createCanvasShapeLockService } from "../canvas/canvas-shape-lock.service";
 import { createCanvasShapePreviewService } from "../canvas/canvas-shape-preview.service";
+import { createSqlErdAccessService } from "../sql-erd/sql-erd-access.service";
+import { createSqlErdPresenceService } from "../sql-erd/sql-erd-presence.service";
+import { createSqlErdRoomService } from "../sql-erd/sql-erd-room.service";
+import {
+  sqlErdClientEvents,
+  sqlErdServerEvents,
+} from "../sql-erd/sql-erd-socket-events";
 import { createMeetingAccessService } from "../meeting/meeting-access.service";
 import {
   isMeetingReportRedisEvent,
@@ -36,6 +43,13 @@ import type {
   CanvasShapePreviewClearRequestPayload,
   CanvasShapePreviewPayload,
 } from "../canvas/canvas-types";
+import type {
+  SqlErdPresencePoint,
+  SqlErdPresenceTool,
+  SqlErdPresenceState,
+  SqlErdPresenceUpdatePayload,
+  SqlErdRoomRef,
+} from "../sql-erd/sql-erd-types";
 import { createRealtimeDatabase } from "../database/database";
 import { createSocketIoRedisAdapter } from "../redis/redis-pubsub";
 import {
@@ -43,7 +57,11 @@ import {
   PR_REVIEW_DECISION_REDIS_CHANNEL,
   PR_REVIEW_DECISION_UPDATED_EVENT,
 } from "../pr-review/pr-review-socket-events";
-import { createCanvasRoomName, createMeetingRoomName } from "./room-names";
+import {
+  createCanvasRoomName,
+  createMeetingRoomName,
+  createSqlErdRoomName,
+} from "./room-names";
 import { createSocketAuthContext } from "./socket-auth";
 import { createSocketErrorPayload } from "./socket-errors";
 
@@ -62,6 +80,7 @@ type AuthedSocket = Socket & {
       displayName?: string;
     };
     canvasRoomAccess: Map<string, CanvasRoomAccess>;
+    sqlErdPresenceByRoom: Record<string, SqlErdPresenceState>;
   };
 };
 
@@ -95,6 +114,68 @@ function readRoomRef(payload: unknown): CanvasRoomRef | null {
   if (!workspaceId || !canvasId) return null;
 
   return { canvasId, workspaceId };
+}
+
+function readSqlErdRoomRef(payload: unknown): SqlErdRoomRef | null {
+  if (!isRecord(payload)) return null;
+
+  const workspaceId = readRequiredString(payload, "workspaceId");
+  const sessionId = readRequiredString(payload, "sessionId");
+
+  if (!workspaceId || !sessionId) return null;
+
+  return { sessionId, workspaceId };
+}
+
+function isSqlErdPresencePoint(value: unknown): value is SqlErdPresencePoint {
+  return (
+    isRecord(value) &&
+    typeof value.x === "number" &&
+    typeof value.y === "number" &&
+    Number.isFinite(value.x) &&
+    Number.isFinite(value.y)
+  );
+}
+
+function isSqlErdPresenceTool(value: unknown): value is SqlErdPresenceTool {
+  return (
+    value === "draw" ||
+    value === "eraser" ||
+    value === "frame" ||
+    value === "note" ||
+    value === "select" ||
+    value === "text"
+  );
+}
+
+function readSqlErdPresenceUpdatePayload(
+  payload: unknown,
+): SqlErdPresenceUpdatePayload | null {
+  const room = readSqlErdRoomRef(payload);
+
+  if (!room || !isRecord(payload)) return null;
+
+  const cursor = payload.cursor;
+  const selectedShapeIds = payload.selectedShapeIds;
+
+  if (cursor !== null && !isSqlErdPresencePoint(cursor)) return null;
+  if (
+    !Array.isArray(selectedShapeIds) ||
+    selectedShapeIds.length > 100 ||
+    !selectedShapeIds.every(
+      (shapeId) => typeof shapeId === "string" && shapeId.length <= 200,
+    ) ||
+    !isSqlErdPresenceTool(payload.tool)
+  ) {
+    return null;
+  }
+
+  return {
+    ...room,
+    cursor,
+    selectedShapeIds: Array.from(new Set(selectedShapeIds)),
+    tool: payload.tool,
+  };
 }
 
 function isCanvasPresencePoint(value: unknown): value is CanvasPresencePoint {
@@ -356,6 +437,54 @@ function emitCanvasError(socket: Socket, message: string) {
   );
 }
 
+function emitSqlErdError(socket: Socket, message: string) {
+  socket.emit(
+    sqlErdServerEvents.error,
+    createSocketErrorPayload("invalid_payload", message),
+  );
+}
+
+function isSqlErdPresenceState(
+  value: unknown,
+): value is SqlErdPresenceState {
+  return (
+    isRecord(value) &&
+    typeof value.sessionId === "string" &&
+    typeof value.workspaceId === "string" &&
+    typeof value.userId === "string" &&
+    (value.cursor === null || isSqlErdPresencePoint(value.cursor)) &&
+    Array.isArray(value.selectedShapeIds) &&
+    value.selectedShapeIds.every((shapeId) => typeof shapeId === "string") &&
+    isSqlErdPresenceTool(value.tool) &&
+    typeof value.updatedAt === "string"
+  );
+}
+
+async function getSqlErdRoomSocketPresence(
+  io: Server,
+  room: SqlErdRoomRef,
+  roomName: string,
+): Promise<SqlErdPresenceState[]> {
+  const sockets = await io.in(roomName).fetchSockets();
+  const presenceByUserId = new Map<string, SqlErdPresenceState>();
+
+  for (const socket of sockets) {
+    const socketData = socket.data as {
+      sqlErdPresenceByRoom?: Record<string, unknown>;
+    };
+    const presence = socketData.sqlErdPresenceByRoom?.[roomName];
+
+    if (!isSqlErdPresenceState(presence)) continue;
+    if (presence.workspaceId !== room.workspaceId || presence.sessionId !== room.sessionId) {
+      continue;
+    }
+
+    presenceByUserId.set(presence.userId, presence);
+  }
+
+  return [...presenceByUserId.values()];
+}
+
 function assertCanvasRoomWritable(
   socket: AuthedSocket,
   roomName: string,
@@ -411,8 +540,10 @@ export async function createRealtimeSocketServer({
 
   const sessionService = createRealtimeSessionService(database);
   const accessService = createCanvasAccessService(database);
+  const sqlErdAccessService = createSqlErdAccessService(database);
   const boardAccessService = createBoardAccessService(database);
   const presenceService = createCanvasPresenceService();
+  const sqlErdPresenceService = createSqlErdPresenceService();
   const shapeLockService = createCanvasShapeLockService({
     redisClient: redisAdapter?.stateClient ?? null,
   });
@@ -424,6 +555,10 @@ export async function createRealtimeSocketServer({
     presenceService,
     shapeLockService,
     shapePreviewService,
+  });
+  const sqlErdRoomService = createSqlErdRoomService({
+    accessService: sqlErdAccessService,
+    presenceService: sqlErdPresenceService,
   });
   const meetingAccessService = createMeetingAccessService(database);
   const boardRoomService = createBoardRoomService({
@@ -517,6 +652,7 @@ export async function createRealtimeSocketServer({
           userId: session.userId,
         };
         (socket as AuthedSocket).data.canvasRoomAccess = new Map();
+        (socket as AuthedSocket).data.sqlErdPresenceByRoom = {};
         next();
       })
       .catch(next);
@@ -549,6 +685,38 @@ export async function createRealtimeSocketServer({
       await socket.join(result.roomName);
       authedSocket.data.canvasRoomAccess.set(result.roomName, result.access);
       socket.emit(canvasServerEvents.joined, result.payload);
+    });
+
+    socket.on(sqlErdClientEvents.join, async (payload) => {
+      const joinPayload = readSqlErdRoomRef(payload);
+
+      if (!joinPayload) {
+        emitSqlErdError(socket, "sql-erd:join payload is invalid");
+        return;
+      }
+
+      const result = await sqlErdRoomService.joinSqlErdRoom(
+        authedSocket.data.auth,
+        joinPayload,
+      );
+
+      if (!result.joined) {
+        socket.emit(
+          sqlErdServerEvents.error,
+          createSocketErrorPayload("forbidden", "SQLtoERD room access denied"),
+        );
+        return;
+      }
+
+      await socket.join(result.roomName);
+      socket.emit(sqlErdServerEvents.joined, {
+        ...result.payload,
+        presence: await getSqlErdRoomSocketPresence(
+          io,
+          joinPayload,
+          result.roomName,
+        ),
+      });
     });
 
     socket.on(meetingClientEvents.subscribe, async payload => {
@@ -624,6 +792,25 @@ export async function createRealtimeSocketServer({
       }
     });
 
+    socket.on(sqlErdClientEvents.leave, async (payload) => {
+      const room = readSqlErdRoomRef(payload);
+
+      if (!room) {
+        emitSqlErdError(socket, "sql-erd:leave payload is invalid");
+        return;
+      }
+
+      const roomName = createSqlErdRoomName(room);
+      const leavePayload = sqlErdPresenceService.clearRoomPresence(socket.id, room);
+
+      await socket.leave(roomName);
+      delete authedSocket.data.sqlErdPresenceByRoom[roomName];
+
+      if (leavePayload) {
+        socket.to(roomName).emit(sqlErdServerEvents.presenceLeave, leavePayload);
+      }
+    });
+
     registerBoardSocketHandlers({
       context: authedSocket.data.auth,
       roomService: boardRoomService,
@@ -661,6 +848,40 @@ export async function createRealtimeSocketServer({
       );
 
       socket.to(roomName).emit(canvasServerEvents.presenceUpdate, presence);
+    });
+
+    socket.on(sqlErdClientEvents.presenceUpdate, (payload) => {
+      const presencePayload = readSqlErdPresenceUpdatePayload(payload);
+
+      if (!presencePayload) {
+        emitSqlErdError(socket, "sql-erd:presence:update payload is invalid");
+        return;
+      }
+
+      const roomName = createSqlErdRoomName(presencePayload);
+
+      if (!socket.rooms.has(roomName)) {
+        socket.emit(
+          sqlErdServerEvents.error,
+          createSocketErrorPayload(
+            "room_not_joined",
+            "join SQLtoERD room before sending presence",
+          ),
+        );
+        return;
+      }
+
+      const presence = sqlErdPresenceService.updatePresence(
+        socket.id,
+        {
+          displayName: authedSocket.data.auth.displayName,
+          userId: authedSocket.data.auth.userId ?? socket.id,
+        },
+        presencePayload,
+      );
+      authedSocket.data.sqlErdPresenceByRoom[roomName] = presence;
+
+      socket.to(roomName).emit(sqlErdServerEvents.presenceUpdate, presence);
     });
 
     socket.on(canvasClientEvents.shapeLockClaim, async (payload) => {
@@ -824,6 +1045,7 @@ export async function createRealtimeSocketServer({
     socket.on("disconnect", () => {
       void (async () => {
         const leaveEvents = presenceService.clearSocket(socket.id);
+        const sqlErdLeaveEvents = sqlErdPresenceService.clearSocket(socket.id);
         const [lockReleaseEvents, previewClearEvents] = await Promise.all([
           shapeLockService.clearSocket(socket.id),
           shapePreviewService.clearSocket(socket.id),
@@ -833,6 +1055,12 @@ export async function createRealtimeSocketServer({
           socket
             .to(createCanvasRoomName(leavePayload))
             .emit(canvasServerEvents.presenceLeave, leavePayload);
+        }
+
+        for (const leavePayload of sqlErdLeaveEvents) {
+          socket
+            .to(createSqlErdRoomName(leavePayload))
+            .emit(sqlErdServerEvents.presenceLeave, leavePayload);
         }
 
         for (const lockReleasePayload of lockReleaseEvents) {
@@ -847,7 +1075,7 @@ export async function createRealtimeSocketServer({
             .emit(canvasServerEvents.shapePreviewClear, previewClearPayload);
         }
       })().catch((error) => {
-        console.error("Canvas socket disconnect cleanup failed", error);
+        console.error("Realtime socket disconnect cleanup failed", error);
       });
     });
   });
