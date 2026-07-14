@@ -17,6 +17,7 @@ import {
   ExternalLink,
   FileText,
   GitBranch,
+  GitMerge,
   HelpCircle,
   Loader2,
   MessageSquareWarning,
@@ -81,6 +82,8 @@ type PrReviewFileDiffDrawerProps = {
   baseBranch: string | null;
   conflictAnalysisErrorMessage: string | null;
   conflictAnalysisStatus: ConflictAnalysisLoadStatus;
+  conflictApplyDisabledReason: string | null;
+  conflictApplyProgress: { ready: number; total: number };
   conflictDraft: PrReviewConflictDraft | null;
   conflictFile: PrReviewConflictFile | null;
   headBranch: string | null;
@@ -88,6 +91,7 @@ type PrReviewFileDiffDrawerProps = {
   isReviewVersionStale: boolean;
   isReviewSessionConflicted: boolean;
   onClose: () => void;
+  onOpenConflictApply: () => void;
   onConflictDraftChange: (
     reviewFileId: string,
     draft: PrReviewConflictDraft
@@ -302,6 +306,8 @@ export function PrReviewFileDiffDrawer({
   baseBranch,
   conflictAnalysisErrorMessage,
   conflictAnalysisStatus,
+  conflictApplyDisabledReason,
+  conflictApplyProgress,
   conflictDraft,
   conflictFile,
   headBranch,
@@ -309,6 +315,7 @@ export function PrReviewFileDiffDrawer({
   isReviewVersionStale,
   isReviewSessionConflicted,
   onClose,
+  onOpenConflictApply,
   onConflictDraftChange,
   onRemoteConflictDraftUpdated,
   onRemoteConflictDraftInvalidated,
@@ -1031,6 +1038,8 @@ export function PrReviewFileDiffDrawer({
               conflictSuggestion={conflictSuggestion}
               conflictSuggestionErrorMessage={conflictSuggestionError}
               conflictSuggestionStatus={conflictSuggestionStatus}
+              conflictApplyDisabledReason={conflictApplyDisabledReason}
+              conflictApplyProgress={conflictApplyProgress}
               decisionConflictMessage={decisionConflictMessage}
               decisionStatus={decisionStatus}
               decisionDisabledReason={decisionDisabledReason}
@@ -1048,6 +1057,7 @@ export function PrReviewFileDiffDrawer({
               onApplyAllAiSuggestions={handleApplyAllAiSuggestions}
               onCreateConflictSuggestion={handleCreateConflictSuggestion}
               onDecisionStatusChange={handleDecisionStatusChange}
+              onOpenConflictApply={onOpenConflictApply}
               onOpenResolvedDraft={() => setConflictWorkspaceView("resolved")}
               resolutionComplete={resolutionComplete}
               resolvedHunkCount={resolvedHunkCount}
@@ -1162,6 +1172,8 @@ function ReviewNodePanel({
   conflictSuggestion,
   conflictSuggestionErrorMessage,
   conflictSuggestionStatus,
+  conflictApplyDisabledReason,
+  conflictApplyProgress,
   decisionConflictMessage,
   decisionStatus,
   decisionDisabledReason,
@@ -1175,6 +1187,7 @@ function ReviewNodePanel({
   onApplyAllAiSuggestions,
   onCreateConflictSuggestion,
   onDecisionStatusChange,
+  onOpenConflictApply,
   onOpenResolvedDraft,
   resolutionComplete,
   resolvedHunkCount,
@@ -1188,6 +1201,8 @@ function ReviewNodePanel({
   conflictSuggestion: PrReviewConflictSuggestion | null;
   conflictSuggestionErrorMessage: string | null;
   conflictSuggestionStatus: ConflictSuggestionLoadStatus;
+  conflictApplyDisabledReason: string | null;
+  conflictApplyProgress: { ready: number; total: number };
   decisionConflictMessage: string | null;
   decisionStatus: PrReviewFileDecisionStatus | null;
   decisionDisabledReason: string | null;
@@ -1201,6 +1216,7 @@ function ReviewNodePanel({
   onApplyAllAiSuggestions: () => void;
   onCreateConflictSuggestion: () => void;
   onDecisionStatusChange: (status: PrReviewFileDecisionStatus) => void;
+  onOpenConflictApply: () => void;
   onOpenResolvedDraft: () => void;
   resolutionComplete: boolean;
   resolvedHunkCount: number;
@@ -1255,12 +1271,15 @@ function ReviewNodePanel({
             conflictSuggestion={conflictSuggestion}
             conflictSuggestionErrorMessage={conflictSuggestionErrorMessage}
             conflictSuggestionStatus={conflictSuggestionStatus}
+            conflictApplyDisabledReason={conflictApplyDisabledReason}
+            conflictApplyProgress={conflictApplyProgress}
             isConflictDraftEditing={isConflictDraftEditing}
             isResolvedDraftCustomized={isResolvedDraftCustomized}
             isReviewReadOnly={isReviewReadOnly}
             onApplyAllAiSuggestions={onApplyAllAiSuggestions}
             onCreateConflictSuggestion={onCreateConflictSuggestion}
             onOpenResolvedDraft={onOpenResolvedDraft}
+            onOpenConflictApply={onOpenConflictApply}
             reason={decisionDisabledReason}
             resolutionComplete={resolutionComplete}
             resolvedHunkCount={resolvedHunkCount}
@@ -1415,12 +1434,15 @@ function ConflictResolutionPanel({
   conflictSuggestion,
   conflictSuggestionErrorMessage,
   conflictSuggestionStatus,
+  conflictApplyDisabledReason,
+  conflictApplyProgress,
   isConflictDraftEditing,
   isResolvedDraftCustomized,
   isReviewReadOnly,
   onApplyAllAiSuggestions,
   onCreateConflictSuggestion,
   onOpenResolvedDraft,
+  onOpenConflictApply,
   reason,
   resolutionComplete,
   resolvedHunkCount,
@@ -1430,12 +1452,15 @@ function ConflictResolutionPanel({
   conflictSuggestion: PrReviewConflictSuggestion | null;
   conflictSuggestionErrorMessage: string | null;
   conflictSuggestionStatus: ConflictSuggestionLoadStatus;
+  conflictApplyDisabledReason: string | null;
+  conflictApplyProgress: { ready: number; total: number };
   isConflictDraftEditing: boolean;
   isResolvedDraftCustomized: boolean;
   isReviewReadOnly: boolean;
   onApplyAllAiSuggestions: () => void;
   onCreateConflictSuggestion: () => void;
   onOpenResolvedDraft: () => void;
+  onOpenConflictApply: () => void;
   reason: string;
   resolutionComplete: boolean;
   resolvedHunkCount: number;
@@ -1557,6 +1582,36 @@ function ConflictResolutionPanel({
                 ? "다른 Conflict 파일도 준비되면 상단에서 전체 적용할 수 있습니다."
                 : "모든 Conflict 구간의 해결 방식을 선택해 주세요."}
             </p>
+          </div>
+
+          <div className="rounded-lg border border-slate-200 bg-white p-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold uppercase text-slate-500">
+                  GitHub 적용
+                </p>
+                <p className="mt-1 text-sm font-semibold text-slate-950">
+                  {conflictApplyProgress.ready} / {conflictApplyProgress.total} 파일 준비됨
+                </p>
+              </div>
+              <Button
+                disabled={Boolean(conflictApplyDisabledReason)}
+                onClick={onOpenConflictApply}
+                size="sm"
+                type="button"
+              >
+                <GitMerge className="size-3.5" />
+                GitHub에 전체 적용
+              </Button>
+            </div>
+            <p className="mt-2 text-xs leading-5 text-slate-500">
+              준비한 모든 Conflict 파일을 merge commit 하나로 PR 브랜치에 적용합니다.
+            </p>
+            {conflictApplyDisabledReason ? (
+              <p className="mt-2 text-xs leading-5 text-amber-700">
+                {conflictApplyDisabledReason}
+              </p>
+            ) : null}
           </div>
         </div>
       ) : null}

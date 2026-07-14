@@ -1034,6 +1034,16 @@ export function PrReviewCanvasShell({
     }
   }
 
+  function openConflictApplyConfirm() {
+    setConflictApplyError(null);
+    setConflictApplyResult(null);
+    setConflictApplyStatus("idle");
+    setConflictApplyRequiresGithubReconnect(false);
+    setGithubReconnectStatus("idle");
+    setGithubReconnectMessage(null);
+    setIsConflictApplyConfirmOpen(true);
+  }
+
   async function handleReconnectGithubOAuth() {
     const reconnectWindow = window.open(
       "about:blank",
@@ -1070,77 +1080,41 @@ export function PrReviewCanvasShell({
   return (
     <div className="fixed inset-0 z-[60] flex flex-col overflow-hidden bg-slate-50 text-slate-950">
       <header className="flex h-16 shrink-0 items-center gap-3 overflow-x-auto border-b border-slate-200 bg-white px-4">
-        <Button onClick={onBackToSelection} type="button" variant="outline">
-          <ArrowLeft className="size-4" />
-          {backLabel}
-        </Button>
-        <div className="flex h-10 min-w-0 items-center gap-2 rounded-lg border border-slate-200 px-3 text-sm font-medium">
-          <GitBranch className="size-4 shrink-0 text-slate-500" />
-          <span className="max-w-44 truncate">{headBranch}</span>
-          <span className="text-slate-400">→</span>
-          <span className="max-w-32 truncate">{baseBranch}</span>
+        <div className="flex min-w-0 items-center gap-3">
+          <Button onClick={onBackToSelection} type="button" variant="outline">
+            <ArrowLeft className="size-4" />
+            {backLabel}
+          </Button>
+          <div className="flex h-10 min-w-0 items-center gap-2 rounded-lg border border-slate-200 px-3 text-sm font-medium">
+            <GitBranch className="size-4 shrink-0 text-slate-500" />
+            <span className="max-w-44 truncate">{headBranch}</span>
+            <span className="text-slate-400">→</span>
+            <span className="max-w-32 truncate">{baseBranch}</span>
+          </div>
         </div>
-        <div className="hidden h-10 items-center gap-2 rounded-lg border border-slate-200 px-3 text-sm md:flex">
+        <div className="hidden h-10 shrink-0 items-center gap-2 rounded-lg border border-slate-200 px-3 text-sm md:flex">
           <GitPullRequest className="size-4 text-blue-600" />
           <span>리뷰 진행률</span>
           <strong>{progressLabel}</strong>
         </div>
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex shrink-0 items-center gap-2">
           <span
             className={cn(
-              "inline-flex h-10 items-center rounded-full border px-3 text-sm font-medium",
+              "inline-flex h-10 items-center gap-2 rounded-lg border px-3 text-sm font-medium",
               getConflictClassName(conflictStatus)
             )}
           >
             {getConflictLabel(conflictStatus)}
-          </span>
-          {conflictStatus === "conflicted" ? (
-            <>
-              <span className="inline-flex h-10 items-center rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700">
-                해결 준비&nbsp;
+            {conflictStatus === "conflicted" ? (
+              <span className="border-l border-current/20 pl-2 text-xs font-semibold">
+                해결&nbsp;
                 <strong>
                   {formatNumber(conflictDraftProgress.ready)} /{" "}
                   {formatNumber(conflictDraftProgress.total)}
                 </strong>
               </span>
-              {conflictApplyDisabledReason ? (
-                <span
-                  aria-live="polite"
-                  className="max-w-72 truncate text-xs text-amber-700"
-                  title={conflictApplyDisabledReason}
-                >
-                  {conflictApplyDisabledReason}
-                </span>
-              ) : null}
-              <Tooltip>
-                <TooltipTrigger render={<span />}>
-                  <Button
-                    disabled={
-                      Boolean(conflictApplyDisabledReason) ||
-                      conflictApplyStatus === "applying"
-                    }
-                    onClick={() => {
-                      setConflictApplyError(null);
-                      setConflictApplyResult(null);
-                      setConflictApplyStatus("idle");
-                      setConflictApplyRequiresGithubReconnect(false);
-                      setGithubReconnectStatus("idle");
-                      setGithubReconnectMessage(null);
-                      setIsConflictApplyConfirmOpen(true);
-                    }}
-                    type="button"
-                  >
-                    <GitMerge className="size-4" />
-                    Conflict 해결안 적용
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  {conflictApplyDisabledReason ??
-                    "준비한 모든 Conflict 파일을 merge commit 하나로 적용합니다."}
-                </TooltipContent>
-              </Tooltip>
-            </>
-          ) : null}
+            ) : null}
+          </span>
           <Button
             disabled={
               loadStatus !== "ready" || reviewSubmitted || isReviewReadOnly
@@ -1299,6 +1273,8 @@ export function PrReviewCanvasShell({
               baseBranch={summary?.baseBranch ?? latestPullRequest?.baseBranch ?? null}
               conflictAnalysisErrorMessage={conflictAnalysisError}
               conflictAnalysisStatus={conflictAnalysisStatus}
+              conflictApplyDisabledReason={conflictApplyDisabledReason}
+              conflictApplyProgress={conflictDraftProgress}
               conflictDraft={selectedConflictDraft}
               conflictFile={selectedConflictFile}
               headBranch={summary?.headBranch ?? latestPullRequest?.headBranch ?? null}
@@ -1306,6 +1282,7 @@ export function PrReviewCanvasShell({
               isReviewVersionStale={isReviewVersionStale}
               isReviewSessionConflicted={conflictStatus === "conflicted"}
               onClose={() => setSelectedReviewFileId(null)}
+              onOpenConflictApply={openConflictApplyConfirm}
               onConflictDraftChange={handleConflictDraftChange}
               onRemoteConflictDraftUpdated={handleRemoteConflictDraftUpdated}
               onRemoteConflictDraftInvalidated={handleRemoteConflictDraftInvalidated}

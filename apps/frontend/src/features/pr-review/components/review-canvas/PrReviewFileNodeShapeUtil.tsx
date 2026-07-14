@@ -14,6 +14,7 @@ import {
   type TLBaseShape,
   type TLShape
 } from "tldraw";
+import { AlertTriangle } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { activatePrReviewFileNode } from "@/features/pr-review/components/review-canvas/pr-review-node-activation";
@@ -380,7 +381,7 @@ function PrReviewFileNode({ shape }: { shape: PrReviewFileNodeShape }) {
     >
       <article
         className={cn(
-          "flex h-full w-full flex-col justify-between rounded-md border-2 px-4 py-3 shadow-sm",
+          "relative flex h-full w-full flex-col justify-between rounded-md border-2 px-4 py-3 shadow-sm",
           conflictState
             ? conflictNodeClasses[conflictState]
             : riskNodeClasses[shape.props.riskLevel],
@@ -391,6 +392,15 @@ function PrReviewFileNode({ shape }: { shape: PrReviewFileNodeShape }) {
               : undefined
         )}
       >
+        {conflictState === "unresolved" ? (
+          <span
+            aria-label="해결이 필요한 Conflict"
+            className="pointer-events-none absolute right-3 top-3 flex size-7 items-center justify-center rounded-full bg-rose-600 text-white shadow-sm"
+            title={shape.props.conflictReason ?? "해결이 필요한 Conflict"}
+          >
+            <AlertTriangle aria-hidden="true" className="size-4" />
+          </span>
+        ) : null}
         <div className="flex min-w-0 items-start gap-3">
           <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-blue-600 text-sm font-semibold text-white">
             {shape.props.workflowOrder}
@@ -409,7 +419,7 @@ function PrReviewFileNode({ shape }: { shape: PrReviewFileNodeShape }) {
             {shape.props.roleSummary || fileStatusLabels[shape.props.fileStatus]}
           </span>
           <div className="flex shrink-0 items-center gap-1">
-            {conflictState ? (
+            {conflictState && conflictState !== "unresolved" ? (
               <span
                 className={cn(
                   "rounded-full border px-2 py-0.5 font-semibold",
