@@ -104,6 +104,9 @@ const workspaceIconMigration = await readSource(
 const userSettingsMigration = await readSource(
   "../../../db/migrations/052_create_user_settings_and_account_lifecycle.sql"
 );
+const meetingRoomsMigration = await readSource(
+  "../../../db/migrations/053_create_meeting_rooms.sql"
+);
 const canvasShapeHashMigration = await readSource(
   "../../../db/migrations/009_canvas_shape_hash_revision_viewport_index.sql"
 );
@@ -177,6 +180,23 @@ assert.match(apiError, /"CONFLICT"/);
 assert.match(apiError, /"PAYLOAD_TOO_LARGE"/);
 assert.match(apiError, /export function conflict\(message: string\): ApiError/);
 assert.match(apiError, /HttpStatus\.CONFLICT/);
+assert.match(meetingController, /@Get\("meeting-rooms"\)/);
+assert.match(meetingController, /@Post\("meeting-rooms"\)/);
+assert.match(meetingController, /@Patch\("meeting-rooms\/:meetingRoomId"\)/);
+assert.match(meetingController, /@Delete\("meeting-rooms\/:meetingRoomId"\)/);
+assert.match(meetingController, /@Get\("meeting-rooms\/:meetingRoomId\/current"\)/);
+assert.match(meetingController, /@Post\("meeting-rooms\/:meetingRoomId\/meetings"\)/);
+assert.match(meetingService, /async listMeetingRooms\(/);
+assert.match(meetingService, /async createMeetingRoom\(/);
+assert.match(meetingService, /async updateMeetingRoom\(/);
+assert.match(meetingService, /async deleteMeetingRoom\(/);
+assert.match(meetingService, /async startMeetingInRoom\(/);
+assert.match(meetingService, /assertWorkspaceOwnerAccess/);
+assert.match(meetingRoomsMigration, /CREATE TABLE public\.meeting_rooms/);
+assert.match(meetingRoomsMigration, /unique_active_meeting_room_key/);
+assert.match(meetingRoomsMigration, /unique_active_meeting_room_name/);
+assert.match(meetingRoomsMigration, /ALTER TABLE public\.meeting_rooms ENABLE ROW LEVEL SECURITY/);
+assert.match(meetingRoomsMigration, /trg_workspaces_create_default_meeting_room/);
 assert.match(
   apiError,
   /export function payloadTooLarge\(message: string\): ApiError/

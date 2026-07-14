@@ -43,6 +43,7 @@ import {
   MeetingReportSection,
   type MeetingReportStatusFilter
 } from "@/features/meeting/components/meeting-report-section";
+import { useMeetingRooms } from "@/features/meeting/hooks/use-meeting-rooms";
 import { useMeetingWorkspaceData } from "@/features/meeting/hooks/use-meeting-workspace-data";
 import { meetingNavigation } from "@/features/meeting/navigation";
 import { useMeetingRuntime } from "@/features/meeting/runtime/meeting-runtime-provider";
@@ -339,16 +340,32 @@ export function MeetingPanel() {
     },
     []
   );
+  const meetingRoomsData = useMeetingRooms({
+    accessToken,
+    enabled: Boolean(workspaceId && accessToken),
+    workspaceId
+  });
+  const {
+    error: meetingRoomsError,
+    reloadMeetingRooms,
+    rooms: meetingRooms,
+    selectMeetingRoom,
+    selectedMeetingRoomId,
+    status: meetingRoomsStatus
+  } = meetingRoomsData;
   const meetingData = useMeetingWorkspaceData({
     accessToken,
     enabled: Boolean(workspaceId && accessToken),
+    meetingRoomId: selectedMeetingRoomId,
     reportsEnabled: activeSection === "report",
     reportsQuery,
     workspaceId
   });
   const {
+    activeMeetingId,
     connectToMeeting,
     disconnectFromMeeting,
+    leaveActiveMeeting,
     liveKitRoom
   } = useMeetingRuntime();
   const {
@@ -379,6 +396,7 @@ export function MeetingPanel() {
   const [pendingEndRecordingId, setPendingEndRecordingId] = useState<string | null>(null);
   const [recordingConsentAccepted, setRecordingConsentAccepted] =
     useState(false);
+  const [isMeetingRoomSwitching, setIsMeetingRoomSwitching] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const activeParticipants = useMemo(
@@ -394,10 +412,15 @@ export function MeetingPanel() {
     isCurrentUserActive &&
     (liveKitRoom.status === "disconnected" || liveKitRoom.status === "error");
   const isActionPending = actionStatus !== "idle";
-  const isInitialLoading = currentStatus === "loading" && meeting === null;
+  const isInitialLoading =
+    meetingRoomsStatus === "loading" ||
+    (currentStatus === "loading" && meeting === null);
   const hasRunningRecording = currentRecording?.status === "RUNNING";
   const recordingElapsedSeconds = useRecordingElapsedSeconds(currentRecording);
   const displayedActiveCount = activeParticipants.length || activeParticipantCount;
+  const selectedMeetingRoom = meetingRooms.find(
+    (room) => room.id === selectedMeetingRoomId
+  );
 
   useEffect(() => {
     setHeaderMeetingRecordingStatus(currentRecording?.status ?? null);
@@ -465,6 +488,39 @@ export function MeetingPanel() {
     const timeoutId = window.setTimeout(() => setToastMessage(null), 5000);
     return () => window.clearTimeout(timeoutId);
   }, [toastMessage]);
+
+  async function handleMeetingRoomChange(nextMeetingRoomId: string) {
+    if (!nextMeetingRoomId || nextMeetingRoomId === selectedMeetingRoomId) {
+      return;
+    }
+
+    setIsMeetingRoomSwitching(true);
+    setActionError(null);
+    setToastMessage(null);
+
+    try {
+      if (activeMeetingId) {
+        await leaveActiveMeeting();
+      } else if (isCurrentUserActive && meeting) {
+        await leaveMeeting(meeting.id);
+        await disconnectFromMeeting();
+      } else {
+        await disconnectFromMeeting();
+      }
+
+      setParticipants([]);
+      setParticipantError(null);
+      setParticipantStatus("idle");
+      selectMeetingRoom(nextMeetingRoomId);
+    } catch (error) {
+      const message = "회의방을 전환하지 못했습니다. 기존 회의 연결을 유지합니다.";
+      setActionError(message);
+      setToastMessage(message);
+      void error;
+    } finally {
+      setIsMeetingRoomSwitching(false);
+    }
+  }
 
   async function runEntryAction(
     action: EntryAction,
@@ -681,6 +737,9 @@ export function MeetingPanel() {
   const RecordingButtonIcon = hasRunningRecording ? Square : Radio;
   const isEntryButtonDisabled =
     isActionPending ||
+    isMeetingRoomSwitching ||
+    meetingRoomsStatus !== "success" ||
+    !selectedMeetingRoomId ||
     (!shouldLeaveMeeting &&
       (liveKitRoom.isConnecting || currentStatus === "loading"));
 
@@ -760,6 +819,42 @@ export function MeetingPanel() {
             ) : (
               <div className="flex flex-1 flex-col items-center justify-center gap-6 px-4 py-10">
                 <div className="w-full max-w-2xl text-center">
+                  <label className="mx-auto flex max-w-md flex-col gap-2 text-left text-sm font-medium">
+                    회의방
+                    <select
+                      aria-label="회의방 선택"
+                      className="h-10 rounded-md border bg-background px-3 text-sm font-normal outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                      disabled={
+                        meetingRoomsStatus !== "success" ||
+                        isActionPending ||
+                        isMeetingRoomSwitching
+                      }
+                      value={selectedMeetingRoomId ?? ""}
+                      onChange={(event) => {
+                        void handleMeetingRoomChange(event.target.value);
+                      }}
+                    >
+                      {meetingRooms.length === 0 ? (
+                        <option value="">사용 가능한 회의방이 없습니다.</option>
+                      ) : (
+                        meetingRooms.map((room) => (
+                          <option key={room.id} value={room.id}>
+                            {room.name}
+                            {room.isDefault ? " (기본)" : ""}
+                          </option>
+                        ))
+                      )}
+                    </select>
+                  </label>
+                  {isMeetingRoomSwitching ? (
+                    <p className="mt-2 text-sm text-muted-foreground">
+                      기존 음성 연결을 종료하고 회의방을 전환하는 중입니다.
+                    </p>
+                  ) : selectedMeetingRoom ? (
+                    <p className="mt-2 text-sm text-muted-foreground">
+                      {selectedMeetingRoom.name}의 회의 상태입니다.
+                    </p>
+                  ) : null}
                   <h2 className="text-2xl font-semibold">현재 참여 인원</h2>
                   <p className="mt-2 text-sm text-muted-foreground">
                     {displayedActiveCount}명 참여 중
@@ -886,12 +981,25 @@ export function MeetingPanel() {
                 {(actionError ||
                   participantError ||
                   currentError ||
+                  meetingRoomsError ||
                   liveKitRoom.errorMessage) && (
                   <div className="w-full max-w-2xl rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
                     {actionError ??
                       participantError ??
                       currentError?.message ??
+                      meetingRoomsError?.message ??
                       liveKitRoom.errorMessage}
+                    {meetingRoomsError ? (
+                      <Button
+                        className="mt-3"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => void reloadMeetingRooms()}
+                      >
+                        <RefreshCw />
+                        회의방 다시 불러오기
+                      </Button>
+                    ) : null}
                   </div>
                 )}
 
@@ -936,6 +1044,7 @@ export function MeetingPanel() {
                       !meeting ||
                       !isCurrentUserActive ||
                       isActionPending ||
+                      isMeetingRoomSwitching ||
                       liveKitRoom.status !== "connected"
                     }
                     size="lg"

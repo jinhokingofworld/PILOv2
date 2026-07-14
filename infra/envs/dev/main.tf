@@ -133,6 +133,7 @@ module "iam" {
   github_sync_worker_queue_arns      = module.sqs.github_sync_worker_queue_arns
   github_webhooks_queue_arn          = module.sqs.github_webhooks_queue_arn
   github_sync_operator_user_name     = "pilo-juhyung-github-ops"
+  team_administrator_user_names      = ["pilo-donghyun", "pilo-sein", "pilo-jinho"]
   github_sync_operator_dlq_arns      = module.sqs.github_sync_worker_dlq_arns
   github_sync_operator_log_group_arn = "arn:aws:logs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:log-group:/ecs/${local.name_prefix}/github-sync-worker"
   secrets_manager_arns               = concat(module.secrets.secret_arns, [module.rds.master_user_secret_arn])

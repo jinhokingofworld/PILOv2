@@ -17,6 +17,7 @@ import {
 
 const ACTIVE_STATUSES = new Set(["queued", "planning", "executing"]);
 const COMPLETED_PROGRESS_HIDE_DELAY_MS = 8000;
+const LONG_RUNNING_NOTICE_DELAY_MS = 25_000;
 
 export function useCanvasAgent({
   canvasId,
@@ -37,6 +38,7 @@ export function useCanvasAgent({
   const [error, setError] = useState<string | null>(null);
   const runIdRef = useRef<string | null>(null);
   const progressHideTimerRef = useRef<number | null>(null);
+  const longRunningTimerRef = useRef<number | null>(null);
   const [visibleProgress, setVisibleProgress] = useState<CanvasAgentProgress | null>(null);
 
   const clearProgressHideTimer = useCallback(() => {
@@ -45,11 +47,20 @@ export function useCanvasAgent({
     progressHideTimerRef.current = null;
   }, []);
 
+  const clearLongRunningTimer = useCallback(() => {
+    if (longRunningTimerRef.current === null) return;
+    window.clearTimeout(longRunningTimerRef.current);
+    longRunningTimerRef.current = null;
+  }, []);
+
   const presentRun = useCallback(
     (nextRun: CanvasAgentRun) => {
       setRun(nextRun);
       const progress = nextRun.presentationMode === "background" ? null : nextRun.progress;
       clearProgressHideTimer();
+      if (!ACTIVE_STATUSES.has(nextRun.status)) {
+        clearLongRunningTimer();
+      }
       setVisibleProgress(progress);
       if (progress && !ACTIVE_STATUSES.has(nextRun.status)) {
         progressHideTimerRef.current = window.setTimeout(() => {
@@ -79,7 +90,7 @@ export function useCanvasAgent({
         );
       }
     },
-    [clearProgressHideTimer, editor],
+    [clearLongRunningTimer, clearProgressHideTimer, editor],
   );
 
   const submit = useCallback(
@@ -95,6 +106,7 @@ export function useCanvasAgent({
       setRun(null);
       setDraft(null);
       clearProgressHideTimer();
+      clearLongRunningTimer();
       setVisibleProgress(null);
 
       if (options?.toolHelpMode) {
@@ -178,7 +190,16 @@ export function useCanvasAgent({
         setError(requestError instanceof Error ? requestError.message : "Canvas AI 요청에 실패했습니다.");
       }
     },
-    [canvasId, clearProgressHideTimer, client, editor, enabled, presentRun, workspaceId],
+    [
+      canvasId,
+      clearLongRunningTimer,
+      clearProgressHideTimer,
+      client,
+      editor,
+      enabled,
+      presentRun,
+      workspaceId,
+    ],
   );
 
   const cancel = useCallback(async () => {
@@ -237,7 +258,36 @@ export function useCanvasAgent({
     };
   }, [canvasId, client, presentRun, runStatus, workspaceId]);
 
-  useEffect(() => () => clearProgressHideTimer(), [clearProgressHideTimer]);
+  useEffect(() => {
+    if (!runStatus || !ACTIVE_STATUSES.has(runStatus)) {
+      clearLongRunningTimer();
+      return undefined;
+    }
+
+    clearLongRunningTimer();
+    longRunningTimerRef.current = window.setTimeout(() => {
+      setVisibleProgress((currentProgress) => currentProgress
+        ? {
+            ...currentProgress,
+            message: "Canvas AI 작업이 예상보다 오래 걸리고 있어요. 잠시 더 기다리거나 취소할 수 있습니다.",
+          }
+        : {
+            message: "Canvas AI 작업이 예상보다 오래 걸리고 있어요. 잠시 더 기다리거나 취소할 수 있습니다.",
+            highlightedShapeIds: [],
+            targetViewport: null,
+            toolTarget: null,
+            toolTargetLabel: null,
+          });
+      longRunningTimerRef.current = null;
+    }, LONG_RUNNING_NOTICE_DELAY_MS);
+
+    return () => clearLongRunningTimer();
+  }, [clearLongRunningTimer, runStatus]);
+
+  useEffect(() => () => {
+    clearProgressHideTimer();
+    clearLongRunningTimer();
+  }, [clearLongRunningTimer, clearProgressHideTimer]);
 
   return {
     applyDraft,

@@ -146,15 +146,15 @@ callback 성공 redirect를 실패로 바꾸지 않는다.
   installation/repository/issue/PR/ProjectV2/field/item이 여러 Workspace에
   동기화될 수 있으며, sync upsert는 현재 Workspace 또는 현재 ProjectV2 안에서만
   충돌 처리하고 다른 Workspace의 row를 재할당하지 않는다.
-- `full` sync는 허용 저장소를 먼저 갱신한 뒤 GitHub GraphQL의
-  `organization.projectsV2` 또는 `user.projectsV2`로 Projects v2를 발견한다.
+- `full` sync는 허용 저장소를 먼저 갱신한 뒤 각 저장소의 GitHub Projects 탭과 같은
+  GitHub GraphQL `repository(owner, name).projectsV2`로 Projects v2를 발견한다.
   organization ProjectV2는 GitHub App installation token을 사용하고, personal
   ProjectV2는 현재 사용자의 ProjectV2 OAuth token을 사용한다. 발견한
   ProjectV2는 `github_projects_v2`에 upsert하고, GitHub repository node id와
-  동기화된 저장소를 매칭해 `github_project_v2_repositories` 관계를 갱신한다.
+  현재 처리 중인 저장소에 대해서만 `github_project_v2_repositories` 관계를 갱신한다.
   ProjectV2 item sync는 GitHub ProjectV2 repository 연결 목록이 불완전한 경우에도
   동기화된 issue/PR content의 repository를 기준으로 이 관계를 보강한다.
-- Full sync discovers every ProjectV2 metadata record and repository link; only
+- Full sync discovers every repository-scoped ProjectV2 metadata record and repository link; only
   stored selections receive fields, items, and Board hydration. `repositoryId`
   can limit repository discovery but never expands the selected ProjectV2 detail
   scope.

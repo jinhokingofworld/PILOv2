@@ -3,6 +3,7 @@ import { QueryResultRow } from "pg";
 import {
   ApiError,
   badRequest,
+  conflict,
   forbidden,
   notFound
 } from "../../common/api-error";
@@ -50,6 +51,16 @@ interface MeetingRow extends QueryResultRow {
   ended_by_id: string | null;
   started_at: Date | string;
   ended_at: Date | string | null;
+  created_at: Date | string;
+  updated_at: Date | string;
+}
+
+interface MeetingRoomRow extends QueryResultRow {
+  id: string;
+  workspace_id: string;
+  room_key: string;
+  name: string;
+  created_by_id: string | null;
   created_at: Date | string;
   updated_at: Date | string;
 }
@@ -234,6 +245,10 @@ interface StartMeetingDraft {
   roomKey?: unknown;
 }
 
+interface MeetingRoomNameDraft {
+  name?: unknown;
+}
+
 export interface MeetingPayload {
   id: string;
   workspaceId: string;
@@ -245,6 +260,29 @@ export interface MeetingPayload {
   endedAt: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface MeetingRoomPayload {
+  id: string;
+  workspaceId: string;
+  roomKey: string;
+  name: string;
+  isDefault: boolean;
+  createdById: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MeetingRoomListPayload {
+  rooms: MeetingRoomPayload[];
+}
+
+export interface MeetingRoomMutationPayload {
+  room: MeetingRoomPayload;
+}
+
+export interface DeleteMeetingRoomPayload {
+  deleted: true;
 }
 
 export interface ParticipantPayload {
@@ -427,6 +465,10 @@ const ACTIVE_MEETING_UNIQUE_INDEX = "unique_active_meeting_per_room";
 const MEETING_ALREADY_IN_PROGRESS_ERROR_CODE =
   "MEETING_ALREADY_IN_PROGRESS";
 const MEETING_ALREADY_IN_PROGRESS_MESSAGE = "A meeting is already in progress";
+const DEFAULT_MEETING_ROOM_NAME = "기본 회의실";
+const MEETING_ROOM_NAME_MAX_LENGTH = 100;
+const ACTIVE_MEETING_ROOM_NAME_UNIQUE_INDEX =
+  "unique_active_meeting_room_name";
 const SAFE_EGRESS_START_ERROR = "LiveKit Egress start failed";
 const SAFE_EGRESS_STOP_ERROR = "LiveKit Egress stop failed";
 const DEFAULT_MEETING_REPORT_LIMIT = 20;
@@ -502,87 +544,229 @@ export class MeetingService {
     }
 
     try {
-      const result = await this.database.transaction(async (transaction) => {
-        const startedMeeting = await transaction.queryOne<StartMeetingRow>(
-          `
-            WITH generated AS (
-              SELECT gen_random_uuid() AS meeting_id
-            ),
-            inserted_meeting AS (
-              INSERT INTO meetings (
-                id,
-                workspace_id,
-                room_key,
-                livekit_room_name,
-                created_by_id
-              )
-              SELECT
-                generated.meeting_id,
-                $1::uuid,
-                $2,
-                'meeting-' || generated.meeting_id::text,
-                $3::uuid
-              FROM generated
-              RETURNING *
-            ),
-            inserted_participant AS (
-              INSERT INTO meeting_participants (
-                meeting_id,
-                user_id,
-                livekit_identity
-              )
-              SELECT
-                inserted_meeting.id,
-                $3::uuid,
-                'meeting-' || inserted_meeting.id::text || '-user-' || ($3::uuid)::text
-              FROM inserted_meeting
-              RETURNING *
-            )
-            SELECT
-              inserted_meeting.id AS meeting_id,
-              inserted_meeting.workspace_id AS meeting_workspace_id,
-              inserted_meeting.room_key AS meeting_room_key,
-              inserted_meeting.livekit_room_name AS meeting_livekit_room_name,
-              inserted_meeting.created_by_id AS meeting_created_by_id,
-              inserted_meeting.ended_by_id AS meeting_ended_by_id,
-              inserted_meeting.started_at AS meeting_started_at,
-              inserted_meeting.ended_at AS meeting_ended_at,
-              inserted_meeting.created_at AS meeting_created_at,
-              inserted_meeting.updated_at AS meeting_updated_at,
-              inserted_participant.id AS participant_id,
-              inserted_participant.meeting_id AS participant_meeting_id,
-              inserted_participant.user_id AS participant_user_id,
-              inserted_participant.livekit_identity AS participant_livekit_identity,
-              inserted_participant.joined_at AS participant_joined_at,
-              inserted_participant.left_at AS participant_left_at,
-              users.name AS participant_user_name,
-              users.avatar_url AS participant_user_avatar_url
-            FROM inserted_meeting
-            JOIN inserted_participant
-              ON inserted_participant.meeting_id = inserted_meeting.id
-            JOIN users
-              ON users.id = inserted_participant.user_id
-          `,
-          [workspaceId, roomKey, currentUserId]
-        );
+      const result = await this.database.transaction((transaction) =>
+        this.createStartedMeeting(transaction, workspaceId, roomKey, currentUserId)
+      );
+      await this.publishMeetingStarted(workspaceId, result.meeting.id);
+      return result;
+    } catch (error) {
+      if (this.isConstraintError(error, ACTIVE_MEETING_UNIQUE_INDEX)) {
+        throw this.meetingAlreadyInProgress();
+      }
 
-        if (!startedMeeting) {
-          throw badRequest("Meeting could not be started");
+      throw error;
+    }
+  }
+
+  async listMeetingRooms(
+    currentUserId: string,
+    workspaceId: string
+  ): Promise<MeetingRoomListPayload> {
+    await this.assertWorkspaceAccess(currentUserId, workspaceId);
+    const rooms = await this.database.query<MeetingRoomRow>(
+      `
+        SELECT id, workspace_id, room_key, name, created_by_id, created_at, updated_at
+        FROM meeting_rooms
+        WHERE workspace_id = $1
+          AND archived_at IS NULL
+        ORDER BY CASE WHEN room_key = $2 THEN 0 ELSE 1 END, created_at ASC, id ASC
+      `,
+      [workspaceId, MAIN_MEETING_ROOM]
+    );
+
+    return { rooms: rooms.map((room) => this.mapMeetingRoom(room)) };
+  }
+
+  async createMeetingRoom(
+    currentUserId: string,
+    workspaceId: string,
+    body: unknown
+  ): Promise<MeetingRoomMutationPayload> {
+    await this.assertWorkspaceOwnerAccess(currentUserId, workspaceId);
+    const name = this.normalizeMeetingRoomName(body);
+
+    try {
+      const room = await this.database.queryOne<MeetingRoomRow>(
+        `
+          WITH generated AS (
+            SELECT gen_random_uuid() AS id
+          )
+          INSERT INTO meeting_rooms (
+            id,
+            workspace_id,
+            room_key,
+            name,
+            created_by_id
+          )
+          SELECT
+            generated.id,
+            $1::uuid,
+            'ROOM_' || generated.id::text,
+            $2,
+            $3::uuid
+          FROM generated
+          RETURNING id, workspace_id, room_key, name, created_by_id, created_at, updated_at
+        `,
+        [workspaceId, name, currentUserId]
+      );
+
+      if (!room) {
+        throw badRequest("Meeting room could not be created");
+      }
+
+      return { room: this.mapMeetingRoom(room) };
+    } catch (error) {
+      if (this.isConstraintError(error, ACTIVE_MEETING_ROOM_NAME_UNIQUE_INDEX)) {
+        throw conflict("A meeting room with this name already exists");
+      }
+
+      throw error;
+    }
+  }
+
+  async updateMeetingRoom(
+    currentUserId: string,
+    workspaceId: string,
+    meetingRoomId: string,
+    body: unknown
+  ): Promise<MeetingRoomMutationPayload> {
+    await this.assertWorkspaceOwnerAccess(currentUserId, workspaceId);
+    const name = this.normalizeMeetingRoomName(body);
+
+    try {
+      const room = await this.database.transaction(async (transaction) => {
+        const existing = await this.findActiveMeetingRoom(
+          transaction,
+          workspaceId,
+          meetingRoomId,
+          { lockRoom: true }
+        );
+        if (!existing) {
+          throw notFound("Meeting room not found");
+        }
+        if (existing.room_key === MAIN_MEETING_ROOM) {
+          throw badRequest("Default meeting room cannot be renamed");
         }
 
-        const livekit = await this.liveKitTokenService.createJoinToken({
-          livekitRoomName: startedMeeting.meeting_livekit_room_name,
-          livekitIdentity: startedMeeting.participant_livekit_identity,
-          participantName: startedMeeting.participant_user_name
-        });
+        return transaction.queryOne<MeetingRoomRow>(
+          `
+            UPDATE meeting_rooms
+            SET name = $3, updated_at = now()
+            WHERE workspace_id = $1
+              AND id = $2::uuid
+              AND archived_at IS NULL
+            RETURNING id, workspace_id, room_key, name, created_by_id, created_at, updated_at
+          `,
+          [workspaceId, meetingRoomId, name]
+        );
+      });
 
-        return this.mapStartMeeting(startedMeeting, livekit);
-      });
-      await this.publishMeetingStateEvent({
+      if (!room) {
+        throw notFound("Meeting room not found");
+      }
+
+      return { room: this.mapMeetingRoom(room) };
+    } catch (error) {
+      if (this.isConstraintError(error, ACTIVE_MEETING_ROOM_NAME_UNIQUE_INDEX)) {
+        throw conflict("A meeting room with this name already exists");
+      }
+
+      throw error;
+    }
+  }
+
+  async deleteMeetingRoom(
+    currentUserId: string,
+    workspaceId: string,
+    meetingRoomId: string
+  ): Promise<DeleteMeetingRoomPayload> {
+    await this.assertWorkspaceOwnerAccess(currentUserId, workspaceId);
+
+    await this.database.transaction(async (transaction) => {
+      const room = await this.findActiveMeetingRoom(
+        transaction,
         workspaceId,
-        meetingId: result.meeting.id,
-        change: "started"
+        meetingRoomId,
+        { lockRoom: true }
+      );
+      if (!room) {
+        throw notFound("Meeting room not found");
+      }
+      if (room.room_key === MAIN_MEETING_ROOM) {
+        throw badRequest("Default meeting room cannot be deleted");
+      }
+
+      const activeMeeting = await this.findCurrentMeeting(
+        workspaceId,
+        room.room_key,
+        transaction
+      );
+      if (activeMeeting) {
+        throw conflict("Meeting room with an active meeting cannot be deleted");
+      }
+
+      await transaction.queryOne(
+        `
+          UPDATE meeting_rooms
+          SET archived_at = now(), updated_at = now()
+          WHERE workspace_id = $1
+            AND id = $2::uuid
+            AND archived_at IS NULL
+          RETURNING id
+        `,
+        [workspaceId, meetingRoomId]
+      );
+    });
+
+    return { deleted: true };
+  }
+
+  async getCurrentMeetingForRoom(
+    currentUserId: string,
+    workspaceId: string,
+    meetingRoomId: string
+  ): Promise<CurrentMeetingPayload> {
+    await this.assertWorkspaceAccess(currentUserId, workspaceId);
+    const room = await this.requireActiveMeetingRoom(
+      this.database,
+      workspaceId,
+      meetingRoomId
+    );
+    return this.currentMeetingPayload(workspaceId, room.room_key);
+  }
+
+  async startMeetingInRoom(
+    currentUserId: string,
+    workspaceId: string,
+    meetingRoomId: string
+  ): Promise<StartMeetingPayload> {
+    await this.assertWorkspaceAccess(currentUserId, workspaceId);
+
+    try {
+      const result = await this.database.transaction(async (transaction) => {
+        const room = await this.requireActiveMeetingRoom(
+          transaction,
+          workspaceId,
+          meetingRoomId,
+          { lockRoom: true }
+        );
+        const existingMeeting = await this.findCurrentMeeting(
+          workspaceId,
+          room.room_key,
+          transaction
+        );
+        if (existingMeeting) {
+          throw this.meetingAlreadyInProgress();
+        }
+
+        return this.createStartedMeeting(
+          transaction,
+          workspaceId,
+          room.room_key,
+          currentUserId
+        );
       });
+      await this.publishMeetingStarted(workspaceId, result.meeting.id);
       return result;
     } catch (error) {
       if (this.isConstraintError(error, ACTIVE_MEETING_UNIQUE_INDEX)) {
@@ -1513,11 +1697,135 @@ export class MeetingService {
     };
   }
 
+  private async createStartedMeeting(
+    transaction: DatabaseTransaction,
+    workspaceId: string,
+    roomKey: string,
+    currentUserId: string
+  ): Promise<StartMeetingPayload> {
+    const startedMeeting = await transaction.queryOne<StartMeetingRow>(
+      `
+        WITH generated AS (
+          SELECT gen_random_uuid() AS meeting_id
+        ),
+        inserted_meeting AS (
+          INSERT INTO meetings (
+            id,
+            workspace_id,
+            room_key,
+            livekit_room_name,
+            created_by_id
+          )
+          SELECT
+            generated.meeting_id,
+            $1::uuid,
+            $2,
+            'meeting-' || generated.meeting_id::text,
+            $3::uuid
+          FROM generated
+          RETURNING *
+        ),
+        inserted_participant AS (
+          INSERT INTO meeting_participants (
+            meeting_id,
+            user_id,
+            livekit_identity
+          )
+          SELECT
+            inserted_meeting.id,
+            $3::uuid,
+            'meeting-' || inserted_meeting.id::text || '-user-' || ($3::uuid)::text
+          FROM inserted_meeting
+          RETURNING *
+        )
+        SELECT
+          inserted_meeting.id AS meeting_id,
+          inserted_meeting.workspace_id AS meeting_workspace_id,
+          inserted_meeting.room_key AS meeting_room_key,
+          inserted_meeting.livekit_room_name AS meeting_livekit_room_name,
+          inserted_meeting.created_by_id AS meeting_created_by_id,
+          inserted_meeting.ended_by_id AS meeting_ended_by_id,
+          inserted_meeting.started_at AS meeting_started_at,
+          inserted_meeting.ended_at AS meeting_ended_at,
+          inserted_meeting.created_at AS meeting_created_at,
+          inserted_meeting.updated_at AS meeting_updated_at,
+          inserted_participant.id AS participant_id,
+          inserted_participant.meeting_id AS participant_meeting_id,
+          inserted_participant.user_id AS participant_user_id,
+          inserted_participant.livekit_identity AS participant_livekit_identity,
+          inserted_participant.joined_at AS participant_joined_at,
+          inserted_participant.left_at AS participant_left_at,
+          users.name AS participant_user_name,
+          users.avatar_url AS participant_user_avatar_url
+        FROM inserted_meeting
+        JOIN inserted_participant
+          ON inserted_participant.meeting_id = inserted_meeting.id
+        JOIN users
+          ON users.id = inserted_participant.user_id
+      `,
+      [workspaceId, roomKey, currentUserId]
+    );
+
+    if (!startedMeeting) {
+      throw badRequest("Meeting could not be started");
+    }
+
+    const livekit = await this.liveKitTokenService.createJoinToken({
+      livekitRoomName: startedMeeting.meeting_livekit_room_name,
+      livekitIdentity: startedMeeting.participant_livekit_identity,
+      participantName: startedMeeting.participant_user_name
+    });
+
+    return this.mapStartMeeting(startedMeeting, livekit);
+  }
+
+  private async publishMeetingStarted(
+    workspaceId: string,
+    meetingId: string
+  ): Promise<void> {
+    await this.publishMeetingStateEvent({
+      workspaceId,
+      meetingId,
+      change: "started"
+    });
+  }
+
+  private async currentMeetingPayload(
+    workspaceId: string,
+    roomKey: string
+  ): Promise<CurrentMeetingPayload> {
+    const currentMeeting = await this.findCurrentMeeting(workspaceId, roomKey);
+
+    if (!currentMeeting) {
+      return {
+        meeting: null,
+        currentRecording: null,
+        activeParticipantCount: 0
+      };
+    }
+
+    return {
+      meeting: this.mapMeeting(currentMeeting),
+      currentRecording: this.mapNullableCurrentRecording(currentMeeting),
+      activeParticipantCount: Number(currentMeeting.active_participant_count)
+    };
+  }
+
   private async assertWorkspaceAccess(
     currentUserId: string,
     workspaceId: string
   ): Promise<void> {
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+  }
+
+  private async assertWorkspaceOwnerAccess(
+    currentUserId: string,
+    workspaceId: string
+  ): Promise<void> {
+    await this.workspaceService.assertWorkspaceOwnerAccess(
+      currentUserId,
+      workspaceId
+    );
   }
 
   private meetingAlreadyInProgress() {
@@ -1541,11 +1849,54 @@ export class MeetingService {
     return meeting;
   }
 
+  private async requireActiveMeetingRoom(
+    executor: QueryOneExecutor,
+    workspaceId: string,
+    meetingRoomId: string,
+    options: { lockRoom?: boolean } = {}
+  ): Promise<MeetingRoomRow> {
+    const room = await this.findActiveMeetingRoom(
+      executor,
+      workspaceId,
+      meetingRoomId,
+      options
+    );
+    if (!room) {
+      throw notFound("Meeting room not found");
+    }
+
+    return room;
+  }
+
+  private async findActiveMeetingRoom(
+    executor: QueryOneExecutor,
+    workspaceId: string,
+    meetingRoomId: string,
+    options: { lockRoom?: boolean } = {}
+  ): Promise<MeetingRoomRow | null> {
+    if (!UUID_PATTERN.test(meetingRoomId)) {
+      return null;
+    }
+
+    return executor.queryOne<MeetingRoomRow>(
+      `
+        SELECT id, workspace_id, room_key, name, created_by_id, created_at, updated_at
+        FROM meeting_rooms
+        WHERE workspace_id = $1
+          AND id = $2::uuid
+          AND archived_at IS NULL
+        ${options.lockRoom === true ? "FOR UPDATE" : ""}
+      `,
+      [workspaceId, meetingRoomId]
+    );
+  }
+
   private async findCurrentMeeting(
     workspaceId: string,
-    roomKey: string
+    roomKey: string,
+    executor: QueryOneExecutor = this.database
   ): Promise<CurrentMeetingRow | null> {
-    return this.database.queryOne<CurrentMeetingRow>(
+    return executor.queryOne<CurrentMeetingRow>(
       `
         SELECT
           meetings.id,
@@ -2854,6 +3205,45 @@ export class MeetingService {
     }
 
     return { roomKey };
+  }
+
+  private normalizeMeetingRoomName(body: unknown): string {
+    if (typeof body !== "object" || body === null || Array.isArray(body)) {
+      throw badRequest("Request body must be an object");
+    }
+
+    const draft = body as MeetingRoomNameDraft;
+    if (typeof draft.name !== "string") {
+      throw badRequest("name must be a string");
+    }
+
+    const name = draft.name.trim().replace(/\s+/g, " ");
+    if (!name) {
+      throw badRequest("name is required");
+    }
+    if (name.length > MEETING_ROOM_NAME_MAX_LENGTH) {
+      throw badRequest(
+        `name must be at most ${MEETING_ROOM_NAME_MAX_LENGTH} characters`
+      );
+    }
+    if (name === DEFAULT_MEETING_ROOM_NAME) {
+      throw badRequest("Default meeting room name is reserved");
+    }
+
+    return name;
+  }
+
+  private mapMeetingRoom(room: MeetingRoomRow): MeetingRoomPayload {
+    return {
+      id: room.id,
+      workspaceId: room.workspace_id,
+      roomKey: room.room_key,
+      name: room.name,
+      isDefault: room.room_key === MAIN_MEETING_ROOM,
+      createdById: room.created_by_id,
+      createdAt: this.toIsoString(room.created_at),
+      updatedAt: this.toIsoString(room.updated_at)
+    };
   }
 
   private mapMeeting(meeting: MeetingRow): MeetingPayload {

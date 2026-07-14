@@ -187,7 +187,7 @@ function fullSyncContext(reportProgress) {
     async listInstallationRepositories() {
       return [];
     },
-    async listProjectV2s() {
+    async listRepositoryProjectV2s() {
       return [];
     }
   };
@@ -250,7 +250,7 @@ function fullSyncContext(reportProgress) {
     async listInstallationRepositories() {
       return [];
     },
-    async listProjectV2s() {
+    async listRepositoryProjectV2s() {
       return [
         {
           id: "PVT_example",
@@ -310,6 +310,18 @@ function fullSyncContext(reportProgress) {
         return [{ project_v2_id: "project-v2-id" }];
       }
 
+      if (/FROM github_repositories/i.test(text)) {
+        return [{
+          id: "repository-id",
+          workspace_id: "workspace-id",
+          installation_id: "installation-id",
+          github_node_id: "R_example",
+          owner_login: "example",
+          name: "pilo",
+          full_name: "example/pilo"
+        }];
+      }
+
       return [];
     },
     async queryOne() {
@@ -329,7 +341,7 @@ function fullSyncContext(reportProgress) {
     async listInstallationRepositories() {
       return [];
     },
-    async listProjectV2s() {
+    async listRepositoryProjectV2s() {
       return [
         {
           id: "PVT_example",
@@ -357,6 +369,12 @@ function fullSyncContext(reportProgress) {
       return [];
     },
     async listProjectV2Items() {
+      return [];
+    },
+    async listRepositoryIssues() {
+      return [];
+    },
+    async listRepositoryPullRequests() {
       return [];
     }
   };
@@ -387,6 +405,21 @@ function fullSyncContext(reportProgress) {
 {
   const progressUpdates = [];
   const database = {
+    async query(text) {
+      if (/FROM github_repositories/i.test(text)) {
+        return [{
+          id: "repository-id",
+          workspace_id: "workspace-id",
+          installation_id: "installation-id",
+          github_node_id: "R_example",
+          owner_login: "example",
+          name: "pilo",
+          full_name: "example/pilo"
+        }];
+      }
+
+      return [];
+    },
     async execute() {
       return {
         rows: [],
@@ -398,7 +431,7 @@ function fullSyncContext(reportProgress) {
     async listInstallationRepositories() {
       return [];
     },
-    async listProjectV2s() {
+    async listRepositoryProjectV2s() {
       throw new Error("discovery failed");
     }
   };

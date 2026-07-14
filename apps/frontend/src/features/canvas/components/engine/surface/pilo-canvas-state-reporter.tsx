@@ -34,7 +34,7 @@ export function CanvasStateReporter({
   onResolveFreeformShapeSnapshot?: (
     shape: TLShape,
     snapshot: PiloCanvasFreeformShape,
-  ) => PiloCanvasFreeformShape;
+  ) => PiloCanvasFreeformShape | null;
   onViewChange: (viewSetting: PiloCanvasViewSetting) => void;
   onViewportBoundsChange: (bounds: PiloCanvasViewportBounds) => void;
 }) {
@@ -43,9 +43,21 @@ export function CanvasStateReporter({
   const freeformSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
+  const freeformSnapshotTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const onFreeformShapesDraftChangeRef = useRef(onFreeformShapesDraftChange);
+  const onFreeformShapesChangeRef = useRef(onFreeformShapesChange);
+  const onResolveFreeformShapeSnapshotRef = useRef(
+    onResolveFreeformShapeSnapshot,
+  );
   const camera = useValue("pilo-camera-state", () => editor.getCamera(), [
     editor,
   ]);
+
+  onFreeformShapesDraftChangeRef.current = onFreeformShapesDraftChange;
+  onFreeformShapesChangeRef.current = onFreeformShapesChange;
+  onResolveFreeformShapeSnapshotRef.current = onResolveFreeformShapeSnapshot;
 
   useEffect(() => {
     if (viewSyncTimerRef.current) {
@@ -96,26 +108,40 @@ export function CanvasStateReporter({
         .filter(isPersistableFreeformShape)
         .map((shape) => {
           const snapshot = toFreeformSnapshot(editor, shape);
+          const resolveSnapshot = onResolveFreeformShapeSnapshotRef.current;
 
-          return onResolveFreeformShapeSnapshot
-            ? onResolveFreeformShapeSnapshot(shape, snapshot)
-            : snapshot;
-        });
+          return resolveSnapshot ? resolveSnapshot(shape, snapshot) : snapshot;
+        })
+        .filter((shape): shape is PiloCanvasFreeformShape => shape !== null);
     }
 
     function scheduleFreeformSync() {
-      const nextFreeformShapes = readFreeformShapes();
-
-      onFreeformShapesDraftChange(nextFreeformShapes);
-
-      if (freeformSyncTimerRef.current) {
-        clearTimeout(freeformSyncTimerRef.current);
+      if (freeformSnapshotTimerRef.current) {
+        clearTimeout(freeformSnapshotTimerRef.current);
       }
 
-      freeformSyncTimerRef.current = setTimeout(() => {
-        freeformSyncTimerRef.current = null;
-        onFreeformShapesChange(nextFreeformShapes);
-      }, 220);
+      freeformSnapshotTimerRef.current = setTimeout(() => {
+        freeformSnapshotTimerRef.current = null;
+        let nextFreeformShapes: PiloCanvasFreeformShape[];
+
+        try {
+          nextFreeformShapes = readFreeformShapes();
+        } catch (error) {
+          console.error("Canvas shape snapshot read failed", error);
+          return;
+        }
+
+        onFreeformShapesDraftChangeRef.current(nextFreeformShapes);
+
+        if (freeformSyncTimerRef.current) {
+          clearTimeout(freeformSyncTimerRef.current);
+        }
+
+        freeformSyncTimerRef.current = setTimeout(() => {
+          freeformSyncTimerRef.current = null;
+          onFreeformShapesChangeRef.current(nextFreeformShapes);
+        }, 220);
+      }, 0);
     }
 
     const removeListener = editor.store.listen(scheduleFreeformSync, {
@@ -124,17 +150,15 @@ export function CanvasStateReporter({
     });
 
     return () => {
+      if (freeformSnapshotTimerRef.current) {
+        clearTimeout(freeformSnapshotTimerRef.current);
+      }
       if (freeformSyncTimerRef.current) {
         clearTimeout(freeformSyncTimerRef.current);
       }
       removeListener();
     };
-  }, [
-    editor,
-    onFreeformShapesChange,
-    onFreeformShapesDraftChange,
-    onResolveFreeformShapeSnapshot,
-  ]);
+  }, [editor]);
 
   return null;
 }

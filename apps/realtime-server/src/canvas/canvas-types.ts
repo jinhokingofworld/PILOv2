@@ -52,8 +52,10 @@ export type CanvasJoinPayload = CanvasRoomRef & {
 
 export type CanvasJoinedPayload = CanvasRoomRef & {
   latestOpSeq: number;
+  previews: CanvasShapePreviewEventPayload[];
   presence: CanvasPresenceState[];
   readOnly: boolean;
+  shapeLocks: CanvasShapeLockState[];
   syncRequired: boolean;
 };
 
@@ -114,7 +116,8 @@ export type CanvasShapeLockReleaseEventPayload = CanvasRoomRef & {
 };
 
 export type CanvasShapePreviewPayload = CanvasRoomRef & {
-  phase: "move" | "resize" | "unknown";
+  deletedShapeIds?: string[];
+  phase: "delete" | "move" | "resize" | "unknown";
   shapes: Record<string, unknown>[];
 };
 

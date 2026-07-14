@@ -156,11 +156,17 @@ class FakeDatabase {
 class FakeWorkspaceService {
   constructor() {
     this.calls = [];
+    this.ownerCalls = [];
   }
 
   async assertWorkspaceAccess(userId, targetWorkspaceId) {
     this.calls.push({ userId, workspaceId: targetWorkspaceId });
     return { id: targetWorkspaceId };
+  }
+
+  async assertWorkspaceOwnerAccess(userId, targetWorkspaceId) {
+    this.ownerCalls.push({ userId, workspaceId: targetWorkspaceId });
+    return { id: targetWorkspaceId, role: "owner" };
   }
 }
 
@@ -316,6 +322,19 @@ function startMeetingRow(overrides = {}) {
   };
 }
 
+function meetingRoomRow(overrides = {}) {
+  return {
+    id: "abababab-abab-abab-abab-abababababab",
+    workspace_id: workspaceId,
+    room_key: "ROOM_abababab-abab-abab-abab-abababababab",
+    name: "디자인 회의",
+    created_by_id: currentUserId,
+    created_at: createdAt,
+    updated_at: updatedAt,
+    ...overrides
+  };
+}
+
 function participantRow(overrides = {}) {
   return {
     id: participantId,
@@ -451,6 +470,15 @@ async function assertNotFound(action, messagePattern) {
   });
 }
 
+async function assertConflict(action, messagePattern) {
+  await assert.rejects(action, (error) => {
+    assert.equal(error.getStatus(), 409);
+    assert.equal(error.getResponse().error.code, "CONFLICT");
+    assert.match(error.getResponse().error.message, messagePattern);
+    return true;
+  });
+}
+
 async function assertError(action, messagePattern) {
   await assert.rejects(action, (error) => {
     assert.match(error.message, messagePattern);
@@ -552,6 +580,169 @@ async function assertError(action, messagePattern) {
   });
   assert.equal(started.currentRecording, null);
   assert.equal(database.transactionCommitted, true);
+}
+
+{
+  const { service, workspaceService } = createSubject(
+    new FakeDatabase({
+      queryRows: [
+        [
+          meetingRoomRow({
+            room_key: "MAIN_MEETING_ROOM",
+            name: "기본 회의실",
+            created_by_id: null
+          }),
+          meetingRoomRow()
+        ]
+      ]
+    })
+  );
+
+  const result = await service.listMeetingRooms(currentUserId, workspaceId);
+
+  assert.deepEqual(workspaceService.calls, [{ userId: currentUserId, workspaceId }]);
+  assert.equal(result.rooms.length, 2);
+  assert.equal(result.rooms[0].isDefault, true);
+  assert.equal(result.rooms[0].createdById, null);
+  assert.equal(result.rooms[1].name, "디자인 회의");
+}
+
+{
+  const { service, workspaceService } = createSubject(
+    new FakeDatabase({
+      queryOneRows: [
+        (text, values) => {
+          assert.match(text, /INSERT INTO meeting_rooms/);
+          assert.match(text, /'ROOM_' \|\| generated\.id::text/);
+          assert.deepEqual(values, [workspaceId, "디자인 회의", currentUserId]);
+          return meetingRoomRow();
+        }
+      ]
+    })
+  );
+
+  const result = await service.createMeetingRoom(currentUserId, workspaceId, {
+    name: "  디자인   회의  "
+  });
+
+  assert.deepEqual(workspaceService.ownerCalls, [
+    { userId: currentUserId, workspaceId }
+  ]);
+  assert.equal(result.room.name, "디자인 회의");
+  assert.equal(result.room.isDefault, false);
+}
+
+{
+  const uniqueViolation = new Error("duplicate active meeting room name");
+  uniqueViolation.code = "23505";
+  uniqueViolation.constraint = "unique_active_meeting_room_name";
+  const { service } = createSubject(
+    new FakeDatabase({
+      queryOneRows: [() => { throw uniqueViolation; }]
+    })
+  );
+
+  await assertConflict(
+    () => service.createMeetingRoom(currentUserId, workspaceId, { name: "디자인 회의" }),
+    /already exists/
+  );
+}
+
+{
+  const roomId = "abababab-abab-abab-abab-abababababab";
+  const { service, liveKitTokenService } = createSubject(
+    new FakeDatabase({
+      queryOneRows: [
+        meetingRoomRow({ id: roomId }),
+        null,
+        startMeetingRow({
+          meeting_room_key: "ROOM_abababab-abab-abab-abab-abababababab"
+        })
+      ]
+    })
+  );
+
+  const started = await service.startMeetingInRoom(
+    currentUserId,
+    workspaceId,
+    roomId
+  );
+
+  assert.equal(started.meeting.roomKey, "ROOM_abababab-abab-abab-abab-abababababab");
+  assert.equal(liveKitTokenService.calls.length, 1);
+}
+
+{
+  const firstRoomId = "abababab-abab-abab-abab-abababababab";
+  const secondRoomId = "cdcdcdcd-cdcd-cdcd-cdcd-cdcdcdcdcdcd";
+  const firstRoomKey = "ROOM_abababab-abab-abab-abab-abababababab";
+  const secondRoomKey = "ROOM_cdcdcdcd-cdcd-cdcd-cdcd-cdcdcdcdcdcd";
+  const { service } = createSubject(
+    new FakeDatabase({
+      queryOneRows: [
+        meetingRoomRow({ id: firstRoomId, room_key: firstRoomKey }),
+        null,
+        startMeetingRow({ meeting_room_key: firstRoomKey }),
+        meetingRoomRow({ id: secondRoomId, room_key: secondRoomKey }),
+        null,
+        startMeetingRow({
+          meeting_id: "dededede-dede-dede-dede-dededededede",
+          meeting_room_key: secondRoomKey,
+          meeting_livekit_room_name: "meeting-dededede-dede-dede-dede-dededededede",
+          participant_meeting_id: "dededede-dede-dede-dede-dededededede",
+          participant_livekit_identity: `meeting-dededede-dede-dede-dede-dededededede-user-${currentUserId}`
+        })
+      ]
+    })
+  );
+
+  const first = await service.startMeetingInRoom(
+    currentUserId,
+    workspaceId,
+    firstRoomId
+  );
+  const second = await service.startMeetingInRoom(
+    currentUserId,
+    workspaceId,
+    secondRoomId
+  );
+
+  assert.equal(first.meeting.roomKey, firstRoomKey);
+  assert.equal(second.meeting.roomKey, secondRoomKey);
+  assert.notEqual(first.meeting.id, second.meeting.id);
+}
+
+{
+  const roomId = "abababab-abab-abab-abab-abababababab";
+  const { service } = createSubject(
+    new FakeDatabase({
+      queryOneRows: [meetingRoomRow({ id: roomId, room_key: "MAIN_MEETING_ROOM" })]
+    })
+  );
+
+  await assertBadRequest(
+    () => service.deleteMeetingRoom(currentUserId, workspaceId, roomId),
+    /cannot be deleted/
+  );
+}
+
+{
+  const roomId = "abababab-abab-abab-abab-abababababab";
+  const { service } = createSubject(
+    new FakeDatabase({
+      queryOneRows: [
+        meetingRoomRow({ id: roomId }),
+        currentMeetingRow({
+          room_key: "ROOM_abababab-abab-abab-abab-abababababab"
+        })
+      ]
+    })
+  );
+
+  await assertConflict(
+    () => service.deleteMeetingRoom(currentUserId, workspaceId, roomId),
+    /active meeting/
+  );
 }
 
 {

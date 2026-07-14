@@ -701,6 +701,7 @@ const [
   relationShape,
   annotationShape,
   frameShape,
+  noteShape,
   ddlParserUtils,
   sqlEditorDialectUtils,
   sqlSourceDecorationUtils,
@@ -737,6 +738,7 @@ const [
     readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-relation-shape.tsx"),
     readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-annotation-shape.tsx"),
     readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-frame-shape.tsx"),
+    readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-note-shape.tsx"),
     readSqlErdFile("../../src/features/sql-erd/utils/ddl-parser.ts"),
     readSqlErdFile("../../src/features/sql-erd/utils/sql-editor-dialect.ts"),
     readSqlErdFile("../../src/features/sql-erd/utils/sql-source-decoration.ts"),
@@ -6229,6 +6231,19 @@ assert.doesNotMatch(
 );
 assert.doesNotMatch(annotationShape, /Cardinality/);
 assert.match(frameShape, /\{!shape\.props\.isLocked \? \(/);
+assert.doesNotMatch(noteShape, /SQLTOERD_NOTE_DELETE_EVENT/);
+assert.match(
+  canvasSurface,
+  /function deleteNote\(noteId: string\)[\s\S]*?deleteNoteIds/
+);
+assert.match(
+  canvasSurface,
+  /isSqlErdNoteShape\(selectedShape\)[\s\S]*?deleteNote\(selectedShape\.props\.noteId\)/
+);
+assert.match(
+  canvasSurface,
+  /const frameShape = editor\.getShape\(getSqlErdFrameShapeId\(frameId\)\);[\s\S]*?isSqlErdFrameShape\(frameShape\)[\s\S]*?editor\.updateShapes\(\[[\s\S]*?props: \{ \.\.\.frameShape\.props, \.\.\.patch \}/
+);
 assert.match(
   canvasSurface,
   /const frame = layoutJsonRef\.current\.annotations\?\.frames\?\.find\([\s\S]*?if \(!frame \|\| frame\.isLocked\) \{[\s\S]*?return;/

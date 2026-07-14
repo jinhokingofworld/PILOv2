@@ -12,6 +12,17 @@ export type RedisPubSubClient = {
   ) => Promise<() => Promise<void>>;
 };
 
+export type RedisStateClient = {
+  del: (keys: string[]) => Promise<void>;
+  get: (key: string) => Promise<string | null>;
+  keys: (pattern: string) => Promise<string[]>;
+  set: (
+    key: string,
+    value: string,
+    options?: { mode?: "NX"; px?: number },
+  ) => Promise<"OK" | null>;
+};
+
 export function createNoopRedisPubSub(): RedisPubSubClient {
   return {
     status: "disabled",
@@ -27,6 +38,7 @@ export function createNoopRedisPubSub(): RedisPubSubClient {
 export type SocketIoRedisAdapterHandle = {
   adapter: ReturnType<typeof createAdapter>;
   close: () => Promise<void>;
+  stateClient: RedisStateClient;
   subscribe: (
     channel: string,
     handler: (payload: unknown) => void,
@@ -57,6 +69,32 @@ export async function createSocketIoRedisAdapter(
     ),
     async close() {
       await Promise.allSettled([pubClient.quit(), subClient.quit()]);
+    },
+    stateClient: {
+      async del(keys) {
+        if (!keys.length) return;
+
+        await pubClient.del(keys);
+      },
+      async get(key) {
+        return pubClient.get(key);
+      },
+      async keys(pattern) {
+        return pubClient.keys(pattern);
+      },
+      async set(key, value, options) {
+        const result =
+          options?.mode === "NX"
+            ? await pubClient.set(key, value, {
+                NX: true,
+                ...(options.px ? { PX: options.px } : {}),
+              })
+            : await pubClient.set(key, value, {
+                ...(options?.px ? { PX: options.px } : {}),
+              });
+
+        return result === "OK" ? result : null;
+      },
     },
     async subscribe(channel, handler) {
       await subClient.subscribe(channel, (message) => {

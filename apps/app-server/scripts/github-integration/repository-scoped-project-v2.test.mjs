@@ -138,6 +138,7 @@ function selectionDatabase({ repository = { id: repositoryId }, links = ["555555
   const dto = readFileSync(new URL("apps/app-server/src/modules/github-integration/dto/index.ts", root), "utf8");
   const controller = readFileSync(new URL("apps/app-server/src/modules/github-integration/github-integration.controller.ts", root), "utf8");
   const executor = readFileSync(new URL("apps/app-server/src/modules/github-integration/github-sync-executor.service.ts", root), "utf8");
+  const client = readFileSync(new URL("apps/app-server/src/modules/github-integration/github-app.client.ts", root), "utf8");
   const queries = readFileSync(new URL("apps/app-server/src/modules/github-integration/queries/index.ts", root), "utf8");
 
   assert.match(dto, /interface DiscoverGithubProjectV2Request[\s\S]*repositoryId\?: unknown/);
@@ -146,6 +147,11 @@ function selectionDatabase({ repository = { id: repositoryId }, links = ["555555
   assert.match(source, /DELETE FROM github_project_v2_selections[\s\S]{0,160}repository_id = \$2/);
   assert.match(queries, /FROM github_project_v2_repositories[\s\S]{0,160}repository_id = \$1/);
   assert.match(source, /repositoryId,\s*target: "full"/);
+  assert.match(executor, /listRepositoryProjectV2s/);
+  assert.match(executor, /replaceGithubRepositoryProjectV2Links/);
+  assert.match(executor, /links\.repository_id = \$2/);
+  assert.doesNotMatch(executor, /replaceGithubProjectV2RepositoryLinks/);
+  assert.match(client, /repository\(owner: \$owner, name: \$name\)/);
   assert.doesNotMatch(source, /DELETE FROM github_projects_v2|DELETE FROM github_project_v2_fields|DELETE FROM github_project_v2_items|DELETE FROM github_issues|DELETE FROM github_pull_requests|DELETE FROM boards/i);
   assert.match(executor, /gps\.repository_id = \$3/);
   assert.match(

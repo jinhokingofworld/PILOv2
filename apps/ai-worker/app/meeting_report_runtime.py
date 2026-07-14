@@ -56,6 +56,7 @@ DEFAULT_MEETING_REPORT_EVENT_MAX_ATTEMPTS = 3
 AGENT_RETRY_TERMINAL_RECEIVE_COUNT = 3
 AGENT_RETRY_EXHAUSTED_ERROR_CODE = "AGENT_PLANNER_RETRY_EXHAUSTED"
 PR_REVIEW_ANALYSIS_RETRY_TERMINAL_RECEIVE_COUNT = 3
+CANVAS_AGENT_RETRY_TERMINAL_RECEIVE_COUNT = 3
 AGENT_RETRY_EXHAUSTED_ERROR_MESSAGE = "요청을 분석하지 못했습니다. 잠시 후 다시 시도해주세요."
 LOCAL_APP_ENVS = {"local", "test", "development"}
 MEETING_REPORT_FAILURE_STEPS = {
@@ -745,6 +746,7 @@ class SqsAiJobWorker:
         canvas_embedding_processor: Any | None = None,
         stale_execution_recovery: Any | None = None,
         agent_retry_exhaustion_recovery: Any | None = None,
+        canvas_agent_retry_exhaustion_recovery: Any | None = None,
         pr_review_retry_exhaustion_recovery: Any | None = None,
         monotonic_time: Callable[[], float] = time.monotonic,
     ) -> None:
@@ -754,6 +756,7 @@ class SqsAiJobWorker:
         self.canvas_embedding_processor = canvas_embedding_processor
         self.stale_execution_recovery = stale_execution_recovery
         self.agent_retry_exhaustion_recovery = agent_retry_exhaustion_recovery
+        self.canvas_agent_retry_exhaustion_recovery = canvas_agent_retry_exhaustion_recovery
         self.pr_review_retry_exhaustion_recovery = pr_review_retry_exhaustion_recovery
         self.monotonic_time = monotonic_time
         self.last_stale_execution_sweep_at: float | None = None
@@ -818,6 +821,7 @@ class SqsAiJobWorker:
             should_delete = (
                 result.delete_message
                 or self._terminalize_agent_retry(result, message)
+                or self._terminalize_canvas_agent_retry(result, message)
                 or self._terminalize_pr_review_analysis_retry(result, message, body)
             )
             if should_delete and receipt_handle:
@@ -869,6 +873,30 @@ class SqsAiJobWorker:
         except Exception:
             LOGGER.exception(
                 "Agent retry terminalization failed run_id=%s message_id=%s",
+                result.resource_id,
+                message.get("MessageId"),
+            )
+            return False
+
+    def _terminalize_canvas_agent_retry(self, result: Any, message: dict[str, Any]) -> bool:
+        if (
+            self.canvas_agent_retry_exhaustion_recovery is None
+            or result.job_type != "canvas_agent_step_requested"
+            or result.reason != "infrastructure_failure"
+            or not result.resource_id
+            or self._receive_count(message) < CANVAS_AGENT_RETRY_TERMINAL_RECEIVE_COUNT
+        ):
+            return False
+
+        try:
+            return bool(
+                self.canvas_agent_retry_exhaustion_recovery.fail_planning_after_retry_exhaustion(
+                    result.resource_id
+                )
+            )
+        except Exception:
+            LOGGER.exception(
+                "Canvas Agent retry terminalization failed run_id=%s message_id=%s",
                 result.resource_id,
                 message.get("MessageId"),
             )

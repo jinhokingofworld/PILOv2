@@ -14,10 +14,13 @@ class CanvasAgentPlannerError(Exception):
 
 
 class OpenAiCanvasAgentPlanner:
-    def __init__(self, api_key: str, model: str) -> None:
+    def __init__(self, api_key: str, model: str, timeout_seconds: float | None = None) -> None:
         from openai import OpenAI
 
-        self.client = OpenAI(api_key=api_key)
+        kwargs: dict[str, object] = {"api_key": api_key}
+        if timeout_seconds is not None:
+            kwargs["timeout"] = timeout_seconds
+        self.client = OpenAI(**kwargs)
         self.model = model
 
     def plan(self, context: CanvasAgentRunContext) -> CanvasAgentPlan:

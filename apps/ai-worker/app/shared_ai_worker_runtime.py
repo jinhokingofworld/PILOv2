@@ -174,6 +174,7 @@ def create_shared_ai_worker(
     canvas_agent_planner = OpenAiCanvasAgentPlanner(
         resolved_settings.openai_api_key,
         resolved_settings.openai_agent_planner_model,
+        resolved_settings.openai_agent_planner_timeout_seconds,
     )
     canvas_embedder = LocalSentenceTransformerCanvasEmbedder()
     agent_run_repository = None
@@ -227,6 +228,7 @@ def create_shared_ai_worker(
         canvas_embedding_processor=canvas_embedding_processor,
         stale_execution_recovery=agent_execution_handoff_client,
         agent_retry_exhaustion_recovery=agent_run_repository,
+        canvas_agent_retry_exhaustion_recovery=canvas_agent_repository,
     )
 
 

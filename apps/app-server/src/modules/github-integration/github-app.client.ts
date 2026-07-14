@@ -171,8 +171,8 @@ export interface GithubProjectV2ItemStatusUpdateRequest
 export interface GithubProjectV2DiscoveryRequest
   extends GithubAppInstallationTokenRequest,
     GithubProjectV2UserAccessTokenRequest {
-  accountLogin: string;
-  accountType: "User" | "Organization";
+  owner: string;
+  repo: string;
 }
 
 export interface GithubInstallationRepositoryApiItem {
@@ -502,25 +502,9 @@ const GITHUB_PROJECT_V2_DISCOVERY_FRAGMENT = `
     }
   }
 `;
-const GITHUB_ORGANIZATION_PROJECT_V2S_QUERY = `
-  query PiloOrganizationProjectV2s($login: String!, $cursor: String) {
-    organization(login: $login) {
-      projectsV2(first: 100, after: $cursor) {
-        nodes {
-          ...PiloProjectV2DiscoveryFields
-        }
-        pageInfo {
-          hasNextPage
-          endCursor
-        }
-      }
-    }
-  }
-  ${GITHUB_PROJECT_V2_DISCOVERY_FRAGMENT}
-`;
-const GITHUB_USER_PROJECT_V2S_QUERY = `
-  query PiloUserProjectV2s($login: String!, $cursor: String) {
-    user(login: $login) {
+const GITHUB_REPOSITORY_PROJECT_V2S_QUERY = `
+  query PiloRepositoryProjectV2s($owner: String!, $name: String!, $cursor: String) {
+    repository(owner: $owner, name: $name) {
       projectsV2(first: 100, after: $cursor) {
         nodes {
           ...PiloProjectV2DiscoveryFields
@@ -1409,23 +1393,20 @@ export class GithubAppClient {
     return pullRequests;
   }
 
-  async listProjectV2s(
+  async listRepositoryProjectV2s(
     input: GithubProjectV2DiscoveryRequest
   ): Promise<GithubProjectV2DiscoveryApiItem[]> {
     const graphqlAuth = await this.getProjectV2GraphqlAuth(input);
     const projects: GithubProjectV2DiscoveryApiItem[] = [];
     let cursor: string | null = null;
-    const query =
-      input.accountType === "Organization"
-        ? GITHUB_ORGANIZATION_PROJECT_V2S_QUERY
-        : GITHUB_USER_PROJECT_V2S_QUERY;
 
     do {
       const data = await this.fetchGraphqlWithToken(
         graphqlAuth.token,
-        query,
+        GITHUB_REPOSITORY_PROJECT_V2S_QUERY,
         {
-          login: input.accountLogin,
+          owner: input.owner,
+          name: input.repo,
           cursor
         },
         "GitHub ProjectV2 discovery failed",
@@ -1434,30 +1415,12 @@ export class GithubAppClient {
           accountType: graphqlAuth.accountType
         }
       );
-      const connection = this.readProjectV2OwnerConnection(
-        data,
-        input.accountType,
-        "GitHub ProjectV2 discovery failed"
-      );
+      const connection = this.readRepositoryProjectV2Connection(data, "GitHub ProjectV2 discovery failed");
 
       for (const projectNode of connection.nodes) {
-        const firstRepositoryPage = this.readProjectV2RepositoryPage(
-          projectNode,
-          "GitHub ProjectV2 discovery failed"
-        );
-        const repositoryNodeIds = [
-          ...firstRepositoryPage.nodeIds,
-          ...(await this.listRemainingProjectV2RepositoryNodeIds(
-            graphqlAuth,
-            this.readString(projectNode.id, "GitHub ProjectV2 discovery failed"),
-            firstRepositoryPage.endCursor,
-            firstRepositoryPage.hasNextPage
-          ))
-        ];
-
         projects.push({
           ...this.mapProjectV2(projectNode),
-          repositoryNodeIds: this.uniqueStrings(repositoryNodeIds)
+          repositoryNodeIds: []
         });
       }
 
@@ -2436,6 +2399,34 @@ export class GithubAppClient {
         typeof pageInfo.endCursor === "string" && pageInfo.endCursor
           ? pageInfo.endCursor
           : null
+    };
+  }
+
+  private readRepositoryProjectV2Connection(
+    data: unknown,
+    errorMessage: string
+  ): {
+    nodes: Record<string, unknown>[];
+    hasNextPage: boolean;
+    endCursor: string | null;
+  } {
+    const repository = this.toObject(this.toObject(data).repository);
+    const connection = this.toObject(repository.projectsV2);
+    const nodes = Array.isArray(connection.nodes)
+      ? connection.nodes.filter((node): node is Record<string, unknown> => this.isRecord(node))
+      : null;
+    const pageInfo = this.toObject(connection.pageInfo);
+
+    if (!nodes || typeof pageInfo.hasNextPage !== "boolean") {
+      throw badRequest(errorMessage);
+    }
+
+    return {
+      nodes,
+      hasNextPage: pageInfo.hasNextPage,
+      endCursor: typeof pageInfo.endCursor === "string" && pageInfo.endCursor
+        ? pageInfo.endCursor
+        : null
     };
   }
 

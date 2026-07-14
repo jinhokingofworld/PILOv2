@@ -493,45 +493,58 @@ export class GithubSyncExecutorService {
   private async syncGithubProjectV2Discovery(
     context: GithubSyncRunContext
   ): Promise<GithubProjectV2DiscoverySyncResult> {
-    const projects = await this.githubAppClient.listProjectV2s({
-      installationId: this.toNumber(context.installation.github_installation_id),
-      appId: context.config.appId,
-      privateKey: context.config.privateKey,
-      accountLogin: context.installation.account_login,
-      accountType: context.installation.account_type,
-      userAccessToken: this.getProjectV2UserAccessToken(context),
-      now: context.config.now
-    });
-
     let createdCount = 0;
     let updatedCount = 0;
+    let fetchedCount = 0;
     const projectV2s: GithubProjectV2DiscoveryContext[] = [];
-    for (const project of projects) {
-      const row = await this.upsertDiscoveredGithubProjectV2(context, project);
-      if (row.created) {
-        createdCount += 1;
-      } else {
-        updatedCount += 1;
+    const repositories = await this.getGithubSyncRepositoriesForTarget(context);
+
+    for (const repository of repositories) {
+      const projects = await this.githubAppClient.listRepositoryProjectV2s({
+        installationId: this.toNumber(context.installation.github_installation_id),
+        appId: context.config.appId,
+        privateKey: context.config.privateKey,
+        owner: repository.owner_login,
+        repo: repository.name,
+        accountType: context.installation.account_type,
+        userAccessToken: this.getProjectV2UserAccessToken(context),
+        now: context.config.now
+      });
+      fetchedCount += projects.length;
+      const projectIds: string[] = [];
+
+      for (const project of projects) {
+        const row = await this.upsertDiscoveredGithubProjectV2(context, project);
+        if (row.created) {
+          createdCount += 1;
+        } else {
+          updatedCount += 1;
+        }
+        projectIds.push(row.id);
+        const existing = projectV2s.find((item) => item.id === row.id);
+        if (existing && repository.github_node_id) {
+          existing.repositoryNodeIds.push(repository.github_node_id);
+        } else if (!existing) {
+          projectV2s.push({
+            id: row.id,
+            workspace_id: context.workspaceId,
+            installation_id: context.installation.id,
+            github_project_node_id: project.id,
+            repositoryNodeIds: repository.github_node_id ? [repository.github_node_id] : []
+          });
+        }
       }
 
-      await this.replaceGithubProjectV2RepositoryLinks(
+      await this.replaceGithubRepositoryProjectV2Links(
         context.workspaceId,
-        row.id,
-        project.repositoryNodeIds
+        repository.id,
+        projectIds
       );
-
-      projectV2s.push({
-        id: row.id,
-        workspace_id: context.workspaceId,
-        installation_id: context.installation.id,
-        github_project_node_id: project.id,
-        repositoryNodeIds: project.repositoryNodeIds
-      });
     }
 
     return {
       summary: this.createGithubSyncSummary({
-        fetchedCount: projects.length,
+        fetchedCount,
         createdCount,
         updatedCount
       }),
@@ -809,28 +822,25 @@ export class GithubSyncExecutorService {
     return row;
   }
 
-  private async replaceGithubProjectV2RepositoryLinks(
+  private async replaceGithubRepositoryProjectV2Links(
     workspaceId: string,
-    projectV2Id: string,
-    repositoryNodeIds: string[]
+    repositoryId: string,
+    projectV2Ids: string[]
   ): Promise<void> {
-    const uniqueRepositoryNodeIds = [...new Set(repositoryNodeIds)];
+    const uniqueProjectV2Ids = [...new Set(projectV2Ids)];
     await this.database.execute(
       `
         DELETE FROM github_project_v2_repositories links
-        WHERE links.project_v2_id = $1
-          AND NOT EXISTS (
-            SELECT 1
-            FROM github_repositories repositories
-            WHERE repositories.id = links.repository_id
-              AND repositories.workspace_id = $2
-              AND repositories.github_node_id = ANY($3::text[])
-          )
+        USING github_projects_v2 projects
+        WHERE links.project_v2_id = projects.id
+          AND projects.workspace_id = $1
+          AND links.repository_id = $2
+          AND NOT (links.project_v2_id = ANY($3::uuid[]))
       `,
-      [projectV2Id, workspaceId, uniqueRepositoryNodeIds]
+      [workspaceId, repositoryId, uniqueProjectV2Ids]
     );
 
-    if (uniqueRepositoryNodeIds.length === 0) {
+    if (uniqueProjectV2Ids.length === 0) {
       return;
     }
 
@@ -840,14 +850,12 @@ export class GithubSyncExecutorService {
           project_v2_id,
           repository_id
         )
-        SELECT $1, repositories.id
-        FROM github_repositories repositories
-        WHERE repositories.workspace_id = $2
-          AND repositories.github_node_id = ANY($3::text[])
+        SELECT project_v2_id, $2
+        FROM unnest($3::uuid[]) AS project_v2_id
         ON CONFLICT (project_v2_id, repository_id)
         DO NOTHING
       `,
-      [projectV2Id, workspaceId, uniqueRepositoryNodeIds]
+      [workspaceId, repositoryId, uniqueProjectV2Ids]
     );
   }
 

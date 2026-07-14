@@ -69,6 +69,80 @@ function githubIssuePayload(overrides = {}) {
 {
   const originalFetch = globalThis.fetch;
   const privateKeyPem = createPrivateKeyPem();
+  const graphqlRequests = [];
+
+  globalThis.fetch = async (url, options = {}) => {
+    const requestUrl = url.toString();
+    if (requestUrl.endsWith("/app/installations/12345678/access_tokens")) {
+      return {
+        ok: true,
+        async json() {
+          return {
+            token: "installation-token",
+            expires_at: "2026-07-04T13:00:00.000Z"
+          };
+        }
+      };
+    }
+
+    const body = JSON.parse(options.body);
+    graphqlRequests.push(body);
+    const isSecondPage = body.variables.cursor === "projects-page-2";
+    return {
+      ok: true,
+      async json() {
+        return {
+          data: {
+            repository: {
+              projectsV2: {
+                nodes: [
+                  projectNode({
+                    id: isSecondPage ? "PVT_kwDOSecond" : "PVT_kwDOExample",
+                    number: isSecondPage ? 2 : 1
+                  })
+                ],
+                pageInfo: {
+                  hasNextPage: !isSecondPage,
+                  endCursor: isSecondPage ? null : "projects-page-2"
+                }
+              }
+            }
+          }
+        };
+      }
+    };
+  };
+
+  try {
+    const projects = await new GithubAppClient().listRepositoryProjectV2s({
+      installationId: 12345678,
+      appId: "12345",
+      privateKey: privateKeyPem,
+      owner: "my-team",
+      repo: "pilo",
+      accountType: "Organization",
+      now: () => fixedNow
+    });
+
+    assert.deepEqual(
+      graphqlRequests.map((request) => request.variables),
+      [
+        { owner: "my-team", name: "pilo", cursor: null },
+        { owner: "my-team", name: "pilo", cursor: "projects-page-2" }
+      ]
+    );
+    assert.deepEqual(projects.map((project) => project.id), [
+      "PVT_kwDOExample",
+      "PVT_kwDOSecond"
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
+{
+  const originalFetch = globalThis.fetch;
+  const privateKeyPem = createPrivateKeyPem();
   const requests = [];
 
   globalThis.fetch = async (url, options = {}) => {
@@ -96,35 +170,12 @@ function githubIssuePayload(overrides = {}) {
     assert.equal(requestUrl, "https://api.github.com/graphql");
     assert.equal(options.headers?.Authorization, "Bearer installation-token");
 
-    if (body.variables.projectId === "PVT_kwDOExample") {
-      return {
-        ok: true,
-        async json() {
-          return {
-            data: {
-              node: {
-                __typename: "ProjectV2",
-                id: "PVT_kwDOExample",
-                repositories: {
-                  nodes: [{ id: "R_kgDOSecond" }, { id: "R_kgDOExample" }],
-                  pageInfo: {
-                    hasNextPage: false,
-                    endCursor: null
-                  }
-                }
-              }
-            }
-          };
-        }
-      };
-    }
-
     return {
       ok: true,
       async json() {
         return {
           data: {
-            organization: {
+            repository: {
               projectsV2: {
                 nodes: [projectNode()],
                 pageInfo: {
@@ -140,27 +191,24 @@ function githubIssuePayload(overrides = {}) {
   };
 
   try {
-    const projects = await new GithubAppClient().listProjectV2s({
+    const projects = await new GithubAppClient().listRepositoryProjectV2s({
       installationId: 12345678,
       appId: "12345",
       privateKey: privateKeyPem,
-      accountLogin: "my-team",
+      owner: "my-team",
+      repo: "pilo",
       accountType: "Organization",
       now: () => fixedNow
     });
 
-    assert.equal(requests.length, 3);
+    assert.equal(requests.length, 2);
     assert.equal(requests[0].method, "POST");
     assert.match(requests[0].headers.Authorization, /^Bearer [^.]+\.[^.]+\.[^.]+$/);
-    assert.match(requests[1].body.query, /organization\(login: \$login\)/);
+    assert.match(requests[1].body.query, /repository\(owner: \$owner, name: \$name\)/);
     assert.deepEqual(requests[1].body.variables, {
-      login: "my-team",
+      owner: "my-team",
+      name: "pilo",
       cursor: null
-    });
-    assert.match(requests[2].body.query, /node\(id: \$projectId\)/);
-    assert.deepEqual(requests[2].body.variables, {
-      projectId: "PVT_kwDOExample",
-      cursor: "repo-cursor-1"
     });
     assert.deepEqual(projects, [
       {
@@ -181,7 +229,7 @@ function githubIssuePayload(overrides = {}) {
         updatedAt: "2026-07-01T14:30:00.000Z",
         closedAt: null,
         raw: projectNode(),
-        repositoryNodeIds: ["R_kgDOExample", "R_kgDOSecond"]
+        repositoryNodeIds: []
       }
     ]);
   } finally {
@@ -565,11 +613,12 @@ function githubIssuePayload(overrides = {}) {
   try {
     await assert.rejects(
       () =>
-        new GithubAppClient().listProjectV2s({
+        new GithubAppClient().listRepositoryProjectV2s({
           installationId: 12345678,
           appId: "12345",
           privateKey: privateKeyPem,
-          accountLogin: "my-team",
+          owner: "my-team",
+          repo: "pilo",
           accountType: "Organization",
           now: () => fixedNow
         }),
@@ -850,11 +899,12 @@ function githubIssuePayload(overrides = {}) {
   try {
     await assert.rejects(
       () =>
-        new GithubAppClient().listProjectV2s({
+        new GithubAppClient().listRepositoryProjectV2s({
           installationId: 12345678,
           appId: "12345",
           privateKey: privateKeyPem,
-          accountLogin: "Developer-EJ",
+          owner: "Developer-EJ",
+          repo: "PILO",
           accountType: "User",
           now: () => fixedNow
         }),
@@ -903,13 +953,13 @@ function githubIssuePayload(overrides = {}) {
     assert.equal(requestUrl, "https://api.github.com/graphql");
     assert.equal(options.headers?.Authorization, "Bearer user-oauth-token");
 
-    if (body.query.includes("user(login: $login)")) {
+    if (body.query.includes("repository(owner: $owner, name: $name)")) {
       return {
         ok: true,
         async json() {
           return {
             data: {
-              user: {
+              repository: {
                 projectsV2: {
                   nodes: [userProject],
                   pageInfo: {
@@ -994,9 +1044,10 @@ function githubIssuePayload(overrides = {}) {
       now: () => fixedNow
     };
 
-    const projects = await client.listProjectV2s({
+    const projects = await client.listRepositoryProjectV2s({
       ...baseInput,
-      accountLogin: "Developer-EJ",
+      owner: "Developer-EJ",
+      repo: "PILO",
       accountType: "User"
     });
     const project = await client.getProjectV2({
@@ -1057,11 +1108,12 @@ function githubIssuePayload(overrides = {}) {
   try {
     await assert.rejects(
       () =>
-        new GithubAppClient().listProjectV2s({
+        new GithubAppClient().listRepositoryProjectV2s({
           installationId: 12345678,
           appId: "12345",
           privateKey: privateKeyPem,
-          accountLogin: "Developer-EJ",
+          owner: "Developer-EJ",
+          repo: "PILO",
           accountType: "User",
           userAccessToken: "user-oauth-token",
           now: () => fixedNow
@@ -1102,11 +1154,12 @@ function githubIssuePayload(overrides = {}) {
   try {
     await assert.rejects(
       () =>
-        new GithubAppClient().listProjectV2s({
+        new GithubAppClient().listRepositoryProjectV2s({
           installationId: 12345678,
           appId: "12345",
           privateKey: privateKeyPem,
-          accountLogin: "missing-user",
+          owner: "missing-user",
+          repo: "PILO",
           accountType: "User",
           userAccessToken: "user-oauth-token",
           now: () => fixedNow
@@ -1147,11 +1200,12 @@ function githubIssuePayload(overrides = {}) {
   try {
     await assert.rejects(
       () =>
-        new GithubAppClient().listProjectV2s({
+        new GithubAppClient().listRepositoryProjectV2s({
           installationId: 12345678,
           appId: "12345",
           privateKey: privateKeyPem,
-          accountLogin: "Developer-EJ",
+          owner: "Developer-EJ",
+          repo: "PILO",
           accountType: "User",
           userAccessToken: "user-oauth-token",
           now: () => fixedNow

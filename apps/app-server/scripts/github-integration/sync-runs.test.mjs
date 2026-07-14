@@ -120,8 +120,8 @@ class FakeGithubAppClient {
     return this.repositories;
   }
 
-  async listProjectV2s(input) {
-    this.calls.push({ method: "listProjectV2s", input });
+  async listRepositoryProjectV2s(input) {
+    this.calls.push({ method: "listRepositoryProjectV2s", input });
     if (this.error) {
       throw this.error;
     }
@@ -997,6 +997,11 @@ function projectV2ItemApiItem(overrides = {}) {
         return [repositoryContextRow()];
       },
       (text, values) => {
+        assert.match(text, /FROM github_repositories/i);
+        assert.deepEqual(values, [workspaceId, installationId]);
+        return [repositoryContextRow()];
+      },
+      (text, values) => {
         assert.match(text, /FROM github_project_v2_selections/i);
         assert.deepEqual(values, [workspaceId, installationId]);
         return [{ project_v2_id: projectV2Id }];
@@ -1016,15 +1021,15 @@ function projectV2ItemApiItem(overrides = {}) {
     githubAppClient.calls.map((call) => call.method),
     [
       "listInstallationRepositories",
-      "listProjectV2s",
+      "listRepositoryProjectV2s",
       "listRepositoryIssues",
       "listRepositoryPullRequests",
       "listProjectV2Fields",
       "listProjectV2Items"
     ]
   );
-  assert.equal(githubAppClient.calls[1].input.accountLogin, "my-team");
-  assert.equal(githubAppClient.calls[1].input.accountType, "Organization");
+  assert.equal(githubAppClient.calls[1].input.owner, "my-team");
+  assert.equal(githubAppClient.calls[1].input.repo, "pilo");
   assert.equal(githubAppClient.calls[4].input.projectNodeId, projectNodeId);
   assert.equal(githubAppClient.calls[5].input.projectNodeId, projectNodeId);
   const projectRepositoryDelete = database.queries.find(
@@ -1033,26 +1038,19 @@ function projectV2ItemApiItem(overrides = {}) {
       /DELETE FROM github_project_v2_repositories/i.test(query.text)
   );
   assert.ok(projectRepositoryDelete);
-  assert.deepEqual(projectRepositoryDelete.values, [
-    projectV2Id,
-    workspaceId,
-    ["R_kgDOExample"]
-  ]);
+  assert.deepEqual(projectRepositoryDelete.values, [workspaceId, repositoryId, [projectV2Id]]);
   const projectRepositoryInsert = database.queries.find(
     (query) =>
       query.method === "execute" &&
       /INSERT INTO github_project_v2_repositories/i.test(query.text)
   );
   assert.ok(projectRepositoryInsert);
-  assert.deepEqual(projectRepositoryInsert.values, [
-    projectV2Id,
-    workspaceId,
-    ["R_kgDOExample"]
-  ]);
+  assert.deepEqual(projectRepositoryInsert.values, [workspaceId, repositoryId, [projectV2Id]]);
 }
 
 {
   const githubAppClient = new FakeGithubAppClient({
+    repositories: [repositoryApiItem()],
     projects: [
       discoveredProjectV2ApiItem({
         ownerLogin: "Developer-EJ",
@@ -1089,6 +1087,12 @@ function projectV2ItemApiItem(overrides = {}) {
         return githubProjectOAuthConnectionRow();
       },
       (text, values) => {
+        assert.match(text, /INSERT INTO github_repositories/i);
+        assert.equal(values[0], workspaceId);
+        assert.equal(values[1], installationId);
+        return { id: repositoryId, created: true };
+      },
+      (text, values) => {
         assert.match(text, /INSERT INTO github_projects_v2/i);
         assert.deepEqual(values.slice(0, 7), [
           workspaceId,
@@ -1104,20 +1108,25 @@ function projectV2ItemApiItem(overrides = {}) {
       (text, values) => {
         assert.match(text, /UPDATE github_sync_runs/i);
         assert.match(text, /status = 'success'/i);
-        assert.deepEqual(values, [syncRunId, 1, 1, 0, 0, "{}"]);
+        assert.deepEqual(values, [syncRunId, 2, 2, 0, 0, "{}"]);
         return syncRunRow({
           target: "full",
           repository_id: null,
           project_v2_id: null,
-          fetched_count: 1,
-          created_count: 1,
+          fetched_count: 2,
+          created_count: 2,
           updated_count: 0,
           skipped_count: 0,
           cursor: {}
         });
       }
     ],
-    queryRows: [() => [], () => []]
+    queryRows: [
+      () => [repositoryContextRow()],
+      () => [repositoryContextRow()],
+      () => [repositoryContextRow()],
+      () => []
+    ]
   });
   const { service } = createService(database, githubAppClient);
 
@@ -1127,12 +1136,14 @@ function projectV2ItemApiItem(overrides = {}) {
   });
 
   assert.equal(syncRun.status, "success");
-  assert.equal(syncRun.createdCount, 1);
+  assert.equal(syncRun.createdCount, 2);
   assert.deepEqual(
     githubAppClient.calls.map((call) => call.method),
     [
       "listInstallationRepositories",
-      "listProjectV2s"
+      "listRepositoryProjectV2s",
+      "listRepositoryIssues",
+      "listRepositoryPullRequests"
     ]
   );
   assert.equal(githubAppClient.calls[0].input.userAccessToken, undefined);

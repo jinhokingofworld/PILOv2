@@ -32,11 +32,9 @@ import {
 import {
   SQLTOERD_NOTE_SHAPE_TYPE,
   SQLTOERD_NOTE_CHANGE_EVENT,
-  SQLTOERD_NOTE_DELETE_EVENT,
   isSqlErdNoteShape,
   SqlErdNoteShapeUtil,
   type SqlErdNoteChangeEventDetail,
-  type SqlErdNoteDeleteEventDetail,
   type SqlErdNoteShape
 } from "@/features/sql-erd/shapes/sql-erd-note-shape";
 import {
@@ -2144,12 +2142,32 @@ function SqlErdCanvasAnnotationSync({
       const { noteId, text } = (event as CustomEvent<SqlErdNoteChangeEventDetail>).detail;
       onLayoutPatchRef.current({ notesById: { [noteId]: { text } } });
     }
-    function handleNoteDelete(event: Event) {
-      const { noteId } = (event as CustomEvent<SqlErdNoteDeleteEventDetail>).detail;
+    function deleteNote(noteId: string) {
+      const shapeId = getSqlErdNoteShapeId(noteId);
+
+      if (editor.getShape(shapeId)) {
+        editor.run(() => editor.deleteShapes([shapeId]), { history: "ignore" });
+      }
+
       onLayoutPatchRef.current({ deleteNoteIds: [noteId] });
     }
     function handleFrameChange(event: Event) {
       const { frameId, patch } = (event as CustomEvent<SqlErdFrameChangeEventDetail>).detail;
+
+      const frameShape = editor.getShape(getSqlErdFrameShapeId(frameId));
+
+      if (isSqlErdFrameShape(frameShape)) {
+        editor.run(() => {
+          editor.updateShapes([
+            {
+              id: frameShape.id,
+              type: SQLTOERD_FRAME_SHAPE_TYPE,
+              props: { ...frameShape.props, ...patch }
+            }
+          ]);
+        }, { history: "ignore" });
+      }
+
       onLayoutPatchRef.current({ framesById: { [frameId]: patch } });
     }
     function deleteFrame(frameId: string) {
@@ -2192,6 +2210,13 @@ function SqlErdCanvasAnnotationSync({
 
       const selectedShape = editor.getOnlySelectedShape();
 
+      if (isSqlErdNoteShape(selectedShape)) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        deleteNote(selectedShape.props.noteId);
+        return;
+      }
+
       if (!isSqlErdFrameShape(selectedShape)) {
         return;
       }
@@ -2204,13 +2229,11 @@ function SqlErdCanvasAnnotationSync({
       }
     }
     window.addEventListener(SQLTOERD_NOTE_CHANGE_EVENT, handleNoteChange);
-    window.addEventListener(SQLTOERD_NOTE_DELETE_EVENT, handleNoteDelete);
     window.addEventListener(SQLTOERD_FRAME_CHANGE_EVENT, handleFrameChange);
     window.addEventListener(SQLTOERD_FRAME_DELETE_EVENT, handleFrameDelete);
     window.addEventListener("keydown", handleKeyDown, true);
     return () => {
       window.removeEventListener(SQLTOERD_NOTE_CHANGE_EVENT, handleNoteChange);
-      window.removeEventListener(SQLTOERD_NOTE_DELETE_EVENT, handleNoteDelete);
       window.removeEventListener(SQLTOERD_FRAME_CHANGE_EVENT, handleFrameChange);
       window.removeEventListener(SQLTOERD_FRAME_DELETE_EVENT, handleFrameDelete);
       window.removeEventListener("keydown", handleKeyDown, true);

@@ -18,6 +18,8 @@ import { createCanvasAgentDraftToolSteps } from "./canvas-agent-draft-tool-steps
 
 const MAX_GENERATED_DRAFT_NODES = 16;
 const MAX_GENERATED_DRAFT_CONNECTIONS = 24;
+const GENERATED_FRAME_PADDING = 32;
+const GENERATED_NODE_GAP = 16;
 const ALLOWED_DRAFT_NODE_KINDS = new Set<CanvasAgentDraftNodeKind>([
   "frame",
   "note",
@@ -189,12 +191,8 @@ export class CanvasAgentDraftService {
       .filter((node): node is CanvasAgentDraftNode => node !== null);
     if (!nodes.length) return null;
 
-    const frameIds = new Set(nodes.filter((node) => node.kind === "frame").map((node) => node.id));
-    const nodeIds = new Set(nodes.map((node) => node.id));
-    const normalizedNodes = nodes.map((node) => ({
-      ...node,
-      parentId: node.parentId && frameIds.has(node.parentId) ? node.parentId : null
-    }));
+    const normalizedNodes = this.normalizeGeneratedLayout(nodes, input.origin, input.title);
+    const nodeIds = new Set(normalizedNodes.map((node) => node.id));
     const connections = Array.isArray(input.connections)
       ? input.connections
         .slice(0, MAX_GENERATED_DRAFT_CONNECTIONS)
@@ -215,6 +213,158 @@ export class CanvasAgentDraftService {
       connections,
       toolSteps: this.createToolSteps(normalizedNodes, connections)
     };
+  }
+
+  private normalizeGeneratedLayout(
+    nodes: CanvasAgentDraftNode[],
+    origin: { x: number; y: number },
+    title: string
+  ): CanvasAgentDraftNode[] {
+    const uniqueNodes = this.dedupeNodeIds(nodes);
+    const providedFrame = uniqueNodes.find((node) => node.kind === "frame");
+    const frame: CanvasAgentDraftNode = providedFrame
+      ? { ...providedFrame, parentId: null }
+      : {
+          id: "frame",
+          kind: "frame",
+          title,
+          text: null,
+          x: origin.x,
+          y: origin.y,
+          width: 720,
+          height: 520,
+          color: "blue",
+          parentId: null
+        };
+
+    const frameNode = {
+      ...frame,
+      width: Math.max(320, frame.width),
+      height: Math.max(240, frame.height)
+    };
+    const children = uniqueNodes
+      .filter((node) => node.id !== frameNode.id && node.kind !== "frame")
+      .map((node) => this.normalizeFrameChildNode(node, frameNode))
+      .sort((left, right) => (left.y - right.y) || (left.x - right.x));
+    const repairedChildren = this.repairChildOverlaps(children, frameNode);
+    const resizedFrame = this.resizeFrameToChildren(frameNode, repairedChildren);
+
+    return [resizedFrame, ...repairedChildren];
+  }
+
+  private dedupeNodeIds(nodes: CanvasAgentDraftNode[]): CanvasAgentDraftNode[] {
+    const seen = new Set<string>();
+    return nodes.map((node, index) => {
+      if (!seen.has(node.id)) {
+        seen.add(node.id);
+        return node;
+      }
+      const fallbackId = `${node.id}-${index + 1}`.slice(0, 64);
+      seen.add(fallbackId);
+      return { ...node, id: fallbackId };
+    });
+  }
+
+  private normalizeFrameChildNode(
+    node: CanvasAgentDraftNode,
+    frame: CanvasAgentDraftNode
+  ): CanvasAgentDraftNode {
+    const absoluteInsideFrame = node.x >= frame.x
+      && node.x <= frame.x + frame.width
+      && node.y >= frame.y
+      && node.y <= frame.y + frame.height;
+    const x = absoluteInsideFrame ? node.x - frame.x : node.x;
+    const y = absoluteInsideFrame ? node.y - frame.y : node.y;
+    const width = this.clamp(node.width, this.minNodeWidth(node.kind), Math.max(this.minNodeWidth(node.kind), frame.width - GENERATED_FRAME_PADDING * 2));
+    const height = Math.max(
+      this.clamp(node.height, this.minNodeHeight(node.kind), 1600),
+      this.estimatedNodeTextHeight(node, width)
+    );
+
+    return {
+      ...node,
+      x: this.clamp(x, GENERATED_FRAME_PADDING, Math.max(GENERATED_FRAME_PADDING, frame.width - width - GENERATED_FRAME_PADDING)),
+      y: Math.max(GENERATED_FRAME_PADDING, y),
+      width,
+      height,
+      parentId: frame.id
+    };
+  }
+
+  private repairChildOverlaps(
+    children: CanvasAgentDraftNode[],
+    frame: CanvasAgentDraftNode
+  ): CanvasAgentDraftNode[] {
+    const placed: CanvasAgentDraftNode[] = [];
+    children.forEach((child) => {
+      const node = {
+        ...child,
+        x: this.clamp(child.x, GENERATED_FRAME_PADDING, Math.max(GENERATED_FRAME_PADDING, frame.width - child.width - GENERATED_FRAME_PADDING))
+      };
+      let guard = 0;
+      while (placed.some((candidate) => this.overlaps(node, candidate, GENERATED_NODE_GAP)) && guard < placed.length + 4) {
+        const collidingBottom = Math.max(
+          ...placed
+            .filter((candidate) => this.overlaps(node, candidate, GENERATED_NODE_GAP))
+            .map((candidate) => candidate.y + candidate.height + GENERATED_NODE_GAP)
+        );
+        node.y = Math.max(node.y + GENERATED_NODE_GAP, collidingBottom);
+        guard += 1;
+      }
+      placed.push(node);
+    });
+    return placed;
+  }
+
+  private resizeFrameToChildren(
+    frame: CanvasAgentDraftNode,
+    children: CanvasAgentDraftNode[]
+  ): CanvasAgentDraftNode {
+    if (!children.length) return frame;
+    const right = Math.max(...children.map((node) => node.x + node.width + GENERATED_FRAME_PADDING));
+    const bottom = Math.max(...children.map((node) => node.y + node.height + GENERATED_FRAME_PADDING));
+    return {
+      ...frame,
+      width: this.clamp(Math.max(frame.width, right), 320, 2000),
+      height: this.clamp(Math.max(frame.height, bottom), 240, 1600)
+    };
+  }
+
+  private overlaps(
+    left: CanvasAgentDraftNode,
+    right: CanvasAgentDraftNode,
+    gap: number
+  ): boolean {
+    return left.x < right.x + right.width + gap
+      && left.x + left.width + gap > right.x
+      && left.y < right.y + right.height + gap
+      && left.y + left.height + gap > right.y;
+  }
+
+  private estimatedNodeTextHeight(node: CanvasAgentDraftNode, width: number): number {
+    if (node.kind === "code" || node.kind === "frame") return node.height;
+    const text = [node.title, node.text].filter(Boolean).join("\n");
+    if (!text.trim()) return this.minNodeHeight(node.kind);
+    const charsPerLine = Math.max(8, Math.floor(width / 9));
+    const lines = text
+      .split(/\n+/)
+      .map((line) => Math.max(1, Math.ceil(line.length / charsPerLine)))
+      .reduce((sum, lineCount) => sum + lineCount, 0);
+    return Math.min(800, Math.max(this.minNodeHeight(node.kind), 32 + lines * 24));
+  }
+
+  private minNodeWidth(kind: CanvasAgentDraftNodeKind): number {
+    if (kind === "text") return 80;
+    if (kind === "circle" || kind === "triangle") return 72;
+    if (kind === "code") return 320;
+    return 120;
+  }
+
+  private minNodeHeight(kind: CanvasAgentDraftNodeKind): number {
+    if (kind === "text") return 36;
+    if (kind === "circle" || kind === "triangle") return 72;
+    if (kind === "code") return 180;
+    return 56;
   }
 
   toShapeBatch(spec: CanvasDraftSpec, clientOperationId: string): SyncCanvasShapesBatchRequest {
@@ -429,6 +579,10 @@ export class CanvasAgentDraftService {
   private readBoundedNumber(value: unknown, fallback: number, min: number, max: number): number {
     const number = typeof value === "number" && Number.isFinite(value) ? value : fallback;
     return Math.min(max, Math.max(min, Math.round(number)));
+  }
+
+  private clamp(value: number, min: number, max: number): number {
+    return Math.min(max, Math.max(min, Math.round(value)));
   }
 
   private cleanText(value: unknown): string {

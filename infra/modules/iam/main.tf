@@ -233,6 +233,26 @@ resource "aws_iam_user" "github_sync_operator" {
   }
 }
 
+resource "aws_iam_user" "team_administrator" {
+  for_each = var.team_administrator_user_names
+
+  name = each.value
+}
+
+resource "aws_iam_user_policy_attachment" "team_administrator" {
+  for_each = aws_iam_user.team_administrator
+
+  user       = each.value.name
+  policy_arn = "arn:aws:iam::aws:policy/AdministratorAccess"
+}
+
+resource "aws_iam_user_policy_attachment" "github_sync_operator_administrator" {
+  count = var.github_sync_operator_user_name == "" ? 0 : 1
+
+  user       = aws_iam_user.github_sync_operator[0].name
+  policy_arn = "arn:aws:iam::aws:policy/AdministratorAccess"
+}
+
 resource "aws_iam_policy" "github_sync_operator" {
   count = var.github_sync_operator_user_name == "" ? 0 : 1
 

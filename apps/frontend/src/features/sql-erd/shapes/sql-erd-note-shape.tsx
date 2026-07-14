@@ -1,6 +1,5 @@
 "use client";
 
-import { Trash2 } from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import {
   HTMLContainer,
@@ -13,10 +12,8 @@ import {
 
 export const SQLTOERD_NOTE_SHAPE_TYPE = "sqltoerd_note";
 export const SQLTOERD_NOTE_CHANGE_EVENT = "sqltoerd:note-change";
-export const SQLTOERD_NOTE_DELETE_EVENT = "sqltoerd:note-delete";
 
 export type SqlErdNoteChangeEventDetail = { noteId: string; text: string };
-export type SqlErdNoteDeleteEventDetail = { noteId: string };
 
 export type SqlErdNoteShapeProps = {
   w: number;
@@ -94,12 +91,7 @@ function SqlErdNoteCard({ shape }: { shape: SqlErdNoteShape }) {
 
   return <HTMLContainer style={{ height: shape.props.h, width: shape.props.w }}>
     <div className="h-full w-full rounded-md border border-amber-300 bg-amber-100 p-3 text-sm text-slate-800 shadow-sm" data-sqltoerd-note-id={shape.props.noteId}>
-      <div className="mb-2 flex justify-end">
-        <button aria-label="메모 삭제" className="rounded p-1 hover:bg-amber-200" onClick={() => window.dispatchEvent(new CustomEvent<SqlErdNoteDeleteEventDetail>(SQLTOERD_NOTE_DELETE_EVENT, { detail: { noteId: shape.props.noteId } }))} type="button">
-          <Trash2 aria-hidden="true" className="size-3.5" />
-        </button>
-      </div>
-      <textarea className="h-[calc(100%-2rem)] w-full resize-none bg-transparent outline-none" maxLength={2000} onBlur={commit} onChange={(event) => setDraft(event.target.value)} onKeyDown={handleKeyDown} ref={textareaRef} value={draft} />
+      <textarea className="h-full w-full resize-none bg-transparent outline-none" maxLength={2000} onBlur={commit} onChange={(event) => setDraft(event.target.value)} onKeyDown={handleKeyDown} ref={textareaRef} value={draft} />
     </div>
   </HTMLContainer>;
 }

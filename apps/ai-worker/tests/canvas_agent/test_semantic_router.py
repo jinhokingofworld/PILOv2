@@ -30,11 +30,28 @@ class FakeEmbedder:
         raise AssertionError("semantic routing only embeds a query")
 
 
+class FailingEmbedder:
+    model_name = "test-embedding"
+    model_version = "test-revision"
+
+    def embed_query(self, text: str) -> list[float]:
+        raise AssertionError(f"semantic router must skip embedding for an empty canvas: {text}")
+
+    def embed_passage(self, _text: str) -> list[float]:
+        raise AssertionError("semantic routing only embeds a query")
+
+
 class FakeRepository:
-    def __init__(self, *, shapes=None) -> None:
+    def __init__(self, *, has_shapes=True, shapes=None) -> None:
+        self.has_shapes = has_shapes
         self.shapes = shapes or []
+        self.search_calls = 0
+
+    def has_semantic_shapes(self, _workspace_id, _canvas_id):
+        return self.has_shapes
 
     def search_semantic_shapes(self, _workspace_id, _canvas_id, _embedding, limit=4):
+        self.search_calls += 1
         assert limit == 4
         if _embedding[0] == 0.2:
             return [
@@ -102,6 +119,25 @@ def test_semantic_router_uses_direct_shape_search_prompt() -> None:
     assert plan.action_name == "find_shapes"
     assert plan.input["shapeIds"] == ["shape:auth"]
     assert plan.input["focusResult"] is True
+
+
+def test_semantic_router_skips_embedding_when_canvas_has_no_indexed_shapes() -> None:
+    repository = FakeRepository(has_shapes=False)
+    context = CanvasAgentRunContext(
+        run_id="run-1",
+        workspace_id="workspace-1",
+        canvas_id="canvas-1",
+        requested_by_user_id="user-1",
+        status="planning",
+        prompt="?몄쬆 ?먮쫫 ?대뵒 ?덉뼱?",
+        request_context={"selectedShapeIds": []},
+        previous_action=None,
+    )
+
+    plan = CanvasSemanticRouter(repository, FailingEmbedder()).plan(context)
+
+    assert plan is None
+    assert repository.search_calls == 0
 
 
 def test_semantic_router_skips_generation_prompt_for_planner() -> None:

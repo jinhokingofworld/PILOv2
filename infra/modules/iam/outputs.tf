@@ -45,3 +45,7 @@ output "github_sync_operator_user_name" {
 output "github_sync_operator_user_arn" {
   value = try(aws_iam_user.github_sync_operator[0].arn, "")
 }
+
+output "team_administrator_user_names" {
+  value = sort(keys(aws_iam_user.team_administrator))
+}

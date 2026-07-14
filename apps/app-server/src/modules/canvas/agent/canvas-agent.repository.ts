@@ -354,6 +354,23 @@ export class CanvasAgentRepository {
     );
   }
 
+  async expireActiveRunsOlderThan(timeoutMs: number): Promise<number> {
+    const result = await this.database.execute(
+      `
+        UPDATE canvas_agent_runs
+        SET status = 'expired',
+          error_code = 'CANVAS_AGENT_RUN_TIMEOUT',
+          error_message = 'Canvas Agent run did not finish before the timeout',
+          result_summary = 'Canvas AI 작업이 너무 오래 걸려 중단되었습니다.',
+          completed_at = now()
+        WHERE status IN ('queued', 'planning', 'executing')
+          AND created_at < now() - ($1::int * interval '1 millisecond')
+      `,
+      [Math.max(1, Math.floor(timeoutMs))]
+    );
+    return result.rowCount ?? 0;
+  }
+
   async cancelRun(
     currentUserId: string,
     workspaceId: string,
