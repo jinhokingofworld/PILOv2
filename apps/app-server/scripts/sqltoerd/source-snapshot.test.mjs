@@ -13,19 +13,22 @@ const {
 const {
   rebaseSqlErdSourceLayout
 } = require("../../dist/modules/sql-erd/sql-erd-source-rebase.js");
-const { SqlErdService } = require("../../dist/modules/sql-erd/sql-erd.service.js");
+const {
+  assertSourceSnapshotBatchResponseSize,
+  SqlErdService
+} = require("../../dist/modules/sql-erd/sql-erd.service.js");
 
 const migrationDirectory = new URL("../../../../db/migrations/", import.meta.url);
 const migrationFilenames = await readdir(migrationDirectory);
 
 assert.ok(
-  migrationFilenames.includes("062_create_sql_erd_source_snapshots_and_locks.sql"),
+  migrationFilenames.includes("063_create_sql_erd_source_snapshots_and_locks.sql"),
   "SQLtoERD source snapshot migration must exist"
 );
 
 const migration = await readFile(
   new URL(
-    "../../../../db/migrations/062_create_sql_erd_source_snapshots_and_locks.sql",
+    "../../../../db/migrations/063_create_sql_erd_source_snapshots_and_locks.sql",
     import.meta.url
   ),
   "utf8"
@@ -76,6 +79,20 @@ assert.throws(
 assert.throws(
   () => validateSqlErdSourceSnapshotBatchQuery({ ids: "x".repeat(2049) }),
   (error) => error.getStatus() === 400 && /too long/.test(error.getResponse().error.message)
+);
+
+const escapedMegabyte = "\\".repeat(1024 * 1024);
+assert.throws(
+  () =>
+    assertSourceSnapshotBatchResponseSize(
+      Array.from({ length: 3 }, (_, index) => ({
+        id: `snapshot-${index}`,
+        sourceText: escapedMegabyte,
+        modelJson: { escaped: escapedMegabyte },
+        layoutJson: { escaped: escapedMegabyte }
+      }))
+    ),
+  (error) => error.getStatus() === 413 && error.getResponse().error.code === "PAYLOAD_TOO_LARGE"
 );
 
 const table = (id, name, columns = []) => ({

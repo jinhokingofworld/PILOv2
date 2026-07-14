@@ -128,6 +128,7 @@ const JSON_SIZE_CONSTRAINTS = new Set([
   "sql_erd_source_snapshots_total_size_check"
 ]);
 const SOURCE_LOCK_TTL_SECONDS = 30;
+export const MAX_SQL_ERD_SOURCE_SNAPSHOT_BATCH_RESPONSE_BYTES = 10 * 1024 * 1024;
 const SQL_ERD_OPERATION_SELECT = `
   SELECT
     id,
@@ -634,7 +635,9 @@ export class SqlErdService {
     if (rows.length !== input.ids.length) {
       throw notFound("sqltoerd source snapshot not found");
     }
-    return rows.map(mapSqlErdSourceSnapshot);
+    const snapshots = rows.map(mapSqlErdSourceSnapshot);
+    assertSourceSnapshotBatchResponseSize(snapshots);
+    return snapshots;
   }
 
   async createSession(
@@ -1470,4 +1473,16 @@ function countModelArray(modelJson: SqlErdJsonObject, key: "relations" | "tables
   if (typeof schema !== "object" || schema === null || Array.isArray(schema)) return 0;
   const value = (schema as Record<string, unknown>)[key];
   return Array.isArray(value) ? value.length : 0;
+}
+
+export function assertSourceSnapshotBatchResponseSize(
+  snapshots: SqlErdSourceSnapshotPayload[]
+): void {
+  const responseBytes = Buffer.byteLength(
+    JSON.stringify({ success: true, data: snapshots }),
+    "utf8"
+  );
+  if (responseBytes > MAX_SQL_ERD_SOURCE_SNAPSHOT_BATCH_RESPONSE_BYTES) {
+    throw payloadTooLarge("sqltoerd source snapshot batch response is too large");
+  }
 }

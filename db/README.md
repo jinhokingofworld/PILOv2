@@ -76,3 +76,4 @@ The database schema source of truth is the migration history in `db/migrations/`
 - `migrations/060_create_agent_grounded_answer_outbox.sql` adds server-only durable dispatch intents for the Agent grounded-answer phase; only transcript chunk identifiers, never excerpts, are retained.
 - `migrations/061_create_sql_erd_operation_delivery.sql` adds the SQLtoERD snapshot/operations_v1 write protocol, ordered layout operation log, and durable realtime broadcast outbox with reclaimable publisher leases.
 - `migrations/062_create_pr_review_conflict_drafts.sql` adds durable per-file shared Conflict resolution drafts with optimistic draft versions, audit actor data, timestamp tracking, and all-deny RLS.
+- `migrations/063_create_sql_erd_source_snapshots_and_locks.sql` adds immutable SQLtoERD source snapshots, source-writer leases, and source snapshot operation references.

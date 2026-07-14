@@ -991,9 +991,11 @@ An `operations_v1` session rejects legacy durable `PATCH` with `409` and `error.
 
 ## Source snapshot and source writer lease
 
-This phase does not activate `operations_v1`. The following endpoints reject a
-`snapshot` session with `409 SQL_ERD_WRITE_PROTOCOL_MISMATCH`; until activation,
-legacy PATCH remains its source writer. Once a session is `operations_v1`, every
+This phase does not activate `operations_v1`. Source-lock mutation and source
+publish endpoints reject a `snapshot` session with `409 SQL_ERD_WRITE_PROTOCOL_MISMATCH`;
+until activation, legacy PATCH remains its source writer. Source snapshot batch
+read is protocol-independent because it is a read-only catch-up endpoint. Once
+a session is `operations_v1`, every
 legacy durable session PATCH and DELETE is rejected with the same code, so a
 source lease cannot be bypassed.
 
