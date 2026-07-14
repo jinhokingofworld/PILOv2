@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { createMeetingApiClient } from "@/features/meeting/api/client";
 import type {
+  JoinMeetingInput,
   CurrentMeetingPayload,
   Meeting,
   MeetingRecording,
@@ -185,7 +186,8 @@ export function useMeetingWorkspaceData({
         usesRoomScopedApi && normalizedMeetingRoomId
           ? await meetingClient.startMeetingInRoom(
               targetWorkspaceId,
-              normalizedMeetingRoomId
+              normalizedMeetingRoomId,
+              input
             )
           : await meetingClient.startMeeting(targetWorkspaceId, input);
       setCurrentState({
@@ -206,9 +208,13 @@ export function useMeetingWorkspaceData({
   );
 
   const joinMeeting = useCallback(
-    async (meetingId: string) => {
+    async (meetingId: string, input: JoinMeetingInput = {}) => {
       const targetWorkspaceId = requireWorkspace();
-      const result = await meetingClient.joinMeeting(targetWorkspaceId, meetingId);
+      const result = await meetingClient.joinMeeting(
+        targetWorkspaceId,
+        meetingId,
+        input
+      );
       await reloadCurrentMeeting();
       return result;
     },

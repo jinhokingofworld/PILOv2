@@ -146,6 +146,16 @@ export type MeetingRoomListPayload = {
 
 export type StartMeetingInput = {
   roomKey?: MeetingRoomKey;
+  recordingConsent?: RecordingConsentInput;
+};
+
+export type RecordingConsentInput = {
+  accepted: true;
+  policyVersion: "v1";
+};
+
+export type JoinMeetingInput = {
+  recordingConsent?: RecordingConsentInput;
 };
 
 export type StartMeetingPayload = {
