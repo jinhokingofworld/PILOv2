@@ -239,6 +239,145 @@ function githubIssuePayload(overrides = {}) {
 
 {
   const originalFetch = globalThis.fetch;
+  let requestSignal;
+  globalThis.fetch = async (_url, options = {}) => {
+    requestSignal = options.signal;
+    return {
+      ok: true,
+      async json() {
+        return {
+          data: {
+            addProjectV2ItemById: {
+              item: {
+                id: "PVTI_lADOExample"
+              }
+            }
+          }
+        };
+      }
+    };
+  };
+
+  try {
+    assert.deepEqual(
+      await new GithubAppClient().addProjectV2ItemByContentId({
+        contentNodeId: "I_kwDOExample",
+        projectNodeId: "PVT_kwDOExample",
+        userAccessToken: "user-oauth-token"
+      }),
+      {
+        itemNodeId: "PVTI_lADOExample"
+      }
+    );
+    assert.equal(requestSignal, undefined);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
+{
+  const originalFetch = globalThis.fetch;
+  const originalSetTimeout = globalThis.setTimeout;
+  const originalClearTimeout = globalThis.clearTimeout;
+  const privateKeyPem = createPrivateKeyPem();
+  const timeoutHandle = Symbol("ProjectV2 GraphQL timeout");
+  let timeoutCallback;
+  let clearedTimeoutHandle;
+  let requestSignal;
+  let markGraphqlRequestStarted;
+  let markJsonReadStarted;
+  const graphqlRequestStarted = new Promise((resolve) => {
+    markGraphqlRequestStarted = resolve;
+  });
+  const jsonReadStarted = new Promise((resolve) => {
+    markJsonReadStarted = resolve;
+  });
+
+  globalThis.setTimeout = (callback, delay) => {
+    timeoutCallback = callback;
+    assert.equal(delay, 30_000);
+    return timeoutHandle;
+  };
+  globalThis.clearTimeout = (handle) => {
+    clearedTimeoutHandle = handle;
+  };
+  globalThis.fetch = async (url, options = {}) => {
+    const requestUrl = url.toString();
+    if (requestUrl.endsWith("/app/installations/12345678/access_tokens")) {
+      return {
+        ok: true,
+        async json() {
+          return {
+            token: "installation-token",
+            expires_at: "2026-07-04T13:00:00.000Z"
+          };
+        }
+      };
+    }
+
+    assert.equal(requestUrl, "https://api.github.com/graphql");
+    requestSignal = options.signal;
+    markGraphqlRequestStarted();
+
+    return {
+      ok: true,
+      async json() {
+        markJsonReadStarted();
+        return new Promise((_resolve, reject) => {
+          requestSignal?.addEventListener(
+            "abort",
+            () => reject(new DOMException("The operation was aborted", "AbortError")),
+            { once: true }
+          );
+        });
+      }
+    };
+  };
+
+  try {
+    const sync = new GithubAppClient().listRepositoryProjectV2s({
+      installationId: 12345678,
+      appId: "12345",
+      privateKey: privateKeyPem,
+      owner: "my-team",
+      repo: "pilo",
+      accountType: "Organization",
+      now: () => fixedNow
+    });
+
+    await graphqlRequestStarted;
+    await jsonReadStarted;
+    assert.ok(requestSignal instanceof AbortSignal);
+    assert.equal(typeof timeoutCallback, "function");
+    assert.equal(clearedTimeoutHandle, undefined);
+    timeoutCallback();
+
+    await assert.rejects(
+      () => sync,
+      (error) => {
+        assert.equal(error?.getStatus?.(), 400);
+        assert.equal(
+          error?.response?.error?.message,
+          "GitHub ProjectV2 discovery timed out"
+        );
+        assert.doesNotMatch(
+          JSON.stringify(error?.response),
+          /installation-token|api\.github\.com|operation was aborted/i
+        );
+        return true;
+      }
+    );
+    assert.equal(requestSignal.aborted, true);
+    assert.equal(clearedTimeoutHandle, timeoutHandle);
+  } finally {
+    globalThis.fetch = originalFetch;
+    globalThis.setTimeout = originalSetTimeout;
+    globalThis.clearTimeout = originalClearTimeout;
+  }
+}
+
+{
+  const originalFetch = globalThis.fetch;
   const originalSetTimeout = globalThis.setTimeout;
   const originalClearTimeout = globalThis.clearTimeout;
   const requests = [];
