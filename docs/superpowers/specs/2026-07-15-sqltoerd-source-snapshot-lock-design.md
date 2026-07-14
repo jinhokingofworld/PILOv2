@@ -51,9 +51,11 @@ Each field has the existing SQLtoERD component limits:
 
 Snapshot rows are append-only. External clients receive them only through a
 workspace/session-authorized read API; no update or delete API exists. RLS has
-no direct client policy. Snapshot rows remain for as long as the operation log
-that refers to them remains; this phase introduces no compaction or retention
-deletion job.
+no direct client policy, and a database trigger rejects every snapshot `UPDATE`
+and direct `DELETE`. Snapshot rows remain for as long as the operation log that
+refers to them remains; this phase introduces no compaction or retention
+deletion job. A future compaction flow requires a separate privileged deletion
+procedure.
 
 ## Operation reference model
 
@@ -76,21 +78,39 @@ as a first-class field. The operation payload limit remains 1 MiB.
 The migration must include a test or migration-safe verification that the
 restrict FK does not break the existing session/workspace cascade path.
 
+## Write-protocol boundary and idempotency
+
+This contract does not activate `operations_v1`. Source-lock acquire, renew,
+release, source publish, and snapshot read APIs are available only to an
+`operations_v1` session. Until activation, legacy snapshot `PATCH` remains the
+source writer and does not claim source-lock semantics. After activation, every
+legacy durable-state writer that can change canonical session state is rejected
+so a source lease cannot be bypassed through a legacy route.
+
+The source-publish `clientOperationId` is unique per
+`(sessionId, actorUserId, clientOperationId)`. The server stores a SHA-256
+request fingerprint over the normalized source-publish input. A retry with the
+same key and fingerprint returns the original operation, snapshot ID, revision,
+and rebase summary without creating another snapshot or advancing `opSeq`. The
+same key with a different fingerprint returns `409 CONFLICT`.
+
 ## Source lock lease
 
 Create one SQLtoERD source-lock row per session with `workspace_id`,
 `session_id`, `lease_id`, `actor_user_id`, `source_base_revision`, and
 `expires_at`.
 
-- Acquire grants a 30-second lease when no active lease exists; it records the
-  current session revision as `source_base_revision`.
+- Acquire locks the session row before it inspects or inserts the lease row. It
+  accepts a stable client-generated `leaseId`, making a lost acquire response
+  retriable. It grants a 30-second lease when no active lease exists and
+  records the current session revision as `source_base_revision`.
 - Renew is allowed only for the lease owner before expiry and extends the lease
   by 30 seconds. The frontend will renew every 10 seconds in a later change.
-- Release is idempotent for a missing or already-expired lease and only removes
-  a matching owner/lease pair.
-- A competing active lease returns `409 SQL_ERD_SOURCE_LOCKED`; an expired,
-  missing, or non-owner lease used for publish/renew/release returns the
-  documented conflict/forbidden response.
+- Publish and renew require the matching, unexpired owner/lease pair and
+  otherwise return `409`. Release is idempotent only for a missing or expired
+  matching lease; a mismatched active lease returns a generic conflict without
+  revealing the holder.
+- A competing active acquire returns `409 SQL_ERD_SOURCE_LOCKED`.
 - Layout operations do not require this lease and remain writable.
 
 No presence state is persisted in this table. It is solely the durable source
@@ -117,7 +137,7 @@ In one DB transaction, the server:
 4. Validates the resulting layout against the new model.
 5. Inserts the immutable snapshot row.
 6. Updates the session source/model/layout/counts/revision and the lock's
-   source base revision.
+   source base revision to the snapshot `result_revision`.
 7. Inserts the ordered `source_snapshot` operation and transactional outbox
    row, then commits.
 
@@ -138,7 +158,9 @@ uses those IDs and never guesses renamed entities.
   360, 80 + floor(index / 3) * 280)`. With retained layouts, start each new
   table at `rightmost retained x + retained width + 144`, at the retained
   topmost y (minimum 80), then scan downward in 252px increments for the first
-  non-overlapping position. Existing positions are never moved.
+  non-overlapping position. Each collision check includes retained layouts and
+  every layout generated earlier in the same rebase. The rightmost boundary is
+  `max(x + (width ?? 320))`. Existing positions are never moved.
 - Keep notes, frames, texts, strokes, and viewport because they have no model
   endpoint dependency.
 - Remove annotation links whose table or column endpoint no longer exists.
@@ -168,6 +190,13 @@ GET /workspaces/{workspaceId}/sql-erd-sessions/{sessionId}/source-snapshots?ids=
   cross-session ID returns `404`; the API never silently omits an item.
 - The response preserves normalized request order and may contain at most three
   snapshots with a combined serialized response size of at most 10 MiB.
+
+The source-publish request body contains only `sourceText`, `modelJson`, and
+the small lease/operation envelope. The App Server does not parse SQL in this
+phase; the client must send `modelJson` from the same parse result as
+`sourceText`. The server validates schema, component sizes, the 3 MiB persisted
+snapshot total, and the rebased layout, but cannot prove semantic equivalence
+between source text and model JSON.
 
 When a client sees `source_snapshot` at sequence `N`, it buffers operations
 with a higher sequence, batch-fetches the required snapshot, applies the exact
