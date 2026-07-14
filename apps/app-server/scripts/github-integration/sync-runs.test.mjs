@@ -1004,7 +1004,12 @@ function projectV2ItemApiItem(overrides = {}) {
       (text, values) => {
         assert.match(text, /FROM github_project_v2_selections/i);
         assert.deepEqual(values, [workspaceId, installationId]);
-        return [{ project_v2_id: projectV2Id }];
+        return [
+          {
+            project_v2_id: projectV2Id,
+            repository_id: repositoryId
+          }
+        ];
       }
     ]
   });

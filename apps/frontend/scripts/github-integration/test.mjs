@@ -225,6 +225,7 @@ assert.doesNotMatch(githubPanel, /pilo_access_token/);
 
 await import("../../src/features/github-integration/github-sync-progress.test.mjs");
 await import("../../src/features/github-integration/github-sync-polling.test.mjs");
+await import("../../src/features/github-integration/github-manual-sync.test.mjs");
 await import("../../src/features/github-integration/github-connect-format.test.mjs");
 await import("../../src/features/github-integration/repository-scoped-sync.test.mjs");
 await import("../../src/features/github-integration/repository-pagination.test.mjs");

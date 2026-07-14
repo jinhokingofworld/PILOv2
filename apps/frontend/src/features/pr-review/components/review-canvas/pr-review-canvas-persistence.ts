@@ -3,6 +3,7 @@ import type {
   PrReviewCanvasViewportQuery,
   UpdatePrReviewCanvasFileShapeInput
 } from "@/features/pr-review/types";
+import type { CanvasShapeOperationPayload } from "@/shared/canvas-realtime/canvas-realtime-types";
 
 export const PR_REVIEW_CANVAS_LOAD_QUERY: PrReviewCanvasViewportQuery = {
   x: -100_000,
@@ -122,6 +123,54 @@ export function applyPrReviewFileShapeUpdate(
   };
 }
 
+export function readPrReviewCanvasOperationShape(
+  operation: CanvasShapeOperationPayload
+): PrReviewCanvasShape | null {
+  const shape = operation.payload.shape;
+  if (
+    operation.operationType !== "update" ||
+    !isRecord(shape) ||
+    shape.id !== operation.shapeId ||
+    shape.canvasId !== operation.canvasId ||
+    shape.shapeType !== "pr_review_file_node" ||
+    !isNullableString(shape.parentShapeId) ||
+    !isNullableString(shape.title) ||
+    !isNullableString(shape.textContent) ||
+    !isFiniteNumber(shape.x) ||
+    !isFiniteNumber(shape.y) ||
+    !isNullableFiniteNumber(shape.width) ||
+    !isNullableFiniteNumber(shape.height) ||
+    !isFiniteNumber(shape.rotation) ||
+    !isFiniteNumber(shape.zIndex) ||
+    !isRecord(shape.rawShape) ||
+    typeof shape.contentHash !== "string" ||
+    typeof shape.revision !== "number" ||
+    !Number.isSafeInteger(shape.revision) ||
+    shape.revision !== operation.resultRevision ||
+    shape.contentHash !== operation.contentHash
+  ) {
+    return null;
+  }
+
+  return {
+    id: shape.id,
+    canvasId: shape.canvasId,
+    parentShapeId: shape.parentShapeId,
+    shapeType: shape.shapeType,
+    title: shape.title,
+    textContent: shape.textContent,
+    x: shape.x,
+    y: shape.y,
+    width: shape.width,
+    height: shape.height,
+    rotation: shape.rotation,
+    zIndex: shape.zIndex,
+    rawShape: shape.rawShape,
+    contentHash: shape.contentHash,
+    revision: shape.revision
+  };
+}
+
 export function buildPrReviewRelationEdgeGeometry(
   from: { x: number; y: number; width: number; height: number },
   to: { x: number; y: number; width: number; height: number }
@@ -174,4 +223,16 @@ function requireFinitePositiveNumber(value: number, label: string) {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isNullableString(value: unknown): value is string | null {
+  return value === null || typeof value === "string";
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function isNullableFiniteNumber(value: unknown): value is number | null {
+  return value === null || isFiniteNumber(value);
 }

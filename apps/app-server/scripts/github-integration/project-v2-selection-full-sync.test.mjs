@@ -23,7 +23,7 @@ assert.match(
 );
 assert.match(
   syncExecutor,
-  /listSelectedGithubProjectV2Ids\([\s\S]{0,180}context\.workspaceId,[\s\S]{0,120}context\.installation\.id,[\s\S]{0,120}context\.repository\?\.id \?\? null/,
+  /listSelectedGithubProjectV2Selections\([\s\S]{0,180}context\.workspaceId,[\s\S]{0,120}context\.installation\.id,[\s\S]{0,120}context\.repository\?\.id \?\? null/,
   "Full sync must pass the repository context into stored ProjectV2 selection lookup."
 );
 assert.match(
@@ -33,13 +33,28 @@ assert.match(
 );
 assert.match(
   syncExecutor,
-  /getGithubProjectV2ContextsForFullSync[\s\S]{0,700}selectedProjectV2Ids/,
-  "Full sync must pass stored selection IDs into the discovered ProjectV2 filter."
+  /getGithubProjectV2ContextsForFullSync[\s\S]{0,700}selectedProjectV2Selections/,
+  "Full sync must pass stored repository-scoped selections into the discovered ProjectV2 filter."
 );
 assert.match(
   syncExecutor,
-  /selectedProjectV2Ids\.has\(projectV2\.id\)/,
-  "The discovered ProjectV2 filter must retain only selected local ProjectV2 IDs."
+  /selection\.repository_id/,
+  "The discovered ProjectV2 filter must retain the selected repository ID."
+);
+assert.match(
+  syncExecutor,
+  /hydrateExistingBoardsForGithubProjectV2\([\s\S]{0,160}projectV2Context\.repositoryId/,
+  "Board hydration must receive the selected repository ID for each ProjectV2 selection."
+);
+assert.match(
+  syncExecutor,
+  /const uniqueProjectV2s = \[[\s\S]{0,80}new Map\([\s\S]{0,200}projectV2\.id/,
+  "Fields and items must deduplicate ProjectV2 detail sync by ProjectV2 ID."
+);
+assert.match(
+  syncExecutor,
+  /uniqueProjectV2s\.length \* 2 \+ projectV2Contexts\.length/,
+  "Full-sync progress must count two unique detail steps and one hydration step per selection pair."
 );
 assert.doesNotMatch(
   syncExecutor,
@@ -58,6 +73,7 @@ const {
 const workspaceId = "11111111-1111-4111-8111-111111111111";
 const installationId = "22222222-2222-4222-8222-222222222222";
 const repositoryId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const unselectedRepositoryId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const selectedProjectId = "33333333-3333-4333-8333-333333333333";
 const unselectedProjectId = "44444444-4444-4444-8444-444444444444";
 
@@ -67,7 +83,7 @@ function project(id) {
     workspace_id: workspaceId,
     installation_id: installationId,
     github_project_node_id: `PVT_${id}`,
-    repositoryNodeIds: []
+    repositoryIds: [repositoryId, unselectedRepositoryId]
   };
 }
 
@@ -83,7 +99,7 @@ function summary() {
 
 async function assertFullSyncOnlyDetailsSelectedProjects(
   accountType,
-  selectedIds,
+  selectedSelections,
   repository = null
 ) {
   const database = {
@@ -100,12 +116,12 @@ async function assertFullSyncOnlyDetailsSelectedProjects(
           ? [workspaceId, installationId, repository.id]
           : [workspaceId, installationId]
       );
-      return selectedIds.map((project_v2_id) => ({ project_v2_id }));
+      return selectedSelections;
     }
   };
   const executor = new GithubSyncExecutorService(database, {});
   const detailedProjectIds = [];
-  const hydratedProjectIds = [];
+  const hydratedProjectSelections = [];
   executor.syncGithubRepositories = async () => summary();
   executor.syncGithubProjectV2Discovery = async () => ({
     summary: summary(),
@@ -121,8 +137,8 @@ async function assertFullSyncOnlyDetailsSelectedProjects(
     detailedProjectIds.push(`items:${context.projectV2.id}`);
     return summary();
   };
-  executor.hydrateExistingBoardsForGithubProjectV2 = async (context) => {
-    hydratedProjectIds.push(context.projectV2.id);
+  executor.hydrateExistingBoardsForGithubProjectV2 = async (context, selectedRepositoryId) => {
+    hydratedProjectSelections.push(`${context.projectV2.id}:${selectedRepositoryId}`);
   };
 
   await executor.runGithubSyncTarget("full", {
@@ -142,18 +158,48 @@ async function assertFullSyncOnlyDetailsSelectedProjects(
     reportProgress: async () => {}
   });
 
-  assert.deepEqual(detailedProjectIds, selectedIds.flatMap((id) => [`fields:${id}`, `items:${id}`]));
-  assert.deepEqual(hydratedProjectIds, selectedIds);
+  const selectedIds = [
+    ...new Set(selectedSelections.map((selection) => selection.project_v2_id))
+  ];
+  assert.deepEqual(
+    detailedProjectIds,
+    selectedIds.flatMap((id) => [`fields:${id}`, `items:${id}`])
+  );
+  assert.deepEqual(
+    hydratedProjectSelections,
+    selectedSelections.map(
+      (selection) => `${selection.project_v2_id}:${selection.repository_id}`
+    )
+  );
 }
 
-await assertFullSyncOnlyDetailsSelectedProjects("User", [selectedProjectId]);
-await assertFullSyncOnlyDetailsSelectedProjects("Organization", [selectedProjectId]);
+const selectedRepositorySelection = {
+  project_v2_id: selectedProjectId,
+  repository_id: repositoryId
+};
+
+await assertFullSyncOnlyDetailsSelectedProjects("User", [selectedRepositorySelection]);
+await assertFullSyncOnlyDetailsSelectedProjects("Organization", [selectedRepositorySelection]);
 await assertFullSyncOnlyDetailsSelectedProjects("Organization", []);
 await assertFullSyncOnlyDetailsSelectedProjects(
   "Organization",
-  [selectedProjectId],
+  [selectedRepositorySelection],
   { id: repositoryId, github_node_id: null }
 );
+
+await assertFullSyncOnlyDetailsSelectedProjects(
+  "Organization",
+  [selectedRepositorySelection],
+  null
+);
+
+await assertFullSyncOnlyDetailsSelectedProjects("Organization", [
+  selectedRepositorySelection,
+  {
+    project_v2_id: selectedProjectId,
+    repository_id: unselectedRepositoryId
+  }
+]);
 
 {
   const service = new GithubSyncRunService(

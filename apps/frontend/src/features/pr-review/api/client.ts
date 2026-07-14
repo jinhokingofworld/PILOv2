@@ -29,6 +29,7 @@ import type {
   UpdatePrReviewCanvasFileShapeInput,
   UpdatePrReviewFileDecisionInput
 } from "@/features/pr-review/types";
+import type { CanvasOperationsCatchupPayload } from "@/shared/canvas-realtime/canvas-realtime-types";
 
 const API_BASE_PATH = "/api/v1";
 const DEFAULT_APP_SERVER_ORIGIN = "http://localhost:4000";
@@ -481,6 +482,21 @@ export function createPrReviewApiClient({
     ) {
       return requestPrReviewData<PrReviewCanvasShape[]>(
         withQueryParams(`${reviewCanvasPath(workspaceId, canvasId)}/shapes`, query),
+        init,
+        requestOptions
+      );
+    },
+
+    async listReviewCanvasOperations(
+      workspaceId: string,
+      canvasId: string,
+      afterSeq: number,
+      init?: Pick<RequestInit, "signal">
+    ) {
+      return requestPrReviewData<CanvasOperationsCatchupPayload>(
+        withQueryParams(`${reviewCanvasPath(workspaceId, canvasId)}/operations`, {
+          afterSeq
+        }),
         init,
         requestOptions
       );

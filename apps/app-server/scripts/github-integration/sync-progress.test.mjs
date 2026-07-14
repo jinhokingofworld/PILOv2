@@ -307,7 +307,12 @@ function fullSyncContext(reportProgress) {
   const database = {
     async query(text) {
       if (/FROM github_project_v2_selections/i.test(text)) {
-        return [{ project_v2_id: "project-v2-id" }];
+        return [
+          {
+            project_v2_id: "project-v2-id",
+            repository_id: "repository-id"
+          }
+        ];
       }
 
       if (/FROM github_repositories/i.test(text)) {

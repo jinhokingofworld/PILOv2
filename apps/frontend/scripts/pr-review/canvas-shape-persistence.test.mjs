@@ -4,7 +4,8 @@ const {
   applyPrReviewFileShapeUpdate,
   buildPrReviewFileShapeUpdateInput,
   buildPrReviewRelationEdgeGeometry,
-  getPrReviewFileShapeGeometryKey
+  getPrReviewFileShapeGeometryKey,
+  readPrReviewCanvasOperationShape
 } = await import(
   "../../src/features/pr-review/components/review-canvas/pr-review-canvas-persistence.ts"
 );
@@ -81,6 +82,38 @@ assert.equal(
   "page:page\u0000420\u0000260\u0000a7\u0000272\u0000116"
 );
 assert.equal(applyPrReviewFileShapeUpdate(storedShape, input, 4).revision, 4);
+
+const remoteShape = {
+  ...storedShape,
+  x: 640,
+  y: 360,
+  revision: 5,
+  contentHash: "hash-5"
+};
+const remoteOperation = {
+  id: "operation-5",
+  workspaceId: "workspace-1",
+  canvasId: "canvas-1",
+  shapeId: storedShape.id,
+  operationType: "update",
+  opSeq: 5,
+  actorUserId: "remote-user",
+  clientOperationId: "remote-operation-5",
+  baseRevision: 4,
+  resultRevision: 5,
+  contentHash: "hash-5",
+  payload: { shape: remoteShape },
+  createdAt: "2026-07-14T00:00:00.000Z"
+};
+
+assert.deepEqual(readPrReviewCanvasOperationShape(remoteOperation), remoteShape);
+assert.equal(
+  readPrReviewCanvasOperationShape({
+    ...remoteOperation,
+    payload: { shape: { ...remoteShape, shapeType: "note" } }
+  }),
+  null
+);
 
 assert.deepEqual(
   buildPrReviewRelationEdgeGeometry(
