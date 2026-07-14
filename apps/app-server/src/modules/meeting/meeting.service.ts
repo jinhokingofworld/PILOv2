@@ -1628,7 +1628,7 @@ export class MeetingService {
           AND meeting_recordings.meeting_id = meeting_reports.meeting_id
         WHERE meetings.workspace_id = $1
           AND meeting_reports.id = $2
-        FOR UPDATE OF meeting_reports
+        FOR UPDATE OF meeting_reports, meeting_recordings
       `,
       [workspaceId, reportId]
     );

@@ -9,6 +9,7 @@ import { LiveKitWebhookService } from "./livekit-webhook.service";
 import { MeetingController } from "./meeting.controller";
 import { MeetingReportOutboxPublisherService } from "./meeting-report-outbox-publisher.service";
 import { MeetingReportOutboxRecoveryService } from "./meeting-report-outbox-recovery.service";
+import { MeetingRecordingRetentionService } from "./meeting-recording-retention.service";
 import { MeetingReportJobService } from "./meeting-report-job.service";
 import { MeetingReportInternalController } from "./meeting-report-internal.controller";
 import { MeetingReportEventGuard } from "./meeting-report-event.guard";
@@ -29,7 +30,8 @@ import { MeetingService } from "./meeting.service";
     MeetingReportRealtimePublisherService,
     MeetingStateRealtimePublisherService,
     MeetingReportOutboxPublisherService,
-    MeetingReportOutboxRecoveryService
+    MeetingReportOutboxRecoveryService,
+    MeetingRecordingRetentionService
   ],
   exports: [MeetingService]
 })
