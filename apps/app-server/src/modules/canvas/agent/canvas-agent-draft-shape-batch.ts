@@ -122,6 +122,7 @@ export function createCanvasAgentConnectionBatch(input: {
   const shapeId = shapeIdFor("arrow");
   const fromPoint = shapeConnectionPoint(input.from, "end");
   const toPoint = shapeConnectionPoint(input.to, "start");
+  const geometry = connectionShapeGeometry(fromPoint, toPoint);
   const text = cleanText(input.label);
 
   return {
@@ -136,18 +137,18 @@ export function createCanvasAgentConnectionBatch(input: {
           shapeType: "arrow",
           title: null,
           textContent: text || null,
-          x: 0,
-          y: 0,
-          width: null,
-          height: null,
+          x: geometry.x,
+          y: geometry.y,
+          width: geometry.width,
+          height: geometry.height,
           rotation: 0,
           zIndex: 90,
           rawShape: {
             id: shapeId,
             type: "arrow",
             parentId: "page:page",
-            x: 0,
-            y: 0,
+            x: geometry.x,
+            y: geometry.y,
             rotation: 0,
             props: {
               dash: "draw",
@@ -156,8 +157,8 @@ export function createCanvasAgentConnectionBatch(input: {
               color: "black",
               labelColor: "black",
               bend: 0,
-              start: { type: "point", x: fromPoint.x, y: fromPoint.y },
-              end: { type: "point", x: toPoint.x, y: toPoint.y },
+              start: { type: "point", x: geometry.start.x, y: geometry.start.y },
+              end: { type: "point", x: geometry.end.x, y: geometry.end.y },
               arrowheadStart: "none",
               arrowheadEnd: input.connectionKind === "line" ? "none" : "arrow",
               richText: richText(text)
@@ -173,6 +174,38 @@ export function createCanvasAgentConnectionBatch(input: {
         }
       }
     ]
+  };
+}
+
+function connectionShapeGeometry(
+  fromPoint: { x: number; y: number },
+  toPoint: { x: number; y: number }
+): {
+  end: { x: number; y: number };
+  height: number;
+  start: { x: number; y: number };
+  width: number;
+  x: number;
+  y: number;
+} {
+  const x = Math.min(fromPoint.x, toPoint.x);
+  const y = Math.min(fromPoint.y, toPoint.y);
+  const width = Math.max(1, Math.abs(toPoint.x - fromPoint.x));
+  const height = Math.max(1, Math.abs(toPoint.y - fromPoint.y));
+
+  return {
+    end: {
+      x: toPoint.x - x,
+      y: toPoint.y - y
+    },
+    height,
+    start: {
+      x: fromPoint.x - x,
+      y: fromPoint.y - y
+    },
+    width,
+    x,
+    y
   };
 }
 

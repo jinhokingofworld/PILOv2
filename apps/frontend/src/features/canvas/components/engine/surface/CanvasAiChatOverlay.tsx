@@ -49,6 +49,7 @@ export function CanvasAiChatOverlay({
     },
   ]);
   const lastAssistantFeedbackRef = useRef<string | null>(null);
+  const messageListRef = useRef<HTMLDivElement>(null);
   const messageListEndRef = useRef<HTMLDivElement>(null);
   const assistantFeedback = (error ?? statusMessage)?.trim() || null;
 
@@ -74,8 +75,14 @@ export function CanvasAiChatOverlay({
   }, [assistantFeedback]);
 
   useEffect(() => {
+    if (!anchor) return;
+
+    const messageList = messageListRef.current;
+    if (messageList) {
+      messageList.scrollTop = messageList.scrollHeight;
+    }
     messageListEndRef.current?.scrollIntoView({ block: "end" });
-  }, [draft, messages]);
+  }, [anchor, draft, messages]);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -153,7 +160,10 @@ export function CanvasAiChatOverlay({
             </div>
           </header>
 
-          <div className="max-h-64 space-y-2 overflow-y-auto bg-white px-4 py-4 text-sm leading-6 text-slate-700 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div
+            ref={messageListRef}
+            className="max-h-64 space-y-2 overflow-y-auto bg-white px-4 py-4 text-sm leading-6 text-slate-700 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          >
             {messages.map((message, index) => (
               <p
                 key={`${message.role}-${index}`}
