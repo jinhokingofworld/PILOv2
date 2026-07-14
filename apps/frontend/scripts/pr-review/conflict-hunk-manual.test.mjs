@@ -8,7 +8,9 @@ import {
   updatePrReviewConflictSuggestion
 } from "../../src/features/pr-review/components/review-canvas/pr-review-conflict-resolution.ts";
 import {
-  createPrReviewConflictDraft
+  applyPrReviewConflictDraftResolutionState,
+  createPrReviewConflictDraft,
+  toPrReviewConflictDraftResolutionState
 } from "../../src/features/pr-review/components/review-canvas/pr-review-conflict-drafts.ts";
 
 const file = {
@@ -54,6 +56,21 @@ const file = {
 };
 
 const baseDraft = createPrReviewConflictDraft(file);
+assert.deepEqual(toPrReviewConflictDraftResolutionState(baseDraft), {
+  resolutionChoices: {},
+  acceptedAiResolvedTexts: {},
+  manualResolvedTexts: {},
+  isCustomized: false
+});
+
+const restoredHunkDraft = applyPrReviewConflictDraftResolutionState(baseDraft, {
+  resolutionChoices: { "hunk-1": "pr" },
+  acceptedAiResolvedTexts: {},
+  manualResolvedTexts: {},
+  isCustomized: false
+});
+assert.deepEqual(restoredHunkDraft.resolutionChoices, { "hunk-1": "pr" });
+assert.equal(restoredHunkDraft.isCustomized, false);
 const mixedDraft = {
   ...baseDraft,
   resolutionChoices: {

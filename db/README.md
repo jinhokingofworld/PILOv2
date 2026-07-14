@@ -77,3 +77,4 @@ The database schema source of truth is the migration history in `db/migrations/`
 - `migrations/061_create_sql_erd_operation_delivery.sql` adds the SQLtoERD snapshot/operations_v1 write protocol, ordered layout operation log, and durable realtime broadcast outbox with reclaimable publisher leases.
 - `migrations/062_create_pr_review_conflict_drafts.sql` adds durable per-file shared Conflict resolution drafts with optimistic draft versions, audit actor data, timestamp tracking, and all-deny RLS.
 - `migrations/063_create_sql_erd_source_snapshots_and_locks.sql` adds immutable SQLtoERD source snapshots, source-writer leases, and source snapshot operation references.
+- `migrations/064_add_pr_review_conflict_draft_resolution_state.sql` stores durable Conflict hunk-selection and direct-edit state so shared draft reloads do not misclassify selection results as manual code edits.

@@ -15,6 +15,8 @@ assert.match(
   /PR_REVIEW_CONFLICT_DRAFT_REDIS_CHANNEL =\s*"pr-review:conflict-draft-events"/
 );
 assert.match(events, /isPrReviewConflictDraftRedisEvent/);
+assert.match(events, /resolutionState/);
+assert.match(events, /isPrReviewConflictDraftResolutionState/);
 assert.match(events, /isPrReviewConflictDraftLockPayload/);
 assert.match(socketServer, /unsubscribePrReviewConflictDrafts/);
 assert.match(socketServer, /PR_REVIEW_CONFLICT_DRAFT_LOCK_CLAIM_EVENT/);

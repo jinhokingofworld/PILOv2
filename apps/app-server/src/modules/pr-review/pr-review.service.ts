@@ -417,13 +417,22 @@ interface PrReviewConflictsApplyDraft {
 interface PrReviewConflictDraftUpdateInput {
   sourceHeadBlobSha?: unknown;
   resolvedContent?: unknown;
+  resolutionState?: unknown;
   expectedDraftVersion?: unknown;
+}
+
+export interface PrReviewConflictDraftResolutionState {
+  resolutionChoices: Record<string, PrReviewConflictSuggestionDraftSource>;
+  acceptedAiResolvedTexts: Record<string, string>;
+  manualResolvedTexts: Record<string, string>;
+  isCustomized: boolean;
 }
 
 interface PrReviewConflictDraftRow extends QueryResultRow {
   review_file_id: string;
   source_head_blob_sha: string;
   resolved_content: string;
+  resolution_state: unknown;
   draft_version: number | string;
   updated_by_user_id: string;
   updated_at: Date | string;
@@ -833,6 +842,7 @@ export interface PrReviewConflictDraftPayload {
   reviewFileId: string;
   sourceHeadBlobSha: string;
   resolvedContent: string;
+  resolutionState: PrReviewConflictDraftResolutionState;
   draftVersion: number;
   updatedByUserId: string;
   updatedAt: string;
@@ -996,6 +1006,10 @@ const CONFLICT_SUGGESTION_DRAFT_SOURCES: readonly PrReviewConflictSuggestionDraf
 const CONFLICT_STATUS_SETTLE_MAX_ATTEMPTS = 4;
 const CONFLICT_STATUS_SETTLE_DELAY_MS = 250;
 const CONFLICT_MARKER_PATTERN = /(^|\n)(<<<<<<<|=======|>>>>>>>)(?:\s|$)/;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
 @Injectable()
 export class PrReviewService {
@@ -2300,19 +2314,22 @@ export class PrReviewService {
            review_file_id,
            source_head_blob_sha,
            resolved_content,
+           resolution_state,
            draft_version,
            updated_by_user_id
          )
-         VALUES ($1, $2, $3, 1, $4)
+         VALUES ($1, $2, $3, $4::jsonb, 1, $5)
          ON CONFLICT (review_file_id) DO UPDATE
          SET source_head_blob_sha = EXCLUDED.source_head_blob_sha,
              resolved_content = EXCLUDED.resolved_content,
+             resolution_state = EXCLUDED.resolution_state,
              draft_version = pr_review_conflict_drafts.draft_version + 1,
              updated_by_user_id = EXCLUDED.updated_by_user_id
-         WHERE pr_review_conflict_drafts.draft_version = $5
+         WHERE pr_review_conflict_drafts.draft_version = $6
          RETURNING review_file_id,
                    source_head_blob_sha,
                    resolved_content,
+                   resolution_state,
                    draft_version,
                    updated_by_user_id,
                    updated_at`,
@@ -2320,6 +2337,7 @@ export class PrReviewService {
           reviewFileId,
           input.sourceHeadBlobSha,
           input.resolvedContent,
+          JSON.stringify(input.resolutionState),
           currentUserId,
           input.expectedDraftVersion
         ]
@@ -2331,6 +2349,7 @@ export class PrReviewService {
         `SELECT review_file_id,
                 source_head_blob_sha,
                 resolved_content,
+                resolution_state,
                 draft_version,
                 updated_by_user_id,
                 updated_at
@@ -5666,6 +5685,9 @@ export class PrReviewService {
       reviewFileId: draft.review_file_id,
       sourceHeadBlobSha: draft.source_head_blob_sha,
       resolvedContent: draft.resolved_content,
+      resolutionState:
+        this.readConflictDraftResolutionState(draft.resolution_state) ??
+        this.createLegacyConflictDraftResolutionState(),
       draftVersion: Number(draft.draft_version),
       updatedByUserId: draft.updated_by_user_id,
       updatedAt: new Date(draft.updated_at).toISOString()
@@ -5679,6 +5701,7 @@ export class PrReviewService {
       `SELECT review_file_id,
               source_head_blob_sha,
               resolved_content,
+              resolution_state,
               draft_version,
               updated_by_user_id,
               updated_at
@@ -5904,6 +5927,7 @@ export class PrReviewService {
   private normalizeConflictDraftUpdate(body: unknown): {
     sourceHeadBlobSha: string;
     resolvedContent: string;
+    resolutionState: PrReviewConflictDraftResolutionState;
     expectedDraftVersion: number;
   } {
     if (!body || typeof body !== "object" || Array.isArray(body)) {
@@ -5936,11 +5960,120 @@ export class PrReviewService {
     ) {
       throw badRequest("expectedDraftVersion must be a non-negative integer");
     }
+    const resolutionState = this.normalizeConflictDraftResolutionState(
+      draft.resolutionState
+    );
 
     return {
       sourceHeadBlobSha: draft.sourceHeadBlobSha.trim(),
       resolvedContent,
+      resolutionState,
       expectedDraftVersion: draft.expectedDraftVersion
+    };
+  }
+
+  private normalizeConflictDraftResolutionState(
+    value: unknown
+  ): PrReviewConflictDraftResolutionState {
+    if (value === undefined) {
+      return this.createLegacyConflictDraftResolutionState();
+    }
+
+    const state = this.readConflictDraftResolutionState(value);
+    if (!state) {
+      throw badRequest("resolutionState is invalid");
+    }
+    return state;
+  }
+
+  private readConflictDraftResolutionState(
+    value: unknown
+  ): PrReviewConflictDraftResolutionState | null {
+    if (!isRecord(value) || typeof value.isCustomized !== "boolean") {
+      return null;
+    }
+
+    const resolutionChoices = this.readConflictDraftChoiceMap(
+      value.resolutionChoices
+    );
+    const acceptedAiResolvedTexts = this.readConflictDraftTextMap(
+      value.acceptedAiResolvedTexts
+    );
+    const manualResolvedTexts = this.readConflictDraftTextMap(
+      value.manualResolvedTexts
+    );
+    if (
+      !resolutionChoices ||
+      !acceptedAiResolvedTexts ||
+      !manualResolvedTexts
+    ) {
+      return null;
+    }
+
+    const state = {
+      resolutionChoices,
+      acceptedAiResolvedTexts,
+      manualResolvedTexts,
+      isCustomized: value.isCustomized
+    };
+    return JSON.stringify(state).length <= MAX_CONFLICT_APPLY_CONTENT_CHARS
+      ? state
+      : null;
+  }
+
+  private readConflictDraftChoiceMap(
+    value: unknown
+  ): Record<string, PrReviewConflictSuggestionDraftSource> | null {
+    if (!isRecord(value)) return null;
+
+    const entries = Object.entries(value);
+    if (
+      entries.some(
+        ([hunkId, source]) =>
+          !hunkId.trim() ||
+          hunkId.length > 255 ||
+          typeof source !== "string" ||
+          !CONFLICT_SUGGESTION_DRAFT_SOURCES.includes(
+            source as PrReviewConflictSuggestionDraftSource
+          )
+      )
+    ) {
+      return null;
+    }
+
+    return Object.fromEntries(entries) as Record<
+      string,
+      PrReviewConflictSuggestionDraftSource
+    >;
+  }
+
+  private readConflictDraftTextMap(
+    value: unknown
+  ): Record<string, string> | null {
+    if (!isRecord(value)) return null;
+
+    const entries = Object.entries(value);
+    if (
+      entries.some(
+        ([hunkId, resolvedText]) =>
+          !hunkId.trim() ||
+          hunkId.length > 255 ||
+          typeof resolvedText !== "string" ||
+          resolvedText.length > MAX_CONFLICT_APPLY_CONTENT_CHARS
+      )
+    ) {
+      return null;
+    }
+
+    return Object.fromEntries(entries) as Record<string, string>;
+  }
+
+  private createLegacyConflictDraftResolutionState(): PrReviewConflictDraftResolutionState {
+    return {
+      resolutionChoices: {},
+      acceptedAiResolvedTexts: {},
+      manualResolvedTexts: {},
+      isCustomized: true
     };
   }
 

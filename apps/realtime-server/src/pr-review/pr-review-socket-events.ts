@@ -49,9 +49,24 @@ export type PrReviewConflictDraftUpdatedEvent = {
   reviewFileId: string;
   sourceHeadBlobSha: string;
   resolvedContent: string;
+  resolutionState: PrReviewConflictDraftResolutionState;
   draftVersion: number;
   updatedByUserId: string;
   updatedAt: string;
+};
+
+type PrReviewConflictDraftResolutionChoice =
+  | "ai"
+  | "pr"
+  | "target"
+  | "both"
+  | "manual";
+
+type PrReviewConflictDraftResolutionState = {
+  resolutionChoices: Record<string, PrReviewConflictDraftResolutionChoice>;
+  acceptedAiResolvedTexts: Record<string, string>;
+  manualResolvedTexts: Record<string, string>;
+  isCustomized: boolean;
 };
 
 export type PrReviewConflictDraftInvalidatedEvent = {
@@ -130,6 +145,42 @@ function isPositiveInteger(value: unknown): value is number {
   return Number.isInteger(value) && Number(value) > 0;
 }
 
+function isConflictDraftResolutionChoice(
+  value: unknown,
+): value is PrReviewConflictDraftResolutionChoice {
+  return (
+    value === "ai" ||
+    value === "pr" ||
+    value === "target" ||
+    value === "both" ||
+    value === "manual"
+  );
+}
+
+function isStringRecord(
+  value: unknown,
+  validateValue: (entry: unknown) => boolean,
+): value is Record<string, string> {
+  return (
+    isRecord(value) &&
+    Object.entries(value).every(
+      ([key, entry]) => isNonEmptyString(key) && validateValue(entry),
+    )
+  );
+}
+
+function isPrReviewConflictDraftResolutionState(
+  value: unknown,
+): value is PrReviewConflictDraftResolutionState {
+  return (
+    isRecord(value) &&
+    isStringRecord(value.resolutionChoices, isConflictDraftResolutionChoice) &&
+    isStringRecord(value.acceptedAiResolvedTexts, (entry) => typeof entry === "string") &&
+    isStringRecord(value.manualResolvedTexts, (entry) => typeof entry === "string") &&
+    typeof value.isCustomized === "boolean"
+  );
+}
+
 function isStringList(value: unknown): value is string[] {
   return Array.isArray(value) && value.length > 0 && value.every(isNonEmptyString);
 }
@@ -145,6 +196,7 @@ export function isPrReviewConflictDraftRedisEvent(
       isNonEmptyString(value.reviewFileId) &&
       isNonEmptyString(value.sourceHeadBlobSha) &&
       typeof value.resolvedContent === "string" &&
+      isPrReviewConflictDraftResolutionState(value.resolutionState) &&
       isPositiveInteger(value.draftVersion) &&
       isNonEmptyString(value.updatedByUserId) &&
       typeof value.updatedAt === "string" &&

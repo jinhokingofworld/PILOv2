@@ -54,17 +54,20 @@ import {
   applyDecisionUpdateToSummary
 } from "@/features/pr-review/realtime/pr-review-decision-sync";
 import {
+  applyPrReviewConflictDraftResolutionState,
   buildPrReviewConflictsApplyInput,
   createPrReviewConflictDraft,
   getPrReviewConflictDraftProgress,
   isPrReviewConflictDraftReady,
   reconcilePrReviewConflictDrafts,
+  toPrReviewConflictDraftResolutionState,
   type PrReviewConflictDraft,
   type PrReviewConflictDraftMap
 } from "@/features/pr-review/components/review-canvas/pr-review-conflict-drafts";
 import type {
   PrReviewCanvas,
   PrReviewConflictAnalysis,
+  PrReviewConflictDraftResolutionState,
   PrReviewConflictsApplyResult,
   PrReviewConflictFile,
   PrReviewConflictStatus,
@@ -519,13 +522,15 @@ export function PrReviewCanvasShell({
           for (const { file, draft } of entries) {
             if (!draft || draft.sourceHeadBlobSha !== file.headBlobSha) continue;
             nextDrafts[file.reviewFileId] = {
-              ...nextDrafts[file.reviewFileId],
+              ...applyPrReviewConflictDraftResolutionState(
+                nextDrafts[file.reviewFileId],
+                draft.resolutionState
+              ),
               sourceHeadBlobSha: draft.sourceHeadBlobSha,
               resolvedContent: draft.resolvedContent,
               draftVersion: draft.draftVersion,
               updatedByUserId: draft.updatedByUserId,
-              updatedAt: draft.updatedAt,
-              isCustomized: true
+              updatedAt: draft.updatedAt
             };
           }
           return nextDrafts;
@@ -673,6 +678,7 @@ export function PrReviewCanvasShell({
           .updateReviewFileConflictDraft(workspaceId, reviewFileId, {
             sourceHeadBlobSha: draft.sourceHeadBlobSha,
             resolvedContent: draft.resolvedContent,
+            resolutionState: toPrReviewConflictDraftResolutionState(draft),
             expectedDraftVersion: draft.draftVersion
           })
           .then(savedDraft => {
@@ -712,6 +718,7 @@ export function PrReviewCanvasShell({
       reviewFileId: string;
       sourceHeadBlobSha: string;
       resolvedContent: string;
+      resolutionState: PrReviewConflictDraftResolutionState;
       draftVersion: number;
       updatedByUserId: string;
       updatedAt: string;
@@ -732,13 +739,15 @@ export function PrReviewCanvasShell({
         return {
           ...currentDrafts,
           [remoteDraft.reviewFileId]: {
-            ...(currentDraft ?? createPrReviewConflictDraft(file!)),
+            ...applyPrReviewConflictDraftResolutionState(
+              currentDraft ?? createPrReviewConflictDraft(file!),
+              remoteDraft.resolutionState
+            ),
             sourceHeadBlobSha: remoteDraft.sourceHeadBlobSha,
             resolvedContent: remoteDraft.resolvedContent,
             draftVersion: remoteDraft.draftVersion,
             updatedByUserId: remoteDraft.updatedByUserId,
-            updatedAt: remoteDraft.updatedAt,
-            isCustomized: true
+            updatedAt: remoteDraft.updatedAt
           }
         };
       });
@@ -1094,6 +1103,15 @@ export function PrReviewCanvasShell({
                   {formatNumber(conflictDraftProgress.total)}
                 </strong>
               </span>
+              {conflictApplyDisabledReason ? (
+                <span
+                  aria-live="polite"
+                  className="max-w-72 truncate text-xs text-amber-700"
+                  title={conflictApplyDisabledReason}
+                >
+                  {conflictApplyDisabledReason}
+                </span>
+              ) : null}
               <Tooltip>
                 <TooltipTrigger render={<span />}>
                   <Button

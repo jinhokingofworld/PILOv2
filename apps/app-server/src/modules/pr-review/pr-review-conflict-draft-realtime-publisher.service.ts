@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleDestroy } from "@nestjs/common";
 import { createClient, type RedisClientType } from "redis";
 import { DatabaseService } from "../../database/database.service";
+import type { PrReviewConflictDraftResolutionState } from "./pr-review.service";
 
 export const PR_REVIEW_CONFLICT_DRAFT_REDIS_CHANNEL =
   "pr-review:conflict-draft-events";
@@ -17,6 +18,7 @@ type ConflictDraftRealtimeRow = {
   review_file_id: string;
   source_head_blob_sha: string;
   resolved_content: string;
+  resolution_state: PrReviewConflictDraftResolutionState;
   draft_version: number | string;
   updated_by_user_id: string;
   updated_at: Date | string;
@@ -42,6 +44,7 @@ export class PrReviewConflictDraftRealtimePublisherService
               review_file.id AS review_file_id,
               draft.source_head_blob_sha,
               draft.resolved_content,
+              draft.resolution_state,
               draft.draft_version,
               draft.updated_by_user_id,
               draft.updated_at
@@ -64,6 +67,7 @@ export class PrReviewConflictDraftRealtimePublisherService
       reviewFileId: row.review_file_id,
       sourceHeadBlobSha: row.source_head_blob_sha,
       resolvedContent: row.resolved_content,
+      resolutionState: row.resolution_state,
       draftVersion: Number(row.draft_version),
       updatedByUserId: row.updated_by_user_id,
       updatedAt: new Date(row.updated_at).toISOString()

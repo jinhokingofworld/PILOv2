@@ -49,6 +49,7 @@ import {
 import type {
   PrReviewDiffRow,
   PrReviewConflictFile,
+  PrReviewConflictDraftResolutionState,
   PrReviewConflictHunk,
   PrReviewConflictSuggestion,
   PrReviewDecisionUpdatedEvent,
@@ -95,6 +96,7 @@ type PrReviewFileDiffDrawerProps = {
     reviewFileId: string;
     sourceHeadBlobSha: string;
     resolvedContent: string;
+    resolutionState: PrReviewConflictDraftResolutionState;
     draftVersion: number;
     updatedByUserId: string;
     updatedAt: string;
