@@ -88,6 +88,25 @@ export function MeetingRuntimeProvider({ children }: { children: ReactNode }) {
     setHeaderMeetingRecordingStatus(null);
   }, [disconnectLiveKitRoom, setActiveSession]);
 
+  const leaveSession = useCallback(
+    async (session: MeetingRuntimeActiveSession) => {
+      const meetingClient = createMeetingApiClient({
+        accessToken: session.accessToken
+      });
+      const result = await meetingClient.leaveMeeting(
+        session.workspaceId,
+        session.meetingId
+      );
+
+      await disconnectLiveKitRoom();
+      setActiveSession(null);
+      setHeaderMeetingRecordingStatus(null);
+
+      return result;
+    },
+    [disconnectLiveKitRoom, setActiveSession]
+  );
+
   const connectToMeeting = useCallback(
     async ({
       audioDeviceId,
@@ -105,6 +124,16 @@ export function MeetingRuntimeProvider({ children }: { children: ReactNode }) {
         throw new Error("Meeting runtime requires an authenticated workspace");
       }
 
+      const previousSession = activeSessionRef.current;
+
+      if (
+        previousSession &&
+        (previousSession.workspaceId !== workspaceId ||
+          previousSession.meetingId !== meeting.id)
+      ) {
+        await leaveSession(previousSession);
+      }
+
       await connectLiveKitRoom(livekit, audioDeviceId);
       setActiveSession({
         accessToken,
@@ -116,6 +145,7 @@ export function MeetingRuntimeProvider({ children }: { children: ReactNode }) {
       authSession?.accessToken,
       authSession?.activeWorkspaceId,
       connectLiveKitRoom,
+      leaveSession,
       setActiveSession
     ]
   );
@@ -128,20 +158,8 @@ export function MeetingRuntimeProvider({ children }: { children: ReactNode }) {
       return null;
     }
 
-    const meetingClient = createMeetingApiClient({
-      accessToken: currentSession.accessToken
-    });
-    const result = await meetingClient.leaveMeeting(
-      currentSession.workspaceId,
-      currentSession.meetingId
-    );
-
-    await disconnectLiveKitRoom();
-    setActiveSession(null);
-    setHeaderMeetingRecordingStatus(null);
-
-    return result;
-  }, [disconnectFromMeeting, disconnectLiveKitRoom, setActiveSession]);
+    return leaveSession(currentSession);
+  }, [disconnectFromMeeting, leaveSession]);
 
   useEffect(() => {
     setHeaderMeetingConnectionState({
