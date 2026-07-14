@@ -432,7 +432,8 @@ export class PrReviewAnalysisService {
         "resolvedText must not contain <<<<<<<, =======, or >>>>>>>.",
         "An empty resolvedText is allowed only when deleting the entire conflict hunk is intentional.",
         "Prefer preserving both current and incoming intent when they do not contradict each other.",
-        "Treat currentDraft as user work that should inform every suggestion. Do not discard manual intent without a clear conflict."
+        "Treat currentDraft as user work that should inform every suggestion. Do not discard manual intent without a clear conflict.",
+        "currentDraft.resolvedContent may include unresolved conflict markers. Use them only as context and never copy them into resolvedText."
       ],
       file: {
         filePath: input.filePath,

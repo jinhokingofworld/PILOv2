@@ -22,7 +22,12 @@ import {
   indentOnInput,
   syntaxHighlighting
 } from "@codemirror/language";
-import { Compartment, EditorState, type Extension } from "@codemirror/state";
+import {
+  Compartment,
+  EditorState,
+  type Extension,
+  type Range
+} from "@codemirror/state";
 import {
   Decoration,
   drawSelection,
@@ -78,6 +83,12 @@ const editorTheme = EditorView.theme({
     backgroundColor: "#ecfdf5",
     boxShadow: "inset 3px 0 0 #10b981"
   },
+  ".cm-conflictMarkerLine": {
+    backgroundColor: "#fff7ed",
+    boxShadow: "inset 3px 0 0 #f97316",
+    color: "#9a3412",
+    fontWeight: "700"
+  },
   ".cm-selectionBackground": {
     backgroundColor: "#bfdbfe !important"
   },
@@ -106,6 +117,23 @@ function buildChangedLineHighlightExtension(changedLineNumbers: number[]) {
       })
     )
   );
+}
+
+function buildConflictMarkerHighlightExtension() {
+  return EditorView.decorations.compute(["doc"], (state) => {
+    const decorations: Array<Range<Decoration>> = [];
+
+    for (let lineNumber = 1; lineNumber <= state.doc.lines; lineNumber += 1) {
+      const line = state.doc.line(lineNumber);
+      if (/^\s*(<<<<<<<|=======|>>>>>>>)/.test(line.text)) {
+        decorations.push(
+          Decoration.line({ class: "cm-conflictMarkerLine" }).range(line.from)
+        );
+      }
+    }
+
+    return Decoration.set(decorations);
+  });
 }
 
 function getLanguageExtension(filePath: string): Extension {
@@ -193,6 +221,7 @@ export function PrReviewResolvedCodeEditor({
           changedLinesCompartmentRef.current.of(
             buildChangedLineHighlightExtension(changedLineNumbers)
           ),
+          buildConflictMarkerHighlightExtension(),
           readOnlyCompartmentRef.current.of([
             EditorState.readOnly.of(readOnly),
             EditorView.editable.of(!readOnly)

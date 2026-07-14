@@ -17,7 +17,6 @@ import {
   ExternalLink,
   FileText,
   GitBranch,
-  GitCompare,
   HelpCircle,
   Loader2,
   MessageSquareWarning,
@@ -36,23 +35,17 @@ import {
 import { PrReviewResolvedCodeEditor } from "./PrReviewResolvedCodeEditor";
 import { usePrReviewConflictDraftLock } from "@/features/pr-review/realtime/usePrReviewConflictDraftLock";
 import {
-  applyPrReviewConflictMarkerChoice,
+  buildPrReviewConflictMarkerDraft,
   type PrReviewConflictDraft
 } from "./pr-review-conflict-drafts";
 import {
   applyAllPrReviewConflictSuggestion,
   buildPrReviewConflictSuggestionInput,
-  buildConflictResolutionDraft,
   getConflictResolutionText,
   isConflictResolutionComplete,
   updatePrReviewConflictSuggestion,
   type PrReviewConflictResolutionChoice
 } from "./pr-review-conflict-resolution";
-import {
-  buildPrReviewContextualDiffRows,
-  buildPrReviewResolvedCodeDiff,
-  type PrReviewResolvedDiffLine
-} from "./pr-review-resolved-code-diff";
 import type {
   PrReviewDiffRow,
   PrReviewConflictFile,
@@ -81,7 +74,6 @@ type ConflictAnalysisLoadStatus =
 type SaveStatus = "idle" | "saving" | "saved" | "error";
 type ConflictSuggestionLoadStatus = "idle" | "loading" | "ready" | "error";
 type ConflictWorkspaceView = "conflict" | "resolved";
-type ResolvedWorkspaceView = "changes" | "editor";
 
 type PrReviewFileDiffDrawerProps = {
   apiClient: PrReviewApiClient;
@@ -157,6 +149,13 @@ function getErrorMessage(error: unknown) {
   }
 
   return "파일 리뷰 정보를 불러오지 못했습니다.";
+}
+
+function getConflictSuggestionErrorMessage(error: unknown) {
+  const message = getErrorMessage(error);
+  return message.includes("currentDraft.resolvedContent must not contain conflict markers")
+    ? "현재 충돌 초안을 AI에 전달하지 못했습니다. 화면을 새로고침한 뒤 다시 시도해주세요."
+    : message;
 }
 
 function isReviewDecisionChangedError(error: unknown) {
@@ -575,7 +574,9 @@ export function PrReviewFileDiffDrawer({
   const {
     canEdit: canEditConflictDraft,
     editingOwnerUserId,
+    isEditClaimPending,
     isEditing: isEditingConflictDraft,
+    isRealtimeReady,
     releaseEdit: releaseConflictDraftEdit,
     startEdit: startConflictDraftEdit
   } = usePrReviewConflictDraftLock({
@@ -629,13 +630,26 @@ export function PrReviewFileDiffDrawer({
         resolutionChoices: nextChoices,
         acceptedAiResolvedTexts: nextAcceptedAiResolvedTexts,
         manualResolvedTexts: nextManualResolvedTexts,
-        resolvedContent: buildConflictResolutionDraft({
-          headContent: conflictFile.headContent,
-          hunks: conflictFile.hunks,
-          choices: nextChoices,
-          acceptedAiResolvedTexts: nextAcceptedAiResolvedTexts,
-          manualResolvedTexts: nextManualResolvedTexts
-        }),
+        resolvedContent: buildPrReviewConflictMarkerDraft(
+          conflictFile,
+          Object.fromEntries(
+            conflictFile.hunks.flatMap((hunk) => {
+              const choice = nextChoices[hunk.id];
+              if (!choice) {
+                return [];
+              }
+
+              const resolvedText = getConflictResolutionText({
+                hunk,
+                choice,
+                acceptedAiResolvedTexts: nextAcceptedAiResolvedTexts,
+                manualResolvedTexts: nextManualResolvedTexts
+              });
+
+              return resolvedText === null ? [] : [[hunk.id, resolvedText]];
+            })
+          )
+        ),
         isCustomized: false
       });
     },
@@ -775,7 +789,7 @@ export function PrReviewFileDiffDrawer({
       setConflictSuggestionStatus("ready");
     } catch (error) {
       setConflictSuggestionStatus("error");
-      setConflictSuggestionError(getErrorMessage(error));
+      setConflictSuggestionError(getConflictSuggestionErrorMessage(error));
     }
   }, [
     apiClient,
@@ -899,109 +913,75 @@ export function PrReviewFileDiffDrawer({
             <Separator />
             {conflictFile && selectedConflictHunk ? (
               <>
-                <div className="flex items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-2">
-                  <div className="text-sm text-slate-600">
-                    {isEditingConflictDraft
-                      ? "해결 코드를 편집 중입니다. 다른 참여자는 변경 내용을 바로 확인할 수 있습니다."
-                      : editingOwnerUserId
-                        ? "다른 참여자가 해결 코드를 편집 중입니다. 저장된 변경 내용을 읽기 전용으로 표시합니다."
-                        : "한 명씩 해결 코드를 편집할 수 있습니다."}
-                  </div>
-                  {!isReviewReadOnly ? (
-                    isEditingConflictDraft ? (
-                      <Button onClick={releaseConflictDraftEdit} size="sm" type="button" variant="outline">
-                        편집 완료
-                      </Button>
-                    ) : (
-                      <Button disabled={!canEditConflictDraft} onClick={startConflictDraftEdit} size="sm" type="button">
-                        해결 코드 편집 시작
-                      </Button>
-                    )
-                  ) : null}
-                </div>
-                <div className="flex items-center gap-2 overflow-x-auto border-b border-slate-200 bg-slate-50 px-4 py-2">
-                  <Button
-                    aria-label="이전 충돌 구간"
-                    disabled={selectedConflictHunkIndex === 0}
-                    onClick={() =>
-                      setSelectedConflictHunkIndex(index => Math.max(0, index - 1))
-                    }
-                    size="icon-sm"
-                    type="button"
-                    variant="outline"
-                  >
-                    <ChevronLeft className="size-4" />
-                  </Button>
-                  <span className="shrink-0 text-sm font-medium text-slate-700">
-                    충돌 구간 {selectedConflictHunkIndex + 1} / {conflictFile.hunks.length}
-                  </span>
-                  <Button
-                    aria-label="다음 충돌 구간"
-                    disabled={selectedConflictHunkIndex >= conflictFile.hunks.length - 1}
-                    onClick={() =>
-                      setSelectedConflictHunkIndex(index =>
-                        Math.min(conflictFile.hunks.length - 1, index + 1)
-                      )
-                    }
-                    size="icon-sm"
-                    type="button"
-                    variant="outline"
-                  >
-                    <ChevronRight className="size-4" />
-                  </Button>
-                  <Separator className="mx-1 h-5" orientation="vertical" />
-                  {([
-                    ["pr", "PR 변경 선택"],
-                    ["target", "대상 변경 선택"],
-                    ["both", "둘 다 선택"]
-                  ] as const).map(([choice, label]) => (
-                    <Button
-                      disabled={!isEditingConflictDraft}
-                      key={choice}
-                      onClick={() => {
-                        if (!conflictDraft || !selectedConflictHunk) return;
-                        const nextContent = applyPrReviewConflictMarkerChoice({
-                          choice,
-                          hunk: selectedConflictHunk,
-                          value: conflictDraft.resolvedContent
-                        });
-                        if (!nextContent) return;
-                        onConflictDraftChange(conflictFile.reviewFileId, {
-                          ...conflictDraft,
-                          resolvedContent: nextContent,
-                          isCustomized: true
-                        });
-                      }}
-                      size="sm"
-                      type="button"
-                      variant="outline"
-                    >
-                      {label}
-                    </Button>
-                  ))}
-                </div>
-                <ResolvedDraftWorkspace
-                  filePath={file.filePath}
-                  isCustomized={isResolvedDraftCustomized}
-                  onChange={(value) => {
-                    if (
-                      isReviewReadOnly ||
-                      !isEditingConflictDraft ||
-                      !conflictDraft ||
-                      !conflictFile
-                    ) {
-                      return;
-                    }
-                    onConflictDraftChange(conflictFile.reviewFileId, {
-                      ...conflictDraft,
-                      resolvedContent: value,
-                      isCustomized: true
-                    });
-                  }}
-                  readOnly={isReviewReadOnly || !isEditingConflictDraft}
-                  originalValue={conflictFile.headContent}
-                  value={resolvedContentDraft}
+                <ConflictWorkspaceTabs
+                  onViewChange={setConflictWorkspaceView}
+                  resolvedHunkCount={resolvedHunkCount}
+                  totalHunkCount={conflictFile.hunks.length}
+                  view={conflictWorkspaceView}
                 />
+                {conflictWorkspaceView === "conflict" ? (
+                  <ConflictHunkComparison
+                    aiResolvedText={
+                      aiResolvedHunks.find(
+                        hunk => hunk.hunkId === selectedConflictHunk.id
+                      )?.resolvedText ?? null
+                    }
+                    baseBranch={baseBranch}
+                    choice={resolutionChoices[selectedConflictHunk.id] ?? null}
+                    filePath={file.filePath}
+                    headBranch={headBranch}
+                    hunk={selectedConflictHunk}
+                    hunkCount={conflictFile.hunks.length}
+                    hunkIndex={selectedConflictHunkIndex}
+                    isBaseComparisonOpen={isBaseComparisonOpen}
+                    isChoiceDisabled={
+                      isReviewReadOnly || isResolvedDraftCustomized
+                    }
+                    manualResolvedText={
+                      manualResolvedTexts[selectedConflictHunk.id] ??
+                      selectedConflictHunk.incomingText
+                    }
+                    onChoiceChange={choice =>
+                      handleResolutionChoiceChange(selectedConflictHunk.id, choice)
+                    }
+                    onHunkIndexChange={setSelectedConflictHunkIndex}
+                    onManualResolvedTextChange={value =>
+                      handleManualResolutionChange(selectedConflictHunk.id, value)
+                    }
+                    onResetCustomizedDraft={handleResetCustomizedDraft}
+                    onToggleBaseComparison={() =>
+                      setIsBaseComparisonOpen(open => !open)
+                    }
+                  />
+                ) : (
+                  <ResolvedDraftWorkspace
+                    canStartEditing={canEditConflictDraft}
+                    editingOwnerUserId={editingOwnerUserId}
+                    filePath={file.filePath}
+                    isCustomized={isResolvedDraftCustomized}
+                    isEditClaimPending={isEditClaimPending}
+                    isEditing={isEditingConflictDraft}
+                    isRealtimeReady={isRealtimeReady}
+                    isReviewReadOnly={isReviewReadOnly}
+                    onChange={(value) => {
+                      if (
+                        isReviewReadOnly ||
+                        !isEditingConflictDraft ||
+                        !conflictDraft
+                      ) {
+                        return;
+                      }
+                      onConflictDraftChange(conflictFile.reviewFileId, {
+                        ...conflictDraft,
+                        resolvedContent: value,
+                        isCustomized: true
+                      });
+                    }}
+                    onFinishEditing={releaseConflictDraftEdit}
+                    onStartEditing={startConflictDraftEdit}
+                    value={resolvedContentDraft}
+                  />
+                )}
               </>
             ) : (
               <div className="min-h-0 flex-1 overflow-y-auto">
@@ -1600,7 +1580,7 @@ function ConflictWorkspaceTabs({
           onClick={() => onViewChange("conflict")}
           type="button"
         >
-          Conflict 비교
+          Conflict 해결
         </button>
         <button
           aria-pressed={view === "resolved"}
@@ -1613,7 +1593,7 @@ function ConflictWorkspaceTabs({
           onClick={() => onViewChange("resolved")}
           type="button"
         >
-          최종 해결 코드
+          전체 코드 보기
         </button>
       </div>
       <p className="text-xs font-medium text-slate-500">
@@ -1624,72 +1604,39 @@ function ConflictWorkspaceTabs({
 }
 
 function ResolvedDraftWorkspace({
+  canStartEditing,
+  editingOwnerUserId,
   filePath,
   isCustomized,
+  isEditClaimPending,
+  isEditing,
+  isRealtimeReady,
+  isReviewReadOnly,
   onChange,
-  originalValue,
-  readOnly,
+  onFinishEditing,
+  onStartEditing,
   value
 }: {
+  canStartEditing: boolean;
+  editingOwnerUserId: string | null;
   filePath: string;
   isCustomized: boolean;
+  isEditClaimPending: boolean;
+  isEditing: boolean;
+  isRealtimeReady: boolean;
+  isReviewReadOnly: boolean;
   onChange: (value: string) => void;
-  originalValue: string;
-  readOnly: boolean;
+  onFinishEditing: () => void;
+  onStartEditing: () => void;
   value: string;
 }) {
-  const [view, setView] = useState<ResolvedWorkspaceView>("editor");
-  const [selectedChangeIndex, setSelectedChangeIndex] = useState(0);
-  const [revealRequestId, setRevealRequestId] = useState(0);
-  const resolvedDiff = useMemo(
-    () => buildPrReviewResolvedCodeDiff(originalValue, value),
-    [originalValue, value]
-  );
-  const contextualRows = useMemo(
-    () => buildPrReviewContextualDiffRows(resolvedDiff.rows),
-    [resolvedDiff.rows]
-  );
-  const selectedChangeBlock =
-    resolvedDiff.changeBlocks[selectedChangeIndex] ?? null;
-
-  useEffect(() => {
-    setSelectedChangeIndex((currentIndex) =>
-      Math.min(currentIndex, Math.max(0, resolvedDiff.changeBlocks.length - 1))
-    );
-  }, [resolvedDiff.changeBlocks.length]);
-
-  useEffect(() => {
-    setView("changes");
-    setSelectedChangeIndex(0);
-    setRevealRequestId(0);
-  }, [filePath, originalValue]);
-
-  function openEditor() {
-    setView("editor");
-    if (selectedChangeBlock) {
-      setRevealRequestId((current) => current + 1);
-    }
-  }
-
-  function moveToChange(nextIndex: number) {
-    if (
-      nextIndex < 0 ||
-      nextIndex >= resolvedDiff.changeBlocks.length
-    ) {
-      return;
-    }
-
-    setSelectedChangeIndex(nextIndex);
-    setRevealRequestId((current) => current + 1);
-  }
-
   return (
     <section className="flex min-h-0 flex-1 flex-col bg-white">
       <header className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-slate-200 px-5 py-3">
         <div>
           <p className="text-sm font-semibold text-slate-950">{filePath}</p>
           <p className="mt-1 text-xs text-slate-500">
-            Conflict 구간 선택 결과를 조립한 파일 전체 코드입니다. 적용 전에 직접 수정할 수 있습니다.
+            선택한 해결 결과와 아직 해결하지 않은 Conflict marker를 함께 보여줍니다.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -1698,150 +1645,48 @@ function ResolvedDraftWorkspace({
               직접 편집됨
             </span>
           ) : null}
-          <div className="inline-flex rounded-md border border-slate-200 bg-slate-100 p-1">
-            <button
-              aria-pressed={view === "changes"}
-              className={cn(
-                "inline-flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-semibold transition-colors",
-                view === "changes"
-                  ? "bg-white text-slate-950 shadow-sm"
-                  : "text-slate-500 hover:text-slate-800"
-              )}
-              onClick={() => setView("changes")}
-              type="button"
-            >
-              <GitCompare className="size-3.5" />
-              변경점 보기
-            </button>
-            <button
-              aria-pressed={view === "editor"}
-              className={cn(
-                "inline-flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-semibold transition-colors",
-                view === "editor"
-                  ? "bg-white text-slate-950 shadow-sm"
-                  : "text-slate-500 hover:text-slate-800"
-              )}
-              onClick={openEditor}
-              type="button"
-            >
-              <Pencil className="size-3.5" />
-              전체 코드 편집
-            </button>
-          </div>
+          {!isReviewReadOnly ? (
+            isEditing ? (
+              <Button onClick={onFinishEditing} size="sm" type="button" variant="outline">
+                편집 완료
+              </Button>
+            ) : (
+              <Button
+                disabled={!canStartEditing}
+                onClick={onStartEditing}
+                size="sm"
+                type="button"
+              >
+                <Pencil className="size-3.5" />
+                {isEditClaimPending
+                  ? "편집 권한 확인 중"
+                  : !isRealtimeReady
+                    ? "실시간 연결 중"
+                    : editingOwnerUserId
+                      ? "다른 참여자가 편집 중"
+                      : "코드 편집 시작"}
+              </Button>
+            )
+          ) : null}
         </div>
       </header>
-      {view === "changes" ? (
-        <ResolvedCodeDiffView rows={contextualRows} />
-      ) : (
-        <>
-          <div className="flex h-11 shrink-0 items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-4">
-            <p className="text-xs font-medium text-slate-600">
-              {resolvedDiff.changeBlocks.length > 0
-                ? `변경 구간 ${selectedChangeIndex + 1} / ${resolvedDiff.changeBlocks.length}`
-                : "PR 브랜치 원본과 동일합니다."}
-            </p>
-            <div className="flex items-center gap-2">
-              <Button
-                aria-label="이전 변경 구간"
-                disabled={selectedChangeIndex === 0}
-                onClick={() => moveToChange(selectedChangeIndex - 1)}
-                size="icon"
-                type="button"
-                variant="outline"
-              >
-                <ChevronLeft className="size-4" />
-              </Button>
-              <Button
-                aria-label="다음 변경 구간"
-                disabled={
-                  selectedChangeIndex >= resolvedDiff.changeBlocks.length - 1
-                }
-                onClick={() => moveToChange(selectedChangeIndex + 1)}
-                size="icon"
-                type="button"
-                variant="outline"
-              >
-                <ChevronRight className="size-4" />
-              </Button>
-            </div>
-          </div>
-          <PrReviewResolvedCodeEditor
-            changedLineNumbers={resolvedDiff.changedLineNumbers}
-            filePath={filePath}
-            onChange={onChange}
-            readOnly={readOnly}
-            revealLine={selectedChangeBlock?.startLine ?? null}
-            revealRequestId={revealRequestId}
-            value={value}
-          />
-        </>
-      )}
+      <div className="flex shrink-0 items-center border-b border-slate-200 bg-slate-50 px-4 py-2 text-xs text-slate-600">
+        {isEditing
+          ? "코드 편집 중입니다. 저장된 변경 내용은 다른 참여자에게 바로 반영됩니다."
+          : editingOwnerUserId
+            ? "다른 참여자가 코드 편집 중입니다. 현재 내용은 읽기 전용입니다."
+            : "전체 코드를 읽기 전용으로 보고 있습니다. 수정하려면 코드 편집을 시작하세요."}
+      </div>
+      <PrReviewResolvedCodeEditor
+        changedLineNumbers={[]}
+        filePath={filePath}
+        onChange={onChange}
+        readOnly={!isEditing}
+        revealLine={null}
+        revealRequestId={0}
+        value={value}
+      />
     </section>
-  );
-}
-
-function ResolvedCodeDiffView({
-  rows
-}: {
-  rows: Array<PrReviewResolvedDiffLine | { type: "separator" }>;
-}) {
-  if (rows.length === 0) {
-    return (
-      <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-center">
-        <p className="text-sm text-slate-500">
-          PR 브랜치 원본과 동일한 코드입니다.
-        </p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="min-h-0 flex-1 overflow-auto bg-white">
-      <div className="min-w-max text-xs leading-5">
-        {rows.map((row, index) => {
-          if (row.type === "separator") {
-            return (
-              <div
-                className="grid grid-cols-[56px_56px_24px_minmax(560px,1fr)] border-b border-slate-200 bg-slate-100 text-slate-500"
-                key={`separator-${index}`}
-              >
-                <span />
-                <span />
-                <span />
-                <span className="px-3 py-1 font-mono">...</span>
-              </div>
-            );
-          }
-
-          const rowClassName =
-            row.type === "added"
-              ? "bg-emerald-50 text-emerald-950"
-              : row.type === "deleted"
-                ? "bg-rose-50 text-rose-950"
-                : "bg-white text-slate-700";
-          const marker = row.type === "added" ? "+" : row.type === "deleted" ? "-" : "";
-
-          return (
-            <div
-              className={cn(
-                "grid grid-cols-[56px_56px_24px_minmax(560px,1fr)] border-b border-slate-100 font-mono",
-                rowClassName
-              )}
-              key={`${row.type}-${row.oldLineNumber ?? "new"}-${row.newLineNumber ?? "old"}-${index}`}
-            >
-              <span className="border-r border-slate-200 px-2 py-1 text-right text-slate-400">
-                {row.oldLineNumber ?? ""}
-              </span>
-              <span className="border-r border-slate-200 px-2 py-1 text-right text-slate-400">
-                {row.newLineNumber ?? ""}
-              </span>
-              <span className="px-2 py-1 text-center font-semibold">{marker}</span>
-              <code className="whitespace-pre px-3 py-1">{row.text || " "}</code>
-            </div>
-          );
-        })}
-      </div>
-    </div>
   );
 }
 
@@ -1890,8 +1735,7 @@ function ConflictHunkComparison({
     { label: "AI 사용", value: "ai", disabled: aiResolvedText === null },
     { label: "PR 브랜치 선택", value: "pr" },
     { label: "대상 브랜치 선택", value: "target" },
-    { label: "둘 다 선택", value: "both" },
-    { label: "직접 편집", value: "manual" }
+    { label: "둘 다 선택", value: "both" }
   ];
 
   return (
@@ -1976,7 +1820,6 @@ function ConflictHunkComparison({
             variant={choice === option.value ? "default" : "outline"}
           >
             {option.value === "ai" ? <Sparkles className="size-3.5" /> : null}
-            {option.value === "manual" ? <Pencil className="size-3.5" /> : null}
             {option.label}
           </Button>
         ))}

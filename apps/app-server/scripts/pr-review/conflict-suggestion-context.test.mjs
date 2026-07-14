@@ -86,20 +86,17 @@ assert.throws(
     error.response?.error?.message ===
     "currentDraft.hunks[0].hunkId is not a current conflict hunk"
 );
-assert.throws(
-  () =>
-    service.normalizeConflictSuggestionCurrentDraft(
-      {
-        currentDraft: {
-          ...currentDraft,
-          resolvedContent: "<<<<<<< head\ncode\n=======\ncode\n>>>>>>> base"
-        }
-      },
-      hunks
-    ),
-  (error) =>
-    error.response?.error?.message ===
-    "currentDraft.resolvedContent must not contain conflict markers"
+assert.equal(
+  service.normalizeConflictSuggestionCurrentDraft(
+    {
+      currentDraft: {
+        ...currentDraft,
+        resolvedContent: "<<<<<<< head\ncode\n=======\ncode\n>>>>>>> base"
+      }
+    },
+    hunks
+  ).resolvedContent,
+  "<<<<<<< head\ncode\n=======\ncode\n>>>>>>> base"
 );
 
 console.log("PR Review conflict suggestion context tests passed");

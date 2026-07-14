@@ -79,7 +79,10 @@ export function isPrReviewConflictDraftReady(
   return true;
 }
 
-export function buildPrReviewConflictMarkerDraft(file: PrReviewConflictFile): string {
+export function buildPrReviewConflictMarkerDraft(
+  file: PrReviewConflictFile,
+  resolvedHunkTexts: Record<string, string> = {}
+): string {
   const lines = file.headContent.replace(/\r\n/g, "\n").split("\n");
   const hunks = [...file.hunks].sort(
     (left, right) => right.incomingStartLine - left.incomingStartLine
@@ -87,15 +90,26 @@ export function buildPrReviewConflictMarkerDraft(file: PrReviewConflictFile): st
 
   for (const hunk of hunks) {
     const start = Math.max(0, hunk.incomingStartLine - 1);
-    const end = start + hunk.incomingLineCount;
+    const resolvedText = resolvedHunkTexts[hunk.id] ?? "";
+    const normalizedResolvedText = resolvedText
+      .replace(/\r\n/g, "\n")
+      .replace(/\r/g, "\n");
+    const replacementLines = Object.hasOwn(resolvedHunkTexts, hunk.id)
+      ? normalizedResolvedText.length === 0
+        ? []
+        : normalizedResolvedText.split("\n")
+      : [
+          "<<<<<<< PR branch",
+          ...hunk.incomingText.split("\n"),
+          "=======",
+          ...hunk.currentText.split("\n"),
+          ">>>>>>> target branch"
+        ];
+
     lines.splice(
       start,
       Math.max(0, hunk.incomingLineCount),
-      `<<<<<<< PR branch`,
-      ...hunk.incomingText.split("\n"),
-      "=======",
-      ...hunk.currentText.split("\n"),
-      ">>>>>>> target branch"
+      ...replacementLines
     );
   }
 
