@@ -25,12 +25,41 @@ const meetingServiceSource = await readFile(
   new URL("../../src/modules/meeting/meeting.service.ts", import.meta.url),
   "utf8"
 );
+const participantSessionMigration = await readFile(
+  new URL(
+    "../../../../db/migrations/072_convert_meeting_participants_to_session_history.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
 
 assert.match(meetingStateRealtimePublisher, /MEETING_STATE_REDIS_CHANNEL = "meeting:state-events"/);
 assert.match(meetingStateRealtimePublisher, /event: "meeting:state:updated"/);
 assert.match(meetingStateRealtimePublisher, /publishStateUpdatedSafely/);
 assert.match(meetingStateRealtimePublisher, /recording_started/);
 assert.match(meetingStateRealtimePublisher, /recording_failed/);
+assert.match(meetingServiceSource, /WITH active_participant AS/);
+assert.match(
+  meetingServiceSource,
+  /active_participant AS \(\s+SELECT meeting_participants\.\*/s
+);
+assert.match(meetingServiceSource, /ON CONFLICT DO NOTHING/);
+assert.match(meetingServiceSource, /pg_advisory_xact_lock/);
+assert.match(meetingServiceSource, /legacy_participant AS/);
+assert.match(meetingServiceSource, /ORDER BY joined_at DESC, id DESC\s+LIMIT 1/s);
+assert.match(meetingServiceSource, /WHERE id = \(SELECT id FROM legacy_participant\)/);
+assert.match(meetingServiceSource, /AND meeting_participants\.left_at IS NULL/);
+assert.match(
+  meetingServiceSource,
+  /WHERE id = \$1\s+AND left_at IS NULL/
+);
+assert.match(meetingServiceSource, /COUNT\(DISTINCT user_id\)::int/);
+assert.match(meetingServiceSource, /SELECT DISTINCT ON \(meeting_participants\.user_id\)/);
+assert.match(participantSessionMigration, /is_legacy_session boolean NOT NULL DEFAULT false/);
+assert.match(participantSessionMigration, /UPDATE meeting_participants\s+SET is_legacy_session = true/s);
+assert.match(participantSessionMigration, /DROP CONSTRAINT IF EXISTS unique_meeting_participant/);
+assert.match(participantSessionMigration, /unique_active_meeting_participant/);
+assert.match(participantSessionMigration, /unique_active_meeting_livekit_identity/);
 
 const currentUserId = "11111111-1111-1111-1111-111111111111";
 const workspaceId = "22222222-2222-2222-2222-222222222222";
@@ -959,12 +988,13 @@ async function assertError(action, messagePattern) {
           });
         },
         (text, values) => {
-          assert.match(text, /ON CONFLICT \(meeting_id, user_id\)/);
+          assert.match(text, /WITH[\s\S]*active_participant AS/);
+          assert.match(text, /ON CONFLICT DO NOTHING/);
           assert.match(text, /\$1::uuid/);
           assert.match(text, /\$2::uuid/);
           assert.match(text, /\(\$1::uuid\)::text/);
           assert.match(text, /\(\$2::uuid\)::text/);
-          assert.match(text, /left_at = NULL/);
+          assert.match(text, /AND left_at IS NULL/);
           assert.deepEqual(values, [meetingId, currentUserId]);
           return participantRow();
         }
@@ -996,6 +1026,41 @@ async function assertError(action, messagePattern) {
 }
 
 {
+  const { service, liveKitTokenService } = createSubject(
+    new FakeDatabase({
+      queryOneRows: [
+        currentMeetingRow({
+          recording_id: null,
+          recording_meeting_id: null,
+          recording_status: null,
+          recording_started_at: null
+        }),
+        text => {
+          assert.match(text, /CROSS JOIN participant_lock/);
+          assert.match(text, /ON CONFLICT DO NOTHING/);
+          return null;
+        },
+        text => {
+          assert.match(text, /legacy_participant AS/);
+          assert.match(text, /ORDER BY joined_at DESC, id DESC\s+LIMIT 1/s);
+          assert.match(text, /WHERE id = \(SELECT id FROM legacy_participant\)/);
+          assert.doesNotMatch(
+            text,
+            /reactivated_participant AS \([\s\S]*WHERE meeting_id = \$1::uuid/s
+          );
+          return participantRow();
+        }
+      ]
+    })
+  );
+
+  const joined = await service.joinMeeting(currentUserId, workspaceId, meetingId);
+
+  assert.equal(joined.participant.id, participantId);
+  assert.equal(liveKitTokenService.calls.length, 1);
+}
+
+{
   const { service, workspaceService, liveKitTokenService } = createSubject(
     new FakeDatabase({
       queryOneRows: [
@@ -1013,12 +1078,13 @@ async function assertError(action, messagePattern) {
           });
         },
         (text, values) => {
-          assert.match(text, /ON CONFLICT \(meeting_id, user_id\)/);
+          assert.match(text, /WITH[\s\S]*active_participant AS/);
+          assert.match(text, /ON CONFLICT DO NOTHING/);
           assert.match(text, /\$1::uuid/);
           assert.match(text, /\$2::uuid/);
           assert.match(text, /\(\$1::uuid\)::text/);
           assert.match(text, /\(\$2::uuid\)::text/);
-          assert.match(text, /left_at = NULL/);
+          assert.match(text, /AND left_at IS NULL/);
           assert.deepEqual(values, [meetingId, otherUserId]);
           return participantRow({
             id: otherParticipantId,
@@ -1962,13 +2028,13 @@ async function assertError(action, messagePattern) {
           });
         },
         (text, values) => {
-          assert.match(text, /COUNT\(\*\)::int AS participant_count/);
+          assert.match(text, /COUNT\(DISTINCT user_id\)::int AS participant_count/);
           assert.match(text, /left_at IS NULL/);
           assert.deepEqual(values, [meetingId]);
           return participantCountRow("0", "0");
         },
         (text, values) => {
-          assert.match(text, /meeting_participants\.user_id = \$2/);
+          assert.match(text, /AND user_id = \$2/);
           assert.deepEqual(values, [meetingId, currentUserId]);
           return null;
         }
@@ -2856,7 +2922,10 @@ assert.match(meetingServiceSource, /activityEvidence/);
         (text, values) => {
           assert.match(text, /FROM meeting_participants/);
           assert.match(text, /JOIN users/);
-          assert.match(text, /ORDER BY meeting_participants\.joined_at ASC/);
+          assert.match(text, /WITH participant_summaries AS/);
+          assert.match(text, /MIN\(joined_at\) AS joined_at/);
+          assert.match(text, /BOOL_OR\(left_at IS NULL\)/);
+          assert.match(text, /ORDER BY participant_summaries\.joined_at ASC/);
           assert.doesNotMatch(text, /email|token|secret/i);
           assert.deepEqual(values, [meetingId]);
           return [

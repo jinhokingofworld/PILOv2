@@ -269,18 +269,22 @@ class PgMeetingReportRepository:
                  AND activity_logs.actor_user_id IS NOT NULL
                  AND activity_logs.occurred_at >= meeting_recordings.started_at
                  AND activity_logs.occurred_at < meeting_recordings.ended_at
-                JOIN meeting_participants
-                  ON meeting_participants.meeting_id = meeting_reports.meeting_id
-                 AND meeting_participants.user_id = activity_logs.actor_user_id
-                 AND meeting_participants.joined_at < meeting_recordings.ended_at
-                 AND (
-                   meeting_participants.left_at IS NULL
-                   OR meeting_participants.left_at >= meeting_recordings.started_at
-                 )
                 WHERE meeting_reports.id = %s
                   AND meeting_reports.meeting_id = %s
                   AND meeting_reports.recording_id = %s
                   AND meeting_recordings.ended_at IS NOT NULL
+                  AND EXISTS (
+                    SELECT 1
+                    FROM meeting_participants
+                    WHERE meeting_participants.meeting_id = meeting_reports.meeting_id
+                      AND meeting_participants.user_id = activity_logs.actor_user_id
+                      AND meeting_participants.is_legacy_session = false
+                      AND meeting_participants.joined_at <= activity_logs.occurred_at
+                      AND (
+                        meeting_participants.left_at IS NULL
+                        OR activity_logs.occurred_at < meeting_participants.left_at
+                      )
+                  )
                 ORDER BY activity_logs.occurred_at ASC, activity_logs.id ASC
                 LIMIT %s
                 """,

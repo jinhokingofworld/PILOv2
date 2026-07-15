@@ -121,6 +121,34 @@ class FakeCompletedReportConnection:
         return FakeCompletedReportCursor()
 
 
+class FakeActivityEvidenceCursor:
+    def __init__(self, rows: list[dict[str, object]]) -> None:
+        self.rows = rows
+
+    def fetchall(self) -> list[dict[str, object]]:
+        return self.rows
+
+
+class FakeActivityEvidenceConnection:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, tuple[object, ...]]] = []
+
+    def execute(self, query: str, values: tuple[object, ...]):
+        self.calls.append((query, values))
+        if "FROM meeting_report_activity_evidence" in query:
+            return FakeActivityEvidenceCursor([])
+        return FakeActivityEvidenceCursor(
+            [
+                {
+                    "activity_log_id": "88888888-8888-8888-8888-888888888888",
+                    "occurred_at": "2026-07-16T00:00:00+00:00",
+                    "action": "calendar_event_updated",
+                    "summary": "디자인 리뷰 일정을 변경했습니다.",
+                }
+            ]
+        )
+
+
 class FakeStorage:
     def __init__(
         self,
@@ -904,6 +932,25 @@ def test_serialize_action_items_uses_api_shape() -> None:
             "priority": "MEDIUM",
         }
     ]
+
+
+def test_activity_evidence_requires_a_non_legacy_participant_session() -> None:
+    repository = object.__new__(PgMeetingReportRepository)
+    connection = FakeActivityEvidenceConnection()
+    repository.connection = connection
+
+    evidence = repository._load_activity_evidence(
+        parse_meeting_report_job(meeting_report_job_payload())
+    )
+
+    assert len(evidence) == 1
+    assert evidence[0].activity_log_id == "88888888-8888-8888-8888-888888888888"
+    query, values = connection.calls[1]
+    assert "AND EXISTS (" in query
+    assert "meeting_participants.is_legacy_session = false" in query
+    assert "meeting_participants.joined_at <= activity_logs.occurred_at" in query
+    assert "activity_logs.occurred_at < meeting_participants.left_at" in query
+    assert values == (REPORT_ID, MEETING_ID, RECORDING_ID, 50)
 
 
 def test_completed_report_requeues_terminal_embedding_job() -> None:

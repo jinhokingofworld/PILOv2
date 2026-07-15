@@ -47,6 +47,22 @@ jobs:
   app-server:
     name: app-server
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: pilo
+          POSTGRES_PASSWORD: pilo
+          POSTGRES_USER: pilo
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U pilo -d pilo"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://pilo:pilo@localhost:5432/pilo
     defaults:
       run:
         working-directory: apps/app-server
