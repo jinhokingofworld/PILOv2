@@ -79,3 +79,6 @@ The database schema source of truth is the migration history in `db/migrations/`
 - `migrations/063_create_sql_erd_source_snapshots_and_locks.sql` adds immutable SQLtoERD source snapshots, source-writer leases, and source snapshot operation references.
 - `migrations/064_add_pr_review_conflict_draft_resolution_state.sql` stores durable Conflict hunk-selection and direct-edit state so shared draft reloads do not misclassify selection results as manual code edits.
 - `migrations/065_add_activity_log_dedupe_key.sql` adds the required Workspace-scoped idempotency key for common append-only Activity Log writers.
+- `migrations/066_fix_board_hydration_timestamp.sql` fixes Board hydration timestamp shapes so row timestamps can be parsed consistently.
+- `migrations/067_add_canvas_engine_type.sql` adds Canvas engine type metadata for separating classic Canvas persistence from tldraw sync documents.
+- `migrations/068_create_canvas_sync_documents.sql` adds `canvas_sync_documents` for tldraw sync Canvas document snapshots.

@@ -87,7 +87,9 @@ assert.match(
 );
 assert.match(listCanvases, /c\.board_type = 'freeform'/);
 assert.doesNotMatch(listCanvases, /CANVAS_READ_ACCESS_SQL/);
-assert.match(createCanvas, /VALUES \(\$1, \$2, 'freeform', \$3\)/);
+assert.match(createCanvas, /engine_type/);
+assert.match(createCanvas, /engine_version/);
+assert.match(createCanvas, /VALUES \(\$1, \$2, 'freeform', \$3, 1, \$4\)/);
 assert.match(getCanvas, /findCanvas\(workspaceId, canvasId\)/);
 assert.match(listShapes, /findCanvas\(workspaceId, canvasId\)/);
 assert.match(listOperations, /CANVAS_READ_ACCESS_SQL/);

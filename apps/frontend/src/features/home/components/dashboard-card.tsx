@@ -13,11 +13,13 @@ import {
   CardHeader,
   CardTitle
 } from "@/components/ui/card";
+import { pageCursorTargetAttributes } from "@/shared/page-cursor/page-cursor-target";
 
 export function DashboardCard({
   background,
   children,
   className,
+  cursorTarget,
   description,
   icon,
   action,
@@ -28,6 +30,11 @@ export function DashboardCard({
   background?: ReactNode;
   children: ReactNode;
   className?: string;
+  cursorTarget?: {
+    id: string;
+    label?: string;
+    type: string;
+  };
   description: string | null;
   icon: ReactNode;
   action?: ReactNode;
@@ -36,7 +43,11 @@ export function DashboardCard({
   titleClassName?: string;
 }) {
   return (
-    <Card className={`relative h-full min-h-0 ${className ?? ""} shadow-sm`} size="sm">
+    <Card
+      {...(cursorTarget ? pageCursorTargetAttributes(cursorTarget) : {})}
+      className={`relative h-full min-h-0 ${className ?? ""} shadow-sm`}
+      size="sm"
+    >
       {background ? (
         <div aria-hidden="true" className="pointer-events-none absolute inset-0">
           {background}
@@ -136,5 +147,4 @@ export function StatusPill({
     </span>
   );
 }
-
 

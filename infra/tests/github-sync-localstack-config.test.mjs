@@ -12,6 +12,8 @@ const powershellSetupScript = path.join(repoRoot, 'infra/scripts/create-local-sq
 const operationsRunbook = await readFile(path.join(repoRoot, 'docs/infra/github-sync-operations.md'), 'utf8');
 const deployChecklist = await readFile(path.join(repoRoot, 'docs/infra/deploy-checklist.md'), 'utf8');
 const architecture = await readFile(path.join(repoRoot, 'docs/infra/dev-architecture.md'), 'utf8');
+const iamModule = await readFile(path.join(repoRoot, 'infra/modules/iam/main.tf'), 'utf8');
+const sqsOutputs = await readFile(path.join(repoRoot, 'infra/modules/sqs/outputs.tf'), 'utf8');
 const observabilityModule = await readFile(path.join(repoRoot, 'infra/modules/github-sync-observability/main.tf'), 'utf8');
 const localStackWorkflow = await readFile(path.join(repoRoot, '.github/workflows/infra-localstack-integration.yml'), 'utf8');
 const powershellCommand = process.platform === 'win32' ? 'powershell.exe' : 'pwsh';
@@ -27,6 +29,8 @@ assert.match(architecture, /AWS_TERRAFORM_PLAN_ROLE_ARN/);
 assert.match(architecture, /동일 저장소 PR/);
 assert.match(architecture, /pilo-dev-github-sync-jobs/);
 assert.match(architecture, /pilo-dev-github-sync-jobs-dlq/);
+assert.match(sqsOutputs, /output "github_sync_worker_queue_arns" \{\s*value = \[aws_sqs_queue\.github_webhooks\.arn, aws_sqs_queue\.github_sync_jobs\.arn\]\s*\}/s);
+assert.match(iamModule, /resource "aws_iam_role_policy" "github_sync_worker_task" \{.*Action\s*=\s*\["sqs:SendMessage"\]\s*Resource\s*=\s*var\.github_sync_worker_queue_arns.*\}/s);
 assert.match(localStackWorkflow, /runs-on:\s*ubuntu-latest/);
 assert.match(localStackWorkflow, /RUN_LOCALSTACK_INTEGRATION:\s*"1"/);
 assert.match(localStackWorkflow, /docker version/);

@@ -25,6 +25,7 @@ import { computeShapeContentHash } from "./canvas-shape-hash";
 import {
   attachShapeOperationMeta,
   mapCanvas,
+  mapCanvasSyncDocument,
   mapCanvasUserState,
   mapDeletedShape,
   mapShapeOperation,
@@ -33,6 +34,9 @@ import {
 } from "./canvas-shape.mapper";
 import {
   validateCanvasTitle,
+  validateCanvasEngineConversion,
+  validateCanvasEngineType,
+  validateCanvasSyncDocumentSnapshot,
   validateShapeBatchOperations,
   validateShapeCreate,
   validateShapeId,
@@ -46,6 +50,7 @@ import {
 import {
   CanvasBoardDetailPayload,
   CanvasBoardPayload,
+  ConvertCanvasEngineRequest,
   CanvasLatestOperationSeqRow,
   CanvasLeavePayload,
   CanvasOperationsCatchupPayload,
@@ -60,6 +65,8 @@ import {
   CanvasShapePayload,
   CanvasShapeRow,
   CanvasShapeSummaryPayload,
+  CanvasSyncDocumentPayload,
+  CanvasSyncDocumentRow,
   CanvasUserStatePayload,
   CanvasUserStateRow,
   CanvasViewSettingPayload,
@@ -69,6 +76,7 @@ import {
   ListCanvasOperationsQuery,
   ListCanvasShapesQuery,
   SyncCanvasShapesBatchRequest,
+  UpdateCanvasSyncDocumentRequest,
   UpdateCanvasShapeRequest,
   UpdateCanvasViewSettingRequest
 } from "./canvas.types";
@@ -183,6 +191,9 @@ export class CanvasService implements OnModuleDestroy, OnModuleInit {
           c.workspace_id,
           c.title,
           c.board_type,
+          c.engine_type,
+          c.engine_version,
+          c.source_canvas_id,
           c.zoom,
           c.viewport_x,
           c.viewport_y,
@@ -211,22 +222,33 @@ export class CanvasService implements OnModuleDestroy, OnModuleInit {
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
 
     const title = validateCanvasTitle(input.title);
+    const engineType = validateCanvasEngineType(input.engineType);
     const canvas = await this.database.queryOne<CanvasRow>(
       `
-        INSERT INTO canvas (workspace_id, title, board_type, created_by)
-        VALUES ($1, $2, 'freeform', $3)
+        INSERT INTO canvas (
+          workspace_id,
+          title,
+          board_type,
+          engine_type,
+          engine_version,
+          created_by
+        )
+        VALUES ($1, $2, 'freeform', $3, 1, $4)
         RETURNING
           id,
           workspace_id,
           title,
           board_type,
+          engine_type,
+          engine_version,
+          source_canvas_id,
           zoom,
           viewport_x,
           viewport_y,
           updated_at,
           0::int AS shape_count
       `,
-      [workspaceId, title, currentUserId]
+      [workspaceId, title, engineType, currentUserId]
     );
 
     if (!canvas) {
@@ -234,6 +256,68 @@ export class CanvasService implements OnModuleDestroy, OnModuleInit {
     }
 
     return mapCanvas(canvas);
+  }
+
+  async convertCanvasEngine(
+    currentUserId: string,
+    workspaceId: string,
+    canvasId: string,
+    input: ConvertCanvasEngineRequest
+  ): Promise<CanvasBoardPayload> {
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+
+    const sourceCanvas = await this.findCanvas(workspaceId, canvasId, "write");
+    if (!sourceCanvas) {
+      throw notFound("Canvas not found");
+    }
+
+    const { targetEngineType } = validateCanvasEngineConversion(input);
+    const sourceEngineType = sourceCanvas.engine_type ?? "classic";
+
+    if (targetEngineType === sourceEngineType) {
+      throw badRequest("Canvas already uses the requested engineType");
+    }
+
+    const convertedCanvas = await this.database.queryOne<CanvasRow>(
+      `
+        INSERT INTO canvas (
+          workspace_id,
+          title,
+          board_type,
+          engine_type,
+          engine_version,
+          source_canvas_id,
+          created_by
+        )
+        VALUES ($1, $2, 'freeform', $3, 1, $4, $5)
+        RETURNING
+          id,
+          workspace_id,
+          title,
+          board_type,
+          engine_type,
+          engine_version,
+          source_canvas_id,
+          zoom,
+          viewport_x,
+          viewport_y,
+          updated_at,
+          0::int AS shape_count
+      `,
+      [
+        workspaceId,
+        `${sourceCanvas.title} 실시간`,
+        targetEngineType,
+        sourceCanvas.id,
+        currentUserId
+      ]
+    );
+
+    if (!convertedCanvas) {
+      throw badRequest("Canvas engine conversion could not be created");
+    }
+
+    return mapCanvas(convertedCanvas);
   }
 
   async getCanvas(
@@ -1154,6 +1238,9 @@ export class CanvasService implements OnModuleDestroy, OnModuleInit {
           workspace_id,
           title,
           board_type,
+          engine_type,
+          engine_version,
+          source_canvas_id,
           zoom,
           viewport_x,
           viewport_y,
@@ -1174,6 +1261,93 @@ export class CanvasService implements OnModuleDestroy, OnModuleInit {
       viewportX: payload.viewportX,
       viewportY: payload.viewportY
     };
+  }
+
+  async getCanvasSyncDocument(
+    currentUserId: string,
+    workspaceId: string,
+    canvasId: string
+  ): Promise<CanvasSyncDocumentPayload> {
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+
+    const canvas = await this.findCanvas(workspaceId, canvasId);
+    if (!canvas) {
+      throw notFound("Canvas not found");
+    }
+
+    this.assertTldrawSyncCanvas(canvas);
+
+    const document = await this.database.queryOne<CanvasSyncDocumentRow>(
+      `
+        SELECT
+          canvas_id,
+          workspace_id,
+          provider_type,
+          snapshot,
+          version,
+          updated_at
+        FROM canvas_sync_documents
+        WHERE canvas_id = $1
+          AND workspace_id = $2
+      `,
+      [canvas.id, workspaceId]
+    );
+
+    return mapCanvasSyncDocument(document, {
+      canvasId: canvas.id,
+      workspaceId
+    });
+  }
+
+  async updateCanvasSyncDocument(
+    currentUserId: string,
+    workspaceId: string,
+    canvasId: string,
+    input: UpdateCanvasSyncDocumentRequest
+  ): Promise<CanvasSyncDocumentPayload> {
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+
+    const canvas = await this.findCanvas(workspaceId, canvasId, "write");
+    if (!canvas) {
+      throw notFound("Canvas not found");
+    }
+
+    this.assertTldrawSyncCanvas(canvas);
+
+    const snapshot = validateCanvasSyncDocumentSnapshot(input);
+    const document = await this.database.queryOne<CanvasSyncDocumentRow>(
+      `
+        INSERT INTO canvas_sync_documents (
+          workspace_id,
+          canvas_id,
+          provider_type,
+          snapshot
+        )
+        VALUES ($1, $2, 'tldraw_sync', $3)
+        ON CONFLICT (canvas_id)
+        DO UPDATE SET
+          snapshot = EXCLUDED.snapshot,
+          version = canvas_sync_documents.version + 1,
+          updated_at = now()
+        RETURNING
+          canvas_id,
+          workspace_id,
+          provider_type,
+          snapshot,
+          version,
+          updated_at
+      `,
+      [workspaceId, canvas.id, snapshot]
+    );
+
+    if (!document) {
+      throw badRequest("Canvas sync document could not be saved");
+    }
+
+    return mapCanvasSyncDocument(document, {
+      canvasId: canvas.id,
+      workspaceId
+    });
   }
 
   async updateShape(
@@ -1848,6 +2022,12 @@ export class CanvasService implements OnModuleDestroy, OnModuleInit {
     return typeof value === "object" && value !== null && !Array.isArray(value);
   }
 
+  private assertTldrawSyncCanvas(canvas: CanvasRow): void {
+    if ((canvas.engine_type ?? "classic") !== "tldraw_sync") {
+      throw badRequest("Canvas sync document is only available for tldraw_sync canvases");
+    }
+  }
+
   private async findCanvas(
     workspaceId: string,
     canvasId: string,
@@ -1869,6 +2049,9 @@ export class CanvasService implements OnModuleDestroy, OnModuleInit {
           c.workspace_id,
           c.title,
           c.board_type,
+          c.engine_type,
+          c.engine_version,
+          c.source_canvas_id,
           c.zoom,
           c.viewport_x,
           c.viewport_y,

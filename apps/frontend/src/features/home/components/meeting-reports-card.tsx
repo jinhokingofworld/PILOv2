@@ -18,6 +18,7 @@ import {
   DashboardNavigationAction
 } from "./dashboard-card";
 import { MeetingReportsBackground } from "./home-backgrounds";
+import { pageCursorTargetAttributes } from "@/shared/page-cursor/page-cursor-target";
 
 export function MeetingReportsCard({
   meetingReportsState
@@ -41,6 +42,7 @@ export function MeetingReportsCard({
       }
       background={<MeetingReportsBackground />}
       className="border-[#CBEFBD] bg-[#F5FCF2] shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_10px_24px_rgba(15,23,42,0.08)]"
+      cursorTarget={{ id: "meeting-reports", label: "회의록", type: "home_card" }}
       description={null}
       icon={<FileText className="size-4" />}
       title="회의록"
@@ -58,6 +60,11 @@ export function MeetingReportsCard({
         ) : visibleMeetingReports.length > 0 ? (
           visibleMeetingReports.map((report) => (
             <button
+              {...pageCursorTargetAttributes({
+                id: report.id,
+                label: formatMeetingReportTitle(report),
+                type: "home_meeting_report"
+              })}
               key={report.id}
               aria-label={`${formatMeetingReportTitle(report)} 회의록으로 이동`}
               className="flex min-h-0 flex-col justify-center overflow-hidden rounded-lg border bg-background/90 p-2.5 text-left shadow-sm backdrop-blur transition hover:bg-background hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"

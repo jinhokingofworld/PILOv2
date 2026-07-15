@@ -54,6 +54,11 @@ Do not store cursor position or selection in PostgreSQL. Presence is realtime
 state only. Canvas shape state and operation catch-up remain App Server/API/DB
 responsibilities.
 
+For `tldraw_sync` Canvas, realtime-server owns the multiplayer room lifecycle.
+The room key and validation contract are documented in `src/canvas/README.md`;
+recoverable room snapshots are persisted to the same `canvas_sync_documents`
+boundary used by the App Server fallback API.
+
 ## Runtime
 
 Required for authenticated Canvas and Board rooms:
@@ -67,6 +72,19 @@ Optional:
 - `REDIS_URL` to enable Socket.IO Redis adapter across multiple tasks.
 - `SOCKET_IO_CORS_ORIGIN` as a comma-separated frontend origin allowlist.
 - `REALTIME_SCOPE` for health/debug scope reporting.
+
+## tldraw_sync deployment notes
+
+- Browser clients connect to `/sync/canvas` through
+  `NEXT_PUBLIC_PILO_REALTIME_SERVER_URL`.
+- The load balancer must route `/sync/*` WebSocket upgrades to realtime-server.
+- `canvas_sync_documents` migrations must be applied before enabling
+  `tldraw_sync` Canvas creation/conversion.
+- The current room implementation is in-memory per realtime-server process.
+  Run one realtime-server task or configure sticky routing for `/sync/canvas`
+  before using multiple tasks.
+- `/health` and `/sync/health` include the current `tldraw_sync` room count,
+  active session count, and pending persist count.
 
 ## Verification
 

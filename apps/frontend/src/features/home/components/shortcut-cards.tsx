@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 
 import { Card, CardContent } from "@/components/ui/card";
 import { useAuthSession } from "@/features/auth/auth-session";
+import { pageCursorTargetAttributes } from "@/shared/page-cursor/page-cursor-target";
 import {
   useHomeCanvasSummary,
   useHomeSqlErdSession
@@ -39,6 +40,11 @@ function CanvasShortcutCard() {
 
   return (
     <Card
+      {...pageCursorTargetAttributes({
+        id: "canvas-shortcut",
+        label: "Canvas 바로가기",
+        type: "home_card"
+      })}
       aria-label="Canvas로 이동"
       className="relative min-h-0 cursor-pointer overflow-hidden border-slate-900/10 bg-slate-950 text-white shadow-sm transition-shadow hover:shadow-md"
       onClick={handleNavigateToCanvas}
@@ -111,6 +117,11 @@ function SqlErdShortcutCard() {
 
   return (
     <Card
+      {...pageCursorTargetAttributes({
+        id: "sql-erd-shortcut",
+        label: "SQL to ERD 바로가기",
+        type: "home_card"
+      })}
       aria-label="SQL to ERD로 이동"
       className="relative min-h-0 cursor-pointer overflow-hidden border-slate-900/10 bg-slate-950 text-white shadow-sm transition-shadow hover:shadow-md"
       onClick={handleNavigateToSqlErd}

@@ -142,6 +142,7 @@ Request:
 - repository와 ProjectV2가 같은 workspace에 있고 서로 연결되어 있는지 검증한다.
 - 연결된 GitHub repository 또는 ProjectV2가 없으면 `404 NOT_FOUND`와 `GitHub repository or ProjectV2 link not found`를 반환한다.
 - 서버는 `hydrate_pilo_board_from_github(projectV2Id, repositoryId)`를 호출해 `boards`, `board_columns`, `pilo_issues`를 hydrate한다.
+- `lastSyncedAt`은 마지막으로 성공한 Board hydration 시각이다. GitHub polling 또는 webhook refresh가 성공할 때 갱신되며 ProjectV2 메타데이터 동기화 시각과는 별개다.
 - `boards.name`은 ProjectV2 title에서 가져온다.
 - `boards.status_field_id`는 동기화된 Status field로 설정된다. Status field가 없으면 `statusField`는 `null`일 수 있다.
 - 새 board면 `201 Created`, 기존 board refresh면 `200 OK`를 반환한다.

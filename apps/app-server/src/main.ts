@@ -20,7 +20,7 @@ async function bootstrap() {
     origin: corsOrigin,
     credentials: true,
     methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Authorization", "Content-Type", "Accept"]
+    allowedHeaders: ["Authorization", "Content-Type", "Accept", "Idempotency-Key"]
   });
 
   const port = Number.parseInt(process.env.PORT ?? "3000", 10);

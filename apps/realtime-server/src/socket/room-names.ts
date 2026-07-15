@@ -15,6 +15,13 @@ export function createCanvasRoomName({
   return `workspace:${workspaceId}:canvas:${canvasId}`;
 }
 
+export function createCanvasTldrawSyncRoomName({
+  canvasId,
+  workspaceId,
+}: CanvasRoomNameInput) {
+  return `${createCanvasRoomName({ canvasId, workspaceId })}:tldraw-sync`;
+}
+
 export function createSqlErdRoomName({
   sessionId,
   workspaceId,

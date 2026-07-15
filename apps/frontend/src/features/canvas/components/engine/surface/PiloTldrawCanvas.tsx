@@ -195,6 +195,7 @@ const tldrawComponents = {
 const PILO_COLLAPSED_FRAME_SIZE = 144;
 const CANVAS_AI_CHAT_HOLD_MS = 500;
 const CANVAS_SHAPE_LOCK_RELEASE_GRACE_MS = 1_500;
+const CANVAS_SHAPE_LOCK_HEARTBEAT_MS = 3_000;
 const CANVAS_COLLABORATION_NOTICE_MS = 4_000;
 const CANVAS_PENDING_PREVIEW_GROUP_TTL_MS = 30_000;
 const CANVAS_PENDING_PREVIEW_HEARTBEAT_MS = 1_500;
@@ -1495,6 +1496,21 @@ export function PiloTldrawCanvas({
 
     return () => window.clearInterval(heartbeatTimer);
   }, [handleRealtimePreviewDraftChange, presence?.enabled]);
+
+  useEffect(() => {
+    if (!presence?.enabled) return;
+
+    const claimShapeLocks = presence.claimShapeLocks;
+    const heartbeatTimer = window.setInterval(() => {
+      const shapeIds = requestedShapeLockIdsRef.current.filter(Boolean);
+
+      if (!shapeIds.length) return;
+
+      claimShapeLocks(Array.from(new Set(shapeIds)));
+    }, CANVAS_SHAPE_LOCK_HEARTBEAT_MS);
+
+    return () => window.clearInterval(heartbeatTimer);
+  }, [presence?.claimShapeLocks, presence?.enabled]);
 
   useEffect(() => {
     remoteBusyShapeIdsRef.current = remoteBusyShapeIds;

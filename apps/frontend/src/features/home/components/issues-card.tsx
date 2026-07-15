@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { ListChecks } from "lucide-react";
 
 import type { BoardIssueCardPayload } from "@/features/board/types";
+import { pageCursorTargetAttributes } from "@/shared/page-cursor/page-cursor-target";
 import {
   homeIssueListLimit,
   type HomeIssuesState
@@ -28,6 +29,7 @@ export function IssuesCard({ issuesState }: { issuesState: HomeIssuesState }) {
       }
       background={<IssuesBackground />}
       className="border-[#D8D1FF] bg-[#F7F5FF] shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_10px_24px_rgba(15,23,42,0.08)]"
+      cursorTarget={{ id: "issues", label: "이슈", type: "home_card" }}
       description={null}
       icon={<ListChecks className="size-4" />}
       title={isRecentMode ? "최근 이슈" : "내 이슈"}
@@ -67,6 +69,11 @@ function IssueTodoRow({ issue }: { issue: BoardIssueCardPayload }) {
 
   return (
     <button
+      {...pageCursorTargetAttributes({
+        id: issue.id,
+        label: issue.title,
+        type: "home_issue"
+      })}
       aria-label={`${issue.title} 이슈로 이동`}
       className="flex min-h-0 min-w-0 items-center overflow-hidden rounded-lg border bg-background/90 p-3 text-left shadow-sm backdrop-blur transition hover:bg-background hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
       onClick={() => router.push(boardIssueHref)}

@@ -5,6 +5,9 @@ export interface CanvasRow extends QueryResultRow {
   workspace_id: string;
   title: string;
   board_type: string;
+  engine_type?: string;
+  engine_version?: number | string;
+  source_canvas_id?: string | null;
   zoom: number | string;
   viewport_x: number | string;
   viewport_y: number | string;
@@ -56,6 +59,15 @@ export interface CanvasLatestOperationSeqRow extends QueryResultRow {
   latest_op_seq: number | string;
 }
 
+export interface CanvasSyncDocumentRow extends QueryResultRow {
+  canvas_id: string;
+  workspace_id: string;
+  provider_type: string;
+  snapshot: Record<string, unknown> | null;
+  version: number | string;
+  updated_at: Date | string;
+}
+
 export type CanvasShapeOperationType = "create" | "update" | "delete";
 
 export interface CanvasShapeOperationRow extends QueryResultRow {
@@ -76,6 +88,12 @@ export interface CanvasShapeOperationRow extends QueryResultRow {
 
 export interface CreateCanvasRequest {
   title?: unknown;
+  engineType?: unknown;
+}
+
+export interface ConvertCanvasEngineRequest {
+  targetEngineType?: unknown;
+  copyShapes?: unknown;
 }
 
 export interface CreateCanvasShapeRequest {
@@ -125,6 +143,19 @@ export interface SyncCanvasShapesBatchRequest {
   operations?: unknown;
 }
 
+export interface UpdateCanvasSyncDocumentRequest {
+  snapshot?: unknown;
+}
+
+export interface CanvasSyncDocumentPayload {
+  canvasId: string;
+  workspaceId: string;
+  providerType: string;
+  snapshot: Record<string, unknown> | null;
+  version: number;
+  updatedAt: string | null;
+}
+
 export interface CanvasViewSettingPayload {
   zoom: number;
   viewportX: number;
@@ -164,6 +195,9 @@ export interface CanvasBoardPayload {
   workspaceId: string;
   title: string;
   boardType: string;
+  engineType: string;
+  engineVersion: number;
+  sourceCanvasId: string | null;
   zoom: number;
   viewportX: number;
   viewportY: number;

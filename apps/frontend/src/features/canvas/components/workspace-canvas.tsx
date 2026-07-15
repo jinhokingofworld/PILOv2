@@ -57,6 +57,7 @@ import {
   PiloCanvasRuntime,
   type CanvasBoardDetail,
 } from "@/features/canvas/components/engine/runtime/PiloCanvasRuntime";
+import { PiloTldrawSyncRuntime } from "@/features/canvas/components/engine/runtime/PiloTldrawSyncRuntime";
 import {
   canvasAgentToolTargetEventName,
   getCanvasAgentToolTargetPopover,
@@ -173,6 +174,10 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
     null,
   );
   const [urlInsertValue, setUrlInsertValue] = useState("");
+  const [isCreatingRealtimeCanvas, setIsCreatingRealtimeCanvas] =
+    useState(false);
+  const [isRealtimeCanvasDialogOpen, setIsRealtimeCanvasDialogOpen] =
+    useState(false);
   const [openPopover, setOpenPopover] = useState<
     "color" | "draw" | "line" | "insert" | null
   >(null);
@@ -464,6 +469,70 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
     [canvasActions, closePopover],
   );
 
+  const createRealtimeCanvasVersion = useCallback(async () => {
+    if (
+      !shouldUseCanvasApi ||
+      !activeBoard ||
+      activeBoard.engineType === "tldraw_sync" ||
+      isCreatingRealtimeCanvas
+    ) {
+      return;
+    }
+
+    setIsCreatingRealtimeCanvas(true);
+
+    try {
+      const convertedBoard = await canvasClient.convertBoardEngine(
+        activeBoard.id,
+        {
+          copyShapes: false,
+          targetEngineType: "tldraw_sync",
+        },
+        { workspaceId },
+      );
+
+      const convertedBoardId =
+        typeof convertedBoard === "object" &&
+        convertedBoard !== null &&
+        "id" in convertedBoard &&
+        typeof convertedBoard.id === "string"
+          ? convertedBoard.id
+          : null;
+
+      if (!convertedBoardId) {
+        throw new Error("Canvas engine conversion response is invalid");
+      }
+
+      const detail = (await canvasClient.getBoardDetail(convertedBoardId, {
+        workspaceId,
+      })) as CanvasBoardDetail;
+
+      setBoardState({
+        board: detail,
+        source: canvasClientMode,
+        status: "ready",
+      });
+      setIsRealtimeCanvasDialogOpen(false);
+      closePopover();
+      setActiveCanvasTool("select");
+    } catch (error) {
+      console.error("Canvas realtime version creation failed", error);
+      window.alert(
+        "실시간 동시편집 캔버스를 만들지 못했습니다. 다시 시도해 주세요.",
+      );
+    } finally {
+      setIsCreatingRealtimeCanvas(false);
+    }
+  }, [
+    activeBoard,
+    canvasClient,
+    canvasClientMode,
+    closePopover,
+    isCreatingRealtimeCanvas,
+    shouldUseCanvasApi,
+    workspaceId,
+  ]);
+
   const markCanvasUiEvent = useCallback(
     (event: ReactPointerEvent<HTMLElement>) => {
       canvasActions?.markUiEventAsHandled(event);
@@ -539,6 +608,52 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
                 </Button>
               </div>
             </form>
+          </DialogContent>
+        </Dialog>
+        <Dialog
+          open={isRealtimeCanvasDialogOpen}
+          onOpenChange={(open) => {
+            if (!isCreatingRealtimeCanvas) {
+              setIsRealtimeCanvasDialogOpen(open);
+            }
+          }}
+        >
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>실시간 동시편집 Canvas를 만들까요?</DialogTitle>
+              <DialogDescription>
+                현재 Canvas는 그대로 보존하고, 같은 Workspace에 빈
+                tldraw sync Canvas를 새로 만듭니다.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="canvas-realtime-version-dialog">
+              <p>
+                새 Canvas에서는 사용자의 조작이 realtime-server의
+                <code>/sync/canvas</code> room을 통해 즉시 공유됩니다.
+              </p>
+              <ul>
+                <li>기존 shape는 복사하지 않습니다.</li>
+                <li>기존 Canvas의 shape와 저장 기록은 유지됩니다.</li>
+                <li>새 Canvas에서 만든 내용은 별도 sync snapshot으로 저장됩니다.</li>
+              </ul>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button
+                disabled={isCreatingRealtimeCanvas}
+                onClick={() => setIsRealtimeCanvasDialogOpen(false)}
+                type="button"
+                variant="outline"
+              >
+                취소
+              </Button>
+              <Button
+                disabled={isCreatingRealtimeCanvas}
+                onClick={createRealtimeCanvasVersion}
+                type="button"
+              >
+                {isCreatingRealtimeCanvas ? "만드는 중..." : "새 실시간 Canvas 만들기"}
+              </Button>
+            </div>
           </DialogContent>
         </Dialog>
 
@@ -766,6 +881,26 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
               <ToolButton label="그룹" agentTarget="toolbar.more.group" onClick={groupSelectedShapes}>
                 <Group />
               </ToolButton>
+              <ToolButton
+                label="실시간 버전"
+                agentTarget="toolbar.more.realtime_canvas"
+                disabled={
+                  !shouldUseCanvasApi ||
+                  activeBoard?.engineType === "tldraw_sync" ||
+                  isCreatingRealtimeCanvas
+                }
+                onClick={() => {
+                  closePopover();
+                  setIsRealtimeCanvasDialogOpen(true);
+                }}
+              >
+                <PanelsTopLeft />
+              </ToolButton>
+              <div className="canvas-realtime-version-hint">
+                {activeBoard?.engineType === "tldraw_sync"
+                  ? "현재 Canvas는 이미 실시간 동시편집 타입입니다."
+                  : "실시간 버전은 빈 Canvas로 새로 만들어집니다."}
+              </div>
             </section>
           ) : null}
 
@@ -791,16 +926,26 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
           </section>
         </nav>
 
-        <PiloCanvasRuntime
-          key={`${board.workspaceId}:${board.id}:${shouldUseCanvasApi ? "api" : "local"}`}
-          board={board}
-          canvasClient={shouldUseCanvasApi ? canvasClient : null}
-          onHistoryStateChange={setCanvasHistoryState}
-          onOneShotToolCreated={handleOneShotToolCreated}
-          onReady={setCanvasActions}
-          realtime={canvasRealtimeConfig}
-          storageMode={shouldUseCanvasApi ? "api" : "local"}
-        />
+        {board.engineType === "tldraw_sync" ? (
+          <PiloTldrawSyncRuntime
+            key={`${board.workspaceId}:${board.id}:tldraw-sync`}
+            board={board}
+            canvasClient={shouldUseCanvasApi ? canvasClient : null}
+            onHistoryStateChange={setCanvasHistoryState}
+            onReady={setCanvasActions}
+          />
+        ) : (
+          <PiloCanvasRuntime
+            key={`${board.workspaceId}:${board.id}:${shouldUseCanvasApi ? "api" : "local"}`}
+            board={board}
+            canvasClient={shouldUseCanvasApi ? canvasClient : null}
+            onHistoryStateChange={setCanvasHistoryState}
+            onOneShotToolCreated={handleOneShotToolCreated}
+            onReady={setCanvasActions}
+            realtime={canvasRealtimeConfig}
+            storageMode={shouldUseCanvasApi ? "api" : "local"}
+          />
+        )}
       </div>
     </section>
   );
