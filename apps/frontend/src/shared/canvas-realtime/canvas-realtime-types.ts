@@ -219,6 +219,18 @@ export type CanvasRoomShapesHydratePayload = {
   shapes: Record<string, unknown>[];
 };
 
+export type CanvasRoomShapePatchPayload = {
+  workspaceId: string;
+  canvasId: string;
+  deletedShapeIds: string[];
+  upsertShapes: Record<string, unknown>[];
+};
+
+export type CanvasRoomShapePatchEventPayload = CanvasRoomShapePatchPayload & {
+  actorUserId: string;
+  sentAt: string;
+};
+
 export type CanvasRealtimeErrorPayload = {
   code: string;
   message: string;
@@ -259,6 +271,9 @@ export type CanvasServerToClientEvents = {
   "canvas:room:shapes:hydrate": (
     payload: CanvasRoomShapesHydratePayload,
   ) => void;
+  "canvas:room:shape:patch": (
+    payload: CanvasRoomShapePatchEventPayload,
+  ) => void;
   "canvas:error": (payload: CanvasRealtimeErrorPayload) => void;
 };
 
@@ -275,4 +290,5 @@ export type CanvasClientToServerEvents = {
     payload: CanvasShapePreviewClearRequestPayload,
   ) => void;
   "canvas:viewport:loaded": (payload: CanvasViewportLoadedPayload) => void;
+  "canvas:room:shape:patch": (payload: CanvasRoomShapePatchPayload) => void;
 };

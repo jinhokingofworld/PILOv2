@@ -60,6 +60,7 @@ import type {
   CanvasPresenceEditingMode,
   CanvasPresencePoint,
   CanvasPresenceUpdatePayload,
+  CanvasRoomShapePatchPayload,
   CanvasRoomRef,
   CanvasViewportLoadedPayload,
   CanvasShapeLockClaimPayload,
@@ -584,6 +585,29 @@ function readViewportLoadedPayload(
     ...room,
     bounds: { height, margin, width, x, y },
     shapes,
+  };
+}
+
+function readRoomShapePatchPayload(
+  payload: unknown,
+): CanvasRoomShapePatchPayload | null {
+  const room = readRoomRef(payload);
+
+  if (!room || !isRecord(payload)) return null;
+
+  const upsertShapes = payload.upsertShapes;
+  const deletedShapeIds = readShapeIdList(payload.deletedShapeIds);
+
+  if (!Array.isArray(upsertShapes) || !upsertShapes.every(isRecord)) {
+    return null;
+  }
+  if (!deletedShapeIds) return null;
+  if (!upsertShapes.length && !deletedShapeIds.length) return null;
+
+  return {
+    ...room,
+    deletedShapeIds,
+    upsertShapes,
   };
 }
 
@@ -1352,6 +1376,39 @@ export async function createRealtimeSocketServer({
         loadedRegions,
         shapes: loadedPayload.shapes,
         workspaceId: loadedPayload.workspaceId,
+      });
+    });
+
+    socket.on(canvasClientEvents.shapePatch, (payload) => {
+      const patchPayload = readRoomShapePatchPayload(payload);
+
+      if (!patchPayload) {
+        emitCanvasError(socket, "canvas:room:shape:patch payload is invalid");
+        return;
+      }
+
+      const roomName = createCanvasRoomName(patchPayload);
+
+      if (!socket.rooms.has(roomName)) {
+        socket.emit(
+          canvasServerEvents.error,
+          createSocketErrorPayload(
+            "room_not_joined",
+            "join canvas room before sending room shape patch",
+          ),
+        );
+        return;
+      }
+
+      if (!assertCanvasRoomWritable(authedSocket, roomName)) {
+        return;
+      }
+
+      roomStateService.applyShapePatch(patchPayload, patchPayload);
+      socket.to(roomName).emit(canvasServerEvents.shapePatch, {
+        ...patchPayload,
+        actorUserId: authedSocket.data.auth.userId ?? socket.id,
+        sentAt: new Date().toISOString(),
       });
     });
 

@@ -14,7 +14,13 @@ type CachedRoomShape = {
 };
 
 export type CanvasRoomStateService = {
+  applyShapePatch: (
+    room: CanvasRoomRef,
+    patch: { deletedShapeIds: string[]; upsertShapes: Record<string, unknown>[] },
+  ) => void;
   getCachedShapes: (room: CanvasRoomRef) => Record<string, unknown>[];
+  getDeletedTombstones: (room: CanvasRoomRef) => string[];
+  getDirtyShapeIds: (room: CanvasRoomRef) => string[];
   getLoadedRegions: (room: CanvasRoomRef) => CanvasRoomLoadedRegion[];
   recordLoadedViewport: (
     room: CanvasRoomRef,
@@ -61,6 +67,8 @@ function createLoadedRegion(
 
 export function createCanvasRoomStateService(): CanvasRoomStateService {
   const loadedRegionsByRoom = new Map<string, CanvasRoomLoadedRegion[]>();
+  const deletedTombstonesByRoom = new Map<string, Set<string>>();
+  const dirtyShapeIdsByRoom = new Map<string, Set<string>>();
   const shapesByRoom = new Map<string, Map<string, CachedRoomShape>>();
 
   function getRoomShapeCache(roomName: string) {
@@ -74,7 +82,22 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
     return shapeCache;
   }
 
-  function upsertRoomShapes(roomName: string, shapes: Record<string, unknown>[]) {
+  function getRoomShapeIdSet(map: Map<string, Set<string>>, roomName: string) {
+    let shapeIds = map.get(roomName);
+
+    if (!shapeIds) {
+      shapeIds = new Set<string>();
+      map.set(roomName, shapeIds);
+    }
+
+    return shapeIds;
+  }
+
+  function upsertRoomShapes(
+    roomName: string,
+    shapes: Record<string, unknown>[],
+    options: { markDirty: boolean },
+  ) {
     if (!shapes.length) return;
 
     const shapeCache = getRoomShapeCache(roomName);
@@ -85,6 +108,10 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
 
       if (!shapeId) return;
       shapeCache.set(shapeId, { cachedAt, shape });
+      getRoomShapeIdSet(deletedTombstonesByRoom, roomName).delete(shapeId);
+      if (options.markDirty) {
+        getRoomShapeIdSet(dirtyShapeIdsByRoom, roomName).add(shapeId);
+      }
     });
 
     if (shapeCache.size <= MAX_ROOM_CACHED_SHAPES) return;
@@ -100,10 +127,44 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
   }
 
   return {
+    applyShapePatch(room, patch) {
+      const roomName = createCanvasRoomName(room);
+
+      upsertRoomShapes(roomName, patch.upsertShapes, { markDirty: true });
+
+      if (!patch.deletedShapeIds.length) return;
+
+      const shapeCache = getRoomShapeCache(roomName);
+      const deletedTombstones = getRoomShapeIdSet(
+        deletedTombstonesByRoom,
+        roomName,
+      );
+      const dirtyShapeIds = getRoomShapeIdSet(dirtyShapeIdsByRoom, roomName);
+
+      patch.deletedShapeIds.forEach((shapeId) => {
+        const normalizedShapeId = shapeId.trim();
+
+        if (!normalizedShapeId) return;
+        shapeCache.delete(normalizedShapeId);
+        deletedTombstones.add(normalizedShapeId);
+        dirtyShapeIds.add(normalizedShapeId);
+      });
+    },
+
     getCachedShapes(room) {
       const shapeCache = shapesByRoom.get(createCanvasRoomName(room));
 
       return shapeCache ? Array.from(shapeCache.values(), ({ shape }) => shape) : [];
+    },
+
+    getDeletedTombstones(room) {
+      return Array.from(
+        deletedTombstonesByRoom.get(createCanvasRoomName(room)) ?? [],
+      );
+    },
+
+    getDirtyShapeIds(room) {
+      return Array.from(dirtyShapeIdsByRoom.get(createCanvasRoomName(room)) ?? []);
     },
 
     getLoadedRegions(room) {
@@ -114,7 +175,7 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
       const roomName = createCanvasRoomName(room);
       const currentRegions = loadedRegionsByRoom.get(roomName) ?? [];
 
-      upsertRoomShapes(roomName, shapes);
+      upsertRoomShapes(roomName, shapes, { markDirty: false });
 
       if (currentRegions.some((region) => isCoveringRegion(region, bounds))) {
         return currentRegions;

@@ -167,3 +167,13 @@ export type CanvasRoomShapesHydratePayload = CanvasRoomRef & {
   loadedRegions: CanvasRoomLoadedRegion[];
   shapes: Record<string, unknown>[];
 };
+
+export type CanvasRoomShapePatchPayload = CanvasRoomRef & {
+  deletedShapeIds: string[];
+  upsertShapes: Record<string, unknown>[];
+};
+
+export type CanvasRoomShapePatchEventPayload = CanvasRoomShapePatchPayload & {
+  actorUserId: string;
+  sentAt: string;
+};

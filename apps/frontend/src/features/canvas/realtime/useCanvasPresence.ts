@@ -17,6 +17,8 @@ import type {
   CanvasRealtimeConfig,
   CanvasRemotePresenceState,
   CanvasRoomLoadedRegion,
+  CanvasRoomShapePatchPayload,
+  CanvasRoomShapePatchEventPayload,
   CanvasShapeLockState,
   CanvasShapeOperationPayload,
   CanvasShapePreviewEventPayload,
@@ -52,6 +54,7 @@ export type CanvasPresenceController = {
     bounds: CanvasLoadedViewportBounds,
     shapes?: Record<string, unknown>[],
   ) => void;
+  sendRoomShapePatch: (patch: Omit<CanvasRoomShapePatchPayload, "workspaceId" | "canvasId">) => void;
   clearShapePreview: (shapeIds: string[]) => void;
   sendPresenceUpdate: (
     cursor: CanvasPresencePoint | null,
@@ -74,6 +77,7 @@ export type CanvasPresenceOptions = {
     signal?: AbortSignal,
   ) => Promise<CanvasOperationsCatchupPayload>;
   hydrateShapes?: (shapes: Record<string, unknown>[]) => void;
+  applyRoomShapePatch?: (patch: CanvasRoomShapePatchEventPayload) => void;
 };
 
 const initialOperationSyncState: CanvasOperationCatchupState = {
@@ -389,6 +393,7 @@ export function useCanvasPresence(
   const applyOperationsRef = useRef(options.applyOperations);
   const catchUpOperationsRef = useRef(options.catchUpOperations);
   const hydrateShapesRef = useRef(options.hydrateShapes);
+  const applyRoomShapePatchRef = useRef(options.applyRoomShapePatch);
   const activeCatchUpAbortRef = useRef<AbortController | null>(null);
   const liveOperationBufferRef = useRef<CanvasShapeOperationPayload[]>([]);
   const runCatchUpRef = useRef<(afterSeq: number) => void>(() => {});
@@ -400,7 +405,9 @@ export function useCanvasPresence(
     applyOperationsRef.current = options.applyOperations;
     catchUpOperationsRef.current = options.catchUpOperations;
     hydrateShapesRef.current = options.hydrateShapes;
+    applyRoomShapePatchRef.current = options.applyRoomShapePatch;
   }, [
+    options.applyRoomShapePatch,
     options.applyOperations,
     options.catchUpOperations,
     options.hydrateShapes,
@@ -895,6 +902,16 @@ export function useCanvasPresence(
         hydrateShapesRef.current?.(payload.shapes);
       }
     });
+    realtimeSocket.on("canvas:room:shape:patch", (payload) => {
+      if (
+        !isSameCanvasRoom(payload, room) ||
+        payload.actorUserId === currentUserId
+      ) {
+        return;
+      }
+
+      applyRoomShapePatchRef.current?.(payload);
+    });
     realtimeSocket.on("canvas:error", (payload) => {
       console.warn("Canvas realtime socket error.", payload);
     });
@@ -1054,6 +1071,28 @@ export function useCanvasPresence(
     });
   }, []);
 
+  const sendRoomShapePatch = useCallback(
+    (patch: Omit<CanvasRoomShapePatchPayload, "workspaceId" | "canvasId">) => {
+      const socket = socketRef.current;
+      const room = roomRef.current;
+
+      if (
+        !socket?.connected ||
+        !joinedRef.current ||
+        (!patch.upsertShapes.length && !patch.deletedShapeIds.length)
+      ) {
+        return;
+      }
+
+      socket.emit("canvas:room:shape:patch", {
+        ...room,
+        deletedShapeIds: patch.deletedShapeIds,
+        upsertShapes: patch.upsertShapes,
+      });
+    },
+    [],
+  );
+
   const sendShapePreview = useCallback(
     (
       shapes: Record<string, unknown>[],
@@ -1103,6 +1142,7 @@ export function useCanvasPresence(
       releaseShapeLocks,
       reportLoadedViewport,
       roomLoadedRegions,
+      sendRoomShapePatch,
       remotePresence:
         currentUserId === null
           ? remotePresence
@@ -1128,6 +1168,7 @@ export function useCanvasPresence(
       releaseShapeLocks,
       reportLoadedViewport,
       roomLoadedRegions,
+      sendRoomShapePatch,
       remotePresence,
       remoteShapeLocks,
       remoteShapePreviews,

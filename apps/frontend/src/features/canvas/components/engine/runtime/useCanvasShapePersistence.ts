@@ -30,6 +30,10 @@ type UseCanvasShapePersistenceOptions = {
   freeformShapesRef: RuntimeRef<PiloCanvasFreeformShape[]>;
   localShapeVersionRef: RuntimeRef<number>;
   onLocalShapeSyncIdle?: () => void;
+  onRoomShapePatch?: (patch: {
+    deletedShapeIds: string[];
+    upsertShapes: PiloCanvasFreeformShape[];
+  }) => void;
   onShapeSyncConflict?: (conflict: CanvasShapeSyncConflict) => void;
   onShapeSyncError?: (error: unknown) => void;
   pendingLocalShapeVersionsRef: RuntimeRef<Map<string, number>>;
@@ -53,6 +57,7 @@ export function useCanvasShapePersistence({
   freeformShapesRef,
   localShapeVersionRef,
   onLocalShapeSyncIdle,
+  onRoomShapePatch,
   onShapeSyncConflict,
   onShapeSyncError,
   pendingLocalShapeVersionsRef,
@@ -204,6 +209,24 @@ export function useCanvasShapePersistence({
             currentFreeformShapes,
             nextFreeformShapes,
           );
+          const nextShapeMap = buildFreeformShapeMap(
+            buildPersistableLocalShapes(nextFreeformShapes),
+          );
+          const upsertShapes: PiloCanvasFreeformShape[] = [];
+          const deletedShapeIds: string[] = [];
+
+          pendingLocalShapeVersions.forEach((_version, shapeId) => {
+            const nextShape = nextShapeMap.get(shapeId);
+
+            if (nextShape) {
+              upsertShapes.push(nextShape);
+            } else {
+              deletedShapeIds.push(shapeId);
+            }
+          });
+
+          onRoomShapePatch?.({ deletedShapeIds, upsertShapes });
+
           const shapeSyncQueue = shapeSyncQueueRef.current;
           const syncInput = {
             nextShapes: buildPersistableLocalShapes(nextFreeformShapes),
@@ -277,6 +300,7 @@ export function useCanvasShapePersistence({
       deletedShapeIdsRef,
       freeformShapesRef,
       onLocalShapeSyncIdle,
+      onRoomShapePatch,
       onShapeSyncConflict,
       onShapeSyncError,
       remoteShapeRevisionRef,

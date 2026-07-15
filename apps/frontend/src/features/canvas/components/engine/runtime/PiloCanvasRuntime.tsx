@@ -575,8 +575,34 @@ function PiloCanvasRuntimeInner({
   const hydrateRoomShapes = useCallback((shapes: Record<string, unknown>[]) => {
     hydrateRoomShapesRef.current(shapes);
   }, []);
+  const applyRoomShapePatch = useCallback(
+    (patch: { deletedShapeIds: string[]; upsertShapes: Record<string, unknown>[] }) => {
+      patch.deletedShapeIds.forEach((shapeId) => {
+        markShapeDeleted(shapeId);
+      });
+
+      if (patch.deletedShapeIds.length) {
+        setFreeformShapes((currentShapes) => {
+          const deletedShapeIds = new Set(patch.deletedShapeIds);
+          const nextShapes = currentShapes.filter((shape) => {
+            const shapeId = getFreeformShapeId(shape);
+
+            return !shapeId || !deletedShapeIds.has(shapeId);
+          });
+
+          freeformShapesRef.current = nextShapes;
+          return nextShapes;
+        });
+        setCanvasHydrationVersion((version) => version + 1);
+      }
+
+      hydrateRoomShapes(patch.upsertShapes);
+    },
+    [hydrateRoomShapes, markShapeDeleted],
+  );
   const canvasPresence = useCanvasPresence(realtime, {
     applyOperations: applyRemoteCanvasOperations,
+    applyRoomShapePatch,
     catchUpOperations: catchUpCanvasOperations,
     hydrateShapes: hydrateRoomShapes,
   });
@@ -652,6 +678,7 @@ function PiloCanvasRuntimeInner({
     freeformShapesRef,
     localShapeVersionRef,
     onLocalShapeSyncIdle: flushDeferredRemoteOperations,
+    onRoomShapePatch: canvasPresence.sendRoomShapePatch,
     onShapeSyncConflict: handleShapeSyncConflict,
     onShapeSyncError: handleShapeSyncError,
     pendingLocalShapeVersionsRef,
