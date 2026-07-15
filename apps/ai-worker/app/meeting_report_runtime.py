@@ -1726,6 +1726,11 @@ def _meeting_report_system_prompt() -> str:
         "You generate concise meeting reports from transcripts. "
         "Return only JSON matching the provided schema. "
         "Use the transcript language. "
+        "Use only the [index] values shown in the transcript for evidence.segmentIndexes. "
+        "If there is no decision, say so in decisions and omit decision evidence. "
+        "For every action item, include one or more sourceType=action_item evidence "
+        "entries using that action item's zero-based sourceIndex and non-empty "
+        "segmentIndexes. Do not create action items when there is no concrete follow-up. "
         "Set every actionItemCandidates[].assigneeUserId to null because "
         "this worker does not match users in #174."
     )

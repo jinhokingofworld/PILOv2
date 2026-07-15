@@ -1,4 +1,5 @@
 import json
+import logging
 from types import SimpleNamespace
 
 import pytest
@@ -497,6 +498,64 @@ def test_processor_marks_invalid_action_item_payload_as_llm_failure() -> None:
     assert repository.failed_updates == [
         (REPORT_ID, "LLM", "Meeting report could not be generated.")
     ]
+
+
+def test_processor_logs_sanitized_llm_failure_details(caplog) -> None:
+    processor = MeetingReportProcessor(
+        FakeRepository(),
+        FakeStorage(),
+        FakeAiClient(llm_failure=ProviderBusinessError("Missing required evidence")),
+    )
+
+    with caplog.at_level(logging.WARNING, logger="app.meeting_report_processor"):
+        processor.process_message(meeting_report_job_payload())
+
+    assert "error_category=invalid_evidence" in caplog.text
+    assert "error_type=ProviderBusinessError" in caplog.text
+    assert "status_code=None" in caplog.text
+    assert "회의록 조회 API와 worker 처리 방향을 정리합니다." not in caplog.text
+
+
+def test_parse_generated_report_allows_no_decision_evidence_when_no_decision_was_made() -> None:
+    report = parse_generated_report_json(
+        json.dumps(
+            {
+                "summary": "요약",
+                "discussionPoints": "논의",
+                "decisions": "결정된 내용 없음",
+                "actionItemCandidates": [],
+                "evidence": [],
+            }
+        ),
+        "원문",
+        [TranscriptSegment(0, 0, 1_000, "원문")],
+    )
+
+    assert report.evidence == []
+
+
+def test_parse_generated_report_requires_evidence_for_each_action_item() -> None:
+    with pytest.raises(ProviderBusinessError, match="Missing required evidence"):
+        parse_generated_report_json(
+            json.dumps(
+                {
+                    "summary": "요약",
+                    "discussionPoints": "논의",
+                    "decisions": "결정된 내용 없음",
+                    "actionItemCandidates": [
+                        {
+                            "title": "작업",
+                            "description": "설명",
+                            "assigneeUserId": None,
+                            "priority": "MEDIUM",
+                        }
+                    ],
+                    "evidence": [],
+                }
+            ),
+            "원문",
+            [TranscriptSegment(0, 0, 1_000, "원문")],
+        )
 
 
 def test_processor_leaves_infrastructure_failure_for_sqs_retry() -> None:

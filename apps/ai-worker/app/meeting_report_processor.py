@@ -281,7 +281,18 @@ class MeetingReportProcessor:
             try:
                 transcript_text = "\n".join(segment.text for segment in transcript_segments)
                 report = self.ai_client.generate_report(transcript_text, transcript_segments)
-            except ProviderBusinessError:
+            except ProviderBusinessError as error:
+                failure_category, error_type, status_code = _safe_llm_failure_details(error)
+                LOGGER.warning(
+                    "meeting report LLM generation failed report_id=%s recording_id=%s "
+                    "retry_count=%s error_category=%s error_type=%s status_code=%s",
+                    job.report_id,
+                    job.recording_id,
+                    job.retry_count,
+                    failure_category,
+                    error_type,
+                    status_code,
+                )
                 self.repository.mark_failed(
                     job.report_id,
                     REPORT_FAILED_STEP_LLM,
@@ -404,6 +415,8 @@ def _parse_evidence(
             or not isinstance(segment_indexes, list)
         ):
             raise ProviderBusinessError("Invalid evidence reference")
+        if source_type == "decision" and source_index != 0:
+            raise ProviderBusinessError("Invalid decision evidence")
         if source_type == "action_item" and not 0 <= source_index < action_item_count:
             raise ProviderBusinessError("Invalid action item evidence")
         if not all(isinstance(index, int) and index in valid_indexes for index in segment_indexes):
@@ -419,9 +432,7 @@ def _parse_evidence(
         EvidenceReference(source_type, source_index, segment_indexes)
         for (source_type, source_index), segment_indexes in segment_indexes_by_source.items()
     ]
-    required_sources = {("decision", 0)} | {
-        ("action_item", index) for index in range(action_item_count)
-    }
+    required_sources = {("action_item", index) for index in range(action_item_count)}
     provided_sources = {
         (reference.source_type, reference.source_index)
         for reference in references
@@ -430,6 +441,25 @@ def _parse_evidence(
     if not required_sources.issubset(provided_sources):
         raise ProviderBusinessError("Missing required evidence")
     return references
+
+
+def _safe_llm_failure_details(error: ProviderBusinessError) -> tuple[str, str, int | None]:
+    cause = error.__cause__
+    error_type = type(cause if cause is not None else error).__name__
+    status_code = getattr(cause, "status_code", None)
+    if not isinstance(status_code, int):
+        status_code = None
+
+    error_message = str(error)
+    if error_message == "OpenAI LLM business failure":
+        return "openai_api_error", error_type, status_code
+    if error_message == "OpenAI LLM returned no text":
+        return "empty_output", error_type, status_code
+    if error_message == "Invalid meeting report JSON":
+        return "invalid_json", error_type, status_code
+    if "evidence" in error_message.lower():
+        return "invalid_evidence", error_type, status_code
+    return "invalid_output", error_type, status_code
 
 
 def _require_string(payload: dict[str, object], key: str) -> str:
