@@ -19,11 +19,8 @@ export async function validateSqlErdOperationsV1CutoverManifest({
     "retention.deleteAfter",
   );
   const retentionMilliseconds = deleteAfter.getTime() - createdAt.getTime();
-  if (
-    retentionMilliseconds <= 0 ||
-    retentionMilliseconds > MAX_RETENTION_MILLISECONDS
-  )
-    throw new Error("cutover manifest retention must be within seven days");
+  if (retentionMilliseconds !== MAX_RETENTION_MILLISECONDS)
+    throw new Error("cutover manifest retention must be exactly seven days");
   if (
     manifest.scope?.activeSessionPredicate !== ACTIVE_SNAPSHOT_SESSION_PREDICATE
   )

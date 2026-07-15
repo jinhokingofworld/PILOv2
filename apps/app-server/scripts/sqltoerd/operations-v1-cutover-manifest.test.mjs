@@ -102,6 +102,19 @@ try {
     }),
     /sorted/,
   );
+
+  await assert.rejects(
+    validateSqlErdOperationsV1CutoverManifest({
+      artifactPath,
+      manifest: {
+        ...manifest,
+        retention: {
+          deleteAfter: "2026-07-21T09:00:00.000Z",
+        },
+      },
+    }),
+    /seven days/,
+  );
 } finally {
   await rm(tempDirectory, { force: true, recursive: true });
 }
