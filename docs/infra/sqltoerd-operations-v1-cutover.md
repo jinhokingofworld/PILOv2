@@ -26,22 +26,8 @@
 먼저 Supabase SQL Editor 또는 `psql`에서 다음 조회를 실행해 행 수와 session ID 목록을 기록한다. ID는 manifest와 삭제 SQL에서 같은 정렬 순서를 사용한다.
 
 ```sql
-SELECT
-  id,
-  workspace_id,
-  title,
-  source_format,
-  dialect,
-  source_text,
-  model_json,
-  layout_json,
-  settings_json,
-  table_count,
-  relation_count,
-  revision,
-  created_at,
-  updated_at
-FROM public.sql_erd_sessions
+SELECT to_jsonb(session) AS session
+FROM public.sql_erd_sessions AS session
 WHERE write_protocol = 'snapshot'
   AND deleted_at IS NULL
 ORDER BY id;
@@ -53,6 +39,8 @@ ORDER BY id;
 age -r $env:PILO_CUTOVER_AGE_RECIPIENT -o snapshot-sessions.ndjson.age snapshot-sessions.ndjson
 Get-FileHash snapshot-sessions.ndjson.age -Algorithm SHA256
 ```
+
+암호화 artifact를 별도 restricted bucket 또는 vault에 업로드한 뒤, 업로드 완료와 접근 제어가 실제로 제한됐는지를 운영자가 확인한다. manifest validator는 artifact의 `age` raw header·checksum·URI 형식만 확인하며 bucket policy나 vault ACL을 대신 검증하지 않는다.
 
 암호화 artifact와 별도로 보관하는 manifest 예시는 다음과 같다. `storageLocation`에는 credential이 아닌 bucket/vault 경로만 기록한다.
 
@@ -94,11 +82,11 @@ manifest 검증이 실패하면 삭제 SQL을 실행하지 않는다.
 
 `db/operations/sqltoerd-operations-v1-delete-snapshot-sessions.sql`을 Supabase SQL Editor에서 열고, `expected_session_ids`를 manifest의 전체 ID 목록으로 교체한다. 이 SQL은 transaction과 `SHARE ROW EXCLUSIVE` table lock 안에서 현재 활성 snapshot ID 목록을 다시 비교한다. export 이후 새 snapshot이 생기거나 대상이 달라지면 exception으로 rollback하며 삭제하지 않는다.
 
-삭제 대상은 active snapshot session뿐이다. `operations_v1` session, soft-deleted session, title/metadata는 이 SQL의 대상이 아니다. session child row는 선언된 FK cascade를 사용하며, source snapshot operation의 `ON DELETE RESTRICT` 규칙을 우회하거나 constraint를 끄지 않는다.
+삭제 대상은 active snapshot session뿐이다. `operations_v1` session, soft-deleted session, title/metadata는 이 SQL의 대상이 아니다. session child row는 선언된 FK cascade를 사용하며, source snapshot operation의 `ON DELETE RESTRICT` 규칙을 우회하거나 constraint를 끄지 않는다. `deleted_snapshot_session_count`와 `deleted_session_ids` 결과는 manifest와 대조한 뒤 운영 기록에 남긴다.
 
 ## postflight
 
-physical delete 이후 아래 SQL을 실행한다. 첫 네 query는 모두 `0`이어야 한다. 마지막 두 query는 새 session을 만든 뒤 `operations_v1` 생성과 cutover 이후 snapshot 생성 부재를 확인한다.
+physical delete 이후 아래 SQL을 실행한다. 첫 다섯 query는 모두 `0`이어야 한다. 마지막 두 query는 새 session을 만든 뒤 `operations_v1` 생성과 cutover 이후 snapshot 생성 부재를 확인한다.
 
 ```sql
 SELECT count(*)::INTEGER AS active_snapshot_sessions
@@ -111,6 +99,10 @@ FROM public.sql_erd_session_operations operation
 LEFT JOIN public.sql_erd_sessions session ON session.id = operation.session_id
 WHERE session.id IS NULL;
 
+SELECT count(*)::INTEGER AS outbox_rows_without_operation
+FROM public.sql_erd_session_operation_outbox outbox
+LEFT JOIN public.sql_erd_session_operations operation ON operation.id = outbox.operation_id
+WHERE operation.id IS NULL;
 SELECT count(*)::INTEGER AS source_snapshot_rows_without_session
 FROM public.sql_erd_session_source_snapshots snapshot
 LEFT JOIN public.sql_erd_sessions session ON session.id = snapshot.session_id

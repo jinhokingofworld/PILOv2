@@ -18,7 +18,7 @@ const sessionIds = [
 ];
 
 try {
-  const artifact = "encrypted snapshot export bytes";
+  const artifact = "age-encryption.org/v1\n-> X25519 test-recipient\n--- test";
   await writeFile(artifactPath, artifact, "utf8");
 
   const manifest = {
@@ -48,6 +48,22 @@ try {
     }),
   );
 
+  const plainArtifact = "plain snapshot export";
+  await writeFile(artifactPath, plainArtifact, "utf8");
+  await assert.rejects(
+    validateSqlErdOperationsV1CutoverManifest({
+      artifactPath,
+      manifest: {
+        ...manifest,
+        artifact: {
+          ...manifest.artifact,
+          sha256: createHash("sha256").update(plainArtifact).digest("hex"),
+        },
+      },
+    }),
+    /age-encrypted/,
+  );
+  await writeFile(artifactPath, artifact, "utf8");
   await assert.rejects(
     validateSqlErdOperationsV1CutoverManifest({
       artifactPath,
@@ -114,6 +130,17 @@ try {
       },
     }),
     /seven days/,
+  );
+
+  await assert.rejects(
+    validateSqlErdOperationsV1CutoverManifest({
+      artifactPath,
+      manifest: {
+        ...manifest,
+        storageLocation: "file:///operator-laptop/snapshot-sessions.ndjson.age",
+      },
+    }),
+    /restricted storage/,
   );
 } finally {
   await rm(tempDirectory, { force: true, recursive: true });

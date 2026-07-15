@@ -8,6 +8,8 @@ const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MAX_RETENTION_MILLISECONDS = 7 * 24 * 60 * 60 * 1000;
+const RESTRICTED_STORAGE_LOCATION_PATTERN =
+  /^(?:s3|vault):\/\/[^\s/]+(?:\/[^\s]*)?$/;
 export async function validateSqlErdOperationsV1CutoverManifest({
   artifactPath,
   manifest,
@@ -58,10 +60,22 @@ export async function validateSqlErdOperationsV1CutoverManifest({
     !SHA256_PATTERN.test(artifact.sha256 ?? "")
   )
     throw new Error("cutover manifest encrypted artifact metadata is invalid");
-  if (typeof manifest.storageLocation !== "string" || !manifest.storageLocation)
-    throw new Error("cutover manifest storageLocation is required");
+  if (
+    typeof manifest.storageLocation !== "string" ||
+    !RESTRICTED_STORAGE_LOCATION_PATTERN.test(manifest.storageLocation)
+  )
+    throw new Error(
+      "cutover manifest storageLocation must be restricted storage",
+    );
+  const artifactBytes = await readFile(artifactPath);
+  if (
+    !artifactBytes
+      .subarray(0, 22)
+      .equals(Buffer.from("age-encryption.org/v1\n"))
+  )
+    throw new Error("cutover manifest artifact must be age-encrypted");
   const actualChecksum = createHash("sha256")
-    .update(await readFile(artifactPath))
+    .update(artifactBytes)
     .digest("hex");
   if (actualChecksum !== artifact.sha256)
     throw new Error("cutover manifest artifact checksum does not match");
