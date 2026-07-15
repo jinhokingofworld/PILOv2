@@ -72,6 +72,19 @@ export type PrReviewEdgeRoutePoint = {
   y: number;
 };
 
+export type PrReviewRelationDetail = {
+  relationType:
+    | "review_order"
+    | "depends_on"
+    | "tests"
+    | "uses_api"
+    | "passes_data_to"
+    | "supports";
+  source: "rule" | "ai" | "hybrid" | "fallback";
+  confidence: number;
+  reason: string;
+};
+
 export type PrReviewRelationEdgeShapeProps = PrReviewFlowEdgeShapeProps & {
   routePoints: PrReviewEdgeRoutePoint[];
   reviewRoomId: string;
@@ -87,6 +100,8 @@ export type PrReviewRelationEdgeShapeProps = PrReviewFlowEdgeShapeProps & {
     | "supports";
   source: "rule" | "ai" | "hybrid" | "fallback";
   confidence: number;
+  relationCount: number;
+  relationDetails: PrReviewRelationDetail[];
 };
 
 export type PrReviewRoleLaneShapeProps = {
@@ -314,6 +329,20 @@ function useRelationEndpointHighlight(roomFileId: string | null) {
   );
 }
 
+function useFocusedRelationEndpoint() {
+  const editor = useEditor();
+  return useValue(
+    "pr-review-relation-focus-endpoint",
+    () => {
+      const selected = editor.getOnlySelectedShape();
+      return isPrReviewFileNodeShape(selected)
+        ? selected.props.roomFileId
+        : null;
+    },
+    [editor]
+  );
+}
+
 function getRelationTypeLabel(
   relationType: PrReviewRelationEdgeShapeProps["relationType"]
 ) {
@@ -331,14 +360,15 @@ function getRelationTypeLabel(
 function getEdgeVisualStyle(
   shape: PrReviewFlowEdgeShape | PrReviewRelationEdgeShape,
   isHovered: boolean,
-  isSelected: boolean
+  isSelected: boolean,
+  isDimmed = false
 ) {
-  const emphasis = isSelected ? 1 : isHovered ? 0.9 : 0.72;
+  const emphasis = isDimmed ? 0.12 : isSelected ? 1 : isHovered ? 0.9 : 0.72;
   if (!isPrReviewRelationEdgeShapeValue(shape)) {
     return {
       stroke: `rgba(37, 99, 235, ${emphasis})`,
       strokeDasharray: undefined,
-      strokeWidth: isSelected ? 4 : isHovered ? 3.5 : 3
+      strokeWidth: isDimmed ? 1.5 : isSelected ? 4 : isHovered ? 3.5 : 3
     };
   }
 
@@ -357,7 +387,7 @@ function getEdgeVisualStyle(
   return {
     stroke: `rgba(${style.stroke}, ${emphasis})`,
     strokeDasharray: style.strokeDasharray,
-    strokeWidth: isSelected ? 4 : isHovered ? 3 : 2
+    strokeWidth: isDimmed ? 1.25 : isSelected ? 4 : isHovered ? 3 : 2
   };
 }
 
@@ -467,7 +497,19 @@ function PrReviewFlowEdge({
   );
   const path = getEdgePathData(shape);
   const isRelation = isPrReviewRelationEdgeShapeValue(shape);
-  const visualStyle = getEdgeVisualStyle(shape, isHovered, isSelected);
+  const focusedRoomFileId = useFocusedRelationEndpoint();
+  const isDimmed = Boolean(
+    isRelation &&
+      focusedRoomFileId &&
+      shape.props.fromRoomFileId !== focusedRoomFileId &&
+      shape.props.toRoomFileId !== focusedRoomFileId
+  );
+  const visualStyle = getEdgeVisualStyle(
+    shape,
+    isHovered,
+    isSelected,
+    isDimmed
+  );
   const arrowSize = 7;
   const routePoints = getEdgeRoutePoints(shape);
   const endpoint = routePoints[routePoints.length - 1];
@@ -480,8 +522,11 @@ function PrReviewFlowEdge({
       ? `${endpoint.x},${endpoint.y} ${endpoint.x - arrowSize * horizontalDirection},${endpoint.y - arrowSize} ${endpoint.x - arrowSize * horizontalDirection},${endpoint.y + arrowSize}`
       : `${endpoint.x},${endpoint.y} ${endpoint.x - arrowSize},${endpoint.y - arrowSize * verticalDirection} ${endpoint.x + arrowSize},${endpoint.y - arrowSize * verticalDirection}`;
   const hoverSummary = isRelation
-    ? `${getRelationTypeLabel(shape.props.relationType)} · ${shape.props.reason}`
+    ? shape.props.relationCount > 1
+      ? `관계 ${shape.props.relationCount}개 · ${getRelationTypeLabel(shape.props.relationType)}`
+      : `${getRelationTypeLabel(shape.props.relationType)} · ${shape.props.reason}`
     : shape.props.reason;
+  const relationBadgePoint = routePoints[Math.floor(routePoints.length / 2)];
 
   function handleClick(event: MouseEvent<SVGPathElement>) {
     event.stopPropagation();
@@ -528,6 +573,35 @@ function PrReviewFlowEdge({
         pointerEvents="none"
         points={arrowPoints}
       />
+      {isRelation && shape.props.relationCount > 1 ? (
+        <g
+          aria-label={`관계 ${shape.props.relationCount}개`}
+          opacity={isDimmed ? 0.4 : 1}
+          pointerEvents="none"
+          transform={`translate(${relationBadgePoint.x}, ${relationBadgePoint.y})`}
+        >
+          <rect
+            fill="rgba(255, 255, 255, 0.96)"
+            height="20"
+            rx="10"
+            stroke={visualStyle.stroke}
+            strokeWidth="1.5"
+            width="42"
+            x="-21"
+            y="-10"
+          />
+          <text
+            dominantBaseline="middle"
+            fill="rgb(30, 41, 59)"
+            fontSize="11"
+            fontWeight="700"
+            textAnchor="middle"
+            y="1"
+          >
+            {`${shape.props.relationCount}개`}
+          </text>
+        </g>
+      ) : null}
     </SVGContainer>
   );
 }
@@ -814,7 +888,23 @@ export class PrReviewRelationEdgeShapeUtil extends ShapeUtil<PrReviewRelationEdg
       "supports"
     ),
     source: T.literalEnum("rule", "ai", "hybrid", "fallback"),
-    confidence: T.number
+    confidence: T.number,
+    relationCount: T.number,
+    relationDetails: T.arrayOf(
+      T.object({
+        relationType: T.literalEnum(
+          "review_order",
+          "depends_on",
+          "tests",
+          "uses_api",
+          "passes_data_to",
+          "supports"
+        ),
+        source: T.literalEnum("rule", "ai", "hybrid", "fallback"),
+        confidence: T.number,
+        reason: T.string
+      })
+    )
   };
 
   override canBind() {
@@ -853,7 +943,9 @@ export class PrReviewRelationEdgeShapeUtil extends ShapeUtil<PrReviewRelationEdg
       toRoomFileId: "",
       relationType: "depends_on",
       source: "hybrid",
-      confidence: 0
+      confidence: 0,
+      relationCount: 1,
+      relationDetails: []
     };
   }
 

@@ -577,9 +577,11 @@ function buildPrReviewCanvasShapes(
 function buildStoredPrReviewCanvasShapes(
   storedShapes: PrReviewCanvasShape[]
 ): TLShapePartial[] {
-  const systemShapes = storedShapes.filter(
-    (shape) =>
-      isPrReviewCanvasSystemShape(shape) && isRecord(shape.rawShape.props)
+  const systemShapes = collapseStoredSemanticRelationShapes(
+    storedShapes.filter(
+      (shape) =>
+        isPrReviewCanvasSystemShape(shape) && isRecord(shape.rawShape.props)
+    )
   );
   const indexes = resolvePrReviewCanvasShapeIndexes(
     systemShapes.map((shape) => shape.rawShape.index),
@@ -613,6 +615,131 @@ function buildStoredPrReviewCanvasShapes(
 
     return partial;
   });
+}
+
+function collapseStoredSemanticRelationShapes(
+  systemShapes: PrReviewCanvasShape[]
+): PrReviewCanvasShape[] {
+  const groups = new Map<string, PrReviewCanvasShape[]>();
+
+  for (const shape of systemShapes) {
+    const props = shape.rawShape.props;
+    if (
+      shape.shapeType !== PR_REVIEW_RELATION_EDGE_SHAPE_TYPE ||
+      !isRecord(props) ||
+      props.kind !== "semantic" ||
+      typeof props.flowId !== "string" ||
+      typeof props.fromRoomFileId !== "string" ||
+      typeof props.toRoomFileId !== "string"
+    ) {
+      continue;
+    }
+
+    const key = [props.flowId, props.fromRoomFileId, props.toRoomFileId].join(
+      "\u0000"
+    );
+    const group = groups.get(key) ?? [];
+    group.push(shape);
+    groups.set(key, group);
+  }
+
+  const firstShapeIds = new Set(
+    Array.from(groups.values()).map((group) => group[0]?.id).filter(Boolean)
+  );
+
+  return systemShapes.flatMap((shape) => {
+    if (!firstShapeIds.has(shape.id)) {
+      const props = shape.rawShape.props;
+      if (
+        shape.shapeType === PR_REVIEW_RELATION_EDGE_SHAPE_TYPE &&
+        isRecord(props) &&
+        props.kind === "semantic"
+      ) {
+        return [];
+      }
+      return [shape];
+    }
+
+    const props = shape.rawShape.props;
+    if (!isRecord(props)) {
+      return [shape];
+    }
+    const key = [props.flowId, props.fromRoomFileId, props.toRoomFileId].join(
+      "\u0000"
+    );
+    const group = groups.get(key) ?? [shape];
+    const details = group
+      .map((candidate) => toStoredRelationDetail(candidate.rawShape.props))
+      .filter((detail): detail is PrReviewRelationEdgeShape["props"]["relationDetails"][number] =>
+        detail !== null
+      )
+      .sort((left, right) => right.confidence - left.confidence);
+    const primary = details[0];
+
+    if (!primary) {
+      return [shape];
+    }
+
+    return [
+      {
+        ...shape,
+        rawShape: {
+          ...shape.rawShape,
+          props: {
+            ...props,
+            relationType: primary.relationType,
+            source: primary.source,
+            confidence: primary.confidence,
+            reason: primary.reason,
+            relationCount: details.length,
+            relationDetails: details
+          }
+        }
+      }
+    ];
+  });
+}
+
+function toStoredRelationDetail(
+  rawProps: unknown
+): PrReviewRelationEdgeShape["props"]["relationDetails"][number] | null {
+  if (!isRecord(rawProps)) {
+    return null;
+  }
+  const { relationType, source, confidence, reason } = rawProps;
+  if (
+    !isPrReviewRelationType(relationType) ||
+    !isPrReviewRelationSource(source) ||
+    typeof confidence !== "number" ||
+    typeof reason !== "string"
+  ) {
+    return null;
+  }
+  return { relationType, source, confidence, reason };
+}
+
+function isPrReviewRelationType(
+  value: unknown
+): value is PrReviewRelationEdgeShape["props"]["relationType"] {
+  return (
+    value === "review_order" ||
+    value === "depends_on" ||
+    value === "tests" ||
+    value === "uses_api" ||
+    value === "passes_data_to" ||
+    value === "supports"
+  );
+}
+
+function isPrReviewRelationSource(
+  value: unknown
+): value is PrReviewRelationEdgeShape["props"]["source"] {
+  return (
+    value === "rule" ||
+    value === "ai" ||
+    value === "hybrid" ||
+    value === "fallback"
+  );
 }
 
 function isValidPrReviewCanvasIndex(index: string): boolean {
@@ -1032,21 +1159,55 @@ function PrReviewRelationInspector({ editor }: { editor: Editor | null }) {
     return null;
   }
 
+  const relationDetails =
+    selectedRelation.props.relationDetails.length > 0
+      ? selectedRelation.props.relationDetails
+      : [
+          {
+            relationType: selectedRelation.props.relationType,
+            source: selectedRelation.props.source,
+            confidence: selectedRelation.props.confidence,
+            reason: selectedRelation.props.reason
+          }
+        ];
+
   return (
     <aside
       aria-label="선택한 파일 관계"
       className="absolute bottom-5 left-5 z-20 w-[min(28rem,calc(100%-2.5rem))] rounded-md border border-slate-200 bg-white/95 px-4 py-3 shadow-lg backdrop-blur"
     >
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs font-semibold text-slate-700">
-        <span>{relationTypeLabels[selectedRelation.props.relationType]}</span>
-        <span className="text-slate-400">·</span>
-        <span>{relationSourceLabels[selectedRelation.props.source]}</span>
-        <span className="text-slate-400">·</span>
-        <span>{getRelationConfidenceLabel(selectedRelation.props.confidence)}</span>
+        <span>
+          {relationDetails.length > 1
+            ? `관계 ${relationDetails.length}개`
+            : relationTypeLabels[relationDetails[0].relationType]}
+        </span>
+        {relationDetails.length === 1 ? (
+          <>
+            <span className="text-slate-400">·</span>
+            <span>{relationSourceLabels[relationDetails[0].source]}</span>
+            <span className="text-slate-400">·</span>
+            <span>{getRelationConfidenceLabel(relationDetails[0].confidence)}</span>
+          </>
+        ) : null}
       </div>
-      <p className="mt-2 break-words text-sm leading-6 text-slate-700">
-        {selectedRelation.props.reason}
-      </p>
+      <ul className="mt-2 space-y-3">
+        {relationDetails.map((detail, index) => (
+          <li
+            className="border-l-2 border-slate-200 pl-3 text-sm leading-6 text-slate-700"
+            key={`${detail.relationType}-${detail.source}-${detail.reason}-${index}`}
+          >
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs font-semibold text-slate-600">
+              <span>{relationTypeLabels[detail.relationType]}</span>
+              <span className="text-slate-400">·</span>
+              <span>{relationSourceLabels[detail.source]}</span>
+              <span className="text-slate-400">·</span>
+              <span>{getRelationConfidenceLabel(detail.confidence)}</span>
+            </div>
+            <p className="mt-1 break-words">{detail.reason}</p>
+          </li>
+        ))}
+      </ul>
     </aside>
   );
 }
