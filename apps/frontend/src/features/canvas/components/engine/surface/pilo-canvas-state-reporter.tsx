@@ -11,8 +11,21 @@ import type {
 import { withSerializedArrowBindings } from "./pilo-canvas-arrow-bindings";
 import { withPiloMediaAsset } from "../assets/pilo-canvas-assets";
 
+const FREEHAND_DRAW_SNAPSHOT_THROTTLE_MS = 120;
+const FREEFORM_SYNC_IDLE_DELAY_MS = 220;
+
 function isPersistableFreeformShape(_shape: TLShape) {
   return true;
+}
+
+function isFreehandDrawingTool(toolId: string) {
+  return toolId.includes("draw") || toolId.includes("highlight");
+}
+
+function isFreehandDrawingInProgress(editor: Editor) {
+  if (!isFreehandDrawingTool(editor.getCurrentToolId())) return false;
+
+  return editor.inputs.getIsPointing() || editor.inputs.getIsDragging();
 }
 
 function toFreeformSnapshot(
@@ -46,6 +59,7 @@ export function CanvasStateReporter({
   const freeformSnapshotTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
+  const lastFreeformSnapshotAtRef = useRef(0);
   const onFreeformShapesDraftChangeRef = useRef(onFreeformShapesDraftChange);
   const onFreeformShapesChangeRef = useRef(onFreeformShapesChange);
   const onResolveFreeformShapeSnapshotRef = useRef(
@@ -116,12 +130,28 @@ export function CanvasStateReporter({
     }
 
     function scheduleFreeformSync() {
+      const isDrawing = isFreehandDrawingInProgress(editor);
+
       if (freeformSnapshotTimerRef.current) {
+        if (isDrawing) {
+          return;
+        }
+
         clearTimeout(freeformSnapshotTimerRef.current);
       }
 
+      const elapsedSinceLastSnapshot =
+        Date.now() - lastFreeformSnapshotAtRef.current;
+      const snapshotDelay = isDrawing
+        ? Math.max(
+            0,
+            FREEHAND_DRAW_SNAPSHOT_THROTTLE_MS - elapsedSinceLastSnapshot,
+          )
+        : 0;
+
       freeformSnapshotTimerRef.current = setTimeout(() => {
         freeformSnapshotTimerRef.current = null;
+        lastFreeformSnapshotAtRef.current = Date.now();
         let nextFreeformShapes: PiloCanvasFreeformShape[];
 
         try {
@@ -137,11 +167,21 @@ export function CanvasStateReporter({
           clearTimeout(freeformSyncTimerRef.current);
         }
 
-        freeformSyncTimerRef.current = setTimeout(() => {
-          freeformSyncTimerRef.current = null;
-          onFreeformShapesChangeRef.current(nextFreeformShapes);
-        }, 220);
-      }, 0);
+        function scheduleFreeformPersist() {
+          freeformSyncTimerRef.current = setTimeout(() => {
+            freeformSyncTimerRef.current = null;
+
+            if (isFreehandDrawingInProgress(editor)) {
+              scheduleFreeformPersist();
+              return;
+            }
+
+            onFreeformShapesChangeRef.current(nextFreeformShapes);
+          }, FREEFORM_SYNC_IDLE_DELAY_MS);
+        }
+
+        scheduleFreeformPersist();
+      }, snapshotDelay);
     }
 
     const removeListener = editor.store.listen(scheduleFreeformSync, {
