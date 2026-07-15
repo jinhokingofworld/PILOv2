@@ -6252,6 +6252,59 @@ assert.match(
   canvasSurface,
   /const handlePointerDownCapture = useCallback\(\s*\(event:[\s\S]*?if \(isReadOnly \|\| !editor/s
 );
+assert.match(panel, /const isWriteProtocolMismatchRef = useRef\(false\)/);
+assert.match(
+  panel,
+  /isWriteProtocolMismatchRef\.current = isWriteProtocolMismatch/
+);
+assert.match(
+  panel,
+  /if \(isWriteProtocolMismatch\) \{[\s\S]*?setNormalizedSqlPreview\(null\)/
+);
+assert.match(
+  panel,
+  /if \(isWriteProtocolMismatchRef\.current\) \{\s*setIsNormalizedSqlApplying\(false\);\s*return;/s
+);
+assert.match(
+  panel,
+  /const handlePreviewNormalizedSql = useCallback\(\(\) => \{[\s\S]*?if \(\s*isWriteProtocolMismatch \|\|\s*!resolvedDialect/s
+);
+assert.match(
+  panel,
+  /const handleApplyNormalizedSql = useCallback\(\(\) => \{[\s\S]*?isWriteProtocolMismatch \|\|/s
+);
+assert.match(
+  panel,
+  /const handleUndoNormalizedSql = useCallback\(\(\) => \{\s*if \(isWriteProtocolMismatch \|\| isNormalizedSqlApplying\)/s
+);
+assert.match(
+  panel,
+  /const handleRedoNormalizedSql = useCallback\(\(\) => \{\s*if \(isWriteProtocolMismatch \|\| isNormalizedSqlApplying\)/s
+);
+assert.match(
+  panel,
+  /canPreviewNormalizedSql=\{\s*isSessionReady &&\s*!isWriteProtocolMismatch/s
+);
+assert.match(
+  panel,
+  /canRedoNormalizedSql=\{[\s\S]*?!isWriteProtocolMismatch &&/s
+);
+assert.match(
+  panel,
+  /canUndoNormalizedSql=\{[\s\S]*?!isWriteProtocolMismatch &&/s
+);
+assert.match(
+  panel,
+  /canAddForeignKey=\{\s*isSessionReady &&\s*!isWriteProtocolMismatch/s
+);
+assert.match(
+  panel,
+  /<NormalizedSqlPreviewDialog[\s\S]*?isReadOnly=\{isWriteProtocolMismatch\}/
+);
+assert.match(
+  panel,
+  /disabled=\{isReadOnly \|\| !preview \|\| !preview\.hasChanges \|\| isApplying\}/
+);
 assert.match(panel, /handleReloadSession/);
 assert.match(panel, /handleReloadPausedSession/);
 assert.match(panel, /handleRetryLayoutAutosaveOnce/);

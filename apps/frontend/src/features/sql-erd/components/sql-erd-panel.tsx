@@ -341,6 +341,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
     revision: number;
     sessionId: string;
   } | null>(null);
+  const isWriteProtocolMismatchRef = useRef(false);
   currentSessionIdRef.current = sessionId;
   const [isSourceOpen, setIsSourceOpen] = useState(false);
   const [isInspectorOpen, setIsInspectorOpen] = useState(false);
@@ -677,6 +678,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
   });
   const isWriteProtocolMismatch =
     layoutAutosaveBlockReason === "write_protocol_mismatch";
+  isWriteProtocolMismatchRef.current = isWriteProtocolMismatch;
   useEffect(() => {
     if (!sqlErdViewSession.id || sqlErdViewSession.revision === null) return;
     const persisted = operationPersistedLayoutRef.current;
@@ -710,6 +712,16 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           tone: "neutral" as const
         }
       : sourceStatus;
+  useEffect(() => {
+    if (!isWriteProtocolMismatch) {
+      return;
+    }
+
+    terminateParseWorker();
+    setNormalizedSqlPreview(null);
+    setNormalizedSqlApplyError(null);
+    setIsNormalizedSqlApplying(false);
+  }, [isWriteProtocolMismatch, terminateParseWorker]);
   const selectedRelationSourceRanges = useMemo(
     () =>
       getSelectedSqlErdRelationSourceRanges({
@@ -784,6 +796,10 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
     }
   }, [modelIndex, tablePinState.pinnedTableId]);
   const handleSourceTextChange = useCallback((sourceText: string) => {
+    if (isWriteProtocolMismatch) {
+      return;
+    }
+
     setSqlSourceMap(null);
     setNormalizedSqlPreview(null);
     setNormalizedSqlApplyError(null);
@@ -792,8 +808,12 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
       sourceText,
       type: "draft_source_changed"
     });
-  }, [applySqlErdEditAction]);
+  }, [applySqlErdEditAction, isWriteProtocolMismatch]);
   const handleDialectChange = useCallback((dialect: SqltoerdDialect) => {
+    if (isWriteProtocolMismatch) {
+      return;
+    }
+
     setSqlSourceMap(null);
     setNormalizedSqlPreview(null);
     setNormalizedSqlApplyError(null);
@@ -802,7 +822,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
       dialect,
       type: "draft_dialect_changed"
     });
-  }, [applySqlErdEditAction]);
+  }, [applySqlErdEditAction, isWriteProtocolMismatch]);
   const applyNormalizedSqlSnapshot = useCallback(
     ({
       baseSnapshot,
@@ -815,7 +835,11 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
       sourceMapModelJson: SqlErdViewSession["modelJson"];
       targetSnapshot: SqlErdViewSession;
     }) => {
-      if (!baseSnapshot.id || isNormalizedSqlApplying) {
+      if (
+        isWriteProtocolMismatchRef.current ||
+        !baseSnapshot.id ||
+        isNormalizedSqlApplying
+      ) {
         return;
       }
 
@@ -845,6 +869,11 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
               "SQL을 적용하는 동안 세션이 변경되었습니다. 새 미리보기를 만든 뒤 다시 시도하세요."
             );
           }
+          setIsNormalizedSqlApplying(false);
+          return;
+        }
+
+        if (isWriteProtocolMismatchRef.current) {
           setIsNormalizedSqlApplying(false);
           return;
         }
@@ -895,7 +924,11 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
       lastResolvedDialect ??
       (currentSnapshot.dialect === "auto" ? null : currentSnapshot.dialect);
 
-    if (!resolvedDialect || isSqlErdDraftDirty(sqlErdEditStateRef.current)) {
+    if (
+      isWriteProtocolMismatch ||
+      !resolvedDialect ||
+      isSqlErdDraftDirty(sqlErdEditStateRef.current)
+    ) {
       setNormalizedSqlApplyError(
         "Generate the current SQL successfully before creating a normalized SQL preview."
       );
@@ -910,7 +943,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
         session: currentSnapshot
       })
     );
-  }, [lastResolvedDialect]);
+  }, [isWriteProtocolMismatch, lastResolvedDialect]);
   const handlePreviewForeignKeyAdd = useCallback(
     ({
       fromColumnId,
@@ -930,6 +963,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
         (currentSnapshot.dialect === "auto" ? null : currentSnapshot.dialect);
 
       if (
+        isWriteProtocolMismatch ||
         !resolvedDialect ||
         isNormalizedSqlApplying ||
         isSqlErdDraftDirty(sqlErdEditStateRef.current)
@@ -961,7 +995,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
 
       return candidate;
     },
-    [isNormalizedSqlApplying, lastResolvedDialect]
+    [isNormalizedSqlApplying, isWriteProtocolMismatch, lastResolvedDialect]
   );
   const handlePreviewForeignKeyUpdate = useCallback(
     ({
@@ -980,6 +1014,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
         (currentSnapshot.dialect === "auto" ? null : currentSnapshot.dialect);
 
       if (
+        isWriteProtocolMismatch ||
         !resolvedDialect ||
         isNormalizedSqlApplying ||
         isSqlErdDraftDirty(sqlErdEditStateRef.current)
@@ -1010,7 +1045,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
 
       return candidate;
     },
-    [isNormalizedSqlApplying, lastResolvedDialect]
+    [isNormalizedSqlApplying, isWriteProtocolMismatch, lastResolvedDialect]
   );
   const handlePreviewForeignKeyDelete = useCallback(
     ({ relationId }: { relationId: string }): SqltoerdForeignKeyEditResult | null => {
@@ -1021,6 +1056,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
         (currentSnapshot.dialect === "auto" ? null : currentSnapshot.dialect);
 
       if (
+        isWriteProtocolMismatch ||
         !resolvedDialect ||
         isNormalizedSqlApplying ||
         isSqlErdDraftDirty(sqlErdEditStateRef.current)
@@ -1048,7 +1084,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
 
       return candidate;
     },
-    [isNormalizedSqlApplying, lastResolvedDialect]
+    [isNormalizedSqlApplying, isWriteProtocolMismatch, lastResolvedDialect]
   );
   const handlePreviewAnnotationForeignKeyConversion = useCallback(
     ({
@@ -1065,6 +1101,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
         (currentSnapshot.dialect === "auto" ? null : currentSnapshot.dialect);
 
       if (
+        isWriteProtocolMismatch ||
         !resolvedDialect ||
         isNormalizedSqlApplying ||
         isSqlErdDraftDirty(sqlErdEditStateRef.current)
@@ -1098,10 +1135,11 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
 
       return candidate;
     },
-    [isNormalizedSqlApplying, lastResolvedDialect]
+    [isNormalizedSqlApplying, isWriteProtocolMismatch, lastResolvedDialect]
   );
   const handleApplyNormalizedSql = useCallback(() => {
     if (
+      isWriteProtocolMismatch ||
       !normalizedSqlPreview ||
       !normalizedSqlPreview.hasChanges ||
       isNormalizedSqlApplying
@@ -1141,10 +1179,11 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
   }, [
     applyNormalizedSqlSnapshot,
     isNormalizedSqlApplying,
+    isWriteProtocolMismatch,
     normalizedSqlPreview
   ]);
   const handleUndoNormalizedSql = useCallback(() => {
-    if (isNormalizedSqlApplying) {
+    if (isWriteProtocolMismatch || isNormalizedSqlApplying) {
       return;
     }
 
@@ -1164,9 +1203,9 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
         revision: baseSnapshot.revision
       }
     });
-  }, [applyNormalizedSqlSnapshot, isNormalizedSqlApplying, modelSqlHistory]);
+  }, [applyNormalizedSqlSnapshot, isNormalizedSqlApplying, isWriteProtocolMismatch, modelSqlHistory]);
   const handleRedoNormalizedSql = useCallback(() => {
-    if (isNormalizedSqlApplying) {
+    if (isWriteProtocolMismatch || isNormalizedSqlApplying) {
       return;
     }
 
@@ -1186,7 +1225,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
         revision: baseSnapshot.revision
       }
     });
-  }, [applyNormalizedSqlSnapshot, isNormalizedSqlApplying, modelSqlHistory]);
+  }, [applyNormalizedSqlSnapshot, isNormalizedSqlApplying, isWriteProtocolMismatch, modelSqlHistory]);
   const handleLayoutChange = useCallback(
     (layoutJson: SqltoerdLayoutJsonV1) => {
       applySqlErdEditAction({
@@ -1414,6 +1453,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
   useEffect(() => {
     if (
       !isSessionReady ||
+      isWriteProtocolMismatch ||
       !shouldScheduleSqlErdAutoParse(sqlErdEditStateRef.current)
     ) {
       return;
@@ -1444,6 +1484,10 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
         }
 
         if (parseResult.cancelled) {
+          return;
+        }
+
+        if (isWriteProtocolMismatchRef.current) {
           return;
         }
 
@@ -1485,6 +1529,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
     autoParseDraftDialect,
     autoParseDraftSourceText,
     autoParseRequestSequence,
+    isWriteProtocolMismatch,
     isSessionReady,
     runSqlErdParseWorker,
     sessionId,
@@ -2069,16 +2114,21 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
       <SourcePanel
         canPreviewNormalizedSql={
           isSessionReady &&
+          !isWriteProtocolMismatch &&
           !isNormalizedSqlApplying &&
           !isSqlErdDraftDirty(sqlErdEditState) &&
           (lastResolvedDialect !== null ||
             sqlErdEditState.draftDialect !== "auto")
         }
         canRedoNormalizedSql={
-          !isNormalizedSqlApplying && modelSqlHistory.future.length > 0
+          !isWriteProtocolMismatch &&
+          !isNormalizedSqlApplying &&
+          modelSqlHistory.future.length > 0
         }
         canUndoNormalizedSql={
-          !isNormalizedSqlApplying && modelSqlHistory.past.length > 0
+          !isWriteProtocolMismatch &&
+          !isNormalizedSqlApplying &&
+          modelSqlHistory.past.length > 0
         }
         counts={sessionCounts}
         dialect={sqlErdEditState.draftDialect}
@@ -2153,6 +2203,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
       <InspectorPanel
         canAddForeignKey={
           isSessionReady &&
+          !isWriteProtocolMismatch &&
           !isNormalizedSqlApplying &&
           !isSqlErdDraftDirty(sqlErdEditState) &&
           (lastResolvedDialect !== null ||
@@ -2183,6 +2234,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
       <NormalizedSqlPreviewDialog
         error={normalizedSqlApplyError}
         isApplying={isNormalizedSqlApplying}
+        isReadOnly={isWriteProtocolMismatch}
         onApply={handleApplyNormalizedSql}
         onOpenChange={(open) => {
           if (!open && !isNormalizedSqlApplying) {
@@ -2199,12 +2251,14 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
 function NormalizedSqlPreviewDialog({
   error,
   isApplying,
+  isReadOnly,
   onApply,
   onOpenChange,
   preview
 }: {
   error: string | null;
   isApplying: boolean;
+  isReadOnly: boolean;
   onApply: () => void;
   onOpenChange: (open: boolean) => void;
   preview: SqlErdNormalizedSqlPreview | null;
@@ -2258,7 +2312,7 @@ function NormalizedSqlPreviewDialog({
           </button>
           <button
             className="inline-flex h-9 items-center rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground disabled:pointer-events-none disabled:opacity-50"
-            disabled={!preview || !preview.hasChanges || isApplying}
+            disabled={isReadOnly || !preview || !preview.hasChanges || isApplying}
             onClick={onApply}
             type="button"
           >
