@@ -293,6 +293,18 @@ export function useMeetingWorkspaceData({
     [meetingClient, requireWorkspace]
   );
 
+  const deleteMeetingReport = useCallback(
+    async (reportId: string) => {
+      const result = await meetingClient.deleteMeetingReport(
+        requireWorkspace(),
+        reportId
+      );
+      await reloadReports();
+      return result;
+    },
+    [meetingClient, reloadReports, requireWorkspace]
+  );
+
   const listMeetingReportsByMeeting = useCallback(
     async (meetingId: string) => {
       return meetingClient.listMeetingReportsByMeeting(
@@ -434,6 +446,7 @@ export function useMeetingWorkspaceData({
     currentError,
     currentRecording: currentState.currentRecording,
     currentStatus,
+    deleteMeetingReport,
     dismissMeetingReportActionItem,
     endRecording,
     getCurrentRecording,

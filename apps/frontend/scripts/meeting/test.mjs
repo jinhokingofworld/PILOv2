@@ -104,6 +104,10 @@ const meetingNavigation = await readFile(
   new URL("../../src/features/meeting/navigation.ts", import.meta.url),
   "utf8"
 );
+const homeRouting = await readFile(
+  new URL("../../src/features/home/utils/home-routing.ts", import.meta.url),
+  "utf8"
+);
 const packageJson = await readFile(
   new URL("../../package.json", import.meta.url),
   "utf8"
@@ -165,6 +169,7 @@ assert.match(meetingApiClient, /getCurrentRecording/);
 assert.match(meetingApiClient, /listParticipants/);
 assert.match(meetingApiClient, /listMeetingReports/);
 assert.match(meetingApiClient, /getMeetingReport/);
+assert.match(meetingApiClient, /deleteMeetingReport/);
 assert.match(meetingApiClient, /listMeetingReportsByMeeting/);
 assert.match(meetingApiClient, /regenerateMeetingReport/);
 assert.match(meetingApiClient, /workspaceMeetingsPath/);
@@ -196,6 +201,7 @@ assert.match(meetingHook, /leaveMeeting/);
 assert.match(meetingHook, /startRecording/);
 assert.match(meetingHook, /endRecording/);
 assert.match(meetingHook, /regenerateMeetingReport/);
+assert.match(meetingHook, /deleteMeetingReport/);
 assert.match(meetingHook, /Meeting action requires an authenticated workspace/);
 assert.doesNotMatch(meetingHook, /livekit-client/);
 assert.doesNotMatch(meetingHook, /@livekit\/components-react/);
@@ -242,10 +248,11 @@ assert.match(meetingRuntimeProvider, /data-livekit-audio-sink="true"/);
 
 assert.match(meetingNavigation, /title: "음성회의"/);
 assert.match(meetingNavigation, /회의 참여, 녹음, 회의록 확인과 재생성/);
-assert.match(meetingNavigation, /\/meeting#room/);
-assert.match(meetingNavigation, /\/meeting#report/);
-assert.doesNotMatch(meetingNavigation, /\/meeting\/#/);
-assert.doesNotMatch(meetingNavigation, /\/meeting#recording/);
+assert.match(meetingNavigation, /href: "\/meeting"/);
+assert.match(meetingNavigation, /href: "\/report"/);
+assert.doesNotMatch(meetingNavigation, /#room|#report/);
+assert.match(homeRouting, /buildMeetingReportHref\(reportId: string\)/);
+assert.match(homeRouting, /\/report\?reportId=\$\{encodeURIComponent\(reportId\)\}/);
 
 assert.match(meetingPanel, /"use client"/);
 assert.match(meetingPanel, /useAuthSession/);
@@ -294,14 +301,10 @@ assert.match(meetingPanel, /녹음 종료/);
 assert.match(meetingPanel, /현재 참여 인원/);
 assert.doesNotMatch(meetingPanel, /remoteAudioContainerRef/);
 assert.match(meetingPanel, /MeetingReportSection/);
-assert.match(meetingPanel, /getMeetingSectionFromHash/);
 assert.match(meetingPanel, /activeSection/);
-assert.match(meetingPanel, /useSyncExternalStore/);
-assert.match(meetingPanel, /getMeetingSectionServerSnapshot/);
-assert.match(meetingPanel, /hashchange/);
-assert.match(meetingPanel, /popstate/);
-assert.match(meetingPanel, /syncSectionAfterNavigationClick/);
-assert.match(meetingPanel, /addEventListener\("click", syncSectionAfterNavigationClick, true\)/);
+assert.match(meetingPanel, /section = "room"/);
+assert.match(meetingPanel, /window\.location\.replace\("\/report"\)/);
+assert.match(meetingPanel, /window\.history\.replaceState\(null, "", "\/meeting"\)/);
 assert.match(meetingPanel, /reportsEnabled: activeSection === "report"/);
 assert.match(meetingPanel, /reportStatusFilter/);
 assert.match(meetingPanel, /MEETING_REPORT_PAGE_SIZE = 20/);
@@ -381,6 +384,11 @@ assert.match(meetingReportSection, /MeetingReportStatusFilter/);
 assert.match(meetingReportSection, /REPORT_POLL_INTERVAL_MS = 10000/);
 assert.match(meetingReportSection, /useMeetingReportRealtime/);
 assert.match(meetingReportSection, /selectedReportId === event\.reportId/);
+assert.match(meetingReportSection, /getReportIdFromLocation/);
+assert.match(meetingReportSection, /new URLSearchParams\(window\.location\.search\)/);
+assert.match(meetingReportSection, /openedDeepLinkReportIdRef/);
+assert.match(meetingReportSection, /void loadReportDetail\(reportId\)/);
+assert.match(meetingReportSection, /회의록 상세를 찾을 수 없습니다/);
 assert.doesNotMatch(meetingReportSection, /from "socket\.io-client"/);
 assert.doesNotMatch(meetingReportSection, /useRouter/);
 assert.doesNotMatch(meetingReportSection, /buildCalendarDraftHref/);
@@ -428,11 +436,20 @@ assert.doesNotMatch(
 );
 assert.match(meetingReportSection, /formatTranscriptTimestamp/);
 assert.match(meetingReportSection, /EvidenceTimeButtons/);
-assert.match(meetingReportSection, /TranscriptSegmentViewer/);
-assert.match(meetingReportSection, /scrollIntoView\(\{ behavior: "smooth", block: "center" \}\)/);
-assert.match(meetingReportSection, /focus\(\{ preventScroll: true \}\)/);
-assert.match(meetingReportSection, /transcriptSegments\.length/);
-assert.match(meetingReportSection, /transcriptText/);
+assert.match(meetingReportSection, /근거 Transcript/);
+assert.match(meetingReportSection, /selectedEvidenceSegment/);
+assert.match(meetingReportSection, /selectedEvidencePanelRef/);
+assert.match(
+  meetingReportSection,
+  /scrollIntoView\(\{ behavior: "smooth", block: "center" \}\)/
+);
+assert.match(meetingReportSection, /evidenceSegments/);
+assert.match(meetingReportSection, /회의록 삭제/);
+assert.match(meetingReportSection, /Transcript 전문 보기/);
+assert.match(meetingReportSection, /회의록 상세로 돌아가기/);
+assert.match(meetingReportSection, /detailView === "transcript"/);
+assert.match(meetingReportSection, /report\.transcriptText/);
+assert.doesNotMatch(meetingReportSection, /TranscriptSegmentViewer/);
 assert.match(meetingReportSection, /60초 이하 녹음은 회의록이 생성되지 않습니다/);
 assert.doesNotMatch(meetingReportSection, /@\/components\/ui\/sheet/);
 assert.doesNotMatch(meetingReportSection, /MeetingReportDetailSheet/);

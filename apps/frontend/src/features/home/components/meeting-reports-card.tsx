@@ -36,7 +36,7 @@ export function MeetingReportsCard({
       action={
         <DashboardNavigationAction
           ariaLabel="회의록으로 이동"
-          href="/meeting#report"
+          href="/report"
         />
       }
       background={<MeetingReportsBackground />}

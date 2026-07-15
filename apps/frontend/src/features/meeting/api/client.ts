@@ -13,6 +13,7 @@ import type {
   MeetingRoomNameInput,
   MeetingReportActionItemMutationPayload,
   MeetingReportDetailPayload,
+  MeetingReportDeletionPayload,
   MeetingReportListPayload,
   MeetingReportListQuery,
   MeetingReportRegenerationPayload,
@@ -478,6 +479,14 @@ export function createMeetingApiClient({
       return requestMeetingData<MeetingReportDetailPayload>(
         meetingReportPath(workspaceId, reportId),
         undefined,
+        requestOptions
+      );
+    },
+
+    async deleteMeetingReport(workspaceId: string, reportId: string) {
+      return requestMeetingData<MeetingReportDeletionPayload>(
+        meetingReportPath(workspaceId, reportId),
+        { method: "DELETE" },
         requestOptions
       );
     },

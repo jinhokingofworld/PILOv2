@@ -2,6 +2,7 @@
 
 import {
   AlertCircle,
+  ArrowLeft,
   ArrowDownWideNarrow,
   CheckCircle2,
   Clock3,
@@ -51,17 +52,10 @@ type MeetingReportSectionProps = {
 };
 
 type ReportDetailStatus = "idle" | "loading" | "success" | "error";
-
-function readInitialMeetingReportId() {
-  if (typeof window === "undefined") {
-    return null;
-  }
-
-  return new URLSearchParams(window.location.search).get("reportId")?.trim() || null;
-}
+type ReportDetailView = "detail" | "transcript";
 
 type MeetingReportTranscriptSegment = NonNullable<
-  MeetingReportDetail["transcriptSegments"]
+  MeetingReportDetail["evidenceSegments"]
 >[number];
 
 const REPORT_POLL_INTERVAL_MS = 10000;
@@ -77,12 +71,19 @@ const REPORT_STATUS_FILTERS: Array<{
 
 function getReportRequestErrorMessage(error: unknown) {
   if (error instanceof MeetingApiError && error.status === 404) {
-    return "이 회의록의 상세 transcript는 회의 참석자와 Workspace owner만 볼 수 있습니다.";
+    return "회의록 상세를 찾을 수 없습니다. 삭제되었거나 더 이상 사용할 수 없는 회의록일 수 있습니다.";
   }
 
   return error instanceof Error
     ? error.message
     : "회의록 요청을 처리하지 못했습니다. 잠시 후 다시 시도해주세요.";
+}
+
+function getReportIdFromLocation() {
+  if (typeof window === "undefined") return null;
+
+  const reportId = new URLSearchParams(window.location.search).get("reportId");
+  return reportId?.trim() || null;
 }
 
 function toDayBoundary(value: string, boundary: "start" | "end") {
@@ -307,7 +308,7 @@ function getEvidenceSegments(
   const seenSegmentIds = new Set<string>();
   const segments: MeetingReportTranscriptSegment[] = [];
 
-  for (const segment of report.transcriptSegments ?? []) {
+  for (const segment of report.evidenceSegments ?? []) {
     segmentsById.set(segment.id, segment);
   }
 
@@ -348,7 +349,7 @@ function EvidenceTimeButtons({
             key={segment.id}
             type="button"
             className="inline-flex h-7 items-center gap-1 rounded-full border bg-muted/40 px-2 font-medium text-muted-foreground transition hover:border-primary/40 hover:bg-primary/10 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            aria-label={`${timestamp} transcript 근거로 이동`}
+            aria-label={`${timestamp} transcript 근거 보기`}
             onClick={() => onSelect(segment)}
           >
             <Clock3 className="size-3" />
@@ -357,49 +358,6 @@ function EvidenceTimeButtons({
         );
       })}
     </div>
-  );
-}
-
-function TranscriptSegmentViewer({
-  activeSegmentId,
-  onSelect,
-  registerSegment,
-  segments
-}: {
-  activeSegmentId: string | null;
-  onSelect: (segment: MeetingReportTranscriptSegment) => void;
-  registerSegment: (id: string, element: HTMLButtonElement | null) => void;
-  segments: MeetingReportTranscriptSegment[];
-}) {
-  return (
-    <section className="grid gap-2">
-      <h3 className="font-heading text-base font-semibold">Transcript</h3>
-      <ul className="grid gap-2">
-        {segments.map((segment) => {
-          const isActive = segment.id === activeSegmentId;
-          const timestamp = formatTranscriptTimestamp(segment.startedAtMs);
-          return (
-            <li key={segment.id}>
-              <button
-                ref={(element) => registerSegment(segment.id, element)}
-                type="button"
-                aria-current={isActive ? "true" : undefined}
-                className={cn(
-                  "w-full scroll-mt-6 rounded-lg border bg-background p-3 text-left text-sm leading-6 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                  isActive && "border-primary bg-primary/10 ring-1 ring-primary/30"
-                )}
-                onClick={() => onSelect(segment)}
-              >
-                <span className="mb-1 block text-xs font-semibold text-muted-foreground">
-                  {timestamp} - {formatTranscriptTimestamp(segment.endedAtMs)}
-                </span>
-                <span className="whitespace-pre-wrap break-words">{segment.text}</span>
-              </button>
-            </li>
-          );
-        })}
-      </ul>
-    </section>
   );
 }
 
@@ -586,10 +544,12 @@ function MeetingReportDetailModal({
   mutatingActionItemId,
   onApproveActionItem,
   onClose,
+  onDelete,
   onDismissActionItem,
   onRegenerate,
   onUpdateActionItem,
   open,
+  deleting,
   regenerating,
   report
 }: {
@@ -598,6 +558,7 @@ function MeetingReportDetailModal({
   mutatingActionItemId: string | null;
   onApproveActionItem: (actionItem: MeetingReportActionItem) => void;
   onClose: () => void;
+  onDelete: (report: MeetingReportSummary) => void;
   onDismissActionItem: (actionItem: MeetingReportActionItem) => void;
   onRegenerate: (report: MeetingReportSummary) => void;
   onUpdateActionItem: (
@@ -605,17 +566,16 @@ function MeetingReportDetailModal({
     body: UpdateMeetingReportActionItemInput
   ) => void;
   open: boolean;
+  deleting: boolean;
   regenerating: boolean;
   report: MeetingReportDetail | null;
 }) {
   const actionItems = report?.actionItems ?? [];
-  const transcriptSegmentRefs = useRef(
-    new Map<string, HTMLButtonElement>()
-  );
-  const [activeTranscriptSegmentId, setActiveTranscriptSegmentId] = useState<
-    string | null
+  const [detailView, setDetailView] = useState<ReportDetailView>("detail");
+  const [selectedEvidenceSegment, setSelectedEvidenceSegment] = useState<
+    MeetingReportTranscriptSegment | null
   >(null);
-  const transcriptSegments = report?.transcriptSegments ?? [];
+  const selectedEvidencePanelRef = useRef<HTMLElement | null>(null);
   const actionItemsWithEvidence = report
     ? actionItems.map((item, index) => ({
         item,
@@ -628,27 +588,22 @@ function MeetingReportDetailModal({
     : [];
 
   useEffect(() => {
-    setActiveTranscriptSegmentId(null);
-  }, [report?.id, report?.transcriptSegments]);
+    setDetailView("detail");
+    setSelectedEvidenceSegment(null);
+  }, [report?.id, report?.evidenceSegments]);
 
-  function registerTranscriptSegment(
-    segmentId: string,
-    element: HTMLButtonElement | null
-  ) {
-    if (element) {
-      transcriptSegmentRefs.current.set(segmentId, element);
-    } else {
-      transcriptSegmentRefs.current.delete(segmentId);
-    }
-  }
+  useEffect(() => {
+    if (!selectedEvidenceSegment) return;
+
+    const panel = selectedEvidencePanelRef.current;
+    if (!panel) return;
+
+    panel.scrollIntoView({ behavior: "smooth", block: "center" });
+    panel.focus({ preventScroll: true });
+  }, [selectedEvidenceSegment?.id]);
 
   function selectTranscriptSegment(segment: MeetingReportTranscriptSegment) {
-    setActiveTranscriptSegmentId(segment.id);
-    const element = transcriptSegmentRefs.current.get(segment.id);
-    if (!element) return;
-
-    element.scrollIntoView({ behavior: "smooth", block: "center" });
-    element.focus({ preventScroll: true });
+    setSelectedEvidenceSegment(segment);
   }
 
   const summaryEvidence = report ? getEvidenceSegments(report, "summary") : [];
@@ -667,7 +622,7 @@ function MeetingReportDetailModal({
         <DialogPrimitive.Popup className="fixed top-1/2 left-1/2 z-50 flex max-h-[min(988px,calc(100vh-2rem))] w-[calc(100vw-2rem)] max-w-[1080px] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl border bg-popover text-popover-foreground shadow-2xl shadow-slate-950/20 outline-none transition duration-150 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0">
           <div className="border-b p-5 pr-14">
             <DialogPrimitive.Title className="font-heading text-lg font-semibold">
-              회의록 상세
+              {detailView === "transcript" ? "Transcript 전문" : "회의록 상세"}
             </DialogPrimitive.Title>
             <DialogPrimitive.Description className="mt-1 text-sm text-muted-foreground">
               {report ? formatReportDateTime(report.createdAt) : "불러오는 중"}
@@ -700,6 +655,31 @@ function MeetingReportDetailModal({
               <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
                 {detailError ?? "회의록 상세를 불러오지 못했습니다."}
               </div>
+            ) : report && detailView === "transcript" ? (
+              <section className="grid gap-4">
+                <Button
+                  type="button"
+                  className="justify-self-start"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setDetailView("detail")}
+                >
+                  <ArrowLeft />
+                  회의록 상세로 돌아가기
+                </Button>
+                <div className="grid gap-2">
+                  <h2 className="font-heading text-lg font-semibold">Transcript 전문</h2>
+                  {report.transcriptText?.trim() ? (
+                    <p className="whitespace-pre-wrap break-words rounded-lg border bg-muted/20 p-4 text-sm leading-7">
+                      {report.transcriptText}
+                    </p>
+                  ) : (
+                    <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+                      표시할 Transcript가 없습니다.
+                    </p>
+                  )}
+                </div>
+              </section>
             ) : report ? (
               <div className="grid gap-5">
                 <section className="grid gap-4 rounded-lg border bg-muted/20 p-4">
@@ -824,43 +804,82 @@ function MeetingReportDetailModal({
                   )}
                 </section>
 
-                {transcriptSegments.length ? (
-                  <TranscriptSegmentViewer
-                    activeSegmentId={activeTranscriptSegmentId}
-                    registerSegment={registerTranscriptSegment}
-                    segments={transcriptSegments}
-                    onSelect={selectTranscriptSegment}
-                  />
-                ) : (
-                  <ReportTextBlock
-                    emptyLabel={
-                      isReportInProgress(report.status)
-                        ? "음성 텍스트를 정리하는 중입니다."
-                        : "등록된 transcript가 없습니다."
-                    }
-                    title="Transcript"
-                    value={report.transcriptText}
-                  />
-                )}
+                {selectedEvidenceSegment ? (
+                  <section
+                    ref={selectedEvidencePanelRef}
+                    tabIndex={-1}
+                    className="grid gap-2 rounded-lg border border-primary/30 bg-primary/5 p-4"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <h3 className="font-heading text-base font-semibold">근거 Transcript</h3>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => setSelectedEvidenceSegment(null)}
+                      >
+                        닫기
+                      </Button>
+                    </div>
+                    <p className="text-xs font-semibold text-muted-foreground">
+                      {formatTranscriptTimestamp(selectedEvidenceSegment.startedAtMs)} - {formatTranscriptTimestamp(selectedEvidenceSegment.endedAtMs)}
+                    </p>
+                    <p className="whitespace-pre-wrap break-words text-sm leading-6">
+                      {selectedEvidenceSegment.text}
+                    </p>
+                  </section>
+                ) : null}
               </div>
             ) : null}
           </div>
 
-          {report?.status === "FAILED" ? (
+          {report ? (
             <div className="mt-auto flex flex-col gap-2 border-t p-4 sm:flex-row sm:justify-end">
-              <Button
-                type="button"
-                variant="outline"
-                disabled={regenerating}
-                onClick={() => onRegenerate(report)}
-              >
-                {regenerating ? (
-                  <Loader2 className="animate-spin" />
-                ) : (
-                  <RotateCcw />
-                )}
-                재생성 요청
-              </Button>
+              {detailView === "transcript" ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setDetailView("detail")}
+                >
+                  <ArrowLeft />
+                  회의록 상세로 돌아가기
+                </Button>
+              ) : (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setDetailView("transcript")}
+                >
+                  <FileText />
+                  Transcript 전문 보기
+                </Button>
+              )}
+              {detailView === "detail" && report.canDelete ? (
+                <Button
+                  type="button"
+                  variant="destructive"
+                  disabled={deleting}
+                  onClick={() => onDelete(report)}
+                >
+                  {deleting ? <Loader2 className="animate-spin" /> : <X />}
+                  회의록 삭제
+                </Button>
+              ) : null}
+              {detailView === "detail" && report.status === "FAILED" ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={regenerating || deleting}
+                  onClick={() => onRegenerate(report)}
+                >
+                  {regenerating ? (
+                    <Loader2 className="animate-spin" />
+                  ) : (
+                    <RotateCcw />
+                  )}
+                  재생성 요청
+                </Button>
+              ) : null}
             </div>
           ) : null}
         </DialogPrimitive.Popup>
@@ -884,6 +903,7 @@ export function MeetingReportSection({
     accessToken,
     approveMeetingReportActionItem,
     canLoad,
+    deleteMeetingReport,
     dismissMeetingReportActionItem,
     getMeetingReport,
     regenerateMeetingReport,
@@ -906,10 +926,8 @@ export function MeetingReportSection({
     useState<string | null>(null);
   const [mutatingActionItemId, setMutatingActionItemId] =
     useState<string | null>(null);
-  const [initialReportId] = useState(readInitialMeetingReportId);
-  const [openedInitialReportId, setOpenedInitialReportId] = useState<
-    string | null
-  >(null);
+  const [deletingReportId, setDeletingReportId] = useState<string | null>(null);
+  const openedDeepLinkReportIdRef = useRef<string | null>(null);
 
   const hasProcessingReport = reports.some((report) =>
     isReportInProgress(report.status)
@@ -959,14 +977,23 @@ export function MeetingReportSection({
   const handleOpenReport = useCallback(
     (report: MeetingReportSummary) => {
       setSelectedReportId(report.id);
-      setSelectedReport({
-        ...report,
-        transcriptText: null
-      });
+      setSelectedReport({ ...report, transcriptText: null });
       void loadReportDetail(report.id);
     },
     [loadReportDetail]
   );
+
+  useEffect(() => {
+    if (!canLoad) return;
+
+    const reportId = getReportIdFromLocation();
+    if (!reportId || openedDeepLinkReportIdRef.current === reportId) return;
+
+    openedDeepLinkReportIdRef.current = reportId;
+    setSelectedReportId(reportId);
+    setSelectedReport(null);
+    void loadReportDetail(reportId);
+  }, [canLoad, loadReportDetail]);
 
   const handleCloseReport = useCallback(() => {
     setSelectedReportId(null);
@@ -974,20 +1001,6 @@ export function MeetingReportSection({
     setDetailStatus("idle");
     setDetailError(null);
   }, []);
-
-  useEffect(() => {
-    if (
-      !canLoad ||
-      !initialReportId ||
-      openedInitialReportId === initialReportId
-    ) {
-      return;
-    }
-
-    setOpenedInitialReportId(initialReportId);
-    setSelectedReportId(initialReportId);
-    void loadReportDetail(initialReportId);
-  }, [canLoad, initialReportId, loadReportDetail, openedInitialReportId]);
 
   const handleRegenerateReport = useCallback(
     async (report: MeetingReportSummary) => {
@@ -1005,10 +1018,7 @@ export function MeetingReportSection({
           onStatusFilterChange("ALL");
         }
 
-        setSelectedReport({
-          ...result.report,
-          transcriptText: null
-        });
+        setSelectedReport({ ...result.report, transcriptText: null });
 
         if (selectedReportId === report.id) {
           await loadReportDetail(report.id, { silent: true });
@@ -1027,6 +1037,25 @@ export function MeetingReportSection({
       selectedReportId,
       statusFilter
     ]
+  );
+
+  const handleDeleteReport = useCallback(
+    async (report: MeetingReportSummary) => {
+      if (!window.confirm("이 회의록을 삭제할까요? 삭제된 회의록은 복구할 수 없습니다.")) {
+        return;
+      }
+      setDeletingReportId(report.id);
+      try {
+        await deleteMeetingReport(report.id);
+        handleCloseReport();
+        onToastMessage("회의록을 삭제했습니다.");
+      } catch (error) {
+        onToastMessage(getReportRequestErrorMessage(error));
+      } finally {
+        setDeletingReportId(null);
+      }
+    },
+    [deleteMeetingReport, handleCloseReport, onToastMessage]
   );
 
   const handleActionItemMutation = useCallback(
@@ -1335,6 +1364,7 @@ export function MeetingReportSection({
       </div>
 
       <MeetingReportDetailModal
+        deleting={deletingReportId === selectedReport?.id}
         detailError={detailError}
         detailStatus={detailStatus}
         mutatingActionItemId={mutatingActionItemId}
@@ -1348,6 +1378,7 @@ export function MeetingReportSection({
           void handleActionItemMutation(actionItem, "approve")
         }
         onClose={handleCloseReport}
+        onDelete={(report) => void handleDeleteReport(report)}
         onDismissActionItem={(actionItem) =>
           void handleActionItemMutation(actionItem, "dismiss")
         }

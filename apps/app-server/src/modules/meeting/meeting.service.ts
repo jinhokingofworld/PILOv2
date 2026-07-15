@@ -143,6 +143,7 @@ interface MeetingReportRow extends QueryResultRow {
   updated_at: Date | string;
   participant_count?: number | string;
   participant_preview?: unknown;
+  can_delete?: boolean;
 }
 
 interface MeetingReportDetailRow extends MeetingReportRow {
@@ -349,6 +350,7 @@ export interface MeetingReportSummaryPayload {
   actionItemCandidates: unknown[];
   retryCount: number;
   participantSummary: MeetingReportParticipantSummaryPayload;
+  canDelete?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -365,7 +367,7 @@ export interface MeetingReportParticipantSummaryPayload {
 
 export interface MeetingReportDetailPayload extends MeetingReportSummaryPayload {
   transcriptText: string | null;
-  transcriptSegments: Array<{ id: string; segmentIndex: number; startedAtMs: number; endedAtMs: number; text: string }>;
+  evidenceSegments: Array<{ id: string; segmentIndex: number; startedAtMs: number; endedAtMs: number; text: string }>;
   evidence: Array<{ sourceType: string; sourceIndex: number; transcriptSegmentId: string }>;
   actionItems: MeetingReportActionItemPayload[];
   actionItemAssignees: MeetingReportActionItemAssigneePayload[];
@@ -485,6 +487,10 @@ export interface MeetingReportDetailResponsePayload {
 
 export interface MeetingReportRegenerationPayload {
   report: MeetingReportSummaryPayload;
+}
+
+export interface MeetingReportDeletionPayload {
+  deletedReportId: string;
 }
 
 const MAIN_MEETING_ROOM = "MAIN_MEETING_ROOM";
@@ -1505,6 +1511,7 @@ export class MeetingService {
     }
     const page = await this.listWorkspaceMeetingReportRows(
       workspaceId,
+      currentUserId,
       status,
       limit,
       { cursor, from, searchQuery, to }
@@ -1524,8 +1531,8 @@ export class MeetingService {
     await this.assertWorkspaceAccess(currentUserId, workspaceId);
     const report = await this.findMeetingReportDetailById(
       workspaceId,
-      reportId,
-      currentUserId
+      currentUserId,
+      reportId
     );
 
     if (report === null) {
@@ -1544,6 +1551,72 @@ export class MeetingService {
         actionItemAssignees
       })
     };
+  }
+
+  async deleteReport(
+    currentUserId: string,
+    workspaceId: string,
+    reportId: string
+  ): Promise<MeetingReportDeletionPayload> {
+    await this.assertWorkspaceAccess(currentUserId, workspaceId);
+
+    return this.database.transaction(async (transaction) => {
+      if (!UUID_PATTERN.test(reportId)) {
+        throw notFound("Meeting report not found");
+      }
+      const report = await transaction.queryOne<{
+        id: string;
+        status: MeetingReportStatus;
+        can_delete: boolean;
+      }>(
+        `SELECT
+           meeting_reports.id,
+           meeting_reports.status,
+           (
+             EXISTS (
+               SELECT 1
+               FROM workspace_members
+               WHERE workspace_members.workspace_id = meetings.workspace_id
+                 AND workspace_members.user_id = $2
+                 AND workspace_members.role = 'owner'
+             )
+             OR EXISTS (
+               SELECT 1
+               FROM meeting_participants
+               WHERE meeting_participants.meeting_id = meeting_reports.meeting_id
+                 AND meeting_participants.user_id = $2
+             )
+           ) AS can_delete
+         FROM meeting_reports
+         JOIN meetings ON meetings.id = meeting_reports.meeting_id
+         WHERE meetings.workspace_id = $1
+           AND meeting_reports.id = $3
+         FOR UPDATE OF meeting_reports`,
+        [workspaceId, currentUserId, reportId]
+      );
+
+      if (report === null) {
+        throw notFound("Meeting report not found");
+      }
+      if (!report.can_delete) {
+        throw forbidden("Only the workspace owner or a meeting participant can delete this report");
+      }
+      if (this.isMeetingReportInProgress(report.status)) {
+        throw badRequest("Meeting report is still processing");
+      }
+
+      const deleted = await transaction.queryOne<{ id: string }>(
+        `DELETE FROM meeting_reports
+         WHERE id = $1
+         RETURNING id`,
+        [report.id]
+      );
+      if (deleted === null) {
+        throw notFound("Meeting report not found");
+      }
+
+      return { deletedReportId: deleted.id };
+    });
   }
 
   async updateMeetingReportActionItem(
@@ -2962,6 +3035,7 @@ export class MeetingService {
 
   private async listWorkspaceMeetingReportRows(
     workspaceId: string,
+    currentUserId: string,
     status: MeetingReportStatus | null,
     limit: number,
     filters: {
@@ -2971,7 +3045,7 @@ export class MeetingService {
       to: string | null;
     }
   ): Promise<{ nextCursor: string | null; reports: MeetingReportRow[] }> {
-    const values: unknown[] = [workspaceId];
+    const values: unknown[] = [workspaceId, currentUserId];
     const statusCondition =
       status === null
         ? ""
@@ -3014,6 +3088,21 @@ export class MeetingService {
           meeting_reports.retry_count,
           meeting_reports.created_at,
           meeting_reports.updated_at,
+          (
+            EXISTS (
+              SELECT 1
+              FROM workspace_members
+              WHERE workspace_members.workspace_id = meetings.workspace_id
+                AND workspace_members.user_id = $2
+                AND workspace_members.role = 'owner'
+            )
+            OR EXISTS (
+              SELECT 1
+              FROM meeting_participants
+              WHERE meeting_participants.meeting_id = meeting_reports.meeting_id
+                AND meeting_participants.user_id = $2
+            )
+          ) AS can_delete,
           ${this.meetingReportParticipantSummaryColumns()}
         FROM meeting_reports
         JOIN meetings
@@ -3047,8 +3136,8 @@ export class MeetingService {
 
   private async findMeetingReportDetailById(
     workspaceId: string,
-    reportId: string,
-    currentUserId: string
+    currentUserId: string,
+    reportId: string
   ): Promise<MeetingReportDetailRow | null> {
     if (!UUID_PATTERN.test(reportId)) {
       return null;
@@ -3071,31 +3160,31 @@ export class MeetingService {
           meeting_reports.retry_count,
           meeting_reports.created_at,
           meeting_reports.updated_at,
+          (
+            EXISTS (
+              SELECT 1
+              FROM workspace_members
+              WHERE workspace_members.workspace_id = meetings.workspace_id
+                AND workspace_members.user_id = $2
+                AND workspace_members.role = 'owner'
+            )
+            OR EXISTS (
+              SELECT 1
+              FROM meeting_participants
+              WHERE meeting_participants.meeting_id = meeting_reports.meeting_id
+                AND meeting_participants.user_id = $2
+            )
+          ) AS can_delete,
           ${this.meetingReportParticipantSummaryColumns()}
         FROM meeting_reports
         JOIN meetings
           ON meetings.id = meeting_reports.meeting_id
         ${this.meetingReportParticipantSummaryJoin("meeting_reports")}
         WHERE meetings.workspace_id = $1
-          AND meeting_reports.id = $2
-          AND (
-            EXISTS (
-              SELECT 1
-              FROM workspace_members
-              WHERE workspace_members.workspace_id = meetings.workspace_id
-                AND workspace_members.user_id = $3::uuid
-                AND workspace_members.role = 'owner'
-            )
-            OR EXISTS (
-              SELECT 1
-              FROM meeting_participants
-              WHERE meeting_participants.meeting_id = meetings.id
-                AND meeting_participants.user_id = $3::uuid
-            )
-          )
+          AND meeting_reports.id = $3
         LIMIT 1
       `,
-      [workspaceId, reportId, currentUserId]
+      [workspaceId, currentUserId, reportId]
     );
   }
 
@@ -3753,6 +3842,9 @@ export class MeetingService {
       actionItemCandidates: this.toJsonArray(report.action_item_candidates),
       retryCount: Number(report.retry_count),
       participantSummary: this.mapMeetingReportParticipantSummary(report),
+      ...(typeof report.can_delete === "boolean"
+        ? { canDelete: report.can_delete }
+        : {}),
       createdAt: this.toIsoString(report.created_at),
       updatedAt: this.toIsoString(report.updated_at)
     };
@@ -4003,7 +4095,7 @@ export class MeetingService {
   }
 
   private mapMeetingReportDetail(report: MeetingReportDetailRow, evidence: {
-    transcriptSegments: MeetingReportDetailPayload["transcriptSegments"];
+    evidenceSegments: MeetingReportDetailPayload["evidenceSegments"];
     evidence: MeetingReportDetailPayload["evidence"];
     actionItems: MeetingReportActionItemPayload[];
     actionItemAssignees: MeetingReportActionItemAssigneePayload[];
@@ -4054,22 +4146,22 @@ export class MeetingService {
     }));
   }
 
-  private async listMeetingReportEvidence(reportId: string): Promise<{ transcriptSegments: MeetingReportDetailPayload["transcriptSegments"]; evidence: MeetingReportDetailPayload["evidence"] }> {
+  private async listMeetingReportEvidence(reportId: string): Promise<{ evidenceSegments: MeetingReportDetailPayload["evidenceSegments"]; evidence: MeetingReportDetailPayload["evidence"] }> {
     const rows = await this.database.query<{ id: string; segment_index: number; started_at_ms: number; ended_at_ms: number; text: string; source_type: string | null; source_index: number | null; transcript_segment_id: string | null }>(`
       SELECT segments.id, segments.segment_index, segments.started_at_ms, segments.ended_at_ms, segments.text,
         evidence.source_type, evidence.source_index, evidence.transcript_segment_id
-      FROM meeting_report_transcript_segments segments
-      LEFT JOIN meeting_report_evidence evidence ON evidence.transcript_segment_id = segments.id
-      WHERE segments.meeting_report_id = $1
+      FROM meeting_report_evidence evidence
+      JOIN meeting_report_transcript_segments segments ON segments.id = evidence.transcript_segment_id
+      WHERE evidence.meeting_report_id = $1
       ORDER BY segments.segment_index ASC, evidence.source_type ASC, evidence.source_index ASC
     `, [reportId]);
-    const segmentMap = new Map<string, MeetingReportDetailPayload["transcriptSegments"][number]>();
+    const segmentMap = new Map<string, MeetingReportDetailPayload["evidenceSegments"][number]>();
     const references: MeetingReportDetailPayload["evidence"] = [];
     for (const row of rows) {
       segmentMap.set(row.id, { id: row.id, segmentIndex: Number(row.segment_index), startedAtMs: Number(row.started_at_ms), endedAtMs: Number(row.ended_at_ms), text: row.text });
       if (row.source_type !== null && row.source_index !== null && row.transcript_segment_id !== null) references.push({ sourceType: row.source_type, sourceIndex: Number(row.source_index), transcriptSegmentId: row.transcript_segment_id });
     }
-    return { transcriptSegments: [...segmentMap.values()], evidence: references };
+    return { evidenceSegments: [...segmentMap.values()], evidence: references };
   }
 
   private normalizeMeetingReportStatus(

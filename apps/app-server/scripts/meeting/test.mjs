@@ -627,19 +627,17 @@ async function assertError(action, messagePattern) {
     new FakeDatabase({
       queryOneRows: [
         (text, values) => {
-          assert.match(text, /workspace_members\.role = 'owner'/);
-          assert.match(text, /meeting_participants\.user_id = \$3::uuid/);
-          assert.deepEqual(values, [workspaceId, reportId, otherUserId]);
-          return null;
+          assert.doesNotMatch(text, /meeting_participants\.user_id = \$3/);
+          assert.deepEqual(values, [workspaceId, otherUserId, reportId]);
+          return meetingReportRow({ transcript_text: "다른 멤버도 조회 가능" });
         }
       ]
     })
   );
 
-  await assertNotFound(
-    () => service.getReport(otherUserId, workspaceId, reportId),
-    /Meeting report not found/
-  );
+  const result = await service.getReport(otherUserId, workspaceId, reportId);
+
+  assert.equal(result.report.id, reportId);
 }
 
 {
@@ -2057,9 +2055,9 @@ async function assertError(action, messagePattern) {
           assert.match(text, /JOIN meetings/);
           assert.match(text, /meetings\.workspace_id = \$1/);
           assert.match(text, /ORDER BY meeting_reports\.created_at DESC/);
-          assert.match(text, /LIMIT \$2/);
+          assert.match(text, /LIMIT \$3/);
           assert.doesNotMatch(text, /transcript_text/);
-          assert.deepEqual(values, [workspaceId, 21]);
+          assert.deepEqual(values, [workspaceId, currentUserId, 21]);
           return [
             meetingReportRow({
               status: "FAILED",
@@ -2089,9 +2087,9 @@ async function assertError(action, messagePattern) {
     new FakeDatabase({
       queryRows: [
         (text, values) => {
-          assert.match(text, /meeting_reports\.status = \$2/);
-          assert.match(text, /LIMIT \$3/);
-          assert.deepEqual(values, [workspaceId, "FAILED", 101]);
+          assert.match(text, /meeting_reports\.status = \$3/);
+          assert.match(text, /LIMIT \$4/);
+          assert.deepEqual(values, [workspaceId, currentUserId, "FAILED", 101]);
           return [];
         }
       ]
@@ -2111,8 +2109,8 @@ async function assertError(action, messagePattern) {
     new FakeDatabase({
       queryRows: [
         (text, values) => {
-          assert.match(text, /LIMIT \$2/);
-          assert.deepEqual(values, [workspaceId, 21]);
+          assert.match(text, /LIMIT \$3/);
+          assert.deepEqual(values, [workspaceId, currentUserId, 21]);
           return [];
         }
       ]
@@ -2131,8 +2129,8 @@ async function assertError(action, messagePattern) {
     new FakeDatabase({
       queryRows: [
         (text, values) => {
-          assert.match(text, /LIMIT \$2/);
-          assert.deepEqual(values, [workspaceId, 101]);
+          assert.match(text, /LIMIT \$3/);
+          assert.deepEqual(values, [workspaceId, currentUserId, 101]);
           return [];
         }
       ]
@@ -2151,8 +2149,8 @@ async function assertError(action, messagePattern) {
     new FakeDatabase({
       queryRows: [
         (text, values) => {
-          assert.match(text, /LIMIT \$2/);
-          assert.deepEqual(values, [workspaceId, 21]);
+          assert.match(text, /LIMIT \$3/);
+          assert.deepEqual(values, [workspaceId, currentUserId, 21]);
           return [];
         }
       ]
@@ -2171,8 +2169,8 @@ async function assertError(action, messagePattern) {
     new FakeDatabase({
       queryRows: [
         (text, values) => {
-          assert.match(text, /LIMIT \$2/);
-          assert.deepEqual(values, [workspaceId, 21]);
+          assert.match(text, /LIMIT \$3/);
+          assert.deepEqual(values, [workspaceId, currentUserId, 21]);
           return [];
         }
       ]
@@ -2197,13 +2195,14 @@ async function assertError(action, messagePattern) {
       queryRows: [
         (text, values) => {
           assert.match(text, /to_tsvector\('simple'/);
-          assert.match(text, /websearch_to_tsquery\('simple', \$2\)/);
-          assert.match(text, /meeting_reports\.created_at >= \$3::timestamptz/);
-          assert.match(text, /meeting_reports\.created_at < \$4::timestamptz/);
-          assert.match(text, /meeting_reports\.id > \$6::uuid/);
-          assert.match(text, /LIMIT \$7/);
+          assert.match(text, /websearch_to_tsquery\('simple', \$3\)/);
+          assert.match(text, /meeting_reports\.created_at >= \$4::timestamptz/);
+          assert.match(text, /meeting_reports\.created_at < \$5::timestamptz/);
+          assert.match(text, /meeting_reports\.id > \$7::uuid/);
+          assert.match(text, /LIMIT \$8/);
           assert.deepEqual(values, [
             workspaceId,
+            currentUserId,
             "회의록 검색",
             "2026-07-01T00:00:00.000Z",
             "2026-08-01T00:00:00.000Z",
@@ -2301,12 +2300,10 @@ async function assertError(action, messagePattern) {
           assert.match(text, /FROM meeting_reports/);
           assert.match(text, /JOIN meetings/);
           assert.match(text, /meeting_reports\.transcript_text/);
-          assert.match(text, /meeting_reports\.id = \$2/);
-          assert.match(text, /workspace_members\.role = 'owner'/);
-          assert.match(text, /meeting_participants\.user_id = \$3::uuid/);
-          assert.deepEqual(values, [workspaceId, reportId, currentUserId]);
+          assert.match(text, /meeting_reports\.id = \$3/);
+          assert.deepEqual(values, [workspaceId, currentUserId, reportId]);
           return meetingReportRow({
-            transcript_text: "회의 원문",
+            transcript_text: "회의 원문 전체",
             action_item_candidates: JSON.stringify([{ title: "후속 작업" }])
           });
         }
@@ -2318,12 +2315,64 @@ async function assertError(action, messagePattern) {
 
   assert.deepEqual(workspaceService.calls, [{ userId: currentUserId, workspaceId }]);
   assert.equal(result.report.id, reportId);
-  assert.equal(result.report.transcriptText, "회의 원문");
-  assert.deepEqual(result.report.transcriptSegments, []);
+  assert.equal(result.report.transcriptText, "회의 원문 전체");
+  assert.deepEqual(result.report.evidenceSegments, []);
   assert.deepEqual(result.report.evidence, []);
   assert.deepEqual(result.report.actionItems, []);
   assert.deepEqual(result.report.actionItemAssignees, []);
   assert.deepEqual(result.report.actionItemCandidates, [{ title: "후속 작업" }]);
+}
+
+{
+  const { database, service } = createSubject(
+    new FakeDatabase({
+      queryOneRows: [
+        (text, values) => {
+          assert.match(text, /workspace_members\.role = 'owner'/);
+          assert.match(text, /FROM meeting_participants/);
+          assert.match(text, /FOR UPDATE OF meeting_reports/);
+          assert.deepEqual(values, [workspaceId, currentUserId, reportId]);
+          return { id: reportId, status: "COMPLETED", can_delete: true };
+        },
+        (text, values) => {
+          assert.match(text, /DELETE FROM meeting_reports/);
+          assert.deepEqual(values, [reportId]);
+          return { id: reportId };
+        }
+      ]
+    })
+  );
+
+  const result = await service.deleteReport(currentUserId, workspaceId, reportId);
+
+  assert.deepEqual(result, { deletedReportId: reportId });
+  assert.equal(database.transactionCommitted, true);
+}
+
+{
+  const { service } = createSubject(
+    new FakeDatabase({
+      queryOneRows: [{ id: reportId, status: "COMPLETED", can_delete: false }]
+    })
+  );
+
+  await assert.rejects(
+    () => service.deleteReport(currentUserId, workspaceId, reportId),
+    error => error.getStatus() === 403
+  );
+}
+
+{
+  const { service } = createSubject(
+    new FakeDatabase({
+      queryOneRows: [{ id: reportId, status: "SUMMARIZING", can_delete: true }]
+    })
+  );
+
+  await assertBadRequest(
+    () => service.deleteReport(currentUserId, workspaceId, reportId),
+    /still processing/
+  );
 }
 
 {

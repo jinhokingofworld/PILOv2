@@ -24,8 +24,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  useState,
-  useSyncExternalStore
+  useState
 } from "react";
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -87,59 +86,6 @@ const CURRENT_MEETING_RELOAD_FAILED_MESSAGE =
 
 function getInitial(name: string | null | undefined) {
   return (name?.trim().slice(0, 1) || "?").toUpperCase();
-}
-
-function getMeetingSectionFromHash(hash: string): MeetingSection {
-  return hash === "#report" ? "report" : "room";
-}
-
-function getMeetingSectionSnapshot(): MeetingSection {
-  if (typeof window === "undefined") {
-    return "room";
-  }
-
-  return getMeetingSectionFromHash(window.location.hash);
-}
-
-function getMeetingSectionServerSnapshot(): MeetingSection {
-  return "room";
-}
-
-function subscribeToMeetingSection(onStoreChange: () => void) {
-  const frameIds: number[] = [];
-  const timeoutIds: number[] = [];
-
-  function scheduleSectionSync(delayMs = 50) {
-    const timeoutId = window.setTimeout(() => {
-      const frameId = window.requestAnimationFrame(onStoreChange);
-      frameIds.push(frameId);
-    }, delayMs);
-
-    timeoutIds.push(timeoutId);
-  }
-
-  function syncSectionAfterNavigationClick() {
-    scheduleSectionSync(50);
-    scheduleSectionSync(150);
-    scheduleSectionSync(300);
-  }
-
-  function syncSectionAfterNavigationChange() {
-    scheduleSectionSync();
-  }
-
-  scheduleSectionSync();
-  window.addEventListener("click", syncSectionAfterNavigationClick, true);
-  window.addEventListener("hashchange", syncSectionAfterNavigationChange);
-  window.addEventListener("popstate", syncSectionAfterNavigationChange);
-
-  return () => {
-    timeoutIds.forEach((timeoutId) => window.clearTimeout(timeoutId));
-    frameIds.forEach((frameId) => window.cancelAnimationFrame(frameId));
-    window.removeEventListener("click", syncSectionAfterNavigationClick, true);
-    window.removeEventListener("hashchange", syncSectionAfterNavigationChange);
-    window.removeEventListener("popstate", syncSectionAfterNavigationChange);
-  };
 }
 
 function getParticipantName(participant: MeetingParticipant) {
@@ -316,7 +262,7 @@ function ToastMessage({
   );
 }
 
-export function MeetingPanel() {
+export function MeetingPanel({ section = "room" }: { section?: MeetingSection }) {
   const authSession = useAuthSession();
   const workspaceId = authSession?.activeWorkspaceId ?? "";
   const accessToken = authSession?.accessToken.trim() ?? "";
@@ -328,11 +274,7 @@ export function MeetingPanel() {
     () => createMeetingApiClient({ accessToken }),
     [accessToken]
   );
-  const activeSection = useSyncExternalStore(
-    subscribeToMeetingSection,
-    getMeetingSectionSnapshot,
-    getMeetingSectionServerSnapshot
-  );
+  const activeSection = section;
   const [reportStatusFilter, setReportStatusFilter] =
     useState<MeetingReportStatusFilter>("ALL");
   const [reportSearchQuery, setReportSearchQuery] = useState("");
@@ -430,6 +372,18 @@ export function MeetingPanel() {
   const [editingMeetingRoomName, setEditingMeetingRoomName] = useState("");
   const [restoredMeetingRoomId, setRestoredMeetingRoomId] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (section !== "room" || typeof window === "undefined") return;
+
+    if (window.location.hash === "#report") {
+      window.location.replace("/report");
+      return;
+    }
+    if (window.location.hash === "#room") {
+      window.history.replaceState(null, "", "/meeting");
+    }
+  }, [section]);
 
   const activeParticipants = useMemo(
     () => participants.filter((participant) => participant.isActive),

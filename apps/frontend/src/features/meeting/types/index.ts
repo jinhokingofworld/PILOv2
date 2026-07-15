@@ -90,13 +90,14 @@ export type MeetingReportSummary = {
     participants: Array<{ userId: string; name: string | null; avatarUrl: string | null }>;
     hasMore: boolean;
   };
+  canDelete?: boolean;
   createdAt: string;
   updatedAt: string;
 };
 
 export type MeetingReportDetail = MeetingReportSummary & {
   transcriptText: string | null;
-  transcriptSegments?: Array<{ id: string; segmentIndex: number; startedAtMs: number; endedAtMs: number; text: string }>;
+  evidenceSegments?: Array<{ id: string; segmentIndex: number; startedAtMs: number; endedAtMs: number; text: string }>;
   evidence?: Array<{ sourceType: string; sourceIndex: number; transcriptSegmentId: string }>;
   actionItems?: MeetingReportActionItem[];
   actionItemAssignees?: MeetingReportActionItemAssignee[];
@@ -249,6 +250,10 @@ export type MeetingReportDetailPayload = {
 
 export type MeetingReportRegenerationPayload = {
   report: MeetingReportSummary;
+};
+
+export type MeetingReportDeletionPayload = {
+  deletedReportId: string;
 };
 
 export type MeetingReportActionItemMutationPayload = {
