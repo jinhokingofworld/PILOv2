@@ -9,7 +9,8 @@
     "start": "node scripts/serve-out.mjs",
     "format:check": "node scripts/check-format.mjs",
     "lint": "tsc --noEmit",
-    "test": "node scripts/test.mjs"
+    "test": "node scripts/test.mjs && npm run test:workspace-presence",
+    "test:workspace-presence": "node src/shared/workspace-presence/workspace-presence-reducer.test.mjs && node src/shared/workspace-presence/workspace-location-registry.test.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
