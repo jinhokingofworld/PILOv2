@@ -1101,16 +1101,16 @@
 
 .pilo-code-block-shape.is-collapsed .pilo-code-block {
   grid-template-rows: 34px 38px;
-  border-color: #020617;
-  background: #020617;
+  border-color: #d8e0ec;
+  background: #ffffff;
   box-shadow:
-    0 1px 2px rgba(2, 6, 23, 0.5),
-    0 14px 34px rgba(2, 6, 23, 0.28);
+    0 1px 2px rgba(15, 23, 42, 0.1),
+    0 14px 34px rgba(15, 23, 42, 0.14);
 }
 
 .pilo-code-block-shape.is-collapsed .pilo-code-block header {
-  border-bottom-color: rgba(255, 255, 255, 0.08);
-  background: #050505;
+  border-bottom-color: rgba(148, 163, 184, 0.22);
+  background: #f8fafc;
   gap: 5px;
   padding: 5px 7px;
 }
@@ -1118,14 +1118,14 @@
 .pilo-code-block-shape.is-collapsed .pilo-code-block header strong {
   flex: 1;
   min-width: 0;
-  color: #ffffff;
+  color: #0f172a;
   font-size: 11px;
 }
 
 .pilo-code-block-shape.is-collapsed .pilo-code-block header small {
   display: none;
-  background: rgba(255, 255, 255, 0.1);
-  color: #f8fafc;
+  background: rgba(79, 70, 229, 0.08);
+  color: #4338ca;
 }
 
 .pilo-code-block-shape.is-collapsed .pilo-code-dot {
@@ -1154,13 +1154,13 @@
   height: 100%;
   grid-template-rows: 42px 1fr;
   overflow: hidden;
-  border: 1px solid #252a36;
+  border: 1px solid #d8e0ec;
   border-radius: 10px;
-  background: #0f1422;
+  background: #ffffff;
   box-shadow:
-    0 1px 2px rgba(15, 23, 42, 0.18),
-    0 18px 42px rgba(15, 23, 42, 0.24);
-  color: #dbe3f4;
+    0 1px 2px rgba(15, 23, 42, 0.08),
+    0 18px 42px rgba(15, 23, 42, 0.14);
+  color: #1e293b;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
@@ -1169,8 +1169,8 @@
   min-width: 0;
   align-items: center;
   gap: 8px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  background: #171d2b;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.22);
+  background: #f8fafc;
   padding: 0 12px;
 }
 
@@ -1196,7 +1196,7 @@
 .pilo-code-block header strong {
   overflow: hidden;
   min-width: 0;
-  color: #f8fafc;
+  color: #0f172a;
   font-size: 12px;
   font-weight: 850;
   text-overflow: ellipsis;
@@ -1205,8 +1205,8 @@
 
 .pilo-code-block header small {
   border-radius: 4px;
-  background: rgba(109, 91, 214, 0.3);
-  color: #d8d3ff;
+  background: rgba(79, 70, 229, 0.08);
+  color: #4338ca;
   font-size: 10px;
   font-weight: 850;
   padding: 3px 6px;
@@ -1232,8 +1232,8 @@
   flex: 0 0 auto;
   border: 1px solid rgba(94, 234, 212, 0.32);
   border-radius: 999px;
-  background: rgba(13, 148, 136, 0.22);
-  color: #ccfbf1;
+  background: rgba(20, 184, 166, 0.12);
+  color: #0f766e;
   font-size: 10px;
   font-weight: 850;
   line-height: 1;
@@ -1248,8 +1248,8 @@
   flex: 0 0 auto;
   border: 1px solid rgba(251, 191, 36, 0.44);
   border-radius: 999px;
-  background: rgba(180, 83, 9, 0.32);
-  color: #fef3c7;
+  background: rgba(251, 146, 60, 0.14);
+  color: #c2410c;
   font-size: 10px;
   font-weight: 850;
   line-height: 1;
@@ -1260,10 +1260,10 @@
 
 .pilo-code-copy-button {
   margin-left: auto;
-  border: 1px solid rgba(148, 163, 184, 0.18);
+  border: 1px solid rgba(148, 163, 184, 0.32);
   border-radius: 5px;
-  background: rgba(15, 23, 42, 0.55);
-  color: #cbd5e1;
+  background: #ffffff;
+  color: #475569;
   cursor: pointer;
   font: inherit;
   font-size: 10px;
@@ -1274,10 +1274,10 @@
 
 .pilo-code-collapse-button {
   margin-left: auto;
-  border: 1px solid rgba(148, 163, 184, 0.18);
+  border: 1px solid rgba(148, 163, 184, 0.32);
   border-radius: 5px;
-  background: rgba(15, 23, 42, 0.55);
-  color: #cbd5e1;
+  background: #ffffff;
+  color: #475569;
   cursor: pointer;
   font: inherit;
   font-size: 10px;
@@ -1291,25 +1291,25 @@
 }
 
 .pilo-code-copy-button:hover {
-  background: rgba(59, 130, 246, 0.18);
-  color: #eff6ff;
+  background: #eff6ff;
+  color: #1d4ed8;
 }
 
 .pilo-code-collapse-button:hover {
-  background: rgba(20, 184, 166, 0.16);
-  color: #ecfeff;
+  background: #ecfeff;
+  color: #0f766e;
 }
 
 .pilo-code-block-shape.is-collapsed .pilo-code-collapse-button {
-  border-color: rgba(255, 255, 255, 0.22);
+  border-color: rgba(148, 163, 184, 0.32);
   background: #ffffff;
-  color: #020617;
+  color: #334155;
   padding: 5px 7px;
 }
 
 .pilo-code-block-shape.is-collapsed .pilo-code-collapse-button:hover {
-  background: #e2e8f0;
-  color: #020617;
+  background: #eff6ff;
+  color: #1d4ed8;
 }
 
 .pilo-code-block-shape.is-collapsed .pilo-code-copy-button {
@@ -1320,10 +1320,10 @@
 .pilo-code-block select {
   min-width: 0;
   height: 26px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(148, 163, 184, 0.34);
   border-radius: 5px;
-  background: #101624;
-  color: #f8fafc;
+  background: #ffffff;
+  color: #0f172a;
   font: inherit;
   font-size: 11px;
   outline: 0;
@@ -1345,10 +1345,10 @@
   margin: 0;
   border: 0;
   background:
-    linear-gradient(rgba(255, 255, 255, 0.025) 50%, transparent 0) 0 0 / 100%
+    linear-gradient(rgba(15, 23, 42, 0.025) 50%, transparent 0) 0 0 / 100%
       48px,
-    #0f1422;
-  color: #c8d3f5;
+    #ffffff;
+  color: #1e293b;
   font: inherit;
   font-size: 12px;
   line-height: 1.6;
@@ -1379,8 +1379,8 @@
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  background: #050505;
-  color: #e5e7eb;
+  background: #ffffff;
+  color: #1e293b;
   padding: 14px 16px;
 }
 
@@ -1392,7 +1392,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  color: #93a4bd;
+  color: #64748b;
   font-family:
     Pretendard,
     Inter,
@@ -1413,9 +1413,9 @@
 }
 
 .pilo-code-preview span {
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(148, 163, 184, 0.28);
   border-radius: 5px;
-  background: rgba(255, 255, 255, 0.06);
+  background: #f8fafc;
   padding: 5px 7px;
 }
 
@@ -1432,7 +1432,7 @@
   display: -webkit-box;
   max-height: calc(100% - 32px);
   overflow: hidden;
-  color: #f8fafc;
+  color: #1e293b;
   font: inherit;
   font-size: 12px;
   line-height: 1.55;
@@ -1445,7 +1445,7 @@
 
 .pilo-code-block-shape.is-collapsed .pilo-code-preview pre {
   overflow: hidden;
-  color: #cbd5e1;
+  color: #475569;
   font-size: 10px;
   line-height: 1.2;
   text-overflow: ellipsis;

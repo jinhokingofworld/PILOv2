@@ -85,7 +85,7 @@ const piloCodeMirrorTheme = EditorView.theme(
     "&": {
       height: "100%",
       backgroundColor: "transparent",
-      color: "#c8d3f5",
+      color: "#1e293b",
       fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
       fontSize: "12px",
     },
@@ -100,15 +100,15 @@ const piloCodeMirrorTheme = EditorView.theme(
     ".cm-content": {
       minHeight: "100%",
       padding: "14px 16px 14px 0",
-      caretColor: "#e2e8f0",
+      caretColor: "#2563eb",
     },
     ".cm-line": {
       padding: "0 0 0 12px",
     },
     ".cm-gutters": {
-      borderRight: "1px solid rgba(148, 163, 184, 0.12)",
+      borderRight: "1px solid rgba(148, 163, 184, 0.22)",
       backgroundColor: "transparent",
-      color: "#526072",
+      color: "#94a3b8",
     },
     ".cm-lineNumbers .cm-gutterElement": {
       minWidth: "42px",
@@ -116,20 +116,20 @@ const piloCodeMirrorTheme = EditorView.theme(
       textAlign: "right",
     },
     ".cm-activeLine": {
-      backgroundColor: "rgba(96, 165, 250, 0.08)",
+      backgroundColor: "rgba(59, 130, 246, 0.08)",
     },
     ".cm-activeLineGutter": {
-      backgroundColor: "rgba(96, 165, 250, 0.08)",
-      color: "#94a3b8",
+      backgroundColor: "rgba(59, 130, 246, 0.08)",
+      color: "#475569",
     },
     ".cm-selectionBackground": {
-      backgroundColor: "rgba(96, 165, 250, 0.35) !important",
+      backgroundColor: "rgba(59, 130, 246, 0.22) !important",
     },
     ".cm-focused": {
       outline: "none",
     },
   },
-  { dark: true },
+  { dark: false },
 );
 
 function getScrollTopForAnchor(
