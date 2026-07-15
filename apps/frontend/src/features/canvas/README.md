@@ -65,6 +65,40 @@ Canvas AI의 가상 포인터, 도형 강조, 초안 preview는 현재 사용자
 도메인은 필요한 경우 이 surface만 가져가고, 자기 도메인 payload와 source of
 truth를 유지해야 한다.
 
+## tldraw_sync Canvas 연결 계약
+
+`engineType === "tldraw_sync"`인 Canvas는 기존 `PiloCanvasRuntime`의
+shape batch/operation log 경로로 들어가지 않고 `PiloTldrawSyncRuntime`으로
+분기한다.
+
+현재 구현은 `NEXT_PUBLIC_PILO_REALTIME_SERVER_URL`과 bearer session token이 있으면
+`@tldraw/sync`로 realtime-server의 sync room에 접속한다. realtime-server를 사용할 수
+없는 local UI Preview/mock session에서는 `canvas_sync_documents` snapshot 저장/복원
+fallback을 사용한다. frontend는 아래 값을 기준으로 realtime-server room에 접속한다.
+
+```text
+workspaceId = board.workspaceId
+canvasId = board.id
+roomKey = workspace:{workspaceId}:canvas:{canvasId}:tldraw-sync
+auth = bearer session token
+```
+
+규칙:
+
+- frontend는 client에서 임의 room key를 만들 수 있지만, server에는
+  `workspaceId`, `canvasId`, bearer token만 전달한다. 최종 room key는
+  realtime-server가 검증 후 생성한다.
+- `canvasId`는 `engineType === "tldraw_sync"`인 `freeform` Canvas여야 한다.
+- `classic` Canvas의 `canvas_freeform_shapes`, `shapes/batch`, `operations`
+  API를 tldraw sync document 저장에 사용하지 않는다.
+- sync document의 최초 복원 기준은 realtime-server가 DB의
+  `canvas_sync_documents.snapshot`에서 읽은 room snapshot이다. fallback runtime만
+  `GET /workspaces/{workspaceId}/canvases/{canvasId}/sync-document`를 직접 사용한다.
+- 새로고침/room 재생성 복구 기준은 realtime-server가 같은 persistence 경계에 저장한
+  `canvas_sync_documents` snapshot이어야 한다.
+- 로컬 UI Preview나 mock session은 realtime-server의 bearer session 검증을
+  통과하지 않으므로 실제 multiplayer sync room에 접속하지 않는다.
+
 ## 다른 도메인과의 경계
 
 다른 도메인이 PILO freeform Canvas 전체를 import해서 재사용하면 안 된다.

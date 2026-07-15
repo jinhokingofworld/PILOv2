@@ -396,7 +396,11 @@ assert.match(canvasService, /CANVAS_SHAPE_CLEANUP_INTERVAL_MS = 10 \* 60 \* 1000
 assert.match(canvasService, /canvasShapeCleanupInterval/);
 assert.match(canvasService, /cleanupDeletedFreeformShapes/);
 assert.match(canvasService, /FROM canvas c/);
-assert.match(canvasService, /INSERT INTO canvas \(workspace_id, title, board_type, created_by\)/);
+assert.match(canvasService, /validateCanvasEngineType\(input\.engineType\)/);
+assert.match(canvasService, /INSERT INTO canvas \(\s*workspace_id,\s*title,\s*board_type,\s*engine_type,\s*engine_version,\s*created_by\s*\)/);
+assert.match(canvasService, /validateCanvasEngineConversion\(input\)/);
+assert.match(canvasService, /INSERT INTO canvas \(\s*workspace_id,\s*title,\s*board_type,\s*engine_type,\s*engine_version,\s*source_canvas_id,\s*created_by\s*\)/);
+assert.match(canvasService, /canvas_sync_documents/);
 assert.match(canvasService, /UPDATE canvas/);
 assert.match(canvasService, /viewport_x =/);
 assert.match(canvasService, /INSERT INTO canvas_freeform_shapes/);

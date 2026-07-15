@@ -1,11 +1,21 @@
 import { createServer } from "node:http";
 import { WebSocketServer } from "ws";
 
+import { createCanvasTldrawSyncRoomService } from "./canvas/canvas-tldraw-sync-room.service";
 import { loadRealtimeServerConfig } from "./config/realtime-config";
+import { createRealtimeDatabase } from "./database/database";
 import { createRealtimeSocketServer } from "./socket/socket-server";
 
 async function bootstrap() {
   const config = loadRealtimeServerConfig();
+  const database = createRealtimeDatabase({
+    databaseApplicationName: config.databaseApplicationName,
+    databasePoolConnectionTimeoutMs: config.databasePoolConnectionTimeoutMs,
+    databasePoolIdleTimeoutMs: config.databasePoolIdleTimeoutMs,
+    databasePoolMax: config.databasePoolMax,
+    databaseSsl: config.databaseSsl,
+    databaseUrl: config.databaseUrl,
+  });
   const server = createServer((request, response) => {
     const url = new URL(
       request.url ?? "/",
@@ -21,6 +31,13 @@ async function bootstrap() {
           service: "pilo-realtime-server",
           status: "ok",
           scope: config.scope,
+          sync: {
+            canvas: {
+              endpoint: "/sync/canvas",
+              engine: "tldraw_sync",
+              ...tldrawSyncRoomService.getStats(),
+            },
+          },
         }),
       );
       return;
@@ -34,7 +51,11 @@ async function bootstrap() {
 
   const socketServer = await createRealtimeSocketServer({
     config,
+    database,
     httpServer: server,
+  });
+  const tldrawSyncRoomService = createCanvasTldrawSyncRoomService({
+    database,
   });
   const websocketServer = new WebSocketServer({ noServer: true });
 
@@ -63,7 +84,22 @@ async function bootstrap() {
     });
   });
 
-  websocketServer.on("connection", (websocket) => {
+  websocketServer.on("connection", (websocket, request) => {
+    const url = new URL(
+      request.url ?? "/",
+      `http://${request.headers.host ?? "localhost"}`,
+    );
+
+    if (url.pathname === "/sync/canvas") {
+      void tldrawSyncRoomService
+        .handleConnection(websocket, request)
+        .catch((error) => {
+          console.error("Canvas tldraw sync connection failed", error);
+          websocket.close(1011, "INTERNAL_ERROR");
+        });
+      return;
+    }
+
     websocket.send(
       JSON.stringify({
         type: "ready",
@@ -88,9 +124,12 @@ async function bootstrap() {
   });
 
   function shutdown() {
-    void socketServer.close().finally(() => {
-      server.close(() => process.exit(0));
-    });
+    void tldrawSyncRoomService
+      .close()
+      .finally(() => socketServer.close())
+      .finally(() => {
+        server.close(() => process.exit(0));
+      });
   }
 
   process.on("SIGINT", shutdown);

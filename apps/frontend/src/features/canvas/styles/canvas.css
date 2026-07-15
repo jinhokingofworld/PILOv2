@@ -224,6 +224,40 @@
   border-radius: 8px;
 }
 
+.canvas-realtime-version-hint {
+  max-width: 176px;
+  border-top: 1px solid #eef2f7;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 750;
+  line-height: 1.45;
+  padding: 8px 4px 2px;
+  text-align: center;
+}
+
+.canvas-realtime-version-dialog {
+  display: grid;
+  gap: 12px;
+  color: #475569;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.canvas-realtime-version-dialog code {
+  border-radius: 6px;
+  background: #eef2ff;
+  color: #3730a3;
+  font-size: 12px;
+  padding: 2px 6px;
+}
+
+.canvas-realtime-version-dialog ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 18px;
+}
+
 .canvas-color-swatch {
   display: block;
   width: 22px;
@@ -325,6 +359,39 @@
 .pilo-tldraw-canvas {
   position: absolute;
   inset: 0;
+}
+
+.pilo-tldraw-sync-runtime {
+  position: absolute;
+  inset: 0;
+}
+
+.pilo-tldraw-sync-runtime__notice {
+  position: absolute;
+  left: 50%;
+  top: 32px;
+  z-index: 20;
+  display: grid;
+  max-width: 360px;
+  transform: translateX(-50%);
+  gap: 6px;
+  border: 1px solid rgba(14, 165, 233, 0.2);
+  border-radius: 18px;
+  background: rgba(240, 253, 250, 0.96);
+  box-shadow: 0 18px 50px rgba(15, 23, 42, 0.14);
+  color: #334155;
+  padding: 14px 16px;
+  text-align: center;
+}
+
+.pilo-tldraw-sync-runtime__notice strong {
+  color: #0f172a;
+  font-size: 14px;
+}
+
+.pilo-tldraw-sync-runtime__notice span {
+  font-size: 12px;
+  line-height: 1.55;
 }
 
 .is-pilo-eraser-active .pilo-tldraw-canvas,
