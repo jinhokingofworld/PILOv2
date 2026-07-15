@@ -224,6 +224,33 @@ interface ReviewFlowRelationRow extends QueryResultRow {
   reason: string;
 }
 
+interface ReviewCanvasMaterializationFileRow extends QueryResultRow {
+  review_file_id: string;
+  room_file_id: string;
+  review_flow_file_id: string | null;
+  flow_id: string | null;
+  flow_sort_order: number | string | null;
+  workflow_order: number | string | null;
+  file_name: string;
+  file_path: string;
+  file_status: PrReviewFileStatus;
+  file_role: string | null;
+  risk_level: PrReviewFileRiskLevel;
+  current_status: PrReviewFileReviewStatus;
+}
+
+interface ReviewCanvasMaterializationRelationRow extends QueryResultRow {
+  from_review_file_id: string;
+  to_review_file_id: string;
+  from_room_file_id: string;
+  to_room_file_id: string;
+  flow_id: string;
+  relation_type: PrReviewRelationType;
+  source: PrReviewRelationSource;
+  confidence: number | string;
+  reason: string;
+}
+
 interface ReviewFileRow extends QueryResultRow {
   id: string;
   room_file_id: string;
@@ -1081,6 +1108,7 @@ export class PrReviewService {
       detail.headSha
     );
     if (reusable) {
+      await this.activateReusableReviewSession(workspaceId, reusable);
       return {
         session: this.mapSession(reusable),
         created: false,
@@ -1166,6 +1194,10 @@ export class PrReviewService {
         ));
       if (!reused) {
         throw error;
+      }
+
+      if (reused.status !== "analyzing") {
+        await this.activateReusableReviewSession(workspaceId, reused);
       }
 
       return {
@@ -3499,6 +3531,141 @@ export class PrReviewService {
       return null;
     }
     return this.findReviewSession(workspaceId, reusable.id);
+  }
+
+  private async activateReusableReviewSession(
+    workspaceId: string,
+    session: PrReviewSessionRow
+  ): Promise<void> {
+    await this.database.transaction(async (transaction) => {
+      const room = await transaction.queryOne<{ id: string }>(
+        `
+          UPDATE pr_review_rooms
+          SET current_session_id = $2,
+              updated_at = NOW()
+          WHERE id = $1
+            AND workspace_id = $3
+            AND status = 'active'
+          RETURNING id
+        `,
+        [session.room_id, session.id, workspaceId]
+      );
+      if (!room) {
+        throw conflictError("PR Review room is no longer active");
+      }
+
+      const [files, relations] = await Promise.all([
+        transaction.query<ReviewCanvasMaterializationFileRow>(
+          `
+            SELECT
+              review_file.id AS review_file_id,
+              review_file.room_file_id,
+              membership.id AS review_flow_file_id,
+              membership.flow_id,
+              membership.flow_sort_order,
+              membership.workflow_order,
+              review_file.file_name,
+              review_file.file_path,
+              review_file.file_status,
+              review_file.file_role,
+              review_file.risk_level,
+              review_file.current_status
+            FROM review_files AS review_file
+            LEFT JOIN LATERAL (
+              SELECT
+                flow_file.id,
+                flow_file.flow_id,
+                flow.sort_order AS flow_sort_order,
+                flow_file.workflow_order
+              FROM review_flow_files AS flow_file
+              JOIN review_flows AS flow
+                ON flow.id = flow_file.flow_id
+               AND flow.session_id = flow_file.session_id
+              WHERE flow_file.session_id = review_file.session_id
+                AND flow_file.review_file_id = review_file.id
+              ORDER BY flow.sort_order ASC, flow_file.workflow_order ASC, flow_file.id ASC
+              LIMIT 1
+            ) AS membership ON true
+            WHERE review_file.session_id = $1
+              AND review_file.room_id = $2
+            ORDER BY
+              membership.flow_sort_order ASC NULLS LAST,
+              membership.workflow_order ASC NULLS LAST,
+              review_file.file_path ASC
+          `,
+          [session.id, session.room_id]
+        ),
+        transaction.query<ReviewCanvasMaterializationRelationRow>(
+          `
+            SELECT
+              from_review_file.id AS from_review_file_id,
+              to_review_file.id AS to_review_file_id,
+              from_review_file.room_file_id AS from_room_file_id,
+              to_review_file.room_file_id AS to_room_file_id,
+              relation.flow_id,
+              relation.relation_type,
+              relation.source,
+              relation.confidence,
+              relation.reason
+            FROM review_flow_relations AS relation
+            JOIN review_flow_files AS from_flow_file
+              ON from_flow_file.id = relation.from_review_flow_file_id
+             AND from_flow_file.session_id = relation.session_id
+            JOIN review_flow_files AS to_flow_file
+              ON to_flow_file.id = relation.to_review_flow_file_id
+             AND to_flow_file.session_id = relation.session_id
+            JOIN review_files AS from_review_file
+              ON from_review_file.id = from_flow_file.review_file_id
+             AND from_review_file.session_id = relation.session_id
+            JOIN review_files AS to_review_file
+              ON to_review_file.id = to_flow_file.review_file_id
+             AND to_review_file.session_id = relation.session_id
+            WHERE relation.session_id = $1
+              AND from_review_file.room_id = $2
+              AND to_review_file.room_id = $2
+            ORDER BY relation.flow_id ASC, relation.confidence DESC, relation.id ASC
+          `,
+          [session.id, session.room_id]
+        )
+      ]);
+
+      await this.materializeReviewCanvas(
+        transaction,
+        session.room_id,
+        session.id,
+        files.map((file, index) => ({
+          reviewFileId: file.review_file_id,
+          roomFileId: file.room_file_id,
+          reviewFlowFileId: file.review_flow_file_id,
+          flowId: file.flow_id,
+          flowSortOrder:
+            file.flow_sort_order === null
+              ? files.length + 1
+              : Number(file.flow_sort_order),
+          workflowOrder:
+            file.workflow_order === null
+              ? index + 1
+              : Number(file.workflow_order),
+          fileName: file.file_name,
+          filePath: file.file_path,
+          fileStatus: file.file_status,
+          roleSummary: file.file_role,
+          riskLevel: file.risk_level,
+          reviewStatus: file.current_status
+        })),
+        relations.map((relation) => ({
+          fromReviewFileId: relation.from_review_file_id,
+          toReviewFileId: relation.to_review_file_id,
+          fromRoomFileId: relation.from_room_file_id,
+          toRoomFileId: relation.to_room_file_id,
+          flowId: relation.flow_id,
+          relationType: relation.relation_type,
+          source: relation.source,
+          confidence: Number(relation.confidence),
+          reason: relation.reason
+        }))
+      );
+    });
   }
 
   private isUniqueConstraintViolation(error: unknown): boolean {
