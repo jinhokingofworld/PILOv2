@@ -169,9 +169,7 @@ export function registerWorkspacePresenceSocketHandlers({
       if (generationByWorkspace.get(room.workspaceId) !== generation) return;
       const result = service.leaveSocket(socket.id, room.workspaceId);
       await socket.leave(createWorkspacePresenceRoomName(room.workspaceId));
-      if (result && generationByWorkspace.get(room.workspaceId) === generation) {
-        emitClearResult(io, result);
-      }
+      if (result) emitClearResult(io, result);
     });
   });
 
