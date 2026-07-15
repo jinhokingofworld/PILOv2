@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   AlertCircle,
   ArrowLeft,
@@ -47,6 +47,7 @@ import { PrReviewRoomsPanel } from "@/features/pr-review/components/pr-review-ro
 import { PrReviewCanvasErrorBoundary } from "@/features/pr-review/components/review-canvas/PrReviewCanvasErrorBoundary";
 import { PrReviewCanvasShell } from "@/features/pr-review/components/review-canvas/PrReviewCanvasShell";
 import { getPrReviewErrorMessage } from "@/features/pr-review/pr-review-error-message";
+import { PrReviewDocumentWorkspaceLocationAdapter } from "@/features/pr-review/pr-review-workspace-location-adapter";
 import type {
   PrReviewPaginationMeta,
   PrReviewPullRequest,
@@ -183,6 +184,9 @@ export function PrReviewPanel({
   view?: "pull-requests" | "rooms";
 }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const routeReviewSessionId =
+    searchParams.get("reviewSessionId")?.trim() || null;
   const authSession = useAuthSession();
   const workspaceId = authSession?.activeWorkspaceId ?? "";
   const accessToken = authSession?.accessToken ?? null;
@@ -280,6 +284,10 @@ export function PrReviewPanel({
       : `${detailDescription.slice(0, 360).trimEnd()}...`;
   const backToSelectionLabel =
     view === "rooms" ? "리뷰 공간으로" : "PR 선택으로";
+
+  useEffect(() => {
+    setRequestedReviewSessionId(routeReviewSessionId);
+  }, [routeReviewSessionId]);
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -741,6 +749,9 @@ export function PrReviewPanel({
 
   return (
     <>
+      {!activeReviewSession && !requestedReviewSessionId && !routeReviewSessionId ? (
+        <PrReviewDocumentWorkspaceLocationAdapter />
+      ) : null}
       {activeReviewSession?.status === "analyzing" ||
       activeReviewSession?.status === "failed" ? (
         <PrReviewAnalysisStatus

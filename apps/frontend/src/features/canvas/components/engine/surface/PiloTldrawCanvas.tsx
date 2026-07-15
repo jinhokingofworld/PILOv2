@@ -22,6 +22,7 @@ import {
 } from "tldraw";
 import { useValue } from "@tldraw/state-react";
 import { useCanvasAgent } from "@/features/canvas/agent/use-canvas-agent";
+import { CanvasWorkspaceLocationAdapter } from "@/features/canvas/canvas-workspace-location-adapter";
 import { TldrawSurface } from "@/shared/tldraw";
 import type { CanvasPresenceController } from "@/features/canvas/realtime/useCanvasPresence";
 import { RemoteCursorOverlay } from "@/shared/canvas-realtime/RemoteCursorOverlay";
@@ -2611,6 +2612,7 @@ export function PiloTldrawCanvas({
           components={tldrawComponents}
           onMount={mountEditor}
         >
+          <CanvasWorkspaceLocationAdapter canvasId={board.id} />
           <CanvasLocalInteractionReporter
             onChange={handleLocalInteractionChange}
           />

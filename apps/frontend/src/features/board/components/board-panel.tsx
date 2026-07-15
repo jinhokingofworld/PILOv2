@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import { BoardIssueCreateDialog } from "@/features/board/components/board-issue-create-dialog";
 import { BoardIssueSheet } from "@/features/board/components/board-issue-sheet";
 import { BoardKanban } from "@/features/board/components/board-kanban";
+import { BoardWorkspaceLocationAdapter } from "@/features/board/board-workspace-location-adapter";
 import { useBoardWorkspaceData } from "@/features/board/hooks/use-board-workspace-data";
 import { useBoardRealtime } from "@/features/board/realtime/use-board-realtime";
 import type {
@@ -194,6 +195,7 @@ export function BoardPanel() {
       page="board"
       workspaceId={workspaceId}
     >
+      <BoardWorkspaceLocationAdapter boardId={selectedBoardId} />
       <section className="board-toolbar flex min-h-[74px] items-center justify-end border-b border-slate-200 bg-white/90 px-7 py-5 backdrop-blur">
         <div className="board-controls flex w-full min-w-0 flex-wrap items-center justify-end gap-2">
           <label className="relative w-[min(100%,260px)] min-w-48">

@@ -148,6 +148,7 @@ import {
 } from "@/features/sql-erd/utils/canvas-selection";
 import { cn } from "@/lib/utils";
 import { TldrawSurface } from "@/shared/tldraw/TldrawSurface";
+import { SqlErdWorkspaceLocationAdapter } from "@/features/sql-erd/sql-erd-workspace-location-adapter";
 
 type SqlErdCanvasProps = {
   className?: string;
@@ -3114,6 +3115,9 @@ export function SqlErdCanvas({
         onPointerDownCapture={handlePointerDownCapture}
         shapeUtils={sqlErdShapeUtils}
       >
+        {sessionId ? (
+          <SqlErdWorkspaceLocationAdapter sessionId={sessionId} />
+        ) : null}
         <SqlErdCanvasReadOnlyBridge isReadOnly={isReadOnly} />
         <SqlErdCanvasShapeSync
           canvasContentKey={canvasContentKey}

@@ -15,6 +15,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type FormEvent
 } from "react";
@@ -31,6 +32,7 @@ import {
 } from "@/components/ui/sheet";
 import { useAuthSession } from "@/features/auth";
 import { createCalendarApiClient } from "@/features/calendar/api/client";
+import { CalendarWorkspaceLocationAdapter } from "@/features/calendar/calendar-workspace-location-adapter";
 import {
   formatCalendarDate,
   useCalendarMonthEvents
@@ -1021,6 +1023,7 @@ function CalendarEventsDialog({
 
 export function CalendarPanel() {
   const authSession = useAuthSession();
+  const calendarGridRef = useRef<HTMLDivElement | null>(null);
   const [monthDate, setMonthDate] = useState(() =>
     startOfCalendarMonth(new Date())
   );
@@ -1064,6 +1067,13 @@ export function CalendarPanel() {
   const needsSignIn = !normalizedAccessToken;
   const isLoading = calendarEvents.status === "loading";
   const canUseCalendar = Boolean(workspaceId.trim() && normalizedAccessToken);
+  const handleWorkspaceLocationDate = useCallback((date: string | null) => {
+    if (!date) {
+      return;
+    }
+    setMonthDate(startOfCalendarMonth(parseCalendarDateInput(date)));
+    setSelectedDate(date);
+  }, []);
 
   useEffect(() => {
     const draftFormState = readCalendarDraftFormState(
@@ -1320,6 +1330,11 @@ export function CalendarPanel() {
       page="calendar"
       workspaceId={workspaceId}
     >
+      <CalendarWorkspaceLocationAdapter
+        gridRef={calendarGridRef}
+        onSelectDate={handleWorkspaceLocationDate}
+        selectedDate={selectedDate}
+      />
       <section id="month" className="flex min-h-0 flex-1 flex-col gap-4">
         <div className="grid gap-3 lg:grid-cols-[1fr_auto_1fr] lg:items-center">
           <div className="flex items-center gap-2">
@@ -1408,7 +1423,7 @@ export function CalendarPanel() {
           </p>
         ) : null}
 
-        <div className="min-h-0 flex-1 overflow-x-auto">
+        <div ref={calendarGridRef} className="min-h-0 flex-1 overflow-x-auto">
           <div className="grid min-w-[760px] grid-cols-7 gap-1.5">
             {calendarWeekdayLabels.map((weekday) => (
               <div

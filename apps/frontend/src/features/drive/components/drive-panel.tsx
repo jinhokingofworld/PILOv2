@@ -61,6 +61,7 @@ import {
   createDriveApiClient,
   uploadDriveFileToPresignedUrl
 } from "@/features/drive/api/client";
+import { DriveWorkspaceLocationAdapter } from "@/features/drive/drive-workspace-location-adapter";
 import type { DriveItem, DriveListPayload } from "@/features/drive/types";
 import { cn } from "@/lib/utils";
 
@@ -682,6 +683,11 @@ function DeleteItemDialog({
 export function DrivePanel() {
   const authSession = useAuthSession();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const driveListRef = useRef<HTMLDivElement | null>(null);
+  const loadedDriveParentIdRef = useRef<{
+    folderId: string | null;
+    workspaceId: string;
+  } | null>(null);
   const workspaceId = authSession?.activeWorkspaceId ?? "";
   const workspaceName = authSession?.activeWorkspace.name ?? "Workspace";
   const normalizedAccessToken = authSession?.accessToken.trim() ?? "";
@@ -735,6 +741,29 @@ export function DrivePanel() {
     });
   }, [canUseDrive, currentParentId, driveClient, workspaceId]);
 
+  const loadWorkspaceLocationFolder = useCallback(
+    async (folderId: string | null) => {
+      if (!canUseDrive) {
+        return false;
+      }
+
+      try {
+        const nextDriveData = await driveClient.listItems(workspaceId, {
+          parentId: folderId
+        });
+        loadedDriveParentIdRef.current = { folderId, workspaceId };
+        setCurrentParentId(folderId);
+        setDriveData(nextDriveData);
+        setStatus("success");
+        setError(null);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    [canUseDrive, driveClient, workspaceId]
+  );
+
   const reloadDrive = useCallback(async () => {
     if (!canUseDrive) {
       setDriveData(emptyDriveData);
@@ -748,6 +777,10 @@ export function DrivePanel() {
 
     try {
       const nextDriveData = await fetchDriveData();
+      loadedDriveParentIdRef.current = {
+        folderId: currentParentId,
+        workspaceId
+      };
       setDriveData(nextDriveData);
       setStatus("success");
       return nextDriveData;
@@ -761,16 +794,24 @@ export function DrivePanel() {
       setStatus("error");
       return emptyDriveData;
     }
-  }, [canUseDrive, fetchDriveData]);
+  }, [canUseDrive, currentParentId, fetchDriveData, workspaceId]);
 
   useEffect(() => {
     let active = true;
 
     async function loadDrive() {
       if (!canUseDrive) {
+        loadedDriveParentIdRef.current = null;
         setDriveData(emptyDriveData);
         setStatus("idle");
         setError(null);
+        return;
+      }
+
+      if (
+        loadedDriveParentIdRef.current?.workspaceId === workspaceId &&
+        loadedDriveParentIdRef.current.folderId === currentParentId
+      ) {
         return;
       }
 
@@ -781,6 +822,10 @@ export function DrivePanel() {
         const nextDriveData = await fetchDriveData();
         if (!active) return;
 
+        loadedDriveParentIdRef.current = {
+          folderId: currentParentId,
+          workspaceId
+        };
         setDriveData(nextDriveData);
         setStatus("success");
       } catch (loadError) {
@@ -801,7 +846,7 @@ export function DrivePanel() {
     return () => {
       active = false;
     };
-  }, [canUseDrive, fetchDriveData]);
+  }, [canUseDrive, currentParentId, fetchDriveData, workspaceId]);
 
   function openCreateFolderSheet() {
     setFolderName("");
@@ -1069,6 +1114,12 @@ export function DrivePanel() {
 
   return (
     <div className="flex min-h-[calc(100vh-6.5rem)] flex-col gap-4">
+      <DriveWorkspaceLocationAdapter
+        folderId={currentParentId}
+        listRef={driveListRef}
+        loadFolder={loadWorkspaceLocationFolder}
+        workspaceId={workspaceId}
+      />
       <section className="flex flex-col gap-4">
         <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
           <div className="min-w-0">
@@ -1151,95 +1202,97 @@ export function DrivePanel() {
           </div>
           <Separator />
 
-          {status === "error" ? (
-            <div className="flex min-h-48 flex-col items-center justify-center gap-3 px-4 py-10 text-center">
-              <span className="flex size-10 items-center justify-center rounded-lg border border-destructive/20 bg-destructive/10 text-destructive">
-                <AlertCircle className="size-5" />
-              </span>
-              <div className="max-w-sm">
-                <h2 className="font-heading text-base font-semibold">
-                  파일 목록을 불러오지 못했습니다
-                </h2>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {error?.message ?? "잠시 후 다시 시도해주세요."}
-                </p>
-              </div>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={!canUseDrive || isLoading}
-                onClick={() => void reloadDrive()}
-              >
-                <RefreshCw />
-                다시 시도
-              </Button>
-            </div>
-          ) : isLoading ? (
-            <DriveListSkeleton />
-          ) : isEmpty ? (
-            <div className="flex min-h-48 flex-col items-center justify-center gap-3 px-4 py-10 text-center">
-              <span className="flex size-10 items-center justify-center rounded-lg border bg-muted/30 text-muted-foreground">
-                <Folder className="size-5" />
-              </span>
-              <div>
-                <h2 className="font-heading text-base font-semibold">
-                  비어 있습니다
-                </h2>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  이 위치에는 아직 파일이나 폴더가 없습니다.
-                </p>
-              </div>
-              <div className="flex flex-wrap items-center justify-center gap-2">
+          <div ref={driveListRef} className="min-h-0 overflow-x-auto">
+            {status === "error" ? (
+              <div className="flex min-h-48 flex-col items-center justify-center gap-3 px-4 py-10 text-center">
+                <span className="flex size-10 items-center justify-center rounded-lg border border-destructive/20 bg-destructive/10 text-destructive">
+                  <AlertCircle className="size-5" />
+                </span>
+                <div className="max-w-sm">
+                  <h2 className="font-heading text-base font-semibold">
+                    파일 목록을 불러오지 못했습니다
+                  </h2>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {error?.message ?? "잠시 후 다시 시도해주세요."}
+                  </p>
+                </div>
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
-                  disabled={!canUseDrive || isUploading}
-                  onClick={openFilePicker}
+                  disabled={!canUseDrive || isLoading}
+                  onClick={() => void reloadDrive()}
                 >
-                  <Upload />
-                  업로드
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  disabled={!canUseDrive}
-                  onClick={openCreateFolderSheet}
-                >
-                  <FolderPlus />
-                  새 폴더
+                  <RefreshCw />
+                  다시 시도
                 </Button>
               </div>
-            </div>
-          ) : (
-            <div className="min-h-0 overflow-x-auto">
-              <div className="min-w-[780px]">
-                <div className="grid border-b bg-muted/30 px-3 py-2 text-xs font-semibold text-muted-foreground md:grid-cols-[minmax(0,1.8fr)_minmax(7rem,0.7fr)_minmax(8rem,0.8fr)_minmax(9rem,0.8fr)_3rem]">
-                  <span>이름</span>
-                  <span>유형</span>
-                  <span>크기</span>
-                  <span>수정일</span>
-                  <span className="text-right">작업</span>
+            ) : isLoading ? (
+              <DriveListSkeleton />
+            ) : isEmpty ? (
+              <div className="flex min-h-48 flex-col items-center justify-center gap-3 px-4 py-10 text-center">
+                <span className="flex size-10 items-center justify-center rounded-lg border bg-muted/30 text-muted-foreground">
+                  <Folder className="size-5" />
+                </span>
+                <div>
+                  <h2 className="font-heading text-base font-semibold">
+                    비어 있습니다
+                  </h2>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    이 위치에는 아직 파일이나 폴더가 없습니다.
+                  </p>
                 </div>
-                <ul>
-                  {driveData.items.map((item) => (
-                    <DriveItemRow
-                      key={item.id}
-                      activeActionItemId={activeActionItemId}
-                      item={item}
-                      onDownload={(targetItem) =>
-                        void handleDownloadItem(targetItem)
-                      }
-                      onOpenDelete={openDeleteDialog}
-                      onOpenFolder={(folder) => setCurrentParentId(folder.id)}
-                      onOpenRename={openRenameSheet}
-                    />
-                  ))}
-                </ul>
+                <div className="flex flex-wrap items-center justify-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={!canUseDrive || isUploading}
+                    onClick={openFilePicker}
+                  >
+                    <Upload />
+                    업로드
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={!canUseDrive}
+                    onClick={openCreateFolderSheet}
+                  >
+                    <FolderPlus />
+                    새 폴더
+                  </Button>
+                </div>
               </div>
-            </div>
-          )}
+            ) : (
+              <div className="min-h-0">
+                <div className="min-w-[780px]">
+                  <div className="grid border-b bg-muted/30 px-3 py-2 text-xs font-semibold text-muted-foreground md:grid-cols-[minmax(0,1.8fr)_minmax(7rem,0.7fr)_minmax(8rem,0.8fr)_minmax(9rem,0.8fr)_3rem]">
+                    <span>이름</span>
+                    <span>유형</span>
+                    <span>크기</span>
+                    <span>수정일</span>
+                    <span className="text-right">작업</span>
+                  </div>
+                  <ul>
+                    {driveData.items.map((item) => (
+                      <DriveItemRow
+                        key={item.id}
+                        activeActionItemId={activeActionItemId}
+                        item={item}
+                        onDownload={(targetItem) =>
+                          void handleDownloadItem(targetItem)
+                        }
+                        onOpenDelete={openDeleteDialog}
+                        onOpenFolder={(folder) => setCurrentParentId(folder.id)}
+                        onOpenRename={openRenameSheet}
+                      />
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </section>
 
