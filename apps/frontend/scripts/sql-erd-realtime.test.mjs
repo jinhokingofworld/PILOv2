@@ -5,8 +5,11 @@ import { fileURLToPath } from "node:url";
 
 import ts from "typescript";
 
-async function compileRuntimeModule(sourcePath, outputPath) {
-  const source = await readFile(new URL(sourcePath, import.meta.url), "utf8");
+async function compileRuntimeModule(sourcePath, outputPath, replacements = []) {
+  let source = await readFile(new URL(sourcePath, import.meta.url), "utf8");
+  replacements.forEach(([pattern, replacement]) => {
+    source = source.replace(pattern, replacement);
+  });
   const output = ts.transpileModule(source, {
     compilerOptions: {
       module: ts.ModuleKind.ESNext,
@@ -22,20 +25,35 @@ async function loadOperationSyncRuntime() {
   );
   const outputPath = join(outputDir, "operation-sync-state.mjs");
   const sourceLockOutputPath = join(outputDir, "source-lock-state.mjs");
-  await compileRuntimeModule(
-    "../src/features/sql-erd/realtime/operation-sync-state.ts",
-    outputPath
+  const sourceLockControllerOutputPath = join(
+    outputDir,
+    "source-lock-controller.mjs"
   );
-  await compileRuntimeModule(
-    "../src/features/sql-erd/realtime/source-lock-state.ts",
-    sourceLockOutputPath
-  );
+  try {
+    await compileRuntimeModule(
+      "../src/features/sql-erd/realtime/operation-sync-state.ts",
+      outputPath
+    );
+    await compileRuntimeModule(
+      "../src/features/sql-erd/realtime/source-lock-state.ts",
+      sourceLockOutputPath
+    );
+    await compileRuntimeModule(
+      "../src/features/sql-erd/realtime/source-lock-controller.ts",
+      sourceLockControllerOutputPath,
+      [[/from "\.\/source-lock-state"/g, 'from "./source-lock-state.mjs"']]
+    );
 
-  return {
-    operationSync: await import(`${new URL(`file:///${outputPath.replace(/\\\\/g, "/")}`).href}?${Date.now()}`),
-    sourceLock: await import(`${new URL(`file:///${sourceLockOutputPath.replace(/\\\\/g, "/")}`).href}?${Date.now()}`),
-    outputDir
-  };
+    return {
+      operationSync: await import(`${new URL(`file:///${outputPath.replace(/\\\\/g, "/")}`).href}?${Date.now()}`),
+      sourceLock: await import(`${new URL(`file:///${sourceLockOutputPath.replace(/\\\\/g, "/")}`).href}?${Date.now()}`),
+      sourceLockController: await import(`${new URL(`file:///${sourceLockControllerOutputPath.replace(/\\\\/g, "/")}`).href}?${Date.now()}`),
+      outputDir
+    };
+  } catch (error) {
+    await rm(outputDir, { force: true, recursive: true });
+    throw error;
+  }
 }
 
 const types = await readFile(
@@ -77,6 +95,13 @@ const sourceLockHook = await readFile(
   ),
   "utf8",
 );
+const sourceLockController = await readFile(
+  new URL(
+    "../src/features/sql-erd/realtime/source-lock-controller.ts",
+    import.meta.url,
+  ),
+  "utf8",
+);
 const bridge = await readFile(
   new URL(
     "../src/features/sql-erd/realtime/sql-erd-realtime-bridge.tsx",
@@ -109,9 +134,10 @@ assert.match(operationHook, /liveOperationBufferRef/);
 assert.match(operationHook, /catchUpOperations/);
 assert.match(operationHook, /sql-erd:operation/);
 assert.match(sourceLockHook, /SOURCE_LOCK_RENEW_INTERVAL_MS = 10_000/);
-assert.match(sourceLockHook, /acquireSourceLock/);
-assert.match(sourceLockHook, /renewSourceLock/);
-assert.match(sourceLockHook, /releaseSourceLock/);
+assert.match(sourceLockHook, /createSqlErdSourceLockController/);
+assert.match(sourceLockController, /acquireSourceLock/);
+assert.match(sourceLockController, /renewSourceLock/);
+assert.match(sourceLockController, /releaseSourceLock/);
 assert.match(apiClient, /listOperations/);
 assert.match(apiClient, /listSourceSnapshots/);
 assert.match(apiClient, /acquireSourceLock/);
@@ -128,7 +154,12 @@ assert.equal(
 );
 
 {
-  const { operationSync, outputDir, sourceLock } = await loadOperationSyncRuntime();
+  const {
+    operationSync,
+    outputDir,
+    sourceLock,
+    sourceLockController
+  } = await loadOperationSyncRuntime();
   const operations = Array.from({ length: 101 }, (_, index) => ({
     id: `operation-${index + 1}`,
     opSeq: index + 1
@@ -186,6 +217,73 @@ assert.equal(
 
     assert.equal(sourceLock.getSourceLockIntervalRequest("held"), "renew");
     assert.equal(sourceLock.getSourceLockIntervalRequest("read_only"), "acquire");
+
+    const heldLeases = new Map();
+    const requests = [];
+    let shouldRejectNextRenewal = false;
+    const createClient = (actor) => ({
+      acquireSourceLock: async (leaseId) => {
+        requests.push(`acquire:${actor}:${leaseId}`);
+        if (heldLeases.size) throw new Error("SQL source is locked by another user.");
+
+        heldLeases.set(actor, leaseId);
+        return { leaseId };
+      },
+      releaseSourceLock: async (leaseId) => {
+        requests.push(`release:${actor}:${leaseId}`);
+        if (heldLeases.get(actor) === leaseId) heldLeases.delete(actor);
+      },
+      renewSourceLock: async (leaseId) => {
+        requests.push(`renew:${actor}:${leaseId}`);
+        if (shouldRejectNextRenewal) {
+          shouldRejectNextRenewal = false;
+          heldLeases.delete(actor);
+          throw new Error("SQL source lock expired.");
+        }
+        if (heldLeases.get(actor) !== leaseId) {
+          throw new Error("SQL source lock is not held.");
+        }
+        return { leaseId };
+      }
+    });
+    let nextLeaseNumber = 0;
+    const createController = (actor) =>
+      sourceLockController.createSqlErdSourceLockController({
+        client: createClient(actor),
+        createLeaseId: () => `${actor}-lease-${++nextLeaseNumber}`
+      });
+    const firstEditor = createController("first");
+    const secondEditor = createController("second");
+
+    await firstEditor.start();
+    await secondEditor.start();
+    assert.equal(firstEditor.getState().status, "held");
+    assert.equal(secondEditor.getState().status, "read_only");
+
+    await firstEditor.stop();
+    await secondEditor.tick();
+    assert.equal(secondEditor.getState().status, "held");
+    assert.deepEqual(requests, [
+      "acquire:first:first-lease-1",
+      "acquire:second:second-lease-2",
+      "release:first:first-lease-1",
+      "acquire:second:second-lease-3"
+    ]);
+
+    await secondEditor.tick();
+    assert.equal(secondEditor.getState().status, "held");
+    shouldRejectNextRenewal = true;
+    await secondEditor.tick();
+    assert.equal(secondEditor.getState().status, "read_only");
+    await secondEditor.tick();
+    assert.equal(secondEditor.getState().status, "held");
+    await secondEditor.stop();
+    assert.deepEqual(requests.slice(-4), [
+      "renew:second:second-lease-3",
+      "renew:second:second-lease-3",
+      "acquire:second:second-lease-4",
+      "release:second:second-lease-4"
+    ]);
   } finally {
     await rm(outputDir, { force: true, recursive: true });
   }

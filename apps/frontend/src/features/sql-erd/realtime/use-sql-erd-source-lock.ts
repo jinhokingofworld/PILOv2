@@ -2,30 +2,16 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import type { SqlErdSourceLockPayload } from "@/features/sql-erd/api/client";
-
-import { getSourceLockIntervalRequest } from "./source-lock-state";
+import {
+  createSqlErdSourceLockController,
+  type SqlErdSourceLockClient,
+  type SqlErdSourceLockState
+} from "./source-lock-controller";
 
 export const SOURCE_LOCK_RENEW_INTERVAL_MS = 10_000;
 
-export type SqlErdSourceLockState =
-  | { status: "disabled" }
-  | { status: "acquiring" }
-  | { lease: SqlErdSourceLockPayload; status: "held" }
-  | { message: string; status: "read_only" };
-
-type SourceLockClient = {
-  acquireSourceLock: (leaseId: string) => Promise<SqlErdSourceLockPayload>;
-  releaseSourceLock: (leaseId: string) => Promise<unknown>;
-  renewSourceLock: (leaseId: string) => Promise<SqlErdSourceLockPayload>;
-};
-
 function createLeaseId() {
   return crypto.randomUUID();
-}
-
-function readErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "SQL source is read-only.";
 }
 
 export function useSqlErdSourceLock({
@@ -33,92 +19,47 @@ export function useSqlErdSourceLock({
   client
 }: {
   active: boolean;
-  client: SourceLockClient;
+  client: SqlErdSourceLockClient;
 }) {
   const [state, setState] = useState<SqlErdSourceLockState>({ status: "disabled" });
-  const clientRef = useRef(client);
-  const stateRef = useRef<SqlErdSourceLockState>(state);
-  const leaseIdRef = useRef<string | null>(null);
-  const heldLeaseIdRef = useRef<string | null>(null);
+  const controllerRef = useRef<ReturnType<typeof createSqlErdSourceLockController> | null>(
+    null
+  );
 
   const setLockState = useCallback((nextState: SqlErdSourceLockState) => {
-    stateRef.current = nextState;
     setState(nextState);
   }, []);
 
-  const acquire = useCallback(async () => {
-    const leaseId = createLeaseId();
-    leaseIdRef.current = leaseId;
-    heldLeaseIdRef.current = null;
-    setLockState({ status: "acquiring" });
-
-    try {
-      const lease = await clientRef.current.acquireSourceLock(leaseId);
-      if (leaseIdRef.current !== leaseId) return;
-
-      heldLeaseIdRef.current = leaseId;
-      setLockState({ lease, status: "held" });
-    } catch (error) {
-      if (leaseIdRef.current !== leaseId) return;
-
-      setLockState({ message: readErrorMessage(error), status: "read_only" });
-    }
-  }, [setLockState]);
-
   const renew = useCallback(async () => {
-    const leaseId = heldLeaseIdRef.current;
-    if (!leaseId) return;
-
-    try {
-      const lease = await clientRef.current.renewSourceLock(leaseId);
-      if (heldLeaseIdRef.current === leaseId) {
-        setLockState({ lease, status: "held" });
-      }
-    } catch (error) {
-      if (heldLeaseIdRef.current !== leaseId) return;
-
-      heldLeaseIdRef.current = null;
-      setLockState({ message: readErrorMessage(error), status: "read_only" });
-    }
-  }, [setLockState]);
+    await controllerRef.current?.renew();
+  }, []);
 
   useEffect(() => {
-    clientRef.current = client;
-  }, [client]);
+    const controller = createSqlErdSourceLockController({
+      client,
+      createLeaseId,
+      onStateChange: setLockState
+    });
+    controllerRef.current = controller;
 
-  useEffect(() => {
     if (!active) {
-      leaseIdRef.current = null;
-      heldLeaseIdRef.current = null;
-      setLockState({ status: "disabled" });
-      return;
+      void controller.stop();
+      return () => {
+        if (controllerRef.current === controller) controllerRef.current = null;
+      };
     }
 
-    let disposed = false;
-    void acquire();
-
+    void controller.start();
     const renewTimer = window.setInterval(() => {
-      if (disposed) return;
-
-      const request = getSourceLockIntervalRequest(stateRef.current.status);
-      if (request === "acquire") {
-        void acquire();
-      } else if (request === "renew") {
-        void renew();
-      }
+      void controller.tick();
     }, SOURCE_LOCK_RENEW_INTERVAL_MS);
 
     return () => {
-      disposed = true;
       window.clearInterval(renewTimer);
-      const heldLeaseId = heldLeaseIdRef.current;
-      leaseIdRef.current = null;
-      heldLeaseIdRef.current = null;
-      if (heldLeaseId) {
-        void client.releaseSourceLock(heldLeaseId).catch(() => undefined);
-      }
+      void controller.stop();
+      if (controllerRef.current === controller) controllerRef.current = null;
     };
-  }, [active, acquire, client, renew, setLockState]);
+  }, [active, client, setLockState]);
 
   return useMemo(
     () => ({
