@@ -218,7 +218,7 @@ resource "aws_iam_role_policy" "github_sync_worker_task" {
     }, {
     Effect   = "Allow"
     Action   = ["sqs:SendMessage"]
-    Resource = var.github_webhooks_queue_arn
+    Resource = var.github_sync_worker_queue_arns
   }] })
 }
 
