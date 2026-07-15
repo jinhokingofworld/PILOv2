@@ -35,6 +35,7 @@ import {
   RenewSqlErdSourceLockRequest,
   SourcePublishRequest,
   SourceSnapshotBatchQuery,
+  UpdateSqlErdSessionMetadataRequest,
   UpdateSqlErdSessionRequest
 } from "./sql-erd.types";
 
@@ -223,6 +224,24 @@ export class SqlErdSessionController {
     @Body() body: UpdateSqlErdSessionRequest
   ): Promise<ApiSuccessResponse<SqlErdSessionPayload>> {
     const session = await this.sqlErdService.updateSession(
+      currentUserId,
+      workspaceId,
+      sessionId,
+      body
+    );
+
+    return apiResponse(session);
+  }
+
+  @RouteConfig({ bodyLimit: SQL_ERD_REQUEST_BODY_LIMIT_BYTES })
+  @Patch("sql-erd-sessions/:sessionId/metadata")
+  async updateSessionMetadata(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("sessionId") sessionId: string,
+    @Body() body: UpdateSqlErdSessionMetadataRequest
+  ): Promise<ApiSuccessResponse<SqlErdSessionPayload>> {
+    const session = await this.sqlErdService.updateSessionMetadata(
       currentUserId,
       workspaceId,
       sessionId,

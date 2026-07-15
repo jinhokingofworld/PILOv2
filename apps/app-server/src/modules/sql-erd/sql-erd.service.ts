@@ -63,6 +63,7 @@ import {
   SqlErdSessionRow,
   SqlErdSessionSummaryRow,
   SqlErdWriteProtocol,
+  UpdateSqlErdSessionMetadataRequest,
   UpdateSqlErdSessionRequest
 } from "./sql-erd.types";
 import {
@@ -71,6 +72,7 @@ import {
   validateListSqlErdSessionsQuery,
   validateSqlErdLayoutJson,
   validateSqlErdSessionId,
+  validateUpdateSqlErdSessionMetadataRequest,
   validateUpdateSqlErdSessionRequest
 } from "./sql-erd.validation";
 
@@ -876,6 +878,71 @@ export class SqlErdService {
     return mapSqlErdSession(session);
   }
 
+  async updateSessionMetadata(
+    currentUserId: string,
+    workspaceId: string,
+    sessionId: string,
+    body: UpdateSqlErdSessionMetadataRequest
+  ): Promise<SqlErdSessionPayload> {
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+
+    const validSessionId = validateSqlErdSessionId(sessionId);
+    const input = validateUpdateSqlErdSessionMetadataRequest(body);
+
+    return this.database.transaction(async (transaction) => {
+      const currentSession = await this.findActiveSessionById(
+        workspaceId,
+        validSessionId,
+        transaction,
+        true
+      );
+      if (!currentSession) {
+        throw notFound("sqltoerd session not found");
+      }
+
+      this.assertRevision(currentSession, input.baseRevision);
+      const session = await transaction.queryOne<SqlErdSessionRow>(
+        `
+          UPDATE sql_erd_sessions
+          SET
+            title = $3,
+            revision = revision + 1,
+            updated_by = $4
+          WHERE workspace_id = $1
+            AND id = $2
+            AND deleted_at IS NULL
+            AND revision = $5
+          RETURNING
+            id,
+            workspace_id,
+            title,
+            source_format,
+            dialect,
+            source_text,
+            model_json,
+            layout_json,
+            settings_json,
+            table_count,
+            relation_count,
+            revision,
+            write_protocol,
+            latest_op_seq,
+            created_by,
+            updated_by,
+            created_at,
+            updated_at,
+            deleted_at
+        `,
+        [workspaceId, validSessionId, input.title, currentUserId, input.baseRevision]
+      );
+      if (!session) {
+        throw conflict("sqltoerd session revision conflict");
+      }
+
+      return mapSqlErdSession(session);
+    });
+  }
+
   async deleteSession(
     currentUserId: string,
     workspaceId: string,
@@ -886,55 +953,67 @@ export class SqlErdService {
 
     const validSessionId = validateSqlErdSessionId(sessionId);
     const input = validateDeleteSqlErdSessionQuery(query);
-    const session = await this.database.queryOne<SqlErdSessionRow>(
-      `
-        UPDATE sql_erd_sessions
-        SET
-          deleted_at = now(),
-          revision = revision + 1,
-          updated_by = $4
-        WHERE workspace_id = $1
-          AND id = $2
-          AND deleted_at IS NULL
-          AND revision = $3
-          AND write_protocol = 'snapshot'
-        RETURNING
-          id,
-          workspace_id,
-          title,
-          source_format,
-          dialect,
-          source_text,
-          model_json,
-          layout_json,
-          settings_json,
-          table_count,
-          relation_count,
-          revision,
-          write_protocol,
-          latest_op_seq,
-          created_by,
-          updated_by,
-          created_at,
-          updated_at,
-          deleted_at
-      `,
-      [workspaceId, validSessionId, input.baseRevision, currentUserId]
-    );
+    return this.database.transaction(async (transaction) => {
+      const currentSession = await this.findActiveSessionById(
+        workspaceId,
+        validSessionId,
+        transaction,
+        true
+      );
+      if (!currentSession) {
+        throw notFound("sqltoerd session not found");
+      }
 
-    if (!session) {
-      return await this.throwMissingOrConflict(workspaceId, validSessionId);
-    }
+      this.assertRevision(currentSession, input.baseRevision);
+      await transaction.execute(
+        `DELETE FROM sql_erd_session_source_locks
+         WHERE workspace_id = $1 AND session_id = $2`,
+        [workspaceId, validSessionId]
+      );
+      const session = await transaction.queryOne<SqlErdSessionRow>(
+        `
+          UPDATE sql_erd_sessions
+          SET
+            deleted_at = now(),
+            revision = revision + 1,
+            updated_by = $4
+          WHERE workspace_id = $1
+            AND id = $2
+            AND deleted_at IS NULL
+            AND revision = $3
+          RETURNING
+            id,
+            workspace_id,
+            title,
+            source_format,
+            dialect,
+            source_text,
+            model_json,
+            layout_json,
+            settings_json,
+            table_count,
+            relation_count,
+            revision,
+            write_protocol,
+            latest_op_seq,
+            created_by,
+            updated_by,
+            created_at,
+            updated_at,
+            deleted_at
+        `,
+        [workspaceId, validSessionId, input.baseRevision, currentUserId]
+      );
+      if (!session || !session.deleted_at) {
+        throw conflict("sqltoerd session revision conflict");
+      }
 
-    if (!session.deleted_at) {
-      return await this.throwMissingOrConflict(workspaceId, validSessionId);
-    }
-
-    return mapDeletedSqlErdSession(
-      session.id,
-      session.deleted_at,
-      session.revision
-    );
+      return mapDeletedSqlErdSession(
+        session.id,
+        session.deleted_at,
+        session.revision
+      );
+    });
   }
 
   private async findOperationByClientOperationId(

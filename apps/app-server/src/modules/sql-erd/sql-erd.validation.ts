@@ -11,6 +11,7 @@ import {
   SqlErdDialect,
   SqlErdJsonObject,
   SqlErdSourceFormat,
+  UpdateSqlErdSessionMetadataRequest,
   UpdateSqlErdSessionRequest
 } from "./sql-erd.types";
 
@@ -69,6 +70,7 @@ const UPDATE_REQUEST_FIELDS = new Set([
   "layoutJson",
   "settingsJson"
 ]);
+const UPDATE_METADATA_REQUEST_FIELDS = new Set(["baseRevision", "title"]);
 const DELETE_QUERY_FIELDS = new Set(["baseRevision"]);
 const LIST_QUERY_FIELDS = new Set(["limit", "cursor"]);
 const DEFAULT_LIST_LIMIT = 20;
@@ -136,6 +138,17 @@ export function validateUpdateSqlErdSessionRequest(
   }
 
   return input;
+}
+
+export function validateUpdateSqlErdSessionMetadataRequest(
+  body: UpdateSqlErdSessionMetadataRequest
+): UpdateSqlErdSessionMetadataRequest {
+  const draft = readBody(body, UPDATE_METADATA_REQUEST_FIELDS);
+
+  return {
+    baseRevision: readBaseRevision(draft.baseRevision),
+    title: readTitle(draft.title)
+  };
 }
 
 export function validateDeleteSqlErdSessionQuery(

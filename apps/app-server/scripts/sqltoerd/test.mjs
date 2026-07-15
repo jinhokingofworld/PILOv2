@@ -84,9 +84,10 @@ assert.match(sqlErdController, /@Post\("sql-erd-sessions\/:sessionId\/source-loc
 assert.match(sqlErdController, /@Patch\("sql-erd-sessions\/:sessionId\/source-lock"\)/);
 assert.match(sqlErdController, /@Delete\("sql-erd-sessions\/:sessionId\/source-lock"\)/);
 assert.match(sqlErdController, /@Patch\("sql-erd-sessions\/:sessionId"\)/);
+assert.match(sqlErdController, /@Patch\("sql-erd-sessions\/:sessionId\/metadata"\)/);
 assert.match(sqlErdController, /@Delete\("sql-erd-sessions\/:sessionId"\)/);
-assert.equal(sqlErdController.match(/@RouteConfig/g)?.length, 8);
-assert.equal(sqlErdController.match(/bodyLimit/g)?.length, 8);
+assert.equal(sqlErdController.match(/@RouteConfig/g)?.length, 9);
+assert.equal(sqlErdController.match(/bodyLimit/g)?.length, 9);
 assert.match(sqlErdTypes, /SQL_ERD_REQUEST_BODY_LIMIT_BYTES = 2 \* 1024 \* 1024/);
 assert.match(sqlErdTypes, /SQL_ERD_SOURCE_PUBLISH_BODY_LIMIT_BYTES = 4 \* 1024 \* 1024/);
 assert.match(sqlErdService, /domain: "sqltoerd"/);
@@ -146,6 +147,7 @@ assert.match(dbReadme, /023_enable_sql_erd_multi_sessions\.sql/);
 assert.match(sqlErdValidation, /validateSqlErdSessionId/);
 assert.match(sqlErdValidation, /validateCreateSqlErdSessionRequest/);
 assert.match(sqlErdValidation, /validateUpdateSqlErdSessionRequest/);
+assert.match(sqlErdValidation, /validateUpdateSqlErdSessionMetadataRequest/);
 assert.match(sqlErdValidation, /validateDeleteSqlErdSessionQuery/);
 assert.match(sqlErdValidation, /MAX_MODEL_JSON_BYTES = 1024 \* 1024/);
 assert.match(sqlErdValidation, /MAX_LAYOUT_JSON_BYTES = 1024 \* 1024/);
@@ -183,7 +185,8 @@ class FakeDatabase {
   async transaction(callback) {
     const transaction = {
       query: (text, values = []) => this.readQuery(text, values, true),
-      queryOne: (text, values = []) => this.readQueryOne(text, values, true)
+      queryOne: (text, values = []) => this.readQueryOne(text, values, true),
+      execute: (text, values = []) => this.readQuery(text, values, true)
     };
     this.transactions.push(transaction);
     return callback(transaction);
@@ -2100,6 +2103,118 @@ await assertRouteBodyLimit(
 }
 
 {
+  const { service } = createSubject();
+  const rejectedFields = {
+    sourceText: "CREATE TABLE forbidden_metadata_write (id BIGINT);",
+    modelJson: modelJson(),
+    layoutJson: layoutJson(),
+    settingsJson: {},
+    sourceFormat: "sql",
+    dialect: "postgresql"
+  };
+
+  for (const [field, value] of Object.entries(rejectedFields)) {
+    await assertApiError(
+      () =>
+        service.updateSessionMetadata(currentUserId, workspaceId, sessionId, {
+          baseRevision: 3,
+          title: "Renamed ERD",
+          [field]: value
+        }),
+      400,
+      "BAD_REQUEST",
+      /unknown field/
+    );
+  }
+}
+
+{
+  const currentSession = sessionRow({
+    title: "Old ERD",
+    revision: 3,
+    write_protocol: "operations_v1"
+  });
+  const database = new FakeDatabase({
+    queryOneRows: [
+      currentSession,
+      (text, values) => {
+        assert.match(text, /UPDATE sql_erd_sessions/);
+        assert.match(text, /SET\s+title = \$3,\s+revision = revision \+ 1,\s+updated_by = \$4/s);
+        assert.doesNotMatch(
+          text.slice(text.indexOf("SET"), text.indexOf("WHERE")),
+          /source_text|model_json|layout_json|settings_json|write_protocol/
+        );
+        assert.deepEqual(values, [workspaceId, sessionId, "Renamed ERD", currentUserId, 3]);
+        return sessionRow({
+          ...currentSession,
+          title: "Renamed ERD",
+          revision: 4,
+          updated_by: currentUserId
+        });
+      }
+    ]
+  });
+  const { service } = createSubject(database);
+
+  const session = await service.updateSessionMetadata(currentUserId, workspaceId, sessionId, {
+    baseRevision: 3,
+    title: "Renamed ERD"
+  });
+
+  assert.equal(session.title, "Renamed ERD");
+  assert.equal(session.revision, 4);
+  assert.equal(session.writeProtocol, "operations_v1");
+  assert.equal(database.transactions.length, 1);
+  assert.equal(database.queries.every((query) => query.transaction), true);
+  assert.equal(
+    database.queries.some((query) => /sql_erd_session_operations|operation_outbox/.test(query.text)),
+    false
+  );
+}
+
+{
+  const currentSession = sessionRow({ revision: 4, write_protocol: "operations_v1" });
+  const database = new FakeDatabase({
+    queryOneRows: [
+      currentSession,
+      (text, values) => {
+        assert.match(text, /UPDATE sql_erd_sessions/);
+        assert.match(text, /deleted_at = now\(\)/);
+        assert.match(text, /AND revision = \$3/);
+        assert.doesNotMatch(text.slice(text.indexOf("WHERE"), text.indexOf("RETURNING")), /write_protocol/);
+        assert.deepEqual(values, [workspaceId, sessionId, 4, currentUserId]);
+        return sessionRow({
+          ...currentSession,
+          deleted_at: deletedAt,
+          revision: 5,
+          updated_by: currentUserId
+        });
+      }
+    ]
+  });
+  const { service } = createSubject(database);
+
+  const result = await service.deleteSession(currentUserId, workspaceId, sessionId, {
+    baseRevision: "4"
+  });
+
+  assert.deepEqual(result, {
+    id: sessionId,
+    deletedAt: deletedAt.toISOString(),
+    revision: 5
+  });
+  assert.equal(database.transactions.length, 1);
+  assert.equal(database.queries.every((query) => query.transaction), true);
+  assert.match(database.queries[0].text, /FOR UPDATE/);
+  assert.match(database.queries[1].text, /DELETE FROM sql_erd_session_source_locks/);
+  assert.deepEqual(database.queries[1].values, [workspaceId, sessionId]);
+  assert.equal(
+    database.queries.some((query) => /sql_erd_session_operations|operation_outbox/.test(query.text)),
+    false
+  );
+}
+
+{
   const updatedSourceText = "CREATE TABLE users (id BIGINT PRIMARY KEY, email TEXT);";
   const updatedModelJson = modelJson({
     schema: {
@@ -2395,6 +2510,7 @@ await assertRouteBodyLimit(
 {
   const database = new FakeDatabase({
     queryOneRows: [
+      sessionRow({ revision: 4 }),
       (text, values) => {
         assert.match(text, /UPDATE sql_erd_sessions/);
         assert.match(text, /deleted_at = now\(\)/);
@@ -2423,7 +2539,7 @@ await assertRouteBodyLimit(
 
 {
   const database = new FakeDatabase({
-    queryOneRows: [null, sessionRow({ revision: 6 })]
+    queryOneRows: [sessionRow({ revision: 6 })]
   });
   const { service } = createSubject(database);
 
@@ -2440,7 +2556,7 @@ await assertRouteBodyLimit(
 
 {
   const database = new FakeDatabase({
-    queryOneRows: [null, null]
+    queryOneRows: [null]
   });
   const { service } = createSubject(database);
 
