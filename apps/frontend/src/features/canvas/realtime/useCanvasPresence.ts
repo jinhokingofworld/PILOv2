@@ -356,12 +356,14 @@ function removeShapePreviewIds({
 
 class CanvasRealtimeCommitError extends Error {
   body?: unknown;
+  code: string;
   status?: number;
 
   constructor(ack: Extract<CanvasShapeCommitAck, { ok: false }>) {
     super(ack.error.message);
     this.name = "CanvasRealtimeCommitError";
     this.body = ack.error.body;
+    this.code = ack.error.code;
     this.status = ack.error.status;
   }
 }

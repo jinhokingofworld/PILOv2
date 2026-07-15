@@ -741,6 +741,9 @@ assert.match(canvasWorkspace, /storageMode=\{shouldUseCanvasApi \? "api" : "loca
 assert.match(canvasRuntime, /useCanvasPresence/);
 assert.match(canvasRuntime, /persistenceCanvasClient/);
 assert.match(canvasRuntime, /commitShapeOperations/);
+assert.match(canvasRuntime, /canvas-sync-notice/);
+assert.match(canvasRuntime, /getShapeSyncErrorNoticeMessage/);
+assert.match(canvasRuntime, /onShapeSyncError: handleShapeSyncError/);
 assert.match(canvasRuntime, /catchUpCanvasOperations/);
 assert.match(canvasRuntime, /applyRemoteCanvasOperations/);
 assert.match(canvasRuntime, /deferredRemoteOperationsRef/);

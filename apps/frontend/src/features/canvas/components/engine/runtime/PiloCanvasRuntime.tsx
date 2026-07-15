@@ -70,6 +70,12 @@ const INITIAL_CANVAS_VIEW_SETTING: CanvasViewSetting = {
 const initialCanvasSnapState: PiloCanvasSnapState = {
   isSmartGuideEnabled: false,
 };
+type CanvasSyncNotice = {
+  id: number;
+  message: string;
+  tone: "info" | "warning";
+};
+
 const initialLocalInteractionState: PiloCanvasLocalInteractionState = {
   currentToolId: "select.idle",
   editingShapeId: null,
@@ -215,6 +221,32 @@ function readConflictLatestFreeformShape(conflict: CanvasShapeSyncConflict) {
   return shape && typeof shape.id === "string" ? shape : null;
 }
 
+function readRealtimeCommitErrorCode(error: unknown) {
+  return isRecord(error) && typeof error.code === "string"
+    ? error.code
+    : null;
+}
+
+function readRealtimeCommitErrorStatus(error: unknown) {
+  return isRecord(error) && typeof error.status === "number"
+    ? error.status
+    : null;
+}
+
+function getShapeSyncErrorNoticeMessage(error: unknown) {
+  const code = readRealtimeCommitErrorCode(error);
+
+  if (code === "shape_locked") {
+    return "다른 사용자가 작업 중인 도형이라 반영하지 못했어요. 잠시 뒤 다시 시도해 주세요.";
+  }
+
+  if (readRealtimeCommitErrorStatus(error) === 409) {
+    return "다른 사용자가 먼저 수정해서 최신 상태로 갱신했어요.";
+  }
+
+  return "Canvas 변경사항 저장 중 오류가 발생했어요. 연결 상태를 확인한 뒤 다시 시도해 주세요.";
+}
+
 export function PiloCanvasRuntime({
   ...props
 }: PiloCanvasRuntimeProps) {
@@ -260,6 +292,8 @@ function PiloCanvasRuntimeInner({
   );
   const [canvasSnapState, setCanvasSnapState] =
     useState<PiloCanvasSnapState>(initialCanvasSnapState);
+  const [canvasSyncNotice, setCanvasSyncNotice] =
+    useState<CanvasSyncNotice | null>(null);
   const shapeSyncQueueRef = useRef<CanvasShapeSyncQueue | null>(null);
   const pendingViewSettingRef = useRef<CanvasViewSetting | null>(null);
   const viewSettingRef = useRef<CanvasViewSetting>(viewSetting);
@@ -289,6 +323,16 @@ function PiloCanvasRuntimeInner({
   const [canvasHydrationVersion, setCanvasHydrationVersion] = useState(0);
   const [cameraRestoreVersion, setCameraRestoreVersion] = useState(0);
   const currentRealtimeUserId = realtime?.currentUser?.userId ?? null;
+  const showCanvasSyncNotice = useCallback(
+    (message: string, tone: CanvasSyncNotice["tone"] = "info") => {
+      setCanvasSyncNotice({
+        id: Date.now(),
+        message,
+        tone,
+      });
+    },
+    [],
+  );
   const markShapeDeleted = useCallback((shapeId: string) => {
     deletedShapeIdsRef.current.add(shapeId);
     unloadedShapeIdsRef.current.delete(shapeId);
@@ -456,6 +500,10 @@ function PiloCanvasRuntimeInner({
         ? conflict.latestOperation
         : null;
 
+      showCanvasSyncNotice(
+        "다른 사용자가 먼저 수정해서 최신 상태로 갱신했어요.",
+        "info",
+      );
       pendingLocalShapeVersionsRef.current.delete(conflict.shapeId);
 
       if (
@@ -499,7 +547,18 @@ function PiloCanvasRuntimeInner({
       applyRemoteCanvasOperations,
       currentRealtimeUserId,
       flushDeferredRemoteOperations,
+      showCanvasSyncNotice,
     ],
+  );
+  const handleShapeSyncError = useCallback(
+    (error: unknown) => {
+      showCanvasSyncNotice(getShapeSyncErrorNoticeMessage(error), "warning");
+
+      void queryClient.invalidateQueries({
+        queryKey: ["canvas", board.workspaceId, board.id, "viewport-shapes"],
+      });
+    },
+    [board.id, board.workspaceId, queryClient, showCanvasSyncNotice],
   );
   const canvasPresence = useCanvasPresence(realtime, {
     applyOperations: applyRemoteCanvasOperations,
@@ -550,6 +609,20 @@ function PiloCanvasRuntimeInner({
   }, [board.id]);
 
   useEffect(() => {
+    if (!canvasSyncNotice) return undefined;
+
+    const noticeTimer = setTimeout(() => {
+      setCanvasSyncNotice((currentNotice) =>
+        currentNotice?.id === canvasSyncNotice.id ? null : currentNotice,
+      );
+    }, 5000);
+
+    return () => {
+      clearTimeout(noticeTimer);
+    };
+  }, [canvasSyncNotice]);
+
+  useEffect(() => {
     onReady(canvasActions);
   }, [canvasActions, onReady]);
 
@@ -581,6 +654,7 @@ function PiloCanvasRuntimeInner({
     pendingViewSettingRef,
     queryClient,
     remoteShapeRevisionRef,
+    onShapeSyncError: handleShapeSyncError,
     onShapeSyncConflict: handleShapeSyncConflict,
     shapeSyncQueueRef,
     storageMode,
@@ -599,6 +673,7 @@ function PiloCanvasRuntimeInner({
     localShapeVersionRef,
     onLocalShapeSyncIdle: flushDeferredRemoteOperations,
     onShapeSyncConflict: handleShapeSyncConflict,
+    onShapeSyncError: handleShapeSyncError,
     pendingLocalShapeVersionsRef,
     remoteShapeRevisionRef,
     setCanvasHydrationVersion,
@@ -728,6 +803,14 @@ function PiloCanvasRuntimeInner({
           onOneShotToolCreated={onOneShotToolCreated}
           canvasAgentEnabled={storageMode === "api"}
         />
+        {canvasSyncNotice ? (
+          <div
+            className={`canvas-sync-notice canvas-sync-notice--${canvasSyncNotice.tone}`}
+            role="status"
+          >
+            {canvasSyncNotice.message}
+          </div>
+        ) : null}
       </section>
 
       <CanvasZoomControls

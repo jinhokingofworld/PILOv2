@@ -22,6 +22,7 @@ type UseCanvasApiLifecycleOptions = {
   board: CanvasBoardDetail;
   canvasClient: CanvasViewSettingApiClient | null;
   latestViewportBoundsRef: RuntimeRef<unknown>;
+  onShapeSyncError?: (error: unknown) => void;
   pendingShapeDetailRef: RuntimeRef<string | null>;
   pendingViewSettingRef: RuntimeRef<CanvasViewSetting | null>;
   queryClient: QueryClient;
@@ -37,6 +38,7 @@ export function useCanvasApiLifecycle({
   board,
   canvasClient,
   latestViewportBoundsRef,
+  onShapeSyncError,
   pendingShapeDetailRef,
   pendingViewSettingRef,
   queryClient,
@@ -64,6 +66,7 @@ export function useCanvasApiLifecycle({
       onError(error: unknown) {
         if (isCanvasShapeSyncConflictError(error)) return;
 
+        onShapeSyncError?.(error);
         console.error("Canvas API shape sync failed", error);
       },
       onSynced(operations, result) {
@@ -160,6 +163,7 @@ export function useCanvasApiLifecycle({
     board.workspaceId,
     canvasClient,
     latestViewportBoundsRef,
+    onShapeSyncError,
     pendingShapeDetailRef,
     pendingViewSettingRef,
     queryClient,
