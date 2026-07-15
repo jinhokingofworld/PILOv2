@@ -28,6 +28,7 @@ export type SqlErdSessionLoadState = {
 
 export type LayoutAutosaveBlockReason =
   | "conflict"
+  | "write_protocol_mismatch"
   | "unauthorized"
   | "forbidden"
   | "not_found"
@@ -129,6 +130,20 @@ export function getLayoutAutosaveBlockReasonForStatus(
   return "unknown_non_transient";
 }
 
+export function getLayoutAutosaveBlockReasonForApiError({
+  code,
+  status
+}: {
+  code?: string;
+  status?: number | null;
+}): LayoutAutosaveBlockReason | null {
+  if (code === "SQL_ERD_WRITE_PROTOCOL_MISMATCH") {
+    return "write_protocol_mismatch";
+  }
+
+  return getLayoutAutosaveBlockReasonForStatus(status);
+}
+
 export function isLayoutAutosaveTransientStatus(
   status: number | null | undefined
 ) {
@@ -145,6 +160,15 @@ export function getLayoutAutosaveDelayMs(retryAttempt: number) {
 export function getLayoutAutosavePausedBanner(
   reason: LayoutAutosaveBlockReason
 ): LayoutAutosavePausedBannerViewModel {
+  if (reason === "write_protocol_mismatch") {
+    return {
+      canRetry: false,
+      message:
+        "쓰기 프로토콜이 변경되었습니다. 최신 세션을 다시 불러올 때까지 이 탭은 읽기 전용입니다.",
+      reason
+    };
+  }
+
   if (reason === "conflict") {
     return {
       canRetry: false,

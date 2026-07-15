@@ -233,7 +233,7 @@ export function SqlErdSessionList() {
       setErrorMessage(null);
 
       try {
-        const updatedSession = await apiClient.updateSession(
+        const updatedSession = await apiClient.updateSessionMetadata(
           authSession.activeWorkspaceId,
           session.id,
           {

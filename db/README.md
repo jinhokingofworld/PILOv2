@@ -82,3 +82,4 @@ The database schema source of truth is the migration history in `db/migrations/`
 - `migrations/066_fix_board_hydration_timestamp.sql` fixes Board hydration timestamp shapes so row timestamps can be parsed consistently.
 - `migrations/067_add_canvas_engine_type.sql` adds Canvas engine type metadata for separating classic Canvas persistence from tldraw sync documents.
 - `migrations/068_create_canvas_sync_documents.sql` adds `canvas_sync_documents` for tldraw sync Canvas document snapshots.
+- `migrations/069_create_sql_erd_session_creation_audit.sql` records every SQLtoERD session INSERT with an AFTER INSERT trigger so operations_v1 cutover monitoring also catches direct or default-protocol creation paths.

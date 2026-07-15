@@ -4,6 +4,7 @@ export const canvasClientEvents = {
   presenceUpdate: "canvas:presence:update",
   shapeLockClaim: "canvas:shape:lock:claim",
   shapeLockRelease: "canvas:shape:lock:release",
+  shapeCommit: "canvas:shape:commit",
   shapePreview: "canvas:shape:preview",
   shapePreviewClear: "canvas:shape:preview:clear",
 } as const;

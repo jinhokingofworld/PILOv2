@@ -151,6 +151,7 @@ import { TldrawSurface } from "@/shared/tldraw/TldrawSurface";
 
 type SqlErdCanvasProps = {
   className?: string;
+  isReadOnly?: boolean;
   layoutJson?: SqltoerdLayoutJsonV1;
   modelJson?: SqltoerdModelJsonV1;
   onLayoutPatch?: (patch: SqltoerdLayoutPatch) => void;
@@ -2527,11 +2528,22 @@ function SqlErdLayoutSync({
   return null;
 }
 
+function SqlErdCanvasReadOnlyBridge({ isReadOnly }: { isReadOnly: boolean }) {
+  const editor = useEditor();
+
+  useEffect(() => {
+    editor.updateInstanceState({ isReadonly: isReadOnly });
+  }, [editor, isReadOnly]);
+
+  return null;
+}
+
 export function SqlErdCanvas({
   className,
+  isReadOnly = false,
   layoutJson = commerceSqltoerdFixture.layoutJson,
   modelJson = commerceSqltoerdFixture.modelJson,
-  onLayoutPatch,
+  onLayoutPatch: onLayoutPatchProp,
   onSelectionChange,
   pinNavigationRequestId = 0,
   pinnedTableId = null,
@@ -2540,6 +2552,7 @@ export function SqlErdCanvas({
   sessionId = null,
   selectedSqlErdObject = { type: "none" }
 }: SqlErdCanvasProps) {
+  const onLayoutPatch = isReadOnly ? undefined : onLayoutPatchProp;
   const editorRef = useRef<Editor | null>(null);
   const [canvasEditor, setCanvasEditor] = useState<Editor | null>(null);
   const [tool, setTool] = useState<SqlErdCanvasTool>(null);
@@ -2904,7 +2917,7 @@ export function SqlErdCanvas({
       const eventTarget = event.target as Element;
       const editor = editorRef.current;
 
-      if (!editor || event.button !== 0 || !event.isPrimary) {
+      if (isReadOnly || !editor || event.button !== 0 || !event.isPrimary) {
         return;
       }
 
@@ -3017,7 +3030,7 @@ export function SqlErdCanvas({
         tableId
       });
     },
-    [deleteStrokeAt, layoutJson.annotations?.strokes?.length, nextStrokeColor, placeAnnotationAt, updateStrokeShape]
+    [deleteStrokeAt, isReadOnly, layoutJson.annotations?.strokes?.length, nextStrokeColor, placeAnnotationAt, updateStrokeShape]
   );
   const handleDoubleClickCapture = useCallback(
     (event: MouseEvent<HTMLDivElement>) => {
@@ -3101,6 +3114,7 @@ export function SqlErdCanvas({
         onPointerDownCapture={handlePointerDownCapture}
         shapeUtils={sqlErdShapeUtils}
       >
+        <SqlErdCanvasReadOnlyBridge isReadOnly={isReadOnly} />
         <SqlErdCanvasShapeSync
           canvasContentKey={canvasContentKey}
           shapes={shapes}

@@ -39,6 +39,7 @@ const types = await readFile(
 );
 
 assert.match(access, /FROM sql_erd_sessions AS s/);
+assert.match(access, /SELECT s\.id, s\.latest_op_seq/);
 assert.match(access, /JOIN workspace_members AS wm/);
 assert.match(access, /s\.deleted_at IS NULL/);
 assert.match(access, /wm\.user_id = \$3/);
@@ -53,7 +54,7 @@ assert.match(presence, /editingMode: payload\.editingMode/);
 assert.match(presence, /sentAt: payload\.sentAt/);
 assert.match(presence, /tool: payload\.tool/);
 assert.match(presence, /updatedAt: new Date\(\)\.toISOString\(\)/);
-assert.match(room, /latestOpSeq: 0/);
+assert.match(room, /latestOpSeq: access\.latestOpSeq/);
 assert.match(room, /presence: presenceService\.getPresence\(payload\)/);
 
 assert.match(events, /sql-erd:join/);

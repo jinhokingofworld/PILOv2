@@ -18,6 +18,11 @@ import {
 } from "../canvas/canvas-access.service";
 import { createCanvasPresenceService } from "../canvas/canvas-presence.service";
 import { createCanvasRoomService } from "../canvas/canvas-room.service";
+import {
+  createCanvasShapeCommitService,
+  getShapeCommitBlockedByLocks,
+  readShapeCommitPayload,
+} from "../canvas/canvas-shape-commit.service";
 import { createCanvasShapeLockService } from "../canvas/canvas-shape-lock.service";
 import { createCanvasShapePreviewService } from "../canvas/canvas-shape-preview.service";
 import { createSqlErdAccessService } from "../sql-erd/sql-erd-access.service";
@@ -60,6 +65,7 @@ import type {
   CanvasPresencePoint,
   CanvasPresenceUpdatePayload,
   CanvasRoomRef,
+  CanvasShapeCommitAck,
   CanvasShapeLockClaimPayload,
   CanvasShapeLockReleasePayload,
   CanvasShapeOperationPayload,
@@ -744,6 +750,9 @@ export async function createRealtimeSocketServer({
   const shapePreviewService = createCanvasShapePreviewService({
     redisClient: redisAdapter?.stateClient ?? null,
   });
+  const shapeCommitService = createCanvasShapeCommitService({
+    appServerUrl: config.appServerUrl,
+  });
   const roomService = createCanvasRoomService({
     accessService,
     presenceService,
@@ -1277,6 +1286,116 @@ export async function createRealtimeSocketServer({
 
       io.to(roomName).emit(canvasServerEvents.shapeLockRelease, lockReleasePayload);
     });
+
+    socket.on(
+      canvasClientEvents.shapeCommit,
+      async (payload, callback?: (ack: CanvasShapeCommitAck) => void) => {
+        const commitPayload = readShapeCommitPayload(payload);
+
+        if (!commitPayload) {
+          const ack: CanvasShapeCommitAck = {
+            error: {
+              code: "invalid_payload",
+              message: "canvas:shape:commit payload is invalid",
+            },
+            ok: false,
+          };
+          callback?.(ack);
+          emitCanvasError(socket, ack.error.message);
+          return;
+        }
+
+        const roomName = createCanvasRoomName(commitPayload);
+
+        if (!socket.rooms.has(roomName)) {
+          const ack: CanvasShapeCommitAck = {
+            error: {
+              code: "room_not_joined",
+              message: "join canvas room before committing shape operations",
+            },
+            ok: false,
+          };
+          callback?.(ack);
+          socket.emit(
+            canvasServerEvents.error,
+            createSocketErrorPayload("room_not_joined", ack.error.message),
+          );
+          return;
+        }
+
+        if (!assertCanvasRoomWritable(authedSocket, roomName)) {
+          callback?.({
+            error: {
+              code: "read_only",
+              message: "canvas room is read-only",
+            },
+            ok: false,
+          });
+          return;
+        }
+
+        const actorUserId = authedSocket.data.auth.userId ?? socket.id;
+        const commitShapeIds = Array.from(
+          new Set(
+            commitPayload.operations
+              .map((operation) => operation.shapeId.trim())
+              .filter(Boolean),
+          ),
+        );
+        const clearCommitShapePreview = async () => {
+          if (!commitShapeIds.length) return;
+
+          const clearEvent = await shapePreviewService.clearRoomPreview(
+            socket.id,
+            actorUserId,
+            commitPayload,
+            commitShapeIds,
+          );
+
+          if (clearEvent) {
+            socket.to(roomName).emit(canvasServerEvents.shapePreviewClear, clearEvent);
+          }
+        };
+        const blockingLocks = getShapeCommitBlockedByLocks({
+          locks: await shapeLockService.getRoomLocks(commitPayload),
+          operations: commitPayload.operations,
+          ownerUserId: actorUserId,
+        });
+
+        if (blockingLocks.length) {
+          await clearCommitShapePreview();
+          callback?.({
+            error: {
+              body: { locks: blockingLocks },
+              code: "shape_locked",
+              message: "shape is locked by another user",
+              status: 409,
+            },
+            ok: false,
+          });
+          return;
+        }
+
+        try {
+          const ack = await shapeCommitService.commitOperations(
+            authedSocket.data.auth.token,
+            commitPayload,
+          );
+          await clearCommitShapePreview();
+          callback?.(ack);
+        } catch (error) {
+          await clearCommitShapePreview();
+          console.error("Canvas realtime shape commit failed", error);
+          callback?.({
+            error: {
+              code: "internal_error",
+              message: "Canvas realtime shape commit failed",
+            },
+            ok: false,
+          });
+        }
+      },
+    );
 
     socket.on(canvasClientEvents.shapePreview, async (payload) => {
       const previewPayload = readShapePreviewPayload(payload);

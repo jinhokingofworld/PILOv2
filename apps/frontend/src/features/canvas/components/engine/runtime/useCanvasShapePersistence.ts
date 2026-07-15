@@ -31,6 +31,7 @@ type UseCanvasShapePersistenceOptions = {
   localShapeVersionRef: RuntimeRef<number>;
   onLocalShapeSyncIdle?: () => void;
   onShapeSyncConflict?: (conflict: CanvasShapeSyncConflict) => void;
+  onShapeSyncError?: (error: unknown) => void;
   pendingLocalShapeVersionsRef: RuntimeRef<Map<string, number>>;
   remoteShapeRevisionRef: RuntimeRef<Map<string, number>>;
   setCanvasHydrationVersion: (updater: (version: number) => number) => void;
@@ -53,6 +54,7 @@ export function useCanvasShapePersistence({
   localShapeVersionRef,
   onLocalShapeSyncIdle,
   onShapeSyncConflict,
+  onShapeSyncError,
   pendingLocalShapeVersionsRef,
   remoteShapeRevisionRef,
   setCanvasHydrationVersion,
@@ -221,6 +223,7 @@ export function useCanvasShapePersistence({
                   clearPendingLocalShapeChanges(pendingLocalShapeVersions);
                   if (isCanvasShapeSyncConflictError(error)) return;
 
+                  onShapeSyncError?.(error);
                   console.error("Canvas API shape sync failed", error);
                 });
             }
@@ -252,6 +255,7 @@ export function useCanvasShapePersistence({
                 clearPendingLocalShapeChanges(pendingLocalShapeVersions);
                 if (isCanvasShapeSyncConflictError(error)) return;
 
+                onShapeSyncError?.(error);
                 console.error("Canvas API shape sync failed", error);
               });
           }
@@ -274,6 +278,7 @@ export function useCanvasShapePersistence({
       freeformShapesRef,
       onLocalShapeSyncIdle,
       onShapeSyncConflict,
+      onShapeSyncError,
       remoteShapeRevisionRef,
       setFreeformShapes,
       shapeSyncQueueRef,
