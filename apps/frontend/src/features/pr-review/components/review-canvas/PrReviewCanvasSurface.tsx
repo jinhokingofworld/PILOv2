@@ -828,6 +828,7 @@ function resetPrReviewCanvas(
   shapes: TLShapePartial[],
   selectedReviewFileId: string | null | undefined,
   hydratingRef: MutableRefObject<boolean>,
+  internalShapeUpdateRef: MutableRefObject<boolean>,
   lastSyncedGeometryRef: MutableRefObject<Map<string, string>>
 ) {
   hydratingRef.current = true;
@@ -847,6 +848,7 @@ function resetPrReviewCanvas(
     }
 
     editor.createShapes(shapes);
+    updatePrReviewRelationGeometry(editor, internalShapeUpdateRef);
     selectReviewFileNode(editor, selectedReviewFileId);
     initializeSyncedFileGeometry(editor, lastSyncedGeometryRef);
   } finally {
@@ -1536,6 +1538,7 @@ export function PrReviewCanvasSurface({
         shapes,
         selectedReviewFileIdRef.current,
         hydratingRef,
+        internalShapeUpdateRef,
         lastSyncedGeometryRef
       );
       if (pendingRemoteOperationsRef.current.length) {
@@ -1575,6 +1578,7 @@ export function PrReviewCanvasSurface({
       shapes,
       selectedReviewFileIdRef.current,
       hydratingRef,
+      internalShapeUpdateRef,
       lastSyncedGeometryRef
     );
     if (persistedFileShapeEnabled) {
