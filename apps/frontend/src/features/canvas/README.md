@@ -71,9 +71,10 @@ truth를 유지해야 한다.
 shape batch/operation log 경로로 들어가지 않고 `PiloTldrawSyncRuntime`으로
 분기한다.
 
-현재 구현은 `@tldraw/sync` multiplayer server를 직접 붙이기 전 단계이므로
-`canvas_sync_documents` snapshot 저장/복원 fallback을 사용한다. 실제 sync server를
-연결할 때 frontend는 아래 값을 기준으로 realtime-server room에 접속해야 한다.
+현재 구현은 `NEXT_PUBLIC_PILO_REALTIME_SERVER_URL`과 bearer session token이 있으면
+`@tldraw/sync`로 realtime-server의 sync room에 접속한다. realtime-server를 사용할 수
+없는 local UI Preview/mock session에서는 `canvas_sync_documents` snapshot 저장/복원
+fallback을 사용한다. frontend는 아래 값을 기준으로 realtime-server room에 접속한다.
 
 ```text
 workspaceId = board.workspaceId
@@ -90,11 +91,11 @@ auth = bearer session token
 - `canvasId`는 `engineType === "tldraw_sync"`인 `freeform` Canvas여야 한다.
 - `classic` Canvas의 `canvas_freeform_shapes`, `shapes/batch`, `operations`
   API를 tldraw sync document 저장에 사용하지 않는다.
-- sync document의 최초 복원 기준은
-  `GET /workspaces/{workspaceId}/canvases/{canvasId}/sync-document`다.
-- sync server가 붙은 뒤에도 새로고침/room 재생성 복구 기준은
-  `canvas_sync_documents` 또는 sync server가 같은 persistence 경계에 저장한
-  snapshot이어야 한다.
+- sync document의 최초 복원 기준은 realtime-server가 DB의
+  `canvas_sync_documents.snapshot`에서 읽은 room snapshot이다. fallback runtime만
+  `GET /workspaces/{workspaceId}/canvases/{canvasId}/sync-document`를 직접 사용한다.
+- 새로고침/room 재생성 복구 기준은 realtime-server가 같은 persistence 경계에 저장한
+  `canvas_sync_documents` snapshot이어야 한다.
 - 로컬 UI Preview나 mock session은 realtime-server의 bearer session 검증을
   통과하지 않으므로 실제 multiplayer sync room에 접속하지 않는다.
 

@@ -15,11 +15,20 @@ export type CanvasAccessService = {
     context: CanvasAccessContext,
     room: CanvasRoomRef,
   ) => Promise<CanvasRoomAccess | null>;
+  getCanvasTldrawSyncRoomAccess: (
+    context: CanvasAccessContext,
+    room: CanvasRoomRef,
+  ) => Promise<CanvasRoomAccess | null>;
 };
 
 type CanvasAccessRow = {
   board_type: string;
   review_room_status: string | null;
+};
+
+type CanvasTldrawSyncAccessRow = {
+  board_type: string;
+  engine_type: string;
 };
 
 export function createCanvasAccessService(
@@ -81,6 +90,39 @@ export function createCanvasAccessService(
       }
 
       return null;
+    },
+    async getCanvasTldrawSyncRoomAccess(context, room) {
+      if (!context.userId || !room.workspaceId || !room.canvasId) {
+        return null;
+      }
+
+      if (!database) {
+        return { readOnly: false };
+      }
+
+      const access = await database.queryOne<CanvasTldrawSyncAccessRow>(
+        `
+          SELECT
+            c.board_type,
+            c.engine_type
+          FROM canvas c
+          JOIN workspace_members wm
+            ON wm.workspace_id = c.workspace_id
+           AND wm.user_id = $3
+          WHERE c.workspace_id = $1
+            AND c.id = $2
+            AND c.board_type = 'freeform'
+            AND c.engine_type = 'tldraw_sync'
+          LIMIT 1
+        `,
+        [room.workspaceId, room.canvasId, context.userId],
+      );
+
+      if (!access) {
+        return null;
+      }
+
+      return { readOnly: false };
     },
   };
 }

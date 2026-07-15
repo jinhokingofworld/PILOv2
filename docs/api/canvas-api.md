@@ -67,7 +67,7 @@ PR Review의 분석 결과, file decision, 위험도, Flow와 relation 원본, G
 - Review Canvas realtime room은 연결된 room의 상태에 따라 권한을 계산한다. active room은
   read-write, completed room은 Presence만 허용하는 read-only로 입장한다.
 - `classic` Canvas MVP에는 Yjs/CRDT, DB 기반 hard lock, viewer-only role, 복잡한 conflict UI가 없다. Shape 조작 중 사용자 경험을 위한 realtime-only soft lock/preview는 Socket.IO 레이어에서 처리하며 DB schema에는 저장하지 않는다.
-- `tldraw_sync` Canvas는 classic shape table/operation log를 사용하지 않고 `canvas_sync_documents` snapshot을 저장/복원하는 별도 engine이다. 실제 multiplayer sync server 연동 전까지는 snapshot persistence fallback으로 동작한다.
+- `tldraw_sync` Canvas는 classic shape table/operation log를 사용하지 않고 realtime-server의 `@tldraw/sync` room과 `canvas_sync_documents` snapshot 저장/복원을 사용하는 별도 engine이다. realtime-server URL/token이 없는 local fallback에서만 App Server sync-document API로 snapshot을 직접 저장/복원한다.
 
 ## Canvas 접근 정책
 
@@ -810,7 +810,8 @@ PATCH /workspaces/{workspaceId}/canvases/{canvasId}/leave
 
 ## MVP 제외
 
-- Yjs/CRDT 및 실제 tldraw multiplayer sync server
+- `classic` Canvas의 Yjs/CRDT 전환
+- `classic` Canvas shape table과 `tldraw_sync` room snapshot의 자동 migration
 - 복잡한 conflict UI
 - DB 기반 hard shape lock
 - public link 공유

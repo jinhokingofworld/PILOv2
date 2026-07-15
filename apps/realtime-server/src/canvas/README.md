@@ -15,21 +15,21 @@ This module owns Canvas Socket.IO rooms and presence delivery.
   room.
 - Emit leave events when a socket leaves or disconnects.
 - Return `canvas:joined` with current in-memory room presence.
-- When the tldraw sync engine is implemented, validate sync-room access and
-  create canvas-scoped sync rooms lazily.
+- Validate tldraw sync-room access and create canvas-scoped sync rooms lazily.
 
 ## Non-Responsibilities
 
 - Canvas shape persistence.
 - Canvas shape operation log writes.
 - `operations?afterSeq` catch-up API.
-- CRDT, Yjs, or tldraw sync.
+- CRDT or Yjs.
 - Long-term presence storage.
 - Persisting `editingShapeId` or `editingMode`; edit intent is realtime-only.
 
-Note: `@tldraw/sync` is currently a planned engine path, not an implemented
-multiplayer room in this module. Until it is implemented, `tldraw_sync` Canvas
-uses App Server `canvas_sync_documents` snapshot persistence fallback.
+Note: `@tldraw/sync` room state is owned by realtime-server. The room persists
+its recoverable snapshot to `canvas_sync_documents`, while local UI Preview can
+still use App Server snapshot persistence fallback when no realtime server/token
+is available.
 
 ## Event Boundary
 
@@ -67,8 +67,7 @@ presence automatically through the shared tldraw surface.
 
 ## tldraw_sync Room Contract
 
-When `@tldraw/sync` multiplayer is added, it should be added to this Canvas
-module rather than to App Server.
+`@tldraw/sync` multiplayer belongs to this Canvas module rather than App Server.
 
 Room identity:
 
@@ -107,9 +106,9 @@ Lifecycle:
 Persistence:
 
 - The sync room may hydrate from `canvas_sync_documents.snapshot`.
-- Snapshot saves must use the same persistence boundary as
-  `PUT /workspaces/{workspaceId}/canvases/{canvasId}/sync-document` or a shared
-  service with identical validation.
+- Snapshot saves use `canvas_sync_documents` directly from realtime-server with
+  the same workspace/canvas/provider boundary as the App Server sync-document
+  fallback API.
 - Do not write tldraw sync document state into `canvas_freeform_shapes` or
   `canvas_shape_operations`.
 

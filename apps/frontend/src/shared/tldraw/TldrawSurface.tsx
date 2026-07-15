@@ -17,6 +17,7 @@ export type TldrawSurfaceProps = {
   onPointerDownCapture?: PointerEventHandler<HTMLDivElement>;
   onWheelCapture?: WheelEventHandler<HTMLDivElement>;
   shapeUtils?: TldrawProps["shapeUtils"];
+  store?: TldrawProps["store"];
 };
 
 export function TldrawSurface({
@@ -29,6 +30,7 @@ export function TldrawSurface({
   onPointerDownCapture,
   onWheelCapture,
   shapeUtils,
+  store,
 }: TldrawSurfaceProps) {
   return (
     <div
@@ -40,6 +42,7 @@ export function TldrawSurface({
         hideUi={hideUi}
         licenseKey={licenseKey}
         shapeUtils={shapeUtils}
+        store={store}
         components={components}
         onMount={onMount}
       >
