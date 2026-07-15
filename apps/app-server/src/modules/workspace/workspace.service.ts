@@ -348,7 +348,14 @@ export class WorkspaceService {
       throw conflict(messages.join(" "));
     }
 
-    await this.database.execute(`DELETE FROM workspaces WHERE id = $1`, [workspaceId]);
+    await this.database.transaction(async (transaction) => {
+      await transaction.execute(
+        "SELECT set_config('pilo.activity_log_tenant_purge', 'on', true)"
+      );
+      await transaction.execute(`DELETE FROM workspaces WHERE id = $1`, [
+        workspaceId
+      ]);
+    });
     return { deleted: true, workspaceId };
   }
 
