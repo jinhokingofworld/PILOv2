@@ -285,7 +285,8 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
     `${root}/infra/modules/github-sync-observability/main.tf`,
     "utf8"
   );
-  assert.match(iam, /Action\s*=\s*\["sqs:SendMessage"\][\s\S]*Resource\s*=\s*var\.github_webhooks_queue_arn/);
+  assert.match(iam, /Action\s*=\s*\["sqs:SendMessage"\][\s\S]*Resource\s*=\s*var\.github_sync_worker_queue_arns/);
+  assert.match(env, /github_sync_worker_queue_arns\s+= module\.sqs\.github_sync_worker_queue_arns/);
   assert.match(env, /github_webhooks_queue_arn\s+= module\.sqs\.github_webhooks_queue_arn/);
   assert.match(
     env,
