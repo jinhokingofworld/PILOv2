@@ -176,6 +176,8 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
   const [urlInsertValue, setUrlInsertValue] = useState("");
   const [isCreatingRealtimeCanvas, setIsCreatingRealtimeCanvas] =
     useState(false);
+  const [isRealtimeCanvasDialogOpen, setIsRealtimeCanvasDialogOpen] =
+    useState(false);
   const [openPopover, setOpenPopover] = useState<
     "color" | "draw" | "line" | "insert" | null
   >(null);
@@ -477,12 +479,6 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
       return;
     }
 
-    const confirmed = window.confirm(
-      "실시간 동시편집 버전의 새 캔버스를 만들까요?\n기존 캔버스와 shape는 그대로 보존되고, 새 캔버스는 비어 있는 상태로 시작합니다.",
-    );
-
-    if (!confirmed) return;
-
     setIsCreatingRealtimeCanvas(true);
 
     try {
@@ -516,6 +512,7 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
         source: canvasClientMode,
         status: "ready",
       });
+      setIsRealtimeCanvasDialogOpen(false);
       closePopover();
       setActiveCanvasTool("select");
     } catch (error) {
@@ -611,6 +608,52 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
                 </Button>
               </div>
             </form>
+          </DialogContent>
+        </Dialog>
+        <Dialog
+          open={isRealtimeCanvasDialogOpen}
+          onOpenChange={(open) => {
+            if (!isCreatingRealtimeCanvas) {
+              setIsRealtimeCanvasDialogOpen(open);
+            }
+          }}
+        >
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>실시간 동시편집 Canvas를 만들까요?</DialogTitle>
+              <DialogDescription>
+                현재 Canvas는 그대로 보존하고, 같은 Workspace에 빈
+                tldraw sync Canvas를 새로 만듭니다.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="canvas-realtime-version-dialog">
+              <p>
+                새 Canvas에서는 사용자의 조작이 realtime-server의
+                <code>/sync/canvas</code> room을 통해 즉시 공유됩니다.
+              </p>
+              <ul>
+                <li>기존 shape는 복사하지 않습니다.</li>
+                <li>기존 Canvas의 shape와 저장 기록은 유지됩니다.</li>
+                <li>새 Canvas에서 만든 내용은 별도 sync snapshot으로 저장됩니다.</li>
+              </ul>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button
+                disabled={isCreatingRealtimeCanvas}
+                onClick={() => setIsRealtimeCanvasDialogOpen(false)}
+                type="button"
+                variant="outline"
+              >
+                취소
+              </Button>
+              <Button
+                disabled={isCreatingRealtimeCanvas}
+                onClick={createRealtimeCanvasVersion}
+                type="button"
+              >
+                {isCreatingRealtimeCanvas ? "만드는 중..." : "새 실시간 Canvas 만들기"}
+              </Button>
+            </div>
           </DialogContent>
         </Dialog>
 
@@ -846,10 +889,18 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
                   activeBoard?.engineType === "tldraw_sync" ||
                   isCreatingRealtimeCanvas
                 }
-                onClick={createRealtimeCanvasVersion}
+                onClick={() => {
+                  closePopover();
+                  setIsRealtimeCanvasDialogOpen(true);
+                }}
               >
                 <PanelsTopLeft />
               </ToolButton>
+              <div className="canvas-realtime-version-hint">
+                {activeBoard?.engineType === "tldraw_sync"
+                  ? "현재 Canvas는 이미 실시간 동시편집 타입입니다."
+                  : "실시간 버전은 빈 Canvas로 새로 만들어집니다."}
+              </div>
             </section>
           ) : null}
 
