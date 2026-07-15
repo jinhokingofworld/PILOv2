@@ -35,6 +35,13 @@ PR Review의 분석 결과, file decision, 위험도, Flow와 relation 원본, G
   변경 여부를 판단한다.
 - 모든 create/update/delete/batch mutation은 shape row 변경, `canvas.latest_op_seq`
   증가, `canvas_shape_operations` insert를 같은 transaction 안에서 처리한다.
+- Canvas shape 중 `note`, `sticky-note`, `text`, `frame`, `pilo-code-block`,
+  `arrow`, `line`의 생성·삭제와 text/title/code/language/frame name 같은 의미 변경은
+  공통 `activity_logs`에 같은 transaction으로 append한다. geometry-only 변경,
+  draw/highlight, viewport, presence, lock, retry/recovery는 기록하지 않는다.
+- Canvas Activity Log는 Canvas operation에서 dedupe key와 App Server 발생 시각을
+  만들며 client에게 Meeting/recording 식별자나 별도 Activity Log 값을 요구하지 않는다.
+  metadata에는 raw tldraw shape, 원문 code/file, token, secret을 저장하지 않는다.
 - `clientOperationId`는 frontend retry/idempotency 기준이다. Realtime canvas client는
   요청마다 stable `clientOperationId`를 보내야 한다. 기존 client, 다른 canvas engine,
   PR Review 호환을 위해 API level에서는 선택값으로 둔다. 없으면 서버가 값을 생성해서
