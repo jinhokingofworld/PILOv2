@@ -1027,7 +1027,7 @@ type SqltoerdOperationCatchupResponse = {
 
 An `operations_v1` session rejects legacy durable `PATCH` with `409` and `error.code: "SQL_ERD_WRITE_PROTOCOL_MISMATCH"`. A future `baseRevision` returns `409` with `error.code: "CONFLICT"`.
 
-On `SQL_ERD_WRITE_PROTOCOL_MISMATCH`, the client stops autosave, becomes read-only, and requires a session reload before writing again. It does not retry the stale payload or silently switch protocols. Reload fetches the current session detail and uses its returned `writeProtocol`; until that succeeds, pending source/layout changes stay unsaved in the old tab.
+On `SQL_ERD_WRITE_PROTOCOL_MISMATCH`, the client pauses autosave and persistence, disables retry, and shows a reload/read-only 안내. A session reload is required before persistence resumes. It does not retry the stale payload or silently switch protocols. Reload fetches the current session detail and uses its returned `writeProtocol`; until that succeeds, pending source/layout changes stay unsaved in the old tab.
 
 `sql-erd:operation` carries the `operation` object itself, not the HTTP write-response envelope. The App Server commits the session, operation, and outbox record in one DB transaction; the outbox then broadcasts the saved operation through Redis/Socket.IO. Delivery is at-least-once, so clients deduplicate by `id` or `opSeq` and use GET catch-up when a sequence gap is detected.
 

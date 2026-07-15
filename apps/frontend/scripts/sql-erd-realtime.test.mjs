@@ -200,7 +200,7 @@ assert.match(
 );
 assert.match(
   apiDocument,
-  /on `SQL_ERD_WRITE_PROTOCOL_MISMATCH`, the client stops autosave, becomes read-only, and requires a session reload before writing again/i
+  /on `SQL_ERD_WRITE_PROTOCOL_MISMATCH`, the client pauses autosave and persistence, disables retry, and shows a reload\/read-only 안내\. a session reload is required before persistence resumes/i
 );
 
 assert.match(types, /"sql-erd:join"/);
