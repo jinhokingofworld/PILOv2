@@ -68,7 +68,7 @@ function getCursorPosition({
     const targetRect = targetElement.getBoundingClientRect();
 
     return {
-      label: cursor.target?.label ?? cursor.displayName,
+      label: cursor.displayName,
       x:
         targetRect.left -
         containerRect.left +

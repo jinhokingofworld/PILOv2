@@ -36,6 +36,7 @@ assert.match(pageCursorHook, /targetPoint/);
 assert.match(pageCursorSurface, /fallback\.xRatio/);
 assert.match(pageCursorSurface, /querySelector/);
 assert.match(pageCursorSurface, /overflow-hidden/);
+assert.doesNotMatch(pageCursorSurface, /cursor\.target\?\.label \?\?/);
 assert.match(homeDashboard, /page="home"/);
 assert.match(calendarPanel, /page="calendar"/);
 assert.match(boardPanel, /page="board"/);
