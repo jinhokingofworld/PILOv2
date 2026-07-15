@@ -2457,6 +2457,13 @@ assert.equal(
   "conflict"
 );
 assert.equal(
+  sessionStateRuntime.getLayoutAutosaveBlockReasonForApiError({
+    code: "SQL_ERD_WRITE_PROTOCOL_MISMATCH",
+    status: 409
+  }),
+  "write_protocol_mismatch"
+);
+assert.equal(
   sessionStateRuntime.getLayoutAutosaveBlockReasonForStatus(401),
   "unauthorized"
 );
@@ -2506,6 +2513,17 @@ assert.deepEqual(sessionStateRuntime.getLayoutAutosavePausedBanner("conflict"), 
   message: "Workspace session changed. Reload the latest session before saving this layout.",
   reason: "conflict"
 });
+assert.deepEqual(
+  sessionStateRuntime.getLayoutAutosavePausedBanner(
+    "write_protocol_mismatch"
+  ),
+  {
+    canRetry: false,
+    message:
+      "쓰기 프로토콜이 변경되었습니다. 최신 세션을 다시 불러올 때까지 이 탭은 읽기 전용입니다.",
+    reason: "write_protocol_mismatch"
+  }
+);
 assert.deepEqual(
   sessionStateRuntime.getLayoutAutosavePausedBanner("unauthorized"),
   {
@@ -4053,6 +4071,42 @@ assert.equal(updateSqlErdSessionRequests[0].init.method, "PATCH");
 assert.deepEqual(
   JSON.parse(updateSqlErdSessionRequests[0].init.body),
   updateSessionPayload
+);
+
+const updateSqlErdSessionMetadataRequests = [];
+const updateSqlErdSessionMetadataClient = apiClientRuntime.createSqlErdApiClient({
+  fetcher: async (url, init) => {
+    updateSqlErdSessionMetadataRequests.push({ init, url });
+
+    return new Response(
+      JSON.stringify({
+        success: true,
+        data: createRuntimeTestSession({ revision: 4, title: "Renamed ERD" })
+      }),
+      {
+        headers: { "Content-Type": "application/json" },
+        status: 200
+      }
+    );
+  }
+});
+const updatedSqlErdSessionMetadata =
+  await updateSqlErdSessionMetadataClient.updateSessionMetadata(
+    "workspace 1",
+    "session 1",
+    { baseRevision: 3, title: "Renamed ERD" }
+  );
+
+assert.equal(updatedSqlErdSessionMetadata.title, "Renamed ERD");
+assert.equal(updateSqlErdSessionMetadataRequests.length, 1);
+assert.equal(
+  updateSqlErdSessionMetadataRequests[0].url,
+  "http://localhost:4000/api/v1/workspaces/workspace%201/sql-erd-sessions/session%201/metadata"
+);
+assert.equal(updateSqlErdSessionMetadataRequests[0].init.method, "PATCH");
+assert.deepEqual(
+  JSON.parse(updateSqlErdSessionMetadataRequests[0].init.body),
+  { baseRevision: 3, title: "Renamed ERD" }
 );
 
 const deleteSqlErdSessionRequests = [];
@@ -5951,8 +6005,14 @@ assert.match(sessionList, /createSession/);
 assert.match(sessionList, /getSqlErdCreateSessionTitle/);
 assert.match(sessionList, /getSqlErdSessionTitleUpdate/);
 assert.match(sessionList, /updateSqlErdSessionSummaryTitle/);
-assert.match(sessionList, /updateSession/);
+assert.match(sessionList, /updateSessionMetadata/);
 assert.match(sessionList, /baseRevision: session\.revision/);
+const sessionTitleRenameHandler = sessionList.slice(
+  sessionList.indexOf("const handleSaveSessionTitle"),
+  sessionList.indexOf("const handleDeleteSession")
+);
+assert.match(sessionTitleRenameHandler, /apiClient\.updateSessionMetadata/);
+assert.doesNotMatch(sessionTitleRenameHandler, /apiClient\.updateSession\(/);
 assert.match(sessionList, /DialogTitle>새 ERD 만들기/);
 assert.match(sessionList, /제목 수정/);
 assert.match(sessionList, /deleteSession/);
@@ -6011,6 +6071,7 @@ assert.match(
   /SQL_ERD_LAYOUT_AUTOSAVE_MAX_RETRY_DELAY_MS = 30000/
 );
 assert.match(sessionStateUtils, /getLayoutAutosaveBlockReasonForStatus/);
+assert.match(sessionStateUtils, /getLayoutAutosaveBlockReasonForApiError/);
 assert.match(sessionStateUtils, /isLayoutAutosaveTransientStatus/);
 assert.match(sessionStateUtils, /getLayoutAutosaveDelayMs/);
 assert.match(sessionStateUtils, /getLayoutAutosavePausedBanner/);
@@ -6156,10 +6217,94 @@ assert.match(panel, /type LayoutAutosaveBlockReason/);
 assert.match(panel, /layoutAutosaveBlockReason/);
 assert.match(panel, /getLayoutAutosaveBlockReason/);
 assert.match(panel, /getLayoutAutosavePausedBanner/);
+assert.match(panel, /SQL_ERD_WRITE_PROTOCOL_MISMATCH/);
+assert.match(panel, /write_protocol_mismatch/);
 assert.match(panel, /AutosavePausedBanner/);
 assert.match(panel, /Autosave paused/);
 assert.match(panel, /Reload session/);
 assert.match(panel, /Retry once/);
+assert.match(
+  panel,
+  /const isWriteProtocolMismatch =\s*layoutAutosaveBlockReason === "write_protocol_mismatch"/
+);
+assert.match(
+  panel,
+  /isDialectSelectDisabled=\{\s*!isSessionReady \|\|\s*isWriteProtocolMismatch \|\|/s
+);
+assert.match(
+  panel,
+  /isSourceTextReadOnly=\{\s*!isSessionReady \|\|\s*isWriteProtocolMismatch \|\|/s
+);
+assert.match(
+  panel,
+  /<CanvasShell[\s\S]*?isReadOnly=\{isWriteProtocolMismatch\}/
+);
+assert.match(canvasSurface, /isReadOnly\?: boolean/);
+assert.match(
+  canvasSurface,
+  /editor\.updateInstanceState\(\{ isReadonly: isReadOnly \}\)/
+);
+assert.match(
+  canvasSurface,
+  /const onLayoutPatch = isReadOnly \? undefined : onLayoutPatchProp/
+);
+assert.match(
+  canvasSurface,
+  /const handlePointerDownCapture = useCallback\(\s*\(event:[\s\S]*?if \(isReadOnly \|\| !editor/s
+);
+assert.match(panel, /const isWriteProtocolMismatchRef = useRef\(false\)/);
+assert.match(
+  panel,
+  /isWriteProtocolMismatchRef\.current = isWriteProtocolMismatch/
+);
+assert.match(
+  panel,
+  /if \(isWriteProtocolMismatch\) \{[\s\S]*?setNormalizedSqlPreview\(null\)/
+);
+assert.match(
+  panel,
+  /if \(isWriteProtocolMismatchRef\.current\) \{\s*setIsNormalizedSqlApplying\(false\);\s*return;/s
+);
+assert.match(
+  panel,
+  /const handlePreviewNormalizedSql = useCallback\(\(\) => \{[\s\S]*?if \(\s*isWriteProtocolMismatch \|\|\s*!resolvedDialect/s
+);
+assert.match(
+  panel,
+  /const handleApplyNormalizedSql = useCallback\(\(\) => \{[\s\S]*?isWriteProtocolMismatch \|\|/s
+);
+assert.match(
+  panel,
+  /const handleUndoNormalizedSql = useCallback\(\(\) => \{\s*if \(isWriteProtocolMismatch \|\| isNormalizedSqlApplying\)/s
+);
+assert.match(
+  panel,
+  /const handleRedoNormalizedSql = useCallback\(\(\) => \{\s*if \(isWriteProtocolMismatch \|\| isNormalizedSqlApplying\)/s
+);
+assert.match(
+  panel,
+  /canPreviewNormalizedSql=\{\s*isSessionReady &&\s*!isWriteProtocolMismatch/s
+);
+assert.match(
+  panel,
+  /canRedoNormalizedSql=\{[\s\S]*?!isWriteProtocolMismatch &&/s
+);
+assert.match(
+  panel,
+  /canUndoNormalizedSql=\{[\s\S]*?!isWriteProtocolMismatch &&/s
+);
+assert.match(
+  panel,
+  /canAddForeignKey=\{\s*isSessionReady &&\s*!isWriteProtocolMismatch/s
+);
+assert.match(
+  panel,
+  /<NormalizedSqlPreviewDialog[\s\S]*?isReadOnly=\{isWriteProtocolMismatch\}/
+);
+assert.match(
+  panel,
+  /disabled=\{isReadOnly \|\| !preview \|\| !preview\.hasChanges \|\| isApplying\}/
+);
 assert.match(panel, /handleReloadSession/);
 assert.match(panel, /handleReloadPausedSession/);
 assert.match(panel, /handleRetryLayoutAutosaveOnce/);
@@ -6180,7 +6325,7 @@ assert.doesNotMatch(
 );
 assert.doesNotMatch(panel, /isLayoutAutosaveBlocked/);
 assert.match(panel, /isSqlErdApiTransientAutosaveError/);
-assert.match(panel, /getLayoutAutosaveBlockReasonForStatus/);
+assert.match(panel, /getLayoutAutosaveBlockReasonForApiError/);
 assert.match(panel, /isLayoutAutosaveTransientStatus/);
 assert.match(panel, /createSqlErdLayoutAutosaveRequest/);
 assert.match(panel, /getLayoutAutosaveDelayMs\(layoutAutosaveRetryAttempt\)/);

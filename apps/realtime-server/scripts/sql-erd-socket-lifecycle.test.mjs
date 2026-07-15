@@ -73,7 +73,9 @@ function createTestDatabase() {
       }
 
       if (text.includes("FROM sql_erd_sessions AS s")) {
-        return values[0] === "forbidden-session" ? null : { id: values[0] };
+        return values[0] === "forbidden-session"
+          ? null
+          : { id: values[0], latest_op_seq: 7 };
       }
 
       throw new Error(`Unexpected query: ${text}`);
@@ -135,7 +137,14 @@ try {
   const firstTab = await connect("se-in");
   const secondTab = await connect("se-in");
   const observer = await connect("observer");
-  await Promise.all([join(firstTab), join(secondTab), join(observer)]);
+  const [firstJoined, secondJoined, observerJoined] = await Promise.all([
+    join(firstTab),
+    join(secondTab),
+    join(observer)
+  ]);
+  assert.equal(firstJoined.latestOpSeq, 7);
+  assert.equal(secondJoined.latestOpSeq, 7);
+  assert.equal(observerJoined.latestOpSeq, 7);
 
   let update = waitForEvent(observer, "sql-erd:presence:update");
   firstTab.emit("sql-erd:presence:update", createPresence({ x: 10, y: 20 }));

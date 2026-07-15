@@ -20,6 +20,10 @@ assert.ok(
   migrationFilenames.includes("061_create_sql_erd_operation_delivery.sql"),
   "SQLtoERD operation delivery migration must exist"
 );
+assert.ok(
+  migrationFilenames.includes("069_create_sql_erd_session_creation_audit.sql"),
+  "SQLtoERD session creation audit migration must exist"
+);
 
 const migration = await readFile(
   new URL(
@@ -30,6 +34,13 @@ const migration = await readFile(
 );
 const apiDocument = await readFile(
   new URL("../../../../docs/api/sqltoerd-api.md", import.meta.url),
+  "utf8"
+);
+const sessionCreationAuditMigration = await readFile(
+  new URL(
+    "../../../../db/migrations/069_create_sql_erd_session_creation_audit.sql",
+    import.meta.url
+  ),
   "utf8"
 );
 
@@ -57,6 +68,24 @@ assert.match(
   /ALTER TABLE public\.sql_erd_session_operation_outbox ENABLE ROW LEVEL SECURITY/
 );
 assert.match(
+  sessionCreationAuditMigration,
+  /CREATE TABLE public\.sql_erd_session_creation_audit/
+);
+assert.match(sessionCreationAuditMigration, /session_id UUID NOT NULL UNIQUE/);
+assert.match(sessionCreationAuditMigration, /session_created_at TIMESTAMPTZ NOT NULL/);
+assert.match(
+  sessionCreationAuditMigration,
+  /CREATE FUNCTION public\.capture_sql_erd_session_creation_audit\(\)/
+);
+assert.match(
+  sessionCreationAuditMigration,
+  /CREATE TRIGGER trg_sql_erd_sessions_capture_creation_audit\s+AFTER INSERT ON public\.sql_erd_sessions/s
+);
+assert.match(
+  sessionCreationAuditMigration,
+  /ALTER TABLE public\.sql_erd_session_creation_audit ENABLE ROW LEVEL SECURITY/
+);
+assert.match(
   apiDocument,
   /GET` \| `\/workspaces\/\{workspaceId\}\/sql-erd-sessions\/\{sessionId\}\/operations/
 );
@@ -68,6 +97,26 @@ assert.match(apiDocument, /latestOpSeq: number/);
 assert.match(apiDocument, /type PatchCollection<T>/);
 assert.match(apiDocument, /SQL_ERD_WRITE_PROTOCOL_MISMATCH/);
 assert.match(apiDocument, /"sql-erd:operation" = SqltoerdLayoutPatchOperation/);
+assert.match(
+  apiDocument,
+  /`PATCH` \| `\/workspaces\/\{workspaceId\}\/sql-erd-sessions\/\{sessionId\}\/metadata`/
+);
+assert.match(
+  apiDocument,
+  /plural metadata PATCH accepts only `baseRevision` and `title`/i
+);
+assert.match(apiDocument, /soft delete is write-protocol-independent/i);
+assert.match(
+  apiDocument,
+  /cleans up any source-writer lease in the same transaction/i
+);
+assert.match(
+  apiDocument,
+  /`SQL_ERD_OPERATIONS_V1_ENABLED=true` creates a new session with\s+`operations_v1`/i
+);
+assert.match(apiDocument, /database column default remains `snapshot`/i);
+assert.match(apiDocument, /sql_erd_session_creation_audit/);
+assert.match(apiDocument, /session_created_at >= :cutover_started_at/);
 
 const currentUserId = "11111111-1111-4111-8111-111111111111";
 const workspaceId = "22222222-2222-4222-8222-222222222222";

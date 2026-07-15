@@ -31,16 +31,16 @@ export function createSqlErdRoomService({
 }): SqlErdRoomService {
   return {
     async joinSqlErdRoom(context, payload) {
-      const allowed = await accessService.canJoinSqlErdRoom(context, payload);
+      const access = await accessService.canJoinSqlErdRoom(context, payload);
 
-      if (!allowed) {
+      if (!access) {
         return { joined: false, reason: "forbidden" };
       }
 
       return {
         joined: true,
         payload: {
-          latestOpSeq: 0,
+          latestOpSeq: access.latestOpSeq,
           presence: presenceService.getPresence(payload),
           sessionId: payload.sessionId,
           workspaceId: payload.workspaceId,

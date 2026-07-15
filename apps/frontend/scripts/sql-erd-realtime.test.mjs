@@ -56,6 +56,82 @@ async function loadOperationSyncRuntime() {
   }
 }
 
+async function loadOperationSyncHookRuntime() {
+  const outputDir = await mkdtemp(
+    fileURLToPath(new URL("../../.pilo-sqltoerd-operation-hook-", import.meta.url))
+  );
+  const hookOutputPath = join(outputDir, "use-sql-erd-operation-sync.mjs");
+  const operationSyncOutputPath = join(outputDir, "operation-sync-state.mjs");
+  const reactOutputPath = join(outputDir, "react.mjs");
+  const clientOutputPath = join(outputDir, "sql-erd-realtime-client.mjs");
+
+  try {
+    await writeFile(
+      reactOutputPath,
+      `let refIndex = 0;
+const refs = [];
+let stateIndex = 0;
+const states = [];
+export function useRef(value) {
+  const index = refIndex++;
+  return (refs[index] ??= { current: value });
+}
+export function useState(value) {
+  const index = stateIndex++;
+  states[index] ??= value;
+  return [states[index], (next) => { states[index] = typeof next === "function" ? next(states[index]) : next; }];
+}
+export const useCallback = (callback) => callback;
+export const useMemo = (factory) => factory();
+export const useEffect = (effect) => { effect(); };
+`,
+      "utf8"
+    );
+    await writeFile(
+      clientOutputPath,
+      `const handlers = new Map();
+export const socket = {
+  connected: false,
+  connect() { this.connected = true; handlers.get("connect")?.(); },
+  disconnect() { this.connected = false; },
+  emit() {},
+  on(event, handler) { handlers.set(event, handler); },
+  removeAllListeners() { handlers.clear(); }
+};
+export const createSqlErdRealtimeSocket = () => socket;
+export const getSqlErdRealtimeServerUrl = () => "http://realtime.test";
+export const emitServerEvent = (event, payload) => handlers.get(event)?.(payload);
+`,
+      "utf8"
+    );
+    await compileRuntimeModule(
+      "../src/features/sql-erd/realtime/operation-sync-state.ts",
+      operationSyncOutputPath
+    );
+    await compileRuntimeModule(
+      "../src/features/sql-erd/realtime/use-sql-erd-operation-sync.ts",
+      hookOutputPath,
+      [
+        [/from "react"/g, 'from "./react.mjs"'],
+        [
+          /from "\.\/sql-erd-realtime-client"/g,
+          'from "./sql-erd-realtime-client.mjs"'
+        ],
+        [/from "\.\/operation-sync-state"/g, 'from "./operation-sync-state.mjs"']
+      ]
+    );
+
+    return {
+      client: await import(new URL(`file:///${clientOutputPath.replace(/\\\\/g, "/")}`).href),
+      hook: await import(`${new URL(`file:///${hookOutputPath.replace(/\\\\/g, "/")}`).href}?${Date.now()}`),
+      outputDir
+    };
+  } catch (error) {
+    await rm(outputDir, { force: true, recursive: true });
+    throw error;
+  }
+}
+
 const types = await readFile(
   new URL(
     "../src/features/sql-erd/realtime/sql-erd-realtime-types.ts",
@@ -113,6 +189,19 @@ const canvas = await readFile(
   new URL("../src/features/sql-erd/components/sql-erd-canvas.tsx", import.meta.url),
   "utf8",
 );
+const apiDocument = await readFile(
+  new URL("../../../docs/api/sqltoerd-api.md", import.meta.url),
+  "utf8",
+);
+
+assert.match(
+  apiDocument,
+  /`sql-erd:joined` reads `latestOpSeq` from `sql_erd_sessions\.latest_op_seq` in the database for each authorized join/i
+);
+assert.match(
+  apiDocument,
+  /on `SQL_ERD_WRITE_PROTOCOL_MISMATCH`, the client pauses autosave and persistence, disables retry, and shows a reload\/read-only 안내\. a session reload is required before persistence resumes/i
+);
 
 assert.match(types, /"sql-erd:join"/);
 assert.match(types, /"sql-erd:presence:update"/);
@@ -133,6 +222,7 @@ assert.match(operationHook, /lastSeenOpSeqRef/);
 assert.match(operationHook, /liveOperationBufferRef/);
 assert.match(operationHook, /catchUpOperations/);
 assert.match(operationHook, /sql-erd:operation/);
+assert.match(operationHook, /payload\.latestOpSeq > lastSeenOpSeqRef\.current/);
 assert.match(sourceLockHook, /SOURCE_LOCK_RENEW_INTERVAL_MS = 10_000/);
 assert.match(sourceLockHook, /createSqlErdSourceLockController/);
 assert.match(sourceLockController, /acquireSourceLock/);
@@ -284,6 +374,45 @@ assert.equal(
       "acquire:second:second-lease-4",
       "release:second:second-lease-4"
     ]);
+  } finally {
+    await rm(outputDir, { force: true, recursive: true });
+  }
+}
+
+{
+  const { client, hook, outputDir } = await loadOperationSyncHookRuntime();
+  const catchUpAfterSequences = [];
+
+  try {
+    hook.useSqlErdOperationSync(
+      {
+        authToken: "token",
+        currentUser: { displayName: "Se-in", userId: "user-1" },
+        enabled: true,
+        sessionId: "session-1",
+        workspaceId: "workspace-1"
+      },
+      {
+        applyOperations: () => {},
+        catchUpOperations: async (afterSeq) => {
+          catchUpAfterSequences.push(afterSeq);
+          return { items: [], latestOpSeq: 7, nextAfterSeq: null };
+        },
+        initialLatestOpSeq: 4,
+        writeProtocol: "operations_v1"
+      }
+    );
+
+    client.emitServerEvent("sql-erd:joined", {
+      latestOpSeq: 7,
+      presence: [],
+      sessionId: "session-1",
+      workspaceId: "workspace-1"
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.deepEqual(catchUpAfterSequences, [4]);
   } finally {
     await rm(outputDir, { force: true, recursive: true });
   }

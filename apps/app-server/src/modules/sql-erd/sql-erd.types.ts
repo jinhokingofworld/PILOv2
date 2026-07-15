@@ -81,6 +81,11 @@ export interface NormalizedUpdateSqlErdSessionInput {
   relationCount?: number;
 }
 
+export interface UpdateSqlErdSessionMetadataRequest {
+  baseRevision: number;
+  title: string;
+}
+
 export interface NormalizedDeleteSqlErdSessionInput {
   baseRevision: number;
 }

@@ -38,6 +38,11 @@ export type UpdateSqlErdSessionRequest = Partial<CreateSqlErdSessionRequest> & {
   baseRevision: number;
 };
 
+export type UpdateSqlErdSessionMetadataRequest = {
+  baseRevision: number;
+  title: string;
+};
+
 export type ListSqlErdSessionsQuery = {
   cursor?: string | null;
   limit?: number;
@@ -290,6 +295,10 @@ export function createSqlErdApiClient({
     return `${sessionsPath(workspaceId)}/${encodeURIComponent(sessionId)}` as const;
   }
 
+  function sessionMetadataPath(workspaceId: string, sessionId: string) {
+    return `${sessionPath(workspaceId, sessionId)}/metadata` as const;
+  }
+
   function operationsPath(workspaceId: string, sessionId: string) {
     return `${sessionPath(workspaceId, sessionId)}/operations` as const;
   }
@@ -452,6 +461,24 @@ export function createSqlErdApiClient({
         sessionPath(workspaceId, sessionId),
         {
           body: JSON.stringify(payload),
+          method: "PATCH"
+        },
+        requestOptions
+      );
+    },
+
+    async updateSessionMetadata(
+      workspaceId: string,
+      sessionId: string,
+      payload: UpdateSqlErdSessionMetadataRequest
+    ) {
+      return requestSqlErdApiPayload<SqltoerdSessionPayload>(
+        sessionMetadataPath(workspaceId, sessionId),
+        {
+          body: JSON.stringify({
+            baseRevision: payload.baseRevision,
+            title: payload.title
+          }),
           method: "PATCH"
         },
         requestOptions
