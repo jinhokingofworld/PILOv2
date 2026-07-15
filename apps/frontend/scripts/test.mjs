@@ -947,6 +947,7 @@ assert.doesNotMatch(tldrawSurface, /createCanvasShapeSyncQueue/);
 assert.doesNotMatch(tldrawSurface, /writeCanvasStorage/);
 assert.match(piloTldrawCanvas, /TldrawSurface/);
 assert.match(piloTldrawCanvas, /piloCanvasShapeUtils/);
+assert.match(piloTldrawCanvas, /hideUi/);
 assert.match(piloTldrawCanvas, /CanvasStateReporter/);
 assert.match(piloTldrawCanvas, /initialViewSetting/);
 assert.match(piloTldrawCanvas, /editor\.setCamera/);
