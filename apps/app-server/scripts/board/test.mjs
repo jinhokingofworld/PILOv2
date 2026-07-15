@@ -242,6 +242,7 @@ await import("./issue-update.test.mjs");
 await import("./issue-create.test.mjs");
 await import("./issue-create-operation-migration.test.mjs");
 await import("./issue-create-idempotency.test.mjs");
+await import("./activity-log.test.mjs");
 await import("./contract.test.mjs");
 await import("./github-sync-workspace-isolation.test.mjs");
 await import("./full-sync-project-items.test.mjs");

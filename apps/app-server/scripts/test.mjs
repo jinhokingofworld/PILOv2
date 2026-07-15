@@ -582,9 +582,13 @@ await import("./meeting/livekit-token.test.mjs");
 await import("./meeting/livekit-webhook.test.mjs");
 await import("./meeting/meeting-report-job.test.mjs");
 await import("./calendar/test.mjs");
+await import("./common/activity-log.test.mjs");
 await import("./canvas/activity-log.test.mjs");
 await import("./canvas/review-canvas-access.test.mjs");
 await import("./meeting/test.mjs");
+if (process.env.DATABASE_URL) {
+  await import("./meeting/participant-session-postgres.test.mjs");
+}
 await import("./github-integration/test.mjs");
 await import("./pr-review/test.mjs");
 await import("./board/test.mjs");
@@ -592,3 +596,4 @@ await import("./sqltoerd/test.mjs");
 await import("./sqltoerd/operation-delivery.test.mjs");
 await import("./sqltoerd/source-snapshot.test.mjs");
 await import("./sqltoerd/operation-publisher.test.mjs");
+await import("./sqltoerd/operations-v1-cutover-manifest.test.mjs");

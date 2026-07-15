@@ -1,9 +1,11 @@
 import json
+import logging
 from types import SimpleNamespace
 
 import pytest
 
 from app.meeting_report_processor import (
+    ActivityEvidence,
     AudioObjectMetadata,
     GeneratedMeetingReport,
     InfrastructureError,
@@ -119,6 +121,34 @@ class FakeCompletedReportConnection:
         return FakeCompletedReportCursor()
 
 
+class FakeActivityEvidenceCursor:
+    def __init__(self, rows: list[dict[str, object]]) -> None:
+        self.rows = rows
+
+    def fetchall(self) -> list[dict[str, object]]:
+        return self.rows
+
+
+class FakeActivityEvidenceConnection:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, tuple[object, ...]]] = []
+
+    def execute(self, query: str, values: tuple[object, ...]):
+        self.calls.append((query, values))
+        if "FROM meeting_report_activity_evidence" in query:
+            return FakeActivityEvidenceCursor([])
+        return FakeActivityEvidenceCursor(
+            [
+                {
+                    "activity_log_id": "88888888-8888-8888-8888-888888888888",
+                    "occurred_at": "2026-07-16T00:00:00+00:00",
+                    "action": "calendar_event_updated",
+                    "summary": "디자인 리뷰 일정을 변경했습니다.",
+                }
+            ]
+        )
+
+
 class FakeStorage:
     def __init__(
         self,
@@ -155,6 +185,7 @@ class FakeAiClient:
         self.llm_failure = llm_failure
         self.transcribe_calls: list[str] = []
         self.generate_calls: list[str] = []
+        self.generate_activity_evidence: list[list[ActivityEvidence]] = []
 
     def transcribe(self, audio_file_path: str) -> list[TranscriptSegment]:
         self.transcribe_calls.append(audio_file_path)
@@ -162,8 +193,11 @@ class FakeAiClient:
             raise self.stt_failure
         return [TranscriptSegment(0, 0, 1_000, "진호: 회의록 조회 API와 worker 처리를 정리합니다.")]
 
-    def generate_report(self, transcript_text: str, transcript_segments) -> GeneratedMeetingReport:
+    def generate_report(
+        self, transcript_text: str, transcript_segments, activity_evidence=None
+    ) -> GeneratedMeetingReport:
         self.generate_calls.append(transcript_text)
+        self.generate_activity_evidence.append(list(activity_evidence or []))
         if self.llm_failure:
             raise self.llm_failure
         return parse_generated_report_json(
@@ -184,10 +218,16 @@ class FakeAiClient:
                         {"sourceType": "decision", "sourceIndex": 0, "segmentIndexes": [0]},
                         {"sourceType": "action_item", "sourceIndex": 0, "segmentIndexes": [0]},
                     ],
+                    "activityEvidenceReferences": (
+                        [{"sourceType": "action_item", "sourceIndex": 0, "activityIndexes": [0]}]
+                        if activity_evidence
+                        else []
+                    ),
                 }
             ),
             transcript_text,
             transcript_segments,
+            activity_evidence,
         )
 
 
@@ -459,7 +499,10 @@ def test_parse_generated_report_rejects_action_items_that_violate_db_text_constr
 def test_processor_marks_invalid_action_item_payload_as_llm_failure() -> None:
     class InvalidActionItemAiClient(FakeAiClient):
         def generate_report(
-            self, transcript_text: str, transcript_segments: list[TranscriptSegment]
+            self,
+            transcript_text: str,
+            transcript_segments: list[TranscriptSegment],
+            activity_evidence=None,
         ) -> GeneratedMeetingReport:
             self.generate_calls.append(transcript_text)
             return parse_generated_report_json(
@@ -484,6 +527,7 @@ def test_processor_marks_invalid_action_item_payload_as_llm_failure() -> None:
                 ),
                 transcript_text,
                 transcript_segments,
+                activity_evidence,
             )
 
     repository = FakeRepository()
@@ -497,6 +541,177 @@ def test_processor_marks_invalid_action_item_payload_as_llm_failure() -> None:
     assert repository.failed_updates == [
         (REPORT_ID, "LLM", "Meeting report could not be generated.")
     ]
+
+
+def test_processor_logs_sanitized_llm_failure_details(caplog) -> None:
+    processor = MeetingReportProcessor(
+        FakeRepository(),
+        FakeStorage(),
+        FakeAiClient(llm_failure=ProviderBusinessError("Missing required evidence")),
+    )
+
+    with caplog.at_level(logging.WARNING, logger="app.meeting_report_processor"):
+        processor.process_message(meeting_report_job_payload())
+
+    assert "error_category=invalid_evidence" in caplog.text
+    assert "error_type=ProviderBusinessError" in caplog.text
+    assert "status_code=None" in caplog.text
+    assert "회의록 조회 API와 worker 처리 방향을 정리합니다." not in caplog.text
+
+
+def test_processor_passes_activity_snapshot_to_report_generation() -> None:
+    activity = ActivityEvidence(
+        activity_log_id="88888888-8888-8888-8888-888888888888",
+        source_index=0,
+        occurred_at="2026-07-16T00:00:00+00:00",
+        action="calendar_event_updated",
+        summary="디자인 리뷰 일정을 변경했습니다.",
+    )
+    repository = FakeRepository(context=report_context(activity_evidence=[activity]))
+    ai_client = FakeAiClient()
+    processor = MeetingReportProcessor(repository, FakeStorage(), ai_client)
+
+    result = processor.process_message(meeting_report_job_payload())
+
+    assert result.reason == "completed"
+    assert ai_client.generate_activity_evidence == [[activity]]
+    assert repository.completed_updates[0][1].activity_evidence == [activity]
+
+
+def test_parse_generated_report_allows_no_decision_evidence_when_no_decision_was_made() -> None:
+    report = parse_generated_report_json(
+        json.dumps(
+            {
+                "summary": "요약",
+                "discussionPoints": "논의",
+                "decisions": "결정된 내용 없음",
+                "actionItemCandidates": [],
+                "evidence": [],
+            }
+        ),
+        "원문",
+        [TranscriptSegment(0, 0, 1_000, "원문")],
+    )
+
+    assert report.evidence == []
+
+
+def test_parse_generated_report_requires_evidence_for_each_action_item() -> None:
+    with pytest.raises(ProviderBusinessError, match="Missing required evidence"):
+        parse_generated_report_json(
+            json.dumps(
+                {
+                    "summary": "요약",
+                    "discussionPoints": "논의",
+                    "decisions": "결정된 내용 없음",
+                    "actionItemCandidates": [
+                        {
+                            "title": "작업",
+                            "description": "설명",
+                            "assigneeUserId": None,
+                            "priority": "MEDIUM",
+                        }
+                    ],
+                    "evidence": [],
+                }
+            ),
+            "원문",
+            [TranscriptSegment(0, 0, 1_000, "원문")],
+        )
+
+
+@pytest.mark.parametrize("source_type", ["summary", "discussion"])
+def test_parse_generated_report_rejects_nonzero_singleton_transcript_evidence_index(
+    source_type: str,
+) -> None:
+    with pytest.raises(ProviderBusinessError, match="Invalid singleton evidence"):
+        parse_generated_report_json(
+            json.dumps(
+                {
+                    "summary": "요약",
+                    "discussionPoints": "논의",
+                    "decisions": "결정된 내용 없음",
+                    "actionItemCandidates": [],
+                    "evidence": [
+                        {"sourceType": source_type, "sourceIndex": 1, "segmentIndexes": [0]}
+                    ],
+                }
+            ),
+            "원문",
+            [TranscriptSegment(0, 0, 1_000, "원문")],
+        )
+
+
+@pytest.mark.parametrize("source_type", ["summary", "discussion"])
+def test_parse_generated_report_rejects_nonzero_singleton_activity_evidence_index(
+    source_type: str,
+) -> None:
+    activity = ActivityEvidence(
+        activity_log_id="88888888-8888-8888-8888-888888888888",
+        source_index=0,
+        occurred_at="2026-07-16T00:00:00+00:00",
+        action="calendar_event_updated",
+        summary="디자인 리뷰 일정을 변경했습니다.",
+    )
+
+    with pytest.raises(ProviderBusinessError, match="Invalid singleton Activity evidence"):
+        parse_generated_report_json(
+            json.dumps(
+                {
+                    "summary": "요약",
+                    "discussionPoints": "논의",
+                    "decisions": "결정된 내용 없음",
+                    "actionItemCandidates": [],
+                    "evidence": [],
+                    "activityEvidenceReferences": [
+                        {"sourceType": source_type, "sourceIndex": 1, "activityIndexes": [0]}
+                    ],
+                }
+            ),
+            "원문",
+            [TranscriptSegment(0, 0, 1_000, "원문")],
+            [activity],
+        )
+
+
+def test_parse_generated_report_accepts_activity_evidence_for_an_action_item() -> None:
+    activity = ActivityEvidence(
+        activity_log_id="88888888-8888-8888-8888-888888888888",
+        source_index=0,
+        occurred_at="2026-07-16T00:00:00+00:00",
+        action="calendar_event_updated",
+        summary="디자인 리뷰 일정을 변경했습니다.",
+    )
+
+    report = parse_generated_report_json(
+        json.dumps(
+            {
+                "summary": "요약",
+                "discussionPoints": "논의",
+                "decisions": "결정된 내용 없음",
+                "actionItemCandidates": [
+                    {
+                        "title": "작업",
+                        "description": "설명",
+                        "assigneeUserId": None,
+                        "priority": "MEDIUM",
+                    }
+                ],
+                "evidence": [],
+                "activityEvidenceReferences": [
+                    {"sourceType": "action_item", "sourceIndex": 0, "activityIndexes": [0]}
+                ],
+            }
+        ),
+        "원문",
+        [TranscriptSegment(0, 0, 1_000, "원문")],
+        [activity],
+    )
+
+    assert [
+        (item.source_type, item.source_index, item.activity_indexes)
+        for item in report.activity_evidence_references
+    ] == [("action_item", 0, [0])]
 
 
 def test_processor_leaves_infrastructure_failure_for_sqs_retry() -> None:
@@ -719,10 +934,37 @@ def test_serialize_action_items_uses_api_shape() -> None:
     ]
 
 
+def test_activity_evidence_requires_a_non_legacy_participant_session() -> None:
+    repository = object.__new__(PgMeetingReportRepository)
+    connection = FakeActivityEvidenceConnection()
+    repository.connection = connection
+
+    evidence = repository._load_activity_evidence(
+        parse_meeting_report_job(meeting_report_job_payload())
+    )
+
+    assert len(evidence) == 1
+    assert evidence[0].activity_log_id == "88888888-8888-8888-8888-888888888888"
+    query, values = connection.calls[1]
+    assert "AND EXISTS (" in query
+    assert "meeting_participants.is_legacy_session = false" in query
+    assert "meeting_participants.joined_at <= activity_logs.occurred_at" in query
+    assert "activity_logs.occurred_at < meeting_participants.left_at" in query
+    assert values == (REPORT_ID, MEETING_ID, RECORDING_ID, 50)
+
+
 def test_completed_report_requeues_terminal_embedding_job() -> None:
+    activity = ActivityEvidence(
+        activity_log_id="88888888-8888-8888-8888-888888888888",
+        source_index=0,
+        occurred_at="2026-07-16T00:00:00+00:00",
+        action="calendar_event_updated",
+        summary="디자인 리뷰 일정을 변경했습니다.",
+    )
     report = FakeAiClient().generate_report(
         "진호: 회의록 조회 API와 worker 처리 방향을 정리합니다.",
         [TranscriptSegment(0, 0, 1_000, "진호: 회의록 조회 API와 worker 처리 방향을 정리합니다.")],
+        [activity],
     )
     repository = object.__new__(PgMeetingReportRepository)
     connection = FakeCompletedReportConnection()
@@ -745,6 +987,28 @@ def test_completed_report_requeues_terminal_embedding_job() -> None:
         "meeting_report job processor를 구현한다.",
         "HIGH",
     )
+    activity_inserts = [
+        (query, values)
+        for query, values in connection.calls
+        if "INSERT INTO meeting_report_activity_evidence (" in query
+    ]
+    assert len(activity_inserts) == 1
+    assert activity_inserts[0][1][1:] == (
+        REPORT_ID,
+        activity.activity_log_id,
+        activity.source_index,
+        activity.occurred_at,
+        activity.action,
+        activity.summary,
+    )
+    activity_references = [
+        (query, values)
+        for query, values in connection.calls
+        if "INSERT INTO meeting_report_activity_evidence_references" in query
+    ]
+    assert len(activity_references) == 1
+    assert activity_references[0][1][:3] == (REPORT_ID, "action_item", 0)
+    assert activity_references[0][1][3] == activity_inserts[0][1][0]
     assert any(
         "UPDATE meeting_report_transcript_embedding_jobs" in query
         and "status = 'superseded'" in query

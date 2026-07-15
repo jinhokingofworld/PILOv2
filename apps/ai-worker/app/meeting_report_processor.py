@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol
 from uuid import UUID
 
@@ -33,6 +33,15 @@ class MeetingReportJob:
 
 
 @dataclass(frozen=True)
+class ActivityEvidence:
+    activity_log_id: str
+    source_index: int
+    occurred_at: str
+    action: str
+    summary: str
+
+
+@dataclass(frozen=True)
 class MeetingReportContext:
     report_id: str
     meeting_id: str
@@ -40,6 +49,7 @@ class MeetingReportContext:
     report_status: str
     recording_status: str
     recording_audio_file_key: str | None
+    activity_evidence: list[ActivityEvidence] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -71,6 +81,13 @@ class EvidenceReference:
 
 
 @dataclass(frozen=True)
+class ActivityEvidenceReference:
+    source_type: str
+    source_index: int
+    activity_indexes: list[int]
+
+
+@dataclass(frozen=True)
 class GeneratedMeetingReport:
     transcript_text: str
     summary: str
@@ -79,6 +96,8 @@ class GeneratedMeetingReport:
     action_item_candidates: list[ActionItemCandidate]
     transcript_segments: list[TranscriptSegment]
     evidence: list[EvidenceReference]
+    activity_evidence: list[ActivityEvidence] = field(default_factory=list)
+    activity_evidence_references: list[ActivityEvidenceReference] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -124,7 +143,10 @@ class MeetingReportAiClient(Protocol):
     def transcribe(self, audio_file_path: str) -> list[TranscriptSegment]: ...
 
     def generate_report(
-        self, transcript_text: str, transcript_segments: list[TranscriptSegment]
+        self,
+        transcript_text: str,
+        transcript_segments: list[TranscriptSegment],
+        activity_evidence: list[ActivityEvidence],
     ) -> GeneratedMeetingReport: ...
 
 
@@ -280,8 +302,23 @@ class MeetingReportProcessor:
 
             try:
                 transcript_text = "\n".join(segment.text for segment in transcript_segments)
-                report = self.ai_client.generate_report(transcript_text, transcript_segments)
-            except ProviderBusinessError:
+                report = self.ai_client.generate_report(
+                    transcript_text,
+                    transcript_segments,
+                    context.activity_evidence,
+                )
+            except ProviderBusinessError as error:
+                failure_category, error_type, status_code = _safe_llm_failure_details(error)
+                LOGGER.warning(
+                    "meeting report LLM generation failed report_id=%s recording_id=%s "
+                    "retry_count=%s error_category=%s error_type=%s status_code=%s",
+                    job.report_id,
+                    job.recording_id,
+                    job.retry_count,
+                    failure_category,
+                    error_type,
+                    status_code,
+                )
                 self.repository.mark_failed(
                     job.report_id,
                     REPORT_FAILED_STEP_LLM,
@@ -317,7 +354,10 @@ class MeetingReportProcessor:
 
 
 def parse_generated_report_json(
-    raw_text: str, transcript_text: str, transcript_segments: list[TranscriptSegment]
+    raw_text: str,
+    transcript_text: str,
+    transcript_segments: list[TranscriptSegment],
+    activity_evidence: list[ActivityEvidence] | None = None,
 ) -> GeneratedMeetingReport:
     try:
         payload = json.loads(raw_text)
@@ -337,6 +377,12 @@ def parse_generated_report_json(
 
     action_items = [_parse_action_item(item) for item in raw_action_items]
     evidence = _parse_evidence(payload.get("evidence"), transcript_segments, len(action_items))
+    activity_evidence_references = _parse_activity_evidence_references(
+        payload.get("activityEvidenceReferences", []),
+        activity_evidence or [],
+        len(action_items),
+    )
+    _require_action_item_evidence(action_items, evidence, activity_evidence_references)
 
     return GeneratedMeetingReport(
         transcript_text=transcript_text,
@@ -346,6 +392,8 @@ def parse_generated_report_json(
         action_item_candidates=action_items,
         transcript_segments=transcript_segments,
         evidence=evidence,
+        activity_evidence=list(activity_evidence or []),
+        activity_evidence_references=activity_evidence_references,
     )
 
 
@@ -404,12 +452,12 @@ def _parse_evidence(
             or not isinstance(segment_indexes, list)
         ):
             raise ProviderBusinessError("Invalid evidence reference")
+        if source_type in {"summary", "discussion", "decision"} and source_index != 0:
+            raise ProviderBusinessError("Invalid singleton evidence")
         if source_type == "action_item" and not 0 <= source_index < action_item_count:
             raise ProviderBusinessError("Invalid action item evidence")
         if not all(isinstance(index, int) and index in valid_indexes for index in segment_indexes):
             raise ProviderBusinessError("Invalid evidence segment")
-        if source_type in {"decision", "action_item"} and not segment_indexes:
-            raise ProviderBusinessError("Missing required evidence")
         source = (source_type, source_index)
         unique_segment_indexes = segment_indexes_by_source.setdefault(source, [])
         for segment_index in segment_indexes:
@@ -419,17 +467,84 @@ def _parse_evidence(
         EvidenceReference(source_type, source_index, segment_indexes)
         for (source_type, source_index), segment_indexes in segment_indexes_by_source.items()
     ]
-    required_sources = {("decision", 0)} | {
-        ("action_item", index) for index in range(action_item_count)
-    }
-    provided_sources = {
+    return references
+
+
+def _parse_activity_evidence_references(
+    value: object,
+    activity_evidence: list[ActivityEvidence],
+    action_item_count: int,
+) -> list[ActivityEvidenceReference]:
+    if not isinstance(value, list):
+        raise ProviderBusinessError("Invalid Activity evidence reference")
+    valid_indexes = {item.source_index for item in activity_evidence}
+    activity_indexes_by_source: dict[tuple[str, int], list[int]] = {}
+    for item in value:
+        if not isinstance(item, dict):
+            raise ProviderBusinessError("Invalid Activity evidence reference")
+        source_type = _require_payload_string(item, "sourceType")
+        source_index = item.get("sourceIndex")
+        activity_indexes = item.get("activityIndexes")
+        if (
+            source_type not in {"summary", "discussion", "decision", "action_item"}
+            or not isinstance(source_index, int)
+            or not isinstance(activity_indexes, list)
+        ):
+            raise ProviderBusinessError("Invalid Activity evidence reference")
+        if source_type in {"summary", "discussion", "decision"} and source_index != 0:
+            raise ProviderBusinessError("Invalid singleton Activity evidence")
+        if source_type == "action_item" and not 0 <= source_index < action_item_count:
+            raise ProviderBusinessError("Invalid action item Activity evidence")
+        if not all(isinstance(index, int) and index in valid_indexes for index in activity_indexes):
+            raise ProviderBusinessError("Invalid Activity evidence index")
+        source = (source_type, source_index)
+        unique_activity_indexes = activity_indexes_by_source.setdefault(source, [])
+        for activity_index in activity_indexes:
+            if activity_index not in unique_activity_indexes:
+                unique_activity_indexes.append(activity_index)
+    return [
+        ActivityEvidenceReference(source_type, source_index, activity_indexes)
+        for (source_type, source_index), activity_indexes in activity_indexes_by_source.items()
+    ]
+
+
+def _require_action_item_evidence(
+    action_items: list[ActionItemCandidate],
+    transcript_evidence: list[EvidenceReference],
+    activity_evidence: list[ActivityEvidenceReference],
+) -> None:
+    transcript_sources = {
         (reference.source_type, reference.source_index)
-        for reference in references
+        for reference in transcript_evidence
         if reference.segment_indexes
     }
-    if not required_sources.issubset(provided_sources):
+    activity_sources = {
+        (reference.source_type, reference.source_index)
+        for reference in activity_evidence
+        if reference.activity_indexes
+    }
+    required_sources = {("action_item", index) for index in range(len(action_items))}
+    if not required_sources.issubset(transcript_sources | activity_sources):
         raise ProviderBusinessError("Missing required evidence")
-    return references
+
+
+def _safe_llm_failure_details(error: ProviderBusinessError) -> tuple[str, str, int | None]:
+    cause = error.__cause__
+    error_type = type(cause if cause is not None else error).__name__
+    status_code = getattr(cause, "status_code", None)
+    if not isinstance(status_code, int):
+        status_code = None
+
+    error_message = str(error)
+    if error_message == "OpenAI LLM business failure":
+        return "openai_api_error", error_type, status_code
+    if error_message == "OpenAI LLM returned no text":
+        return "empty_output", error_type, status_code
+    if error_message == "Invalid meeting report JSON":
+        return "invalid_json", error_type, status_code
+    if "evidence" in error_message.lower():
+        return "invalid_evidence", error_type, status_code
+    return "invalid_output", error_type, status_code
 
 
 def _require_string(payload: dict[str, object], key: str) -> str:

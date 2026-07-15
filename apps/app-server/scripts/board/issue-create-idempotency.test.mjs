@@ -489,6 +489,16 @@ class FakeGithubProjectV2WriteService {
   }
 }
 
+class FakeActivityLogService {
+  constructor() {
+    this.calls = [];
+  }
+
+  async append(transaction, input) {
+    this.calls.push({ input, transaction });
+  }
+}
+
 function createOrchestrator({
   addError = null,
   addFailures = 0,
@@ -504,15 +514,18 @@ function createOrchestrator({
     addFailures,
     statusFailures
   });
+  const activityLogService = new FakeActivityLogService();
   const service = new BoardIssueCreateService(
     createQueries,
     new FakeWorkspaceService(),
     githubIssueWriteService,
     githubProjectV2WriteService,
-    operationService
+    operationService,
+    activityLogService
   );
 
   return {
+    activityLogService,
     createQueries,
     githubIssueWriteService,
     githubProjectV2WriteService,
@@ -605,6 +618,11 @@ function isBoardError(error, status, message) {
   assert.equal(subject.githubProjectV2WriteService.statusCalls.length, 1);
   assert.equal(subject.createQueries.cacheTransactions, 2);
   assert.equal(result.issue.id, "1001");
+  assert.equal(subject.activityLogService.calls.length, 1);
+  assert.equal(
+    subject.activityLogService.calls[0].input.dedupeKey,
+    `board:pilo_issue_created:1001:${subject.operationQueries.operation.id}`
+  );
 
   const replay = await createIssue(subject.service);
   assert.deepEqual(replay, result);
@@ -612,4 +630,5 @@ function isBoardError(error, status, message) {
   assert.equal(subject.githubProjectV2WriteService.addCalls.length, 1);
   assert.equal(subject.githubProjectV2WriteService.statusCalls.length, 1);
   assert.equal(subject.createQueries.cacheTransactions, 2);
+  assert.equal(subject.activityLogService.calls.length, 1);
 }

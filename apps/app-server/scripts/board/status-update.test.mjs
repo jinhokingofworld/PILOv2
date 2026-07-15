@@ -255,14 +255,26 @@ class FakeGithubProjectV2WriteService {
   }
 }
 
+class FakeActivityLogService {
+  constructor() {
+    this.calls = [];
+  }
+
+  async append(transaction, input) {
+    this.calls.push({ input, transaction });
+  }
+}
+
 function createSubject(database, githubWriteService = new FakeGithubProjectV2WriteService()) {
   const workspaceService = new FakeWorkspaceService();
   const statusQueries = new BoardIssueStatusQueries(database);
+  const activityLogService = new FakeActivityLogService();
   const statusService = new BoardIssueStatusService(
     statusQueries,
     workspaceService,
     githubWriteService,
-    database
+    database,
+    activityLogService
   );
   const service = new BoardService(
     undefined,
@@ -272,6 +284,7 @@ function createSubject(database, githubWriteService = new FakeGithubProjectV2Wri
   );
 
   return {
+    activityLogService,
     database,
     githubWriteService,
     service,
@@ -395,8 +408,13 @@ function issueRow(overrides = {}) {
       issueRow()
     ]
   });
-  const { database: db, githubWriteService, service, workspaceService } =
-    createSubject(database);
+  const {
+    activityLogService,
+    database: db,
+    githubWriteService,
+    service,
+    workspaceService
+  } = createSubject(database);
 
   const result = await service.updateBoardIssueStatus(
     currentUserId,
@@ -420,6 +438,14 @@ function issueRow(overrides = {}) {
     }
   ]);
   assert.equal(db.transactions.length, 1);
+  assert.equal(activityLogService.calls.length, 1);
+  assert.equal(activityLogService.calls[0].transaction, db.transactions[0]);
+  assert.equal(activityLogService.calls[0].input.action, "pilo_issue_moved");
+  assert.deepEqual(activityLogService.calls[0].input.metadata.data, {
+    boardId,
+    from: sourceColumnId,
+    to: targetColumnId
+  });
   const targetQuery = db.queries.find(
     (query) => !query.transaction && /JOIN board_columns target_col/i.test(query.text)
   );
@@ -458,6 +484,29 @@ function issueRow(overrides = {}) {
   assert.equal(result.previousColumnId, sourceColumnId);
   assert.equal(result.issue.id, issueId);
   assert.equal(result.issue.columnId, targetColumnId);
+}
+
+{
+  const database = new FakeDatabase({
+    queryOneRows: [
+      statusTargetRow({
+        column_id: targetColumnId,
+        target_column_id: targetColumnId
+      }),
+      issueRow({ column_id: targetColumnId })
+    ]
+  });
+  const { activityLogService, service } = createSubject(database);
+
+  await service.updateBoardIssueStatus(
+    currentUserId,
+    workspaceId,
+    boardId,
+    issueId,
+    { columnId: targetColumnId }
+  );
+
+  assert.equal(activityLogService.calls.length, 0);
 }
 
 {

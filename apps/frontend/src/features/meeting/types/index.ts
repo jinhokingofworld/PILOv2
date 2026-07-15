@@ -99,6 +99,14 @@ export type MeetingReportDetail = MeetingReportSummary & {
   transcriptText: string | null;
   evidenceSegments?: Array<{ id: string; segmentIndex: number; startedAtMs: number; endedAtMs: number; text: string }>;
   evidence?: Array<{ sourceType: string; sourceIndex: number; transcriptSegmentId: string }>;
+  activityEvidence?: Array<{
+    id: string;
+    sourceIndex: number;
+    occurredAt: string;
+    action: string;
+    summary: string;
+    references: Array<{ sourceType: string; sourceIndex: number }>;
+  }>;
   actionItems?: MeetingReportActionItem[];
   actionItemAssignees?: MeetingReportActionItemAssignee[];
 };

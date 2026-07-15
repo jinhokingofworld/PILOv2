@@ -369,6 +369,14 @@ export interface MeetingReportDetailPayload extends MeetingReportSummaryPayload 
   transcriptText: string | null;
   evidenceSegments: Array<{ id: string; segmentIndex: number; startedAtMs: number; endedAtMs: number; text: string }>;
   evidence: Array<{ sourceType: string; sourceIndex: number; transcriptSegmentId: string }>;
+  activityEvidence: Array<{
+    id: string;
+    sourceIndex: number;
+    occurredAt: string;
+    action: string;
+    summary: string;
+    references: Array<{ sourceType: string; sourceIndex: number }>;
+  }>;
   actionItems: MeetingReportActionItemPayload[];
   actionItemAssignees: MeetingReportActionItemAssigneePayload[];
 }
@@ -1000,7 +1008,7 @@ export class MeetingService {
     const recordings = await this.listRecordingRows(meetingId);
     const reports = await this.listMeetingReportRows(meetingId);
     const participantCounts = await this.countParticipants(meetingId);
-    const currentUserParticipant = await this.findParticipant(
+    const currentUserParticipant = await this.findParticipantSummary(
       this.database,
       meetingId,
       currentUserId
@@ -1041,7 +1049,7 @@ export class MeetingService {
           throw notFound("Meeting not found");
         }
 
-        const existingParticipant = await this.findParticipant(
+        const existingParticipant = await this.findActiveParticipant(
           transaction,
           meetingId,
           currentUserId
@@ -1079,8 +1087,7 @@ export class MeetingService {
             : await this.prepareReportForStoppedRecording(transaction, stoppedRecording);
         const participant = await this.markParticipantLeft(
           transaction,
-          meetingId,
-          currentUserId
+          existingParticipant.id
         );
         const endedMeeting = shouldEndMeeting
           ? await this.endMeetingIfStillActive(transaction, workspaceId, meetingId)
@@ -1186,7 +1193,7 @@ export class MeetingService {
         ? { report: null, job: null }
         : await this.prepareReportForStoppedRecording(transaction, stoppedRecording);
 
-    await this.markParticipantLeft(transaction, meeting.id, participant.user_id);
+    await this.markParticipantLeft(transaction, participant.id);
 
     if (shouldEndMeeting) {
       await this.endMeetingIfStillActive(
@@ -1538,8 +1545,9 @@ export class MeetingService {
     if (report === null) {
       throw notFound("Meeting report not found");
     }
-    const [evidence, actionItems, actionItemAssignees] = await Promise.all([
+    const [evidence, activityEvidence, actionItems, actionItemAssignees] = await Promise.all([
       this.listMeetingReportEvidence(report.id),
+      this.listMeetingReportActivityEvidence(report.id),
       this.listMeetingReportActionItems(report.id),
       this.listMeetingReportActionItemAssignees(workspaceId)
     ]);
@@ -1547,6 +1555,7 @@ export class MeetingService {
     return {
       report: this.mapMeetingReportDetail(report, {
         ...evidence,
+        activityEvidence,
         actionItems,
         actionItemAssignees
       })
@@ -3194,8 +3203,9 @@ export class MeetingService {
     const result = await this.database.queryOne<ParticipantCountRow>(
       `
         SELECT
-          COUNT(*)::int AS participant_count,
-          (COUNT(*) FILTER (WHERE left_at IS NULL))::int AS active_participant_count
+          COUNT(DISTINCT user_id)::int AS participant_count,
+          (COUNT(DISTINCT user_id) FILTER (WHERE left_at IS NULL))::int
+            AS active_participant_count
         FROM meeting_participants
         WHERE meeting_id = $1
       `,
@@ -3211,20 +3221,43 @@ export class MeetingService {
   private async listParticipantRows(meetingId: string): Promise<ParticipantRow[]> {
     return this.database.query<ParticipantRow>(
       `
+        WITH participant_summaries AS (
+          SELECT
+            meeting_id,
+            user_id,
+            MIN(joined_at) AS joined_at,
+            CASE
+              WHEN BOOL_OR(left_at IS NULL) THEN NULL
+              ELSE MAX(left_at)
+            END AS left_at,
+            (
+              ARRAY_AGG(
+                id
+                ORDER BY (left_at IS NULL) DESC, joined_at DESC, id DESC
+              )
+            )[1] AS id,
+            (
+              ARRAY_AGG(
+                livekit_identity
+                ORDER BY (left_at IS NULL) DESC, joined_at DESC, id DESC
+              )
+            )[1] AS livekit_identity
+          FROM meeting_participants
+          WHERE meeting_id = $1
+          GROUP BY meeting_id, user_id
+        )
         SELECT
-          meeting_participants.id,
-          meeting_participants.meeting_id,
-          meeting_participants.user_id,
-          meeting_participants.livekit_identity,
-          meeting_participants.joined_at,
-          meeting_participants.left_at,
+          participant_summaries.id,
+          participant_summaries.meeting_id,
+          participant_summaries.user_id,
+          participant_summaries.livekit_identity,
+          participant_summaries.joined_at,
+          participant_summaries.left_at,
           users.name AS user_name,
           users.avatar_url AS user_avatar_url
-        FROM meeting_participants
-        JOIN users
-          ON users.id = meeting_participants.user_id
-        WHERE meeting_participants.meeting_id = $1
-        ORDER BY meeting_participants.joined_at ASC, meeting_participants.id ASC
+        FROM participant_summaries
+        JOIN users ON users.id = participant_summaries.user_id
+        ORDER BY participant_summaries.joined_at ASC, participant_summaries.id ASC
       `,
       [meetingId]
     );
@@ -3237,49 +3270,180 @@ export class MeetingService {
   ): Promise<ParticipantRow> {
     const participant = await executor.queryOne<ParticipantRow>(
       `
-        WITH upserted_participant AS (
+        WITH participant_lock AS (
+          SELECT pg_advisory_xact_lock(
+            hashtextextended(
+              ($1::uuid)::text || ':' || ($2::uuid)::text,
+              0
+            )
+          )
+        ),
+        active_participant AS (
+          SELECT meeting_participants.*
+          FROM meeting_participants
+          CROSS JOIN participant_lock
+          WHERE meeting_id = $1::uuid
+            AND user_id = $2::uuid
+            AND left_at IS NULL
+          FOR UPDATE
+        ),
+        inserted_participant AS (
           INSERT INTO meeting_participants (
             meeting_id,
             user_id,
             livekit_identity
           )
-          VALUES (
-            $1::uuid,
-            $2::uuid,
-            'meeting-' || ($1::uuid)::text || '-user-' || ($2::uuid)::text
-          )
-          ON CONFLICT (meeting_id, user_id)
-          DO UPDATE SET
-            joined_at = now(),
-            left_at = NULL,
-            livekit_identity = EXCLUDED.livekit_identity,
-            updated_at = now()
+          SELECT meeting_id, user_id, livekit_identity
+          FROM (
+            SELECT
+              $1::uuid AS meeting_id,
+              $2::uuid AS user_id,
+              'meeting-' || ($1::uuid)::text || '-user-' || ($2::uuid)::text
+                AS livekit_identity
+          ) AS candidate
+          WHERE NOT EXISTS (SELECT 1 FROM active_participant)
+          ON CONFLICT DO NOTHING
           RETURNING *
+        ),
+        resolved_participant AS (
+          SELECT * FROM active_participant
+          UNION ALL
+          SELECT * FROM inserted_participant
         )
         SELECT
-          upserted_participant.id,
-          upserted_participant.meeting_id,
-          upserted_participant.user_id,
-          upserted_participant.livekit_identity,
-          upserted_participant.joined_at,
-          upserted_participant.left_at,
+          resolved_participant.id,
+          resolved_participant.meeting_id,
+          resolved_participant.user_id,
+          resolved_participant.livekit_identity,
+          resolved_participant.joined_at,
+          resolved_participant.left_at,
           users.name AS user_name,
           users.avatar_url AS user_avatar_url
-        FROM upserted_participant
+        FROM resolved_participant
         JOIN users
-          ON users.id = upserted_participant.user_id
+          ON users.id = resolved_participant.user_id
       `,
       [meetingId, currentUserId]
     );
 
-    if (!participant) {
+    if (participant) {
+      return participant;
+    }
+
+    // Before 072, the former global unique constraint rejects the insert above.
+    // This transaction already holds the participant advisory lock, so only that
+    // old-schema compatibility path can reactivate one latest closed row. After
+    // 072 the insert succeeds for a new session and this path is not used.
+    const reactivatedParticipant = await executor.queryOne<ParticipantRow>(
+      `
+        WITH active_participant AS (
+          SELECT *
+          FROM meeting_participants
+          WHERE meeting_id = $1::uuid
+            AND user_id = $2::uuid
+            AND left_at IS NULL
+          FOR UPDATE
+        ),
+        legacy_participant AS (
+          SELECT id
+          FROM meeting_participants
+          WHERE meeting_id = $1::uuid
+            AND user_id = $2::uuid
+            AND left_at IS NOT NULL
+            AND NOT EXISTS (SELECT 1 FROM active_participant)
+          ORDER BY joined_at DESC, id DESC
+          LIMIT 1
+          FOR UPDATE
+        ),
+        reactivated_participant AS (
+          UPDATE meeting_participants
+          SET
+            joined_at = now(),
+            left_at = NULL,
+            livekit_identity =
+              'meeting-' || ($1::uuid)::text || '-user-' || ($2::uuid)::text,
+            updated_at = now()
+          WHERE id = (SELECT id FROM legacy_participant)
+          RETURNING *
+        ),
+        resolved_participant AS (
+          SELECT * FROM active_participant
+          UNION ALL
+          SELECT * FROM reactivated_participant
+        )
+        SELECT
+          resolved_participant.id,
+          resolved_participant.meeting_id,
+          resolved_participant.user_id,
+          resolved_participant.livekit_identity,
+          resolved_participant.joined_at,
+          resolved_participant.left_at,
+          users.name AS user_name,
+          users.avatar_url AS user_avatar_url
+        FROM resolved_participant
+        JOIN users ON users.id = resolved_participant.user_id
+      `,
+      [meetingId, currentUserId]
+    );
+
+    if (!reactivatedParticipant) {
       throw badRequest("Meeting participant could not be saved");
     }
 
-    return participant;
+    return reactivatedParticipant;
   }
 
-  private async findParticipant(
+  private async findParticipantSummary(
+    executor: QueryOneExecutor,
+    meetingId: string,
+    currentUserId: string
+  ): Promise<ParticipantRow | null> {
+    return executor.queryOne<ParticipantRow>(
+      `
+        WITH participant_summary AS (
+          SELECT
+            meeting_id,
+            user_id,
+            MIN(joined_at) AS joined_at,
+            CASE
+              WHEN BOOL_OR(left_at IS NULL) THEN NULL
+              ELSE MAX(left_at)
+            END AS left_at,
+            (
+              ARRAY_AGG(
+                id
+                ORDER BY (left_at IS NULL) DESC, joined_at DESC, id DESC
+              )
+            )[1] AS id,
+            (
+              ARRAY_AGG(
+                livekit_identity
+                ORDER BY (left_at IS NULL) DESC, joined_at DESC, id DESC
+              )
+            )[1] AS livekit_identity
+          FROM meeting_participants
+          WHERE meeting_id = $1
+            AND user_id = $2
+          GROUP BY meeting_id, user_id
+        )
+        SELECT
+          participant_summary.id,
+          participant_summary.meeting_id,
+          participant_summary.user_id,
+          participant_summary.livekit_identity,
+          participant_summary.joined_at,
+          participant_summary.left_at,
+          users.name AS user_name,
+          users.avatar_url AS user_avatar_url
+        FROM participant_summary
+        JOIN users ON users.id = participant_summary.user_id
+        LIMIT 1
+      `,
+      [meetingId, currentUserId]
+    );
+  }
+
+  private async findActiveParticipant(
     executor: QueryOneExecutor,
     meetingId: string,
     currentUserId: string
@@ -3296,10 +3460,10 @@ export class MeetingService {
           users.name AS user_name,
           users.avatar_url AS user_avatar_url
         FROM meeting_participants
-        JOIN users
-          ON users.id = meeting_participants.user_id
+        JOIN users ON users.id = meeting_participants.user_id
         WHERE meeting_participants.meeting_id = $1
           AND meeting_participants.user_id = $2
+          AND meeting_participants.left_at IS NULL
         LIMIT 1
       `,
       [meetingId, currentUserId]
@@ -3328,6 +3492,7 @@ export class MeetingService {
           ON users.id = meeting_participants.user_id
         WHERE meeting_participants.meeting_id = $1
           AND meeting_participants.livekit_identity = $2
+          AND meeting_participants.left_at IS NULL
         LIMIT 1
         ${options.lockParticipant === true ? "FOR UPDATE OF meeting_participants" : ""}
       `,
@@ -3340,7 +3505,7 @@ export class MeetingService {
     meetingId: string,
     currentUserId: string
   ): Promise<void> {
-    const participant = await this.findParticipant(
+    const participant = await this.findActiveParticipant(
       executor,
       meetingId,
       currentUserId
@@ -3443,21 +3608,17 @@ export class MeetingService {
 
   private async markParticipantLeft(
     executor: QueryOneExecutor,
-    meetingId: string,
-    currentUserId: string
+    participantId: string
   ): Promise<ParticipantRow> {
     const participant = await executor.queryOne<ParticipantRow>(
       `
         WITH updated_participant AS (
           UPDATE meeting_participants
           SET
-            left_at = COALESCE(left_at, now()),
-            updated_at = CASE
-              WHEN left_at IS NULL THEN now()
-              ELSE updated_at
-            END
-          WHERE meeting_id = $1
-            AND user_id = $2
+            left_at = now(),
+            updated_at = now()
+          WHERE id = $1
+            AND left_at IS NULL
           RETURNING *
         )
         SELECT
@@ -3473,7 +3634,7 @@ export class MeetingService {
         JOIN users
           ON users.id = updated_participant.user_id
       `,
-      [meetingId, currentUserId]
+      [participantId]
     );
 
     if (!participant) {
@@ -3872,14 +4033,23 @@ export class MeetingService {
   private meetingReportParticipantSummaryJoin(reportAlias: string): string {
     return `LEFT JOIN LATERAL (
       SELECT
-        (SELECT COUNT(*)::int FROM meeting_participants WHERE meeting_id = ${reportAlias}.meeting_id) AS participant_count,
+        (SELECT COUNT(DISTINCT user_id)::int FROM meeting_participants WHERE meeting_id = ${reportAlias}.meeting_id) AS participant_count,
         (SELECT COALESCE(jsonb_agg(jsonb_build_object('userId', preview.user_id, 'name', preview.name, 'avatarUrl', preview.avatar_url) ORDER BY preview.joined_at ASC, preview.id ASC), '[]'::jsonb)
          FROM (
-           SELECT meeting_participants.id, meeting_participants.user_id, meeting_participants.joined_at, users.name, users.avatar_url
-           FROM meeting_participants
-           JOIN users ON users.id = meeting_participants.user_id
-           WHERE meeting_participants.meeting_id = ${reportAlias}.meeting_id
-           ORDER BY meeting_participants.joined_at ASC, meeting_participants.id ASC
+           SELECT first_session.id, first_session.user_id, first_session.joined_at, first_session.name, first_session.avatar_url
+           FROM (
+             SELECT DISTINCT ON (meeting_participants.user_id)
+               meeting_participants.id,
+               meeting_participants.user_id,
+               meeting_participants.joined_at,
+               users.name,
+               users.avatar_url
+             FROM meeting_participants
+             JOIN users ON users.id = meeting_participants.user_id
+             WHERE meeting_participants.meeting_id = ${reportAlias}.meeting_id
+             ORDER BY meeting_participants.user_id, meeting_participants.joined_at ASC, meeting_participants.id ASC
+           ) AS first_session
+           ORDER BY first_session.joined_at ASC, first_session.id ASC
            LIMIT 3
          ) AS preview) AS participant_preview
     ) AS participant_summary ON true`;
@@ -4097,6 +4267,7 @@ export class MeetingService {
   private mapMeetingReportDetail(report: MeetingReportDetailRow, evidence: {
     evidenceSegments: MeetingReportDetailPayload["evidenceSegments"];
     evidence: MeetingReportDetailPayload["evidence"];
+    activityEvidence: MeetingReportDetailPayload["activityEvidence"];
     actionItems: MeetingReportActionItemPayload[];
     actionItemAssignees: MeetingReportActionItemAssigneePayload[];
   }): MeetingReportDetailPayload {
@@ -4162,6 +4333,52 @@ export class MeetingService {
       if (row.source_type !== null && row.source_index !== null && row.transcript_segment_id !== null) references.push({ sourceType: row.source_type, sourceIndex: Number(row.source_index), transcriptSegmentId: row.transcript_segment_id });
     }
     return { evidenceSegments: [...segmentMap.values()], evidence: references };
+  }
+
+  private async listMeetingReportActivityEvidence(
+    reportId: string
+  ): Promise<MeetingReportDetailPayload["activityEvidence"]> {
+    const rows = await this.database.query<{
+      id: string;
+      source_index: number | string;
+      occurred_at: Date | string;
+      action: string;
+      summary: string;
+      source_type: string | null;
+      reference_source_index: number | string | null;
+    }>(
+      `SELECT activity_evidence.id, activity_evidence.source_index, activity_evidence.occurred_at,
+              activity_evidence.action::text AS action, activity_evidence.summary,
+              references.source_type, references.source_index AS reference_source_index
+       FROM meeting_report_activity_evidence AS activity_evidence
+       LEFT JOIN meeting_report_activity_evidence_references AS references
+         ON references.activity_evidence_id = activity_evidence.id
+        AND references.meeting_report_id = activity_evidence.meeting_report_id
+       WHERE activity_evidence.meeting_report_id = $1
+       ORDER BY activity_evidence.occurred_at ASC, activity_evidence.source_index ASC,
+                references.source_type ASC, references.source_index ASC`,
+      [reportId]
+    );
+
+    const activityEvidence = new Map<string, MeetingReportDetailPayload["activityEvidence"][number]>();
+    for (const row of rows) {
+      const item = activityEvidence.get(row.id) ?? {
+        id: row.id,
+        sourceIndex: Number(row.source_index),
+        occurredAt: new Date(row.occurred_at).toISOString(),
+        action: row.action,
+        summary: row.summary,
+        references: []
+      };
+      if (row.source_type !== null && row.reference_source_index !== null) {
+        item.references.push({
+          sourceType: row.source_type,
+          sourceIndex: Number(row.reference_source_index)
+        });
+      }
+      activityEvidence.set(row.id, item);
+    }
+    return [...activityEvidence.values()];
   }
 
   private normalizeMeetingReportStatus(

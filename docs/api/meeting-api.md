@@ -72,6 +72,9 @@ Workspace에는 하나 이상의 MeetingRoom이 있다. 활성 방을 `created_a
 - `Meeting.endedAt`은 회의방 생존 여부와 원본 audio retention 시점의 기준이다.
 - 원본 audio S3 object는 `Meeting.endedAt` 뒤 30일이 지나면 자동 purge한다. purge가 완료되면 Recording metadata의 `audioFileUrl`과 `audioFileKey`는 `null`이 된다.
 - raw transcript, transcript segment, summary, discussion point, decision, evidence, action item은 retention purge 대상이 아니며 기간 제한 없이 보존한다.
+- `meeting_participants`는 참여 이력이다. 참여 또는 재입장마다 새 session 행을 만들고, 같은 Meeting·사용자와 같은 Meeting·LiveKit identity에는 각각 active session이 하나만 존재할 수 있다.
+- MeetingReport의 Activity evidence는 Recording의 `[startedAt, endedAt)` 구간 안의 같은 Workspace `actorUserId` Activity Log 중, 그 사용자의 non-legacy participant session 하나가 `joinedAt <= occurredAt < leftAt`(아직 active면 `leftAt` 없음)을 만족할 때만 선택한다. 이전 단일-row 구조에서 생성된 legacy session은 실제 참여 구간을 복원할 수 없으므로 새 Activity snapshot 대상에서 제외한다.
+- Activity evidence에는 action, 발생 시각, 검증된 metadata summary만 snapshot한다. AI가 summary/discussion/decision/action item을 Activity로 뒷받침한 경우에만 해당 산출물 reference를 함께 저장한다. 원본 Activity Log row, metadata.data, token, provider raw payload는 MeetingReport 응답에 포함하지 않는다.
 - audio purge는 수동 API 없이 durable job으로 재시도한다. 처리 중인 MeetingReport 또는 report outbox가 audio를 참조하면 purge 후보에서 제외한다.
 - 마지막 active participant가 나가면 회의가 자동 종료될 수 있다.
 - Meeting과 Recording은 1:N 관계다. 같은 Meeting 안에서 녹음을 여러 번 시작하고 종료할 수 있다.
@@ -254,12 +257,12 @@ workspace 정보나 상태값을 신뢰 경계 밖으로 전달하지 않는다.
 
 | Field | Type | 설명 |
 | --- | --- | --- |
-| `id` | string | 참여 정보 id |
+| `id` | string | 대표 참여 session id. active session이 있으면 그 id, 아니면 마지막 session id |
 | `meetingId` | string | 회의 id |
 | `userId` | string | 사용자 id |
-| `livekitIdentity` | string | LiveKit participant identity |
-| `joinedAt` | string | ISO datetime |
-| `leftAt` | string \| null | ISO datetime |
+| `livekitIdentity` | string | 대표 session의 LiveKit participant identity |
+| `joinedAt` | string | 해당 사용자의 이 Meeting 첫 입장 ISO datetime |
+| `leftAt` | string \| null | active session이 있으면 `null`, 아니면 마지막 퇴장 ISO datetime |
 | `isActive` | boolean | 현재 회의에 남아 있는지 여부 |
 | `user` | object | 화면 표시용 사용자 요약 |
 
@@ -306,6 +309,7 @@ Meeting 하나에는 여러 Recording이 있을 수 있다. API에서 `currentRe
 | `transcriptText` | string \| null | 상세 조회에서만 반환. 시간별 segment가 아닌 전체 Transcript 텍스트다. 목록 응답에는 포함하지 않는다. |
 | `evidenceSegments` | array | 상세 조회에서만 반환. 요약·논의·결정·후속 작업의 근거로 연결된 `id`, `segmentIndex`, `startedAtMs`, `endedAtMs`, `text` segment만 포함한다. |
 | `evidence` | array | 상세 조회에서만 반환. `sourceType`, `sourceIndex`, `transcriptSegmentId`로 요약 산출물과 evidence segment를 연결 |
+| `activityEvidence` | array | 상세 조회에서만 반환. Transcript와 구분된 Activity 근거. `id`, `sourceIndex`, `occurredAt`, `action`, `summary`, `references[]`만 포함하며, reference는 이 Activity가 뒷받침한 `sourceType`, `sourceIndex`다. raw Activity Log metadata는 포함하지 않는다. |
 | `summary` | string \| null | 요약 |
 | `discussionPoints` | string \| null | 논의사항 |
 | `decisions` | string \| null | 결정사항 |
@@ -313,7 +317,7 @@ Meeting 하나에는 여러 Recording이 있을 수 있다. API에서 `currentRe
 | `actionItems` | array | 상세 조회에서만 반환. 저장된 후속 작업 검토 항목. `id`, `sourceIndex`, `title`, `description`, `priority`, `assignee`, `status`, 승인·반려 audit 시각을 포함한다. |
 | `actionItemAssignees` | array | 상세 조회에서만 반환. 같은 Workspace의 지정 가능한 사용자 목록. `userId`, `name`, `avatarUrl`을 포함한다. |
 | `retryCount` | number | 재시도 횟수 |
-| `participantSummary` | object | 참석자 요약. `totalCount`, 대표 참석자 최대 3명의 `participants`, 추가 참석자 여부 `hasMore`를 포함한다. 대표 참석자는 참여 시각 순서다. |
+| `participantSummary` | object | 중복 제거한 참석자 요약. `totalCount`, 대표 참석자 최대 3명의 `participants`, 추가 참석자 여부 `hasMore`를 포함한다. 대표 참석자는 첫 참여 시각 순서다. |
 | `canDelete` | boolean | 현재 사용자가 이 회의록을 삭제할 수 있는지. Workspace owner 또는 해당 회의의 참여자만 `true`다. |
 | `createdAt` | string | ISO datetime |
 | `updatedAt` | string | ISO datetime |
@@ -509,7 +513,8 @@ Request body는 최초 동의가 필요한 경우에만 보낸다.
 }
 ```
 
-같은 사용자가 같은 회의에 다시 참여하면 기존 participant 기준으로 재입장한다.
+같은 사용자가 같은 회의에 다시 참여하면 새 participant session을 만든다. 이미 active인
+상태에서 재시도하면 같은 active session을 반환한다.
 LiveKit 입장 token은 참여 요청마다 다시 받을 수 있다.
 
 Response `data`:
@@ -537,7 +542,7 @@ Response `data`:
 | `currentRecording` | Recording \| null | 진행 중 녹음. 없으면 `null` |
 | `recordings` | Recording[] | 녹음 목록 |
 | `reports` | MeetingReport[] | 회의록 목록. Transcript 전문은 제공하지 않음 |
-| `participantCount` | number | 전체 참여자 수 |
+| `participantCount` | number | 중복 제거한 전체 참여자 수 |
 | `activeParticipantCount` | number | 현재 active participant 수 |
 | `currentUserParticipant` | Participant \| null | 현재 사용자의 참여 정보 |
 
@@ -699,8 +704,9 @@ Response `data`:
 | --- | --- | --- |
 | `participants` | Participant[] | 회의 참석자 목록 |
 
-이 목록은 회의 참석 이력이다. 마이크 상태, 발화 상태, LiveKit connection state는
-포함하지 않는다.
+이 목록은 사용자별로 중복 제거한 회의 참석 요약이다. `joinedAt`은 첫 입장,
+`leftAt`은 active session이 없을 때 마지막 퇴장이다. 마이크 상태, 발화 상태,
+LiveKit connection state는 포함하지 않는다.
 
 주요 오류: `401`, `403`, `404`
 
