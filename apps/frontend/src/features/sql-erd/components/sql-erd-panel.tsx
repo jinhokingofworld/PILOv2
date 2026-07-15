@@ -82,7 +82,7 @@ import type {
 import {
   completeSqlErdAutosave,
   createWorkspaceSqlErdViewSession,
-  getLayoutAutosaveBlockReasonForStatus,
+  getLayoutAutosaveBlockReasonForApiError,
   getLayoutAutosaveDelayMs,
   getLayoutAutosavePausedBanner,
   getSqlErdSessionLoadFailureState,
@@ -277,12 +277,20 @@ function isSqlErdApiConflictError(error: unknown) {
   return error instanceof SqlErdApiError && error.status === 409;
 }
 
+function isSqlErdWriteProtocolMismatchError(error: unknown) {
+  return (
+    error instanceof SqlErdApiError &&
+    error.code === "SQL_ERD_WRITE_PROTOCOL_MISMATCH"
+  );
+}
+
 function getLayoutAutosaveBlockReason(
   error: unknown
 ): LayoutAutosaveBlockReason | null {
-  return getLayoutAutosaveBlockReasonForStatus(
-    error instanceof SqlErdApiError ? error.status : undefined
-  );
+  return getLayoutAutosaveBlockReasonForApiError({
+    code: error instanceof SqlErdApiError ? error.code : undefined,
+    status: error instanceof SqlErdApiError ? error.status : undefined
+  });
 }
 
 function isSqlErdApiTransientAutosaveError(error: unknown) {
@@ -1626,6 +1634,18 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           return;
         }
 
+        if (isSqlErdWriteProtocolMismatchError(error)) {
+          setSourceAutosaveRetryAttempt(0);
+          setLayoutAutosaveBlockReason("write_protocol_mismatch");
+          setSessionLoadState({
+            label: "Read only",
+            message: getLayoutAutosavePausedBanner("write_protocol_mismatch")
+              .message,
+            tone: "error"
+          });
+          return;
+        }
+
         const autosaveBlockReason = getLayoutAutosaveBlockReason(error);
 
         if (autosaveBlockReason) {
@@ -1822,6 +1842,18 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
             requestLifecycleGeneration
           )
         ) {
+          return;
+        }
+
+        if (isSqlErdWriteProtocolMismatchError(error)) {
+          setLayoutAutosaveRetryAttempt(0);
+          setLayoutAutosaveBlockReason("write_protocol_mismatch");
+          setSessionLoadState({
+            label: "Read only",
+            message: getLayoutAutosavePausedBanner("write_protocol_mismatch")
+              .message,
+            tone: "error"
+          });
           return;
         }
 
