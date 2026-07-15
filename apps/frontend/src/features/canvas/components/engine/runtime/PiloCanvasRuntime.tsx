@@ -5,7 +5,7 @@ import {
   QueryClientProvider,
   useQueryClient,
 } from "@tanstack/react-query";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CanvasShapeOperationPayload } from "@/features/canvas/api/canvas-types";
 import {
   isRecord,
@@ -16,6 +16,7 @@ import { useCanvasPresence } from "@/features/canvas/realtime/useCanvasPresence"
 import { normalizeCanvasFreeformShapes } from "../../../utils/canvas-storage";
 import type {
   CanvasShapeSyncConflict,
+  CanvasShapeSyncOperation,
   CanvasShapeSyncQueue,
 } from "../../../utils/canvas-shape-sync";
 import {
@@ -504,6 +505,42 @@ function PiloCanvasRuntimeInner({
     applyOperations: applyRemoteCanvasOperations,
     catchUpOperations: catchUpCanvasOperations,
   });
+  const persistenceCanvasClient = useMemo<CanvasViewSettingApiClient | null>(() => {
+    if (!canvasClient) {
+      return null;
+    }
+
+    return {
+      ...canvasClient,
+      async syncShapesBatch(boardId, body, options) {
+        if (
+          boardId === board.id &&
+          options.workspaceId === board.workspaceId &&
+          isRecord(body) &&
+          Array.isArray(body.operations)
+        ) {
+          const realtimeCommitResult = canvasPresence.commitShapeOperations(
+            body.operations as CanvasShapeSyncOperation[],
+          );
+
+          if (realtimeCommitResult) {
+            return realtimeCommitResult;
+          }
+        }
+
+        if (canvasClient.syncShapesBatch) {
+          return canvasClient.syncShapesBatch(boardId, body, options);
+        }
+
+        throw new Error("Canvas shape batch client is unavailable");
+      },
+    };
+  }, [
+    board.id,
+    board.workspaceId,
+    canvasClient,
+    canvasPresence.commitShapeOperations,
+  ]);
 
   useEffect(() => {
     deferredRemoteOperationsRef.current.clear();
@@ -538,7 +575,7 @@ function PiloCanvasRuntimeInner({
 
   useCanvasApiLifecycle({
     board,
-    canvasClient,
+    canvasClient: persistenceCanvasClient,
     latestViewportBoundsRef,
     pendingShapeDetailRef,
     pendingViewSettingRef,
@@ -557,7 +594,7 @@ function PiloCanvasRuntimeInner({
     persistFreeformShapes,
   } = useCanvasShapePersistence({
     board,
-    canvasClient,
+    canvasClient: persistenceCanvasClient,
     freeformShapesRef,
     localShapeVersionRef,
     onLocalShapeSyncIdle: flushDeferredRemoteOperations,

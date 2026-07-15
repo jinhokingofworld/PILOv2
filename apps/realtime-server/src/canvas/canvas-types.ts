@@ -86,6 +86,33 @@ export type CanvasShapeOperationPayload = CanvasRoomRef & {
   shapeId: string;
 };
 
+export type CanvasShapeCommitOperation = {
+  baseRevision?: number | null;
+  clientOperationId: string;
+  payload?: Record<string, unknown>;
+  shapeId: string;
+  type: "create" | "update" | "delete";
+};
+
+export type CanvasShapeCommitPayload = CanvasRoomRef & {
+  operations: CanvasShapeCommitOperation[];
+};
+
+export type CanvasShapeCommitAck =
+  | {
+      ok: true;
+      result: unknown;
+    }
+  | {
+      ok: false;
+      error: {
+        body?: unknown;
+        code: string;
+        message: string;
+        status?: number;
+      };
+    };
+
 export type CanvasShapeLockState = CanvasRoomRef & {
   expiresAt: string;
   lockedAt: string;

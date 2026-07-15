@@ -35,6 +35,10 @@ const canvasShapePreview = await readFile(
   new URL("../src/canvas/canvas-shape-preview.service.ts", import.meta.url),
   "utf8"
 );
+const canvasShapeCommit = await readFile(
+  new URL("../src/canvas/canvas-shape-commit.service.ts", import.meta.url),
+  "utf8"
+);
 const meetingAccess = await readFile(
   new URL("../src/meeting/meeting-access.service.ts", import.meta.url),
   "utf8"
@@ -54,6 +58,7 @@ const socketServer = await readFile(
 
 assert.match(config, /notifications_status_only/);
 assert.match(config, /DATABASE_URL/);
+assert.match(config, /APP_SERVER_URL/);
 assert.match(config, /SOCKET_IO_CORS_ORIGIN/);
 assert.match(server, /\/health/);
 assert.match(server, /pathname\.startsWith\("\/ws\/"\)/);
@@ -95,6 +100,7 @@ assert.match(socketServer, /isCanvasShapeOperationPayload/);
 assert.match(socketServer, /canvasServerEvents\.operation/);
 assert.match(socketServer, /canvasClientEvents\.shapeLockClaim/);
 assert.match(socketServer, /canvasClientEvents\.shapeLockRelease/);
+assert.match(socketServer, /canvasClientEvents\.shapeCommit/);
 assert.match(socketServer, /canvasClientEvents\.shapePreview/);
 assert.match(socketServer, /canvasClientEvents\.shapePreviewClear/);
 assert.match(socketServer, /canvasServerEvents\.shapeLockAccepted/);
@@ -103,6 +109,9 @@ assert.match(socketServer, /canvasServerEvents\.shapeLockUpdate/);
 assert.match(socketServer, /canvasServerEvents\.shapePreview/);
 assert.match(socketServer, /canvasServerEvents\.shapePreviewClear/);
 assert.match(socketServer, /createCanvasShapePreviewService/);
+assert.match(socketServer, /createCanvasShapeCommitService/);
+assert.match(socketServer, /getShapeCommitBlockedByLocks/);
+assert.match(socketServer, /shape is locked by another user/);
 assert.match(socketServer, /redisAdapter\?\.stateClient/);
 assert.match(socketServer, /await shapePreviewService\.updatePreview/);
 assert.match(socketServer, /await shapePreviewService\.clearRoomPreview/);
@@ -150,6 +159,8 @@ assert.match(canvasShapePreview, /getRoomPreviews/);
 assert.match(canvasShapePreview, /updatePreview/);
 assert.match(canvasShapePreview, /clearRoomPreview/);
 assert.match(canvasShapePreview, /clearSocket/);
+assert.match(canvasShapeCommit, /\/shapes\/batch/);
+assert.match(canvasShapeCommit, /Authorization: `Bearer \$\{token\}`/);
 assert.match(redisPubSub, /createAdapter/);
 assert.match(redisPubSub, /stateClient/);
 assert.match(redisPubSub, /NX: true/);
