@@ -72,6 +72,8 @@ Workspace에는 하나 이상의 MeetingRoom이 있다. 활성 방을 `created_a
 - `Meeting.endedAt`은 회의방 생존 여부와 원본 audio retention 시점의 기준이다.
 - 원본 audio S3 object는 `Meeting.endedAt` 뒤 30일이 지나면 자동 purge한다. purge가 완료되면 Recording metadata의 `audioFileUrl`과 `audioFileKey`는 `null`이 된다.
 - raw transcript, transcript segment, summary, discussion point, decision, evidence, action item은 retention purge 대상이 아니며 기간 제한 없이 보존한다.
+- MeetingReport의 Activity evidence는 Recording의 `[startedAt, endedAt)` 구간 안에서 같은 Workspace의 `actorUserId` Activity Log와 현재 `meeting_participants` 행의 마지막 `joinedAt`/`leftAt`이 겹칠 때만 선택한다. 재입장 전 참여 구간은 복원하지 않는 근사 규칙이다.
+- Activity evidence에는 action, 발생 시각, 검증된 metadata summary만 snapshot한다. AI가 summary/discussion/decision/action item을 Activity로 뒷받침한 경우에만 해당 산출물 reference를 함께 저장한다. 원본 Activity Log row, metadata.data, token, provider raw payload는 MeetingReport 응답에 포함하지 않는다.
 - audio purge는 수동 API 없이 durable job으로 재시도한다. 처리 중인 MeetingReport 또는 report outbox가 audio를 참조하면 purge 후보에서 제외한다.
 - 마지막 active participant가 나가면 회의가 자동 종료될 수 있다.
 - Meeting과 Recording은 1:N 관계다. 같은 Meeting 안에서 녹음을 여러 번 시작하고 종료할 수 있다.
@@ -306,6 +308,7 @@ Meeting 하나에는 여러 Recording이 있을 수 있다. API에서 `currentRe
 | `transcriptText` | string \| null | 상세 조회에서만 반환. 시간별 segment가 아닌 전체 Transcript 텍스트다. 목록 응답에는 포함하지 않는다. |
 | `evidenceSegments` | array | 상세 조회에서만 반환. 요약·논의·결정·후속 작업의 근거로 연결된 `id`, `segmentIndex`, `startedAtMs`, `endedAtMs`, `text` segment만 포함한다. |
 | `evidence` | array | 상세 조회에서만 반환. `sourceType`, `sourceIndex`, `transcriptSegmentId`로 요약 산출물과 evidence segment를 연결 |
+| `activityEvidence` | array | 상세 조회에서만 반환. Transcript와 구분된 Activity 근거. `id`, `sourceIndex`, `occurredAt`, `action`, `summary`, `references[]`만 포함하며, reference는 이 Activity가 뒷받침한 `sourceType`, `sourceIndex`다. raw Activity Log metadata는 포함하지 않는다. |
 | `summary` | string \| null | 요약 |
 | `discussionPoints` | string \| null | 논의사항 |
 | `decisions` | string \| null | 결정사항 |
