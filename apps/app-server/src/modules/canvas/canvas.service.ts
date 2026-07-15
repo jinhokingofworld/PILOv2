@@ -6,11 +6,16 @@ import {
   OnModuleDestroy,
   OnModuleInit
 } from "@nestjs/common";
+import { ActivityLogService } from "../../common/activity-log.service";
 import type { DatabaseTransaction } from "../../database/database.service";
 import { badRequest, notFound } from "../../common/api-error";
 import { DatabaseService } from "../../database/database.service";
 import { WorkspaceService } from "../workspace/workspace.service";
 import { CanvasOperationPublisherService } from "./canvas-operation-publisher.service";
+import {
+  buildCanvasShapeActivityLog,
+  type CanvasActivityActorType
+} from "./canvas-activity-log";
 import {
   assertUserCanCreateCanvasShape,
   assertUserCanDeleteCanvasShape,
@@ -144,6 +149,7 @@ export class CanvasService implements OnModuleDestroy, OnModuleInit {
     null;
 
   constructor(
+    private readonly activityLogService: ActivityLogService,
     private readonly database: DatabaseService,
     private readonly operationPublisher: CanvasOperationPublisherService,
     private readonly workspaceService: WorkspaceService
@@ -474,8 +480,8 @@ export class CanvasService implements OnModuleDestroy, OnModuleInit {
       input.clientOperationId
     );
     const baseRevision = validateOptionalBaseRevision(input.baseRevision);
-    const result = await this.database.transaction(async (transaction) =>
-      this.writeShapeOperation<CanvasShapePayload>(
+    const result = await this.database.transaction(async (transaction) => {
+      const writeResult = await this.writeShapeOperation<CanvasShapePayload>(
         transaction,
         {
           actorUserId: currentUserId,
@@ -592,8 +598,14 @@ export class CanvasService implements OnModuleDestroy, OnModuleInit {
             payload
           };
         }
-      )
-    );
+      );
+
+      await this.appendShapeActivityLog(transaction, writeResult, "user", {
+        after: writeResult.payload
+      });
+
+      return writeResult;
+    });
 
     if (result.isNewOperation) {
       await this.publishShapeOperations([result.operation]);
@@ -606,7 +618,8 @@ export class CanvasService implements OnModuleDestroy, OnModuleInit {
     currentUserId: string,
     workspaceId: string,
     canvasId: string,
-    input: SyncCanvasShapesBatchRequest
+    input: SyncCanvasShapesBatchRequest,
+    actorType: CanvasActivityActorType = "user"
   ): Promise<CanvasShapeBatchPayload> {
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
 
@@ -750,6 +763,10 @@ export class CanvasService implements OnModuleDestroy, OnModuleInit {
             }
           );
 
+          await this.appendShapeActivityLog(transaction, writeResult, actorType, {
+            after: writeResult.payload
+          });
+
           result.created += 1;
           result.shapes.push(writeResult.payload);
           if (writeResult.isNewOperation) {
@@ -760,6 +777,7 @@ export class CanvasService implements OnModuleDestroy, OnModuleInit {
 
         if (operation.type === "update") {
           const values = validateShapeUpdate(operation.payload);
+          let activityBefore: CanvasShapePayload | undefined;
           const writeResult = await this.writeShapeOperation<CanvasShapePayload>(
             transaction,
             {
@@ -781,6 +799,8 @@ export class CanvasService implements OnModuleDestroy, OnModuleInit {
               if (!currentShape) {
                 throw notFound("Canvas shape not found");
               }
+
+              activityBefore = mapShape(currentShape);
 
               const permittedValues = prepareUserCanvasShapeUpdate(
                 currentShape,
@@ -871,6 +891,11 @@ export class CanvasService implements OnModuleDestroy, OnModuleInit {
             }
           );
 
+          await this.appendShapeActivityLog(transaction, writeResult, actorType, {
+            after: writeResult.payload,
+            before: activityBefore
+          });
+
           result.updated += 1;
           result.shapes.push(writeResult.payload);
           if (writeResult.isNewOperation) {
@@ -879,6 +904,7 @@ export class CanvasService implements OnModuleDestroy, OnModuleInit {
           continue;
         }
 
+        let activityBefore: CanvasShapePayload | undefined;
         const writeResult =
           await this.writeShapeOperation<CanvasShapeDeletePayload>(
             transaction,
@@ -901,6 +927,8 @@ export class CanvasService implements OnModuleDestroy, OnModuleInit {
               if (!currentShape) {
                 throw notFound("Canvas shape not found");
               }
+
+              activityBefore = mapShape(currentShape);
 
               assertUserCanDeleteCanvasShape(currentShape);
 
@@ -937,6 +965,10 @@ export class CanvasService implements OnModuleDestroy, OnModuleInit {
               };
             }
           );
+
+        await this.appendShapeActivityLog(transaction, writeResult, actorType, {
+          before: activityBefore
+        });
 
         result.deleted += 1;
         result.deletedShapes.push(writeResult.payload);
@@ -1193,8 +1225,9 @@ export class CanvasService implements OnModuleDestroy, OnModuleInit {
       throw notFound("Canvas shape not found");
     }
 
-    const result = await this.database.transaction(async (transaction) =>
-      this.writeShapeOperation<CanvasShapePayload>(
+    const result = await this.database.transaction(async (transaction) => {
+      let activityBefore: CanvasShapePayload | undefined;
+      const writeResult = await this.writeShapeOperation<CanvasShapePayload>(
         transaction,
         {
           actorUserId: currentUserId,
@@ -1215,6 +1248,8 @@ export class CanvasService implements OnModuleDestroy, OnModuleInit {
           if (!currentShape) {
             throw notFound("Canvas shape not found");
           }
+
+          activityBefore = mapShape(currentShape);
 
           const permittedValues = prepareUserCanvasShapeUpdate(
             currentShape,
@@ -1304,8 +1339,15 @@ export class CanvasService implements OnModuleDestroy, OnModuleInit {
             payload
           };
         }
-      )
-    );
+      );
+
+      await this.appendShapeActivityLog(transaction, writeResult, "user", {
+        after: writeResult.payload,
+        before: activityBefore
+      });
+
+      return writeResult;
+    });
 
     if (result.isNewOperation) {
       await this.publishShapeOperations([result.operation]);
@@ -1362,65 +1404,75 @@ export class CanvasService implements OnModuleDestroy, OnModuleInit {
       throw notFound("Canvas shape not found");
     }
 
-    const result = await this.database.transaction(async (transaction) =>
-      this.writeShapeOperation<CanvasShapeDeletePayload>(
-        transaction,
-        {
-          actorUserId: currentUserId,
-          baseRevision,
-          canvasId: targetShape.canvas_id,
-          clientOperationId,
-          operationType: "delete",
-          shapeId: id,
-          workspaceId
-        },
-        async () => {
-          const currentShape = await this.findActiveShapeForUpdate(
-            transaction,
-            targetShape.canvas_id,
-            id
-          );
-
-          if (!currentShape) {
-            throw notFound("Canvas shape not found");
-          }
-
-          assertUserCanDeleteCanvasShape(currentShape);
-
-          await this.assertFreshShapeBaseRevision(transaction, {
+    const result = await this.database.transaction(async (transaction) => {
+      let activityBefore: CanvasShapePayload | undefined;
+      const writeResult =
+        await this.writeShapeOperation<CanvasShapeDeletePayload>(
+          transaction,
+          {
+            actorUserId: currentUserId,
             baseRevision,
-            currentShape,
+            canvasId: targetShape.canvas_id,
+            clientOperationId,
+            operationType: "delete",
             shapeId: id,
             workspaceId
-          });
+          },
+          async () => {
+            const currentShape = await this.findActiveShapeForUpdate(
+              transaction,
+              targetShape.canvas_id,
+              id
+            );
 
-          const shape = await transaction.queryOne<CanvasShapeDeleteRow>(
-            `
-              UPDATE canvas_freeform_shapes s
-              SET
-                deleted_at = now(),
-                revision = s.revision + 1
-              WHERE s.id = $1
-                AND s.canvas_id = $2
-                AND s.deleted_at IS NULL
-              RETURNING s.id, s.content_hash, s.revision, s.deleted_at
-            `,
-            [id, targetShape.canvas_id]
-          );
+            if (!currentShape) {
+              throw notFound("Canvas shape not found");
+            }
 
-          if (!shape || !shape.deleted_at) {
-            throw notFound("Canvas shape not found");
+            activityBefore = mapShape(currentShape);
+
+            assertUserCanDeleteCanvasShape(currentShape);
+
+            await this.assertFreshShapeBaseRevision(transaction, {
+              baseRevision,
+              currentShape,
+              shapeId: id,
+              workspaceId
+            });
+
+            const shape = await transaction.queryOne<CanvasShapeDeleteRow>(
+              `
+                UPDATE canvas_freeform_shapes s
+                SET
+                  deleted_at = now(),
+                  revision = s.revision + 1
+                WHERE s.id = $1
+                  AND s.canvas_id = $2
+                  AND s.deleted_at IS NULL
+                RETURNING s.id, s.content_hash, s.revision, s.deleted_at
+              `,
+              [id, targetShape.canvas_id]
+            );
+
+            if (!shape || !shape.deleted_at) {
+              throw notFound("Canvas shape not found");
+            }
+
+            const payload = mapDeletedShape(shape);
+
+            return {
+              operationPayload: { deletedShape: payload },
+              payload
+            };
           }
+        );
 
-          const payload = mapDeletedShape(shape);
+      await this.appendShapeActivityLog(transaction, writeResult, "user", {
+        before: activityBefore
+      });
 
-          return {
-            operationPayload: { deletedShape: payload },
-            payload
-          };
-        }
-      )
-    );
+      return writeResult;
+    });
 
     if (result.isNewOperation) {
       await this.publishShapeOperations([result.operation]);
@@ -1563,6 +1615,33 @@ export class CanvasService implements OnModuleDestroy, OnModuleInit {
         operation
       ) as TPayload
     };
+  }
+
+  private async appendShapeActivityLog(
+    transaction: DatabaseTransaction,
+    writeResult: CanvasShapeOperationWriteResult<
+      CanvasShapeDeletePayload | CanvasShapePayload
+    >,
+    actorType: CanvasActivityActorType,
+    shapes: {
+      after?: CanvasShapePayload;
+      before?: CanvasShapePayload;
+    }
+  ): Promise<void> {
+    if (!writeResult.isNewOperation) {
+      return;
+    }
+
+    const activityLog = buildCanvasShapeActivityLog({
+      actorType,
+      after: shapes.after,
+      before: shapes.before,
+      operation: writeResult.operation
+    });
+
+    if (activityLog) {
+      await this.activityLogService.append(transaction, activityLog);
+    }
   }
 
   private async findActiveShapeForUpdate(

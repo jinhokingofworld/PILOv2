@@ -176,7 +176,8 @@ export class CanvasAgentService implements OnModuleDestroy, OnModuleInit {
       currentUserId,
       workspaceId,
       canvasId,
-      this.drafts.toShapeBatch(draft.draft_spec_json, clientOperationId)
+      this.drafts.toShapeBatch(draft.draft_spec_json, clientOperationId),
+      "agent"
     );
     const shapeIds = batch.shapes.map((shape) => shape.id);
     const applied = await this.repository.markDraftApplied(draft.id, shapeIds);
@@ -253,7 +254,8 @@ export class CanvasAgentService implements OnModuleDestroy, OnModuleInit {
             claimed.run.requested_by_user_id,
             claimed.run.workspace_id,
             claimed.run.canvas_id,
-            result.shapeBatch
+            result.shapeBatch,
+            "agent"
           );
           createdShapeIds = batch.shapes.map((shape) => shape.id);
           latestOpSeq = Math.max(0, ...batch.shapes.map((shape) => shape.opSeq ?? 0));

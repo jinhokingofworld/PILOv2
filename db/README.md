@@ -78,3 +78,4 @@ The database schema source of truth is the migration history in `db/migrations/`
 - `migrations/062_create_pr_review_conflict_drafts.sql` adds durable per-file shared Conflict resolution drafts with optimistic draft versions, audit actor data, timestamp tracking, and all-deny RLS.
 - `migrations/063_create_sql_erd_source_snapshots_and_locks.sql` adds immutable SQLtoERD source snapshots, source-writer leases, and source snapshot operation references.
 - `migrations/064_add_pr_review_conflict_draft_resolution_state.sql` stores durable Conflict hunk-selection and direct-edit state so shared draft reloads do not misclassify selection results as manual code edits.
+- `migrations/065_add_activity_log_dedupe_key.sql` adds the required Workspace-scoped idempotency key for common append-only Activity Log writers.
