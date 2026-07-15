@@ -15,6 +15,8 @@ This module owns Canvas Socket.IO rooms and presence delivery.
   room.
 - Emit leave events when a socket leaves or disconnects.
 - Return `canvas:joined` with current in-memory room presence.
+- When the tldraw sync engine is implemented, validate sync-room access and
+  create canvas-scoped sync rooms lazily.
 
 ## Non-Responsibilities
 
@@ -24,6 +26,10 @@ This module owns Canvas Socket.IO rooms and presence delivery.
 - CRDT, Yjs, or tldraw sync.
 - Long-term presence storage.
 - Persisting `editingShapeId` or `editingMode`; edit intent is realtime-only.
+
+Note: `@tldraw/sync` is currently a planned engine path, not an implemented
+multiplayer room in this module. Until it is implemented, `tldraw_sync` Canvas
+uses App Server `canvas_sync_documents` snapshot persistence fallback.
 
 ## Event Boundary
 
@@ -58,3 +64,59 @@ Realtime Canvas access follows App Server semantics:
 
 PR Review canvas surfaces opt in explicitly instead of receiving Canvas
 presence automatically through the shared tldraw surface.
+
+## tldraw_sync Room Contract
+
+When `@tldraw/sync` multiplayer is added, it should be added to this Canvas
+module rather than to App Server.
+
+Room identity:
+
+```text
+workspace:{workspaceId}:canvas:{canvasId}:tldraw-sync
+```
+
+Join input:
+
+```ts
+type CanvasTldrawSyncJoinInput = {
+  workspaceId: string;
+  canvasId: string;
+};
+```
+
+Validation:
+
+1. Validate bearer session with the same socket auth path used by Canvas
+   presence.
+2. Verify `workspace_members` contains the authenticated user.
+3. Verify `canvas.workspace_id = workspaceId`.
+4. Verify `canvas.id = canvasId`.
+5. Verify `canvas.board_type = 'freeform'`.
+6. Verify `canvas.engine_type = 'tldraw_sync'`.
+7. Reject client-provided room keys. The server builds the room key only after
+   validation succeeds.
+
+Lifecycle:
+
+- A sync room is created lazily when the first authorized socket joins.
+- If the room already exists, the socket joins the existing room.
+- When the last socket leaves, in-memory room state may be released.
+- Room release must not delete `canvas_sync_documents`.
+
+Persistence:
+
+- The sync room may hydrate from `canvas_sync_documents.snapshot`.
+- Snapshot saves must use the same persistence boundary as
+  `PUT /workspaces/{workspaceId}/canvases/{canvasId}/sync-document` or a shared
+  service with identical validation.
+- Do not write tldraw sync document state into `canvas_freeform_shapes` or
+  `canvas_shape_operations`.
+
+Scale-out:
+
+- With one realtime-server task, in-memory rooms are enough for local
+  development.
+- With multiple realtime-server tasks, Socket.IO Redis adapter alone does not
+  make a tldraw sync document authoritative. The sync engine also needs shared
+  persistence or a provider-level coordination strategy.

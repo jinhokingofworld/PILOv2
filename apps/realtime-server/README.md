@@ -54,6 +54,11 @@ Do not store cursor position or selection in PostgreSQL. Presence is realtime
 state only. Canvas shape state and operation catch-up remain App Server/API/DB
 responsibilities.
 
+For `tldraw_sync` Canvas, realtime-server owns the future multiplayer room
+lifecycle only. The room key and validation contract are documented in
+`src/canvas/README.md`; document persistence remains the App Server
+`canvas_sync_documents` boundary.
+
 ## Runtime
 
 Required for authenticated Canvas and Board rooms:

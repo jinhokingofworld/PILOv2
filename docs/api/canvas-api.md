@@ -709,6 +709,39 @@ Canvas는 `false`, completed Review Canvas는 `true`다. read-only room에서도
 `forbidden`으로 거부한다. active room이 접속 중 completed로 전환되는 lifecycle event와
 클라이언트 상태 전환은 PR Review room lifecycle 단계에서 처리한다.
 
+## tldraw_sync Multiplayer Room 계약
+
+`tldraw_sync` Canvas의 실제 multiplayer server는 realtime-server의 Canvas module에
+붙인다. App Server는 REST API와 `canvas_sync_documents` persistence 경계를 유지하고,
+긴 연결 상태를 소유하지 않는다.
+
+room key:
+
+```text
+workspace:{workspaceId}:canvas:{canvasId}:tldraw-sync
+```
+
+접속 규칙:
+
+- browser는 bearer session token과 `workspaceId`, `canvasId`를 전달한다.
+- browser가 전달한 room key는 신뢰하지 않는다. realtime-server가 검증 후 key를 만든다.
+- realtime-server는 bearer session, workspace membership, canvas ownership을 검증한다.
+- 대상 Canvas는 `board_type = 'freeform'`이고 `engine_type = 'tldraw_sync'`여야 한다.
+- `classic` Canvas와 Review Canvas는 이 room에 입장할 수 없다.
+- 첫 authorized socket이 들어오면 room은 lazy하게 생성된다. 마지막 socket이 나가면
+  in-memory room은 사라져도 된다.
+
+persistence 규칙:
+
+- room 생성 시 저장된 문서가 필요하면 `canvas_sync_documents.snapshot`을 복원 기준으로 삼는다.
+- sync engine이 snapshot을 저장할 때도 `canvas_sync_documents`와 같은 검증·용량 제한·보안
+  기준을 사용한다.
+- tldraw sync 문서 상태를 `canvas_freeform_shapes`, `canvas_shape_operations`,
+  classic `shapes/batch` 경로에 저장하지 않는다.
+- realtime-server가 여러 instance로 동작하면 Redis adapter만으로 문서 병합 source of
+  truth가 되지 않는다. sync engine용 shared persistence 또는 provider-level
+  coordination이 별도로 필요하다.
+
 ## DB 조회 정책
 
 `canvas_freeform_shapes`는 viewport overlap 조회를 위해 `max_x`, `max_y` generated
