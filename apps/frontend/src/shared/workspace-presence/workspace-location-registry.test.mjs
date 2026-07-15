@@ -16,6 +16,14 @@ function location(page, pathname = `/${page}`) {
   };
 }
 
+function deferred() {
+  let resolve;
+  const promise = new Promise((nextResolve) => {
+    resolve = nextResolve;
+  });
+  return { promise, resolve };
+}
+
 test("registry는 mounted adapter의 capture와 restore를 사용한다", async () => {
   const restored = [];
   const registry = createWorkspaceLocationRegistry();
@@ -119,4 +127,160 @@ test("새 click은 pending jump를 교체하고 timeout은 rollback과 정확한
   assert.deepEqual(rolledBack, ["/home"]);
   assert.deepEqual(errors, [WORKSPACE_JUMP_ERROR_MESSAGE]);
   assert.equal(coordinator.getPending(), null);
+});
+
+test("async restore 도중 재클릭하면 stale completion이 새 pending을 지우지 않는다", async () => {
+  const restores = [];
+  const registry = createWorkspaceLocationRegistry();
+  registry.register({
+    capture: () => location("home"),
+    page: "home",
+    ready: true,
+    restore: (target) => {
+      const pendingRestore = deferred();
+      restores.push({ pendingRestore, target });
+      return pendingRestore.promise;
+    },
+  });
+  const coordinator = createWorkspaceJumpCoordinator({
+    clearTimer: () => {},
+    getCurrentHref: () => "/home",
+    navigate: () => {},
+    onError: () => {},
+    registry,
+    rollback: () => {},
+    setTimer: () => 1,
+  });
+  const firstTarget = {
+    ...location("home"),
+    context: { request: "first" },
+  };
+  const secondTarget = {
+    ...location("home"),
+    context: { request: "second" },
+  };
+
+  const firstJump = coordinator.jump(firstTarget);
+  await Promise.resolve();
+  const secondJump = coordinator.jump(secondTarget);
+  await Promise.resolve();
+  assert.equal(restores.length, 2);
+
+  restores[0].pendingRestore.resolve(true);
+  await firstJump;
+  assert.equal(
+    coordinator.getPending()?.targetLocation.context.request,
+    "second",
+  );
+
+  restores[1].pendingRestore.resolve(true);
+  await secondJump;
+  assert.equal(coordinator.getPending(), null);
+});
+
+test("같은 request의 destinationReady 중복 호출은 restore를 한 번만 실행한다", async () => {
+  let currentHref = "/home";
+  const restore = deferred();
+  let restoreCount = 0;
+  const registry = createWorkspaceLocationRegistry();
+  registry.register({
+    capture: () => location("home"),
+    page: "home",
+    ready: true,
+    restore: async () => true,
+  });
+  const coordinator = createWorkspaceJumpCoordinator({
+    clearTimer: () => {},
+    getCurrentHref: () => currentHref,
+    navigate: (href) => {
+      currentHref = href;
+    },
+    onError: () => {},
+    registry,
+    rollback: () => {},
+    setTimer: () => 1,
+  });
+
+  await coordinator.jump(location("calendar"));
+  registry.register({
+    capture: () => location("calendar"),
+    page: "calendar",
+    ready: true,
+    restore: () => {
+      restoreCount += 1;
+      return restore.promise;
+    },
+  });
+
+  const firstReady = coordinator.destinationReady();
+  const duplicateReady = coordinator.destinationReady();
+  assert.equal(restoreCount, 1);
+  restore.resolve(true);
+  await Promise.all([firstReady, duplicateReady]);
+  assert.equal(coordinator.getPending(), null);
+});
+
+test("target 실패는 source route의 camera와 element viewport를 정확히 한 번 복원한다", async () => {
+  const sources = [
+    {
+      context: { canvasId: "canvas-1" },
+      page: "canvas",
+      route: { pathname: "/canvas", search: "?canvasId=canvas-1" },
+      viewport: { kind: "camera", x: 10, y: 20, z: 1.5 },
+    },
+    {
+      context: { boardId: "board-1" },
+      page: "board",
+      route: { pathname: "/board", search: "" },
+      viewport: {
+        kind: "element",
+        key: "board-kanban",
+        xRatio: 0.75,
+        yRatio: 0.25,
+      },
+    },
+  ];
+
+  for (const source of sources) {
+    let currentHref = `${source.route.pathname}${source.route.search}`;
+    const restoredSources = [];
+    const errors = [];
+    const registry = createWorkspaceLocationRegistry();
+    registry.register({
+      capture: () => source,
+      page: source.page,
+      ready: true,
+      restore: (target) => {
+        restoredSources.push(target);
+        return true;
+      },
+    });
+    const coordinator = createWorkspaceJumpCoordinator({
+      clearTimer: () => {},
+      getCurrentHref: () => currentHref,
+      navigate: (href) => {
+        currentHref = href;
+      },
+      onError: (message) => errors.push(message),
+      registry,
+      rollback: (href) => {
+        currentHref = href;
+      },
+      setTimer: () => 1,
+    });
+
+    await coordinator.jump(location("calendar"));
+    registry.register({
+      capture: () => location("calendar"),
+      page: "calendar",
+      ready: true,
+      restore: () => false,
+    });
+    await coordinator.destinationReady();
+
+    assert.equal(currentHref, `${source.route.pathname}${source.route.search}`);
+    assert.deepEqual(restoredSources, [source]);
+    assert.deepEqual(errors, [WORKSPACE_JUMP_ERROR_MESSAGE]);
+    assert.equal(coordinator.getPending(), null);
+  }
 });

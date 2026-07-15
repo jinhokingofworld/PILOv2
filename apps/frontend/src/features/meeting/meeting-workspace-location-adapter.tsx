@@ -12,10 +12,12 @@ function getDocumentScroller() {
 
 export function MeetingWorkspaceLocationAdapter({
   availableRoomIds,
+  roomsReady,
   selectedMeetingRoomId,
   selectMeetingRoom,
 }: {
   availableRoomIds: string[];
+  roomsReady: boolean;
   selectedMeetingRoomId: string | null;
   selectMeetingRoom: (meetingRoomId: string) => void;
 }) {
@@ -33,14 +35,14 @@ export function MeetingWorkspaceLocationAdapter({
         });
       },
       page: "meeting" as const,
-      ready: availableRoomIds.length > 0,
+      ready: roomsReady,
       async restore(location: WorkspacePresenceLocation) {
         if (location.page !== "meeting" || location.viewport.kind !== "document") {
           return false;
         }
         const roomId = readMeetingRoomId(location, availableRoomIds);
-        if (!roomId) return false;
-        selectMeetingRoom(roomId);
+        if (roomId === undefined) return false;
+        if (roomId !== null) selectMeetingRoom(roomId);
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
         const scroller = getDocumentScroller();
         window.scrollTo(
@@ -54,7 +56,7 @@ export function MeetingWorkspaceLocationAdapter({
         return true;
       },
     }),
-    [availableRoomIds, selectMeetingRoom, selectedMeetingRoomId],
+    [availableRoomIds, roomsReady, selectMeetingRoom, selectedMeetingRoomId],
   );
   useWorkspaceLocationAdapter(adapter);
   return null;

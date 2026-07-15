@@ -113,8 +113,10 @@ export function createWorkspacePresenceService({
         visible: false,
         workspaceId,
       };
-      getOrCreateWorkspace(workspaceId).set(socketId, state);
-      return toPresenceState(state);
+      const workspacePresence = getOrCreateWorkspace(workspaceId);
+      workspacePresence.set(socketId, state);
+      const representative = getRepresentative(workspacePresence, state.userId);
+      return toPresenceState(representative ?? state);
     },
     leaveSocket(socketId: string, workspaceId: string) {
       const workspacePresence = presenceByWorkspace.get(workspaceId);

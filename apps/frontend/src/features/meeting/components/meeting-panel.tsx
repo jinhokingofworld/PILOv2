@@ -844,6 +844,7 @@ export function MeetingPanel({ section = "room" }: { section?: MeetingSection })
       <div className="flex flex-col gap-6">
         <MeetingWorkspaceLocationAdapter
           availableRoomIds={availableMeetingRoomIds}
+          roomsReady={meetingRoomsStatus === "success"}
           selectedMeetingRoomId={selectedMeetingRoomId || null}
           selectMeetingRoom={selectMeetingRoom}
         />

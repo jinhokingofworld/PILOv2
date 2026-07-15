@@ -11,6 +11,8 @@ type WorkspaceJumpTimer = ReturnType<typeof globalThis.setTimeout>;
 
 export type WorkspacePendingJump = {
   expiresAt: number;
+  phase: "rollback" | "target";
+  requestId: number;
   sourceHref: string;
   sourceLocation: WorkspacePresenceLocation | null;
   targetLocation: WorkspacePresenceLocation;
@@ -79,6 +81,8 @@ export function createWorkspaceJumpCoordinator({
 }) {
   let pending: WorkspacePendingJump | null = null;
   let timeout: WorkspaceJumpTimer | null = null;
+  let requestSequence = 0;
+  const restoresInFlight = new Set<string>();
 
   function clearPending() {
     if (timeout !== null) clearTimer(timeout);
@@ -86,59 +90,145 @@ export function createWorkspaceJumpCoordinator({
     pending = null;
   }
 
-  async function fail() {
-    const failedJump = pending;
+  function isCurrentRequest(
+    requestId: number,
+    phase?: WorkspacePendingJump["phase"],
+  ) {
+    return Boolean(
+      pending?.requestId === requestId &&
+        (phase === undefined || pending.phase === phase),
+    );
+  }
+
+  function finishWithError(requestId: number) {
+    if (!isCurrentRequest(requestId)) return;
     clearPending();
-    if (failedJump) await rollback(failedJump.sourceHref);
     onError(WORKSPACE_JUMP_ERROR_MESSAGE);
   }
 
-  return {
-    async destinationReady() {
-      if (!pending) return false;
-      if (getCurrentHref() !== toWorkspaceLocationHref(pending.targetLocation)) {
-        return false;
+  function scheduleTimeout(requestId: number, phase: WorkspacePendingJump["phase"]) {
+    if (timeout !== null) clearTimer(timeout);
+    timeout = setTimer(() => {
+      if (phase === "target") {
+        return beginRollback(requestId);
       }
-      if (!registry.isReady(pending.targetLocation.page)) return false;
+      finishWithError(requestId);
+    }, WORKSPACE_JUMP_TIMEOUT_MS);
+  }
 
-      const restored = await registry.restore(pending.targetLocation);
-      if (!restored) {
-        await fail();
+  async function beginRollback(requestId: number) {
+    if (!isCurrentRequest(requestId, "target") || !pending) return false;
+    pending = {
+      ...pending,
+      expiresAt: now() + WORKSPACE_JUMP_TIMEOUT_MS,
+      phase: "rollback",
+    };
+    scheduleTimeout(requestId, "rollback");
+
+    try {
+      await rollback(pending.sourceHref);
+    } catch {
+      finishWithError(requestId);
+      return false;
+    }
+
+    if (!isCurrentRequest(requestId, "rollback")) return false;
+    await destinationReady();
+    return false;
+  }
+
+  async function restorePending(
+    requestId: number,
+    phase: WorkspacePendingJump["phase"],
+    location: WorkspacePresenceLocation,
+  ) {
+    const restoreKey = `${requestId}:${phase}`;
+    if (restoresInFlight.has(restoreKey)) return false;
+    restoresInFlight.add(restoreKey);
+
+    let restored = false;
+    try {
+      restored = await registry.restore(location);
+    } catch {
+      restored = false;
+    } finally {
+      restoresInFlight.delete(restoreKey);
+    }
+
+    if (!isCurrentRequest(requestId, phase)) return false;
+    if (phase === "rollback") {
+      finishWithError(requestId);
+      return false;
+    }
+    if (!restored) {
+      await beginRollback(requestId);
+      return false;
+    }
+
+    clearPending();
+    return true;
+  }
+
+  async function destinationReady() {
+    const current = pending;
+    if (!current) return false;
+
+    if (current.phase === "rollback") {
+      if (getCurrentHref() !== current.sourceHref) return false;
+      if (!current.sourceLocation) {
+        finishWithError(current.requestId);
         return false;
       }
-      clearPending();
-      return true;
-    },
+      if (!registry.isReady(current.sourceLocation.page)) return false;
+      return restorePending(
+        current.requestId,
+        "rollback",
+        current.sourceLocation,
+      );
+    }
+
+    if (getCurrentHref() !== toWorkspaceLocationHref(current.targetLocation)) {
+      return false;
+    }
+    if (!registry.isReady(current.targetLocation.page)) return false;
+    return restorePending(
+      current.requestId,
+      "target",
+      current.targetLocation,
+    );
+  }
+
+  return {
+    destinationReady,
     getPending() {
       return pending;
     },
     async jump(targetLocation: WorkspacePresenceLocation) {
       clearPending();
+      const requestId = ++requestSequence;
       const sourceHref = getCurrentHref();
       const sourceLocation = registry.capture();
       const targetHref = toWorkspaceLocationHref(targetLocation);
 
-      if (sourceHref === targetHref) {
-        const restored = await registry.restore(targetLocation);
-        if (!restored) onError(WORKSPACE_JUMP_ERROR_MESSAGE);
-        return restored;
-      }
-
       pending = {
         expiresAt: now() + WORKSPACE_JUMP_TIMEOUT_MS,
+        phase: "target",
+        requestId,
         sourceHref,
         sourceLocation,
         targetLocation,
       };
-      timeout = setTimer(() => {
-        void fail();
-      }, WORKSPACE_JUMP_TIMEOUT_MS);
+      scheduleTimeout(requestId, "target");
+
+      if (sourceHref === targetHref) {
+        return destinationReady();
+      }
 
       try {
         await navigate(targetHref);
         return true;
       } catch {
-        await fail();
+        await beginRollback(requestId);
         return false;
       }
     },

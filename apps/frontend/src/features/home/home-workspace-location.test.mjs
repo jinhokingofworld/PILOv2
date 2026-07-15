@@ -11,4 +11,23 @@ test("Home은 document scroll ratio를 capture/restore한다", async () => {
   assert.match(adapter, /useWorkspaceLocationAdapter/);
   const host = await readFile(new URL("./components/home-dashboard.tsx", import.meta.url), "utf8");
   assert.match(host, /HomeWorkspaceLocationAdapter/);
+  const packageJson = JSON.parse(
+    await readFile(new URL("../../../package.json", import.meta.url), "utf8"),
+  );
+  assert.match(packageJson.scripts.test, /test:workspace-location/);
+  for (const domain of [
+    "home",
+    "calendar",
+    "board",
+    "sql-erd",
+    "pr-review",
+    "meeting",
+    "canvas",
+    "drive",
+  ]) {
+    assert.match(
+      packageJson.scripts["test:workspace-location"],
+      new RegExp(`${domain}-workspace-location`),
+    );
+  }
 });

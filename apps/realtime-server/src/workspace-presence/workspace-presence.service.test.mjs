@@ -158,3 +158,20 @@ test("background update는 활성 시각을 전진시키지 않고 마지막 탭
     payload: { userId: "user-2", workspaceId },
   });
 });
+
+test("joinSocket은 새 background 탭이 아니라 사용자 대표 foreground를 반환한다", () => {
+  const service = createWorkspacePresenceService();
+  const user = { displayName: "세인", userId: "user-1" };
+  service.joinSocket("foreground", user, workspaceId);
+  service.updateSocket("foreground", {
+    focused: true,
+    location: homeLocation(),
+    visible: true,
+    workspaceId,
+  });
+
+  const representative = service.joinSocket("background", user, workspaceId);
+
+  assert.equal(representative.focused, true);
+  assert.equal(representative.location?.page, "home");
+});

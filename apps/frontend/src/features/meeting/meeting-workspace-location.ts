@@ -38,7 +38,8 @@ export function readMeetingRoomId(
   availableRoomIds: string[],
 ) {
   const roomId = location.context.meetingRoomId;
-  return roomId && availableRoomIds.includes(roomId) ? roomId : null;
+  if (roomId === null) return null;
+  return roomId && availableRoomIds.includes(roomId) ? roomId : undefined;
 }
 
 export function getMeetingScrollOffset(

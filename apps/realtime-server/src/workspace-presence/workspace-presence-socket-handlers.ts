@@ -64,6 +64,23 @@ export function registerWorkspacePresenceSocketHandlers({
   socket: Socket;
 }) {
   const authedSocket = socket as WorkspacePresenceSocket;
+  const generationByWorkspace = new Map<string, number>();
+  const joinedGenerationByWorkspace = new Map<string, number>();
+  let disconnected = false;
+
+  function nextGeneration(workspaceId: string) {
+    const generation = (generationByWorkspace.get(workspaceId) ?? 0) + 1;
+    generationByWorkspace.set(workspaceId, generation);
+    return generation;
+  }
+
+  function isCurrentJoin(workspaceId: string, generation: number) {
+    return (
+      !disconnected &&
+      socket.connected &&
+      generationByWorkspace.get(workspaceId) === generation
+    );
+  }
 
   socket.on(workspacePresenceClientEvents.join, async (payload) => {
     const room = readWorkspacePresenceRoomRef(payload);
@@ -71,11 +88,13 @@ export function registerWorkspacePresenceSocketHandlers({
       emitInvalidPayload(socket, workspacePresenceClientEvents.join);
       return;
     }
+    const generation = nextGeneration(room.workspaceId);
 
     const allowed = await accessService.canJoinWorkspace(
       authedSocket.data.auth,
       room.workspaceId,
     );
+    if (!isCurrentJoin(room.workspaceId, generation)) return;
     if (!allowed || !authedSocket.data.auth.userId) {
       socket.emit(
         workspacePresenceServerEvents.error,
@@ -89,6 +108,15 @@ export function registerWorkspacePresenceSocketHandlers({
 
     const roomName = createWorkspacePresenceRoomName(room.workspaceId);
     await socket.join(roomName);
+    if (!isCurrentJoin(room.workspaceId, generation)) {
+      if (
+        joinedGenerationByWorkspace.get(room.workspaceId) !==
+        generationByWorkspace.get(room.workspaceId)
+      ) {
+        await socket.leave(roomName);
+      }
+      return;
+    }
     const presence = service.joinSocket(
       socket.id,
       {
@@ -97,6 +125,7 @@ export function registerWorkspacePresenceSocketHandlers({
       },
       room.workspaceId,
     );
+    joinedGenerationByWorkspace.set(room.workspaceId, generation);
     socket.emit(workspacePresenceServerEvents.joined, {
       ...room,
       presence: service.getWorkspacePresence(room.workspaceId),
@@ -110,10 +139,14 @@ export function registerWorkspacePresenceSocketHandlers({
       emitInvalidPayload(socket, workspacePresenceClientEvents.leave);
       return;
     }
+    const generation = nextGeneration(room.workspaceId);
+    joinedGenerationByWorkspace.delete(room.workspaceId);
 
     const result = service.leaveSocket(socket.id, room.workspaceId);
     await socket.leave(createWorkspacePresenceRoomName(room.workspaceId));
-    if (result) emitClearResult(io, result);
+    if (result && generationByWorkspace.get(room.workspaceId) === generation) {
+      emitClearResult(io, result);
+    }
   });
 
   socket.on(workspacePresenceClientEvents.update, (payload) => {
@@ -142,6 +175,8 @@ export function registerWorkspacePresenceSocketHandlers({
   });
 
   socket.on("disconnect", () => {
+    disconnected = true;
+    joinedGenerationByWorkspace.clear();
     for (const result of service.clearSocket(socket.id)) {
       emitClearResult(io, result);
     }
