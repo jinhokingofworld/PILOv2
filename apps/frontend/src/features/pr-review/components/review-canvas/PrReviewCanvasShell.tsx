@@ -1342,7 +1342,11 @@ export function PrReviewCanvasShell({
           }
         }}
       >
-        <AlertDialogContent size="default">
+        <AlertDialogContent
+          className="z-[90]"
+          overlayClassName="z-[90]"
+          size="default"
+        >
           <AlertDialogHeader>
             <AlertDialogMedia className="bg-amber-50 text-amber-700">
               <GitMerge className="size-5" />
@@ -1498,7 +1502,11 @@ export function PrReviewCanvasShell({
           }
         }}
       >
-        <AlertDialogContent size="default">
+        <AlertDialogContent
+          className="z-[90]"
+          overlayClassName="z-[90]"
+          size="default"
+        >
           <AlertDialogHeader>
             <AlertDialogMedia className="bg-blue-50 text-blue-700">
               <GitMerge className="size-5" />

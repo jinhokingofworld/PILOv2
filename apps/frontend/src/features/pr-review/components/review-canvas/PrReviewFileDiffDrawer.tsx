@@ -27,6 +27,16 @@ import {
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle
+} from "@/components/ui/alert-dialog";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import {
@@ -40,6 +50,7 @@ import {
   getPrReviewConflictHunkLocations,
   type PrReviewConflictDraft
 } from "./pr-review-conflict-drafts";
+import { mergePrReviewConflictDraft } from "./pr-review-conflict-draft-merge";
 import {
   applyAllPrReviewConflictSuggestion,
   buildPrReviewConflictSuggestionInput,
@@ -52,8 +63,8 @@ import type {
   PrReviewDiffRow,
   PrReviewConflictFile,
   PrReviewConflictDraftResolutionState,
+  PrReviewConflictDraftSuggestion,
   PrReviewConflictHunk,
-  PrReviewConflictSuggestion,
   PrReviewDecisionUpdatedEvent,
   PrReviewFile,
   PrReviewFileDecisionStatus,
@@ -77,6 +88,12 @@ type ConflictAnalysisLoadStatus =
 type SaveStatus = "idle" | "saving" | "saved" | "error";
 type ConflictSuggestionLoadStatus = "idle" | "loading" | "ready" | "error";
 type ConflictWorkspaceView = "conflict" | "resolved";
+
+type PendingConflictDraftMerge = {
+  nextDraft: PrReviewConflictDraft;
+  overlapCount: number;
+  useSelectionContent: string;
+};
 
 type PrReviewFileDiffDrawerProps = {
   apiClient: PrReviewApiClient;
@@ -376,6 +393,8 @@ export function PrReviewFileDiffDrawer({
   const [isBaseComparisonOpen, setIsBaseComparisonOpen] = useState(false);
   const [conflictWorkspaceView, setConflictWorkspaceView] =
     useState<ConflictWorkspaceView>("conflict");
+  const [pendingConflictDraftMerge, setPendingConflictDraftMerge] =
+    useState<PendingConflictDraftMerge | null>(null);
   const conflictSuggestion = conflictDraft?.suggestion ?? null;
   const resolvedContentDraft = conflictDraft?.resolvedContent ?? "";
   const resolutionChoices = conflictDraft?.resolutionChoices ?? {};
@@ -677,6 +696,50 @@ export function PrReviewFileDiffDrawer({
       ? "Conflict 해결"
       : "파일 경로";
 
+  const applyGeneratedDraft = useCallback(
+    (nextDraft: PrReviewConflictDraft) => {
+      if (!conflictFile || !conflictDraft || isReviewReadOnly) {
+        return;
+      }
+
+      if (!conflictDraft.isCustomized) {
+        onConflictDraftChange(conflictFile.reviewFileId, nextDraft);
+        return;
+      }
+
+      const previousGeneratedContent = buildPrReviewConflictMarkerDraft(
+        conflictFile,
+        getResolvedHunkTexts({
+          acceptedAiResolvedTexts: conflictDraft.acceptedAiResolvedTexts,
+          choices: conflictDraft.resolutionChoices,
+          file: conflictFile,
+          manualResolvedTexts: conflictDraft.manualResolvedTexts
+        })
+      );
+      const merge = mergePrReviewConflictDraft({
+        currentContent: conflictDraft.resolvedContent,
+        previousGeneratedContent,
+        nextGeneratedContent: nextDraft.resolvedContent
+      });
+
+      if (merge.kind === "clean") {
+        onConflictDraftChange(conflictFile.reviewFileId, {
+          ...nextDraft,
+          resolvedContent: merge.resolvedContent,
+          isCustomized: merge.resolvedContent !== nextDraft.resolvedContent
+        });
+        return;
+      }
+
+      setPendingConflictDraftMerge({
+        nextDraft,
+        overlapCount: merge.overlapCount,
+        useSelectionContent: merge.useSelectionContent
+      });
+    },
+    [conflictDraft, conflictFile, isReviewReadOnly, onConflictDraftChange]
+  );
+
   const rebuildResolvedDraft = useCallback(
     (
       nextChoices: Record<string, PrReviewConflictResolutionChoice>,
@@ -687,36 +750,37 @@ export function PrReviewFileDiffDrawer({
         return;
       }
 
-      onConflictDraftChange(conflictFile.reviewFileId, {
+      const resolvedContent = buildPrReviewConflictMarkerDraft(
+        conflictFile,
+        getResolvedHunkTexts({
+          acceptedAiResolvedTexts: nextAcceptedAiResolvedTexts,
+          choices: nextChoices,
+          file: conflictFile,
+          manualResolvedTexts: nextManualResolvedTexts
+        })
+      );
+      applyGeneratedDraft({
         ...conflictDraft,
         resolutionChoices: nextChoices,
         acceptedAiResolvedTexts: nextAcceptedAiResolvedTexts,
         manualResolvedTexts: nextManualResolvedTexts,
-        resolvedContent: buildPrReviewConflictMarkerDraft(
-          conflictFile,
-          getResolvedHunkTexts({
-            acceptedAiResolvedTexts: nextAcceptedAiResolvedTexts,
-            choices: nextChoices,
-            file: conflictFile,
-            manualResolvedTexts: nextManualResolvedTexts
-          })
-        ),
+        resolvedContent,
         isCustomized: false
       });
     },
     [
       acceptedAiResolvedTexts,
+      applyGeneratedDraft,
       conflictDraft,
       conflictFile,
       isReviewReadOnly,
-      manualResolvedTexts,
-      onConflictDraftChange
+      manualResolvedTexts
     ]
   );
 
   const handleResolutionChoiceChange = useCallback(
     (hunkId: string, choice: PrReviewConflictResolutionChoice) => {
-      if (!conflictFile || isResolvedDraftCustomized || isReviewReadOnly) {
+      if (!conflictFile || isReviewReadOnly) {
         return;
       }
 
@@ -769,7 +833,6 @@ export function PrReviewFileDiffDrawer({
       acceptedAiResolvedTexts,
       aiResolvedHunks,
       conflictFile,
-      isResolvedDraftCustomized,
       isReviewReadOnly,
       manualResolvedTexts,
       rebuildResolvedDraft,
@@ -778,15 +841,29 @@ export function PrReviewFileDiffDrawer({
   );
 
   const handleResetCustomizedDraft = useCallback(() => {
-    if (isReviewReadOnly) {
+    if (!conflictFile || !conflictDraft || isReviewReadOnly) {
       return;
     }
-    rebuildResolvedDraft(resolutionChoices);
-  }, [isReviewReadOnly, rebuildResolvedDraft, resolutionChoices]);
+    const resolvedContent = buildPrReviewConflictMarkerDraft(
+      conflictFile,
+      resolvedHunkTexts
+    );
+    onConflictDraftChange(conflictFile.reviewFileId, {
+      ...conflictDraft,
+      resolvedContent,
+      isCustomized: false
+    });
+  }, [
+    conflictDraft,
+    conflictFile,
+    isReviewReadOnly,
+    onConflictDraftChange,
+    resolvedHunkTexts
+  ]);
 
   const handleResolutionChoiceReset = useCallback(
     (hunkId: string) => {
-      if (isResolvedDraftCustomized || isReviewReadOnly) {
+      if (isReviewReadOnly) {
         return;
       }
 
@@ -804,7 +881,6 @@ export function PrReviewFileDiffDrawer({
     },
     [
       acceptedAiResolvedTexts,
-      isResolvedDraftCustomized,
       isReviewReadOnly,
       manualResolvedTexts,
       rebuildResolvedDraft,
@@ -814,7 +890,7 @@ export function PrReviewFileDiffDrawer({
 
   const handleManualResolutionChange = useCallback(
     (hunkId: string, resolvedText: string) => {
-      if (!conflictFile || isResolvedDraftCustomized || isReviewReadOnly) {
+      if (!conflictFile || isReviewReadOnly) {
         return;
       }
 
@@ -830,7 +906,6 @@ export function PrReviewFileDiffDrawer({
     [
       acceptedAiResolvedTexts,
       conflictFile,
-      isResolvedDraftCustomized,
       isReviewReadOnly,
       manualResolvedTexts,
       rebuildResolvedDraft,
@@ -886,7 +961,6 @@ export function PrReviewFileDiffDrawer({
       !conflictFile ||
       !conflictSuggestion ||
       conflictSuggestion.status === "invalid" ||
-      isResolvedDraftCustomized ||
       isReviewReadOnly ||
       !isEditingConflictDraft
     ) {
@@ -896,8 +970,7 @@ export function PrReviewFileDiffDrawer({
     if (!conflictDraft) {
       return;
     }
-    onConflictDraftChange(
-      conflictFile.reviewFileId,
+    applyGeneratedDraft(
       applyAllPrReviewConflictSuggestion(
         conflictFile,
         conflictDraft,
@@ -909,10 +982,9 @@ export function PrReviewFileDiffDrawer({
     conflictDraft,
     conflictFile,
     conflictSuggestion,
-    isResolvedDraftCustomized,
     isEditingConflictDraft,
     isReviewReadOnly,
-    onConflictDraftChange
+    applyGeneratedDraft
   ]);
 
   useEffect(() => {
@@ -1013,9 +1085,7 @@ export function PrReviewFileDiffDrawer({
                     hunkCount={conflictFile.hunks.length}
                     hunkIndex={selectedConflictHunkIndex}
                     isBaseComparisonOpen={isBaseComparisonOpen}
-                    isChoiceDisabled={
-                      isReviewReadOnly || isResolvedDraftCustomized
-                    }
+                    isChoiceDisabled={isReviewReadOnly}
                     manualResolvedText={
                       manualResolvedTexts[selectedConflictHunk.id] ??
                       selectedConflictHunk.incomingText
@@ -1091,7 +1161,6 @@ export function PrReviewFileDiffDrawer({
               decisionDisabledReason={decisionDisabledReason}
               file={file}
               isConflictDraftEditing={isEditingConflictDraft}
-              isResolvedDraftCustomized={isResolvedDraftCustomized}
               isReviewReadOnly={isReviewReadOnly}
               isReviewRoomCompleted={isReviewRoomCompleted}
               onCommentChange={(value) => {
@@ -1115,6 +1184,44 @@ export function PrReviewFileDiffDrawer({
           </aside>
         </main>
       ) : null}
+
+      <AlertDialog
+        open={pendingConflictDraftMerge !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPendingConflictDraftMerge(null);
+          }
+        }}
+      >
+        <AlertDialogContent className="z-[90]" overlayClassName="z-[90]">
+          <AlertDialogHeader>
+            <AlertDialogTitle>직접 수정과 선택 결과가 겹칩니다</AlertDialogTitle>
+            <AlertDialogDescription>
+              현재 직접 수정한 코드와 새 hunk 선택 결과가 {pendingConflictDraftMerge?.overlapCount ?? 0}곳에서
+              같은 줄을 바꾸고 있습니다. 직접 수정은 그대로 두거나, 겹친 곳만 새 선택 결과로 바꿀 수 있습니다.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>직접 수정 유지</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (!pendingConflictDraftMerge || !conflictFile) {
+                  return;
+                }
+                const { nextDraft, useSelectionContent } = pendingConflictDraftMerge;
+                onConflictDraftChange(conflictFile.reviewFileId, {
+                  ...nextDraft,
+                  resolvedContent: useSelectionContent,
+                  isCustomized: useSelectionContent !== nextDraft.resolvedContent
+                });
+                setPendingConflictDraftMerge(null);
+              }}
+            >
+              선택 결과로 덮어쓰기
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
@@ -1225,7 +1332,6 @@ function ReviewNodePanel({
   decisionDisabledReason,
   file,
   isConflictDraftEditing,
-  isResolvedDraftCustomized,
   isReviewReadOnly,
   isReviewRoomCompleted,
   onCommentBlur,
@@ -1244,7 +1350,7 @@ function ReviewNodePanel({
 }: {
   comment: string;
   conflictFile: PrReviewConflictFile | null;
-  conflictSuggestion: PrReviewConflictSuggestion | null;
+  conflictSuggestion: PrReviewConflictDraftSuggestion | null;
   conflictSuggestionErrorMessage: string | null;
   conflictSuggestionStatus: ConflictSuggestionLoadStatus;
   conflictApplyDisabledReason: string | null;
@@ -1254,7 +1360,6 @@ function ReviewNodePanel({
   decisionDisabledReason: string | null;
   file: PrReviewFile;
   isConflictDraftEditing: boolean;
-  isResolvedDraftCustomized: boolean;
   isReviewReadOnly: boolean;
   isReviewRoomCompleted: boolean;
   onCommentBlur: () => void;
@@ -1320,7 +1425,6 @@ function ReviewNodePanel({
             conflictApplyDisabledReason={conflictApplyDisabledReason}
             conflictApplyProgress={conflictApplyProgress}
             isConflictDraftEditing={isConflictDraftEditing}
-            isResolvedDraftCustomized={isResolvedDraftCustomized}
             isReviewReadOnly={isReviewReadOnly}
             onApplyAllAiSuggestions={onApplyAllAiSuggestions}
             onCreateConflictSuggestion={onCreateConflictSuggestion}
@@ -1483,7 +1587,6 @@ function ConflictResolutionPanel({
   conflictApplyDisabledReason,
   conflictApplyProgress,
   isConflictDraftEditing,
-  isResolvedDraftCustomized,
   isReviewReadOnly,
   onApplyAllAiSuggestions,
   onCreateConflictSuggestion,
@@ -1495,13 +1598,12 @@ function ConflictResolutionPanel({
   unsupportedConflictFile
 }: {
   conflictFile: PrReviewConflictFile | null;
-  conflictSuggestion: PrReviewConflictSuggestion | null;
+  conflictSuggestion: PrReviewConflictDraftSuggestion | null;
   conflictSuggestionErrorMessage: string | null;
   conflictSuggestionStatus: ConflictSuggestionLoadStatus;
   conflictApplyDisabledReason: string | null;
   conflictApplyProgress: { ready: number; total: number };
   isConflictDraftEditing: boolean;
-  isResolvedDraftCustomized: boolean;
   isReviewReadOnly: boolean;
   onApplyAllAiSuggestions: () => void;
   onCreateConflictSuggestion: () => void;
@@ -1547,7 +1649,6 @@ function ConflictResolutionPanel({
                   <Button
                     disabled={
                       conflictSuggestion.status === "invalid" ||
-                      isResolvedDraftCustomized ||
                       isReviewReadOnly ||
                       !isConflictDraftEditing
                     }
@@ -1668,7 +1769,7 @@ function ConflictResolutionPanel({
 function ConflictSuggestionPreview({
   suggestion
 }: {
-  suggestion: PrReviewConflictSuggestion;
+  suggestion: PrReviewConflictDraftSuggestion;
 }) {
   const invalid = suggestion.status === "invalid";
 

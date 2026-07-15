@@ -102,6 +102,13 @@ const prReviewCanvasPresence = await readFile(
   ),
   "utf8"
 );
+const prReviewConflictDraftLock = await readFile(
+  new URL(
+    "../../src/features/pr-review/realtime/usePrReviewConflictDraftLock.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
 const prReviewCanvasPersistence = await readFile(
   new URL(
     "../../src/features/pr-review/components/review-canvas/pr-review-canvas-persistence.ts",
@@ -151,6 +158,13 @@ const prReviewConflictDrafts = await readFile(
   ),
   "utf8"
 );
+const prReviewConflictDraftMerge = await readFile(
+  new URL(
+    "../../src/features/pr-review/components/review-canvas/pr-review-conflict-draft-merge.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
 const prReviewSubmitReviewModal = await readFile(
   new URL(
     "../../src/features/pr-review/components/review-canvas/PrReviewSubmitReviewModal.tsx",
@@ -193,6 +207,7 @@ assert.match(prReviewTypes, /export type PrReviewFileDiff =/);
 assert.match(prReviewTypes, /export type PrReviewConflictAnalysis =/);
 assert.match(prReviewTypes, /export type PrReviewConflictFile =/);
 assert.match(prReviewTypes, /export type PrReviewConflictSuggestion =/);
+assert.match(prReviewTypes, /export type PrReviewConflictDraftSuggestion =/);
 assert.match(prReviewTypes, /export type PrReviewConflictDraft =/);
 assert.match(prReviewTypes, /export type UpdatePrReviewConflictDraftInput =/);
 assert.match(prReviewTypes, /export type PrReviewConflictResolvedHunk =/);
@@ -485,7 +500,9 @@ assert.ok(
 );
 assert.match(prReviewFileDiffDrawer, /ConflictSuggestionPreview/);
 assert.match(prReviewFileDiffDrawer, /createReviewFileConflictSuggestion/);
-assert.doesNotMatch(prReviewFileDiffDrawer, /<AlertDialog/);
+assert.match(prReviewFileDiffDrawer, /mergePrReviewConflictDraft/);
+assert.match(prReviewFileDiffDrawer, /직접 수정과 선택 결과가 겹칩니다/);
+assert.match(prReviewFileDiffDrawer, /<AlertDialog/);
 assert.doesNotMatch(prReviewFileDiffDrawer, /applyReviewFileConflictResolution/);
 assert.match(prReviewFileDiffDrawer, /onConflictDraftChange/);
 assert.match(prReviewFileDiffDrawer, /이 파일은 해결 준비됨/);
@@ -556,6 +573,8 @@ assert.doesNotMatch(prReviewResolvedCodeEditor, /features\/canvas/);
 assert.match(prReviewResolvedCodeDiff, /diffLines/);
 assert.match(prReviewConflictDrafts, /reconcilePrReviewConflictDrafts/);
 assert.match(prReviewConflictDrafts, /buildPrReviewConflictsApplyInput/);
+assert.match(prReviewConflictDraftMerge, /diff3Merge/);
+assert.match(prReviewConflictDraftMerge, /kind: "overlap"/);
 assert.match(prReviewResolvedCodeDiff, /changedLineNumbers/);
 assert.match(prReviewResolvedCodeDiff, /changeBlocks/);
 assert.match(prReviewConflictResolution, /buildConflictResolutionDraft/);
@@ -610,6 +629,10 @@ assert.match(prReviewCanvasShell, /createReviewRoomRevision/);
 assert.match(prReviewCanvasShell, /PULL_REQUEST_HEAD_POLL_INTERVAL_MS/);
 assert.match(prReviewCanvasShell, /최신 버전 분석 시작/);
 assert.match(prReviewCanvasSurface, /registerAfterCreateHandler/);
+assert.match(prReviewConflictDraftLock, /const renewEdit = useCallback/);
+assert.match(prReviewConflictDraftLock, /window\.setInterval\(renewEdit, 3_000\)/);
+assert.match(prReviewConflictDraftLock, /setLock\(null\);/);
+assert.match(prReviewCanvasShell, /overlayClassName="z-\[90\]"/);
 assert.match(
   prReviewCanvasSurface,
   /editor\.createShapes\(shapes\);\s+updatePrReviewRelationGeometry\(editor, internalShapeUpdateRef\);/
