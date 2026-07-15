@@ -1,3 +1,3 @@
-export function buildMeetingReportHref(_reportId: string) {
-  return "/report";
+export function buildMeetingReportHref(reportId: string) {
+  return `/report?reportId=${encodeURIComponent(reportId)}`;
 }

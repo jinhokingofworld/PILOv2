@@ -71,12 +71,19 @@ const REPORT_STATUS_FILTERS: Array<{
 
 function getReportRequestErrorMessage(error: unknown) {
   if (error instanceof MeetingApiError && error.status === 404) {
-    return "이 회의록의 상세 transcript는 회의 참석자와 Workspace owner만 볼 수 있습니다.";
+    return "회의록 상세를 찾을 수 없습니다. 삭제되었거나 더 이상 사용할 수 없는 회의록일 수 있습니다.";
   }
 
   return error instanceof Error
     ? error.message
     : "회의록 요청을 처리하지 못했습니다. 잠시 후 다시 시도해주세요.";
+}
+
+function getReportIdFromLocation() {
+  if (typeof window === "undefined") return null;
+
+  const reportId = new URLSearchParams(window.location.search).get("reportId");
+  return reportId?.trim() || null;
 }
 
 function toDayBoundary(value: string, boundary: "start" | "end") {
@@ -920,6 +927,7 @@ export function MeetingReportSection({
   const [mutatingActionItemId, setMutatingActionItemId] =
     useState<string | null>(null);
   const [deletingReportId, setDeletingReportId] = useState<string | null>(null);
+  const openedDeepLinkReportIdRef = useRef<string | null>(null);
 
   const hasProcessingReport = reports.some((report) =>
     isReportInProgress(report.status)
@@ -974,6 +982,18 @@ export function MeetingReportSection({
     },
     [loadReportDetail]
   );
+
+  useEffect(() => {
+    if (!canLoad) return;
+
+    const reportId = getReportIdFromLocation();
+    if (!reportId || openedDeepLinkReportIdRef.current === reportId) return;
+
+    openedDeepLinkReportIdRef.current = reportId;
+    setSelectedReportId(reportId);
+    setSelectedReport(null);
+    void loadReportDetail(reportId);
+  }, [canLoad, loadReportDetail]);
 
   const handleCloseReport = useCallback(() => {
     setSelectedReportId(null);

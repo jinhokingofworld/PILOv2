@@ -104,6 +104,10 @@ const meetingNavigation = await readFile(
   new URL("../../src/features/meeting/navigation.ts", import.meta.url),
   "utf8"
 );
+const homeRouting = await readFile(
+  new URL("../../src/features/home/utils/home-routing.ts", import.meta.url),
+  "utf8"
+);
 const packageJson = await readFile(
   new URL("../../package.json", import.meta.url),
   "utf8"
@@ -247,6 +251,8 @@ assert.match(meetingNavigation, /회의 참여, 녹음, 회의록 확인과 재�
 assert.match(meetingNavigation, /href: "\/meeting"/);
 assert.match(meetingNavigation, /href: "\/report"/);
 assert.doesNotMatch(meetingNavigation, /#room|#report/);
+assert.match(homeRouting, /buildMeetingReportHref\(reportId: string\)/);
+assert.match(homeRouting, /\/report\?reportId=\$\{encodeURIComponent\(reportId\)\}/);
 
 assert.match(meetingPanel, /"use client"/);
 assert.match(meetingPanel, /useAuthSession/);
@@ -378,6 +384,11 @@ assert.match(meetingReportSection, /MeetingReportStatusFilter/);
 assert.match(meetingReportSection, /REPORT_POLL_INTERVAL_MS = 10000/);
 assert.match(meetingReportSection, /useMeetingReportRealtime/);
 assert.match(meetingReportSection, /selectedReportId === event\.reportId/);
+assert.match(meetingReportSection, /getReportIdFromLocation/);
+assert.match(meetingReportSection, /new URLSearchParams\(window\.location\.search\)/);
+assert.match(meetingReportSection, /openedDeepLinkReportIdRef/);
+assert.match(meetingReportSection, /void loadReportDetail\(reportId\)/);
+assert.match(meetingReportSection, /회의록 상세를 찾을 수 없습니다/);
 assert.doesNotMatch(meetingReportSection, /from "socket\.io-client"/);
 assert.doesNotMatch(meetingReportSection, /useRouter/);
 assert.doesNotMatch(meetingReportSection, /buildCalendarDraftHref/);
