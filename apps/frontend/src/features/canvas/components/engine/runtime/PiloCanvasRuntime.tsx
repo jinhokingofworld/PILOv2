@@ -578,12 +578,24 @@ function PiloCanvasRuntimeInner({
           isRecord(body) &&
           Array.isArray(body.operations)
         ) {
+          const operations = body.operations as CanvasShapeSyncOperation[];
+          const shapeIds = Array.from(
+            new Set(
+              operations
+                .map((operation) => operation.shapeId.trim())
+                .filter(Boolean),
+            ),
+          );
           const realtimeCommitResult = canvasPresence.commitShapeOperations(
-            body.operations as CanvasShapeSyncOperation[],
+            operations,
           );
 
           if (realtimeCommitResult) {
-            return realtimeCommitResult;
+            try {
+              return await realtimeCommitResult;
+            } finally {
+              canvasPresence.clearShapePreview(shapeIds);
+            }
           }
         }
 

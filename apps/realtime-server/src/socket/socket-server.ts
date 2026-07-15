@@ -1335,6 +1335,27 @@ export async function createRealtimeSocketServer({
         }
 
         const actorUserId = authedSocket.data.auth.userId ?? socket.id;
+        const commitShapeIds = Array.from(
+          new Set(
+            commitPayload.operations
+              .map((operation) => operation.shapeId.trim())
+              .filter(Boolean),
+          ),
+        );
+        const clearCommitShapePreview = async () => {
+          if (!commitShapeIds.length) return;
+
+          const clearEvent = await shapePreviewService.clearRoomPreview(
+            socket.id,
+            actorUserId,
+            commitPayload,
+            commitShapeIds,
+          );
+
+          if (clearEvent) {
+            socket.to(roomName).emit(canvasServerEvents.shapePreviewClear, clearEvent);
+          }
+        };
         const blockingLocks = getShapeCommitBlockedByLocks({
           locks: await shapeLockService.getRoomLocks(commitPayload),
           operations: commitPayload.operations,
@@ -1342,6 +1363,7 @@ export async function createRealtimeSocketServer({
         });
 
         if (blockingLocks.length) {
+          await clearCommitShapePreview();
           callback?.({
             error: {
               body: { locks: blockingLocks },
@@ -1355,13 +1377,14 @@ export async function createRealtimeSocketServer({
         }
 
         try {
-          callback?.(
-            await shapeCommitService.commitOperations(
-              authedSocket.data.auth.token,
-              commitPayload,
-            ),
+          const ack = await shapeCommitService.commitOperations(
+            authedSocket.data.auth.token,
+            commitPayload,
           );
+          await clearCommitShapePreview();
+          callback?.(ack);
         } catch (error) {
+          await clearCommitShapePreview();
           console.error("Canvas realtime shape commit failed", error);
           callback?.({
             error: {

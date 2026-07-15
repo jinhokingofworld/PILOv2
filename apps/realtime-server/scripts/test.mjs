@@ -110,6 +110,7 @@ assert.match(socketServer, /canvasServerEvents\.shapePreview/);
 assert.match(socketServer, /canvasServerEvents\.shapePreviewClear/);
 assert.match(socketServer, /createCanvasShapePreviewService/);
 assert.match(socketServer, /createCanvasShapeCommitService/);
+assert.match(socketServer, /clearCommitShapePreview/);
 assert.match(socketServer, /getShapeCommitBlockedByLocks/);
 assert.match(socketServer, /shape is locked by another user/);
 assert.match(socketServer, /redisAdapter\?\.stateClient/);
