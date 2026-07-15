@@ -625,10 +625,7 @@ def _shape_summary(row: dict[str, object]) -> dict[str, object]:
     props = _json_object(raw_shape.get("props"))
     parent_id = raw_shape.get("parentId")
     title = _clean_text(
-        row.get("title")
-        or props.get("fileName")
-        or props.get("name")
-        or props.get("title")
+        row.get("title") or props.get("fileName") or props.get("name") or props.get("title")
     )
     text = _clean_text(
         row.get("text_content")

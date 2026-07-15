@@ -59,7 +59,9 @@ class OpenAiCanvasAgentPlanner:
                     },
                 )
             except _retryable_errors() as error:
-                raise InfrastructureError("OpenAI Canvas Agent planner retryable failure") from error
+                raise InfrastructureError(
+                    "OpenAI Canvas Agent planner retryable failure"
+                ) from error
             except Exception as error:
                 raise CanvasAgentPlannerError("Canvas Agent planner provider failure") from error
 
@@ -206,9 +208,7 @@ def _has_non_empty_code_payload(action_input: dict[str, object]) -> bool:
         return _non_empty_string(action_input.get("code"))
 
     code_nodes = [
-        node
-        for node in nodes
-        if isinstance(node, dict) and _is_code_node_kind(_node_kind(node))
+        node for node in nodes if isinstance(node, dict) and _is_code_node_kind(_node_kind(node))
     ]
     if not code_nodes:
         return False

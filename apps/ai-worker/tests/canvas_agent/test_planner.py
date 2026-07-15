@@ -67,7 +67,9 @@ def test_code_generation_contract_forces_code_kind_and_requires_code_content() -
                                 "height": 320,
                                 "title": "LoginPage.tsx",
                                 "language": "tsx",
-                                "code": "export function LoginPage() { return <main>Login</main>; }",
+                                "code": (
+                                    "export function LoginPage() { " "return <main>Login</main>; }"
+                                ),
                             }
                         ],
                     }
