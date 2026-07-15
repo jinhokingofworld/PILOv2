@@ -8,6 +8,7 @@ import type {
   SqltoerdSettingsJson,
   SqltoerdSourceFormat
 } from "@/features/sql-erd/types";
+import type { SqlErdOperationPayload } from "@/features/sql-erd/realtime/sql-erd-realtime-types";
 
 const API_BASE_PATH = "/api/v1";
 const DEFAULT_APP_SERVER_ORIGIN = "http://localhost:4000";
@@ -40,6 +41,70 @@ export type UpdateSqlErdSessionRequest = Partial<CreateSqlErdSessionRequest> & {
 export type ListSqlErdSessionsQuery = {
   cursor?: string | null;
   limit?: number;
+};
+
+export type SqlErdOperationListPayload = {
+  items: SqlErdOperationPayload[];
+  latestOpSeq: number;
+  nextAfterSeq: number | null;
+};
+
+export type SqlErdCreateOperationRequest = {
+  baseRevision: number;
+  clientOperationId: string;
+  patch: Record<string, unknown>;
+  type: "layout_patch";
+};
+
+export type SqlErdOperationWritePayload = {
+  latestOpSeq: number;
+  layoutJson: SqltoerdLayoutJsonV1;
+  operation: SqlErdOperationPayload;
+  revision: number;
+};
+
+export type SqlErdSourceLockPayload = {
+  expiresAt: string;
+  leaseId: string;
+  sourceBaseRevision: number;
+};
+
+export type SqlErdSourceSnapshotPayload = {
+  baseRevision: number;
+  createdAt: string;
+  createdBy: string;
+  dialect: SqltoerdDialect;
+  id: string;
+  layoutJson: SqltoerdLayoutJsonV1;
+  modelJson: SqltoerdModelJsonV1;
+  relationCount: number;
+  resultRevision: number;
+  sourceFormat: SqltoerdSourceFormat;
+  sourceText: string;
+  tableCount: number;
+};
+
+export type SqlErdSourcePublishRequest = {
+  baseRevision: number;
+  clientOperationId: string;
+  dialect: SqltoerdDialect;
+  leaseId: string;
+  modelJson: SqltoerdModelJsonV1;
+  sourceFormat: SqltoerdSourceFormat;
+  sourceText: string;
+};
+
+export type SqlErdSourcePublishPayload = {
+  latestOpSeq: number;
+  layoutJson: SqltoerdLayoutJsonV1;
+  operation: SqlErdOperationPayload;
+  rebaseSummary: {
+    createdTableLayoutIds: string[];
+    removedAnnotationLinkIds: string[];
+    removedTableLayoutIds: string[];
+  };
+  revision: number;
+  snapshot: SqlErdSourceSnapshotPayload;
 };
 
 function trimTrailingSlash(value: string) {
@@ -225,6 +290,18 @@ export function createSqlErdApiClient({
     return `${sessionsPath(workspaceId)}/${encodeURIComponent(sessionId)}` as const;
   }
 
+  function operationsPath(workspaceId: string, sessionId: string) {
+    return `${sessionPath(workspaceId, sessionId)}/operations` as const;
+  }
+
+  function sourceSnapshotsPath(workspaceId: string, sessionId: string) {
+    return `${sessionPath(workspaceId, sessionId)}/source-snapshots` as const;
+  }
+
+  function sourceLockPath(workspaceId: string, sessionId: string) {
+    return `${sessionPath(workspaceId, sessionId)}/source-lock` as const;
+  }
+
   return {
     async listSessions(
       workspaceId: string,
@@ -254,6 +331,100 @@ export function createSqlErdApiClient({
       return requestSqlErdApiPayload<SqltoerdSessionPayload>(
         sessionPath(workspaceId, sessionId),
         { method: "GET" },
+        requestOptions
+      );
+    },
+
+    async listOperations(
+      workspaceId: string,
+      sessionId: string,
+      afterSeq: number,
+      signal?: AbortSignal
+    ) {
+      const searchParams = new URLSearchParams({
+        afterSeq: String(Math.max(0, Math.trunc(afterSeq))),
+        limit: "100"
+      });
+      const path = `${operationsPath(workspaceId, sessionId)}?${searchParams.toString()}` as const;
+
+      return requestSqlErdApiPayload<SqlErdOperationListPayload>(
+        path,
+        { method: "GET", signal },
+        requestOptions
+      );
+    },
+
+    async createOperation(
+      workspaceId: string,
+      sessionId: string,
+      payload: SqlErdCreateOperationRequest
+    ) {
+      return requestSqlErdApiPayload<SqlErdOperationWritePayload>(
+        operationsPath(workspaceId, sessionId),
+        { body: JSON.stringify(payload), method: "POST" },
+        requestOptions
+      );
+    },
+
+    async listSourceSnapshots(
+      workspaceId: string,
+      sessionId: string,
+      ids: string[],
+      signal?: AbortSignal
+    ) {
+      const path = `${sourceSnapshotsPath(workspaceId, sessionId)}?ids=${encodeURIComponent(ids.join(","))}` as const;
+
+      return requestSqlErdApiPayload<SqlErdSourceSnapshotPayload[]>(
+        path,
+        { method: "GET", signal },
+        requestOptions
+      );
+    },
+
+    async acquireSourceLock(
+      workspaceId: string,
+      sessionId: string,
+      leaseId: string
+    ) {
+      return requestSqlErdApiPayload<SqlErdSourceLockPayload>(
+        sourceLockPath(workspaceId, sessionId),
+        { body: JSON.stringify({ leaseId }), method: "POST" },
+        requestOptions
+      );
+    },
+
+    async renewSourceLock(
+      workspaceId: string,
+      sessionId: string,
+      leaseId: string
+    ) {
+      return requestSqlErdApiPayload<SqlErdSourceLockPayload>(
+        sourceLockPath(workspaceId, sessionId),
+        { body: JSON.stringify({ leaseId }), method: "PATCH" },
+        requestOptions
+      );
+    },
+
+    async releaseSourceLock(
+      workspaceId: string,
+      sessionId: string,
+      leaseId: string
+    ) {
+      return requestSqlErdApiPayload<null>(
+        sourceLockPath(workspaceId, sessionId),
+        { body: JSON.stringify({ leaseId }), method: "DELETE" },
+        requestOptions
+      );
+    },
+
+    async publishSourceSnapshot(
+      workspaceId: string,
+      sessionId: string,
+      payload: SqlErdSourcePublishRequest
+    ) {
+      return requestSqlErdApiPayload<SqlErdSourcePublishPayload>(
+        sourceSnapshotsPath(workspaceId, sessionId),
+        { body: JSON.stringify(payload), method: "POST" },
         requestOptions
       );
     },

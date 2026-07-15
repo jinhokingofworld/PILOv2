@@ -77,6 +77,14 @@ export type SqlErdEditAction =
       type: "source_autosave_saved";
     }
   | {
+      snapshot: SqlErdViewSession;
+      type: "operation_saved";
+    }
+  | {
+      snapshot: SqlErdViewSession;
+      type: "remote_snapshot_applied";
+    }
+  | {
       baseSnapshot: SqlErdViewSession;
       snapshot: SqlErdViewSession;
       type: "normalized_sql_applied";
@@ -244,6 +252,40 @@ export function reduceSqlErdEditState(
         ...state.lastSuccessfulSnapshot,
         revision: action.snapshot.revision
       }
+    };
+  }
+
+  if (action.type === "operation_saved") {
+    if (
+      state.lastSuccessfulSnapshot.id !== action.snapshot.id ||
+      state.lastSuccessfulSnapshot.revision === null ||
+      action.snapshot.revision === null ||
+      action.snapshot.revision <= state.lastSuccessfulSnapshot.revision
+    ) {
+      return state;
+    }
+
+    return {
+      ...state,
+      lastSuccessfulSnapshot: action.snapshot
+    };
+  }
+
+  if (action.type === "remote_snapshot_applied") {
+    if (
+      state.lastSuccessfulSnapshot.id !== action.snapshot.id ||
+      state.lastSuccessfulSnapshot.revision === null ||
+      action.snapshot.revision === null ||
+      action.snapshot.revision <= state.lastSuccessfulSnapshot.revision
+    ) {
+      return state;
+    }
+
+    return {
+      draftDialect: action.snapshot.dialect,
+      draftSourceText: action.snapshot.sourceText,
+      lastSuccessfulSnapshot: action.snapshot,
+      parse: createIdleParseState(state.parse.requestSequence + 1)
     };
   }
 

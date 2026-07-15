@@ -190,6 +190,8 @@ export type SqltoerdSessionPayload = {
   tableCount: number;
   relationCount: number;
   revision: number;
+  writeProtocol: "snapshot" | "operations_v1";
+  latestOpSeq: number;
   createdBy: string | null;
   updatedBy: string | null;
   createdAt: string;

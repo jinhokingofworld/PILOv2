@@ -66,6 +66,30 @@ export type SqlErdJoinedPayload = {
   workspaceId: string;
 };
 
+type SqlErdOperationBasePayload = {
+  actorUserId: string;
+  appliedOnRevision: number;
+  baseRevision: number;
+  clientOperationId: string;
+  createdAt: string;
+  id: string;
+  opSeq: number;
+  rebased: boolean;
+  resultRevision: number;
+  sessionId: string;
+  workspaceId: string;
+};
+
+export type SqlErdOperationPayload =
+  | (SqlErdOperationBasePayload & {
+      patch: Record<string, unknown>;
+      type: "layout_patch";
+    })
+  | (SqlErdOperationBasePayload & {
+      sourceSnapshotId: string;
+      type: "source_snapshot";
+    });
+
 export type SqlErdPresenceLeavePayload = {
   sessionId: string;
   userId: string;
@@ -79,6 +103,7 @@ export type SqlErdRealtimeErrorPayload = {
 };
 
 export type SqlErdServerToClientEvents = {
+  "sql-erd:operation": (payload: SqlErdOperationPayload) => void;
   "sql-erd:error": (payload: SqlErdRealtimeErrorPayload) => void;
   "sql-erd:joined": (payload: SqlErdJoinedPayload) => void;
   "sql-erd:presence:leave": (payload: SqlErdPresenceLeavePayload) => void;

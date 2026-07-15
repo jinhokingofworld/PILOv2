@@ -13,6 +13,8 @@ export type SqlErdViewSession = Pick<
   | "sourceFormat"
   | "sourceText"
   | "title"
+  | "latestOpSeq"
+  | "writeProtocol"
 > & {
   id: string | null;
   revision: number | null;
@@ -62,8 +64,10 @@ export function createSampleSqlErdViewSession(
 ): SqlErdViewSession {
   return {
     id: null,
+    latestOpSeq: 0,
     revision: null,
     title: fixture.title,
+    writeProtocol: "snapshot",
     sourceFormat: fixture.sourceFormat,
     dialect: fixture.dialect,
     sourceText: fixture.sourceText,
@@ -78,8 +82,10 @@ export function createWorkspaceSqlErdViewSession(
 ): SqlErdViewSession {
   return {
     id: session.id,
+    latestOpSeq: session.latestOpSeq,
     revision: session.revision,
     title: session.title,
+    writeProtocol: session.writeProtocol,
     sourceFormat: session.sourceFormat,
     dialect: session.dialect,
     sourceText: session.sourceText,
