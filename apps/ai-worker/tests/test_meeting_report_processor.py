@@ -165,7 +165,9 @@ class FakeAiClient:
             raise self.stt_failure
         return [TranscriptSegment(0, 0, 1_000, "진호: 회의록 조회 API와 worker 처리를 정리합니다.")]
 
-    def generate_report(self, transcript_text: str, transcript_segments, activity_evidence=None) -> GeneratedMeetingReport:
+    def generate_report(
+        self, transcript_text: str, transcript_segments, activity_evidence=None
+    ) -> GeneratedMeetingReport:
         self.generate_calls.append(transcript_text)
         self.generate_activity_evidence.append(list(activity_evidence or []))
         if self.llm_failure:
@@ -590,6 +592,60 @@ def test_parse_generated_report_requires_evidence_for_each_action_item() -> None
         )
 
 
+@pytest.mark.parametrize("source_type", ["summary", "discussion"])
+def test_parse_generated_report_rejects_nonzero_singleton_transcript_evidence_index(
+    source_type: str,
+) -> None:
+    with pytest.raises(ProviderBusinessError, match="Invalid singleton evidence"):
+        parse_generated_report_json(
+            json.dumps(
+                {
+                    "summary": "요약",
+                    "discussionPoints": "논의",
+                    "decisions": "결정된 내용 없음",
+                    "actionItemCandidates": [],
+                    "evidence": [
+                        {"sourceType": source_type, "sourceIndex": 1, "segmentIndexes": [0]}
+                    ],
+                }
+            ),
+            "원문",
+            [TranscriptSegment(0, 0, 1_000, "원문")],
+        )
+
+
+@pytest.mark.parametrize("source_type", ["summary", "discussion"])
+def test_parse_generated_report_rejects_nonzero_singleton_activity_evidence_index(
+    source_type: str,
+) -> None:
+    activity = ActivityEvidence(
+        activity_log_id="88888888-8888-8888-8888-888888888888",
+        source_index=0,
+        occurred_at="2026-07-16T00:00:00+00:00",
+        action="calendar_event_updated",
+        summary="디자인 리뷰 일정을 변경했습니다.",
+    )
+
+    with pytest.raises(ProviderBusinessError, match="Invalid singleton Activity evidence"):
+        parse_generated_report_json(
+            json.dumps(
+                {
+                    "summary": "요약",
+                    "discussionPoints": "논의",
+                    "decisions": "결정된 내용 없음",
+                    "actionItemCandidates": [],
+                    "evidence": [],
+                    "activityEvidenceReferences": [
+                        {"sourceType": source_type, "sourceIndex": 1, "activityIndexes": [0]}
+                    ],
+                }
+            ),
+            "원문",
+            [TranscriptSegment(0, 0, 1_000, "원문")],
+            [activity],
+        )
+
+
 def test_parse_generated_report_accepts_activity_evidence_for_an_action_item() -> None:
     activity = ActivityEvidence(
         activity_log_id="88888888-8888-8888-8888-888888888888",
@@ -624,9 +680,10 @@ def test_parse_generated_report_accepts_activity_evidence_for_an_action_item() -
         [activity],
     )
 
-    assert [(item.source_type, item.source_index, item.activity_indexes) for item in report.activity_evidence_references] == [
-        ("action_item", 0, [0])
-    ]
+    assert [
+        (item.source_type, item.source_index, item.activity_indexes)
+        for item in report.activity_evidence_references
+    ] == [("action_item", 0, [0])]
 
 
 def test_processor_leaves_infrastructure_failure_for_sqs_retry() -> None:

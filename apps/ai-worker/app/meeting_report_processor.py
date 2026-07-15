@@ -452,8 +452,8 @@ def _parse_evidence(
             or not isinstance(segment_indexes, list)
         ):
             raise ProviderBusinessError("Invalid evidence reference")
-        if source_type == "decision" and source_index != 0:
-            raise ProviderBusinessError("Invalid decision evidence")
+        if source_type in {"summary", "discussion", "decision"} and source_index != 0:
+            raise ProviderBusinessError("Invalid singleton evidence")
         if source_type == "action_item" and not 0 <= source_index < action_item_count:
             raise ProviderBusinessError("Invalid action item evidence")
         if not all(isinstance(index, int) and index in valid_indexes for index in segment_indexes):
@@ -491,8 +491,8 @@ def _parse_activity_evidence_references(
             or not isinstance(activity_indexes, list)
         ):
             raise ProviderBusinessError("Invalid Activity evidence reference")
-        if source_type == "decision" and source_index != 0:
-            raise ProviderBusinessError("Invalid decision Activity evidence")
+        if source_type in {"summary", "discussion", "decision"} and source_index != 0:
+            raise ProviderBusinessError("Invalid singleton Activity evidence")
         if source_type == "action_item" and not 0 <= source_index < action_item_count:
             raise ProviderBusinessError("Invalid action item Activity evidence")
         if not all(isinstance(index, int) and index in valid_indexes for index in activity_indexes):
