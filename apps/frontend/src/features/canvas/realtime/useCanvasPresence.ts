@@ -15,8 +15,6 @@ import type {
   CanvasPresenceViewport,
   CanvasRealtimeConfig,
   CanvasRemotePresenceState,
-  CanvasShapeCommitAck,
-  CanvasShapeCommitOperation,
   CanvasShapeOperationPayload,
   CanvasShapeLockState,
   CanvasShapePreviewEventPayload,
@@ -27,7 +25,6 @@ import type {
 const STALE_PRESENCE_TIMEOUT_MS = 15_000;
 const STALE_PRESENCE_SWEEP_MS = 2_000;
 const STALE_SHAPE_PREVIEW_TIMEOUT_MS = 5_000;
-const SHAPE_COMMIT_ACK_TIMEOUT_MS = 10_000;
 
 export type CanvasOperationCatchupState = {
   lastSeenOpSeq: number;
@@ -47,9 +44,6 @@ export type CanvasPresenceController = {
   remoteShapeLocks: CanvasShapeLockState[];
   remoteShapePreviews: CanvasShapePreviewEventPayload[];
   claimShapeLocks: (shapeIds: string[]) => void;
-  commitShapeOperations: (
-    operations: CanvasShapeCommitOperation[],
-  ) => Promise<unknown> | null;
   releaseShapeLocks: (shapeIds?: string[]) => void;
   clearShapePreview: (shapeIds: string[]) => void;
   sendPresenceUpdate: (
@@ -352,20 +346,6 @@ function removeShapePreviewIds({
 
     return hasShapePreviewPayload(nextPreview) ? [nextPreview] : [];
   });
-}
-
-class CanvasRealtimeCommitError extends Error {
-  body?: unknown;
-  code: string;
-  status?: number;
-
-  constructor(ack: Extract<CanvasShapeCommitAck, { ok: false }>) {
-    super(ack.error.message);
-    this.name = "CanvasRealtimeCommitError";
-    this.body = ack.error.body;
-    this.code = ack.error.code;
-    this.status = ack.error.status;
-  }
 }
 
 export function useCanvasPresence(
@@ -978,42 +958,6 @@ export function useCanvasPresence(
     });
   }, []);
 
-  const commitShapeOperations = useCallback(
-    (operations: CanvasShapeCommitOperation[]) => {
-      const socket = socketRef.current;
-      const room = roomRef.current;
-
-      if (!socket?.connected || !joinedRef.current || !operations.length) {
-        return null;
-      }
-
-      return new Promise<unknown>((resolve, reject) => {
-        const timeout = window.setTimeout(() => {
-          reject(new Error("Canvas realtime shape commit timed out"));
-        }, SHAPE_COMMIT_ACK_TIMEOUT_MS);
-
-        socket.emit(
-          "canvas:shape:commit",
-          {
-            ...room,
-            operations,
-          },
-          (ack) => {
-            window.clearTimeout(timeout);
-
-            if (ack.ok) {
-              resolve(ack.result);
-              return;
-            }
-
-            reject(new CanvasRealtimeCommitError(ack));
-          },
-        );
-      });
-    },
-    [],
-  );
-
   const releaseShapeLocks = useCallback((shapeIds?: string[]) => {
     const socket = socketRef.current;
     const room = roomRef.current;
@@ -1086,7 +1030,6 @@ export function useCanvasPresence(
     () => ({
       claimShapeLocks,
       clearShapePreview,
-      commitShapeOperations,
       enabled,
       currentUserId,
       lastRejectedShapeLock,
@@ -1115,7 +1058,6 @@ export function useCanvasPresence(
     [
       claimShapeLocks,
       clearShapePreview,
-      commitShapeOperations,
       currentUserId,
       enabled,
       lastRejectedShapeLock,

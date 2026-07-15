@@ -676,7 +676,6 @@ canvas:leave
 canvas:presence:update
 canvas:shape:lock:claim
 canvas:shape:lock:release
-canvas:shape:commit
 canvas:shape:preview
 canvas:shape:preview:clear
 ```
@@ -710,13 +709,11 @@ Canvas는 `false`, completed Review Canvas는 `true`다. read-only room에서도
 `forbidden`으로 거부한다. active room이 접속 중 completed로 전환되는 lifecycle event와
 클라이언트 상태 전환은 PR Review room lifecycle 단계에서 처리한다.
 
-`canvas:shape:commit`은 classic Canvas 전용 서버 조정 저장 경로다. 클라이언트는
-기존 `/shapes/batch`와 같은 operation 배열을 Socket.IO ack 이벤트로 보내고,
-realtime-server는 room 입장 여부, read-write 권한, 다른 사용자의 active shape lock을
-확인한 뒤 연결 사용자의 bearer token으로 App Server `/shapes/batch`를 호출한다.
+classic Canvas의 최종 저장은 클라이언트가 App Server `/shapes/batch`를 직접 호출한다.
+Socket.IO는 presence, lock, preview, operation 전달과 catch-up 유도만 담당하며,
+realtime-server는 `canvas_freeform_shapes`나 `canvas_shape_operations`를 직접 쓰지 않는다.
 최종 DB transaction, revision/opSeq, operation log, activity log 작성 책임은 App Server가
-계속 가진다. realtime-server는 `canvas_freeform_shapes`나 `canvas_shape_operations`를
-직접 쓰지 않는다.
+계속 가진다.
 
 ## tldraw_sync Multiplayer Room 계약
 

@@ -5,7 +5,7 @@ import {
   QueryClientProvider,
   useQueryClient,
 } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { CanvasShapeOperationPayload } from "@/features/canvas/api/canvas-types";
 import {
   isRecord,
@@ -16,7 +16,6 @@ import { useCanvasPresence } from "@/features/canvas/realtime/useCanvasPresence"
 import { normalizeCanvasFreeformShapes } from "../../../utils/canvas-storage";
 import type {
   CanvasShapeSyncConflict,
-  CanvasShapeSyncOperation,
   CanvasShapeSyncQueue,
 } from "../../../utils/canvas-shape-sync";
 import {
@@ -221,12 +220,6 @@ function readConflictLatestFreeformShape(conflict: CanvasShapeSyncConflict) {
   return shape && typeof shape.id === "string" ? shape : null;
 }
 
-function readRealtimeCommitErrorCode(error: unknown) {
-  return isRecord(error) && typeof error.code === "string"
-    ? error.code
-    : null;
-}
-
 function readRealtimeCommitErrorStatus(error: unknown) {
   return isRecord(error) && typeof error.status === "number"
     ? error.status
@@ -234,12 +227,6 @@ function readRealtimeCommitErrorStatus(error: unknown) {
 }
 
 function getShapeSyncErrorNoticeMessage(error: unknown) {
-  const code = readRealtimeCommitErrorCode(error);
-
-  if (code === "shape_locked") {
-    return "다른 사용자가 작업 중인 도형이라 반영하지 못했어요. 잠시 뒤 다시 시도해 주세요.";
-  }
-
   if (readRealtimeCommitErrorStatus(error) === 409) {
     return "다른 사용자가 먼저 수정해서 최신 상태로 갱신했어요.";
   }
@@ -564,54 +551,6 @@ function PiloCanvasRuntimeInner({
     applyOperations: applyRemoteCanvasOperations,
     catchUpOperations: catchUpCanvasOperations,
   });
-  const persistenceCanvasClient = useMemo<CanvasViewSettingApiClient | null>(() => {
-    if (!canvasClient) {
-      return null;
-    }
-
-    return {
-      ...canvasClient,
-      async syncShapesBatch(boardId, body, options) {
-        if (
-          boardId === board.id &&
-          options.workspaceId === board.workspaceId &&
-          isRecord(body) &&
-          Array.isArray(body.operations)
-        ) {
-          const operations = body.operations as CanvasShapeSyncOperation[];
-          const shapeIds = Array.from(
-            new Set(
-              operations
-                .map((operation) => operation.shapeId.trim())
-                .filter(Boolean),
-            ),
-          );
-          const realtimeCommitResult = canvasPresence.commitShapeOperations(
-            operations,
-          );
-
-          if (realtimeCommitResult) {
-            try {
-              return await realtimeCommitResult;
-            } finally {
-              canvasPresence.clearShapePreview(shapeIds);
-            }
-          }
-        }
-
-        if (canvasClient.syncShapesBatch) {
-          return canvasClient.syncShapesBatch(boardId, body, options);
-        }
-
-        throw new Error("Canvas shape batch client is unavailable");
-      },
-    };
-  }, [
-    board.id,
-    board.workspaceId,
-    canvasClient,
-    canvasPresence.commitShapeOperations,
-  ]);
 
   useEffect(() => {
     deferredRemoteOperationsRef.current.clear();
@@ -660,7 +599,7 @@ function PiloCanvasRuntimeInner({
 
   useCanvasApiLifecycle({
     board,
-    canvasClient: persistenceCanvasClient,
+    canvasClient,
     latestViewportBoundsRef,
     pendingShapeDetailRef,
     pendingViewSettingRef,
@@ -680,7 +619,7 @@ function PiloCanvasRuntimeInner({
     persistFreeformShapes,
   } = useCanvasShapePersistence({
     board,
-    canvasClient: persistenceCanvasClient,
+    canvasClient,
     freeformShapesRef,
     localShapeVersionRef,
     onLocalShapeSyncIdle: flushDeferredRemoteOperations,

@@ -166,7 +166,6 @@ UI Preview는 local 개발 편의 기능이며 실제 bearer session이나 Works
 | `PORT` | Realtime Server port |
 | `DATABASE_SSL` | Set to `true` when `DATABASE_URL` requires SSL. |
 | `SOCKET_IO_CORS_ORIGIN` | Socket.IO 허용 frontend origin. 여러 개면 comma-separated로 설정한다. |
-| `APP_SERVER_URL` | classic Canvas shape commit을 기존 App Server `/shapes/batch`로 위임할 때 사용할 App Server origin. 없으면 `API_PUBLIC_ORIGIN`, local 기본값 `http://localhost:4000`을 사용한다. |
 | `REALTIME_SCOPE` | MVP 기본값: `notifications_status_only` |
 
 ### AI Worker

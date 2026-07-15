@@ -148,35 +148,6 @@ export type CanvasShapeLockReleaseEventPayload = {
   shapeIds: string[];
 };
 
-export type CanvasShapeCommitOperation = {
-  baseRevision?: number | null;
-  clientOperationId: string;
-  payload?: Record<string, unknown>;
-  shapeId: string;
-  type: "create" | "update" | "delete";
-};
-
-export type CanvasShapeCommitPayload = {
-  workspaceId: string;
-  canvasId: string;
-  operations: CanvasShapeCommitOperation[];
-};
-
-export type CanvasShapeCommitAck =
-  | {
-      ok: true;
-      result: unknown;
-    }
-  | {
-      ok: false;
-      error: {
-        body?: unknown;
-        code: string;
-        message: string;
-        status?: number;
-      };
-    };
-
 export type CanvasShapePreviewPhase =
   | "delete"
   | "move"
@@ -253,10 +224,6 @@ export type CanvasClientToServerEvents = {
   "canvas:shape:lock:claim": (payload: CanvasShapeLockClaimPayload) => void;
   "canvas:shape:lock:release": (
     payload: CanvasShapeLockReleasePayload,
-  ) => void;
-  "canvas:shape:commit": (
-    payload: CanvasShapeCommitPayload,
-    callback: (ack: CanvasShapeCommitAck) => void,
   ) => void;
   "canvas:shape:preview": (payload: CanvasShapePreviewPayload) => void;
   "canvas:shape:preview:clear": (
