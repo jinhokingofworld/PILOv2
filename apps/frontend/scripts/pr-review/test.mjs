@@ -451,6 +451,8 @@ assert.match(prReviewCanvasSurface, /aria-label="선택한 파일 관계"/);
 assert.match(prReviewCanvasSurface, /buildPrReviewFileShapeUpdateInput/);
 assert.match(prReviewCanvasSurface, /riskLevel: fileNodeData\.riskLevel/);
 assert.match(prReviewCanvasSurface, /conflictReason: conflictMetadata\.conflictReason/);
+assert.match(prReviewCanvasSurface, /fileByPath/);
+assert.match(prReviewCanvasSurface, /fileByPath\.get\(shape\.props\.filePath\)/);
 assert.doesNotMatch(prReviewCanvasSurface, /features\/canvas/);
 assert.doesNotMatch(prReviewCanvasSurface, /PiloCanvasRuntime/);
 assert.doesNotMatch(prReviewCanvasSurface, /canvas_freeform_shapes/);

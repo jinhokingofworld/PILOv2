@@ -658,6 +658,11 @@ function syncPrReviewFileNodeMetadata(
       flow.files.map((file) => [file.reviewFileId, file] as const)
     )
   );
+  const fileByPath = new Map(
+    canvas.flows.flatMap((flow) =>
+      flow.files.map((file) => [file.filePath, file] as const)
+    )
+  );
   const getConflictMetadata = createConflictMetadataResolver(
     conflictAnalysis,
     preparedConflictFileIds
@@ -667,7 +672,11 @@ function syncPrReviewFileNodeMetadata(
       return [];
     }
 
-    const file = fileByReviewFileId.get(shape.props.reviewFileId);
+    const file =
+      fileByReviewFileId.get(shape.props.reviewFileId) ??
+      (shape.props.filePath
+        ? fileByPath.get(shape.props.filePath)
+        : undefined);
     if (!file) {
       return [];
     }
