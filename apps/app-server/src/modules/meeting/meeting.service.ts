@@ -3270,9 +3270,18 @@ export class MeetingService {
   ): Promise<ParticipantRow> {
     const participant = await executor.queryOne<ParticipantRow>(
       `
-        WITH active_participant AS (
+        WITH participant_lock AS (
+          SELECT pg_advisory_xact_lock(
+            hashtextextended(
+              ($1::uuid)::text || ':' || ($2::uuid)::text,
+              0
+            )
+          )
+        ),
+        active_participant AS (
           SELECT *
           FROM meeting_participants
+          CROSS JOIN participant_lock
           WHERE meeting_id = $1::uuid
             AND user_id = $2::uuid
             AND left_at IS NULL
@@ -3321,6 +3330,10 @@ export class MeetingService {
       return participant;
     }
 
+    // Before 072, the former global unique constraint rejects the insert above.
+    // This transaction already holds the participant advisory lock, so only that
+    // old-schema compatibility path can reactivate one latest closed row. After
+    // 072 the insert succeeds for a new session and this path is not used.
     const reactivatedParticipant = await executor.queryOne<ParticipantRow>(
       `
         WITH active_participant AS (
@@ -3331,6 +3344,17 @@ export class MeetingService {
             AND left_at IS NULL
           FOR UPDATE
         ),
+        legacy_participant AS (
+          SELECT id
+          FROM meeting_participants
+          WHERE meeting_id = $1::uuid
+            AND user_id = $2::uuid
+            AND left_at IS NOT NULL
+            AND NOT EXISTS (SELECT 1 FROM active_participant)
+          ORDER BY joined_at DESC, id DESC
+          LIMIT 1
+          FOR UPDATE
+        ),
         reactivated_participant AS (
           UPDATE meeting_participants
           SET
@@ -3339,10 +3363,7 @@ export class MeetingService {
             livekit_identity =
               'meeting-' || ($1::uuid)::text || '-user-' || ($2::uuid)::text,
             updated_at = now()
-          WHERE meeting_id = $1::uuid
-            AND user_id = $2::uuid
-            AND left_at IS NOT NULL
-            AND NOT EXISTS (SELECT 1 FROM active_participant)
+          WHERE id = (SELECT id FROM legacy_participant)
           RETURNING *
         ),
         resolved_participant AS (

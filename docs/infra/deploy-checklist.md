@@ -305,7 +305,10 @@ role에는 state object read와 lockfile 생성·해제, 현재 Terraform state 
 
 1. ECS deployment event 확인
 2. CloudWatch Logs 확인
-3. 이전 ECR image tag로 ECS service update
+3. 이전 ECR image tag로 ECS service update. 단, schema compatibility migration이 포함된
+   배포는 해당 도메인 운영 문서의 rollback 경계를 먼저 확인한다. 예를 들어 Meeting
+   participant session migration 072 적용 뒤에는 session-compatible App Server revision보다
+   이전 image를 rollback 대상으로 선택하지 않는다.
 4. 필요 시 Terraform 변경 revert
 5. DB migration이 포함된 경우 migration rollback 전략 별도 확인
 

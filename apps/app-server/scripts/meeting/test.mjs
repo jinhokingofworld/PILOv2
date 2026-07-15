@@ -40,6 +40,10 @@ assert.match(meetingStateRealtimePublisher, /recording_started/);
 assert.match(meetingStateRealtimePublisher, /recording_failed/);
 assert.match(meetingServiceSource, /WITH active_participant AS/);
 assert.match(meetingServiceSource, /ON CONFLICT DO NOTHING/);
+assert.match(meetingServiceSource, /pg_advisory_xact_lock/);
+assert.match(meetingServiceSource, /legacy_participant AS/);
+assert.match(meetingServiceSource, /ORDER BY joined_at DESC, id DESC\s+LIMIT 1/s);
+assert.match(meetingServiceSource, /WHERE id = \(SELECT id FROM legacy_participant\)/);
 assert.match(meetingServiceSource, /AND meeting_participants\.left_at IS NULL/);
 assert.match(
   meetingServiceSource,
@@ -980,7 +984,7 @@ async function assertError(action, messagePattern) {
           });
         },
         (text, values) => {
-          assert.match(text, /WITH active_participant AS/);
+          assert.match(text, /WITH[\s\S]*active_participant AS/);
           assert.match(text, /ON CONFLICT DO NOTHING/);
           assert.match(text, /\$1::uuid/);
           assert.match(text, /\$2::uuid/);
@@ -1018,6 +1022,41 @@ async function assertError(action, messagePattern) {
 }
 
 {
+  const { service, liveKitTokenService } = createSubject(
+    new FakeDatabase({
+      queryOneRows: [
+        currentMeetingRow({
+          recording_id: null,
+          recording_meeting_id: null,
+          recording_status: null,
+          recording_started_at: null
+        }),
+        text => {
+          assert.match(text, /CROSS JOIN participant_lock/);
+          assert.match(text, /ON CONFLICT DO NOTHING/);
+          return null;
+        },
+        text => {
+          assert.match(text, /legacy_participant AS/);
+          assert.match(text, /ORDER BY joined_at DESC, id DESC\s+LIMIT 1/s);
+          assert.match(text, /WHERE id = \(SELECT id FROM legacy_participant\)/);
+          assert.doesNotMatch(
+            text,
+            /reactivated_participant AS \([\s\S]*WHERE meeting_id = \$1::uuid/s
+          );
+          return participantRow();
+        }
+      ]
+    })
+  );
+
+  const joined = await service.joinMeeting(currentUserId, workspaceId, meetingId);
+
+  assert.equal(joined.participant.id, participantId);
+  assert.equal(liveKitTokenService.calls.length, 1);
+}
+
+{
   const { service, workspaceService, liveKitTokenService } = createSubject(
     new FakeDatabase({
       queryOneRows: [
@@ -1035,7 +1074,7 @@ async function assertError(action, messagePattern) {
           });
         },
         (text, values) => {
-          assert.match(text, /WITH active_participant AS/);
+          assert.match(text, /WITH[\s\S]*active_participant AS/);
           assert.match(text, /ON CONFLICT DO NOTHING/);
           assert.match(text, /\$1::uuid/);
           assert.match(text, /\$2::uuid/);
