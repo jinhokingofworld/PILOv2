@@ -384,6 +384,8 @@ assert.match(meetingReportSection, /MeetingReportStatusFilter/);
 assert.match(meetingReportSection, /REPORT_POLL_INTERVAL_MS = 10000/);
 assert.match(meetingReportSection, /useMeetingReportRealtime/);
 assert.match(meetingReportSection, /selectedReportId === event\.reportId/);
+assert.match(meetingReportSection, /활동 근거/);
+assert.match(meetingReportSection, /report\.activityEvidence/);
 assert.match(meetingReportSection, /getReportIdFromLocation/);
 assert.match(meetingReportSection, /new URLSearchParams\(window\.location\.search\)/);
 assert.match(meetingReportSection, /openedDeepLinkReportIdRef/);

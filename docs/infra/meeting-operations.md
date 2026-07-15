@@ -57,6 +57,22 @@ outbox가 `pending` 또는 lease가 만료된 `publishing`이면 App Server disp
 `PROCESSING`이면 AI Worker 로그와 advisory lock 보유 여부를 먼저 확인한다. stale
 recovery는 Worker lock을 보유한 Report를 실패 처리하지 않는다.
 
+## Activity snapshot 조사
+
+`meeting_report_activity_evidence`는 `report_id` 기준으로 저장된 안전한 Activity
+projection이며, `meeting_report_activity_evidence_references`는 그 Activity가 어느
+MeetingReport 산출물(`summary`, `discussion`, `decision`, `action_item`)을 뒷받침했는지
+연결한다. 두 table 모두 raw `activity_logs.metadata.data`를 저장하지 않는다.
+
+- `report_id`, `recording_id`와 snapshot `activity_log_id`로 생성 건을 상관한다. 원본
+  Activity Log를 조사해야 할 때도 summary와 action만 사용하고 raw metadata를 운영 로그에
+  복사하지 않는다.
+- snapshot query가 실패하거나 선택 가능한 row가 없으면 Worker는 transcript-only로 완료한다.
+  `MeetingReport activity snapshot unavailable` warning과 동일 `report_id`를 확인한다.
+- 재생성은 이미 저장된 snapshot을 다시 LLM context로 사용하고, 완료 transaction에서
+  snapshot과 그 references를 함께 replace한다. 따라서 regenerate 결과가 현재 Activity Log의
+  후속 변경으로 달라지는지부터 확인할 필요는 없다.
+
 ## 전용 queue 운영
 
 MeetingReport는 `${prefix}-meeting-jobs`만 사용한다. queue visibility timeout은

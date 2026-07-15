@@ -121,6 +121,16 @@ function formatReportTitle(report: Pick<MeetingReportSummary, "createdAt">) {
   return `${formatReportDateTime(report.createdAt)} 회의록`;
 }
 
+function formatActivityEvidenceReference(sourceType: string, sourceIndex: number) {
+  const label = {
+    summary: "요약",
+    discussion: "논의",
+    decision: "결정",
+    action_item: "후속 작업"
+  }[sourceType] ?? sourceType;
+  return sourceType === "decision" ? label : `${label} ${sourceIndex + 1}`;
+}
+
 function ReportParticipantSummary({ report }: { report: MeetingReportSummary }) {
   const summary = report.participantSummary;
   if (!summary || summary.totalCount === 0) return null;
@@ -776,6 +786,34 @@ function MeetingReportDetailModal({
                   title="결정사항"
                   value={report.decisions}
                 />
+
+                <section className="grid gap-2 rounded-lg border bg-muted/20 p-4">
+                  <div>
+                    <h3 className="font-heading text-base font-semibold">활동 근거</h3>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Transcript와 별도로 녹음 구간에 기록된 Workspace 활동입니다.
+                    </p>
+                  </div>
+                  {report.activityEvidence?.length ? (
+                    <ul className="grid gap-2">
+                      {report.activityEvidence.map((activity) => (
+                        <li key={activity.id} className="rounded-md border bg-background p-3 text-sm">
+                          <p className="text-xs font-semibold text-muted-foreground">
+                            {formatReportDateTime(activity.occurredAt)} · {activity.action}
+                          </p>
+                          <p className="mt-1 whitespace-pre-wrap break-words">{activity.summary}</p>
+                          {activity.references.length ? (
+                            <p className="mt-2 text-xs text-muted-foreground">
+                              연결된 산출물: {activity.references.map((reference) => formatActivityEvidenceReference(reference.sourceType, reference.sourceIndex)).join(", ")}
+                            </p>
+                          ) : null}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">기록된 활동 근거가 없습니다.</p>
+                  )}
+                </section>
 
                 <section className="grid gap-2">
                   <h3 className="font-heading text-base font-semibold">후속 작업</h3>

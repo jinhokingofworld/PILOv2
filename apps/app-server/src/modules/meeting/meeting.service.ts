@@ -369,6 +369,14 @@ export interface MeetingReportDetailPayload extends MeetingReportSummaryPayload 
   transcriptText: string | null;
   evidenceSegments: Array<{ id: string; segmentIndex: number; startedAtMs: number; endedAtMs: number; text: string }>;
   evidence: Array<{ sourceType: string; sourceIndex: number; transcriptSegmentId: string }>;
+  activityEvidence: Array<{
+    id: string;
+    sourceIndex: number;
+    occurredAt: string;
+    action: string;
+    summary: string;
+    references: Array<{ sourceType: string; sourceIndex: number }>;
+  }>;
   actionItems: MeetingReportActionItemPayload[];
   actionItemAssignees: MeetingReportActionItemAssigneePayload[];
 }
@@ -1538,8 +1546,9 @@ export class MeetingService {
     if (report === null) {
       throw notFound("Meeting report not found");
     }
-    const [evidence, actionItems, actionItemAssignees] = await Promise.all([
+    const [evidence, activityEvidence, actionItems, actionItemAssignees] = await Promise.all([
       this.listMeetingReportEvidence(report.id),
+      this.listMeetingReportActivityEvidence(report.id),
       this.listMeetingReportActionItems(report.id),
       this.listMeetingReportActionItemAssignees(workspaceId)
     ]);
@@ -1547,6 +1556,7 @@ export class MeetingService {
     return {
       report: this.mapMeetingReportDetail(report, {
         ...evidence,
+        activityEvidence,
         actionItems,
         actionItemAssignees
       })
@@ -4097,6 +4107,7 @@ export class MeetingService {
   private mapMeetingReportDetail(report: MeetingReportDetailRow, evidence: {
     evidenceSegments: MeetingReportDetailPayload["evidenceSegments"];
     evidence: MeetingReportDetailPayload["evidence"];
+    activityEvidence: MeetingReportDetailPayload["activityEvidence"];
     actionItems: MeetingReportActionItemPayload[];
     actionItemAssignees: MeetingReportActionItemAssigneePayload[];
   }): MeetingReportDetailPayload {
@@ -4162,6 +4173,52 @@ export class MeetingService {
       if (row.source_type !== null && row.source_index !== null && row.transcript_segment_id !== null) references.push({ sourceType: row.source_type, sourceIndex: Number(row.source_index), transcriptSegmentId: row.transcript_segment_id });
     }
     return { evidenceSegments: [...segmentMap.values()], evidence: references };
+  }
+
+  private async listMeetingReportActivityEvidence(
+    reportId: string
+  ): Promise<MeetingReportDetailPayload["activityEvidence"]> {
+    const rows = await this.database.query<{
+      id: string;
+      source_index: number | string;
+      occurred_at: Date | string;
+      action: string;
+      summary: string;
+      source_type: string | null;
+      reference_source_index: number | string | null;
+    }>(
+      `SELECT activity_evidence.id, activity_evidence.source_index, activity_evidence.occurred_at,
+              activity_evidence.action::text AS action, activity_evidence.summary,
+              references.source_type, references.source_index AS reference_source_index
+       FROM meeting_report_activity_evidence AS activity_evidence
+       LEFT JOIN meeting_report_activity_evidence_references AS references
+         ON references.activity_evidence_id = activity_evidence.id
+        AND references.meeting_report_id = activity_evidence.meeting_report_id
+       WHERE activity_evidence.meeting_report_id = $1
+       ORDER BY activity_evidence.occurred_at ASC, activity_evidence.source_index ASC,
+                references.source_type ASC, references.source_index ASC`,
+      [reportId]
+    );
+
+    const activityEvidence = new Map<string, MeetingReportDetailPayload["activityEvidence"][number]>();
+    for (const row of rows) {
+      const item = activityEvidence.get(row.id) ?? {
+        id: row.id,
+        sourceIndex: Number(row.source_index),
+        occurredAt: new Date(row.occurred_at).toISOString(),
+        action: row.action,
+        summary: row.summary,
+        references: []
+      };
+      if (row.source_type !== null && row.reference_source_index !== null) {
+        item.references.push({
+          sourceType: row.source_type,
+          sourceIndex: Number(row.reference_source_index)
+        });
+      }
+      activityEvidence.set(row.id, item);
+    }
+    return [...activityEvidence.values()];
   }
 
   private normalizeMeetingReportStatus(

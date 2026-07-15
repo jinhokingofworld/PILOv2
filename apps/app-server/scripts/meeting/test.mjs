@@ -21,6 +21,10 @@ const meetingStateRealtimePublisher = await readFile(
   ),
   "utf8"
 );
+const meetingServiceSource = await readFile(
+  new URL("../../src/modules/meeting/meeting.service.ts", import.meta.url),
+  "utf8"
+);
 
 assert.match(meetingStateRealtimePublisher, /MEETING_STATE_REDIS_CHANNEL = "meeting:state-events"/);
 assert.match(meetingStateRealtimePublisher, /event: "meeting:state:updated"/);
@@ -2318,10 +2322,14 @@ async function assertError(action, messagePattern) {
   assert.equal(result.report.transcriptText, "회의 원문 전체");
   assert.deepEqual(result.report.evidenceSegments, []);
   assert.deepEqual(result.report.evidence, []);
+  assert.deepEqual(result.report.activityEvidence, []);
   assert.deepEqual(result.report.actionItems, []);
   assert.deepEqual(result.report.actionItemAssignees, []);
   assert.deepEqual(result.report.actionItemCandidates, [{ title: "후속 작업" }]);
 }
+
+assert.match(meetingServiceSource, /FROM meeting_report_activity_evidence/);
+assert.match(meetingServiceSource, /activityEvidence/);
 
 {
   const { database, service } = createSubject(
