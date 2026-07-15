@@ -423,6 +423,36 @@ function deterministicPlan(prompt, selectedShapeIds = [], toolHelpMode = false) 
     y: 0,
   });
   assert.equal(result.shapeBatch.operations[0].payload.rawShape.props.arrowheadEnd, "arrow");
+  assert.deepEqual(result.shapeBatch.operations[0].payload.rawShape.meta.piloArrowBindingsV1, [
+    {
+      type: "arrow",
+      typeName: "binding",
+      fromId: result.shapeBatch.operations[0].shapeId,
+      toId: "shape:login",
+      props: {
+        terminal: "start",
+        normalizedAnchor: { x: 0.5, y: 0.5 },
+        isExact: false,
+        isPrecise: false,
+        snap: "center",
+      },
+      meta: {},
+    },
+    {
+      type: "arrow",
+      typeName: "binding",
+      fromId: result.shapeBatch.operations[0].shapeId,
+      toId: "shape:auth",
+      props: {
+        terminal: "end",
+        normalizedAnchor: { x: 0.5, y: 0.5 },
+        isExact: false,
+        isPrecise: false,
+        snap: "center",
+      },
+      meta: {},
+    },
+  ]);
   assert.deepEqual(repository.findByIdCalls, [
     { canvasId: "canvas-1", shapeIds: ["shape:login", "shape:auth"] },
   ]);
@@ -514,6 +544,12 @@ function deterministicPlan(prompt, selectedShapeIds = [], toolHelpMode = false) 
     batch.operations.map((operation) => operation.payload.shapeType).sort(),
     ["arrow", "frame", "geo", "text"]
   );
+  const arrowOperation = batch.operations.find((operation) => operation.payload.shapeType === "arrow");
+  assert.equal(arrowOperation.payload.rawShape.meta.piloArrowBindingsV1.length, 2);
+  assert.equal(arrowOperation.payload.rawShape.meta.piloArrowBindingsV1[0].fromId, arrowOperation.shapeId);
+  assert.equal(arrowOperation.payload.rawShape.meta.piloArrowBindingsV1[0].props.terminal, "start");
+  assert.equal(arrowOperation.payload.rawShape.meta.piloArrowBindingsV1[1].fromId, arrowOperation.shapeId);
+  assert.equal(arrowOperation.payload.rawShape.meta.piloArrowBindingsV1[1].props.terminal, "end");
 }
 
 {

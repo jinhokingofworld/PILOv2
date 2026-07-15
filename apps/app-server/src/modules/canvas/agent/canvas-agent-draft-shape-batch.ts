@@ -8,6 +8,9 @@ import type {
 } from "./canvas-agent.types";
 
 const ALLOWED_DRAFT_COLORS = new Set(["default", "blue", "violet", "green", "yellow", "red", "black"]);
+const PILO_ARROW_BINDINGS_META_KEY = "piloArrowBindingsV1";
+
+type PiloArrowBindingTerminal = "start" | "end";
 
 export function canvasAgentDraftToShapeBatch(
   spec: CanvasDraftSpec,
@@ -103,7 +106,10 @@ export function canvasAgentDraftToShapeBatch(
             arrowheadEnd: connection.kind === "line" ? "none" : "arrow",
             richText: richText(text)
           },
-          meta: { piloCanvasAgent: true }
+          meta: {
+            piloCanvasAgent: true,
+            [PILO_ARROW_BINDINGS_META_KEY]: createArrowBindingSnapshots(shapeId, fromShapeId, toShapeId)
+          }
         }
       }
     });
@@ -168,7 +174,8 @@ export function createCanvasAgentConnectionBatch(input: {
               piloCanvasAgentConnection: {
                 fromShapeId: input.from.id,
                 toShapeId: input.to.id
-              }
+              },
+              [PILO_ARROW_BINDINGS_META_KEY]: createArrowBindingSnapshots(shapeId, input.from.id, input.to.id)
             }
           }
         }
@@ -206,6 +213,38 @@ function connectionShapeGeometry(
     width,
     x,
     y
+  };
+}
+
+function createArrowBindingSnapshots(
+  arrowId: string,
+  startShapeId: string,
+  endShapeId: string
+): Array<Record<string, unknown>> {
+  return [
+    createArrowBindingSnapshot(arrowId, startShapeId, "start"),
+    createArrowBindingSnapshot(arrowId, endShapeId, "end")
+  ];
+}
+
+function createArrowBindingSnapshot(
+  arrowId: string,
+  targetShapeId: string,
+  terminal: PiloArrowBindingTerminal
+): Record<string, unknown> {
+  return {
+    type: "arrow",
+    typeName: "binding",
+    fromId: arrowId,
+    toId: targetShapeId,
+    props: {
+      terminal,
+      normalizedAnchor: { x: 0.5, y: 0.5 },
+      isExact: false,
+      isPrecise: false,
+      snap: "center"
+    },
+    meta: {}
   };
 }
 
