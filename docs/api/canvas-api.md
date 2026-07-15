@@ -66,7 +66,8 @@ PR Review의 분석 결과, file decision, 위험도, Flow와 relation 원본, G
 - Canvas Agent는 `freeform` 전용이다. Review Canvas Agent 실행은 지원하지 않는다.
 - Review Canvas realtime room은 연결된 room의 상태에 따라 권한을 계산한다. active room은
   read-write, completed room은 Presence만 허용하는 read-only로 입장한다.
-- MVP에는 tldraw sync, Yjs/CRDT, DB 기반 hard lock, viewer-only role, 복잡한 conflict UI가 없다. Shape 조작 중 사용자 경험을 위한 realtime-only soft lock/preview는 Socket.IO 레이어에서 처리하며 DB schema에는 저장하지 않는다.
+- `classic` Canvas MVP에는 Yjs/CRDT, DB 기반 hard lock, viewer-only role, 복잡한 conflict UI가 없다. Shape 조작 중 사용자 경험을 위한 realtime-only soft lock/preview는 Socket.IO 레이어에서 처리하며 DB schema에는 저장하지 않는다.
+- `tldraw_sync` Canvas는 classic shape table/operation log를 사용하지 않고 `canvas_sync_documents` snapshot을 저장/복원하는 별도 engine이다. 실제 multiplayer sync server 연동 전까지는 snapshot persistence fallback으로 동작한다.
 
 ## Canvas 접근 정책
 
@@ -124,6 +125,24 @@ Canvas는 ID를 알고 있어도 조회할 수 없다.
 - `INDEX (actor_user_id)`
 - `INDEX (workspace_id, canvas_id)`
 
+`canvas_sync_documents`:
+
+| 컬럼 | 역할 |
+| --- | --- |
+| `workspace_id` | Workspace 접근 검증과 조회 범위 |
+| `canvas_id` | `engine_type=tldraw_sync` Canvas id. Canvas 삭제 시 함께 삭제된다. |
+| `provider_type` | sync provider 구분. 현재는 `tldraw_sync`만 허용한다. |
+| `snapshot` | tldraw editor snapshot JSON object. `null`이면 아직 저장된 문서가 없다는 뜻이다. |
+| `version` | snapshot 저장 시 증가하는 문서 버전 |
+| `updated_at` | 마지막 snapshot 저장 시각 |
+
+`canvas_sync_documents` 제약/인덱스:
+
+- `UNIQUE (canvas_id)`
+- `CHECK (provider_type IN ('tldraw_sync'))`
+- `CHECK (snapshot IS NULL OR jsonb_typeof(snapshot) = 'object')`
+- `INDEX (workspace_id, canvas_id)`
+
 `canvas_freeform_shapes` 추가 인덱스:
 
 - `INDEX canvas_freeform_shapes(canvas_id, parent_shape_id) WHERE deleted_at IS NULL`
@@ -142,6 +161,8 @@ Canvas는 ID를 알고 있어도 조회할 수 없다.
 | `POST` | `/workspaces/{workspaceId}/canvases` | Canvas 생성 |
 | `POST` | `/workspaces/{workspaceId}/canvases/{canvasId}/engine-conversions` | 기존 Canvas를 보존하고 새 engine Canvas 생성 |
 | `GET` | `/workspaces/{workspaceId}/canvases/{canvasId}` | Canvas metadata와 저장된 viewport 조회 |
+| `GET` | `/workspaces/{workspaceId}/canvases/{canvasId}/sync-document` | `tldraw_sync` Canvas snapshot 조회 |
+| `PUT` | `/workspaces/{workspaceId}/canvases/{canvasId}/sync-document` | `tldraw_sync` Canvas snapshot 저장 |
 | `GET` | `/workspaces/{workspaceId}/canvases/{canvasId}/shapes` | Viewport bounds 기준 shape summary 조회 |
 | `POST` | `/workspaces/{workspaceId}/canvases/{canvasId}/shapes` | Shape 생성 |
 | `POST` | `/workspaces/{workspaceId}/canvases/{canvasId}/shapes/batch` | Shape 변경 batch 저장 |
@@ -177,6 +198,49 @@ Canvas는 ID를 알고 있어도 조회할 수 없다.
 전환 API는 기존 Canvas row를 직접 변경하지 않는다. 서버는 기존 Canvas를
 `sourceCanvasId`로 참조하는 새 Canvas를 만들고, 새 Canvas는 비어 있는 상태로
 시작한다. 현재 `copyShapes: true`는 지원하지 않는다.
+
+## Canvas sync document
+
+`engineType`이 `tldraw_sync`인 Canvas에서만 사용한다. `classic` Canvas는 기존 shape/batch/operation API를 계속 사용한다.
+
+```text
+GET /workspaces/{workspaceId}/canvases/{canvasId}/sync-document
+PUT /workspaces/{workspaceId}/canvases/{canvasId}/sync-document
+```
+
+저장 요청:
+
+```json
+{
+  "snapshot": {
+    "document": {},
+    "session": {}
+  }
+}
+```
+
+응답:
+
+```json
+{
+  "canvasId": "canvas id",
+  "workspaceId": "workspace id",
+  "providerType": "tldraw_sync",
+  "snapshot": {
+    "document": {},
+    "session": {}
+  },
+  "version": 1,
+  "updatedAt": "2026-07-15T00:00:00.000Z"
+}
+```
+
+정책:
+
+- `snapshot`은 JSON object 또는 `null`만 허용한다.
+- snapshot payload는 2MB 이하로 제한한다.
+- 저장할 때마다 `version`을 1씩 증가시킨다.
+- 이 endpoint는 tldraw sync engine의 문서 저장/복원 경계이며, classic Canvas의 shape revision/operation log와 섞지 않는다.
 
 ## Shape Payload
 
@@ -713,7 +777,7 @@ PATCH /workspaces/{workspaceId}/canvases/{canvasId}/leave
 
 ## MVP 제외
 
-- tldraw sync, Yjs/CRDT
+- Yjs/CRDT 및 실제 tldraw multiplayer sync server
 - 복잡한 conflict UI
 - DB 기반 hard shape lock
 - public link 공유

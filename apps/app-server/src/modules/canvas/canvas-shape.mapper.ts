@@ -8,6 +8,8 @@ import {
   CanvasShapeRow,
   CanvasShapeOperationPayload,
   CanvasShapeOperationRow,
+  CanvasSyncDocumentPayload,
+  CanvasSyncDocumentRow,
   CanvasUserStatePayload,
   CanvasUserStateRow,
   CompleteShapeWriteValues,
@@ -37,6 +39,37 @@ export function mapCanvas(
     shapeCount:
       shapeCount ?? (canvas.shape_count === undefined ? 0 : Number(canvas.shape_count)),
     updatedAt: toIsoString(canvas.updated_at)
+  };
+}
+
+export function mapCanvasSyncDocument(
+  document: CanvasSyncDocumentRow | null,
+  {
+    canvasId,
+    workspaceId
+  }: {
+    canvasId: string;
+    workspaceId: string;
+  }
+): CanvasSyncDocumentPayload {
+  if (!document) {
+    return {
+      canvasId,
+      providerType: "tldraw_sync",
+      snapshot: null,
+      updatedAt: null,
+      version: 0,
+      workspaceId
+    };
+  }
+
+  return {
+    canvasId: document.canvas_id,
+    providerType: document.provider_type,
+    snapshot: document.snapshot,
+    updatedAt: toIsoString(document.updated_at),
+    version: Number(document.version),
+    workspaceId: document.workspace_id
   };
 }
 

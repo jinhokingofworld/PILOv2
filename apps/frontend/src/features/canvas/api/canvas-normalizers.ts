@@ -3,6 +3,7 @@ import type {
   CanvasBoardSummary,
   CanvasOperationsCatchupPayload,
   CanvasShapeOperationPayload,
+  CanvasSyncDocumentPayload,
   CanvasViewSetting,
 } from "./canvas-types";
 import {
@@ -174,6 +175,32 @@ export function normalizeCanvasOperationsCatchup(
   return {
     latestOpSeq: normalizeNumber(value.latestOpSeq),
     operations,
+  };
+}
+
+export function normalizeCanvasSyncDocument(
+  value: unknown,
+  { boardId, workspaceId }: { boardId: string; workspaceId: string },
+): CanvasSyncDocumentPayload {
+  if (!isRecord(value)) {
+    return {
+      canvasId: boardId,
+      providerType: "tldraw_sync",
+      snapshot: null,
+      updatedAt: null,
+      version: 0,
+      workspaceId,
+    };
+  }
+
+  return {
+    canvasId: normalizeString(value.canvasId, boardId),
+    providerType: normalizeString(value.providerType, "tldraw_sync"),
+    snapshot: isRecord(value.snapshot) ? value.snapshot : null,
+    updatedAt:
+      typeof value.updatedAt === "string" ? value.updatedAt : null,
+    version: normalizeNumber(value.version),
+    workspaceId: normalizeString(value.workspaceId, workspaceId),
   };
 }
 

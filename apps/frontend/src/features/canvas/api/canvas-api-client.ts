@@ -8,6 +8,7 @@ import {
   normalizeCanvasOperationsCatchup,
   normalizeCanvasShape,
   normalizeCanvasShapes,
+  normalizeCanvasSyncDocument,
   unwrapCanvasApiData,
 } from "./canvas-normalizers";
 
@@ -203,6 +204,31 @@ export function createCanvasApiClient({
       const board = await requestCanvasJson(path, undefined, requestOptions);
 
       return normalizeCanvasBoardDetail(board, { workspaceId });
+    },
+
+    async getSyncDocument(
+      boardId: string,
+      { workspaceId }: { workspaceId: string },
+    ) {
+      const path = `/workspaces/${encodeURIComponent(workspaceId)}/canvases/${encodeURIComponent(boardId)}/sync-document`;
+      const document = await requestCanvasJson(path, undefined, requestOptions);
+
+      return normalizeCanvasSyncDocument(document, { boardId, workspaceId });
+    },
+
+    async updateSyncDocument(
+      boardId: string,
+      body: { snapshot: Record<string, unknown> | null },
+      { workspaceId }: { workspaceId: string },
+    ) {
+      const path = `/workspaces/${encodeURIComponent(workspaceId)}/canvases/${encodeURIComponent(boardId)}/sync-document`;
+      const document = await requestCanvasJson(
+        path,
+        withJsonBody(body, { method: "PUT" }),
+        requestOptions,
+      );
+
+      return normalizeCanvasSyncDocument(document, { boardId, workspaceId });
     },
 
     async listShapesInViewport(

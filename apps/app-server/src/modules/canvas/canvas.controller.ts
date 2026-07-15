@@ -34,6 +34,7 @@ import {
   CanvasOperationsCatchupPayload,
   CanvasShapePayload,
   CanvasShapeSummaryPayload,
+  CanvasSyncDocumentPayload,
   CanvasUserStatePayload,
   CanvasViewSettingPayload,
   ConvertCanvasEngineRequest,
@@ -43,6 +44,7 @@ import {
   ListCanvasOperationsQuery,
   ListCanvasShapesQuery,
   SyncCanvasShapesBatchRequest,
+  UpdateCanvasSyncDocumentRequest,
   UpdateCanvasViewSettingRequest,
   UpdateCanvasShapeRequest
 } from "./canvas.types";
@@ -201,6 +203,38 @@ export class CanvasController {
     );
 
     return apiResponse(canvas);
+  }
+
+  @Get("canvases/:canvasId/sync-document")
+  async getCanvasSyncDocument(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("canvasId") canvasId: string
+  ): Promise<ApiSuccessResponse<CanvasSyncDocumentPayload>> {
+    const document = await this.canvasService.getCanvasSyncDocument(
+      currentUserId,
+      workspaceId,
+      canvasId
+    );
+
+    return apiResponse(document);
+  }
+
+  @Put("canvases/:canvasId/sync-document")
+  async updateCanvasSyncDocument(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("canvasId") canvasId: string,
+    @Body() body: UpdateCanvasSyncDocumentRequest
+  ): Promise<ApiSuccessResponse<CanvasSyncDocumentPayload>> {
+    const document = await this.canvasService.updateCanvasSyncDocument(
+      currentUserId,
+      workspaceId,
+      canvasId,
+      body
+    );
+
+    return apiResponse(document);
   }
 
   @Get("canvases/:canvasId/shapes")

@@ -59,6 +59,15 @@ export interface CanvasLatestOperationSeqRow extends QueryResultRow {
   latest_op_seq: number | string;
 }
 
+export interface CanvasSyncDocumentRow extends QueryResultRow {
+  canvas_id: string;
+  workspace_id: string;
+  provider_type: string;
+  snapshot: Record<string, unknown> | null;
+  version: number | string;
+  updated_at: Date | string;
+}
+
 export type CanvasShapeOperationType = "create" | "update" | "delete";
 
 export interface CanvasShapeOperationRow extends QueryResultRow {
@@ -132,6 +141,19 @@ export interface ListCanvasOperationsQuery {
 
 export interface SyncCanvasShapesBatchRequest {
   operations?: unknown;
+}
+
+export interface UpdateCanvasSyncDocumentRequest {
+  snapshot?: unknown;
+}
+
+export interface CanvasSyncDocumentPayload {
+  canvasId: string;
+  workspaceId: string;
+  providerType: string;
+  snapshot: Record<string, unknown> | null;
+  version: number;
+  updatedAt: string | null;
 }
 
 export interface CanvasViewSettingPayload {

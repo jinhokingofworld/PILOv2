@@ -10,6 +10,7 @@ import {
   ShapeWriteValues,
   SyncCanvasShapesBatchRequest,
   UpdateCanvasShapeRequest,
+  UpdateCanvasSyncDocumentRequest,
   UpdateCanvasViewSettingRequest,
   ViewportBoundsValues,
   CanvasViewSettingPayload
@@ -85,6 +86,29 @@ export function validateCanvasEngineConversion(
   }
 
   return { copyShapes, targetEngineType };
+}
+
+export function validateCanvasSyncDocumentSnapshot(
+  input: UpdateCanvasSyncDocumentRequest
+): Record<string, unknown> | null {
+  if (!isRecord(input)) {
+    throw badRequest("Canvas sync document body is required");
+  }
+
+  if (input.snapshot === null) {
+    return null;
+  }
+
+  if (!isRecord(input.snapshot)) {
+    throw badRequest("Canvas sync document snapshot must be an object");
+  }
+
+  const serialized = JSON.stringify(input.snapshot);
+  if (serialized.length > 2_000_000) {
+    throw badRequest("Canvas sync document snapshot is too large");
+  }
+
+  return input.snapshot;
 }
 
 export function validateShapeId(value: unknown): string {

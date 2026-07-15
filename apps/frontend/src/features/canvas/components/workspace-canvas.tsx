@@ -879,6 +879,7 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
           <PiloTldrawSyncRuntime
             key={`${board.workspaceId}:${board.id}:tldraw-sync`}
             board={board}
+            canvasClient={shouldUseCanvasApi ? canvasClient : null}
             onHistoryStateChange={setCanvasHistoryState}
             onReady={setCanvasActions}
           />

@@ -2,6 +2,7 @@ import type { CanvasShapeApiClient } from "../../../utils/canvas-shape-sync";
 import type {
   CanvasBoardDetail,
   CanvasOperationsCatchupPayload,
+  CanvasSyncDocumentPayload,
   CanvasViewportShapeQuery,
   CanvasViewSetting,
 } from "../../../api/canvas-types";
@@ -39,4 +40,13 @@ export type CanvasViewSettingApiClient = CanvasShapeApiClient & {
     boardId: string,
     options: { workspaceId: string },
   ) => Promise<unknown>;
+  getSyncDocument?: (
+    boardId: string,
+    options: { workspaceId: string },
+  ) => Promise<CanvasSyncDocumentPayload>;
+  updateSyncDocument?: (
+    boardId: string,
+    body: { snapshot: Record<string, unknown> | null },
+    options: { workspaceId: string },
+  ) => Promise<CanvasSyncDocumentPayload>;
 };

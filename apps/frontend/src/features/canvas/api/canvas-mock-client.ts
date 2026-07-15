@@ -10,11 +10,13 @@ import {
   defaultCanvasViewSetting,
   isRecord,
   normalizeCanvasBoardDetail,
+  normalizeCanvasSyncDocument,
   normalizeCanvasShapes,
   toBoardSummary,
 } from "./canvas-normalizers";
 
 const mockBoardListStorageScope = "mock-board-list";
+const mockSyncDocumentStorageScope = "mock-sync-documents";
 
 function readMockBoards(workspaceId: string): CanvasBoardDetail[] {
   const boards = readCanvasStorage(mockBoardListStorageScope, workspaceId);
@@ -28,6 +30,19 @@ function readMockBoards(workspaceId: string): CanvasBoardDetail[] {
 
 function writeMockBoards(workspaceId: string, boards: CanvasBoardDetail[]) {
   writeCanvasStorage(mockBoardListStorageScope, workspaceId, boards);
+}
+
+function readMockSyncDocuments(workspaceId: string) {
+  const documents = readCanvasStorage(mockSyncDocumentStorageScope, workspaceId);
+
+  return isRecord(documents) ? documents : {};
+}
+
+function writeMockSyncDocuments(
+  workspaceId: string,
+  documents: Record<string, unknown>,
+) {
+  writeCanvasStorage(mockSyncDocumentStorageScope, workspaceId, documents);
 }
 
 function createMockBlankBoard(
@@ -133,6 +148,47 @@ export function createMockCanvasClient() {
         ...createMockBlankBoard(defaultBoard.workspaceId, "Untitled canvas"),
         id: boardId,
       };
+    },
+
+    async getSyncDocument(
+      boardId: string,
+      { workspaceId }: { workspaceId?: string } = {},
+    ) {
+      const defaultBoard = createMockCanvasBoardDetail(workspaceId);
+      const documents = readMockSyncDocuments(defaultBoard.workspaceId);
+
+      return normalizeCanvasSyncDocument(documents[boardId], {
+        boardId,
+        workspaceId: defaultBoard.workspaceId,
+      });
+    },
+
+    async updateSyncDocument(
+      boardId: string,
+      body: { snapshot?: Record<string, unknown> | null } = {},
+      { workspaceId }: { workspaceId?: string } = {},
+    ) {
+      const defaultBoard = createMockCanvasBoardDetail(workspaceId);
+      const documents = readMockSyncDocuments(defaultBoard.workspaceId);
+      const previous = normalizeCanvasSyncDocument(documents[boardId], {
+        boardId,
+        workspaceId: defaultBoard.workspaceId,
+      });
+      const document = {
+        canvasId: boardId,
+        providerType: "tldraw_sync",
+        snapshot: isRecord(body.snapshot) ? body.snapshot : null,
+        updatedAt: new Date().toISOString(),
+        version: previous.version + 1,
+        workspaceId: defaultBoard.workspaceId,
+      };
+
+      writeMockSyncDocuments(defaultBoard.workspaceId, {
+        ...documents,
+        [boardId]: document,
+      });
+
+      return document;
     },
 
     async listShapesInViewport(

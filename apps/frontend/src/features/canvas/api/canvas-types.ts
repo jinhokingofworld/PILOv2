@@ -48,6 +48,15 @@ export type CanvasBoardSummary = Omit<
   "shapes" | "viewSetting" | "userState"
 >;
 
+export type CanvasSyncDocumentPayload = {
+  canvasId: string;
+  workspaceId: string;
+  providerType: "tldraw_sync" | string;
+  snapshot: Record<string, unknown> | null;
+  version: number;
+  updatedAt: string | null;
+};
+
 export type CanvasClientOptions = {
   mode?: string;
   baseUrl?: string;
