@@ -1555,4 +1555,5 @@ await import("./pr-review/test.mjs");
 await import("./pr-review-decision-realtime.test.mjs");
 await import("./sql-erd/test.mjs");
 await import("./sql-erd-realtime.test.mjs");
+await import("../src/shared/page-cursor/page-cursor.test.mjs");
 await import("../src/features/workspace-onboarding/github-onboarding.test.mjs");

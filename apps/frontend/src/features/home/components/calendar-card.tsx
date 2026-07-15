@@ -5,6 +5,7 @@ import { CalendarDays, ChevronRight } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { pageCursorTargetAttributes } from "@/shared/page-cursor/page-cursor-target";
 import type { HomeWeekCalendarEventsState } from "../hooks/use-home-dashboard-data";
 import {
   formatCalendarDate,
@@ -56,6 +57,11 @@ function ReadonlyCalendar({
   return (
     <>
       <Card
+        {...pageCursorTargetAttributes({
+          id: "calendar",
+          label: "캘린더",
+          type: "home_card"
+        })}
         className="relative h-full min-h-0 border-[#B7DCD7] bg-[#F4FBFA] shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_10px_24px_rgba(15,23,42,0.08)]"
         size="sm"
       >
@@ -103,6 +109,11 @@ function ReadonlyCalendar({
 
                 return (
                   <button
+                    {...pageCursorTargetAttributes({
+                      id: dateValue,
+                      label: dateValue,
+                      type: "home_calendar_date"
+                    })}
                     key={date.toISOString()}
                     aria-label={`${dateValue} 캘린더로 이동`}
                     className={[
@@ -133,6 +144,11 @@ function ReadonlyCalendar({
                         <>
                           {visibleEvents.map((event) => (
                             <span
+                              {...pageCursorTargetAttributes({
+                                id: event.id,
+                                label: event.title,
+                                type: "home_calendar_event"
+                              })}
                               key={event.id}
                               className="block min-w-0 truncate rounded-sm px-1 py-0.5 text-center text-[0.65rem] leading-none text-white"
                               style={{ backgroundColor: event.color }}

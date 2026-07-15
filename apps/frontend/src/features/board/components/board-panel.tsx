@@ -24,6 +24,8 @@ import type {
 import { formatBoardDateTime } from "@/features/board/utils/board-format";
 import { useAuthSession } from "@/features/auth";
 import { cn } from "@/lib/utils";
+import { PageCursorSurface } from "@/shared/page-cursor/PageCursorSurface";
+import { pageCursorTargetAttributes } from "@/shared/page-cursor/page-cursor-target";
 
 const selectClassName =
   "h-9 rounded-[11px] border border-slate-200 bg-white px-3 text-[12.5px] font-semibold text-slate-700 shadow-sm outline-none transition focus-visible:border-violet-300 focus-visible:ring-2 focus-visible:ring-violet-200 disabled:cursor-not-allowed disabled:opacity-50";
@@ -184,9 +186,13 @@ export function BoardPanel() {
   }
 
   return (
-    <div
+    <PageCursorSurface
+      boardId={selectedBoardId}
       data-board-main
-      className="workspace-board -m-6 min-h-[calc(100vh-3.5rem)] overflow-hidden border-l border-slate-200 bg-slate-50 text-slate-950"
+      className="workspace-board relative -m-6 min-h-[calc(100vh-3.5rem)] overflow-hidden border-l border-slate-200 bg-slate-50 text-slate-950"
+      enabled={Boolean(canUseBoard && selectedBoardId)}
+      page="board"
+      workspaceId={workspaceId}
     >
       <section className="board-toolbar flex min-h-[74px] items-center justify-end border-b border-slate-200 bg-white/90 px-7 py-5 backdrop-blur">
         <div className="board-controls flex w-full min-w-0 flex-wrap items-center justify-end gap-2">
@@ -222,6 +228,11 @@ export function BoardPanel() {
           </select>
 
           <Button
+            {...pageCursorTargetAttributes({
+              id: "create-issue",
+              label: "이슈 추가",
+              type: "board_action"
+            })}
             type="button"
             variant="outline"
             size="sm"
@@ -392,6 +403,6 @@ export function BoardPanel() {
         onClose={() => setSelectedIssueId(null)}
         onIssueUpdated={handleIssueUpdated}
       />
-    </div>
+    </PageCursorSurface>
   );
 }

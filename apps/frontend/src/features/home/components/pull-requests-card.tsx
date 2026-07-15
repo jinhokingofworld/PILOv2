@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { GitPullRequest } from "lucide-react";
 
 import type { GithubPullRequest } from "@/features/github-integration/types";
+import { pageCursorTargetAttributes } from "@/shared/page-cursor/page-cursor-target";
 import {
   homePullRequestListLimit,
   type HomePullRequestsState
@@ -34,6 +35,7 @@ export function PullRequestsCard({
       }
       background={<PullRequestsBackground />}
       className="border-[#C8CCF2] bg-[#F5F6FF] shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_10px_24px_rgba(15,23,42,0.08)]"
+      cursorTarget={{ id: "pull-requests", label: "PR", type: "home_card" }}
       description={null}
       icon={<GitPullRequest className="size-4" />}
       title="PR"
@@ -76,6 +78,11 @@ function PullRequestRow({ pullRequest }: { pullRequest: GithubPullRequest }) {
 
   return (
     <button
+      {...pageCursorTargetAttributes({
+        id: pullRequest.id,
+        label: pullRequest.title,
+        type: "home_pull_request"
+      })}
       aria-label={`${pullRequest.title} PR 리뷰로 이동`}
       className="flex min-h-0 min-w-0 flex-col justify-center overflow-hidden rounded-lg border bg-background/90 p-3 text-left shadow-sm backdrop-blur transition hover:bg-background hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
       onClick={handleOpenPullRequest}
