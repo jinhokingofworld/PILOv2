@@ -10,6 +10,8 @@ from app.canvas_agent.types import (
     CanvasSemanticShapeMatch,
 )
 
+CODE_GENERATION_FAILURE_MESSAGE = "코드 생성 중 오류가 났어요. 다시 시도해 주세요."
+
 
 class PgCanvasAgentRepository:
     def __init__(self, database_url: str, database_ssl: bool) -> None:
@@ -69,6 +71,14 @@ class PgCanvasAgentRepository:
                 "resourceRefs": _json_list(previous["resource_refs"]),
             }
 
+        request_context = _json_object(row["context_json"])
+        selected_shape_ids = _string_list(request_context.get("selectedShapeIds"))[:12]
+        if selected_shape_ids:
+            request_context["selectedShapeSummaries"] = self._selected_shape_summaries(
+                str(row["canvas_id"]),
+                selected_shape_ids,
+            )
+
         return CanvasAgentRunContext(
             run_id=str(row["id"]),
             workspace_id=str(row["workspace_id"]),
@@ -76,9 +86,37 @@ class PgCanvasAgentRepository:
             requested_by_user_id=str(row["requested_by_user_id"]),
             status=str(row["status"]),
             prompt=str(row["prompt"]),
-            request_context=_json_object(row["context_json"]),
+            request_context=request_context,
             previous_action=previous_action,
         )
+
+    def _selected_shape_summaries(
+        self,
+        canvas_id: str,
+        shape_ids: list[str],
+    ) -> list[dict[str, object]]:
+        if not shape_ids:
+            return []
+        rows = self.connection.execute(
+            """
+            SELECT id, title, text_content, shape_type, raw_shape
+            FROM canvas_freeform_shapes
+            WHERE canvas_id = %s
+              AND deleted_at IS NULL
+              AND (
+                id = ANY(%s::text[])
+                OR raw_shape->>'parentId' = ANY(%s::text[])
+              )
+            ORDER BY
+              CASE WHEN id = ANY(%s::text[]) THEN 0 ELSE 1 END,
+              array_position(%s::text[], COALESCE(raw_shape->>'parentId', id)),
+              id
+            LIMIT 40
+            """,
+            (canvas_id, shape_ids, shape_ids, shape_ids, shape_ids),
+        ).fetchall()
+
+        return [_shape_summary(row) for row in rows]
 
     def create_planned_action(
         self,
@@ -163,7 +201,10 @@ class PgCanvasAgentRepository:
         )
 
     def mark_failed(self, run_id: str, error_message: str) -> None:
+        safe_error_message = error_message[:4096]
         user_message = "디자인 초안을 만드는 중 오류가 났어요. 다시 시도해 주세요."
+        if safe_error_message == CODE_GENERATION_FAILURE_MESSAGE:
+            user_message = CODE_GENERATION_FAILURE_MESSAGE
         self.connection.execute(
             """
             UPDATE canvas_agent_runs
@@ -194,7 +235,7 @@ class PgCanvasAgentRepository:
               AND status NOT IN ('completed', 'cancelled', 'expired', 'draft_ready')
             """,
             (
-                error_message[:4096],
+                safe_error_message,
                 "(디자인|와이어|페이지|화면|초안|그려|만들|생성)",
                 user_message,
                 "(디자인|와이어|페이지|화면|초안|그려|만들|생성)",
@@ -577,6 +618,49 @@ class PgCanvasAgentRepository:
             """,
             (message[:4096], job_id),
         )
+
+
+def _shape_summary(row: dict[str, object]) -> dict[str, object]:
+    raw_shape = _json_object(row.get("raw_shape"))
+    props = _json_object(raw_shape.get("props"))
+    parent_id = raw_shape.get("parentId")
+    title = _clean_text(
+        row.get("title") or props.get("fileName") or props.get("name") or props.get("title")
+    )
+    text = _clean_text(
+        row.get("text_content")
+        or props.get("text")
+        or props.get("label")
+        or props.get("placeholder")
+    )
+    summary: dict[str, object] = {
+        "id": str(row.get("id", "")),
+        "shapeType": str(row.get("shape_type", "")),
+    }
+    if isinstance(parent_id, str) and parent_id:
+        summary["parentId"] = parent_id[:120]
+    if title:
+        summary["title"] = title[:160]
+    if text:
+        summary["text"] = text[:800]
+
+    code = _clean_text(props.get("code"))
+    if code:
+        summary["codePreview"] = code[:1000]
+
+    return summary
+
+
+def _clean_text(value: object) -> str:
+    if not isinstance(value, str):
+        return ""
+    return " ".join(value.split())
+
+
+def _string_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [item.strip() for item in value if isinstance(item, str) and item.strip()]
 
 
 def _json_object(value: object) -> dict[str, object]:

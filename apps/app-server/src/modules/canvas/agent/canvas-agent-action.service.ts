@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { badRequest } from "../../../common/api-error";
 import type { SyncCanvasShapesBatchRequest } from "../canvas.types";
+import { CANVAS_AGENT_CODE_GENERATION_FAILURE_MESSAGE } from "./canvas-agent.constants";
 import { CanvasAgentDraftService } from "./canvas-agent-draft.service";
 import { CanvasAgentRepository } from "./canvas-agent.repository";
 import { findCanvasAgentToolTarget } from "./canvas-agent-tool-targets";
@@ -146,7 +147,11 @@ export class CanvasAgentActionService {
       run.canvas_id,
       requestedIds.length ? requestedIds : contextShapeIds
     );
-    const kind = input.kind === "code" ? "code" : defaultKind;
+    const kind = this.shouldCreateCodeDraft(run.prompt, input, defaultKind) ? "code" : defaultKind;
+    const code = this.readText(input.code) || undefined;
+    if (kind === "code" && !this.hasCodeDraftContent(input.nodes, code)) {
+      throw new Error(CANVAS_AGENT_CODE_GENERATION_FAILURE_MESSAGE);
+    }
     const viewport = this.readViewport(run.context_json.viewport);
     const spec = this.drafts.createDraftSpec({
       kind,
@@ -159,7 +164,7 @@ export class CanvasAgentActionService {
       summary: this.readText(input.summary) || undefined,
       style: this.readText(input.style) || undefined,
       title: this.readText(input.title) || undefined,
-      code: this.readText(input.code) || undefined
+      code
     });
     const summary = `${this.routingPrefix(input)}${spec.summary}을 만들었습니다. 적용하거나 폐기할 수 있습니다.`;
 
@@ -265,6 +270,66 @@ export class CanvasAgentActionService {
     return "";
   }
 
+  private shouldCreateCodeDraft(
+    prompt: string,
+    input: Record<string, unknown>,
+    defaultKind: "diagram" | "code"
+  ): boolean {
+    if (input.kind === "code" || defaultKind === "code") return true;
+    const normalized = prompt.toLowerCase();
+    const asksForCode = [
+      "코드",
+      "구현",
+      "컴포넌트",
+      "파일",
+      "code",
+      "component",
+      "snippet",
+      "tsx",
+      "jsx",
+      "typescript",
+      "javascript"
+    ].some((term) => normalized.includes(term));
+    const generationIntent = [
+      "만들",
+      "짜",
+      "작성",
+      "생성",
+      "구현",
+      "그려",
+      "create",
+      "generate",
+      "write",
+      "implement"
+    ].some((term) => normalized.includes(term));
+    return asksForCode && generationIntent;
+  }
+
+  private hasCodeDraftContent(nodes: unknown, fallbackCode: string | undefined): boolean {
+    if (!Array.isArray(nodes) || nodes.length === 0) return Boolean(fallbackCode);
+
+    const codeNodes = nodes.filter((node) => {
+      if (!this.isRecord(node)) return false;
+      const kind = this.readText(node.kind ?? node.tool).toLowerCase();
+      return kind === "code" || kind === "code_block" || kind === "code-block";
+    });
+    if (!codeNodes.length) return false;
+
+    return codeNodes.every((node) => {
+      if (!this.isRecord(node)) return false;
+      const hasFileName = Boolean(this.readText(node.title) || this.readText(node.fileName));
+      const hasLanguage = Boolean(this.readText(node.language));
+      return Boolean(
+        hasFileName
+          && hasLanguage
+          && (this.readText(node.code)
+          || this.readText(node.content)
+          || this.readText(node.body)
+          || this.readText(node.source))
+      );
+    });
+  }
+
   private readText(value: unknown): string {
     return typeof value === "string" ? value.trim().slice(0, 12000) : "";
   }
@@ -280,5 +345,9 @@ export class CanvasAgentActionService {
     if ([candidate.x, candidate.y, candidate.width, candidate.height].some((item) => typeof item !== "number" || !Number.isFinite(item))) return null;
     if ((candidate.width as number) <= 0 || (candidate.height as number) <= 0) return null;
     return { x: candidate.x as number, y: candidate.y as number, width: candidate.width as number, height: candidate.height as number };
+  }
+
+  private isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
   }
 }

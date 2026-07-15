@@ -630,6 +630,17 @@ function PiloCanvasRuntimeInner({
     },
     [],
   );
+  const getPreservedFreeformShapeSnapshots = useCallback(() => {
+    const snapshots: PiloCanvasFreeformShape[] = [];
+
+    shapeDetailCacheRef.current.forEach((shape, shapeId) => {
+      if (deletedShapeIdsRef.current.has(shapeId)) return;
+
+      snapshots.push(shape);
+    });
+
+    return snapshots;
+  }, []);
 
   const handleSnapStateChange = useCallback(
     (state: PiloCanvasSnapState) => {
@@ -667,6 +678,9 @@ function PiloCanvasRuntimeInner({
           onFrameChildShapesUnload={handleFrameChildShapesUnload}
           onViewportBoundsChange={loadViewportShapes}
           onFrameChildrenRequest={loadFrameChildren}
+          getPreservedFreeformShapeSnapshots={
+            getPreservedFreeformShapeSnapshots
+          }
           onShapeDetailRequest={loadShapeDetail}
           onHistoryStateChange={
             onHistoryStateChange ?? noopCanvasHistoryStateChange

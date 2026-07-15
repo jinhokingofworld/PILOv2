@@ -100,16 +100,19 @@ export function useCanvasViewportQueries({
   viewportShapeLoadTimerRef,
 }: UseCanvasViewportQueriesOptions) {
   const loadingFrameChildrenRef = useRef(new Set<string>());
+  const pendingFrameChildrenReloadRef = useRef(new Set<string>());
   const loadedViewportBoundsRef = useRef<{
     boardId: string;
     bounds: LoadedViewportShapeBounds[];
   } | null>(null);
   const loadFrameChildren = useCallback(
     (frameId: string, visitedFrameIds = new Set<string>()) => {
-      if (
-        visitedFrameIds.has(frameId) ||
-        loadingFrameChildrenRef.current.has(frameId)
-      ) {
+      if (visitedFrameIds.has(frameId)) {
+        return;
+      }
+
+      if (loadingFrameChildrenRef.current.has(frameId)) {
+        pendingFrameChildrenReloadRef.current.add(frameId);
         return;
       }
 
@@ -198,6 +201,9 @@ export function useCanvasViewportQueries({
         })
         .finally(() => {
           loadingFrameChildrenRef.current.delete(frameId);
+          if (pendingFrameChildrenReloadRef.current.delete(frameId)) {
+            loadFrameChildren(frameId);
+          }
         });
     },
     [

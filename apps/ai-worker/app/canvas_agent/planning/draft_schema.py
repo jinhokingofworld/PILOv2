@@ -55,6 +55,8 @@ GENERATION_RULES: dict[str, object] = {
                 "height": 360,
                 "title": "visible title",
                 "text": "optional visible text",
+                "language": "required for code nodes, for example tsx",
+                "code": "required non-empty source code for code nodes",
                 "color": "blue",
                 "parentId": "optional frame id",
             }
@@ -187,6 +189,15 @@ DRAFT_TEMPLATES: dict[str, object] = {
                 "and language when known."
             ),
         ],
+        "requiredCodeNodeFields": [
+            "title: file name such as LoginPage.tsx",
+            "language: code language such as tsx, ts, jsx, js, css, html",
+            "code: non-empty copyable code content; never leave this blank",
+        ],
+        "sourceContextRule": (
+            "When selectedShapeSummaries are present, generate code that matches the selected "
+            "wireframe/frame/memo structure, labels, controls, and visual hierarchy."
+        ),
         "styleGuidance": [
             "Keep each code block concise enough to be readable on Canvas.",
             "Prefer practical, copyable examples over long prose.",

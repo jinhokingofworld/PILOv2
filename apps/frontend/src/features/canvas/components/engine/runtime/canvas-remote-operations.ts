@@ -4,7 +4,10 @@ import {
   normalizeCanvasShape,
 } from "@/features/canvas/api/canvas-normalizers";
 import { normalizeCanvasFreeformShapes } from "../../../utils/canvas-storage";
-import { isPiloFrameCollapsed } from "../../../utils/canvas-collapse";
+import {
+  getPiloChildShapeCount,
+  isPiloFrameCollapsed,
+} from "../../../utils/canvas-collapse";
 import type { PiloCanvasFreeformShape, PiloCanvasViewportBounds } from "../types";
 import {
   buildFreeformShapeMap,
@@ -228,7 +231,9 @@ export function applyCanvasRemoteOperation({
       )
     : [...currentShapes, nextShape];
   const expandedFrameIds =
-    nextShape.type === "frame" && wasCollapsedFrame && !isCollapsedFrame
+    nextShape.type === "frame" &&
+    !isCollapsedFrame &&
+    (wasCollapsedFrame || getPiloChildShapeCount(nextShape) > 0)
       ? [shapeId]
       : [];
   let unloadedShapeIds: string[] = [];

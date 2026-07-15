@@ -210,6 +210,13 @@ const piloCanvasStateReporter = await readFile(
   ),
   "utf8"
 );
+const canvasAgentToolStepPlayback = await readFile(
+  new URL(
+    "../src/features/canvas/components/engine/surface/canvas-agent-tool-step-playback.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
 const piloCanvasArrowBindings = await readFile(
   new URL(
     "../src/features/canvas/components/engine/surface/pilo-canvas-arrow-bindings.ts",
@@ -750,6 +757,7 @@ assert.match(canvasRemoteOperations, /shapeDetailCache\.set/);
 assert.match(canvasRemoteOperations, /shapeDetailCache\.delete/);
 assert.match(canvasRemoteOperations, /intersectsViewport/);
 assert.match(canvasRemoteOperations, /isPiloFrameCollapsed/);
+assert.match(canvasRemoteOperations, /getPiloChildShapeCount/);
 assert.match(canvasRemoteOperations, /expandedFrameIds/);
 assert.match(canvasRemoteOperations, /unloadedShapeIds/);
 assert.match(canvasRemoteOperations, /collectDescendantShapeIds/);
@@ -761,6 +769,8 @@ assert.match(canvasRuntime, /pendingRemoteFrameChildrenRequestRef/);
 assert.match(canvasRuntime, /result\.expandedFrameIds/);
 assert.match(canvasRuntime, /result\.unloadedShapeIds/);
 assert.match(canvasRuntime, /loadFrameChildren\(frameId\)/);
+assert.match(canvasRuntime, /getPreservedFreeformShapeSnapshots/);
+assert.match(canvasViewportQueries, /pendingFrameChildrenReloadRef/);
 assert.match(piloTldrawCanvas, /CanvasPresenceReporter/);
 assert.match(piloTldrawCanvas, /getCanvasPresenceEditingMode/);
 assert.match(piloTldrawCanvas, /editingShapeId/);
@@ -777,7 +787,13 @@ assert.match(piloTldrawCanvas, /remoteShapeLocks/);
 assert.match(piloTldrawCanvas, /remoteShapePreviews/);
 assert.match(piloTldrawCanvas, /resolveRealtimePreviewSnapshot/);
 assert.match(piloTldrawCanvas, /syncFreeformShapesIncrementally/);
+assert.match(piloTldrawCanvas, /shouldPreserveMissingFrameChildShape/);
+assert.match(piloTldrawCanvas, /getPreservedFreeformShapeSnapshots/);
 assert.match(piloTldrawCanvas, /editor\.updateShapes\(shapesToUpdate/);
+assert.match(canvasAgentToolStepPlayback, /playbackState/);
+assert.match(canvasAgentToolStepPlayback, /setPlaybackState\("playing"\)/);
+assert.match(canvasAgentToolStepPlayback, /setPlaybackState\("complete"\)/);
+assert.match(canvasAgentToolStepPlayback, /new Set<string>\(\)/);
 assert.match(piloTldrawCanvas, /removeStaleSerializedArrowBindings/);
 assert.match(piloTldrawCanvas, /editor\.getContainer\(\)/);
 assert.match(piloTldrawCanvas, /editor\.screenToPage/);
@@ -1163,10 +1179,12 @@ assert.match(piloTldrawCanvas, /function placePendingShapeAt/);
 assert.match(piloTldrawCanvas, /onOneShotToolCreatedRef\.current\?\.\(\)/);
 assert.match(piloTldrawCanvas, /const connectionTools = new Set<PiloCanvasTool>\(\["arrow", "line"\]\)/);
 assert.match(piloTldrawCanvas, /!connectionTools\.has\(tool\)/);
+assert.match(piloTldrawCanvas, /tool !== "text"/);
 assert.match(piloTldrawCanvas, /function getArrowAtPoint/);
 assert.match(piloTldrawCanvas, /getShapesAtPoint\(pagePoint/);
 assert.match(piloTldrawCanvas, /getArrowAtPoint\(editor, pagePoint\) \?\? directShape/);
-assert.match(piloTldrawCanvas, /editor\.getCurrentToolId\(\) !== "select"/);
+assert.match(piloTldrawCanvas, /currentToolId === "select" \|\| currentToolId\.startsWith\("select\."\)/);
+assert.doesNotMatch(piloTldrawCanvas, /\.tl-frame-heading, \.tl-frame-heading-hit-area, \.tl-frame-label, \.tl-frame-name-input/);
 assert.match(piloTldrawCanvas, /editor\.setCurrentTool\("select\.idle"\)/);
 assert.match(canvasAiChatOverlay, /Canvas AI 열기 진행 중/);
 assert.match(canvasAiChatOverlay, /conic-gradient/);

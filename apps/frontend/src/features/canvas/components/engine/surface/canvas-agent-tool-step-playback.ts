@@ -7,24 +7,30 @@ type CanvasAgentToolStep = NonNullable<CanvasAgentDraft["spec"]["toolSteps"]>[nu
 
 export function useCanvasAgentToolStepPlayback(draft: CanvasAgentDraft | null) {
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
+  const [playbackState, setPlaybackState] = useState<
+    "idle" | "playing" | "complete"
+  >("idle");
   const draftKey = draft ? `${draft.id}:${draft.status}:${draft.spec.toolSteps?.length ?? 0}` : null;
   const steps = draft?.spec.toolSteps ?? [];
 
   useEffect(() => {
     if (!draftKey || !steps.length) {
       setActiveIndex(null);
+      setPlaybackState("idle");
       return undefined;
     }
 
     let cancelled = false;
     let timer: number | null = null;
     setActiveIndex(0);
+    setPlaybackState("playing");
 
     const schedule = (nextIndex: number) => {
       timer = window.setTimeout(() => {
         if (cancelled) return;
         if (nextIndex >= steps.length) {
           setActiveIndex(null);
+          setPlaybackState("complete");
           return;
         }
         setActiveIndex(nextIndex);
@@ -40,8 +46,12 @@ export function useCanvasAgentToolStepPlayback(draft: CanvasAgentDraft | null) {
     };
   }, [draftKey, steps]);
 
-  const visibleNodeIds = activeIndex === null
+  const visibleNodeIds = !draft
     ? null
+    : playbackState === "complete" || !steps.length
+      ? null
+      : activeIndex === null
+        ? new Set<string>()
     : new Set(
         steps
           .slice(0, activeIndex + 1)
@@ -51,6 +61,7 @@ export function useCanvasAgentToolStepPlayback(draft: CanvasAgentDraft | null) {
 
   return {
     activeStep: activeIndex === null ? null : steps[activeIndex] ?? null,
+    isPlaying: playbackState === "playing",
     visibleNodeIds,
   };
 }

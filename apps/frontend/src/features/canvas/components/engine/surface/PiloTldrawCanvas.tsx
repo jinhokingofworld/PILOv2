@@ -175,6 +175,7 @@ type PiloTldrawCanvasProps = {
   onViewChange: (viewSetting: PiloCanvasViewSetting) => void;
   onFrameChildShapesUnload: (shapes: PiloCanvasFreeformShape[]) => void;
   onFrameChildrenRequest: (frameId: string) => void;
+  getPreservedFreeformShapeSnapshots?: () => PiloCanvasFreeformShape[];
   onViewportBoundsChange: (bounds: PiloCanvasViewportBounds) => void;
   onShapeDetailRequest: (request: PiloCanvasShapeDetailRequest) => void;
   onHistoryStateChange: (state: PiloCanvasHistoryState) => void;
@@ -577,11 +578,15 @@ function syncFreeformShapesIncrementally(
   shapes: PiloCanvasFreeformShape[],
   pendingArrowBindingsRef: MutableRefObject<PiloArrowBindingSnapshot[]>,
   piloDefaultArrowKindHydrationGuardRef: MutableRefObject<boolean>,
+  getPreservedFreeformShapeSnapshots?: () => PiloCanvasFreeformShape[],
 ) {
   editor.store.mergeRemoteChanges(() => {
     editor.run(
       () => {
         const incomingShapeMap = new Map<string, PiloCanvasFreeformShape>();
+        const preservedShapeMap = buildFreeformShapeMapFromShapes(
+          getPreservedFreeformShapeSnapshots?.() ?? [],
+        );
         const currentShapeMap = new Map<string, TLShape>();
         const shapeIdsToDelete: TLShapeId[] = [];
         const shapesToCreate: PiloCanvasFreeformShape[] = [];
@@ -600,6 +605,16 @@ function syncFreeformShapesIncrementally(
           currentShapeMap.set(String(shape.id), shape);
 
           if (!incomingShapeMap.has(String(shape.id))) {
+            if (
+              shouldPreserveMissingFrameChildShape({
+                incomingShapeMap,
+                preservedShapeMap,
+                shapeId: String(shape.id),
+              })
+            ) {
+              return;
+            }
+
             shapeIdsToDelete.push(shape.id as TLShapeId);
           }
         });
@@ -928,6 +943,33 @@ function getCreatedFreeformShapeIds({
   });
 }
 
+function shouldPreserveMissingFrameChildShape({
+  incomingShapeMap,
+  preservedShapeMap,
+  shapeId,
+}: {
+  incomingShapeMap: Map<string, PiloCanvasFreeformShape>;
+  preservedShapeMap: Map<string, PiloCanvasFreeformShape>;
+  shapeId: string;
+}) {
+  const preservedShape = preservedShapeMap.get(shapeId);
+  const parentId =
+    preservedShape && typeof preservedShape.parentId === "string"
+      ? preservedShape.parentId
+      : null;
+
+  if (!preservedShape || !parentId?.startsWith("shape:")) return false;
+  if (!incomingShapeMap.has(parentId) && !preservedShapeMap.has(parentId)) {
+    return false;
+  }
+
+  return !isShapeHiddenByCollapsedAncestor({
+    currentShapesById: incomingShapeMap,
+    shape: preservedShape,
+    snapshots: preservedShapeMap,
+  });
+}
+
 function scheduleShapeLockRelease({
   pendingShapeIds,
   presence,
@@ -1042,6 +1084,7 @@ export function PiloTldrawCanvas({
   onViewChange,
   onFrameChildShapesUnload,
   onFrameChildrenRequest,
+  getPreservedFreeformShapeSnapshots,
   onViewportBoundsChange,
   onShapeDetailRequest,
   onHistoryStateChange,
@@ -1515,6 +1558,7 @@ export function PiloTldrawCanvas({
         freeformShapesRef.current,
         pendingArrowBindingsRef,
         piloDefaultArrowKindHydrationGuardRef,
+        getPreservedFreeformShapeSnapshots,
       );
     } else {
       resetFreeformShapes(
@@ -1526,7 +1570,7 @@ export function PiloTldrawCanvas({
     }
 
     lastHydratedSeedKeyRef.current = seedKey;
-  }, [hydrationVersion, seedKey]);
+  }, [getPreservedFreeformShapeSnapshots, hydrationVersion, seedKey]);
 
   useEffect(() => {
     const editor = editorRef.current;
@@ -1870,7 +1914,7 @@ export function PiloTldrawCanvas({
         deactivatePiloEraser(editor);
         placementRequestRef.current = null;
         returnToSelectAfterPlacementRef.current =
-          tool !== "select" && !connectionTools.has(tool);
+          tool !== "select" && tool !== "text" && !connectionTools.has(tool);
         editor.cancel();
         editor.updateInstanceState({ isToolLocked: false });
         editor.setCurrentTool(tool === "select" ? "select.idle" : tool);
@@ -2327,7 +2371,7 @@ export function PiloTldrawCanvas({
     if (
       event.target instanceof Element &&
       event.target.closest(
-        ".pilo-frame-toolbar, .tl-frame-heading, .tl-frame-heading-hit-area, .tl-frame-label, .tl-frame-name-input, .pilo-code-block input, .pilo-code-block select, .pilo-code-mirror",
+        ".pilo-frame-toolbar, .pilo-code-block input, .pilo-code-block select, .pilo-code-mirror",
       )
     ) {
       return;
@@ -2365,7 +2409,11 @@ export function PiloTldrawCanvas({
     // Frame and shape detail selection are select-tool affordances. Let an
     // active drawing tool receive its first click so an arrow can start from
     // a frame instead of the frame stealing that click.
-    if (editor.getCurrentToolId() !== "select") {
+    const currentToolId = editor.getCurrentToolId();
+    const isSelectTool =
+      currentToolId === "select" || currentToolId.startsWith("select.");
+
+    if (!isSelectTool) {
       if (isInsideRemoteLockedShape) {
         event.preventDefault();
         event.stopPropagation();
