@@ -6223,6 +6223,35 @@ assert.match(panel, /AutosavePausedBanner/);
 assert.match(panel, /Autosave paused/);
 assert.match(panel, /Reload session/);
 assert.match(panel, /Retry once/);
+assert.match(
+  panel,
+  /const isWriteProtocolMismatch =\s*layoutAutosaveBlockReason === "write_protocol_mismatch"/
+);
+assert.match(
+  panel,
+  /isDialectSelectDisabled=\{\s*!isSessionReady \|\|\s*isWriteProtocolMismatch \|\|/s
+);
+assert.match(
+  panel,
+  /isSourceTextReadOnly=\{\s*!isSessionReady \|\|\s*isWriteProtocolMismatch \|\|/s
+);
+assert.match(
+  panel,
+  /<CanvasShell[\s\S]*?isReadOnly=\{isWriteProtocolMismatch\}/
+);
+assert.match(canvasSurface, /isReadOnly\?: boolean/);
+assert.match(
+  canvasSurface,
+  /editor\.updateInstanceState\(\{ isReadonly: isReadOnly \}\)/
+);
+assert.match(
+  canvasSurface,
+  /const onLayoutPatch = isReadOnly \? undefined : onLayoutPatchProp/
+);
+assert.match(
+  canvasSurface,
+  /const handlePointerDownCapture = useCallback\(\s*\(event:[\s\S]*?if \(isReadOnly \|\| !editor/s
+);
 assert.match(panel, /handleReloadSession/);
 assert.match(panel, /handleReloadPausedSession/);
 assert.match(panel, /handleRetryLayoutAutosaveOnce/);

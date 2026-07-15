@@ -1116,6 +1116,48 @@ await assertRouteBodyLimit(
 }
 
 {
+  const previousFlag = process.env.SQL_ERD_OPERATIONS_V1_ENABLED;
+
+  try {
+    process.env.SQL_ERD_OPERATIONS_V1_ENABLED = "true";
+    const database = new FakeDatabase({
+      queryOneRows: [
+        workspaceLockRow(),
+        null,
+        () => sessionRow({ write_protocol: "snapshot" })
+      ]
+    });
+    const { service } = createSubject(database);
+    const errors = [];
+    service.logger = {
+      error(message) {
+        errors.push(message);
+      }
+    };
+
+    await service.createSession(currentUserId, workspaceId, {
+      modelJson: modelJson(),
+      layoutJson: layoutJson()
+    });
+
+    assert.deepEqual(errors, [
+      JSON.stringify({
+        event: "SQL_ERD_OPERATIONS_V1_SNAPSHOT_CREATION_DETECTED",
+        sessionId,
+        workspaceId,
+        writeProtocol: "snapshot"
+      })
+    ]);
+  } finally {
+    if (previousFlag === undefined) {
+      delete process.env.SQL_ERD_OPERATIONS_V1_ENABLED;
+    } else {
+      process.env.SQL_ERD_OPERATIONS_V1_ENABLED = previousFlag;
+    }
+  }
+}
+
+{
   const database = new FakeDatabase({
     queryOneRows: [
       workspaceLockRow(),

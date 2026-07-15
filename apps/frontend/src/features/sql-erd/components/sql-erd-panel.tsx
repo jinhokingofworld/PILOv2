@@ -675,6 +675,8 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
     parse: sqlErdEditState.parse,
     sourceAutosaveState
   });
+  const isWriteProtocolMismatch =
+    layoutAutosaveBlockReason === "write_protocol_mismatch";
   useEffect(() => {
     if (!sqlErdViewSession.id || sqlErdViewSession.revision === null) return;
     const persisted = operationPersistedLayoutRef.current;
@@ -690,8 +692,13 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
       };
     }
   }, [sqlErdViewSession.id, sqlErdViewSession.layoutJson, sqlErdViewSession.revision]);
-  const sourcePanelStatus =
-    sqlErdViewSession.writeProtocol === "operations_v1" &&
+  const sourcePanelStatus = isWriteProtocolMismatch
+    ? {
+        label: "Read only",
+        message: "Reload this session before editing or saving changes.",
+        tone: "neutral" as const
+      }
+    : sqlErdViewSession.writeProtocol === "operations_v1" &&
     isSourceOpen &&
     !sourceLock.canEdit
       ? {
@@ -2078,6 +2085,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
         isOpen={isSourceOpen}
         isDialectSelectDisabled={
           !isSessionReady ||
+          isWriteProtocolMismatch ||
           (sqlErdViewSession.writeProtocol === "operations_v1" &&
             !sourceLock.canEdit)
         }
@@ -2090,6 +2098,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
         sessionLoadState={sourcePanelStatus}
         isSourceTextReadOnly={
           !isSessionReady ||
+          isWriteProtocolMismatch ||
           (sqlErdViewSession.writeProtocol === "operations_v1" &&
             !sourceLock.canEdit)
         }
@@ -2120,6 +2129,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           pinNavigationRequestId={tablePinState.navigationRequestId}
           pinnedTableId={tablePinState.pinnedTableId}
           realtimeConfig={realtimeConfig}
+          isReadOnly={isWriteProtocolMismatch}
           isSqlSourceOpen={isSourceOpen}
           selectedSqlErdObject={selectedSqlErdObject}
           sessionId={sessionId}
@@ -2885,6 +2895,7 @@ type CanvasShellProps = {
   pinNavigationRequestId: number;
   pinnedTableId: string | null;
   realtimeConfig: SqlErdRealtimeConfig;
+  isReadOnly: boolean;
   isSqlSourceOpen: boolean;
   selectedSqlErdObject: SqlErdSelection;
   sessionId: string;
@@ -2901,6 +2912,7 @@ function CanvasShell({
   pinNavigationRequestId,
   pinnedTableId,
   realtimeConfig,
+  isReadOnly,
   isSqlSourceOpen,
   selectedSqlErdObject,
   sessionId
@@ -2916,6 +2928,7 @@ function CanvasShell({
         pinNavigationRequestId={pinNavigationRequestId}
         pinnedTableId={pinnedTableId}
         realtimeConfig={realtimeConfig}
+        isReadOnly={isReadOnly}
         isSqlSourceOpen={isSqlSourceOpen}
         sessionId={sessionId}
         selectedSqlErdObject={selectedSqlErdObject}

@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
 import { createHash } from "node:crypto";
 import {
   badRequest,
@@ -178,6 +178,8 @@ const SQL_ERD_SOURCE_SNAPSHOT_SELECT = `
 
 @Injectable()
 export class SqlErdService {
+  private readonly logger = new Logger(SqlErdService.name);
+
   constructor(
     private readonly database: DatabaseService,
     private readonly workspaceService: WorkspaceService
@@ -724,6 +726,20 @@ export class SqlErdService {
 
       if (!session) {
         throw badRequest("sqltoerd session could not be created");
+      }
+
+      if (
+        resolveNewSqlErdWriteProtocol() === "operations_v1" &&
+        session.write_protocol !== "operations_v1"
+      ) {
+        this.logger.error(
+          JSON.stringify({
+            event: "SQL_ERD_OPERATIONS_V1_SNAPSHOT_CREATION_DETECTED",
+            sessionId: session.id,
+            workspaceId,
+            writeProtocol: session.write_protocol
+          })
+        );
       }
 
       return mapSqlErdSession(session);
