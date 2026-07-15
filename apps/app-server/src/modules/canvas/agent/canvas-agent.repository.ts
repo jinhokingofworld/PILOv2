@@ -10,6 +10,7 @@ import type {
   CanvasAgentRequestContext,
   CanvasAgentRunStatus
 } from "./canvas-agent.types";
+import { CANVAS_AGENT_CODE_GENERATION_FAILURE_MESSAGE } from "./canvas-agent.constants";
 
 const CANVAS_AGENT_SHAPE_SEARCH_STOP_WORDS = new Set([
   "canvas",
@@ -410,6 +411,7 @@ export class CanvasAgentRepository {
         UPDATE canvas_agent_runs
         SET status = 'failed', error_code = 'CANVAS_AGENT_FAILED', error_message = $2,
           result_summary = CASE
+            WHEN $2 = $5 THEN $5
             WHEN prompt ~* $3 THEN $4
             ELSE 'Canvas AI 작업을 완료하지 못했습니다.'
           END,
@@ -419,6 +421,7 @@ export class CanvasAgentRepository {
             jsonb_build_object(
               'message',
               CASE
+                WHEN $2 = $5 THEN $5
                 WHEN prompt ~* $3 THEN $4
                 ELSE 'Canvas AI 작업을 완료하지 못했습니다.'
               END,
@@ -437,7 +440,8 @@ export class CanvasAgentRepository {
         runId,
         message.slice(0, 4096),
         "(디자인|와이어|페이지|화면|초안|그려|만들|생성)",
-        userMessage
+        userMessage,
+        CANVAS_AGENT_CODE_GENERATION_FAILURE_MESSAGE
       ]
     );
   }

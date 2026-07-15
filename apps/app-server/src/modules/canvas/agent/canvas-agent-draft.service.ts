@@ -9,6 +9,7 @@ import type {
   CanvasAgentShapeRow,
   CanvasDraftSpec
 } from "./canvas-agent.types";
+import { CANVAS_AGENT_CODE_GENERATION_FAILURE_MESSAGE } from "./canvas-agent.constants";
 import { placeCanvasAgentDraftNodes } from "./canvas-agent-draft-placement";
 import {
   canvasAgentDraftToShapeBatch,
@@ -79,7 +80,8 @@ export class CanvasAgentDraftService {
     if (generated) return this.placeDraftSpec(generated, input.viewport);
 
     if (input.kind === "code") {
-      const code = this.cleanText(input.code) || this.defaultCode(input.prompt);
+      const code = this.cleanText(input.code);
+      if (!code) throw new Error(CANVAS_AGENT_CODE_GENERATION_FAILURE_MESSAGE);
       const codeNode: CanvasAgentDraftNode = {
         id: "code",
         kind: "code",
@@ -400,10 +402,6 @@ export class CanvasAgentDraftService {
     return `${this.cleanText(prompt).slice(0, 48) || "Canvas AI"} ${suffix}`;
   }
 
-  private defaultCode(prompt: string): string {
-    return `// ${this.cleanText(prompt).slice(0, 100)}\nexport function canvasAgentExample() {\n  return \"PILO Canvas AI\";\n}`;
-  }
-
   private readGeneratedNode(
     value: unknown,
     index: number,
@@ -414,9 +412,15 @@ export class CanvasAgentDraftService {
     if (!kind || !ALLOWED_DRAFT_NODE_KINDS.has(kind)) return null;
 
     const id = this.cleanText(value.id) || `node-${index + 1}`;
-    const title = this.cleanText(value.title) || this.cleanText(value.text) || this.defaultNodeTitle(kind, index);
+    const title = this.cleanText(value.title)
+      || this.cleanText(value.fileName)
+      || this.cleanText(value.text)
+      || this.defaultNodeTitle(kind, index);
     const text = this.cleanText(value.text);
-    const code = this.cleanText(value.code);
+    const code = this.cleanText(value.code)
+      || this.cleanText(value.content)
+      || this.cleanText(value.body)
+      || this.cleanText(value.source);
     const parentId = this.cleanText(value.parentId) || null;
     return {
       id: id.slice(0, 64),

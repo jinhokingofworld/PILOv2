@@ -69,6 +69,15 @@ const canvasOperationPublisher = await readSource(
 const canvasAgentRepository = await readSource(
   "../src/modules/canvas/agent/canvas-agent.repository.ts"
 );
+const canvasAgentActionService = await readSource(
+  "../src/modules/canvas/agent/canvas-agent-action.service.ts"
+);
+const canvasAgentDraftService = await readSource(
+  "../src/modules/canvas/agent/canvas-agent-draft.service.ts"
+);
+const canvasAgentConstants = await readSource(
+  "../src/modules/canvas/agent/canvas-agent.constants.ts"
+);
 const meetingController = await readSource(
   "../src/modules/meeting/meeting.controller.ts"
 );
@@ -465,6 +474,13 @@ assert.match(canvasOperationPublisher, /publishOperation/);
 assert.match(canvasAgentRepository, /async discardDraft/);
 assert.match(canvasAgentRepository, /DELETE FROM canvas_agent_drafts/);
 assert.doesNotMatch(canvasAgentRepository, /SET status = 'discarded'/);
+assert.match(canvasAgentConstants, /코드 생성 중 오류가 났어요\. 다시 시도해 주세요\./);
+assert.match(canvasAgentActionService, /shouldCreateCodeDraft/);
+assert.match(canvasAgentActionService, /hasCodeDraftContent/);
+assert.match(canvasAgentActionService, /CANVAS_AGENT_CODE_GENERATION_FAILURE_MESSAGE/);
+assert.match(canvasAgentDraftService, /value\.fileName/);
+assert.match(canvasAgentDraftService, /value\.content/);
+assert.match(canvasAgentDraftService, /CANVAS_AGENT_CODE_GENERATION_FAILURE_MESSAGE/);
 assert.match(canvasShapeOperationMigration, /ALTER TABLE public\.canvas/);
 assert.match(canvasShapeOperationMigration, /latest_op_seq/);
 assert.match(canvasShapeOperationMigration, /CREATE TABLE public\.canvas_shape_operations/);
