@@ -189,6 +189,19 @@ const canvas = await readFile(
   new URL("../src/features/sql-erd/components/sql-erd-canvas.tsx", import.meta.url),
   "utf8",
 );
+const apiDocument = await readFile(
+  new URL("../../../docs/api/sqltoerd-api.md", import.meta.url),
+  "utf8",
+);
+
+assert.match(
+  apiDocument,
+  /`sql-erd:joined` reads `latestOpSeq` from `sql_erd_sessions\.latest_op_seq` in the database for each authorized join/i
+);
+assert.match(
+  apiDocument,
+  /on `SQL_ERD_WRITE_PROTOCOL_MISMATCH`, the client stops autosave, becomes read-only, and requires a session reload before writing again/i
+);
 
 assert.match(types, /"sql-erd:join"/);
 assert.match(types, /"sql-erd:presence:update"/);

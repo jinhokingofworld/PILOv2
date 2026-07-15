@@ -68,6 +68,24 @@ assert.match(apiDocument, /latestOpSeq: number/);
 assert.match(apiDocument, /type PatchCollection<T>/);
 assert.match(apiDocument, /SQL_ERD_WRITE_PROTOCOL_MISMATCH/);
 assert.match(apiDocument, /"sql-erd:operation" = SqltoerdLayoutPatchOperation/);
+assert.match(
+  apiDocument,
+  /`PATCH` \| `\/workspaces\/\{workspaceId\}\/sql-erd-sessions\/\{sessionId\}\/metadata`/
+);
+assert.match(
+  apiDocument,
+  /plural metadata PATCH accepts only `baseRevision` and `title`/i
+);
+assert.match(apiDocument, /soft delete is write-protocol-independent/i);
+assert.match(
+  apiDocument,
+  /cleans up any source-writer lease in the same transaction/i
+);
+assert.match(
+  apiDocument,
+  /`SQL_ERD_OPERATIONS_V1_ENABLED=true` creates a new session with\s+`operations_v1`/i
+);
+assert.match(apiDocument, /database column default remains `snapshot`/i);
 
 const currentUserId = "11111111-1111-4111-8111-111111111111";
 const workspaceId = "22222222-2222-4222-8222-222222222222";
