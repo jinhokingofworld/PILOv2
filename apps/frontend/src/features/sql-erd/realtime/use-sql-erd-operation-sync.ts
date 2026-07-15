@@ -7,6 +7,11 @@ import {
   getSqlErdRealtimeServerUrl,
   type SqlErdRealtimeSocket
 } from "./sql-erd-realtime-client";
+import {
+  bufferSqlErdOperation,
+  catchUpSqlErdOperationPages,
+  takeContiguousSqlErdOperations
+} from "./operation-sync-state";
 import type {
   SqlErdOperationPayload,
   SqlErdRealtimeConfig
@@ -68,25 +73,6 @@ function isSameRoom(
   return payload.sessionId === room.sessionId && payload.workspaceId === room.workspaceId;
 }
 
-function getContiguousOperations(
-  operations: SqlErdOperationPayload[],
-  afterSeq: number
-) {
-  const contiguous: SqlErdOperationPayload[] = [];
-  let nextSeq = normalizeSequence(afterSeq);
-
-  operations
-    .slice()
-    .sort((left, right) => left.opSeq - right.opSeq)
-    .forEach((operation) => {
-      if (operation.opSeq !== nextSeq + 1) return;
-      contiguous.push(operation);
-      nextSeq = operation.opSeq;
-    });
-
-  return { contiguous, nextSeq };
-}
-
 export function useSqlErdOperationSync(
   config: SqlErdRealtimeConfig | null | undefined,
   {
@@ -138,17 +124,15 @@ export function useSqlErdOperationSync(
   }, []);
 
   const flushBufferedOperations = useCallback(async () => {
-    const { contiguous, nextSeq } = getContiguousOperations(
-      liveOperationBufferRef.current,
-      lastSeenOpSeqRef.current
-    );
-    if (!contiguous.length) return;
+    const { operations, state: nextState } = takeContiguousSqlErdOperations({
+      bufferedOperations: liveOperationBufferRef.current,
+      lastSeenOpSeq: lastSeenOpSeqRef.current
+    });
+    if (!operations.length) return;
 
-    await applyOperationsRef.current(contiguous);
-    liveOperationBufferRef.current = liveOperationBufferRef.current.filter(
-      (operation) => operation.opSeq > nextSeq
-    );
-    setLastSeen(nextSeq);
+    await applyOperationsRef.current(operations);
+    liveOperationBufferRef.current = nextState.bufferedOperations;
+    setLastSeen(nextState.lastSeenOpSeq);
   }, [setLastSeen]);
 
   const runCatchUp = useCallback(
@@ -163,26 +147,25 @@ export function useSqlErdOperationSync(
         status: "catching_up"
       }));
 
-      void catchUpOperationsRef.current(normalizedAfterSeq, abortController.signal)
-        .then(async (payload) => {
-          if (abortController.signal.aborted) return;
-          const { contiguous, nextSeq } = getContiguousOperations(
-            payload.items,
-            normalizedAfterSeq
-          );
-          if (contiguous.length) {
-            await applyOperationsRef.current(contiguous);
-          }
+      void catchUpSqlErdOperationPages({
+        afterSeq: normalizedAfterSeq,
+        applyOperations: applyOperationsRef.current,
+        fetchPage: (pageAfterSeq) =>
+          catchUpOperationsRef.current(pageAfterSeq, abortController.signal)
+      })
+        .then(async (nextSeq) => {
           if (abortController.signal.aborted) return;
 
           lastSeenOpSeqRef.current = nextSeq;
-          setState({
-            lastError: null,
-            lastSeenOpSeq: nextSeq,
-            latestOpSeq: Math.max(payload.latestOpSeq, nextSeq),
-            status: "caught_up"
-          });
           await flushBufferedOperations();
+
+          if (abortController.signal.aborted) return;
+          setState((current) => ({
+            lastError: null,
+            lastSeenOpSeq: lastSeenOpSeqRef.current,
+            latestOpSeq: Math.max(current.latestOpSeq, nextSeq),
+            status: "caught_up"
+          }));
 
           if (liveOperationBufferRef.current.length) {
             runCatchUpRef.current(lastSeenOpSeqRef.current);
@@ -219,10 +202,14 @@ export function useSqlErdOperationSync(
         ...current,
         latestOpSeq: Math.max(current.latestOpSeq, operation.opSeq)
       }));
-      liveOperationBufferRef.current = [
-        ...liveOperationBufferRef.current.filter((entry) => entry.opSeq !== operation.opSeq),
+      const nextBufferState = bufferSqlErdOperation(
+        {
+          bufferedOperations: liveOperationBufferRef.current,
+          lastSeenOpSeq: lastSeen
+        },
         operation
-      ];
+      );
+      liveOperationBufferRef.current = nextBufferState.bufferedOperations;
 
       if (activeCatchUpAbortRef.current || operation.opSeq > lastSeen + 1) {
         if (!activeCatchUpAbortRef.current) runCatchUp(lastSeen);

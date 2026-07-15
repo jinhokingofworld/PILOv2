@@ -172,7 +172,6 @@ const sqlErdShapeUtils = [
   SqlErdRelationShapeUtil,
   SqlErdTableShapeUtil
 ];
-const SQLTOERD_LAYOUT_SYNC_DELAY_MS = 250;
 const SQLTOERD_MINIMUM_READABLE_ZOOM = 0.45;
 const SQLTOERD_STROKE_SIZE = 4;
 const SQLTOERD_MINIMUM_STROKE_POINT_DISTANCE = 1;
@@ -2405,9 +2404,8 @@ function SqlErdCanvasAnnotationSync({
   }, []);
 
   useEffect(() => {
-    let timeoutId: number | null = null;
+    let hasPendingLayoutSync = false;
     function syncTransforms() {
-      timeoutId = null;
       const notesById: NonNullable<SqltoerdLayoutPatch["notesById"]> = {};
       const framesById: NonNullable<SqltoerdLayoutPatch["framesById"]> = {};
       const textsById: NonNullable<SqltoerdLayoutPatch["textsById"]> = {};
@@ -2438,11 +2436,20 @@ function SqlErdCanvasAnnotationSync({
         onLayoutPatchRef.current({ notesById, framesById, textsById });
       }
     }
+    function flushPendingLayoutSync() {
+      if (!hasPendingLayoutSync) return;
+
+      hasPendingLayoutSync = false;
+      window.requestAnimationFrame(syncTransforms);
+    }
     const removeListener = editor.store.listen(() => {
-      if (timeoutId !== null) window.clearTimeout(timeoutId);
-      timeoutId = window.setTimeout(syncTransforms, SQLTOERD_LAYOUT_SYNC_DELAY_MS);
+      hasPendingLayoutSync = true;
     }, { scope: "document", source: "user" });
-    return () => { if (timeoutId !== null) window.clearTimeout(timeoutId); removeListener(); };
+    window.addEventListener("pointerup", flushPendingLayoutSync);
+    return () => {
+      window.removeEventListener("pointerup", flushPendingLayoutSync);
+      removeListener();
+    };
   }, [editor]);
 
   return null;
@@ -2477,20 +2484,9 @@ function SqlErdLayoutSync({
   }, [onLayoutPatch]);
 
   useEffect(() => {
-    let timeoutId: number | null = null;
-
-    function clearPendingLayoutSync() {
-      if (timeoutId === null) {
-        return;
-      }
-
-      window.clearTimeout(timeoutId);
-      timeoutId = null;
-    }
+    let hasPendingLayoutSync = false;
 
     function syncLayoutFromEditor() {
-      timeoutId = null;
-
       const nextLayoutJson = updateSqltoerdLayoutWithTablePositions(
         modelJsonRef.current,
         layoutJsonRef.current,
@@ -2507,21 +2503,23 @@ function SqlErdLayoutSync({
       });
     }
 
-    function scheduleLayoutSync() {
-      clearPendingLayoutSync();
-      timeoutId = window.setTimeout(
-        syncLayoutFromEditor,
-        SQLTOERD_LAYOUT_SYNC_DELAY_MS
-      );
+    function flushPendingLayoutSync() {
+      if (!hasPendingLayoutSync) return;
+
+      hasPendingLayoutSync = false;
+      window.requestAnimationFrame(syncLayoutFromEditor);
     }
 
-    const removeStoreListener = editor.store.listen(scheduleLayoutSync, {
+    const removeStoreListener = editor.store.listen(() => {
+      hasPendingLayoutSync = true;
+    }, {
       scope: "document",
       source: "user"
     });
+    window.addEventListener("pointerup", flushPendingLayoutSync);
 
     return () => {
-      clearPendingLayoutSync();
+      window.removeEventListener("pointerup", flushPendingLayoutSync);
       removeStoreListener();
     };
   }, [editor]);

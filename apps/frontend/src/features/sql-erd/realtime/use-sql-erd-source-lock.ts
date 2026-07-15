@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { SqlErdSourceLockPayload } from "@/features/sql-erd/api/client";
 
+import { getSourceLockIntervalRequest } from "./source-lock-state";
+
 export const SOURCE_LOCK_RENEW_INTERVAL_MS = 10_000;
 
 export type SqlErdSourceLockState =
@@ -35,23 +37,50 @@ export function useSqlErdSourceLock({
 }) {
   const [state, setState] = useState<SqlErdSourceLockState>({ status: "disabled" });
   const clientRef = useRef(client);
+  const stateRef = useRef<SqlErdSourceLockState>(state);
   const leaseIdRef = useRef<string | null>(null);
+  const heldLeaseIdRef = useRef<string | null>(null);
+
+  const setLockState = useCallback((nextState: SqlErdSourceLockState) => {
+    stateRef.current = nextState;
+    setState(nextState);
+  }, []);
+
+  const acquire = useCallback(async () => {
+    const leaseId = createLeaseId();
+    leaseIdRef.current = leaseId;
+    heldLeaseIdRef.current = null;
+    setLockState({ status: "acquiring" });
+
+    try {
+      const lease = await clientRef.current.acquireSourceLock(leaseId);
+      if (leaseIdRef.current !== leaseId) return;
+
+      heldLeaseIdRef.current = leaseId;
+      setLockState({ lease, status: "held" });
+    } catch (error) {
+      if (leaseIdRef.current !== leaseId) return;
+
+      setLockState({ message: readErrorMessage(error), status: "read_only" });
+    }
+  }, [setLockState]);
 
   const renew = useCallback(async () => {
-    const leaseId = leaseIdRef.current;
+    const leaseId = heldLeaseIdRef.current;
     if (!leaseId) return;
 
     try {
       const lease = await clientRef.current.renewSourceLock(leaseId);
-      if (leaseIdRef.current === leaseId) {
-        setState({ lease, status: "held" });
+      if (heldLeaseIdRef.current === leaseId) {
+        setLockState({ lease, status: "held" });
       }
     } catch (error) {
-      if (leaseIdRef.current === leaseId) {
-        setState({ message: readErrorMessage(error), status: "read_only" });
-      }
+      if (heldLeaseIdRef.current !== leaseId) return;
+
+      heldLeaseIdRef.current = null;
+      setLockState({ message: readErrorMessage(error), status: "read_only" });
     }
-  }, []);
+  }, [setLockState]);
 
   useEffect(() => {
     clientRef.current = client;
@@ -59,43 +88,37 @@ export function useSqlErdSourceLock({
 
   useEffect(() => {
     if (!active) {
-      setState({ status: "disabled" });
+      leaseIdRef.current = null;
+      heldLeaseIdRef.current = null;
+      setLockState({ status: "disabled" });
       return;
     }
 
     let disposed = false;
-    const leaseId = createLeaseId();
-    leaseIdRef.current = leaseId;
-    setState({ status: "acquiring" });
-
-    void clientRef.current
-      .acquireSourceLock(leaseId)
-      .then((lease) => {
-        if (!disposed && leaseIdRef.current === leaseId) {
-          setState({ lease, status: "held" });
-        }
-      })
-      .catch((error: unknown) => {
-        if (!disposed && leaseIdRef.current === leaseId) {
-          setState({ message: readErrorMessage(error), status: "read_only" });
-        }
-      });
+    void acquire();
 
     const renewTimer = window.setInterval(() => {
-      if (disposed || leaseIdRef.current !== leaseId) return;
+      if (disposed) return;
 
-      void renew();
+      const request = getSourceLockIntervalRequest(stateRef.current.status);
+      if (request === "acquire") {
+        void acquire();
+      } else if (request === "renew") {
+        void renew();
+      }
     }, SOURCE_LOCK_RENEW_INTERVAL_MS);
 
     return () => {
       disposed = true;
       window.clearInterval(renewTimer);
-      if (leaseIdRef.current === leaseId) {
-        leaseIdRef.current = null;
-        void clientRef.current.releaseSourceLock(leaseId).catch(() => undefined);
+      const heldLeaseId = heldLeaseIdRef.current;
+      leaseIdRef.current = null;
+      heldLeaseIdRef.current = null;
+      if (heldLeaseId) {
+        void client.releaseSourceLock(heldLeaseId).catch(() => undefined);
       }
     };
-  }, [active, renew]);
+  }, [active, acquire, client, renew, setLockState]);
 
   return useMemo(
     () => ({

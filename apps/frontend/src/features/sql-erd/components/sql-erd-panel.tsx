@@ -69,7 +69,7 @@ import type {
 import { useSqlErdOperationSync } from "@/features/sql-erd/realtime/use-sql-erd-operation-sync";
 import { useSqlErdSourceLock } from "@/features/sql-erd/realtime/use-sql-erd-source-lock";
 import { applySqlErdOperationLayoutPatch } from "@/features/sql-erd/utils/operation-layout";
-import { createSqlErdFullOperationLayoutPatch } from "@/features/sql-erd/utils/operation-patch";
+import { createSqlErdOperationLayoutPatch } from "@/features/sql-erd/utils/operation-patch";
 import type {
   SqlErdSelection,
   SqltoerdDialect,
@@ -213,6 +213,12 @@ const PANEL_RESIZE_HANDLE_WIDTH = 4;
 const COLLAPSED_PANEL_BUTTON_WIDTH = 48;
 const PANEL_RESIZE_KEYBOARD_STEP = 24;
 const SQL_ERD_PARSE_TIMEOUT_MS = 5000;
+
+type PendingSqlErdLayoutOperation = {
+  clientOperationId: string;
+  patch: Record<string, unknown>;
+  sessionId: string;
+};
 
 type SqlErdParseWorkerController = {
   terminate: () => void;
@@ -503,6 +509,9 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
     useState(0);
   const [pendingLayoutAutosaveJson, setPendingLayoutAutosaveJson] =
     useState<SqltoerdLayoutJsonV1 | null>(null);
+  const [pendingLayoutOperations, setPendingLayoutOperations] = useState<
+    PendingSqlErdLayoutOperation[]
+  >([]);
   const [layoutAutosaveRetryAttempt, setLayoutAutosaveRetryAttempt] =
     useState(0);
   const [layoutAutosaveBlockReason, setLayoutAutosaveBlockReason] =
@@ -1210,14 +1219,48 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
   const handleLayoutPatch = useCallback(
     (patch: SqltoerdLayoutPatch) => {
       applySqlErdEditAction({ patch, type: "layout_patched" });
-      handleLayoutChange(
-        sqlErdEditStateRef.current.lastSuccessfulSnapshot.layoutJson
-      );
+      const nextLayoutJson = sqlErdEditStateRef.current.lastSuccessfulSnapshot.layoutJson;
+
+      if (sqlErdViewSession.writeProtocol === "operations_v1") {
+        const operationSessionId = sqlErdViewSession.id;
+        if (!operationSessionId || sqlErdViewSession.revision === null) return;
+
+        const operationPatch = createSqlErdOperationLayoutPatch(patch, nextLayoutJson);
+        if (!Object.keys(operationPatch).length) return;
+
+        setPendingLayoutOperations((current) => [
+          ...current,
+          {
+            clientOperationId: crypto.randomUUID(),
+            patch: operationPatch,
+            sessionId: operationSessionId
+          }
+        ]);
+        setLayoutAutosaveRetryAttempt(0);
+        setSessionLoadState({
+          label: "Unsaved",
+          message: "Canvas changes will sync as workspace operations",
+          tone: "neutral"
+        });
+        return;
+      }
+
+      handleLayoutChange(nextLayoutJson);
     },
-    [applySqlErdEditAction, handleLayoutChange]
+    [
+      applySqlErdEditAction,
+      handleLayoutChange,
+      sqlErdViewSession.id,
+      sqlErdViewSession.revision,
+      sqlErdViewSession.writeProtocol
+    ]
   );
   const handleRetryLayoutAutosaveOnce = useCallback(() => {
-    if (!pendingLayoutAutosaveJson && !pendingSourceAutosaveSnapshot) {
+    if (
+      !pendingLayoutAutosaveJson &&
+      !pendingLayoutOperations.length &&
+      !pendingSourceAutosaveSnapshot
+    ) {
       return;
     }
 
@@ -1632,8 +1675,17 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
   ]);
 
   useEffect(() => {
+    const isOperationProtocol = sqlErdViewSession.writeProtocol === "operations_v1";
+    const pendingOperation = isOperationProtocol
+      ? pendingLayoutOperations.find(
+          (operation) => operation.sessionId === sqlErdViewSession.id
+        )
+      : null;
+    const hasPendingLayout = isOperationProtocol
+      ? Boolean(pendingOperation)
+      : Boolean(pendingLayoutAutosaveJson);
     if (
-      !pendingLayoutAutosaveJson ||
+      !hasPendingLayout ||
       !accessToken ||
       !activeWorkspaceId ||
       !sqlErdViewSession.id ||
@@ -1642,7 +1694,9 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
       return;
     }
 
-    const requestLayoutJson = pendingLayoutAutosaveJson;
+    const requestLayoutJson = isOperationProtocol
+      ? sqlErdViewSession.layoutJson
+      : pendingLayoutAutosaveJson!;
     const requestSessionId = sqlErdViewSession.id;
     const requestLifecycleGeneration =
       autosaveLifecycleGenerationRef.current;
@@ -1663,20 +1717,22 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
       }
 
       try {
-        if (sqlErdViewSession.writeProtocol === "operations_v1") {
+        if (isOperationProtocol) {
           const persisted = operationPersistedLayoutRef.current;
-          if (!persisted || persisted.sessionId !== requestSessionId) return;
-          const operationPatch = createSqlErdFullOperationLayoutPatch(
-            persisted.layoutJson,
-            requestLayoutJson
-          );
+          if (
+            !pendingOperation ||
+            !persisted ||
+            persisted.sessionId !== requestSessionId
+          ) {
+            return;
+          }
           const operationResult = await createSqlErdApiClient({ accessToken }).createOperation(
             activeWorkspaceId,
             requestSessionId,
             {
               baseRevision: persisted.revision,
-              clientOperationId: crypto.randomUUID(),
-              patch: operationPatch,
+              clientOperationId: pendingOperation.clientOperationId,
+              patch: pendingOperation.patch,
               type: "layout_patch"
             }
           );
@@ -1685,7 +1741,6 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           const snapshot = {
             ...sqlErdEditStateRef.current.lastSuccessfulSnapshot,
             latestOpSeq: operationResult.latestOpSeq,
-            layoutJson: operationResult.layoutJson,
             revision: operationResult.revision
           };
           operationPersistedLayoutRef.current = {
@@ -1694,10 +1749,11 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
             sessionId: requestSessionId
           };
           applySqlErdEditAction({ snapshot, type: "operation_saved" });
-          setPendingLayoutAutosaveJson((currentLayoutJson) =>
-            currentLayoutJson && areSqltoerdLayoutsEqual(currentLayoutJson, requestLayoutJson)
-              ? null
-              : currentLayoutJson
+          setPendingLayoutOperations((current) =>
+            current.filter(
+              (operation) =>
+                operation.clientOperationId !== pendingOperation.clientOperationId
+            )
           );
           setLayoutAutosaveRetryAttempt(0);
           setSessionLoadState({
@@ -1823,7 +1879,9 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
     layoutAutosaveBlockReason,
     layoutAutosaveRetryAttempt,
     pendingLayoutAutosaveJson,
+    pendingLayoutOperations,
     sqlErdViewSession.id,
+    sqlErdViewSession.layoutJson,
     sqlErdViewSession.writeProtocol,
     tryBeginAutosave
   ]);
@@ -1986,7 +2044,11 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
         counts={sessionCounts}
         dialect={sqlErdEditState.draftDialect}
         isOpen={isSourceOpen}
-        isDialectSelectDisabled={!isSessionReady}
+        isDialectSelectDisabled={
+          !isSessionReady ||
+          (sqlErdViewSession.writeProtocol === "operations_v1" &&
+            !sourceLock.canEdit)
+        }
         onDialectChange={handleDialectChange}
         onPreviewNormalizedSql={handlePreviewNormalizedSql}
         onRedoNormalizedSql={handleRedoNormalizedSql}
