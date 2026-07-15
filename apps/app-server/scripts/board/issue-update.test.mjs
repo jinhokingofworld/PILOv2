@@ -136,13 +136,25 @@ class FakeGithubIssueWriteService {
   }
 }
 
+class FakeActivityLogService {
+  constructor() {
+    this.calls = [];
+  }
+
+  async append(transaction, input) {
+    this.calls.push({ input, transaction });
+  }
+}
+
 function createSubject(database, githubIssueWriteService = new FakeGithubIssueWriteService()) {
   const workspaceService = new FakeWorkspaceService();
   const updateQueries = new BoardIssueUpdateQueries(database);
+  const activityLogService = new FakeActivityLogService();
   const updateService = new BoardIssueUpdateService(
     updateQueries,
     workspaceService,
-    githubIssueWriteService
+    githubIssueWriteService,
+    activityLogService
   );
   const service = new BoardService(
     undefined,
@@ -153,6 +165,7 @@ function createSubject(database, githubIssueWriteService = new FakeGithubIssueWr
   );
 
   return {
+    activityLogService,
     database,
     githubIssueWriteService,
     service,
@@ -264,8 +277,13 @@ function githubIssuePayload(overrides = {}) {
       }
     ]
   });
-  const { database: db, githubIssueWriteService, service, workspaceService } =
-    createSubject(database);
+  const {
+    activityLogService,
+    database: db,
+    githubIssueWriteService,
+    service,
+    workspaceService
+  } = createSubject(database);
 
   const result = await service.updateBoardIssue(
     currentUserId,
@@ -294,6 +312,17 @@ function githubIssuePayload(overrides = {}) {
     }
   ]);
   assert.equal(db.transactions.length, 1);
+  assert.equal(activityLogService.calls.length, 1);
+  assert.equal(activityLogService.calls[0].transaction, db.transactions[0]);
+  assert.equal(activityLogService.calls[0].input.action, "pilo_issue_updated");
+  assert.deepEqual(activityLogService.calls[0].input.metadata.data, {
+    boardId,
+    changedFields: ["title", "body", "state", "assignees"]
+  });
+  assert.doesNotMatch(
+    JSON.stringify(activityLogService.calls[0].input),
+    /Updated issue title|Updated issue body/
+  );
   assert.ok(
     db.queries.some((query) =>
       /UPDATE github_issues[\s\S]*title[\s\S]*body[\s\S]*state/i.test(query.text)
@@ -316,6 +345,27 @@ function githubIssuePayload(overrides = {}) {
       singleSelectName: "High"
     }
   ]);
+}
+
+{
+  const database = new FakeDatabase({
+    queryOneRows: [
+      updateTargetRow(),
+      updatedIssueRow({ title: "Old issue title" })
+    ],
+    queryRows: [[projectFieldRow()]]
+  });
+  const { activityLogService, service } = createSubject(database);
+
+  await service.updateBoardIssue(
+    currentUserId,
+    workspaceId,
+    boardId,
+    issueId,
+    { title: "Old issue title" }
+  );
+
+  assert.equal(activityLogService.calls.length, 0);
 }
 
 {

@@ -196,6 +196,16 @@ class FakeBoardIssueCreateOperationService {
   async markSucceeded() {}
 }
 
+class FakeActivityLogService {
+  constructor() {
+    this.calls = [];
+  }
+
+  async append(transaction, input) {
+    this.calls.push({ input, transaction });
+  }
+}
+
 function createSubject(
   database,
   githubIssueWriteService = new FakeGithubIssueWriteService(),
@@ -203,12 +213,14 @@ function createSubject(
 ) {
   const workspaceService = new FakeWorkspaceService();
   const createQueries = new BoardIssueCreateQueries(database);
+  const activityLogService = new FakeActivityLogService();
   const createService = new BoardIssueCreateService(
     createQueries,
     workspaceService,
     githubIssueWriteService,
     githubProjectV2WriteService,
-    new FakeBoardIssueCreateOperationService()
+    new FakeBoardIssueCreateOperationService(),
+    activityLogService
   );
   const service = new BoardService(
     undefined,
@@ -220,6 +232,7 @@ function createSubject(
   );
 
   return {
+    activityLogService,
     database,
     githubIssueWriteService,
     githubProjectV2WriteService,
@@ -315,6 +328,7 @@ function createdIssueRow(overrides = {}) {
     ]
   });
   const {
+    activityLogService,
     database: db,
     githubIssueWriteService,
     githubProjectV2WriteService,
@@ -362,6 +376,21 @@ function createdIssueRow(overrides = {}) {
     }
   ]);
   assert.equal(db.transactions.length, 1);
+  assert.equal(activityLogService.calls.length, 1);
+  assert.equal(activityLogService.calls[0].transaction, db.transactions[0]);
+  assert.deepEqual(activityLogService.calls[0].input, {
+    workspaceId,
+    actor: { type: "user", userId: currentUserId },
+    action: "pilo_issue_created",
+    target: { type: "pilo_issue", id: piloIssueId },
+    dedupeKey:
+      "board:pilo_issue_created:1001:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    metadata: {
+      version: 1,
+      summary: "Board 이슈를 생성했습니다.",
+      data: { boardId }
+    }
+  });
   assert.ok(db.queries.some((query) => /INSERT INTO github_issues/i.test(query.text)));
   assert.ok(
     db.queries.some((query) =>

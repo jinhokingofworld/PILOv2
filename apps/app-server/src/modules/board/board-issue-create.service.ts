@@ -1,9 +1,11 @@
 import { Injectable } from "@nestjs/common";
+import { ActivityLogService } from "../../common/activity-log.service";
 import { badRequest, notFound } from "../../common/api-error";
 import { GithubIssueWriteService } from "../github-integration/github-issue-write.service";
 import { GithubProjectV2WriteService } from "../github-integration/github-project-v2-write.service";
 import { WorkspaceService } from "../workspace/workspace.service";
 import { rethrowBoardGithubWriteError } from "./board-github-write-error";
+import { buildPiloIssueCreatedActivityLog } from "./board-activity-log";
 import {
   BoardIssueCreateOperationService,
   type BoardIssueCreateAttempt
@@ -33,7 +35,8 @@ export class BoardIssueCreateService {
     private readonly workspaceService: WorkspaceService,
     private readonly githubIssueWriteService: GithubIssueWriteService,
     private readonly githubProjectV2WriteService: GithubProjectV2WriteService,
-    private readonly operationService: BoardIssueCreateOperationService
+    private readonly operationService: BoardIssueCreateOperationService,
+    private readonly activityLogService: ActivityLogService
   ) {}
 
   async createBoardIssue(
@@ -108,7 +111,8 @@ export class BoardIssueCreateService {
         target,
         input,
         workspaceId,
-        normalizedBoardId
+        normalizedBoardId,
+        currentUserId
       );
     } catch (error) {
       await this.operationService.markRetryableSafely(attempt, error);
@@ -129,7 +133,8 @@ export class BoardIssueCreateService {
     },
     input: NormalizedIssueCreateInput,
     workspaceId: string,
-    boardId: string
+    boardId: string,
+    currentUserId: string
   ): Promise<CreateBoardIssueResult> {
     if (attempt.completedStage !== "status_updated") {
       throw new Error("Board issue creation operation is not ready for cache persistence");
@@ -218,6 +223,16 @@ export class BoardIssueCreateService {
         piloIssueId: createdIssueId,
         result
       });
+      await this.activityLogService.append(
+        transaction,
+        buildPiloIssueCreatedActivityLog({
+          actorUserId: currentUserId,
+          boardId,
+          issueId: createdIssueId,
+          operationId: attempt.operationId,
+          workspaceId
+        })
+      );
 
       return result;
     });

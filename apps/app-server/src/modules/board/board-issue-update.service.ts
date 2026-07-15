@@ -1,8 +1,10 @@
 import { Injectable } from "@nestjs/common";
+import { ActivityLogService } from "../../common/activity-log.service";
 import { badRequest, forbidden, notFound } from "../../common/api-error";
 import { GithubIssueWriteService } from "../github-integration/github-issue-write.service";
 import { WorkspaceService } from "../workspace/workspace.service";
 import { rethrowBoardGithubWriteError } from "./board-github-write-error";
+import { buildPiloIssueUpdatedActivityLog } from "./board-activity-log";
 import type { UpdateBoardIssueRequest } from "./dto";
 import {
   BoardIssueUpdateQueries,
@@ -32,7 +34,8 @@ export class BoardIssueUpdateService {
   constructor(
     private readonly boardIssueUpdateQueries: BoardIssueUpdateQueries,
     private readonly workspaceService: WorkspaceService,
-    private readonly githubIssueWriteService: GithubIssueWriteService
+    private readonly githubIssueWriteService: GithubIssueWriteService,
+    private readonly activityLogService: ActivityLogService
   ) {}
 
   async updateBoardIssue(
@@ -69,6 +72,21 @@ export class BoardIssueUpdateService {
       issueNumber,
       input
     );
+    const activityLog = buildPiloIssueUpdatedActivityLog({
+      actorUserId: currentUserId,
+      after: githubUpdate.issue,
+      before: {
+        assignees: target.assignees,
+        body: target.body,
+        state: target.state,
+        title: target.title,
+        updatedAt: target.updated_at
+      },
+      boardId: normalizedBoardId,
+      issueId: normalizedIssueId,
+      requestedChanges: input,
+      workspaceId
+    });
 
     await this.boardIssueUpdateQueries.transaction(async (transaction) => {
       const cacheInput = {
@@ -87,6 +105,9 @@ export class BoardIssueUpdateService {
         transaction,
         cacheInput
       );
+      if (activityLog) {
+        await this.activityLogService.append(transaction, activityLog);
+      }
     });
 
     if (!githubUpdate.assigneesApplied) {
