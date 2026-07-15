@@ -38,6 +38,22 @@ import {
   meetingClientEvents,
   meetingServerEvents
 } from "../meeting/meeting-socket-events";
+import {
+  pageCursorClientEvents,
+  pageCursorServerEvents,
+} from "../page-cursor/page-cursor-events";
+import {
+  readPageCursorRoomRef,
+  readPageCursorUpdatePayload,
+} from "../page-cursor/page-cursor-payload";
+import {
+  canJoinPageCursorRoom,
+  createPageCursorRoomName,
+} from "../page-cursor/page-cursor-room";
+import type {
+  PageCursorPresenceState,
+  PageCursorRoomRef,
+} from "../page-cursor/page-cursor-types";
 import type {
   CanvasJoinPayload,
   CanvasPresenceEditingMode,
@@ -104,6 +120,7 @@ type AuthedSocket = Socket & {
       displayName: string;
     };
     canvasRoomAccess: Map<string, CanvasRoomAccess>;
+    pageCursorPresenceByRoom: Record<string, PageCursorPresenceState>;
     sqlErdPresenceByRoom: Record<string, SqlErdPresenceState>;
   };
 };
@@ -630,6 +647,61 @@ function emitMeetingError(socket: Socket, message: string) {
   socket.emit(meetingServerEvents.error, createSocketErrorPayload("invalid_payload", message));
 }
 
+function emitPageCursorError(socket: Socket, message: string) {
+  socket.emit(
+    pageCursorServerEvents.error,
+    createSocketErrorPayload("invalid_payload", message),
+  );
+}
+
+function isPageCursorPresenceState(
+  value: unknown,
+): value is PageCursorPresenceState {
+  return (
+    isRecord(value) &&
+    typeof value.workspaceId === "string" &&
+    (value.page === "home" || value.page === "calendar" || value.page === "board") &&
+    (value.boardId === undefined || typeof value.boardId === "string") &&
+    typeof value.userId === "string" &&
+    typeof value.displayName === "string" &&
+    isRecord(value.fallback) &&
+    typeof value.fallback.xRatio === "number" &&
+    typeof value.fallback.yRatio === "number" &&
+    (value.target === null || isRecord(value.target)) &&
+    (value.targetPoint === null || isRecord(value.targetPoint)) &&
+    typeof value.updatedAt === "string"
+  );
+}
+
+async function getPageCursorRoomSocketPresence(
+  io: Server,
+  room: PageCursorRoomRef,
+  roomName: string,
+): Promise<PageCursorPresenceState[]> {
+  const sockets = await io.in(roomName).fetchSockets();
+  const presenceByUserId = new Map<string, PageCursorPresenceState>();
+
+  for (const socket of sockets) {
+    const socketData = socket.data as {
+      pageCursorPresenceByRoom?: Record<string, unknown>;
+    };
+    const presence = socketData.pageCursorPresenceByRoom?.[roomName];
+
+    if (!isPageCursorPresenceState(presence)) continue;
+    if (
+      presence.workspaceId !== room.workspaceId ||
+      presence.page !== room.page ||
+      (presence.boardId ?? null) !== (room.boardId ?? null)
+    ) {
+      continue;
+    }
+
+    presenceByUserId.set(presence.userId, presence);
+  }
+
+  return [...presenceByUserId.values()];
+}
+
 export async function createRealtimeSocketServer({
   config,
   database: providedDatabase,
@@ -809,6 +881,7 @@ export async function createRealtimeSocketServer({
           userId: session.userId,
         };
         (socket as AuthedSocket).data.canvasRoomAccess = new Map();
+        (socket as AuthedSocket).data.pageCursorPresenceByRoom = {};
         (socket as AuthedSocket).data.sqlErdPresenceByRoom = {};
         next();
       })
@@ -906,6 +979,53 @@ export async function createRealtimeSocketServer({
         return;
       }
       await socket.leave(createMeetingRoomName(workspaceId));
+    });
+
+    socket.on(pageCursorClientEvents.join, async (payload) => {
+      const room = readPageCursorRoomRef(payload);
+
+      if (!room) {
+        emitPageCursorError(socket, "page-cursor:join payload is invalid");
+        return;
+      }
+
+      const allowed = await canJoinPageCursorRoom({
+        accessService: boardAccessService,
+        context: authedSocket.data.auth,
+        room,
+      });
+
+      if (!allowed) {
+        socket.emit(
+          pageCursorServerEvents.error,
+          createSocketErrorPayload("forbidden", "page cursor room access denied"),
+        );
+        return;
+      }
+
+      const roomName = createPageCursorRoomName(room);
+      await socket.join(roomName);
+      socket.emit(pageCursorServerEvents.joined, {
+        ...room,
+        presence: await getPageCursorRoomSocketPresence(io, room, roomName),
+      });
+    });
+
+    socket.on(pageCursorClientEvents.leave, async (payload) => {
+      const room = readPageCursorRoomRef(payload);
+
+      if (!room) {
+        emitPageCursorError(socket, "page-cursor:leave payload is invalid");
+        return;
+      }
+
+      const roomName = createPageCursorRoomName(room);
+      await socket.leave(roomName);
+      delete authedSocket.data.pageCursorPresenceByRoom[roomName];
+      socket.to(roomName).emit(pageCursorServerEvents.leave, {
+        ...room,
+        userId: authedSocket.data.auth.userId ?? socket.id,
+      });
     });
 
     socket.on(canvasClientEvents.leave, async (payload) => {
@@ -1043,6 +1163,38 @@ export async function createRealtimeSocketServer({
       authedSocket.data.sqlErdPresenceByRoom[roomName] = presence;
 
       socket.to(roomName).emit(sqlErdServerEvents.presenceUpdate, presence);
+    });
+
+    socket.on(pageCursorClientEvents.update, (payload) => {
+      const cursorPayload = readPageCursorUpdatePayload(payload);
+
+      if (!cursorPayload) {
+        emitPageCursorError(socket, "page-cursor:update payload is invalid");
+        return;
+      }
+
+      const roomName = createPageCursorRoomName(cursorPayload);
+
+      if (!socket.rooms.has(roomName)) {
+        socket.emit(
+          pageCursorServerEvents.error,
+          createSocketErrorPayload(
+            "room_not_joined",
+            "join page cursor room before sending cursor updates",
+          ),
+        );
+        return;
+      }
+
+      const presence: PageCursorPresenceState = {
+        ...cursorPayload,
+        displayName: authedSocket.data.auth.displayName,
+        userId: authedSocket.data.auth.userId ?? socket.id,
+        updatedAt: new Date().toISOString(),
+      };
+      authedSocket.data.pageCursorPresenceByRoom[roomName] = presence;
+
+      socket.to(roomName).emit(pageCursorServerEvents.update, presence);
     });
 
     socket.on(canvasClientEvents.shapeLockClaim, async (payload) => {
@@ -1270,6 +1422,10 @@ export async function createRealtimeSocketServer({
       void (async () => {
         const leaveEvents = presenceService.clearSocket(socket.id);
         const sqlErdClearResults = sqlErdPresenceService.clearSocket(socket.id);
+        const pageCursorLeaveEvents: PageCursorPresenceState[] = Object.values(
+          authedSocket.data.pageCursorPresenceByRoom,
+        );
+        authedSocket.data.pageCursorPresenceByRoom = {};
         const [lockReleaseEvents, previewClearEvents] = await Promise.all([
           shapeLockService.clearSocket(socket.id),
           shapePreviewService.clearSocket(socket.id),
@@ -1283,6 +1439,17 @@ export async function createRealtimeSocketServer({
 
         for (const clearResult of sqlErdClearResults) {
           emitSqlErdPresenceClearResult(socket, clearResult);
+        }
+
+        for (const pageCursorPresence of pageCursorLeaveEvents) {
+          socket
+            .to(createPageCursorRoomName(pageCursorPresence))
+            .emit(pageCursorServerEvents.leave, {
+              boardId: pageCursorPresence.boardId,
+              page: pageCursorPresence.page,
+              userId: pageCursorPresence.userId,
+              workspaceId: pageCursorPresence.workspaceId,
+            });
         }
 
         for (const lockReleasePayload of lockReleaseEvents) {

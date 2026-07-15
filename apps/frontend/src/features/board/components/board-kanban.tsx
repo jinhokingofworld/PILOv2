@@ -22,6 +22,7 @@ import {
   readBoardLabelName
 } from "@/features/board/utils/board-format";
 import { cn } from "@/lib/utils";
+import { pageCursorTargetAttributes } from "@/shared/page-cursor/page-cursor-target";
 
 type BoardKanbanProps = {
   board: BoardDetailPayload | null;
@@ -103,6 +104,11 @@ function BoardIssueCard({
 
   return (
     <button
+      {...pageCursorTargetAttributes({
+        id: issue.id,
+        label: issue.title,
+        type: "board_issue"
+      })}
       type="button"
       draggable={!moving}
       className={cn(
@@ -331,6 +337,11 @@ export function BoardKanban({
 
           return (
             <article
+              {...pageCursorTargetAttributes({
+                id: column.id,
+                label: column.name,
+                type: "board_column"
+              })}
               id={column.normalizedName ?? column.id}
               key={column.id}
               className={cn(

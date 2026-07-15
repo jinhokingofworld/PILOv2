@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 
 import { useAuthSession } from "@/features/auth/auth-session";
+import { PageCursorSurface } from "@/shared/page-cursor/PageCursorSurface";
 import { CalendarCard } from "./calendar-card";
 import { GithubWorkspaceCards } from "./shortcut-cards";
 import { MembersCard } from "./members-card";
@@ -45,7 +46,12 @@ export function HomeDashboard() {
   });
 
   return (
-    <section className="flex min-h-0 flex-1 flex-col gap-4">
+    <PageCursorSurface
+      className="relative flex min-h-0 flex-1 flex-col gap-4"
+      enabled={Boolean(authSession?.activeWorkspaceId)}
+      page="home"
+      workspaceId={authSession?.activeWorkspaceId ?? ""}
+    >
       <div className="grid min-h-0 flex-1 gap-4 2xl:grid-cols-[0.9fr_1.75fr_1fr] 2xl:grid-rows-[minmax(0,330px)_minmax(272px,1fr)_128px]">
         <MembersCard />
         <CalendarCard
@@ -60,6 +66,6 @@ export function HomeDashboard() {
         />
         <GithubWorkspaceCards />
       </div>
-    </section>
+    </PageCursorSurface>
   );
 }

@@ -39,6 +39,8 @@ import type {
   CalendarEvent,
   CreateCalendarEventInput
 } from "@/features/calendar/types";
+import { PageCursorSurface } from "@/shared/page-cursor/PageCursorSurface";
+import { pageCursorTargetAttributes } from "@/shared/page-cursor/page-cursor-target";
 
 type CalendarFormState = {
   title: string;
@@ -1312,7 +1314,12 @@ export function CalendarPanel() {
   }
 
   return (
-    <div className="flex min-h-[calc(100vh-6.5rem)] flex-col gap-4">
+    <PageCursorSurface
+      className="relative flex min-h-[calc(100vh-6.5rem)] flex-col gap-4"
+      enabled={canUseCalendar}
+      page="calendar"
+      workspaceId={workspaceId}
+    >
       <section id="month" className="flex min-h-0 flex-1 flex-col gap-4">
         <div className="grid gap-3 lg:grid-cols-[1fr_auto_1fr] lg:items-center">
           <div className="flex items-center gap-2">
@@ -1373,6 +1380,11 @@ export function CalendarPanel() {
               새로고침
             </Button>
             <Button
+              {...pageCursorTargetAttributes({
+                id: "new-event",
+                label: "일정 추가",
+                type: "calendar_action"
+              })}
               id="new"
               type="button"
               size="sm"
@@ -1417,6 +1429,11 @@ export function CalendarPanel() {
 
               return (
                 <div
+                  {...pageCursorTargetAttributes({
+                    id: date,
+                    label: formatDateLabel(date),
+                    type: "calendar_date"
+                  })}
                   key={date}
                   className={classNames(
                     "relative min-h-28 rounded-lg border bg-background p-2 text-left align-top transition sm:min-h-32",
@@ -1444,6 +1461,11 @@ export function CalendarPanel() {
                   <div className="relative z-20 mt-2 flex flex-col gap-1">
                     {visibleEvents.map((event) => (
                       <button
+                        {...pageCursorTargetAttributes({
+                          id: event.id,
+                          label: event.title,
+                          type: "calendar_event"
+                        })}
                         key={`${date}-${event.id}`}
                         type="button"
                         className={classNames(
@@ -1512,6 +1534,6 @@ export function CalendarPanel() {
         onRequestDelete={requestDeleteSheet}
         onSubmit={handleEditEventSubmit}
       />
-    </div>
+    </PageCursorSurface>
   );
 }
