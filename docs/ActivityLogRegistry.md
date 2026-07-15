@@ -11,6 +11,13 @@
 - raw transcript, 원문 파일, OAuth/provider payload, token/secret, Canvas raw shape를 `metadata`에 넣지 않는다.
 - row는 append-only다. DB는 일반 `UPDATE`/`DELETE`를 차단한다. 계정 식별자 익명화(`actor_user_id -> NULL`)와 Workspace 물리 삭제 transaction의 tenant purge만 예외다.
 
+## MeetingReport 소비 경계
+
+`activity_logs`에는 `meetingId`나 `recordingId`를 저장하지 않는다. MeetingReport가 전역
+활동을 근거로 사용할 후속 구현은 Workspace 일치, recording 시간 범위, 해당 시점의
+participant membership을 모두 만족하는 row만 snapshot한다. raw Activity Log row와 raw
+metadata는 MeetingReport 응답이나 LLM 결과 저장소에 노출하지 않는다.
+
 ## 등록된 action과 `metadata.data` 계약
 
 이 표가 producer의 단일 계약이다. `metadata.data`는 표에 적힌 key 외 값을 넣지 않는다.
