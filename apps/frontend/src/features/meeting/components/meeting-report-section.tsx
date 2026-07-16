@@ -35,6 +35,10 @@ import type {
   MeetingReportStatus,
   MeetingReportSummary
 } from "@/features/meeting/types";
+import {
+  hasPiloIssueDeliverySelection,
+  hasPiloIssueDeliveryTarget
+} from "@/features/meeting/utils/action-item-delivery-flow";
 import { cn } from "@/lib/utils";
 
 export type MeetingReportStatusFilter = "ALL" | MeetingReportStatus;
@@ -454,6 +458,22 @@ function ActionItemReviewCard({
   const canDeliver = pending || actionItem.status === "DELIVERY_FAILED";
   const retryingDelivery = actionItem.status === "DELIVERY_FAILED";
   const selectedBoard = issueOptions?.boards.find((board) => board.id === selectedBoardId);
+  const hasIssueDeliveryTarget = issueOptions
+    ? hasPiloIssueDeliveryTarget(issueOptions)
+    : false;
+  const hasIssueDeliverySelection = issueOptions
+    ? hasPiloIssueDeliverySelection(
+        issueOptions,
+        selectedBoardId,
+        selectedColumnId
+      )
+    : false;
+  const hasStaleIssueDeliverySelection = Boolean(
+    issueOptions &&
+    hasIssueDeliveryTarget &&
+    (selectedBoardId || selectedColumnId) &&
+    !hasIssueDeliverySelection
+  );
 
   useEffect(() => {
     setDeliveryTitle(actionItem.title);
@@ -655,20 +675,37 @@ function ActionItemReviewCard({
             </div>
           ) : (
             <div className="grid gap-2 sm:grid-cols-2">
-              <select aria-label="Board 선택" className="h-9 rounded-md border bg-background px-3 text-sm" disabled={busy || loadingIssueOptions || retryingDelivery} value={selectedBoardId} onChange={(event) => changeBoard(event.target.value)}>
-                <option value="">Board 선택</option>
-                {issueOptions?.boards.map((board) => <option key={board.id} value={board.id}>{board.name}</option>)}
-              </select>
-              <select aria-label="Column 선택" className="h-9 rounded-md border bg-background px-3 text-sm" disabled={busy || !selectedBoard || retryingDelivery} value={selectedColumnId} onChange={(event) => setSelectedColumnId(event.target.value)}>
-                <option value="">Column 선택</option>
-                {selectedBoard?.columns.map((column) => <option key={column.id} value={column.id}>{column.name}</option>)}
-              </select>
+              {loadingIssueOptions ? (
+                <p className="text-xs text-muted-foreground sm:col-span-2">
+                  생성 가능한 Board와 Column을 불러오는 중입니다.
+                </p>
+              ) : issueOptions && !hasIssueDeliveryTarget ? (
+                <p className="text-xs text-muted-foreground sm:col-span-2">
+                  생성 가능한 대상이 없습니다. ProjectV2 Board를 선택하고 동기화한 뒤 다시 시도해주세요.
+                </p>
+              ) : (
+                <>
+                  <select aria-label="Board 선택" className="h-9 rounded-md border bg-background px-3 text-sm" disabled={busy || retryingDelivery} value={selectedBoardId} onChange={(event) => changeBoard(event.target.value)}>
+                    <option value="">Board 선택</option>
+                    {issueOptions?.boards.map((board) => <option key={board.id} value={board.id}>{board.name}</option>)}
+                  </select>
+                  <select aria-label="Column 선택" className="h-9 rounded-md border bg-background px-3 text-sm" disabled={busy || !selectedBoard || retryingDelivery} value={selectedColumnId} onChange={(event) => setSelectedColumnId(event.target.value)}>
+                    <option value="">Column 선택</option>
+                    {selectedBoard?.columns.map((column) => <option key={column.id} value={column.id}>{column.name}</option>)}
+                  </select>
+                  {hasStaleIssueDeliverySelection ? (
+                    <p className="text-xs text-muted-foreground sm:col-span-2">
+                      선택한 Board 또는 Column을 사용할 수 없습니다. ProjectV2 Board와 Column을 동기화한 후 다시 시도해주세요.
+                    </p>
+                  ) : null}
+                </>
+              )}
               {deliveryOptionsError ? <p className="text-xs text-destructive sm:col-span-2">{deliveryOptionsError}</p> : null}
             </div>
           )}
           <div className="flex justify-end gap-2">
             <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => setShowDelivery(false)}>취소</Button>
-            <Button type="button" size="sm" disabled={busy || !deliveryTitle.trim() || (deliveryType === "calendar_event" ? !startDate || (!isAllDay && !startTime) : !selectedBoardId || !selectedColumnId)} onClick={() => void submitDelivery()}>
+            <Button type="button" size="sm" disabled={busy || !deliveryTitle.trim() || (deliveryType === "calendar_event" ? !startDate || (!isAllDay && !startTime) : deliveryType === "pilo_issue" && !hasIssueDeliverySelection)} onClick={() => void submitDelivery()}>
               {busy ? <Loader2 className="animate-spin" /> : null}
               확인하고 생성
             </Button>
