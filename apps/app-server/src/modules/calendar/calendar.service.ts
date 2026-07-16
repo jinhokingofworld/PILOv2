@@ -25,7 +25,7 @@ interface CalendarEventRow extends QueryResultRow {
   updated_at: Date | string;
 }
 
-interface NormalizedCalendarEventInput {
+export interface NormalizedCalendarEventInput {
   title: string;
   description: string | null;
   color: string;
@@ -167,7 +167,7 @@ export class CalendarService {
   ): Promise<CalendarEventPayload> {
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
 
-    const input = this.normalizeCreateInput(body);
+    const input = this.normalizeCreateEventInput(body);
     const event = await this.database.transaction(async (transaction) => {
       return this.createNormalizedEventInTransaction(transaction, {
         currentUserId,
@@ -185,7 +185,7 @@ export class CalendarService {
     workspaceId: string,
     body: unknown
   ): Promise<CalendarEventPayload> {
-    const input = this.normalizeCreateInput(body);
+    const input = this.normalizeCreateEventInput(body);
     const created = await this.createNormalizedEventInTransaction(transaction, {
       currentUserId,
       workspaceId,
@@ -198,8 +198,8 @@ export class CalendarService {
    * Reuses the Calendar create contract for callers that must reject an
    * invalid event before they persist their own side-effect or retry state.
    */
-  validateCreateEventInput(body: unknown): void {
-    this.normalizeCreateInput(body);
+  validateCreateEventInput(body: unknown): NormalizedCalendarEventInput {
+    return this.normalizeCreateEventInput(body);
   }
 
   private async createNormalizedEventInTransaction(
@@ -388,14 +388,21 @@ export class CalendarService {
     );
   }
 
-  private normalizeCreateInput(body: unknown): NormalizedCalendarEventInput {
+  /**
+   * Applies the public Calendar creation defaults for callers that need the
+   * final schedule before showing a confirmation or persisting a draft.
+   */
+  normalizeCreateEventInput(body: unknown): NormalizedCalendarEventInput {
     const draft = this.readBody(body);
     const isAllDay = this.readOptionalBoolean(draft, "isAllDay") ?? true;
     const title = this.requireTitle(draft.title);
     const description = this.readOptionalNullableString(draft, "description");
     const color = this.readOptionalColor(draft.color) ?? DEFAULT_COLOR;
     const startDate = this.requireDate(draft.startDate, "startDate");
-    const endDate = this.requireDate(draft.endDate, "endDate");
+    const endDate =
+      draft.endDate === undefined
+        ? startDate
+        : this.requireDate(draft.endDate, "endDate");
 
     return this.normalizeSchedule({
       title,
@@ -511,7 +518,6 @@ export class CalendarService {
       draft.endTime === undefined &&
       (draft.isAllDay !== undefined ||
         draft.startDate !== undefined ||
-        draft.endDate !== undefined ||
         draft.startTime !== undefined)
     );
   }

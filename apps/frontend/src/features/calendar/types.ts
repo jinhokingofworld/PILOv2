@@ -31,7 +31,7 @@ export type CreateCalendarEventInput = {
   color?: string;
   isAllDay?: boolean;
   startDate: string;
-  endDate: string;
+  endDate?: string;
   startTime?: string | null;
   endTime?: string | null;
 };

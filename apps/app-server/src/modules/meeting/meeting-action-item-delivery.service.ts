@@ -17,7 +17,7 @@ export interface MeetingActionItemDeliveryInput {
     color?: string;
     isAllDay?: boolean;
     startDate: string;
-    endDate: string;
+    endDate?: string;
     startTime?: string | null;
     endTime?: string | null;
   };
@@ -268,7 +268,7 @@ export class MeetingActionItemDeliveryService {
       ) {
         throw badRequest("Action item is not ready for delivery");
       }
-      await this.validateDeliveryDraft(
+      const preparedDraft = await this.normalizeDeliveryDraft(
         currentUserId,
         workspaceId,
         actionItem,
@@ -292,7 +292,7 @@ export class MeetingActionItemDeliveryService {
             actionItem.id,
             deliveryType,
             currentUserId,
-            JSON.stringify(draft),
+            JSON.stringify(preparedDraft),
             `meeting-action-item:${actionItem.id}:${randomUUID()}`
           ]
         );
@@ -541,17 +541,17 @@ export class MeetingActionItemDeliveryService {
     return "ACTION_ITEM_DELIVERY_FAILED";
   }
 
-  private async validateDeliveryDraft(
+  private async normalizeDeliveryDraft(
     currentUserId: string,
     workspaceId: string,
     actionItem: ActionItemRow,
     draft: MeetingActionItemDeliveryInput
-  ): Promise<void> {
+  ): Promise<MeetingActionItemDeliveryInput> {
     if (draft.deliveryType === "calendar_event") {
       if (!draft.calendar) {
         throw badRequest("calendar delivery input is required");
       }
-      this.calendarService.validateCreateEventInput({
+      const calendar = this.calendarService.normalizeCreateEventInput({
         title: draft.calendar.title ?? actionItem.title,
         description: draft.calendar.description ?? actionItem.description,
         color: draft.calendar.color,
@@ -561,7 +561,10 @@ export class MeetingActionItemDeliveryService {
         startTime: draft.calendar.startTime,
         endTime: draft.calendar.endTime
       });
-      return;
+      return {
+        deliveryType: "calendar_event",
+        calendar
+      };
     }
 
     if (!draft.issue) {
@@ -577,6 +580,7 @@ export class MeetingActionItemDeliveryService {
         body: draft.issue.body ?? actionItem.description
       }
     );
+    return draft;
   }
 
   private normalizeDeliveryInput(input: unknown): MeetingActionItemDeliveryInput {
@@ -602,7 +606,7 @@ export class MeetingActionItemDeliveryService {
           color: this.normalizeOptionalText(input.calendar.color, "calendar color"),
           isAllDay: this.normalizeOptionalBoolean(input.calendar.isAllDay, "calendar isAllDay"),
           startDate: this.normalizeRequiredDate(input.calendar.startDate, "calendar startDate"),
-          endDate: this.normalizeRequiredDate(input.calendar.endDate, "calendar endDate"),
+          endDate: this.normalizeOptionalDate(input.calendar.endDate, "calendar endDate"),
           startTime: this.normalizeOptionalTime(input.calendar.startTime, "calendar startTime"),
           endTime: this.normalizeOptionalTime(input.calendar.endTime, "calendar endTime")
         }
@@ -638,6 +642,14 @@ export class MeetingActionItemDeliveryService {
       throw badRequest(`${field} must be an ISO date`);
     }
     return value;
+  }
+
+  private normalizeOptionalDate(
+    value: unknown,
+    field: string
+  ): string | undefined {
+    if (value === undefined) return undefined;
+    return this.normalizeRequiredDate(value, field);
   }
 
   private normalizeOptionalTime(value: unknown, field: string): string | null | undefined {
