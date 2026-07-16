@@ -1,4 +1,4 @@
-export type DriveItemType = "folder" | "file";
+export type DriveItemType = "folder" | "file" | "document";
 
 export type DriveItemUploadStatus = "pending" | "ready" | "failed" | "expired";
 
@@ -41,6 +41,54 @@ export type CreateDriveFolderInput = {
   name: string;
 };
 
+export type CreateDocumentInput = {
+  parentId?: string | null;
+  name?: string;
+};
+
+export type DocumentMetadata = {
+  id: string;
+  driveItemId: string;
+  workspaceId: string;
+  currentVersion: number;
+  latestSnapshotId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt: string | null;
+};
+
+export type DocumentSnapshot = {
+  id: string;
+  version: number;
+  yjsState: string;
+  contentJson: Record<string, unknown>;
+  plainText: string;
+  sourceUpdateSequence: number;
+  createdAt: string;
+};
+
+export type DocumentBootstrapPayload = {
+  item: DriveItem;
+  document: DocumentMetadata;
+  snapshot: DocumentSnapshot;
+};
+
+export type CreateDocumentPayload = Pick<
+  DocumentBootstrapPayload,
+  "item" | "document"
+>;
+
+export type SaveDocumentSnapshotInput = {
+  expectedVersion: number;
+  yjsState: string;
+  contentJson: Record<string, unknown>;
+};
+
+export type SaveDocumentSnapshotPayload = {
+  document: DocumentMetadata;
+  snapshot: DocumentSnapshot;
+};
+
 export type DriveUpload = {
   id: string;
   fileId: string;
@@ -73,9 +121,9 @@ export type DriveDownloadUrlPayload = {
   expiresAt: string;
 };
 
-export type UpdateDriveItemInput = {
-  name: string;
-};
+export type UpdateDriveItemInput =
+  | { name: string }
+  | { parentId: string | null };
 
 export type DeleteDriveItemPayload = {
   id: string;

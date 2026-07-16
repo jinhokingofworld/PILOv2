@@ -147,6 +147,13 @@ export type PrReviewDecisionUpdatedEvent = {
   reviewedAt: string | null;
 };
 
+export type PrReviewRoomDeletedEvent = {
+  event: "pr-review:room:deleted";
+  workspaceId: string;
+  canvasId: string;
+  reviewRoomId: string;
+};
+
 export type PrReviewSubmitType = "COMMENT" | "APPROVE" | "REQUEST_CHANGES";
 
 export type PrReviewGithubSubmitStatus =

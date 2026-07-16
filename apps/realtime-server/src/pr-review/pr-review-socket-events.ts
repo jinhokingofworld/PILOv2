@@ -1,5 +1,7 @@
 export const PR_REVIEW_DECISION_REDIS_CHANNEL = "pr-review:decision-events";
 export const PR_REVIEW_DECISION_UPDATED_EVENT = "pr-review:decision:updated";
+export const PR_REVIEW_ROOM_REDIS_CHANNEL = "pr-review:room-events";
+export const PR_REVIEW_ROOM_DELETED_EVENT = "pr-review:room:deleted";
 export const PR_REVIEW_CONFLICT_DRAFT_REDIS_CHANNEL =
   "pr-review:conflict-draft-events";
 export const PR_REVIEW_CONFLICT_DRAFT_UPDATED_EVENT =
@@ -38,6 +40,13 @@ export type PrReviewDecisionUpdatedEvent = {
   readyToSubmit: boolean;
   reviewedByUserId: string | null;
   reviewedAt: string | null;
+};
+
+export type PrReviewRoomDeletedEvent = {
+  event: typeof PR_REVIEW_ROOM_DELETED_EVENT;
+  workspaceId: string;
+  canvasId: string;
+  reviewRoomId: string;
 };
 
 export type PrReviewConflictDraftUpdatedEvent = {
@@ -150,6 +159,18 @@ export function isPrReviewDecisionUpdatedEvent(
     (value.reviewedAt === null ||
       (typeof value.reviewedAt === "string" &&
         Number.isFinite(Date.parse(value.reviewedAt))))
+  );
+}
+
+export function isPrReviewRoomDeletedEvent(
+  value: unknown,
+): value is PrReviewRoomDeletedEvent {
+  return (
+    isRecord(value) &&
+    value.event === PR_REVIEW_ROOM_DELETED_EVENT &&
+    isNonEmptyString(value.workspaceId) &&
+    isNonEmptyString(value.canvasId) &&
+    isNonEmptyString(value.reviewRoomId)
   );
 }
 

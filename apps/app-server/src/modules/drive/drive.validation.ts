@@ -72,8 +72,22 @@ export function validateUpdateDriveItemRequest(
 ): NormalizedUpdateDriveItemInput {
   const draft = readBody(body);
 
+  const hasName = Object.hasOwn(draft, "name");
+  const hasParentId = Object.hasOwn(draft, "parentId");
+  if (hasName === hasParentId) {
+    throw badRequest("Drive item update must include exactly one of name or parentId");
+  }
+
+  if (hasName) {
+    return {
+      type: "rename",
+      name: readDriveItemName(draft.name)
+    };
+  }
+
   return {
-    name: readDriveItemName(draft.name)
+    type: "move",
+    parentId: readMoveParentId(draft.parentId)
   };
 }
 
@@ -89,6 +103,16 @@ function readOptionalParentId(value: unknown): string | null {
   if (value === undefined || value === null || value === "") {
     return null;
   }
+
+  if (typeof value !== "string" || !UUID_PATTERN.test(value)) {
+    throw badRequest("Drive parentId is invalid");
+  }
+
+  return value;
+}
+
+function readMoveParentId(value: unknown): string | null {
+  if (value === null) return null;
 
   if (typeof value !== "string" || !UUID_PATTERN.test(value)) {
     throw badRequest("Drive parentId is invalid");

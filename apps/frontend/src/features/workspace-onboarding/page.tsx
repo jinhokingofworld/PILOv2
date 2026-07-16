@@ -48,11 +48,11 @@ function WorkspaceCreationPageContent() {
   }, [router, session]);
 
   useEffect(() => {
-    if (!workspaceId || callback.callbackError || callback.step !== "oauth") return;
-    void resumeGithub(workspaceId);
+    if (!callback.workspaceId || callback.callbackError || callback.step !== "oauth") return;
+    void resumeGithub(callback.workspaceId);
   // The callback query is intentionally consumed only through github-onboarding.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspaceId, callback.callbackError, callback.step]);
+  }, [callback.workspaceId, callback.callbackError, callback.step]);
 
   useEffect(() => {
     if (!workspaceId || !installationId || !repositoryId || callback.callbackError || callback.step !== "project-oauth") return;
@@ -136,7 +136,10 @@ function WorkspaceCreationPageContent() {
 
   async function createAndConnect(connect: boolean) {
     if (!session) return;
-    if (workspaceId) { await resumeGithub(workspaceId); return; }
+    if (workspaceId) {
+      if (!connect) { router.replace("/home"); return; }
+      await resumeGithub(workspaceId); return;
+    }
     if (!workspaceName.trim()) return;
     setBusy(true); setMessage(null);
     try {

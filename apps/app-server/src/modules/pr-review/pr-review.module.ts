@@ -13,6 +13,7 @@ import { PrReviewGithubDependencyService } from "./pr-review-github-dependency.s
 import { PrReviewController } from "./pr-review.controller";
 import { PrReviewDecisionRealtimePublisherService } from "./pr-review-decision-realtime-publisher.service";
 import { PrReviewConflictDraftRealtimePublisherService } from "./pr-review-conflict-draft-realtime-publisher.service";
+import { PrReviewRoomRealtimePublisherService } from "./pr-review-room-realtime-publisher.service";
 import { PrReviewService } from "./pr-review.service";
 
 @Module({
@@ -27,7 +28,8 @@ import { PrReviewService } from "./pr-review.service";
     PrReviewAnalysisJobPublisherService,
     PrReviewAnalysisJobRecoveryService,
     PrReviewDecisionRealtimePublisherService,
-    PrReviewConflictDraftRealtimePublisherService
+    PrReviewConflictDraftRealtimePublisherService,
+    PrReviewRoomRealtimePublisherService
   ],
   exports: [
     PrReviewService,
@@ -37,7 +39,8 @@ import { PrReviewService } from "./pr-review.service";
     PrReviewAnalysisJobPublisherService,
     PrReviewAnalysisJobRecoveryService,
     PrReviewDecisionRealtimePublisherService,
-    PrReviewConflictDraftRealtimePublisherService
+    PrReviewConflictDraftRealtimePublisherService,
+    PrReviewRoomRealtimePublisherService
   ]
 })
 export class PrReviewModule {}

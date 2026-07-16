@@ -15,10 +15,10 @@ Frontend 화면 이름은 `파일`로 둔다. Backend 도메인 이름과 API pa
 - 빈 네이티브 문서 생성
 - S3 presigned URL 기반 파일 업로드
 - S3 presigned URL 기반 파일 다운로드
-- 폴더/파일 이름 변경
-- 폴더/파일 soft delete
+- 폴더/문서/파일 이름 변경과 이동
+- 폴더/문서/파일 soft delete
 
-파일 미리보기, 검색, 이동, 복구, public link share, 문서 공동 편집과 장기 버전 관리는
+파일 미리보기, 검색, 복구, public link share, 문서 공동 편집과 장기 버전 관리는
 이 문서의 MVP 범위가 아니다. 문서 본문은 최신 snapshot 조회와 자동 저장만 지원한다.
 
 ## 데이터 규칙
@@ -50,7 +50,8 @@ Frontend 화면 이름은 `파일`로 둔다. Backend 도메인 이름과 API pa
 - 파일 크기 제한은 파일당 `100 MiB`다.
 - 모든 MIME type을 허용한다. 실행 파일 차단과 바이러스 검사는 MVP 범위가 아니다.
 - 삭제는 `deleted_at`을 사용하는 soft delete다.
-- 폴더 삭제는 해당 폴더와 하위 폴더/파일 전체를 soft delete한다.
+- 폴더 삭제는 해당 폴더와 하위 폴더/문서/파일 전체를 soft delete하며, 하위 document
+  aggregate도 함께 soft delete한다.
 - 목록 조회는 활성 폴더, 네이티브 문서와 `ready` 파일만 반환한다. `pending`, `failed` 파일은 공유
   목록에 노출하지 않는다.
 - 만료된 pending upload는 서버가 `expired`로 전환하고 연결된 pending file item을
@@ -68,8 +69,8 @@ Frontend 화면 이름은 `파일`로 둔다. Backend 도메인 이름과 API pa
 | `POST` | `/workspaces/{workspaceId}/drive/files/upload-url` | 파일 metadata 생성과 presigned upload URL 발급 |
 | `POST` | `/workspaces/{workspaceId}/drive/files/{fileId}/complete` | S3 업로드 완료 확인과 파일 ready 전환 |
 | `GET` | `/workspaces/{workspaceId}/drive/files/{fileId}/download-url` | 파일 다운로드용 presigned URL 발급 |
-| `PATCH` | `/workspaces/{workspaceId}/drive/items/{itemId}` | 폴더/파일 이름 변경 |
-| `DELETE` | `/workspaces/{workspaceId}/drive/items/{itemId}` | 폴더/파일 soft delete |
+| `PATCH` | `/workspaces/{workspaceId}/drive/items/{itemId}` | 폴더/문서/파일 이름 변경 또는 이동 |
+| `DELETE` | `/workspaces/{workspaceId}/drive/items/{itemId}` | 폴더/문서/파일 soft delete |
 
 Endpoint 표는 공통 API 문서 규칙에 따라 `/api/v1` base path를 생략한다.
 
@@ -598,7 +599,7 @@ GET /api/v1/workspaces/{workspaceId}/drive/files/{fileId}/download-url
 - 다운로드 응답은 원본 파일명을 `Content-Disposition` filename으로 사용할 수 있게
   발급한다.
 
-## 이름 변경
+## 이름 변경 및 이동
 
 ```http
 PATCH /api/v1/workspaces/{workspaceId}/drive/items/{itemId}
@@ -612,15 +613,28 @@ Request:
 }
 ```
 
+이동 request는 이름 변경과 별도로 `parentId`만 보낸다. `null`은 root 이동이다.
+
+```json
+{
+  "parentId": "folder_uuid"
+}
+```
+
 응답은 `Drive Item Payload`와 같다.
 
 서버 규칙:
 
-- 현재 사용자가 해당 Workspace의 `owner` 또는 `member`이면 이름을 변경할 수 있다.
+- 현재 사용자가 해당 Workspace의 `owner` 또는 `member`이면 이름을 변경하거나 이동할 수 있다.
 - `itemId`는 같은 Workspace의 활성 item이어야 한다.
-- `name`은 trim 후 저장한다.
+- request body는 `{ name }` 또는 `{ parentId }` 중 정확히 하나만 가진다.
+- 이름 변경의 `name`은 trim 후 저장한다.
 - 같은 parent 안에 활성 item의 같은 이름이 이미 있으면 `400 BAD_REQUEST`를 반환한다.
 - 이름 변경은 S3 object key를 변경하지 않는다.
+- 이동의 `parentId`는 같은 Workspace의 활성 folder 또는 `null`이어야 한다. folder는 자신 또는
+  하위 folder로 이동할 수 없다.
+- document rename/move는 각각 `document_renamed`, `document_moved` Activity Log를 같은
+  transaction 안에서 남긴다. 폴더와 파일의 rename/move는 Activity Log를 남기지 않는다.
 
 ## 삭제
 
@@ -645,9 +659,12 @@ DELETE /api/v1/workspaces/{workspaceId}/drive/items/{itemId}
 
 - 현재 사용자가 해당 Workspace의 `owner` 또는 `member`이면 삭제할 수 있다.
 - `itemId`는 같은 Workspace의 활성 item이어야 한다.
-- file 삭제는 해당 file row의 `deleted_at`을 기록한다.
-- folder 삭제는 recursive soft delete로 folder와 모든 하위 item의 `deleted_at`을
-  기록한다.
+- file/document 삭제는 해당 item의 `deleted_at`을 기록한다. document는 연결된
+  `documents.deleted_at`도 같은 transaction에서 기록한다.
+- folder 삭제는 recursive soft delete로 folder와 모든 하위 item의 `deleted_at`, 하위
+  document aggregate의 `deleted_at`을 기록한다.
+- 직접 삭제한 document는 `document_deleted` Activity Log를 같은 transaction에서 남긴다.
+  folder 삭제에 포함된 하위 document별 Activity Log는 남기지 않는다.
 - MVP에서는 S3 object를 즉시 삭제하지 않는다. S3 실제 삭제 또는 lifecycle cleanup은
   후속 작업으로 둔다.
 
@@ -664,6 +681,9 @@ DELETE /api/v1/workspaces/{workspaceId}/drive/items/{itemId}
 | 파일 크기 | `0 <= sizeBytes <= 104857600` |
 | MIME type | 빈 문자열 불가, 최대 255자 |
 | upload 완료 | S3 object가 존재하고 expected size와 일치해야 함 |
+| item update body | `{ name }` 또는 `{ parentId }` 중 정확히 하나 |
+| 이동 parentId | `null` 또는 같은 Workspace의 활성 folder |
+| folder 이동 | 자기 자신 또는 하위 folder를 parent로 지정할 수 없음 |
 | 문서 저장 expectedVersion | `0` 이상의 정수이며 현재 버전과 일치해야 함 |
 | 문서 snapshot Yjs 상태 | 유효한 base64, 디코딩 후 최대 `1048576` bytes |
 | 문서 snapshot JSON | 최상위 `type: "doc"` object, 최대 `524288` bytes |
@@ -675,7 +695,7 @@ DELETE /api/v1/workspaces/{workspaceId}/drive/items/{itemId}
 | bearer session 없음 또는 만료 | `401` | `UNAUTHORIZED` |
 | Workspace 접근 권한 없음 | `403` | `FORBIDDEN` |
 | parent, item, file, upload 없음 | `404` | `NOT_FOUND` |
-| 이름, 크기, MIME type, upload 상태가 잘못됨 | `400` | `BAD_REQUEST` |
+| 이름, 크기, MIME type, upload 상태, item update body가 잘못됨 | `400` | `BAD_REQUEST` |
 | 문서 저장 요청이 잘못됨 | `400` | `BAD_REQUEST` |
 | 같은 parent에 같은 이름의 활성 item이 있음 | `400` | `BAD_REQUEST` |
 | 문서 저장 시 최신 버전과 다름 | `409` | `CONFLICT` |
@@ -683,7 +703,6 @@ DELETE /api/v1/workspaces/{workspaceId}/drive/items/{itemId}
 
 ## MVP 제외
 
-- 파일/폴더 이동
 - 전체 또는 현재 폴더 검색
 - 파일 미리보기
 - 문서 공동 편집

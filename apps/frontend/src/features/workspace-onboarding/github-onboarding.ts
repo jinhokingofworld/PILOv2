@@ -8,10 +8,10 @@ export const GITHUB_ONBOARDING_STEPS = [
 
 export type GithubOnboardingStep = (typeof GITHUB_ONBOARDING_STEPS)[number];
 
-export function getGithubOnboardingStep(value: string | null): GithubOnboardingStep {
+export function getGithubOnboardingStep(value: string | null): GithubOnboardingStep | null {
   return GITHUB_ONBOARDING_STEPS.includes(value as GithubOnboardingStep)
     ? (value as GithubOnboardingStep)
-    : "oauth";
+    : null;
 }
 
 export function readGithubOnboardingCallback(searchParams: URLSearchParams) {

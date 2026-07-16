@@ -25,6 +25,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuthSession } from "@/features/auth";
 import { createPrReviewApiClient } from "@/features/pr-review/api/client";
+import { PrReviewRoomDeleteButton } from "@/features/pr-review/components/pr-review-room-delete-button";
 import { getPrReviewErrorMessage } from "@/features/pr-review/pr-review-error-message";
 import {
   getReviewRoomEntrySessionId,
@@ -149,7 +150,14 @@ export function PrReviewRoomsPanel({
                   onEnterReviewSession(reviewSessionId);
                 }
               }}
+              apiClient={apiClient}
+              onDeleted={() => {
+                setRooms((currentRooms) =>
+                  currentRooms.filter((currentRoom) => currentRoom.id !== room.id)
+                );
+              }}
               room={room}
+              workspaceId={workspaceId}
             />
           ))}
         </div>
@@ -159,11 +167,17 @@ export function PrReviewRoomsPanel({
 }
 
 function ReviewRoomCard({
+  apiClient,
   room,
-  onEnter
+  onDeleted,
+  onEnter,
+  workspaceId
 }: {
+  apiClient: ReturnType<typeof createPrReviewApiClient>;
   room: PrReviewRoom;
+  onDeleted: () => void;
   onEnter: () => void;
+  workspaceId: string;
 }) {
   const isCompleted = room.status === "completed";
   const completionLabel = room.completionReason === "merged" ? "병합 완료" : "닫힘";
@@ -215,6 +229,12 @@ function ReviewRoomCard({
           </CardDescription>
         </div>
         <CardAction className="flex items-center gap-1">
+          <PrReviewRoomDeleteButton
+            apiClient={apiClient}
+            onDeleted={onDeleted}
+            reviewRoomId={room.id}
+            workspaceId={workspaceId}
+          />
           <Button
             aria-label={`PR #${room.pullRequest.githubNumber} GitHub에서 열기`}
             render={<a href={room.pullRequest.githubUrl} rel="noreferrer" target="_blank" />}

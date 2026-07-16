@@ -51,6 +51,7 @@ import type {
 import { PrReviewAnalysisJobPublisherService } from "./pr-review-analysis-job-publisher.service";
 import { PrReviewDecisionRealtimePublisherService } from "./pr-review-decision-realtime-publisher.service";
 import { PrReviewConflictDraftRealtimePublisherService } from "./pr-review-conflict-draft-realtime-publisher.service";
+import { PrReviewRoomRealtimePublisherService } from "./pr-review-room-realtime-publisher.service";
 import {
   buildPrReviewSemanticGraphHandoff,
   PR_REVIEW_SEMANTIC_GRAPH_SCHEMA_VERSION,
@@ -1061,7 +1062,8 @@ export class PrReviewService {
     private readonly analysisService: PrReviewAnalysisService,
     private readonly analysisJobPublisher: PrReviewAnalysisJobPublisherService,
     private readonly decisionRealtimePublisher?: PrReviewDecisionRealtimePublisherService,
-    private readonly conflictDraftRealtimePublisher?: PrReviewConflictDraftRealtimePublisherService
+    private readonly conflictDraftRealtimePublisher?: PrReviewConflictDraftRealtimePublisherService,
+    private readonly roomRealtimePublisher?: PrReviewRoomRealtimePublisherService
   ) {}
 
   getModuleInfo(): PrReviewModuleInfo {
@@ -1337,6 +1339,11 @@ export class PrReviewService {
     if (!deleted) {
       throw notFound("PR Review room not found");
     }
+    await this.roomRealtimePublisher?.publishRoomDeletedSafely({
+      workspaceId,
+      canvasId: deleted.id,
+      reviewRoomId: roomId
+    });
     return { deleted: true };
   }
 

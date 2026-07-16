@@ -46,6 +46,7 @@ import {
   type createPrReviewApiClient
 } from "@/features/pr-review/api/client";
 import { PrReviewCanvasSurface } from "@/features/pr-review/components/review-canvas/PrReviewCanvasSurface";
+import { PrReviewRoomDeleteButton } from "@/features/pr-review/components/pr-review-room-delete-button";
 import { PrReviewFileDiffDrawer } from "@/features/pr-review/components/review-canvas/PrReviewFileDiffDrawer";
 import { PrReviewSubmitReviewModal } from "@/features/pr-review/components/review-canvas/PrReviewSubmitReviewModal";
 import { getPrReviewErrorMessage } from "@/features/pr-review/pr-review-error-message";
@@ -91,6 +92,7 @@ type PrReviewCanvasShellProps = {
   backLabel: string;
   onBackToSelection: () => void;
   onGoToGithub: () => void;
+  onReviewRoomDeleted: () => void;
   onReviewSessionCreated: (session: PrReviewSession) => void;
   pullRequest: PrReviewPullRequest | PrReviewPullRequestDetail | null;
   realtimeIdentity: CanvasRealtimeIdentity;
@@ -314,6 +316,7 @@ export function PrReviewCanvasShell({
   backLabel,
   onBackToSelection,
   onGoToGithub,
+  onReviewRoomDeleted,
   onReviewSessionCreated,
   pullRequest,
   realtimeIdentity,
@@ -1099,6 +1102,12 @@ export function PrReviewCanvasShell({
             <ArrowLeft className="size-4" />
             {backLabel}
           </Button>
+          <PrReviewRoomDeleteButton
+            apiClient={apiClient}
+            onDeleted={onReviewRoomDeleted}
+            reviewRoomId={session.reviewRoomId}
+            workspaceId={workspaceId}
+          />
           <div className="flex h-10 min-w-0 items-center gap-2 rounded-lg border border-slate-200 px-3 text-sm font-medium">
             <GitBranch className="size-4 shrink-0 text-slate-500" />
             <span className="max-w-44 truncate">{headBranch}</span>
@@ -1265,6 +1274,7 @@ export function PrReviewCanvasShell({
                 onDecisionUpdated={handleRealtimeDecisionUpdated}
                 onFileSelect={setSelectedReviewFileId}
                 onRealtimeRoomJoined={handleRealtimeRoomJoined}
+                onRealtimeRoomDeleted={onReviewRoomDeleted}
                 preparedConflictFileIds={preparedConflictFileIds}
                 readOnly={isReviewReadOnly}
                 realtimeIdentity={realtimeIdentity}

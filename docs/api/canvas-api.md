@@ -700,6 +700,7 @@ canvas:shape:preview
 canvas:shape:preview:clear
 canvas:room:loaded-regions:update
 canvas:room:shapes:hydrate
+pr-review:room:deleted
 canvas:error
 ```
 
@@ -714,6 +715,11 @@ Canvas는 `false`, completed Review Canvas는 `true`다. read-only room에서도
 `canvas:presence:update`은 허용하지만 shape lock·preview event는 `canvas:error`의
 `forbidden`으로 거부한다. active room이 접속 중 completed로 전환되는 lifecycle event와
 클라이언트 상태 전환은 PR Review room lifecycle 단계에서 처리한다.
+
+`pr-review:room:deleted`는 Review room과 연결 Canvas가 영구 삭제된 뒤에만 같은 Canvas
+room으로 전송한다. payload는 `workspaceId`, `canvasId`, `reviewRoomId`를 포함하며, 수신한
+클라이언트는 pending 편집을 중단하고 PR Review 목록으로 이동한다. 일반 freeform Canvas에는
+전송하지 않는다.
 
 classic Canvas에서 realtime roomState가 비활성화된 경우 최종 저장은 클라이언트가
 App Server `/shapes/batch`를 직접 호출한다. realtime roomState가 활성화된 경우
@@ -732,6 +738,13 @@ App Server `/shapes/batch`를 호출한다. realtime-server는
 roomState에 없다는 사실은 삭제가 아니라 아직 로딩되지 않았을 가능성으로 본다.
 겹치는 loaded region은 roomState에서 병합하며, cached shape와 loaded region 수는
 서버 메모리 보호를 위해 상한을 둔다.
+
+`canvas:join` payload는 `initialViewportBounds`를 선택적으로 포함할 수 있다.
+형태는 `canvas:viewport:loaded.bounds`와 같은 `{ x, y, width, height, margin }`이다.
+classic Canvas room cache가 비어 있으면 realtime-server는 이 bounds로 App Server
+viewport shape API를 best-effort 조회하고, 조회된 shape를 `canvas:joined.roomShapes`에
+포함할 수 있다. 이 hydrate 실패는 room join을 거부하지 않으며, 클라이언트는 기존
+viewport lazy loading을 fallback으로 계속 수행한다.
 
 `canvas:room:shape:patch`는 DB 저장 전의 roomState patch 이벤트다. 클라이언트는
 로컬 shape diff에서 upsert shape snapshot과 명시적 `deletedShapeIds`를 만들어 보낸다.

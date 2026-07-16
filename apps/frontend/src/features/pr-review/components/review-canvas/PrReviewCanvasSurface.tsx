@@ -52,6 +52,7 @@ import type {
   PrReviewConflictAnalysis,
   PrReviewDecisionUpdatedEvent,
   PrReviewFlowFile,
+  PrReviewRoomDeletedEvent,
   PrReviewRoomCanvas
 } from "@/features/pr-review/types";
 import {
@@ -117,6 +118,7 @@ type PrReviewCanvasSurfaceProps = {
   onDecisionUpdated?: (event: PrReviewDecisionUpdatedEvent) => void;
   onFileSelect?: (reviewFileId: string | null) => void;
   onRealtimeRoomJoined?: () => void;
+  onRealtimeRoomDeleted?: (event: PrReviewRoomDeletedEvent) => void;
   preparedConflictFileIds?: Set<string>;
   readOnly?: boolean;
   realtimeIdentity: CanvasRealtimeIdentity;
@@ -1911,6 +1913,7 @@ export function PrReviewCanvasSurface({
   onDecisionUpdated,
   onFileSelect,
   onRealtimeRoomJoined,
+  onRealtimeRoomDeleted,
   preparedConflictFileIds = new Set<string>(),
   readOnly: isReviewVersionStale = false,
   realtimeIdentity,
@@ -2101,7 +2104,8 @@ export function PrReviewCanvasSurface({
     applyOperations: applyRemoteCanvasOperations,
     catchUpOperations: catchUpCanvasOperations,
     onDecisionUpdated,
-    onRoomJoined: onRealtimeRoomJoined
+    onRoomJoined: onRealtimeRoomJoined,
+    onRoomDeleted: onRealtimeRoomDeleted
   });
   const readOnly =
     isReviewVersionStale || reviewRoom?.status === "completed" || canvasPresence.readOnly;

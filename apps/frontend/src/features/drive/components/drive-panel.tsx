@@ -5,7 +5,9 @@ import {
   ChevronRight,
   Download,
   FileText,
+  FilePlus,
   Folder,
+  FolderInput,
   FolderPlus,
   Home,
   Loader2,
@@ -16,6 +18,7 @@ import {
   Upload,
   X
 } from "lucide-react";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   useCallback,
   useEffect,
@@ -64,6 +67,8 @@ import {
 import { DriveWorkspaceLocationAdapter } from "@/features/drive/drive-workspace-location-adapter";
 import type { DriveItem, DriveListPayload } from "@/features/drive/types";
 import { cn } from "@/lib/utils";
+
+import { DriveDocumentEditor } from "./document-editor";
 
 type DriveStatus = "idle" | "loading" | "success" | "error";
 
@@ -166,6 +171,10 @@ function getItemTypeLabel(item: DriveItem) {
     return "폴더";
   }
 
+  if (item.itemType === "document") {
+    return "문서";
+  }
+
   return item.mimeType || "파일";
 }
 
@@ -234,6 +243,7 @@ function DriveBreadcrumbs({
 
 function DriveItemName({ item }: { item: DriveItem }) {
   const isFolder = item.itemType === "folder";
+  const isDocument = item.itemType === "document";
 
   return (
     <>
@@ -242,7 +252,9 @@ function DriveItemName({ item }: { item: DriveItem }) {
           "flex size-9 shrink-0 items-center justify-center rounded-lg border",
           isFolder
             ? "border-amber-200 bg-amber-50 text-amber-700"
-            : "border-sky-200 bg-sky-50 text-sky-700"
+            : isDocument
+              ? "border-violet-200 bg-violet-50 text-violet-700"
+              : "border-sky-200 bg-sky-50 text-sky-700"
         )}
       >
         {isFolder ? (
@@ -266,31 +278,36 @@ function DriveItemRow({
   item,
   onDownload,
   onOpenDelete,
+  onOpenDocument,
   onOpenFolder,
+  onOpenMove,
   onOpenRename
 }: {
   activeActionItemId: string | null;
   item: DriveItem;
   onDownload: (item: DriveItem) => void;
   onOpenDelete: (item: DriveItem) => void;
+  onOpenDocument: (item: DriveItem) => void;
   onOpenFolder: (item: DriveItem) => void;
+  onOpenMove: (item: DriveItem) => void;
   onOpenRename: (item: DriveItem) => void;
 }) {
   const isFolder = item.itemType === "folder";
+  const isDocument = item.itemType === "document";
   const isBusy = activeActionItemId === item.id;
 
   return (
     <li
       className={cn(
         "grid gap-3 border-b px-3 py-3 last:border-b-0 md:grid-cols-[minmax(0,1.8fr)_minmax(7rem,0.7fr)_minmax(8rem,0.8fr)_minmax(9rem,0.8fr)_3rem] md:items-center",
-        isFolder && "transition hover:bg-muted/40"
+        (isFolder || isDocument) && "transition hover:bg-muted/40"
       )}
     >
-      {isFolder ? (
+      {isFolder || isDocument ? (
         <button
           type="button"
           className="flex min-w-0 items-center gap-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          onClick={() => onOpenFolder(item)}
+          onClick={() => (isFolder ? onOpenFolder(item) : onOpenDocument(item))}
         >
           <DriveItemName item={item} />
         </button>
@@ -333,7 +350,7 @@ function DriveItemRow({
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-40">
             <DropdownMenuGroup>
-              {!isFolder ? (
+              {item.itemType === "file" ? (
                 <DropdownMenuItem
                   className="gap-2"
                   disabled={isBusy}
@@ -350,6 +367,14 @@ function DriveItemRow({
               >
                 <Pencil />
                 이름 변경
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className="gap-2"
+                disabled={isBusy}
+                onClick={() => onOpenMove(item)}
+              >
+                <FolderInput />
+                이동
               </DropdownMenuItem>
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
@@ -623,6 +648,168 @@ function RenameItemSheet({
   );
 }
 
+function MoveItemSheet({
+  destination,
+  destinationParentId,
+  error,
+  hasDestinationError,
+  isDestinationReady,
+  isLoading,
+  isSubmitting,
+  item,
+  onNavigate,
+  onOpenChange,
+  onRetry,
+  onSelect
+}: {
+  destination: DriveListPayload;
+  destinationParentId: string | null;
+  error: string | null;
+  hasDestinationError: boolean;
+  isDestinationReady: boolean;
+  isLoading: boolean;
+  isSubmitting: boolean;
+  item: DriveItem | null;
+  onNavigate: (parentId: string | null) => void;
+  onOpenChange: (open: boolean) => void;
+  onRetry: () => void;
+  onSelect: (parentId: string | null) => void;
+}) {
+  const folders = destination.items.filter((candidate) => candidate.itemType === "folder");
+  const isCurrentParent = item?.parentId === destinationParentId;
+  const isInvalidDestination = destinationParentId === item?.id;
+  const canSelect =
+    Boolean(item) &&
+    !isCurrentParent &&
+    !isInvalidDestination &&
+    isDestinationReady &&
+    !isLoading &&
+    !isSubmitting;
+  const destinationLabel = destination.parent?.name ?? "루트";
+
+  return (
+    <Sheet open={Boolean(item)} onOpenChange={onOpenChange}>
+      <SheetContent className="w-full sm:max-w-sm">
+        <div className="flex min-h-0 flex-1 flex-col">
+          <SheetHeader>
+            <SheetTitle>이동</SheetTitle>
+            <SheetDescription>
+              {item ? `${item.name}의 이동할 폴더를 선택하세요.` : ""}
+            </SheetDescription>
+          </SheetHeader>
+
+          <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4">
+            <DriveBreadcrumbs
+              breadcrumbs={destination.breadcrumbs}
+              currentParentId={destinationParentId}
+              onNavigate={onNavigate}
+            />
+
+            <div className="rounded-md border bg-muted/30 px-3 py-2">
+              <p className="text-xs font-medium text-muted-foreground">선택한 위치</p>
+              <p className="mt-1 truncate text-sm font-medium">{destinationLabel}</p>
+            </div>
+
+            {error ? (
+              <p
+                className="rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+                role="alert"
+              >
+                {error}
+              </p>
+            ) : null}
+
+            {isLoading ? (
+              <div className="grid gap-2">
+                <Skeleton className="h-10 w-full" />
+                <Skeleton className="h-10 w-full" />
+                <Skeleton className="h-10 w-full" />
+              </div>
+            ) : hasDestinationError ? (
+              <div className="flex min-h-24 flex-col items-start justify-center gap-3 px-2">
+                <p className="text-sm text-muted-foreground">
+                  폴더 목록을 다시 불러온 뒤 이동할 수 있습니다.
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={isSubmitting}
+                  onClick={onRetry}
+                >
+                  <RefreshCw />
+                  다시 시도
+                </Button>
+              </div>
+            ) : (
+              <div className="grid gap-1">
+                <p className="px-1 pb-1 text-xs font-medium text-muted-foreground">
+                  하위 폴더
+                </p>
+                {folders.length ? (
+                  folders.map((folder) => {
+                    const isMovingFolder = folder.id === item?.id;
+
+                    return (
+                      <Button
+                        key={folder.id}
+                        type="button"
+                        variant="ghost"
+                        className="justify-between gap-3 px-2"
+                        disabled={isSubmitting || isMovingFolder}
+                        onClick={() => onNavigate(folder.id)}
+                      >
+                        <span className="flex min-w-0 items-center gap-2">
+                          <Folder className="size-4 shrink-0 text-amber-700" />
+                          <span className="truncate">{folder.name}</span>
+                        </span>
+                        {isMovingFolder ? (
+                          <span className="shrink-0 text-xs text-muted-foreground">
+                            이동할 폴더
+                          </span>
+                        ) : (
+                          <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+                        )}
+                      </Button>
+                    );
+                  })
+                ) : (
+                  <p className="px-2 py-3 text-sm text-muted-foreground">
+                    이동할 하위 폴더가 없습니다.
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+
+          <SheetFooter className="border-t">
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                className="flex-1"
+                disabled={isSubmitting}
+                onClick={() => onOpenChange(false)}
+              >
+                취소
+              </Button>
+              <Button
+                type="button"
+                className="flex-1"
+                disabled={!canSelect}
+                onClick={() => onSelect(destinationParentId)}
+              >
+                {isSubmitting ? <Loader2 className="animate-spin" /> : <FolderInput />}
+                {isCurrentParent ? "현재 위치" : "이 폴더로 이동"}
+              </Button>
+            </div>
+          </SheetFooter>
+        </div>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
 function DeleteItemDialog({
   error,
   isDeleting,
@@ -682,6 +869,8 @@ function DeleteItemDialog({
 
 export function DrivePanel() {
   const authSession = useAuthSession();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const driveListRef = useRef<HTMLDivElement | null>(null);
   const loadedDriveParentIdRef = useRef<{
@@ -692,6 +881,7 @@ export function DrivePanel() {
   const workspaceName = authSession?.activeWorkspace.name ?? "Workspace";
   const normalizedAccessToken = authSession?.accessToken.trim() ?? "";
   const canUseDrive = Boolean(workspaceId.trim() && normalizedAccessToken);
+  const documentId = searchParams.get("documentId");
   const [currentParentId, setCurrentParentId] = useState<string | null>(null);
   const [driveData, setDriveData] = useState<DriveListPayload>(emptyDriveData);
   const [status, setStatus] = useState<DriveStatus>("idle");
@@ -711,6 +901,18 @@ export function DrivePanel() {
   const [renameName, setRenameName] = useState("");
   const [renameError, setRenameError] = useState<string | null>(null);
   const [isRenaming, setIsRenaming] = useState(false);
+  const [moveItem, setMoveItem] = useState<DriveItem | null>(null);
+  const [moveDestinationParentId, setMoveDestinationParentId] = useState<
+    string | null
+  >(null);
+  const [moveDestinationData, setMoveDestinationData] =
+    useState<DriveListPayload>(emptyDriveData);
+  const [moveDestinationStatus, setMoveDestinationStatus] =
+    useState<DriveStatus>("idle");
+  const [moveDestinationRequestVersion, setMoveDestinationRequestVersion] =
+    useState(0);
+  const [moveError, setMoveError] = useState<string | null>(null);
+  const [isMoving, setIsMoving] = useState(false);
   const [deleteItem, setDeleteItem] = useState<DriveItem | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -722,9 +924,12 @@ export function DrivePanel() {
     const folderCount = driveData.items.filter(
       (item) => item.itemType === "folder"
     ).length;
-    const fileCount = driveData.items.length - folderCount;
+    const documentCount = driveData.items.filter(
+      (item) => item.itemType === "document"
+    ).length;
+    const fileCount = driveData.items.length - folderCount - documentCount;
 
-    return `폴더 ${folderCount}개 · 파일 ${fileCount}개`;
+    return `폴더 ${folderCount}개 · 문서 ${documentCount}개 · 파일 ${fileCount}개`;
   }, [driveData.items]);
   const currentFolderName = driveData.parent
     ? driveData.parent.name
@@ -848,10 +1053,94 @@ export function DrivePanel() {
     };
   }, [canUseDrive, currentParentId, fetchDriveData, workspaceId]);
 
+  useEffect(() => {
+    if (!moveItem) {
+      return;
+    }
+
+    if (!canUseDrive) {
+      setMoveDestinationData(emptyDriveData);
+      setMoveDestinationStatus("idle");
+      setMoveError("파일을 이동하려면 로그인이 필요합니다.");
+      return;
+    }
+
+    let active = true;
+
+    async function loadMoveDestination() {
+      setMoveDestinationStatus("loading");
+      setMoveError(null);
+
+      try {
+        const nextDestination = await driveClient.listItems(workspaceId, {
+          parentId: moveDestinationParentId
+        });
+        if (!active) return;
+
+        setMoveDestinationData(nextDestination);
+        setMoveDestinationStatus("success");
+      } catch (moveLoadError) {
+        if (!active) return;
+
+        setMoveDestinationData(emptyDriveData);
+        setMoveDestinationStatus("error");
+        setMoveError(errorMessageFromUnknown(moveLoadError));
+      }
+    }
+
+    void loadMoveDestination();
+
+    return () => {
+      active = false;
+    };
+  }, [
+    canUseDrive,
+    driveClient,
+    moveDestinationParentId,
+    moveDestinationRequestVersion,
+    moveItem,
+    workspaceId
+  ]);
+
   function openCreateFolderSheet() {
     setFolderName("");
     setFolderError(null);
     setIsCreateOpen(true);
+  }
+
+  function updateDocumentLocation(nextDocumentId: string | null) {
+    const nextSearchParams = new URLSearchParams(searchParams.toString());
+
+    if (nextDocumentId) {
+      nextSearchParams.set("documentId", nextDocumentId);
+    } else {
+      nextSearchParams.delete("documentId");
+    }
+
+    const search = nextSearchParams.toString();
+    router.push(search ? `/files?${search}` : "/files");
+  }
+
+  async function handleCreateDocument() {
+    if (!canUseDrive) {
+      setActionError("문서를 만들려면 로그인이 필요합니다.");
+      return;
+    }
+
+    setActionError(null);
+    setActiveActionItemId("create-document");
+
+    try {
+      const result = await driveClient.createDocument(workspaceId, {
+        parentId: currentParentId
+      });
+      await reloadDrive();
+      updateDocumentLocation(result.document.id);
+    } catch (createError) {
+      setActionError(errorMessageFromUnknown(createError));
+    } finally {
+      setActiveActionItemId(null);
+    }
   }
 
   function handleCreateOpenChange(open: boolean) {
@@ -1010,6 +1299,75 @@ export function DrivePanel() {
     }
   }
 
+  function openMoveSheet(item: DriveItem) {
+    setMoveItem(item);
+    setMoveDestinationParentId(item.parentId);
+    setMoveDestinationData(emptyDriveData);
+    setMoveDestinationStatus("idle");
+    setMoveError(null);
+    setActionError(null);
+  }
+
+  function handleMoveOpenChange(open: boolean) {
+    if (isMoving) {
+      return;
+    }
+
+    if (!open) {
+      setMoveItem(null);
+      setMoveDestinationParentId(null);
+      setMoveDestinationData(emptyDriveData);
+      setMoveDestinationStatus("idle");
+      setMoveError(null);
+    }
+  }
+
+  function navigateMoveDestination(parentId: string | null) {
+    if (moveItem?.itemType === "folder" && parentId === moveItem.id) {
+      return;
+    }
+
+    setMoveDestinationParentId(parentId);
+  }
+
+  async function handleMoveSelect(parentId: string | null) {
+    if (!moveItem) {
+      return;
+    }
+
+    if (!canUseDrive) {
+      setMoveError("파일을 이동하려면 로그인이 필요합니다.");
+      return;
+    }
+
+    if (moveItem.parentId === parentId) {
+      setMoveError("이미 이 폴더에 있습니다.");
+      return;
+    }
+
+    if (moveItem.itemType === "folder" && parentId === moveItem.id) {
+      setMoveError("폴더를 자기 자신으로 이동할 수 없습니다.");
+      return;
+    }
+
+    setIsMoving(true);
+    setActiveActionItemId(moveItem.id);
+    setMoveError(null);
+
+    try {
+      await driveClient.updateItem(workspaceId, moveItem.id, { parentId });
+      setMoveItem(null);
+      setMoveDestinationData(emptyDriveData);
+      setMoveDestinationStatus("idle");
+      await reloadDrive();
+    } catch (moveErrorValue) {
+      setMoveError(errorMessageFromUnknown(moveErrorValue));
+    } finally {
+      setIsMoving(false);
+      setActiveActionItemId(null);
+    }
+  }
+
   function openRenameSheet(item: DriveItem) {
     setRenameItem(item);
     setRenameName(item.name);
@@ -1109,6 +1467,15 @@ export function DrivePanel() {
     }
   }
 
+  if (documentId) {
+    return (
+      <DriveDocumentEditor
+        documentId={documentId}
+        onClose={() => updateDocumentLocation(null)}
+      />
+    );
+  }
+
   const isLoading = status === "loading";
   const isEmpty = status === "success" && driveData.items.length === 0;
 
@@ -1165,6 +1532,20 @@ export function DrivePanel() {
                 <Upload />
               )}
               업로드
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={!canUseDrive || activeActionItemId === "create-document"}
+              onClick={() => void handleCreateDocument()}
+            >
+              {activeActionItemId === "create-document" ? (
+                <Loader2 className="animate-spin" />
+              ) : (
+                <FilePlus />
+              )}
+              새 문서
             </Button>
             <Button
               type="button"
@@ -1262,6 +1643,16 @@ export function DrivePanel() {
                     <FolderPlus />
                     새 폴더
                   </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={!canUseDrive || activeActionItemId === "create-document"}
+                    onClick={() => void handleCreateDocument()}
+                  >
+                    <FilePlus />
+                    새 문서
+                  </Button>
                 </div>
               </div>
             ) : (
@@ -1284,7 +1675,9 @@ export function DrivePanel() {
                           void handleDownloadItem(targetItem)
                         }
                         onOpenDelete={openDeleteDialog}
+                        onOpenDocument={(document) => updateDocumentLocation(document.id)}
                         onOpenFolder={(folder) => setCurrentParentId(folder.id)}
+                        onOpenMove={openMoveSheet}
                         onOpenRename={openRenameSheet}
                       />
                     ))}
@@ -1315,6 +1708,23 @@ export function DrivePanel() {
         onNameChange={setRenameName}
         onOpenChange={handleRenameOpenChange}
         onSubmit={handleRenameSubmit}
+      />
+
+      <MoveItemSheet
+        destination={moveDestinationData}
+        destinationParentId={moveDestinationParentId}
+        error={moveError}
+        hasDestinationError={moveDestinationStatus === "error"}
+        isDestinationReady={moveDestinationStatus === "success"}
+        isLoading={moveDestinationStatus === "loading"}
+        isSubmitting={isMoving}
+        item={moveItem}
+        onNavigate={navigateMoveDestination}
+        onOpenChange={handleMoveOpenChange}
+        onRetry={() =>
+          setMoveDestinationRequestVersion((version) => version + 1)
+        }
+        onSelect={(parentId) => void handleMoveSelect(parentId)}
       />
 
       <DeleteItemDialog
