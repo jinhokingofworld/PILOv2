@@ -53,6 +53,25 @@ await service.append(
 assert.equal(executed.length, 2);
 assert.equal(executed[1].values[3], "document_created");
 
+const prReviewActions = [
+  "pr_review_conflict_resolution_applied",
+  "pr_review_pull_request_merged"
+];
+for (const action of prReviewActions) {
+  await service.append(
+    transaction,
+    createInput({
+      action,
+      target: { type: "pull_request", id: "pull-request-1" },
+      dedupeKey: `pr-review:${action}:pull-request-1:1`
+    })
+  );
+}
+assert.deepEqual(
+  executed.slice(2).map(({ values }) => values[3]),
+  prReviewActions
+);
+
 await assert.rejects(
   () => service.append(transaction, createInput({ action: "unknown_action" })),
   (error) => hasBadRequestMessage(error, "Activity Log action must be registered")
@@ -81,7 +100,23 @@ await assert.rejects(
     ),
   (error) => hasBadRequestMessage(error, "Activity Log metadata.data must be an object")
 );
-assert.equal(executed.length, 2);
+assert.equal(executed.length, 4);
+
+const prReviewActionMigration = await readFile(
+  new URL(
+    "../../../../db/migrations/079_add_pr_review_activity_log_actions.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
+assert.match(
+  prReviewActionMigration,
+  /ALTER TYPE public\.activity_log_action\s+ADD VALUE IF NOT EXISTS 'pr_review_conflict_resolution_applied';/
+);
+assert.match(
+  prReviewActionMigration,
+  /ALTER TYPE public\.activity_log_action\s+ADD VALUE IF NOT EXISTS 'pr_review_pull_request_merged';/
+);
 
 assert.match(migration, /activity_logs_dedupe_key_max_length_check/);
 assert.match(migration, /length\(dedupe_key\) <= 512/);
