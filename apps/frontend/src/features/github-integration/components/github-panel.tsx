@@ -24,6 +24,7 @@ import {
 } from "@/features/github-integration/utils/github-connect-format";
 import { getGithubManualSyncActionMessage } from "@/features/github-integration/utils/github-manual-sync-status";
 import { hasRequiredGithubProjectOAuthScopes } from "@/features/github-integration/utils/github-project-oauth-scope";
+import { buildGithubSettingsReturnUrl } from "@/features/github-integration/utils/github-settings-entry";
 import {
   resolveGithubActiveBoardSelection,
   selectProjectV2IdForRepository
@@ -577,7 +578,7 @@ export function GithubPanel() {
 
     try {
       const result = await apiClient.startGithubOAuth({
-        returnUrl: window.location.href
+        returnUrl: buildGithubSettingsReturnUrl(window.location.href)
       });
       window.location.assign(result.authorizeUrl);
     } catch (error) {
@@ -609,7 +610,7 @@ export function GithubPanel() {
 
     try {
       const result = await apiClient.startGithubProjectOAuth({
-        returnUrl: window.location.href
+        returnUrl: buildGithubSettingsReturnUrl(window.location.href)
       });
       window.location.assign(result.authorizeUrl);
     } catch (error) {
@@ -687,7 +688,7 @@ export function GithubPanel() {
 
     try {
       const result = await apiClient.startGithubAppInstallation(workspaceId, {
-        returnUrl: window.location.href
+        returnUrl: buildGithubSettingsReturnUrl(window.location.href)
       });
       window.location.assign(result.installUrl);
     } catch (error) {
