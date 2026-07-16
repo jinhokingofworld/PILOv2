@@ -13,6 +13,7 @@ import type {
   GithubAppInstallation,
   GithubProjectOAuthStatus
 } from "@/features/github-integration/types";
+import { hasRequiredGithubProjectOAuthScopes } from "@/features/github-integration/utils/github-project-oauth-scope";
 
 import {
   GithubConnectPanel,
@@ -74,7 +75,12 @@ export function GithubConnectSteps({
   onConfirmDeleteInstallation
 }: StepsProps) {
   const hasInstallation = Boolean(selectedInstallation);
-  const projectOAuthConnected = projectOAuth?.connected === true;
+  const projectOAuthHasRequiredScopes =
+    hasRequiredGithubProjectOAuthScopes(projectOAuth?.tokenScope);
+  const projectOAuthConnected =
+    projectOAuth?.connected === true && projectOAuthHasRequiredScopes;
+  const projectOAuthNeedsReconnect =
+    projectOAuth?.connected === true && !projectOAuthHasRequiredScopes;
 
   return (
     <div className="space-y-[15px]">
@@ -299,8 +305,8 @@ export function GithubConnectSteps({
               </GithubConnectPill>
             </div>
             <p className="mt-3 text-[13px] leading-5 text-[#687184]">
-              Personal ProjectV2 동기화와 상태 쓰기에는 project scope OAuth
-              토큰이 필요합니다.
+              Personal ProjectV2 동기화와 상태 쓰기에는 project + repo scopes
+              OAuth 토큰이 필요합니다.
             </p>
             <div className="mt-auto flex flex-wrap gap-2 pt-5">
               {projectOAuthConnected ? (
@@ -333,7 +339,9 @@ export function GithubConnectSteps({
                   ) : (
                     <GitBranch data-icon="inline-start" />
                   )}
-                  Project access 연결
+                  {projectOAuthNeedsReconnect
+                    ? "Project access 재연결"
+                    : "Project access 연결"}
                 </Button>
               )}
             </div>

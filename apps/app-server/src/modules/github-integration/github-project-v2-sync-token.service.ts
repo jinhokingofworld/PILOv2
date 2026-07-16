@@ -6,6 +6,10 @@ import { GithubIntegrationConfigService } from "./github-integration-config.serv
 import { GithubTokenEncryptionService } from "./github-token-encryption.service";
 import { GithubOAuthConnectionService } from "./github-oauth-connection.service";
 import {
+  GITHUB_PROJECT_OAUTH_SCOPE_ERROR_MESSAGE,
+  hasRequiredGithubProjectOAuthScopes
+} from "./github-project-oauth-scope";
+import {
   requiresPersonalProjectV2OAuth,
   type GithubRepositoryOwnerType
 } from "./github-repository-owner";
@@ -17,8 +21,6 @@ interface GithubProjectV2SyncInstallation {
 
 const GITHUB_PROJECT_OAUTH_REQUIRED_MESSAGE =
   "GitHub ProjectV2 OAuth connection is required for personal ProjectV2 sync";
-const GITHUB_PROJECT_OAUTH_SCOPE_ERROR_MESSAGE =
-  "GitHub ProjectV2 OAuth connection must be reconnected with project scope";
 const GITHUB_PROJECT_OAUTH_OWNER_MISMATCH_MESSAGE =
   "GitHub ProjectV2 OAuth account does not match this personal ProjectV2 owner";
 
@@ -58,18 +60,10 @@ export class GithubProjectV2SyncTokenService {
       throw badRequest(GITHUB_PROJECT_OAUTH_OWNER_MISMATCH_MESSAGE);
     }
 
-    if (!this.hasProjectScope(connection.tokenScope)) {
+    if (!hasRequiredGithubProjectOAuthScopes(connection.tokenScope)) {
       throw badRequest(GITHUB_PROJECT_OAUTH_SCOPE_ERROR_MESSAGE);
     }
 
     return connection.accessToken;
-  }
-
-  private hasProjectScope(scope: string | null): boolean {
-    if (!scope) {
-      return false;
-    }
-
-    return scope.split(/[,\s]+/).includes("project");
   }
 }

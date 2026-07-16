@@ -40,6 +40,41 @@ assert.equal(
   "a personal repository owner must use the matching ProjectV2 OAuth token even when its installation is stored as an organization"
 );
 
+{
+  const projectOnlyTokenService = new GithubProjectV2SyncTokenService(
+    {},
+    {},
+    {},
+    {
+      async getActiveConnection() {
+        return {
+          githubLogin: ownerLogin,
+          tokenScope: "project",
+          accessToken: userAccessToken
+        };
+      }
+    }
+  );
+
+  await assert.rejects(
+    () =>
+      projectOnlyTokenService.resolvePersonalProjectV2UserAccessToken({
+        currentUserId: "current-user-id",
+        installation: {
+          account_login: "pilo-organization",
+          account_type: "Organization"
+        },
+        repositoryOwnerLogin: ownerLogin,
+        repositoryOwnerType: "User",
+        requiresProjectV2Access: true
+      }),
+    (error) =>
+      error.getResponse().error.message ===
+      "GitHub ProjectV2 OAuth connection must be reconnected with project and repo scopes",
+    "a project-only token must be reconnected before personal ProjectV2 sync"
+  );
+}
+
 const organizationToken = await tokenService.resolvePersonalProjectV2UserAccessToken({
   currentUserId: "current-user-id",
   installation: { account_login: "pilo-organization", account_type: "Organization" },

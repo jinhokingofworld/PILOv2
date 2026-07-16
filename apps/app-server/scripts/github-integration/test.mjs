@@ -32,6 +32,14 @@ const githubIntegrationApi = await readFile(
   new URL("../../../../docs/api/github-integration-api.md", import.meta.url),
   "utf8"
 );
+const apiIndex = await readFile(
+  new URL("../../../../docs/api/README.md", import.meta.url),
+  "utf8"
+);
+const githubIntegrationReadme = await readFile(
+  new URL("../../src/modules/github-integration/README.md", import.meta.url),
+  "utf8"
+);
 
 const githubIntegrationDirectory = new URL(
   "../../src/modules/github-integration/",
@@ -143,6 +151,30 @@ assert.match(githubIntegrationApi, /github_callback_error=installation_not_acces
 assert.match(githubIntegrationApi, /github_oauth_error=account_already_connected/);
 assert.match(githubIntegrationApi, /progressPercent/);
 assert.match(githubIntegrationApi, /progressStage/);
+assert.match(
+  githubIntegrationApi,
+  /"tokenScope": "read:user,user:email,project,repo"/
+);
+for (const contract of [apiIndex, githubIntegrationApi, githubIntegrationReadme]) {
+  assert.match(contract, /read:user user:email project repo/);
+  assert.match(contract, /project(?:`)?\s*(?:and|\+)\s*(?:`)?repo[\s\S]{0,80}scopes?/i);
+}
+assert.match(
+  githubIntegrationApi,
+  /existing `project`-only connections[\s\S]{0,120}reconnect/i
+);
+assert.match(
+  githubIntegrationApi,
+  /Board issue create[\s\S]{0,160}purpose=project_v2/i
+);
+assert.match(
+  githubIntegrationApi,
+  /Board issue update[\s\S]{0,200}purpose=app_user[\s\S]{0,200}PR Review[\s\S]{0,120}purpose=app_user/i
+);
+assert.match(
+  githubIntegrationApi,
+  /repo scope grants broad read\/write access[\s\S]{0,120}private repositories/i
+);
 assert.deepEqual(directoryNames.sort(), ["dto", "queries", "types"]);
 
 const tscScript = fileURLToPath(

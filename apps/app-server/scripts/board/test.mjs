@@ -67,6 +67,7 @@ const hydrationServiceFile = await readSource(
 const dtoIndexFile = await readSource("../../src/modules/board/dto/index.ts");
 const typesIndexFile = await readSource("../../src/modules/board/types/index.ts");
 const readmeFile = await readSource("../../src/modules/board/README.md");
+const boardApiFile = await readSource("../../../../docs/api/board-api.md");
 const projectItemFieldValueUniquenessMigration = await readSource(
   "../../../../db/migrations/020_backfill_project_item_field_value_uniqueness.sql"
 );
@@ -155,7 +156,14 @@ assert.doesNotMatch(issueUpdateServiceFile, /FROM pilo_issues/);
 
 assert.match(issueCreateServiceFile, /class BoardIssueCreateService/);
 assert.match(issueCreateServiceFile, /assertWorkspaceAccess/);
-assert.match(issueCreateServiceFile, /createIssue/);
+assert.match(
+  issueCreateServiceFile,
+  /this\.githubIssueWriteService\.createIssueWithProjectOAuth\(/
+);
+assert.doesNotMatch(
+  issueCreateServiceFile,
+  /this\.githubIssueWriteService\.createIssue\(/
+);
 assert.match(issueCreateServiceFile, /addProjectV2ItemByContentId/);
 assert.match(issueCreateServiceFile, /updateProjectV2ItemStatus/);
 assert.match(issueCreateServiceFile, /assertProjectV2WriteAccess/);
@@ -203,7 +211,26 @@ assert.match(
 );
 
 assert.match(githubIssueWriteServiceFile, /class GithubIssueWriteService/);
-assert.match(githubIssueWriteServiceFile, /getActiveConnection\(input\.currentUserId, "app_user"\)/);
+assert.match(
+  githubIssueWriteServiceFile,
+  /async updateIssue\([\s\S]*?getActiveConnection\(input\.currentUserId, "app_user"\)/
+);
+assert.match(
+  githubIssueWriteServiceFile,
+  /async updateIssueAssigneesDelta\([\s\S]*?getActiveConnection\([\s\S]*?"app_user"/
+);
+assert.match(
+  githubIssueWriteServiceFile,
+  /async listAssignableUsers\([\s\S]*?getActiveConnection\(input\.currentUserId, "app_user"\)/
+);
+assert.match(
+  githubIssueWriteServiceFile,
+  /async createIssue\([\s\S]*?getActiveConnection\(input\.currentUserId, "app_user"\)/
+);
+assert.match(
+  githubIssueWriteServiceFile,
+  /async createIssueWithProjectOAuth\([\s\S]*?getActiveConnection\([\s\S]*?"project_v2"/
+);
 assert.doesNotMatch(githubIssueWriteServiceFile, /github_access_token_encrypted/);
 assert.match(githubIssueWriteServiceFile, /updateRepositoryIssue/);
 assert.match(githubIssueWriteServiceFile, /createRepositoryIssue/);
@@ -225,6 +252,18 @@ assert.match(typesIndexFile, /BoardPayload/);
 assert.match(typesIndexFile, /UpdateBoardIssuePayload/);
 
 assert.match(readmeFile, /API contract: `docs\/api\/board-api\.md`/);
+assert.match(
+  boardApiFile,
+  /Board issue create[\s\S]{0,160}purpose=project_v2/i
+);
+assert.match(
+  boardApiFile,
+  /Board issue update[\s\S]{0,240}purpose=app_user/i
+);
+assert.match(
+  boardApiFile,
+  /repo scope grants broad read\/write access[\s\S]{0,120}private repositories/i
+);
 
 execFileSync(process.execPath, [tscScript, "-p", "tsconfig.build.json"], {
   cwd: appServerRoot,
@@ -240,6 +279,7 @@ await import("./issue-assignees.test.mjs");
 await import("./status-update.test.mjs");
 await import("./issue-update.test.mjs");
 await import("./issue-create.test.mjs");
+await import("./issue-create-project-oauth.test.mjs");
 await import("./issue-create-operation-migration.test.mjs");
 await import("./issue-create-idempotency.test.mjs");
 await import("./activity-log.test.mjs");

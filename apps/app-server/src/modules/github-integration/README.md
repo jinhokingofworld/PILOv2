@@ -27,7 +27,10 @@ API contract: `docs/api/github-integration-api.md`
 - GitHub App installation 연결은 현재 사용자의 GitHub App user access token을 선행 조건으로 두고, callback의 `installation_id`가 해당 사용자에게 접근 가능한 installation인지 검증한 뒤 저장한다.
 - `/user/installations` 조회가 가능한 GitHub App user access token이 필요하다. classic OAuth App token만 저장된 상태면 installation 시작 단계에서 거절한다.
 - Repository/Issue/PR와 organization ProjectV2 조회와 동기화는 GitHub App installation token을 사용한다.
-- personal ProjectV2 조회/쓰기/동기화는 `/me/github/project-oauth/start`로 연결한 별도 GitHub OAuth App token(`project` scope)을 사용한다.
+- ProjectV2 OAuth authorize scope는 정확히 `read:user user:email project repo`이며 callback과 runtime은 project and repo scopes를 모두 요구한다. 기존 `project`-only 연결은 다시 연결해야 한다.
+- personal ProjectV2 조회/쓰기/동기화와 Board issue create는 별도 GitHub OAuth App token(`purpose=project_v2`)을 사용한다.
+- Board issue update와 assignee 변경·조회, PR Review는 GitHub App user OAuth token(`purpose=app_user`)을 유지한다.
+- The repo scope grants broad read/write access to public and private repositories available to the connected GitHub user.
 - GitHub Review 제출 공개 API는 PR Review가 소유하고, 이 모듈은 PR Review가 호출하는
   서버 내부 OAuth token/decrypt 및 body-only 제출 adapter를 제공한다.
 - GitHub App `Pull requests: write` permission이 없으면 Review 제출은 권한 부족 에러로

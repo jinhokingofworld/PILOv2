@@ -187,7 +187,7 @@ function createReply() {
   const controller = new GithubIntegrationController({
     async completeGithubProjectOAuthCallback() {
       throw badRequest(
-        "GitHub ProjectV2 OAuth connection must be reconnected with project scope"
+        "GitHub ProjectV2 OAuth connection must be reconnected with project and repo scopes"
       );
     },
     getGithubCallbackFailureRedirectUrl() {

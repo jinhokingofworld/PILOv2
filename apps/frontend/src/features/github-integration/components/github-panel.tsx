@@ -23,6 +23,7 @@ import {
   getGithubConnectSyncTargetLabel
 } from "@/features/github-integration/utils/github-connect-format";
 import { getGithubManualSyncActionMessage } from "@/features/github-integration/utils/github-manual-sync-status";
+import { hasRequiredGithubProjectOAuthScopes } from "@/features/github-integration/utils/github-project-oauth-scope";
 import {
   resolveGithubActiveBoardSelection,
   selectProjectV2IdForRepository
@@ -79,7 +80,7 @@ const PERSONAL_PROJECT_OAUTH_REQUIRED_MESSAGE =
 const PERSONAL_PROJECT_OAUTH_ACCOUNT_MISMATCH_MESSAGE =
   "GitHub ProjectV2 OAuth account does not match this personal ProjectV2 owner";
 const PERSONAL_PROJECT_OAUTH_SCOPE_MESSAGE =
-  "GitHub ProjectV2 OAuth connection must be reconnected with project scope";
+  "GitHub ProjectV2 OAuth connection must be reconnected with project and repo scopes";
 const GITHUB_CALLBACK_ERROR_PARAM = "github_callback_error";
 const GITHUB_OAUTH_CALLBACK_ERROR_PARAM = "github_oauth_error";
 const GITHUB_OAUTH_ACCOUNT_ALREADY_CONNECTED_ERROR =
@@ -103,21 +104,13 @@ const GITHUB_CALLBACK_ERROR_MESSAGES: Record<string, string> = {
   project_oauth_account_mismatch:
     "GitHub ProjectV2 OAuth 계정은 GitHub OAuth 계정과 같아야 합니다.",
   project_oauth_scope_missing:
-    "GitHub ProjectV2 권한이 부족합니다. project 권한으로 다시 연결하세요.",
+    "GitHub ProjectV2 OAuth에는 project와 repo 권한이 모두 필요합니다. 다시 연결하세요.",
   token_exchange_failed:
     "GitHub 인증 토큰을 발급받지 못했습니다. 다시 시도하세요."
 };
 
 function requiresProjectOAuth(target: GithubSyncTarget) {
   return target === "full" || projectScopedSyncTargets.has(target);
-}
-
-function hasProjectScope(scope: string | null | undefined) {
-  if (!scope) {
-    return false;
-  }
-
-  return scope.split(/[,\s]+/).includes("project");
 }
 
 function getErrorMessage(error: unknown) {
@@ -884,7 +877,7 @@ export function GithubPanel() {
         return;
       }
 
-      if (!hasProjectScope(projectOAuth.tokenScope)) {
+      if (!hasRequiredGithubProjectOAuthScopes(projectOAuth.tokenScope)) {
         setActionError(PERSONAL_PROJECT_OAUTH_SCOPE_MESSAGE);
         return;
       }

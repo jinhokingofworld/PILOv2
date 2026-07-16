@@ -90,7 +90,7 @@ const projectOAuthConnectedRow = {
   github_user_id: "12345678",
   github_login: "juhyeong",
   access_token_encrypted: tokenEncryption.encryptToken("project-access-token", projectOAuthConfig),
-  token_scope: "read:user,user:email,project",
+  token_scope: "read:user,user:email,project,repo",
   connected_at: fixedNow,
   revoked_at: null
 };
@@ -229,7 +229,7 @@ const projectOAuthConnectedRow = {
     connected: true,
     githubUserId: 12345678,
     githubLogin: "juhyeong",
-    tokenScope: "read:user,user:email,project",
+    tokenScope: "read:user,user:email,project,repo",
     githubConnectedAt: "2026-07-04T12:00:00.000Z",
     githubRevokedAt: null
   });
@@ -297,7 +297,7 @@ const projectOAuthConnectedRow = {
   );
   assert.equal(
     authorizeUrl.searchParams.get("scope"),
-    "read:user user:email project"
+    "read:user user:email project repo"
   );
   assert.equal(authorizeUrl.searchParams.get("state"), start.state);
   assert.match(start.stateCookie, /pilo_github_project_oauth_state=/);
@@ -346,7 +346,7 @@ const projectOAuthConnectedRow = {
       );
       return {
         accessToken: "plain-project-access-token",
-        scope: "read:user,user:email,project"
+        scope: "read:user,user:email,project,repo"
       };
     },
     async getAuthenticatedUser(accessToken) {
@@ -377,7 +377,7 @@ const projectOAuthConnectedRow = {
     connected: true,
     githubUserId: 12345678,
     githubLogin: "juhyeong",
-    tokenScope: "read:user,user:email,project",
+    tokenScope: "read:user,user:email,project,repo",
     githubConnectedAt: "2026-07-04T12:00:00.000Z",
     returnUrl: "https://pilo.test/settings/integrations/github"
   });
@@ -421,7 +421,7 @@ const projectOAuthConnectedRow = {
       async exchangeCodeForAccessToken() {
         return {
           accessToken: "plain-project-access-token",
-          scope: "read:user,user:email"
+          scope: "project"
         };
       },
       async getAuthenticatedUser() {
@@ -447,7 +447,7 @@ const projectOAuthConnectedRow = {
       ),
     (error) =>
       error?.response?.error?.message ===
-      "GitHub ProjectV2 OAuth connection must be reconnected with project scope"
+      "GitHub ProjectV2 OAuth connection must be reconnected with project and repo scopes"
   );
 }
 
@@ -480,7 +480,7 @@ const projectOAuthConnectedRow = {
       async exchangeCodeForAccessToken() {
         return {
           accessToken: "plain-project-access-token",
-          scope: "read:user,user:email"
+          scope: "project"
         };
       }
     },
@@ -502,7 +502,7 @@ const projectOAuthConnectedRow = {
       error?.returnUrl === "https://pilo.test/settings/integrations/github" &&
       error?.callbackError === "project_oauth_scope_missing" &&
       error?.response?.error?.message ===
-        "GitHub ProjectV2 OAuth connection must be reconnected with project scope"
+        "GitHub ProjectV2 OAuth connection must be reconnected with project and repo scopes"
   );
 }
 

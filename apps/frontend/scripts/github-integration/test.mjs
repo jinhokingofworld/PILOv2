@@ -118,7 +118,10 @@ assert.match(
 );
 assert.match(githubPanel, /GitHub 승인이 취소되었습니다/);
 assert.match(githubPanel, /GitHub 연동 요청이 만료되었거나 이미 사용되었습니다/);
-assert.match(githubPanel, /GitHub ProjectV2 권한이 부족합니다/);
+assert.match(
+  githubPanel,
+  /GitHub ProjectV2 OAuth에는 project와 repo 권한이 모두 필요합니다/
+);
 assert.match(githubPanel, /현재 연결된 GitHub 계정에서 접근할 수 없는 GitHub App 설치입니다/);
 assert.match(githubPanel, /window\.history\.replaceState/);
 assert.match(githubPanel, /handleStartGithubOAuth/);
@@ -230,3 +233,4 @@ await import("../../src/features/github-integration/github-connect-format.test.m
 await import("../../src/features/github-integration/repository-scoped-sync.test.mjs");
 await import("../../src/features/github-integration/repository-pagination.test.mjs");
 await import("../../src/features/github-integration/github-settings-status.test.mjs");
+await import("../../src/features/github-integration/github-project-oauth-scope.test.mjs");

@@ -446,7 +446,7 @@ class FakeGithubIssueWriteService {
     this.calls = [];
   }
 
-  async createIssue(input) {
+  async createIssueWithProjectOAuth(input) {
     this.calls.push(input);
     return { ...githubIssue };
   }

@@ -256,7 +256,7 @@ function githubProjectOAuthConnectionRow(overrides = {}) {
   return {
     github_login: "Developer-EJ",
     access_token_encrypted: "encrypted-project-oauth-token",
-    token_scope: "read:user,user:email,project",
+    token_scope: "read:user,user:email,project,repo",
     connected_at: "2026-07-05T09:00:00.000Z",
     revoked_at: null,
     ...overrides
@@ -1260,7 +1260,7 @@ function projectV2ItemApiItem(overrides = {}) {
         assert.match(text, /status = 'failed'/i);
         assert.deepEqual(values, [
           syncRunId,
-          "GitHub ProjectV2 OAuth connection must be reconnected with project scope"
+          "GitHub ProjectV2 OAuth connection must be reconnected with project and repo scopes"
         ]);
         return syncRunRow({
           target: "full",
@@ -1272,7 +1272,7 @@ function projectV2ItemApiItem(overrides = {}) {
           updated_count: 0,
           skipped_count: 0,
           error_message:
-            "GitHub ProjectV2 OAuth connection must be reconnected with project scope",
+            "GitHub ProjectV2 OAuth connection must be reconnected with project and repo scopes",
           cursor: {}
         });
       }
@@ -1289,7 +1289,7 @@ function projectV2ItemApiItem(overrides = {}) {
   assert.equal(syncRun.status, "failed");
   assert.equal(
     syncRun.errorMessage,
-    "GitHub ProjectV2 OAuth connection must be reconnected with project scope"
+    "GitHub ProjectV2 OAuth connection must be reconnected with project and repo scopes"
   );
   assert.deepEqual(githubAppClient.calls, []);
 }

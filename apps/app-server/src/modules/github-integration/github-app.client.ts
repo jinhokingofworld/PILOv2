@@ -2,6 +2,7 @@ import { createSign } from "node:crypto";
 import { HttpStatus, Injectable, Optional } from "@nestjs/common";
 import { ApiError, badRequest, forbidden } from "../../common/api-error";
 import { GITHUB_API_VERSION } from "./github-api.constants";
+import { GITHUB_PROJECT_OAUTH_SCOPE_ERROR_MESSAGE } from "./github-project-oauth-scope";
 import { GithubSyncObservabilityService } from "./github-sync-observability.service";
 
 export interface GithubAppInstallationLookupRequest {
@@ -462,8 +463,6 @@ const GITHUB_SYNC_MAX_PAGES = 100;
 const GITHUB_ASSIGNEE_LOOKUP_TIMEOUT_MS = 30_000;
 const GITHUB_PROJECT_V2_READ_TIMEOUT_MS = 30_000;
 const GITHUB_PROJECT_V2_ITEM_STATUS_TIMEOUT_MS = 30_000;
-const GITHUB_PROJECT_V2_OAUTH_SCOPE_ERROR_MESSAGE =
-  "GitHub ProjectV2 OAuth connection must be reconnected with project scope";
 const GITHUB_PROJECT_V2_OWNER_RESOLUTION_ERROR_MESSAGE =
   "GitHub ProjectV2 owner could not be resolved";
 const GITHUB_PROJECT_V2_PERSONAL_USER_PERMISSION_ERROR_MESSAGE =
@@ -2426,7 +2425,7 @@ export class GithubAppClient {
       context?.tokenSource === "user" &&
       errors.some((error) => this.isProjectV2ScopeError(error))
     ) {
-      return GITHUB_PROJECT_V2_OAUTH_SCOPE_ERROR_MESSAGE;
+      return GITHUB_PROJECT_OAUTH_SCOPE_ERROR_MESSAGE;
     }
 
     if (errors.some((error) => this.isProjectV2OwnerResolutionError(error))) {

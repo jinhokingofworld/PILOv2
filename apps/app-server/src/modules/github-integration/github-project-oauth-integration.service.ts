@@ -8,6 +8,11 @@ import { GithubOAuthClient } from "./github-oauth.client";
 import { GithubOAuthConnectionService } from "./github-oauth-connection.service";
 import { githubCallbackBadRequest } from "./github-oauth-callback-error";
 import { GithubOAuthStateService } from "./github-oauth-state.service";
+import {
+  GITHUB_PROJECT_OAUTH_AUTHORIZE_SCOPE,
+  GITHUB_PROJECT_OAUTH_SCOPE_ERROR_MESSAGE,
+  hasRequiredGithubProjectOAuthScopes
+} from "./github-project-oauth-scope";
 import { validateGithubCallbackReturnUrl } from "./github-return-url";
 import { GithubTokenEncryptionService } from "./github-token-encryption.service";
 import type {
@@ -20,10 +25,6 @@ import type {
 type GithubProjectOAuthStartResult = GithubProjectOAuthStartPayload & {
   stateCookie: string;
 };
-
-const GITHUB_PROJECT_OAUTH_SCOPE = "read:user user:email project";
-const GITHUB_PROJECT_OAUTH_SCOPE_ERROR_MESSAGE =
-  "GitHub ProjectV2 OAuth connection must be reconnected with project scope";
 
 @Injectable()
 export class GithubProjectOAuthIntegrationService {
@@ -86,7 +87,7 @@ export class GithubProjectOAuthIntegrationService {
     const authorizeUrl = new URL("https://github.com/login/oauth/authorize");
     authorizeUrl.searchParams.set("client_id", config.clientId);
     authorizeUrl.searchParams.set("redirect_uri", this.getCallbackUrl(config));
-    authorizeUrl.searchParams.set("scope", GITHUB_PROJECT_OAUTH_SCOPE);
+    authorizeUrl.searchParams.set("scope", GITHUB_PROJECT_OAUTH_AUTHORIZE_SCOPE);
     authorizeUrl.searchParams.set("state", state);
 
     return {
@@ -123,7 +124,7 @@ export class GithubProjectOAuthIntegrationService {
       storedState.returnUrl
     );
 
-    if (!this.hasProjectScope(token.scope)) {
+    if (!hasRequiredGithubProjectOAuthScopes(token.scope)) {
       throw githubCallbackBadRequest(
         GITHUB_PROJECT_OAUTH_SCOPE_ERROR_MESSAGE,
         storedState.returnUrl,
@@ -281,23 +282,6 @@ export class GithubProjectOAuthIntegrationService {
         "callback_failed"
       );
     }
-  }
-
-  private hasProjectScope(scope: string | null): boolean {
-    return this.parseScopes(scope).has("project");
-  }
-
-  private parseScopes(scope: string | null): Set<string> {
-    if (!scope) {
-      return new Set();
-    }
-
-    return new Set(
-      scope
-        .split(/[,\s]+/)
-        .map((value) => value.trim())
-        .filter(Boolean)
-    );
   }
 
   private validateRequiredString(value: unknown, message: string): string {
