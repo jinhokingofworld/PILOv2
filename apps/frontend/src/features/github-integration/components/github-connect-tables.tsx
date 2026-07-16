@@ -103,7 +103,7 @@ export function GithubConnectSourceTables({
           </GithubConnectEmptyState>
         ) : (
           <div className="repo-table overflow-hidden rounded-[8px] border border-[#d9dee8]">
-            <div className="repo-row header grid grid-cols-[minmax(180px,1.7fr)_90px_90px_108px_86px] gap-3 bg-[#f5f7fb] px-3 py-2 text-[12px] font-semibold uppercase tracking-[0.06em] text-[#7a8497] max-[760px]:hidden">
+            <div className="repo-row header hidden gap-3 bg-[#f5f7fb] px-3 py-2 text-[12px] font-semibold uppercase tracking-[0.06em] text-[#7a8497] @[48rem]:grid @[48rem]:grid-cols-[minmax(180px,1.7fr)_90px_90px_108px_86px]">
               <span>Repository</span>
               <span>Visibility</span>
               <span>보관 상태</span>
@@ -244,7 +244,7 @@ export function GithubConnectSourceTables({
           </GithubConnectEmptyState>
         ) : (
           <div className="project-table overflow-hidden rounded-[8px] border border-[#d9dee8]">
-            <div className="project-row header grid grid-cols-[minmax(180px,1.7fr)_120px_112px_100px] gap-3 bg-[#f5f7fb] px-3 py-2 text-[12px] font-semibold uppercase tracking-[0.06em] text-[#7a8497] max-[760px]:hidden">
+            <div className="project-row header hidden gap-3 bg-[#f5f7fb] px-3 py-2 text-[12px] font-semibold uppercase tracking-[0.06em] text-[#7a8497] @[48rem]:grid @[48rem]:grid-cols-[minmax(180px,1.7fr)_120px_112px_100px]">
               <span>Project</span>
               <span>Owner</span>
               <span>Updated</span>
@@ -283,7 +283,7 @@ function RepositoryRow({
 }) {
   return (
     <div
-      className={`repo-row grid grid-cols-[minmax(180px,1.7fr)_90px_90px_108px_86px] items-center gap-3 px-3 py-3 text-[13px] max-[760px]:grid-cols-1 max-[760px]:gap-2 ${
+      className={`repo-row grid grid-cols-1 items-center gap-2 px-3 py-3 text-[13px] @[48rem]:grid-cols-[minmax(180px,1.7fr)_90px_90px_108px_86px] @[48rem]:gap-3 ${
         isSelected ? "bg-[#f5f7ff]" : "bg-white"
       }`}
     >
@@ -340,7 +340,7 @@ function ProjectRow({
 }) {
   return (
     <div
-      className={`project-row grid grid-cols-[minmax(180px,1.7fr)_120px_112px_100px] items-center gap-3 px-3 py-3 text-[13px] max-[760px]:grid-cols-1 max-[760px]:gap-2 ${
+      className={`project-row grid grid-cols-1 items-center gap-2 px-3 py-3 text-[13px] @[48rem]:grid-cols-[minmax(180px,1.7fr)_120px_112px_100px] @[48rem]:gap-3 ${
         isSelected ? "bg-[#f5f7ff]" : "bg-white"
       }`}
     >

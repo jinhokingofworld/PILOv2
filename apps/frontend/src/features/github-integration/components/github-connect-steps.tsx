@@ -118,7 +118,7 @@ export function GithubConnectSteps({
         title="현재 작업"
         subtitle="현재 연결 상태에 따라 다음에 필요한 작업만 노출합니다."
       >
-        <div className="grid gap-4 md:grid-cols-3">
+        <div className="grid gap-4 @[48rem]:grid-cols-3">
           <div
             className={
               connected ? completedTaskCardClassName : pendingTaskCardClassName
