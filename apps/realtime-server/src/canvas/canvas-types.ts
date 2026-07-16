@@ -131,10 +131,6 @@ export type CanvasShapeLockState = CanvasRoomRef & {
   shapeId: string;
 };
 
-export type CanvasShapeLockClaimPayload = CanvasRoomRef & {
-  shapeIds: string[];
-};
-
 export type CanvasShapeLockAcceptedPayload = CanvasRoomRef & {
   locks: CanvasShapeLockState[];
 };
@@ -142,10 +138,6 @@ export type CanvasShapeLockAcceptedPayload = CanvasRoomRef & {
 export type CanvasShapeLockRejectedPayload = CanvasRoomRef & {
   locks: CanvasShapeLockState[];
   shapeIds: string[];
-};
-
-export type CanvasShapeLockReleasePayload = CanvasRoomRef & {
-  shapeIds?: string[];
 };
 
 export type CanvasShapeLockReleaseEventPayload = CanvasRoomRef & {

@@ -1319,7 +1319,7 @@
     0 18px 42px rgba(15, 23, 42, 0.24);
 }
 
-.pilo-code-block-shape.is-remotely-edit-locked .pilo-code-block {
+.pilo-code-block-shape.is-remotely-editing .pilo-code-block {
   border-color: rgba(251, 146, 60, 0.7);
   box-shadow:
     0 0 0 2px rgba(251, 146, 60, 0.24),

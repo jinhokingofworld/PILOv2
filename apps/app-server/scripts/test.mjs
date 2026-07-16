@@ -602,3 +602,11 @@ await import("./sqltoerd/operation-delivery.test.mjs");
 await import("./sqltoerd/source-snapshot.test.mjs");
 await import("./sqltoerd/operation-publisher.test.mjs");
 await import("./sqltoerd/operations-v1-cutover-manifest.test.mjs");
+await import("./sqltoerd/schema-generator.test.mjs");
+if (process.env.DATABASE_URL) {
+  await import("./sqltoerd/schema-generator-postgres.test.mjs");
+}
+if (process.env.MYSQL_TEST_URL) {
+  await import("./sqltoerd/schema-generator-mysql.test.mjs");
+}
+await import("./sqltoerd/schema-mutation.test.mjs");

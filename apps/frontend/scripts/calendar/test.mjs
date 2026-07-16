@@ -56,6 +56,9 @@ assert.match(calendarPanel, /일정을 보려면 로그인이 필요합니다/);
 assert.match(calendarPanel, /createCalendarApiClient/);
 assert.match(calendarPanel, /getCalendarGridDates/);
 assert.match(calendarPanel, /getEventsForCalendarDate/);
+assert.match(calendarPanel, /getCalendarWeekEventBars/);
+assert.match(calendarPanel, /CalendarEventBar/);
+assert.match(calendarPanel, /pointer-events-none absolute inset-x-0 top-10/);
 assert.match(calendarPanel, /CalendarEventDialog/);
 assert.match(
   calendarPanel,
@@ -106,3 +109,5 @@ assert.doesNotMatch(calendarPanel, /pilo-local-workspace/);
 assert.doesNotMatch(calendarPanel, /localStorage/);
 assert.doesNotMatch(calendarPanel, /Workspace ID/);
 assert.doesNotMatch(calendarPanel, /워크스페이스 ID/);
+
+await import("../../src/features/calendar/calendar-event-bars.test.mjs");

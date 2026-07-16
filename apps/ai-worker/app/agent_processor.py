@@ -13,7 +13,7 @@ from app.meeting_report_processor import InfrastructureError
 
 AGENT_RUN_REQUESTED_JOB_TYPE = "agent_run_requested"
 AGENT_GROUNDED_ANSWER_REQUESTED_JOB_TYPE = "agent_grounded_answer_requested"
-AGENT_TOOL_SCHEMA_VERSION = "agent-tools:v3"
+AGENT_TOOL_SCHEMA_VERSION = "agent-tools:v4"
 AGENT_PLANNER_TURN_LIMIT_MESSAGE = (
     "한 요청에서 계획할 수 있는 작업은 최대 5회입니다. "
     "다음 요청에서 계속 진행할 내용을 알려주세요."
@@ -727,10 +727,36 @@ def _missing_required_tool_input_fields(
     for field in required:
         if not isinstance(field, str) or not field:
             continue
-        value = input_value.get(field)
-        if value is None or value == "" or value == {}:
+        if field not in input_value:
             missing.append(field)
+            continue
+        value = input_value[field]
+        property_schema = _tool_input_property_schema(tool, field)
+        if value is None:
+            allowed_types = property_schema.get("type")
+            if allowed_types == "null" or (
+                isinstance(allowed_types, list) and "null" in allowed_types
+            ):
+                continue
+            missing.append(field)
+        elif value == "" or value == {}:
+            missing.append(field)
+        elif isinstance(value, list):
+            min_items = property_schema.get("minItems")
+            if isinstance(min_items, int) and len(value) < min_items:
+                missing.append(field)
     return tuple(missing)
+
+
+def _tool_input_property_schema(
+    tool: AgentToolSchema,
+    field: str,
+) -> dict[str, object]:
+    properties = tool.input_schema.get("properties")
+    if not isinstance(properties, dict):
+        return {}
+    schema = properties.get(field)
+    return schema if isinstance(schema, dict) else {}
 
 
 def _missing_calendar_update_fields(
@@ -997,6 +1023,15 @@ def _agent_planner_system_prompt() -> str:
         "Calendar default can apply; never set endTime equal to startTime. "
         "When the user supplies a positive integer Calendar event ID with changes, use it and let "
         "the App Server verify that the event exists in the Workspace. "
+        "Use generate_sql_erd when the user asks to generate an ERD, database schema, or SQL DDL "
+        "from natural-language requirements. Its input must be one complete SqlErdSchemaSpecV1 "
+        "object matching the provided schema; never return raw DDL as tool input. Always include "
+        "unsupportedFeatures and list requested features the generator cannot represent instead "
+        "of silently omitting them. Actual database execution is not supported: a request only to "
+        "execute, deploy, or apply SQL to a database must be unsupported. Never include "
+        "targetMode, sessionId, workspaceId, userId, or currentUserId in generate_sql_erd input; "
+        "the App Server "
+        "resolves context and, when needed, asks the user whether to create or replace a session. "
         "Normalize relative dates using the provided timezone and currentDate. For Korean week "
         "phrases, '이번 주말' means the nearest Saturday-Sunday that is not fully past: include "
         "the current Saturday, but on Sunday use the following weekend. '다음 주 월요일' means "

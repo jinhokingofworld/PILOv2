@@ -67,7 +67,6 @@ export function PiloCodeBlockComponent({
     () => editor.getEditingShapeId() === shape.id,
     [editor, shape.id],
   );
-  const isEditSoftLocked = !isEditing && Boolean(remoteShapeEditingLabel);
 
   function updateProps(props: Partial<PiloCodeBlockShapeProps>) {
     const currentShape = editor.getShape(shape.id);
@@ -181,17 +180,13 @@ export function PiloCodeBlockComponent({
 
   return (
     <HTMLContainer
-      className={`pilo-code-block-shape${isEditing ? " is-editing" : ""}${isCollapsed ? " is-collapsed" : ""}${remoteShapePresenceLabel ? " is-remotely-selected" : ""}${isEditSoftLocked ? " is-remotely-edit-locked" : ""}`}
+      className={`pilo-code-block-shape${isEditing ? " is-editing" : ""}${isCollapsed ? " is-collapsed" : ""}${remoteShapePresenceLabel ? " is-remotely-selected" : ""}${remoteShapeEditingLabel ? " is-remotely-editing" : ""}`}
       style={{
         width: shape.props.w,
         height: shape.props.h,
       }}
       onDoubleClick={(event) => {
         event.stopPropagation();
-        if (isEditSoftLocked) {
-          editor.markEventAsHandled(event);
-          return;
-        }
         if (isPiloCodeBlockShape(editor.getShape(shape.id))) {
           editor.setEditingShape(shape.id);
         }
@@ -213,7 +208,7 @@ export function PiloCodeBlockComponent({
           {remoteShapeEditingLabel ? (
             <span
               className="pilo-code-remote-edit-badge"
-              title="Another user is editing this code block. New edit entry is locked to avoid text conflicts."
+              title="다른 사용자가 이 코드 블록을 편집 중입니다. 변경사항은 서버 수신 순서대로 반영됩니다."
             >
               {remoteShapeEditingLabel}
             </span>

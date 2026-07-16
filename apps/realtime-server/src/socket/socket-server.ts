@@ -74,8 +74,6 @@ import type {
   CanvasRoomShapePatchPayload,
   CanvasRoomRef,
   CanvasViewportLoadedPayload,
-  CanvasShapeLockClaimPayload,
-  CanvasShapeLockReleasePayload,
   CanvasShapeOperationPayload,
   CanvasShapePreviewClearRequestPayload,
   CanvasShapePreviewPayload,
@@ -489,41 +487,6 @@ function readShapeIdList(value: unknown): string[] | null {
 
 function readShapeIds(payload: Record<string, unknown>): string[] | null {
   return readShapeIdList(payload.shapeIds);
-}
-
-function readShapeLockClaimPayload(
-  payload: unknown,
-): CanvasShapeLockClaimPayload | null {
-  const room = readRoomRef(payload);
-
-  if (!room || !isRecord(payload)) return null;
-
-  const shapeIds = readShapeIds(payload);
-
-  if (!shapeIds?.length) return null;
-
-  return {
-    ...room,
-    shapeIds,
-  };
-}
-
-function readShapeLockReleasePayload(
-  payload: unknown,
-): CanvasShapeLockReleasePayload | null {
-  const room = readRoomRef(payload);
-
-  if (!room || !isRecord(payload)) return null;
-
-  const shapeIds =
-    payload.shapeIds === undefined ? undefined : readShapeIds(payload);
-
-  if (payload.shapeIds !== undefined && !shapeIds) return null;
-
-  return {
-    ...room,
-    ...(shapeIds ? { shapeIds } : {}),
-  };
 }
 
 function isShapePreviewPhase(
@@ -1241,9 +1204,6 @@ export async function createRealtimeSocketServer({
       }
 
       if (lockReleasePayload) {
-        socket
-          .to(roomName)
-          .emit(canvasServerEvents.shapeLockRelease, lockReleasePayload);
         emitConflictDraftLockReleases(io, lockReleasePayload);
       }
 
@@ -1384,87 +1344,6 @@ export async function createRealtimeSocketServer({
       authedSocket.data.pageCursorPresenceByRoom[roomName] = presence;
 
       socket.to(roomName).emit(pageCursorServerEvents.update, presence);
-    });
-
-    socket.on(canvasClientEvents.shapeLockClaim, async (payload) => {
-      const claimPayload = readShapeLockClaimPayload(payload);
-
-      if (!claimPayload) {
-        emitCanvasError(socket, "canvas:shape:lock:claim payload is invalid");
-        return;
-      }
-
-      const roomName = createCanvasRoomName(claimPayload);
-
-      if (!socket.rooms.has(roomName)) {
-        socket.emit(
-          canvasServerEvents.error,
-          createSocketErrorPayload(
-            "room_not_joined",
-            "join canvas room before claiming shape locks",
-          ),
-        );
-        return;
-      }
-
-      if (!assertCanvasRoomWritable(authedSocket, roomName)) {
-        return;
-      }
-
-      const result = await shapeLockService.claimLocks(
-        socket.id,
-        authedSocket.data.auth.userId ?? socket.id,
-        claimPayload,
-        claimPayload.shapeIds,
-      );
-
-      if (result.accepted.locks.length) {
-        socket.emit(canvasServerEvents.shapeLockAccepted, result.accepted);
-        socket
-          .to(roomName)
-          .emit(canvasServerEvents.shapeLockUpdate, result.accepted);
-      }
-
-      if (result.rejected.shapeIds.length) {
-        socket.emit(canvasServerEvents.shapeLockRejected, result.rejected);
-      }
-    });
-
-    socket.on(canvasClientEvents.shapeLockRelease, async (payload) => {
-      const releasePayload = readShapeLockReleasePayload(payload);
-
-      if (!releasePayload) {
-        emitCanvasError(socket, "canvas:shape:lock:release payload is invalid");
-        return;
-      }
-
-      const roomName = createCanvasRoomName(releasePayload);
-
-      if (!socket.rooms.has(roomName)) {
-        socket.emit(
-          canvasServerEvents.error,
-          createSocketErrorPayload(
-            "room_not_joined",
-            "join canvas room before releasing shape locks",
-          ),
-        );
-        return;
-      }
-
-      if (!assertCanvasRoomWritable(authedSocket, roomName)) {
-        return;
-      }
-
-      const lockReleasePayload = await shapeLockService.clearRoomLocks(
-        socket.id,
-        authedSocket.data.auth.userId ?? socket.id,
-        releasePayload,
-        releasePayload.shapeIds,
-      );
-
-      if (!lockReleasePayload) return;
-
-      io.to(roomName).emit(canvasServerEvents.shapeLockRelease, lockReleasePayload);
     });
 
     socket.on(canvasClientEvents.viewportLoaded, (payload) => {
@@ -1849,9 +1728,6 @@ export async function createRealtimeSocketServer({
         }
 
         for (const lockReleasePayload of lockReleaseEvents) {
-          socket
-            .to(createCanvasRoomName(lockReleasePayload))
-            .emit(canvasServerEvents.shapeLockRelease, lockReleasePayload);
           emitConflictDraftLockReleases(io, lockReleasePayload);
         }
 

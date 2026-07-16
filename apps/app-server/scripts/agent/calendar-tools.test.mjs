@@ -72,6 +72,37 @@ class FakeCalendarService {
     return createEvent(body);
   }
 
+  normalizeCreateEventInput(body) {
+    const startDate = body.startDate;
+    const endDate = body.endDate ?? startDate;
+    const isAllDay = body.isAllDay ?? !body.startTime;
+    if (
+      endDate < startDate ||
+      (!isAllDay &&
+        body.startTime &&
+        body.endTime &&
+        endDate === startDate &&
+        body.endTime <= body.startTime)
+    ) {
+      const error = new Error("endTime must be later than startTime");
+      error.getStatus = () => 400;
+      error.getResponse = () => ({ error: { code: "BAD_REQUEST", message: error.message } });
+      throw error;
+    }
+    return {
+      title: body.title.trim().replace(/\s+/g, " "),
+      description: body.description ?? null,
+      color: body.color ?? "#3B82F6",
+      isAllDay,
+      startDate,
+      endDate,
+      startTime: isAllDay ? null : body.startTime ?? null,
+      endTime: isAllDay
+        ? null
+        : body.endTime ?? `${String(Number(body.startTime.slice(0, 2)) + 1).padStart(2, "0")}:${body.startTime.slice(3)}`
+    };
+  }
+
   async updateEvent(currentUserId, workspaceId, eventId, body) {
     this.calls.push({
       method: "updateEvent",
@@ -172,7 +203,7 @@ function errorCode(error) {
     startDate: "2026-07-08",
     endDate: "2026-07-08",
     startTime: "15:00",
-    endTime: null
+    endTime: "16:00"
   });
 }
 
@@ -196,8 +227,20 @@ function errorCode(error) {
     startDate: "2026-07-08",
     endDate: "2026-07-08",
     startTime: "15:00",
-    endTime: null
+    endTime: "16:00"
   });
+}
+
+{
+  const { registry } = createRegistry();
+  const tool = registry.getDefinition("create_calendar_event");
+  const input = tool.validateInput({
+    title: "종료일 없는 일정",
+    startDate: "2026-07-08"
+  });
+
+  assert.equal(input.isAllDay, true);
+  assert.equal(input.endDate, "2026-07-08");
 }
 
 {

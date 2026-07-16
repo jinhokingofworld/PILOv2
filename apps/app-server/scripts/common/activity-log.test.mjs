@@ -104,7 +104,7 @@ assert.equal(executed.length, 4);
 
 const prReviewActionMigration = await readFile(
   new URL(
-    "../../../../db/migrations/079_add_pr_review_activity_log_actions.sql",
+    "../../../../db/migrations/080_add_pr_review_activity_log_actions.sql",
     import.meta.url
   ),
   "utf8"

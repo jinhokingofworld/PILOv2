@@ -59,7 +59,7 @@ Expected: 첫 명령 exit 0, 새 worktree는 설계/계획 문서 외 깨끗한 
 
 - Modify: `apps/app-server/src/common/activity-log.service.ts`
 - Modify: `apps/app-server/scripts/common/activity-log.test.mjs`
-- Create: `db/migrations/079_add_pr_review_activity_log_actions.sql`
+- Create: `db/migrations/080_add_pr_review_activity_log_actions.sql`
 - Modify: `db/README.md`
 - Modify: `docs/ActivityLogRegistry.md`
 
@@ -96,7 +96,7 @@ Expected: 미등록 action 또는 누락 migration 때문에 실패한다.
 
 - [ ] **Step 4: 다음 순번 migration을 추가한다**
 
-실행 직전 최신 `origin/dev`의 migration 최댓값이 여전히 `078`인지 확인한다. 그렇다면 `db/migrations/079_add_pr_review_activity_log_actions.sql`을 다음 내용으로 만든다.
+최신 `origin/dev`의 migration 최댓값이 `079`이므로 `db/migrations/080_add_pr_review_activity_log_actions.sql`을 다음 내용으로 만든다.
 
 ```sql
 ALTER TYPE public.activity_log_action
@@ -133,7 +133,7 @@ Expected: `Common Activity Log tests passed.`
 - [ ] **Step 7: commit한다**
 
 ```powershell
-git add apps/app-server/src/common/activity-log.service.ts apps/app-server/scripts/common/activity-log.test.mjs db/migrations/079_add_pr_review_activity_log_actions.sql db/README.md docs/ActivityLogRegistry.md
+git add apps/app-server/src/common/activity-log.service.ts apps/app-server/scripts/common/activity-log.test.mjs db/migrations/080_add_pr_review_activity_log_actions.sql db/README.md docs/ActivityLogRegistry.md
 git commit -m "feat: PR Review Activity Log action 등록 (#1221)"
 ```
 

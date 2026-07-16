@@ -25,6 +25,13 @@ import {
   validateListSqlErdOperationsQuery
 } from "./sql-erd-operation.validation";
 import { rebaseSqlErdSourceLayout } from "./sql-erd-source-rebase";
+import { generateSqlErdSchema } from "./sql-erd-schema-generator";
+import {
+  SqlErdAgentSchemaReplacementPayload,
+  SqlErdAgentSessionCreationPayload,
+  SqlErdSchemaSpecV1
+} from "./sql-erd-schema-spec.types";
+import { validateSqlErdSchemaSpec } from "./sql-erd-schema-spec.validation";
 import {
   validateAcquireSqlErdSourceLockRequest,
   validateReleaseSqlErdSourceLockRequest,
@@ -131,6 +138,12 @@ const JSON_SIZE_CONSTRAINTS = new Set([
   "sql_erd_source_snapshots_total_size_check"
 ]);
 const SOURCE_LOCK_TTL_SECONDS = 30;
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+type SqlErdSourceSnapshotWriteInput = Omit<
+  NormalizedSqlErdSourcePublishInput,
+  "leaseId"
+>;
 export const MAX_SQL_ERD_SOURCE_SNAPSHOT_BATCH_RESPONSE_BYTES = 10 * 1024 * 1024;
 
 export function resolveNewSqlErdWriteProtocol(): SqlErdWriteProtocol {
@@ -672,6 +685,235 @@ export class SqlErdService {
     );
   }
 
+  async createAgentGeneratedSession(
+    currentUserId: string,
+    workspaceId: string,
+    agentRunId: string,
+    schemaSpec: unknown
+  ): Promise<SqlErdAgentSessionCreationPayload> {
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+    const validAgentRunId = validateAgentRunId(agentRunId);
+    const normalizedSpec = validateSqlErdSchemaSpec(schemaSpec);
+    const generated = generateSqlErdSchema(normalizedSpec);
+    const requestFingerprint = createAgentSchemaFingerprint(normalizedSpec);
+
+    try {
+      const session = await this.database.transaction(async (transaction) => {
+        const workspace = await transaction.queryOne<{ id: string }>(
+          `
+            SELECT id
+            FROM workspaces
+            WHERE id = $1
+            FOR UPDATE
+          `,
+          [workspaceId]
+        );
+        if (!workspace) {
+          throw notFound("Workspace not found");
+        }
+
+        const existing = await transaction.queryOne<{
+          request_fingerprint: string;
+          session_id: string;
+        }>(
+          `
+            SELECT request_fingerprint, session_id
+            FROM sql_erd_agent_session_creations
+            WHERE workspace_id = $1
+              AND actor_user_id = $2
+              AND agent_run_id = $3
+          `,
+          [workspaceId, currentUserId, validAgentRunId]
+        );
+        if (existing) {
+          if (existing.request_fingerprint !== requestFingerprint) {
+            throw conflict("sqltoerd agentRunId was reused with different schema input");
+          }
+          const existingSession = await this.findActiveSessionById(
+            workspaceId,
+            existing.session_id,
+            transaction
+          );
+          if (!existingSession) {
+            throw conflict("sqltoerd agent-created session is unavailable");
+          }
+          return existingSession;
+        }
+
+        const createdSession = await this.insertSession(
+          transaction,
+          workspaceId,
+          currentUserId,
+          {
+            title: generated.title,
+            sourceFormat: "sql",
+            dialect: generated.dialect,
+            sourceText: generated.sourceText,
+            modelJson: generated.modelJson,
+            layoutJson: generated.layoutJson,
+            settingsJson: {},
+            tableCount: generated.tableCount,
+            relationCount: generated.relationCount
+          }
+        );
+        if (!createdSession) {
+          throw badRequest("sqltoerd agent session could not be created");
+        }
+
+        await transaction.execute(
+          `
+            INSERT INTO sql_erd_agent_session_creations (
+              workspace_id,
+              actor_user_id,
+              agent_run_id,
+              request_fingerprint,
+              session_id
+            )
+            VALUES ($1, $2, $3, $4, $5)
+          `,
+          [
+            workspaceId,
+            currentUserId,
+            validAgentRunId,
+            requestFingerprint,
+            createdSession.id
+          ]
+        );
+
+        return createdSession;
+      });
+
+      return {
+        session: mapSqlErdSession(session),
+        warnings: generated.warnings
+      };
+    } catch (error) {
+      if (this.isJsonSizeConstraintViolation(error)) {
+        throw payloadTooLarge("sqltoerd generated session payload is too large");
+      }
+      throw error;
+    }
+  }
+
+  async replaceAgentGeneratedSchema(
+    currentUserId: string,
+    workspaceId: string,
+    sessionId: string,
+    agentRunId: string,
+    schemaSpec: unknown
+  ): Promise<SqlErdAgentSchemaReplacementPayload> {
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+    const validSessionId = validateSqlErdSessionId(sessionId);
+    const validAgentRunId = validateAgentRunId(agentRunId);
+    const normalizedSpec = validateSqlErdSchemaSpec(schemaSpec);
+    const requestFingerprint = createAgentSchemaFingerprint(normalizedSpec);
+
+    try {
+      return await this.database.transaction(async (transaction) => {
+        const session = await this.requireOperationsSession(
+          transaction,
+          workspaceId,
+          validSessionId
+        );
+        const effectiveSpec = resolveAgentReplacementSpec(session, normalizedSpec);
+        const generated = generateSqlErdSchema(effectiveSpec);
+        const existingOperation = await this.findOperationByClientOperationId(
+          transaction,
+          validSessionId,
+          currentUserId,
+          validAgentRunId
+        );
+        if (existingOperation) {
+          const existing = await this.mapExistingSourcePublish(
+            transaction,
+            existingOperation,
+            requestFingerprint
+          );
+          return { ...existing, warnings: generated.warnings };
+        }
+
+        const activeSourceLock = await this.findActiveSourceLock(
+          transaction,
+          workspaceId,
+          validSessionId
+        );
+        if (activeSourceLock) {
+          throw conflict("sqltoerd source lock is currently held");
+        }
+
+        const currentRevision = Number(session.revision);
+        const input: SqlErdSourceSnapshotWriteInput = {
+          baseRevision: currentRevision,
+          clientOperationId: validAgentRunId,
+          dialect: session.dialect,
+          modelJson: generated.modelJson,
+          sourceFormat: "sql",
+          sourceText: generated.sourceText
+        };
+        const rebased = rebaseSqlErdSourceLayout({
+          currentLayout: session.layout_json,
+          nextModel: generated.modelJson
+        });
+        const updatedSession = await this.applySourceSnapshot(
+          transaction,
+          session,
+          currentUserId,
+          input,
+          rebased.layoutJson
+        );
+        if (!updatedSession) {
+          throw conflict("sqltoerd session revision conflict");
+        }
+
+        const snapshot = await this.insertSourceSnapshot(
+          transaction,
+          updatedSession,
+          currentUserId,
+          input,
+          currentRevision,
+          rebased.layoutJson
+        );
+        if (!snapshot) {
+          throw conflict("sqltoerd source snapshot could not be recorded");
+        }
+
+        const operation = await this.insertSourceSnapshotOperation(
+          transaction,
+          updatedSession,
+          currentUserId,
+          input,
+          currentRevision,
+          snapshot.id,
+          requestFingerprint,
+          rebased.summary
+        );
+        if (!operation) {
+          throw conflict("sqltoerd source operation could not be recorded");
+        }
+
+        await transaction.execute(
+          `
+            INSERT INTO sql_erd_session_operation_outbox (operation_id)
+            VALUES ($1)
+          `,
+          [operation.id]
+        );
+
+        return {
+          ...this.mapOperationWriteResult(updatedSession, operation),
+          snapshot: mapSqlErdSourceSnapshot(snapshot),
+          rebaseSummary: rebased.summary,
+          warnings: generated.warnings
+        };
+      });
+    } catch (error) {
+      if (this.isJsonSizeConstraintViolation(error)) {
+        throw payloadTooLarge("sqltoerd generated source snapshot is too large");
+      }
+      throw error;
+    }
+  }
+
   async createPluralSession(
     currentUserId: string,
     workspaceId: string,
@@ -1139,7 +1381,7 @@ export class SqlErdService {
     transaction: DatabaseTransaction,
     session: SqlErdSessionRow,
     currentUserId: string,
-    input: NormalizedSqlErdSourcePublishInput,
+    input: SqlErdSourceSnapshotWriteInput,
     layoutJson: SqlErdJsonObject
   ): Promise<SqlErdSessionRow | null> {
     return transaction.queryOne<SqlErdSessionRow>(
@@ -1186,7 +1428,7 @@ export class SqlErdService {
     transaction: DatabaseTransaction,
     session: SqlErdSessionRow,
     currentUserId: string,
-    input: NormalizedSqlErdSourcePublishInput,
+    input: SqlErdSourceSnapshotWriteInput,
     appliedOnRevision: number,
     layoutJson: SqlErdJsonObject
   ): Promise<SqlErdSourceSnapshotRow | null> {
@@ -1221,7 +1463,7 @@ export class SqlErdService {
     transaction: DatabaseTransaction,
     session: SqlErdSessionRow,
     currentUserId: string,
-    input: NormalizedSqlErdSourcePublishInput,
+    input: SqlErdSourceSnapshotWriteInput,
     appliedOnRevision: number,
     sourceSnapshotId: string,
     requestFingerprint: string,
@@ -1551,7 +1793,7 @@ function mapSqlErdSourceSnapshot(
   };
 }
 
-function createSourcePublishFingerprint(input: NormalizedSqlErdSourcePublishInput): string {
+function createSourcePublishFingerprint(input: SqlErdSourceSnapshotWriteInput): string {
   return createHash("sha256")
     .update(
       JSON.stringify({
@@ -1562,6 +1804,40 @@ function createSourcePublishFingerprint(input: NormalizedSqlErdSourcePublishInpu
       })
     )
     .digest("hex");
+}
+
+function createAgentSchemaFingerprint(spec: SqlErdSchemaSpecV1): string {
+  return createHash("sha256").update(JSON.stringify(spec)).digest("hex");
+}
+
+function resolveAgentReplacementSpec(
+  session: SqlErdSessionRow,
+  spec: SqlErdSchemaSpecV1
+): SqlErdSchemaSpecV1 {
+  if (
+    session.dialect !== "auto" &&
+    spec.requestedDialect !== null &&
+    spec.requestedDialect !== session.dialect
+  ) {
+    throw conflict(
+      "sqltoerd requested dialect conflicts with the current session dialect"
+    );
+  }
+
+  return {
+    ...spec,
+    requestedDialect:
+      session.dialect === "auto"
+        ? spec.requestedDialect
+        : session.dialect
+  };
+}
+
+function validateAgentRunId(value: string): string {
+  if (!UUID_PATTERN.test(value)) {
+    throw badRequest("sqltoerd agentRunId is invalid");
+  }
+  return value;
 }
 
 function readSourceRebaseSummary(

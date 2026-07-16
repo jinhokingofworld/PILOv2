@@ -178,8 +178,10 @@ function resolveCanvasShapeBaseRevision({
   shape: CanvasFreeformShapeSnapshot | undefined;
   shapeId: string;
 }) {
+  if (!getBaseRevision) return null;
+
   const localRevision = readCanvasShapeRevision(shape);
-  const remoteRevision = getBaseRevision?.(shapeId) ?? null;
+  const remoteRevision = getBaseRevision(shapeId);
 
   if (localRevision === null) return remoteRevision;
   if (remoteRevision === null) return localRevision;

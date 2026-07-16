@@ -14,32 +14,46 @@ import {
 } from "lucide-react";
 
 import styles from "./document-editor.module.css";
+import {
+  filterSlashCommands,
+  SLASH_COMMANDS,
+  type SlashCommandId
+} from "./document-slash-commands";
 
-export const SLASH_COMMANDS = [
-  { id: "paragraph", label: "일반 문단", description: "기본 텍스트를 작성합니다.", icon: Pilcrow },
-  { id: "heading1", label: "제목 1", description: "큰 제목을 작성합니다.", icon: Heading1 },
-  { id: "heading2", label: "제목 2", description: "중간 제목을 작성합니다.", icon: Heading2 },
-  { id: "heading3", label: "제목 3", description: "작은 제목을 작성합니다.", icon: Heading3 },
-  { id: "bulletList", label: "글머리 목록", description: "점 목록을 만듭니다.", icon: List },
-  { id: "orderedList", label: "번호 목록", description: "번호 목록을 만듭니다.", icon: ListOrdered },
-  { id: "blockquote", label: "인용", description: "인용 블록을 만듭니다.", icon: Quote },
-  { id: "codeBlock", label: "코드 블록", description: "코드를 작성합니다.", icon: Code2 },
-  { id: "horizontalRule", label: "구분선", description: "문단 사이에 구분선을 넣습니다.", icon: Minus },
-  { id: "attachment", label: "Drive 파일", description: "Workspace Drive 파일을 첨부합니다.", icon: FileText }
-] as const;
-
-export type SlashCommandId = (typeof SLASH_COMMANDS)[number]["id"];
+const slashCommandIcons = {
+  paragraph: Pilcrow,
+  heading1: Heading1,
+  heading2: Heading2,
+  heading3: Heading3,
+  bulletList: List,
+  orderedList: ListOrdered,
+  blockquote: Quote,
+  codeBlock: Code2,
+  horizontalRule: Minus,
+  attachment: FileText
+};
 
 export function DocumentSlashMenu({
   activeIndex,
+  onActiveIndexChange,
+  onClose,
+  onQueryChange,
   onSelect,
-  position
+  position,
+  query
 }: {
   activeIndex: number;
+  onActiveIndexChange: (index: number) => void;
+  onClose: () => void;
+  onQueryChange: (query: string) => void;
   onSelect: (commandId: SlashCommandId) => void;
   position: { top: number; left: number } | null;
+  query: string;
 }) {
+  const filteredCommands = filterSlashCommands(SLASH_COMMANDS, query);
+
   if (!position) return null;
+  const selectedCommand = filteredCommands[activeIndex];
 
   return (
     <div
@@ -48,8 +62,46 @@ export function DocumentSlashMenu({
       aria-label="문서 명령"
       style={{ top: position.top, left: position.left }}
     >
-      {SLASH_COMMANDS.map((command, index) => {
-        const Icon = command.icon;
+      <label className={styles.slashMenuSearch}>
+        <span>/</span>
+        <input
+          autoFocus
+          value={query}
+          onChange={(event) => onQueryChange(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.nativeEvent.isComposing) {
+              return;
+            }
+
+            if (event.key === "ArrowDown" && filteredCommands.length > 0) {
+              event.preventDefault();
+              onActiveIndexChange((activeIndex + 1) % filteredCommands.length);
+            }
+            if (event.key === "ArrowUp" && filteredCommands.length > 0) {
+              event.preventDefault();
+              onActiveIndexChange(
+                (activeIndex - 1 + filteredCommands.length) % filteredCommands.length
+              );
+            }
+            if (event.key === "Enter" && selectedCommand) {
+              event.preventDefault();
+              onSelect(selectedCommand.id);
+            }
+            if (event.key === "Escape") {
+              event.preventDefault();
+              onClose();
+            }
+            if (event.key === "Backspace" && !query) {
+              event.preventDefault();
+              onClose();
+            }
+          }}
+          placeholder="명령 검색"
+          aria-label="문서 명령 검색"
+        />
+      </label>
+      {filteredCommands.map((command, index) => {
+        const Icon = slashCommandIcons[command.id];
         const isActive = index === activeIndex;
 
         return (
@@ -73,6 +125,9 @@ export function DocumentSlashMenu({
           </button>
         );
       })}
+      {filteredCommands.length === 0 ? (
+        <p className={styles.slashMenuEmpty}>일치하는 명령이 없습니다.</p>
+      ) : null}
     </div>
   );
 }

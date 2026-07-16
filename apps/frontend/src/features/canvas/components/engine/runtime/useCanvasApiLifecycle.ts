@@ -59,9 +59,6 @@ export function useCanvasApiLifecycle({
     const shapeSyncQueue = createCanvasShapeSyncQueue({
       boardId: board.id,
       canvasClient,
-      getBaseRevision(shapeId) {
-        return remoteShapeRevisionRef.current.get(shapeId) ?? null;
-      },
       onConflict: onShapeSyncConflict,
       onError(error: unknown) {
         if (isCanvasShapeSyncConflictError(error)) return;

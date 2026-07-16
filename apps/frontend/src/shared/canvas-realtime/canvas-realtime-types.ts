@@ -154,38 +154,6 @@ export type CanvasShapeLockState = {
   expiresAt: string;
 };
 
-export type CanvasShapeLockClaimPayload = {
-  workspaceId: string;
-  canvasId: string;
-  shapeIds: string[];
-};
-
-export type CanvasShapeLockAcceptedPayload = {
-  workspaceId: string;
-  canvasId: string;
-  locks: CanvasShapeLockState[];
-};
-
-export type CanvasShapeLockRejectedPayload = {
-  workspaceId: string;
-  canvasId: string;
-  shapeIds: string[];
-  locks: CanvasShapeLockState[];
-};
-
-export type CanvasShapeLockReleasePayload = {
-  workspaceId: string;
-  canvasId: string;
-  shapeIds?: string[];
-};
-
-export type CanvasShapeLockReleaseEventPayload = {
-  workspaceId: string;
-  canvasId: string;
-  ownerUserId: string;
-  shapeIds: string[];
-};
-
 export type CanvasShapePreviewPhase =
   | "delete"
   | "move"
@@ -282,18 +250,6 @@ export type CanvasServerToClientEvents = {
   "canvas:sync:required": (payload: CanvasSyncRequiredPayload) => void;
   "canvas:presence:update": (payload: CanvasRemotePresenceState) => void;
   "canvas:presence:leave": (payload: CanvasPresenceLeavePayload) => void;
-  "canvas:shape:lock:accepted": (
-    payload: CanvasShapeLockAcceptedPayload,
-  ) => void;
-  "canvas:shape:lock:rejected": (
-    payload: CanvasShapeLockRejectedPayload,
-  ) => void;
-  "canvas:shape:lock:release": (
-    payload: CanvasShapeLockReleaseEventPayload,
-  ) => void;
-  "canvas:shape:lock:update": (
-    payload: CanvasShapeLockAcceptedPayload,
-  ) => void;
   "canvas:shape:preview": (payload: CanvasShapePreviewEventPayload) => void;
   "canvas:shape:preview:clear": (
     payload: CanvasShapePreviewClearPayload,
@@ -319,10 +275,6 @@ export type CanvasClientToServerEvents = {
   "canvas:room:history:redo": (payload: CanvasJoinPayload) => void;
   "canvas:room:history:undo": (payload: CanvasJoinPayload) => void;
   "canvas:presence:update": (payload: CanvasPresenceUpdatePayload) => void;
-  "canvas:shape:lock:claim": (payload: CanvasShapeLockClaimPayload) => void;
-  "canvas:shape:lock:release": (
-    payload: CanvasShapeLockReleasePayload,
-  ) => void;
   "canvas:shape:preview": (payload: CanvasShapePreviewPayload) => void;
   "canvas:shape:preview:clear": (
     payload: CanvasShapePreviewClearRequestPayload,

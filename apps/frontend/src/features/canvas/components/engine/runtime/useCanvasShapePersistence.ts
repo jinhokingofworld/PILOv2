@@ -294,9 +294,6 @@ export function useCanvasShapePersistence({
             void syncCanvasFreeformShapes({
               boardId: board.id,
               canvasClient,
-              getBaseRevision(shapeId) {
-                return remoteShapeRevisionRef.current.get(shapeId) ?? null;
-              },
               ...syncInput,
               onConflict: onShapeSyncConflict,
               workspaceId: board.workspaceId,

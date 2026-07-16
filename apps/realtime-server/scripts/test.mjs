@@ -109,8 +109,8 @@ assert.match(socketServer, /createSocketIoRedisAdapter/);
 assert.match(socketServer, /CANVAS_OPERATION_REDIS_CHANNEL = "canvas:operations"/);
 assert.match(socketServer, /isCanvasShapeOperationPayload/);
 assert.match(socketServer, /canvasServerEvents\.operation/);
-assert.match(socketServer, /canvasClientEvents\.shapeLockClaim/);
-assert.match(socketServer, /canvasClientEvents\.shapeLockRelease/);
+assert.doesNotMatch(socketServer, /canvasClientEvents\.shapeLockClaim/);
+assert.doesNotMatch(socketServer, /canvasClientEvents\.shapeLockRelease/);
 assert.match(socketServer, /canvasClientEvents\.shapePatch/);
 assert.match(
   socketServer,
@@ -135,9 +135,9 @@ assert.match(
   socketServer,
   /const actorUserId = authedSocket\.data\.auth\.userId \?\? socket\.id/,
 );
-assert.match(socketServer, /canvasServerEvents\.shapeLockAccepted/);
-assert.match(socketServer, /canvasServerEvents\.shapeLockRejected/);
-assert.match(socketServer, /canvasServerEvents\.shapeLockUpdate/);
+assert.doesNotMatch(socketServer, /canvasServerEvents\.shapeLockAccepted/);
+assert.doesNotMatch(socketServer, /canvasServerEvents\.shapeLockRejected/);
+assert.doesNotMatch(socketServer, /canvasServerEvents\.shapeLockUpdate/);
 assert.match(socketServer, /canvasServerEvents\.shapePreview/);
 assert.match(socketServer, /canvasServerEvents\.shapePreviewClear/);
 assert.match(socketServer, /createCanvasShapePreviewService/);
