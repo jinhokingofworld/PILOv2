@@ -2396,6 +2396,8 @@ async function assertError(action, messagePattern) {
 
 assert.match(meetingServiceSource, /FROM meeting_report_activity_evidence/);
 assert.match(meetingServiceSource, /activityEvidence/);
+assert.match(meetingServiceSource, /AS activity_references/);
+assert.doesNotMatch(meetingServiceSource, /AS references\b/);
 
 {
   const { database, service } = createSubject(

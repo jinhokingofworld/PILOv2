@@ -22,14 +22,6 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetFooter,
-  SheetHeader,
-  SheetTitle
-} from "@/components/ui/sheet";
 import { useAuthSession } from "@/features/auth";
 import { createCalendarApiClient } from "@/features/calendar/api/client";
 import { CalendarWorkspaceLocationAdapter } from "@/features/calendar/calendar-workspace-location-adapter";
@@ -570,7 +562,7 @@ function CalendarEventFormFields({
   );
 }
 
-function CalendarEventSheet({
+function CalendarEventDialog({
   formError,
   formState,
   isSubmitting,
@@ -600,17 +592,39 @@ function CalendarEventSheet({
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
   return (
-    <Sheet open={Boolean(mode)} onOpenChange={(open) => !open && onClose()}>
-      {mode ? (
-        <SheetContent className="w-full sm:max-w-lg">
+    <DialogPrimitive.Root
+      open={Boolean(mode)}
+      onOpenChange={(nextOpen) => !nextOpen && onClose()}
+    >
+      <DialogPrimitive.Portal>
+        <DialogPrimitive.Backdrop className="fixed inset-0 z-50 bg-black/35 transition-opacity duration-150 data-ending-style:opacity-0 data-starting-style:opacity-0" />
+        {mode ? (
+          <DialogPrimitive.Popup className="fixed inset-x-3 bottom-3 z-50 flex max-h-[min(660px,calc(100vh-2rem))] flex-col overflow-hidden rounded-lg border bg-background shadow-xl outline-none transition duration-150 data-ending-style:translate-y-2 data-ending-style:opacity-0 data-starting-style:translate-y-2 data-starting-style:opacity-0 sm:top-1/2 sm:left-1/2 sm:bottom-auto sm:w-[calc(100vw-2rem)] sm:max-w-xl sm:-translate-x-1/2 sm:-translate-y-1/2 sm:data-ending-style:translate-y-0 sm:data-ending-style:scale-95 sm:data-starting-style:translate-y-0 sm:data-starting-style:scale-95">
           {mode.type === "delete" ? (
             <div className="flex min-h-0 flex-1 flex-col">
-              <SheetHeader>
-                <SheetTitle>일정 삭제</SheetTitle>
-                <SheetDescription>
+              <div className="border-b p-4 pr-14">
+                <DialogPrimitive.Title className="font-heading text-lg font-semibold">
+                  일정 삭제
+                </DialogPrimitive.Title>
+                <DialogPrimitive.Description className="mt-1 text-sm text-muted-foreground">
                   삭제한 일정은 되돌릴 수 없습니다.
-                </SheetDescription>
-              </SheetHeader>
+                </DialogPrimitive.Description>
+              </div>
+
+              <DialogPrimitive.Close
+                disabled={isSubmitting}
+                render={
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    className="absolute top-3 right-3"
+                    aria-label="일정 삭제 닫기"
+                  />
+                }
+              >
+                <X className="size-4" />
+              </DialogPrimitive.Close>
 
               <div className="flex-1 space-y-4 overflow-y-auto px-4 pb-2">
                 <div className="rounded-lg border bg-muted/20 p-3">
@@ -633,7 +647,7 @@ function CalendarEventSheet({
                 ) : null}
               </div>
 
-              <SheetFooter className="border-t">
+              <div className="border-t p-4">
                 <div className="flex gap-2">
                   <Button
                     type="button"
@@ -655,16 +669,33 @@ function CalendarEventSheet({
                     삭제
                   </Button>
                 </div>
-              </SheetFooter>
+              </div>
             </div>
           ) : (
             <form className="flex min-h-0 flex-1 flex-col" onSubmit={onSubmit}>
-              <SheetHeader>
-                <SheetTitle>일정 수정</SheetTitle>
-                <SheetDescription>
+              <div className="border-b p-4 pr-14">
+                <DialogPrimitive.Title className="font-heading text-lg font-semibold">
+                  일정 수정
+                </DialogPrimitive.Title>
+                <DialogPrimitive.Description className="mt-1 text-sm text-muted-foreground">
                   {formatDateLabel(formState.startDate)}
-                </SheetDescription>
-              </SheetHeader>
+                </DialogPrimitive.Description>
+              </div>
+
+              <DialogPrimitive.Close
+                disabled={isSubmitting}
+                render={
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    className="absolute top-3 right-3"
+                    aria-label="일정 수정 닫기"
+                  />
+                }
+              >
+                <X className="size-4" />
+              </DialogPrimitive.Close>
 
               <CalendarEventFormFields
                 formError={formError}
@@ -672,7 +703,7 @@ function CalendarEventSheet({
                 onFormChange={onFormChange}
               />
 
-              <SheetFooter className="border-t">
+              <div className="border-t p-4">
                 <Button
                   type="button"
                   variant="destructive"
@@ -701,12 +732,13 @@ function CalendarEventSheet({
                     저장
                   </Button>
                 </div>
-              </SheetFooter>
+              </div>
             </form>
           )}
-        </SheetContent>
-      ) : null}
-    </Sheet>
+          </DialogPrimitive.Popup>
+        ) : null}
+      </DialogPrimitive.Portal>
+    </DialogPrimitive.Root>
   );
 }
 
@@ -737,7 +769,7 @@ function CalendarEventCreateDialog({
     >
       <DialogPrimitive.Portal>
         <DialogPrimitive.Backdrop className="fixed inset-0 z-50 bg-black/35 transition-opacity duration-150 data-ending-style:opacity-0 data-starting-style:opacity-0" />
-        <DialogPrimitive.Popup className="fixed inset-x-3 bottom-3 z-50 flex max-h-[min(620px,calc(100vh-2rem))] flex-col overflow-hidden rounded-lg border bg-background shadow-xl outline-none transition duration-150 data-ending-style:translate-y-2 data-ending-style:opacity-0 data-starting-style:translate-y-2 data-starting-style:opacity-0 sm:top-1/2 sm:left-1/2 sm:bottom-auto sm:w-[calc(100vw-2rem)] sm:max-w-lg sm:-translate-x-1/2 sm:-translate-y-1/2 sm:data-ending-style:translate-y-0 sm:data-ending-style:scale-95 sm:data-starting-style:translate-y-0 sm:data-starting-style:scale-95">
+        <DialogPrimitive.Popup className="fixed inset-x-3 bottom-3 z-50 flex max-h-[min(660px,calc(100vh-2rem))] flex-col overflow-hidden rounded-lg border bg-background shadow-xl outline-none transition duration-150 data-ending-style:translate-y-2 data-ending-style:opacity-0 data-starting-style:translate-y-2 data-starting-style:opacity-0 sm:top-1/2 sm:left-1/2 sm:bottom-auto sm:w-[calc(100vw-2rem)] sm:max-w-xl sm:-translate-x-1/2 sm:-translate-y-1/2 sm:data-ending-style:translate-y-0 sm:data-ending-style:scale-95 sm:data-starting-style:translate-y-0 sm:data-starting-style:scale-95">
           <form className="flex min-h-0 flex-1 flex-col" onSubmit={onSubmit}>
             <div className="border-b p-4 pr-14">
               <DialogPrimitive.Title className="font-heading text-lg font-semibold">
@@ -827,7 +859,7 @@ function CalendarEventDetailDialog({
     >
       <DialogPrimitive.Portal>
         <DialogPrimitive.Backdrop className="fixed inset-0 z-50 bg-black/35 transition-opacity duration-150 data-ending-style:opacity-0 data-starting-style:opacity-0" />
-        <DialogPrimitive.Popup className="fixed inset-x-3 bottom-3 z-50 flex max-h-[min(620px,calc(100vh-2rem))] flex-col rounded-lg border bg-background shadow-xl outline-none transition duration-150 data-ending-style:translate-y-2 data-ending-style:opacity-0 data-starting-style:translate-y-2 data-starting-style:opacity-0 sm:top-1/2 sm:left-1/2 sm:bottom-auto sm:w-[calc(100vw-2rem)] sm:max-w-lg sm:-translate-x-1/2 sm:-translate-y-1/2 sm:data-ending-style:translate-y-0 sm:data-ending-style:scale-95 sm:data-starting-style:translate-y-0 sm:data-starting-style:scale-95">
+        <DialogPrimitive.Popup className="fixed inset-x-3 bottom-3 z-50 flex max-h-[min(660px,calc(100vh-2rem))] flex-col rounded-lg border bg-background shadow-xl outline-none transition duration-150 data-ending-style:translate-y-2 data-ending-style:opacity-0 data-starting-style:translate-y-2 data-starting-style:opacity-0 sm:top-1/2 sm:left-1/2 sm:bottom-auto sm:w-[calc(100vw-2rem)] sm:max-w-xl sm:-translate-x-1/2 sm:-translate-y-1/2 sm:data-ending-style:translate-y-0 sm:data-ending-style:scale-95 sm:data-starting-style:translate-y-0 sm:data-starting-style:scale-95">
         <div className="flex items-start justify-between gap-3 border-b p-4">
           <div className="min-w-0">
             <p className="text-sm font-medium text-muted-foreground">
@@ -1537,7 +1569,7 @@ export function CalendarPanel() {
         onRequestDelete={requestDeleteSheet}
       />
 
-      <CalendarEventSheet
+      <CalendarEventDialog
         formError={formError}
         formState={formState}
         isSubmitting={isSubmitting}

@@ -448,6 +448,9 @@ assert.match(prReviewCanvasSurface, /registerReviewShapePolicy/);
 assert.match(prReviewCanvasSurface, /updatePrReviewRelationGeometry/);
 assert.match(prReviewCanvasSurface, /PrReviewRelationInspector/);
 assert.match(prReviewCanvasSurface, /collapseStoredSemanticRelationShapes/);
+assert.match(prReviewCanvasSurface, /buildStoredFlowLabelShapes/);
+assert.match(prReviewCanvasSurface, /roleTypeByReviewFileId/);
+assert.match(prReviewCanvasSurface, /shape\.props\.routePoints\.length >= 2/);
 assert.match(prReviewCanvasSurface, /relationCount: details\.length/);
 assert.match(prReviewCanvasSurface, /관계 \$\{relationDetails\.length\}개/);
 assert.match(prReviewCanvasSurface, /aria-label="선택한 파일 관계"/);
@@ -614,6 +617,7 @@ assert.match(prReviewFileNodeShapeUtil, /PR_REVIEW_RELATION_EDGE_SHAPE_TYPE/);
 assert.match(prReviewFileNodeShapeUtil, /reviewRoomId/);
 assert.match(prReviewFileNodeShapeUtil, /roomFileId/);
 assert.match(prReviewFileNodeShapeUtil, /currentReviewSessionId/);
+assert.match(prReviewFileNodeShapeUtil, /roleType: PrReviewFileRoleType/);
 assert.match(prReviewFileNodeShapeUtil, /fromRoomFileId/);
 assert.match(prReviewFileNodeShapeUtil, /toRoomFileId/);
 assert.match(prReviewFileNodeShapeUtil, /relationCount/);
@@ -643,7 +647,7 @@ assert.match(prReviewConflictDraftLock, /setLock\(null\);/);
 assert.match(prReviewCanvasShell, /overlayClassName="z-\[90\]"/);
 assert.match(
   prReviewCanvasSurface,
-  /editor\.createShapes\(shapes\);\s+updatePrReviewRelationGeometry\(editor, internalShapeUpdateRef\);/
+  /editor\.createShapes\(shapes\);\s+updatePrReviewRelationGeometry\(editor, internalShapeUpdateRef, true\);/
 );
 assert.match(prReviewFileNodeShapeUtil, /override onClick/);
 assert.match(prReviewFileNodeShapeUtil, /activatePrReviewFileNode/);

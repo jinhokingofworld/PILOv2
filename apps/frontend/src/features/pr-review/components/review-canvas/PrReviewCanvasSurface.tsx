@@ -209,6 +209,7 @@ function createFileNodeShape(
       filePath: fileNodeData.filePath,
       fileStatus: file.fileStatus,
       roleSummary: fileNodeData.roleSummary,
+      roleType: fileNodeData.roleType,
       riskLevel: fileNodeData.riskLevel,
       reviewStatus: fileNodeData.reviewStatus,
       conflictState: conflictMetadata.conflictState,
@@ -576,8 +577,14 @@ function buildPrReviewCanvasShapes(
 }
 
 function buildStoredPrReviewCanvasShapes(
-  storedShapes: PrReviewCanvasShape[]
+  storedShapes: PrReviewCanvasShape[],
+  canvas: PrReviewCanvas
 ): TLShapePartial[] {
+  const roleTypeByReviewFileId = new Map(
+    canvas.flows.flatMap((flow) =>
+      flow.files.map((file) => [file.reviewFileId, file.roleType] as const)
+    )
+  );
   const systemShapes = collapseStoredSemanticRelationShapes(
     storedShapes.filter(
       (shape) =>
@@ -592,8 +599,17 @@ function buildStoredPrReviewCanvasShapes(
     }
   );
 
-  return systemShapes.map((shape, shapeIndex) => {
+  const persistedShapes = systemShapes.map((shape, shapeIndex) => {
     const props = { ...(shape.rawShape.props as Record<string, unknown>) };
+    if (
+      shape.shapeType === PR_REVIEW_FILE_NODE_SHAPE_TYPE &&
+      typeof props.roleType !== "string"
+    ) {
+      props.roleType =
+        typeof props.reviewFileId === "string"
+          ? (roleTypeByReviewFileId.get(props.reviewFileId) ?? "unknown")
+          : "unknown";
+    }
     if (
       shape.shapeType === PR_REVIEW_RELATION_EDGE_SHAPE_TYPE &&
       !Array.isArray(props.routePoints)
@@ -615,6 +631,52 @@ function buildStoredPrReviewCanvasShapes(
     }
 
     return partial;
+  });
+
+  return [
+    ...buildStoredFlowLabelShapes(canvas, systemShapes),
+    ...persistedShapes
+  ];
+}
+
+function buildStoredFlowLabelShapes(
+  canvas: PrReviewCanvas,
+  storedShapes: PrReviewCanvasShape[]
+): TLShapePartial<PrReviewFlowLabelShape>[] {
+  const fileShapeByReviewFileId = new Map(
+    storedShapes.flatMap((shape) => {
+      if (
+        shape.shapeType !== PR_REVIEW_FILE_NODE_SHAPE_TYPE ||
+        !isRecord(shape.rawShape.props) ||
+        typeof shape.rawShape.props.reviewFileId !== "string"
+      ) {
+        return [];
+      }
+      return [[shape.rawShape.props.reviewFileId, shape] as const];
+    })
+  );
+
+  return sortFlows(canvas.flows).flatMap((flow) => {
+    const fileShapes = flow.files.flatMap((file) => {
+      const shape = fileShapeByReviewFileId.get(file.reviewFileId);
+      return shape ? [shape] : [];
+    });
+    if (!fileShapes.length) {
+      return [];
+    }
+
+    const left = Math.min(...fileShapes.map((shape) => shape.x));
+    const top = Math.min(...fileShapes.map((shape) => shape.y));
+    const right = Math.max(
+      ...fileShapes.map((shape) => shape.x + (shape.width ?? NODE_WIDTH))
+    );
+    return [
+      createFlowLabelShape(
+        flow,
+        Math.max(CANVAS_PADDING_Y, top - FLOW_LABEL_HEIGHT - FLOW_HEADER_GAP),
+        Math.max(FLOW_LABEL_MIN_WIDTH, right - left)
+      )
+    ].map((shape) => ({ ...shape, x: left }));
   });
 }
 
@@ -825,6 +887,7 @@ function syncPrReviewFileNodeMetadata(
           filePath: file.fileNodeData.filePath,
           fileStatus: file.fileStatus,
           roleSummary: file.fileNodeData.roleSummary,
+          roleType: file.fileNodeData.roleType,
           riskLevel: file.fileNodeData.riskLevel,
           reviewStatus: file.fileNodeData.reviewStatus,
           conflictState: conflictMetadata.conflictState,
@@ -848,7 +911,8 @@ function syncPrReviewFileNodeMetadata(
 
 function updatePrReviewRelationGeometry(
   editor: Editor,
-  internalShapeUpdateRef: MutableRefObject<boolean>
+  internalShapeUpdateRef: MutableRefObject<boolean>,
+  preserveStoredRoutes = false
 ) {
   const fileByRoomFileId = new Map(
     editor
@@ -860,6 +924,10 @@ function updatePrReviewRelationGeometry(
   );
   const updates = editor.getCurrentPageShapes().flatMap((shape) => {
     if (!isPrReviewRelationEdgeShape(shape)) {
+      return [];
+    }
+
+    if (preserveStoredRoutes && shape.props.routePoints.length >= 2) {
       return [];
     }
 
@@ -985,7 +1053,7 @@ function resetPrReviewCanvas(
     }
 
     editor.createShapes(shapes);
-    updatePrReviewRelationGeometry(editor, internalShapeUpdateRef);
+    updatePrReviewRelationGeometry(editor, internalShapeUpdateRef, true);
     selectReviewFileNode(editor, selectedReviewFileId);
     initializeSyncedFileGeometry(editor, lastSyncedGeometryRef);
   } finally {
@@ -1491,8 +1559,8 @@ export function PrReviewCanvasSurface({
     [canvas, conflictAnalysis, preparedConflictFileIds]
   );
   const persistedShapes = useMemo(
-    () => buildStoredPrReviewCanvasShapes(storedShapes ?? []),
-    [storedShapes]
+    () => buildStoredPrReviewCanvasShapes(storedShapes ?? [], canvas),
+    [canvas, storedShapes]
   );
   const shapes = persistedFileShapeEnabled
     ? persistedShapes

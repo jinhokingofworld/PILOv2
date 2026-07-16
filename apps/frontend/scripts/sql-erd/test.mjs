@@ -55,6 +55,8 @@ async function compileSqlErdRuntimeModules() {
   const tableCardLayoutOutputPath = join(outputDir, "table-card-layout.mjs");
   const autoLayoutOutputPath = join(outputDir, "auto-layout.mjs");
   const canvasShapeSyncOutputPath = join(outputDir, "canvas-shape-sync.mjs");
+  const operationLayoutOutputPath = join(outputDir, "operation-layout.mjs");
+  const operationPatchOutputPath = join(outputDir, "operation-patch.mjs");
 
   try {
     await compileTypeScriptModule(
@@ -277,6 +279,14 @@ async function compileSqlErdRuntimeModules() {
       canvasShapeSyncOutputPath
     );
     await compileTypeScriptModule(
+      "../../src/features/sql-erd/utils/operation-layout.ts",
+      operationLayoutOutputPath
+    );
+    await compileTypeScriptModule(
+      "../../src/features/sql-erd/utils/operation-patch.ts",
+      operationPatchOutputPath
+    );
+    await compileTypeScriptModule(
       "../../src/features/sql-erd/utils/foreign-key-add.ts",
       foreignKeyAddOutputPath,
       [
@@ -364,7 +374,9 @@ async function compileSqlErdRuntimeModules() {
       tablePinRuntime,
       foreignKeyAddRuntime,
       autoLayoutRuntime,
-      canvasShapeSyncRuntime
+      canvasShapeSyncRuntime,
+      operationLayoutRuntime,
+      operationPatchRuntime
     ] = await Promise.all([
       import(pathToFileHref(modelOutputPath)),
       import(pathToFileHref(modelToSqlOutputPath)),
@@ -390,7 +402,9 @@ async function compileSqlErdRuntimeModules() {
       import(pathToFileHref(tablePinOutputPath)),
       import(pathToFileHref(foreignKeyAddOutputPath)),
       import(pathToFileHref(autoLayoutOutputPath)),
-      import(pathToFileHref(canvasShapeSyncOutputPath))
+      import(pathToFileHref(canvasShapeSyncOutputPath)),
+      import(pathToFileHref(operationLayoutOutputPath)),
+      import(pathToFileHref(operationPatchOutputPath))
     ]);
 
     return {
@@ -418,7 +432,9 @@ async function compileSqlErdRuntimeModules() {
       tablePinRuntime,
       foreignKeyAddRuntime,
       autoLayoutRuntime,
-      canvasShapeSyncRuntime
+      canvasShapeSyncRuntime,
+      operationLayoutRuntime,
+      operationPatchRuntime
     };
   } finally {
     await rm(outputDir, { force: true, recursive: true });
@@ -793,8 +809,262 @@ const {
   tablePinRuntime,
   foreignKeyAddRuntime,
   autoLayoutRuntime,
-  canvasShapeSyncRuntime
+  canvasShapeSyncRuntime,
+  operationLayoutRuntime,
+  operationPatchRuntime
 } = await compileSqlErdRuntimeModules();
+
+assert.equal(
+  typeof canvasShapeSyncRuntime.createSqlErdTablePositionChangeBuffer,
+  "function"
+);
+assert.equal(
+  typeof canvasShapeSyncRuntime.shouldFlushSqlErdTablePositionChangesOnKeyUp,
+  "function"
+);
+
+const createTableShape = (tableId, x, y) => ({
+  id: `shape:${tableId}`,
+  props: { tableId },
+  type: "sqltoerd_table",
+  typeName: "shape",
+  x,
+  y
+});
+const isTableShape = (shape) => shape?.type === "sqltoerd_table";
+const createTableChangeEntry = (source, updates) => ({
+  changes: {
+    added: {},
+    removed: {},
+    updated: Object.fromEntries(
+      updates.map(([before, after]) => [after.id, [before, after]])
+    )
+  },
+  source
+});
+
+const singleTableBuffer =
+  canvasShapeSyncRuntime.createSqlErdTablePositionChangeBuffer(isTableShape);
+singleTableBuffer.record(
+  createTableChangeEntry("user", [
+    [createTableShape("table.users", 0, 0), createTableShape("table.users", 100, 0)],
+    [createTableShape("table.orders", 0, 0), createTableShape("table.orders", 0, 0)]
+  ])
+);
+const singleTablePositions = singleTableBuffer.flush((tableId) =>
+  tableId === "table.users"
+    ? { tableId, x: 125, y: 0 }
+    : { tableId, x: 0, y: 0 }
+);
+assert.deepEqual(singleTablePositions, [
+  { tableId: "table.users", x: 125, y: 0 }
+]);
+assert.deepEqual(
+  operationPatchRuntime.createSqlErdOperationLayoutPatch(
+    { tablePositions: singleTablePositions },
+    {
+      tableLayouts: [
+        { tableId: "table.users", x: 125, y: 0 },
+        { tableId: "table.orders", x: 0, y: 0 }
+      ],
+      version: 1
+    }
+  ),
+  {
+    tableLayouts: {
+      upsert: [{ tableId: "table.users", x: 125, y: 0 }]
+    }
+  }
+);
+
+const initialConcurrentLayout = {
+  tableLayouts: [
+    { tableId: "table.users", x: 0, y: 0 },
+    { tableId: "table.orders", x: 0, y: 0 }
+  ],
+  version: 1
+};
+const afterDifferentTableMoves = operationLayoutRuntime.applySqlErdOperationLayoutPatch(
+  operationLayoutRuntime.applySqlErdOperationLayoutPatch(initialConcurrentLayout, {
+    tableLayouts: {
+      upsert: [{ tableId: "table.users", x: 100, y: 0 }]
+    }
+  }),
+  {
+    tableLayouts: {
+      upsert: [{ tableId: "table.orders", x: 0, y: 100 }]
+    }
+  }
+);
+assert.deepEqual(afterDifferentTableMoves.tableLayouts, [
+  { tableId: "table.users", x: 100, y: 0 },
+  { tableId: "table.orders", x: 0, y: 100 }
+]);
+assert.deepEqual(
+  operationLayoutRuntime.applySqlErdOperationLayoutPatch(
+    afterDifferentTableMoves,
+    {
+      tableLayouts: {
+        upsert: [{ tableId: "table.users", x: 200, y: 0 }]
+      }
+    }
+  ).tableLayouts,
+  [
+    { tableId: "table.users", x: 200, y: 0 },
+    { tableId: "table.orders", x: 0, y: 100 }
+  ]
+);
+
+const ignoredTableChanges =
+  canvasShapeSyncRuntime.createSqlErdTablePositionChangeBuffer(isTableShape);
+ignoredTableChanges.record(
+  createTableChangeEntry("remote", [
+    [createTableShape("table.users", 0, 0), createTableShape("table.users", 50, 0)]
+  ])
+);
+ignoredTableChanges.record(
+  createTableChangeEntry("user", [
+    [createTableShape("table.users", 0, 0), createTableShape("table.users", 0, 0)]
+  ])
+);
+assert.deepEqual(ignoredTableChanges.flush(() => null), []);
+
+ignoredTableChanges.record(
+  createTableChangeEntry("user", [
+    [createTableShape("table.users", 0, 0), createTableShape("table.users", 75, 0)]
+  ])
+);
+ignoredTableChanges.cancel();
+assert.deepEqual(ignoredTableChanges.flush(() => null), []);
+
+const autoLayoutTableChanges =
+  canvasShapeSyncRuntime.createSqlErdTablePositionChangeBuffer(isTableShape);
+autoLayoutTableChanges.suppressNext([
+  { tableId: "table.users", x: 100, y: 50 },
+  { tableId: "table.orders", x: 500, y: 50 }
+]);
+autoLayoutTableChanges.record(
+  createTableChangeEntry("user", [
+    [
+      createTableShape("table.users", 0, 0),
+      createTableShape("table.users", 100, 50)
+    ],
+    [
+      createTableShape("table.orders", 0, 0),
+      createTableShape("table.orders", 500, 50)
+    ]
+  ])
+);
+assert.deepEqual(
+  autoLayoutTableChanges.flush((tableId) => ({ tableId, x: 999, y: 999 })),
+  []
+);
+autoLayoutTableChanges.record(
+  createTableChangeEntry("user", [
+    [
+      createTableShape("table.users", 100, 50),
+      createTableShape("table.users", 125, 50)
+    ]
+  ])
+);
+assert.deepEqual(
+  autoLayoutTableChanges.flush((tableId) => ({ tableId, x: 125, y: 50 })),
+  [{ tableId: "table.users", x: 125, y: 50 }]
+);
+
+autoLayoutTableChanges.suppressNext([
+  { tableId: "table.users", x: 200, y: 50 }
+]);
+autoLayoutTableChanges.clearSuppressed();
+autoLayoutTableChanges.record(
+  createTableChangeEntry("user", [
+    [
+      createTableShape("table.users", 125, 50),
+      createTableShape("table.users", 200, 50)
+    ]
+  ])
+);
+assert.deepEqual(
+  autoLayoutTableChanges.flush((tableId) => ({ tableId, x: 200, y: 50 })),
+  [{ tableId: "table.users", x: 200, y: 50 }]
+);
+
+autoLayoutTableChanges.suppressNext([
+  { tableId: "table.users", x: 250, y: 50 }
+]);
+autoLayoutTableChanges.record(
+  createTableChangeEntry("user", [
+    [
+      createTableShape("table.users", 200, 50),
+      createTableShape("table.users", 275, 50)
+    ]
+  ])
+);
+assert.deepEqual(
+  autoLayoutTableChanges.flush((tableId) => ({ tableId, x: 275, y: 50 })),
+  [{ tableId: "table.users", x: 275, y: 50 }]
+);
+
+assert.equal(
+  canvasShapeSyncRuntime.shouldFlushSqlErdTablePositionChangesOnKeyUp({
+    ctrlKey: false,
+    key: "ArrowUp",
+    metaKey: false
+  }),
+  true
+);
+assert.equal(
+  canvasShapeSyncRuntime.shouldFlushSqlErdTablePositionChangesOnKeyUp({
+    ctrlKey: true,
+    key: "z",
+    metaKey: false
+  }),
+  true
+);
+assert.equal(
+  canvasShapeSyncRuntime.shouldFlushSqlErdTablePositionChangesOnKeyUp({
+    ctrlKey: false,
+    key: "Z",
+    metaKey: true
+  }),
+  true
+);
+assert.equal(
+  canvasShapeSyncRuntime.shouldFlushSqlErdTablePositionChangesOnKeyUp({
+    ctrlKey: true,
+    key: "y",
+    metaKey: false
+  }),
+  true
+);
+assert.equal(
+  canvasShapeSyncRuntime.shouldFlushSqlErdTablePositionChangesOnKeyUp({
+    ctrlKey: false,
+    key: "z",
+    metaKey: false
+  }),
+  false
+);
+assert.equal(
+  canvasShapeSyncRuntime.shouldFlushSqlErdTablePositionChangesOnKeyUp({
+    ctrlKey: false,
+    key: "Enter",
+    metaKey: false
+  }),
+  false
+);
+
+const autoLayoutPositions = [
+  { tableId: "table.users", x: 100, y: 50 },
+  { tableId: "table.orders", x: 500, y: 50 }
+];
+assert.deepEqual(
+  operationPatchRuntime.createSqlErdOperationLayoutPatch(
+    { tablePositions: autoLayoutPositions },
+    { tableLayouts: autoLayoutPositions, version: 1 }
+  ),
+  { tableLayouts: { upsert: autoLayoutPositions } }
+);
 
 const initialTablePinState = tablePinRuntime.createSqlErdTablePinState();
 const pinnedOrdersTable = tablePinRuntime.pinSqlErdTable(
@@ -6699,6 +6969,36 @@ assert.match(annotationToolbar, /bottom-4 left-1\/2/);
 assert.match(annotationToolbar, /function applyColor/);
 assert.match(canvasSurface, /SqlErdCanvasToolbar/);
 assert.match(canvasSurface, /<SqlErdCanvasToolbar/);
+assert.doesNotMatch(canvasSurface, /getSqlErdTablePositionsFromEditor/);
+assert.match(
+  canvasSurface,
+  /createSqlErdTablePositionChangeBuffer\(/
+);
+assert.match(canvasSurface, /tablePositionChanges\.record\(entry\)/);
+assert.match(
+  canvasSurface,
+  /editor\.store\.mergeRemoteChanges\(\(\) => \{[\s\S]*?applySqlErdCanvasIncrementalShapeSync/
+);
+assert.match(
+  canvasSurface,
+  /markHistoryStoppingPoint\("sqltoerd auto layout"\);[\s\S]*?editor\.run\(\(\) => \{[\s\S]*?editor\.updateShapes\(updates\);[\s\S]*?markHistoryStoppingPoint\("sqltoerd auto layout"\);/
+);
+assert.doesNotMatch(
+  canvasSurface,
+  /markHistoryStoppingPoint\("sqltoerd auto layout"\);\s*editor\.store\.mergeRemoteChanges/
+);
+assert.match(
+  canvasSurface,
+  /tablePositionChanges\.cancel\(\)[\s\S]*?pointercancel", cancelPendingLayoutSync/
+);
+assert.match(
+  canvasSurface,
+  /shouldFlushSqlErdTablePositionChangesOnKeyUp\(event\)[\s\S]*?flushPendingLayoutSync\(\)/
+);
+assert.match(
+  canvasSurface,
+  /addEventListener\("keyup", handleTablePositionKeyUp\)[\s\S]*?removeEventListener\("keyup", handleTablePositionKeyUp\)/
+);
 assert.match(
   canvasSurface,
   /SQLTOERD_FRAME_CHANGE_EVENT[\s\S]*?SqlErdCanvasToolbar/

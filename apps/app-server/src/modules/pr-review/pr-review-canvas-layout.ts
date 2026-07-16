@@ -1,3 +1,8 @@
+import ELK, {
+  type ElkExtendedEdge,
+  type ElkNode
+} from "elkjs";
+
 export type PrReviewCanvasRoutePoint = {
   x: number;
   y: number;
@@ -11,6 +16,14 @@ export type PrReviewCanvasLayoutFile = {
   flowSortOrder: number;
   workflowOrder: number;
   filePath: string;
+  roleType:
+    | "entry"
+    | "core_logic"
+    | "api_contract"
+    | "ui_state"
+    | "verification"
+    | "support"
+    | "unknown";
 };
 
 export type PrReviewCanvasLayoutRelation = {
@@ -38,6 +51,7 @@ const CANVAS_START_X = 160;
 const CANVAS_START_Y = 160;
 const FLOW_NODE_GAP_X = 184;
 const FLOW_LANE_GAP_Y = 320;
+const FLOW_LAYOUT_GAP_Y = 360;
 const SAME_FLOW_ROUTE_OFFSET = 72;
 const SAME_FLOW_ROUTE_GAP = 32;
 const CROSS_FLOW_ROUTE_OFFSET = 52;
@@ -53,11 +67,13 @@ export async function buildPrReviewCanvasGraphLayout(input: {
   }
 
   const files = [...input.files].sort(compareFiles);
-  const geometryByRoomFileId = buildFlowGeometry(files);
+  const { geometryByRoomFileId, routePointsByRelationId: flowRoutePoints } =
+    await buildFlowGeometry(files, input.relations);
   const routePointsByRelationId = buildOrthogonalRoutes(
     files,
     input.relations,
-    geometryByRoomFileId
+    geometryByRoomFileId,
+    flowRoutePoints
   );
 
   return {
@@ -68,7 +84,10 @@ export async function buildPrReviewCanvasGraphLayout(input: {
   };
 }
 
-function buildFlowGeometry(files: PrReviewCanvasLayoutFile[]) {
+async function buildFlowGeometry(
+  files: PrReviewCanvasLayoutFile[],
+  relations: PrReviewCanvasLayoutRelation[]
+) {
   const filesByFlowKey = new Map<string, PrReviewCanvasLayoutFile[]>();
   for (const file of files) {
     const flowKey = getFlowKey(file);
@@ -87,31 +106,116 @@ function buildFlowGeometry(files: PrReviewCanvasLayoutFile[]) {
     );
   });
   const geometryByRoomFileId = new Map<string, NodeGeometry>();
+  const routePointsByRelationId = new Map<string, PrReviewCanvasRoutePoint[]>();
+  let nextFlowY = CANVAS_START_Y;
 
-  for (const [flowIndex, [flowKey, members]] of flows.entries()) {
+  for (const [flowKey, members] of flows) {
     const sortedMembers = [...members].sort(compareFilesInFlow);
-    const y = CANVAS_START_Y + flowIndex * (getFlowHeight(sortedMembers) + FLOW_LANE_GAP_Y);
-    let nextX = CANVAS_START_X;
+    const flowRelationIds = new Set(
+      relations
+        .filter(
+          (relation) =>
+            getFlowKeyByRoomFileId(members, relation.fromRoomFileId) === flowKey &&
+            getFlowKeyByRoomFileId(members, relation.toRoomFileId) === flowKey
+        )
+        .map((relation) => relation.id)
+    );
+    const flowRelations = relations.filter((relation) => flowRelationIds.has(relation.id));
+    const layout = await buildElkFlowLayout(sortedMembers, flowRelations);
+    const layoutChildren = layout.children ?? [];
+    const layoutHeight = Math.max(
+      ...layoutChildren.map((child) => (child.y ?? 0) + (child.height ?? 0)),
+      ...sortedMembers.map((file) => file.height)
+    );
+
     for (const [columnIndex, file] of sortedMembers.entries()) {
+      const node = layoutChildren.find((child) => child.id === file.roomFileId);
       geometryByRoomFileId.set(file.roomFileId, {
-        x: nextX,
-        y,
+        x: CANVAS_START_X + (node?.x ?? columnIndex * (file.width + FLOW_NODE_GAP_X)),
+        y: nextFlowY + (node?.y ?? 0),
         width: file.width,
         height: file.height,
         flowKey,
         columnIndex
       });
-      nextX += file.width + FLOW_NODE_GAP_X;
     }
+
+    for (const edge of layout.edges ?? []) {
+      const points = toRoutePoints(edge, CANVAS_START_X, nextFlowY);
+      if (points.length >= 2) {
+        routePointsByRelationId.set(edge.id, points);
+      }
+    }
+
+    nextFlowY += layoutHeight + FLOW_LAYOUT_GAP_Y;
   }
 
-  return geometryByRoomFileId;
+  return { geometryByRoomFileId, routePointsByRelationId };
+}
+
+async function buildElkFlowLayout(
+  files: PrReviewCanvasLayoutFile[],
+  relations: PrReviewCanvasLayoutRelation[]
+) {
+  const elk = new ELK();
+  const graph: ElkNode = {
+    id: `flow:${getFlowKey(files[0])}`,
+    layoutOptions: {
+      "elk.algorithm": "layered",
+      "elk.direction": "RIGHT",
+      "elk.edgeRouting": "ORTHOGONAL",
+      "elk.spacing.nodeNode": "72",
+      "elk.layered.spacing.nodeNodeBetweenLayers": "184",
+      "elk.layered.considerModelOrder.strategy": "NODES_AND_EDGES",
+      "elk.layered.crossingMinimization.strategy": "LAYER_SWEEP"
+    },
+    children: files.map((file) => ({
+      id: file.roomFileId,
+      width: file.width,
+      height: file.height,
+      layoutOptions: getRoleLayoutOptions(file)
+    })),
+    edges: relations.map((relation) => ({
+      id: relation.id,
+      sources: [relation.fromRoomFileId],
+      targets: [relation.toRoomFileId]
+    }))
+  };
+
+  return elk.layout(graph);
+}
+
+function getRoleLayoutOptions(file: PrReviewCanvasLayoutFile) {
+  if (file.roleType === "entry") {
+    return { "elk.layered.layering.layerConstraint": "FIRST" };
+  }
+  if (file.roleType === "verification") {
+    return { "elk.layered.layering.layerConstraint": "LAST" };
+  }
+  return undefined;
+}
+
+function toRoutePoints(edge: ElkExtendedEdge, offsetX: number, offsetY: number) {
+  const section = edge.sections?.[0];
+  if (!section) {
+    return [];
+  }
+
+  return deduplicateRoutePoints([
+    { x: offsetX + section.startPoint.x, y: offsetY + section.startPoint.y },
+    ...(section.bendPoints ?? []).map((point) => ({
+      x: offsetX + point.x,
+      y: offsetY + point.y
+    })),
+    { x: offsetX + section.endPoint.x, y: offsetY + section.endPoint.y }
+  ]);
 }
 
 function buildOrthogonalRoutes(
   files: PrReviewCanvasLayoutFile[],
   relations: PrReviewCanvasLayoutRelation[],
-  geometryByRoomFileId: Map<string, NodeGeometry>
+  geometryByRoomFileId: Map<string, NodeGeometry>,
+  flowRoutePoints: Map<string, PrReviewCanvasRoutePoint[]>
 ) {
   const fileIds = new Set(files.map((file) => file.roomFileId));
   const validRelations = relations
@@ -136,6 +240,12 @@ function buildOrthogonalRoutes(
     const from = geometryByRoomFileId.get(relation.fromRoomFileId);
     const to = geometryByRoomFileId.get(relation.toRoomFileId);
     if (!from || !to) {
+      continue;
+    }
+
+    const flowRoutePointsForRelation = flowRoutePoints.get(relation.id);
+    if (flowRoutePointsForRelation) {
+      routePointsByRelationId.set(relation.id, flowRoutePointsForRelation);
       continue;
     }
 
@@ -222,12 +332,16 @@ function isAdjacentReviewOrder(
   );
 }
 
-function getFlowHeight(files: PrReviewCanvasLayoutFile[]) {
-  return Math.max(...files.map((file) => file.height));
-}
-
 function getFlowKey(file: PrReviewCanvasLayoutFile) {
   return file.flowId ?? `unassigned:${file.flowSortOrder}`;
+}
+
+function getFlowKeyByRoomFileId(
+  files: PrReviewCanvasLayoutFile[],
+  roomFileId: string
+) {
+  const file = files.find((candidate) => candidate.roomFileId === roomFileId);
+  return file ? getFlowKey(file) : null;
 }
 
 function getCenterX(geometry: NodeGeometry) {
@@ -261,10 +375,30 @@ function compareFiles(left: PrReviewCanvasLayoutFile, right: PrReviewCanvasLayou
 
 function compareFilesInFlow(left: PrReviewCanvasLayoutFile, right: PrReviewCanvasLayoutFile) {
   return (
+    getRolePriority(left.roleType) - getRolePriority(right.roleType) ||
     left.workflowOrder - right.workflowOrder ||
     left.filePath.localeCompare(right.filePath) ||
     left.roomFileId.localeCompare(right.roomFileId)
   );
+}
+
+function getRolePriority(roleType: PrReviewCanvasLayoutFile["roleType"]) {
+  switch (roleType) {
+    case "entry":
+      return 0;
+    case "core_logic":
+      return 1;
+    case "ui_state":
+      return 2;
+    case "api_contract":
+      return 3;
+    case "support":
+      return 4;
+    case "verification":
+      return 5;
+    case "unknown":
+      return 6;
+  }
 }
 
 function compareRelations(

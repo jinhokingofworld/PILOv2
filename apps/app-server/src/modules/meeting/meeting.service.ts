@@ -4349,14 +4349,14 @@ export class MeetingService {
     }>(
       `SELECT activity_evidence.id, activity_evidence.source_index, activity_evidence.occurred_at,
               activity_evidence.action::text AS action, activity_evidence.summary,
-              references.source_type, references.source_index AS reference_source_index
+              activity_references.source_type, activity_references.source_index AS reference_source_index
        FROM meeting_report_activity_evidence AS activity_evidence
-       LEFT JOIN meeting_report_activity_evidence_references AS references
-         ON references.activity_evidence_id = activity_evidence.id
-        AND references.meeting_report_id = activity_evidence.meeting_report_id
+       LEFT JOIN meeting_report_activity_evidence_references AS activity_references
+         ON activity_references.activity_evidence_id = activity_evidence.id
+        AND activity_references.meeting_report_id = activity_evidence.meeting_report_id
        WHERE activity_evidence.meeting_report_id = $1
        ORDER BY activity_evidence.occurred_at ASC, activity_evidence.source_index ASC,
-                references.source_type ASC, references.source_index ASC`,
+                activity_references.source_type ASC, activity_references.source_index ASC`,
       [reportId]
     );
 

@@ -1,4 +1,120 @@
-import type { SqltoerdModelJsonV1 } from "@/features/sql-erd/types";
+import type {
+  SqltoerdModelJsonV1,
+  SqltoerdTableLayout
+} from "@/features/sql-erd/types";
+
+type SqlErdPositionedTableShape = {
+  props: { tableId: string };
+  x: number;
+  y: number;
+};
+
+type SqlErdTablePositionChangeEntry = {
+  changes: {
+    updated: Record<string, readonly [unknown, unknown]>;
+  };
+  source: "remote" | "user";
+};
+
+export type SqlErdTablePositionChangeBuffer = {
+  cancel: () => void;
+  clearSuppressed: () => void;
+  flush: (
+    resolvePosition: (tableId: string) => SqltoerdTableLayout | null
+  ) => SqltoerdTableLayout[];
+  record: (entry: SqlErdTablePositionChangeEntry) => void;
+  suppressNext: (tablePositions: readonly SqltoerdTableLayout[]) => void;
+};
+
+export function createSqlErdTablePositionChangeBuffer<
+  TableShape extends SqlErdPositionedTableShape
+>(
+  isTableShape: (shape: unknown) => shape is TableShape
+): SqlErdTablePositionChangeBuffer {
+  const changedTableIds = new Set<string>();
+  const suppressedTablePositions = new Map<
+    string,
+    Pick<SqltoerdTableLayout, "x" | "y">
+  >();
+
+  return {
+    cancel() {
+      changedTableIds.clear();
+    },
+    clearSuppressed() {
+      suppressedTablePositions.clear();
+    },
+    flush(
+      resolvePosition: (tableId: string) => SqltoerdTableLayout | null
+    ) {
+      const positions = [...changedTableIds].flatMap((tableId) => {
+        const position = resolvePosition(tableId);
+        return position ? [position] : [];
+      });
+      changedTableIds.clear();
+      return positions;
+    },
+    record(entry: SqlErdTablePositionChangeEntry) {
+      if (entry.source !== "user") {
+        return;
+      }
+
+      Object.values(entry.changes.updated).forEach(([before, after]) => {
+        if (
+          !isTableShape(before) ||
+          !isTableShape(after) ||
+          before.props.tableId !== after.props.tableId ||
+          (before.x === after.x && before.y === after.y)
+        ) {
+          return;
+        }
+
+        const suppressedPosition = suppressedTablePositions.get(
+          after.props.tableId
+        );
+
+        if (suppressedPosition) {
+          suppressedTablePositions.delete(after.props.tableId);
+
+          if (
+            suppressedPosition.x === after.x &&
+            suppressedPosition.y === after.y
+          ) {
+            return;
+          }
+        }
+
+        changedTableIds.add(after.props.tableId);
+      });
+    },
+    suppressNext(tablePositions: readonly SqltoerdTableLayout[]) {
+      tablePositions.forEach(({ tableId, x, y }) => {
+        suppressedTablePositions.set(tableId, { x, y });
+      });
+    }
+  };
+}
+
+type SqlErdTablePositionKeyUpEvent = Pick<
+  KeyboardEvent,
+  "ctrlKey" | "key" | "metaKey"
+>;
+
+export function shouldFlushSqlErdTablePositionChangesOnKeyUp(
+  event: SqlErdTablePositionKeyUpEvent
+) {
+  if (
+    event.key === "ArrowDown" ||
+    event.key === "ArrowLeft" ||
+    event.key === "ArrowRight" ||
+    event.key === "ArrowUp"
+  ) {
+    return true;
+  }
+
+  const key = event.key.toLowerCase();
+  return (event.ctrlKey || event.metaKey) && (key === "y" || key === "z");
+}
 
 export type SqlErdCanvasShapeIdentity = {
   id: string;
