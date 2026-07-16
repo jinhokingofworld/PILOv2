@@ -34,8 +34,11 @@ import {
 import type { DocumentBootstrapPayload } from "@/features/drive/types";
 
 import styles from "./document-editor.module.css";
+import { DocumentBlockHandle } from "./document-block-handle";
+import { DocumentBubbleMenu } from "./document-bubble-menu";
 import { DriveFileAttachment } from "./document-file-attachment";
 import { DocumentFilePicker } from "./document-file-picker";
+import { DocumentInlineTitle } from "./document-inline-title";
 import {
   DocumentSlashMenu,
   SLASH_COMMANDS,
@@ -137,6 +140,7 @@ function DocumentEditorSurface({
   const [isEditorEmpty, setIsEditorEmpty] = useState(false);
   const [isFilePickerOpen, setIsFilePickerOpen] = useState(false);
   const [slashMenuState, setSlashMenuState] = useState<SlashMenuState | null>(null);
+  const [documentName, setDocumentName] = useState(bootstrap.item.name);
   const driveClient = useMemo(
     () => createDriveApiClient({ accessToken }),
     [accessToken]
@@ -147,6 +151,28 @@ function DocumentEditorSurface({
     setSaveState("saved");
     setSaveError(null);
   }, [bootstrap.document.currentVersion, bootstrap.snapshot.id]);
+
+  useEffect(() => {
+    setDocumentName(bootstrap.item.name);
+  }, [bootstrap.item.id, bootstrap.item.name]);
+
+  const renameDocument = useCallback(
+    async (name: string) => {
+      if (!workspaceId || !accessToken) {
+        throw new Error("문서 이름을 변경하려면 로그인해야 합니다.");
+      }
+
+      if (name === "." || name === ".." || /[\\/]/.test(name)) {
+        throw new Error("문서 이름에 사용할 수 없는 문자가 포함되어 있습니다.");
+      }
+
+      const item = await driveClient.updateItem(workspaceId, bootstrap.item.id, {
+        name
+      });
+      setDocumentName(item.name);
+    },
+    [accessToken, bootstrap.item.id, driveClient, workspaceId]
+  );
 
   const persistSnapshot = useCallback(
     (editor: Editor) => {
@@ -378,7 +404,7 @@ function DocumentEditorSurface({
         </Button>
         <div className={styles.documentTitleGroup}>
           <h1 className={styles.documentTitle}>
-            {bootstrap.item.name}
+            <DocumentInlineTitle name={documentName} onSave={renameDocument} />
           </h1>
           <p className={styles.documentStatus} role="status">
             {saveStateLabel}
@@ -448,6 +474,8 @@ function DocumentEditorSurface({
           editor={editor}
           className={`${styles.editor} ${isEditorEmpty ? styles.emptyEditor : ""}`}
         />
+        <DocumentBubbleMenu editor={editor} />
+        <DocumentBlockHandle editor={editor} />
       </div>
       <DocumentFilePicker
         open={isFilePickerOpen}
