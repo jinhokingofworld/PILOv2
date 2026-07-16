@@ -29,6 +29,8 @@ import {
 import type { MeetingWorkspaceData } from "@/features/meeting/hooks/use-meeting-workspace-data";
 import type {
   MeetingReportActionItem,
+  MeetingReportActionItemDeliveryInput,
+  MeetingReportActionItemDeliveryOptions,
   MeetingReportActionItemAssignee,
   MeetingReportDetail,
   MeetingReportStatus,
@@ -405,7 +407,15 @@ function ReportTextBlock({
 function getActionItemStatusLabel(status: MeetingReportActionItem["status"]) {
   if (status === "APPROVED") return "승인됨";
   if (status === "DISMISSED") return "반려됨";
+  if (status === "DELIVERING") return "생성 중";
+  if (status === "DELIVERY_FAILED") return "생성 실패";
   return "검토 대기";
+}
+
+function getActionItemDeliveryErrorMessage(errorCode: string | null) {
+  if (errorCode === "FORBIDDEN") return "연결된 서비스에 접근할 수 없습니다.";
+  if (errorCode === "NOT_FOUND") return "선택한 대상 정보를 찾을 수 없습니다.";
+  return "생성에 실패했습니다. 입력을 확인한 뒤 다시 시도해주세요.";
 }
 
 function ActionItemReviewCard({
@@ -413,18 +423,20 @@ function ActionItemReviewCard({
   assignees,
   busy,
   evidenceSegments,
-  onApprove,
+  onDeliver,
   onDismiss,
   onEvidenceSelect,
+  onLoadIssueDeliveryOptions,
   onSave
 }: {
   actionItem: MeetingReportActionItem;
   assignees: MeetingReportActionItemAssignee[];
   busy: boolean;
   evidenceSegments: MeetingReportTranscriptSegment[];
-  onApprove: () => void;
+  onDeliver: (input: MeetingReportActionItemDeliveryInput) => Promise<void>;
   onDismiss: () => void;
   onEvidenceSelect: (segment: MeetingReportTranscriptSegment) => void;
+  onLoadIssueDeliveryOptions: () => Promise<MeetingReportActionItemDeliveryOptions>;
   onSave: (body: UpdateMeetingReportActionItemInput) => void;
 }) {
   const [title, setTitle] = useState(actionItem.title);
@@ -433,14 +445,114 @@ function ActionItemReviewCard({
   const [assigneeUserId, setAssigneeUserId] = useState(
     actionItem.assignee?.userId ?? ""
   );
+  const [showDelivery, setShowDelivery] = useState(false);
+  const [deliveryType, setDeliveryType] = useState<"calendar_event" | "pilo_issue">(
+    "calendar_event"
+  );
+  const [deliveryTitle, setDeliveryTitle] = useState(actionItem.title);
+  const [deliveryDescription, setDeliveryDescription] = useState(actionItem.description);
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const [isAllDay, setIsAllDay] = useState(true);
+  const [startTime, setStartTime] = useState("");
+  const [endTime, setEndTime] = useState("");
+  const [issueOptions, setIssueOptions] =
+    useState<MeetingReportActionItemDeliveryOptions | null>(null);
+  const [selectedBoardId, setSelectedBoardId] = useState("");
+  const [selectedColumnId, setSelectedColumnId] = useState("");
+  const [deliveryOptionsError, setDeliveryOptionsError] = useState<string | null>(null);
+  const [loadingIssueOptions, setLoadingIssueOptions] = useState(false);
   const pending = actionItem.status === "PENDING";
+  const canDeliver = pending || actionItem.status === "DELIVERY_FAILED";
+  const retryingDelivery = actionItem.status === "DELIVERY_FAILED";
+  const selectedBoard = issueOptions?.boards.find((board) => board.id === selectedBoardId);
 
   useEffect(() => {
     setTitle(actionItem.title);
     setDescription(actionItem.description);
     setPriority(actionItem.priority);
     setAssigneeUserId(actionItem.assignee?.userId ?? "");
+    setDeliveryTitle(actionItem.title);
+    setDeliveryDescription(actionItem.description);
+    setShowDelivery(false);
   }, [actionItem]);
+
+  async function selectDeliveryType(nextType: "calendar_event" | "pilo_issue") {
+    setDeliveryType(nextType);
+    setDeliveryOptionsError(null);
+    if (nextType !== "pilo_issue" || issueOptions || loadingIssueOptions) return;
+    setLoadingIssueOptions(true);
+    try {
+      const options = await onLoadIssueDeliveryOptions();
+      setIssueOptions(options);
+      const firstBoard = options.boards[0];
+      setSelectedBoardId((current) => current || firstBoard?.id || "");
+      setSelectedColumnId((current) => current || firstBoard?.columns[0]?.id || "");
+    } catch (error) {
+      setDeliveryOptionsError(getReportRequestErrorMessage(error));
+    } finally {
+      setLoadingIssueOptions(false);
+    }
+  }
+
+  function changeBoard(boardId: string) {
+    setSelectedBoardId(boardId);
+    const board = issueOptions?.boards.find((option) => option.id === boardId);
+    setSelectedColumnId(board?.columns[0]?.id ?? "");
+  }
+
+  async function openDelivery() {
+    const draft = actionItem.status === "DELIVERY_FAILED"
+      ? actionItem.delivery?.draft
+      : null;
+    if (draft?.deliveryType === "calendar_event") {
+      setDeliveryType("calendar_event");
+      setDeliveryTitle(draft.calendar.title ?? actionItem.title);
+      setDeliveryDescription(draft.calendar.description ?? actionItem.description);
+      setStartDate(draft.calendar.startDate);
+      setEndDate(draft.calendar.endDate);
+      setIsAllDay(draft.calendar.isAllDay ?? true);
+      setStartTime(draft.calendar.startTime ?? "");
+      setEndTime(draft.calendar.endTime ?? "");
+    } else if (draft?.deliveryType === "pilo_issue") {
+      setDeliveryType("pilo_issue");
+      setDeliveryTitle(draft.issue.title ?? actionItem.title);
+      setDeliveryDescription(draft.issue.body ?? actionItem.description);
+      setSelectedBoardId(draft.issue.boardId);
+      setSelectedColumnId(draft.issue.columnId);
+      await selectDeliveryType("pilo_issue");
+    }
+    setShowDelivery(true);
+  }
+
+  async function submitDelivery() {
+    if (deliveryType === "calendar_event") {
+      if (!startDate || !endDate) return;
+      await onDeliver({
+        deliveryType,
+        calendar: {
+          title: deliveryTitle.trim() || undefined,
+          description: deliveryDescription.trim() || null,
+          isAllDay,
+          startDate,
+          endDate,
+          startTime: isAllDay ? null : startTime || null,
+          endTime: isAllDay ? null : endTime || null
+        }
+      });
+      return;
+    }
+    if (!selectedBoardId || !selectedColumnId) return;
+    await onDeliver({
+      deliveryType,
+      issue: {
+        boardId: selectedBoardId,
+        columnId: selectedColumnId,
+        title: deliveryTitle.trim() || undefined,
+        body: deliveryDescription.trim() || undefined
+      }
+    });
+  }
 
   return (
     <li className="grid gap-3 rounded-lg border bg-background p-3 text-sm">
@@ -457,14 +569,14 @@ function ActionItemReviewCard({
         <div className="grid gap-2">
           <Input
             aria-label="후속 작업 제목"
-            disabled={busy}
+            disabled={busy || retryingDelivery}
             value={title}
             onChange={(event) => setTitle(event.target.value)}
           />
           <textarea
             aria-label="후속 작업 설명"
             className="min-h-20 rounded-md border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            disabled={busy}
+            disabled={busy || retryingDelivery}
             value={description}
             onChange={(event) => setDescription(event.target.value)}
           />
@@ -512,6 +624,113 @@ function ActionItemReviewCard({
         <EvidenceTimeButtons segments={evidenceSegments} onSelect={onEvidenceSelect} />
       ) : null}
 
+      {actionItem.delivery ? (
+        <div className="rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground">
+          <p className="font-medium text-foreground">
+            {actionItem.delivery.deliveryType === "calendar_event" ? "일정" : "Pilo issue"} 전달 · {actionItem.delivery.status}
+          </p>
+          {actionItem.delivery.calendarEvent ? (
+            <p className="mt-1">일정 생성됨: {actionItem.delivery.calendarEvent.title}</p>
+          ) : null}
+          {actionItem.delivery.piloIssue ? (
+            <p className="mt-1">
+              Issue 생성됨: {actionItem.delivery.piloIssue.title}
+              {actionItem.delivery.piloIssue.columnName
+                ? ` · ${actionItem.delivery.piloIssue.columnName}`
+                : ""}
+            </p>
+          ) : null}
+          {actionItem.delivery.status === "FAILED" ? (
+            <p className="mt-1 text-destructive">
+              {getActionItemDeliveryErrorMessage(actionItem.delivery.errorCode)}
+            </p>
+          ) : null}
+          {actionItem.delivery.status === "COMPLETED" &&
+          !actionItem.delivery.calendarEvent &&
+          !actionItem.delivery.piloIssue ? (
+            <p className="mt-1">생성된 대상은 삭제되었거나 더 이상 조회할 수 없습니다.</p>
+          ) : null}
+        </div>
+      ) : null}
+
+      {showDelivery ? (
+        <div className="grid gap-3 rounded-md border bg-muted/20 p-3">
+          <div className="grid gap-2 sm:grid-cols-2">
+            <Button
+              type="button"
+              variant={deliveryType === "calendar_event" ? "default" : "outline"}
+              disabled={busy || actionItem.status === "DELIVERY_FAILED"}
+              onClick={() => void selectDeliveryType("calendar_event")}
+            >
+              Calendar 일정
+            </Button>
+            <Button
+              type="button"
+              variant={deliveryType === "pilo_issue" ? "default" : "outline"}
+              disabled={busy || loadingIssueOptions || actionItem.status === "DELIVERY_FAILED"}
+              onClick={() => void selectDeliveryType("pilo_issue")}
+            >
+              {loadingIssueOptions ? <Loader2 className="animate-spin" /> : null}
+              Pilo issue
+            </Button>
+          </div>
+          <Input
+            aria-label="생성 대상 제목"
+            disabled={busy || retryingDelivery}
+            value={deliveryTitle}
+            onChange={(event) => setDeliveryTitle(event.target.value)}
+          />
+          <textarea
+            aria-label="생성 대상 설명"
+            className="min-h-20 rounded-md border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            disabled={busy || retryingDelivery}
+            value={deliveryDescription}
+            onChange={(event) => setDeliveryDescription(event.target.value)}
+          />
+          {deliveryType === "calendar_event" ? (
+            <div className="grid gap-2 sm:grid-cols-2">
+              <label className="grid gap-1 text-xs text-muted-foreground">
+                시작 날짜
+                <Input type="date" disabled={busy || retryingDelivery} value={startDate} onChange={(event) => setStartDate(event.target.value)} />
+              </label>
+              <label className="grid gap-1 text-xs text-muted-foreground">
+                종료 날짜
+                <Input type="date" disabled={busy || retryingDelivery} value={endDate} onChange={(event) => setEndDate(event.target.value)} />
+              </label>
+              <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                <input type="checkbox" checked={isAllDay} disabled={busy || retryingDelivery} onChange={(event) => setIsAllDay(event.target.checked)} />
+                종일 일정
+              </label>
+              {!isAllDay ? (
+                <div className="grid grid-cols-2 gap-2">
+                  <Input aria-label="시작 시간" type="time" disabled={busy || retryingDelivery} value={startTime} onChange={(event) => setStartTime(event.target.value)} />
+                  <Input aria-label="종료 시간" type="time" disabled={busy || retryingDelivery} value={endTime} onChange={(event) => setEndTime(event.target.value)} />
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <div className="grid gap-2 sm:grid-cols-2">
+              <select aria-label="Board 선택" className="h-9 rounded-md border bg-background px-3 text-sm" disabled={busy || loadingIssueOptions || retryingDelivery} value={selectedBoardId} onChange={(event) => changeBoard(event.target.value)}>
+                <option value="">Board 선택</option>
+                {issueOptions?.boards.map((board) => <option key={board.id} value={board.id}>{board.name}</option>)}
+              </select>
+              <select aria-label="Column 선택" className="h-9 rounded-md border bg-background px-3 text-sm" disabled={busy || !selectedBoard || retryingDelivery} value={selectedColumnId} onChange={(event) => setSelectedColumnId(event.target.value)}>
+                <option value="">Column 선택</option>
+                {selectedBoard?.columns.map((column) => <option key={column.id} value={column.id}>{column.name}</option>)}
+              </select>
+              {deliveryOptionsError ? <p className="text-xs text-destructive sm:col-span-2">{deliveryOptionsError}</p> : null}
+            </div>
+          )}
+          <div className="flex justify-end gap-2">
+            <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => setShowDelivery(false)}>취소</Button>
+            <Button type="button" size="sm" disabled={busy || !deliveryTitle.trim() || (deliveryType === "calendar_event" ? !startDate || !endDate : !selectedBoardId || !selectedColumnId)} onClick={() => void submitDelivery()}>
+              {busy ? <Loader2 className="animate-spin" /> : null}
+              확인하고 생성
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
       {pending ? (
         <div className="flex flex-wrap justify-end gap-2">
           <Button
@@ -539,8 +758,15 @@ function ActionItemReviewCard({
           >
             수정 저장
           </Button>
-          <Button type="button" size="sm" disabled={busy} onClick={() => onApprove()}>
-            승인
+          <Button type="button" size="sm" disabled={busy} onClick={() => void openDelivery()}>
+            승인 및 생성
+          </Button>
+        </div>
+      ) : null}
+      {actionItem.status === "DELIVERY_FAILED" ? (
+        <div className="flex justify-end">
+          <Button type="button" size="sm" disabled={busy} onClick={() => void openDelivery()}>
+            다시 시도
           </Button>
         </div>
       ) : null}
@@ -552,10 +778,11 @@ function MeetingReportDetailModal({
   detailError,
   detailStatus,
   mutatingActionItemId,
-  onApproveActionItem,
+  onDeliverActionItem,
   onClose,
   onDelete,
   onDismissActionItem,
+  onLoadIssueDeliveryOptions,
   onRegenerate,
   onUpdateActionItem,
   open,
@@ -566,10 +793,16 @@ function MeetingReportDetailModal({
   detailError: string | null;
   detailStatus: ReportDetailStatus;
   mutatingActionItemId: string | null;
-  onApproveActionItem: (actionItem: MeetingReportActionItem) => void;
+  onDeliverActionItem: (
+    actionItem: MeetingReportActionItem,
+    input: MeetingReportActionItemDeliveryInput
+  ) => Promise<void>;
   onClose: () => void;
   onDelete: (report: MeetingReportSummary) => void;
   onDismissActionItem: (actionItem: MeetingReportActionItem) => void;
+  onLoadIssueDeliveryOptions: (
+    actionItem: MeetingReportActionItem
+  ) => Promise<MeetingReportActionItemDeliveryOptions>;
   onRegenerate: (report: MeetingReportSummary) => void;
   onUpdateActionItem: (
     actionItem: MeetingReportActionItem,
@@ -827,9 +1060,10 @@ function MeetingReportDetailModal({
                             assignees={report.actionItemAssignees ?? []}
                             busy={mutatingActionItemId === item.id}
                             evidenceSegments={evidenceSegments}
-                            onApprove={() => onApproveActionItem(item)}
+                            onDeliver={(input) => onDeliverActionItem(item, input)}
                             onDismiss={() => onDismissActionItem(item)}
                             onEvidenceSelect={selectTranscriptSegment}
+                            onLoadIssueDeliveryOptions={() => onLoadIssueDeliveryOptions(item)}
                             onSave={(body) => onUpdateActionItem(item, body)}
                           />
                         )
@@ -939,11 +1173,12 @@ export function MeetingReportSection({
 }: MeetingReportSectionProps) {
   const {
     accessToken,
-    approveMeetingReportActionItem,
     canLoad,
     deleteMeetingReport,
+    deliverMeetingReportActionItem,
     dismissMeetingReportActionItem,
     getMeetingReport,
+    getMeetingReportActionItemDeliveryOptions,
     regenerateMeetingReport,
     reloadReports,
     reports,
@@ -1099,16 +1334,13 @@ export function MeetingReportSection({
   const handleActionItemMutation = useCallback(
     async (
       actionItem: MeetingReportActionItem,
-      action: "approve" | "dismiss" | "update",
+      action: "dismiss" | "update",
       body?: UpdateMeetingReportActionItemInput
     ) => {
       if (!selectedReport) return;
       setMutatingActionItemId(actionItem.id);
       try {
-        if (action === "approve") {
-          await approveMeetingReportActionItem(selectedReport.id, actionItem.id);
-          onToastMessage("후속 작업을 승인했습니다.");
-        } else if (action === "dismiss") {
+        if (action === "dismiss") {
           await dismissMeetingReportActionItem(selectedReport.id, actionItem.id);
           onToastMessage("후속 작업을 반려했습니다.");
         } else if (body) {
@@ -1127,13 +1359,53 @@ export function MeetingReportSection({
       }
     },
     [
-      approveMeetingReportActionItem,
       dismissMeetingReportActionItem,
       loadReportDetail,
       onToastMessage,
       selectedReport,
       updateMeetingReportActionItem
     ]
+  );
+
+  const handleActionItemDelivery = useCallback(
+    async (
+      actionItem: MeetingReportActionItem,
+      input: MeetingReportActionItemDeliveryInput
+    ) => {
+      if (!selectedReport) return;
+      setMutatingActionItemId(actionItem.id);
+      try {
+        const result = await deliverMeetingReportActionItem(
+          selectedReport.id,
+          actionItem.id,
+          input
+        );
+        onToastMessage(
+          result.status === "COMPLETED"
+            ? "후속 작업을 생성하고 승인했습니다."
+            : "생성에 실패했습니다. 같은 설정으로 다시 시도할 수 있습니다."
+        );
+        await loadReportDetail(selectedReport.id, { silent: true });
+      } catch (error) {
+        onToastMessage(getReportRequestErrorMessage(error));
+      } finally {
+        setMutatingActionItemId(null);
+      }
+    },
+    [deliverMeetingReportActionItem, loadReportDetail, onToastMessage, selectedReport]
+  );
+
+  const handleLoadIssueDeliveryOptions = useCallback(
+    async (actionItem: MeetingReportActionItem) => {
+      if (!selectedReport) {
+        throw new Error("회의록 상세를 찾을 수 없습니다.");
+      }
+      return getMeetingReportActionItemDeliveryOptions(
+        selectedReport.id,
+        actionItem.id
+      );
+    },
+    [getMeetingReportActionItemDeliveryOptions, selectedReport]
   );
 
   useEffect(() => {
@@ -1412,14 +1684,13 @@ export function MeetingReportSection({
           regeneratingReportId === selectedReport?.id
         }
         report={selectedReport}
-        onApproveActionItem={(actionItem) =>
-          void handleActionItemMutation(actionItem, "approve")
-        }
+        onDeliverActionItem={handleActionItemDelivery}
         onClose={handleCloseReport}
         onDelete={(report) => void handleDeleteReport(report)}
         onDismissActionItem={(actionItem) =>
           void handleActionItemMutation(actionItem, "dismiss")
         }
+        onLoadIssueDeliveryOptions={handleLoadIssueDeliveryOptions}
         onRegenerate={(report) => void handleRegenerateReport(report)}
         onUpdateActionItem={(actionItem, body) =>
           void handleActionItemMutation(actionItem, "update", body)

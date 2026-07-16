@@ -25,6 +25,17 @@ const meetingServiceSource = await readFile(
   new URL("../../src/modules/meeting/meeting.service.ts", import.meta.url),
   "utf8"
 );
+const meetingControllerSource = await readFile(
+  new URL("../../src/modules/meeting/meeting.controller.ts", import.meta.url),
+  "utf8"
+);
+const meetingActionItemDeliverySource = await readFile(
+  new URL(
+    "../../src/modules/meeting/meeting-action-item-delivery.service.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
 const participantSessionMigration = await readFile(
   new URL(
     "../../../../db/migrations/072_convert_meeting_participants_to_session_history.sql",
@@ -42,6 +53,26 @@ assert.match(meetingServiceSource, /WITH active_participant AS/);
 assert.match(
   meetingServiceSource,
   /active_participant AS \(\s+SELECT meeting_participants\.\*/s
+);
+assert.match(
+  meetingControllerSource,
+  /action-items\/:actionItemId\/delivery-options/,
+  "Meeting API must provide Board and Column delivery options without a frontend Board dependency"
+);
+assert.match(
+  meetingControllerSource,
+  /action-items\/:actionItemId\/deliveries/,
+  "Meeting API must expose the composite action item delivery command"
+);
+assert.match(
+  meetingActionItemDeliverySource,
+  /last_attempted_by_user_id = \$3[\s\S]*?last_attempted_at = now\(\)/,
+  "Any Workspace member retry must record the most recent delivery claimant"
+);
+assert.doesNotMatch(
+  meetingActionItemDeliverySource,
+  /delivery\.requested_by_user_id !== currentUserId/,
+  "Delivery retries must not be restricted to the original requester"
 );
 assert.match(meetingServiceSource, /ON CONFLICT DO NOTHING/);
 assert.match(meetingServiceSource, /pg_advisory_xact_lock/);
@@ -2503,34 +2534,17 @@ assert.doesNotMatch(meetingServiceSource, /AS references\b/);
 }
 
 {
-  const { service } = createSubject(
-    new FakeDatabase({
-      queryOneRows: [
-        () => meetingReportActionItemRow(),
-        (text, values) => {
-          assert.match(text, /status = 'APPROVED'/);
-          assert.deepEqual(values, [actionItemId, currentUserId]);
-          return { id: actionItemId };
-        },
-        () => meetingReportActionItemRow({
-          status: "APPROVED",
-          approved_by_user_id: currentUserId,
-          approved_at: updatedAt,
-          updated_by_user_id: currentUserId
-        })
-      ]
-    })
-  );
+  const { service } = createSubject();
 
-  const result = await service.approveMeetingReportActionItem(
-    currentUserId,
-    workspaceId,
-    reportId,
-    actionItemId
+  await assertBadRequest(
+    () => service.approveMeetingReportActionItem(
+      currentUserId,
+      workspaceId,
+      reportId,
+      actionItemId
+    ),
+    /requires delivery input/
   );
-
-  assert.equal(result.actionItem.status, "APPROVED");
-  assert.equal(result.actionItem.approvedByUserId, currentUserId);
 }
 
 {

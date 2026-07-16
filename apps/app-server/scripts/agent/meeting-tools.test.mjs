@@ -38,6 +38,13 @@ const deliveryTargetPreservationMigration = await readFile(
   ),
   "utf8"
 );
+const deliveryAttemptAuditMigration = await readFile(
+  new URL(
+    "../../../../db/migrations/076_add_meeting_action_item_delivery_attempt_audit.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
 
 assert.match(
   meetingAgentWorkflowMigration,
@@ -63,6 +70,16 @@ assert.match(
   deliveryTargetPreservationMigration,
   /target_resource_id ~ '[^']+'[\s\S]*?calendar_event_id IS NULL[\s\S]*?target_resource_id = calendar_event_id::text[\s\S]*?pilo_issue_id IS NULL[\s\S]*?target_resource_id = pilo_issue_id::text/,
   "Completed deliveries must match their snapshot to a live FK when present"
+);
+assert.match(
+  deliveryAttemptAuditMigration,
+  /last_attempted_by_user_id UUID[\s\S]*?REFERENCES public\.users\(id\) ON DELETE SET NULL/,
+  "Delivery retries must retain a safe member audit reference"
+);
+assert.match(
+  deliveryAttemptAuditMigration,
+  /last_attempted_at TIMESTAMPTZ/,
+  "Delivery retries must retain when the latest attempt was claimed"
 );
 
 function createMeeting(overrides = {}) {
@@ -824,6 +841,8 @@ class FakeActionItemDeliveryDatabase {
       return { ...this.delivery };
     }
     if (text.includes("SET status = 'RUNNING'")) {
+      assert.match(text, /last_attempted_by_user_id = \$3/);
+      assert.equal(values[2], USER_ID);
       this.delivery.status = "RUNNING";
       this.delivery.claim_token = values[1];
       this.delivery.locked_until = new Date("2026-07-08T00:05:00.000Z");
@@ -874,8 +893,8 @@ class FakeActionItemDeliveryDatabase {
     {
       deliveryType: "pilo_issue",
       issue: {
-        boardId: "board-changed-on-retry",
-        columnId: "column-changed-on-retry",
+        boardId: "99",
+        columnId: "77",
         title: "재시도에서 바꾼 제목"
       }
     }

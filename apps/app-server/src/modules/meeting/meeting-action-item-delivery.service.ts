@@ -6,6 +6,7 @@ import { DatabaseService, DatabaseTransaction } from "../../database/database.se
 import { BoardService } from "../board/board.service";
 import { CalendarService } from "../calendar/calendar.service";
 import { WorkspaceService } from "../workspace/workspace.service";
+import type { BoardColumnPayload, BoardPayload } from "../board/types";
 
 export type MeetingActionItemDeliveryType = "calendar_event" | "pilo_issue";
 
@@ -36,6 +37,16 @@ export interface MeetingActionItemDeliveryPayload {
   calendarEventId?: number;
   piloIssueId?: string;
   errorCode?: string;
+}
+
+export interface MeetingActionItemIssueDeliveryOption {
+  id: string;
+  name: string;
+  columns: Array<{ id: string; name: string }>;
+}
+
+export interface MeetingActionItemDeliveryOptionsPayload {
+  boards: MeetingActionItemIssueDeliveryOption[];
 }
 
 interface ActionItemRow extends QueryResultRow {
@@ -76,16 +87,17 @@ export class MeetingActionItemDeliveryService {
     workspaceId: string,
     reportId: string,
     actionItemId: string,
-    input: MeetingActionItemDeliveryInput
+    input: unknown
   ): Promise<MeetingActionItemDeliveryPayload> {
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+    const normalizedInput = this.normalizeDeliveryInput(input);
     const prepared = await this.prepareDelivery(
       currentUserId,
       workspaceId,
       reportId,
       actionItemId,
-      input.deliveryType,
-      input
+      normalizedInput.deliveryType,
+      normalizedInput
     );
 
     try {
@@ -173,6 +185,43 @@ export class MeetingActionItemDeliveryService {
     }
   }
 
+  async listIssueDeliveryOptions(
+    currentUserId: string,
+    workspaceId: string,
+    reportId: string,
+    actionItemId: string
+  ): Promise<MeetingActionItemDeliveryOptionsPayload> {
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+    const actionItem = await this.database.queryOne<{ id: string }>(
+      `SELECT action_items.id
+       FROM meeting_report_action_items AS action_items
+       JOIN meeting_reports AS reports ON reports.id = action_items.meeting_report_id
+       JOIN meetings ON meetings.id = reports.meeting_id
+       WHERE action_items.id = $1
+         AND reports.id = $2
+         AND meetings.workspace_id = $3`,
+      [actionItemId, reportId, workspaceId]
+    );
+    if (!actionItem) {
+      throw notFound("Meeting report action item not found");
+    }
+    const boards = await this.boardService.listBoards(currentUserId, workspaceId, {
+      limit: 100,
+      page: 1
+    });
+    const options = await Promise.all(
+      boards.data.map(async (board: BoardPayload) => {
+        const columns = await this.boardService.listBoardColumns(
+          currentUserId,
+          workspaceId,
+          board.id
+        );
+        return this.mapIssueDeliveryOption(board, columns);
+      })
+    );
+    return { boards: options };
+  }
+
   private async prepareDelivery(
     currentUserId: string,
     workspaceId: string,
@@ -213,9 +262,6 @@ export class MeetingActionItemDeliveryService {
       );
       if (delivery && delivery.delivery_type !== deliveryType) {
         throw badRequest("Action item delivery type cannot be changed after a failed delivery");
-      }
-      if (delivery && delivery.requested_by_user_id !== currentUserId) {
-        throw badRequest("Action item delivery must be retried by the original user");
       }
       if (
         actionItem.status === "DELIVERING" &&
@@ -273,6 +319,8 @@ export class MeetingActionItemDeliveryService {
           SET status = 'RUNNING',
               attempt_count = attempt_count + 1,
               last_error_code = NULL,
+              last_attempted_by_user_id = $3,
+              last_attempted_at = now(),
               claim_token = $2::uuid,
               locked_until = now() + INTERVAL '5 minutes',
               updated_at = now()
@@ -284,7 +332,7 @@ export class MeetingActionItemDeliveryService {
           RETURNING id, delivery_type, draft_json, idempotency_key,
                     requested_by_user_id, status, locked_until
         `,
-        [delivery.id, claimToken]
+        [delivery.id, claimToken, currentUserId]
       );
       if (!claimed) {
         throw badRequest("Action item delivery is already processing");
@@ -464,5 +512,118 @@ export class MeetingActionItemDeliveryService {
       }
     }
     return "ACTION_ITEM_DELIVERY_FAILED";
+  }
+
+  private mapIssueDeliveryOption(
+    board: BoardPayload,
+    columns: BoardColumnPayload[]
+  ): MeetingActionItemIssueDeliveryOption {
+    return {
+      id: board.id,
+      name: board.name,
+      columns: columns.map((column) => ({ id: column.id, name: column.name }))
+    };
+  }
+
+  private normalizeDeliveryInput(input: unknown): MeetingActionItemDeliveryInput {
+    if (!this.isRecord(input)) {
+      throw badRequest("Action item delivery input must be an object");
+    }
+    const keys = Object.keys(input);
+    if (keys.some((key) => !["deliveryType", "calendar", "issue"].includes(key))) {
+      throw badRequest("Invalid action item delivery input");
+    }
+    if (input.deliveryType === "calendar_event") {
+      if (input.issue !== undefined || !this.isRecord(input.calendar)) {
+        throw badRequest("calendar delivery input is required");
+      }
+      return {
+        deliveryType: "calendar_event",
+        calendar: {
+          title: this.normalizeOptionalText(input.calendar.title, "calendar title"),
+          description: this.normalizeOptionalNullableText(
+            input.calendar.description,
+            "calendar description"
+          ),
+          color: this.normalizeOptionalText(input.calendar.color, "calendar color"),
+          isAllDay: this.normalizeOptionalBoolean(input.calendar.isAllDay, "calendar isAllDay"),
+          startDate: this.normalizeRequiredDate(input.calendar.startDate, "calendar startDate"),
+          endDate: this.normalizeRequiredDate(input.calendar.endDate, "calendar endDate"),
+          startTime: this.normalizeOptionalTime(input.calendar.startTime, "calendar startTime"),
+          endTime: this.normalizeOptionalTime(input.calendar.endTime, "calendar endTime")
+        }
+      };
+    }
+    if (input.deliveryType === "pilo_issue") {
+      if (input.calendar !== undefined || !this.isRecord(input.issue)) {
+        throw badRequest("issue delivery input is required");
+      }
+      return {
+        deliveryType: "pilo_issue",
+        issue: {
+          boardId: this.normalizePositiveId(input.issue.boardId, "issue boardId"),
+          columnId: this.normalizePositiveId(input.issue.columnId, "issue columnId"),
+          title: this.normalizeOptionalText(input.issue.title, "issue title"),
+          body: this.normalizeOptionalText(input.issue.body, "issue body")
+        }
+      };
+    }
+    throw badRequest("Invalid action item delivery type");
+  }
+
+  private isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+  }
+
+  private normalizeRequiredDate(value: unknown, field: string): string {
+    if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      throw badRequest(`${field} must be an ISO date`);
+    }
+    const parsed = new Date(`${value}T00:00:00.000Z`);
+    if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value) {
+      throw badRequest(`${field} must be an ISO date`);
+    }
+    return value;
+  }
+
+  private normalizeOptionalTime(value: unknown, field: string): string | null | undefined {
+    if (value === undefined) return undefined;
+    if (value === null) return null;
+    if (
+      typeof value !== "string" ||
+      !/^([01]\d|2[0-3]):[0-5]\d$/.test(value)
+    ) {
+      throw badRequest(`${field} must be an HH:MM time`);
+    }
+    return value;
+  }
+
+  private normalizeOptionalBoolean(value: unknown, field: string): boolean | undefined {
+    if (value === undefined) return undefined;
+    if (typeof value !== "boolean") throw badRequest(`${field} must be a boolean`);
+    return value;
+  }
+
+  private normalizePositiveId(value: unknown, field: string): string {
+    if (typeof value !== "string" || !/^[1-9]\d*$/.test(value)) {
+      throw badRequest(`${field} must be a positive integer`);
+    }
+    return value;
+  }
+
+  private normalizeOptionalText(value: unknown, field: string): string | undefined {
+    if (value === undefined) return undefined;
+    if (typeof value !== "string" || !value.trim()) {
+      throw badRequest(`${field} must be a non-empty string`);
+    }
+    return value.trim();
+  }
+
+  private normalizeOptionalNullableText(
+    value: unknown,
+    field: string
+  ): string | null | undefined {
+    if (value === undefined || value === null) return value;
+    return this.normalizeOptionalText(value, field);
   }
 }

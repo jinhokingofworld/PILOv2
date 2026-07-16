@@ -31,6 +31,7 @@ import {
   type MeetingStateChange,
   type MeetingStateRealtimeEventInput
 } from "./meeting-state-realtime-publisher.service";
+import type { MeetingActionItemDeliveryInput } from "./meeting-action-item-delivery.service";
 
 type RecordingStatus = "RUNNING" | "COMPLETED" | "FAILED";
 type MeetingReportStatus =
@@ -173,6 +174,19 @@ interface MeetingReportActionItemRow extends QueryResultRow {
   dismissed_at: Date | string | null;
   created_at: Date | string;
   updated_at: Date | string;
+  delivery_id?: string | null;
+  delivery_type?: "calendar_event" | "pilo_issue" | null;
+  delivery_status?: "PENDING" | "RUNNING" | "COMPLETED" | "FAILED" | null;
+  delivery_error_code?: string | null;
+  delivery_draft_json?: unknown;
+  delivery_target_resource_id?: string | null;
+  calendar_event_id?: number | string | null;
+  calendar_event_title?: string | null;
+  pilo_issue_id?: number | string | null;
+  pilo_issue_title?: string | null;
+  pilo_issue_board_id?: number | string | null;
+  pilo_issue_column_id?: number | string | null;
+  pilo_issue_column_name?: string | null;
 }
 
 interface MeetingReportActionItemAssigneeRow extends QueryResultRow {
@@ -399,6 +413,21 @@ export interface MeetingReportActionItemPayload {
   approvedAt: string | null;
   dismissedByUserId: string | null;
   dismissedAt: string | null;
+  delivery: {
+    deliveryType: "calendar_event" | "pilo_issue";
+    status: "PENDING" | "RUNNING" | "COMPLETED" | "FAILED";
+    errorCode: string | null;
+    draft: MeetingActionItemDeliveryInput | null;
+    targetResourceId: string | null;
+    calendarEvent: { id: string; title: string } | null;
+    piloIssue: {
+      id: string;
+      title: string;
+      boardId: string;
+      columnId: string;
+      columnName: string | null;
+    } | null;
+  } | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -1725,14 +1754,11 @@ export class MeetingService {
     reportId: string,
     actionItemId: string
   ): Promise<MeetingReportActionItemMutationPayload> {
-    const actionItem = await this.transitionMeetingReportActionItem(
-      currentUserId,
-      workspaceId,
-      reportId,
-      actionItemId,
-      "APPROVED"
-    );
-    return { actionItem: this.mapMeetingReportActionItem(actionItem) };
+    void currentUserId;
+    void workspaceId;
+    void reportId;
+    void actionItemId;
+    throw badRequest("Action item approval requires delivery input");
   }
 
   async dismissMeetingReportActionItem(
@@ -4313,6 +4339,39 @@ export class MeetingService {
       approvedAt: this.toNullableIsoString(actionItem.approved_at),
       dismissedByUserId: actionItem.dismissed_by_user_id,
       dismissedAt: this.toNullableIsoString(actionItem.dismissed_at),
+      delivery: !actionItem.delivery_id ||
+        !actionItem.delivery_type ||
+        !actionItem.delivery_status
+        ? null
+        : {
+            deliveryType: actionItem.delivery_type,
+            status: actionItem.delivery_status,
+            errorCode: actionItem.delivery_error_code ?? null,
+            draft: this.toMeetingActionItemDeliveryDraft(
+              actionItem.delivery_draft_json,
+              actionItem.delivery_type
+            ),
+            targetResourceId: actionItem.delivery_target_resource_id ?? null,
+            calendarEvent: actionItem.calendar_event_id === null ||
+              actionItem.calendar_event_title === null
+              ? null
+              : {
+                  id: String(actionItem.calendar_event_id),
+                  title: actionItem.calendar_event_title ?? "일정"
+                },
+            piloIssue: actionItem.pilo_issue_id === null ||
+              actionItem.pilo_issue_title === null ||
+              actionItem.pilo_issue_board_id === null ||
+              actionItem.pilo_issue_column_id === null
+              ? null
+              : {
+                  id: String(actionItem.pilo_issue_id),
+                  title: actionItem.pilo_issue_title ?? "Issue",
+                  boardId: String(actionItem.pilo_issue_board_id),
+                  columnId: String(actionItem.pilo_issue_column_id),
+                  columnName: actionItem.pilo_issue_column_name ?? null
+                }
+          },
       createdAt: this.toIsoString(actionItem.created_at),
       updatedAt: this.toIsoString(actionItem.updated_at)
     };
@@ -4342,9 +4401,27 @@ export class MeetingService {
               users.avatar_url AS assignee_avatar_url, action_items.status,
               action_items.updated_by_user_id, action_items.approved_by_user_id,
               action_items.approved_at, action_items.dismissed_by_user_id,
-              action_items.dismissed_at, action_items.created_at, action_items.updated_at
+              action_items.dismissed_at, action_items.created_at, action_items.updated_at,
+              delivery.id AS delivery_id, delivery.delivery_type, delivery.status AS delivery_status,
+              delivery.last_error_code AS delivery_error_code,
+              delivery.draft_json AS delivery_draft_json,
+              delivery.target_resource_id AS delivery_target_resource_id,
+              calendar_event.id AS calendar_event_id, calendar_event.title AS calendar_event_title,
+              pilo_issue.id AS pilo_issue_id, pilo_issue.title AS pilo_issue_title,
+              pilo_issue.board_id AS pilo_issue_board_id,
+              pilo_issue.column_id AS pilo_issue_column_id,
+              board_column.name AS pilo_issue_column_name
        FROM meeting_report_action_items AS action_items
        LEFT JOIN users ON users.id = action_items.assignee_user_id
+       LEFT JOIN meeting_report_action_item_deliveries AS delivery
+         ON delivery.action_item_id = action_items.id
+       LEFT JOIN calendar_events AS calendar_event
+         ON calendar_event.id = delivery.calendar_event_id
+       LEFT JOIN pilo_issues AS pilo_issue
+         ON pilo_issue.id = delivery.pilo_issue_id
+       LEFT JOIN board_columns AS board_column
+         ON board_column.id = pilo_issue.column_id
+        AND board_column.board_id = pilo_issue.board_id
        WHERE action_items.meeting_report_id = $1
        ORDER BY action_items.source_index ASC`,
       [reportId]
@@ -4578,6 +4655,78 @@ export class MeetingService {
     }
 
     return [];
+  }
+
+  private toMeetingActionItemDeliveryDraft(
+    value: unknown,
+    deliveryType: "calendar_event" | "pilo_issue"
+  ): MeetingActionItemDeliveryInput | null {
+    const draft = this.toJsonObject(value);
+    if (!draft || draft.deliveryType !== deliveryType) return null;
+    if (deliveryType === "calendar_event") {
+      const calendar = this.toJsonObject(draft.calendar);
+      if (
+        !calendar ||
+        typeof calendar.startDate !== "string" ||
+        typeof calendar.endDate !== "string"
+      ) {
+        return null;
+      }
+      return {
+        deliveryType,
+        calendar: {
+          title: typeof calendar.title === "string" ? calendar.title : undefined,
+          description:
+            typeof calendar.description === "string" || calendar.description === null
+              ? calendar.description
+              : undefined,
+          color: typeof calendar.color === "string" ? calendar.color : undefined,
+          isAllDay: typeof calendar.isAllDay === "boolean" ? calendar.isAllDay : undefined,
+          startDate: calendar.startDate,
+          endDate: calendar.endDate,
+          startTime:
+            typeof calendar.startTime === "string" || calendar.startTime === null
+              ? calendar.startTime
+              : undefined,
+          endTime:
+            typeof calendar.endTime === "string" || calendar.endTime === null
+              ? calendar.endTime
+              : undefined
+        }
+      };
+    }
+    const issue = this.toJsonObject(draft.issue);
+    if (
+      !issue ||
+      typeof issue.boardId !== "string" ||
+      typeof issue.columnId !== "string"
+    ) {
+      return null;
+    }
+    return {
+      deliveryType,
+      issue: {
+        boardId: issue.boardId,
+        columnId: issue.columnId,
+        title: typeof issue.title === "string" ? issue.title : undefined,
+        body: typeof issue.body === "string" ? issue.body : undefined
+      }
+    };
+  }
+
+  private toJsonObject(value: unknown): Record<string, unknown> | null {
+    const parsed = typeof value === "string"
+      ? (() => {
+          try {
+            return JSON.parse(value) as unknown;
+          } catch {
+            return null;
+          }
+        })()
+      : value;
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null;
   }
 
   private isConstraintError(error: unknown, constraint: string): boolean {
