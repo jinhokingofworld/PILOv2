@@ -49,6 +49,9 @@ const prReviewModule = await readSource(
 const prReviewService = await readSource(
   "../../src/modules/pr-review/pr-review.service.ts"
 );
+const prReviewActivityLog = await readSource(
+  "../../src/modules/pr-review/pr-review-activity-log.ts"
+);
 const prReviewCanvasMaterializer = await readSource(
   "../../src/modules/pr-review/pr-review-canvas-materializer.ts"
 );
@@ -509,6 +512,72 @@ assert.match(databaseReadme, /057_add_pr_review_decision_version\.sql/);
 assert.match(prReviewApi, /공유 Review Room/);
 assert.match(prReviewApi, /review-rooms\/\{reviewRoomId\}\/revisions/);
 assert.match(prReviewApi, /pr-review:decision:updated/);
+
+const prReviewActivityActions = [
+  "pr_review_session_created",
+  "file_review_decision_created",
+  "review_submission_submitted",
+  "review_submission_failed",
+  "pr_review_conflict_resolution_applied",
+  "pr_review_pull_request_merged"
+];
+const prReviewActivityLogContractMatch = prReviewApi.match(
+  /## Server-side Activity Log 규칙[\s\S]*?(?=\n## )/
+);
+assert.ok(prReviewActivityLogContractMatch);
+const prReviewActivityLogContract = prReviewActivityLogContractMatch[0];
+
+for (const action of prReviewActivityActions) {
+  assert.match(prReviewActivityLog, new RegExp(`"${action}"`));
+  assert.match(prReviewActivityLogContract, new RegExp("`" + action + "`"));
+}
+
+assert.match(prReviewActivityLogContract, /request\/response shape[\s\S]*?변경하지 않는다/);
+assert.match(prReviewActivityLogContract, /합류와 기존 revision 재사용은[\s\S]*?기록하지 않는다/);
+assert.match(prReviewActivityLogContract, /실제 file decision 변경[\s\S]*?기록한다/);
+assert.match(prReviewActivityLogContract, /submission[\s\S]*?terminal[\s\S]*?기록한다/);
+assert.match(prReviewActivityLogContract, /conflict apply[\s\S]*?merge 성공[\s\S]*?기록한다/);
+assert.match(
+  prReviewActivityLogContract,
+  /PR Review는 `meetingId`와 `recordingId`를 소유하지 않으며[^\n]*Activity Log[^\n]*저장하지 않는다/
+);
+assert.match(prReviewActivityLogContract, /민감[^\n]*원문 payload[^\n]*저장하지 않는다/);
+assert.match(prReviewActivityLogContract, /stable dedupe/);
+assert.match(prReviewActivityLogContract, /merge commit SHA[\s\S]*?복구와 dedupe/);
+assert.match(
+  prReviewActivityLogContract,
+  /GitHub PR merge[\s\S]*?local room\/activity transaction[\s\S]*?실패[\s\S]*?숨기지 않고[\s\S]*?API error/
+);
+assert.match(prReviewActivityLogContract, /conflict apply[\s\S]*?sync_required/);
+
+const conflictApplyContract = prReviewApi.match(
+  /## Conflict Resolution Apply[\s\S]*?(?=\n## )/
+)?.[0];
+const mergeContract = prReviewApi.match(
+  /## GitHub PR Merge 실행[\s\S]*?(?=\n## )/
+)?.[0];
+assert.ok(conflictApplyContract);
+assert.ok(mergeContract);
+assert.match(
+  conflictApplyContract,
+  /Activity Log append transaction[\s\S]*?sync_required[\s\S]*?API error[\s\S]*?`commitSha`/
+);
+assert.match(
+  mergeContract,
+  /local room completion\/Activity Log transaction[\s\S]*?API error[\s\S]*?`mergeCommitSha`/
+);
+
+assert.match(prReviewService, /ActivityLogService/);
+assert.match(prReviewService, /this\.activityLogService\.append\(/);
+const prReviewActivityProduction = `${prReviewService}\n${prReviewActivityLog}`;
+assert.doesNotMatch(
+  prReviewActivityProduction,
+  /INSERT\s+INTO\s+(?:public\.)?activity_logs/i
+);
+assert.doesNotMatch(
+  prReviewActivityProduction,
+  /\b(?:meetingId|recordingId)\b/
+);
 
 assert.match(databaseService, /DatabaseTransaction/);
 assert.match(databaseService, /async transaction/);
