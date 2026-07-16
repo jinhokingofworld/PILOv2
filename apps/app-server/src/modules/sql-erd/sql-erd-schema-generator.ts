@@ -245,33 +245,46 @@ function renderDdl(
   }
   const tablesById = new Map(tables.map((table) => [table.id, table]));
 
-  return tables
-    .map((table) => {
-      const inlineAutoIncrementPrimaryKey = getInlineAutoIncrementPrimaryKey(
-        table,
-        dialect
-      );
-      const lines = [
-        ...table.columns.map((column) =>
-          renderColumn(column, dialect, column.id === inlineAutoIncrementPrimaryKey)
-        ),
-        ...table.constraints
-          .filter(
-            (constraint) =>
-              constraint.kind !== "primary_key" ||
-              inlineAutoIncrementPrimaryKey === null
-          )
-          .map((constraint) => renderConstraint(constraint, table, dialect)),
-        ...(relationsByTableId.get(table.id) ?? []).map((relation) =>
-          renderRelation(relation, tablesById, dialect)
+  const createTableStatements = tables.map((table) => {
+    const inlineAutoIncrementPrimaryKey = getInlineAutoIncrementPrimaryKey(
+      table,
+      dialect
+    );
+    const lines = [
+      ...table.columns.map((column) =>
+        renderColumn(column, dialect, column.id === inlineAutoIncrementPrimaryKey)
+      ),
+      ...table.constraints
+        .filter(
+          (constraint) =>
+            constraint.kind !== "primary_key" ||
+            inlineAutoIncrementPrimaryKey === null
         )
-      ];
+        .map((constraint) => renderConstraint(constraint, table, dialect)),
+      ...(dialect === "sqlite"
+        ? (relationsByTableId.get(table.id) ?? []).map((relation) =>
+            renderRelation(relation, tablesById, dialect)
+          )
+        : [])
+    ];
 
-      return `CREATE TABLE ${quoteTable(table, dialect)} (\n${lines
-        .map((line) => `  ${line}`)
-        .join(",\n")}\n);`;
-    })
-    .join("\n\n");
+    return `CREATE TABLE ${quoteTable(table, dialect)} (\n${lines
+      .map((line) => `  ${line}`)
+      .join(",\n")}\n);`;
+  });
+  const foreignKeyStatements =
+    dialect === "sqlite"
+      ? []
+      : relations.map((relation) => {
+          const fromTable = tablesById.get(relation.fromTableId)!;
+          return `ALTER TABLE ${quoteTable(fromTable, dialect)} ADD ${renderRelation(
+            relation,
+            tablesById,
+            dialect
+          )};`;
+        });
+
+  return [...createTableStatements, ...foreignKeyStatements].join("\n\n");
 }
 
 function renderColumn(

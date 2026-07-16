@@ -143,7 +143,8 @@ type SqlErdSchemaRelationSpec = {
 모든 object는 명시되지 않은 필드를 거부한다. `key`는 tool-local 참조 값이며 DB에는
 저장하지 않는다. table key와 relation key는 spec 전체에서 각각 유일하고, column
 key는 table 안에서 유일해야 한다. relation의 table/column 참조와 양쪽 column 수는
-정확히 일치해야 한다.
+정확히 일치해야 한다. relation의 `toColumnKeys`는 대상 table의 primary key 또는
+하나의 unique constraint `columnKeys`와 순서를 포함해 정확히 일치해야 한다.
 
 제한은 다음과 같다.
 
@@ -166,6 +167,9 @@ type과 일치해야 한다. SQLite는 `schemaName`을 허용하지 않는다.
 stable identity 규칙을 그대로 사용한다. 초기 layout은 frontend와 같은 Dagre 3.x
 설정과 table card 크기 계산을 사용한다. `unsupportedFeatures`와
 `timestamp_tz`의 MySQL/SQLite downgrade는 bounded warning으로 반환한다.
+PostgreSQL과 MySQL DDL은 입력 table 순서나 순환 참조와 무관하게 실행할 수 있도록
+모든 `CREATE TABLE` 뒤에 FK `ALTER TABLE` 문을 생성한다. SQLite는 FK를 각
+`CREATE TABLE` 안에 inline으로 생성한다.
 
 ### Agent 신규 세션 mutation
 

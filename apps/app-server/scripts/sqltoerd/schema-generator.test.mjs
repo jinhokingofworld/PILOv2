@@ -145,6 +145,26 @@ assertApiError(
       tables: [
         {
           ...createSchemaSpec().tables[0],
+          uniqueConstraints: []
+        },
+        createSchemaSpec().tables[1]
+      ],
+      relations: [
+        {
+          ...createSchemaSpec().relations[0],
+          toColumnKeys: ["email"]
+        }
+      ]
+    }),
+  /toColumnKeys must exactly match a primary key or unique constraint/
+);
+assertApiError(
+  () =>
+    validateSqlErdSchemaSpec({
+      ...createSchemaSpec(),
+      tables: [
+        {
+          ...createSchemaSpec().tables[0],
           primaryKey: { name: null, columnKeys: ["email"] }
         }
       ],
@@ -308,9 +328,10 @@ assert.equal(
 CREATE TABLE "orders" (
   "id" BIGSERIAL NOT NULL,
   "user_id" BIGINT NOT NULL,
-  PRIMARY KEY ("id"),
-  CONSTRAINT "fk_orders_user" FOREIGN KEY ("user_id") REFERENCES "users" ("id")
-);`
+  PRIMARY KEY ("id")
+);
+
+ALTER TABLE "orders" ADD CONSTRAINT "fk_orders_user" FOREIGN KEY ("user_id") REFERENCES "users" ("id");`
 );
 assert.deepEqual(postgresql.modelJson.schema.tables.map((table) => table.id), [
   "table.users",
@@ -367,10 +388,68 @@ assert.equal(
 CREATE TABLE \`orders\` (
   \`id\` BIGINT NOT NULL AUTO_INCREMENT,
   \`user_id\` BIGINT NOT NULL,
-  PRIMARY KEY (\`id\`),
-  CONSTRAINT \`fk_orders_user\` FOREIGN KEY (\`user_id\`) REFERENCES \`users\` (\`id\`)
-);`
+  PRIMARY KEY (\`id\`)
 );
+
+ALTER TABLE \`orders\` ADD CONSTRAINT \`fk_orders_user\` FOREIGN KEY (\`user_id\`) REFERENCES \`users\` (\`id\`);`
+);
+
+for (const requestedDialect of ["postgresql", "mysql"]) {
+  const childFirst = generateSqlErdSchema({
+    ...createSchemaSpec(),
+    requestedDialect,
+    tables: [...createSchemaSpec().tables].reverse()
+  });
+  const finalCreateTable = childFirst.sourceText.lastIndexOf("CREATE TABLE");
+  const firstAlterTable = childFirst.sourceText.indexOf("ALTER TABLE");
+  assert.ok(
+    firstAlterTable > finalCreateTable,
+    `${requestedDialect} foreign keys must be added after every table exists`
+  );
+
+  const cyclic = generateSqlErdSchema({
+    ...createSchemaSpec(),
+    requestedDialect,
+    tables: [
+      {
+        ...createSchemaSpec().tables[0],
+        columns: [
+          ...createSchemaSpec().tables[0].columns,
+          {
+            key: "latest_order_id",
+            name: "latest_order_id",
+            dataType: {
+              kind: "bigint",
+              length: null,
+              precision: null,
+              scale: null
+            },
+            nullable: true,
+            autoIncrement: false,
+            defaultValue: null
+          }
+        ]
+      },
+      createSchemaSpec().tables[1]
+    ],
+    relations: [
+      ...createSchemaSpec().relations,
+      {
+        key: "users_latest_order",
+        name: "fk_users_latest_order",
+        fromTableKey: "users",
+        fromColumnKeys: ["latest_order_id"],
+        toTableKey: "orders",
+        toColumnKeys: ["id"]
+      }
+    ]
+  });
+  assert.equal(cyclic.sourceText.match(/ALTER TABLE/g)?.length, 2);
+  assert.ok(
+    cyclic.sourceText.indexOf("ALTER TABLE") >
+      cyclic.sourceText.lastIndexOf("CREATE TABLE")
+  );
+}
 
 const sqlite = generateSqlErdSchema({
   ...createSchemaSpec(),

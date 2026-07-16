@@ -406,6 +406,21 @@ function validateRelationReferences(
   if (relation.toColumnKeys.some((key) => !toColumnKeys.has(key))) {
     throw badRequest("relation toColumnKeys references an unknown column key");
   }
+  const candidateKeys = [
+    ...(toTable.primaryKey ? [toTable.primaryKey.columnKeys] : []),
+    ...toTable.uniqueConstraints.map((constraint) => constraint.columnKeys)
+  ];
+  if (
+    !candidateKeys.some(
+      (columnKeys) =>
+        columnKeys.length === relation.toColumnKeys.length &&
+        columnKeys.every((key, index) => key === relation.toColumnKeys[index])
+    )
+  ) {
+    throw badRequest(
+      "relation toColumnKeys must exactly match a primary key or unique constraint"
+    );
+  }
 }
 
 function readUnsupportedFeatures(value: unknown): SqlErdSchemaUnsupportedFeature[] {
