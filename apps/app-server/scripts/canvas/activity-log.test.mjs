@@ -13,7 +13,10 @@ const activityLogServiceSource = await readFile(
   "utf8"
 );
 const canvasServiceSource = await readFile(
-  new URL("../../src/modules/canvas/canvas.service.ts", import.meta.url),
+  new URL(
+    "../../src/modules/canvas/shape/canvas-shape-command.service.ts",
+    import.meta.url
+  ),
   "utf8"
 );
 const canvasAgentServiceSource = await readFile(

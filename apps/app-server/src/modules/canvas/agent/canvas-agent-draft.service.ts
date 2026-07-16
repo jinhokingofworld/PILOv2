@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import type { SyncCanvasShapesBatchRequest } from "../canvas.types";
+import type { SyncCanvasShapesBatchRequest } from "../contracts/canvas.types";
 import type {
   CanvasAgentDraftColorOption,
   CanvasAgentDraftNode,

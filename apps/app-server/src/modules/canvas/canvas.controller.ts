@@ -47,7 +47,7 @@ import {
   UpdateCanvasSyncDocumentRequest,
   UpdateCanvasViewSettingRequest,
   UpdateCanvasShapeRequest
-} from "./canvas.types";
+} from "./contracts/canvas.types";
 
 @Controller("workspaces/:workspaceId")
 @UseGuards(AuthGuard)

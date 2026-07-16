@@ -52,19 +52,58 @@ const canvasModule = await readSource("../src/modules/canvas/canvas.module.ts");
 const canvasController = await readSource(
   "../src/modules/canvas/canvas.controller.ts"
 );
-const canvasService = await readSource("../src/modules/canvas/canvas.service.ts");
-const canvasTypes = await readSource("../src/modules/canvas/canvas.types.ts");
+const canvasServiceFacade = await readSource(
+  "../src/modules/canvas/canvas.service.ts"
+);
+const canvasBoardService = await readSource(
+  "../src/modules/canvas/board/canvas-board.service.ts"
+);
+const canvasAccessService = await readSource(
+  "../src/modules/canvas/policies/canvas-access.service.ts"
+);
+const canvasOperationQueryService = await readSource(
+  "../src/modules/canvas/operation/canvas-operation-query.service.ts"
+);
+const canvasShapeCommandService = await readSource(
+  "../src/modules/canvas/shape/canvas-shape-command.service.ts"
+);
+const canvasShapeQueryService = await readSource(
+  "../src/modules/canvas/shape/canvas-shape-query.service.ts"
+);
+const canvasShapeCleanupService = await readSource(
+  "../src/modules/canvas/infrastructure/canvas-shape-cleanup.service.ts"
+);
+const canvasSyncDocumentService = await readSource(
+  "../src/modules/canvas/sync-document/canvas-sync-document.service.ts"
+);
+const canvasUserStateService = await readSource(
+  "../src/modules/canvas/user-state/canvas-user-state.service.ts"
+);
+const canvasService = [
+  canvasServiceFacade,
+  canvasAccessService,
+  canvasBoardService,
+  canvasOperationQueryService,
+  canvasShapeCleanupService,
+  canvasShapeCommandService,
+  canvasShapeQueryService,
+  canvasSyncDocumentService,
+  canvasUserStateService
+].join("\n");
+const canvasTypes = await readSource(
+  "../src/modules/canvas/contracts/canvas.types.ts"
+);
 const canvasShapeValidation = await readSource(
-  "../src/modules/canvas/canvas-shape.validation.ts"
+  "../src/modules/canvas/shape/canvas-shape.validation.ts"
 );
 const canvasShapeMapper = await readSource(
-  "../src/modules/canvas/canvas-shape.mapper.ts"
+  "../src/modules/canvas/shape/canvas-shape.mapper.ts"
 );
 const canvasShapeHash = await readSource(
-  "../src/modules/canvas/canvas-shape-hash.ts"
+  "../src/modules/canvas/shape/canvas-shape-hash.ts"
 );
 const canvasOperationPublisher = await readSource(
-  "../src/modules/canvas/canvas-operation-publisher.service.ts"
+  "../src/modules/canvas/operation/canvas-operation-publisher.service.ts"
 );
 const canvasAgentRepository = await readSource(
   "../src/modules/canvas/agent/canvas-agent.repository.ts"
@@ -374,7 +413,10 @@ assert.match(workspaceMembershipMigration, /ENABLE ROW LEVEL SECURITY/);
 assert.match(workspaceMembershipMigration, /ON CONFLICT \(workspace_id, user_id\) DO NOTHING/);
 assert.match(canvasModule, /controllers: \[CanvasController\]/);
 assert.match(canvasModule, /CanvasOperationPublisherService/);
-assert.match(canvasModule, /providers: \[CanvasOperationPublisherService, CanvasService\]/);
+assert.match(canvasModule, /CanvasShapeCommandService/);
+assert.match(canvasModule, /CanvasShapeQueryService/);
+assert.match(canvasModule, /CanvasSyncDocumentService/);
+assert.match(canvasModule, /CanvasUserStateService/);
 assert.match(canvasController, /@Controller\("workspaces\/:workspaceId"\)/);
 assert.match(canvasController, /@Get\("canvases"\)/);
 assert.match(canvasController, /@Post\("canvases"\)/);

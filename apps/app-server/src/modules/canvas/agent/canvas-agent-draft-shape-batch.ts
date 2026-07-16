@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { SyncCanvasShapesBatchRequest } from "../canvas.types";
+import type { SyncCanvasShapesBatchRequest } from "../contracts/canvas.types";
 import type {
   CanvasAgentDraftNode,
   CanvasAgentDraftNodeKind,

@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { badRequest } from "../../../common/api-error";
-import type { SyncCanvasShapesBatchRequest } from "../canvas.types";
+import type { SyncCanvasShapesBatchRequest } from "../contracts/canvas.types";
 import { CANVAS_AGENT_CODE_GENERATION_FAILURE_MESSAGE } from "./canvas-agent.constants";
 import { CanvasAgentDraftService } from "./canvas-agent-draft.service";
 import { CanvasAgentRepository } from "./canvas-agent.repository";
