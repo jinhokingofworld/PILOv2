@@ -1,4 +1,4 @@
-import type { TLShape } from "tldraw";
+import type { Editor, TLShape } from "tldraw";
 
 import { isSqlErdAnnotationShape } from "@/features/sql-erd/shapes/sql-erd-annotation-shape";
 import { isSqlErdFrameShape } from "@/features/sql-erd/shapes/sql-erd-frame-shape";
@@ -85,4 +85,32 @@ export function getSqlErdSelectionFromSelectedShapes(
   }
 
   return { type: "none" };
+}
+
+export function selectSqlErdCanvasShapeAtPoint(
+  editor: Pick<Editor, "getShapeAtPoint" | "select">,
+  point: { x: number; y: number }
+) {
+  const shape = editor.getShapeAtPoint(point, {
+    hitInside: true,
+    hitLabels: true,
+    hitLocked: true
+  });
+
+  if (
+    !shape ||
+    !(
+      isSqlErdAnnotationShape(shape) ||
+      isSqlErdFrameShape(shape) ||
+      isSqlErdNoteShape(shape) ||
+      isSqlErdTextShape(shape) ||
+      isSqlErdRelationShape(shape) ||
+      isSqlErdTableShape(shape)
+    )
+  ) {
+    return false;
+  }
+
+  editor.select(shape.id);
+  return true;
 }

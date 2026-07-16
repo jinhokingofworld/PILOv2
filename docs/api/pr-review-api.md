@@ -71,6 +71,10 @@ PR Review service는 의미 있는 사용자 행동이 commit되는 DB transacti
 
 - 새 revision만 기록하며 기존 room 합류와 기존 revision 재사용은 Activity Log를 기록하지 않는다.
 - 실제 file decision 변경만 기록한다. 동일한 status와 comment를 다시 저장한 no-op은 기록하지 않는다.
+- file decision 기록은 repo-relative file path와 review file ID를 metadata에 포함하고, 같은 bounded
+  path를 `summary`에 넣어 MeetingReport 활동 근거에서 어떤 파일인지 식별할 수 있게 한다. path는
+  한 줄 최대 400자로 제한하며 긴 값은 파일명을 포함한 suffix를 보존한다. 기존 Activity Log와
+  MeetingReport snapshot은 소급 보강하지 않는다.
 - submission 성공/실패 terminal 결과만 기록한다. 제출 시도와 `submitting` 상태는 기록하지 않는다.
 - conflict apply와 PR merge 성공 결과를 기록한다. 조회, AI suggestion, draft 편집은 기록하지 않는다.
 - PR Review는 `meetingId`와 `recordingId`를 소유하지 않으며 요청이나 Activity Log metadata에 저장하지 않는다.

@@ -70,6 +70,13 @@ The room key and validation contract are documented in `src/canvas/README.md`;
 recoverable room snapshots are persisted to the same `canvas_sync_documents`
 boundary used by the App Server fallback API.
 
+Native document collaboration uses Hocuspocus rooms under `/sync/documents`.
+Realtime-server restores the latest Drive document snapshot when a room loads and
+is the only realtime checkpoint writer: Hocuspocus debounces merged Yjs state for
+one second before calling the existing App Server snapshot API. Browser clients
+only sync Yjs and awareness while this transport is configured. The authenticated
+bearer token remains in the in-memory Hocuspocus context and is never persisted.
+
 ## Runtime
 
 Required for authenticated Canvas and Board rooms:
@@ -84,7 +91,8 @@ Optional:
 - `SOCKET_IO_CORS_ORIGIN` as a comma-separated frontend origin allowlist.
 - `REALTIME_SCOPE` for health/debug scope reporting.
 - `APP_SERVER_URL` for classic Canvas roomState checkpoint persistence through
-  the existing App Server `/shapes/batch` transaction boundary.
+  the existing App Server `/shapes/batch` transaction boundary and native
+  document snapshot checkpoints.
 
 ## tldraw_sync deployment notes
 
@@ -95,7 +103,7 @@ Optional:
   `tldraw_sync` Canvas creation/conversion.
 - The current room implementation is in-memory per realtime-server process.
   Run one realtime-server task or configure sticky routing for `/sync/canvas`
-  before using multiple tasks.
+  and `/sync/documents` before using multiple tasks.
 - `/health` and `/sync/health` include the current `tldraw_sync` room count,
   active session count, and pending persist count.
 

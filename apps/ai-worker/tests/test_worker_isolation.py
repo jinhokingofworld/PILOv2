@@ -87,6 +87,11 @@ def test_shared_ai_worker_wires_meeting_transcript_embedding_processor(monkeypat
     )
     monkeypatch.setattr(
         shared_ai_worker_runtime,
+        "PgMeetingActivityEvidenceEmbeddingRepository",
+        lambda *_args: "meeting-activity-evidence-repository",
+    )
+    monkeypatch.setattr(
+        shared_ai_worker_runtime,
         "OpenAiAgentPlannerClient",
         lambda *_args: object(),
     )
@@ -117,6 +122,11 @@ def test_shared_ai_worker_wires_meeting_transcript_embedding_processor(monkeypat
         "MeetingTranscriptEmbeddingProcessor",
         lambda repository, embedder: (repository, embedder),
     )
+    monkeypatch.setattr(
+        shared_ai_worker_runtime,
+        "MeetingActivityEvidenceEmbeddingProcessor",
+        lambda repository, embedder: (repository, embedder),
+    )
 
     worker = shared_ai_worker_runtime.create_shared_ai_worker()
 
@@ -125,6 +135,10 @@ def test_shared_ai_worker_wires_meeting_transcript_embedding_processor(monkeypat
         ("test-key", "text-embedding-3-small"),
     )
     assert worker.settings.meeting_transcript_embedding_jobs_per_tick == 10
+    assert worker.meeting_activity_evidence_embedding_processor == (
+        "meeting-activity-evidence-repository",
+        ("test-key", "text-embedding-3-small"),
+    )
 
 
 def test_agent_worker_uses_only_dedicated_queue_environment(monkeypatch) -> None:

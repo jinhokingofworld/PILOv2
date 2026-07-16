@@ -118,20 +118,21 @@ Browser: Tiptap + Yjs + collaboration provider
   <-> realtime-server: /sync/documents
       - document room, Yjs sync, awareness, remote cursor
       - bearer session 검증과 Workspace membership 확인
+      - merged room state를 App Server document snapshot API로 checkpoint
   -> App Server document snapshot API
       - membership 재검증
       - merged snapshot/version 저장
       - Activity Log append
 ```
 
-`/sync/documents`는 Hocuspocus의 검증된 Yjs collaboration provider/protocol을 사용한다. provider는 `workspace:{workspaceId}:document:{documentId}:yjs` document name과 bearer token을 표준 인증 메시지로 보내며, realtime-server는 Hocuspocus 인증 hook에서 membership과 활성 문서를 검증한다. realtime-server는 room lifecycle, 즉시 update broadcast, awareness만 담당한다. PostgreSQL은 App Server가 소유하며 realtime-server 메모리는 영구 source of truth가 아니다.
+`/sync/documents`는 Hocuspocus의 검증된 Yjs collaboration provider/protocol을 사용한다. provider는 `workspace:{workspaceId}:document:{documentId}:yjs` document name과 bearer token을 표준 인증 메시지로 보내며, realtime-server는 Hocuspocus 인증 hook에서 membership과 활성 문서를 검증한다. realtime-server는 room lifecycle, 즉시 update broadcast, awareness와 document별 checkpoint debounce를 담당한다. PostgreSQL은 App Server가 소유하며 realtime-server 메모리는 영구 source of truth가 아니다.
 
-1차 realtime 구현에서 raw Yjs update는 DB에 append하지 않는다. 새 room 또는 realtime-server 재시작 시 browser는 App Server의 최신 snapshot으로 Y.Doc을 bootstrap한다. 연결이 잠시 끊긴 동안의 local Yjs update는 browser session에 유지하고 재연결 뒤 provider가 병합한다. realtime-server 장애 시 마지막 snapshot 뒤 최대 1초의 편집이 유실될 수 있다.
+1차 realtime 구현에서 raw Yjs update는 DB에 append하지 않는다. 새 room 또는 realtime-server 재시작 시 realtime-server는 App Server의 최신 snapshot으로 room Y.Doc을 bootstrap한다. 연결이 잠시 끊긴 동안의 local Yjs update는 browser session에 유지하고 재연결 뒤 provider가 병합한다. realtime-server 장애 시 마지막 snapshot 뒤 최대 1초의 편집이 유실될 수 있다.
 
 ### 저장과 snapshot
 
 - Yjs update는 realtime room에서 즉시 동기화하고 DB에 개별 저장하지 않는다.
-- collaboration provider는 마지막 변경 뒤 `1초` debounce로 snapshot을 확정하고, 마지막 editor가 문서를 떠날 때 pending snapshot을 즉시 flush한다.
+- realtime-server는 마지막 변경 뒤 `1초` debounce로 snapshot을 확정하고, 마지막 editor가 문서를 떠날 때 pending checkpoint를 즉시 flush한다.
 - snapshot 확정 transaction은 Tiptap JSON, plain text, 버전을 함께 저장한다.
 - 재연결과 강제 새로고침은 마지막 snapshot까지 복구한다.
 - 여러 사용자가 동시에 편집한 snapshot은 병합된 문서 상태를 표현한다. 1차 MeetingReport는 겹친 변경을 특정 문장 단위로 한 사람에게 귀속하지 않는다.

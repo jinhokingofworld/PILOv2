@@ -1125,6 +1125,9 @@ def test_sql_erd_planner_contract_uses_structured_schema_without_raw_ddl() -> No
     assert "unsupportedFeatures" in prompt
     assert "database execution" in prompt
     assert "targetMode" in prompt
+    assert "action=replaced" in prompt
+    assert "existing session title" in prompt
+    assert "successful schema replacement" in prompt
 
 
 def test_sql_erd_nullable_requested_dialect_is_not_missing() -> None:
@@ -1225,3 +1228,25 @@ def test_sql_erd_missing_schema_root_requests_clarification() -> None:
         "relations",
         "unsupportedFeatures",
     ]
+    assert normalized.final_answer == (
+        "ERD에 포함할 핵심 테이블과 각 테이블의 주요 데이터 관계를 알려주세요."
+    )
+    assert "version" not in normalized.final_answer
+    assert "unsupportedFeatures" not in normalized.final_answer
+
+
+def test_completed_sql_erd_replacement_uses_deterministic_success_answer() -> None:
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            status="completed",
+            final_answer_draft=("이전 햄버거 ERD 결과와 학교 ERD 요청이 일치하지 않습니다."),
+        ),
+        parse_agent_run_job_payload(agent_payload()),
+        planning_context=(
+            'tool generate_sql_erd: {"action": "replaced", ' '"title": "햄버거 가게 주문 관리 ERD"}'
+        ),
+    )
+
+    assert normalized.status == "completed"
+    assert normalized.final_answer == "현재 SQLtoERD 세션의 스키마를 교체했습니다."
+    assert normalized.output_summary["finalAnswerDraft"] == normalized.final_answer

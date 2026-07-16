@@ -13,9 +13,11 @@ import { useRouter } from "next/navigation";
 import {
   Bot,
   CalendarDays,
+  FileText,
   Loader2,
   MessageCircle,
   SendHorizontal,
+  Workflow,
   X
 } from "lucide-react";
 
@@ -226,6 +228,64 @@ function getAgentRunDisplayMessage(run: AgentRun) {
     case "planning":
       return run.message?.trim() || "요청을 분석하고 있습니다.";
   }
+}
+
+type GroundedCitation = {
+  sourceId: string;
+  sourceType: "activity" | "transcript";
+  occurredAt?: string;
+  startedAtMs?: number;
+  endedAtMs?: number;
+  summary?: string;
+};
+
+function getGroundedCitations(run: AgentRun): GroundedCitation[] {
+  const answerStep = [...run.steps]
+    .filter((step) => step.type === "answer" && step.status === "completed")
+    .sort((left, right) => right.order - left.order)[0];
+  const candidates = answerStep?.outputSummary?.citationSources;
+  if (!Array.isArray(candidates)) return [];
+  return candidates.flatMap((candidate) => {
+    if (!isRecord(candidate) || typeof candidate.sourceId !== "string") return [];
+    if (candidate.sourceType !== "transcript" && candidate.sourceType !== "activity") return [];
+    const citation: GroundedCitation = { sourceId: candidate.sourceId, sourceType: candidate.sourceType };
+    if (typeof candidate.occurredAt === "string") citation.occurredAt = candidate.occurredAt;
+    if (typeof candidate.startedAtMs === "number") citation.startedAtMs = candidate.startedAtMs;
+    if (typeof candidate.endedAtMs === "number") citation.endedAtMs = candidate.endedAtMs;
+    if (typeof candidate.summary === "string") citation.summary = candidate.summary.slice(0, 500);
+    return [citation];
+  });
+}
+
+function formatTranscriptTime(milliseconds: number | undefined) {
+  if (typeof milliseconds !== "number" || milliseconds < 0) return null;
+  const seconds = Math.floor(milliseconds / 1000);
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
+function GroundedCitationList({ run }: { run: AgentRun }) {
+  const citations = getGroundedCitations(run);
+  if (citations.length === 0) return null;
+  return (
+    <div className="mt-2 space-y-1.5 border-l-2 border-slate-200 pl-2 text-xs text-slate-600">
+      <p className="font-medium text-slate-700">답변 근거</p>
+      {citations.map((citation) => {
+        const transcriptTime = formatTranscriptTime(citation.startedAtMs);
+        const occurredAt = citation.occurredAt ? new Date(citation.occurredAt).toLocaleString("ko-KR") : null;
+        return (
+          <div key={citation.sourceId} className="rounded border border-slate-200 bg-white px-2 py-1.5">
+            <div className="flex items-center gap-1 font-medium text-slate-700">
+              {citation.sourceType === "transcript" ? <FileText className="size-3" /> : <Workflow className="size-3" />}
+              {citation.sourceType === "transcript" ? "회의 발언" : "실제 활동"}
+              {transcriptTime ? <span className="font-normal text-slate-500">{transcriptTime}</span> : null}
+              {occurredAt ? <span className="font-normal text-slate-500">{occurredAt}</span> : null}
+            </div>
+            {citation.sourceType === "activity" && citation.summary ? <p className="mt-0.5 whitespace-pre-wrap">{citation.summary}</p> : null}
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 function getAgentRequestErrorMessage(error: unknown) {
@@ -819,6 +879,9 @@ export function AgentChatWidget() {
                       >
                         {message.content}
                       </div>
+                      {message.run?.status === "completed" ? (
+                        <GroundedCitationList run={message.run} />
+                      ) : null}
                       {confirmation ? (
                         <AgentConfirmationCard
                           confirmation={confirmation}

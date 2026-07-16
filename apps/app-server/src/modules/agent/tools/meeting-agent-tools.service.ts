@@ -389,7 +389,7 @@ export class MeetingAgentToolsService {
   private searchMeetingTranscriptDefinition(): AgentToolDefinition<unknown> {
     return {
       name: "search_meeting_transcript",
-      description: "권한이 있는 MeetingReport transcript에서 질문과 의미적으로 관련된 발언을 검색하고 근거 기반 답변을 생성합니다.",
+      description: "권한이 있는 MeetingReport의 발언 transcript와 안전한 실제 사용자 활동 evidence에서 질문과 의미적으로 관련된 근거를 검색하고, 출처 유형을 구분한 근거 기반 답변을 생성합니다.",
       riskLevel: "low",
       executionMode: "auto",
       requiresGroundedAnswer: true,
