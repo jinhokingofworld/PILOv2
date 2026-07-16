@@ -81,6 +81,19 @@ const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)$/;
 const COLOR_PATTERN = /^#[0-9a-fA-F]{6}$/;
 const MAX_TITLE_LENGTH = 255;
+const CALENDAR_ACTIVITY_LOG_FIELDS = [
+  "title",
+  "color",
+  "isAllDay",
+  "startDate",
+  "endDate",
+  "startTime",
+  "endTime"
+] as const;
+
+type CalendarActivityLogField = (typeof CALENDAR_ACTIVITY_LOG_FIELDS)[number];
+type CalendarActivityChangedField = CalendarActivityLogField | "description";
+type CalendarActivityLogSnapshot = Record<CalendarActivityLogField, string | boolean | null>;
 
 const CALENDAR_EVENT_SELECT = `
   SELECT
@@ -286,64 +299,81 @@ export class CalendarService {
   ): Promise<CalendarEventPayload> {
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
 
-    const existing = await this.findEvent(workspaceId, eventId);
-    if (!existing) {
-      throw notFound("Calendar event not found");
-    }
-
-    const input = this.normalizeUpdateInput(body, existing);
-    const event = await this.database.queryOne<CalendarEventRow>(
-      `
-        WITH updated AS (
-          UPDATE calendar_events
-          SET
-            title = $3,
-            description = $4,
-            color = $5,
-            is_all_day = $6,
-            start_date = $7,
-            end_date = $8,
-            start_time = $9,
-            end_time = $10
-          WHERE workspace_id = $1
-            AND id = $2
-          RETURNING *
-        )
-        SELECT
-          updated.id,
-          updated.title,
-          updated.description,
-          updated.color,
-          updated.is_all_day,
-          updated.start_date,
-          updated.end_date,
-          updated.start_time,
-          updated.end_time,
-          updated.created_by,
-          users.name AS created_by_user_name,
-          users.avatar_url AS created_by_user_avatar_url,
-          updated.created_at,
-          updated.updated_at
-        FROM updated
-        JOIN users ON users.id = updated.created_by
-      `,
-      [
+    const event = await this.database.transaction(async (transaction) => {
+      const existing = await this.findEventInTransaction(
+        transaction,
         workspaceId,
-        this.parseEventId(eventId),
-        input.title,
-        input.description,
-        input.color,
-        input.isAllDay,
-        input.startDate,
-        input.endDate,
-        input.startTime,
-        input.endTime
-      ]
-    );
+        eventId
+      );
+      if (!existing) {
+        throw notFound("Calendar event not found");
+      }
 
-    if (!event) {
-      throw notFound("Calendar event not found");
-    }
+      const input = this.normalizeUpdateInput(body, existing);
+      const updated = await transaction.queryOne<CalendarEventRow>(
+        `
+          WITH updated AS (
+            UPDATE calendar_events
+            SET
+              title = $3,
+              description = $4,
+              color = $5,
+              is_all_day = $6,
+              start_date = $7,
+              end_date = $8,
+              start_time = $9,
+              end_time = $10
+            WHERE workspace_id = $1
+              AND id = $2
+            RETURNING *
+          )
+          SELECT
+            updated.id,
+            updated.title,
+            updated.description,
+            updated.color,
+            updated.is_all_day,
+            updated.start_date,
+            updated.end_date,
+            updated.start_time,
+            updated.end_time,
+            updated.created_by,
+            users.name AS created_by_user_name,
+            users.avatar_url AS created_by_user_avatar_url,
+            updated.created_at,
+            updated.updated_at
+          FROM updated
+          JOIN users ON users.id = updated.created_by
+        `,
+        [
+          workspaceId,
+          this.parseEventId(eventId),
+          input.title,
+          input.description,
+          input.color,
+          input.isAllDay,
+          input.startDate,
+          input.endDate,
+          input.startTime,
+          input.endTime
+        ]
+      );
+
+      if (!updated) {
+        throw notFound("Calendar event not found");
+      }
+
+      const activityLog = this.buildUpdatedActivityLog(
+        currentUserId,
+        workspaceId,
+        existing,
+        updated
+      );
+      if (activityLog) {
+        await this.activityLogService.append(transaction, activityLog);
+      }
+      return updated;
+    });
 
     return this.mapEvent(event);
   }
@@ -355,19 +385,36 @@ export class CalendarService {
   ): Promise<DeleteCalendarEventPayload> {
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
 
-    const deleted = await this.database.queryOne<{ id: string | number }>(
-      `
-        DELETE FROM calendar_events
-        WHERE workspace_id = $1
-          AND id = $2
-        RETURNING id
-      `,
-      [workspaceId, this.parseEventId(eventId)]
-    );
+    const deleted = await this.database.transaction(async (transaction) => {
+      const existing = await this.findEventInTransaction(
+        transaction,
+        workspaceId,
+        eventId
+      );
+      if (!existing) {
+        throw notFound("Calendar event not found");
+      }
 
-    if (!deleted) {
-      throw notFound("Calendar event not found");
-    }
+      const removed = await transaction.queryOne<{ id: string | number }>(
+        `
+          DELETE FROM calendar_events
+          WHERE workspace_id = $1
+            AND id = $2
+          RETURNING id
+        `,
+        [workspaceId, this.parseEventId(eventId)]
+      );
+
+      if (!removed) {
+        throw notFound("Calendar event not found");
+      }
+
+      await this.activityLogService.append(
+        transaction,
+        this.buildDeletedActivityLog(currentUserId, workspaceId, existing)
+      );
+      return removed;
+    });
 
     return {
       id: Number(deleted.id)
@@ -386,6 +433,103 @@ export class CalendarService {
       `,
       [workspaceId, this.parseEventId(eventId)]
     );
+  }
+
+  private async findEventInTransaction(
+    transaction: DatabaseTransaction,
+    workspaceId: string,
+    eventId: string
+  ): Promise<CalendarEventRow | null> {
+    return transaction.queryOne<CalendarEventRow>(
+      `
+        ${CALENDAR_EVENT_SELECT}
+        WHERE calendar_events.workspace_id = $1
+          AND calendar_events.id = $2
+        FOR UPDATE
+      `,
+      [workspaceId, this.parseEventId(eventId)]
+    );
+  }
+
+  private buildUpdatedActivityLog(
+    currentUserId: string,
+    workspaceId: string,
+    previous: CalendarEventRow,
+    updated: CalendarEventRow
+  ) {
+    const beforeSnapshot = this.toActivityLogSnapshot(previous);
+    const afterSnapshot = this.toActivityLogSnapshot(updated);
+    const changedFields: CalendarActivityChangedField[] = CALENDAR_ACTIVITY_LOG_FIELDS.filter(
+      (field) => beforeSnapshot[field] !== afterSnapshot[field]
+    );
+    if (previous.description !== updated.description) {
+      changedFields.push("description");
+    }
+    if (changedFields.length === 0) {
+      return null;
+    }
+
+    const before = Object.fromEntries(
+      changedFields
+        .filter((field) => field !== "description")
+        .map((field) => [field, beforeSnapshot[field]])
+    );
+    const after = Object.fromEntries(
+      changedFields
+        .filter((field) => field !== "description")
+        .map((field) => [field, afterSnapshot[field]])
+    );
+
+    return {
+      workspaceId,
+      actor: { type: "user" as const, userId: currentUserId },
+      action: "calendar_event_updated" as const,
+      target: { type: "calendar_event", id: String(updated.id) },
+      dedupeKey: `calendar:calendar_event_updated:${updated.id}:${this.toIsoString(updated.updated_at)}`,
+      metadata: {
+        version: 1 as const,
+        summary: `${updated.title} 일정을 변경했습니다.`,
+        data: {
+          title: updated.title,
+          changedFields,
+          before,
+          after
+        }
+      }
+    };
+  }
+
+  private buildDeletedActivityLog(
+    currentUserId: string,
+    workspaceId: string,
+    event: CalendarEventRow
+  ) {
+    return {
+      workspaceId,
+      actor: { type: "user" as const, userId: currentUserId },
+      action: "calendar_event_deleted" as const,
+      target: { type: "calendar_event", id: String(event.id) },
+      dedupeKey: `calendar:calendar_event_deleted:${event.id}:${this.toIsoString(event.updated_at)}`,
+      metadata: {
+        version: 1 as const,
+        summary: `${event.title} 일정을 삭제했습니다.`,
+        data: { title: event.title }
+      }
+    };
+  }
+
+  private toActivityLogSnapshot(
+    event: CalendarEventRow
+  ): CalendarActivityLogSnapshot {
+    return {
+      title: event.title,
+      color: event.color,
+      isAllDay: event.is_all_day,
+      startDate: this.toDateString(event.start_date),
+      endDate: this.toDateString(event.end_date),
+      startTime: this.toTimeString(event.start_time),
+      endTime: this.toTimeString(event.end_time)
+    };
   }
 
   /**
