@@ -1,6 +1,7 @@
 "use client";
 
 import Collaboration from "@tiptap/extension-collaboration";
+import type { EditorView } from "@tiptap/pm/view";
 import { EditorContent, useEditor, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import {
@@ -35,6 +36,11 @@ import type { DocumentBootstrapPayload } from "@/features/drive/types";
 import styles from "./document-editor.module.css";
 import { DriveFileAttachment } from "./document-file-attachment";
 import { DocumentFilePicker } from "./document-file-picker";
+import {
+  DocumentSlashMenu,
+  SLASH_COMMANDS,
+  type SlashCommandId
+} from "./document-slash-menu";
 
 type EditorLoadState =
   | { status: "loading" }
@@ -43,7 +49,13 @@ type EditorLoadState =
 
 type SaveState = "saved" | "saving" | "error" | "conflict";
 
+type SlashMenuState = {
+  position: { top: number; left: number };
+  activeIndex: number;
+};
+
 const AUTOSAVE_DELAY_MS = 800;
+const SLASH_MENU_MAX_HEIGHT_PX = 384;
 
 function messageFromUnknown(error: unknown) {
   return error instanceof Error
@@ -118,10 +130,13 @@ function DocumentEditorSurface({
   const currentVersionRef = useRef(bootstrap.document.currentVersion);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveQueueRef = useRef(Promise.resolve());
+  const slashMenuStateRef = useRef<SlashMenuState | null>(null);
+  const slashCommandExecutorRef = useRef<(commandId: SlashCommandId) => void>(() => {});
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [saveError, setSaveError] = useState<string | null>(null);
   const [isEditorEmpty, setIsEditorEmpty] = useState(false);
   const [isFilePickerOpen, setIsFilePickerOpen] = useState(false);
+  const [slashMenuState, setSlashMenuState] = useState<SlashMenuState | null>(null);
   const driveClient = useMemo(
     () => createDriveApiClient({ accessToken }),
     [accessToken]
@@ -189,6 +204,104 @@ function DocumentEditorSurface({
     [persistSnapshot]
   );
 
+  const closeSlashMenu = useCallback(() => {
+    slashMenuStateRef.current = null;
+    setSlashMenuState(null);
+  }, []);
+
+  const setSlashMenuActiveIndex = useCallback((nextIndex: number) => {
+    const currentState = slashMenuStateRef.current;
+    if (!currentState) return;
+
+    const nextState = { ...currentState, activeIndex: nextIndex };
+    slashMenuStateRef.current = nextState;
+    setSlashMenuState(nextState);
+  }, []);
+
+  const handleEditorKeyDown = useCallback(
+    (view: EditorView, event: KeyboardEvent) => {
+      const currentMenuState = slashMenuStateRef.current;
+
+      if (currentMenuState) {
+        if (event.key === "ArrowDown") {
+          event.preventDefault();
+          setSlashMenuActiveIndex(
+            (currentMenuState.activeIndex + 1) % SLASH_COMMANDS.length
+          );
+          return true;
+        }
+
+        if (event.key === "ArrowUp") {
+          event.preventDefault();
+          setSlashMenuActiveIndex(
+            (currentMenuState.activeIndex - 1 + SLASH_COMMANDS.length) %
+              SLASH_COMMANDS.length
+          );
+          return true;
+        }
+
+        if (event.key === "Enter") {
+          event.preventDefault();
+          slashCommandExecutorRef.current(
+            SLASH_COMMANDS[currentMenuState.activeIndex].id
+          );
+          return true;
+        }
+
+        if (event.key === "Escape") {
+          event.preventDefault();
+          closeSlashMenu();
+          return true;
+        }
+
+        if (
+          event.isComposing ||
+          event.key === "Process" ||
+          event.key === "Dead" ||
+          event.key.length === 1 ||
+          event.key === "Backspace"
+        ) {
+          closeSlashMenu();
+        }
+
+        return false;
+      }
+
+      const { selection } = view.state;
+      if (
+        event.key !== "/" ||
+        !selection.empty ||
+        selection.$from.parent.type.name !== "paragraph" ||
+        selection.$from.parent.content.size !== 0
+      ) {
+        return false;
+      }
+
+      event.preventDefault();
+      const coordinates = view.coordsAtPos(selection.from);
+      const availableMenuHeight = Math.min(
+        SLASH_MENU_MAX_HEIGHT_PX,
+        Math.max(0, window.innerHeight - 32)
+      );
+      const menuTopBelowCursor = coordinates.bottom + 8;
+      const menuTop =
+        menuTopBelowCursor + availableMenuHeight <= window.innerHeight - 16
+          ? menuTopBelowCursor
+          : Math.max(16, coordinates.top - 8 - availableMenuHeight);
+      const nextState = {
+        activeIndex: 0,
+        position: {
+          top: menuTop,
+          left: Math.max(16, Math.min(coordinates.left, window.innerWidth - 336))
+        }
+      };
+      slashMenuStateRef.current = nextState;
+      setSlashMenuState(nextState);
+      return true;
+    },
+    [closeSlashMenu, setSlashMenuActiveIndex]
+  );
+
   const editor = useEditor({
     extensions: [
       StarterKit.configure({ undoRedo: false }),
@@ -199,13 +312,16 @@ function DocumentEditorSurface({
     editorProps: {
       attributes: {
         class: "text-sm leading-7 outline-none sm:text-base"
-      }
+      },
+      handleKeyDown: handleEditorKeyDown
     },
     onCreate: ({ editor: createdEditor }) => setIsEditorEmpty(createdEditor.isEmpty),
     onUpdate: ({ editor: updatedEditor }) => {
       setIsEditorEmpty(updatedEditor.isEmpty);
+      closeSlashMenu();
       queueSnapshot(updatedEditor);
-    }
+    },
+    onSelectionUpdate: () => closeSlashMenu()
   });
 
   useEffect(() => {
@@ -216,6 +332,33 @@ function DocumentEditorSurface({
       yDoc.destroy();
     };
   }, [yDoc]);
+
+  const executeSlashCommand = useCallback(
+    (commandId: SlashCommandId) => {
+      closeSlashMenu();
+
+      if (commandId === "attachment") {
+        setIsFilePickerOpen(true);
+        return;
+      }
+
+      const command = editor?.chain().focus();
+      if (!command) return;
+
+      if (commandId === "paragraph") command.setParagraph().run();
+      if (commandId === "heading1") command.toggleHeading({ level: 1 }).run();
+      if (commandId === "heading2") command.toggleHeading({ level: 2 }).run();
+      if (commandId === "heading3") command.toggleHeading({ level: 3 }).run();
+      if (commandId === "bulletList") command.toggleBulletList().run();
+      if (commandId === "orderedList") command.toggleOrderedList().run();
+      if (commandId === "blockquote") command.toggleBlockquote().run();
+      if (commandId === "codeBlock") command.toggleCodeBlock().run();
+      if (commandId === "horizontalRule") command.setHorizontalRule().run();
+    },
+    [closeSlashMenu, editor]
+  );
+
+  slashCommandExecutorRef.current = executeSlashCommand;
 
   const saveStateLabel =
     saveState === "saving"
@@ -319,6 +462,11 @@ function DocumentEditorSurface({
             })
             .run();
         }}
+      />
+      <DocumentSlashMenu
+        activeIndex={slashMenuState?.activeIndex ?? 0}
+        onSelect={executeSlashCommand}
+        position={slashMenuState?.position ?? null}
       />
     </section>
   );

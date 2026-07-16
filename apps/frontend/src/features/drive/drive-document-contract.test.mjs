@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-const [client, editor, panel, types, editorStyles, attachment, picker, preview] = await Promise.all([
+const [client, editor, panel, types, editorStyles, attachment, picker, preview, slashMenu] = await Promise.all([
   readFile(new URL("./api/client.ts", import.meta.url), "utf8"),
   readFile(new URL("./components/document-editor.tsx", import.meta.url), "utf8"),
   readFile(new URL("./components/drive-panel.tsx", import.meta.url), "utf8"),
@@ -9,7 +9,8 @@ const [client, editor, panel, types, editorStyles, attachment, picker, preview] 
   readFile(new URL("./components/document-editor.module.css", import.meta.url), "utf8"),
   readFile(new URL("./components/document-file-attachment.tsx", import.meta.url), "utf8"),
   readFile(new URL("./components/document-file-picker.tsx", import.meta.url), "utf8"),
-  readFile(new URL("./components/pdf-preview-dialog.tsx", import.meta.url), "utf8")
+  readFile(new URL("./components/pdf-preview-dialog.tsx", import.meta.url), "utf8"),
+  readFile(new URL("./components/document-slash-menu.tsx", import.meta.url), "utf8")
 ]);
 
 assert.match(types, /DriveItemType = "folder" \| "file" \| "document"/);
@@ -28,6 +29,11 @@ assert.match(client, /drive\/documents/);
 assert.match(editor, /Collaboration\.configure/);
 assert.match(editor, /DriveFileAttachment/);
 assert.match(editor, /DocumentFilePicker/);
+assert.match(editor, /DocumentSlashMenu/);
+assert.match(editor, /event\.key !== "\/"/);
+assert.match(editor, /event\.isComposing/);
+assert.match(editor, /setHorizontalRule/);
+assert.match(editor, /onSelectionUpdate: \(\) => closeSlashMenu\(\)/);
 assert.match(editor, /Y\.encodeStateAsUpdate/);
 assert.match(editor, /expectedVersion/);
 assert.match(editor, /immediatelyRender: false/);
@@ -38,6 +44,7 @@ assert.match(editor, /styles\.editorSurface/);
 assert.match(editor, /isEditorEmpty/);
 assert.ok(editorStyles.includes("입력하려면 /"));
 assert.doesNotMatch(editor, /rounded-md border bg-background/);
+assert.match(editorStyles, /max-width: 60rem/);
 assert.match(attachment, /driveFileAttachment/);
 assert.match(attachment, /driveItemId/);
 assert.match(attachment, /createDownloadUrl/);
@@ -48,6 +55,7 @@ assert.match(picker, /uploadStatus === "ready"/);
 assert.match(preview, /<iframe/);
 assert.match(preview, /previewUrl/);
 assert.match(preview, /createPreviewUrl/);
+assert.match(slashMenu, /role="listbox"/);
 assert.match(panel, /documentId/);
 assert.match(panel, /DriveDocumentEditor/);
 assert.match(panel, /function MoveItemSheet\(/);
