@@ -813,15 +813,23 @@ Request:
 - Meeting 후속 작업의 Pilo issue 선택 목록은 이 생성 API가 사용하는 target 조회와 검증을
   그대로 재사용한다. repository와 ProjectV2 Status metadata가 유효하고, 매핑된 Status
   option이 있으면 GitHub option id까지 존재하는 Column만 생성 가능 대상으로 본다.
+- repository와 ProjectV2는 모두 active GitHub App installation에 연결되어 있어야 하며
+  두 `installation_id`가 동일해야 한다. installation 삭제로 둘 중 하나가 분리됐거나
+  서로 다른 installation을 가리키면 최종 생성 검증과 선택 목록에서 모두 거부한다.
 - 생성 가능한 Column이 하나도 없는 Board는 선택 목록에서 제외한다. 로컬 `Unmapped`
   Column처럼 Status option 자체가 없는 Column은 기존 생성 검증과 동일하게 허용한다.
 - 선택 목록은 Board id를 identity로 사용하며 Board 이름으로 중복 제거하지 않는다.
+- 선택 목록 응답은 Board/Column의 `id`, `name`만 반환하며 repository, ProjectV2,
+  installation 내부 metadata는 노출하지 않는다. 생성 가능한 대상이 없으면 오류 대신
+  `200 OK`와 `{ "boards": [] }`를 반환한다.
 - `title`은 필수 문자열이며 trim 후 빈 문자열일 수 없고 최대 255자다.
 - `body`는 선택 문자열이다.
 - `columnId`는 필수 양의 정수 문자열이며 같은 board에 속한 `board_columns.id`여야 한다.
 - board 또는 target column이 없으면 `404 NOT_FOUND`와 `Board or target column not found`를 반환한다.
 - board에 GitHub repository metadata가 없으면 `400 BAD_REQUEST`와 `Board is missing GitHub repository metadata`를 반환한다.
 - board에 ProjectV2 status metadata가 없으면 `400 BAD_REQUEST`와 `Board is missing GitHub ProjectV2 status metadata`를 반환한다.
+- repository 또는 ProjectV2가 active installation에서 분리됐으면 `400 BAD_REQUEST`와 `Board is disconnected from its GitHub installation`을 반환한다.
+- repository와 ProjectV2가 서로 다른 installation에 연결됐으면 `400 BAD_REQUEST`와 `Board repository and ProjectV2 installations do not match`를 반환한다.
 - 대상 column이 Status option에 매핑되어 있으나 GitHub option id가 없으면 `400 BAD_REQUEST`와 `Board column is missing GitHub Status option metadata`를 반환한다.
 - 서버는 ProjectV2 write access를 먼저 확인한다.
 - 서버는 Board issue create의 GitHub repository issue write에도 같은 `purpose=project_v2` token을 사용한다.

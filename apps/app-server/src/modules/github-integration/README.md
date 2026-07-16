@@ -27,6 +27,8 @@ API contract: `docs/api/github-integration-api.md`
 - GitHub App installation 연결은 현재 사용자의 GitHub App user access token을 선행 조건으로 두고, callback의 `installation_id`가 해당 사용자에게 접근 가능한 installation인지 검증한 뒤 저장한다.
 - `/user/installations` 조회가 가능한 GitHub App user access token이 필요하다. classic OAuth App token만 저장된 상태면 installation 시작 단계에서 거절한다.
 - Repository/Issue/PR와 organization ProjectV2 조회와 동기화는 GitHub App installation token을 사용한다.
+- GitHub App installation 삭제는 repository, ProjectV2, repository link와 Board cache identity를 보존하고 repository/ProjectV2의 `installation_id`만 `NULL`로 분리한다. 같은 Workspace의 재연결 sync는 workspace-scoped remote identity upsert로 두 row를 새 installation에 재결합하며 기존 Board id를 재사용한다.
+- installation이 분리된 cache는 새 installation에 재결합되기 전까지 active repository/ProjectV2 목록, ProjectV2 상세 read, installation-scoped sync 및 Board write 대상이 아니다. 공개 ProjectV2 payload의 `installationId`는 nullable로 바꾸지 않는다.
 - ProjectV2 OAuth authorize scope는 정확히 `read:user user:email project repo`이며 callback과 runtime은 project and repo scopes를 모두 요구한다. 기존 `project`-only 연결은 다시 연결해야 한다.
 - personal ProjectV2 조회/쓰기/동기화와 Board issue create는 별도 GitHub OAuth App token(`purpose=project_v2`)을 사용한다.
 - Board issue update와 assignee 변경·조회, PR Review는 GitHub App user OAuth token(`purpose=app_user`)을 유지한다.

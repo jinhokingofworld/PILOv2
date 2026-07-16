@@ -18,6 +18,7 @@ const { getBoardIssueCreateTargetError } = require(
 
 const currentUserId = "22222222-2222-4222-8222-222222222222";
 const workspaceId = "11111111-1111-4111-8111-111111111111";
+const installationId = "77777777-7777-4777-8777-777777777777";
 
 class FakeDatabase {
   constructor(rows) {
@@ -43,9 +44,11 @@ function targetRow(overrides = {}) {
     board_id: "10",
     board_name: "PILO Project",
     repository_id: "33333333-3333-4333-8333-333333333333",
+    repository_installation_id: installationId,
     repository_owner_login: "Developer-EJ",
     repository_name: "PILO",
     project_v2_id: "44444444-4444-4444-8444-444444444444",
+    project_installation_id: installationId,
     github_project_node_id: "PVT_kwDOExample",
     status_field_id: "55555555-5555-4555-8555-555555555555",
     github_field_node_id: "PVTSSF_lADOExample",
@@ -80,6 +83,22 @@ assert.equal(
 assert.equal(
   getBoardIssueCreateTargetError(targetRow({ project_v2_id: null })),
   "Board is missing GitHub ProjectV2 status metadata"
+);
+assert.equal(
+  getBoardIssueCreateTargetError(targetRow({ repository_installation_id: null })),
+  "Board is disconnected from its GitHub installation"
+);
+assert.equal(
+  getBoardIssueCreateTargetError(targetRow({ project_installation_id: null })),
+  "Board is disconnected from its GitHub installation"
+);
+assert.equal(
+  getBoardIssueCreateTargetError(
+    targetRow({
+      project_installation_id: "88888888-8888-4888-8888-888888888888"
+    })
+  ),
+  "Board repository and ProjectV2 installations do not match"
 );
 assert.equal(
   getBoardIssueCreateTargetError(
@@ -126,6 +145,24 @@ assert.equal(
       repository_owner_login: null,
       repository_name: null,
       target_column_id: "400"
+    }),
+    targetRow({
+      board_id: "50",
+      board_name: "Disconnected repository",
+      repository_installation_id: null,
+      target_column_id: "500"
+    }),
+    targetRow({
+      board_id: "60",
+      board_name: "Disconnected ProjectV2",
+      project_installation_id: null,
+      target_column_id: "600"
+    }),
+    targetRow({
+      board_id: "70",
+      board_name: "Mismatched installations",
+      project_installation_id: "88888888-8888-4888-8888-888888888888",
+      target_column_id: "700"
     })
   ]);
   const service = new BoardReadService(
@@ -154,6 +191,14 @@ assert.equal(
   assert.match(database.queries[0].text, /JOIN github_repositories gr/);
   assert.match(database.queries[0].text, /LEFT JOIN github_projects_v2 gp/);
   assert.match(database.queries[0].text, /LEFT JOIN github_project_v2_fields sf/);
+  assert.match(
+    database.queries[0].text,
+    /gr\.installation_id AS repository_installation_id/
+  );
+  assert.match(
+    database.queries[0].text,
+    /gp\.installation_id AS project_installation_id/
+  );
 }
 
 {
