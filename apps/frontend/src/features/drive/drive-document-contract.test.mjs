@@ -45,6 +45,7 @@ assert.match(client, /drive\/documents/);
 assert.match(editor, /Collaboration\.configure/);
 assert.match(editor, /CollaborationCaret\.configure/);
 assert.match(editor, /StarterKit\.configure\(\{ undoRedo: false, dropcursor: false \}\)/);
+assert.match(editor, /Dropcursor\.configure\(\{ color: "var\(--primary\)", width: 2 \}\)/);
 assert.match(editor, /provider: realtimeProvider/);
 assert.match(editor, /createDocumentRealtimeProvider/);
 assert.match(editor, /createDocumentSnapshotSaveQueue/);
