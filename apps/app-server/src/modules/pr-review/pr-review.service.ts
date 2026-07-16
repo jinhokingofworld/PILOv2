@@ -70,7 +70,10 @@ import {
   PR_REVIEW_RELATION_EDGE_SHAPE_TYPE
 } from "../canvas/canvas-review-shape-policy";
 import type { CanvasShapeRow } from "../canvas/canvas.types";
-import { buildPrReviewSessionCreatedActivityLog } from "./pr-review-activity-log";
+import {
+  buildFileReviewDecisionCreatedActivityLog,
+  buildPrReviewSessionCreatedActivityLog
+} from "./pr-review-activity-log";
 import {
   buildPrReviewCanvasMaterialization,
   type PrReviewCanvasMaterializationFile,
@@ -2108,7 +2111,7 @@ export class PrReviewService {
       }
 
       if (file.changed) {
-        await this.insertReviewFileDecision(transaction, {
+        const decisionId = await this.insertReviewFileDecision(transaction, {
           reviewFileId: file.file.id,
           currentUserId,
           status: input.status,
@@ -2117,6 +2120,16 @@ export class PrReviewService {
         await this.syncReviewSessionReviewProgress(
           transaction,
           file.file.session_id
+        );
+        await this.activityLogService.append(
+          transaction,
+          buildFileReviewDecisionCreatedActivityLog({
+            currentUserId,
+            workspaceId,
+            decision: input.status,
+            decisionId,
+            reviewSessionId: file.file.session_id
+          })
         );
       }
 
@@ -4965,7 +4978,7 @@ export class PrReviewService {
       status: PrReviewDecisionStatus;
       comment: string | null;
     }
-  ): Promise<void> {
+  ): Promise<string> {
     const decision = await transaction.queryOne<{ id: string }>(
       `
         INSERT INTO file_review_decisions (
@@ -4983,6 +4996,8 @@ export class PrReviewService {
     if (!decision) {
       throw badRequest("Review decision could not be saved");
     }
+
+    return decision.id;
   }
 
   private async syncReviewSessionReviewProgress(
