@@ -188,6 +188,8 @@ assert.match(canvasShapePreview, /clearSocket/);
 assert.match(canvasRoomState, /MAX_ROOM_LOADED_REGIONS = 64/);
 assert.match(canvasRoomState, /MAX_ROOM_CACHED_SHAPES = 2_000/);
 assert.match(canvasRoomState, /MAX_ROOM_HISTORY_ITEMS = 200/);
+assert.match(canvasRoomState, /evictStaleCleanRoomShapes/);
+assert.match(canvasRoomState, /!dirtyShapeIds\.has\(shapeId\)/);
 assert.match(canvasRoomState, /mergeLoadedRegions/);
 assert.match(canvasRoomState, /doRegionsOverlap/);
 assert.match(canvasRoomState, /recordLoadedViewport/);

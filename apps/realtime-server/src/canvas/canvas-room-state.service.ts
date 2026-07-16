@@ -585,11 +585,25 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
       }
     });
 
+    evictStaleCleanRoomShapes(roomName, shapeCache);
+  }
+
+  function evictStaleCleanRoomShapes(
+    roomName: string,
+    shapeCache: Map<string, CachedRoomShape>,
+  ) {
     if (shapeCache.size <= MAX_ROOM_CACHED_SHAPES) return;
 
+    const dirtyShapeIds = dirtyShapeIdsByRoom.get(roomName) ?? new Set();
+    const deletedTombstones = deletedTombstonesByRoom.get(roomName) ?? new Map();
+    const evictionCount = shapeCache.size - MAX_ROOM_CACHED_SHAPES;
     const staleShapeIds = Array.from(shapeCache.entries())
+      .filter(
+        ([shapeId]) =>
+          !dirtyShapeIds.has(shapeId) && !deletedTombstones.has(shapeId),
+      )
       .sort(([, left], [, right]) => left.cachedAt.localeCompare(right.cachedAt))
-      .slice(0, shapeCache.size - MAX_ROOM_CACHED_SHAPES)
+      .slice(0, evictionCount)
       .map(([shapeId]) => shapeId);
 
     staleShapeIds.forEach((shapeId) => {
