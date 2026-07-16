@@ -9,6 +9,7 @@ import type {
 } from "../canvas/canvas.types";
 import type {
   PrReviewFileReviewStatus,
+  PrReviewFileRoleType,
   PrReviewFileRiskLevel,
   PrReviewFileStatus,
   PrReviewRelationSource,
@@ -30,6 +31,7 @@ export interface PrReviewCanvasMaterializationFile {
   filePath: string;
   fileStatus: PrReviewFileStatus;
   roleSummary: string | null;
+  roleType: PrReviewFileRoleType;
   riskLevel: PrReviewFileRiskLevel;
   reviewStatus: PrReviewFileReviewStatus;
 }
@@ -206,6 +208,7 @@ function buildFileShape(input: {
     filePath: file.filePath,
     fileStatus: file.fileStatus,
     roleSummary: file.roleSummary,
+    roleType: file.roleType,
     riskLevel: file.riskLevel,
     reviewStatus: file.reviewStatus,
     conflictState: "none",
@@ -321,7 +324,8 @@ async function safelyBuildInitialGraphLayout(
         height: NODE_HEIGHT,
         flowSortOrder: file.flowSortOrder,
         workflowOrder: file.workflowOrder,
-        filePath: file.filePath
+        filePath: file.filePath,
+        roleType: file.roleType
       })),
       relations: relations.map((relation) => ({
         id: getPrReviewRelationShapeId(reviewRoomId, relation),

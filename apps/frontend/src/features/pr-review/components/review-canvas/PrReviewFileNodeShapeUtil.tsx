@@ -47,6 +47,7 @@ export type PrReviewFileNodeShapeProps = {
   filePath: string;
   fileStatus: PrReviewFileStatus;
   roleSummary: string | null;
+  roleType: PrReviewFileRoleType;
   riskLevel: PrReviewFileRiskLevel;
   reviewStatus: PrReviewFileReviewStatus;
   conflictState: "none" | "unresolved" | "ready" | "unsupported";
@@ -708,6 +709,15 @@ export class PrReviewFileNodeShapeUtil extends ShapeUtil<PrReviewFileNodeShape> 
     filePath: T.string,
     fileStatus: T.literalEnum("added", "modified", "deleted", "renamed"),
     roleSummary: T.nullable(T.string),
+    roleType: T.literalEnum(
+      "entry",
+      "core_logic",
+      "api_contract",
+      "ui_state",
+      "verification",
+      "support",
+      "unknown"
+    ),
     riskLevel: T.literalEnum("high", "medium", "low", "unknown"),
     reviewStatus: T.literalEnum(
       "not_reviewed",
@@ -748,6 +758,7 @@ export class PrReviewFileNodeShapeUtil extends ShapeUtil<PrReviewFileNodeShape> 
       filePath: "",
       fileStatus: "modified",
       roleSummary: null,
+      roleType: "unknown",
       riskLevel: "unknown",
       reviewStatus: "not_reviewed",
       conflictState: "none",

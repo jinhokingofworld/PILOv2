@@ -3650,6 +3650,7 @@ export class PrReviewService {
           filePath: file.file_path,
           fileStatus: file.file_status,
           roleSummary: file.file_role,
+          roleType: file.role_type,
           riskLevel: file.risk_level,
           reviewStatus: file.current_status
         })),
@@ -5284,6 +5285,7 @@ export class PrReviewService {
           filePath: file.filePath,
           fileStatus: file.fileStatus,
           roleSummary: metadata.fileRole,
+          roleType: reviewFile.role_type,
           riskLevel: metadata.riskLevel,
           reviewStatus: reviewFile.current_status
         };
