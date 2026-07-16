@@ -23,16 +23,22 @@
   - [x] 자동 저장 상태와 새로고침 복구
   - [x] frontend lint/test
   - [x] PR [#1160](https://github.com/Developer-EJ/PILO/pull/1160) 생성
-- [x] **문서 lifecycle API와 Activity Log**: Issue [#1166](https://github.com/Developer-EJ/PILO/issues/1166), PR [#1169](https://github.com/Developer-EJ/PILO/pull/1169) 생성
+- [x] **문서 lifecycle API와 Activity Log**: Issue [#1166](https://github.com/Developer-EJ/PILO/issues/1166), PR [#1169](https://github.com/Developer-EJ/PILO/pull/1169) 병합 완료
   - [x] rename/move/delete의 Activity Log와 문서 aggregate soft delete 구현
   - [x] API 계약과 전체 app-server 검증
-  - [x] PR [#1169](https://github.com/Developer-EJ/PILO/pull/1169) 생성
-- [x] **Drive 이동 UI**: Issue [#1170](https://github.com/Developer-EJ/PILO/issues/1170), PR [#1175](https://github.com/Developer-EJ/PILO/pull/1175) 생성
+  - [x] PR [#1169](https://github.com/Developer-EJ/PILO/pull/1169) 병합 완료
+- [x] **Drive 이동 UI**: Issue [#1170](https://github.com/Developer-EJ/PILO/issues/1170), PR [#1175](https://github.com/Developer-EJ/PILO/pull/1175) 병합 완료
   - [x] 폴더/파일/문서 이동 목적지 탐색과 `PATCH` 호출
   - [x] focused test, frontend format/lint/test
   - [ ] 인증된 dev 환경 수동 QA
-  - [x] PR [#1175](https://github.com/Developer-EJ/PILO/pull/1175) 생성
-- [ ] **후속 작업**: Yjs realtime, 파일 첨부/PDF viewer
+  - [x] PR [#1175](https://github.com/Developer-EJ/PILO/pull/1175) 병합 완료
+- [ ] **파일 첨부와 PDF viewer 기반**: Issue [#1179](https://github.com/Developer-EJ/PILO/issues/1179) 진행 중
+  - [x] Drive file attachment 검증과 PDF inline preview API
+  - [ ] 후속 frontend attachment picker와 PDF viewer
+- [ ] **후속 작업**: Yjs realtime collaboration
+
+> 아래 작업 1~5는 최초 기반 구현 계획이다. 현재 진행 상태는 이 상단 현황을 기준으로
+> 추적하며, 자동 검증은 각 PR에서 완료했고 인증된 dev 환경 수동 QA만 남아 있다.
 
 ## 공통 제약
 
