@@ -6,13 +6,15 @@ import {
   useRef,
   useState
 } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
+import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import type {
   ChatMessageContext,
   ChatMessagePage,
+  ChatMentionNotification,
   ChatSummary,
   ChatViewMessage
 } from "@/features/chat/types";
@@ -22,6 +24,15 @@ import {
   shouldObserveChatRead,
   shouldMarkChatRead
 } from "@/features/chat/utils/chat-read-policy";
+import {
+  CHAT_TARGET_UNAVAILABLE_MESSAGE,
+  CHAT_TARGET_VISIBILITY_THRESHOLD,
+  createChatTargetFocusLifecycle,
+  createVisibleMentionReadRetry,
+  handleChatTargetLoadError,
+  loadChatTargetIfMissing,
+  shouldReadVisibleMention
+} from "@/features/chat/utils/chat-notification";
 import { ChatMessageItem } from "./chat-message-item";
 
 export function ChatMessageList({
@@ -29,7 +40,9 @@ export function ChatMessageList({
   loadMessageContext,
   loadMessagePage,
   markRead,
+  markMentionRead,
   messages,
+  mentions,
   onDelete,
   onRetry,
   summary,
@@ -42,7 +55,9 @@ export function ChatMessageList({
   ) => Promise<ChatMessageContext | null>;
   loadMessagePage: (before?: string) => Promise<ChatMessagePage | null>;
   markRead: (messageId: string) => Promise<void>;
+  markMentionRead: (mentionId: string) => Promise<void>;
   messages: ChatViewMessage[];
+  mentions: ChatMentionNotification[];
   onDelete: (messageId: string) => Promise<void>;
   onRetry: (clientMessageId: string) => Promise<void>;
   summary: ChatSummary;
@@ -50,13 +65,20 @@ export function ChatMessageList({
   workspaceId: string;
 }) {
   const pathname = usePathname();
+  const router = useRouter();
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const bottomSentinelRef = useRef<HTMLDivElement>(null);
   const hasPositionedInitialScrollRef = useRef(false);
-  const lastFocusedTargetRef = useRef<string | null>(null);
   const lastMarkedReadIdRef = useRef<string | null>(null);
   const targetPositionedRef = useRef(targetMessageId === null);
+  const documentVisibleRef = useRef(true);
+  const unreadMentionIdsRef = useRef(new Set<string>());
+  const visibleTargetKeyRef = useRef<string | null>(null);
   const wasBottomVisibleRef = useRef(false);
+  const [targetFocusLifecycle] = useState(createChatTargetFocusLifecycle);
+  const [visibleMentionReadRetry] = useState(
+    createVisibleMentionReadRetry
+  );
   const [bottomVisible, setBottomVisible] = useState(false);
   const [documentVisible, setDocumentVisible] = useState(true);
   const [highlightedMessageId, setHighlightedMessageId] = useState<
@@ -66,6 +88,29 @@ export function ChatMessageList({
   const [isLoadingOlder, setIsLoadingOlder] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [readObservationEpoch, setReadObservationEpoch] = useState(0);
+  const [visibleTargetMessageIds, setVisibleTargetMessageIds] = useState<
+    Set<string>
+  >(() => new Set());
+  const hasLocalTargetMessage = useMemo(
+    () =>
+      Boolean(
+        targetMessageId &&
+          messages.some(
+            ({ id, workspaceId: messageWorkspaceId }) =>
+              id === targetMessageId && messageWorkspaceId === workspaceId
+          )
+      ),
+    [messages, targetMessageId, workspaceId]
+  );
+  documentVisibleRef.current = documentVisible;
+  unreadMentionIdsRef.current = new Set(
+    mentions
+      .filter(
+        (mention) =>
+          mention.workspaceId === workspaceId && mention.readAt === null
+      )
+      .map(({ id }) => id)
+  );
   const firstUnreadIndex = useMemo(
     () =>
       findFirstUnreadChatMessageIndex(
@@ -78,8 +123,12 @@ export function ChatMessageList({
 
   useEffect(() => {
     hasPositionedInitialScrollRef.current = false;
-    lastFocusedTargetRef.current = null;
     lastMarkedReadIdRef.current = null;
+    targetFocusLifecycle.reset();
+    visibleMentionReadRetry.reset();
+    targetPositionedRef.current = targetMessageId === null;
+    setHighlightedMessageId(null);
+    setVisibleTargetMessageIds(new Set());
     setHistoryError(null);
     setNextCursor(null);
     let active = true;
@@ -95,32 +144,69 @@ export function ChatMessageList({
 
     return () => {
       active = false;
+      targetFocusLifecycle.reset();
+      visibleMentionReadRetry.reset();
     };
-  }, [loadMessagePage, workspaceId]);
+  }, [
+    loadMessagePage,
+    targetFocusLifecycle,
+    visibleMentionReadRetry,
+    workspaceId
+  ]);
 
   useEffect(() => {
     targetPositionedRef.current = targetMessageId === null;
     wasBottomVisibleRef.current = false;
     setBottomVisible(false);
-    if (!targetMessageId) return;
+    setVisibleTargetMessageIds(new Set());
+    targetFocusLifecycle.reset();
+    visibleMentionReadRetry.reset();
+    visibleTargetKeyRef.current = null;
+    if (!targetMessageId) {
+      setHighlightedMessageId(null);
+      return;
+    }
     let active = true;
     setHistoryError(null);
 
-    void loadMessageContext(targetMessageId)
-      .then((context) => {
-        if (!active || !context) return;
-        if (!context.items.some(({ id }) => id === targetMessageId)) {
-          setHistoryError("요청한 메시지를 찾을 수 없습니다.");
+    void loadChatTargetIfMissing({
+      hasLocalMessage: hasLocalTargetMessage,
+      loadContext: loadMessageContext,
+      targetMessageId
+    })
+      .then((result) => {
+        if (!active) return;
+        if (result === "missing") {
+          toast.error(CHAT_TARGET_UNAVAILABLE_MESSAGE);
+          router.replace("/chat");
         }
       })
-      .catch(() => {
-        if (active) setHistoryError("요청한 메시지를 불러오지 못했습니다.");
+      .catch((error: unknown) => {
+        if (!active) return;
+        let targetErrorMessage = "";
+        const result = handleChatTargetLoadError({
+          error,
+          onError: (message) => {
+            targetErrorMessage = message;
+          },
+          replace: (href) => router.replace(href)
+        });
+        if (result === "not-found") toast.error(targetErrorMessage);
+        else setHistoryError(targetErrorMessage);
       });
 
     return () => {
       active = false;
     };
-  }, [loadMessageContext, targetMessageId]);
+  }, [
+    hasLocalTargetMessage,
+    loadMessageContext,
+    router,
+    targetFocusLifecycle,
+    targetMessageId,
+    visibleMentionReadRetry,
+    workspaceId
+  ]);
 
   useEffect(() => {
     const updateVisibility = () =>
@@ -130,6 +216,75 @@ export function ChatMessageList({
     return () =>
       document.removeEventListener("visibilitychange", updateVisibility);
   }, []);
+
+  useEffect(() => {
+    if (!targetMessageId || !hasLocalTargetMessage) return;
+    const targetElement = document.getElementById(
+      `chat-message-${targetMessageId}`
+    );
+    const root = scrollContainerRef.current;
+    if (!targetElement || !root) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        const isVisible = entry?.isIntersecting === true;
+        setVisibleTargetMessageIds((currentIds) => {
+          if (currentIds.has(targetMessageId) === isVisible) {
+            return currentIds;
+          }
+          return isVisible ? new Set([targetMessageId]) : new Set();
+        });
+      },
+      { root, threshold: CHAT_TARGET_VISIBILITY_THRESHOLD }
+    );
+    observer.observe(targetElement);
+    return () => observer.disconnect();
+  }, [hasLocalTargetMessage, targetMessageId, workspaceId]);
+
+  useEffect(() => {
+    const targetVisible =
+      documentVisible &&
+      shouldReadVisibleMention({
+        targetMessageId,
+        visibleMessageIds: visibleTargetMessageIds
+      });
+    visibleTargetKeyRef.current =
+      targetVisible && targetMessageId
+        ? `${workspaceId}:${targetMessageId}`
+        : null;
+    if (!targetVisible || !targetMessageId) {
+      visibleMentionReadRetry.reset();
+      return;
+    }
+
+    for (const mention of mentions) {
+      if (
+        mention.workspaceId !== workspaceId ||
+        mention.messageId !== targetMessageId ||
+        mention.readAt !== null
+      ) {
+        continue;
+      }
+
+      const targetKey = `${workspaceId}:${targetMessageId}`;
+      visibleMentionReadRetry.start({
+        key: `${workspaceId}:${mention.id}`,
+        isCurrent: () =>
+          documentVisibleRef.current &&
+          visibleTargetKeyRef.current === targetKey &&
+          unreadMentionIdsRef.current.has(mention.id),
+        read: () => markMentionRead(mention.id)
+      });
+    }
+  }, [
+    documentVisible,
+    markMentionRead,
+    mentions,
+    targetMessageId,
+    visibleMentionReadRetry,
+    visibleTargetMessageIds,
+    workspaceId
+  ]);
 
   useEffect(() => {
     const sentinel = bottomSentinelRef.current;
@@ -155,7 +310,7 @@ export function ChatMessageList({
     );
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [readObservationEpoch, targetMessageId]);
+  }, [readObservationEpoch, targetMessageId, workspaceId]);
 
   useEffect(() => {
     if (messages.length === 0) return;
@@ -180,38 +335,53 @@ export function ChatMessageList({
   }, [messages.length, targetMessageId]);
 
   useEffect(() => {
-    if (
-      !targetMessageId ||
-      lastFocusedTargetRef.current === targetMessageId ||
-      !messages.some(({ id }) => id === targetMessageId)
-    ) {
-      return;
-    }
+    const ticket = targetFocusLifecycle.begin({
+      targetAvailable: hasLocalTargetMessage,
+      targetMessageId,
+      workspaceId
+    });
+    if (!ticket || !targetMessageId) return;
 
-    lastFocusedTargetRef.current = targetMessageId;
     setHighlightedMessageId(targetMessageId);
     setBottomVisible(false);
     wasBottomVisibleRef.current = false;
     let secondFrame = 0;
     const firstFrame = requestAnimationFrame(() => {
-      document
-        .getElementById(`chat-message-${targetMessageId}`)
-        ?.scrollIntoView({ behavior: "auto", block: "center" });
+      const targetElement = document.getElementById(
+        `chat-message-${targetMessageId}`
+      );
+      if (!targetElement) {
+        targetFocusLifecycle.cancel(ticket);
+        return;
+      }
+      targetElement.scrollIntoView({ behavior: "auto", block: "center" });
+      targetElement.focus({ preventScroll: true });
       secondFrame = requestAnimationFrame(() => {
+        if (!targetFocusLifecycle.complete(ticket)) return;
         targetPositionedRef.current = true;
         setReadObservationEpoch((currentEpoch) => currentEpoch + 1);
       });
     });
+    return () => {
+      cancelAnimationFrame(firstFrame);
+      cancelAnimationFrame(secondFrame);
+      targetFocusLifecycle.cancel(ticket);
+    };
+  }, [
+    hasLocalTargetMessage,
+    targetFocusLifecycle,
+    targetMessageId,
+    workspaceId
+  ]);
+
+  useEffect(() => {
+    if (!highlightedMessageId) return;
     const timeout = window.setTimeout(
       () => setHighlightedMessageId(null),
       3_000
     );
-    return () => {
-      cancelAnimationFrame(firstFrame);
-      cancelAnimationFrame(secondFrame);
-      window.clearTimeout(timeout);
-    };
-  }, [messages, targetMessageId]);
+    return () => window.clearTimeout(timeout);
+  }, [highlightedMessageId]);
 
   useEffect(() => {
     const latestMessage = [...messages].reverse().find(

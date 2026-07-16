@@ -34,7 +34,9 @@ export function ChatPage() {
     loadMessageContext,
     loadMessagePage,
     markRead,
+    markMentionRead,
     mentionErrorMessage,
+    mentions,
     refreshMentions,
     refreshSummary,
     removeMessage,
@@ -133,6 +135,8 @@ export function ChatPage() {
           loadMessageContext={loadMessageContext}
           loadMessagePage={loadMessagePage}
           markRead={markRead}
+          markMentionRead={markMentionRead}
+          mentions={mentions}
           messages={state.messages}
           onDelete={removeMessage}
           onRetry={retryMessage}

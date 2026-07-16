@@ -11,7 +11,7 @@
     "lint": "tsc --noEmit",
     "test": "node scripts/test.mjs && npm run test:chat && npm run test:workspace-presence && npm run test:workspace-location",
     "test:chat": "npm run test:chat-reducer && npm run test:chat-api && node --experimental-strip-types src/features/chat/realtime/chat-runtime-provider.test.mjs && node --experimental-strip-types src/features/chat/chat-common-shell.test.mjs && npm run test:chat-ui",
-    "test:chat-ui": "node --experimental-strip-types src/features/chat/utils/chat-message-text.test.mjs && node --experimental-strip-types src/features/chat/utils/chat-read-policy.test.mjs && node --experimental-strip-types src/features/chat/chat-ui.test.mjs",
+    "test:chat-ui": "node --experimental-strip-types src/features/chat/utils/chat-message-text.test.mjs && node --experimental-strip-types src/features/chat/utils/chat-read-policy.test.mjs && node --experimental-strip-types src/features/chat/utils/chat-notification.test.mjs && node --experimental-strip-types src/features/chat/chat-ui.test.mjs",
     "test:chat-reducer": "node --experimental-strip-types src/features/chat/realtime/chat-reducer.test.mjs",
     "test:chat-api": "node --experimental-strip-types src/features/chat/api/client.test.mjs",
     "test:workspace-presence": "node src/shared/workspace-presence/workspace-presence-reducer.test.mjs && node src/shared/workspace-presence/workspace-location-registry.test.mjs && node src/features/workspace-presence/workspace-member-avatars.test.mjs",

@@ -12,21 +12,177 @@ const {
   CHAT_MENTION_REFRESH_ERROR_MESSAGE,
   createOptimisticChatMentions,
   createChatSendConfirmationTracker,
+  createChatMentionReadTracker,
+  applyChatMentionReadSuccess,
   createChatRefreshActions,
   createChatRefreshCoordinator,
   createChatSocketLifecycle,
   createLatestRequestRunner,
   createWorkspaceRequestScope,
+  getWorkspaceCoherentChatSnapshot,
   getChatRefreshErrorMessages,
   isAbortError,
   loadChatMessagesIntoState,
   loadChatRefresh,
+  mergeChatMentionNotifications,
   resolveTrackedChatSendFailure,
+  startChatMentionReadReconciliation,
 } = chatRuntime;
 import { chatClientEvents, chatServerEvents } from "./chat-events.ts";
 
 assert.equal(typeof createChatRefreshActions, "function");
 assert.equal(typeof createChatRefreshCoordinator, "function");
+assert.equal(typeof createChatMentionReadTracker, "function");
+
+{
+  const staleSnapshot = getWorkspaceCoherentChatSnapshot({
+    errorMessage: "old workspace error",
+    mentionErrorMessage: "old mention error",
+    mentions: [mention({ id: "old-mention" })],
+    state: {
+      ...createChatState("workspace-a"),
+      messages: [message({ id: "old-message" })],
+    },
+    summary: summary({ mentionUnreadCount: 4, unreadCount: 7 }),
+    workspaceId: "workspace-b",
+  });
+
+  assert.equal(staleSnapshot.state.workspaceId, "workspace-b");
+  assert.deepEqual(staleSnapshot.state.messages, []);
+  assert.deepEqual(staleSnapshot.mentions, []);
+  assert.deepEqual(staleSnapshot.summary, summary());
+  assert.equal(staleSnapshot.errorMessage, null);
+  assert.equal(staleSnapshot.mentionErrorMessage, null);
+}
+
+{
+  const readMention = mention({
+    id: "mention-read",
+    readAt: "2026-07-17T01:00:00.000Z",
+  });
+  const result = applyChatMentionReadSuccess({
+    mention: readMention,
+    mentions: [mention({ id: "mention-read" }), mention({ id: "mention-other" })],
+    summary: summary({ mentionUnreadCount: 2 }),
+  });
+
+  assert.equal(result.mentions[0].readAt, "2026-07-17T01:00:00.000Z");
+  assert.equal(result.summary.mentionUnreadCount, 1);
+  const duplicate = applyChatMentionReadSuccess({
+    mention: readMention,
+    mentions: result.mentions,
+    summary: result.summary,
+  });
+  assert.equal(duplicate.summary.mentionUnreadCount, 1);
+}
+
+{
+  const merged = mergeChatMentionNotifications({
+    current: [
+      mention({
+        id: "mention-read",
+        readAt: "2026-07-17T01:00:00.000Z",
+      }),
+    ],
+    incoming: [
+      mention({ id: "mention-read", readAt: null }),
+      mention({ id: "mention-live", messageId: "message-live" }),
+    ],
+  });
+
+  assert.equal(merged.find(({ id }) => id === "mention-read").readAt, "2026-07-17T01:00:00.000Z");
+  assert.equal(merged.find(({ id }) => id === "mention-live").messageId, "message-live");
+}
+
+{
+  const unhandled = [];
+  const onUnhandled = (error) => unhandled.push(error);
+  process.on("unhandledRejection", onUnhandled);
+  try {
+    const calls = [];
+    const result = startChatMentionReadReconciliation({
+      refreshMentions: async () => {
+        calls.push("mentions");
+        throw new Error("mentions refresh failed");
+      },
+      refreshSummary: async () => {
+        calls.push("summary");
+        throw new Error("summary refresh failed");
+      },
+    });
+    assert.equal(result, undefined);
+    assert.deepEqual(calls, ["mentions", "summary"]);
+    await new Promise((resolve) => setImmediate(resolve));
+  } finally {
+    process.off("unhandledRejection", onUnhandled);
+  }
+  assert.deepEqual(unhandled, []);
+}
+
+{
+  const tracker = createChatMentionReadTracker();
+  const request = deferred();
+  const applied = [];
+  let requestCount = 0;
+  const input = {
+    isCurrent: () => true,
+    mentionId: "mention-1",
+    onSuccess: (mention) => applied.push(mention.id),
+    request: () => {
+      requestCount += 1;
+      return request.promise;
+    },
+    workspaceId: "workspace-1",
+  };
+  const first = tracker.run(input);
+  const duplicate = tracker.run(input);
+
+  assert.equal(first, duplicate);
+  assert.equal(requestCount, 1);
+  request.resolve({ id: "mention-1" });
+  assert.equal(await first, "success");
+  assert.equal(await duplicate, "success");
+  assert.deepEqual(applied, ["mention-1"]);
+}
+
+{
+  const tracker = createChatMentionReadTracker();
+  let requestCount = 0;
+  const run = () =>
+    tracker.run({
+      isCurrent: () => true,
+      mentionId: "mention-retry",
+      onSuccess: () => undefined,
+      request: async () => {
+        requestCount += 1;
+        if (requestCount === 1) throw new Error("temporary failure");
+        return { id: "mention-retry" };
+      },
+      workspaceId: "workspace-1",
+    });
+
+  await assert.rejects(run, /temporary failure/);
+  assert.equal(await run(), "success");
+  assert.equal(requestCount, 2);
+}
+
+{
+  const tracker = createChatMentionReadTracker();
+  const oldRequest = deferred();
+  const applied = [];
+  const oldRun = tracker.run({
+    isCurrent: () => false,
+    mentionId: "mention-stale",
+    onSuccess: (mention) => applied.push(mention.id),
+    request: () => oldRequest.promise,
+    workspaceId: "workspace-1",
+  });
+  tracker.reset();
+  oldRequest.resolve({ id: "mention-stale" });
+
+  assert.equal(await oldRun, "stale");
+  assert.deepEqual(applied, []);
+}
 
 {
   assert.deepEqual(
@@ -329,6 +485,37 @@ function message({
     mentions: [],
     createdAt,
     deletedAt,
+  };
+}
+
+function mention({
+  id,
+  messageId = `message-${id}`,
+  readAt = null,
+}) {
+  return {
+    id,
+    readAt,
+    messageId,
+    excerpt: "mention excerpt",
+    actor: {
+      id: "user-2",
+      displayName: "Mention actor",
+      avatarUrl: null,
+    },
+    workspaceId: "workspace-1",
+    workspaceName: "Workspace 1",
+    createdAt: "2026-07-17T00:00:00.000Z",
+  };
+}
+
+function summary(overrides = {}) {
+  return {
+    latestMessageId: null,
+    lastReadMessageId: null,
+    unreadCount: 0,
+    mentionUnreadCount: 0,
+    ...overrides,
   };
 }
 
@@ -733,12 +920,21 @@ assert.ok(
 );
 assert.ok(
   (provider.match(/await refreshActions\.afterMessageChange\(\)/g) ?? [])
-    .length >= 5,
+    .length >= 4,
 );
 assert.match(provider, /void refreshActions\.afterLiveMention\(\)/);
 assert.match(
   provider,
   /markMentionRead[\s\S]*mentionsRequestRunner\.invalidate\(\)/,
+);
+assert.match(
+  provider,
+  /markMentionRead[\s\S]*applyChatMentionReadSuccess[\s\S]*startChatMentionReadReconciliation/,
+);
+assert.match(provider, /getWorkspaceCoherentChatSnapshot/);
+assert.match(
+  provider,
+  /refreshMentionReadSummary[\s\S]*onError: \(\) => undefined/,
 );
 assert.match(provider, /errorMessage/);
 assert.match(provider, /loadMessagePage/);

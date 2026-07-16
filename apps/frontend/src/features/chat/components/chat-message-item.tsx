@@ -51,12 +51,14 @@ export function ChatMessageItem({
 
   return (
     <article
+      aria-current={isHighlighted ? "true" : undefined}
       className={cn(
         "group relative flex scroll-m-24 gap-3 rounded-xl px-3 py-2.5 transition-colors",
         isHighlighted && "bg-primary/10 ring-2 ring-primary/30"
       )}
       data-message-id={message.id}
       id={`chat-message-${message.id}`}
+      tabIndex={-1}
     >
       <Avatar className="mt-0.5" size="sm">
         {message.author?.avatarUrl ? (

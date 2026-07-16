@@ -12,6 +12,7 @@ const [
   messageItem,
   composer,
   mentionMenu,
+  headerNotificationDropdown,
   packageJson,
   testRunner,
 ] = await Promise.all([
@@ -22,6 +23,7 @@ const [
   readOptional("./components/chat-message-item.tsx"),
   readOptional("./components/chat-composer.tsx"),
   readOptional("./components/chat-mention-menu.tsx"),
+  readOptional("../../components/header-notification-dropdown.tsx"),
   readOptional("../../../package.json"),
   readOptional("../../../scripts/test.mjs"),
 ]);
@@ -32,7 +34,14 @@ assert.equal(
 );
 assert.match(featureNavigation, /homeNavigation,\s*chatNavigation,/);
 assert.doesNotMatch(
-  [page, messageList, messageItem, composer, mentionMenu].join("\n"),
+  [
+    page,
+    messageList,
+    messageItem,
+    composer,
+    mentionMenu,
+    headerNotificationDropdown,
+  ].join("\n"),
   /dangerouslySetInnerHTML/,
 );
 assert.match(composer, /event\.nativeEvent\.isComposing/);
@@ -59,9 +68,33 @@ assert.match(page, /refreshMentions/);
 assert.match(page, /key=\{workspaceId\}/);
 assert.match(messageList, /shouldObserveChatRead/);
 assert.match(messageList, /readObservationEpoch/);
+assert.match(
+  messageList,
+  /\[readObservationEpoch, targetMessageId, workspaceId\]/,
+);
+assert.match(headerNotificationDropdown, /workspaceInvitations\.map/);
+assert.match(headerNotificationDropdown, /mentions\.map/);
+assert.match(headerNotificationDropdown, /getNotificationUnreadCount/);
+assert.match(headerNotificationDropdown, /navigateToChatMention/);
+assert.match(headerNotificationDropdown, /formatChatNotificationTime/);
+assert.match(headerNotificationDropdown, /<time/);
+assert.match(headerNotificationDropdown, /listCurrentUserWorkspaceInvitations/);
+assert.match(headerNotificationDropdown, /closeInvitationDialogAsRead/);
+assert.match(messageList, /loadChatTargetIfMissing/);
+assert.match(messageList, /handleChatTargetLoadError/);
+assert.match(messageList, /shouldReadVisibleMention/);
+assert.match(messageList, /markMentionRead/);
+assert.match(messageList, /IntersectionObserver/);
+assert.match(messageList, /createChatTargetFocusLifecycle/);
+assert.match(messageList, /createVisibleMentionReadRetry/);
+assert.match(messageList, /CHAT_TARGET_VISIBILITY_THRESHOLD/);
+assert.match(messageList, /CHAT_TARGET_UNAVAILABLE_MESSAGE/);
+assert.doesNotMatch(messageList, /lastFocusedTargetRef/);
+assert.match(messageItem, /aria-current/);
+assert.match(messageItem, /tabIndex=\{-1\}/);
 assert.match(packageJson, /"test"[\s\S]*npm run test:chat/);
 assert.match(packageJson, /"test:chat-ui"/);
 assert.doesNotMatch(
   testRunner,
-  /features\/chat\/(?:utils\/chat-message-text|utils\/chat-read-policy|chat-ui)\.test\.mjs/,
+  /features\/chat\/(?:utils\/chat-message-text|utils\/chat-read-policy|utils\/chat-notification|chat-ui)\.test\.mjs/,
 );

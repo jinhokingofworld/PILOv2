@@ -1,10 +1,12 @@
 import type {
+  ChatMentionNotification,
   ChatMessagePage,
   ChatSendOutcome,
   ChatSummary,
   WorkspaceChatMention,
   WorkspaceChatMessage
 } from "@/features/chat/types";
+import type { ChatState } from "./chat-reducer";
 import type {
   ChatMentionCreatedPayload,
   ChatMessageDeletedPayload
@@ -14,6 +16,104 @@ export const CHAT_REFRESH_ERROR_MESSAGE =
   "채팅 정보를 새로고침하지 못했습니다. 잠시 후 다시 시도해주세요.";
 export const CHAT_MENTION_REFRESH_ERROR_MESSAGE =
   "멘션 알림을 새로고침하지 못했습니다. 잠시 후 다시 시도해주세요.";
+
+export function getWorkspaceCoherentChatSnapshot({
+  errorMessage,
+  mentionErrorMessage,
+  mentions,
+  state,
+  summary,
+  workspaceId
+}: {
+  errorMessage: string | null;
+  mentionErrorMessage: string | null;
+  mentions: ChatMentionNotification[];
+  state: ChatState;
+  summary: ChatSummary;
+  workspaceId: string;
+}) {
+  if (state.workspaceId === workspaceId) {
+    return { errorMessage, mentionErrorMessage, mentions, state, summary };
+  }
+
+  return {
+    errorMessage: null,
+    mentionErrorMessage: null,
+    mentions: [],
+    state: {
+      workspaceId,
+      deletedMessageIds: {},
+      messagesById: {},
+      messageIdByClientId: {},
+      messages: []
+    },
+    summary: {
+      latestMessageId: null,
+      lastReadMessageId: null,
+      unreadCount: 0,
+      mentionUnreadCount: 0
+    }
+  };
+}
+
+export function applyChatMentionReadSuccess({
+  mention,
+  mentions,
+  summary
+}: {
+  mention: ChatMentionNotification;
+  mentions: ChatMentionNotification[];
+  summary: ChatSummary;
+}) {
+  const currentMention = mentions.find(({ id }) => id === mention.id);
+  const newlyRead = currentMention?.readAt === null && mention.readAt !== null;
+  return {
+    mentions: mentions.map((current) =>
+      current.id === mention.id ? mention : current
+    ),
+    summary: newlyRead
+      ? {
+          ...summary,
+          mentionUnreadCount: Math.max(0, summary.mentionUnreadCount - 1)
+        }
+      : summary
+  };
+}
+
+export function mergeChatMentionNotifications({
+  current,
+  incoming
+}: {
+  current: ChatMentionNotification[];
+  incoming: ChatMentionNotification[];
+}) {
+  const currentById = new Map(current.map((mention) => [mention.id, mention]));
+  return incoming.map((mention) => {
+    const currentMention = currentById.get(mention.id);
+    return currentMention?.readAt && !mention.readAt
+      ? { ...mention, readAt: currentMention.readAt }
+      : mention;
+  });
+}
+
+export function startChatMentionReadReconciliation({
+  refreshMentions,
+  refreshSummary
+}: {
+  refreshMentions: () => Promise<void>;
+  refreshSummary: () => Promise<void>;
+}) {
+  try {
+    void refreshMentions().catch(() => undefined);
+  } catch {
+    // Background reconciliation must not change the successful primary read.
+  }
+  try {
+    void refreshSummary().catch(() => undefined);
+  } catch {
+    // Focus/reconnect remains the retry path for a failed canonical refresh.
+  }
+}
 
 export function getChatRefreshErrorMessages(errors: {
   deep: boolean;
@@ -260,6 +360,58 @@ export function createWorkspaceRequestScope() {
       return current?.workspaceId === workspaceId
         ? current.controller.signal
         : undefined;
+    }
+  };
+}
+
+export function createChatMentionReadTracker() {
+  let generation = 0;
+  const inFlight = new Map<string, Promise<"success" | "stale">>();
+
+  return {
+    reset() {
+      generation += 1;
+      inFlight.clear();
+    },
+    run<T>({
+      isCurrent,
+      mentionId,
+      onSuccess,
+      request,
+      workspaceId
+    }: {
+      isCurrent: () => boolean;
+      mentionId: string;
+      onSuccess: (value: T) => void | Promise<void>;
+      request: () => Promise<T>;
+      workspaceId: string;
+    }) {
+      const key = `${workspaceId}:${mentionId}`;
+      const currentRequest = inFlight.get(key);
+      if (currentRequest) return currentRequest;
+
+      const requestGeneration = generation;
+      let requestPromise: Promise<T>;
+      try {
+        requestPromise = request();
+      } catch (error) {
+        return Promise.reject(error);
+      }
+
+      let trackedPromise: Promise<"success" | "stale">;
+      trackedPromise = requestPromise
+        .then(async (value) => {
+          if (requestGeneration !== generation || !isCurrent()) {
+            return "stale" as const;
+          }
+          await onSuccess(value);
+          return "success" as const;
+        })
+        .finally(() => {
+          if (inFlight.get(key) === trackedPromise) inFlight.delete(key);
+        });
+      inFlight.set(key, trackedPromise);
+      return trackedPromise;
     }
   };
 }

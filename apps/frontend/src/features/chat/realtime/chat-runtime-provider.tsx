@@ -45,13 +45,18 @@ import {
   createOptimisticChatMentions,
   createChatRefreshActions,
   createChatRefreshCoordinator,
+  createChatMentionReadTracker,
   createChatSendConfirmationTracker,
   createChatSocketLifecycle,
   createLatestRequestRunner,
   createWorkspaceRequestScope,
+  applyChatMentionReadSuccess,
   getChatRefreshErrorMessages,
+  getWorkspaceCoherentChatSnapshot,
   isAbortError,
   loadChatMessagesIntoState,
+  mergeChatMentionNotifications,
+  startChatMentionReadReconciliation,
   resolveTrackedChatSendFailure
 } from "./chat-runtime";
 
@@ -110,10 +115,13 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
   const [requestScope] = useState(createWorkspaceRequestScope);
   const [refreshCoordinator] = useState(createChatRefreshCoordinator);
   const [mentionsRequestRunner] = useState(createLatestRequestRunner);
+  const [mentionReadTracker] = useState(createChatMentionReadTracker);
   const [sendConfirmationTracker] = useState(
     createChatSendConfirmationTracker
   );
   const stateRef = useRef(state);
+  const mentionsRef = useRef(mentions);
+  const summaryRef = useRef(summary);
   const activeWorkspaceIdRef = useRef(workspaceId);
   const previousChatRouteRef = useRef(false);
   const refreshErrorsRef = useRef<Record<RefreshChannel, boolean>>({
@@ -123,6 +131,8 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
   });
 
   stateRef.current = state;
+  mentionsRef.current = mentions;
+  summaryRef.current = summary;
   activeWorkspaceIdRef.current = workspaceId;
 
   const setRefreshError = useCallback(
@@ -154,7 +164,16 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
       isAbortError,
       onSuccess: (page) => {
         if (activeWorkspaceIdRef.current !== workspaceId) return;
-        setMentions(page.items);
+        setMentions((currentMentions) => {
+          const nextMentions = mergeChatMentionNotifications({
+            current: currentMentions.filter(
+              (mention) => mention.workspaceId === workspaceId
+            ),
+            incoming: page.items
+          });
+          mentionsRef.current = nextMentions;
+          return nextMentions;
+        });
         setRefreshError("mentions", false);
       },
       onError: () => {
@@ -191,6 +210,32 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
           setRefreshError("summary", true);
         }
       }
+    });
+  }, [
+    accessToken,
+    getRequestSignal,
+    refreshCoordinator,
+    setRefreshError,
+    workspaceId
+  ]);
+
+  const refreshMentionReadSummary = useCallback(async () => {
+    if (!accessToken || !workspaceId) return;
+    const signal = getRequestSignal(workspaceId);
+    if (!signal || signal.aborted) return;
+
+    await refreshCoordinator.refreshSummaryOnly({
+      parentSignal: signal,
+      loadSummary: (requestSignal) =>
+        getChatSummary(accessToken, workspaceId, { signal: requestSignal }),
+      isAbortError,
+      onSummary: (nextSummary) => {
+        if (activeWorkspaceIdRef.current !== workspaceId) return;
+        summaryRef.current = nextSummary;
+        setSummary(nextSummary);
+        setRefreshError("summary", false);
+      },
+      onError: () => undefined
     });
   }, [
     accessToken,
@@ -266,6 +311,8 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
     mentionsRequestRunner.invalidate();
     requestScope.activate(workspaceId);
     dispatch({ type: "workspace-reset", workspaceId });
+    summaryRef.current = emptySummary;
+    mentionsRef.current = [];
     setSummary(emptySummary);
     setMentions([]);
     refreshErrorsRef.current = {
@@ -276,6 +323,7 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
     setErrorMessage(null);
     setMentionErrorMessage(null);
     sendConfirmationTracker.reset();
+    mentionReadTracker.reset();
 
     if (accessToken && workspaceId) {
       void refreshActions.reconcile();
@@ -285,11 +333,13 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
     return () => {
       refreshCoordinator.invalidate();
       mentionsRequestRunner.invalidate();
+      mentionReadTracker.reset();
       requestScope.clear(workspaceId);
     };
   }, [
     accessToken,
     mentionsRequestRunner,
+    mentionReadTracker,
     refreshActions,
     refreshCoordinator,
     refreshMentions,
@@ -564,38 +614,77 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
   const markMentionRead = useCallback(
     async (mentionId: string) => {
       if (!accessToken || !workspaceId) return;
-      const mention = await readChatMention(
-        accessToken,
+      const currentMention = mentionsRef.current.find(
+        (mention) => mention.id === mentionId
+      );
+      if (currentMention?.readAt) return;
+
+      const signal = getRequestSignal(workspaceId);
+      if (!signal || signal.aborted) return;
+      await mentionReadTracker.run({
         workspaceId,
         mentionId,
-        { signal: getRequestSignal(workspaceId) }
-      );
-      if (activeWorkspaceIdRef.current !== workspaceId) return;
-      mentionsRequestRunner.invalidate();
-      setMentions((currentMentions) =>
-        currentMentions.map((currentMention) =>
-          currentMention.id === mention.id ? mention : currentMention
-        )
-      );
-      await refreshActions.afterMessageChange();
+        request: () =>
+          readChatMention(accessToken, workspaceId, mentionId, { signal }),
+        isCurrent: () =>
+          activeWorkspaceIdRef.current === workspaceId && !signal.aborted,
+        onSuccess: (mention) => {
+          const result = applyChatMentionReadSuccess({
+            mention,
+            mentions: mentionsRef.current,
+            summary: summaryRef.current
+          });
+          mentionsRef.current = result.mentions;
+          summaryRef.current = result.summary;
+          mentionsRequestRunner.invalidate();
+          setMentions(result.mentions);
+          setSummary(result.summary);
+          startChatMentionReadReconciliation({
+            refreshMentions,
+            refreshSummary: refreshMentionReadSummary
+          });
+        }
+      });
     },
     [
       accessToken,
       getRequestSignal,
+      mentionReadTracker,
       mentionsRequestRunner,
-      refreshActions,
+      refreshMentionReadSummary,
+      refreshMentions,
+      workspaceId
+    ]
+  );
+
+  const coherentSnapshot = useMemo(
+    () =>
+      getWorkspaceCoherentChatSnapshot({
+        errorMessage,
+        mentionErrorMessage,
+        mentions,
+        state,
+        summary,
+        workspaceId
+      }),
+    [
+      errorMessage,
+      mentionErrorMessage,
+      mentions,
+      state,
+      summary,
       workspaceId
     ]
   );
 
   const contextValue = useMemo<ChatRuntimeValue>(
     () => ({
-      state,
-      summary,
-      mentions,
+      state: coherentSnapshot.state,
+      summary: coherentSnapshot.summary,
+      mentions: coherentSnapshot.mentions,
       connectionState,
-      errorMessage,
-      mentionErrorMessage,
+      errorMessage: coherentSnapshot.errorMessage,
+      mentionErrorMessage: coherentSnapshot.mentionErrorMessage,
       refreshSummary: refreshActions.reconcile,
       refreshMentions,
       loadMessagePage,
@@ -608,20 +697,16 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
     }),
     [
       connectionState,
-      errorMessage,
+      coherentSnapshot,
       loadMessageContext,
       loadMessagePage,
       markMentionRead,
       markRead,
-      mentionErrorMessage,
-      mentions,
       refreshActions,
       refreshMentions,
       removeMessage,
       retryMessage,
       sendMessage,
-      state,
-      summary
     ]
   );
 
