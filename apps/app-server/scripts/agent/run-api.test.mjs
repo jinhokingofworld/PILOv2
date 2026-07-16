@@ -22,7 +22,7 @@ const EXPIRES_AT = new Date("2026-08-07T00:00:00.000Z");
 const CONFIRMATION_EXPIRES_AT = new Date("2026-07-08T00:15:00.000Z");
 const contextualExecutionMigration = readFileSync(
   new URL(
-    "../../../../db/migrations/076_add_agent_contextual_execution.sql",
+    "../../../../db/migrations/078_add_agent_contextual_execution.sql",
     import.meta.url
   ),
   "utf8"
