@@ -19,6 +19,8 @@ This module owns Canvas Socket.IO rooms and presence delivery.
   API when `canvas:join.initialViewportBounds` is provided. This is a
   best-effort optimization; join must still succeed when the hydrate request
   fails so the frontend can fall back to its normal viewport lazy loading.
+- Flush dirty classic Canvas room checkpoints on explicit leave, unexpected
+  socket disconnect, and graceful server shutdown.
 - Validate tldraw sync-room access and create canvas-scoped sync rooms lazily.
 
 ## Non-Responsibilities

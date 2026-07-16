@@ -93,6 +93,7 @@ assert.match(canvasRoom, /readOnly: access\.readOnly/);
 
 assert.match(socketServer, /validateSessionToken/);
 assert.match(socketServer, /canvasClientEvents\.join/);
+assert.match(socketServer, /canvasRoomsByName/);
 assert.match(socketServer, /canvasServerEvents\.presenceUpdate/);
 assert.match(socketServer, /emit\(canvasServerEvents\.presenceUpdate, presence\)/);
 assert.doesNotMatch(socketServer, /presence,\s*[\r\n]\s*workspaceId/);
@@ -131,6 +132,8 @@ assert.match(socketServer, /createCanvasRoomStateService/);
 assert.match(socketServer, /createCanvasRoomCheckpointService/);
 assert.match(socketServer, /roomCheckpointService\.scheduleCheckpoint/);
 assert.match(socketServer, /roomCheckpointService\.flushCheckpointNow/);
+assert.match(socketServer, /authedSocket\.data\.canvasRoomsByName\.values\(\)/);
+assert.match(socketServer, /authedSocket\.data\.canvasRoomsByName\.clear\(\)/);
 assert.doesNotMatch(socketServer, /createCanvasShapeCommitService/);
 assert.doesNotMatch(socketServer, /clearCommitShapePreview/);
 assert.doesNotMatch(socketServer, /getShapeCommitBlockedByLocks/);

@@ -124,6 +124,7 @@ type AuthedSocket = Socket & {
       displayName: string;
     };
     canvasRoomAccess: Map<string, CanvasRoomAccess>;
+    canvasRoomsByName: Map<string, CanvasRoomRef>;
     pageCursorPresenceByRoom: Record<string, PageCursorPresenceState>;
     sqlErdPresenceByRoom: Record<string, SqlErdPresenceState>;
   };
@@ -983,6 +984,7 @@ export async function createRealtimeSocketServer({
           userId: session.userId,
         };
         (socket as AuthedSocket).data.canvasRoomAccess = new Map();
+        (socket as AuthedSocket).data.canvasRoomsByName = new Map();
         (socket as AuthedSocket).data.pageCursorPresenceByRoom = {};
         (socket as AuthedSocket).data.sqlErdPresenceByRoom = {};
         next();
@@ -1016,6 +1018,10 @@ export async function createRealtimeSocketServer({
 
       await socket.join(result.roomName);
       authedSocket.data.canvasRoomAccess.set(result.roomName, result.access);
+      authedSocket.data.canvasRoomsByName.set(result.roomName, {
+        canvasId: joinPayload.canvasId,
+        workspaceId: joinPayload.workspaceId,
+      });
       socket.emit(canvasServerEvents.joined, result.payload);
     });
 
@@ -1157,6 +1163,7 @@ export async function createRealtimeSocketServer({
       );
       await socket.leave(roomName);
       authedSocket.data.canvasRoomAccess.delete(roomName);
+      authedSocket.data.canvasRoomsByName.delete(roomName);
 
       if (leavePayload) {
         socket.to(roomName).emit(canvasServerEvents.presenceLeave, leavePayload);
@@ -1688,15 +1695,28 @@ export async function createRealtimeSocketServer({
 
     socket.on("disconnect", () => {
       void (async () => {
+        const canvasRooms: CanvasRoomRef[] = Array.from(
+          authedSocket.data.canvasRoomsByName.values(),
+        );
         const leaveEvents = presenceService.clearSocket(socket.id);
         const sqlErdClearResults = sqlErdPresenceService.clearSocket(socket.id);
         const pageCursorLeaveEvents: PageCursorPresenceState[] = Object.values(
           authedSocket.data.pageCursorPresenceByRoom,
         );
+        authedSocket.data.canvasRoomAccess.clear();
+        authedSocket.data.canvasRoomsByName.clear();
         authedSocket.data.pageCursorPresenceByRoom = {};
         const [lockReleaseEvents, previewClearEvents] = await Promise.all([
           shapeLockService.clearSocket(socket.id),
           shapePreviewService.clearSocket(socket.id),
+          Promise.all(
+            canvasRooms.map((room) =>
+              roomCheckpointService.flushCheckpointNow(
+                room,
+                authedSocket.data.auth.token,
+              ),
+            ),
+          ),
         ]);
 
         for (const leavePayload of leaveEvents) {
