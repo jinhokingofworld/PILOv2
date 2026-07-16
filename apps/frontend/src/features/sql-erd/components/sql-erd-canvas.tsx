@@ -146,7 +146,8 @@ import {
 import { getSqlErdPinnedTableCenter } from "@/features/sql-erd/utils/table-pin";
 import {
   areSqlErdSelectionsEqual,
-  getSqlErdSelectionFromSelectedShapes
+  getSqlErdSelectionFromSelectedShapes,
+  selectSqlErdCanvasShapeAtPoint
 } from "@/features/sql-erd/utils/canvas-selection";
 import { cn } from "@/lib/utils";
 import { TldrawSurface } from "@/shared/tldraw/TldrawSurface";
@@ -2948,11 +2949,20 @@ export function SqlErdCanvas({
         return;
       }
 
-      if (eventTarget.closest("[data-sqltoerd-canvas-toolbar], input, textarea, select, button")) {
+      const pagePoint = editor.screenToPage({
+        x: event.clientX,
+        y: event.clientY
+      });
+
+      if (eventTarget.closest("[data-sqltoerd-canvas-toolbar]")) {
         return;
       }
 
-      const pagePoint = editor.screenToPage({ x: event.clientX, y: event.clientY });
+      if (eventTarget.closest("input, textarea, select, button")) {
+        selectSqlErdCanvasShapeAtPoint(editor, pagePoint);
+        return;
+      }
+
       const pendingPlacementTool = pendingPlacementToolRef.current;
 
       if (toolRef.current === "draw") {

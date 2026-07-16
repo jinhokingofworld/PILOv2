@@ -79,6 +79,12 @@ export function createSqltoerdSourceMap(input: {
         sourceText: input.sourceText,
         statementNode: rootCursor.node
       });
+      collectAlterTableRelationRange({
+        modelJson: input.modelJson,
+        pendingRelations,
+        sourceText: input.sourceText,
+        statementNode: rootCursor.node
+      });
     } while (rootCursor.nextSibling());
   }
 
@@ -117,6 +123,59 @@ export function getSelectedSqlErdRelationSourceRanges(input: {
         relationRanges.constraintRange
       ]
     : [];
+}
+
+function collectAlterTableRelationRange(input: {
+  modelJson: SqltoerdModelJsonV1;
+  pendingRelations: PendingRelationRange[];
+  sourceText: string;
+  statementNode: SqlSyntaxNode;
+}) {
+  const statementNodes = getDirectSyntaxNodes(input.statementNode);
+
+  if (
+    readKeyword(statementNodes[0], input.sourceText) !== "ALTER" ||
+    readKeyword(statementNodes[1], input.sourceText) !== "TABLE"
+  ) {
+    return;
+  }
+
+  const fromTable = findTable(
+    input.modelJson.schema.tables,
+    readSqlName(statementNodes[2], input.sourceText)
+  );
+  const foreignIndex = findKeywordIndex(
+    statementNodes,
+    "FOREIGN",
+    input.sourceText
+  );
+  const constraintIndex = findKeywordIndex(
+    statementNodes,
+    "CONSTRAINT",
+    input.sourceText
+  );
+
+  if (!fromTable || foreignIndex < 0) {
+    return;
+  }
+
+  const startIndex =
+    constraintIndex >= 0 && constraintIndex < foreignIndex
+      ? constraintIndex
+      : foreignIndex;
+  const segment = statementNodes
+    .slice(startIndex)
+    .filter((node) => readNodeText(node, input.sourceText) !== ";");
+  const pendingRelation = readTableRelationRange(
+    segment,
+    fromTable,
+    input.modelJson.schema.tables,
+    input.sourceText
+  );
+
+  if (pendingRelation) {
+    input.pendingRelations.push(pendingRelation);
+  }
 }
 
 function collectCreateTableRanges(input: {
