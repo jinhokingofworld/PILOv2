@@ -736,7 +736,41 @@ assert.match(canvasWorkspace, /<DialogTitle>/);
 assert.match(canvasWorkspace, /<Input/);
 assert.doesNotMatch(canvasWorkspace, /window\.prompt/);
 assert.match(canvasWorkspace, /label="더보기"/);
-assert.match(canvasWorkspace, /label="사각형"[\s\S]*label="원"[\s\S]*label="삼각형"/);
+assert.match(canvasWorkspace, /const canvasGeoShapeOptions/);
+for (const shapePreset of [
+  "rectangle",
+  "circle",
+  "triangle",
+  "diamond",
+  "hexagon",
+  "ellipse",
+  "rhombus",
+  "rhombus-2",
+  "star",
+  "cloud",
+  "heart",
+  "x-box",
+  "check-box",
+  "arrow-left",
+  "arrow-up",
+  "arrow-down",
+  "arrow-right",
+]) {
+  assert.match(canvasWorkspace, new RegExp(`value: "${shapePreset}"`));
+}
+assert.match(canvasWorkspace, /label="핸드"/);
+assert.match(canvasWorkspace, /label="레이저"/);
+assert.match(canvasWorkspace, /openPopover === "style"/);
+assert.match(canvasWorkspace, /openPopover === "actions"/);
+assert.match(canvasWorkspace, /openPopover === "export"/);
+assert.match(canvasWorkspace, /openPopover === "settings"/);
+assert.match(piloTldrawCanvas, /setOpacityForSelectedShapes/);
+assert.match(piloTldrawCanvas, /exportAs\(editor, shapeIds/);
+assert.match(piloTldrawCanvas, /DefaultFillStyle/);
+assert.match(piloTldrawCanvas, /DefaultDashStyle/);
+assert.match(piloTldrawCanvas, /DefaultSizeStyle/);
+assert.match(piloTldrawCanvas, /GeoShapeGeoStyle/);
+assert.match(piloTldrawCanvas, /currentToolId\.includes\("laser"\)\) return null/);
 assert.match(canvasWorkspace, /label="더보기"/);
 assert.match(canvasWorkspace, /aria-label="더보기 도구"/);
 assert.doesNotMatch(canvasWorkspace, /label="삽입"/);

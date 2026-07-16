@@ -11,9 +11,12 @@ import {
 import {
   DefaultColorStyle,
   DefaultDashStyle,
+  DefaultFillStyle,
   DefaultSizeStyle,
   GeoShapeGeoStyle,
+  exportAs,
   type Editor,
+  type TLGeoShapeGeoStyle,
   type TLShape,
   type TLShapeId,
   type TLShapePartial,
@@ -108,6 +111,8 @@ type CanvasBoardDetail = {
 
 export type PiloCanvasTool =
   | "select"
+  | "hand"
+  | "laser"
   | "note"
   | "draw"
   | "text"
@@ -132,7 +137,85 @@ export type PiloDrawingPreset =
   | "eraser"
   | "rectangle"
   | "circle"
-  | "triangle";
+  | "triangle"
+  | "diamond"
+  | "hexagon"
+  | "ellipse"
+  | "oval"
+  | "rhombus"
+  | "rhombus-2"
+  | "star"
+  | "cloud"
+  | "heart"
+  | "x-box"
+  | "check-box"
+  | "arrow-left"
+  | "arrow-up"
+  | "arrow-down"
+  | "arrow-right";
+
+export type PiloCanvasFill = "none" | "semi" | "solid" | "fill";
+export type PiloCanvasDash = "draw" | "dashed" | "dotted" | "solid";
+export type PiloCanvasSize = "s" | "m" | "l" | "xl";
+export type PiloCanvasSelectionAction =
+  | "select-all"
+  | "duplicate"
+  | "group"
+  | "ungroup"
+  | "bring-to-front"
+  | "send-to-back"
+  | "align-left"
+  | "align-center"
+  | "align-right"
+  | "align-top"
+  | "align-middle"
+  | "align-bottom"
+  | "distribute-horizontal"
+  | "distribute-vertical"
+  | "delete";
+export type PiloCanvasExportFormat = "png" | "svg";
+export type PiloCanvasExportScope = "selection" | "canvas";
+export type PiloCanvasUserPreference =
+  | "paste-at-cursor"
+  | "wrap-text"
+  | "reduce-motion";
+export type PiloCanvasUserPreferenceState = Record<
+  PiloCanvasUserPreference,
+  boolean
+>;
+export type PiloCanvasStyleState = {
+  dash: PiloCanvasDash | null;
+  fill: PiloCanvasFill | null;
+  opacity: number | null;
+  size: PiloCanvasSize | null;
+};
+
+const piloGeoStyleByDrawingPreset: Partial<
+  Record<PiloDrawingPreset, TLGeoShapeGeoStyle>
+> = {
+  rectangle: "rectangle",
+  circle: "ellipse",
+  triangle: "triangle",
+  diamond: "diamond",
+  hexagon: "hexagon",
+  ellipse: "ellipse",
+  oval: "oval",
+  rhombus: "rhombus",
+  "rhombus-2": "rhombus-2",
+  star: "star",
+  cloud: "cloud",
+  heart: "heart",
+  "x-box": "x-box",
+  "check-box": "check-box",
+  "arrow-left": "arrow-left",
+  "arrow-up": "arrow-up",
+  "arrow-down": "arrow-down",
+  "arrow-right": "arrow-right",
+};
+
+function getCanvasExportName(title: string) {
+  return title.replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-").trim() || "PILO Canvas";
+}
 
 export type PiloCanvasActions = {
   markUiEventAsHandled: (event: PointerEvent<HTMLElement>) => void;
@@ -140,8 +223,24 @@ export type PiloCanvasActions = {
   selectTool: (tool: PiloCanvasTool) => void;
   selectDrawingPreset: (preset: PiloDrawingPreset) => void;
   setColor: (color: PiloCanvasColor) => void;
+  setFill: (fill: PiloCanvasFill) => void;
+  setDash: (dash: PiloCanvasDash) => void;
+  setSize: (size: PiloCanvasSize) => void;
+  setOpacity: (opacity: number) => void;
+  getStyleState: () => PiloCanvasStyleState;
   createInsertableShape: (tool: PiloInsertableTool, url: string) => void;
   groupSelection: () => void;
+  performSelectionAction: (action: PiloCanvasSelectionAction) => void;
+  exportCanvas: (
+    format: PiloCanvasExportFormat,
+    scope: PiloCanvasExportScope,
+    background: boolean,
+  ) => Promise<boolean>;
+  setUserPreference: (
+    preference: PiloCanvasUserPreference,
+    enabled: boolean,
+  ) => void;
+  getUserPreferences: () => PiloCanvasUserPreferenceState;
   setSmartGuidesEnabled: (enabled: boolean) => void;
   createNote: () => void;
   createCodeBlock: () => void;
@@ -1732,7 +1831,11 @@ export function PiloTldrawCanvas({
         deactivatePiloEraser(editor);
         placementRequestRef.current = null;
         returnToSelectAfterPlacementRef.current =
-          tool !== "select" && tool !== "text" && !connectionTools.has(tool);
+          tool !== "select" &&
+          tool !== "hand" &&
+          tool !== "laser" &&
+          tool !== "text" &&
+          !connectionTools.has(tool);
         editor.cancel();
         editor.updateInstanceState({ isToolLocked: false });
         editor.setCurrentTool(tool === "select" ? "select.idle" : tool);
@@ -1756,20 +1859,9 @@ export function PiloTldrawCanvas({
           return;
         }
 
-        if (preset === "rectangle") {
-          editor.setStyleForNextShapes(GeoShapeGeoStyle, "rectangle");
-          editor.setCurrentTool("geo");
-          return;
-        }
-
-        if (preset === "circle") {
-          editor.setStyleForNextShapes(GeoShapeGeoStyle, "ellipse");
-          editor.setCurrentTool("geo");
-          return;
-        }
-
-        if (preset === "triangle") {
-          editor.setStyleForNextShapes(GeoShapeGeoStyle, "triangle");
+        const geoStyle = piloGeoStyleByDrawingPreset[preset];
+        if (geoStyle) {
+          editor.setStyleForNextShapes(GeoShapeGeoStyle, geoStyle);
           editor.setCurrentTool("geo");
           return;
         }
@@ -1815,6 +1907,81 @@ export function PiloTldrawCanvas({
           editor.setStyleForSelectedShapes(DefaultColorStyle, color);
         }
       },
+      setFill(fill) {
+        editor.setStyleForNextShapes(DefaultFillStyle, fill);
+
+        if (editor.getSelectedShapeIds().length) {
+          editor.setStyleForSelectedShapes(DefaultFillStyle, fill);
+        }
+      },
+      setDash(dash) {
+        editor.setStyleForNextShapes(DefaultDashStyle, dash);
+
+        if (editor.getSelectedShapeIds().length) {
+          editor.setStyleForSelectedShapes(DefaultDashStyle, dash);
+        }
+      },
+      setSize(size) {
+        editor.setStyleForNextShapes(DefaultSizeStyle, size);
+
+        if (editor.getSelectedShapeIds().length) {
+          editor.setStyleForSelectedShapes(DefaultSizeStyle, size);
+        }
+      },
+      setOpacity(opacity) {
+        const nextOpacity = Math.min(1, Math.max(0.1, opacity));
+
+        editor.setOpacityForNextShapes(nextOpacity);
+
+        if (editor.getSelectedShapeIds().length) {
+          editor.setOpacityForSelectedShapes(nextOpacity);
+        }
+      },
+      getStyleState() {
+        const sharedStyles = editor.getSharedStyles();
+        const sharedDash = sharedStyles.get(DefaultDashStyle);
+        const sharedFill = sharedStyles.get(DefaultFillStyle);
+        const sharedSize = sharedStyles.get(DefaultSizeStyle);
+        const sharedOpacity = editor.getSharedOpacity();
+        const dash =
+          sharedDash?.type === "shared"
+            ? sharedDash.value
+            : sharedDash?.type === "mixed"
+              ? null
+              : editor.getStyleForNextShape(DefaultDashStyle);
+        const fill =
+          sharedFill?.type === "shared"
+            ? sharedFill.value
+            : sharedFill?.type === "mixed"
+              ? null
+              : editor.getStyleForNextShape(DefaultFillStyle);
+        const size =
+          sharedSize?.type === "shared"
+            ? sharedSize.value
+            : sharedSize?.type === "mixed"
+              ? null
+              : editor.getStyleForNextShape(DefaultSizeStyle);
+
+        return {
+          dash:
+            dash === "draw" ||
+            dash === "dashed" ||
+            dash === "dotted" ||
+            dash === "solid"
+              ? dash
+              : null,
+          fill:
+            fill === "none" ||
+            fill === "semi" ||
+            fill === "solid" ||
+            fill === "fill"
+              ? fill
+              : null,
+          opacity:
+            sharedOpacity.type === "shared" ? sharedOpacity.value : null,
+          size,
+        };
+      },
       createNote() {
         deactivatePiloEraser(editor);
         placementRequestRef.current = null;
@@ -1848,6 +2015,101 @@ export function PiloTldrawCanvas({
         if (selectedShapeIds.length < 2) return;
 
         editor.groupShapes(selectedShapeIds);
+      },
+      performSelectionAction(action) {
+        if (action === "select-all") {
+          editor.selectAll();
+          return;
+        }
+
+        const selectedShapeIds = editor.getSelectedShapeIds();
+        if (!selectedShapeIds.length) return;
+
+        switch (action) {
+          case "duplicate":
+            editor.duplicateShapes(selectedShapeIds, { x: 16, y: 16 });
+            break;
+          case "group":
+            if (selectedShapeIds.length > 1) {
+              editor.groupShapes(selectedShapeIds);
+            }
+            break;
+          case "ungroup":
+            editor.ungroupShapes(selectedShapeIds);
+            break;
+          case "bring-to-front":
+            editor.bringToFront(selectedShapeIds);
+            break;
+          case "send-to-back":
+            editor.sendToBack(selectedShapeIds);
+            break;
+          case "align-left":
+            editor.alignShapes(selectedShapeIds, "left");
+            break;
+          case "align-center":
+            editor.alignShapes(selectedShapeIds, "center-horizontal");
+            break;
+          case "align-right":
+            editor.alignShapes(selectedShapeIds, "right");
+            break;
+          case "align-top":
+            editor.alignShapes(selectedShapeIds, "top");
+            break;
+          case "align-middle":
+            editor.alignShapes(selectedShapeIds, "center-vertical");
+            break;
+          case "align-bottom":
+            editor.alignShapes(selectedShapeIds, "bottom");
+            break;
+          case "distribute-horizontal":
+            editor.distributeShapes(selectedShapeIds, "horizontal");
+            break;
+          case "distribute-vertical":
+            editor.distributeShapes(selectedShapeIds, "vertical");
+            break;
+          case "delete":
+            deleteSelectedShapes(editor);
+            break;
+        }
+      },
+      async exportCanvas(format, scope, background) {
+        const shapeIds =
+          scope === "selection"
+            ? editor.getSelectedShapeIds()
+            : [...editor.getCurrentPageShapeIds()];
+
+        if (!shapeIds.length) return false;
+
+        await exportAs(editor, shapeIds, {
+          background,
+          format,
+          name: getCanvasExportName(board.title),
+        });
+        return true;
+      },
+      setUserPreference(preference, enabled) {
+        switch (preference) {
+          case "paste-at-cursor":
+            editor.user.updateUserPreferences({
+              isPasteAtCursorMode: enabled,
+            });
+            break;
+          case "wrap-text":
+            editor.user.updateUserPreferences({ isWrapMode: enabled });
+            break;
+          case "reduce-motion":
+            editor.user.updateUserPreferences({
+              animationSpeed: enabled ? 0 : 1,
+            });
+            break;
+        }
+      },
+      getUserPreferences() {
+        return {
+          "paste-at-cursor": editor.user.getIsPasteAtCursorMode(),
+          "reduce-motion": editor.user.getAnimationSpeed() === 0,
+          "wrap-text": editor.user.getIsWrapMode(),
+        };
       },
       setSmartGuidesEnabled(enabled) {
         editor.user.updateUserPreferences({ isSnapMode: enabled });
@@ -3119,6 +3381,7 @@ function getCanvasPresenceEditingMode({
     return editingShape && isPiloCodeBlockShape(editingShape) ? "code" : "text";
   }
 
+  if (currentToolId.includes("laser")) return null;
   if (currentToolId.includes("draw")) return "draw";
   if (currentToolId.includes("hand")) return "hand";
   if (currentToolId.includes("resize")) return "resize";
