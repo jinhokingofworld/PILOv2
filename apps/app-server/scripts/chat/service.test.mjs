@@ -61,6 +61,12 @@ class FakeDatabase {
 
   async consume(method, text, values) {
     this.queries.push({ method, text, values });
+    if (
+      /FROM workspace_members AS membership[\s\S]*FOR KEY SHARE/.test(text) &&
+      !text.includes("ANY($2::uuid[])")
+    ) {
+      this.timeline.push("membership-guard");
+    }
     const step = this.steps.shift();
     assert.ok(step, `unexpected ${method} query: ${text}`);
     assert.equal(method, step.method);
@@ -75,11 +81,13 @@ class FakeDatabase {
 }
 
 class FakeWorkspaceService {
-  constructor() {
+  constructor(timeline) {
     this.calls = [];
+    this.timeline = timeline;
   }
 
   async assertWorkspaceAccess(currentUserId, targetWorkspaceId) {
+    this.timeline.push("access-checked");
     this.calls.push({ currentUserId, workspaceId: targetWorkspaceId });
     if (targetWorkspaceId === malformedWorkspaceId) {
       const error = new Error("Workspace not found");
@@ -147,10 +155,55 @@ function mentionRow(overrides = {}) {
 
 function createSubject(steps = []) {
   const database = new FakeDatabase(steps);
-  const workspaceService = new FakeWorkspaceService();
+  const workspaceService = new FakeWorkspaceService(database.timeline);
   const publisher = new FakePublisher(database.timeline);
   const service = new ChatService(database, workspaceService, publisher);
   return { database, publisher, service, workspaceService };
+}
+
+function membershipGuard(result = { id: userId }) {
+  return {
+    method: "queryOne",
+    match: /FROM workspace_members AS membership[\s\S]*FOR KEY SHARE/,
+    values: [workspaceId, userId],
+    result
+  };
+}
+
+for (const [name, action] of [
+  ["message list", service => service.listMessages(userId, workspaceId, {})],
+  [
+    "message context",
+    service => service.getMessageContext(userId, workspaceId, message1Id)
+  ],
+  [
+    "message create",
+    service =>
+      service.createMessage(userId, workspaceId, {
+        clientMessageId: "membership-revoked",
+        content: "확인 부탁해요",
+        mentionedUserIds: []
+      })
+  ],
+  [
+    "message delete",
+    service => service.deleteMessage(userId, workspaceId, message1Id)
+  ]
+]) {
+  const { database, publisher, service, workspaceService } = createSubject([
+    membershipGuard(null)
+  ]);
+
+  await assertApiError(() => action(service), 403, "FORBIDDEN");
+  assert.deepEqual(
+    database.timeline,
+    ["access-checked", "transaction-started", "membership-guard"],
+    `${name} must lock membership first inside its authoritative transaction`
+  );
+  assert.equal(database.queries.length, 1, `${name} must stop after membership loss`);
+  assert.equal(workspaceService.calls.length, 1);
+  assert.deepEqual(publisher.events, []);
+  database.assertConsumed();
 }
 
 async function assertApiError(action, status, code) {
@@ -247,6 +300,7 @@ for (const [name, action] of [
   const inserted = messageRow({ mentions: [] });
   const createdRow = messageRow();
   const { database, publisher, service } = createSubject([
+    membershipGuard(),
     {
       method: "execute",
       match: /pg_advisory_xact_lock/,
@@ -262,6 +316,9 @@ for (const [name, action] of [
       method: "query",
       match: /FROM workspace_members AS membership/,
       values: [workspaceId, [mentionedUserId]],
+      inspect(text) {
+        assert.match(text, /FOR KEY SHARE OF membership/);
+      },
       result: [
         {
           user_id: mentionedUserId,
@@ -316,7 +373,9 @@ for (const [name, action] of [
   assert.equal(publisher.events[0].type, "message.created");
   assert.equal(publisher.events[0].version, 1);
   assert.deepEqual(database.timeline, [
+    "access-checked",
     "transaction-started",
+    "membership-guard",
     "transaction-resolved",
     "published"
   ]);
@@ -387,11 +446,17 @@ for (const content of ["   ", "x".repeat(4_001)]) {
     403,
     "FORBIDDEN"
   );
+  assert.deepEqual(database.timeline, [
+    "access-checked",
+    "transaction-started",
+    "membership-guard"
+  ]);
   database.assertConsumed();
 }
 
 {
   const { database, service } = createSubject([
+    membershipGuard(),
     {
       method: "execute",
       match: /pg_advisory_xact_lock/,
@@ -427,6 +492,7 @@ for (const content of ["   ", "x".repeat(4_001)]) {
     ]
   });
   const { database, publisher, service } = createSubject([
+    membershipGuard(),
     {
       method: "execute",
       match: /pg_advisory_xact_lock/,
@@ -451,12 +517,52 @@ for (const content of ["   ", "x".repeat(4_001)]) {
 
 {
   const deletedAt = new Date("2026-07-16T00:10:00.000Z");
+  const deletedRow = messageRow({
+    content: null,
+    deleted_at: deletedAt,
+    mentions: []
+  });
+  const { database, publisher, service } = createSubject([
+    membershipGuard(),
+    {
+      method: "queryOne",
+      match: /FOR UPDATE OF message/,
+      result: messageRow()
+    },
+    {
+      method: "execute",
+      match: /UPDATE workspace_chat_messages/,
+      result: { rows: [], rowCount: 1 }
+    },
+    {
+      method: "queryOne",
+      match: /message\.id = \$2/,
+      result: deletedRow
+    }
+  ]);
+
+  const deleted = await service.deleteMessage(userId, workspaceId, message1Id);
+  assert.equal(deleted.deletedAt, deletedAt.toISOString());
+  assert.equal(publisher.events[0].type, "message.deleted");
+  assert.deepEqual(database.timeline, [
+    "access-checked",
+    "transaction-started",
+    "membership-guard",
+    "transaction-resolved",
+    "published"
+  ]);
+  database.assertConsumed();
+}
+
+{
+  const deletedAt = new Date("2026-07-16T00:10:00.000Z");
   const tombstone = messageRow({
     content: null,
     deleted_at: deletedAt,
     mentions: []
   });
   const { database, publisher, service } = createSubject([
+    membershipGuard(),
     {
       method: "execute",
       match: /pg_advisory_xact_lock/,
@@ -483,6 +589,7 @@ for (const content of ["   ", "x".repeat(4_001)]) {
 
 {
   const { database, service } = createSubject([
+    membershipGuard(),
     {
       method: "execute",
       match: /pg_advisory_xact_lock/,
@@ -513,6 +620,7 @@ for (const content of ["   ", "x".repeat(4_001)]) {
 
 {
   const { database, service } = createSubject([
+    membershipGuard(),
     {
       method: "execute",
       match: /pg_advisory_xact_lock/,
@@ -539,6 +647,7 @@ for (const content of ["   ", "x".repeat(4_001)]) {
 
 {
   const { database, service } = createSubject([
+    membershipGuard(),
     {
       method: "queryOne",
       match: /FOR UPDATE OF message/,
@@ -562,6 +671,7 @@ for (const content of ["   ", "x".repeat(4_001)]) {
     mentions: []
   });
   const { database, publisher, service } = createSubject([
+    membershipGuard(),
     {
       method: "queryOne",
       match: /FOR UPDATE OF message/,
@@ -577,6 +687,7 @@ for (const content of ["   ", "x".repeat(4_001)]) {
 
 {
   const { database, service } = createSubject([
+    membershipGuard(),
     {
       method: "queryOne",
       match: /FROM workspace_chat_messages AS target/,
@@ -590,7 +701,7 @@ for (const content of ["   ", "x".repeat(4_001)]) {
     "NOT_FOUND"
   );
   assert.ok(
-    database.queries[0].text.includes("target.workspace_id = $1"),
+    database.queries[1].text.includes("target.workspace_id = $1"),
     "cross-Workspace lookup must be hidden by workspace_id"
   );
   database.assertConsumed();
@@ -714,6 +825,7 @@ for (const content of ["   ", "x".repeat(4_001)]) {
     unreadCount: 2,
     mentionUnreadCount: 1
   });
+  assert.deepEqual(database.timeline, ["access-checked"]);
   database.assertConsumed();
 }
 
@@ -742,6 +854,7 @@ for (const content of ["   ", "x".repeat(4_001)]) {
     })
   ];
   const { database, service } = createSubject([
+    membershipGuard(),
     {
       method: "query",
       match: /ORDER BY message\.created_at DESC, message\.id DESC/,
@@ -770,6 +883,7 @@ for (const content of ["   ", "x".repeat(4_001)]) {
   const page = await service.listMentions(userId, workspaceId, {});
   assert.equal(page.items[0].id, mention1Id);
   assert.equal(page.nextCursor, null);
+  assert.deepEqual(database.timeline, ["access-checked"]);
   database.assertConsumed();
 }
 
@@ -789,6 +903,7 @@ for (const content of ["   ", "x".repeat(4_001)]) {
     mention1Id
   );
   assert.equal(mention.readAt, readAt.toISOString());
+  assert.deepEqual(database.timeline, ["access-checked"]);
   database.assertConsumed();
 }
 

@@ -86,7 +86,7 @@ const CHAT_AUTHOR_JOINS = `
 `;
 
 export async function selectChatMessages(
-  database: DatabaseService,
+  database: ChatQueryExecutor,
   workspaceId: string,
   input: { before: ChatCursor | null; limit: number }
 ): Promise<ChatMessageRow[]> {
@@ -160,20 +160,6 @@ export async function upsertChatReadState(
   transaction: DatabaseTransaction,
   input: { workspaceId: string; userId: string; messageId: string }
 ): Promise<ChatReadStateRow> {
-  const membership = await transaction.queryOne<ChatIdRow>(
-    `
-      SELECT membership.user_id AS id
-      FROM workspace_members AS membership
-      WHERE membership.workspace_id = $1
-        AND membership.user_id = $2
-      FOR KEY SHARE
-    `,
-    [input.workspaceId, input.userId]
-  );
-  if (!membership) {
-    throw forbidden("Workspace access denied");
-  }
-
   await transaction.execute(
     `
       INSERT INTO workspace_chat_reads (
@@ -253,6 +239,26 @@ export async function upsertChatReadState(
   }
 
   return row;
+}
+
+export async function lockChatMembership(
+  transaction: DatabaseTransaction,
+  workspaceId: string,
+  userId: string
+): Promise<void> {
+  const membership = await transaction.queryOne<ChatIdRow>(
+    `
+      SELECT membership.user_id AS id
+      FROM workspace_members AS membership
+      WHERE membership.workspace_id = $1
+        AND membership.user_id = $2
+      FOR KEY SHARE
+    `,
+    [workspaceId, userId]
+  );
+  if (!membership) {
+    throw forbidden("Workspace access denied");
+  }
 }
 
 export async function lockChatIdempotencyKey(
@@ -342,6 +348,7 @@ export function selectChatMentionTargets(
         ON settings.user_id = member.id
       WHERE membership.workspace_id = $1
         AND membership.user_id = ANY($2::uuid[])
+      FOR KEY SHARE OF membership
     `,
     [workspaceId, userIds]
   );
@@ -474,7 +481,7 @@ export function selectChatSummary(
 }
 
 export function selectChatContextTarget(
-  database: DatabaseService,
+  database: ChatQueryExecutor,
   workspaceId: string,
   messageId: string
 ): Promise<ChatIdRow | null> {
@@ -490,7 +497,7 @@ export function selectChatContextTarget(
 }
 
 export function selectChatMessageContext(
-  database: DatabaseService,
+  database: ChatQueryExecutor,
   workspaceId: string,
   messageId: string
 ): Promise<ChatMessageRow[]> {

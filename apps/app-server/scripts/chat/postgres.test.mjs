@@ -5,6 +5,10 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const { Pool } = require("pg");
 const {
+  ChatService
+} = require("../../dist/modules/chat/chat.service.js");
+const {
+  lockChatMembership,
   upsertChatReadState
 } = require("../../dist/modules/chat/chat-queries.js");
 
@@ -33,6 +37,7 @@ const otherUserId = "22222222-2222-4222-8222-222222222222";
 const oldestMessageId = "10000000-0000-4000-8000-000000000001";
 const middleMessageId = "10000000-0000-4000-8000-000000000002";
 const newestMessageId = "10000000-0000-4000-8000-000000000003";
+const deletableMessageId = "10000000-0000-4000-8000-000000000004";
 const validFingerprint = "a".repeat(64);
 
 function deferred() {
@@ -46,7 +51,10 @@ function deferred() {
 function transactionFor(client, hooks = {}) {
   return {
     async query(text, values = []) {
-      return (await client.query(text, values)).rows;
+      await hooks.beforeQuery?.(text);
+      const rows = (await client.query(text, values)).rows;
+      await hooks.afterQuery?.(text);
+      return rows;
     },
     async queryOne(text, values = []) {
       await hooks.beforeQueryOne?.(text);
@@ -63,10 +71,80 @@ function transactionFor(client, hooks = {}) {
   };
 }
 
+class PostgresDatabase {
+  constructor(hooks = {}) {
+    this.hooks = hooks;
+  }
+
+  async query(text, values = []) {
+    return (await pool.query(text, values)).rows;
+  }
+
+  async queryOne(text, values = []) {
+    return (await pool.query(text, values)).rows[0] ?? null;
+  }
+
+  async transaction(callback) {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const result = await callback(transactionFor(client, this.hooks));
+      await client.query("COMMIT");
+      return result;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+}
+
+class PostgresWorkspaceService {
+  constructor(afterAccess) {
+    this.afterAccess = afterAccess;
+  }
+
+  async assertWorkspaceAccess(currentUserId, targetWorkspaceId) {
+    const result = await pool.query(
+      `
+        SELECT 1
+        FROM workspace_members
+        WHERE workspace_id = $1 AND user_id = $2
+      `,
+      [targetWorkspaceId, currentUserId]
+    );
+    assert.equal(result.rowCount, 1, "REST precheck requires an initial membership");
+    await this.afterAccess?.();
+    return { id: targetWorkspaceId };
+  }
+}
+
+class RecordingPublisher {
+  constructor() {
+    this.events = [];
+  }
+
+  async publish(event) {
+    this.events.push(event);
+  }
+}
+
+function createChatService({ afterAccess, transactionHooks } = {}) {
+  const publisher = new RecordingPublisher();
+  const service = new ChatService(
+    new PostgresDatabase(transactionHooks),
+    new PostgresWorkspaceService(afterAccess),
+    publisher
+  );
+  return { publisher, service };
+}
+
 async function runReadUpdate(messageId, hooks = {}) {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    await lockChatMembership(transactionFor(client, hooks), workspaceId, userId);
     const row = await upsertChatReadState(transactionFor(client, hooks), {
       workspaceId,
       userId,
@@ -80,6 +158,36 @@ async function runReadUpdate(messageId, hooks = {}) {
   } finally {
     client.release();
   }
+}
+
+async function restoreMembership(targetUserId = userId) {
+  await pool.query(
+    `
+      INSERT INTO workspace_members (workspace_id, user_id)
+      VALUES ($1, $2)
+      ON CONFLICT (workspace_id, user_id) DO NOTHING
+    `,
+    [workspaceId, targetUserId]
+  );
+}
+
+async function removeMembership(targetUserId = userId) {
+  await pool.query(
+    `
+      DELETE FROM workspace_members
+      WHERE workspace_id = $1 AND user_id = $2
+    `,
+    [workspaceId, targetUserId]
+  );
+}
+
+async function assertForbidden(action) {
+  await assert.rejects(
+    action,
+    error =>
+      error.getStatus?.() === 403 &&
+      error.getResponse?.().error.code === "FORBIDDEN"
+  );
 }
 
 async function waitForBlockedBackend(pid) {
@@ -102,12 +210,76 @@ async function waitForBlockedBackend(pid) {
   assert.fail("membership DELETE backend did not wait for a database lock");
 }
 
+async function beginMembershipRemoval(targetUserId) {
+  const client = await pool.connect();
+  const backend = await client.query("SELECT pg_backend_pid()::int AS pid");
+  let finished = false;
+  const promise = client
+    .query(
+      `
+        DELETE FROM workspace_members
+        WHERE workspace_id = $1 AND user_id = $2
+      `,
+      [workspaceId, targetUserId]
+    )
+    .then(() => {
+      finished = true;
+    })
+    .finally(() => {
+      client.release();
+    });
+  return {
+    get finished() {
+      return finished;
+    },
+    pid: backend.rows[0].pid,
+    promise
+  };
+}
+
+async function runAfterCommittedMembershipRemoval(action) {
+  await restoreMembership();
+  const accessChecked = deferred();
+  const releaseAccess = deferred();
+  const { publisher, service } = createChatService({
+    async afterAccess() {
+      accessChecked.resolve();
+      await releaseAccess.promise;
+    }
+  });
+  const operation = action(service);
+  await accessChecked.promise;
+  await removeMembership();
+  releaseAccess.resolve();
+  await assertForbidden(operation);
+  assert.deepEqual(publisher.events, []);
+}
+
 try {
+  const serverVersion = await pool.query(
+    "SHOW server_version_num"
+  );
+  assert.match(
+    serverVersion.rows[0].server_version_num,
+    /^16\d{4}$/,
+    "Chat PostgreSQL races must run on PostgreSQL 16"
+  );
   await pool.query("DROP SCHEMA public CASCADE");
   await pool.query("CREATE SCHEMA public");
   await pool.query(`
-    CREATE TABLE public.users (id UUID PRIMARY KEY);
-    CREATE TABLE public.workspaces (id UUID PRIMARY KEY);
+    CREATE TABLE public.users (
+      id UUID PRIMARY KEY,
+      name TEXT,
+      email TEXT,
+      avatar_url TEXT
+    );
+    CREATE TABLE public.user_settings (
+      user_id UUID PRIMARY KEY REFERENCES public.users(id) ON DELETE CASCADE,
+      display_name TEXT,
+      avatar_mode TEXT,
+      custom_avatar_url TEXT
+    );
+    CREATE TABLE public.workspaces (id UUID PRIMARY KEY, name TEXT NOT NULL);
     CREATE TABLE public.workspace_members (
       workspace_id UUID NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
       user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
@@ -125,11 +297,11 @@ try {
     $$;
   `);
   await pool.query(migration);
-  await pool.query("INSERT INTO public.users (id) VALUES ($1), ($2)", [
+  await pool.query("INSERT INTO public.users (id, name) VALUES ($1, 'Sender'), ($2, 'Other')", [
     userId,
     otherUserId
   ]);
-  await pool.query("INSERT INTO public.workspaces (id) VALUES ($1)", [
+  await pool.query("INSERT INTO public.workspaces (id, name) VALUES ($1, 'PILO')", [
     workspaceId
   ]);
   await pool.query(
@@ -154,7 +326,8 @@ try {
       VALUES
         ($1, $4, $5, 'oldest', 'oldest', $6, '2026-07-16T00:01:00.000Z'),
         ($2, $4, $5, 'middle', 'middle', $6, '2026-07-16T00:02:00.000Z'),
-        ($3, $4, $5, 'newest', 'newest', $6, '2026-07-16T00:03:00.000Z')
+        ($3, $4, $5, 'newest', 'newest', $6, '2026-07-16T00:03:00.000Z'),
+        ($7, $4, $8, 'deletable', 'delete me', $6, '2026-07-16T00:04:00.000Z')
     `,
     [
       oldestMessageId,
@@ -162,7 +335,9 @@ try {
       newestMessageId,
       workspaceId,
       otherUserId,
-      validFingerprint
+      validFingerprint,
+      deletableMessageId,
+      userId
     ]
   );
 
@@ -367,6 +542,142 @@ try {
   await concurrentRemoval;
   if (lockObservationError) throw lockObservationError;
   assert.equal(lockedReadRow.last_read_message_id, newestMessageId);
+
+  await runAfterCommittedMembershipRemoval(service =>
+    service.createMessage(userId, workspaceId, {
+      clientMessageId: "create-after-revoke",
+      content: "must not be inserted",
+      mentionedUserIds: []
+    })
+  );
+  const revokedCreate = await pool.query(
+    `
+      SELECT 1
+      FROM workspace_chat_messages
+      WHERE workspace_id = $1
+        AND sender_user_id = $2
+        AND client_message_id = 'create-after-revoke'
+    `,
+    [workspaceId, userId]
+  );
+  assert.equal(revokedCreate.rowCount, 0);
+
+  await runAfterCommittedMembershipRemoval(service =>
+    service.listMessages(userId, workspaceId, {})
+  );
+  await runAfterCommittedMembershipRemoval(service =>
+    service.getMessageContext(userId, workspaceId, newestMessageId)
+  );
+
+  await runAfterCommittedMembershipRemoval(service =>
+    service.deleteMessage(userId, workspaceId, deletableMessageId)
+  );
+  const messageAfterRevokedDelete = await pool.query(
+    `
+      SELECT content, deleted_at
+      FROM workspace_chat_messages
+      WHERE workspace_id = $1 AND id = $2
+    `,
+    [workspaceId, deletableMessageId]
+  );
+  assert.equal(messageAfterRevokedDelete.rows[0].content, "delete me");
+  assert.equal(messageAfterRevokedDelete.rows[0].deleted_at, null);
+
+  await restoreMembership();
+  const createMembershipLocked = deferred();
+  const releaseCreateMembership = deferred();
+  const createSubject = createChatService({
+    transactionHooks: {
+      async afterQueryOne(text) {
+        if (!text.includes("FROM workspace_members AS membership")) return;
+        createMembershipLocked.resolve();
+        await releaseCreateMembership.promise;
+      }
+    }
+  });
+  const lockedCreate = createSubject.service.createMessage(userId, workspaceId, {
+    clientMessageId: "create-before-revoke",
+    content: "created before membership removal",
+    mentionedUserIds: []
+  });
+  await createMembershipLocked.promise;
+  const blockedSenderRemoval = await beginMembershipRemoval(userId);
+  let createLockObservationError = null;
+  try {
+    await waitForBlockedBackend(blockedSenderRemoval.pid);
+    assert.equal(
+      blockedSenderRemoval.finished,
+      false,
+      "membership DELETE must wait for the create transaction membership lock"
+    );
+    assert.deepEqual(
+      createSubject.publisher.events,
+      [],
+      "create event must remain post-commit while the transaction is held"
+    );
+  } catch (error) {
+    createLockObservationError = error;
+  } finally {
+    releaseCreateMembership.resolve();
+  }
+  const createdBeforeRemoval = await lockedCreate;
+  await blockedSenderRemoval.promise;
+  if (createLockObservationError) throw createLockObservationError;
+  assert.equal(createdBeforeRemoval.replayed, false);
+  assert.equal(createSubject.publisher.events[0].type, "message.created");
+
+  await restoreMembership();
+  await restoreMembership(otherUserId);
+  const mentionTargetsLocked = deferred();
+  const releaseMentionTargets = deferred();
+  const mentionSubject = createChatService({
+    transactionHooks: {
+      async afterQuery(text) {
+        if (!text.includes("membership.user_id = ANY($2::uuid[])")) return;
+        mentionTargetsLocked.resolve();
+        assert.match(text, /FOR KEY SHARE OF membership/);
+        await releaseMentionTargets.promise;
+      }
+    }
+  });
+  const mentionedCreate = mentionSubject.service.createMessage(
+    userId,
+    workspaceId,
+    {
+      clientMessageId: "recipient-before-revoke",
+      content: "@Other please review",
+      mentionedUserIds: [otherUserId]
+    }
+  );
+  await mentionTargetsLocked.promise;
+  const blockedRecipientRemoval = await beginMembershipRemoval(otherUserId);
+  let mentionLockObservationError = null;
+  try {
+    await waitForBlockedBackend(blockedRecipientRemoval.pid);
+    assert.equal(
+      blockedRecipientRemoval.finished,
+      false,
+      "recipient membership DELETE must wait for mention target validation"
+    );
+  } catch (error) {
+    mentionLockObservationError = error;
+  } finally {
+    releaseMentionTargets.resolve();
+  }
+  const createdWithMention = await mentionedCreate;
+  await blockedRecipientRemoval.promise;
+  if (mentionLockObservationError) throw mentionLockObservationError;
+  assert.equal(createdWithMention.message.mentions[0].userId, otherUserId);
+  assert.equal(mentionSubject.publisher.events[0].type, "message.created");
+  const removedRecipientMentions = await pool.query(
+    `
+      SELECT 1
+      FROM workspace_chat_mentions
+      WHERE workspace_id = $1 AND mentioned_user_id = $2
+    `,
+    [workspaceId, otherUserId]
+  );
+  assert.equal(removedRecipientMentions.rowCount, 0);
 } finally {
   await pool.end();
 }

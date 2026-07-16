@@ -10,6 +10,7 @@ import {
   insertChatMentions,
   insertChatMessage,
   lockChatIdempotencyKey,
+  lockChatMembership,
   markChatMentionRead,
   selectChatContextTarget,
   selectChatMentionTargets,
@@ -96,11 +97,14 @@ export class ChatService {
       workspaceId
     );
     const input = this.readPageInput(query);
-    const rows = await selectChatMessages(
-      this.database,
-      accessibleWorkspaceId,
-      input
-    );
+    const rows = await this.database.transaction(async transaction => {
+      await lockChatMembership(
+        transaction,
+        accessibleWorkspaceId,
+        currentUserId
+      );
+      return selectChatMessages(transaction, accessibleWorkspaceId, input);
+    });
     const pageRows = rows.slice(0, input.limit);
 
     return {
@@ -122,20 +126,27 @@ export class ChatService {
       workspaceId
     );
     const normalizedMessageId = readChatUuid(messageId, "messageId");
-    const target = await selectChatContextTarget(
-      this.database,
-      accessibleWorkspaceId,
-      normalizedMessageId
-    );
-    if (!target) {
-      throw notFound("Chat message not found");
-    }
+    const rows = await this.database.transaction(async transaction => {
+      await lockChatMembership(
+        transaction,
+        accessibleWorkspaceId,
+        currentUserId
+      );
+      const target = await selectChatContextTarget(
+        transaction,
+        accessibleWorkspaceId,
+        normalizedMessageId
+      );
+      if (!target) {
+        throw notFound("Chat message not found");
+      }
 
-    const rows = await selectChatMessageContext(
-      this.database,
-      accessibleWorkspaceId,
-      normalizedMessageId
-    );
+      return selectChatMessageContext(
+        transaction,
+        accessibleWorkspaceId,
+        normalizedMessageId
+      );
+    });
     return { items: rows.map(row => this.mapMessage(row)) };
   }
 
@@ -159,6 +170,11 @@ export class ChatService {
     }
 
     const result = await this.database.transaction(async transaction => {
+      await lockChatMembership(
+        transaction,
+        accessibleWorkspaceId,
+        currentUserId
+      );
       await lockChatIdempotencyKey(transaction, {
         workspaceId: accessibleWorkspaceId,
         userId: currentUserId,
@@ -251,6 +267,11 @@ export class ChatService {
     );
     const normalizedMessageId = readChatUuid(messageId, "messageId");
     const result = await this.database.transaction(async transaction => {
+      await lockChatMembership(
+        transaction,
+        accessibleWorkspaceId,
+        currentUserId
+      );
       const existing = await selectChatMessageForUpdate(
         transaction,
         accessibleWorkspaceId,
@@ -303,13 +324,18 @@ export class ChatService {
       workspaceId
     );
     const input = readLastReadBody(body);
-    const row = await this.database.transaction(transaction =>
-      upsertChatReadState(transaction, {
+    const row = await this.database.transaction(async transaction => {
+      await lockChatMembership(
+        transaction,
+        accessibleWorkspaceId,
+        currentUserId
+      );
+      return upsertChatReadState(transaction, {
         workspaceId: accessibleWorkspaceId,
         userId: currentUserId,
         messageId: input.lastReadMessageId
-      })
-    );
+      });
+    });
 
     return {
       lastReadMessageId: row.last_read_message_id,
