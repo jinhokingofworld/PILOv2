@@ -1,7 +1,20 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-const [client, editor, panel, types, editorStyles, attachment, picker, preview, slashMenu] = await Promise.all([
+const [
+  client,
+  editor,
+  panel,
+  types,
+  editorStyles,
+  attachment,
+  picker,
+  preview,
+  slashMenu,
+  bubbleMenu,
+  blockHandle,
+  inlineTitle
+] = await Promise.all([
   readFile(new URL("./api/client.ts", import.meta.url), "utf8"),
   readFile(new URL("./components/document-editor.tsx", import.meta.url), "utf8"),
   readFile(new URL("./components/drive-panel.tsx", import.meta.url), "utf8"),
@@ -10,7 +23,10 @@ const [client, editor, panel, types, editorStyles, attachment, picker, preview, 
   readFile(new URL("./components/document-file-attachment.tsx", import.meta.url), "utf8"),
   readFile(new URL("./components/document-file-picker.tsx", import.meta.url), "utf8"),
   readFile(new URL("./components/pdf-preview-dialog.tsx", import.meta.url), "utf8"),
-  readFile(new URL("./components/document-slash-menu.tsx", import.meta.url), "utf8")
+  readFile(new URL("./components/document-slash-menu.tsx", import.meta.url), "utf8"),
+  readFile(new URL("./components/document-bubble-menu.tsx", import.meta.url), "utf8"),
+  readFile(new URL("./components/document-block-handle.tsx", import.meta.url), "utf8"),
+  readFile(new URL("./components/document-inline-title.tsx", import.meta.url), "utf8")
 ]);
 
 assert.match(types, /DriveItemType = "folder" \| "file" \| "document"/);
@@ -30,6 +46,10 @@ assert.match(editor, /Collaboration\.configure/);
 assert.match(editor, /DriveFileAttachment/);
 assert.match(editor, /DocumentFilePicker/);
 assert.match(editor, /DocumentSlashMenu/);
+assert.match(editor, /DocumentBubbleMenu/);
+assert.match(editor, /DocumentBlockHandle/);
+assert.match(editor, /DocumentInlineTitle/);
+assert.match(editor, /driveClient\.updateItem/);
 assert.match(editor, /event\.key !== "\/"/);
 assert.match(editor, /event\.isComposing/);
 assert.match(editor, /setHorizontalRule/);
@@ -56,6 +76,16 @@ assert.match(preview, /<iframe/);
 assert.match(preview, /previewUrl/);
 assert.match(preview, /createPreviewUrl/);
 assert.match(slashMenu, /role="listbox"/);
+assert.match(bubbleMenu, /BubbleMenu/);
+assert.match(bubbleMenu, /toggleBold/);
+assert.match(bubbleMenu, /toggleItalic/);
+assert.match(blockHandle, /moveBlock/);
+assert.match(blockHandle, /duplicateBlock/);
+assert.match(blockHandle, /deleteBlock/);
+assert.match(blockHandle, /node\.type\.name === "listItem"/);
+assert.match(blockHandle, /window\.addEventListener\("scroll", clearActiveBlock, true\)/);
+assert.match(inlineTitle, /onSave/);
+assert.match(inlineTitle, /onBlur/);
 assert.match(panel, /documentId/);
 assert.match(panel, /DriveDocumentEditor/);
 assert.match(panel, /function MoveItemSheet\(/);

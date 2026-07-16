@@ -35,6 +35,21 @@ export type PrReviewGraphPresentation = {
   nodeOpacityById: Map<string, number>;
 };
 
+export type PrReviewOrderFlow = {
+  id: string;
+  files: Array<{
+    reviewFileId: string;
+    workflowOrder: number;
+  }>;
+};
+
+export type PrReviewStoredRelation = {
+  flowId: string;
+  fromReviewFileId: string;
+  toReviewFileId: string;
+  relationTypes: string[];
+};
+
 const DIMMED_OPACITY = 0.14;
 const HIDDEN_OPACITY = 0;
 const DEFAULT_NODE_GAP = 84;
@@ -138,6 +153,57 @@ export function buildPrReviewGraphPresentation(
   }
 
   return { edgeOpacityById, nodeOpacityById };
+}
+
+export function findMissingPrReviewOrderEdges(
+  flows: PrReviewOrderFlow[],
+  storedRelations: PrReviewStoredRelation[]
+): Array<{
+  flowId: string;
+  fromReviewFileId: string;
+  toReviewFileId: string;
+}> {
+  const storedReviewOrderKeys = new Set(
+    storedRelations
+      .filter((relation) => relation.relationTypes.includes("review_order"))
+      .map((relation) =>
+        [
+          relation.flowId,
+          relation.fromReviewFileId,
+          relation.toReviewFileId
+        ].join("\u0000")
+      )
+  );
+
+  return flows.flatMap((flow) => {
+    const files = [...flow.files].sort(
+      (left, right) =>
+        left.workflowOrder - right.workflowOrder ||
+        left.reviewFileId.localeCompare(right.reviewFileId)
+    );
+    const missing = [] as Array<{
+      flowId: string;
+      fromReviewFileId: string;
+      toReviewFileId: string;
+    }>;
+
+    for (let index = 1; index < files.length; index += 1) {
+      const fromReviewFileId = files[index - 1].reviewFileId;
+      const toReviewFileId = files[index].reviewFileId;
+      const key = [flow.id, fromReviewFileId, toReviewFileId].join("\u0000");
+      if (storedReviewOrderKeys.has(key)) {
+        continue;
+      }
+
+      missing.push({
+        flowId: flow.id,
+        fromReviewFileId,
+        toReviewFileId
+      });
+    }
+
+    return missing;
+  });
 }
 
 export function createPrReviewFlowLayout(

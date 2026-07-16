@@ -102,6 +102,7 @@ import { shouldRemoveCreatedPrReviewSystemShape } from "@/features/pr-review/com
 import {
   buildPrReviewGraphPresentation,
   createPrReviewFlowLayout,
+  findMissingPrReviewOrderEdges,
   type PrReviewGraphFilter,
   type PrReviewGraphNode,
   type PrReviewGraphRelation
@@ -664,10 +665,141 @@ function buildStoredPrReviewCanvasShapes(
     return partial;
   });
 
+  const restoredReviewOrderEdges = buildMissingStoredReviewOrderShapes(
+    canvas,
+    systemShapes
+  );
+
   return [
     ...buildStoredFlowLabelShapes(canvas, systemShapes),
+    ...restoredReviewOrderEdges,
     ...persistedShapes
   ];
+}
+
+function buildMissingStoredReviewOrderShapes(
+  canvas: PrReviewCanvas,
+  storedShapes: PrReviewCanvasShape[]
+): TLShapePartial<PrReviewRelationEdgeShape>[] {
+  const fileShapeByReviewFileId = new Map(
+    storedShapes.flatMap((shape) => {
+      const props = shape.rawShape.props;
+      if (
+        shape.shapeType !== PR_REVIEW_FILE_NODE_SHAPE_TYPE ||
+        !isRecord(props) ||
+        typeof props.reviewFileId !== "string" ||
+        typeof props.roomFileId !== "string" ||
+        typeof props.reviewRoomId !== "string" ||
+        typeof props.currentReviewSessionId !== "string"
+      ) {
+        return [];
+      }
+
+      return [
+        [
+          props.reviewFileId,
+          {
+            shape,
+            currentReviewSessionId: props.currentReviewSessionId,
+            reviewRoomId: props.reviewRoomId,
+            roomFileId: props.roomFileId
+          }
+        ] as const
+      ];
+    })
+  );
+  const storedRelations = storedShapes.flatMap((shape) => {
+    const props = shape.rawShape.props;
+    if (
+      shape.shapeType !== PR_REVIEW_RELATION_EDGE_SHAPE_TYPE ||
+      !isRecord(props) ||
+      typeof props.flowId !== "string" ||
+      typeof props.fromReviewFileId !== "string" ||
+      typeof props.toReviewFileId !== "string" ||
+      !isPrReviewRelationType(props.relationType)
+    ) {
+      return [];
+    }
+
+    return [
+      {
+        flowId: props.flowId,
+        fromReviewFileId: props.fromReviewFileId,
+        toReviewFileId: props.toReviewFileId,
+        relationTypes: [props.relationType]
+      }
+    ];
+  });
+  const missingEdges = findMissingPrReviewOrderEdges(
+    canvas.flows,
+    storedRelations
+  );
+
+  return missingEdges.flatMap((edge) => {
+    const from = fileShapeByReviewFileId.get(edge.fromReviewFileId);
+    const to = fileShapeByReviewFileId.get(edge.toReviewFileId);
+    if (!from || !to) {
+      return [];
+    }
+
+    const geometry = buildPrReviewRelationEdgeGeometry(
+      {
+        x: from.shape.x,
+        y: from.shape.y,
+        width: from.shape.width ?? NODE_WIDTH,
+        height: from.shape.height ?? NODE_HEIGHT
+      },
+      {
+        x: to.shape.x,
+        y: to.shape.y,
+        width: to.shape.width ?? NODE_WIDTH,
+        height: to.shape.height ?? NODE_HEIGHT
+      }
+    );
+
+    return [
+      {
+        id: createShapeId(
+          `pr-review-restored-order-${shapeIdSuffix(edge.flowId)}-${shapeIdSuffix(
+            edge.fromReviewFileId
+          )}-${shapeIdSuffix(edge.toReviewFileId)}`
+        ),
+        type: PR_REVIEW_RELATION_EDGE_SHAPE_TYPE,
+        x: geometry.x,
+        y: geometry.y,
+        props: {
+          w: geometry.width,
+          h: geometry.height,
+          startX: geometry.startX,
+          startY: geometry.startY,
+          endX: geometry.endX,
+          endY: geometry.endY,
+          routePoints: geometry.routePoints,
+          fromReviewFileId: edge.fromReviewFileId,
+          toReviewFileId: edge.toReviewFileId,
+          flowId: edge.flowId,
+          reason: "추천 리뷰 경로",
+          kind: "review_order",
+          reviewRoomId: from.reviewRoomId,
+          currentReviewSessionId: from.currentReviewSessionId,
+          fromRoomFileId: from.roomFileId,
+          toRoomFileId: to.roomFileId,
+          relationType: "review_order",
+          source: "fallback",
+          confidence: 100,
+          relationCount: 1,
+          relationDetails: [
+            {
+              relationType: "review_order",
+              source: "fallback",
+              confidence: 100,
+              reason: "추천 리뷰 경로"
+            }
+          ]
+        }
+      } satisfies TLShapePartial<PrReviewRelationEdgeShape>
+    ];
+  });
 }
 
 function buildStoredFlowLabelShapes(
@@ -1347,19 +1479,7 @@ function PrReviewRelationInspector({ editor }: { editor: Editor | null }) {
       className="absolute bottom-5 left-5 z-20 w-[min(28rem,calc(100%-2.5rem))] rounded-md border border-slate-200 bg-white/95 px-4 py-3 shadow-lg backdrop-blur"
     >
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs font-semibold text-slate-700">
-        <span>
-          {relationDetails.length > 1
-            ? `관계 ${relationDetails.length}개`
-            : relationTypeLabels[relationDetails[0].relationType]}
-        </span>
-        {relationDetails.length === 1 ? (
-          <>
-            <span className="text-slate-400">·</span>
-            <span>{relationSourceLabels[relationDetails[0].source]}</span>
-            <span className="text-slate-400">·</span>
-            <span>{getRelationConfidenceLabel(relationDetails[0].confidence)}</span>
-          </>
-        ) : null}
+        <span>{`선택한 관계 ${relationDetails.length}개`}</span>
       </div>
       <ul className="mt-2 space-y-3">
         {relationDetails.map((detail, index) => (

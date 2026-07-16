@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 
 const {
   buildPrReviewGraphPresentation,
-  createPrReviewFlowLayout
+  createPrReviewFlowLayout,
+  findMissingPrReviewOrderEdges
 } = await import(
   "../../src/features/pr-review/components/review-canvas/pr-review-graph-exploration.ts"
 );
@@ -79,5 +80,41 @@ assert.equal(relatedPresentation.edgeOpacityById.get("edge-bc"), 0);
 const layout = createPrReviewFlowLayout(nodes, relations, "flow-1");
 assert.equal(layout.has("node-a"), false);
 assert.ok(layout.get("node-b").x > nodes[0].x + nodes[0].width);
+
+assert.deepEqual(
+  findMissingPrReviewOrderEdges(
+    [
+      {
+        id: "flow-1",
+        files: [
+          { reviewFileId: "file-a", workflowOrder: 1 },
+          { reviewFileId: "file-b", workflowOrder: 2 },
+          { reviewFileId: "file-c", workflowOrder: 3 }
+        ]
+      }
+    ],
+    [
+      {
+        flowId: "flow-1",
+        fromReviewFileId: "file-a",
+        toReviewFileId: "file-b",
+        relationTypes: ["depends_on"]
+      },
+      {
+        flowId: "flow-1",
+        fromReviewFileId: "file-b",
+        toReviewFileId: "file-c",
+        relationTypes: ["review_order"]
+      }
+    ]
+  ),
+  [
+    {
+      flowId: "flow-1",
+      fromReviewFileId: "file-a",
+      toReviewFileId: "file-b"
+    }
+  ]
+);
 
 console.log("PR Review graph exploration tests passed");

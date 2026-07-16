@@ -11,8 +11,18 @@ import type {
 import { withSerializedArrowBindings } from "./pilo-canvas-arrow-bindings";
 import { withPiloMediaAsset } from "../assets/pilo-canvas-assets";
 
-const FREEHAND_DRAW_SNAPSHOT_THROTTLE_MS = 120;
+const INTERACTION_SNAPSHOT_THROTTLE_MS = 80;
+const FREEHAND_DRAW_SNAPSHOT_THROTTLE_MS = 160;
 const FREEFORM_SYNC_IDLE_DELAY_MS = 220;
+const TL_DRAWING_RECORD_TYPES = new Set(["asset", "binding", "shape"]);
+
+type CanvasStoreListenEntry = {
+  changes?: {
+    added?: Record<string, unknown>;
+    removed?: Record<string, unknown>;
+    updated?: Record<string, readonly [unknown, unknown]>;
+  };
+};
 
 function isPersistableFreeformShape(_shape: TLShape) {
   return true;
@@ -33,6 +43,37 @@ function toFreeformSnapshot(
   shape: TLShape,
 ): PiloCanvasFreeformShape {
   return withPiloMediaAsset(editor, withSerializedArrowBindings(editor, shape));
+}
+
+function getTldrawRecordType(record: unknown) {
+  if (!record || typeof record !== "object") return null;
+
+  const typeName = (record as { typeName?: unknown }).typeName;
+
+  return typeof typeName === "string" ? typeName : null;
+}
+
+function isCanvasShapeSyncRecord(record: unknown) {
+  const recordType = getTldrawRecordType(record);
+
+  return recordType ? TL_DRAWING_RECORD_TYPES.has(recordType) : false;
+}
+
+function shouldReadCanvasShapeSnapshot(entry?: CanvasStoreListenEntry) {
+  if (!entry?.changes) return true;
+
+  const { added = {}, removed = {}, updated = {} } = entry.changes;
+
+  if (Object.values(added).some(isCanvasShapeSyncRecord)) return true;
+  if (Object.values(removed).some(isCanvasShapeSyncRecord)) return true;
+
+  return Object.values(updated).some(([before, after]) => {
+    return isCanvasShapeSyncRecord(before) || isCanvasShapeSyncRecord(after);
+  });
+}
+
+function getFreeformSnapshotSignature(shapes: PiloCanvasFreeformShape[]) {
+  return JSON.stringify(shapes);
 }
 
 export function CanvasStateReporter({
@@ -60,6 +101,7 @@ export function CanvasStateReporter({
     null,
   );
   const lastFreeformSnapshotAtRef = useRef(0);
+  const lastFreeformSnapshotSignatureRef = useRef<string | null>(null);
   const onFreeformShapesDraftChangeRef = useRef(onFreeformShapesDraftChange);
   const onFreeformShapesChangeRef = useRef(onFreeformShapesChange);
   const onResolveFreeformShapeSnapshotRef = useRef(
@@ -129,11 +171,17 @@ export function CanvasStateReporter({
         .filter((shape): shape is PiloCanvasFreeformShape => shape !== null);
     }
 
-    function scheduleFreeformSync() {
+    function scheduleFreeformSync(entry?: CanvasStoreListenEntry) {
+      if (!shouldReadCanvasShapeSnapshot(entry)) {
+        return;
+      }
+
       const isDrawing = isFreehandDrawingInProgress(editor);
+      const isInteracting =
+        isDrawing || editor.inputs.getIsPointing() || editor.inputs.getIsDragging();
 
       if (freeformSnapshotTimerRef.current) {
-        if (isDrawing) {
+        if (isInteracting) {
           return;
         }
 
@@ -147,6 +195,11 @@ export function CanvasStateReporter({
             0,
             FREEHAND_DRAW_SNAPSHOT_THROTTLE_MS - elapsedSinceLastSnapshot,
           )
+        : isInteracting
+          ? Math.max(
+              0,
+              INTERACTION_SNAPSHOT_THROTTLE_MS - elapsedSinceLastSnapshot,
+            )
         : 0;
 
       freeformSnapshotTimerRef.current = setTimeout(() => {
@@ -161,6 +214,14 @@ export function CanvasStateReporter({
           return;
         }
 
+        const nextSnapshotSignature =
+          getFreeformSnapshotSignature(nextFreeformShapes);
+
+        if (lastFreeformSnapshotSignatureRef.current === nextSnapshotSignature) {
+          return;
+        }
+
+        lastFreeformSnapshotSignatureRef.current = nextSnapshotSignature;
         onFreeformShapesDraftChangeRef.current(nextFreeformShapes);
 
         if (freeformSyncTimerRef.current) {

@@ -62,6 +62,7 @@ import {
   type PrReviewValidatedGraphFlow,
   type PrReviewValidatedSemanticGraph
 } from "./pr-review-semantic-validator";
+import { prioritizePrReviewSemanticGraph } from "./pr-review-review-priority";
 import { computeShapeContentHash } from "../canvas/canvas-shape-hash";
 import {
   PR_REVIEW_FILE_NODE_SHAPE_TYPE,
@@ -3907,9 +3908,12 @@ export class PrReviewService {
         patch: file.patch
       }))
     );
-    const semanticGraph = resolvePrReviewSemanticGraph(
-      analysis,
-      semanticGraphCandidates
+    const semanticGraph = prioritizePrReviewSemanticGraph(
+      resolvePrReviewSemanticGraph(analysis, semanticGraphCandidates),
+      normalizedFiles.map((file) => ({
+        filePath: file.filePath,
+        riskLevel: file.riskLevel
+      }))
     );
     if (semanticGraph.fallbackReason === "invalid_ai_graph") {
       this.logger.warn("Invalid PR Review AI semantic graph used deterministic fallback");

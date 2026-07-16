@@ -236,7 +236,12 @@ assert.match(canvasRoom, /checkpointVersion: checkpointState\.checkpointVersion/
 assert.match(canvasRoom, /historySeq: historyState\.historySeq/);
 assert.match(canvasRoomCheckpoint, /checkpointVersion: checkpointState\.checkpointVersion/);
 assert.match(canvasRoomCheckpoint, /historySeq: checkpointState\.historySeq/);
-assert.match(canvasRoomCheckpoint, /CANVAS_CHECKPOINT_DELAY_MS = 3_000/);
+assert.match(
+  canvasRoomCheckpoint,
+  /CANVAS_CHECKPOINT_INTERVAL_MS = 5 \* 60 \* 1_000/
+);
+assert.match(canvasRoomCheckpoint, /SPLITTABLE_CHECKPOINT_STATUSES/);
+assert.match(canvasRoomCheckpoint, /if \(timersByRoom\.has\(roomKey\)\) return/);
 assert.match(canvasRoomCheckpoint, /flushCheckpointNow/);
 assert.match(canvasRoomCheckpoint, /await Promise\.all\(Array\.from\(roomsByKey\.keys\(\), flushCheckpoint\)\)/);
 assert.match(canvasRoomCheckpoint, /\/shapes\/batch/);
@@ -245,7 +250,9 @@ assert.match(canvasRoomCheckpoint, /onCheckpointStatus/);
 assert.match(canvasRoomCheckpoint, /"saving"/);
 assert.match(canvasRoomCheckpoint, /"delayed"/);
 assert.match(canvasRoomCheckpoint, /"saved"/);
-assert.match(canvasRoomCheckpoint, /markCheckpointSucceeded\(room, operations, responseBody\)/);
+assert.match(canvasRoomCheckpoint, /persistOperations/);
+assert.match(canvasRoomCheckpoint, /runningCheckpointsByRoom/);
+assert.match(canvasRoomCheckpoint, /advanceCheckpoint/);
 assert.match(redisPubSub, /createAdapter/);
 assert.match(redisPubSub, /stateClient/);
 assert.match(redisPubSub, /NX: true/);
