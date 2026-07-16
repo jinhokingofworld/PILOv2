@@ -228,13 +228,19 @@ export class BoardAgentToolsService {
       validateInput: (input) => this.validateCreateInput(input),
       validateConfirmationInput: (input) =>
         this.validateResolvedCreateInput(input),
-      buildConfirmationInput: (plan) => ({
-        boardId: plan.call.boardId,
-        title: plan.after.title,
-        body: plan.after.body,
-        columnId: plan.call.columnId,
-        idempotencyKey: plan.call.idempotencyKey
-      }),
+      buildConfirmationInput: (plan) => {
+        if (!("after" in plan)) {
+          throw badRequest("Board confirmation plan is invalid");
+        }
+
+        return {
+          boardId: plan.call.boardId,
+          title: plan.after.title,
+          body: plan.after.body,
+          columnId: plan.call.columnId,
+          idempotencyKey: plan.call.idempotencyKey
+        };
+      },
       buildConfirmation: (context, input) =>
         this.buildCreateConfirmation(context, this.validateCreateInput(input)),
       execute: (context, input) =>

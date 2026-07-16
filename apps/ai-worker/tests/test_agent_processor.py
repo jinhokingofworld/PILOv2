@@ -23,6 +23,7 @@ from app.meeting_report_processor import InfrastructureError
 RUN_ID = "33333333-3333-3333-3333-333333333333"
 WORKSPACE_ID = "22222222-2222-2222-2222-222222222222"
 USER_ID = "11111111-1111-1111-1111-111111111111"
+SQL_ERD_SESSION_ID = "77777777-7777-4777-8777-777777777777"
 STEP_ID = "44444444-4444-4444-4444-444444444444"
 _DEFAULT_CONTEXT = object()
 
@@ -52,6 +53,7 @@ def agent_payload(**overrides: object) -> dict[str, object]:
         "runId": RUN_ID,
         "workspaceId": WORKSPACE_ID,
         "requestedByUserId": USER_ID,
+        "requestContext": None,
         "toolSchemaVersion": AGENT_TOOL_SCHEMA_VERSION,
         "tools": [tool_snapshot()],
         **overrides,
@@ -220,6 +222,7 @@ def test_parse_agent_run_job_payload_validates_required_ids() -> None:
     assert job.workspace_id == WORKSPACE_ID
     assert job.requested_by_user_id == USER_ID
     assert job.tool_schema_version == AGENT_TOOL_SCHEMA_VERSION
+    assert job.request_context is None
     assert job.tools[0].name == "list_calendar_events"
 
     for key in ["runId", "workspaceId", "requestedByUserId"]:
@@ -237,6 +240,45 @@ def test_parse_agent_run_job_payload_validates_required_ids() -> None:
         assert "toolSchemaVersion" in str(error)
     else:
         raise AssertionError("toolSchemaVersion should be validated")
+
+
+def test_parse_agent_run_job_payload_preserves_validated_request_context() -> None:
+    request_context = {
+        "surface": "sql_erd",
+        "sessionId": SQL_ERD_SESSION_ID,
+    }
+    job = parse_agent_run_job_payload(agent_payload(requestContext=request_context))
+
+    assert job.request_context == request_context
+
+    for invalid_context in [
+        {"surface": "board", "sessionId": SQL_ERD_SESSION_ID},
+        {"surface": "sql_erd", "sessionId": "not-a-uuid"},
+        {"surface": "sql_erd", "sessionId": SQL_ERD_SESSION_ID, "extra": True},
+    ]:
+        with pytest.raises(ValueError, match="requestContext"):
+            parse_agent_run_job_payload(agent_payload(requestContext=invalid_context))
+
+
+def test_contextual_tool_snapshot_emits_indeterminate_confirmation_metadata() -> None:
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=[
+                tool_snapshot(
+                    name="contextual_schema_fixture",
+                    executionMode="contextual",
+                )
+            ]
+        )
+    )
+    normalized = normalize_agent_planner_decision(
+        planner_decision(tool_name="contextual_schema_fixture"),
+        job,
+    )
+
+    assert normalized.status == "tool_candidate"
+    assert normalized.output_summary["executionMode"] == "contextual"
+    assert normalized.output_summary["requiresConfirmation"] is None
 
 
 def test_processor_completes_planning_run_with_tool_candidate() -> None:

@@ -50,6 +50,9 @@ type AgentChatBusyState = "idle" | "polling" | "submitting";
 
 const AGENT_RUN_POLL_INTERVAL_MS = 1800;
 const DEFAULT_AGENT_TIMEZONE = "Asia/Seoul";
+const SQL_ERD_SESSION_PATH = "/sql-erd/session";
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const initialMessages: AgentChatMessage[] = [
   {
@@ -88,6 +91,22 @@ function getBrowserTimezone() {
   return (
     Intl.DateTimeFormat().resolvedOptions().timeZone || DEFAULT_AGENT_TIMEZONE
   );
+}
+
+export function readAgentRequestContext(pathname: string, search: string) {
+  if (pathname !== SQL_ERD_SESSION_PATH) {
+    return null;
+  }
+
+  const sessionId = new URLSearchParams(search).get("sessionId")?.trim();
+  if (!sessionId || !UUID_PATTERN.test(sessionId)) {
+    return null;
+  }
+
+  return {
+    surface: "sql_erd" as const,
+    sessionId
+  };
 }
 
 function createAbortError() {
@@ -317,12 +336,17 @@ export function AgentChatWidget() {
     setBusyState("submitting");
 
     try {
+      const requestContext = readAgentRequestContext(
+        window.location.pathname,
+        window.location.search
+      );
       const createdRunPayload = await agentApiClient.createRun(
         workspaceId,
         {
           clientRequestId,
           prompt: trimmedPrompt,
-          timezone: getBrowserTimezone()
+          timezone: getBrowserTimezone(),
+          requestContext
         },
         {
           signal: abortController.signal
@@ -350,7 +374,8 @@ export function AgentChatWidget() {
 
   async function handleConfirmationAction(
     message: AgentChatMessage,
-    action: "approve" | "reject"
+    action: "approve" | "reject",
+    choiceId?: string
   ) {
     const run = message.run;
     const confirmation = run?.confirmation;
@@ -398,6 +423,7 @@ export function AgentChatWidget() {
               workspaceId,
               run.id,
               confirmation.id,
+              choiceId ? { choiceId } : undefined,
               {
                 signal: abortController.signal
               }
@@ -598,8 +624,12 @@ export function AgentChatWidget() {
                             confirmationAction?.action === "reject"
                           }
                           nowMs={nowMs}
-                          onApprove={() =>
-                            void handleConfirmationAction(message, "approve")
+                          onApprove={(choiceId) =>
+                            void handleConfirmationAction(
+                              message,
+                              "approve",
+                              choiceId
+                            )
                           }
                           onReject={() =>
                             void handleConfirmationAction(message, "reject")

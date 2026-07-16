@@ -13,6 +13,7 @@ import {
   AgentToolSchemaSnapshotItem
 } from "./agent-job.service";
 import { AgentToolRegistryService } from "./agent-tool-registry.service";
+import type { AgentRunRequestContext } from "./types/agent-tool.types";
 
 const OUTBOX_SWEEP_INTERVAL_MS = 60_000;
 const OUTBOX_CLAIM_TIMEOUT_SECONDS = 60;
@@ -30,6 +31,7 @@ interface AgentOutboxClaimRow extends QueryResultRow {
   run_id: string;
   workspace_id: string;
   requested_by_user_id: string;
+  request_context_json: AgentRunRequestContext;
   attempt_count: number | string;
   claim_token: string;
 }
@@ -117,6 +119,7 @@ export class AgentOutboxPublisherService
         runId: claim.run_id,
         workspaceId: claim.workspace_id,
         requestedByUserId: claim.requested_by_user_id,
+        requestContext: claim.request_context_json,
         toolSchemaVersion: AGENT_TOOL_SCHEMA_VERSION,
         tools: this.buildToolSchemaSnapshot()
       });
@@ -166,6 +169,7 @@ export class AgentOutboxPublisherService
             outbox.run_id,
             outbox.workspace_id,
             run.requested_by_user_id,
+            run.request_context_json,
             outbox.attempt_count,
             outbox.claim_token
         `,

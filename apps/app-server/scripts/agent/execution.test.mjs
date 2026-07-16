@@ -34,6 +34,7 @@ const RUN_ID = "33333333-3333-3333-3333-333333333333";
 const STEP_ID = "44444444-4444-4444-4444-444444444444";
 const CONFIRMATION_ID = "55555555-5555-5555-5555-555555555555";
 const REPORT_ID = "66666666-6666-4666-8666-666666666666";
+const SQL_ERD_SESSION_ID = "77777777-7777-4777-8777-777777777777";
 
 function plannerOutput(overrides = {}) {
   return {
@@ -101,10 +102,25 @@ class FakeDatabaseService {
       };
     }
 
-    if (text.includes("SELECT id, workspace_id, requested_by_user_id, status")) {
+    if (
+      text.includes("requested_by_user_id") &&
+      text.includes("prompt") &&
+      text.includes("request_context_json")
+    ) {
       const [runId] = values;
       const run = this.state.run;
       return run && run.id === runId ? run : null;
+    }
+
+    if (text.includes("SELECT request_context_json")) {
+      const [runId, workspaceId, currentUserId] = values;
+      const run = this.state.run;
+      return run &&
+        run.id === runId &&
+        run.workspace_id === workspaceId &&
+        run.requested_by_user_id === currentUserId
+        ? { request_context_json: run.request_context_json ?? null }
+        : null;
     }
 
     if (text.includes("FROM agent_runs")) {
@@ -300,6 +316,12 @@ class FakeAgentToolRegistryService {
             this.calls.push({ method: "buildConfirmation", input });
             return confirmationPlan();
           },
+      prepareExecution: this.state.prepareExecution
+        ? async (context, input) => {
+            this.calls.push({ method: "prepareExecution", context, input });
+            return this.state.prepareExecution;
+          }
+        : undefined,
       execute: async (context, input) => {
         this.calls.push({ method: "execute", context, input });
 
@@ -610,7 +632,8 @@ function createService({
   registryState = {},
   runStatus = "running",
   planner = plannerOutput(),
-  executionStarted = false
+  executionStarted = false,
+  requestContext = null
 } = {}) {
   const state = {
     run: {
@@ -619,7 +642,8 @@ function createService({
       requested_by_user_id: USER_ID,
       status: runStatus,
       prompt: "이번 주 일정 알려줘",
-      timezone: "Asia/Seoul"
+      timezone: "Asia/Seoul",
+      request_context_json: requestContext
     },
     plannerStep: {
       id: STEP_ID,
@@ -1025,6 +1049,97 @@ function formatterMeetingReport(index, overrides = {}) {
   );
   assert.equal(confirmationService.calls[0].input.toolName, "create_calendar_event");
   assert.equal(confirmationService.calls[0].input.riskLevel, "medium");
+}
+
+{
+  const planner = plannerOutput({
+    toolName: "contextual_schema_fixture",
+    executionMode: "contextual",
+    requiresConfirmation: null
+  });
+  const { service, toolRegistryService, confirmationService } = createService({
+    planner,
+    registryState: {
+      name: "contextual_schema_fixture",
+      executionMode: "contextual",
+      prepareExecution: {
+        kind: "execute"
+      }
+    }
+  });
+
+  const result = await service.executePlannerOutput(USER_ID, WORKSPACE_ID, RUN_ID, {
+    plannerOutput: planner
+  });
+
+  assert.equal(result.status, "completed");
+  assert.deepEqual(
+    toolRegistryService.calls.map((call) => call.method),
+    ["getDefinition", "validateInput", "prepareExecution", "execute"]
+  );
+  assert.equal(toolRegistryService.calls[2].context.requestContext, null);
+  assert.equal(toolRegistryService.calls[3].context.requestContext, null);
+  assert.deepEqual(confirmationService.calls, []);
+}
+
+{
+  const requestContext = {
+    surface: "sql_erd",
+    sessionId: SQL_ERD_SESSION_ID
+  };
+  const choicePlan = {
+    kind: "choice",
+    toolName: "contextual_schema_fixture",
+    summary: "Choose where to create the schema",
+    target: {
+      domain: "sql_erd"
+    },
+    call: {
+      action: "generate_schema"
+    },
+    choices: [
+      {
+        id: "new_session",
+        label: "Create new session",
+        input: {
+          mode: "new_session"
+        }
+      },
+      {
+        id: "replace_schema",
+        label: "Replace current schema",
+        input: {
+          mode: "replace_schema",
+          sessionId: SQL_ERD_SESSION_ID
+        }
+      }
+    ]
+  };
+  const planner = plannerOutput({
+    toolName: "contextual_schema_fixture",
+    executionMode: "contextual",
+    requiresConfirmation: null
+  });
+  const { service, toolRegistryService, confirmationService } = createService({
+    planner,
+    requestContext,
+    registryState: {
+      name: "contextual_schema_fixture",
+      executionMode: "contextual",
+      prepareExecution: {
+        kind: "confirmation",
+        plan: choicePlan
+      }
+    }
+  });
+
+  const result = await service.executePlannerOutput(USER_ID, WORKSPACE_ID, RUN_ID, {
+    plannerOutput: planner
+  });
+
+  assert.equal(result.status, "waiting_confirmation");
+  assert.deepEqual(toolRegistryService.calls[2].context.requestContext, requestContext);
+  assert.deepEqual(confirmationService.calls[0].input.plan, choicePlan);
 }
 
 {

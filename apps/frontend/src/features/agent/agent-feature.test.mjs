@@ -21,6 +21,9 @@ assert.match(agentTypes, /export type AgentRun/);
 assert.match(agentTypes, /export type CreateAgentRunInput/);
 assert.match(agentTypes, /export type AgentRunDetailPayload/);
 assert.match(agentTypes, /export type AgentConfirmationActionPayload/);
+assert.match(agentTypes, /export type AgentRunRequestContext/);
+assert.match(agentTypes, /kind: "choice"/);
+assert.match(agentTypes, /selectedChoiceId: string \| null/);
 
 assert.match(agentApiClient, /createAgentApiClient/);
 assert.match(agentApiClient, /AgentApiError/);
@@ -40,10 +43,10 @@ assert.match(agentApiClient, /method: "GET"/);
 assert.match(agentApiClient, /\/confirmations\/\$\{encodeURIComponent/);
 assert.match(agentApiClient, /"approve"/);
 assert.match(agentApiClient, /"reject"/);
-assert.doesNotMatch(
+assert.match(
   agentApiClient,
-  /approveConfirmation[\s\S]*withJsonBody/,
-  "approve confirmation should not send request body"
+  /approveConfirmation[\s\S]*withJsonBody\(body/,
+  "choice confirmation should send only the selected choice"
 );
 assert.doesNotMatch(
   agentApiClient,
@@ -61,6 +64,9 @@ assert.match(agentConfirmationCard, /plan\.toolName/);
 assert.match(agentConfirmationCard, /renderObjectSummary\(plan\.before\)/);
 assert.match(agentConfirmationCard, /renderObjectSummary\(plan\.after\)/);
 assert.match(agentConfirmationCard, /renderObjectSummary\(plan\.call\)/);
+assert.match(agentConfirmationCard, /plan\.kind === "choice"/);
+assert.match(agentConfirmationCard, /selectedChoiceId/);
+assert.match(agentConfirmationCard, /aria-pressed/);
 assert.doesNotMatch(agentConfirmationCard, /<input/);
 assert.doesNotMatch(agentConfirmationCard, /<textarea/);
 
@@ -68,11 +74,14 @@ assert.match(agentChatWidget, /useAuthSession/);
 assert.match(agentChatWidget, /activeWorkspaceId/);
 assert.match(agentChatWidget, /createAgentApiClient/);
 assert.match(agentChatWidget, /createRun/);
+assert.match(agentChatWidget, /readAgentRequestContext/);
+assert.match(agentChatWidget, /requestContext/);
 assert.match(agentChatWidget, /getRun/);
 assert.match(agentChatWidget, /approveConfirmation/);
 assert.match(agentChatWidget, /rejectConfirmation/);
 assert.match(agentChatWidget, /AgentConfirmationCard/);
 assert.match(agentChatWidget, /handleConfirmationAction/);
+assert.match(agentChatWidget, /choiceId/);
 assert.match(agentChatWidget, /CONFIRMATION_EXPIRED/);
 assert.match(agentChatWidget, /CONFIRMATION_NOT_PENDING/);
 assert.match(agentChatWidget, /hasActiveAgentRequest/);

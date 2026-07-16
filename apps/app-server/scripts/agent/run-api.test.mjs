@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
@@ -11,18 +12,52 @@ const USER_ID = "11111111-1111-1111-1111-111111111111";
 const OTHER_USER_ID = "99999999-9999-9999-9999-999999999999";
 const WORKSPACE_ID = "22222222-2222-2222-2222-222222222222";
 const RUN_ID = "33333333-3333-3333-3333-333333333333";
+const SQL_ERD_SESSION_ID = "77777777-7777-4777-8777-777777777777";
 const STEP_ID = "44444444-4444-4444-4444-444444444444";
 const CONFIRMATION_ID = "55555555-5555-5555-5555-555555555555";
 const CREATED_AT = new Date("2026-07-08T00:00:00.000Z");
 const UPDATED_AT = new Date("2026-07-08T00:01:00.000Z");
 const EXPIRES_AT = new Date("2026-08-07T00:00:00.000Z");
 const CONFIRMATION_EXPIRES_AT = new Date("2026-07-08T00:15:00.000Z");
+const contextualExecutionMigration = readFileSync(
+  new URL(
+    "../../../../db/migrations/074_add_agent_contextual_execution.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
+
+assert.match(
+  contextualExecutionMigration,
+  /ALTER TABLE public\.agent_runs[\s\S]*ADD COLUMN request_context_json JSONB/
+);
+assert.match(
+  contextualExecutionMigration,
+  /ALTER TABLE public\.agent_confirmations[\s\S]*ADD COLUMN selected_choice_id TEXT/
+);
+assert.match(
+  contextualExecutionMigration,
+  /CREATE TABLE public\.sql_erd_agent_session_creations/
+);
+assert.match(
+  contextualExecutionMigration,
+  /UNIQUE \(workspace_id, actor_user_id, agent_run_id\)/
+);
+assert.match(
+  contextualExecutionMigration,
+  /ALTER TABLE public\.sql_erd_agent_session_creations ENABLE ROW LEVEL SECURITY/
+);
+assert.match(
+  contextualExecutionMigration,
+  /agent_runs_request_context_shape_check[\s\S]*\) IS TRUE\)/
+);
 function createStoredRun(overrides = {}) {
   return {
     id: RUN_ID,
     workspaceId: WORKSPACE_ID,
     requestedByUserId: USER_ID,
     clientRequestId: "request-1",
+    requestContext: null,
     status: "planning",
     riskLevel: null,
     prompt: "내일 회의 일정 만들어줘",
@@ -45,6 +80,7 @@ function createRunRow(overrides = {}) {
     workspace_id: WORKSPACE_ID,
     requested_by_user_id: USER_ID,
     client_request_id: "request-1",
+    request_context_json: null,
     status: "planning",
     risk_level: null,
     prompt: "내일 회의 일정 만들어줘",
@@ -139,6 +175,7 @@ function createConfirmationRow(overrides = {}) {
     rejected_at: null,
     created_at: CREATED_AT,
     updated_at: UPDATED_AT,
+    selected_choice_id: null,
     ...overrides
   };
 }
@@ -236,6 +273,16 @@ class FakeDatabaseService {
             run.id === runId &&
             run.workspace_id === workspaceId &&
             run.requested_by_user_id === currentUserId
+        ) ?? null
+      );
+    }
+
+    if (text.includes("FROM sql_erd_sessions")) {
+      const [sessionId, workspaceId] = values;
+      return (
+        (this.state.sessionRows ?? []).find(
+          (session) =>
+            session.id === sessionId && session.workspace_id === workspaceId
         ) ?? null
       );
     }
@@ -385,7 +432,8 @@ function errorMessage(error) {
       input: {
         prompt: "내일 회의 일정 만들어줘",
         timezone: "Asia/Seoul",
-        clientRequestId: "request-1"
+        clientRequestId: "request-1",
+        requestContext: null
       }
     }
   ]);
@@ -548,6 +596,85 @@ function errorMessage(error) {
 }
 
 {
+  const requestContext = {
+    surface: "sql_erd",
+    sessionId: SQL_ERD_SESSION_ID
+  };
+  const { service, agentLoggingService } = createService({
+    loggingResult: {
+      run: createStoredRun({ requestContext }),
+      created: true
+    },
+    state: {
+      listRows: [],
+      runRows: [],
+      stepRows: [],
+      confirmationRows: [],
+      sessionRows: [
+        {
+          id: SQL_ERD_SESSION_ID,
+          workspace_id: WORKSPACE_ID
+        }
+      ]
+    }
+  });
+
+  const result = await service.createRun(USER_ID, WORKSPACE_ID, {
+    prompt: "Create an orders schema in this ERD",
+    requestContext
+  });
+
+  assert.deepEqual(result.run.requestContext, requestContext);
+  assert.deepEqual(agentLoggingService.calls[0].input.requestContext, requestContext);
+}
+
+{
+  const { service, agentLoggingService } = createService();
+
+  await assert.rejects(
+    () =>
+      service.createRun(USER_ID, WORKSPACE_ID, {
+        prompt: "Create an orders schema in this ERD",
+        requestContext: {
+          surface: "sql_erd",
+          sessionId: SQL_ERD_SESSION_ID
+        }
+      }),
+    (error) => {
+      assert.equal(error.getStatus(), 404);
+      assert.equal(errorMessage(error), "SQLtoERD session not found");
+      return true;
+    }
+  );
+  assert.equal(agentLoggingService.calls.length, 0);
+}
+
+for (const requestContext of [
+  { surface: "board", sessionId: SQL_ERD_SESSION_ID },
+  { surface: "sql_erd", sessionId: "not-a-uuid" },
+  { surface: "sql_erd", sessionId: SQL_ERD_SESSION_ID, extra: true },
+  "sql_erd"
+]) {
+  const { service } = createService();
+
+  await assert.rejects(
+    () =>
+      service.createRun(USER_ID, WORKSPACE_ID, {
+        prompt: "Create an orders schema in this ERD",
+        requestContext
+      }),
+    (error) => {
+      assert.equal(error.getStatus(), 400);
+      assert.equal(
+        errorMessage(error),
+        "requestContext must be a valid Agent request context"
+      );
+      return true;
+    }
+  );
+}
+
+{
   const { service } = createService();
 
   await assert.rejects(
@@ -579,6 +706,7 @@ function errorMessage(error) {
   assert.equal(result.run.steps[0].resourceRefs[0].metadata.visible, "ok");
   assert.equal("token" in result.run.steps[0].resourceRefs[0].metadata, false);
   assert.equal(result.run.confirmation.id, CONFIRMATION_ID);
+  assert.equal(result.run.confirmation.selectedChoiceId, null);
   assert.equal(result.run.confirmation.plan.after.title, "주간 회의");
   assert.equal(
     "providerRawResponse" in result.run.confirmation.plan.after,

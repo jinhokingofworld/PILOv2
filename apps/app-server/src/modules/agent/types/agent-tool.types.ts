@@ -1,6 +1,16 @@
 export type AgentRiskLevel = "low" | "medium" | "high";
 
-export type AgentToolExecutionMode = "auto" | "confirmation_required";
+export type AgentToolExecutionMode =
+  | "auto"
+  | "confirmation_required"
+  | "contextual";
+
+export type AgentRunRequestContext =
+  | {
+      surface: "sql_erd";
+      sessionId: string;
+    }
+  | null;
 
 export type AgentJsonPrimitive = string | number | boolean | null;
 
@@ -23,6 +33,7 @@ export interface AgentToolContext {
   currentUserId: string;
   workspaceId: string;
   runId: string;
+  requestContext: AgentRunRequestContext;
 }
 
 export interface AgentResourceRef {
@@ -35,7 +46,8 @@ export interface AgentResourceRef {
   metadata?: AgentJsonObject;
 }
 
-export interface AgentConfirmationPlan {
+export interface AgentApprovalConfirmationPlan {
+  kind?: "approval";
   toolName: string;
   summary: string;
   target: AgentJsonObject;
@@ -44,11 +56,41 @@ export interface AgentConfirmationPlan {
   call: AgentJsonObject;
 }
 
+export interface AgentChoiceConfirmationOption {
+  id: string;
+  label: string;
+  description?: string;
+  input: AgentJsonObject;
+}
+
+export interface AgentChoiceConfirmationPlan {
+  kind: "choice";
+  toolName: string;
+  summary: string;
+  target: AgentJsonObject;
+  call: AgentJsonObject;
+  choices: AgentChoiceConfirmationOption[];
+}
+
+export type AgentConfirmationPlan =
+  | AgentApprovalConfirmationPlan
+  | AgentChoiceConfirmationPlan;
+
 export interface AgentToolClarificationResult {
   kind: "needs_clarification";
   outputSummary: AgentToolOutputSummary;
   resourceRefs: AgentResourceRef[];
 }
+
+export type AgentToolPreparationResult =
+  | {
+      kind: "execute";
+    }
+  | {
+      kind: "confirmation";
+      plan: AgentConfirmationPlan;
+    }
+  | AgentToolClarificationResult;
 
 export interface AgentToolExecutionResult {
   outputSummary: AgentToolOutputSummary;
@@ -71,7 +113,14 @@ export interface AgentToolDefinition<TInput> {
     | AgentConfirmationPlan
     | AgentToolClarificationResult
     | Promise<AgentConfirmationPlan | AgentToolClarificationResult>;
-  buildConfirmationInput?: (plan: AgentConfirmationPlan) => unknown;
+  prepareExecution?: (
+    context: AgentToolContext,
+    input: TInput
+  ) => AgentToolPreparationResult | Promise<AgentToolPreparationResult>;
+  buildConfirmationInput?: (
+    plan: AgentConfirmationPlan,
+    selectedChoiceId?: string | null
+  ) => unknown;
   validateConfirmationInput?: (input: unknown) => unknown;
   execute: (
     context: AgentToolContext,
