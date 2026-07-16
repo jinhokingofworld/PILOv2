@@ -1,6 +1,13 @@
 import { Loader2, Play } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import type {
   GithubAppInstallation,
@@ -73,28 +80,45 @@ export function GithubConnectSidebar({
         subtitle="선택한 installation 기준으로 백엔드 동기화 작업을 요청합니다."
       >
         <div className="space-y-3">
-          <label className="block">
-            <span className="text-[12px] font-semibold uppercase tracking-[0.06em] text-[#7a8497]">
+          <div>
+            <span
+              className="text-[12px] font-semibold uppercase tracking-[0.06em] text-muted-foreground"
+              id="github-sync-target-label"
+            >
               Target
             </span>
-            <select
-              className="mt-2 h-10 w-full rounded-[8px] border border-[#d9dee8] bg-white px-3 text-[13px] text-[#293142] outline-none transition-colors focus:border-[#3157d5]"
-              onChange={(event) =>
-                onSyncTargetChange(event.target.value as GithubSyncTarget)
-              }
+            <Select
+              onValueChange={(value) => {
+                if (value) {
+                  onSyncTargetChange(value as GithubSyncTarget);
+                }
+              }}
               value={syncTarget}
             >
-              {syncTargetOptions.map((option) => (
-                <option
-                  disabled={!selectedRepositoryId && option.value !== "source"}
-                  key={option.value}
-                  value={option.value}
-                >
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
+              <SelectTrigger
+                aria-labelledby="github-sync-target-label"
+                className="mt-2 h-10 w-full"
+              >
+                <SelectValue>
+                  {syncTargetOptions.find((option) => option.value === syncTarget)
+                    ?.label ?? "대상 선택"}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {syncTargetOptions.map((option) => (
+                  <SelectItem
+                    disabled={
+                      !selectedRepositoryId && option.value !== "source"
+                    }
+                    key={option.value}
+                    value={option.value}
+                  >
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
 
           <Button
             className="h-10 w-full rounded-[8px] bg-[#3157d5] text-white hover:bg-[#2447bd]"
