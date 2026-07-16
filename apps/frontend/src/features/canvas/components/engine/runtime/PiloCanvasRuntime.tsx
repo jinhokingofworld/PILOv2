@@ -93,6 +93,35 @@ type DeferredRemoteOperation = {
   reason: DeferredRemoteOperationReason;
 };
 
+type CanvasShapeSerializableMetadata = {
+  contentHash?: unknown;
+  revision?: unknown;
+};
+
+function serializeCanvasRoomStateShape(shape: PiloCanvasFreeformShape) {
+  const shapeRecord = shape as Record<string, unknown> &
+    CanvasShapeSerializableMetadata;
+  const serializedShape: Record<string, unknown> = { ...shapeRecord };
+
+  if (
+    typeof shapeRecord.revision === "number" &&
+    Number.isInteger(shapeRecord.revision) &&
+    shapeRecord.revision > 0
+  ) {
+    serializedShape.revision = shapeRecord.revision;
+  }
+
+  if (typeof shapeRecord.contentHash === "string") {
+    serializedShape.contentHash = shapeRecord.contentHash;
+  }
+
+  return serializedShape;
+}
+
+function serializeCanvasRoomStateShapes(shapes: PiloCanvasFreeformShape[]) {
+  return shapes.map(serializeCanvasRoomStateShape);
+}
+
 function isRemoteOperationProtectedByLocalInteraction({
   localInteractionState,
   operation,
@@ -606,6 +635,36 @@ function PiloCanvasRuntimeInner({
     catchUpOperations: catchUpCanvasOperations,
     hydrateShapes: hydrateRoomShapes,
   });
+  const sendRoomShapePatch = useCallback(
+    (patch: {
+      deletedShapeIds: string[];
+      upsertShapes: PiloCanvasFreeformShape[];
+    }) => {
+      canvasPresence.sendRoomShapePatch({
+        deletedShapeIds: patch.deletedShapeIds,
+        upsertShapes: serializeCanvasRoomStateShapes(patch.upsertShapes),
+      });
+    },
+    [canvasPresence.sendRoomShapePatch],
+  );
+  const reportLoadedViewport = useCallback(
+    (
+      bounds: {
+        height: number;
+        margin: number;
+        width: number;
+        x: number;
+        y: number;
+      },
+      shapes: PiloCanvasFreeformShape[],
+    ) => {
+      canvasPresence.reportLoadedViewport(
+        bounds,
+        serializeCanvasRoomStateShapes(shapes),
+      );
+    },
+    [canvasPresence.reportLoadedViewport],
+  );
 
   useEffect(() => {
     if (canvasPresence.checkpointStatus?.status !== "delayed") {
@@ -689,7 +748,7 @@ function PiloCanvasRuntimeInner({
     freeformShapesRef,
     localShapeVersionRef,
     onLocalShapeSyncIdle: flushDeferredRemoteOperations,
-    onRoomShapePatch: canvasPresence.sendRoomShapePatch,
+    onRoomShapePatch: sendRoomShapePatch,
     onShapeSyncConflict: handleShapeSyncConflict,
     onShapeSyncError: handleShapeSyncError,
     pendingLocalShapeVersionsRef,
@@ -755,7 +814,7 @@ function PiloCanvasRuntimeInner({
     shapeDetailCacheRef,
     shapeDetailRequestSeqRef,
     storageMode,
-    onViewportShapesLoaded: canvasPresence.reportLoadedViewport,
+    onViewportShapesLoaded: reportLoadedViewport,
     deletedShapeIdsRef,
     unloadedShapeIdsRef,
     viewportShapeLoadRequestSeqRef,

@@ -218,6 +218,11 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
 
   function toCanvasShapePayload(shape: Record<string, unknown>, zIndex: number) {
     const props = readRecord(shape.props);
+    const rawShape = { ...shape };
+
+    delete rawShape.contentHash;
+    delete rawShape.revision;
+
     const title =
       typeof props.name === "string"
         ? props.name
@@ -235,7 +240,7 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
       height: readNullableSize(props.h),
       id: typeof shape.id === "string" ? shape.id : "",
       parentShapeId: resolveParentShapeId(shape.parentId),
-      rawShape: shape,
+      rawShape,
       rotation: readFiniteNumber(shape.rotation, 0),
       shapeType: typeof shape.type === "string" ? shape.type : "",
       textContent,
