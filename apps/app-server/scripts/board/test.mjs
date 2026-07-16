@@ -155,7 +155,14 @@ assert.doesNotMatch(issueUpdateServiceFile, /FROM pilo_issues/);
 
 assert.match(issueCreateServiceFile, /class BoardIssueCreateService/);
 assert.match(issueCreateServiceFile, /assertWorkspaceAccess/);
-assert.match(issueCreateServiceFile, /createIssue/);
+assert.match(
+  issueCreateServiceFile,
+  /this\.githubIssueWriteService\.createIssueWithProjectOAuth\(/
+);
+assert.doesNotMatch(
+  issueCreateServiceFile,
+  /this\.githubIssueWriteService\.createIssue\(/
+);
 assert.match(issueCreateServiceFile, /addProjectV2ItemByContentId/);
 assert.match(issueCreateServiceFile, /updateProjectV2ItemStatus/);
 assert.match(issueCreateServiceFile, /assertProjectV2WriteAccess/);
@@ -203,7 +210,26 @@ assert.match(
 );
 
 assert.match(githubIssueWriteServiceFile, /class GithubIssueWriteService/);
-assert.match(githubIssueWriteServiceFile, /getActiveConnection\(input\.currentUserId, "app_user"\)/);
+assert.match(
+  githubIssueWriteServiceFile,
+  /async updateIssue\([\s\S]*?getActiveConnection\(input\.currentUserId, "app_user"\)/
+);
+assert.match(
+  githubIssueWriteServiceFile,
+  /async updateIssueAssigneesDelta\([\s\S]*?getActiveConnection\([\s\S]*?"app_user"/
+);
+assert.match(
+  githubIssueWriteServiceFile,
+  /async listAssignableUsers\([\s\S]*?getActiveConnection\(input\.currentUserId, "app_user"\)/
+);
+assert.match(
+  githubIssueWriteServiceFile,
+  /async createIssue\([\s\S]*?getActiveConnection\(input\.currentUserId, "app_user"\)/
+);
+assert.match(
+  githubIssueWriteServiceFile,
+  /async createIssueWithProjectOAuth\([\s\S]*?getActiveConnection\([\s\S]*?"project_v2"/
+);
 assert.doesNotMatch(githubIssueWriteServiceFile, /github_access_token_encrypted/);
 assert.match(githubIssueWriteServiceFile, /updateRepositoryIssue/);
 assert.match(githubIssueWriteServiceFile, /createRepositoryIssue/);
@@ -240,6 +266,7 @@ await import("./issue-assignees.test.mjs");
 await import("./status-update.test.mjs");
 await import("./issue-update.test.mjs");
 await import("./issue-create.test.mjs");
+await import("./issue-create-project-oauth.test.mjs");
 await import("./issue-create-operation-migration.test.mjs");
 await import("./issue-create-idempotency.test.mjs");
 await import("./activity-log.test.mjs");

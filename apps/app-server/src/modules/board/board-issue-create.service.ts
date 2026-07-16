@@ -292,7 +292,7 @@ export class BoardIssueCreateService {
     input: NormalizedIssueCreateInput
   ) {
     try {
-      return await this.githubIssueWriteService.createIssue({
+      return await this.githubIssueWriteService.createIssueWithProjectOAuth({
         body: input.body,
         currentUserId,
         owner: target.repository_owner_login,

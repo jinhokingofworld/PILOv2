@@ -14,6 +14,10 @@ import {
 import { GithubTokenEncryptionService } from "./github-token-encryption.service";
 import { GithubOAuthConnectionService } from "./github-oauth-connection.service";
 import { GithubIssueAssigneeValidationError } from "./github-issue-assignee.error";
+import {
+  GITHUB_PROJECT_OAUTH_SCOPE_ERROR_MESSAGE,
+  hasRequiredGithubProjectOAuthScopes
+} from "./github-project-oauth-scope";
 
 export interface UpdateGithubIssueInput {
   currentUserId: string;
@@ -183,6 +187,26 @@ export class GithubIssueWriteService {
       repo: input.repo,
       title: input.title,
       userAccessToken: accessToken
+    });
+  }
+
+  async createIssueWithProjectOAuth(
+    input: CreateGithubIssueInput
+  ): Promise<GithubIssueApiItem> {
+    const connection = await this.connectionService.getActiveConnection(
+      input.currentUserId,
+      "project_v2"
+    );
+    if (!hasRequiredGithubProjectOAuthScopes(connection.tokenScope)) {
+      throw badRequest(GITHUB_PROJECT_OAUTH_SCOPE_ERROR_MESSAGE);
+    }
+
+    return this.githubAppClient.createRepositoryIssue({
+      body: input.body,
+      owner: input.owner,
+      repo: input.repo,
+      title: input.title,
+      userAccessToken: connection.accessToken
     });
   }
 
