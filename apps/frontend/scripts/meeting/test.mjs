@@ -51,6 +51,13 @@ const meetingStateInvalidationStore = await readFile(
   ),
   "utf8"
 );
+const meetingConnectionActionStore = await readFile(
+  new URL(
+    "../../src/features/meeting/stores/meeting-connection-action-store.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
 const meetingAudioPreflightHook = await readFile(
   new URL(
     "../../src/features/meeting/hooks/use-meeting-audio-preflight.ts",
@@ -211,6 +218,18 @@ assert.match(meetingRoomsHook, /listMeetingRooms/);
 assert.match(meetingRoomsHook, /selectedMeetingRoomId/);
 assert.match(meetingRoomsHook, /room\.isDefault/);
 assert.match(meetingRoomsHook, /reloadMeetingRooms/);
+assert.match(meetingRoomsHook, /requestGenerationRef/);
+assert.match(meetingRoomsHook, /loadedWorkspaceId/);
+assert.match(meetingRoomsHook, /isCurrentWorkspaceResult/);
+const meetingRoomsLoadStart = meetingRoomsHook.slice(
+  meetingRoomsHook.indexOf('setStatus("loading")') - 120,
+  meetingRoomsHook.indexOf("try {", meetingRoomsHook.indexOf('setStatus("loading")'))
+);
+assert.doesNotMatch(meetingRoomsLoadStart, /setSelectedMeetingRoomId\(null\)/);
+assert.match(
+  meetingRoomsHook,
+  /result\.rooms\.some\(\(room\) => room\.id === currentMeetingRoomId\)/
+);
 
 assert.match(packageJson, /"livekit-client":/);
 assert.match(liveKitHook, /useLiveKitMeetingRoom/);
@@ -317,6 +336,18 @@ assert.match(meetingPanel, /60초 이하 녹음은 회의록이 생성되지 않
 assert.match(meetingPanel, /useRecordingElapsedSeconds/);
 assert.match(meetingPanel, /setInterval/);
 assert.match(meetingPanel, /useMeetingStateInvalidation/);
+assert.match(meetingPanel, /consumeMeetingConnectionAction/);
+assert.match(meetingPanel, /subscribeMeetingConnectionAction/);
+assert.match(meetingPanel, /action\.workspaceId !== workspaceId/);
+assert.match(meetingPanel, /meetingRoomsWorkspaceId !== action\.workspaceId/);
+assert.match(meetingPanel, /setActiveWorkspaceId\(action\.workspaceId\)/);
+assert.match(
+  meetingPanel,
+  /activeMeetingId && activeMeetingId !== action\.meetingId[\s\S]*disconnectFromMeeting\(\)/
+);
+assert.match(meetingPanel, /reconcilingMeetingConnectionActionId/);
+assert.match(meetingPanel, /setPrejoinAction\("reconnect"\)/);
+assert.match(meetingPanel, /Agent가 선택한 회의방을 찾을 수 없습니다/);
 assert.doesNotMatch(meetingPanel, /MEETING_STATUS_POLL_INTERVAL_MS/);
 assert.match(meetingPanel, /Math\.max\(0, Math\.floor/);
 assert.match(meetingPanel, /녹음 진행 중/);
@@ -332,6 +363,11 @@ assert.match(meetingStateRealtimeHook, /isMeetingStateRealtimeEvent/);
 assert.match(meetingStateRealtimeHook, /socket\.emit\("meeting:subscribe"/);
 assert.match(meetingStateInvalidationStore, /useMeetingStateInvalidation/);
 assert.match(meetingStateInvalidationStore, /reloadQueued/);
+assert.match(meetingConnectionActionStore, /enqueueMeetingConnectionAction/);
+assert.match(meetingConnectionActionStore, /consumeMeetingConnectionAction/);
+assert.match(meetingConnectionActionStore, /subscribeMeetingConnectionAction/);
+assert.match(meetingConnectionActionStore, /handledActionExpirations/);
+assert.doesNotMatch(meetingConnectionActionStore, /localStorage|sessionStorage/);
 assert.match(headerMeetingStatus, /useMeetingStateInvalidation/);
 assert.doesNotMatch(headerMeetingStatus, /HEADER_MEETING_STATUS_POLL_INTERVAL_MS/);
 assert.match(meetingPanel, /result\.recording\.durationSec <= 60/);

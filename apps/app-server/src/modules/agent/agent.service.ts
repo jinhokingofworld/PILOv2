@@ -76,6 +76,14 @@ export interface AgentConfirmationSummaryPayload {
   expiresAt: string;
 }
 
+export interface AgentRunMessageApiPayload {
+  id: string;
+  sequence: number;
+  role: "user" | "assistant";
+  content: string;
+  createdAt: string;
+}
+
 export interface AgentConfirmationApiPayload
   extends AgentConfirmationSummaryPayload {
   runId: string;
@@ -92,6 +100,7 @@ export interface AgentRunListItemPayload extends AgentRunApiPayload {
 
 export interface AgentRunDetailItemPayload extends AgentRunApiPayload {
   steps: AgentStepApiPayload[];
+  messages: AgentRunMessageApiPayload[];
   confirmation: AgentConfirmationApiPayload | null;
 }
 
@@ -168,6 +177,14 @@ interface AgentConfirmationRow extends QueryResultRow {
   rejected_at: Date | string | null;
   created_at: Date | string;
   updated_at: Date | string;
+}
+
+interface AgentRunMessageRow extends QueryResultRow {
+  id: string;
+  sequence: number;
+  role: "user" | "assistant";
+  content: string;
+  created_at: Date | string;
 }
 
 interface AgentRunWithConfirmationRow extends AgentRunRow {
@@ -249,6 +266,7 @@ export class AgentService {
       run: {
         ...this.mapStoredRun(result.run),
         steps: [],
+        messages: [],
         confirmation: null
       },
       created: result.created
@@ -264,7 +282,7 @@ export class AgentService {
     const input = this.normalizeRunInput(body);
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
 
-    const accepted = await this.database.transaction(async (transaction) => {
+    const outcome = await this.database.transaction(async (transaction) => {
       const run = await transaction.queryOne<AgentRunRow>(
         `
           SELECT *
@@ -289,7 +307,7 @@ export class AgentService {
           `UPDATE agent_runs SET status = 'cancelled', message = '추가 정보 입력 대기 시간이 만료되었습니다.', completed_at = now(), updated_at = now() WHERE id = $1`,
           [runId]
         );
-        throw badRequest("Agent run input wait has expired");
+        return "expired" as const;
       }
       const next = await transaction.queryOne<{ sequence: number | string }>(
         `SELECT COALESCE(MAX(sequence), 0) + 1 AS sequence FROM agent_run_messages WHERE run_id = $1`,
@@ -299,28 +317,48 @@ export class AgentService {
         `INSERT INTO agent_run_messages (run_id, sequence, role, content) VALUES ($1, $2, 'user', $3)`,
         [runId, Number(next?.sequence ?? 1), input.message]
       );
-      await transaction.execute(
+      const resumed = await transaction.queryOne<{ id: string }>(
         `
           UPDATE agent_runs
-          SET status = 'planning', message = '추가 정보를 반영하고 있습니다.', final_answer = NULL,
-              error_code = NULL, error_message = NULL, completed_at = NULL, updated_at = now()
+          SET status = 'planning',
+              message = '추가 정보를 반영하고 있습니다.',
+              final_answer = NULL,
+              error_code = NULL,
+              error_message = NULL,
+              completed_at = NULL,
+              planner_turn_count = 0,
+              tool_call_count = 0,
+              updated_at = now()
           WHERE id = $1
+            AND status = 'waiting_user_input'
+          RETURNING id
         `,
         [runId]
       );
-      await transaction.execute(
+      if (!resumed) {
+        throw new Error("Agent run could not resume from user input");
+      }
+      const outbox = await transaction.queryOne<{ id: string }>(
         `
           UPDATE agent_run_outbox
           SET status = 'pending', attempt_count = 0, next_attempt_at = now(),
               claim_token = NULL, claimed_at = NULL, delivered_at = NULL,
-              error_code = NULL, error_message = NULL
+              error_code = NULL, error_message = NULL,
+              turn_sequence = turn_sequence + 1, reason = 'user_input'
           WHERE run_id = $1
+          RETURNING id
         `,
         [runId]
       );
-      return true;
+      if (!outbox) {
+        throw new Error("Agent run outbox could not be re-armed");
+      }
+      return "accepted" as const;
     });
-    if (accepted) await this.agentOutboxPublisherService.publishCreatedRun(runId);
+    if (outcome === "expired") {
+      throw badRequest("Agent run input wait has expired");
+    }
+    await this.agentOutboxPublisherService.publishCreatedRun(runId);
     return this.getRun(currentUserId, workspaceId, runId);
   }
 
@@ -485,13 +523,22 @@ export class AgentService {
       throw notFound("Agent run not found");
     }
 
-    const [steps, confirmation] = await Promise.all([
+    const [steps, messages, confirmation] = await Promise.all([
       this.database.query<AgentStepRow>(
         `
           SELECT *
           FROM agent_steps
           WHERE run_id = $1
           ORDER BY step_order ASC
+        `,
+        [runId]
+      ),
+      this.database.query<AgentRunMessageRow>(
+        `
+          SELECT id, sequence, role, content, created_at
+          FROM agent_run_messages
+          WHERE run_id = $1
+          ORDER BY sequence ASC
         `,
         [runId]
       ),
@@ -513,6 +560,7 @@ export class AgentService {
       run: {
         ...this.mapRun(run),
         steps: steps.map((step) => this.mapStep(step)),
+        messages: messages.map((message) => this.mapMessage(message)),
         confirmation: confirmation
           ? this.mapConfirmation(confirmation)
           : null
@@ -815,6 +863,16 @@ export class AgentService {
       errorMessage: row.error_message,
       startedAt: this.toIsoOrNull(row.started_at),
       completedAt: this.toIsoOrNull(row.completed_at)
+    };
+  }
+
+  private mapMessage(row: AgentRunMessageRow): AgentRunMessageApiPayload {
+    return {
+      id: row.id,
+      sequence: row.sequence,
+      role: row.role,
+      content: row.content,
+      createdAt: this.toIso(row.created_at)
     };
   }
 

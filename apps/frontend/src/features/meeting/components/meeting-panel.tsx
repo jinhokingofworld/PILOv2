@@ -54,6 +54,11 @@ import { useMeetingWorkspaceData } from "@/features/meeting/hooks/use-meeting-wo
 import { meetingNavigation } from "@/features/meeting/navigation";
 import { useMeetingRuntime } from "@/features/meeting/runtime/meeting-runtime-provider";
 import { setHeaderMeetingRecordingStatus } from "@/features/meeting/stores/header-meeting-status-store";
+import {
+  consumeMeetingConnectionAction,
+  type MeetingConnectionAction,
+  subscribeMeetingConnectionAction
+} from "@/features/meeting/stores/meeting-connection-action-store";
 import { useMeetingStateInvalidation } from "@/features/meeting/stores/meeting-state-invalidation-store";
 import type {
   MeetingParticipant,
@@ -315,6 +320,7 @@ export function MeetingPanel({ section = "room" }: { section?: MeetingSection })
   });
   const {
     error: meetingRoomsError,
+    loadedWorkspaceId: meetingRoomsWorkspaceId,
     reloadMeetingRooms,
     rooms: meetingRooms,
     selectMeetingRoom,
@@ -373,6 +379,12 @@ export function MeetingPanel({ section = "room" }: { section?: MeetingSection })
   const [editingMeetingRoomName, setEditingMeetingRoomName] = useState("");
   const [restoredMeetingRoomId, setRestoredMeetingRoomId] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [pendingMeetingConnectionAction, setPendingMeetingConnectionAction] =
+    useState<MeetingConnectionAction | null>(null);
+  const [
+    reconcilingMeetingConnectionActionId,
+    setReconcilingMeetingConnectionActionId
+  ] = useState<string | null>(null);
 
   useEffect(() => {
     if (section !== "room" || typeof window === "undefined") return;
@@ -384,6 +396,22 @@ export function MeetingPanel({ section = "room" }: { section?: MeetingSection })
     if (window.location.hash === "#room") {
       window.history.replaceState(null, "", "/meeting");
     }
+  }, [section]);
+
+  useEffect(() => {
+    if (section !== "room") {
+      return;
+    }
+
+    const receiveAction = () => {
+      const action = consumeMeetingConnectionAction();
+      if (action) {
+        setPendingMeetingConnectionAction(action);
+      }
+    };
+
+    receiveAction();
+    return subscribeMeetingConnectionAction(receiveAction);
   }, [section]);
 
   const activeParticipants = useMemo(
@@ -448,6 +476,186 @@ export function MeetingPanel({ section = "room" }: { section?: MeetingSection })
       selectMeetingRoom(restoredMeetingRoomId);
     }
   }, [meetingRooms, restoredMeetingRoomId, selectMeetingRoom]);
+
+  useEffect(() => {
+    const action = pendingMeetingConnectionAction;
+    if (!action || action.workspaceId === workspaceId) {
+      return;
+    }
+
+    if (
+      !authSession?.workspaces.some(
+        (workspace) => workspace.id === action.workspaceId
+      )
+    ) {
+      setPendingMeetingConnectionAction(null);
+      setToastMessage("Agent가 요청한 Workspace에 접근할 수 없습니다.");
+      return;
+    }
+
+    authSession.setActiveWorkspaceId(action.workspaceId);
+  }, [authSession, pendingMeetingConnectionAction, workspaceId]);
+
+  useEffect(() => {
+    const action = pendingMeetingConnectionAction;
+    if (
+      !action ||
+      action.workspaceId !== workspaceId ||
+      action.meetingRoomId ||
+      !accessToken
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+    void meetingClient
+      .getCurrentUserActiveMeeting()
+      .then((result) => {
+        if (
+          cancelled ||
+          result.meeting?.id !== action.meetingId ||
+          !result.meetingRoom
+        ) {
+          return;
+        }
+
+        const meetingRoomId = result.meetingRoom.id;
+        setPendingMeetingConnectionAction((current) =>
+          current?.actionId === action.actionId
+            ? { ...current, meetingRoomId }
+            : current
+        );
+      })
+      .catch(() => undefined);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    accessToken,
+    meetingClient,
+    pendingMeetingConnectionAction,
+    workspaceId
+  ]);
+
+  useEffect(() => {
+    const action = pendingMeetingConnectionAction;
+    if (!action) {
+      return;
+    }
+
+    const remainingMs = action.expiresAtMs - Date.now();
+    if (remainingMs <= 0) {
+      setPendingMeetingConnectionAction(null);
+      setToastMessage(
+        "회의 연결 요청이 만료되었습니다. 회의 참여 버튼으로 다시 시도해주세요."
+      );
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setPendingMeetingConnectionAction((current) =>
+        current?.actionId === action.actionId ? null : current
+      );
+      setToastMessage(
+        "회의 연결 요청이 만료되었습니다. 회의 참여 버튼으로 다시 시도해주세요."
+      );
+    }, remainingMs);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [pendingMeetingConnectionAction]);
+
+  useEffect(() => {
+    const action = pendingMeetingConnectionAction;
+    if (
+      !action ||
+      action.workspaceId !== workspaceId ||
+      !action.meetingRoomId
+    ) {
+      return;
+    }
+
+    if (Date.now() >= action.expiresAtMs) {
+      return;
+    }
+
+    if (
+      meetingRoomsStatus !== "success" ||
+      meetingRoomsWorkspaceId !== action.workspaceId
+    ) {
+      return;
+    }
+
+    if (!meetingRooms.some((room) => room.id === action.meetingRoomId)) {
+      setPendingMeetingConnectionAction(null);
+      setToastMessage("Agent가 선택한 회의방을 찾을 수 없습니다.");
+      return;
+    }
+
+    if (selectedMeetingRoomId !== action.meetingRoomId) {
+      selectMeetingRoom(action.meetingRoomId);
+      return;
+    }
+
+    if (meeting?.id !== action.meetingId) {
+      return;
+    }
+
+    if (reconcilingMeetingConnectionActionId) {
+      return;
+    }
+
+    if (activeMeetingId && activeMeetingId !== action.meetingId) {
+      setReconcilingMeetingConnectionActionId(action.actionId);
+      void disconnectFromMeeting()
+        .catch(() => {
+          setPendingMeetingConnectionAction((current) =>
+            current?.actionId === action.actionId ? null : current
+          );
+          setToastMessage(
+            "기존 음성 연결을 정리하지 못했습니다. 다시 시도해주세요."
+          );
+        })
+        .finally(() => {
+          setReconcilingMeetingConnectionActionId((current) =>
+            current === action.actionId ? null : current
+          );
+        });
+      return;
+    }
+
+    if (
+      activeMeetingId === action.meetingId &&
+      (liveKitRoom.status === "connected" ||
+        liveKitRoom.status === "connecting" ||
+        liveKitRoom.status === "reconnecting")
+    ) {
+      setPendingMeetingConnectionAction(null);
+      return;
+    }
+
+    if (prejoinAction || actionStatus !== "idle") {
+      return;
+    }
+
+    setPendingMeetingConnectionAction(null);
+    setPrejoinAction("reconnect");
+  }, [
+    actionStatus,
+    activeMeetingId,
+    disconnectFromMeeting,
+    liveKitRoom.status,
+    meeting?.id,
+    meetingRooms,
+    meetingRoomsStatus,
+    meetingRoomsWorkspaceId,
+    pendingMeetingConnectionAction,
+    prejoinAction,
+    reconcilingMeetingConnectionActionId,
+    selectMeetingRoom,
+    selectedMeetingRoomId,
+    workspaceId
+  ]);
 
   useEffect(() => {
     setHeaderMeetingRecordingStatus(currentRecording?.status ?? null);

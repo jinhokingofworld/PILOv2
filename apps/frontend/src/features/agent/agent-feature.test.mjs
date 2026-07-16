@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
+import {
+  didAgentRunAcceptInput,
+  getLatestAgentRunMessageSequence
+} from "./run-input-recovery.ts";
+
 async function readFeatureFile(path) {
   return readFile(new URL(path, import.meta.url), "utf8");
 }
@@ -15,10 +20,14 @@ const [agentTypes, agentApiClient, agentConfirmationCard, agentChatWidget] =
 
 assert.match(agentTypes, /export type AgentRunStatus/);
 assert.match(agentTypes, /"planning"/);
+assert.match(agentTypes, /"waiting_user_input"/);
 assert.match(agentTypes, /"waiting_confirmation"/);
 assert.match(agentTypes, /"completed"/);
 assert.match(agentTypes, /export type AgentRun/);
 assert.match(agentTypes, /export type CreateAgentRunInput/);
+assert.match(agentTypes, /export type SubmitAgentRunInput/);
+assert.match(agentTypes, /export type AgentRunMessage/);
+assert.match(agentTypes, /messages: AgentRunMessage\[\]/);
 assert.match(agentTypes, /export type AgentRunDetailPayload/);
 assert.match(agentTypes, /export type AgentConfirmationActionPayload/);
 
@@ -32,6 +41,9 @@ assert.match(agentApiClient, /cache: "no-store"/);
 assert.match(agentApiClient, /success === true/);
 assert.match(agentApiClient, /createRun/);
 assert.match(agentApiClient, /getRun/);
+assert.match(agentApiClient, /submitRunInput/);
+assert.match(agentApiClient, /agentRunInputsPath/);
+assert.match(agentApiClient, /\/inputs/);
 assert.match(agentApiClient, /approveConfirmation/);
 assert.match(agentApiClient, /rejectConfirmation/);
 assert.match(agentApiClient, /\/agent\/runs/);
@@ -80,10 +92,28 @@ assert.match(
   agentChatWidget,
   /confirmationAction \|\|\s+isBusy \|\|\s+activeRunAbortControllerRef\.current !== null/
 );
-assert.match(agentChatWidget, /disabled=\{\s*!workspaceId[\s\S]*hasActiveAgentRequest/);
+assert.match(
+  agentChatWidget,
+  /disabled=\{\s*!accessToken\?\.trim\(\) \|\| hasActiveAgentRequest/
+);
 assert.match(agentChatWidget, /const canSend = draft\.trim\(\)\.length > 0 && !hasActiveAgentRequest/);
 assert.match(agentChatWidget, /AGENT_RUN_POLL_INTERVAL_MS/);
 assert.match(agentChatWidget, /waiting_confirmation/);
+assert.match(agentChatWidget, /waiting_user_input/);
+assert.match(agentChatWidget, /submitRunInput/);
+assert.match(agentChatWidget, /appendRunInput/);
+assert.match(agentChatWidget, /latestAssistantMessage/);
+assert.match(agentChatWidget, /같은 요청을 이어서 처리합니다/);
+assert.match(agentChatWidget, /enqueueMeetingConnectionAction/);
+assert.match(agentChatWidget, /clientAction/);
+assert.match(agentChatWidget, /connect_meeting/);
+assert.match(agentChatWidget, /router\.push\("\/meeting"\)/);
+assert.match(agentChatWidget, /workspaceId: run\.workspaceId/);
+assert.match(agentChatWidget, /currentRun\.workspaceId/);
+assert.match(agentChatWidget, /submitRunInput\(\s*run\.workspaceId/);
+assert.match(agentChatWidget, /getRun\(\s*run\.workspaceId/);
+assert.match(agentChatWidget, /inputWasAccepted/);
+assert.match(agentChatWidget, /refreshRun\.status !== "waiting_user_input"/);
 assert.match(agentChatWidget, /completed/);
 assert.match(agentChatWidget, /failed/);
 assert.match(agentChatWidget, /cancelled/);
@@ -107,3 +137,34 @@ assert.match(agentChatWidget, /event\.shiftKey/);
 assert.match(agentChatWidget, /event\.nativeEvent\.isComposing/);
 assert.doesNotMatch(agentChatWidget, /createMockAssistantReply/);
 assert.doesNotMatch(agentChatWidget, /Mockup/);
+
+const previousMessages = [
+  {
+    id: "assistant-1",
+    sequence: 1,
+    role: "assistant",
+    content: "몇 시인가요?",
+    createdAt: "2026-07-16T00:00:00.000Z"
+  }
+];
+const acceptedMessages = [
+  ...previousMessages,
+  {
+    id: "user-2",
+    sequence: 2,
+    role: "user",
+    content: "오후 3시",
+    createdAt: "2026-07-16T00:00:01.000Z"
+  },
+  {
+    id: "assistant-3",
+    sequence: 3,
+    role: "assistant",
+    content: "종료 시간도 알려주세요.",
+    createdAt: "2026-07-16T00:00:02.000Z"
+  }
+];
+
+assert.equal(getLatestAgentRunMessageSequence(previousMessages), 1);
+assert.equal(didAgentRunAcceptInput(acceptedMessages, 1, "오후 3시"), true);
+assert.equal(didAgentRunAcceptInput(previousMessages, 1, "오후 3시"), false);

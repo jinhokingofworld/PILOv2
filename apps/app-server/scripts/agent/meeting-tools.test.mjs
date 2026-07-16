@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
@@ -7,6 +8,9 @@ const { AgentToolRegistryService } = require(
 );
 const { MeetingAgentToolsService } = require(
   "../../dist/modules/agent/tools/meeting-agent-tools.service.js"
+);
+const { MeetingActionItemDeliveryService } = require(
+  "../../dist/modules/meeting/meeting-action-item-delivery.service.js"
 );
 
 const USER_ID = "11111111-1111-1111-1111-111111111111";
@@ -19,6 +23,47 @@ const MEETING_ID = "55555555-5555-5555-8555-555555555555";
 const RECORDING_ID = "66666666-6666-6666-8666-666666666666";
 const MEETING_ROOM_ID = "99999999-9999-4999-8999-999999999991";
 const SECOND_MEETING_ROOM_ID = "99999999-9999-4999-8999-999999999992";
+
+const meetingAgentWorkflowMigration = await readFile(
+  new URL(
+    "../../../../db/migrations/074_create_meeting_agent_workflow.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
+const deliveryTargetPreservationMigration = await readFile(
+  new URL(
+    "../../../../db/migrations/075_preserve_meeting_action_item_delivery_targets.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
+
+assert.match(
+  meetingAgentWorkflowMigration,
+  /pilo_issue_id BIGINT[\s\S]*?REFERENCES public\.pilo_issues\(id\) ON DELETE RESTRICT/,
+  "The applied 074 migration must keep the Board target FK type compatible"
+);
+assert.match(
+  deliveryTargetPreservationMigration,
+  /ADD COLUMN IF NOT EXISTS target_resource_id TEXT/,
+  "The post-074 correction must apply safely to the shared dev schema"
+);
+assert.match(
+  deliveryTargetPreservationMigration,
+  /calendar_event_id_fkey[\s\S]*?ON DELETE SET NULL[\s\S]*?pilo_issue_id_fkey[\s\S]*?ON DELETE SET NULL/,
+  "The post-074 correction must make both delivered targets deletable"
+);
+assert.match(
+  deliveryTargetPreservationMigration,
+  /status = 'COMPLETED'[\s\S]*?target_resource_id IS NOT NULL/,
+  "The post-074 correction must reject completed deliveries without a target snapshot"
+);
+assert.match(
+  deliveryTargetPreservationMigration,
+  /target_resource_id ~ '[^']+'[\s\S]*?calendar_event_id IS NULL[\s\S]*?target_resource_id = calendar_event_id::text[\s\S]*?pilo_issue_id IS NULL[\s\S]*?target_resource_id = pilo_issue_id::text/,
+  "Completed deliveries must match their snapshot to a live FK when present"
+);
 
 function createMeeting(overrides = {}) {
   return {
@@ -721,6 +766,153 @@ for (const limit of [1.9, "1.9"]) {
       return true;
     }
   );
+}
+
+class FakeActionItemDeliveryDatabase {
+  constructor() {
+    this.actionItem = {
+      id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      title: "원래 액션 아이템",
+      description: "원래 설명",
+      status: "DELIVERY_FAILED"
+    };
+    this.delivery = {
+      id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      delivery_type: "pilo_issue",
+      draft_json: {
+        deliveryType: "pilo_issue",
+        issue: {
+          boardId: "board-original",
+          columnId: "column-original",
+          title: "처음 승인한 제목",
+          body: "처음 승인한 본문"
+        }
+      },
+      idempotency_key: "meeting-action-item:stable-operation",
+      requested_by_user_id: USER_ID,
+      status: "FAILED",
+      locked_until: null,
+      claim_token: null
+    };
+    this.calls = [];
+  }
+
+  async transaction(callback) {
+    return callback({
+      execute: this.execute.bind(this),
+      queryOne: this.queryOne.bind(this)
+    });
+  }
+
+  async query(text, values = []) {
+    this.calls.push({ method: "query", text, values });
+    return [{ id: this.actionItem.id }];
+  }
+
+  async execute(text, values = []) {
+    this.calls.push({ method: "execute", text, values });
+    if (text.includes("SET status = 'DELIVERING'")) {
+      this.actionItem.status = "DELIVERING";
+    }
+    return { rows: [] };
+  }
+
+  async queryOne(text, values = []) {
+    this.calls.push({ method: "queryOne", text, values });
+    if (text.includes("SELECT action_items.id")) return { ...this.actionItem };
+    if (text.includes("FROM meeting_report_action_item_deliveries")) {
+      return { ...this.delivery };
+    }
+    if (text.includes("SET status = 'RUNNING'")) {
+      this.delivery.status = "RUNNING";
+      this.delivery.claim_token = values[1];
+      this.delivery.locked_until = new Date("2026-07-08T00:05:00.000Z");
+      return { ...this.delivery };
+    }
+    if (text.includes("SET status = 'COMPLETED'")) {
+      assert.equal(values[3], this.delivery.claim_token);
+      assert.match(
+        text,
+        /target_resource_id = COALESCE\(\$2::text, \$3::text\)/,
+        "Delivery completion must store the immutable target ID snapshot"
+      );
+      assert.equal(values[1], null);
+      assert.equal(values[2], "42");
+      this.delivery.status = "COMPLETED";
+      this.delivery.claim_token = null;
+      this.delivery.locked_until = null;
+      return { id: this.delivery.id };
+    }
+    if (text.includes("SET status = 'APPROVED'")) {
+      this.actionItem.status = "APPROVED";
+      return { id: this.actionItem.id };
+    }
+    throw new Error(`Unhandled delivery queryOne: ${text}`);
+  }
+}
+
+{
+  const database = new FakeActionItemDeliveryDatabase();
+  const boardCalls = [];
+  const service = new MeetingActionItemDeliveryService(
+    database,
+    { async assertWorkspaceAccess() {} },
+    {},
+    {
+      async createBoardIssue(userId, workspaceId, boardId, input, idempotencyKey) {
+        boardCalls.push({ userId, workspaceId, boardId, input, idempotencyKey });
+        return { issue: { id: "42" } };
+      }
+    }
+  );
+
+  const result = await service.deliver(
+    USER_ID,
+    WORKSPACE_ID,
+    REPORT_ID,
+    database.actionItem.id,
+    {
+      deliveryType: "pilo_issue",
+      issue: {
+        boardId: "board-changed-on-retry",
+        columnId: "column-changed-on-retry",
+        title: "재시도에서 바꾼 제목"
+      }
+    }
+  );
+
+  assert.equal(result.status, "COMPLETED");
+  assert.equal(result.piloIssueId, "42");
+  assert.deepEqual(boardCalls, [
+    {
+      userId: USER_ID,
+      workspaceId: WORKSPACE_ID,
+      boardId: "board-original",
+      input: {
+        columnId: "column-original",
+        title: "처음 승인한 제목",
+        body: "처음 승인한 본문"
+      },
+      idempotencyKey: "meeting-action-item:stable-operation"
+    }
+  ]);
+}
+
+{
+  const database = new FakeActionItemDeliveryDatabase();
+  const service = new MeetingActionItemDeliveryService(
+    database,
+    {},
+    {},
+    {}
+  );
+
+  assert.equal(await service.recoverStaleDeliveries(), 1);
+  const recovery = database.calls.find((call) => call.method === "query");
+  assert.match(recovery.text, /delivery\.locked_until <= now\(\)/);
+  assert.match(recovery.text, /FOR UPDATE OF delivery, action_item SKIP LOCKED/);
+  assert.match(recovery.text, /last_error_code = 'ACTION_ITEM_DELIVERY_STALE'/);
+  assert.match(recovery.text, /SET status = 'DELIVERY_FAILED'/);
 }
 
 {

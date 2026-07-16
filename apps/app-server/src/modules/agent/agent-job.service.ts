@@ -22,6 +22,7 @@ export interface AgentRunRequestedJobPayload {
   runId: string;
   workspaceId: string;
   requestedByUserId: string;
+  turnSequence: number;
   toolSchemaVersion: string;
   tools: AgentToolSchemaSnapshotItem[];
 }

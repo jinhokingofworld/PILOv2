@@ -162,6 +162,48 @@ class FakeAgentLoggingService {
     };
   }
 
+  async completeToolStepAndAdvance(currentUserId, workspaceId, input) {
+    this.calls.push({
+      method: "completeToolStepAndAdvance",
+      currentUserId,
+      workspaceId,
+      input
+    });
+
+    const queuedNextPlannerTurn =
+      input.waitForUserInput !== true &&
+      this.state.toolCallLimitReached !== true;
+    const status = queuedNextPlannerTurn ? "planning" : "waiting_user_input";
+    return {
+      step: {
+        id: input.stepId,
+        runId: input.runId,
+        status: "completed"
+      },
+      run: {
+        id: input.runId,
+        workspaceId,
+        requestedByUserId: currentUserId,
+        clientRequestId: null,
+        status,
+        riskLevel: input.riskLevel ?? null,
+        prompt: "이번 주 일정 알려줘",
+        timezone: "Asia/Seoul",
+        message: queuedNextPlannerTurn
+          ? "다음 작업을 확인하고 있습니다."
+          : input.waitingMessage,
+        finalAnswer: null,
+        errorCode: null,
+        errorMessage: null,
+        expiresAt: "2026-08-09T00:00:00.000Z",
+        completedAt: null,
+        createdAt: "2026-07-10T00:00:00.000Z",
+        updatedAt: "2026-07-10T00:00:00.000Z"
+      },
+      queuedNextPlannerTurn
+    };
+  }
+
   async failStep(currentUserId, workspaceId, input) {
     this.calls.push({
       method: "failStep",
@@ -279,8 +321,15 @@ class FakeAgentLoggingService {
 }
 
 class FakeAgentOutboxPublisherService {
-  constructor() { this.calls = []; }
-  async publishCreatedRun(runId) { this.calls.push(runId); }
+  constructor(error = null) {
+    this.calls = [];
+    this.error = error;
+  }
+
+  async publishCreatedRun(runId) {
+    this.calls.push(runId);
+    if (this.error) throw this.error;
+  }
 }
 
 class FakeAgentConfirmationService {
@@ -741,7 +790,9 @@ function createService({
   registryState = {},
   runStatus = "running",
   planner = plannerOutput(),
-  executionStarted = false
+  executionStarted = false,
+  toolCallLimitReached = false,
+  publisherError = null
 } = {}) {
   const state = {
     run: {
@@ -756,14 +807,17 @@ function createService({
       id: STEP_ID,
       output_json: planner
     },
-    executionStarted
+    executionStarted,
+    toolCallLimitReached
   };
   const workspaceService = new FakeWorkspaceService();
   const database = new FakeDatabaseService(state);
   const loggingService = new FakeAgentLoggingService(state);
   const confirmationService = new FakeAgentConfirmationService();
   const toolRegistryService = new FakeAgentToolRegistryService(registryState);
-  const outboxPublisherService = new FakeAgentOutboxPublisherService();
+  const outboxPublisherService = new FakeAgentOutboxPublisherService(
+    publisherError
+  );
 
   return {
     service: new AgentExecutionService(
@@ -1053,7 +1107,7 @@ function formatterMeetingReport(index, overrides = {}) {
   ]);
   assert.deepEqual(
     loggingService.calls.map((call) => call.method),
-    ["startNextToolStepIfAbsent", "completeStep", "queueNextPlannerTurn"]
+    ["startNextToolStepIfAbsent", "completeToolStepAndAdvance"]
   );
 }
 
@@ -1087,7 +1141,7 @@ function formatterMeetingReport(index, overrides = {}) {
   );
   assert.deepEqual(
     loggingService.calls.map((call) => call.method),
-    ["startNextToolStepIfAbsent", "completeStep", "queueNextPlannerTurn"]
+    ["startNextToolStepIfAbsent", "completeToolStepAndAdvance"]
   );
   assert.equal(
     "providerRawResponse" in loggingService.calls[0].input.inputSummary.input,
@@ -1106,7 +1160,58 @@ function formatterMeetingReport(index, overrides = {}) {
     "token" in loggingService.calls[1].input.resourceRefs[0].metadata,
     false
   );
-  assert.equal(loggingService.calls[2].method, "queueNextPlannerTurn");
+  assert.equal(
+    loggingService.calls[1].method,
+    "completeToolStepAndAdvance"
+  );
+}
+
+{
+  const {
+    service,
+    loggingService,
+    toolRegistryService,
+    outboxPublisherService
+  } = createService({ toolCallLimitReached: true });
+
+  const result = await service.executeReadyRun(RUN_ID);
+
+  assert.equal(result.status, "waiting_user_input");
+  assert.equal(result.run.status, "waiting_user_input");
+  assert.deepEqual(
+    loggingService.calls.map((call) => call.method),
+    ["startNextToolStepIfAbsent", "completeToolStepAndAdvance"]
+  );
+  assert.equal(
+    toolRegistryService.calls.filter((call) => call.method === "execute").length,
+    1
+  );
+  assert.deepEqual(outboxPublisherService.calls, []);
+}
+
+{
+  const publisherError = new Error("SQS publish failed");
+  const {
+    service,
+    loggingService,
+    outboxPublisherService
+  } = createService({ publisherError });
+
+  const result = await service.executeReadyRun(RUN_ID);
+
+  assert.equal(result.status, "skipped");
+  assert.equal(result.reason, "already_started");
+  assert.deepEqual(outboxPublisherService.calls, [RUN_ID]);
+  assert.deepEqual(
+    loggingService.calls.map((call) => call.method),
+    ["startNextToolStepIfAbsent", "completeToolStepAndAdvance"]
+  );
+  assert.equal(
+    loggingService.calls.some(
+      (call) => call.method === "failStep" || call.method === "failRun"
+    ),
+    false
+  );
 }
 
 {
@@ -1362,13 +1467,15 @@ function formatterMeetingReport(index, overrides = {}) {
 
   assert.equal(result.status, "waiting_user_input");
   assert.equal(result.run.status, "waiting_user_input");
-  assert.match(result.run.finalAnswer, /여러 개/);
+  assert.equal(result.run.finalAnswer, null);
+  assert.match(result.run.message, /여러 개/);
   assert.equal(confirmationService.calls.length, 0);
   assert.deepEqual(
     loggingService.calls.map((call) => call.method),
-    ["startNextToolStepIfAbsent", "completeStep", "waitForUserInput"]
+    ["startNextToolStepIfAbsent", "completeToolStepAndAdvance"]
   );
   assert.equal(loggingService.calls[1].input.outputSummary.selection, "multiple");
+  assert.equal(loggingService.calls[1].input.waitForUserInput, true);
 }
 
 {

@@ -296,6 +296,4 @@ def test_fixed_korean_suite_loads() -> None:
     assert expectations["meeting_participants"].input_contains == {
         "meetingId": "123e4567-e89b-12d3-a456-426614174000",
     }
-    assert expectations["meeting_recording_missing_id"].missing_fields == (
-        "meetingId",
-    )
+    assert expectations["meeting_recording_missing_id"].missing_fields == ("meetingId",)

@@ -14,6 +14,10 @@ from app.meeting_report_processor import InfrastructureError
 AGENT_RUN_REQUESTED_JOB_TYPE = "agent_run_requested"
 AGENT_GROUNDED_ANSWER_REQUESTED_JOB_TYPE = "agent_grounded_answer_requested"
 AGENT_TOOL_SCHEMA_VERSION = "agent-tools:v3"
+AGENT_PLANNER_TURN_LIMIT_MESSAGE = (
+    "한 요청에서 계획할 수 있는 작업은 최대 5회입니다. "
+    "다음 요청에서 계속 진행할 내용을 알려주세요."
+)
 TERMINAL_AGENT_RUN_STATUSES = {"completed", "failed", "cancelled"}
 PLANNER_STATUSES = {
     "tool_candidate",
@@ -44,6 +48,7 @@ class AgentRunJob:
     workspace_id: str
     requested_by_user_id: str
     tool_schema_version: str
+    turn_sequence: int
     tools: tuple[AgentToolSchema, ...]
 
 
@@ -246,7 +251,7 @@ class AgentRunRepository(Protocol):
         message: str,
     ) -> None: ...
 
-    def wait_for_user_input(self, run_id: str, message: str) -> None: ...
+    def wait_for_user_input(self, run_id: str, message: str) -> bool: ...
 
 
 class AgentPlannerClient(Protocol):
@@ -274,6 +279,7 @@ def parse_agent_run_job_payload(payload: dict[str, object]) -> AgentRunJob:
         workspace_id=_require_uuid_string(payload, "workspaceId"),
         requested_by_user_id=_require_uuid_string(payload, "requestedByUserId"),
         tool_schema_version=_require_non_empty_string(payload, "toolSchemaVersion"),
+        turn_sequence=_optional_positive_int(payload, "turnSequence", default=1),
         tools=_parse_tool_schema_snapshot(payload.get("tools")),
     )
 
@@ -355,14 +361,18 @@ class AgentRunProcessor:
                 )
 
             if context.planner_turn_count >= 5:
-                self.repository.wait_for_user_input(
+                waiting = self.repository.wait_for_user_input(
                     job.run_id,
-                    "한 요청에서 계획할 수 있는 작업은 최대 5회입니다. 다음 요청에서 계속 진행할 내용을 알려주세요.",
+                    AGENT_PLANNER_TURN_LIMIT_MESSAGE,
                 )
                 return self._result(
                     job,
                     delete_message=True,
-                    reason="agent_planner_turn_limit_reached",
+                    reason=(
+                        "agent_planner_turn_limit_reached"
+                        if waiting
+                        else "agent_run_no_longer_planning"
+                    ),
                 )
 
             return self._plan_run(job, context)
@@ -409,6 +419,19 @@ class AgentRunProcessor:
                     normalized.risk_level,
                 )
                 return self._handoff_execution(job, retried=False)
+
+            if normalized.status == "needs_clarification":
+                waiting = self.repository.wait_for_user_input(
+                    job.run_id,
+                    normalized.final_answer,
+                )
+                return self._result(
+                    job,
+                    delete_message=True,
+                    reason=(
+                        "agent_waiting_user_input" if waiting else "agent_run_no_longer_planning"
+                    ),
+                )
 
             self.repository.complete_run(
                 job.run_id,
@@ -503,6 +526,18 @@ def _require_non_empty_string(payload: dict[str, object], key: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"Invalid {key}")
     return value.strip()
+
+
+def _optional_positive_int(
+    payload: dict[str, object],
+    key: str,
+    *,
+    default: int,
+) -> int:
+    value = payload.get(key, default)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1 or value > 2_147_483_647:
+        raise ValueError(f"Invalid {key}")
+    return value
 
 
 def _parse_tool_schema_snapshot(value: object) -> tuple[AgentToolSchema, ...]:
@@ -947,7 +982,8 @@ def _agent_planner_system_prompt() -> str:
         "for '다음 주 월요일', and 2026-07-21 for '다다음 주 화요일'. "
         "Use YYYY-MM-DD dates and HH:mm 24-hour times in tool inputs. "
         "When planningContext contains completed tool results, use them to answer the user's "
-        "original request. If the request is satisfied, return completed instead of repeating a tool. "
+        "original request. If the request is satisfied, return completed instead of "
+        "repeating a tool. "
         "Write message and finalAnswerDraft in Korean. "
         "Put the selected tool input object into inputJson as a compact JSON string. "
         "Use null inputJson when there is no tool input. "

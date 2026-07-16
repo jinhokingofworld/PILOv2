@@ -181,6 +181,36 @@ class FakeAgentLoggingService {
     };
   }
 
+  async completeToolStepAndAdvance(currentUserId, workspaceId, input) {
+    this.calls.push({
+      method: "completeToolStepAndAdvance",
+      currentUserId,
+      workspaceId,
+      input
+    });
+
+    const run = this.state.runs.find((candidate) => candidate.id === input.runId);
+    const queuedNextPlannerTurn = this.state.toolCallLimitReached !== true;
+    run.status = queuedNextPlannerTurn ? "planning" : "waiting_user_input";
+    run.message = queuedNextPlannerTurn
+      ? "다음 작업을 확인하고 있습니다."
+      : input.waitingMessage;
+
+    return {
+      step: {
+        id: input.stepId,
+        runId: input.runId,
+        status: "completed"
+      },
+      run: {
+        id: run.id,
+        status: run.status,
+        message: run.message
+      },
+      queuedNextPlannerTurn
+    };
+  }
+
   async failStep(currentUserId, workspaceId, input) {
     this.calls.push({
       method: "failStep",
@@ -337,12 +367,14 @@ class FakeAgentToolRegistryService {
 }
 
 class FakeAgentOutboxPublisherService {
-  constructor() {
+  constructor(error = null) {
     this.calls = [];
+    this.error = error;
   }
 
   async publishCreatedRun(runId) {
     this.calls.push(runId);
+    if (this.error) throw this.error;
   }
 }
 
@@ -550,7 +582,9 @@ function createService(state) {
   const database = new FakeDatabaseService(state);
   const loggingService = new FakeAgentLoggingService(state);
   const toolRegistryService = new FakeAgentToolRegistryService(state);
-  const outboxPublisherService = new FakeAgentOutboxPublisherService();
+  const outboxPublisherService = new FakeAgentOutboxPublisherService(
+    state.publisherError ?? null
+  );
 
   return {
     service: new AgentConfirmationService(
@@ -644,11 +678,11 @@ function errorMessage(error) {
   assert.equal(result.run.confirmation.status, "approved");
   assert.equal(result.run.confirmation.approvedAt, "2026-07-08T00:03:00.000Z");
   assert.equal(state.confirmations[0].approved_by_user_id, USER_ID);
-  assert.equal(state.runs[0].message, "다음 작업을 계획하고 있습니다.");
+  assert.equal(state.runs[0].message, "다음 작업을 확인하고 있습니다.");
   assert.equal(workspaceService.calls.length, 1);
   assert.deepEqual(
     loggingService.calls.map((call) => call.method),
-    ["createToolExecutionClaim", "completeStep", "queueNextPlannerTurn"]
+    ["createToolExecutionClaim", "completeToolStepAndAdvance"]
   );
   assert.deepEqual(outboxPublisherService.calls, [RUN_ID]);
   assert.deepEqual(
@@ -669,7 +703,61 @@ function errorMessage(error) {
     "token" in loggingService.calls[1].input.resourceRefs[0].metadata,
     false
   );
-  assert.equal(loggingService.calls[2].input.riskLevel, "medium");
+  assert.equal(loggingService.calls[1].input.riskLevel, "medium");
+}
+
+{
+  const state = {
+    runs: [createRun()],
+    confirmations: [createConfirmation()],
+    toolCallLimitReached: true
+  };
+  const { service, loggingService, outboxPublisherService } = createService(state);
+
+  const result = await service.approveConfirmation(
+    USER_ID,
+    WORKSPACE_ID,
+    RUN_ID,
+    CONFIRMATION_ID,
+    undefined
+  );
+
+  assert.equal(result.run.status, "waiting_user_input");
+  assert.deepEqual(
+    loggingService.calls.map((call) => call.method),
+    ["createToolExecutionClaim", "completeToolStepAndAdvance"]
+  );
+  assert.deepEqual(outboxPublisherService.calls, []);
+}
+
+{
+  const state = {
+    runs: [createRun()],
+    confirmations: [createConfirmation()],
+    publisherError: new Error("SQS publish failed")
+  };
+  const { service, loggingService, outboxPublisherService } = createService(state);
+
+  const result = await service.approveConfirmation(
+    USER_ID,
+    WORKSPACE_ID,
+    RUN_ID,
+    CONFIRMATION_ID,
+    undefined
+  );
+
+  assert.equal(result.run.status, "planning");
+  assert.deepEqual(outboxPublisherService.calls, [RUN_ID]);
+  assert.deepEqual(
+    loggingService.calls.map((call) => call.method),
+    ["createToolExecutionClaim", "completeToolStepAndAdvance"]
+  );
+  assert.equal(
+    loggingService.calls.some(
+      (call) => call.method === "failStep" || call.method === "failRun"
+    ),
+    false
+  );
 }
 
 {

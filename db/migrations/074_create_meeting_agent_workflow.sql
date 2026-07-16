@@ -26,12 +26,16 @@ CREATE TABLE public.meeting_report_action_item_deliveries (
   status TEXT NOT NULL DEFAULT 'PENDING',
   calendar_event_id BIGINT
     REFERENCES public.calendar_events(id) ON DELETE RESTRICT,
-  pilo_issue_id UUID
+  pilo_issue_id BIGINT
     REFERENCES public.pilo_issues(id) ON DELETE RESTRICT,
+  requested_by_user_id UUID
+    REFERENCES public.users(id) ON DELETE SET NULL,
   draft_json JSONB NOT NULL,
   idempotency_key TEXT NOT NULL UNIQUE,
   attempt_count INTEGER NOT NULL DEFAULT 0,
   last_error_code TEXT,
+  claim_token UUID,
+  locked_until TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 
@@ -47,6 +51,11 @@ CREATE TABLE public.meeting_report_action_item_deliveries (
     CHECK (idempotency_key = btrim(idempotency_key) AND octet_length(idempotency_key) BETWEEN 1 AND 512),
   CONSTRAINT meeting_report_action_item_deliveries_error_code_check
     CHECK (last_error_code IS NULL OR octet_length(last_error_code) BETWEEN 1 AND 80),
+  CONSTRAINT meeting_report_action_item_deliveries_claim_check
+    CHECK (
+      (status = 'RUNNING' AND claim_token IS NOT NULL AND locked_until IS NOT NULL)
+      OR (status <> 'RUNNING' AND claim_token IS NULL AND locked_until IS NULL)
+    ),
   CONSTRAINT meeting_report_action_item_deliveries_target_check
     CHECK (
       (delivery_type = 'calendar_event' AND pilo_issue_id IS NULL)
@@ -67,6 +76,13 @@ CREATE INDEX idx_meeting_report_action_item_deliveries_calendar_event
 CREATE INDEX idx_meeting_report_action_item_deliveries_pilo_issue
   ON public.meeting_report_action_item_deliveries(pilo_issue_id)
   WHERE pilo_issue_id IS NOT NULL;
+
+CREATE INDEX idx_meeting_report_action_item_deliveries_requested_by
+  ON public.meeting_report_action_item_deliveries(requested_by_user_id);
+
+CREATE INDEX idx_meeting_report_action_item_deliveries_running_lease
+  ON public.meeting_report_action_item_deliveries(locked_until)
+  WHERE status = 'RUNNING';
 
 CREATE TRIGGER trg_meeting_report_action_item_deliveries_updated_at
 BEFORE UPDATE ON public.meeting_report_action_item_deliveries
@@ -90,9 +106,6 @@ CREATE TABLE public.meeting_report_decision_items (
   CONSTRAINT meeting_report_decision_items_text_check
     CHECK (text = btrim(text) AND octet_length(text) BETWEEN 1 AND 5000)
 );
-
-CREATE INDEX idx_meeting_report_decision_items_report_source
-  ON public.meeting_report_decision_items(meeting_report_id, source_index);
 
 ALTER TABLE public.meeting_report_decision_items ENABLE ROW LEVEL SECURITY;
 
@@ -125,6 +138,14 @@ ALTER TABLE public.agent_runs
   ADD CONSTRAINT agent_runs_tool_call_count_check
     CHECK (tool_call_count >= 0 AND tool_call_count <= 5);
 
+ALTER TABLE public.agent_run_outbox
+  ADD COLUMN turn_sequence INTEGER NOT NULL DEFAULT 1,
+  ADD COLUMN reason TEXT NOT NULL DEFAULT 'run_created',
+  ADD CONSTRAINT agent_run_outbox_turn_sequence_check
+    CHECK (turn_sequence >= 1),
+  ADD CONSTRAINT agent_run_outbox_reason_check
+    CHECK (reason IN ('run_created', 'user_input', 'tool_result'));
+
 CREATE TABLE public.agent_run_messages (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   run_id UUID NOT NULL REFERENCES public.agent_runs(id) ON DELETE CASCADE,
@@ -135,13 +156,10 @@ CREATE TABLE public.agent_run_messages (
 
   CONSTRAINT agent_run_messages_run_sequence_unique UNIQUE (run_id, sequence),
   CONSTRAINT agent_run_messages_role_check
-    CHECK (role IN ('user', 'assistant', 'tool')),
+    CHECK (role IN ('user', 'assistant')),
   CONSTRAINT agent_run_messages_content_check
     CHECK (content = btrim(content) AND octet_length(content) BETWEEN 1 AND 4000)
 );
-
-CREATE INDEX idx_agent_run_messages_run_sequence
-  ON public.agent_run_messages(run_id, sequence);
 
 ALTER TABLE public.agent_run_messages ENABLE ROW LEVEL SECURITY;
 
@@ -153,5 +171,11 @@ COMMENT ON TABLE public.meeting_report_decision_items IS
 
 COMMENT ON TABLE public.agent_run_messages IS
   'Append-only bounded multi-turn memory for one Agent run. It is never shared with another run.';
+
+COMMENT ON COLUMN public.agent_run_outbox.turn_sequence IS
+  'Monotonic planner turn generation. Delayed jobs from an older generation are ignored by the AI Worker.';
+
+COMMENT ON COLUMN public.agent_run_outbox.reason IS
+  'Safe reason that caused the current planner turn to be queued.';
 
 COMMIT;

@@ -1,6 +1,7 @@
 import json
 import logging
 
+from app.agent_processor import AGENT_TOOL_SCHEMA_VERSION, parse_agent_run_job_payload
 from app.job_dispatcher import JobProcessResult
 from app.meeting_report_runtime import (
     PgAgentRunRepository,
@@ -57,10 +58,10 @@ class FakeAgentRetryExhaustionRecovery:
     def __init__(self, result: bool = True, error: Exception | None = None) -> None:
         self.result = result
         self.error = error
-        self.calls: list[str] = []
+        self.calls: list[tuple[str, int]] = []
 
-    def fail_planning_after_retry_exhaustion(self, run_id: str) -> bool:
-        self.calls.append(run_id)
+    def fail_planning_after_retry_exhaustion(self, run_id: str, turn_sequence: int) -> bool:
+        self.calls.append((run_id, turn_sequence))
         if self.error:
             raise self.error
         return self.result
@@ -79,8 +80,17 @@ class FakeGroundedAnswerRetryExhaustionRecovery:
         return self.result
 
 
-class FakeCanvasAgentRetryExhaustionRecovery(FakeAgentRetryExhaustionRecovery):
-    pass
+class FakeCanvasAgentRetryExhaustionRecovery:
+    def __init__(self, result: bool = True, error: Exception | None = None) -> None:
+        self.result = result
+        self.error = error
+        self.calls: list[str] = []
+
+    def fail_planning_after_retry_exhaustion(self, run_id: str) -> bool:
+        self.calls.append(run_id)
+        if self.error:
+            raise self.error
+        return self.result
 
 
 class FakePrReviewRetryExhaustionRecovery:
@@ -167,6 +177,79 @@ class FakeGroundedAnswerRecoveryConnection:
         if "RETURNING workspace_id" in query:
             return FakeRecoveryCursor({"workspace_id": "workspace-1"})
         return FakeRecoveryCursor()
+
+    def transaction(self) -> FakeTransaction:
+        return FakeTransaction()
+
+
+class FakeAgentRetryRecoveryConnection:
+    def __init__(self, current_turn_sequence: int) -> None:
+        self.current_turn_sequence = current_turn_sequence
+        self.executed: list[tuple[str, tuple[object, ...]]] = []
+
+    def execute(self, query: str, values: tuple[object, ...]) -> FakeRecoveryCursor:
+        self.executed.append((query, values))
+        if "pg_try_advisory_lock" in query:
+            return FakeRecoveryCursor(FakeLockRow(True))
+        if "UPDATE agent_runs AS run" in query:
+            requested_turn_sequence = values[-1]
+            if requested_turn_sequence == self.current_turn_sequence:
+                return FakeRecoveryCursor({"workspace_id": "workspace-1"})
+            return FakeRecoveryCursor()
+        return FakeRecoveryCursor()
+
+    def transaction(self) -> FakeTransaction:
+        return FakeTransaction()
+
+
+class FakeAgentContextCursor:
+    def __init__(
+        self,
+        *,
+        row: dict[str, object] | None = None,
+        rows: list[dict[str, object]] | None = None,
+    ) -> None:
+        self.row = row
+        self.rows = rows or []
+
+    def fetchone(self) -> dict[str, object] | None:
+        return self.row
+
+    def fetchall(self) -> list[dict[str, object]]:
+        return self.rows
+
+
+class FakeAgentContextConnection:
+    def __init__(
+        self,
+        run_row: dict[str, object] | None,
+        timeline_rows: list[dict[str, object]] | None = None,
+    ) -> None:
+        self.run_row = run_row
+        self.timeline_rows = timeline_rows or []
+        self.executed: list[tuple[str, tuple[object, ...]]] = []
+
+    def execute(self, query: str, values: tuple[object, ...]) -> FakeAgentContextCursor:
+        self.executed.append((query, values))
+        if "INNER JOIN agent_run_outbox" in query:
+            return FakeAgentContextCursor(row=self.run_row)
+        if "WITH timeline AS" in query:
+            return FakeAgentContextCursor(rows=self.timeline_rows)
+        raise AssertionError(f"Unexpected query: {query}")
+
+
+class FakeAgentWaitConnection:
+    def __init__(self, update_row: dict[str, object] | None) -> None:
+        self.update_row = update_row
+        self.executed: list[tuple[str, tuple[object, ...]]] = []
+
+    def execute(self, query: str, values: tuple[object, ...]) -> FakeAgentContextCursor:
+        self.executed.append((query, values))
+        if "UPDATE agent_runs" in query:
+            return FakeAgentContextCursor(row=self.update_row)
+        if "INSERT INTO agent_run_messages" in query:
+            return FakeAgentContextCursor()
+        raise AssertionError(f"Unexpected query: {query}")
 
     def transaction(self) -> FakeTransaction:
         return FakeTransaction()
@@ -338,7 +421,13 @@ def test_sqs_worker_terminalizes_third_agent_infrastructure_failure() -> None:
     sqs_client.receive_message = lambda **kwargs: {
         "Messages": [
             {
-                "Body": '{"jobType":"agent_run_requested"}',
+                "Body": json.dumps(
+                    {
+                        "jobType": "agent_run_requested",
+                        "runId": "run-1",
+                        "turnSequence": 4,
+                    }
+                ),
                 "ReceiptHandle": "receipt-terminal",
                 "MessageId": "message-terminal",
                 "Attributes": {"ApproximateReceiveCount": "3"},
@@ -355,7 +444,7 @@ def test_sqs_worker_terminalizes_third_agent_infrastructure_failure() -> None:
 
     worker.run_once()
 
-    assert recovery.calls == ["run-1"]
+    assert recovery.calls == [("run-1", 4)]
     assert sqs_client.deleted == [
         {
             "QueueUrl": "https://sqs.example.com/jobs",
@@ -379,7 +468,13 @@ def test_sqs_worker_preserves_agent_message_when_terminalization_fails() -> None
     sqs_client.receive_message = lambda **kwargs: {
         "Messages": [
             {
-                "Body": '{"jobType":"agent_run_requested"}',
+                "Body": json.dumps(
+                    {
+                        "jobType": "agent_run_requested",
+                        "runId": "run-1",
+                        "turnSequence": 4,
+                    }
+                ),
                 "ReceiptHandle": "receipt-dlq",
                 "MessageId": "message-dlq",
                 "Attributes": {"ApproximateReceiveCount": "3"},
@@ -396,7 +491,7 @@ def test_sqs_worker_preserves_agent_message_when_terminalization_fails() -> None
 
     worker.run_once()
 
-    assert recovery.calls == ["run-1"]
+    assert recovery.calls == [("run-1", 4)]
     assert sqs_client.deleted == []
 
 
@@ -415,7 +510,13 @@ def test_sqs_worker_preserves_agent_message_when_terminalization_errors() -> Non
     sqs_client.receive_message = lambda **kwargs: {
         "Messages": [
             {
-                "Body": '{"jobType":"agent_run_requested"}',
+                "Body": json.dumps(
+                    {
+                        "jobType": "agent_run_requested",
+                        "runId": "run-1",
+                        "turnSequence": 4,
+                    }
+                ),
                 "ReceiptHandle": "receipt-db-error",
                 "MessageId": "message-db-error",
                 "Attributes": {"ApproximateReceiveCount": "3"},
@@ -432,7 +533,7 @@ def test_sqs_worker_preserves_agent_message_when_terminalization_errors() -> Non
 
     worker.run_once()
 
-    assert recovery.calls == ["run-1"]
+    assert recovery.calls == [("run-1", 4)]
     assert sqs_client.deleted == []
 
 
@@ -636,8 +737,42 @@ def test_retry_terminalizer_preserves_message_when_planner_lock_is_held() -> Non
     connection = FakeLockConnection(acquired=False)
     repository.connection = connection
 
-    assert repository.fail_planning_after_retry_exhaustion("run-1") is False
+    assert repository.fail_planning_after_retry_exhaustion("run-1", 1) is False
     assert connection.transaction_calls == 0
+
+
+def test_retry_terminalizer_does_not_fail_rearmed_newer_planner_turn() -> None:
+    repository = object.__new__(PgAgentRunRepository)
+    connection = FakeAgentRetryRecoveryConnection(current_turn_sequence=2)
+    repository.connection = connection
+
+    assert repository.fail_planning_after_retry_exhaustion("run-1", 1) is False
+
+    run_update_query, run_update_values = next(
+        (query, values)
+        for query, values in connection.executed
+        if "UPDATE agent_runs AS run" in query
+    )
+    assert "outbox.turn_sequence = %s" in run_update_query
+    assert run_update_values[-1] == 1
+    assert not any("UPDATE agent_steps" in query for query, _values in connection.executed)
+    assert not any("INSERT INTO agent_logs" in query for query, _values in connection.executed)
+
+
+def test_retry_terminalizer_fails_only_matching_planner_turn_generation() -> None:
+    repository = object.__new__(PgAgentRunRepository)
+    connection = FakeAgentRetryRecoveryConnection(current_turn_sequence=2)
+    repository.connection = connection
+
+    assert repository.fail_planning_after_retry_exhaustion("run-1", 2) is True
+
+    assert any("UPDATE agent_steps" in query for query, _values in connection.executed)
+    assert any("INSERT INTO agent_logs" in query for query, _values in connection.executed)
+    assert any(
+        '"turnSequence": 2' in str(values)
+        for query, values in connection.executed
+        if "INSERT INTO agent_logs" in query
+    )
 
 
 def test_retry_terminalizer_preserves_message_when_grounded_answer_lock_is_held() -> None:
@@ -664,6 +799,124 @@ def test_retry_terminalizer_fails_grounded_answer_run_and_outbox() -> None:
     assert any(
         "AGENT_GROUNDED_ANSWER_RETRY_EXHAUSTED" in values for _query, values in connection.executed
     )
+
+
+def test_agent_repository_rejects_stale_outbox_turn_generation() -> None:
+    repository = object.__new__(PgAgentRunRepository)
+    connection = FakeAgentContextConnection(run_row=None)
+    repository.connection = connection
+    job = parse_agent_run_job_payload(
+        {
+            "jobType": "agent_run_requested",
+            "runId": "33333333-3333-3333-3333-333333333333",
+            "workspaceId": "22222222-2222-2222-2222-222222222222",
+            "requestedByUserId": "11111111-1111-1111-1111-111111111111",
+            "toolSchemaVersion": AGENT_TOOL_SCHEMA_VERSION,
+            "turnSequence": 7,
+            "tools": [],
+        }
+    )
+
+    assert repository.get_run_context(job) is None
+    assert len(connection.executed) == 1
+    query, values = connection.executed[0]
+    assert "outbox.turn_sequence = %s" in query
+    assert values == (
+        7,
+        "33333333-3333-3333-3333-333333333333",
+        "22222222-2222-2222-2222-222222222222",
+        "11111111-1111-1111-1111-111111111111",
+    )
+
+
+def test_agent_repository_builds_bounded_chronological_context() -> None:
+    repository = object.__new__(PgAgentRunRepository)
+    connection = FakeAgentContextConnection(
+        run_row={
+            "id": "33333333-3333-3333-3333-333333333333",
+            "workspace_id": "22222222-2222-2222-2222-222222222222",
+            "requested_by_user_id": "11111111-1111-1111-1111-111111111111",
+            "status": "planning",
+            "prompt": "그 회의를 다시 연결해줘",
+            "timezone": "Asia/Seoul",
+            "planner_turn_count": 2,
+        },
+        timeline_rows=[
+            {
+                "item_kind": "message",
+                "role": "user",
+                "content": "회의방을 찾아줘",
+                "tool_name": None,
+                "output_json": None,
+            },
+            {
+                "item_kind": "tool_step",
+                "role": "tool",
+                "content": None,
+                "tool_name": "get_active_meeting",
+                "output_json": {"meetingId": "meeting-1"},
+            },
+            {
+                "item_kind": "message",
+                "role": "user",
+                "content": "회의 상태 조회가 끝났나요?",
+                "tool_name": None,
+                "output_json": None,
+            },
+            {
+                "item_kind": "message",
+                "role": "assistant",
+                "content": "현재 회의를 찾았습니다.",
+                "tool_name": None,
+                "output_json": None,
+            },
+        ],
+    )
+    repository.connection = connection
+    job = parse_agent_run_job_payload(
+        {
+            "jobType": "agent_run_requested",
+            "runId": "33333333-3333-3333-3333-333333333333",
+            "workspaceId": "22222222-2222-2222-2222-222222222222",
+            "requestedByUserId": "11111111-1111-1111-1111-111111111111",
+            "toolSchemaVersion": AGENT_TOOL_SCHEMA_VERSION,
+            "turnSequence": 3,
+            "tools": [],
+        }
+    )
+
+    context = repository.get_run_context(job)
+
+    assert context is not None
+    assert context.planning_context.splitlines() == [
+        "user: 회의방을 찾아줘",
+        'tool get_active_meeting: {"meetingId": "meeting-1"}',
+        "user: 회의 상태 조회가 끝났나요?",
+        "assistant: 현재 회의를 찾았습니다.",
+    ]
+    timeline_query, timeline_values = connection.executed[1]
+    assert "UNION ALL" in timeline_query
+    assert "ORDER BY occurred_at DESC" in timeline_query
+    assert "LIMIT 17" in timeline_query
+    assert "ORDER BY occurred_at ASC" in timeline_query
+    assert timeline_values == (job.run_id, job.run_id)
+
+
+def test_agent_repository_appends_clarification_only_after_state_transition() -> None:
+    repository = object.__new__(PgAgentRunRepository)
+    rejected_connection = FakeAgentWaitConnection(update_row=None)
+    repository.connection = rejected_connection
+
+    assert repository.wait_for_user_input("run-1", "추가 정보가 필요합니다.") is False
+    assert len(rejected_connection.executed) == 1
+
+    accepted_connection = FakeAgentWaitConnection(update_row={"id": "run-1"})
+    repository.connection = accepted_connection
+
+    assert repository.wait_for_user_input("run-1", "추가 정보가 필요합니다.") is True
+    assert len(accepted_connection.executed) == 2
+    assert "RETURNING id" in accepted_connection.executed[0][0]
+    assert "INSERT INTO agent_run_messages" in accepted_connection.executed[1][0]
 
 
 def test_sqs_worker_sweeps_stale_agent_executions_on_interval() -> None:

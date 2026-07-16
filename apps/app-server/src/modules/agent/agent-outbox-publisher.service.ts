@@ -32,6 +32,7 @@ interface AgentOutboxClaimRow extends QueryResultRow {
   requested_by_user_id: string;
   attempt_count: number | string;
   claim_token: string;
+  turn_sequence: number | string;
 }
 
 @Injectable()
@@ -117,6 +118,7 @@ export class AgentOutboxPublisherService
         runId: claim.run_id,
         workspaceId: claim.workspace_id,
         requestedByUserId: claim.requested_by_user_id,
+        turnSequence: Number(claim.turn_sequence),
         toolSchemaVersion: AGENT_TOOL_SCHEMA_VERSION,
         tools: this.buildToolSchemaSnapshot()
       });
@@ -167,7 +169,8 @@ export class AgentOutboxPublisherService
             outbox.workspace_id,
             run.requested_by_user_id,
             outbox.attempt_count,
-            outbox.claim_token
+            outbox.claim_token,
+            outbox.turn_sequence
         `,
         [runId, OUTBOX_CLAIM_TIMEOUT_SECONDS, claimToken]
       )

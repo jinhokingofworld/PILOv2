@@ -501,12 +501,6 @@ export class AgentExecutionService {
 
     const outputSummary = this.sanitizeJsonObject(clarification.outputSummary);
     const resourceRefs = this.sanitizeResourceRefs(clarification.resourceRefs);
-    await this.agentLoggingService.completeStep(currentUserId, workspaceId, {
-      runId,
-      stepId: step.id,
-      outputSummary,
-      resourceRefs
-    });
     const answer =
       typeof outputSummary.question === "string" && outputSummary.question.trim()
         ? outputSummary.question.trim()
@@ -517,19 +511,23 @@ export class AgentExecutionService {
             prompt,
             timezone
           });
-    const run = await this.agentLoggingService.waitForUserInput(
+    const advanced = await this.agentLoggingService.completeToolStepAndAdvance(
       currentUserId,
       workspaceId,
       {
         runId,
+        stepId: step.id,
+        outputSummary,
+        resourceRefs,
         riskLevel: definition.riskLevel,
-        message: answer
+        waitingMessage: answer,
+        waitForUserInput: true
       }
     );
 
     return {
       status: "waiting_user_input",
-      run
+      run: advanced.run
     };
   }
 
@@ -579,40 +577,35 @@ export class AgentExecutionService {
 
       if (definition.requiresGroundedAnswer) {
         await this.agentGroundedAnswerService.completeToolAndQueue({ currentUserId, workspaceId, runId, stepId: step.id, outputSummary, resourceRefs });
-        await this.agentGroundedAnswerOutboxPublisherService.publish(runId);
+        await this.agentGroundedAnswerOutboxPublisherService
+          .publish(runId)
+          .catch(() => undefined);
         return { status: "skipped", reason: "already_started" };
       }
 
-      await this.agentLoggingService.completeStep(currentUserId, workspaceId, {
-        runId,
-        stepId: step.id,
-        outputSummary,
-        resourceRefs
-      });
-
-      const queued = await this.agentLoggingService.queueNextPlannerTurn(
-        currentUserId,
-        workspaceId,
-        { runId, riskLevel: definition.riskLevel }
-      );
-      if (queued) {
-        await this.agentOutboxPublisherService.publishCreatedRun(runId);
-        return { status: "skipped", reason: "already_started" };
-      }
-
-      const run = await this.agentLoggingService.waitForUserInput(
+      const advanced = await this.agentLoggingService.completeToolStepAndAdvance(
         currentUserId,
         workspaceId,
         {
           runId,
+          stepId: step.id,
+          outputSummary,
+          resourceRefs,
           riskLevel: definition.riskLevel,
-          message: "한 요청에서 실행할 수 있는 작업은 최대 5회입니다. 다음 요청에서 계속 진행할 내용을 알려주세요."
+          waitingMessage:
+            "한 요청에서 실행할 수 있는 작업은 최대 5회입니다. 다음 요청에서 계속 진행할 내용을 알려주세요."
         }
       );
+      if (advanced.queuedNextPlannerTurn) {
+        await this.agentOutboxPublisherService
+          .publishCreatedRun(runId)
+          .catch(() => undefined);
+        return { status: "skipped", reason: "already_started" };
+      }
 
       return {
         status: "waiting_user_input",
-        run
+        run: advanced.run
       };
     } catch (error) {
       const safeMessage = this.toSafeErrorMessage(
@@ -620,12 +613,19 @@ export class AgentExecutionService {
         "Agent tool execution failed"
       );
 
-      await this.agentLoggingService.failStep(currentUserId, workspaceId, {
-        runId,
-        stepId: step.id,
-        errorCode: "AGENT_TOOL_EXECUTION_FAILED",
-        errorMessage: safeMessage
-      });
+      const failedStep = await this.agentLoggingService.failStep(
+        currentUserId,
+        workspaceId,
+        {
+          runId,
+          stepId: step.id,
+          errorCode: "AGENT_TOOL_EXECUTION_FAILED",
+          errorMessage: safeMessage
+        }
+      );
+      if (failedStep.status === "completed") {
+        return { status: "skipped", reason: "already_started" };
+      }
 
       const run = await this.agentLoggingService.failRun(
         currentUserId,

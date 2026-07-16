@@ -763,55 +763,85 @@ class PgAgentRunRepository:
         row = self.connection.execute(
             """
             SELECT
-              id,
-              workspace_id,
-              requested_by_user_id,
-              status,
-              prompt,
-              timezone,
-              planner_turn_count
-            FROM agent_runs
-            WHERE id = %s
-              AND workspace_id = %s
-              AND requested_by_user_id = %s
+              run.id,
+              run.workspace_id,
+              run.requested_by_user_id,
+              run.status,
+              run.prompt,
+              run.timezone,
+              run.planner_turn_count
+            FROM agent_runs AS run
+            INNER JOIN agent_run_outbox AS outbox
+              ON outbox.run_id = run.id
+             AND outbox.turn_sequence = %s
+            WHERE run.id = %s
+              AND run.workspace_id = %s
+              AND run.requested_by_user_id = %s
             LIMIT 1
             """,
-            (job.run_id, job.workspace_id, job.requested_by_user_id),
+            (
+                job.turn_sequence,
+                job.run_id,
+                job.workspace_id,
+                job.requested_by_user_id,
+            ),
         ).fetchone()
 
         if row is None:
             return None
 
-        message_rows = self.connection.execute(
+        timeline_rows = self.connection.execute(
             """
-            SELECT role, content
-            FROM agent_run_messages
-            WHERE run_id = %s
-            ORDER BY sequence DESC
-            LIMIT 12
+            WITH timeline AS (
+              SELECT
+                message.created_at AS occurred_at,
+                message.sequence AS item_order,
+                1 AS kind_order,
+                'message'::TEXT AS item_kind,
+                message.role,
+                message.content,
+                NULL::TEXT AS tool_name,
+                NULL::JSONB AS output_json
+              FROM agent_run_messages AS message
+              WHERE message.run_id = %s
+
+              UNION ALL
+
+              SELECT
+                COALESCE(step.completed_at, step.updated_at, step.created_at) AS occurred_at,
+                step.step_order AS item_order,
+                0 AS kind_order,
+                'tool_step'::TEXT AS item_kind,
+                'tool'::TEXT AS role,
+                NULL::TEXT AS content,
+                step.tool_name,
+                step.output_json
+              FROM agent_steps AS step
+              WHERE step.run_id = %s
+                AND step.step_type = 'tool'
+                AND step.status = 'completed'
+            ), recent_timeline AS (
+              SELECT *
+              FROM timeline
+              ORDER BY occurred_at DESC, kind_order DESC, item_order DESC
+              LIMIT 17
+            )
+            SELECT item_kind, role, content, tool_name, output_json
+            FROM recent_timeline
+            ORDER BY occurred_at ASC, kind_order ASC, item_order ASC
             """,
-            (job.run_id,),
-        ).fetchall()
-        tool_rows = self.connection.execute(
-            """
-            SELECT tool_name, output_json
-            FROM agent_steps
-            WHERE run_id = %s
-              AND step_type = 'tool'
-              AND status = 'completed'
-            ORDER BY step_order DESC
-            LIMIT 5
-            """,
-            (job.run_id,),
+            (job.run_id, job.run_id),
         ).fetchall()
         memory: list[str] = []
-        for message in reversed(message_rows):
-            content = str(message["content"]).strip()[:1000]
+        for item in timeline_rows:
+            if item["item_kind"] == "tool_step":
+                output = json.dumps(item["output_json"], ensure_ascii=False)[:3000]
+                memory.append(f"tool {item['tool_name']}: {output}")
+                continue
+
+            content = str(item["content"]).strip()[:1000]
             if content:
-                memory.append(f"{message['role']}: {content}")
-        for tool in reversed(tool_rows):
-            output = json.dumps(tool["output_json"], ensure_ascii=False)[:3000]
-            memory.append(f"tool {tool['tool_name']}: {output}")
+                memory.append(f"{item['role']}: {content}")
 
         return AgentRunContext(
             run_id=str(row["id"]),
@@ -995,21 +1025,25 @@ class PgAgentRunRepository:
             (error_code, error_message, message, run_id),
         )
 
-    def wait_for_user_input(self, run_id: str, message: str) -> None:
+    def wait_for_user_input(self, run_id: str, message: str) -> bool:
         with self.connection.transaction():
-            self.connection.execute(
+            run = self.connection.execute(
                 """
                 UPDATE agent_runs
                 SET status = 'waiting_user_input',
                     message = %s,
-                    final_answer = %s,
+                    final_answer = NULL,
                     completed_at = NULL,
                     updated_at = now()
                 WHERE id = %s
                   AND status = 'planning'
+                RETURNING id
                 """,
-                (message, message, run_id),
-            )
+                (message, run_id),
+            ).fetchone()
+            if run is None:
+                return False
+
             self.connection.execute(
                 """
                 INSERT INTO agent_run_messages (run_id, sequence, role, content)
@@ -1019,8 +1053,13 @@ class PgAgentRunRepository:
                 """,
                 (run_id, message, run_id),
             )
+            return True
 
-    def fail_planning_after_retry_exhaustion(self, run_id: str) -> bool:
+    def fail_planning_after_retry_exhaustion(
+        self,
+        run_id: str,
+        turn_sequence: int,
+    ) -> bool:
         if not self.try_acquire_run_lock(run_id):
             return False
 
@@ -1028,7 +1067,7 @@ class PgAgentRunRepository:
             with self.connection.transaction():
                 run = self.connection.execute(
                     """
-                    UPDATE agent_runs
+                    UPDATE agent_runs AS run
                     SET
                       status = 'failed',
                       error_code = %s,
@@ -1036,15 +1075,19 @@ class PgAgentRunRepository:
                       message = %s,
                       completed_at = now(),
                       updated_at = now()
-                    WHERE id = %s
-                      AND status = 'planning'
-                    RETURNING workspace_id
+                    FROM agent_run_outbox AS outbox
+                    WHERE run.id = %s
+                      AND run.status = 'planning'
+                      AND outbox.run_id = run.id
+                      AND outbox.turn_sequence = %s
+                    RETURNING run.workspace_id
                     """,
                     (
                         AGENT_RETRY_EXHAUSTED_ERROR_CODE,
                         AGENT_RETRY_EXHAUSTED_ERROR_MESSAGE,
                         AGENT_RETRY_EXHAUSTED_ERROR_MESSAGE,
                         run_id,
+                        turn_sequence,
                     ),
                 ).fetchone()
 
@@ -1097,7 +1140,12 @@ class PgAgentRunRepository:
                         str(run["workspace_id"]),
                         run_id,
                         "Agent planner retries exhausted",
-                        json.dumps({"maxReceiveCount": AGENT_RETRY_TERMINAL_RECEIVE_COUNT}),
+                        json.dumps(
+                            {
+                                "maxReceiveCount": AGENT_RETRY_TERMINAL_RECEIVE_COUNT,
+                                "turnSequence": turn_sequence,
+                            }
+                        ),
                     ),
                 )
                 return True
@@ -1432,7 +1480,7 @@ class SqsAiJobWorker:
                 )
             should_delete = (
                 result.delete_message
-                or self._terminalize_agent_retry(result, message)
+                or self._terminalize_agent_retry(result, message, body)
                 or self._terminalize_grounded_answer_retry(result, message)
                 or self._terminalize_canvas_agent_retry(result, message)
                 or self._terminalize_pr_review_analysis_retry(result, message, body)
@@ -1489,7 +1537,12 @@ class SqsAiJobWorker:
 
         return processed
 
-    def _terminalize_agent_retry(self, result: Any, message: dict[str, Any]) -> bool:
+    def _terminalize_agent_retry(
+        self,
+        result: Any,
+        message: dict[str, Any],
+        message_body: str,
+    ) -> bool:
         if (
             self.agent_retry_exhaustion_recovery is None
             or result.job_type != "agent_run_requested"
@@ -1499,10 +1552,15 @@ class SqsAiJobWorker:
         ):
             return False
 
+        turn_sequence = self._agent_run_turn_sequence(message_body, result.resource_id)
+        if turn_sequence is None:
+            return False
+
         try:
             return bool(
                 self.agent_retry_exhaustion_recovery.fail_planning_after_retry_exhaustion(
-                    result.resource_id
+                    result.resource_id,
+                    turn_sequence,
                 )
             )
         except Exception:
@@ -1512,6 +1570,26 @@ class SqsAiJobWorker:
                 message.get("MessageId"),
             )
             return False
+
+    @staticmethod
+    def _agent_run_turn_sequence(message_body: str, run_id: str) -> int | None:
+        try:
+            payload = json.loads(message_body)
+        except (json.JSONDecodeError, TypeError):
+            return None
+
+        if not isinstance(payload, dict) or payload.get("runId") != run_id:
+            return None
+
+        turn_sequence = payload.get("turnSequence", 1)
+        if (
+            isinstance(turn_sequence, bool)
+            or not isinstance(turn_sequence, int)
+            or turn_sequence < 1
+            or turn_sequence > 2_147_483_647
+        ):
+            return None
+        return turn_sequence
 
     def _terminalize_grounded_answer_retry(
         self,
