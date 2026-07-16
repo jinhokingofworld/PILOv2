@@ -11,9 +11,12 @@ import {
 import {
   DefaultColorStyle,
   DefaultDashStyle,
+  DefaultFillStyle,
   DefaultSizeStyle,
   GeoShapeGeoStyle,
+  exportAs,
   type Editor,
+  type TLGeoShapeGeoStyle,
   type TLShape,
   type TLShapeId,
   type TLShapePartial,
@@ -108,6 +111,8 @@ type CanvasBoardDetail = {
 
 export type PiloCanvasTool =
   | "select"
+  | "hand"
+  | "laser"
   | "note"
   | "draw"
   | "text"
@@ -132,7 +137,85 @@ export type PiloDrawingPreset =
   | "eraser"
   | "rectangle"
   | "circle"
-  | "triangle";
+  | "triangle"
+  | "diamond"
+  | "hexagon"
+  | "ellipse"
+  | "oval"
+  | "rhombus"
+  | "rhombus-2"
+  | "star"
+  | "cloud"
+  | "heart"
+  | "x-box"
+  | "check-box"
+  | "arrow-left"
+  | "arrow-up"
+  | "arrow-down"
+  | "arrow-right";
+
+export type PiloCanvasFill = "none" | "semi" | "solid" | "fill";
+export type PiloCanvasDash = "draw" | "dashed" | "dotted" | "solid";
+export type PiloCanvasSize = "s" | "m" | "l" | "xl";
+export type PiloCanvasSelectionAction =
+  | "select-all"
+  | "duplicate"
+  | "group"
+  | "ungroup"
+  | "bring-to-front"
+  | "send-to-back"
+  | "align-left"
+  | "align-center"
+  | "align-right"
+  | "align-top"
+  | "align-middle"
+  | "align-bottom"
+  | "distribute-horizontal"
+  | "distribute-vertical"
+  | "delete";
+export type PiloCanvasExportFormat = "png" | "svg";
+export type PiloCanvasExportScope = "selection" | "canvas";
+export type PiloCanvasUserPreference =
+  | "paste-at-cursor"
+  | "wrap-text"
+  | "reduce-motion";
+export type PiloCanvasUserPreferenceState = Record<
+  PiloCanvasUserPreference,
+  boolean
+>;
+export type PiloCanvasStyleState = {
+  dash: PiloCanvasDash | null;
+  fill: PiloCanvasFill | null;
+  opacity: number | null;
+  size: PiloCanvasSize | null;
+};
+
+const piloGeoStyleByDrawingPreset: Partial<
+  Record<PiloDrawingPreset, TLGeoShapeGeoStyle>
+> = {
+  rectangle: "rectangle",
+  circle: "ellipse",
+  triangle: "triangle",
+  diamond: "diamond",
+  hexagon: "hexagon",
+  ellipse: "ellipse",
+  oval: "oval",
+  rhombus: "rhombus",
+  "rhombus-2": "rhombus-2",
+  star: "star",
+  cloud: "cloud",
+  heart: "heart",
+  "x-box": "x-box",
+  "check-box": "check-box",
+  "arrow-left": "arrow-left",
+  "arrow-up": "arrow-up",
+  "arrow-down": "arrow-down",
+  "arrow-right": "arrow-right",
+};
+
+function getCanvasExportName(title: string) {
+  return title.replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-").trim() || "PILO Canvas";
+}
 
 export type PiloCanvasActions = {
   markUiEventAsHandled: (event: PointerEvent<HTMLElement>) => void;
@@ -140,8 +223,24 @@ export type PiloCanvasActions = {
   selectTool: (tool: PiloCanvasTool) => void;
   selectDrawingPreset: (preset: PiloDrawingPreset) => void;
   setColor: (color: PiloCanvasColor) => void;
+  setFill: (fill: PiloCanvasFill) => void;
+  setDash: (dash: PiloCanvasDash) => void;
+  setSize: (size: PiloCanvasSize) => void;
+  setOpacity: (opacity: number) => void;
+  getStyleState: () => PiloCanvasStyleState;
   createInsertableShape: (tool: PiloInsertableTool, url: string) => void;
   groupSelection: () => void;
+  performSelectionAction: (action: PiloCanvasSelectionAction) => void;
+  exportCanvas: (
+    format: PiloCanvasExportFormat,
+    scope: PiloCanvasExportScope,
+    background: boolean,
+  ) => Promise<boolean>;
+  setUserPreference: (
+    preference: PiloCanvasUserPreference,
+    enabled: boolean,
+  ) => void;
+  getUserPreferences: () => PiloCanvasUserPreferenceState;
   setSmartGuidesEnabled: (enabled: boolean) => void;
   createNote: () => void;
   createCodeBlock: () => void;
@@ -163,9 +262,15 @@ export type PiloCanvasSnapState = {
   isSmartGuideEnabled: boolean;
 };
 
+export type PiloCanvasShapePatch = {
+  deletedShapeIds: string[];
+  upsertShapes: PiloCanvasFreeformShape[];
+};
+
 type PiloTldrawCanvasProps = {
   board: CanvasBoardDetail;
   cameraRestoreVersion: number;
+  consumeShapePatch: () => PiloCanvasShapePatch;
   hydrationVersion: number;
   initialViewSetting: PiloCanvasViewSetting;
   freeformShapes: PiloCanvasFreeformShape[];
@@ -179,6 +284,7 @@ type PiloTldrawCanvasProps = {
   onFrameChildShapesUnload: (shapes: PiloCanvasFreeformShape[]) => void;
   onFrameChildrenRequest: (frameId: string) => void;
   getPreservedFreeformShapeSnapshots?: () => PiloCanvasFreeformShape[];
+  isShapePatchProtected: (shapeId: string) => boolean;
   onViewportBoundsChange: (bounds: PiloCanvasViewportBounds) => void;
   onShapeDetailRequest: (request: PiloCanvasShapeDetailRequest) => void;
   onHistoryStateChange: (state: PiloCanvasHistoryState) => void;
@@ -188,6 +294,7 @@ type PiloTldrawCanvasProps = {
   presence?: CanvasPresenceController;
   onSnapStateChange: (state: PiloCanvasSnapState) => void;
   onOneShotToolCreated?: () => void;
+  shapePatchVersion: number;
   canvasAgentEnabled?: boolean;
 };
 
@@ -200,6 +307,7 @@ const CANVAS_AI_CHAT_HOLD_MS = 500;
 const CANVAS_PENDING_PREVIEW_GROUP_TTL_MS = 30_000;
 const CANVAS_PENDING_PREVIEW_HEARTBEAT_MS = 1_500;
 const CANVAS_REMOTE_PREVIEW_DELETE_GRACE_MS = 8_000;
+const CANVAS_SHAPE_PREVIEW_THROTTLE_MS = 60;
 const CANVAS_PRESENCE_CURSOR_MIN_DISTANCE = 2;
 const CANVAS_PRESENCE_CURSOR_THROTTLE_MS = 60;
 const connectionTools = new Set<PiloCanvasTool>(["arrow", "line"]);
@@ -223,6 +331,12 @@ type PendingRealtimePreviewGroup = {
   id: string;
   shapeIds: Set<string>;
   snapshots: Map<string, PiloCanvasFreeformShape>;
+};
+
+type PendingShapePreviewPayload = {
+  deletedShapeIds: string[];
+  phase: CanvasShapePreviewPhase;
+  shapes: Record<string, unknown>[];
 };
 
 function getRestorableToolId(toolId: string) {
@@ -699,6 +813,97 @@ function syncFreeformShapesIncrementally(
   });
 }
 
+function applyFreeformShapePatchIncrementally(
+  editor: Editor,
+  patch: PiloCanvasShapePatch,
+  pendingArrowBindingsRef: MutableRefObject<PiloArrowBindingSnapshot[]>,
+  piloDefaultArrowKindHydrationGuardRef: MutableRefObject<boolean>,
+) {
+  const deletedShapeIdSet = new Set(patch.deletedShapeIds);
+  const shapesToCreate: PiloCanvasFreeformShape[] = [];
+  const shapesToUpdate: PiloCanvasFreeformShape[] = [];
+  const shapeIdsToDelete = new Set<TLShapeId>();
+  const changedShapesForBindingRestore: PiloCanvasFreeformShape[] = [];
+
+  patch.deletedShapeIds.forEach((shapeId) => {
+    const currentShape = editor.getShape(shapeId as TLShapeId);
+
+    if (currentShape) {
+      shapeIdsToDelete.add(currentShape.id as TLShapeId);
+    }
+  });
+
+  patch.upsertShapes.forEach((shape) => {
+    const shapeId = getFreeformShapeId(shape);
+
+    if (!shapeId || deletedShapeIdSet.has(shapeId)) return;
+
+    const currentShape = editor.getShape(shapeId as TLShapeId);
+
+    if (!currentShape) {
+      shapesToCreate.push(shape);
+      changedShapesForBindingRestore.push(shape);
+      return;
+    }
+
+    if (currentShape.type !== shape.type) {
+      shapeIdsToDelete.add(currentShape.id as TLShapeId);
+      shapesToCreate.push(shape);
+      changedShapesForBindingRestore.push(shape);
+      return;
+    }
+
+    if (hasFreeformShapeChanged(editor, currentShape, shape)) {
+      shapesToUpdate.push(shape);
+      changedShapesForBindingRestore.push(shape);
+    }
+  });
+
+  if (
+    !shapeIdsToDelete.size &&
+    !shapesToCreate.length &&
+    !shapesToUpdate.length
+  ) {
+    return;
+  }
+
+  editor.store.mergeRemoteChanges(() => {
+    editor.run(
+      () => {
+        if (shapeIdsToDelete.size) {
+          editor.deleteShapes([...shapeIdsToDelete]);
+        }
+
+        if (shapesToCreate.length || shapesToUpdate.length) {
+          restorePiloShapeAssets(editor, [...shapesToCreate, ...shapesToUpdate]);
+        }
+
+        if (shapesToCreate.length) {
+          piloDefaultArrowKindHydrationGuardRef.current = true;
+          try {
+            editor.createShapes(sortFreeformShapesForCreate(shapesToCreate));
+          } finally {
+            piloDefaultArrowKindHydrationGuardRef.current = false;
+          }
+        }
+
+        if (shapesToUpdate.length) {
+          editor.updateShapes(shapesToUpdate as TLShapePartial<TLShape>[]);
+        }
+
+        if (changedShapesForBindingRestore.length) {
+          restoreFreeformShapeBindings(
+            editor,
+            changedShapesForBindingRestore,
+            pendingArrowBindingsRef,
+          );
+        }
+      },
+      { history: "ignore" },
+    );
+  });
+}
+
 function collectFrameDescendantShapes(editor: Editor, frameId: TLShapeId) {
   const shapes = editor.getCurrentPageShapes();
   const descendantIds = new Set<TLShapeId>();
@@ -944,6 +1149,7 @@ function getArrowAtPoint(editor: Editor, pagePoint: { x: number; y: number }) {
 export function PiloTldrawCanvas({
   board,
   cameraRestoreVersion,
+  consumeShapePatch,
   freeformShapes,
   hydrationVersion,
   initialViewSetting,
@@ -954,6 +1160,7 @@ export function PiloTldrawCanvas({
   onFrameChildShapesUnload,
   onFrameChildrenRequest,
   getPreservedFreeformShapeSnapshots,
+  isShapePatchProtected,
   onViewportBoundsChange,
   onShapeDetailRequest,
   onHistoryStateChange,
@@ -961,6 +1168,7 @@ export function PiloTldrawCanvas({
   presence,
   onSnapStateChange,
   onOneShotToolCreated,
+  shapePatchVersion,
   canvasAgentEnabled = false,
 }: PiloTldrawCanvasProps) {
   const editorRef = useRef<Editor | null>(null);
@@ -980,6 +1188,11 @@ export function PiloTldrawCanvas({
   const freeformShapesRef = useRef(freeformShapes);
   const localPreviewShapeIdsRef = useRef<string[]>([]);
   const localPreviewPhaseRef = useRef<CanvasShapePreviewPhase | null>(null);
+  const pendingShapePreviewPayloadRef =
+    useRef<PendingShapePreviewPayload | null>(null);
+  const shapePreviewSendTimerRef =
+    useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastShapePreviewSentAtRef = useRef(0);
   const pendingRealtimePreviewGroupsRef = useRef(
     new Map<string, PendingRealtimePreviewGroup>(),
   );
@@ -1019,6 +1232,43 @@ export function PiloTldrawCanvas({
     onApplied: handleCanvasAgentApplied,
     workspaceId: board.workspaceId,
   });
+  const scheduleShapePreviewSend = useCallback(
+    (payload: PendingShapePreviewPayload) => {
+      if (!presence?.enabled) return;
+
+      pendingShapePreviewPayloadRef.current = payload;
+
+      if (shapePreviewSendTimerRef.current) {
+        return;
+      }
+
+      const elapsed = Date.now() - lastShapePreviewSentAtRef.current;
+      const delay = Math.max(0, CANVAS_SHAPE_PREVIEW_THROTTLE_MS - elapsed);
+
+      const flushPreview = () => {
+        shapePreviewSendTimerRef.current = null;
+        const nextPayload = pendingShapePreviewPayloadRef.current;
+
+        pendingShapePreviewPayloadRef.current = null;
+        if (!nextPayload) return;
+
+        presence.sendShapePreview(
+          nextPayload.shapes,
+          nextPayload.phase,
+          nextPayload.deletedShapeIds,
+        );
+        lastShapePreviewSentAtRef.current = Date.now();
+      };
+
+      if (delay === 0) {
+        flushPreview();
+        return;
+      }
+
+      shapePreviewSendTimerRef.current = setTimeout(flushPreview, delay);
+    },
+    [presence?.enabled, presence?.sendShapePreview],
+  );
 
   useEffect(() => {
     onOneShotToolCreatedRef.current = onOneShotToolCreated;
@@ -1167,13 +1417,17 @@ export function PiloTldrawCanvas({
 
       if (!previewShapes.length && !deletedShapeIds.length) return;
 
-      presence.sendShapePreview(
-        previewShapes as unknown as Record<string, unknown>[],
-        deletedShapeIds.length ? "delete" : (phase ?? "unknown"),
+      scheduleShapePreviewSend({
         deletedShapeIds,
-      );
+        phase: deletedShapeIds.length ? "delete" : (phase ?? "unknown"),
+        shapes: previewShapes as unknown as Record<string, unknown>[],
+      });
     },
-    [presence, registerPendingRealtimePreviewGroup],
+    [
+      presence?.enabled,
+      registerPendingRealtimePreviewGroup,
+      scheduleShapePreviewSend,
+    ],
   );
 
   const handleLocalInteractionChange = useCallback(
@@ -1235,6 +1489,12 @@ export function PiloTldrawCanvas({
         clearTimeout(frameChildrenRequestTimerRef.current);
         frameChildrenRequestTimerRef.current = null;
       }
+
+      if (shapePreviewSendTimerRef.current) {
+        clearTimeout(shapePreviewSendTimerRef.current);
+        shapePreviewSendTimerRef.current = null;
+      }
+      pendingShapePreviewPayloadRef.current = null;
     },
     [],
   );
@@ -1266,6 +1526,19 @@ export function PiloTldrawCanvas({
 
     lastHydratedSeedKeyRef.current = seedKey;
   }, [getPreservedFreeformShapeSnapshots, hydrationVersion, seedKey]);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+
+    if (!editor) return;
+
+    applyFreeformShapePatchIncrementally(
+      editor,
+      consumeShapePatch(),
+      pendingArrowBindingsRef,
+      piloDefaultArrowKindHydrationGuardRef,
+    );
+  }, [consumeShapePatch, shapePatchVersion]);
 
   useEffect(() => {
     const editor = editorRef.current;
@@ -1558,7 +1831,11 @@ export function PiloTldrawCanvas({
         deactivatePiloEraser(editor);
         placementRequestRef.current = null;
         returnToSelectAfterPlacementRef.current =
-          tool !== "select" && tool !== "text" && !connectionTools.has(tool);
+          tool !== "select" &&
+          tool !== "hand" &&
+          tool !== "laser" &&
+          tool !== "text" &&
+          !connectionTools.has(tool);
         editor.cancel();
         editor.updateInstanceState({ isToolLocked: false });
         editor.setCurrentTool(tool === "select" ? "select.idle" : tool);
@@ -1582,20 +1859,9 @@ export function PiloTldrawCanvas({
           return;
         }
 
-        if (preset === "rectangle") {
-          editor.setStyleForNextShapes(GeoShapeGeoStyle, "rectangle");
-          editor.setCurrentTool("geo");
-          return;
-        }
-
-        if (preset === "circle") {
-          editor.setStyleForNextShapes(GeoShapeGeoStyle, "ellipse");
-          editor.setCurrentTool("geo");
-          return;
-        }
-
-        if (preset === "triangle") {
-          editor.setStyleForNextShapes(GeoShapeGeoStyle, "triangle");
+        const geoStyle = piloGeoStyleByDrawingPreset[preset];
+        if (geoStyle) {
+          editor.setStyleForNextShapes(GeoShapeGeoStyle, geoStyle);
           editor.setCurrentTool("geo");
           return;
         }
@@ -1641,6 +1907,81 @@ export function PiloTldrawCanvas({
           editor.setStyleForSelectedShapes(DefaultColorStyle, color);
         }
       },
+      setFill(fill) {
+        editor.setStyleForNextShapes(DefaultFillStyle, fill);
+
+        if (editor.getSelectedShapeIds().length) {
+          editor.setStyleForSelectedShapes(DefaultFillStyle, fill);
+        }
+      },
+      setDash(dash) {
+        editor.setStyleForNextShapes(DefaultDashStyle, dash);
+
+        if (editor.getSelectedShapeIds().length) {
+          editor.setStyleForSelectedShapes(DefaultDashStyle, dash);
+        }
+      },
+      setSize(size) {
+        editor.setStyleForNextShapes(DefaultSizeStyle, size);
+
+        if (editor.getSelectedShapeIds().length) {
+          editor.setStyleForSelectedShapes(DefaultSizeStyle, size);
+        }
+      },
+      setOpacity(opacity) {
+        const nextOpacity = Math.min(1, Math.max(0.1, opacity));
+
+        editor.setOpacityForNextShapes(nextOpacity);
+
+        if (editor.getSelectedShapeIds().length) {
+          editor.setOpacityForSelectedShapes(nextOpacity);
+        }
+      },
+      getStyleState() {
+        const sharedStyles = editor.getSharedStyles();
+        const sharedDash = sharedStyles.get(DefaultDashStyle);
+        const sharedFill = sharedStyles.get(DefaultFillStyle);
+        const sharedSize = sharedStyles.get(DefaultSizeStyle);
+        const sharedOpacity = editor.getSharedOpacity();
+        const dash =
+          sharedDash?.type === "shared"
+            ? sharedDash.value
+            : sharedDash?.type === "mixed"
+              ? null
+              : editor.getStyleForNextShape(DefaultDashStyle);
+        const fill =
+          sharedFill?.type === "shared"
+            ? sharedFill.value
+            : sharedFill?.type === "mixed"
+              ? null
+              : editor.getStyleForNextShape(DefaultFillStyle);
+        const size =
+          sharedSize?.type === "shared"
+            ? sharedSize.value
+            : sharedSize?.type === "mixed"
+              ? null
+              : editor.getStyleForNextShape(DefaultSizeStyle);
+
+        return {
+          dash:
+            dash === "draw" ||
+            dash === "dashed" ||
+            dash === "dotted" ||
+            dash === "solid"
+              ? dash
+              : null,
+          fill:
+            fill === "none" ||
+            fill === "semi" ||
+            fill === "solid" ||
+            fill === "fill"
+              ? fill
+              : null,
+          opacity:
+            sharedOpacity.type === "shared" ? sharedOpacity.value : null,
+          size,
+        };
+      },
       createNote() {
         deactivatePiloEraser(editor);
         placementRequestRef.current = null;
@@ -1674,6 +2015,101 @@ export function PiloTldrawCanvas({
         if (selectedShapeIds.length < 2) return;
 
         editor.groupShapes(selectedShapeIds);
+      },
+      performSelectionAction(action) {
+        if (action === "select-all") {
+          editor.selectAll();
+          return;
+        }
+
+        const selectedShapeIds = editor.getSelectedShapeIds();
+        if (!selectedShapeIds.length) return;
+
+        switch (action) {
+          case "duplicate":
+            editor.duplicateShapes(selectedShapeIds, { x: 16, y: 16 });
+            break;
+          case "group":
+            if (selectedShapeIds.length > 1) {
+              editor.groupShapes(selectedShapeIds);
+            }
+            break;
+          case "ungroup":
+            editor.ungroupShapes(selectedShapeIds);
+            break;
+          case "bring-to-front":
+            editor.bringToFront(selectedShapeIds);
+            break;
+          case "send-to-back":
+            editor.sendToBack(selectedShapeIds);
+            break;
+          case "align-left":
+            editor.alignShapes(selectedShapeIds, "left");
+            break;
+          case "align-center":
+            editor.alignShapes(selectedShapeIds, "center-horizontal");
+            break;
+          case "align-right":
+            editor.alignShapes(selectedShapeIds, "right");
+            break;
+          case "align-top":
+            editor.alignShapes(selectedShapeIds, "top");
+            break;
+          case "align-middle":
+            editor.alignShapes(selectedShapeIds, "center-vertical");
+            break;
+          case "align-bottom":
+            editor.alignShapes(selectedShapeIds, "bottom");
+            break;
+          case "distribute-horizontal":
+            editor.distributeShapes(selectedShapeIds, "horizontal");
+            break;
+          case "distribute-vertical":
+            editor.distributeShapes(selectedShapeIds, "vertical");
+            break;
+          case "delete":
+            deleteSelectedShapes(editor);
+            break;
+        }
+      },
+      async exportCanvas(format, scope, background) {
+        const shapeIds =
+          scope === "selection"
+            ? editor.getSelectedShapeIds()
+            : [...editor.getCurrentPageShapeIds()];
+
+        if (!shapeIds.length) return false;
+
+        await exportAs(editor, shapeIds, {
+          background,
+          format,
+          name: getCanvasExportName(board.title),
+        });
+        return true;
+      },
+      setUserPreference(preference, enabled) {
+        switch (preference) {
+          case "paste-at-cursor":
+            editor.user.updateUserPreferences({
+              isPasteAtCursorMode: enabled,
+            });
+            break;
+          case "wrap-text":
+            editor.user.updateUserPreferences({ isWrapMode: enabled });
+            break;
+          case "reduce-motion":
+            editor.user.updateUserPreferences({
+              animationSpeed: enabled ? 0 : 1,
+            });
+            break;
+        }
+      },
+      getUserPreferences() {
+        return {
+          "paste-at-cursor": editor.user.getIsPasteAtCursorMode(),
+          "reduce-motion": editor.user.getAnimationSpeed() === 0,
+          "wrap-text": editor.user.getIsWrapMode(),
+        };
       },
       setSmartGuidesEnabled(enabled) {
         editor.user.updateUserPreferences({ isSnapMode: enabled });
@@ -2166,7 +2602,9 @@ export function PiloTldrawCanvas({
           />
           <CanvasRealtimePreviewApplier
             committedShapes={freeformShapes}
+            isShapePatchProtected={isShapePatchProtected}
             originalShapesRef={remotePreviewOriginalShapesRef}
+            protectionVersion={shapePatchVersion}
             previewShapeIdsRef={remotePreviewShapeIdsRef}
             previews={presence?.remoteShapePreviews ?? []}
           />
@@ -2262,16 +2700,29 @@ function CanvasLocalInteractionReporter({
 
 function CanvasRealtimePreviewApplier({
   committedShapes,
+  isShapePatchProtected,
   originalShapesRef,
+  protectionVersion,
   previewShapeIdsRef,
   previews,
 }: {
   committedShapes: PiloCanvasFreeformShape[];
+  isShapePatchProtected: (shapeId: string) => boolean;
   originalShapesRef: MutableRefObject<Map<string, PiloCanvasFreeformShape>>;
+  protectionVersion: number;
   previewShapeIdsRef: MutableRefObject<Set<string>>;
   previews: CanvasShapePreviewEventPayload[];
 }) {
   const editor = useEditor();
+  const locallyEditingShapeId = useValue(
+    "pilo-preview-local-editing-shape-id",
+    () => {
+      const editingShapeId = editor.getEditingShapeId();
+
+      return editingShapeId ? String(editingShapeId) : null;
+    },
+    [editor],
+  );
   const [previewDeleteCleanupVersion, setPreviewDeleteCleanupVersion] =
     useState(0);
   const previewDeleteGraceSinceRef = useRef(new Map<string, number>());
@@ -2294,14 +2745,26 @@ function CanvasRealtimePreviewApplier({
         const shapeId = getFreeformShapeId(previewShape);
 
         if (!shapeId) return;
-
         activePreviewShapeIds.add(shapeId);
+        if (
+          shapeId === locallyEditingShapeId ||
+          isShapePatchProtected(shapeId)
+        ) {
+          return;
+        }
+
         previewShapesById.set(shapeId, previewShape);
       });
       preview.deletedShapeIds?.forEach((shapeId) => {
         if (!shapeId) return;
-
         activePreviewShapeIds.add(shapeId);
+        if (
+          shapeId === locallyEditingShapeId ||
+          isShapePatchProtected(shapeId)
+        ) {
+          return;
+        }
+
         previewDeletedShapeIds.add(shapeId);
       });
     });
@@ -2317,8 +2780,18 @@ function CanvasRealtimePreviewApplier({
     });
 
     const previousPreviewShapeIds = new Set(previewShapeIdsRef.current);
+    const deferredProtectedRestoreShapeIds = Array.from(
+      previousPreviewShapeIds,
+    ).filter(
+      (shapeId) =>
+        !activePreviewShapeIds.has(shapeId) &&
+        (shapeId === locallyEditingShapeId ||
+          isShapePatchProtected(shapeId)),
+    );
     const shapeIdsToRestore = Array.from(previousPreviewShapeIds).filter(
-      (shapeId) => !activePreviewShapeIds.has(shapeId),
+      (shapeId) =>
+        !activePreviewShapeIds.has(shapeId) &&
+        !deferredProtectedRestoreShapeIds.includes(shapeId),
     );
     const now = Date.now();
     const shapeIdsToDelete = shapeIdsToRestore.filter(
@@ -2362,6 +2835,7 @@ function CanvasRealtimePreviewApplier({
     }
     const trackedPreviewShapeIds = new Set([
       ...activePreviewShapeIds,
+      ...deferredProtectedRestoreShapeIds,
       ...pendingDeleteGraceShapeIds,
     ]);
 
@@ -2480,10 +2954,13 @@ function CanvasRealtimePreviewApplier({
   }, [
     committedShapes,
     editor,
+    isShapePatchProtected,
+    locallyEditingShapeId,
     originalShapesRef,
     previewDeleteCleanupVersion,
     previewShapeIdsRef,
     previews,
+    protectionVersion,
   ]);
 
   useEffect(
@@ -2904,6 +3381,7 @@ function getCanvasPresenceEditingMode({
     return editingShape && isPiloCodeBlockShape(editingShape) ? "code" : "text";
   }
 
+  if (currentToolId.includes("laser")) return null;
   if (currentToolId.includes("draw")) return "draw";
   if (currentToolId.includes("hand")) return "hand";
   if (currentToolId.includes("resize")) return "resize";
