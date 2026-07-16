@@ -284,3 +284,151 @@ test("target 실패는 source route의 camera와 element viewport를 정확히 �
     assert.equal(coordinator.getPending(), null);
   }
 });
+
+test("trailing slash만 다른 같은 route는 navigate 없이 즉시 복원한다", async () => {
+  const navigated = [];
+  const restored = [];
+  const registry = createWorkspaceLocationRegistry();
+  registry.register({
+    capture: () => location("home"),
+    page: "home",
+    ready: true,
+    restore: async (target) => {
+      restored.push(target.page);
+      return true;
+    },
+  });
+  const coordinator = createWorkspaceJumpCoordinator({
+    getCurrentHref: () => "/home/",
+    navigate: (href) => navigated.push(href),
+    onError: () => {},
+    registry,
+    rollback: () => {},
+  });
+
+  assert.equal(await coordinator.jump(location("home", "/home")), true);
+  assert.deepEqual(navigated, []);
+  assert.deepEqual(restored, ["home"]);
+  assert.equal(coordinator.getPending(), null);
+});
+
+test("trailing slash가 붙은 target route도 destination ready로 인정한다", async () => {
+  let currentHref = "/home/";
+  const restored = [];
+  const registry = createWorkspaceLocationRegistry();
+  registry.register({
+    capture: () => location("home"),
+    page: "home",
+    ready: true,
+    restore: async () => true,
+  });
+  const coordinator = createWorkspaceJumpCoordinator({
+    getCurrentHref: () => currentHref,
+    navigate: (href) => {
+      currentHref = `${href}/`;
+    },
+    onError: () => {},
+    registry,
+    rollback: () => {},
+  });
+
+  await coordinator.jump(location("calendar", "/calendar"));
+  registry.register({
+    capture: () => location("calendar"),
+    page: "calendar",
+    ready: true,
+    restore: async (target) => {
+      restored.push(target.page);
+      return true;
+    },
+  });
+
+  assert.equal(await coordinator.destinationReady(), true);
+  assert.deepEqual(restored, ["calendar"]);
+  assert.equal(coordinator.getPending(), null);
+});
+
+test("trailing slash를 정규화해도 query string이 다르면 target route로 인정하지 않는다", async () => {
+  let currentHref = "/home/";
+  let restoreCount = 0;
+  const target = {
+    ...location("calendar", "/calendar"),
+    route: { pathname: "/calendar", search: "?date=2026-07-16" },
+  };
+  const registry = createWorkspaceLocationRegistry();
+  registry.register({
+    capture: () => location("home"),
+    page: "home",
+    ready: true,
+    restore: async () => true,
+  });
+  const coordinator = createWorkspaceJumpCoordinator({
+    clearTimer: () => {},
+    getCurrentHref: () => currentHref,
+    navigate: () => {
+      currentHref = "/calendar/?date=2026-07-17";
+    },
+    onError: () => {},
+    registry,
+    rollback: () => {},
+    setTimer: () => 1,
+  });
+
+  await coordinator.jump(target);
+  registry.register({
+    capture: () => target,
+    page: "calendar",
+    ready: true,
+    restore: async () => {
+      restoreCount += 1;
+      return true;
+    },
+  });
+
+  assert.equal(await coordinator.destinationReady(), false);
+  assert.equal(restoreCount, 0);
+  assert.equal(coordinator.getPending()?.phase, "target");
+});
+
+test("rollback 후 source route에 붙은 trailing slash를 허용하고 source 위치를 복원한다", async () => {
+  let currentHref = "/home";
+  const errors = [];
+  const restoredSources = [];
+  const source = location("home", "/home");
+  const registry = createWorkspaceLocationRegistry();
+  registry.register({
+    capture: () => source,
+    page: "home",
+    ready: true,
+    restore: async (target) => {
+      restoredSources.push(target);
+      return true;
+    },
+  });
+  const coordinator = createWorkspaceJumpCoordinator({
+    clearTimer: () => {},
+    getCurrentHref: () => currentHref,
+    navigate: (href) => {
+      currentHref = href;
+    },
+    onError: (message) => errors.push(message),
+    registry,
+    rollback: (href) => {
+      currentHref = `${href}/`;
+    },
+    setTimer: () => 1,
+  });
+
+  await coordinator.jump(location("calendar", "/calendar"));
+  registry.register({
+    capture: () => location("calendar"),
+    page: "calendar",
+    ready: true,
+    restore: async () => false,
+  });
+  await coordinator.destinationReady();
+
+  assert.deepEqual(restoredSources, [source]);
+  assert.deepEqual(errors, [WORKSPACE_JUMP_ERROR_MESSAGE]);
+  assert.equal(coordinator.getPending(), null);
+});
