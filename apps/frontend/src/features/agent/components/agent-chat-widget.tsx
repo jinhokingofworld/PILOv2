@@ -31,6 +31,7 @@ import {
   createAgentApiClient
 } from "@/features/agent/api/client";
 import { AgentConfirmationCard } from "@/features/agent/components/agent-confirmation-card";
+import { AgentResourceLinks } from "@/features/agent/components/agent-resource-links";
 import { readAgentRequestContext } from "@/features/agent/request-context";
 import {
   didAgentRunAcceptInput,
@@ -844,6 +845,9 @@ export function AgentChatWidget() {
                             void handleConfirmationAction(message, "reject")
                           }
                         />
+                      ) : null}
+                      {message.run ? (
+                        <AgentResourceLinks run={message.run} />
                       ) : null}
                     </div>
                   </div>

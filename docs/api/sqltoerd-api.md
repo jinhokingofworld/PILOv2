@@ -200,6 +200,45 @@ PostgreSQL과 MySQL DDL은 입력 table 순서나 순환 참조와 무관하게 
   한 transaction에서 commit한다. operation은 일반 source publish와 같은 `opSeq`
   순서 및 realtime/catch-up 경로를 사용한다.
 
+### Agent tool adapter와 결과 계약
+
+공개 tool 이름은 `generate_sql_erd` 하나이며 `riskLevel=medium`,
+`executionMode=contextual`이다. AI Worker가 만드는 공개 input은 위의
+`SqlErdSchemaSpecV1` 전체 object다. `targetMode`, session·Workspace·사용자 식별자는
+공개 input에 포함하지 않으며 App Server가 저장된 run context에서만 결정한다.
+
+- SQLtoERD context가 없으면 신규 세션 mutation을 즉시 실행한다.
+- `{ surface: "sql_erd", sessionId }` context가 있으면 session 접근과 write protocol을 다시 검증한다.
+  `snapshot` session에서는 `new_session`만 제공하고, `operations_v1` session에서는
+  `replace_current`도 제공한다.
+- approve 요청은 `choiceId`만 받는다. 저장된 plan의 schemaSpec과 current session ID를
+  App Server가 복원·검증한 뒤 선택한 mutation을 실행한다.
+- 신규 세션과 교체 모두 `agentRunId`를 domain mutation의 멱등성 식별자로 사용한다.
+- step output은 `action`, `title`, `dialect`, `tableCount`, `relationCount`, 고유 warning
+  code만 저장한다. sourceText, DDL, modelJson, layoutJson은 Agent step에 복제하지 않는다.
+
+완료 결과는 다음 resource ref 하나를 반환한다.
+
+```ts
+type SqlErdAgentResourceRef = {
+  domain: "sqltoerd";
+  resourceType: "session";
+  resourceId: string;
+  label: string;
+  url: `/sql-erd/session?sessionId=${string}`;
+  status: "created" | "replaced";
+  metadata: {
+    dialect: "auto" | "postgresql" | "mysql" | "sqlite";
+    tableCount: number;
+    relationCount: number;
+  };
+};
+```
+
+Frontend는 completed run의 completed step만 확인하고, `url`이 정확한 same-origin
+SQLtoERD session 상대 경로이며 query의 session ID가 `resourceId`와 일치할 때만
+`ERD 및 DDL 열기` 링크를 표시한다. 자동 navigation은 하지 않는다.
+
 ## Realtime Presence (Phase 1)
 
 SQLtoERD 편집 화면은 REST session API와 별도로 Socket.IO presence room을 사용할 수
