@@ -1433,6 +1433,94 @@ export async function createRealtimeSocketServer({
       });
     });
 
+    socket.on(canvasClientEvents.historyUndo, (payload) => {
+      const room = readRoomRef(payload);
+
+      if (!room) {
+        emitCanvasError(socket, "canvas:room:history:undo payload is invalid");
+        return;
+      }
+
+      const roomName = createCanvasRoomName(room);
+
+      if (!socket.rooms.has(roomName)) {
+        socket.emit(
+          canvasServerEvents.error,
+          createSocketErrorPayload(
+            "room_not_joined",
+            "join canvas room before undoing room history",
+          ),
+        );
+        return;
+      }
+
+      if (!assertCanvasRoomWritable(authedSocket, roomName)) {
+        return;
+      }
+
+      const historyPatch = roomStateService.undoLastHistory(room, {
+        actorUserId: authedSocket.data.auth.userId ?? socket.id,
+      });
+
+      if (!historyPatch) return;
+
+      roomCheckpointService.scheduleCheckpoint(room, authedSocket.data.auth.token);
+      io.to(roomName).emit(canvasServerEvents.shapePatch, {
+        ...room,
+        actorUserId: authedSocket.data.auth.userId ?? socket.id,
+        canRedo: historyPatch.canRedo,
+        canUndo: historyPatch.canUndo,
+        deletedShapeIds: historyPatch.deletedShapeIds,
+        historySeq: historyPatch.historySeq,
+        sentAt: new Date().toISOString(),
+        upsertShapes: historyPatch.upsertShapes,
+      });
+    });
+
+    socket.on(canvasClientEvents.historyRedo, (payload) => {
+      const room = readRoomRef(payload);
+
+      if (!room) {
+        emitCanvasError(socket, "canvas:room:history:redo payload is invalid");
+        return;
+      }
+
+      const roomName = createCanvasRoomName(room);
+
+      if (!socket.rooms.has(roomName)) {
+        socket.emit(
+          canvasServerEvents.error,
+          createSocketErrorPayload(
+            "room_not_joined",
+            "join canvas room before redoing room history",
+          ),
+        );
+        return;
+      }
+
+      if (!assertCanvasRoomWritable(authedSocket, roomName)) {
+        return;
+      }
+
+      const historyPatch = roomStateService.redoLastHistory(room, {
+        actorUserId: authedSocket.data.auth.userId ?? socket.id,
+      });
+
+      if (!historyPatch) return;
+
+      roomCheckpointService.scheduleCheckpoint(room, authedSocket.data.auth.token);
+      io.to(roomName).emit(canvasServerEvents.shapePatch, {
+        ...room,
+        actorUserId: authedSocket.data.auth.userId ?? socket.id,
+        canRedo: historyPatch.canRedo,
+        canUndo: historyPatch.canUndo,
+        deletedShapeIds: historyPatch.deletedShapeIds,
+        historySeq: historyPatch.historySeq,
+        sentAt: new Date().toISOString(),
+        upsertShapes: historyPatch.upsertShapes,
+      });
+    });
+
     socket.on(canvasClientEvents.shapePreview, async (payload) => {
       const previewPayload = readShapePreviewPayload(payload);
 

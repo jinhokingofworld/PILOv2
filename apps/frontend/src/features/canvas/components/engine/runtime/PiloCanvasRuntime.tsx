@@ -5,7 +5,7 @@ import {
   QueryClientProvider,
   useQueryClient,
 } from "@tanstack/react-query";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CanvasShapeOperationPayload } from "@/features/canvas/api/canvas-types";
 import {
   isRecord,
@@ -756,10 +756,6 @@ function PiloCanvasRuntimeInner({
     };
   }, [canvasSyncNotice]);
 
-  useEffect(() => {
-    onReady(canvasActions);
-  }, [canvasActions, onReady]);
-
   useCanvasRuntimeHydration({
     board,
     freeformShapesRef,
@@ -820,6 +816,34 @@ function PiloCanvasRuntimeInner({
     deletedShapeIdsRef,
     unloadedShapeIdsRef,
   });
+
+  const roomAwareCanvasActions = useMemo(() => {
+    if (!canvasActions) return null;
+    if (!persistThroughRoomState) return canvasActions;
+
+    return {
+      ...canvasActions,
+      redo() {
+        if (canvasPresence.redoRoomHistory()) return;
+
+        canvasActions.redo();
+      },
+      undo() {
+        if (canvasPresence.undoRoomHistory()) return;
+
+        canvasActions.undo();
+      },
+    };
+  }, [
+    canvasActions,
+    canvasPresence.redoRoomHistory,
+    canvasPresence.undoRoomHistory,
+    persistThroughRoomState,
+  ]);
+
+  useEffect(() => {
+    onReady(roomAwareCanvasActions);
+  }, [onReady, roomAwareCanvasActions]);
 
   useEffect(() => {
     hydrateRoomShapesRef.current = (rawShapes: Record<string, unknown>[]) => {
@@ -946,7 +970,7 @@ function PiloCanvasRuntimeInner({
   );
 
   const toggleSmartGuides = useCallback(() => {
-    if (!canvasActions) return;
+    if (!roomAwareCanvasActions) return;
 
     const nextState = {
       isSmartGuideEnabled: !canvasSnapState.isSmartGuideEnabled,
@@ -954,8 +978,12 @@ function PiloCanvasRuntimeInner({
 
     setCanvasSnapState(nextState);
     onSnapStateChange?.(nextState);
-    canvasActions.setSmartGuidesEnabled(nextState.isSmartGuideEnabled);
-  }, [canvasActions, canvasSnapState.isSmartGuideEnabled, onSnapStateChange]);
+    roomAwareCanvasActions.setSmartGuidesEnabled(nextState.isSmartGuideEnabled);
+  }, [
+    canvasSnapState.isSmartGuideEnabled,
+    onSnapStateChange,
+    roomAwareCanvasActions,
+  ]);
 
   return (
     <>
@@ -997,7 +1025,7 @@ function PiloCanvasRuntimeInner({
       </section>
 
       <CanvasZoomControls
-        canvasActions={canvasActions}
+        canvasActions={roomAwareCanvasActions}
         canvasSnapState={canvasSnapState}
         onToggleSmartGuides={toggleSmartGuides}
         viewSetting={viewSetting}

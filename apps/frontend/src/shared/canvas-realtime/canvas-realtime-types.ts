@@ -246,6 +246,9 @@ export type CanvasRoomShapePatchPayload = {
 
 export type CanvasRoomShapePatchEventPayload = CanvasRoomShapePatchPayload & {
   actorUserId: string;
+  canRedo?: boolean;
+  canUndo?: boolean;
+  historySeq?: number;
   sentAt: string;
 };
 
@@ -312,6 +315,8 @@ export type CanvasServerToClientEvents = {
 export type CanvasClientToServerEvents = {
   "canvas:join": (payload: CanvasJoinPayload) => void;
   "canvas:leave": (payload: CanvasJoinPayload) => void;
+  "canvas:room:history:redo": (payload: CanvasJoinPayload) => void;
+  "canvas:room:history:undo": (payload: CanvasJoinPayload) => void;
   "canvas:presence:update": (payload: CanvasPresenceUpdatePayload) => void;
   "canvas:shape:lock:claim": (payload: CanvasShapeLockClaimPayload) => void;
   "canvas:shape:lock:release": (

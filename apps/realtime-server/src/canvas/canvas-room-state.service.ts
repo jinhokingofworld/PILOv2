@@ -33,6 +33,14 @@ export type CanvasRoomHistoryState = {
   historySeq: number;
 };
 
+export type CanvasRoomHistoryPatch = {
+  canRedo: boolean;
+  canUndo: boolean;
+  deletedShapeIds: string[];
+  historySeq: number;
+  upsertShapes: Record<string, unknown>[];
+};
+
 export type CanvasRoomStateService = {
   applyShapePatch: (
     room: CanvasRoomRef,
@@ -56,6 +64,14 @@ export type CanvasRoomStateService = {
     operations: CanvasCheckpointSyncOperation[],
     result?: unknown,
   ) => void;
+  redoLastHistory: (
+    room: CanvasRoomRef,
+    options?: { actorUserId?: string | null },
+  ) => CanvasRoomHistoryPatch | null;
+  undoLastHistory: (
+    room: CanvasRoomRef,
+    options?: { actorUserId?: string | null },
+  ) => CanvasRoomHistoryPatch | null;
 };
 
 function isCoveringRegion(
@@ -225,6 +241,7 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
   function pushRoomHistoryItem(
     roomName: string,
     item: Omit<CanvasRoomHistoryItem, "createdAt" | "id" | "seq">,
+    options: { clearRedo?: boolean } = {},
   ) {
     const seq = getNextHistorySeq(roomName);
     const historyItem: CanvasRoomHistoryItem = {
@@ -237,7 +254,9 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
 
     history.push(historyItem);
     historyByRoom.set(roomName, history.slice(-MAX_ROOM_HISTORY_ITEMS));
-    redoHistoryByRoom.delete(roomName);
+    if (options.clearRedo ?? true) {
+      redoHistoryByRoom.delete(roomName);
+    }
   }
 
   function recordRoomHistoryChange({
@@ -264,6 +283,81 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
       before: cloneShapeRecord(before),
       shapeId,
     });
+  }
+
+  function buildHistoryPatchFromState(roomName: string) {
+    return {
+      canRedo: Boolean(redoHistoryByRoom.get(roomName)?.length),
+      canUndo: Boolean(historyByRoom.get(roomName)?.length),
+      historySeq: historySeqByRoom.get(roomName) ?? 0,
+    };
+  }
+
+  function applyHistoryPatch(
+    roomName: string,
+    patch: { deletedShapeIds: string[]; upsertShapes: Record<string, unknown>[] },
+  ) {
+    upsertRoomShapes(roomName, patch.upsertShapes, { markDirty: true });
+
+    if (!patch.deletedShapeIds.length) return;
+
+    const shapeCache = getRoomShapeCache(roomName);
+    const deletedTombstones = getRoomTombstones(roomName);
+    const dirtyShapeIds = getRoomShapeIdSet(dirtyShapeIdsByRoom, roomName);
+
+    patch.deletedShapeIds.forEach((shapeId) => {
+      const normalizedShapeId = shapeId.trim();
+
+      if (!normalizedShapeId) return;
+
+      const deletedShape = shapeCache.get(normalizedShapeId)?.shape;
+
+      shapeCache.delete(normalizedShapeId);
+      deletedTombstones.set(normalizedShapeId, readShapeRevision(deletedShape));
+      dirtyShapeIds.add(normalizedShapeId);
+    });
+  }
+
+  function createUndoPatch(historyItem: CanvasRoomHistoryItem) {
+    if (historyItem.action === "create") {
+      return {
+        deletedShapeIds: [historyItem.shapeId],
+        upsertShapes: [],
+      };
+    }
+
+    if (!historyItem.before) {
+      return {
+        deletedShapeIds: [historyItem.shapeId],
+        upsertShapes: [],
+      };
+    }
+
+    return {
+      deletedShapeIds: [],
+      upsertShapes: [cloneShapeRecord(historyItem.before) ?? historyItem.before],
+    };
+  }
+
+  function createRedoPatch(historyItem: CanvasRoomHistoryItem) {
+    if (historyItem.action === "delete") {
+      return {
+        deletedShapeIds: [historyItem.shapeId],
+        upsertShapes: [],
+      };
+    }
+
+    if (!historyItem.after) {
+      return {
+        deletedShapeIds: [historyItem.shapeId],
+        upsertShapes: [],
+      };
+    }
+
+    return {
+      deletedShapeIds: [],
+      upsertShapes: [cloneShapeRecord(historyItem.after) ?? historyItem.after],
+    };
   }
 
   function getRoomCheckpointOperationIds(roomName: string) {
@@ -629,11 +723,7 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
     getHistoryState(room) {
       const roomName = createCanvasRoomName(room);
 
-      return {
-        canRedo: Boolean(redoHistoryByRoom.get(roomName)?.length),
-        canUndo: Boolean(historyByRoom.get(roomName)?.length),
-        historySeq: historySeqByRoom.get(roomName) ?? 0,
-      };
+      return buildHistoryPatchFromState(roomName);
     },
 
     getLoadedRegions(room) {
@@ -693,6 +783,66 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
           historySeqByRoom.get(roomName) ?? null,
         );
       }
+    },
+
+    redoLastHistory(room, options = {}) {
+      const roomName = createCanvasRoomName(room);
+      const redoHistory = redoHistoryByRoom.get(roomName);
+      const historyItem = redoHistory?.pop();
+
+      if (!redoHistory || !historyItem) return null;
+      if (!redoHistory.length) {
+        redoHistoryByRoom.delete(roomName);
+      }
+
+      const patch = createRedoPatch(historyItem);
+
+      applyHistoryPatch(roomName, patch);
+      pushRoomHistoryItem(
+        roomName,
+        {
+          action: historyItem.action,
+          actorUserId: options.actorUserId?.trim() || historyItem.actorUserId,
+          after: cloneShapeRecord(historyItem.after),
+          before: cloneShapeRecord(historyItem.before),
+          shapeId: historyItem.shapeId,
+        },
+        { clearRedo: false },
+      );
+
+      return {
+        ...patch,
+        ...buildHistoryPatchFromState(roomName),
+      };
+    },
+
+    undoLastHistory(room, options = {}) {
+      const roomName = createCanvasRoomName(room);
+      const history = historyByRoom.get(roomName);
+      const historyItem = history?.pop();
+
+      if (!history || !historyItem) return null;
+      if (!history.length) {
+        historyByRoom.delete(roomName);
+      }
+
+      const patch = createUndoPatch(historyItem);
+
+      applyHistoryPatch(roomName, patch);
+      getNextHistorySeq(roomName);
+
+      const redoHistory = redoHistoryByRoom.get(roomName) ?? [];
+
+      redoHistory.push({
+        ...historyItem,
+        actorUserId: options.actorUserId?.trim() || historyItem.actorUserId,
+      });
+      redoHistoryByRoom.set(roomName, redoHistory.slice(-MAX_ROOM_HISTORY_ITEMS));
+
+      return {
+        ...patch,
+        ...buildHistoryPatchFromState(roomName),
+      };
     },
   };
 }

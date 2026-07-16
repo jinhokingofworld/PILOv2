@@ -193,6 +193,9 @@ export type CanvasRoomShapePatchPayload = CanvasRoomRef & {
 
 export type CanvasRoomShapePatchEventPayload = CanvasRoomShapePatchPayload & {
   actorUserId: string;
+  canRedo?: boolean;
+  canUndo?: boolean;
+  historySeq?: number;
   sentAt: string;
 };
 

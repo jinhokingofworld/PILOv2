@@ -1,6 +1,8 @@
 export const canvasClientEvents = {
   join: "canvas:join",
   leave: "canvas:leave",
+  historyRedo: "canvas:room:history:redo",
+  historyUndo: "canvas:room:history:undo",
   presenceUpdate: "canvas:presence:update",
   shapeLockClaim: "canvas:shape:lock:claim",
   shapeLockRelease: "canvas:shape:lock:release",
