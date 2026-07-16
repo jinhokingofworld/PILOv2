@@ -18,9 +18,9 @@ Frontend 화면 이름은 `파일`로 둔다. Backend 도메인 이름과 API pa
 - 폴더/문서/파일 이름 변경과 이동
 - 폴더/문서/파일 soft delete
 
-검색, 복구, public link share, 문서 공동 편집과 장기 버전 관리는 이 문서의 MVP 범위가
-아니다. 문서 본문은 최신 snapshot 조회와 자동 저장만 지원하며, 파일 미리보기는 ready
-PDF만 지원한다.
+검색, 복구, public link share, 문서별 권한과 장기 버전 관리 UI는 이 문서의 MVP 범위가
+아니다. native 문서는 `/sync/documents` Yjs WebSocket room에서 Workspace 멤버끼리 동시 편집하며,
+병합된 본문은 최신 snapshot 조회와 자동 저장으로 보존한다. 파일 미리보기는 ready PDF만 지원한다.
 
 ## 데이터 규칙
 
@@ -427,6 +427,20 @@ Request:
   shape만 허용한다. `driveItemId`는 같은 Workspace의 삭제되지 않은 `ready` file이어야 한다.
 - attachment 변화가 있는 snapshot 저장은 변경된 각 file에 대해 `document_attachment_updated`
   Activity Log만 남긴다. 같은 저장에서 generic `document_content_updated`를 중복으로 남기지 않는다.
+
+## 문서 Realtime 연결
+
+```text
+wss://{realtime-origin}/sync/documents
+```
+
+- Hocuspocus의 표준 Yjs sync/awareness protocol을 사용한다. 별도의 JSON mutation protocol을 만들지 않는다.
+- provider의 document name은 `workspace:{workspaceId}:document:{documentId}:yjs` 형식이며, bearer token은 Hocuspocus 인증 메시지로 보낸다. URL query에 access token을 넣지 않는다.
+- realtime-server는 Hocuspocus 인증 hook에서 bearer session, Workspace membership, 삭제되지 않은 `document` Drive item을 검증한다.
+- Workspace `owner`, `member`는 연결과 편집이 가능하다. 인증되지 않았거나 권한이 없거나 삭제된 문서는 연결을 거부한다.
+- realtime room은 즉시 변경 relay와 awareness만 담당한다. raw Yjs update는 1차 MVP에서 `document_yjs_updates`에 저장하지 않는다.
+- collaboration provider는 병합된 문서를 마지막 변경 뒤 `1초` debounce로 기존 snapshot 저장 API에 전송하고, 마지막 editor가 나갈 때 pending 저장을 즉시 flush한다.
+- realtime-server가 재시작되면 browser는 최신 snapshot을 다시 읽어 bootstrap한다. 마지막 snapshot 뒤 최대 `1초`의 편집은 유실될 수 있다.
 
 ## Upload URL 발급
 

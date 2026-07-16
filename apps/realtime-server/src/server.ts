@@ -1,9 +1,13 @@
 import { createServer } from "node:http";
 import { WebSocketServer } from "ws";
 
+import { createRealtimeSessionService } from "./auth/session.service";
 import { createCanvasTldrawSyncRoomService } from "./canvas/canvas-tldraw-sync-room.service";
 import { loadRealtimeServerConfig } from "./config/realtime-config";
 import { createRealtimeDatabase } from "./database/database";
+import { createDocumentAccessService } from "./documents/document-access.service";
+import { createDocumentHocuspocusService } from "./documents/document-hocuspocus.service";
+import { createDocumentHocuspocusTransport } from "./documents/document-hocuspocus-transport";
 import { createRealtimeSocketServer } from "./socket/socket-server";
 
 async function bootstrap() {
@@ -43,6 +47,12 @@ async function bootstrap() {
               engine: "tldraw_sync",
               ...tldrawSyncRoomService.getStats(),
             },
+            documents: {
+              endpoint: "/sync/documents",
+              engine: "hocuspocus",
+              activeSessionCount: documentHocuspocus.getConnectionsCount(),
+              roomCount: documentHocuspocus.getDocumentsCount(),
+            },
           },
         }),
       );
@@ -63,6 +73,14 @@ async function bootstrap() {
   const tldrawSyncRoomService = createCanvasTldrawSyncRoomService({
     database,
   });
+  const documentHocuspocusService = createDocumentHocuspocusService({
+    accessService: createDocumentAccessService({ database }),
+    sessionService: createRealtimeSessionService(database),
+  });
+  const documentHocuspocus = documentHocuspocusService.hocuspocus;
+  const documentHocuspocusTransport = await createDocumentHocuspocusTransport(
+    documentHocuspocus,
+  );
   const websocketServer = new WebSocketServer({ noServer: true });
 
   server.on("upgrade", (request, socket, head) => {
@@ -72,6 +90,16 @@ async function bootstrap() {
     );
 
     if (url.pathname.startsWith("/socket.io/")) {
+      return;
+    }
+
+    if (url.pathname === "/sync/documents") {
+      void documentHocuspocusTransport
+        .handleUpgrade(request, socket, head)
+        .catch((error) => {
+          console.error("Document Hocuspocus connection failed", error);
+          socket.destroy();
+        });
       return;
     }
 
@@ -130,6 +158,7 @@ async function bootstrap() {
   });
 
   function shutdown() {
+    documentHocuspocus.closeConnections();
     void tldrawSyncRoomService
       .close()
       .finally(() => socketServer.close())

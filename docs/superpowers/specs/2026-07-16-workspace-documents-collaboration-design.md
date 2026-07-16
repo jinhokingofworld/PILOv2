@@ -105,7 +105,7 @@ document_edit_sessions
 - base_version, closed_version, closed_at
 ```
 
-`document_yjs_updates`는 협업 복구용 append-only update log이고, `document_snapshots`는 복구·향후 RAG·MeetingReport diff의 안정된 기준이다. snapshot은 최신 상태만 덮어쓰지 않고 version별로 보존한다.
+`document_yjs_updates`는 이후 다중 인스턴스 무중단 복구를 위한 확장용 append-only update log로 보존한다. 1차 realtime 구현은 이 테이블에 raw update를 쓰지 않고, `document_snapshots`를 복구·향후 RAG·MeetingReport diff의 안정된 기준으로 사용한다. snapshot은 최신 상태만 덮어쓰지 않고 version별로 보존한다.
 
 `documents.current_version`과 snapshot version은 App Server가 단조 증가시킨다. 이전 snapshot 보존은 1차 복구 UI를 의미하지 않는다.
 
@@ -118,24 +118,22 @@ Browser: Tiptap + Yjs + collaboration provider
   <-> realtime-server: /sync/documents
       - document room, Yjs sync, awareness, remote cursor
       - bearer session 검증과 Workspace membership 확인
-  -> App Server internal document sync boundary
+  -> App Server document snapshot API
       - membership 재검증
-      - update/snapshot/version 저장
+      - merged snapshot/version 저장
       - Activity Log append
 ```
 
-`/sync/documents`는 Yjs 호환의 검증된 collaboration provider/protocol을 사용한다. realtime-server는 room lifecycle, 즉시 update broadcast, awareness만 담당한다. PostgreSQL은 App Server가 소유하며 realtime-server 메모리는 영구 source of truth가 아니다.
+`/sync/documents`는 Hocuspocus의 검증된 Yjs collaboration provider/protocol을 사용한다. provider는 `workspace:{workspaceId}:document:{documentId}:yjs` document name과 bearer token을 표준 인증 메시지로 보내며, realtime-server는 Hocuspocus 인증 hook에서 membership과 활성 문서를 검증한다. realtime-server는 room lifecycle, 즉시 update broadcast, awareness만 담당한다. PostgreSQL은 App Server가 소유하며 realtime-server 메모리는 영구 source of truth가 아니다.
 
-App Server internal sync boundary는 각 연결 사용자의 bearer identity와 안정적인 `clientUpdateId`를 받아 update를 저장한다. `(document_id, client_update_id)` unique 제약으로 재연결 재전송을 idempotent하게 처리한다.
-
-새 room 또는 realtime-server 재시작 시 realtime-server는 App Server가 제공한 최신 snapshot과 그 뒤 update를 읽어 Y.Doc을 복구한다. 브라우저도 재연결 전 로컬 update를 유지하고, acknowledgement를 받지 못한 update만 같은 id로 재전송한다.
+1차 realtime 구현에서 raw Yjs update는 DB에 append하지 않는다. 새 room 또는 realtime-server 재시작 시 browser는 App Server의 최신 snapshot으로 Y.Doc을 bootstrap한다. 연결이 잠시 끊긴 동안의 local Yjs update는 browser session에 유지하고 재연결 뒤 provider가 병합한다. realtime-server 장애 시 마지막 snapshot 뒤 최대 1초의 편집이 유실될 수 있다.
 
 ### 저장과 snapshot
 
-- 작은 Yjs update는 빠르게 영속화한다.
-- 사용자가 60초 이상 편집을 멈추거나, 하나의 편집 세션이 10분에 도달하거나, 문서를 떠날 때 snapshot을 확정한다.
-- snapshot 확정 transaction은 Tiptap JSON, plain text, 버전, edit session 종료 상태를 함께 저장한다.
-- 재연결과 강제 새로고침은 마지막 durable update까지 복구한다.
+- Yjs update는 realtime room에서 즉시 동기화하고 DB에 개별 저장하지 않는다.
+- collaboration provider는 마지막 변경 뒤 `1초` debounce로 snapshot을 확정하고, 마지막 editor가 문서를 떠날 때 pending snapshot을 즉시 flush한다.
+- snapshot 확정 transaction은 Tiptap JSON, plain text, 버전을 함께 저장한다.
+- 재연결과 강제 새로고침은 마지막 snapshot까지 복구한다.
 - 여러 사용자가 동시에 편집한 snapshot은 병합된 문서 상태를 표현한다. 1차 MeetingReport는 겹친 변경을 특정 문장 단위로 한 사람에게 귀속하지 않는다.
 
 ## 블록과 첨부

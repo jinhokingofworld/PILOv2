@@ -8,6 +8,11 @@ export type SqlErdRoomNameInput = {
   workspaceId: string;
 };
 
+export type DocumentRoomNameInput = {
+  documentId: string;
+  workspaceId: string;
+};
+
 export function createCanvasRoomName({
   canvasId,
   workspaceId,
@@ -27,6 +32,13 @@ export function createSqlErdRoomName({
   workspaceId,
 }: SqlErdRoomNameInput) {
   return `workspace:${workspaceId}:sql-erd:${sessionId}`;
+}
+
+export function createDocumentYjsRoomName({
+  documentId,
+  workspaceId,
+}: DocumentRoomNameInput) {
+  return `workspace:${workspaceId}:document:${documentId}:yjs`;
 }
 
 export function createMeetingRoomName(workspaceId: string) {
