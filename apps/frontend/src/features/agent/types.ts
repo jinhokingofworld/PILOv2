@@ -22,6 +22,13 @@ export type AgentConfirmationStatus =
 
 export type AgentRiskLevel = "low" | "medium" | "high";
 
+export type AgentRunRequestContext =
+  | {
+      surface: "sql_erd";
+      sessionId: string;
+    }
+  | null;
+
 export type AgentResourceRef = {
   id?: string | number | null;
   type?: string | null;
@@ -46,7 +53,8 @@ export type AgentStep = {
   completedAt: string | null;
 };
 
-export type AgentConfirmationPlan = {
+export type AgentApprovalConfirmationPlan = {
+  kind?: "approval";
   toolName: string;
   summary: string;
   target: Record<string, unknown>;
@@ -54,6 +62,24 @@ export type AgentConfirmationPlan = {
   after: Record<string, unknown>;
   call: Record<string, unknown>;
 };
+
+export type AgentChoiceConfirmationPlan = {
+  kind: "choice";
+  toolName: string;
+  summary: string;
+  target: Record<string, unknown>;
+  call: Record<string, unknown>;
+  choices: Array<{
+    id: string;
+    label: string;
+    description?: string;
+    input: Record<string, unknown>;
+  }>;
+};
+
+export type AgentConfirmationPlan =
+  | AgentApprovalConfirmationPlan
+  | AgentChoiceConfirmationPlan;
 
 export type AgentConfirmation = {
   id: string;
@@ -66,6 +92,7 @@ export type AgentConfirmation = {
   rejectedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  selectedChoiceId: string | null;
 };
 
 export type AgentRunMessage = {
@@ -81,6 +108,7 @@ export type AgentRun = {
   workspaceId: string;
   requestedByUserId: string;
   clientRequestId: string | null;
+  requestContext: AgentRunRequestContext;
   status: AgentRunStatus;
   riskLevel: AgentRiskLevel | null;
   prompt: string;
@@ -101,6 +129,11 @@ export type CreateAgentRunInput = {
   prompt: string;
   timezone?: string;
   clientRequestId?: string;
+  requestContext?: AgentRunRequestContext;
+};
+
+export type AgentConfirmationApproveInput = {
+  choiceId: string;
 };
 
 export type SubmitAgentRunInput = {
@@ -121,6 +154,7 @@ export type AgentConfirmationActionPayload = {
       status: AgentConfirmationStatus;
       approvedAt: string | null;
       rejectedAt: string | null;
+      selectedChoiceId: string | null;
     };
   };
 };

@@ -16,7 +16,8 @@ import type {
   AgentConfirmationPlan,
   AgentJsonObject,
   AgentResourceRef,
-  AgentRiskLevel
+  AgentRiskLevel,
+  AgentRunRequestContext
 } from "./types/agent-tool.types";
 
 export interface AgentRunListQuery {
@@ -29,6 +30,7 @@ export interface AgentRunCreateInput {
   prompt: string;
   timezone?: string;
   clientRequestId?: string | null;
+  requestContext: AgentRunRequestContext;
 }
 
 export interface AgentRunInput {
@@ -40,6 +42,7 @@ export interface AgentRunApiPayload {
   workspaceId: string;
   requestedByUserId: string | null;
   clientRequestId: string | null;
+  requestContext: AgentRunRequestContext;
   status: AgentRunStatus;
   riskLevel: AgentRiskLevel | null;
   prompt: string;
@@ -92,6 +95,7 @@ export interface AgentConfirmationApiPayload
   rejectedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  selectedChoiceId: string | null;
 }
 
 export interface AgentRunListItemPayload extends AgentRunApiPayload {
@@ -137,6 +141,7 @@ interface AgentRunRow extends QueryResultRow {
   workspace_id: string;
   requested_by_user_id: string | null;
   client_request_id: string | null;
+  request_context_json: AgentRunRequestContext;
   status: AgentRunStatus;
   risk_level: AgentRiskLevel | null;
   prompt: string;
@@ -177,6 +182,7 @@ interface AgentConfirmationRow extends QueryResultRow {
   rejected_at: Date | string | null;
   created_at: Date | string;
   updated_at: Date | string;
+  selected_choice_id: string | null;
 }
 
 interface AgentRunMessageRow extends QueryResultRow {
@@ -210,6 +216,9 @@ const MAX_PROMPT_BYTES = 32768;
 const MAX_RUN_INPUT_BYTES = 4000;
 const MAX_CLIENT_REQUEST_ID_BYTES = 128;
 const MAX_TIMEZONE_LENGTH = 64;
+const MAX_REQUEST_CONTEXT_BYTES = 2048;
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const AGENT_RUN_STATUSES: AgentRunStatus[] = [
   "planning",
   "waiting_user_input",
@@ -256,6 +265,10 @@ export class AgentService {
     body: unknown
   ): Promise<AgentRunCreateResult> {
     const input = this.normalizeCreateRunInput(body);
+    if (input.requestContext) {
+      await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+      await this.assertRequestContextAccess(workspaceId, input.requestContext);
+    }
     const result = await this.createStoredRun(currentUserId, workspaceId, input);
 
     if (result.created) {
@@ -650,8 +663,56 @@ export class AgentService {
         body.clientRequestId,
         "clientRequestId",
         MAX_CLIENT_REQUEST_ID_BYTES
-      )
+      ),
+      requestContext: this.readRequestContext(body.requestContext)
     };
+  }
+
+  private readRequestContext(value: unknown): AgentRunRequestContext {
+    if (value === undefined || value === null) {
+      return null;
+    }
+
+    if (
+      !this.isPlainObject(value) ||
+      Object.keys(value).length !== 2 ||
+      value.surface !== "sql_erd" ||
+      typeof value.sessionId !== "string" ||
+      !UUID_PATTERN.test(value.sessionId) ||
+      Buffer.byteLength(JSON.stringify(value), "utf8") >
+        MAX_REQUEST_CONTEXT_BYTES
+    ) {
+      throw badRequest("requestContext must be a valid Agent request context");
+    }
+
+    return {
+      surface: "sql_erd",
+      sessionId: value.sessionId
+    };
+  }
+
+  private async assertRequestContextAccess(
+    workspaceId: string,
+    requestContext: AgentRunRequestContext
+  ): Promise<void> {
+    if (!requestContext) {
+      return;
+    }
+
+    const session = await this.database.queryOne<{ id: string }>(
+      `
+        SELECT id
+        FROM sql_erd_sessions
+        WHERE id = $1
+          AND workspace_id = $2
+          AND deleted_at IS NULL
+      `,
+      [requestContext.sessionId, workspaceId]
+    );
+
+    if (!session) {
+      throw notFound("SQLtoERD session not found");
+    }
   }
 
   private normalizeRunInput(body: unknown): AgentRunInput {
@@ -814,6 +875,7 @@ export class AgentService {
       workspaceId: run.workspaceId,
       requestedByUserId: run.requestedByUserId,
       clientRequestId: run.clientRequestId,
+      requestContext: run.requestContext,
       status: run.status,
       riskLevel: run.riskLevel,
       prompt: run.prompt,
@@ -834,6 +896,7 @@ export class AgentService {
       workspaceId: row.workspace_id,
       requestedByUserId: row.requested_by_user_id,
       clientRequestId: row.client_request_id,
+      requestContext: row.request_context_json,
       status: row.status,
       riskLevel: row.risk_level,
       prompt: row.prompt,
@@ -889,7 +952,8 @@ export class AgentService {
       approvedAt: this.toIsoOrNull(row.approved_at),
       rejectedAt: this.toIsoOrNull(row.rejected_at),
       createdAt: this.toIso(row.created_at),
-      updatedAt: this.toIso(row.updated_at)
+      updatedAt: this.toIso(row.updated_at),
+      selectedChoiceId: row.selected_choice_id
     };
   }
 

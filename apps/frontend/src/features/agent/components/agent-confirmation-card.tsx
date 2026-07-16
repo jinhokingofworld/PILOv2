@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { AlertTriangle, Check, Clock3, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -16,7 +17,7 @@ type AgentConfirmationCardProps = {
   isApproving?: boolean;
   isRejecting?: boolean;
   nowMs: number;
-  onApprove: () => void;
+  onApprove: (choiceId?: string) => void;
   onReject: () => void;
 };
 
@@ -118,6 +119,15 @@ export function AgentConfirmationCard({
   onReject
 }: AgentConfirmationCardProps) {
   const plan = confirmation.plan;
+  const isChoicePlan = plan?.kind === "choice";
+  const [selectedChoiceId, setSelectedChoiceId] = useState<string | null>(
+    confirmation.selectedChoiceId
+  );
+
+  useEffect(() => {
+    setSelectedChoiceId(confirmation.selectedChoiceId);
+  }, [confirmation.id, confirmation.selectedChoiceId]);
+
   const expiresAtMs = new Date(confirmation.expiresAt).getTime();
   const isExpired =
     Number.isFinite(expiresAtMs) && confirmation.status === "pending"
@@ -125,6 +135,8 @@ export function AgentConfirmationCard({
       : confirmation.status === "expired";
   const isPending = confirmation.status === "pending" && !isExpired;
   const actionDisabled = disabled || !isPending || isApproving || isRejecting;
+  const approveDisabled =
+    actionDisabled || (isChoicePlan && !selectedChoiceId);
   const statusLabel = isExpired ? "expired" : confirmation.status;
   const summary = plan?.summary?.trim() || "승인이 필요한 작업입니다.";
 
@@ -169,16 +181,47 @@ export function AgentConfirmationCard({
             </span>
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="min-w-0 rounded-md border border-slate-200 p-2">
-              <p className="mb-2 text-xs font-semibold text-slate-500">Before</p>
-              {renderObjectSummary(plan.before)}
+          {plan.kind === "choice" ? (
+            <div className="grid gap-2" role="group" aria-label="실행 방식 선택">
+              {plan.choices.map((choice) => {
+                const isSelected = selectedChoiceId === choice.id;
+
+                return (
+                  <button
+                    aria-pressed={isSelected}
+                    className={cn(
+                      "rounded-md border px-3 py-2 text-left transition-colors",
+                      isSelected
+                        ? "border-blue-500 bg-blue-50 text-blue-900"
+                        : "border-slate-200 bg-white text-slate-800 hover:bg-slate-50"
+                    )}
+                    disabled={disabled || !isPending || isApproving || isRejecting}
+                    key={choice.id}
+                    onClick={() => setSelectedChoiceId(choice.id)}
+                    type="button"
+                  >
+                    <span className="block text-sm font-medium">{choice.label}</span>
+                    {choice.description ? (
+                      <span className="mt-1 block text-xs text-slate-500">
+                        {choice.description}
+                      </span>
+                    ) : null}
+                  </button>
+                );
+              })}
             </div>
-            <div className="min-w-0 rounded-md border border-slate-200 p-2">
-              <p className="mb-2 text-xs font-semibold text-slate-500">After</p>
-              {renderObjectSummary(plan.after)}
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="min-w-0 rounded-md border border-slate-200 p-2">
+                <p className="mb-2 text-xs font-semibold text-slate-500">Before</p>
+                {renderObjectSummary(plan.before)}
+              </div>
+              <div className="min-w-0 rounded-md border border-slate-200 p-2">
+                <p className="mb-2 text-xs font-semibold text-slate-500">After</p>
+                {renderObjectSummary(plan.after)}
+              </div>
             </div>
-          </div>
+          )}
 
           <details className="rounded-md border border-slate-200 px-2 py-1.5 text-xs text-slate-600">
             <summary className="cursor-pointer font-medium">
@@ -203,8 +246,8 @@ export function AgentConfirmationCard({
       <div className="flex flex-col gap-2 border-t border-slate-200 px-3 py-3 sm:flex-row">
         <Button
           className="w-full sm:flex-1"
-          disabled={actionDisabled}
-          onClick={onApprove}
+          disabled={approveDisabled}
+          onClick={() => onApprove(selectedChoiceId ?? undefined)}
           size="sm"
           type="button"
         >

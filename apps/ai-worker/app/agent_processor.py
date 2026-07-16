@@ -26,7 +26,7 @@ PLANNER_STATUSES = {
     "unsupported",
 }
 TOOL_RISK_LEVELS = {"low", "medium", "high"}
-TOOL_EXECUTION_MODES = {"auto", "confirmation_required"}
+TOOL_EXECUTION_MODES = {"auto", "confirmation_required", "contextual"}
 MEETING_REPORT_ID_TOOLS = {"get_meeting_report", "summarize_meeting_report"}
 FORBIDDEN_JSON_KEY_PARTS = (
     "authorization",
@@ -50,6 +50,7 @@ class AgentRunJob:
     tool_schema_version: str
     turn_sequence: int
     tools: tuple[AgentToolSchema, ...]
+    request_context: dict[str, str] | None = None
 
 
 @dataclass(frozen=True)
@@ -91,7 +92,7 @@ class AgentPlannerDecision:
     final_answer_draft: str | None
     tool_name: str | None
     tool_input: dict[str, object]
-    requires_confirmation: bool
+    requires_confirmation: bool | None
     missing_fields: tuple[str, ...]
     unsupported_reason: str | None
 
@@ -281,6 +282,7 @@ def parse_agent_run_job_payload(payload: dict[str, object]) -> AgentRunJob:
         tool_schema_version=_require_non_empty_string(payload, "toolSchemaVersion"),
         turn_sequence=_optional_positive_int(payload, "turnSequence", default=1),
         tools=_parse_tool_schema_snapshot(payload.get("tools")),
+        request_context=_parse_request_context(payload.get("requestContext")),
     )
 
 
@@ -528,6 +530,24 @@ def _require_non_empty_string(payload: dict[str, object], key: str) -> str:
     return value.strip()
 
 
+def _parse_request_context(value: object) -> dict[str, str] | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict) or set(value) != {"surface", "sessionId"}:
+        raise ValueError("Invalid requestContext")
+
+    surface = value.get("surface")
+    session_id = value.get("sessionId")
+    if surface != "sql_erd" or not isinstance(session_id, str):
+        raise ValueError("Invalid requestContext")
+    try:
+        UUID(session_id)
+    except (ValueError, AttributeError, TypeError) as error:
+        raise ValueError("Invalid requestContext") from error
+
+    return {"surface": "sql_erd", "sessionId": session_id}
+
+
 def _optional_positive_int(
     payload: dict[str, object],
     key: str,
@@ -661,7 +681,11 @@ def normalize_agent_planner_decision(
     risk_level: str | None = None
 
     if status == "tool_candidate" and tool is not None:
-        requires_confirmation = tool.execution_mode == "confirmation_required"
+        requires_confirmation = (
+            None
+            if tool.execution_mode == "contextual"
+            else tool.execution_mode == "confirmation_required"
+        )
         risk_level = tool.risk_level
         output_summary.update(
             {

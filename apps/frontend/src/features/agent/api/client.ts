@@ -1,5 +1,6 @@
 import type {
   AgentConfirmationActionPayload,
+  AgentConfirmationApproveInput,
   AgentRunDetailPayload,
   CreateAgentRunInput,
   SubmitAgentRunInput
@@ -290,14 +291,20 @@ export function createAgentApiClient({
       workspaceId: string,
       runId: string,
       confirmationId: string,
+      body?: AgentConfirmationApproveInput,
       options: AgentRequestOptions = {}
     ) {
       return requestAgentData<AgentConfirmationActionPayload>(
         agentConfirmationPath(workspaceId, runId, confirmationId, "approve"),
-        {
-          method: "POST",
-          signal: options.signal
-        },
+        body
+          ? withJsonBody(body, {
+              method: "POST",
+              signal: options.signal
+            })
+          : {
+              method: "POST",
+              signal: options.signal
+            },
         requestOptions
       );
     },

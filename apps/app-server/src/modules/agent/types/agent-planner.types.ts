@@ -74,7 +74,7 @@ export interface AgentPlannerToolCandidate {
   toolName: AgentPlannerToolName;
   riskLevel: AgentRiskLevel;
   executionMode: AgentToolExecutionMode;
-  requiresConfirmation: boolean;
+  requiresConfirmation: boolean | null;
   inputSummary: AgentToolInputSummary;
   toolInputValidation: "tool_adapter_required";
 }

@@ -9,6 +9,7 @@ const { AgentLoggingService } = require(
 const USER_ID = "11111111-1111-1111-1111-111111111111";
 const WORKSPACE_ID = "22222222-2222-2222-2222-222222222222";
 const RUN_ID = "33333333-3333-3333-3333-333333333333";
+const SQL_ERD_SESSION_ID = "77777777-7777-4777-8777-777777777777";
 const STEP_ID = "44444444-4444-4444-4444-444444444444";
 const CREATED_AT = new Date("2026-07-08T00:00:00.000Z");
 const UPDATED_AT = new Date("2026-07-08T00:00:01.000Z");
@@ -20,6 +21,7 @@ function createRun(overrides = {}) {
     workspace_id: WORKSPACE_ID,
     requested_by_user_id: USER_ID,
     client_request_id: null,
+    request_context_json: null,
     status: "planning",
     risk_level: null,
     prompt: "내일 회의 일정 만들어줘",
@@ -242,6 +244,7 @@ class FakeTransaction {
     workspaceId,
     currentUserId,
     clientRequestId,
+    requestContext,
     prompt,
     timezone,
     message
@@ -254,6 +257,7 @@ class FakeTransaction {
       workspace_id: workspaceId,
       requested_by_user_id: currentUserId,
       client_request_id: clientRequestId,
+      request_context_json: requestContext,
       prompt,
       timezone,
       message
@@ -776,6 +780,91 @@ function errorMessage(error) {
         prompt: "다른 요청",
         timezone: "Asia/Seoul",
         clientRequestId: "request-1"
+      }),
+    (error) => {
+      assert.equal(error.getStatus(), 409);
+      assert.equal(errorCode(error), "CLIENT_REQUEST_ID_CONFLICT");
+      return true;
+    }
+  );
+}
+
+{
+  const requestContext = {
+    surface: "sql_erd",
+    sessionId: SQL_ERD_SESSION_ID
+  };
+  const state = {
+    runs: [],
+    steps: [],
+    logs: []
+  };
+  const { service } = createService(state);
+
+  const result = await service.createRun(USER_ID, WORKSPACE_ID, {
+    prompt: "Create an orders schema",
+    clientRequestId: "request-with-context",
+    requestContext
+  });
+
+  assert.equal(result.created, true);
+  assert.deepEqual(result.run.requestContext, requestContext);
+  assert.deepEqual(state.runs[0].request_context_json, requestContext);
+}
+
+{
+  const state = {
+    runs: [
+      createRun({
+        client_request_id: "request-1",
+        request_context_json: {
+          sessionId: SQL_ERD_SESSION_ID,
+          surface: "sql_erd"
+        }
+      })
+    ],
+    steps: [],
+    logs: []
+  };
+  const { service } = createService(state);
+
+  const result = await service.createRun(USER_ID, WORKSPACE_ID, {
+    prompt: state.runs[0].prompt,
+    timezone: state.runs[0].timezone,
+    clientRequestId: "request-1",
+    requestContext: {
+      surface: "sql_erd",
+      sessionId: SQL_ERD_SESSION_ID
+    }
+  });
+
+  assert.equal(result.created, false);
+  assert.equal(result.run.id, RUN_ID);
+}
+
+{
+  const state = {
+    runs: [
+      createRun({
+        client_request_id: "request-1",
+        request_context_json: {
+          surface: "sql_erd",
+          sessionId: SQL_ERD_SESSION_ID
+        }
+      })
+    ],
+    steps: [],
+    logs: []
+  };
+  const { service } = createService(state);
+
+  await assert.rejects(
+    () =>
+      service.createRun(USER_ID, WORKSPACE_ID, {
+        prompt: state.runs[0].prompt,
+        timezone: state.runs[0].timezone,
+        clientRequestId: "request-1",
+        requestContext: null
       }),
     (error) => {
       assert.equal(error.getStatus(), 409);

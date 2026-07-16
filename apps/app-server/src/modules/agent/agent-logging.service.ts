@@ -10,7 +10,8 @@ import { clientRequestIdConflict } from "./agent-api-error";
 import type {
   AgentJsonObject,
   AgentResourceRef,
-  AgentRiskLevel
+  AgentRiskLevel,
+  AgentRunRequestContext
 } from "./types/agent-tool.types";
 
 export type AgentRunStatus =
@@ -43,6 +44,7 @@ export interface CreateAgentRunInput {
   prompt: string;
   timezone?: string;
   clientRequestId?: string | null;
+  requestContext?: AgentRunRequestContext;
   message?: string;
 }
 
@@ -130,6 +132,7 @@ export interface AgentRunPayload {
   workspaceId: string;
   requestedByUserId: string | null;
   clientRequestId: string | null;
+  requestContext: AgentRunRequestContext;
   status: AgentRunStatus;
   riskLevel: AgentRiskLevel | null;
   prompt: string;
@@ -168,6 +171,7 @@ interface AgentRunRow extends QueryResultRow {
   workspace_id: string;
   requested_by_user_id: string | null;
   client_request_id: string | null;
+  request_context_json: AgentRunRequestContext;
   status: AgentRunStatus;
   risk_level: AgentRiskLevel | null;
   prompt: string;
@@ -243,6 +247,7 @@ export class AgentLoggingService {
       "timezone"
     );
     const clientRequestId = this.normalizeOptionalText(input.clientRequestId);
+    const requestContext = input.requestContext ?? null;
     const message = input.message ?? DEFAULT_RUN_MESSAGE;
 
     return this.database.transaction(async (transaction) => {
@@ -255,7 +260,12 @@ export class AgentLoggingService {
         );
 
         if (existing) {
-          return this.mapIdempotentRun(existing, prompt, timezone);
+          return this.mapIdempotentRun(
+            existing,
+            prompt,
+            timezone,
+            requestContext
+          );
         }
       }
 
@@ -265,19 +275,28 @@ export class AgentLoggingService {
             workspace_id,
             requested_by_user_id,
             client_request_id,
+            request_context_json,
             status,
             prompt,
             timezone,
             message
           )
-          VALUES ($1, $2, $3, 'planning', $4, $5, $6)
+          VALUES ($1, $2, $3, $4, 'planning', $5, $6, $7)
           ON CONFLICT (workspace_id, requested_by_user_id, client_request_id)
           WHERE client_request_id IS NOT NULL
             AND requested_by_user_id IS NOT NULL
           DO NOTHING
           RETURNING *
         `,
-        [workspaceId, currentUserId, clientRequestId, prompt, timezone, message]
+        [
+          workspaceId,
+          currentUserId,
+          clientRequestId,
+          requestContext,
+          prompt,
+          timezone,
+          message
+        ]
       );
 
       if (!run) {
@@ -290,7 +309,12 @@ export class AgentLoggingService {
           );
 
           if (existing) {
-            return this.mapIdempotentRun(existing, prompt, timezone);
+            return this.mapIdempotentRun(
+              existing,
+              prompt,
+              timezone,
+              requestContext
+            );
           }
         }
 
@@ -331,9 +355,14 @@ export class AgentLoggingService {
   private mapIdempotentRun(
     run: AgentRunRow,
     prompt: string,
-    timezone: string
+    timezone: string,
+    requestContext: AgentRunRequestContext
   ): CreateAgentRunResult {
-    if (run.prompt !== prompt || run.timezone !== timezone) {
+    if (
+      run.prompt !== prompt ||
+      run.timezone !== timezone ||
+      !this.isSameRequestContext(run.request_context_json, requestContext)
+    ) {
       throw clientRequestIdConflict(
         "clientRequestId was already used for a different Agent run"
       );
@@ -343,6 +372,17 @@ export class AgentLoggingService {
       run: this.mapRun(run),
       created: false
     };
+  }
+
+  private isSameRequestContext(
+    left: AgentRunRequestContext,
+    right: AgentRunRequestContext
+  ): boolean {
+    if (left === null || right === null) {
+      return left === right;
+    }
+
+    return left.surface === right.surface && left.sessionId === right.sessionId;
   }
 
   async startStep(
@@ -1353,6 +1393,7 @@ export class AgentLoggingService {
       workspaceId: run.workspace_id,
       requestedByUserId: run.requested_by_user_id,
       clientRequestId: run.client_request_id,
+      requestContext: run.request_context_json,
       status: run.status,
       riskLevel: run.risk_level,
       prompt: run.prompt,

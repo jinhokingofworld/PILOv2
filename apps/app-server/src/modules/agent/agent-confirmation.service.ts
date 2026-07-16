@@ -24,7 +24,9 @@ import type {
   AgentResourceRef,
   AgentRiskLevel,
   AgentToolDefinition,
-  AgentToolExecutionResult
+  AgentToolExecutionResult,
+  AgentRunRequestContext,
+  AgentChoiceConfirmationPlan
 } from "./types/agent-tool.types";
 
 type AgentRunStatus =
@@ -61,11 +63,13 @@ interface AgentConfirmationRow extends QueryResultRow {
   rejected_at: Date | string | null;
   created_at: Date | string;
   updated_at: Date | string;
+  selected_choice_id: string | null;
 }
 
 interface AgentConfirmationWithRunRow extends AgentConfirmationRow {
   run_status: AgentRunStatus;
   run_message: string | null;
+  run_request_context_json: AgentRunRequestContext;
 }
 
 interface ApprovedToolExecution {
@@ -101,6 +105,7 @@ export interface AgentConfirmationPayload {
   rejectedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  selectedChoiceId: string | null;
 }
 
 export interface AgentConfirmationActionPayload {
@@ -113,6 +118,7 @@ export interface AgentConfirmationActionPayload {
       status: AgentConfirmationStatus;
       approvedAt: string | null;
       rejectedAt: string | null;
+      selectedChoiceId: string | null;
     };
   };
 }
@@ -231,7 +237,6 @@ export class AgentConfirmationService {
     confirmationId: string,
     body: unknown
   ): Promise<AgentConfirmationActionPayload> {
-    this.assertEmptyBody(body);
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
 
     const result = await this.database.transaction(async (transaction) => {
@@ -258,18 +263,26 @@ export class AgentConfirmationService {
       }
 
       this.assertExecutablePlan(confirmation.plan_json, confirmation.tool_name);
-      const toolExecution = this.validateApprovedPlan(confirmation);
+      const selectedChoiceId = this.readSelectedChoiceId(
+        confirmation.plan_json,
+        body
+      );
+      const toolExecution = this.validateApprovedPlan(
+        confirmation,
+        selectedChoiceId
+      );
 
       const approved = await transaction.queryOne<AgentConfirmationRow>(
         `
           UPDATE agent_confirmations
           SET status = 'approved',
               approved_by_user_id = $2,
-              approved_at = now()
+              approved_at = now(),
+              selected_choice_id = $3
           WHERE id = $1
           RETURNING *
         `,
-        [confirmation.id, currentUserId]
+        [confirmation.id, currentUserId, selectedChoiceId]
       );
 
       if (!approved) {
@@ -288,14 +301,22 @@ export class AgentConfirmationService {
           runId,
           toolName: approved.tool_name,
           riskLevel: approved.risk_level,
-          inputSummary: this.buildStepInputSummary(approved.plan_json)
+          inputSummary: this.buildStepInputSummary(
+            approved.plan_json,
+            selectedChoiceId
+          )
         }
       );
 
       return {
         expired: false,
         payload: this.mapActionPayload(run, approved),
-        confirmation: approved,
+        confirmation: {
+          ...approved,
+          run_request_context_json: confirmation.run_request_context_json,
+          run_status: run.status,
+          run_message: run.message
+        },
         toolExecution,
         step
       } as const;
@@ -502,7 +523,8 @@ export class AgentConfirmationService {
         SELECT
           c.*,
           r.status AS run_status,
-          r.message AS run_message
+          r.message AS run_message,
+          r.request_context_json AS run_request_context_json
         FROM agent_confirmations c
         JOIN agent_runs r
           ON r.id = c.run_id
@@ -581,6 +603,35 @@ export class AgentConfirmationService {
     throw badRequest("Request body must be empty");
   }
 
+  private readSelectedChoiceId(
+    plan: AgentConfirmationPlan,
+    body: unknown
+  ): string | null {
+    if (!this.isChoicePlan(plan)) {
+      this.assertEmptyBody(body);
+      return null;
+    }
+
+    if (
+      !this.isPlainObject(body) ||
+      Object.keys(body).length !== 1 ||
+      typeof body.choiceId !== "string" ||
+      !body.choiceId.trim() ||
+      body.choiceId !== body.choiceId.trim() ||
+      !plan.choices.some((choice) => choice.id === body.choiceId)
+    ) {
+      throw badRequest("choiceId must select an available choice");
+    }
+
+    return body.choiceId;
+  }
+
+  private isChoicePlan(
+    plan: AgentConfirmationPlan
+  ): plan is AgentChoiceConfirmationPlan {
+    return plan.kind === "choice" && Array.isArray(plan.choices);
+  }
+
   private assertExecutablePlan(
     plan: AgentConfirmationPlan,
     toolName: string
@@ -593,19 +644,63 @@ export class AgentConfirmationService {
       throw badRequest("Confirmation plan tool does not match confirmation");
     }
 
+    const planKind = (plan as AgentJsonObject).kind;
+    if (
+      planKind !== undefined &&
+      planKind !== "approval" &&
+      planKind !== "choice"
+    ) {
+      throw badRequest("Confirmation plan is not executable");
+    }
+
     if (
       typeof plan.summary !== "string" ||
       !this.isPlainObject(plan.target) ||
-      !(plan.before === null || this.isPlainObject(plan.before)) ||
-      !this.isPlainObject(plan.after) ||
       !this.isPlainObject(plan.call)
+    ) {
+      throw badRequest("Confirmation plan is not executable");
+    }
+
+    if (this.isChoicePlan(plan)) {
+      const choiceIds = new Set<string>();
+      if (
+        plan.choices.length === 0 ||
+        plan.choices.length > 10 ||
+        plan.choices.some((choice) => {
+          if (
+            !this.isPlainObject(choice) ||
+            typeof choice.id !== "string" ||
+            !choice.id.trim() ||
+            choice.id !== choice.id.trim() ||
+            Buffer.byteLength(choice.id, "utf8") > 128 ||
+            typeof choice.label !== "string" ||
+            !choice.label.trim() ||
+            !this.isPlainObject(choice.input) ||
+            choiceIds.has(choice.id)
+          ) {
+            return true;
+          }
+
+          choiceIds.add(choice.id);
+          return false;
+        })
+      ) {
+        throw badRequest("Confirmation plan choices are not executable");
+      }
+      return;
+    }
+
+    if (
+      !(plan.before === null || this.isPlainObject(plan.before)) ||
+      !this.isPlainObject(plan.after)
     ) {
       throw badRequest("Confirmation plan is not executable");
     }
   }
 
   private validateApprovedPlan(
-    confirmation: AgentConfirmationRow
+    confirmation: AgentConfirmationWithRunRow,
+    selectedChoiceId: string | null
   ): ApprovedToolExecution {
     const plan = confirmation.plan_json;
     const definition = this.agentToolRegistryService.getDefinition(plan.toolName);
@@ -624,7 +719,10 @@ export class AgentConfirmationService {
       throw badRequest("Confirmation risk level does not match registered tool");
     }
 
-    if (definition.executionMode !== "confirmation_required") {
+    if (
+      definition.executionMode !== "confirmation_required" &&
+      !(definition.executionMode === "contextual" && this.isChoicePlan(plan))
+    ) {
       throw badRequest(`Agent tool is not executable: ${plan.toolName}`);
     }
 
@@ -632,7 +730,11 @@ export class AgentConfirmationService {
       throw badRequest("High-risk Agent tool execution is not supported");
     }
 
-    const toolInput = this.buildToolInputFromPlan(plan, definition);
+    const toolInput = this.buildToolInputFromPlan(
+      plan,
+      definition,
+      selectedChoiceId
+    );
     return {
       definition,
       toolInput: definition.validateConfirmationInput
@@ -645,7 +747,7 @@ export class AgentConfirmationService {
     currentUserId: string,
     workspaceId: string,
     runId: string,
-    confirmation: AgentConfirmationRow,
+    confirmation: AgentConfirmationWithRunRow,
     toolExecution: ApprovedToolExecution,
     step: AgentStepPayload
   ): Promise<AgentConfirmationActionPayload> {
@@ -654,7 +756,8 @@ export class AgentConfirmationService {
         {
           currentUserId,
           workspaceId,
-          runId
+          runId,
+          requestContext: confirmation.run_request_context_json ?? null
         },
         toolExecution.toolInput
       );
@@ -720,7 +823,8 @@ export class AgentConfirmationService {
                 id: retryConfirmation.id,
                 status: retryConfirmation.status,
                 approvedAt: retryConfirmation.approvedAt,
-                rejectedAt: retryConfirmation.rejectedAt
+                rejectedAt: retryConfirmation.rejectedAt,
+                selectedChoiceId: retryConfirmation.selectedChoiceId
               }
             }
           };
@@ -782,10 +886,21 @@ export class AgentConfirmationService {
 
   private buildToolInputFromPlan(
     plan: AgentConfirmationPlan,
-    definition: AgentToolDefinition<unknown>
+    definition: AgentToolDefinition<unknown>,
+    selectedChoiceId: string | null
   ): unknown {
     if (definition.buildConfirmationInput) {
-      return definition.buildConfirmationInput(plan);
+      return definition.buildConfirmationInput(plan, selectedChoiceId);
+    }
+
+    if (this.isChoicePlan(plan)) {
+      const choice = plan.choices.find(
+        (candidate) => candidate.id === selectedChoiceId
+      );
+      if (!choice) {
+        throw badRequest("choiceId must select an available choice");
+      }
+      return choice.input;
     }
 
     if (definition.name === "create_calendar_event") {
@@ -806,7 +921,18 @@ export class AgentConfirmationService {
     throw badRequest(`Agent tool is not executable: ${plan.toolName}`);
   }
 
-  private buildStepInputSummary(plan: AgentConfirmationPlan): AgentJsonObject {
+  private buildStepInputSummary(
+    plan: AgentConfirmationPlan,
+    selectedChoiceId: string | null
+  ): AgentJsonObject {
+    if (this.isChoicePlan(plan)) {
+      return {
+        toolName: plan.toolName,
+        target: plan.target,
+        selectedChoiceId
+      };
+    }
+
     return {
       toolName: plan.toolName,
       target: plan.target,
@@ -874,7 +1000,8 @@ export class AgentConfirmationService {
           id: confirmation.id,
           status: confirmation.status,
           approvedAt: this.toIsoOrNull(confirmation.approved_at),
-          rejectedAt: this.toIsoOrNull(confirmation.rejected_at)
+          rejectedAt: this.toIsoOrNull(confirmation.rejected_at),
+          selectedChoiceId: confirmation.selected_choice_id
         }
       }
     };
@@ -893,7 +1020,8 @@ export class AgentConfirmationService {
       approvedAt: this.toIsoOrNull(confirmation.approved_at),
       rejectedAt: this.toIsoOrNull(confirmation.rejected_at),
       createdAt: this.toIso(confirmation.created_at),
-      updatedAt: this.toIso(confirmation.updated_at)
+      updatedAt: this.toIso(confirmation.updated_at),
+      selectedChoiceId: confirmation.selected_choice_id
     };
   }
 
@@ -910,7 +1038,8 @@ export class AgentConfirmationService {
           id: confirmation.id,
           status: confirmation.status,
           approvedAt: this.toIsoOrNull(confirmation.approved_at),
-          rejectedAt: this.toIsoOrNull(confirmation.rejected_at)
+          rejectedAt: this.toIsoOrNull(confirmation.rejected_at),
+          selectedChoiceId: confirmation.selected_choice_id
         }
       }
     };
