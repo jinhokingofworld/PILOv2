@@ -51,12 +51,15 @@ export function createCanvasRoomService({
       }
 
       const latestOpSeq = 0;
+      const checkpointState = roomStateService.getCheckpointState(payload);
 
       return {
         access,
         joined: true,
         payload: {
           canvasId: payload.canvasId,
+          checkpointHistorySeq: checkpointState.checkpointHistorySeq,
+          checkpointVersion: checkpointState.checkpointVersion,
           latestOpSeq,
           loadedRegions: roomStateService.getLoadedRegions(payload),
           previews: await shapePreviewService.getRoomPreviews(payload),

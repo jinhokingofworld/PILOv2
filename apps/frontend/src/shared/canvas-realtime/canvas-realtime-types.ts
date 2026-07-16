@@ -99,6 +99,8 @@ export type CanvasJoinPayload = {
 export type CanvasJoinedPayload = {
   workspaceId: string;
   canvasId: string;
+  checkpointHistorySeq: number | null;
+  checkpointVersion: number;
   latestOpSeq: number;
   loadedRegions: CanvasRoomLoadedRegion[];
   previews: CanvasShapePreviewEventPayload[];
@@ -234,6 +236,8 @@ export type CanvasRoomShapePatchEventPayload = CanvasRoomShapePatchPayload & {
 export type CanvasRoomCheckpointStatusPayload = {
   workspaceId: string;
   canvasId: string;
+  checkpointHistorySeq: number | null;
+  checkpointVersion: number;
   pendingOperations: number;
   status: "delayed" | "saved" | "saving";
   updatedAt: string;

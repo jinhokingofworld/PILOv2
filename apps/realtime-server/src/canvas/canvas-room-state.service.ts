@@ -18,6 +18,11 @@ export type CanvasRoomCheckpointSnapshot = {
   operations: CanvasCheckpointSyncOperation[];
 };
 
+export type CanvasRoomCheckpointState = {
+  checkpointHistorySeq: number | null;
+  checkpointVersion: number;
+};
+
 export type CanvasRoomStateService = {
   applyShapePatch: (
     room: CanvasRoomRef,
@@ -25,6 +30,7 @@ export type CanvasRoomStateService = {
   ) => void;
   getCachedShapes: (room: CanvasRoomRef) => Record<string, unknown>[];
   getCheckpointSnapshot: (room: CanvasRoomRef) => CanvasRoomCheckpointSnapshot;
+  getCheckpointState: (room: CanvasRoomRef) => CanvasRoomCheckpointState;
   getDeletedTombstones: (room: CanvasRoomRef) => string[];
   getDirtyShapeIds: (room: CanvasRoomRef) => string[];
   getLoadedRegions: (room: CanvasRoomRef) => CanvasRoomLoadedRegion[];
@@ -119,6 +125,8 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
   const deletedTombstonesByRoom = new Map<string, Map<string, number | null>>();
   const dirtyShapeIdsByRoom = new Map<string, Set<string>>();
   const checkpointOperationIdsByRoom = new Map<string, Map<string, string>>();
+  const checkpointHistorySeqByRoom = new Map<string, number | null>();
+  const checkpointVersionByRoom = new Map<string, number>();
   const shapesByRoom = new Map<string, Map<string, CachedRoomShape>>();
 
   function getRoomShapeCache(roomName: string) {
@@ -444,11 +452,9 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
       const operations: CanvasCheckpointSyncOperation[] = [];
 
       Array.from(dirtyShapeIds).forEach((shapeId) => {
-        const deletedBaseRevision = deletedTombstones.get(shapeId);
-
         if (deletedTombstones.has(shapeId)) {
           operations.push({
-            baseRevision: deletedBaseRevision ?? null,
+            baseRevision: null,
             clientOperationId: createCheckpointOperationId(
               roomName,
               "delete",
@@ -467,7 +473,7 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
         const revision = readShapeRevision(shape);
 
         operations.push({
-          baseRevision: revision,
+          baseRevision: null,
           clientOperationId: createCheckpointOperationId(
             roomName,
             revision === null ? "create" : "update",
@@ -480,6 +486,15 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
       });
 
       return { operations };
+    },
+
+    getCheckpointState(room) {
+      const roomName = createCanvasRoomName(room);
+
+      return {
+        checkpointHistorySeq: checkpointHistorySeqByRoom.get(roomName) ?? null,
+        checkpointVersion: checkpointVersionByRoom.get(roomName) ?? 0,
+      };
     },
 
     getDeletedTombstones(room) {
@@ -538,6 +553,14 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
           );
         }
       });
+
+      if (operations.length) {
+        checkpointVersionByRoom.set(
+          roomName,
+          (checkpointVersionByRoom.get(roomName) ?? 0) + 1,
+        );
+        checkpointHistorySeqByRoom.set(roomName, null);
+      }
     },
   };
 }

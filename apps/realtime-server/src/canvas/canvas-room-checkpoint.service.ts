@@ -54,8 +54,12 @@ export function createCanvasRoomCheckpointService({
     status: CanvasRoomCheckpointStatusPayload["status"],
     pendingOperations: number,
   ) {
+    const checkpointState = roomStateService.getCheckpointState(room);
+
     onCheckpointStatus?.({
       ...room,
+      checkpointHistorySeq: checkpointState.checkpointHistorySeq,
+      checkpointVersion: checkpointState.checkpointVersion,
       pendingOperations,
       status,
       updatedAt: new Date().toISOString(),
