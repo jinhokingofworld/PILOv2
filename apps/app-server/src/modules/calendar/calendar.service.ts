@@ -1,7 +1,11 @@
 import { Injectable } from "@nestjs/common";
 import { QueryResultRow } from "pg";
+import { ActivityLogService } from "../../common/activity-log.service";
 import { badRequest, notFound } from "../../common/api-error";
-import { DatabaseService } from "../../database/database.service";
+import {
+  DatabaseService,
+  DatabaseTransaction
+} from "../../database/database.service";
 import { WorkspaceService } from "../workspace/workspace.service";
 
 interface CalendarEventRow extends QueryResultRow {
@@ -102,7 +106,8 @@ const CALENDAR_EVENT_SELECT = `
 export class CalendarService {
   constructor(
     private readonly database: DatabaseService,
-    private readonly workspaceService: WorkspaceService
+    private readonly workspaceService: WorkspaceService,
+    private readonly activityLogService: ActivityLogService
   ) {}
 
   getModuleInfo() {
@@ -163,7 +168,58 @@ export class CalendarService {
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
 
     const input = this.normalizeCreateInput(body);
-    const event = await this.database.queryOne<CalendarEventRow>(
+    const event = await this.database.transaction(async (transaction) => {
+      return this.createNormalizedEventInTransaction(transaction, {
+        currentUserId,
+        workspaceId,
+        input
+      });
+    });
+
+    return this.mapEvent(event);
+  }
+
+  async createEventInTransaction(
+    transaction: DatabaseTransaction,
+    currentUserId: string,
+    workspaceId: string,
+    body: unknown
+  ): Promise<CalendarEventPayload> {
+    const input = this.normalizeCreateInput(body);
+    const created = await this.createNormalizedEventInTransaction(transaction, {
+      currentUserId,
+      workspaceId,
+      input
+    });
+    return this.mapEvent(created);
+  }
+
+  private async createNormalizedEventInTransaction(
+    transaction: DatabaseTransaction,
+    input: { currentUserId: string; workspaceId: string; input: NormalizedCalendarEventInput }
+  ): Promise<CalendarEventRow> {
+    const created = await this.insertCalendarEvent(transaction, input);
+    if (!created) throw badRequest("Calendar event could not be created");
+    await this.activityLogService.append(transaction, {
+      workspaceId: input.workspaceId,
+      actor: { type: "user", userId: input.currentUserId },
+      action: "calendar_event_created",
+      target: { type: "calendar_event", id: String(created.id) },
+      dedupeKey: `calendar:calendar_event_created:${created.id}`,
+      metadata: { version: 1, summary: "일정을 생성했습니다.", data: { title: created.title } }
+    });
+    return created;
+  }
+
+  private async insertCalendarEvent(
+    transaction: DatabaseTransaction,
+    input: {
+      currentUserId: string;
+      workspaceId: string;
+      input: NormalizedCalendarEventInput;
+    }
+  ): Promise<CalendarEventRow | null> {
+    return transaction.queryOne<CalendarEventRow>(
       `
         WITH inserted AS (
           INSERT INTO calendar_events (
@@ -200,24 +256,18 @@ export class CalendarService {
         JOIN users ON users.id = inserted.created_by
       `,
       [
-        workspaceId,
-        input.title,
-        input.description,
-        input.color,
-        input.isAllDay,
-        input.startDate,
-        input.endDate,
-        input.startTime,
-        input.endTime,
-        currentUserId
+        input.workspaceId,
+        input.input.title,
+        input.input.description,
+        input.input.color,
+        input.input.isAllDay,
+        input.input.startDate,
+        input.input.endDate,
+        input.input.startTime,
+        input.input.endTime,
+        input.currentUserId
       ]
     );
-
-    if (!event) {
-      throw badRequest("Calendar event could not be created");
-    }
-
-    return this.mapEvent(event);
   }
 
   async updateEvent(

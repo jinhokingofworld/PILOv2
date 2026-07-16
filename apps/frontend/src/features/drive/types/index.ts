@@ -121,9 +121,9 @@ export type DriveDownloadUrlPayload = {
   expiresAt: string;
 };
 
-export type UpdateDriveItemInput = {
-  name: string;
-};
+export type UpdateDriveItemInput =
+  | { name: string }
+  | { parentId: string | null };
 
 export type DeleteDriveItemPayload = {
   id: string;

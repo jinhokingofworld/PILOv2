@@ -1,5 +1,6 @@
 export type AgentRunStatus =
   | "planning"
+  | "waiting_user_input"
   | "waiting_confirmation"
   | "running"
   | "completed"
@@ -94,6 +95,14 @@ export type AgentConfirmation = {
   selectedChoiceId: string | null;
 };
 
+export type AgentRunMessage = {
+  id: string;
+  sequence: number;
+  role: "assistant" | "user";
+  content: string;
+  createdAt: string;
+};
+
 export type AgentRun = {
   id: string;
   workspaceId: string;
@@ -111,6 +120,7 @@ export type AgentRun = {
   createdAt: string;
   updatedAt: string;
   completedAt: string | null;
+  messages: AgentRunMessage[];
   steps: AgentStep[];
   confirmation: AgentConfirmation | null;
 };
@@ -124,6 +134,10 @@ export type CreateAgentRunInput = {
 
 export type AgentConfirmationApproveInput = {
   choiceId: string;
+};
+
+export type SubmitAgentRunInput = {
+  message: string;
 };
 
 export type AgentRunDetailPayload = {

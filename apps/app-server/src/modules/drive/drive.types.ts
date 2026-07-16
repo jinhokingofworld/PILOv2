@@ -65,6 +65,12 @@ export interface DriveDownloadUrlPayload {
   expiresAt: string;
 }
 
+export interface DrivePreviewUrlPayload {
+  file: DriveItemPayload;
+  previewUrl: string;
+  expiresAt: string;
+}
+
 export interface DriveItemRow extends QueryResultRow {
   id: string;
   workspace_id: string;
@@ -119,9 +125,15 @@ export interface NormalizedCreateDriveFolderInput
   name: string;
 }
 
-export interface NormalizedUpdateDriveItemInput {
-  name: string;
-}
+export type NormalizedUpdateDriveItemInput =
+  | {
+      type: "rename";
+      name: string;
+    }
+  | {
+      type: "move";
+      parentId: string | null;
+    };
 
 export interface NormalizedCreateDriveUploadUrlInput
   extends NormalizedDriveParentInput {

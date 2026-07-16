@@ -161,6 +161,9 @@ export function normalizeCanvasFreeformShapes(value: unknown) {
       delete normalizedShape.index;
     }
 
+    delete normalizedShape.contentHash;
+    delete normalizedShape.revision;
+
     normalizedShape.meta = isRecord(normalizedShape.meta)
       ? normalizedShape.meta
       : {};

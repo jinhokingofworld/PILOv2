@@ -1,6 +1,8 @@
 import type { Editor } from "tldraw";
 
-type PrReviewFileNodeActivationHandler = (reviewFileId: string) => void;
+type PrReviewFileNodeActivationHandler = {
+  onOpen: (reviewFileId: string) => void;
+};
 
 const activationHandlers = new WeakMap<
   Editor,
@@ -24,5 +26,5 @@ export function activatePrReviewFileNode(
   editor: Editor,
   reviewFileId: string
 ) {
-  activationHandlers.get(editor)?.(reviewFileId);
+  activationHandlers.get(editor)?.onOpen(reviewFileId);
 }

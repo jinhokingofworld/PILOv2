@@ -16,6 +16,7 @@ import {
   AgentStepPayload
 } from "./agent-logging.service";
 import { AgentToolRegistryService } from "./agent-tool-registry.service";
+import { AgentOutboxPublisherService } from "./agent-outbox-publisher.service";
 import type {
   AgentConfirmationPlan,
   AgentJsonObject,
@@ -30,6 +31,7 @@ import type {
 
 type AgentRunStatus =
   | "planning"
+  | "waiting_user_input"
   | "waiting_confirmation"
   | "running"
   | "completed"
@@ -142,7 +144,8 @@ export class AgentConfirmationService {
     private readonly database: DatabaseService,
     private readonly workspaceService: WorkspaceService,
     private readonly agentLoggingService: AgentLoggingService,
-    private readonly agentToolRegistryService: AgentToolRegistryService
+    private readonly agentToolRegistryService: AgentToolRegistryService,
+    private readonly agentOutboxPublisherService: AgentOutboxPublisherService
   ) {}
 
   async createConfirmation(
@@ -761,34 +764,47 @@ export class AgentConfirmationService {
       const outputSummary = this.buildOutputSummary(result);
       const resourceRefs = this.sanitizeResourceRefs(result.resourceRefs);
 
-      await this.agentLoggingService.completeStep(currentUserId, workspaceId, {
-        runId,
-        stepId: step.id,
-        outputSummary,
-        resourceRefs
-      });
-
-      const run = await this.agentLoggingService.completeRun(
+      const advanced = await this.agentLoggingService.completeToolStepAndAdvance(
         currentUserId,
         workspaceId,
         {
           runId,
+          stepId: step.id,
+          outputSummary,
+          resourceRefs,
           riskLevel: confirmation.risk_level,
-          finalAnswer: this.buildFinalAnswer(confirmation.tool_name, resourceRefs),
-          message: "승인된 작업을 완료했습니다."
+          waitingMessage:
+            "한 요청에서 실행할 수 있는 작업은 최대 5회입니다. 다음 요청에서 계속 진행할 내용을 알려주세요."
         }
       );
-
-      return this.mapActionPayloadFromRun(run, confirmation);
+      if (advanced.queuedNextPlannerTurn) {
+        await this.agentOutboxPublisherService
+          .publishCreatedRun(runId)
+          .catch(() => undefined);
+        return this.mapActionPayloadFromRun(advanced.run, confirmation);
+      }
+      return this.mapActionPayloadFromRun(advanced.run, confirmation);
     } catch (error) {
       const message = this.toSafeErrorMessage(error);
 
-      await this.agentLoggingService.failStep(currentUserId, workspaceId, {
-        runId,
-        stepId: step.id,
-        errorCode: "AGENT_TOOL_EXECUTION_FAILED",
-        errorMessage: message
-      });
+      const failedStep = await this.agentLoggingService.failStep(
+        currentUserId,
+        workspaceId,
+        {
+          runId,
+          stepId: step.id,
+          errorCode: "AGENT_TOOL_EXECUTION_FAILED",
+          errorMessage: message
+        }
+      );
+      if (failedStep.status === "completed") {
+        const reconciledRun = await this.agentLoggingService.getOwnedRun(
+          currentUserId,
+          workspaceId,
+          runId
+        );
+        return this.mapActionPayloadFromRun(reconciledRun, confirmation);
+      }
 
       if (this.shouldReconfirmBoardMutation(error, confirmation)) {
         const retryConfirmation = await this.tryCreateRetryConfirmation(
@@ -896,6 +912,10 @@ export class AgentConfirmationService {
         eventId: this.readCalendarEventId(plan),
         changes: plan.after
       };
+    }
+
+    if (this.isPlainObject(plan.call.input)) {
+      return plan.call.input;
     }
 
     throw badRequest(`Agent tool is not executable: ${plan.toolName}`);

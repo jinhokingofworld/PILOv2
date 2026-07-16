@@ -1,5 +1,109 @@
+.documentPage {
+  width: 100%;
+  max-width: 52rem;
+  margin-inline: auto;
+  padding: 0 clamp(1rem, 4vw, 2rem) 4rem;
+}
+
+.documentHeader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding-bottom: 1.25rem;
+}
+
+.documentStateHeader {
+  padding-bottom: 1.25rem;
+}
+
+.documentTitleGroup {
+  min-width: 0;
+  flex: 1 1 12rem;
+}
+
+.documentTitle {
+  overflow-wrap: anywhere;
+  font-family: var(--font-heading);
+  font-size: 1.75rem;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.documentStatus {
+  min-height: 1.25rem;
+  margin-top: 0.25rem;
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+}
+
+.documentActions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 0.5rem;
+  margin-left: auto;
+}
+
+.inlineAlert {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 0.25rem;
+  border: 1px solid color-mix(in srgb, var(--destructive) 20%, transparent);
+  border-radius: 0.375rem;
+  background: color-mix(in srgb, var(--destructive) 10%, transparent);
+  padding: 0.5rem 0.75rem;
+  color: var(--destructive);
+  font-size: 0.875rem;
+}
+
+.editorSurface {
+  margin-top: 1rem;
+}
+
+.commandStrip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--border);
+  padding: 0.375rem 0;
+}
+
+.editor {
+  display: block;
+}
+
+.emptyEditor :global(.tiptap p:first-child::before) {
+  color: var(--muted-foreground);
+  content: "입력하려면 /";
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+
+.loadingState,
+.errorState {
+  display: flex;
+  min-height: 16rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+}
+
+.errorState {
+  flex-direction: column;
+  gap: 0.75rem;
+  text-align: center;
+}
+
 .editor :global(.tiptap) {
-  min-height: 28rem;
+  min-height: 20rem;
+  padding: 1.5rem 0;
   outline: none;
 }
 

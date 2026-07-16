@@ -97,10 +97,12 @@ function ToolbarButton({
 
 function DocumentEditorSurface({
   bootstrap,
-  onReload
+  onReload,
+  onClose
 }: {
   bootstrap: DocumentBootstrapPayload;
   onReload: () => void;
+  onClose: () => void;
 }) {
   const authSession = useAuthSession();
   const workspaceId = authSession?.activeWorkspaceId ?? "";
@@ -115,6 +117,7 @@ function DocumentEditorSurface({
   const saveQueueRef = useRef(Promise.resolve());
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [isEditorEmpty, setIsEditorEmpty] = useState(false);
   const driveClient = useMemo(
     () => createDriveApiClient({ accessToken }),
     [accessToken]
@@ -190,10 +193,14 @@ function DocumentEditorSurface({
     immediatelyRender: false,
     editorProps: {
       attributes: {
-        class: "min-h-[28rem] px-5 py-6 text-sm leading-7 outline-none sm:px-8 sm:text-base"
+        class: "text-sm leading-7 outline-none sm:text-base"
       }
     },
-    onUpdate: ({ editor: updatedEditor }) => queueSnapshot(updatedEditor)
+    onCreate: ({ editor: createdEditor }) => setIsEditorEmpty(createdEditor.isEmpty),
+    onUpdate: ({ editor: updatedEditor }) => {
+      setIsEditorEmpty(updatedEditor.isEmpty);
+      queueSnapshot(updatedEditor);
+    }
   });
 
   useEffect(() => {
@@ -215,17 +222,21 @@ function DocumentEditorSurface({
           : "저장 실패";
 
   return (
-    <section className="flex min-h-[calc(100vh-9rem)] flex-col">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b px-1 pb-4">
-        <div className="min-w-0">
-          <h1 className="truncate font-heading text-2xl font-semibold leading-tight">
+    <section className={styles.documentPage}>
+      <div className={styles.documentHeader}>
+        <Button type="button" variant="ghost" size="sm" onClick={onClose}>
+          <ArrowLeft />
+          파일
+        </Button>
+        <div className={styles.documentTitleGroup}>
+          <h1 className={styles.documentTitle}>
             {bootstrap.item.name}
           </h1>
-          <p className="mt-1 text-sm text-muted-foreground" role="status">
+          <p className={styles.documentStatus} role="status">
             {saveStateLabel}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className={styles.documentActions}>
           <Button
             type="button"
             variant="outline"
@@ -241,7 +252,7 @@ function DocumentEditorSurface({
       </div>
 
       {saveError ? (
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive" role="alert">
+        <div className={styles.inlineAlert} role="alert">
           <span>{saveError}</span>
           <Button type="button" variant="outline" size="sm" onClick={onReload}>
             <RefreshCw />
@@ -250,8 +261,8 @@ function DocumentEditorSurface({
         </div>
       ) : null}
 
-      <div className="mt-4 overflow-hidden rounded-md border bg-background">
-        <div className="flex flex-wrap items-center gap-1 border-b bg-muted/20 px-2 py-1.5">
+      <div className={styles.editorSurface}>
+        <div className={styles.commandStrip} role="toolbar" aria-label="문서 서식">
           <ToolbarButton label="실행 취소" onClick={() => editor?.chain().focus().undo().run()}>
             <Undo2 />
           </ToolbarButton>
@@ -281,7 +292,10 @@ function DocumentEditorSurface({
             <Code2 />
           </ToolbarButton>
         </div>
-        <EditorContent editor={editor} className={styles.editor} />
+        <EditorContent
+          editor={editor}
+          className={`${styles.editor} ${isEditorEmpty ? styles.emptyEditor : ""}`}
+        />
       </div>
     </section>
   );
@@ -322,22 +336,33 @@ export function DriveDocumentEditor({
     void loadDocument();
   }, [loadDocument]);
 
-  return (
-    <div className="flex min-h-[calc(100vh-6.5rem)] flex-col gap-4">
-      <div>
-        <Button type="button" variant="ghost" size="sm" onClick={onClose}>
-          <ArrowLeft />
-          파일
-        </Button>
-      </div>
-
-      {loadState.status === "loading" ? (
-        <div className="flex min-h-64 items-center justify-center gap-2 text-sm text-muted-foreground">
+  if (loadState.status === "loading") {
+    return (
+      <div className={styles.documentPage}>
+        <div className={styles.documentStateHeader}>
+          <Button type="button" variant="ghost" size="sm" onClick={onClose}>
+            <ArrowLeft />
+            파일
+          </Button>
+        </div>
+        <div className={styles.loadingState}>
           <Loader2 className="animate-spin" />
           문서를 불러오는 중입니다.
         </div>
-      ) : loadState.status === "error" ? (
-        <div className="flex min-h-64 flex-col items-center justify-center gap-3 text-center">
+      </div>
+    );
+  }
+
+  if (loadState.status === "error") {
+    return (
+      <div className={styles.documentPage}>
+        <div className={styles.documentStateHeader}>
+          <Button type="button" variant="ghost" size="sm" onClick={onClose}>
+            <ArrowLeft />
+            파일
+          </Button>
+        </div>
+        <div className={styles.errorState}>
           <AlertCircle className="size-6 text-destructive" />
           <p className="text-sm text-muted-foreground">{loadState.message}</p>
           <Button type="button" variant="outline" size="sm" onClick={() => void loadDocument()}>
@@ -345,9 +370,15 @@ export function DriveDocumentEditor({
             다시 시도
           </Button>
         </div>
-      ) : (
-        <DocumentEditorSurface bootstrap={loadState.bootstrap} onReload={() => void loadDocument()} />
-      )}
-    </div>
+      </div>
+    );
+  }
+
+  return (
+    <DocumentEditorSurface
+      bootstrap={loadState.bootstrap}
+      onReload={() => void loadDocument()}
+      onClose={onClose}
+    />
   );
 }

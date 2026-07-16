@@ -497,6 +497,14 @@ export function createPrReviewApiClient({
       );
     },
 
+    async deleteReviewRoom(workspaceId: string, reviewRoomId: string) {
+      return requestPrReviewData<{ deleted: true }>(
+        reviewRoomGithubPath(workspaceId, reviewRoomId),
+        { method: "DELETE" },
+        requestOptions
+      );
+    },
+
     async listReviewCanvasShapes(
       workspaceId: string,
       canvasId: string,

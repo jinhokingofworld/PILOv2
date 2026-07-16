@@ -20,6 +20,7 @@ import {
   DriveDownloadUrlPayload,
   DriveItemPayload,
   DriveListPayload,
+  DrivePreviewUrlPayload,
   DriveUploadUrlPayload
 } from "./drive.types";
 import type {
@@ -152,6 +153,21 @@ export class DriveController {
     @Param("fileId") fileId: string
   ): Promise<ApiSuccessResponse<DriveDownloadUrlPayload>> {
     const result = await this.driveService.createDownloadUrl(
+      currentUserId,
+      workspaceId,
+      fileId
+    );
+
+    return apiResponse(result);
+  }
+
+  @Get("files/:fileId/preview-url")
+  async createPreviewUrl(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("fileId") fileId: string
+  ): Promise<ApiSuccessResponse<DrivePreviewUrlPayload>> {
+    const result = await this.driveService.createPreviewUrl(
       currentUserId,
       workspaceId,
       fileId

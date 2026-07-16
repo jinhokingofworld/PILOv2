@@ -14,7 +14,6 @@ import {
   getIndicesAbove,
   useEditor,
   type Editor,
-  type TLEventInfo,
   type TLShape,
   type TLShapeId,
   type TLShapePartial
@@ -52,6 +51,7 @@ import type {
   PrReviewConflictAnalysis,
   PrReviewDecisionUpdatedEvent,
   PrReviewFlowFile,
+  PrReviewRoomDeletedEvent,
   PrReviewRoomCanvas
 } from "@/features/pr-review/types";
 import {
@@ -115,13 +115,13 @@ type PrReviewCanvasSurfaceProps = {
   className?: string;
   conflictAnalysis?: PrReviewConflictAnalysis | null;
   onDecisionUpdated?: (event: PrReviewDecisionUpdatedEvent) => void;
-  onFileSelect?: (reviewFileId: string | null) => void;
+  onFileOpen?: (reviewFileId: string) => void;
   onRealtimeRoomJoined?: () => void;
+  onRealtimeRoomDeleted?: (event: PrReviewRoomDeletedEvent) => void;
   preparedConflictFileIds?: Set<string>;
   readOnly?: boolean;
   realtimeIdentity: CanvasRealtimeIdentity;
   reviewRoomId: string;
-  selectedReviewFileId?: string | null;
   workspaceId: string;
 };
 
@@ -1115,35 +1115,9 @@ function getStoredFileNodePinned(shape: PrReviewCanvasShape): boolean {
   return isRecord(shape.rawShape.props) && shape.rawShape.props.pinned === true;
 }
 
-function selectReviewFileNode(
-  editor: Editor,
-  reviewFileId: string | null | undefined
-) {
-  if (!reviewFileId) {
-    editor.selectNone();
-    return;
-  }
-
-  const fileNode = editor
-    .getCurrentPageShapes()
-    .find(
-      (shape) =>
-        isPrReviewFileNodeShape(shape) &&
-        shape.props.reviewFileId === reviewFileId
-    );
-
-  if (fileNode) {
-    editor.select(fileNode.id);
-    return;
-  }
-
-  editor.selectNone();
-}
-
 function resetPrReviewCanvas(
   editor: Editor,
   shapes: TLShapePartial[],
-  selectedReviewFileId: string | null | undefined,
   hydratingRef: MutableRefObject<boolean>,
   internalShapeUpdateRef: MutableRefObject<boolean>,
   lastSyncedGeometryRef: MutableRefObject<Map<string, string>>
@@ -1166,7 +1140,6 @@ function resetPrReviewCanvas(
 
     editor.createShapes(shapes);
     updatePrReviewRelationGeometry(editor, internalShapeUpdateRef, true);
-    selectReviewFileNode(editor, selectedReviewFileId);
     initializeSyncedFileGeometry(editor, lastSyncedGeometryRef);
   } finally {
     hydratingRef.current = false;
@@ -1261,33 +1234,44 @@ function registerReviewShapePolicy(
 }
 
 function PrReviewFileNodeActivationBridge({
-  onFileSelect
+  onFileOpen
 }: {
-  onFileSelect?: (reviewFileId: string | null) => void;
+  onFileOpen?: (reviewFileId: string) => void;
 }) {
   const editor = useEditor();
 
   useEffect(() => {
     const unregisterActivationHandler =
-      registerPrReviewFileNodeActivationHandler(editor, (reviewFileId) => {
-        onFileSelect?.(reviewFileId);
+      registerPrReviewFileNodeActivationHandler(editor, {
+        onOpen: (reviewFileId) => {
+          onFileOpen?.(reviewFileId);
+        }
       });
-    const handleEditorEvent = (event: TLEventInfo) => {
-      if (
-        event.type === "pointer" &&
-        event.name === "pointer_down" &&
-        event.target === "canvas"
-      ) {
-        onFileSelect?.(null);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.key !== "Enter") {
+        return;
       }
+
+      const target = event.target instanceof Element ? event.target : null;
+      if (target?.closest("button, input, select, textarea, [contenteditable=true]")) {
+        return;
+      }
+
+      const selected = editor.getOnlySelectedShape();
+      if (!isPrReviewFileNodeShape(selected)) {
+        return;
+      }
+
+      event.preventDefault();
+      onFileOpen?.(selected.props.reviewFileId);
     };
 
-    editor.on("event", handleEditorEvent);
+    window.addEventListener("keydown", handleKeyDown);
     return () => {
-      editor.off("event", handleEditorEvent);
+      window.removeEventListener("keydown", handleKeyDown);
       unregisterActivationHandler();
     };
-  }, [editor, onFileSelect]);
+  }, [editor, onFileOpen]);
 
   return null;
 }
@@ -1909,13 +1893,13 @@ export function PrReviewCanvasSurface({
   className,
   conflictAnalysis,
   onDecisionUpdated,
-  onFileSelect,
+  onFileOpen,
   onRealtimeRoomJoined,
+  onRealtimeRoomDeleted,
   preparedConflictFileIds = new Set<string>(),
   readOnly: isReviewVersionStale = false,
   realtimeIdentity,
   reviewRoomId,
-  selectedReviewFileId,
   workspaceId
 }: PrReviewCanvasSurfaceProps) {
   const editorRef = useRef<Editor | null>(null);
@@ -1926,9 +1910,6 @@ export function PrReviewCanvasSurface({
   const lastSyncedGeometryRef = useRef(new Map<string, string>());
   const storedShapeByIdRef = useRef(new Map<string, PrReviewCanvasShape>());
   const pendingRemoteOperationsRef = useRef<CanvasShapeOperationPayload[]>([]);
-  const selectedReviewFileIdRef = useRef<string | null>(
-    selectedReviewFileId ?? null
-  );
   const [storedShapes, setStoredShapes] = useState<
     PrReviewCanvasShape[] | null
   >(null);
@@ -2101,7 +2082,8 @@ export function PrReviewCanvasSurface({
     applyOperations: applyRemoteCanvasOperations,
     catchUpOperations: catchUpCanvasOperations,
     onDecisionUpdated,
-    onRoomJoined: onRealtimeRoomJoined
+    onRoomJoined: onRealtimeRoomJoined,
+    onRoomDeleted: onRealtimeRoomDeleted
   });
   const readOnly =
     isReviewVersionStale || reviewRoom?.status === "completed" || canvasPresence.readOnly;
@@ -2252,7 +2234,6 @@ export function PrReviewCanvasSurface({
       resetPrReviewCanvas(
         editor,
         shapes,
-        selectedReviewFileIdRef.current,
         hydratingRef,
         internalShapeUpdateRef,
         lastSyncedGeometryRef
@@ -2281,10 +2262,6 @@ export function PrReviewCanvasSurface({
   );
 
   useEffect(() => {
-    selectedReviewFileIdRef.current = selectedReviewFileId ?? null;
-  }, [selectedReviewFileId]);
-
-  useEffect(() => {
     if (!editorRef.current) {
       return;
     }
@@ -2292,7 +2269,6 @@ export function PrReviewCanvasSurface({
     resetPrReviewCanvas(
       editorRef.current,
       shapes,
-      selectedReviewFileIdRef.current,
       hydratingRef,
       internalShapeUpdateRef,
       lastSyncedGeometryRef
@@ -2326,14 +2302,6 @@ export function PrReviewCanvasSurface({
     persistedFileShapeEnabled,
     preparedConflictFileIds
   ]);
-
-  useEffect(() => {
-    if (!editorRef.current) {
-      return;
-    }
-
-    selectReviewFileNode(editorRef.current, selectedReviewFileId);
-  }, [selectedReviewFileId]);
 
   const handleArrangeActiveFlow = useCallback(() => {
     const currentEditor = editorRef.current;
@@ -2554,7 +2522,7 @@ export function PrReviewCanvasSurface({
           presence={canvasPresence}
           readOnly={readOnly}
         />
-        <PrReviewFileNodeActivationBridge onFileSelect={onFileSelect} />
+        <PrReviewFileNodeActivationBridge onFileOpen={onFileOpen} />
         <PrReviewCanvasPersistenceBridge
           apiClient={apiClient}
           enabled={persistedFileShapeEnabled && !readOnly}

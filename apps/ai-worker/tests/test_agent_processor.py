@@ -92,17 +92,37 @@ def planner_decision(**overrides: object) -> AgentPlannerDecision:
     return AgentPlannerDecision(**values)
 
 
+def test_completed_planner_decision_finishes_multi_tool_run() -> None:
+    job = parse_agent_run_job_payload(agent_payload())
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            status="completed",
+            message="요청을 완료했습니다.",
+            final_answer_draft="회의 참여 준비를 마쳤습니다.",
+            tool_name=None,
+            tool_input={},
+        ),
+        job,
+    )
+
+    assert normalized.status == "completed"
+    assert normalized.final_answer == "회의 참여 준비를 마쳤습니다."
+    assert "unsupportedReason" not in normalized.output_summary
+
+
 class FakeAgentRunRepository:
     def __init__(
         self,
         context: AgentRunContext | None | object = _DEFAULT_CONTEXT,
         lock: bool = True,
         complete_step_result: bool = True,
+        wait_for_user_input_result: bool = True,
         context_error: Exception | None = None,
     ) -> None:
         self.context = run_context() if context is _DEFAULT_CONTEXT else context
         self.lock = lock
         self.complete_step_result = complete_step_result
+        self.wait_for_user_input_result = wait_for_user_input_result
         self.context_error = context_error
         self.lock_calls: list[str] = []
         self.release_calls: list[str] = []
@@ -112,6 +132,7 @@ class FakeAgentRunRepository:
         self.failed_steps: list[tuple[str, str, str, str]] = []
         self.completed_runs: list[tuple[str, str, str, str | None]] = []
         self.tool_execution_ready_updates: list[tuple[str, str, str]] = []
+        self.waiting_user_input_updates: list[tuple[str, str]] = []
 
     def try_acquire_run_lock(self, run_id: str) -> bool:
         self.lock_calls.append(run_id)
@@ -173,6 +194,10 @@ class FakeAgentRunRepository:
     ) -> None:
         self.failed_updates.append((run_id, error_code, error_message, message))
 
+    def wait_for_user_input(self, run_id: str, message: str) -> bool:
+        self.waiting_user_input_updates.append((run_id, message))
+        return self.wait_for_user_input_result
+
 
 class FakePlannerClient:
     def __init__(
@@ -223,7 +248,11 @@ def test_parse_agent_run_job_payload_validates_required_ids() -> None:
     assert job.requested_by_user_id == USER_ID
     assert job.tool_schema_version == AGENT_TOOL_SCHEMA_VERSION
     assert job.request_context is None
+    assert job.turn_sequence == 1
     assert job.tools[0].name == "list_calendar_events"
+
+    current_turn = parse_agent_run_job_payload(agent_payload(turnSequence=4))
+    assert current_turn.turn_sequence == 4
 
     for key in ["runId", "workspaceId", "requestedByUserId"]:
         payload = agent_payload(**{key: "not-a-uuid"})
@@ -240,6 +269,10 @@ def test_parse_agent_run_job_payload_validates_required_ids() -> None:
         assert "toolSchemaVersion" in str(error)
     else:
         raise AssertionError("toolSchemaVersion should be validated")
+
+    for invalid_turn_sequence in [0, -1, True, 1.5, "2", 2_147_483_648]:
+        with pytest.raises(ValueError, match="turnSequence"):
+            parse_agent_run_job_payload(agent_payload(turnSequence=invalid_turn_sequence))
 
 
 def test_parse_agent_run_job_payload_preserves_validated_request_context() -> None:
@@ -494,7 +527,7 @@ def test_processor_completes_unregistered_tool_as_unsupported() -> None:
     )
 
 
-def test_processor_completes_missing_fields_with_final_answer() -> None:
+def test_processor_waits_for_user_input_when_required_fields_are_missing() -> None:
     repository = FakeAgentRunRepository()
     planner_client = FakePlannerClient(
         decision=planner_decision(
@@ -511,16 +544,60 @@ def test_processor_completes_missing_fields_with_final_answer() -> None:
     result = processor.process_payload(agent_payload())
 
     assert result.delete_message is True
-    assert result.reason == "agent_planning_completed"
+    assert result.reason == "agent_waiting_user_input"
     output_summary = repository.completed_steps[0][2]
     assert output_summary["status"] == "needs_clarification"
     assert output_summary["missingFields"] == ["calendar_event_time"]
-    assert repository.completed_runs[0] == (
-        RUN_ID,
-        "몇 시에 일정을 만들까요?",
-        "일정 생성을 위해 시간이 필요합니다.",
-        None,
+    assert repository.completed_runs == []
+    assert repository.waiting_user_input_updates == [
+        (
+            RUN_ID,
+            "몇 시에 일정을 만들까요?",
+        )
+    ]
+
+
+def test_processor_does_not_append_clarification_after_run_leaves_planning() -> None:
+    repository = FakeAgentRunRepository(wait_for_user_input_result=False)
+    planner_client = FakePlannerClient(
+        decision=planner_decision(
+            status="needs_clarification",
+            message="일정 생성을 위해 시간이 필요합니다.",
+            final_answer_draft="몇 시에 일정을 만들까요?",
+            tool_name=None,
+            tool_input={},
+            missing_fields=("calendar_event_time",),
+        )
     )
+
+    result = create_processor(repository, planner_client).process_payload(agent_payload())
+
+    assert result.delete_message is True
+    assert result.reason == "agent_run_no_longer_planning"
+    assert repository.completed_runs == []
+    assert repository.waiting_user_input_updates == [
+        (
+            RUN_ID,
+            "몇 시에 일정을 만들까요?",
+        )
+    ]
+
+
+def test_processor_waits_for_user_input_at_planner_turn_limit() -> None:
+    repository = FakeAgentRunRepository(context=run_context(planner_turn_count=5))
+
+    result = create_processor(repository).process_payload(agent_payload())
+
+    assert result.delete_message is True
+    assert result.reason == "agent_planner_turn_limit_reached"
+    assert repository.started_steps == []
+    assert repository.waiting_user_input_updates == [
+        (
+            RUN_ID,
+            "한 요청에서 계획할 수 있는 작업은 최대 5회입니다. "
+            "다음 요청에서 계속 진행할 내용을 알려주세요.",
+        )
+    ]
 
 
 def test_normalizer_blocks_calendar_update_without_event_id() -> None:

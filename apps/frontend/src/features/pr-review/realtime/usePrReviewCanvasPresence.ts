@@ -17,7 +17,10 @@ import type {
   CanvasShapeOperationPayload,
 } from "@/shared/canvas-realtime/canvas-realtime-types";
 import { reconcilePrReviewCanvasOperations } from "@/features/pr-review/realtime/pr-review-canvas-operation-sync";
-import type { PrReviewDecisionUpdatedEvent } from "@/features/pr-review/types";
+import type {
+  PrReviewDecisionUpdatedEvent,
+  PrReviewRoomDeletedEvent,
+} from "@/features/pr-review/types";
 
 const STALE_PRESENCE_TIMEOUT_MS = 15_000;
 const STALE_PRESENCE_SWEEP_MS = 2_000;
@@ -45,6 +48,7 @@ type PrReviewCanvasPresenceOptions = {
     signal: AbortSignal,
   ) => Promise<CanvasOperationsCatchupPayload>;
   onDecisionUpdated?: (event: PrReviewDecisionUpdatedEvent) => void;
+  onRoomDeleted?: (event: PrReviewRoomDeletedEvent) => void;
   onRoomJoined?: () => void;
 };
 
@@ -96,6 +100,7 @@ export function usePrReviewCanvasPresence(
   const applyOperationsRef = useRef(options.applyOperations);
   const catchUpOperationsRef = useRef(options.catchUpOperations);
   const onDecisionUpdatedRef = useRef(options.onDecisionUpdated);
+  const onRoomDeletedRef = useRef(options.onRoomDeleted);
   const onRoomJoinedRef = useRef(options.onRoomJoined);
   const lastSeenOpSeqRef = useRef(0);
   const bufferedOperationsRef = useRef<CanvasShapeOperationPayload[]>([]);
@@ -109,11 +114,13 @@ export function usePrReviewCanvasPresence(
     applyOperationsRef.current = options.applyOperations;
     catchUpOperationsRef.current = options.catchUpOperations;
     onDecisionUpdatedRef.current = options.onDecisionUpdated;
+    onRoomDeletedRef.current = options.onRoomDeleted;
     onRoomJoinedRef.current = options.onRoomJoined;
   }, [
     options.applyOperations,
     options.catchUpOperations,
     options.onDecisionUpdated,
+    options.onRoomDeleted,
     options.onRoomJoined,
   ]);
 
@@ -344,6 +351,29 @@ export function usePrReviewCanvasPresence(
       }
 
       onDecisionUpdatedRef.current?.(payload);
+    });
+    (
+      realtimeSocket as unknown as {
+        on: (
+          event: "pr-review:room:deleted",
+          listener: (payload: PrReviewRoomDeletedEvent) => void,
+        ) => void;
+      }
+    ).on("pr-review:room:deleted", (payload) => {
+      if (
+        payload.workspaceId !== room.workspaceId ||
+        payload.canvasId !== room.canvasId
+      ) {
+        return;
+      }
+
+      joinedRef.current = false;
+      activeCatchUpAbortRef.current?.abort();
+      activeCatchUpAbortRef.current = null;
+      setJoined(false);
+      setReadOnly(true);
+      setRemotePresence([]);
+      onRoomDeletedRef.current?.(payload);
     });
     realtimeSocket.on("canvas:presence:update", (presence) => {
       if (

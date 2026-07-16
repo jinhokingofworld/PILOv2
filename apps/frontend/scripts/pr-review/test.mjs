@@ -357,7 +357,7 @@ assert.match(prReviewCanvasShell, /Conflict 정보가 오래되었습니다/);
 assert.match(prReviewCanvasShell, /Conflict 정보 다시 불러오기/);
 assert.match(prReviewCanvasShell, /PrReviewCanvasSurface/);
 assert.match(prReviewCanvasShell, /realtimeIdentity=\{realtimeIdentity\}/);
-assert.match(prReviewCanvasShell, /setSelectedReviewFileId/);
+assert.match(prReviewCanvasShell, /setOpenedReviewFileId/);
 assert.match(prReviewCanvasShell, /PrReviewFileDiffDrawer/);
 assert.match(prReviewFileDiffDrawer, /file\.decisionCarriedOver/);
 assert.match(prReviewFileDiffDrawer, /이전 버전에서 유지된 판단입니다/);
@@ -380,10 +380,7 @@ assert.match(prReviewCanvasShell, /updateReviewedCount/);
 assert.match(prReviewCanvasShell, /previousReviewStatus/);
 assert.match(prReviewCanvasShell, /setSummary/);
 assert.match(prReviewCanvasShell, /updatedFile\.riskLevel/);
-assert.match(
-  prReviewCanvasShell,
-  /selectedReviewFileId=\{selectedReviewFileId\}/
-);
+assert.match(prReviewCanvasShell, /onFileOpen=\{setOpenedReviewFileId\}/);
 assert.match(prReviewCanvasShell, /conflictAnalysis=\{conflictAnalysis\}/);
 assert.match(prReviewCanvasShell, /conflictFile=\{selectedConflictFile\}/);
 assert.match(
@@ -437,8 +434,8 @@ assert.match(prReviewCanvasSurface, /createShapeId/);
 assert.match(prReviewCanvasSurface, /canvas\.edges/);
 assert.match(prReviewCanvasSurface, /canvas\.flows/);
 assert.match(prReviewCanvasSurface, /isPrReviewFileNodeShape/);
-assert.match(prReviewCanvasSurface, /selectReviewFileNode/);
-assert.match(prReviewCanvasSurface, /selectedReviewFileId/);
+assert.match(prReviewCanvasSurface, /onFileOpen/);
+assert.match(prReviewCanvasSurface, /window\.addEventListener\("keydown", handleKeyDown\)/);
 assert.match(prReviewCanvasSurface, /PrReviewCanvasPersistenceBridge/);
 assert.match(prReviewCanvasSurface, /usePrReviewCanvasPresence/);
 assert.match(
@@ -663,7 +660,7 @@ assert.match(
   prReviewCanvasSurface,
   /editor\.createShapes\(shapes\);\s+updatePrReviewRelationGeometry\(editor, internalShapeUpdateRef, true\);/
 );
-assert.match(prReviewFileNodeShapeUtil, /override onClick/);
+assert.match(prReviewFileNodeShapeUtil, /override onDoubleClick/);
 assert.match(prReviewFileNodeShapeUtil, /activatePrReviewFileNode/);
 
 await import("./flow-layout.test.mjs");

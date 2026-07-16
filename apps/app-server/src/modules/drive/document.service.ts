@@ -28,6 +28,7 @@ import type {
 import type { DriveItemRow } from "./drive.types";
 import {
   validateCreateDocumentRequest,
+  extractDriveFileAttachmentIds,
   validateSaveDocumentSnapshotRequest
 } from "./document.validation";
 
@@ -229,11 +230,18 @@ export class DocumentService {
     return this.database.transaction(async (transaction) => {
       const lockedDocument = await transaction.queryOne<LockedDocumentRow>(
         `
-          SELECT document.*, item.name
+          SELECT
+            document.*,
+            item.name,
+            snapshot.content_json AS current_snapshot_content_json
           FROM documents document
           JOIN drive_items item
             ON item.id = document.drive_item_id
             AND item.workspace_id = document.workspace_id
+          JOIN document_snapshots snapshot
+            ON snapshot.id = document.latest_snapshot_id
+            AND snapshot.document_id = document.id
+            AND snapshot.workspace_id = document.workspace_id
           WHERE document.id = $1
             AND document.workspace_id = $2
             AND document.deleted_at IS NULL
@@ -249,6 +257,12 @@ export class DocumentService {
       if (currentVersion !== input.expectedVersion) {
         throw conflict("Document version is outdated");
       }
+
+      await this.assertActiveReadyFiles(
+        transaction,
+        workspaceId,
+        input.attachmentFileIds
+      );
 
       const nextVersion = currentVersion + 1;
       const snapshot = await transaction.queryOne<DocumentSnapshotRow>(
@@ -294,16 +308,60 @@ export class DocumentService {
         [documentId, workspaceId, currentUserId]
       );
 
-      await this.activityLogService.append(
-        transaction,
-        this.buildContentUpdatedActivityLog(
-          currentUserId,
-          workspaceId,
-          documentId,
-          lockedDocument.name,
-          nextVersion
+      const previousAttachmentFileIds = new Set(
+        extractDriveFileAttachmentIds(
+          lockedDocument.current_snapshot_content_json ?? EMPTY_TIPTAP_DOCUMENT
         )
       );
+      const currentAttachmentFileIds = new Set(input.attachmentFileIds);
+      const attachedFileIds = input.attachmentFileIds.filter(
+        (fileId) => !previousAttachmentFileIds.has(fileId)
+      );
+      const detachedFileIds = [...previousAttachmentFileIds].filter(
+        (fileId) => !currentAttachmentFileIds.has(fileId)
+      );
+
+      if (attachedFileIds.length > 0 || detachedFileIds.length > 0) {
+        for (const fileId of attachedFileIds) {
+          await this.activityLogService.append(
+            transaction,
+            this.buildAttachmentUpdatedActivityLog(
+              currentUserId,
+              workspaceId,
+              documentId,
+              lockedDocument.name,
+              nextVersion,
+              fileId,
+              "attached"
+            )
+          );
+        }
+        for (const fileId of detachedFileIds) {
+          await this.activityLogService.append(
+            transaction,
+            this.buildAttachmentUpdatedActivityLog(
+              currentUserId,
+              workspaceId,
+              documentId,
+              lockedDocument.name,
+              nextVersion,
+              fileId,
+              "detached"
+            )
+          );
+        }
+      } else {
+        await this.activityLogService.append(
+          transaction,
+          this.buildContentUpdatedActivityLog(
+            currentUserId,
+            workspaceId,
+            documentId,
+            lockedDocument.name,
+            nextVersion
+          )
+        );
+      }
 
       return {
         document: mapDocument(document),
@@ -325,6 +383,31 @@ export class DocumentService {
       [workspaceId, parentId]
     );
     if (!parent) throw notFound("Drive folder not found");
+  }
+
+  private async assertActiveReadyFiles(
+    transaction: DatabaseTransaction,
+    workspaceId: string,
+    fileIds: string[]
+  ): Promise<void> {
+    if (fileIds.length === 0) return;
+
+    const files = await transaction.query<{ id: string }>(
+      `
+        SELECT id
+        FROM drive_items
+        WHERE workspace_id = $1
+          AND id = ANY($2::uuid[])
+          AND item_type = 'file'
+          AND upload_status = 'ready'
+          AND deleted_at IS NULL
+      `,
+      [workspaceId, fileIds]
+    );
+
+    if (files.length !== fileIds.length) {
+      throw badRequest("Document attachment is invalid");
+    }
   }
 
   private buildCreatedActivityLog(
@@ -367,6 +450,35 @@ export class DocumentService {
         version: 1,
         summary: `${title} 문서 내용을 수정했습니다.`,
         data: { version }
+      }
+    };
+  }
+
+  private buildAttachmentUpdatedActivityLog(
+    currentUserId: string,
+    workspaceId: string,
+    documentId: string,
+    name: string,
+    version: number,
+    driveItemId: string,
+    operation: "attached" | "detached"
+  ): ActivityLogInput {
+    const title = safeDocumentTitle(name);
+    const summary =
+      operation === "attached"
+        ? `${title} 문서에 파일을 첨부했습니다.`
+        : `${title} 문서에서 파일 첨부를 제거했습니다.`;
+
+    return {
+      workspaceId,
+      actor: { type: "user", userId: currentUserId },
+      action: "document_attachment_updated",
+      target: { type: "document", id: documentId },
+      dedupeKey: `document:document_attachment_updated:${documentId}:${version}:${driveItemId}:${operation}`,
+      metadata: {
+        version: 1,
+        summary,
+        data: { driveItemId, operation }
       }
     };
   }

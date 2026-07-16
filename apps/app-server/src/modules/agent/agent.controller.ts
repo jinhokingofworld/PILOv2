@@ -81,6 +81,22 @@ export class AgentController {
     return apiResponse(result);
   }
 
+  @Post("runs/:runId/inputs")
+  async submitRunInput(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("runId") runId: string,
+    @Body() body: unknown
+  ): Promise<ApiSuccessResponse<AgentRunDetailPayload>> {
+    const result = await this.agentService.submitRunInput(
+      currentUserId,
+      workspaceId,
+      runId,
+      body
+    );
+    return apiResponse(result);
+  }
+
   @Post("runs/:runId/confirmations/:confirmationId/approve")
   async approveConfirmation(
     @CurrentUserId() currentUserId: string,

@@ -526,6 +526,8 @@ await import("./conflict-status-refresh.test.mjs");
 await import("./decision-progress.test.mjs");
 await import("./decision-concurrency.test.mjs");
 await import("./decision-realtime-publisher.test.mjs");
+await import("./review-room-delete-realtime.test.mjs");
+await import("./room-realtime-publisher.test.mjs");
 await import("./submission.test.mjs");
 await import("./async-analysis-enqueue.test.mjs");
 await import("./analysis-input-handoff.test.mjs");

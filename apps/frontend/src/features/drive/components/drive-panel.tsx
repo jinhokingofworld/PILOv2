@@ -7,6 +7,7 @@ import {
   FileText,
   FilePlus,
   Folder,
+  FolderInput,
   FolderPlus,
   Home,
   Loader2,
@@ -279,6 +280,7 @@ function DriveItemRow({
   onOpenDelete,
   onOpenDocument,
   onOpenFolder,
+  onOpenMove,
   onOpenRename
 }: {
   activeActionItemId: string | null;
@@ -287,6 +289,7 @@ function DriveItemRow({
   onOpenDelete: (item: DriveItem) => void;
   onOpenDocument: (item: DriveItem) => void;
   onOpenFolder: (item: DriveItem) => void;
+  onOpenMove: (item: DriveItem) => void;
   onOpenRename: (item: DriveItem) => void;
 }) {
   const isFolder = item.itemType === "folder";
@@ -364,6 +367,14 @@ function DriveItemRow({
               >
                 <Pencil />
                 이름 변경
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className="gap-2"
+                disabled={isBusy}
+                onClick={() => onOpenMove(item)}
+              >
+                <FolderInput />
+                이동
               </DropdownMenuItem>
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
@@ -637,6 +648,168 @@ function RenameItemSheet({
   );
 }
 
+function MoveItemSheet({
+  destination,
+  destinationParentId,
+  error,
+  hasDestinationError,
+  isDestinationReady,
+  isLoading,
+  isSubmitting,
+  item,
+  onNavigate,
+  onOpenChange,
+  onRetry,
+  onSelect
+}: {
+  destination: DriveListPayload;
+  destinationParentId: string | null;
+  error: string | null;
+  hasDestinationError: boolean;
+  isDestinationReady: boolean;
+  isLoading: boolean;
+  isSubmitting: boolean;
+  item: DriveItem | null;
+  onNavigate: (parentId: string | null) => void;
+  onOpenChange: (open: boolean) => void;
+  onRetry: () => void;
+  onSelect: (parentId: string | null) => void;
+}) {
+  const folders = destination.items.filter((candidate) => candidate.itemType === "folder");
+  const isCurrentParent = item?.parentId === destinationParentId;
+  const isInvalidDestination = destinationParentId === item?.id;
+  const canSelect =
+    Boolean(item) &&
+    !isCurrentParent &&
+    !isInvalidDestination &&
+    isDestinationReady &&
+    !isLoading &&
+    !isSubmitting;
+  const destinationLabel = destination.parent?.name ?? "루트";
+
+  return (
+    <Sheet open={Boolean(item)} onOpenChange={onOpenChange}>
+      <SheetContent className="w-full sm:max-w-sm">
+        <div className="flex min-h-0 flex-1 flex-col">
+          <SheetHeader>
+            <SheetTitle>이동</SheetTitle>
+            <SheetDescription>
+              {item ? `${item.name}의 이동할 폴더를 선택하세요.` : ""}
+            </SheetDescription>
+          </SheetHeader>
+
+          <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4">
+            <DriveBreadcrumbs
+              breadcrumbs={destination.breadcrumbs}
+              currentParentId={destinationParentId}
+              onNavigate={onNavigate}
+            />
+
+            <div className="rounded-md border bg-muted/30 px-3 py-2">
+              <p className="text-xs font-medium text-muted-foreground">선택한 위치</p>
+              <p className="mt-1 truncate text-sm font-medium">{destinationLabel}</p>
+            </div>
+
+            {error ? (
+              <p
+                className="rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+                role="alert"
+              >
+                {error}
+              </p>
+            ) : null}
+
+            {isLoading ? (
+              <div className="grid gap-2">
+                <Skeleton className="h-10 w-full" />
+                <Skeleton className="h-10 w-full" />
+                <Skeleton className="h-10 w-full" />
+              </div>
+            ) : hasDestinationError ? (
+              <div className="flex min-h-24 flex-col items-start justify-center gap-3 px-2">
+                <p className="text-sm text-muted-foreground">
+                  폴더 목록을 다시 불러온 뒤 이동할 수 있습니다.
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={isSubmitting}
+                  onClick={onRetry}
+                >
+                  <RefreshCw />
+                  다시 시도
+                </Button>
+              </div>
+            ) : (
+              <div className="grid gap-1">
+                <p className="px-1 pb-1 text-xs font-medium text-muted-foreground">
+                  하위 폴더
+                </p>
+                {folders.length ? (
+                  folders.map((folder) => {
+                    const isMovingFolder = folder.id === item?.id;
+
+                    return (
+                      <Button
+                        key={folder.id}
+                        type="button"
+                        variant="ghost"
+                        className="justify-between gap-3 px-2"
+                        disabled={isSubmitting || isMovingFolder}
+                        onClick={() => onNavigate(folder.id)}
+                      >
+                        <span className="flex min-w-0 items-center gap-2">
+                          <Folder className="size-4 shrink-0 text-amber-700" />
+                          <span className="truncate">{folder.name}</span>
+                        </span>
+                        {isMovingFolder ? (
+                          <span className="shrink-0 text-xs text-muted-foreground">
+                            이동할 폴더
+                          </span>
+                        ) : (
+                          <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+                        )}
+                      </Button>
+                    );
+                  })
+                ) : (
+                  <p className="px-2 py-3 text-sm text-muted-foreground">
+                    이동할 하위 폴더가 없습니다.
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+
+          <SheetFooter className="border-t">
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                className="flex-1"
+                disabled={isSubmitting}
+                onClick={() => onOpenChange(false)}
+              >
+                취소
+              </Button>
+              <Button
+                type="button"
+                className="flex-1"
+                disabled={!canSelect}
+                onClick={() => onSelect(destinationParentId)}
+              >
+                {isSubmitting ? <Loader2 className="animate-spin" /> : <FolderInput />}
+                {isCurrentParent ? "현재 위치" : "이 폴더로 이동"}
+              </Button>
+            </div>
+          </SheetFooter>
+        </div>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
 function DeleteItemDialog({
   error,
   isDeleting,
@@ -728,6 +901,18 @@ export function DrivePanel() {
   const [renameName, setRenameName] = useState("");
   const [renameError, setRenameError] = useState<string | null>(null);
   const [isRenaming, setIsRenaming] = useState(false);
+  const [moveItem, setMoveItem] = useState<DriveItem | null>(null);
+  const [moveDestinationParentId, setMoveDestinationParentId] = useState<
+    string | null
+  >(null);
+  const [moveDestinationData, setMoveDestinationData] =
+    useState<DriveListPayload>(emptyDriveData);
+  const [moveDestinationStatus, setMoveDestinationStatus] =
+    useState<DriveStatus>("idle");
+  const [moveDestinationRequestVersion, setMoveDestinationRequestVersion] =
+    useState(0);
+  const [moveError, setMoveError] = useState<string | null>(null);
+  const [isMoving, setIsMoving] = useState(false);
   const [deleteItem, setDeleteItem] = useState<DriveItem | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -867,6 +1052,55 @@ export function DrivePanel() {
       active = false;
     };
   }, [canUseDrive, currentParentId, fetchDriveData, workspaceId]);
+
+  useEffect(() => {
+    if (!moveItem) {
+      return;
+    }
+
+    if (!canUseDrive) {
+      setMoveDestinationData(emptyDriveData);
+      setMoveDestinationStatus("idle");
+      setMoveError("파일을 이동하려면 로그인이 필요합니다.");
+      return;
+    }
+
+    let active = true;
+
+    async function loadMoveDestination() {
+      setMoveDestinationStatus("loading");
+      setMoveError(null);
+
+      try {
+        const nextDestination = await driveClient.listItems(workspaceId, {
+          parentId: moveDestinationParentId
+        });
+        if (!active) return;
+
+        setMoveDestinationData(nextDestination);
+        setMoveDestinationStatus("success");
+      } catch (moveLoadError) {
+        if (!active) return;
+
+        setMoveDestinationData(emptyDriveData);
+        setMoveDestinationStatus("error");
+        setMoveError(errorMessageFromUnknown(moveLoadError));
+      }
+    }
+
+    void loadMoveDestination();
+
+    return () => {
+      active = false;
+    };
+  }, [
+    canUseDrive,
+    driveClient,
+    moveDestinationParentId,
+    moveDestinationRequestVersion,
+    moveItem,
+    workspaceId
+  ]);
 
   function openCreateFolderSheet() {
     setFolderName("");
@@ -1061,6 +1295,75 @@ export function DrivePanel() {
     } catch (downloadError) {
       setActionError(errorMessageFromUnknown(downloadError));
     } finally {
+      setActiveActionItemId(null);
+    }
+  }
+
+  function openMoveSheet(item: DriveItem) {
+    setMoveItem(item);
+    setMoveDestinationParentId(item.parentId);
+    setMoveDestinationData(emptyDriveData);
+    setMoveDestinationStatus("idle");
+    setMoveError(null);
+    setActionError(null);
+  }
+
+  function handleMoveOpenChange(open: boolean) {
+    if (isMoving) {
+      return;
+    }
+
+    if (!open) {
+      setMoveItem(null);
+      setMoveDestinationParentId(null);
+      setMoveDestinationData(emptyDriveData);
+      setMoveDestinationStatus("idle");
+      setMoveError(null);
+    }
+  }
+
+  function navigateMoveDestination(parentId: string | null) {
+    if (moveItem?.itemType === "folder" && parentId === moveItem.id) {
+      return;
+    }
+
+    setMoveDestinationParentId(parentId);
+  }
+
+  async function handleMoveSelect(parentId: string | null) {
+    if (!moveItem) {
+      return;
+    }
+
+    if (!canUseDrive) {
+      setMoveError("파일을 이동하려면 로그인이 필요합니다.");
+      return;
+    }
+
+    if (moveItem.parentId === parentId) {
+      setMoveError("이미 이 폴더에 있습니다.");
+      return;
+    }
+
+    if (moveItem.itemType === "folder" && parentId === moveItem.id) {
+      setMoveError("폴더를 자기 자신으로 이동할 수 없습니다.");
+      return;
+    }
+
+    setIsMoving(true);
+    setActiveActionItemId(moveItem.id);
+    setMoveError(null);
+
+    try {
+      await driveClient.updateItem(workspaceId, moveItem.id, { parentId });
+      setMoveItem(null);
+      setMoveDestinationData(emptyDriveData);
+      setMoveDestinationStatus("idle");
+      await reloadDrive();
+    } catch (moveErrorValue) {
+      setMoveError(errorMessageFromUnknown(moveErrorValue));
+    } finally {
+      setIsMoving(false);
       setActiveActionItemId(null);
     }
   }
@@ -1374,6 +1677,7 @@ export function DrivePanel() {
                         onOpenDelete={openDeleteDialog}
                         onOpenDocument={(document) => updateDocumentLocation(document.id)}
                         onOpenFolder={(folder) => setCurrentParentId(folder.id)}
+                        onOpenMove={openMoveSheet}
                         onOpenRename={openRenameSheet}
                       />
                     ))}
@@ -1404,6 +1708,23 @@ export function DrivePanel() {
         onNameChange={setRenameName}
         onOpenChange={handleRenameOpenChange}
         onSubmit={handleRenameSubmit}
+      />
+
+      <MoveItemSheet
+        destination={moveDestinationData}
+        destinationParentId={moveDestinationParentId}
+        error={moveError}
+        hasDestinationError={moveDestinationStatus === "error"}
+        isDestinationReady={moveDestinationStatus === "success"}
+        isLoading={moveDestinationStatus === "loading"}
+        isSubmitting={isMoving}
+        item={moveItem}
+        onNavigate={navigateMoveDestination}
+        onOpenChange={handleMoveOpenChange}
+        onRetry={() =>
+          setMoveDestinationRequestVersion((version) => version + 1)
+        }
+        onSelect={(parentId) => void handleMoveSelect(parentId)}
       />
 
       <DeleteItemDialog

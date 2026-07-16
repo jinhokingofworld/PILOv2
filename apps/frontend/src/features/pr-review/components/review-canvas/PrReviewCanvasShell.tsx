@@ -46,6 +46,7 @@ import {
   type createPrReviewApiClient
 } from "@/features/pr-review/api/client";
 import { PrReviewCanvasSurface } from "@/features/pr-review/components/review-canvas/PrReviewCanvasSurface";
+import { PrReviewRoomDeleteButton } from "@/features/pr-review/components/pr-review-room-delete-button";
 import { PrReviewFileDiffDrawer } from "@/features/pr-review/components/review-canvas/PrReviewFileDiffDrawer";
 import { PrReviewSubmitReviewModal } from "@/features/pr-review/components/review-canvas/PrReviewSubmitReviewModal";
 import { getPrReviewErrorMessage } from "@/features/pr-review/pr-review-error-message";
@@ -91,6 +92,7 @@ type PrReviewCanvasShellProps = {
   backLabel: string;
   onBackToSelection: () => void;
   onGoToGithub: () => void;
+  onReviewRoomDeleted: () => void;
   onReviewSessionCreated: (session: PrReviewSession) => void;
   pullRequest: PrReviewPullRequest | PrReviewPullRequestDetail | null;
   realtimeIdentity: CanvasRealtimeIdentity;
@@ -314,6 +316,7 @@ export function PrReviewCanvasShell({
   backLabel,
   onBackToSelection,
   onGoToGithub,
+  onReviewRoomDeleted,
   onReviewSessionCreated,
   pullRequest,
   realtimeIdentity,
@@ -334,7 +337,7 @@ export function PrReviewCanvasShell({
     string | null
   >(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [selectedReviewFileId, setSelectedReviewFileId] = useState<
+  const [openedReviewFileId, setOpenedReviewFileId] = useState<
     string | null
   >(null);
   const [latestDecisionUpdate, setLatestDecisionUpdate] =
@@ -802,15 +805,15 @@ export function PrReviewCanvasShell({
       ),
     [conflictAnalysis]
   );
-  const selectedConflictFile = selectedReviewFileId
-    ? contentConflictByFileId.get(selectedReviewFileId) ?? null
+  const selectedConflictFile = openedReviewFileId
+    ? contentConflictByFileId.get(openedReviewFileId) ?? null
     : null;
   const selectedConflictDraft = selectedConflictFile
     ? conflictDrafts[selectedConflictFile.reviewFileId] ??
       createPrReviewConflictDraft(selectedConflictFile)
     : null;
-  const selectedUnsupportedConflictFile = selectedReviewFileId
-    ? unsupportedConflictByFileId.get(selectedReviewFileId) ?? null
+  const selectedUnsupportedConflictFile = openedReviewFileId
+    ? unsupportedConflictByFileId.get(openedReviewFileId) ?? null
     : null;
   const conflictDraftProgress = useMemo(
     () => getPrReviewConflictDraftProgress(conflictAnalysis, conflictDrafts),
@@ -916,7 +919,7 @@ export function PrReviewCanvasShell({
     );
 
     setIsSubmitReviewModalOpen(false);
-    setSelectedReviewFileId(null);
+    setOpenedReviewFileId(null);
     onReviewSessionCreated(result.revision);
   }
 
@@ -933,7 +936,7 @@ export function PrReviewCanvasShell({
         workspaceId,
         session.reviewRoomId
       );
-      setSelectedReviewFileId(null);
+      setOpenedReviewFileId(null);
       onReviewSessionCreated(result.revision);
     } catch (error) {
       setRevisionStartStatus("error");
@@ -1099,6 +1102,12 @@ export function PrReviewCanvasShell({
             <ArrowLeft className="size-4" />
             {backLabel}
           </Button>
+          <PrReviewRoomDeleteButton
+            apiClient={apiClient}
+            onDeleted={onReviewRoomDeleted}
+            reviewRoomId={session.reviewRoomId}
+            workspaceId={workspaceId}
+          />
           <div className="flex h-10 min-w-0 items-center gap-2 rounded-lg border border-slate-200 px-3 text-sm font-medium">
             <GitBranch className="size-4 shrink-0 text-slate-500" />
             <span className="max-w-44 truncate">{headBranch}</span>
@@ -1263,20 +1272,20 @@ export function PrReviewCanvasShell({
                 className="h-full w-full"
                 conflictAnalysis={conflictAnalysis}
                 onDecisionUpdated={handleRealtimeDecisionUpdated}
-                onFileSelect={setSelectedReviewFileId}
+                onFileOpen={setOpenedReviewFileId}
                 onRealtimeRoomJoined={handleRealtimeRoomJoined}
+                onRealtimeRoomDeleted={onReviewRoomDeleted}
                 preparedConflictFileIds={preparedConflictFileIds}
                 readOnly={isReviewReadOnly}
                 realtimeIdentity={realtimeIdentity}
                 reviewRoomId={session.reviewRoomId}
-                selectedReviewFileId={selectedReviewFileId}
                 workspaceId={workspaceId}
               />
             </>
           ) : (
             <CanvasEmptyState />
           )}
-          {selectedReviewFileId &&
+          {openedReviewFileId &&
           !(
             conflictStatus === "conflicted" &&
             (conflictAnalysisStatus === "error" ||
@@ -1295,7 +1304,7 @@ export function PrReviewCanvasShell({
               isReviewRoomCompleted={isPullRequestClosed}
               isReviewVersionStale={isReviewVersionStale}
               isReviewSessionConflicted={conflictStatus === "conflicted"}
-              onClose={() => setSelectedReviewFileId(null)}
+              onClose={() => setOpenedReviewFileId(null)}
               onOpenConflictApply={openConflictApplyConfirm}
               onConflictDraftChange={handleConflictDraftChange}
               onRemoteConflictDraftUpdated={handleRemoteConflictDraftUpdated}
@@ -1303,7 +1312,7 @@ export function PrReviewCanvasShell({
               onDecisionSaved={handleDecisionSaved}
               remoteDecisionUpdate={latestDecisionUpdate}
               realtimeIdentity={realtimeIdentity}
-              reviewFileId={selectedReviewFileId}
+              reviewFileId={openedReviewFileId}
               reviewRoomId={session.reviewRoomId}
               reviewSessionId={session.id}
               unsupportedConflictFile={selectedUnsupportedConflictFile}
