@@ -8,7 +8,8 @@ const CANVAS_CHECKPOINT_DELAY_MS = 3_000;
 const CANVAS_CHECKPOINT_MAX_OPERATIONS = 100;
 
 export type CanvasRoomCheckpointService = {
-  close: () => void;
+  close: () => Promise<void>;
+  flushCheckpointNow: (room: CanvasRoomRef, token?: string) => Promise<void>;
   scheduleCheckpoint: (room: CanvasRoomRef, token: string) => void;
 };
 
@@ -41,6 +42,7 @@ export function createCanvasRoomCheckpointService({
   const tokensByRoom = new Map<string, string>();
   const roomsByKey = new Map<string, CanvasRoomRef>();
   const runningRooms = new Set<string>();
+  let isClosing = false;
 
   async function flushCheckpoint(roomKey: string) {
     if (runningRooms.has(roomKey)) return;
@@ -89,7 +91,7 @@ export function createCanvasRoomCheckpointService({
     } finally {
       runningRooms.delete(roomKey);
 
-      if (roomStateService.getCheckpointSnapshot(room).operations.length) {
+      if (!isClosing && roomStateService.getCheckpointSnapshot(room).operations.length) {
         scheduleRoomCheckpoint(roomKey);
       }
     }
@@ -112,18 +114,43 @@ export function createCanvasRoomCheckpointService({
   }
 
   return {
-    close() {
+    async close() {
+      isClosing = true;
       timersByRoom.forEach((timer) => {
         clearTimeout(timer);
       });
       timersByRoom.clear();
+      await Promise.all(Array.from(roomsByKey.keys(), flushCheckpoint));
       tokensByRoom.clear();
       roomsByKey.clear();
       runningRooms.clear();
+      isClosing = false;
+    },
+
+    async flushCheckpointNow(room, token) {
+      const roomKey = createRoomKey(room);
+
+      if (isClosing) return;
+
+      const currentTimer = timersByRoom.get(roomKey);
+
+      if (currentTimer) {
+        clearTimeout(currentTimer);
+        timersByRoom.delete(roomKey);
+      }
+
+      roomsByKey.set(roomKey, room);
+      if (token) {
+        tokensByRoom.set(roomKey, token);
+      }
+
+      await flushCheckpoint(roomKey);
     },
 
     scheduleCheckpoint(room, token) {
       const roomKey = createRoomKey(room);
+
+      if (isClosing) return;
 
       roomsByKey.set(roomKey, room);
       tokensByRoom.set(roomKey, token);

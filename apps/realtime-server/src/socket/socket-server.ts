@@ -1120,6 +1120,10 @@ export async function createRealtimeSocketServer({
         room,
       );
 
+      await roomCheckpointService.flushCheckpointNow(
+        room,
+        authedSocket.data.auth.token,
+      );
       await socket.leave(roomName);
       authedSocket.data.canvasRoomAccess.delete(roomName);
 
@@ -1623,7 +1627,7 @@ export async function createRealtimeSocketServer({
       await unsubscribeBoardSourceEvents?.();
       await unsubscribePrReviewDecisions?.();
       await unsubscribePrReviewConflictDrafts?.();
-      roomCheckpointService.close();
+      await roomCheckpointService.close();
       await io.close();
       await redisAdapter?.close();
       await database.close();

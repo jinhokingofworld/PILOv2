@@ -739,6 +739,8 @@ classic Canvas realtime roomState가 활성화된 경우 클라이언트는 매 
 checkpoint 주기로 묶어 App Server `/shapes/batch`에 저장한다. App Server는 계속
 DB transaction, revision/opSeq, operation log의 owner이며, realtime-server는
 checkpoint 실패 시 dirty 상태를 유지하고 다음 checkpoint에서 재시도한다.
+사용자가 room을 떠나거나 realtime-server가 종료될 때는 남은 dirty checkpoint를 즉시
+flush하려고 시도한다.
 
 ## tldraw_sync Multiplayer Room 계약
 
