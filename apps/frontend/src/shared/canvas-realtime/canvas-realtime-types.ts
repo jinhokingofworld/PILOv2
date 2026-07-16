@@ -106,6 +106,7 @@ export type CanvasRemotePresenceState = CanvasRealtimeUser & {
 export type CanvasJoinPayload = {
   workspaceId: string;
   canvasId: string;
+  initialViewportBounds?: CanvasLoadedViewportBounds;
   lastSeenOpSeq?: number;
 };
 

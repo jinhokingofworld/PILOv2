@@ -77,6 +77,7 @@ export type CanvasPresenceState = {
 };
 
 export type CanvasJoinPayload = CanvasRoomRef & {
+  initialViewportBounds?: CanvasLoadedViewportBounds;
   lastSeenOpSeq?: number;
 };
 

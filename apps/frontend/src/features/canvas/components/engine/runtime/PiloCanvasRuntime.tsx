@@ -43,6 +43,7 @@ import { useCanvasShapePersistence } from "./useCanvasShapePersistence";
 import { useCanvasViewSettingPersistence } from "./useCanvasViewSettingPersistence";
 import { useCanvasViewportQueries } from "./useCanvasViewportQueries";
 import {
+  DEFAULT_VIEWPORT_SHAPE_LOAD_MARGIN,
   getFreeformShapeId,
   mergeFreeformShapesById,
 } from "./canvas-runtime-utils";
@@ -650,6 +651,19 @@ function PiloCanvasRuntimeInner({
   const hydrateRoomShapes = useCallback((shapes: Record<string, unknown>[]) => {
     hydrateRoomShapesRef.current(shapes);
   }, []);
+  const getInitialRealtimeViewportBounds = useCallback(() => {
+    const bounds = latestViewportBoundsRef.current;
+
+    if (!bounds) return null;
+
+    return {
+      height: bounds.height,
+      margin: DEFAULT_VIEWPORT_SHAPE_LOAD_MARGIN,
+      width: bounds.width,
+      x: bounds.x,
+      y: bounds.y,
+    };
+  }, []);
   const applyRoomShapePatch = useCallback(
     (patch: { deletedShapeIds: string[]; upsertShapes: Record<string, unknown>[] }) => {
       patch.deletedShapeIds.forEach((shapeId) => {
@@ -679,6 +693,7 @@ function PiloCanvasRuntimeInner({
     applyOperations: applyRemoteCanvasOperations,
     applyRoomShapePatch,
     catchUpOperations: catchUpCanvasOperations,
+    getInitialViewportBounds: getInitialRealtimeViewportBounds,
     hydrateShapes: hydrateRoomShapes,
   });
   const persistThroughRoomState = canvasPresence.roomStateActive;

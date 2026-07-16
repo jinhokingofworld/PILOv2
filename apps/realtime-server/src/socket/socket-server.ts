@@ -381,10 +381,22 @@ function readJoinPayload(payload: unknown): CanvasJoinPayload | null {
 
   if (!room || !isRecord(payload)) return null;
 
+  const initialViewportBounds =
+    payload.initialViewportBounds === undefined
+      ? null
+      : readLoadedViewportBounds(payload.initialViewportBounds);
   const lastSeenOpSeq = payload.lastSeenOpSeq;
+
+  if (
+    payload.initialViewportBounds !== undefined &&
+    initialViewportBounds === null
+  ) {
+    return null;
+  }
 
   return {
     ...room,
+    ...(initialViewportBounds ? { initialViewportBounds } : {}),
     ...(typeof lastSeenOpSeq === "number" &&
     Number.isInteger(lastSeenOpSeq) &&
     lastSeenOpSeq >= 0
@@ -551,15 +563,12 @@ function readShapePreviewClearPayload(
   };
 }
 
-function readViewportLoadedPayload(
-  payload: unknown,
-): CanvasViewportLoadedPayload | null {
-  const room = readRoomRef(payload);
+function readLoadedViewportBounds(
+  bounds: unknown,
+): CanvasViewportLoadedPayload["bounds"] | null {
+  if (!isRecord(bounds)) return null;
 
-  if (!room || !isRecord(payload) || !isRecord(payload.bounds)) return null;
-
-  const { height, margin, width, x, y } = payload.bounds;
-  const shapes = payload.shapes;
+  const { height, margin, width, x, y } = bounds;
 
   if (
     typeof height !== "number" ||
@@ -578,13 +587,28 @@ function readViewportLoadedPayload(
   ) {
     return null;
   }
+
+  return { height, margin, width, x, y };
+}
+
+function readViewportLoadedPayload(
+  payload: unknown,
+): CanvasViewportLoadedPayload | null {
+  const room = readRoomRef(payload);
+
+  if (!room || !isRecord(payload)) return null;
+
+  const bounds = readLoadedViewportBounds(payload.bounds);
+  const shapes = payload.shapes;
+
+  if (!bounds) return null;
   if (!Array.isArray(shapes) || !shapes.every(isRecord)) {
     return null;
   }
 
   return {
     ...room,
-    bounds: { height, margin, width, x, y },
+    bounds,
     shapes,
   };
 }
@@ -812,6 +836,7 @@ export async function createRealtimeSocketServer({
   });
   const roomService = createCanvasRoomService({
     accessService,
+    appServerUrl: config.appServerUrl,
     presenceService,
     roomStateService,
     shapeLockService,

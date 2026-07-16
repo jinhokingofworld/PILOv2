@@ -88,6 +88,7 @@ export type CanvasPresenceOptions = {
     afterSeq: number,
     signal?: AbortSignal,
   ) => Promise<CanvasOperationsCatchupPayload>;
+  getInitialViewportBounds?: () => CanvasLoadedViewportBounds | null;
   hydrateShapes?: (shapes: Record<string, unknown>[]) => void;
   applyRoomShapePatch?: (patch: CanvasRoomShapePatchEventPayload) => void;
 };
@@ -416,6 +417,7 @@ export function useCanvasPresence(
   const lastSeenOpSeqRef = useRef(0);
   const applyOperationsRef = useRef(options.applyOperations);
   const catchUpOperationsRef = useRef(options.catchUpOperations);
+  const getInitialViewportBoundsRef = useRef(options.getInitialViewportBounds);
   const hydrateShapesRef = useRef(options.hydrateShapes);
   const applyRoomShapePatchRef = useRef(options.applyRoomShapePatch);
   const activeCatchUpAbortRef = useRef<AbortController | null>(null);
@@ -428,12 +430,14 @@ export function useCanvasPresence(
   useEffect(() => {
     applyOperationsRef.current = options.applyOperations;
     catchUpOperationsRef.current = options.catchUpOperations;
+    getInitialViewportBoundsRef.current = options.getInitialViewportBounds;
     hydrateShapesRef.current = options.hydrateShapes;
     applyRoomShapePatchRef.current = options.applyRoomShapePatch;
   }, [
     options.applyRoomShapePatch,
     options.applyOperations,
     options.catchUpOperations,
+    options.getInitialViewportBounds,
     options.hydrateShapes,
   ]);
 
@@ -719,10 +723,13 @@ export function useCanvasPresence(
     setRoomStateActive(false);
 
     function joinCanvasRoom() {
+      const initialViewportBounds = getInitialViewportBoundsRef.current?.();
+
       joinedRef.current = false;
       setRoomStateActive(false);
       realtimeSocket.emit("canvas:join", {
         ...room,
+        ...(initialViewportBounds ? { initialViewportBounds } : {}),
         lastSeenOpSeq: lastSeenOpSeqRef.current,
       });
     }
