@@ -27,6 +27,11 @@ from app.canvas_agent.processor import CanvasAgentProcessor
 from app.canvas_agent.repository import PgCanvasAgentRepository
 from app.canvas_agent.routing.semantic_router import CanvasSemanticRouter
 from app.job_dispatcher import JobDispatcher
+from app.meeting_activity_evidence_embedding_processor import (
+    ActivityEvidenceChunk,
+    MeetingActivityEvidenceEmbeddingProcessor,
+    activity_evidence_hash,
+)
 from app.meeting_report_processor import (
     ActivityEvidence,
     AudioObjectMetadata,
@@ -472,6 +477,10 @@ class PgMeetingReportRepository:
                 "DELETE FROM meeting_report_activity_evidence WHERE meeting_report_id = %s",
                 (report_id,),
             )
+            self.connection.execute(
+                "DELETE FROM meeting_report_activity_evidence_chunks WHERE meeting_report_id = %s",
+                (report_id,),
+            )
             activity_evidence_ids_by_source_index: dict[int, str] = {}
             for activity_evidence in report.activity_evidence:
                 activity_evidence_id = str(uuid4())
@@ -551,6 +560,33 @@ class PgMeetingReportRepository:
                 """,
                 (report_id, current_transcript_hash),
             )
+            current_activity_evidence_hash = activity_evidence_hash(report.activity_evidence)
+            self.connection.execute(
+                """
+                UPDATE meeting_report_activity_evidence_embedding_jobs
+                SET status = 'superseded', completed_at = now(), locked_at = NULL
+                WHERE meeting_report_id = %s
+                  AND evidence_hash <> %s
+                  AND status IN ('pending', 'processing')
+                """,
+                (report_id, current_activity_evidence_hash),
+            )
+            if report.activity_evidence:
+                self.connection.execute(
+                    """
+                    INSERT INTO meeting_report_activity_evidence_embedding_jobs (
+                      meeting_report_id, evidence_hash
+                    )
+                    VALUES (%s, %s)
+                    ON CONFLICT (meeting_report_id, evidence_hash) DO UPDATE
+                    SET status = 'pending', attempt_count = 0, locked_at = NULL,
+                        completed_at = NULL, error_message = NULL, updated_at = now()
+                    WHERE meeting_report_activity_evidence_embedding_jobs.status IN (
+                      'completed', 'failed', 'superseded'
+                    )
+                    """,
+                    (report_id, current_activity_evidence_hash),
+                )
 
 
 class PgMeetingTranscriptEmbeddingRepository:
@@ -729,6 +765,159 @@ class PgMeetingTranscriptEmbeddingRepository:
               locked_at = NULL
             WHERE id = %s
               AND status = 'processing'
+            """,
+            (message[:4096], job_id),
+        )
+
+
+class PgMeetingActivityEvidenceEmbeddingRepository:
+    def __init__(self, database_url: str, database_ssl: bool) -> None:
+        import psycopg
+        from psycopg.rows import dict_row
+
+        kwargs: dict[str, Any] = {"autocommit": True, "row_factory": dict_row}
+        if database_ssl:
+            kwargs["sslmode"] = "require"
+        self.connection = psycopg.connect(database_url, **kwargs)
+
+    def close(self) -> None:
+        self.connection.close()
+
+    def claim_activity_evidence_embedding_job(self) -> dict[str, object] | None:
+        with self.connection.transaction():
+            return self.connection.execute(
+                """
+                WITH candidate AS (
+                  SELECT id
+                  FROM meeting_report_activity_evidence_embedding_jobs
+                  WHERE status = 'pending'
+                     OR (status = 'processing' AND locked_at < now() - INTERVAL '10 minutes')
+                  ORDER BY created_at ASC
+                  FOR UPDATE SKIP LOCKED
+                  LIMIT 1
+                )
+                UPDATE meeting_report_activity_evidence_embedding_jobs AS job
+                SET status = 'processing', attempt_count = attempt_count + 1,
+                    locked_at = now(), completed_at = NULL, error_message = NULL
+                FROM candidate
+                WHERE job.id = candidate.id
+                RETURNING job.*
+                """
+            ).fetchone()
+
+    def get_activity_evidence_embedding_source(
+        self, job: dict[str, object]
+    ) -> dict[str, object] | None:
+        report = self.connection.execute(
+            """
+            SELECT id FROM meeting_reports
+            WHERE id = %s AND status = 'COMPLETED'
+            LIMIT 1
+            """,
+            (job["meeting_report_id"],),
+        ).fetchone()
+        if report is None:
+            return None
+        rows = self.connection.execute(
+            """
+            SELECT id, source_index, occurred_at, action, summary
+            FROM meeting_report_activity_evidence
+            WHERE meeting_report_id = %s
+            ORDER BY source_index ASC
+            """,
+            (job["meeting_report_id"],),
+        ).fetchall()
+        if not rows:
+            return None
+        source = {"evidence": [dict(row) for row in rows]}
+        source["evidence_hash"] = activity_evidence_hash(source["evidence"])
+        return source
+
+    def replace_activity_evidence_chunks(
+        self,
+        job: dict[str, object],
+        chunks: list[ActivityEvidenceChunk],
+        embeddings: list[list[float]],
+        model_name: str,
+        model_version: str,
+    ) -> bool:
+        if len(chunks) != len(embeddings) or not chunks:
+            return False
+        report_id = str(job["meeting_report_id"])
+        expected_hash = str(job["evidence_hash"])
+        with self.connection.transaction():
+            rows = self.connection.execute(
+                """
+                SELECT id, source_index, occurred_at, action, summary
+                FROM meeting_report_activity_evidence
+                WHERE meeting_report_id = %s
+                ORDER BY source_index ASC
+                FOR SHARE
+                """,
+                (report_id,),
+            ).fetchall()
+            if not rows or activity_evidence_hash([dict(row) for row in rows]) != expected_hash:
+                return False
+            self.connection.execute(
+                "DELETE FROM meeting_report_activity_evidence_chunks WHERE meeting_report_id = %s",
+                (report_id,),
+            )
+            for chunk, embedding in zip(chunks, embeddings, strict=True):
+                self.connection.execute(
+                    """
+                    INSERT INTO meeting_report_activity_evidence_chunks (
+                      meeting_report_id, activity_evidence_id, source_index, occurred_at,
+                      action, summary, content, content_hash, evidence_hash,
+                      embedding, embedding_model, embedding_version, indexed_at
+                    )
+                    VALUES (
+                      %s, %s, %s, %s, %s::activity_log_action, %s, %s, %s, %s,
+                      %s::extensions.vector, %s, %s, now()
+                    )
+                    """,
+                    (
+                        report_id,
+                        chunk.activity_evidence_id,
+                        chunk.source_index,
+                        chunk.occurred_at,
+                        chunk.action,
+                        chunk.summary,
+                        chunk.content,
+                        chunk.content_hash,
+                        expected_hash,
+                        _vector_literal(embedding),
+                        model_name,
+                        model_version,
+                    ),
+                )
+        return True
+
+    def complete_activity_evidence_embedding_job(self, job_id: str) -> None:
+        self.connection.execute(
+            """
+            UPDATE meeting_report_activity_evidence_embedding_jobs
+            SET status = 'completed', completed_at = now(), locked_at = NULL
+            WHERE id = %s AND status = 'processing'
+            """,
+            (job_id,),
+        )
+
+    def supersede_activity_evidence_embedding_job(self, job_id: str) -> None:
+        self.connection.execute(
+            """
+            UPDATE meeting_report_activity_evidence_embedding_jobs
+            SET status = 'superseded', completed_at = now(), locked_at = NULL
+            WHERE id = %s AND status = 'processing'
+            """,
+            (job_id,),
+        )
+
+    def fail_activity_evidence_embedding_job(self, job_id: str, message: str) -> None:
+        self.connection.execute(
+            """
+            UPDATE meeting_report_activity_evidence_embedding_jobs
+            SET status = 'failed', error_message = %s, completed_at = now(), locked_at = NULL
+            WHERE id = %s AND status = 'processing'
             """,
             (message[:4096], job_id),
         )
@@ -1398,6 +1587,7 @@ class SqsAiJobWorker:
         sqs_client: Any,
         canvas_embedding_processor: Any | None = None,
         meeting_transcript_embedding_processor: Any | None = None,
+        meeting_activity_evidence_embedding_processor: Any | None = None,
         stale_execution_recovery: Any | None = None,
         agent_retry_exhaustion_recovery: Any | None = None,
         agent_grounded_answer_retry_exhaustion_recovery: Any | None = None,
@@ -1410,6 +1600,9 @@ class SqsAiJobWorker:
         self.sqs_client = sqs_client
         self.canvas_embedding_processor = canvas_embedding_processor
         self.meeting_transcript_embedding_processor = meeting_transcript_embedding_processor
+        self.meeting_activity_evidence_embedding_processor = (
+            meeting_activity_evidence_embedding_processor
+        )
         self.stale_execution_recovery = stale_execution_recovery
         self.agent_retry_exhaustion_recovery = agent_retry_exhaustion_recovery
         self.agent_grounded_answer_retry_exhaustion_recovery = (
@@ -1429,6 +1622,7 @@ class SqsAiJobWorker:
         self.recover_stale_executions_if_due()
         self.process_canvas_embedding_jobs()
         self.process_meeting_transcript_embedding_jobs()
+        self.process_meeting_activity_evidence_embedding_jobs()
         response = self.sqs_client.receive_message(
             QueueUrl=self.settings.sqs_queue_url,
             MaxNumberOfMessages=1,
@@ -1535,6 +1729,26 @@ class SqsAiJobWorker:
             processed += 1
             LOGGER.info("meeting transcript embedding job result reason=%s", result)
 
+        return processed
+
+    def process_meeting_activity_evidence_embedding_jobs(self) -> int:
+        if self.meeting_activity_evidence_embedding_processor is None:
+            return 0
+
+        processed = 0
+        for _ in range(self.settings.meeting_transcript_embedding_jobs_per_tick):
+            try:
+                result = self.meeting_activity_evidence_embedding_processor.process_next()
+            except InfrastructureError:
+                LOGGER.exception("Meeting activity evidence embedding job processing failed")
+                break
+            except Exception:
+                LOGGER.exception("Unexpected Meeting activity evidence embedding job failure")
+                break
+            if result is None:
+                break
+            processed += 1
+            LOGGER.info("meeting activity evidence embedding job result reason=%s", result)
         return processed
 
     def _terminalize_agent_retry(
@@ -1846,6 +2060,10 @@ def create_worker(settings: RuntimeSettings | None = None) -> SqsAiJobWorker:
         resolved_settings.database_url,
         resolved_settings.database_ssl,
     )
+    meeting_activity_evidence_embedding_repository = PgMeetingActivityEvidenceEmbeddingRepository(
+        resolved_settings.database_url,
+        resolved_settings.database_ssl,
+    )
     storage = S3RecordingStorage(s3_client, resolved_settings.recordings_bucket)
     ai_client = OpenAiMeetingReportClient(
         resolved_settings.openai_api_key,
@@ -1901,6 +2119,10 @@ def create_worker(settings: RuntimeSettings | None = None) -> SqsAiJobWorker:
         meeting_transcript_embedding_repository,
         meeting_transcript_embedder,
     )
+    meeting_activity_evidence_embedding_processor = MeetingActivityEvidenceEmbeddingProcessor(
+        meeting_activity_evidence_embedding_repository,
+        meeting_transcript_embedder,
+    )
     dispatcher = JobDispatcher(
         meeting_report_processor,
         agent_run_processor,
@@ -1912,6 +2134,9 @@ def create_worker(settings: RuntimeSettings | None = None) -> SqsAiJobWorker:
         sqs_client,
         canvas_embedding_processor=canvas_embedding_processor,
         meeting_transcript_embedding_processor=meeting_transcript_embedding_processor,
+        meeting_activity_evidence_embedding_processor=(
+            meeting_activity_evidence_embedding_processor
+        ),
         stale_execution_recovery=agent_execution_handoff_client,
         agent_retry_exhaustion_recovery=agent_run_repository,
         agent_grounded_answer_retry_exhaustion_recovery=agent_run_repository,

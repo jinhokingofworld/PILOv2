@@ -63,7 +63,7 @@ Meeting API endpoint가 존재하더라도 Agent tool adapter가 없으면 **미
 | 최근 또는 상태별 회의록을 찾는다 | **현재 구현** `list_meeting_reports` | “최근 회의록 보여줘”, “실패한 회의록만 보여줘” | 자동 실행. 현재 입력은 `status`, `limit`뿐이며 제목·기간 검색은 지원하지 않음 |
 | 특정 회의록 상세와 생성 상태를 본다 | **현재 구현** `get_meeting_report` | “이 회의록이 왜 실패했어?” | 자동 실행. `reportId`가 필요하며 status/failed step을 반환 |
 | 요약·논의사항·결정사항·후속 작업 후보만 정리한다 | **현재 구현** `summarize_meeting_report`.<br>report ID가 없으면 우선 `list_meeting_reports`로 최신 후보를 찾는다. | “어제 회의 결정사항과 후속 작업만 알려줘” | 자동 실행. summary/discussion/decisions와 `actionItemCandidates`를 bounded projection으로 반환 |
-| transcript 근거로 회의 내용을 질문한다 | **현재 구현** `search_meeting_transcript` | “API 버전은 왜 v2로 결정했어?” | 자동 실행, 근거 기반 답변. 권한 있는 transcript source만 별도 grounded-answer 경로로 사용 |
+| 회의 발언·실제 활동 근거로 회의 내용을 질문한다 | **현재 구현** `search_meeting_transcript` | “왜 다음 주로 미뤘고, 실제로 무엇을 했어?” | 자동 실행, 근거 기반 답변. 권한 있는 transcript와 안전한 Activity evidence source를 별도 grounded-answer 경로로 사용 |
 | 결정사항을 Activity evidence까지 포함해 검증한다 | `get_meeting_decision_evidence` | “v2 결정의 transcript와 Activity 근거를 함께 보여줘” | 자동. 같은 decision sourceIndex에 직접 연결된 evidence만 반환 |
 | 내 담당 후속 작업을 상태·담당자 기준으로 찾는다 | **현재 구현** `find_action_items` | “내가 맡은 회의 후속 작업이 뭐야?” | 자동 실행. 저장된 후속작업을 담당자·상태 기준으로 조회 |
 | 후속 작업을 수정·승인·반려한다 | `update_meeting_report_action_item`, `approve_meeting_report_action_item`, `dismiss_meeting_report_action_item` | “2번 할 일을 은재에게 넘기고 승인해줘” | 확인 후 실행. 승인은 하나의 Calendar 일정 또는 Board issue를 생성하고 관계를 저장한다 |
@@ -86,7 +86,7 @@ Meeting API endpoint가 존재하더라도 Agent tool adapter가 없으면 **미
 - `list_meeting_reports`: Workspace 회의록 목록을 `status`, `limit`으로 조회한다.
 - `get_meeting_report`: UUID `reportId`의 상세와 상태를 조회한다.
 - `summarize_meeting_report`: 한 회의록의 요약·논의·결정·후속 작업 후보를 Agent용으로 축약한다.
-- `search_meeting_transcript`: transcript RAG 검색 후 source 근거를 사용한 답변 생성 경로를 시작한다.
+- `search_meeting_transcript`: transcript와 안전한 Activity evidence RAG 검색 후 source type을 구분한 근거 답변 생성 경로를 시작한다.
 - `find_action_items`: 저장된 후속작업을 담당자·상태 기준으로 조회한다.
 - `get_meeting_decision_evidence`: 같은 decision item에 직접 연결된 근거만 조회한다.
 - `update_meeting_report_action_item`: 저장된 후속작업을 확인 후 수정한다.

@@ -679,6 +679,8 @@ function errorCode(error) {
   );
 }
 
+await import("./meeting-evidence-rag.test.mjs");
+
 {
   const { registry } = createRegistry();
   const tool = registry.getDefinition("summarize_meeting_report");

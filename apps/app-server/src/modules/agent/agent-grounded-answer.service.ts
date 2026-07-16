@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { DatabaseService } from "../../database/database.service";
-import { MeetingTranscriptRagService, type MeetingTranscriptSource } from "../meeting/meeting-transcript-rag.service";
+import { MeetingTranscriptRagService, type MeetingEvidenceSource } from "../meeting/meeting-transcript-rag.service";
 import type { AgentJsonObject, AgentResourceRef } from "./types/agent-tool.types";
 
 @Injectable()
@@ -8,7 +8,11 @@ export class AgentGroundedAnswerService {
   constructor(private readonly database: DatabaseService, private readonly meetingTranscriptRagService: MeetingTranscriptRagService) {}
 
   async completeToolAndQueue(input: { runId: string; workspaceId: string; currentUserId: string; stepId: string; outputSummary: AgentJsonObject; resourceRefs: AgentResourceRef[] }): Promise<void> {
-    const sourceIds = Array.isArray(input.outputSummary.sourceIds) ? input.outputSummary.sourceIds.filter((id): id is string => typeof id === "string") : [];
+    const sourceIds = this.meetingTranscriptRagService.normalizeSourceIds(
+      Array.isArray(input.outputSummary.sourceIds)
+        ? input.outputSummary.sourceIds.filter((id): id is string => typeof id === "string")
+        : []
+    );
     await this.database.transaction(async (transaction) => {
       const run = await transaction.queryOne<{ id: string }>(`SELECT id FROM agent_runs WHERE id = $1 AND workspace_id = $2 AND requested_by_user_id = $3 AND status = 'running' FOR UPDATE`, [input.runId, input.workspaceId, input.currentUserId]);
       if (!run) return;
@@ -20,7 +24,7 @@ export class AgentGroundedAnswerService {
     });
   }
 
-  async getContext(runId: string): Promise<{ prompt: string; sources: MeetingTranscriptSource[] } | null> {
+  async getContext(runId: string): Promise<{ prompt: string; sources: MeetingEvidenceSource[] } | null> {
     const row = await this.database.queryOne<{ workspace_id: string; requested_by_user_id: string; prompt: string; source_ids: string[] }>(`SELECT run.workspace_id, run.requested_by_user_id, run.prompt, outbox.source_ids FROM agent_runs run JOIN agent_grounded_answer_outbox outbox ON outbox.run_id = run.id WHERE run.id = $1 AND run.status = 'running'`, [runId]);
     if (!row) return null;
     return { prompt: row.prompt, sources: await this.meetingTranscriptRagService.loadAuthorizedSources(row.requested_by_user_id, row.workspace_id, Array.isArray(row.source_ids) ? row.source_ids : []) };
@@ -28,20 +32,28 @@ export class AgentGroundedAnswerService {
 
   async complete(runId: string, answer: string, citations: string[]): Promise<void> {
     const normalizedAnswer = answer.trim().slice(0, 8000);
+    const outbox = await this.database.queryOne<{ workspace_id: string; requested_by_user_id: string; source_ids: string[] }>(`SELECT run.workspace_id, run.requested_by_user_id, outbox.source_ids FROM agent_runs run JOIN agent_grounded_answer_outbox outbox ON outbox.run_id = run.id WHERE run.id = $1 AND run.status = 'running'`, [runId]);
+    if (!outbox || !normalizedAnswer) return;
+    const allowed = new Set(this.meetingTranscriptRagService.normalizeSourceIds(Array.isArray(outbox.source_ids) ? outbox.source_ids : []));
+    if (citations.some((citation) => !allowed.has(citation))) {
+      throw new Error("Grounded answer contains an unknown citation");
+    }
+    const safeCitations = [...new Set(citations.filter((citation) => allowed.has(citation)))];
+    const citationSources = (await this.meetingTranscriptRagService.loadAuthorizedSources(outbox.requested_by_user_id, outbox.workspace_id, safeCitations)).map((source) => ({
+      sourceId: source.sourceId,
+      sourceType: source.sourceType,
+      reportId: source.reportId,
+      ...(source.sourceType === "transcript" ? { startedAtMs: source.startedAtMs, endedAtMs: source.endedAtMs } : { occurredAt: source.occurredAt, action: source.action, summary: source.summary })
+    }));
     await this.database.transaction(async (transaction) => {
-      const row = await transaction.queryOne<{ workspace_id: string; source_ids: string[] }>(`SELECT run.workspace_id, outbox.source_ids FROM agent_runs run JOIN agent_grounded_answer_outbox outbox ON outbox.run_id = run.id WHERE run.id = $1 AND run.status = 'running' FOR UPDATE`, [runId]);
-      if (!row || !normalizedAnswer) return;
-      const allowed = new Set(Array.isArray(row.source_ids) ? row.source_ids : []);
-      if (citations.some((citation) => !allowed.has(citation))) {
-        throw new Error("Grounded answer contains an unknown citation");
-      }
-      const safeCitations = [...new Set(citations.filter((citation) => allowed.has(citation)))];
-      await transaction.execute(`UPDATE agent_steps SET status = 'completed', output_json = $3::jsonb, completed_at = now() WHERE run_id = $1 AND step_type = 'answer' AND status = 'pending'`, [runId, row.workspace_id, JSON.stringify({ citationIds: safeCitations, citationCount: safeCitations.length })]);
+      const run = await transaction.queryOne<{ workspace_id: string }>(`SELECT workspace_id FROM agent_runs WHERE id = $1 AND status = 'running' FOR UPDATE`, [runId]);
+      if (!run) return;
+      await transaction.execute(`UPDATE agent_steps SET status = 'completed', output_json = $3::jsonb, completed_at = now() WHERE run_id = $1 AND step_type = 'answer' AND status = 'pending'`, [runId, run.workspace_id, JSON.stringify({ citationIds: safeCitations, citationCount: safeCitations.length, citationSources })]);
       await transaction.execute(`UPDATE agent_runs SET status = 'completed', final_answer = $2, message = '요청을 완료했습니다.', completed_at = now() WHERE id = $1 AND status = 'running'`, [runId, normalizedAnswer]);
     });
   }
 
   async completeWithoutSources(runId: string): Promise<void> {
-    await this.complete(runId, "권한이 있는 회의록에서 질문과 관련된 발언을 찾지 못했습니다.", []);
+    await this.complete(runId, "권한이 있는 회의록에서 질문과 관련된 발언 또는 활동 근거를 찾지 못했습니다.", []);
   }
 }
