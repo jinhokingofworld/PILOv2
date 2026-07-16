@@ -1,6 +1,8 @@
 "use client";
 
 import Collaboration from "@tiptap/extension-collaboration";
+import CollaborationCaret from "@tiptap/extension-collaboration-caret";
+import Dropcursor from "@tiptap/extension-dropcursor";
 import type { EditorView } from "@tiptap/pm/view";
 import { EditorContent, useEditor, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
@@ -34,6 +36,7 @@ import {
 import type { DocumentBootstrapPayload } from "@/features/drive/types";
 
 import {
+  createDocumentCollaborator,
   createDocumentRealtimeProvider,
   createDocumentSnapshotSaveQueue
 } from "../document-realtime";
@@ -44,10 +47,11 @@ import { DriveFileAttachment } from "./document-file-attachment";
 import { DocumentFilePicker } from "./document-file-picker";
 import { DocumentInlineTitle } from "./document-inline-title";
 import {
-  DocumentSlashMenu,
-  SLASH_COMMANDS,
-  type SlashCommandId
+  DocumentSlashMenu
 } from "./document-slash-menu";
+import {
+  type SlashCommandId
+} from "./document-slash-commands";
 
 type EditorLoadState =
   | { status: "loading" }
@@ -60,6 +64,7 @@ type RealtimeState = "connected" | "connecting" | "disabled" | "disconnected";
 type SlashMenuState = {
   position: { top: number; left: number };
   activeIndex: number;
+  query: string;
 };
 
 type PendingSnapshot = {
@@ -144,7 +149,6 @@ function DocumentEditorSurface({
   const editorRef = useRef<Editor | null>(null);
   const pendingSnapshotRef = useRef<PendingSnapshot | null>(null);
   const slashMenuStateRef = useRef<SlashMenuState | null>(null);
-  const slashCommandExecutorRef = useRef<(commandId: SlashCommandId) => void>(() => {});
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [saveError, setSaveError] = useState<string | null>(null);
   const [realtimeError, setRealtimeError] = useState<string | null>(null);
@@ -153,6 +157,16 @@ function DocumentEditorSurface({
   const [isFilePickerOpen, setIsFilePickerOpen] = useState(false);
   const [slashMenuState, setSlashMenuState] = useState<SlashMenuState | null>(null);
   const [documentName, setDocumentName] = useState(bootstrap.item.name);
+  const [realtimeProvider, setRealtimeProvider] =
+    useState<ReturnType<typeof createDocumentRealtimeProvider>>(null);
+  const currentCollaborator = useMemo(
+    () =>
+      createDocumentCollaborator({
+        displayName: authSession?.user.displayName ?? authSession?.user.name ?? "",
+        userId: authSession?.user.id ?? ""
+      }),
+    [authSession?.user.displayName, authSession?.user.id, authSession?.user.name]
+  );
   const driveClient = useMemo(
     () => createDriveApiClient({ accessToken }),
     [accessToken]
@@ -271,55 +285,17 @@ function DocumentEditorSurface({
     setSlashMenuState(nextState);
   }, []);
 
+  const setSlashMenuQuery = useCallback((query: string) => {
+    const currentState = slashMenuStateRef.current;
+    if (!currentState) return;
+
+    const nextState = { ...currentState, activeIndex: 0, query };
+    slashMenuStateRef.current = nextState;
+    setSlashMenuState(nextState);
+  }, []);
+
   const handleEditorKeyDown = useCallback(
     (view: EditorView, event: KeyboardEvent) => {
-      const currentMenuState = slashMenuStateRef.current;
-
-      if (currentMenuState) {
-        if (event.key === "ArrowDown") {
-          event.preventDefault();
-          setSlashMenuActiveIndex(
-            (currentMenuState.activeIndex + 1) % SLASH_COMMANDS.length
-          );
-          return true;
-        }
-
-        if (event.key === "ArrowUp") {
-          event.preventDefault();
-          setSlashMenuActiveIndex(
-            (currentMenuState.activeIndex - 1 + SLASH_COMMANDS.length) %
-              SLASH_COMMANDS.length
-          );
-          return true;
-        }
-
-        if (event.key === "Enter") {
-          event.preventDefault();
-          slashCommandExecutorRef.current(
-            SLASH_COMMANDS[currentMenuState.activeIndex].id
-          );
-          return true;
-        }
-
-        if (event.key === "Escape") {
-          event.preventDefault();
-          closeSlashMenu();
-          return true;
-        }
-
-        if (
-          event.isComposing ||
-          event.key === "Process" ||
-          event.key === "Dead" ||
-          event.key.length === 1 ||
-          event.key === "Backspace"
-        ) {
-          closeSlashMenu();
-        }
-
-        return false;
-      }
-
       const { selection } = view.state;
       if (
         event.key !== "/" ||
@@ -343,6 +319,7 @@ function DocumentEditorSurface({
           : Math.max(16, coordinates.top - 8 - availableMenuHeight);
       const nextState = {
         activeIndex: 0,
+        query: "",
         position: {
           top: menuTop,
           left: Math.max(16, Math.min(coordinates.left, window.innerWidth - 336))
@@ -352,14 +329,23 @@ function DocumentEditorSurface({
       setSlashMenuState(nextState);
       return true;
     },
-    [closeSlashMenu, setSlashMenuActiveIndex]
+    []
   );
 
   const editor = useEditor({
     extensions: [
       StarterKit.configure({ undoRedo: false }),
       DriveFileAttachment,
-      Collaboration.configure({ document: yDoc })
+      Collaboration.configure({ document: yDoc }),
+      Dropcursor.configure({ color: "var(--primary)", width: 2 }),
+      ...(realtimeProvider
+        ? [
+            CollaborationCaret.configure({
+              provider: realtimeProvider,
+              user: currentCollaborator
+            })
+          ]
+        : [])
     ],
     immediatelyRender: false,
     editorProps: {
@@ -374,7 +360,7 @@ function DocumentEditorSurface({
       closeSlashMenu();
     },
     onSelectionUpdate: () => closeSlashMenu()
-  }, [yDoc]);
+  }, [currentCollaborator, realtimeProvider, yDoc]);
 
   useEffect(() => {
     editorRef.current = editor;
@@ -432,8 +418,12 @@ function DocumentEditorSurface({
       setRealtimeState("disabled");
       return;
     }
+    setRealtimeProvider(realtimeProvider);
 
     return () => {
+      setRealtimeProvider((currentProvider) =>
+        currentProvider === realtimeProvider ? null : currentProvider
+      );
       realtimeProvider.flushPendingUpdates();
       realtimeProvider.destroy();
     };
@@ -474,8 +464,6 @@ function DocumentEditorSurface({
     },
     [closeSlashMenu, editor]
   );
-
-  slashCommandExecutorRef.current = executeSlashCommand;
 
   const closeDocument = useCallback(async () => {
     try {
@@ -607,8 +595,15 @@ function DocumentEditorSurface({
       />
       <DocumentSlashMenu
         activeIndex={slashMenuState?.activeIndex ?? 0}
+        onActiveIndexChange={setSlashMenuActiveIndex}
+        onClose={() => {
+          closeSlashMenu();
+          editor?.commands.focus();
+        }}
+        onQueryChange={setSlashMenuQuery}
         onSelect={executeSlashCommand}
         position={slashMenuState?.position ?? null}
+        query={slashMenuState?.query ?? ""}
       />
     </section>
   );

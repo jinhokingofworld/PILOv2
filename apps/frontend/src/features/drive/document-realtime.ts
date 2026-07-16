@@ -3,11 +3,42 @@ import type * as Y from "yjs";
 
 const LOCAL_REALTIME_SERVER_URL = "ws://localhost:3001";
 const DOCUMENT_SYNC_PATH = "/sync/documents";
+const DOCUMENT_COLLABORATOR_COLORS = [
+  "#0f766e",
+  "#2563eb",
+  "#b45309",
+  "#be123c",
+  "#7e22ce",
+  "#047857"
+];
 
 export type DocumentRealtimeRoom = {
   documentId: string;
   workspaceId: string;
 };
+
+export type DocumentCollaborator = {
+  color: string;
+  name: string;
+};
+
+export function createDocumentCollaborator({
+  displayName,
+  userId
+}: {
+  displayName: string;
+  userId: string;
+}): DocumentCollaborator {
+  const colorIndex = Array.from(userId).reduce(
+    (sum, character) => sum + character.charCodeAt(0),
+    0
+  ) % DOCUMENT_COLLABORATOR_COLORS.length;
+
+  return {
+    color: DOCUMENT_COLLABORATOR_COLORS[colorIndex],
+    name: displayName.trim() || "알 수 없는 사용자"
+  };
+}
 
 export function createDocumentRealtimeRoomName({
   documentId,

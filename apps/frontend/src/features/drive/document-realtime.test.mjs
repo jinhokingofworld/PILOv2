@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   buildDocumentRealtimeServerUrl,
+  createDocumentCollaborator,
   createDocumentRealtimeRoomName,
   createDocumentSnapshotSaveQueue
 } from "./document-realtime.ts";
@@ -25,6 +26,26 @@ test("문서 realtime URL은 HTTP(S) origin을 WebSocket protocol과 documents �
   assert.equal(
     buildDocumentRealtimeServerUrl("wss://realtime.pilo.local"),
     "wss://realtime.pilo.local/sync/documents"
+  );
+});
+
+test("문서 공동 편집자는 사용자 ID 기준의 안정적인 색상과 표시 이름을 갖는다", () => {
+  assert.deepEqual(
+    createDocumentCollaborator({
+      displayName: "은재",
+      userId: "user-123"
+    }),
+    {
+      color: "#0f766e",
+      name: "은재"
+    }
+  );
+  assert.equal(
+    createDocumentCollaborator({
+      displayName: "",
+      userId: "user-123"
+    }).name,
+    "알 수 없는 사용자"
   );
 });
 
