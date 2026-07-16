@@ -441,6 +441,10 @@ assert.match(prReviewCanvasSurface, /selectReviewFileNode/);
 assert.match(prReviewCanvasSurface, /selectedReviewFileId/);
 assert.match(prReviewCanvasSurface, /PrReviewCanvasPersistenceBridge/);
 assert.match(prReviewCanvasSurface, /usePrReviewCanvasPresence/);
+assert.match(
+  prReviewCanvasSurface,
+  /\[realtimeIdentity, reviewRoom\?\.canvasId, workspaceId\]/,
+);
 assert.match(prReviewCanvasSurface, /PrReviewCanvasRealtimeBridge/);
 assert.match(prReviewCanvasSurface, /reviewRoom\?\.status === "completed"/);
 assert.match(prReviewCanvasSurface, /persistedFileShapeEnabled && !readOnly/);
@@ -477,6 +481,10 @@ assert.match(prReviewCanvasSurface, /listReviewCanvasOperations/);
 assert.match(prReviewCanvasSurface, /readPrReviewCanvasOperationShape/);
 assert.doesNotMatch(prReviewFileNodeShapeUtil, /<foreignObject/);
 assert.match(prReviewCanvasPresence, /setReadOnly\(payload\.readOnly\)/);
+assert.match(
+  prReviewCanvasPresence,
+  /setReadOnly\(payload\.readOnly\);\s+onRoomJoinedRef\.current\?\.\(\);/,
+);
 assert.match(prReviewCanvasPresence, /STALE_PRESENCE_TIMEOUT_MS = 15_000/);
 assert.doesNotMatch(prReviewCanvasPresence, /canvas:shape:lock/);
 assert.doesNotMatch(prReviewCanvasPresence, /canvas:shape:preview/);

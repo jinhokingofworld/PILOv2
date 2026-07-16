@@ -669,7 +669,7 @@ export function PrReviewCanvasShell({
     [session.id]
   );
 
-  const handleRealtimeRoomRejoined = useCallback(() => {
+  const handleRealtimeRoomJoined = useCallback(() => {
     void loadCanvasData({ quiet: true });
   }, [loadCanvasData]);
 
@@ -1264,7 +1264,7 @@ export function PrReviewCanvasShell({
                 conflictAnalysis={conflictAnalysis}
                 onDecisionUpdated={handleRealtimeDecisionUpdated}
                 onFileSelect={setSelectedReviewFileId}
-                onRealtimeRoomJoined={handleRealtimeRoomRejoined}
+                onRealtimeRoomJoined={handleRealtimeRoomJoined}
                 preparedConflictFileIds={preparedConflictFileIds}
                 readOnly={isReviewReadOnly}
                 realtimeIdentity={realtimeIdentity}

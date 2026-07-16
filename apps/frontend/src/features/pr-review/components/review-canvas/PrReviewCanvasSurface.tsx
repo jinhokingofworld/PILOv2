@@ -1995,7 +1995,7 @@ export function PrReviewCanvasSurface({
       ),
       workspaceId
     }),
-    [realtimeIdentity, reviewRoom, workspaceId]
+    [realtimeIdentity, reviewRoom?.canvasId, workspaceId]
   );
   const catchUpCanvasOperations = useCallback(
     (afterSeq: number, signal: AbortSignal) => {

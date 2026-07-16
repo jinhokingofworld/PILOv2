@@ -92,7 +92,6 @@ export function usePrReviewCanvasPresence(
   >([]);
   const socketRef = useRef<CanvasRealtimeSocket | null>(null);
   const joinedRef = useRef(false);
-  const hasJoinedRoomRef = useRef(false);
   const roomRef = useRef({ workspaceId: "", canvasId: "" });
   const applyOperationsRef = useRef(options.applyOperations);
   const catchUpOperationsRef = useRef(options.catchUpOperations);
@@ -212,7 +211,6 @@ export function usePrReviewCanvasPresence(
   useEffect(() => {
     if (!usableConfig) {
       joinedRef.current = false;
-      hasJoinedRoomRef.current = false;
       socketRef.current = null;
       roomRef.current = { workspaceId: "", canvasId: "" };
       lastSeenOpSeqRef.current = 0;
@@ -251,7 +249,6 @@ export function usePrReviewCanvasPresence(
       roomRef.current.canvasId !== room.canvasId;
 
     if (isNewRoom) {
-      hasJoinedRoomRef.current = false;
       lastSeenOpSeqRef.current = 0;
       bufferedOperationsRef.current = [];
       activeCatchUpAbortRef.current?.abort();
@@ -295,10 +292,7 @@ export function usePrReviewCanvasPresence(
       joinedRef.current = true;
       setJoined(true);
       setReadOnly(payload.readOnly);
-      if (hasJoinedRoomRef.current) {
-        onRoomJoinedRef.current?.();
-      }
-      hasJoinedRoomRef.current = true;
+      onRoomJoinedRef.current?.();
       setRemotePresence(
         payload.presence.filter((entry) => entry.userId !== ownUserId),
       );
