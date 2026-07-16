@@ -218,6 +218,9 @@ id와 접근 불가 message id는 모두 `404 NOT_FOUND`다.
 }
 ```
 
+- `clientMessageId` 길이는 `1..128` characters다.
+- `content`는 trim 기준 `1..4,000` characters다.
+
 `mentionedUserIds`는 unique하게 normalize하고 최대 20명이다. 각 user는 active Workspace
 member여야 하고 sender 자신일 수 없다. server는 current profile 규칙으로 `displayText`를
 만들고 본문에 해당 token이 있는지 확인한다. message와 mentions는 한 transaction으로
@@ -392,10 +395,21 @@ Socket error code:
 | message, mention 또는 다른 Workspace resource에 접근할 수 없음 | `404` | `NOT_FOUND` |
 | 같은 idempotency key를 다른 content 또는 mention set으로 재사용 | `409` | `IDEMPOTENCY_KEY_REUSED` |
 
-## Failure handling and security
+## Failure handling
 
-- Redis publish 실패는 DB message를 유지하고 server log를 남긴다. reconnect, browser
-  focus, `/chat` 진입 시 summary/history REST catch-up으로 복구한다.
+| Failure | Behavior |
+| --- | --- |
+| POST timeout/failure | pending message를 failed로 표시하고 same id 재시도 제공 |
+| Redis publish failure | DB message 유지, server log, focus/reconnect REST catch-up |
+| Socket disconnect | 연결 상태 표시, REST write 유지, reconnect 후 summary/history catch-up |
+| invalid mention member | draft 유지, member list refresh, safe validation message |
+| membership removed | composer disable, Chat rooms leave, auth Workspace session refresh |
+| stale read update | current server cursor 반환, cursor rollback 금지 |
+| duplicate Socket event | reducer가 message id와 deletion state로 idempotent 처리 |
+| deleted mention target | 안내 후 mention read, deleted message는 list/count 제외 |
+
+## Security
+
 - 모든 message, read, mention query는 `workspace_id`를 조건에 포함한다.
 - mention target room은 target user socket만 join한다.
 - message content를 `dangerouslySetInnerHTML`로 렌더링하지 않는다.
