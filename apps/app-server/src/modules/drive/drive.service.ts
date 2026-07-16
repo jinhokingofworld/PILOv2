@@ -2,6 +2,10 @@ import { randomUUID } from "node:crypto";
 import { Injectable } from "@nestjs/common";
 import { badRequest, notFound } from "../../common/api-error";
 import {
+  ActivityLogService,
+  type ActivityLogInput
+} from "../../common/activity-log.service";
+import {
   DatabaseService,
   DatabaseTransaction
 } from "../../database/database.service";
@@ -66,7 +70,8 @@ export class DriveService {
   constructor(
     private readonly database: DatabaseService,
     private readonly workspaceService: WorkspaceService,
-    private readonly driveStorageService: DriveStorageService
+    private readonly driveStorageService: DriveStorageService,
+    private readonly activityLogService: ActivityLogService
   ) {}
 
   getModuleInfo() {
@@ -390,29 +395,97 @@ export class DriveService {
       throw notFound("Drive item not found");
     }
 
-    try {
-      const item = await this.database.queryOne<DriveItemRow>(
-        `
-          WITH updated AS (
-            UPDATE drive_items
-            SET
-              name = $3,
-              updated_by_user_id = $4
-            WHERE workspace_id = $1
-              AND id = $2
-              AND deleted_at IS NULL
-            RETURNING *
-          )
-          ${this.selectInsertedDriveItem("updated")}
-        `,
-        [workspaceId, validItemId, input.name, currentUserId]
-      );
+    if (input.type === "rename") {
+      if (existing.name === input.name) return mapDriveItem(existing);
 
-      if (!item) {
-        throw notFound("Drive item not found");
+      try {
+        return this.database.transaction(async (transaction) => {
+          const item = await transaction.queryOne<DriveItemRow>(
+            `
+              WITH updated AS (
+                UPDATE drive_items
+                SET
+                  name = $3,
+                  updated_by_user_id = $4
+                WHERE workspace_id = $1
+                  AND id = $2
+                  AND deleted_at IS NULL
+                RETURNING *
+              )
+              ${this.selectInsertedDriveItem("updated")}
+            `,
+            [workspaceId, validItemId, input.name, currentUserId]
+          );
+
+          if (!item) throw notFound("Drive item not found");
+
+          if (item.item_type === "document") {
+            await this.activityLogService.append(
+              transaction,
+              this.buildDocumentRenamedActivityLog(
+                currentUserId,
+                workspaceId,
+                item,
+                existing.name
+              )
+            );
+          }
+
+          return mapDriveItem(item);
+        });
+      } catch (error) {
+        if (this.isUniqueViolation(error)) {
+          throw badRequest("Drive item name already exists in this folder");
+        }
+
+        throw error;
       }
+    }
 
-      return mapDriveItem(item);
+    if (existing.parent_id === input.parentId) return mapDriveItem(existing);
+
+    try {
+      return this.database.transaction(async (transaction) => {
+        const target = await this.assertMoveTarget(
+          transaction,
+          workspaceId,
+          existing,
+          input.parentId
+        );
+        const item = await transaction.queryOne<DriveItemRow>(
+          `
+            WITH updated AS (
+              UPDATE drive_items
+              SET
+                parent_id = $3,
+                updated_by_user_id = $4
+              WHERE workspace_id = $1
+                AND id = $2
+                AND deleted_at IS NULL
+              RETURNING *
+            )
+            ${this.selectInsertedDriveItem("updated")}
+          `,
+          [workspaceId, validItemId, input.parentId, currentUserId]
+        );
+
+        if (!item) throw notFound("Drive item not found");
+
+        if (item.item_type === "document") {
+          await this.activityLogService.append(
+            transaction,
+            this.buildDocumentMovedActivityLog(
+              currentUserId,
+              workspaceId,
+              item,
+              existing.parent_id,
+              target?.name ?? null
+            )
+          );
+        }
+
+        return mapDriveItem(item);
+      });
     } catch (error) {
       if (this.isUniqueViolation(error)) {
         throw badRequest("Drive item name already exists in this folder");
@@ -435,45 +508,61 @@ export class DriveService {
       throw notFound("Drive item not found");
     }
 
-    const result = await this.database.queryOne<DriveDeleteCountRow>(
-      `
-        WITH RECURSIVE target_tree AS (
-          SELECT id
-          FROM drive_items
-          WHERE workspace_id = $1
-            AND id = $2
-            AND deleted_at IS NULL
+    return this.database.transaction(async (transaction) => {
+      const result = await transaction.queryOne<DriveDeleteCountRow>(
+        `
+          WITH RECURSIVE target_tree AS (
+            SELECT id
+            FROM drive_items
+            WHERE workspace_id = $1
+              AND id = $2
+              AND deleted_at IS NULL
 
-          UNION ALL
+            UNION ALL
 
-          SELECT child.id
-          FROM drive_items child
-          JOIN target_tree parent
-            ON parent.id = child.parent_id
-          WHERE child.workspace_id = $1
-            AND child.deleted_at IS NULL
-        ),
-        updated AS (
-          UPDATE drive_items
-          SET
-            deleted_at = now(),
-            updated_by_user_id = $3
-          WHERE workspace_id = $1
-            AND id IN (SELECT id FROM target_tree)
-            AND deleted_at IS NULL
-          RETURNING id
-        )
-        SELECT COUNT(*)::text AS deleted_item_count
-        FROM updated
-      `,
-      [workspaceId, validItemId, currentUserId]
-    );
+            SELECT child.id
+            FROM drive_items child
+            JOIN target_tree parent
+              ON parent.id = child.parent_id
+            WHERE child.workspace_id = $1
+              AND child.deleted_at IS NULL
+          ),
+          updated_documents AS (
+            UPDATE documents
+            SET deleted_at = now()
+            WHERE workspace_id = $1
+              AND drive_item_id IN (SELECT id FROM target_tree)
+              AND deleted_at IS NULL
+          ),
+          updated AS (
+            UPDATE drive_items
+            SET
+              deleted_at = now(),
+              updated_by_user_id = $3
+            WHERE workspace_id = $1
+              AND id IN (SELECT id FROM target_tree)
+              AND deleted_at IS NULL
+            RETURNING id
+          )
+          SELECT COUNT(*)::text AS deleted_item_count
+          FROM updated
+        `,
+        [workspaceId, validItemId, currentUserId]
+      );
 
-    return {
-      id: validItemId,
-      deleted: true,
-      deletedItemCount: Number(result?.deleted_item_count ?? 0)
-    };
+      if (existing.item_type === "document") {
+        await this.activityLogService.append(
+          transaction,
+          this.buildDocumentDeletedActivityLog(currentUserId, workspaceId, existing)
+        );
+      }
+
+      return {
+        id: validItemId,
+        deleted: true,
+        deletedItemCount: Number(result?.deleted_item_count ?? 0)
+      };
+    });
   }
 
   private listChildren(
@@ -588,6 +677,130 @@ export class DriveService {
     }
 
     return folder;
+  }
+
+  private async assertMoveTarget(
+    transaction: DatabaseTransaction,
+    workspaceId: string,
+    item: DriveItemRow,
+    parentId: string | null
+  ): Promise<Pick<DriveItemRow, "id" | "name"> | null> {
+    if (parentId === null) return null;
+
+    const target = await transaction.queryOne<Pick<DriveItemRow, "id" | "name">>(
+      `
+        SELECT id, name
+        FROM drive_items
+        WHERE workspace_id = $1
+          AND id = $2
+          AND item_type = 'folder'
+          AND deleted_at IS NULL
+      `,
+      [workspaceId, parentId]
+    );
+    if (!target) throw notFound("Drive folder not found");
+
+    if (item.item_type !== "folder") return target;
+
+    const descendant = await transaction.queryOne<{ id: string }>(
+      `
+        WITH RECURSIVE descendants AS (
+          SELECT id
+          FROM drive_items
+          WHERE workspace_id = $1
+            AND id = $2
+            AND deleted_at IS NULL
+
+          UNION ALL
+
+          SELECT child.id
+          FROM drive_items child
+          JOIN descendants parent
+            ON parent.id = child.parent_id
+          WHERE child.workspace_id = $1
+            AND child.deleted_at IS NULL
+        )
+        SELECT id
+        FROM descendants
+        WHERE id = $3
+        LIMIT 1
+      `,
+      [workspaceId, item.id, parentId]
+    );
+    if (descendant) {
+      throw badRequest("Drive folder cannot be moved into itself or a descendant");
+    }
+
+    return target;
+  }
+
+  private buildDocumentRenamedActivityLog(
+    currentUserId: string,
+    workspaceId: string,
+    item: DriveItemRow,
+    previousTitle: string
+  ): ActivityLogInput {
+    const title = safeDocumentTitle(item.name);
+
+    return {
+      workspaceId,
+      actor: { type: "user", userId: currentUserId },
+      action: "document_renamed",
+      target: { type: "document", id: item.id },
+      dedupeKey: `document:document_renamed:${item.id}:${this.toIsoString(item.updated_at)}`,
+      metadata: {
+        version: 1,
+        summary: `${safeDocumentTitle(previousTitle)} 문서 이름을 ${title}(으)로 변경했습니다.`,
+        data: { title, previousTitle: safeDocumentTitle(previousTitle) }
+      }
+    };
+  }
+
+  private buildDocumentMovedActivityLog(
+    currentUserId: string,
+    workspaceId: string,
+    item: DriveItemRow,
+    fromParentId: string | null,
+    targetFolderName: string | null
+  ): ActivityLogInput {
+    const destination = targetFolderName
+      ? `${safeDocumentTitle(targetFolderName)} 폴더`
+      : "루트";
+
+    return {
+      workspaceId,
+      actor: { type: "user", userId: currentUserId },
+      action: "document_moved",
+      target: { type: "document", id: item.id },
+      dedupeKey: `document:document_moved:${item.id}:${this.toIsoString(item.updated_at)}`,
+      metadata: {
+        version: 1,
+        summary: `${safeDocumentTitle(item.name)} 문서를 ${destination}로 이동했습니다.`,
+        data: {
+          ...(fromParentId ? { fromParentId } : {}),
+          ...(item.parent_id ? { toParentId: item.parent_id } : {})
+        }
+      }
+    };
+  }
+
+  private buildDocumentDeletedActivityLog(
+    currentUserId: string,
+    workspaceId: string,
+    item: DriveItemRow
+  ): ActivityLogInput {
+    return {
+      workspaceId,
+      actor: { type: "user", userId: currentUserId },
+      action: "document_deleted",
+      target: { type: "document", id: item.id },
+      dedupeKey: `document:document_deleted:${item.id}:deleted`,
+      metadata: {
+        version: 1,
+        summary: `${safeDocumentTitle(item.name)} 문서를 삭제했습니다.`,
+        data: {}
+      }
+    };
   }
 
   private findActiveItem(
@@ -804,11 +1017,15 @@ export class DriveService {
     return safeFileName || "file";
   }
 
-  private isExpired(expiresAt: Date | string): boolean {
-    return new Date(expiresAt).getTime() <= Date.now();
-  }
-
   private toIsoString(value: Date | string): string {
     return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
   }
+
+  private isExpired(expiresAt: Date | string): boolean {
+    return new Date(expiresAt).getTime() <= Date.now();
+  }
+}
+
+function safeDocumentTitle(name: string): string {
+  return name.replace(/\s+/g, " ").trim().slice(0, 160) || "문서";
 }

@@ -18,12 +18,16 @@
   - [x] version 검증 기반 Yjs state/Tiptap JSON snapshot 저장과 `current_version` 갱신
   - [x] `document_content_updated` Activity Log와 rollback 검증
   - [x] API 계약, focused app-server test
-- [ ] **Tiptap/Yjs 로컬 에디터와 자동 저장**: Issue [#1154](https://github.com/Developer-EJ/PILO/issues/1154) 진행 중
+- [x] **Tiptap/Yjs 로컬 에디터와 자동 저장**: Issue [#1154](https://github.com/Developer-EJ/PILO/issues/1154), PR [#1160](https://github.com/Developer-EJ/PILO/pull/1160) 병합 완료
   - [x] Tiptap/Yjs 의존성과 최신 snapshot 기반 editor bootstrap
   - [x] 자동 저장 상태와 새로고침 복구
   - [x] frontend lint/test
   - [x] PR [#1160](https://github.com/Developer-EJ/PILO/pull/1160) 생성
-- [ ] **후속 작업**: 문서 lifecycle(이름 변경/이동/삭제), `/files` 에디터 UI, Yjs realtime, 파일 첨부/PDF viewer
+- [ ] **문서 lifecycle API와 Activity Log**: Issue [#1166](https://github.com/Developer-EJ/PILO/issues/1166) 진행 중
+  - [x] rename/move/delete의 Activity Log와 문서 aggregate soft delete 구현
+  - [x] API 계약과 전체 app-server 검증
+  - [ ] PR
+- [ ] **후속 작업**: Drive 이동 UI, Yjs realtime, 파일 첨부/PDF viewer
 
 ## 공통 제약
 

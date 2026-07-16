@@ -119,9 +119,15 @@ export interface NormalizedCreateDriveFolderInput
   name: string;
 }
 
-export interface NormalizedUpdateDriveItemInput {
-  name: string;
-}
+export type NormalizedUpdateDriveItemInput =
+  | {
+      type: "rename";
+      name: string;
+    }
+  | {
+      type: "move";
+      parentId: string | null;
+    };
 
 export interface NormalizedCreateDriveUploadUrlInput
   extends NormalizedDriveParentInput {
