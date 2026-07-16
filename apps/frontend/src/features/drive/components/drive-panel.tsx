@@ -652,23 +652,27 @@ function MoveItemSheet({
   destination,
   destinationParentId,
   error,
+  hasDestinationError,
   isDestinationReady,
   isLoading,
   isSubmitting,
   item,
   onNavigate,
   onOpenChange,
+  onRetry,
   onSelect
 }: {
   destination: DriveListPayload;
   destinationParentId: string | null;
   error: string | null;
+  hasDestinationError: boolean;
   isDestinationReady: boolean;
   isLoading: boolean;
   isSubmitting: boolean;
   item: DriveItem | null;
   onNavigate: (parentId: string | null) => void;
   onOpenChange: (open: boolean) => void;
+  onRetry: () => void;
   onSelect: (parentId: string | null) => void;
 }) {
   const folders = destination.items.filter((candidate) => candidate.itemType === "folder");
@@ -720,6 +724,22 @@ function MoveItemSheet({
                 <Skeleton className="h-10 w-full" />
                 <Skeleton className="h-10 w-full" />
                 <Skeleton className="h-10 w-full" />
+              </div>
+            ) : hasDestinationError ? (
+              <div className="flex min-h-24 flex-col items-start justify-center gap-3 px-2">
+                <p className="text-sm text-muted-foreground">
+                  폴더 목록을 다시 불러온 뒤 이동할 수 있습니다.
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={isSubmitting}
+                  onClick={onRetry}
+                >
+                  <RefreshCw />
+                  다시 시도
+                </Button>
               </div>
             ) : (
               <div className="grid gap-1">
@@ -889,6 +909,8 @@ export function DrivePanel() {
     useState<DriveListPayload>(emptyDriveData);
   const [moveDestinationStatus, setMoveDestinationStatus] =
     useState<DriveStatus>("idle");
+  const [moveDestinationRequestVersion, setMoveDestinationRequestVersion] =
+    useState(0);
   const [moveError, setMoveError] = useState<string | null>(null);
   const [isMoving, setIsMoving] = useState(false);
   const [deleteItem, setDeleteItem] = useState<DriveItem | null>(null);
@@ -1071,7 +1093,14 @@ export function DrivePanel() {
     return () => {
       active = false;
     };
-  }, [canUseDrive, driveClient, moveDestinationParentId, moveItem, workspaceId]);
+  }, [
+    canUseDrive,
+    driveClient,
+    moveDestinationParentId,
+    moveDestinationRequestVersion,
+    moveItem,
+    workspaceId
+  ]);
 
   function openCreateFolderSheet() {
     setFolderName("");
@@ -1685,12 +1714,16 @@ export function DrivePanel() {
         destination={moveDestinationData}
         destinationParentId={moveDestinationParentId}
         error={moveError}
+        hasDestinationError={moveDestinationStatus === "error"}
         isDestinationReady={moveDestinationStatus === "success"}
         isLoading={moveDestinationStatus === "loading"}
         isSubmitting={isMoving}
         item={moveItem}
         onNavigate={navigateMoveDestination}
         onOpenChange={handleMoveOpenChange}
+        onRetry={() =>
+          setMoveDestinationRequestVersion((version) => version + 1)
+        }
         onSelect={(parentId) => void handleMoveSelect(parentId)}
       />
 

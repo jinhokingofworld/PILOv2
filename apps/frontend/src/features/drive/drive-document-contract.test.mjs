@@ -33,5 +33,7 @@ assert.match(
 );
 assert.match(panel, /destinationParentId: string \| null/);
 assert.match(panel, /isDestinationReady: boolean/);
+assert.match(panel, /hasDestinationError: boolean/);
+assert.match(panel, /onRetry: \(\) => void/);
 
 console.log("Drive document contract tests passed.");
