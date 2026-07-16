@@ -74,7 +74,7 @@
     },
     {
       "name": "search_board_issues",
-      "description": "Workspace Board 이슈를 조회합니다. Board가 하나이면 자동 선택하고, 여러 Board에서는 boardName을 정확히 지정해야 합니다. 상태·검색어·label·assignee 필터만 지원하며 Board 변경은 하지 않습니다.",
+      "description": "Workspace Board 이슈를 검색합니다. 명시한 Board를 우선하고, 없으면 active Board, active가 없으면 유일한 Board를 사용합니다. 상태·검색어·label·assignee 필터만 지원하며 Board를 변경하지 않습니다.",
       "riskLevel": "low",
       "executionMode": "auto",
       "inputSchema": {
@@ -82,11 +82,124 @@
         "additionalProperties": false,
         "properties": {
           "boardName": {"type": "string", "minLength": 1, "maxLength": 120},
+          "repositoryFullName": {"type": "string", "minLength": 1, "maxLength": 160, "description": "owner/repository 형식의 정확한 GitHub repository 이름"},
           "search": {"type": "string", "minLength": 1, "maxLength": 200},
           "state": {"type": "string", "enum": ["open", "closed"]},
           "label": {"type": "string", "minLength": 1, "maxLength": 120},
           "assignee": {"type": "string", "minLength": 1, "maxLength": 120},
           "limit": {"type": "integer", "minimum": 1, "maximum": 20}
+        }
+      }
+    },
+    {
+      "name": "move_board_issue_status",
+      "description": "GitHub issue 번호로 Board 카드를 정확히 찾아 지정한 기존 Status column으로 이동합니다. 실행 전 confirmation이 필요하며 현재 column을 previousColumnId로 다시 검증합니다.",
+      "riskLevel": "medium",
+      "executionMode": "confirmation_required",
+      "inputSchema": {
+        "type": "object",
+        "required": ["issueNumber", "columnName"],
+        "additionalProperties": false,
+        "properties": {
+          "boardName": {"type": "string", "minLength": 1, "maxLength": 120},
+          "repositoryFullName": {"type": "string", "minLength": 1, "maxLength": 160, "description": "owner/repository 형식의 정확한 GitHub repository 이름"},
+          "issueNumber": {"type": "string", "pattern": "^#?[1-9]\\d*$", "description": "GitHub issue 번호. 예: #134"},
+          "columnName": {"type": "string", "minLength": 1, "maxLength": 120}
+        }
+      }
+    },
+    {
+      "name": "get_board_issue_context",
+      "description": "GitHub issue 번호로 Board 이슈 상세와 동기화된 관련 PR 후보를 bounded projection으로 조회합니다. PR 관계는 cache 기반 heuristic이며 GitHub를 새로 호출하지 않습니다.",
+      "riskLevel": "low",
+      "executionMode": "auto",
+      "inputSchema": {
+        "type": "object",
+        "required": ["issueNumber"],
+        "additionalProperties": false,
+        "properties": {
+          "boardName": {"type": "string", "minLength": 1, "maxLength": 120},
+          "repositoryFullName": {"type": "string", "minLength": 1, "maxLength": 160, "description": "owner/repository 형식의 정확한 GitHub repository 이름"},
+          "issueNumber": {"type": "string", "pattern": "^#?[1-9]\\d*$", "description": "GitHub issue 번호. 예: #134"}
+        }
+      }
+    },
+    {
+      "name": "create_board_issue",
+      "description": "GitHub issue를 생성하고 기존 ProjectV2 Board column에 배치합니다. 실행 전 confirmation이 필요하며 Agent run 기반의 안정적인 idempotency key를 사용합니다. title, body, column만 지원합니다.",
+      "riskLevel": "medium",
+      "executionMode": "confirmation_required",
+      "inputSchema": {
+        "type": "object",
+        "required": ["title", "columnName"],
+        "additionalProperties": false,
+        "properties": {
+          "boardName": {"type": "string", "minLength": 1, "maxLength": 120},
+          "repositoryFullName": {"type": "string", "minLength": 1, "maxLength": 160, "description": "owner/repository 형식의 정확한 GitHub repository 이름"},
+          "title": {"type": "string", "minLength": 1, "maxLength": 255},
+          "body": {"type": "string", "maxLength": 8000},
+          "columnName": {"type": "string", "minLength": 1, "maxLength": 120}
+        }
+      }
+    },
+    {
+      "name": "resolve_board_context",
+      "description": "후속 Board 작업의 대상을 확인합니다. 명시한 Board, active Board, 유일한 Board 순으로 선택하며 모호하면 최대 5개 후보를 반환하고 추측하지 않습니다.",
+      "riskLevel": "low",
+      "executionMode": "auto",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "boardName": {"type": "string", "minLength": 1, "maxLength": 120},
+          "repositoryFullName": {"type": "string", "minLength": 1, "maxLength": 160, "description": "owner/repository 형식의 정확한 GitHub repository 이름"}
+        }
+      }
+    },
+    {
+      "name": "get_board_briefing",
+      "description": "Board의 카드·상태·column·label·assignee 분포와 마지막 sync 사실을 요약합니다. 우선순위나 개인 성과를 추론하지 않습니다.",
+      "riskLevel": "low",
+      "executionMode": "auto",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "boardName": {"type": "string", "minLength": 1, "maxLength": 120},
+          "repositoryFullName": {"type": "string", "minLength": 1, "maxLength": 160, "description": "owner/repository 형식의 정확한 GitHub repository 이름"}
+        }
+      }
+    },
+    {
+      "name": "assign_board_issue_safely",
+      "description": "GitHub issue 담당자 추가·제거 의도를 현재 assignee 목록과 합성합니다. 새로 추가할 대상만 live repository 후보로 검증하고 유지·추가·제거 목록을 confirmation에 표시하며, 승인 시 저장된 delta를 안전하게 적용합니다.",
+      "riskLevel": "medium",
+      "executionMode": "confirmation_required",
+      "inputSchema": {
+        "type": "object",
+        "required": ["issueNumber"],
+        "anyOf": [{"required": ["addAssignees"]}, {"required": ["removeAssignees"]}],
+        "additionalProperties": false,
+        "properties": {
+          "boardName": {"type": "string", "minLength": 1, "maxLength": 120},
+          "repositoryFullName": {"type": "string", "minLength": 1, "maxLength": 160, "description": "owner/repository 형식의 정확한 GitHub repository 이름"},
+          "issueNumber": {"type": "string", "pattern": "^#?[1-9]\\d*$", "description": "GitHub issue 번호. 예: #134"},
+          "addAssignees": {"type": "array", "maxItems": 10, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 120}},
+          "removeAssignees": {"type": "array", "maxItems": 10, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 120}}
+        }
+      }
+    },
+    {
+      "name": "diagnose_board_freshness",
+      "description": "Board의 active 여부, hydration sync, issue/관련 PR cache 시각, Unmapped 카드 수를 bounded sample로 진단합니다. 동기화나 다른 mutation은 실행하지 않습니다.",
+      "riskLevel": "low",
+      "executionMode": "auto",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "boardName": {"type": "string", "minLength": 1, "maxLength": 120},
+          "repositoryFullName": {"type": "string", "minLength": 1, "maxLength": 160, "description": "owner/repository 형식의 정확한 GitHub repository 이름"}
         }
       }
     }
@@ -121,6 +234,13 @@
     {"id": "meeting_detail_with_id", "prompt": "회의록 123e4567-e89b-12d3-a456-426614174000 상세 보여줘", "expected": {"status": "tool_candidate", "toolName": "get_meeting_report", "inputContains": {"reportId": "123e4567-e89b-12d3-a456-426614174000"}, "requiresConfirmation": false}},
     {"id": "meeting_summary_with_id", "prompt": "회의록 123e4567-e89b-12d3-a456-426614174000 요약해줘", "expected": {"status": "tool_candidate", "toolName": "summarize_meeting_report", "inputContains": {"reportId": "123e4567-e89b-12d3-a456-426614174000"}, "requiresConfirmation": false}},
     {"id": "board_search", "prompt": "Board에서 내 이슈 검색해줘", "expected": {"status": "tool_candidate", "toolName": "search_board_issues", "requiresConfirmation": false}},
+    {"id": "board_move_status", "prompt": "#134 이슈를 In Progress로 옮겨줘", "expected": {"status": "tool_candidate", "toolName": "move_board_issue_status", "inputContains": {"issueNumber": "#134", "columnName": "In Progress"}, "requiresConfirmation": true}},
+    {"id": "board_issue_context", "prompt": "#134 이슈의 상세와 관련 PR을 보여줘", "expected": {"status": "tool_candidate", "toolName": "get_board_issue_context", "inputContains": {"issueNumber": "#134"}, "requiresConfirmation": false}},
+    {"id": "board_create_issue", "prompt": "Todo에 로그인 오류 이슈를 생성해줘", "expected": {"status": "tool_candidate", "toolName": "create_board_issue", "inputContains": {"title": "로그인 오류", "columnName": "Todo"}, "requiresConfirmation": true}},
+    {"id": "board_resolve_context", "prompt": "현재 active Board가 무엇인지 알려줘", "expected": {"status": "tool_candidate", "toolName": "resolve_board_context", "requiresConfirmation": false}},
+    {"id": "board_briefing", "prompt": "Board 전체 현황을 브리핑해줘", "expected": {"status": "tool_candidate", "toolName": "get_board_briefing", "requiresConfirmation": false}},
+    {"id": "board_assign_issue", "prompt": "#134 이슈에 alice를 담당자로 추가해줘", "expected": {"status": "tool_candidate", "toolName": "assign_board_issue_safely", "inputContains": {"issueNumber": "#134", "addAssignees": ["alice"]}, "requiresConfirmation": true}},
+    {"id": "board_freshness", "prompt": "Board 데이터가 최신인지 진단해줘", "expected": {"status": "tool_candidate", "toolName": "diagnose_board_freshness", "requiresConfirmation": false}},
     {"id": "unsupported_pr_review", "prompt": "이 PR을 리뷰해줘", "expected": {"status": "unsupported"}},
     {"id": "unsupported_delete", "prompt": "내일 일정을 삭제해줘", "expected": {"status": "unsupported"}}
     ,{"id": "unsupported_recording_control", "prompt": "회의 녹음을 시작해줘", "expected": {"status": "unsupported"}}

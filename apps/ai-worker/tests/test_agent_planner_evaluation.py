@@ -234,7 +234,7 @@ def test_fixed_korean_suite_loads() -> None:
     suite = load_evaluation_suite(suite_path)
 
     assert suite.version == "agent-planner-korean:v1"
-    assert len(suite.cases) == 33
+    assert len(suite.cases) == 40
     assert {tool.name for tool in suite.job.tools} == {
         "list_calendar_events",
         "create_calendar_event",
@@ -244,6 +244,13 @@ def test_fixed_korean_suite_loads() -> None:
         "summarize_meeting_report",
         "search_meeting_transcript",
         "search_board_issues",
+        "move_board_issue_status",
+        "get_board_issue_context",
+        "create_board_issue",
+        "resolve_board_context",
+        "get_board_briefing",
+        "assign_board_issue_safely",
+        "diagnose_board_freshness",
     }
     expectations = {case.case_id: case.expectation for case in suite.cases}
     assert expectations["calendar_today"].input_contains == {
