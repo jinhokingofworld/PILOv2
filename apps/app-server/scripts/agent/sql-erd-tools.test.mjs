@@ -196,6 +196,32 @@ assert.deepEqual(
 );
 assert.equal(contextualPreparation.plan.call.currentSessionId, SESSION_ID);
 
+const snapshotSqlErdService = new FakeSqlErdService();
+snapshotSqlErdService.session = sessionPayload({ writeProtocol: "snapshot" });
+const [snapshotDefinition] = new SqlErdAgentToolsService(
+  snapshotSqlErdService
+).listDefinitions();
+const snapshotPreparation = await snapshotDefinition.prepareExecution(
+  {
+    ...context,
+    requestContext: { surface: "sql_erd", sessionId: SESSION_ID }
+  },
+  schemaSpec()
+);
+assert.equal(snapshotPreparation.kind, "confirmation");
+assert.deepEqual(
+  snapshotPreparation.plan.choices.map((choice) => choice.id),
+  ["new_session"]
+);
+assert.throws(
+  () =>
+    snapshotDefinition.buildConfirmationInput(
+      snapshotPreparation.plan,
+      "replace_current"
+    ),
+  (error) => /choice/i.test(error.getResponse().error.message)
+);
+
 assert.deepEqual(
   definition.buildConfirmationInput(
     contextualPreparation.plan,
@@ -296,6 +322,11 @@ for (const contract of [agentApiContract, sqlErdApiContract]) {
   assert.match(contract, /SqlErdSchemaSpecV1/);
   assert.match(contract, /new_session/);
   assert.match(contract, /replace_current/);
+  assert.match(contract, /`snapshot` session에서는 `new_session`만/);
+  assert.match(
+    contract,
+    /`operations_v1` session에서는\s+`replace_current`도/
+  );
   assert.match(contract, /ERD 및 DDL 열기/);
 }
 assert.match(agentApiContract, /executionMode=contextual|`contextual`/);

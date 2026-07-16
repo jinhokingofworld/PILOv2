@@ -208,8 +208,9 @@ PostgreSQL과 MySQL DDL은 입력 table 순서나 순환 참조와 무관하게 
 공개 input에 포함하지 않으며 App Server가 저장된 run context에서만 결정한다.
 
 - SQLtoERD context가 없으면 신규 세션 mutation을 즉시 실행한다.
-- `{ surface: "sql_erd", sessionId }` context가 있으면 session 접근을 다시 검증하고
-  `new_session`, `replace_current` choice confirmation을 만든다.
+- `{ surface: "sql_erd", sessionId }` context가 있으면 session 접근과 write protocol을 다시 검증한다.
+  `snapshot` session에서는 `new_session`만 제공하고, `operations_v1` session에서는
+  `replace_current`도 제공한다.
 - approve 요청은 `choiceId`만 받는다. 저장된 plan의 schemaSpec과 current session ID를
   App Server가 복원·검증한 뒤 선택한 mutation을 실행한다.
 - 신규 세션과 교체 모두 `agentRunId`를 domain mutation의 멱등성 식별자로 사용한다.

@@ -261,13 +261,33 @@ export class SqlErdAgentToolsService {
       context.workspaceId,
       context.requestContext.sessionId
     );
+    const choices: AgentChoiceConfirmationPlan["choices"] = [
+      {
+        id: "new_session",
+        label: "새 세션 만들기",
+        description: "현재 세션을 유지하고 생성 결과를 새 세션에 저장합니다.",
+        input: { targetMode: "new_session" }
+      }
+    ];
+    if (session.writeProtocol === "operations_v1") {
+      choices.push({
+        id: "replace_current",
+        label: "현재 스키마 교체",
+        description:
+          "현재 세션의 제목과 레이아웃 호환 요소는 유지하고 스키마를 교체합니다.",
+        input: { targetMode: "replace_current" }
+      });
+    }
 
     return {
       kind: "confirmation" as const,
       plan: {
         kind: "choice" as const,
         toolName: "generate_sql_erd",
-        summary: "생성한 스키마를 어디에 적용할지 선택해주세요.",
+        summary:
+          session.writeProtocol === "operations_v1"
+            ? "생성한 스키마를 어디에 적용할지 선택해주세요."
+            : "현재 세션은 스키마 교체를 지원하지 않습니다. 생성 결과를 새 세션에 저장할 수 있습니다.",
         target: {
           domain: "sqltoerd",
           resourceType: "session",
@@ -277,21 +297,7 @@ export class SqlErdAgentToolsService {
           schemaSpec: this.toAgentJsonObject(schemaSpec),
           currentSessionId: session.id
         },
-        choices: [
-          {
-            id: "new_session",
-            label: "새 세션 만들기",
-            description: "현재 세션을 유지하고 생성 결과를 새 세션에 저장합니다.",
-            input: { targetMode: "new_session" }
-          },
-          {
-            id: "replace_current",
-            label: "현재 스키마 교체",
-            description:
-              "현재 세션의 제목과 레이아웃 호환 요소는 유지하고 스키마를 교체합니다.",
-            input: { targetMode: "replace_current" }
-          }
-        ]
+        choices
       }
     };
   }

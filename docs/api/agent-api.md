@@ -782,8 +782,9 @@ Status code: `200 OK`
 - planner input에는 `targetMode`, `sessionId`, `workspaceId`, `userId`, `currentUserId`를 넣지 않는다.
   현재 사용자·Workspace·run은 `AgentToolContext`에서만 주입한다.
 - SQLtoERD request context가 없으면 새 session을 즉시 생성한다. context가 있으면 App Server가
-  session 접근을 다시 검증한 뒤 `new_session`, `replace_current` 두 choice를 만든다. 클라이언트는
-  선택한 `choiceId`만 보내며 저장된 schemaSpec과 session ID는 서버가 복원한다.
+  session 접근과 write protocol을 다시 검증한다. `snapshot` session에서는 `new_session`만 제공하고,
+  `operations_v1` session에서는 `replace_current`도 제공한다. 클라이언트는 선택한 `choiceId`만 보내며
+  저장된 schemaSpec과 session ID는 서버가 복원한다.
 - 결과 step에는 sourceText, DDL, modelJson, layoutJson을 저장하지 않는다. `outputSummary`는 action,
   title, dialect, table/relation count, warning code만 포함한다.
 - 생성·교체된 session은 `domain=sqltoerd`, `resourceType=session` resource ref 하나로 반환한다.
