@@ -177,3 +177,18 @@ export type CanvasRoomShapePatchEventPayload = CanvasRoomShapePatchPayload & {
   actorUserId: string;
   sentAt: string;
 };
+
+export type CanvasCheckpointSyncOperation =
+  | {
+      baseRevision: number | null;
+      clientOperationId: string;
+      payload: Record<string, unknown>;
+      shapeId: string;
+      type: "create" | "update";
+    }
+  | {
+      baseRevision: number | null;
+      clientOperationId: string;
+      shapeId: string;
+      type: "delete";
+    };

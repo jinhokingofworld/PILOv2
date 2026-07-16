@@ -682,6 +682,7 @@ function PiloCanvasRuntimeInner({
     onShapeSyncConflict: handleShapeSyncConflict,
     onShapeSyncError: handleShapeSyncError,
     pendingLocalShapeVersionsRef,
+    persistThroughRoomState: canvasPresence.enabled,
     remoteShapeRevisionRef,
     setCanvasHydrationVersion,
     setFreeformShapes,

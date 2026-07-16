@@ -23,6 +23,10 @@ const canvasRoom = await readFile(
   new URL("../src/canvas/canvas-room.service.ts", import.meta.url),
   "utf8"
 );
+const canvasRoomCheckpoint = await readFile(
+  new URL("../src/canvas/canvas-room-checkpoint.service.ts", import.meta.url),
+  "utf8"
+);
 const canvasRoomState = await readFile(
   new URL("../src/canvas/canvas-room-state.service.ts", import.meta.url),
   "utf8"
@@ -58,7 +62,7 @@ const socketServer = await readFile(
 
 assert.match(config, /notifications_status_only/);
 assert.match(config, /DATABASE_URL/);
-assert.doesNotMatch(config, /APP_SERVER_URL/);
+assert.match(config, /APP_SERVER_URL/);
 assert.match(config, /SOCKET_IO_CORS_ORIGIN/);
 assert.match(server, /\/health/);
 assert.match(server, /pathname\.startsWith\("\/ws\/"\)/);
@@ -114,6 +118,8 @@ assert.match(socketServer, /canvasServerEvents\.shapePreview/);
 assert.match(socketServer, /canvasServerEvents\.shapePreviewClear/);
 assert.match(socketServer, /createCanvasShapePreviewService/);
 assert.match(socketServer, /createCanvasRoomStateService/);
+assert.match(socketServer, /createCanvasRoomCheckpointService/);
+assert.match(socketServer, /roomCheckpointService\.scheduleCheckpoint/);
 assert.doesNotMatch(socketServer, /createCanvasShapeCommitService/);
 assert.doesNotMatch(socketServer, /clearCommitShapePreview/);
 assert.doesNotMatch(socketServer, /getShapeCommitBlockedByLocks/);
@@ -173,9 +179,15 @@ assert.match(canvasRoomState, /getLoadedRegions/);
 assert.match(canvasRoomState, /getCachedShapes/);
 assert.match(canvasRoomState, /getDirtyShapeIds/);
 assert.match(canvasRoomState, /getDeletedTombstones/);
+assert.match(canvasRoomState, /getCheckpointSnapshot/);
+assert.match(canvasRoomState, /markCheckpointSucceeded/);
 assert.match(canvasRoomState, /upsertRoomShapes/);
 assert.match(canvasRoom, /loadedRegions: roomStateService\.getLoadedRegions/);
 assert.match(canvasRoom, /roomShapes: roomStateService\.getCachedShapes/);
+assert.match(canvasRoomCheckpoint, /CANVAS_CHECKPOINT_DELAY_MS = 3_000/);
+assert.match(canvasRoomCheckpoint, /\/shapes\/batch/);
+assert.match(canvasRoomCheckpoint, /Authorization: `Bearer \$\{token\}`/);
+assert.match(canvasRoomCheckpoint, /markCheckpointSucceeded/);
 assert.match(redisPubSub, /createAdapter/);
 assert.match(redisPubSub, /stateClient/);
 assert.match(redisPubSub, /NX: true/);

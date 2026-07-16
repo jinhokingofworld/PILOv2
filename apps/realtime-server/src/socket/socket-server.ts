@@ -17,6 +17,7 @@ import {
   type CanvasRoomAccess,
 } from "../canvas/canvas-access.service";
 import { createCanvasPresenceService } from "../canvas/canvas-presence.service";
+import { createCanvasRoomCheckpointService } from "../canvas/canvas-room-checkpoint.service";
 import { createCanvasRoomService } from "../canvas/canvas-room.service";
 import { createCanvasRoomStateService } from "../canvas/canvas-room-state.service";
 import { createCanvasShapeLockService } from "../canvas/canvas-shape-lock.service";
@@ -816,6 +817,10 @@ export async function createRealtimeSocketServer({
     shapeLockService,
     shapePreviewService,
   });
+  const roomCheckpointService = createCanvasRoomCheckpointService({
+    appServerUrl: config.appServerUrl,
+    roomStateService,
+  });
   const sqlErdRoomService = createSqlErdRoomService({
     accessService: sqlErdAccessService,
     presenceService: sqlErdPresenceService,
@@ -1405,6 +1410,10 @@ export async function createRealtimeSocketServer({
       }
 
       roomStateService.applyShapePatch(patchPayload, patchPayload);
+      roomCheckpointService.scheduleCheckpoint(
+        patchPayload,
+        authedSocket.data.auth.token,
+      );
       socket.to(roomName).emit(canvasServerEvents.shapePatch, {
         ...patchPayload,
         actorUserId: authedSocket.data.auth.userId ?? socket.id,
@@ -1614,6 +1623,7 @@ export async function createRealtimeSocketServer({
       await unsubscribeBoardSourceEvents?.();
       await unsubscribePrReviewDecisions?.();
       await unsubscribePrReviewConflictDrafts?.();
+      roomCheckpointService.close();
       await io.close();
       await redisAdapter?.close();
       await database.close();

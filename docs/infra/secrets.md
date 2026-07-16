@@ -166,6 +166,7 @@ UI Preview는 local 개발 편의 기능이며 실제 bearer session이나 Works
 | `PORT` | Realtime Server port |
 | `DATABASE_SSL` | Set to `true` when `DATABASE_URL` requires SSL. |
 | `SOCKET_IO_CORS_ORIGIN` | Socket.IO 허용 frontend origin. 여러 개면 comma-separated로 설정한다. |
+| `APP_SERVER_URL` | classic Canvas roomState checkpoint를 App Server `/shapes/batch`로 저장할 때 사용할 App Server origin. |
 | `REALTIME_SCOPE` | MVP 기본값: `notifications_status_only` |
 
 ### AI Worker

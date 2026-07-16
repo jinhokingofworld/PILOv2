@@ -37,6 +37,7 @@ type UseCanvasShapePersistenceOptions = {
   onShapeSyncConflict?: (conflict: CanvasShapeSyncConflict) => void;
   onShapeSyncError?: (error: unknown) => void;
   pendingLocalShapeVersionsRef: RuntimeRef<Map<string, number>>;
+  persistThroughRoomState?: boolean;
   remoteShapeRevisionRef: RuntimeRef<Map<string, number>>;
   setCanvasHydrationVersion: (updater: (version: number) => number) => void;
   setFreeformShapes: (
@@ -61,6 +62,7 @@ export function useCanvasShapePersistence({
   onShapeSyncConflict,
   onShapeSyncError,
   pendingLocalShapeVersionsRef,
+  persistThroughRoomState = false,
   remoteShapeRevisionRef,
   setCanvasHydrationVersion,
   setFreeformShapes,
@@ -144,15 +146,18 @@ export function useCanvasShapePersistence({
       }
 
       if (storageMode === "api" && canvasClient) {
-        markPendingLocalShapeChanges(
+        const pendingVersions = markPendingLocalShapeChanges(
           freeformShapesRef.current,
           nextFreeformShapes,
         );
+        if (persistThroughRoomState) {
+          clearPendingLocalShapeChanges(pendingVersions);
+        }
       }
 
       freeformShapesRef.current = nextFreeformShapes;
     },
-    [canvasClient, freeformShapesRef, storageMode],
+    [canvasClient, freeformShapesRef, persistThroughRoomState, storageMode],
   );
 
   const mergeLoadedFreeformShapes = useCallback(
@@ -226,6 +231,11 @@ export function useCanvasShapePersistence({
           });
 
           onRoomShapePatch?.({ deletedShapeIds, upsertShapes });
+
+          if (persistThroughRoomState) {
+            clearPendingLocalShapeChanges(pendingLocalShapeVersions);
+            return nextFreeformShapes;
+          }
 
           const shapeSyncQueue = shapeSyncQueueRef.current;
           const syncInput = {
@@ -303,6 +313,7 @@ export function useCanvasShapePersistence({
       onRoomShapePatch,
       onShapeSyncConflict,
       onShapeSyncError,
+      persistThroughRoomState,
       remoteShapeRevisionRef,
       setFreeformShapes,
       shapeSyncQueueRef,

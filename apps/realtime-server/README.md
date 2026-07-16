@@ -77,6 +77,8 @@ Optional:
 - `REDIS_URL` to enable Socket.IO Redis adapter across multiple tasks.
 - `SOCKET_IO_CORS_ORIGIN` as a comma-separated frontend origin allowlist.
 - `REALTIME_SCOPE` for health/debug scope reporting.
+- `APP_SERVER_URL` for classic Canvas roomState checkpoint persistence through
+  the existing App Server `/shapes/batch` transaction boundary.
 
 ## tldraw_sync deployment notes
 

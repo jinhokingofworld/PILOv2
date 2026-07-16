@@ -763,6 +763,7 @@ assert.match(canvasRuntime, /onViewportShapesLoaded: canvasPresence\.reportLoade
 assert.match(canvasRuntime, /hydrateShapes: hydrateRoomShapes/);
 assert.match(canvasRuntime, /applyRoomShapePatch/);
 assert.match(canvasRuntime, /onRoomShapePatch: canvasPresence\.sendRoomShapePatch/);
+assert.match(canvasRuntime, /persistThroughRoomState: canvasPresence\.enabled/);
 assert.match(canvasRuntime, /shapeDetailCacheRef\.current\.set\(shape\.id, shape\)/);
 assert.match(canvasRemoteOperations, /applyCanvasRemoteOperation/);
 assert.match(canvasRemoteOperations, /PILO_ARROW_BINDINGS_META_KEY/);
@@ -845,6 +846,8 @@ assert.match(canvasPresenceHook, /hydrateShapes/);
 assert.match(canvasPresenceHook, /sendRoomShapePatch/);
 assert.match(canvasPresenceHook, /applyRoomShapePatch/);
 assert.match(canvasPresenceHook, /sendShapePreview/);
+assert.match(canvasShapePersistence, /persistThroughRoomState/);
+assert.match(canvasShapePersistence, /clearPendingLocalShapeChanges\(pendingLocalShapeVersions\)/);
 assert.match(canvasPresenceHook, /clearShapePreview/);
 assert.match(canvasPresenceHook, /STALE_SHAPE_PREVIEW_TIMEOUT_MS = 5_000/);
 assert.match(canvasRealtimeClient, /NEXT_PUBLIC_PILO_REALTIME_SERVER_URL/);
