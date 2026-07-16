@@ -1049,6 +1049,10 @@ const CONFLICT_SUGGESTION_DRAFT_SOURCES: readonly PrReviewConflictSuggestionDraf
 const CONFLICT_STATUS_SETTLE_MAX_ATTEMPTS = 4;
 const CONFLICT_STATUS_SETTLE_DELAY_MS = 250;
 const CONFLICT_MARKER_PATTERN = /(^|\n)(<<<<<<<|=======|>>>>>>>)(?:\s|$)/;
+const PR_REVIEW_SESSION_CREATION_UNIQUE_CONSTRAINTS = new Set([
+  "idx_pr_review_sessions_room_head_active",
+  "idx_pr_review_sessions_room_analyzing"
+]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -1192,7 +1196,7 @@ export class PrReviewService {
         roomCreated: created.roomCreated
       };
     } catch (error) {
-      if (!this.isUniqueConstraintViolation(error)) {
+      if (!this.isReviewSessionCreationUniqueConstraintViolation(error)) {
         throw error;
       }
 
@@ -3053,7 +3057,7 @@ export class PrReviewService {
       await this.analysisJobPublisher.publishCreatedJob(created.jobId);
       return;
     } catch (error) {
-      if (!this.isUniqueConstraintViolation(error)) {
+      if (!this.isReviewSessionCreationUniqueConstraintViolation(error)) {
         throw error;
       }
     }
@@ -3698,12 +3702,17 @@ export class PrReviewService {
     });
   }
 
-  private isUniqueConstraintViolation(error: unknown): boolean {
+  private isReviewSessionCreationUniqueConstraintViolation(error: unknown): boolean {
     if (typeof error !== "object" || error === null) {
       return false;
     }
 
-    return (error as { code?: unknown }).code === "23505";
+    const candidate = error as { code?: unknown; constraint?: unknown };
+    return (
+      candidate.code === "23505" &&
+      typeof candidate.constraint === "string" &&
+      PR_REVIEW_SESSION_CREATION_UNIQUE_CONSTRAINTS.has(candidate.constraint)
+    );
   }
 
   private async findAnalysisJobForHandoff(

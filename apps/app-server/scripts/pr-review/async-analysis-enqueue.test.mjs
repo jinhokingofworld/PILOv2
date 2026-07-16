@@ -136,7 +136,9 @@ class FakeReviewDatabase {
       return { id: values[1], ...this.pullRequest };
     }
     if (text.includes("review_session.status = 'analyzing'")) {
-      return this.session ? { id: this.session.id } : null;
+      const activeSession =
+        this.session ?? (this.transactions.length > 0 ? this.concurrentSession : null);
+      return activeSession ? { id: activeSession.id } : null;
     }
     if (
       text.includes("review_session.head_sha = $3") &&
@@ -196,6 +198,7 @@ class FakeReviewDatabase {
           if (this.failSessionInsertWithUnique) {
             const error = new Error("duplicate review revision");
             error.code = "23505";
+            error.constraint = "idx_pr_review_sessions_room_head_active";
             throw error;
           }
           this.session = {
@@ -308,15 +311,15 @@ class FakeReviewPublisher {
 }
 
 class FakeActivityLogService {
-  constructor({ shouldFail = false } = {}) {
-    this.shouldFail = shouldFail;
+  constructor({ error = null, shouldFail = false } = {}) {
+    this.error = error ?? (shouldFail ? new Error("activity append failed") : null);
     this.calls = [];
   }
 
   async append(transaction, input) {
     this.calls.push({ transaction, input });
     transaction.events.push("activity");
-    if (this.shouldFail) throw new Error("activity append failed");
+    if (this.error) throw this.error;
   }
 }
 
@@ -326,6 +329,7 @@ const originalEnv = {
     process.env.SQS_PR_REVIEW_ANALYSIS_QUEUE_URL,
   SQS_ENDPOINT: process.env.SQS_ENDPOINT
 };
+const appendUniqueViolationResults = [];
 
 try {
   process.env.AWS_REGION = "ap-northeast-2";
@@ -505,6 +509,43 @@ try {
   }
 
   {
+    const appendError = new Error("activity append unique violation");
+    appendError.code = "23505";
+    appendError.constraint = "activity_logs_workspace_dedupe_key_key";
+    const concurrentSession = {
+      id: "99999999-9999-4999-8999-999999999999",
+      room_id: "88888888-8888-4888-8888-888888888888"
+    };
+    const database = new FakeReviewDatabase(undefined, { concurrentSession });
+    const publisher = new FakeReviewPublisher();
+    const activityLog = new FakeActivityLogService({ error: appendError });
+    const service = new PrReviewService(
+      database,
+      new FakeWorkspaceService(),
+      new FakeGithubDependency(),
+      new FakeAnalysisService(),
+      publisher,
+      activityLog
+    );
+
+    let rejectedError = null;
+    try {
+      await service.createReviewSession(
+        "11111111-1111-1111-1111-111111111111",
+        payload.workspaceId,
+        "66666666-6666-6666-6666-666666666666"
+      );
+    } catch (error) {
+      rejectedError = error;
+    }
+    appendUniqueViolationResults.push({
+      case: "initial",
+      rejectedOriginalError: rejectedError === appendError
+    });
+    assert.deepEqual(publisher.calls, []);
+  }
+
+  {
     const database = new FakeReviewDatabase();
     const publisher = new FakeReviewPublisher();
     const activityLog = new FakeActivityLogService();
@@ -575,6 +616,55 @@ try {
     assert.deepEqual(activityLog.calls, []);
     assert.deepEqual(publisher.calls, []);
   }
+
+  {
+    const appendError = new Error("successor activity append unique violation");
+    appendError.code = "23505";
+    appendError.constraint = "activity_logs_workspace_dedupe_key_key";
+    const concurrentSession = {
+      id: "99999999-9999-4999-8999-999999999999",
+      room_id: "88888888-8888-4888-8888-888888888888"
+    };
+    const database = new FakeReviewDatabase(undefined, { concurrentSession });
+    const publisher = new FakeReviewPublisher();
+    const activityLog = new FakeActivityLogService({ error: appendError });
+    const service = new PrReviewService(
+      database,
+      new FakeWorkspaceService(),
+      new FakeGithubDependency(),
+      new FakeAnalysisService(),
+      publisher,
+      activityLog
+    );
+
+    let rejectedError = null;
+    try {
+      await service.createSuccessorReviewRevisionAfterConflictApply({
+        currentUserId: "11111111-1111-1111-1111-111111111111",
+        workspaceId: payload.workspaceId,
+        previousSession: {
+          room_id: concurrentSession.room_id,
+          pull_request_id: "66666666-6666-6666-6666-666666666666",
+          head_sha: "previous-head-sha"
+        },
+        headShaAfter: payload.headSha,
+        conflictStatus: "clean",
+        conflictCheckedAt: null
+      });
+    } catch (error) {
+      rejectedError = error;
+    }
+    appendUniqueViolationResults.push({
+      case: "successor",
+      rejectedOriginalError: rejectedError === appendError
+    });
+    assert.deepEqual(publisher.calls, []);
+  }
+
+  assert.deepEqual(appendUniqueViolationResults, [
+    { case: "initial", rejectedOriginalError: true },
+    { case: "successor", rejectedOriginalError: true }
+  ]);
 
   {
     const database = new FakeReviewDatabase({
