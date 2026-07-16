@@ -2,7 +2,7 @@
 
 ## 상태
 
-- 구현 상태 기준: `origin/dev`의 `c67b4d8`(2026-07-13)
+- 구현 상태 기준: 2026-07-16
 - 대상 단계: Post-MVP Phase 1 Workspace multi-session
 - DB migration와 app-server: plural canonical API 구현 완료
 - frontend: `origin/dev`의 session 목록·편집 화면은 plural API를 사용
@@ -32,8 +32,7 @@ API가 담당하는 범위:
 
 - SQL 실행
 - SQL migration 적용
-- server-side SQL parsing
-- server-side ERD auto layout
+- public session API에서의 server-side SQL parsing
 - Local-only 저장
 - JSON import/export
 - PNG/SVG export
@@ -52,6 +51,150 @@ API가 담당하는 범위:
 sqltoerd는 자유형 Canvas의 하위 도구가 아니라 Workspace의 독립 기능이다. 화면은
 tldraw 기반 surface를 사용할 수 있지만, 저장 API는 `canvas-api.md`의 freeform
 canvas shape API를 재사용하지 않는다.
+
+## 내부 Agent schema 생성 계약
+
+이 절은 public HTTP endpoint가 아니라 Agent tool adapter가 호출할 SQLtoERD domain
+mutation 계약이다. AI Worker는 임의 DDL 문자열 대신 `SqlErdSchemaSpecV1`을 만들고,
+App Server가 검증한 뒤 server-side DDL·modelJson·layoutJson 생성 과정을 결정적으로
+수행한다. 생성한 DDL은 실제 DB에 실행하지 않는다.
+
+```ts
+type SqlErdSchemaSpecV1 = {
+  version: 1;
+  title: string;
+  requestedDialect: "postgresql" | "mysql" | "sqlite" | null;
+  tables: SqlErdSchemaTableSpec[];
+  relations: SqlErdSchemaRelationSpec[];
+  unsupportedFeatures: Array<
+    | "views"
+    | "triggers"
+    | "stored_procedures"
+    | "check_constraints"
+    | "indexes"
+    | "enums"
+    | "partitions"
+    | "permissions_rls"
+    | "database_execution"
+    | "comments"
+    | "raw_default_expressions"
+  >;
+};
+
+type SqlErdSchemaTableSpec = {
+  key: string;
+  name: string;
+  schemaName: string | null;
+  columns: SqlErdSchemaColumnSpec[];
+  primaryKey: SqlErdSchemaKeyConstraintSpec | null;
+  uniqueConstraints: SqlErdSchemaKeyConstraintSpec[];
+};
+
+type SqlErdSchemaColumnSpec = {
+  key: string;
+  name: string;
+  dataType: {
+    kind:
+      | "boolean"
+      | "smallint"
+      | "integer"
+      | "bigint"
+      | "decimal"
+      | "real"
+      | "double"
+      | "char"
+      | "varchar"
+      | "text"
+      | "date"
+      | "time"
+      | "timestamp"
+      | "timestamp_tz"
+      | "uuid"
+      | "json"
+      | "binary";
+    length: number | null;
+    precision: number | null;
+    scale: number | null;
+  };
+  nullable: boolean;
+  autoIncrement: boolean;
+  defaultValue:
+    | { kind: "literal"; value: string | number | boolean | null }
+    | { kind: "current_date"; value: null }
+    | { kind: "current_timestamp"; value: null }
+    | null;
+};
+
+type SqlErdSchemaKeyConstraintSpec = {
+  name: string | null;
+  columnKeys: string[];
+};
+
+type SqlErdSchemaRelationSpec = {
+  key: string;
+  name: string | null;
+  fromTableKey: string;
+  fromColumnKeys: string[];
+  toTableKey: string;
+  toColumnKeys: string[];
+};
+```
+
+모든 object는 명시되지 않은 필드를 거부한다. `key`는 tool-local 참조 값이며 DB에는
+저장하지 않는다. table key와 relation key는 spec 전체에서 각각 유일하고, column
+key는 table 안에서 유일해야 한다. relation의 table/column 참조와 양쪽 column 수는
+정확히 일치해야 한다.
+
+제한은 다음과 같다.
+
+- 직렬화한 schemaSpec: UTF-8 최대 48 KiB
+- title: 1~120자, identifier: 1~256자
+- tables: 1~100개
+- columns: table당 1~200개, 전체 최대 1,000개
+- relations: 최대 300개
+- 생성된 sourceText, modelJson, layoutJson: 각각 UTF-8 최대 1 MiB
+- source snapshot 세 구성요소 합계: 최대 3 MiB
+
+`length`는 `char`, `varchar`, `binary`에서만 1~65,535로 허용한다. `precision`과
+`scale`은 `decimal`에서만 각각 1~1,000, 0~precision으로 허용한다. 자동 증가는
+단일 정수 PK column에서만 허용하고 PK column은 nullable일 수 없다. raw SQL type과
+raw default expression은 받지 않으며, integer literal을 포함한 모든 literal은 논리
+type과 일치해야 한다. SQLite는 `schemaName`을 허용하지 않는다.
+
+동일한 정규화 spec과 dialect는 byte-stable DDL, model identity와 초기 layout을
+생성해야 한다. table/column/constraint ID와 FK legacy/v2 hash ID는 frontend parser의
+stable identity 규칙을 그대로 사용한다. 초기 layout은 frontend와 같은 Dagre 3.x
+설정과 table card 크기 계산을 사용한다. `unsupportedFeatures`와
+`timestamp_tz`의 MySQL/SQLite downgrade는 bounded warning으로 반환한다.
+
+### Agent 신규 세션 mutation
+
+- Workspace 접근 권한을 먼저 확인한다.
+- dialect 미지정은 PostgreSQL로 생성한다.
+- `sql_erd_agent_session_creations`가
+  `(workspaceId, actorUserId, agentRunId)`를 멱등성 key로 저장한다.
+- 같은 key와 같은 정규화 schema fingerprint는 원래 session을 반환한다.
+- 같은 key를 다른 schema에 재사용하면 `409 CONFLICT`로 거부한다.
+- session과 ledger row는 Workspace row lock 아래 한 DB transaction에서 생성한다.
+- 새 session의 write protocol은 `SQL_ERD_OPERATIONS_V1_ENABLED` 정책을 따른다.
+
+### Agent 현재 세션 교체 mutation
+
+- `operations_v1` session에서만 허용하며 snapshot session은
+  `409 SQL_ERD_WRITE_PROTOCOL_MISMATCH`로 거부한다.
+- session row를 잠근 뒤 활성 source lock이 하나라도 있으면 교체를 거부한다. Agent가
+  사용자 lease를 가장하거나 별도 공개 lease endpoint를 사용하지 않는다.
+- PostgreSQL/MySQL/SQLite session은 기존 dialect를 유지한다. schemaSpec에 다른
+  dialect가 명시되면 `409 CONFLICT`로 거부한다. `auto` session은 요청 dialect로
+  렌더링하고 요청이 없으면 PostgreSQL로 렌더링하되 저장 dialect는 `auto`를 유지한다.
+- schemaSpec title은 무시하고 기존 session title을 유지한다.
+- 최신 layout에 `rebaseSqlErdSourceLayout`을 적용해 동일 stable ID table 위치와
+  유효 annotation을 보존하고, 사라진 참조를 정리하며 새 table만 배치한다.
+- agentRunId를 deterministic `clientOperationId`로 사용한다. 같은 실행의 재시도는
+  원래 결과를 반환하고 다른 schema 재사용은 `409 CONFLICT`로 거부한다.
+- session update, immutable snapshot, `source_snapshot` operation과 outbox insert를
+  한 transaction에서 commit한다. operation은 일반 source publish와 같은 `opSeq`
+  순서 및 realtime/catch-up 경로를 사용한다.
 
 ## Realtime Presence (Phase 1)
 

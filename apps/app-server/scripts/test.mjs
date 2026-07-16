@@ -602,3 +602,5 @@ await import("./sqltoerd/operation-delivery.test.mjs");
 await import("./sqltoerd/source-snapshot.test.mjs");
 await import("./sqltoerd/operation-publisher.test.mjs");
 await import("./sqltoerd/operations-v1-cutover-manifest.test.mjs");
+await import("./sqltoerd/schema-generator.test.mjs");
+await import("./sqltoerd/schema-mutation.test.mjs");
