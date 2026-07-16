@@ -35,7 +35,7 @@ class FakeGithubAppClient {
 const projectOAuthRow = {
   github_login: "Developer-EJ",
   access_token_encrypted: "encrypted-project-oauth-token",
-  token_scope: "read:user,user:email,project",
+  token_scope: "project,repo",
   connected_at: "2026-07-05T09:00:00.000Z",
   revoked_at: null
 };
@@ -98,7 +98,7 @@ function createService(database, githubAppClient = new FakeGithubAppClient()) {
   const database = new FakeDatabase([
     {
       ...projectOAuthRow,
-      token_scope: "read:user,user:email"
+      token_scope: "project"
     }
   ]);
   const { githubAppClient, service } = createService(database);
@@ -114,7 +114,7 @@ function createService(database, githubAppClient = new FakeGithubAppClient()) {
       }),
     (error) =>
       error?.response?.error?.message ===
-      "GitHub ProjectV2 OAuth connection must be reconnected with project scope"
+      "GitHub ProjectV2 OAuth connection must be reconnected with project and repo scopes"
   );
   assert.deepEqual(githubAppClient.statusUpdates, []);
 }

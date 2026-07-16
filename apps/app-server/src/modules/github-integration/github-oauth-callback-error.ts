@@ -1,5 +1,6 @@
 import { HttpStatus } from "@nestjs/common";
 import { ApiError } from "../../common/api-error";
+import { GITHUB_PROJECT_OAUTH_SCOPE_ERROR_MESSAGE } from "./github-project-oauth-scope";
 
 export const GITHUB_OAUTH_ACCOUNT_ALREADY_CONNECTED_MESSAGE =
   "GitHub account is already connected to another PILO account";
@@ -29,7 +30,7 @@ const CALLBACK_ERROR_BY_MESSAGE = new Map<string, GithubCallbackErrorCode>([
   ["Invalid GitHub App installation state", "invalid_state"],
   ["GitHub OAuth token exchange failed", "token_exchange_failed"],
   [
-    "GitHub ProjectV2 OAuth connection must be reconnected with project scope",
+    GITHUB_PROJECT_OAUTH_SCOPE_ERROR_MESSAGE,
     "project_oauth_scope_missing"
   ],
   [

@@ -9,6 +9,10 @@ import {
 } from "./github-integration-config.service";
 import { GithubTokenEncryptionService } from "./github-token-encryption.service";
 import { GithubOAuthConnectionService } from "./github-oauth-connection.service";
+import {
+  GITHUB_PROJECT_OAUTH_SCOPE_ERROR_MESSAGE,
+  hasRequiredGithubProjectOAuthScopes
+} from "./github-project-oauth-scope";
 
 export interface UpdateGithubProjectV2ItemStatusInput {
   currentUserId: string;
@@ -35,9 +39,6 @@ export interface GithubProjectV2OAuthAccess {
 
 const GITHUB_PROJECT_OAUTH_REQUIRED_MESSAGE =
   "GitHub ProjectV2 OAuth connection is required for ProjectV2 write";
-const GITHUB_PROJECT_OAUTH_SCOPE_ERROR_MESSAGE =
-  "GitHub ProjectV2 OAuth connection must be reconnected with project scope";
-
 @Injectable()
 export class GithubProjectV2WriteService {
   constructor(
@@ -93,17 +94,9 @@ export class GithubProjectV2WriteService {
     let connection;
     try { connection = await this.connectionService.getActiveConnection(currentUserId, "project_v2"); }
     catch { throw badRequest(GITHUB_PROJECT_OAUTH_REQUIRED_MESSAGE); }
-    if (!this.hasProjectScope(connection.tokenScope)) {
+    if (!hasRequiredGithubProjectOAuthScopes(connection.tokenScope)) {
       throw badRequest(GITHUB_PROJECT_OAUTH_SCOPE_ERROR_MESSAGE);
     }
     return connection;
-  }
-
-  private hasProjectScope(scope: string | null): boolean {
-    if (!scope) {
-      return false;
-    }
-
-    return scope.split(/[,\s]+/).includes("project");
   }
 }
