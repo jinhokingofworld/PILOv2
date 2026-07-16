@@ -42,6 +42,13 @@ assert.equal((appModule.match(/ChatModule/g) ?? []).length, 2);
 assert.match(publisher, /CHAT_REDIS_CHANNEL = "chat:events"/);
 assert.match(publisher, /process\.env\.REDIS_URL/);
 assert.match(publisher, /implements OnModuleDestroy/);
+assert.doesNotMatch(controller, /requestFingerprint|request_fingerprint/);
+assert.doesNotMatch(publisher, /requestFingerprint|request_fingerprint/);
+const publicMessageType = types.match(
+  /export type WorkspaceChatMessage = \{[\s\S]*?\n\};/
+)?.[0];
+assert.ok(publicMessageType, "WorkspaceChatMessage type must exist");
+assert.doesNotMatch(publicMessageType, /requestFingerprint|request_fingerprint/);
 assert.match(types, /version: 1/);
 assert.match(types, /type: "message\.created"/);
 assert.match(types, /type: "message\.deleted"/);

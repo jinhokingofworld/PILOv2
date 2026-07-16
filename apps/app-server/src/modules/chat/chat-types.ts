@@ -85,6 +85,7 @@ export interface ChatMessageRow extends QueryResultRow {
   sender_user_id: string | null;
   client_message_id: string;
   content: string | null;
+  request_fingerprint: string;
   author_id: string | null;
   author_display_name: string | null;
   author_avatar_url: string | null;
@@ -133,4 +134,5 @@ export type CreateChatMessageRecord = {
   senderUserId: string;
   clientMessageId: string;
   content: string;
+  requestFingerprint: string;
 };

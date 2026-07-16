@@ -23,6 +23,7 @@ import {
   softDeleteChatMessage,
   upsertChatReadState
 } from "./chat-queries";
+import { computeChatRequestFingerprint } from "./chat-idempotency";
 import { ChatPublisherService } from "./chat-publisher.service";
 import type {
   ChatCursor,
@@ -132,6 +133,7 @@ export class ChatService {
   ): Promise<{ message: WorkspaceChatMessage; replayed: boolean }> {
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
     const input = readCreateChatMessageBody(body);
+    const requestFingerprint = computeChatRequestFingerprint(input);
     if (
       input.mentionedUserIds.some(
         mentionedId => mentionedId === currentUserId.toLowerCase()
@@ -153,7 +155,7 @@ export class ChatService {
         clientMessageId: input.clientMessageId
       });
       if (existing) {
-        return this.resolveIdempotentReplay(existing, input);
+        return this.resolveIdempotentReplay(existing, requestFingerprint);
       }
 
       const targetRows = await selectChatMentionTargets(
@@ -186,7 +188,8 @@ export class ChatService {
         workspaceId,
         senderUserId: currentUserId,
         clientMessageId: input.clientMessageId,
-        content: input.content
+        content: input.content,
+        requestFingerprint
       });
       await insertChatMentions(transaction, {
         workspaceId,
@@ -338,29 +341,13 @@ export class ChatService {
 
   private resolveIdempotentReplay(
     existing: ChatMessageRow,
-    input: {
-      clientMessageId: string;
-      content: string;
-      mentionedUserIds: string[];
-    }
+    requestFingerprint: string
   ): { message: WorkspaceChatMessage; replayed: true } {
-    const message = this.mapMessage(existing);
-    const existingMentionIds = message.mentions
-      .map(mention => mention.userId)
-      .sort();
-    const requestedMentionIds = input.mentionedUserIds.slice().sort();
-    if (
-      message.deletedAt !== null ||
-      message.content !== input.content ||
-      existingMentionIds.length !== requestedMentionIds.length ||
-      existingMentionIds.some(
-        (mentionedId, index) => mentionedId !== requestedMentionIds[index]
-      )
-    ) {
+    if (existing.request_fingerprint !== requestFingerprint) {
       throw idempotencyKeyReused();
     }
 
-    return { message, replayed: true };
+    return { message: this.mapMessage(existing), replayed: true };
   }
 
   private readPageInput(query: unknown): ChatPageInput {

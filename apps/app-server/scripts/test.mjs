@@ -603,5 +603,10 @@ await import("./sqltoerd/source-snapshot.test.mjs");
 await import("./sqltoerd/operation-publisher.test.mjs");
 await import("./sqltoerd/operations-v1-cutover-manifest.test.mjs");
 await import("./chat/schema.test.mjs");
+await import("./chat/idempotency.test.mjs");
 await import("./chat/service.test.mjs");
 await import("./chat/contract.test.mjs");
+await import("./chat/publisher.test.mjs");
+if (process.env.CHAT_POSTGRES_TEST_URL) {
+  await import("./chat/postgres.test.mjs");
+}

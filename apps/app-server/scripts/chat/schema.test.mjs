@@ -22,6 +22,11 @@ for (const table of [
   );
 }
 assert.match(migration, /UNIQUE \(workspace_id, sender_user_id, client_message_id\)/);
+assert.match(migration, /request_fingerprint CHAR\(64\) NOT NULL/);
+assert.match(
+  migration,
+  /request_fingerprint ~ '\^\[0-9a-f\]\{64\}\$'/
+);
 assert.match(migration, /char_length\(btrim\(content\)\) BETWEEN 1 AND 4000/);
 assert.match(migration, /UNIQUE \(message_id, mentioned_user_id\)/);
 assert.match(migration, /idx_workspace_chat_messages_workspace_created/);

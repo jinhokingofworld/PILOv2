@@ -29,12 +29,21 @@ interface ChatIdRow extends QueryResultRow {
   id: string;
 }
 
+interface ChatLockedReadStateRow extends QueryResultRow {
+  workspace_id: string;
+  user_id: string;
+  last_read_message_id: string | null;
+  last_read_at: Date | string | null;
+  target_is_newer: boolean;
+}
+
 const CHAT_MESSAGE_PROJECTION = `
   message.id,
   message.workspace_id,
   message.sender_user_id,
   message.client_message_id,
   message.content,
+  message.request_fingerprint,
   author.id AS author_id,
   CASE
     WHEN author.id IS NULL THEN NULL
@@ -113,15 +122,17 @@ export async function insertChatMessage(
         workspace_id,
         sender_user_id,
         client_message_id,
-        content
+        content,
+        request_fingerprint
       )
-      VALUES ($1, $2, $3, $4)
+      VALUES ($1, $2, $3, $4, $5)
       RETURNING
         id,
         workspace_id,
         sender_user_id,
         client_message_id,
         content,
+        request_fingerprint,
         NULL::uuid AS author_id,
         NULL::text AS author_display_name,
         NULL::text AS author_avatar_url,
@@ -129,7 +140,13 @@ export async function insertChatMessage(
         created_at,
         deleted_at
     `,
-    [input.workspaceId, input.senderUserId, input.clientMessageId, input.content]
+    [
+      input.workspaceId,
+      input.senderUserId,
+      input.clientMessageId,
+      input.content,
+      input.requestFingerprint
+    ]
   );
 
   if (!row) {
@@ -143,67 +160,82 @@ export async function upsertChatReadState(
   transaction: DatabaseTransaction,
   input: { workspaceId: string; userId: string; messageId: string }
 ): Promise<ChatReadStateRow> {
+  await transaction.execute(
+    `
+      INSERT INTO workspace_chat_reads (
+        workspace_id,
+        user_id
+      )
+      SELECT $1, $2
+      FROM workspace_chat_messages AS target_message
+      WHERE target_message.workspace_id = $1
+        AND target_message.id = $3
+      ON CONFLICT (workspace_id, user_id) DO NOTHING
+    `,
+    [input.workspaceId, input.userId, input.messageId]
+  );
+
+  const current = await transaction.queryOne<ChatLockedReadStateRow>(
+    `
+      SELECT
+        read_state.workspace_id,
+        read_state.user_id,
+        read_state.last_read_message_id,
+        read_state.last_read_at,
+        (
+          read_state.last_read_message_id IS NULL
+          OR (target_message.created_at, target_message.id)
+            > (current_message.created_at, current_message.id)
+        ) AS target_is_newer
+      FROM workspace_chat_reads AS read_state
+      JOIN workspace_chat_messages AS target_message
+        ON target_message.workspace_id = $1
+       AND target_message.id = $3
+      LEFT JOIN workspace_chat_messages AS current_message
+        ON current_message.workspace_id = read_state.workspace_id
+       AND current_message.id = read_state.last_read_message_id
+      WHERE read_state.workspace_id = $1
+        AND read_state.user_id = $2
+      FOR UPDATE OF read_state
+    `,
+    [input.workspaceId, input.userId, input.messageId]
+  );
+
+  if (!current) {
+    throw notFound("Chat message not found");
+  }
+
+  if (!current.target_is_newer) {
+    if (!current.last_read_message_id || !current.last_read_at) {
+      throw new Error("Current Chat read state is invalid");
+    }
+    return {
+      workspace_id: current.workspace_id,
+      user_id: current.user_id,
+      last_read_message_id: current.last_read_message_id,
+      last_read_at: current.last_read_at
+    };
+  }
+
   const row = await transaction.queryOne<ChatReadStateRow>(
     `
-      WITH target_message AS (
-        SELECT target_message.id, target_message.created_at
-        FROM workspace_chat_messages AS target_message
-        WHERE target_message.workspace_id = $1
-          AND target_message.id = $3
-      ),
-      upserted AS (
-        INSERT INTO workspace_chat_reads (
-          workspace_id,
-          user_id,
-          last_read_message_id,
-          last_read_at
-        )
-        SELECT $1, $2, target_message.id, now()
-        FROM target_message
-        ON CONFLICT (workspace_id, user_id) DO UPDATE
-        SET
-          last_read_message_id = EXCLUDED.last_read_message_id,
-          last_read_at = now()
-        WHERE workspace_chat_reads.last_read_message_id IS NULL
-          OR EXISTS (
-            SELECT 1
-            FROM target_message
-            JOIN workspace_chat_messages AS current_message
-              ON current_message.workspace_id = $1
-             AND current_message.id = workspace_chat_reads.last_read_message_id
-            WHERE (target_message.created_at, target_message.id)
-              > (current_message.created_at, current_message.id)
-          )
-        RETURNING
-          workspace_id,
-          user_id,
-          last_read_message_id,
-          last_read_at
-      )
-      SELECT
-        workspace_id,
-        user_id,
-        last_read_message_id,
-        last_read_at
-      FROM upserted
-      UNION ALL
-      SELECT
-        current_state.workspace_id,
-        current_state.user_id,
-        current_state.last_read_message_id,
-        current_state.last_read_at
-      FROM workspace_chat_reads AS current_state
-      WHERE current_state.workspace_id = $1
-        AND current_state.user_id = $2
-        AND EXISTS (SELECT 1 FROM target_message)
-        AND NOT EXISTS (SELECT 1 FROM upserted)
-      LIMIT 1
+      UPDATE workspace_chat_reads AS read_state
+      SET
+        last_read_message_id = $3,
+        last_read_at = now()
+      WHERE read_state.workspace_id = $1
+        AND read_state.user_id = $2
+      RETURNING
+        read_state.workspace_id,
+        read_state.user_id,
+        read_state.last_read_message_id,
+        read_state.last_read_at
     `,
     [input.workspaceId, input.userId, input.messageId]
   );
 
   if (!row) {
-    throw notFound("Chat message not found");
+    throw new Error("Chat read state could not be advanced");
   }
 
   return row;

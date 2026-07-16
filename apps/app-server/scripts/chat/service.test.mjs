@@ -18,6 +18,10 @@ const message1Id = "10000000-0000-4000-8000-000000000001";
 const message2Id = "10000000-0000-4000-8000-000000000002";
 const message3Id = "10000000-0000-4000-8000-000000000003";
 const mention1Id = "20000000-0000-4000-8000-000000000001";
+const requestFingerprint =
+  "1d932b12bd81ec643f5875a64bedc69fe625159e5b78eb964637d0241b987b13";
+const twoMentionRequestFingerprint =
+  "7b6bd404585acfb94deffb44c866af90cd1844dc735fc85a06932b667314ee11";
 
 class FakeDatabase {
   constructor(steps = []) {
@@ -99,6 +103,7 @@ function messageRow(overrides = {}) {
     sender_user_id: userId,
     client_message_id: "client-1",
     content: "@Sein 확인 부탁해요",
+    request_fingerprint: requestFingerprint,
     author_id: userId,
     author_display_name: "Juhyung",
     author_avatar_url: null,
@@ -175,7 +180,13 @@ async function assertApiError(action, status, code) {
     {
       method: "queryOne",
       match: /INSERT INTO workspace_chat_messages/,
-      values: [workspaceId, userId, "client-1", "@Sein 확인 부탁해요"],
+      values: [
+        workspaceId,
+        userId,
+        "client-1",
+        "@Sein 확인 부탁해요",
+        requestFingerprint
+      ],
       result: inserted
     },
     {
@@ -208,6 +219,8 @@ async function assertApiError(action, status, code) {
     { userId: mentionedUserId, displayText: "@Sein" }
   ]);
   assert.equal(created.replayed, false);
+  assert.equal("requestFingerprint" in created.message, false);
+  assert.equal("request_fingerprint" in created.message, false);
   assert.equal(publisher.events[0].type, "message.created");
   assert.equal(publisher.events[0].version, 1);
   assert.deepEqual(database.timeline, [
@@ -293,7 +306,14 @@ for (const content of ["   ", "x".repeat(4_001)]) {
 }
 
 {
-  const existing = messageRow();
+  const existing = messageRow({
+    content: "@Sein @Other 확인 부탁해요",
+    request_fingerprint: twoMentionRequestFingerprint,
+    mentions: [
+      { userId: mentionedUserId, displayText: "@Sein" },
+      { userId: otherUserId, displayText: "@Other" }
+    ]
+  });
   const { database, publisher, service } = createSubject([
     {
       method: "execute",
@@ -308,12 +328,74 @@ for (const content of ["   ", "x".repeat(4_001)]) {
   ]);
   const replay = await service.createMessage(userId, workspaceId, {
     clientMessageId: "client-1",
-    content: "@Sein 확인 부탁해요",
-    mentionedUserIds: [mentionedUserId, mentionedUserId]
+    content: "@Sein @Other 확인 부탁해요",
+    mentionedUserIds: [otherUserId, mentionedUserId, otherUserId]
   });
   assert.equal(replay.replayed, true);
   assert.equal(replay.message.id, message1Id);
   assert.deepEqual(publisher.events, []);
+  database.assertConsumed();
+}
+
+{
+  const deletedAt = new Date("2026-07-16T00:10:00.000Z");
+  const tombstone = messageRow({
+    content: null,
+    deleted_at: deletedAt,
+    mentions: []
+  });
+  const { database, publisher, service } = createSubject([
+    {
+      method: "execute",
+      match: /pg_advisory_xact_lock/,
+      result: { rows: [], rowCount: 1 }
+    },
+    {
+      method: "queryOne",
+      match: /client_message_id = \$3/,
+      result: tombstone
+    }
+  ]);
+  const replay = await service.createMessage(userId, workspaceId, {
+    clientMessageId: "client-1",
+    content: "@Sein 확인 부탁해요",
+    mentionedUserIds: [mentionedUserId, mentionedUserId]
+  });
+  assert.equal(replay.replayed, true);
+  assert.equal(replay.message.content, null);
+  assert.equal(replay.message.deletedAt, deletedAt.toISOString());
+  assert.deepEqual(replay.message.mentions, []);
+  assert.deepEqual(publisher.events, []);
+  database.assertConsumed();
+}
+
+{
+  const { database, service } = createSubject([
+    {
+      method: "execute",
+      match: /pg_advisory_xact_lock/,
+      result: { rows: [], rowCount: 1 }
+    },
+    {
+      method: "queryOne",
+      match: /client_message_id = \$3/,
+      result: messageRow({
+        content: null,
+        deleted_at: new Date("2026-07-16T00:10:00.000Z"),
+        mentions: []
+      })
+    }
+  ]);
+  await assertApiError(
+    () =>
+      service.createMessage(userId, workspaceId, {
+        clientMessageId: "client-1",
+        content: "다른 내용",
+        mentionedUserIds: [mentionedUserId]
+      }),
+    409,
+    "IDEMPOTENCY_KEY_REUSED"
+  );
   database.assertConsumed();
 }
 
@@ -405,15 +487,41 @@ for (const content of ["   ", "x".repeat(4_001)]) {
 {
   const { database, service } = createSubject([
     {
-      method: "queryOne",
+      method: "execute",
       match: /INSERT INTO workspace_chat_reads/,
+      values: [workspaceId, userId, message2Id],
+      inspect(text) {
+        assert.match(text, /FROM workspace_chat_messages AS target_message/);
+        assert.match(text, /target_message\.workspace_id = \$1/);
+        assert.match(text, /ON CONFLICT \(workspace_id, user_id\) DO NOTHING/);
+      },
+      result: { rows: [], rowCount: 1 }
+    },
+    {
+      method: "queryOne",
+      match: /FOR UPDATE/,
       values: [workspaceId, userId, message2Id],
       inspect(text) {
         assert.match(
           text,
           /\(target_message\.created_at, target_message\.id\)\s*>\s*\(current_message\.created_at, current_message\.id\)/
         );
-        assert.match(text, /target_message\.workspace_id = \$1/);
+        assert.match(text, /FOR UPDATE OF read_state/);
+      },
+      result: {
+        workspace_id: workspaceId,
+        user_id: userId,
+        last_read_message_id: null,
+        last_read_at: null,
+        target_is_newer: true
+      }
+    },
+    {
+      method: "queryOne",
+      match: /UPDATE workspace_chat_reads AS read_state/,
+      values: [workspaceId, userId, message2Id],
+      inspect(text) {
+        assert.match(text, /last_read_message_id = \$3/);
       },
       result: {
         workspace_id: workspaceId,
@@ -433,13 +541,19 @@ for (const content of ["   ", "x".repeat(4_001)]) {
 {
   const { database, service } = createSubject([
     {
-      method: "queryOne",
+      method: "execute",
       match: /INSERT INTO workspace_chat_reads/,
+      result: { rows: [], rowCount: 0 }
+    },
+    {
+      method: "queryOne",
+      match: /FOR UPDATE/,
       result: {
         workspace_id: workspaceId,
         user_id: userId,
         last_read_message_id: message3Id,
-        last_read_at: new Date("2026-07-16T00:20:00.000Z")
+        last_read_at: new Date("2026-07-16T00:20:00.000Z"),
+        target_is_newer: false
       }
     }
   ]);

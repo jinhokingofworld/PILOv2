@@ -6,6 +6,7 @@ CREATE TABLE public.workspace_chat_messages (
   sender_user_id UUID REFERENCES public.users(id) ON DELETE SET NULL,
   client_message_id TEXT NOT NULL,
   content TEXT,
+  request_fingerprint CHAR(64) NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   deleted_at TIMESTAMPTZ,
@@ -15,6 +16,8 @@ CREATE TABLE public.workspace_chat_messages (
     UNIQUE (workspace_id, sender_user_id, client_message_id),
   CONSTRAINT workspace_chat_messages_client_id_check
     CHECK (char_length(client_message_id) BETWEEN 1 AND 128),
+  CONSTRAINT workspace_chat_messages_request_fingerprint_check
+    CHECK (request_fingerprint ~ '^[0-9a-f]{64}$'),
   CONSTRAINT workspace_chat_messages_shape_check CHECK (
     (deleted_at IS NULL AND content IS NOT NULL
       AND char_length(btrim(content)) BETWEEN 1 AND 4000)
