@@ -79,6 +79,67 @@ try {
   await publisher.onModuleDestroy();
   assert.equal(clients[0].quitCalls, 1);
 
+  const shutdownConnectGate = deferred();
+  const shutdownClients = [];
+  redis.createClient = () => {
+    const client = {
+      destroyCalls: 0,
+      publishCalls: 0,
+      quitCalls: 0,
+      on() {
+        return client;
+      },
+      async connect() {
+        return shutdownConnectGate.promise;
+      },
+      async publish() {
+        client.publishCalls += 1;
+      },
+      async quit() {
+        client.quitCalls += 1;
+      },
+      destroy() {
+        client.destroyCalls += 1;
+      }
+    };
+    shutdownClients.push(client);
+    return client;
+  };
+
+  const shutdownPublisher = new ChatPublisherService();
+  shutdownPublisher.logger = { error() {}, warn() {} };
+  const pendingPublish = shutdownPublisher.publish(fakeEvent("message-shutdown"));
+  await Promise.resolve();
+  assert.equal(shutdownClients.length, 1);
+
+  let shutdownResolved = false;
+  const shutdown = shutdownPublisher.onModuleDestroy().then(() => {
+    shutdownResolved = true;
+  });
+  await Promise.resolve();
+  assert.equal(
+    shutdownClients[0].destroyCalls,
+    1,
+    "teardown must cancel ownership of a pending Redis client"
+  );
+  assert.equal(
+    shutdownResolved,
+    false,
+    "teardown must wait for the pending connection to settle"
+  );
+
+  shutdownConnectGate.resolve();
+  await Promise.all([pendingPublish, shutdown]);
+  assert.equal(shutdownClients[0].publishCalls, 0);
+  assert.equal(
+    shutdownClients[0].quitCalls,
+    1,
+    "a pending client that connects after cancellation must be closed"
+  );
+  await shutdownPublisher.publish(fakeEvent("message-after-shutdown"));
+  assert.equal(shutdownClients.length, 1);
+  assert.equal(shutdownClients[0].publishCalls, 0);
+
   const failureGate = deferred();
   let attempt = 0;
   const retryClients = [];

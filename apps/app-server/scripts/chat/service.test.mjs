@@ -14,6 +14,7 @@ const mentionedUserId = "22222222-2222-4222-8222-222222222222";
 const otherUserId = "33333333-3333-4333-8333-333333333333";
 const workspaceId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const otherWorkspaceId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+const malformedWorkspaceId = "workspace-1";
 const message1Id = "10000000-0000-4000-8000-000000000001";
 const message2Id = "10000000-0000-4000-8000-000000000002";
 const message3Id = "10000000-0000-4000-8000-000000000003";
@@ -80,6 +81,15 @@ class FakeWorkspaceService {
 
   async assertWorkspaceAccess(currentUserId, targetWorkspaceId) {
     this.calls.push({ currentUserId, workspaceId: targetWorkspaceId });
+    if (targetWorkspaceId === malformedWorkspaceId) {
+      const error = new Error("Workspace not found");
+      error.getStatus = () => 404;
+      error.getResponse = () => ({
+        success: false,
+        error: { code: "NOT_FOUND", message: "Workspace not found" }
+      });
+      throw error;
+    }
     return { id: targetWorkspaceId };
   }
 }
@@ -149,6 +159,88 @@ async function assertApiError(action, status, code) {
     assert.equal(error.getResponse().error.code, code);
     return true;
   });
+}
+
+for (const [name, action] of [
+  ["summary", service => service.getSummary(userId, malformedWorkspaceId)],
+  [
+    "message list",
+    service => service.listMessages(userId, malformedWorkspaceId, {})
+  ],
+  [
+    "message context",
+    service =>
+      service.getMessageContext(userId, malformedWorkspaceId, message1Id)
+  ],
+  [
+    "message create",
+    service =>
+      service.createMessage(userId, malformedWorkspaceId, {
+        clientMessageId: "invalid-workspace",
+        content: "확인 부탁해요",
+        mentionedUserIds: []
+      })
+  ],
+  [
+    "message delete",
+    service => service.deleteMessage(userId, malformedWorkspaceId, message1Id)
+  ],
+  [
+    "read state",
+    service =>
+      service.updateReadState(userId, malformedWorkspaceId, {
+        lastReadMessageId: message1Id
+      })
+  ],
+  [
+    "mention list",
+    service => service.listMentions(userId, malformedWorkspaceId, {})
+  ],
+  [
+    "mention read",
+    service => service.readMention(userId, malformedWorkspaceId, mention1Id)
+  ]
+]) {
+  const { database, service, workspaceService } = createSubject();
+  await assertApiError(
+    () => action(service),
+    400,
+    "BAD_REQUEST"
+  );
+  assert.equal(
+    workspaceService.calls.length,
+    0,
+    `${name} must validate workspaceId before access lookup`
+  );
+  database.assertConsumed();
+}
+
+for (const [name, action] of [
+  [
+    "context messageId",
+    service => service.getMessageContext(userId, workspaceId, "message-1")
+  ],
+  [
+    "delete messageId",
+    service => service.deleteMessage(userId, workspaceId, "message-1")
+  ],
+  [
+    "mentionId",
+    service => service.readMention(userId, workspaceId, "mention-1")
+  ]
+]) {
+  const { database, service, workspaceService } = createSubject();
+  await assertApiError(
+    () => action(service),
+    400,
+    "BAD_REQUEST"
+  );
+  assert.equal(
+    workspaceService.calls.length,
+    1,
+    `${name} validation must preserve the valid Workspace access boundary`
+  );
+  database.assertConsumed();
 }
 
 {

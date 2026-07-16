@@ -65,10 +65,13 @@ export class ChatService {
     currentUserId: string,
     workspaceId: string
   ): Promise<ChatSummaryPayload> {
-    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+    const accessibleWorkspaceId = await this.readAccessibleWorkspaceId(
+      currentUserId,
+      workspaceId
+    );
     const row = await selectChatSummary(
       this.database,
-      workspaceId,
+      accessibleWorkspaceId,
       currentUserId
     );
     if (!row) {
@@ -88,9 +91,16 @@ export class ChatService {
     workspaceId: string,
     query: unknown
   ): Promise<ChatMessagePage> {
-    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+    const accessibleWorkspaceId = await this.readAccessibleWorkspaceId(
+      currentUserId,
+      workspaceId
+    );
     const input = this.readPageInput(query);
-    const rows = await selectChatMessages(this.database, workspaceId, input);
+    const rows = await selectChatMessages(
+      this.database,
+      accessibleWorkspaceId,
+      input
+    );
     const pageRows = rows.slice(0, input.limit);
 
     return {
@@ -107,11 +117,14 @@ export class ChatService {
     workspaceId: string,
     messageId: string
   ): Promise<ChatMessageContext> {
-    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+    const accessibleWorkspaceId = await this.readAccessibleWorkspaceId(
+      currentUserId,
+      workspaceId
+    );
     const normalizedMessageId = readChatUuid(messageId, "messageId");
     const target = await selectChatContextTarget(
       this.database,
-      workspaceId,
+      accessibleWorkspaceId,
       normalizedMessageId
     );
     if (!target) {
@@ -120,7 +133,7 @@ export class ChatService {
 
     const rows = await selectChatMessageContext(
       this.database,
-      workspaceId,
+      accessibleWorkspaceId,
       normalizedMessageId
     );
     return { items: rows.map(row => this.mapMessage(row)) };
@@ -131,7 +144,10 @@ export class ChatService {
     workspaceId: string,
     body: unknown
   ): Promise<{ message: WorkspaceChatMessage; replayed: boolean }> {
-    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+    const accessibleWorkspaceId = await this.readAccessibleWorkspaceId(
+      currentUserId,
+      workspaceId
+    );
     const input = readCreateChatMessageBody(body);
     const requestFingerprint = computeChatRequestFingerprint(input);
     if (
@@ -144,13 +160,13 @@ export class ChatService {
 
     const result = await this.database.transaction(async transaction => {
       await lockChatIdempotencyKey(transaction, {
-        workspaceId,
+        workspaceId: accessibleWorkspaceId,
         userId: currentUserId,
         clientMessageId: input.clientMessageId
       });
 
       const existing = await selectChatMessageByClientId(transaction, {
-        workspaceId,
+        workspaceId: accessibleWorkspaceId,
         userId: currentUserId,
         clientMessageId: input.clientMessageId
       });
@@ -160,7 +176,7 @@ export class ChatService {
 
       const targetRows = await selectChatMentionTargets(
         transaction,
-        workspaceId,
+        accessibleWorkspaceId,
         input.mentionedUserIds
       );
       const targetById = new Map(
@@ -185,21 +201,21 @@ export class ChatService {
       });
 
       const inserted = await insertChatMessage(transaction, {
-        workspaceId,
+        workspaceId: accessibleWorkspaceId,
         senderUserId: currentUserId,
         clientMessageId: input.clientMessageId,
         content: input.content,
         requestFingerprint
       });
       await insertChatMentions(transaction, {
-        workspaceId,
+        workspaceId: accessibleWorkspaceId,
         messageId: inserted.id,
         mentions
       });
 
       const created = await selectChatMessageById(
         transaction,
-        workspaceId,
+        accessibleWorkspaceId,
         inserted.id
       );
       if (!created) {
@@ -213,7 +229,7 @@ export class ChatService {
       const event: ChatRedisEventV1 = {
         version: 1,
         type: "message.created",
-        workspaceId,
+        workspaceId: accessibleWorkspaceId,
         occurredAt: new Date().toISOString(),
         message: result.message,
         mentionedUserIds: result.message.mentions.map(mention => mention.userId)
@@ -229,12 +245,15 @@ export class ChatService {
     workspaceId: string,
     messageId: string
   ): Promise<WorkspaceChatMessage> {
-    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+    const accessibleWorkspaceId = await this.readAccessibleWorkspaceId(
+      currentUserId,
+      workspaceId
+    );
     const normalizedMessageId = readChatUuid(messageId, "messageId");
     const result = await this.database.transaction(async transaction => {
       const existing = await selectChatMessageForUpdate(
         transaction,
-        workspaceId,
+        accessibleWorkspaceId,
         normalizedMessageId
       );
       if (!existing) {
@@ -249,7 +268,7 @@ export class ChatService {
 
       const deleted = await softDeleteChatMessage(
         transaction,
-        workspaceId,
+        accessibleWorkspaceId,
         normalizedMessageId,
         currentUserId
       );
@@ -264,7 +283,7 @@ export class ChatService {
       await this.publisher.publish({
         version: 1,
         type: "message.deleted",
-        workspaceId,
+        workspaceId: accessibleWorkspaceId,
         occurredAt: new Date().toISOString(),
         messageId: result.message.id,
         deletedAt
@@ -279,11 +298,14 @@ export class ChatService {
     workspaceId: string,
     body: unknown
   ): Promise<ChatReadStatePayload> {
-    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+    const accessibleWorkspaceId = await this.readAccessibleWorkspaceId(
+      currentUserId,
+      workspaceId
+    );
     const input = readLastReadBody(body);
     const row = await this.database.transaction(transaction =>
       upsertChatReadState(transaction, {
-        workspaceId,
+        workspaceId: accessibleWorkspaceId,
         userId: currentUserId,
         messageId: input.lastReadMessageId
       })
@@ -300,11 +322,14 @@ export class ChatService {
     workspaceId: string,
     query: unknown
   ): Promise<ChatMentionPage> {
-    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+    const accessibleWorkspaceId = await this.readAccessibleWorkspaceId(
+      currentUserId,
+      workspaceId
+    );
     const input = this.readPageInput(query);
     const rows = await selectChatMentions(
       this.database,
-      workspaceId,
+      accessibleWorkspaceId,
       currentUserId,
       input
     );
@@ -324,11 +349,14 @@ export class ChatService {
     workspaceId: string,
     mentionId: string
   ): Promise<ChatMentionNotification> {
-    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+    const accessibleWorkspaceId = await this.readAccessibleWorkspaceId(
+      currentUserId,
+      workspaceId
+    );
     const normalizedMentionId = readChatUuid(mentionId, "mentionId");
     const row = await markChatMentionRead(
       this.database,
-      workspaceId,
+      accessibleWorkspaceId,
       currentUserId,
       normalizedMentionId
     );
@@ -337,6 +365,18 @@ export class ChatService {
     }
 
     return this.mapMention(row);
+  }
+
+  private async readAccessibleWorkspaceId(
+    currentUserId: string,
+    workspaceId: string
+  ): Promise<string> {
+    const normalizedWorkspaceId = readChatUuid(workspaceId, "workspaceId");
+    await this.workspaceService.assertWorkspaceAccess(
+      currentUserId,
+      normalizedWorkspaceId
+    );
+    return normalizedWorkspaceId;
   }
 
   private resolveIdempotentReplay(
