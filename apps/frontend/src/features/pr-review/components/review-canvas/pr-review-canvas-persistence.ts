@@ -22,6 +22,7 @@ export type PrReviewCanvasFileShapeSnapshot = {
   props: {
     w: number;
     h: number;
+    pinned: boolean;
   };
 };
 
@@ -57,7 +58,8 @@ export function getPrReviewFileShapeGeometryKey(
     shape.y,
     shape.index,
     shape.props.w,
-    shape.props.h
+    shape.props.h,
+    shape.props.pinned
   ].join("\u0000");
 }
 
@@ -85,6 +87,7 @@ export function buildPrReviewFileShapeUpdateInput(
   rawShape.index = currentShape.index;
   rawProps.w = width;
   rawProps.h = height;
+  rawProps.pinned = currentShape.props.pinned;
   rawShape.props = rawProps;
 
   if (parentShapeId) {

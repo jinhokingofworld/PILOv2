@@ -20,8 +20,25 @@ import {
   type TLShapePartial
 } from "tldraw";
 import { useValue } from "@tldraw/state-react";
+import {
+  ChevronDown,
+  Filter,
+  LayoutPanelTop,
+  RotateCcw
+} from "lucide-react";
 
 import { TldrawSurface } from "@/shared/tldraw/TldrawSurface";
+import { Button } from "@/components/ui/button";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger
+} from "@/components/ui/popover";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger
+} from "@/components/ui/tooltip";
 import { PrReviewWorkspaceLocationAdapter } from "@/features/pr-review/pr-review-workspace-location-adapter";
 import type {
   CanvasRealtimeConfig,
@@ -82,6 +99,13 @@ import {
   registerPrReviewFileNodeActivationHandler
 } from "@/features/pr-review/components/review-canvas/pr-review-node-activation";
 import { shouldRemoveCreatedPrReviewSystemShape } from "@/features/pr-review/components/review-canvas/pr-review-system-shape-policy";
+import {
+  buildPrReviewGraphPresentation,
+  createPrReviewFlowLayout,
+  type PrReviewGraphFilter,
+  type PrReviewGraphNode,
+  type PrReviewGraphRelation
+} from "@/features/pr-review/components/review-canvas/pr-review-graph-exploration";
 
 type PrReviewApiClient = ReturnType<typeof createPrReviewApiClient>;
 
@@ -213,7 +237,8 @@ function createFileNodeShape(
       riskLevel: fileNodeData.riskLevel,
       reviewStatus: fileNodeData.reviewStatus,
       conflictState: conflictMetadata.conflictState,
-      conflictReason: conflictMetadata.conflictReason
+      conflictReason: conflictMetadata.conflictReason,
+      pinned: false
     }
   };
 }
@@ -611,6 +636,12 @@ function buildStoredPrReviewCanvasShapes(
           : "unknown";
     }
     if (
+      shape.shapeType === PR_REVIEW_FILE_NODE_SHAPE_TYPE &&
+      typeof props.pinned !== "boolean"
+    ) {
+      props.pinned = false;
+    }
+    if (
       shape.shapeType === PR_REVIEW_RELATION_EDGE_SHAPE_TYPE &&
       !Array.isArray(props.routePoints)
     ) {
@@ -820,6 +851,55 @@ function isPrReviewRelationEdgeShape(
   return shape?.type === PR_REVIEW_RELATION_EDGE_SHAPE_TYPE;
 }
 
+function getRelationTypes(shape: PrReviewRelationEdgeShape): string[] {
+  const details = shape.props.relationDetails;
+  if (details.length) {
+    return Array.from(new Set(details.map((detail) => detail.relationType)));
+  }
+
+  return [shape.props.relationType];
+}
+
+function getGraphNodes(editor: Editor): PrReviewGraphNode[] {
+  return editor.getCurrentPageShapes().flatMap((shape) => {
+    if (!isPrReviewFileNodeShape(shape)) {
+      return [];
+    }
+
+    return [
+      {
+        id: shape.id,
+        flowId: shape.props.flowId,
+        roomFileId: shape.props.roomFileId,
+        x: shape.x,
+        y: shape.y,
+        width: shape.props.w,
+        height: shape.props.h,
+        riskLevel: shape.props.riskLevel,
+        reviewStatus: shape.props.reviewStatus,
+        pinned: shape.props.pinned
+      }
+    ];
+  });
+}
+
+function getGraphRelations(editor: Editor): PrReviewGraphRelation[] {
+  return editor.getCurrentPageShapes().flatMap((shape) => {
+    if (!isPrReviewRelationEdgeShape(shape)) {
+      return [];
+    }
+
+    return [
+      {
+        id: shape.id,
+        fromRoomFileId: shape.props.fromRoomFileId,
+        toRoomFileId: shape.props.toRoomFileId,
+        relationTypes: getRelationTypes(shape)
+      }
+    ];
+  });
+}
+
 function toPrReviewFileShapeSnapshot(
   shape: PrReviewFileNodeShape
 ): PrReviewCanvasFileShapeSnapshot {
@@ -831,7 +911,8 @@ function toPrReviewFileShapeSnapshot(
     index: shape.index,
     props: {
       w: shape.props.w,
-      h: shape.props.h
+      h: shape.props.h,
+      pinned: shape.props.pinned
     }
   };
 }
@@ -891,7 +972,8 @@ function syncPrReviewFileNodeMetadata(
           riskLevel: file.fileNodeData.riskLevel,
           reviewStatus: file.fileNodeData.reviewStatus,
           conflictState: conflictMetadata.conflictState,
-          conflictReason: conflictMetadata.conflictReason
+          conflictReason: conflictMetadata.conflictReason,
+          pinned: shape.props.pinned
         }
       } satisfies TLShapePartial<PrReviewFileNodeShape>
     ];
@@ -927,10 +1009,6 @@ function updatePrReviewRelationGeometry(
       return [];
     }
 
-    if (preserveStoredRoutes && shape.props.routePoints.length >= 2) {
-      return [];
-    }
-
     const from = fileByRoomFileId.get(shape.props.fromRoomFileId);
     const to = fileByRoomFileId.get(shape.props.toRoomFileId);
     if (!from || !to) {
@@ -951,6 +1029,13 @@ function updatePrReviewRelationGeometry(
         height: to.props.h
       }
     );
+
+    if (
+      preserveStoredRoutes &&
+      hasPrReviewRelationAnchors(shape, geometry)
+    ) {
+      return [];
+    }
 
     return [
       {
@@ -984,6 +1069,29 @@ function updatePrReviewRelationGeometry(
   }
 }
 
+function hasPrReviewRelationAnchors(
+  shape: PrReviewRelationEdgeShape,
+  geometry: ReturnType<typeof buildPrReviewRelationEdgeGeometry>
+) {
+  const routePoints = shape.props.routePoints;
+  if (routePoints.length < 2) {
+    return false;
+  }
+
+  const first = routePoints[0];
+  const last = routePoints[routePoints.length - 1];
+  if (!first || !last) {
+    return false;
+  }
+
+  return (
+    Math.abs(shape.x + first.x - (geometry.x + geometry.startX)) < 1 &&
+    Math.abs(shape.y + first.y - (geometry.y + geometry.startY)) < 1 &&
+    Math.abs(shape.x + last.x - (geometry.x + geometry.endX)) < 1 &&
+    Math.abs(shape.y + last.y - (geometry.y + geometry.endY)) < 1
+  );
+}
+
 function initializeSyncedFileGeometry(
   editor: Editor,
   lastSyncedGeometryRef: MutableRefObject<Map<string, string>>
@@ -1001,6 +1109,10 @@ function initializeSyncedFileGeometry(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function getStoredFileNodePinned(shape: PrReviewCanvasShape): boolean {
+  return isRecord(shape.rawShape.props) && shape.rawShape.props.pinned === true;
 }
 
 function selectReviewFileNode(
@@ -1185,6 +1297,11 @@ type PrReviewCanvasPersistenceNotice = {
   tone: "info" | "error";
 } | null;
 
+type PrReviewFlowLayoutPreview = {
+  next: Map<string, { x: number; y: number }>;
+  previous: Map<string, { x: number; y: number }>;
+};
+
 const relationTypeLabels: Record<
   PrReviewRelationEdgeShape["props"]["relationType"],
   string
@@ -1281,6 +1398,247 @@ function PrReviewRelationInspector({ editor }: { editor: Editor | null }) {
   );
 }
 
+type PrReviewGraphControlsProps = {
+  activeFlowId: string | null;
+  collapsedFlowIds: Set<string>;
+  focusedFlowId: string | null;
+  isReadOnly: boolean;
+  mode: PrReviewGraphFilter["mode"];
+  onArrangeFlow: () => void;
+  onApplyLayoutPreview: () => void;
+  onCancelLayoutPreview: () => void;
+  onClearFocusedFlow: () => void;
+  onFocusFlow: (flowId: string | null) => void;
+  onUnpinSelected: () => void;
+  onToggleCollapsedFlow: (flowId: string) => void;
+  onToggleMode: (mode: PrReviewGraphFilter["mode"]) => void;
+  relationTypes: Set<string>;
+  riskLevels: Set<PrReviewGraphNode["riskLevel"]>;
+  reviewStatuses: Set<PrReviewGraphNode["reviewStatus"]>;
+  setRelationTypes: (value: Set<string>) => void;
+  setRiskLevels: (value: Set<PrReviewGraphNode["riskLevel"]>) => void;
+  setReviewStatuses: (
+    value: Set<PrReviewGraphNode["reviewStatus"]>
+  ) => void;
+  selectedPinned: boolean;
+  layoutPreviewActive: boolean;
+  flows: PrReviewCanvasFlow[];
+};
+
+const relationFilterLabels = {
+  review_order: "추천 경로",
+  depends_on: "의존",
+  tests: "테스트",
+  uses_api: "API",
+  passes_data_to: "데이터",
+  supports: "지원"
+} as const;
+
+function toggleFilterValue<T>(values: Set<T>, value: T) {
+  const next = new Set(values);
+  if (next.has(value)) {
+    next.delete(value);
+  } else {
+    next.add(value);
+  }
+  return next;
+}
+
+function PrReviewGraphControls({
+  activeFlowId,
+  collapsedFlowIds,
+  focusedFlowId,
+  flows,
+  isReadOnly,
+  mode,
+  onArrangeFlow,
+  onApplyLayoutPreview,
+  onCancelLayoutPreview,
+  onClearFocusedFlow,
+  onFocusFlow,
+  onUnpinSelected,
+  onToggleCollapsedFlow,
+  onToggleMode,
+  relationTypes,
+  riskLevels,
+  reviewStatuses,
+  setRelationTypes,
+  setRiskLevels,
+  setReviewStatuses,
+  selectedPinned,
+  layoutPreviewActive
+}: PrReviewGraphControlsProps) {
+  return (
+    <div className="absolute right-5 top-5 z-20 flex items-center gap-2">
+      <Popover>
+        <PopoverTrigger
+          render={
+            <Button aria-label="그래프 탐색 설정" size="icon" variant="outline">
+              <Filter className="size-4" />
+            </Button>
+          }
+        />
+        <PopoverContent align="end" className="w-80 space-y-4 p-4">
+          <section>
+            <p className="text-sm font-semibold">관계 보기</p>
+            <div className="mt-2 grid grid-cols-3 gap-2">
+              {(
+                [
+                  ["all", "전체"],
+                  ["related", "선택 관계"],
+                  ["review_path", "추천 경로"]
+                ] as const
+              ).map(([value, label]) => (
+                <Button
+                  key={value}
+                  onClick={() => onToggleMode(value)}
+                  size="sm"
+                  variant={mode === value ? "default" : "outline"}
+                >
+                  {label}
+                </Button>
+              ))}
+            </div>
+          </section>
+          <section>
+            <p className="text-sm font-semibold">관계 종류</p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {Object.entries(relationFilterLabels).map(([value, label]) => (
+                <Button
+                  key={value}
+                  onClick={() =>
+                    setRelationTypes(toggleFilterValue(relationTypes, value))
+                  }
+                  size="sm"
+                  variant={relationTypes.has(value) ? "default" : "outline"}
+                >
+                  {label}
+                </Button>
+              ))}
+            </div>
+          </section>
+          <section>
+            <p className="text-sm font-semibold">파일 상태</p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {(
+                [
+                  ["high", "위험 높음"],
+                  ["medium", "위험 중간"],
+                  ["low", "위험 낮음"],
+                  ["not_reviewed", "미판단"],
+                  ["discussion_needed", "논의 필요"]
+                ] as const
+              ).map(([value, label]) => {
+                const selected =
+                  value === "high" || value === "medium" || value === "low"
+                    ? riskLevels.has(value)
+                    : reviewStatuses.has(value);
+                return (
+                  <Button
+                    key={value}
+                    onClick={() => {
+                      if (value === "high" || value === "medium" || value === "low") {
+                        setRiskLevels(toggleFilterValue(riskLevels, value));
+                      } else {
+                        setReviewStatuses(toggleFilterValue(reviewStatuses, value));
+                      }
+                    }}
+                    size="sm"
+                    variant={selected ? "default" : "outline"}
+                  >
+                    {label}
+                  </Button>
+                );
+              })}
+            </div>
+          </section>
+          <section>
+            <p className="text-sm font-semibold">Flow</p>
+            <div className="mt-2 space-y-1">
+              <Button
+                className="w-full justify-start"
+                onClick={onClearFocusedFlow}
+                size="sm"
+                variant={focusedFlowId === null ? "default" : "outline"}
+              >
+                모든 Flow 보기
+              </Button>
+              {flows.map((flow) => (
+                <div className="flex gap-1" key={flow.id}>
+                  <Button
+                    className="min-w-0 flex-1 justify-start truncate"
+                    onClick={() => onFocusFlow(flow.id)}
+                    size="sm"
+                    variant={focusedFlowId === flow.id ? "default" : "outline"}
+                  >
+                    {flow.title}
+                  </Button>
+                  <Button
+                    aria-label={`${flow.title} ${collapsedFlowIds.has(flow.id) ? "펼치기" : "접기"}`}
+                    onClick={() => onToggleCollapsedFlow(flow.id)}
+                    size="icon-sm"
+                    variant="outline"
+                  >
+                    <ChevronDown
+                      className={`size-4 transition-transform ${
+                        collapsedFlowIds.has(flow.id) ? "-rotate-90" : ""
+                      }`}
+                    />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          </section>
+        </PopoverContent>
+      </Popover>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              aria-label="현재 Flow 자동 정렬"
+              disabled={!activeFlowId || isReadOnly || layoutPreviewActive}
+              onClick={onArrangeFlow}
+              size="icon"
+              variant="outline"
+            >
+              <LayoutPanelTop className="size-4" />
+            </Button>
+          }
+        />
+        <TooltipContent>현재 Flow 자동 정렬</TooltipContent>
+      </Tooltip>
+      {layoutPreviewActive ? (
+        <div className="flex items-center gap-1 rounded-md border bg-white p-1 shadow-sm">
+          <Button onClick={onCancelLayoutPreview} size="sm" variant="ghost">
+            되돌리기
+          </Button>
+          <Button onClick={onApplyLayoutPreview} size="sm">
+            배치 적용
+          </Button>
+        </div>
+      ) : null}
+      {selectedPinned ? (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                aria-label="선택 파일 고정 해제"
+                disabled={isReadOnly}
+                onClick={onUnpinSelected}
+                size="icon"
+                variant="outline"
+              >
+                <RotateCcw className="size-4" />
+              </Button>
+            }
+          />
+          <TooltipContent>선택 파일 고정 해제</TooltipContent>
+        </Tooltip>
+      ) : null}
+    </div>
+  );
+}
+
 function PrReviewCanvasPersistenceBridge({
   apiClient,
   enabled,
@@ -1350,7 +1708,8 @@ function PrReviewCanvasPersistenceBridge({
           props: {
             ...current.props,
             w: latest.width ?? current.props.w,
-            h: latest.height ?? current.props.h
+            h: latest.height ?? current.props.h,
+            pinned: getStoredFileNodePinned(latest)
           }
         });
       } finally {
@@ -1467,15 +1826,27 @@ function PrReviewCanvasPersistenceBridge({
         }
 
         let hasChangedFile = false;
+        const pinUpdates: TLShapePartial<PrReviewFileNodeShape>[] = [];
         for (const shape of editor.getCurrentPageShapes()) {
           if (!isPrReviewFileNodeShape(shape)) {
             continue;
           }
 
-          const snapshot = toPrReviewFileShapeSnapshot(shape);
+          let snapshot = toPrReviewFileShapeSnapshot(shape);
           const geometryKey = getPrReviewFileShapeGeometryKey(snapshot);
           if (lastSyncedGeometryRef.current.get(shape.id) === geometryKey) {
             continue;
+          }
+
+          if (!shape.props.pinned) {
+            pinUpdates.push({
+              id: shape.id,
+              type: PR_REVIEW_FILE_NODE_SHAPE_TYPE,
+              props: {
+                ...shape.props,
+                pinned: true
+              }
+            });
           }
 
           pendingShapes.set(shape.id, snapshot);
@@ -1484,6 +1855,24 @@ function PrReviewCanvasPersistenceBridge({
 
         if (!hasChangedFile) {
           return;
+        }
+
+        if (pinUpdates.length) {
+          internalShapeUpdateRef.current = true;
+          try {
+            editor.updateShapes(pinUpdates);
+            for (const update of pinUpdates) {
+              const pinnedShape = editor.getShape(update.id);
+              if (isPrReviewFileNodeShape(pinnedShape)) {
+                pendingShapes.set(
+                  pinnedShape.id,
+                  toPrReviewFileShapeSnapshot(pinnedShape)
+                );
+              }
+            }
+          } finally {
+            internalShapeUpdateRef.current = false;
+          }
         }
 
         updatePrReviewRelationGeometry(editor, internalShapeUpdateRef);
@@ -1546,8 +1935,35 @@ export function PrReviewCanvasSurface({
   const [reviewRoom, setReviewRoom] = useState<PrReviewRoomCanvas | null>(null);
   const [persistenceNotice, setPersistenceNotice] =
     useState<PrReviewCanvasPersistenceNotice>(null);
+  const [graphMode, setGraphMode] = useState<PrReviewGraphFilter["mode"]>(
+    "all"
+  );
+  const [focusedFlowId, setFocusedFlowId] = useState<string | null>(null);
+  const [collapsedFlowIds, setCollapsedFlowIds] = useState<Set<string>>(
+    () => new Set()
+  );
+  const [relationTypes, setRelationTypes] = useState<Set<string>>(
+    () => new Set()
+  );
+  const [riskLevels, setRiskLevels] = useState<
+    Set<PrReviewGraphNode["riskLevel"]>
+  >(() => new Set());
+  const [reviewStatuses, setReviewStatuses] = useState<
+    Set<PrReviewGraphNode["reviewStatus"]>
+  >(() => new Set());
+  const [layoutPreview, setLayoutPreview] =
+    useState<PrReviewFlowLayoutPreview | null>(null);
   const persistedFileShapeEnabled = Boolean(
     storedShapes?.some(isPrReviewCanvasFileShape)
+  );
+  const selectedGraphFile = useValue(
+    "pr-review-graph-selected-file",
+    () => {
+      if (!editor) return null;
+      const selected = editor.getOnlySelectedShape();
+      return isPrReviewFileNodeShape(selected) ? selected : null;
+    },
+    [editor]
   );
   const fallbackShapes = useMemo(
     () =>
@@ -1655,7 +2071,8 @@ export function PrReviewCanvasSurface({
             props: {
               ...current.props,
               w: latest.width ?? current.props.w,
-              h: latest.height ?? current.props.h
+              h: latest.height ?? current.props.h,
+              pinned: getStoredFileNodePinned(latest)
             }
           });
         } finally {
@@ -1688,6 +2105,28 @@ export function PrReviewCanvasSurface({
   });
   const readOnly =
     isReviewVersionStale || reviewRoom?.status === "completed" || canvasPresence.readOnly;
+  const selectedRoomFileId = selectedGraphFile?.props.roomFileId ?? null;
+  const activeFlowId = focusedFlowId ?? selectedGraphFile?.props.flowId ?? null;
+  const graphFilter = useMemo<PrReviewGraphFilter>(
+    () => ({
+      collapsedFlowIds,
+      focusedFlowId,
+      mode: graphMode,
+      relationTypes,
+      riskLevels,
+      reviewStatuses,
+      selectedRoomFileId
+    }),
+    [
+      collapsedFlowIds,
+      focusedFlowId,
+      graphMode,
+      relationTypes,
+      reviewStatuses,
+      riskLevels,
+      selectedRoomFileId
+    ]
+  );
   const handlePersistenceNotice = useCallback(
     (notice: PrReviewCanvasPersistenceNotice) => {
       setPersistenceNotice(notice);
@@ -1696,6 +2135,44 @@ export function PrReviewCanvasSurface({
   );
 
   allowFileGeometryRef.current = persistedFileShapeEnabled;
+
+  useEffect(() => {
+    if (!editor) {
+      return;
+    }
+
+    const presentation = buildPrReviewGraphPresentation(
+      getGraphNodes(editor),
+      getGraphRelations(editor),
+      graphFilter
+    );
+    const updates: TLShapePartial[] = editor.getCurrentPageShapes().flatMap((shape) => {
+      if (isPrReviewFileNodeShape(shape)) {
+        const opacity = presentation.nodeOpacityById.get(shape.id) ?? 1;
+        return shape.opacity === opacity
+          ? []
+          : [{ id: shape.id, type: shape.type, opacity } as TLShapePartial];
+      }
+      if (isPrReviewRelationEdgeShape(shape)) {
+        const opacity = presentation.edgeOpacityById.get(shape.id) ?? 1;
+        return shape.opacity === opacity
+          ? []
+          : [{ id: shape.id, type: shape.type, opacity } as TLShapePartial];
+      }
+      return [];
+    });
+
+    if (!updates.length) {
+      return;
+    }
+
+    internalShapeUpdateRef.current = true;
+    try {
+      editor.updateShapes(updates);
+    } finally {
+      internalShapeUpdateRef.current = false;
+    }
+  }, [editor, graphFilter, persistedShapes]);
 
   useEffect(() => {
     const abortController = new AbortController();
@@ -1858,6 +2335,197 @@ export function PrReviewCanvasSurface({
     selectReviewFileNode(editorRef.current, selectedReviewFileId);
   }, [selectedReviewFileId]);
 
+  const handleArrangeActiveFlow = useCallback(() => {
+    const currentEditor = editorRef.current;
+    if (!currentEditor || !activeFlowId || readOnly) {
+      return;
+    }
+
+    const positions = createPrReviewFlowLayout(
+      getGraphNodes(currentEditor),
+      getGraphRelations(currentEditor),
+      activeFlowId
+    );
+    if (!positions.size) {
+      setPersistenceNotice({
+        message: "고정되지 않은 파일이 없어 현재 Flow를 다시 정렬할 수 없습니다.",
+        tone: "info"
+      });
+      return;
+    }
+
+    const previous = new Map(
+      getGraphNodes(currentEditor)
+        .filter((node) => positions.has(node.id))
+        .map((node) => [node.id, { x: node.x, y: node.y }] as const)
+    );
+    const updates = Array.from(
+      positions,
+      ([id, position]) =>
+        ({
+          id: id as TLShapeId,
+          type: PR_REVIEW_FILE_NODE_SHAPE_TYPE,
+          x: position.x,
+          y: position.y
+        }) satisfies TLShapePartial<PrReviewFileNodeShape>
+    );
+    internalShapeUpdateRef.current = true;
+    try {
+      currentEditor.updateShapes(updates);
+      updatePrReviewRelationGeometry(currentEditor, internalShapeUpdateRef);
+    } finally {
+      internalShapeUpdateRef.current = false;
+    }
+    setLayoutPreview({ next: positions, previous });
+    setPersistenceNotice({
+      message: "고정된 파일은 유지한 배치 미리보기입니다. 적용하면 함께 저장됩니다.",
+      tone: "info"
+    });
+  }, [activeFlowId, readOnly]);
+
+  const handleCancelLayoutPreview = useCallback(() => {
+    const currentEditor = editorRef.current;
+    if (!currentEditor || !layoutPreview) {
+      return;
+    }
+
+    internalShapeUpdateRef.current = true;
+    try {
+      currentEditor.updateShapes(
+        Array.from(
+          layoutPreview.previous,
+          ([id, position]) =>
+            ({
+              id: id as TLShapeId,
+              type: PR_REVIEW_FILE_NODE_SHAPE_TYPE,
+              x: position.x,
+              y: position.y
+            }) satisfies TLShapePartial<PrReviewFileNodeShape>
+        )
+      );
+      updatePrReviewRelationGeometry(currentEditor, internalShapeUpdateRef);
+    } finally {
+      internalShapeUpdateRef.current = false;
+    }
+    setLayoutPreview(null);
+    setPersistenceNotice(null);
+  }, [layoutPreview]);
+
+  const handleApplyLayoutPreview = useCallback(async () => {
+    const currentEditor = editorRef.current;
+    if (!currentEditor || !layoutPreview || readOnly) {
+      return;
+    }
+
+    try {
+      for (const shapeId of layoutPreview.next.keys()) {
+        const shape = currentEditor.getShape(shapeId as TLShapeId);
+        const stored = storedShapeByIdRef.current.get(shapeId);
+        if (!isPrReviewFileNodeShape(shape) || !stored || !isPrReviewCanvasFileShape(stored)) {
+          continue;
+        }
+        const snapshot = toPrReviewFileShapeSnapshot(shape);
+        const input = buildPrReviewFileShapeUpdateInput(
+          stored,
+          snapshot,
+          `pr-review-canvas-layout-${Date.now()}-${shapeId}`
+        );
+        const updated = await apiClient.updateReviewCanvasFileShape(
+          workspaceId,
+          shapeId,
+          input
+        );
+        storedShapeByIdRef.current.set(
+          shapeId,
+          applyPrReviewFileShapeUpdate(stored, input, updated.revision)
+        );
+        lastSyncedGeometryRef.current.set(
+          shapeId,
+          getPrReviewFileShapeGeometryKey(snapshot)
+        );
+      }
+      setLayoutPreview(null);
+      setPersistenceNotice({
+        message: "현재 Flow 배치를 저장했습니다.",
+        tone: "info"
+      });
+    } catch {
+      setPersistenceNotice({
+        message: "배치를 저장하지 못했습니다. 미리보기 상태에서 다시 시도해주세요.",
+        tone: "error"
+      });
+    }
+  }, [apiClient, layoutPreview, readOnly, workspaceId]);
+
+  const handleUnpinSelected = useCallback(async () => {
+    const currentEditor = editorRef.current;
+    if (!currentEditor || !selectedGraphFile || readOnly) {
+      return;
+    }
+
+    const stored = storedShapeByIdRef.current.get(selectedGraphFile.id);
+    if (!stored || !isPrReviewCanvasFileShape(stored)) {
+      return;
+    }
+
+    const snapshot = {
+      ...toPrReviewFileShapeSnapshot(selectedGraphFile),
+      props: {
+        ...toPrReviewFileShapeSnapshot(selectedGraphFile).props,
+        pinned: false
+      }
+    };
+    const input = buildPrReviewFileShapeUpdateInput(
+      stored,
+      snapshot,
+      `pr-review-canvas-unpin-${Date.now()}`
+    );
+
+    try {
+      const updated = await apiClient.updateReviewCanvasFileShape(
+        workspaceId,
+        selectedGraphFile.id,
+        input
+      );
+      storedShapeByIdRef.current.set(
+        selectedGraphFile.id,
+        applyPrReviewFileShapeUpdate(stored, input, updated.revision)
+      );
+      hydratingRef.current = true;
+      try {
+        currentEditor.updateShape({
+          id: selectedGraphFile.id,
+          type: PR_REVIEW_FILE_NODE_SHAPE_TYPE,
+          props: { ...selectedGraphFile.props, pinned: false }
+        });
+      } finally {
+        hydratingRef.current = false;
+      }
+      lastSyncedGeometryRef.current.set(
+        selectedGraphFile.id,
+        getPrReviewFileShapeGeometryKey(snapshot)
+      );
+      setPersistenceNotice({ message: "선택 파일의 고정을 해제했습니다.", tone: "info" });
+    } catch {
+      setPersistenceNotice({
+        message: "파일 고정을 해제하지 못했습니다. 다시 시도해주세요.",
+        tone: "error"
+      });
+    }
+  }, [apiClient, readOnly, selectedGraphFile, workspaceId]);
+
+  const handleToggleCollapsedFlow = useCallback((flowId: string) => {
+    setCollapsedFlowIds((current) => {
+      const next = new Set(current);
+      if (next.has(flowId)) {
+        next.delete(flowId);
+      } else {
+        next.add(flowId);
+      }
+      return next;
+    });
+  }, []);
+
   return (
     <div className={`relative ${className ?? ""}`}>
       {persistenceNotice ? (
@@ -1899,6 +2567,30 @@ export function PrReviewCanvasSurface({
           workspaceId={workspaceId}
         />
       </TldrawSurface>
+      <PrReviewGraphControls
+        activeFlowId={activeFlowId}
+        collapsedFlowIds={collapsedFlowIds}
+        flows={canvas.flows}
+        focusedFlowId={focusedFlowId}
+        isReadOnly={readOnly}
+        mode={graphMode}
+        onArrangeFlow={handleArrangeActiveFlow}
+        onApplyLayoutPreview={() => void handleApplyLayoutPreview()}
+        onCancelLayoutPreview={handleCancelLayoutPreview}
+        onClearFocusedFlow={() => setFocusedFlowId(null)}
+        onFocusFlow={setFocusedFlowId}
+        onUnpinSelected={() => void handleUnpinSelected()}
+        onToggleCollapsedFlow={handleToggleCollapsedFlow}
+        onToggleMode={setGraphMode}
+        relationTypes={relationTypes}
+        reviewStatuses={reviewStatuses}
+        riskLevels={riskLevels}
+        setRelationTypes={setRelationTypes}
+        setReviewStatuses={setReviewStatuses}
+        setRiskLevels={setRiskLevels}
+        layoutPreviewActive={layoutPreview !== null}
+        selectedPinned={selectedGraphFile?.props.pinned === true}
+      />
       <PrReviewRelationInspector editor={editor} />
     </div>
   );

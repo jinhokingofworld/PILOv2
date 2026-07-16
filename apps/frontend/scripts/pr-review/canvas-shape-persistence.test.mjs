@@ -46,7 +46,7 @@ const currentShape = {
   x: 420,
   y: 260,
   index: "a7",
-  props: { w: 272, h: 116, reviewStatus: "approved" }
+  props: { w: 272, h: 116, pinned: true, reviewStatus: "approved" }
 };
 const input = buildPrReviewFileShapeUpdateInput(
   storedShape,
@@ -70,6 +70,7 @@ assert.deepEqual(input, {
     props: {
       w: 272,
       h: 116,
+      pinned: true,
       roomFileId: "room-file-1",
       reviewStatus: "not_reviewed"
     }
@@ -79,7 +80,7 @@ assert.deepEqual(input, {
 });
 assert.equal(
   getPrReviewFileShapeGeometryKey(currentShape),
-  "page:page\u0000420\u0000260\u0000a7\u0000272\u0000116"
+  "page:page\u0000420\u0000260\u0000a7\u0000272\u0000116\u0000true"
 );
 assert.equal(applyPrReviewFileShapeUpdate(storedShape, input, 4).revision, 4);
 
