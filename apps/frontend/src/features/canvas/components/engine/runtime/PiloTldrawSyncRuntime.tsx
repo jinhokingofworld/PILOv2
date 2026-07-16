@@ -9,6 +9,7 @@ import {
   type TLEditorSnapshot,
 } from "tldraw";
 import { getStoredAuthSession } from "@/features/auth/session-storage";
+import { CanvasWorkspaceLocationAdapter } from "@/features/canvas/canvas-workspace-location-adapter";
 import { TldrawSurface } from "@/shared/tldraw";
 import type {
   CanvasBoardDetail,
@@ -100,7 +101,9 @@ function PiloTldrawRemoteSyncRuntime({
           licenseKey={process.env.NEXT_PUBLIC_TLDRAW_LICENSE_KEY}
           onMount={mountEditor}
           store={syncStore.store}
-        />
+        >
+          <CanvasWorkspaceLocationAdapter canvasId={board.id} />
+        </TldrawSurface>
       ) : (
         <div className="pilo-tldraw-sync-runtime__loading" />
       )}
@@ -246,7 +249,9 @@ function PiloTldrawSnapshotFallbackRuntime({
         hideUi={false}
         licenseKey={process.env.NEXT_PUBLIC_TLDRAW_LICENSE_KEY}
         onMount={mountEditor}
-      />
+      >
+        <CanvasWorkspaceLocationAdapter canvasId={board.id} />
+      </TldrawSurface>
       <div className="pilo-tldraw-sync-runtime__notice">
         <strong>{board.title}</strong>
         <span>{getSnapshotFallbackStateMessage(syncState)}</span>

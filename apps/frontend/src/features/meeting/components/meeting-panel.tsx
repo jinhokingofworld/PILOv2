@@ -49,6 +49,7 @@ import {
   type MeetingReportStatusFilter
 } from "@/features/meeting/components/meeting-report-section";
 import { useMeetingRooms } from "@/features/meeting/hooks/use-meeting-rooms";
+import { MeetingWorkspaceLocationAdapter } from "@/features/meeting/meeting-workspace-location-adapter";
 import { useMeetingWorkspaceData } from "@/features/meeting/hooks/use-meeting-workspace-data";
 import { meetingNavigation } from "@/features/meeting/navigation";
 import { useMeetingRuntime } from "@/features/meeting/runtime/meeting-runtime-provider";
@@ -408,6 +409,10 @@ export function MeetingPanel({ section = "room" }: { section?: MeetingSection })
   const displayedActiveCount = activeParticipants.length || activeParticipantCount;
   const selectedMeetingRoom = meetingRooms.find(
     (room) => room.id === selectedMeetingRoomId
+  );
+  const availableMeetingRoomIds = useMemo(
+    () => meetingRooms.map((room) => room.id),
+    [meetingRooms]
   );
 
   useEffect(() => {
@@ -837,6 +842,12 @@ export function MeetingPanel({ section = "room" }: { section?: MeetingSection })
   return (
     <TooltipProvider>
       <div className="flex flex-col gap-6">
+        <MeetingWorkspaceLocationAdapter
+          availableRoomIds={availableMeetingRoomIds}
+          roomsReady={meetingRoomsStatus === "success"}
+          selectedMeetingRoomId={selectedMeetingRoomId || null}
+          selectMeetingRoom={selectMeetingRoom}
+        />
         {toastMessage && (
           <ToastMessage
             message={toastMessage}

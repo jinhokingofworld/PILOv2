@@ -37,6 +37,9 @@ import {
 } from "../sql-erd/sql-erd-socket-events";
 import { relaySqlErdOperation } from "../sql-erd/sql-erd-operation-relay";
 import { createMeetingAccessService } from "../meeting/meeting-access.service";
+import { createWorkspacePresenceAccessService } from "../workspace-presence/workspace-presence-access.service";
+import { createWorkspacePresenceService } from "../workspace-presence/workspace-presence.service";
+import { registerWorkspacePresenceSocketHandlers } from "../workspace-presence/workspace-presence-socket-handlers";
 import {
   isMeetingReportRedisEvent,
   isMeetingStateRedisEvent,
@@ -764,6 +767,9 @@ export async function createRealtimeSocketServer({
     presenceService: sqlErdPresenceService,
   });
   const meetingAccessService = createMeetingAccessService(database);
+  const workspacePresenceAccessService =
+    createWorkspacePresenceAccessService(database);
+  const workspacePresenceService = createWorkspacePresenceService();
   const boardRoomService = createBoardRoomService({
     accessService: boardAccessService,
   });
@@ -899,6 +905,13 @@ export async function createRealtimeSocketServer({
 
   io.on("connection", (socket) => {
     const authedSocket = socket as AuthedSocket;
+
+    registerWorkspacePresenceSocketHandlers({
+      accessService: workspacePresenceAccessService,
+      io,
+      service: workspacePresenceService,
+      socket,
+    });
 
     socket.on(canvasClientEvents.join, async (payload) => {
       const joinPayload = readJoinPayload(payload);

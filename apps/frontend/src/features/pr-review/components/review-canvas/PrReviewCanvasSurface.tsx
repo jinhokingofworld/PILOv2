@@ -22,6 +22,7 @@ import {
 import { useValue } from "@tldraw/state-react";
 
 import { TldrawSurface } from "@/shared/tldraw/TldrawSurface";
+import { PrReviewWorkspaceLocationAdapter } from "@/features/pr-review/pr-review-workspace-location-adapter";
 import type {
   CanvasRealtimeConfig,
   CanvasRealtimeIdentity,
@@ -1810,6 +1811,9 @@ export function PrReviewCanvasSurface({
         onMount={handleMount}
         shapeUtils={prReviewShapeUtils}
       >
+        <PrReviewWorkspaceLocationAdapter
+          reviewSessionId={canvas.reviewSessionId}
+        />
         <PrReviewCanvasRealtimeBridge
           presence={canvasPresence}
           readOnly={readOnly}

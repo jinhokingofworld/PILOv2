@@ -6,6 +6,7 @@ import { LayoutDashboard } from "lucide-react";
 
 import { AppSidebar } from "@/components/app-sidebar";
 import { HeaderNotificationDropdown } from "@/components/header-notification-dropdown";
+import { WorkspaceMemberAvatars } from "@/features/workspace-presence/components/workspace-member-avatars";
 import {
   SidebarInset,
   SidebarProvider,
@@ -35,6 +36,7 @@ export function MainShell({ children }: MainShellProps) {
   if (isSqlErdImmersiveRoute) {
     return (
       <main className="h-svh overflow-hidden bg-background">
+        <WorkspaceMemberAvatars mode="floating" />
         {children}
       </main>
     );
@@ -58,6 +60,7 @@ export function MainShell({ children }: MainShellProps) {
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
+            <WorkspaceMemberAvatars mode="header" />
             <div className="hidden min-[480px]:block">
               <HeaderMeetingStatus />
             </div>
