@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 from typing import Protocol
 from uuid import UUID
 
+from app.meeting_document_evidence import DocumentChangeEvidence
+
 MAX_TRANSCRIPTION_FILE_BYTES = 25_000_000
 MAX_ACTION_ITEM_TITLE_BYTES = 500
 MAX_ACTION_ITEM_DESCRIPTION_BYTES = 5_000
@@ -50,6 +52,7 @@ class MeetingReportContext:
     recording_status: str
     recording_audio_file_key: str | None
     activity_evidence: list[ActivityEvidence] = field(default_factory=list)
+    document_change_evidence: list[DocumentChangeEvidence] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -148,6 +151,7 @@ class MeetingReportAiClient(Protocol):
         transcript_text: str,
         transcript_segments: list[TranscriptSegment],
         activity_evidence: list[ActivityEvidence],
+        document_change_evidence: list[DocumentChangeEvidence],
     ) -> GeneratedMeetingReport: ...
 
 
@@ -307,6 +311,7 @@ class MeetingReportProcessor:
                     transcript_text,
                     transcript_segments,
                     context.activity_evidence,
+                    context.document_change_evidence,
                 )
             except ProviderBusinessError as error:
                 failure_category, error_type, status_code = _safe_llm_failure_details(error)
