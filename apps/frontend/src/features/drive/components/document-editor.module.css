@@ -84,6 +84,89 @@
   pointer-events: none;
 }
 
+.fileAttachment {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.375rem;
+  padding: 0.75rem;
+  background: color-mix(in srgb, var(--muted) 35%, transparent);
+}
+
+.fileAttachmentIcon {
+  flex: none;
+  width: 1.25rem;
+  height: 1.25rem;
+  color: var(--muted-foreground);
+}
+
+.fileAttachmentDetails {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.fileAttachmentName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.fileAttachmentMeta,
+.fileAttachmentMuted,
+.fileAttachmentUnavailable {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+}
+
+.fileAttachmentUnavailable {
+  color: var(--destructive);
+}
+
+.fileAttachmentActions {
+  display: flex;
+  flex: none;
+  gap: 0.125rem;
+}
+
+.pdfPreviewSurface {
+  display: flex;
+  min-height: min(38rem, calc(100vh - 15rem));
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 0.375rem;
+  background: var(--muted);
+}
+
+.pdfPreviewFrame {
+  width: 100%;
+  min-height: min(38rem, calc(100vh - 15rem));
+  border: 0;
+  background: white;
+}
+
+.pdfPreviewState {
+  display: flex;
+  width: 100%;
+  min-height: min(38rem, calc(100vh - 15rem));
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 1rem;
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+  text-align: center;
+}
+
 .loadingState,
 .errorState {
   display: flex;

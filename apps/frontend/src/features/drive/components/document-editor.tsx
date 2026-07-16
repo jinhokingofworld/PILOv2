@@ -13,6 +13,7 @@ import {
   List,
   ListOrdered,
   Loader2,
+  Paperclip,
   Quote,
   Redo2,
   RefreshCw,
@@ -32,6 +33,8 @@ import {
 import type { DocumentBootstrapPayload } from "@/features/drive/types";
 
 import styles from "./document-editor.module.css";
+import { DriveFileAttachment } from "./document-file-attachment";
+import { DocumentFilePicker } from "./document-file-picker";
 
 type EditorLoadState =
   | { status: "loading" }
@@ -118,6 +121,7 @@ function DocumentEditorSurface({
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [saveError, setSaveError] = useState<string | null>(null);
   const [isEditorEmpty, setIsEditorEmpty] = useState(false);
+  const [isFilePickerOpen, setIsFilePickerOpen] = useState(false);
   const driveClient = useMemo(
     () => createDriveApiClient({ accessToken }),
     [accessToken]
@@ -188,6 +192,7 @@ function DocumentEditorSurface({
   const editor = useEditor({
     extensions: [
       StarterKit.configure({ undoRedo: false }),
+      DriveFileAttachment,
       Collaboration.configure({ document: yDoc })
     ],
     immediatelyRender: false,
@@ -270,6 +275,10 @@ function DocumentEditorSurface({
             <Redo2 />
           </ToolbarButton>
           <Separator orientation="vertical" className="mx-1 h-5" />
+          <ToolbarButton label="Drive 파일 첨부" onClick={() => setIsFilePickerOpen(true)}>
+            <Paperclip />
+          </ToolbarButton>
+          <Separator orientation="vertical" className="mx-1 h-5" />
           <ToolbarButton active={editor?.isActive("heading", { level: 1 })} label="제목 1" onClick={() => editor?.chain().focus().toggleHeading({ level: 1 }).run()}>
             <Heading1 />
           </ToolbarButton>
@@ -297,6 +306,20 @@ function DocumentEditorSurface({
           className={`${styles.editor} ${isEditorEmpty ? styles.emptyEditor : ""}`}
         />
       </div>
+      <DocumentFilePicker
+        open={isFilePickerOpen}
+        onOpenChange={setIsFilePickerOpen}
+        onSelect={(file) => {
+          editor
+            ?.chain()
+            .focus()
+            .insertContent({
+              type: "driveFileAttachment",
+              attrs: { driveItemId: file.id }
+            })
+            .run();
+        }}
+      />
     </section>
   );
 }

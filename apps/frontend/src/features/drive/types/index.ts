@@ -121,6 +121,12 @@ export type DriveDownloadUrlPayload = {
   expiresAt: string;
 };
 
+export type DrivePreviewUrlPayload = {
+  file: DriveItem;
+  previewUrl: string;
+  expiresAt: string;
+};
+
 export type UpdateDriveItemInput =
   | { name: string }
   | { parentId: string | null };
