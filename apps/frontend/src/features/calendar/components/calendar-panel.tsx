@@ -25,6 +25,7 @@ import { Input } from "@/components/ui/input";
 import { useAuthSession } from "@/features/auth";
 import { createCalendarApiClient } from "@/features/calendar/api/client";
 import {
+  getCalendarDateBarLayout,
   getCalendarWeekEventBars,
   type CalendarEventBarSegment
 } from "@/features/calendar/calendar-event-bars";
@@ -1523,8 +1524,12 @@ export function CalendarPanel() {
                 key={week.dates[0]}
                 className="relative col-span-7 grid grid-cols-7 pb-1.5"
               >
-                {week.dates.map((date) => {
+                {week.dates.map((date, dateIndex) => {
                   const dateEvents = eventsByDate.get(date) ?? [];
+                  const dateBarLayout = getCalendarDateBarLayout(
+                    week.segments,
+                    dateIndex + 1
+                  );
                   const singleDayEvents = dateEvents.filter(
                     (event) => !isMultiDayCalendarEvent(event)
                   );
@@ -1544,16 +1549,24 @@ export function CalendarPanel() {
                       })}
                       key={date}
                       className={classNames(
-                        "relative mx-0.75 rounded-lg border bg-background p-2 text-left align-top transition",
+                        "relative border bg-background p-2 text-left align-top transition",
+                        dateBarLayout.connectsToPrevious
+                          ? "ml-0 rounded-l-none border-l-0"
+                          : "ml-0.75 rounded-l-lg",
+                        dateBarLayout.connectsToNext
+                          ? "mr-0 rounded-r-none border-r-0"
+                          : "mr-0.75 rounded-r-lg",
                         !isCurrentMonth && "bg-muted/20 text-muted-foreground",
                         isSelected && "border-primary ring-2 ring-primary/80",
                         isToday && !isSelected && "border-primary/40 bg-primary/5"
                       )}
-                      style={{ minHeight: `${128 + week.laneCount * 28}px` }}
+                      style={{
+                        minHeight: `${128 + dateBarLayout.laneCount * 28}px`
+                      }}
                     >
                       <button
                         type="button"
-                        className="absolute inset-0 z-0 rounded-lg hover:bg-muted/40 focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        className="absolute inset-0 z-0 hover:bg-muted/40 focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                         aria-label={`${formatDateLabel(date)} 선택`}
                         onClick={() => setSelectedDate(date)}
                       />
@@ -1569,7 +1582,9 @@ export function CalendarPanel() {
                       </div>
                       <div
                         className="relative z-20 flex flex-col gap-1"
-                        style={{ marginTop: `${12 + week.laneCount * 28}px` }}
+                        style={{
+                          marginTop: `${12 + dateBarLayout.laneCount * 28}px`
+                        }}
                       >
                         {visibleEvents.map((event) => (
                           <button
