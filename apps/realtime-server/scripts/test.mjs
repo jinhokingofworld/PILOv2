@@ -201,6 +201,8 @@ assert.match(canvasRoomState, /mergeLoadedRegions/);
 assert.match(canvasRoomState, /doRegionsOverlap/);
 assert.match(canvasRoomState, /recordLoadedViewport/);
 assert.match(canvasRoomState, /applyShapePatch/);
+assert.match(canvasRoomState, /!options\.markDirty && tombstones\.has\(shapeId\)/);
+assert.match(canvasRoomState, /if \(options\.markDirty\) \{\s*[\r\n]+\s*tombstones\.delete\(shapeId\);/);
 assert.match(canvasRoomState, /getLoadedRegions/);
 assert.match(canvasRoomState, /getCachedShapes/);
 assert.match(canvasRoomState, /getDirtyShapeIds/);

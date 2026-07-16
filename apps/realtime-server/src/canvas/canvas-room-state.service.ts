@@ -584,11 +584,14 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
 
     const shapeCache = getRoomShapeCache(roomName);
     const cachedAt = new Date().toISOString();
+    const tombstones = getRoomTombstones(roomName);
 
     shapes.forEach((shape) => {
       const shapeId = typeof shape.id === "string" ? shape.id.trim() : "";
 
       if (!shapeId) return;
+      if (!options.markDirty && tombstones.has(shapeId)) return;
+
       const currentShape = shapeCache.get(shapeId)?.shape;
       const nextShape = { ...shape };
 
@@ -609,7 +612,9 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
       }
 
       shapeCache.set(shapeId, { cachedAt, shape: nextShape });
-      getRoomTombstones(roomName).delete(shapeId);
+      if (options.markDirty) {
+        tombstones.delete(shapeId);
+      }
       if (options.markDirty) {
         getRoomShapeIdSet(dirtyShapeIdsByRoom, roomName).add(shapeId);
       }

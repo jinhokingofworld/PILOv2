@@ -36,6 +36,8 @@ This module owns Canvas Socket.IO rooms and presence delivery.
 - Persisting `editingShapeId` or `editingMode`; edit intent is realtime-only.
 - Treating absence from the room cache as deletion. Deletion requires an
   explicit delete patch/tombstone.
+- Letting viewport/API hydrate upserts clear delete tombstones. Only a dirty
+  user edit patch, undo, or redo may intentionally recreate a tombstoned shape.
 - Evicting dirty roomState shapes before they are checkpointed. Cache eviction
   may remove clean hydrated shapes, but pending local changes must stay until
   App Server confirms the checkpoint.
