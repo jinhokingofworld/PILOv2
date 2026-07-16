@@ -39,6 +39,16 @@ function emitUnauthenticated(socket: Socket) {
   );
 }
 
+function emitInternalError(socket: Socket) {
+  socket.emit(
+    chatServerEvents.error,
+    createSocketErrorPayload(
+      "internal_error",
+      "workspace Chat operation failed",
+    ),
+  );
+}
+
 export function registerChatSocketHandlers({
   accessService,
   socket,
@@ -57,7 +67,7 @@ export function registerChatSocketHandlers({
     return generation;
   }
 
-  function isCurrentJoin(workspaceId: string, generation: number) {
+  function isCurrentOperation(workspaceId: string, generation: number) {
     return (
       !disconnected &&
       socket.connected &&
@@ -85,8 +95,27 @@ export function registerChatSocketHandlers({
   }
 
   async function leaveChatRooms(workspaceId: string, userId: string) {
-    await socket.leave(createChatRoomName(workspaceId));
-    await socket.leave(createChatUserRoomName(workspaceId, userId));
+    const leaveRoom = async (roomName: string) => {
+      await socket.leave(roomName);
+    };
+    const results = await Promise.allSettled([
+      leaveRoom(createChatRoomName(workspaceId)),
+      leaveRoom(createChatUserRoomName(workspaceId, userId)),
+    ]);
+    return results.every((result) => result.status === "fulfilled");
+  }
+
+  async function handleCurrentOperationFailure(
+    workspaceId: string,
+    userId: string,
+    generation: number,
+  ) {
+    await runMembershipOperation(workspaceId, async () => {
+      if (!isCurrentOperation(workspaceId, generation)) return;
+      await leaveChatRooms(workspaceId, userId);
+      if (!isCurrentOperation(workspaceId, generation)) return;
+      emitInternalError(socket);
+    });
   }
 
   socket.on(chatClientEvents.join, async (payload) => {
@@ -103,33 +132,64 @@ export function registerChatSocketHandlers({
     }
 
     const generation = nextGeneration(room.workspaceId);
-    const allowed = await accessService.canJoinWorkspace(
-      { userId },
-      room.workspaceId,
-    );
-    if (!isCurrentJoin(room.workspaceId, generation)) return;
-    if (!allowed) {
-      socket.emit(
-        chatServerEvents.error,
-        createSocketErrorPayload(
-          "forbidden",
-          "workspace Chat access denied",
-        ),
+    let allowed: boolean;
+    try {
+      allowed = await accessService.canJoinWorkspace(
+        { userId },
+        room.workspaceId,
       );
+    } catch {
+      await handleCurrentOperationFailure(
+        room.workspaceId,
+        userId,
+        generation,
+      );
+      return;
+    }
+    if (!isCurrentOperation(room.workspaceId, generation)) return;
+    if (!allowed) {
+      await runMembershipOperation(room.workspaceId, async () => {
+        if (!isCurrentOperation(room.workspaceId, generation)) return;
+        const cleanupSucceeded = await leaveChatRooms(
+          room.workspaceId,
+          userId,
+        );
+        if (!isCurrentOperation(room.workspaceId, generation)) return;
+        if (!cleanupSucceeded) {
+          emitInternalError(socket);
+          return;
+        }
+        socket.emit(
+          chatServerEvents.error,
+          createSocketErrorPayload(
+            "forbidden",
+            "workspace Chat access denied",
+          ),
+        );
+      });
       return;
     }
 
     await runMembershipOperation(room.workspaceId, async () => {
-      if (!isCurrentJoin(room.workspaceId, generation)) return;
+      if (!isCurrentOperation(room.workspaceId, generation)) return;
 
-      await socket.join(createChatRoomName(room.workspaceId));
-      if (!isCurrentJoin(room.workspaceId, generation)) {
+      try {
+        await socket.join(createChatRoomName(room.workspaceId));
+        if (!isCurrentOperation(room.workspaceId, generation)) {
+          await leaveChatRooms(room.workspaceId, userId);
+          return;
+        }
+
+        await socket.join(createChatUserRoomName(room.workspaceId, userId));
+      } catch {
         await leaveChatRooms(room.workspaceId, userId);
+        if (isCurrentOperation(room.workspaceId, generation)) {
+          emitInternalError(socket);
+        }
         return;
       }
 
-      await socket.join(createChatUserRoomName(room.workspaceId, userId));
-      if (!isCurrentJoin(room.workspaceId, generation)) {
+      if (!isCurrentOperation(room.workspaceId, generation)) {
         await leaveChatRooms(room.workspaceId, userId);
         return;
       }
@@ -153,8 +213,17 @@ export function registerChatSocketHandlers({
 
     const generation = nextGeneration(room.workspaceId);
     await runMembershipOperation(room.workspaceId, async () => {
-      if (generationByWorkspace.get(room.workspaceId) !== generation) return;
-      await leaveChatRooms(room.workspaceId, userId);
+      if (!isCurrentOperation(room.workspaceId, generation)) return;
+      const cleanupSucceeded = await leaveChatRooms(
+        room.workspaceId,
+        userId,
+      );
+      if (
+        !cleanupSucceeded &&
+        isCurrentOperation(room.workspaceId, generation)
+      ) {
+        emitInternalError(socket);
+      }
     });
   });
 

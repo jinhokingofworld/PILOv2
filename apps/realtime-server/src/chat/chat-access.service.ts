@@ -1,5 +1,8 @@
 import type { RealtimeDatabase } from "../database/database";
 
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export type ChatAccessContext = {
   userId?: string;
 };
@@ -7,7 +10,7 @@ export type ChatAccessContext = {
 export function createChatAccessService(database: RealtimeDatabase) {
   return {
     async canJoinWorkspace(context: ChatAccessContext, workspaceId: string) {
-      if (!context.userId || !workspaceId) return false;
+      if (!context.userId || !UUID_PATTERN.test(workspaceId)) return false;
 
       const membership = await database.queryOne<{ id: string }>(
         `SELECT id

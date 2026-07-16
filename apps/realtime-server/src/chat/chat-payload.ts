@@ -1,4 +1,6 @@
 const MAX_IDENTIFIER_LENGTH = 256;
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export type WorkspaceChatMessage = {
   id: string;
@@ -57,7 +59,11 @@ function isIdentifier(value: unknown): value is string {
 }
 
 function isIsoDateString(value: unknown): value is string {
-  return typeof value === "string" && Number.isFinite(Date.parse(value));
+  if (typeof value !== "string") return false;
+  const timestamp = Date.parse(value);
+  return (
+    Number.isFinite(timestamp) && new Date(timestamp).toISOString() === value
+  );
 }
 
 function isNullableString(value: unknown): value is string | null {
@@ -128,7 +134,7 @@ export function readChatRoomRef(
 
   if (typeof payload.workspaceId !== "string") return null;
   const workspaceId = payload.workspaceId.trim();
-  if (!workspaceId || workspaceId.length > MAX_IDENTIFIER_LENGTH) return null;
+  if (!UUID_PATTERN.test(workspaceId)) return null;
   return { workspaceId };
 }
 

@@ -49,6 +49,8 @@ const validDeleted = {
   deletedAt: "2026-07-16T00:09:59.000Z",
 };
 
+const roomWorkspaceId = "11111111-1111-4111-8111-111111111111";
+
 const socketServerSource = await readFile(
   new URL("../socket/socket-server.ts", import.meta.url),
   "utf8",
@@ -89,16 +91,16 @@ test("Chat event와 room contract는 문서의 exact 이름을 사용한다", ()
   );
 });
 
-test("readChatRoomRef는 workspaceId만 있는 bounded payload만 허용한다", () => {
-  assert.deepEqual(readChatRoomRef({ workspaceId: " workspace-1 " }), {
-    workspaceId: "workspace-1",
-  });
-  assert.deepEqual(readChatRoomRef({ workspaceId: ` ${"x".repeat(256)} ` }), {
-    workspaceId: "x".repeat(256),
+test("readChatRoomRef는 workspaceId만 있는 UUID payload만 허용한다", () => {
+  assert.deepEqual(readChatRoomRef({ workspaceId: ` ${roomWorkspaceId} ` }), {
+    workspaceId: roomWorkspaceId,
   });
   assert.equal(readChatRoomRef({ workspaceId: "" }), null);
-  assert.equal(readChatRoomRef({ workspaceId: "x".repeat(257) }), null);
-  assert.equal(readChatRoomRef({ workspaceId: "workspace-1", userId: "user-2" }), null);
+  assert.equal(readChatRoomRef({ workspaceId: "workspace-1" }), null);
+  assert.equal(
+    readChatRoomRef({ workspaceId: roomWorkspaceId, userId: "user-2" }),
+    null,
+  );
 });
 
 test("isChatRedisEvent는 V1 created/deleted wire shape만 허용한다", () => {
@@ -115,6 +117,37 @@ test("isChatRedisEvent는 V1 created/deleted wire shape만 허용한다", () => 
   );
   assert.equal(isChatRedisEvent({ ...validCreated, occurredAt: "invalid" }), false);
   assert.equal(isChatRedisEvent({ ...validCreated, extra: true }), false);
+});
+
+test("isChatRedisEvent는 canonical ISO timestamp만 허용한다", () => {
+  assert.equal(
+    isChatRedisEvent({ ...validCreated, occurredAt: "2026-07-16" }),
+    false,
+  );
+  assert.equal(
+    isChatRedisEvent({
+      ...validCreated,
+      message: { ...message, createdAt: "2026-07-16T00:00:00Z" },
+    }),
+    false,
+  );
+  assert.equal(
+    isChatRedisEvent({
+      ...validCreated,
+      message: {
+        ...message,
+        deletedAt: "2026-07-16T09:00:00.000+09:00",
+      },
+    }),
+    false,
+  );
+  assert.equal(
+    isChatRedisEvent({
+      ...validDeleted,
+      deletedAt: "2026-07-16T00:09:59Z",
+    }),
+    false,
+  );
 });
 
 test("created fan-out은 Workspace room과 deduplicated mention user room에 보낸다", () => {
