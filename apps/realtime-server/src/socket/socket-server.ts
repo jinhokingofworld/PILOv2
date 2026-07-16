@@ -1073,13 +1073,27 @@ export async function createRealtimeSocketServer({
         return;
       }
 
+      await roomCheckpointService.flushCheckpointNow(
+        joinPayload,
+        authedSocket.data.auth.token,
+      );
+      const checkpointState =
+        roomStateService.getCheckpointState(joinPayload);
+      const joinedPayload = {
+        ...result.payload,
+        checkpointHistorySeq: checkpointState.checkpointHistorySeq,
+        checkpointVersion: checkpointState.checkpointVersion,
+        historySeq: checkpointState.historySeq,
+        roomShapes: roomStateService.getCachedShapes(joinPayload),
+      };
+
       await socket.join(result.roomName);
       authedSocket.data.canvasRoomAccess.set(result.roomName, result.access);
       authedSocket.data.canvasRoomsByName.set(result.roomName, {
         canvasId: joinPayload.canvasId,
         workspaceId: joinPayload.workspaceId,
       });
-      socket.emit(canvasServerEvents.joined, result.payload);
+      socket.emit(canvasServerEvents.joined, joinedPayload);
     });
 
     socket.on(sqlErdClientEvents.join, async (payload) => {

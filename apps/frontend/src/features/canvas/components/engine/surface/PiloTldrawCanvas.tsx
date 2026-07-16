@@ -201,6 +201,8 @@ const CANVAS_COLLABORATION_NOTICE_MS = 4_000;
 const CANVAS_PENDING_PREVIEW_GROUP_TTL_MS = 30_000;
 const CANVAS_PENDING_PREVIEW_HEARTBEAT_MS = 1_500;
 const CANVAS_REMOTE_PREVIEW_DELETE_GRACE_MS = 8_000;
+const CANVAS_PRESENCE_CURSOR_MIN_DISTANCE = 4;
+const CANVAS_PRESENCE_CURSOR_THROTTLE_MS = 140;
 const CANVAS_COLLABORATION_GUARD_MESSAGE =
   "다른 사용자가 이 shape를 조작 중이라 삭제/지우개 같은 위험한 작업은 잠시 막았어요.";
 const connectionTools = new Set<PiloCanvasTool>(["arrow", "line"]);
@@ -3313,7 +3315,7 @@ function hasCursorMovedEnough(
     Math.hypot(
       nextCursor.x - previousCursor.x,
       nextCursor.y - previousCursor.y,
-    ) >= 1.5
+    ) >= CANVAS_PRESENCE_CURSOR_MIN_DISTANCE
   );
 }
 
@@ -3472,7 +3474,7 @@ function CanvasPresenceReporter({
       pendingCursorRef.current = cursor;
 
       const elapsedMs = Date.now() - lastSentAtRef.current;
-      if (elapsedMs >= 80) {
+      if (elapsedMs >= CANVAS_PRESENCE_CURSOR_THROTTLE_MS) {
         if (pendingTimerRef.current) {
           window.clearTimeout(pendingTimerRef.current);
           pendingTimerRef.current = null;
@@ -3493,7 +3495,7 @@ function CanvasPresenceReporter({
         if (pendingCursor) {
           flushPresence(pendingCursor);
         }
-      }, 80 - elapsedMs);
+      }, CANVAS_PRESENCE_CURSOR_THROTTLE_MS - elapsedMs);
     },
     [flushPresence],
   );

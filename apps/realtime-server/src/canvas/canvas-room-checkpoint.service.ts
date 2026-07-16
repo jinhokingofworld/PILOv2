@@ -7,8 +7,9 @@ import type {
   CanvasRoomStateService,
 } from "./canvas-room-state.service";
 
-const CANVAS_CHECKPOINT_DELAY_MS = 3_000;
+const CANVAS_CHECKPOINT_INTERVAL_MS = 5 * 60 * 1_000;
 const CANVAS_CHECKPOINT_MAX_OPERATIONS = 100;
+const SPLITTABLE_CHECKPOINT_STATUSES = new Set([400, 409, 422]);
 
 export type CanvasRoomCheckpointService = {
   close: () => Promise<void>;
@@ -38,6 +39,29 @@ function shouldCheckpoint(snapshot: CanvasRoomCheckpointSnapshot) {
   return snapshot.operations.length > 0;
 }
 
+function summarizeOperations(
+  operations: CanvasRoomCheckpointSnapshot["operations"],
+) {
+  return operations.slice(0, 5).map((operation) => ({
+    shapeId: operation.shapeId,
+    type: operation.type,
+  }));
+}
+
+function shouldSplitCheckpointFailure(status: number, body: unknown) {
+  if (SPLITTABLE_CHECKPOINT_STATUSES.has(status)) return true;
+  if (status !== 404 || typeof body !== "object" || body === null) return false;
+
+  const error = "error" in body ? body.error : null;
+
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "message" in error &&
+    error.message === "Canvas shape not found"
+  );
+}
+
 export function createCanvasRoomCheckpointService({
   appServerUrl,
   onCheckpointStatus,
@@ -46,8 +70,92 @@ export function createCanvasRoomCheckpointService({
   const timersByRoom = new Map<string, ReturnType<typeof setTimeout>>();
   const tokensByRoom = new Map<string, string>();
   const roomsByKey = new Map<string, CanvasRoomRef>();
-  const runningRooms = new Set<string>();
+  const runningCheckpointsByRoom = new Map<string, Promise<void>>();
   let isClosing = false;
+
+  async function persistOperations(
+    room: CanvasRoomRef,
+    token: string,
+    operations: CanvasRoomCheckpointSnapshot["operations"],
+  ): Promise<{
+    failures: Array<{
+      body: unknown;
+      operations: CanvasRoomCheckpointSnapshot["operations"];
+      status: number | null;
+    }>;
+    successes: Array<{
+      operations: CanvasRoomCheckpointSnapshot["operations"];
+      result: unknown;
+    }>;
+  }> {
+    const path = `/workspaces/${encodeURIComponent(
+      room.workspaceId,
+    )}/canvases/${encodeURIComponent(room.canvasId)}/shapes/batch`;
+
+    try {
+      const response = await fetch(`${appServerUrl}${path}`, {
+        body: JSON.stringify({ operations }),
+        headers: {
+          Accept: "application/json",
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        method: "POST",
+      });
+      const responseBody = await readResponseJson(response);
+
+      if (response.ok) {
+        return {
+          failures: [],
+          successes: [{ operations, result: responseBody }],
+        };
+      }
+
+      if (
+        operations.length > 1 &&
+        shouldSplitCheckpointFailure(response.status, responseBody)
+      ) {
+        const middle = Math.ceil(operations.length / 2);
+        const left = await persistOperations(
+          room,
+          token,
+          operations.slice(0, middle),
+        );
+        const right = await persistOperations(
+          room,
+          token,
+          operations.slice(middle),
+        );
+
+        return {
+          failures: [...left.failures, ...right.failures],
+          successes: [...left.successes, ...right.successes],
+        };
+      }
+
+      return {
+        failures: [
+          {
+            body: responseBody,
+            operations,
+            status: response.status,
+          },
+        ],
+        successes: [],
+      };
+    } catch (error) {
+      return {
+        failures: [
+          {
+            body: error,
+            operations,
+            status: null,
+          },
+        ],
+        successes: [],
+      };
+    }
+  }
 
   function emitCheckpointStatus(
     room: CanvasRoomRef,
@@ -67,9 +175,7 @@ export function createCanvasRoomCheckpointService({
     });
   }
 
-  async function flushCheckpoint(roomKey: string) {
-    if (runningRooms.has(roomKey)) return;
-
+  async function runCheckpoint(roomKey: string) {
     const room = roomsByKey.get(roomKey);
     const token = tokensByRoom.get(roomKey);
 
@@ -79,69 +185,82 @@ export function createCanvasRoomCheckpointService({
 
     if (!shouldCheckpoint(snapshot)) return;
 
-    runningRooms.add(roomKey);
-
-    const operations = snapshot.operations.slice(0, CANVAS_CHECKPOINT_MAX_OPERATIONS);
-    const path = `/workspaces/${encodeURIComponent(
-      room.workspaceId,
-    )}/canvases/${encodeURIComponent(room.canvasId)}/shapes/batch`;
+    const operations = snapshot.operations.slice(
+      0,
+      CANVAS_CHECKPOINT_MAX_OPERATIONS,
+    );
 
     try {
       emitCheckpointStatus(room, "saving", operations.length);
+      const result = await persistOperations(room, token, operations);
+      const completedAllOperations = result.failures.length === 0;
 
-      const response = await fetch(`${appServerUrl}${path}`, {
-        body: JSON.stringify({ operations }),
-        headers: {
-          Accept: "application/json",
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        method: "POST",
+      result.successes.forEach((success, index) => {
+        roomStateService.markCheckpointSucceeded(
+          room,
+          success.operations,
+          success.result,
+          {
+            advanceCheckpoint:
+              completedAllOperations && index === result.successes.length - 1,
+          },
+        );
       });
-      const responseBody = await readResponseJson(response);
 
-      if (!response.ok) {
+      result.failures.forEach((failure) => {
         console.warn("Canvas room checkpoint failed.", {
-          body: responseBody,
+          body: failure.body,
           canvasId: room.canvasId,
-          status: response.status,
+          operationCount: failure.operations.length,
+          operations: summarizeOperations(failure.operations),
+          status: failure.status,
           workspaceId: room.workspaceId,
         });
-        emitCheckpointStatus(room, "delayed", operations.length);
-        return;
-      }
+      });
 
-      roomStateService.markCheckpointSucceeded(room, operations, responseBody);
+      const pendingOperations =
+        roomStateService.getCheckpointSnapshot(room).operations.length;
+
       emitCheckpointStatus(
         room,
-        "saved",
-        roomStateService.getCheckpointSnapshot(room).operations.length,
+        result.failures.length ? "delayed" : "saved",
+        pendingOperations,
       );
-    } catch (error) {
-      console.warn("Canvas room checkpoint failed.", error);
-      emitCheckpointStatus(room, "delayed", operations.length);
     } finally {
-      runningRooms.delete(roomKey);
-
       if (!isClosing && roomStateService.getCheckpointSnapshot(room).operations.length) {
         scheduleRoomCheckpoint(roomKey);
       }
     }
   }
 
-  function scheduleRoomCheckpoint(roomKey: string) {
-    const currentTimer = timersByRoom.get(roomKey);
+  async function flushCheckpoint(roomKey: string) {
+    const runningCheckpoint = runningCheckpointsByRoom.get(roomKey);
 
-    if (currentTimer) {
-      clearTimeout(currentTimer);
+    if (runningCheckpoint) {
+      await runningCheckpoint;
+      return;
     }
+
+    const checkpoint = runCheckpoint(roomKey);
+
+    runningCheckpointsByRoom.set(roomKey, checkpoint);
+
+    try {
+      await checkpoint;
+    } finally {
+      runningCheckpointsByRoom.delete(roomKey);
+    }
+  }
+
+  function scheduleRoomCheckpoint(roomKey: string) {
+    if (timersByRoom.has(roomKey)) return;
 
     timersByRoom.set(
       roomKey,
       setTimeout(() => {
         timersByRoom.delete(roomKey);
         void flushCheckpoint(roomKey);
-      }, CANVAS_CHECKPOINT_DELAY_MS),
+      }, CANVAS_CHECKPOINT_INTERVAL_MS),
     );
   }
 
@@ -155,7 +274,7 @@ export function createCanvasRoomCheckpointService({
       await Promise.all(Array.from(roomsByKey.keys(), flushCheckpoint));
       tokensByRoom.clear();
       roomsByKey.clear();
-      runningRooms.clear();
+      runningCheckpointsByRoom.clear();
       isClosing = false;
     },
 
