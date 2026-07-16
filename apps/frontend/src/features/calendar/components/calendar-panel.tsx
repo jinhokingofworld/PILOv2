@@ -591,15 +591,18 @@ function CalendarEventDialog({
   ) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
+  if (!mode) {
+    return null;
+  }
+
   return (
     <DialogPrimitive.Root
-      open={Boolean(mode)}
+      open
       onOpenChange={(nextOpen) => !nextOpen && onClose()}
     >
       <DialogPrimitive.Portal>
         <DialogPrimitive.Backdrop className="fixed inset-0 z-50 bg-black/35 transition-opacity duration-150 data-ending-style:opacity-0 data-starting-style:opacity-0" />
-        {mode ? (
-          <DialogPrimitive.Popup className="fixed inset-x-3 bottom-3 z-50 flex max-h-[min(660px,calc(100vh-2rem))] flex-col overflow-hidden rounded-lg border bg-background shadow-xl outline-none transition duration-150 data-ending-style:translate-y-2 data-ending-style:opacity-0 data-starting-style:translate-y-2 data-starting-style:opacity-0 sm:top-1/2 sm:left-1/2 sm:bottom-auto sm:w-[calc(100vw-2rem)] sm:max-w-xl sm:-translate-x-1/2 sm:-translate-y-1/2 sm:data-ending-style:translate-y-0 sm:data-ending-style:scale-95 sm:data-starting-style:translate-y-0 sm:data-starting-style:scale-95">
+        <DialogPrimitive.Popup className="fixed inset-x-3 bottom-3 z-50 flex max-h-[min(660px,calc(100vh-2rem))] flex-col overflow-hidden rounded-lg border bg-background shadow-xl outline-none transition duration-150 data-ending-style:translate-y-2 data-ending-style:opacity-0 data-starting-style:translate-y-2 data-starting-style:opacity-0 sm:top-1/2 sm:left-1/2 sm:bottom-auto sm:w-[calc(100vw-2rem)] sm:max-w-xl sm:-translate-x-1/2 sm:-translate-y-1/2 sm:data-ending-style:translate-y-0 sm:data-ending-style:scale-95 sm:data-starting-style:translate-y-0 sm:data-starting-style:scale-95">
           {mode.type === "delete" ? (
             <div className="flex min-h-0 flex-1 flex-col">
               <div className="border-b p-4 pr-14">
@@ -735,8 +738,7 @@ function CalendarEventDialog({
               </div>
             </form>
           )}
-          </DialogPrimitive.Popup>
-        ) : null}
+        </DialogPrimitive.Popup>
       </DialogPrimitive.Portal>
     </DialogPrimitive.Root>
   );

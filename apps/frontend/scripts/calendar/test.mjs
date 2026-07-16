@@ -57,6 +57,10 @@ assert.match(calendarPanel, /createCalendarApiClient/);
 assert.match(calendarPanel, /getCalendarGridDates/);
 assert.match(calendarPanel, /getEventsForCalendarDate/);
 assert.match(calendarPanel, /CalendarEventDialog/);
+assert.match(
+  calendarPanel,
+  /function CalendarEventDialog\([\s\S]*?if \(!mode\) \{\s*return null;/
+);
 assert.match(calendarPanel, /CalendarEventCreateDialog/);
 assert.match(calendarPanel, /CalendarEventDetailDialog/);
 assert.match(calendarPanel, /CalendarEventsDialog/);
