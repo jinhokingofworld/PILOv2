@@ -88,10 +88,17 @@ confirmation을 중복 생성하지 않는다. 이 내부 endpoint는 public API
 받지 않는다.
 
 `search_meeting_transcript`는 read-only tool이지만 일반 formatter로 즉시 완료하지 않는다. App Server가
-현재 사용자 권한으로 query embedding과 pgvector 검색을 수행하고, chunk ID만 가진
-`agent_grounded_answer_outbox`를 저장한다. AI Worker는 내부 인증 endpoint에서만 bounded transcript
-excerpt를 일회성으로 받아 두 번째 LLM 호출을 수행한다. excerpt와 embedding은 Agent run/step/log,
-outbox, SQS payload에 저장하지 않는다. final citation은 outbox의 source ID 부분집합만 허용한다.
+현재 사용자 권한으로 query embedding과 pgvector 검색을 수행한다. 검색 대상은 current transcript chunk와
+`meeting_report_activity_evidence`의 안전한 snapshot(`occurredAt`, `action`, `summary`) chunk다. raw
+`activity_logs.metadata`, 원본 도메인 객체, transcript 전문은 RAG table·outbox·SQS·Agent run/step/log에
+저장하지 않는다. App Server는 namespaced source ID(`transcript:<uuid>`, `activity:<uuid>`)만 가진
+`agent_grounded_answer_outbox`를 저장한다. AI Worker는 내부 인증 endpoint에서만 bounded evidence excerpt를
+일회성으로 받아 두 번째 LLM 호출을 수행한다. 직접 decision/action item에 연결된 Activity evidence에는 제한된
+relevance boost만 적용한다. 두 source type이 모두 있으면 transcript와 Activity를 각각 최소 한 건씩 보존하고,
+후보 chunk 사이 cosine distance가 0.12 이하인 경우에는 의미 중복 group 안에서 source type별 최상위 후보만
+남긴다. 따라서 직접 연결된 Activity가 많아도 transcript가 전부 밀려나지 않으며, 같은 근거를 여러 chunk가
+차지하지 않는다. final citation은 outbox source ID의 부분집합만 허용하며, answer step에는 source type과 안전한
+시간/summary metadata만 저장해 UI가 구분 표시한다.
 
 ## 실행 모델
 
@@ -110,8 +117,9 @@ outbox, SQS payload에 저장하지 않는다. final citation은 outbox의 sourc
   confirmation, clarification 중 하나를 결정한다. AI Worker는 이 모드의 `requiresConfirmation`을
   `null`로 기록한다.
 - `search_meeting_transcript`는 `query`와 선택 `reportId`만 받고, Workspace 전체의 owner 또는 해당
-  회의의 현재·과거 참여자가 접근 가능한 current transcript chunk만 상위 5개 검색한다. 결과가 없으면
-  LLM answer phase를 호출하지 않는다.
+  회의의 현재·과거 참여자가 접근 가능한 current transcript chunk와 Activity evidence chunk를 합쳐 최대 5개
+  검색한다. 두 source type이 모두 있으면 최소 한 건씩 포함하며, 의미 중복 chunk는 source type별 대표만
+  포함한다. 결과가 없으면 LLM answer phase를 호출하지 않는다.
 - write 요청은 `waiting_confirmation` 상태의 run과 pending confirmation을 만든다.
 - 사용자가 승인하면 서버는 confirmation에 저장된 plan만 실행한다.
 - 승인 transaction은 `running` tool step을 execution claim으로 함께 만든다. 승인 직후 process가
@@ -849,8 +857,8 @@ Status code: `200 OK`
 - 특정 MeetingReport 상세/요약은 UUID `reportId`가 필요하다. ID가 없으면 같은 run의 후속 planner
   turn에서 목록 조회 결과를 사용하거나 사용자에게 필요한 선택만 요청한다.
 - 상세 조회의 `transcriptText`는 답변 생성에 사용할 수 있지만 Agent run/step/confirmation에는 전문 저장하지 않는다.
-- `search_meeting_transcript`는 `query`와 선택적 `reportId`를 받는다. transcript 원문을
-  Agent run/step에 저장하지 않고, 권한 있는 source ID만 grounded-answer 경로에 전달한다.
+- `search_meeting_transcript`는 `query`와 선택적 `reportId`를 받는다. transcript 원문과 raw Activity Log를
+  Agent run/step에 저장하지 않고, 권한 있는 namespaced source ID만 grounded-answer 경로에 전달한다.
 - 실패한 회의록 재생성은 `regenerate_meeting_report` confirmation 뒤 요청할 수 있다.
 
 ### Board

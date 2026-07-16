@@ -16,6 +16,9 @@ from app.canvas_agent.processor import CanvasAgentProcessor
 from app.canvas_agent.repository import PgCanvasAgentRepository
 from app.canvas_agent.routing.semantic_router import CanvasSemanticRouter
 from app.job_dispatcher import JobDispatcher
+from app.meeting_activity_evidence_embedding_processor import (
+    MeetingActivityEvidenceEmbeddingProcessor,
+)
 from app.meeting_report_processor import MeetingReportProcessor
 from app.meeting_report_runtime import (
     DEFAULT_AGENT_EXECUTION_HANDOFF_TIMEOUT_SECONDS,
@@ -30,6 +33,7 @@ from app.meeting_report_runtime import (
     HttpMeetingReportEventPublisher,
     OpenAiMeetingReportClient,
     PgAgentRunRepository,
+    PgMeetingActivityEvidenceEmbeddingRepository,
     PgMeetingReportRepository,
     PgMeetingTranscriptEmbeddingRepository,
     S3RecordingStorage,
@@ -226,8 +230,19 @@ def create_shared_ai_worker(
         resolved_settings.database_url,
         resolved_settings.database_ssl,
     )
+    meeting_activity_evidence_embedding_repository = PgMeetingActivityEvidenceEmbeddingRepository(
+        resolved_settings.database_url,
+        resolved_settings.database_ssl,
+    )
     meeting_transcript_embedding_processor = MeetingTranscriptEmbeddingProcessor(
         meeting_transcript_embedding_repository,
+        OpenAiTranscriptEmbedder(
+            resolved_settings.openai_api_key,
+            resolved_settings.openai_meeting_transcript_embedding_model,
+        ),
+    )
+    meeting_activity_evidence_embedding_processor = MeetingActivityEvidenceEmbeddingProcessor(
+        meeting_activity_evidence_embedding_repository,
         OpenAiTranscriptEmbedder(
             resolved_settings.openai_api_key,
             resolved_settings.openai_meeting_transcript_embedding_model,
@@ -260,6 +275,9 @@ def create_shared_ai_worker(
         boto3.client("sqs", **boto_kwargs),
         canvas_embedding_processor=canvas_embedding_processor,
         meeting_transcript_embedding_processor=meeting_transcript_embedding_processor,
+        meeting_activity_evidence_embedding_processor=(
+            meeting_activity_evidence_embedding_processor
+        ),
         stale_execution_recovery=agent_execution_handoff_client,
         agent_retry_exhaustion_recovery=agent_run_repository,
         agent_grounded_answer_retry_exhaustion_recovery=agent_run_repository,

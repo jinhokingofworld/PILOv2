@@ -92,3 +92,4 @@ The database schema source of truth is the migration history in `db/migrations/`
 - `migrations/078_add_agent_contextual_execution.sql` adds immutable Agent request context, choice confirmation selection state, and the SQLtoERD Agent session-creation idempotency ledger.
 - `migrations/079_allow_board_issue_operation_parent_cleanup.sql` preserves succeeded Board Issue creation operations when their cached PILO Issue is deleted by allowing `pilo_issue_id` to be cleared by its `ON DELETE SET NULL` foreign key.
 - `migrations/080_add_pr_review_activity_log_actions.sql` adds the PR Review conflict-resolution-applied and pull-request-merged Activity Log actions.
+- `migrations/081_add_meeting_report_activity_evidence_rag.sql` adds durable Activity evidence embedding jobs and safe `vector(1536)` chunks for MeetingReport RAG. It indexes only the MeetingReport snapshot action, summary, and timestamp; raw Activity Log metadata is never copied.

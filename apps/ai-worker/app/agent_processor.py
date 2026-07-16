@@ -114,7 +114,7 @@ class AgentProcessResult:
 
 
 class AgentGroundedAnswerProcessor:
-    """Keeps transcript text in-memory: only App Server internal HTTPS carries it."""
+    """Keeps bounded Meeting evidence in-memory: only App Server internal HTTPS carries it."""
 
     def __init__(
         self, handoff_client: object, api_key: str, model: str, timeout_seconds: float
@@ -156,7 +156,11 @@ class AgentGroundedAnswerProcessor:
                     {
                         "role": "system",
                         "content": (
-                            "Answer in Korean using only supplied meeting transcript sources. "
+                            "Answer in Korean using only supplied Meeting evidence sources. "
+                            "Sources have sourceType transcript (spoken content) or activity "
+                            "(an actual committed user action). Distinguish the source type in "
+                            "the answer when it affects the claim; do not present activity "
+                            "as speech. "
                             "Return JSON with answer and citations (sourceId array). "
                             "Do not invent citations."
                         ),
