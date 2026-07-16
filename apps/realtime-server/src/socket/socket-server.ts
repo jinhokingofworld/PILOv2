@@ -66,6 +66,20 @@ import type {
   PageCursorPresenceState,
   PageCursorRoomRef,
 } from "../page-cursor/page-cursor-types";
+import { createPdfCollaborationAccessService } from "../pdf-collaboration/pdf-collaboration-access.service";
+import {
+  pdfCollaborationClientEvents,
+  pdfCollaborationServerEvents,
+} from "../pdf-collaboration/pdf-collaboration-events";
+import {
+  readPdfCollaborationPageUpdate,
+  readPdfCollaborationPointerUpdate,
+  readPdfCollaborationRoomRef,
+  readPdfCollaborationStrokeCommit,
+  readPdfCollaborationStrokeRemove,
+} from "../pdf-collaboration/pdf-collaboration-payload";
+import { createPdfCollaborationRoomName } from "../pdf-collaboration/pdf-collaboration-room";
+import { createPdfCollaborationRoomState } from "../pdf-collaboration/pdf-collaboration-room-state";
 import type {
   CanvasJoinPayload,
   CanvasPresenceEditingMode,
@@ -722,6 +736,13 @@ function emitPageCursorError(socket: Socket, message: string) {
   );
 }
 
+function emitPdfCollaborationError(socket: Socket, message: string) {
+  socket.emit(
+    pdfCollaborationServerEvents.error,
+    createSocketErrorPayload("invalid_payload", message),
+  );
+}
+
 function isPageCursorPresenceState(
   value: unknown,
 ): value is PageCursorPresenceState {
@@ -802,10 +823,14 @@ export async function createRealtimeSocketServer({
 
   const sessionService = createRealtimeSessionService(database);
   const accessService = createCanvasAccessService(database);
+  const pdfCollaborationAccessService = createPdfCollaborationAccessService({
+    database,
+  });
   const sqlErdAccessService = createSqlErdAccessService(database);
   const boardAccessService = createBoardAccessService(database);
   const presenceService = createCanvasPresenceService();
   const roomStateService = createCanvasRoomStateService();
+  const pdfCollaborationRoomState = createPdfCollaborationRoomState();
   const sqlErdPresenceService = createSqlErdPresenceService();
   const shapeLockService = createCanvasShapeLockService({
     redisClient: redisAdapter?.stateClient ?? null,
@@ -1170,6 +1195,48 @@ export async function createRealtimeSocketServer({
       });
     });
 
+    socket.on(pdfCollaborationClientEvents.join, async (payload) => {
+      const room = readPdfCollaborationRoomRef(payload);
+      if (!room) {
+        emitPdfCollaborationError(socket, "pdf-collaboration:join payload is invalid");
+        return;
+      }
+
+      const access = await pdfCollaborationAccessService.getPdfCollaborationRoomAccess(
+        authedSocket.data.auth,
+        room,
+      );
+      if (!access) {
+        socket.emit(
+          pdfCollaborationServerEvents.error,
+          createSocketErrorPayload("forbidden", "PDF collaboration room access denied"),
+        );
+        return;
+      }
+
+      const roomName = createPdfCollaborationRoomName(room);
+      await socket.join(roomName);
+      const snapshot = pdfCollaborationRoomState.join(room, socket.id, {
+        displayName: authedSocket.data.auth.displayName,
+        pageNumber: 1,
+        userId: authedSocket.data.auth.userId ?? socket.id,
+      });
+      socket.emit(pdfCollaborationServerEvents.joined, snapshot);
+    });
+
+    socket.on(pdfCollaborationClientEvents.leave, async (payload) => {
+      const room = readPdfCollaborationRoomRef(payload);
+      if (!room) {
+        emitPdfCollaborationError(socket, "pdf-collaboration:leave payload is invalid");
+        return;
+      }
+
+      const roomName = createPdfCollaborationRoomName(room);
+      const presence = pdfCollaborationRoomState.leave(room, socket.id);
+      await socket.leave(roomName);
+      if (presence) socket.to(roomName).emit(pdfCollaborationServerEvents.leave, presence);
+    });
+
     socket.on(canvasClientEvents.leave, async (payload) => {
       const room = readRoomRef(payload);
 
@@ -1344,6 +1411,114 @@ export async function createRealtimeSocketServer({
       authedSocket.data.pageCursorPresenceByRoom[roomName] = presence;
 
       socket.to(roomName).emit(pageCursorServerEvents.update, presence);
+    });
+
+    socket.on(pdfCollaborationClientEvents.pageUpdate, (payload) => {
+      const update = readPdfCollaborationPageUpdate(payload);
+      if (!update) {
+        emitPdfCollaborationError(socket, "pdf-collaboration:page:update payload is invalid");
+        return;
+      }
+
+      const roomName = createPdfCollaborationRoomName(update);
+      if (!socket.rooms.has(roomName)) {
+        socket.emit(
+          pdfCollaborationServerEvents.error,
+          createSocketErrorPayload("room_not_joined", "join PDF room before updating page"),
+        );
+        return;
+      }
+
+      const presence = pdfCollaborationRoomState.updatePage(
+        update,
+        socket.id,
+        update.pageNumber,
+      );
+      if (presence) socket.to(roomName).emit(pdfCollaborationServerEvents.pageUpdate, presence);
+    });
+
+    socket.on(pdfCollaborationClientEvents.pointerUpdate, (payload) => {
+      const update = readPdfCollaborationPointerUpdate(payload);
+      if (!update) {
+        emitPdfCollaborationError(socket, "pdf-collaboration:pointer:update payload is invalid");
+        return;
+      }
+
+      const roomName = createPdfCollaborationRoomName(update);
+      if (!socket.rooms.has(roomName)) {
+        socket.emit(
+          pdfCollaborationServerEvents.error,
+          createSocketErrorPayload("room_not_joined", "join PDF room before updating pointer"),
+        );
+        return;
+      }
+
+      const pointer = pdfCollaborationRoomState.updatePointer(update, socket.id, update);
+      if (pointer) socket.to(roomName).emit(pdfCollaborationServerEvents.pointerUpdate, pointer);
+    });
+
+    socket.on(pdfCollaborationClientEvents.strokeCommit, (payload) => {
+      const commit = readPdfCollaborationStrokeCommit(payload);
+      if (!commit) {
+        emitPdfCollaborationError(socket, "pdf-collaboration:stroke:commit payload is invalid");
+        return;
+      }
+
+      const roomName = createPdfCollaborationRoomName(commit);
+      if (!socket.rooms.has(roomName)) {
+        socket.emit(
+          pdfCollaborationServerEvents.error,
+          createSocketErrorPayload("room_not_joined", "join PDF room before drawing"),
+        );
+        return;
+      }
+
+      const stroke = pdfCollaborationRoomState.commitStroke(commit, commit);
+      socket.to(roomName).emit(pdfCollaborationServerEvents.strokeCommit, {
+        ...commit,
+        stroke,
+      });
+    });
+
+    socket.on(pdfCollaborationClientEvents.strokeRemove, (payload) => {
+      const remove = readPdfCollaborationStrokeRemove(payload);
+      if (!remove) {
+        emitPdfCollaborationError(socket, "pdf-collaboration:stroke:remove payload is invalid");
+        return;
+      }
+
+      const roomName = createPdfCollaborationRoomName(remove);
+      if (!socket.rooms.has(roomName)) {
+        socket.emit(
+          pdfCollaborationServerEvents.error,
+          createSocketErrorPayload("room_not_joined", "join PDF room before erasing"),
+        );
+        return;
+      }
+
+      if (pdfCollaborationRoomState.removeStroke(remove, remove.pageNumber, remove.strokeId)) {
+        socket.to(roomName).emit(pdfCollaborationServerEvents.strokeRemove, remove);
+      }
+    });
+
+    socket.on(pdfCollaborationClientEvents.strokesClear, (payload) => {
+      const clear = readPdfCollaborationPageUpdate(payload);
+      if (!clear) {
+        emitPdfCollaborationError(socket, "pdf-collaboration:strokes:clear payload is invalid");
+        return;
+      }
+
+      const roomName = createPdfCollaborationRoomName(clear);
+      if (!socket.rooms.has(roomName)) {
+        socket.emit(
+          pdfCollaborationServerEvents.error,
+          createSocketErrorPayload("room_not_joined", "join PDF room before clearing drawings"),
+        );
+        return;
+      }
+
+      pdfCollaborationRoomState.clearPageStrokes(clear, clear.pageNumber);
+      socket.to(roomName).emit(pdfCollaborationServerEvents.strokesClear, clear);
     });
 
     socket.on(canvasClientEvents.viewportLoaded, (payload) => {
@@ -1690,6 +1865,7 @@ export async function createRealtimeSocketServer({
         const pageCursorLeaveEvents: PageCursorPresenceState[] = Object.values(
           authedSocket.data.pageCursorPresenceByRoom,
         );
+        const pdfCollaborationLeaveEvents = pdfCollaborationRoomState.clearSocket(socket.id);
         authedSocket.data.canvasRoomAccess.clear();
         authedSocket.data.canvasRoomsByName.clear();
         authedSocket.data.pageCursorPresenceByRoom = {};
@@ -1725,6 +1901,12 @@ export async function createRealtimeSocketServer({
               userId: pageCursorPresence.userId,
               workspaceId: pageCursorPresence.workspaceId,
             });
+        }
+
+        for (const pdfCollaborationPresence of pdfCollaborationLeaveEvents) {
+          socket
+            .to(createPdfCollaborationRoomName(pdfCollaborationPresence))
+            .emit(pdfCollaborationServerEvents.leave, pdfCollaborationPresence);
         }
 
         for (const lockReleasePayload of lockReleaseEvents) {
