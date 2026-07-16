@@ -265,7 +265,25 @@ class FakeActivityLogService {
   }
 }
 
-function createSubject(database, githubWriteService = new FakeGithubProjectV2WriteService()) {
+class FakeBoardInvalidationPublisherService {
+  constructor({ fail = false } = {}) {
+    this.fail = fail;
+    this.calls = [];
+  }
+
+  async publishInvalidation(payload) {
+    this.calls.push(payload);
+    if (this.fail) {
+      throw new Error("Redis publish failed");
+    }
+  }
+}
+
+function createSubject(
+  database,
+  githubWriteService = new FakeGithubProjectV2WriteService(),
+  invalidationPublisher = new FakeBoardInvalidationPublisherService()
+) {
   const workspaceService = new FakeWorkspaceService();
   const statusQueries = new BoardIssueStatusQueries(database);
   const activityLogService = new FakeActivityLogService();
@@ -274,7 +292,8 @@ function createSubject(database, githubWriteService = new FakeGithubProjectV2Wri
     workspaceService,
     githubWriteService,
     database,
-    activityLogService
+    activityLogService,
+    invalidationPublisher
   );
   const service = new BoardService(
     undefined,
@@ -287,7 +306,9 @@ function createSubject(database, githubWriteService = new FakeGithubProjectV2Wri
     activityLogService,
     database,
     githubWriteService,
+    invalidationPublisher,
     service,
+    statusService,
     workspaceService
   };
 }
@@ -412,6 +433,7 @@ function issueRow(overrides = {}) {
     activityLogService,
     database: db,
     githubWriteService,
+    invalidationPublisher,
     service,
     workspaceService
   } = createSubject(database);
@@ -484,6 +506,46 @@ function issueRow(overrides = {}) {
   assert.equal(result.previousColumnId, sourceColumnId);
   assert.equal(result.issue.id, issueId);
   assert.equal(result.issue.columnId, targetColumnId);
+  assert.deepEqual(invalidationPublisher.calls, [
+    {
+      workspaceId,
+      boardId,
+      updatedAt: "2026-07-06T01:07:00.000Z"
+    }
+  ]);
+}
+
+{
+  const database = new FakeDatabase({
+    queryOneRows: [statusTargetRow(), issueRow()]
+  });
+  const invalidationPublisher = new FakeBoardInvalidationPublisherService({
+    fail: true
+  });
+  const { service, statusService } = createSubject(
+    database,
+    new FakeGithubProjectV2WriteService(),
+    invalidationPublisher
+  );
+  const warnings = [];
+  statusService.logger.warn = (message) => warnings.push(message);
+
+  const result = await service.updateBoardIssueStatus(
+    currentUserId,
+    workspaceId,
+    boardId,
+    issueId,
+    {
+      columnId: targetColumnId,
+      previousColumnId: sourceColumnId
+    }
+  );
+
+  assert.equal(result.issue.columnId, targetColumnId);
+  assert.equal(invalidationPublisher.calls.length, 1);
+  assert.deepEqual(warnings, [
+    `Board invalidation publish failed workspace_id=${workspaceId} board_id=${boardId}`
+  ]);
 }
 
 {
@@ -554,7 +616,11 @@ function issueRow(overrides = {}) {
       issueRow({ column_id: targetColumnId })
     ]
   });
-  const { database: db, githubWriteService, service } = createSubject(database);
+  const {
+    database: db,
+    githubWriteService,
+    service
+  } = createSubject(database);
 
   await service.updateBoardIssueStatus(
     currentUserId,
@@ -578,7 +644,12 @@ function issueRow(overrides = {}) {
   const database = new FakeDatabase({
     queryOneRows: [statusTargetRow()]
   });
-  const { database: db, githubWriteService, service } = createSubject(database);
+  const {
+    database: db,
+    githubWriteService,
+    invalidationPublisher,
+    service
+  } = createSubject(database);
 
   await assert.rejects(
     () =>
@@ -605,6 +676,7 @@ function issueRow(overrides = {}) {
 
   assert.equal(githubWriteService.calls.length, 0);
   assert.equal(db.transactions.length, 0);
+  assert.equal(invalidationPublisher.calls.length, 0);
 }
 
 {
@@ -614,7 +686,7 @@ function issueRow(overrides = {}) {
   const failingGithubWriteService = new FakeGithubProjectV2WriteService({
     fail: true
   });
-  const { database: db, service } = createSubject(
+  const { database: db, invalidationPublisher, service } = createSubject(
     database,
     failingGithubWriteService
   );
@@ -639,6 +711,7 @@ function issueRow(overrides = {}) {
   );
 
   assert.equal(db.transactions.length, 0);
+  assert.equal(invalidationPublisher.calls.length, 0);
 }
 
 {
