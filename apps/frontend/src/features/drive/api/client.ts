@@ -8,6 +8,7 @@ import type {
   DeleteDriveItemPayload,
   DocumentBootstrapPayload,
   DriveDownloadUrlPayload,
+  DrivePreviewUrlPayload,
   DriveItem,
   DriveListPayload,
   ListDriveItemsQuery,
@@ -401,6 +402,14 @@ export function createDriveApiClient({
     async createDownloadUrl(workspaceId: string, fileId: string) {
       return requestDriveData<DriveDownloadUrlPayload>(
         `${driveFilePath(workspaceId, fileId)}/download-url`,
+        undefined,
+        requestOptions
+      );
+    },
+
+    async createPreviewUrl(workspaceId: string, fileId: string) {
+      return requestDriveData<DrivePreviewUrlPayload>(
+        `${driveFilePath(workspaceId, fileId)}/preview-url`,
         undefined,
         requestOptions
       );
