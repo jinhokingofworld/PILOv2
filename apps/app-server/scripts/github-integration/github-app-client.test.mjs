@@ -1351,7 +1351,7 @@ function githubIssuePayload(overrides = {}) {
         }),
       (error) =>
         error?.response?.error?.message ===
-        "GitHub ProjectV2 OAuth connection must be reconnected with project scope"
+        "GitHub ProjectV2 OAuth connection must be reconnected with project and repo scopes"
     );
   } finally {
     globalThis.fetch = originalFetch;

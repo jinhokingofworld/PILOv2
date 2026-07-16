@@ -151,6 +151,10 @@ assert.match(githubIntegrationApi, /github_callback_error=installation_not_acces
 assert.match(githubIntegrationApi, /github_oauth_error=account_already_connected/);
 assert.match(githubIntegrationApi, /progressPercent/);
 assert.match(githubIntegrationApi, /progressStage/);
+assert.match(
+  githubIntegrationApi,
+  /"tokenScope": "read:user,user:email,project,repo"/
+);
 for (const contract of [apiIndex, githubIntegrationApi, githubIntegrationReadme]) {
   assert.match(contract, /read:user user:email project repo/);
   assert.match(contract, /project(?:`)?\s*(?:and|\+)\s*(?:`)?repo[\s\S]{0,80}scopes?/i);

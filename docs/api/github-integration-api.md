@@ -286,7 +286,7 @@ callback 성공 redirect를 실패로 바꾸지 않는다.
     "connected": true,
     "githubUserId": 123456,
     "githubLogin": "octocat",
-    "tokenScope": "read:user,user:email,project",
+    "tokenScope": "read:user,user:email,project,repo",
     "githubConnectedAt": "2026-07-07T12:00:00.000Z",
     "githubRevokedAt": null
   }
