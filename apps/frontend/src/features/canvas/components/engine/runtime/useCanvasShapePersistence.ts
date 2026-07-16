@@ -33,7 +33,7 @@ type UseCanvasShapePersistenceOptions = {
   onRoomShapePatch?: (patch: {
     deletedShapeIds: string[];
     upsertShapes: PiloCanvasFreeformShape[];
-  }) => void;
+  }) => boolean;
   onShapeSyncConflict?: (conflict: CanvasShapeSyncConflict) => void;
   onShapeSyncError?: (error: unknown) => void;
   pendingLocalShapeVersionsRef: RuntimeRef<Map<string, number>>;
@@ -230,11 +230,14 @@ export function useCanvasShapePersistence({
             }
           });
 
-          onRoomShapePatch?.({ deletedShapeIds, upsertShapes });
-
           if (persistThroughRoomState) {
-            clearPendingLocalShapeChanges(pendingLocalShapeVersions);
-            return nextFreeformShapes;
+            const didSendRoomPatch =
+              onRoomShapePatch?.({ deletedShapeIds, upsertShapes }) ?? false;
+
+            if (didSendRoomPatch) {
+              clearPendingLocalShapeChanges(pendingLocalShapeVersions);
+              return nextFreeformShapes;
+            }
           }
 
           const shapeSyncQueue = shapeSyncQueueRef.current;

@@ -68,6 +68,19 @@ export type CanvasRoomLoadedRegion = {
   top: number;
 };
 
+export type CanvasRoomHistoryAction = "create" | "delete" | "update";
+
+export type CanvasRoomHistoryItem = {
+  action: CanvasRoomHistoryAction;
+  actorUserId: string;
+  after: Record<string, unknown> | null;
+  before: Record<string, unknown> | null;
+  createdAt: string;
+  id: string;
+  seq: number;
+  shapeId: string;
+};
+
 export type CanvasPresenceEditingMode =
   | "code"
   | "draw"
@@ -93,12 +106,18 @@ export type CanvasRemotePresenceState = CanvasRealtimeUser & {
 export type CanvasJoinPayload = {
   workspaceId: string;
   canvasId: string;
+  initialViewportBounds?: CanvasLoadedViewportBounds;
   lastSeenOpSeq?: number;
 };
 
 export type CanvasJoinedPayload = {
   workspaceId: string;
   canvasId: string;
+  canRedo: boolean;
+  canUndo: boolean;
+  checkpointHistorySeq: number | null;
+  checkpointVersion: number;
+  historySeq: number;
   latestOpSeq: number;
   loadedRegions: CanvasRoomLoadedRegion[];
   previews: CanvasShapePreviewEventPayload[];
@@ -228,12 +247,18 @@ export type CanvasRoomShapePatchPayload = {
 
 export type CanvasRoomShapePatchEventPayload = CanvasRoomShapePatchPayload & {
   actorUserId: string;
+  canRedo?: boolean;
+  canUndo?: boolean;
+  historySeq?: number;
   sentAt: string;
 };
 
 export type CanvasRoomCheckpointStatusPayload = {
   workspaceId: string;
   canvasId: string;
+  checkpointHistorySeq: number | null;
+  checkpointVersion: number;
+  historySeq: number;
   pendingOperations: number;
   status: "delayed" | "saved" | "saving";
   updatedAt: string;
@@ -291,6 +316,8 @@ export type CanvasServerToClientEvents = {
 export type CanvasClientToServerEvents = {
   "canvas:join": (payload: CanvasJoinPayload) => void;
   "canvas:leave": (payload: CanvasJoinPayload) => void;
+  "canvas:room:history:redo": (payload: CanvasJoinPayload) => void;
+  "canvas:room:history:undo": (payload: CanvasJoinPayload) => void;
   "canvas:presence:update": (payload: CanvasPresenceUpdatePayload) => void;
   "canvas:shape:lock:claim": (payload: CanvasShapeLockClaimPayload) => void;
   "canvas:shape:lock:release": (

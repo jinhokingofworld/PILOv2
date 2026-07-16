@@ -39,13 +39,21 @@ export type CanvasOperationCatchupState = {
   lastError: string | null;
 };
 
+export type CanvasRoomHistoryState = {
+  canRedo: boolean;
+  canUndo: boolean;
+  historySeq: number;
+};
+
 export type CanvasPresenceController = {
   enabled: boolean;
+  roomStateActive: boolean;
   currentUserId: string | null;
   checkpointStatus: CanvasRoomCheckpointStatusPayload | null;
   lastRejectedShapeLock: { rejectedAt: number; shapeIds: string[] } | null;
   operationSync: CanvasOperationCatchupState;
   ownedShapeLocks: CanvasShapeLockState[];
+  roomHistory: CanvasRoomHistoryState;
   roomLoadedRegions: CanvasRoomLoadedRegion[];
   remotePresence: CanvasRemotePresenceState[];
   remoteShapeLocks: CanvasShapeLockState[];
@@ -56,7 +64,9 @@ export type CanvasPresenceController = {
     bounds: CanvasLoadedViewportBounds,
     shapes?: Record<string, unknown>[],
   ) => void;
-  sendRoomShapePatch: (patch: Omit<CanvasRoomShapePatchPayload, "workspaceId" | "canvasId">) => void;
+  sendRoomShapePatch: (patch: Omit<CanvasRoomShapePatchPayload, "workspaceId" | "canvasId">) => boolean;
+  redoRoomHistory: () => boolean;
+  undoRoomHistory: () => boolean;
   clearShapePreview: (shapeIds: string[]) => void;
   sendPresenceUpdate: (
     cursor: CanvasPresencePoint | null,
@@ -78,6 +88,7 @@ export type CanvasPresenceOptions = {
     afterSeq: number,
     signal?: AbortSignal,
   ) => Promise<CanvasOperationsCatchupPayload>;
+  getInitialViewportBounds?: () => CanvasLoadedViewportBounds | null;
   hydrateShapes?: (shapes: Record<string, unknown>[]) => void;
   applyRoomShapePatch?: (patch: CanvasRoomShapePatchEventPayload) => void;
 };
@@ -88,6 +99,12 @@ const initialOperationSyncState: CanvasOperationCatchupState = {
   pendingAfterSeq: null,
   status: "idle",
   lastError: null,
+};
+
+const initialRoomHistoryState: CanvasRoomHistoryState = {
+  canRedo: false,
+  canUndo: false,
+  historySeq: 0,
 };
 
 function isUsableRealtimeConfig(
@@ -381,8 +398,12 @@ export function useCanvasPresence(
   const [roomLoadedRegions, setRoomLoadedRegions] = useState<
     CanvasRoomLoadedRegion[]
   >([]);
+  const [roomHistory, setRoomHistory] = useState<CanvasRoomHistoryState>(
+    initialRoomHistoryState,
+  );
   const [checkpointStatus, setCheckpointStatus] =
     useState<CanvasRoomCheckpointStatusPayload | null>(null);
+  const [roomStateActive, setRoomStateActive] = useState(false);
   const [lastRejectedShapeLock, setLastRejectedShapeLock] = useState<{
     rejectedAt: number;
     shapeIds: string[];
@@ -396,6 +417,7 @@ export function useCanvasPresence(
   const lastSeenOpSeqRef = useRef(0);
   const applyOperationsRef = useRef(options.applyOperations);
   const catchUpOperationsRef = useRef(options.catchUpOperations);
+  const getInitialViewportBoundsRef = useRef(options.getInitialViewportBounds);
   const hydrateShapesRef = useRef(options.hydrateShapes);
   const applyRoomShapePatchRef = useRef(options.applyRoomShapePatch);
   const activeCatchUpAbortRef = useRef<AbortController | null>(null);
@@ -408,12 +430,14 @@ export function useCanvasPresence(
   useEffect(() => {
     applyOperationsRef.current = options.applyOperations;
     catchUpOperationsRef.current = options.catchUpOperations;
+    getInitialViewportBoundsRef.current = options.getInitialViewportBounds;
     hydrateShapesRef.current = options.hydrateShapes;
     applyRoomShapePatchRef.current = options.applyRoomShapePatch;
   }, [
     options.applyRoomShapePatch,
     options.applyOperations,
     options.catchUpOperations,
+    options.getInitialViewportBounds,
     options.hydrateShapes,
   ]);
 
@@ -638,6 +662,7 @@ export function useCanvasPresence(
   useEffect(() => {
     if (!usableConfig) {
       joinedRef.current = false;
+      setRoomStateActive(false);
       socketRef.current = null;
       roomRef.current = { workspaceId: "", canvasId: "" };
       lastSeenOpSeqRef.current = 0;
@@ -648,6 +673,7 @@ export function useCanvasPresence(
       setRemoteShapeLocks([]);
       setRemoteShapePreviews([]);
       setRoomLoadedRegions([]);
+      setRoomHistory(initialRoomHistoryState);
       setCheckpointStatus(null);
       setLastRejectedShapeLock(null);
       setOperationSync(initialOperationSyncState);
@@ -661,10 +687,12 @@ export function useCanvasPresence(
 
     if (!socket) {
       joinedRef.current = false;
+      setRoomStateActive(false);
       setRemotePresence([]);
       setRemoteShapeLocks([]);
       setRemoteShapePreviews([]);
       setRoomLoadedRegions([]);
+      setRoomHistory(initialRoomHistoryState);
       setCheckpointStatus(null);
       setLastRejectedShapeLock(null);
       return;
@@ -692,11 +720,16 @@ export function useCanvasPresence(
     socketRef.current = realtimeSocket;
     roomRef.current = room;
     joinedRef.current = false;
+    setRoomStateActive(false);
 
     function joinCanvasRoom() {
+      const initialViewportBounds = getInitialViewportBoundsRef.current?.();
+
       joinedRef.current = false;
+      setRoomStateActive(false);
       realtimeSocket.emit("canvas:join", {
         ...room,
+        ...(initialViewportBounds ? { initialViewportBounds } : {}),
         lastSeenOpSeq: lastSeenOpSeqRef.current,
       });
     }
@@ -707,11 +740,13 @@ export function useCanvasPresence(
     });
     realtimeSocket.on("disconnect", () => {
       joinedRef.current = false;
+      setRoomStateActive(false);
       setRemotePresence([]);
       setRemoteShapeLocks([]);
       setOwnedShapeLocks([]);
       setRemoteShapePreviews([]);
       setRoomLoadedRegions([]);
+      setRoomHistory(initialRoomHistoryState);
       setCheckpointStatus(null);
       setLastRejectedShapeLock(null);
     });
@@ -724,6 +759,7 @@ export function useCanvasPresence(
       }
 
       joinedRef.current = true;
+      setRoomStateActive(true);
       reconcileJoinState(payload);
       setRemotePresence(
         filterOwnPresence(
@@ -746,6 +782,11 @@ export function useCanvasPresence(
           (preview) => preview.actorUserId !== currentUserId,
         ),
       );
+      setRoomHistory({
+        canRedo: payload.canRedo,
+        canUndo: payload.canUndo,
+        historySeq: payload.historySeq,
+      });
       setRoomLoadedRegions(payload.loadedRegions);
       if (payload.roomShapes.length) {
         hydrateShapesRef.current?.(payload.roomShapes);
@@ -910,10 +951,17 @@ export function useCanvasPresence(
       }
     });
     realtimeSocket.on("canvas:room:shape:patch", (payload) => {
-      if (
-        !isSameCanvasRoom(payload, room) ||
-        payload.actorUserId === currentUserId
-      ) {
+      if (!isSameCanvasRoom(payload, room)) {
+        return;
+      }
+
+      if (typeof payload.historySeq === "number") {
+        setRoomHistory((currentHistory) => ({
+          canRedo: payload.canRedo ?? currentHistory.canRedo,
+          canUndo: payload.canUndo ?? currentHistory.canUndo,
+          historySeq: payload.historySeq ?? currentHistory.historySeq,
+        }));
+      } else if (payload.actorUserId === currentUserId) {
         return;
       }
 
@@ -934,6 +982,7 @@ export function useCanvasPresence(
 
     return () => {
       joinedRef.current = false;
+      setRoomStateActive(false);
       if (realtimeSocket.connected) {
         realtimeSocket.emit("canvas:leave", room);
       }
@@ -950,6 +999,7 @@ export function useCanvasPresence(
       setOwnedShapeLocks([]);
       setRemoteShapePreviews([]);
       setRoomLoadedRegions([]);
+      setRoomHistory(initialRoomHistoryState);
       setCheckpointStatus(null);
       setLastRejectedShapeLock(null);
     };
@@ -1096,7 +1146,7 @@ export function useCanvasPresence(
         !joinedRef.current ||
         (!patch.upsertShapes.length && !patch.deletedShapeIds.length)
       ) {
-        return;
+        return false;
       }
 
       socket.emit("canvas:room:shape:patch", {
@@ -1104,9 +1154,35 @@ export function useCanvasPresence(
         deletedShapeIds: patch.deletedShapeIds,
         upsertShapes: patch.upsertShapes,
       });
+
+      return true;
     },
     [],
   );
+
+  const undoRoomHistory = useCallback(() => {
+    const socket = socketRef.current;
+    const room = roomRef.current;
+
+    if (!socket?.connected || !joinedRef.current) {
+      return false;
+    }
+
+    socket.emit("canvas:room:history:undo", room);
+    return true;
+  }, []);
+
+  const redoRoomHistory = useCallback(() => {
+    const socket = socketRef.current;
+    const room = roomRef.current;
+
+    if (!socket?.connected || !joinedRef.current) {
+      return false;
+    }
+
+    socket.emit("canvas:room:history:redo", room);
+    return true;
+  }, []);
 
   const sendShapePreview = useCallback(
     (
@@ -1146,6 +1222,7 @@ export function useCanvasPresence(
       clearShapePreview,
       checkpointStatus,
       enabled,
+      roomStateActive,
       currentUserId,
       lastRejectedShapeLock,
       operationSync,
@@ -1156,7 +1233,9 @@ export function useCanvasPresence(
               (lock) => lock.ownerUserId === currentUserId,
             ),
       releaseShapeLocks,
+      redoRoomHistory,
       reportLoadedViewport,
+      roomHistory,
       roomLoadedRegions,
       sendRoomShapePatch,
       remotePresence:
@@ -1172,6 +1251,7 @@ export function useCanvasPresence(
       remoteShapePreviews,
       sendPresenceUpdate,
       sendShapePreview,
+      undoRoomHistory,
     }),
     [
       claimShapeLocks,
@@ -1179,11 +1259,14 @@ export function useCanvasPresence(
       checkpointStatus,
       currentUserId,
       enabled,
+      roomStateActive,
       lastRejectedShapeLock,
       operationSync,
       ownedShapeLocks,
       releaseShapeLocks,
+      redoRoomHistory,
       reportLoadedViewport,
+      roomHistory,
       roomLoadedRegions,
       sendRoomShapePatch,
       remotePresence,
@@ -1191,6 +1274,7 @@ export function useCanvasPresence(
       remoteShapePreviews,
       sendPresenceUpdate,
       sendShapePreview,
+      undoRoomHistory,
     ],
   );
 }

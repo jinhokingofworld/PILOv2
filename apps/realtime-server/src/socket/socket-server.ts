@@ -23,7 +23,10 @@ import {
 import { createCanvasPresenceService } from "../canvas/canvas-presence.service";
 import { createCanvasRoomCheckpointService } from "../canvas/canvas-room-checkpoint.service";
 import { createCanvasRoomService } from "../canvas/canvas-room.service";
-import { createCanvasRoomStateService } from "../canvas/canvas-room-state.service";
+import {
+  createCanvasRoomStateService,
+  type CanvasRoomStateStats,
+} from "../canvas/canvas-room-state.service";
 import { createCanvasShapeLockService } from "../canvas/canvas-shape-lock.service";
 import { createCanvasShapePreviewService } from "../canvas/canvas-shape-preview.service";
 import { createSqlErdAccessService } from "../sql-erd/sql-erd-access.service";
@@ -117,6 +120,7 @@ import { createSocketErrorPayload } from "./socket-errors";
 
 export type RealtimeSocketServerHandle = {
   close: () => Promise<void>;
+  getCanvasRoomStateStats: () => CanvasRoomStateStats;
 };
 
 export type RealtimeSocketServerOptions = {
@@ -131,6 +135,7 @@ type AuthedSocket = Socket & {
       displayName: string;
     };
     canvasRoomAccess: Map<string, CanvasRoomAccess>;
+    canvasRoomsByName: Map<string, CanvasRoomRef>;
     pageCursorPresenceByRoom: Record<string, PageCursorPresenceState>;
     sqlErdPresenceByRoom: Record<string, SqlErdPresenceState>;
   };
@@ -389,10 +394,22 @@ function readJoinPayload(payload: unknown): CanvasJoinPayload | null {
 
   if (!room || !isRecord(payload)) return null;
 
+  const initialViewportBounds =
+    payload.initialViewportBounds === undefined
+      ? null
+      : readLoadedViewportBounds(payload.initialViewportBounds);
   const lastSeenOpSeq = payload.lastSeenOpSeq;
+
+  if (
+    payload.initialViewportBounds !== undefined &&
+    initialViewportBounds === null
+  ) {
+    return null;
+  }
 
   return {
     ...room,
+    ...(initialViewportBounds ? { initialViewportBounds } : {}),
     ...(typeof lastSeenOpSeq === "number" &&
     Number.isInteger(lastSeenOpSeq) &&
     lastSeenOpSeq >= 0
@@ -559,15 +576,12 @@ function readShapePreviewClearPayload(
   };
 }
 
-function readViewportLoadedPayload(
-  payload: unknown,
-): CanvasViewportLoadedPayload | null {
-  const room = readRoomRef(payload);
+function readLoadedViewportBounds(
+  bounds: unknown,
+): CanvasViewportLoadedPayload["bounds"] | null {
+  if (!isRecord(bounds)) return null;
 
-  if (!room || !isRecord(payload) || !isRecord(payload.bounds)) return null;
-
-  const { height, margin, width, x, y } = payload.bounds;
-  const shapes = payload.shapes;
+  const { height, margin, width, x, y } = bounds;
 
   if (
     typeof height !== "number" ||
@@ -586,13 +600,28 @@ function readViewportLoadedPayload(
   ) {
     return null;
   }
+
+  return { height, margin, width, x, y };
+}
+
+function readViewportLoadedPayload(
+  payload: unknown,
+): CanvasViewportLoadedPayload | null {
+  const room = readRoomRef(payload);
+
+  if (!room || !isRecord(payload)) return null;
+
+  const bounds = readLoadedViewportBounds(payload.bounds);
+  const shapes = payload.shapes;
+
+  if (!bounds) return null;
   if (!Array.isArray(shapes) || !shapes.every(isRecord)) {
     return null;
   }
 
   return {
     ...room,
-    bounds: { height, margin, width, x, y },
+    bounds,
     shapes,
   };
 }
@@ -820,6 +849,7 @@ export async function createRealtimeSocketServer({
   });
   const roomService = createCanvasRoomService({
     accessService,
+    appServerUrl: config.appServerUrl,
     presenceService,
     roomStateService,
     shapeLockService,
@@ -988,6 +1018,7 @@ export async function createRealtimeSocketServer({
           userId: session.userId,
         };
         (socket as AuthedSocket).data.canvasRoomAccess = new Map();
+        (socket as AuthedSocket).data.canvasRoomsByName = new Map();
         (socket as AuthedSocket).data.pageCursorPresenceByRoom = {};
         (socket as AuthedSocket).data.sqlErdPresenceByRoom = {};
         next();
@@ -1028,6 +1059,10 @@ export async function createRealtimeSocketServer({
 
       await socket.join(result.roomName);
       authedSocket.data.canvasRoomAccess.set(result.roomName, result.access);
+      authedSocket.data.canvasRoomsByName.set(result.roomName, {
+        canvasId: joinPayload.canvasId,
+        workspaceId: joinPayload.workspaceId,
+      });
       socket.emit(canvasServerEvents.joined, result.payload);
     });
 
@@ -1169,6 +1204,7 @@ export async function createRealtimeSocketServer({
       );
       await socket.leave(roomName);
       authedSocket.data.canvasRoomAccess.delete(roomName);
+      authedSocket.data.canvasRoomsByName.delete(roomName);
 
       if (leavePayload) {
         socket.to(roomName).emit(canvasServerEvents.presenceLeave, leavePayload);
@@ -1461,7 +1497,9 @@ export async function createRealtimeSocketServer({
         return;
       }
 
-      roomStateService.applyShapePatch(patchPayload, patchPayload);
+      roomStateService.applyShapePatch(patchPayload, patchPayload, {
+        actorUserId: authedSocket.data.auth.userId ?? socket.id,
+      });
       roomCheckpointService.scheduleCheckpoint(
         patchPayload,
         authedSocket.data.auth.token,
@@ -1470,6 +1508,94 @@ export async function createRealtimeSocketServer({
         ...patchPayload,
         actorUserId: authedSocket.data.auth.userId ?? socket.id,
         sentAt: new Date().toISOString(),
+      });
+    });
+
+    socket.on(canvasClientEvents.historyUndo, (payload) => {
+      const room = readRoomRef(payload);
+
+      if (!room) {
+        emitCanvasError(socket, "canvas:room:history:undo payload is invalid");
+        return;
+      }
+
+      const roomName = createCanvasRoomName(room);
+
+      if (!socket.rooms.has(roomName)) {
+        socket.emit(
+          canvasServerEvents.error,
+          createSocketErrorPayload(
+            "room_not_joined",
+            "join canvas room before undoing room history",
+          ),
+        );
+        return;
+      }
+
+      if (!assertCanvasRoomWritable(authedSocket, roomName)) {
+        return;
+      }
+
+      const historyPatch = roomStateService.undoLastHistory(room, {
+        actorUserId: authedSocket.data.auth.userId ?? socket.id,
+      });
+
+      if (!historyPatch) return;
+
+      roomCheckpointService.scheduleCheckpoint(room, authedSocket.data.auth.token);
+      io.to(roomName).emit(canvasServerEvents.shapePatch, {
+        ...room,
+        actorUserId: authedSocket.data.auth.userId ?? socket.id,
+        canRedo: historyPatch.canRedo,
+        canUndo: historyPatch.canUndo,
+        deletedShapeIds: historyPatch.deletedShapeIds,
+        historySeq: historyPatch.historySeq,
+        sentAt: new Date().toISOString(),
+        upsertShapes: historyPatch.upsertShapes,
+      });
+    });
+
+    socket.on(canvasClientEvents.historyRedo, (payload) => {
+      const room = readRoomRef(payload);
+
+      if (!room) {
+        emitCanvasError(socket, "canvas:room:history:redo payload is invalid");
+        return;
+      }
+
+      const roomName = createCanvasRoomName(room);
+
+      if (!socket.rooms.has(roomName)) {
+        socket.emit(
+          canvasServerEvents.error,
+          createSocketErrorPayload(
+            "room_not_joined",
+            "join canvas room before redoing room history",
+          ),
+        );
+        return;
+      }
+
+      if (!assertCanvasRoomWritable(authedSocket, roomName)) {
+        return;
+      }
+
+      const historyPatch = roomStateService.redoLastHistory(room, {
+        actorUserId: authedSocket.data.auth.userId ?? socket.id,
+      });
+
+      if (!historyPatch) return;
+
+      roomCheckpointService.scheduleCheckpoint(room, authedSocket.data.auth.token);
+      io.to(roomName).emit(canvasServerEvents.shapePatch, {
+        ...room,
+        actorUserId: authedSocket.data.auth.userId ?? socket.id,
+        canRedo: historyPatch.canRedo,
+        canUndo: historyPatch.canUndo,
+        deletedShapeIds: historyPatch.deletedShapeIds,
+        historySeq: historyPatch.historySeq,
+        sentAt: new Date().toISOString(),
+        upsertShapes: historyPatch.upsertShapes,
       });
     });
 
@@ -1615,15 +1741,28 @@ export async function createRealtimeSocketServer({
 
     socket.on("disconnect", () => {
       void (async () => {
+        const canvasRooms: CanvasRoomRef[] = Array.from(
+          authedSocket.data.canvasRoomsByName.values(),
+        );
         const leaveEvents = presenceService.clearSocket(socket.id);
         const sqlErdClearResults = sqlErdPresenceService.clearSocket(socket.id);
         const pageCursorLeaveEvents: PageCursorPresenceState[] = Object.values(
           authedSocket.data.pageCursorPresenceByRoom,
         );
+        authedSocket.data.canvasRoomAccess.clear();
+        authedSocket.data.canvasRoomsByName.clear();
         authedSocket.data.pageCursorPresenceByRoom = {};
         const [lockReleaseEvents, previewClearEvents] = await Promise.all([
           shapeLockService.clearSocket(socket.id),
           shapePreviewService.clearSocket(socket.id),
+          Promise.all(
+            canvasRooms.map((room) =>
+              roomCheckpointService.flushCheckpointNow(
+                room,
+                authedSocket.data.auth.token,
+              ),
+            ),
+          ),
         ]);
 
         for (const leavePayload of leaveEvents) {
@@ -1680,6 +1819,9 @@ export async function createRealtimeSocketServer({
       await io.close();
       await redisAdapter?.close();
       await database.close();
+    },
+    getCanvasRoomStateStats() {
+      return roomStateService.getStats();
     },
   };
 }

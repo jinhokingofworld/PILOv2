@@ -31,6 +31,12 @@ async function bootstrap() {
           service: "pilo-realtime-server",
           status: "ok",
           scope: config.scope,
+          classic: {
+            canvas: {
+              engine: "classic_room_state",
+              ...socketServer.getCanvasRoomStateStats(),
+            },
+          },
           sync: {
             canvas: {
               endpoint: "/sync/canvas",

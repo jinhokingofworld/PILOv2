@@ -15,6 +15,15 @@ This module owns Canvas Socket.IO rooms and presence delivery.
   room.
 - Emit leave events when a socket leaves or disconnects.
 - Return `canvas:joined` with current in-memory room presence.
+- Hydrate an empty classic Canvas room cache from the App Server viewport shape
+  API when `canvas:join.initialViewportBounds` is provided. This is a
+  best-effort optimization; join must still succeed when the hydrate request
+  fails so the frontend can fall back to its normal viewport lazy loading.
+- Flush dirty classic Canvas room checkpoints on explicit leave, unexpected
+  socket disconnect, and graceful server shutdown.
+- Expose classic Canvas roomState health counters (`roomCount`,
+  `cachedShapeCount`, `dirtyShapeCount`, `deletedTombstoneCount`,
+  `loadedRegionCount`, and history counts) from realtime-server health output.
 - Validate tldraw sync-room access and create canvas-scoped sync rooms lazily.
 
 ## Non-Responsibilities
@@ -25,6 +34,11 @@ This module owns Canvas Socket.IO rooms and presence delivery.
 - CRDT or Yjs.
 - Long-term presence storage.
 - Persisting `editingShapeId` or `editingMode`; edit intent is realtime-only.
+- Treating absence from the room cache as deletion. Deletion requires an
+  explicit delete patch/tombstone.
+- Evicting dirty roomState shapes before they are checkpointed. Cache eviction
+  may remove clean hydrated shapes, but pending local changes must stay until
+  App Server confirms the checkpoint.
 
 Note: `@tldraw/sync` room state is owned by realtime-server. The room persists
 its recoverable snapshot to `canvas_sync_documents`, while local UI Preview can

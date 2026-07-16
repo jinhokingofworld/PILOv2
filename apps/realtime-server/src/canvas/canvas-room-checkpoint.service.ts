@@ -54,8 +54,13 @@ export function createCanvasRoomCheckpointService({
     status: CanvasRoomCheckpointStatusPayload["status"],
     pendingOperations: number,
   ) {
+    const checkpointState = roomStateService.getCheckpointState(room);
+
     onCheckpointStatus?.({
       ...room,
+      checkpointHistorySeq: checkpointState.checkpointHistorySeq,
+      checkpointVersion: checkpointState.checkpointVersion,
+      historySeq: checkpointState.historySeq,
       pendingOperations,
       status,
       updatedAt: new Date().toISOString(),
@@ -106,7 +111,7 @@ export function createCanvasRoomCheckpointService({
         return;
       }
 
-      roomStateService.markCheckpointSucceeded(room, operations);
+      roomStateService.markCheckpointSucceeded(room, operations, responseBody);
       emitCheckpointStatus(
         room,
         "saved",

@@ -3,11 +3,16 @@ import type {
   CreateDriveUploadUrlInput,
   CreateDriveUploadUrlPayload,
   CompleteDriveUploadInput,
+  CreateDocumentInput,
+  CreateDocumentPayload,
   DeleteDriveItemPayload,
+  DocumentBootstrapPayload,
   DriveDownloadUrlPayload,
   DriveItem,
   DriveListPayload,
   ListDriveItemsQuery,
+  SaveDocumentSnapshotInput,
+  SaveDocumentSnapshotPayload,
   UpdateDriveItemInput
 } from "@/features/drive/types";
 
@@ -225,6 +230,14 @@ function driveFoldersPath(workspaceId: string) {
   return `/workspaces/${encodeURIComponent(workspaceId)}/drive/folders` as const;
 }
 
+function driveDocumentsPath(workspaceId: string) {
+  return `/workspaces/${encodeURIComponent(workspaceId)}/drive/documents` as const;
+}
+
+function driveDocumentPath(workspaceId: string, documentId: string) {
+  return `${driveDocumentsPath(workspaceId)}/${encodeURIComponent(documentId)}` as const;
+}
+
 function driveUploadUrlPath(workspaceId: string) {
   return `/workspaces/${encodeURIComponent(
     workspaceId
@@ -330,6 +343,34 @@ export function createDriveApiClient({
       return requestDriveData<DriveItem>(
         driveFoldersPath(workspaceId),
         withJsonBody(body, { method: "POST" }),
+        requestOptions
+      );
+    },
+
+    async createDocument(workspaceId: string, body: CreateDocumentInput = {}) {
+      return requestDriveData<CreateDocumentPayload>(
+        driveDocumentsPath(workspaceId),
+        withJsonBody(body, { method: "POST" }),
+        requestOptions
+      );
+    },
+
+    async getDocument(workspaceId: string, documentId: string) {
+      return requestDriveData<DocumentBootstrapPayload>(
+        driveDocumentPath(workspaceId, documentId),
+        undefined,
+        requestOptions
+      );
+    },
+
+    async saveDocumentSnapshot(
+      workspaceId: string,
+      documentId: string,
+      body: SaveDocumentSnapshotInput
+    ) {
+      return requestDriveData<SaveDocumentSnapshotPayload>(
+        `${driveDocumentPath(workspaceId, documentId)}/snapshot`,
+        withJsonBody(body, { method: "PUT" }),
         requestOptions
       );
     },

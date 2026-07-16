@@ -15,6 +15,17 @@ const onboarding = await import(
 );
 
 assert.deepEqual(
+  onboarding.readGithubOnboardingCallback(new URLSearchParams()),
+  {
+    workspaceId: null,
+    step: null,
+    installationId: null,
+    repositoryId: null,
+    callbackError: null
+  }
+);
+
+assert.deepEqual(
   onboarding.readGithubOnboardingCallback(
     new URLSearchParams(
       "workspaceId=workspace-1&github_onboarding_step=installation&github_installation_id=installation-7&github_callback_error=authorization_cancelled"
@@ -46,7 +57,13 @@ assert.equal(
   ).workspaceId,
   null
 );
-assert.equal(onboarding.getGithubOnboardingStep("not-a-step"), "oauth");
+assert.equal(
+  onboarding.readGithubOnboardingCallback(
+    new URLSearchParams("workspaceId=workspace-1&github_onboarding_step=oauth")
+  ).step,
+  "oauth"
+);
+assert.equal(onboarding.getGithubOnboardingStep("not-a-step"), null);
 assert.match(
   onboarding.getGithubCallbackErrorMessage("project_oauth_account_mismatch"),
   /ProjectV2/
@@ -65,7 +82,15 @@ assert.match(pageSource, /callback\.step !== "project-oauth"/);
 assert.match(pageSource, /callback\.step === "project-oauth" \? "repositories"/);
 assert.match(pageSource, /router\.replace\("\/home"\)/);
 assert.match(pageSource, /router\.replace\(createGithubOnboardingReturnUrl\(workspace\.id, "oauth"\)\)/);
-assert.match(pageSource, /if \(workspaceId\) \{ await resumeGithub\(workspaceId\); return; \}/);
+assert.match(
+  pageSource,
+  /if \(!callback\.workspaceId \|\| callback\.callbackError \|\| callback\.step !== "oauth"\) return;/
+);
+assert.match(pageSource, /void resumeGithub\(callback\.workspaceId\);/);
+assert.match(
+  pageSource,
+  /if \(workspaceId\) \{\s*if \(!connect\) \{ router\.replace\("\/home"\); return; \}\s*await resumeGithub\(workspaceId\); return;\s*\}/
+);
 assert.match(pageSource, /projectIds\.length === 0/);
 assert.doesNotMatch(pageSource, /accessToken.*returnUrl|state.*returnUrl/);
 assert.match(pageSource, /const \[repositoryPage, setRepositoryPage\] = useState\(1\)/);

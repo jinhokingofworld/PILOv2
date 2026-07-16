@@ -14,13 +14,20 @@
   - [x] `document` Drive item type, 문서/스냅샷/Yjs/edit session 테이블, Activity Log action registry 추가
   - [x] 문서 생성 API와 Drive 목록의 document item 노출
   - [x] Supabase dev DB에 `073_create_workspace_documents` migration 적용 및 schema 검증
-- [ ] **Tiptap/Yjs 로컬 에디터와 자동 저장**: Issue [#1151](https://github.com/Developer-EJ/PILO/issues/1151) 진행 중
-  - [ ] Tiptap/Yjs 의존성과 최신 snapshot 기반 editor bootstrap
-  - [ ] version 검증 기반 Yjs state/Tiptap JSON snapshot 저장과 `current_version` 갱신
-  - [ ] 자동 저장 상태와 새로고침 복구
-  - [ ] `document_content_updated` Activity Log와 rollback 검증
-  - [ ] API 계약, focused test, app-server/frontend lint/test, PR
-- [ ] **후속 작업**: 문서 lifecycle(이름 변경/이동/삭제), `/files` 에디터 UI, Yjs realtime, 파일 첨부/PDF viewer
+- [x] **문서 최신 snapshot 조회 및 저장 API**: Issue [#1151](https://github.com/Developer-EJ/PILO/issues/1151) 완료
+  - [x] version 검증 기반 Yjs state/Tiptap JSON snapshot 저장과 `current_version` 갱신
+  - [x] `document_content_updated` Activity Log와 rollback 검증
+  - [x] API 계약, focused app-server test
+- [x] **Tiptap/Yjs 로컬 에디터와 자동 저장**: Issue [#1154](https://github.com/Developer-EJ/PILO/issues/1154), PR [#1160](https://github.com/Developer-EJ/PILO/pull/1160) 병합 완료
+  - [x] Tiptap/Yjs 의존성과 최신 snapshot 기반 editor bootstrap
+  - [x] 자동 저장 상태와 새로고침 복구
+  - [x] frontend lint/test
+  - [x] PR [#1160](https://github.com/Developer-EJ/PILO/pull/1160) 생성
+- [x] **문서 lifecycle API와 Activity Log**: Issue [#1166](https://github.com/Developer-EJ/PILO/issues/1166), PR [#1169](https://github.com/Developer-EJ/PILO/pull/1169) 생성
+  - [x] rename/move/delete의 Activity Log와 문서 aggregate soft delete 구현
+  - [x] API 계약과 전체 app-server 검증
+  - [x] PR [#1169](https://github.com/Developer-EJ/PILO/pull/1169) 생성
+- [ ] **후속 작업**: Drive 이동 UI, Yjs realtime, 파일 첨부/PDF viewer
 
 ## 공통 제약
 

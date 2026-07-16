@@ -5,6 +5,7 @@ import {
   ChevronRight,
   Download,
   FileText,
+  FilePlus,
   Folder,
   FolderPlus,
   Home,
@@ -16,6 +17,7 @@ import {
   Upload,
   X
 } from "lucide-react";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   useCallback,
   useEffect,
@@ -64,6 +66,8 @@ import {
 import { DriveWorkspaceLocationAdapter } from "@/features/drive/drive-workspace-location-adapter";
 import type { DriveItem, DriveListPayload } from "@/features/drive/types";
 import { cn } from "@/lib/utils";
+
+import { DriveDocumentEditor } from "./document-editor";
 
 type DriveStatus = "idle" | "loading" | "success" | "error";
 
@@ -166,6 +170,10 @@ function getItemTypeLabel(item: DriveItem) {
     return "폴더";
   }
 
+  if (item.itemType === "document") {
+    return "문서";
+  }
+
   return item.mimeType || "파일";
 }
 
@@ -234,6 +242,7 @@ function DriveBreadcrumbs({
 
 function DriveItemName({ item }: { item: DriveItem }) {
   const isFolder = item.itemType === "folder";
+  const isDocument = item.itemType === "document";
 
   return (
     <>
@@ -242,7 +251,9 @@ function DriveItemName({ item }: { item: DriveItem }) {
           "flex size-9 shrink-0 items-center justify-center rounded-lg border",
           isFolder
             ? "border-amber-200 bg-amber-50 text-amber-700"
-            : "border-sky-200 bg-sky-50 text-sky-700"
+            : isDocument
+              ? "border-violet-200 bg-violet-50 text-violet-700"
+              : "border-sky-200 bg-sky-50 text-sky-700"
         )}
       >
         {isFolder ? (
@@ -266,6 +277,7 @@ function DriveItemRow({
   item,
   onDownload,
   onOpenDelete,
+  onOpenDocument,
   onOpenFolder,
   onOpenRename
 }: {
@@ -273,24 +285,26 @@ function DriveItemRow({
   item: DriveItem;
   onDownload: (item: DriveItem) => void;
   onOpenDelete: (item: DriveItem) => void;
+  onOpenDocument: (item: DriveItem) => void;
   onOpenFolder: (item: DriveItem) => void;
   onOpenRename: (item: DriveItem) => void;
 }) {
   const isFolder = item.itemType === "folder";
+  const isDocument = item.itemType === "document";
   const isBusy = activeActionItemId === item.id;
 
   return (
     <li
       className={cn(
         "grid gap-3 border-b px-3 py-3 last:border-b-0 md:grid-cols-[minmax(0,1.8fr)_minmax(7rem,0.7fr)_minmax(8rem,0.8fr)_minmax(9rem,0.8fr)_3rem] md:items-center",
-        isFolder && "transition hover:bg-muted/40"
+        (isFolder || isDocument) && "transition hover:bg-muted/40"
       )}
     >
-      {isFolder ? (
+      {isFolder || isDocument ? (
         <button
           type="button"
           className="flex min-w-0 items-center gap-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          onClick={() => onOpenFolder(item)}
+          onClick={() => (isFolder ? onOpenFolder(item) : onOpenDocument(item))}
         >
           <DriveItemName item={item} />
         </button>
@@ -333,7 +347,7 @@ function DriveItemRow({
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-40">
             <DropdownMenuGroup>
-              {!isFolder ? (
+              {item.itemType === "file" ? (
                 <DropdownMenuItem
                   className="gap-2"
                   disabled={isBusy}
@@ -682,6 +696,8 @@ function DeleteItemDialog({
 
 export function DrivePanel() {
   const authSession = useAuthSession();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const driveListRef = useRef<HTMLDivElement | null>(null);
   const loadedDriveParentIdRef = useRef<{
@@ -692,6 +708,7 @@ export function DrivePanel() {
   const workspaceName = authSession?.activeWorkspace.name ?? "Workspace";
   const normalizedAccessToken = authSession?.accessToken.trim() ?? "";
   const canUseDrive = Boolean(workspaceId.trim() && normalizedAccessToken);
+  const documentId = searchParams.get("documentId");
   const [currentParentId, setCurrentParentId] = useState<string | null>(null);
   const [driveData, setDriveData] = useState<DriveListPayload>(emptyDriveData);
   const [status, setStatus] = useState<DriveStatus>("idle");
@@ -722,9 +739,12 @@ export function DrivePanel() {
     const folderCount = driveData.items.filter(
       (item) => item.itemType === "folder"
     ).length;
-    const fileCount = driveData.items.length - folderCount;
+    const documentCount = driveData.items.filter(
+      (item) => item.itemType === "document"
+    ).length;
+    const fileCount = driveData.items.length - folderCount - documentCount;
 
-    return `폴더 ${folderCount}개 · 파일 ${fileCount}개`;
+    return `폴더 ${folderCount}개 · 문서 ${documentCount}개 · 파일 ${fileCount}개`;
   }, [driveData.items]);
   const currentFolderName = driveData.parent
     ? driveData.parent.name
@@ -852,6 +872,41 @@ export function DrivePanel() {
     setFolderName("");
     setFolderError(null);
     setIsCreateOpen(true);
+  }
+
+  function updateDocumentLocation(nextDocumentId: string | null) {
+    const nextSearchParams = new URLSearchParams(searchParams.toString());
+
+    if (nextDocumentId) {
+      nextSearchParams.set("documentId", nextDocumentId);
+    } else {
+      nextSearchParams.delete("documentId");
+    }
+
+    const search = nextSearchParams.toString();
+    router.push(search ? `/files?${search}` : "/files");
+  }
+
+  async function handleCreateDocument() {
+    if (!canUseDrive) {
+      setActionError("문서를 만들려면 로그인이 필요합니다.");
+      return;
+    }
+
+    setActionError(null);
+    setActiveActionItemId("create-document");
+
+    try {
+      const result = await driveClient.createDocument(workspaceId, {
+        parentId: currentParentId
+      });
+      await reloadDrive();
+      updateDocumentLocation(result.document.id);
+    } catch (createError) {
+      setActionError(errorMessageFromUnknown(createError));
+    } finally {
+      setActiveActionItemId(null);
+    }
   }
 
   function handleCreateOpenChange(open: boolean) {
@@ -1109,6 +1164,15 @@ export function DrivePanel() {
     }
   }
 
+  if (documentId) {
+    return (
+      <DriveDocumentEditor
+        documentId={documentId}
+        onClose={() => updateDocumentLocation(null)}
+      />
+    );
+  }
+
   const isLoading = status === "loading";
   const isEmpty = status === "success" && driveData.items.length === 0;
 
@@ -1165,6 +1229,20 @@ export function DrivePanel() {
                 <Upload />
               )}
               업로드
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={!canUseDrive || activeActionItemId === "create-document"}
+              onClick={() => void handleCreateDocument()}
+            >
+              {activeActionItemId === "create-document" ? (
+                <Loader2 className="animate-spin" />
+              ) : (
+                <FilePlus />
+              )}
+              새 문서
             </Button>
             <Button
               type="button"
@@ -1262,6 +1340,16 @@ export function DrivePanel() {
                     <FolderPlus />
                     새 폴더
                   </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={!canUseDrive || activeActionItemId === "create-document"}
+                    onClick={() => void handleCreateDocument()}
+                  >
+                    <FilePlus />
+                    새 문서
+                  </Button>
                 </div>
               </div>
             ) : (
@@ -1284,6 +1372,7 @@ export function DrivePanel() {
                           void handleDownloadItem(targetItem)
                         }
                         onOpenDelete={openDeleteDialog}
+                        onOpenDocument={(document) => updateDocumentLocation(document.id)}
                         onOpenFolder={(folder) => setCurrentParentId(folder.id)}
                         onOpenRename={openRenameSheet}
                       />
