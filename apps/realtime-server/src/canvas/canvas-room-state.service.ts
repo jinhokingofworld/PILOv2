@@ -36,6 +36,7 @@ export type CanvasRoomStateService = {
   markCheckpointSucceeded: (
     room: CanvasRoomRef,
     operations: CanvasCheckpointSyncOperation[],
+    result?: unknown,
   ) => void;
 };
 
@@ -117,6 +118,7 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
   const loadedRegionsByRoom = new Map<string, CanvasRoomLoadedRegion[]>();
   const deletedTombstonesByRoom = new Map<string, Map<string, number | null>>();
   const dirtyShapeIdsByRoom = new Map<string, Set<string>>();
+  const checkpointOperationIdsByRoom = new Map<string, Map<string, string>>();
   const shapesByRoom = new Map<string, Map<string, CachedRoomShape>>();
 
   function getRoomShapeCache(roomName: string) {
@@ -160,8 +162,126 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
       : null;
   }
 
-  function createCheckpointOperationId(type: string, shapeId: string) {
-    return `checkpoint:${type}:${shapeId}:${Date.now()}`;
+  function readShapeContentHash(shape: Record<string, unknown> | undefined) {
+    return typeof shape?.contentHash === "string" && shape.contentHash
+      ? shape.contentHash
+      : null;
+  }
+
+  function getRoomCheckpointOperationIds(roomName: string) {
+    let operationIds = checkpointOperationIdsByRoom.get(roomName);
+
+    if (!operationIds) {
+      operationIds = new Map<string, string>();
+      checkpointOperationIdsByRoom.set(roomName, operationIds);
+    }
+
+    return operationIds;
+  }
+
+  function createCheckpointOperationId(
+    roomName: string,
+    type: string,
+    shapeId: string,
+  ) {
+    const operationIds = getRoomCheckpointOperationIds(roomName);
+    const operationKey = `${type}:${shapeId}`;
+    const currentOperationId = operationIds.get(operationKey);
+
+    if (currentOperationId) return currentOperationId;
+
+    const nextOperationId = `checkpoint:${type}:${shapeId}:${Date.now()}`;
+
+    operationIds.set(operationKey, nextOperationId);
+    return nextOperationId;
+  }
+
+  function clearCheckpointOperationIds(roomName: string, shapeId: string) {
+    const operationIds = checkpointOperationIdsByRoom.get(roomName);
+
+    if (!operationIds) return;
+
+    operationIds.delete(`create:${shapeId}`);
+    operationIds.delete(`update:${shapeId}`);
+    operationIds.delete(`delete:${shapeId}`);
+
+    if (!operationIds.size) {
+      checkpointOperationIdsByRoom.delete(roomName);
+    }
+  }
+
+  function unwrapApiResponseData(value: unknown) {
+    const response = readRecord(value);
+
+    return response.success === true && "data" in response
+      ? response.data
+      : value;
+  }
+
+  function readPersistedShapeMetadata(value: unknown) {
+    const shape = readRecord(value);
+    const id = shape.id;
+    const revision = readShapeRevision(shape);
+    const contentHash = readShapeContentHash(shape);
+
+    if (typeof id !== "string" || !id.trim() || revision === null) {
+      return null;
+    }
+
+    return {
+      contentHash,
+      revision,
+      shapeId: id,
+    };
+  }
+
+  function readPersistedShapeMetadataById(result: unknown) {
+    const data = readRecord(unwrapApiResponseData(result));
+    const shapes = Array.isArray(data.shapes) ? data.shapes : [];
+    const metadataById = new Map<
+      string,
+      { contentHash: string | null; revision: number; shapeId: string }
+    >();
+
+    shapes.forEach((shape) => {
+      const metadata = readPersistedShapeMetadata(shape);
+
+      if (metadata) {
+        metadataById.set(metadata.shapeId, metadata);
+      }
+    });
+
+    return metadataById;
+  }
+
+  function applyPersistedShapeMetadata(
+    shapeCache: Map<string, CachedRoomShape>,
+    shapeId: string,
+    metadata:
+      | { contentHash: string | null; revision: number; shapeId: string }
+      | undefined,
+  ) {
+    if (!metadata) return;
+
+    const cachedShape = shapeCache.get(shapeId);
+
+    if (!cachedShape) return;
+
+    const nextShape: Record<string, unknown> = {
+      ...cachedShape.shape,
+      revision: metadata.revision,
+    };
+
+    if (metadata.contentHash) {
+      nextShape.contentHash = metadata.contentHash;
+    } else {
+      delete nextShape.contentHash;
+    }
+
+    shapeCache.set(shapeId, {
+      cachedAt: cachedShape.cachedAt,
+      shape: nextShape,
+    });
   }
 
   function resolveParentShapeId(parentId: unknown) {
@@ -329,7 +449,11 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
         if (deletedTombstones.has(shapeId)) {
           operations.push({
             baseRevision: deletedBaseRevision ?? null,
-            clientOperationId: createCheckpointOperationId("delete", shapeId),
+            clientOperationId: createCheckpointOperationId(
+              roomName,
+              "delete",
+              shapeId,
+            ),
             shapeId,
             type: "delete",
           });
@@ -345,6 +469,7 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
         operations.push({
           baseRevision: revision,
           clientOperationId: createCheckpointOperationId(
+            roomName,
             revision === null ? "create" : "update",
             shapeId,
           ),
@@ -390,15 +515,27 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
       return nextRegions;
     },
 
-    markCheckpointSucceeded(room, operations) {
+    markCheckpointSucceeded(room, operations, result) {
       const roomName = createCanvasRoomName(room);
+      const shapeCache = shapesByRoom.get(roomName);
       const dirtyShapeIds = dirtyShapeIdsByRoom.get(roomName);
       const deletedTombstones = deletedTombstonesByRoom.get(roomName);
+      const metadataById = readPersistedShapeMetadataById(result);
 
       operations.forEach((operation) => {
         dirtyShapeIds?.delete(operation.shapeId);
+        clearCheckpointOperationIds(roomName, operation.shapeId);
         if (operation.type === "delete") {
           deletedTombstones?.delete(operation.shapeId);
+          return;
+        }
+
+        if (shapeCache) {
+          applyPersistedShapeMetadata(
+            shapeCache,
+            operation.shapeId,
+            metadataById.get(operation.shapeId),
+          );
         }
       });
     },

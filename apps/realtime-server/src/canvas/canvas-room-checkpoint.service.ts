@@ -106,7 +106,7 @@ export function createCanvasRoomCheckpointService({
         return;
       }
 
-      roomStateService.markCheckpointSucceeded(room, operations);
+      roomStateService.markCheckpointSucceeded(room, operations, responseBody);
       emitCheckpointStatus(
         room,
         "saved",

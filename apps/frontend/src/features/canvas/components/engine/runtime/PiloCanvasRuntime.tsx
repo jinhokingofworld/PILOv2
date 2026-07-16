@@ -98,28 +98,52 @@ type CanvasShapeSerializableMetadata = {
   revision?: unknown;
 };
 
-function serializeCanvasRoomStateShape(shape: PiloCanvasFreeformShape) {
+type CanvasRoomShapeMetadataFallback = {
+  contentHashes?: Map<string, string>;
+  revisions?: Map<string, number>;
+};
+
+function readCanvasRoomStateRevision(value: unknown) {
+  return typeof value === "number" && Number.isInteger(value) && value > 0
+    ? value
+    : null;
+}
+
+function readCanvasRoomStateContentHash(value: unknown) {
+  return typeof value === "string" && value ? value : null;
+}
+
+function serializeCanvasRoomStateShape(
+  shape: PiloCanvasFreeformShape,
+  fallback: CanvasRoomShapeMetadataFallback = {},
+) {
   const shapeRecord = shape as Record<string, unknown> &
     CanvasShapeSerializableMetadata;
   const serializedShape: Record<string, unknown> = { ...shapeRecord };
+  const shapeId = typeof shapeRecord.id === "string" ? shapeRecord.id : null;
+  const revision =
+    readCanvasRoomStateRevision(shapeRecord.revision) ??
+    (shapeId ? fallback.revisions?.get(shapeId) ?? null : null);
+  const contentHash =
+    readCanvasRoomStateContentHash(shapeRecord.contentHash) ??
+    (shapeId ? fallback.contentHashes?.get(shapeId) ?? null : null);
 
-  if (
-    typeof shapeRecord.revision === "number" &&
-    Number.isInteger(shapeRecord.revision) &&
-    shapeRecord.revision > 0
-  ) {
-    serializedShape.revision = shapeRecord.revision;
+  if (revision !== null) {
+    serializedShape.revision = revision;
   }
 
-  if (typeof shapeRecord.contentHash === "string") {
-    serializedShape.contentHash = shapeRecord.contentHash;
+  if (contentHash) {
+    serializedShape.contentHash = contentHash;
   }
 
   return serializedShape;
 }
 
-function serializeCanvasRoomStateShapes(shapes: PiloCanvasFreeformShape[]) {
-  return shapes.map(serializeCanvasRoomStateShape);
+function serializeCanvasRoomStateShapes(
+  shapes: PiloCanvasFreeformShape[],
+  fallback?: CanvasRoomShapeMetadataFallback,
+) {
+  return shapes.map((shape) => serializeCanvasRoomStateShape(shape, fallback));
 }
 
 function isRemoteOperationProtectedByLocalInteraction({
@@ -357,6 +381,7 @@ function PiloCanvasRuntimeInner({
     initialLocalInteractionState,
   );
   const remoteShapeRevisionRef = useRef(new Map<string, number>());
+  const remoteShapeContentHashRef = useRef(new Map<string, string>());
   const localShapeVersionRef = useRef(0);
   const [canvasHydrationVersion, setCanvasHydrationVersion] = useState(0);
   const [cameraRestoreVersion, setCameraRestoreVersion] = useState(0);
@@ -376,6 +401,7 @@ function PiloCanvasRuntimeInner({
     unloadedShapeIdsRef.current.delete(shapeId);
     shapeDetailCacheRef.current.delete(shapeId);
     pendingLocalShapeVersionsRef.current.delete(shapeId);
+    remoteShapeContentHashRef.current.delete(shapeId);
   }, []);
   const catchUpCanvasOperations = useCallback(
     async (afterSeq: number, signal?: AbortSignal) => {
@@ -424,6 +450,14 @@ function PiloCanvasRuntimeInner({
               operation.resultRevision,
             ),
           );
+          if (operation.operationType === "delete") {
+            remoteShapeContentHashRef.current.delete(operation.shapeId);
+          } else {
+            remoteShapeContentHashRef.current.set(
+              operation.shapeId,
+              operation.contentHash,
+            );
+          }
           return;
         }
 
@@ -450,6 +484,10 @@ function PiloCanvasRuntimeInner({
               remoteShapeRevisionRef.current.get(operation.shapeId) ?? 0,
               operation.resultRevision,
             ),
+          );
+          remoteShapeContentHashRef.current.set(
+            operation.shapeId,
+            operation.contentHash,
           );
           return;
         }
@@ -481,6 +519,14 @@ function PiloCanvasRuntimeInner({
           operation.shapeId,
           operation.resultRevision,
         );
+        if (operation.operationType === "delete") {
+          remoteShapeContentHashRef.current.delete(operation.shapeId);
+        } else {
+          remoteShapeContentHashRef.current.set(
+            operation.shapeId,
+            operation.contentHash,
+          );
+        }
         result.expandedFrameIds.forEach((frameId) => {
           expandedFrameIds.add(frameId);
         });
@@ -647,7 +693,10 @@ function PiloCanvasRuntimeInner({
 
       canvasPresence.sendRoomShapePatch({
         deletedShapeIds: patch.deletedShapeIds,
-        upsertShapes: serializeCanvasRoomStateShapes(patch.upsertShapes),
+        upsertShapes: serializeCanvasRoomStateShapes(patch.upsertShapes, {
+          contentHashes: remoteShapeContentHashRef.current,
+          revisions: remoteShapeRevisionRef.current,
+        }),
       });
     },
     [canvasPresence.sendRoomShapePatch, persistThroughRoomState],
@@ -665,7 +714,10 @@ function PiloCanvasRuntimeInner({
     ) => {
       canvasPresence.reportLoadedViewport(
         bounds,
-        serializeCanvasRoomStateShapes(shapes),
+        serializeCanvasRoomStateShapes(shapes, {
+          contentHashes: remoteShapeContentHashRef.current,
+          revisions: remoteShapeRevisionRef.current,
+        }),
       );
     },
     [canvasPresence.reportLoadedViewport],
@@ -685,6 +737,7 @@ function PiloCanvasRuntimeInner({
   useEffect(() => {
     deferredRemoteOperationsRef.current.clear();
     remoteShapeRevisionRef.current.clear();
+    remoteShapeContentHashRef.current.clear();
     deletedShapeIdsRef.current.clear();
     unloadedShapeIdsRef.current.clear();
   }, [board.id]);
@@ -770,6 +823,23 @@ function PiloCanvasRuntimeInner({
 
   useEffect(() => {
     hydrateRoomShapesRef.current = (rawShapes: Record<string, unknown>[]) => {
+      rawShapes.forEach((shape) => {
+        const shapeId = typeof shape.id === "string" ? shape.id : null;
+        const revision = readCanvasRoomStateRevision(shape.revision);
+        const contentHash = readCanvasRoomStateContentHash(shape.contentHash);
+
+        if (!shapeId) return;
+        if (revision !== null) {
+          remoteShapeRevisionRef.current.set(
+            shapeId,
+            Math.max(remoteShapeRevisionRef.current.get(shapeId) ?? 0, revision),
+          );
+        }
+        if (contentHash) {
+          remoteShapeContentHashRef.current.set(shapeId, contentHash);
+        }
+      });
+
       const hydratedShapes = normalizeCanvasFreeformShapes(
         rawShapes,
       ) as PiloCanvasFreeformShape[];
