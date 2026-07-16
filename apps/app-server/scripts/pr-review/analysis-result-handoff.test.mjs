@@ -385,8 +385,8 @@ function createService(database, github) {
   assert.deepEqual(
     membershipCalls.map((call) => call.values),
     [
-      [SESSION_ID, "flow-1", "file-1", 1],
-      [SESSION_ID, "flow-1", "file-2", 2],
+      [SESSION_ID, "flow-1", "file-2", 1],
+      [SESSION_ID, "flow-1", "file-1", 2],
       [SESSION_ID, "flow-2", "file-3", 1]
     ]
   );
@@ -394,8 +394,8 @@ function createService(database, github) {
     [
       SESSION_ID,
       "flow-1",
-      "membership-1",
       "membership-2",
+      "membership-1",
       "depends_on",
       "hybrid",
       90,

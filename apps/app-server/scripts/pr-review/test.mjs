@@ -539,4 +539,5 @@ await import("./github-file-pagination.test.mjs");
 await import("./semantic-graph-contract.test.mjs");
 await import("./semantic-graph-candidates.test.mjs");
 await import("./semantic-graph-validator.test.mjs");
+await import("./review-priority.test.mjs");
 await import("./canvas-materializer.test.mjs");
