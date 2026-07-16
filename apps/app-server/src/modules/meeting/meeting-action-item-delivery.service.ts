@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { HttpException, Injectable } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import { QueryResultRow } from "pg";
 import { badRequest, notFound } from "../../common/api-error";
@@ -426,7 +426,7 @@ export class MeetingActionItemDeliveryService {
           SET status = 'COMPLETED',
               calendar_event_id = $2,
               pilo_issue_id = $3::bigint,
-              target_resource_id = COALESCE($2::text, $3::text),
+              target_resource_id = COALESCE($2::bigint::text, $3::bigint::text),
               claim_token = NULL,
               locked_until = NULL,
               updated_at = now()
@@ -505,6 +505,37 @@ export class MeetingActionItemDeliveryService {
       const value = (error as { code?: unknown }).code;
       if (typeof value === "string" && /^[A-Z0-9_]{1,80}$/.test(value)) {
         return value;
+      }
+    }
+    if (error instanceof HttpException) {
+      const response = error.getResponse();
+      if (
+        typeof response === "object" &&
+        response !== null &&
+        "error" in response
+      ) {
+        const payload = response.error;
+        if (
+          typeof payload === "object" &&
+          payload !== null &&
+          "code" in payload &&
+          "message" in payload
+        ) {
+          const { code, message } = payload as {
+            code?: unknown;
+            message?: unknown;
+          };
+          if (
+            code === "BAD_REQUEST" &&
+            typeof message === "string" &&
+            message.includes("GitHub ProjectV2 OAuth")
+          ) {
+            return "GITHUB_PROJECT_OAUTH_RECONNECT_REQUIRED";
+          }
+          if (typeof code === "string" && /^[A-Z0-9_]{1,80}$/.test(code)) {
+            return code;
+          }
+        }
       }
     }
     return "ACTION_ITEM_DELIVERY_FAILED";

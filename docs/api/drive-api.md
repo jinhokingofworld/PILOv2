@@ -439,7 +439,9 @@ wss://{realtime-origin}/sync/documents
 - realtime-server는 Hocuspocus 인증 hook에서 bearer session, Workspace membership, 삭제되지 않은 `document` Drive item을 검증한다.
 - Workspace `owner`, `member`는 연결과 편집이 가능하다. 인증되지 않았거나 권한이 없거나 삭제된 문서는 연결을 거부한다.
 - realtime room은 즉시 변경 relay와 awareness만 담당한다. raw Yjs update는 1차 MVP에서 `document_yjs_updates`에 저장하지 않는다.
-- collaboration provider는 병합된 문서를 마지막 변경 뒤 `1초` debounce로 기존 snapshot 저장 API에 전송하고, 마지막 editor가 나갈 때 pending 저장을 즉시 flush한다.
+- collaboration provider는 snapshot으로 bootstrap한 기존 Y.Doc을 `/sync/documents` room에 연결한다. local·remote Yjs update 모두 마지막 변경 뒤 `1초` debounce로 최신 병합 상태를 기존 snapshot 저장 API에 전송한다.
+- 문서 편집 화면을 닫거나 unmount할 때 pending snapshot을 즉시 flush한다. 따라서 마지막 editor가 나가는 경우에도 pending 변경을 기다리지 않는다.
+- snapshot 저장이 `409 CONFLICT`이면 최신 snapshot을 현재 Y.Doc에 병합하고 한 번 재시도한다. 저장이 실패하면 문서를 닫지 않고 재시도 UI를 유지한다.
 - realtime-server가 재시작되면 browser는 최신 snapshot을 다시 읽어 bootstrap한다. 마지막 snapshot 뒤 최대 `1초`의 편집은 유실될 수 있다.
 
 ## Upload URL 발급

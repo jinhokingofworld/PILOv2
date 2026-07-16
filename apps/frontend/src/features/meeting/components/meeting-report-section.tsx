@@ -37,6 +37,7 @@ import type {
   MeetingReportSummary,
   UpdateMeetingReportActionItemInput
 } from "@/features/meeting/types";
+import { saveThenDeliverActionItem } from "@/features/meeting/utils/action-item-delivery-flow";
 import { cn } from "@/lib/utils";
 
 export type MeetingReportStatusFilter = "ALL" | MeetingReportStatus;
@@ -413,8 +414,17 @@ function getActionItemStatusLabel(status: MeetingReportActionItem["status"]) {
 }
 
 function getActionItemDeliveryErrorMessage(errorCode: string | null) {
+  if (errorCode === "GITHUB_PROJECT_OAUTH_RECONNECT_REQUIRED") {
+    return "Pilo issue를 만들려면 GitHub ProjectV2 연결을 project·repo 권한으로 다시 연결해주세요.";
+  }
+  if (errorCode === "BAD_REQUEST") {
+    return "입력한 일정 날짜 또는 선택한 Pilo issue 대상을 확인해주세요.";
+  }
   if (errorCode === "FORBIDDEN") return "연결된 서비스에 접근할 수 없습니다.";
   if (errorCode === "NOT_FOUND") return "선택한 대상 정보를 찾을 수 없습니다.";
+  if (errorCode === "ACTION_ITEM_DELIVERY_STALE") {
+    return "생성 요청 시간이 초과되었습니다. 다시 시도해주세요.";
+  }
   return "생성에 실패했습니다. 입력을 확인한 뒤 다시 시도해주세요.";
 }
 
@@ -437,7 +447,7 @@ function ActionItemReviewCard({
   onDismiss: () => void;
   onEvidenceSelect: (segment: MeetingReportTranscriptSegment) => void;
   onLoadIssueDeliveryOptions: () => Promise<MeetingReportActionItemDeliveryOptions>;
-  onSave: (body: UpdateMeetingReportActionItemInput) => void;
+  onSave: (body: UpdateMeetingReportActionItemInput) => Promise<boolean>;
 }) {
   const [title, setTitle] = useState(actionItem.title);
   const [description, setDescription] = useState(actionItem.description);
@@ -445,12 +455,9 @@ function ActionItemReviewCard({
   const [assigneeUserId, setAssigneeUserId] = useState(
     actionItem.assignee?.userId ?? ""
   );
-  const [showDelivery, setShowDelivery] = useState(false);
   const [deliveryType, setDeliveryType] = useState<"calendar_event" | "pilo_issue">(
     "calendar_event"
   );
-  const [deliveryTitle, setDeliveryTitle] = useState(actionItem.title);
-  const [deliveryDescription, setDeliveryDescription] = useState(actionItem.description);
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [isAllDay, setIsAllDay] = useState(true);
@@ -463,8 +470,6 @@ function ActionItemReviewCard({
   const [deliveryOptionsError, setDeliveryOptionsError] = useState<string | null>(null);
   const [loadingIssueOptions, setLoadingIssueOptions] = useState(false);
   const pending = actionItem.status === "PENDING";
-  const canDeliver = pending || actionItem.status === "DELIVERY_FAILED";
-  const retryingDelivery = actionItem.status === "DELIVERY_FAILED";
   const selectedBoard = issueOptions?.boards.find((board) => board.id === selectedBoardId);
 
   useEffect(() => {
@@ -472,9 +477,32 @@ function ActionItemReviewCard({
     setDescription(actionItem.description);
     setPriority(actionItem.priority);
     setAssigneeUserId(actionItem.assignee?.userId ?? "");
-    setDeliveryTitle(actionItem.title);
-    setDeliveryDescription(actionItem.description);
-    setShowDelivery(false);
+    const draft = actionItem.status === "DELIVERY_FAILED"
+      ? actionItem.delivery?.draft
+      : null;
+    if (draft?.deliveryType === "calendar_event") {
+      setDeliveryType("calendar_event");
+      setStartDate(draft.calendar.startDate);
+      setEndDate(draft.calendar.endDate);
+      setIsAllDay(draft.calendar.isAllDay ?? true);
+      setStartTime(draft.calendar.startTime ?? "");
+      setEndTime(draft.calendar.endTime ?? "");
+      return;
+    }
+    if (draft?.deliveryType === "pilo_issue") {
+      setDeliveryType("pilo_issue");
+      setSelectedBoardId(draft.issue.boardId);
+      setSelectedColumnId(draft.issue.columnId);
+      return;
+    }
+    setDeliveryType("calendar_event");
+    setStartDate("");
+    setEndDate("");
+    setIsAllDay(true);
+    setStartTime("");
+    setEndTime("");
+    setSelectedBoardId("");
+    setSelectedColumnId("");
   }, [actionItem]);
 
   async function selectDeliveryType(nextType: "calendar_event" | "pilo_issue") {
@@ -501,65 +529,97 @@ function ActionItemReviewCard({
     setSelectedColumnId(board?.columns[0]?.id ?? "");
   }
 
-  async function openDelivery() {
-    const draft = actionItem.status === "DELIVERY_FAILED"
-      ? actionItem.delivery?.draft
-      : null;
-    if (draft?.deliveryType === "calendar_event") {
-      setDeliveryType("calendar_event");
-      setDeliveryTitle(draft.calendar.title ?? actionItem.title);
-      setDeliveryDescription(draft.calendar.description ?? actionItem.description);
-      setStartDate(draft.calendar.startDate);
-      setEndDate(draft.calendar.endDate);
-      setIsAllDay(draft.calendar.isAllDay ?? true);
-      setStartTime(draft.calendar.startTime ?? "");
-      setEndTime(draft.calendar.endTime ?? "");
-    } else if (draft?.deliveryType === "pilo_issue") {
-      setDeliveryType("pilo_issue");
-      setDeliveryTitle(draft.issue.title ?? actionItem.title);
-      setDeliveryDescription(draft.issue.body ?? actionItem.description);
-      setSelectedBoardId(draft.issue.boardId);
-      setSelectedColumnId(draft.issue.columnId);
-      await selectDeliveryType("pilo_issue");
-    }
-    setShowDelivery(true);
+  function getActionItemPatch(): UpdateMeetingReportActionItemInput {
+    return {
+      title: title.trim(),
+      description: description.trim(),
+      priority,
+      assigneeUserId: assigneeUserId || null
+    };
+  }
+
+  function hasUnsavedActionItemChanges(
+    patch: UpdateMeetingReportActionItemInput
+  ) {
+    return (
+      patch.title !== actionItem.title ||
+      patch.description !== actionItem.description ||
+      patch.priority !== actionItem.priority ||
+      patch.assigneeUserId !== (actionItem.assignee?.userId ?? null)
+    );
   }
 
   async function submitDelivery() {
+    const patch = getActionItemPatch();
+    if (!patch.title || !patch.description) return;
+    let delivery: MeetingReportActionItemDeliveryInput;
     if (deliveryType === "calendar_event") {
       if (!startDate || !endDate) return;
-      await onDeliver({
+      delivery = {
         deliveryType,
         calendar: {
-          title: deliveryTitle.trim() || undefined,
-          description: deliveryDescription.trim() || null,
+          title: patch.title,
+          description: patch.description,
           isAllDay,
           startDate,
           endDate,
           startTime: isAllDay ? null : startTime || null,
           endTime: isAllDay ? null : endTime || null
         }
-      });
-      return;
+      };
+    } else {
+      if (!selectedBoardId || !selectedColumnId) return;
+      delivery = {
+        deliveryType,
+        issue: {
+          boardId: selectedBoardId,
+          columnId: selectedColumnId,
+          title: patch.title,
+          body: patch.description
+        }
+      };
     }
-    if (!selectedBoardId || !selectedColumnId) return;
-    await onDeliver({
-      deliveryType,
-      issue: {
-        boardId: selectedBoardId,
-        columnId: selectedColumnId,
-        title: deliveryTitle.trim() || undefined,
-        body: deliveryDescription.trim() || undefined
-      }
+
+    await saveThenDeliverActionItem({
+      needsSave: pending && hasUnsavedActionItemChanges(patch),
+      save: () => onSave(patch),
+      deliver: () => onDeliver(delivery)
     });
   }
 
   return (
     <li className="grid gap-3 rounded-lg border bg-background p-3 text-sm">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="rounded-full border bg-muted/40 px-2 py-0.5 text-xs font-medium text-muted-foreground">
-          {getActionItemStatusLabel(actionItem.status)}
-        </span>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="rounded-full border bg-muted/40 px-2 py-0.5 text-xs font-medium text-muted-foreground">
+            {getActionItemStatusLabel(actionItem.status)}
+          </span>
+          {pending ? (
+            <div aria-label="생성 대상 선택" className="flex rounded-md border bg-background p-0.5">
+              <Button
+                type="button"
+                size="sm"
+                variant={deliveryType === "calendar_event" ? "default" : "ghost"}
+                className="h-7 px-2 text-xs"
+                disabled={busy}
+                onClick={() => void selectDeliveryType("calendar_event")}
+              >
+                Calendar 일정
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={deliveryType === "pilo_issue" ? "default" : "ghost"}
+                className="h-7 px-2 text-xs"
+                disabled={busy || loadingIssueOptions}
+                onClick={() => void selectDeliveryType("pilo_issue")}
+              >
+                {loadingIssueOptions ? <Loader2 className="animate-spin" /> : null}
+                Pilo issue
+              </Button>
+            </div>
+          ) : null}
+        </div>
         <span className="text-xs text-muted-foreground">
           AI 후보 #{actionItem.sourceIndex + 1}
         </span>
@@ -569,14 +629,14 @@ function ActionItemReviewCard({
         <div className="grid gap-2">
           <Input
             aria-label="후속 작업 제목"
-            disabled={busy || retryingDelivery}
+            disabled={busy}
             value={title}
             onChange={(event) => setTitle(event.target.value)}
           />
           <textarea
             aria-label="후속 작업 설명"
             className="min-h-20 rounded-md border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            disabled={busy || retryingDelivery}
+            disabled={busy}
             value={description}
             onChange={(event) => setDescription(event.target.value)}
           />
@@ -607,6 +667,40 @@ function ActionItemReviewCard({
               ))}
             </select>
           </div>
+          {deliveryType === "calendar_event" ? (
+            <div className="grid gap-2 sm:grid-cols-2">
+              <label className="grid gap-1 text-xs text-muted-foreground">
+                시작 날짜
+                <Input type="date" disabled={busy} value={startDate} onChange={(event) => setStartDate(event.target.value)} />
+              </label>
+              <label className="grid gap-1 text-xs text-muted-foreground">
+                종료 날짜
+                <Input type="date" disabled={busy} value={endDate} onChange={(event) => setEndDate(event.target.value)} />
+              </label>
+              <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                <input type="checkbox" checked={isAllDay} disabled={busy} onChange={(event) => setIsAllDay(event.target.checked)} />
+                종일 일정
+              </label>
+              {!isAllDay ? (
+                <div className="grid grid-cols-2 gap-2">
+                  <Input aria-label="시작 시간" type="time" disabled={busy} value={startTime} onChange={(event) => setStartTime(event.target.value)} />
+                  <Input aria-label="종료 시간" type="time" disabled={busy} value={endTime} onChange={(event) => setEndTime(event.target.value)} />
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <div className="grid gap-2 sm:grid-cols-2">
+              <select aria-label="Board 선택" className="h-9 rounded-md border bg-background px-3 text-sm" disabled={busy || loadingIssueOptions} value={selectedBoardId} onChange={(event) => changeBoard(event.target.value)}>
+                <option value="">Board 선택</option>
+                {issueOptions?.boards.map((board) => <option key={board.id} value={board.id}>{board.name}</option>)}
+              </select>
+              <select aria-label="Column 선택" className="h-9 rounded-md border bg-background px-3 text-sm" disabled={busy || !selectedBoard} value={selectedColumnId} onChange={(event) => setSelectedColumnId(event.target.value)}>
+                <option value="">Column 선택</option>
+                {selectedBoard?.columns.map((column) => <option key={column.id} value={column.id}>{column.name}</option>)}
+              </select>
+              {deliveryOptionsError ? <p className="text-xs text-destructive sm:col-span-2">{deliveryOptionsError}</p> : null}
+            </div>
+          )}
         </div>
       ) : (
         <div>
@@ -653,84 +747,6 @@ function ActionItemReviewCard({
         </div>
       ) : null}
 
-      {showDelivery ? (
-        <div className="grid gap-3 rounded-md border bg-muted/20 p-3">
-          <div className="grid gap-2 sm:grid-cols-2">
-            <Button
-              type="button"
-              variant={deliveryType === "calendar_event" ? "default" : "outline"}
-              disabled={busy || actionItem.status === "DELIVERY_FAILED"}
-              onClick={() => void selectDeliveryType("calendar_event")}
-            >
-              Calendar 일정
-            </Button>
-            <Button
-              type="button"
-              variant={deliveryType === "pilo_issue" ? "default" : "outline"}
-              disabled={busy || loadingIssueOptions || actionItem.status === "DELIVERY_FAILED"}
-              onClick={() => void selectDeliveryType("pilo_issue")}
-            >
-              {loadingIssueOptions ? <Loader2 className="animate-spin" /> : null}
-              Pilo issue
-            </Button>
-          </div>
-          <Input
-            aria-label="생성 대상 제목"
-            disabled={busy || retryingDelivery}
-            value={deliveryTitle}
-            onChange={(event) => setDeliveryTitle(event.target.value)}
-          />
-          <textarea
-            aria-label="생성 대상 설명"
-            className="min-h-20 rounded-md border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            disabled={busy || retryingDelivery}
-            value={deliveryDescription}
-            onChange={(event) => setDeliveryDescription(event.target.value)}
-          />
-          {deliveryType === "calendar_event" ? (
-            <div className="grid gap-2 sm:grid-cols-2">
-              <label className="grid gap-1 text-xs text-muted-foreground">
-                시작 날짜
-                <Input type="date" disabled={busy || retryingDelivery} value={startDate} onChange={(event) => setStartDate(event.target.value)} />
-              </label>
-              <label className="grid gap-1 text-xs text-muted-foreground">
-                종료 날짜
-                <Input type="date" disabled={busy || retryingDelivery} value={endDate} onChange={(event) => setEndDate(event.target.value)} />
-              </label>
-              <label className="flex items-center gap-2 text-xs text-muted-foreground">
-                <input type="checkbox" checked={isAllDay} disabled={busy || retryingDelivery} onChange={(event) => setIsAllDay(event.target.checked)} />
-                종일 일정
-              </label>
-              {!isAllDay ? (
-                <div className="grid grid-cols-2 gap-2">
-                  <Input aria-label="시작 시간" type="time" disabled={busy || retryingDelivery} value={startTime} onChange={(event) => setStartTime(event.target.value)} />
-                  <Input aria-label="종료 시간" type="time" disabled={busy || retryingDelivery} value={endTime} onChange={(event) => setEndTime(event.target.value)} />
-                </div>
-              ) : null}
-            </div>
-          ) : (
-            <div className="grid gap-2 sm:grid-cols-2">
-              <select aria-label="Board 선택" className="h-9 rounded-md border bg-background px-3 text-sm" disabled={busy || loadingIssueOptions || retryingDelivery} value={selectedBoardId} onChange={(event) => changeBoard(event.target.value)}>
-                <option value="">Board 선택</option>
-                {issueOptions?.boards.map((board) => <option key={board.id} value={board.id}>{board.name}</option>)}
-              </select>
-              <select aria-label="Column 선택" className="h-9 rounded-md border bg-background px-3 text-sm" disabled={busy || !selectedBoard || retryingDelivery} value={selectedColumnId} onChange={(event) => setSelectedColumnId(event.target.value)}>
-                <option value="">Column 선택</option>
-                {selectedBoard?.columns.map((column) => <option key={column.id} value={column.id}>{column.name}</option>)}
-              </select>
-              {deliveryOptionsError ? <p className="text-xs text-destructive sm:col-span-2">{deliveryOptionsError}</p> : null}
-            </div>
-          )}
-          <div className="flex justify-end gap-2">
-            <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => setShowDelivery(false)}>취소</Button>
-            <Button type="button" size="sm" disabled={busy || !deliveryTitle.trim() || (deliveryType === "calendar_event" ? !startDate || !endDate : !selectedBoardId || !selectedColumnId)} onClick={() => void submitDelivery()}>
-              {busy ? <Loader2 className="animate-spin" /> : null}
-              확인하고 생성
-            </Button>
-          </div>
-        </div>
-      ) : null}
-
       {pending ? (
         <div className="flex flex-wrap justify-end gap-2">
           <Button
@@ -747,25 +763,19 @@ function ActionItemReviewCard({
             size="sm"
             variant="outline"
             disabled={busy || !title.trim() || !description.trim()}
-            onClick={() =>
-              onSave({
-                title: title.trim(),
-                description: description.trim(),
-                priority,
-                assigneeUserId: assigneeUserId || null
-              })
-            }
+            onClick={() => void onSave(getActionItemPatch())}
           >
             수정 저장
           </Button>
-          <Button type="button" size="sm" disabled={busy} onClick={() => void openDelivery()}>
+          <Button type="button" size="sm" disabled={busy || !title.trim() || !description.trim() || (deliveryType === "calendar_event" ? !startDate || !endDate : !selectedBoardId || !selectedColumnId)} onClick={() => void submitDelivery()}>
+            {busy ? <Loader2 className="animate-spin" /> : null}
             승인 및 생성
           </Button>
         </div>
       ) : null}
       {actionItem.status === "DELIVERY_FAILED" ? (
         <div className="flex justify-end">
-          <Button type="button" size="sm" disabled={busy} onClick={() => void openDelivery()}>
+          <Button type="button" size="sm" disabled={busy} onClick={() => void submitDelivery()}>
             다시 시도
           </Button>
         </div>
@@ -807,7 +817,7 @@ function MeetingReportDetailModal({
   onUpdateActionItem: (
     actionItem: MeetingReportActionItem,
     body: UpdateMeetingReportActionItemInput
-  ) => void;
+  ) => Promise<boolean>;
   open: boolean;
   deleting: boolean;
   regenerating: boolean;
@@ -1337,7 +1347,7 @@ export function MeetingReportSection({
       action: "dismiss" | "update",
       body?: UpdateMeetingReportActionItemInput
     ) => {
-      if (!selectedReport) return;
+      if (!selectedReport) return false;
       setMutatingActionItemId(actionItem.id);
       try {
         if (action === "dismiss") {
@@ -1352,8 +1362,10 @@ export function MeetingReportSection({
           onToastMessage("후속 작업을 수정했습니다.");
         }
         await loadReportDetail(selectedReport.id, { silent: true });
+        return true;
       } catch (error) {
         onToastMessage(getReportRequestErrorMessage(error));
+        return false;
       } finally {
         setMutatingActionItemId(null);
       }
@@ -1695,7 +1707,7 @@ export function MeetingReportSection({
         onLoadIssueDeliveryOptions={handleLoadIssueDeliveryOptions}
         onRegenerate={(report) => void handleRegenerateReport(report)}
         onUpdateActionItem={(actionItem, body) =>
-          void handleActionItemMutation(actionItem, "update", body)
+          handleActionItemMutation(actionItem, "update", body)
         }
       />
     </section>

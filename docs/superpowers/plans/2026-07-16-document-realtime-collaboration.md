@@ -60,17 +60,18 @@
 ## 작업 4: frontend editor를 collaboration과 recovery state에 연결
 
 **대상 파일:**
-- 생성: `apps/frontend/src/features/documents/realtime/document-collaboration-provider.ts`, `document-realtime-client.ts`, `document-realtime-client.test.ts`
-- 수정: `apps/frontend/src/features/documents/components/document-editor.tsx`, `document-editor-page.tsx`, `document-save-status.tsx`
-- 수정: `apps/frontend/scripts/test.mjs`
+- 생성: `apps/frontend/src/features/drive/document-realtime.ts`, `document-realtime.test.mjs`
+- 수정: `apps/frontend/src/features/drive/components/document-editor.tsx`, `drive-document-contract.test.mjs`
+- 수정: `apps/frontend/package.json`
 
-- [ ] editor schema/attachment renderer는 유지한 채 local-only content transport를 collaboration adapter로 교체한다. 같은 edit session에서 REST autosave와 realtime snapshot write를 동시에 실행하지 않는다.
-- [ ] pending update envelope과 `clientUpdateId`를 browser session storage에 보관한다. reconnect 시 acknowledgement 전까지 같은 id로 resend하고, acknowledgement된 것만 지운다.
+- [x] editor schema/attachment renderer는 유지한 채 snapshot으로 bootstrap한 Y.Doc에 Hocuspocus provider를 연결한다. local·remote Yjs update 모두 `1초` debounce snapshot 저장을 만든다.
+- [x] 문서 화면 종료와 provider 종료에서 pending Yjs 전송 및 snapshot 저장을 flush한다. `409 CONFLICT`는 최신 snapshot을 현재 Y.Doc에 병합한 뒤 한 번 재시도한다.
+- [ ] custom `clientUpdateId` acknowledgement envelope은 Hocuspocus 표준 sync protocol과 중복되므로 만들지 않는다. offline 복구 경계와 unsynced update UX는 reconnect QA 결과를 바탕으로 별도 보강한다.
 - [ ] remote awareness를 Tiptap collaboration cursor와 compact member list로 바인딩한다. untrusted display name을 HTML로 render하지 않는다.
-- [ ] transport state를 `저장 중`/`저장됨`, reconnecting을 `재연결 중`, recover 불가능한 server rejection을 `저장 실패`로 표시한다. content를 잃지 않는 retry를 제공한다.
+- [x] transport state를 `저장 중`/`저장됨`, reconnecting을 `재연결 중`, 인증 실패를 재연결 가능한 오류로 표시한다. snapshot 저장 재시도는 로컬 내용을 버리지 않는다.
 - [ ] 열린 문서의 delete를 감지하면 provider를 stop하고 해당 document pending update를 비우며 deletion state를 표시한 뒤 `/files`로 안전하게 이동한다.
-- [ ] reconnect resend identity, acknowledgement cleanup, provider error mapping, deleted-document shutdown, remote cursor가 save request를 만들지 않는 경우를 test한다.
-- [ ] 두 browser session의 같은 paragraph 동시 편집, tab offline/reconnect, realtime-server restart를 수동 검증한다. 두 변경이 converge하고 refresh 뒤에도 남아야 한다.
+- [x] provider room name, realtime URL 변환, `1초` debounce/flush, remote transaction이 저장 요청을 만들지 않는 연결 지점을 단위·계약 test로 검증한다.
+- [ ] deleted-document shutdown, remote cursor, 두 browser session의 같은 paragraph 동시 편집, tab offline/reconnect, realtime-server restart를 수동 검증한다. 두 변경이 converge하고 refresh 뒤에도 남아야 한다.
 
 ## 작업 5: ephemeral shared PDF presence와 opt-in follow 추가
 

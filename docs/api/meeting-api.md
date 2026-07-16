@@ -872,7 +872,9 @@ Content-Type: application/json
 명시해야 한다. title/description/body를 생략하면 저장된 Action Item 내용을 기본값으로 쓴다.
 
 응답 `data`는 `actionItemId`, `deliveryType`, `status`(`COMPLETED` 또는 `FAILED`)와 성공 시
-`calendarEventId` 또는 `piloIssueId`, 실패 시 안전한 `errorCode`만 반환한다. 실패는 HTTP 성공
+`calendarEventId` 또는 `piloIssueId`, 실패 시 안전한 `errorCode`만 반환한다.
+`GITHUB_PROJECT_OAUTH_RECONNECT_REQUIRED`은 Pilo issue 생성에 필요한 GitHub ProjectV2 OAuth를
+`project`·`repo` 권한으로 다시 연결해야 함을 뜻한다. 실패는 HTTP 성공
 응답 안의 `FAILED` 결과로 저장되며 UI는 상세 재조회 뒤 재시도 상태를 표시한다. validation·소속·진행 중
 상태는 `400`, 다른 Workspace/report/action item은 `404`, Board OAuth 등 provider 오류는 안전한
 `FAILED.errorCode`로만 노출한다. 최초 요청자와 가장 최근 재시도자는 audit으로 남고, 같은 Workspace
