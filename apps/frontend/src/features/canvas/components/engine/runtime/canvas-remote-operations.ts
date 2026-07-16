@@ -282,12 +282,14 @@ export function applyCanvasRemoteOperation({
 export function applyCanvasRoomShapePatch({
   currentShapes,
   deletedShapeIds,
+  respectViewport = true,
   shapeDetailCache,
   upsertShapes,
   viewportBounds,
 }: {
   currentShapes: PiloCanvasFreeformShape[];
   deletedShapeIds: string[];
+  respectViewport?: boolean;
   shapeDetailCache: Map<string, PiloCanvasFreeformShape>;
   upsertShapes: PiloCanvasFreeformShape[];
   viewportBounds: PiloCanvasViewportBounds | null;
@@ -371,7 +373,11 @@ export function applyCanvasRoomShapePatch({
 
         return;
       }
-    } else if (!currentShape && !intersectsViewport(nextShape, viewportBounds)) {
+    } else if (
+      respectViewport &&
+      !currentShape &&
+      !intersectsViewport(nextShape, viewportBounds)
+    ) {
       return;
     }
 

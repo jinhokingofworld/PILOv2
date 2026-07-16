@@ -800,6 +800,9 @@ assert.match(canvasRemoteOperations, /isPiloFrameCollapsed/);
 assert.match(canvasRemoteOperations, /getPiloChildShapeCount/);
 assert.match(canvasRemoteOperations, /expandedFrameIds/);
 assert.match(canvasRemoteOperations, /applyCanvasRoomShapePatch/);
+assert.match(canvasRemoteOperations, /respectViewport = true/);
+assert.match(canvasRuntime, /respectViewport: false/);
+assert.match(canvasRuntime, /respectViewport: true/);
 assert.match(canvasRemoteOperations, /loadedShapeIds/);
 assert.match(canvasRemoteOperations, /unloadedShapeIds/);
 assert.match(canvasRemoteOperations, /collectCanvasFrameDescendantShapeIds/);
@@ -892,12 +895,16 @@ assert.match(canvasPresenceHook, /undoRoomHistory/);
 assert.match(canvasPresenceHook, /redoRoomHistory/);
 assert.match(canvasPresenceHook, /setRoomHistory/);
 assert.match(canvasPresenceHook, /applyRoomShapePatch/);
+assert.match(canvasPresenceHook, /lastCommittedShapePatch/);
+assert.match(canvasPresenceHook, /setLastCommittedShapePatch/);
 assert.match(canvasPresenceHook, /checkpointStatus/);
 assert.match(canvasPresenceHook, /roomStateActive/);
 assert.match(canvasPresenceHook, /setRoomStateActive\(true\)/);
 assert.match(canvasPresenceHook, /setRoomStateActive\(false\)/);
 assert.match(canvasPresenceHook, /sendShapePreview/);
 assert.match(canvasShapePersistence, /persistThroughRoomState/);
+assert.match(canvasShapePersistence, /explicitDeletedShapeIds/);
+assert.match(canvasShapePersistence, /uniqueExplicitDeletedShapeIds/);
 assert.match(canvasShapePersistence, /const didSendRoomPatch =[\s\S]*onRoomShapePatch\?\./);
 assert.match(canvasShapePersistence, /if \(didSendRoomPatch\) \{[\s\S]*clearPendingLocalShapeChanges/);
 assert.match(canvasShapePersistence, /clearPendingLocalShapeChanges\(pendingLocalShapeVersions\)/);
@@ -1057,9 +1064,12 @@ assert.match(piloTldrawCanvas, /closest\("\.canvas-trash-drop-zone"\)/);
 assert.match(piloTldrawCanvas, /window\.addEventListener\("pointerup"/);
 assert.match(piloTldrawCanvas, /window\.requestAnimationFrame\(\(\) => \{/);
 assert.match(piloTldrawCanvas, /collectRemoteBusyShapeIds/);
-assert.match(piloTldrawCanvas, /collectRemoteSelectedShapeIds/);
+assert.doesNotMatch(piloTldrawCanvas, /collectRemoteSelectedShapeIds/);
+assert.match(
+  piloTldrawCanvas,
+  /const remoteDeleteBlockedShapeIds = useMemo\(\(\) => new Set<string>\(\), \[\]\)/,
+);
 assert.match(piloTldrawCanvas, /filterUnlockedShapeIds/);
-assert.match(piloTldrawCanvas, /entry\.selectedShapeIds\.forEach\(\(shapeId\)/);
 assert.match(piloTldrawCanvas, /presence\?\.remoteShapePreviews\.forEach/);
 assert.match(piloTldrawCanvas, /CANVAS_COLLABORATION_GUARD_MESSAGE/);
 assert.match(piloTldrawCanvas, /showCollaborationNotice/);
@@ -1071,6 +1081,8 @@ assert.match(piloTldrawCanvas, /CANVAS_PENDING_PREVIEW_HEARTBEAT_MS = 1_500/);
 assert.match(piloTldrawCanvas, /CANVAS_REMOTE_PREVIEW_DELETE_GRACE_MS = 8_000/);
 assert.match(piloTldrawCanvas, /PendingRealtimePreviewGroup/);
 assert.match(piloTldrawCanvas, /registerPendingRealtimePreviewGroup/);
+assert.match(piloTldrawCanvas, /acknowledgePendingPreviewGroupShapes/);
+assert.match(piloTldrawCanvas, /presence\?\.lastCommittedShapePatch/);
 assert.match(piloTldrawCanvas, /collectPendingPreviewGroupShapes/);
 assert.match(piloTldrawCanvas, /isShapeHiddenByCollapsedAncestor/);
 assert.match(piloTldrawCanvas, /previewDeleteGraceSinceRef/);
@@ -1132,6 +1144,13 @@ assert.match(piloCanvasStateReporter, /withSerializedArrowBindings/);
 assert.match(piloCanvasStateReporter, /withPiloMediaAsset/);
 assert.match(piloCanvasStateReporter, /onResolveFreeformShapeSnapshot/);
 assert.match(piloCanvasStateReporter, /source:\s*"user"/);
+assert.match(piloCanvasStateReporter, /getRemovedCanvasShapeIds/);
+assert.match(piloCanvasStateReporter, /pendingExplicitDeletedShapeIdsRef/);
+assert.match(piloCanvasStateReporter, /explicitDeletedShapeIds/);
+assert.match(
+  piloCanvasStateReporter,
+  /lastFreeformSnapshotSignatureRef\.current === nextSnapshotSignature &&\s*!pendingExplicitDeletedShapeIdsRef\.current\.size/,
+);
 assert.match(piloTldrawCanvas, /mergeRemoteChanges/);
 assert.match(piloTldrawCanvas, /CANVAS_SHAPE_LOCK_RELEASE_GRACE_MS/);
 assert.match(piloTldrawCanvas, /scheduleShapeLockRelease/);
@@ -1852,6 +1871,69 @@ async function runScenarioBatchFallback(operations, runBatch) {
       ),
     /Canvas API 404/
   );
+}
+
+{
+  const currentShapeIds = new Set();
+  const nextShapeIds = new Set();
+  const explicitDeletedShapeIds = ["shape:remote-preview"];
+  const unloadedShapeIds = new Set();
+  const deletedShapeIds = new Set();
+
+  explicitDeletedShapeIds.forEach((shapeId) => {
+    if (nextShapeIds.has(shapeId) || unloadedShapeIds.has(shapeId)) return;
+    deletedShapeIds.add(shapeId);
+  });
+
+  assert.equal(currentShapeIds.has("shape:remote-preview"), false);
+  assert.equal(deletedShapeIds.has("shape:remote-preview"), true);
+}
+
+{
+  const unloadedShapeIds = new Set(["shape:collapsed-child"]);
+  const deletedShapeIds = new Set();
+
+  ["shape:collapsed-child"].forEach((shapeId) => {
+    if (unloadedShapeIds.has(shapeId)) return;
+    deletedShapeIds.add(shapeId);
+  });
+
+  assert.equal(deletedShapeIds.has("shape:collapsed-child"), false);
+}
+
+{
+  const pendingPreviewGroups = new Map([
+    [
+      "created-folder",
+      {
+        shapeIds: new Set(["shape:folder-frame", "shape:folder-child"]),
+        snapshots: new Map([
+          ["shape:folder-frame", createScenarioFrame("shape:folder-frame", false)],
+          [
+            "shape:folder-child",
+            {
+              ...createScenarioShape("shape:folder-child", 1),
+              parentId: "shape:folder-frame"
+            }
+          ]
+        ])
+      }
+    ]
+  ]);
+  const committedShapeIds = new Set(["shape:folder-frame", "shape:folder-child"]);
+
+  pendingPreviewGroups.forEach((group, groupId) => {
+    committedShapeIds.forEach((shapeId) => {
+      group.shapeIds.delete(shapeId);
+      group.snapshots.delete(shapeId);
+    });
+
+    if (!group.shapeIds.size) {
+      pendingPreviewGroups.delete(groupId);
+    }
+  });
+
+  assert.equal(pendingPreviewGroups.size, 0);
 }
 
 await import("./calendar/test.mjs");

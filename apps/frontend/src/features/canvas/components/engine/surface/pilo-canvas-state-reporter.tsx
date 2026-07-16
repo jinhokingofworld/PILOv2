@@ -72,6 +72,24 @@ function shouldReadCanvasShapeSnapshot(entry?: CanvasStoreListenEntry) {
   });
 }
 
+function getRemovedCanvasShapeIds(entry?: CanvasStoreListenEntry) {
+  const removedRecords = Object.values(entry?.changes?.removed ?? {});
+
+  return removedRecords.flatMap((record) => {
+    if (
+      getTldrawRecordType(record) !== "shape" ||
+      !record ||
+      typeof record !== "object" ||
+      !("id" in record) ||
+      typeof record.id !== "string"
+    ) {
+      return [];
+    }
+
+    return [record.id];
+  });
+}
+
 function getFreeformSnapshotSignature(shapes: PiloCanvasFreeformShape[]) {
   return JSON.stringify(shapes);
 }
@@ -84,7 +102,10 @@ export function CanvasStateReporter({
   onViewportBoundsChange,
 }: {
   onFreeformShapesDraftChange: (shapes: PiloCanvasFreeformShape[]) => void;
-  onFreeformShapesChange: (shapes: PiloCanvasFreeformShape[]) => void;
+  onFreeformShapesChange: (
+    shapes: PiloCanvasFreeformShape[],
+    explicitDeletedShapeIds?: string[],
+  ) => void;
   onResolveFreeformShapeSnapshot?: (
     shape: TLShape,
     snapshot: PiloCanvasFreeformShape,
@@ -102,6 +123,7 @@ export function CanvasStateReporter({
   );
   const lastFreeformSnapshotAtRef = useRef(0);
   const lastFreeformSnapshotSignatureRef = useRef<string | null>(null);
+  const pendingExplicitDeletedShapeIdsRef = useRef(new Set<string>());
   const onFreeformShapesDraftChangeRef = useRef(onFreeformShapesDraftChange);
   const onFreeformShapesChangeRef = useRef(onFreeformShapesChange);
   const onResolveFreeformShapeSnapshotRef = useRef(
@@ -172,6 +194,10 @@ export function CanvasStateReporter({
     }
 
     function scheduleFreeformSync(entry?: CanvasStoreListenEntry) {
+      getRemovedCanvasShapeIds(entry).forEach((shapeId) => {
+        pendingExplicitDeletedShapeIdsRef.current.add(shapeId);
+      });
+
       if (!shouldReadCanvasShapeSnapshot(entry)) {
         return;
       }
@@ -217,7 +243,10 @@ export function CanvasStateReporter({
         const nextSnapshotSignature =
           getFreeformSnapshotSignature(nextFreeformShapes);
 
-        if (lastFreeformSnapshotSignatureRef.current === nextSnapshotSignature) {
+        if (
+          lastFreeformSnapshotSignatureRef.current === nextSnapshotSignature &&
+          !pendingExplicitDeletedShapeIdsRef.current.size
+        ) {
           return;
         }
 
@@ -237,7 +266,15 @@ export function CanvasStateReporter({
               return;
             }
 
-            onFreeformShapesChangeRef.current(nextFreeformShapes);
+            const explicitDeletedShapeIds = Array.from(
+              pendingExplicitDeletedShapeIdsRef.current,
+            );
+
+            pendingExplicitDeletedShapeIdsRef.current.clear();
+            onFreeformShapesChangeRef.current(
+              nextFreeformShapes,
+              explicitDeletedShapeIds,
+            );
           }, FREEFORM_SYNC_IDLE_DELAY_MS);
         }
 
@@ -257,6 +294,7 @@ export function CanvasStateReporter({
       if (freeformSyncTimerRef.current) {
         clearTimeout(freeformSyncTimerRef.current);
       }
+      pendingExplicitDeletedShapeIdsRef.current.clear();
       removeListener();
     };
   }, [editor]);

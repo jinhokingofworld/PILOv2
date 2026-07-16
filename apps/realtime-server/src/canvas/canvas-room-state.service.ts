@@ -56,7 +56,7 @@ export type CanvasRoomStateService = {
     room: CanvasRoomRef,
     patch: { deletedShapeIds: string[]; upsertShapes: Record<string, unknown>[] },
     options?: { actorUserId?: string | null },
-  ) => void;
+  ) => CanvasRoomHistoryState;
   getCachedShapes: (room: CanvasRoomRef) => Record<string, unknown>[];
   getCheckpointSnapshot: (room: CanvasRoomRef) => CanvasRoomCheckpointSnapshot;
   getCheckpointState: (room: CanvasRoomRef) => CanvasRoomCheckpointState;
@@ -703,7 +703,9 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
 
       upsertRoomShapes(roomName, patch.upsertShapes, { markDirty: true });
 
-      if (!patch.deletedShapeIds.length) return;
+      if (!patch.deletedShapeIds.length) {
+        return buildHistoryPatchFromState(roomName);
+      }
 
       const deletedTombstones = getRoomTombstones(roomName);
       const dirtyShapeIds = getRoomShapeIdSet(dirtyShapeIdsByRoom, roomName);
@@ -728,6 +730,8 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
         invalidateCheckpointOperationIds(roomName, normalizedShapeId);
         dirtyShapeIds.add(normalizedShapeId);
       });
+
+      return buildHistoryPatchFromState(roomName);
     },
 
     getCachedShapes(room) {

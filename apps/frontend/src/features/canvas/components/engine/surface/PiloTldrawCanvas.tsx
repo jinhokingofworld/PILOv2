@@ -172,7 +172,10 @@ type PiloTldrawCanvasProps = {
   freeformShapes: PiloCanvasFreeformShape[];
   onReady: (actions: PiloCanvasActions | null) => void;
   onFreeformShapesDraftChange: (shapes: PiloCanvasFreeformShape[]) => void;
-  onFreeformShapesChange: (shapes: PiloCanvasFreeformShape[]) => void;
+  onFreeformShapesChange: (
+    shapes: PiloCanvasFreeformShape[],
+    explicitDeletedShapeIds?: string[],
+  ) => void;
   onViewChange: (viewSetting: PiloCanvasViewSetting) => void;
   onFrameChildShapesUnload: (shapes: PiloCanvasFreeformShape[]) => void;
   onFrameChildrenRequest: (frameId: string) => void;
@@ -346,6 +349,26 @@ function refreshPendingPreviewGroupSnapshots({
   });
 
   return currentShapesById;
+}
+
+function acknowledgePendingPreviewGroupShapes(
+  groups: Map<string, PendingRealtimePreviewGroup>,
+  committedShapeIds: string[],
+) {
+  if (!groups.size || !committedShapeIds.length) return;
+
+  const committedShapeIdSet = new Set(committedShapeIds);
+
+  groups.forEach((group, groupId) => {
+    committedShapeIdSet.forEach((shapeId) => {
+      group.shapeIds.delete(shapeId);
+      group.snapshots.delete(shapeId);
+    });
+
+    if (!group.shapeIds.size) {
+      groups.delete(groupId);
+    }
+  });
 }
 
 function isShapeHiddenByCollapsedAncestor({
@@ -857,20 +880,6 @@ function collectRemoteBusyShapeIds(
   return busyShapeIds;
 }
 
-function collectRemoteSelectedShapeIds(
-  presence: CanvasPresenceController | undefined,
-) {
-  const selectedShapeIds = new Set<string>();
-
-  presence?.remotePresence.forEach((entry) => {
-    entry.selectedShapeIds.forEach((shapeId) => {
-      selectedShapeIds.add(shapeId);
-    });
-  });
-
-  return selectedShapeIds;
-}
-
 function getShapePreviewPhase(
   currentToolId: string,
   selectedShapeIds: string[],
@@ -1137,15 +1146,7 @@ export function PiloTldrawCanvas({
       presence?.remoteShapePreviews,
     ],
   );
-  const remoteDeleteBlockedShapeIds = useMemo(() => {
-    const blockedShapeIds = collectRemoteSelectedShapeIds(presence);
-
-    remoteBusyShapeIds.forEach((shapeId) => {
-      blockedShapeIds.add(shapeId);
-    });
-
-    return blockedShapeIds;
-  }, [presence?.remotePresence, remoteBusyShapeIds]);
+  const remoteDeleteBlockedShapeIds = useMemo(() => new Set<string>(), []);
   const ownedShapeLockIds = useMemo(
     () =>
       new Set(
@@ -1259,6 +1260,17 @@ export function PiloTldrawCanvas({
   useEffect(() => {
     freeformShapesRef.current = freeformShapes;
   }, [freeformShapes]);
+
+  useEffect(() => {
+    const committedPatch = presence?.lastCommittedShapePatch;
+
+    if (!committedPatch) return;
+
+    acknowledgePendingPreviewGroupShapes(
+      pendingRealtimePreviewGroupsRef.current,
+      committedPatch.shapeIds,
+    );
+  }, [presence?.lastCommittedShapePatch]);
 
   useEffect(() => {
     ownedShapeLockIdsRef.current = ownedShapeLockIds;

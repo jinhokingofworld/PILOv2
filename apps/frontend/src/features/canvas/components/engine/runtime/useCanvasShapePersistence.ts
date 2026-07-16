@@ -199,9 +199,17 @@ export function useCanvasShapePersistence({
   );
 
   const persistFreeformShapes = useCallback(
-    (nextFreeformShapes: PiloCanvasFreeformShape[]) => {
+    (
+      nextFreeformShapes: PiloCanvasFreeformShape[],
+      explicitDeletedShapeIds: string[] = [],
+    ) => {
+      const uniqueExplicitDeletedShapeIds = Array.from(
+        new Set(explicitDeletedShapeIds.map((shapeId) => shapeId.trim())),
+      ).filter(Boolean);
+
       setFreeformShapes((currentFreeformShapes) => {
         if (
+          !uniqueExplicitDeletedShapeIds.length &&
           areCanvasFreeformShapesEqual(currentFreeformShapes, nextFreeformShapes)
         ) {
           return currentFreeformShapes;
@@ -217,6 +225,25 @@ export function useCanvasShapePersistence({
           const nextShapeMap = buildFreeformShapeMap(
             buildPersistableLocalShapes(nextFreeformShapes),
           );
+          uniqueExplicitDeletedShapeIds.forEach((shapeId) => {
+            if (
+              nextShapeMap.has(shapeId) ||
+              unloadedShapeIdsRef.current.has(shapeId)
+            ) {
+              return;
+            }
+
+            if (!pendingLocalShapeVersions.has(shapeId)) {
+              const version = localShapeVersionRef.current + 1;
+
+              localShapeVersionRef.current = version;
+              pendingLocalShapeVersionsRef.current.set(shapeId, version);
+              pendingLocalShapeVersions.set(shapeId, version);
+            }
+
+            deletedShapeIdsRef.current.add(shapeId);
+            shapeDetailCacheRef.current.delete(shapeId);
+          });
           const upsertShapes: PiloCanvasFreeformShape[] = [];
           const deletedShapeIds: string[] = [];
 

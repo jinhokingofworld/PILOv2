@@ -1527,9 +1527,14 @@ export async function createRealtimeSocketServer({
         return;
       }
 
-      roomStateService.applyShapePatch(patchPayload, patchPayload, {
-        actorUserId: authedSocket.data.auth.userId ?? socket.id,
-      });
+      const actorUserId = authedSocket.data.auth.userId ?? socket.id;
+      const historyState = roomStateService.applyShapePatch(
+        patchPayload,
+        patchPayload,
+        {
+          actorUserId,
+        },
+      );
       const patchedShapeIds = [
         ...patchPayload.deletedShapeIds,
         ...patchPayload.upsertShapes.flatMap((shape) =>
@@ -1540,15 +1545,18 @@ export async function createRealtimeSocketServer({
         patchPayload,
         authedSocket.data.auth.token,
       );
-      socket.to(roomName).emit(canvasServerEvents.shapePatch, {
+      io.to(roomName).emit(canvasServerEvents.shapePatch, {
         ...patchPayload,
-        actorUserId: authedSocket.data.auth.userId ?? socket.id,
+        actorUserId,
+        canRedo: historyState.canRedo,
+        canUndo: historyState.canUndo,
+        historySeq: historyState.historySeq,
         sentAt: new Date().toISOString(),
       });
       void shapePreviewService
         .clearRoomPreview(
           socket.id,
-          authedSocket.data.auth.userId ?? socket.id,
+          actorUserId,
           patchPayload,
           patchedShapeIds,
         )

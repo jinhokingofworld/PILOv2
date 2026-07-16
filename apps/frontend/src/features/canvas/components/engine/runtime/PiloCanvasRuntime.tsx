@@ -693,6 +693,7 @@ function PiloCanvasRuntimeInner({
   const applyNormalizedRoomShapePatch = useCallback(
     (patch: {
       deletedShapeIds: string[];
+      respectViewport?: boolean;
       upsertShapes: PiloCanvasFreeformShape[];
     }) => {
       const deletedShapeIdSet = new Set(patch.deletedShapeIds);
@@ -709,6 +710,7 @@ function PiloCanvasRuntimeInner({
       const result = applyCanvasRoomShapePatch({
         currentShapes: freeformShapesRef.current,
         deletedShapeIds: patch.deletedShapeIds,
+        respectViewport: patch.respectViewport,
         shapeDetailCache: shapeDetailCacheRef.current,
         upsertShapes: patch.upsertShapes,
         viewportBounds: latestViewportBoundsRef.current,
@@ -735,7 +737,13 @@ function PiloCanvasRuntimeInner({
     [markShapeDeleted],
   );
   const applyRoomShapePatch = useCallback(
-    (patch: { deletedShapeIds: string[]; upsertShapes: Record<string, unknown>[] }) => {
+    (
+      patch: {
+        deletedShapeIds: string[];
+        upsertShapes: Record<string, unknown>[];
+      },
+      options: { respectViewport?: boolean } = {},
+    ) => {
       const deletedShapeIdSet = new Set(patch.deletedShapeIds);
 
       patch.deletedShapeIds.forEach((shapeId) => {
@@ -796,6 +804,7 @@ function PiloCanvasRuntimeInner({
 
       applyNormalizedRoomShapePatch({
         deletedShapeIds: patch.deletedShapeIds,
+        respectViewport: options.respectViewport ?? false,
         upsertShapes: immediateUpsertShapes,
       });
     },
@@ -831,6 +840,7 @@ function PiloCanvasRuntimeInner({
     if (readyFrames.length) {
       applyNormalizedRoomShapePatch({
         deletedShapeIds: [],
+        respectViewport: false,
         upsertShapes: readyFrames,
       });
     }
@@ -1026,10 +1036,15 @@ function PiloCanvasRuntimeInner({
 
       if (!nextShapes.length) return;
 
-      applyRoomShapePatch({
-        deletedShapeIds: [],
-        upsertShapes: nextShapes,
-      });
+      applyRoomShapePatch(
+        {
+          deletedShapeIds: [],
+          upsertShapes: nextShapes,
+        },
+        {
+          respectViewport: true,
+        },
+      );
     };
   }, [applyRoomShapePatch]);
 

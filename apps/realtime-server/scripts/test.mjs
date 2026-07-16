@@ -114,7 +114,7 @@ assert.match(socketServer, /canvasClientEvents\.shapeLockRelease/);
 assert.match(socketServer, /canvasClientEvents\.shapePatch/);
 assert.match(
   socketServer,
-  /shapePreviewService\s*\.clearRoomPreview\(\s*socket\.id,\s*authedSocket\.data\.auth\.userId \?\? socket\.id,\s*patchPayload,\s*patchedShapeIds,/,
+  /shapePreviewService\s*\.clearRoomPreview\(\s*socket\.id,\s*actorUserId,\s*patchPayload,\s*patchedShapeIds,/,
 );
 assert.match(socketServer, /canvasClientEvents\.historyUndo/);
 assert.match(socketServer, /canvasClientEvents\.historyRedo/);
@@ -126,8 +126,15 @@ assert.match(socketServer, /readLoadedViewportBounds/);
 assert.match(socketServer, /initialViewportBounds/);
 assert.match(socketServer, /canvasServerEvents\.shapesHydrate/);
 assert.match(socketServer, /canvasServerEvents\.shapePatch/);
+assert.match(socketServer, /io\.to\(roomName\)\.emit\(canvasServerEvents\.shapePatch/);
+assert.match(socketServer, /historySeq: historyState\.historySeq/);
+assert.match(socketServer, /canUndo: historyState\.canUndo/);
+assert.match(socketServer, /canRedo: historyState\.canRedo/);
 assert.match(socketServer, /canvasServerEvents\.checkpoint/);
-assert.match(socketServer, /actorUserId: authedSocket\.data\.auth\.userId \?\? socket\.id/);
+assert.match(
+  socketServer,
+  /const actorUserId = authedSocket\.data\.auth\.userId \?\? socket\.id/,
+);
 assert.match(socketServer, /canvasServerEvents\.shapeLockAccepted/);
 assert.match(socketServer, /canvasServerEvents\.shapeLockRejected/);
 assert.match(socketServer, /canvasServerEvents\.shapeLockUpdate/);

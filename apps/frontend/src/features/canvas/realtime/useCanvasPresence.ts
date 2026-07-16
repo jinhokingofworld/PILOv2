@@ -49,11 +49,19 @@ export type CanvasRoomHistoryState = {
   historySeq: number;
 };
 
+export type CanvasCommittedShapePatch = {
+  actorUserId: string;
+  committedAt: number;
+  historySeq: number | null;
+  shapeIds: string[];
+};
+
 export type CanvasPresenceController = {
   enabled: boolean;
   roomStateActive: boolean;
   currentUserId: string | null;
   checkpointStatus: CanvasRoomCheckpointStatusPayload | null;
+  lastCommittedShapePatch: CanvasCommittedShapePatch | null;
   lastRejectedShapeLock: { rejectedAt: number; shapeIds: string[] } | null;
   operationSync: CanvasOperationCatchupState;
   ownedShapeLocks: CanvasShapeLockState[];
@@ -434,6 +442,8 @@ export function useCanvasPresence(
   );
   const [checkpointStatus, setCheckpointStatus] =
     useState<CanvasRoomCheckpointStatusPayload | null>(null);
+  const [lastCommittedShapePatch, setLastCommittedShapePatch] =
+    useState<CanvasCommittedShapePatch | null>(null);
   const [roomStateActive, setRoomStateActive] = useState(false);
   const [lastRejectedShapeLock, setLastRejectedShapeLock] = useState<{
     rejectedAt: number;
@@ -713,6 +723,7 @@ export function useCanvasPresence(
       setRoomLoadedRegions([]);
       setRoomHistory(initialRoomHistoryState);
       setCheckpointStatus(null);
+      setLastCommittedShapePatch(null);
       setLastRejectedShapeLock(null);
       setOperationSync(initialOperationSyncState);
       return;
@@ -735,6 +746,7 @@ export function useCanvasPresence(
       setRoomLoadedRegions([]);
       setRoomHistory(initialRoomHistoryState);
       setCheckpointStatus(null);
+      setLastCommittedShapePatch(null);
       setLastRejectedShapeLock(null);
       return;
     }
@@ -795,6 +807,7 @@ export function useCanvasPresence(
       setRoomLoadedRegions([]);
       setRoomHistory(initialRoomHistoryState);
       setCheckpointStatus(null);
+      setLastCommittedShapePatch(null);
       setLastRejectedShapeLock(null);
     });
     realtimeSocket.on("canvas:joined", (payload) => {
@@ -1032,6 +1045,15 @@ export function useCanvasPresence(
           return typeof shapeId === "string" ? [shapeId] : [];
         }),
       ];
+      setLastCommittedShapePatch((currentPatch) => ({
+        actorUserId: payload.actorUserId,
+        committedAt: Date.now(),
+        historySeq:
+          typeof payload.historySeq === "number" ? payload.historySeq : null,
+        shapeIds: Array.from(
+          new Set([...(currentPatch?.shapeIds ?? []), ...patchedShapeIds]),
+        ),
+      }));
 
       setRemoteShapePreviews((currentPreviews) =>
         removeShapePreviewIds({
@@ -1090,6 +1112,7 @@ export function useCanvasPresence(
       setRoomLoadedRegions([]);
       setRoomHistory(initialRoomHistoryState);
       setCheckpointStatus(null);
+      setLastCommittedShapePatch(null);
       setLastRejectedShapeLock(null);
     };
   }, [
@@ -1330,6 +1353,7 @@ export function useCanvasPresence(
       enabled,
       roomStateActive,
       currentUserId,
+      lastCommittedShapePatch,
       lastRejectedShapeLock,
       operationSync,
       ownedShapeLocks:
@@ -1367,6 +1391,7 @@ export function useCanvasPresence(
       currentUserId,
       enabled,
       roomStateActive,
+      lastCommittedShapePatch,
       lastRejectedShapeLock,
       operationSync,
       ownedShapeLocks,
