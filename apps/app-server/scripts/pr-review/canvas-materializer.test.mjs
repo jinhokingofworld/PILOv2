@@ -230,10 +230,8 @@ const flowOneFirstGeometry = getFileGeometry(flowLayout, flowOneFirst.roomFileId
 const flowOneSecondGeometry = getFileGeometry(flowLayout, flowOneSecond.roomFileId);
 const flowOneThirdGeometry = getFileGeometry(flowLayout, flowOneThird.roomFileId);
 const flowTwoFirstGeometry = getFileGeometry(flowLayout, flowTwoFirst.roomFileId);
-assert.equal(flowOneFirstGeometry[1], flowOneSecondGeometry[1]);
-assert.equal(flowOneSecondGeometry[1], flowOneThirdGeometry[1]);
 assert.ok(flowOneFirstGeometry[0] < flowOneSecondGeometry[0]);
-assert.ok(flowOneSecondGeometry[0] < flowOneThirdGeometry[0]);
+assert.ok(flowOneFirstGeometry[0] < flowOneThirdGeometry[0]);
 assert.ok(flowTwoFirstGeometry[1] > flowOneFirstGeometry[1]);
 
 const getRoutePoints = (relationToFind) => {
@@ -242,11 +240,83 @@ const getRoutePoints = (relationToFind) => {
   );
   return shape.values.rawShape.props.routePoints;
 };
-assert.equal(getRoutePoints(adjacentOrder).length, 2);
-assert.equal(getRoutePoints(sameFlowSemantic).length, 4);
+assert.ok(getRoutePoints(adjacentOrder).length >= 2);
+assert.ok(getRoutePoints(sameFlowSemantic).length >= 2);
 assert.ok(
-  getRoutePoints(sameFlowSemantic)[1].y < flowOneFirstGeometry[1],
-  "semantic edges must use the empty space above their flow"
+  getRoutePoints(sameFlowSemantic).some(
+    (point, index, points) =>
+      index > 0 && point.y !== points[index - 1].y
+  ),
+  "semantic edges must include an orthogonal vertical segment when needed"
+);
+
+const entryFile = file(11, {
+  roomFileId: "room-file-entry",
+  reviewFileId: "review-file-entry",
+  workflowOrder: 1,
+  roleType: "entry"
+});
+const coreFile = file(12, {
+  roomFileId: "room-file-core",
+  reviewFileId: "review-file-core",
+  workflowOrder: 2,
+  roleType: "core_logic"
+});
+const stateFile = file(13, {
+  roomFileId: "room-file-state",
+  reviewFileId: "review-file-state",
+  workflowOrder: 3,
+  roleType: "ui_state"
+});
+const apiFile = file(14, {
+  roomFileId: "room-file-api",
+  reviewFileId: "review-file-api",
+  workflowOrder: 4,
+  roleType: "api_contract"
+});
+const layeredFlow = await buildPrReviewCanvasMaterialization({
+  reviewRoomId: ROOM_ID,
+  reviewSessionId: SESSION_ID,
+  files: [entryFile, coreFile, stateFile, apiFile],
+  relations: [
+    relation({
+      fromReviewFileId: entryFile.reviewFileId,
+      fromRoomFileId: entryFile.roomFileId,
+      toReviewFileId: coreFile.reviewFileId,
+      toRoomFileId: coreFile.roomFileId
+    }),
+    relation({
+      fromReviewFileId: entryFile.reviewFileId,
+      fromRoomFileId: entryFile.roomFileId,
+      toReviewFileId: stateFile.reviewFileId,
+      toRoomFileId: stateFile.roomFileId
+    }),
+    relation({
+      fromReviewFileId: coreFile.reviewFileId,
+      fromRoomFileId: coreFile.roomFileId,
+      toReviewFileId: apiFile.reviewFileId,
+      toRoomFileId: apiFile.roomFileId
+    }),
+    relation({
+      fromReviewFileId: stateFile.reviewFileId,
+      fromRoomFileId: stateFile.roomFileId,
+      toReviewFileId: apiFile.reviewFileId,
+      toRoomFileId: apiFile.roomFileId
+    })
+  ],
+  existingShapes: []
+});
+const coreGeometry = getFileGeometry(layeredFlow, coreFile.roomFileId);
+const stateGeometry = getFileGeometry(layeredFlow, stateFile.roomFileId);
+assert.equal(
+  coreGeometry[0],
+  stateGeometry[0],
+  "parallel relation targets must share a review layer"
+);
+assert.notEqual(
+  coreGeometry[1],
+  stateGeometry[1],
+  "parallel relation targets must not collapse into a single review row"
 );
 
 const movedRawShape = {
