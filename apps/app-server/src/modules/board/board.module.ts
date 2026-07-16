@@ -7,6 +7,7 @@ import { BoardController } from "./board.controller";
 import { ActiveBoardSourceService } from "./active-board-source.service";
 import { BoardSourcePublisherService } from "./board-source-publisher.service";
 import { BoardHydrationService } from "./board-hydration.service";
+import { BoardInvalidationPublisherService } from "./board-invalidation-publisher.service";
 import { BoardIssueAssigneeService } from "./board-issue-assignee.service";
 import { BoardIssueCreateService } from "./board-issue-create.service";
 import { BoardIssueCreateOperationService } from "./board-issue-create-operation.service";
@@ -31,6 +32,7 @@ import { ActiveBoardSourceQueries } from "./queries/active-board-source.queries"
     ActiveBoardSourceService,
     BoardSourcePublisherService,
     BoardHydrationService,
+    BoardInvalidationPublisherService,
     BoardIssueCreateOperationService,
     BoardIssueCreateService,
     BoardIssueAssigneeService,
