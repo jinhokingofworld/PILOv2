@@ -1602,3 +1602,4 @@ await import("./sql-erd/test.mjs");
 await import("./sql-erd-realtime.test.mjs");
 await import("../src/shared/page-cursor/page-cursor.test.mjs");
 await import("../src/features/workspace-onboarding/github-onboarding.test.mjs");
+await import("../src/features/drive/drive-document-contract.test.mjs");
