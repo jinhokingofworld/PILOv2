@@ -242,7 +242,7 @@ module "ecs" {
         DATABASE_POOL_IDLE_TIMEOUT_MS       = "10000"
         DATABASE_POOL_CONNECTION_TIMEOUT_MS = "5000"
         DATABASE_APPLICATION_NAME           = "pilo-dev-realtime-server"
-        APP_SERVER_URL                      = local.api_domain == "" ? "http://${module.alb.alb_dns_name}" : "https://${local.api_domain}"
+        APP_SERVER_URL                      = local.api_domain == "" ? "http://${module.alb.alb_dns_name}/api/v1" : "https://${local.api_domain}/api/v1"
         SOCKET_IO_CORS_ORIGIN               = local.frontend_domain == "" ? "*" : "https://${local.frontend_domain}"
       }
       secrets = module.secrets.realtime_server_ecs_secrets
