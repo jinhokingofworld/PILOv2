@@ -373,6 +373,26 @@ for (const content of ["   ", "x".repeat(4_001)]) {
 {
   const { database, service } = createSubject([
     {
+      method: "queryOne",
+      match: /FROM workspace_members AS membership[\s\S]*FOR KEY SHARE/,
+      values: [workspaceId, userId],
+      result: null
+    }
+  ]);
+  await assertApiError(
+    () =>
+      service.updateReadState(userId, workspaceId, {
+        lastReadMessageId: message2Id
+      }),
+    403,
+    "FORBIDDEN"
+  );
+  database.assertConsumed();
+}
+
+{
+  const { database, service } = createSubject([
+    {
       method: "execute",
       match: /pg_advisory_xact_lock/,
       result: { rows: [], rowCount: 1 }
@@ -579,6 +599,11 @@ for (const content of ["   ", "x".repeat(4_001)]) {
 {
   const { database, service } = createSubject([
     {
+      method: "queryOne",
+      match: /FROM workspace_members AS membership[\s\S]*FOR KEY SHARE/,
+      result: { id: userId }
+    },
+    {
       method: "execute",
       match: /INSERT INTO workspace_chat_reads/,
       values: [workspaceId, userId, message2Id],
@@ -632,6 +657,12 @@ for (const content of ["   ", "x".repeat(4_001)]) {
 
 {
   const { database, service } = createSubject([
+    {
+      method: "queryOne",
+      match: /FROM workspace_members AS membership[\s\S]*FOR KEY SHARE/,
+      values: [workspaceId, userId],
+      result: { id: userId }
+    },
     {
       method: "execute",
       match: /INSERT INTO workspace_chat_reads/,

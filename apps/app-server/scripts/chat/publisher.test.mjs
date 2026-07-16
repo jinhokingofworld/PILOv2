@@ -79,6 +79,79 @@ try {
   await publisher.onModuleDestroy();
   assert.equal(clients[0].quitCalls, 1);
 
+  const oldUrl = "redis://old-chat-test.invalid:6379";
+  const replacementUrl = "redis://new-chat-test.invalid:6379";
+  const oldConnectGate = deferred();
+  const transitionClients = [];
+  process.env.REDIS_URL = oldUrl;
+  redis.createClient = ({ url }) => {
+    const client = {
+      destroyCalls: 0,
+      publishCalls: [],
+      quitCalls: 0,
+      url,
+      on() {
+        return client;
+      },
+      async connect() {
+        if (url === oldUrl) return oldConnectGate.promise;
+      },
+      async publish(channel, payload) {
+        client.publishCalls.push({ channel, payload: JSON.parse(payload) });
+      },
+      async quit() {
+        client.quitCalls += 1;
+      },
+      destroy() {
+        client.destroyCalls += 1;
+      }
+    };
+    transitionClients.push(client);
+    return client;
+  };
+
+  const transitionPublisher = new ChatPublisherService();
+  transitionPublisher.logger = { error() {}, warn() {} };
+  const oldPublish = transitionPublisher.publish(fakeEvent("message-old-url"));
+  await Promise.resolve();
+  assert.equal(transitionClients.length, 1);
+
+  process.env.REDIS_URL = replacementUrl;
+  const firstReplacementPublish = transitionPublisher.publish(
+    fakeEvent("message-new-url-1")
+  );
+  const secondReplacementPublish = transitionPublisher.publish(
+    fakeEvent("message-new-url-2")
+  );
+  await Promise.resolve();
+  assert.equal(transitionClients.length, 1);
+
+  oldConnectGate.resolve();
+  await Promise.all([
+    oldPublish,
+    firstReplacementPublish,
+    secondReplacementPublish
+  ]);
+  const oldClients = transitionClients.filter(client => client.url === oldUrl);
+  const replacementClients = transitionClients.filter(
+    client => client.url === replacementUrl
+  );
+  assert.equal(oldClients.length, 1);
+  assert.equal(oldClients[0].quitCalls, 1);
+  assert.equal(oldClients[0].destroyCalls, 0);
+  assert.equal(
+    replacementClients.length,
+    1,
+    "concurrent URL transitions must create one replacement client"
+  );
+  assert.deepEqual(
+    replacementClients[0].publishCalls.map(call => call.payload.messageId).sort(),
+    ["message-new-url-1", "message-new-url-2"]
+  );
+  await transitionPublisher.onModuleDestroy();
+  assert.equal(replacementClients[0].quitCalls, 1);
+  process.env.REDIS_URL = "redis://chat-test.invalid:6379";
+
   const shutdownConnectGate = deferred();
   const shutdownClients = [];
   redis.createClient = () => {
@@ -116,7 +189,7 @@ try {
   const shutdown = shutdownPublisher.onModuleDestroy().then(() => {
     shutdownResolved = true;
   });
-  await Promise.resolve();
+  await new Promise(resolve => setImmediate(resolve));
   assert.equal(
     shutdownClients[0].destroyCalls,
     1,

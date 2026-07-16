@@ -11,12 +11,17 @@ type ChatRedisConnectionAttempt = {
   redisUrl: string;
 };
 
+type ChatRedisClientLease = {
+  clientPromise: Promise<RedisClientType | null>;
+};
+
 @Injectable()
 export class ChatPublisherService implements OnModuleDestroy {
   private readonly logger = new Logger(ChatPublisherService.name);
   private redisClient: RedisClientType | null = null;
   private redisUrl: string | null = null;
   private redisConnectionAttempt: ChatRedisConnectionAttempt | null = null;
+  private redisOwnershipTransition: Promise<void> = Promise.resolve();
   private shuttingDown = false;
 
   async publish(event: ChatRedisEventV1): Promise<void> {
@@ -35,64 +40,86 @@ export class ChatPublisherService implements OnModuleDestroy {
   async onModuleDestroy(): Promise<void> {
     this.shuttingDown = true;
 
-    const pendingAttempt = this.redisConnectionAttempt;
-    if (pendingAttempt) {
-      this.destroyConnectionAttempt(pendingAttempt);
-      await pendingAttempt.promise?.catch(() => undefined);
-      if (this.redisConnectionAttempt === pendingAttempt) {
-        this.redisConnectionAttempt = null;
+    await this.withRedisOwnershipTransition(async () => {
+      const pendingAttempt = this.redisConnectionAttempt;
+      if (pendingAttempt) {
+        this.destroyConnectionAttempt(pendingAttempt);
+        await pendingAttempt.promise?.catch(() => undefined);
+        if (this.redisConnectionAttempt === pendingAttempt) {
+          this.redisConnectionAttempt = null;
+        }
       }
-    }
 
-    const connectedClient = this.redisClient;
-    this.redisClient = null;
-    this.redisUrl = null;
-    if (connectedClient) {
-      await connectedClient.quit();
-    }
+      const connectedClient = this.redisClient;
+      this.redisClient = null;
+      this.redisUrl = null;
+      if (connectedClient) {
+        await this.closeRedisClient(connectedClient);
+      }
+    });
   }
 
   private async getClient(): Promise<RedisClientType | null> {
     if (this.shuttingDown) return null;
 
-    const redisUrl = process.env.REDIS_URL?.trim();
-    if (!redisUrl) return null;
+    const lease = await this.withRedisOwnershipTransition(() =>
+      this.resolveRedisClientLease()
+    );
+    return lease.clientPromise;
+  }
 
-    if (this.redisClient && this.redisUrl === redisUrl) {
-      return this.redisClient;
+  private async resolveRedisClientLease(): Promise<ChatRedisClientLease> {
+    while (true) {
+      if (this.shuttingDown) {
+        return { clientPromise: Promise.resolve(null) };
+      }
+
+      const redisUrl = process.env.REDIS_URL?.trim() || null;
+      if (redisUrl && this.redisClient && this.redisUrl === redisUrl) {
+        return { clientPromise: Promise.resolve(this.redisClient) };
+      }
+
+      const pendingAttempt = this.redisConnectionAttempt;
+      if (
+        redisUrl &&
+        pendingAttempt?.redisUrl === redisUrl &&
+        pendingAttempt.promise
+      ) {
+        return { clientPromise: pendingAttempt.promise };
+      }
+
+      if (pendingAttempt?.promise) {
+        await pendingAttempt.promise.catch(() => undefined);
+        continue;
+      }
+
+      const connectedClient = this.redisClient;
+      if (connectedClient) {
+        this.redisClient = null;
+        this.redisUrl = null;
+        await this.closeRedisClient(connectedClient);
+        continue;
+      }
+
+      if (!redisUrl) {
+        return { clientPromise: Promise.resolve(null) };
+      }
+
+      const client = createClient({ url: redisUrl }) as RedisClientType;
+      client.on("error", () => {
+        this.logger.error("Chat Redis connection error");
+      });
+
+      const attempt: ChatRedisConnectionAttempt = {
+        client,
+        destroyed: false,
+        redisUrl
+      };
+      this.redisConnectionAttempt = attempt;
+      const connectionPromise = this.connectRedisClient(attempt);
+      attempt.promise = connectionPromise;
+      return { clientPromise: connectionPromise };
     }
-
-    const pendingAttempt = this.redisConnectionAttempt;
-    if (pendingAttempt?.redisUrl === redisUrl && pendingAttempt.promise) {
-      return pendingAttempt.promise;
-    }
-
-    if (pendingAttempt?.promise) {
-      await pendingAttempt.promise.catch(() => undefined);
-    }
-
-    if (this.shuttingDown) return null;
-
-    if (this.redisClient) {
-      await this.redisClient.quit();
-    }
-    this.redisClient = null;
-    this.redisUrl = null;
-
-    const client = createClient({ url: redisUrl }) as RedisClientType;
-    client.on("error", () => {
-      this.logger.error("Chat Redis connection error");
-    });
-
-    const attempt: ChatRedisConnectionAttempt = {
-      client,
-      destroyed: false,
-      redisUrl
-    };
-    this.redisConnectionAttempt = attempt;
-    const connectionPromise = this.connectRedisClient(attempt);
-    attempt.promise = connectionPromise;
-    return connectionPromise;
   }
 
   private async connectRedisClient(
@@ -133,10 +160,31 @@ export class ChatPublisherService implements OnModuleDestroy {
   private async closeConnectedAttempt(
     attempt: ChatRedisConnectionAttempt
   ): Promise<void> {
+    await this.closeRedisClient(attempt.client);
+  }
+
+  private async closeRedisClient(client: RedisClientType): Promise<void> {
     try {
-      await attempt.client.quit();
+      await client.quit();
     } catch {
-      attempt.client.destroy();
+      client.destroy();
+    }
+  }
+
+  private async withRedisOwnershipTransition<T>(
+    operation: () => Promise<T>
+  ): Promise<T> {
+    const previousTransition = this.redisOwnershipTransition;
+    let releaseTransition: () => void = () => undefined;
+    this.redisOwnershipTransition = new Promise(resolve => {
+      releaseTransition = resolve;
+    });
+
+    await previousTransition;
+    try {
+      return await operation();
+    } finally {
+      releaseTransition();
     }
   }
 }

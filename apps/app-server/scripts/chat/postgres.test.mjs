@@ -82,6 +82,26 @@ async function runReadUpdate(messageId, hooks = {}) {
   }
 }
 
+async function waitForBlockedBackend(pid) {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    const result = await pool.query(
+      `
+        SELECT EXISTS (
+          SELECT 1
+          FROM pg_locks
+          WHERE pid = $1
+            AND NOT granted
+        ) AS blocked
+      `,
+      [pid]
+    );
+    if (result.rows[0].blocked) return;
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  assert.fail("membership DELETE backend did not wait for a database lock");
+}
+
 try {
   await pool.query("DROP SCHEMA public CASCADE");
   await pool.query("CREATE SCHEMA public");
@@ -268,6 +288,85 @@ try {
     [workspaceId, userId]
   );
   assert.equal(finalRead.rows[0].last_read_message_id, newestMessageId);
+
+  const accessCheck = await pool.query(
+    `
+      SELECT user_id
+      FROM workspace_members
+      WHERE workspace_id = $1 AND user_id = $2
+    `,
+    [workspaceId, userId]
+  );
+  assert.equal(accessCheck.rowCount, 1);
+  await pool.query(
+    `
+      DELETE FROM workspace_members
+      WHERE workspace_id = $1 AND user_id = $2
+    `,
+    [workspaceId, userId]
+  );
+  await assert.rejects(
+    runReadUpdate(newestMessageId),
+    error =>
+      error.getStatus?.() === 403 &&
+      error.getResponse?.().error.code === "FORBIDDEN"
+  );
+
+  await pool.query(
+    `
+      INSERT INTO workspace_members (workspace_id, user_id)
+      VALUES ($1, $2)
+    `,
+    [workspaceId, userId]
+  );
+  await runReadUpdate(newestMessageId);
+  const membershipLockAcquired = deferred();
+  const releaseMembershipLock = deferred();
+  const lockedRead = runReadUpdate(middleMessageId, {
+    async afterQueryOne(text) {
+      if (!text.includes("FROM workspace_members AS membership")) return;
+      membershipLockAcquired.resolve();
+      await releaseMembershipLock.promise;
+    }
+  });
+  await membershipLockAcquired.promise;
+  const removalClient = await pool.connect();
+  const removalBackend = await removalClient.query(
+    "SELECT pg_backend_pid()::int AS pid"
+  );
+  let concurrentRemovalFinished = false;
+  const concurrentRemoval = removalClient
+    .query(
+      `
+        DELETE FROM workspace_members
+        WHERE workspace_id = $1 AND user_id = $2
+      `,
+      [workspaceId, userId]
+    )
+    .then(() => {
+      concurrentRemovalFinished = true;
+    })
+    .finally(() => {
+      removalClient.release();
+    });
+
+  let lockObservationError = null;
+  try {
+    await waitForBlockedBackend(removalBackend.rows[0].pid);
+    assert.equal(
+      concurrentRemovalFinished,
+      false,
+      "membership removal must wait for the read-state transaction lock"
+    );
+  } catch (error) {
+    lockObservationError = error;
+  } finally {
+    releaseMembershipLock.resolve();
+  }
+  const lockedReadRow = await lockedRead;
+  await concurrentRemoval;
+  if (lockObservationError) throw lockObservationError;
+  assert.equal(lockedReadRow.last_read_message_id, newestMessageId);
 } finally {
   await pool.end();
 }

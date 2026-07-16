@@ -1,5 +1,5 @@
 import type { QueryResultRow } from "pg";
-import { notFound } from "../../common/api-error";
+import { forbidden, notFound } from "../../common/api-error";
 import {
   DatabaseService,
   type DatabaseTransaction
@@ -160,6 +160,20 @@ export async function upsertChatReadState(
   transaction: DatabaseTransaction,
   input: { workspaceId: string; userId: string; messageId: string }
 ): Promise<ChatReadStateRow> {
+  const membership = await transaction.queryOne<ChatIdRow>(
+    `
+      SELECT membership.user_id AS id
+      FROM workspace_members AS membership
+      WHERE membership.workspace_id = $1
+        AND membership.user_id = $2
+      FOR KEY SHARE
+    `,
+    [input.workspaceId, input.userId]
+  );
+  if (!membership) {
+    throw forbidden("Workspace access denied");
+  }
+
   await transaction.execute(
     `
       INSERT INTO workspace_chat_reads (
