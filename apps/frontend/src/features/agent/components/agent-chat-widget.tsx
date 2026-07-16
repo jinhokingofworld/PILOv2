@@ -31,6 +31,7 @@ import {
   createAgentApiClient
 } from "@/features/agent/api/client";
 import { AgentConfirmationCard } from "@/features/agent/components/agent-confirmation-card";
+import { readAgentRequestContext } from "@/features/agent/request-context";
 import {
   didAgentRunAcceptInput,
   getLatestAgentRunMessageSequence
@@ -56,9 +57,6 @@ type AgentChatBusyState = "idle" | "polling" | "submitting";
 
 const AGENT_RUN_POLL_INTERVAL_MS = 1800;
 const DEFAULT_AGENT_TIMEZONE = "Asia/Seoul";
-const SQL_ERD_SESSION_PATH = "/sql-erd/session";
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MAX_MEETING_CLIENT_ACTION_EXPIRY_SECONDS = 300;
 
 const initialMessages: AgentChatMessage[] = [
@@ -98,22 +96,6 @@ function getBrowserTimezone() {
   return (
     Intl.DateTimeFormat().resolvedOptions().timeZone || DEFAULT_AGENT_TIMEZONE
   );
-}
-
-export function readAgentRequestContext(pathname: string, search: string) {
-  if (pathname !== SQL_ERD_SESSION_PATH) {
-    return null;
-  }
-
-  const sessionId = new URLSearchParams(search).get("sessionId")?.trim();
-  if (!sessionId || !UUID_PATTERN.test(sessionId)) {
-    return null;
-  }
-
-  return {
-    surface: "sql_erd" as const,
-    sessionId
-  };
 }
 
 function createAbortError() {

@@ -5,6 +5,7 @@ import {
   didAgentRunAcceptInput,
   getLatestAgentRunMessageSequence
 } from "./run-input-recovery.ts";
+import { readAgentRequestContext } from "./request-context.ts";
 
 async function readFeatureFile(path) {
   return readFile(new URL(path, import.meta.url), "utf8");
@@ -177,3 +178,35 @@ const acceptedMessages = [
 assert.equal(getLatestAgentRunMessageSequence(previousMessages), 1);
 assert.equal(didAgentRunAcceptInput(acceptedMessages, 1, "오후 3시"), true);
 assert.equal(didAgentRunAcceptInput(previousMessages, 1, "오후 3시"), false);
+
+const sqlErdSessionId = "77777777-7777-4777-8777-777777777777";
+const expectedSqlErdContext = {
+  surface: "sql_erd",
+  sessionId: sqlErdSessionId
+};
+
+assert.deepEqual(
+  readAgentRequestContext(
+    "/sql-erd/session",
+    `sessionId=${sqlErdSessionId}`
+  ),
+  expectedSqlErdContext
+);
+assert.deepEqual(
+  readAgentRequestContext(
+    "/sql-erd/session/",
+    `sessionId=${sqlErdSessionId}`
+  ),
+  expectedSqlErdContext
+);
+assert.equal(
+  readAgentRequestContext(
+    "/sql-erd/session/extra/",
+    `sessionId=${sqlErdSessionId}`
+  ),
+  null
+);
+assert.equal(
+  readAgentRequestContext("/sql-erd/session/", "sessionId=not-a-uuid"),
+  null
+);
