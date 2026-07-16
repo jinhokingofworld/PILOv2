@@ -635,17 +635,22 @@ function PiloCanvasRuntimeInner({
     catchUpOperations: catchUpCanvasOperations,
     hydrateShapes: hydrateRoomShapes,
   });
+  const persistThroughRoomState = canvasPresence.roomStateActive;
   const sendRoomShapePatch = useCallback(
     (patch: {
       deletedShapeIds: string[];
       upsertShapes: PiloCanvasFreeformShape[];
     }) => {
+      if (!persistThroughRoomState) {
+        return;
+      }
+
       canvasPresence.sendRoomShapePatch({
         deletedShapeIds: patch.deletedShapeIds,
         upsertShapes: serializeCanvasRoomStateShapes(patch.upsertShapes),
       });
     },
-    [canvasPresence.sendRoomShapePatch],
+    [canvasPresence.sendRoomShapePatch, persistThroughRoomState],
   );
   const reportLoadedViewport = useCallback(
     (
@@ -752,7 +757,7 @@ function PiloCanvasRuntimeInner({
     onShapeSyncConflict: handleShapeSyncConflict,
     onShapeSyncError: handleShapeSyncError,
     pendingLocalShapeVersionsRef,
-    persistThroughRoomState: canvasPresence.enabled,
+    persistThroughRoomState,
     remoteShapeRevisionRef,
     setCanvasHydrationVersion,
     setFreeformShapes,

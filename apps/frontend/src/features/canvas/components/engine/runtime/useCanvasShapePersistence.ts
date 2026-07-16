@@ -230,9 +230,8 @@ export function useCanvasShapePersistence({
             }
           });
 
-          onRoomShapePatch?.({ deletedShapeIds, upsertShapes });
-
           if (persistThroughRoomState) {
+            onRoomShapePatch?.({ deletedShapeIds, upsertShapes });
             clearPendingLocalShapeChanges(pendingLocalShapeVersions);
             return nextFreeformShapes;
           }

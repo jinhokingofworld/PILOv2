@@ -41,6 +41,7 @@ export type CanvasOperationCatchupState = {
 
 export type CanvasPresenceController = {
   enabled: boolean;
+  roomStateActive: boolean;
   currentUserId: string | null;
   checkpointStatus: CanvasRoomCheckpointStatusPayload | null;
   lastRejectedShapeLock: { rejectedAt: number; shapeIds: string[] } | null;
@@ -383,6 +384,7 @@ export function useCanvasPresence(
   >([]);
   const [checkpointStatus, setCheckpointStatus] =
     useState<CanvasRoomCheckpointStatusPayload | null>(null);
+  const [roomStateActive, setRoomStateActive] = useState(false);
   const [lastRejectedShapeLock, setLastRejectedShapeLock] = useState<{
     rejectedAt: number;
     shapeIds: string[];
@@ -638,6 +640,7 @@ export function useCanvasPresence(
   useEffect(() => {
     if (!usableConfig) {
       joinedRef.current = false;
+      setRoomStateActive(false);
       socketRef.current = null;
       roomRef.current = { workspaceId: "", canvasId: "" };
       lastSeenOpSeqRef.current = 0;
@@ -661,6 +664,7 @@ export function useCanvasPresence(
 
     if (!socket) {
       joinedRef.current = false;
+      setRoomStateActive(false);
       setRemotePresence([]);
       setRemoteShapeLocks([]);
       setRemoteShapePreviews([]);
@@ -692,9 +696,11 @@ export function useCanvasPresence(
     socketRef.current = realtimeSocket;
     roomRef.current = room;
     joinedRef.current = false;
+    setRoomStateActive(false);
 
     function joinCanvasRoom() {
       joinedRef.current = false;
+      setRoomStateActive(false);
       realtimeSocket.emit("canvas:join", {
         ...room,
         lastSeenOpSeq: lastSeenOpSeqRef.current,
@@ -707,6 +713,7 @@ export function useCanvasPresence(
     });
     realtimeSocket.on("disconnect", () => {
       joinedRef.current = false;
+      setRoomStateActive(false);
       setRemotePresence([]);
       setRemoteShapeLocks([]);
       setOwnedShapeLocks([]);
@@ -724,6 +731,7 @@ export function useCanvasPresence(
       }
 
       joinedRef.current = true;
+      setRoomStateActive(true);
       reconcileJoinState(payload);
       setRemotePresence(
         filterOwnPresence(
@@ -934,6 +942,7 @@ export function useCanvasPresence(
 
     return () => {
       joinedRef.current = false;
+      setRoomStateActive(false);
       if (realtimeSocket.connected) {
         realtimeSocket.emit("canvas:leave", room);
       }
@@ -1146,6 +1155,7 @@ export function useCanvasPresence(
       clearShapePreview,
       checkpointStatus,
       enabled,
+      roomStateActive,
       currentUserId,
       lastRejectedShapeLock,
       operationSync,
@@ -1179,6 +1189,7 @@ export function useCanvasPresence(
       checkpointStatus,
       currentUserId,
       enabled,
+      roomStateActive,
       lastRejectedShapeLock,
       operationSync,
       ownedShapeLocks,
