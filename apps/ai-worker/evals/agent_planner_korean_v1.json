@@ -1042,10 +1042,7 @@
             }
           },
           "keyConstraint": {
-            "type": [
-              "object",
-              "null"
-            ],
+            "type": "object",
             "required": [
               "name",
               "columnKeys"
@@ -1109,7 +1106,14 @@
                 }
               },
               "primaryKey": {
-                "$ref": "#/$defs/keyConstraint"
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/keyConstraint"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               },
               "uniqueConstraints": {
                 "type": "array",

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
@@ -158,6 +159,11 @@ assert.deepEqual(definition.inputSchema.required, [
   "unsupportedFeatures"
 ]);
 assert.equal(definition.inputSchema.additionalProperties, false);
+assert.equal(definition.inputSchema.$defs.keyConstraint.type, "object");
+assert.deepEqual(
+  definition.inputSchema.$defs.table.properties.primaryKey.oneOf,
+  [{ $ref: "#/$defs/keyConstraint" }, { type: "null" }]
+);
 
 assert.deepEqual(definition.validateInput(schemaSpec()), schemaSpec());
 assert.throws(
@@ -280,5 +286,19 @@ assert.equal(
   registry.getDefinition("generate_sql_erd").name,
   "generate_sql_erd"
 );
+
+const [agentApiContract, sqlErdApiContract] = await Promise.all([
+  readFile(new URL("../../../../docs/api/agent-api.md", import.meta.url), "utf8"),
+  readFile(new URL("../../../../docs/api/sqltoerd-api.md", import.meta.url), "utf8")
+]);
+for (const contract of [agentApiContract, sqlErdApiContract]) {
+  assert.match(contract, /generate_sql_erd/);
+  assert.match(contract, /SqlErdSchemaSpecV1/);
+  assert.match(contract, /new_session/);
+  assert.match(contract, /replace_current/);
+  assert.match(contract, /ERD 및 DDL 열기/);
+}
+assert.match(agentApiContract, /executionMode=contextual|`contextual`/);
+assert.match(sqlErdApiContract, /sourceText, DDL, modelJson, layoutJson/);
 
 console.log("SQLtoERD Agent tool tests passed.");

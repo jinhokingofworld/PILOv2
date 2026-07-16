@@ -146,7 +146,7 @@ const SQL_ERD_SCHEMA_SPEC_INPUT_SCHEMA: AgentToolInputSchema = {
       }
     },
     keyConstraint: {
-      type: ["object", "null"],
+      type: "object",
       required: ["name", "columnKeys"],
       additionalProperties: false,
       properties: {
@@ -180,7 +180,9 @@ const SQL_ERD_SCHEMA_SPEC_INPUT_SCHEMA: AgentToolInputSchema = {
           maxItems: 200,
           items: { $ref: "#/$defs/column" }
         },
-        primaryKey: { $ref: "#/$defs/keyConstraint" },
+        primaryKey: {
+          oneOf: [{ $ref: "#/$defs/keyConstraint" }, { type: "null" }]
+        },
         uniqueConstraints: {
           type: "array",
           maxItems: 200,

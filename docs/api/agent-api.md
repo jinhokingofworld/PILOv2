@@ -233,6 +233,25 @@ outbox, SQS payload에 저장하지 않는다. final citation은 outbox의 sourc
 `inputSummary`와 `outputSummary`에는 긴 원문, transcript, provider raw, token, secret을
 포함하지 않는다.
 
+### AgentResourceRef
+
+tool step의 `resourceRefs`는 다음 bounded object 배열이다.
+
+| Field | Type | 설명 |
+| --- | --- | --- |
+| `domain` | string | resource 소유 도메인 |
+| `resourceType` | string | 도메인 안의 resource 종류 |
+| `resourceId` | string | 서버가 검증한 resource 식별자 |
+| `label` | string \| undefined | 사용자 표시용 짧은 이름 |
+| `url` | string \| undefined | 앱 내부에서 검증 후 사용할 상대 경로 |
+| `status` | string \| undefined | 생성·수정 등 bounded 결과 상태 |
+| `metadata` | object \| undefined | 화면 표시에 필요한 bounded metadata |
+
+클라이언트는 `url`을 그대로 신뢰하지 않는다. SQLtoERD session 링크는 run과 tool step이
+모두 `completed`일 때만 표시하고, `/sql-erd/session?sessionId={resourceId}`와 정확히
+일치하는 same-origin 상대 경로만 허용한다. 외부 origin, protocol-relative URL, 추가
+query/hash, 중복·불일치 session ID는 거부한다. 링크 표시는 자동 navigation을 발생시키지 않는다.
+
 ### AgentConfirmation
 
 | Field | Type | 설명 |
@@ -748,11 +767,29 @@ Status code: `200 OK`
 | `get_board_briefing` | `low` | 가능 | Board 상세, column, filter option의 사실 기반 요약 |
 | `assign_board_issue_safely` | `medium` | 불가 | `GET .../assignee-options`, Agent 전용 내부 add/remove Board service |
 | `diagnose_board_freshness` | `low` | 가능 | active source, Board/issue/PR cache freshness와 Unmapped 진단 |
+| `generate_sql_erd` | `medium` | 상황별 | `SqlErdSchemaSpecV1`을 검증해 새 session을 만들거나 현재 operations_v1 session의 schema를 교체 |
 
 > `assign_board_issue_safely`는 공개 assignee option 조회 계약을 사용하지만, 실행은 내부 add/remove
 > Board service 경로를 사용한다. 별도의 공개 endpoint는 추가하지 않는다.
 
 ## 도메인별 실행 규칙
+
+### SQLtoERD
+
+- `generate_sql_erd`는 완성된 DDL 문자열이 아니라 전체 `SqlErdSchemaSpecV1` object만
+  planner input으로 받는다. App Server가 같은 schema를 다시 검증하고 DDL·modelJson·layoutJson을
+  결정적으로 생성하며 실제 데이터베이스에는 실행하지 않는다.
+- planner input에는 `targetMode`, `sessionId`, `workspaceId`, `userId`, `currentUserId`를 넣지 않는다.
+  현재 사용자·Workspace·run은 `AgentToolContext`에서만 주입한다.
+- SQLtoERD request context가 없으면 새 session을 즉시 생성한다. context가 있으면 App Server가
+  session 접근을 다시 검증한 뒤 `new_session`, `replace_current` 두 choice를 만든다. 클라이언트는
+  선택한 `choiceId`만 보내며 저장된 schemaSpec과 session ID는 서버가 복원한다.
+- 결과 step에는 sourceText, DDL, modelJson, layoutJson을 저장하지 않는다. `outputSummary`는 action,
+  title, dialect, table/relation count, warning code만 포함한다.
+- 생성·교체된 session은 `domain=sqltoerd`, `resourceType=session` resource ref 하나로 반환한다.
+  Frontend는 검증된 링크를 `ERD 및 DDL 열기`로 표시하고 자동으로 이동하지 않는다.
+- 지원 범위를 벗어난 schema 기능은 `unsupportedFeatures`에 명시한다. DB 실행·배포만 요구하는
+  요청은 `unsupported`이며, 요구 entity/table 정보가 없으면 먼저 clarification을 요청한다.
 
 ### Calendar
 
