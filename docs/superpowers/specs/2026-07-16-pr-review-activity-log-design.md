@@ -62,8 +62,10 @@ type PrReviewActivityMetadata<TData> = {
 - `summary`는 1~500자의 한국어 사실 문장이고 실제 반영된 결과를 과거형으로 쓴다.
 - actor 이름은 `actor_user_id`로 해석하므로 summary에 중복 저장하지 않는다.
 - PR 제목과 comment 원문은 저장하지 않는다.
-- `prNumber`, resource ID, file path, 상태, 개수와 결과 식별자만 저장한다.
-- `filePath`는 UTF-8 기준 최대 500자로 제한한다.
+- 기존 action은 중앙 registry에 정의된 `metadata.data` key만 저장한다. 파일 경로와 PR 번호처럼
+  회의록에 필요한 표현은 제한된 summary에 포함하고 임의 key로 중복 저장하지 않는다.
+- summary에 넣는 file path preview는 공백을 정규화하고 최대 400자로 잘라 전체 summary가
+  500자를 넘지 않게 한다.
 - URL은 저장하지 않는다. 기존 resource ID 또는 외부 결과 ID로 원본을 조회한다.
 - SHA는 원문 파일 내용이 아닌 결과 식별자이므로 필요한 action에서만 저장한다.
 
@@ -74,16 +76,12 @@ type PrReviewActivityMetadata<TData> = {
 ```ts
 type PrReviewSessionCreatedData = {
   pullRequestId: string;
-  reviewRoomId: string;
-  prNumber: number;
-  headSha: string;
-  reviewStatus: "analyzing";
 };
 ```
 
 - target: `{ type: "pr_review_session", id: reviewSessionId }`
 - dedupeKey:
-  `pr-review:pr_review_session_created:<reviewSessionId>:<headSha>`
+  `pr-review:pr_review_session_created:<reviewSessionId>:created`
 - summary 예시: `PR #142의 새 리뷰 revision을 시작했습니다.`
 - 새 session row가 실제 생성된 경우에만 기록한다.
 - 기존 session을 재사용해 `200 OK`로 반환하는 멱등 경로는 기록하지 않는다.
@@ -94,27 +92,17 @@ type PrReviewSessionCreatedData = {
 
 ```ts
 type FileReviewDecisionCreatedData = {
-  decisionId: string;
-  pullRequestId: string;
-  reviewRoomId: string;
   reviewSessionId: string;
-  prNumber: number;
-  filePath: string;
-  beforeStatus: "not_reviewed" | "approved" | "discussion_needed" | "unknown";
-  afterStatus: "approved" | "discussion_needed" | "unknown";
-  hasComment: boolean;
-  decisionVersion: number;
-  reviewStatus: "reviewing" | "ready_to_submit";
-  reviewedCount: number;
-  totalFileCount: number;
+  decision: "approved" | "discussion_needed" | "unknown";
 };
 ```
 
-- target: `{ type: "review_file", id: reviewFileId }`
+- target: `{ type: "file_review_decision", id: decisionId }`
 - dedupeKey:
-  `pr-review:file_review_decision_created:<reviewFileId>:<decisionVersion>`
+  `pr-review:file_review_decision_created:<decisionId>:created`
 - summary 예시: `auth.service.ts 파일을 추가 논의 필요 상태로 변경했습니다.`
-- comment 원문은 저장하지 않고 `decisionId`와 `hasComment`만 기록한다.
+- comment 원문과 comment 존재 여부는 metadata에 저장하지 않는다. 상세 확인은 target의
+  `decisionId`로 기존 판단 이력을 조회한다.
 - 현재 값과 요청 값이 같아 새 decision row가 생성되지 않는 멱등 경로는 기록하지 않는다.
 - file 상태, decision history, session 진행률 변경과 activity append를 하나의 transaction으로
   묶는다.
@@ -128,13 +116,6 @@ type FileReviewDecisionCreatedData = {
 ```ts
 type ReviewSubmissionTerminalData = {
   reviewSessionId: string;
-  pullRequestId: string;
-  prNumber: number;
-  submitType: "COMMENT" | "APPROVE" | "REQUEST_CHANGES";
-  reviewStatus: "submitted" | "ready_to_submit";
-  result: "submitted" | "failed";
-  githubReviewId: string | null;
-  errorCode: string | null;
 };
 ```
 
@@ -145,8 +126,8 @@ type ReviewSubmissionTerminalData = {
   `pr-review:review_submission_failed:<submissionId>:failed`
 - 성공 summary 예시: `PR #142에 변경 요청 Review를 제출했습니다.`
 - 실패 summary 예시: `PR #142의 변경 요청 Review 제출에 실패했습니다.`
-- review body, file review 결과 원문, GitHub URL, provider 오류 원문은 저장하지 않는다.
-- 실패에는 중앙 registry가 허용한 sanitize된 `errorCode`만 저장한다.
+- review body, submit type, file review 결과 원문, GitHub ID/URL, provider 오류 원문은
+  metadata에 저장하지 않는다. 성공·실패는 action과 summary로 구분한다.
 - local submission terminal 상태 변경과 activity append를 같은 transaction으로 묶는다.
 
 ## Action 4: Conflict 해결 적용
@@ -165,14 +146,10 @@ summary 예시: "PR #142의 conflict 파일 2개를 해결했습니다."
 ```ts
 type PrReviewConflictResolutionAppliedData = {
   reviewSessionId: string;
-  pullRequestId: string;
-  prNumber: number;
   resolvedFileCount: number;
-  headShaBefore: string;
   headShaAfter: string;
   commitSha: string;
   conflictStatusAfter: "checking" | "clean" | "conflicted" | "unknown";
-  localStateStatus: "updated" | "sync_required";
 };
 ```
 
@@ -191,22 +168,15 @@ type PrReviewConflictResolutionAppliedData = {
 target type: pull_request
 기록할 사용자 행동: 사용자가 PR Review 화면에서 GitHub PR merge를 완료함
 회의록에 필요한 이유: PR의 최종 상태와 수행자를 기록하기 위해
-dedupeKey 생성 방식: GitHub merge commit SHA, 없으면 GitHub가 반환한 mergedAt
+dedupeKey 생성 방식: GitHub merge commit SHA
 summary 예시: "PR #142를 merge 방식으로 병합했습니다."
 ```
 
 ```ts
 type PrReviewPullRequestMergedData = {
   reviewSessionId: string;
-  pullRequestId: string;
-  reviewRoomId: string;
-  prNumber: number;
   mergeMethod: "merge";
   mergeCommitSha: string;
-  headSha: string;
-  pullRequestState: "closed";
-  merged: true;
-  reviewRoomStatus: "completed";
 };
 ```
 
@@ -236,9 +206,9 @@ GitHub 자체를 DB transaction으로 rollback할 수 없다.
 
 ## 중앙 Foundation 선행 조건
 
-현재 checkout에는 공통 `ActivityLogService`, TypeScript `ActivityLogAction` registry와
-action별 metadata 문서가 아직 보이지 않는다. 구현 전에 foundation PR 또는 담당 경로를
-확인해야 한다.
+공통 foundation은 최신 `dev`의 `apps/app-server/src/common/activity-log.service.ts`,
+`docs/ActivityLogRegistry.md`, `db/migrations/070_create_activity_log_foundation_constraints.sql`에
+존재한다. 구현 브랜치는 이 foundation이 포함된 최신 `dev`를 기준으로 해야 한다.
 
 PR Review 구현은 다음을 직접 만들지 않는다.
 
@@ -293,7 +263,8 @@ Foundation에는 다음 두 신규 action과 data 타입을 요청한다.
 - 신규 action 두 개가 foundation registry와 metadata 문서에 등록된다.
 - 모든 append가 공통 service와 domain transaction을 사용한다.
 - Meeting 전용 ID와 context가 PR Review 요청·DB·metadata에 추가되지 않는다.
-- metadata가 회의록에 필요한 수행자, 변경 결과와 PR 상태를 복원할 수 있다.
+- actor와 summary가 회의록에 필요한 수행자, 변경 결과와 PR 상태를 설명하고,
+  `metadata.data`는 중앙 registry의 exact-key 계약을 지킨다.
 - 중복, rollback, 민감 데이터 금지와 외부 GitHub 복구 시나리오를 테스트한다.
 
 ## 별도 후속 범위
