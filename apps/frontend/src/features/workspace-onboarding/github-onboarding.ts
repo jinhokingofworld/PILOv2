@@ -35,7 +35,7 @@ export function getGithubCallbackErrorMessage(error: string | null) {
   const messages: Record<string, string> = {
     authorization_cancelled: "GitHub 연결이 취소되었습니다. workspace는 유지되며 언제든 다시 연결할 수 있습니다.",
     project_oauth_account_mismatch: "ProjectV2 권한은 GitHub App 연결에 사용한 동일한 계정으로 승인해 주세요.",
-    project_oauth_scope_missing: "ProjectV2 권한에 필요한 project scope가 승인되지 않았습니다. 다시 연결해 주세요.",
+    project_oauth_scope_missing: "ProjectV2 OAuth에는 project와 repo 권한이 모두 필요합니다. 다시 연결해 주세요.",
     account_already_connected: "이 GitHub 계정은 다른 PILO 계정에 연결되어 있습니다.",
     installation_not_accessible: "선택한 GitHub App 설치에 접근할 수 없습니다. 다시 설치해 주세요."
   };

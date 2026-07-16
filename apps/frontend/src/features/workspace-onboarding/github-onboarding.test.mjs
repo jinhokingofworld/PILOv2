@@ -68,6 +68,10 @@ assert.match(
   onboarding.getGithubCallbackErrorMessage("project_oauth_account_mismatch"),
   /ProjectV2/
 );
+assert.match(
+  onboarding.getGithubCallbackErrorMessage("project_oauth_scope_missing"),
+  /project와 repo 권한이 모두 필요합니다/
+);
 
 assert.match(pageSource, /startGithubAppInstallation\(existingWorkspaceId/);
 assert.match(pageSource, /getGithubSourceSyncPollingState/);
