@@ -925,6 +925,8 @@ function PiloCanvasRuntimeInner({
     mergeLoadedFreeformShapes,
     pendingShapeDetailRef,
     queryClient,
+    remoteShapeContentHashRef,
+    remoteShapeRevisionRef,
     shapeDetailCacheRef,
     shapeDetailRequestSeqRef,
     storageMode,

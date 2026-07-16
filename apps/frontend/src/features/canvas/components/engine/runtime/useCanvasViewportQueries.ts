@@ -42,6 +42,8 @@ type UseCanvasViewportQueriesOptions = {
   mergeLoadedFreeformShapes: (loadedShapes: PiloCanvasFreeformShape[]) => void;
   pendingShapeDetailRef: RuntimeRef<string | null>;
   queryClient: QueryClient;
+  remoteShapeContentHashRef: RuntimeRef<Map<string, string>>;
+  remoteShapeRevisionRef: RuntimeRef<Map<string, number>>;
   shapeDetailCacheRef: RuntimeRef<Map<string, PiloCanvasFreeformShape>>;
   shapeDetailRequestSeqRef: RuntimeRef<number>;
   storageMode: CanvasRuntimeStorageMode;
@@ -66,6 +68,20 @@ function shouldLoadExpandedFrameChildren(
     typeof shape.id === "string" &&
     !isPiloFrameCollapsed(shape)
   );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readPersistedRevision(value: unknown) {
+  return typeof value === "number" && Number.isInteger(value) && value > 0
+    ? value
+    : null;
+}
+
+function readPersistedContentHash(value: unknown) {
+  return typeof value === "string" && value ? value : null;
 }
 
 function createViewportShapeLoadBounds(
@@ -98,6 +114,8 @@ export function useCanvasViewportQueries({
   mergeLoadedFreeformShapes,
   pendingShapeDetailRef,
   queryClient,
+  remoteShapeContentHashRef,
+  remoteShapeRevisionRef,
   shapeDetailCacheRef,
   shapeDetailRequestSeqRef,
   storageMode,
@@ -113,6 +131,30 @@ export function useCanvasViewportQueries({
     boardId: string;
     bounds: LoadedViewportShapeBounds[];
   } | null>(null);
+  const rememberPersistedShapeMetadata = useCallback(
+    (value: unknown) => {
+      const shapes = Array.isArray(value) ? value : [value];
+
+      shapes.forEach((shape) => {
+        if (!isRecord(shape) || typeof shape.id !== "string") return;
+
+        const revision = readPersistedRevision(shape.revision);
+        const contentHash = readPersistedContentHash(shape.contentHash);
+
+        if (revision !== null) {
+          remoteShapeRevisionRef.current.set(
+            shape.id,
+            Math.max(remoteShapeRevisionRef.current.get(shape.id) ?? 0, revision),
+          );
+        }
+
+        if (contentHash) {
+          remoteShapeContentHashRef.current.set(shape.id, contentHash);
+        }
+      });
+    },
+    [remoteShapeContentHashRef, remoteShapeRevisionRef],
+  );
   const loadFrameChildren = useCallback(
     (frameId: string, visitedFrameIds = new Set<string>()) => {
       if (visitedFrameIds.has(frameId)) {
@@ -194,6 +236,8 @@ export function useCanvasViewportQueries({
             ),
         })
         .then((shapes) => {
+          rememberPersistedShapeMetadata(shapes);
+
           const loadedShapes = normalizeCanvasFreeformShapes(
             shapes,
           ) as PiloCanvasFreeformShape[];
@@ -220,6 +264,7 @@ export function useCanvasViewportQueries({
       canvasClient,
       deletedShapeIdsRef,
       mergeLoadedFreeformShapes,
+      rememberPersistedShapeMetadata,
       queryClient,
       shapeDetailCacheRef,
       storageMode,
@@ -318,6 +363,8 @@ export function useCanvasViewportQueries({
               return;
             }
 
+            rememberPersistedShapeMetadata(shapes);
+
             const loadedShapes = normalizeCanvasFreeformShapes(
               shapes,
             ) as PiloCanvasFreeformShape[];
@@ -368,6 +415,7 @@ export function useCanvasViewportQueries({
       mergeLoadedFreeformShapes,
       onViewportShapesLoaded,
       queryClient,
+      rememberPersistedShapeMetadata,
       storageMode,
       viewportShapeLoadRequestSeqRef,
       viewportShapeLoadTimerRef,
@@ -436,6 +484,8 @@ export function useCanvasViewportQueries({
             return;
           }
 
+          rememberPersistedShapeMetadata([shape]);
+
           const [detailShape] = normalizeCanvasFreeformShapes([
             shape,
           ]) as PiloCanvasFreeformShape[];
@@ -461,6 +511,7 @@ export function useCanvasViewportQueries({
       mergeLoadedFreeformShapes,
       pendingShapeDetailRef,
       queryClient,
+      rememberPersistedShapeMetadata,
       shapeDetailCacheRef,
       shapeDetailRequestSeqRef,
       storageMode,

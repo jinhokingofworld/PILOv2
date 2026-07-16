@@ -589,7 +589,26 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
       const shapeId = typeof shape.id === "string" ? shape.id.trim() : "";
 
       if (!shapeId) return;
-      shapeCache.set(shapeId, { cachedAt, shape });
+      const currentShape = shapeCache.get(shapeId)?.shape;
+      const nextShape = { ...shape };
+
+      if (readShapeRevision(nextShape) === null) {
+        const currentRevision = readShapeRevision(currentShape);
+
+        if (currentRevision !== null) {
+          nextShape.revision = currentRevision;
+        }
+      }
+
+      if (readShapeContentHash(nextShape) === null) {
+        const currentContentHash = readShapeContentHash(currentShape);
+
+        if (currentContentHash) {
+          nextShape.contentHash = currentContentHash;
+        }
+      }
+
+      shapeCache.set(shapeId, { cachedAt, shape: nextShape });
       getRoomTombstones(roomName).delete(shapeId);
       if (options.markDirty) {
         getRoomShapeIdSet(dirtyShapeIdsByRoom, roomName).add(shapeId);
