@@ -134,6 +134,28 @@ class FakeGithubIssueWriteService {
       })
     };
   }
+
+  async updateIssueAssigneesDelta(input) {
+    this.calls.push({ method: "updateIssueAssigneesDelta", ...input });
+    if (this.error) {
+      throw this.error;
+    }
+    if (this.fail) {
+      throw new Error("raw provider failure");
+    }
+
+    return {
+      assigneesApplied: this.assigneesApplied,
+      issue: githubIssuePayload({
+        assignees: (
+          this.assigneesApplied ? ["alice", ...input.add] : []
+        ).map((login) => ({
+          login,
+          avatar_url: `https://avatar.test/${login}`
+        }))
+      })
+    };
+  }
 }
 
 class FakeActivityLogService {
@@ -713,5 +735,99 @@ for (const { input, message, name } of [
     }
   );
 
+  assert.equal(db.transactions.length, 0);
+}
+{
+  const finalAssignees = [
+    { login: "alice", avatar_url: "https://avatar.test/alice" },
+    { login: "carol", avatar_url: "https://avatar.test/carol" }
+  ];
+  const database = new FakeDatabase({
+    queryOneRows: [
+      updateTargetRow({
+        assignees: [{ login: "alice" }, { login: "bob" }]
+      }),
+      updatedIssueRow({ assignees: finalAssignees })
+    ],
+    queryRows: [[projectFieldRow()]]
+  });
+  const {
+    activityLogService,
+    database: db,
+    githubIssueWriteService,
+    service,
+    workspaceService
+  } = createSubject(database);
+
+  const result = await service.updateBoardIssueAssigneesDelta(
+    currentUserId,
+    workspaceId,
+    boardId,
+    issueId,
+    {
+      addAssignees: ["carol"],
+      removeAssignees: ["bob"]
+    }
+  );
+
+  assert.deepEqual(workspaceService.calls, [
+    { userId: currentUserId, workspaceId }
+  ]);
+  assert.deepEqual(githubIssueWriteService.calls, [
+    {
+      method: "updateIssueAssigneesDelta",
+      add: ["carol"],
+      currentUserId,
+      issueNumber: 203,
+      owner: "Developer-EJ",
+      remove: ["bob"],
+      repo: "PILO"
+    }
+  ]);
+  assert.equal(db.transactions.length, 1);
+  assert.equal(activityLogService.calls.length, 1);
+  assert.deepEqual(activityLogService.calls[0].input.metadata.data, {
+    boardId,
+    changedFields: ["assignees"]
+  });
+  assert.ok(
+    db.queries.some((query) =>
+      /UPDATE github_issues[\s\S]*assignees/i.test(query.text)
+    )
+  );
+  assert.ok(
+    db.queries.some((query) =>
+      /UPDATE pilo_issues[\s\S]*assignees/i.test(query.text)
+    )
+  );
+  assert.deepEqual(
+    result.issue.assignees.map((item) => item.login),
+    ["alice", "carol"]
+  );
+}
+
+{
+  const database = new FakeDatabase({
+    queryOneRows: [null]
+  });
+  const { database: db, githubIssueWriteService, service } =
+    createSubject(database);
+
+  await assert.rejects(
+    () =>
+      service.updateBoardIssueAssigneesDelta(
+        currentUserId,
+        workspaceId,
+        boardId,
+        issueId,
+        {
+          addAssignees: ["carol"],
+          removeAssignees: []
+        }
+      ),
+    (error) => error.getStatus() === 404
+  );
+
+  assert.equal(githubIssueWriteService.calls.length, 0);
   assert.equal(db.transactions.length, 0);
 }

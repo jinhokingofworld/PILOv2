@@ -6,12 +6,14 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Query,
   UseGuards
 } from "@nestjs/common";
 import { apiResponse, ApiSuccessResponse } from "../../common/api-response";
 import { AuthGuard } from "../../common/auth.guard";
 import { CurrentUserId } from "../../common/current-user.decorator";
+import { DocumentService } from "./document.service";
 import { DriveService } from "./drive.service";
 import {
   DriveDeletePayload,
@@ -20,11 +22,19 @@ import {
   DriveListPayload,
   DriveUploadUrlPayload
 } from "./drive.types";
+import type {
+  CreateDocumentPayload,
+  DocumentBootstrapPayload,
+  SaveDocumentSnapshotPayload
+} from "./document.types";
 
 @Controller("workspaces/:workspaceId/drive")
 @UseGuards(AuthGuard)
 export class DriveController {
-  constructor(private readonly driveService: DriveService) {}
+  constructor(
+    private readonly driveService: DriveService,
+    private readonly documentService: DocumentService
+  ) {}
 
   @Get("items")
   async listItems(
@@ -54,6 +64,53 @@ export class DriveController {
     );
 
     return apiResponse(folder);
+  }
+
+  @Post("documents")
+  async createDocument(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Body() body: Record<string, unknown>
+  ): Promise<ApiSuccessResponse<CreateDocumentPayload>> {
+    const document = await this.documentService.createDocument(
+      currentUserId,
+      workspaceId,
+      body
+    );
+
+    return apiResponse(document);
+  }
+
+  @Get("documents/:documentId")
+  async getDocument(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("documentId") documentId: string
+  ): Promise<ApiSuccessResponse<DocumentBootstrapPayload>> {
+    const document = await this.documentService.getDocument(
+      currentUserId,
+      workspaceId,
+      documentId
+    );
+
+    return apiResponse(document);
+  }
+
+  @Put("documents/:documentId/snapshot")
+  async saveDocumentSnapshot(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("documentId") documentId: string,
+    @Body() body: Record<string, unknown>
+  ): Promise<ApiSuccessResponse<SaveDocumentSnapshotPayload>> {
+    const document = await this.documentService.saveDocumentSnapshot(
+      currentUserId,
+      workspaceId,
+      documentId,
+      body
+    );
+
+    return apiResponse(document);
   }
 
   @Post("files/upload-url")

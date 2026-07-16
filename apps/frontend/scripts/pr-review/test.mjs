@@ -441,6 +441,10 @@ assert.match(prReviewCanvasSurface, /selectReviewFileNode/);
 assert.match(prReviewCanvasSurface, /selectedReviewFileId/);
 assert.match(prReviewCanvasSurface, /PrReviewCanvasPersistenceBridge/);
 assert.match(prReviewCanvasSurface, /usePrReviewCanvasPresence/);
+assert.match(
+  prReviewCanvasSurface,
+  /\[realtimeIdentity, reviewRoom\?\.canvasId, workspaceId\]/,
+);
 assert.match(prReviewCanvasSurface, /PrReviewCanvasRealtimeBridge/);
 assert.match(prReviewCanvasSurface, /reviewRoom\?\.status === "completed"/);
 assert.match(prReviewCanvasSurface, /persistedFileShapeEnabled && !readOnly/);
@@ -450,11 +454,15 @@ assert.match(prReviewCanvasSurface, /PrReviewRelationInspector/);
 assert.match(prReviewCanvasSurface, /collapseStoredSemanticRelationShapes/);
 assert.match(prReviewCanvasSurface, /buildStoredFlowLabelShapes/);
 assert.match(prReviewCanvasSurface, /roleTypeByReviewFileId/);
-assert.match(prReviewCanvasSurface, /shape\.props\.routePoints\.length >= 2/);
+assert.match(prReviewCanvasSurface, /hasPrReviewRelationAnchors/);
 assert.match(prReviewCanvasSurface, /relationCount: details\.length/);
 assert.match(prReviewCanvasSurface, /관계 \$\{relationDetails\.length\}개/);
 assert.match(prReviewCanvasSurface, /aria-label="선택한 파일 관계"/);
 assert.match(prReviewCanvasSurface, /buildPrReviewFileShapeUpdateInput/);
+assert.match(prReviewCanvasSurface, /buildPrReviewGraphPresentation/);
+assert.match(prReviewCanvasSurface, /createPrReviewFlowLayout/);
+assert.match(prReviewCanvasSurface, /PrReviewGraphControls/);
+assert.match(prReviewCanvasSurface, /pinned: true/);
 assert.match(prReviewCanvasSurface, /riskLevel: fileNodeData\.riskLevel/);
 assert.match(prReviewCanvasSurface, /conflictReason: conflictMetadata\.conflictReason/);
 assert.match(prReviewCanvasSurface, /fileByPath/);
@@ -473,6 +481,10 @@ assert.match(prReviewCanvasSurface, /listReviewCanvasOperations/);
 assert.match(prReviewCanvasSurface, /readPrReviewCanvasOperationShape/);
 assert.doesNotMatch(prReviewFileNodeShapeUtil, /<foreignObject/);
 assert.match(prReviewCanvasPresence, /setReadOnly\(payload\.readOnly\)/);
+assert.match(
+  prReviewCanvasPresence,
+  /setReadOnly\(payload\.readOnly\);\s+onRoomJoinedRef\.current\?\.\(\);/,
+);
 assert.match(prReviewCanvasPresence, /STALE_PRESENCE_TIMEOUT_MS = 15_000/);
 assert.doesNotMatch(prReviewCanvasPresence, /canvas:shape:lock/);
 assert.doesNotMatch(prReviewCanvasPresence, /canvas:shape:preview/);
@@ -607,6 +619,8 @@ assert.match(prReviewFileNodeShapeUtil, /reviewFileId/);
 assert.match(prReviewFileNodeShapeUtil, /workflowOrder/);
 assert.match(prReviewFileNodeShapeUtil, /reviewStatus/);
 assert.match(prReviewFileNodeShapeUtil, /conflictState/);
+assert.match(prReviewFileNodeShapeUtil, /pinned: boolean/);
+assert.match(prReviewFileNodeShapeUtil, /고정된 파일 노드/);
 assert.match(prReviewFileNodeShapeUtil, /conflictBadgeLabels/);
 assert.match(prReviewFileNodeShapeUtil, /conflictNodeClasses/);
 assert.match(prReviewFileNodeShapeUtil, /AlertTriangle/);
@@ -661,6 +675,7 @@ await import("./oauth-reconnect-client.test.mjs");
 await import("./canvas-shape-client.test.mjs");
 await import("./canvas-shape-persistence.test.mjs");
 await import("./canvas-shape-index.test.mjs");
+await import("./graph-exploration.test.mjs");
 await import("./canvas-operation-sync.test.mjs");
 await import("./node-activation.test.mjs");
 await import("./system-shape-policy.test.mjs");

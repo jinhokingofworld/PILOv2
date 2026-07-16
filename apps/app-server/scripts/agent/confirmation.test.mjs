@@ -6,6 +6,9 @@ const { AgentConfirmationService } = require(
   "../../dist/modules/agent/agent-confirmation.service.js"
 );
 const { badRequest } = require("../../dist/common/api-error.js");
+const { boardBadGateway } = require(
+  "../../dist/modules/board/board-api-error.js"
+);
 
 const USER_ID = "11111111-1111-1111-1111-111111111111";
 const WORKSPACE_ID = "22222222-2222-2222-2222-222222222222";
@@ -266,6 +269,22 @@ class FakeAgentToolRegistryService {
 
         return input;
       },
+      ...(this.state.buildConfirmationInput
+        ? {
+            buildConfirmationInput: (plan) => {
+              this.calls.push({ method: "buildConfirmationInput", name, plan });
+              return this.state.buildConfirmationInput(plan);
+            },
+            validateConfirmationInput: (input) => {
+              this.calls.push({
+                method: "validateConfirmationInput",
+                name,
+                input
+              });
+              return input;
+            }
+          }
+        : {}),
       execute: async (context, input) => {
         this.calls.push({
           method: "execute",
@@ -434,8 +453,12 @@ class FakeTransaction {
     expiresAt
   ]) {
     const now = new Date("2026-07-08T00:00:00.000Z");
+    const id =
+      this.state.confirmations.length === 0
+        ? CONFIRMATION_ID
+        : "66666666-6666-6666-6666-666666666666";
     const confirmation = {
-      id: CONFIRMATION_ID,
+      id,
       run_id: runId,
       tool_name: toolName,
       status: "pending",
@@ -882,4 +905,219 @@ function errorMessage(error) {
     }
   );
   assert.equal(state.confirmations[0].status, "approved");
+}
+
+{
+  const movePlan = {
+    toolName: "move_board_issue_status",
+    summary: "#134 이슈를 In Progress로 이동합니다.",
+    target: {
+      domain: "board",
+      resourceType: "issue",
+      resourceId: "101"
+    },
+    before: { columnName: "Todo" },
+    after: { columnName: "In Progress" },
+    call: {
+      boardId: "42",
+      issueId: "101",
+      columnId: "8",
+      previousColumnId: "7"
+    }
+  };
+  const state = {
+    runs: [createRun()],
+    confirmations: [
+      createConfirmation({
+        tool_name: "move_board_issue_status",
+        summary: movePlan.summary,
+        plan_json: movePlan
+      })
+    ],
+    buildConfirmationInput: (plan) => ({
+      boardId: plan.call.boardId,
+      issueId: plan.call.issueId,
+      columnId: plan.call.columnId,
+      previousColumnId: plan.call.previousColumnId
+    })
+  };
+  const { service, toolRegistryService } = createService(state);
+  const result = await service.approveConfirmation(
+    USER_ID,
+    WORKSPACE_ID,
+    RUN_ID,
+    CONFIRMATION_ID,
+    undefined
+  );
+
+  assert.equal(result.run.status, "completed");
+  assert.deepEqual(
+    toolRegistryService.calls.map((call) => call.method),
+    [
+      "getDefinition",
+      "buildConfirmationInput",
+      "validateConfirmationInput",
+      "execute"
+    ]
+  );
+  assert.deepEqual(toolRegistryService.calls[3].input, {
+    boardId: "42",
+    issueId: "101",
+    columnId: "8",
+    previousColumnId: "7"
+  });
+}
+
+{
+  const plan = {
+    ...createPlan("create_board_issue"),
+    summary: "Create an authentication failure issue in Todo.",
+    target: {
+      domain: "board",
+      resourceType: "issue"
+    },
+    after: {
+      title: "Fix authentication failure",
+      body: null,
+      columnName: "Todo"
+    },
+    call: {
+      method: "POST",
+      path: "/api/v1/workspaces/{workspaceId}/boards/{boardId}/issues",
+      boardId: "1",
+      columnId: "2",
+      idempotencyKey: `agent:${RUN_ID}:create_board_issue`
+    }
+  };
+  const state = {
+    runs: [createRun()],
+    confirmations: [
+      createConfirmation({
+        tool_name: "create_board_issue",
+        summary: plan.summary,
+        plan_json: plan
+      })
+    ],
+    executionError: boardBadGateway("GitHub ProjectV2 item add failed"),
+    buildConfirmationInput: (confirmationPlan) => confirmationPlan.after
+  };
+  const { service, loggingService } = createService(state);
+
+  const result = await service.approveConfirmation(
+    USER_ID,
+    WORKSPACE_ID,
+    RUN_ID,
+    CONFIRMATION_ID,
+    undefined
+  );
+
+  assert.equal(result.run.status, "waiting_confirmation");
+  assert.equal(result.run.confirmation.status, "pending");
+  assert.equal(state.confirmations.length, 2);
+  assert.equal(state.confirmations[0].status, "approved");
+  assert.equal(state.confirmations[1].status, "pending");
+  assert.notEqual(state.confirmations[1].id, CONFIRMATION_ID);
+  assert.deepEqual(state.confirmations[1].plan_json, plan);
+  assert.equal(
+    state.confirmations[1].plan_json.call.idempotencyKey,
+    `agent:${RUN_ID}:create_board_issue`
+  );
+  assert.deepEqual(
+    loggingService.calls.map((call) => call.method),
+    ["createToolExecutionClaim", "failStep"]
+  );
+}
+
+{
+  const plan = {
+    ...createPlan("create_board_issue"),
+    summary: "Create an authentication failure issue in Todo."
+  };
+  const state = {
+    runs: [createRun()],
+    confirmations: [
+      createConfirmation({
+        tool_name: "create_board_issue",
+        summary: plan.summary,
+        plan_json: plan
+      })
+    ],
+    executionError: badRequest("title is required"),
+    buildConfirmationInput: (confirmationPlan) => confirmationPlan.after
+  };
+  const { service, loggingService } = createService(state);
+
+  const result = await service.approveConfirmation(
+    USER_ID,
+    WORKSPACE_ID,
+    RUN_ID,
+    CONFIRMATION_ID,
+    undefined
+  );
+
+  assert.equal(result.run.status, "failed");
+  assert.equal(state.confirmations.length, 1);
+  assert.deepEqual(
+    loggingService.calls.map((call) => call.method),
+    ["createToolExecutionClaim", "failStep", "failRun"]
+  );
+}
+{
+  const plan = {
+    toolName: "assign_board_issue_safely",
+    summary: "#134 issue assignees will be updated.",
+    target: {
+      domain: "board",
+      resourceType: "issue",
+      resourceId: "101"
+    },
+    before: {
+      assignees: ["alice", "bob"]
+    },
+    after: {
+      assignees: ["alice", "carol"],
+      retained: ["alice"],
+      added: ["carol"],
+      removed: ["bob"]
+    },
+    call: {
+      service: "BoardService.updateBoardIssueAssigneesDelta",
+      boardId: "42",
+      issueId: "101",
+      addAssignees: ["carol"],
+      removeAssignees: ["bob"]
+    }
+  };
+  const state = {
+    runs: [createRun()],
+    confirmations: [
+      createConfirmation({
+        tool_name: "assign_board_issue_safely",
+        summary: plan.summary,
+        plan_json: plan
+      })
+    ],
+    executionError: boardBadGateway("GitHub issue update failed"),
+    buildConfirmationInput: (confirmationPlan) => ({
+      boardId: confirmationPlan.call.boardId,
+      issueId: confirmationPlan.call.issueId,
+      addAssignees: confirmationPlan.call.addAssignees,
+      removeAssignees: confirmationPlan.call.removeAssignees
+    })
+  };
+  const { service } = createService(state);
+
+  const result = await service.approveConfirmation(
+    USER_ID,
+    WORKSPACE_ID,
+    RUN_ID,
+    CONFIRMATION_ID,
+    undefined
+  );
+
+  assert.equal(result.run.status, "waiting_confirmation");
+  assert.equal(state.confirmations.length, 2);
+  assert.equal(state.confirmations[0].status, "approved");
+  assert.equal(state.confirmations[1].status, "pending");
+  assert.deepEqual(state.confirmations[1].plan_json.call, plan.call);
 }

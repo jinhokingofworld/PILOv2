@@ -25,6 +25,11 @@ interface NormalizedIssueUpdateInput {
   state?: BoardIssueState;
 }
 
+interface NormalizedAssigneeDeltaInput {
+  addAssignees: string[];
+  removeAssignees: string[];
+}
+
 export interface UpdateBoardIssueResult {
   issue: BoardIssueDetailPayload;
 }
@@ -133,6 +138,109 @@ export class BoardIssueUpdateService {
     };
   }
 
+  async updateBoardIssueAssigneesDelta(
+    currentUserId: string,
+    workspaceId: string,
+    boardId: string,
+    issueId: string,
+    body: unknown
+  ): Promise<UpdateBoardIssueResult> {
+    const normalizedBoardId = this.readBoardId(boardId);
+    const normalizedIssueId = this.readIssueId(issueId);
+    const input = this.normalizeAssigneeDeltaInput(body);
+
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+
+    const target = await this.boardIssueUpdateQueries.findIssueUpdateTarget(
+      workspaceId,
+      normalizedBoardId,
+      normalizedIssueId
+    );
+    if (!target) {
+      throw notFound("Board issue not found");
+    }
+
+    this.assertGithubIssueTarget(target);
+    const issueNumber = this.toInteger(
+      target.github_issue_number,
+      "Invalid GitHub issue number"
+    );
+
+    let githubUpdate;
+    try {
+      githubUpdate =
+        await this.githubIssueWriteService.updateIssueAssigneesDelta({
+          add: input.addAssignees,
+          currentUserId,
+          issueNumber,
+          owner: target.repository_owner_login,
+          remove: input.removeAssignees,
+          repo: target.repository_name
+        });
+    } catch (error) {
+      rethrowBoardGithubWriteError(error, "GitHub issue update failed");
+    }
+
+    const activityLog = buildPiloIssueUpdatedActivityLog({
+      actorUserId: currentUserId,
+      after: githubUpdate.issue,
+      before: {
+        assignees: target.assignees,
+        body: target.body,
+        state: target.state,
+        title: target.title,
+        updatedAt: target.updated_at
+      },
+      boardId: normalizedBoardId,
+      issueId: normalizedIssueId,
+      requestedChanges: { assignees: [] },
+      workspaceId
+    });
+
+    await this.boardIssueUpdateQueries.transaction(async (transaction) => {
+      const cacheInput = {
+        boardId: normalizedBoardId,
+        githubIssueId: target.github_issue_id,
+        issue: githubUpdate.issue,
+        issueId: normalizedIssueId,
+        workspaceId
+      };
+
+      await this.boardIssueUpdateQueries.updateGithubIssueCache(
+        transaction,
+        cacheInput
+      );
+      await this.boardIssueUpdateQueries.updatePiloIssueCache(
+        transaction,
+        cacheInput
+      );
+      if (activityLog) {
+        await this.activityLogService.append(transaction, activityLog);
+      }
+    });
+
+    if (!githubUpdate.assigneesApplied) {
+      throw forbidden("GitHub Issue assignee update was not applied");
+    }
+
+    const issue = await this.boardIssueUpdateQueries.findUpdatedIssueDetail(
+      workspaceId,
+      normalizedBoardId,
+      normalizedIssueId
+    );
+    if (!issue) {
+      throw notFound("Board issue not found");
+    }
+
+    const projectFields = issue.project_item_id
+      ? await this.boardIssueUpdateQueries.listProjectFields(issue.project_item_id)
+      : [];
+
+    return {
+      issue: this.mapBoardIssueDetail(issue, projectFields)
+    };
+  }
+
   private async updateGithubIssue(
     currentUserId: string,
     target: BoardIssueUpdateTargetRow & {
@@ -157,6 +265,44 @@ export class BoardIssueUpdateService {
     } catch (error) {
       rethrowBoardGithubWriteError(error, "GitHub issue update failed");
     }
+  }
+
+  private normalizeAssigneeDeltaInput(
+    body: unknown
+  ): NormalizedAssigneeDeltaInput {
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      throw badRequest("Board assignee delta must be an object");
+    }
+
+    const draft = body as Record<string, unknown>;
+    const allowedFields = new Set(["addAssignees", "removeAssignees"]);
+    for (const field of Object.keys(draft)) {
+      if (!allowedFields.has(field)) {
+        throw badRequest(`Board assignee delta.${field} is not supported`);
+      }
+    }
+
+    const addAssignees = this.readAssignees(draft.addAssignees ?? []);
+    const removeAssignees = this.readAssignees(draft.removeAssignees ?? []);
+    if (addAssignees.length === 0 && removeAssignees.length === 0) {
+      throw badRequest("At least one assignee must be added or removed");
+    }
+
+    const removed = new Set(
+      removeAssignees.map((login) => login.toLocaleLowerCase("en-US"))
+    );
+    if (
+      addAssignees.some((login) =>
+        removed.has(login.toLocaleLowerCase("en-US"))
+      )
+    ) {
+      throw badRequest("The same assignee cannot be added and removed");
+    }
+
+    return {
+      addAssignees,
+      removeAssignees
+    };
   }
 
   private normalizeIssueUpdateInput(body: unknown): NormalizedIssueUpdateInput {

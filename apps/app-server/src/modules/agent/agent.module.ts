@@ -19,6 +19,7 @@ import { AgentPlannerService } from "./agent-planner.service";
 import { AgentService } from "./agent.service";
 import { AgentToolRegistryService } from "./agent-tool-registry.service";
 import { BoardAgentToolsService } from "./tools/board-agent-tools.service";
+import { BoardContextResolverService } from "./tools/board-context-resolver.service";
 import { CalendarAgentToolsService } from "./tools/calendar-agent-tools.service";
 import { MeetingAgentToolsService } from "./tools/meeting-agent-tools.service";
 
@@ -44,6 +45,7 @@ import { MeetingAgentToolsService } from "./tools/meeting-agent-tools.service";
     AgentGroundedAnswerOutboxPublisherService,
     AgentPlannerService,
     AgentToolRegistryService,
+    BoardContextResolverService,
     BoardAgentToolsService,
     CalendarAgentToolsService,
     MeetingAgentToolsService

@@ -14,7 +14,7 @@ import {
   type TLBaseShape,
   type TLShape
 } from "tldraw";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, LockKeyhole } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { activatePrReviewFileNode } from "@/features/pr-review/components/review-canvas/pr-review-node-activation";
@@ -52,6 +52,7 @@ export type PrReviewFileNodeShapeProps = {
   reviewStatus: PrReviewFileReviewStatus;
   conflictState: "none" | "unresolved" | "ready" | "unsupported";
   conflictReason: string | null;
+  pinned: boolean;
 };
 
 export type PrReviewFlowEdgeShapeProps = {
@@ -432,6 +433,15 @@ function PrReviewFileNode({ shape }: { shape: PrReviewFileNodeShape }) {
             <AlertTriangle aria-hidden="true" className="size-4" />
           </span>
         ) : null}
+        {shape.props.pinned ? (
+          <span
+            aria-label="고정된 파일 노드"
+            className="pointer-events-none absolute bottom-3 right-3 text-slate-400"
+            title="직접 옮긴 파일입니다. 자동 정렬에서 위치를 유지합니다."
+          >
+            <LockKeyhole aria-hidden="true" className="size-3.5" />
+          </span>
+        ) : null}
         <div className="flex min-w-0 items-start gap-3">
           <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-blue-600 text-sm font-semibold text-white">
             {shape.props.workflowOrder}
@@ -731,7 +741,8 @@ export class PrReviewFileNodeShapeUtil extends ShapeUtil<PrReviewFileNodeShape> 
       "ready",
       "unsupported"
     ),
-    conflictReason: T.nullable(T.string)
+    conflictReason: T.nullable(T.string),
+    pinned: T.boolean
   };
 
   override canBind() {
@@ -762,7 +773,8 @@ export class PrReviewFileNodeShapeUtil extends ShapeUtil<PrReviewFileNodeShape> 
       riskLevel: "unknown",
       reviewStatus: "not_reviewed",
       conflictState: "none",
-      conflictReason: null
+      conflictReason: null,
+      pinned: false
     };
   }
 

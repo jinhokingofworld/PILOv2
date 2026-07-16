@@ -81,9 +81,385 @@ export function buildAgentReadResultAnswer(
       return formatMeetingReportDetail(input) ?? buildGenericAnswer(input);
     case "search_board_issues":
       return formatBoardIssues(input) ?? buildGenericAnswer(input);
+    case "resolve_board_context":
+      return formatBoardResolution(input) ?? buildGenericAnswer(input);
+    case "get_board_issue_context":
+      return formatBoardIssueContext(input) ?? buildGenericAnswer(input);
+    case "get_board_briefing":
+      return formatBoardBriefing(input) ?? buildGenericAnswer(input);
+    case "diagnose_board_freshness":
+      return formatBoardFreshness(input) ?? buildGenericAnswer(input);
+    case "move_board_issue_status":
+    case "create_board_issue":
+    case "assign_board_issue_safely":
+      return formatBoardClarification(input) ?? buildGenericAnswer(input);
     default:
       return buildGenericAnswer(input);
   }
+}
+
+function formatBoardResolution(
+  input: AgentReadResultFormatterInput
+): string | null {
+  const clarification = formatBoardSelectionClarification(input.outputSummary);
+  if (clarification) {
+    return clarification;
+  }
+  if (readString(input.outputSummary.selection) !== "selected") {
+    return null;
+  }
+  const board = isPlainObject(input.outputSummary.board)
+    ? input.outputSummary.board
+    : null;
+  if (!board) {
+    return null;
+  }
+  const name = boundText(board.name, 120);
+  const repository = boundText(board.repository, 160);
+  const source = readString(input.outputSummary.source);
+  if (!name) {
+    return null;
+  }
+  const sourceLabel =
+    source === "active"
+      ? "active Board"
+      : source === "explicit"
+        ? "명시한 Board"
+        : "유일한 Board";
+  return `${sourceLabel}로 ${name}${repository ? ` · ${repository}` : ""}를 선택했습니다.`;
+}
+
+function formatBoardIssueContext(
+  input: AgentReadResultFormatterInput
+): string | null {
+  const clarification = formatBoardClarification(input);
+  if (clarification) {
+    return clarification;
+  }
+  const issue = isPlainObject(input.outputSummary.issue)
+    ? input.outputSummary.issue
+    : null;
+  const related = isPlainObject(input.outputSummary.relatedPullRequests)
+    ? input.outputSummary.relatedPullRequests
+    : null;
+  if (!issue || !related) {
+    return null;
+  }
+  const issueNumber = boundText(issue.issueNumber, 40);
+  const title = boundText(issue.title, MAX_BOARD_TITLE_LENGTH);
+  if (!issueNumber || !title) {
+    return null;
+  }
+  const state = readString(issue.state);
+  const body = boundText(issue.body, 320);
+  const pullRequestsValue = related.items;
+  const pullRequests = Array.isArray(pullRequestsValue)
+    ? pullRequestsValue.filter(isPlainObject).slice(0, MAX_LIST_ITEMS)
+    : [];
+  const relatedCount = Math.max(
+    readCount(related.count) ?? 0,
+    pullRequests.length
+  );
+  const answer = [
+    `${issueNumber} · ${title}${state ? ` · ${state}` : ""}`
+  ];
+  if (body) {
+    answer.push(`본문: ${body}`);
+  }
+  const labels = readBoundedStringList(issue.labels);
+  answer.push(`라벨: ${formatBoundedList(labels)}`);
+  const assignees = readBoundedStringList(issue.assignees);
+  answer.push(`담당자: ${formatBoundedList(assignees)}`);
+  const milestone = isPlainObject(issue.milestone) ? issue.milestone : null;
+  const milestoneTitle = milestone ? boundText(milestone.title, 120) : null;
+  if (milestoneTitle) {
+    const milestoneState = boundText(milestone?.state, 40);
+    const milestoneDueOn = boundText(milestone?.dueOn, 40);
+    answer.push(
+      `마일스톤: ${milestoneTitle}${milestoneState ? ` · ${milestoneState}` : ""}${milestoneDueOn ? ` · 마감 ${milestoneDueOn}` : ""}`
+    );
+  }
+  const projectFieldsValue = issue.projectFields;
+  const projectFields = Array.isArray(projectFieldsValue)
+    ? projectFieldsValue.filter(isPlainObject).slice(0, MAX_LIST_ITEMS)
+    : [];
+  if (projectFields.length > 0) {
+    answer.push("프로젝트 필드:");
+    for (const field of projectFields) {
+      const name = boundText(field.name, 120);
+      const value = readBoardFieldValue(field);
+      if (name) {
+        answer.push(`- ${name}${value ? `: ${value}` : ""}`);
+      }
+    }
+  }
+  answer.push(
+    `관련 PR ${relatedCount}개입니다. 동기화된 cache의 heuristic 연결 결과입니다.`
+  );
+  for (const pullRequest of pullRequests) {
+    const number = readCount(pullRequest.number);
+    const pullRequestTitle = boundText(pullRequest.title, MAX_BOARD_TITLE_LENGTH);
+    const pullRequestState = readString(pullRequest.state);
+    if (number !== null && pullRequestTitle) {
+      answer.push(
+        `- #${number} · ${pullRequestTitle}${pullRequestState ? ` · ${pullRequestState}` : ""}`
+      );
+    }
+  }
+  return answer.join("\n");
+}
+
+function formatBoardBriefing(
+  input: AgentReadResultFormatterInput
+): string | null {
+  const clarification = formatBoardSelectionClarification(input.outputSummary);
+  if (clarification) {
+    return clarification;
+  }
+  const board = isPlainObject(input.outputSummary.board)
+    ? input.outputSummary.board
+    : null;
+  const summary = isPlainObject(input.outputSummary.summary)
+    ? input.outputSummary.summary
+    : null;
+  const columnsValue = input.outputSummary.columns;
+  const columns = Array.isArray(columnsValue)
+    ? columnsValue.filter(isPlainObject).slice(0, MAX_LIST_ITEMS)
+    : [];
+  if (!summary) {
+    return null;
+  }
+  const boardName = board ? boundText(board.name, 120) : null;
+  const totalCards = readCount(summary.totalCards);
+  const openCards = readCount(summary.openCards);
+  const closedCards = readCount(summary.closedCards);
+  if (totalCards === null || openCards === null || closedCards === null) {
+    return null;
+  }
+  const answer = [
+    `${boardName ? `${boardName} Board` : "Board"}: 전체 ${totalCards}개 · open ${openCards}개 · closed ${closedCards}개`
+  ];
+  for (const column of columns) {
+    const name = boundText(column.name, 120);
+    const count = readCount(column.count);
+    if (name && count !== null) {
+      answer.push(`- ${name} ${count}개`);
+    }
+  }
+  for (const distribution of [
+    formatBoardDistribution("상태 분포", input.outputSummary.states, [
+      "label",
+      "value"
+    ]),
+    formatBoardDistribution("라벨 분포", input.outputSummary.labels, ["name"]),
+    formatBoardDistribution("담당자 분포", input.outputSummary.assignees, [
+      "login"
+    ])
+  ]) {
+    if (distribution) {
+      answer.push(distribution);
+    }
+  }
+  const sync = isPlainObject(input.outputSummary.sync)
+    ? input.outputSummary.sync
+    : null;
+  const syncStatus = sync ? readString(sync.status) : null;
+  const lastSyncedAt = sync ? readString(sync.lastSyncedAt) : null;
+  if (syncStatus || lastSyncedAt) {
+    answer.push(
+      `동기화: ${syncStatus ?? "unknown"}${lastSyncedAt ? ` · ${lastSyncedAt}` : ""}`
+    );
+  }
+  return answer.join("\n");
+}
+
+function formatBoardFreshness(
+  input: AgentReadResultFormatterInput
+): string | null {
+  const clarification = formatBoardSelectionClarification(input.outputSummary);
+  if (clarification) {
+    return clarification;
+  }
+  const active = isPlainObject(input.outputSummary.active)
+    ? input.outputSummary.active
+    : null;
+  const sync = isPlainObject(input.outputSummary.sync)
+    ? input.outputSummary.sync
+    : null;
+  const issues = isPlainObject(input.outputSummary.issueFreshness)
+    ? input.outputSummary.issueFreshness
+    : null;
+  const pullRequests = isPlainObject(input.outputSummary.pullRequestFreshness)
+    ? input.outputSummary.pullRequestFreshness
+    : null;
+  const unmapped = isPlainObject(input.outputSummary.unmapped)
+    ? input.outputSummary.unmapped
+    : null;
+  if (!active || !sync || !issues || !pullRequests || !unmapped) {
+    return null;
+  }
+  const status = readString(sync.status) ?? "unknown";
+  const hydratedAt = readString(sync.lastHydratedAt);
+  const sampled = readCount(issues.sampled) ?? 0;
+  const total = readCount(issues.total) ?? sampled;
+  const relatedCount = readCount(pullRequests.relatedCount) ?? 0;
+  const unmappedCount = readCount(unmapped.count) ?? 0;
+  const activeLabel =
+    active.isActive === true
+      ? "예"
+      : active.isActive === false
+        ? "아니요"
+        : "확인 불가";
+  const sourceUpdatedAt = boundText(active.sourceUpdatedAt, 80) ?? "없음";
+  const sampleCompleteness =
+    issues.complete === true
+      ? "전체"
+      : issues.complete === false
+        ? "일부"
+        : "확인 불가";
+  const issueOldest = boundText(issues.oldestLastSyncedAt, 80) ?? "없음";
+  const issueNewest = boundText(issues.newestLastSyncedAt, 80) ?? "없음";
+  const pullRequestOldest =
+    boundText(pullRequests.oldestLastSyncedAt, 80) ?? "없음";
+  const pullRequestNewest =
+    boundText(pullRequests.newestLastSyncedAt, 80) ?? "없음";
+  const answer = [
+    `동기화 상태: ${status}${hydratedAt ? ` · 마지막 hydration ${hydratedAt}` : ""}`,
+    `이슈 freshness: ${total}개 중 ${sampled}개 확인`,
+    `관련 PR freshness: ${relatedCount}개 확인`,
+    `Unmapped ${unmappedCount}개`,
+    "이 진단은 조회만 수행했으며 동기화를 실행하지 않았습니다."
+  ];
+  answer.push(
+    `active Board: ${activeLabel} · source 갱신 ${sourceUpdatedAt}`,
+    `이슈 표본: ${sampleCompleteness} · 가장 오래된 cache ${issueOldest} · 최신 cache ${issueNewest}`,
+    `관련 PR cache: 가장 오래된 ${pullRequestOldest} · 최신 ${pullRequestNewest}`
+  );
+  return answer.join("\n");
+}
+
+function readBoundedStringList(value: unknown, limit = 80): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((item) => boundText(item, limit))
+    .filter((item): item is string => item !== null);
+}
+
+function formatBoundedList(values: string[]): string {
+  const displayed = values.slice(0, MAX_LIST_ITEMS);
+  if (displayed.length === 0) {
+    return "없음";
+  }
+  const omitted = values.length - displayed.length;
+  return `${displayed.join(", ")}${omitted > 0 ? ` 외 ${omitted}개` : ""}`;
+}
+
+function readBoardFieldValue(field: AgentJsonObject): string | null {
+  for (const value of [
+    field.option,
+    field.iteration,
+    field.text,
+    field.date,
+    field.number,
+    field.type
+  ]) {
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return String(value);
+    }
+    const text = boundText(value, 160);
+    if (text) {
+      return text;
+    }
+  }
+  return null;
+}
+
+function formatBoardDistribution(
+  title: string,
+  value: unknown,
+  nameKeys: string[]
+): string | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+  const formatted = value
+    .filter(isPlainObject)
+    .map((item) => {
+      const name = nameKeys
+        .map((key) => boundText(item[key], 80))
+        .find((candidate): candidate is string => candidate !== null);
+      const count = readCount(item.count);
+      return name && count !== null ? `${name} ${count}개` : null;
+    })
+    .filter((item): item is string => item !== null)
+    .slice(0, MAX_LIST_ITEMS);
+  return formatted.length > 0 ? `${title}: ${formatted.join(", ")}` : null;
+}
+
+function formatBoardClarification(
+  input: AgentReadResultFormatterInput
+): string | null {
+  const selection = formatBoardSelectionClarification(input.outputSummary);
+  if (selection) {
+    return selection;
+  }
+  if (input.outputSummary.status !== "needs_clarification") {
+    return null;
+  }
+  switch (readString(input.outputSummary.reason)) {
+    case "issue_not_found":
+      return "지정한 GitHub issue 번호를 Board에서 찾지 못했습니다.";
+    case "column_not_found": {
+      const columnsValue = input.outputSummary.columns;
+      const columns = Array.isArray(columnsValue)
+        ? columnsValue
+            .map((value) => boundText(value, 120))
+            .filter((value): value is string => value !== null)
+            .slice(0, MAX_LIST_ITEMS)
+        : [];
+      return [
+        "지정한 Board column을 정확히 찾지 못했습니다.",
+        ...columns.map((column) => `- ${column}`)
+      ].join("\n");
+    }
+    case "assignee_not_assignable":
+      return "저장소에 지정할 수 없는 GitHub 담당자가 포함되어 있어 변경하지 않았습니다.";
+    case "assignee_limit_exceeded":
+      return "담당자는 최대 10명까지 지정할 수 있어 변경하지 않았습니다.";
+    case "assignee_no_changes":
+      return "요청을 적용해도 담당자 목록이 바뀌지 않아 변경하지 않았습니다.";
+    default:
+      return null;
+  }
+}
+
+function formatBoardSelectionClarification(
+  outputSummary: AgentJsonObject
+): string | null {
+  const selection = readString(outputSummary.selection);
+  if (selection === "none") {
+    return "조회할 Board가 없습니다.";
+  }
+  if (selection !== "required") {
+    return null;
+  }
+  const boardsValue = outputSummary.boards;
+  const boards = Array.isArray(boardsValue)
+    ? boardsValue.filter(isPlainObject).slice(0, MAX_LIST_ITEMS)
+    : [];
+  const candidates = boards
+    .map((board) => {
+      const name = boundText(board.name, 120);
+      const repository = boundText(board.repository, 160);
+      return name ? (repository ? `${name} · ${repository}` : name) : null;
+    })
+    .filter((value): value is string => value !== null);
+  return [
+    "조회할 Board를 정확히 지정해 주세요.",
+    ...candidates.map((candidate) => `- ${candidate}`)
+  ].join("\n");
 }
 
 function formatCalendarUpdateClarification(

@@ -22,6 +22,25 @@ export function toWorkspaceLocationHref(location: WorkspacePresenceLocation) {
   return `${location.route.pathname}${location.route.search}`;
 }
 
+function normalizeWorkspaceLocationHref(href: string) {
+  const searchIndex = href.indexOf("?");
+  const pathname = searchIndex === -1 ? href : href.slice(0, searchIndex);
+  const search = searchIndex === -1 ? "" : href.slice(searchIndex);
+  const normalizedPathname =
+    pathname.length > 1 && pathname.endsWith("/")
+      ? pathname.slice(0, -1)
+      : pathname;
+
+  return `${normalizedPathname}${search}`;
+}
+
+function areWorkspaceLocationHrefsEqual(left: string, right: string) {
+  return (
+    normalizeWorkspaceLocationHref(left) ===
+    normalizeWorkspaceLocationHref(right)
+  );
+}
+
 export function createWorkspaceLocationRegistry() {
   const adapters = new Map<WorkspacePresencePage, WorkspaceLocationAdapter>();
   let activePage: WorkspacePresencePage | null = null;
@@ -174,7 +193,9 @@ export function createWorkspaceJumpCoordinator({
     if (!current) return false;
 
     if (current.phase === "rollback") {
-      if (getCurrentHref() !== current.sourceHref) return false;
+      if (!areWorkspaceLocationHrefsEqual(getCurrentHref(), current.sourceHref)) {
+        return false;
+      }
       if (!current.sourceLocation) {
         finishWithError(current.requestId);
         return false;
@@ -187,7 +208,12 @@ export function createWorkspaceJumpCoordinator({
       );
     }
 
-    if (getCurrentHref() !== toWorkspaceLocationHref(current.targetLocation)) {
+    if (
+      !areWorkspaceLocationHrefsEqual(
+        getCurrentHref(),
+        toWorkspaceLocationHref(current.targetLocation),
+      )
+    ) {
       return false;
     }
     if (!registry.isReady(current.targetLocation.page)) return false;
@@ -220,7 +246,7 @@ export function createWorkspaceJumpCoordinator({
       };
       scheduleTimeout(requestId, "target");
 
-      if (sourceHref === targetHref) {
+      if (areWorkspaceLocationHrefsEqual(sourceHref, targetHref)) {
         return destinationReady();
       }
 

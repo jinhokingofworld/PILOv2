@@ -181,6 +181,26 @@ export class BoardService {
     );
   }
 
+  /**
+   * Internal Agent mutation. The public Board PATCH contract remains a full
+   * assignee-list replacement and is intentionally unchanged.
+   */
+  async updateBoardIssueAssigneesDelta(
+    currentUserId: string,
+    workspaceId: string,
+    boardId: string,
+    issueId: string,
+    input: unknown
+  ): Promise<UpdateBoardIssueResult> {
+    return this.boardIssueUpdateService.updateBoardIssueAssigneesDelta(
+      currentUserId,
+      workspaceId,
+      boardId,
+      issueId,
+      input
+    );
+  }
+
   async createBoardIssue(
     currentUserId: string,
     workspaceId: string,

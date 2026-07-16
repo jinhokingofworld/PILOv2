@@ -71,6 +71,7 @@ export interface AgentToolDefinition<TInput> {
     | AgentConfirmationPlan
     | AgentToolClarificationResult
     | Promise<AgentConfirmationPlan | AgentToolClarificationResult>;
+  buildConfirmationInput?: (plan: AgentConfirmationPlan) => unknown;
   validateConfirmationInput?: (input: unknown) => unknown;
   execute: (
     context: AgentToolContext,

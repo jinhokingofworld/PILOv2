@@ -122,6 +122,14 @@ export interface GithubRepositoryIssueUpdateRequest
   state?: "open" | "closed";
 }
 
+export interface GithubRepositoryIssueAssigneesUpdateRequest
+  extends GithubProjectV2UserAccessTokenRequest {
+  owner: string;
+  repo: string;
+  issueNumber: number;
+  assignees: string[];
+}
+
 export interface GithubRepositoryAssigneesRequest
   extends GithubProjectV2UserAccessTokenRequest {
   owner: string;
@@ -1294,6 +1302,64 @@ export class GithubAppClient {
     const payload = await this.readJson(response, "GitHub issue update failed");
     if (!this.isIssuePayload(payload) || this.isPullRequestIssue(payload)) {
       throw badRequest("GitHub issue update failed");
+    }
+
+    return payload;
+  }
+
+  async addRepositoryIssueAssignees(
+    input: GithubRepositoryIssueAssigneesUpdateRequest
+  ): Promise<GithubIssueApiItem> {
+    return this.updateRepositoryIssueAssignees(input, "POST");
+  }
+
+  async removeRepositoryIssueAssignees(
+    input: GithubRepositoryIssueAssigneesUpdateRequest
+  ): Promise<GithubIssueApiItem> {
+    return this.updateRepositoryIssueAssignees(input, "DELETE");
+  }
+
+  private async updateRepositoryIssueAssignees(
+    input: GithubRepositoryIssueAssigneesUpdateRequest,
+    method: "POST" | "DELETE"
+  ): Promise<GithubIssueApiItem> {
+    if (!input.userAccessToken) {
+      throw badRequest("GitHub OAuth connection is required");
+    }
+
+    let response: Response;
+    try {
+      response = await fetch(
+        `https://api.github.com/repos/${encodeURIComponent(input.owner)}/${encodeURIComponent(input.repo)}/issues/${input.issueNumber}/assignees`,
+        {
+          method,
+          headers: {
+            Accept: "application/vnd.github+json",
+            Authorization: `Bearer ${input.userAccessToken}`,
+            "Content-Type": "application/json",
+            "X-GitHub-Api-Version": GITHUB_API_VERSION
+          },
+          body: JSON.stringify({ assignees: input.assignees })
+        }
+      );
+    } catch {
+      throw badRequest("GitHub issue assignee update failed");
+    }
+
+    if (response.status === 403) {
+      throw forbidden(GITHUB_ISSUE_WRITE_PERMISSION_ERROR_MESSAGE);
+    }
+
+    if (!response.ok) {
+      throw badRequest("GitHub issue assignee update failed");
+    }
+
+    const payload = await this.readJson(
+      response,
+      "GitHub issue assignee update failed"
+    );
+    if (!this.isIssuePayload(payload) || this.isPullRequestIssue(payload)) {
+      throw badRequest("GitHub issue assignee update failed");
     }
 
     return payload;

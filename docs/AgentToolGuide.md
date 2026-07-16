@@ -156,6 +156,11 @@ Calendar 수정처럼 public planner input과 승인 실행 input이 다를 수 
 resource ID는 `validateConfirmationInput`으로만 검증한다. 내부 ID를 공개 schema에
 되돌려 넣지 않는다.
 
+도메인별 confirmation plan에서 승인 실행 input을 복원해야 하면 definition의
+`buildConfirmationInput(plan)`을 사용한다. 이 함수는 저장된 `target`, `before`, `after`,
+`call`의 최소 값만 실행 input으로 옮기며, 반환값은 반드시 `validateConfirmationInput`으로
+다시 검증한다. approve request body나 planner input에서 내부 ID를 다시 받지 않는다.
+
 후보가 0개 또는 여러 개인 경우처럼 confirmation을 만들 수 없지만 안전한 재질문이
 가능한 tool은 `AgentToolClarificationResult`를 반환한다.
 

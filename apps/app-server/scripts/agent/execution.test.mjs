@@ -23,6 +23,9 @@ const { MeetingAgentToolsService } = require(
 const { BoardAgentToolsService } = require(
   "../../dist/modules/agent/tools/board-agent-tools.service.js"
 );
+const { BoardContextResolverService } = require(
+  "../../dist/modules/agent/tools/board-context-resolver.service.js"
+);
 const { badRequest } = require("../../dist/common/api-error.js");
 
 const USER_ID = "11111111-1111-1111-1111-111111111111";
@@ -484,7 +487,18 @@ class SmokeBoardService {
       {
         id: "99999999-9999-4999-8999-999999999999",
         name: "제품 개발",
-        repository: { fullName: "Developer-EJ/PILO" }
+        repository: {
+          id: "repository-id",
+          fullName: "Developer-EJ/PILO",
+          htmlUrl: "https://github.com/Developer-EJ/PILO"
+        },
+        project: {
+          id: "project-id",
+          title: "제품 개발",
+          projectNumber: 1,
+          githubProjectNodeId: "PVT_test",
+          url: "https://github.com/orgs/Developer-EJ/projects/1"
+        }
       }
     ];
     this.issues = [
@@ -498,6 +512,15 @@ class SmokeBoardService {
         htmlUrl: "https://github.com/Developer-EJ/PILO/issues/729"
       }
     ];
+  }
+
+  async getActiveBoardSource(currentUserId, workspaceId) {
+    this.calls.push({
+      method: "getActiveBoardSource",
+      currentUserId,
+      workspaceId
+    });
+    return null;
   }
 
   async listBoards(currentUserId, workspaceId, query) {
@@ -527,10 +550,11 @@ function createSmokeRegistry() {
   const calendarService = new SmokeCalendarService();
   const meetingService = new SmokeMeetingService();
   const boardService = new SmokeBoardService();
+  const boardContextResolver = new BoardContextResolverService(boardService);
   const registry = new AgentToolRegistryService(
     new CalendarAgentToolsService(calendarService),
     new MeetingAgentToolsService(meetingService),
-    new BoardAgentToolsService(boardService)
+    new BoardAgentToolsService(boardService, boardContextResolver)
   );
 
   return {
@@ -1106,9 +1130,19 @@ function formatterMeetingReport(index, overrides = {}) {
     "get_meeting_report",
     "summarize_meeting_report",
     "search_meeting_transcript",
-    "search_board_issues"
+    "search_board_issues",
+    "move_board_issue_status",
+    "get_board_issue_context",
+    "create_board_issue",
+    "resolve_board_context",
+    "get_board_briefing",
+    "assign_board_issue_safely",
+    "diagnose_board_freshness"
   ]);
-  assert.equal(registry.getDefinition("move_board_issue_status"), null);
+  assert.equal(
+    registry.getDefinition("move_board_issue_status").executionMode,
+    "confirmation_required"
+  );
 }
 
 {
@@ -1223,7 +1257,7 @@ function formatterMeetingReport(index, overrides = {}) {
   );
 
   assert.equal(result.status, "completed");
-  assert.deepEqual(boardService.calls[1], {
+  assert.deepEqual(boardService.calls[2], {
     method: "listBoardIssues",
     currentUserId: USER_ID,
     workspaceId: WORKSPACE_ID,
@@ -1237,7 +1271,18 @@ function formatterMeetingReport(index, overrides = {}) {
   boardService.boards.push({
     id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
     name: "운영",
-    repository: { fullName: "Developer-EJ/PILO" }
+    repository: {
+      id: "repository-id-2",
+      fullName: "Developer-EJ/PILO",
+      htmlUrl: "https://github.com/Developer-EJ/PILO"
+    },
+    project: {
+      id: "project-id-2",
+      title: "운영",
+      projectNumber: 2,
+      githubProjectNodeId: "PVT_test_2",
+      url: "https://github.com/orgs/Developer-EJ/projects/2"
+    }
   });
   const tool = registry.getDefinition("search_board_issues");
   const result = await tool.execute(
@@ -1247,7 +1292,7 @@ function formatterMeetingReport(index, overrides = {}) {
 
   assert.equal(result.status, "needs_clarification");
   assert.equal(result.outputSummary.selection, "required");
-  assert.equal(boardService.calls.length, 1);
+  assert.equal(boardService.calls.length, 2);
 }
 
 {
@@ -1381,8 +1426,9 @@ function formatterMeetingReport(index, overrides = {}) {
   );
 
   assert.equal(result.status, "completed");
-  assert.equal(boardService.calls[0].method, "listBoards");
-  assert.equal(boardService.calls[1].method, "listBoardIssues");
+  assert.equal(boardService.calls[0].method, "getActiveBoardSource");
+  assert.equal(boardService.calls[1].method, "listBoards");
+  assert.equal(boardService.calls[2].method, "listBoardIssues");
   assert.match(result.run.finalAnswer, /제품 개발 Board 이슈 1개/);
   assert.match(result.run.finalAnswer, /#729/);
   assert.equal(loggingService.calls[1].input.outputSummary.issues[0].title, "Board read/search tool adapter");

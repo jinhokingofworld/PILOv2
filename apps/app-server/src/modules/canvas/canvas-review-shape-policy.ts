@@ -104,6 +104,7 @@ function omitFileNodeLayout(
     const protectedProps = { ...protectedShape.props };
     delete protectedProps.w;
     delete protectedProps.h;
+    delete protectedProps.pinned;
     protectedShape.props = protectedProps;
   }
 

@@ -512,7 +512,7 @@ export class AgentExecutionService {
           prompt,
           timezone
         }),
-        message: "수정할 일정을 특정할 정보가 더 필요합니다."
+        message: "요청을 실행하려면 추가 정보가 필요합니다."
       }
     );
 

@@ -1357,3 +1357,58 @@ function githubIssuePayload(overrides = {}) {
     globalThis.fetch = originalFetch;
   }
 }
+{
+  const originalFetch = globalThis.fetch;
+  const requests = [];
+  globalThis.fetch = async (url, options = {}) => {
+    requests.push({
+      url: url.toString(),
+      method: options.method,
+      body: JSON.parse(options.body)
+    });
+    return {
+      ok: true,
+      status: 200,
+      async json() {
+        return githubIssuePayload({
+          assignees: [{ login: "alice" }]
+        });
+      }
+    };
+  };
+
+  try {
+    const client = new GithubAppClient();
+    await client.removeRepositoryIssueAssignees({
+      assignees: ["bob"],
+      issueNumber: 609,
+      owner: "Developer-EJ",
+      repo: "PILO",
+      userAccessToken: "user-token"
+    });
+    await client.addRepositoryIssueAssignees({
+      assignees: ["carol"],
+      issueNumber: 609,
+      owner: "Developer-EJ",
+      repo: "PILO",
+      userAccessToken: "user-token"
+    });
+
+    assert.deepEqual(requests, [
+      {
+        url:
+          "https://api.github.com/repos/Developer-EJ/PILO/issues/609/assignees",
+        method: "DELETE",
+        body: { assignees: ["bob"] }
+      },
+      {
+        url:
+          "https://api.github.com/repos/Developer-EJ/PILO/issues/609/assignees",
+        method: "POST",
+        body: { assignees: ["carol"] }
+      }
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}

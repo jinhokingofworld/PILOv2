@@ -27,6 +27,8 @@ class FakeGithubAppClient {
     this.updatedAssignees = updatedAssignees;
     this.listCalls = [];
     this.updateCalls = [];
+    this.removeCalls = [];
+    this.addCalls = [];
   }
 
   async listRepositoryAssignees(input) {
@@ -42,6 +44,20 @@ class FakeGithubAppClient {
         avatar_url: `https://avatar.test/${login}`
       })),
       title: input.title ?? "Board issue assignee update"
+    });
+  }
+
+  async removeRepositoryIssueAssignees(input) {
+    this.removeCalls.push(input);
+    return githubIssue({
+      assignees: [assignee("alice")]
+    });
+  }
+
+  async addRepositoryIssueAssignees(input) {
+    this.addCalls.push(input);
+    return githubIssue({
+      assignees: [assignee("alice"), assignee("carol")]
     });
   }
 }
@@ -181,4 +197,122 @@ function createSubject(client) {
   assert.equal(result.assigneesApplied, false);
   assert.equal(result.issue.title, "Provider applied this title");
   assert.deepEqual(result.issue.assignees, []);
+}
+{
+  const client = new FakeGithubAppClient({
+    assignees: [assignee("alice"), assignee("carol")]
+  });
+  const service = createSubject(client);
+
+  const result = await service.updateIssueAssigneesDelta({
+    add: ["carol"],
+    currentUserId,
+    issueNumber: 609,
+    owner: "Developer-EJ",
+    remove: ["bob"],
+    repo: "PILO"
+  });
+
+  assert.equal(result.assigneesApplied, true);
+  assert.deepEqual(
+    result.issue.assignees.map((item) => item.login),
+    ["alice", "carol"]
+  );
+  assert.equal(client.listCalls.length, 1);
+  assert.deepEqual(client.removeCalls[0], {
+    assignees: ["bob"],
+    issueNumber: 609,
+    owner: "Developer-EJ",
+    repo: "PILO",
+    userAccessToken: "user-oauth-token"
+  });
+  assert.deepEqual(client.addCalls[0], {
+    assignees: ["carol"],
+    issueNumber: 609,
+    owner: "Developer-EJ",
+    repo: "PILO",
+    userAccessToken: "user-oauth-token"
+  });
+}
+
+{
+  const events = [];
+  const assigned = new Set(["alice", "bob"]);
+  let failAdd = true;
+  const client = {
+    async listRepositoryAssignees() {
+      events.push("list");
+      return [assignee("alice"), assignee("carol")];
+    },
+    async removeRepositoryIssueAssignees(input) {
+      events.push("remove");
+      for (const login of input.assignees) {
+        assigned.delete(login);
+      }
+      return githubIssue({
+        assignees: [...assigned].map(assignee)
+      });
+    },
+    async addRepositoryIssueAssignees(input) {
+      events.push("add");
+      if (failAdd) {
+        failAdd = false;
+        throw new Error("transient add failure");
+      }
+      for (const login of input.assignees) {
+        assigned.add(login);
+      }
+      return githubIssue({
+        assignees: [...assigned].map(assignee)
+      });
+    }
+  };
+  const service = createSubject(client);
+  const input = {
+    add: ["carol"],
+    currentUserId,
+    issueNumber: 609,
+    owner: "Developer-EJ",
+    remove: ["bob"],
+    repo: "PILO"
+  };
+
+  await assert.rejects(() => service.updateIssueAssigneesDelta(input));
+  const result = await service.updateIssueAssigneesDelta(input);
+
+  assert.deepEqual(events, [
+    "list",
+    "remove",
+    "add",
+    "list",
+    "remove",
+    "add"
+  ]);
+  assert.equal(result.assigneesApplied, true);
+  assert.deepEqual(
+    result.issue.assignees.map((item) => item.login).sort(),
+    ["alice", "carol"]
+  );
+}
+
+{
+  const client = new FakeGithubAppClient({
+    assignees: [assignee("alice")]
+  });
+  const service = createSubject(client);
+
+  await assert.rejects(
+    () =>
+      service.updateIssueAssigneesDelta({
+        add: ["missing-user"],
+        currentUserId,
+        issueNumber: 609,
+        owner: "Developer-EJ",
+        remove: ["bob"],
+        repo: "PILO"
+      }),
+    (error) => error.getStatus() === 400
+  );
+  assert.equal(client.removeCalls.length, 0);
+  assert.equal(client.addCalls.length, 0);
 }

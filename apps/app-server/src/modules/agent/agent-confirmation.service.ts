@@ -687,6 +687,30 @@ export class AgentConfirmationService {
         errorMessage: message
       });
 
+      if (this.shouldReconfirmBoardMutation(error, confirmation)) {
+        const retryConfirmation = await this.tryCreateRetryConfirmation(
+          currentUserId,
+          workspaceId,
+          runId,
+          confirmation
+        );
+        if (retryConfirmation) {
+          return {
+            run: {
+              id: runId,
+              status: "waiting_confirmation",
+              message: "Approval is required before retrying the Board mutation.",
+              confirmation: {
+                id: retryConfirmation.id,
+                status: retryConfirmation.status,
+                approvedAt: retryConfirmation.approvedAt,
+                rejectedAt: retryConfirmation.rejectedAt
+              }
+            }
+          };
+        }
+      }
+
       const run = await this.agentLoggingService.failRun(
         currentUserId,
         workspaceId,
@@ -702,10 +726,52 @@ export class AgentConfirmationService {
     }
   }
 
+  private shouldReconfirmBoardMutation(
+    error: unknown,
+    confirmation: AgentConfirmationRow
+  ): boolean {
+    if (
+      confirmation.tool_name !== "create_board_issue" &&
+      confirmation.tool_name !== "assign_board_issue_safely"
+    ) {
+      return false;
+    }
+
+    if (!(error instanceof HttpException)) {
+      return true;
+    }
+
+    const status = error.getStatus();
+    return status === 409 || status >= 500;
+  }
+
+  private async tryCreateRetryConfirmation(
+    currentUserId: string,
+    workspaceId: string,
+    runId: string,
+    confirmation: AgentConfirmationRow
+  ): Promise<AgentConfirmationPayload | null> {
+    try {
+      return await this.createConfirmation(currentUserId, workspaceId, {
+        runId,
+        toolName: confirmation.tool_name,
+        riskLevel: confirmation.risk_level,
+        summary: confirmation.summary,
+        plan: confirmation.plan_json
+      });
+    } catch {
+      return null;
+    }
+  }
+
   private buildToolInputFromPlan(
     plan: AgentConfirmationPlan,
     definition: AgentToolDefinition<unknown>
   ): unknown {
+    if (definition.buildConfirmationInput) {
+      return definition.buildConfirmationInput(plan);
+    }
+
     if (definition.name === "create_calendar_event") {
       return plan.after;
     }

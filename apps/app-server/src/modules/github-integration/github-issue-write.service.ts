@@ -31,6 +31,15 @@ export interface UpdateGithubIssueResult {
   assigneesApplied: boolean;
 }
 
+export interface UpdateGithubIssueAssigneesDeltaInput {
+  currentUserId: string;
+  owner: string;
+  repo: string;
+  issueNumber: number;
+  add: string[];
+  remove: string[];
+}
+
 export interface ListGithubIssueAssigneesInput {
   currentUserId: string;
   owner: string;
@@ -94,6 +103,63 @@ export class GithubIssueWriteService {
     };
   }
 
+  async updateIssueAssigneesDelta(
+    input: UpdateGithubIssueAssigneesDeltaInput
+  ): Promise<UpdateGithubIssueResult> {
+    if (input.add.length === 0 && input.remove.length === 0) {
+      throw badRequest("At least one assignee addition or removal is required");
+    }
+
+    const connection = await this.connectionService.getActiveConnection(
+      input.currentUserId,
+      "app_user"
+    );
+    const accessToken = connection.accessToken;
+
+    if (input.add.length > 0) {
+      const assignableUsers = await this.githubAppClient.listRepositoryAssignees({
+        owner: input.owner,
+        repo: input.repo,
+        userAccessToken: accessToken
+      });
+      const assignableLogins = new Set(
+        assignableUsers.map((assignee) => assignee.login.toLowerCase())
+      );
+      if (input.add.some((login) => !assignableLogins.has(login.toLowerCase()))) {
+        throw new GithubIssueAssigneeValidationError();
+      }
+    }
+
+    let issue: GithubIssueApiItem;
+    if (input.remove.length > 0) {
+      issue = await this.githubAppClient.removeRepositoryIssueAssignees({
+        assignees: input.remove,
+        issueNumber: input.issueNumber,
+        owner: input.owner,
+        repo: input.repo,
+        userAccessToken: accessToken
+      });
+    }
+    if (input.add.length > 0) {
+      issue = await this.githubAppClient.addRepositoryIssueAssignees({
+        assignees: input.add,
+        issueNumber: input.issueNumber,
+        owner: input.owner,
+        repo: input.repo,
+        userAccessToken: accessToken
+      });
+    }
+
+    return {
+      assigneesApplied: this.isAssigneeDeltaApplied(
+        input.add,
+        input.remove,
+        issue!.assignees
+      ),
+      issue: issue!
+    };
+  }
+
   async listAssignableUsers(
     input: ListGithubIssueAssigneesInput
   ): Promise<GithubIssueAssigneeApiItem[]> {
@@ -118,6 +184,33 @@ export class GithubIssueWriteService {
       title: input.title,
       userAccessToken: accessToken
     });
+  }
+
+  private isAssigneeDeltaApplied(
+    added: string[],
+    removed: string[],
+    actual: unknown[] | undefined
+  ): boolean {
+    if (!Array.isArray(actual)) {
+      return false;
+    }
+
+    const actualLogins = new Set(
+      actual
+        .map((assignee) => {
+          if (!assignee || typeof assignee !== "object" || Array.isArray(assignee)) {
+            return null;
+          }
+          const login = (assignee as { login?: unknown }).login;
+          return typeof login === "string" ? login.toLowerCase() : null;
+        })
+        .filter((login): login is string => login !== null)
+    );
+
+    return (
+      added.every((login) => actualLogins.has(login.toLowerCase())) &&
+      removed.every((login) => !actualLogins.has(login.toLowerCase()))
+    );
   }
 
   private haveSameAssignees(
