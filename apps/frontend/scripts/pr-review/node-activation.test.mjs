@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 
 const {
   activatePrReviewFileNode,
@@ -11,7 +12,7 @@ const editor = {};
 const activatedReviewFileIds = [];
 const unregister = registerPrReviewFileNodeActivationHandler(
   editor,
-  (reviewFileId) => activatedReviewFileIds.push(reviewFileId)
+  { onOpen: (reviewFileId) => activatedReviewFileIds.push(reviewFileId) }
 );
 
 activatePrReviewFileNode(editor, "review-file-1");
@@ -25,11 +26,11 @@ const replacementEditor = {};
 const replacementActivations = [];
 const unregisterFirst = registerPrReviewFileNodeActivationHandler(
   replacementEditor,
-  () => replacementActivations.push("first")
+  { onOpen: () => replacementActivations.push("first") }
 );
 const unregisterSecond = registerPrReviewFileNodeActivationHandler(
   replacementEditor,
-  () => replacementActivations.push("second")
+  { onOpen: () => replacementActivations.push("second") }
 );
 
 unregisterFirst();
@@ -37,5 +38,36 @@ activatePrReviewFileNode(replacementEditor, "review-file-3");
 assert.deepEqual(replacementActivations, ["second"]);
 
 unregisterSecond();
+
+const [fileNodeShapeUtil, canvasSurface] = await Promise.all([
+  readFile(
+    new URL(
+      "../../src/features/pr-review/components/review-canvas/PrReviewFileNodeShapeUtil.tsx",
+      import.meta.url
+    ),
+    "utf8"
+  ),
+  readFile(
+    new URL(
+      "../../src/features/pr-review/components/review-canvas/PrReviewCanvasSurface.tsx",
+      import.meta.url
+    ),
+    "utf8"
+  )
+]);
+
+assert.doesNotMatch(
+  fileNodeShapeUtil,
+  /override onClick\(shape: PrReviewFileNodeShape\)/
+);
+assert.match(
+  fileNodeShapeUtil,
+  /override onDoubleClick\(shape: PrReviewFileNodeShape\)/
+);
+assert.match(fileNodeShapeUtil, /aria-label="파일 보기"/);
+assert.match(
+  canvasSurface,
+  /window\.addEventListener\("keydown", handleKeyDown\)/
+);
 
 console.log("PR Review file node activation tests passed");

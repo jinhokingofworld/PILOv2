@@ -14,7 +14,7 @@ import {
   type TLBaseShape,
   type TLShape
 } from "tldraw";
-import { AlertTriangle, LockKeyhole } from "lucide-react";
+import { AlertTriangle, FileSearch, LockKeyhole } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { activatePrReviewFileNode } from "@/features/pr-review/components/review-canvas/pr-review-node-activation";
@@ -400,11 +400,23 @@ export function isPrReviewFileNodeShape(
 }
 
 function PrReviewFileNode({ shape }: { shape: PrReviewFileNodeShape }) {
+  const editor = useEditor();
+  const isSelected = useValue(
+    `pr-review-file-node-selected-${shape.id}`,
+    () => editor.getOnlySelectedShape()?.id === shape.id,
+    [editor, shape.id]
+  );
   const conflictState =
     shape.props.conflictState === "none" ? null : shape.props.conflictState;
   const relationEndpointHighlight = useRelationEndpointHighlight(
     shape.props.roomFileId
   );
+
+  function handleOpenFile(event: MouseEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    activatePrReviewFileNode(editor, shape.props.reviewFileId);
+  }
 
   return (
     <HTMLContainer
@@ -424,6 +436,21 @@ function PrReviewFileNode({ shape }: { shape: PrReviewFileNodeShape }) {
               : undefined
         )}
       >
+        {isSelected ? (
+          <button
+            aria-label="파일 보기"
+            className={cn(
+              "absolute top-3 flex size-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 shadow-sm transition-colors hover:bg-slate-100 hover:text-slate-950 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600",
+              conflictState === "unresolved" ? "right-12" : "right-3"
+            )}
+            onClick={handleOpenFile}
+            onPointerDown={(event) => event.stopPropagation()}
+            title="파일 보기"
+            type="button"
+          >
+            <FileSearch aria-hidden="true" className="size-4" />
+          </button>
+        ) : null}
         {conflictState === "unresolved" ? (
           <span
             aria-label="해결이 필요한 Conflict"
@@ -790,7 +817,7 @@ export class PrReviewFileNodeShapeUtil extends ShapeUtil<PrReviewFileNodeShape> 
     return <PrReviewFileNode shape={shape} />;
   }
 
-  override onClick(shape: PrReviewFileNodeShape) {
+  override onDoubleClick(shape: PrReviewFileNodeShape) {
     activatePrReviewFileNode(this.editor, shape.props.reviewFileId);
   }
 
