@@ -142,7 +142,13 @@
   - [x] 빈 문서 placeholder와 반응형 loading/error 상태 적용
   - [x] 기존 자동 저장, 충돌 감지, reload 흐름 유지
   - [ ] 인증된 dev 환경에서 desktop/mobile 수동 QA
-  - [ ] 다음 interaction 작업: bubble menu, block handle, inline rename
+  - [ ] 다음 interaction 작업: 없음
+- [x] **문서 편집 보조 인터랙션 추가**: Issue [#1205](https://github.com/Developer-EJ/PILO/issues/1205)
+  - [x] 선택 텍스트 bubble menu로 굵게, 기울임, 취소선, 인라인 코드 적용
+  - [x] Hover block handle로 위/아래 이동, 복제, 삭제
+  - [x] 문서 제목 클릭 후 inline rename, 기존 Drive item update API로 저장
+  - [x] 기존 파일 첨부와 문서 snapshot 자동 저장 흐름 유지
+  - [ ] 인증된 dev 환경에서 desktop/mobile 수동 QA
 - [x] **Slash command와 문서 작성 영역 개선**: Issue [#1200](https://github.com/Developer-EJ/PILO/issues/1200)
   - [x] 빈 문단에서 `/` 입력 시 기본 블록과 Drive 파일 첨부를 선택하는 메뉴 표시
   - [x] 방향키, Enter, Escape 및 클릭으로 메뉴 조작
