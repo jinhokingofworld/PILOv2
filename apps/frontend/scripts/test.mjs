@@ -1565,6 +1565,7 @@ await import("../src/features/agent/agent-feature.test.mjs");
 await import("./github-integration/test.mjs");
 await import("../src/features/board/board-feature.test.mjs");
 await import("../src/features/board/board-load.test.mjs");
+await import("../src/features/board/board-realtime.test.mjs");
 await import("./meeting/test.mjs");
 await import("./pr-review/test.mjs");
 await import("./pr-review-decision-realtime.test.mjs");

@@ -590,6 +590,7 @@ if (process.env.DATABASE_URL) {
   await import("./meeting/participant-session-postgres.test.mjs");
 }
 await import("./github-integration/test.mjs");
+await import("./github-integration/source-webhook-reconcile.test.mjs");
 await import("./pr-review/test.mjs");
 await import("./board/test.mjs");
 await import("./sqltoerd/test.mjs");

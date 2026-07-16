@@ -660,3 +660,5 @@ await import("./canvas-shape-index.test.mjs");
 await import("./canvas-operation-sync.test.mjs");
 await import("./node-activation.test.mjs");
 await import("./system-shape-policy.test.mjs");
+await import("../../src/features/pr-review/pr-review-github-source-realtime.test.mjs");
+await import("../../src/features/pr-review/pr-review-pull-request-refresh.test.mjs");

@@ -81,6 +81,8 @@ import type {
   PrReviewUnsupportedConflictFile
 } from "@/features/pr-review/types";
 import type { CanvasRealtimeIdentity } from "@/shared/canvas-realtime/canvas-realtime-types";
+import { usePrReviewGithubSourceInvalidation } from "@/features/pr-review/realtime/usePrReviewGithubSourceInvalidation";
+import { createPrReviewPullRequestRefreshCoordinator } from "@/features/pr-review/realtime/pr-review-pull-request-refresh";
 
 type PrReviewApiClient = ReturnType<typeof createPrReviewApiClient>;
 
@@ -370,39 +372,51 @@ export function PrReviewCanvasShell({
   const conflictDraftSaveTimersRef = useRef<
     Record<string, number | undefined>
   >({});
+  const refreshPullRequestRef = useRef<() => void | Promise<unknown>>(
+    () => undefined
+  );
 
   useEffect(() => {
     setLatestPullRequest(pullRequest);
   }, [pullRequest]);
 
+  const refreshPullRequest = useCallback(
+    () => refreshPullRequestRef.current(),
+    []
+  );
+
+  usePrReviewGithubSourceInvalidation({
+    authToken: realtimeIdentity.authToken,
+    pullRequestId: session.pullRequestId,
+    refreshPullRequest,
+    workspaceId
+  });
+
   useEffect(() => {
     if (!workspaceId || !session.pullRequestId) {
+      refreshPullRequestRef.current = () => undefined;
       return;
     }
 
-    let cancelled = false;
-    const refreshPullRequest = () => {
-      void apiClient
-        .getPullRequest(workspaceId, session.pullRequestId)
-        .then((nextPullRequest) => {
-          if (!cancelled) {
-            setLatestPullRequest(nextPullRequest);
-          }
-        })
-        .catch(() => {
-          // Keep the last successfully loaded PR data. Submit and merge have server-side stale guards.
-        });
-    };
+    const coordinator = createPrReviewPullRequestRefreshCoordinator({
+      apply: setLatestPullRequest,
+      load: () => apiClient.getPullRequest(workspaceId, session.pullRequestId)
+    });
+    const requestRefresh = () => coordinator.refresh();
+    refreshPullRequestRef.current = requestRefresh;
 
-    refreshPullRequest();
+    void requestRefresh();
     const intervalId = window.setInterval(
-      refreshPullRequest,
+      () => void requestRefresh(),
       PULL_REQUEST_HEAD_POLL_INTERVAL_MS
     );
 
     return () => {
-      cancelled = true;
       window.clearInterval(intervalId);
+      coordinator.dispose();
+      if (refreshPullRequestRef.current === requestRefresh) {
+        refreshPullRequestRef.current = () => undefined;
+      }
     };
   }, [apiClient, session.pullRequestId, workspaceId]);
 

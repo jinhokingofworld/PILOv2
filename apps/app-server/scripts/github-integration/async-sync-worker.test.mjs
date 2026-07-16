@@ -1164,9 +1164,9 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
   const rawBody = Buffer.from('{"ok":true}');
   const { createHmac } = await import("node:crypto");
   const signature256 = `sha256=${createHmac("sha256", "secret").update(rawBody).digest("hex")}`;
-  await assert.rejects(() => service.receiveGithubWebhook({ deliveryId: "delivery-1", eventName: "issues", signature256, rawBody, body: {} }));
+  await assert.rejects(() => service.receiveGithubWebhook({ deliveryId: "delivery-1", eventName: "repository", signature256, rawBody, body: {} }));
   assert.equal(delivery.status, "failed");
-  const recovered = await service.receiveGithubWebhook({ deliveryId: "delivery-1", eventName: "issues", signature256, rawBody, body: {} });
+  const recovered = await service.receiveGithubWebhook({ deliveryId: "delivery-1", eventName: "repository", signature256, rawBody, body: {} });
   assert.equal(sends, 2);
   assert.equal(recovered.status, "received");
 }

@@ -49,10 +49,35 @@ export function createBoardRealtimeLifecycle({
   socket: BoardRealtimeLifecycleSocket;
   workspaceId: string;
 }): BoardRealtimeLifecycle {
+  let boardReloadInFlight: Promise<unknown> | null = null;
+  let boardReloadPending = false;
+  let disposed = false;
+
+  function requestBoardReload() {
+    if (disposed) {
+      return;
+    }
+    if (boardReloadInFlight) {
+      boardReloadPending = true;
+      return;
+    }
+    const reload = Promise.resolve().then(reloadBoard).finally(() => {
+      if (boardReloadInFlight !== reload) {
+        return;
+      }
+      boardReloadInFlight = null;
+      if (boardReloadPending && !disposed) {
+        boardReloadPending = false;
+        requestBoardReload();
+      }
+    });
+    boardReloadInFlight = reload;
+  }
+
   function handleConnect() {
     if (room) {
       socket.emit("board:join", room);
-      void reloadBoard();
+      requestBoardReload();
     }
     socket.emit("board:source:join", { workspaceId });
     void reloadActiveSource();
@@ -69,7 +94,7 @@ export function createBoardRealtimeLifecycle({
       event.workspaceId === workspaceId &&
       event.boardId === room?.boardId
     ) {
-      void reloadBoard();
+      requestBoardReload();
     }
   }
 
@@ -81,11 +106,12 @@ export function createBoardRealtimeLifecycle({
       socket.connect();
     },
     cleanup() {
+      disposed = true;
+      boardReloadPending = false;
       if (socket.connected && room) {
         socket.emit("board:leave", room);
       }
       if (socket.connected) socket.emit("board:source:leave", { workspaceId });
-
       socket.removeAllListeners();
       socket.disconnect();
     },

@@ -1168,7 +1168,8 @@ function createDeliveryReconcileService(database, { getProjectV2Item, reconcile,
   assert.match(apiContract, /GitHub ProjectV2 webhook reconcile failed[\s\S]*recoverable/i);
   assert.match(apiContract, /\(repository_id, project_v2_id\).*Board hydration/i);
   assert.match(apiContract, /field values are a current GitHub snapshot[\s\S]*before Board hydration/i);
-  assert.match(apiContract, /six-minute SQS redrive cooldown[\s\S]*SQS redelivery remains the primary retry path/i);
+  assert.match(apiContract, /6분 cooldown[\s\S]*DB recovery.*다시 queue/i);
+  assert.doesNotMatch(apiContract, /SQS redelivery remains the primary retry path/i);
   assert.doesNotMatch(apiContract, /receiver.*does not.*background job/i);
   assert.doesNotMatch(workerSource, /FROM github_webhook_deliveries/i);
   assert.match(reconcileSource, /SELECT delivery_id FROM github_webhook_deliveries/i);

@@ -10,6 +10,10 @@ import { createBoardRoomService } from "../board/board-room.service";
 import { createBoardSourceRoomService } from "../board/board-source-room.service";
 import { registerBoardSocketHandlers } from "../board/board-socket-handlers";
 import { registerBoardSourceSocketHandlers } from "../board/board-source-socket-handlers";
+import { createGithubSourceAccessService } from "../github-source/github-source-access.service";
+import { createGithubSourceFanOut } from "../github-source/github-source-fan-out";
+import { createGithubSourceRoomService } from "../github-source/github-source-room.service";
+import { registerGithubSourceSocketHandlers } from "../github-source/github-source-socket-handlers";
 import { canvasClientEvents, canvasServerEvents } from "../canvas/canvas-socket-events";
 import {
   createCanvasAccessService,
@@ -137,6 +141,7 @@ const MEETING_REPORT_REDIS_CHANNEL = "meeting:report-events";
 const MEETING_STATE_REDIS_CHANNEL = "meeting:state-events";
 const BOARD_INVALIDATION_REDIS_CHANNEL = "board:invalidations";
 const BOARD_SOURCE_REDIS_CHANNEL = "board:source-events";
+const GITHUB_SOURCE_INVALIDATION_REDIS_CHANNEL = "github:source-invalidations";
 
 function createConflictDraftShapeLockId(
   reviewSessionId: string,
@@ -780,6 +785,15 @@ export async function createRealtimeSocketServer({
       io.to(roomName).emit(event, payload);
     },
   });
+  const githubSourceAccessService = createGithubSourceAccessService(database);
+  const githubSourceRoomService = createGithubSourceRoomService({
+    accessService: githubSourceAccessService,
+  });
+  const githubSourceFanOut = createGithubSourceFanOut({
+    emitToRoom(roomName, event, payload) {
+      io.to(roomName).emit(event, payload);
+    },
+  });
   const unsubscribeCanvasOperations = redisAdapter
     ? await redisAdapter.subscribe(CANVAS_OPERATION_REDIS_CHANNEL, (payload) => {
         if (!isCanvasShapeOperationPayload(payload)) {
@@ -840,6 +854,16 @@ export async function createRealtimeSocketServer({
           console.error("Board source Redis payload is invalid");
         }
       })
+    : null;
+  const unsubscribeGithubSourceInvalidations = redisAdapter
+    ? await redisAdapter.subscribe(
+        GITHUB_SOURCE_INVALIDATION_REDIS_CHANNEL,
+        (payload) => {
+          if (!githubSourceFanOut.fanOut(payload)) {
+            console.error("GitHub source invalidation Redis payload is invalid");
+          }
+        },
+      )
     : null;
   const unsubscribePrReviewDecisions = redisAdapter
     ? await redisAdapter.subscribe(PR_REVIEW_DECISION_REDIS_CHANNEL, (payload) => {
@@ -1104,6 +1128,11 @@ export async function createRealtimeSocketServer({
     registerBoardSourceSocketHandlers({
       context: authedSocket.data.auth,
       roomService: boardSourceRoomService,
+      socket,
+    });
+    registerGithubSourceSocketHandlers({
+      context: authedSocket.data.auth,
+      roomService: githubSourceRoomService,
       socket,
     });
 
@@ -1597,6 +1626,7 @@ export async function createRealtimeSocketServer({
       await unsubscribeMeetingStates?.();
       await unsubscribeBoardInvalidations?.();
       await unsubscribeBoardSourceEvents?.();
+      await unsubscribeGithubSourceInvalidations?.();
       await unsubscribePrReviewDecisions?.();
       await unsubscribePrReviewConflictDrafts?.();
       await io.close();

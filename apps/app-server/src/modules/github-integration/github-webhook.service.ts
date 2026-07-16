@@ -7,6 +7,11 @@ import { GithubWebhookRequest } from "./dto";
 import { GithubIntegrationConfigService } from "./github-integration-config.service";
 import { GithubSyncJobService } from "./github-sync-job.service";
 import {
+  type GithubSourceWebhookContext,
+  isGithubSourceWebhookEventName,
+  parseGithubSourceWebhookContext
+} from "./github-source-webhook-context";
+import {
   GithubProjectV2WebhookContext,
   parseGithubProjectV2WebhookContext
 } from "./github-webhook-context";
@@ -55,6 +60,8 @@ const INVALID_GITHUB_WEBHOOK_SIGNATURE_MESSAGE =
   "Invalid GitHub webhook signature";
 const INVALID_PROJECT_V2_ITEM_WEBHOOK_CONTEXT_MESSAGE =
   "GitHub ProjectV2 webhook context is invalid";
+const INVALID_SOURCE_WEBHOOK_CONTEXT_MESSAGE =
+  "GitHub source webhook context is invalid or irrelevant";
 const UNSELECTED_PROJECT_V2_ITEM_WEBHOOK_MESSAGE =
   "GitHub ProjectV2 webhook project is not selected";
 const GITHUB_WEBHOOK_ENQUEUE_PENDING_MESSAGE =
@@ -130,6 +137,10 @@ export class GithubWebhookService {
       return this.receiveProjectV2ItemWebhook(deliveryId, eventName, input.body);
     }
 
+    if (isGithubSourceWebhookEventName(eventName)) {
+      return this.receiveSourceWebhook(deliveryId, eventName, input.body);
+    }
+
     const status: GithubWebhookDeliveryStatus =
       SUPPORTED_GITHUB_WEBHOOK_EVENTS.has(eventName) ? "received" : "ignored";
     const delivery = await this.recordGithubWebhookDelivery({
@@ -142,6 +153,42 @@ export class GithubWebhookService {
 
     if (status === "received" && delivery.inserted) {
       await this.enqueueWebhookDelivery(deliveryId);
+    }
+
+    return this.mapGithubWebhookDelivery(delivery.row);
+  }
+
+  private async receiveSourceWebhook(
+    deliveryId: string,
+    eventName: string,
+    body: unknown
+  ): Promise<GithubWebhookDeliveryPayload> {
+    const sourceContext = parseGithubSourceWebhookContext(eventName, body);
+    if (!sourceContext) {
+      const delivery = await this.recordGithubWebhookDelivery({
+        deliveryId,
+        eventName,
+        status: "ignored",
+        errorMessage: INVALID_SOURCE_WEBHOOK_CONTEXT_MESSAGE
+      });
+      return this.mapGithubWebhookDelivery(delivery.row);
+    }
+
+    const delivery = await this.recordGithubWebhookDelivery({
+      deliveryId,
+      eventName,
+      status: "received",
+      errorMessage: GITHUB_WEBHOOK_ENQUEUE_PENDING_MESSAGE,
+      sourceContext
+    });
+
+    if (delivery.inserted) {
+      const publicationOwner = await this.claimPendingWebhookDeliveryForPublication(
+        deliveryId
+      );
+      if (publicationOwner) {
+        await this.enqueueWebhookDelivery(deliveryId, publicationOwner);
+      }
     }
 
     return this.mapGithubWebhookDelivery(delivery.row);
@@ -372,10 +419,17 @@ export class GithubWebhookService {
     status: GithubWebhookDeliveryStatus | "failed";
     errorMessage: string | null;
     context?: GithubProjectV2WebhookContext;
+    sourceContext?: GithubSourceWebhookContext;
   }): Promise<RecordedGithubWebhookDelivery> {
     const context = input.context;
     if (context) {
       return this.recordGithubProjectV2WebhookDelivery({ ...input, context });
+    }
+    if (input.sourceContext) {
+      return this.recordGithubSourceWebhookDelivery({
+        ...input,
+        context: input.sourceContext
+      });
     }
 
     const row = await this.database.queryOne<GithubWebhookDeliveryRow>(
@@ -405,6 +459,78 @@ export class GithubWebhookService {
           error_message
       `,
       [input.deliveryId, input.eventName, input.status, input.errorMessage]
+    );
+
+    if (row) {
+      return { row, inserted: true };
+    }
+
+    const existing = await this.findGithubWebhookDelivery(input.deliveryId);
+    if (!existing) {
+      throw badRequest("GitHub webhook delivery could not be recorded");
+    }
+
+    return { row: existing, inserted: false };
+  }
+
+  private async recordGithubSourceWebhookDelivery(input: {
+    deliveryId: string;
+    eventName: string;
+    status: GithubWebhookDeliveryStatus | "failed";
+    errorMessage: string | null;
+    context: GithubSourceWebhookContext;
+  }): Promise<RecordedGithubWebhookDelivery> {
+    // No schema expansion: source deliveries reuse the existing durable locator
+    // slots as repository id (project_v2_node_id) and Issue/PR number
+    // (project_item_node_id). event_name determines how the worker interprets them.
+    const row = await this.database.queryOne<GithubWebhookDeliveryRow>(
+      `
+        INSERT INTO github_webhook_deliveries (
+          delivery_id,
+          event_name,
+          status,
+          action,
+          github_installation_id,
+          project_v2_node_id,
+          project_item_node_id,
+          processed_at,
+          error_message
+        )
+        VALUES (
+          $1,
+          $2,
+          $3,
+          $4,
+          $5,
+          $6,
+          $7,
+          CASE WHEN $3 = 'received' THEN NULL ELSE now() END,
+          $8
+        )
+        ON CONFLICT (delivery_id)
+        DO NOTHING
+        RETURNING
+          delivery_id,
+          event_name,
+          status,
+          received_at,
+          processed_at,
+          error_message,
+          action,
+          github_installation_id,
+          project_v2_node_id,
+          project_item_node_id
+      `,
+      [
+        input.deliveryId,
+        input.eventName,
+        input.status,
+        input.context.action,
+        input.context.githubInstallationId,
+        String(input.context.githubRepositoryId),
+        String(input.context.contentNumber),
+        input.errorMessage
+      ]
     );
 
     if (row) {

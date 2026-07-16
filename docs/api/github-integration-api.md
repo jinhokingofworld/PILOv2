@@ -191,6 +191,12 @@ callback 성공 redirect를 실패로 바꾸지 않는다.
   ProjectV2s remain webhook-driven and are not added to personal polling
   schedules.
 - GitHub webhook receiver는 delivery 수신과 검증 결과를 `github_webhook_deliveries`에 기록한다. 실제 GitHub source table 동기화는 sync run 또는 별도 background worker가 담당한다.
+- `issues`, `pull_request`, PR의 `issue_comment`, `pull_request_review`,
+  `pull_request_review_comment` webhook은 payload를 locator와 변경 신호로만 사용한다.
+  worker는 GitHub App installation token으로 해당 Issue 또는 PR의 최신 REST snapshot을
+  다시 조회한 뒤 `github_issues` 또는 `github_pull_requests`를 갱신한다.
+  `projects_v2_item`은 기존 organization ProjectV2 item 전용 reconcile을 유지하고,
+  personal ProjectV2는 기존 polling schedule을 유지한다.
 - GitHub App installation 삭제는 GitHub 원격 `DELETE /app/installations/{installation_id}`를
   App JWT로 호출한 뒤 local `github_installations` row를 삭제한다. GitHub가 `404`를
   반환하면 이미 원격에서 삭제된 상태로 보고 local cleanup을 진행한다.
@@ -739,13 +745,40 @@ github_app_authorization
 - signature가 유효하지 않으면 delivery를 `failed`로 기록하고 `400 BAD_REQUEST`를 반환한다.
 - 이미 같은 `delivery_id` row가 있고 상태가 `received` 또는 `ignored`이면 신규 insert나 overwrite 없이 기존 row를 반환한다.
 - `projects_v2_item`은 `action`, `githubInstallationId`, `projectV2NodeId`, `projectItemNodeId`를 정규화해 delivery row에 함께 보관한다. 필수 context가 없거나 선택된 organization ProjectV2가 아니면 queue publication 전에 `ignored`로 기록하고 `processedAt`을 기록한다. `ignored` delivery는 SQS 또는 GitHub GraphQL 작업을 예약하지 않는다.
+- `issues`, `pull_request`, PR의 `issue_comment`, `pull_request_review`,
+  `pull_request_review_comment`는 installation id, repository id, Issue/PR number만
+  durable locator로 보관한다. 일반 Issue의 `issue_comment`처럼 현재 source cache에 영향을
+  주지 않는 delivery와 필수 locator가 없는 delivery는 `ignored`로 기록한다.
+  DB schema를 확장하지 않는 범위에서 기존 nullable delivery column을 재사용하며,
+  `github_installation_id`에는 installation id, `project_v2_node_id`에는 GitHub repository id,
+  `project_item_node_id`에는 Issue/PR number를 문자열로 저장한다. 이 해석은
+  `event_name`이 source event일 때만 적용하고 `projects_v2_item`의 기존 의미는 바꾸지 않는다.
+- Source webhook worker는 delivery event에 따라 Issue 또는 PR handler로 dispatch한다.
+  payload 본문을 source 값으로 저장하지 않고 GitHub REST detail을 다시 조회한다. Issue는
+  제목, 본문, 상태, label, 담당자, milestone을 포함한 snapshot을 저장한다. PR은 제목,
+  본문, state, draft, merged 상태, head SHA, 파일·addition·deletion·commit·comment count를
+  포함한 snapshot을 저장한다. `pull_request`의 `synchronize` action도 같은 경로를 사용한다.
+- Issue reconcile 뒤 해당 Issue를 포함하는 기존 Board만 다시 hydrate한다. DB reconcile이
+  성공한 뒤 Redis/Socket.IO invalidation을 best-effort로 발행하며, Redis 장애는 이미 성공한
+  source DB reconcile을 실패로 되돌리지 않는다.
+- 같은 installation, repository, source type, Issue/PR number의 reconcile은 transaction-level
+  PostgreSQL advisory lock으로 직렬화한다. lock을 획득한 뒤 REST snapshot을 조회하고,
+  upsert와 delivery 완료 기록이 commit된 후에만 invalidation을 발행한다.
+- Targeted REST detail이 `404`를 반환하면 권한 제거와 원격 삭제를 안전하게 구분할 수
+  없으므로 local source row를 삭제하지 않는다. 해당 delivery는 terminal로 완료하고 기존
+  cache를 유지한다. 따라서 `issues.deleted`도 현재 범위에서는 기존 Issue cache를 유지하며,
+  Issue/PR 원격 삭제 동기화는 지원하지 않는다. 그 외 일시적 lookup/reconcile 실패는
+  delivery retry 대상이다.
 - A selected `projects_v2_item` delivery는 먼저 내부 pending publication marker를 가진 `received`로 기록한 뒤 `SQS_GITHUB_WEBHOOKS_QUEUE_URL`에 `deliveryId`를 queue한다. 이때 `received`는 선택된 delivery가 비동기 reconcile에 수락되었다는 의미이며, source table 동기화 완료를 의미하지 않는다. pending/publishing marker는 receiver 응답의 `received` message를 바꾸지 않으며 raw payload나 token을 포함하지 않는다.
 - Publication은 delivery별 publishing lease를 원자적으로 claim한 publisher만 수행한다. SQS send가 성공한 뒤 그 publisher의 guarded acknowledgement가 marker와 lease를 해제한다. send, acknowledgement, 또는 release가 실패하면 pending marker 또는 만료 가능한 publishing lease가 남아 recovery 대상이 되므로 `received` delivery가 unqueued 상태로 고립되지 않는다. Lease 만료 뒤의 duplicate publication은 worker delivery claim/idempotency로 안전하게 처리된다.
 - worker는 선택 상태를 다시 확인한 뒤 `processing` lease와 함께 delivery를 claim하고, `attempt_count`를 증가시킨다. 성공하면 lease를 해제하고 내부 완료 상태인 `processed`로 기록한다. An unselected queued delivery is internally processed without GitHub GraphQL.
 - claim된 worker는 delivery의 remote installation과 ProjectV2 node에 일치하는 모든 선택 repository target을 다시 조회한다. Each target is one selected `github_project_v2_selections` `(repository_id, project_v2_id)` tuple, and its repository context is retained through Board hydration. One GitHub GraphQL target-item fetch is fanned out to all matching selected repository targets under the one delivery lease; `processed`는 모든 target reconcile 또는 archive가 성공한 뒤에만 기록한다. 선택 target이 남아 있지 않으면 GraphQL 없이 delivery를 `processed`로 완료한다.
 - The worker performs a projectItemNodeId-only GitHub GraphQL source-of-truth fetch. target item이 있으면 해당 item cache를 reconcile한다. For a missing target, the worker archives the matching local item before it hydrates the existing Board cache.
 - ProjectV2 item field values are a current GitHub snapshot: values absent from a fetched item are deleted from its local cache before the remaining values are upserted and before Board hydration.
-- 처리 실패 시 worker는 lease를 해제해 `received`로 되돌리고 SQS `retry`를 요청한다. A reconcile-failed delivery retains the existing lease column as a six-minute SQS redrive cooldown; recovery republishes it only after that cooldown expires (or when a legacy row has no lease), while SQS redelivery remains the primary retry path. lease 해제도 실패하면 lease 만료 뒤 recovery가 다시 queue할 수 있다.
+- 처리 실패 시 worker는 delivery를 `received`로 되돌리고 기존 lease column에 6분 cooldown을
+  기록한다. cooldown이 만료된 delivery만 DB recovery가 다시 queue할 수 있으며, legacy row처럼
+  lease가 없는 delivery도 recovery 대상이다. lease 갱신에 실패한 경우에는 기존 processing
+  lease가 만료된 뒤 DB recovery가 다시 queue할 수 있다.
 - 그 밖의 지원 event는 `received`로 기록한다. 지원하지 않는 event는 오류 없이 `ignored`로 기록하고 `processedAt`을 기록한다.
 
 Webhook endpoint의 공개 응답 shape은 계속 `GithubWebhookDeliveryPayload`이다. `received`와
@@ -766,6 +799,40 @@ Webhook endpoint의 공개 응답 shape은 계속 `GithubWebhookDeliveryPayload`
   }
 }
 ```
+
+### GitHub source Socket.IO invalidation
+
+Socket.IO client는 PILO bearer token으로 연결한 뒤 아래 event로 Workspace source room을
+구독하거나 해제한다. Realtime Server는 `workspace_members`를 조회해 Workspace 접근 권한을
+확인한 뒤에만 room join을 허용한다.
+
+```text
+client -> github:source:subscribe   { workspaceId }
+client -> github:source:unsubscribe { workspaceId }
+server -> github:source:subscribed  { workspaceId }
+server -> github:source:invalidated GithubSourceInvalidation
+server -> github:source:error       SocketError
+```
+
+`GithubSourceInvalidation`:
+
+```json
+{
+  "workspaceId": "workspace_uuid",
+  "repositoryId": "repository_uuid",
+  "sourceType": "pull_request",
+  "sourceId": "pull_request_uuid",
+  "sourceNumber": 24,
+  "updatedAt": "2026-07-16T00:00:00.000Z"
+}
+```
+
+`sourceType`은 `issue` 또는 `pull_request`다. event는 변경된 source의 식별자만 전달하는
+invalidation이며 GitHub source payload가 아니다. PR Review client는 event 값을 화면 state에
+merge하지 않고 기존 REST 조회를 다시 호출한다. Board는 generic source event를 구독하지 않고,
+Issue hydrate 뒤 발행되는 기존 `board:invalidated`를 통해 한 번만 REST 재조회한다. PR Review는
+재접속 시에도 REST snapshot을 재조회하며, 유실된 event 복구를 위해 기존 polling을 fallback으로
+유지한다.
 
 ### GitHub App installation 삭제
 
@@ -967,5 +1034,5 @@ not publish the same pending delivery at the same time. A normally received
 delivery without the pending marker is never republished by recovery or by a
 duplicate webhook request. An expired publishing or `processing` lease is
 eligible for recovery and requeue. A `received` delivery with the
-`GitHub ProjectV2 webhook reconcile failed` marker is recoverable when queue
-retries end.
+`GitHub ProjectV2 webhook reconcile failed` 또는
+`GitHub source webhook reconcile failed` marker is recoverable by DB recovery after its cooldown expires.

@@ -136,6 +136,13 @@ export class GithubProjectV2WebhookReconcileService {
          )
        ) OR (
          status = 'received'
+         AND error_message = 'GitHub source webhook reconcile failed'
+         AND (
+           lease_expires_at < now()
+           OR lease_expires_at IS NULL
+         )
+       ) OR (
+         status = 'received'
          AND error_message = 'GitHub webhook enqueue is publishing'
          AND lease_expires_at < now()
        ) OR (
@@ -305,6 +312,14 @@ export class GithubProjectV2WebhookReconcileService {
           OR (
             status='received'
             AND error_message='GitHub ProjectV2 webhook reconcile failed'
+            AND (
+              lease_expires_at < now()
+              OR lease_expires_at IS NULL
+            )
+          )
+          OR (
+            status='received'
+            AND error_message='GitHub source webhook reconcile failed'
             AND (
               lease_expires_at < now()
               OR lease_expires_at IS NULL

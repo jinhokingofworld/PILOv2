@@ -13,7 +13,7 @@ import { GithubGraphqlRateLimitError, isGithubGraphqlRateLimitError } from "./gi
 import { GithubProjectV2PollingService } from "./github-project-v2-polling.service";
 import { GithubProjectV2SyncTokenService } from "./github-project-v2-sync-token.service";
 import { readGithubRepositoryOwnerType } from "./github-repository-owner";
-import { GithubProjectV2WebhookReconcileService } from "./github-project-v2-webhook-reconcile.service";
+import { GithubWebhookDeliveryDispatcherService } from "./github-webhook-delivery-dispatcher.service";
 import {
   GithubSyncExecutorService,
   type GithubSyncInstallationRow,
@@ -69,7 +69,7 @@ export class GithubSyncJobService implements OnModuleDestroy {
     private readonly configService: GithubIntegrationConfigService,
     private readonly executor: GithubSyncExecutorService,
     private readonly tokenService: GithubProjectV2SyncTokenService,
-    private readonly webhookReconcileService: GithubProjectV2WebhookReconcileService,
+    private readonly webhookReconcileService: GithubWebhookDeliveryDispatcherService,
     private readonly pollingService?: GithubProjectV2PollingService,
     @Optional() private readonly observability?: GithubSyncObservabilityService
   ) {}

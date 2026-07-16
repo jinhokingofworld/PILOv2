@@ -38,6 +38,12 @@ export function isGithubGraphqlRateLimitError(error: unknown): boolean {
   return error instanceof GithubGraphqlRateLimitError && error[githubGraphqlRateLimitErrorMarker] === true;
 }
 
+export class GithubSourceSnapshotNotFoundError extends Error {
+  constructor() {
+    super("GitHub source snapshot was not found");
+  }
+}
+
 export interface GithubAppInstallationDetails {
   githubInstallationId: number;
   accountLogin: string;
@@ -87,6 +93,11 @@ export interface GithubRepositoryIssuesRequest
   extends GithubAppInstallationTokenRequest {
   owner: string;
   repo: string;
+}
+
+export interface GithubRepositoryIssueLookupRequest
+  extends GithubRepositoryIssuesRequest {
+  issueNumber: number;
 }
 
 export interface GithubRepositoryPullRequestsRequest
@@ -1210,6 +1221,28 @@ export class GithubAppClient {
     return issues;
   }
 
+  async getRepositoryIssue(
+    input: GithubRepositoryIssueLookupRequest
+  ): Promise<GithubIssueApiItem> {
+    const installationToken = await this.createInstallationAccessToken(input);
+    const url = new URL(
+      `https://api.github.com/repos/${encodeURIComponent(input.owner)}/${encodeURIComponent(input.repo)}/issues/${input.issueNumber}`
+    );
+    const payload = await this.fetchJsonWithToken(
+      url,
+      installationToken.token,
+      "GitHub issue lookup failed",
+      undefined,
+      true
+    );
+
+    if (!this.isIssuePayload(payload) || this.isPullRequestIssue(payload)) {
+      throw badRequest("GitHub issue lookup failed");
+    }
+
+    return payload;
+  }
+
   async updateRepositoryIssue(
     input: GithubRepositoryIssueUpdateRequest
   ): Promise<GithubIssueApiItem> {
@@ -1707,33 +1740,7 @@ export class GithubAppClient {
   async getPullRequest(
     input: GithubPullRequestLookupRequest
   ): Promise<GithubPullRequestApiDetails> {
-    const installationToken = await this.createInstallationAccessToken(input);
-    let response: Response;
-    try {
-      response = await fetch(
-        `https://api.github.com/repos/${encodeURIComponent(input.owner)}/${encodeURIComponent(input.repo)}/pulls/${input.pullNumber}`,
-        {
-          headers: {
-            Accept: "application/vnd.github+json",
-            Authorization: `Bearer ${installationToken.token}`,
-            "X-GitHub-Api-Version": GITHUB_API_VERSION
-          }
-        }
-      );
-    } catch {
-      throw badRequest("GitHub pull request lookup failed");
-    }
-
-    if (!response.ok) {
-      throw badRequest("GitHub pull request lookup failed");
-    }
-
-    const payload = await this.readJson(response, "GitHub pull request lookup failed");
-    if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
-      throw badRequest("GitHub pull request lookup failed");
-    }
-
-    const pullRequest = payload as GithubPullRequestApiItem;
+    const pullRequest = await this.getPullRequestSnapshot(input, false);
     if (
       typeof pullRequest.changed_files !== "number" ||
       typeof pullRequest.additions !== "number" ||
@@ -1799,6 +1806,35 @@ export class GithubAppClient {
       headRepositoryName,
       headRepositoryFullName
     };
+  }
+
+  async getPullRequestWebhookSnapshot(
+    input: GithubPullRequestLookupRequest
+  ): Promise<GithubPullRequestApiItem> {
+    return this.getPullRequestSnapshot(input, true);
+  }
+
+  private async getPullRequestSnapshot(
+    input: GithubPullRequestLookupRequest,
+    sourceNotFoundError: boolean
+  ): Promise<GithubPullRequestApiItem> {
+    const installationToken = await this.createInstallationAccessToken(input);
+    const url = new URL(
+      `https://api.github.com/repos/${encodeURIComponent(input.owner)}/${encodeURIComponent(input.repo)}/pulls/${input.pullNumber}`
+    );
+    const payload = await this.fetchJsonWithToken(
+      url,
+      installationToken.token,
+      "GitHub pull request lookup failed",
+      undefined,
+      sourceNotFoundError
+    );
+
+    if (!this.isPullRequestPayload(payload)) {
+      throw badRequest("GitHub pull request lookup failed");
+    }
+
+    return payload;
   }
 
   async getRepositoryMergeBase(
@@ -2972,7 +3008,8 @@ export class GithubAppClient {
     url: URL,
     token: string,
     errorMessage: string,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    sourceNotFoundError = false
   ): Promise<unknown> {
     let response: Response;
     try {
@@ -2986,6 +3023,10 @@ export class GithubAppClient {
       });
     } catch {
       throw badRequest(errorMessage);
+    }
+
+    if (response.status === 404 && sourceNotFoundError) {
+      throw new GithubSourceSnapshotNotFoundError();
     }
 
     if (!response.ok) {

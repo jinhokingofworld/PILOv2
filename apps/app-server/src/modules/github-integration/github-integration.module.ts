@@ -28,11 +28,14 @@ import { GithubPullRequestMergeService } from "./github-pull-request-merge.servi
 import { GithubPullRequestRemoteService } from "./github-pull-request-remote.service";
 import { GithubReviewSubmissionService } from "./github-review-submission.service";
 import { GithubSourceReadService } from "./github-source-read.service";
+import { GithubSourceInvalidationPublisherService } from "./github-source-invalidation-publisher.service";
+import { GithubSourceWebhookReconcileService } from "./github-source-webhook-reconcile.service";
 import { GithubSyncExecutorService } from "./github-sync-executor.service";
 import { GithubSyncJobService } from "./github-sync-job.service";
 import { GithubSyncRunService } from "./github-sync-run.service";
 import { GithubTokenEncryptionService } from "./github-token-encryption.service";
 import { GithubWebhookService } from "./github-webhook.service";
+import { GithubWebhookDeliveryDispatcherService } from "./github-webhook-delivery-dispatcher.service";
 
 @Module({
   imports: [CommonModule, DatabaseModule, WorkspaceModule],
@@ -62,12 +65,15 @@ import { GithubWebhookService } from "./github-webhook.service";
     GithubPullRequestRemoteService,
     GithubReviewSubmissionService,
     GithubSourceReadService,
+    GithubSourceInvalidationPublisherService,
+    GithubSourceWebhookReconcileService,
     GithubSyncExecutorService,
     GithubSyncJobService,
     GithubProjectV2WebhookReconcileService,
     GithubSyncRunService,
     GithubTokenEncryptionService,
-    GithubWebhookService
+    GithubWebhookService,
+    GithubWebhookDeliveryDispatcherService
   ],
   exports: [
     GithubIntegrationService,
