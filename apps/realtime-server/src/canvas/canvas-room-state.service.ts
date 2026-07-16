@@ -41,6 +41,16 @@ export type CanvasRoomHistoryPatch = {
   upsertShapes: Record<string, unknown>[];
 };
 
+export type CanvasRoomStateStats = {
+  cachedShapeCount: number;
+  deletedTombstoneCount: number;
+  dirtyShapeCount: number;
+  historyItemCount: number;
+  loadedRegionCount: number;
+  redoHistoryItemCount: number;
+  roomCount: number;
+};
+
 export type CanvasRoomStateService = {
   applyShapePatch: (
     room: CanvasRoomRef,
@@ -54,6 +64,7 @@ export type CanvasRoomStateService = {
   getDirtyShapeIds: (room: CanvasRoomRef) => string[];
   getHistoryState: (room: CanvasRoomRef) => CanvasRoomHistoryState;
   getLoadedRegions: (room: CanvasRoomRef) => CanvasRoomLoadedRegion[];
+  getStats: () => CanvasRoomStateStats;
   recordLoadedViewport: (
     room: CanvasRoomRef,
     bounds: CanvasLoadedViewportBounds,
@@ -611,6 +622,17 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
     });
   }
 
+  function sumMapSizes<T>(map: Map<string, Map<string, T> | Set<string>>) {
+    return Array.from(map.values()).reduce((sum, value) => sum + value.size, 0);
+  }
+
+  function sumArrayMapLengths<T>(map: Map<string, T[]>) {
+    return Array.from(map.values()).reduce(
+      (sum, value) => sum + value.length,
+      0,
+    );
+  }
+
   return {
     applyShapePatch(room, patch, options = {}) {
       const roomName = createCanvasRoomName(room);
@@ -742,6 +764,35 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
 
     getLoadedRegions(room) {
       return loadedRegionsByRoom.get(createCanvasRoomName(room)) ?? [];
+    },
+
+    getStats() {
+      const roomNames = new Set<string>();
+
+      [
+        loadedRegionsByRoom,
+        deletedTombstonesByRoom,
+        dirtyShapeIdsByRoom,
+        checkpointOperationIdsByRoom,
+        checkpointHistorySeqByRoom,
+        checkpointVersionByRoom,
+        historyByRoom,
+        historySeqByRoom,
+        redoHistoryByRoom,
+        shapesByRoom,
+      ].forEach((map) => {
+        map.forEach((_, roomName) => roomNames.add(roomName));
+      });
+
+      return {
+        cachedShapeCount: sumMapSizes(shapesByRoom),
+        deletedTombstoneCount: sumMapSizes(deletedTombstonesByRoom),
+        dirtyShapeCount: sumMapSizes(dirtyShapeIdsByRoom),
+        historyItemCount: sumArrayMapLengths(historyByRoom),
+        loadedRegionCount: sumArrayMapLengths(loadedRegionsByRoom),
+        redoHistoryItemCount: sumArrayMapLengths(redoHistoryByRoom),
+        roomCount: roomNames.size,
+      };
     },
 
     recordLoadedViewport(room, bounds, shapes = []) {

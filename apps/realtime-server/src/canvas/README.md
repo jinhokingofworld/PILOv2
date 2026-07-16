@@ -21,6 +21,9 @@ This module owns Canvas Socket.IO rooms and presence delivery.
   fails so the frontend can fall back to its normal viewport lazy loading.
 - Flush dirty classic Canvas room checkpoints on explicit leave, unexpected
   socket disconnect, and graceful server shutdown.
+- Expose classic Canvas roomState health counters (`roomCount`,
+  `cachedShapeCount`, `dirtyShapeCount`, `deletedTombstoneCount`,
+  `loadedRegionCount`, and history counts) from realtime-server health output.
 - Validate tldraw sync-room access and create canvas-scoped sync rooms lazily.
 
 ## Non-Responsibilities

@@ -19,7 +19,10 @@ import {
 import { createCanvasPresenceService } from "../canvas/canvas-presence.service";
 import { createCanvasRoomCheckpointService } from "../canvas/canvas-room-checkpoint.service";
 import { createCanvasRoomService } from "../canvas/canvas-room.service";
-import { createCanvasRoomStateService } from "../canvas/canvas-room-state.service";
+import {
+  createCanvasRoomStateService,
+  type CanvasRoomStateStats,
+} from "../canvas/canvas-room-state.service";
 import { createCanvasShapeLockService } from "../canvas/canvas-shape-lock.service";
 import { createCanvasShapePreviewService } from "../canvas/canvas-shape-preview.service";
 import { createSqlErdAccessService } from "../sql-erd/sql-erd-access.service";
@@ -110,6 +113,7 @@ import { createSocketErrorPayload } from "./socket-errors";
 
 export type RealtimeSocketServerHandle = {
   close: () => Promise<void>;
+  getCanvasRoomStateStats: () => CanvasRoomStateStats;
 };
 
 export type RealtimeSocketServerOptions = {
@@ -1772,6 +1776,9 @@ export async function createRealtimeSocketServer({
       await io.close();
       await redisAdapter?.close();
       await database.close();
+    },
+    getCanvasRoomStateStats() {
+      return roomStateService.getStats();
     },
   };
 }
