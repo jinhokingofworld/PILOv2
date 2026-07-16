@@ -629,9 +629,13 @@ Status code: `200 OK`
 | `list_calendar_events` | `low` | 가능 | `GET /workspaces/{workspaceId}/calendar/events` |
 | `create_calendar_event` | `medium` | 불가 | `POST /workspaces/{workspaceId}/calendar/events` |
 | `update_calendar_event` | `medium` | 불가 | `PATCH /workspaces/{workspaceId}/calendar/events/{eventId}` |
+| `list_meeting_rooms` | `low` | 가능 | Workspace 회의방과 방별 현재 Meeting·녹음 상태를 조회한다. |
+| `get_active_meeting` | `low` | 가능 | 현재 사용자의 active Meeting과 회의방, 경과 시간을 조회한다. |
+| `get_meeting_participants` | `low` | 가능 | `GET /workspaces/{workspaceId}/meetings/{meetingId}/participants` |
 | `list_meeting_reports` | `low` | 가능 | `GET /workspaces/{workspaceId}/meeting-reports` |
 | `get_meeting_report` | `low` | 가능 | `GET /workspaces/{workspaceId}/meeting-reports/{reportId}` |
 | `summarize_meeting_report` | `low` | 가능 | MeetingReport 조회 결과를 요약한다. transcript 전문은 저장하지 않는다. |
+| `search_meeting_transcript` | `low` | 가능 | 권한 있는 transcript source를 검색하고 grounded-answer 경로를 시작한다. |
 | `search_board_issues` | `low` | 가능 | `GET /workspaces/{workspaceId}/boards/{boardId}/issues` |
 
 ## 도메인별 실행 규칙
@@ -666,8 +670,14 @@ Status code: `200 OK`
   만들지 않는다. 명시적 `isAllDay: true` 또는 시간 입력이 있으면 기존 생성 후보 규칙을 따른다.
 - 일정 삭제는 1차 Agent tool이 아니다.
 
-### MeetingReport
+### Meeting·MeetingReport
 
+- `list_meeting_rooms`는 현재 Workspace의 활성 MeetingRoom을 최대 100개까지 반환하고, 각 방의
+  current Meeting·현재 Recording 상태를 요약한다. LiveKit room name, token, audio key는 반환하지 않는다.
+- `get_active_meeting`은 현재 사용자의 모든 Workspace 기준 active Meeting을 조회한다. active Meeting이
+  있으면 Meeting 시작 시각과 현재 시각으로 계산한 `durationSec`을 반환하며, 없으면 `active: false`를 반환한다.
+- `get_meeting_participants`는 UUID `meetingId`가 필요하고, 사용자별 중복 제거된 현재·과거 참여자 요약을
+  최대 100명까지 반환한다. LiveKit identity·연결 상태는 반환하지 않는다.
 - Agent는 MeetingReport 목록/상세를 읽고 요약할 수 있다.
 - 목록 응답의 요약 필드를 우선 사용한다.
 - report ID 없는 넓은 조회(예: `지난 회의 결정사항 보여줘`)는 `list_meeting_reports`에 `limit: 1`을
@@ -676,6 +686,8 @@ Status code: `200 OK`
 - 특정 MeetingReport 상세/요약은 UUID `reportId`가 필요하다. 현재 one prompt = one run에서는 후보
   선택을 이어갈 수 없으므로 ID 없는 특정 상세 요청은 `unsupported`로 완료한다.
 - 상세 조회의 `transcriptText`는 답변 생성에 사용할 수 있지만 Agent run/step/confirmation에는 전문 저장하지 않는다.
+- `search_meeting_transcript`는 `query`와 선택적 `reportId`를 받는다. transcript 원문을
+  Agent run/step에 저장하지 않고, 권한 있는 source ID만 grounded-answer 경로에 전달한다.
 - 녹음 시작, 녹음 종료, 회의록 재생성 요청은 1차 Agent tool이 아니다.
 
 ### Board
