@@ -30,6 +30,14 @@ assert.match(appSidebar, /<GithubPanel\s*\/>/);
 assert.doesNotMatch(appSidebar, /GithubSettingsStatus/);
 assert.match(settingsDialog, /initialSection\?: SettingsDialogSectionId/);
 assert.match(settingsDialog, /activeSection === "github" \? githubContent : null/);
+assert.match(
+  settingsDialog,
+  /h-\[calc\(100vh-3rem\)\] max-h-\[44rem\] w-\[calc\(100vw-3rem\)\] max-w-6xl/
+);
+assert.doesNotMatch(
+  settingsDialog,
+  /activeSection === "github"[\s\S]{0,240}xl:max-w-\[96rem\]/
+);
 assert.match(layout, /@container/);
 assert.doesNotMatch(layout, /min-h-\[calc\(100vh-3\.5rem\)\]/);
 assert.match(primitives, /@\/components\/ui\/card/);

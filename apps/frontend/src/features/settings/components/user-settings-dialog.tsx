@@ -726,11 +726,7 @@ function SettingsView(props: UserDialogProps) {
     <>
       <Dialog onOpenChange={onOpenChange} open={open}>
         <DialogContent
-          className={cn(
-            "h-[calc(100vh-3rem)] max-h-[44rem] w-[calc(100vw-3rem)] max-w-6xl gap-0 overflow-hidden rounded-xl border-0 bg-background p-0 shadow-2xl",
-            activeSection === "github" &&
-              "h-[calc(100vh-2rem)] max-h-[calc(100vh-2rem)] w-[calc(100vw-2rem)] max-w-[calc(100vw-2rem)] xl:max-w-[96rem]"
-          )}
+          className="h-[calc(100vh-3rem)] max-h-[44rem] w-[calc(100vw-3rem)] max-w-6xl gap-0 overflow-hidden rounded-xl border-0 bg-background p-0 shadow-2xl"
           showCloseButton={false}
         >
           <Button
