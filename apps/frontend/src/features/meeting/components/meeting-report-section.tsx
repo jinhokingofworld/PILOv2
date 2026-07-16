@@ -37,6 +37,7 @@ import type {
   MeetingReportSummary,
   UpdateMeetingReportActionItemInput
 } from "@/features/meeting/types";
+import { saveThenDeliverActionItem } from "@/features/meeting/utils/action-item-delivery-flow";
 import { cn } from "@/lib/utils";
 
 export type MeetingReportStatusFilter = "ALL" | MeetingReportStatus;
@@ -446,7 +447,7 @@ function ActionItemReviewCard({
   onDismiss: () => void;
   onEvidenceSelect: (segment: MeetingReportTranscriptSegment) => void;
   onLoadIssueDeliveryOptions: () => Promise<MeetingReportActionItemDeliveryOptions>;
-  onSave: (body: UpdateMeetingReportActionItemInput) => Promise<void>;
+  onSave: (body: UpdateMeetingReportActionItemInput) => Promise<boolean>;
 }) {
   const [title, setTitle] = useState(actionItem.title);
   const [description, setDescription] = useState(actionItem.description);
@@ -551,12 +552,10 @@ function ActionItemReviewCard({
   async function submitDelivery() {
     const patch = getActionItemPatch();
     if (!patch.title || !patch.description) return;
-    if (pending && hasUnsavedActionItemChanges(patch)) {
-      await onSave(patch);
-    }
+    let delivery: MeetingReportActionItemDeliveryInput;
     if (deliveryType === "calendar_event") {
       if (!startDate || !endDate) return;
-      await onDeliver({
+      delivery = {
         deliveryType,
         calendar: {
           title: patch.title,
@@ -567,18 +566,24 @@ function ActionItemReviewCard({
           startTime: isAllDay ? null : startTime || null,
           endTime: isAllDay ? null : endTime || null
         }
-      });
-      return;
+      };
+    } else {
+      if (!selectedBoardId || !selectedColumnId) return;
+      delivery = {
+        deliveryType,
+        issue: {
+          boardId: selectedBoardId,
+          columnId: selectedColumnId,
+          title: patch.title,
+          body: patch.description
+        }
+      };
     }
-    if (!selectedBoardId || !selectedColumnId) return;
-    await onDeliver({
-      deliveryType,
-      issue: {
-        boardId: selectedBoardId,
-        columnId: selectedColumnId,
-        title: patch.title,
-        body: patch.description
-      }
+
+    await saveThenDeliverActionItem({
+      needsSave: pending && hasUnsavedActionItemChanges(patch),
+      save: () => onSave(patch),
+      deliver: () => onDeliver(delivery)
     });
   }
 
@@ -812,7 +817,7 @@ function MeetingReportDetailModal({
   onUpdateActionItem: (
     actionItem: MeetingReportActionItem,
     body: UpdateMeetingReportActionItemInput
-  ) => Promise<void>;
+  ) => Promise<boolean>;
   open: boolean;
   deleting: boolean;
   regenerating: boolean;
@@ -1342,7 +1347,7 @@ export function MeetingReportSection({
       action: "dismiss" | "update",
       body?: UpdateMeetingReportActionItemInput
     ) => {
-      if (!selectedReport) return;
+      if (!selectedReport) return false;
       setMutatingActionItemId(actionItem.id);
       try {
         if (action === "dismiss") {
@@ -1357,8 +1362,10 @@ export function MeetingReportSection({
           onToastMessage("후속 작업을 수정했습니다.");
         }
         await loadReportDetail(selectedReport.id, { silent: true });
+        return true;
       } catch (error) {
         onToastMessage(getReportRequestErrorMessage(error));
+        return false;
       } finally {
         setMutatingActionItemId(null);
       }
