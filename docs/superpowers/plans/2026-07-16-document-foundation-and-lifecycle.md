@@ -23,10 +23,10 @@
   - [x] 자동 저장 상태와 새로고침 복구
   - [x] frontend lint/test
   - [x] PR [#1160](https://github.com/Developer-EJ/PILO/pull/1160) 생성
-- [ ] **문서 lifecycle API와 Activity Log**: Issue [#1166](https://github.com/Developer-EJ/PILO/issues/1166) 진행 중
+- [x] **문서 lifecycle API와 Activity Log**: Issue [#1166](https://github.com/Developer-EJ/PILO/issues/1166), PR [#1169](https://github.com/Developer-EJ/PILO/pull/1169) 생성
   - [x] rename/move/delete의 Activity Log와 문서 aggregate soft delete 구현
   - [x] API 계약과 전체 app-server 검증
-  - [ ] PR
+  - [x] PR [#1169](https://github.com/Developer-EJ/PILO/pull/1169) 생성
 - [ ] **후속 작업**: Drive 이동 UI, Yjs realtime, 파일 첨부/PDF viewer
 
 ## 공통 제약
