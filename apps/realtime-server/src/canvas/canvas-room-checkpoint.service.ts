@@ -50,7 +50,11 @@ function summarizeOperations(
 
 function shouldSplitCheckpointFailure(status: number, body: unknown) {
   if (SPLITTABLE_CHECKPOINT_STATUSES.has(status)) return true;
-  if (status !== 404 || typeof body !== "object" || body === null) return false;
+  return status === 404 && isCanvasShapeNotFoundResponse(body);
+}
+
+function isCanvasShapeNotFoundResponse(body: unknown) {
+  if (typeof body !== "object" || body === null) return false;
 
   const error = "error" in body ? body.error : null;
 
@@ -59,6 +63,19 @@ function shouldSplitCheckpointFailure(status: number, body: unknown) {
     error !== null &&
     "message" in error &&
     error.message === "Canvas shape not found"
+  );
+}
+
+function isAlreadyDeletedCheckpointFailure(
+  status: number,
+  body: unknown,
+  operations: CanvasRoomCheckpointSnapshot["operations"],
+) {
+  return (
+    status === 404 &&
+    operations.length === 1 &&
+    operations[0]?.type === "delete" &&
+    isCanvasShapeNotFoundResponse(body)
   );
 }
 
@@ -105,6 +122,19 @@ export function createCanvasRoomCheckpointService({
       const responseBody = await readResponseJson(response);
 
       if (response.ok) {
+        return {
+          failures: [],
+          successes: [{ operations, result: responseBody }],
+        };
+      }
+
+      if (
+        isAlreadyDeletedCheckpointFailure(
+          response.status,
+          responseBody,
+          operations,
+        )
+      ) {
         return {
           failures: [],
           successes: [{ operations, result: responseBody }],

@@ -7,6 +7,10 @@ import {
   getCanvasRealtimeServerUrl,
   type CanvasRealtimeSocket,
 } from "@/shared/canvas-realtime/canvas-realtime-client";
+import {
+  createCanvasRemoteCursorStore,
+  type CanvasRemoteCursorStore,
+} from "@/shared/canvas-realtime/canvas-remote-cursor-store";
 import type {
   CanvasJoinedPayload,
   CanvasLoadedViewportBounds,
@@ -55,6 +59,7 @@ export type CanvasPresenceController = {
   ownedShapeLocks: CanvasShapeLockState[];
   roomHistory: CanvasRoomHistoryState;
   roomLoadedRegions: CanvasRoomLoadedRegion[];
+  remoteCursorStore: CanvasRemoteCursorStore;
   remotePresence: CanvasRemotePresenceState[];
   remoteShapeLocks: CanvasShapeLockState[];
   remoteShapePreviews: CanvasShapePreviewEventPayload[];
@@ -281,6 +286,31 @@ function upsertPresence(
   );
 }
 
+function hasSameStringValues(
+  previousValues: readonly string[],
+  nextValues: readonly string[],
+) {
+  return (
+    previousValues.length === nextValues.length &&
+    previousValues.every((value, index) => value === nextValues[index])
+  );
+}
+
+function hasSameInteractionPresence(
+  previousPresence: CanvasRemotePresenceState,
+  nextPresence: CanvasRemotePresenceState,
+) {
+  return (
+    previousPresence.displayName === nextPresence.displayName &&
+    previousPresence.editingMode === nextPresence.editingMode &&
+    previousPresence.editingShapeId === nextPresence.editingShapeId &&
+    hasSameStringValues(
+      previousPresence.selectedShapeIds,
+      nextPresence.selectedShapeIds,
+    )
+  );
+}
+
 function isSameCanvasRoom(
   payload: { canvasId: string; workspaceId: string },
   room: { canvasId: string; workspaceId: string },
@@ -383,6 +413,7 @@ export function useCanvasPresence(
   config: CanvasRealtimeConfig | null | undefined,
   options: CanvasPresenceOptions = {},
 ): CanvasPresenceController {
+  const [remoteCursorStore] = useState(createCanvasRemoteCursorStore);
   const [remotePresence, setRemotePresence] = useState<
     CanvasRemotePresenceState[]
   >([]);
@@ -414,6 +445,10 @@ export function useCanvasPresence(
   const socketRef = useRef<CanvasRealtimeSocket | null>(null);
   const joinedRef = useRef(false);
   const roomRef = useRef({ workspaceId: "", canvasId: "" });
+  const remoteInteractionPresenceRef = useRef(
+    new Map<string, CanvasRemotePresenceState>(),
+  );
+  const remotePresenceSeenAtRef = useRef(new Map<string, number>());
   const lastSeenOpSeqRef = useRef(0);
   const applyOperationsRef = useRef(options.applyOperations);
   const catchUpOperationsRef = useRef(options.catchUpOperations);
@@ -669,6 +704,9 @@ export function useCanvasPresence(
       activeCatchUpAbortRef.current?.abort();
       activeCatchUpAbortRef.current = null;
       liveOperationBufferRef.current = [];
+      remoteCursorStore.clear();
+      remoteInteractionPresenceRef.current.clear();
+      remotePresenceSeenAtRef.current.clear();
       setRemotePresence([]);
       setRemoteShapeLocks([]);
       setRemoteShapePreviews([]);
@@ -688,6 +726,9 @@ export function useCanvasPresence(
     if (!socket) {
       joinedRef.current = false;
       setRoomStateActive(false);
+      remoteCursorStore.clear();
+      remoteInteractionPresenceRef.current.clear();
+      remotePresenceSeenAtRef.current.clear();
       setRemotePresence([]);
       setRemoteShapeLocks([]);
       setRemoteShapePreviews([]);
@@ -713,6 +754,9 @@ export function useCanvasPresence(
       activeCatchUpAbortRef.current?.abort();
       activeCatchUpAbortRef.current = null;
       liveOperationBufferRef.current = [];
+      remoteCursorStore.clear();
+      remoteInteractionPresenceRef.current.clear();
+      remotePresenceSeenAtRef.current.clear();
       setLastRejectedShapeLock(null);
       setOperationSync(initialOperationSyncState);
     }
@@ -741,6 +785,9 @@ export function useCanvasPresence(
     realtimeSocket.on("disconnect", () => {
       joinedRef.current = false;
       setRoomStateActive(false);
+      remoteCursorStore.clear();
+      remoteInteractionPresenceRef.current.clear();
+      remotePresenceSeenAtRef.current.clear();
       setRemotePresence([]);
       setRemoteShapeLocks([]);
       setOwnedShapeLocks([]);
@@ -761,12 +808,20 @@ export function useCanvasPresence(
       joinedRef.current = true;
       setRoomStateActive(true);
       reconcileJoinState(payload);
-      setRemotePresence(
-        filterOwnPresence(
-          normalizeRemotePresenceList(payload.presence),
-          currentUserId,
-        ),
+      const joinedPresence = filterOwnPresence(
+        normalizeRemotePresenceList(payload.presence),
+        currentUserId,
       );
+      const joinedAt = Date.now();
+
+      remoteCursorStore.replace(joinedPresence);
+      remoteInteractionPresenceRef.current.clear();
+      remotePresenceSeenAtRef.current.clear();
+      joinedPresence.forEach((entry) => {
+        remoteInteractionPresenceRef.current.set(entry.userId, entry);
+        remotePresenceSeenAtRef.current.set(entry.userId, joinedAt);
+      });
+      setRemotePresence(joinedPresence);
       const joinedShapeLocks = upsertShapeLocks([], payload.shapeLocks);
 
       setRemoteShapeLocks(joinedShapeLocks);
@@ -834,15 +889,29 @@ export function useCanvasPresence(
         return;
       }
 
-      setRemotePresence((currentPresence) =>
-        upsertPresence(currentPresence, presence),
-      );
+      remoteCursorStore.upsert(presence);
+      remotePresenceSeenAtRef.current.set(presence.userId, Date.now());
+      const previousInteractionPresence =
+        remoteInteractionPresenceRef.current.get(presence.userId);
+
+      if (
+        !previousInteractionPresence ||
+        !hasSameInteractionPresence(previousInteractionPresence, presence)
+      ) {
+        remoteInteractionPresenceRef.current.set(presence.userId, presence);
+        setRemotePresence((currentPresence) =>
+          upsertPresence(currentPresence, presence),
+        );
+      }
     });
     realtimeSocket.on("canvas:presence:leave", (payload) => {
       if (!isSameCanvasRoom(payload, room)) {
         return;
       }
 
+      remoteCursorStore.remove(payload.userId);
+      remoteInteractionPresenceRef.current.delete(payload.userId);
+      remotePresenceSeenAtRef.current.delete(payload.userId);
       setRemotePresence((currentPresence) =>
         currentPresence.filter((entry) => entry.userId !== payload.userId),
       );
@@ -955,6 +1024,23 @@ export function useCanvasPresence(
         return;
       }
 
+      const patchedShapeIds = [
+        ...payload.deletedShapeIds,
+        ...payload.upsertShapes.flatMap((shape) => {
+          const shapeId = isRecord(shape) ? shape.id : null;
+
+          return typeof shapeId === "string" ? [shapeId] : [];
+        }),
+      ];
+
+      setRemoteShapePreviews((currentPreviews) =>
+        removeShapePreviewIds({
+          actorUserId: payload.actorUserId,
+          previews: currentPreviews,
+          shapeIds: patchedShapeIds,
+        }),
+      );
+
       if (typeof payload.historySeq === "number") {
         setRoomHistory((currentHistory) => ({
           canRedo: payload.canRedo ?? currentHistory.canRedo,
@@ -994,6 +1080,9 @@ export function useCanvasPresence(
       if (socketRef.current === realtimeSocket) {
         socketRef.current = null;
       }
+      remoteCursorStore.clear();
+      remoteInteractionPresenceRef.current.clear();
+      remotePresenceSeenAtRef.current.clear();
       setRemotePresence([]);
       setRemoteShapeLocks([]);
       setOwnedShapeLocks([]);
@@ -1007,18 +1096,35 @@ export function useCanvasPresence(
     reconcileJoinState,
     reconcileOperationSeq,
     reconcileSyncRequired,
+    remoteCursorStore,
     usableConfig,
   ]);
 
   useEffect(() => {
     const staleTimer = window.setInterval(() => {
       const staleBefore = Date.now() - STALE_PRESENCE_TIMEOUT_MS;
+      const staleUserIds: string[] = [];
 
-      setRemotePresence((currentPresence) =>
-        currentPresence.filter(
-          (entry) => parsePresenceTimestamp(entry.updatedAt) >= staleBefore,
-        ),
-      );
+      remotePresenceSeenAtRef.current.forEach((seenAt, userId) => {
+        if (seenAt >= staleBefore) {
+          return;
+        }
+
+        remotePresenceSeenAtRef.current.delete(userId);
+        remoteInteractionPresenceRef.current.delete(userId);
+        remoteCursorStore.remove(userId);
+        staleUserIds.push(userId);
+      });
+
+      if (staleUserIds.length) {
+        const staleUserIdSet = new Set(staleUserIds);
+
+        setRemotePresence((currentPresence) =>
+          currentPresence.filter(
+            (entry) => !staleUserIdSet.has(entry.userId),
+          ),
+        );
+      }
       setRemoteShapeLocks((currentLocks) =>
         currentLocks.filter(isShapeLockFresh),
       );
@@ -1035,7 +1141,7 @@ export function useCanvasPresence(
     }, STALE_PRESENCE_SWEEP_MS);
 
     return () => window.clearInterval(staleTimer);
-  }, []);
+  }, [remoteCursorStore]);
 
   const sendPresenceUpdate = useCallback(
     (
@@ -1238,6 +1344,7 @@ export function useCanvasPresence(
       roomHistory,
       roomLoadedRegions,
       sendRoomShapePatch,
+      remoteCursorStore,
       remotePresence:
         currentUserId === null
           ? remotePresence
@@ -1269,6 +1376,7 @@ export function useCanvasPresence(
       roomHistory,
       roomLoadedRegions,
       sendRoomShapePatch,
+      remoteCursorStore,
       remotePresence,
       remoteShapeLocks,
       remoteShapePreviews,

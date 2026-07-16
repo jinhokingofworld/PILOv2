@@ -1530,6 +1530,12 @@ export async function createRealtimeSocketServer({
       roomStateService.applyShapePatch(patchPayload, patchPayload, {
         actorUserId: authedSocket.data.auth.userId ?? socket.id,
       });
+      const patchedShapeIds = [
+        ...patchPayload.deletedShapeIds,
+        ...patchPayload.upsertShapes.flatMap((shape) =>
+          typeof shape.id === "string" ? [shape.id] : [],
+        ),
+      ];
       roomCheckpointService.scheduleCheckpoint(
         patchPayload,
         authedSocket.data.auth.token,
@@ -1539,6 +1545,24 @@ export async function createRealtimeSocketServer({
         actorUserId: authedSocket.data.auth.userId ?? socket.id,
         sentAt: new Date().toISOString(),
       });
+      void shapePreviewService
+        .clearRoomPreview(
+          socket.id,
+          authedSocket.data.auth.userId ?? socket.id,
+          patchPayload,
+          patchedShapeIds,
+        )
+        .then((previewClearPayload) => {
+          if (!previewClearPayload) return;
+
+          io.to(roomName).emit(
+            canvasServerEvents.shapePreviewClear,
+            previewClearPayload,
+          );
+        })
+        .catch((error: unknown) => {
+          console.warn("Canvas committed shape preview cleanup failed.", error);
+        });
     });
 
     socket.on(canvasClientEvents.historyUndo, (payload) => {

@@ -112,6 +112,10 @@ assert.match(socketServer, /canvasServerEvents\.operation/);
 assert.match(socketServer, /canvasClientEvents\.shapeLockClaim/);
 assert.match(socketServer, /canvasClientEvents\.shapeLockRelease/);
 assert.match(socketServer, /canvasClientEvents\.shapePatch/);
+assert.match(
+  socketServer,
+  /shapePreviewService\s*\.clearRoomPreview\(\s*socket\.id,\s*authedSocket\.data\.auth\.userId \?\? socket\.id,\s*patchPayload,\s*patchedShapeIds,/,
+);
 assert.match(socketServer, /canvasClientEvents\.historyUndo/);
 assert.match(socketServer, /canvasClientEvents\.historyRedo/);
 assert.doesNotMatch(socketServer, /canvasClientEvents\.shapeCommit/);

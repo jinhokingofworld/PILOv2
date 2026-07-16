@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import checkpointModule from "../../dist/canvas/canvas-room-checkpoint.service.js";
 import roomStateModule from "../../dist/canvas/canvas-room-state.service.js";
 
+const { createCanvasRoomCheckpointService } = checkpointModule;
 const { createCanvasRoomStateService } = roomStateModule;
 
 const room = {
@@ -93,4 +95,59 @@ test("checkpoint 실행 중 발생한 최신 변경은 이전 성공 응답이 d
 
   assert.deepEqual(service.getDirtyShapeIds(room), []);
   assert.equal(service.getCheckpointState(room).checkpointVersion, 1);
+});
+
+test("already missing delete checkpoint clears its tombstone", async () => {
+  const originalFetch = globalThis.fetch;
+  const checkpointStatuses = [];
+  const service = createCanvasRoomStateService();
+  const shape = {
+    ...createNote("deleted"),
+    revision: 1,
+  };
+
+  service.recordLoadedViewport(
+    room,
+    { height: 600, margin: 200, width: 800, x: 0, y: 0 },
+    [shape],
+  );
+  service.applyShapePatch(room, {
+    deletedShapeIds: [shape.id],
+    upsertShapes: [],
+  });
+
+  globalThis.fetch = async () =>
+    new Response(
+      JSON.stringify({
+        error: {
+          message: "Canvas shape not found",
+        },
+        success: false,
+      }),
+      {
+        headers: { "content-type": "application/json" },
+        status: 404,
+      },
+    );
+
+  try {
+    const checkpointService = createCanvasRoomCheckpointService({
+      appServerUrl: "https://app-server.test",
+      onCheckpointStatus(status) {
+        checkpointStatuses.push(status);
+      },
+      roomStateService: service,
+    });
+
+    await checkpointService.flushCheckpointNow(room, "test-token");
+
+    assert.deepEqual(service.getDirtyShapeIds(room), []);
+    assert.deepEqual(service.getDeletedTombstones(room), []);
+    assert.equal(checkpointStatuses.at(-1)?.status, "saved");
+    assert.equal(checkpointStatuses.at(-1)?.pendingOperations, 0);
+
+    await checkpointService.close();
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });

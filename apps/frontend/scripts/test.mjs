@@ -243,6 +243,13 @@ const canvasRemoteCursorOverlay = await readFile(
   new URL("../src/shared/canvas-realtime/RemoteCursorOverlay.tsx", import.meta.url),
   "utf8"
 );
+const canvasRemoteCursorStore = await readFile(
+  new URL(
+    "../src/shared/canvas-realtime/canvas-remote-cursor-store.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
 const canvasRealtimeCss = await readFile(
   new URL("../src/shared/canvas-realtime/canvas-realtime.css", import.meta.url),
   "utf8"
@@ -918,18 +925,28 @@ assert.match(canvasPresenceHook, /payload\.loadedRegions/);
 assert.match(canvasPresenceHook, /payload\.roomShapes/);
 assert.match(canvasPresenceHook, /canvas:room:shapes:hydrate/);
 assert.match(canvasPresenceHook, /canvas:room:shape:patch/);
+assert.match(
+  canvasPresenceHook,
+  /removeShapePreviewIds\(\{\s*actorUserId: payload\.actorUserId,\s*previews: currentPreviews,\s*shapeIds: patchedShapeIds,/,
+);
 assert.match(canvasPresenceHook, /canvas:room:checkpoint/);
 assert.match(canvasPresenceHook, /ownedShapeLocks: CanvasShapeLockState\[\]/);
 assert.match(canvasPresenceHook, /const joinedShapeLocks = upsertShapeLocks\(\[\], payload\.shapeLocks\)/);
 assert.match(canvasPresenceHook, /setOwnedShapeLocks/);
 assert.match(canvasPresenceHook, /sentAt: new Date\(\)\.toISOString\(\)/);
 assert.match(canvasPresenceHook, /userId !== currentUserId/);
+assert.match(canvasPresenceHook, /remoteCursorStore\.upsert\(presence\)/);
+assert.match(canvasPresenceHook, /remoteInteractionPresenceRef/);
 assert.match(canvasRemoteCursorOverlay, /pageToScreen/);
 assert.match(canvasRemoteCursorOverlay, /getBoundingClientRect/);
 assert.match(canvasRemoteCursorOverlay, /getShapePageBounds/);
 assert.match(canvasRemoteCursorOverlay, /canvas-remote-selection-outline/);
 assert.match(canvasRemoteCursorOverlay, /getStableCursorColor/);
-assert.match(canvasRemoteCursorOverlay, /entry\.cursor === null/);
+assert.match(canvasRemoteCursorOverlay, /useSyncExternalStore/);
+assert.match(canvasRemoteCursorOverlay, /requestAnimationFrame/);
+assert.match(canvasRemoteCursorOverlay, /ResizeObserver/);
+assert.match(canvasRemoteCursorStore, /createCanvasRemoteCursorStore/);
+assert.match(canvasRemoteCursorStore, /isSameCursorEntry/);
 assert.match(canvasRealtimeCss, /canvas-remote-cursor-layer/);
 assert.match(canvasRealtimeCss, /canvas-remote-selection-outline/);
 assert.match(canvasRemotePresenceContext, /CanvasRemotePresenceProvider/);
