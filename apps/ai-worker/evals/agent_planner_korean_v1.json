@@ -1,6 +1,6 @@
 {
   "version": "agent-planner-korean:v1",
-  "toolSchemaVersion": "agent-tools:v1",
+  "toolSchemaVersion": "agent-tools:v3",
   "tools": [
     {
       "name": "list_calendar_events",
@@ -9,9 +9,23 @@
       "executionMode": "auto",
       "inputSchema": {
         "type": "object",
-        "required": ["start", "end"],
+        "required": [
+          "start",
+          "end"
+        ],
         "additionalProperties": false,
-        "properties": {"start": {"type": "string", "format": "date", "description": "조회 시작일. YYYY-MM-DD"}, "end": {"type": "string", "format": "date", "description": "조회 종료일. YYYY-MM-DD"}}
+        "properties": {
+          "start": {
+            "type": "string",
+            "format": "date",
+            "description": "조회 시작일. YYYY-MM-DD"
+          },
+          "end": {
+            "type": "string",
+            "format": "date",
+            "description": "조회 종료일. YYYY-MM-DD"
+          }
+        }
       }
     },
     {
@@ -21,10 +35,52 @@
       "executionMode": "confirmation_required",
       "inputSchema": {
         "type": "object",
-        "required": ["title", "startDate", "endDate"],
+        "required": [
+          "title",
+          "startDate",
+          "endDate"
+        ],
         "additionalProperties": false,
         "properties": {
-          "title": {"type": "string", "maxLength": 255}, "description": {"type": ["string", "null"]}, "color": {"type": "string", "pattern": "^#[0-9a-fA-F]{6}$"}, "isAllDay": {"type": "boolean"}, "startDate": {"type": "string", "format": "date"}, "endDate": {"type": "string", "format": "date"}, "startTime": {"type": ["string", "null"], "pattern": "^([01]\\d|2[0-3]):([0-5]\\d)$"}, "endTime": {"type": ["string", "null"], "pattern": "^([01]\\d|2[0-3]):([0-5]\\d)$"}
+          "title": {
+            "type": "string",
+            "maxLength": 255
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "color": {
+            "type": "string",
+            "pattern": "^#[0-9a-fA-F]{6}$"
+          },
+          "isAllDay": {
+            "type": "boolean"
+          },
+          "startDate": {
+            "type": "string",
+            "format": "date"
+          },
+          "endDate": {
+            "type": "string",
+            "format": "date"
+          },
+          "startTime": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^([01]\\d|2[0-3]):([0-5]\\d)$"
+          },
+          "endTime": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^([01]\\d|2[0-3]):([0-5]\\d)$"
+          }
         }
       }
     },
@@ -35,9 +91,224 @@
       "executionMode": "confirmation_required",
       "inputSchema": {
         "type": "object",
-        "required": ["target", "changes"],
+        "required": [
+          "target",
+          "changes"
+        ],
         "additionalProperties": false,
-        "properties": {"target": {"type": "object", "required": ["title", "startDate", "endDate"], "additionalProperties": false, "properties": {"title": {"type": "string", "minLength": 1, "maxLength": 255}, "startDate": {"type": "string", "format": "date"}, "endDate": {"type": "string", "format": "date"}, "isAllDay": {"type": "boolean"}, "startTime": {"type": "string", "pattern": "^([01]\\d|2[0-3]):([0-5]\\d)$"}, "endTime": {"type": "string", "pattern": "^([01]\\d|2[0-3]):([0-5]\\d)$"}}}, "changes": {"type": "object", "minProperties": 1}}
+        "properties": {
+          "target": {
+            "type": "object",
+            "required": [
+              "title",
+              "startDate",
+              "endDate"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255
+              },
+              "startDate": {
+                "type": "string",
+                "format": "date"
+              },
+              "endDate": {
+                "type": "string",
+                "format": "date"
+              },
+              "isAllDay": {
+                "type": "boolean"
+              },
+              "startTime": {
+                "type": "string",
+                "pattern": "^([01]\\d|2[0-3]):([0-5]\\d)$"
+              },
+              "endTime": {
+                "type": "string",
+                "pattern": "^([01]\\d|2[0-3]):([0-5]\\d)$"
+              }
+            }
+          },
+          "changes": {
+            "type": "object",
+            "minProperties": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "list_meeting_rooms",
+      "description": "Workspace 회의방 목록과 각 방의 현재 회의·녹음 상태를 조회합니다.",
+      "riskLevel": "low",
+      "executionMode": "auto",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      }
+    },
+    {
+      "name": "get_active_meeting",
+      "description": "현재 사용자가 참여 중인 active Meeting과 회의방, 시작 후 경과 시간을 조회합니다.",
+      "riskLevel": "low",
+      "executionMode": "auto",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      }
+    },
+    {
+      "name": "get_meeting_participants",
+      "description": "특정 Meeting의 현재·과거 참여자 요약을 조회합니다. LiveKit 연결 상태는 반환하지 않습니다.",
+      "riskLevel": "low",
+      "executionMode": "auto",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "meetingId"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "meetingId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      }
+    },
+    {
+      "name": "start_meeting_in_room",
+      "description": "선택한 MeetingRoom에서 회의를 시작합니다. recordingConsent는 사용자가 현재 정책에 명시적으로 동의한 경우에만 전달합니다.",
+      "riskLevel": "medium",
+      "executionMode": "confirmation_required",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "meetingRoomId"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "meetingRoomId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "recordingConsent": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "accepted",
+              "policyVersion"
+            ],
+            "properties": {
+              "accepted": {
+                "type": "boolean",
+                "const": true
+              },
+              "policyVersion": {
+                "type": "string",
+                "const": "v1"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "join_meeting",
+      "description": "진행 중인 Meeting에 참여하거나 재입장합니다. LiveKit token은 저장하지 않고 connect_meeting client action만 반환합니다.",
+      "riskLevel": "medium",
+      "executionMode": "confirmation_required",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "meetingId"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "meetingId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "recordingConsent": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "accepted",
+              "policyVersion"
+            ],
+            "properties": {
+              "accepted": {
+                "type": "boolean",
+                "const": true
+              },
+              "policyVersion": {
+                "type": "string",
+                "const": "v1"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "leave_meeting",
+      "description": "현재 참여 중인 Meeting에서 나갑니다. 마지막 참여자면 기존 Meeting 규칙에 따라 녹음·회의가 종료될 수 있습니다.",
+      "riskLevel": "low",
+      "executionMode": "auto",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "meetingId"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "meetingId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      }
+    },
+    {
+      "name": "start_meeting_recording",
+      "description": "현재 active participant인 Meeting의 녹음을 시작합니다. 모든 active participant의 동의를 서버가 재검증합니다.",
+      "riskLevel": "medium",
+      "executionMode": "confirmation_required",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "meetingId"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "meetingId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      }
+    },
+    {
+      "name": "end_meeting_recording",
+      "description": "Meeting의 current recording을 종료하고 조건을 충족하면 MeetingReport 생성을 요청합니다. recordingId를 입력받지 않습니다.",
+      "riskLevel": "medium",
+      "executionMode": "confirmation_required",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "meetingId"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "meetingId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
       }
     },
     {
@@ -48,7 +319,21 @@
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
-        "properties": {"status": {"type": "string", "enum": ["PROCESSING", "COMPLETED", "FAILED"]}, "limit": {"type": "integer", "minimum": 1, "maximum": 100}}
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "PROCESSING",
+              "COMPLETED",
+              "FAILED"
+            ]
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          }
+        }
       }
     },
     {
@@ -56,21 +341,220 @@
       "description": "MeetingReport 상세를 Agent용 보고서 projection으로 조회합니다.",
       "riskLevel": "low",
       "executionMode": "auto",
-      "inputSchema": {"type": "object", "required": ["reportId"], "additionalProperties": false, "properties": {"reportId": {"type": "string", "format": "uuid"}}}
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "reportId"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "reportId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      }
     },
     {
       "name": "summarize_meeting_report",
       "description": "MeetingReport를 Agent가 소비할 수 있는 sections/actionItems projection으로 요약합니다.",
       "riskLevel": "low",
       "executionMode": "auto",
-      "inputSchema": {"type": "object", "required": ["reportId"], "additionalProperties": false, "properties": {"reportId": {"type": "string", "format": "uuid"}}}
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "reportId"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "reportId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      }
     },
     {
       "name": "search_meeting_transcript",
       "description": "권한이 있는 MeetingReport transcript에서 질문과 의미적으로 관련된 발언을 검색하고 근거 기반 답변을 생성합니다.",
       "riskLevel": "low",
       "executionMode": "auto",
-      "inputSchema": {"type": "object", "required": ["query"], "additionalProperties": false, "properties": {"query": {"type": "string", "minLength": 1, "maxLength": 1000}, "reportId": {"type": "string", "format": "uuid"}}}
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "reportId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      }
+    },
+    {
+      "name": "find_action_items",
+      "description": "특정 MeetingReport에 저장된 후속작업의 상태와 담당자를 조회합니다.",
+      "riskLevel": "low",
+      "executionMode": "auto",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "reportId"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "reportId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      }
+    },
+    {
+      "name": "get_meeting_decision_evidence",
+      "description": "MeetingReport 결정사항에 직접 연결된 transcript와 Activity evidence만 조회합니다.",
+      "riskLevel": "low",
+      "executionMode": "auto",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "reportId"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "reportId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "decisionIndex": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "update_meeting_report_action_item",
+      "description": "저장된 회의 후속작업의 제목, 설명, 우선순위, 담당자를 수정합니다.",
+      "riskLevel": "medium",
+      "executionMode": "confirmation_required",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "reportId",
+          "actionItemId"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "reportId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "actionItemId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "string",
+            "enum": [
+              "LOW",
+              "MEDIUM",
+              "HIGH"
+            ]
+          },
+          "assigneeUserId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          }
+        }
+      }
+    },
+    {
+      "name": "dismiss_meeting_report_action_item",
+      "description": "저장된 회의 후속작업을 반려합니다.",
+      "riskLevel": "medium",
+      "executionMode": "confirmation_required",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "reportId",
+          "actionItemId"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "reportId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "actionItemId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      }
+    },
+    {
+      "name": "approve_meeting_report_action_item",
+      "description": "회의 후속작업을 승인하고 선택한 하나의 Calendar 일정 또는 Board issue를 생성합니다.",
+      "riskLevel": "medium",
+      "executionMode": "confirmation_required",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "reportId",
+          "actionItemId",
+          "delivery"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "reportId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "actionItemId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "delivery": {
+            "type": "object"
+          }
+        }
+      }
+    },
+    {
+      "name": "regenerate_meeting_report",
+      "description": "원본 audio가 남아 있는 실패 MeetingReport의 재생성을 요청합니다.",
+      "riskLevel": "medium",
+      "executionMode": "confirmation_required",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "reportId"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "reportId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      }
     },
     {
       "name": "search_board_issues",
@@ -81,13 +565,44 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "boardName": {"type": "string", "minLength": 1, "maxLength": 120},
-          "repositoryFullName": {"type": "string", "minLength": 1, "maxLength": 160, "description": "owner/repository 형식의 정확한 GitHub repository 이름"},
-          "search": {"type": "string", "minLength": 1, "maxLength": 200},
-          "state": {"type": "string", "enum": ["open", "closed"]},
-          "label": {"type": "string", "minLength": 1, "maxLength": 120},
-          "assignee": {"type": "string", "minLength": 1, "maxLength": 120},
-          "limit": {"type": "integer", "minimum": 1, "maximum": 20}
+          "boardName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "repositoryFullName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160,
+            "description": "owner/repository 형식의 정확한 GitHub repository 이름"
+          },
+          "search": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "open",
+              "closed"
+            ]
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "assignee": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20
+          }
         }
       }
     },
@@ -98,13 +613,33 @@
       "executionMode": "confirmation_required",
       "inputSchema": {
         "type": "object",
-        "required": ["issueNumber", "columnName"],
+        "required": [
+          "issueNumber",
+          "columnName"
+        ],
         "additionalProperties": false,
         "properties": {
-          "boardName": {"type": "string", "minLength": 1, "maxLength": 120},
-          "repositoryFullName": {"type": "string", "minLength": 1, "maxLength": 160, "description": "owner/repository 형식의 정확한 GitHub repository 이름"},
-          "issueNumber": {"type": "string", "pattern": "^#?[1-9]\\d*$", "description": "GitHub issue 번호. 예: #134"},
-          "columnName": {"type": "string", "minLength": 1, "maxLength": 120}
+          "boardName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "repositoryFullName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160,
+            "description": "owner/repository 형식의 정확한 GitHub repository 이름"
+          },
+          "issueNumber": {
+            "type": "string",
+            "pattern": "^#?[1-9]\\d*$",
+            "description": "GitHub issue 번호. 예: #134"
+          },
+          "columnName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          }
         }
       }
     },
@@ -115,12 +650,27 @@
       "executionMode": "auto",
       "inputSchema": {
         "type": "object",
-        "required": ["issueNumber"],
+        "required": [
+          "issueNumber"
+        ],
         "additionalProperties": false,
         "properties": {
-          "boardName": {"type": "string", "minLength": 1, "maxLength": 120},
-          "repositoryFullName": {"type": "string", "minLength": 1, "maxLength": 160, "description": "owner/repository 형식의 정확한 GitHub repository 이름"},
-          "issueNumber": {"type": "string", "pattern": "^#?[1-9]\\d*$", "description": "GitHub issue 번호. 예: #134"}
+          "boardName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "repositoryFullName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160,
+            "description": "owner/repository 형식의 정확한 GitHub repository 이름"
+          },
+          "issueNumber": {
+            "type": "string",
+            "pattern": "^#?[1-9]\\d*$",
+            "description": "GitHub issue 번호. 예: #134"
+          }
         }
       }
     },
@@ -131,14 +681,37 @@
       "executionMode": "confirmation_required",
       "inputSchema": {
         "type": "object",
-        "required": ["title", "columnName"],
+        "required": [
+          "title",
+          "columnName"
+        ],
         "additionalProperties": false,
         "properties": {
-          "boardName": {"type": "string", "minLength": 1, "maxLength": 120},
-          "repositoryFullName": {"type": "string", "minLength": 1, "maxLength": 160, "description": "owner/repository 형식의 정확한 GitHub repository 이름"},
-          "title": {"type": "string", "minLength": 1, "maxLength": 255},
-          "body": {"type": "string", "maxLength": 8000},
-          "columnName": {"type": "string", "minLength": 1, "maxLength": 120}
+          "boardName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "repositoryFullName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160,
+            "description": "owner/repository 형식의 정확한 GitHub repository 이름"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
+          },
+          "body": {
+            "type": "string",
+            "maxLength": 8000
+          },
+          "columnName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          }
         }
       }
     },
@@ -151,8 +724,17 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "boardName": {"type": "string", "minLength": 1, "maxLength": 120},
-          "repositoryFullName": {"type": "string", "minLength": 1, "maxLength": 160, "description": "owner/repository 형식의 정확한 GitHub repository 이름"}
+          "boardName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "repositoryFullName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160,
+            "description": "owner/repository 형식의 정확한 GitHub repository 이름"
+          }
         }
       }
     },
@@ -165,8 +747,17 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "boardName": {"type": "string", "minLength": 1, "maxLength": 120},
-          "repositoryFullName": {"type": "string", "minLength": 1, "maxLength": 160, "description": "owner/repository 형식의 정확한 GitHub repository 이름"}
+          "boardName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "repositoryFullName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160,
+            "description": "owner/repository 형식의 정확한 GitHub repository 이름"
+          }
         }
       }
     },
@@ -177,15 +768,59 @@
       "executionMode": "confirmation_required",
       "inputSchema": {
         "type": "object",
-        "required": ["issueNumber"],
-        "anyOf": [{"required": ["addAssignees"]}, {"required": ["removeAssignees"]}],
+        "required": [
+          "issueNumber"
+        ],
+        "anyOf": [
+          {
+            "required": [
+              "addAssignees"
+            ]
+          },
+          {
+            "required": [
+              "removeAssignees"
+            ]
+          }
+        ],
         "additionalProperties": false,
         "properties": {
-          "boardName": {"type": "string", "minLength": 1, "maxLength": 120},
-          "repositoryFullName": {"type": "string", "minLength": 1, "maxLength": 160, "description": "owner/repository 형식의 정확한 GitHub repository 이름"},
-          "issueNumber": {"type": "string", "pattern": "^#?[1-9]\\d*$", "description": "GitHub issue 번호. 예: #134"},
-          "addAssignees": {"type": "array", "maxItems": 10, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 120}},
-          "removeAssignees": {"type": "array", "maxItems": 10, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 120}}
+          "boardName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "repositoryFullName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160,
+            "description": "owner/repository 형식의 정확한 GitHub repository 이름"
+          },
+          "issueNumber": {
+            "type": "string",
+            "pattern": "^#?[1-9]\\d*$",
+            "description": "GitHub issue 번호. 예: #134"
+          },
+          "addAssignees": {
+            "type": "array",
+            "maxItems": 10,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            }
+          },
+          "removeAssignees": {
+            "type": "array",
+            "maxItems": 10,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            }
+          }
         }
       }
     },
@@ -198,52 +833,508 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "boardName": {"type": "string", "minLength": 1, "maxLength": 120},
-          "repositoryFullName": {"type": "string", "minLength": 1, "maxLength": 160, "description": "owner/repository 형식의 정확한 GitHub repository 이름"}
+          "boardName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "repositoryFullName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160,
+            "description": "owner/repository 형식의 정확한 GitHub repository 이름"
+          }
         }
       }
     }
   ],
   "cases": [
-    {"id": "calendar_today", "prompt": "오늘 일정 보여줘", "expected": {"status": "tool_candidate", "toolName": "list_calendar_events", "inputContains": {"start": "2026-07-08", "end": "2026-07-08"}, "requiresConfirmation": false}},
-    {"id": "calendar_tomorrow", "prompt": "내일 일정 알려줘", "expected": {"status": "tool_candidate", "toolName": "list_calendar_events", "inputContains": {"start": "2026-07-09", "end": "2026-07-09"}, "requiresConfirmation": false}},
-    {"id": "calendar_this_week", "prompt": "이번 주 일정 보여줘", "expected": {"status": "tool_candidate", "toolName": "list_calendar_events", "inputContains": {"start": "2026-07-06", "end": "2026-07-12"}, "requiresConfirmation": false}},
-    {"id": "calendar_this_weekend", "prompt": "이번 주말 일정 보여줘", "expected": {"status": "tool_candidate", "toolName": "list_calendar_events", "inputContains": {"start": "2026-07-11", "end": "2026-07-12"}, "requiresConfirmation": false}},
-    {"id": "calendar_next_monday", "prompt": "다음 주 월요일 오전 일정 보여줘", "expected": {"status": "tool_candidate", "toolName": "list_calendar_events", "inputContains": {"start": "2026-07-13", "end": "2026-07-13"}, "requiresConfirmation": false}},
-    {"id": "calendar_week_after_next_tuesday", "prompt": "다다음 주 화요일 일정 보여줘", "expected": {"status": "tool_candidate", "toolName": "list_calendar_events", "inputContains": {"start": "2026-07-21", "end": "2026-07-21"}, "requiresConfirmation": false}},
-    {"id": "calendar_this_sunday", "prompt": "이번 주 일요일 일정 보여줘", "expected": {"status": "tool_candidate", "toolName": "list_calendar_events", "inputContains": {"start": "2026-07-12", "end": "2026-07-12"}, "requiresConfirmation": false}},
-    {"id": "calendar_next_week", "prompt": "다음 주 일정 보여줘", "expected": {"status": "tool_candidate", "toolName": "list_calendar_events", "inputContains": {"start": "2026-07-13", "end": "2026-07-19"}, "requiresConfirmation": false}},
-    {"id": "calendar_explicit_range", "prompt": "2026년 7월 20일부터 22일까지 일정 보여줘", "expected": {"status": "tool_candidate", "toolName": "list_calendar_events", "inputContains": {"start": "2026-07-20", "end": "2026-07-22"}, "requiresConfirmation": false}},
-    {"id": "calendar_create_timed", "prompt": "7월 14일 오후 3시에 디자인 리뷰 일정 만들어줘", "expected": {"status": "tool_candidate", "toolName": "create_calendar_event", "inputContains": {"title": "디자인 리뷰", "startDate": "2026-07-14", "endDate": "2026-07-14", "startTime": "15:00"}, "requiresConfirmation": true}},
-    {"id": "calendar_create_all_day", "prompt": "7월 18일 워크숍 일정 만들어줘", "expected": {"status": "tool_candidate", "toolName": "create_calendar_event", "inputContains": {"title": "워크숍", "startDate": "2026-07-18", "endDate": "2026-07-18"}, "requiresConfirmation": true}},
-    {"id": "calendar_create_duration", "prompt": "7월 14일 오전 9시부터 10시 30분까지 스프린트 회고 일정 만들어줘", "expected": {"status": "tool_candidate", "toolName": "create_calendar_event", "inputContains": {"title": "스프린트 회고", "startDate": "2026-07-14", "endDate": "2026-07-14", "startTime": "09:00", "endTime": "10:30"}, "requiresConfirmation": true}},
-    {"id": "calendar_create_multi_day", "prompt": "7월 20일부터 22일까지 워크숍 일정 만들어줘", "expected": {"status": "needs_clarification", "missingFields": ["calendar_event_time_or_all_day"]}},
-    {"id": "calendar_create_recurrence", "prompt": "다음 주 평일마다 오전 10시에 스탠드업 일정 만들어줘", "expected": {"status": "unsupported"}},
-    {"id": "calendar_create_missing_date", "prompt": "디자인 리뷰 일정 만들어줘", "expected": {"status": "needs_clarification", "missingFields": ["startDate", "endDate"]}},
-    {"id": "calendar_create_missing_title", "prompt": "내일 오후 3시에 일정 만들어줘", "expected": {"status": "needs_clarification", "missingFields": ["title"]}},
-    {"id": "calendar_update", "prompt": "7월 10일 오후 3시 주간 회의 일정을 내일 오후 4시로 바꿔줘", "expected": {"status": "tool_candidate", "toolName": "update_calendar_event", "inputContains": {"target": {"title": "주간 회의", "startDate": "2026-07-10", "endDate": "2026-07-10", "startTime": "15:00"}, "changes": {"startDate": "2026-07-09", "endDate": "2026-07-09", "startTime": "16:00"}}, "requiresConfirmation": true}},
-    {"id": "calendar_update_missing_target", "prompt": "내일 오후 4시로 일정 바꿔줘", "expected": {"status": "needs_clarification", "missingFields": ["calendar_event_target"]}},
-    {"id": "calendar_update_missing_target_date", "prompt": "주간 회의 일정을 내일 오후 4시로 바꿔줘", "expected": {"status": "needs_clarification", "missingFields": ["calendar_event_target"]}},
-    {"id": "meeting_latest", "prompt": "가장 최신 회의록을 보여줘", "expected": {"status": "tool_candidate", "toolName": "list_meeting_reports", "inputContains": {"limit": 1}, "requiresConfirmation": false}},
-    {"id": "meeting_recent", "prompt": "최근 회의록 목록 보여줘", "expected": {"status": "tool_candidate", "toolName": "list_meeting_reports", "requiresConfirmation": false}},
-    {"id": "meeting_completed", "prompt": "완료된 회의록만 보여줘", "expected": {"status": "tool_candidate", "toolName": "list_meeting_reports", "inputContains": {"status": "COMPLETED"}, "requiresConfirmation": false}},
-    {"id": "meeting_processing", "prompt": "처리 중인 회의록 보여줘", "expected": {"status": "tool_candidate", "toolName": "list_meeting_reports", "inputContains": {"status": "PROCESSING"}, "requiresConfirmation": false}},
-    {"id": "meeting_failed", "prompt": "실패한 회의록 보여줘", "expected": {"status": "tool_candidate", "toolName": "list_meeting_reports", "inputContains": {"status": "FAILED"}, "requiresConfirmation": false}},
-    {"id": "meeting_detail_without_id", "prompt": "지난 회의록 상세를 보여줘", "expected": {"status": "unsupported"}},
-    {"id": "meeting_summary_without_id", "prompt": "지난 회의록 요약해줘", "expected": {"status": "unsupported"}},
-    {"id": "meeting_detail_with_id", "prompt": "회의록 123e4567-e89b-12d3-a456-426614174000 상세 보여줘", "expected": {"status": "tool_candidate", "toolName": "get_meeting_report", "inputContains": {"reportId": "123e4567-e89b-12d3-a456-426614174000"}, "requiresConfirmation": false}},
-    {"id": "meeting_summary_with_id", "prompt": "회의록 123e4567-e89b-12d3-a456-426614174000 요약해줘", "expected": {"status": "tool_candidate", "toolName": "summarize_meeting_report", "inputContains": {"reportId": "123e4567-e89b-12d3-a456-426614174000"}, "requiresConfirmation": false}},
-    {"id": "board_search", "prompt": "Board에서 내 이슈 검색해줘", "expected": {"status": "tool_candidate", "toolName": "search_board_issues", "requiresConfirmation": false}},
-    {"id": "board_move_status", "prompt": "#134 이슈를 In Progress로 옮겨줘", "expected": {"status": "tool_candidate", "toolName": "move_board_issue_status", "inputContains": {"issueNumber": "#134", "columnName": "In Progress"}, "requiresConfirmation": true}},
-    {"id": "board_issue_context", "prompt": "#134 이슈의 상세와 관련 PR을 보여줘", "expected": {"status": "tool_candidate", "toolName": "get_board_issue_context", "inputContains": {"issueNumber": "#134"}, "requiresConfirmation": false}},
-    {"id": "board_create_issue", "prompt": "Todo에 로그인 오류 이슈를 생성해줘", "expected": {"status": "tool_candidate", "toolName": "create_board_issue", "inputContains": {"title": "로그인 오류", "columnName": "Todo"}, "requiresConfirmation": true}},
-    {"id": "board_resolve_context", "prompt": "현재 active Board가 무엇인지 알려줘", "expected": {"status": "tool_candidate", "toolName": "resolve_board_context", "requiresConfirmation": false}},
-    {"id": "board_briefing", "prompt": "Board 전체 현황을 브리핑해줘", "expected": {"status": "tool_candidate", "toolName": "get_board_briefing", "requiresConfirmation": false}},
-    {"id": "board_assign_issue", "prompt": "#134 이슈에 alice를 담당자로 추가해줘", "expected": {"status": "tool_candidate", "toolName": "assign_board_issue_safely", "inputContains": {"issueNumber": "#134", "addAssignees": ["alice"]}, "requiresConfirmation": true}},
-    {"id": "board_freshness", "prompt": "Board 데이터가 최신인지 진단해줘", "expected": {"status": "tool_candidate", "toolName": "diagnose_board_freshness", "requiresConfirmation": false}},
-    {"id": "unsupported_pr_review", "prompt": "이 PR을 리뷰해줘", "expected": {"status": "unsupported"}},
-    {"id": "unsupported_delete", "prompt": "내일 일정을 삭제해줘", "expected": {"status": "unsupported"}}
-    ,{"id": "unsupported_recording_control", "prompt": "회의 녹음을 시작해줘", "expected": {"status": "unsupported"}}
-    ,{"id": "unsupported_calendar_delete", "prompt": "일정 42번을 삭제해줘", "expected": {"status": "unsupported"}}
+    {
+      "id": "calendar_today",
+      "prompt": "오늘 일정 보여줘",
+      "expected": {
+        "status": "tool_candidate",
+        "toolName": "list_calendar_events",
+        "inputContains": {
+          "start": "2026-07-08",
+          "end": "2026-07-08"
+        },
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "id": "calendar_tomorrow",
+      "prompt": "내일 일정 알려줘",
+      "expected": {
+        "status": "tool_candidate",
+        "toolName": "list_calendar_events",
+        "inputContains": {
+          "start": "2026-07-09",
+          "end": "2026-07-09"
+        },
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "id": "calendar_this_week",
+      "prompt": "이번 주 일정 보여줘",
+      "expected": {
+        "status": "tool_candidate",
+        "toolName": "list_calendar_events",
+        "inputContains": {
+          "start": "2026-07-06",
+          "end": "2026-07-12"
+        },
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "id": "calendar_this_weekend",
+      "prompt": "이번 주말 일정 보여줘",
+      "expected": {
+        "status": "tool_candidate",
+        "toolName": "list_calendar_events",
+        "inputContains": {
+          "start": "2026-07-11",
+          "end": "2026-07-12"
+        },
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "id": "calendar_next_monday",
+      "prompt": "다음 주 월요일 오전 일정 보여줘",
+      "expected": {
+        "status": "tool_candidate",
+        "toolName": "list_calendar_events",
+        "inputContains": {
+          "start": "2026-07-13",
+          "end": "2026-07-13"
+        },
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "id": "calendar_week_after_next_tuesday",
+      "prompt": "다다음 주 화요일 일정 보여줘",
+      "expected": {
+        "status": "tool_candidate",
+        "toolName": "list_calendar_events",
+        "inputContains": {
+          "start": "2026-07-21",
+          "end": "2026-07-21"
+        },
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "id": "calendar_this_sunday",
+      "prompt": "이번 주 일요일 일정 보여줘",
+      "expected": {
+        "status": "tool_candidate",
+        "toolName": "list_calendar_events",
+        "inputContains": {
+          "start": "2026-07-12",
+          "end": "2026-07-12"
+        },
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "id": "calendar_next_week",
+      "prompt": "다음 주 일정 보여줘",
+      "expected": {
+        "status": "tool_candidate",
+        "toolName": "list_calendar_events",
+        "inputContains": {
+          "start": "2026-07-13",
+          "end": "2026-07-19"
+        },
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "id": "calendar_explicit_range",
+      "prompt": "2026년 7월 20일부터 22일까지 일정 보여줘",
+      "expected": {
+        "status": "tool_candidate",
+        "toolName": "list_calendar_events",
+        "inputContains": {
+          "start": "2026-07-20",
+          "end": "2026-07-22"
+        },
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "id": "calendar_create_timed",
+      "prompt": "7월 14일 오후 3시에 디자인 리뷰 일정 만들어줘",
+      "expected": {
+        "status": "tool_candidate",
+        "toolName": "create_calendar_event",
+        "inputContains": {
+          "title": "디자인 리뷰",
+          "startDate": "2026-07-14",
+          "endDate": "2026-07-14",
+          "startTime": "15:00"
+        },
+        "requiresConfirmation": true
+      }
+    },
+    {
+      "id": "calendar_create_all_day",
+      "prompt": "7월 18일 워크숍 일정 만들어줘",
+      "expected": {
+        "status": "tool_candidate",
+        "toolName": "create_calendar_event",
+        "inputContains": {
+          "title": "워크숍",
+          "startDate": "2026-07-18",
+          "endDate": "2026-07-18"
+        },
+        "requiresConfirmation": true
+      }
+    },
+    {
+      "id": "calendar_create_duration",
+      "prompt": "7월 14일 오전 9시부터 10시 30분까지 스프린트 회고 일정 만들어줘",
+      "expected": {
+        "status": "tool_candidate",
+        "toolName": "create_calendar_event",
+        "inputContains": {
+          "title": "스프린트 회고",
+          "startDate": "2026-07-14",
+          "endDate": "2026-07-14",
+          "startTime": "09:00",
+          "endTime": "10:30"
+        },
+        "requiresConfirmation": true
+      }
+    },
+    {
+      "id": "calendar_create_multi_day",
+      "prompt": "7월 20일부터 22일까지 워크숍 일정 만들어줘",
+      "expected": {
+        "status": "needs_clarification",
+        "missingFields": [
+          "calendar_event_time_or_all_day"
+        ]
+      }
+    },
+    {
+      "id": "calendar_create_recurrence",
+      "prompt": "다음 주 평일마다 오전 10시에 스탠드업 일정 만들어줘",
+      "expected": {
+        "status": "unsupported"
+      }
+    },
+    {
+      "id": "calendar_create_missing_date",
+      "prompt": "디자인 리뷰 일정 만들어줘",
+      "expected": {
+        "status": "needs_clarification",
+        "missingFields": [
+          "startDate",
+          "endDate"
+        ]
+      }
+    },
+    {
+      "id": "calendar_create_missing_title",
+      "prompt": "내일 오후 3시에 일정 만들어줘",
+      "expected": {
+        "status": "needs_clarification",
+        "missingFields": [
+          "title"
+        ]
+      }
+    },
+    {
+      "id": "calendar_update",
+      "prompt": "7월 10일 오후 3시 주간 회의 일정을 내일 오후 4시로 바꿔줘",
+      "expected": {
+        "status": "tool_candidate",
+        "toolName": "update_calendar_event",
+        "inputContains": {
+          "target": {
+            "title": "주간 회의",
+            "startDate": "2026-07-10",
+            "endDate": "2026-07-10",
+            "startTime": "15:00"
+          },
+          "changes": {
+            "startDate": "2026-07-09",
+            "endDate": "2026-07-09",
+            "startTime": "16:00"
+          }
+        },
+        "requiresConfirmation": true
+      }
+    },
+    {
+      "id": "calendar_update_missing_target",
+      "prompt": "내일 오후 4시로 일정 바꿔줘",
+      "expected": {
+        "status": "needs_clarification",
+        "missingFields": [
+          "calendar_event_target"
+        ]
+      }
+    },
+    {
+      "id": "calendar_update_missing_target_date",
+      "prompt": "주간 회의 일정을 내일 오후 4시로 바꿔줘",
+      "expected": {
+        "status": "needs_clarification",
+        "missingFields": [
+          "calendar_event_target"
+        ]
+      }
+    },
+    {
+      "id": "meeting_rooms",
+      "prompt": "회의방과 현재 진행 상태 보여줘",
+      "expected": {
+        "status": "tool_candidate",
+        "toolName": "list_meeting_rooms",
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "id": "meeting_active",
+      "prompt": "내가 참여 중인 회의가 뭐야?",
+      "expected": {
+        "status": "tool_candidate",
+        "toolName": "get_active_meeting",
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "id": "meeting_participants",
+      "prompt": "회의 123e4567-e89b-12d3-a456-426614174000 참여자 보여줘",
+      "expected": {
+        "status": "tool_candidate",
+        "toolName": "get_meeting_participants",
+        "inputContains": {
+          "meetingId": "123e4567-e89b-12d3-a456-426614174000"
+        },
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "id": "meeting_latest",
+      "prompt": "가장 최신 회의록을 보여줘",
+      "expected": {
+        "status": "tool_candidate",
+        "toolName": "list_meeting_reports",
+        "inputContains": {
+          "limit": 1
+        },
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "id": "meeting_recent",
+      "prompt": "최근 회의록 목록 보여줘",
+      "expected": {
+        "status": "tool_candidate",
+        "toolName": "list_meeting_reports",
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "id": "meeting_completed",
+      "prompt": "완료된 회의록만 보여줘",
+      "expected": {
+        "status": "tool_candidate",
+        "toolName": "list_meeting_reports",
+        "inputContains": {
+          "status": "COMPLETED"
+        },
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "id": "meeting_processing",
+      "prompt": "처리 중인 회의록 보여줘",
+      "expected": {
+        "status": "tool_candidate",
+        "toolName": "list_meeting_reports",
+        "inputContains": {
+          "status": "PROCESSING"
+        },
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "id": "meeting_failed",
+      "prompt": "실패한 회의록 보여줘",
+      "expected": {
+        "status": "tool_candidate",
+        "toolName": "list_meeting_reports",
+        "inputContains": {
+          "status": "FAILED"
+        },
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "id": "meeting_detail_without_id",
+      "prompt": "지난 회의록 상세를 보여줘",
+      "expected": {
+        "status": "unsupported"
+      }
+    },
+    {
+      "id": "meeting_summary_without_id",
+      "prompt": "지난 회의록 요약해줘",
+      "expected": {
+        "status": "unsupported"
+      }
+    },
+    {
+      "id": "meeting_detail_with_id",
+      "prompt": "회의록 123e4567-e89b-12d3-a456-426614174000 상세 보여줘",
+      "expected": {
+        "status": "tool_candidate",
+        "toolName": "get_meeting_report",
+        "inputContains": {
+          "reportId": "123e4567-e89b-12d3-a456-426614174000"
+        },
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "id": "meeting_summary_with_id",
+      "prompt": "회의록 123e4567-e89b-12d3-a456-426614174000 요약해줘",
+      "expected": {
+        "status": "tool_candidate",
+        "toolName": "summarize_meeting_report",
+        "inputContains": {
+          "reportId": "123e4567-e89b-12d3-a456-426614174000"
+        },
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "id": "board_search",
+      "prompt": "Board에서 내 이슈 검색해줘",
+      "expected": {
+        "status": "tool_candidate",
+        "toolName": "search_board_issues",
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "id": "board_move_status",
+      "prompt": "#134 이슈를 In Progress로 옮겨줘",
+      "expected": {
+        "status": "tool_candidate",
+        "toolName": "move_board_issue_status",
+        "inputContains": {
+          "issueNumber": "#134",
+          "columnName": "In Progress"
+        },
+        "requiresConfirmation": true
+      }
+    },
+    {
+      "id": "board_issue_context",
+      "prompt": "#134 이슈의 상세와 관련 PR을 보여줘",
+      "expected": {
+        "status": "tool_candidate",
+        "toolName": "get_board_issue_context",
+        "inputContains": {
+          "issueNumber": "#134"
+        },
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "id": "board_create_issue",
+      "prompt": "Todo에 로그인 오류 이슈를 생성해줘",
+      "expected": {
+        "status": "tool_candidate",
+        "toolName": "create_board_issue",
+        "inputContains": {
+          "title": "로그인 오류",
+          "columnName": "Todo"
+        },
+        "requiresConfirmation": true
+      }
+    },
+    {
+      "id": "board_resolve_context",
+      "prompt": "현재 active Board가 무엇인지 알려줘",
+      "expected": {
+        "status": "tool_candidate",
+        "toolName": "resolve_board_context",
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "id": "board_briefing",
+      "prompt": "Board 전체 현황을 브리핑해줘",
+      "expected": {
+        "status": "tool_candidate",
+        "toolName": "get_board_briefing",
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "id": "board_assign_issue",
+      "prompt": "#134 이슈에 alice를 담당자로 추가해줘",
+      "expected": {
+        "status": "tool_candidate",
+        "toolName": "assign_board_issue_safely",
+        "inputContains": {
+          "issueNumber": "#134",
+          "addAssignees": [
+            "alice"
+          ]
+        },
+        "requiresConfirmation": true
+      }
+    },
+    {
+      "id": "board_freshness",
+      "prompt": "Board 데이터가 최신인지 진단해줘",
+      "expected": {
+        "status": "tool_candidate",
+        "toolName": "diagnose_board_freshness",
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "id": "unsupported_pr_review",
+      "prompt": "이 PR을 리뷰해줘",
+      "expected": {
+        "status": "unsupported"
+      }
+    },
+    {
+      "id": "unsupported_delete",
+      "prompt": "내일 일정을 삭제해줘",
+      "expected": {
+        "status": "unsupported"
+      }
+    },
+    {
+      "id": "meeting_recording_missing_id",
+      "prompt": "회의 녹음을 시작해줘",
+      "expected": {
+        "status": "needs_clarification",
+        "missingFields": [
+          "meetingId"
+        ]
+      }
+    },
+    {
+      "id": "unsupported_calendar_delete",
+      "prompt": "일정 42번을 삭제해줘",
+      "expected": {
+        "status": "unsupported"
+      }
+    }
   ]
 }

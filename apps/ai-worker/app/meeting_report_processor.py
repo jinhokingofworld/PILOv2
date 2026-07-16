@@ -98,6 +98,7 @@ class GeneratedMeetingReport:
     evidence: list[EvidenceReference]
     activity_evidence: list[ActivityEvidence] = field(default_factory=list)
     activity_evidence_references: list[ActivityEvidenceReference] = field(default_factory=list)
+    decision_items: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -370,17 +371,24 @@ def parse_generated_report_json(
     summary = _require_payload_string(payload, "summary")
     discussion_points = _require_payload_string(payload, "discussionPoints")
     decisions = _require_payload_string(payload, "decisions")
+    decision_items = _parse_decision_items(payload.get("decisionItems"), decisions)
     raw_action_items = payload.get("actionItemCandidates")
 
     if not isinstance(raw_action_items, list):
         raise ProviderBusinessError("Invalid action item candidates")
 
     action_items = [_parse_action_item(item) for item in raw_action_items]
-    evidence = _parse_evidence(payload.get("evidence"), transcript_segments, len(action_items))
+    evidence = _parse_evidence(
+        payload.get("evidence"),
+        transcript_segments,
+        len(action_items),
+        len(decision_items),
+    )
     activity_evidence_references = _parse_activity_evidence_references(
         payload.get("activityEvidenceReferences", []),
         activity_evidence or [],
         len(action_items),
+        len(decision_items),
     )
     _require_action_item_evidence(action_items, evidence, activity_evidence_references)
 
@@ -394,6 +402,7 @@ def parse_generated_report_json(
         evidence=evidence,
         activity_evidence=list(activity_evidence or []),
         activity_evidence_references=activity_evidence_references,
+        decision_items=decision_items,
     )
 
 
@@ -434,7 +443,10 @@ def _parse_action_item(value: object) -> ActionItemCandidate:
 
 
 def _parse_evidence(
-    value: object, segments: list[TranscriptSegment], action_item_count: int
+    value: object,
+    segments: list[TranscriptSegment],
+    action_item_count: int,
+    decision_count: int,
 ) -> list[EvidenceReference]:
     if not isinstance(value, list):
         raise ProviderBusinessError("Invalid evidence")
@@ -452,8 +464,10 @@ def _parse_evidence(
             or not isinstance(segment_indexes, list)
         ):
             raise ProviderBusinessError("Invalid evidence reference")
-        if source_type in {"summary", "discussion", "decision"} and source_index != 0:
+        if source_type in {"summary", "discussion"} and source_index != 0:
             raise ProviderBusinessError("Invalid singleton evidence")
+        if source_type == "decision" and not 0 <= source_index < decision_count:
+            raise ProviderBusinessError("Invalid decision evidence")
         if source_type == "action_item" and not 0 <= source_index < action_item_count:
             raise ProviderBusinessError("Invalid action item evidence")
         if not all(isinstance(index, int) and index in valid_indexes for index in segment_indexes):
@@ -474,6 +488,7 @@ def _parse_activity_evidence_references(
     value: object,
     activity_evidence: list[ActivityEvidence],
     action_item_count: int,
+    decision_count: int,
 ) -> list[ActivityEvidenceReference]:
     if not isinstance(value, list):
         raise ProviderBusinessError("Invalid Activity evidence reference")
@@ -491,8 +506,10 @@ def _parse_activity_evidence_references(
             or not isinstance(activity_indexes, list)
         ):
             raise ProviderBusinessError("Invalid Activity evidence reference")
-        if source_type in {"summary", "discussion", "decision"} and source_index != 0:
+        if source_type in {"summary", "discussion"} and source_index != 0:
             raise ProviderBusinessError("Invalid singleton Activity evidence")
+        if source_type == "decision" and not 0 <= source_index < decision_count:
+            raise ProviderBusinessError("Invalid decision Activity evidence")
         if source_type == "action_item" and not 0 <= source_index < action_item_count:
             raise ProviderBusinessError("Invalid action item Activity evidence")
         if not all(isinstance(index, int) and index in valid_indexes for index in activity_indexes):
@@ -506,6 +523,22 @@ def _parse_activity_evidence_references(
         ActivityEvidenceReference(source_type, source_index, activity_indexes)
         for (source_type, source_index), activity_indexes in activity_indexes_by_source.items()
     ]
+
+
+def _parse_decision_items(value: object, decisions: str) -> list[str]:
+    if value is None:
+        return [decisions]
+    if not isinstance(value, list) or not value:
+        raise ProviderBusinessError("Invalid decision items")
+    items: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            raise ProviderBusinessError("Invalid decision item")
+        normalized = item.strip()
+        if not normalized or len(normalized.encode("utf-8")) > 5000:
+            raise ProviderBusinessError("Invalid decision item")
+        items.append(normalized)
+    return items
 
 
 def _require_action_item_evidence(

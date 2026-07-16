@@ -13,6 +13,7 @@ const WORKSPACE_ID = "22222222-2222-2222-2222-222222222222";
 const RUN_ID = "33333333-3333-3333-3333-333333333333";
 const STEP_ID = "44444444-4444-4444-4444-444444444444";
 const CONFIRMATION_ID = "55555555-5555-5555-5555-555555555555";
+const MESSAGE_ID = "66666666-6666-4666-8666-666666666666";
 const CREATED_AT = new Date("2026-07-08T00:00:00.000Z");
 const UPDATED_AT = new Date("2026-07-08T00:01:00.000Z");
 const EXPIRES_AT = new Date("2026-08-07T00:00:00.000Z");
@@ -143,6 +144,18 @@ function createConfirmationRow(overrides = {}) {
   };
 }
 
+function createMessageRow(overrides = {}) {
+  return {
+    id: MESSAGE_ID,
+    run_id: RUN_ID,
+    sequence: 1,
+    role: "assistant",
+    content: "몇 시에 시작할까요?",
+    created_at: new Date("2026-07-08T00:00:30.000Z"),
+    ...overrides
+  };
+}
+
 class FakeWorkspaceService {
   constructor() {
     this.calls = [];
@@ -212,7 +225,8 @@ class FakeDatabaseService {
 
   async transaction(callback) {
     return callback({
-      execute: this.execute.bind(this)
+      execute: this.execute.bind(this),
+      queryOne: this.queryOne.bind(this)
     });
   }
 
@@ -264,6 +278,11 @@ class FakeDatabaseService {
       return this.state.stepRows.filter((step) => step.run_id === runId);
     }
 
+    if (text.includes("FROM agent_run_messages")) {
+      const [runId] = values;
+      return this.state.messageRows.filter((message) => message.run_id === runId);
+    }
+
     throw new Error(`Unhandled query: ${text}`);
   }
 }
@@ -277,6 +296,7 @@ function createService({
     listRows: [],
     runRows: [],
     stepRows: [],
+    messageRows: [],
     confirmationRows: []
   },
   agentOutboxPublisherService = new FakeAgentOutboxPublisherService(),
@@ -377,6 +397,7 @@ function errorMessage(error) {
   assert.equal(result.created, true);
   assert.equal(result.run.id, RUN_ID);
   assert.deepEqual(result.run.steps, []);
+  assert.deepEqual(result.run.messages, []);
   assert.equal(result.run.confirmation, null);
   assert.deepEqual(agentLoggingService.calls, [
     {
@@ -507,15 +528,17 @@ function errorMessage(error) {
   const lifecycleCalls = database.calls.filter(
     (call) => call.method === "execute"
   );
-  assert.equal(lifecycleCalls.length, 2);
+  assert.equal(lifecycleCalls.length, 3);
   assert.deepEqual(lifecycleCalls[0].values, [WORKSPACE_ID, USER_ID]);
   assert.match(lifecycleCalls[0].text, /SET status = 'expired'/);
-  assert.deepEqual(lifecycleCalls[1].values, [
+  assert.deepEqual(lifecycleCalls[1].values, [WORKSPACE_ID, USER_ID]);
+  assert.match(lifecycleCalls[1].text, /status = 'waiting_user_input'/);
+  assert.deepEqual(lifecycleCalls[2].values, [
     WORKSPACE_ID,
     USER_ID,
     100
   ]);
-  assert.match(lifecycleCalls[1].text, /DELETE FROM agent_runs/);
+  assert.match(lifecycleCalls[2].text, /DELETE FROM agent_runs/);
 
   const listCalls = database.calls.filter(
     (call) => call.method !== "execute"
@@ -547,6 +570,132 @@ function errorMessage(error) {
   );
 }
 
+class FakeRunInputDatabaseService {
+  constructor({ expired = false } = {}) {
+    this.expired = expired;
+    this.calls = [];
+    this.run = createRunRow({
+      status: "waiting_user_input",
+      message: "몇 시에 시작할까요?",
+      final_answer: null
+    });
+    this.messages = [createMessageRow()];
+  }
+
+  async transaction(callback) {
+    return callback({
+      execute: this.execute.bind(this),
+      queryOne: this.queryOne.bind(this)
+    });
+  }
+
+  async execute(text, values = []) {
+    this.calls.push({ method: "execute", text, values });
+    if (text.includes("INSERT INTO agent_run_messages")) {
+      this.messages.push(
+        createMessageRow({
+          id: "77777777-7777-4777-8777-777777777777",
+          sequence: values[1],
+          role: "user",
+          content: values[2],
+          created_at: new Date("2026-07-08T00:01:00.000Z")
+        })
+      );
+    }
+    if (
+      text.includes("추가 정보 입력 대기 시간이 만료되었습니다.") &&
+      text.includes("WHERE id = $1")
+    ) {
+      this.run.status = "cancelled";
+    }
+    return { rows: [] };
+  }
+
+  async queryOne(text, values = []) {
+    this.calls.push({ method: "queryOne", text, values });
+    if (text.includes("COUNT(*)")) return { total: 0 };
+    if (text.includes("MAX(sequence)")) return { sequence: this.messages.length + 1 };
+    if (text.includes("updated_at > now()")) {
+      return this.expired ? null : { id: RUN_ID };
+    }
+    if (text.includes("UPDATE agent_runs") && text.includes("RETURNING id")) {
+      this.run.status = "planning";
+      this.run.message = "추가 정보를 반영하고 있습니다.";
+      return { id: RUN_ID };
+    }
+    if (text.includes("UPDATE agent_run_outbox")) return { id: "outbox-1" };
+    if (text.includes("FROM agent_confirmations")) return null;
+    if (text.includes("FROM agent_runs") && text.includes("WHERE id = $1")) {
+      return this.run;
+    }
+    throw new Error(`Unhandled run input queryOne: ${text}`);
+  }
+
+  async query(text, values = []) {
+    this.calls.push({ method: "query", text, values });
+    if (text.includes("FROM agent_steps")) return [];
+    if (text.includes("FROM agent_run_messages")) return this.messages;
+    throw new Error(`Unhandled run input query: ${text}`);
+  }
+}
+
+{
+  const database = new FakeRunInputDatabaseService();
+  const publisher = new FakeAgentOutboxPublisherService();
+  const service = new AgentService(
+    database,
+    new FakeWorkspaceService(),
+    new FakeAgentLoggingService(null),
+    publisher
+  );
+
+  const result = await service.submitRunInput(USER_ID, WORKSPACE_ID, RUN_ID, {
+    message: "오전 10시요"
+  });
+
+  assert.equal(result.run.status, "planning");
+  assert.equal(result.run.messages.at(-1).content, "오전 10시요");
+  assert.deepEqual(publisher.calls, [RUN_ID]);
+  const resume = database.calls.find(
+    (call) =>
+      call.method === "queryOne" &&
+      call.text.includes("planner_turn_count = 0")
+  );
+  assert.ok(resume);
+  const rearm = database.calls.find(
+    (call) =>
+      call.method === "queryOne" && call.text.includes("reason = 'user_input'")
+  );
+  assert.ok(rearm);
+  assert.match(rearm.text, /turn_sequence = turn_sequence \+ 1/);
+}
+
+{
+  const database = new FakeRunInputDatabaseService({ expired: true });
+  const publisher = new FakeAgentOutboxPublisherService();
+  const service = new AgentService(
+    database,
+    new FakeWorkspaceService(),
+    new FakeAgentLoggingService(null),
+    publisher
+  );
+
+  await assert.rejects(
+    () =>
+      service.submitRunInput(USER_ID, WORKSPACE_ID, RUN_ID, {
+        message: "오전 10시요"
+      }),
+    (error) => {
+      assert.equal(error.getStatus(), 400);
+      assert.equal(errorMessage(error), "Agent run input wait has expired");
+      return true;
+    }
+  );
+
+  assert.equal(database.run.status, "cancelled");
+  assert.deepEqual(publisher.calls, []);
+}
+
 {
   const { service } = createService();
 
@@ -565,6 +714,7 @@ function errorMessage(error) {
     listRows: [],
     runRows: [createRunRow()],
     stepRows: [createStepRow()],
+    messageRows: [createMessageRow()],
     confirmationRows: [createConfirmationRow()]
   };
   const { service } = createService({ state });
@@ -579,6 +729,15 @@ function errorMessage(error) {
   assert.equal(result.run.steps[0].resourceRefs[0].metadata.visible, "ok");
   assert.equal("token" in result.run.steps[0].resourceRefs[0].metadata, false);
   assert.equal(result.run.confirmation.id, CONFIRMATION_ID);
+  assert.deepEqual(result.run.messages, [
+    {
+      id: MESSAGE_ID,
+      sequence: 1,
+      role: "assistant",
+      content: "몇 시에 시작할까요?",
+      createdAt: "2026-07-08T00:00:30.000Z"
+    }
+  ]);
   assert.equal(result.run.confirmation.plan.after.title, "주간 회의");
   assert.equal(
     "providerRawResponse" in result.run.confirmation.plan.after,
@@ -595,6 +754,7 @@ function errorMessage(error) {
       })
     ],
     stepRows: [],
+    messageRows: [],
     confirmationRows: []
   };
   const { service } = createService({ state });

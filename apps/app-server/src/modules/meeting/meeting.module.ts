@@ -1,6 +1,8 @@
 import { Module } from "@nestjs/common";
 import { CommonModule } from "../../common/common.module";
 import { DatabaseModule } from "../../database/database.module";
+import { BoardModule } from "../board/board.module";
+import { CalendarModule } from "../calendar/calendar.module";
 import { WorkspaceModule } from "../workspace/workspace.module";
 import { LiveKitEgressService } from "./livekit-egress.service";
 import { LiveKitTokenService } from "./livekit-token.service";
@@ -18,9 +20,10 @@ import { MeetingReportRealtimePublisherService } from "./meeting-report-realtime
 import { MeetingStateRealtimePublisherService } from "./meeting-state-realtime-publisher.service";
 import { MeetingService } from "./meeting.service";
 import { MeetingTranscriptRagService } from "./meeting-transcript-rag.service";
+import { MeetingActionItemDeliveryService } from "./meeting-action-item-delivery.service";
 
 @Module({
-  imports: [CommonModule, DatabaseModule, WorkspaceModule],
+  imports: [CommonModule, DatabaseModule, WorkspaceModule, CalendarModule, BoardModule],
   controllers: [
     MeetingController,
     CurrentUserMeetingController,
@@ -29,6 +32,7 @@ import { MeetingTranscriptRagService } from "./meeting-transcript-rag.service";
   ],
   providers: [
     MeetingService,
+    MeetingActionItemDeliveryService,
     MeetingTranscriptRagService,
     LiveKitEgressService,
     LiveKitTokenService,
@@ -41,6 +45,10 @@ import { MeetingTranscriptRagService } from "./meeting-transcript-rag.service";
     MeetingReportOutboxRecoveryService,
     MeetingRecordingRetentionService
   ],
-  exports: [MeetingService, MeetingTranscriptRagService]
+  exports: [
+    MeetingService,
+    MeetingTranscriptRagService,
+    MeetingActionItemDeliveryService
+  ]
 })
 export class MeetingModule {}

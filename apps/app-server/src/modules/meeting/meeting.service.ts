@@ -41,7 +41,12 @@ type MeetingReportStatus =
   | "COMPLETED"
   | "FAILED";
 type MeetingReportFailedStep = "RECORDING" | "STT" | "LLM";
-type MeetingReportActionItemStatus = "PENDING" | "APPROVED" | "DISMISSED";
+type MeetingReportActionItemStatus =
+  | "PENDING"
+  | "DELIVERING"
+  | "DELIVERY_FAILED"
+  | "APPROVED"
+  | "DISMISSED";
 
 interface MeetingRow extends QueryResultRow {
   id: string;
@@ -426,6 +431,11 @@ export interface RecordingConsentInput {
   policyVersion: string;
 }
 
+export interface RecordingConsentStatusPayload {
+  accepted: boolean;
+  policyVersion: string;
+}
+
 export interface JoinMeetingPayload {
   meeting: MeetingPayload;
   participant: ParticipantPayload;
@@ -653,6 +663,29 @@ export class MeetingService {
         },
         isDefault
       )
+    };
+  }
+
+  async getRecordingConsentStatus(
+    currentUserId: string,
+    workspaceId: string
+  ): Promise<RecordingConsentStatusPayload> {
+    await this.assertWorkspaceAccess(currentUserId, workspaceId);
+    const consent = await this.database.queryOne<{ accepted: boolean }>(
+      `
+        SELECT EXISTS (
+          SELECT 1
+          FROM workspace_recording_consents
+          WHERE workspace_id = $1::uuid
+            AND user_id = $2::uuid
+            AND policy_version = $3
+        ) AS accepted
+      `,
+      [workspaceId, currentUserId, WORKSPACE_RECORDING_CONSENT_POLICY_VERSION]
+    );
+    return {
+      accepted: consent?.accepted === true,
+      policyVersion: WORKSPACE_RECORDING_CONSENT_POLICY_VERSION
     };
   }
 
@@ -1560,6 +1593,27 @@ export class MeetingService {
         actionItemAssignees
       })
     };
+  }
+
+  async getMeetingReportDecisionItem(
+    currentUserId: string,
+    workspaceId: string,
+    reportId: string,
+    sourceIndex: number
+  ): Promise<{ sourceIndex: number; text: string } | null> {
+    await this.getReport(currentUserId, workspaceId, reportId);
+    return this.database.queryOne<{ source_index: number; text: string }>(
+      `
+        SELECT source_index, text
+        FROM meeting_report_decision_items
+        WHERE meeting_report_id = $1
+          AND source_index = $2
+        LIMIT 1
+      `,
+      [reportId, sourceIndex]
+    ).then((row) =>
+      row ? { sourceIndex: row.source_index, text: row.text } : null
+    );
   }
 
   async deleteReport(

@@ -13,9 +13,18 @@ from app.meeting_report_processor import InfrastructureError
 
 AGENT_RUN_REQUESTED_JOB_TYPE = "agent_run_requested"
 AGENT_GROUNDED_ANSWER_REQUESTED_JOB_TYPE = "agent_grounded_answer_requested"
-AGENT_TOOL_SCHEMA_VERSION = "agent-tools:v1"
+AGENT_TOOL_SCHEMA_VERSION = "agent-tools:v3"
+AGENT_PLANNER_TURN_LIMIT_MESSAGE = (
+    "한 요청에서 계획할 수 있는 작업은 최대 5회입니다. "
+    "다음 요청에서 계속 진행할 내용을 알려주세요."
+)
 TERMINAL_AGENT_RUN_STATUSES = {"completed", "failed", "cancelled"}
-PLANNER_STATUSES = {"tool_candidate", "needs_clarification", "unsupported"}
+PLANNER_STATUSES = {
+    "tool_candidate",
+    "needs_clarification",
+    "completed",
+    "unsupported",
+}
 TOOL_RISK_LEVELS = {"low", "medium", "high"}
 TOOL_EXECUTION_MODES = {"auto", "confirmation_required"}
 MEETING_REPORT_ID_TOOLS = {"get_meeting_report", "summarize_meeting_report"}
@@ -39,6 +48,7 @@ class AgentRunJob:
     workspace_id: str
     requested_by_user_id: str
     tool_schema_version: str
+    turn_sequence: int
     tools: tuple[AgentToolSchema, ...]
 
 
@@ -59,6 +69,8 @@ class AgentRunContext:
     status: str
     prompt: str
     timezone: str
+    planner_turn_count: int = 0
+    planning_context: str = ""
 
 
 @dataclass(frozen=True)
@@ -69,6 +81,7 @@ class AgentPlanningRequest:
     current_date: str
     tool_schema_version: str
     tools: tuple[AgentToolSchema, ...]
+    planning_context: str = ""
 
 
 @dataclass(frozen=True)
@@ -238,6 +251,8 @@ class AgentRunRepository(Protocol):
         message: str,
     ) -> None: ...
 
+    def wait_for_user_input(self, run_id: str, message: str) -> bool: ...
+
 
 class AgentPlannerClient(Protocol):
     def plan(self, request: AgentPlanningRequest) -> AgentPlannerDecision: ...
@@ -264,6 +279,7 @@ def parse_agent_run_job_payload(payload: dict[str, object]) -> AgentRunJob:
         workspace_id=_require_uuid_string(payload, "workspaceId"),
         requested_by_user_id=_require_uuid_string(payload, "requestedByUserId"),
         tool_schema_version=_require_non_empty_string(payload, "toolSchemaVersion"),
+        turn_sequence=_optional_positive_int(payload, "turnSequence", default=1),
         tools=_parse_tool_schema_snapshot(payload.get("tools")),
     )
 
@@ -327,6 +343,13 @@ class AgentRunProcessor:
                     reason="agent_run_waiting_confirmation",
                 )
 
+            if status == "waiting_user_input":
+                return self._result(
+                    job,
+                    delete_message=True,
+                    reason="agent_run_waiting_user_input",
+                )
+
             if status == "running":
                 return self._handoff_execution(job, retried=True)
 
@@ -335,6 +358,21 @@ class AgentRunProcessor:
                     job,
                     delete_message=True,
                     reason="agent_run_unsupported_status",
+                )
+
+            if context.planner_turn_count >= 5:
+                waiting = self.repository.wait_for_user_input(
+                    job.run_id,
+                    AGENT_PLANNER_TURN_LIMIT_MESSAGE,
+                )
+                return self._result(
+                    job,
+                    delete_message=True,
+                    reason=(
+                        "agent_planner_turn_limit_reached"
+                        if waiting
+                        else "agent_run_no_longer_planning"
+                    ),
                 )
 
             return self._plan_run(job, context)
@@ -354,6 +392,7 @@ class AgentRunProcessor:
                     current_date=current_date,
                     tool_schema_version=job.tool_schema_version,
                     tools=job.tools,
+                    planning_context=context.planning_context,
                 )
             )
             normalized = normalize_agent_planner_decision(
@@ -380,6 +419,19 @@ class AgentRunProcessor:
                     normalized.risk_level,
                 )
                 return self._handoff_execution(job, retried=False)
+
+            if normalized.status == "needs_clarification":
+                waiting = self.repository.wait_for_user_input(
+                    job.run_id,
+                    normalized.final_answer,
+                )
+                return self._result(
+                    job,
+                    delete_message=True,
+                    reason=(
+                        "agent_waiting_user_input" if waiting else "agent_run_no_longer_planning"
+                    ),
+                )
 
             self.repository.complete_run(
                 job.run_id,
@@ -474,6 +526,18 @@ def _require_non_empty_string(payload: dict[str, object], key: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"Invalid {key}")
     return value.strip()
+
+
+def _optional_positive_int(
+    payload: dict[str, object],
+    key: str,
+    *,
+    default: int,
+) -> int:
+    value = payload.get(key, default)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1 or value > 2_147_483_647:
+        raise ValueError(f"Invalid {key}")
+    return value
 
 
 def _parse_tool_schema_snapshot(value: object) -> tuple[AgentToolSchema, ...]:
@@ -614,7 +678,7 @@ def normalize_agent_planner_decision(
     elif status == "needs_clarification":
         output_summary["missingFields"] = list(missing_fields)
         final_answer = final_answer or "요청을 처리하려면 추가 정보가 필요합니다."
-    else:
+    elif status == "unsupported":
         output_summary["unsupportedReason"] = unsupported_reason or "unknown_intent"
         final_answer = final_answer or "현재 Agent 1차 범위에서 지원하지 않는 요청입니다."
 
@@ -883,7 +947,7 @@ def _agent_planner_system_prompt() -> str:
         "Choose only tools from the provided tool list. "
         "If no provided tool can handle the request, return unsupported. "
         "High-risk or excluded actions such as delete, PR review submission, "
-        "meeting recording control, label, milestone, or due date changes "
+        "label, milestone, or due date changes "
         "must be unsupported. "
         "Board assignee changes are allowed only when the provided tool list contains "
         "assign_board_issue_safely; otherwise they must be unsupported. "
@@ -896,6 +960,10 @@ def _agent_planner_system_prompt() -> str:
         "For a broad MeetingReport request without a report ID, use list_meeting_reports "
         "with limit 1 to return the latest report. A specific MeetingReport detail or "
         "summary request without a valid report ID must be unsupported. "
+        "For Meeting control, use list_meeting_rooms or get_active_meeting first when IDs are "
+        "unknown. Never invent meetingRoomId, meetingId, or recordingId. end_meeting_recording "
+        "accepts meetingId only and resolves the current recording on the server. Include "
+        "recordingConsent only after the user explicitly accepts the stated policy version. "
         "Calendar list_calendar_events supports only a date range; title, keyword, participant, "
         "or current-time filters are not supported and must be unsupported rather than ignored. "
         "Calendar recurrence is not supported and must be unsupported rather than converted to a "
@@ -913,6 +981,9 @@ def _agent_planner_system_prompt() -> str:
         "currentDate 2026-07-12, use 2026-07-18 through 2026-07-19 for '이번 주말', 2026-07-13 "
         "for '다음 주 월요일', and 2026-07-21 for '다다음 주 화요일'. "
         "Use YYYY-MM-DD dates and HH:mm 24-hour times in tool inputs. "
+        "When planningContext contains completed tool results, use them to answer the user's "
+        "original request. If the request is satisfied, return completed instead of "
+        "repeating a tool. "
         "Write message and finalAnswerDraft in Korean. "
         "Put the selected tool input object into inputJson as a compact JSON string. "
         "Use null inputJson when there is no tool input. "
@@ -940,6 +1011,7 @@ def _agent_planner_user_prompt(request: AgentPlanningRequest) -> str:
             "toolSchemaVersion": request.tool_schema_version,
             "tools": tools,
             "prompt": request.prompt,
+            "planningContext": request.planning_context,
         },
         ensure_ascii=False,
     )
@@ -962,7 +1034,12 @@ def _agent_planner_schema() -> dict[str, object]:
         "properties": {
             "status": {
                 "type": "string",
-                "enum": ["tool_candidate", "needs_clarification", "unsupported"],
+                "enum": [
+                    "tool_candidate",
+                    "needs_clarification",
+                    "completed",
+                    "unsupported",
+                ],
             },
             "message": {"type": "string"},
             "finalAnswerDraft": {"type": ["string", "null"]},

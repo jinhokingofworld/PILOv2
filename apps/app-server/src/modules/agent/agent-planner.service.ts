@@ -32,6 +32,10 @@ export class AgentPlannerService {
       return this.planCalendar(prompt);
     }
 
+    if (this.isMeetingControlPrompt(prompt)) {
+      return this.planMeetingControl(prompt);
+    }
+
     if (this.isMeetingReportPrompt(prompt)) {
       return this.planMeetingReport(prompt);
     }
@@ -109,6 +113,52 @@ export class AgentPlannerService {
       toolName: "list_meeting_reports",
       riskLevel: "low",
       message: "MeetingReport 조회 후보로 분류했습니다."
+    });
+  }
+
+  private planMeetingControl(prompt: string): AgentPlannerResult {
+    if (this.includesAny(prompt, ["녹음 종료", "녹음 끝", "recording stop"])) {
+      return this.needsClarification({
+        intent: "meeting.end_recording",
+        toolName: "end_meeting_recording",
+        riskLevel: "medium",
+        missingFields: ["meeting"],
+        message: "녹음을 종료할 회의를 특정해야 합니다."
+      });
+    }
+    if (this.includesAny(prompt, ["녹음 시작", "recording start"])) {
+      return this.needsClarification({
+        intent: "meeting.start_recording",
+        toolName: "start_meeting_recording",
+        riskLevel: "medium",
+        missingFields: ["meeting"],
+        message: "녹음을 시작할 회의를 특정해야 합니다."
+      });
+    }
+    if (this.includesAny(prompt, ["나가", "퇴장", "leave"])) {
+      return this.needsClarification({
+        intent: "meeting.leave",
+        toolName: "leave_meeting",
+        riskLevel: "low",
+        missingFields: ["meeting"],
+        message: "나갈 회의를 특정해야 합니다."
+      });
+    }
+    if (this.includesAny(prompt, ["참여", "입장", "들어가", "join"])) {
+      return this.needsClarification({
+        intent: "meeting.join",
+        toolName: "join_meeting",
+        riskLevel: "medium",
+        missingFields: ["meeting"],
+        message: "참여할 회의를 특정해야 합니다."
+      });
+    }
+    return this.needsClarification({
+      intent: "meeting.start",
+      toolName: "start_meeting_in_room",
+      riskLevel: "medium",
+      missingFields: ["meeting_room"],
+      message: "회의를 시작할 방을 특정해야 합니다."
     });
   }
 
@@ -308,6 +358,20 @@ export class AgentPlannerService {
     return this.includesAny(prompt, ["회의록", "meeting report"]);
   }
 
+  private isMeetingControlPrompt(prompt: string): boolean {
+    return this.includesAny(prompt, [
+      "회의 시작",
+      "회의 참여",
+      "회의 입장",
+      "회의 나가",
+      "회의 퇴장",
+      "녹음 시작",
+      "녹음 종료",
+      "meeting",
+      "recording"
+    ]);
+  }
+
   private isBoardPrompt(prompt: string): boolean {
     return this.includesAny(prompt, ["이슈", "issue", "보드", "board"]);
   }
@@ -324,8 +388,6 @@ export class AgentPlannerService {
       "마일스톤 변경",
       "milestone 변경",
       "due date 변경",
-      "녹음 시작",
-      "녹음 종료",
       "회의록 재생성"
     ]);
   }

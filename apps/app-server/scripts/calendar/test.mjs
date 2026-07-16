@@ -47,6 +47,10 @@ class FakeDatabase {
 
     return next ?? [];
   }
+
+  async transaction(callback) {
+    return callback(this);
+  }
 }
 
 class FakeWorkspaceService {
@@ -62,7 +66,12 @@ class FakeWorkspaceService {
 
 function createSubject(database = new FakeDatabase()) {
   const workspaceService = new FakeWorkspaceService();
-  const service = new CalendarService(database, workspaceService);
+  const activityLogService = { append: async () => undefined };
+  const service = new CalendarService(
+    database,
+    workspaceService,
+    activityLogService
+  );
   return {
     database,
     service,

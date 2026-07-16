@@ -7,7 +7,7 @@ import type {
   AgentToolInputSchema
 } from "./types/agent-tool.types";
 
-export const AGENT_TOOL_SCHEMA_VERSION = "agent-tools:v1";
+export const AGENT_TOOL_SCHEMA_VERSION = "agent-tools:v3";
 
 export interface AgentToolSchemaSnapshotItem {
   name: string;
@@ -22,6 +22,7 @@ export interface AgentRunRequestedJobPayload {
   runId: string;
   workspaceId: string;
   requestedByUserId: string;
+  turnSequence: number;
   toolSchemaVersion: string;
   tools: AgentToolSchemaSnapshotItem[];
 }

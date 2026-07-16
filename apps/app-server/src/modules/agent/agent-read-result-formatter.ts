@@ -74,6 +74,12 @@ export function buildAgentReadResultAnswer(
       return formatCalendarEvents(input) ?? buildGenericAnswer(input);
     case "update_calendar_event":
       return formatCalendarUpdateClarification(input) ?? buildGenericAnswer(input);
+    case "list_meeting_rooms":
+      return formatMeetingRooms(input) ?? buildGenericAnswer(input);
+    case "get_active_meeting":
+      return formatActiveMeeting(input) ?? buildGenericAnswer(input);
+    case "get_meeting_participants":
+      return formatMeetingParticipants(input) ?? buildGenericAnswer(input);
     case "list_meeting_reports":
       return formatMeetingReportList(input) ?? buildGenericAnswer(input);
     case "get_meeting_report":
@@ -460,6 +466,135 @@ function formatBoardSelectionClarification(
     "조회할 Board를 정확히 지정해 주세요.",
     ...candidates.map((candidate) => `- ${candidate}`)
   ].join("\n");
+}
+
+function formatMeetingRooms(input: AgentReadResultFormatterInput): string | null {
+  const roomsValue = input.outputSummary.rooms;
+  if (!Array.isArray(roomsValue)) {
+    return null;
+  }
+
+  const rooms = roomsValue.filter(isPlainObject);
+  const total = Math.max(readCount(input.outputSummary.count) ?? 0, rooms.length);
+  if (total === 0) {
+    return "조회 가능한 회의방이 없습니다.";
+  }
+
+  const lines = rooms
+    .map((room) => formatMeetingRoom(room))
+    .filter((line): line is string => line !== null)
+    .slice(0, MAX_LIST_ITEMS);
+  if (lines.length === 0) {
+    return null;
+  }
+
+  const answer = [`회의방 ${total}개입니다.`, ...lines.map((line) => `- ${line}`)];
+  appendOmittedCount(answer, total, lines.length, "회의방");
+  if (input.outputSummary.hasMore === true) {
+    answer.push("추가 회의방이 있습니다.");
+  }
+  return answer.join("\n");
+}
+
+function formatMeetingRoom(room: AgentJsonObject): string | null {
+  const name = boundText(room.name, MAX_CALENDAR_TITLE_LENGTH);
+  if (!name) {
+    return null;
+  }
+
+  const currentMeeting = isPlainObject(room.currentMeeting)
+    ? room.currentMeeting
+    : null;
+  if (!currentMeeting) {
+    return `${name} · 진행 중인 회의 없음`;
+  }
+
+  const participantCount = readCount(currentMeeting.activeParticipantCount);
+  const duration = formatDuration(readCount(currentMeeting.durationSec));
+  const recording = isPlainObject(currentMeeting.recording)
+    ? readString(currentMeeting.recording.status)
+    : null;
+  const details = [
+    "진행 중",
+    participantCount === null ? null : `${participantCount}명 참여`,
+    duration ? `${duration} 경과` : null,
+    recording === "RUNNING" ? "녹음 중" : null
+  ].filter((value): value is string => value !== null);
+
+  return `${name} · ${details.join(" · ")}`;
+}
+
+function formatActiveMeeting(input: AgentReadResultFormatterInput): string | null {
+  if (input.outputSummary.active !== true) {
+    return "현재 참여 중인 회의가 없습니다.";
+  }
+
+  const meetingRoom = isPlainObject(input.outputSummary.meetingRoom)
+    ? input.outputSummary.meetingRoom
+    : null;
+  const roomName = meetingRoom
+    ? boundText(meetingRoom.name, MAX_CALENDAR_TITLE_LENGTH)
+    : null;
+  const duration = formatDuration(readCount(input.outputSummary.durationSec));
+  const startedAt = formatIsoDateTime(
+    isPlainObject(input.outputSummary.meeting)
+      ? input.outputSummary.meeting.startedAt
+      : null,
+    input.timezone
+  );
+
+  if (!roomName && !duration && !startedAt) {
+    return null;
+  }
+
+  const details = [
+    roomName ? `${roomName} 회의에 참여 중입니다.` : "회의에 참여 중입니다.",
+    duration ? `진행 시간: ${duration}` : null,
+    startedAt ? `시작: ${startedAt}` : null
+  ].filter((value): value is string => value !== null);
+  return details.join(" ");
+}
+
+function formatMeetingParticipants(
+  input: AgentReadResultFormatterInput
+): string | null {
+  const participantsValue = input.outputSummary.participants;
+  if (!Array.isArray(participantsValue)) {
+    return null;
+  }
+
+  const participants = participantsValue.filter(isPlainObject);
+  const total = Math.max(
+    readCount(input.outputSummary.count) ?? 0,
+    participants.length
+  );
+  if (total === 0) {
+    return "참여자가 없습니다.";
+  }
+
+  const lines = participants
+    .map((participant) => formatMeetingParticipant(participant))
+    .filter((line): line is string => line !== null)
+    .slice(0, MAX_LIST_ITEMS);
+  if (lines.length === 0) {
+    return null;
+  }
+
+  const answer = [`참여자 ${total}명입니다.`, ...lines.map((line) => `- ${line}`)];
+  appendOmittedCount(answer, total, lines.length, "참여자");
+  if (input.outputSummary.hasMore === true) {
+    answer.push("추가 참여자가 있습니다.");
+  }
+  return answer.join("\n");
+}
+
+function formatMeetingParticipant(participant: AgentJsonObject): string | null {
+  const name = boundText(participant.name, MAX_CALENDAR_TITLE_LENGTH);
+  if (!name) {
+    return null;
+  }
+
+  return `${name} · ${participant.isActive === true ? "참여 중" : "퇴장"}`;
 }
 
 function formatCalendarUpdateClarification(
@@ -926,6 +1061,22 @@ function formatDateRange(start: string | null, end: string | null): string | nul
     return start;
   }
   return `${start}~${end}`;
+}
+
+function formatDuration(value: number | null): string | null {
+  if (value === null || value < 0) {
+    return null;
+  }
+
+  const hours = Math.floor(value / 3600);
+  const minutes = Math.floor((value % 3600) / 60);
+  if (hours > 0) {
+    return minutes > 0 ? `${hours}시간 ${minutes}분` : `${hours}시간`;
+  }
+  if (minutes > 0) {
+    return `${minutes}분`;
+  }
+  return "1분 미만";
 }
 
 function appendOmittedCount(

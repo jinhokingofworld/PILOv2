@@ -33,6 +33,7 @@ const payload = {
   runId: "33333333-3333-3333-3333-333333333333",
   workspaceId: "22222222-2222-2222-2222-222222222222",
   requestedByUserId: "11111111-1111-1111-1111-111111111111",
+  turnSequence: 1,
   toolSchemaVersion: AGENT_TOOL_SCHEMA_VERSION,
   tools: [
     {
@@ -208,6 +209,7 @@ function createOutboxClaim(overrides = {}) {
     requested_by_user_id: payload.requestedByUserId,
     attempt_count: 1,
     claim_token: "55555555-5555-5555-5555-555555555555",
+    turn_sequence: 1,
     ...overrides
   };
 }
@@ -316,6 +318,7 @@ try {
 
     assert.equal(jobService.calls.length, 1);
     assert.equal(jobService.calls[0].runId, payload.runId);
+    assert.equal(jobService.calls[0].turnSequence, 1);
     assert.equal(jobService.calls[0].toolSchemaVersion, AGENT_TOOL_SCHEMA_VERSION);
     assert.deepEqual(jobService.calls[0].tools, [
       {
@@ -332,6 +335,10 @@ try {
     assert.match(
       database.calls.find((call) => call.method === "queryOne").text,
       /FOR UPDATE OF outbox SKIP LOCKED/
+    );
+    assert.match(
+      database.calls.find((call) => call.method === "queryOne").text,
+      /outbox\.turn_sequence/
     );
     assert.match(
       database.calls.find((call) => call.method === "query").text,

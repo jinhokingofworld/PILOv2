@@ -15,6 +15,7 @@ import type {
 
 export type AgentRunStatus =
   | "planning"
+  | "waiting_user_input"
   | "waiting_confirmation"
   | "running"
   | "completed"
@@ -98,6 +99,30 @@ export interface FailAgentRunInput {
 export interface CancelAgentRunInput {
   runId: string;
   message: string;
+}
+
+export interface WaitForAgentUserInput {
+  runId: string;
+  message: string;
+  riskLevel?: AgentRiskLevel | null;
+}
+
+export interface QueueNextAgentPlannerTurnInput {
+  runId: string;
+  riskLevel?: AgentRiskLevel | null;
+}
+
+export interface CompleteAgentToolStepAndAdvanceInput
+  extends CompleteAgentStepInput {
+  riskLevel?: AgentRiskLevel | null;
+  waitingMessage: string;
+  waitForUserInput?: boolean;
+}
+
+export interface CompleteAgentToolStepAndAdvanceResult {
+  step: AgentStepPayload;
+  run: AgentRunPayload;
+  queuedNextPlannerTurn: boolean;
 }
 
 export interface AgentRunPayload {
@@ -405,6 +430,7 @@ export class AgentLoggingService {
           FROM agent_steps
           WHERE run_id = $1
             AND step_type = 'tool'
+            AND status = 'running'
           LIMIT 1
         `,
         [input.runId]
@@ -429,6 +455,109 @@ export class AgentLoggingService {
         order: Number(nextOrder?.next_order ?? 1),
         inputSummary
       });
+    });
+  }
+
+  async waitForUserInput(
+    currentUserId: string,
+    workspaceId: string,
+    input: WaitForAgentUserInput
+  ): Promise<AgentRunPayload> {
+    const message = this.normalizeRequiredText(input.message, "message");
+    return this.database.transaction(async (transaction) => {
+      const run = await this.findOwnedRunForUpdate(transaction, {
+        currentUserId,
+        workspaceId,
+        runId: input.runId
+      });
+      const nextSequence = await transaction.queryOne<{ sequence: number | string }>(
+        `SELECT COALESCE(MAX(sequence), 0) + 1 AS sequence FROM agent_run_messages WHERE run_id = $1`,
+        [input.runId]
+      );
+      await transaction.execute(
+        `INSERT INTO agent_run_messages (run_id, sequence, role, content) VALUES ($1, $2, 'assistant', $3)`,
+        [input.runId, Number(nextSequence?.sequence ?? 1), message]
+      );
+      const updated = await transaction.queryOne<AgentRunRow>(
+        `
+          UPDATE agent_runs
+          SET status = 'waiting_user_input',
+              risk_level = COALESCE($2, risk_level),
+              message = $3,
+              final_answer = NULL,
+              completed_at = NULL,
+              updated_at = now()
+          WHERE id = $1
+            AND status IN ('planning', 'running')
+          RETURNING *
+        `,
+        [run.id, input.riskLevel ?? null, message]
+      );
+      if (!updated) throw new Error("Agent run could not wait for user input");
+      return this.mapRun(updated);
+    });
+  }
+
+  /**
+   * A completed tool is not necessarily the end of an Agent run.  Re-open the
+   * same run for one bounded planner turn, and re-arm its existing outbox row.
+   */
+  async queueNextPlannerTurn(
+    currentUserId: string,
+    workspaceId: string,
+    input: QueueNextAgentPlannerTurnInput
+  ): Promise<AgentRunPayload | null> {
+    return this.database.transaction(async (transaction) => {
+      const run = await this.findOwnedRunForUpdate(transaction, {
+        currentUserId,
+        workspaceId,
+        runId: input.runId
+      });
+      const updated = await transaction.queryOne<AgentRunRow>(
+        `
+          UPDATE agent_runs
+          SET status = 'planning',
+              tool_call_count = tool_call_count + 1,
+              risk_level = COALESCE($2, risk_level),
+              message = '다음 작업을 확인하고 있습니다.',
+              final_answer = NULL,
+              error_code = NULL,
+              error_message = NULL,
+              completed_at = NULL,
+              updated_at = now()
+          WHERE id = $1
+            AND status = 'running'
+            AND tool_call_count < 4
+          RETURNING *
+        `,
+        [run.id, input.riskLevel ?? null]
+      );
+      if (!updated) {
+        return null;
+      }
+
+      const outbox = await transaction.queryOne<{ id: string }>(
+        `
+          UPDATE agent_run_outbox
+          SET status = 'pending',
+              attempt_count = 0,
+              next_attempt_at = now(),
+              claim_token = NULL,
+              claimed_at = NULL,
+              delivered_at = NULL,
+              error_code = NULL,
+              error_message = NULL,
+              turn_sequence = turn_sequence + 1,
+              reason = 'tool_result'
+          WHERE run_id = $1
+          RETURNING id
+        `,
+        [run.id]
+      );
+      if (!outbox) {
+        throw new Error("Agent run outbox could not be re-armed");
+      }
+      return this.mapRun(updated);
     });
   }
 
@@ -529,6 +658,200 @@ export class AgentLoggingService {
     });
   }
 
+  /**
+   * Persist a successful tool result and its next durable run state in one
+   * transaction. This prevents a process crash from leaving an externally
+   * completed tool attached to a still-running planner generation.
+   */
+  async completeToolStepAndAdvance(
+    currentUserId: string,
+    workspaceId: string,
+    input: CompleteAgentToolStepAndAdvanceInput
+  ): Promise<CompleteAgentToolStepAndAdvanceResult> {
+    const outputSummary = this.assertSafeObject(
+      input.outputSummary ?? {},
+      OUTPUT_JSON_MAX_BYTES,
+      "step output"
+    );
+    const resourceRefs = this.assertSafeResourceRefs(
+      input.resourceRefs ?? [],
+      RESOURCE_REFS_MAX_BYTES,
+      "step resource refs"
+    );
+    const waitingMessage = this.normalizeRequiredText(
+      input.waitingMessage,
+      "waiting message"
+    );
+
+    return this.database.transaction(async (transaction) => {
+      const lockedRun = await this.findOwnedRunForUpdate(transaction, {
+        currentUserId,
+        workspaceId,
+        runId: input.runId
+      });
+      if (lockedRun.status !== "running") {
+        throw new Error("Agent run is not running");
+      }
+
+      const step = await transaction.queryOne<AgentStepRow>(
+        `
+          UPDATE agent_steps
+          SET status = 'completed',
+              output_json = $3,
+              resource_refs = $4::jsonb,
+              error_code = NULL,
+              error_message = NULL,
+              completed_at = now()
+          WHERE id = $1
+            AND run_id = $2
+            AND status = 'running'
+          RETURNING *
+        `,
+        [
+          input.stepId,
+          input.runId,
+          outputSummary,
+          this.serializeResourceRefs(resourceRefs)
+        ]
+      );
+      if (!step) {
+        throw notFound("Agent step not found");
+      }
+
+      await this.insertLog(transaction, {
+        workspaceId,
+        runId: input.runId,
+        stepId: step.id,
+        actorType: "app_server",
+        actorUserId: null,
+        level: "info",
+        eventType: "step_completed",
+        message: "Agent step completed",
+        metadata: {
+          stepOrder: step.step_order,
+          stepType: step.step_type,
+          toolName: step.tool_name
+        },
+        resourceRefs
+      });
+
+      if (!input.waitForUserInput) {
+        const planningRun = await transaction.queryOne<AgentRunRow>(
+          `
+            UPDATE agent_runs
+            SET status = 'planning',
+                tool_call_count = tool_call_count + 1,
+                risk_level = COALESCE($2, risk_level),
+                message = '다음 작업을 확인하고 있습니다.',
+                final_answer = NULL,
+                error_code = NULL,
+                error_message = NULL,
+                completed_at = NULL,
+                updated_at = now()
+            WHERE id = $1
+              AND status = 'running'
+              AND tool_call_count < 4
+            RETURNING *
+          `,
+          [input.runId, input.riskLevel ?? null]
+        );
+        if (planningRun) {
+          const outbox = await transaction.queryOne<{ id: string }>(
+            `
+              UPDATE agent_run_outbox
+              SET status = 'pending',
+                  attempt_count = 0,
+                  next_attempt_at = now(),
+                  claim_token = NULL,
+                  claimed_at = NULL,
+                  delivered_at = NULL,
+                  error_code = NULL,
+                  error_message = NULL,
+                  turn_sequence = turn_sequence + 1,
+                  reason = 'tool_result'
+              WHERE run_id = $1
+              RETURNING id
+            `,
+            [input.runId]
+          );
+          if (!outbox) {
+            throw new Error("Agent run outbox could not be re-armed");
+          }
+          return {
+            step: this.mapStep(step),
+            run: this.mapRun(planningRun),
+            queuedNextPlannerTurn: true
+          };
+        }
+      }
+
+      const waitingRun = await transaction.queryOne<AgentRunRow>(
+        `
+          UPDATE agent_runs
+          SET status = 'waiting_user_input',
+              tool_call_count = LEAST(
+                tool_call_count + CASE WHEN $4::boolean THEN 0 ELSE 1 END,
+                5
+              ),
+              risk_level = COALESCE($2, risk_level),
+              message = $3,
+              final_answer = NULL,
+              completed_at = NULL,
+              updated_at = now()
+          WHERE id = $1
+            AND status = 'running'
+          RETURNING *
+        `,
+        [
+          input.runId,
+          input.riskLevel ?? null,
+          waitingMessage,
+          input.waitForUserInput === true
+        ]
+      );
+      if (!waitingRun) {
+        throw new Error("Agent run could not wait for user input");
+      }
+      const nextSequence = await transaction.queryOne<{
+        sequence: number | string;
+      }>(
+        `SELECT COALESCE(MAX(sequence), 0) + 1 AS sequence FROM agent_run_messages WHERE run_id = $1`,
+        [input.runId]
+      );
+      await transaction.execute(
+        `INSERT INTO agent_run_messages (run_id, sequence, role, content) VALUES ($1, $2, 'assistant', $3)`,
+        [input.runId, Number(nextSequence?.sequence ?? 1), waitingMessage]
+      );
+      return {
+        step: this.mapStep(step),
+        run: this.mapRun(waitingRun),
+        queuedNextPlannerTurn: false
+      };
+    });
+  }
+
+  async getOwnedRun(
+    currentUserId: string,
+    workspaceId: string,
+    runId: string
+  ): Promise<AgentRunPayload> {
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+    const run = await this.database.queryOne<AgentRunRow>(
+      `
+        SELECT *
+        FROM agent_runs
+        WHERE id = $1
+          AND workspace_id = $2
+          AND requested_by_user_id = $3
+      `,
+      [runId, workspaceId, currentUserId]
+    );
+    if (!run) {
+      throw notFound("Agent run not found");
+    }
+    return this.mapRun(run);
+  }
+
   async failStep(
     currentUserId: string,
     workspaceId: string,
@@ -556,13 +879,21 @@ export class AgentLoggingService {
               completed_at = now()
           WHERE id = $1
             AND run_id = $2
+            AND status = 'running'
           RETURNING *
         `,
         [input.stepId, input.runId, errorCode, errorMessage]
       );
 
       if (!step) {
-        throw notFound("Agent step not found");
+        const terminalStep = await transaction.queryOne<AgentStepRow>(
+          `SELECT * FROM agent_steps WHERE id = $1 AND run_id = $2`,
+          [input.stepId, input.runId]
+        );
+        if (!terminalStep) {
+          throw notFound("Agent step not found");
+        }
+        return this.mapStep(terminalStep);
       }
 
       await this.insertLog(transaction, {
