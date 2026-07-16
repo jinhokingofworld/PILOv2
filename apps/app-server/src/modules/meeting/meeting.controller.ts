@@ -33,11 +33,19 @@ import {
   StartRecordingPayload,
   StartMeetingPayload
 } from "./meeting.service";
+import {
+  MeetingActionItemDeliveryOptionsPayload,
+  MeetingActionItemDeliveryPayload,
+  MeetingActionItemDeliveryService
+} from "./meeting-action-item-delivery.service";
 
 @Controller("workspaces/:workspaceId")
 @UseGuards(AuthGuard)
 export class MeetingController {
-  constructor(private readonly meetingService: MeetingService) {}
+  constructor(
+    private readonly meetingService: MeetingService,
+    private readonly meetingActionItemDeliveryService: MeetingActionItemDeliveryService
+  ) {}
 
   @Get("meeting-rooms")
   async listMeetingRooms(
@@ -345,6 +353,42 @@ export class MeetingController {
         workspaceId,
         reportId,
         actionItemId
+      )
+    );
+  }
+
+  @Get("meeting-reports/:reportId/action-items/:actionItemId/delivery-options")
+  async getReportActionItemDeliveryOptions(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("reportId") reportId: string,
+    @Param("actionItemId") actionItemId: string
+  ): Promise<ApiSuccessResponse<MeetingActionItemDeliveryOptionsPayload>> {
+    return apiResponse(
+      await this.meetingActionItemDeliveryService.listIssueDeliveryOptions(
+        currentUserId,
+        workspaceId,
+        reportId,
+        actionItemId
+      )
+    );
+  }
+
+  @Post("meeting-reports/:reportId/action-items/:actionItemId/deliveries")
+  async deliverReportActionItem(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("reportId") reportId: string,
+    @Param("actionItemId") actionItemId: string,
+    @Body() body: unknown
+  ): Promise<ApiSuccessResponse<MeetingActionItemDeliveryPayload>> {
+    return apiResponse(
+      await this.meetingActionItemDeliveryService.deliver(
+        currentUserId,
+        workspaceId,
+        reportId,
+        actionItemId,
+        body
       )
     );
   }

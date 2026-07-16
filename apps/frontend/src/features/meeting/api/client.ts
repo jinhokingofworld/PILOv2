@@ -12,6 +12,9 @@ import type {
   MeetingRoomMutationPayload,
   MeetingRoomNameInput,
   MeetingReportActionItemMutationPayload,
+  MeetingReportActionItemDeliveryInput,
+  MeetingReportActionItemDeliveryOptions,
+  MeetingReportActionItemDeliveryResult,
   MeetingReportDetailPayload,
   MeetingReportDeletionPayload,
   MeetingReportListPayload,
@@ -530,6 +533,48 @@ export function createMeetingApiClient({
         { method: "POST" },
         requestOptions
       );
+    },
+
+    async getMeetingReportActionItemDeliveryOptions(
+      workspaceId: string,
+      reportId: string,
+      actionItemId: string
+    ) {
+      return requestMeetingData<MeetingReportActionItemDeliveryOptions>(
+        `${meetingReportActionItemPath(workspaceId, reportId, actionItemId)}/delivery-options`,
+        undefined,
+        requestOptions
+      );
+    },
+
+    async deliverMeetingReportActionItem(
+      workspaceId: string,
+      reportId: string,
+      actionItemId: string,
+      body: MeetingReportActionItemDeliveryInput
+    ) {
+      try {
+        return await requestMeetingData<MeetingReportActionItemDeliveryResult>(
+          `${meetingReportActionItemPath(workspaceId, reportId, actionItemId)}/deliveries`,
+          withJsonBody(body, { method: "POST" }),
+          requestOptions
+        );
+      } catch (error) {
+        if (!(error instanceof MeetingApiError) || error.status !== 404) {
+          throw error;
+        }
+
+        await requestMeetingData<MeetingReportActionItemMutationPayload>(
+          `${meetingReportActionItemPath(workspaceId, reportId, actionItemId)}/approve`,
+          { method: "POST" },
+          requestOptions
+        );
+        return {
+          actionItemId,
+          deliveryType: body.deliveryType,
+          status: "LEGACY_APPROVED"
+        };
+      }
     },
 
     async dismissMeetingReportActionItem(

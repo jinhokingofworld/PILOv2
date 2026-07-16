@@ -31,6 +31,12 @@ import type {
   ActiveBoardSourcePayload
 } from "./types";
 
+export interface BoardDeliveryOptionPayload {
+  id: string;
+  name: string;
+  columns: Array<{ id: string; name: string }>;
+}
+
 export interface BoardModuleInfo {
   domain: "board";
   apiContract: "docs/api/board-api.md";
@@ -104,6 +110,27 @@ export class BoardService {
       currentUserId,
       workspaceId,
       boardId
+    );
+  }
+
+  async listBoardDeliveryOptions(
+    currentUserId: string,
+    workspaceId: string
+  ): Promise<BoardDeliveryOptionPayload[]> {
+    return this.boardReadService.listBoardDeliveryOptions(currentUserId, workspaceId);
+  }
+
+  async validateBoardIssueCreateInput(
+    currentUserId: string,
+    workspaceId: string,
+    boardId: string,
+    body: unknown
+  ): Promise<void> {
+    await this.boardIssueCreateService.validateBoardIssueCreateInput(
+      currentUserId,
+      workspaceId,
+      boardId,
+      body
     );
   }
 

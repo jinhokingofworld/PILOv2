@@ -44,6 +44,13 @@ export interface BoardColumnRow extends QueryResultRow {
   issue_count: string | number;
 }
 
+export interface BoardDeliveryOptionRow extends QueryResultRow {
+  board_id: string | number;
+  board_name: string;
+  column_id: string | number | null;
+  column_name: string | null;
+}
+
 export interface BoardIssueRow extends QueryResultRow {
   id: string | number;
   board_id: string | number;
@@ -263,6 +270,25 @@ export class BoardReadQueries {
         ORDER BY bc.position ASC, bc.id ASC
       `,
       [boardId]
+    );
+  }
+
+  async listBoardDeliveryOptions(
+    workspaceId: string
+  ): Promise<BoardDeliveryOptionRow[]> {
+    return this.database.query<BoardDeliveryOptionRow>(
+      `
+        SELECT
+          b.id::text AS board_id,
+          b.name AS board_name,
+          bc.id::text AS column_id,
+          bc.name AS column_name
+        FROM boards AS b
+        LEFT JOIN board_columns AS bc ON bc.board_id = b.id
+        WHERE b.workspace_id = $1
+        ORDER BY b.updated_at DESC, b.id ASC, bc.position ASC NULLS LAST, bc.id ASC NULLS LAST
+      `,
+      [workspaceId]
     );
   }
 

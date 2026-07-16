@@ -194,6 +194,14 @@ export class CalendarService {
     return this.mapEvent(created);
   }
 
+  /**
+   * Reuses the Calendar create contract for callers that must reject an
+   * invalid event before they persist their own side-effect or retry state.
+   */
+  validateCreateEventInput(body: unknown): void {
+    this.normalizeCreateInput(body);
+  }
+
   private async createNormalizedEventInTransaction(
     transaction: DatabaseTransaction,
     input: { currentUserId: string; workspaceId: string; input: NormalizedCalendarEventInput }

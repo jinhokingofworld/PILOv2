@@ -120,6 +120,33 @@ export class BoardIssueCreateService {
     }
   }
 
+  /**
+   * Checks the same user-controlled Board issue input and target metadata as
+   * createBoardIssue, without creating an operation or contacting GitHub.
+   */
+  async validateBoardIssueCreateInput(
+    currentUserId: string,
+    workspaceId: string,
+    boardId: string,
+    body: unknown
+  ): Promise<void> {
+    const normalizedBoardId = this.readBoardId(boardId);
+    const input = this.normalizeIssueCreateInput(body);
+
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+
+    const target = await this.boardIssueCreateQueries.findIssueCreateTarget(
+      workspaceId,
+      normalizedBoardId,
+      input.columnId
+    );
+    if (!target) {
+      throw notFound("Board or target column not found");
+    }
+
+    this.assertGithubCreateTarget(target);
+  }
+
   private async persistCachesAndComplete(
     attempt: BoardIssueCreateAttempt,
     target: BoardIssueCreateTargetRow & {

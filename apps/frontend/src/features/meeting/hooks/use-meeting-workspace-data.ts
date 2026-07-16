@@ -8,6 +8,7 @@ import type {
   CurrentMeetingPayload,
   Meeting,
   MeetingRecording,
+  MeetingReportActionItemDeliveryInput,
   UpdateMeetingReportActionItemInput,
   MeetingReportListQuery,
   MeetingReportSummary,
@@ -354,6 +355,33 @@ export function useMeetingWorkspaceData({
     [meetingClient, requireWorkspace]
   );
 
+  const getMeetingReportActionItemDeliveryOptions = useCallback(
+    async (reportId: string, actionItemId: string) => {
+      return meetingClient.getMeetingReportActionItemDeliveryOptions(
+        requireWorkspace(),
+        reportId,
+        actionItemId
+      );
+    },
+    [meetingClient, requireWorkspace]
+  );
+
+  const deliverMeetingReportActionItem = useCallback(
+    async (
+      reportId: string,
+      actionItemId: string,
+      body: MeetingReportActionItemDeliveryInput
+    ) => {
+      return meetingClient.deliverMeetingReportActionItem(
+        requireWorkspace(),
+        reportId,
+        actionItemId,
+        body
+      );
+    },
+    [meetingClient, requireWorkspace]
+  );
+
   const dismissMeetingReportActionItem = useCallback(
     async (reportId: string, actionItemId: string) => {
       return meetingClient.dismissMeetingReportActionItem(
@@ -447,11 +475,13 @@ export function useMeetingWorkspaceData({
     currentRecording: currentState.currentRecording,
     currentStatus,
     deleteMeetingReport,
+    deliverMeetingReportActionItem,
     dismissMeetingReportActionItem,
     endRecording,
     getCurrentRecording,
     getMeeting,
     getMeetingReport,
+    getMeetingReportActionItemDeliveryOptions,
     joinMeeting,
     leaveMeeting,
     listMeetingReportsByMeeting,

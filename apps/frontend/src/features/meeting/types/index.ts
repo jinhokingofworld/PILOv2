@@ -111,7 +111,69 @@ export type MeetingReportDetail = MeetingReportSummary & {
   actionItemAssignees?: MeetingReportActionItemAssignee[];
 };
 
-export type MeetingReportActionItemStatus = "PENDING" | "APPROVED" | "DISMISSED";
+export type MeetingReportActionItemStatus =
+  | "PENDING"
+  | "DELIVERING"
+  | "DELIVERY_FAILED"
+  | "APPROVED"
+  | "DISMISSED";
+
+export type MeetingReportActionItemDeliveryInput =
+  | {
+      deliveryType: "calendar_event";
+      calendar: {
+        title?: string;
+        description?: string | null;
+        color?: string;
+        isAllDay?: boolean;
+        startDate: string;
+        endDate: string;
+        startTime?: string | null;
+        endTime?: string | null;
+      };
+    }
+  | {
+      deliveryType: "pilo_issue";
+      issue: {
+        boardId: string;
+        columnId: string;
+        title?: string;
+        body?: string;
+      };
+    };
+
+export type MeetingReportActionItemDelivery = {
+  deliveryType: "calendar_event" | "pilo_issue";
+  status: "PENDING" | "RUNNING" | "COMPLETED" | "FAILED";
+  errorCode: string | null;
+  draft: MeetingReportActionItemDeliveryInput | null;
+  targetResourceId: string | null;
+  calendarEvent: { id: string; title: string } | null;
+  piloIssue: {
+    id: string;
+    title: string;
+    boardId: string;
+    columnId: string;
+    columnName: string | null;
+  } | null;
+};
+
+export type MeetingReportActionItemDeliveryOptions = {
+  boards: Array<{
+    id: string;
+    name: string;
+    columns: Array<{ id: string; name: string }>;
+  }>;
+};
+
+export type MeetingReportActionItemDeliveryResult = {
+  actionItemId: string;
+  deliveryType: "calendar_event" | "pilo_issue";
+  status: "COMPLETED" | "FAILED" | "LEGACY_APPROVED";
+  calendarEventId?: number;
+  piloIssueId?: string;
+  errorCode?: string;
+};
 
 export type MeetingReportActionItemAssignee = {
   userId: string;
@@ -132,6 +194,7 @@ export type MeetingReportActionItem = {
   approvedAt: string | null;
   dismissedByUserId: string | null;
   dismissedAt: string | null;
+  delivery: MeetingReportActionItemDelivery | null;
   createdAt: string;
   updatedAt: string;
 };

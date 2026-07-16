@@ -5,6 +5,7 @@ import type { ListBoardIssuesQuery, ListBoardsQuery } from "./dto";
 import { BoardReadQueries } from "./queries/board-read.queries";
 import type {
   BoardColumnRow,
+  BoardDeliveryOptionRow,
   BoardDetailRow,
   BoardIssueRow,
   BoardRow
@@ -22,6 +23,12 @@ interface NormalizedPagination {
   page: number;
   limit: number;
   offset: number;
+}
+
+export interface BoardDeliveryOptionPayload {
+  id: string;
+  name: string;
+  columns: Array<{ id: string; name: string }>;
 }
 
 interface PaginationInput {
@@ -106,6 +113,16 @@ export class BoardReadService {
     const rows = await this.boardReadQueries.listBoardColumns(normalizedBoardId);
 
     return rows.map((row) => this.mapBoardColumn(row));
+  }
+
+  async listBoardDeliveryOptions(
+    currentUserId: string,
+    workspaceId: string
+  ): Promise<BoardDeliveryOptionPayload[]> {
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+
+    const rows = await this.boardReadQueries.listBoardDeliveryOptions(workspaceId);
+    return this.mapBoardDeliveryOptions(rows);
   }
 
   async listBoardIssues(
@@ -328,6 +345,27 @@ export class BoardReadService {
       color: row.color,
       issueCount: this.toInteger(row.issue_count, "Invalid board column issue count")
     };
+  }
+
+  private mapBoardDeliveryOptions(
+    rows: BoardDeliveryOptionRow[]
+  ): BoardDeliveryOptionPayload[] {
+    const boards = new Map<string, BoardDeliveryOptionPayload>();
+
+    for (const row of rows) {
+      const id = String(row.board_id);
+      const board = boards.get(id) ?? {
+        id,
+        name: row.board_name,
+        columns: []
+      };
+      if (row.column_id !== null && row.column_name !== null) {
+        board.columns.push({ id: String(row.column_id), name: row.column_name });
+      }
+      boards.set(id, board);
+    }
+
+    return [...boards.values()];
   }
 
   private mapBoardIssue(row: BoardIssueRow): BoardIssueCardPayload {
