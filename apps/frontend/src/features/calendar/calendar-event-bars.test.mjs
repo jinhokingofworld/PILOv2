@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { getCalendarWeekEventBars } from "./calendar-event-bars.ts";
+import {
+  getCalendarDateBarLayout,
+  getCalendarWeekEventBars
+} from "./calendar-event-bars.ts";
 
 function createEvent(id, startDate, endDate) {
   return {
@@ -93,5 +96,42 @@ test("주 경계를 넘는 기간 일정은 각 주에서 이어지는 segment�
     lane: 0,
     startColumn: 1,
     weekIndex: 1
+  });
+});
+
+test("multi-day event does not reserve a lane before its start date", () => {
+  const [week] = getCalendarWeekEventBars(
+    [createEvent(1, "2026-07-20", "2026-07-22")],
+    [
+      "2026-07-19",
+      "2026-07-20",
+      "2026-07-21",
+      "2026-07-22",
+      "2026-07-23",
+      "2026-07-24",
+      "2026-07-25"
+    ]
+  );
+
+  assert.ok(week);
+  assert.deepEqual(getCalendarDateBarLayout(week.segments, 1), {
+    connectsToNext: false,
+    connectsToPrevious: false,
+    laneCount: 0
+  });
+  assert.deepEqual(getCalendarDateBarLayout(week.segments, 2), {
+    connectsToNext: true,
+    connectsToPrevious: false,
+    laneCount: 1
+  });
+  assert.deepEqual(getCalendarDateBarLayout(week.segments, 3), {
+    connectsToNext: true,
+    connectsToPrevious: true,
+    laneCount: 1
+  });
+  assert.deepEqual(getCalendarDateBarLayout(week.segments, 4), {
+    connectsToNext: false,
+    connectsToPrevious: true,
+    laneCount: 1
   });
 });
