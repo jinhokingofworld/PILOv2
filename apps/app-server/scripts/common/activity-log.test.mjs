@@ -37,6 +37,22 @@ assert.doesNotMatch(executed[0].text, /occurred_at/);
 assert.match(executed[0].text, /ON CONFLICT \(workspace_id, dedupe_key\) DO NOTHING/);
 assert.equal(executed[0].values[6], "calendar:calendar_event_updated:event-1:v2");
 
+await service.append(
+  transaction,
+  createInput({
+    action: "document_created",
+    target: { type: "document", id: "document-1" },
+    dedupeKey: "document:document_created:document-1:0",
+    metadata: {
+      version: 1,
+      summary: "문서를 생성했습니다.",
+      data: { title: "PILO 기획서", source: "blank" }
+    }
+  })
+);
+assert.equal(executed.length, 2);
+assert.equal(executed[1].values[3], "document_created");
+
 await assert.rejects(
   () => service.append(transaction, createInput({ action: "unknown_action" })),
   (error) => hasBadRequestMessage(error, "Activity Log action must be registered")
@@ -65,7 +81,7 @@ await assert.rejects(
     ),
   (error) => hasBadRequestMessage(error, "Activity Log metadata.data must be an object")
 );
-assert.equal(executed.length, 1);
+assert.equal(executed.length, 2);
 
 assert.match(migration, /activity_logs_dedupe_key_max_length_check/);
 assert.match(migration, /length\(dedupe_key\) <= 512/);

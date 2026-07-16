@@ -491,13 +491,18 @@ export class DriveService {
           AND drive_items.deleted_at IS NULL
           AND (
             drive_items.item_type = 'folder'
+            OR drive_items.item_type = 'document'
             OR (
               drive_items.item_type = 'file'
               AND drive_items.upload_status = 'ready'
             )
           )
         ORDER BY
-          CASE drive_items.item_type WHEN 'folder' THEN 0 ELSE 1 END,
+          CASE drive_items.item_type
+            WHEN 'folder' THEN 0
+            WHEN 'document' THEN 1
+            ELSE 2
+          END,
           drive_items.updated_at DESC,
           lower(drive_items.name) ASC,
           drive_items.id ASC

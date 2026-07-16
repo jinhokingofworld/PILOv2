@@ -12,6 +12,7 @@ import {
 import { apiResponse, ApiSuccessResponse } from "../../common/api-response";
 import { AuthGuard } from "../../common/auth.guard";
 import { CurrentUserId } from "../../common/current-user.decorator";
+import { DocumentService } from "./document.service";
 import { DriveService } from "./drive.service";
 import {
   DriveDeletePayload,
@@ -20,11 +21,15 @@ import {
   DriveListPayload,
   DriveUploadUrlPayload
 } from "./drive.types";
+import type { CreateDocumentPayload } from "./document.types";
 
 @Controller("workspaces/:workspaceId/drive")
 @UseGuards(AuthGuard)
 export class DriveController {
-  constructor(private readonly driveService: DriveService) {}
+  constructor(
+    private readonly driveService: DriveService,
+    private readonly documentService: DocumentService
+  ) {}
 
   @Get("items")
   async listItems(
@@ -54,6 +59,21 @@ export class DriveController {
     );
 
     return apiResponse(folder);
+  }
+
+  @Post("documents")
+  async createDocument(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Body() body: Record<string, unknown>
+  ): Promise<ApiSuccessResponse<CreateDocumentPayload>> {
+    const document = await this.documentService.createDocument(
+      currentUserId,
+      workspaceId,
+      body
+    );
+
+    return apiResponse(document);
   }
 
   @Post("files/upload-url")

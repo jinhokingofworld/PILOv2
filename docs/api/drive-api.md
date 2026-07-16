@@ -2,8 +2,8 @@
 
 ## 범위
 
-Drive API는 Workspace 공유 파일 화면의 폴더와 파일 업로드, 조회, 다운로드,
-이름 변경, 삭제를 담당한다.
+Drive API는 Workspace 공유 파일 화면의 폴더, 파일, 네이티브 문서 생성과 파일 업로드,
+조회, 다운로드, 이름 변경, 삭제를 담당한다.
 
 Frontend 화면 이름은 `파일`로 둔다. Backend 도메인 이름과 API path는 `drive`를
 사용한다.
@@ -11,22 +11,26 @@ Frontend 화면 이름은 `파일`로 둔다. Backend 도메인 이름과 API pa
 1차 Domain Owner는 은재다.
 
 - Workspace 공유 드라이브 폴더 생성
-- 현재 폴더의 폴더/파일 목록 조회
+- 현재 폴더의 폴더/문서/파일 목록 조회
+- 빈 네이티브 문서 생성
 - S3 presigned URL 기반 파일 업로드
 - S3 presigned URL 기반 파일 다운로드
 - 폴더/파일 이름 변경
 - 폴더/파일 soft delete
 
-파일 미리보기, 검색, 이동, 복구, public link share, 문서 공동 편집, 버전 관리는
+파일 미리보기, 검색, 이동, 복구, public link share, 문서 본문 조회와 자동 저장,
+문서 공동 편집, 버전 관리는
 이 문서의 MVP 범위가 아니다.
 
 ## 데이터 규칙
 
-- 테이블: `drive_items`, `drive_uploads`
+- 테이블: `drive_items`, `drive_uploads`, `documents`, `document_snapshots`,
+  `document_yjs_updates`, `document_edit_sessions`
 - `workspace_id`는 path의 `workspaceId`에서 온다.
 - `created_by_user_id`, `updated_by_user_id`는 현재 로그인 사용자에서 온다.
-- Workspace 접근 권한이 있는 모든 `owner`, `member`는 폴더/파일을 조회, 다운로드,
-  업로드, 이름 변경, 삭제할 수 있다.
+- Workspace 접근 권한이 있는 모든 `owner`, `member`는 폴더/문서/파일을 조회하고,
+  문서를 생성할 수 있으며, 파일은 다운로드와 업로드, 모든 Drive item은 이름 변경과
+  삭제를 할 수 있다.
 - `workspaceId`, `createdByUserId`, `updatedByUserId`, `objectKey`는 request body로
   받지 않는다.
 - S3 object key는 서버가 생성한다. 클라이언트가 object key를 지정할 수 없다.
@@ -34,20 +38,21 @@ Frontend 화면 이름은 `파일`로 둔다. Backend 도메인 이름과 API pa
   보고서, 스냅샷 등 다른 기능 prefix와 섞지 않는다.
 - 파일 업로드는 app-server가 발급한 presigned URL로 브라우저가 S3에 직접
   `PUT`한 뒤, `complete` API로 서버에 완료를 알리는 방식이다.
-- `drive_items`는 드라이브에 보이는 폴더/파일 metadata source of truth다.
+- `drive_items`는 드라이브에 보이는 폴더/문서/파일 metadata source of truth다.
 - `drive_uploads`는 presigned upload URL 한 번의 업로드 시도와 만료/완료 상태를
   추적한다.
-- 폴더는 `itemType = 'folder'`, 파일은 `itemType = 'file'`이다.
+- 폴더는 `itemType = 'folder'`, 파일은 `itemType = 'file'`, 네이티브 문서는
+  `itemType = 'document'`다.
 - root 폴더는 별도 row를 만들지 않는다. `parentId = null`이면 root 목록이다.
 - 폴더는 무제한 depth를 허용한다. 단, 서버는 parent가 같은 Workspace의 활성 폴더인지
   검증한다.
-- 같은 Workspace와 같은 parent 안에서는 활성 폴더/파일 이름을 대소문자 구분 없이
+- 같은 Workspace와 같은 parent 안에서는 활성 폴더/파일/문서 이름을 대소문자 구분 없이
   중복할 수 없다.
 - 파일 크기 제한은 파일당 `100 MiB`다.
 - 모든 MIME type을 허용한다. 실행 파일 차단과 바이러스 검사는 MVP 범위가 아니다.
 - 삭제는 `deleted_at`을 사용하는 soft delete다.
 - 폴더 삭제는 해당 폴더와 하위 폴더/파일 전체를 soft delete한다.
-- 목록 조회는 활성 폴더와 `ready` 파일만 반환한다. `pending`, `failed` 파일은 공유
+- 목록 조회는 활성 폴더, 네이티브 문서와 `ready` 파일만 반환한다. `pending`, `failed` 파일은 공유
   목록에 노출하지 않는다.
 - 만료된 pending upload는 서버가 `expired`로 전환하고 연결된 pending file item을
   `failed` 및 soft delete 처리할 수 있다.
@@ -56,8 +61,9 @@ Frontend 화면 이름은 `파일`로 둔다. Backend 도메인 이름과 API pa
 
 | Method | Endpoint | 설명 |
 | --- | --- | --- |
-| `GET` | `/workspaces/{workspaceId}/drive/items` | 현재 parent의 폴더/파일 목록 조회 |
+| `GET` | `/workspaces/{workspaceId}/drive/items` | 현재 parent의 폴더/문서/파일 목록 조회 |
 | `POST` | `/workspaces/{workspaceId}/drive/folders` | 폴더 생성 |
+| `POST` | `/workspaces/{workspaceId}/drive/documents` | 빈 네이티브 문서 생성 |
 | `POST` | `/workspaces/{workspaceId}/drive/files/upload-url` | 파일 metadata 생성과 presigned upload URL 발급 |
 | `POST` | `/workspaces/{workspaceId}/drive/files/{fileId}/complete` | S3 업로드 완료 확인과 파일 ready 전환 |
 | `GET` | `/workspaces/{workspaceId}/drive/files/{fileId}/download-url` | 파일 다운로드용 presigned URL 발급 |
@@ -97,7 +103,7 @@ API 응답은 S3 bucket name, object key, presigned URL 생성을 위한 내부 
 }
 ```
 
-폴더 payload는 파일 전용 값을 `null`로 반환한다.
+폴더와 네이티브 문서 payload는 파일 전용 값을 `null`로 반환한다.
 
 ```json
 {
@@ -117,6 +123,22 @@ API 응답은 S3 bucket name, object key, presigned URL 생성을 위한 내부 
   "updatedByUser": null,
   "createdAt": "2026-07-07T00:00:00.000Z",
   "updatedAt": "2026-07-07T00:00:00.000Z",
+  "deletedAt": null
+}
+```
+
+문서 생성 응답의 `item`은 위 Drive Item Payload를 사용한다. `document`는 문서 본문이
+아닌 저장 상태만 반환한다.
+
+```json
+{
+  "id": "document_uuid",
+  "driveItemId": "document_uuid",
+  "workspaceId": "workspace_uuid",
+  "currentVersion": 0,
+  "latestSnapshotId": "document_snapshot_uuid",
+  "createdAt": "2026-07-16T00:00:00.000Z",
+  "updatedAt": "2026-07-16T00:00:00.000Z",
   "deletedAt": null
 }
 ```
@@ -191,7 +213,7 @@ Query:
 - `parentId`가 없으면 root 목록을 조회한다.
 - `parentId`가 있으면 같은 Workspace의 활성 folder여야 한다.
 - 삭제된 item과 `pending`, `failed` file은 반환하지 않는다.
-- 정렬은 folder 먼저, file 나중이며 각 그룹 안에서는 `updatedAt DESC`, `name ASC`를
+- 정렬은 folder, document, file 순서이고 각 그룹 안에서는 `updatedAt DESC`, `name ASC`를
   기본값으로 한다.
 
 ## 폴더 생성
@@ -241,6 +263,71 @@ Request:
 - `parentId`가 있으면 같은 Workspace의 활성 folder여야 한다.
 - 같은 parent 안에 활성 item의 같은 이름이 이미 있으면 `400 BAD_REQUEST`를 반환한다.
 - `name`은 trim 후 저장한다.
+
+## 문서 생성
+
+```http
+POST /api/v1/workspaces/{workspaceId}/drive/documents
+```
+
+Request:
+
+```json
+{
+  "parentId": "folder_uuid",
+  "name": "새 문서"
+}
+```
+
+`parentId`와 `name`은 선택 값이다. `parentId`를 생략하면 root에 생성하고, `name`을
+생략하면 서버가 `새 문서`를 사용한다.
+
+응답:
+
+```json
+{
+  "success": true,
+  "data": {
+    "item": {
+      "id": "document_uuid",
+      "workspaceId": "workspace_uuid",
+      "parentId": "folder_uuid",
+      "itemType": "document",
+      "name": "새 문서",
+      "mimeType": null,
+      "sizeBytes": null,
+      "uploadStatus": null,
+      "createdByUser": {
+        "id": "user_uuid",
+        "name": "PILO User",
+        "avatarUrl": null
+      },
+      "updatedByUser": null,
+      "createdAt": "2026-07-16T00:00:00.000Z",
+      "updatedAt": "2026-07-16T00:00:00.000Z",
+      "deletedAt": null
+    },
+    "document": {
+      "id": "document_uuid",
+      "driveItemId": "document_uuid",
+      "workspaceId": "workspace_uuid",
+      "currentVersion": 0,
+      "latestSnapshotId": "document_snapshot_uuid",
+      "createdAt": "2026-07-16T00:00:00.000Z",
+      "updatedAt": "2026-07-16T00:00:00.000Z",
+      "deletedAt": null
+    }
+  }
+}
+```
+
+서버 규칙:
+
+- 현재 사용자가 Workspace의 `owner` 또는 `member`여야 한다.
+- `parentId`가 있으면 같은 Workspace의 활성 folder여야 한다.
+- 문서, Drive item, 초기 empty snapshot, `document_created` Activity Log는 하나의 DB
+  transaction으로 저장한다.
+- 문서 본문은 이 API에서 받거나 반환하지 않는다.
 
 ## Upload URL 발급
 

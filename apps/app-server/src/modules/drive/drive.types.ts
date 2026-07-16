@@ -1,6 +1,6 @@
 import { QueryResultRow } from "pg";
 
-export type DriveItemType = "folder" | "file";
+export type DriveItemType = "folder" | "file" | "document";
 export type DriveUploadStatus = "pending" | "ready" | "failed" | null;
 export type DriveUploadAttemptStatus =
   | "pending"
