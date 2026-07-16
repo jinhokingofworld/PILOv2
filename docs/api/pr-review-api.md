@@ -600,6 +600,11 @@ DELETE /api/v1/workspaces/{workspaceId}/github/review-rooms/{reviewRoomId}
 - `file_review_decisions`는 `review_files` 삭제에 의해 함께 삭제된다.
 - `review_submissions`는 revision 삭제와 함께 삭제된다.
 - 연결된 Review Canvas와 shape, operation, user state도 함께 삭제된다.
+- 삭제 SQL이 완료된 뒤 realtime-server로 `pr-review:room:deleted` event를 발행한다.
+  현재 room에 접속한 클라이언트는 event의 `workspaceId`, `canvasId`, `reviewRoomId`가
+  자신이 연 Canvas와 일치할 때 로컬 편집을 중단하고 PR Review 목록으로 이동한다.
+- event 발행 실패는 이미 완료된 DB 삭제를 되돌리지 않는다. realtime 연결이 없던
+  클라이언트는 다음 조회에서 `404`를 받아 목록으로 돌아간다.
 - `DELETE /review-sessions/{reviewSessionId}`는 전환 기간의 호환 endpoint이며 해당 revision 하나가
   아니라 그 revision이 속한 room 전체를 같은 방식으로 삭제한다.
 

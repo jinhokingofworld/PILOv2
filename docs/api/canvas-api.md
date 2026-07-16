@@ -700,6 +700,7 @@ canvas:shape:preview
 canvas:shape:preview:clear
 canvas:room:loaded-regions:update
 canvas:room:shapes:hydrate
+pr-review:room:deleted
 canvas:error
 ```
 
@@ -714,6 +715,11 @@ Canvas는 `false`, completed Review Canvas는 `true`다. read-only room에서도
 `canvas:presence:update`은 허용하지만 shape lock·preview event는 `canvas:error`의
 `forbidden`으로 거부한다. active room이 접속 중 completed로 전환되는 lifecycle event와
 클라이언트 상태 전환은 PR Review room lifecycle 단계에서 처리한다.
+
+`pr-review:room:deleted`는 Review room과 연결 Canvas가 영구 삭제된 뒤에만 같은 Canvas
+room으로 전송한다. payload는 `workspaceId`, `canvasId`, `reviewRoomId`를 포함하며, 수신한
+클라이언트는 pending 편집을 중단하고 PR Review 목록으로 이동한다. 일반 freeform Canvas에는
+전송하지 않는다.
 
 classic Canvas에서 realtime roomState가 비활성화된 경우 최종 저장은 클라이언트가
 App Server `/shapes/batch`를 직접 호출한다. realtime roomState가 활성화된 경우

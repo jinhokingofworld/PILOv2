@@ -776,6 +776,7 @@ export function PrReviewPanel({
             backLabel={backToSelectionLabel}
             onBackToSelection={leaveReviewSession}
             onGoToGithub={goToGithubPage}
+            onReviewRoomDeleted={leaveReviewSession}
             onReviewSessionCreated={activateReviewSessionWithLatestPullRequest}
             pullRequest={activeReviewPullRequest}
             realtimeIdentity={realtimeIdentity}

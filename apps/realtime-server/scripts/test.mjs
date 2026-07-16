@@ -255,6 +255,7 @@ await import("./sql-erd-presence.test.mjs");
 await import("./sql-erd-socket-lifecycle.test.mjs");
 await import("./sql-erd-operation-relay.test.mjs");
 await import("./pr-review-decision-events.test.mjs");
+await import("./pr-review-room-events.test.mjs");
 await import("./pr-review-conflict-draft-events.test.mjs");
 await import("./page-cursor.test.mjs");
 await import("./github-source/test.mjs");

@@ -96,6 +96,7 @@ import {
 import { createSocketIoRedisAdapter } from "../redis/redis-pubsub";
 import {
   isPrReviewDecisionUpdatedEvent,
+  isPrReviewRoomDeletedEvent,
   isPrReviewConflictDraftLockPayload,
   isPrReviewConflictDraftRedisEvent,
   PR_REVIEW_CONFLICT_DRAFT_INVALIDATED_EVENT,
@@ -109,6 +110,8 @@ import {
   PR_REVIEW_CONFLICT_DRAFT_UPDATED_EVENT,
   PR_REVIEW_DECISION_REDIS_CHANNEL,
   PR_REVIEW_DECISION_UPDATED_EVENT,
+  PR_REVIEW_ROOM_DELETED_EVENT,
+  PR_REVIEW_ROOM_REDIS_CHANNEL,
 } from "../pr-review/pr-review-socket-events";
 import {
   createCanvasRoomName,
@@ -982,6 +985,19 @@ export async function createRealtimeSocketServer({
         );
       })
     : null;
+  const unsubscribePrReviewRoomDeleted = redisAdapter
+    ? await redisAdapter.subscribe(PR_REVIEW_ROOM_REDIS_CHANNEL, (payload) => {
+        if (!isPrReviewRoomDeletedEvent(payload)) {
+          console.error("PR Review room deletion Redis payload is invalid", payload);
+          return;
+        }
+
+        io.to(createCanvasRoomName(payload)).emit(
+          PR_REVIEW_ROOM_DELETED_EVENT,
+          payload,
+        );
+      })
+    : null;
   const unsubscribePrReviewConflictDrafts = redisAdapter
     ? await redisAdapter.subscribe(PR_REVIEW_CONFLICT_DRAFT_REDIS_CHANNEL, (payload) => {
         if (!isPrReviewConflictDraftRedisEvent(payload)) {
@@ -1814,6 +1830,7 @@ export async function createRealtimeSocketServer({
       await unsubscribeBoardSourceEvents?.();
       await unsubscribeGithubSourceInvalidations?.();
       await unsubscribePrReviewDecisions?.();
+      await unsubscribePrReviewRoomDeleted?.();
       await unsubscribePrReviewConflictDrafts?.();
       await roomCheckpointService.close();
       await io.close();
