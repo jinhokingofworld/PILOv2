@@ -135,3 +135,10 @@
 - [ ] `git diff --check`, `apps/app-server`의 `npm test`, `apps/frontend`의 `npm test`를 실행한다.
 - [ ] owner/member로 nested folder 문서 생성, 목록/열기, rename, root 이동, delete를 수동 QA하고 S3 upload object가 생기지 않았는지, 각 mutation당 정확히 한 개의 Activity Log가 남았는지 확인한다.
 - [ ] 체크된 작업 단위마다 repository convention에 맞춰 commit하고 하나의 focused PR을 연다. Tiptap/Yjs, PDF, realtime, RAG, MeetingReport 변경은 넣지 않는다.
+- [x] **문서 편집 화면 개선**: Issue [#1184](https://github.com/Developer-EJ/PILO/issues/1184)
+  - [x] 카드형 프레임 제거, 중앙 문서 컬럼과 borderless command strip 적용
+  - [x] 제목/저장 상태/저장 버튼을 문서 페이지 헤더로 통합
+  - [x] 빈 문서 placeholder와 반응형 loading/error 상태 적용
+  - [x] 기존 자동 저장, 충돌 감지, reload 흐름 유지
+  - [ ] 인증된 dev 환경에서 desktop/mobile 수동 QA
+  - [ ] 다음 interaction 작업: slash menu, bubble menu, block handle, inline rename
