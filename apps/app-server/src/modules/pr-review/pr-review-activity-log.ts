@@ -15,6 +15,8 @@ interface BuildFileReviewDecisionCreatedActivityLogInput
   extends PrReviewActivityLogContext {
   decision: "approved" | "discussion_needed" | "unknown";
   decisionId: string;
+  filePath: string;
+  reviewFileId: string;
   reviewSessionId: string;
 }
 
@@ -49,6 +51,8 @@ const REVIEW_DECISION_SUMMARY_LABELS = {
   unknown: "미정"
 } as const;
 
+const ACTIVITY_FILE_PATH_MAX_LENGTH = 400;
+
 export function buildPrReviewSessionCreatedActivityLog(
   input: BuildPrReviewSessionCreatedActivityLogInput
 ): ActivityLogInput {
@@ -69,6 +73,8 @@ export function buildPrReviewSessionCreatedActivityLog(
 export function buildFileReviewDecisionCreatedActivityLog(
   input: BuildFileReviewDecisionCreatedActivityLogInput
 ): ActivityLogInput {
+  const filePath = normalizeActivityFilePath(input.filePath);
+
   return {
     workspaceId: input.workspaceId,
     actor: { type: "user", userId: input.currentUserId },
@@ -77,13 +83,23 @@ export function buildFileReviewDecisionCreatedActivityLog(
     dedupeKey: `pr-review:file_review_decision_created:${input.decisionId}:created`,
     metadata: {
       version: 1,
-      summary: `PR Review 파일 판단을 ${REVIEW_DECISION_SUMMARY_LABELS[input.decision]} 상태로 변경했습니다.`,
+      summary: `${filePath} 파일의 PR Review 판단을 ${REVIEW_DECISION_SUMMARY_LABELS[input.decision]} 상태로 변경했습니다.`,
       data: {
         reviewSessionId: input.reviewSessionId,
+        reviewFileId: input.reviewFileId,
+        filePath,
         decision: input.decision
       }
     }
   };
+}
+
+function normalizeActivityFilePath(filePath: string): string {
+  const normalized = filePath.trim().replace(/\s+/g, " ");
+  if (normalized.length <= ACTIVITY_FILE_PATH_MAX_LENGTH) {
+    return normalized;
+  }
+  return `…${normalized.slice(-(ACTIVITY_FILE_PATH_MAX_LENGTH - 1))}`;
 }
 
 export function buildReviewSubmissionTerminalActivityLog(
