@@ -282,6 +282,9 @@ await import("./issue-update.test.mjs");
 await import("./issue-create.test.mjs");
 await import("./issue-create-project-oauth.test.mjs");
 await import("./issue-create-operation-migration.test.mjs");
+if (process.env.BOARD_POSTGRES_TEST_URL) {
+  await import("./issue-create-operation-postgres.test.mjs");
+}
 await import("./issue-create-idempotency.test.mjs");
 await import("./activity-log.test.mjs");
 await import("./contract.test.mjs");
