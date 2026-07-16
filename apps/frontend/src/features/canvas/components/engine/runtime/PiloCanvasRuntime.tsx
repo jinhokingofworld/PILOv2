@@ -688,10 +688,10 @@ function PiloCanvasRuntimeInner({
       upsertShapes: PiloCanvasFreeformShape[];
     }) => {
       if (!persistThroughRoomState) {
-        return;
+        return false;
       }
 
-      canvasPresence.sendRoomShapePatch({
+      return canvasPresence.sendRoomShapePatch({
         deletedShapeIds: patch.deletedShapeIds,
         upsertShapes: serializeCanvasRoomStateShapes(patch.upsertShapes, {
           contentHashes: remoteShapeContentHashRef.current,

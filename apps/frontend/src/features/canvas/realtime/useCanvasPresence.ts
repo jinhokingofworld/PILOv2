@@ -57,7 +57,7 @@ export type CanvasPresenceController = {
     bounds: CanvasLoadedViewportBounds,
     shapes?: Record<string, unknown>[],
   ) => void;
-  sendRoomShapePatch: (patch: Omit<CanvasRoomShapePatchPayload, "workspaceId" | "canvasId">) => void;
+  sendRoomShapePatch: (patch: Omit<CanvasRoomShapePatchPayload, "workspaceId" | "canvasId">) => boolean;
   clearShapePreview: (shapeIds: string[]) => void;
   sendPresenceUpdate: (
     cursor: CanvasPresencePoint | null,
@@ -1105,7 +1105,7 @@ export function useCanvasPresence(
         !joinedRef.current ||
         (!patch.upsertShapes.length && !patch.deletedShapeIds.length)
       ) {
-        return;
+        return false;
       }
 
       socket.emit("canvas:room:shape:patch", {
@@ -1113,6 +1113,8 @@ export function useCanvasPresence(
         deletedShapeIds: patch.deletedShapeIds,
         upsertShapes: patch.upsertShapes,
       });
+
+      return true;
     },
     [],
   );
