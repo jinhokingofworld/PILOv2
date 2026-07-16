@@ -736,7 +736,41 @@ assert.match(canvasWorkspace, /<DialogTitle>/);
 assert.match(canvasWorkspace, /<Input/);
 assert.doesNotMatch(canvasWorkspace, /window\.prompt/);
 assert.match(canvasWorkspace, /label="더보기"/);
-assert.match(canvasWorkspace, /label="사각형"[\s\S]*label="원"[\s\S]*label="삼각형"/);
+assert.match(canvasWorkspace, /const canvasGeoShapeOptions/);
+for (const shapePreset of [
+  "rectangle",
+  "circle",
+  "triangle",
+  "diamond",
+  "hexagon",
+  "ellipse",
+  "rhombus",
+  "rhombus-2",
+  "star",
+  "cloud",
+  "heart",
+  "x-box",
+  "check-box",
+  "arrow-left",
+  "arrow-up",
+  "arrow-down",
+  "arrow-right",
+]) {
+  assert.match(canvasWorkspace, new RegExp(`value: "${shapePreset}"`));
+}
+assert.match(canvasWorkspace, /label="핸드"/);
+assert.match(canvasWorkspace, /label="레이저"/);
+assert.match(canvasWorkspace, /openPopover === "style"/);
+assert.match(canvasWorkspace, /openPopover === "actions"/);
+assert.match(canvasWorkspace, /openPopover === "export"/);
+assert.match(canvasWorkspace, /openPopover === "settings"/);
+assert.match(piloTldrawCanvas, /setOpacityForSelectedShapes/);
+assert.match(piloTldrawCanvas, /exportAs\(editor, shapeIds/);
+assert.match(piloTldrawCanvas, /DefaultFillStyle/);
+assert.match(piloTldrawCanvas, /DefaultDashStyle/);
+assert.match(piloTldrawCanvas, /DefaultSizeStyle/);
+assert.match(piloTldrawCanvas, /GeoShapeGeoStyle/);
+assert.match(piloTldrawCanvas, /currentToolId\.includes\("laser"\)\) return null/);
 assert.match(canvasWorkspace, /label="더보기"/);
 assert.match(canvasWorkspace, /aria-label="더보기 도구"/);
 assert.doesNotMatch(canvasWorkspace, /label="삽입"/);
@@ -748,7 +782,7 @@ assert.match(canvasRuntime, /canvasClient,\s*[\r\n]\s*latestViewportBoundsRef/);
 assert.doesNotMatch(canvasRuntime, /persistenceCanvasClient/);
 assert.doesNotMatch(canvasRuntime, /commitShapeOperations/);
 assert.match(canvasRuntime, /canvas-sync-notice/);
-assert.match(canvasRuntime, /getShapeSyncErrorNoticeMessage/);
+assert.doesNotMatch(canvasRuntime, /getShapeSyncErrorNoticeMessage/);
 assert.match(canvasRuntime, /onShapeSyncError: handleShapeSyncError/);
 assert.match(canvasRuntime, /catchUpCanvasOperations/);
 assert.match(canvasRuntime, /applyRemoteCanvasOperations/);
@@ -781,10 +815,13 @@ assert.match(canvasRuntime, /applyRoomShapePatch/);
 assert.match(canvasRuntime, /const persistThroughRoomState = canvasPresence\.roomStateActive/);
 assert.match(canvasRuntime, /if \(!persistThroughRoomState\)/);
 assert.match(canvasRuntime, /return false/);
-assert.match(canvasRuntime, /return canvasPresence\.sendRoomShapePatch/);
-assert.match(canvasRuntime, /roomAwareCanvasActions/);
-assert.match(canvasRuntime, /canvasPresence\.undoRoomHistory\(\)/);
-assert.match(canvasRuntime, /canvasPresence\.redoRoomHistory\(\)/);
+assert.match(canvasRuntime, /const didSendPatch = canvasPresence\.sendRoomShapePatch/);
+assert.match(canvasRuntime, /return didSendPatch/);
+assert.doesNotMatch(canvasRuntime, /roomAwareCanvasActions/);
+assert.doesNotMatch(canvasRuntime, /canvasPresence\.undoRoomHistory\(\)/);
+assert.doesNotMatch(canvasRuntime, /canvasPresence\.redoRoomHistory\(\)/);
+assert.match(canvasRuntime, /onReady\(canvasActions\)/);
+assert.match(canvasRuntime, /canvasActions=\{canvasActions\}/);
 assert.match(canvasRuntime, /onRoomShapePatch: sendRoomShapePatch/);
 assert.match(canvasRuntime, /persistThroughRoomState,\s*[\r\n]\s*remoteShapeRevisionRef/);
 assert.match(canvasRuntime, /checkpointStatus\?\.status !== "delayed"/);
@@ -816,9 +853,15 @@ assert.match(canvasRuntime, /result\.loadedShapeIds/);
 assert.match(canvasRuntime, /result\.unloadedShapeIds/);
 assert.match(canvasRuntime, /loadFrameChildren\(frameId\)/);
 assert.match(canvasRuntime, /applyCanvasRoomShapePatch/);
-assert.match(canvasRuntime, /deferredRoomFrameShapesRef/);
+assert.match(canvasRuntime, /deferredRoomShapeChangesRef/);
 assert.match(canvasRuntime, /isRemoteFrameCollapseProtected/);
-assert.match(canvasRuntime, /flushDeferredRoomFrameShapes/);
+assert.match(canvasRuntime, /isRemoteShapeDeletionProtected/);
+assert.match(canvasRuntime, /flushDeferredRoomShapeChanges/);
+assert.match(canvasRuntime, /pendingRoomShapeAckCountsRef/);
+assert.match(canvasRuntime, /isCanvasShapePatchProtected/);
+assert.match(canvasRuntime, /queueCanvasSurfaceShapePatch/);
+assert.match(canvasRuntime, /consumeCanvasSurfaceShapePatch/);
+assert.match(canvasRuntime, /canvasShapePatchVersion/);
 assert.match(canvasRuntime, /getPreservedFreeformShapeSnapshots/);
 assert.match(canvasViewportQueries, /pendingFrameChildrenReloadRef/);
 assert.match(piloTldrawCanvas, /CanvasPresenceReporter/);
@@ -829,6 +872,9 @@ assert.match(piloTldrawCanvas, /RemoteCursorOverlay/);
 assert.match(piloTldrawCanvas, /CanvasRemotePresenceProvider/);
 assert.match(piloTldrawCanvas, /CanvasRealtimePreviewApplier/);
 assert.match(piloTldrawCanvas, /handleRealtimePreviewDraftChange/);
+assert.match(piloTldrawCanvas, /CANVAS_SHAPE_PREVIEW_THROTTLE_MS = 60/);
+assert.match(piloTldrawCanvas, /scheduleShapePreviewSend/);
+assert.match(piloTldrawCanvas, /pendingShapePreviewPayloadRef/);
 assert.doesNotMatch(piloTldrawCanvas, /claimShapeLocks/);
 assert.doesNotMatch(piloTldrawCanvas, /releaseShapeLocks/);
 assert.match(piloTldrawCanvas, /deletedShapeIds/);
@@ -837,6 +883,11 @@ assert.doesNotMatch(piloTldrawCanvas, /remoteShapeLocks/);
 assert.match(piloTldrawCanvas, /remoteShapePreviews/);
 assert.match(piloTldrawCanvas, /resolveRealtimePreviewSnapshot/);
 assert.match(piloTldrawCanvas, /syncFreeformShapesIncrementally/);
+assert.match(piloTldrawCanvas, /applyFreeformShapePatchIncrementally/);
+assert.match(piloTldrawCanvas, /consumeShapePatch\(\)/);
+assert.match(piloTldrawCanvas, /locallyEditingShapeId/);
+assert.match(piloTldrawCanvas, /deferredProtectedRestoreShapeIds/);
+assert.match(piloTldrawCanvas, /isShapePatchProtected/);
 assert.match(piloTldrawCanvas, /shouldPreserveMissingFrameChildShape/);
 assert.match(piloTldrawCanvas, /getPreservedFreeformShapeSnapshots/);
 assert.match(piloTldrawCanvas, /editor\.updateShapes\(shapesToUpdate/);
@@ -984,18 +1035,16 @@ assert.match(canvasShapeSync, /new Set\(\[400, 401, 403, 404, 409\]\)/);
 assert.match(canvasShapeSync, /isStaleMissingShapeOperation/);
 assert.match(canvasShapeSync, /CanvasShapeSyncFailure/);
 assert.match(canvasShapeSync, /isNonRetryableCanvasShapeSyncError/);
-assert.match(canvasShapeSync, /CanvasShapeSyncConflict/);
 assert.match(canvasShapeSync, /CanvasShapeSyncResult/);
-assert.match(canvasShapeSync, /readCanvasShapeSyncConflict/);
 assert.match(canvasShapeSync, /readCanvasShapeSyncResult/);
 assert.match(canvasShapeSync, /shapeRevisions: new Map<string, number>\(\)/);
 assert.match(canvasShapeSync, /Math\.max\(localRevision, remoteRevision\)/);
 assert.match(canvasShapeSync, /if \(!getBaseRevision\) return null/);
 assert.doesNotMatch(canvasApiLifecycle, /getBaseRevision/);
 assert.doesNotMatch(canvasShapePersistence, /getBaseRevision/);
-assert.match(canvasShapeSync, /latestShape/);
-assert.match(canvasShapeSync, /latestOperation/);
-assert.match(canvasShapeSync, /onConflict\?\.\(conflict\)/);
+assert.doesNotMatch(canvasShapeSync, /CanvasShapeSyncConflict/);
+assert.doesNotMatch(canvasShapeSync, /readCanvasShapeSyncConflict/);
+assert.doesNotMatch(canvasShapeSync, /onConflict/);
 assert.match(canvasShapeSync, /onSynced\?\.\(operations, result\)/);
 assert.match(canvasShapeSync, /shouldRetry\(\{ error \}\)/);
 assert.match(canvasShapeSync, /runWithRetry/);
@@ -1178,9 +1227,11 @@ assert.match(piloCanvasTypes, /export type PiloCanvasShapeDetailRequest/);
 assert.match(canvasRuntime, /localInteractionStateRef/);
 assert.match(canvasRuntime, /isRemoteOperationProtectedByLocalInteraction/);
 assert.match(canvasRuntime, /queueDeferredRemoteOperation\(/);
-assert.match(canvasRuntime, /handleShapeSyncConflict/);
-assert.match(canvasRuntime, /readConflictLatestFreeformShape/);
-assert.match(canvasRuntime, /onShapeSyncConflict: handleShapeSyncConflict/);
+assert.match(canvasShapePersistence, /onLoadedShapesMerged/);
+assert.doesNotMatch(canvasShapePersistence, /setCanvasHydrationVersion/);
+assert.doesNotMatch(canvasRuntime, /handleShapeSyncConflict/);
+assert.doesNotMatch(canvasRuntime, /readConflictLatestFreeformShape/);
+assert.doesNotMatch(canvasRuntime, /onShapeSyncConflict/);
 assert.match(canvasRuntime, /onLocalInteractionStateChange=\{handleLocalInteractionStateChange\}/);
 assert.match(canvasRuntimeHydration, /normalizeCanvasFreeformShapes/);
 assert.match(canvasRemoteOperations, /normalizeCanvasFreeformShapes/);

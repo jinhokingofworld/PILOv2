@@ -867,8 +867,9 @@ Content-Type: application/json
 ```
 
 `deliveryType`은 `calendar_event` 또는 `pilo_issue` 중 하나이며 반대 type의 payload를 함께
-보낼 수 없다. Calendar는 `startDate`·`endDate`가 필수이고, 시간 지정 시 `HH:MM` 형식의
-`startTime`·`endTime`을 사용한다. Pilo issue는 같은 Workspace의 Board와 해당 Board Column을
+보낼 수 없다. Calendar는 `startDate`가 필수이고 `endDate`를 생략하면 `startDate`와 같은 날짜로
+정규화한다. 종일 일정에는 시간을 보내지 않으며, 시간 지정 시 `HH:MM` 형식의 `startTime`을 필수로
+받고 `endTime`을 생략하면 `startTime + 1시간`으로 정규화한다. Pilo issue는 같은 Workspace의 Board와 해당 Board Column을
 명시해야 한다. title/description/body를 생략하면 저장된 Action Item 내용을 기본값으로 쓴다.
 
 응답 `data`는 `actionItemId`, `deliveryType`, `status`(`COMPLETED` 또는 `FAILED`)와 성공 시

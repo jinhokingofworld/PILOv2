@@ -13,6 +13,7 @@ const secondReviewFileId = "44444444-4444-4444-8444-444444444444";
 const pullRequestId = "55555555-5555-4555-8555-555555555555";
 const reviewRoomId = "66666666-6666-4666-8666-666666666666";
 const successorSessionId = "77777777-7777-4777-8777-777777777777";
+const conflictDedupeKeys = [];
 
 function reviewFile(id, filePath) {
   return {
@@ -30,6 +31,8 @@ class FakeDatabase {
     this.files = files;
     this.failSessionUpdate = false;
     this.successorSession = null;
+    this.transactions = [];
+    this.draftClearRequests = [];
   }
 
   async queryOne(text, values = []) {
@@ -47,7 +50,7 @@ class FakeDatabase {
       text.includes("review_session.head_sha = $3") &&
       text.includes("review_session.status <> 'failed'")
     ) {
-      return this.successorSession ? { id: this.successorSession.id } : null;
+      return this.successorSession;
     }
 
     if (text.includes("FROM pr_review_sessions AS review_session")) {
@@ -68,9 +71,12 @@ class FakeDatabase {
     return null;
   }
 
-  async query(text) {
+  async query(text, values = []) {
     if (text.includes("FROM review_files AS review_file")) {
       return this.files;
+    }
+    if (text.includes("DELETE FROM pr_review_conflict_drafts")) {
+      this.draftClearRequests.push(values[0]);
     }
 
     return [];
@@ -78,9 +84,12 @@ class FakeDatabase {
 
   async transaction(callback) {
     if (this.failSessionUpdate) {
+      this.failSessionUpdate = false;
       throw new Error("database unavailable");
     }
-    return callback({
+
+    const previousSuccessorSession = this.successorSession;
+    const transaction = {
       queryOne: async (text, values = []) => {
         if (text.includes("INSERT INTO pr_review_sessions")) {
           this.successorSession = {
@@ -100,14 +109,24 @@ class FakeDatabase {
         }
         throw new Error(`Unhandled conflict transaction query: ${text}`);
       }
-    });
+    };
+    this.transactions.push(transaction);
+    try {
+      return await callback(transaction);
+    } catch (error) {
+      this.successorSession = previousSuccessorSession;
+      throw error;
+    }
   }
 }
 
 function createGithubDependency({
+  commitSha = "merge-commit-sha",
   conflictStatuses = ["clean"],
+  failApply = false,
   failConflictRefresh = false,
   localCacheUpdated = true,
+  multiCommitSha = "multi-merge-commit-sha",
   unsupportedPaths = []
 } = {}) {
   const applyRequests = [];
@@ -144,14 +163,16 @@ function createGithubDependency({
         };
       },
       async applyPullRequestFileResolution(_userId, _workspaceId, _prId, input) {
+        if (failApply) {
+          throw new Error("GitHub apply failed");
+        }
         applyRequests.push(input);
         return {
           appliedByGithubLogin: "Developer-EJ",
-          commitSha: "merge-commit-sha",
-          commitUrl:
-            "https://github.com/Developer-EJ/PILO/commit/merge-commit-sha",
+          commitSha,
+          commitUrl: `https://github.com/Developer-EJ/PILO/commit/${commitSha}`,
           headShaBefore: "head-sha",
-          headShaAfter: "merge-commit-sha",
+          headShaAfter: commitSha,
           headBlobShaBefore: "head-blob-sha",
           headBlobShaAfter: "resolved-blob-sha",
           localCacheUpdated
@@ -163,14 +184,16 @@ function createGithubDependency({
         _prId,
         input
       ) {
+        if (failApply) {
+          throw new Error("GitHub apply failed");
+        }
         multiApplyRequests.push(input);
         return {
           appliedByGithubLogin: "Developer-EJ",
-          commitSha: "multi-merge-commit-sha",
-          commitUrl:
-            "https://github.com/Developer-EJ/PILO/commit/multi-merge-commit-sha",
+          commitSha: multiCommitSha,
+          commitUrl: `https://github.com/Developer-EJ/PILO/commit/${multiCommitSha}`,
           headShaBefore: "head-sha",
-          headShaAfter: "multi-merge-commit-sha",
+          headShaAfter: multiCommitSha,
           files: input.files.map((file) => ({
             filePath: file.filePath,
             headBlobShaBefore: file.expectedHeadBlobSha,
@@ -203,8 +226,11 @@ function createGithubDependency({
     reviewFile(reviewFileId, "src/conflicted.ts"),
     reviewFile(secondReviewFileId, "src/second-conflict.ts")
   ]);
-  const { dependency, multiApplyRequests } = createGithubDependency();
-  const service = createService(database, dependency);
+  const { dependency, multiApplyRequests } = createGithubDependency({
+    multiCommitSha: "shared-conflict-commit-sha"
+  });
+  const activityLog = createActivityLogRecorder();
+  const service = createService(database, dependency, activityLog.service);
 
   const result = await service.applyReviewSessionConflictResolutions(
     "user-id",
@@ -248,6 +274,29 @@ function createGithubDependency({
   assert.equal(result.status, "applied");
   assert.equal(result.files.length, 2);
   assert.equal(result.localStateStatus, "updated");
+  assert.equal(activityLog.appends.length, 2);
+  assert.equal(activityLog.appends[0].transaction, database.transactions[0]);
+  assert.equal(activityLog.appends[1].transaction, database.transactions[0]);
+  assert.deepEqual(activityLog.appends[1].input, {
+    workspaceId,
+    actor: { type: "user", userId: "user-id" },
+    action: "pr_review_conflict_resolution_applied",
+    target: { type: "pull_request", id: pullRequestId },
+    dedupeKey:
+      `pr-review:pr_review_conflict_resolution_applied:${pullRequestId}:shared-conflict-commit-sha`,
+    metadata: {
+      version: 1,
+      summary: "PR conflict 파일 2개를 해결했습니다.",
+      data: {
+        reviewSessionId,
+        resolvedFileCount: 2,
+        headShaAfter: "shared-conflict-commit-sha",
+        commitSha: "shared-conflict-commit-sha",
+        conflictStatusAfter: "clean"
+      }
+    }
+  });
+  conflictDedupeKeys.push(activityLog.appends[1].input.dedupeKey);
 }
 
 {
@@ -389,7 +438,11 @@ function createGithubDependency({
   assert.deepEqual(multiApplyRequests, []);
 }
 
-function createService(database, githubDependency) {
+function createService(
+  database,
+  githubDependency,
+  activityLogService = { async append() {} }
+) {
   return new PrReviewService(
     database,
     {
@@ -399,16 +452,38 @@ function createService(database, githubDependency) {
     {},
     {
       async publishCreatedJob() {}
-    }
+    },
+    activityLogService
   );
+}
+
+function createActivityLogRecorder({ failConflictAppend = false } = {}) {
+  const appends = [];
+  return {
+    appends,
+    service: {
+      async append(transaction, input) {
+        if (
+          failConflictAppend &&
+          input.action === "pr_review_conflict_resolution_applied"
+        ) {
+          throw new Error("activity log unavailable");
+        }
+        appends.push({ transaction, input });
+      }
+    }
+  };
 }
 
 {
   const database = new FakeDatabase([
     reviewFile(reviewFileId, "src/conflicted.ts")
   ]);
-  const { dependency, applyRequests } = createGithubDependency();
-  const service = createService(database, dependency);
+  const { dependency, applyRequests } = createGithubDependency({
+    commitSha: "shared-conflict-commit-sha"
+  });
+  const activityLog = createActivityLogRecorder();
+  const service = createService(database, dependency, activityLog.service);
 
   const result = await service.applyReviewFileConflictResolution(
     "user-id",
@@ -432,6 +507,30 @@ function createService(database, githubDependency) {
   ]);
   assert.equal(result.status, "applied");
   assert.equal(result.localStateStatus, "updated");
+  assert.equal(activityLog.appends.length, 2);
+  assert.equal(activityLog.appends[0].transaction, database.transactions[0]);
+  assert.equal(activityLog.appends[1].transaction, database.transactions[0]);
+  assert.deepEqual(activityLog.appends[1].input, {
+    workspaceId,
+    actor: { type: "user", userId: "user-id" },
+    action: "pr_review_conflict_resolution_applied",
+    target: { type: "pull_request", id: pullRequestId },
+    dedupeKey:
+      `pr-review:pr_review_conflict_resolution_applied:${pullRequestId}:shared-conflict-commit-sha`,
+    metadata: {
+      version: 1,
+      summary: "PR conflict 파일 1개를 해결했습니다.",
+      data: {
+        reviewSessionId,
+        resolvedFileCount: 1,
+        headShaAfter: "shared-conflict-commit-sha",
+        commitSha: "shared-conflict-commit-sha",
+        conflictStatusAfter: "clean"
+      }
+    }
+  });
+  conflictDedupeKeys.push(activityLog.appends[1].input.dedupeKey);
+  assert.equal(conflictDedupeKeys[0], conflictDedupeKeys[1]);
 }
 
 {
@@ -540,7 +639,8 @@ function createService(database, githubDependency) {
   ]);
   database.failSessionUpdate = true;
   const { dependency } = createGithubDependency();
-  const service = createService(database, dependency);
+  const activityLog = createActivityLogRecorder();
+  const service = createService(database, dependency, activityLog.service);
 
   const result = await service.applyReviewFileConflictResolution(
     "user-id",
@@ -555,6 +655,147 @@ function createService(database, githubDependency) {
 
   assert.equal(result.status, "applied");
   assert.equal(result.localStateStatus, "sync_required");
+  assert.equal(activityLog.appends.length, 1);
+  assert.equal(
+    activityLog.appends[0].input.action,
+    "pr_review_conflict_resolution_applied"
+  );
+  assert.equal(activityLog.appends[0].transaction, database.transactions[0]);
+}
+
+{
+  const database = new FakeDatabase([
+    reviewFile(reviewFileId, "src/conflicted.ts")
+  ]);
+  database.successorSession = {
+    id: successorSessionId,
+    room_id: reviewRoomId,
+    pull_request_id: pullRequestId,
+    created_by_user_id: "user-id",
+    head_sha: "merge-commit-sha",
+    status: "analyzing",
+    conflict_status: "clean"
+  };
+  const { dependency } = createGithubDependency();
+  const activityLog = createActivityLogRecorder();
+  const service = createService(database, dependency, activityLog.service);
+
+  const result = await service.applyReviewFileConflictResolution(
+    "user-id",
+    workspaceId,
+    reviewFileId,
+    {
+      resolvedContent: "const value = 'resolved';",
+      expectedHeadSha: "head-sha",
+      expectedHeadBlobSha: "head-blob-sha"
+    }
+  );
+
+  assert.equal(result.localStateStatus, "updated");
+  assert.equal(database.transactions.length, 1);
+  assert.equal(activityLog.appends.length, 1);
+  assert.equal(activityLog.appends[0].transaction, database.transactions[0]);
+  assert.equal(
+    activityLog.appends[0].input.action,
+    "pr_review_conflict_resolution_applied"
+  );
+}
+
+{
+  const database = new FakeDatabase([
+    reviewFile(reviewFileId, "src/conflicted.ts")
+  ]);
+  const { dependency } = createGithubDependency({ failApply: true });
+  const activityLog = createActivityLogRecorder();
+  const service = createService(database, dependency, activityLog.service);
+
+  await assert.rejects(
+    () =>
+      service.applyReviewFileConflictResolution(
+        "user-id",
+        workspaceId,
+        reviewFileId,
+        {
+          resolvedContent: "const value = 'resolved';",
+          expectedHeadSha: "head-sha",
+          expectedHeadBlobSha: "head-blob-sha"
+        }
+      ),
+    /GitHub apply failed/
+  );
+  assert.deepEqual(activityLog.appends, []);
+  assert.deepEqual(database.transactions, []);
+}
+
+{
+  const database = new FakeDatabase([
+    reviewFile(reviewFileId, "src/conflicted.ts"),
+    reviewFile(secondReviewFileId, "src/second-conflict.ts")
+  ]);
+  const { dependency } = createGithubDependency({ failApply: true });
+  const activityLog = createActivityLogRecorder();
+  const service = createService(database, dependency, activityLog.service);
+
+  await assert.rejects(
+    () =>
+      service.applyReviewSessionConflictResolutions(
+        "user-id",
+        workspaceId,
+        reviewSessionId,
+        {
+          expectedHeadSha: "head-sha",
+          files: [
+            {
+              reviewFileId,
+              resolvedContent: "const value = 'resolved';",
+              expectedHeadBlobSha: "head-blob-sha"
+            },
+            {
+              reviewFileId: secondReviewFileId,
+              resolvedContent: "const second = 'resolved';",
+              expectedHeadBlobSha: "second-head-blob-sha"
+            }
+          ]
+        }
+      ),
+    /GitHub apply failed/
+  );
+  assert.deepEqual(activityLog.appends, []);
+  assert.deepEqual(database.transactions, []);
+}
+
+{
+  const database = new FakeDatabase([
+    reviewFile(reviewFileId, "src/conflicted.ts")
+  ]);
+  database.successorSession = {
+    id: successorSessionId,
+    room_id: reviewRoomId,
+    pull_request_id: pullRequestId,
+    created_by_user_id: "user-id",
+    head_sha: "merge-commit-sha",
+    status: "analyzing",
+    conflict_status: "clean"
+  };
+  const { dependency } = createGithubDependency();
+  const activityLog = createActivityLogRecorder({ failConflictAppend: true });
+  const service = createService(database, dependency, activityLog.service);
+
+  await assert.rejects(
+    () =>
+      service.applyReviewFileConflictResolution(
+        "user-id",
+        workspaceId,
+        reviewFileId,
+        {
+          resolvedContent: "const value = 'resolved';",
+          expectedHeadSha: "head-sha",
+          expectedHeadBlobSha: "head-blob-sha"
+        }
+      ),
+    /activity log unavailable/
+  );
+  assert.deepEqual(database.draftClearRequests, [[reviewFileId]]);
 }
 
 console.log("PR Review conflict apply tests passed");

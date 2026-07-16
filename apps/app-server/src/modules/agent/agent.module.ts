@@ -4,6 +4,7 @@ import { DatabaseModule } from "../../database/database.module";
 import { BoardModule } from "../board/board.module";
 import { CalendarModule } from "../calendar/calendar.module";
 import { MeetingModule } from "../meeting/meeting.module";
+import { SqlErdModule } from "../sql-erd/sql-erd.module";
 import { WorkspaceModule } from "../workspace/workspace.module";
 import { AgentConfirmationService } from "./agent-confirmation.service";
 import { AgentController } from "./agent.controller";
@@ -22,6 +23,7 @@ import { BoardAgentToolsService } from "./tools/board-agent-tools.service";
 import { BoardContextResolverService } from "./tools/board-context-resolver.service";
 import { CalendarAgentToolsService } from "./tools/calendar-agent-tools.service";
 import { MeetingAgentToolsService } from "./tools/meeting-agent-tools.service";
+import { SqlErdAgentToolsService } from "./tools/sql-erd-agent-tools.service";
 
 @Module({
   imports: [
@@ -30,7 +32,8 @@ import { MeetingAgentToolsService } from "./tools/meeting-agent-tools.service";
     WorkspaceModule,
     CalendarModule,
     MeetingModule,
-    BoardModule
+    BoardModule,
+    SqlErdModule
   ],
   controllers: [AgentController, AgentInternalController],
   providers: [
@@ -48,7 +51,8 @@ import { MeetingAgentToolsService } from "./tools/meeting-agent-tools.service";
     BoardContextResolverService,
     BoardAgentToolsService,
     CalendarAgentToolsService,
-    MeetingAgentToolsService
+    MeetingAgentToolsService,
+    SqlErdAgentToolsService
   ]
 })
 export class AgentModule {}

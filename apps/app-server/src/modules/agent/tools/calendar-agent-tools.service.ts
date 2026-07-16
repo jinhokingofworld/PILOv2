@@ -129,12 +129,12 @@ export class CalendarAgentToolsService {
     return {
       name: "create_calendar_event",
       description:
-        "Calendar 일정을 생성합니다. 실행 전 confirmation이 필요합니다. 반복 일정은 지원하지 않습니다. 여러 날짜 일정은 종일 여부를 명시하거나 시간을 제공해야 합니다. 종료 시각이 없으면 생략하고, 시작·종료 시각이 같거나 역전되면 추가 정보를 요청합니다.",
+        "Calendar 일정을 생성합니다. 실행 전 confirmation이 필요합니다. 종료 날짜가 없으면 시작 날짜와 같게, 시간 일정의 종료 시각이 없으면 시작 시각 1시간 뒤로 정규화합니다. 종일 일정에는 시간을 넣지 않습니다. 반복 일정은 지원하지 않습니다.",
       riskLevel: "medium",
       executionMode: "confirmation_required",
       inputSchema: {
         type: "object",
-        required: ["title", "startDate", "endDate"],
+        required: ["title", "startDate"],
         additionalProperties: false,
         properties: {
           title: {
@@ -400,36 +400,22 @@ export class CalendarAgentToolsService {
     );
 
     const startDate = this.requireDate(draft.startDate, "startDate");
-    const endDate = this.requireDate(draft.endDate, "endDate");
     const startTime = this.readOptionalNullableTime(draft, "startTime");
     const endTime = this.readOptionalNullableTime(draft, "endTime");
     const isAllDay = this.resolveCreateIsAllDay(draft, startTime, endTime);
 
-    this.assertDateOrder(startDate, endDate);
     this.assertScheduleTimeFields({
       isAllDay,
       startTime,
       endTime,
       label: "Calendar create input"
     });
-    this.assertTimedScheduleOrder({
-      startDate,
-      endDate,
-      startTime,
-      endTime,
-      label: "Calendar create input"
-    });
 
-    return {
-      title: this.requireTitle(draft.title),
-      description: this.readOptionalNullableString(draft, "description"),
-      color: this.readOptionalColor(draft.color) ?? DEFAULT_COLOR,
+    return this.calendarService.normalizeCreateEventInput({
+      ...draft,
       isAllDay,
-      startDate,
-      endDate,
-      startTime,
-      endTime
-    };
+      endDate: draft.endDate ?? startDate
+    });
   }
 
   private validateUpdateInput(input: unknown): UpdateCalendarEventInput {

@@ -16,6 +16,29 @@ export type CalendarWeekEventBars = {
   segments: CalendarEventBarSegment[];
 };
 
+export function getCalendarDateBarLayout(
+  segments: CalendarEventBarSegment[],
+  column: number
+) {
+  const coveringSegments = segments.filter(
+    (segment) =>
+      segment.startColumn <= column && segment.endColumn >= column
+  );
+
+  return {
+    connectsToNext: coveringSegments.some(
+      (segment) => segment.endColumn > column
+    ),
+    connectsToPrevious: coveringSegments.some(
+      (segment) => segment.startColumn < column
+    ),
+    laneCount: coveringSegments.reduce(
+      (count, segment) => Math.max(count, segment.lane + 1),
+      0
+    )
+  };
+}
+
 function compareBarEvents(a: CalendarEvent, b: CalendarEvent) {
   const startCompare = a.startDate.localeCompare(b.startDate);
   if (startCompare !== 0) {

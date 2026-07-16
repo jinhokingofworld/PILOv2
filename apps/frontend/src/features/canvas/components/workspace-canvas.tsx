@@ -1,29 +1,58 @@
 "use client";
 
 import {
+  AlignCenter,
+  AlignCenterVertical,
+  AlignEndVertical,
+  AlignLeft,
+  AlignRight,
+  AlignStartVertical,
+  ArrowDown,
+  ArrowLeft,
   ArrowRight,
+  ArrowUp,
   Bookmark,
   Bot,
+  BringToFront,
+  CheckSquare,
   Circle,
+  Cloud,
   Code2,
+  Columns3,
+  Copy,
+  Diamond,
+  Download,
   Eraser,
   Group,
+  Hand,
+  Heart,
   Highlighter,
+  Hexagon,
   Image,
   Maximize2,
+  MoreHorizontal,
   MousePointer2,
   PanelsTopLeft,
   Pencil,
   Redo2,
   RotateCcw,
+  Rows3,
+  SendToBack,
+  Settings2,
   Slash,
+  SlidersHorizontal,
   Plus,
   Square,
+  Star,
   StickyNote,
   Triangle,
+  Trash2,
   Type,
+  Ungroup,
   Undo2,
   Video,
+  XSquare,
+  Zap,
 } from "lucide-react";
 import {
   useCallback,
@@ -66,8 +95,17 @@ import type { CanvasRealtimeConfig } from "@/shared/canvas-realtime/canvas-realt
 import {
   type PiloCanvasActions,
   type PiloCanvasColor,
+  type PiloCanvasDash,
+  type PiloCanvasExportFormat,
+  type PiloCanvasExportScope,
+  type PiloCanvasFill,
   type PiloCanvasHistoryState,
+  type PiloCanvasSelectionAction,
+  type PiloCanvasSize,
+  type PiloCanvasStyleState,
   type PiloCanvasTool,
+  type PiloCanvasUserPreference,
+  type PiloCanvasUserPreferenceState,
   type PiloDrawingPreset,
   type PiloInsertableTool,
 } from "@/features/canvas/components/engine/surface/PiloTldrawCanvas";
@@ -87,7 +125,19 @@ type ToolButtonProps = {
   onClick: (event: ReactMouseEvent<HTMLButtonElement>) => void;
 };
 
+type PopoverMenuButtonProps = {
+  active?: boolean;
+  children: ReactNode;
+  disabled?: boolean;
+  icon: ReactNode;
+  onClick: () => void;
+};
+
 type CanvasUrlInsertTool = Extract<PiloInsertableTool, "bookmark" | "embed">;
+type CanvasGeoDrawingPreset = Exclude<
+  PiloDrawingPreset,
+  "pen" | "highlight" | "eraser"
+>;
 
 const MOCK_CANVAS_WORKSPACE_ID = "pilo-local-workspace";
 const RETURN_TO_CLASSIC_CANVAS_SHORTCUT = "Ctrl+Alt+C";
@@ -111,6 +161,51 @@ const initialCanvasHistoryState: PiloCanvasHistoryState = {
   canRedo: false,
 };
 
+const canvasGeoShapeOptions: {
+  icon: ReactNode;
+  label: string;
+  value: CanvasGeoDrawingPreset;
+}[] = [
+  { icon: <Square />, label: "사각형", value: "rectangle" },
+  { icon: <Circle />, label: "원", value: "circle" },
+  { icon: <Triangle />, label: "삼각형", value: "triangle" },
+  { icon: <Diamond />, label: "다이아몬드", value: "diamond" },
+  { icon: <Hexagon />, label: "육각형", value: "hexagon" },
+  { icon: <span className="canvas-shape-glyph">⬭</span>, label: "타원", value: "ellipse" },
+  { icon: <span className="canvas-shape-glyph">▱</span>, label: "마름모", value: "rhombus" },
+  { icon: <span className="canvas-shape-glyph">▱</span>, label: "반대 마름모", value: "rhombus-2" },
+  { icon: <Star />, label: "별", value: "star" },
+  { icon: <Cloud />, label: "클라우드", value: "cloud" },
+  { icon: <Heart />, label: "하트", value: "heart" },
+  { icon: <XSquare />, label: "X 박스", value: "x-box" },
+  { icon: <CheckSquare />, label: "체크박스", value: "check-box" },
+  { icon: <ArrowLeft />, label: "왼쪽 화살표", value: "arrow-left" },
+  { icon: <ArrowUp />, label: "위쪽 화살표", value: "arrow-up" },
+  { icon: <ArrowDown />, label: "아래쪽 화살표", value: "arrow-down" },
+  { icon: <ArrowRight />, label: "오른쪽 화살표", value: "arrow-right" },
+];
+
+const canvasFillOptions: { label: string; value: PiloCanvasFill }[] = [
+  { label: "없음", value: "none" },
+  { label: "무색", value: "semi" },
+  { label: "단색", value: "solid" },
+  { label: "채우기", value: "fill" },
+];
+
+const canvasDashOptions: { label: string; value: PiloCanvasDash }[] = [
+  { label: "그린 선", value: "draw" },
+  { label: "파선", value: "dashed" },
+  { label: "점선", value: "dotted" },
+  { label: "실선", value: "solid" },
+];
+
+const canvasSizeOptions: { label: string; value: PiloCanvasSize }[] = [
+  { label: "소", value: "s" },
+  { label: "중", value: "m" },
+  { label: "대", value: "l" },
+  { label: "특대", value: "xl" },
+];
+
 function ToolButton({
   label,
   active,
@@ -130,6 +225,26 @@ function ToolButton({
       onClick={onClick}
     >
       {children}
+    </button>
+  );
+}
+
+function PopoverMenuButton({
+  active,
+  children,
+  disabled,
+  icon,
+  onClick,
+}: PopoverMenuButtonProps) {
+  return (
+    <button
+      type="button"
+      className={active ? "is-active" : undefined}
+      disabled={disabled}
+      onClick={onClick}
+    >
+      {icon}
+      <span>{children}</span>
     </button>
   );
 }
@@ -171,6 +286,24 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
     useState<PiloDrawingPreset>("pen");
   const [activeCanvasColor, setActiveCanvasColor] =
     useState<PiloCanvasColor>("default");
+  const [activeCanvasFill, setActiveCanvasFill] =
+    useState<PiloCanvasFill | null>("none");
+  const [activeCanvasDash, setActiveCanvasDash] =
+    useState<PiloCanvasDash | null>("draw");
+  const [activeCanvasSize, setActiveCanvasSize] =
+    useState<PiloCanvasSize | null>("m");
+  const [canvasOpacityPercent, setCanvasOpacityPercent] = useState(100);
+  const [isCanvasOpacityMixed, setIsCanvasOpacityMixed] = useState(false);
+  const [canvasExportScope, setCanvasExportScope] =
+    useState<PiloCanvasExportScope>("selection");
+  const [isCanvasExportBackgroundEnabled, setIsCanvasExportBackgroundEnabled] =
+    useState(true);
+  const [canvasUserPreferences, setCanvasUserPreferences] =
+    useState<PiloCanvasUserPreferenceState>({
+      "paste-at-cursor": false,
+      "reduce-motion": false,
+      "wrap-text": false,
+    });
   const [urlInsertTool, setUrlInsertTool] = useState<CanvasUrlInsertTool | null>(
     null,
   );
@@ -182,7 +315,15 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
   const [isRealtimeCanvasDialogOpen, setIsRealtimeCanvasDialogOpen] =
     useState(false);
   const [openPopover, setOpenPopover] = useState<
-    "color" | "draw" | "line" | "insert" | null
+    | "actions"
+    | "color"
+    | "draw"
+    | "export"
+    | "insert"
+    | "line"
+    | "settings"
+    | "style"
+    | null
   >(null);
   const canvasClientMode = resolveCanvasClientMode();
   const canvasClient = useMemo(
@@ -249,6 +390,12 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
   const activeColor =
     canvasColorOptions.find((color) => color.value === activeCanvasColor) ??
     canvasColorOptions[0];
+
+  useEffect(() => {
+    if (!canvasActions) return;
+
+    setCanvasUserPreferences(canvasActions.getUserPreferences());
+  }, [canvasActions]);
 
   useEffect(() => {
     let cancelled = false;
@@ -367,15 +514,103 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
   );
 
   const selectShapePreset = useCallback(
-    (
-      preset: Extract<PiloDrawingPreset, "rectangle" | "circle" | "triangle">,
-    ) => {
+    (preset: CanvasGeoDrawingPreset) => {
       setOpenPopover("draw");
       setActiveDrawingPreset(preset);
       setActiveCanvasTool("geo");
       canvasActions?.selectDrawingPreset(preset);
     },
     [canvasActions],
+  );
+
+  const selectCanvasFill = useCallback(
+    (fill: PiloCanvasFill) => {
+      setActiveCanvasFill(fill);
+      canvasActions?.setFill(fill);
+    },
+    [canvasActions],
+  );
+
+  const selectCanvasDash = useCallback(
+    (dash: PiloCanvasDash) => {
+      setActiveCanvasDash(dash);
+      canvasActions?.setDash(dash);
+    },
+    [canvasActions],
+  );
+
+  const selectCanvasSize = useCallback(
+    (size: PiloCanvasSize) => {
+      setActiveCanvasSize(size);
+      canvasActions?.setSize(size);
+    },
+    [canvasActions],
+  );
+
+  const commitCanvasOpacity = useCallback(() => {
+    if (isCanvasOpacityMixed) return;
+
+    canvasActions?.setOpacity(canvasOpacityPercent / 100);
+  }, [canvasActions, canvasOpacityPercent, isCanvasOpacityMixed]);
+
+  const openCanvasStylePopover = useCallback(() => {
+    const styleState: PiloCanvasStyleState | undefined =
+      canvasActions?.getStyleState();
+
+    if (styleState) {
+      setActiveCanvasFill(styleState.fill);
+      setActiveCanvasDash(styleState.dash);
+      setActiveCanvasSize(styleState.size);
+      setIsCanvasOpacityMixed(styleState.opacity === null);
+    }
+    if (styleState?.opacity !== null && styleState?.opacity !== undefined) {
+      setCanvasOpacityPercent(Math.round(styleState.opacity * 100));
+    }
+
+    togglePopover("style");
+  }, [canvasActions]);
+
+  const performCanvasSelectionAction = useCallback(
+    (action: PiloCanvasSelectionAction) => {
+      setActiveCanvasTool("select");
+      canvasActions?.performSelectionAction(action);
+    },
+    [canvasActions],
+  );
+
+  const exportCanvas = useCallback(
+    async (format: PiloCanvasExportFormat) => {
+      try {
+        const exported = await canvasActions?.exportCanvas(
+          format,
+          canvasExportScope,
+          isCanvasExportBackgroundEnabled,
+        );
+        if (exported === false && canvasExportScope === "selection") {
+          window.alert("내보낼 shape를 먼저 선택해 주세요.");
+        }
+      } catch (error) {
+        console.error("Canvas export failed", error);
+        window.alert("Canvas를 내보내지 못했습니다. 다시 시도해 주세요.");
+      }
+    },
+    [
+      canvasActions,
+      canvasExportScope,
+      isCanvasExportBackgroundEnabled,
+    ],
+  );
+
+  const toggleCanvasUserPreference = useCallback(
+    (preference: PiloCanvasUserPreference) => {
+      const enabled = !canvasUserPreferences[preference];
+      canvasActions?.setUserPreference(preference, enabled);
+      setCanvasUserPreferences((currentPreferences) => ({
+        ...currentPreferences,
+        [preference]: enabled,
+      }));
+    },
+    [canvasActions, canvasUserPreferences],
   );
 
   const createMemo = useCallback(() => {
@@ -756,6 +991,13 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
               <MousePointer2 />
             </ToolButton>
             <ToolButton
+              label="핸드"
+              active={isCanvasToolActive("hand")}
+              onClick={() => selectCanvasTool("hand")}
+            >
+              <Hand />
+            </ToolButton>
+            <ToolButton
               label="메모"
               agentTarget="toolbar.memo"
               active={isCanvasToolActive("note")}
@@ -815,6 +1057,13 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
               <span className={`canvas-color-swatch ${activeColor.className}`} />
             </ToolButton>
             <ToolButton
+              label="스타일"
+              active={openPopover === "style"}
+              onClick={openCanvasStylePopover}
+            >
+              <SlidersHorizontal />
+            </ToolButton>
+            <ToolButton
               label="더보기"
               agentTarget="toolbar.more"
               active={openPopover === "insert"}
@@ -857,29 +1106,24 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
                 <Eraser />
               </ToolButton>
               <ToolButton
-                label="사각형"
-                agentTarget="toolbar.draw.rectangle"
-                active={activeDrawingPreset === "rectangle"}
-                onClick={() => selectShapePreset("rectangle")}
+                label="레이저"
+                active={activeCanvasTool === "laser"}
+                onClick={() => selectCanvasTool("laser")}
               >
-                <Square />
+                <Zap />
               </ToolButton>
-              <ToolButton
-                label="원"
-                agentTarget="toolbar.draw.circle"
-                active={activeDrawingPreset === "circle"}
-                onClick={() => selectShapePreset("circle")}
-              >
-                <Circle />
-              </ToolButton>
-              <ToolButton
-                label="삼각형"
-                agentTarget="toolbar.draw.triangle"
-                active={activeDrawingPreset === "triangle"}
-                onClick={() => selectShapePreset("triangle")}
-              >
-                <Triangle />
-              </ToolButton>
+              <div className="canvas-shape-option-grid">
+                {canvasGeoShapeOptions.map((shape) => (
+                  <ToolButton
+                    key={shape.value}
+                    label={shape.label}
+                    active={activeDrawingPreset === shape.value}
+                    onClick={() => selectShapePreset(shape.value)}
+                  >
+                    {shape.icon}
+                  </ToolButton>
+                ))}
+              </div>
             </section>
           ) : null}
 
@@ -902,6 +1146,87 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
                   )}
                 </ToolButton>
               ))}
+            </section>
+          ) : null}
+
+          {openPopover === "style" ? (
+            <section
+              className="canvas-tool-popover canvas-settings-popover"
+              aria-label="도형 스타일"
+            >
+              <div className="canvas-popover-group">
+                <strong>채우기</strong>
+                <div className="canvas-segmented-options">
+                  {canvasFillOptions.map((fill) => (
+                    <button
+                      key={fill.value}
+                      type="button"
+                      className={
+                        activeCanvasFill === fill.value ? "is-active" : undefined
+                      }
+                      onClick={() => selectCanvasFill(fill.value)}
+                    >
+                      {fill.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="canvas-popover-group">
+                <strong>테두리</strong>
+                <div className="canvas-segmented-options">
+                  {canvasDashOptions.map((dash) => (
+                    <button
+                      key={dash.value}
+                      type="button"
+                      className={
+                        activeCanvasDash === dash.value ? "is-active" : undefined
+                      }
+                      onClick={() => selectCanvasDash(dash.value)}
+                    >
+                      {dash.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="canvas-popover-group">
+                <strong>크기</strong>
+                <div className="canvas-segmented-options">
+                  {canvasSizeOptions.map((size) => (
+                    <button
+                      key={size.value}
+                      type="button"
+                      className={
+                        activeCanvasSize === size.value ? "is-active" : undefined
+                      }
+                      onClick={() => selectCanvasSize(size.value)}
+                    >
+                      {size.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <label className="canvas-opacity-control">
+                <span>
+                  <strong>불투명도</strong>
+                  <output>
+                    {isCanvasOpacityMixed ? "혼합" : `${canvasOpacityPercent}%`}
+                  </output>
+                </span>
+                <input
+                  type="range"
+                  min="10"
+                  max="100"
+                  step="5"
+                  value={canvasOpacityPercent}
+                  onBlur={commitCanvasOpacity}
+                  onChange={(event) => {
+                    setIsCanvasOpacityMixed(false);
+                    setCanvasOpacityPercent(Number(event.target.value));
+                  }}
+                  onKeyUp={commitCanvasOpacity}
+                  onPointerUp={commitCanvasOpacity}
+                />
+              </label>
             </section>
           ) : null}
 
@@ -940,6 +1265,24 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
                 onClick={openCanvasAiChat}
               >
                 <Bot />
+              </ToolButton>
+              <ToolButton
+                label="액션"
+                onClick={() => setOpenPopover("actions")}
+              >
+                <MoreHorizontal />
+              </ToolButton>
+              <ToolButton
+                label="내보내기"
+                onClick={() => setOpenPopover("export")}
+              >
+                <Download />
+              </ToolButton>
+              <ToolButton
+                label="설정"
+                onClick={() => setOpenPopover("settings")}
+              >
+                <Settings2 />
               </ToolButton>
               <ToolButton label="이미지" agentTarget="toolbar.more.image" onClick={() => openMediaFilePicker("image")}>
                 <Image />
@@ -998,6 +1341,200 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
                   ? `현재 Canvas는 tldraw sync 모드입니다. 원본 classic Canvas는 ${RETURN_TO_CLASSIC_CANVAS_SHORTCUT}로도 열 수 있습니다.`
                   : "실시간 버전은 빈 Canvas로 새로 만들어집니다."}
               </div>
+            </section>
+          ) : null}
+
+          {openPopover === "actions" ? (
+            <section
+              className="canvas-tool-popover canvas-menu-popover"
+              aria-label="Canvas 액션"
+            >
+              <PopoverMenuButton
+                icon={<MousePointer2 />}
+                onClick={() => performCanvasSelectionAction("select-all")}
+              >
+                전체 선택
+              </PopoverMenuButton>
+              <PopoverMenuButton
+                icon={<Copy />}
+                onClick={() => performCanvasSelectionAction("duplicate")}
+              >
+                복제
+              </PopoverMenuButton>
+              <PopoverMenuButton
+                icon={<Group />}
+                onClick={() => performCanvasSelectionAction("group")}
+              >
+                그룹
+              </PopoverMenuButton>
+              <PopoverMenuButton
+                icon={<Ungroup />}
+                onClick={() => performCanvasSelectionAction("ungroup")}
+              >
+                그룹 해제
+              </PopoverMenuButton>
+              <PopoverMenuButton
+                icon={<BringToFront />}
+                onClick={() => performCanvasSelectionAction("bring-to-front")}
+              >
+                맨 앞으로
+              </PopoverMenuButton>
+              <PopoverMenuButton
+                icon={<SendToBack />}
+                onClick={() => performCanvasSelectionAction("send-to-back")}
+              >
+                맨 뒤로
+              </PopoverMenuButton>
+              <div className="canvas-menu-divider" />
+              <PopoverMenuButton
+                icon={<AlignLeft />}
+                onClick={() => performCanvasSelectionAction("align-left")}
+              >
+                왼쪽 정렬
+              </PopoverMenuButton>
+              <PopoverMenuButton
+                icon={<AlignCenter />}
+                onClick={() => performCanvasSelectionAction("align-center")}
+              >
+                가운데 정렬
+              </PopoverMenuButton>
+              <PopoverMenuButton
+                icon={<AlignRight />}
+                onClick={() => performCanvasSelectionAction("align-right")}
+              >
+                오른쪽 정렬
+              </PopoverMenuButton>
+              <PopoverMenuButton
+                icon={<AlignStartVertical />}
+                onClick={() => performCanvasSelectionAction("align-top")}
+              >
+                위쪽 정렬
+              </PopoverMenuButton>
+              <PopoverMenuButton
+                icon={<AlignCenterVertical />}
+                onClick={() => performCanvasSelectionAction("align-middle")}
+              >
+                세로 가운데 정렬
+              </PopoverMenuButton>
+              <PopoverMenuButton
+                icon={<AlignEndVertical />}
+                onClick={() => performCanvasSelectionAction("align-bottom")}
+              >
+                아래쪽 정렬
+              </PopoverMenuButton>
+              <PopoverMenuButton
+                icon={<Columns3 />}
+                onClick={() =>
+                  performCanvasSelectionAction("distribute-horizontal")
+                }
+              >
+                가로 간격 맞춤
+              </PopoverMenuButton>
+              <PopoverMenuButton
+                icon={<Rows3 />}
+                onClick={() =>
+                  performCanvasSelectionAction("distribute-vertical")
+                }
+              >
+                세로 간격 맞춤
+              </PopoverMenuButton>
+              <div className="canvas-menu-divider" />
+              <PopoverMenuButton
+                icon={<Trash2 />}
+                onClick={() => performCanvasSelectionAction("delete")}
+              >
+                삭제
+              </PopoverMenuButton>
+            </section>
+          ) : null}
+
+          {openPopover === "export" ? (
+            <section
+              className="canvas-tool-popover canvas-settings-popover"
+              aria-label="Canvas 내보내기"
+            >
+              <div className="canvas-popover-group">
+                <strong>내보낼 범위</strong>
+                <div className="canvas-segmented-options">
+                  <button
+                    type="button"
+                    className={
+                      canvasExportScope === "selection"
+                        ? "is-active"
+                        : undefined
+                    }
+                    onClick={() => setCanvasExportScope("selection")}
+                  >
+                    선택 영역
+                  </button>
+                  <button
+                    type="button"
+                    className={
+                      canvasExportScope === "canvas" ? "is-active" : undefined
+                    }
+                    onClick={() => setCanvasExportScope("canvas")}
+                  >
+                    전체 Canvas
+                  </button>
+                </div>
+              </div>
+              <label className="canvas-setting-toggle">
+                <input
+                  type="checkbox"
+                  checked={isCanvasExportBackgroundEnabled}
+                  onChange={(event) =>
+                    setIsCanvasExportBackgroundEnabled(event.target.checked)
+                  }
+                />
+                <span>배경 포함</span>
+              </label>
+              <div className="canvas-export-actions">
+                <button type="button" onClick={() => void exportCanvas("png")}>
+                  PNG
+                </button>
+                <button type="button" onClick={() => void exportCanvas("svg")}>
+                  SVG
+                </button>
+              </div>
+            </section>
+          ) : null}
+
+          {openPopover === "settings" ? (
+            <section
+              className="canvas-tool-popover canvas-settings-popover"
+              aria-label="Canvas 설정"
+            >
+              <strong className="canvas-popover-title">사용자 설정</strong>
+              <label className="canvas-setting-toggle">
+                <input
+                  type="checkbox"
+                  checked={canvasUserPreferences["paste-at-cursor"]}
+                  onChange={() =>
+                    toggleCanvasUserPreference("paste-at-cursor")
+                  }
+                />
+                <span>커서 위치에 붙여넣기</span>
+              </label>
+              <label className="canvas-setting-toggle">
+                <input
+                  type="checkbox"
+                  checked={canvasUserPreferences["wrap-text"]}
+                  onChange={() => toggleCanvasUserPreference("wrap-text")}
+                />
+                <span>텍스트 자동 줄바꿈</span>
+              </label>
+              <label className="canvas-setting-toggle">
+                <input
+                  type="checkbox"
+                  checked={canvasUserPreferences["reduce-motion"]}
+                  onChange={() => toggleCanvasUserPreference("reduce-motion")}
+                />
+                <span>모션 줄이기</span>
+              </label>
+              <p className="canvas-settings-note">
+                이 설정은 현재 사용자의 브라우저에만 적용되며 다른 참여자의
+                roomState에는 전송되지 않습니다.
+              </p>
             </section>
           ) : null}
 

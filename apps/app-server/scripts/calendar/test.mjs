@@ -200,6 +200,34 @@ async function assertBadRequest(action, messagePattern) {
     queryOneRows: [
       (text, values) => {
         assert.match(text, /INSERT INTO calendar_events/);
+        assert.equal(values[5], "2026-07-03");
+        assert.equal(values[6], "2026-07-03");
+        return calendarRow({
+          title: "종료일 없는 종일 일정",
+          is_all_day: true,
+          start_time: null,
+          end_time: null
+        });
+      }
+    ]
+  });
+  const { service } = createSubject(database);
+
+  const event = await service.createEvent(currentUserId, workspaceId, {
+    title: "종료일 없는 종일 일정",
+    startDate: "2026-07-03"
+  });
+
+  assert.equal(event.endDate, "2026-07-03");
+  assert.equal(event.startTime, null);
+  assert.equal(event.endTime, null);
+}
+
+{
+  const database = new FakeDatabase({
+    queryOneRows: [
+      (text, values) => {
+        assert.match(text, /INSERT INTO calendar_events/);
         assert.deepEqual(values, [
           workspaceId,
           "Late deploy",
@@ -277,6 +305,42 @@ async function assertBadRequest(action, messagePattern) {
 
   assert.equal(event.startTime, "16:00");
   assert.equal(event.endTime, "17:00");
+}
+
+{
+  const database = new FakeDatabase({
+    queryOneRows: [
+      calendarRow({
+        title: "Existing event",
+        start_date: "2026-07-03",
+        end_date: "2026-07-03",
+        start_time: "14:00:00",
+        end_time: "15:00:00"
+      }),
+      (text, values) => {
+        assert.match(text, /UPDATE calendar_events/);
+        assert.equal(values[7], "2026-07-05");
+        assert.equal(values[8], "14:00");
+        assert.equal(values[9], "15:00");
+        return calendarRow({
+          title: "Existing event",
+          start_date: "2026-07-03",
+          end_date: "2026-07-05",
+          start_time: "14:00:00",
+          end_time: "15:00:00"
+        });
+      }
+    ]
+  });
+  const { service } = createSubject(database);
+
+  const event = await service.updateEvent(currentUserId, workspaceId, "1", {
+    endDate: "2026-07-05"
+  });
+
+  assert.equal(event.endDate, "2026-07-05");
+  assert.equal(event.startTime, "14:00");
+  assert.equal(event.endTime, "15:00");
 }
 
 {

@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 import { BoardAgentToolsService } from "./tools/board-agent-tools.service";
 import { CalendarAgentToolsService } from "./tools/calendar-agent-tools.service";
 import { MeetingAgentToolsService } from "./tools/meeting-agent-tools.service";
+import { SqlErdAgentToolsService } from "./tools/sql-erd-agent-tools.service";
 import type { AgentToolDefinition } from "./types/agent-tool.types";
 
 @Injectable()
@@ -11,7 +12,8 @@ export class AgentToolRegistryService {
   constructor(
     calendarAgentToolsService?: CalendarAgentToolsService,
     meetingAgentToolsService?: MeetingAgentToolsService,
-    boardAgentToolsService?: BoardAgentToolsService
+    boardAgentToolsService?: BoardAgentToolsService,
+    sqlErdAgentToolsService?: SqlErdAgentToolsService
   ) {
     if (calendarAgentToolsService) {
       this.registerMany(calendarAgentToolsService.listDefinitions());
@@ -23,6 +25,10 @@ export class AgentToolRegistryService {
 
     if (boardAgentToolsService) {
       this.registerMany(boardAgentToolsService.listDefinitions());
+    }
+
+    if (sqlErdAgentToolsService) {
+      this.registerMany(sqlErdAgentToolsService.listDefinitions());
     }
   }
 

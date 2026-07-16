@@ -2,8 +2,6 @@ import type { QueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import {
   createCanvasShapeSyncQueue,
-  isCanvasShapeSyncConflictError,
-  type CanvasShapeSyncConflict,
   type CanvasShapeSyncQueue,
 } from "../../../utils/canvas-shape-sync";
 import type {
@@ -27,7 +25,6 @@ type UseCanvasApiLifecycleOptions = {
   pendingViewSettingRef: RuntimeRef<CanvasViewSetting | null>;
   queryClient: QueryClient;
   remoteShapeRevisionRef: RuntimeRef<Map<string, number>>;
-  onShapeSyncConflict?: (conflict: CanvasShapeSyncConflict) => void;
   shapeSyncQueueRef: RuntimeRef<CanvasShapeSyncQueue | null>;
   storageMode: CanvasRuntimeStorageMode;
   viewSettingSyncTimerRef: RuntimeRef<ReturnType<typeof setTimeout> | null>;
@@ -43,7 +40,6 @@ export function useCanvasApiLifecycle({
   pendingViewSettingRef,
   queryClient,
   remoteShapeRevisionRef,
-  onShapeSyncConflict,
   shapeSyncQueueRef,
   storageMode,
   viewSettingSyncTimerRef,
@@ -59,10 +55,7 @@ export function useCanvasApiLifecycle({
     const shapeSyncQueue = createCanvasShapeSyncQueue({
       boardId: board.id,
       canvasClient,
-      onConflict: onShapeSyncConflict,
       onError(error: unknown) {
-        if (isCanvasShapeSyncConflictError(error)) return;
-
         onShapeSyncError?.(error);
         console.error("Canvas API shape sync failed", error);
       },
@@ -127,9 +120,7 @@ export function useCanvasApiLifecycle({
         try {
           await shapeSyncQueue.flush();
         } catch (error) {
-          if (!isCanvasShapeSyncConflictError(error)) {
-            console.error("Canvas API shape sync failed", error);
-          }
+          console.error("Canvas API shape sync failed", error);
         }
 
         if (pendingViewSetting) {
@@ -165,7 +156,6 @@ export function useCanvasApiLifecycle({
     pendingViewSettingRef,
     queryClient,
     remoteShapeRevisionRef,
-    onShapeSyncConflict,
     shapeSyncQueueRef,
     storageMode,
     viewSettingSyncTimerRef,

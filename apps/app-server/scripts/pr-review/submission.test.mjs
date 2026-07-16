@@ -12,6 +12,8 @@ class FakeDatabase {
     this.queryRows = [...queryRows];
     this.queries = [];
     this.transactionCount = 0;
+    this.transactionAttempts = [];
+    this.rolledBackTransactions = [];
   }
 
   async queryOne(text, values = []) {
@@ -36,9 +38,10 @@ class FakeDatabase {
 
   async transaction(callback) {
     this.transactionCount += 1;
-    return callback({
+    const pendingQueries = [];
+    const transaction = {
       queryOne: async (text, values = []) => {
-        this.queries.push({ method: "transaction.queryOne", text, values });
+        pendingQueries.push({ method: "transaction.queryOne", text, values });
         const next = this.queryOneRows.shift();
         if (typeof next === "function") {
           return next(text, values);
@@ -47,7 +50,7 @@ class FakeDatabase {
         return next ?? null;
       },
       query: async (text, values = []) => {
-        this.queries.push({ method: "transaction.query", text, values });
+        pendingQueries.push({ method: "transaction.query", text, values });
         const next = this.queryRows.shift();
         if (typeof next === "function") {
           return next(text, values);
@@ -56,13 +59,38 @@ class FakeDatabase {
         return next ?? [];
       },
       execute: async (text, values = []) => {
-        this.queries.push({ method: "transaction.execute", text, values });
+        pendingQueries.push({ method: "transaction.execute", text, values });
         return {
           rows: [],
           rowCount: 0
         };
       }
-    });
+    };
+    this.transactionAttempts.push({ transaction, queries: pendingQueries });
+
+    try {
+      const result = await callback(transaction);
+      this.queries.push(...pendingQueries);
+      return result;
+    } catch (error) {
+      this.rolledBackTransactions.push([...pendingQueries]);
+      throw error;
+    }
+  }
+}
+
+class FakeActivityLogService {
+  constructor({ appendError = null } = {}) {
+    this.appendError = appendError;
+    this.calls = [];
+  }
+
+  async append(transaction, input) {
+    assert.notEqual(input.action, "review_submission_created");
+    this.calls.push({ transaction, input });
+    if (this.appendError) {
+      throw this.appendError;
+    }
   }
 }
 
@@ -162,21 +190,32 @@ const reviewSessionId = "33333333-3333-4333-8333-333333333333";
 const pullRequestId = "44444444-4444-4444-8444-444444444444";
 const submissionId = "55555555-5555-4555-8555-555555555555";
 
-function createService({ database, githubDependency, workspaceService } = {}) {
+function createService({
+  activityLogService,
+  database,
+  githubDependency,
+  workspaceService
+} = {}) {
   const resolvedWorkspaceService = workspaceService ?? new FakeWorkspaceService();
   const resolvedGithubDependency =
     githubDependency ?? new FakeGithubDependency();
+  const resolvedActivityLogService =
+    activityLogService ?? new FakeActivityLogService();
   const service = new PrReviewService(
     database ?? new FakeDatabase(),
     resolvedWorkspaceService,
     resolvedGithubDependency,
+    {},
+    {},
+    resolvedActivityLogService,
     {}
   );
 
   return {
     service,
     workspaceService: resolvedWorkspaceService,
-    githubDependency: resolvedGithubDependency
+    githubDependency: resolvedGithubDependency,
+    activityLogService: resolvedActivityLogService
   };
 }
 
@@ -292,9 +331,12 @@ function hasQuery(database, pattern) {
     ],
     queryRows: [fileRows()]
   });
-  const { service, workspaceService, githubDependency } = createService({
-    database
-  });
+  const {
+    service,
+    workspaceService,
+    githubDependency,
+    activityLogService
+  } = createService({ database });
 
   const result = await service.submitReviewSession(
     currentUserId,
@@ -326,6 +368,27 @@ function hasQuery(database, pattern) {
   assert.equal(hasQuery(database, /INSERT INTO review_submissions/i), true);
   assert.equal(hasQuery(database, /github_submit_status = 'submitted'/i), true);
   assert.equal(hasQuery(database, /SET status = 'submitted'/i), true);
+  assert.equal(activityLogService.calls.length, 1);
+  assert.equal(
+    activityLogService.calls[0].transaction,
+    database.transactionAttempts[0].transaction
+  );
+  assert.deepEqual(activityLogService.calls[0].input, {
+    workspaceId,
+    actor: { type: "user", userId: currentUserId },
+    action: "review_submission_submitted",
+    target: { type: "review_submission", id: submissionId },
+    dedupeKey: `pr-review:review_submission_submitted:${submissionId}:submitted`,
+    metadata: {
+      version: 1,
+      summary: "GitHub Review 제출을 완료했습니다.",
+      data: { reviewSessionId }
+    }
+  });
+  assert.doesNotMatch(
+    JSON.stringify(activityLogService.calls[0].input.metadata),
+    /Please check empty state|REQUEST_CHANGES|987654|github\.com/i
+  );
   assert.doesNotMatch(JSON.stringify(database.queries), /accessToken|secret/i);
 }
 
@@ -381,7 +444,10 @@ function hasQuery(database, pattern) {
     queryRows: [fileRows()]
   });
   const githubDependency = new FakeGithubDependency({ currentHeadSha: "head-sha-2" });
-  const { service } = createService({ database, githubDependency });
+  const { service, activityLogService } = createService({
+    database,
+    githubDependency
+  });
 
   await assert.rejects(
     () =>
@@ -397,6 +463,7 @@ function hasQuery(database, pattern) {
     githubDependency.calls.some((call) => call.method === "submitPullRequestReview"),
     false
   );
+  assert.equal(activityLogService.calls.length, 0);
 }
 
 {
@@ -405,7 +472,10 @@ function hasQuery(database, pattern) {
     queryRows: [fileRows()]
   });
   const githubDependency = new FakeGithubDependency({ connected: false });
-  const { service } = createService({ database, githubDependency });
+  const { service, activityLogService } = createService({
+    database,
+    githubDependency
+  });
 
   await assert.rejects(
     () =>
@@ -417,6 +487,27 @@ function hasQuery(database, pattern) {
       error?.response?.error?.message === "GitHub OAuth connection is required"
   );
   assert.equal(hasQuery(database, /INSERT INTO review_submissions/i), false);
+  assert.equal(activityLogService.calls.length, 0);
+}
+
+{
+  const database = new FakeDatabase({
+    queryOneRows: [sessionRow()]
+  });
+  const { service, activityLogService } = createService({ database });
+
+  await assert.rejects(
+    () =>
+      service.submitReviewSession(currentUserId, workspaceId, reviewSessionId, {
+        submitType: "INVALID",
+        reviewBody: "Looks good."
+      }),
+    (error) =>
+      error?.response?.error?.message ===
+      "submitType must be COMMENT, APPROVE, or REQUEST_CHANGES"
+  );
+  assert.equal(hasQuery(database, /INSERT INTO review_submissions/i), false);
+  assert.equal(activityLogService.calls.length, 0);
 }
 
 {
@@ -430,7 +521,10 @@ function hasQuery(database, pattern) {
   const githubDependency = new FakeGithubDependency({
     submitError: permissionError
   });
-  const { service } = createService({ database, githubDependency });
+  const { service, activityLogService } = createService({
+    database,
+    githubDependency
+  });
 
   await assert.rejects(
     () =>
@@ -442,12 +536,153 @@ function hasQuery(database, pattern) {
       error?.response?.error?.message ===
       "GitHub App Pull requests write permission is required"
   );
+  assert.equal(database.transactionCount, 1);
   assert.equal(hasQuery(database, /INSERT INTO review_submissions/i), true);
   assert.equal(hasQuery(database, /github_submit_status = 'failed'/i), true);
   assert.deepEqual(database.queries.at(-1).values, [
     submissionId,
     "GitHub App Pull requests write permission is required"
   ]);
+  assert.equal(activityLogService.calls.length, 1);
+  assert.equal(
+    activityLogService.calls[0].transaction,
+    database.transactionAttempts[0].transaction
+  );
+  assert.deepEqual(activityLogService.calls[0].input, {
+    workspaceId,
+    actor: { type: "user", userId: currentUserId },
+    action: "review_submission_failed",
+    target: { type: "review_submission", id: submissionId },
+    dedupeKey: `pr-review:review_submission_failed:${submissionId}:failed`,
+    metadata: {
+      version: 1,
+      summary: "GitHub Review 제출에 실패했습니다.",
+      data: { reviewSessionId }
+    }
+  });
+  assert.doesNotMatch(
+    JSON.stringify(activityLogService.calls[0].input.metadata),
+    /Approved|APPROVE|permission|required|failed$/i
+  );
+}
+
+{
+  const database = new FakeDatabase({
+    queryOneRows: [sessionRow(), submissionRow(), { id: submissionId }],
+    queryRows: [fileRows()]
+  });
+  const githubDependency = new FakeGithubDependency({
+    submitError: new Error("provider token leaked")
+  });
+  const { service, activityLogService } = createService({
+    database,
+    githubDependency
+  });
+
+  await assert.rejects(
+    () =>
+      service.submitReviewSession(currentUserId, workspaceId, reviewSessionId, {
+        submitType: "COMMENT",
+        reviewBody: "Provider detail must stay private."
+      }),
+    (error) =>
+      error?.response?.error?.message === "GitHub Review submission failed"
+  );
+  assert.deepEqual(database.queries.at(-1).values, [
+    submissionId,
+    "GitHub Review submission failed"
+  ]);
+  assert.equal(activityLogService.calls[0].input.action, "review_submission_failed");
+  assert.deepEqual(activityLogService.calls[0].input.metadata.data, {
+    reviewSessionId
+  });
+  assert.doesNotMatch(
+    JSON.stringify(activityLogService.calls[0].input.metadata),
+    /provider token leaked|GitHub Review submission failed|Provider detail/i
+  );
+}
+
+{
+  const appendError = new Error("activity append failed");
+  const database = new FakeDatabase({
+    queryOneRows: [
+      sessionRow(),
+      submissionRow(),
+      submissionRow({
+        github_submit_status: "submitted",
+        github_review_id: "987654",
+        github_review_url:
+          "https://github.com/my-team/pilo/pull/24#pullrequestreview-987654",
+        submitted_at: "2026-07-06T12:00:00.000Z"
+      }),
+      { id: reviewSessionId }
+    ],
+    queryRows: [fileRows()]
+  });
+  const activityLogService = new FakeActivityLogService({ appendError });
+  const { service } = createService({ database, activityLogService });
+
+  await assert.rejects(
+    () =>
+      service.submitReviewSession(currentUserId, workspaceId, reviewSessionId, {
+        submitType: "APPROVE",
+        reviewBody: "Approved."
+      }),
+    (error) => error === appendError
+  );
+  assert.equal(hasQuery(database, /github_submit_status = 'submitted'/i), false);
+  assert.equal(hasQuery(database, /SET status = 'submitted'/i), false);
+  assert.equal(database.rolledBackTransactions.length, 1);
+  assert.equal(
+    database.rolledBackTransactions[0].some((query) =>
+      /github_submit_status = 'submitted'/i.test(query.text)
+    ),
+    true
+  );
+  assert.equal(
+    database.rolledBackTransactions[0].some((query) =>
+      /SET status = 'submitted'/i.test(query.text)
+    ),
+    true
+  );
+}
+
+{
+  const appendError = new Error("activity append failed");
+  const database = new FakeDatabase({
+    queryOneRows: [sessionRow(), submissionRow(), { id: submissionId }],
+    queryRows: [fileRows()]
+  });
+  const githubDependency = new FakeGithubDependency({
+    submitError: forbidden("GitHub permission denied")
+  });
+  const activityLogService = new FakeActivityLogService({ appendError });
+  const { service } = createService({
+    database,
+    githubDependency,
+    activityLogService
+  });
+
+  await assert.rejects(
+    () =>
+      service.submitReviewSession(currentUserId, workspaceId, reviewSessionId, {
+        submitType: "APPROVE",
+        reviewBody: "Approved."
+      }),
+    (error) => error === appendError
+  );
+  assert.equal(hasQuery(database, /github_submit_status = 'failed'/i), false);
+  assert.equal(database.rolledBackTransactions.length, 1);
+  assert.equal(
+    database.rolledBackTransactions[0].some((query) =>
+      /github_submit_status = 'failed'/i.test(query.text)
+    ),
+    true
+  );
+  assert.equal(
+    activityLogService.calls[0].input.action,
+    "review_submission_failed"
+  );
 }
 
 {

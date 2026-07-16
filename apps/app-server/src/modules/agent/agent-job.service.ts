@@ -8,7 +8,7 @@ import type {
   AgentRunRequestContext
 } from "./types/agent-tool.types";
 
-export const AGENT_TOOL_SCHEMA_VERSION = "agent-tools:v3";
+export const AGENT_TOOL_SCHEMA_VERSION = "agent-tools:v4";
 
 export interface AgentToolSchemaSnapshotItem {
   name: string;

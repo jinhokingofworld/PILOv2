@@ -1114,3 +1114,114 @@ def test_agent_planner_schema_is_strict_closed_schema() -> None:
                 assert_closed_objects(value)
 
     assert_closed_objects(_agent_planner_schema())
+
+
+def test_sql_erd_planner_contract_uses_structured_schema_without_raw_ddl() -> None:
+    prompt = _agent_planner_system_prompt()
+
+    assert "generate_sql_erd" in prompt
+    assert "SqlErdSchemaSpecV1" in prompt
+    assert "raw DDL" in prompt
+    assert "unsupportedFeatures" in prompt
+    assert "database execution" in prompt
+    assert "targetMode" in prompt
+
+
+def test_sql_erd_nullable_requested_dialect_is_not_missing() -> None:
+    schema_spec = {
+        "version": 1,
+        "title": "주문 관리",
+        "requestedDialect": None,
+        "tables": [{"key": "users"}],
+        "relations": [],
+        "unsupportedFeatures": [],
+    }
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=[
+                tool_snapshot(
+                    name="generate_sql_erd",
+                    description="구조화 스키마로 ERD를 생성합니다.",
+                    riskLevel="medium",
+                    executionMode="contextual",
+                    inputSchema={
+                        "type": "object",
+                        "required": [
+                            "version",
+                            "title",
+                            "requestedDialect",
+                            "tables",
+                            "relations",
+                            "unsupportedFeatures",
+                        ],
+                        "additionalProperties": False,
+                        "properties": {
+                            "version": {"const": 1},
+                            "title": {"type": "string"},
+                            "requestedDialect": {"type": ["string", "null"]},
+                            "tables": {"type": "array"},
+                            "relations": {"type": "array"},
+                            "unsupportedFeatures": {"type": "array"},
+                        },
+                    },
+                )
+            ]
+        )
+    )
+
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="generate_sql_erd",
+            tool_input=schema_spec,
+        ),
+        job,
+    )
+
+    assert normalized.status == "tool_candidate"
+    assert normalized.output_summary["requiresConfirmation"] is None
+    assert normalized.output_summary["input"] == schema_spec
+
+
+def test_sql_erd_missing_schema_root_requests_clarification() -> None:
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=[
+                tool_snapshot(
+                    name="generate_sql_erd",
+                    description="구조화 스키마로 ERD를 생성합니다.",
+                    riskLevel="medium",
+                    executionMode="contextual",
+                    inputSchema={
+                        "type": "object",
+                        "required": [
+                            "version",
+                            "title",
+                            "requestedDialect",
+                            "tables",
+                            "relations",
+                            "unsupportedFeatures",
+                        ],
+                        "additionalProperties": False,
+                        "properties": {"requestedDialect": {"type": ["string", "null"]}},
+                    },
+                )
+            ]
+        )
+    )
+
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="generate_sql_erd",
+            tool_input={"requestedDialect": None},
+        ),
+        job,
+    )
+
+    assert normalized.status == "needs_clarification"
+    assert normalized.output_summary["missingFields"] == [
+        "version",
+        "title",
+        "tables",
+        "relations",
+        "unsupportedFeatures",
+    ]

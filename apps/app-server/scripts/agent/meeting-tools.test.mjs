@@ -107,8 +107,8 @@ assert.match(
 );
 assert.match(
   meetingActionItemDeliverySource,
-  /await this\.validateDeliveryDraft\([\s\S]*?INSERT INTO meeting_report_action_item_deliveries/,
-  "A user-invalid draft must be validated before a delivery row is created"
+  /await this\.normalizeDeliveryDraft\([\s\S]*?INSERT INTO meeting_report_action_item_deliveries/,
+  "A user-invalid draft must be normalized and validated before a delivery row is created"
 );
 assert.match(
   meetingActionItemDeliverySource,
@@ -1026,7 +1026,7 @@ class FakeInvalidCalendarDeliveryDatabase {
     database,
     { async assertWorkspaceAccess() {} },
     {
-      validateCreateEventInput(input) {
+      normalizeCreateEventInput(input) {
         assert.equal(input.startDate, "2026-07-09");
         assert.equal(input.endDate, "2026-07-08");
         const error = new Error("endDate must be on or after startDate");
