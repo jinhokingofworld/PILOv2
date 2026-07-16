@@ -27,10 +27,11 @@
   - [x] rename/move/delete의 Activity Log와 문서 aggregate soft delete 구현
   - [x] API 계약과 전체 app-server 검증
   - [x] PR [#1169](https://github.com/Developer-EJ/PILO/pull/1169) 생성
-- [x] **Drive 이동 UI**: Issue [#1170](https://github.com/Developer-EJ/PILO/issues/1170) 구현 및 자동 검증 완료, PR 생성 대기
+- [x] **Drive 이동 UI**: Issue [#1170](https://github.com/Developer-EJ/PILO/issues/1170), PR [#1175](https://github.com/Developer-EJ/PILO/pull/1175) 생성
   - [x] 폴더/파일/문서 이동 목적지 탐색과 `PATCH` 호출
   - [x] focused test, frontend format/lint/test
-  - [ ] 인증된 dev 환경 수동 QA와 PR
+  - [ ] 인증된 dev 환경 수동 QA
+  - [x] PR [#1175](https://github.com/Developer-EJ/PILO/pull/1175) 생성
 - [ ] **후속 작업**: Yjs realtime, 파일 첨부/PDF viewer
 
 ## 공통 제약

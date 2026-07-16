@@ -53,7 +53,7 @@
 - Modify: `docs/superpowers/plans/2026-07-16-document-foundation-and-lifecycle.md`
 - Modify: `docs/superpowers/plans/2026-07-16-drive-move-ui.md`
 
-- [x] Mark completed checklist items. Record the PR link after it is created.
+- [x] Mark completed checklist items and record PR [#1175](https://github.com/Developer-EJ/PILO/pull/1175).
 - [x] Run `npm.cmd run lint`, `npm.cmd test` in `apps/frontend`, and `git diff --check` from the worktree.
 - [ ] Perform local UI QA for root/nested move, disabled same-parent destination, API failure display, and preserved rename/delete/download/document-open behavior when an authenticated dev session is available. The local `/files` route redirected to login, so authenticated mutation QA is unavailable in this worktree.
-- [ ] Commit `docs: Drive 이동 UI 체크리스트 갱신 (#1170)` and open a non-draft PR to `dev` with `Closes #1170`.
+- [x] Commit `docs: Drive 이동 UI 체크리스트 갱신 (#1170)` and open non-draft PR [#1175](https://github.com/Developer-EJ/PILO/pull/1175) to `dev` with `Closes #1170`.
