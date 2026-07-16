@@ -69,6 +69,7 @@ import type {
   PiloCanvasShapeDetailRequest,
   PiloCanvasFreeformShape,
   PiloCanvasLocalInteractionState,
+  PiloCanvasLocalShapeChange,
   PiloCanvasViewportBounds,
   PiloCanvasViewSetting,
 } from "../types";
@@ -290,10 +291,13 @@ type PiloTldrawCanvasProps = {
   initialViewSetting: PiloCanvasViewSetting;
   freeformShapes: PiloCanvasFreeformShape[];
   onReady: (actions: PiloCanvasActions | null) => void;
-  onFreeformShapesDraftChange: (shapes: PiloCanvasFreeformShape[]) => void;
+  onFreeformShapesDraftChange: (
+    shapes: PiloCanvasFreeformShape[],
+    change?: PiloCanvasLocalShapeChange,
+  ) => void;
   onFreeformShapesChange: (
     shapes: PiloCanvasFreeformShape[],
-    explicitDeletedShapeIds?: string[],
+    change?: PiloCanvasLocalShapeChange,
   ) => void;
   onViewChange: (viewSetting: PiloCanvasViewSetting) => void;
   onFrameChildShapesUnload: (shapes: PiloCanvasFreeformShape[]) => void;
@@ -1368,7 +1372,10 @@ export function PiloTldrawCanvas({
   );
 
   const handleRealtimePreviewDraftChange = useCallback(
-    (shapes: PiloCanvasFreeformShape[]) => {
+    (
+      shapes: PiloCanvasFreeformShape[],
+      localChange?: PiloCanvasLocalShapeChange,
+    ) => {
       const previousShapes = freeformShapesRef.current;
       const createdShapeIds = getCreatedFreeformShapeIds({
         nextShapes: shapes,
@@ -1383,6 +1390,21 @@ export function PiloTldrawCanvas({
 
       if (hasGroupedFreeformShapes(createdShapes)) {
         registerPendingRealtimePreviewGroup(createdShapes, "created-group");
+      }
+
+      if (localChange?.isFreehandDrawing) {
+        const changedShapeIdSet = new Set(localChange.changedShapeIds);
+        const freehandShapes = shapes.filter((shape) => {
+          const shapeId = getFreeformShapeId(shape);
+
+          return Boolean(
+            shapeId &&
+              changedShapeIdSet.has(shapeId) &&
+              (shape.type === "draw" || shape.type === "highlight"),
+          );
+        });
+
+        registerPendingRealtimePreviewGroup(freehandShapes, "freehand");
       }
 
       const currentShapesById = refreshPendingPreviewGroupSnapshots({
@@ -1463,9 +1485,12 @@ export function PiloTldrawCanvas({
     [onLocalInteractionStateChange],
   );
   const handleFreeformShapesDraftChange = useCallback(
-    (shapes: PiloCanvasFreeformShape[]) => {
-      onFreeformShapesDraftChange(shapes);
-      handleRealtimePreviewDraftChange(shapes);
+    (
+      shapes: PiloCanvasFreeformShape[],
+      change: PiloCanvasLocalShapeChange,
+    ) => {
+      onFreeformShapesDraftChange(shapes, change);
+      handleRealtimePreviewDraftChange(shapes, change);
     },
     [handleRealtimePreviewDraftChange, onFreeformShapesDraftChange],
   );
@@ -2377,8 +2402,14 @@ export function PiloTldrawCanvas({
         .getCurrentPageShapes()
         .map((shape) => withSerializedArrowBindings(editor, shape));
 
-      onFreeformShapesDraftChange(nextFreeformShapes);
-      onFreeformShapesChange(nextFreeformShapes);
+      const frameChange: PiloCanvasLocalShapeChange = {
+        changedShapeIds: [String(frameShape.id)],
+        deletedShapeIds: [],
+        isFreehandDrawing: false,
+      };
+
+      onFreeformShapesDraftChange(nextFreeformShapes, frameChange);
+      onFreeformShapesChange(nextFreeformShapes, frameChange);
 
       if (!nextCollapsed) {
         if (frameChildrenRequestTimerRef.current) {

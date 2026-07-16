@@ -5,7 +5,10 @@ import {
   syncCanvasFreeformShapes,
   type CanvasShapeSyncQueue,
 } from "../../../utils/canvas-shape-sync";
-import type { PiloCanvasFreeformShape } from "../types";
+import type {
+  PiloCanvasFreeformShape,
+  PiloCanvasLocalShapeChange,
+} from "../types";
 import type {
   CanvasBoardDetail,
   CanvasRuntimeStorageMode,
@@ -15,6 +18,7 @@ import {
   buildFreeformShapeMap,
   getChangedFreeformShapeIds,
   getFreeformShapeId,
+  mergeLocalFreeformShapeChanges,
   mergeFreeformShapesById,
 } from "./canvas-runtime-utils";
 
@@ -87,13 +91,19 @@ export function useCanvasShapePersistence({
   function markPendingLocalShapeChanges(
     currentShapes: PiloCanvasFreeformShape[],
     nextShapes: PiloCanvasFreeformShape[],
+    candidateShapeIds?: Iterable<string>,
   ) {
     const currentSyncShapes = buildPersistableLocalShapes(currentShapes);
     const nextSyncShapes = buildPersistableLocalShapes(nextShapes);
-    const changedShapeIds = getChangedFreeformShapeIds(
+    const detectedChangedShapeIds = getChangedFreeformShapeIds(
       currentSyncShapes,
       nextSyncShapes,
     );
+    const changedShapeIds = candidateShapeIds
+      ? Array.from(new Set(candidateShapeIds)).filter((shapeId) =>
+          detectedChangedShapeIds.has(shapeId),
+        )
+      : Array.from(detectedChangedShapeIds);
     const nextShapeMap = buildFreeformShapeMap(nextSyncShapes);
     const pendingVersions = new Map<string, number>();
 
@@ -118,6 +128,75 @@ export function useCanvasShapePersistence({
     return pendingVersions;
   }
 
+  function normalizeLocalShapeChange(
+    currentShapes: PiloCanvasFreeformShape[],
+    snapshotShapes: PiloCanvasFreeformShape[],
+    change?: PiloCanvasLocalShapeChange,
+  ): PiloCanvasLocalShapeChange {
+    if (change) {
+      const deletedShapeIds = Array.from(
+        new Set(change.deletedShapeIds.map((shapeId) => shapeId.trim())),
+      ).filter(Boolean);
+
+      return {
+        changedShapeIds: Array.from(
+          new Set([
+            ...change.changedShapeIds.map((shapeId) => shapeId.trim()),
+            ...deletedShapeIds,
+          ]),
+        ).filter(Boolean),
+        deletedShapeIds,
+        isFreehandDrawing: change.isFreehandDrawing,
+      };
+    }
+
+    return {
+      changedShapeIds: Array.from(
+        getChangedFreeformShapeIds(currentShapes, snapshotShapes),
+      ),
+      deletedShapeIds: [],
+      isFreehandDrawing: false,
+    };
+  }
+
+  function mergeLocalSnapshot(
+    currentShapes: PiloCanvasFreeformShape[],
+    snapshotShapes: PiloCanvasFreeformShape[],
+    change: PiloCanvasLocalShapeChange,
+  ) {
+    const snapshotShapeMap = buildFreeformShapeMap(snapshotShapes);
+    const mergedShapes = mergeLocalFreeformShapeChanges({
+      changedShapeIds: change.changedShapeIds,
+      currentShapes,
+      deletedShapeIds: change.deletedShapeIds,
+      snapshotShapes,
+    });
+
+    return mergedShapes.filter((shape) => {
+      const shapeId = getFreeformShapeId(shape);
+
+      return (
+        !shapeId ||
+        !unloadedShapeIdsRef.current.has(shapeId) ||
+        snapshotShapeMap.has(shapeId)
+      );
+    });
+  }
+
+  function collectPendingLocalShapeVersions(shapeIds: Iterable<string>) {
+    const pendingVersions = new Map<string, number>();
+
+    Array.from(new Set(shapeIds)).forEach((shapeId) => {
+      const version = pendingLocalShapeVersionsRef.current.get(shapeId);
+
+      if (version !== undefined) {
+        pendingVersions.set(shapeId, version);
+      }
+    });
+
+    return pendingVersions;
+  }
+
   function clearPendingLocalShapeChanges(
     pendingVersions: Map<string, number>,
   ) {
@@ -131,7 +210,21 @@ export function useCanvasShapePersistence({
   }
 
   const captureDraftFreeformShapes = useCallback(
-    (nextFreeformShapes: PiloCanvasFreeformShape[]) => {
+    (
+      snapshotShapes: PiloCanvasFreeformShape[],
+      localChange?: PiloCanvasLocalShapeChange,
+    ) => {
+      const normalizedChange = normalizeLocalShapeChange(
+        freeformShapesRef.current,
+        snapshotShapes,
+        localChange,
+      );
+      const nextFreeformShapes = mergeLocalSnapshot(
+        freeformShapesRef.current,
+        snapshotShapes,
+        normalizedChange,
+      );
+
       if (
         areCanvasFreeformShapesEqual(
           freeformShapesRef.current,
@@ -145,6 +238,7 @@ export function useCanvasShapePersistence({
         markPendingLocalShapeChanges(
           freeformShapesRef.current,
           nextFreeformShapes,
+          normalizedChange.changedShapeIds,
         );
       }
 
@@ -193,16 +287,30 @@ export function useCanvasShapePersistence({
 
   const persistFreeformShapes = useCallback(
     (
-      nextFreeformShapes: PiloCanvasFreeformShape[],
-      explicitDeletedShapeIds: string[] = [],
+      snapshotShapes: PiloCanvasFreeformShape[],
+      localChange?: PiloCanvasLocalShapeChange,
     ) => {
-      const uniqueExplicitDeletedShapeIds = Array.from(
-        new Set(explicitDeletedShapeIds.map((shapeId) => shapeId.trim())),
-      ).filter(Boolean);
+      const currentLocalShapes = freeformShapesRef.current;
+      const normalizedChange = normalizeLocalShapeChange(
+        currentLocalShapes,
+        snapshotShapes,
+        localChange,
+      );
+      const nextFreeformShapes = mergeLocalSnapshot(
+        currentLocalShapes,
+        snapshotShapes,
+        normalizedChange,
+      );
 
       setFreeformShapes((currentFreeformShapes) => {
+        const hasPendingLocalChanges = normalizedChange.changedShapeIds.some(
+          (shapeId) =>
+            pendingLocalShapeVersionsRef.current.has(shapeId),
+        );
+
         if (
-          !uniqueExplicitDeletedShapeIds.length &&
+          !normalizedChange.deletedShapeIds.length &&
+          !hasPendingLocalChanges &&
           areCanvasFreeformShapesEqual(currentFreeformShapes, nextFreeformShapes)
         ) {
           return currentFreeformShapes;
@@ -211,14 +319,19 @@ export function useCanvasShapePersistence({
         freeformShapesRef.current = nextFreeformShapes;
 
         if (storageMode === "api" && canvasClient) {
-          const pendingLocalShapeVersions = markPendingLocalShapeChanges(
-            currentFreeformShapes,
+          markPendingLocalShapeChanges(
+            currentLocalShapes,
             nextFreeformShapes,
+            normalizedChange.changedShapeIds,
           );
+          const pendingLocalShapeVersions =
+            collectPendingLocalShapeVersions(
+              normalizedChange.changedShapeIds,
+            );
           const nextShapeMap = buildFreeformShapeMap(
             buildPersistableLocalShapes(nextFreeformShapes),
           );
-          uniqueExplicitDeletedShapeIds.forEach((shapeId) => {
+          normalizedChange.deletedShapeIds.forEach((shapeId) => {
             if (
               nextShapeMap.has(shapeId) ||
               unloadedShapeIdsRef.current.has(shapeId)

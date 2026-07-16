@@ -2,6 +2,12 @@ import type { TLCreateShapePartial, TLShape } from "tldraw";
 
 export type PiloCanvasFreeformShape = TLCreateShapePartial<TLShape>;
 
+export type PiloCanvasLocalShapeChange = {
+  changedShapeIds: string[];
+  deletedShapeIds: string[];
+  isFreehandDrawing: boolean;
+};
+
 export type PiloCanvasLocalInteractionState = {
   currentToolId: string;
   editingShapeId: string | null;

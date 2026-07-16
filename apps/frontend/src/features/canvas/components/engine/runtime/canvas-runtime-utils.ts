@@ -104,6 +104,47 @@ export function mergeFreeformShapesById(
     .filter((shape): shape is PiloCanvasFreeformShape => Boolean(shape));
 }
 
+export function mergeLocalFreeformShapeChanges({
+  changedShapeIds,
+  currentShapes,
+  deletedShapeIds,
+  snapshotShapes,
+}: {
+  changedShapeIds: Iterable<string>;
+  currentShapes: PiloCanvasFreeformShape[];
+  deletedShapeIds: Iterable<string>;
+  snapshotShapes: PiloCanvasFreeformShape[];
+}) {
+  const changedShapeIdSet = new Set(changedShapeIds);
+  const deletedShapeIdSet = new Set(deletedShapeIds);
+  const currentShapeMap = buildFreeformShapeMap(currentShapes);
+  const orderedShapeIds = currentShapes.flatMap((shape) => {
+    const shapeId = getFreeformShapeId(shape);
+
+    return shapeId ? [shapeId] : [];
+  });
+
+  deletedShapeIdSet.forEach((shapeId) => {
+    currentShapeMap.delete(shapeId);
+  });
+
+  snapshotShapes.forEach((shape) => {
+    const shapeId = getFreeformShapeId(shape);
+
+    if (!shapeId || !changedShapeIdSet.has(shapeId)) return;
+
+    if (!currentShapeMap.has(shapeId)) {
+      orderedShapeIds.push(shapeId);
+    }
+
+    currentShapeMap.set(shapeId, shape);
+  });
+
+  return Array.from(new Set(orderedShapeIds))
+    .map((shapeId) => currentShapeMap.get(shapeId))
+    .filter((shape): shape is PiloCanvasFreeformShape => Boolean(shape));
+}
+
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
