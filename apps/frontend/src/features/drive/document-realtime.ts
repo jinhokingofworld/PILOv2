@@ -108,6 +108,10 @@ export function createDocumentRealtimeProvider({
   });
 }
 
+export function shouldUseDocumentSnapshotFallback(hasRealtimeTransport: boolean) {
+  return !hasRealtimeTransport;
+}
+
 export function createDocumentSnapshotSaveQueue({
   delayMs,
   save

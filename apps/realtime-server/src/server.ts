@@ -6,6 +6,8 @@ import { createCanvasTldrawSyncRoomService } from "./canvas/canvas-tldraw-sync-r
 import { loadRealtimeServerConfig } from "./config/realtime-config";
 import { createRealtimeDatabase } from "./database/database";
 import { createDocumentAccessService } from "./documents/document-access.service";
+import { createDocumentAppServerClient } from "./documents/document-app-server-client";
+import { createDocumentCheckpointService } from "./documents/document-checkpoint.service";
 import { createDocumentHocuspocusService } from "./documents/document-hocuspocus.service";
 import { createDocumentHocuspocusTransport } from "./documents/document-hocuspocus-transport";
 import { createRealtimeSocketServer } from "./socket/socket-server";
@@ -75,6 +77,9 @@ async function bootstrap() {
   });
   const documentHocuspocusService = createDocumentHocuspocusService({
     accessService: createDocumentAccessService({ database }),
+    checkpointService: createDocumentCheckpointService({
+      client: createDocumentAppServerClient({ appServerUrl: config.appServerUrl }),
+    }),
     sessionService: createRealtimeSessionService(database),
   });
   const documentHocuspocus = documentHocuspocusService.hocuspocus;
@@ -157,18 +162,37 @@ async function bootstrap() {
     console.log(`PILO realtime server listening on ${config.port}`);
   });
 
-  function shutdown() {
-    documentHocuspocus.closeConnections();
-    void tldrawSyncRoomService
-      .close()
-      .finally(() => socketServer.close())
-      .finally(() => {
-        server.close(() => process.exit(0));
+  let isShuttingDown = false;
+
+  async function shutdown() {
+    if (isShuttingDown) {
+      return;
+    }
+    isShuttingDown = true;
+
+    try {
+      const closeHttpServer = new Promise<void>((resolve, reject) => {
+        server.close((error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+          resolve();
+        });
       });
+      await documentHocuspocusService.shutdown();
+      await tldrawSyncRoomService.close();
+      await socketServer.close();
+      await closeHttpServer;
+      process.exit(0);
+    } catch (error) {
+      console.error("Realtime server shutdown failed", error);
+      process.exit(1);
+    }
   }
 
-  process.on("SIGINT", shutdown);
-  process.on("SIGTERM", shutdown);
+  process.on("SIGINT", () => void shutdown());
+  process.on("SIGTERM", () => void shutdown());
 }
 
 void bootstrap().catch((error) => {

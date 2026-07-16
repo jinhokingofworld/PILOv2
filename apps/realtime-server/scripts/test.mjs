@@ -280,6 +280,8 @@ await import("./pr-review-conflict-draft-events.test.mjs");
 await import("./page-cursor.test.mjs");
 await import("./github-source/test.mjs");
 await import("../src/documents/document-access.service.test.mjs");
+await import("../src/documents/document-app-server-client.test.mjs");
+await import("../src/documents/document-checkpoint.service.test.mjs");
 await import("../src/documents/document-hocuspocus.service.test.mjs");
 await import("../src/documents/document-hocuspocus-transport.test.mjs");
 await import("../src/documents/document-route-contract.test.mjs");

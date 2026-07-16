@@ -38,7 +38,9 @@ import type { DocumentBootstrapPayload } from "@/features/drive/types";
 import {
   createDocumentCollaborator,
   createDocumentRealtimeProvider,
-  createDocumentSnapshotSaveQueue
+  createDocumentSnapshotSaveQueue,
+  getDocumentRealtimeServerUrl,
+  shouldUseDocumentSnapshotFallback
 } from "../document-realtime";
 import styles from "./document-editor.module.css";
 import { DocumentBlockHandle } from "./document-block-handle";
@@ -171,6 +173,13 @@ function DocumentEditorSurface({
     () => createDriveApiClient({ accessToken }),
     [accessToken]
   );
+  const useSnapshotFallback = useMemo(
+    () =>
+      shouldUseDocumentSnapshotFallback(
+        Boolean(accessToken && getDocumentRealtimeServerUrl())
+      ),
+    [accessToken]
+  );
 
   useEffect(() => {
     currentVersionRef.current = bootstrap.document.currentVersion;
@@ -265,11 +274,15 @@ function DocumentEditorSurface({
   );
 
   const retrySnapshot = useCallback(() => {
+    if (!useSnapshotFallback) {
+      return;
+    }
+
     setSaveState("saving");
     setSaveError(null);
     snapshotSaveQueue.schedule();
     void snapshotSaveQueue.flush().catch(() => undefined);
-  }, [snapshotSaveQueue]);
+  }, [snapshotSaveQueue, useSnapshotFallback]);
 
   const closeSlashMenu = useCallback(() => {
     slashMenuStateRef.current = null;
@@ -373,6 +386,10 @@ function DocumentEditorSurface({
   }, [editor]);
 
   useEffect(() => {
+    if (!useSnapshotFallback) {
+      return;
+    }
+
     let disposed = false;
     const handleUpdate = () => {
       queueMicrotask(() => {
@@ -392,7 +409,7 @@ function DocumentEditorSurface({
       disposed = true;
       yDoc.off("update", handleUpdate);
     };
-  }, [captureSnapshot, snapshotSaveQueue, yDoc]);
+  }, [captureSnapshot, snapshotSaveQueue, useSnapshotFallback, yDoc]);
 
   useEffect(() => {
     const realtimeProvider = createDocumentRealtimeProvider({
@@ -431,10 +448,12 @@ function DocumentEditorSurface({
 
   useEffect(() => {
     return () => {
-      void snapshotSaveQueue.flush();
+      if (useSnapshotFallback) {
+        void snapshotSaveQueue.flush();
+      }
       snapshotSaveQueue.destroy();
     };
-  }, [snapshotSaveQueue]);
+  }, [snapshotSaveQueue, useSnapshotFallback]);
 
   useEffect(() => {
     return () => yDoc.destroy();
@@ -467,12 +486,14 @@ function DocumentEditorSurface({
 
   const closeDocument = useCallback(async () => {
     try {
-      await snapshotSaveQueue.flush();
+      if (useSnapshotFallback) {
+        await snapshotSaveQueue.flush();
+      }
       onClose();
     } catch {
       // The save error state keeps the editor open for an explicit retry.
     }
-  }, [onClose, snapshotSaveQueue]);
+  }, [onClose, snapshotSaveQueue, useSnapshotFallback]);
 
   const saveStateLabel =
     saveState === "saving"
@@ -514,7 +535,7 @@ function DocumentEditorSurface({
             size="icon-sm"
             aria-label="문서 저장"
             title="문서 저장"
-            disabled={!editor || saveState === "conflict"}
+            disabled={!editor || saveState === "conflict" || !useSnapshotFallback}
             onClick={retrySnapshot}
           >
             {saveState === "saving" ? <Loader2 className="animate-spin" /> : <Save />}

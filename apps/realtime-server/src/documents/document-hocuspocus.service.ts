@@ -2,20 +2,33 @@ import { createRequire } from "node:module";
 
 import type { RealtimeSessionService } from "../auth/session.service";
 import type { DocumentAccessService } from "./document-access.service";
+import type { DocumentCheckpointService } from "./document-checkpoint.service";
 import type { DocumentHocuspocusInstance } from "./document-hocuspocus-transport";
 import type { DocumentRoomRef } from "./document-types";
 
 type HocuspocusDocumentServer = DocumentHocuspocusInstance & {
   closeConnections: () => void;
+  flushPendingStores: () => void;
   getConnectionsCount: () => number;
   getDocumentsCount: () => number;
 };
+
+type HocuspocusDocument = Parameters<
+  DocumentCheckpointService["storeDocument"]
+>[0]["document"];
 
 type HocuspocusConstructor = new <Context>(configuration: {
   onAuthenticate: (payload: {
     documentName: string;
     token: string;
   }) => Promise<Context>;
+  onLoadDocument: (payload: { context: Context }) => Promise<Uint8Array>;
+  onStoreDocument: (payload: {
+    document: HocuspocusDocument;
+    lastContext: Context | null;
+  }) => Promise<void>;
+  afterUnloadDocument: () => void;
+  debounce: number;
   unloadImmediately: boolean;
 }) => HocuspocusDocumentServer;
 
@@ -24,6 +37,7 @@ const { Hocuspocus } = createRequire(__filename)("@hocuspocus/server") as {
 };
 
 export type DocumentHocuspocusContext = DocumentRoomRef & {
+  accessToken: string;
   userId: string;
 };
 
@@ -33,15 +47,36 @@ export type DocumentHocuspocusService = {
     token: string,
   ) => Promise<DocumentHocuspocusContext>;
   hocuspocus: HocuspocusDocumentServer;
+  loadDocument: (context: DocumentHocuspocusContext) => Promise<Uint8Array>;
+  storeDocument: (
+    context: DocumentHocuspocusContext,
+    document: HocuspocusDocument,
+  ) => Promise<void>;
+  shutdown: () => Promise<void>;
 };
 
 export function createDocumentHocuspocusService({
   accessService,
+  checkpointService,
   sessionService,
 }: {
   accessService: DocumentAccessService;
+  checkpointService: DocumentCheckpointService;
   sessionService: RealtimeSessionService;
 }): DocumentHocuspocusService {
+  const shutdownWaiters = new Set<() => void>();
+
+  function resolveShutdownWaiters(hocuspocus: HocuspocusDocumentServer) {
+    if (hocuspocus.getDocumentsCount() !== 0) {
+      return;
+    }
+
+    for (const resolve of shutdownWaiters) {
+      resolve();
+    }
+    shutdownWaiters.clear();
+  }
+
   async function authorizeDocument(documentName: string, token: string) {
     const room = parseDocumentRoomName(documentName);
     if (!room) {
@@ -61,17 +96,55 @@ export function createDocumentHocuspocusService({
       throw new Error("FORBIDDEN");
     }
 
-    return { ...room, userId: session.userId };
+    return { ...room, accessToken: token, userId: session.userId };
+  }
+
+  function loadDocument(context: DocumentHocuspocusContext) {
+    return checkpointService.loadDocument(context);
+  }
+
+  function storeDocument(
+    context: DocumentHocuspocusContext,
+    document: HocuspocusDocument,
+  ) {
+    return checkpointService.storeDocument({ ...context, document });
   }
 
   const hocuspocus = new Hocuspocus<DocumentHocuspocusContext>({
     async onAuthenticate({ documentName, token }) {
       return authorizeDocument(documentName, token);
     },
+    onLoadDocument({ context }) {
+      return loadDocument(context);
+    },
+    onStoreDocument({ document, lastContext }) {
+      if (!lastContext) {
+        throw new Error("Document checkpoint requires an authenticated context");
+      }
+
+      return storeDocument(lastContext, document);
+    },
+    afterUnloadDocument() {
+      resolveShutdownWaiters(hocuspocus);
+    },
+    debounce: 1_000,
     unloadImmediately: true,
   });
 
-  return { authorizeDocument, hocuspocus };
+  async function shutdown() {
+    if (hocuspocus.getDocumentsCount() === 0) {
+      return;
+    }
+
+    await new Promise<void>((resolve) => {
+      shutdownWaiters.add(resolve);
+      hocuspocus.closeConnections();
+      hocuspocus.flushPendingStores();
+      resolveShutdownWaiters(hocuspocus);
+    });
+  }
+
+  return { authorizeDocument, hocuspocus, loadDocument, shutdown, storeDocument };
 }
 
 function parseDocumentRoomName(documentName: string): DocumentRoomRef | null {

@@ -5,7 +5,8 @@ import {
   buildDocumentRealtimeServerUrl,
   createDocumentCollaborator,
   createDocumentRealtimeRoomName,
-  createDocumentSnapshotSaveQueue
+  createDocumentSnapshotSaveQueue,
+  shouldUseDocumentSnapshotFallback
 } from "./document-realtime.ts";
 
 test("문서 realtime room 이름은 Workspace와 문서 식별자를 포함한다", () => {
@@ -91,4 +92,9 @@ test("문서 snapshot 저장이 실패하면 대기 변경을 보존해 재시�
 
   assert.equal(attempts, 2);
   queue.destroy();
+});
+
+test("uses browser snapshot autosave only without a realtime transport", () => {
+  assert.equal(shouldUseDocumentSnapshotFallback(true), false);
+  assert.equal(shouldUseDocumentSnapshotFallback(false), true);
 });
