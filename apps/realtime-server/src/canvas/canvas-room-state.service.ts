@@ -74,6 +74,7 @@ export type CanvasRoomStateService = {
     room: CanvasRoomRef,
     operations: CanvasCheckpointSyncOperation[],
     result?: unknown,
+    options?: { advanceCheckpoint?: boolean },
   ) => void;
   redoLastHistory: (
     room: CanvasRoomRef,
@@ -160,6 +161,7 @@ function mergeLoadedRegions(
 }
 
 export function createCanvasRoomStateService(): CanvasRoomStateService {
+  let checkpointOperationSequence = 0;
   const loadedRegionsByRoom = new Map<string, CanvasRoomLoadedRegion[]>();
   const deletedTombstonesByRoom = new Map<string, Map<string, number | null>>();
   const dirtyShapeIdsByRoom = new Map<string, Set<string>>();
@@ -325,6 +327,7 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
 
       shapeCache.delete(normalizedShapeId);
       deletedTombstones.set(normalizedShapeId, readShapeRevision(deletedShape));
+      invalidateCheckpointOperationIds(roomName, normalizedShapeId);
       dirtyShapeIds.add(normalizedShapeId);
     });
   }
@@ -393,7 +396,9 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
 
     if (currentOperationId) return currentOperationId;
 
-    const nextOperationId = `checkpoint:${type}:${shapeId}:${Date.now()}`;
+    checkpointOperationSequence += 1;
+    const nextOperationId =
+      `checkpoint:${type}:${shapeId}:${Date.now()}:${checkpointOperationSequence}`;
 
     operationIds.set(operationKey, nextOperationId);
     return nextOperationId;
@@ -411,6 +416,22 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
     if (!operationIds.size) {
       checkpointOperationIdsByRoom.delete(roomName);
     }
+  }
+
+  function invalidateCheckpointOperationIds(roomName: string, shapeId: string) {
+    clearCheckpointOperationIds(roomName, shapeId);
+  }
+
+  function isCurrentCheckpointOperation(
+    roomName: string,
+    operation: CanvasCheckpointSyncOperation,
+  ) {
+    return (
+      checkpointOperationIdsByRoom
+        .get(roomName)
+        ?.get(`${operation.type}:${operation.shapeId}`) ===
+      operation.clientOperationId
+    );
   }
 
   function unwrapApiResponseData(value: unknown) {
@@ -614,8 +635,7 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
       shapeCache.set(shapeId, { cachedAt, shape: nextShape });
       if (options.markDirty) {
         tombstones.delete(shapeId);
-      }
-      if (options.markDirty) {
+        invalidateCheckpointOperationIds(roomName, shapeId);
         getRoomShapeIdSet(dirtyShapeIdsByRoom, roomName).add(shapeId);
       }
     });
@@ -705,6 +725,7 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
 
         shapeCache.delete(normalizedShapeId);
         deletedTombstones.set(normalizedShapeId, readShapeRevision(deletedShape));
+        invalidateCheckpointOperationIds(roomName, normalizedShapeId);
         dirtyShapeIds.add(normalizedShapeId);
       });
     },
@@ -838,7 +859,7 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
       return nextRegions;
     },
 
-    markCheckpointSucceeded(room, operations, result) {
+    markCheckpointSucceeded(room, operations, result, options = {}) {
       const roomName = createCanvasRoomName(room);
       const shapeCache = shapesByRoom.get(roomName);
       const dirtyShapeIds = dirtyShapeIdsByRoom.get(roomName);
@@ -846,6 +867,22 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
       const metadataById = readPersistedShapeMetadataById(result);
 
       operations.forEach((operation) => {
+        const isCurrentOperation = isCurrentCheckpointOperation(
+          roomName,
+          operation,
+        );
+
+        if (!isCurrentOperation) {
+          if (operation.type !== "delete" && shapeCache) {
+            applyPersistedShapeMetadata(
+              shapeCache,
+              operation.shapeId,
+              metadataById.get(operation.shapeId),
+            );
+          }
+          return;
+        }
+
         dirtyShapeIds?.delete(operation.shapeId);
         clearCheckpointOperationIds(roomName, operation.shapeId);
         if (operation.type === "delete") {
@@ -862,7 +899,11 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
         }
       });
 
-      if (operations.length) {
+      if (
+        operations.length &&
+        (options.advanceCheckpoint ?? true) &&
+        !dirtyShapeIds?.size
+      ) {
         checkpointVersionByRoom.set(
           roomName,
           (checkpointVersionByRoom.get(roomName) ?? 0) + 1,
