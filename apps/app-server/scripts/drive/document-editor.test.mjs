@@ -5,6 +5,9 @@ const require = createRequire(import.meta.url);
 const { DocumentService } = require(
   "../../dist/modules/drive/document.service.js"
 );
+const {
+  validateSaveDocumentSnapshotRequest
+} = require("../../dist/modules/drive/document.validation.js");
 
 const currentUserId = "11111111-1111-4111-8111-111111111111";
 const workspaceId = "22222222-2222-4222-8222-222222222222";
@@ -18,6 +21,7 @@ class FakeDatabase {
   constructor(rows) {
     this.rows = [...rows];
     this.queryOneCalls = [];
+    this.queryCalls = [];
     this.executeCalls = [];
     this.transactions = 0;
   }
@@ -28,6 +32,10 @@ class FakeDatabase {
   async queryOne(text, values = []) {
     this.queryOneCalls.push({ text, values });
     return this.rows.shift() ?? null;
+  }
+  async query(text, values = []) {
+    this.queryCalls.push({ text, values });
+    return [];
   }
   async execute(text, values = []) {
     this.executeCalls.push({ text, values });
@@ -124,6 +132,120 @@ await assert.rejects(
   (error) => error?.getStatus?.() === 409
 );
 
+assert.throws(
+  () =>
+    validateSaveDocumentSnapshotRequest({
+      expectedVersion: 0,
+      yjsState: "AQID",
+      contentJson: {
+        type: "doc",
+        content: [
+          {
+            type: "driveFileAttachment",
+            attrs: {
+              driveItemId: "66666666-6666-4666-8666-666666666666",
+              unsafeExtra: true
+            },
+            content: []
+          }
+        ]
+      }
+    }),
+  (error) => error?.getStatus?.() === 400
+);
+
+const attachmentDatabase = new FakeDatabase([
+  lockedDocumentRow(),
+  insertedSnapshotRow(),
+  updatedDocumentRow()
+]);
+attachmentDatabase.query = async (text, values = []) => {
+  attachmentDatabase.queryCalls.push({ text, values });
+  return [
+    {
+      id: "66666666-6666-4666-8666-666666666666"
+    }
+  ];
+};
+const attachmentActivityLogService = new FakeActivityLogService();
+const attachmentService = new DocumentService(
+  attachmentDatabase,
+  new FakeWorkspaceService(),
+  attachmentActivityLogService,
+  { createDocumentId: () => documentId, createSnapshotId: () => nextSnapshotId }
+);
+
+await attachmentService.saveDocumentSnapshot(currentUserId, workspaceId, documentId, {
+  expectedVersion: 0,
+  yjsState: "AQID",
+  contentJson: {
+    type: "doc",
+    content: [
+      {
+        type: "driveFileAttachment",
+        attrs: {
+          driveItemId: "66666666-6666-4666-8666-666666666666"
+        }
+      }
+    ]
+  }
+});
+
+assert.equal(attachmentDatabase.queryCalls.length, 1);
+assert.match(attachmentDatabase.queryCalls[0].text, /item_type = 'file'/);
+assert.match(attachmentDatabase.queryCalls[0].text, /upload_status = 'ready'/);
+assert.deepEqual(attachmentDatabase.queryCalls[0].values, [
+  workspaceId,
+  ["66666666-6666-4666-8666-666666666666"]
+]);
+assert.equal(
+  attachmentActivityLogService.calls[0].input.action,
+  "document_attachment_updated"
+);
+assert.equal(
+  attachmentActivityLogService.calls[0].input.metadata.data.driveItemId,
+  "66666666-6666-4666-8666-666666666666"
+);
+
+const detachedAttachmentDatabase = new FakeDatabase([
+  lockedDocumentRow({
+    currentSnapshotContentJson: {
+      type: "doc",
+      content: [
+        {
+          type: "driveFileAttachment",
+          attrs: { driveItemId: "66666666-6666-4666-8666-666666666666" }
+        }
+      ]
+    }
+  }),
+  insertedSnapshotRow(),
+  updatedDocumentRow()
+]);
+const detachedAttachmentActivityLogService = new FakeActivityLogService();
+const detachedAttachmentService = new DocumentService(
+  detachedAttachmentDatabase,
+  new FakeWorkspaceService(),
+  detachedAttachmentActivityLogService,
+  { createDocumentId: () => documentId, createSnapshotId: () => nextSnapshotId }
+);
+
+await detachedAttachmentService.saveDocumentSnapshot(currentUserId, workspaceId, documentId, {
+  expectedVersion: 0,
+  yjsState: "AQID",
+  contentJson: { type: "doc", content: [] }
+});
+
+assert.equal(detachedAttachmentDatabase.queryCalls.length, 0);
+assert.equal(
+  detachedAttachmentActivityLogService.calls[0].input.action,
+  "document_attachment_updated"
+);
+assert.equal(
+  detachedAttachmentActivityLogService.calls[0].input.metadata.data.operation,
+  "detached"
+);
+
 console.log("Document editor tests passed.");
 
 function documentBootstrapRow() {
@@ -145,11 +267,12 @@ function documentBootstrapRow() {
   };
 }
 
-function lockedDocumentRow({ currentVersion = 0 } = {}) {
+function lockedDocumentRow({ currentVersion = 0, currentSnapshotContentJson = null } = {}) {
   return {
     ...documentRow(),
     current_version: String(currentVersion),
-    name: "PILO 기획서"
+    name: "PILO 기획서",
+    current_snapshot_content_json: currentSnapshotContentJson
   };
 }
 

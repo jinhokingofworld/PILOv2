@@ -45,8 +45,15 @@ export function validateSaveDocumentSnapshotRequest(
     expectedVersion,
     yjsState,
     contentJson,
-    plainText: extractPlainText(contentJson)
+    plainText: extractPlainText(contentJson),
+    attachmentFileIds: extractDriveFileAttachmentIds(contentJson)
   };
+}
+
+export function extractDriveFileAttachmentIds(contentJson: DocumentJson): string[] {
+  const attachmentFileIds = new Set<string>();
+  collectDriveFileAttachmentIds(contentJson, attachmentFileIds);
+  return [...attachmentFileIds];
 }
 
 function readOptionalParentId(value: unknown): string | null {
@@ -150,4 +157,46 @@ function collectText(value: unknown, textParts: string[]): void {
   const record = value as Record<string, unknown>;
   if (typeof record.text === "string") textParts.push(record.text);
   if (Array.isArray(record.content)) collectText(record.content, textParts);
+}
+
+function collectDriveFileAttachmentIds(value: unknown, attachmentFileIds: Set<string>): void {
+  if (Array.isArray(value)) {
+    for (const item of value) collectDriveFileAttachmentIds(item, attachmentFileIds);
+    return;
+  }
+  if (typeof value !== "object" || value === null) return;
+
+  const record = value as Record<string, unknown>;
+  if (record.type === "driveFileAttachment") {
+    if (
+      !hasOnlyKeys(record, ["type", "attrs"]) ||
+      typeof record.attrs !== "object" ||
+      record.attrs === null ||
+      Array.isArray(record.attrs)
+    ) {
+      throw badRequest("Document attachment is invalid");
+    }
+
+    const attrs = record.attrs;
+    const attachmentAttrs = attrs as Record<string, unknown>;
+    if (!hasOnlyKeys(attachmentAttrs, ["driveItemId"])) {
+      throw badRequest("Document attachment is invalid");
+    }
+
+    const driveItemId = attachmentAttrs.driveItemId;
+
+    if (typeof driveItemId !== "string" || !UUID_PATTERN.test(driveItemId)) {
+      throw badRequest("Document attachment is invalid");
+    }
+
+    attachmentFileIds.add(driveItemId);
+  }
+
+  if (Array.isArray(record.content)) {
+    collectDriveFileAttachmentIds(record.content, attachmentFileIds);
+  }
+}
+
+function hasOnlyKeys(record: Record<string, unknown>, allowedKeys: string[]): boolean {
+  return Object.keys(record).every((key) => allowedKeys.includes(key));
 }
