@@ -162,8 +162,8 @@ assert.match(githubConnectLayout, /onCancelDeleteInstallation/);
 assert.match(githubConnectLayout, /onConfirmDeleteInstallation/);
 assert.doesNotMatch(githubConnectLayout, /GithubConnectSummary/);
 assert.doesNotMatch(githubConnectLayout, /summary-strip/);
-assert.match(githubConnectLayout, /main-grid/);
-assert.match(githubConnectLayout, /main-grid grid items-start/);
+assert.match(githubConnectLayout, /@container/);
+assert.doesNotMatch(githubConnectLayout, /min-h-\[calc\(100vh-3\.5rem\)\]/);
 assert.doesNotMatch(githubConnectLayout, /PILO GitHub Connect/);
 assert.match(githubConnectPrimitives, /GithubConnectPanel/);
 assert.match(githubConnectPrimitives, /GithubConnectPill/);
@@ -234,3 +234,4 @@ await import("../../src/features/github-integration/repository-scoped-sync.test.
 await import("../../src/features/github-integration/repository-pagination.test.mjs");
 await import("../../src/features/github-integration/github-settings-status.test.mjs");
 await import("../../src/features/github-integration/github-project-oauth-scope.test.mjs");
+await import("../../src/features/github-integration/github-settings-navigation.test.mjs");
