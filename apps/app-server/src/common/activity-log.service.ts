@@ -52,7 +52,13 @@ export const ACTIVITY_LOG_ACTIONS = [
   "pilo_issue_deleted",
   "calendar_event_created",
   "calendar_event_updated",
-  "calendar_event_deleted"
+  "calendar_event_deleted",
+  "document_created",
+  "document_content_updated",
+  "document_renamed",
+  "document_moved",
+  "document_attachment_updated",
+  "document_deleted"
 ] as const;
 
 export type ActivityLogAction = (typeof ACTIVITY_LOG_ACTIONS)[number];

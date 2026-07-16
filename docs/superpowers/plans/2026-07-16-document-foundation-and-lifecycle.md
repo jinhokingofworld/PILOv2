@@ -37,10 +37,10 @@
 - [ ] registry가 여섯 action을 허용하고 임의의 document action은 거부하는 test를 추가한다.
 - [ ] `apps/app-server`에서 `npm run lint`, `npm test`를 실행한다. schema/service 작업 전에 typecheck와 Activity Log 계약 test가 통과해야 한다.
 
-## 작업 2: Drive document type과 durable storage를 위한 migration 072 추가
+## 작업 2: Drive document type과 durable storage를 위한 migration 073 추가
 
 **대상 파일:**
-- 생성: `db/migrations/072_create_workspace_documents.sql`
+- 생성: `db/migrations/073_create_workspace_documents.sql`
 - 수정: `db/README.md` (migration index를 관리하는 경우만)
 - 수정: `apps/app-server/scripts/test.mjs`
 - 생성: `apps/app-server/scripts/drive/document-schema.test.mjs`
@@ -99,7 +99,7 @@
 
 ## 작업 5: 리뷰와 통합 확인
 
-- [ ] `docs/api/drive-api.md`, `docs/ActivityLogRegistry.md`, TypeScript registry, migration `072`가 action/request/response/document item 규칙에서 일치하는지 확인한다.
+- [ ] `docs/api/drive-api.md`, `docs/ActivityLogRegistry.md`, TypeScript registry, migration `073`이 action/request/response/document item 규칙에서 일치하는지 확인한다.
 - [ ] `git diff --check`, `apps/app-server`의 `npm test`, `apps/frontend`의 `npm test`를 실행한다.
 - [ ] owner/member로 nested folder 문서 생성, 목록/열기, rename, root 이동, delete를 수동 QA하고 S3 upload object가 생기지 않았는지, 각 mutation당 정확히 한 개의 Activity Log가 남았는지 확인한다.
 - [ ] 체크된 작업 단위마다 repository convention에 맞춰 commit하고 하나의 focused PR을 연다. Tiptap/Yjs, PDF, realtime, RAG, MeetingReport 변경은 넣지 않는다.
