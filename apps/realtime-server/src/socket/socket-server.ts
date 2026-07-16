@@ -10,6 +10,9 @@ import { createBoardRoomService } from "../board/board-room.service";
 import { createBoardSourceRoomService } from "../board/board-source-room.service";
 import { registerBoardSocketHandlers } from "../board/board-socket-handlers";
 import { registerBoardSourceSocketHandlers } from "../board/board-source-socket-handlers";
+import { createChatAccessService } from "../chat/chat-access.service";
+import { createChatFanOut } from "../chat/chat-fan-out";
+import { registerChatSocketHandlers } from "../chat/chat-socket-handlers";
 import { createGithubSourceAccessService } from "../github-source/github-source-access.service";
 import { createGithubSourceFanOut } from "../github-source/github-source-fan-out";
 import { createGithubSourceRoomService } from "../github-source/github-source-room.service";
@@ -151,6 +154,7 @@ const MEETING_STATE_REDIS_CHANNEL = "meeting:state-events";
 const BOARD_INVALIDATION_REDIS_CHANNEL = "board:invalidations";
 const BOARD_SOURCE_REDIS_CHANNEL = "board:source-events";
 const GITHUB_SOURCE_INVALIDATION_REDIS_CHANNEL = "github:source-invalidations";
+const CHAT_REDIS_CHANNEL = "chat:events";
 
 function createConflictDraftShapeLockId(
   reviewSessionId: string,
@@ -876,6 +880,8 @@ export async function createRealtimeSocketServer({
   const workspacePresenceAccessService =
     createWorkspacePresenceAccessService(database);
   const workspacePresenceService = createWorkspacePresenceService();
+  const chatAccessService = createChatAccessService(database);
+  const chatFanOut = createChatFanOut({ io });
   const boardRoomService = createBoardRoomService({
     accessService: boardAccessService,
   });
@@ -972,6 +978,13 @@ export async function createRealtimeSocketServer({
         },
       )
     : null;
+  const unsubscribeChatEvents = redisAdapter
+    ? await redisAdapter.subscribe(CHAT_REDIS_CHANNEL, (payload) => {
+        if (!chatFanOut.fanOut(payload)) {
+          console.error("Chat Redis payload is invalid");
+        }
+      })
+    : null;
   const unsubscribePrReviewDecisions = redisAdapter
     ? await redisAdapter.subscribe(PR_REVIEW_DECISION_REDIS_CHANNEL, (payload) => {
         if (!isPrReviewDecisionUpdatedEvent(payload)) {
@@ -1045,6 +1058,10 @@ export async function createRealtimeSocketServer({
   io.on("connection", (socket) => {
     const authedSocket = socket as AuthedSocket;
 
+    registerChatSocketHandlers({
+      accessService: chatAccessService,
+      socket,
+    });
     registerWorkspacePresenceSocketHandlers({
       accessService: workspacePresenceAccessService,
       io,
@@ -1829,6 +1846,7 @@ export async function createRealtimeSocketServer({
       await unsubscribeBoardInvalidations?.();
       await unsubscribeBoardSourceEvents?.();
       await unsubscribeGithubSourceInvalidations?.();
+      await unsubscribeChatEvents?.();
       await unsubscribePrReviewDecisions?.();
       await unsubscribePrReviewRoomDeleted?.();
       await unsubscribePrReviewConflictDrafts?.();
