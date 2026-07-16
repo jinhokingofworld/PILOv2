@@ -212,7 +212,8 @@ function buildFileShape(input: {
     riskLevel: file.riskLevel,
     reviewStatus: file.reviewStatus,
     conflictState: "none",
-    conflictReason: null
+    conflictReason: null,
+    pinned: getExistingPinnedState(existing)
   };
   const values: CompleteShapeWriteValues = {
     parentShapeId,
@@ -241,6 +242,14 @@ function buildFileShape(input: {
   };
 
   return { id, values };
+}
+
+function getExistingPinnedState(shape: CanvasShapeRow | undefined): boolean {
+  if (!shape || !isRecord(shape.raw_shape) || !isRecord(shape.raw_shape.props)) {
+    return false;
+  }
+
+  return shape.raw_shape.props.pinned === true;
 }
 
 function buildRelationShape(input: {
