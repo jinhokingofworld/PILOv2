@@ -2416,13 +2416,14 @@ export function PiloTldrawCanvas({
       x: event.clientX,
       y: event.clientY,
     });
-    const isInsideRemoteLockedShape = isPointInsideRemoteLockedShape(
-      editor,
-      pagePoint,
-      remoteBusyShapeIdsRef.current,
-    );
 
     if (placementRequestRef.current) {
+      const isInsideRemoteLockedShape = isPointInsideRemoteLockedShape(
+        editor,
+        pagePoint,
+        remoteBusyShapeIdsRef.current,
+      );
+
       if (isInsideRemoteLockedShape) {
         event.preventDefault();
         event.stopPropagation();
@@ -2445,12 +2446,6 @@ export function PiloTldrawCanvas({
       currentToolId === "select" || currentToolId.startsWith("select.");
 
     if (!isSelectTool) {
-      if (isInsideRemoteLockedShape) {
-        event.preventDefault();
-        event.stopPropagation();
-        showCollaborationNotice(CANVAS_COLLABORATION_GUARD_MESSAGE);
-      }
-
       return;
     }
 

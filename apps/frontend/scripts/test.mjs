@@ -1090,6 +1090,14 @@ assert.match(piloTldrawCanvas, /remoteBusyShapeIdsRef/);
 assert.match(piloTldrawCanvas, /remoteDeleteBlockedShapeIdsRef/);
 assert.match(
   piloTldrawCanvas,
+  /if \(!isSelectTool\) \{\s*return;\s*\}/,
+);
+assert.doesNotMatch(
+  piloTldrawCanvas,
+  /if \(!isSelectTool\) \{\s*if \(isInsideRemoteLockedShape\)/,
+);
+assert.match(
+  piloTldrawCanvas,
   /deleteSelectedShapes\(editor, remoteDeleteBlockedShapeIdsRef\.current\)/,
 );
 assert.match(piloTldrawCanvas, /isPiloErasableShape/);
