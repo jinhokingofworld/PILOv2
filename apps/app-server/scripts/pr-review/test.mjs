@@ -541,3 +541,4 @@ await import("./semantic-graph-candidates.test.mjs");
 await import("./semantic-graph-validator.test.mjs");
 await import("./review-priority.test.mjs");
 await import("./canvas-materializer.test.mjs");
+await import("./activity-log.test.mjs");
