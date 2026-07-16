@@ -810,6 +810,12 @@ Request:
 - 같은 key의 operation이 유효한 lease를 가진 `processing` 상태면 `409 CONFLICT`를 반환한다.
 - `retryable` 상태이거나 `processing` lease가 만료된 operation은 마지막 완료 checkpoint부터 이어서 처리한다.
 - 서버는 Board가 참조하는 repository와 ProjectV2를 사용한다.
+- Meeting 후속 작업의 Pilo issue 선택 목록은 이 생성 API가 사용하는 target 조회와 검증을
+  그대로 재사용한다. repository와 ProjectV2 Status metadata가 유효하고, 매핑된 Status
+  option이 있으면 GitHub option id까지 존재하는 Column만 생성 가능 대상으로 본다.
+- 생성 가능한 Column이 하나도 없는 Board는 선택 목록에서 제외한다. 로컬 `Unmapped`
+  Column처럼 Status option 자체가 없는 Column은 기존 생성 검증과 동일하게 허용한다.
+- 선택 목록은 Board id를 identity로 사용하며 Board 이름으로 중복 제거하지 않는다.
 - `title`은 필수 문자열이며 trim 후 빈 문자열일 수 없고 최대 255자다.
 - `body`는 선택 문자열이다.
 - `columnId`는 필수 양의 정수 문자열이며 같은 board에 속한 `board_columns.id`여야 한다.
