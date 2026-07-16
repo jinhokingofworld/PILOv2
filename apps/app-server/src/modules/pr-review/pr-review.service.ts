@@ -10,7 +10,10 @@ import {
   DatabaseService,
   type DatabaseTransaction
 } from "../../database/database.service";
-import { ActivityLogService } from "../../common/activity-log.service";
+import {
+  ActivityLogService,
+  type ActivityLogInput
+} from "../../common/activity-log.service";
 import { WorkspaceService } from "../workspace/workspace.service";
 import {
   parseUnifiedDiffPatch,
@@ -72,6 +75,7 @@ import {
 import type { CanvasShapeRow } from "../canvas/canvas.types";
 import {
   buildFileReviewDecisionCreatedActivityLog,
+  buildPrReviewConflictResolutionAppliedActivityLog,
   buildPrReviewSessionCreatedActivityLog,
   buildReviewSubmissionTerminalActivityLog
 } from "./pr-review-activity-log";
@@ -163,6 +167,11 @@ interface PrReviewAnalysisJobInputRow extends QueryResultRow {
 }
 
 interface PrReviewAnalysisJobResultRow extends PrReviewAnalysisJobInputRow {}
+
+type SuccessorRevisionResult = {
+  created: boolean;
+  jobId: string | null;
+};
 
 interface PrReviewAnalysisJobQueryRunner {
   queryOne<T extends QueryResultRow = QueryResultRow>(
@@ -2547,16 +2556,35 @@ export class PrReviewService {
       );
     }
 
+    const conflictActivityLog =
+      buildPrReviewConflictResolutionAppliedActivityLog({
+        currentUserId,
+        workspaceId,
+        pullRequestId: session.pull_request_id,
+        reviewSessionId: session.id,
+        resolvedFileCount: resolvedFiles.length,
+        headShaAfter: applyResult.headShaAfter,
+        commitSha: applyResult.commitSha,
+        conflictStatusAfter: refreshedConflict.conflictStatus
+      });
+    let successorRevision: SuccessorRevisionResult = {
+      created: false,
+      jobId: null
+    };
     let successorRevisionCreated = true;
     try {
-      await this.createSuccessorReviewRevisionAfterConflictApply({
+      successorRevision = await this.createSuccessorReviewRevisionAfterConflictApply({
         currentUserId,
         workspaceId,
         previousSession: session,
         headShaAfter: applyResult.headShaAfter,
         conflictStatus: refreshedConflict.conflictStatus,
-        conflictCheckedAt: refreshedConflict.checkedAt
+        conflictCheckedAt: refreshedConflict.checkedAt,
+        conflictActivityLog
       });
+      if (successorRevision.jobId) {
+        await this.analysisJobPublisher.publishCreatedJob(successorRevision.jobId);
+      }
     } catch {
       successorRevisionCreated = false;
       this.logger.warn(
@@ -2564,15 +2592,21 @@ export class PrReviewService {
       );
     }
 
-    const appliedFileByPath = new Map(
-      applyResult.files.map((file) => [file.filePath, file])
-    );
-
     void this.clearConflictDraftsAfterApply({
       workspaceId,
       session,
       reviewFileIds: resolvedFiles.map(file => file.reviewFileId)
     });
+
+    if (!successorRevision.created) {
+      await this.database.transaction(transaction =>
+        this.activityLogService.append(transaction, conflictActivityLog)
+      );
+    }
+
+    const appliedFileByPath = new Map(
+      applyResult.files.map((file) => [file.filePath, file])
+    );
 
     return {
       reviewSessionId: session.id,
@@ -2692,6 +2726,21 @@ export class PrReviewService {
       );
     }
 
+    const conflictActivityLog =
+      buildPrReviewConflictResolutionAppliedActivityLog({
+        currentUserId,
+        workspaceId,
+        pullRequestId: file.pull_request_id,
+        reviewSessionId: file.session_id,
+        resolvedFileCount: 1,
+        headShaAfter: applyResult.headShaAfter,
+        commitSha: applyResult.commitSha,
+        conflictStatusAfter: refreshedConflict.conflictStatus
+      });
+    let successorRevision: SuccessorRevisionResult = {
+      created: false,
+      jobId: null
+    };
     let successorRevisionCreated = true;
     try {
       const previousSession = await this.findReviewSession(
@@ -2701,14 +2750,18 @@ export class PrReviewService {
       if (!previousSession) {
         throw notFound("Review session not found");
       }
-      await this.createSuccessorReviewRevisionAfterConflictApply({
+      successorRevision = await this.createSuccessorReviewRevisionAfterConflictApply({
         currentUserId,
         workspaceId,
         previousSession,
         headShaAfter: applyResult.headShaAfter,
         conflictStatus: refreshedConflict.conflictStatus,
-        conflictCheckedAt: refreshedConflict.checkedAt
+        conflictCheckedAt: refreshedConflict.checkedAt,
+        conflictActivityLog
       });
+      if (successorRevision.jobId) {
+        await this.analysisJobPublisher.publishCreatedJob(successorRevision.jobId);
+      }
     } catch {
       successorRevisionCreated = false;
       this.logger.warn(
@@ -2721,6 +2774,12 @@ export class PrReviewService {
       session,
       reviewFileIds: [file.id]
     });
+
+    if (!successorRevision.created) {
+      await this.database.transaction(transaction =>
+        this.activityLogService.append(transaction, conflictActivityLog)
+      );
+    }
 
     return {
       reviewFileId: file.id,
@@ -3051,7 +3110,8 @@ export class PrReviewService {
     headShaAfter: string;
     conflictStatus: PrReviewConflictStatus;
     conflictCheckedAt: string | null;
-  }): Promise<void> {
+    conflictActivityLog: ActivityLogInput;
+  }): Promise<SuccessorRevisionResult> {
     if (input.previousSession.head_sha === input.headShaAfter) {
       throw conflictError("Successor review revision head SHA is stale");
     }
@@ -3065,7 +3125,7 @@ export class PrReviewService {
       if (existing.room_id !== input.previousSession.room_id) {
         throw conflictError("Successor review revision room does not match");
       }
-      return;
+      return { created: false, jobId: null };
     }
 
     try {
@@ -3092,10 +3152,13 @@ export class PrReviewService {
             reviewSessionId: session.id
           })
         );
+        await this.activityLogService.append(
+          transaction,
+          input.conflictActivityLog
+        );
         return { session, jobId: job.id };
       });
-      await this.analysisJobPublisher.publishCreatedJob(created.jobId);
-      return;
+      return { created: true, jobId: created.jobId };
     } catch (error) {
       if (!this.isReviewSessionCreationUniqueConstraintViolation(error)) {
         throw error;
@@ -3110,6 +3173,7 @@ export class PrReviewService {
     if (!concurrent || concurrent.room_id !== input.previousSession.room_id) {
       throw conflictError("Successor review revision head SHA is stale");
     }
+    return { created: false, jobId: null };
   }
 
   private async refreshPendingReviewSessionConflictStatus<

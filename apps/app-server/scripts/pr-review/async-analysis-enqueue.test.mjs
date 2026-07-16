@@ -560,7 +560,26 @@ try {
     const pullRequestId = "66666666-6666-6666-6666-666666666666";
     const userId = "11111111-1111-1111-1111-111111111111";
 
-    await service.createSuccessorReviewRevisionAfterConflictApply({
+    const conflictActivityLog = {
+      workspaceId: payload.workspaceId,
+      actor: { type: "user", userId },
+      action: "pr_review_conflict_resolution_applied",
+      target: { type: "pull_request", id: pullRequestId },
+      dedupeKey:
+        `pr-review:pr_review_conflict_resolution_applied:${pullRequestId}:conflict-commit-sha`,
+      metadata: {
+        version: 1,
+        summary: "PR conflict 파일 1개를 해결했습니다.",
+        data: {
+          reviewSessionId: "99999999-9999-4999-8999-999999999999",
+          resolvedFileCount: 1,
+          headShaAfter: payload.headSha,
+          commitSha: "conflict-commit-sha",
+          conflictStatusAfter: "clean"
+        }
+      }
+    };
+    const result = await service.createSuccessorReviewRevisionAfterConflictApply({
       currentUserId: userId,
       workspaceId: payload.workspaceId,
       previousSession: {
@@ -570,14 +589,26 @@ try {
       },
       headShaAfter: payload.headSha,
       conflictStatus: "clean",
-      conflictCheckedAt: "2026-07-11T00:00:00.000Z"
+      conflictCheckedAt: "2026-07-11T00:00:00.000Z",
+      conflictActivityLog
     });
 
-    assert.deepEqual(database.transactions[0].events, ["session", "job", "activity"]);
-    assert.equal(activityLog.calls.length, 1);
+    assert.deepEqual(result, { created: true, jobId: payload.jobId });
+    assert.deepEqual(database.transactions[0].events, [
+      "session",
+      "job",
+      "activity",
+      "activity"
+    ]);
+    assert.equal(activityLog.calls.length, 2);
     assert.equal(activityLog.calls[0].input.action, "pr_review_session_created");
     assert.deepEqual(activityLog.calls[0].input.metadata.data, { pullRequestId });
-    assert.deepEqual(publisher.calls, [payload.jobId]);
+    assert.equal(
+      activityLog.calls[1].input.action,
+      "pr_review_conflict_resolution_applied"
+    );
+    assert.strictEqual(activityLog.calls[1].input, conflictActivityLog);
+    assert.deepEqual(publisher.calls, []);
   }
 
   {
