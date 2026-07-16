@@ -32,11 +32,11 @@ type UseCanvasShapePersistenceOptions = {
     deletedShapeIds: string[];
     upsertShapes: PiloCanvasFreeformShape[];
   }) => boolean;
+  onLoadedShapesMerged?: (shapes: PiloCanvasFreeformShape[]) => void;
   onShapeSyncError?: (error: unknown) => void;
   pendingLocalShapeVersionsRef: RuntimeRef<Map<string, number>>;
   persistThroughRoomState?: boolean;
   remoteShapeRevisionRef: RuntimeRef<Map<string, number>>;
-  setCanvasHydrationVersion: (updater: (version: number) => number) => void;
   setFreeformShapes: (
     updater:
       | PiloCanvasFreeformShape[]
@@ -55,12 +55,12 @@ export function useCanvasShapePersistence({
   freeformShapesRef,
   localShapeVersionRef,
   onLocalShapeSyncIdle,
+  onLoadedShapesMerged,
   onRoomShapePatch,
   onShapeSyncError,
   pendingLocalShapeVersionsRef,
   persistThroughRoomState = false,
   remoteShapeRevisionRef,
-  setCanvasHydrationVersion,
   setFreeformShapes,
   shapeDetailCacheRef,
   shapeSyncQueueRef,
@@ -142,18 +142,15 @@ export function useCanvasShapePersistence({
       }
 
       if (storageMode === "api" && canvasClient) {
-        const pendingVersions = markPendingLocalShapeChanges(
+        markPendingLocalShapeChanges(
           freeformShapesRef.current,
           nextFreeformShapes,
         );
-        if (persistThroughRoomState) {
-          clearPendingLocalShapeChanges(pendingVersions);
-        }
       }
 
       freeformShapesRef.current = nextFreeformShapes;
     },
-    [canvasClient, freeformShapesRef, persistThroughRoomState, storageMode],
+    [canvasClient, freeformShapesRef, storageMode],
   );
 
   const mergeLoadedFreeformShapes = useCallback(
@@ -183,13 +180,13 @@ export function useCanvasShapePersistence({
 
       freeformShapesRef.current = mergedShapes;
       setFreeformShapes(mergedShapes);
-      setCanvasHydrationVersion((version) => version + 1);
+      onLoadedShapesMerged?.(nextLoadedShapes);
     },
     [
       freeformShapesRef,
       deletedShapeIdsRef,
       pendingLocalShapeVersionsRef,
-      setCanvasHydrationVersion,
+      onLoadedShapesMerged,
       setFreeformShapes,
     ],
   );

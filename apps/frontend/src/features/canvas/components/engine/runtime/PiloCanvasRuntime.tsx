@@ -16,6 +16,7 @@ import {
   PiloTldrawCanvas,
   type PiloCanvasActions,
   type PiloCanvasHistoryState,
+  type PiloCanvasShapePatch,
   type PiloCanvasSnapState,
 } from "../surface/PiloTldrawCanvas";
 import type {
@@ -89,6 +90,11 @@ type DeferredRemoteOperation = {
   deferredAt: number;
   operation: CanvasShapeOperationPayload;
   reason: DeferredRemoteOperationReason;
+};
+
+type DeferredRoomShapeChange = {
+  respectViewport: boolean;
+  shape: PiloCanvasFreeformShape | null;
 };
 
 type CanvasShapeSerializableMetadata = {
@@ -186,6 +192,39 @@ function isRemoteFrameCollapseProtected({
 
   return [...descendantIds].some((shapeId) =>
     protectedShapeIds.has(shapeId),
+  );
+}
+
+function isRemoteShapeDeletionProtected({
+  currentShapes,
+  protectedShapeIds,
+  shapeDetailCache,
+  shapeId,
+}: {
+  currentShapes: PiloCanvasFreeformShape[];
+  protectedShapeIds: ReadonlySet<string>;
+  shapeDetailCache: Map<string, PiloCanvasFreeformShape>;
+  shapeId: string;
+}) {
+  if (protectedShapeIds.has(shapeId)) {
+    return true;
+  }
+
+  const shape =
+    currentShapes.find((candidate) => getFreeformShapeId(candidate) === shapeId) ??
+    shapeDetailCache.get(shapeId);
+
+  if (shape?.type !== "frame") {
+    return false;
+  }
+
+  const descendantIds = collectCanvasFrameDescendantShapeIds(
+    [...shapeDetailCache.values(), ...currentShapes],
+    shapeId,
+  );
+
+  return [...descendantIds].some((descendantId) =>
+    protectedShapeIds.has(descendantId),
   );
 }
 
@@ -320,10 +359,14 @@ function PiloCanvasRuntimeInner({
   const deferredRemoteOperationsRef = useRef(
     new Map<number, DeferredRemoteOperation>(),
   );
-  const deferredRoomFrameShapesRef = useRef(
-    new Map<string, PiloCanvasFreeformShape>(),
+  const deferredRoomShapeChangesRef = useRef(
+    new Map<string, DeferredRoomShapeChange>(),
   );
-  const flushDeferredRoomFrameShapesRef = useRef<() => void>(() => {});
+  const flushDeferredRoomShapeChangesRef = useRef<() => void>(() => {});
+  const pendingSurfaceShapeChangesRef = useRef(
+    new Map<string, PiloCanvasFreeformShape | null>(),
+  );
+  const pendingRoomShapeAckCountsRef = useRef(new Map<string, number>());
   const localInteractionStateRef = useRef<PiloCanvasLocalInteractionState>(
     initialLocalInteractionState,
   );
@@ -331,6 +374,11 @@ function PiloCanvasRuntimeInner({
   const remoteShapeContentHashRef = useRef(new Map<string, string>());
   const localShapeVersionRef = useRef(0);
   const [canvasHydrationVersion, setCanvasHydrationVersion] = useState(0);
+  const [canvasShapePatchVersion, setCanvasShapePatchVersion] = useState(0);
+  const [
+    pendingRemoteFrameChildrenRequestVersion,
+    setPendingRemoteFrameChildrenRequestVersion,
+  ] = useState(0);
   const [cameraRestoreVersion, setCameraRestoreVersion] = useState(0);
   const currentRealtimeUserId = realtime?.currentUser?.userId ?? null;
   const showCanvasSyncNotice = useCallback(
@@ -350,6 +398,69 @@ function PiloCanvasRuntimeInner({
     pendingLocalShapeVersionsRef.current.delete(shapeId);
     remoteShapeContentHashRef.current.delete(shapeId);
   }, []);
+  const queueCanvasSurfaceShapePatch = useCallback(
+    (patch: PiloCanvasShapePatch) => {
+      patch.deletedShapeIds.forEach((shapeId) => {
+        pendingSurfaceShapeChangesRef.current.set(shapeId, null);
+      });
+      patch.upsertShapes.forEach((shape) => {
+        const shapeId = getFreeformShapeId(shape);
+
+        if (shapeId) {
+          pendingSurfaceShapeChangesRef.current.set(shapeId, shape);
+        }
+      });
+
+      if (pendingSurfaceShapeChangesRef.current.size) {
+        setCanvasShapePatchVersion((version) => version + 1);
+      }
+    },
+    [],
+  );
+  const consumeCanvasSurfaceShapePatch = useCallback(() => {
+    const deletedShapeIds: string[] = [];
+    const upsertShapes: PiloCanvasFreeformShape[] = [];
+
+    pendingSurfaceShapeChangesRef.current.forEach((shape, shapeId) => {
+      if (shape) {
+        upsertShapes.push(shape);
+      } else {
+        deletedShapeIds.push(shapeId);
+      }
+    });
+    pendingSurfaceShapeChangesRef.current.clear();
+
+    return {
+      deletedShapeIds,
+      upsertShapes,
+    };
+  }, []);
+  const isCanvasShapePatchProtected = useCallback((shapeId: string) => {
+    return (
+      localInteractionStateRef.current.protectedShapeIds.includes(shapeId) ||
+      pendingLocalShapeVersionsRef.current.has(shapeId) ||
+      pendingRoomShapeAckCountsRef.current.has(shapeId)
+    );
+  }, []);
+  const queueRemoteFrameChildrenRequests = useCallback(
+    (frameIds: Iterable<string>) => {
+      let addedRequest = false;
+
+      for (const frameId of frameIds) {
+        if (pendingRemoteFrameChildrenRequestRef.current.has(frameId)) {
+          continue;
+        }
+
+        pendingRemoteFrameChildrenRequestRef.current.add(frameId);
+        addedRequest = true;
+      }
+
+      if (addedRequest) {
+        setPendingRemoteFrameChildrenRequestVersion((version) => version + 1);
+      }
+    },
+    [],
+  );
   const catchUpCanvasOperations = useCallback(
     async (afterSeq: number, signal?: AbortSignal) => {
       if (storageMode !== "api" || !canvasClient?.listOperationsAfterSeq) {
@@ -378,6 +489,8 @@ function PiloCanvasRuntimeInner({
       let nextFreeformShapes = freeformShapesRef.current;
       let hasVisibleShapeChange = false;
       const expandedFrameIds = new Set<string>();
+      const surfaceDeletedShapeIds = new Set<string>();
+      const surfaceUpsertShapeIds = new Set<string>();
 
       sortedOperations.forEach((operation) => {
         deferredRemoteOperationsRef.current.delete(operation.opSeq);
@@ -488,13 +601,25 @@ function PiloCanvasRuntimeInner({
           return;
         }
 
+        if (operation.operationType === "delete") {
+          surfaceDeletedShapeIds.add(operation.shapeId);
+          surfaceUpsertShapeIds.delete(operation.shapeId);
+        } else {
+          result.loadedShapeIds.forEach((shapeId) => {
+            surfaceDeletedShapeIds.delete(shapeId);
+            surfaceUpsertShapeIds.add(shapeId);
+          });
+          result.unloadedShapeIds.forEach((shapeId) => {
+            surfaceUpsertShapeIds.delete(shapeId);
+            surfaceDeletedShapeIds.add(shapeId);
+          });
+        }
+
         nextFreeformShapes = result.nextShapes;
         hasVisibleShapeChange = true;
       });
 
-      expandedFrameIds.forEach((frameId) => {
-        pendingRemoteFrameChildrenRequestRef.current.add(frameId);
-      });
+      queueRemoteFrameChildrenRequests(expandedFrameIds);
 
       if (!hasVisibleShapeChange) {
         return;
@@ -502,9 +627,22 @@ function PiloCanvasRuntimeInner({
 
       freeformShapesRef.current = nextFreeformShapes;
       setFreeformShapes(nextFreeformShapes);
-      setCanvasHydrationVersion((version) => version + 1);
+      queueCanvasSurfaceShapePatch({
+        deletedShapeIds: [...surfaceDeletedShapeIds],
+        upsertShapes: nextFreeformShapes.filter((shape) => {
+          const shapeId = getFreeformShapeId(shape);
+
+          return shapeId ? surfaceUpsertShapeIds.has(shapeId) : false;
+        }),
+      });
     },
-    [currentRealtimeUserId, markShapeDeleted, storageMode],
+    [
+      currentRealtimeUserId,
+      markShapeDeleted,
+      queueCanvasSurfaceShapePatch,
+      queueRemoteFrameChildrenRequests,
+      storageMode,
+    ],
   );
   const flushDeferredRemoteOperations = useCallback(() => {
     if (!deferredRemoteOperationsRef.current.size) {
@@ -521,7 +659,7 @@ function PiloCanvasRuntimeInner({
 
       if (!state.protectedShapeIds.length) {
         flushDeferredRemoteOperations();
-        flushDeferredRoomFrameShapesRef.current();
+        flushDeferredRoomShapeChangesRef.current();
       }
     },
     [flushDeferredRemoteOperations],
@@ -590,8 +728,21 @@ function PiloCanvasRuntimeInner({
       result.unloadedShapeIds.forEach((shapeId) => {
         unloadedShapeIdsRef.current.add(shapeId);
       });
-      result.expandedFrameIds.forEach((frameId) => {
-        pendingRemoteFrameChildrenRequestRef.current.add(frameId);
+      queueRemoteFrameChildrenRequests(result.expandedFrameIds);
+
+      const surfaceDeletedShapeIds = new Set([
+        ...patch.deletedShapeIds,
+        ...result.unloadedShapeIds,
+      ]);
+      const surfaceLoadedShapeIds = new Set(result.loadedShapeIds);
+      const surfaceUpsertShapes = result.nextShapes.filter((shape) => {
+        const shapeId = getFreeformShapeId(shape);
+
+        return shapeId ? surfaceLoadedShapeIds.has(shapeId) : false;
+      });
+      queueCanvasSurfaceShapePatch({
+        deletedShapeIds: [...surfaceDeletedShapeIds],
+        upsertShapes: surfaceUpsertShapes,
       });
 
       if (!result.changed) {
@@ -600,23 +751,47 @@ function PiloCanvasRuntimeInner({
 
       freeformShapesRef.current = result.nextShapes;
       setFreeformShapes(result.nextShapes);
-      setCanvasHydrationVersion((version) => version + 1);
     },
-    [markShapeDeleted],
+    [
+      markShapeDeleted,
+      queueCanvasSurfaceShapePatch,
+      queueRemoteFrameChildrenRequests,
+    ],
   );
   const applyRoomShapePatch = useCallback(
     (
       patch: {
+        actorUserId?: string;
         deletedShapeIds: string[];
         upsertShapes: Record<string, unknown>[];
       },
       options: { respectViewport?: boolean } = {},
     ) => {
       const deletedShapeIdSet = new Set(patch.deletedShapeIds);
+      const respectViewport = options.respectViewport ?? false;
+      const patchedShapeIds = new Set([
+        ...patch.deletedShapeIds,
+        ...patch.upsertShapes.flatMap((shape) =>
+          typeof shape.id === "string" ? [shape.id] : [],
+        ),
+      ]);
 
-      patch.deletedShapeIds.forEach((shapeId) => {
-        deferredRoomFrameShapesRef.current.delete(shapeId);
-      });
+      if (patch.actorUserId === currentRealtimeUserId) {
+        patchedShapeIds.forEach((shapeId) => {
+          const pendingAckCount =
+            pendingRoomShapeAckCountsRef.current.get(shapeId) ?? 0;
+
+          if (pendingAckCount <= 1) {
+            pendingRoomShapeAckCountsRef.current.delete(shapeId);
+          } else {
+            pendingRoomShapeAckCountsRef.current.set(
+              shapeId,
+              pendingAckCount - 1,
+            );
+          }
+        });
+      }
+
       patch.upsertShapes.forEach((shape) => {
         const shapeId = typeof shape.id === "string" ? shape.id : null;
         const revision = readCanvasRoomStateRevision(shape.revision);
@@ -640,8 +815,30 @@ function PiloCanvasRuntimeInner({
       const protectedShapeIds = new Set([
         ...localInteractionStateRef.current.protectedShapeIds,
         ...pendingLocalShapeVersionsRef.current.keys(),
+        ...pendingRoomShapeAckCountsRef.current.keys(),
       ]);
+      const immediateDeletedShapeIds: string[] = [];
       const immediateUpsertShapes: PiloCanvasFreeformShape[] = [];
+
+      patch.deletedShapeIds.forEach((shapeId) => {
+        if (
+          isRemoteShapeDeletionProtected({
+            currentShapes: freeformShapesRef.current,
+            protectedShapeIds,
+            shapeDetailCache: shapeDetailCacheRef.current,
+            shapeId,
+          })
+        ) {
+          deferredRoomShapeChangesRef.current.set(shapeId, {
+            respectViewport,
+            shape: null,
+          });
+          return;
+        }
+
+        deferredRoomShapeChangesRef.current.delete(shapeId);
+        immediateDeletedShapeIds.push(shapeId);
+      });
 
       normalizedUpsertShapes.forEach((shape) => {
         const shapeId = getFreeformShapeId(shape);
@@ -650,11 +847,11 @@ function PiloCanvasRuntimeInner({
           return;
         }
         if (deletedShapeIdSet.has(shapeId)) {
-          deferredRoomFrameShapesRef.current.delete(shapeId);
           return;
         }
 
         if (
+          protectedShapeIds.has(shapeId) ||
           isRemoteFrameCollapseProtected({
             currentShapes: freeformShapesRef.current,
             frame: shape,
@@ -662,38 +859,69 @@ function PiloCanvasRuntimeInner({
             shapeDetailCache: shapeDetailCacheRef.current,
           })
         ) {
-          deferredRoomFrameShapesRef.current.set(shapeId, shape);
+          deferredRoomShapeChangesRef.current.set(shapeId, {
+            respectViewport,
+            shape,
+          });
           return;
         }
 
-        deferredRoomFrameShapesRef.current.delete(shapeId);
+        deferredRoomShapeChangesRef.current.delete(shapeId);
         immediateUpsertShapes.push(shape);
       });
 
+      if (!immediateDeletedShapeIds.length && !immediateUpsertShapes.length) {
+        return;
+      }
+
       applyNormalizedRoomShapePatch({
-        deletedShapeIds: patch.deletedShapeIds,
-        respectViewport: options.respectViewport ?? false,
+        deletedShapeIds: immediateDeletedShapeIds,
+        respectViewport,
         upsertShapes: immediateUpsertShapes,
       });
     },
-    [applyNormalizedRoomShapePatch],
+    [
+      applyNormalizedRoomShapePatch,
+      currentRealtimeUserId,
+    ],
   );
-  const flushDeferredRoomFrameShapes = useCallback(() => {
-    if (!deferredRoomFrameShapesRef.current.size) {
+  const flushDeferredRoomShapeChanges = useCallback(() => {
+    if (!deferredRoomShapeChangesRef.current.size) {
       return;
     }
 
     const protectedShapeIds = new Set([
       ...localInteractionStateRef.current.protectedShapeIds,
       ...pendingLocalShapeVersionsRef.current.keys(),
+      ...pendingRoomShapeAckCountsRef.current.keys(),
     ]);
-    const readyFrames: PiloCanvasFreeformShape[] = [];
+    const readyDeletedShapeIds: string[] = [];
+    const readyViewportUpsertShapes: PiloCanvasFreeformShape[] = [];
+    const readyRoomUpsertShapes: PiloCanvasFreeformShape[] = [];
 
-    deferredRoomFrameShapesRef.current.forEach((frame, frameId) => {
+    deferredRoomShapeChangesRef.current.forEach((change, shapeId) => {
+      if (!change.shape) {
+        if (
+          isRemoteShapeDeletionProtected({
+            currentShapes: freeformShapesRef.current,
+            protectedShapeIds,
+            shapeDetailCache: shapeDetailCacheRef.current,
+            shapeId,
+          })
+        ) {
+          return;
+        }
+
+        deferredRoomShapeChangesRef.current.delete(shapeId);
+        readyDeletedShapeIds.push(shapeId);
+        return;
+      }
+
       if (
+        protectedShapeIds.has(shapeId) ||
         isRemoteFrameCollapseProtected({
           currentShapes: freeformShapesRef.current,
-          frame,
+          frame: change.shape,
           protectedShapeIds,
           shapeDetailCache: shapeDetailCacheRef.current,
         })
@@ -701,19 +929,31 @@ function PiloCanvasRuntimeInner({
         return;
       }
 
-      deferredRoomFrameShapesRef.current.delete(frameId);
-      readyFrames.push(frame);
+      deferredRoomShapeChangesRef.current.delete(shapeId);
+      if (change.respectViewport) {
+        readyViewportUpsertShapes.push(change.shape);
+      } else {
+        readyRoomUpsertShapes.push(change.shape);
+      }
     });
 
-    if (readyFrames.length) {
+    if (readyDeletedShapeIds.length || readyRoomUpsertShapes.length) {
+      applyNormalizedRoomShapePatch({
+        deletedShapeIds: readyDeletedShapeIds,
+        respectViewport: false,
+        upsertShapes: readyRoomUpsertShapes,
+      });
+    }
+
+    if (readyViewportUpsertShapes.length) {
       applyNormalizedRoomShapePatch({
         deletedShapeIds: [],
-        respectViewport: false,
-        upsertShapes: readyFrames,
+        respectViewport: true,
+        upsertShapes: readyViewportUpsertShapes,
       });
     }
   }, [applyNormalizedRoomShapePatch]);
-  flushDeferredRoomFrameShapesRef.current = flushDeferredRoomFrameShapes;
+  flushDeferredRoomShapeChangesRef.current = flushDeferredRoomShapeChanges;
   const canvasPresence = useCanvasPresence(realtime, {
     applyOperations: applyRemoteCanvasOperations,
     applyRoomShapePatch,
@@ -731,13 +971,33 @@ function PiloCanvasRuntimeInner({
         return false;
       }
 
-      return canvasPresence.sendRoomShapePatch({
+      const didSendPatch = canvasPresence.sendRoomShapePatch({
         deletedShapeIds: patch.deletedShapeIds,
         upsertShapes: serializeCanvasRoomStateShapes(patch.upsertShapes, {
           contentHashes: remoteShapeContentHashRef.current,
           revisions: remoteShapeRevisionRef.current,
         }),
       });
+
+      if (didSendPatch) {
+        const patchedShapeIds = new Set([
+          ...patch.deletedShapeIds,
+          ...patch.upsertShapes.flatMap((shape) => {
+            const shapeId = getFreeformShapeId(shape);
+
+            return shapeId ? [shapeId] : [];
+          }),
+        ]);
+
+        patchedShapeIds.forEach((shapeId) => {
+          pendingRoomShapeAckCountsRef.current.set(
+            shapeId,
+            (pendingRoomShapeAckCountsRef.current.get(shapeId) ?? 0) + 1,
+          );
+        });
+      }
+
+      return didSendPatch;
     },
     [canvasPresence.sendRoomShapePatch, persistThroughRoomState],
   );
@@ -776,7 +1036,10 @@ function PiloCanvasRuntimeInner({
 
   useEffect(() => {
     deferredRemoteOperationsRef.current.clear();
-    deferredRoomFrameShapesRef.current.clear();
+    deferredRoomShapeChangesRef.current.clear();
+    pendingSurfaceShapeChangesRef.current.clear();
+    pendingRemoteFrameChildrenRequestRef.current.clear();
+    pendingRoomShapeAckCountsRef.current.clear();
     remoteShapeRevisionRef.current.clear();
     remoteShapeContentHashRef.current.clear();
     deletedShapeIdsRef.current.clear();
@@ -834,8 +1097,23 @@ function PiloCanvasRuntimeInner({
 
   const flushDeferredRemoteChanges = useCallback(() => {
     flushDeferredRemoteOperations();
-    flushDeferredRoomFrameShapes();
-  }, [flushDeferredRemoteOperations, flushDeferredRoomFrameShapes]);
+    flushDeferredRoomShapeChanges();
+  }, [flushDeferredRemoteOperations, flushDeferredRoomShapeChanges]);
+  useEffect(() => {
+    if (canvasPresence.roomStateActive) return;
+
+    pendingRoomShapeAckCountsRef.current.clear();
+    flushDeferredRemoteChanges();
+  }, [canvasPresence.roomStateActive, flushDeferredRemoteChanges]);
+  const handleLoadedShapesMerged = useCallback(
+    (upsertShapes: PiloCanvasFreeformShape[]) => {
+      queueCanvasSurfaceShapePatch({
+        deletedShapeIds: [],
+        upsertShapes,
+      });
+    },
+    [queueCanvasSurfaceShapePatch],
+  );
   const {
     captureDraftFreeformShapes,
     mergeLoadedFreeformShapes,
@@ -846,12 +1124,12 @@ function PiloCanvasRuntimeInner({
     freeformShapesRef,
     localShapeVersionRef,
     onLocalShapeSyncIdle: flushDeferredRemoteChanges,
+    onLoadedShapesMerged: handleLoadedShapesMerged,
     onRoomShapePatch: sendRoomShapePatch,
     onShapeSyncError: handleShapeSyncError,
     pendingLocalShapeVersionsRef,
     persistThroughRoomState,
     remoteShapeRevisionRef,
-    setCanvasHydrationVersion,
     setFreeformShapes,
     shapeDetailCacheRef,
     shapeSyncQueueRef,
@@ -959,7 +1237,12 @@ function PiloCanvasRuntimeInner({
     frameIds.forEach((frameId) => {
       loadFrameChildren(frameId);
     });
-  }, [canvasHydrationVersion, loadFrameChildren, storageMode]);
+  }, [
+    canvasHydrationVersion,
+    loadFrameChildren,
+    pendingRemoteFrameChildrenRequestVersion,
+    storageMode,
+  ]);
 
   const handleFrameChildShapesUnload = useCallback(
     (shapes: PiloCanvasFreeformShape[]) => {
@@ -1016,6 +1299,7 @@ function PiloCanvasRuntimeInner({
         <PiloTldrawCanvas
           board={board}
           cameraRestoreVersion={cameraRestoreVersion}
+          consumeShapePatch={consumeCanvasSurfaceShapePatch}
           freeformShapes={freeformShapes}
           hydrationVersion={canvasHydrationVersion}
           initialViewSetting={viewSetting}
@@ -1029,6 +1313,7 @@ function PiloCanvasRuntimeInner({
           getPreservedFreeformShapeSnapshots={
             getPreservedFreeformShapeSnapshots
           }
+          isShapePatchProtected={isCanvasShapePatchProtected}
           onShapeDetailRequest={loadShapeDetail}
           onHistoryStateChange={
             onHistoryStateChange ?? noopCanvasHistoryStateChange
@@ -1037,6 +1322,7 @@ function PiloCanvasRuntimeInner({
           presence={canvasPresence}
           onSnapStateChange={handleSnapStateChange}
           onOneShotToolCreated={onOneShotToolCreated}
+          shapePatchVersion={canvasShapePatchVersion}
           canvasAgentEnabled={storageMode === "api"}
         />
         {canvasSyncNotice ? (
