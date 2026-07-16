@@ -6,6 +6,7 @@ import { LayoutDashboard } from "lucide-react";
 
 import { AppSidebar } from "@/components/app-sidebar";
 import { HeaderNotificationDropdown } from "@/components/header-notification-dropdown";
+import { useChatRuntime } from "@/features/chat/realtime/chat-runtime-provider";
 import { WorkspaceMemberAvatars } from "@/features/workspace-presence/components/workspace-member-avatars";
 import {
   SidebarInset,
@@ -24,6 +25,7 @@ type MainShellProps = {
 
 export function MainShell({ children }: MainShellProps) {
   const pathname = usePathname();
+  const { summary } = useChatRuntime();
   const activeFeature = getFeatureNavigationItemForPathname(pathname);
   const isCanvasRoute = pathname.startsWith("/canvas");
   const isSqlErdImmersiveRoute = pathname.startsWith("/sql-erd/session");
@@ -45,6 +47,7 @@ export function MainShell({ children }: MainShellProps) {
   return (
     <SidebarProvider open={sidebarOpen} onOpenChange={setSidebarOpen}>
       <AppSidebar
+        itemBadges={{ chat: summary.unreadCount }}
         items={featureNavigationItems}
         selectedItemId={activeFeature.id}
       />

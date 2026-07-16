@@ -9,7 +9,10 @@
     "start": "node scripts/serve-out.mjs",
     "format:check": "node scripts/check-format.mjs",
     "lint": "tsc --noEmit",
-    "test": "node scripts/test.mjs && npm run test:workspace-presence && npm run test:workspace-location",
+    "test": "node scripts/test.mjs && npm run test:chat && npm run test:workspace-presence && npm run test:workspace-location",
+    "test:chat": "npm run test:chat-reducer && npm run test:chat-api && node --experimental-strip-types src/features/chat/realtime/chat-runtime-provider.test.mjs && node --experimental-strip-types src/features/chat/chat-common-shell.test.mjs",
+    "test:chat-reducer": "node --experimental-strip-types src/features/chat/realtime/chat-reducer.test.mjs",
+    "test:chat-api": "node --experimental-strip-types src/features/chat/api/client.test.mjs",
     "test:workspace-presence": "node src/shared/workspace-presence/workspace-presence-reducer.test.mjs && node src/shared/workspace-presence/workspace-location-registry.test.mjs && node src/features/workspace-presence/workspace-member-avatars.test.mjs",
     "test:workspace-location": "node --experimental-strip-types --test src/features/home/home-workspace-location.test.mjs src/features/calendar/calendar-workspace-location.test.mjs src/features/board/board-workspace-location.test.mjs src/features/sql-erd/sql-erd-workspace-location.test.mjs src/features/pr-review/pr-review-workspace-location.test.mjs src/features/meeting/meeting-workspace-location.test.mjs src/features/canvas/canvas-workspace-location.test.mjs src/features/drive/drive-workspace-location.test.mjs"
   },

@@ -1,5 +1,6 @@
 import { calendarNavigation } from "@/features/calendar/navigation";
 import { canvasNavigation } from "@/features/canvas/navigation";
+import { chatNavigation } from "@/features/chat/navigation";
 import { driveNavigation } from "@/features/drive/navigation";
 import { githubIntegrationNavigation } from "@/features/github-integration/navigation";
 import { homeNavigation } from "@/features/home/navigation";
@@ -11,6 +12,7 @@ import type { FeatureNavigationItem } from "@/features/navigation-types";
 
 export const featureNavigationItems: FeatureNavigationItem[] = [
   homeNavigation,
+  chatNavigation,
   calendarNavigation,
   githubIntegrationNavigation,
   boardNavigation,
