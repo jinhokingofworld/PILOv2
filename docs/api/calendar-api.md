@@ -12,7 +12,7 @@ meeting, meeting report를 자동으로 Calendar에 넣지 않는다.
 - `created_by`는 현재 로그인 사용자에서 온다.
 - Workspace 접근 권한이 있는 모든 사용자는 MVP에서 일정을 생성, 조회, 수정, 삭제할 수 있다.
 - `createdBy`, `workspaceId`는 request body로 받지 않는다.
-- `startDate`, `endDate`는 `YYYY-MM-DD` 형식이다.
+- `startDate`, `endDate`는 `YYYY-MM-DD` 형식이며, `endDate`를 생략하면 서버가 `startDate`와 같은 날짜로 정규화한다.
 - `startTime`, `endTime`은 `HH:mm` 형식이며 `isAllDay = false`일 때 사용한다.
 - `isAllDay = false`이고 `endTime`이 생략되면 서버는 `startTime + 1시간`으로 정규화한다.
 - `startTime + 1시간`이 다음 날짜로 넘어가면 서버는 `endDate`도 함께 다음 날짜로 정규화한다.
@@ -84,8 +84,7 @@ encrypted token은 포함하지 않는다.
 }
 ```
 
-`endTime`은 `isAllDay = false`일 때 생략할 수 있다. 생략하면 서버가 `startTime + 1시간`으로
-정규화한 값을 저장하고 응답한다.
+`endDate`는 생략할 수 있으며, 생략하면 서버가 `startDate`와 같은 날짜로 정규화한다. `isAllDay = true`인 종일 일정에는 `startTime`과 `endTime`이 필요하지 않고 저장하지 않는다. `endTime`은 `isAllDay = false`일 때 생략할 수 있으며, 생략하면 서버가 `startTime + 1시간`으로 정규화한 값을 저장하고 응답한다.
 
 예:
 
@@ -94,7 +93,6 @@ encrypted token은 포함하지 않는다.
   "title": "Team meeting",
   "isAllDay": false,
   "startDate": "2026-07-03",
-  "endDate": "2026-07-03",
   "startTime": "14:00"
 }
 ```
