@@ -8,6 +8,20 @@
 
 **기술:** NestJS, PostgreSQL migration, 기존 Drive module, `ActivityLogService`, Node assertion script.
 
+## 현재 구현 현황 (2026-07-16)
+
+- [x] **문서 저장 기반과 생성 API**: Issue [#1146](https://github.com/Developer-EJ/PILO/issues/1146), PR [#1150](https://github.com/Developer-EJ/PILO/pull/1150) 병합 완료
+  - [x] `document` Drive item type, 문서/스냅샷/Yjs/edit session 테이블, Activity Log action registry 추가
+  - [x] 문서 생성 API와 Drive 목록의 document item 노출
+  - [x] Supabase dev DB에 `073_create_workspace_documents` migration 적용 및 schema 검증
+- [ ] **Tiptap/Yjs 로컬 에디터와 자동 저장**: Issue [#1151](https://github.com/Developer-EJ/PILO/issues/1151) 진행 중
+  - [ ] Tiptap/Yjs 의존성과 최신 snapshot 기반 editor bootstrap
+  - [ ] version 검증 기반 Yjs state/Tiptap JSON snapshot 저장과 `current_version` 갱신
+  - [ ] 자동 저장 상태와 새로고침 복구
+  - [ ] `document_content_updated` Activity Log와 rollback 검증
+  - [ ] API 계약, focused test, app-server/frontend lint/test, PR
+- [ ] **후속 작업**: 문서 lifecycle(이름 변경/이동/삭제), `/files` 에디터 UI, Yjs realtime, 파일 첨부/PDF viewer
+
 ## 공통 제약
 
 - 최신 `dev` 기반의 격리 worktree에서 시작하고, 수정 전 `AGENTS.md`, `coding-rule.md`, `convention.md`, `docs/api/README.md`, `docs/api/drive-api.md`, `docs/ActivityLogRegistry.md`를 읽는다.

@@ -585,6 +585,7 @@ await import("./calendar/test.mjs");
 await import("./common/activity-log.test.mjs");
 await import("./drive/document-schema.test.mjs");
 await import("./drive/document-lifecycle.test.mjs");
+await import("./drive/document-editor.test.mjs");
 await import("./canvas/activity-log.test.mjs");
 await import("./canvas/review-canvas-access.test.mjs");
 await import("./meeting/test.mjs");

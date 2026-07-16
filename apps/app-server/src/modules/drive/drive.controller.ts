@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Query,
   UseGuards
 } from "@nestjs/common";
@@ -21,7 +22,11 @@ import {
   DriveListPayload,
   DriveUploadUrlPayload
 } from "./drive.types";
-import type { CreateDocumentPayload } from "./document.types";
+import type {
+  CreateDocumentPayload,
+  DocumentBootstrapPayload,
+  SaveDocumentSnapshotPayload
+} from "./document.types";
 
 @Controller("workspaces/:workspaceId/drive")
 @UseGuards(AuthGuard)
@@ -70,6 +75,38 @@ export class DriveController {
     const document = await this.documentService.createDocument(
       currentUserId,
       workspaceId,
+      body
+    );
+
+    return apiResponse(document);
+  }
+
+  @Get("documents/:documentId")
+  async getDocument(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("documentId") documentId: string
+  ): Promise<ApiSuccessResponse<DocumentBootstrapPayload>> {
+    const document = await this.documentService.getDocument(
+      currentUserId,
+      workspaceId,
+      documentId
+    );
+
+    return apiResponse(document);
+  }
+
+  @Put("documents/:documentId/snapshot")
+  async saveDocumentSnapshot(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("documentId") documentId: string,
+    @Body() body: Record<string, unknown>
+  ): Promise<ApiSuccessResponse<SaveDocumentSnapshotPayload>> {
+    const document = await this.documentService.saveDocumentSnapshot(
+      currentUserId,
+      workspaceId,
+      documentId,
       body
     );
 

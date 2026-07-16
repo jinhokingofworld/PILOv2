@@ -18,9 +18,8 @@ Frontend 화면 이름은 `파일`로 둔다. Backend 도메인 이름과 API pa
 - 폴더/파일 이름 변경
 - 폴더/파일 soft delete
 
-파일 미리보기, 검색, 이동, 복구, public link share, 문서 본문 조회와 자동 저장,
-문서 공동 편집, 버전 관리는
-이 문서의 MVP 범위가 아니다.
+파일 미리보기, 검색, 이동, 복구, public link share, 문서 공동 편집과 장기 버전 관리는
+이 문서의 MVP 범위가 아니다. 문서 본문은 최신 snapshot 조회와 자동 저장만 지원한다.
 
 ## 데이터 규칙
 
@@ -64,6 +63,8 @@ Frontend 화면 이름은 `파일`로 둔다. Backend 도메인 이름과 API pa
 | `GET` | `/workspaces/{workspaceId}/drive/items` | 현재 parent의 폴더/문서/파일 목록 조회 |
 | `POST` | `/workspaces/{workspaceId}/drive/folders` | 폴더 생성 |
 | `POST` | `/workspaces/{workspaceId}/drive/documents` | 빈 네이티브 문서 생성 |
+| `GET` | `/workspaces/{workspaceId}/drive/documents/{documentId}` | 문서와 최신 snapshot 조회 |
+| `PUT` | `/workspaces/{workspaceId}/drive/documents/{documentId}/snapshot` | 문서 최신 snapshot 저장 |
 | `POST` | `/workspaces/{workspaceId}/drive/files/upload-url` | 파일 metadata 생성과 presigned upload URL 발급 |
 | `POST` | `/workspaces/{workspaceId}/drive/files/{fileId}/complete` | S3 업로드 완료 확인과 파일 ready 전환 |
 | `GET` | `/workspaces/{workspaceId}/drive/files/{fileId}/download-url` | 파일 다운로드용 presigned URL 발급 |
@@ -140,6 +141,24 @@ API 응답은 S3 bucket name, object key, presigned URL 생성을 위한 내부 
   "createdAt": "2026-07-16T00:00:00.000Z",
   "updatedAt": "2026-07-16T00:00:00.000Z",
   "deletedAt": null
+}
+```
+
+문서 snapshot은 Tiptap JSON projection과 Yjs 상태를 함께 저장한다. `yjsState`는 base64
+문자열이며, `plainText`는 서버가 `contentJson`에서 추출한 검색/RAG 준비용 텍스트다.
+
+```json
+{
+  "id": "document_snapshot_uuid",
+  "version": 1,
+  "yjsState": "AQID",
+  "contentJson": {
+    "type": "doc",
+    "content": [{ "type": "paragraph" }]
+  },
+  "plainText": "PILO 기획서",
+  "sourceUpdateSequence": 0,
+  "createdAt": "2026-07-16T00:10:00.000Z"
 }
 ```
 
@@ -328,6 +347,79 @@ Request:
 - 문서, Drive item, 초기 empty snapshot, `document_created` Activity Log는 하나의 DB
   transaction으로 저장한다.
 - 문서 본문은 이 API에서 받거나 반환하지 않는다.
+
+## 문서 조회
+
+```http
+GET /api/v1/workspaces/{workspaceId}/drive/documents/{documentId}
+```
+
+응답:
+
+```json
+{
+  "success": true,
+  "data": {
+    "item": { "id": "document_uuid", "itemType": "document", "name": "새 문서" },
+    "document": {
+      "id": "document_uuid",
+      "driveItemId": "document_uuid",
+      "workspaceId": "workspace_uuid",
+      "currentVersion": 1,
+      "latestSnapshotId": "document_snapshot_uuid",
+      "createdAt": "2026-07-16T00:00:00.000Z",
+      "updatedAt": "2026-07-16T00:10:00.000Z",
+      "deletedAt": null
+    },
+    "snapshot": {
+      "id": "document_snapshot_uuid",
+      "version": 1,
+      "yjsState": "AQID",
+      "contentJson": { "type": "doc", "content": [{ "type": "paragraph" }] },
+      "plainText": "",
+      "sourceUpdateSequence": 0,
+      "createdAt": "2026-07-16T00:10:00.000Z"
+    }
+  }
+}
+```
+
+서버 규칙:
+
+- 현재 사용자는 해당 Workspace의 `owner` 또는 `member`여야 한다.
+- 삭제되지 않은 같은 Workspace의 `document` item과 최신 snapshot만 반환한다.
+- snapshot의 Yjs 상태와 JSON은 편집기 bootstrap 용도이며, 다운로드 파일 API를 사용하지 않는다.
+
+## 문서 Snapshot 저장
+
+```http
+PUT /api/v1/workspaces/{workspaceId}/drive/documents/{documentId}/snapshot
+```
+
+Request:
+
+```json
+{
+  "expectedVersion": 1,
+  "yjsState": "AQID",
+  "contentJson": {
+    "type": "doc",
+    "content": [{ "type": "paragraph", "content": [{ "type": "text", "text": "PILO 기획서" }] }]
+  }
+}
+```
+
+응답은 갱신된 `document`와 새 `snapshot`을 반환한다.
+
+서버 규칙:
+
+- `expectedVersion`은 현재 문서 버전과 같아야 하며, 다르면 `409 CONFLICT`를 반환한다.
+- `yjsState`는 유효한 base64이고 디코딩 후 `1 MiB` 이하여야 한다.
+- `contentJson`은 최상위 `type: "doc"` Tiptap JSON object이고 직렬화 후 `512 KiB` 이하여야 한다.
+- 새 snapshot insert, `documents.current_version`/`latest_snapshot_id` 갱신, Drive item의
+  `updatedByUser` 갱신, `document_content_updated` Activity Log append를 하나의 transaction으로 처리한다.
+- Activity Log에는 새 버전과 짧은 사실 summary만 저장하며, 문서 본문, block JSON, Yjs 상태,
+  변경 전후 diff는 저장하지 않는다.
 
 ## Upload URL 발급
 
@@ -572,6 +664,9 @@ DELETE /api/v1/workspaces/{workspaceId}/drive/items/{itemId}
 | 파일 크기 | `0 <= sizeBytes <= 104857600` |
 | MIME type | 빈 문자열 불가, 최대 255자 |
 | upload 완료 | S3 object가 존재하고 expected size와 일치해야 함 |
+| 문서 저장 expectedVersion | `0` 이상의 정수이며 현재 버전과 일치해야 함 |
+| 문서 snapshot Yjs 상태 | 유효한 base64, 디코딩 후 최대 `1048576` bytes |
+| 문서 snapshot JSON | 최상위 `type: "doc"` object, 최대 `524288` bytes |
 
 ## 오류
 
@@ -581,7 +676,9 @@ DELETE /api/v1/workspaces/{workspaceId}/drive/items/{itemId}
 | Workspace 접근 권한 없음 | `403` | `FORBIDDEN` |
 | parent, item, file, upload 없음 | `404` | `NOT_FOUND` |
 | 이름, 크기, MIME type, upload 상태가 잘못됨 | `400` | `BAD_REQUEST` |
+| 문서 저장 요청이 잘못됨 | `400` | `BAD_REQUEST` |
 | 같은 parent에 같은 이름의 활성 item이 있음 | `400` | `BAD_REQUEST` |
+| 문서 저장 시 최신 버전과 다름 | `409` | `CONFLICT` |
 | S3 object 확인 또는 presigned URL 발급 실패 | `502` | `BAD_GATEWAY` |
 
 ## MVP 제외
