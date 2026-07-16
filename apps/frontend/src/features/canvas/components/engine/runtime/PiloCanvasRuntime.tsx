@@ -1138,33 +1138,9 @@ function PiloCanvasRuntimeInner({
     unloadedShapeIdsRef,
   });
 
-  const roomAwareCanvasActions = useMemo(() => {
-    if (!canvasActions) return null;
-    if (!persistThroughRoomState) return canvasActions;
-
-    return {
-      ...canvasActions,
-      redo() {
-        if (canvasPresence.redoRoomHistory()) return;
-
-        canvasActions.redo();
-      },
-      undo() {
-        if (canvasPresence.undoRoomHistory()) return;
-
-        canvasActions.undo();
-      },
-    };
-  }, [
-    canvasActions,
-    canvasPresence.redoRoomHistory,
-    canvasPresence.undoRoomHistory,
-    persistThroughRoomState,
-  ]);
-
   useEffect(() => {
-    onReady(roomAwareCanvasActions);
-  }, [onReady, roomAwareCanvasActions]);
+    onReady(canvasActions);
+  }, [canvasActions, onReady]);
 
   useEffect(() => {
     hydrateRoomShapesRef.current = (rawShapes: Record<string, unknown>[]) => {
@@ -1278,7 +1254,7 @@ function PiloCanvasRuntimeInner({
   );
 
   const toggleSmartGuides = useCallback(() => {
-    if (!roomAwareCanvasActions) return;
+    if (!canvasActions) return;
 
     const nextState = {
       isSmartGuideEnabled: !canvasSnapState.isSmartGuideEnabled,
@@ -1286,11 +1262,11 @@ function PiloCanvasRuntimeInner({
 
     setCanvasSnapState(nextState);
     onSnapStateChange?.(nextState);
-    roomAwareCanvasActions.setSmartGuidesEnabled(nextState.isSmartGuideEnabled);
+    canvasActions.setSmartGuidesEnabled(nextState.isSmartGuideEnabled);
   }, [
+    canvasActions,
     canvasSnapState.isSmartGuideEnabled,
     onSnapStateChange,
-    roomAwareCanvasActions,
   ]);
 
   return (
@@ -1336,7 +1312,7 @@ function PiloCanvasRuntimeInner({
       </section>
 
       <CanvasZoomControls
-        canvasActions={roomAwareCanvasActions}
+        canvasActions={canvasActions}
         canvasSnapState={canvasSnapState}
         onToggleSmartGuides={toggleSmartGuides}
         viewSetting={viewSetting}
