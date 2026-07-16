@@ -24,6 +24,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useAuthSession } from "@/features/auth";
 import { createCalendarApiClient } from "@/features/calendar/api/client";
+import {
+  getCalendarWeekEventBars,
+  type CalendarEventBarSegment
+} from "@/features/calendar/calendar-event-bars";
 import { CalendarWorkspaceLocationAdapter } from "@/features/calendar/calendar-workspace-location-adapter";
 import {
   formatCalendarDate,
@@ -228,6 +232,10 @@ function getEventsForCalendarDate(events: CalendarEvent[], date: string) {
     .sort(compareCalendarEvents);
 }
 
+function isMultiDayCalendarEvent(event: CalendarEvent) {
+  return event.startDate < event.endDate;
+}
+
 function classNames(...values: Array<string | false | null | undefined>) {
   return values.filter(Boolean).join(" ");
 }
@@ -299,6 +307,44 @@ function CalendarEventChip({
       />
       <span className="truncate">{event.title}</span>
     </span>
+  );
+}
+
+function CalendarEventBar({
+  onOpen,
+  segment
+}: {
+  onOpen: (event: CalendarEvent) => void;
+  segment: CalendarEventBarSegment;
+}) {
+  const { event } = segment;
+
+  return (
+    <button
+      {...pageCursorTargetAttributes({
+        id: event.id,
+        label: event.title,
+        type: "calendar_event"
+      })}
+      type="button"
+      className={classNames(
+        "pointer-events-auto flex h-6 min-w-0 items-center border-y px-2 text-left text-xs font-medium shadow-sm transition hover:brightness-95 focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        segment.continuesFromPreviousWeek
+          ? "rounded-l-none border-l-0"
+          : "rounded-l-md border-l",
+        segment.continuesToNextWeek
+          ? "rounded-r-none border-r-0"
+          : "rounded-r-md border-r"
+      )}
+      style={{
+        ...getAllDayEventChipStyle(event),
+        gridColumn: `${segment.startColumn} / ${segment.endColumn + 1}`,
+        gridRow: segment.lane + 1
+      }}
+      onClick={() => onOpen(event)}
+    >
+      <span className="truncate">{event.title}</span>
+    </button>
   );
 }
 
@@ -1098,6 +1144,10 @@ export function CalendarPanel() {
       ),
     [calendarEvents.events, gridDates]
   );
+  const calendarWeeks = useMemo(
+    () => getCalendarWeekEventBars(calendarEvents.events, gridDates),
+    [calendarEvents.events, gridDates]
+  );
   const needsSignIn = !normalizedAccessToken;
   const isLoading = calendarEvents.status === "loading";
   const canUseCalendar = Boolean(workspaceId.trim() && normalizedAccessToken);
@@ -1458,91 +1508,116 @@ export function CalendarPanel() {
         ) : null}
 
         <div ref={calendarGridRef} className="min-h-0 flex-1 overflow-x-auto">
-          <div className="grid min-w-[760px] grid-cols-7 gap-1.5">
+          <div className="grid min-w-[760px] grid-cols-7">
             {calendarWeekdayLabels.map((weekday) => (
               <div
                 key={weekday}
-                className="px-2 py-1 text-center text-xs font-semibold text-muted-foreground"
+                className="mx-0.75 px-2 py-1 text-center text-xs font-semibold text-muted-foreground"
               >
                 {weekday}
               </div>
             ))}
 
-            {gridDates.map((date) => {
-              const dateEvents = eventsByDate.get(date) ?? [];
-              const visibleEvents = dateEvents.slice(0, 3);
-              const hiddenEventCount = dateEvents.length - visibleEvents.length;
-              const isSelected = date === selectedDate;
-              const isToday = date === today;
-              const isCurrentMonth = isDateInMonth(date, monthDate);
+            {calendarWeeks.map((week) => (
+              <div
+                key={week.dates[0]}
+                className="relative col-span-7 grid grid-cols-7 pb-1.5"
+              >
+                {week.dates.map((date) => {
+                  const dateEvents = eventsByDate.get(date) ?? [];
+                  const singleDayEvents = dateEvents.filter(
+                    (event) => !isMultiDayCalendarEvent(event)
+                  );
+                  const visibleEvents = singleDayEvents.slice(0, 3);
+                  const hiddenEventCount =
+                    singleDayEvents.length - visibleEvents.length;
+                  const isSelected = date === selectedDate;
+                  const isToday = date === today;
+                  const isCurrentMonth = isDateInMonth(date, monthDate);
 
-              return (
-                <div
-                  {...pageCursorTargetAttributes({
-                    id: date,
-                    label: formatDateLabel(date),
-                    type: "calendar_date"
-                  })}
-                  key={date}
-                  className={classNames(
-                    "relative min-h-28 rounded-lg border bg-background p-2 text-left align-top transition sm:min-h-32",
-                    !isCurrentMonth && "bg-muted/20 text-muted-foreground",
-                    isSelected && "border-primary ring-2 ring-primary/80",
-                    isToday && !isSelected && "border-primary/40 bg-primary/5"
-                  )}
-                >
-                  <button
-                    type="button"
-                    className="absolute inset-0 z-0 rounded-lg hover:bg-muted/40 focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    aria-label={`${formatDateLabel(date)} 선택`}
-                    onClick={() => setSelectedDate(date)}
-                  />
-                  <div className="relative z-20 flex items-center justify-between">
-                    <span
+                  return (
+                    <div
+                      {...pageCursorTargetAttributes({
+                        id: date,
+                        label: formatDateLabel(date),
+                        type: "calendar_date"
+                      })}
+                      key={date}
                       className={classNames(
-                        "pointer-events-none inline-flex size-6 items-center justify-center rounded-full text-xs font-semibold",
-                        isToday && "bg-primary text-primary-foreground"
+                        "relative mx-0.75 rounded-lg border bg-background p-2 text-left align-top transition",
+                        !isCurrentMonth && "bg-muted/20 text-muted-foreground",
+                        isSelected && "border-primary ring-2 ring-primary/80",
+                        isToday && !isSelected && "border-primary/40 bg-primary/5"
                       )}
+                      style={{ minHeight: `${128 + week.laneCount * 28}px` }}
                     >
-                      {formatCellDay(date)}
-                    </span>
-                  </div>
-                  <div className="relative z-20 mt-2 flex flex-col gap-1">
-                    {visibleEvents.map((event) => (
-                      <button
-                        {...pageCursorTargetAttributes({
-                          id: event.id,
-                          label: event.title,
-                          type: "calendar_event"
-                        })}
-                        key={`${date}-${event.id}`}
-                        type="button"
-                        className={classNames(
-                          "block min-w-0 rounded-md text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                          event.isAllDay ? "hover:brightness-95" : "hover:bg-muted/40",
-                          !isCurrentMonth && "opacity-65"
-                        )}
-                        onClick={() => {
-                          setSelectedDate(date);
-                          openDetailDialog(event);
-                        }}
-                      >
-                        <CalendarEventChip event={event} />
-                      </button>
-                    ))}
-                    {hiddenEventCount > 0 ? (
                       <button
                         type="button"
-                        className="rounded-md px-1.5 py-0.5 text-left text-xs font-semibold text-muted-foreground transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                        onClick={() => openEventsDialog(date, dateEvents)}
+                        className="absolute inset-0 z-0 rounded-lg hover:bg-muted/40 focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        aria-label={`${formatDateLabel(date)} 선택`}
+                        onClick={() => setSelectedDate(date)}
+                      />
+                      <div className="relative z-20 flex items-center justify-between">
+                        <span
+                          className={classNames(
+                            "pointer-events-none inline-flex size-6 items-center justify-center rounded-full text-xs font-semibold",
+                            isToday && "bg-primary text-primary-foreground"
+                          )}
+                        >
+                          {formatCellDay(date)}
+                        </span>
+                      </div>
+                      <div
+                        className="relative z-20 flex flex-col gap-1"
+                        style={{ marginTop: `${12 + week.laneCount * 28}px` }}
                       >
-                        +{hiddenEventCount}
-                      </button>
-                    ) : null}
-                  </div>
+                        {visibleEvents.map((event) => (
+                          <button
+                            {...pageCursorTargetAttributes({
+                              id: event.id,
+                              label: event.title,
+                              type: "calendar_event"
+                            })}
+                            key={`${date}-${event.id}`}
+                            type="button"
+                            className={classNames(
+                              "block min-w-0 rounded-md text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                              event.isAllDay ? "hover:brightness-95" : "hover:bg-muted/40",
+                              !isCurrentMonth && "opacity-65"
+                            )}
+                            onClick={() => {
+                              setSelectedDate(date);
+                              openDetailDialog(event);
+                            }}
+                          >
+                            <CalendarEventChip event={event} />
+                          </button>
+                        ))}
+                        {hiddenEventCount > 0 ? (
+                          <button
+                            type="button"
+                            className="rounded-md px-1.5 py-0.5 text-left text-xs font-semibold text-muted-foreground transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            onClick={() => openEventsDialog(date, dateEvents)}
+                          >
+                            +{hiddenEventCount}
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+                  );
+                })}
+
+                <div className="pointer-events-none absolute inset-x-0 top-10 z-30 grid grid-cols-7 auto-rows-6 gap-y-1">
+                  {week.segments.map((segment) => (
+                    <CalendarEventBar
+                      key={`${segment.weekIndex}-${segment.event.id}`}
+                      segment={segment}
+                      onOpen={openDetailDialog}
+                    />
+                  ))}
                 </div>
-              );
-            })}
+              </div>
+            ))}
           </div>
         </div>
       </section>
