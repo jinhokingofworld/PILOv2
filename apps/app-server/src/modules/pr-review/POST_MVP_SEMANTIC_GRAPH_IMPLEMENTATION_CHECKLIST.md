@@ -191,8 +191,8 @@ DB migration과 schema 검증을 같은 PR에 포함한다.
 
 - [x] 서버가 제공한 Flow와 file role을 lane/cluster 배치 입력으로 사용한다.
 - [x] `workflowOrder`를 node 번호와 주요 리뷰 경로로 표시한다.
-- [ ] relation type별 edge style을 과도하지 않게 구분한다.
-- [ ] edge hover 또는 선택 시 relation reason을 표시한다.
+- [x] relation type별 edge style을 과도하지 않게 구분한다.
+- [x] edge hover 또는 선택 시 relation reason을 표시한다.
 - [x] semantic relation이 없는 기존 session은 현재 순차 layout을 유지한다.
 - [x] 독립 node와 fallback Flow가 화면 밖이나 다른 node와 겹치지 않게 한다.
 - [x] Conflict, 위험도와 review status badge를 기존과 동일하게 유지한다.
@@ -202,7 +202,7 @@ DB migration과 schema 검증을 같은 PR에 포함한다.
 
 완료 기준:
 
-- [ ] 사용자가 파일 관계, 관계 이유와 추천 리뷰 경로를 구분할 수 있다.
+- [x] 사용자가 파일 관계, 관계 이유와 추천 리뷰 경로를 구분할 수 있다.
 - [ ] desktop과 주요 viewport에서 node/edge/label이 겹치지 않는다.
 - [ ] 기존 decision, Conflict resolution, Review 제출과 Merge 흐름이 동작한다.
 
@@ -214,8 +214,8 @@ DB migration과 schema 검증을 같은 PR에 포함한다.
 - [ ] 같은 session/Flow에 속하지 않은 relation insert를 거부한다.
 - [x] duplicate, self edge와 invalid type을 거부한다.
 - [x] semantic graph 원자 저장과 idempotency 테스트가 통과한다.
-- [ ] 기존 session 순차 edge fallback 테스트가 통과한다.
-- [ ] `format:check`, `lint`, `build`, PR Review focused test가 통과한다.
+- [x] 기존 session 순차 edge fallback 테스트가 통과한다.
+- [x] `format:check`, `lint`, `build`, PR Review focused test가 통과한다.
 
 ### AI Worker
 
@@ -229,7 +229,7 @@ DB migration과 schema 검증을 같은 PR에 포함한다.
 ### Frontend
 
 - [x] 복수 Flow, 독립 node, relation 없는 fallback fixture를 렌더링한다.
-- [ ] edge reason과 relation type 표시 테스트가 통과한다.
+- [x] edge reason과 relation type 표시 테스트가 통과한다.
 - [x] Conflict와 file decision 상태 회귀 테스트가 통과한다.
 - [x] `format:check`, `lint`, `build`, PR Review focused test가 통과한다.
 - [x] desktop/mobile screenshot으로 겹침과 canvas framing을 확인한다.
@@ -241,6 +241,20 @@ DB migration과 schema 검증을 같은 PR에 포함한다.
 - [ ] Review room에서 relation reason과 추천 리뷰 경로를 확인한다.
 - [ ] graph가 불확실한 파일도 누락되지 않는다.
 - [ ] 분석 재시도와 Worker 재시작 이후 같은 검증 규칙으로 graph가 저장된다.
+
+## 1차 마감 전 확인
+
+2026-07-16 기준으로 관계선 유형별 style, hover/선택 설명, relation inspector,
+기존 session의 순차 edge fallback은 구현과 자동 테스트로 확인했다. `3-D`의 남은
+다중 Flow membership 표현과 대형 PR 성능 항목은 1차 마감 필수 조건으로 처리하지 않고
+후속 UX 고도화 후보로 유지한다.
+
+`Dev E2E` 항목은 배포된 dev 환경에서 실제 PR로 확인해야 한다. 특히 다음을 함께 점검한다.
+
+- API, service, UI, test 파일이 함께 바뀐 PR에서 복수 Flow와 semantic relation이 생성되는지
+- edge를 선택했을 때 양 끝 파일 강조과 한국어 relation reason이 보이는지
+- 새 리뷰 공간과 기존 순차 edge session에서 file node 클릭과 diff drawer 진입이 유지되는지
+- 분석 재시도 또는 Worker 재시작 뒤에도 validator/fallback 규칙이 유지되는지
 
 ## PR 생성 전 확인
 
