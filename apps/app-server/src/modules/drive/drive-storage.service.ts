@@ -78,6 +78,28 @@ export class DriveStorageService implements OnModuleDestroy {
     }
   }
 
+  async createPreviewUrl(input: CreateDownloadUrlInput): Promise<string> {
+    const config = this.getConfig();
+    const client = this.getS3Client(config);
+
+    try {
+      return await getSignedUrl(
+        client,
+        new GetObjectCommand({
+          Bucket: config.bucket,
+          Key: input.objectKey,
+          ResponseContentDisposition: this.inlineContentDisposition(input.fileName),
+          ResponseContentType: input.mimeType
+        }),
+        {
+          expiresIn: input.expiresInSeconds
+        }
+      );
+    } catch {
+      throw this.badGateway("Drive preview URL could not be created");
+    }
+  }
+
   async getObjectSizeBytes(objectKey: string): Promise<number | null> {
     const config = this.getConfig();
     const client = this.getS3Client(config);
@@ -141,6 +163,10 @@ export class DriveStorageService implements OnModuleDestroy {
 
   private contentDisposition(fileName: string): string {
     return `attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`;
+  }
+
+  private inlineContentDisposition(fileName: string): string {
+    return `inline; filename*=UTF-8''${encodeURIComponent(fileName)}`;
   }
 
   private isMissingObjectError(error: unknown): boolean {

@@ -71,6 +71,7 @@ export interface DocumentBootstrapRow extends QueryResultRow {
 
 export interface LockedDocumentRow extends DocumentRow {
   name: string;
+  current_snapshot_content_json: DocumentJson | null;
 }
 
 export interface DocumentPayload {
@@ -113,4 +114,5 @@ export interface NormalizedSaveDocumentSnapshotInput {
   yjsState: Buffer;
   contentJson: DocumentJson;
   plainText: string;
+  attachmentFileIds: string[];
 }

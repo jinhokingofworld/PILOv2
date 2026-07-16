@@ -14,12 +14,13 @@ Frontend 화면 이름은 `파일`로 둔다. Backend 도메인 이름과 API pa
 - 현재 폴더의 폴더/문서/파일 목록 조회
 - 빈 네이티브 문서 생성
 - S3 presigned URL 기반 파일 업로드
-- S3 presigned URL 기반 파일 다운로드
+- S3 presigned URL 기반 파일 다운로드와 PDF 앱 내 미리보기 URL 발급
 - 폴더/문서/파일 이름 변경과 이동
 - 폴더/문서/파일 soft delete
 
-파일 미리보기, 검색, 복구, public link share, 문서 공동 편집과 장기 버전 관리는
-이 문서의 MVP 범위가 아니다. 문서 본문은 최신 snapshot 조회와 자동 저장만 지원한다.
+검색, 복구, public link share, 문서 공동 편집과 장기 버전 관리는 이 문서의 MVP 범위가
+아니다. 문서 본문은 최신 snapshot 조회와 자동 저장만 지원하며, 파일 미리보기는 ready
+PDF만 지원한다.
 
 ## 데이터 규칙
 
@@ -69,6 +70,7 @@ Frontend 화면 이름은 `파일`로 둔다. Backend 도메인 이름과 API pa
 | `POST` | `/workspaces/{workspaceId}/drive/files/upload-url` | 파일 metadata 생성과 presigned upload URL 발급 |
 | `POST` | `/workspaces/{workspaceId}/drive/files/{fileId}/complete` | S3 업로드 완료 확인과 파일 ready 전환 |
 | `GET` | `/workspaces/{workspaceId}/drive/files/{fileId}/download-url` | 파일 다운로드용 presigned URL 발급 |
+| `GET` | `/workspaces/{workspaceId}/drive/files/{fileId}/preview-url` | PDF 앱 내 미리보기용 presigned URL 발급 |
 | `PATCH` | `/workspaces/{workspaceId}/drive/items/{itemId}` | 폴더/문서/파일 이름 변경 또는 이동 |
 | `DELETE` | `/workspaces/{workspaceId}/drive/items/{itemId}` | 폴더/문서/파일 soft delete |
 
@@ -418,9 +420,13 @@ Request:
 - `yjsState`는 유효한 base64이고 디코딩 후 `1 MiB` 이하여야 한다.
 - `contentJson`은 최상위 `type: "doc"` Tiptap JSON object이고 직렬화 후 `512 KiB` 이하여야 한다.
 - 새 snapshot insert, `documents.current_version`/`latest_snapshot_id` 갱신, Drive item의
-  `updatedByUser` 갱신, `document_content_updated` Activity Log append를 하나의 transaction으로 처리한다.
+  `updatedByUser` 갱신과 Activity Log append를 하나의 transaction으로 처리한다.
 - Activity Log에는 새 버전과 짧은 사실 summary만 저장하며, 문서 본문, block JSON, Yjs 상태,
   변경 전후 diff는 저장하지 않는다.
+- `driveFileAttachment` block은 `{ "type": "driveFileAttachment", "attrs": { "driveItemId": "uuid" } }`
+  shape만 허용한다. `driveItemId`는 같은 Workspace의 삭제되지 않은 `ready` file이어야 한다.
+- attachment 변화가 있는 snapshot 저장은 변경된 각 file에 대해 `document_attachment_updated`
+  Activity Log만 남긴다. 같은 저장에서 generic `document_content_updated`를 중복으로 남기지 않는다.
 
 ## Upload URL 발급
 
@@ -599,6 +605,39 @@ GET /api/v1/workspaces/{workspaceId}/drive/files/{fileId}/download-url
 - 다운로드 응답은 원본 파일명을 `Content-Disposition` filename으로 사용할 수 있게
   발급한다.
 
+## PDF 미리보기 URL 발급
+
+```http
+GET /api/v1/workspaces/{workspaceId}/drive/files/{fileId}/preview-url
+```
+
+응답:
+
+```json
+{
+  "success": true,
+  "data": {
+    "file": {
+      "id": "drive_item_uuid",
+      "itemType": "file",
+      "name": "PILO 기획서.pdf",
+      "mimeType": "application/pdf",
+      "uploadStatus": "ready"
+    },
+    "previewUrl": "https://s3-presigned-inline-preview-url",
+    "expiresAt": "2026-07-16T00:11:00.000Z"
+  }
+}
+```
+
+서버 규칙:
+
+- `fileId`는 같은 Workspace의 활성 `ready` file이며 MIME type이 정확히
+  `application/pdf`여야 한다.
+- presigned URL은 `Content-Disposition: inline`과 PDF content type으로 발급한다.
+- bucket name, S3 object key는 응답에 포함하지 않는다.
+- URL 기본 만료 시간은 `10분`이며, 미리보기 요청은 Activity Log를 남기지 않는다.
+
 ## 이름 변경 및 이동
 
 ```http
@@ -687,6 +726,7 @@ DELETE /api/v1/workspaces/{workspaceId}/drive/items/{itemId}
 | 문서 저장 expectedVersion | `0` 이상의 정수이며 현재 버전과 일치해야 함 |
 | 문서 snapshot Yjs 상태 | 유효한 base64, 디코딩 후 최대 `1048576` bytes |
 | 문서 snapshot JSON | 최상위 `type: "doc"` object, 최대 `524288` bytes |
+| 문서 파일 첨부 | `driveFileAttachment.attrs.driveItemId`는 같은 Workspace의 활성 `ready` file |
 
 ## 오류
 
@@ -694,9 +734,9 @@ DELETE /api/v1/workspaces/{workspaceId}/drive/items/{itemId}
 | --- | --- | --- |
 | bearer session 없음 또는 만료 | `401` | `UNAUTHORIZED` |
 | Workspace 접근 권한 없음 | `403` | `FORBIDDEN` |
-| parent, item, file, upload 없음 | `404` | `NOT_FOUND` |
+| parent, item, file, upload 없음 또는 PDF 미리보기 대상이 아님 | `404` | `NOT_FOUND` |
 | 이름, 크기, MIME type, upload 상태, item update body가 잘못됨 | `400` | `BAD_REQUEST` |
-| 문서 저장 요청이 잘못됨 | `400` | `BAD_REQUEST` |
+| 문서 저장 요청 또는 첨부 file 참조가 잘못됨 | `400` | `BAD_REQUEST` |
 | 같은 parent에 같은 이름의 활성 item이 있음 | `400` | `BAD_REQUEST` |
 | 문서 저장 시 최신 버전과 다름 | `409` | `CONFLICT` |
 | S3 object 확인 또는 presigned URL 발급 실패 | `502` | `BAD_GATEWAY` |
@@ -704,7 +744,7 @@ DELETE /api/v1/workspaces/{workspaceId}/drive/items/{itemId}
 ## MVP 제외
 
 - 전체 또는 현재 폴더 검색
-- 파일 미리보기
+- PDF 이외 파일 미리보기
 - 문서 공동 편집
 - 파일 버전 관리
 - 휴지통 복구

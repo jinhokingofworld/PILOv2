@@ -70,6 +70,8 @@ assert.match(driveStorageService, /getSignedUrl/);
 assert.match(driveStorageService, /S3_UPLOADS_BUCKET/);
 assert.match(driveStorageService, /AWS_REGION/);
 assert.match(driveStorageService, /BAD_GATEWAY/);
+assert.match(driveStorageService, /async createPreviewUrl\(/);
+assert.match(driveStorageService, /ResponseContentDisposition: this\.inlineContentDisposition/);
 assert.match(driveValidation, /validateCreateDriveFolderRequest/);
 assert.match(driveValidation, /validateCreateDriveUploadUrlRequest/);
 assert.match(driveValidation, /validateCompleteDriveUploadRequest/);
@@ -137,6 +139,7 @@ class FakeDriveStorageService {
     this.objectSizeBytes = objectSizeBytes;
     this.uploadUrlCalls = [];
     this.downloadUrlCalls = [];
+    this.previewUrlCalls = [];
     this.headCalls = [];
   }
 
@@ -148,6 +151,11 @@ class FakeDriveStorageService {
   async createDownloadUrl(input) {
     this.downloadUrlCalls.push(input);
     return "https://s3.example/download";
+  }
+
+  async createPreviewUrl(input) {
+    this.previewUrlCalls.push(input);
+    return "https://s3.example/preview";
   }
 
   async getObjectSizeBytes(objectKey) {
@@ -480,6 +488,75 @@ async function assertApiError(action, status, code, messagePattern) {
   assert.equal(result.file.id, fileId);
   assert.equal(result.downloadUrl, "https://s3.example/download");
   assert.equal(driveStorageService.downloadUrlCalls[0].fileName, "PILO.pdf");
+}
+
+{
+  const readyPdf = itemRow({
+    id: fileId,
+    item_type: "file",
+    name: "PILO.pdf",
+    object_key: "drive/workspaces/workspace/items/file/PILO.pdf",
+    mime_type: "application/pdf",
+    size_bytes: "1024",
+    upload_status: "ready"
+  });
+  const database = new FakeDatabase({ queryOneRows: [readyPdf] });
+  const storage = new FakeDriveStorageService();
+  const { service, driveStorageService } = createSubject(database, storage);
+
+  assert.equal(typeof service.createPreviewUrl, "function");
+  const result = await service.createPreviewUrl(currentUserId, workspaceId, fileId);
+
+  assert.equal(result.file.id, fileId);
+  assert.equal(result.previewUrl, "https://s3.example/preview");
+  assert.equal(driveStorageService.previewUrlCalls[0].fileName, "PILO.pdf");
+  assert.equal(driveStorageService.previewUrlCalls[0].mimeType, "application/pdf");
+}
+
+{
+  const readyImage = itemRow({
+    id: fileId,
+    item_type: "file",
+    name: "PILO.png",
+    object_key: "drive/workspaces/workspace/items/file/PILO.png",
+    mime_type: "image/png",
+    size_bytes: "1024",
+    upload_status: "ready"
+  });
+  const database = new FakeDatabase({ queryOneRows: [readyImage] });
+  const storage = new FakeDriveStorageService();
+  const { service, driveStorageService } = createSubject(database, storage);
+
+  await assertApiError(
+    () => service.createPreviewUrl(currentUserId, workspaceId, fileId),
+    404,
+    "NOT_FOUND",
+    /PDF file not found/
+  );
+  assert.equal(driveStorageService.previewUrlCalls.length, 0);
+}
+
+{
+  const mixedCasePdf = itemRow({
+    id: fileId,
+    item_type: "file",
+    name: "PILO.pdf",
+    object_key: "drive/workspaces/workspace/items/file/PILO.pdf",
+    mime_type: "Application/PDF",
+    size_bytes: "1024",
+    upload_status: "ready"
+  });
+  const database = new FakeDatabase({ queryOneRows: [mixedCasePdf] });
+  const storage = new FakeDriveStorageService();
+  const { service, driveStorageService } = createSubject(database, storage);
+
+  await assertApiError(
+    () => service.createPreviewUrl(currentUserId, workspaceId, fileId),
+    404,
+    "NOT_FOUND",
+    /PDF file not found/
+  );
+  assert.equal(driveStorageService.previewUrlCalls.length, 0);
 }
 
 {

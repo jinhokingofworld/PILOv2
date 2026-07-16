@@ -22,6 +22,7 @@ import {
   DriveItemPayload,
   DriveItemRow,
   DriveListPayload,
+  DrivePreviewUrlPayload,
   DriveUploadRow,
   DriveUploadUrlPayload,
   UpdateDriveItemRequest
@@ -374,6 +375,40 @@ export class DriveService {
     return {
       file: mapDriveItem(file),
       downloadUrl,
+      expiresAt: this.toIsoString(
+        new Date(Date.now() + DRIVE_UPLOAD_EXPIRES_SECONDS * 1000)
+      )
+    };
+  }
+
+  async createPreviewUrl(
+    currentUserId: string,
+    workspaceId: string,
+    fileId: string
+  ): Promise<DrivePreviewUrlPayload> {
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+
+    const validFileId = validateDriveItemId(fileId);
+    const file = await this.findActiveReadyFile(workspaceId, validFileId);
+    if (
+      !file ||
+      !file.object_key ||
+      !file.mime_type ||
+      file.mime_type !== "application/pdf"
+    ) {
+      throw notFound("Drive PDF file not found");
+    }
+
+    const previewUrl = await this.driveStorageService.createPreviewUrl({
+      objectKey: file.object_key,
+      fileName: file.name,
+      mimeType: file.mime_type,
+      expiresInSeconds: DRIVE_UPLOAD_EXPIRES_SECONDS
+    });
+
+    return {
+      file: mapDriveItem(file),
+      previewUrl,
       expiresAt: this.toIsoString(
         new Date(Date.now() + DRIVE_UPLOAD_EXPIRES_SECONDS * 1000)
       )
