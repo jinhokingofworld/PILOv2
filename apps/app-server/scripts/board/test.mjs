@@ -277,6 +277,7 @@ await import("./issues.test.mjs");
 await import("./issue-detail.test.mjs");
 await import("./issue-assignees.test.mjs");
 await import("./status-update.test.mjs");
+await import("./board-invalidation-publisher.test.mjs");
 await import("./issue-update.test.mjs");
 await import("./issue-create.test.mjs");
 await import("./issue-create-project-oauth.test.mjs");
