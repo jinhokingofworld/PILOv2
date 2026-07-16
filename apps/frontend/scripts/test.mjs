@@ -5,7 +5,6 @@ const navigationFiles = await Promise.all(
   [
     "../src/features/home/navigation.ts",
     "../src/features/calendar/navigation.ts",
-    "../src/features/github-integration/navigation.ts",
     "../src/features/board/navigation.ts",
     "../src/features/pr-review/navigation.ts",
     "../src/features/meeting/navigation.ts",
@@ -383,7 +382,6 @@ const deprecatedCanvasTokenEnv = "NEXT_PUBLIC_PILO_" + "ACCESS_TOKEN";
 
 assert.match(navigation, /Calendar/);
 assert.match(navigation, /Home/);
-assert.match(navigation, /GitHub sync/);
 assert.match(navigation, /Board/);
 assert.match(navigation, /PR review/);
 assert.match(navigation, /Voice meeting/);

@@ -128,8 +128,8 @@ export function GithubConnectLayout({
   onStartSync
 }: GithubConnectLayoutProps) {
   return (
-      <div className="github-connect-root -m-6 min-h-[calc(100vh-3.5rem)] bg-[#eceef3] px-6 py-5 text-[#101828]">
-        <div className="mx-auto grid max-w-[1204px] gap-[15px]">
+    <div className="github-connect-root @container rounded-xl bg-muted/40 p-4 text-foreground sm:p-5">
+      <div className="grid gap-4">
         {panelStatus === "error" ? (
           <StatusNotice
             icon={<XCircle className="size-4" />}
@@ -183,7 +183,7 @@ export function GithubConnectLayout({
           selectedInstallation={selectedInstallation}
         />
 
-        <div className="main-grid grid items-start gap-[15px] xl:grid-cols-[minmax(0,1.55fr)_minmax(320px,1fr)]">
+        <div className="main-grid grid items-start gap-4 @[64rem]:grid-cols-[minmax(0,1.55fr)_minmax(20rem,1fr)]">
           <GithubConnectSourceTables
             hasNextRepositoryPage={hasNextRepositoryPage}
             isLoading={isLoading}

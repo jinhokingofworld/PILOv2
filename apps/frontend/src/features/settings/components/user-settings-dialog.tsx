@@ -81,19 +81,23 @@ import {
   type SettingsSectionId
 } from "@/features/settings/options";
 
+export type SettingsDialogSectionId =
+  | "profile"
+  | "account"
+  | SettingsSectionId;
+
 export type UserDialogProps = {
   activeWorkspaceName: string;
   avatarUrl: string | null;
   canManageWorkspace: boolean;
   email: string;
   githubContent: ReactNode;
+  initialSection?: SettingsDialogSectionId;
   joinedAt: string | null;
   name: string;
   onOpenChange: (open: boolean) => void;
   open: boolean;
 };
-
-type SettingsDialogSectionId = "profile" | "account" | SettingsSectionId;
 
 const ACCOUNT_SECTIONS: Array<{
   id: Extract<SettingsDialogSectionId, "profile" | "account">;
@@ -528,6 +532,7 @@ function SettingsView(props: UserDialogProps) {
     canManageWorkspace,
     email,
     githubContent,
+    initialSection,
     name,
     onOpenChange,
     open
@@ -566,11 +571,19 @@ function SettingsView(props: UserDialogProps) {
   const sidebarAvatarUrl = authSession?.user.avatarUrl ?? avatarUrl;
   const initials = getInitials(sidebarDisplayName, email);
   const activeSectionCopy = SECTION_COPY[activeSection];
+  const activeGithubContent =
+    activeSection === "github" ? githubContent : null;
 
   useEffect(() => {
     setWorkspaceName(activeWorkspaceName);
     setWorkspaceIcon(authSession?.activeWorkspace.icon ?? "");
   }, [activeWorkspaceName, authSession?.activeWorkspace.icon]);
+
+  useEffect(() => {
+    if (open) {
+      setActiveSection(initialSection ?? "general");
+    }
+  }, [initialSection, open]);
 
   useEffect(() => {
     if (!open || !authSession) return;
@@ -823,7 +836,13 @@ function SettingsView(props: UserDialogProps) {
             </aside>
 
             <main className="min-h-0 overflow-y-auto bg-background">
-              <div className="mx-auto w-full max-w-5xl px-6 pb-20 pt-10 sm:px-10 lg:px-14 lg:pt-14">
+              <div
+                className={cn(
+                  "mx-auto w-full max-w-5xl px-6 pb-20 pt-10 sm:px-10 lg:px-14 lg:pt-14",
+                  activeSection === "github" &&
+                    "max-w-none px-4 pb-8 pt-8 sm:px-5 lg:px-6 lg:pt-10"
+                )}
+              >
                 <DialogHeader className="pr-10">
                   <DialogTitle className="text-3xl font-semibold tracking-tight">
                     {activeSectionCopy.title}
@@ -833,7 +852,12 @@ function SettingsView(props: UserDialogProps) {
                   </DialogDescription>
                 </DialogHeader>
 
-                <div className="mt-12">
+                <div
+                  className={cn(
+                    "mt-12",
+                    activeSection === "github" && "mt-8"
+                  )}
+                >
 
         <TabsContent value="profile">
           <ProfileView {...props} />
@@ -963,7 +987,9 @@ function SettingsView(props: UserDialogProps) {
         </TabsContent>
 
         <TabsContent value="github">
-          {githubContent}
+          {activeGithubContent ? (
+            <GithubSettingsContent githubContent={activeGithubContent} />
+          ) : null}
         </TabsContent>
 
         <TabsContent value="workspace">
@@ -1086,6 +1112,12 @@ function SettingsView(props: UserDialogProps) {
       </AlertDialog>
     </>
   );
+}
+
+function GithubSettingsContent({
+  githubContent
+}: Pick<UserDialogProps, "githubContent">) {
+  return <>{githubContent}</>;
 }
 
 function SummaryCard({

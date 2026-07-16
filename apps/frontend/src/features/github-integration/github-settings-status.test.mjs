@@ -1,10 +1,6 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-const statusComponent = await readFile(
-  new URL("./components/github-settings-status.tsx", import.meta.url),
-  "utf8"
-);
 const settingsDialog = await readFile(
   new URL("../settings/components/user-settings-dialog.tsx", import.meta.url),
   "utf8"
@@ -13,25 +9,40 @@ const appSidebar = await readFile(
   new URL("../../components/app-sidebar.tsx", import.meta.url),
   "utf8"
 );
+const layout = await readFile(
+  new URL("./components/github-connect-layout.tsx", import.meta.url),
+  "utf8"
+);
+const primitives = await readFile(
+  new URL("./components/github-connect-primitives.tsx", import.meta.url),
+  "utf8"
+);
+const steps = await readFile(
+  new URL("./components/github-connect-steps.tsx", import.meta.url),
+  "utf8"
+);
+const tables = await readFile(
+  new URL("./components/github-connect-tables.tsx", import.meta.url),
+  "utf8"
+);
 
-assert.match(statusComponent, /useAuthSession/);
-assert.match(statusComponent, /createGithubIntegrationApiClient/);
-assert.match(statusComponent, /getGithubOAuthStatus/);
-assert.match(statusComponent, /getGithubProjectOAuthStatus/);
-assert.match(statusComponent, /listGithubAppInstallations/);
-assert.match(statusComponent, /Promise\.all/);
-assert.match(statusComponent, /불러오는 중/);
-assert.match(statusComponent, /불러오지 못했습니다/);
-assert.match(statusComponent, /설치된 GitHub App이 없습니다/);
-assert.match(statusComponent, /onManage/);
-assert.match(statusComponent, /function GithubManagementAction/);
-assert.match(statusComponent, /disabled=\{!canManageWorkspace\}/);
-assert.match(statusComponent, /errorMessage \?[\s\S]*GithubManagementAction/);
-assert.match(statusComponent, /!snapshot \?[\s\S]*GithubManagementAction/);
-
-assert.match(settingsDialog, /githubContent: ReactNode/);
-assert.doesNotMatch(settingsDialog, /MOCK_GITHUB_CONNECTIONS/);
-assert.match(appSidebar, /GithubSettingsStatus/);
-assert.match(appSidebar, /handleManageGithub/);
-assert.match(appSidebar, /router\.push\("\/github"\)/);
-assert.match(appSidebar, /onManage=\{handleManageGithub\}/);
+assert.match(appSidebar, /<GithubPanel\s*\/>/);
+assert.doesNotMatch(appSidebar, /GithubSettingsStatus/);
+assert.match(settingsDialog, /initialSection\?: SettingsDialogSectionId/);
+assert.match(settingsDialog, /activeSection === "github" \? githubContent : null/);
+assert.match(
+  settingsDialog,
+  /h-\[calc\(100vh-3rem\)\] max-h-\[44rem\] w-\[calc\(100vw-3rem\)\] max-w-6xl/
+);
+assert.doesNotMatch(
+  settingsDialog,
+  /activeSection === "github"[\s\S]{0,240}xl:max-w-\[96rem\]/
+);
+assert.match(layout, /@container/);
+assert.doesNotMatch(layout, /min-h-\[calc\(100vh-3\.5rem\)\]/);
+assert.match(primitives, /@\/components\/ui\/card/);
+assert.match(primitives, /@\/components\/ui\/badge/);
+assert.doesNotMatch(steps, /md:grid-cols-3/);
+assert.match(steps, /@\[48rem\]:grid-cols-3/);
+assert.doesNotMatch(tables, /max-\[760px\]/);
+assert.equal((tables.match(/@\[48rem\]:grid-cols-/g) ?? []).length, 4);
