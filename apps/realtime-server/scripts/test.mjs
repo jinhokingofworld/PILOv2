@@ -16,31 +16,61 @@ const sessionService = await readFile(
   "utf8"
 );
 const canvasAccess = await readFile(
-  new URL("../src/canvas/canvas-access.service.ts", import.meta.url),
+  new URL("../src/canvas/room/canvas-access.service.ts", import.meta.url),
   "utf8"
 );
 const canvasRoom = await readFile(
-  new URL("../src/canvas/canvas-room.service.ts", import.meta.url),
+  new URL("../src/canvas/room/canvas-room.service.ts", import.meta.url),
   "utf8"
 );
 const canvasRoomCheckpoint = await readFile(
-  new URL("../src/canvas/canvas-room-checkpoint.service.ts", import.meta.url),
+  new URL(
+    "../src/canvas/checkpoint/canvas-room-checkpoint.service.ts",
+    import.meta.url
+  ),
   "utf8"
 );
-const canvasRoomState = await readFile(
-  new URL("../src/canvas/canvas-room-state.service.ts", import.meta.url),
+const canvasRoomStateSource = await readFile(
+  new URL("../src/canvas/state/canvas-room-state.service.ts", import.meta.url),
   "utf8"
 );
+const canvasLoadedRegion = await readFile(
+  new URL("../src/canvas/state/canvas-loaded-region.ts", import.meta.url),
+  "utf8"
+);
+const canvasShapeRecord = await readFile(
+  new URL("../src/canvas/state/canvas-shape-record.ts", import.meta.url),
+  "utf8"
+);
+const canvasRoomState = [
+  canvasRoomStateSource,
+  canvasLoadedRegion,
+  canvasShapeRecord
+].join("\n");
 const canvasPresence = await readFile(
-  new URL("../src/canvas/canvas-presence.service.ts", import.meta.url),
+  new URL("../src/canvas/presence/canvas-presence.service.ts", import.meta.url),
   "utf8"
 );
 const canvasShapeLock = await readFile(
-  new URL("../src/canvas/canvas-shape-lock.service.ts", import.meta.url),
+  new URL(
+    "../src/canvas/review-lock/canvas-shape-lock.service.ts",
+    import.meta.url
+  ),
   "utf8"
 );
 const canvasShapePreview = await readFile(
-  new URL("../src/canvas/canvas-shape-preview.service.ts", import.meta.url),
+  new URL(
+    "../src/canvas/preview/canvas-shape-preview.service.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
+const canvasSocketHandlers = await readFile(
+  new URL("../src/canvas/socket/canvas-socket-handlers.ts", import.meta.url),
+  "utf8"
+);
+const canvasSocketPayloads = await readFile(
+  new URL("../src/canvas/socket/canvas-socket-payloads.ts", import.meta.url),
   "utf8"
 );
 const meetingAccess = await readFile(
@@ -55,10 +85,15 @@ const redisPubSub = await readFile(
   new URL("../src/redis/redis-pubsub.ts", import.meta.url),
   "utf8"
 );
-const socketServer = await readFile(
+const socketServerSource = await readFile(
   new URL("../src/socket/socket-server.ts", import.meta.url),
   "utf8"
 );
+const socketServer = [
+  socketServerSource,
+  canvasSocketHandlers,
+  canvasSocketPayloads
+].join("\n");
 
 assert.match(config, /notifications_status_only/);
 assert.match(config, /DATABASE_URL/);
@@ -122,7 +157,7 @@ assert.doesNotMatch(socketServer, /canvasClientEvents\.shapeCommit/);
 assert.match(socketServer, /canvasClientEvents\.shapePreview/);
 assert.match(socketServer, /canvasClientEvents\.shapePreviewClear/);
 assert.match(socketServer, /canvasClientEvents\.viewportLoaded/);
-assert.match(socketServer, /readLoadedViewportBounds/);
+assert.match(socketServer, /readCanvasLoadedViewportBounds/);
 assert.match(socketServer, /initialViewportBounds/);
 assert.match(socketServer, /canvasServerEvents\.shapesHydrate/);
 assert.match(socketServer, /canvasServerEvents\.shapePatch/);
@@ -133,7 +168,7 @@ assert.match(socketServer, /canRedo: historyState\.canRedo/);
 assert.match(socketServer, /canvasServerEvents\.checkpoint/);
 assert.match(
   socketServer,
-  /const actorUserId = authedSocket\.data\.auth\.userId \?\? socket\.id/,
+  /const actorUserId = socket\.data\.auth\.userId \?\? socket\.id/,
 );
 assert.doesNotMatch(socketServer, /canvasServerEvents\.shapeLockAccepted/);
 assert.doesNotMatch(socketServer, /canvasServerEvents\.shapeLockRejected/);
@@ -146,8 +181,8 @@ assert.match(socketServer, /getCanvasRoomStateStats/);
 assert.match(socketServer, /createCanvasRoomCheckpointService/);
 assert.match(socketServer, /roomCheckpointService\.scheduleCheckpoint/);
 assert.match(socketServer, /roomCheckpointService\.flushCheckpointNow/);
-assert.match(socketServer, /authedSocket\.data\.canvasRoomsByName\.values\(\)/);
-assert.match(socketServer, /authedSocket\.data\.canvasRoomsByName\.clear\(\)/);
+assert.match(socketServer, /socket\.data\.canvasRoomsByName\.values\(\)/);
+assert.match(socketServer, /socket\.data\.canvasRoomsByName\.clear\(\)/);
 assert.doesNotMatch(socketServer, /createCanvasShapeCommitService/);
 assert.doesNotMatch(socketServer, /clearCommitShapePreview/);
 assert.doesNotMatch(socketServer, /getShapeCommitBlockedByLocks/);

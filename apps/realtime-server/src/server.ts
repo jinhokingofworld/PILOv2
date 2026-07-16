@@ -2,7 +2,7 @@ import { createServer } from "node:http";
 import { WebSocketServer } from "ws";
 
 import { createRealtimeSessionService } from "./auth/session.service";
-import { createCanvasTldrawSyncRoomService } from "./canvas/canvas-tldraw-sync-room.service";
+import { createCanvasTldrawSyncRoomService } from "./canvas/sync/canvas-tldraw-sync-room.service";
 import { loadRealtimeServerConfig } from "./config/realtime-config";
 import { createRealtimeDatabase } from "./database/database";
 import { createDocumentAccessService } from "./documents/document-access.service";

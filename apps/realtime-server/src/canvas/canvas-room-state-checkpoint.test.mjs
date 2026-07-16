@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import checkpointModule from "../../dist/canvas/canvas-room-checkpoint.service.js";
-import roomStateModule from "../../dist/canvas/canvas-room-state.service.js";
+import checkpointModule from "../../dist/canvas/checkpoint/canvas-room-checkpoint.service.js";
+import roomStateModule from "../../dist/canvas/state/canvas-room-state.service.js";
 
 const { createCanvasRoomCheckpointService } = checkpointModule;
 const { createCanvasRoomStateService } = roomStateModule;
