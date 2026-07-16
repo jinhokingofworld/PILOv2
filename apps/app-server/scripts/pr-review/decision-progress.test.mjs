@@ -11,6 +11,7 @@ const workspaceId = "11111111-1111-4111-8111-111111111111";
 const reviewFileId = "22222222-2222-4222-8222-222222222222";
 const currentUserId = "44444444-4444-4444-8444-444444444444";
 const decisionId = "55555555-5555-4555-8555-555555555555";
+const filePath = "apps/app-server/src/modules/pr-review/pr-review.service.ts";
 
 async function captureProgressUpdate(reviewedCount, totalFileCount) {
   const queries = [];
@@ -108,6 +109,7 @@ function createDecisionUpdateHarness({ appendError } = {}) {
   const file = {
     id: reviewFileId,
     session_id: reviewSessionId,
+    file_path: filePath,
     current_status: "approved",
     comment: null,
     reviewed_by_user_id: currentUserId,
@@ -162,12 +164,19 @@ function createDecisionUpdateHarness({ appendError } = {}) {
     dedupeKey: `pr-review:file_review_decision_created:${decisionId}:created`,
     metadata: {
       version: 1,
-      summary: events.at(-1).input.metadata.summary,
-      data: { reviewSessionId, decision: "approved" }
+      summary: `${filePath} 파일의 PR Review 판단을 승인 상태로 변경했습니다.`,
+      data: {
+        reviewSessionId,
+        reviewFileId,
+        filePath,
+        decision: "approved"
+      }
     }
   });
   assert.deepEqual(Object.keys(events.at(-1).input.metadata.data).sort(), [
     "decision",
+    "filePath",
+    "reviewFileId",
     "reviewSessionId"
   ]);
 }

@@ -2139,6 +2139,8 @@ export class PrReviewService {
             workspaceId,
             decision: input.status,
             decisionId,
+            filePath: targetFile.file_path,
+            reviewFileId: reviewFileUuid,
             reviewSessionId: file.file.session_id
           })
         );
