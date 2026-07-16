@@ -16,6 +16,9 @@ class FakeDatabase {
   constructor(queryOneRows) {
     this.queryOneRows = [...queryOneRows];
     this.queries = [];
+    this.transactionCount = 0;
+    this.transactionAttempts = [];
+    this.rolledBackTransactions = [];
   }
 
   async queryOne(text, values = []) {
@@ -27,6 +30,47 @@ class FakeDatabase {
     this.queries.push({ text, values });
     return { rows: [] };
   }
+
+  async transaction(callback) {
+    this.transactionCount += 1;
+    const pendingQueries = [];
+    const transaction = {
+      queryOne: async (text, values = []) => {
+        pendingQueries.push({ text, values });
+        return this.queryOneRows.shift() ?? null;
+      },
+      async query() {
+        return [];
+      },
+      async execute() {
+        return { rows: [] };
+      }
+    };
+    this.transactionAttempts.push({ transaction, queries: pendingQueries });
+
+    try {
+      const result = await callback(transaction);
+      this.queries.push(...pendingQueries);
+      return result;
+    } catch (error) {
+      this.rolledBackTransactions.push([...pendingQueries]);
+      throw error;
+    }
+  }
+}
+
+class FakeActivityLogService {
+  constructor(appendError = null) {
+    this.appendError = appendError;
+    this.calls = [];
+  }
+
+  async append(transaction, input) {
+    this.calls.push({ transaction, input });
+    if (this.appendError) {
+      throw this.appendError;
+    }
+  }
 }
 
 class FakeGithubDependency {
@@ -34,6 +78,7 @@ class FakeGithubDependency {
     this.conflictStatuses = [...conflictStatuses];
     this.conflictStatusCalls = [];
     this.mergeCalls = [];
+    this.mergeError = null;
   }
 
   async getPullRequestConflictStatus(
@@ -67,6 +112,10 @@ class FakeGithubDependency {
       pullRequestId: requestedPullRequestId,
       input
     });
+
+    if (this.mergeError) {
+      throw this.mergeError;
+    }
 
     return {
       mergedByGithubLogin: "Developer-EJ",
@@ -125,13 +174,20 @@ function summaryRow(overrides = {}) {
   };
 }
 
-function createService(database, githubDependency) {
+function createService(
+  database,
+  githubDependency,
+  activityLogService = new FakeActivityLogService()
+) {
   return new PrReviewService(
     database,
     {
       async assertWorkspaceAccess() {}
     },
     githubDependency,
+    {},
+    {},
+    activityLogService,
     {}
   );
 }
@@ -182,10 +238,16 @@ for (const staleStatus of ["checking", "unknown"]) {
 {
   const database = new FakeDatabase([
     sessionRow({ conflict_status: "checking" }),
-    { id: reviewSessionId }
+    { id: reviewSessionId },
+    { id: reviewRoomId }
   ]);
   const githubDependency = new FakeGithubDependency(["clean"]);
-  const service = createService(database, githubDependency);
+  const activityLogService = new FakeActivityLogService();
+  const service = createService(
+    database,
+    githubDependency,
+    activityLogService
+  );
 
   const result = await service.mergeReviewSession(
     currentUserId,
@@ -207,6 +269,38 @@ for (const staleStatus of ["checking", "unknown"]) {
       input: { expectedHeadSha: "head-sha" }
     }
   ]);
+  assert.equal(database.transactionCount, 1);
+  assert.equal(database.transactionAttempts[0].queries.length, 1);
+  assert.match(
+    database.transactionAttempts[0].queries[0].text,
+    /UPDATE pr_review_rooms[\s\S]*RETURNING id/
+  );
+  assert.deepEqual(database.transactionAttempts[0].queries[0].values, [
+    reviewRoomId,
+    "2026-07-10T13:01:00.000Z"
+  ]);
+  assert.equal(activityLogService.calls.length, 1);
+  assert.equal(
+    activityLogService.calls[0].transaction,
+    database.transactionAttempts[0].transaction
+  );
+  assert.deepEqual(activityLogService.calls[0].input, {
+    workspaceId,
+    actor: { type: "user", userId: currentUserId },
+    action: "pr_review_pull_request_merged",
+    target: { type: "pull_request", id: pullRequestId },
+    dedupeKey:
+      "pr-review:pr_review_pull_request_merged:44444444-4444-4444-8444-444444444444:merge-commit-sha",
+    metadata: {
+      version: 1,
+      summary: "PR을 merge 방식으로 병합했습니다.",
+      data: {
+        reviewSessionId,
+        mergeMethod: "merge",
+        mergeCommitSha: "merge-commit-sha"
+      }
+    }
+  });
 }
 
 {
@@ -215,7 +309,12 @@ for (const staleStatus of ["checking", "unknown"]) {
     { id: reviewSessionId }
   ]);
   const githubDependency = new FakeGithubDependency(["conflicted"]);
-  const service = createService(database, githubDependency);
+  const activityLogService = new FakeActivityLogService();
+  const service = createService(
+    database,
+    githubDependency,
+    activityLogService
+  );
 
   await assert.rejects(
     () =>
@@ -233,6 +332,112 @@ for (const staleStatus of ["checking", "unknown"]) {
   );
   assert.equal(githubDependency.conflictStatusCalls.length, 1);
   assert.equal(githubDependency.mergeCalls.length, 0);
+  assert.equal(database.transactionCount, 0);
+  assert.equal(activityLogService.calls.length, 0);
+}
+
+{
+  const database = new FakeDatabase([
+    sessionRow({ conflict_status: "clean" }),
+    { id: reviewSessionId }
+  ]);
+  const githubDependency = new FakeGithubDependency(["clean"]);
+  githubDependency.mergeError = new Error("GitHub merge failed");
+  const activityLogService = new FakeActivityLogService();
+  const service = createService(
+    database,
+    githubDependency,
+    activityLogService
+  );
+
+  await assert.rejects(
+    () =>
+      service.mergeReviewSession(
+        currentUserId,
+        workspaceId,
+        reviewSessionId,
+        {
+          confirm: true,
+          expectedHeadSha: "head-sha"
+        }
+      ),
+    /GitHub merge failed/
+  );
+  assert.equal(database.transactionCount, 0);
+  assert.equal(activityLogService.calls.length, 0);
+}
+
+{
+  const database = new FakeDatabase([
+    sessionRow({ conflict_status: "clean" }),
+    { id: reviewSessionId },
+    null
+  ]);
+  const githubDependency = new FakeGithubDependency(["clean"]);
+  const activityLogService = new FakeActivityLogService();
+  const service = createService(
+    database,
+    githubDependency,
+    activityLogService
+  );
+
+  await assert.rejects(
+    () =>
+      service.mergeReviewSession(
+        currentUserId,
+        workspaceId,
+        reviewSessionId,
+        {
+          confirm: true,
+          expectedHeadSha: "head-sha"
+        }
+      ),
+    (error) =>
+      error?.response?.error?.message ===
+      "PR Review room is no longer active"
+  );
+  assert.equal(database.rolledBackTransactions.length, 1);
+  assert.equal(activityLogService.calls.length, 0);
+}
+
+{
+  const database = new FakeDatabase([
+    sessionRow({ conflict_status: "clean" }),
+    { id: reviewSessionId },
+    { id: reviewRoomId }
+  ]);
+  const githubDependency = new FakeGithubDependency(["clean"]);
+  const appendError = new Error("Activity append failed");
+  const activityLogService = new FakeActivityLogService(appendError);
+  const service = createService(
+    database,
+    githubDependency,
+    activityLogService
+  );
+
+  await assert.rejects(
+    () =>
+      service.mergeReviewSession(
+        currentUserId,
+        workspaceId,
+        reviewSessionId,
+        {
+          confirm: true,
+          expectedHeadSha: "head-sha"
+        }
+      ),
+    (error) => error === appendError
+  );
+  assert.equal(database.transactionCount, 1);
+  assert.equal(database.rolledBackTransactions.length, 1);
+  assert.match(
+    database.rolledBackTransactions[0][0].text,
+    /UPDATE pr_review_rooms[\s\S]*RETURNING id/
+  );
+  assert.equal(
+    database.queries.some(({ text }) => /UPDATE pr_review_rooms/.test(text)),
+    false
+  );
 }
 
 console.log("PR Review conflict status refresh tests passed");

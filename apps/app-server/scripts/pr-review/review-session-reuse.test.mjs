@@ -10,6 +10,16 @@ const workspaceId = "11111111-1111-4111-8111-111111111111";
 const reviewRoomId = "22222222-2222-4222-8222-222222222222";
 const reviewSessionId = "33333333-3333-4333-8333-333333333333";
 
+class FakeActivityLogService {
+  constructor() {
+    this.calls = [];
+  }
+
+  async append(transaction, input) {
+    this.calls.push({ transaction, input });
+  }
+}
+
 class FakeDatabase {
   constructor() {
     this.queryOneCalls = [];
@@ -68,11 +78,14 @@ class FakeDatabase {
 }
 
 const database = new FakeDatabase();
+const activityLog = new FakeActivityLogService();
 const service = new PrReviewService(
   database,
   { async assertWorkspaceAccess() {} },
   {},
-  {}
+  {},
+  {},
+  activityLog
 );
 
 await service.activateReusableReviewSession(workspaceId, {
@@ -110,6 +123,11 @@ assert.equal(
   JSON.parse(fileShapeInsert.values[12]).props.currentReviewSessionId,
   reviewSessionId,
   "reusing a historical session must rematerialize the Canvas for that session"
+);
+assert.deepEqual(
+  activityLog.calls,
+  [],
+  "reusing an existing revision must not append a session-created activity"
 );
 
 console.log("PR Review reusable session activation tests passed");
