@@ -9,6 +9,7 @@ export type DocumentJson = Record<string, unknown>;
 
 export interface NormalizedCreateDocumentInput {
   name: string;
+  usesDefaultName: boolean;
   parentId: string | null;
 }
 

@@ -10,7 +10,7 @@ import type {
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const DEFAULT_DOCUMENT_NAME = "새 문서";
+export const DEFAULT_DOCUMENT_NAME = "새 문서";
 const MAX_DRIVE_ITEM_NAME_LENGTH = 255;
 const MAX_DOCUMENT_SNAPSHOT_BYTES = 1024 * 1024;
 const MAX_DOCUMENT_JSON_BYTES = 512 * 1024;
@@ -26,7 +26,7 @@ export function validateCreateDocumentRequest(
   const parentId = readOptionalParentId(draft.parentId);
   const name = readOptionalName(draft.name);
 
-  return { name, parentId };
+  return { name, usesDefaultName: draft.name === undefined, parentId };
 }
 
 export function validateSaveDocumentSnapshotRequest(

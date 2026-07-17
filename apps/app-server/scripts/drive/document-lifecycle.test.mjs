@@ -25,7 +25,14 @@ class FakeDatabase {
   }
   async queryOne(text, values = []) {
     this.queryOneCalls.push({ text, values });
-    return this.rows.shift() ?? null;
+    const next = this.rows.shift();
+    if (next instanceof Error) {
+      throw next;
+    }
+    return next ?? null;
+  }
+  async query() {
+    return this.queryRows?.shift() ?? [];
   }
   async execute(text, values = []) {
     this.executeCalls.push({ text, values });
@@ -81,16 +88,74 @@ assert.equal(result.item.itemType, "document");
 assert.equal(result.item.name, "PILO 기획서");
 assert.equal(result.document.latestSnapshotId, snapshotId);
 
+const automaticNameDatabase = new FakeDatabase([
+  uniqueViolation(),
+  driveItemRow({ name: "새 문서 (2)" }),
+  documentRow(),
+  snapshotRow()
+]);
+automaticNameDatabase.queryRows = [[{ name: "새 문서" }]];
+const automaticNameActivityLogService = new FakeActivityLogService();
+const automaticNameService = new DocumentService(
+  automaticNameDatabase,
+  new FakeWorkspaceService(),
+  automaticNameActivityLogService,
+  {
+    createDocumentId: () => documentId,
+    createSnapshotId: () => snapshotId
+  }
+);
+
+const automaticallyNamedDocument = await automaticNameService.createDocument(
+  currentUserId,
+  workspaceId,
+  { parentId: null }
+);
+
+assert.equal(automaticNameDatabase.transactions, 2);
+assert.equal(automaticNameDatabase.queryOneCalls[0].values[3], "새 문서");
+assert.equal(automaticNameDatabase.queryOneCalls[1].values[3], "새 문서 (2)");
+assert.equal(automaticallyNamedDocument.item.name, "새 문서 (2)");
+assert.equal(automaticNameActivityLogService.calls.length, 1);
+
+const explicitNameDatabase = new FakeDatabase([uniqueViolation()]);
+const explicitNameService = new DocumentService(
+  explicitNameDatabase,
+  new FakeWorkspaceService(),
+  new FakeActivityLogService(),
+  {
+    createDocumentId: () => documentId,
+    createSnapshotId: () => snapshotId
+  }
+);
+
+await assert.rejects(
+  () =>
+    explicitNameService.createDocument(currentUserId, workspaceId, {
+      parentId: null,
+      name: "새 문서"
+    }),
+  (error) => error?.getStatus?.() === 400
+);
+
 console.log("Document lifecycle tests passed.");
 
-function driveItemRow() {
+function uniqueViolation() {
+  return Object.assign(new Error("duplicate drive item name"), {
+    code: "23505",
+    constraint: "ux_drive_items_workspace_parent_name_active"
+  });
+}
+
+function driveItemRow(overrides = {}) {
   return {
     id: documentId, workspace_id: workspaceId, parent_id: null, item_type: "document",
     name: "PILO 기획서", object_key: null, mime_type: null, size_bytes: null,
     upload_status: null, created_by_user_id: currentUserId, updated_by_user_id: null,
     created_at: createdAt, updated_at: createdAt, deleted_at: null,
     created_by_user_name: "PILO User", created_by_user_avatar_url: null,
-    updated_by_user_name: null, updated_by_user_avatar_url: null
+    updated_by_user_name: null, updated_by_user_avatar_url: null,
+    ...overrides
   };
 }
 

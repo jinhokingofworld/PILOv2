@@ -3,7 +3,7 @@
 import DragHandle from "@tiptap/extension-drag-handle-react";
 import type { Editor } from "@tiptap/react";
 import { ChevronDown, ChevronUp, Copy, GripVertical, Trash2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -64,8 +64,27 @@ function deleteBlock(editor: Editor, position: number) {
   editor.chain().focus().setNodeSelection(position).deleteSelection().run();
 }
 
+function getBlockHandleVirtualElement(editor: Editor, position: number) {
+  const blockElement = editor.view.nodeDOM(position);
+  if (!(blockElement instanceof HTMLElement)) {
+    return null;
+  }
+
+  const editorElement = editor.view.dom;
+  const blockRect = blockElement.getBoundingClientRect();
+  const editorRect = editorElement.getBoundingClientRect();
+  const leftPadding = Number.parseFloat(window.getComputedStyle(editorElement).paddingLeft) || 0;
+
+  return {
+    contextElement: editorElement,
+    getBoundingClientRect: () =>
+      new DOMRect(editorRect.left + leftPadding, blockRect.top, 0, blockRect.height)
+  };
+}
+
 export function DocumentBlockHandle({ editor }: { editor: Editor | null }) {
   const [activeBlockPosition, setActiveBlockPosition] = useState<number | null>(null);
+  const activeBlockPositionRef = useRef<number | null>(null);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   useEffect(() => {
@@ -89,11 +108,20 @@ export function DocumentBlockHandle({ editor }: { editor: Editor | null }) {
   return (
     <DragHandle
       editor={editor}
+      computePositionConfig={{ placement: "left-start", strategy: "fixed" }}
+      getReferencedVirtualElement={() => {
+        const position = activeBlockPositionRef.current;
+        return position === null ? null : getBlockHandleVirtualElement(editor, position);
+      }}
       nested={{
         allowedContainers: ["bulletList", "orderedList"],
         edgeDetection: { threshold: -16 }
       }}
-      onNodeChange={({ pos }) => setActiveBlockPosition(pos)}
+      onNodeChange={({ node, pos }) => {
+        const nextPosition = node ? pos : null;
+        activeBlockPositionRef.current = nextPosition;
+        setActiveBlockPosition(nextPosition);
+      }}
     >
       <div className={styles.blockHandle}>
       <DropdownMenu open={isMenuOpen} onOpenChange={setIsMenuOpen}>
