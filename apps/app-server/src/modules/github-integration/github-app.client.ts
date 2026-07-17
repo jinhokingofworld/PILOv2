@@ -2,6 +2,7 @@ import { createSign } from "node:crypto";
 import { HttpStatus, Injectable, Optional } from "@nestjs/common";
 import { ApiError, badRequest, forbidden } from "../../common/api-error";
 import { GITHUB_API_VERSION } from "./github-api.constants";
+import { GITHUB_OAUTH_INVALID_CONNECTION_MESSAGE } from "./github-oauth-refresh.error";
 import { GITHUB_PROJECT_OAUTH_SCOPE_ERROR_MESSAGE } from "./github-project-oauth-scope";
 import { GithubSyncObservabilityService } from "./github-sync-observability.service";
 
@@ -1290,6 +1291,10 @@ export class GithubAppClient {
       throw badRequest("GitHub issue update failed");
     }
 
+    if (response.status === 401) {
+      throw badRequest(GITHUB_OAUTH_INVALID_CONNECTION_MESSAGE);
+    }
+
     if (response.status === 403) {
       throw forbidden(GITHUB_ISSUE_WRITE_PERMISSION_ERROR_MESSAGE);
     }
@@ -1345,6 +1350,10 @@ export class GithubAppClient {
       throw badRequest("GitHub issue assignee update failed");
     }
 
+    if (response.status === 401) {
+      throw badRequest(GITHUB_OAUTH_INVALID_CONNECTION_MESSAGE);
+    }
+
     if (response.status === 403) {
       throw forbidden(GITHUB_ISSUE_WRITE_PERMISSION_ERROR_MESSAGE);
     }
@@ -1390,7 +1399,9 @@ export class GithubAppClient {
           url,
           input.userAccessToken,
           "GitHub issue assignee lookup failed",
-          controller.signal
+          controller.signal,
+          false,
+          true
         );
         if (
           !Array.isArray(payload) ||
@@ -1442,6 +1453,10 @@ export class GithubAppClient {
       );
     } catch {
       throw badRequest("GitHub issue create failed");
+    }
+
+    if (response.status === 401) {
+      throw badRequest(GITHUB_OAUTH_INVALID_CONNECTION_MESSAGE);
     }
 
     if (response.status === 403) {
@@ -3074,7 +3089,8 @@ export class GithubAppClient {
     token: string,
     errorMessage: string,
     signal?: AbortSignal,
-    sourceNotFoundError = false
+    sourceNotFoundError = false,
+    userTokenOperation = false
   ): Promise<unknown> {
     let response: Response;
     try {
@@ -3092,6 +3108,10 @@ export class GithubAppClient {
 
     if (response.status === 404 && sourceNotFoundError) {
       throw new GithubSourceSnapshotNotFoundError();
+    }
+
+    if (response.status === 401 && userTokenOperation) {
+      throw badRequest(GITHUB_OAUTH_INVALID_CONNECTION_MESSAGE);
     }
 
     if (!response.ok) {

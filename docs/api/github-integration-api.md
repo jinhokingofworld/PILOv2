@@ -63,6 +63,26 @@ PR 리뷰 세션, 파일별 리뷰 판단, Kanban board cache hydrate, GitHub is
 
 GitHub token은 복호화된 상태로 응답하거나 로그에 남기지 않는다.
 
+### OAuth token refresh lifecycle
+
+`github_oauth_connections`의 `refresh_token_encrypted`,
+`access_token_expires_at`, `refresh_token_expires_at`은 모두 nullable metadata다.
+Access token expiry가 현재 시각으로부터 5분 이내이면 서버는 connection row를
+transaction 안에서 `FOR UPDATE`로 잠그고 expiry를 다시 확인한 뒤 access/refresh token을
+원자적으로 rotation한다.
+
+기존 connection처럼 access token expiry가 `NULL`이면 서버는 proactive refresh를 하지 않고
+기존 access token을 GitHub가 `401`로 거절할 때까지 사용한다. 이 legacy connection은
+`GitHub OAuth connection is invalid; reconnect is required`를 받으면 사용자가 다시 연결해야 한다.
+Refresh token이 없거나 만료됐거나 GitHub refresh endpoint가 `4xx`로 거절하면 서버는 저장된
+access token, refresh token, scope, expiry metadata를 모두 지우고 connection을 revoke한 뒤
+`GitHub OAuth reconnection is required`를 반환한다. Network 오류, GitHub `5xx`, malformed
+success response 같은 transient refresh 실패는 connection을 revoke하지 않으며 transaction을
+rollback해 기존 credential을 보존한다.
+
+Access token, refresh token, 암호화된 token 값과 provider refresh payload는 API 응답이나
+로그에 노출하지 않는다.
+
 ProjectV2 OAuth is intentionally separate from `/me/github/oauth/start`.
 `/me/github/oauth/start` remains the GitHub App user authorization flow used for
 installation lookup and PR review submission. Personal ProjectV2 discovery and

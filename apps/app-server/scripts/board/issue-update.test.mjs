@@ -10,10 +10,13 @@ const {
   BoardIssueUpdateService
 } = require("../../dist/modules/board/board-issue-update.service.js");
 const { BoardService } = require("../../dist/modules/board/board.service.js");
-const { forbidden } = require("../../dist/common/api-error.js");
+const { badRequest, forbidden } = require("../../dist/common/api-error.js");
 const {
   GithubIssueAssigneeValidationError
 } = require("../../dist/modules/github-integration/github-issue-assignee.error.js");
+const {
+  GITHUB_OAUTH_RECONNECTION_REQUIRED_MESSAGE
+} = require("../../dist/modules/github-integration/github-oauth-refresh.error.js");
 
 const currentUserId = "22222222-2222-4222-8222-222222222222";
 const workspaceId = "11111111-1111-4111-8111-111111111111";
@@ -830,4 +833,173 @@ for (const { input, message, name } of [
 
   assert.equal(githubIssueWriteService.calls.length, 0);
   assert.equal(db.transactions.length, 0);
+}
+
+const { GithubAppClient: BoardTestGithubAppClient } = require(
+  "../../dist/modules/github-integration/github-app.client.js"
+);
+const {
+  BoardIssueAssigneeQueries: BoardTestIssueAssigneeQueries
+} = require("../../dist/modules/board/queries/board-issue-assignee.queries.js");
+const {
+  BoardIssueAssigneeService: BoardTestIssueAssigneeService
+} = require("../../dist/modules/board/board-issue-assignee.service.js");
+
+async function captureGithub401(operation) {
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return new Response(JSON.stringify({ message: "provider detail" }), {
+      status: 401,
+      headers: { "Content-Type": "application/json" }
+    });
+  };
+  try {
+    try {
+      await operation(new BoardTestGithubAppClient());
+    } catch (error) {
+      assert.equal(calls, 1, "HTTP 401 must not be retried");
+      return error;
+    }
+    assert.fail("Expected GitHub operation to reject");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
+function assertBoardReconnectError(error) {
+  assert.equal(error.getStatus(), 400);
+  assert.equal(error.getResponse().error.code, "BAD_REQUEST");
+  assert.notEqual(error.getResponse().error.code, "BAD_GATEWAY");
+  assert.equal(
+    error.getResponse().error.message,
+    "GitHub OAuth connection is invalid; reconnect is required"
+  );
+  return true;
+}
+
+function assertBoardProactiveReconnectError(error) {
+  assert.equal(error.getStatus(), 400);
+  assert.equal(error.getResponse().error.code, "BAD_REQUEST");
+  assert.equal(
+    error.getResponse().error.message,
+    GITHUB_OAUTH_RECONNECTION_REQUIRED_MESSAGE
+  );
+  return true;
+}
+
+{
+  const database = new FakeDatabase({ queryOneRows: [updateTargetRow()] });
+  const githubIssueWriteService = new FakeGithubIssueWriteService({
+    error: badRequest(GITHUB_OAUTH_RECONNECTION_REQUIRED_MESSAGE)
+  });
+  const { service } = createSubject(database, githubIssueWriteService);
+
+  await assert.rejects(
+    () => service.updateBoardIssue(
+      currentUserId,
+      workspaceId,
+      boardId,
+      issueId,
+      { title: "Reconnect proactively" }
+    ),
+    assertBoardProactiveReconnectError
+  );
+}
+
+{
+  const github401 = await captureGithub401((client) =>
+    client.updateRepositoryIssue({
+      issueNumber: 203,
+      owner: "Developer-EJ",
+      repo: "PILO",
+      title: "Reconnect required",
+      userAccessToken: "user-oauth-token"
+    })
+  );
+  const database = new FakeDatabase({ queryOneRows: [updateTargetRow()] });
+  const githubIssueWriteService = new FakeGithubIssueWriteService({ error: github401 });
+  const { service } = createSubject(database, githubIssueWriteService);
+
+  await assert.rejects(
+    () => service.updateBoardIssue(
+      currentUserId,
+      workspaceId,
+      boardId,
+      issueId,
+      { title: "Reconnect required" }
+    ),
+    assertBoardReconnectError
+  );
+}
+
+{
+  const github401 = await captureGithub401((client) =>
+    client.addRepositoryIssueAssignees({
+      assignees: ["carol"],
+      issueNumber: 203,
+      owner: "Developer-EJ",
+      repo: "PILO",
+      userAccessToken: "user-oauth-token"
+    })
+  );
+  const database = new FakeDatabase({ queryOneRows: [updateTargetRow()] });
+  const githubIssueWriteService = new FakeGithubIssueWriteService({ error: github401 });
+  const { service } = createSubject(database, githubIssueWriteService);
+
+  await assert.rejects(
+    () => service.updateBoardIssueAssigneesDelta(
+      currentUserId,
+      workspaceId,
+      boardId,
+      issueId,
+      { addAssignees: ["carol"], removeAssignees: [] }
+    ),
+    assertBoardReconnectError
+  );
+}
+
+{
+  const github401 = await captureGithub401((client) =>
+    client.listRepositoryAssignees({
+      owner: "Developer-EJ",
+      repo: "PILO",
+      userAccessToken: "user-oauth-token"
+    })
+  );
+  const database = new FakeDatabase({
+    queryOneRows: [{
+      repository_owner_login: "Developer-EJ",
+      repository_name: "PILO"
+    }]
+  });
+  const assigneeService = new BoardTestIssueAssigneeService(
+    new BoardTestIssueAssigneeQueries(database),
+    new FakeWorkspaceService(),
+    {
+      async listAssignableUsers() {
+        throw github401;
+      }
+    }
+  );
+  const service = new BoardService(
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    assigneeService
+  );
+
+  await assert.rejects(
+    () => service.listBoardIssueAssigneeOptions(
+      currentUserId,
+      workspaceId,
+      boardId,
+      issueId
+    ),
+    assertBoardReconnectError
+  );
 }

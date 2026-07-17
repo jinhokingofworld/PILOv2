@@ -5,6 +5,9 @@ const require = createRequire(import.meta.url);
 const {
   GithubIssueWriteService
 } = require("../../dist/modules/github-integration/github-issue-write.service.js");
+const { GithubAppClient } = require(
+  "../../dist/modules/github-integration/github-app.client.js"
+);
 
 const currentUserId = "22222222-2222-4222-8222-222222222222";
 
@@ -316,3 +319,95 @@ function createSubject(client) {
   assert.equal(client.removeCalls.length, 0);
   assert.equal(client.addCalls.length, 0);
 }
+
+async function withFetchStatus(status, callback) {
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return new Response(JSON.stringify({ message: "provider detail" }), {
+      status,
+      headers: { "Content-Type": "application/json" }
+    });
+  };
+  try {
+    await callback(() => calls);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
+function assertReconnectRequired(error) {
+  assert.equal(error.getStatus(), 400);
+  assert.equal(error.getResponse().error.code, "BAD_REQUEST");
+  assert.equal(
+    error.getResponse().error.message,
+    "GitHub OAuth connection is invalid; reconnect is required"
+  );
+  return true;
+}
+
+for (const operation of [
+  (client) => client.listRepositoryAssignees({
+    owner: "Developer-EJ",
+    repo: "PILO",
+    userAccessToken: "user-oauth-token"
+  }),
+  (client) => client.updateRepositoryIssue({
+    issueNumber: 609,
+    owner: "Developer-EJ",
+    repo: "PILO",
+    title: "Updated issue",
+    userAccessToken: "user-oauth-token"
+  }),
+  (client) => client.addRepositoryIssueAssignees({
+    assignees: ["alice"],
+    issueNumber: 609,
+    owner: "Developer-EJ",
+    repo: "PILO",
+    userAccessToken: "user-oauth-token"
+  }),
+  (client) => client.removeRepositoryIssueAssignees({
+    assignees: ["alice"],
+    issueNumber: 609,
+    owner: "Developer-EJ",
+    repo: "PILO",
+    userAccessToken: "user-oauth-token"
+  }),
+  (client) => client.createRepositoryIssue({
+    owner: "Developer-EJ",
+    repo: "PILO",
+    title: "Created issue",
+    userAccessToken: "user-oauth-token"
+  })
+]) {
+  await withFetchStatus(401, async (readCalls) => {
+    await assert.rejects(
+      () => operation(new GithubAppClient()),
+      assertReconnectRequired
+    );
+    assert.equal(readCalls(), 1, "user-token operation must not retry HTTP 401");
+  });
+}
+
+await withFetchStatus(403, async (readCalls) => {
+  await assert.rejects(
+    () =>
+      new GithubAppClient().updateRepositoryIssue({
+        issueNumber: 609,
+        owner: "Developer-EJ",
+        repo: "PILO",
+        title: "Permission denied",
+        userAccessToken: "user-oauth-token"
+      }),
+    (error) => {
+      assert.equal(error.getStatus(), 403);
+      assert.equal(
+        error.getResponse().error.message,
+        "GitHub Issue write permission is required"
+      );
+      return true;
+    }
+  );
+  assert.equal(readCalls(), 1);
+});
