@@ -86,8 +86,8 @@ export function BoardPanel() {
   useBoardRealtime({
     accessToken,
     boardId: selectedBoardId,
-    reloadActiveSource: boardData.reloadWorkspace,
-    reloadBoard: boardData.reloadBoard,
+    reloadActiveSource: boardData.refreshWorkspace,
+    reloadBoard: boardData.refreshBoard,
     workspaceId
   });
   const selectedBoardSummary = boardData.boards.find(
@@ -183,7 +183,7 @@ export function BoardPanel() {
   }
 
   function handleIssueUpdated() {
-    void boardData.reloadBoard();
+    void boardData.refreshBoard();
   }
 
   return (
@@ -240,8 +240,8 @@ export function BoardPanel() {
             size="sm"
             disabled={!canUseBoard || isCatalogLoading || isBoardLoading}
             onClick={() => {
-              void boardData.reloadWorkspace();
-              void boardData.reloadBoard();
+              void boardData.refreshWorkspace();
+              void boardData.refreshBoard();
             }}
           >
             {isCatalogLoading || isBoardLoading ? (

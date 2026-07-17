@@ -94,7 +94,7 @@ assert.match(boardDataHook, /listBoardColumns/);
 assert.match(boardDataHook, /listBoardIssues/);
 assert.match(boardDataHook, /getBoardFilterOptions/);
 assert.match(boardDataHook, /Promise\.all/);
-assert.match(boardDataHook, /reloadBoard/);
+assert.match(boardDataHook, /refreshBoard/);
 assert.match(boardDataHook, /hydrateBoard/);
 assert.match(boardDataHook, /createBoardIssue/);
 assert.match(boardDataHook, /moveIssueStatus/);
