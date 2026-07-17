@@ -8,7 +8,7 @@ import type {
   AgentPlannerRequestContext
 } from "./types/agent-tool.types";
 
-export const AGENT_TOOL_SCHEMA_VERSION = "agent-tools:v5";
+export const AGENT_TOOL_SCHEMA_VERSION = "agent-tools:v6";
 
 export interface AgentToolSchemaSnapshotItem {
   name: string;

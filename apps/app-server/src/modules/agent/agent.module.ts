@@ -3,6 +3,7 @@ import { CommonModule } from "../../common/common.module";
 import { DatabaseModule } from "../../database/database.module";
 import { BoardModule } from "../board/board.module";
 import { CalendarModule } from "../calendar/calendar.module";
+import { DriveModule } from "../drive/drive.module";
 import { MeetingModule } from "../meeting/meeting.module";
 import { PrReviewModule } from "../pr-review/pr-review.module";
 import { SqlErdModule } from "../sql-erd/sql-erd.module";
@@ -30,6 +31,7 @@ import { MeetingAgentToolsService } from "./tools/meeting-agent-tools.service";
 import { SqlErdAgentToolsService } from "./tools/sql-erd-agent-tools.service";
 import { PrReviewAgentToolsService } from "./tools/pr-review-agent-tools.service";
 import { CanvasAgentDelegationToolsService } from "./tools/canvas-agent-delegation-tools.service";
+import { DriveAgentToolsService } from "./tools/drive-agent-tools.service";
 
 @Module({
   imports: [
@@ -37,6 +39,7 @@ import { CanvasAgentDelegationToolsService } from "./tools/canvas-agent-delegati
     DatabaseModule,
     WorkspaceModule,
     CalendarModule,
+    DriveModule,
     MeetingModule,
     BoardModule,
     SqlErdModule,
@@ -62,6 +65,7 @@ import { CanvasAgentDelegationToolsService } from "./tools/canvas-agent-delegati
     CalendarAgentToolsService,
     MeetingAgentResourceResolver,
     MeetingAgentToolsService,
+    DriveAgentToolsService,
     CanvasAgentDelegationToolsService,
     SqlErdAgentToolsService,
     PrReviewAgentToolsService
