@@ -62,11 +62,11 @@ try {
   await client.query("BEGIN");
   await client.query(`
     CREATE TEMP TABLE agent_threads (
-      id uuid PRIMARY KEY,
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
       workspace_id uuid NOT NULL,
       requested_by_user_id uuid NOT NULL,
-      last_activity_at timestamptz NOT NULL,
-      expires_at timestamptz NOT NULL
+      last_activity_at timestamptz NOT NULL DEFAULT now(),
+      expires_at timestamptz NOT NULL DEFAULT (now() + INTERVAL '30 days')
     )
   `);
   await client.query(`
