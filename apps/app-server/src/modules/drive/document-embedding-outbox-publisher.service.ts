@@ -49,6 +49,8 @@ export class DocumentEmbeddingOutboxPublisherService
   }
 
   async publishDue(): Promise<void> {
+    await this.recoverCurrentSupersededJobs();
+
     const rows = await this.database.query<{ id: string }>(
       `
         SELECT outbox.id
@@ -74,6 +76,39 @@ export class DocumentEmbeddingOutboxPublisherService
     for (const row of rows) {
       await this.publishOne(row.id);
     }
+  }
+
+  private async recoverCurrentSupersededJobs(): Promise<void> {
+    await this.database.execute(
+      `
+        WITH recovered_jobs AS (
+          UPDATE document_embedding_jobs AS job
+          SET status = 'queued',
+              claimed_at = NULL,
+              completed_at = NULL,
+              error_code = NULL,
+              error_message = NULL
+          FROM documents AS document
+          WHERE job.status = 'superseded'
+            AND document.id = job.document_id
+            AND document.workspace_id = job.workspace_id
+            AND document.deleted_at IS NULL
+            AND document.latest_snapshot_id = job.snapshot_id
+          RETURNING job.id
+        )
+        UPDATE document_embedding_outbox AS outbox
+        SET status = 'pending',
+            attempt_count = 0,
+            next_attempt_at = now(),
+            claim_token = NULL,
+            claimed_at = NULL,
+            delivered_at = NULL,
+            error_code = NULL,
+            error_message = NULL
+        FROM recovered_jobs
+        WHERE outbox.job_id = recovered_jobs.id
+      `
+    );
   }
 
   private async publishOne(outboxId: string): Promise<void> {

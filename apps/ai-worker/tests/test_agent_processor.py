@@ -14,6 +14,7 @@ from app.agent_processor import (
     OpenAiAgentPlannerClient,
     _agent_planner_schema,
     _agent_planner_system_prompt,
+    _agent_planner_user_prompt,
     normalize_agent_planner_decision,
     parse_agent_planner_output,
     parse_agent_run_job_payload,
@@ -361,6 +362,42 @@ def test_processor_completes_planning_run_with_tool_candidate() -> None:
     assert handoff_client.calls == [RUN_ID]
     assert planner_client.requests[0].current_date == "2026-07-09"
     assert planner_client.requests[0].timezone == "Asia/Seoul"
+
+
+def test_processor_forwards_only_pr_review_surface_to_planner() -> None:
+    repository = FakeAgentRunRepository()
+    planner_client = FakePlannerClient(
+        decision=planner_decision(
+            tool_name="recommend_pr_review_focus",
+            tool_input={},
+            requires_confirmation=False,
+        )
+    )
+    processor = create_processor(repository, planner_client)
+
+    result = processor.process_payload(
+        agent_payload(
+            requestContext={
+                "surface": "pr_review",
+                "sessionId": PR_REVIEW_SESSION_ID,
+            },
+            tools=[
+                tool_snapshot(
+                    name="recommend_pr_review_focus",
+                    executionMode="contextual",
+                    inputSchema={"type": "object"},
+                )
+            ],
+        )
+    )
+
+    request = planner_client.requests[0]
+    planner_prompt = _agent_planner_user_prompt(request)
+
+    assert result.reason == "agent_execution_handoff_completed"
+    assert request.context_surface == "pr_review"
+    assert json.loads(planner_prompt)["contextSurface"] == "pr_review"
+    assert PR_REVIEW_SESSION_ID not in planner_prompt
 
 
 def test_processor_stops_when_planner_step_completion_loses_claim() -> None:
@@ -981,6 +1018,14 @@ def test_planner_prompt_uses_server_board_issue_defaults() -> None:
     assert "omit boardName and repositoryFullName" in prompt
     assert "omit columnName so the App Server uses Unmapped" in prompt
     assert "do not ask the user for those defaults" in prompt
+
+
+def test_planner_prompt_knows_pr_review_contextual_tool_contract() -> None:
+    prompt = _agent_planner_system_prompt()
+
+    assert "contextSurface is pr_review" in prompt
+    assert "recommend_pr_review_focus" in prompt
+    assert "never request or invent either identifier" in prompt
 
 
 def test_processor_marks_planning_failed_for_invalid_planner_output() -> None:
