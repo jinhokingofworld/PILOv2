@@ -11,6 +11,22 @@ import type {
   SqltoerdModelJsonV1
 } from "@/features/sql-erd/types";
 
+export function shouldHandleSqlErdSchemaDeleteShortcut({
+  isEditableTarget,
+  key,
+  selection
+}: {
+  isEditableTarget: boolean;
+  key: string;
+  selection: SqlErdSelection;
+}) {
+  return (
+    !isEditableTarget &&
+    (key === "Delete" || key === "Backspace") &&
+    (selection.type === "table" || selection.type === "column")
+  );
+}
+
 export function getSqlErdContextRelationIds(
   modelJson: SqltoerdModelJsonV1,
   selection: SqlErdSelection

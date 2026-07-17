@@ -23,6 +23,85 @@ export type SqlErdSchemaMutationResult =
       reason: SqlErdSchemaMutationFailureReason;
     };
 
+export type SqlErdSchemaMutationRequest =
+  | { type: "delete_table"; tableId: string }
+  | { type: "delete_column"; tableId: string; columnId: string }
+  | { type: "rename_table"; tableId: string; name: string }
+  | {
+      type: "rename_column";
+      tableId: string;
+      columnId: string;
+      name: string;
+    }
+  | {
+      type: "change_column_type";
+      tableId: string;
+      columnId: string;
+      dataType: string;
+    }
+  | {
+      type: "update_column";
+      tableId: string;
+      columnId: string;
+      name: string;
+      dataType: string;
+    };
+
+export function applySqlErdSchemaMutation(
+  modelJson: SqltoerdModelJsonV1,
+  request: SqlErdSchemaMutationRequest
+) {
+  if (request.type === "delete_table") {
+    return deleteSqlErdTable(modelJson, request.tableId);
+  }
+
+  if (request.type === "delete_column") {
+    return deleteSqlErdColumn(
+      modelJson,
+      request.tableId,
+      request.columnId
+    );
+  }
+
+  if (request.type === "rename_table") {
+    return renameSqlErdTable(modelJson, request.tableId, request.name);
+  }
+
+  if (request.type === "rename_column") {
+    return renameSqlErdColumn(
+      modelJson,
+      request.tableId,
+      request.columnId,
+      request.name
+    );
+  }
+
+  if (request.type === "update_column") {
+    const renamed = renameSqlErdColumn(
+      modelJson,
+      request.tableId,
+      request.columnId,
+      request.name
+    );
+
+    return renamed.ok
+      ? changeSqlErdColumnType(
+          renamed.modelJson,
+          request.tableId,
+          request.columnId,
+          request.dataType
+        )
+      : renamed;
+  }
+
+  return changeSqlErdColumnType(
+    modelJson,
+    request.tableId,
+    request.columnId,
+    request.dataType
+  );
+}
+
 export function deleteSqlErdTable(
   modelJson: SqltoerdModelJsonV1,
   tableId: string

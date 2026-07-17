@@ -1253,6 +1253,14 @@ const deletedOrdersUserId = schemaMutationRuntime.deleteSqlErdColumn(
   "user_id"
 );
 assert.equal(deletedOrdersUserId.ok, true);
+assert.deepEqual(
+  schemaMutationRuntime.applySqlErdSchemaMutation(runtimeModel, {
+    type: "delete_column",
+    tableId: "table.orders",
+    columnId: "user_id"
+  }),
+  deletedOrdersUserId
+);
 assert.equal(deletedOrdersUserId.affectedRelationCount, 1);
 assert.equal(deletedOrdersUserId.affectedConstraintCount, 0);
 assert.deepEqual(
@@ -1265,6 +1273,23 @@ assert.deepEqual(
   deletedOrdersUserId.modelJson.schema.relations.map((relation) => relation.id),
   ["relation.users.manager_id.users.id"]
 );
+for (const dialect of ["postgresql", "mysql", "sqlite"]) {
+  const regeneratedAfterColumnDelete =
+    modelToSqlRuntime.generateSqlDdlFromErdModel({
+      dialect,
+      modelJson: deletedOrdersUserId.modelJson
+    });
+
+  assert.doesNotMatch(regeneratedAfterColumnDelete.sql, /user_id/);
+  assert.equal(
+    ddlParserRuntime.parseSqlDdlToErdModel({
+      dialect,
+      sourceMapModelJson: deletedOrdersUserId.modelJson,
+      sourceText: regeneratedAfterColumnDelete.sql
+    }).ok,
+    true
+  );
+}
 assert.equal(
   runtimeModel.schema.tables
     .find((table) => table.id === "table.orders")
@@ -1301,6 +1326,23 @@ assert.equal(
   deletedUsersTable.modelJson.schema.tables[0].columns[1].foreignKey,
   false
 );
+for (const dialect of ["postgresql", "mysql", "sqlite"]) {
+  const regeneratedAfterTableDelete =
+    modelToSqlRuntime.generateSqlDdlFromErdModel({
+      dialect,
+      modelJson: deletedUsersTable.modelJson
+    });
+
+  assert.doesNotMatch(regeneratedAfterTableDelete.sql, /CREATE TABLE [`"]users[`"]?/);
+  assert.equal(
+    ddlParserRuntime.parseSqlDdlToErdModel({
+      dialect,
+      sourceMapModelJson: deletedUsersTable.modelJson,
+      sourceText: regeneratedAfterTableDelete.sql
+    }).ok,
+    true
+  );
+}
 assert.deepEqual(
   schemaMutationRuntime.deleteSqlErdTable(
     {
@@ -1395,6 +1437,25 @@ const changedOrdersColumnType = schemaMutationRuntime.changeSqlErdColumnType(
   "BIGINT"
 );
 assert.equal(changedOrdersColumnType.ok, true);
+const updatedOrdersColumn = schemaMutationRuntime.applySqlErdSchemaMutation(
+  runtimeModel,
+  {
+    type: "update_column",
+    tableId: "table.orders",
+    columnId: "user_id",
+    name: "account_id",
+    dataType: "INTEGER"
+  }
+);
+assert.equal(updatedOrdersColumn.ok, true);
+assert.equal(
+  updatedOrdersColumn.modelJson.schema.tables[1].columns[1].name,
+  "account_id"
+);
+assert.equal(
+  updatedOrdersColumn.modelJson.schema.tables[1].columns[1].dataType,
+  "INTEGER"
+);
 for (const dialect of ["postgresql", "mysql", "sqlite"]) {
   const regenerated = modelToSqlRuntime.generateSqlDdlFromErdModel({
     dialect,
@@ -2906,6 +2967,37 @@ assert.deepEqual(
     tableId: "table.users"
   }),
   { selectedColumnId: "email", selectedState: "column" }
+);
+assert.equal(
+  canvasSelectionRuntime.shouldHandleSqlErdSchemaDeleteShortcut({
+    isEditableTarget: false,
+    key: "Delete",
+    selection: { type: "table", tableId: "table.users" }
+  }),
+  true
+);
+assert.equal(
+  canvasSelectionRuntime.shouldHandleSqlErdSchemaDeleteShortcut({
+    isEditableTarget: true,
+    key: "Backspace",
+    selection: {
+      type: "column",
+      tableId: "table.users",
+      columnId: "id"
+    }
+  }),
+  false
+);
+assert.equal(
+  canvasSelectionRuntime.shouldHandleSqlErdSchemaDeleteShortcut({
+    isEditableTarget: false,
+    key: "Delete",
+    selection: {
+      type: "relation",
+      relationId: "relation.orders.user_id.users.id"
+    }
+  }),
+  false
 );
 assert.deepEqual(
   canvasSelectionRuntime.getSqlErdSelectionFromSelectedShapes([
@@ -7358,8 +7450,18 @@ assert.match(
 );
 assert.match(
   panel,
-  /<NormalizedSqlPreviewDialog[\s\S]*?isReadOnly=\{isWriteProtocolMismatch\}/
+  /<NormalizedSqlPreviewDialog[\s\S]*?sqlErdViewSession\.writeProtocol === "operations_v1"[\s\S]*?!sourceLock\.canEdit/
 );
+assert.match(panel, /handlePreviewSchemaMutation/);
+assert.match(panel, /createSqltoerdLayoutForModel/);
+assert.match(panel, /createSqlErdSchemaSemanticSignature/);
+assert.match(panel, /테이블명 SQL diff 보기/);
+assert.match(panel, /테이블 삭제 SQL diff 보기/);
+assert.match(panel, /컬럼 변경 SQL diff 보기/);
+assert.match(panel, /컬럼 삭제 SQL diff 보기/);
+assert.match(canvasSurface, /function SqlErdSchemaDeleteBridge/);
+assert.match(canvasSurface, /registerBeforeDeleteHandler/);
+assert.match(canvasSurface, /shouldHandleSqlErdSchemaDeleteShortcut/);
 assert.match(
   panel,
   /disabled=\{isReadOnly \|\| !preview \|\| !preview\.hasChanges \|\| isApplying\}/
