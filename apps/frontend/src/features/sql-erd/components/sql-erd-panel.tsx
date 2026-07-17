@@ -1429,7 +1429,12 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
     }
   }, [normalizedSqlPreview, sqlErdViewSession.writeProtocol]);
   const handleUndoNormalizedSql = useCallback(() => {
-    if (isWriteProtocolMismatch || isNormalizedSqlApplying) {
+    if (
+      isWriteProtocolMismatch ||
+      isNormalizedSqlApplying ||
+      (sqlErdViewSession.writeProtocol === "operations_v1" &&
+        !sourceLock.canEdit)
+    ) {
       return;
     }
 
@@ -1449,9 +1454,21 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
         revision: baseSnapshot.revision
       }
     });
-  }, [applyNormalizedSqlSnapshot, isNormalizedSqlApplying, isWriteProtocolMismatch, modelSqlHistory]);
+  }, [
+    applyNormalizedSqlSnapshot,
+    isNormalizedSqlApplying,
+    isWriteProtocolMismatch,
+    modelSqlHistory,
+    sourceLock.canEdit,
+    sqlErdViewSession.writeProtocol
+  ]);
   const handleRedoNormalizedSql = useCallback(() => {
-    if (isWriteProtocolMismatch || isNormalizedSqlApplying) {
+    if (
+      isWriteProtocolMismatch ||
+      isNormalizedSqlApplying ||
+      (sqlErdViewSession.writeProtocol === "operations_v1" &&
+        !sourceLock.canEdit)
+    ) {
       return;
     }
 
@@ -1471,7 +1488,14 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
         revision: baseSnapshot.revision
       }
     });
-  }, [applyNormalizedSqlSnapshot, isNormalizedSqlApplying, isWriteProtocolMismatch, modelSqlHistory]);
+  }, [
+    applyNormalizedSqlSnapshot,
+    isNormalizedSqlApplying,
+    isWriteProtocolMismatch,
+    modelSqlHistory,
+    sourceLock.canEdit,
+    sqlErdViewSession.writeProtocol
+  ]);
   const handleLayoutChange = useCallback(
     (layoutJson: SqltoerdLayoutJsonV1) => {
       applySqlErdEditAction({
@@ -2438,11 +2462,15 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
         canRedoNormalizedSql={
           !isWriteProtocolMismatch &&
           !isNormalizedSqlApplying &&
+          (sqlErdViewSession.writeProtocol !== "operations_v1" ||
+            sourceLock.canEdit) &&
           modelSqlHistory.future.length > 0
         }
         canUndoNormalizedSql={
           !isWriteProtocolMismatch &&
           !isNormalizedSqlApplying &&
+          (sqlErdViewSession.writeProtocol !== "operations_v1" ||
+            sourceLock.canEdit) &&
           modelSqlHistory.past.length > 0
         }
         counts={sessionCounts}

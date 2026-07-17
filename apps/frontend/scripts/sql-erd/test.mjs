@@ -7426,11 +7426,11 @@ assert.match(
 );
 assert.match(
   panel,
-  /const handleUndoNormalizedSql = useCallback\(\(\) => \{\s*if \(isWriteProtocolMismatch \|\| isNormalizedSqlApplying\)/s
+  /const handleUndoNormalizedSql = useCallback\(\(\) => \{\s*if \([\s\S]*?sqlErdViewSession\.writeProtocol === "operations_v1" &&\s*!sourceLock\.canEdit/s
 );
 assert.match(
   panel,
-  /const handleRedoNormalizedSql = useCallback\(\(\) => \{\s*if \(isWriteProtocolMismatch \|\| isNormalizedSqlApplying\)/s
+  /const handleRedoNormalizedSql = useCallback\(\(\) => \{\s*if \([\s\S]*?sqlErdViewSession\.writeProtocol === "operations_v1" &&\s*!sourceLock\.canEdit/s
 );
 assert.match(
   panel,
@@ -7438,11 +7438,11 @@ assert.match(
 );
 assert.match(
   panel,
-  /canRedoNormalizedSql=\{[\s\S]*?!isWriteProtocolMismatch &&/s
+  /canRedoNormalizedSql=\{[\s\S]*?sqlErdViewSession\.writeProtocol !== "operations_v1" \|\|\s*sourceLock\.canEdit/s
 );
 assert.match(
   panel,
-  /canUndoNormalizedSql=\{[\s\S]*?!isWriteProtocolMismatch &&/s
+  /canUndoNormalizedSql=\{[\s\S]*?sqlErdViewSession\.writeProtocol !== "operations_v1" \|\|\s*sourceLock\.canEdit/s
 );
 assert.match(
   panel,
