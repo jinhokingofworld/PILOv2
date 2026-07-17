@@ -470,7 +470,7 @@ export class CalendarService {
         ${CALENDAR_EVENT_SELECT}
         WHERE calendar_events.workspace_id = $1
           AND calendar_events.id = $2
-        FOR UPDATE
+        FOR UPDATE OF calendar_events
       `,
       [workspaceId, this.parseEventId(eventId)]
     );
