@@ -3310,10 +3310,19 @@ function InspectorPanel({
 
   return (
     <aside
-      className="flex shrink-0 flex-col border-l bg-background"
+      className="relative flex shrink-0 flex-col border-l bg-background"
       id="inspector"
       style={{ width }}
     >
+      <button
+        aria-label="상세 정보 패널 닫기"
+        className="absolute top-1/2 -left-4 z-20 inline-flex size-8 -translate-y-1/2 items-center justify-center rounded-full border bg-background text-muted-foreground shadow-md transition-colors hover:bg-muted hover:text-foreground"
+        data-sqltoerd-inspector-toggle
+        onClick={onToggle}
+        type="button"
+      >
+        <PanelRightClose className="size-4" />
+      </button>
       <div className="flex min-h-20 items-center justify-between gap-3 border-b px-6">
         <div className="min-w-0">
           <p className="text-xl font-semibold">{inspectorTitle}</p>
@@ -3323,14 +3332,6 @@ function InspectorPanel({
             </p>
           ) : null}
         </div>
-        <button
-          aria-label="상세 정보 패널 닫기"
-          className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          onClick={onToggle}
-          type="button"
-        >
-          <PanelRightClose className="size-4" />
-        </button>
       </div>
 
       <div className="flex flex-1 flex-col gap-6 overflow-auto p-6">

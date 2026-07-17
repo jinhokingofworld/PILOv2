@@ -258,6 +258,20 @@ function getNextSqlErdSelectedShapeIds(
     : [...selectedShapeIds, shapeId];
 }
 
+export function primeSqlErdPointerSelection(
+  editor: Pick<Editor, "getSelectedShapeIds" | "setSelectedShapes">,
+  shapeId: TLShapeId,
+  options: { toggle?: boolean } = {}
+) {
+  const selectedShapeIds = Array.from(editor.getSelectedShapeIds());
+
+  if (!options.toggle && !selectedShapeIds.includes(shapeId)) {
+    editor.setSelectedShapes([shapeId]);
+  }
+
+  return selectedShapeIds;
+}
+
 export function selectSqlErdTableShape(
   editor: Editor,
   selectedTableShape: SqlErdTableShape,
@@ -485,8 +499,11 @@ function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
   }
 
   function handleColumnPointerDown(event: PointerEvent<HTMLDivElement>) {
+    const selectedShapeIds = primeSqlErdPointerSelection(editor, shape.id, {
+      toggle: event.shiftKey
+    });
     columnPointerStartRef.current = {
-      selectedShapeIds: Array.from(editor.getSelectedShapeIds()),
+      selectedShapeIds,
       x: event.clientX,
       y: event.clientY
     };
@@ -568,9 +585,11 @@ function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
           onKeyDown={handleTableKeyDown}
           role="button"
           tabIndex={isFocusDimmed ? -1 : 0}
-          onPointerDownCapture={() => {
-            tablePointerSelectionRef.current = Array.from(
-              editor.getSelectedShapeIds()
+          onPointerDownCapture={(event) => {
+            tablePointerSelectionRef.current = primeSqlErdPointerSelection(
+              editor,
+              shape.id,
+              { toggle: event.shiftKey }
             );
           }}
         >

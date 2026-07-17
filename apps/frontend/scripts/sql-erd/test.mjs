@@ -2663,6 +2663,33 @@ assert.equal(
   false
 );
 assert.deepEqual(runtimeInteractiveSelectionEditor.selectedShapeIds, []);
+runtimeInteractiveSelectionEditor.selectedShapeIds = [
+  "shape:sqltoerd-table-current"
+];
+assert.deepEqual(
+  tableShapeRuntime.primeSqlErdPointerSelection(
+    runtimeInteractiveSelectionEditor,
+    "shape:sqltoerd-table-next"
+  ),
+  ["shape:sqltoerd-table-current"]
+);
+assert.deepEqual(runtimeInteractiveSelectionEditor.selectedShapeIds, [
+  "shape:sqltoerd-table-next"
+]);
+runtimeInteractiveSelectionEditor.selectedShapeIds = [
+  "shape:sqltoerd-table-current"
+];
+assert.deepEqual(
+  tableShapeRuntime.primeSqlErdPointerSelection(
+    runtimeInteractiveSelectionEditor,
+    "shape:sqltoerd-table-next",
+    { toggle: true }
+  ),
+  ["shape:sqltoerd-table-current"]
+);
+assert.deepEqual(runtimeInteractiveSelectionEditor.selectedShapeIds, [
+  "shape:sqltoerd-table-current"
+]);
 assert.deepEqual(
   canvasSelectionRuntime.resolveSqlErdTableInteractionSelection({
     isShapeSelected: false,
@@ -7368,6 +7395,7 @@ assert.match(tableShape, /isSqlErdColumnPointerDrag/);
 assert.match(tableShape, /columnPointerStartRef/);
 assert.doesNotMatch(tableShape, /suppressNextColumnClickRef/);
 assert.match(tableShape, /onPointerDownCapture/);
+assert.match(tableShape, /primeSqlErdPointerSelection/);
 assert.doesNotMatch(tableShape, /onPointerUpCapture/);
 assert.doesNotMatch(tableShape, /<article[\s\S]*?onClick=\{handleTableClick\}/);
 assert.doesNotMatch(tableShape, /isSelected \|\| column\.foreignKey\s*\?\s*"border-blue-400 opacity-100"/);
@@ -7384,6 +7412,12 @@ assert.doesNotMatch(tableShape, /const BADGE_COLUMN_WIDTH = 72/);
 assert.doesNotMatch(tableShape, /gridTemplateColumns: `\$\{BADGE_COLUMN_WIDTH\}px max-content max-content`/);
 assert.doesNotMatch(tableShape, /truncate/);
 assert.doesNotMatch(tableShape, /text-overflow/);
+
+assert.match(panel, /data-sqltoerd-inspector-toggle/);
+assert.match(
+  panel,
+  /className="absolute top-1\/2 -left-[\s\S]*?data-sqltoerd-inspector-toggle/
+);
 
 assert.match(relationShape, /SQLTOERD_RELATION_SHAPE_TYPE/);
 assert.match(relationShape, /SQLTOERD_RELATION_HOVER_EVENT/);
