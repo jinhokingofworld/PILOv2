@@ -3,6 +3,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { createBoardApiClient } from "@/features/board/api/client";
+import {
+  createBoardRequestCoordinator,
+  resolveBackgroundSnapshot
+} from "@/features/board/utils/board-request-coordinator";
 import { selectBoardProjectRepositoryId } from "@/features/board/utils/board-project-repository";
 import type {
   BoardColumnPayload,
@@ -96,6 +100,14 @@ export function useBoardWorkspaceData({
     () => createBoardApiClient({ accessToken: normalizedAccessToken }),
     [normalizedAccessToken]
   );
+  const catalogRequestCoordinator = useMemo(
+    () => createBoardRequestCoordinator(),
+    []
+  );
+  const boardRequestCoordinator = useMemo(
+    () => createBoardRequestCoordinator(),
+    []
+  );
 
   const loadWorkspaceData = useCallback(async () => {
     if (!canLoad) {
@@ -171,6 +183,7 @@ export function useBoardWorkspaceData({
 
   const reloadWorkspace = useCallback(async () => {
     if (!canLoad) {
+      catalogRequestCoordinator.invalidate();
       setCatalog(emptyCatalog);
       setCatalogStatus("idle");
       setCatalogError(null);
@@ -180,44 +193,83 @@ export function useBoardWorkspaceData({
     setCatalogStatus("loading");
     setCatalogError(null);
 
-    try {
-      const nextCatalog = await loadWorkspaceData();
-      setCatalog(nextCatalog);
+    const outcome = await catalogRequestCoordinator.run(loadWorkspaceData);
+    if (outcome.status === "stale") {
+      return null;
+    }
+
+    setCatalog((current) => resolveBackgroundSnapshot(current, outcome));
+    if (outcome.status === "applied") {
       setCatalogStatus("success");
-      return nextCatalog;
-    } catch (error) {
-      const nextError = errorFromUnknown(error);
+      return outcome.value;
+    }
+    if (outcome.status === "failed") {
       setCatalog(emptyCatalog);
-      setCatalogError(nextError);
+      setCatalogError(errorFromUnknown(outcome.error));
       setCatalogStatus("error");
-      return emptyCatalog;
     }
-  }, [canLoad, loadWorkspaceData]);
 
-  const reloadBoard = useCallback(async () => {
+    return emptyCatalog;
+  }, [canLoad, catalogRequestCoordinator, loadWorkspaceData]);
+
+  const refreshWorkspace = useCallback(async () => {
+    if (!canLoad) {
+      catalogRequestCoordinator.invalidate();
+      setCatalogError(null);
+      return null;
+    }
+
+    setCatalogError(null);
+
+    const outcome = await catalogRequestCoordinator.run(loadWorkspaceData);
+    if (outcome.status === "applied") {
+      setCatalog(outcome.value);
+      setCatalogStatus("success");
+      return outcome.value;
+    }
+    if (outcome.status === "failed") {
+      setCatalogError(errorFromUnknown(outcome.error));
+      setCatalogStatus((current) =>
+        current === "success" ? current : "error"
+      );
+    }
+
+    return null;
+  }, [canLoad, catalogRequestCoordinator, loadWorkspaceData]);
+
+  const refreshBoard = useCallback(async () => {
     if (!canLoad || !normalizedBoardId) {
-      setBoardState(emptyBoardState);
-      setBoardStatus("idle");
+      boardRequestCoordinator.invalidate();
       setBoardError(null);
-      return emptyBoardState;
+      return null;
     }
 
-    setBoardStatus("loading");
     setBoardError(null);
 
-    try {
-      const nextBoardState = await loadBoardData();
-      setBoardState(nextBoardState);
-      setBoardStatus("success");
-      return nextBoardState;
-    } catch (error) {
-      const nextError = errorFromUnknown(error);
-      setBoardState(emptyBoardState);
-      setBoardError(nextError);
-      setBoardStatus("error");
-      return emptyBoardState;
+    const outcome = await boardRequestCoordinator.run(loadBoardData);
+    if (outcome.status === "stale") {
+      return null;
     }
-  }, [canLoad, loadBoardData, normalizedBoardId]);
+
+    setBoardState((current) => resolveBackgroundSnapshot(current, outcome));
+    if (outcome.status === "applied") {
+      setBoardStatus("success");
+      return outcome.value;
+    }
+    if (outcome.status === "failed") {
+      setBoardError(errorFromUnknown(outcome.error));
+      setBoardStatus((current) =>
+        current === "success" ? current : "error"
+      );
+    }
+
+    return null;
+  }, [
+    boardRequestCoordinator,
+    canLoad,
+    loadBoardData,
+    normalizedBoardId
+  ]);
 
   const hydrateBoard = useCallback(
     async (input: CreateBoardInput) => {
@@ -250,6 +302,7 @@ export function useBoardWorkspaceData({
         throw new Error("Board issue could not be found");
       }
 
+      const mutation = boardRequestCoordinator.beginMutation();
       setBoardError(null);
       setBoardState((current) => ({
         ...current,
@@ -269,6 +322,7 @@ export function useBoardWorkspaceData({
           }
         );
 
+        mutation.finish();
         setBoardState((current) => ({
           ...current,
           issues: current.issues.map((issue) =>
@@ -278,19 +332,21 @@ export function useBoardWorkspaceData({
 
         return result.issue;
       } catch (error) {
+        mutation.finish();
         setBoardState(previousBoardState);
         setBoardError(errorFromUnknown(error));
-        void reloadBoard();
+        void refreshBoard();
         throw error;
       }
     },
     [
       boardClient,
+      boardRequestCoordinator,
       boardState,
       canLoad,
       normalizedBoardId,
       normalizedWorkspaceId,
-      reloadBoard
+      refreshBoard
     ]
   );
 
@@ -300,6 +356,7 @@ export function useBoardWorkspaceData({
         throw new Error("Board issue creation requires an authenticated board");
       }
 
+      const mutation = boardRequestCoordinator.beginMutation();
       setBoardError(null);
 
       try {
@@ -309,6 +366,7 @@ export function useBoardWorkspaceData({
           input
         );
 
+        mutation.finish();
         setBoardState((current) => {
           const hasIssue = current.issues.some(
             (issue) => issue.id === result.issue.id
@@ -340,11 +398,18 @@ export function useBoardWorkspaceData({
 
         return result.issue;
       } catch (error) {
+        mutation.finish();
         setBoardError(errorFromUnknown(error));
         throw error;
       }
     },
-    [boardClient, canLoad, normalizedBoardId, normalizedWorkspaceId]
+    [
+      boardClient,
+      boardRequestCoordinator,
+      canLoad,
+      normalizedBoardId,
+      normalizedWorkspaceId
+    ]
   );
 
   useEffect(() => {
@@ -352,6 +417,7 @@ export function useBoardWorkspaceData({
 
     async function loadCatalog() {
       if (!canLoad) {
+        catalogRequestCoordinator.invalidate();
         setCatalog(emptyCatalog);
         setCatalogStatus("idle");
         setCatalogError(null);
@@ -361,17 +427,16 @@ export function useBoardWorkspaceData({
       setCatalogStatus("loading");
       setCatalogError(null);
 
-      try {
-        const nextCatalog = await loadWorkspaceData();
-        if (!active) return;
-
-        setCatalog(nextCatalog);
+      const outcome = await catalogRequestCoordinator.run(loadWorkspaceData);
+      if (!active || outcome.status === "stale") {
+        return;
+      }
+      if (outcome.status === "applied") {
+        setCatalog(outcome.value);
         setCatalogStatus("success");
-      } catch (error) {
-        if (!active) return;
-
+      } else {
         setCatalog(emptyCatalog);
-        setCatalogError(errorFromUnknown(error));
+        setCatalogError(errorFromUnknown(outcome.error));
         setCatalogStatus("error");
       }
     }
@@ -380,14 +445,16 @@ export function useBoardWorkspaceData({
 
     return () => {
       active = false;
+      catalogRequestCoordinator.invalidate();
     };
-  }, [canLoad, loadWorkspaceData]);
+  }, [canLoad, catalogRequestCoordinator, loadWorkspaceData]);
 
   useEffect(() => {
     let active = true;
 
     async function loadSelectedBoard() {
       if (!canLoad || !normalizedBoardId) {
+        boardRequestCoordinator.invalidate();
         setBoardState(emptyBoardState);
         setBoardStatus("idle");
         setBoardError(null);
@@ -397,17 +464,16 @@ export function useBoardWorkspaceData({
       setBoardStatus("loading");
       setBoardError(null);
 
-      try {
-        const nextBoardState = await loadBoardData();
-        if (!active) return;
-
-        setBoardState(nextBoardState);
+      const outcome = await boardRequestCoordinator.run(loadBoardData);
+      if (!active || outcome.status === "stale") {
+        return;
+      }
+      if (outcome.status === "applied") {
+        setBoardState(outcome.value);
         setBoardStatus("success");
-      } catch (error) {
-        if (!active) return;
-
+      } else {
         setBoardState(emptyBoardState);
-        setBoardError(errorFromUnknown(error));
+        setBoardError(errorFromUnknown(outcome.error));
         setBoardStatus("error");
       }
     }
@@ -416,8 +482,14 @@ export function useBoardWorkspaceData({
 
     return () => {
       active = false;
+      boardRequestCoordinator.invalidate();
     };
-  }, [canLoad, loadBoardData, normalizedBoardId]);
+  }, [
+    boardRequestCoordinator,
+    canLoad,
+    loadBoardData,
+    normalizedBoardId
+  ]);
 
   return {
     ...catalog,
@@ -429,7 +501,8 @@ export function useBoardWorkspaceData({
     createBoardIssue,
     hydrateBoard,
     moveIssueStatus,
-    reloadBoard,
+    refreshBoard,
+    refreshWorkspace,
     reloadWorkspace
   };
 }
