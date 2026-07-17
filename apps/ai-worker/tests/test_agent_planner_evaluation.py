@@ -1,7 +1,9 @@
+import hashlib
 import json
 from pathlib import Path
 
 from app.agent_planner_evaluation import (
+    build_evaluation_input_hashes,
     build_evaluation_report,
     evaluate_suite,
     load_evaluation_suite,
@@ -17,6 +19,20 @@ class FakePlanner:
     def plan(self, request):
         self.requests.append(request)
         return next(self.decisions)
+
+
+def test_evaluation_input_hashes_include_meeting_catalog_when_provided(tmp_path) -> None:
+    suite_path = tmp_path / "suite.json"
+    catalog_path = tmp_path / "meeting-catalog.json"
+    suite_path.write_bytes(b'{"version":"suite:v1"}')
+    catalog_path.write_bytes(b'{"version":"meeting:v1"}')
+
+    hashes = build_evaluation_input_hashes(suite_path, catalog_path)
+
+    assert hashes == {
+        "suiteSha256": hashlib.sha256(suite_path.read_bytes()).hexdigest(),
+        "meetingCatalogSha256": hashlib.sha256(catalog_path.read_bytes()).hexdigest(),
+    }
 
 
 def decision(**overrides):

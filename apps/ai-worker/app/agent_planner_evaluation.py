@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,6 +20,20 @@ from app.agent_processor import (
 EVALUATION_RUN_ID = "00000000-0000-4000-8000-000000000001"
 EVALUATION_WORKSPACE_ID = "00000000-0000-4000-8000-000000000002"
 EVALUATION_USER_ID = "00000000-0000-4000-8000-000000000003"
+
+
+def build_evaluation_input_hashes(
+    tool_snapshot_path: Path,
+    meeting_catalog_path: Path | None = None,
+) -> dict[str, str]:
+    hashes = {
+        "suiteSha256": hashlib.sha256(tool_snapshot_path.read_bytes()).hexdigest(),
+    }
+    if meeting_catalog_path:
+        hashes["meetingCatalogSha256"] = hashlib.sha256(
+            meeting_catalog_path.read_bytes()
+        ).hexdigest()
+    return hashes
 
 
 @dataclass(frozen=True)
@@ -131,11 +146,7 @@ def load_meeting_regression_suite(
                 isinstance(seed, str) and seed for seed in seeds
             ):
                 raise ValueError("Meeting regression canonicalSeeds must be a string array")
-            prompts = [
-                f"{prefix}{seed}".strip()
-                for prefix in prefixes
-                for seed in seeds
-            ]
+            prompts = [f"{prefix}{seed}".strip() for prefix in prefixes for seed in seeds]
         else:
             prompts = capability.get("heldOutParaphrases")
             if not isinstance(prompts, list) or not all(

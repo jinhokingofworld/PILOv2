@@ -7,9 +7,7 @@ from app.agent_planner_evaluation import (
     load_meeting_regression_suite,
 )
 
-CATALOG_PATH = (
-    Path(__file__).parents[1] / "evals" / "meeting_agent_capability_catalog_v1.json"
-)
+CATALOG_PATH = Path(__file__).parents[1] / "evals" / "meeting_agent_capability_catalog_v1.json"
 PLANNER_SUITE_PATH = Path(__file__).parents[1] / "evals" / "agent_planner_korean_v1.json"
 UUID_PATTERN = re.compile(
     r"\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b",
@@ -57,6 +55,8 @@ def test_catalog_covers_every_registered_meeting_tool_with_minimum_variants() ->
     assert tool_names == EXPECTED_MEETING_TOOLS
 
     for capability in capabilities:
+        assert isinstance(capability["requestSection"], str)
+        assert capability["requestSection"]
         canonical = [
             f"{prefix}{seed}".strip()
             for prefix in prefixes
@@ -155,8 +155,6 @@ def test_catalog_builds_separate_canonical_and_held_out_planner_suites() -> None
         {case.prompt for case in held_out.cases}
     )
     expected_tool_names = {
-        case.expectation.tool_name
-        for case in canonical.cases
-        if case.expectation.tool_name
+        case.expectation.tool_name for case in canonical.cases if case.expectation.tool_name
     }
     assert expected_tool_names <= EXPECTED_MEETING_TOOLS

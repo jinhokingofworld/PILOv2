@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import subprocess
@@ -9,6 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from app.agent_planner_evaluation import (
+    build_evaluation_input_hashes,
     build_evaluation_report,
     evaluate_suite,
     load_evaluation_suite,
@@ -81,7 +81,7 @@ def main() -> None:
         "repetitions": args.repetitions,
         "suiteVersion": suite.version,
         "toolSchemaVersion": suite.job.tool_schema_version,
-        "suiteSha256": hashlib.sha256(args.suite.read_bytes()).hexdigest(),
+        **build_evaluation_input_hashes(args.suite, args.meeting_catalog),
         "sourceRevision": _git_revision(),
     }
     print(json.dumps(report, ensure_ascii=False, indent=2))
