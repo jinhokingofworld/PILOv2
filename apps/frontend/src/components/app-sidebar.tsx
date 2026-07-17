@@ -459,7 +459,7 @@ export function AppSidebar({
                         onClick={() =>
                           handleSelectItem(item.id, item.href, {
                             navigate:
-                              item.id === "meeting" && sidebarState === "collapsed"
+                              item.id === "voice-chat" && sidebarState === "collapsed"
                                 ? true
                                 : item.navigateOnTrigger
                           })

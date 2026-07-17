@@ -182,7 +182,7 @@ export function HeaderNotificationDropdown() {
     });
     setIsPopoverOpen(false);
     if (notification.type === "meeting_report_completed" && notification.canOpenReport) {
-      router.push("/meeting/report");
+      router.push("/report");
     }
   }
 
