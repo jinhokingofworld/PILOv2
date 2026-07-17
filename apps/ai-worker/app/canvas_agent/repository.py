@@ -11,6 +11,7 @@ from app.canvas_agent.types import (
 )
 
 CODE_GENERATION_FAILURE_MESSAGE = "코드 생성 중 오류가 났어요. 다시 시도해 주세요."
+GENERIC_FAILURE_MESSAGE = "Canvas AI 작업을 완료하지 못했습니다."
 
 
 class PgCanvasAgentRepository:
@@ -207,29 +208,22 @@ class PgCanvasAgentRepository:
 
     def mark_failed(self, run_id: str, error_message: str) -> None:
         safe_error_message = error_message[:4096]
-        user_message = "디자인 초안을 만드는 중 오류가 났어요. 다시 시도해 주세요."
-        if safe_error_message == CODE_GENERATION_FAILURE_MESSAGE:
-            user_message = CODE_GENERATION_FAILURE_MESSAGE
+        user_message = (
+            CODE_GENERATION_FAILURE_MESSAGE
+            if safe_error_message == CODE_GENERATION_FAILURE_MESSAGE
+            else GENERIC_FAILURE_MESSAGE
+        )
         self.connection.execute(
             """
             UPDATE canvas_agent_runs
             SET status = 'failed', error_code = 'CANVAS_AGENT_PLANNER_FAILED',
                 error_message = %s,
-                result_summary = CASE
-                    WHEN %s THEN %s
-                    WHEN prompt ~* %s THEN %s
-                    ELSE 'Canvas AI 작업을 완료하지 못했습니다.'
-                END,
+                result_summary = %s,
                 result_json = jsonb_set(
                     COALESCE(result_json, '{}'::jsonb),
                     '{progress}',
                     jsonb_build_object(
-                        'message',
-                        CASE
-                            WHEN %s THEN %s
-                            WHEN prompt ~* %s THEN %s
-                            ELSE 'Canvas AI 작업을 완료하지 못했습니다.'
-                        END,
+                        'message', %s,
                         'highlightedShapeIds', '[]'::jsonb,
                         'targetViewport', NULL,
                         'toolTarget', NULL,
@@ -243,13 +237,7 @@ class PgCanvasAgentRepository:
             """,
             (
                 safe_error_message,
-                safe_error_message == CODE_GENERATION_FAILURE_MESSAGE,
-                CODE_GENERATION_FAILURE_MESSAGE,
-                "(디자인|와이어|페이지|화면|초안|그려|만들|생성)",
                 user_message,
-                safe_error_message == CODE_GENERATION_FAILURE_MESSAGE,
-                CODE_GENERATION_FAILURE_MESSAGE,
-                "(디자인|와이어|페이지|화면|초안|그려|만들|생성)",
                 user_message,
                 run_id,
             ),
@@ -259,26 +247,18 @@ class PgCanvasAgentRepository:
         if not self.try_acquire_run_lock(run_id):
             return False
         try:
-            user_message = "디자인 초안을 만드는 중 오류가 났어요. 다시 시도해 주세요."
             cursor = self.connection.execute(
                 """
                 UPDATE canvas_agent_runs
                 SET status = 'failed',
                     error_code = 'CANVAS_AGENT_PLANNER_RETRY_EXHAUSTED',
                     error_message = 'Canvas AI request could not be planned. Please try again.',
-                    result_summary = CASE
-                        WHEN prompt ~* %s THEN %s
-                        ELSE 'Canvas AI 작업을 완료하지 못했습니다.'
-                    END,
+                    result_summary = %s,
                     result_json = jsonb_set(
                         COALESCE(result_json, '{}'::jsonb),
                         '{progress}',
                         jsonb_build_object(
-                            'message',
-                            CASE
-                                WHEN prompt ~* %s THEN %s
-                                ELSE 'Canvas AI 작업을 완료하지 못했습니다.'
-                            END,
+                            'message', %s,
                             'highlightedShapeIds', '[]'::jsonb,
                             'targetViewport', NULL,
                             'toolTarget', NULL,
@@ -291,10 +271,8 @@ class PgCanvasAgentRepository:
                   AND status IN ('queued', 'planning')
                 """,
                 (
-                    "(디자인|와이어|페이지|화면|초안|그려|만들|생성)",
-                    user_message,
-                    "(디자인|와이어|페이지|화면|초안|그려|만들|생성)",
-                    user_message,
+                    GENERIC_FAILURE_MESSAGE,
+                    GENERIC_FAILURE_MESSAGE,
                     run_id,
                 ),
             )
